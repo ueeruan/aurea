@@ -830,7 +830,7 @@ private val TagByKey: Map<Int, List<String>> by lazy {
             "aurea.transition.luma_dissolve", "aurea.distort.ripple_dissolve", "aurea.glitch.dissolve_shake",
             "aurea.transition.disintegrate", "aurea.transition.noise_dissolve",
         ),
-        "text" to listOf("aurea.text.animator", "aurea.text.animator_pro", "aurea.text.transform", EffectTool.Captions.key),
+        "text" to listOf(EffectTool.Captions.key),
         "mask" to listOf(
             EffectTool.Mask.key, "aurea.key.background_remove", "aurea.key.chroma", "aurea.key.luma", "aurea.key.matte_refine", "aurea.key.rotobrush",
             "aurea.utility.copy_background", "aurea.transform.crop", "aurea.ai.depth_map",

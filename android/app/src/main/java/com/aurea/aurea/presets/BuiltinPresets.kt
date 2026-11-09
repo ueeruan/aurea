@@ -14,6 +14,19 @@ import org.json.JSONArray
 internal val ExtraTextPresetNames = listOf("Preset Bounce", "Preset Entrada suave", "Preset Revelar", "Preset Deslizar",
     "Preset Entrada rápida", "Preset Salto elástico", "Preset Salto por palavra", "Preset Movimento suave", "Onda de contorno", "Digitação reversa", "Palavras em sequência", "Cintilação", "Legenda suave", "Legenda luminosa", "Text Explosion", "Salto suave")
 
+/** 0.5.0: Engine::kMotionTextPresetBase. */
+internal const val MOTION_TEXT_PRESET_BASE = 1000
+internal val MotionTextPresetLabels = listOf(
+    R.string.tp_m_type_in, R.string.tp_m_decode, R.string.tp_m_uncensor, R.string.tp_m_password, R.string.tp_m_title_spread,
+    R.string.tp_m_fade_up, R.string.tp_m_wave, R.string.tp_m_spin, R.string.tp_m_scale_word, R.string.tp_m_scale_out,
+)
+
+/** O preset serve para este texto? Os do modelo Motion só no 2D; os antigos só no 3D; os salvos em ambos. */
+internal fun PresetEntry.fitsText(threeD: Boolean): Boolean {
+    val id = textPreset ?: return true
+    return if (id >= MOTION_TEXT_PRESET_BASE) !threeD else threeD
+}
+
 /** Nomes 0..7 de [ExtraTextPresetNames] no catálogo (o texto em pt acima é só referência). */
 internal val ExtraTextPresetLabels = listOf(R.string.app_text_preset_bounce, R.string.app_text_preset_soft_in, R.string.app_text_preset_reveal,
     R.string.app_text_preset_slide, R.string.app_text_preset_fast_in, R.string.app_text_preset_elastic, R.string.app_text_preset_word_jump,
@@ -50,7 +63,11 @@ class BuiltinPresets(private val context: Context) {
     private fun textEntries(): List<PresetEntry> {
         val res = AppText.resources(context)
         text?.let { (r, list) -> if (r === res) return list }
-        val list = TextPresetNames.mapIndexed { i, id ->
+        // 0.5.0: os do modelo Motion primeiro (motor: base 1000); os antigos ficam para o texto 3D.
+        val motion = MotionTextPresetLabels.mapIndexed { i, id ->
+            PresetEntry("b:motion:$i", PresetKind.Text, res.getString(id), builtin = true, textPreset = MOTION_TEXT_PRESET_BASE + i)
+        }
+        val list = motion + TextPresetNames.mapIndexed { i, id ->
             PresetEntry("b:texto:$i", PresetKind.Text, res.getString(id), builtin = true, textPreset = i)
         } + ExtraTextPresetNames.mapIndexed { i, name ->
             PresetEntry("b:texto:${i + 11}", PresetKind.Text, if (i >= 8) AppText.get(context, PackTextPresetLabels[i - 8]) else ExtraTextPresetLabels.getOrNull(i)?.let { res.getString(it) } ?: name, builtin = true, textPreset = i + 11)

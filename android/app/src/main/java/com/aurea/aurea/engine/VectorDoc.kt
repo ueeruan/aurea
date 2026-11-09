@@ -55,6 +55,8 @@ data class VKey(
     var frame: Int, var ease: Int, var path: VBezier,
     var curve: Int = CURVE_LEGACY, var easePower: Int = 1,
     var bx1: Float = 0.33f, var by1: Float = 0f, var bx2: Float = 0.67f, var by2: Float = 1f,
+    /** 0.5.0: 1 = este key anima o ponto; vazio = todos (ver PathKey::points). */
+    var points: List<Int> = emptyList(),
 ) {
     companion object { const val CURVE_LEGACY = 255 }
 }
@@ -145,6 +147,7 @@ data class VectorDoc(
                 for (k in p.keys) {
                     o += k.frame.toFloat(); o += k.ease.toFloat(); k.path.encode(o)
                     o += k.curve.toFloat(); o += k.easePower.toFloat(); o += k.bx1; o += k.by1; o += k.bx2; o += k.by2   // v4
+                    o += k.points.size.toFloat(); k.points.forEach { o += it.toFloat() }   // v5
                 }
             }
         }
@@ -155,8 +158,8 @@ data class VectorDoc(
     fun names(): String = groups.joinToString("\n") { it.name.replace('\n', ' ') }
 
     companion object {
-        /** Versão do fluxo (vector/VectorDocument.cpp): 2 = afinar do contorno; 3 = perfil, apagar, furo, desenho (Omega); 4 = curva dos keys de forma. */
-        const val DOC_VERSION = 4f
+        /** Versão do fluxo (vector/VectorDocument.cpp): 2 = afinar do contorno; 3 = perfil, apagar, furo, desenho (Omega); 5 = keyframe por ponto; 4 = curva dos keys de forma. */
+        const val DOC_VERSION = 5f
 
         private fun putPaint(p: VPaint, o: MutableList<Float>) {
             o += p.type.toFloat(); o += p.r; o += p.g; o += p.b; o += p.a; o += p.sx; o += p.sy; o += p.ex; o += p.ey; o += p.opacity
@@ -176,7 +179,7 @@ data class VectorDoc(
             return try {
                 val r = VReader(d)
                 val version = r.f()
-                if (version != 1f && version != 2f && version != 3f && version != DOC_VERSION) return null
+                if (version != 1f && version != 2f && version != 3f && version != 4f && version != DOC_VERSION) return null
                 val nm = names?.split('\n') ?: emptyList()
                 val n = r.i()
                 val doc = VectorDoc()
@@ -204,6 +207,7 @@ data class VectorDoc(
                             if (version >= 4f) {
                                 k.curve = r.i(); k.easePower = r.i(); k.bx1 = r.f(); k.by1 = r.f(); k.bx2 = r.f(); k.by2 = r.f()
                             }
+                            if (version >= 5f) k.points = List(r.i()) { r.i() }
                             p.keys += k
                         }
                         g.paths += p

@@ -1257,6 +1257,8 @@ private struct TextPanelView: View {
     @State private var fonts: [[String: Any]] = []
     @State private var query = ""
     @State private var tab = 0
+    /// Animador aberto: o editor fica com a largura toda, sem as abas.
+    @State private var animatorOpen = false
     private var layerId: Int64 { model.primarySelection ?? 0 }
     /// A propriedade escolhida: o losango e a curva da coluna valem para ela.
     private var railTrack: TimelineTrack? {
@@ -1348,20 +1350,24 @@ private struct TextPanelView: View {
                                 } else if tab == 2 {
                                     TextAppearanceControls(page: 2)
                                 } else {
-                                    TextAnimationSection(listFirst: true)
-                                    NativePanelChip(AureaText.t("la_animators")) { model.transformTab = 6; model.openPanel(.transform) }.padding(.top, 6)
+                                    TextAnimationSection(onEditing: { animatorOpen = $0 })
+                                    if !animatorOpen {
+                                        PanelItemRow(glyph: CupertinoGlyph.Move, title: AureaText.t("la_animators"), tag: "text.layer.animators", chevron: true) { model.transformTab = 6; model.openPanel(.transform) }.padding(.top, 6)
+                                    }
                                 }
                             }.padding(.horizontal, 8).padding(.top, 8).padding(.bottom, 24)
                         }
                         .scrollDismissesKeyboard(.interactively)
                     }
-                    AureaColors.contentStrongLine.frame(width: 0.7)
-                    PanelIconTabs(tabs: [
-                        PanelIconTab(glyph: CupertinoGlyph.Textformat, label: AureaText.t("panel_texto"), id: "text.tab.text"),
-                        PanelIconTab(glyph: CupertinoGlyph.Paintbrush, label: AureaText.t("tx_tab_style"), id: "text.tab.style"),
-                        PanelIconTab(glyph: CupertinoGlyph.DocText, label: AureaText.t("tx_tab_layout"), id: "text.tab.layout"),
-                        PanelIconTab(glyph: CupertinoGlyph.Sparkles, label: AureaText.t("tx_tab_animator"), id: "text.tab.animator"),
-                    ], selected: tab, group: AureaText.t("text_options")) { tab = $0; model.timelineFocus = nil }
+                    if !(tab == 3 && animatorOpen) {
+                        AureaColors.contentStrongLine.frame(width: 0.7)
+                        PanelIconTabs(tabs: [
+                            PanelIconTab(glyph: CupertinoGlyph.Textformat, label: AureaText.t("panel_texto"), id: "text.tab.text"),
+                            PanelIconTab(glyph: CupertinoGlyph.Paintbrush, label: AureaText.t("tx_tab_style"), id: "text.tab.style"),
+                            PanelIconTab(glyph: CupertinoGlyph.DocText, label: AureaText.t("tx_tab_layout"), id: "text.tab.layout"),
+                            PanelIconTab(glyph: CupertinoGlyph.Sparkles, label: AureaText.t("tx_tab_animator"), id: "text.tab.animator"),
+                        ], selected: tab, group: AureaText.t("text_options")) { tab = $0; model.timelineFocus = nil }
+                    }
                 }
             }
         }.onAppear { load(); fonts = model.engine.availableFonts() }
@@ -1730,7 +1736,9 @@ private struct AddLayerSheet: View {
         // Formas paramétricas (presets 23..32 do motor: explosão e os tipos 16..24).
         (23, "sh_shape_burst"), (24, "sh_shape_line"), (25, "sh_shape_diamond"), (26, "sh_shape_heart"),
         (27, "sh_shape_seal"), (28, "sh_shape_arc"), (29, "sh_shape_bubble"), (30, "sh_shape_bolt"),
-        (31, "sh_shape_wave"), (32, "sh_shape_blob")
+        (31, "sh_shape_wave"), (32, "sh_shape_blob"),
+        // 0.5.0 (paridade Alight Motion): presets 33 lua e 34 gota.
+        (33, "sh_shape_moon"), (34, "sh_shape_teardrop")
     ]
 
     var body: some View {

@@ -332,6 +332,9 @@ std::string gRigCacheDirectory;
 /// EngineConfig::exportSourceIdentity dos próximos Rig (fontes por URI).
 Status (*gRigSourceIdentity)(const std::string&, export_checkpoint::SourceIdentity&, const std::atomic<bool>*) noexcept = nullptr;
 
+const std::atomic<bool>* g_holdProducer = nullptr;
+u32 g_holdProducerFrame = 0, g_producerHangMs = 0;
+
 struct Rig {
     SyntheticFactory factory;
     BenchCapture cap;
@@ -353,6 +356,9 @@ struct Rig {
         ec.memoryBudgetBytes = trackedBudget;
         if (trackedBudget) ec.enableTrackedGpuAdmission = true;
         ec.exportWorkerHangMs = workerHangMs;
+        ec.exportProducerHangMs = g_producerHangMs;
+        ec.testHoldExportProducer = g_holdProducer;
+        ec.testHoldExportProducerFrame = g_holdProducerFrame;
         // Linha do tempo longa de propósito (ex.: 10 h): sem o teto de 3 h.
         if (compFps > 0 && static_cast<f64>(frames) / compFps > 3.0 * 3600.0) ec.maxExportSeconds = 0;
         ec.enableExportRecovery = recovery;
@@ -2829,10 +2835,9 @@ AUREA_TEST(Regression2135Gpu, SharedTextTransformAndPresetReach3DExportAndSurviv
     scene3d::Text3DSpec spec; spec.content = "AUREA";
     const auto id = r.e.add_text3d(spec); AUREA_CHECK(id.ok()); if (!id.ok()) return;
     AUREA_CHECK(r.e.apply_text_preset(*id, 2));
-    auto* effect = r.add_effect(LayerId::unpack(*id), text::kTransformEffect);
-    AUREA_CHECK(effect != nullptr); if (!effect) return;
     auto* layer = r.comp()->layer(LayerId::unpack(*id)); layer->end = FrameIndex{12};
-    auto& track = layer->tracks.get_or_create(TrackProperty::EffectParam, effect->id, param_track_key(text::kOffset, 0));
+    layer->text.animators.push_back(text::make_transform_animator());
+    auto& track = layer->tracks.get_or_create(TrackProperty::TextAnimParam, static_cast<u32>(layer->text.animators.size() - 1), text::kPosX);
     track.set(FrameIndex{0}, -20, Interpolation::Linear); track.set(FrameIndex{11}, 20, Interpolation::Linear);
     Command duration; duration.type = CommandType::CompositionSetDuration;
     duration.comp_duration.comp = r.e.project()->timeline().current(); duration.comp_duration.duration = FrameIndex{12};

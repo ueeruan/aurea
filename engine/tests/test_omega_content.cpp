@@ -9,6 +9,8 @@
 #include "TestFramework.hpp"
 
 #include "aurea/Engine.hpp"
+#include "aurea/timeline/ShapeGeometry.hpp"
+#include "aurea/render/MaskRaster.hpp"
 #include "aurea/text/FontManager.hpp"
 #include "aurea/vector/PathEdit.hpp"
 #include "aurea/vector/Vector.hpp"
@@ -236,7 +238,7 @@ AUREA_TEST(OmegaContent, DocumentV3KeepsNewFieldsAndV2StillOpens) {
     std::vector<f32> s;
     std::string names;
     encode_document(d, s, names);
-    AUREA_CHECK_NEAR(s[0], 3.0, 1e-6);
+    AUREA_CHECK_NEAR(s[0], 5.0, 1e-6);   // kDocVersion (VectorDocument.cpp)
     VectorData back;
     AUREA_CHECK(decode_document(s.data(), s.size(), names, back));
     AUREA_CHECK(back == d);
@@ -353,6 +355,352 @@ AUREA_TEST(OmegaContent, EditVectorPathAppliesRulesWithUndo) {
     AUREA_CHECK_EQ(r.e.edit_vector_path(*id, 3, 0, Op::Remove, removeIt, 1, false), -1);   // grupo errado
 }
 
+// =============================================================================
+// 0.5.0 (Alight Motion): morph da máscara com contagens diferentes e a mesma
+// topologia em todos os keyframes. Referência: docs/parity/motion-alight-ae-0.5.0.md.
+// =============================================================================
+namespace {
+std::vector<MaskPoint> mask_square(f32 x, f32 y, f32 s) {
+    std::vector<MaskPoint> p(4);
+    p[0].position = Vec2{x, y}; p[1].position = Vec2{x + s, y};
+    p[2].position = Vec2{x + s, y + s}; p[3].position = Vec2{x, y + s};
+    return p;
+}
+void seek_to(Engine& e, i64 frame) {
+    Command c;
+    c.type = CommandType::PlaybackSeek;
+    c.seek.time = tick_at(FrameIndex{frame}, 30.0);
+    AUREA_CHECK(e.apply_command(c).ok());
+}
+} // namespace
+
+AUREA_TEST(OmegaContent, PointKeysAnimateOnlyTheirOwnPoints) {
+    const auto square = [](f32 x) {
+        BezierPath p; p.closed = true;
+        p.v = {BezierVertex{{x, 0.f}, {}, {}}, BezierVertex{{x + 100.f, 0.f}, {}, {}}, BezierVertex{{x + 100.f, 100.f}, {}, {}}};
+        return p;
+    };
+    VectorPath path;
+    path.kind = VectorPathKind::Free;
+    PathKey a; a.frame = 0; a.path = square(0.f); a.curve = 0;
+    PathKey c; c.frame = 30; c.path = square(60.f); c.curve = 0;
+    PathKey m; m.frame = 15; m.path = square(0.f); m.path.v[1].p.x = 500.f; m.points = {0, 1, 0}; m.curve = 0;
+    path.keys = {a, m, c};
+    const f32 ease = vector::path_key_ease(a, .5f);
+    const BezierPath mid = vector::path_at(path, 15.0);
+    AUREA_CHECK_NEAR(mid.v[1].p.x, 500.f, 1e-3);                        // o ponto do key
+    AUREA_CHECK_NEAR(mid.v[0].p.x, 60.f * ease, 1e-3);                  // os outros ignoram o key do meio
+    AUREA_CHECK_NEAR(mid.v[2].p.x, 100.f + 60.f * ease, 1e-3);
+    // Fora dos keys: segura o valor do ponto.
+    AUREA_CHECK_NEAR(vector::path_at(path, -5.0).v[1].p.x, 100.f, 1e-3);
+    AUREA_CHECK_NEAR(vector::path_at(path, 40.0).v[1].p.x, 160.f, 1e-3);
+    // Sem máscara: o morph normal continua igual.
+    VectorPath plain = path;
+    plain.keys = {a, c};
+    AUREA_CHECK_NEAR(vector::path_at(plain, 15.0).v[1].p.x, 100.f + 60.f * ease, 1e-3);
+    // A máscara passa pelo documento.
+    VectorData d;
+    VectorGroup g; g.paths.push_back(path); d.groups.push_back(g);
+    std::vector<f32> s; std::string names;
+    encode_document(d, s, names);
+    VectorData back;
+    AUREA_CHECK(decode_document(s.data(), s.size(), names, back));
+    AUREA_CHECK(back == d);
+    AUREA_CHECK(back.groups[0].paths[0].keys[1].points == (std::vector<u8>{0, 1, 0}));
+
+    // Pela API: criar, somar, tirar e editar só marca o ponto mexido.
+    ContentRig r;
+    const auto id = r.e.add_vector_layer(0);
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) return;
+    using Op = Engine::PathOp;
+    const f32 p0[] = {0.f, 0.f, 0.f}, p1[] = {100.f, 0.f, 0.f}, p2[] = {100.f, 100.f, 0.f};
+    r.e.edit_vector_path(*id, 0, 0, Op::Append, p0, 3, false);
+    r.e.edit_vector_path(*id, 0, 0, Op::Append, p1, 3, false);
+    r.e.edit_vector_path(*id, 0, 0, Op::Append, p2, 3, false);
+    const auto keys = [&]() -> std::vector<PathKey>& { return r.layer(*id)->shape.vector.groups[0].paths[0].keys; };
+    const u32 one[] = {1};
+    AUREA_CHECK(r.e.toggle_vector_path_points_key(*id, 0, 0, one, 1));
+    AUREA_CHECK_EQ(keys().size(), usize{1});
+    AUREA_CHECK(keys()[0].points == (std::vector<u8>{0, 1, 0}));
+    // Mover o ponto 2 no mesmo key: ele entra na máscara.
+    const f32 move2[] = {5.f, 0.f, 2.f};
+    AUREA_CHECK_EQ(r.e.edit_vector_path(*id, 0, 0, Op::MovePoints, move2, 3, false), 2);
+    AUREA_CHECK(keys()[0].points == (std::vector<u8>{0, 1, 1}));
+    // Inserir leva a máscara junto e o novo ponto já vale.
+    const f32 ins[] = {0.f, 0.5f};
+    AUREA_CHECK_EQ(r.e.edit_vector_path(*id, 0, 0, Op::Insert, ins, 2, false), 1);
+    AUREA_CHECK(keys()[0].points == (std::vector<u8>{0, 1, 1, 1}));
+    // Remover idem.
+    const f32 rem[] = {2.f};
+    AUREA_CHECK(r.e.edit_vector_path(*id, 0, 0, Op::Remove, rem, 1, false) >= 0);
+    AUREA_CHECK(keys()[0].points == (std::vector<u8>{0, 1, 1}));
+    // Tirar todos os pontos apaga o key; desfazer volta.
+    const u32 both[] = {1, 2};
+    AUREA_CHECK(r.e.toggle_vector_path_points_key(*id, 0, 0, both, 2));
+    AUREA_CHECK(keys().empty());
+    AUREA_CHECK(r.undo());
+    AUREA_CHECK_EQ(keys().size(), usize{1});
+    // Índice inválido não cria nada.
+    const u32 bad[] = {99};
+    AUREA_CHECK(!r.e.toggle_vector_path_points_key(*id, 0, 0, bad, 1));
+}
+
+AUREA_TEST(OmegaContent, OpenAtCutsTheChosenSegmentInEveryKey) {
+    ContentRig r;
+    const auto id = r.e.add_vector_layer(0);
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) return;
+    using Op = Engine::PathOp;
+    for (const f32 x : {0.f, 100.f, 200.f, 300.f}) {
+        const f32 p[] = {x, 0.f, 0.f};
+        r.e.edit_vector_path(*id, 0, 0, Op::Append, p, 3, false);
+    }
+    const f32 close[] = {1.f};
+    r.e.edit_vector_path(*id, 0, 0, Op::SetClosed, close, 1, false);
+    VectorPath& vp = r.layer(*id)->shape.vector.groups[0].paths[0];
+    vp.keys.resize(2);
+    vp.keys[0].frame = 0; vp.keys[0].path = vp.path;
+    vp.keys[1].frame = 10; vp.keys[1].path = vp.path;
+    vp.keys[1].path.v[0].p.y = 50.f;
+    vp.keys[0].points = {1, 0, 0, 0};
+    const f32 cut[] = {1.f};                                       // trecho entre os pontos 1 e 2
+    AUREA_CHECK(r.e.edit_vector_path(*id, 0, 0, Op::OpenAt, cut, 1, false) >= 0);
+    const VectorPath& after = r.layer(*id)->shape.vector.groups[0].paths[0];
+    AUREA_CHECK(!after.path.closed);
+    AUREA_CHECK_NEAR(after.path.v[0].p.x, 200.f, 1e-3f);           // o corte vira as pontas
+    AUREA_CHECK_NEAR(after.path.v[3].p.x, 100.f, 1e-3f);
+    for (const PathKey& k : after.keys) {
+        AUREA_CHECK(!k.path.closed);
+        AUREA_CHECK_NEAR(k.path.v[0].p.x, 200.f, 1e-3f);
+    }
+    AUREA_CHECK_NEAR(after.keys[1].path.v[2].p.y, 50.f, 1e-3f);    // o ponto 0 continua sendo ele
+    AUREA_CHECK(after.keys[0].points == (std::vector<u8>{0, 0, 1, 0}));
+    const f32 bad[] = {9.f};
+    AUREA_CHECK_EQ(r.e.edit_vector_path(*id, 0, 0, Op::OpenAt, bad, 1, false), -1);
+}
+
+AUREA_TEST(OmegaContent, SetFirstRotatesOnlyTheKeyAtThePlayhead) {
+    ContentRig r;
+    const auto id = r.e.add_vector_layer(0);
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) return;
+    using Op = Engine::PathOp;
+    for (const f32 x : {0.f, 100.f, 200.f}) {
+        const f32 p[] = {x, 0.f, 0.f};
+        r.e.edit_vector_path(*id, 0, 0, Op::Append, p, 3, false);
+    }
+    const f32 close[] = {1.f};
+    r.e.edit_vector_path(*id, 0, 0, Op::SetClosed, close, 1, false);
+    VectorPath& vp = r.layer(*id)->shape.vector.groups[0].paths[0];
+    vp.keys.resize(2);
+    vp.keys[0].frame = 0; vp.keys[0].path = vp.path; vp.keys[0].points = {1, 0, 0};
+    vp.keys[1].frame = 10; vp.keys[1].path = vp.path;
+    seek_to(r.e, 0);
+    const f32 first[] = {2.f};
+    AUREA_CHECK(r.e.edit_vector_path(*id, 0, 0, Op::SetFirst, first, 1, false) >= 0);
+    const VectorPath& after = r.layer(*id)->shape.vector.groups[0].paths[0];
+    AUREA_CHECK_NEAR(after.keys[0].path.v[0].p.x, 200.f, 1e-3f);   // só o key do cabeçote gira
+    AUREA_CHECK_NEAR(after.keys[1].path.v[0].p.x, 0.f, 1e-3f);
+    AUREA_CHECK(after.keys[0].points == (std::vector<u8>{0, 1, 0})); // a escolha de pontos gira junto
+}
+
+AUREA_TEST(OmegaContent, MaskPointKeysAnimateOnlyTheirOwnPoints) {
+    Mask m;
+    m.closed = true;
+    MaskPathKey a, b;
+    a.frame = 0; a.points = mask_square(0, 0, 100);
+    b.frame = 10; b.points = mask_square(0, 0, 100);
+    b.points[1].position.x = 300.f;
+    b.points[2].position.x = 300.f;
+    b.pointMask = {0, 1, 0, 0};                                    // só o ponto 1 anima neste key
+    m.pathKeys = {a, b};
+    std::vector<MaskPoint> out;
+    mask::evaluate_path(m, 5.0, out);
+    AUREA_CHECK_EQ(out.size(), usize{4});
+    AUREA_CHECK(out[1].position.x > 100.f);
+    AUREA_CHECK_NEAR(out[2].position.x, 100.f, 1e-3f);             // o 2 ignora o key que não é dele
+
+    ContentRig r;
+    const auto id = r.e.add_vector_layer(0);
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) return;
+    const f32 sq[24] = {0, 0, 0, 0, 0, 0, 100, 0, 0, 0, 0, 0, 100, 100, 0, 0, 0, 0, 0, 100, 0, 0, 0, 0};
+    const i32 mid = r.e.add_mask(*id, sq, 4, true);
+    AUREA_CHECK(mid >= 0);
+    if (mid < 0) return;
+    const auto keys = [&]() -> std::vector<MaskPathKey>& { return r.layer(*id)->masks[0].pathKeys; };
+    const u32 one[] = {1};
+    AUREA_CHECK(r.e.toggle_mask_path_points_key(*id, static_cast<u32>(mid), one, 1));
+    AUREA_CHECK_EQ(keys().size(), usize{1});
+    AUREA_CHECK(keys()[0].pointMask == (std::vector<u8>{0, 1, 0, 0}));
+    using Op = Engine::PathOp;
+    const f32 ins[] = {0.f, 0.5f};
+    AUREA_CHECK_EQ(r.e.edit_mask_path(*id, static_cast<u32>(mid), Op::Insert, ins, 2, false), 1);
+    AUREA_CHECK(keys()[0].pointMask == (std::vector<u8>{0, 1, 1, 0, 0}));
+    const u32 two[] = {1, 2};
+    AUREA_CHECK(r.e.toggle_mask_path_points_key(*id, static_cast<u32>(mid), two, 2));
+    AUREA_CHECK(keys().empty());
+    AUREA_CHECK(r.undo());
+    AUREA_CHECK_EQ(keys().size(), usize{1});
+    const u32 bad[] = {99};
+    AUREA_CHECK(!r.e.toggle_mask_path_points_key(*id, static_cast<u32>(mid), bad, 1));
+}
+
+AUREA_TEST(OmegaContent, MaskMorphsBetweenKeysWithDifferentPointCounts) {
+    Mask m;
+    m.closed = true;
+    MaskPathKey a, b;
+    a.frame = 0; a.points = mask_square(0, 0, 100);                // 4 pontos
+    b.frame = 10;
+    for (int i = 0; i < 8; ++i) {                                  // 8 pontos: octógono de raio 60 em (50, 50)
+        const f32 ang = static_cast<f32>(i) * 0.7853981634f;
+        MaskPoint q;
+        q.position = Vec2{50 + 60 * std::cos(ang), 50 + 60 * std::sin(ang)};
+        b.points.push_back(q);
+    }
+    m.pathKeys = {a, b};
+    std::vector<MaskPoint> out;
+    mask::evaluate_path(m, 0.0, out);
+    AUREA_CHECK_EQ(out.size(), usize{4});                          // no key: a forma dele, como estava
+    mask::evaluate_path(m, 10.0, out);
+    AUREA_CHECK_EQ(out.size(), usize{8});
+    // No meio: morph de verdade (antes segurava o quadrado até o quadro 10).
+    mask::evaluate_path(m, 5.0, out);
+    AUREA_CHECK_EQ(out.size(), usize{8});
+    std::vector<MaskPoint> early;
+    mask::evaluate_path(m, 1.0, early);
+    AUREA_CHECK_EQ(early.size(), usize{8});
+    bool differsFromSquare = false;
+    for (const MaskPoint& q : early)
+        differsFromSquare |= !(std::fabs(q.position.x) < 1e-3f || std::fabs(q.position.x - 100) < 1e-3f || std::fabs(q.position.x - 50) < 1e-3f);
+    AUREA_CHECK(differsFromSquare);
+    // O mesmo resultado do morph do vetor (uma regra só).
+    BezierPath pa, pb;
+    for (const MaskPoint& q : a.points) pa.v.push_back(BezierVertex{q.position, q.inTangent, q.outTangent});
+    for (const MaskPoint& q : b.points) pb.v.push_back(BezierVertex{q.position, q.inTangent, q.outTangent});
+    const BezierPath expect = lerp_path(pa, pb, path_key_ease(mask::ease_of(a), 0.5f));
+    for (usize k = 0; k < out.size(); ++k) {
+        AUREA_CHECK_NEAR(out[k].position.x, expect.v[k].p.x, 1e-4);
+        AUREA_CHECK_NEAR(out[k].position.y, expect.v[k].p.y, 1e-4);
+    }
+    // Key de segurar continua segurando, com qualquer contagem.
+    m.pathKeys[0].interp = 0;
+    mask::evaluate_path(m, 5.0, out);
+    AUREA_CHECK_EQ(out.size(), usize{4});
+}
+
+AUREA_TEST(OmegaContent, VectorPointEditsKeepTheSameTopologyInEveryKey) {
+    ContentRig r;
+    const auto id = r.e.add_vector_layer(0);
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) return;
+    using Op = Engine::PathOp;
+    Layer* l = r.layer(*id);
+    AUREA_CHECK(l != nullptr);
+    if (!l) return;
+    const i64 k0 = l->local_time(FrameIndex{0}).value, k1 = l->local_time(FrameIndex{20}).value;
+    VectorPath& vp = l->shape.vector.groups[0].paths[0];
+    vp.kind = VectorPathKind::Free;
+    auto tri = [](f32 s) {
+        BezierPath p;
+        p.closed = true;
+        p.v = {BezierVertex{Vec2{0, 0}}, BezierVertex{Vec2{s, 0}}, BezierVertex{Vec2{0, s}}};
+        return p;
+    };
+    PathKey a; a.frame = k0; a.path = tri(100);
+    PathKey b; b.frame = k1; b.path = tri(200);
+    vp.keys = {a, b};
+    seek_to(r.e, 0);
+    // Inserir no trecho 0 em t = 0,5 com o cabeçote no 1º key: os dois keys
+    // ganham o ponto, cada um no meio do PRÓPRIO trecho 0.
+    const f32 ins[2] = {0, 0.5f};
+    AUREA_CHECK_EQ(r.e.edit_vector_path(*id, 0, 0, Op::Insert, ins, 2, false), 1);
+    l = r.layer(*id);
+    if (!l) return;
+    const std::vector<PathKey>& keys = l->shape.vector.groups[0].paths[0].keys;
+    AUREA_CHECK_EQ(keys.size(), usize{2});
+    AUREA_CHECK_EQ(keys[0].path.v.size(), usize{4});
+    AUREA_CHECK_EQ(keys[1].path.v.size(), usize{4});
+    AUREA_CHECK_NEAR(keys[0].path.v[1].p.x, 50.0, 1e-3);
+    AUREA_CHECK_NEAR(keys[1].path.v[1].p.x, 100.0, 1e-3);       // a forma do 2º key não mudou
+    // Acrescentar: ponto parado no mesmo lugar em todos os keys.
+    const f32 app[3] = {-30, -40, 0};
+    AUREA_CHECK_EQ(r.e.edit_vector_path(*id, 0, 0, Op::Append, app, 3, false), 4);
+    l = r.layer(*id);
+    const std::vector<PathKey>& k2 = l->shape.vector.groups[0].paths[0].keys;
+    AUREA_CHECK_EQ(k2[0].path.v.size(), usize{5});
+    AUREA_CHECK_EQ(k2[1].path.v.size(), usize{5});
+    AUREA_CHECK_NEAR(k2[1].path.v[4].p.x, -30.0, 1e-4);
+    AUREA_CHECK_NEAR(k2[1].path.v[4].p.y, -40.0, 1e-4);
+    // Apagar o ponto inserido: sai dos dois.
+    const f32 rem[1] = {1};
+    AUREA_CHECK(r.e.edit_vector_path(*id, 0, 0, Op::Remove, rem, 1, false) >= 0);
+    l = r.layer(*id);
+    const std::vector<PathKey>& k3 = l->shape.vector.groups[0].paths[0].keys;
+    AUREA_CHECK_EQ(k3[0].path.v.size(), usize{4});
+    AUREA_CHECK_EQ(k3[1].path.v.size(), usize{4});
+    AUREA_CHECK_NEAR(k3[1].path.v[1].p.x, 200.0, 1e-4);         // o (200, 0) original voltou para o índice 1
+    AUREA_CHECK_NEAR(k3[1].path.v[1].p.y, 0.0, 1e-4);
+    // Mover um ponto continua sendo só do key do cabeçote.
+    const f32 mv[3] = {7, 0, 0};
+    AUREA_CHECK_EQ(r.e.edit_vector_path(*id, 0, 0, Op::MovePoints, mv, 3, false), 0);
+    l = r.layer(*id);
+    const std::vector<PathKey>& k4 = l->shape.vector.groups[0].paths[0].keys;
+    AUREA_CHECK_NEAR(k4[0].path.v[0].p.x, 7.0, 1e-4);
+    AUREA_CHECK_NEAR(k4[1].path.v[0].p.x, 0.0, 1e-4);
+    // Um desfazer por operação: volta o "apagar" nos DOIS keys.
+    AUREA_CHECK(r.undo());
+    AUREA_CHECK(r.undo());
+    l = r.layer(*id);
+    const std::vector<PathKey>& k5 = l->shape.vector.groups[0].paths[0].keys;
+    AUREA_CHECK_EQ(k5[0].path.v.size(), usize{5});
+    AUREA_CHECK_EQ(k5[1].path.v.size(), usize{5});
+}
+
+AUREA_TEST(OmegaContent, MaskPointEditsKeepTheSameTopologyInEveryKey) {
+    ContentRig r;
+    const auto id = r.e.add_shape(0);
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) return;
+    const f32 pts[24] = {0, 0, 0, 0, 0, 0, 100, 0, 0, 0, 0, 0, 100, 100, 0, 0, 0, 0, 0, 100, 0, 0, 0, 0};
+    const i32 mid = r.e.add_mask(*id, pts, 4, true);
+    AUREA_CHECK(mid >= 0);
+    if (mid < 0) return;
+    Layer* l = r.layer(*id);
+    if (!l || l->masks.empty()) return;
+    const i64 k0 = l->local_time(FrameIndex{0}).value, k1 = l->local_time(FrameIndex{20}).value;
+    MaskPathKey a, b;
+    a.frame = k0; a.points = mask_square(0, 0, 100);
+    b.frame = k1; b.points = mask_square(0, 0, 300);
+    l->masks[0].pathKeys = {a, b};
+    seek_to(r.e, 0);
+    using Op = Engine::PathOp;
+    const f32 ins[2] = {0, 0.5f};
+    AUREA_CHECK_EQ(r.e.edit_mask_path(*id, static_cast<u32>(mid), Op::Insert, ins, 2, false), 1);
+    l = r.layer(*id);
+    if (!l) return;
+    const Mask& m = l->masks[0];
+    AUREA_CHECK_EQ(m.pathKeys.size(), usize{2});
+    AUREA_CHECK_EQ(m.pathKeys[0].points.size(), usize{5});
+    AUREA_CHECK_EQ(m.pathKeys[1].points.size(), usize{5});
+    AUREA_CHECK_NEAR(m.pathKeys[0].points[1].position.x, 50.0, 1e-3);
+    AUREA_CHECK_NEAR(m.pathKeys[1].points[1].position.x, 150.0, 1e-3);
+    // Entre os keys: 5 pontos que casam (o novo anda de (50,0) a (150,0)).
+    std::vector<MaskPoint> mid10;
+    mask::evaluate_path(m, static_cast<f64>(k0 + (k1 - k0) / 2), mid10);
+    AUREA_CHECK_EQ(mid10.size(), usize{5});
+    AUREA_CHECK(mid10[1].position.x > 50.0f && mid10[1].position.x < 150.0f);
+    AUREA_CHECK_NEAR(mid10[1].position.y, 0.0, 1e-3);
+    // Desfazer tira dos dois keys.
+    AUREA_CHECK(r.undo());
+    l = r.layer(*id);
+    if (l) {
+        AUREA_CHECK_EQ(l->masks[0].pathKeys[0].points.size(), usize{4});
+        AUREA_CHECK_EQ(l->masks[0].pathKeys[1].points.size(), usize{4});
+    }
+}
+
 AUREA_TEST(OmegaContent, TextBoxWidthHandleFollowsAlignment) {
     const std::string roboto = repo_path("engine/assets/fonts/Roboto-Regular.ttf");
     text::set_default_font_path(roboto);
@@ -424,6 +772,108 @@ AUREA_TEST(OmegaContent, ShapeHandleResizesFromCenterOrEdge) {
     AUREA_CHECK_NEAR(l->shape.bounds.w / l->shape.bounds.h, ratio, 1e-3);
     (void)h0;
     AUREA_CHECK(r.undo());   // um gesto, um passo
+}
+
+AUREA_TEST(OmegaContent, EveryShapeHandleRoundTripsItsOwnValue) {
+    // Soltar a alça onde ela está não pode mudar o parâmetro, em caixa quadrada ou esticada.
+    const u32 types[] = {shape::kRect, shape::kStar, shape::kCross, shape::kRing, shape::kPie, shape::kArc, shape::kFlower, shape::kArrow,
+                         shape::kDoubleArrow, shape::kTrapezoid, shape::kParallelogram, shape::kGear, shape::kLine, shape::kDiamond,
+                         shape::kHeart, shape::kSeal, shape::kBubble, shape::kBolt, shape::kWave, shape::kMoon, shape::kTeardrop};
+    u32 checked = 0;
+    for (const Vec2 box : {Vec2{200.f, 200.f}, Vec2{320.f, 180.f}, Vec2{120.f, 300.f}}) {
+        for (const u32 type : types) {
+            ShapeData sh;
+            sh.shapeType = type;
+            sh.bounds.w = box.x; sh.bounds.h = box.y;
+            sh.cornerRadius = 20.f; sh.innerRadius = .4f; sh.points = 6.f; sh.sweep = 200.f; sh.head = .3f; sh.shaft = .4f;
+            sh.thickness = .25f; sh.tip = .35f; sh.depth = .3f; sh.amplitude = .6f;
+            shape::ParamHandle h[shape::kMaxParamHandles];
+            const u32 n = shape::param_handles(sh, h);
+            AUREA_CHECK(n >= 1u);
+            for (u32 i = 0; i < n; ++i) {
+                f32 v = -1.f;
+                AUREA_CHECK(shape::value_from_handle(sh, h[i].param, h[i].pos, v));
+                AUREA_CHECK_NEAR(v, shape::param_value(sh, h[i].param), 2e-3);
+                ++checked;
+            }
+            f32 unused = 0.f;
+            AUREA_CHECK(!shape::value_from_handle(sh, shape::kParamSeed, Vec2{0.f, 0.f}, unused));
+        }
+    }
+    AUREA_CHECK(checked > 80u);
+    // Formas sem parâmetro de silhueta só têm a caixa.
+    for (const u32 type : {shape::kEllipse, shape::kPolygon, shape::kRightTriangle, shape::kBlob}) {
+        ShapeData sh; sh.shapeType = type;
+        shape::ParamHandle h[shape::kMaxParamHandles];
+        AUREA_CHECK_EQ(shape::param_handles(sh, h), 0u);
+    }
+}
+
+AUREA_TEST(OmegaContent, ShapeHandleGeometryFollowsTheSilhouette) {
+    ShapeData sh;
+    sh.bounds.w = 200.f; sh.bounds.h = 200.f;
+    shape::ParamHandle h[shape::kMaxParamHandles];
+    f32 v = 0.f;
+    // Estrela: a alça está no vale do topo; descer o dedo fecha o raio interno.
+    sh.shapeType = shape::kStar; sh.innerRadius = .5f; sh.points = 5.f;
+    AUREA_CHECK_EQ(shape::param_handles(sh, h), 1u);
+    AUREA_CHECK_NEAR(h[0].pos.y, -50.f, 1e-3);
+    AUREA_CHECK(std::fabs(shape::signed_distance(sh, h[0].pos, Vec2{100.f, 100.f})) < .5f);   // em cima da borda
+    AUREA_CHECK(shape::value_from_handle(sh, shape::kParamInner, Vec2{0.f, -20.f}, v));
+    AUREA_CHECK_NEAR(v, .2f, 1e-4);
+    // Limite do parâmetro vale no arrasto.
+    AUREA_CHECK(shape::value_from_handle(sh, shape::kParamInner, Vec2{0.f, -500.f}, v));
+    AUREA_CHECK_NEAR(v, .95f, 1e-4);
+    // Fatia: cruzar o leste não pula de 360 para 0.
+    sh.shapeType = shape::kPie; sh.sweep = 350.f;
+    AUREA_CHECK(shape::value_from_handle(sh, shape::kParamSweep, Vec2{100.f, 5.f}, v));
+    AUREA_CHECK_NEAR(v, 360.f, 1e-3);
+    sh.sweep = 10.f;
+    AUREA_CHECK(shape::value_from_handle(sh, shape::kParamSweep, Vec2{100.f, -5.f}, v));
+    AUREA_CHECK_NEAR(v, 1.f, 1e-3);
+    // Em todas: a alça da borda real cai em cima do contorno da forma.
+    sh.shapeType = shape::kRing; sh.innerRadius = .6f;
+    AUREA_CHECK_EQ(shape::param_handles(sh, h), 1u);
+    AUREA_CHECK(std::fabs(shape::signed_distance(sh, h[0].pos, Vec2{100.f, 100.f})) < .5f);
+    sh.shapeType = shape::kMoon; sh.depth = .25f;
+    AUREA_CHECK_EQ(shape::param_handles(sh, h), 1u);
+    AUREA_CHECK_NEAR(h[0].pos.x, -50.f, 1e-3);
+    AUREA_CHECK(std::fabs(shape::signed_distance(sh, h[0].pos, Vec2{100.f, 100.f})) < .5f);
+}
+
+AUREA_TEST(OmegaContent, ShapeParamHandleDragRespectsKeysAndUndo) {
+    ContentRig r;
+    const auto id = r.e.add_shape(0);
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) return;
+    Layer* l = r.layer(*id);
+    if (!l) return;
+    l->shape.shapeType = shape::kStar;
+    l->shape.points = 5.f;
+    l->shape.innerRadius = .5f;
+    l->shape.bounds.w = l->shape.bounds.h = 200.f;
+    f32 out[shape::kMaxParamHandles * Engine::kShapeHandleFloats] = {};
+    AUREA_CHECK_EQ(r.e.query_shape_param_handles(*id, out, shape::kMaxParamHandles * Engine::kShapeHandleFloats), 1u);
+    AUREA_CHECK_NEAR(out[1], -50.f, 1e-3);
+    AUREA_CHECK_EQ(static_cast<u32>(out[2]), static_cast<u32>(shape::kParamInner));
+    // Um arrasto em vários passos é um desfazer só.
+    AUREA_CHECK(r.e.drag_shape_param_handle(*id, shape::kParamInner, 0.f, -40.f, false));
+    AUREA_CHECK(r.e.drag_shape_param_handle(*id, shape::kParamInner, 0.f, -30.f, true));
+    AUREA_CHECK_NEAR(r.layer(*id)->shape.innerRadius, .3f, 1e-4);
+    AUREA_CHECK(r.undo());
+    AUREA_CHECK_NEAR(r.layer(*id)->shape.innerRadius, .5f, 1e-4);
+    // Parâmetro sem alça nesta forma: recusado, sem mexer em nada.
+    AUREA_CHECK(!r.e.drag_shape_param_handle(*id, shape::kParamSweep, 10.f, 10.f, false));
+    // Animado: grava no keyframe e a alça acompanha o valor do instante.
+    AUREA_CHECK(r.e.toggle_shape_param_key(*id, shape::kParamInner));
+    AUREA_CHECK(r.e.drag_shape_param_handle(*id, shape::kParamInner, 0.f, -70.f, false));
+    const Track* tr = r.layer(*id)->tracks.find(TrackProperty::ShapeParam, 0, shape::kParamInner);
+    AUREA_CHECK(tr && tr->keys.size() == 1u);
+    if (tr && !tr->keys.empty()) AUREA_CHECK_NEAR(tr->keys[0].value, .7f, 1e-4);
+    AUREA_CHECK_EQ(r.e.query_shape_param_handles(*id, out, shape::kMaxParamHandles * Engine::kShapeHandleFloats), 1u);
+    AUREA_CHECK_NEAR(out[1], -70.f, 1e-3);
+    // Capacidade curta não escreve fora.
+    AUREA_CHECK_EQ(r.e.query_shape_param_handles(*id, out, 2), 0u);
 }
 
 AUREA_TEST(OmegaContent, FontCategoryAndScriptsFromTheFile) {

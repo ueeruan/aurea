@@ -245,6 +245,7 @@ set(AUREA_CORE_SOURCES
     src/text/TextAnimator.cpp
     src/text/TextAnimatorPro.cpp
     src/text/TextTransform.cpp
+    src/text/TextAnimatorMigrate.cpp
     src/text/Captions.cpp
     src/engine/EngineCaptions.cpp
     src/engine/EngineTextExplode.cpp
@@ -631,6 +632,16 @@ if(AUREA_PLATFORM_ANDROID)
 
     option(AUREA_ANDROID_RUNTIME_TESTS "Build native Vulkan/GLES regression tests for a connected device" OFF)
     if(AUREA_ANDROID_RUNTIME_TESTS)
+        # Texto e formato do projeto, sem GPU: rodam no emulador por adb.
+        add_executable(aurea_text_device_tests tests/main.cpp tests/test_text_animator_pro.cpp
+            tests/test_text_animator_universal.cpp tests/test_text.cpp tests/test_serialization.cpp)
+        target_link_libraries(aurea_text_device_tests PRIVATE aurea_vulkan android log)
+        target_compile_options(aurea_text_device_tests PRIVATE -fno-rtti -fno-exceptions)
+        target_compile_definitions(aurea_text_device_tests PRIVATE
+            AUREA_GOLDEN_DIR="/data/local/tmp/aurea-tests/golden"
+            AUREA_TEST_DATA_DIR="/data/local/tmp/aurea-tests/data"
+            AUREA_APP_PRESETS_DIR="/data/local/tmp/aurea-tests/presets"
+            AUREA_TEST_FONTS_DIR="/data/local/tmp/aurea-tests/engine/assets/fonts")
         set(_aurea_runtime_tests
             tests/main.cpp tests/test_gpu.cpp tests/test_motion_blur.cpp tests/test_render.cpp
             tests/test_media.cpp tests/test_engine.cpp tests/test_real_camera.cpp tests/test_mesh_warp_keys.cpp tests/test_motion_geometry.cpp

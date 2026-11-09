@@ -6,6 +6,7 @@
 //  estoura pilha nem memória. Todo número lido passa por validação de faixa
 //  antes de virar dado de camada.
 // =============================================================================
+#include "aurea/text/TextAnimator.hpp"
 #include "aurea/project/Presets.hpp"
 
 #include "aurea/effects/EffectRegistry.hpp"
@@ -367,6 +368,93 @@ void write_vec4(json::Writer& w, const char* k, const Vec4& v) { const f32 a[4] 
 void write_vec3(json::Writer& w, const char* k, const Vec3& v) { const f32 a[3] = {v.x, v.y, v.z}; write_vec(w, k, a, 3); }
 void write_vec2(json::Writer& w, const char* k, const Vec2& v) { const f32 a[2] = {v.x, v.y}; write_vec(w, k, a, 2); }
 
+void write_selector(json::Writer& w, const TextSelector& s) {
+    w.begin_object();
+    w.key("basedOn").value(static_cast<u32>(s.basedOn));
+    w.key("type").value(static_cast<u32>(s.type));
+    w.key("shape").value(static_cast<u32>(s.shape));
+    w.key("randomOrder").value(s.randomOrder);
+    w.key("seed").value(s.seed);
+    w.key("start").value(s.start);
+    w.key("end").value(s.end);
+    w.key("offset").value(s.offset);
+    w.key("amount").value(s.amount);
+    w.key("easeHigh").value(s.easeHigh);
+    w.key("easeLow").value(s.easeLow);
+    w.key("wiggleRate").value(s.wiggleRate);
+    w.key("enabled").value(s.enabled);
+    w.key("mode").value(static_cast<u32>(s.mode));
+    w.key("units").value(static_cast<u32>(s.units));
+    w.key("lockDimensions").value(s.lockDimensions);
+    w.key("smoothness").value(s.smoothness);
+    w.key("wiggleMin").value(s.wiggleMin);
+    w.key("wiggleMax").value(s.wiggleMax);
+    w.key("correlation").value(s.correlation);
+    w.key("temporalPhase").value(s.temporalPhase);
+    w.key("spatialPhase").value(s.spatialPhase);
+    write_vec3(w, "exprAmount", s.exprAmount);
+    w.key("overlap").value(s.overlap);
+    w.end_object();
+}
+
+void write_animators(json::Writer& w, const Preset& p) {
+    if (!(p.textParts & kTextAnimators)) return;
+    w.key("animators").begin_array();
+    for (const TextAnimator& a : p.animators) {
+        w.begin_object();
+        w.key("name").value(a.name);
+        w.key("enabled").value(a.enabled);
+        w.key("selector");
+        write_selector(w, a.selector);
+        w.key("moreSelectors").begin_array();
+        for (const TextSelector& s : a.moreSelectors) write_selector(w, s);
+        w.end_array();
+        w.key("props").value(a.props);
+        write_vec3(w, "position", a.position);
+        write_vec2(w, "scale", a.scale);
+        write_vec3(w, "rotation", a.rotation);
+        w.key("opacity").value(a.opacity);
+        w.key("tracking").value(a.tracking);
+        w.key("blur").value(a.blur);
+        w.key("skew").value(a.skew);
+        w.key("strokeWidth").value(a.strokeWidth);
+        w.key("charOffset").value(a.charOffset);
+        write_vec4(w, "fill", a.fill);
+        write_vec4(w, "stroke", a.stroke);
+        w.key("aeModel").value(static_cast<u32>(a.aeModel));
+        w.key("rig").value(static_cast<u32>(a.rig));
+        w.key("rigAnchor").value(static_cast<u32>(a.rigAnchor));
+        w.key("anchorGrouping").value(static_cast<u32>(a.anchorGrouping));
+        write_vec2(w, "groupAlign", a.groupAlign);
+        write_vec2(w, "anchor", a.anchor);
+        write_vec2(w, "lineSpacing", a.lineSpacing);
+        w.key("fillHue").value(a.fillHue);
+        w.key("fillSaturation").value(a.fillSaturation);
+        w.key("fillBrightness").value(a.fillBrightness);
+        w.key("fillOpacity").value(a.fillOpacity);
+        w.key("cursor").value(static_cast<u32>(a.cursor));
+        w.key("cursorBlink").value(a.cursorBlink);
+        w.key("charset").value(static_cast<u32>(a.charset));
+        w.key("preserveSpace").value(a.preserveSpace);
+        w.key("randAmount").value(a.randAmount);
+        w.key("randEvolution").value(a.randEvolution);
+        w.key("randSeed").value(a.randSeed);
+        w.key("letterSpacing").value(a.letterSpacing);
+        w.key("lineSpacingEm").value(a.lineSpacingEm);
+        w.end_object();
+    }
+    w.end_array();
+    w.key("tracks").begin_array();
+    for (const Track& t : p.textTracks) {
+        w.begin_object();
+        w.key("animator").value(t.effectIndex);
+        w.key("param").value(t.effectParamIndex);
+        write_keys(w, t);
+        w.end_object();
+    }
+    w.end_array();
+}
+
 void write_effects(json::Writer& w, const Preset& p, const EffectRegistry* reg) {
     w.key("effects").begin_array();
     for (u32 ei = 0; ei < p.effects.size(); ++ei) {
@@ -454,52 +542,7 @@ void write_text(json::Writer& w, const Preset& p) {
         w.key("shadowBlur").value(t.shadowBlur);
         w.end_object();
     }
-    if (p.textParts & kTextAnimators) {
-        w.key("animators").begin_array();
-        for (const TextAnimator& a : p.animators) {
-            w.begin_object();
-            w.key("name").value(a.name);
-            w.key("enabled").value(a.enabled);
-            const TextSelector& s = a.selector;
-            w.key("selector").begin_object();
-            w.key("basedOn").value(static_cast<u32>(s.basedOn));
-            w.key("type").value(static_cast<u32>(s.type));
-            w.key("shape").value(static_cast<u32>(s.shape));
-            w.key("randomOrder").value(s.randomOrder);
-            w.key("seed").value(s.seed);
-            w.key("start").value(s.start);
-            w.key("end").value(s.end);
-            w.key("offset").value(s.offset);
-            w.key("amount").value(s.amount);
-            w.key("easeHigh").value(s.easeHigh);
-            w.key("easeLow").value(s.easeLow);
-            w.key("wiggleRate").value(s.wiggleRate);
-            w.end_object();
-            w.key("props").value(a.props);
-            write_vec3(w, "position", a.position);
-            write_vec2(w, "scale", a.scale);
-            write_vec3(w, "rotation", a.rotation);
-            w.key("opacity").value(a.opacity);
-            w.key("tracking").value(a.tracking);
-            w.key("blur").value(a.blur);
-            w.key("skew").value(a.skew);
-            w.key("strokeWidth").value(a.strokeWidth);
-            w.key("charOffset").value(a.charOffset);
-            write_vec4(w, "fill", a.fill);
-            write_vec4(w, "stroke", a.stroke);
-            w.end_object();
-        }
-        w.end_array();
-        w.key("tracks").begin_array();
-        for (const Track& t : p.textTracks) {
-            w.begin_object();
-            w.key("animator").value(t.effectIndex);
-            w.key("param").value(t.effectParamIndex);
-            write_keys(w, t);
-            w.end_object();
-        }
-        w.end_array();
-    }
+    write_animators(w, p);
 }
 
 void write_caption_body(json::Writer& w, const text::CaptionOptions& o, bool removeFillers) {
@@ -662,10 +705,111 @@ struct Reader {
     }
 };
 
+bool read_selector(Reader& r, const json::Value& so, TextSelector& s) {
+    if (!so.is_object()) return r.fail("seletor invalido");
+    s.basedOn = static_cast<u8>(r.u(so, "basedOn", 0, 3));
+    s.type = static_cast<u8>(r.u(so, "type", 0, 5));
+    s.shape = static_cast<u8>(r.u(so, "shape", 0, 5));
+    s.randomOrder = r.b(so, "randomOrder", false);
+    s.seed = r.u(so, "seed", 1, 0xFFFFFFFFu);
+    s.start = r.f(so, "start", 0.0f, -1e5, 1e5);
+    s.end = r.f(so, "end", 100.0f, -1e5, 1e5);
+    s.offset = r.f(so, "offset", 0.0f, -1e5, 1e5);
+    s.amount = r.f(so, "amount", 100.0f, -1e5, 1e5);
+    s.easeHigh = r.f(so, "easeHigh", 0.0f, -100.0, 100.0);
+    s.easeLow = r.f(so, "easeLow", 0.0f, -100.0, 100.0);
+    s.wiggleRate = r.f(so, "wiggleRate", 2.0f, 0.0, 1000.0);
+    s.enabled = r.b(so, "enabled", true);
+    s.mode = static_cast<u8>(r.u(so, "mode", 0, 6));
+    s.units = static_cast<u8>(r.u(so, "units", 0, 1));
+    s.lockDimensions = r.b(so, "lockDimensions", false);
+    s.smoothness = r.f(so, "smoothness", 100.0f, 0.0, 100.0);
+    s.wiggleMin = r.f(so, "wiggleMin", -100.0f, -1000.0, 1000.0);
+    s.wiggleMax = r.f(so, "wiggleMax", 100.0f, -1000.0, 1000.0);
+    s.correlation = r.f(so, "correlation", 50.0f, 0.0, 100.0);
+    s.temporalPhase = r.f(so, "temporalPhase", 0.0f, -1e5, 1e5);
+    s.spatialPhase = r.f(so, "spatialPhase", 0.0f, -1e5, 1e5);
+    s.exprAmount = r.vec3(so, "exprAmount", s.exprAmount);
+    s.overlap = r.f(so, "overlap", 0.0f, 0.0, 1000.0);
+    return r.ok();
+}
+
+bool read_animators(Reader& r, const json::Value& root, Preset& p) {
+    const json::Value* av = r.arr(root, "animators", kMaxAnimators);
+    if (!av) return r.ok();
+    for (const json::Value& ao : av->array) {
+        if (!ao.is_object()) return r.fail("animador invalido");
+        TextAnimator a;
+        a.name = r.s(ao, "name");
+        a.enabled = r.b(ao, "enabled", true);
+        if (const json::Value* so = ao.get("selector")) { if (!read_selector(r, *so, a.selector)) return false; }
+        if (const json::Value* more = r.arr(ao, "moreSelectors", text::kMaxTextSelectors - 1)) {
+            for (const json::Value& so : more->array) {
+                TextSelector s;
+                if (!read_selector(r, so, s)) return false;
+                a.moreSelectors.push_back(std::move(s));
+            }
+        }
+        a.props = r.u(ao, "props", 0, 0x3FFFF);
+        a.position = r.vec3(ao, "position", a.position);
+        a.scale = r.vec2(ao, "scale", a.scale);
+        a.rotation = r.vec3(ao, "rotation", a.rotation);
+        a.opacity = r.f(ao, "opacity", 100.0f);
+        a.tracking = r.f(ao, "tracking", 0.0f);
+        a.blur = r.f(ao, "blur", 0.0f, 0.0, 1000.0);
+        a.skew = r.f(ao, "skew", 0.0f);
+        a.strokeWidth = r.f(ao, "strokeWidth", 0.0f, 0.0, 200.0);
+        a.charOffset = r.f(ao, "charOffset", 0.0f);
+        a.fill = r.vec4(ao, "fill", a.fill, 0.0, 1.0);
+        a.stroke = r.vec4(ao, "stroke", a.stroke, 0.0, 1.0);
+        a.aeModel = static_cast<u8>(r.u(ao, "aeModel", 0, 1));
+        a.rig = static_cast<u8>(r.u(ao, "rig", 0, 1));
+        a.rigAnchor = static_cast<u8>(r.u(ao, "rigAnchor", 0, 1));
+        a.anchorGrouping = static_cast<u8>(r.u(ao, "anchorGrouping", 0, 3));
+        a.groupAlign = r.vec2(ao, "groupAlign", a.groupAlign);
+        a.anchor = r.vec2(ao, "anchor", a.anchor);
+        a.lineSpacing = r.vec2(ao, "lineSpacing", a.lineSpacing);
+        a.fillHue = r.f(ao, "fillHue", 0.0f);
+        a.fillSaturation = r.f(ao, "fillSaturation", 0.0f);
+        a.fillBrightness = r.f(ao, "fillBrightness", 0.0f);
+        a.fillOpacity = r.f(ao, "fillOpacity", 100.0f, 0.0, 100.0);
+        a.cursor = static_cast<u8>(r.u(ao, "cursor", 0, 255));
+        a.cursorBlink = r.b(ao, "cursorBlink", false);
+        a.charset = static_cast<u8>(r.u(ao, "charset", 0, 255));
+        a.preserveSpace = r.b(ao, "preserveSpace", true);
+        a.randAmount = r.f(ao, "randAmount", 100.0f);
+        a.randEvolution = r.f(ao, "randEvolution", 0.0f);
+        a.randSeed = r.f(ao, "randSeed", 0.0f);
+        a.letterSpacing = r.f(ao, "letterSpacing", 0.0f);
+        a.lineSpacingEm = r.f(ao, "lineSpacingEm", 100.0f);
+        if (!r.ok()) return false;
+        p.animators.push_back(std::move(a));
+    }
+    p.textParts |= kTextAnimators;
+    if (const json::Value* ts = r.arr(root, "tracks", kMaxTracks)) {
+        for (const json::Value& tv : ts->array) {
+            if (!tv.is_object()) return r.fail("trilha invalida");
+            Track t;
+            t.property = TrackProperty::TextAnimParam;
+            t.effectIndex = r.u(tv, "animator", 0, kMaxAnimators);
+            t.effectParamIndex = r.u(tv, "param", 0, text::kSelectorKeyBlock * text::kMaxTextSelectors - 1);
+            if (!r.ok()) return false;
+            if (t.effectIndex >= p.animators.size()) return r.fail("trilha de animador inexistente");
+            if (!r.keys(tv, t)) return false;
+            for (const Track& o : p.textTracks) {
+                if (o.effectIndex == t.effectIndex && o.effectParamIndex == t.effectParamIndex) return r.fail("trilha repetida");
+            }
+            p.textTracks.push_back(std::move(t));
+        }
+    }
+    return r.ok();
+}
+
 bool read_effects(Reader& r, const json::Value& root, const EffectRegistry* reg, Preset& p) {
     const json::Value* list = r.arr(root, "effects", kMaxEffectCount);
     if (!r.ok()) return false;
-    if (!list || list->array.empty()) return r.fail("preset de efeitos vazio");
+    // Preset só de animadores de texto: a lista de efeitos pode vir vazia.
+    if (!list || (list->array.empty() && !root.get("animators"))) return r.fail("preset de efeitos vazio");
     for (u32 ei = 0; ei < list->array.size(); ++ei) {
         const json::Value& ev = list->array[ei];
         if (!ev.is_object()) return r.fail("efeito invalido");
@@ -818,61 +962,7 @@ bool read_text(Reader& r, const json::Value& root, Preset& p) {
         p.style = std::move(t);
         p.textParts |= kTextStyle;
     }
-    if (const json::Value* av = r.arr(root, "animators", kMaxAnimators)) {
-        for (const json::Value& ao : av->array) {
-            if (!ao.is_object()) return r.fail("animador invalido");
-            TextAnimator a;
-            a.name = r.s(ao, "name");
-            a.enabled = r.b(ao, "enabled", true);
-            if (const json::Value* so = ao.get("selector")) {
-                if (!so->is_object()) return r.fail("seletor invalido");
-                TextSelector& s = a.selector;
-                s.basedOn = static_cast<u8>(r.u(*so, "basedOn", 0, 2));
-                s.type = static_cast<u8>(r.u(*so, "type", 0, 2));
-                s.shape = static_cast<u8>(r.u(*so, "shape", 0, 5));
-                s.randomOrder = r.b(*so, "randomOrder", false);
-                s.seed = r.u(*so, "seed", 1, 0xFFFFFFFFu);
-                s.start = r.f(*so, "start", 0.0f, -1e5, 1e5);
-                s.end = r.f(*so, "end", 100.0f, -1e5, 1e5);
-                s.offset = r.f(*so, "offset", 0.0f, -1e5, 1e5);
-                s.amount = r.f(*so, "amount", 100.0f, -1e5, 1e5);
-                s.easeHigh = r.f(*so, "easeHigh", 0.0f, -100.0, 100.0);
-                s.easeLow = r.f(*so, "easeLow", 0.0f, -100.0, 100.0);
-                s.wiggleRate = r.f(*so, "wiggleRate", 2.0f, 0.0, 1000.0);
-            }
-            a.props = r.u(ao, "props", 0, 0x7FF);
-            a.position = r.vec3(ao, "position", a.position);
-            a.scale = r.vec2(ao, "scale", a.scale);
-            a.rotation = r.vec3(ao, "rotation", a.rotation);
-            a.opacity = r.f(ao, "opacity", 100.0f);
-            a.tracking = r.f(ao, "tracking", 0.0f);
-            a.blur = r.f(ao, "blur", 0.0f, 0.0, 1000.0);
-            a.skew = r.f(ao, "skew", 0.0f);
-            a.strokeWidth = r.f(ao, "strokeWidth", 0.0f, 0.0, 200.0);
-            a.charOffset = r.f(ao, "charOffset", 0.0f);
-            a.fill = r.vec4(ao, "fill", a.fill, 0.0, 1.0);
-            a.stroke = r.vec4(ao, "stroke", a.stroke, 0.0, 1.0);
-            if (!r.ok()) return false;
-            p.animators.push_back(std::move(a));
-        }
-        p.textParts |= kTextAnimators;
-        if (const json::Value* ts = r.arr(root, "tracks", kMaxTracks)) {
-            for (const json::Value& tv : ts->array) {
-                if (!tv.is_object()) return r.fail("trilha invalida");
-                Track t;
-                t.property = TrackProperty::TextAnimParam;
-                t.effectIndex = r.u(tv, "animator", 0, kMaxAnimators);
-                t.effectParamIndex = r.u(tv, "param", 0, 63);
-                if (!r.ok()) return false;
-                if (t.effectIndex >= p.animators.size()) return r.fail("trilha de animador inexistente");
-                if (!r.keys(tv, t)) return false;
-                for (const Track& o : p.textTracks) {
-                    if (o.effectIndex == t.effectIndex && o.effectParamIndex == t.effectParamIndex) return r.fail("trilha repetida");
-                }
-                p.textTracks.push_back(std::move(t));
-            }
-        }
-    }
+    if (!read_animators(r, root, p)) return false;
     if (!r.ok()) return false;
     if (p.textParts == 0) return r.fail("preset de texto vazio");
     return true;
@@ -1039,6 +1129,7 @@ std::string write(const Preset& p, const EffectRegistry* registry) {
         case PresetKind::Effects:
             w.key("fps").value(p.fps);
             write_effects(w, p, registry);
+            write_animators(w, p);
             break;
         case PresetKind::Text:
             w.key("fps").value(p.fps);
@@ -1098,7 +1189,7 @@ bool parse_value(const json::Value& root, Preset& out, const EffectRegistry* reg
     }
     if (r.ok()) {
         switch (p.kind) {
-            case PresetKind::Effects: read_effects(r, root, registry, p); break;
+            case PresetKind::Effects: if (read_effects(r, root, registry, p)) (void)read_animators(r, root, p); break;
             case PresetKind::Text: read_text(r, root, p); break;
             case PresetKind::Animation: read_animation(r, root, p); break;
             case PresetKind::Caption: read_caption(r, root, p); break;
@@ -1123,8 +1214,19 @@ bool capture(const Layer& l, PresetKind kind, std::string name, f64 fps, u32 par
     const i64 base = l.offset.value;
     switch (kind) {
         case PresetKind::Effects: {
-            if (l.effects.empty()) return false;
+            if (l.effects.empty() && l.text.animators.empty()) return false;
             for (u32 i = 0; i < l.effects.size(); ++i) capture_one_effect(l, l.effects[i], i, registry, p);
+            if (!l.text.animators.empty()) {
+                p.textParts |= kTextAnimators;
+                p.animators = l.text.animators;
+                for (u32 t = 0; t < l.tracks.size(); ++t) {
+                    const Track& tr = l.tracks.at(t);
+                    if (tr.property != TrackProperty::TextAnimParam || tr.effectIndex >= p.animators.size()) continue;
+                    Track c = tr;
+                    retime_track(c, -base, 1.0, 0.0f);
+                    p.textTracks.push_back(std::move(c));
+                }
+            }
             break;
         }
         case PresetKind::Text: {
@@ -1198,7 +1300,7 @@ bool capture_effect(const Layer& l, u32 effectId, std::string name, f64 fps, con
 
 bool applicable(const Preset& p, const Layer& l, bool meshText) noexcept {
     switch (p.kind) {
-        case PresetKind::Effects: return !p.effects.empty() && l.effects.size() + p.effects.size() <= kMaxEffectCount;
+        case PresetKind::Effects: return (!p.effects.empty() || (!p.animators.empty() && (l.kind == LayerKind::Text || meshText))) && l.effects.size() + p.effects.size() <= kMaxEffectCount;
         case PresetKind::Text: return (l.kind == LayerKind::Text && p.textParts != 0) || (meshText && (p.textParts & kTextAnimators));
         case PresetKind::Animation: return !p.animTracks.empty() && l.kind != LayerKind::Audio;
         default: return false;
@@ -1243,6 +1345,17 @@ bool apply(const Preset& p, Layer& l, i64 anchorLocal, i64 durationFrames, f64 f
                 l.effects.push_back(std::move(e));
             }
             l.nextEffectId = next;
+            if ((p.textParts & kTextAnimators) && (l.kind == LayerKind::Text || l.kind == LayerKind::Model3D)) {
+                const u32 first = static_cast<u32>(l.text.animators.size());
+                l.text.animators.insert(l.text.animators.end(), p.animators.begin(), p.animators.end());
+                for (const Track& t : p.textTracks) {
+                    Track c = t;
+                    c.effectIndex += first;
+                    retime_track(c, start, scale, 0.0f);
+                    l.tracks.add(std::move(c));
+                }
+            }
+            text::migrate_text_effects(l);
             return true;
         }
         case PresetKind::Text: {

@@ -54,6 +54,10 @@ struct PathKey {
     u8         curve = kPathCurveLegacy;
     u8         easePower = 1;
     f32        bx1 = 0.33f, by1 = 0.0f, bx2 = 0.67f, by2 = 1.0f;
+    /// 0.5.0 (keyframe por ponto, como no Alight Motion): 1 = este key anima o
+    /// ponto; vazio = todos. Os outros pontos passam por este instante como se
+    /// o key não existisse. Mesmo tamanho de `path.v` quando preenchido.
+    std::vector<u8> points;
     friend bool operator==(const PathKey&, const PathKey&) noexcept = default;
 };
 

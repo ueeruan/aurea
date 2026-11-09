@@ -187,16 +187,18 @@ AUREA_TEST(OriginalModelExport, UnsupportedDegradedSourceCannotSilentlyExportPre
     AUREA_CHECK(prior && prior->stats.texturesReduced > 0);
     ExportSettings settings; settings.height = 64;
     const auto failed = rig.e.start_export(settings, (fixture.prefix + ".mp4").c_str());
-    AUREA_CHECK_EQ(failed.code(), Errc::NotSupported);
-    // The snapshot can fingerprint OBJ, but cannot promote this degraded
-    // Original OBJ texture through the glTF-only source reimporter.
-    AUREA_CHECK(!failed.detail().empty());
-    AUREA_CHECK(failed.detail().find("Original") != std::string_view::npos);
-    AUREA_CHECK(!rig.cap.opened && rig.cap.writes == 0);
+    // The snapshot can fingerprint OBJ, but cannot promote this degraded Original
+    // OBJ texture through the glTF-only reimporter: since 0.1.8 it exports as the
+    // preview shows and the screen warns (kExportModelFallback).
+    AUREA_CHECK(failed.ok());
+    for (int i = 0; i < 60000 && !rig.e.export_progress().finished; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    AUREA_CHECK(rig.e.export_progress().finished);
+    AUREA_CHECK_EQ(rig.e.export_progress().result, Errc::Ok);
+    AUREA_CHECK((rig.e.export_progress().flags & Engine::kExportModelFallback) != 0);
     AUREA_CHECK(rig.e.model_asset(key) == prior);
 }
 
-AUREA_TEST(OriginalModelExport, InsufficientSourceMemoryFailsBeforeOpeningTheEncoderWithoutChangingPreview) {
+AUREA_TEST(OriginalModelExport, InsufficientSourceMemoryExportsThePreviewModelAndWarns) {
     OriginalModelFixture fixture("aurea-original-budget");
     const auto source = fixture.glb(4096, "-source.glb");
     AUREA_CHECK(!source.empty()); if (source.empty()) return;
@@ -213,15 +215,17 @@ AUREA_TEST(OriginalModelExport, InsufficientSourceMemoryFailsBeforeOpeningTheEnc
     AUREA_CHECK(prior && prior->stats.texturesReduced == 1);
     ExportSettings settings; settings.height = 64;
     const auto failed = rig.e.start_export(settings, (fixture.prefix + ".mp4").c_str());
-    AUREA_CHECK_EQ(failed.code(), Errc::BudgetExceeded);
-    AUREA_CHECK(failed.detail().find("Original") != std::string_view::npos);
-    AUREA_CHECK(!rig.cap.opened && rig.cap.writes == 0 && !rig.cap.finished);
+    AUREA_CHECK(failed.ok());
+    for (int i = 0; i < 60000 && !rig.e.export_progress().finished; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    AUREA_CHECK(rig.e.export_progress().finished);
+    AUREA_CHECK_EQ(rig.e.export_progress().result, Errc::Ok);
+    AUREA_CHECK((rig.e.export_progress().flags & Engine::kExportModelFallback) != 0);
     AUREA_CHECK(rig.e.model_asset(asset.pack()) == prior);
     AUREA_CHECK_EQ(rig.e.project()->asset(asset)->model.importQuality, 0u);
     AUREA_CHECK(rig.e.new_project(96, 64, 30, "startup failure released ownership").ok());
 }
 
-AUREA_TEST(OriginalModelExport, MissingRequiredTextureDoesNotPublishAnUntexturedVideo) {
+AUREA_TEST(OriginalModelExport, MissingSourceTextureExportsAsThePreviewAndWarns) {
     OriginalModelFixture fixture("aurea-original-missing");
     const auto source = fixture.glb(4096, "-bad.glb", true);
     AUREA_CHECK(!source.empty()); if (source.empty()) return;
@@ -238,8 +242,11 @@ AUREA_TEST(OriginalModelExport, MissingRequiredTextureDoesNotPublishAnUntextured
     AUREA_CHECK_EQ(rig.e.last_model_import().texturesSkipped, 0u); // Legacy decode warnings are not counted here.
     ExportSettings settings; settings.height = 64;
     const auto failed = rig.e.start_export(settings, (fixture.prefix + ".mp4").c_str());
-    AUREA_CHECK_EQ(failed.code(), Errc::AssetCorrupted);
-    AUREA_CHECK(!rig.cap.opened && rig.cap.writes == 0 && !rig.cap.finished);
+    AUREA_CHECK(failed.ok());
+    for (int i = 0; i < 60000 && !rig.e.export_progress().finished; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    AUREA_CHECK(rig.e.export_progress().finished);
+    AUREA_CHECK_EQ(rig.e.export_progress().result, Errc::Ok);
+    AUREA_CHECK((rig.e.export_progress().flags & Engine::kExportModelFallback) != 0);
 }
 
 AUREA_TEST(OriginalModelExport, CancellationKeepsSourceTexturesUntilFenceThenRestoresPreviewProxyWithoutWaitingIdle) {

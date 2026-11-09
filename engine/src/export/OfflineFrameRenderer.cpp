@@ -62,6 +62,7 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
     settings.finalQuality = true;
     settings.dither = false;
     const auto cancelled = [&] {
+        settings.beat();
         return (settings.cancelFlag && settings.cancelFlag->load(std::memory_order_acquire))
             || (additionalCancel && additionalCancel->load(std::memory_order_acquire));
     };

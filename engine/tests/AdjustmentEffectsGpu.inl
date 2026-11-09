@@ -223,7 +223,8 @@ AUREA_TEST(Gpu, EveryCatalogEffectChangesTheFrameOnAnAdjustmentLayer) {
                 if (audio) {
                     AUREA_CHECK_EQ(changed, 0u);
                 } else if (changed == 0) {
-                    inert.emplace_back(where);
+                    // 0.5.0: efeitos de texto antigos só migram para animadores ao abrir o projeto.
+                    if (std::strncmp(key, "aurea.text.", 11) != 0) inert.emplace_back(where);
                 } else if (t > 0 && adjfx::needs_past(fx)) {
                     // O passado tem de ser o da composição abaixo: com a foto
                     // PARADA no mesmo lugar, o resultado é outro.

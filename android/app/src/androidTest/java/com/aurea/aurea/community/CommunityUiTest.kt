@@ -40,7 +40,7 @@ class CommunityUiTest {
             AureaTheme { Column(Modifier.fillMaxSize().background(AureaColors.Background).safeDrawingPadding()) {
                 Text("aurea", style = AureaType.HeadlineLarge, modifier = Modifier.padding(horizontal = 20.dp))
                 Box(Modifier.weight(1f)) { CommunityScreen(store, conta, own, api) }
-                HomeDock(if (own) HomeViewModel.PROFILE_TAB else HomeViewModel.HOME_TAB, {}, {}, {}, {}, {}, {})
+                HomeDock(if (own) HomeViewModel.PROFILE_TAB else HomeViewModel.HOME_TAB, {}, {})
             } }
         }
         compose.waitUntil(10000) { api.loaded }

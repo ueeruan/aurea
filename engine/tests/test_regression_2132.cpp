@@ -125,9 +125,7 @@ AUREA_TEST(Regression2132, PastedTextAnimatorPreparesExtrudedLetters) {
     auto asset = r.e.model_asset(layer->model.scene.pack());
     AUREA_CHECK(asset && asset->textGlyphLayout);
     if (!asset || !asset->textGlyphLayout) return;
-    Command opacity; opacity.type = CommandType::EffectSetParam;
-    opacity.effect_param = {LayerId::unpack(to), EffectId{layer->effects.back().id, 0}, text::aeOpacity, 0};
-    AUREA_CHECK(r.e.apply_command(opacity).ok());
+    AUREA_CHECK(r.e.set_text_anim_param(to, 0, text::kOpacity, 0));
     auto pose = asset->rest_world_matrices(); std::vector<f32> alpha;
     scene3d::apply_text3d_animators(*asset, *layer, 0, 30, pose, alpha);
     AUREA_CHECK(!alpha.empty());

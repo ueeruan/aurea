@@ -98,6 +98,9 @@ internal fun TextPanel(env: PanelEnv) {
     // O desenho dos painéis de propriedade: a coluna fixa à esquerda, o conteúdo no centro e
     // as abas em ícones à direita. O losango e a curva valem para a propriedade escolhida.
     var tab by rememberSaveable(store.primary) { mutableIntStateOf(0) }
+    // Animador aberto: o editor fica com a largura toda, sem as abas.
+    var animatorOpen by remember(store.primary) { mutableStateOf(false) }
+    val fullWidth = tab == 3 && animatorOpen
     DisposableEffect(store.primary) { onDispose { store.timelineFocus = null } }
     val focus = store.timelineFocus?.singleOrNull()?.takeIf { it.property in TEXT_RAIL_PROPERTIES }
     val keys = focus?.let { f -> store.primaryKeys().filter { it.property == f.property && it.effectIndex == f.effectIndex && it.paramIndex == f.paramIndex } }.orEmpty()
@@ -205,32 +208,23 @@ internal fun TextPanel(env: PanelEnv) {
         // O rótulo em cima e os três botões do mesmo tamanho: com as abas à direita a linha
         // não comporta os dois lado a lado em nenhum idioma.
         Text(stringResource(R.string.panel_alinhamento), modifier = Modifier.padding(top = 8.dp, bottom = 6.dp), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
-        Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf(0 to stringResource(R.string.panel_esquerda), 1 to stringResource(R.string.panel_centro), 2 to stringResource(R.string.panel_direita)).forEach { (a, label) ->
-                val on = td.alignment == a
-                Box(
-                    Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(if (on) AureaColors.AccentDim else AureaColors.Chip)
-                        .tocavel(onClick = { store.setTextAlignment(a) }).padding(horizontal = 4.dp, vertical = 6.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(label, maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = if (on) AureaColors.Accent else AureaColors.Text)))
-                }
-            }
-        }
+        PanelItemGrid(listOf(
+            Triple(0, R.string.panel_esquerda, com.aurea.aurea.editor.ContentIconKind.AlignLeft),
+            Triple(1, R.string.panel_centro, com.aurea.aurea.editor.ContentIconKind.AlignCenter),
+            Triple(2, R.string.panel_direita, com.aurea.aurea.editor.ContentIconKind.AlignRight),
+        ).map { (a, label, icon) -> PanelItem(com.aurea.aurea.ui.theme.CupertinoGlyph.Textformat, stringResource(label), "text.align.$a", on = td.alignment == a, contentIcon = icon) { store.setTextAlignment(a) } }, columns = 3)
         TextDynamicSection(env)
                     }
                     1 -> {
-        Text(stringResource(R.string.panel_contorno), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted)))
-        Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.panel_cor_contorno), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
-            ColorWell(Color(td.strokeColor[0], td.strokeColor[1], td.strokeColor[2])) {
+        PanelSection(stringResource(R.string.panel_contorno), com.aurea.aurea.ui.theme.CupertinoGlyph.Circle, "text.sec.stroke") {
+            ColorLine(stringResource(R.string.panel_cor_contorno), Color(td.strokeColor[0], td.strokeColor[1], td.strokeColor[2])) {
                 store.beginGesture("cor do contorno do texto")
                 env.openColor(ColorRequest(td.strokeColor.copyOf(), onChange = { r, g, b, a -> store.setTextStrokeColor(r, g, b, a) },
                     onDone = { store.endGesture() }))
             }
+            TextRuler(env, stringResource(R.string.panel_largura_contorno), { store.textDetail?.strokeWidth ?: 0f }, "${td.strokeWidth.roundToInt()} px",
+                0.1f, 0f, 60f, stringResource(R.string.panel_contorno_texto)) { store.setTextStrokeWidth(it) }
         }
-        TextRuler(env, stringResource(R.string.panel_largura_contorno), { store.textDetail?.strokeWidth ?: 0f }, "${td.strokeWidth.roundToInt()} px",
-            0.1f, 0f, 60f, stringResource(R.string.panel_contorno_texto)) { store.setTextStrokeWidth(it) }
         TextBackdropSection(env)
                     }
                     2 -> {
@@ -238,15 +232,15 @@ internal fun TextPanel(env: PanelEnv) {
                         TextPathSection(env)
                     }
                     else -> {
-                        TextAnimSection(env, listFirst = true)
-                        Spacer(Modifier.height(6.dp))
-                        AnimChip(stringResource(R.string.la_animators), false) { env.onOpenAnimators() }
+                        TextAnimSection(env) { animatorOpen = it }
+                        if (!animatorOpen) Spacer(Modifier.height(6.dp))
+                        if (!animatorOpen) PanelItemRow(com.aurea.aurea.ui.theme.CupertinoGlyph.Move, stringResource(R.string.la_animators), "text.layer.animators", chevron = true) { env.onOpenAnimators() }
                     }
                 }
             }
         }
-        Box(Modifier.width(0.7.dp).fillMaxHeight().background(AureaColors.ContentStrongLine))
-        PanelIconTabs(listOf(
+        if (!fullWidth) Box(Modifier.width(0.7.dp).fillMaxHeight().background(AureaColors.ContentStrongLine))
+        if (!fullWidth) PanelIconTabs(listOf(
             PanelIconTab(com.aurea.aurea.ui.theme.CupertinoGlyph.Textformat, stringResource(R.string.panel_texto), "text.tab.text"),
             PanelIconTab(com.aurea.aurea.ui.theme.CupertinoGlyph.Paintbrush, stringResource(R.string.tx_tab_style), "text.tab.style"),
             PanelIconTab(com.aurea.aurea.ui.theme.CupertinoGlyph.DocText, stringResource(R.string.tx_tab_layout), "text.tab.layout"),
@@ -273,24 +267,15 @@ private fun SpanChip(label: String, onClick: () -> Unit) {
 private fun TextDynamicSection(env: PanelEnv) {
     val store = env.store
     val d = store.textDynamic ?: return
-    Spacer(Modifier.height(6.dp))
-    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(stringResource(R.string.text_dynamic), modifier = Modifier.weight(1f),
-            style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700)))
-        AureaToggle(checked = d[0] > .5, onCheckedChange = { store.setTextDynamicValue(0, if (it) 1.0 else 0.0) })
-    }
-    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        listOf("{#}" to R.string.text_token_counter, "{tc}" to R.string.text_token_timecode,
-               "{t}" to R.string.text_token_time, "{f}" to R.string.text_token_frame).forEach { (token, label) ->
-            val desc = stringResource(R.string.text_token_insert, stringResource(label))
-            Box(Modifier.clip(RoundedCornerShape(8.dp)).background(AureaColors.Chip)
-                .semantics { contentDescription = desc }.tocavel(onClick = { store.insertTextToken(token) })
-                .padding(horizontal = 10.dp, vertical = 6.dp)) {
-                Text(stringResource(label), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Text)))
-            }
-        }
-    }
-    if (d[0] > .5) {
+    val on = d[0] > .5
+    PanelSection(stringResource(R.string.text_dynamic), com.aurea.aurea.ui.theme.CupertinoGlyph.Timer, "text.sec.dynamic", startOpen = on,
+        trailing = { AureaToggle(checked = on, onCheckedChange = { store.setTextDynamicValue(0, if (it) 1.0 else 0.0) }) }) {
+        val tokens = listOf(
+            Triple("{#}", R.string.text_token_counter, com.aurea.aurea.ui.theme.CupertinoGlyph.Repeat), Triple("{tc}", R.string.text_token_timecode, com.aurea.aurea.ui.theme.CupertinoGlyph.Timer),
+            Triple("{t}", R.string.text_token_time, com.aurea.aurea.ui.theme.CupertinoGlyph.Clock), Triple("{f}", R.string.text_token_frame, com.aurea.aurea.ui.theme.CupertinoGlyph.Film),
+        )
+        PanelItemGrid(tokens.map { (token, label, glyph) -> PanelItem(glyph, stringResource(label), "text.token.$token") { store.insertTextToken(token) } })
+        Spacer(Modifier.height(4.dp))
         TextRuler(env, stringResource(R.string.text_counter_from), { (store.textDynamic?.get(1) ?: 0.0).toFloat() },
             com.aurea.aurea.editor.formatCounter(d[1], d[3].toInt(), d[4] > .5), 0.5f, -1e9f, 1e9f, "contador de") {
             store.setTextDynamicValue(1, kotlin.math.round(it.toDouble() * 1e6) / 1e6)
@@ -303,19 +288,11 @@ private fun TextDynamicSection(env: PanelEnv) {
             "${d[3].toInt()}", 0.05f, 0f, 6f, "casas do contador") {
             store.setTextDynamicValue(3, kotlin.math.round(it).toDouble())
         }
-        Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.text_counter_grouping), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
-            AureaToggle(checked = d[4] > .5, onCheckedChange = { store.setTextDynamicValue(4, if (it) 1.0 else 0.0) })
-        }
-        Row(Modifier.fillMaxWidth().height(44.dp).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            // Curva do contador: Linear (1), Suave (5), Entrada (3), Saída (4).
-            listOf(1 to R.string.panel_linear, 5 to R.string.pn_ease_in_out, 3 to R.string.pn_ease_in, 4 to R.string.pn_ease_out).forEach { (ease, label) ->
-                val on = d[5].toInt() == ease
-                Box(Modifier.clip(RoundedCornerShape(8.dp)).background(if (on) AureaColors.AccentDim else AureaColors.Chip)
-                    .tocavel(onClick = { store.setTextDynamicValue(5, ease.toDouble()) }).padding(horizontal = 10.dp, vertical = 6.dp)) {
-                    Text(stringResource(label), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = if (on) AureaColors.Accent else AureaColors.Text)))
-                }
-            }
+        ToggleLine(stringResource(R.string.text_counter_grouping), d[4] > .5) { store.setTextDynamicValue(4, if (it) 1.0 else 0.0) }
+        // Curva do contador: Linear (1), Suave (5), Entrada (3), Saída (4).
+        val eases = listOf(1 to R.string.panel_linear, 5 to R.string.pn_ease_in_out, 3 to R.string.pn_ease_in, 4 to R.string.pn_ease_out)
+        ChipRow(stringResource(R.string.panel_curva), eases.map { stringResource(it.second) }, eases.indexOfFirst { it.first == d[5].toInt() }) {
+            store.setTextDynamicValue(5, eases[it].first.toDouble())
         }
     }
 }
@@ -326,7 +303,7 @@ private fun TextLayoutSection(env: PanelEnv) {
     val store = env.store
     val st by remember(store) { derivedStateOf { store.textStyle } }
     val v = st ?: return
-    if (v.size >= 20) {
+    if (v.size >= 20) PanelSection(stringResource(R.string.edt_prop_spacing), com.aurea.aurea.ui.theme.CupertinoGlyph.ArrowLeftRight, "text.sec.spacing") {
         TextRuler(env, stringResource(R.string.text_line_spacing), { (store.textStyle?.get(18) ?: 1.2f) * 100 },
             "${(v[18] * 100).roundToInt()}%", 0.5f, 10f, 1000f, stringResource(R.string.text_line_spacing)) {
             store.setTextStyleValue(18, it / 100)
@@ -336,26 +313,20 @@ private fun TextLayoutSection(env: PanelEnv) {
             store.setTextStyleValue(19, it)
         }
     }
-    Spacer(Modifier.height(6.dp))
-    Text(stringResource(R.string.panel_caixa), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted)))
-    Row(Modifier.fillMaxWidth().height(44.dp).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        listOf(0 to stringResource(R.string.panel_livre), 1 to stringResource(R.string.panel_paragrafo), 2 to stringResource(R.string.panel_tamanho_fixo), 3 to stringResource(R.string.panel_encolher_caber)).forEach { (m, label) ->
-            val on = v[0].toInt() == m
-            Box(
-                Modifier.clip(RoundedCornerShape(8.dp)).background(if (on) AureaColors.AccentDim else AureaColors.Chip)
-                    .tocavel(onClick = { store.setTextStyleValue(0, m.toFloat()) }).padding(horizontal = 10.dp, vertical = 6.dp),
-            ) {
-                Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = if (on) AureaColors.Accent else AureaColors.Text)))
+    PanelSection(stringResource(R.string.panel_caixa), com.aurea.aurea.ui.theme.CupertinoGlyph.Square, "text.sec.box") {
+        PanelItemGrid(listOf(
+            Triple(0, R.string.panel_livre, com.aurea.aurea.ui.theme.CupertinoGlyph.Move), Triple(1, R.string.panel_paragrafo, com.aurea.aurea.ui.theme.CupertinoGlyph.LineHorizontal3),
+            Triple(2, R.string.panel_tamanho_fixo, com.aurea.aurea.ui.theme.CupertinoGlyph.Square), Triple(3, R.string.panel_encolher_caber, com.aurea.aurea.ui.theme.CupertinoGlyph.FullscreenExit),
+        ).map { (m, label, glyph) -> PanelItem(glyph, stringResource(label), "text.box.$m", on = v[0].toInt() == m) { store.setTextStyleValue(0, m.toFloat()) } })
+        if (v[0] >= 1f) {
+            Spacer(Modifier.height(4.dp))
+            TextRuler(env, stringResource(R.string.panel_largura_caixa), { store.textStyle?.get(1) ?: 800f }, "${v[1].roundToInt()} px", 2f, 10f, 20000f, stringResource(R.string.panel_largura_caixa_4a83)) {
+                store.setTextStyleValue(1, it)
             }
-        }
-    }
-    if (v[0] >= 1f) {
-        TextRuler(env, stringResource(R.string.panel_largura_caixa), { store.textStyle?.get(1) ?: 800f }, "${v[1].roundToInt()} px", 2f, 10f, 20000f, stringResource(R.string.panel_largura_caixa_4a83)) {
-            store.setTextStyleValue(1, it)
-        }
-        if (v[0] >= 2f) {
-            TextRuler(env, stringResource(R.string.panel_altura_caixa), { store.textStyle?.get(2) ?: 200f }, "${v[2].roundToInt()} px", 2f, 10f, 20000f, stringResource(R.string.panel_altura_caixa_0cec)) {
-                store.setTextStyleValue(2, it)
+            if (v[0] >= 2f) {
+                TextRuler(env, stringResource(R.string.panel_altura_caixa), { store.textStyle?.get(2) ?: 200f }, "${v[2].roundToInt()} px", 2f, 10f, 20000f, stringResource(R.string.panel_altura_caixa_0cec)) {
+                    store.setTextStyleValue(2, it)
+                }
             }
         }
     }
@@ -367,20 +338,13 @@ private fun TextBackdropSection(env: PanelEnv) {
     val store = env.store
     val st by remember(store) { derivedStateOf { store.textStyle } }
     val v = st ?: return
-    Spacer(Modifier.height(6.dp))
-    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(stringResource(R.string.panel_fundo), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700)))
-        if (v[3] > 0.5f) {
-            ColorWell(Color(v[4], v[5], v[6])) {
-                store.beginGesture("cor do fundo do texto")
-                env.openColor(ColorRequest(floatArrayOf(v[4], v[5], v[6], v[7]),
-                    onChange = { r, g, b, a -> store.setTextStyleValues(mapOf(4 to r, 5 to g, 6 to b, 7 to a)) }, onDone = { store.endGesture() }))
-            }
-            Spacer(Modifier.width(10.dp))
+    PanelSection(stringResource(R.string.panel_fundo), com.aurea.aurea.ui.theme.CupertinoGlyph.Square, "text.sec.backdrop", startOpen = v[3] > 0.5f,
+        trailing = { AureaToggle(checked = v[3] > 0.5f, onCheckedChange = { store.setTextStyleValue(3, if (it) 1f else 0f) }) }) {
+        ColorLine(stringResource(R.string.panel_cor), Color(v[4], v[5], v[6])) {
+            store.beginGesture("cor do fundo do texto")
+            env.openColor(ColorRequest(floatArrayOf(v[4], v[5], v[6], v[7]),
+                onChange = { r, g, b, a -> store.setTextStyleValues(mapOf(4 to r, 5 to g, 6 to b, 7 to a)) }, onDone = { store.endGesture() }))
         }
-        AureaToggle(checked = v[3] > 0.5f, onCheckedChange = { store.setTextStyleValue(3, if (it) 1f else 0f) })
-    }
-    if (v[3] > 0.5f) {
         TextRuler(env, stringResource(R.string.panel_margem_fundo), { store.textStyle?.get(8) ?: 14f }, "${v[8].roundToInt()} px", 0.2f, 0f, 500f, stringResource(R.string.panel_margem_fundo_276c)) {
             store.setTextStyleValue(8, it)
         }
@@ -388,19 +352,13 @@ private fun TextBackdropSection(env: PanelEnv) {
             store.setTextStyleValue(9, it)
         }
     }
-    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(stringResource(R.string.panel_sombra), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700)))
-        if (v[10] > 0.5f) {
-            ColorWell(Color(v[11], v[12], v[13])) {
-                store.beginGesture("cor da sombra do texto")
-                env.openColor(ColorRequest(floatArrayOf(v[11], v[12], v[13], v[14]),
-                    onChange = { r, g, b, a -> store.setTextStyleValues(mapOf(11 to r, 12 to g, 13 to b, 14 to a)) }, onDone = { store.endGesture() }))
-            }
-            Spacer(Modifier.width(10.dp))
+    PanelSection(stringResource(R.string.panel_sombra), com.aurea.aurea.ui.theme.CupertinoGlyph.CircleLefthalfFill, "text.sec.shadow", startOpen = v[10] > 0.5f,
+        trailing = { AureaToggle(checked = v[10] > 0.5f, onCheckedChange = { store.setTextStyleValue(10, if (it) 1f else 0f) }) }) {
+        ColorLine(stringResource(R.string.panel_cor), Color(v[11], v[12], v[13])) {
+            store.beginGesture("cor da sombra do texto")
+            env.openColor(ColorRequest(floatArrayOf(v[11], v[12], v[13], v[14]),
+                onChange = { r, g, b, a -> store.setTextStyleValues(mapOf(11 to r, 12 to g, 13 to b, 14 to a)) }, onDone = { store.endGesture() }))
         }
-        AureaToggle(checked = v[10] > 0.5f, onCheckedChange = { store.setTextStyleValue(10, if (it) 1f else 0f) })
-    }
-    if (v[10] > 0.5f) {
         TextRuler(env, stringResource(R.string.panel_distancia_x), { store.textStyle?.get(15) ?: 4f }, "${v[15].roundToInt()} px", 0.2f, -500f, 500f, stringResource(R.string.panel_sombra_x)) { store.setTextStyleValue(15, it) }
         TextRuler(env, stringResource(R.string.panel_distancia_y), { store.textStyle?.get(16) ?: 6f }, "${v[16].roundToInt()} px", 0.2f, -500f, 500f, stringResource(R.string.panel_sombra_y)) { store.setTextStyleValue(16, it) }
         TextRuler(env, stringResource(R.string.panel_desfoque), { store.textStyle?.get(17) ?: 6f }, "${v[17].roundToInt()} px", 0.1f, 0f, 200f, stringResource(R.string.panel_desfoque_sombra)) { store.setTextStyleValue(17, it) }

@@ -177,9 +177,11 @@ struct PreviewMetalView: UIViewRepresentable {
         private var groupMove: [(id: Int64, local: SIMD2<Float>, affine: [Float])] = []
         private var groupCentre: SIMD2<Float>?
         private var shapeHandle = -1
+        /// 0.5.0: parâmetro e posição real (px da forma) da alça de parâmetro agarrada.
+        private var shapeParam: UInt32 = 0
+        private var shapeParamStart = SIMD2<Float>(0, 0)
         private var shapeWidth: Float = 1
         private var shapeHeight: Float = 1
-        private var shapeRadius: Float = 0
         private var shapeU = SIMD2<Float>.zero
         private var shapeV = SIMD2<Float>.zero
         private var shapeScale = SIMD2<Float>(repeating: 1)
@@ -1273,7 +1275,8 @@ struct PreviewMetalView: UIViewRepresentable {
         }
         private func startShape(at point: CGPoint, view: UIView) -> Bool {
             guard ShapeStageGeometry.enabled(model) else { return false }
-            let points = ShapeStageGeometry.handles(model.detail, corners: screenCorners(view: view))
+            let params = ShapeStageGeometry.paramHandles(model)
+            let points = ShapeStageGeometry.handles(model.detail, corners: screenCorners(view: view), params: params)
             var closest: CGFloat = 26
             for i in points.indices.reversed() {
                 let distance = hypot(point.x - points[i].x, point.y - points[i].y)
@@ -1282,7 +1285,10 @@ struct PreviewMetalView: UIViewRepresentable {
             guard shapeHandle >= 0 else { return false }
             var corners: [Float] = []; guard StageGeom.corners(model.detail, &corners) else { return false }
             shapeWidth = max(1, StageGeom.width(model.detail)); shapeHeight = max(1, StageGeom.height(model.detail))
-            let shape = StageGeom.floats(model.detail["shape"]); shapeRadius = shape.count > 4 ? shape[4] : 0
+            if shapeHandle >= 8, shapeHandle - 8 < params.count {
+                let picked = params[shapeHandle - 8]
+                shapeParam = picked.param; shapeParamStart = SIMD2(picked.x, picked.y)
+            }
             let u = SIMD2(corners[2] - corners[0], corners[3] - corners[1]), v = SIMD2(corners[6] - corners[0], corners[7] - corners[1])
             let lengthU = hypot(u.x, u.y), lengthV = hypot(v.x, v.y)
             guard lengthU >= 0.0001 && lengthV >= 0.0001 else { return false }
@@ -1290,14 +1296,15 @@ struct PreviewMetalView: UIViewRepresentable {
             // Omega conteúdo (área 06, P0-6): "manter proporção" é a chave da barra da seção (salva no aparelho).
             shapeLinked = ContentPrefs.shared.lockAspect; shapeLastU = 0; shapeLastV = 0; shapeSent = false
             shell.grabbedShapeHandle = shapeHandle
-            beginEdit(shapeHandle == 8 ? "raio da forma" : "tamanho da forma"); return true
+            beginEdit(shapeHandle >= 8 ? "parâmetro da forma" : "tamanho da forma"); return true
         }
         private func stepShape(_ point: CGPoint, view: UIView) {
             guard let id = model.primarySelection else { return }
             let f = scaleFactor(view), dx = Float(point.x - stageDown.x) * f, dy = Float(point.y - stageDown.y) * f
             let du = (dx * shapeU.x + dy * shapeU.y) / shapeScale.x, dv = (dx * shapeV.x + dy * shapeV.y) / shapeScale.y
-            if shapeHandle == 8 {
-                _ = model.engine.editShape(id, param: 1, value: (shapeRadius + (du + dv) / 2).clamped(to: 0...(min(shapeWidth, shapeHeight) / 2)), continuing: false)
+            if shapeHandle >= 8 {
+                _ = model.engine.dragShapeParamHandle(id, param: shapeParam, x: shapeParamStart.x + du, y: shapeParamStart.y + dv, continuing: shapeSent)
+                shapeSent = true
             } else {
                 // Omega conteúdo (área 06, P0-6): a regra (a partir do centro ou da borda oposta,
                 // manter proporção) é do motor; vai o passo desde o último envio, em px da forma.
@@ -1488,22 +1495,43 @@ struct StageTouchPoint {
         guard model.panel == .shapeEdit, model.selection.count == 1, let row = model.selectedLayer else { return false }
         return row.kind == 5 && !model.isVectorLayer && !row.locked && Int64(row.startFrame) <= model.status.playhead && model.status.playhead < Int64(row.endFrame)
     }
-    static func handles(_ detail: [String: Any], corners c: [CGPoint]) -> [CGPoint] {
+    /// 0.5.0: alça de parâmetro da silhueta. Onde fica e o que o arrasto muda é do motor.
+    struct ParamHandle { var x: Float; var y: Float; var param: UInt32; var style: Int; var pushX: Float; var pushY: Float }
+    static func paramHandles(_ model: AureaModel) -> [ParamHandle] {
+        guard let id = model.primarySelection else { return [] }
+        let raw = model.engine.shapeParamHandles(id).map(\.floatValue)
+        return stride(from: 0, to: raw.count - raw.count % 6, by: 6).map {
+            ParamHandle(x: raw[$0], y: raw[$0 + 1], param: UInt32(raw[$0 + 2]), style: Int(raw[$0 + 3]), pushX: raw[$0 + 4], pushY: raw[$0 + 5])
+        }
+    }
+    /// Índices: 0 TL, 1 TR, 2 BR, 3 BL, 4 cima, 5 direita, 6 baixo, 7 esquerda; de 8 em diante, `params`.
+    static func handles(_ detail: [String: Any], corners c: [CGPoint], params: [ParamHandle]) -> [CGPoint] {
         guard c.count == 4 else { return [] }
         var result = c
         for i in 0..<4 { let j = (i + 1) % 4; result.append(CGPoint(x: (c[i].x + c[j].x) / 2, y: (c[i].y + c[j].y) / 2)) }
-        let shape = StageGeom.floats(detail["shape"]), w = CGFloat(StageGeom.width(detail)), h = CGFloat(StageGeom.height(detail))
-        let type = (detail["shapeTypePoints"] as? NSNumber)?.uint32Value ?? 0
-        if type & 0xFFFF == 0 && w > 0 && h > 0 {
-            let rho = min(CGFloat(shape.count > 4 ? shape[4] : 0), min(w, h) / 2)
-            let ux = (c[1].x - c[0].x) / w, uy = (c[1].y - c[0].y) / w
-            let vx = (c[3].x - c[0].x) / h, vy = (c[3].y - c[0].y) / h
-            var px = (ux + vx) * rho, py = (uy + vy) * rho
-            if hypot(px, py) < 24 {
-                let dx = ux + vx, dy = uy + vy, length = hypot(dx, dy)
-                if length > 0.000001 { px = dx / length * 24; py = dy / length * 24 }
+        let w = CGFloat(StageGeom.width(detail)), h = CGFloat(StageGeom.height(detail))
+        guard w > 0 && h > 0 else { return result }
+        let sizeHandles = result
+        let ux = (c[1].x - c[0].x) / w, uy = (c[1].y - c[0].y) / w
+        let vx = (c[3].x - c[0].x) / h, vy = (c[3].y - c[0].y) / h
+        let minDistance: CGFloat = 24
+        for handle in params {
+            let sx = CGFloat(handle.x) + w / 2, sy = CGFloat(handle.y) + h / 2
+            var px = c[0].x + ux * sx + vx * sy, py = c[0].y + uy * sx + vy * sy
+            // Só o desenho se afasta das alças de tamanho; o arrasto parte da posição real.
+            let pushX = ux * CGFloat(handle.pushX) + vx * CGFloat(handle.pushY)
+            let pushY = uy * CGFloat(handle.pushX) + vy * CGFloat(handle.pushY)
+            let pushLength = hypot(pushX, pushY)
+            if pushLength > 0.000001 {
+                for size in sizeHandles {
+                    let gap = hypot(px - size.x, py - size.y)
+                    if gap < minDistance {
+                        px += pushX / pushLength * (minDistance - gap)
+                        py += pushY / pushLength * (minDistance - gap)
+                    }
+                }
             }
-            result.append(CGPoint(x: c[0].x + px, y: c[0].y + py))
+            result.append(CGPoint(x: px, y: py))
         }
         return result
     }
@@ -1581,15 +1609,20 @@ enum LayerResizeGeometry {
             OmegaTransformStage.draw(&context, model: model, width: Float(cw), height: Float(ch), screen: screen)
             guard ShapeStageGeometry.enabled(model) else { return }
             var data: [Float] = []; guard StageGeom.corners(model.detail, &data) else { return }
-            let points = ShapeStageGeometry.handles(model.detail, corners: stride(from: 0, to: 8, by: 2).map { screen(data[$0], data[$0 + 1]) })
+            let params = ShapeStageGeometry.paramHandles(model)
+            let points = ShapeStageGeometry.handles(model.detail, corners: stride(from: 0, to: 8, by: 2).map { screen(data[$0], data[$0 + 1]) }, params: params)
             func disk(_ point: CGPoint, _ radius: CGFloat) -> Path { Path(ellipseIn: CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2)) }
             for i in points.indices {
                 let selected = shell.grabbedShapeHandle == i
-                let radius: CGFloat = i == 8 ? (selected ? 8 : 7) : selected ? 7 : i < 4 ? 6 : 5
+                let parameter = i >= 8
+                let radius: CGFloat = parameter ? (selected ? 8 : 7) : selected ? 7 : i < 4 ? 6 : 5
                 context.fill(disk(points[i], radius + 1.5), with: .color(StageInk.outlineUnder))
-                context.fill(disk(points[i], radius), with: .color(i == 8 ? AureaColors.accent : .white))
-                if i == 8 { context.fill(disk(points[i], radius * 0.35), with: .color(.white)) }
-                else { context.stroke(disk(points[i], radius), with: .color(AureaColors.accent), lineWidth: 1.5) }
+                context.fill(disk(points[i], radius), with: .color(parameter ? AureaColors.accent : .white))
+                if parameter {
+                    // Ângulo: anel branco; os outros, ponto branco.
+                    if i - 8 < params.count, params[i - 8].style == 1 { context.stroke(disk(points[i], radius * 0.55), with: .color(.white), lineWidth: 1.5) }
+                    else { context.fill(disk(points[i], radius * 0.35), with: .color(.white)) }
+                } else { context.stroke(disk(points[i], radius), with: .color(AureaColors.accent), lineWidth: 1.5) }
             }
         }
         // Omega aparência (P1-1/P1-4): mira e lupa do conta-gotas, alças das pontas do degradê.

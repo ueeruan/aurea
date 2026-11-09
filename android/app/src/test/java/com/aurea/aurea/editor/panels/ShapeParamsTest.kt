@@ -35,7 +35,8 @@ class ShapeParamsTest {
 
     @Test fun everyEngineShapeTypeIsInTheSwitcherOnce() {
         // 2 (caminho livre) e 11 (vetorial) não são formas SDF.
-        val expected = (0..24).filter { it != 2 && it != 11 }
+        // 25 lua e 26 gota (0.5.0) = shape::kLastSdfType.
+        val expected = (0..26).filter { it != 2 && it != 11 }
         assertEquals(expected, SimpleShapes.toList())
     }
 

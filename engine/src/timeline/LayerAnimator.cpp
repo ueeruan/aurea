@@ -54,6 +54,8 @@ struct Frame {
     f32 strength, delay;
     f32 op, px, py, sx, sy, rz, rx, ry, trk;
     f32 wx, wy, ws, wr, wspeed, whold;
+    f32 vx, vy, vfx, vfy, vr, vfr, vs, vfs, vlo, vhi, vfo, vphase;   ///< onda
+    bool wave;
 };
 
 Frame frame_of(const TrackSet& tracks, u32 ai, const LayerAnimator& a, f64 local) noexcept {
@@ -66,12 +68,18 @@ Frame frame_of(const TrackSet& tracks, u32 ai, const LayerAnimator& a, f64 local
     f.rz = P(kFromRotation); f.rx = P(kFromRotX); f.ry = P(kFromRotY); f.trk = P(kFromTracking);
     f.wx = P(kWigglePosX); f.wy = P(kWigglePosY); f.ws = P(kWiggleScale); f.wr = P(kWiggleRotation);
     f.wspeed = P(kWiggleSpeed); f.whold = P(kWiggleHold) / 100.0f;
+    f.vx = P(kWavePosX); f.vy = P(kWavePosY); f.vfx = P(kWaveFreqX); f.vfy = P(kWaveFreqY);
+    f.vr = P(kWaveRotation); f.vfr = P(kWaveRotFreq); f.vs = P(kWaveScale); f.vfs = P(kWaveScaleFreq);
+    f.vlo = P(kWaveOpacityLow) / 100.0f; f.vhi = P(kWaveOpacityHigh) / 100.0f; f.vfo = P(kWaveOpacityFreq);
+    f.vphase = P(kWavePhase);
+    f.wave = f.vx != 0.0f || f.vy != 0.0f || f.vr != 0.0f || f.vs != 0.0f || f.vlo != 1.0f || f.vhi != 1.0f;
     return f;
 }
 
 /// Soma de um animador numa unidade (índice já na ordem de entrada).
 struct Accum {
     f32 op = 0, px = 0, py = 0, sx = 0, sy = 0, rz = 0, rx = 0, ry = 0, trk = 0;
+    f32 opMul = 1;   ///< pulso da onda: multiplica a opacidade (como o float.sine.mult do Alight)
 };
 
 /// Loop (vai e volta): o relógio da unidade dobra dentro do trecho dos
@@ -90,6 +98,18 @@ void add_unit(const TrackSet& tracks, u32 ai, const LayerAnimator& a, const Fram
               u32 noiseUnit, Accum& s) noexcept {
     const f64 delayFrames = static_cast<f64>(f.delay) * 0.001 * fps;
     f64 t = local - static_cast<f64>(order) * delayFrames;
+    if (f.wave && std::isfinite(t)) {
+        // Onda: relógio da unidade em segundos (sem o vai e volta do loop, que
+        // é do progresso). Fase em graus = fração do ciclo.
+        const f64 sec = t / (fps > 0.0 ? fps : 30.0);
+        const f64 ph = static_cast<f64>(f.vphase) / 360.0;
+        auto W = [&](f32 hz) { return wave_value(a.waveShape, sec * static_cast<f64>(hz) + ph); };
+        if (f.vx != 0.0f) s.px += f.vx * W(f.vfx);
+        if (f.vy != 0.0f) s.py += f.vy * W(f.vfy);
+        if (f.vr != 0.0f) s.rz += f.vr * W(f.vfr);
+        if (f.vs != 0.0f) { const f32 n = f.vs * W(f.vfs); s.sx += n; s.sy += n; }
+        if (f.vlo != 1.0f || f.vhi != 1.0f) s.opMul *= f.vlo + (f.vhi - f.vlo) * (W(f.vfo) + 1.0f) * 0.5f;
+    }
     if (a.loop) t = loop_time(tracks, ai, t);
     const f32 p = clamp_param(kProgress, param_at(tracks, ai, kProgress, t, a.progress)) / 100.0f;
     const f32 w = f.strength * (1.0f - shape(a.ease, p));
@@ -134,6 +154,18 @@ f32* param_ref(LayerAnimator& a, u32 p) noexcept {
         case kWiggleRotation: return &a.wiggleRotation;
         case kWiggleSpeed: return &a.wiggleSpeed;
         case kWiggleHold: return &a.wiggleHold;
+        case kWavePosX: return &a.wavePosX;
+        case kWavePosY: return &a.wavePosY;
+        case kWaveFreqX: return &a.waveFreqX;
+        case kWaveFreqY: return &a.waveFreqY;
+        case kWaveRotation: return &a.waveRotation;
+        case kWaveRotFreq: return &a.waveRotFreq;
+        case kWaveScale: return &a.waveScale;
+        case kWaveScaleFreq: return &a.waveScaleFreq;
+        case kWaveOpacityLow: return &a.waveOpacityLow;
+        case kWaveOpacityHigh: return &a.waveOpacityHigh;
+        case kWaveOpacityFreq: return &a.waveOpacityFreq;
+        case kWavePhase: return &a.wavePhase;
         default: return nullptr;
     }
 }
@@ -146,12 +178,17 @@ f32 param_static(const LayerAnimator& a, u32 p) noexcept {
 f32 clamp_param(u32 p, f32 v) noexcept {
     if (!std::isfinite(v)) v = 0.0f;
     switch (p) {
-        case kProgress: case kStrength: case kFromOpacity: case kWiggleHold: return std::clamp(v, 0.0f, 100.0f);
+        case kProgress: case kStrength: case kFromOpacity: case kWiggleHold:
+        case kWaveOpacityLow: case kWaveOpacityHigh: return std::clamp(v, 0.0f, 100.0f);
         case kDelay: return std::clamp(v, 0.0f, 10000.0f);
         case kFromScale: case kFromScaleY: return std::clamp(v, 0.0f, 5000.0f);
         case kWiggleSpeed: return std::clamp(v, 0.0f, 60.0f);
+        case kWaveFreqX: case kWaveFreqY: case kWaveRotFreq: case kWaveScaleFreq: case kWaveOpacityFreq:
+            return std::clamp(v, 0.0f, 60.0f);
         case kWiggleScale: return std::clamp(v, 0.0f, 1000.0f);
-        case kFromRotation: case kFromRotX: case kFromRotY: case kWiggleRotation: return std::clamp(v, -3600.0f, 3600.0f);
+        case kWaveScale: return std::clamp(v, -1000.0f, 1000.0f);
+        case kFromRotation: case kFromRotX: case kFromRotY: case kWiggleRotation: case kWaveRotation: case kWavePhase:
+            return std::clamp(v, -3600.0f, 3600.0f);
         default: return std::clamp(v, -20000.0f, 20000.0f);
     }
 }
@@ -160,6 +197,19 @@ f32 param_at(const TrackSet& tracks, u32 animator, u32 param, f64 local, f32 fal
     const Track* tr = tracks.find(TrackProperty::LayerAnimParam, animator, param);
     if (!tr || !tr->driven() || !std::isfinite(local)) return fallback;
     return tr->value_or_f(local, fallback);
+}
+
+f32 wave_value(u8 shape, f64 cycles) noexcept {
+    if (!std::isfinite(cycles)) return 0.0f;
+    if (shape == 1) {
+        // Triângulo de período 1 em fase com o seno: 0 → 1 (¼) → 0 (½) → −1 (¾).
+        const f64 x = cycles + 0.75;
+        const f64 m = x - std::floor(x);
+        return static_cast<f32>((std::fabs(m - 0.5) - 0.25) * 4.0);
+    }
+    constexpr f64 kTwoPi = 6.283185307179586476925286766559;
+    const f64 frac = cycles - std::floor(cycles);   // precisão em tempos longos
+    return static_cast<f32>(std::sin(frac * kTwoPi));
 }
 
 f32 wiggle_noise(u32 seed, u32 unit, u32 channel, f64 t, f32 hold) noexcept {
@@ -207,7 +257,7 @@ Offset whole_offset(const Layer& l, f64 local, f64 fps) noexcept {
     o.translate = Vec3{s.px, s.py, 0.0f};
     o.rotation = Vec3{s.rx, s.ry, s.rz};
     o.scale = Vec2{std::max(0.0f, 1.0f + s.sx / 100.0f), std::max(0.0f, 1.0f + s.sy / 100.0f)};
-    o.opacity = std::clamp(1.0f + s.op / 100.0f, 0.0f, 1.0f);
+    o.opacity = std::clamp(1.0f + s.op / 100.0f, 0.0f, 1.0f) * std::clamp(s.opMul, 0.0f, 1.0f);
     return o;
 }
 
@@ -238,7 +288,7 @@ void apply_to_glyphs(const Layer& l, f64 local, f64 fps, const std::vector<text:
         o.rotation = o.rotation + Vec3{s.rx, s.ry, s.rz};
         o.scale.x *= std::max(0.0f, 1.0f + s.sx / 100.0f);
         o.scale.y *= std::max(0.0f, 1.0f + s.sy / 100.0f);
-        o.opacity *= std::clamp(1.0f + s.op / 100.0f, 0.0f, 1.0f);
+        o.opacity *= std::clamp(1.0f + s.op / 100.0f, 0.0f, 1.0f) * std::clamp(s.opMul, 0.0f, 1.0f);
         // Tracking: cada glifo empurra os seguintes da mesma linha.
         const u32 li = std::min<u32>(units[g].lineIndex, static_cast<u32>(lineRun.size() - 1));
         shift[g] = lineRun[li];
@@ -270,10 +320,13 @@ f32 glyph_padding(const Layer& l, f32 textSize, usize glyphs) noexcept {
         if (!a.enabled || a.unit == 0) continue;
         extra += std::max(maxAbs(ai, kFromPosX, a.fromPosX), maxAbs(ai, kFromPosY, a.fromPosY));
         extra += std::max(maxAbs(ai, kWigglePosX, a.wigglePosX), maxAbs(ai, kWigglePosY, a.wigglePosY));
-        const f32 sc = std::max({maxAbs(ai, kFromScale, a.fromScale), maxAbs(ai, kFromScaleY, a.fromScaleY)}) + maxAbs(ai, kWiggleScale, a.wiggleScale);
+        extra += std::max(maxAbs(ai, kWavePosX, a.wavePosX), maxAbs(ai, kWavePosY, a.wavePosY));
+        const f32 sc = std::max({maxAbs(ai, kFromScale, a.fromScale), maxAbs(ai, kFromScaleY, a.fromScaleY)})
+            + maxAbs(ai, kWiggleScale, a.wiggleScale) + maxAbs(ai, kWaveScale, a.waveScale);
         extra += textSize * std::max(0.0f, sc / 100.0f - 1.0f);
-        if (a.fromRotation != 0.0f || a.fromRotX != 0.0f || a.fromRotY != 0.0f || a.wiggleRotation != 0.0f
-            || l.tracks.find(TrackProperty::LayerAnimParam, ai, kFromRotation)) extra += textSize * 0.5f;
+        if (a.fromRotation != 0.0f || a.fromRotX != 0.0f || a.fromRotY != 0.0f || a.wiggleRotation != 0.0f || a.waveRotation != 0.0f
+            || l.tracks.find(TrackProperty::LayerAnimParam, ai, kFromRotation)
+            || l.tracks.find(TrackProperty::LayerAnimParam, ai, kWaveRotation)) extra += textSize * 0.5f;
         extra += maxAbs(ai, kFromTracking, a.fromTracking) * static_cast<f32>(std::min<usize>(glyphs, 200));
     }
     return std::min(extra, 4000.0f);

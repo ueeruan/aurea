@@ -147,3 +147,81 @@ AUREA_TEST(OmegaOutline, OneUndoAndRefusals) {
     AUREA_CHECK(!r.e.convert_shape_to_outline(id));
     AUREA_CHECK_EQ(r.L(id)->shape.shapeType, type);
 }
+
+// =============================================================================
+// 0.5.0: contorno exato. O número de pontos depende só da forma e dos
+// parâmetros, nunca do tamanho: o que o morph ponto a ponto precisa.
+// =============================================================================
+namespace {
+struct ExactCase { u32 type; u32 paths; u32 points; };   // points 0 = não fixo no teste
+const ExactCase kExact[] = {
+    {shape::kPolygon, 1, 6},        {shape::kStar, 1, 12},        {shape::kCross, 1, 12},       {shape::kRing, 2, 16},
+    {shape::kPie, 1, 0},            {shape::kArc, 1, 0},          {shape::kFlower, 1, 24},      {shape::kArrow, 1, 7},
+    {shape::kRightTriangle, 1, 3},  {shape::kTrapezoid, 1, 4},    {shape::kParallelogram, 1, 4},{shape::kGear, 2, 0},
+    {shape::kDoubleArrow, 1, 10},   {shape::kLine, 1, 0},         {shape::kDiamond, 1, 4},      {shape::kHeart, 1, 0},
+    {shape::kSeal, 1, 0},           {shape::kBubble, 1, 0},       {shape::kBolt, 1, 7},         {shape::kWave, 1, 0},
+    {shape::kBlob, 1, 0},           {shape::kMoon, 1, 0},         {shape::kTeardrop, 1, 0},
+};
+ShapeData configure(u32 type, Vec2 box) {
+    ShapeData sh;
+    sh.shapeType = type;
+    sh.bounds = Rect{0.0f, 0.0f, box.x, box.y};
+    sh.points = 6.f; sh.innerRadius = .45f; sh.cornerRadius = 8.f;
+    sh.strokeWidth = 0.f;
+    sh.fillColor = Vec4{.9f, .2f, .1f, 1.f};
+    sh.fillKind = 0;
+    // A onda precisa ser suave para a borda não dobrar sobre si (aí é traçado).
+    if (type == shape::kWave) { sh.points = 2.f; sh.thickness = .02f; sh.amplitude = .1f; }
+    return sh;
+}
+u32 vertex_total(const ShapeData& vec) {
+    u32 n = 0;
+    for (const auto& p : vec.vector.groups[0].paths) n += static_cast<u32>(p.path.v.size());
+    return n;
+}
+} // namespace
+
+AUREA_TEST(OmegaOutline, ExactCurvesMatchTheSilhouetteAndNeverDependOnSize) {
+    OutlineRig r;
+    for (const ExactCase& c : kExact) {
+        u32 reference = 0;
+        bool first = true;
+        for (const Vec2 box : {Vec2{200.f, 200.f}, Vec2{320.f, 180.f}, Vec2{140.f, 300.f}, Vec2{60.f, 60.f}}) {
+            const u64 id = r.shape(10);
+            Layer* l = r.L(id);
+            l->shape = configure(c.type, box);
+            const ShapeData before = l->shape;
+            AUREA_CHECK(r.e.convert_shape_to_outline(id));
+            const ShapeData& after = r.L(id)->shape;
+            AUREA_CHECK_EQ(after.vector.groups[0].paths.size(), static_cast<usize>(c.paths));
+            const u32 total = vertex_total(after);
+            if (first) { reference = total; first = false; }
+            const f32 miss = mismatch(before, after);
+            // A gota vira círculo quando a ponta cabe dentro da base (caixa baixa).
+            if (c.type != shape::kTeardrop) AUREA_CHECK_MSG(total == reference, "o numero de pontos mudou com o tamanho");
+            if (c.points) AUREA_CHECK_EQ(total, c.points);
+            AUREA_CHECK_MSG(total <= 120u, "pontos demais para editar");
+            // A fita fina da onda tem pouca área: a borda de 1 px já pesa na conta.
+            const f32 allowed = box.x < 100.f ? 0.06f : c.type == shape::kWave ? 0.03f : 0.015f;
+            AUREA_CHECK_MSG(miss < allowed, "silhueta diferente da forma viva");
+        }
+    }
+}
+
+AUREA_TEST(OmegaOutline, TopologyChangesFallBackToTheTrace) {
+    OutlineRig r;
+    // Flor acima de 0,5: as pétalas se soltam; ainda precisa converter igual.
+    const u64 id = r.shape(10);
+    Layer* l = r.L(id);
+    l->shape = configure(shape::kFlower, Vec2{200.f, 200.f});
+    l->shape.depth = .7f;
+    const ShapeData before = l->shape;
+    AUREA_CHECK(r.e.convert_shape_to_outline(id));
+    AUREA_CHECK(mismatch(before, r.L(id)->shape) < 0.04f);
+    // Pontas fracionárias no meio de uma animação também.
+    const u64 star = r.shape(10);
+    Layer* s = r.L(star);
+    s->shape = configure(shape::kStar, Vec2{200.f, 200.f});
+    s->shape.points = 5.5f;
+    AUREA_CHECK(r.e.convert_shape_to_outline(star));
+}

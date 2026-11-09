@@ -7,6 +7,8 @@
 #include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/tracking/CameraTrackData.hpp"
 #include "aurea/tracking/MotionTrackData.hpp"
+#include "aurea/timeline/LayerAnimator.hpp"
+#include "aurea/text/TextAnimator.hpp"
 #include <cmath>
 #include <limits>
 
@@ -1070,6 +1072,44 @@ void write_layer(ByteWriter& w, const Layer& l) {
         w.vec4(b.fill); w.vec4(b.stroke); w.f32v(b.strokeFrac);
         w.boolv(b.box); w.vec4(b.boxColor); w.boolv(b.shadow);
     }
+    // v57 (0.5.0): onda dos animadores de camada, na ordem dos animadores.
+    w.u32v(static_cast<u32>(l.layerAnimators.size()));
+    for (const LayerAnimator& a : l.layerAnimators) {
+        w.u8v(a.waveShape);
+        for (f32 v : {a.wavePosX, a.wavePosY, a.waveFreqX, a.waveFreqY, a.waveRotation, a.waveRotFreq, a.waveScale,
+                      a.waveScaleFreq, a.waveOpacityLow, a.waveOpacityHigh, a.waveOpacityFreq, a.wavePhase})
+            w.f32v(v);
+    }
+    // v59 (0.5.0): animador universal (o bloco v14 segue com os campos antigos).
+    const auto write_selector = [&w](const TextSelector& s) {
+        w.boolv(s.enabled); w.u32v(s.mode); w.u32v(s.units); w.boolv(s.lockDimensions);
+        for (const f32 v : {s.smoothness, s.wiggleMin, s.wiggleMax, s.correlation, s.temporalPhase, s.spatialPhase,
+                            s.exprAmount.x, s.exprAmount.y, s.exprAmount.z, s.overlap}) w.f32v(v);
+    };
+    w.u32v(static_cast<u32>(l.text.animators.size()));
+    for (const TextAnimator& a : l.text.animators) {
+        write_selector(a.selector);
+        w.u32v(static_cast<u32>(a.moreSelectors.size()));
+        for (const TextSelector& s : a.moreSelectors) {
+            w.u32v(s.basedOn); w.u32v(s.type); w.u32v(s.shape); w.boolv(s.randomOrder); w.u32v(s.seed);
+            for (const f32 v : {s.start, s.end, s.offset, s.amount, s.easeHigh, s.easeLow, s.wiggleRate}) w.f32v(v);
+            write_selector(s);
+        }
+        w.u32v(a.rig); w.u32v(a.rigAnchor); w.u32v(a.anchorGrouping); w.u32v(a.cursor); w.boolv(a.cursorBlink); w.u32v(a.charset); w.boolv(a.preserveSpace);
+        for (const f32 v : {a.groupAlign.x, a.groupAlign.y, a.anchor.x, a.anchor.y, a.lineSpacing.x, a.lineSpacing.y, a.fillHue, a.fillSaturation,
+                            a.fillBrightness, a.fillOpacity, a.randAmount, a.randEvolution, a.randSeed, a.letterSpacing, a.lineSpacingEm}) w.f32v(v);
+    }
+    // v60 (0.5.0): modelo de cada animador.
+    for (const TextAnimator& a : l.text.animators) w.u32v(a.aeModel);
+    // v58 (0.5.0): keyframe por ponto das máscaras.
+    w.u32v(static_cast<u32>(l.masks.size()));
+    for (const Mask& m : l.masks) {
+        w.u32v(static_cast<u32>(m.pathKeys.size()));
+        for (const MaskPathKey& k : m.pathKeys) {
+            w.u32v(static_cast<u32>(k.pointMask.size()));
+            for (const u8 on : k.pointMask) w.boolv(on != 0);
+        }
+    }
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
@@ -1833,6 +1873,60 @@ void read_layer(ByteReader& r, Layer& l) {
             b.box = r.boolv(); b.boxColor = color(r.vec4()); b.shadow = r.boolv();
             if (b.style >= text::kCaptionStyleCount || b.fontFamily.size() > 1024 || b.fontPath.size() > 4096) { r.fail(); return; }
             segment.look = std::move(b);
+        }
+    }
+    // v57 (0.5.0): onda dos animadores. Antes dela: sem onda (os padrões).
+    if (g_readingTimelineVersion >= 57) {
+        if (r.u32v() != l.layerAnimators.size()) { r.fail(); return; }
+        for (LayerAnimator& a : l.layerAnimators) {
+            a.waveShape = std::min<u8>(r.u8v(), 1);
+            u32 p = layeranim::kFirstWaveParam;
+            for (f32* v : {&a.wavePosX, &a.wavePosY, &a.waveFreqX, &a.waveFreqY, &a.waveRotation, &a.waveRotFreq, &a.waveScale,
+                           &a.waveScaleFreq, &a.waveOpacityLow, &a.waveOpacityHigh, &a.waveOpacityFreq, &a.wavePhase})
+                *v = layeranim::clamp_param(p++, r.f32v());
+        }
+    }
+    // v59 (0.5.0): animador universal.
+    if (g_readingTimelineVersion >= 59) {
+        const auto read_selector = [&r](TextSelector& s) {
+            s.enabled = r.boolv(); s.mode = static_cast<u8>(r.u32v()); s.units = static_cast<u8>(r.u32v()); s.lockDimensions = r.boolv();
+            for (f32* v : {&s.smoothness, &s.wiggleMin, &s.wiggleMax, &s.correlation, &s.temporalPhase, &s.spatialPhase,
+                           &s.exprAmount.x, &s.exprAmount.y, &s.exprAmount.z, &s.overlap}) *v = r.f32v();
+        };
+        if (r.u32v() != l.text.animators.size()) { r.fail(); return; }
+        for (TextAnimator& a : l.text.animators) {
+            read_selector(a.selector);
+            const u32 more = r.u32v();
+            if (more >= text::kMaxTextSelectors) { r.fail(); return; }
+            a.moreSelectors.resize(more);
+            for (TextSelector& s : a.moreSelectors) {
+                s.basedOn = static_cast<u8>(r.u32v()); s.type = static_cast<u8>(r.u32v()); s.shape = static_cast<u8>(r.u32v());
+                s.randomOrder = r.boolv(); s.seed = r.u32v();
+                for (f32* v : {&s.start, &s.end, &s.offset, &s.amount, &s.easeHigh, &s.easeLow, &s.wiggleRate}) *v = r.f32v();
+                read_selector(s);
+            }
+            a.rig = static_cast<u8>(r.u32v()); a.rigAnchor = static_cast<u8>(r.u32v()); a.anchorGrouping = static_cast<u8>(r.u32v());
+            a.cursor = static_cast<u8>(r.u32v()); a.cursorBlink = r.boolv(); a.charset = static_cast<u8>(r.u32v()); a.preserveSpace = r.boolv();
+            for (f32* v : {&a.groupAlign.x, &a.groupAlign.y, &a.anchor.x, &a.anchor.y, &a.lineSpacing.x, &a.lineSpacing.y, &a.fillHue, &a.fillSaturation,
+                           &a.fillBrightness, &a.fillOpacity, &a.randAmount, &a.randEvolution, &a.randSeed, &a.letterSpacing, &a.lineSpacingEm}) *v = r.f32v();
+        }
+    }
+    // v60 (0.5.0): o que foi gravado antes continua com a matemática de quando foi feito.
+    for (TextAnimator& a : l.text.animators) a.aeModel = g_readingTimelineVersion >= 60 ? static_cast<u8>(r.u32v() != 0 ? 1 : 0) : 0;
+    // Efeitos antigos de texto viram animadores (projetos até v58 e colagens).
+    text::migrate_text_effects(l);
+    // v58 (0.5.0): keyframe por ponto das máscaras.
+    if (g_readingTimelineVersion >= 58) {
+        if (r.u32v() != l.masks.size()) { r.fail(); return; }
+        for (Mask& m : l.masks) {
+            if (r.u32v() != m.pathKeys.size()) { r.fail(); return; }
+            for (MaskPathKey& k : m.pathKeys) {
+                const u32 n = r.u32v();
+                if (n > 100000u) { r.fail(); return; }
+                k.pointMask.resize(n);
+                for (u8& on : k.pointMask) on = r.boolv() ? 1 : 0;
+                if (n != k.points.size()) k.pointMask.clear();
+            }
         }
     }
     // Um bloco de legenda fora da regra (ordem, palavra vazia, id repetido) perdia o

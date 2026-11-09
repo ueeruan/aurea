@@ -39,8 +39,19 @@ enum Param : u32 {
     kProgress = 0, kStrength, kDelay,
     kFromOpacity, kFromPosX, kFromPosY, kFromScale, kFromScaleY, kFromRotation, kFromRotX, kFromRotY, kFromTracking,
     kWigglePosX, kWigglePosY, kWiggleScale, kWiggleRotation, kWiggleSpeed, kWiggleHold,
+    // 0.5.0: onda (Alight Motion "animador automático", unidades do AE).
+    kWavePosX, kWavePosY, kWaveFreqX, kWaveFreqY, kWaveRotation, kWaveRotFreq,
+    kWaveScale, kWaveScaleFreq, kWaveOpacityLow, kWaveOpacityHigh, kWaveOpacityFreq, kWavePhase,
     kParamCount,
 };
+/// Os 18 primeiros (até o wiggle) ocupam os floats 6..23 da consulta; os da
+/// onda vêm em 32..43 (Engine::kLayerAnimFloats).
+inline constexpr u32 kFirstWaveParam = kWavePosX;
+static_assert(kFirstWaveParam == 18 && kParamCount == 30, "índices gravados nas trilhas LayerAnimParam");
+
+/// Forma da onda no instante `cycles` (ciclos; 1 = um período): −1..1.
+/// 0 seno; 1 triângulo (mesma fase do seno: sobe de 0 a 1 no primeiro quarto).
+[[nodiscard]] f32 wave_value(u8 shape, f64 cycles) noexcept;
 
 /// Campo parado do parâmetro (nulo = parâmetro inexistente).
 [[nodiscard]] f32* param_ref(LayerAnimator& a, u32 param) noexcept;

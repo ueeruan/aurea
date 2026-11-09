@@ -747,3 +747,176 @@ AUREA_TEST(LayerAnim, ExpressionDrivesALayerAnimatorValue) {
     AUREA_CHECK_EQ(rows[0], prop);
     e.shutdown();
 }
+
+// =============================================================================
+// 0.5.0: ONDA — o "animador automático" do Alight Motion (float.sine,
+// float.sine.mult, v2d.sine, v2d.tri), com as unidades do After Effects
+// (Hz e graus). Referência: docs/parity/motion-alight-ae-0.5.0.md.
+// =============================================================================
+namespace {
+/// Camada de forma só com a onda (sem entrada: força 0).
+Layer shape_with_wave(LayerAnimator a) {
+    a.strength = 0.0f;
+    Layer l;
+    l.kind = LayerKind::Shape;
+    l.start = FrameIndex{0};
+    l.end = FrameIndex{600};
+    l.layerAnimators.push_back(a);
+    return l;
+}
+constexpr f64 kWavePi = 3.14159265358979323846;
+} // namespace
+
+AUREA_TEST(LayerAnim, WaveShapesMatchSineAndTriangleInHertz) {
+    // Seno: sin(2π·ciclos). Triângulo em fase com ele: 0 → 1 → 0 → −1 → 0.
+    for (f64 c : {0.0, 0.1, 0.25, 0.4, 0.5, 0.75, 0.9, 1.3, 1000.25})
+        AUREA_CHECK_NEAR(layeranim::wave_value(0, c), static_cast<f32>(std::sin(2.0 * kWavePi * c)), 1e-5f);
+    AUREA_CHECK_NEAR(layeranim::wave_value(1, 0.0), 0.0f, 1e-6f);
+    AUREA_CHECK_NEAR(layeranim::wave_value(1, 0.125), 0.5f, 1e-6f);
+    AUREA_CHECK_NEAR(layeranim::wave_value(1, 0.25), 1.0f, 1e-6f);
+    AUREA_CHECK_NEAR(layeranim::wave_value(1, 0.5), 0.0f, 1e-6f);
+    AUREA_CHECK_NEAR(layeranim::wave_value(1, 0.75), -1.0f, 1e-6f);
+    AUREA_CHECK_NEAR(layeranim::wave_value(1, 2.25), 1.0f, 1e-6f);
+    AUREA_CHECK_NEAR(layeranim::wave_value(0, std::nan("")), 0.0f, 0.0f);
+    // Mesmo resultado da expressão do AE: Math.sin(time·f·2π)·amp.
+    LayerAnimator a;
+    a.wavePosX = 40.0f; a.waveFreqX = 2.0f;     // 2 Hz
+    a.wavePosY = 10.0f; a.waveFreqY = 0.5f;
+    a.waveRotation = 15.0f; a.waveRotFreq = 1.0f;
+    const Layer l = shape_with_wave(a);
+    AUREA_CHECK(l.layerAnimators[0].has_wave() && layeranim::has_whole(l));
+    for (f64 frame : {0.0, 3.0, 7.5, 11.0, 29.0, 61.0}) {
+        const f64 t = frame / 30.0;
+        const layeranim::Offset o = layeranim::whole_offset(l, frame, 30.0);
+        AUREA_CHECK_NEAR(o.translate.x, static_cast<f32>(40.0 * std::sin(t * 2.0 * 2.0 * kWavePi)), 1e-3f);
+        AUREA_CHECK_NEAR(o.translate.y, static_cast<f32>(10.0 * std::sin(t * 0.5 * 2.0 * kWavePi)), 1e-3f);
+        AUREA_CHECK_NEAR(o.rotation.z, static_cast<f32>(15.0 * std::sin(t * 1.0 * 2.0 * kWavePi)), 1e-3f);
+        AUREA_CHECK_NEAR(o.opacity, 1.0f, 0.0f);
+    }
+    // Fase de 90°: começa no pico (cosseno).
+    Layer p = l;
+    p.layerAnimators[0].wavePhase = 90.0f;
+    AUREA_CHECK_NEAR(layeranim::whole_offset(p, 0.0, 30.0).translate.x, 40.0f, 1e-3f);
+    // Triângulo a 1 Hz: no quarto de segundo, a amplitude cheia.
+    Layer tri = l;
+    tri.layerAnimators[0].waveShape = 1;
+    tri.layerAnimators[0].waveFreqX = 1.0f;
+    AUREA_CHECK_NEAR(layeranim::whole_offset(tri, 7.5, 30.0).translate.x, 40.0f, 1e-3f);
+    AUREA_CHECK_NEAR(layeranim::whole_offset(tri, 3.75, 30.0).translate.x, 20.0f, 1e-3f);
+}
+
+AUREA_TEST(LayerAnim, WavePulsesOpacityBetweenLowAndHighAndScales) {
+    // float.sine.mult: valor × (low + (high − low)·(sen + 1)/2).
+    LayerAnimator a;
+    a.waveOpacityLow = 20.0f; a.waveOpacityHigh = 80.0f; a.waveOpacityFreq = 1.0f;
+    a.waveScale = 10.0f; a.waveScaleFreq = 1.0f;
+    const Layer l = shape_with_wave(a);
+    AUREA_CHECK_NEAR(layeranim::whole_offset(l, 0.0, 30.0).opacity, 0.5f, 1e-5f);     // sen 0 → meio
+    AUREA_CHECK_NEAR(layeranim::whole_offset(l, 7.5, 30.0).opacity, 0.8f, 1e-5f);     // pico
+    AUREA_CHECK_NEAR(layeranim::whole_offset(l, 22.5, 30.0).opacity, 0.2f, 1e-5f);    // vale
+    AUREA_CHECK_NEAR(layeranim::whole_offset(l, 7.5, 30.0).scale.x, 1.1f, 1e-5f);
+    AUREA_CHECK_NEAR(layeranim::whole_offset(l, 22.5, 30.0).scale.y, 0.9f, 1e-5f);
+    // O pulso multiplica a entrada (não soma): entrada em 50 % × meio do pulso (t = 0,5 s → sen π = 0).
+    LayerAnimator in = a;
+    in.ease = 0; in.fromOpacity = 0.0f;
+    Layer both = shape_with_animator(in);
+    AUREA_CHECK_NEAR(layeranim::whole_offset(both, 15.0, 30.0).opacity, 0.5f * 0.5f, 1e-4f);
+    // Padrão (100/100, amplitudes 0): sem onda.
+    AUREA_CHECK(!LayerAnimator{}.has_wave());
+}
+
+AUREA_TEST(LayerAnim, WaveRunsThroughTextUnitsWithTheDelay) {
+    LayerAnimator a;
+    a.unit = 1;
+    a.delayMs = 250.0f;            // a 1 Hz: um quarto de ciclo por letra
+    a.wavePosY = 30.0f; a.waveFreqY = 1.0f;
+    Layer l = shape_with_wave(a);
+    l.kind = LayerKind::Text;
+    std::vector<text::GlyphUnits> units(4);
+    for (u32 i = 0; i < 4; ++i) units[i] = text::GlyphUnits{i, 0, 0};
+    std::vector<text::GlyphAnim> out(4);
+    layeranim::apply_to_glyphs(l, 30.0, 30.0, units, 4, 1, 1, 0.0f, out);   // 1 s
+    // Letra i: relógio 1 − 0,25·i s → seno de (1 − 0,25 i) ciclos.
+    for (u32 i = 0; i < 4; ++i)
+        AUREA_CHECK_NEAR(out[i].translate.y, static_cast<f32>(30.0 * std::sin(2.0 * kWavePi * (1.0 - 0.25 * i))), 1e-3f);
+    AUREA_CHECK(layeranim::glyph_padding(l, 40.0f, 4) >= 30.0f);
+}
+
+AUREA_TEST(LayerAnim, WaveApiKeyframesSlotsSaveLoadAndCopyPaste) {
+    static_assert(Engine::layer_anim_slot(17) == 23 && Engine::layer_anim_slot(18) == 32 && Engine::layer_anim_slot(29) == 43);
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_anim()).ok());
+    AUREA_CHECK(e.new_project(320, 180, 30.0, nullptr).ok());
+    const auto a = e.add_shape(10);
+    AUREA_CHECK(a.ok());
+    if (!a.ok()) return;
+    AUREA_CHECK_EQ(e.add_layer_animator(*a), 0);
+    std::vector<f32> v(Engine::kLayerAnimFloats * 32);
+    AUREA_CHECK_EQ(e.query_layer_animators(*a, v.data(), static_cast<u32>(v.size())), 1u);
+    // Padrões da onda nos novos lugares.
+    AUREA_CHECK_NEAR(v[Engine::layer_anim_slot(layeranim::kWaveFreqX)], 1.0f, 0.0f);
+    AUREA_CHECK_NEAR(v[Engine::layer_anim_slot(layeranim::kWaveOpacityLow)], 100.0f, 0.0f);
+    AUREA_CHECK_NEAR(v[31], 0.0f, 0.0f);
+    AUREA_CHECK_NEAR(v[44], 0.0f, 0.0f);
+    // Forma pelo set (com a marca da extensão) e valores com faixa.
+    v[31] = 1.0f;
+    AUREA_CHECK(e.set_layer_animator(*a, 0, v.data()));
+    AUREA_CHECK(e.set_layer_anim_param(*a, 0, layeranim::kWavePosY, 24.0f));
+    AUREA_CHECK(e.set_layer_anim_param(*a, 0, layeranim::kWaveFreqY, 999.0f));      // limite 60 Hz
+    AUREA_CHECK(e.set_layer_anim_param(*a, 0, layeranim::kWaveOpacityHigh, 150.0f)); // limite 100 %
+    AUREA_CHECK(e.set_layer_anim_param(*a, 0, layeranim::kWavePhase, 45.0f));
+    // Keyframe na amplitude X: bit 0 da onda (param 18) em 44/45.
+    AUREA_CHECK(e.toggle_layer_anim_key(*a, 0, layeranim::kWavePosX));
+    AUREA_CHECK_EQ(e.query_layer_animators(*a, v.data(), static_cast<u32>(v.size())), 1u);
+    AUREA_CHECK_NEAR(v[31], 1.0f, 0.0f);
+    AUREA_CHECK_NEAR(v[Engine::layer_anim_slot(layeranim::kWavePosY)], 24.0f, 0.0f);
+    AUREA_CHECK_NEAR(v[Engine::layer_anim_slot(layeranim::kWaveFreqY)], 60.0f, 0.0f);
+    AUREA_CHECK_NEAR(v[Engine::layer_anim_slot(layeranim::kWaveOpacityHigh)], 100.0f, 0.0f);
+    AUREA_CHECK_EQ(static_cast<u32>(v[44]), 1u);
+    AUREA_CHECK_EQ(static_cast<u32>(v[45]), 1u);
+    AUREA_CHECK_EQ(static_cast<u32>(v[24]) & (1u << 18), 0u);   // não vaza para os bits antigos
+    // Chamador antigo (sem a marca): não mexe na forma.
+    v[30] = 0.0f; v[31] = 0.0f;
+    AUREA_CHECK(e.set_layer_animator(*a, 0, v.data()));
+    AUREA_CHECK_EQ(layer(e, *a)->layerAnimators[0].waveShape, u8{1});
+    // Desfazer volta o valor anterior.
+    AUREA_CHECK(e.set_layer_anim_param(*a, 0, layeranim::kWaveRotation, 33.0f));
+    undo(e);
+    AUREA_CHECK_NEAR(layer(e, *a)->layerAnimators[0].waveRotation, 0.0f, 0.0f);
+    // Copiar/colar leva a onda e o keyframe.
+    const auto b = e.add_shape(10);
+    AUREA_CHECK(b.ok());
+    if (!b.ok()) return;
+    AUREA_CHECK_EQ(e.copy_layer_animators(*a), 1u);
+    const u64 dst[] = {*b};
+    AUREA_CHECK_EQ(e.paste_layer_animators(dst, 1), 1u);
+    AUREA_CHECK_EQ(layer(e, *b)->layerAnimators[0].waveShape, u8{1});
+    AUREA_CHECK_NEAR(layer(e, *b)->layerAnimators[0].wavePosY, 24.0f, 0.0f);
+    AUREA_CHECK(layer(e, *b)->tracks.find(TrackProperty::LayerAnimParam, 0, layeranim::kWavePosX) != nullptr);
+    // Gravar e abrir.
+    const std::string path = temp_file("aurea_layer_anim_wave.aurea");
+    AUREA_CHECK(e.save_project(path.c_str()).ok());
+    Project p;
+    LoadReport r;
+    AUREA_CHECK(ProjectSerializer::load(p, path, LoadOptions{}, &r).ok());
+    AUREA_CHECK_EQ(r.timelineVersion, kTimelineSectionVersion);
+    u32 seen = 0;
+    p.timeline().for_each_composition([&](CompositionId, const Composition& c) {
+        for (u32 i = 0; i < c.order().size(); ++i) {
+            const Layer* l = c.layer(c.order().at(i));
+            if (!l || l->layerAnimators.empty()) continue;
+            const LayerAnimator& x = l->layerAnimators[0];
+            AUREA_CHECK_EQ(x.waveShape, u8{1});
+            AUREA_CHECK_NEAR(x.wavePosY, 24.0f, 0.0f);
+            AUREA_CHECK_NEAR(x.waveFreqY, 60.0f, 0.0f);
+            AUREA_CHECK_NEAR(x.waveOpacityHigh, 100.0f, 0.0f);
+            AUREA_CHECK_NEAR(x.waveOpacityLow, 100.0f, 0.0f);
+            AUREA_CHECK_NEAR(x.wavePhase, 45.0f, 0.0f);
+            AUREA_CHECK(l->tracks.find(TrackProperty::LayerAnimParam, 0, layeranim::kWavePosX) != nullptr);
+            ++seen;
+        }
+    });
+    AUREA_CHECK_EQ(seen, 2u);
+    std::remove(path.c_str());
+    e.shutdown();
+}

@@ -30,16 +30,15 @@ struct TextAppearanceControls: View {
             // O rótulo em cima e os três botões do mesmo tamanho: com as abas à direita a linha
             // não comporta os dois lado a lado em nenhum idioma.
             Text(AureaText.t("panel_alinhamento")).font(.aurea(size: 13)).padding(.top, 8)
-            HStack(spacing: 6) {
-                ForEach(Array(["panel_esquerda", "panel_centro", "panel_direita"].enumerated()), id: \.offset) { n, key in
-                    NativePanelChip(AureaText.t(key), selected: Int(value("alignment")) == n, horizontal: 4, fill: true) { model.engine.setText(id, alignment: UInt32(n)); refresh() }
-                }
-            }.padding(.bottom, 8)
+            PanelItemGrid(items: [("panel_esquerda", ContentIconKind.alignLeft), ("panel_centro", ContentIconKind.alignCenter), ("panel_direita", ContentIconKind.alignRight)].enumerated().map { n, entry in
+                PanelItem(glyph: CupertinoGlyph.Textformat, label: AureaText.t(entry.0), tag: "text.align.\(n)", on: Int(value("alignment")) == n, contentIcon: entry.1) { model.engine.setText(id, alignment: UInt32(n)); refresh() }
+            }, columns: 3).padding(.top, 6).padding(.bottom, 8)
             }
             if page == -1 || page == 1 {
-            section("panel_contorno")
-            colorRow("panel_cor_contorno", values: components("strokeColor")) { color("strokeColor", "panel_cor_contorno") }
-            NativePanelRuler(label: AureaText.t("panel_largura_contorno"), value: value("strokeWidth"), step: 0.1, range: 0...60, unit: "px", keypad: true) { model.engine.setText(id, strokeWidth: $0); refresh() }
+            PanelSection(title: AureaText.t("panel_contorno"), glyph: CupertinoGlyph.Circle, tag: "text.sec.stroke") {
+                colorRow("panel_cor_contorno", values: components("strokeColor")) { color("strokeColor", "panel_cor_contorno") }
+                NativePanelRuler(label: AureaText.t("panel_largura_contorno"), value: value("strokeWidth"), step: 0.1, range: 0...60, unit: "px", keypad: true) { model.engine.setText(id, strokeWidth: $0); refresh() }
+            }
             }
             if style.count >= 20 {
                 if page == -1 || page == 2 { layoutSections }
@@ -53,38 +52,39 @@ struct TextAppearanceControls: View {
     }
     private var layoutSections: some View {
         VStack(alignment: .leading, spacing: 0) {
-            NativePanelRuler(label: AureaText.t("text_line_spacing"), value: style[18] * 100, step: 0.5, range: 10...1000, unit: "%", keypad: true) { set(18, $0 / 100) }
-            trackingRow
-            section("panel_caixa")
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(Array(["panel_livre", "panel_paragrafo", "panel_tamanho_fixo", "panel_encolher_caber"].enumerated()), id: \.offset) { n, key in
-                        NativePanelChip(AureaText.t(key), selected: Int(style[0]) == n) { set(0, Float(n)) }
-                    }
-                }.frame(height: 44)
+            PanelSection(title: AureaText.t("edt_prop_spacing"), glyph: CupertinoGlyph.ArrowLeftRight, tag: "text.sec.spacing") {
+                NativePanelRuler(label: AureaText.t("text_line_spacing"), value: style[18] * 100, step: 0.5, range: 10...1000, unit: "%", keypad: true) { set(18, $0 / 100) }
+                trackingRow
             }
-            if style[0] >= 1 {
-                styleRow("panel_largura_caixa", 1, 2, 10...20000)
-                if style[0] >= 2 { styleRow("panel_altura_caixa", 2, 2, 10...20000) }
+            PanelSection(title: AureaText.t("panel_caixa"), glyph: CupertinoGlyph.Square, tag: "text.sec.box") {
+                PanelItemGrid(items: [("panel_livre", CupertinoGlyph.Move), ("panel_paragrafo", CupertinoGlyph.LineHorizontal3), ("panel_tamanho_fixo", CupertinoGlyph.Square), ("panel_encolher_caber", CupertinoGlyph.FullscreenExit)].enumerated().map { n, entry in
+                    PanelItem(glyph: entry.1, label: AureaText.t(entry.0), tag: "text.box.\(n)", on: Int(style[0]) == n) { set(0, Float(n)) }
+                })
+                if style[0] >= 1 {
+                    styleRow("panel_largura_caixa", 1, 2, 10...20000)
+                    if style[0] >= 2 { styleRow("panel_altura_caixa", 2, 2, 10...20000) }
+                }
             }
         }
     }
     private var backdropSections: some View {
         VStack(alignment: .leading, spacing: 0) {
-            styleToggle("panel_fundo", enabled: 3, color: 4).padding(.top, 6)
-            if style[3] > 0.5 {
+            PanelSection(title: AureaText.t("panel_fundo"), glyph: CupertinoGlyph.Square, tag: "text.sec.backdrop", isOn: styleBinding(3)) {
+                styleColor("panel_cor", color: 4)
                 styleRow("panel_margem_fundo", 8, 0.2, 0...500)
                 styleRow("panel_cantos_arredondados", 9, 0.2, 0...500)
             }
-            styleToggle("panel_sombra", enabled: 10, color: 11)
-            if style[10] > 0.5 {
+            PanelSection(title: AureaText.t("panel_sombra"), glyph: CupertinoGlyph.CircleLefthalfFill, tag: "text.sec.shadow", isOn: styleBinding(10)) {
+                styleColor("panel_cor", color: 11)
                 styleRow("panel_distancia_x", 15, 0.2, -500...500)
                 styleRow("panel_distancia_y", 16, 0.2, -500...500)
                 styleRow("panel_desfoque", 17, 0.1, 0...200)
             }
         }
     }
-    private func section(_ key: String) -> some View { Text(AureaText.t(key)).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted).padding(.top, 6) }
+    private func styleBinding(_ slot: Int) -> Binding<Bool> {
+        Binding(get: { style.count > slot && style[slot] > 0.5 }, set: { set(slot, $0 ? 1 : 0) })
+    }
     /// O losango fica no rótulo, como no Alight: tocar nele escolhe a propriedade e o ◆ da coluna marca.
     private var trackingRow: some View {
         let track = TimelineTrack(property: 29)
@@ -98,22 +98,19 @@ struct TextAppearanceControls: View {
     private func styleRow(_ key: String, _ slot: Int, _ step: Float, _ range: ClosedRange<Float>) -> some View {
         NativePanelRuler(label: AureaText.t(key), value: style[slot], step: step, range: range, unit: "px", keypad: true) { set(slot, $0) }
     }
-    private func styleToggle(_ key: String, enabled: Int, color: Int) -> some View {
+    private func styleColor(_ key: String, color: Int) -> some View {
         HStack(spacing: 10) {
-            Text(AureaText.t(key)).font(.aurea(size: 13, weight: .bold)).frame(maxWidth: .infinity, alignment: .leading)
-            if style[enabled] > 0.5 {
-                NativePanelColorWell(values: Array(style[color..<(color + 4)])) {
-                    let layer = id
-                    model.beginGesture(AureaText.t(key))
-                    model.colorSheet = ColorSheetRequest(title: AureaText.t(key), initial: Array(style[color..<(color + 4)]), onChange: { r, g, b, a in
-                        var current = model.engine.textStyle(layer).map(\.floatValue)
-                        guard current.count >= 20 else { return }
-                        for (n, v) in [r, g, b, a].enumerated() { current[color + n] = v }
-                        _ = model.engine.setTextStyle(layer, values: current.map { NSNumber(value: $0) }); refresh()
-                    }, onDone: { model.endGesture() })
-                }
+            Text(AureaText.t(key)).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
+            NativePanelColorWell(values: Array(style[color..<(color + 4)])) {
+                let layer = id
+                model.beginGesture(AureaText.t(key))
+                model.colorSheet = ColorSheetRequest(title: AureaText.t(key), initial: Array(style[color..<(color + 4)]), onChange: { r, g, b, a in
+                    var current = model.engine.textStyle(layer).map(\.floatValue)
+                    guard current.count >= 20 else { return }
+                    for (n, v) in [r, g, b, a].enumerated() { current[color + n] = v }
+                    _ = model.engine.setTextStyle(layer, values: current.map { NSNumber(value: $0) }); refresh()
+                }, onDone: { model.endGesture() })
             }
-            AureaToggle(checked: style[enabled] > 0.5) { set(enabled, $0 ? 1 : 0) }
         }.frame(height: 44)
     }
     private func colorRow(_ key: String, values: [Float], action: @escaping () -> Void) -> some View {
@@ -152,30 +149,20 @@ private struct NativeTextDynamicSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if values.count >= 6 {
-                NativePanelToggle(AureaText.t("text_dynamic"), checked: values[0] > 0.5) { set(0, $0 ? 1 : 0) }.padding(.top, 6)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach([("{#}", "text_token_counter"), ("{tc}", "text_token_timecode"), ("{t}", "text_token_time"), ("{f}", "text_token_frame")], id: \.0) { token, key in
-                            NativePanelChip(AureaText.t(key)) { insert(token) }
-                                .accessibilityLabel(AureaText.t("text_token_insert", AureaText.t(key)))
-                        }
-                    }.frame(height: 44)
-                }
-                if values[0] > 0.5 {
+                PanelSection(title: AureaText.t("text_dynamic"), glyph: CupertinoGlyph.Timer, tag: "text.sec.dynamic",
+                             isOn: Binding(get: { values.count >= 6 && values[0] > 0.5 }, set: { set(0, $0 ? 1 : 0) })) {
+                    PanelItemGrid(items: [("{#}", "text_token_counter", CupertinoGlyph.Repeat), ("{tc}", "text_token_timecode", CupertinoGlyph.Timer), ("{t}", "text_token_time", CupertinoGlyph.Clock), ("{f}", "text_token_frame", CupertinoGlyph.Film)].map { token, key, glyph in
+                        PanelItem(glyph: glyph, label: AureaText.t(key), tag: "text.token.\(token)") { insert(token) }
+                    })
                     NativePanelRuler(label: AureaText.t("text_counter_from"), value: Float(values[1]), step: 0.5, range: -1_000_000_000...1_000_000_000,
                                      decimals: Int(values[3]), keypad: true) { set(1, Double($0)) }
                     NativePanelRuler(label: AureaText.t("text_counter_to"), value: Float(values[2]), step: 0.5, range: -1_000_000_000...1_000_000_000,
                                      decimals: Int(values[3]), keypad: true) { set(2, Double($0)) }
                     NativePanelRuler(label: AureaText.t("text_counter_decimals"), value: Float(values[3]), step: 0.05, range: 0...6) { set(3, Double($0.rounded())) }
                     NativePanelToggle(AureaText.t("text_counter_grouping"), checked: values[4] > 0.5, fontSize: 13, weight: .regular) { set(4, $0 ? 1 : 0) }
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 6) {
-                            // Curva do contador: Linear (1), Suave (5), Entrada (3), Saída (4).
-                            ForEach([(1, "panel_linear"), (5, "pn_ease_in_out"), (3, "pn_ease_in"), (4, "pn_ease_out")], id: \.0) { ease, key in
-                                NativePanelChip(AureaText.t(key), selected: Int(values[5]) == ease) { set(5, Double(ease)) }
-                            }
-                        }.frame(height: 44)
-                    }
+                    // Curva do contador: Linear (1), Suave (5), Entrada (3), Saída (4).
+                    PanelChoiceRow(label: AureaText.t("panel_curva"), options: ["panel_linear", "pn_ease_in_out", "pn_ease_in", "pn_ease_out"].map { AureaText.t($0) },
+                                   isOn: { [1, 5, 3, 4][$0] == Int(values[5]) }) { set(5, Double([1, 5, 3, 4][$0])) }
                 }
             }
         }.onAppear { load() }.onChange(of: id) { _ in load() }.onChange(of: model.status.modelRevision) { _ in load() }
@@ -236,34 +223,28 @@ private struct NativeTextPathSection: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(AureaText.t("panel_texto_caminho")).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted).padding(.top, 6)
-            if candidates.isEmpty && ownMasks.isEmpty && !onPath {
-                Text(AureaText.t("text027_path_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).padding(.vertical, 8)
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        NativePanelChip(AureaText.t("panel_linha_reta"), selected: !onPath) { target = 0; mask = -1; write() }
-                            .accessibilityIdentifier("text.path.none")
-                        ForEach(Array(ownMasks.enumerated()), id: \.offset) { n, m in
-                            NativePanelChip(AureaText.t("text027_path_mask", n + 1), selected: mask == Int32(m)) { target = 0; mask = Int32(m); write() }
-                                .accessibilityIdentifier("text.path.mask.\(n)")
-                        }
-                        ForEach(candidates) { layer in
-                            NativePanelChip(layer.name.isEmpty ? AureaText.t("panel_vetor") : layer.name, selected: mask < 0 && target == layer.id) { target = layer.id; mask = -1; write() }
-                                .accessibilityIdentifier("text.path.layer.\(layer.id)")
-                        }
-                    }.frame(height: 44)
-                }
-                if onPath {
-                    marginRow("panel_margem_inicial", property: 46, value: firstMargin, identifier: "text.path.first.key") { firstMargin = $0; write() }
-                    marginRow("text027_path_last_margin", property: 47, value: lastMargin, identifier: "text.path.last.key") { lastMargin = $0; write() }
-                    NativePanelToggle(AureaText.t("text027_path_force_align"), checked: forceAlign, fontSize: 13, weight: .regular) { forceAlign = $0; write() }
-                        .accessibilityIdentifier("text.path.force")
-                    NativePanelToggle(AureaText.t("panel_perpendicular_caminho"), checked: perpendicular, fontSize: 13, weight: .regular) { perpendicular = $0; write() }
-                        .accessibilityIdentifier("text.path.perpendicular")
-                    NativePanelToggle(AureaText.t("panel_inverter_sentido"), checked: reversed, fontSize: 13, weight: .regular) { reversed = $0; write() }
-                        .accessibilityIdentifier("text.path.reverse")
-                    Text(AureaText.t("text027_path_alignment_note")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).padding(.vertical, 6)
+            PanelSection(title: AureaText.t("panel_texto_caminho"), glyph: CupertinoGlyph.Scribble, tag: "text.sec.path") {
+                if candidates.isEmpty && ownMasks.isEmpty && !onPath {
+                    Text(AureaText.t("text027_path_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).fixedSize(horizontal: false, vertical: true)
+                } else {
+                    PanelItemRow(glyph: CupertinoGlyph.Minus, title: AureaText.t("panel_linha_reta"), tag: "text.path.none", on: !onPath) { target = 0; mask = -1; write() }
+                    ForEach(Array(ownMasks.enumerated()), id: \.offset) { n, m in
+                        PanelItemRow(glyph: CupertinoGlyph.SquareOnSquare, title: AureaText.t("text027_path_mask", n + 1), tag: "text.path.mask.\(n)", on: mask == Int32(m)) { target = 0; mask = Int32(m); write() }
+                    }
+                    ForEach(candidates) { layer in
+                        PanelItemRow(glyph: CupertinoGlyph.Scribble, title: layer.name.isEmpty ? AureaText.t("panel_vetor") : layer.name, tag: "text.path.layer.\(layer.id)", on: mask < 0 && target == layer.id) { target = layer.id; mask = -1; write() }
+                    }
+                    if onPath {
+                        marginRow("panel_margem_inicial", property: 46, value: firstMargin, identifier: "text.path.first.key") { firstMargin = $0; write() }
+                        marginRow("text027_path_last_margin", property: 47, value: lastMargin, identifier: "text.path.last.key") { lastMargin = $0; write() }
+                        NativePanelToggle(AureaText.t("text027_path_force_align"), checked: forceAlign, fontSize: 13, weight: .regular) { forceAlign = $0; write() }
+                            .accessibilityIdentifier("text.path.force")
+                        NativePanelToggle(AureaText.t("panel_perpendicular_caminho"), checked: perpendicular, fontSize: 13, weight: .regular) { perpendicular = $0; write() }
+                            .accessibilityIdentifier("text.path.perpendicular")
+                        NativePanelToggle(AureaText.t("panel_inverter_sentido"), checked: reversed, fontSize: 13, weight: .regular) { reversed = $0; write() }
+                            .accessibilityIdentifier("text.path.reverse")
+                        Text(AureaText.t("text027_path_alignment_note")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).padding(.vertical, 6)
+                    }
                 }
             }
         }.onAppear { load() }.onChange(of: id) { _ in load() }.onChange(of: model.status.modelRevision) { _ in load() }
@@ -272,6 +253,7 @@ private struct NativeTextPathSection: View {
 
 // Literal control geometry shared by the TextPanel and MaskPanel source ports.
 struct NativePanelChip: View {
+    @Environment(\.panelItemSurface) private var surface
     let title: String
     var selected = false
     var horizontal: CGFloat = 10
@@ -290,7 +272,7 @@ struct NativePanelChip: View {
         Button(action: action) {
             Text(title).font(.aurea(size: fontSize, weight: bold ? (selected ? .bold : .medium) : .regular)).foregroundStyle(selected ? AureaColors.accent : AureaColors.text).lineLimit(1)
                 .padding(.horizontal, horizontal).padding(.vertical, height == nil ? 6 : 0).frame(maxWidth: fill ? .infinity : nil).frame(height: height)
-                .background(selected ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: radius))
+                .background(selected ? AureaColors.accentDim : surface ?? AureaColors.chip, in: RoundedRectangle(cornerRadius: radius))
         }.buttonStyle(AureaPressStyle(shrink: 1))
     }
 }
@@ -362,22 +344,28 @@ struct NativePanelRuler: View {
     @State private var dragging = false
     @State private var live: Float = 0
     private var shown: Float { dragging ? live : value }
+    @Environment(\.paramRowStacked) private var stacked
+    private var labelChip: some View {
+        PropertyLabelChip(label, expression: expression, keyframe: look, onTap: { onSelect?() })
+            .transformEnvironment(\.aureaSelectedProperty) { if onSelect != nil { $0 = selected ? label : nil } }
+            .onLongPressGesture(minimumDuration: 0.5) { if reset == nil { onExpression?() } }
+            .contextMenu {
+                if let reset {
+                    Button(AureaText.t("panel_voltar_padrao")) { set(reset) }
+                        .disabled(abs(shown - reset) <= 0.001 * max(1, abs(reset)))
+                    if let onExpression { Button(AureaText.t("panel_expressao"), action: onExpression) }
+                }
+            }
+    }
     var body: some View {
+        // Em seção estreita o rótulo sobe e a régua fica com a largura toda.
+        let onTop = stacked && plainLabelWidth == nil
+        VStack(spacing: 0) {
+        if onTop { labelChip }
         HStack(spacing: 0) {
             if let plainLabelWidth { Text(label).font(.aurea(size: 13)).frame(width: plainLabelWidth, alignment: .leading) }
-            else {
-                PropertyLabelChip(label, expression: expression, keyframe: look, onTap: { onSelect?() })
-                    .transformEnvironment(\.aureaSelectedProperty) { if onSelect != nil { $0 = selected ? label : nil } }
-                    .onLongPressGesture(minimumDuration: 0.5) { if reset == nil { onExpression?() } }
-                    .contextMenu {
-                        if let reset {
-                            Button(AureaText.t("panel_voltar_padrao")) { set(reset) }
-                                .disabled(abs(shown - reset) <= 0.001 * max(1, abs(reset)))
-                            if let onExpression { Button(AureaText.t("panel_expressao"), action: onExpression) }
-                        }
-                    }
-            }
-            Color.clear.frame(width: plainLabelWidth != nil ? 0 : keypad ? 6 : 8)
+            else if !onTop { labelChip }
+            Color.clear.frame(width: plainLabelWidth != nil || onTop ? 0 : keypad ? 6 : 8)
             TickRuler(value: { shown }, unitsPerDp: step, active: enabled && (selected || dragging), height: ParamRowDims.labelH).frame(maxWidth: .infinity).frame(minWidth: 30, minHeight: ParamRowDims.labelH)
                 .valueDrag(enabled: enabled, start: { value }, unitsPerDp: { step }, min: range.lowerBound, max: range.upperBound,
                            onStart: { live = value; dragging = true; onSelect?(); model.beginGesture(label) }, onValue: { live = $0; set($0) }, onEnd: finish)
@@ -400,7 +388,8 @@ struct NativePanelRuler: View {
                 Button(action: toggleKey) { KeyframeDiamondIcon(look: look, enabled: enabled).frame(width: max(44, controlHeight), height: ParamRowDims.labelH) }.buttonStyle(.plain)
                     .accessibilityLabel(AureaText.t(look == .keyHere ? "panel_tirar_keyframe_daqui" : "panel_marcar_keyframe_aqui") + " · " + label)
             }
-        }.frame(height: ParamRowDims.row).onDisappear(perform: finish)
+        }.frame(height: onTop ? 44 : ParamRowDims.row)
+        }.padding(.vertical, onTop ? 3 : 0).onDisappear(perform: finish)
     }
     private func finish() { if dragging { dragging = false; model.endGesture() } }
     private func openKeypad() {
@@ -466,6 +455,13 @@ struct PanelPresetEntry: Identifiable {
     var file: URL?
     var textPreset: UInt32?
     var source: String? { json ?? file.flatMap { try? String(contentsOf: $0, encoding: .utf8) } }
+    /// 0.5.0: Engine::kMotionTextPresetBase.
+    static let motionTextBase: UInt32 = 1000
+    /// Os do modelo Motion só no 2D; os antigos só no 3D; os salvos em ambos.
+    func fitsText(threeD: Bool) -> Bool {
+        guard let preset = textPreset else { return true }
+        return preset >= Self.motionTextBase ? !threeD : threeD
+    }
     var object: [String: Any]? {
         guard let data = source?.data(using: .utf8) else { return nil }
         return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
@@ -477,6 +473,11 @@ extension PanelPresetEntry {
         var result: [PanelPresetEntry] = []
         for kind in PanelPresetKind.allCases {
             if kind == .text {
+                // 0.5.0: os do modelo Motion primeiro (motor: base 1000); os antigos ficam para o texto 3D.
+                let motionKeys = ["tp_m_type_in", "tp_m_decode", "tp_m_uncensor", "tp_m_password", "tp_m_title_spread", "tp_m_fade_up", "tp_m_wave", "tp_m_spin", "tp_m_scale_word", "tp_m_scale_out"]
+                for (index, key) in motionKeys.enumerated() {
+                    result.append(PanelPresetEntry(id: "motion:\(index)", name: AureaText.t(key), kind: kind, textPreset: PanelPresetEntry.motionTextBase + UInt32(index)))
+                }
                 let keys = ["pn_pop", "pn_textpreset_bounce", "pn_textpreset_slide", "panel_escala", "pn_textpreset_appear",
                             "panel_desfoque", "pn_textpreset_word_highlight", "pn_karaoke", "pn_textpreset_typewriter", "pn_textpreset_wave", "pn_textpreset_elastic"]
                 for (index, key) in keys.enumerated() {
@@ -528,7 +529,7 @@ struct TextPresetPicker: View {
             Text(AureaText.t("tp_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).padding(.bottom, 8)
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 8)], spacing: 8) {
-                    ForEach(presets) { entry in
+                    ForEach(presets.filter { $0.fitsText(threeD: threeD) }) { entry in
                         PresetCardView(entry: entry, showKind: false, favorite: favorites.contains(entry.id),
                                        compositionWidth: Float(max(1, model.compositionWidth)),
                                        onApply: { add(entry) }, onFavorite: { toggleFavorite(entry) }, onDelete: nil,
@@ -613,7 +614,8 @@ struct PresetsPanel: View {
         if tab == "favoritos" { values = presets.filter { favorites.contains($0.id) } }
         else if tab == "recentes" { values = recents.compactMap { id in presets.first { $0.id == id } } }
         else { values = presets.filter { $0.kind == kind } }
-        return values.filter { (!isText || $0.kind == .text) && (query.isEmpty || $0.name.range(of: query, options: .caseInsensitive) != nil) }
+        let textIs3D = isText && !(model.engine.text3D(forLayer: model.primarySelection ?? 0) ?? [:]).isEmpty
+        return values.filter { (!isText || ($0.kind == .text && $0.fitsText(threeD: textIs3D))) && (query.isEmpty || $0.name.range(of: query, options: .caseInsensitive) != nil) }
     }
 
     /// 0.3.4 presets: o título "Presets" mora na barra da seção (TopBarView); o
@@ -1473,7 +1475,7 @@ struct ShapePanel: View {
     private var selected: Int { model.shapeSelectedParam }
     private var fill: [Float] { rgba(1) }
     private var stroke: [Float] { rgba(2) }
-    private let types = [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]
+    private let types = [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]
     private var track: [KeyframeItem] {
         preferredCurveTrack(([selected] + ([5, 6, 1, 2, 3, 4] + Array(7...14)).filter { $0 != selected }).map { param in
             (model.keyframes[id] ?? []).filter { $0.property == 35 && $0.paramIndex == UInt32(param) }.sorted { $0.time < $1.time }
@@ -1548,8 +1550,9 @@ struct ShapePanel: View {
                     switcher
                     Color.clear.frame(height: 4)
                     sizeRow
-                    if [0, 16, 21].contains(shapeType) {
-                        shapeRow(1, "panel_raio", value: value(1), step: 0.3, range: 0...max(0, min(value(5), value(6)) / 2), unit: "px", reset: 0, gesture: "raio") { write(1, $0) }
+                    // Gota (0.5.0): o canto arredonda a PONTA.
+                    if [0, 16, 21, 26].contains(shapeType) {
+                        shapeRow(1, shapeType == 26 ? "shp_tip_radius" : "panel_raio", value: value(1), step: 0.3, range: 0...max(0, min(value(5), value(6)) / 2), unit: "px", reset: 0, gesture: "raio") { write(1, $0) }
                     }
                     if [3, 4, 8, 14].contains(shapeType) {
                         shapeRow(2, shapeType == 3 ? "panel_lados" : shapeType == 8 ? "panel_petalas" : shapeType == 14 ? "panel_dentes" : "panel_pontas", value: value(2), step: 0.06, range: 3...64, reset: 5, gesture: "pontas") { write(2, $0.rounded()) }
@@ -1605,6 +1608,7 @@ struct ShapePanel: View {
         case 16: return AureaText.t("sh_shape_line"); case 17: return AureaText.t("sh_shape_diamond"); case 18: return AureaText.t("sh_shape_heart")
         case 19: return AureaText.t("sh_shape_seal"); case 20: return AureaText.t("sh_shape_arc"); case 21: return AureaText.t("sh_shape_bubble")
         case 22: return AureaText.t("sh_shape_bolt"); case 23: return AureaText.t("sh_shape_wave"); case 24: return AureaText.t("sh_shape_blob")
+        case 25: return AureaText.t("sh_shape_moon"); case 26: return AureaText.t("sh_shape_teardrop")
         default: return AureaText.t("target_shape")
         }
     }
@@ -1642,6 +1646,8 @@ struct ShapePanel: View {
         case 24:
             percentRow(7, "shp_variation", range: 5...95, reset: 50, gesture: "variacao")
             shapeRow(14, "shp_seed", value: value(14), step: 0.06, range: 0...99, reset: 0, gesture: "variante") { write(14, $0.rounded()) }
+        // Lua (0.5.0): o deslocamento do círculo que recorta (25 % = a lua fina).
+        case 25: percentRow(7, "shp_offset", range: 5...95, reset: 25, gesture: "deslocamento")
         default: EmptyView()
         }
     }
@@ -1853,6 +1859,8 @@ private struct ShapeEditGlyph: View {
             case 23:
                 context.stroke(ShapeGlyphPaths.wave(center: c, radius: r, waves: 2), with: .color(AureaColors.text), lineWidth: r * 0.3); return
             case 24: path = ShapeGlyphPaths.blob(center: c, radius: r)
+            case 25: path = ShapeGlyphPaths.moon(center: c, radius: r)
+            case 26: path = ShapeGlyphPaths.teardrop(center: c, radius: r)
             default: path.addRect(CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
             }
             context.fill(path, with: .color(AureaColors.text))
@@ -1863,11 +1871,255 @@ private struct ShapeEditGlyph: View {
 // MaskPanel.kt: máscaras numa tela só (três botões de criar sempre à vista,
 // chips das máscaras e, da escolhida, Caminho, Modo, Borda, Seguir objeto e
 // Apagar) e o recorte por outra camada na segunda aba.
+// MARK: - Kit de lista (0.5.0), par do PanelList.kt
+
+/// A organização do Motion: 37 pt por item, 5 pt de canto, seta + ícone + nome e
+/// seções que abrem e fecham. Tudo que é escolha fica à vista, sem fileira cortada na borda.
+struct PanelSection<Content: View>: View {
+    let title: String
+    let glyph: Character
+    let tag: String
+    var count = 0
+    var flat = false
+    /// O interruptor no título, como no Motion: ligar abre e desligar fecha.
+    var isOn: Binding<Bool>? = nil
+    /// false = rótulo, régua e número na mesma linha (painel na largura toda).
+    var stacked = true
+    let content: () -> Content
+    @State private var open: Bool
+
+    init(title: String, glyph: Character, tag: String, startOpen: Bool = true, count: Int = 0, flat: Bool = false, isOn: Binding<Bool>? = nil, stacked: Bool = true, @ViewBuilder content: @escaping () -> Content) {
+        self.title = title; self.glyph = glyph; self.tag = tag; self.count = count; self.flat = flat; self.isOn = isOn; self.stacked = stacked; self.content = content
+        _open = State(initialValue: isOn?.wrappedValue ?? startOpen)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 0) {
+                Button { withAnimation(.easeInOut(duration: 0.2)) { open.toggle() } } label: {
+                    HStack(spacing: 8) {
+                        CupertinoGlyph.text(open ? CupertinoGlyph.ChevronDown : CupertinoGlyph.ChevronRight, size: 14, color: AureaColors.text.opacity(open ? 0.9 : 0.3))
+                        CupertinoGlyph.text(glyph, size: 18, color: AureaColors.text)
+                        Text(title).font(.aurea(size: 13, weight: .semibold)).foregroundStyle(AureaColors.text).lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        if count > 0 { Text("\(count)").font(.aurea(size: 12)).foregroundStyle(AureaColors.muted) }
+                    }.frame(height: 40).contentShape(Rectangle())
+                }
+                .buttonStyle(AureaPressStyle(shrink: 1))
+                .accessibilityAddTraits(open ? .isSelected : [])
+                .accessibilityIdentifier(tag)
+                if let isOn {
+                    AureaToggle(checked: isOn.wrappedValue) { value in
+                        isOn.wrappedValue = value
+                        withAnimation(.easeInOut(duration: 0.2)) { open = value }
+                    }
+                }
+            }.padding(.horizontal, 8)
+            if open {
+                VStack(alignment: .leading, spacing: 0) { content() }
+                    .padding(.horizontal, 8).padding(.bottom, 8)
+                    .environment(\.paramRowStacked, stacked)
+            }
+        }
+        .background(flat ? Color.clear : AureaColors.fxListSurface, in: RoundedRectangle(cornerRadius: 5))
+        .padding(.top, flat ? 0 : 6)
+        // O interruptor desligado usa a cor da seção: sobre ela, precisa escurecer para aparecer.
+        .transformEnvironment(\.toggleOffTrack) { if !flat { $0 = AureaColors.fxLowSurface } }
+    }
+}
+
+/// Um item que se aplica ou se escolhe: ícone, nome e o estado aceso.
+struct PanelItem: Identifiable {
+    let glyph: Character
+    let label: String
+    let tag: String
+    var on = false
+    var contentIcon: ContentIconKind? = nil
+    let action: () -> Void
+    var id: String { tag }
+}
+
+/// Dentro de um cartão escuro os itens clareiam, para não sumirem no fundo.
+private struct PanelItemSurfaceKey: EnvironmentKey { static let defaultValue: Color? = nil }
+extension EnvironmentValues {
+    var panelItemSurface: Color? {
+        get { self[PanelItemSurfaceKey.self] }
+        set { self[PanelItemSurfaceKey.self] = newValue }
+    }
+}
+
+/// Grade de itens com nome e ícone. Até 2 colunas, em linha; 3 ou mais, ícone sobre o nome.
+struct PanelItemGrid: View {
+    @Environment(\.panelItemSurface) private var surface
+    let items: [PanelItem]
+    var columns = 2
+    @ViewBuilder private func icon(_ item: PanelItem, _ tint: Color) -> some View {
+        if let kind = item.contentIcon { ContentIcon(kind: kind, size: 18, tint: tint) }
+        else { CupertinoGlyph.text(item.glyph, size: 18, color: tint) }
+    }
+    var body: some View {
+        VStack(spacing: 6) {
+            ForEach(Array(stride(from: 0, to: items.count, by: columns)), id: \.self) { start in
+                HStack(spacing: 6) {
+                    ForEach(items[start..<min(start + columns, items.count)]) { tile($0) }
+                    ForEach(0..<max(0, start + columns - items.count), id: \.self) { _ in Color.clear.frame(maxWidth: .infinity, maxHeight: 1) }
+                }
+            }
+        }
+    }
+    @ViewBuilder private func tile(_ item: PanelItem) -> some View {
+        let tint = item.on ? AureaColors.accent : AureaColors.text
+        let stacked = columns >= 3
+        Button(action: item.action) {
+            Group {
+                if stacked {
+                    VStack(spacing: 3) {
+                        icon(item, tint)
+                        Text(item.label).font(.aurea(size: 11)).foregroundStyle(tint).lineLimit(2).multilineTextAlignment(.center)
+                    }.padding(.horizontal, 3)
+                } else {
+                    HStack(spacing: 8) {
+                        icon(item, tint)
+                        Text(item.label).font(.aurea(size: 12)).foregroundStyle(tint).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+                    }.padding(.horizontal, 8)
+                }
+            }
+            .frame(maxWidth: .infinity).frame(height: stacked ? 56 : 44)
+            .background(item.on ? AureaColors.accentDim : surface ?? AureaColors.fxLowSurface, in: RoundedRectangle(cornerRadius: 5))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(AureaPressStyle(shrink: 1))
+        .accessibilityLabel(item.label)
+        .accessibilityAddTraits(item.on ? .isSelected : [])
+        .accessibilityIdentifier(item.tag)
+    }
+}
+
+/// Linha inteira: ícone, nome e, à direita, o detalhe; com `chevron`, leva a outra tela.
+struct PanelItemRow: View {
+    @Environment(\.panelItemSurface) private var surface
+    let glyph: Character
+    let title: String
+    let tag: String
+    var detail: String? = nil
+    var on = false
+    var danger = false
+    var chevron = false
+    let action: () -> Void
+    var body: some View {
+        let tint = danger ? AureaColors.danger : on ? AureaColors.accent : AureaColors.text
+        Button(action: action) {
+            HStack(spacing: 8) {
+                CupertinoGlyph.text(glyph, size: 18, color: tint)
+                Text(title).font(.aurea(size: 13)).foregroundStyle(tint).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 8)
+                if let detail { Text(detail).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).lineLimit(1) }
+                if chevron { CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 12, color: AureaColors.muted).mirrorsInRtl() }
+            }
+            .padding(.horizontal, 8).frame(minHeight: 37)
+            .background(on ? AureaColors.accentDim : surface ?? AureaColors.fxLowSurface, in: RoundedRectangle(cornerRadius: 5))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(AureaPressStyle(shrink: 1))
+        .padding(.vertical, 3)
+        .accessibilityAddTraits(on ? .isSelected : [])
+        .accessibilityIdentifier(tag)
+    }
+}
+
+/// "+ Adicionar": o último item da lista, centrado, como no Motion.
+struct PanelAddRow: View {
+    let label: String
+    let tag: String
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                CupertinoGlyph.text(CupertinoGlyph.Plus, size: 16, color: AureaColors.text)
+                Text(label).font(.aurea(size: 13)).foregroundStyle(AureaColors.text).lineLimit(1)
+            }
+            .frame(maxWidth: .infinity).frame(height: 37)
+            .background(AureaColors.fxLowSurface, in: RoundedRectangle(cornerRadius: 5))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(AureaPressStyle(shrink: 1))
+        .padding(.vertical, 3)
+        .accessibilityIdentifier(tag)
+    }
+}
+
+/// Rótulo em cima e as opções embaixo, quebrando linha (par do ChipRow do Android).
+struct PanelChoiceRow: View {
+    let label: String
+    let options: [String]
+    let isOn: (Int) -> Bool
+    let pick: (Int) -> Void
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+            PanelFlow(spacing: 6) {
+                ForEach(Array(options.enumerated()), id: \.offset) { n, title in
+                    NativePanelChip(title, selected: isOn(n)) { pick(n) }
+                }
+            }
+        }.padding(.vertical, 4)
+    }
+}
+
+/// Quebra de linha simples para as escolhas (iOS 16+; antes, empilha).
+private struct PanelFlow<Content: View>: View {
+    let spacing: CGFloat
+    @ViewBuilder let content: () -> Content
+    var body: some View {
+        if #available(iOS 16.0, *) {
+            PanelFlowLayout(spacing: spacing) { content() }
+        } else {
+            VStack(alignment: .leading, spacing: spacing) { content() }
+        }
+    }
+}
+
+@available(iOS 16.0, *)
+private struct PanelFlowLayout: Layout {
+    let spacing: CGFloat
+    private func rows(_ width: CGFloat, _ subviews: Subviews) -> [(range: Range<Int>, height: CGFloat)] {
+        var result: [(range: Range<Int>, height: CGFloat)] = []
+        var start = 0, x: CGFloat = 0, height: CGFloat = 0
+        for (i, view) in subviews.enumerated() {
+            let size = view.sizeThatFits(.unspecified)
+            if x > 0 && x + size.width > width {
+                result.append((start..<i, height))
+                start = i; x = 0; height = 0
+            }
+            x += size.width + spacing
+            height = max(height, size.height)
+        }
+        if start < subviews.count { result.append((start..<subviews.count, height)) }
+        return result
+    }
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? 320
+        let all = rows(width, subviews)
+        return CGSize(width: width, height: all.reduce(0) { $0 + $1.height } + spacing * CGFloat(max(0, all.count - 1)))
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in rows(bounds.width, subviews) {
+            var x = bounds.minX
+            for i in row.range {
+                let size = subviews[i].sizeThatFits(.unspecified)
+                subviews[i].place(at: CGPoint(x: x, y: y + (row.height - size.height) / 2), proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+            y += row.height + spacing
+        }
+    }
+}
+
 struct MaskPanel: View {
     @EnvironmentObject private var model: AureaModel
     @ObservedObject private var pen = EditPointsState.shared
     /// 0 Pontos (o modo de caneta, com o desenho do Editar pontos), 1 Máscaras, 2 Recorte.
-    @State private var tab = 0
+    @State private var tab = 1
     @State private var matte: Int64 = 0
     @State private var mode = 0
     private var id: Int64 { model.primarySelection ?? 0 }
@@ -1904,7 +2156,8 @@ struct MaskPanel: View {
                              onCurve: curveKeys.count >= 2 && tab == 1 ? { openCurve() } : nil, onBack: { model.panel = .none })
                 }
                 VStack(spacing: 0) {
-                    ParamTabs([AureaText.t("pn_mask_points"), AureaText.t("panel_mascaras"), AureaText.t("panel_recorte_outra_camada")], selected: tab) { tab = $0 }
+                    // Na tela, como no Motion: primeiro a lista do que existe.
+                    ParamTabs([AureaText.t("panel_mascaras"), AureaText.t("pn_mask_points"), AureaText.t("ui_mask_tab_matte")], selected: tab == 1 ? 0 : tab == 0 ? 1 : 2) { tab = $0 == 0 ? 1 : $0 == 1 ? 0 : 2 }
                     if editing != nil {
                         if model.masks.count > 1 { maskChips.padding(.horizontal, 6) }
                         PointsTrackpad(path: path).padding(6)
@@ -1969,14 +2222,43 @@ struct MaskPanel: View {
             Color.clear.frame(height: 10)
             hint("panel_mascara_mostra_so_parte_camada_escolha")
         } else {
-            Color.clear.frame(height: 4)
-            maskChips
-            if tab == 1 {
-                if let mask { maskEditor(mask) }
-                else { hint("panel_escolha_mascara_acima_editar_palco") }
+            PanelSection(title: AureaText.t("panel_mascaras"), glyph: CupertinoGlyph.RectangleStack, tag: "mask.sec.list", count: model.masks.count) {
+                ForEach(Array(model.masks.enumerated()), id: \.element.id) { entry in
+                    let open = tab == 1 && mask?.id == entry.element.id
+                    VStack(alignment: .leading, spacing: 0) {
+                        maskRow(entry.offset, entry.element, open: open)
+                        if open, let mask { VStack(alignment: .leading, spacing: 0) { maskEditor(mask) }.padding(.horizontal, 8).padding(.bottom, 8).environment(\.panelItemSurface, AureaColors.fxListSurface).environment(\.toggleOffTrack, nil) }
+                    }
+                    .background(AureaColors.fxLowSurface, in: RoundedRectangle(cornerRadius: 5))
+                    .padding(.vertical, 3)
+                }
             }
         }
     }
+    /// A linha da máscara: seta, ícone, nome e o modo em que ela está.
+    private func maskRow(_ index: Int, _ item: MaskItem, open: Bool) -> some View {
+        Button {
+            model.selectedMask = open ? nil : item.id
+            model.selectedMaskPoint = nil
+            model.maskDrawing = !open && !item.closed
+        } label: {
+            HStack(spacing: 8) {
+                CupertinoGlyph.text(open ? CupertinoGlyph.ChevronDown : CupertinoGlyph.ChevronRight, size: 14, color: AureaColors.text.opacity(open ? 0.9 : 0.3))
+                CupertinoGlyph.text(CupertinoGlyph.SquareOnSquare, size: 18, color: AureaColors.text)
+                Text(AureaText.t(item.closed ? "pn_mask_n" : "pn_mask_n_open", index + 1)).font(.aurea(size: 13, weight: open ? .bold : .semibold))
+                    .foregroundStyle(AureaColors.text).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                if let mode = maskModes.first(where: { $0.op == item.operation }) {
+                    Text(AureaText.t(mode.key)).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).lineLimit(1)
+                }
+            }.padding(.horizontal, 8).frame(height: 37).contentShape(Rectangle())
+        }
+        .buttonStyle(AureaPressStyle(shrink: 1))
+        .accessibilityIdentifier("mask.item.\(index)")
+    }
+    private var maskModes: [(op: UInt32, key: String, glyph: Character)] { [
+        (0, "panel_somar", CupertinoGlyph.Plus), (1, "panel_subtrair", CupertinoGlyph.Minus), (2, "panel_intersecao", CupertinoGlyph.SquareOnSquare),
+        (3, "panel_diferenca", CupertinoGlyph.CircleLefthalfFill), (4, "panel_desligada", CupertinoGlyph.EyeSlash),
+    ] }
     private var maskChips: some View {
     ScrollView(.horizontal, showsIndicators: false) {
         HStack(spacing: 6) {
@@ -1988,59 +2270,52 @@ struct MaskPanel: View {
         }.frame(height: 44)
     }
     }
-    /// A máscara escolhida, tudo numa tela só, na ordem de uso.
+    /// A máscara aberta na lista, separada em Pontos, Modo, Borda e Seguir objeto.
     @ViewBuilder private func maskEditor(_ m: MaskItem) -> some View {
-        title("panel_caminho")
+        let pointsLabel = AureaText.plural("pn_mask_points_so_far", m.points.count / 6)
         if model.maskDrawing {
             hint("panel_toque_palco_pontos_arraste_curvar_toque")
-            Color.clear.frame(height: 8)
-            NativePanelAction("panel_fechar_caminho", detail: AureaText.plural("pn_mask_points_so_far", m.points.count / 6)) {
+            Color.clear.frame(height: 6)
+            PanelItemRow(glyph: CupertinoGlyph.CheckmarkCircle, title: AureaText.t("panel_fechar_caminho"), tag: "mask.close", detail: pointsLabel) {
                 if m.points.count >= 18 { model.setMaskPoints(m.points, closed: true); model.maskDrawing = false }
                 else { model.toast = AureaText.t("msg_ponha_pelo_menos_3_pontos") }
             }
             // Sem caminho fechado ainda não há modo/borda para ajustar.
-            Color.clear.frame(height: 10)
             deleteAction(m)
         } else {
-            hint("panel_arraste_pontos_palco_toque_num_ponto")
-            HStack(spacing: 8) {
+            PanelItemRow(glyph: CupertinoGlyph.Pencil, title: AureaText.t("ui_edit_points"), tag: "mask.edit.points", detail: pointsLabel, chevron: true) { tab = 0 }
+            VStack(alignment: .leading, spacing: 4) {
                 PropertyLabelChip(AureaText.t("panel_caminho"), expression: .none, keyframe: look, onTap: { toggleKey() })
                 Text(m.keyCount == 0 ? AureaText.t("panel_parado_toque_trilho_animar") : AureaText.plural("pn_keyframes_edit_at_playhead", Int(m.keyCount)))
                     .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).frame(maxWidth: .infinity, alignment: .leading)
-            }.frame(height: 48).aureaSelectedProperty(AureaText.t("panel_caminho"))
-            if let point = model.selectedMaskPoint, point >= 0, point * 6 + 5 < m.points.count {
-                let curved = (2...5).contains { m.points[point * 6 + $0] != 0 }
-                Color.clear.frame(height: 8)
-                NativePanelAction(curved ? "panel_mask_point_corner" : "panel_mask_point_curve",
-                                  detail: AureaText.t("panel_mask_point_hint")) { model.toggleMaskPointCurve(point) }
+            }.padding(.vertical, 3).aureaSelectedProperty(AureaText.t("panel_caminho"))
+            PanelSection(title: AureaText.t("panel_mask_mode"), glyph: CupertinoGlyph.SquareStack3dUp, tag: "mask.sec.mode", flat: true) {
+                PanelItemGrid(items: maskModes.map { mode in
+                    PanelItem(glyph: mode.glyph, label: AureaText.t(mode.key), tag: "mask.mode.\(mode.op)", on: mode.op == m.operation) { update(m, operation: mode.op) }
+                }, columns: 3)
+                NativePanelToggle(AureaText.t("panel_inverter_mostrar_lado_fora"), checked: m.inverted) { update(m, inverted: $0) }
             }
-
-            title("panel_mask_mode")
-            ChoiceChips(["panel_somar", "panel_subtrair", "panel_intersecao", "panel_diferenca", "panel_desligada"].map { AureaText.t($0) }, selected: Int(m.operation)) { update(m, operation: UInt32($0)) }
-            NativePanelToggle(AureaText.t("panel_inverter_mostrar_lado_fora"), checked: m.inverted) { update(m, inverted: $0) }
-
-            title("panel_mask_edge")
-            maskRuler(m, param: 0, label: "panel_suavizar", value: m.feather, range: 0...500, unit: "px", reset: 0)
-            maskRuler(m, param: 1, label: "panel_expandir", value: m.expansion, range: -500...500, unit: "px", reset: 0)
-            maskRuler(m, param: 2, label: "panel_opacidade", value: m.opacity * 100, range: 0...100, unit: "%", reset: 100)
-
+            PanelSection(title: AureaText.t("panel_mask_edge"), glyph: CupertinoGlyph.Drop, tag: "mask.sec.edge", flat: true) {
+                maskRuler(m, param: 0, label: "panel_suavizar", value: m.feather, range: 0...500, unit: "px", reset: 0)
+                maskRuler(m, param: 1, label: "panel_expandir", value: m.expansion, range: -500...500, unit: "px", reset: 0)
+                maskRuler(m, param: 2, label: "panel_opacidade", value: m.opacity * 100, range: 0...100, unit: "%", reset: 100)
+            }
             if model.selectedLayer?.kind == 1 {
-                title("panel_mask_follow")
-                if model.importingMedia { hint("panel_rastreando") }
-                else {
-                    hint("panel_mascara_segue_esta_embaixo_dela_cabecote")
-                    Color.clear.frame(height: 8)
-                    NativePanelAction("panel_seguir_posicao", detail: AureaText.t("panel_objetos_so_andam_pela_tela")) { track(m.id, mode: 0) }
-                    Color.clear.frame(height: 6)
-                    NativePanelAction("panel_seguir_posicao_tamanho_giro", detail: AureaText.t("panel_objetos_aproximam_ou_giram")) { track(m.id, mode: 1) }
+                PanelSection(title: AureaText.t("panel_mask_follow"), glyph: CupertinoGlyph.CameraViewfinder, tag: "mask.sec.follow", startOpen: false, flat: true) {
+                    if model.importingMedia { hint("panel_rastreando") }
+                    else {
+                        hint("panel_mascara_segue_esta_embaixo_dela_cabecote")
+                        Color.clear.frame(height: 6)
+                        PanelItemRow(glyph: CupertinoGlyph.Move, title: AureaText.t("panel_seguir_posicao"), tag: "mask.follow.0") { track(m.id, mode: 0) }
+                        PanelItemRow(glyph: CupertinoGlyph.ArrowCounterclockwise, title: AureaText.t("panel_seguir_posicao_tamanho_giro"), tag: "mask.follow.1") { track(m.id, mode: 1) }
+                    }
                 }
             }
-            Color.clear.frame(height: 14)
             deleteAction(m)
         }
     }
     private func deleteAction(_ m: MaskItem) -> some View {
-        NativePanelAction("panel_apagar_mascara", danger: true) {
+        PanelItemRow(glyph: CupertinoGlyph.Trash, title: AureaText.t("panel_apagar_mascara"), tag: "mask.delete", danger: true) {
             guard model.engine.removeMask(id, mask: m.id) else { return }
             if model.timelineFocus?.contains(where: { $0.property == 43 && $0.effect == m.id }) == true { model.timelineFocus = nil }
             if model.curveProperty == 43 && model.curveEffect == m.id { model.curveSelectedTime = nil }
@@ -2065,52 +2340,63 @@ struct MaskPanel: View {
     }
     private var matteBody: some View {
         VStack(alignment: .leading, spacing: 0) {
-            title("panel_1_recortar_pelo")
-            Text(AureaText.t("pn_mask_target", model.layers.first { $0.id == id }?.name ?? ""))
-                .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
-            if mode != 0, let source = candidates.first(where: { $0.id == matte }) {
-                Text(AureaText.t("pn_mask_source", source.name))
+            PanelSection(title: AureaText.t("panel_1_recortar_pelo"), glyph: CupertinoGlyph.Crop, tag: "matte.sec.mode") {
+                Text(AureaText.t("pn_mask_target", model.layers.first { $0.id == id }?.name ?? ""))
                     .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
-                Canvas { context, size in
-                    let center = CGPoint(x: size.width / 2, y: size.height / 2)
-                    let radius = size.height * 0.36
-                    let circle = Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius,
-                        width: radius * 2, height: radius * 2))
-                    context.fill(circle, with: .color(AureaColors.muted.opacity(0.18)))
-                    var clipped = context
-                    let inverted = mode == 2 || mode == 4
-                    clipped.clip(to: Path(CGRect(x: inverted ? 0 : center.x, y: 0,
-                        width: inverted ? center.x : size.width - center.x, height: size.height)))
-                    clipped.fill(circle, with: .color(AureaColors.accent))
-                    context.stroke(Path(CGRect(x: center.x, y: center.y - radius,
-                        width: radius * 1.4, height: radius * 2)), with: .color(AureaColors.muted), lineWidth: 1)
-                }.frame(height: 64).accessibilityHidden(true)
-            }
-            ChoiceChips(["panel_nao_recortar", "panel_pela_forma", "panel_pela_forma_invertido", "panel_pelo_brilho", "panel_pelo_brilho_invertido"].map { AureaText.t($0) }, selected: mode) { value in
-                if value == 0 { write(0, 0) }
-                else {
-                    // Sem camada escolhida: a logo ABAIXO na pilha (a lista vem com a
-                    // frente primeiro, `Engine::query_layers`). O motor usa a camada que
-                    // a UI passar; os textos do painel dizem "abaixo" (par do Android, P1-7).
-                    let own = model.layers.firstIndex { $0.id == id } ?? 0
-                    let below = model.layers.dropFirst(own + 1).first { item in candidates.contains { $0.id == item.id } }
-                    let target = matte != 0 ? matte : (below?.id ?? 0)
-                    if target == 0 { model.toast = AureaText.t("pn_mask_pick_layer_below") } else { write(target, value) }
+                if mode != 0, let source = candidates.first(where: { $0.id == matte }) {
+                    Text(AureaText.t("pn_mask_source", source.name))
+                        .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                    Canvas { context, size in
+                        let center = CGPoint(x: size.width / 2, y: size.height / 2)
+                        let radius = size.height * 0.36
+                        let circle = Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius,
+                            width: radius * 2, height: radius * 2))
+                        context.fill(circle, with: .color(AureaColors.muted.opacity(0.18)))
+                        var clipped = context
+                        let inverted = mode == 2 || mode == 4
+                        clipped.clip(to: Path(CGRect(x: inverted ? 0 : center.x, y: 0,
+                            width: inverted ? center.x : size.width - center.x, height: size.height)))
+                        clipped.fill(circle, with: .color(AureaColors.accent))
+                        context.stroke(Path(CGRect(x: center.x, y: center.y - radius,
+                            width: radius * 1.4, height: radius * 2)), with: .color(AureaColors.muted), lineWidth: 1)
+                    }.frame(height: 64).accessibilityHidden(true)
                 }
+                Color.clear.frame(height: 6)
+                PanelItemGrid(items: matteModes.map { value, key, glyph in
+                    PanelItem(glyph: glyph, label: AureaText.t(key), tag: "matte.mode.\(value)", on: value == mode) { pickMatteMode(value) }
+                })
             }
-            title("panel_2_qual_camada_recorta")
-            if candidates.isEmpty { hint("panel_nao_ha_outra_camada_possa_recortar") }
-            else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(candidates) { layer in
-                            NativePanelChip(layer.name, selected: matte == layer.id, horizontal: 12, height: 36, radius: 9, fontSize: 12.5) { write(layer.id, mode == 0 ? 1 : mode) }
-                        }
-                    }.frame(height: 44)
+            PanelSection(title: AureaText.t("panel_2_qual_camada_recorta"), glyph: CupertinoGlyph.RectangleStack, tag: "matte.sec.layer", count: candidates.count) {
+                if candidates.isEmpty { hint("panel_nao_ha_outra_camada_possa_recortar") }
+                ForEach(Array(candidates.enumerated()), id: \.element.id) { n, layer in
+                    PanelItemRow(glyph: layerKindGlyph(layer.kind), title: layer.name, tag: "matte.layer.\(n)", on: matte == layer.id) { write(layer.id, mode == 0 ? 1 : mode) }
                 }
+                Color.clear.frame(height: 4)
+                hint(matte != 0 ? "panel_camada_escolhida_recorta_esta_some_tela" : "panel_pela_forma_aparece_onde_outra_camada")
             }
-            Color.clear.frame(height: 4)
-            hint(matte != 0 ? "panel_camada_escolhida_recorta_esta_some_tela" : "panel_pela_forma_aparece_onde_outra_camada")
+        }
+    }
+    private var matteModes: [(Int, String, Character)] { [
+        (0, "panel_nao_recortar", CupertinoGlyph.XmarkCircle), (1, "panel_pela_forma", CupertinoGlyph.Circle), (2, "panel_pela_forma_invertido", CupertinoGlyph.CircleFill),
+        (3, "panel_pelo_brilho", CupertinoGlyph.Lightbulb), (4, "panel_pelo_brilho_invertido", CupertinoGlyph.CircleLefthalfFill),
+    ] }
+    private func pickMatteMode(_ value: Int) {
+        if value == 0 { write(0, 0); return }
+        // Sem camada escolhida: a logo ABAIXO na pilha (a lista vem com a
+        // frente primeiro, `Engine::query_layers`). O motor usa a camada que
+        // a UI passar; os textos do painel dizem "abaixo" (par do Android, P1-7).
+        let own = model.layers.firstIndex { $0.id == id } ?? 0
+        let below = model.layers.dropFirst(own + 1).first { item in candidates.contains { $0.id == item.id } }
+        let target = matte != 0 ? matte : (below?.id ?? 0)
+        if target == 0 { model.toast = AureaText.t("pn_mask_pick_layer_below") } else { write(target, value) }
+    }
+    private func layerKindGlyph(_ kind: Int) -> Character {
+        switch kind {
+        case 1: return CupertinoGlyph.VideocamFill
+        case 2: return CupertinoGlyph.PhotoFill
+        case 4: return CupertinoGlyph.Textformat
+        case 5: return CupertinoGlyph.Circle
+        default: return CupertinoGlyph.RectangleStack
         }
     }
     private func title(_ key: String) -> some View { Text(AureaText.t(key)).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted).padding(.top, 8).padding(.bottom, 4) }
@@ -2119,7 +2405,14 @@ struct MaskPanel: View {
             .lineSpacing(max(0, 16 - (UIFont(name: "Roboto-Regular", size: 12)?.lineHeight ?? 12)))
             .foregroundStyle(AureaColors.muted).fixedSize(horizontal: false, vertical: true)
     }
-    private func toggleKey() { if let mask { _ = model.engine.toggleMaskKey(id, mask: mask.id); model.refreshModel(force: true) } }
+    private func toggleKey() {
+        guard let mask else { return }
+        // Pontos escolhidos no laço: keyframe só deles (como no Motion).
+        let chosen = EditPointsState.shared.multi
+        if chosen.isEmpty { _ = model.engine.toggleMaskKey(id, mask: mask.id) }
+        else { _ = model.engine.toggleMaskPathPointsKey(id, mask: mask.id, points: chosen.sorted().map { NSNumber(value: $0) }) }
+        model.refreshModel(force: true)
+    }
     private func track(_ mask: UInt32, mode: UInt32) { let layer = id; model.performMediaOperation(AureaText.t("panel_rastreando")) { $0.trackMask(layer, mask: mask, mode: mode) } }
     private func update(_ mask: MaskItem, operation: UInt32? = nil, inverted: Bool? = nil, feather: Float? = nil, expansion: Float? = nil, opacity: Float? = nil) {
         _ = model.engine.setMaskProps(id, mask: mask.id, operation: operation ?? mask.operation, inverted: inverted ?? mask.inverted, feather: feather ?? mask.feather, expansion: expansion ?? mask.expansion, opacity: opacity ?? mask.opacity)
@@ -2181,389 +2474,310 @@ struct TextAnimationPanel: View {
     }
 }
 
+/// O ANIMADOR DE TEXTO, único. A lista mostra o que está aplicado e "+ Adicionar"; abrir um
+/// animador troca a lista pelo editor, na largura toda, com as seções recolhidas do Transformar
+/// texto do Motion. Par do TextAnimSection.kt.
 struct TextAnimationSection: View {
     var showAnimatorEffect = true
     var beforeAnimation: () -> Void = {}
-    /// Os animadores antes dos presets (a aba Animador das opções de texto).
-    var listFirst = false
+    var onEditing: (Bool) -> Void = { _ in }
     @EnvironmentObject private var model: AureaModel
     @State private var animators: [[Float]] = []
+    @State private var editing = -1
     @State private var animationError = false
     private var id: Int64 { model.primarySelection ?? 0 }
-    private var presets: [String] { ["edt_tp_pop", "edt_tp_jump", "pn_textpreset_slide", "panel_escala", "pn_textpreset_appear", "panel_desfoque", "pn_textpreset_word_highlight", "pn_pop", "pn_textpreset_typewriter", "pn_textpreset_wave", "pn_textpreset_elastic"].map { AureaText.t($0) } + extraTextPresetNames }
+    private var presets: [(key: String, glyph: Character)] { [
+        ("tp_m_type_in", CupertinoGlyph.Pencil), ("tp_m_decode", CupertinoGlyph.LockOpen), ("tp_m_uncensor", CupertinoGlyph.Eye), ("tp_m_password", CupertinoGlyph.Lock),
+        ("tp_m_title_spread", CupertinoGlyph.ArrowLeftRight), ("tp_m_fade_up", CupertinoGlyph.ArrowUp), ("tp_m_wave", CupertinoGlyph.Waveform),
+        ("tp_m_spin", CupertinoGlyph.ArrowCounterclockwise), ("tp_m_scale_word", CupertinoGlyph.Fullscreen), ("tp_m_scale_out", CupertinoGlyph.FullscreenExit),
+    ] }
     private func load() {
         let flat = model.engine.textAnimators(id).map(\.floatValue)
         animators = stride(from: 0, to: flat.count - flat.count % 40, by: 40).map { Array(flat[$0..<($0 + 40)]) }
     }
     private func refresh() { model.refreshModel(force: true); load() }
+    private var open: Bool { animators.indices.contains(editing) }
+    private static func glyph(_ props: Int) -> Character {
+        if props & (1 << 0) != 0 { return CupertinoGlyph.Move }
+        if props & (1 << 1) != 0 { return CupertinoGlyph.Fullscreen }
+        if props & (1 << 2) != 0 { return CupertinoGlyph.ArrowCounterclockwise }
+        if props & (1 << 3) != 0 { return CupertinoGlyph.CircleLefthalfFill }
+        if props & (1 << 5) != 0 { return CupertinoGlyph.Drop }
+        if props & (1 << 9) != 0 { return CupertinoGlyph.Paintbrush }
+        return CupertinoGlyph.Sparkles
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if listFirst { TextAnimatorList(animators: animators, reload: refresh, beforeAnimation: beforeAnimation) }
-            Text(AureaText.t("panel_animacao")).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted).padding(.top, 10)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(Array(presets.enumerated()), id: \.offset) { n, title in
-                        NativePanelChip(title) {
+            if open {
+                TextAnimatorEditor(index: editing, values: animators[editing], reload: refresh) { editing = -1 }
+            } else {
+                PanelSection(title: AureaText.t("ui_text_animators"), glyph: CupertinoGlyph.Sparkles, tag: "text.sec.animators", count: animators.count) {
+                    ForEach(animators.indices, id: \.self) { row($0) }
+                    PanelAddRow(label: AureaText.t("la_add"), tag: "anim.add") {
+                        beforeAnimation()
+                        let created = model.engine.addTextAnimator(id, props: 0b1111)
+                        refresh()
+                        if created >= 0 { editing = created }
+                    }
+                }
+                PanelSection(title: AureaText.t("ui_ready_anims"), glyph: CupertinoGlyph.WandStars, tag: "text.sec.presets") {
+                    PanelItemGrid(items: presets.enumerated().map { n, preset in
+                        PanelItem(glyph: preset.glyph, label: AureaText.t(preset.key), tag: "text.motion.preset.\(n)") {
                             beforeAnimation()
-                            animationError = !model.engine.applyTextPreset(id, preset: UInt32(n))
+                            animationError = !model.engine.applyMotionTextPreset(id, preset: UInt32(n))
                             refresh()
                         }
+                    })
+                }
+                // 0.4.4 Explodir texto (só camada de texto 2D): cada pedaço vira uma camada.
+                if model.selectedLayer?.kind == 4 {
+                    PanelSection(title: AureaText.t("tx044_explode"), glyph: CupertinoGlyph.Scissors, tag: "text.sec.explode", startOpen: false) {
+                        Text(AureaText.t("tx044_explode_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).fixedSize(horizontal: false, vertical: true).padding(.bottom, 6)
+                        PanelItemGrid(items: [(CupertinoGlyph.Textformat, "tx044_explode_chars"), (CupertinoGlyph.DocText, "tx044_explode_words"), (CupertinoGlyph.LineHorizontal3, "tx044_explode_lines")].enumerated().map { mode, entry in
+                            PanelItem(glyph: entry.0, label: AureaText.t(entry.1), tag: "text.explode.\(mode)") {
+                                beforeAnimation()
+                                let made = model.engine.explodeText(id, mode: UInt32(mode), keepOriginal: false)
+                                model.toast = made > 0 ? AureaText.t("tx044_explode_done", Int(made)) : AureaText.t("tx044_explode_fail")
+                                refresh()
+                            }
+                        }, columns: 3)
                     }
-                }.frame(height: 44)
+                }
             }
-            // 0.4.4 Explodir texto (só camada de texto 2D): cada pedaço vira uma camada.
-            if model.selectedLayer?.kind == 4 {
-                Text(AureaText.t("tx044_explode")).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted).padding(.top, 8)
-                Text(AureaText.t("tx044_explode_hint")).font(.aurea(size: 11)).foregroundStyle(AureaColors.muted)
-                HStack(spacing: 6) {
-                    ForEach(Array(["tx044_explode_chars", "tx044_explode_words", "tx044_explode_lines"].enumerated()), id: \.offset) { mode, key in
-                        NativePanelChip(AureaText.t(key)) {
-                            beforeAnimation()
-                            let made = model.engine.explodeText(id, mode: UInt32(mode), keepOriginal: false)
-                            model.toast = made > 0 ? AureaText.t("tx044_explode_done", Int(made)) : AureaText.t("tx044_explode_fail")
-                            refresh()
-                        }
-                    }
-                }.frame(height: 44).accessibilityIdentifier("text.explode")
-            }
-            // Omega conteúdo (área 06, P1-11): os animadores em LISTA (linha de 37 pt que abre os
-            // ajustes a partir dela) e "+ Adicionar" no fim, com os tipos.
-            if !listFirst { TextAnimatorList(animators: animators, reload: refresh, beforeAnimation: beforeAnimation).padding(.top, 6) }
-            if showAnimatorEffect { NativePanelChip(AureaText.t("text_animator_add")) {
-                beforeAnimation()
-                model.addEffectAndFocus(fxEffectTypeId("aurea.text.animator"), layer: id)
-                refresh(); model.openPanel(.effects)
-            }.accessibilityIdentifier("text.animator.add") }
-            // 0.4.6: o Text Animator Pro (só texto 2D). Par do Android.
-            if showAnimatorEffect && (model.engine.text3D(forLayer: id) ?? [:]).isEmpty { NativePanelChip(AureaText.t("text_animator_pro_add")) {
-                beforeAnimation()
-                model.addEffectAndFocus(fxEffectTypeId("aurea.text.animator_pro"), layer: id)
-                refresh(); model.openPanel(.effects)
-            }.accessibilityIdentifier("text.animator_pro.add") }
-            // 0.4.6: preset de texto do After Effects (.ffx) direto no Text Animator Pro. Par do Android.
-            if showAnimatorEffect && (model.engine.text3D(forLayer: id) ?? [:]).isEmpty { NativePanelChip(AureaText.t("text_animator_pro_import")) {
-                model.aeImportTextPro = true
-                OmegaChromeRequests.shared.aeImport = true
-            }.accessibilityIdentifier("text.animator_pro.ffx") }
-            if showAnimatorEffect { NativePanelChip(AureaText.t("text_transform_add")) {
-                beforeAnimation()
-                model.addEffectAndFocus(fxEffectTypeId("aurea.text.transform"), layer: id)
-                refresh(); model.openPanel(.effects)
-            }.accessibilityIdentifier("text.transform.add") }
-        }.foregroundStyle(AureaColors.text).onAppear { load() }.onChange(of: id) { _ in load() }
+        }.foregroundStyle(AureaColors.text).onAppear { load(); onEditing(open) }
+            .onChange(of: id) { _ in editing = -1; load() }
             .onChange(of: model.status.modelRevision) { _ in load() }.onChange(of: model.status.playhead) { _ in load() }
+            .onChange(of: open) { onEditing($0) }
             .alert(AureaText.t("ios_text_anim_title"), isPresented: $animationError) {
                 Button(AureaText.t("pn_ok"), role: .cancel) {}
             } message: {
                 Text(AureaText.t("ios_text_anim_failed"))
             }
     }
+    private func row(_ index: Int) -> some View {
+        let v = animators[index], on = v[0] > 0.5
+        return HStack(spacing: 0) {
+            Button { editing = index } label: {
+                HStack(spacing: 8) {
+                    CupertinoGlyph.text(Self.glyph(Int(v[1])), size: 18, color: on ? AureaColors.text : AureaColors.muted)
+                    Text(AureaText.t("edt_animation_n", index + 1)).font(.aurea(size: 13, weight: .semibold))
+                        .foregroundStyle(on ? AureaColors.text : AureaColors.muted).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                }.frame(height: 37).contentShape(Rectangle())
+            }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityIdentifier("anim.item.\(index)")
+            Button { setEnabled(index, !on) } label: {
+                CupertinoGlyph.text(on ? CupertinoGlyph.Eye : CupertinoGlyph.EyeSlash, size: 18, color: on ? AureaColors.text : AureaColors.muted).frame(width: 34, height: 37).contentShape(Rectangle())
+            }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityIdentifier("anim.item.\(index).eye")
+            Button { model.engine.removeTextAnimator(id, index: UInt32(index)); refresh() } label: {
+                CupertinoGlyph.text(CupertinoGlyph.Trash, size: 18, color: AureaColors.fxListIcon).frame(width: 34, height: 37).contentShape(Rectangle())
+            }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityLabel(AureaText.t("panel_remover")).accessibilityIdentifier("anim.item.\(index).delete")
+        }
+        .padding(.horizontal, 6).frame(height: 37)
+        .background(AureaColors.fxLowSurface, in: RoundedRectangle(cornerRadius: 5))
+        .padding(.vertical, 3)
+    }
+    private func setEnabled(_ index: Int, _ on: Bool) {
+        var next = animators[index]
+        next[0] = on ? 1 : 0
+        _ = model.engine.setTextAnimator(id, index: UInt32(index), values: next.map { NSNumber(value: $0) })
+        refresh()
+    }
 }
 
-/// Omega conteúdo (área 06, P1-11): a LISTA de animadores. Cada um é uma linha de 37 pt
-/// (▸, ícone, nome e o que ele mexe); tocar abre os ajustes a partir da linha (200 ms)
-/// com cabeçalho ▾ · ícone · nome · liga · ⋯ (duplicar, subir, descer) · 🗑. O último
-/// item é "+ Adicionar", que abre os tipos. Par do AnimatorList do TextAnimSection.kt.
-private struct TextAnimatorList: View {
+private struct TextKeyParam {
+    let key: Int
+    let label: String
+    let unit: String
+    let step: Float
+    let range: ClosedRange<Float>
+}
+
+/// O editor do animador, na largura toda. Par do AnimatorEditor do TextAnimSection.kt.
+private struct TextAnimatorEditor: View {
     @EnvironmentObject private var model: AureaModel
-    let animators: [[Float]]
+    let index: Int
+    let values: [Float]
     let reload: () -> Void
-    var beforeAnimation: () -> Void = {}
-    @State private var open = -1
-    @State private var adding = false
-    @State private var more = -1
+    let onClose: () -> Void
     private var id: Int64 { model.primarySelection ?? 0 }
-    /// As propriedades do animador (bit do motor, rótulo), na ordem do cartão.
-    private static let props: [(Int, String)] = [
-        (1 << 0, "fx_posicao"), (1 << 1, "panel_escala"), (1 << 2, "panel_rotacao"), (1 << 3, "panel_opacidade"),
-        (1 << 4, "ios_spacing"), (1 << 5, "panel_desfoque"), (1 << 6, "ios_skew"), (1 << 7, "panel_contorno"),
-        (1 << 8, "ios_scramble_letter"), (1 << 9, "panel_cor"), (1 << 10, "panel_cor_contorno"),
-    ]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(animators.indices, id: \.self) { index in
-                VStack(spacing: 0) {
-                    header(index)
-                    if open == index { NativeTextAnimatorCard(index: UInt32(index), values: animators[index], embedded: true) }
-                }
-                .background(AureaColors.fxListSurface, in: RoundedRectangle(cornerRadius: 5))
-                .clipShape(RoundedRectangle(cornerRadius: 5))
-                .padding(.vertical, 3.25)
-            }
-            Button { adding = true } label: {
-                HStack(spacing: 8) {
-                    CupertinoGlyph.text(CupertinoGlyph.Plus, size: 16)
-                    Text(AureaText.t("la_add")).font(.aurea(size: 13))
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 10).frame(height: 37)
-                .background(AureaColors.fxLowSurface, in: RoundedRectangle(cornerRadius: 5))
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(AureaPressStyle(shrink: 1))
-            .padding(.vertical, 2)
-            .accessibilityIdentifier("anim.add")
-            .aureaAnchoredMenu(isPresented: $adding, width: 300, tone: .editor, tag: "anim.add.menu") { addEntries() }
-        }
-        .foregroundStyle(AureaColors.text)
-        .animation(.easeInOut(duration: 0.2), value: open)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(AureaText.t("om_anim_list_cd"))
-        .accessibilityIdentifier("anim.list")
-        .onChange(of: model.primarySelection) { _ in open = -1 }
-    }
-
-    private func what(_ v: [Float]) -> String {
-        let bits = Int(v.count > 1 ? v[1] : 0)
-        return Self.props.filter { bits & $0.0 != 0 }.map { AureaText.t($0.1) }.joined(separator: ", ")
-    }
-
-    /// A linha do animador, como a lista de efeitos do Alight (37 pt). Fechada: ▸, nome, o que
-    /// ele mexe, olho e alça ≡ (soltar muda a ordem pela distância). Aberta: ▾, nome, olho, ⋮ e 🗑.
-    private func header(_ index: Int) -> some View {
-        let v = animators[index], list = what(v)
-        let on = v[0] > 0.5, isOpen = open == index
-        return HStack(spacing: 0) {
-            Button { open = isOpen ? -1 : index } label: {
-                HStack(spacing: 6) {
-                    CupertinoGlyph.text(isOpen ? CupertinoGlyph.ChevronDown : CupertinoGlyph.ChevronRight, size: 16,
-                                        color: AureaColors.text.opacity(isOpen ? 1 : 0.3))
-                    Text(AureaText.t("edt_animation_n", index + 1)).font(.aurea(size: 13, weight: isOpen ? .bold : .semibold))
-                        .foregroundStyle(on ? AureaColors.text : AureaColors.muted).lineLimit(1)
-                    if !isOpen { Text(list).font(.aurea(size: 11)).foregroundStyle(AureaColors.muted).lineLimit(1).padding(.leading, 2) }
-                    Spacer(minLength: 0)
-                }.frame(height: 37).contentShape(Rectangle())
-            }
-            .buttonStyle(AureaPressStyle(shrink: 1))
-            .accessibilityLabel(AureaText.t("om_anim_item_cd", index + 1, list))
-            .accessibilityIdentifier("anim.item.\(index)")
-            Button { set(index, [0: on ? 0 : 1]) } label: {
-                CupertinoGlyph.text(on ? CupertinoGlyph.Eye : CupertinoGlyph.EyeSlash, size: 18, color: on ? AureaColors.text : AureaColors.muted)
-                    .frame(width: 34, height: 37).contentShape(Rectangle())
-            }
-            .buttonStyle(AureaPressStyle(shrink: 1))
-            .accessibilityLabel(list)
-            .accessibilityAddTraits(on ? [.isSelected] : [])
-            .accessibilityIdentifier("anim.item.\(index).eye")
-            if !isOpen {
-                VStack(spacing: 2) {
-                    ForEach(0..<3, id: \.self) { _ in Rectangle().fill(AureaColors.muted).frame(width: 14, height: 1) }
-                }
-                .frame(width: 30, height: 37).contentShape(Rectangle())
-                .gesture(DragGesture(minimumDistance: 6).onEnded { g in
-                    let to = min(animators.count - 1, max(0, index + Int((g.translation.height / 37).rounded())))
-                    if to != index { _ = model.engine.moveTextAnimator(id, from: UInt32(index), to: UInt32(to)) }
-                    reload()
-                })
-                .accessibilityIdentifier("anim.item.\(index).grip")
-            }
-            if isOpen {
-                Button { more = index } label: {
-                    CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: 18, color: AureaColors.fxListIcon).frame(width: 34, height: 37).contentShape(Rectangle())
-                }
-                .buttonStyle(AureaPressStyle(shrink: 1))
-                .accessibilityLabel(AureaText.t("editor_mais"))
-                .accessibilityIdentifier("anim.item.\(index).more")
-                .aureaAnchoredMenu(isPresented: Binding(get: { more == index }, set: { if !$0 { more = -1 } }), tone: .editor, alignEnd: true,
-                                   tag: "anim.item.\(index).menu") {
-                    [
-                        .item(AureaText.t("om_anim_duplicate"), glyph: CupertinoGlyph.PlusSquareOnSquare, tag: "anim.item.\(index).duplicate") {
-                            if model.engine.duplicateTextAnimator(id, index: UInt32(index)) >= 0 { open = index + 1 }
-                            reload()
-                        },
-                        .item(AureaText.t("panel_mover_cima"), glyph: CupertinoGlyph.ArrowUp, enabled: index > 0) {
-                            if model.engine.moveTextAnimator(id, from: UInt32(index), to: UInt32(index - 1)) { open = index - 1 }
-                            reload()
-                        },
-                        .item(AureaText.t("panel_mover_baixo"), glyph: CupertinoGlyph.ArrowDown, enabled: index < animators.count - 1) {
-                            if model.engine.moveTextAnimator(id, from: UInt32(index), to: UInt32(index + 1)) { open = index + 1 }
-                            reload()
-                        },
-                    ]
-                }
-                Button {
-                    model.engine.removeTextAnimator(id, index: UInt32(index))
-                    open = -1
-                    reload()
-                } label: {
-                    CupertinoGlyph.text(CupertinoGlyph.Trash, size: 18, color: AureaColors.fxListIcon).frame(width: 34, height: 37).contentShape(Rectangle())
-                }
-                .buttonStyle(AureaPressStyle(shrink: 1))
-                .accessibilityLabel(AureaText.t("panel_remover"))
-                .accessibilityIdentifier("anim.item.\(index).delete")
-            }
-        }
-        .padding(.horizontal, 6)
-        .frame(height: 37)
-    }
-
-    private func set(_ index: Int, _ updates: [Int: Float]) {
-        let flat = model.engine.textAnimators(id).map(\.floatValue), start = index * 40
-        guard flat.count >= start + 40 else { return }
-        var next = Array(flat[start..<(start + 40)])
-        for (slot, value) in updates { next[slot] = value }
-        _ = model.engine.setTextAnimator(id, index: UInt32(index), values: next.map { NSNumber(value: $0) })
+    private var fields: [Float] { model.engine.textAnimatorFields(id, index: UInt32(index)).map(\.floatValue) }
+    private func selectorField(_ s: Int, _ f: Int) -> Int { 16 * (s + 1) + f }
+    private func setField(_ field: Int, _ value: Float) {
+        _ = model.engine.setTextAnimatorField(id, index: UInt32(index), field: UInt32(field), value: value)
         reload()
     }
-
-    /// Os tipos do "+ Adicionar": de texto (por propriedade), de camada e os efeitos de movimento.
-    private func addEntries() -> [MenuEntry] {
-        var entries: [MenuEntry] = [.header(AureaText.t("text_animator_add"))]
-        for (bit, key) in Self.props {
-            entries.append(.item(AureaText.t(key), glyph: CupertinoGlyph.Textformat) {
-                beforeAnimation()
-                let created = model.engine.addTextAnimator(id, props: UInt32(bit))
+    private func param(_ key: Int, _ label: String, _ unit: String, _ step: Float, _ range: ClosedRange<Float>) -> TextKeyParam {
+        TextKeyParam(key: key, label: AureaText.t(label), unit: unit, step: step, range: range)
+    }
+    private func row(_ p: TextKeyParam) -> some View {
+        let state = model.engine.textAnimValues(id, index: UInt32(index), keys: [NSNumber(value: p.key)]).map(\.floatValue)
+        let value = state.first ?? 0, flags = state.count > 1 ? Int(state[1]) : 0
+        let look: KeyframeLook = flags & 2 != 0 ? .keyHere : flags & 1 != 0 ? .animated : .none
+        let track = TimelineTrack(property: 33, effect: UInt32(index), param: UInt32(p.key))
+        let info = model.engine.expression(id, property: 33, effect: UInt32(index), param: UInt32(p.key))
+        let expression: ExpressionLook = (info["exists"] as? NSNumber)?.boolValue != true ? .none
+            : !((info["enabled"] as? NSNumber)?.boolValue ?? true) ? .off
+            : (info["error"] as? String ?? "").isEmpty ? .ok : .error
+        return NativePanelRuler(label: p.label, value: value, step: p.step, range: p.range, unit: p.unit, decimals: p.step < 0.5 ? 1 : 0, keypad: true,
+            look: look, expression: expression, onExpression: {
+                model.expressionSheet = ExpressionRequest(layer: id, label: p.label, tracks: [ExpressionTrack(property: 33, effect: UInt32(index), param: UInt32(p.key))], unit: p.unit)
+            }, selected: model.timelineFocus == [track], onSelect: { model.timelineFocus = [track] }, compactUnit: true, identifier: "anim.\(index).key.\(p.key)") {
+                model.engine.setTextAnimParam(id, index: UInt32(index), param: UInt32(p.key), value: $0)
                 reload()
-                if created >= 0 { open = created }
-            })
-        }
-        entries.append(.divider)
-        entries.append(.item(AureaText.t("la_animators"), glyph: CupertinoGlyph.Move) { model.transformTab = 6; model.openPanel(.transform) })
-        let motion: [(String, String)] = [("aurea.motion.oscillate.cycles", "fx_name_oscillate"), ("aurea.motion.swing", "fx_name_swing"),
-                                          ("aurea.motion.wiggle", "fx_name_wiggle"), ("aurea.motion.twitch", "fx_name_twitch")]
-        for (type, key) in motion {
-            entries.append(.item(AureaText.t(key), glyph: CupertinoGlyph.Sparkles) {
-                beforeAnimation()
-                model.addEffectAndFocus(fxEffectTypeId(type), layer: id)
-                reload()
-                model.openPanel(.effects)
-            })
-        }
-        return entries
-    }
-}
-
-private struct NativeAnimParam: Identifiable {
-    var id: Int
-    var slot: Int
-    var bit: Int
-    var label: String
-    var unit: String
-    var step: Float
-    var range: ClosedRange<Float>
-    static var selectors: [NativeAnimParam] { [
-        NativeAnimParam(id: 0, slot: 7, bit: 0, label: AureaText.t("panel_inicio"), unit: "%", step: 0.5, range: 0...100),
-        NativeAnimParam(id: 1, slot: 8, bit: 0, label: AureaText.t("panel_fim"), unit: "%", step: 0.5, range: 0...100),
-        NativeAnimParam(id: 2, slot: 9, bit: 0, label: AureaText.t("ios_anim_delay_between"), unit: "%", step: 0.5, range: -1000...1000),
-        NativeAnimParam(id: 3, slot: 10, bit: 0, label: AureaText.t("panel_intensidade"), unit: "%", step: 0.5, range: -100...100)
-    ] }
-    static var properties: [NativeAnimParam] { [
-        NativeAnimParam(id: 10, slot: 14, bit: 0, label: AureaText.t("panel_posicao_x"), unit: "px", step: 1, range: -5000...5000),
-        NativeAnimParam(id: 11, slot: 15, bit: 0, label: AureaText.t("panel_posicao_y"), unit: "px", step: 1, range: -5000...5000),
-        NativeAnimParam(id: 12, slot: 16, bit: 0, label: AureaText.t("pn_depth"), unit: "px", step: 1, range: -5000...5000),
-        NativeAnimParam(id: 13, slot: 17, bit: 1, label: AureaText.t("fx_escala_x"), unit: "%", step: 1, range: -2000...2000),
-        NativeAnimParam(id: 14, slot: 18, bit: 1, label: AureaText.t("fx_escala_y"), unit: "%", step: 1, range: -2000...2000),
-        NativeAnimParam(id: 15, slot: 19, bit: 2, label: AureaText.t("edt_rotation_x"), unit: "°", step: 1, range: -3600...3600),
-        NativeAnimParam(id: 16, slot: 20, bit: 2, label: AureaText.t("edt_rotation_y"), unit: "°", step: 1, range: -3600...3600),
-        NativeAnimParam(id: 17, slot: 21, bit: 2, label: AureaText.t("edt_rotation_z"), unit: "°", step: 1, range: -3600...3600),
-        NativeAnimParam(id: 18, slot: 22, bit: 3, label: AureaText.t("panel_opacidade"), unit: "%", step: 0.5, range: 0...100),
-        NativeAnimParam(id: 19, slot: 23, bit: 4, label: AureaText.t("ios_spacing"), unit: "px", step: 0.5, range: -500...500),
-        NativeAnimParam(id: 20, slot: 24, bit: 5, label: AureaText.t("panel_desfoque"), unit: "px", step: 0.2, range: 0...200),
-        NativeAnimParam(id: 21, slot: 25, bit: 6, label: AureaText.t("ios_skew"), unit: "°", step: 0.5, range: -80...80),
-        NativeAnimParam(id: 22, slot: 26, bit: 7, label: AureaText.t("panel_contorno"), unit: "px", step: 0.1, range: -50...50),
-        NativeAnimParam(id: 23, slot: 27, bit: 8, label: AureaText.t("ios_scramble_letter"), unit: "", step: 0.1, range: -1000...1000)
-    ] }
-}
-
-private struct NativeTextAnimatorCard: View {
-    @EnvironmentObject private var model: AureaModel
-    let index: UInt32
-    let values: [Float]
-    /// Omega conteúdo (área 06, P1-11): dentro da lista o cabeçalho é da linha aberta.
-    var embedded = false
-    private var id: Int64 { model.primarySelection ?? 0 }
-    // Portuguese names stay as the undo labels sent to the engine; the screen shows `titles`.
-    private let names = ["Posição", "Escala", "Rotação", "Opacidade", "Espaçamento", "Desfoque", "Inclinação", "Contorno", "Embaralhar letra", "Cor", "Cor do contorno"]
-    private var titles: [String] { ["fx_posicao", "panel_escala", "panel_rotacao", "panel_opacidade", "ios_spacing", "panel_desfoque", "ios_skew", "panel_contorno", "ios_scramble_letter", "panel_cor", "panel_cor_contorno"].map { AureaText.t($0) } }
-    private func set(_ updates: [Int: Float]) {
-        let flat = model.engine.textAnimators(id).map(\.floatValue), start = Int(index) * 40
-        guard flat.count >= start + 40 else { return }
-        var next = Array(flat[start..<(start + 40)])
-        for (slot, value) in updates { next[slot] = value }
-        _ = model.engine.setTextAnimator(id, index: index, values: next.map { NSNumber(value: $0) }); model.refreshModel(force: true)
-    }
-    var body: some View {
-        VStack(spacing: 0) {
-            if !embedded {
-                HStack(spacing: 8) {
-                    Text(AureaText.t("ios_animation_n", Int(index) + 1)).font(.aurea(size: 13, weight: .bold)).frame(maxWidth: .infinity, alignment: .leading)
-                    NativePanelChip(AureaText.t("panel_remover")) { model.engine.removeTextAnimator(id, index: index); model.refreshModel(force: true) }
-                    AureaToggle(checked: values[0] > 0.5) { set([0: $0 ? 1 : 0]) }
-                }.frame(height: 40)
             }
-            choices("panel_anima_cada", ["panel_letra", "panel_palavra", "panel_linha"], slot: 2)
-            choices("panel_escolhe", ["panel_ordem", "panel_sorteado", "ios_range_ae"], slot: 3)
-            selectorControls
-            ForEach(NativeAnimParam.properties.filter { Int(values[1]) & (1 << $0.bit) != 0 }) { param in NativeTextAnimRuler(index: index, param: param, values: values) }
-            ForEach([9, 10], id: \.self) { bit in if Int(values[1]) & (1 << bit) != 0 { colorRow(bit) } }
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(Array(names.enumerated()), id: \.offset) { bit, name in
-                        NativePanelChip(titles[bit], selected: Int(values[1]) & (1 << bit) != 0) { set([1: Float(Int(values[1]) ^ (1 << bit))]) }
-                    }
-                }.frame(height: 44)
-            }
-        }.padding(8).background(embedded ? Color.clear : AureaColors.chip.opacity(0.45), in: RoundedRectangle(cornerRadius: 10))
     }
-    @ViewBuilder private var selectorControls: some View {
-        if Int(values[3]) != 1 {
-            choices("panel_passagem", ["panel_seco", "panel_sobe", "panel_desce", "panel_triangulo", "panel_redondo", "panel_suave"], slot: 4)
-            HStack {
-                Text(AureaText.t("panel_ordem_aleatoria")).font(.aurea(size: 12)).frame(maxWidth: .infinity, alignment: .leading)
-                AureaToggle(checked: values[5] > 0.5) { set([5: $0 ? 1 : 0]) }
-            }.frame(height: 40)
-            ForEach(NativeAnimParam.selectors) { param in NativeTextAnimRuler(index: index, param: param, values: values) }
-        } else {
-            NativeTextAnimRuler(index: index, param: NativeAnimParam(id: 25, slot: 13, bit: 0, label: AureaText.t("panel_trocas_segundo"), unit: "", step: 0.05, range: 0...60), values: values)
-            NativeTextAnimRuler(index: index, param: NativeAnimParam.selectors[3], values: values)
-        }
+    private func choice(_ label: String, _ keys: [String], field: Int, current: Int) -> some View {
+        PanelChoiceRow(label: AureaText.t(label), options: keys.map { AureaText.t($0) }, isOn: { $0 == current }) { setField(field, Float($0)) }
     }
-    private func choices(_ label: String, _ keys: [String], slot: Int) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                Text(AureaText.t(label)).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
-                ForEach(Array(keys.enumerated()), id: \.offset) { n, key in NativePanelChip(AureaText.t(key), selected: Int(values[slot]) == n) { set([slot: Float(n)]) } }
-            }.frame(height: 40)
-        }
+    private func toggle(_ key: String, _ checked: Bool, _ set: @escaping (Bool) -> Void) -> some View {
+        NativePanelToggle(AureaText.t(key), checked: checked, fontSize: 13, weight: .regular, set: set)
     }
-    private func colorRow(_ bit: Int) -> some View {
-        let base = bit == 9 ? 28 : 32
+    private func color(_ key: String, base: Int) -> some View {
+        let slot = base == 6 ? 28 : 32
+        let rgba = [values[slot], values[slot + 1], values[slot + 2], 1]
+        let title = AureaText.t(key)
         return HStack {
-            Text(titles[bit]).font(.aurea(size: 12)); Spacer()
-            NativePanelColorWell(values: [values[base], values[base + 1], values[base + 2], 1]) {
-                model.beginGesture(names[bit])
-                model.colorSheet = ColorSheetRequest(title: titles[bit], initial: [values[base], values[base + 1], values[base + 2], 1], onChange: { r, g, b, _ in set([base: r, base + 1: g, base + 2: b]) }, onDone: { model.endGesture() })
+            Text(title).font(.aurea(size: 13)); Spacer()
+            NativePanelColorWell(values: rgba) {
+                model.colorSheet = ColorSheetRequest(title: title, initial: rgba, onChange: { r, g, b, _ in
+                    for (n, c) in [r, g, b].enumerated() { model.engine.setTextAnimParam(id, index: UInt32(index), param: UInt32(base + n), value: c) }
+                    reload()
+                }, onDone: {})
             }
         }.frame(height: 44)
     }
-}
-
-private struct NativeTextAnimRuler: View {
-    @EnvironmentObject private var model: AureaModel
-    let index: UInt32
-    let param: NativeAnimParam
-    let values: [Float]
-    private var id: Int64 { model.primarySelection ?? 0 }
-    private var track: TimelineTrack { TimelineTrack(property: 33, effect: index, param: UInt32(param.id)) }
-    private var look: KeyframeLook {
-        let bit = 1 << (param.id < 10 ? param.id : param.id - 10)
-        if Int(values[param.id < 10 ? 38 : 39]) & bit != 0 { return .keyHere }
-        return Int(values[param.id < 10 ? 36 : 37]) & bit != 0 ? .animated : .none
-    }
-    private var expression: ExpressionLook {
-        let info = model.engine.expression(id, property: 33, effect: index, param: UInt32(param.id))
-        guard (info["exists"] as? NSNumber)?.boolValue == true else { return .none }
-        guard (info["enabled"] as? NSNumber)?.boolValue ?? true else { return .off }
-        return (info["error"] as? String ?? "").isEmpty ? .ok : .error
-    }
     var body: some View {
-        NativePanelRuler(label: param.label, value: values[param.slot], step: param.step, range: param.range, unit: param.unit, decimals: param.step < 0.5 ? 1 : 0,
-            look: look, expression: expression, onExpression: {
-                model.expressionSheet = ExpressionRequest(layer: id, label: param.label, tracks: [ExpressionTrack(property: 33, effect: index, param: UInt32(param.id))], unit: param.unit)
-            }, selected: model.timelineFocus == [track], onSelect: { model.timelineFocus = [track] }, compactUnit: true, identifier: "anim.\(index).\(param.id)") {
-                model.engine.setTextAnimParam(id, index: index, param: UInt32(param.id), value: $0); model.refreshModel(force: true)
+        let f = fields
+        if f.count >= 32 { editor(f) }
+    }
+    @ViewBuilder private func editor(_ f: [Float]) -> some View {
+        let props = Int(f[0]), rig = f[1] > 0.5, tag = "anim.\(index)", on = values[0] > 0.5
+        let toggleProp: (Int) -> Void = { setField(0, Float(props ^ $0)) }
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 0) {
+                Button(action: onClose) {
+                    HStack(spacing: 8) {
+                        CupertinoGlyph.text(CupertinoGlyph.ChevronLeft, size: 18, color: AureaColors.text).mirrorsInRtl()
+                        Text(AureaText.t("edt_animation_n", index + 1)).font(.aurea(size: 14, weight: .bold)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                    }.frame(height: 40).contentShape(Rectangle())
+                }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityIdentifier("\(tag).back")
+                Button {
+                    var next = values; next[0] = on ? 0 : 1
+                    _ = model.engine.setTextAnimator(id, index: UInt32(index), values: next.map { NSNumber(value: $0) }); reload()
+                } label: {
+                    CupertinoGlyph.text(on ? CupertinoGlyph.Eye : CupertinoGlyph.EyeSlash, size: 18, color: on ? AureaColors.text : AureaColors.muted).frame(width: 36, height: 40).contentShape(Rectangle())
+                }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityIdentifier("\(tag).eye")
+                Button { _ = model.engine.duplicateTextAnimator(id, index: UInt32(index)); reload() } label: {
+                    CupertinoGlyph.text(CupertinoGlyph.PlusSquareOnSquare, size: 18, color: AureaColors.fxListIcon).frame(width: 36, height: 40).contentShape(Rectangle())
+                }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityIdentifier("\(tag).duplicate")
+                Button { model.engine.removeTextAnimator(id, index: UInt32(index)); onClose(); reload() } label: {
+                    CupertinoGlyph.text(CupertinoGlyph.Trash, size: 18, color: AureaColors.fxListIcon).frame(width: 36, height: 40).contentShape(Rectangle())
+                }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityLabel(AureaText.t("panel_remover")).accessibilityIdentifier("\(tag).delete")
             }
+            PanelSection(title: AureaText.t("fxs_range"), glyph: CupertinoGlyph.ArrowLeftRight, tag: "\(tag).sec.range", startOpen: false, stacked: false) {
+                row(param(0, "panel_inicio", "%", 0.5, -1000...1000)); row(param(1, "panel_fim", "%", 0.5, -1000...1000)); row(param(2, "fxl_offset", "%", 0.5, -1000...1000))
+            }
+            PanelSection(title: AureaText.t("fxs_transform"), glyph: CupertinoGlyph.Move, tag: "\(tag).sec.transform", startOpen: false, stacked: false) {
+                transformRows(f, props: props, rig: rig, toggleProp: toggleProp)
+            }
+            if !rig {
+                PanelSection(title: AureaText.t("fxl_anchor_point_grouping"), glyph: CupertinoGlyph.Move, tag: "\(tag).sec.grouping", startOpen: false, stacked: false) {
+                    choice("fxl_anchor_point_grouping", ["panel_letra", "panel_palavra", "panel_linha", "edt_cmd_all"], field: 3, current: Int(f[3]))
+                    row(param(56, "fxl_group_align_x", "%", 0.5, -100...100)); row(param(57, "fxl_group_align_y", "%", 0.5, -100...100))
+                }
+            }
+            PanelSection(title: AureaText.t("fxs_visual_attrs"), glyph: CupertinoGlyph.Paintbrush, tag: "\(tag).sec.visual", startOpen: false, stacked: false) {
+                toggle("fxl_override_fill_color", props & (1 << 9) != 0) { _ in toggleProp(1 << 9) }
+                if props & (1 << 9) != 0 { color("panel_cor", base: 6) }
+                if !rig {
+                    toggle("panel_cor_contorno", props & (1 << 10) != 0) { _ in toggleProp(1 << 10) }
+                    if props & (1 << 10) != 0 { color("panel_cor_contorno", base: 29) }
+                    toggle("ui_fill_hsb", props & (1 << 13) != 0) { _ in toggleProp(1 << 13) }
+                    if props & (1 << 13) != 0 {
+                        row(param(46, "fx_matiz", "°", 1, -3600...3600)); row(param(47, "fx_saturacao", "%", 0.5, -100...100)); row(param(48, "fx_brilho", "%", 0.5, -100...100))
+                    }
+                }
+            }
+            PanelSection(title: AureaText.t("fxs_interp_ease"), glyph: CupertinoGlyph.ArrowUpArrowDown, tag: "\(tag).sec.ease", startOpen: false, stacked: false) {
+                choice("fxl_shape", rig ? ["fxo_square_2", "fxo_smooth", "fxo_triangle"] : ["fxo_square_2", "panel_sobe", "panel_desce", "fxo_triangle", "panel_redondo", "fxo_smooth"], field: selectorField(0, 5), current: Int(f[selectorField(0, 5)]))
+                if !rig { row(param(32, "fx_suavidade", "%", 0.5, 0...100)) }
+                row(param(4, rig ? "fxl_ease_in" : "fxl_ease_high", "%", 0.5, -100...100)); row(param(5, rig ? "fxl_ease_out" : "fxl_ease_low", "%", 0.5, -100...100))
+                if rig { row(param(41, "fxl_overlap", "%", 0.5, 0...1000)) }
+            }
+            PanelSection(title: AureaText.t("fxl_random_order"), glyph: CupertinoGlyph.Arrow2Squarepath, tag: "\(tag).sec.random", startOpen: false, stacked: false) {
+                toggle("fxl_random_order", f[selectorField(0, 6)] > 0.5) { setField(selectorField(0, 6), $0 ? 1 : 0) }
+                HStack(spacing: 8) {
+                    Text(AureaText.t("fxl_seed")).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
+                    Text("\(Int(f[selectorField(0, 7)]))").font(.aurea(size: 13)).foregroundStyle(AureaColors.muted)
+                    NativePanelChip(AureaText.t("la_reroll")) { setField(selectorField(0, 7), Float(Int.random(in: 1...999_999))) }
+                }.frame(height: 44)
+            }
+            if !rig { selectors(f, tag: tag) }
+        }
+    }
+    @ViewBuilder private func transformRows(_ f: [Float], props: Int, rig: Bool, toggleProp: @escaping (Int) -> Void) -> some View {
+        choice("panel_anima_cada", ["panel_letra", "panel_palavra", "panel_linha", "ui_char_no_spaces"], field: selectorField(0, 2), current: Int(f[selectorField(0, 2)]))
+        if rig {
+            choice("fxl_anchor", ["fxo_layer", "fxl_component"], field: 2, current: Int(f[2]))
+            row(param(10, "panel_posicao_x", "px", 1, -20000...20000)); row(param(11, "panel_posicao_y", "px", 1, -20000...20000))
+            row(param(17, "fxl_angle", "°", 1, -1800...1800)); row(param(13, "panel_escala", "%", 1, -100...1000))
+            row(param(14, "fxl_stretch", "%", 1, -100...1000)); row(param(18, "panel_opacidade", "%", 0.5, -100...100))
+        } else {
+            row(param(10, "panel_posicao_x", "px", 1, -20000...20000)); row(param(11, "panel_posicao_y", "px", 1, -20000...20000)); row(param(12, "fxl_position_z", "px", 1, -20000...20000))
+            row(param(13, "fx_escala_x", "%", 1, -2000...2000)); row(param(14, "fx_escala_y", "%", 1, -2000...2000))
+            row(param(17, "panel_rotacao", "°", 1, -3600...3600)); row(param(15, "edt_rotation_x", "°", 1, -3600...3600)); row(param(16, "edt_rotation_y", "°", 1, -3600...3600))
+            row(param(18, "panel_opacidade", "%", 0.5, 0...100))
+            if props & (1 << 5) != 0 { row(param(20, "panel_desfoque", "px", 0.2, 0...200)) }
+            if props & (1 << 4) != 0 { row(param(19, "edt_prop_spacing", "px", 0.5, -500...500)) }
+            if props & (1 << 6) != 0 { row(param(21, "edt_prop_skew", "°", 0.5, -80...80)) }
+            if props & (1 << 7) != 0 { row(param(22, "panel_contorno", "px", 0.1, -50...50)) }
+            if props & (1 << 12) != 0 { row(param(45, "fxl_line_spacing", "px", 1, -20000...20000)) }
+            if props & (1 << 11) != 0 { row(param(42, "fxl_anchor", "px", 1, -20000...20000)); row(param(43, "fxl_anchor", "px", 1, -20000...20000)) }
+            let extras = [(1 << 5, "panel_desfoque"), (1 << 4, "edt_prop_spacing"), (1 << 6, "edt_prop_skew"), (1 << 7, "panel_contorno"), (1 << 12, "fxl_line_spacing"), (1 << 11, "fxl_anchor")]
+            PanelChoiceRow(label: AureaText.t("panel_propriedades"), options: extras.map { AureaText.t($0.1) }, isOn: { props & extras[$0].0 != 0 }) { toggleProp(extras[$0].0) }
+        }
+    }
+    private static let modes = ["panel_somar", "panel_subtrair", "panel_intersecao", "fxo_min", "fxo_maximum", "panel_diferenca"]
+    private func selectors(_ f: [Float], tag: String) -> some View {
+        let count = Int(f[15])
+        return PanelSection(title: AureaText.t("ui_selectors"), glyph: CupertinoGlyph.SliderHorizontal3, tag: "\(tag).sec.selectors", startOpen: false, count: count, stacked: false) {
+            choice("fxl_units", ["fxo_percentage", "fxo_index"], field: selectorField(0, 3), current: Int(f[selectorField(0, 3)]))
+            choice("fxl_mode", Self.modes, field: selectorField(0, 4), current: Int(f[selectorField(0, 4)]))
+            row(param(3, "panel_intensidade", "%", 0.5, -100...100))
+            ForEach(Array(1..<max(1, count)), id: \.self) { selectorBody($0, f, tag: tag) }
+            PanelItemGrid(items: [
+                PanelItem(glyph: CupertinoGlyph.ArrowLeftRight, label: AureaText.t("fxs_range"), tag: "\(tag).add.range") { addSelector(2) },
+                PanelItem(glyph: CupertinoGlyph.Waveform, label: AureaText.t("ui_wiggly"), tag: "\(tag).add.wiggly") { addSelector(5) },
+                PanelItem(glyph: CupertinoGlyph.Textformat, label: AureaText.t("panel_expressao"), tag: "\(tag).add.expression") { addSelector(3) },
+            ], columns: 3).padding(.top, 4)
+        }
+    }
+    private func addSelector(_ type: UInt32) {
+        _ = model.engine.addTextSelector(id, index: UInt32(index), type: type)
+        reload()
+    }
+    private func selectorBody(_ s: Int, _ f: [Float], tag: String) -> some View {
+        let type = Int(f[selectorField(s, 1)]), block = 64 * s
+        let title = AureaText.t(type == 5 ? "ui_wiggly" : type == 3 ? "panel_expressao" : "fxs_range")
+        let glyph = type == 5 ? CupertinoGlyph.Waveform : type == 3 ? CupertinoGlyph.Textformat : CupertinoGlyph.ArrowLeftRight
+        return PanelSection(title: "\(title) \(s + 1)", glyph: glyph, tag: "\(tag).sel.\(s).\(type)", flat: true, stacked: false) {
+            choice("fxl_mode", Self.modes, field: selectorField(s, 4), current: Int(f[selectorField(s, 4)]))
+            if type == 5 {
+                row(param(block + 34, "fxl_max_amount", "%", 0.5, -100...100)); row(param(block + 33, "fxl_min_amount", "%", 0.5, -100...100))
+                row(param(block + 25, "fxl_wiggles_second", "/s", 0.05, 0...60)); row(param(block + 35, "fxl_correlation", "%", 0.5, 0...100))
+                row(param(block + 36, "fxl_temporal_phase", "°", 1, -3600...3600)); row(param(block + 37, "fxl_spatial_phase", "°", 1, -3600...3600))
+                toggle("fxl_lock_dimensions", f[selectorField(s, 8)] > 0.5) { setField(selectorField(s, 8), $0 ? 1 : 0) }
+            } else if type == 3 {
+                Text(AureaText.t("ui_expr_selector_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).fixedSize(horizontal: false, vertical: true)
+                row(param(block + 38, "panel_intensidade", "%", 1, -1000...1000))
+            } else {
+                row(param(block, "panel_inicio", "%", 0.5, -1000...1000)); row(param(block + 1, "panel_fim", "%", 0.5, -1000...1000)); row(param(block + 2, "fxl_offset", "%", 0.5, -1000...1000))
+                row(param(block + 3, "panel_intensidade", "%", 0.5, -100...100))
+            }
+            PanelItemRow(glyph: CupertinoGlyph.Trash, title: AureaText.t("panel_remover"), tag: "\(tag).sel.\(s).delete", danger: true) {
+                _ = model.engine.removeTextSelector(id, index: UInt32(index), selector: UInt32(s))
+                reload()
+            }
+        }
     }
 }
 
@@ -2600,36 +2814,41 @@ struct NativeAnimationTrackActions: View {
 
 /// ANIMADORES DA CAMADA: entrada "começa de", saída, força e atraso entre
 /// letras, curva e wiggle — o mesmo cartão, régua e losango da animação de
-/// texto. O motor avalia (prévia = export). 32 floats por animador.
+/// texto. O motor avalia (prévia = export). 48 floats por animador
+/// (AureaModel.layerAnimFloats; a onda em 31..45).
 struct LayerAnimatorSection: View {
     @EnvironmentObject private var model: AureaModel
     @State private var animators: [[Float]] = []
     @State private var failed = false
+    @State private var open = 0
     private var id: Int64 { model.primarySelection ?? 0 }
     private func load() {
         let flat = model.engine.layerAnimators(id).map(\.floatValue)
-        animators = stride(from: 0, to: flat.count - flat.count % 32, by: 32).map { Array(flat[$0..<($0 + 32)]) }
+        let n = AureaModel.layerAnimFloats
+        animators = stride(from: 0, to: flat.count - flat.count % n, by: n).map { Array(flat[$0..<($0 + n)]) }
     }
     private func refresh() { model.refreshModel(force: true); load() }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(AureaText.t("la_animators")).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted)
-            if animators.isEmpty {
-                Text(AureaText.t("la_empty")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).padding(.top, 6)
-            }
-            ForEach(animators.indices, id: \.self) { index in
-                NativeLayerAnimatorCard(index: UInt32(index), values: animators[index], reload: refresh).padding(.top, 8)
-            }
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    NativePanelChip(AureaText.t("la_add")) { failed = model.engine.addLayerAnimator(id) < 0; refresh() }
-                    if !animators.isEmpty { NativePanelChip(AureaText.t("la_copy")) { _ = model.engine.copyLayerAnimators(id) } }
-                    NativePanelChip(AureaText.t("la_paste")) {
+            PanelSection(title: AureaText.t("la_animators"), glyph: CupertinoGlyph.Move, tag: "layer.anim.sec", count: animators.count) {
+                if animators.isEmpty {
+                    Text(AureaText.t("la_empty")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                }
+                ForEach(animators.indices, id: \.self) { index in
+                    NativeLayerAnimatorCard(index: UInt32(index), values: animators[index], reload: refresh, open: open == index) { open = open == index ? -1 : index }
+                }
+                PanelAddRow(label: AureaText.t("la_add"), tag: "layer.anim.add") {
+                    failed = model.engine.addLayerAnimator(id) < 0
+                    open = animators.count
+                    refresh()
+                }
+                PanelItemGrid(items: (animators.isEmpty ? [] : [PanelItem(glyph: CupertinoGlyph.DocOnDoc, label: AureaText.t("la_copy"), tag: "layer.anim.copy") { _ = model.engine.copyLayerAnimators(id) }]) + [
+                    PanelItem(glyph: CupertinoGlyph.DocOnClipboard, label: AureaText.t("la_paste"), tag: "layer.anim.paste") {
                         let ids = model.selection.isEmpty ? [id] : Array(model.selection)
                         _ = model.engine.pasteLayerAnimators(ids.map { NSNumber(value: $0) }); refresh()
-                    }
-                }.frame(height: 44)
-            }.padding(.top, 6)
+                    },
+                ])
+            }
         }.foregroundStyle(AureaColors.text).onAppear { load() }.onChange(of: id) { _ in load() }
             .onChange(of: model.status.modelRevision) { _ in load() }.onChange(of: model.status.playhead) { _ in load() }
             .alert(AureaText.t("la_animators"), isPresented: $failed) {
@@ -2646,7 +2865,13 @@ private struct NativeLayerAnimParam: Identifiable {
     var unit: String
     var step: Float
     var range: ClosedRange<Float>
-    var slot: Int { 6 + id }
+    /// Posição na consulta (Engine::layer_anim_slot): 0..17 em 6 + id; a onda
+    /// (18..29) em 32 + (id − 18), com os bits de keyframe em 44/45.
+    static let firstWave = 18
+    var slot: Int { id < Self.firstWave ? 6 + id : 32 + (id - Self.firstWave) }
+    var animatedSlot: Int { id < Self.firstWave ? 24 : 44 }
+    var keyedSlot: Int { id < Self.firstWave ? 25 : 45 }
+    var bit: Int { 1 << (id < Self.firstWave ? id : id - Self.firstWave) }
     static var strength: [NativeLayerAnimParam] { [
         NativeLayerAnimParam(id: 0, label: AureaText.t("la_progress"), unit: "%", step: 0.5, range: 0...100),
         NativeLayerAnimParam(id: 1, label: AureaText.t("la_strength"), unit: "%", step: 0.5, range: 0...100)
@@ -2671,6 +2896,21 @@ private struct NativeLayerAnimParam: Identifiable {
         NativeLayerAnimParam(id: 16, label: AureaText.t("la_wiggle_speed"), unit: "/s", step: 0.05, range: 0...60),
         NativeLayerAnimParam(id: 17, label: AureaText.t("la_wiggle_hold"), unit: "%", step: 0.5, range: 0...100)
     ] }
+    /// Onda (0.5.0): o animador automático do Alight Motion, em Hz e graus como no After Effects.
+    static var wave: [NativeLayerAnimParam] { [
+        NativeLayerAnimParam(id: 18, label: AureaText.t("panel_posicao_x"), unit: "px", step: 1, range: -20000...20000),
+        NativeLayerAnimParam(id: 20, label: AureaText.t("la_wave_freq_x"), unit: "Hz", step: 0.01, range: 0...60),
+        NativeLayerAnimParam(id: 19, label: AureaText.t("panel_posicao_y"), unit: "px", step: 1, range: -20000...20000),
+        NativeLayerAnimParam(id: 21, label: AureaText.t("la_wave_freq_y"), unit: "Hz", step: 0.01, range: 0...60),
+        NativeLayerAnimParam(id: 22, label: AureaText.t("panel_rotacao"), unit: "°", step: 0.5, range: -3600...3600),
+        NativeLayerAnimParam(id: 23, label: AureaText.t("la_wave_rot_freq"), unit: "Hz", step: 0.01, range: 0...60),
+        NativeLayerAnimParam(id: 24, label: AureaText.t("panel_escala"), unit: "%", step: 0.5, range: -1000...1000),
+        NativeLayerAnimParam(id: 25, label: AureaText.t("la_wave_scale_freq"), unit: "Hz", step: 0.01, range: 0...60),
+        NativeLayerAnimParam(id: 26, label: AureaText.t("la_wave_opacity_low"), unit: "%", step: 0.5, range: 0...100),
+        NativeLayerAnimParam(id: 27, label: AureaText.t("la_wave_opacity_high"), unit: "%", step: 0.5, range: 0...100),
+        NativeLayerAnimParam(id: 28, label: AureaText.t("la_wave_opacity_freq"), unit: "Hz", step: 0.01, range: 0...60),
+        NativeLayerAnimParam(id: 29, label: AureaText.t("la_wave_phase"), unit: "°", step: 1, range: -3600...3600)
+    ] }
 }
 
 private struct NativeLayerAnimatorCard: View {
@@ -2678,6 +2918,8 @@ private struct NativeLayerAnimatorCard: View {
     let index: UInt32
     let values: [Float]
     let reload: () -> Void
+    let open: Bool
+    let onToggle: () -> Void
     private var id: Int64 { model.primarySelection ?? 0 }
     private var isText: Bool { values[26] > 0.5 }
     private var unit: Int { Int(values[1]) }
@@ -2689,35 +2931,78 @@ private struct NativeLayerAnimatorCard: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Text(AureaText.t("la_animator_n", Int(index) + 1)).font(.aurea(size: 13, weight: .bold)).frame(maxWidth: .infinity, alignment: .leading)
-                NativePanelChip(AureaText.t("panel_remover")) { model.engine.removeLayerAnimator(id, index: index); reload() }
-                AureaToggle(checked: values[0] > 0.5) { set([0: $0 ? 1 : 0]) }
-            }.frame(height: 40)
-            if isText { choices("la_unit", ["la_unit_whole", "panel_letra", "panel_palavra", "panel_linha"], slot: 1) }
-            toggleLine("la_exit", hint: "la_exit_hint", checked: values[2] > 0.5) { set([2: $0 ? 1 : 0]) }
-            choices("la_ease", ["la_ease_linear", "la_ease_smooth", "la_ease_inout", "la_ease_back"], slot: 3)
-            groupLabel("la_strength_delay")
-            ForEach(NativeLayerAnimParam.strength) { ruler($0) }
-            if isText && unit != 0 {
-                ruler(NativeLayerAnimParam.delay)
-                NativePanelRuler(label: AureaText.t("beta_overlap"), value: values[28], step: 0.5,
-                    range: 0...100, unit: "%", keypad: true) { set([28: $0]) }
+            header
+            if open {
+                PanelSection(title: AureaText.t("fxo_general"), glyph: CupertinoGlyph.SliderHorizontal3, tag: "layer.anim.\(index).sec.general", flat: true) {
+                    if isText { choices("la_unit", ["la_unit_whole", "panel_letra", "panel_palavra", "panel_linha"], slot: 1) }
+                    toggleLine("la_exit", hint: "la_exit_hint", checked: values[2] > 0.5) { set([2: $0 ? 1 : 0]) }
+                    choices("la_ease", ["la_ease_linear", "la_ease_smooth", "la_ease_inout", "la_ease_back"], slot: 3)
+                }
+                PanelSection(title: AureaText.t("la_strength_delay"), glyph: CupertinoGlyph.Speedometer, tag: "layer.anim.\(index).sec.strength", flat: true) {
+                    ForEach(NativeLayerAnimParam.strength) { ruler($0) }
+                    if isText && unit != 0 {
+                        ruler(NativeLayerAnimParam.delay)
+                        NativePanelRuler(label: AureaText.t("beta_overlap"), value: values[28], step: 0.5,
+                            range: 0...100, unit: "%", keypad: true) { set([28: $0]) }
+                    }
+                }
+                PanelSection(title: AureaText.t("la_from"), glyph: CupertinoGlyph.ArrowDownRightSquare, tag: "layer.anim.\(index).sec.from", startOpen: false, flat: true) {
+                    ForEach(NativeLayerAnimParam.from.filter { ($0.id != 7 || values[4] > 0.5) && ($0.id != 11 || (isText && unit != 0)) }) { ruler($0) }
+                    toggleLine("la_scale_separate", hint: nil, checked: values[4] > 0.5) { set([4: $0 ? 1 : 0]) }
+                }
+                PanelSection(title: AureaText.t("la_wiggle"), glyph: CupertinoGlyph.Scribble, tag: "layer.anim.\(index).sec.wiggle", startOpen: false, flat: true) {
+                    ForEach(NativeLayerAnimParam.wiggle) { ruler($0) }
+                    Text(AureaText.t("la_wiggle_seed")).font(.aurea(size: 12)).padding(.top, 6)
+                    HStack(spacing: 8) {
+                        Text("\(Int(values[5]))").font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                        NativePanelChip(AureaText.t("la_reroll")) { set([5: Float(Int.random(in: 1...999_999))]) }
+                    }.frame(height: 44)
+                }
+                if values.count >= AureaModel.layerAnimFloats {
+                    PanelSection(title: AureaText.t("la_wave"), glyph: CupertinoGlyph.Waveform, tag: "layer.anim.\(index).sec.wave", startOpen: false, flat: true) {
+                        Text(AureaText.t("la_wave_hint")).font(.aurea(size: 11)).foregroundStyle(AureaColors.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                        // Forma (31): lida pelo motor só com a marca 2146 em 30.
+                        PanelChoiceRow(label: AureaText.t("la_wave_shape"), options: [AureaText.t("la_wave_sine"), AureaText.t("la_wave_triangle")], isOn: { Int(values[31]) == $0 }) { set([30: 2146, 31: Float($0)]) }
+                            .accessibilityIdentifier("layer.anim.\(index).wave.shape")
+                        ForEach(NativeLayerAnimParam.wave) { ruler($0) }
+                    }
+                }
             }
-            groupLabel("la_from")
-            ForEach(NativeLayerAnimParam.from.filter { ($0.id != 7 || values[4] > 0.5) && ($0.id != 11 || (isText && unit != 0)) }) { ruler($0) }
-            toggleLine("la_scale_separate", hint: nil, checked: values[4] > 0.5) { set([4: $0 ? 1 : 0]) }
-            groupLabel("la_wiggle")
-            ForEach(NativeLayerAnimParam.wiggle) { ruler($0) }
-            HStack(spacing: 8) {
-                Text(AureaText.t("la_wiggle_seed")).font(.aurea(size: 12)).frame(maxWidth: .infinity, alignment: .leading)
-                Text("\(Int(values[5]))").font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
-                NativePanelChip(AureaText.t("la_reroll")) { set([5: Float(Int.random(in: 1...999_999))]) }
-            }.frame(height: 44)
-        }.padding(8).background(AureaColors.chip.opacity(0.45), in: RoundedRectangle(cornerRadius: 10))
+        }
+        .background(AureaColors.fxLowSurface, in: RoundedRectangle(cornerRadius: 5))
+        .environment(\.toggleOffTrack, nil)
+        .environment(\.panelItemSurface, AureaColors.fxListSurface)
+        .padding(.vertical, 3)
     }
-    private func groupLabel(_ key: String) -> some View {
-        Text(AureaText.t(key)).font(.aurea(size: 12, weight: .bold)).foregroundStyle(AureaColors.muted).padding(.top, 10).padding(.bottom, 2)
+    private var header: some View {
+        let on = values[0] > 0.5
+        return HStack(spacing: 0) {
+            Button(action: onToggle) {
+                HStack(spacing: 8) {
+                    CupertinoGlyph.text(open ? CupertinoGlyph.ChevronDown : CupertinoGlyph.ChevronRight, size: 14, color: AureaColors.text.opacity(open ? 0.9 : 0.3))
+                    CupertinoGlyph.text(CupertinoGlyph.Move, size: 18, color: on ? AureaColors.text : AureaColors.muted)
+                    Text(AureaText.t("la_animator_n", Int(index) + 1)).font(.aurea(size: 13, weight: open ? .bold : .semibold))
+                        .foregroundStyle(on ? AureaColors.text : AureaColors.muted).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                }.frame(height: 37).contentShape(Rectangle())
+            }
+            .buttonStyle(AureaPressStyle(shrink: 1))
+            .accessibilityIdentifier("layer.anim.\(index).open")
+            Button { set([0: on ? 0 : 1]) } label: {
+                CupertinoGlyph.text(on ? CupertinoGlyph.Eye : CupertinoGlyph.EyeSlash, size: 18, color: on ? AureaColors.text : AureaColors.muted)
+                    .frame(width: 34, height: 37).contentShape(Rectangle())
+            }
+            .buttonStyle(AureaPressStyle(shrink: 1))
+            .accessibilityAddTraits(on ? .isSelected : [])
+            .accessibilityIdentifier("layer.anim.\(index).eye")
+            Button { model.engine.removeLayerAnimator(id, index: index); reload() } label: {
+                CupertinoGlyph.text(CupertinoGlyph.Trash, size: 18, color: AureaColors.fxListIcon)
+                    .frame(width: 34, height: 37).contentShape(Rectangle())
+            }
+            .buttonStyle(AureaPressStyle(shrink: 1))
+            .accessibilityLabel(AureaText.t("panel_remover"))
+            .accessibilityIdentifier("layer.anim.\(index).delete")
+        }.padding(.horizontal, 6).frame(height: 37)
     }
     private func toggleLine(_ key: String, hint: String?, checked: Bool, onChange: @escaping (Bool) -> Void) -> some View {
         HStack {
@@ -2729,16 +3014,11 @@ private struct NativeLayerAnimatorCard: View {
         }.padding(.vertical, 4)
     }
     private func choices(_ label: String, _ keys: [String], slot: Int) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                Text(AureaText.t(label)).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
-                ForEach(Array(keys.enumerated()), id: \.offset) { n, key in NativePanelChip(AureaText.t(key), selected: Int(values[slot]) == n) { set([slot: Float(n)]) } }
-            }.frame(height: 40)
-        }
+        PanelChoiceRow(label: AureaText.t(label), options: keys.map { AureaText.t($0) }, isOn: { Int(values[slot]) == $0 }) { set([slot: Float($0)]) }
     }
     private func ruler(_ param: NativeLayerAnimParam) -> some View {
-        let bit = 1 << param.id
-        let look: KeyframeLook = Int(values[25]) & bit != 0 ? .keyHere : (Int(values[24]) & bit != 0 ? .animated : .none)
+        let bit = param.bit
+        let look: KeyframeLook = Int(values[param.keyedSlot]) & bit != 0 ? .keyHere : (Int(values[param.animatedSlot]) & bit != 0 ? .animated : .none)
         // Expressão no valor do animador (TrackProperty::LayerAnimParam = 40).
         let info = model.engine.expression(id, property: 40, effect: index, param: UInt32(param.id))
         let expression: ExpressionLook = (info["exists"] as? NSNumber)?.boolValue != true ? .none

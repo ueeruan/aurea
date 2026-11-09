@@ -327,6 +327,17 @@ AUREA_TEST(FFmpegExport, IndependentValidationRejectsTruncatedFinalizedMp4) {
     if (error) return;
     AUREA_CHECK(!sink->validate_output(ExportOutputValidation{kWidth, kHeight, 30, 30, false}).ok());
 }
+AUREA_TEST(FFmpegExport, CleanEncodePassesContentCheckAndWrongPictureFailsItInBothModes) {
+    auto sink = make_ffmpeg_export_sink(nullptr); AUREA_CHECK(sink != nullptr); if (!sink) return;
+    const auto path = output("content-check");
+    if (!exportNumbered(*sink, path, 60, 30, false)) return;
+    ExportOutputValidation expected{kWidth, kHeight, 60, 30, false};
+    AUREA_CHECK(sink->validate_output(expected).ok());
+    expected.simulateContentMismatchFrame = 30;
+    AUREA_CHECK(!sink->validate_output(expected).ok());
+    expected.strict = false;
+    AUREA_CHECK(!sink->validate_output(expected).ok());
+}
 AUREA_TEST(FFmpegExport, MissingHalfOfAudioCannotPublishAValidVideoTrack) {
     auto sink = make_ffmpeg_export_sink(nullptr); AUREA_CHECK(sink != nullptr); if (!sink) return;
     const auto path = output("incomplete-audio");

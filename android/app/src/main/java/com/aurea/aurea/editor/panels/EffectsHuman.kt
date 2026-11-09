@@ -130,6 +130,12 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put("aurea.text.transform", EffectHuman(name = R.string.text_transform_name,
         keywords = "text transform texto transformar letras palavras linhas intervalo fase",
         principal = (0..17).toList()))
+    put("aurea.text.progress", EffectHuman(name = R.string.text_progress_name,
+        keywords = "text progress progresso texto digitar typewriter cursor", principal = (0..3).toList()))
+    put("aurea.text.randomizer", EffectHuman(name = R.string.text_randomizer_name,
+        keywords = "text randomizer aleatorio decodificar decode senha censura caracteres", principal = (0..6).toList()))
+    put("aurea.text.spacing", EffectHuman(name = R.string.text_spacing_name,
+        keywords = "text spacing espacamento letras linhas tracking entrelinha", principal = (0..1).toList()))
     put("aurea.text.animator", EffectHuman(name = R.string.text_animator_name,
         keywords = "text animator animador texto letras palavras linhas cor blur desfoque random aleatorio",
         principal = (0..23).toList()))

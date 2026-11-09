@@ -242,6 +242,32 @@ f32 sd_bolt(Vec2 q, Vec2 half, f32 tip) {
     return sd_polygon(q, v, 7);
 }
 
+// Lua: círculo de raio m menos o mesmo círculo com o centro em x = 2·m·d
+// (d 0..1 desliza a borda interna de −m a +m; 0,25 = a lua fina de sempre).
+f32 sd_moon(Vec2 q, f32 m, f32 d) {
+    const f32 outer = q.length() - m;
+    const f32 cut = (q - Vec2{2.0f * m * d, 0.0f}).length() - m;
+    return std::max(outer, -cut);
+}
+
+// Gota: círculo de base (raio r1, encostado embaixo) e a ponta em cima
+// (raio r2), unidos pelas tangentes — a cápsula desigual, com y para baixo.
+f32 sd_teardrop(Vec2 q, Vec2 half, f32 corner) {
+    const f32 r1 = std::max(1e-3f, std::min(half.x, half.y));
+    const f32 r2 = std::clamp(corner, 0.0f, r1 * 0.99f);
+    const f32 yc = half.y - r1;
+    const f32 h = yc + half.y - r2;   // centro da base até o centro da ponta
+    const Vec2 p{std::fabs(q.x), yc - q.y};
+    if (h <= 1e-3f) return p.length() - r1;
+    const f32 b = (r1 - r2) / h;
+    if (b >= 1.0f) return p.length() - r1;   // a ponta cabe dentro da base: só o círculo
+    const f32 a = std::sqrt(1.0f - b * b);
+    const f32 k = -b * p.x + a * p.y;
+    if (k < 0.0f) return p.length() - r1;
+    if (k > a * h) return (p - Vec2{0.0f, h}).length() - r2;
+    return a * p.x + b * p.y - r1;
+}
+
 bool type_default(u32 param) {
     return param == kParamDepth || param == kParamTip || param == kParamThickness || param == kParamHead;
 }
@@ -276,6 +302,7 @@ f32 default_param(u32 type, u32 param) noexcept {
                 case kFlower: return 0.28f;   // pétala de sempre (0,72 + 0,28·cos)
                 case kSeal: return 0.6f;
                 case kBlob: return 0.5f;
+                case kMoon: return 0.25f;     // a lua fina (offset 250/1000 do Alight)
                 default: return 0.4f;         // coração
             }
         case kParamTip: return type == kBubble ? 0.3f : 0.5f;
@@ -320,6 +347,224 @@ f32 param_value(const ShapeData& sh, u32 param) noexcept {
     f32 v = *f;
     if (!std::isfinite(v) || (v < 0.0f && type_default(param))) v = default_param(sh.shapeType, param);
     return clamp_param(param, v);
+}
+
+// =============================================================================
+// Alças de parâmetro (0.5.0)
+// =============================================================================
+
+namespace {
+
+constexpr Vec2 kPushDiagonal{0.70710678f, 0.70710678f};
+constexpr Vec2 kPushDown{0.0f, 1.0f};
+
+/// Medidas que as contas das alças usam, iguais às de `signed_distance`.
+struct HandleBox {
+    Vec2 half, st;
+    f32 m;
+    explicit HandleBox(const ShapeData& sh) noexcept {
+        half = Vec2{std::max(0.5f, sh.bounds.w * 0.5f), std::max(0.5f, sh.bounds.h * 0.5f)};
+        m = std::min(half.x, half.y);
+        st = Vec2{half.x / m, half.y / m};
+    }
+    [[nodiscard]] Vec2 stretch(Vec2 qs) const noexcept { return Vec2{qs.x * st.x, qs.y * st.y}; }
+    [[nodiscard]] Vec2 unstretch(Vec2 q) const noexcept { return Vec2{q.x / st.x, q.y / st.y}; }
+};
+
+f32 inner_of(const ShapeData& sh) noexcept { return std::clamp(sh.innerRadius, 0.05f, 0.95f); }
+
+/// Direção a partir do topo, no sentido horário da tela.
+Vec2 from_top(f32 a) noexcept { return Vec2{std::sin(a), -std::cos(a)}; }
+
+f32 sector_half(const ShapeData& sh) noexcept { return kPi / std::max(3.0f, sh.points); }
+
+/// Ponto de ângulo `deg` no sentido horário a partir do leste.
+Vec2 from_east(f32 deg) noexcept { const f32 a = deg * kPi / 180.0f; return Vec2{std::cos(a), std::sin(a)}; }
+
+/// A abertura do ângulo apontado, sem pular entre 360 e 0 quando o dedo cruza o leste.
+f32 sweep_from(Vec2 d, f32 current) noexcept {
+    f32 deg = std::atan2(d.y, d.x) * 180.0f / kPi;
+    if (deg < 0.0f) deg += 360.0f;
+    if (current > 270.0f && deg < 90.0f) return 360.0f;
+    if (current < 90.0f && deg > 270.0f) return 1.0f;
+    return deg;
+}
+
+f32 bubble_corner_limit(Vec2 half) noexcept { return std::min(half.x, half.y * 0.76f); }
+
+f32 seal_max_depth(f32 h) noexcept { return 1.0f - 1.0f / (std::cos(h) + std::sin(h)); }
+f32 seal_sector(const ShapeData& sh) noexcept { return kPi / std::clamp(std::round(sh.points), 3.0f, 64.0f); }
+
+f32 wave_period_factor(const ShapeData& sh, f32 hx) noexcept {
+    return kPi * std::clamp(std::round(sh.points), 1.0f, 32.0f) / std::max(hx, 1e-3f);
+}
+
+} // namespace
+
+u32 param_handles(const ShapeData& sh, ParamHandle* out) noexcept {
+    if (!out) return 0;
+    const HandleBox b(sh);
+    const f32 hx = b.half.x, hy = b.half.y, m = b.m;
+    const f32 inner = inner_of(sh);
+    const f32 depth = param_value(sh, kParamDepth), tip = param_value(sh, kParamTip), thick = param_value(sh, kParamThickness);
+    const f32 sweep = param_value(sh, kParamSweep), head = param_value(sh, kParamHead), shaft = param_value(sh, kParamShaft);
+    u32 n = 0;
+    const auto add = [&](u32 param, Vec2 pos, Vec2 push = Vec2{0.0f, 0.0f}, u32 style = 0) {
+        if (n < kMaxParamHandles) out[n++] = ParamHandle{param, style, pos, push};
+    };
+    switch (sh.shapeType) {
+        case kRect: {
+            const f32 r = std::clamp(sh.cornerRadius, 0.0f, m);
+            add(kParamCorner, Vec2{-hx + r, -hy + r}, kPushDiagonal);
+            break;
+        }
+        case kStar: add(kParamInner, b.stretch(Vec2{0.0f, -inner * m}), kPushDown); break;   // o vale do topo
+        case kCross: add(kParamInner, Vec2{m * inner, -hy}, kPushDown); break;
+        case kRing: add(kParamInner, Vec2{0.0f, -(hy - m * (1.0f - inner))}, kPushDown); break;
+        case kPie: {
+            const Vec2 d = from_east(sweep);
+            add(kParamSweep, Vec2{hx * d.x, hy * d.y}, Vec2{-d.x, -d.y}, 1);   // na borda: afasta para dentro
+            break;
+        }
+        case kArc: {
+            const f32 T = std::clamp(thick, 0.02f, 0.5f) * 2.0f * m;
+            const Vec2 d = from_east(sweep);
+            add(kParamSweep, b.stretch(Vec2{(m - T * 0.5f) * d.x, (m - T * 0.5f) * d.y}), Vec2{0.0f, 0.0f}, 1);
+            add(kParamThickness, b.stretch(Vec2{m - T, 0.0f}), Vec2{-1.0f, 0.0f});
+            break;
+        }
+        case kFlower: {
+            const f32 a = kPi / std::max(3.0f, sh.points), r = m * (1.0f - 2.0f * depth);
+            add(kParamDepth, b.stretch(Vec2{r * std::cos(a), r * std::sin(a)}));
+            break;
+        }
+        case kArrow:
+            add(kParamHead, Vec2{hx * (1.0f - 2.0f * head), -hy}, kPushDown);
+            add(kParamShaft, Vec2{-hx * 0.5f, -hy * shaft * 0.5f});
+            break;
+        case kDoubleArrow:
+            add(kParamHead, Vec2{hx * (1.0f - 2.0f * head), -hy}, kPushDown);
+            add(kParamInner, Vec2{0.0f, -hy * inner});
+            break;
+        case kTrapezoid: add(kParamInner, Vec2{hx * inner, -hy}, kPushDown); break;
+        case kParallelogram: add(kParamInner, Vec2{-hx + hx * inner, -hy}, kPushDown); break;
+        case kGear: {
+            const f32 root = m * (1.0f - depth);
+            add(kParamDepth, b.stretch(from_top(sector_half(sh)) * root));
+            add(kParamInner, b.stretch(Vec2{0.0f, -inner * root}));
+            break;
+        }
+        case kLine: add(kParamThickness, Vec2{0.0f, -std::max(0.5f, hy * thick)}, kPushDown); break;
+        case kDiamond: add(kParamTip, Vec2{0.0f, hy * (2.0f * std::clamp(tip, 0.05f, 0.95f) - 1.0f)}); break;
+        case kHeart: add(kParamDepth, b.stretch(Vec2{0.0f, (std::clamp(depth, 0.05f, 0.95f) * 0.5f - 1.0f) * m}), kPushDown); break;
+        case kSeal: {
+            const f32 h = seal_sector(sh), dl = 0.01f + std::clamp(depth, 0.0f, 1.0f) * std::max(0.0f, seal_max_depth(h) - 0.01f);
+            add(kParamDepth, b.stretch(from_top(h) * ((1.0f - dl) * m)));
+            break;
+        }
+        case kBubble: {
+            const f32 r = std::clamp(sh.cornerRadius, 0.0f, bubble_corner_limit(b.half));
+            add(kParamTip, Vec2{std::clamp(hx * (2.0f * tip - 1.0f), -hx * 0.92f, hx * 0.92f), hy}, Vec2{0.0f, -1.0f});
+            add(kParamCorner, Vec2{-hx + r, -hy + r}, kPushDiagonal);
+            break;
+        }
+        case kBolt: add(kParamTip, Vec2{(0.275f + (tip - 0.5f) * 0.8f) * hx, -hy}, kPushDown); break;
+        case kWave: {
+            const f32 T = std::clamp(thick, 0.02f, 1.0f) * 2.0f * hy, room = std::max(0.0f, hy - T * 0.5f);
+            const f32 a = param_value(sh, kParamAmplitude) * room;
+            const f32 k = wave_period_factor(sh, hx);
+            const f32 crest = -hx + kPi * 0.5f / k;
+            add(kParamAmplitude, Vec2{crest, a});
+            add(kParamThickness, Vec2{crest + kPi / k, -(a + T * 0.5f)}, kPushDown);
+            break;
+        }
+        case kMoon: add(kParamDepth, b.stretch(Vec2{(2.0f * depth - 1.0f) * m, 0.0f}), Vec2{1.0f, 0.0f}); break;
+        case kTeardrop: {
+            const f32 r2 = std::clamp(sh.cornerRadius, 0.0f, m * 0.99f);
+            add(kParamCorner, Vec2{0.0f, -hy + r2}, kPushDown);
+            break;
+        }
+        default: break;   // elipse, polígono, triângulo e blob só têm a caixa
+    }
+    return n;
+}
+
+bool value_from_handle(const ShapeData& sh, u32 param, Vec2 q, f32& value) noexcept {
+    if (!std::isfinite(q.x) || !std::isfinite(q.y)) return false;
+    ParamHandle handles[kMaxParamHandles];
+    const u32 n = param_handles(sh, handles);
+    bool has = false;
+    for (u32 i = 0; i < n; ++i) has |= handles[i].param == param;
+    if (!has) return false;
+    const HandleBox b(sh);
+    const f32 hx = b.half.x, hy = b.half.y, m = b.m;
+    const Vec2 qs = b.unstretch(q);
+    f32 v = 0.0f;
+    switch (sh.shapeType) {
+        case kRect: v = std::clamp(((q.x + hx) + (q.y + hy)) * 0.5f, 0.0f, m); break;
+        case kStar: v = qs.length() / m; break;
+        case kCross: v = std::fabs(q.x) / m; break;
+        case kRing: v = 1.0f - (hy - std::fabs(q.y)) / m; break;
+        case kPie: v = sweep_from(Vec2{q.x / hx, q.y / hy}, param_value(sh, kParamSweep)); break;
+        case kArc:
+            if (param == kParamSweep) v = sweep_from(qs, param_value(sh, kParamSweep));
+            else v = (m - qs.length()) / (2.0f * m);
+            break;
+        case kFlower: {
+            const f32 a = kPi / std::max(3.0f, sh.points);
+            v = (1.0f - (qs.x * std::cos(a) + qs.y * std::sin(a)) / m) * 0.5f;
+            break;
+        }
+        case kArrow:
+            if (param == kParamHead) v = (1.0f - q.x / hx) * 0.5f;
+            else v = 2.0f * std::fabs(q.y) / hy;
+            break;
+        case kDoubleArrow:
+            if (param == kParamHead) v = (1.0f - q.x / hx) * 0.5f;
+            else v = std::fabs(q.y) / hy;
+            break;
+        case kTrapezoid: v = std::fabs(q.x) / hx; break;
+        case kParallelogram: v = (q.x + hx) / hx; break;
+        case kGear:
+            if (param == kParamDepth) {
+                const Vec2 d = from_top(sector_half(sh));
+                v = 1.0f - (qs.x * d.x + qs.y * d.y) / m;
+            } else {
+                v = qs.length() / std::max(1e-3f, m * (1.0f - param_value(sh, kParamDepth)));
+            }
+            break;
+        case kLine: v = std::fabs(q.y) / hy; break;
+        case kDiamond: v = (q.y / hy + 1.0f) * 0.5f; break;
+        case kHeart: v = 2.0f * (qs.y / m + 1.0f); break;
+        case kSeal: {
+            const f32 h = seal_sector(sh);
+            const Vec2 d = from_top(h);
+            v = (1.0f - (qs.x * d.x + qs.y * d.y) / m - 0.01f) / std::max(1e-4f, seal_max_depth(h) - 0.01f);
+            break;
+        }
+        case kBubble:
+            if (param == kParamTip) v = (q.x / hx + 1.0f) * 0.5f;
+            else v = std::clamp(((q.x + hx) + (q.y + hy)) * 0.5f, 0.0f, bubble_corner_limit(b.half));
+            break;
+        case kBolt: v = (q.x / hx - 0.275f) / 0.8f + 0.5f; break;
+        case kWave: {
+            const f32 amp = param_value(sh, kParamAmplitude);
+            if (param == kParamAmplitude) {
+                const f32 T = std::clamp(param_value(sh, kParamThickness), 0.02f, 1.0f) * 2.0f * hy;
+                const f32 room = hy - T * 0.5f;
+                v = room > 1e-3f ? std::fabs(q.y) / room : amp;
+            } else {
+                // A amplitude encolhe junto com a folga: y = a·(h − t) + t.
+                v = amp < 0.98f ? (std::fabs(q.y) - amp * hy) / (1.0f - amp) / hy : param_value(sh, kParamThickness);
+            }
+            break;
+        }
+        case kMoon: v = (qs.x / m + 1.0f) * 0.5f; break;
+        case kTeardrop: v = std::clamp(hy + q.y, 0.0f, m * 0.99f); break;
+        default: return false;
+    }
+    value = clamp_param(param, v);
+    return std::isfinite(value);
 }
 
 void blob_phases(f32 seed, f32 out[3]) noexcept {
@@ -428,6 +673,8 @@ f32 signed_distance(u32 type, const SdfParams& p, Vec2 q, Vec2 half) noexcept {
             return std::max(wave_distance(q, half.x, a, k) - T * 0.5f, std::fabs(q.x) - half.x);
         }
         case kBlob: return sd_blob(qs, m, count, depth, p.blob) * mst;
+        case kMoon: return sd_moon(qs, m, depth) * mst;
+        case kTeardrop: return sd_teardrop(q, half, corner);
         default: return sd_round_box(q, half, 0.0f);
     }
 }

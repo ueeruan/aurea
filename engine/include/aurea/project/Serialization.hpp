@@ -79,7 +79,10 @@ struct SectionHeader {
 /// v53 (0.4.6): texto dinâmico, câmera paralela, repetir mídia, tangentes.
 /// v54 (0.4.6): opções completas da faixa de legendas (aparência própria).
 /// v55 (0.4.6): estilo próprio de cada bloco da faixa de legendas.
-constexpr u32 kTimelineSectionVersion = 56;
+/// v57 (0.5.0): onda dos animadores de camada (Alight Motion + unidades do AE).
+/// v58 (0.5.0): keyframe por ponto das máscaras. v59: animador de texto universal.
+/// v60 (0.5.0): modelo de cada animador de texto (matemática medida no After Effects).
+constexpr u32 kTimelineSectionVersion = 60;
 
 /// Cabeçalho do arquivo.
 struct FileHeader {

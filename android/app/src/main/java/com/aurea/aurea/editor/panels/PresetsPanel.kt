@@ -73,6 +73,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aurea.aurea.presets.PresetEntry
 import com.aurea.aurea.presets.PresetKind
+import com.aurea.aurea.presets.fitsText
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.ds.AureaAlert
 import com.aurea.aurea.ui.ds.AureaToggle
@@ -134,7 +135,7 @@ internal fun PresetsPanel(env: PanelEnv) {
         store.presetsOpenKind = null
     }
     val tab = if (picked in tabs) picked else tabs.first()
-    val onlyText: (PresetEntry) -> Boolean = { !isText || it.kind == PresetKind.Text }
+    val onlyText: (PresetEntry) -> Boolean = { !isText || (it.kind == PresetKind.Text && it.fitsText(store.text3d != null)) }
     var query by rememberSaveable { mutableStateOf(store.presetsOpenSearch.orEmpty()) }
     LaunchedEffect(Unit) { store.presetsOpenSearch = null }
     var stretch by rememberSaveable { mutableStateOf(false) }
@@ -282,7 +283,7 @@ internal fun PresetsPanel(env: PanelEnv) {
 internal fun TextPresetPicker(store: EditorStore, onAdded: () -> Unit) {
     val lib = store.presets
     var threeD by rememberSaveable { mutableStateOf(false) }
-    val list = lib.entries(PresetKind.Text)
+    val list = lib.entries(PresetKind.Text).filter { it.fitsText(threeD) }
     Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
         Row(
             Modifier.fillMaxWidth().height(46.dp),

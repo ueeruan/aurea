@@ -1,4 +1,5 @@
 #include "aurea/export/FFmpegExportSink.hpp"
+#include "aurea/export/ExportContentCheck.hpp"
 #include "aurea/export/NV12Copy.hpp"
 #include "aurea/export/ExportPacketLog.hpp"
 #include "AndroidCodecName.hpp"
@@ -86,19 +87,28 @@ constexpr u64 probationBytes = 64ull << 20;
 // cor/faixa trocado, quadro invertido ou layout errado passam de longe.
 constexpr f64 verifyMeanLimit = 3.0, verifyBlockLimit = 16.0;
 
-// Degraus que falharam neste processo (encoder do aparelho): o próximo export
-// começa direto no degrau que funciona, sem esperar a partida travar de novo.
+// Degraus que falharam há pouco (encoder do aparelho): o próximo export começa
+// direto no degrau que funciona, sem esperar a partida travar de novo. Vale por
+// 30 min: antes durava o processo inteiro, e um aperto passageiro condenava o
+// encoder de hardware até reabrir o app.
+constexpr u64 failedRungTtlNs = 30ull * 60ull * 1'000'000'000ull;
+struct FailedRung { std::string key; u64 atNs = 0; };
 std::mutex failedRungMutex;
-std::vector<std::string> failedRungs;
+std::vector<FailedRung> failedRungs;
 bool rung_failed_before(const char* key) noexcept {
+    const u64 now = monotonic_ns();
     std::lock_guard lock(failedRungMutex);
-    return std::find(failedRungs.begin(), failedRungs.end(), key) != failedRungs.end();
+    failedRungs.erase(std::remove_if(failedRungs.begin(), failedRungs.end(),
+                                     [now](const FailedRung& f) { return now - f.atNs > failedRungTtlNs; }), failedRungs.end());
+    return std::any_of(failedRungs.begin(), failedRungs.end(), [key](const FailedRung& f) { return f.key == key; });
 }
 void remember_failed_rung(const char* key) noexcept {
+    const u64 now = monotonic_ns();
     std::lock_guard lock(failedRungMutex);
     try {
-        if (std::find(failedRungs.begin(), failedRungs.end(), key) == failedRungs.end() && failedRungs.size() < 32)
-            failedRungs.emplace_back(key);
+        const auto found = std::find_if(failedRungs.begin(), failedRungs.end(), [key](const FailedRung& f) { return f.key == key; });
+        if (found != failedRungs.end()) found->atNs = now;
+        else if (failedRungs.size() < 32) failedRungs.push_back(FailedRung{key, now});
     } catch (...) {}
 }
 
@@ -446,6 +456,12 @@ private:
     bool nativeActive_ = false, nativeEos_ = false;
     std::vector<u8> extradata_;              ///< parâmetros globais do encoder atual (Annex-B ou avcC)
     std::vector<Retained> retained_;
+    /// Amostras do que foi entregue ao encoder, por quadro crescente (validação).
+    std::vector<export_content::Fingerprint> fingerprints_;
+    u32 fingerprintEvery_ = export_content::kFirstInterval;
+    u64 fingerprintFrame_ = 0;
+    u64 audioSourceSum_ = 0, audioSourceCount_ = 0;
+    void sample_source_frame(const u8* y, u32 ys, const u8* uv, u32 uvs) noexcept;
     bool probation_ = false;                 ///< quadros guardados; falha aqui = próximo degrau
     bool firstPacketPending_ = false;        ///< o 1o pacote ainda confere/abre o registro
     bool audioUnretained_ = false;           ///< entrou som no contêiner que não está em retained_ (sem troca)
@@ -641,6 +657,8 @@ Status FFmpegSink::open(const char* output, const VideoStreamConfig& video,
     audio_ = audio ? *audio : AudioStreamConfig{0, 0, 0};
     timing_ = Timing::Unknown; encoder_ = {};
     videoFrames_ = videoPackets_ = 0; videoHash_ = hashSeed;
+    fingerprints_.clear(); fingerprintEvery_ = export_content::kFirstInterval; fingerprintFrame_ = 0;
+    audioSourceSum_ = audioSourceCount_ = 0;
     completedVideoWrites_ = 0;
     lastVideoPts_ = AV_NOPTS_VALUE; lastVideoEnd_ = 0;
     audioInputSamples_ = audioConvertedSamples_ = audioSubmittedSamples_ = 0;
@@ -1110,7 +1128,8 @@ Status FFmpegSink::open_video(usize firstRung) noexcept {
         const auto text = last.detail().empty() ? last.message() : last.detail();
         char why[160];
         std::snprintf(why, sizeof(why), "%.*s", static_cast<int>(text.size()), text.data());
-        note_failure(why, !resumeMismatch);
+        // Falta de memória é do momento, não do encoder: não condena o degrau.
+        note_failure(why, !resumeMismatch && last.code() != Errc::OutOfMemory);
         if (last.code() == Errc::OutOfMemory) sawOutOfMemory = true;
     }
     rung_ = rungs_.size();
@@ -1148,6 +1167,7 @@ void FFmpegSink::reset_video_clock() noexcept {
     pendingHead_ = pendingCount_ = 0;
     const u64 resume = logMode_ ? video_.resumeFrame : 0;
     videoFrames_ = videoPackets_ = resume;
+    fingerprintFrame_ = resume;
     videoHash_ = hashSeed;
     for (u64 frame = 0; frame < resume; ++frame) videoHash_ = timestamp_hash(videoHash_, frame_pts(frame));
     lastVideoPts_ = resume ? frame_pts(resume - 1) : AV_NOPTS_VALUE;
@@ -1178,7 +1198,7 @@ Status FFmpegSink::fallback(Status reason) noexcept {
         char why[160];
         std::snprintf(why, sizeof(why), "%.*s", static_cast<int>(text.size()), text.data());
         if (!fallback_allowed(reason)) {
-            if (probation_ && !cancelled() && reason.code() != Errc::Cancelled) note_failure(why, !resumeMismatch_);
+            if (probation_ && !cancelled() && reason.code() != Errc::Cancelled) note_failure(why, !resumeMismatch_ && reason.code() != Errc::OutOfMemory);
             return reason;
         }
         note_failure(why);
@@ -1785,14 +1805,39 @@ Status FFmpegSink::write_video_with_fallback(const u8* y, u32 ys, const u8* uv, 
     }
     if (probation_)
         if (const Status kept = retain(y, ys, uv, uvs, pts, duration, timed); !kept.ok()) return kept;
+    sample_source_frame(y, ys, uv, uvs);
     Status result = write_video_impl(y, ys, uv, uvs, pts, duration, timed);
     // Recusa/travada do encoder antes do 1o pacote: o quadro atual já está
     // guardado e vai junto com os outros para o próximo degrau.
     if (!result.ok() && probation_) result = fallback(result);
-    if (result.ok()) ++completedVideoWrites_;
+    if (result.ok()) { ++completedVideoWrites_; ++fingerprintFrame_; }
     if (!probation_ && !retained_.empty()) std::vector<Retained>().swap(retained_);
     directFrame_ = nullptr;   // vale só para esta chamada (o motor reusa o slot)
     return result;
+}
+
+void FFmpegSink::sample_source_frame(const u8* y, u32 ys, const u8* uv, u32 uvs) noexcept {
+    // Surface direta confirmada: o motor parou de gerar o NV12, este buffer não é o quadro.
+    if (directConfirmed_ || directFrame_ || fingerprintFrame_ % fingerprintEvery_) return;
+    try {
+        if (fingerprints_.size() >= export_content::kMaxSamples) {
+            const u32 wider = fingerprintEvery_ * 2;
+            fingerprints_.erase(std::remove_if(fingerprints_.begin(), fingerprints_.end(),
+                                               [wider](const export_content::Fingerprint& f) { return f.frame % wider; }),
+                                fingerprints_.end());
+            fingerprintEvery_ = wider;
+            if (fingerprintFrame_ % fingerprintEvery_) return;
+        }
+        export_content::Planes planes;
+        planes.y = y; planes.cb = uv; planes.cr = uv + 1;
+        planes.yStride = static_cast<i32>(ys);
+        planes.cbStride = planes.crStride = static_cast<i32>(uvs);
+        planes.chromaStep = 2;
+        export_content::Fingerprint sample;
+        sample.frame = static_cast<u32>(fingerprintFrame_);
+        export_content::compute(planes, video_.width, video_.height, sample);
+        fingerprints_.push_back(sample);
+    } catch (...) {}   // sem memória para a amostra: a validação confere as outras
 }
 
 Status FFmpegSink::write_video_impl(const u8* y, u32 ys, const u8* uv, u32 uvs,
@@ -1999,6 +2044,10 @@ Status FFmpegSink::write_audio(const i16* pcm, u32 frames, i64 pts) noexcept {
 }
 
 Status FFmpegSink::write_audio_direct(const i16* pcm, u32 frames) noexcept {
+    for (u32 i = 0; i < frames * audio_.channels; i += 7) {
+        audioSourceSum_ += static_cast<u64>(std::abs(static_cast<int>(pcm[i])));
+        ++audioSourceCount_;
+    }
     u32 consumed = 0;
     while (consumed < frames) {
         if (cancelled()) return error(Errc::Cancelled, "conversao de audio FFmpeg cancelada");
@@ -2301,6 +2350,8 @@ Status FFmpegSink::decode_validate(const ExportOutputValidation& expected) noexc
         }
     }
     if (videoIndex < 0) return error(Errc::CorruptData, "arquivo FFmpeg sem faixa de video");
+    // Os dois modos: o projeto tinha som e o arquivo saiu sem a faixa.
+    if (hasAudio_ && audioIndex < 0) return error(Errc::CorruptData, "arquivo exportado sem a faixa de audio do projeto");
     if ((audioIndex >= 0) != hasAudio_) {
         if (const Status s = soft(Errc::CorruptData, "arquivo FFmpeg sem faixas esperadas"); !s.ok()) return s;
     }
@@ -2326,7 +2377,7 @@ Status FFmpegSink::decode_validate(const ExportOutputValidation& expected) noexc
         int code = avcodec_parameters_to_context(context, stream->codecpar);
         if (code < 0) return error(Errc::DecodeFailed, "parametros do decoder independente FFmpeg", code);
         context->pkt_timebase = stream->time_base;
-        context->thread_count = 4;
+        context->thread_count = std::clamp(expected.decodeThreads, 1, 4);
         // Tolerante: o decoder esconde o erro do pacote (o quadro sai marcado)
         // em vez de explodir — a contagem de quadros decodificáveis é o que vale.
         context->err_recognition = AV_EF_CRCCHECK | AV_EF_BITSTREAM | AV_EF_BUFFER | (strict ? AV_EF_EXPLODE : 0);
@@ -2352,6 +2403,31 @@ Status FFmpegSink::decode_validate(const ExportOutputValidation& expected) noexc
     i64 previousAudioRawEnd = AV_NOPTS_VALUE;
     u64 progressAt = monotonic_ns();
     const u64 stall = expected.stallNs ? expected.stallNs : codecStallNs;
+    f64 decodedAudioSum = 0.0;
+    u64 decodedAudioCount = 0, contentChecked = 0;
+    // Quadro decodificado x o que o encoder recebeu. Reprova nos dois modos:
+    // verde, preto ou cor trocada não são divergência de relógio.
+    auto check_content = [&](const AVFrame* picture, u64 index) noexcept -> Status {
+        const auto found = std::lower_bound(fingerprints_.begin(), fingerprints_.end(), index,
+            [](const export_content::Fingerprint& f, u64 wanted) { return f.frame < wanted; });
+        if (found == fingerprints_.end() || found->frame != index) return OkStatus;
+        const bool planar = picture->format == AV_PIX_FMT_YUV420P || picture->format == AV_PIX_FMT_YUVJ420P;
+        if (!planar && picture->format != AV_PIX_FMT_NV12) return OkStatus;
+        export_content::Planes planes;
+        planes.y = picture->data[0]; planes.yStride = picture->linesize[0];
+        planes.cb = picture->data[1]; planes.cbStride = picture->linesize[1];
+        planes.cr = planar ? picture->data[2] : picture->data[1] + 1;
+        planes.crStride = planar ? picture->linesize[2] : picture->linesize[1];
+        planes.chromaStep = planar ? 1 : 2;
+        export_content::Fingerprint decodedSample;
+        export_content::compute(planes, video_.width, video_.height, decodedSample);
+        const export_content::Difference d = export_content::compare(*found, decodedSample);
+        ++contentChecked;
+        if (!export_content::damaged(d) && expected.simulateContentMismatchFrame != index) return OkStatus;
+        AUREA_LOG_WARN("export: quadro %llu saiu diferente do render (Y %.1f, CbCr %.1f)",
+                       static_cast<unsigned long long>(index), d.meanY, d.meanC);
+        return error(Errc::CorruptData, "o video final saiu com imagem errada (verde, preta ou com cor trocada)");
+    };
     auto receive = [&](AVCodecContext* context, int index, bool video, bool final, unsigned& obtained) noexcept -> Status {
         obtained = 0;
         for (;;) {
@@ -2387,6 +2463,13 @@ Status FFmpegSink::decode_validate(const ExportOutputValidation& expected) noexc
                 if (checked.ok() && timing_ == Timing::Constant && normalized !=
                     av_rescale_q(static_cast<i64>(frames), av_inv_q(rate_), videoTimebase_))
                     checked = soft(Errc::CorruptData, "arquivo FFmpeg perdeu um frame do relogio absoluto");
+                if (checked.ok() && frame->width == static_cast<int>(expected.width) &&
+                    frame->height == static_cast<int>(expected.height)) {
+                    const i64 index = timing_ == Timing::Constant
+                        ? av_rescale_q_rnd(normalized, videoTimebase_, av_inv_q(rate_), AV_ROUND_NEAR_INF)
+                        : static_cast<i64>(frames);
+                    checked = check_content(frame, static_cast<u64>(std::max<i64>(index, 0)));
+                }
                 if (checked.ok()) {
                     hash = timestamp_hash(hash, normalized); previousVideo = normalized;
                     if (++frames > videoFrames_) checked = soft(Errc::CorruptData, "arquivo FFmpeg possui frames adicionais");
@@ -2405,6 +2488,10 @@ Status FFmpegSink::decode_validate(const ExportOutputValidation& expected) noexc
                             (previousAudioRawEnd != AV_NOPTS_VALUE && std::abs(start - previousAudioRawEnd) > 1))
                             checked = soft(Errc::CorruptData, "AAC FFmpeg possui pacote repetido, lacuna ou padding excessivo");
                         previousAudioRawEnd = end;
+                        if (frame->format == AV_SAMPLE_FMT_FLTP) {
+                            const auto* samples = reinterpret_cast<const float*>(frame->extended_data[0]);
+                            for (int i = 0; i < frame->nb_samples; i += 7) { decodedAudioSum += std::fabs(samples[i]) * 32768.0; ++decodedAudioCount; }
+                        }
                         // AAC priming is removed by the MP4 edit list / decoder. The
                         // final coded frame may extend past the exact stream duration.
                         const i64 clippedStart = std::max<i64>(0, start);
@@ -2461,6 +2548,12 @@ Status FFmpegSink::decode_validate(const ExportOutputValidation& expected) noexc
     if (audioDecoding) if (const Status status = submit(decoded.audio, audioIndex, false, nullptr); !status.ok()) return status;
     // Nos dois modos: um arquivo sem nenhum quadro decodificável não é vídeo.
     if (frames == 0) return error(Errc::CorruptData, "arquivo exportado FFmpeg sem nenhum quadro decodificavel");
+    AUREA_LOG_INFO("export: imagem conferida em %llu de %llu amostras",
+                   static_cast<unsigned long long>(contentChecked), static_cast<unsigned long long>(fingerprints_.size()));
+    if (audioDecoding && audioSourceCount_ && decodedAudioCount &&
+        export_content::audio_lost(static_cast<f64>(audioSourceSum_) / static_cast<f64>(audioSourceCount_),
+                                   decodedAudioSum / static_cast<f64>(decodedAudioCount)))
+        return error(Errc::CorruptData, "o video final saiu sem som, mas o projeto tem audio");
     if (frames != videoFrames_ || hash != videoHash_)
         if (const Status s = soft(Errc::CorruptData, "validacao FFmpeg encontrou frames ausentes ou PTS alterados"); !s.ok())
             return s;

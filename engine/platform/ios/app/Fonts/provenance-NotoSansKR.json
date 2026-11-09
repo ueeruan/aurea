@@ -1,0 +1,9 @@
+{
+  "source": "https://github.com/notofonts/noto-cjk/blob/Sans2.004/Sans/SubsetOTF/KR/NotoSansKR-Regular.otf",
+  "version": "Sans2.004",
+  "license": "OFL-1.1",
+  "licenseFile": "LICENSE-NotoSansKR.txt",
+  "subset": "fontTools subset: Hangul (U+1100-11FF, U+3130-318F, U+A960-A97F, U+AC00-D7FF), latim basico e pontuacao, sem hinting",
+  "sha256": "858736ab6a70eff6ccf2e4969e974d538bb94227750f6de5acc25b96994773eb",
+  "use": "Reserva coreana do motor compartilhado; o NotoSansCJK do Android 15 e CFF2"
+}

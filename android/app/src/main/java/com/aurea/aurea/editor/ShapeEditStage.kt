@@ -11,7 +11,6 @@ import com.aurea.aurea.editor.panels.ShapeEditState
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.LayerType
-import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.min
 
@@ -23,14 +22,21 @@ import kotlin.math.min
  * esquerda) que arredonda os cantos. Arrastar o corpo da forma continua
  * movendo a camada. Cada arrasto = um passo de desfazer.
  *
- * Índices: 0 TL, 1 TR, 2 BR, 3 BL, 4 cima, 5 direita, 6 baixo, 7 esquerda,
- * 8 raio.
+ * Índices: 0 TL, 1 TR, 2 BR, 3 BL, 4 cima, 5 direita, 6 baixo, 7 esquerda;
+ * de 8 em diante, as alças dos parâmetros da silhueta (0.5.0, como no Alight
+ * Motion): raio, ponta, abertura… Onde cada uma fica e o que o arrasto muda é
+ * do motor (`query_shape_param_handles`/`drag_shape_param_handle`).
  */
 internal object ShapeEditStage {
-    /** Alças na tela (x,y intercalados, 9 alças) desenhadas no último quadro. */
-    val handles = FloatArray(18)
+    /** Alças na tela (x,y intercalados) desenhadas no último quadro. */
+    val handles = FloatArray(24)
     var count = 0
     var grabbed = -1
+    /** Parâmetro, estilo e posição real (px da forma) de cada alça de 8 em diante. */
+    val params = IntArray(4)
+    val styles = IntArray(4)
+    val shapeX = FloatArray(4)
+    val shapeY = FloatArray(4)
 }
 
 private val SIGN_X = intArrayOf(-1, 1, 1, -1, 0, 1, 0, -1)
@@ -56,30 +62,42 @@ internal fun DrawScope.drawShapeEditHandles(store: EditorStore, m: StageMapper) 
         h[8 + i * 2 + 1] = (c[i * 2 + 1] + c[j * 2 + 1]) / 2
     }
     ShapeEditStage.count = 8
-    val type = d.shapeTypePoints and 0xFFFF
     val w = d.sourceWidth.toFloat()
     val hh = d.sourceHeight.toFloat()
-    if (type == 0 && w > 0f && hh > 0f) {
-        // Raio: o ponto (ρ, ρ) da camada, no mínimo a 24 dp do canto (senão a
-        // alça some embaixo da alça do canto quando o raio é 0).
-        val rho = min(d.shapeCorner, min(w, hh) / 2f)
+    val raw = store.shapeParamHandles()
+    if (raw != null && w > 0f && hh > 0f) {
         val ux = (c[2] - c[0]) / w
         val uy = (c[3] - c[1]) / w
         val vx = (c[6] - c[0]) / hh
         val vy = (c[7] - c[1]) / hh
-        var px = ux * rho + vx * rho
-        var py = uy * rho + vy * rho
         val minD = 24.dp.toPx()
-        val dist = hypot(px, py)
-        if (dist < minD) {
-            val dx = ux + vx
-            val dy = uy + vy
-            val l = hypot(dx, dy)
-            if (l > 1e-6f) { px = dx / l * minD; py = dy / l * minD }
+        val n = min(raw.size / 6, 4)
+        for (k in 0 until n) {
+            val sx = raw[k * 6]
+            val sy = raw[k * 6 + 1]
+            ShapeEditStage.shapeX[k] = sx
+            ShapeEditStage.shapeY[k] = sy
+            ShapeEditStage.params[k] = raw[k * 6 + 2].toInt()
+            ShapeEditStage.styles[k] = raw[k * 6 + 3].toInt()
+            var px = c[0] + ux * (sx + w / 2f) + vx * (sy + hh / 2f)
+            var py = c[1] + uy * (sx + w / 2f) + vy * (sy + hh / 2f)
+            // Só o desenho se afasta das alças de tamanho; o arrasto parte da posição real.
+            val pushX = ux * raw[k * 6 + 4] + vx * raw[k * 6 + 5]
+            val pushY = uy * raw[k * 6 + 4] + vy * raw[k * 6 + 5]
+            val pushLen = hypot(pushX, pushY)
+            if (pushLen > 1e-6f) {
+                for (i in 0 until 8) {
+                    val gap = hypot(px - h[i * 2], py - h[i * 2 + 1])
+                    if (gap < minD) {
+                        px += pushX / pushLen * (minD - gap)
+                        py += pushY / pushLen * (minD - gap)
+                    }
+                }
+            }
+            h[(8 + k) * 2] = px
+            h[(8 + k) * 2 + 1] = py
         }
-        h[16] = c[0] + px
-        h[17] = c[1] + py
-        ShapeEditStage.count = 9
+        ShapeEditStage.count = 8 + n
     }
     val grabbed = ShapeEditStage.grabbed
     val under = ShellColors.OutlineUnder
@@ -90,16 +108,18 @@ internal fun DrawScope.drawShapeEditHandles(store: EditorStore, m: StageMapper) 
         drawCircle(Color.White, r, o)
         drawCircle(AureaColors.Accent, r, o, style = m.ring15)
     }
-    if (ShapeEditStage.count == 9) {
-        val o = Offset(h[16], h[17])
-        val r = (if (grabbed == 8) 8.dp else 7.dp).toPx()
+    for (i in 8 until ShapeEditStage.count) {
+        val o = Offset(h[i * 2], h[i * 2 + 1])
+        val r = (if (grabbed == i) 8.dp else 7.dp).toPx()
         drawCircle(under, r + 1.5.dp.toPx(), o)
         drawCircle(AureaColors.Accent, r, o)
-        drawCircle(Color.White, r * 0.35f, o)
+        // Ângulo: miolo escuro em anel; os outros, ponto branco.
+        if (ShapeEditStage.styles[i - 8] == 1) drawCircle(Color.White, r * 0.55f, o, style = m.ring15)
+        else drawCircle(Color.White, r * 0.35f, o)
     }
 }
 
-/** Alça sob o dedo (a mais próxima dentro de [reach]); o raio ganha empate. */
+/** Alça sob o dedo (a mais próxima dentro de [reach]); as de parâmetro ganham empate. */
 internal fun pickShapeHandle(x: Float, y: Float, reach: Float): Int {
     val h = ShapeEditStage.handles
     var best = reach
@@ -118,7 +138,6 @@ internal suspend fun AwaitPointerEventScope.shapeEditGesture(store: EditorStore,
     if (d == null || !m.valid || m.fit <= 0f || !LayerGeometry.corners(d, c)) return
     val w0 = d.sourceWidth.toFloat().coerceAtLeast(1f)
     val h0 = d.sourceHeight.toFloat().coerceAtLeast(1f)
-    val r0 = d.shapeCorner
     val lenU = hypot(c[2] - c[0], c[3] - c[1])
     val lenV = hypot(c[6] - c[0], c[7] - c[1])
     if (lenU < 1e-4f || lenV < 1e-4f) return
@@ -136,7 +155,10 @@ internal suspend fun AwaitPointerEventScope.shapeEditGesture(store: EditorStore,
     var lastV = 0f
     var sent = false
     ShapeEditStage.grabbed = handle
-    store.beginGesture(if (handle == 8) "raio da forma" else "tamanho da forma")
+    val param = if (handle >= 8) ShapeEditStage.params[handle - 8] else -1
+    val startX = if (handle >= 8) ShapeEditStage.shapeX[handle - 8] else 0f
+    val startY = if (handle >= 8) ShapeEditStage.shapeY[handle - 8] else 0f
+    store.beginGesture(if (handle >= 8) "parâmetro da forma" else "tamanho da forma")
     down.consume()
     try {
         while (true) {
@@ -148,9 +170,9 @@ internal suspend fun AwaitPointerEventScope.shapeEditGesture(store: EditorStore,
             val dy = (ch.position.y - down.position.y) / m.fit
             val du = (dx * ux + dy * uy) / ku
             val dv = (dx * vx + dy * vy) / kv
-            if (handle == 8) {
-                val r = (r0 + (du + dv) / 2f).coerceIn(0f, min(w0, h0) / 2f)
-                store.setShapeParam(1, r)
+            if (handle >= 8) {
+                store.dragShapeParamHandle(param, startX + du, startY + dv, continuing = sent)
+                sent = true
                 continue
             }
             // O passo desde o último envio (px da forma, eixos da camada).

@@ -596,10 +596,19 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)moveTextAnimator:(long long)layerId from:(uint32_t)from to:(uint32_t)to;
 - (void)setTextAnimParam:(long long)layerId index:(uint32_t)index param:(uint32_t)param value:(float)value;
 - (void)toggleTextAnimKey:(long long)layerId index:(uint32_t)index param:(uint32_t)param;
+/// 0.5.0, animador universal: campos que não animam (Engine::query_text_animator_fields).
+- (NSArray<NSNumber*>*)textAnimatorFields:(long long)layerId index:(uint32_t)index NS_SWIFT_NAME(textAnimatorFields(_:index:));
+- (BOOL)setTextAnimatorField:(long long)layerId index:(uint32_t)index field:(uint32_t)field value:(float)value NS_SWIFT_NAME(setTextAnimatorField(_:index:field:value:));
+/// Valor no cabeçote e estado (1 animado, 2 keyframe aqui, 4 expressão): 2 números por chave.
+- (NSArray<NSNumber*>*)textAnimValues:(long long)layerId index:(uint32_t)index keys:(NSArray<NSNumber*>*)keys NS_SWIFT_NAME(textAnimValues(_:index:keys:));
+- (NSInteger)addTextSelector:(long long)layerId index:(uint32_t)index type:(uint32_t)type NS_SWIFT_NAME(addTextSelector(_:index:type:));
+- (BOOL)removeTextSelector:(long long)layerId index:(uint32_t)index selector:(uint32_t)selector NS_SWIFT_NAME(removeTextSelector(_:index:selector:));
 - (BOOL)applyTextPreset:(long long)layerId preset:(uint32_t)preset;
+/// 0.5.0: preset no modelo do Motion (efeitos de texto com keyframes; 0..9).
+- (BOOL)applyMotionTextPreset:(long long)layerId preset:(uint32_t)preset;
 /// 0.4.4 Explodir texto: 0 letras, 1 palavras, 2 linhas. Quantas camadas criou (-1 = não deu).
 - (int32_t)explodeText:(long long)layerId mode:(uint32_t)mode keepOriginal:(BOOL)keepOriginal;
-// --- Animadores de camada (32 floats cada — Engine::kLayerAnimFloats) --------
+// --- Animadores de camada (48 floats cada — Engine::kLayerAnimFloats) --------
 - (NSArray<NSNumber*>*)layerAnimators:(long long)layerId;
 - (NSInteger)addLayerAnimator:(long long)layerId;
 - (void)removeLayerAnimator:(long long)layerId index:(uint32_t)index;
@@ -999,6 +1008,9 @@ NS_SWIFT_NAME(AureaEngine)
 /// O trecho de curva amostrado pelo motor (`sample_keyframe_ease`): `count` valores em t = i/(count−1).
 /// handles = [x1, y1, x2, y2, força]; [] = pedido inválido.
 - (NSArray<NSNumber*>*)sampleEase:(uint32_t)interpolation handles:(NSArray<NSNumber*>*)handles count:(uint32_t)count NS_SWIFT_NAME(sampleEase(_:handles:count:));
+/// Velocidade e influência <-> alças da bézier: [x1, y1, x2, y2] ou
+/// [velocidade saída, influência saída, velocidade entrada, influência entrada]; [] = recusado.
+- (NSArray<NSNumber*>*)temporalEase:(BOOL)toHandles values:(NSArray<NSNumber*>*)values seconds:(float)seconds delta:(float)delta NS_SWIFT_NAME(temporalEase(_:values:seconds:delta:));
 - (NSString*)applyPreset:(long long)layerId json:(NSString*)json duration:(int64_t)duration;
 - (NSString*)trackPoint:(long long)layerId x:(float)x y:(float)y stabilize:(BOOL)stabilize;
 - (NSDictionary<NSString*, id>*)cameraTrackingStatus;
@@ -1171,6 +1183,10 @@ NS_SWIFT_NAME(AureaEngine)
 /// Bugs 0.3.4 (bug 11): "Converter em contorno" — forma viva vira camada vetorial (EngineOmegaOutline.cpp).
 - (BOOL)convertShapeToOutline:(long long)layerId NS_SWIFT_NAME(convertShapeToOutline(_:));
 - (BOOL)toggleVectorPathKey:(long long)layerId group:(uint32_t)group path:(uint32_t)path NS_SWIFT_NAME(toggleVectorPathKey(_:group:path:));
+/// 0.5.0: keyframe só dos pontos escolhidos da máscara, no cabeçote.
+- (BOOL)toggleMaskPathPointsKey:(long long)layerId mask:(uint32_t)mask points:(NSArray<NSNumber*>*)points NS_SWIFT_NAME(toggleMaskPathPointsKey(_:mask:points:));
+/// 0.5.0: keyframe só dos pontos escolhidos, no cabeçote.
+- (BOOL)toggleVectorPathPointsKey:(long long)layerId group:(uint32_t)group path:(uint32_t)path points:(NSArray<NSNumber*>*)points NS_SWIFT_NAME(toggleVectorPathPointsKey(_:group:path:points:));
 - (BOOL)setVectorParam:(long long)layerId group:(uint32_t)group param:(uint32_t)param value:(float)value;
 - (BOOL)keyVectorParam:(long long)layerId group:(uint32_t)group param:(uint32_t)param;
 - (BOOL)toggleVectorParamKey:(long long)layerId group:(uint32_t)group param:(uint32_t)param NS_SWIFT_NAME(toggleVectorParamKey(_:group:param:));
@@ -1193,6 +1209,10 @@ NS_SWIFT_NAME(AureaEngine)
 /// Alça de largura da caixa de texto (dx, dy em px da composição).
 - (BOOL)dragTextBoxWidth:(long long)layerId dx:(float)dx dy:(float)dy continuing:(BOOL)continuing NS_SWIFT_NAME(dragTextBoxWidth(_:dx:dy:continuing:));
 /// Alça de tamanho da forma (0..7): du/dv = passo em px da forma.
+/// 0.5.0: alças dos parâmetros da forma, 6 floats cada (x, y, parâmetro, estilo, empurrão X/Y).
+- (NSArray<NSNumber*>*)shapeParamHandles:(long long)layerId NS_SWIFT_NAME(shapeParamHandles(_:));
+/// 0.5.0: leva a alça do parâmetro ao ponto (x, y), em px da forma, origem no centro.
+- (BOOL)dragShapeParamHandle:(long long)layerId param:(uint32_t)param x:(float)x y:(float)y continuing:(BOOL)continuing NS_SWIFT_NAME(dragShapeParamHandle(_:param:x:y:continuing:));
 - (BOOL)resizeShapeHandle:(long long)layerId handle:(uint32_t)handle du:(float)du dv:(float)dv keepRatio:(BOOL)keepRatio
                fromCenter:(BOOL)fromCenter continuing:(BOOL)continuing NS_SWIFT_NAME(resizeShapeHandle(_:handle:du:dv:keepRatio:fromCenter:continuing:));
 /// Apaga uma fonte importada (arquivo + lista); os textos voltam à fonte padrão.

@@ -2238,10 +2238,11 @@ private fun DrawScope.drawMasks(m: StageMapper, ms: EditorStore.MaskState, edit:
         drawPath(path, if (on) MaskEditColor else MaskOtherColor, style = if (on) m.outlineOver else m.batchOver)
         if (!on) continue
         // Pontos: quadrados (o 1º maior enquanto desenha: tocar nele fecha).
-        val half = 5.5.dp.toPx()
+        val half = 4.5.dp.toPx()
         for (i in 0 until n) {
             val c = Offset(sx(p[i * 6], p[i * 6 + 1]), sy(p[i * 6], p[i * 6 + 1]))
-            val h = if (drawing && i == 0 && n >= 3) half * 1.6f else half
+            // After Effects: fora do desenho, o primeiro ponto do caminho fechado também aparece maior.
+            val h = if (drawing && i == 0 && n >= 3) half * 1.6f else if (i == 0 && mask.closed && n >= 2) half * 1.4f else half
             drawRect(ShellColors.OutlineUnder, Offset(c.x - h - 1.5f, c.y - h - 1.5f), androidx.compose.ui.geometry.Size(2 * h + 3f, 2 * h + 3f))
             drawRect(if (i == sel) MaskEditColor else Color.White, Offset(c.x - h, c.y - h), androidx.compose.ui.geometry.Size(2 * h, 2 * h))
         }
@@ -2256,8 +2257,8 @@ private fun DrawScope.drawMasks(m: StageMapper, ms: EditorStore.MaskState, edit:
                 val t = Offset(sx(tx, ty), sy(tx, ty))
                 drawLine(ShellColors.OutlineUnder, c, t, 3f * density)
                 drawLine(MaskEditColor, c, t, 1.5f * density)
-                drawCircle(ShellColors.OutlineUnder, 7.5.dp.toPx(), t)
-                drawCircle(MaskEditColor, 6.dp.toPx(), t)
+                drawCircle(ShellColors.OutlineUnder, 5.25.dp.toPx(), t)
+                drawCircle(MaskEditColor, 3.75.dp.toPx(), t)
             }
         }
     }

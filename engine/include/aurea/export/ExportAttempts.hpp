@@ -165,7 +165,8 @@ enum class ExportRetryKind : u32 {
         case ExportFailure::Media: return code == static_cast<i32>(Errc::MediaSourceMissing) ? ExportRetryKind::None
                                                                                             : ExportRetryKind::Stall;
         case ExportFailure::File:
-        case ExportFailure::Storage: return ExportRetryKind::None;
+        case ExportFailure::Storage:
+        case ExportFailure::RenderHung: return ExportRetryKind::None;
         default: break;
     }
     switch (static_cast<Errc>(code)) {

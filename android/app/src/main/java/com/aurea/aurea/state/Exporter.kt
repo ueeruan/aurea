@@ -965,6 +965,7 @@ class Exporter internal constructor(
         ExportProgress.FAILURE_FILE -> text(R.string.expfail_file)
         ExportProgress.FAILURE_STORAGE -> text(R.string.msg_sem_espaco_no_aparelho_libere_espaco).trimEnd('.', ' ')
         ExportProgress.FAILURE_UNSUPPORTED -> text(R.string.expfail_unsupported)
+        ExportProgress.FAILURE_RENDER_HUNG -> text(R.string.expfail_render_hung)
         else -> null
     }
 
@@ -1024,9 +1025,11 @@ class Exporter internal constructor(
      */
     private fun rateModeFor(hevc: Boolean): Int = runCatching {
         val mime = if (hevc) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
-        val info = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.firstOrNull {
+        val encoders = MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos.filter {
             it.isEncoder && it.supportedTypes.any { type -> type.equals(mime, ignoreCase = true) }
         }
+        // O motor prefere o encoder de hardware: a taxa tem de ser a que ele anuncia.
+        val info = encoders.firstOrNull { Build.VERSION.SDK_INT >= 29 && it.isHardwareAccelerated } ?: encoders.firstOrNull()
         val enc = info?.getCapabilitiesForType(mime)?.encoderCapabilities
         when {
             enc?.isBitrateModeSupported(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR) == true -> 1

@@ -11,6 +11,7 @@
 //  (EffectAdd pelo apply_command_internal; camadas com os padrões de
 //  add_text/add_null/add_camera/add_light), sem abrir passos próprios.
 // =============================================================================
+#include "aurea/text/TextAnimator.hpp"
 #include "aurea/Engine.hpp"
 
 #include "aurea/core/Log.hpp"
@@ -196,6 +197,8 @@ ae::ImportReport Engine::import_ae_data(const std::string& raw, const std::strin
         return report;
     }
     const CompositionId compId = project_->timeline().current();
+    // O importador monta os efeitos antes de ligar as trilhas: a migração fica para o fim.
+    struct DeferMigration { bool& flag; explicit DeferMigration(bool& f) : flag(f) { flag = true; } ~DeferMigration() { flag = false; } } deferMigration(deferTextMigration_);
     const i64 durationBefore = comp->duration().value;
     std::unique_ptr<Composition> before = comp->clone();
 
@@ -396,6 +399,9 @@ ae::ImportReport Engine::import_ae_data(const std::string& raw, const std::strin
     }
     ae::finish_report(report);
     AUREA_LOG_INFO("importar do AE (%s): %s", kind.c_str(), report.message.c_str());
+    // O importador monta efeitos do After Effects; o animador único fica com eles.
+    for (u32 i = 0; i < comp->order().size(); ++i)
+        if (Layer* layer = comp->layer(comp->order().at(i))) text::migrate_text_effects(*layer);
     return report;
 }
 

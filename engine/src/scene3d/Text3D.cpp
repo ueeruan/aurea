@@ -1647,10 +1647,10 @@ void apply_text3d_animators(const SceneAsset& asset, const Layer& layer, f64 loc
     nodeOpacity.clear();
     if (nodeFill) nodeFill->clear();
     // Formas 3D também: cada parte é uma unidade (textUnits = parte, parte, 0).
-    const bool transform = asset.textGlyphLayout && text::has_transform_effect(layer);
+    const bool transform = asset.textGlyphLayout && text::has_rig_animators(layer.text);
     const bool presets = asset.textGlyphLayout && text::has_animators(layer.text);
     if ((!asset.textGlyphLayout && !asset.shapeParts) ||
-        (!layeranim::has_units(layer) && !text::has_animator_effect(layer) && !transform && !presets)) return;
+        (!layeranim::has_units(layer) && !transform && !presets)) return;
     const usize n = std::min(asset.nodes.size(), nodeWorld.size());
     if (n == 0 || asset.textUnits.size() < n * 3) return;
     std::vector<text::GlyphUnits> units(n);
@@ -1665,7 +1665,6 @@ void apply_text3d_animators(const SceneAsset& asset, const Layer& layer, f64 loc
     // A MESMA avaliação das letras do texto 2D (progresso, atraso, curva, saída, wiggle).
     layeranim::apply_to_glyphs(layer, localTime, fps > 0.0 ? fps : 30.0, units, static_cast<u32>(n), std::max(1u, asset.textWords),
                                std::max(1u, asset.textLines), 0.5f, anim);
-    text::evaluate_animator_effects(layer, localTime, fps, units, static_cast<u32>(n), std::max(1u, asset.textWords), std::max(1u, asset.textLines), anim);
     constexpr f32 kPx = 0.01f;   // 100 px do animador = 1 altura de letra
     std::vector<Mat4> transforms;
     if (transform) {
@@ -1681,7 +1680,6 @@ void apply_text3d_animators(const SceneAsset& asset, const Layer& layer, f64 loc
             q.y0 = -bounds.max.y / kPx; q.y1 = -bounds.min.y / kPx;
             q.charIndex = logical[i].charIndex; q.wordIndex = logical[i].wordIndex; q.lineIndex = logical[i].lineIndex;
         }
-        static const ParameterRegistry specs = [] { ParameterRegistry p; text::declare_transform_params(p); return p; }();
         const f32 unitScale = std::max(1e-6f, layer.model.unitScale);
         Vec3 anchor = layer.transform.anchor;
         for (u32 axis = 0; axis < 3; ++axis) {
@@ -1693,7 +1691,7 @@ void apply_text3d_animators(const SceneAsset& asset, const Layer& layer, f64 loc
         const Vec3 pivot{(layer.model.pivot.x + anchor.x / unitScale) / kPx,
                          (-layer.model.pivot.y + anchor.y / unitScale) / kPx,
                          (layer.model.pivot.z - anchor.z / unitScale) / kPx};
-        text::evaluate_transform_effects(layer, specs, localTime, layout, anim, transforms, &pivot);
+        text::evaluate_text_rigs(layer, localTime, layout, anim, transforms, &pivot);
     }
     nodeOpacity.assign(n, 1.0f);
     if (nodeFill) nodeFill->resize(n);

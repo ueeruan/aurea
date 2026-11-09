@@ -208,6 +208,46 @@ void set_path_key_curve(PathKey& key, Interpolation interp, f32 bx1, f32 by1, f3
     }
 }
 
+namespace {
+
+Vec2 mix2(Vec2 a, Vec2 b, f32 t) noexcept { return Vec2{a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t}; }
+
+/// Keyframe por ponto: cada ponto interpola só entre os keys que o animam.
+/// false = nenhum key tem máscara (ou as contagens diferem): o morph normal.
+bool path_with_point_keys(const std::vector<PathKey>& keys, f64 frame, BezierPath& out) {
+    bool masked = false;
+    for (const PathKey& k : keys) masked |= !k.points.empty();
+    if (!masked) return false;
+    const usize n = keys.front().path.v.size();
+    for (const PathKey& k : keys) if (k.path.v.size() != n || (!k.points.empty() && k.points.size() != n)) return false;
+    out = keys.front().path;
+    const auto animates = [](const PathKey& k, usize i) { return k.points.empty() || k.points[i] != 0; };
+    for (usize i = 0; i < n; ++i) {
+        const PathKey* before = nullptr;
+        const PathKey* after = nullptr;
+        for (const PathKey& k : keys) {
+            if (!animates(k, i)) continue;
+            if (static_cast<f64>(k.frame) <= frame) before = &k;
+            else if (!after) after = &k;
+        }
+        BezierVertex& v = out.v[i];
+        if (before && after) {
+            const f32 u = static_cast<f32>((frame - static_cast<f64>(before->frame)) / static_cast<f64>(after->frame - before->frame));
+            const f32 t = path_key_ease(*before, u);
+            const BezierVertex& a = before->path.v[i];
+            const BezierVertex& c = after->path.v[i];
+            v = BezierVertex{mix2(a.p, c.p, t), mix2(a.in, c.in, t), mix2(a.out, c.out, t)};
+        } else if (before) {
+            v = before->path.v[i];
+        } else if (after) {
+            v = after->path.v[i];
+        }
+    }
+    return true;
+}
+
+} // namespace
+
 BezierPath path_at(const VectorPath& p, f64 frame) {
     BezierPath b;
     switch (p.kind) {
@@ -222,6 +262,7 @@ BezierPath path_at(const VectorPath& p, f64 frame) {
         case VectorPathKind::Free: {
             if (p.keys.empty()) { b = p.path; break; }
             const std::vector<PathKey>& k = p.keys;
+            if (path_with_point_keys(k, frame, b)) break;
             if (k.size() == 1 || frame <= static_cast<f64>(k.front().frame)) { b = k.front().path; break; }
             if (frame >= static_cast<f64>(k.back().frame)) { b = k.back().path; break; }
             usize i = 0;

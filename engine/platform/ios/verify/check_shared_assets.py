@@ -17,7 +17,7 @@ def validate():
     pairs += [(root / f'engine/assets/fonts/{name}', app / f'Fonts/{name}')
               for name in ('NotoNaskhArabic-Regular.ttf', 'LICENSE-NotoNaskhArabic.txt')]
     pairs += [(android / f'assets/{name}', app / f'Fonts/{name}')
-              for name in ('NotoSansJP-Regular.otf', 'LICENSE-NotoSansJP.txt')]
+              for name in ('NotoSansJP-Regular.otf', 'LICENSE-NotoSansJP.txt', 'NotoSansKR-Hangul.otf', 'LICENSE-NotoSansKR.txt')]
     pairs.append((android / 'assets/previa_efeitos.jpg', app / 'previa_efeitos.jpg'))
     pairs += [(android / f'assets/presets/{name}.json', app / f'Resources/presets/{name}.json')
               for name in ('animacao', 'efeitos', 'curva', 'legenda')]

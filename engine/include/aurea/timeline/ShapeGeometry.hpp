@@ -53,9 +53,12 @@ enum Type : u32 {
     kBolt = 22,
     kWave = 23,
     kBlob = 24,
+    // 0.5.0 (paridade Alight Motion 5.0.280, assets/shapes moon/teardrop):
+    kMoon = 25,       ///< lua: círculo menos outro deslocado (`depth` = deslocamento 0..1)
+    kTeardrop = 26,   ///< gota: base redonda embaixo, ponta em cima (`corner` = arredondar a ponta, px)
 };
 /// Maior tipo SDF válido (o comando de trocar forma limita a ele).
-inline constexpr u32 kLastSdfType = kBlob;
+inline constexpr u32 kLastSdfType = kTeardrop;
 
 /// Índice do parâmetro: o mesmo de CommandType::ShapeSetParam e de
 /// TrackProperty::ShapeParam.
@@ -87,6 +90,25 @@ enum Param : u32 {
 /// Valor efetivo: o campo, ou o padrão da forma quando o campo é "do tipo";
 /// já dentro da faixa.
 [[nodiscard]] f32 param_value(const ShapeData& sh, u32 param) noexcept;
+/// 0.5.0 (edição de forma do Alight Motion): alça que mexe num parâmetro da
+/// silhueta (raio, ponta, abertura…). Posições em px da forma, com a origem no
+/// centro da caixa e Y para baixo. `style` 0 = disco, 1 = ângulo. `push` =
+/// direção (eixos da forma) em que a TELA afasta a alça quando ela cairia em
+/// cima de uma alça de tamanho; (0,0) não afasta. Só a posição desenhada anda:
+/// o arrasto parte de `pos`.
+struct ParamHandle {
+    u32  param = 0;
+    u32  style = 0;
+    Vec2 pos{0.0f, 0.0f};
+    Vec2 push{0.0f, 0.0f};
+};
+inline constexpr u32 kMaxParamHandles = 4;
+/// As alças da forma (valores já avaliados no instante); devolve quantas.
+u32 param_handles(const ShapeData& sh, ParamHandle* out) noexcept;
+/// Valor do parâmetro `param` com a alça dele no ponto `q` (px da forma, origem
+/// no centro). false = esta forma não tem alça para esse parâmetro.
+bool value_from_handle(const ShapeData& sh, u32 param, Vec2 q, f32& value) noexcept;
+
 /// Fases (radianos) dos três harmônicos do blob a partir da variante. Conta
 /// inteira: o mesmo resultado em todo aparelho (o shader recebe as fases).
 void blob_phases(f32 seed, f32 out[3]) noexcept;

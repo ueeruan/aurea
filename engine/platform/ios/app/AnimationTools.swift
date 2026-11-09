@@ -554,6 +554,49 @@ enum CurveCategory: String, CaseIterable {
 /// Uma vaga da coluna de presets: o nome e o easing que ela aplica.
 struct CurveSlot { let nameKey: String; let ease: CurveEase }
 
+/// Velocidade (unidades por segundo) e influência (%) do trecho, como no After Effects. A conta é do motor.
+private struct CurveTemporalSheet: View {
+    @EnvironmentObject private var model: AureaModel
+    @Environment(\.dismiss) private var dismiss
+    let ease: CurveEase
+    let seconds: Float
+    let delta: Float
+    let onApply: ([Float]) -> Void
+    @State private var values: [Float] = []
+    private let keys = ["om_curve_speed_out", "om_curve_influence_out", "om_curve_speed_in", "om_curve_influence_in"]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(AureaText.t("om_curve_temporal")).font(.aurea(size: 17)).foregroundStyle(AureaColors.text)
+            if values.count == 4 {
+                ForEach(keys.indices, id: \.self) { i in
+                    HStack {
+                        Text(AureaText.t(keys[i])).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted)
+                        Spacer()
+                        AureaNumberField(value: values[i], format: "%.2f") { values[i] = $0 }
+                            .accessibilityLabel(AureaText.t(keys[i]))
+                    }
+                }
+            }
+            HStack {
+                Button(AureaText.t("common_cancel")) { dismiss() }
+                Spacer()
+                Button("OK") {
+                    let handles = model.engine.temporalEase(true, values: values.map { NSNumber(value: $0) }, seconds: seconds, delta: delta).map(\.floatValue)
+                    if handles.count == 4 { onApply(handles) }
+                    dismiss()
+                }
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(AureaColors.curveGraphBackground)
+        .onAppear {
+            values = model.engine.temporalEase(false, values: ease.handles.map { NSNumber(value: $0) }, seconds: seconds, delta: delta).map(\.floatValue)
+        }
+    }
+}
+
 /// As 4 vagas de cada grupo; "Oscilar" e "Degraus elásticos" esperam o P2-14 (nil).
 func curveSlots(_ c: CurveCategory) -> [CurveSlot?] {
     switch c {
@@ -812,6 +855,7 @@ struct NativeCurvePanel: View {
     @State private var saved: [(name: String, ease: CurveEase)] = []
     @State private var menuOpen = false
     @State private var overshoot = CurveSettings.overshoot
+    @State private var temporalOpen = false
     private var graphMode: Int { model.curveGraphMode }
     private struct Segment {
         let start: KeyframeItem
@@ -887,6 +931,13 @@ struct NativeCurvePanel: View {
                         divider
                         presetColumn(segment)
                         groupColumn(segment)
+                    }
+                }
+                .sheet(isPresented: $temporalOpen) {
+                    CurveTemporalSheet(ease: ease,
+                        seconds: Float(segment.end.time - segment.start.time) / Float(model.compositionFps > 0 ? model.compositionFps : 30),
+                        delta: segment.end.value - segment.start.value) { handles in
+                        set(CurveEase(interpolation: 2, x1: handles[0], y1: handles[1], x2: handles[2], y2: handles[3]), to: segment.start, label: "velocidade e influência")
                     }
                 }
             } else {
@@ -1132,6 +1183,9 @@ struct NativeCurvePanel: View {
         entries.append(.item(AureaText.t("panel_salvar_curva_como_preset"), tag: "curve.save") {
             model.namePrompt = NamePromptRequest(title: AureaText.t("panel_salvar_curva_como_preset"), initial: value.name) { savePreset(name: $0, ease: value) }
         })
+        if value.hasHandles {
+            entries.append(.item(AureaText.t("om_curve_temporal"), enabled: segment.end.value != segment.start.value, tag: "curve.temporal") { temporalOpen = true })
+        }
         entries.append(.item(AureaText.t(expanded ? "editor_sair_tela_cheia" : "panel_expandir"), tag: "curve.fullscreen") {
             if expanded { dismissExpanded() } else { fullscreen = true }
         })

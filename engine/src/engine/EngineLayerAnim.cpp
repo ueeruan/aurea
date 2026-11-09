@@ -7,9 +7,11 @@
 //  que um ajuste afeta. O padrão de toda mutação é o do motor: modelMutex_,
 //  history_.before_mutation, modelRevision_, mark_dirty, request_render.
 // =============================================================================
+#include "aurea/text/TextAnimator.hpp"
 #include "aurea/Engine.hpp"
 #include "aurea/DefaultNames.hpp"
 
+#include "aurea/text/TextTransform.hpp"
 #include "aurea/timeline/LayerAnimator.hpp"
 
 #include <algorithm>
@@ -106,20 +108,26 @@ u32 Engine::query_layer_animators(u64 layerId, f32* out, u32 capacity) noexcept 
         v[3] = static_cast<f32>(a.ease);
         v[4] = a.scaleSeparated ? 1.0f : 0.0f;
         v[5] = static_cast<f32>(a.wiggleSeed);
-        u32 animated = 0, keyed = 0;
+        // Bits em dois floats (até 18 bits cada: inteiro exato em f32).
+        u32 animated = 0, keyed = 0, waveAnimated = 0, waveKeyed = 0;
         for (u32 p = 0; p < layeranim::kParamCount; ++p) {
             f32 value = layeranim::param_static(a, p);
+            const bool wave = p >= layeranim::kFirstWaveParam;
+            const u32 bit = 1u << (wave ? p - layeranim::kFirstWaveParam : p);
             if (const Track* tr = l->tracks.find(TrackProperty::LayerAnimParam, i, p); tr && tr->driven()) {
                 value = tr->value_or(local, value);
                 if (!tr->keys.empty()) {
-                    animated |= 1u << p;
-                    if (tr->find_exact(local) != kInvalidIndex) keyed |= 1u << p;
+                    (wave ? waveAnimated : animated) |= bit;
+                    if (tr->find_exact(local) != kInvalidIndex) (wave ? waveKeyed : keyed) |= bit;
                 }
             }
-            v[6 + p] = value;
+            v[layer_anim_slot(p)] = value;
         }
         v[24] = static_cast<f32>(animated);
         v[25] = static_cast<f32>(keyed);
+        v[31] = static_cast<f32>(a.waveShape);
+        v[44] = static_cast<f32>(waveAnimated);
+        v[45] = static_cast<f32>(waveKeyed);
         v[26] = has_units(*project_, *l) ? 1.0f : 0.0f;
         v[27] = a.loop ? 1.0f : 0.0f;
         v[29] = progress_duration_ms(*l, i, comp->fps());
@@ -201,6 +209,7 @@ bool Engine::set_layer_animator(u64 layerId, u32 index, const f32* v) noexcept {
     a.ease = static_cast<u8>(std::clamp(v[3], 0.0f, 3.0f));
     a.scaleSeparated = v[4] > 0.5f;
     a.loop = std::isfinite(v[27]) && v[27] > 0.5f;
+    if (v[30] == 2146 && std::isfinite(v[31])) a.waveShape = static_cast<u8>(std::clamp(v[31], 0.0f, 1.0f) + 0.5f);
     a.wiggleSeed = static_cast<u32>(std::clamp(v[5], 0.0f, 1.0e6f));
     project_->mark_dirty();
     request_render();
@@ -320,6 +329,160 @@ u32 Engine::paste_layer_animators(const u64* ids, u32 count) noexcept {
         request_render();
     }
     return pasted;
+}
+
+// =============================================================================
+// Presets de texto no modelo do Alight Motion (0.5.0)
+// =============================================================================
+
+namespace {
+
+/// Monta um efeito de texto com valores e keyframes lineares (quadros locais).
+struct MotionTextRecipe {
+    Layer& l;
+    const EffectRegistry& registry;
+    i64 first, span;
+    f64 fps;
+    EffectInstance* effect = nullptr;
+
+    bool add(const char* key) {
+        const EffectTypeId type = effect_type_id(key);
+        const ParameterRegistry* specs = registry.params(type);
+        if (!specs) return false;
+        EffectInstance e;
+        e.type = type;
+        initialize_instance(e, *specs);
+        u32 next = l.nextEffectId;
+        for (const EffectInstance& x : l.effects) if (x.id != kInvalidIndex) next = std::max(next, x.id + 1);
+        e.id = next;
+        l.nextEffectId = next + 1;
+        l.effects.push_back(std::move(e));
+        effect = &l.effects.back();
+        return true;
+    }
+    void value(u32 p, f32 v) { effect->params[p].constant = ParamValue::scalar(v); }
+    void flag(u32 p, bool v) { effect->params[p].constant = ParamValue::boolean(v); }
+    void point(u32 p, f32 x, f32 y) { effect->params[p].constant = ParamValue::vec2(x, y); }
+    [[nodiscard]] i64 frame_at(f64 seconds) const noexcept { return first + std::min(span, static_cast<i64>(std::lround(seconds * fps))); }
+    /// Do segundo `a` ao `b`, a partir do começo da camada.
+    Track& keys(u32 p, f64 a, f32 va, f64 b, f32 vb) {
+        return keys_at(p, frame_at(a), va, frame_at(b), vb);
+    }
+    /// Esticado: da fração `a` à `b` da duração da camada.
+    Track& stretched(u32 p, f64 a, f32 va, f64 b, f32 vb) {
+        return keys_at(p, first + static_cast<i64>(std::lround(a * static_cast<f64>(span))), va,
+                       first + static_cast<i64>(std::lround(b * static_cast<f64>(span))), vb);
+    }
+private:
+    Track& keys_at(u32 p, i64 fa, f32 va, i64 fb, f32 vb) {
+        Track& t = l.tracks.get_or_create(TrackProperty::EffectParam, effect->id, param_track_key(p, 0));
+        t.clear();
+        (void)t.set(FrameIndex{fa}, va, Interpolation::Linear);
+        (void)t.set(FrameIndex{std::max(fb, fa + 1)}, vb, Interpolation::Linear);
+        return t;
+    }
+};
+
+bool build_motion_text_preset(MotionTextRecipe& r, u32 preset) {
+    using namespace text;
+    switch (preset) {
+        case 0:   // Digitar: as letras aparecem com um cursor.
+            if (!r.add(kProgressEffect)) return false;
+            r.value(kProgCursor, 1);
+            r.keys(kProgEnd, 0.0, 0, 0.52, 100);
+            return true;
+        case 1:   // Decodificar: letras sorteadas viram o texto, da esquerda para a direita.
+            if (!r.add(kRandomizerEffect)) return false;
+            r.value(kRandCharset, 4);
+            r.keys(kRandEvolution, 0.02, 0.54f, 0.52, 3.32f);
+            r.keys(kRandStart, 0.03, 0, 0.52, 100);
+            return true;
+        case 2:   // Tirar censura: asteriscos somem aos poucos.
+            if (!r.add(kRandomizerEffect)) return false;
+            r.value(kRandCharset, 6);
+            r.flag(kRandPreserveSpace, false);
+            r.keys(kRandAmount, 0.04, 100, 0.53, 0);
+            return true;
+        case 3:   // Revelar senha: asteriscos abrem da esquerda para a direita.
+            if (!r.add(kRandomizerEffect)) return false;
+            r.value(kRandCharset, 6);
+            r.flag(kRandPreserveSpace, false);
+            r.keys(kRandStart, 0.04, 0, 0.49, 100);
+            return true;
+        case 4: { // Abrir título: as letras se afastam, esticado na camada.
+            if (!r.add(kSpacingEffect)) return false;
+            Track& t = r.stretched(kSpaceLetter, 0.0, 0, 1.0, 200);
+            if (!t.keys.empty()) {
+                Keyframe& k = t.keys.front();
+                k.interp = Interpolation::Bezier;
+                k.bx1 = 0.0785f; k.by1 = 0.659f; k.bx2 = 0.431f; k.by2 = 0.948f;
+            }
+            return true;
+        }
+        case 5:   // Subir por letra.
+            if (!r.add(kTransformEffect)) return false;
+            r.value(kAlpha, 100); r.value(kAnchor, 1); r.value(kEaseOut, 100);
+            r.point(kOffset, 0, -100); r.value(kOverlap, 64);
+            r.keys(kRangeEnd, 0.0, 6.2f, 0.69, 100);
+            return true;
+        case 6:   // Onda: uma crista corre pelas letras.
+            if (!r.add(kTransformEffect)) return false;
+            r.value(kAlpha, -0.1f); r.value(kAnchor, 1); r.value(kEaseOut, 100);
+            r.point(kOffset, 0, -10); r.value(kOverlap, 64); r.value(kScale, 20); r.value(kShape, 1);
+            r.keys(kAngle, 0.0, -5.73f, 0.52, 5.73f);
+            r.keys(kRangeEnd, 0.0, 6.2f, 0.52, 100);
+            r.keys(kPhase, 0.0, 0, 0.52, -80.3f);
+            return true;
+        case 7:   // Giro em cascata.
+            if (!r.add(kTransformEffect)) return false;
+            r.value(kAnchor, 1); r.value(kAngle, 361); r.value(kOverlap, 600);
+            r.keys(kRangeEnd, 0.0, 6.2f, 0.86, 100);
+            return true;
+        case 8:   // Crescer por palavra, esticado na camada.
+            if (!r.add(kTransformEffect)) return false;
+            r.value(kAlpha, 40); r.value(kComponent, 1);
+            r.stretched(kRangeEnd, 0.0, 0, 0.76, 100);
+            r.stretched(kScale, 0.0, 200, 0.98, 300);
+            return true;
+        case 9:   // Letras para fora, em ordem sorteada.
+            if (!r.add(kTransformEffect)) return false;
+            r.value(kAlpha, -100); r.value(kAnchor, 1); r.value(kEaseIn, 100); r.value(kOverlap, 500);
+            r.flag(kRandomOrder, true); r.value(kScale, 1000);
+            r.keys(kRangeStart, 0.0, 0, 0.69, 100);
+            return true;
+        default:
+            return false;
+    }
+}
+
+} // namespace
+
+bool Engine::apply_motion_text_preset(u64 layerId, u32 preset) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->locked || l->kind != LayerKind::Text || preset >= kMotionTextPresetCount) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "preset de texto");
+    bump_model_revision_locked();
+    // O preset substitui a animação de texto que a camada tinha.
+    const auto replaced = [](u32 type) { return type == effect_type_id(text::kTransformEffect) || text::is_content_effect(type); };
+    for (const EffectInstance& e : l->effects) {
+        if (!replaced(e.type)) continue;
+        const u32 id = e.id;
+        l->tracks.remove_if([id](const Track& t) { return t.property == TrackProperty::EffectParam && t.effectIndex == id; });
+    }
+    l->effects.erase(std::remove_if(l->effects.begin(), l->effects.end(), [&](const EffectInstance& e) { return replaced(e.type); }), l->effects.end());
+    l->text.animators.clear();
+    l->tracks.remove_if([](const Track& t) { return t.property == TrackProperty::TextAnimParam; });
+
+    const f64 fps = comp->fps() > 0.0 ? comp->fps() : 30.0;
+    MotionTextRecipe recipe{*l, effectRegistry_, l->local_time(l->start).value, std::max<i64>(1, l->end.value - l->start.value - 1), fps};
+    const bool ok = build_motion_text_preset(recipe, preset);
+    text::migrate_text_effects(*l);
+    project_->mark_dirty();
+    request_render();
+    return ok;
 }
 
 // =============================================================================

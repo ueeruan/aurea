@@ -14,6 +14,8 @@
 //  NENHUM BITMAP ATRAVESSA. O preview vai do renderer direto para o
 //  ANativeWindow do SurfaceView, pela thread de render do próprio motor.
 // =============================================================================
+#include "aurea/animation/TemporalEase.hpp"
+#include "aurea/text/TextAnimator.hpp"
 #include <jni.h>
 #include "aurea/DefaultNames.hpp"
 #include <android/log.h>
@@ -33,6 +35,7 @@ extern "C" {
 #endif
 
 #include "aurea/Engine.hpp"
+#include "aurea/timeline/ShapeGeometry.hpp"
 #include "aurea/bridge/BridgePods.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Version.hpp"
@@ -3092,6 +3095,44 @@ AUREA_JNI jfloatArray AUREA_FN(nativeQueryTextAnimators)(JNIEnv* env, jclass, jl
     return out;
 }
 
+AUREA_JNI jfloatArray AUREA_FN(nativeTextAnimatorFields)(JNIEnv* env, jclass, jlong handle, jlong layer, jint index) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || index < 0) return nullptr;
+    std::vector<f32> v(text::kTextAnimatorFieldCount);
+    if (c->engine.query_text_animator_fields(static_cast<u64>(layer), static_cast<u32>(index), v.data(), static_cast<u32>(v.size())) == 0) return nullptr;
+    jfloatArray out = env->NewFloatArray(static_cast<jsize>(v.size()));
+    if (out) env->SetFloatArrayRegion(out, 0, static_cast<jsize>(v.size()), v.data());
+    return out;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetTextAnimatorField)(JNIEnv*, jclass, jlong handle, jlong layer, jint index, jint field, jfloat value) {
+    NativeContext* c = ctx_of(handle);
+    return c && index >= 0 && field >= 0 && c->engine.set_text_animator_field(static_cast<u64>(layer), static_cast<u32>(index), static_cast<u32>(field), value) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jfloatArray AUREA_FN(nativeTextAnimValues)(JNIEnv* env, jclass, jlong handle, jlong layer, jint index, jintArray keys) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || index < 0 || !keys) return nullptr;
+    const jsize n = env->GetArrayLength(keys);
+    std::vector<u32> list(static_cast<usize>(n));
+    if (n > 0) env->GetIntArrayRegion(keys, 0, n, reinterpret_cast<jint*>(list.data()));
+    std::vector<f32> v(static_cast<usize>(n) * 2);
+    if (n > 0) (void)c->engine.query_text_anim_values(static_cast<u64>(layer), static_cast<u32>(index), list.data(), static_cast<u32>(n), v.data());
+    jfloatArray out = env->NewFloatArray(static_cast<jsize>(v.size()));
+    if (out && n > 0) env->SetFloatArrayRegion(out, 0, static_cast<jsize>(v.size()), v.data());
+    return out;
+}
+
+AUREA_JNI jint AUREA_FN(nativeAddTextSelector)(JNIEnv*, jclass, jlong handle, jlong layer, jint index, jint type) {
+    NativeContext* c = ctx_of(handle);
+    return c && index >= 0 && type >= 0 ? c->engine.add_text_selector(static_cast<u64>(layer), static_cast<u32>(index), static_cast<u32>(type)) : -1;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeRemoveTextSelector)(JNIEnv*, jclass, jlong handle, jlong layer, jint index, jint selector) {
+    NativeContext* c = ctx_of(handle);
+    return c && index >= 0 && selector >= 0 && c->engine.remove_text_selector(static_cast<u64>(layer), static_cast<u32>(index), static_cast<u32>(selector)) ? JNI_TRUE : JNI_FALSE;
+}
+
 AUREA_JNI jint AUREA_FN(nativeAddTextAnimator)(JNIEnv*, jclass, jlong handle, jlong layer, jint props) {
     NativeContext* c = ctx_of(handle);
     return c ? c->engine.add_text_animator(static_cast<u64>(layer), static_cast<u32>(props)) : -1;
@@ -3132,6 +3173,11 @@ AUREA_JNI jboolean AUREA_FN(nativeToggleTextAnimKey)(JNIEnv*, jclass, jlong hand
     return c && index >= 0 && param >= 0
                    && c->engine.toggle_text_anim_key(static_cast<u64>(layer), static_cast<u32>(index), static_cast<u32>(param))
                ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeApplyMotionTextPreset)(JNIEnv*, jclass, jlong handle, jlong layer, jint preset) {
+    NativeContext* c = ctx_of(handle);
+    return c && preset >= 0 && c->engine.apply_motion_text_preset(static_cast<u64>(layer), static_cast<u32>(preset)) ? JNI_TRUE : JNI_FALSE;
 }
 
 AUREA_JNI jboolean AUREA_FN(nativeApplyTextPreset)(JNIEnv*, jclass, jlong handle, jlong layer, jint preset) {
@@ -3618,6 +3664,25 @@ AUREA_JNI jbyteArray AUREA_FN(nativeMakeCurvePreset)(JNIEnv* env, jclass, jbyteA
                                                     std::clamp(y1, -2.0f, 3.0f), std::clamp(x2, 0.0f, 1.0f),
                                                     params ? kEaseParamMarker : std::clamp(y2, -2.0f, 3.0f),
                                                     static_cast<u32>(std::clamp(power, 1, 3))));
+}
+
+/// Velocidade e influência <-> alças da bézier. `in`/`out`: [x1, y1, x2, y2] ou
+/// [velocidade saída, influência saída, velocidade entrada, influência entrada].
+AUREA_JNI jboolean AUREA_FN(nativeTemporalEase)(JNIEnv* env, jclass, jboolean toHandles, jfloat a, jfloat b, jfloat c, jfloat d,
+                                                jfloat seconds, jfloat delta, jfloatArray out) {
+    if (!out || env->GetArrayLength(out) < 4) return JNI_FALSE;
+    f32 v[4]{};
+    if (toHandles) {
+        TemporalEase e;
+        e.speedOut = a; e.influenceOut = b; e.speedIn = c; e.influenceIn = d;
+        if (!temporal_ease_to_handles(e, seconds, delta, v)) return JNI_FALSE;
+    } else {
+        TemporalEase e;
+        if (!temporal_ease_from_handles(a, b, c, d, seconds, delta, e)) return JNI_FALSE;
+        v[0] = e.speedOut; v[1] = e.influenceOut; v[2] = e.speedIn; v[3] = e.influenceIn;
+    }
+    env->SetFloatArrayRegion(out, 0, 4, v);
+    return JNI_TRUE;
 }
 
 /// O trecho de curva amostrado pelo MOTOR (`sample_keyframe_ease`) para o
@@ -5377,6 +5442,25 @@ AUREA_JNI jboolean AUREA_FN(nativeSetVectorPath)(JNIEnv* env, jclass, jlong hand
                ? JNI_TRUE : JNI_FALSE;
 }
 
+AUREA_JNI jboolean AUREA_FN(nativeToggleMaskPathPointsKey)(JNIEnv* env, jclass, jlong handle, jlong layer, jint mask, jintArray points) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || mask < 0 || !points) return JNI_FALSE;
+    const jsize n = env->GetArrayLength(points);
+    std::vector<u32> indices(static_cast<usize>(n));
+    if (n > 0) env->GetIntArrayRegion(points, 0, n, reinterpret_cast<jint*>(indices.data()));
+    return c->engine.toggle_mask_path_points_key(static_cast<u64>(layer), static_cast<u32>(mask), indices.data(), static_cast<u32>(n)) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeToggleVectorPathPointsKey)(JNIEnv* env, jclass, jlong handle, jlong layer, jint group, jint path, jintArray points) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || group < 0 || path < 0 || !points) return JNI_FALSE;
+    const jsize n = env->GetArrayLength(points);
+    std::vector<u32> indices(static_cast<usize>(n));
+    if (n > 0) env->GetIntArrayRegion(points, 0, n, reinterpret_cast<jint*>(indices.data()));
+    return c->engine.toggle_vector_path_points_key(static_cast<u64>(layer), static_cast<u32>(group), static_cast<u32>(path), indices.data(), static_cast<u32>(n))
+               ? JNI_TRUE : JNI_FALSE;
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeToggleVectorPathKey)(JNIEnv*, jclass, jlong handle, jlong layer, jint group, jint path) {
     NativeContext* c = ctx_of(handle);
     return c && group >= 0 && path >= 0 && c->engine.ensure_vector_path_key(static_cast<u64>(layer), static_cast<u32>(group), static_cast<u32>(path))
@@ -5641,6 +5725,21 @@ AUREA_JNI jint AUREA_FN(nativeEditMaskPath)(JNIEnv* env, jclass, jlong handle, j
 AUREA_JNI jboolean AUREA_FN(nativeDragTextBoxWidth)(JNIEnv*, jclass, jlong handle, jlong layer, jfloat dx, jfloat dy, jboolean continuing) {
     NativeContext* c = ctx_of(handle);
     return c && c->engine.drag_text_box_width(static_cast<u64>(layer), dx, dy, continuing == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jfloatArray AUREA_FN(nativeQueryShapeParamHandles)(JNIEnv* env, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return nullptr;
+    f32 v[shape::kMaxParamHandles * Engine::kShapeHandleFloats];
+    const u32 n = c->engine.query_shape_param_handles(static_cast<u64>(layer), v, shape::kMaxParamHandles * Engine::kShapeHandleFloats);
+    jfloatArray out = env->NewFloatArray(static_cast<jsize>(n * Engine::kShapeHandleFloats));
+    if (out && n) env->SetFloatArrayRegion(out, 0, static_cast<jsize>(n * Engine::kShapeHandleFloats), v);
+    return out;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeDragShapeParamHandle)(JNIEnv*, jclass, jlong handle, jlong layer, jint param, jfloat x, jfloat y, jboolean continuing) {
+    NativeContext* c = ctx_of(handle);
+    return c && param >= 0 && c->engine.drag_shape_param_handle(static_cast<u64>(layer), static_cast<u32>(param), x, y, continuing == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
 }
 
 AUREA_JNI jboolean AUREA_FN(nativeResizeShapeHandle)(JNIEnv*, jclass, jlong handle, jlong layer, jint which, jfloat du, jfloat dv,

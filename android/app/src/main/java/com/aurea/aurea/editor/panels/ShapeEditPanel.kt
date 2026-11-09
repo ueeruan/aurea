@@ -68,11 +68,14 @@ import com.aurea.aurea.ui.theme.CupertinoIcon
 import com.aurea.aurea.ui.theme.tocavel
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.acos
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 /**
  * Estado do Editar forma que o PALCO também lê: a corrente de proporção (as
@@ -91,7 +94,7 @@ internal object ShapeEditState {
 }
 
 /** As formas simples (SDF do motor, `shape.frag`) na ordem da troca ‹ ›. */
-internal val SimpleShapes = intArrayOf(0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24)
+internal val SimpleShapes = intArrayOf(0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26)
 
 /**
  * Parâmetros das formas (shape::Param do motor, ShapeGeometry.hpp): o índice
@@ -140,6 +143,8 @@ internal fun shapeName(type: Int): String = stringResource(when (type) {
     22 -> R.string.sh_shape_bolt
     23 -> R.string.sh_shape_wave
     24 -> R.string.sh_shape_blob
+    25 -> R.string.sh_shape_moon
+    26 -> R.string.sh_shape_teardrop
     else -> R.string.target_shape
 })
 
@@ -217,7 +222,8 @@ internal fun ShapeEditPanel(env: PanelEnv) {
             // Valor no cabeçote dos parâmetros 7..14 (o motor já resolve o padrão da forma).
             fun pv(param: Int, fallback: Float): Float = sp?.getOrNull(param) ?: fallback
             when (type) {
-                0, 16, 21 -> ShapeRow(env, 1, stringResource(R.string.panel_raio), detail.shapeCorner, 0.3f, 0f, max(0f, min(w, h) / 2f), "px", 0, 0f, "raio") { store.setShapeParam(1, it) }
+                // Gota (0.5.0): o canto arredonda a PONTA.
+                0, 16, 21, 26 -> ShapeRow(env, 1, stringResource(if (type == 26) R.string.shp_tip_radius else R.string.panel_raio), detail.shapeCorner, 0.3f, 0f, max(0f, min(w, h) / 2f), "px", 0, 0f, "raio") { store.setShapeParam(1, it) }
                 3, 4, 8, 14 -> ShapeRow(env, 2, when (type) { 3 -> stringResource(R.string.panel_lados); 8 -> stringResource(R.string.panel_petalas); 14 -> stringResource(R.string.panel_dentes); else -> stringResource(R.string.panel_pontas) }, points.toFloat(), 0.06f, 3f, 64f, "", 0, 5f, "pontas") {
                     store.setShapeParam(2, it.roundToInt().toFloat())
                 }
@@ -266,6 +272,8 @@ internal fun ShapeEditPanel(env: PanelEnv) {
                     PercentRow(env, ShapeParam.THICKNESS, stringResource(R.string.panel_espessura), pv(ShapeParam.THICKNESS, 0.4f), 2f, 100f, 40f, "espessura")
                     PercentRow(env, ShapeParam.AMPLITUDE, stringResource(R.string.shp_amplitude), pv(ShapeParam.AMPLITUDE, 1f), 0f, 100f, 100f, "amplitude")
                 }
+                // Lua (0.5.0): o deslocamento do círculo que recorta (25 % = a lua fina).
+                25 -> PercentRow(env, ShapeParam.DEPTH, stringResource(R.string.shp_offset), pv(ShapeParam.DEPTH, 0.25f), 5f, 95f, 25f, "deslocamento")
                 24 -> {
                     PercentRow(env, ShapeParam.DEPTH, stringResource(R.string.shp_variation), pv(ShapeParam.DEPTH, 0.5f), 5f, 95f, 50f, "variacao")
                     ShapeRow(env, ShapeParam.SEED, stringResource(R.string.shp_seed), pv(ShapeParam.SEED, 0f), 0.06f, 0f, 99f, "", 0, 0f, "variante") {
@@ -347,7 +355,8 @@ private fun SizeRow(env: PanelEnv, w: Float, h: Float) {
         }
     }
     val startW = remember { FloatArray(2) }
-    Row(Modifier.fillMaxWidth().height(52.dp), verticalAlignment = Alignment.CenterVertically) {
+    // O rótulo "x · largura" fica embaixo da caixa: sem esta folga, a linha seguinte o cobre.
+    Row(Modifier.fillMaxWidth().padding(bottom = 16.dp).height(52.dp), verticalAlignment = Alignment.CenterVertically) {
         PropertyLabelChip(stringResource(R.string.panel_tamanho), selected = true)
         Spacer(Modifier.width(6.dp))
         TickRuler(
@@ -522,6 +531,8 @@ internal fun DrawScope.drawShapeGlyph(type: Int, color: Color) {
         22 -> drawPath(boltGlyph(c, r), color)
         23 -> drawPath(waveGlyph(c, r, 2), color, style = Stroke(r * 0.3f))
         24 -> drawPath(blobGlyph(c, r), color)
+        25 -> drawPath(moonGlyph(c, r), color)
+        26 -> drawPath(teardropGlyph(c, r), color)
         else -> drawRect(color, Offset(c.x - r, c.y - r), Size(2 * r, 2 * r))
     }
 }
@@ -567,6 +578,47 @@ internal fun waveGlyph(c: Offset, r: Float, waves: Int): Path = Path().apply {
         val y = c.y + 0.4f * r * sin(t * waves * 2f * PI.toFloat())
         if (i == 0) moveTo(x, y) else lineTo(x, y)
     }
+}
+
+/**
+ * Lua (0.5.0): o círculo de raio `r` menos o mesmo círculo deslocado `offset`·2r
+ * para a direita (0,25 = a lua do motor). Arco de fora pela esquerda e arco
+ * de dentro de volta, entre os dois pontos onde os círculos se cruzam.
+ */
+internal fun moonGlyph(c: Offset, r: Float, offset: Float = 0.25f): Path = Path().apply {
+    val o = 2f * r * offset.coerceIn(0.05f, 0.95f)
+    val h = sqrt(max(0f, r * r - o * o / 4f))
+    val outer0 = atan2(h, o / 2f)          // cruzamento visto do centro de fora
+    val inner0 = atan2(h, -o / 2f)         // o mesmo ponto visto do centro de dentro
+    val steps = 48
+    for (i in 0..steps) {
+        val a = outer0 + (2f * PI.toFloat() - 2f * outer0) * i / steps
+        val x = c.x + r * cos(a); val y = c.y + r * sin(a)
+        if (i == 0) moveTo(x, y) else lineTo(x, y)
+    }
+    for (i in 0..steps) {
+        val a = (2f * PI.toFloat() - inner0) - (2f * PI.toFloat() - 2f * inner0) * i / steps
+        lineTo(c.x + o + r * cos(a), c.y + r * sin(a))
+    }
+    close()
+}
+
+/**
+ * Gota (0.5.0): ponta em cima e base redonda embaixo, as mesmas proporções da
+ * caixa 0,72 : 1 do ladrilho (base de raio 0,6·r), unidas pelas tangentes.
+ */
+internal fun teardropGlyph(c: Offset, r: Float): Path = Path().apply {
+    val rb = 0.6f * r
+    val cy = c.y + r - rb
+    val d = cy - (c.y - r)                 // da ponta ao centro da base
+    val beta = acos((rb / d).coerceIn(-1f, 1f))   // ângulo, a partir de "para cima", do ponto de tangência
+    moveTo(c.x, c.y - r)
+    val steps = 48
+    for (i in 0..steps) {
+        val a = beta + (2f * PI.toFloat() - 2f * beta) * i / steps
+        lineTo(c.x + rb * sin(a), cy - rb * cos(a))
+    }
+    close()
 }
 
 /** Mancha: raio polar com três harmônicos (4, 5 e 2), como o blob do motor. */

@@ -21,6 +21,7 @@
 // =============================================================================
 #pragma once
 
+#include "aurea/core/Time.hpp"
 #include "aurea/render/ShutterPlan.hpp"
 #include "aurea/ai/DepthMapService.hpp"
 namespace aurea::ai { class RotoService; struct RotoStroke; class BgRemoveService; class BgMatteStore; }
@@ -576,6 +577,9 @@ struct RenderSettings {
     bool boundedSceneExposure = false;
     u64 sceneExposureBatchBudgetBytes = 32ull << 20;
     const std::atomic<bool>* cancelFlag = nullptr;
+    /// Vigia do export: cada passo do quadro marca a hora aqui.
+    std::atomic<u64>* heartbeatNs = nullptr;
+    void beat() const noexcept { if (heartbeatNs) heartbeatNs->store(monotonic_ns(), std::memory_order_release); }
     u64 sceneExposureFenceTimeoutNs = 120ull * 1000 * 1000 * 1000;
     /// Capture recovery shares the caller's absolute clock, including the
     /// failed whole compile. Only a completed submitted fence may renew its

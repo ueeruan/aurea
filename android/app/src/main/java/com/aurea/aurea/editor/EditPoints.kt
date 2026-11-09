@@ -50,7 +50,9 @@ import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.aurea.aurea.R
 import com.aurea.aurea.editor.panels.EditorPanel
 import com.aurea.aurea.editor.panels.curveStart
@@ -101,6 +103,8 @@ internal object PathOps {
     const val APPEND = 5
     const val SET_CLOSED = 6
     const val SET_EXCLUDE = 7
+    const val OPEN_AT = 8
+    const val SET_FIRST = 9
 }
 
 /** O que está escolhido no contorno (a faixa, o palco e o trackpad leem daqui). */
@@ -275,6 +279,7 @@ private fun PointsColumn(env: PanelEnv, at: VPathAt?) {
                 onClick = { EditPointsState.edit(store, PathOps.SET_TYPE, floatArrayOf(i.toFloat(), if (curve) 0f else 1f), false) }) {
                 ContentIcon(if (curve) ContentIconKind.PointCorner else ContentIconKind.PointCurve, 22.dp, it)
             }
+            FirstVertexCell(store, path)
             AddRemoveCell(store, path)
         }
     }
@@ -332,7 +337,10 @@ internal fun MaskPointsColumn(env: PanelEnv, m: EditorStore.MaskPath, look: Keyf
             CupertinoIcon(CupertinoGlyph.ChevronLeft, 22.dp, it)
         }
         PointsCell("mask.points.key", stringResource(if (look == KeyframeLook.KeyHere) R.string.panel_tirar_keyframe_daqui else R.string.panel_marcar_keyframe_aqui),
-            m.closed, onClick = { store.toggleMaskKey(m.id) }) {
+            m.closed, onClick = {
+                // Pontos escolhidos no laço: keyframe só deles (como no Motion).
+                if (EditPointsState.multi.isNotEmpty()) store.toggleMaskPointsKey(m.id, EditPointsState.multi) else store.toggleMaskKey(m.id)
+            }) {
             KeyframeDiamondIcon(look, enabled = true, modifier = Modifier.padding(1.dp))
         }
         if (kind == EditPointsState.IN || kind == EditPointsState.OUT) {
@@ -346,7 +354,7 @@ internal fun MaskPointsColumn(env: PanelEnv, m: EditorStore.MaskPath, look: Keyf
             }
         } else {
             PointsCell("mask.points.closed", stringResource(if (m.closed) R.string.panel_abrir_caminho else R.string.panel_fechar_caminho), m.closed || m.count >= 3,
-                onClick = { EditPointsState.edit(store, PathOps.SET_CLOSED, floatArrayOf(if (m.closed) 0f else 1f), false) }) {
+                onClick = { toggleClosedAtSegment(store, m.closed) }) {
                 PathEndsIcon(m.closed, it)
             }
             val curve = isCurve(path, i)
@@ -355,9 +363,33 @@ internal fun MaskPointsColumn(env: PanelEnv, m: EditorStore.MaskPath, look: Keyf
                 onClick = { EditPointsState.edit(store, PathOps.SET_TYPE, floatArrayOf(i.toFloat(), if (curve) 0f else 1f), false) }) {
                 ContentIcon(if (curve) ContentIconKind.PointCorner else ContentIconKind.PointCurve, 22.dp, it)
             }
+            FirstVertexCell(store, path)
         }
         AddRemoveCell(store, path)
     }
+}
+
+/** Abre no trecho escolhido, se houver; sem trecho, abre ou fecha como sempre. */
+private fun toggleClosedAtSegment(store: EditorStore, closed: Boolean) {
+    val segment = EditPointsState.segment
+    if (closed && EditPointsState.kind == EditPointsState.BETWEEN && segment >= 0) {
+        EditPointsState.edit(store, PathOps.OPEN_AT, floatArrayOf(segment.toFloat()), false)
+        EditPointsState.reset()
+    } else {
+        EditPointsState.edit(store, PathOps.SET_CLOSED, floatArrayOf(if (closed) 0f else 1f), false)
+    }
+}
+
+/** After Effects: o ponto escolhido vira o primeiro e muda com quem cada ponto casa no morph. */
+@Composable
+private fun ColumnScope.FirstVertexCell(store: EditorStore, path: VBezier?) {
+    val i = EditPointsState.point(store)
+    if (path == null || !path.closed || EditPointsState.kind != EditPointsState.POINT || i !in 1 until path.v.size) return
+    PointsCell("points.first", stringResource(R.string.om_pts_first_vertex), true,
+        onClick = {
+            EditPointsState.edit(store, PathOps.SET_FIRST, floatArrayOf(i.toFloat()), false)
+            EditPointsState.reset()
+        }) { tint -> Text("1", color = tint, fontSize = 18.sp, fontWeight = FontWeight.W700) }
 }
 
 /** Fechar ou abrir o caminho: o ícone mostra o que o toque vai fazer. */
@@ -459,8 +491,12 @@ private fun contourEntries(store: EditorStore): List<MenuEntry> {
                     EditPointsState.edit(store, PathOps.SET_EXCLUDE, floatArrayOf(if (p.exclude) 0f else 1f), false)
                 },
                 MenuEntry.Item(if (p.path.closed) openLabel else closeLabel, enabled = p.path.v.size >= 2, tag = "points.contour.${n + 1}.close") {
-                    select()
-                    EditPointsState.edit(store, PathOps.SET_CLOSED, floatArrayOf(if (p.path.closed) 0f else 1f), false)
+                    val isCurrent = n == store.vectorPath
+                    if (isCurrent) toggleClosedAtSegment(store, p.path.closed)
+                    else {
+                        select()
+                        EditPointsState.edit(store, PathOps.SET_CLOSED, floatArrayOf(if (p.path.closed) 0f else 1f), false)
+                    }
                 },
                 MenuEntry.Item(deleteLabel, destructive = true, enabled = group.paths.size > 1, tag = "points.contour.${n + 1}.delete") {
                     store.removeVectorPath(n)
@@ -480,6 +516,8 @@ private fun contourEntries(store: EditorStore): List<MenuEntry> {
 /** ◆ do modo keyframes: marca o keyframe da forma aqui; com keyframe aqui, tira. */
 private fun togglePathKey(store: EditorStore) {
     val at = EditPointsState.at(store) ?: return
+    // Pontos escolhidos no laço: keyframe só deles (como no Motion).
+    if (EditPointsState.multi.isNotEmpty()) { store.toggleVectorPathPointsKey(EditPointsState.multi); return }
     if (!at.keyHere) { store.toggleVectorPathKey(); return }
     val row = store.layers.firstOrNull { it.id == store.primary } ?: return
     val local = store.playhead - row.startFrame + row.offsetFrames
@@ -822,14 +860,16 @@ internal fun DrawScope.drawEditPointsOverlay(store: EditorStore, m: StageMapper)
             if (hypot(h.x - c.x, h.y - c.y) < 1f) continue
             val chosen = (k == 0 && kind == EditPointsState.IN) || (k == 1 && kind == EditPointsState.OUT)
             drawLine(HandleInk, c, h, 1.4.dp.toPx())
-            drawCircle(ShellColors.OutlineUnder, 7.5.dp.toPx(), h)
-            drawCircle(if (chosen) AureaColors.Accent else Color.White, 6.dp.toPx(), h)
+            drawCircle(ShellColors.OutlineUnder, 5.25.dp.toPx(), h)
+            drawCircle(if (chosen) AureaColors.Accent else Color.White, 3.75.dp.toPx(), h)
         }
     }
-    val r = 6.dp.toPx()
+    val base = 4.5.dp.toPx()
     for (i in path.v.indices) {
         val c = sx(path.v[i].x, path.v[i].y)
         val chosen = (i == sel && kind == EditPointsState.POINT) || i in EditPointsState.multi
+        // After Effects: o primeiro ponto do caminho fechado aparece maior.
+        val r = if (i == 0 && path.closed && path.v.size >= 2) base * 1.4f else base
         drawRect(ShellColors.OutlineUnder, Offset(c.x - r - 1.5f, c.y - r - 1.5f), Size(2 * r + 3f, 2 * r + 3f))
         drawRect(if (chosen) AureaColors.Accent else Color.White, Offset(c.x - r, c.y - r), Size(2 * r, 2 * r))
         if (i == 0 && !path.closed && path.v.size >= 2) drawCircle(AureaColors.Accent, r * 1.9f, c, style = Stroke(1.5.dp.toPx()))

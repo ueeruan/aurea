@@ -61,36 +61,38 @@ bool different(const GlyphPose& a, const GlyphPose& b) {
 
 AUREA_TEST(SharedText3D, TransformSelectsWordsColorsAndSamplesEffectCurves) {
     SharedTextRig r; const u64 id = r.mesh(); AUREA_CHECK(r.add(id).ok());
-    Layer& l = *r.layer(id); auto& effect = l.effects.back();
-    auto set = [&](u32 p, f32 v) { effect.params[p].constant = ParamValue::scalar(v); };
-    set(text::kComponent, 1); set(text::kRangeEnd, 50);
-    effect.params[text::kOffset].constant = ParamValue::vec2(100, 50);
-    set(text::kAlpha, -50); set(text::kOverrideFill, 1);
-    effect.params[text::kFillColor].constant = ParamValue::color(1, 0, 0, .5f);
+    Layer& l = *r.layer(id); TextAnimator& effect = l.text.animators.back();
+    // 2 palavras: 3 janelas de 1/3, em 1/3 e 2/3. Faixa até 50 %: a primeira na
+    // metade da saída (peso 0,5) e a segunda fora.
+    effect.selector.basedOn = 1; effect.selector.end = 50;
+    effect.position = Vec3{100, 50, 0};
+    effect.opacity = -50; effect.props |= kTextPropFill;
+    effect.fill = Vec4{1, 0, 0, .5f};
     auto pose = sample(r, id, 0);
     for (usize i = 0; i < 4; ++i) {
-        AUREA_CHECK_NEAR(pose.matrices[i].col[3].x, i < 2 ? 1.f : 0.f, 1e-5);
-        AUREA_CHECK_NEAR(pose.matrices[i].col[3].y, i < 2 ? -.5f : 0.f, 1e-5);
-        AUREA_CHECK_NEAR(pose.opacity[i], i < 2 ? .25f : 1.f, 1e-5);
-        AUREA_CHECK_NEAR(pose.fill[i].w, i < 2 ? 1.f : 0.f, 1e-5);
+        AUREA_CHECK_NEAR(pose.matrices[i].col[3].x, i < 2 ? .5f : 0.f, 1e-4);
+        AUREA_CHECK_NEAR(pose.matrices[i].col[3].y, i < 2 ? -.25f : 0.f, 1e-4);
+        AUREA_CHECK_NEAR(pose.opacity[i], i < 2 ? .5625f : 1.f, 1e-4);
+        AUREA_CHECK_NEAR(pose.fill[i].w, i < 2 ? .5f : 0.f, 1e-4);
     }
-    auto& track = l.tracks.get_or_create(TrackProperty::EffectParam, effect.id, param_track_key(text::kOffset, 0));
+    auto& track = l.tracks.get_or_create(TrackProperty::TextAnimParam, 0, text::kPosX);
     track.set(FrameIndex{0}, 0, Interpolation::Linear); track.set(FrameIndex{30}, 100, Interpolation::Linear);
     const auto half = sample(r, id, 15.5);
-    AUREA_CHECK_NEAR(half.matrices[0].col[3].x, 15.5f/30, 1e-5);
+    AUREA_CHECK_NEAR(half.matrices[0].col[3].x, 15.5f/60, 1e-4);
     sample(r, id, 29); sample(r, id, 0);
     AUREA_CHECK(!different(half, sample(r, id, 15.5)));
-    set(text::kPhase, 50);
+    // Fase −50 %: as palavras recuam para −1/6 (fora) e 1/6 (na metade da entrada).
+    effect.selector.offset = -50;
     pose = sample(r, id, 15.5);
-    AUREA_CHECK_NEAR(pose.opacity[0], 1.f, 1e-5);
-    AUREA_CHECK_NEAR(pose.opacity[3], .25f, 1e-5);
+    AUREA_CHECK_NEAR(pose.opacity[0], 1.f, 1e-4);
+    AUREA_CHECK_NEAR(pose.opacity[3], .5625f, 1e-4);
 }
 
 AUREA_TEST(SharedText3D, TransformScalePreservesDepthAndComponentPivot) {
     SharedTextRig r; const u64 id = r.mesh("AB"); AUREA_CHECK(r.add(id).ok());
-    Layer& l = *r.layer(id); auto& effect = l.effects.back();
-    effect.params[text::kScale].constant = ParamValue::scalar(100);
-    effect.params[text::kAnchor].constant = ParamValue::scalar(1);
+    Layer& l = *r.layer(id); TextAnimator& effect = l.text.animators.back();
+    effect.scale.x = 100;
+    effect.rigAnchor = 1;
     const auto asset = r.engine.model_asset(l.model.scene.pack());
     const auto pose = sample(r, id, 0);
     for (usize i = 0; i < pose.matrices.size(); ++i) {
@@ -127,7 +129,7 @@ AUREA_TEST(SharedText3D, PresetsSupportEditsUndoAndProjectRoundTrip) {
     AUREA_CHECK(r.engine.set_text_anim_param(id, 0, text::kPosX, 240));
     AUREA_CHECK(r.engine.toggle_text_anim_key(id, 0, text::kPosX));
     AUREA_CHECK(r.add(id).ok());
-    r.layer(id)->effects.back().params[text::kAngle].constant = ParamValue::scalar(25);
+    r.layer(id)->text.animators.back().rotation.z = 25;
     const auto before = sample(r, id, 12.5);
     const std::string path = "build/reference/text3d-shared/project.aurea";
     std::filesystem::create_directories("build/reference/text3d-shared");
@@ -158,7 +160,7 @@ AUREA_TEST(SharedText3D, SavedPresetsAndCopiedEffectsWorkAcross2DAnd3D) {
     AUREA_CHECK(!meshPreset.empty()); AUREA_CHECK(r.engine.apply_preset(*normal, meshPreset));
     AUREA_CHECK(r.add(*normal).ok()); AUREA_CHECK(r.engine.copy_effects(*normal) > 0);
     const u64 target = r.mesh(); AUREA_CHECK_EQ(r.engine.paste_effects(&target, 1), 1u);
-    r.layer(target)->effects.back().params[text::kAlpha].constant = ParamValue::scalar(-100);
+    r.layer(target)->text.animators.back().opacity = -100;
     for (f32 alpha : sample(r, target, 0).opacity) AUREA_CHECK_NEAR(alpha, 0, 1e-6);
     const auto effectPreset = r.engine.save_preset(target, presets::PresetKind::Effects, "Text Transform");
     const u64 other = r.mesh(); AUREA_CHECK(r.engine.apply_preset(other, effectPreset));

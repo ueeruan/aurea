@@ -23,6 +23,7 @@
 
 namespace aurea {
 struct TextData;
+struct TextSelector;
 struct TextAnimator;
 struct Layer;
 struct EffectInstance;
@@ -66,17 +67,16 @@ void declare_animator_pro_params(ParameterRegistry& params);
 /// O animador simples ou o Pro (os dois agem nos glifos do texto).
 [[nodiscard]] bool is_animator_effect(u32 type) noexcept;
 /// Combinação de seletores (modo do AE): soma, subtrai, interseção, mín., máx., diferença.
-[[nodiscard]] f32 combine_selector(f32 above, f32 value, u32 mode) noexcept;
+/// `aeMath` falso: o subtrair dos projetos antigos.
+[[nodiscard]] f32 combine_selector(f32 above, f32 value, u32 mode, bool aeMath = true) noexcept;
 /// Seletor de intervalo do Pro para a unidade `unit` de `count`: 0..1 (sem a intensidade).
 /// `units` 0 = %, 1 = índice. `smoothness` 0..1 (só na forma quadrada).
 [[nodiscard]] f32 pro_range_weight(f32 start, f32 end, f32 offset, u32 units, u32 shape, f32 smoothness,
-                                   f32 easeHigh, f32 easeLow, u32 unit, u32 count) noexcept;
+                                   f32 easeHigh, f32 easeLow, u32 unit, u32 count, bool aeMath = true) noexcept;
 /// Oscilação do Pro: −1..1 por unidade e dimensão, entre `minAmount` e `maxAmount` (−1..1).
 /// `correlation` 0..1 (1 = todas iguais), fases em graus.
 [[nodiscard]] f32 pro_wiggle(u32 seed, u32 unit, u32 dimension, f64 timeSec, f32 rate, f32 correlation,
                              f32 temporalPhase, f32 spatialPhase, f32 minAmount, f32 maxAmount) noexcept;
-bool has_animator_effect(const Layer& layer) noexcept;
-f32 animator_effect_padding(const Layer& layer, f64 time, f32 size, u32 chars);
 
 /// Parâmetros animáveis de um animador (effectParamIndex da trilha).
 enum TextAnimParam : u32 {
@@ -85,7 +85,19 @@ enum TextAnimParam : u32 {
     kPosX = 10, kPosY, kPosZ, kScaleX, kScaleY, kRotX, kRotY, kRotZ, kOpacity, kTracking, kBlur, kSkew, kStrokeWidth, kCharOffset,
     kFillMix, kWiggleRate, kSkewAxis, kTrackingEm, kAnchorGrouping,
     kStrokeR = 29, kStrokeG, kStrokeB,
+    // 0.5.0, animador universal.
+    kAnimSmoothness = 32, kAnimWigglyMin, kAnimWigglyMax, kAnimCorrelation, kAnimTemporalPhase, kAnimSpatialPhase,
+    kAnimExprX, kAnimExprY, kAnimExprZ, kAnimOverlap,
+    kAnimAnchorX = 42, kAnimAnchorY, kAnimLineSpacingX, kAnimLineSpacingY,
+    kAnimFillHue = 46, kAnimFillSaturation, kAnimFillBrightness, kAnimFillOpacity,
+    kAnimRandAmount = 50, kAnimRandEvolution, kAnimRandSeed, kAnimLetterSpacing, kAnimLineSpacingEm, kAnimFillA,
+    kAnimGroupAlignX = 56, kAnimGroupAlignY,
 };
+/// Trilha de um parâmetro de seletor: o seletor 0 usa as chaves de sempre; os
+/// seguintes ficam em blocos de 64.
+inline constexpr u32 kSelectorKeyBlock = 64;
+[[nodiscard]] constexpr u32 selector_key(u32 selector, u32 key) noexcept { return selector * kSelectorKeyBlock + key; }
+inline constexpr u32 kMaxTextSelectors = 8;
 
 /// Unidade de um glifo para os seletores.
 struct GlyphUnits {
@@ -105,17 +117,13 @@ struct GlyphAnim {
     u32 anchorGrouping = 0;   ///< 0 glyph, 1 word, 2 line, 3 tudo (Pro)
     Vec2 anchor{0, 0};        ///< ponto de âncora do Pro (px): o glifo gira/escala em volta de pivô + âncora
     Vec2 groupAlign{0, 0};    ///< alinhamento do agrupamento do Pro (−1..1 da meia caixa)
+    bool aeModel = false;     ///< pivô como no After Effects (centro do avanço, na linha de base)
     f32  strokeAdd = 0.0f;    ///< px
     f32  trackingShift = 0.0f;
     Vec4 fill{0, 0, 0, 0};    ///< a = peso da mistura com a cor do animador (sRGB)
     f32 fillOpacity = 1.0f;   ///< alpha da cor de preenchimento, separado do peso da mistura
     Vec4 stroke{0, 0, 0, 0};
 };
-/// Aplica um Text Animator Pro (TextAnimatorPro.cpp); chamado por evaluate_animator_effects.
-void evaluate_animator_pro(const Layer& layer, const EffectInstance& fx, f64 time, f64 fps, const std::vector<GlyphUnits>& units,
-                           u32 chars, u32 words, u32 lines, std::vector<GlyphAnim>& out);
-void evaluate_animator_effects(const Layer& layer, f64 time, f64 fps, const std::vector<GlyphUnits>& units,
-                              u32 chars, u32 words, u32 lines, std::vector<GlyphAnim>& out);
 
 /// Valor de um parâmetro no instante (fracionário: sub-quadro do desfoque).
 [[nodiscard]] f32 anim_param(const TrackSet& tracks, u32 animator, u32 param, f64 local, f32 fallback) noexcept;
@@ -137,6 +145,32 @@ void evaluate_text_animators(const TextData& t, const TrackSet& tracks, f64 loca
 
 /// Algum animador ativo?
 [[nodiscard]] bool has_animators(const TextData& t) noexcept;
+
+/// Algum animador no modelo do Motion (matrizes por unidade)?
+[[nodiscard]] bool has_rig_animators(const TextData& t) noexcept;
+/// Algum animador que muda o texto antes do layout?
+[[nodiscard]] bool has_content_animators(const TextData& t) noexcept;
+/// Etapa de conteúdo: deslocamento de caractere, revelação, aleatório e espaçamento.
+void apply_text_content(const TextData& t, const TrackSet& tracks, f64 local, f64 fps, TextData& out);
+/// Endereço do valor parado da chave (seletor em blocos de 64); nullptr = chave sem valor.
+[[nodiscard]] f32* animator_param_ref(TextAnimator& a, u32 key) noexcept;
+[[nodiscard]] const f32* animator_param_ref(const TextAnimator& a, u32 key) noexcept;
+/// Campos que não animam. Animador: 0 propriedades, 1 rig, 2 âncora do rig, 3 agrupamento,
+/// 4 cursor, 5 piscar, 6 caracteres, 7 manter espaços, 8 alinhamento X, 9 alinhamento Y,
+/// 15 número de seletores. Seletor s: 16·(s+1) + 0 ligado, 1 tipo, 2 base, 3 unidades, 4 modo,
+/// 5 forma, 6 ordem aleatória, 7 semente, 8 travar dimensões.
+inline constexpr u32 kTextAnimatorFieldCount = 16u * (kMaxTextSelectors + 1u);
+void read_animator_fields(const TextAnimator& a, f32* out) noexcept;
+[[nodiscard]] bool write_animator_field(TextAnimator& a, u32 field, f32 value) noexcept;
+/// Limite do valor da chave.
+[[nodiscard]] f32 clamp_animator_param(const TextAnimator& a, u32 key, f32 value) noexcept;
+/// Seletor novo do tipo pedido, com os padrões do After Effects.
+[[nodiscard]] TextSelector make_text_selector(u32 type) noexcept;
+/// Animador novo no modelo do Motion: faixa inteira e propriedades neutras.
+[[nodiscard]] TextAnimator make_transform_animator();
+/// Converte os efeitos antigos de texto da camada em animadores, levando
+/// keyframes e expressões. Idempotente.
+void migrate_text_effects(Layer& layer);
 
 /// 0.4.6: texto dinâmico (TextData::dynamic): troca {#} {tc} {t} {f} pelos
 /// valores no instante. `local` = quadro local da camada, `duration` = quadros

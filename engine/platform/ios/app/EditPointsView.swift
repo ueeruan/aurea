@@ -27,6 +27,8 @@ enum PathOps {
     static let append: UInt32 = 5
     static let setClosed: UInt32 = 6
     static let setExclude: UInt32 = 7
+    static let openAt: UInt32 = 8
+    static let setFirst: UInt32 = 9
 }
 
 /// Um vértice do contorno no espaço do grupo (alças RELATIVAS ao ponto).
@@ -282,8 +284,23 @@ private struct PointsColumn: View {
                 cell("points.type", AureaText.t(curve ? "om_pts_type_corner" : "om_pts_type_curve"), enabled: canType, action: {
                     model.editPoints(PathOps.setType, [Float(i), curve ? 0 : 1])
                 }) { tint in ContentIcon(kind: curve ? .pointCorner : .pointCurve, size: 22, tint: tint) }
+                if path?.closed == true, kind == EPKind.point, i > 0, i < (path?.v.count ?? 0) {
+                    // After Effects: o ponto escolhido vira o primeiro e muda como o morph casa os pontos.
+                    cell("points.first", AureaText.t("om_pts_first_vertex"), enabled: true, action: {
+                        model.editPoints(PathOps.setFirst, [Float(i)]); state.reset()
+                    }) { tint in Text("1").font(.aurea(size: 18, weight: .bold)).foregroundStyle(tint) }
+                }
                 addRemoveCell
             }
+        }
+    }
+
+    /// Abre no trecho escolhido, se houver; sem trecho, abre ou fecha como sempre.
+    private func toggleClosedAtSegment(_ closed: Bool) {
+        if closed, state.kind == EPKind.between, state.segment >= 0 {
+            model.editPoints(PathOps.openAt, [Float(state.segment)]); state.reset()
+        } else {
+            model.editPoints(PathOps.setClosed, [closed ? 0 : 1])
         }
     }
 
@@ -381,7 +398,8 @@ private struct PointsColumn: View {
                     select(); model.editPoints(PathOps.setExclude, [hole ? 0 : 1])
                 },
                 .item(AureaText.t(closed ? "panel_abrir_caminho" : "panel_fechar_caminho"), enabled: points >= 2, tag: "points.contour.\(n + 1).close") {
-                    select(); model.editPoints(PathOps.setClosed, [closed ? 0 : 1])
+                    if UInt32(n) == model.vectorPath { toggleClosedAtSegment(closed) }
+                    else { select(); model.editPoints(PathOps.setClosed, [closed ? 0 : 1]) }
                 },
                 .item(AureaText.t("om_pts_delete_contour"), enabled: count > 1, destructive: true, tag: "points.contour.\(n + 1).delete") {
                     _ = model.engine.removeVectorPath(id, group: model.vectorGroup, path: UInt32(n))
@@ -405,7 +423,12 @@ private struct PointsColumn: View {
     /// ◆ do modo keyframes: marca o keyframe da forma aqui; com keyframe aqui, tira.
     private func togglePathKey() {
         guard let id = model.primarySelection else { return }
-        _ = model.engine.toggleVectorPathKey(id, group: model.vectorGroup, path: model.vectorPath)
+        // Pontos escolhidos no laço: keyframe só deles (como no Motion).
+        if !state.multi.isEmpty {
+            _ = model.engine.toggleVectorPathPointsKey(id, group: model.vectorGroup, path: model.vectorPath, points: state.multi.sorted().map { NSNumber(value: $0) })
+        } else {
+            _ = model.engine.toggleVectorPathKey(id, group: model.vectorGroup, path: model.vectorPath)
+        }
         model.contentRevision &+= 1
         model.refreshModel(force: true)
     }
@@ -452,13 +475,22 @@ struct MaskPointsColumn: View {
             } else {
                 let count = mask.points.count / 6
                 cell("mask.points.closed", AureaText.t(mask.closed ? "panel_abrir_caminho" : "panel_fechar_caminho"), enabled: mask.closed || count >= 3, action: {
-                    model.editPoints(PathOps.setClosed, [mask.closed ? 0 : 1])
+                    // Com um trecho escolhido, abre nele (como no Motion).
+                    if mask.closed, state.kind == EPKind.between, state.segment >= 0 {
+                        model.editPoints(PathOps.openAt, [Float(state.segment)]); state.reset()
+                    } else { model.editPoints(PathOps.setClosed, [mask.closed ? 0 : 1]) }
                 }) { tint in pathEnds(tint) }
                 let curve = path?.isCurve(i) ?? false
                 let canType = kind == EPKind.point && (path?.v.indices.contains(i) ?? false)
                 cell("points.type", AureaText.t(curve ? "om_pts_type_corner" : "om_pts_type_curve"), enabled: canType, action: {
                     model.editPoints(PathOps.setType, [Float(i), curve ? 0 : 1])
                 }) { tint in ContentIcon(kind: curve ? .pointCorner : .pointCurve, size: 22, tint: tint) }
+                if path?.closed == true, kind == EPKind.point, i > 0, i < (path?.v.count ?? 0) {
+                    // After Effects: o ponto escolhido vira o primeiro e muda como o morph casa os pontos.
+                    cell("points.first", AureaText.t("om_pts_first_vertex"), enabled: true, action: {
+                        model.editPoints(PathOps.setFirst, [Float(i)]); state.reset()
+                    }) { tint in Text("1").font(.aurea(size: 18, weight: .bold)).foregroundStyle(tint) }
+                }
             }
             cell("points.addRemove", AureaText.t(between ? "om_pts_add" : "om_pts_delete"), enabled: between || canRemove, action: {
                 if between {
@@ -819,14 +851,16 @@ struct PointsStrip: View {
                 let chosen = (k == 0 && kind == EPKind.inHandle) || (k == 1 && kind == EPKind.outHandle)
                 var line = Path(); line.move(to: c); line.addLine(to: h)
                 context.stroke(line, with: .color(Self.handleInk), lineWidth: 1.4)
-                disk(&context, h, 7.5, StageInk.outlineUnder)
-                disk(&context, h, 6, chosen ? AureaColors.accent : .white)
+                disk(&context, h, 5.25, StageInk.outlineUnder)
+                disk(&context, h, 3.75, chosen ? AureaColors.accent : .white)
             }
         }
-        let r: CGFloat = 6
+        let base: CGFloat = 4.5
         for i in path.v.indices {
             let c = sx(path.v[i].x, path.v[i].y)
             let chosen = (i == sel && kind == EPKind.point) || state.multi.contains(i)
+            // After Effects: o primeiro ponto do caminho fechado aparece maior.
+            let r = i == 0 && path.closed && path.v.count >= 2 ? base * 1.4 : base
             context.fill(Path(CGRect(x: c.x - r - 1.5, y: c.y - r - 1.5, width: 2 * r + 3, height: 2 * r + 3)), with: .color(StageInk.outlineUnder))
             context.fill(Path(CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r)), with: .color(chosen ? AureaColors.accent : .white))
             if i == 0 && !path.closed && path.v.count >= 2 {

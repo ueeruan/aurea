@@ -406,6 +406,8 @@ private final class DisplayLinkProxy: NSObject {
 
 @MainActor
 final class AureaModel: ObservableObject {
+    /// Floats por animador de camada (Engine::kLayerAnimFloats; 32..45 = a onda, 0.5.0).
+    static let layerAnimFloats = 48
 
     // --- Ponte e estado do motor -------------------------------------------
     let engine: AureaEngine
@@ -564,11 +566,11 @@ final class AureaModel: ObservableObject {
     }
     func animatorRailTrack() -> TimelineTrack? {
         guard let id = primarySelection else { return nil }
-        let count = engine.layerAnimators(id).count / 32
+        let count = engine.layerAnimators(id).count / AureaModel.layerAnimFloats
         if let focused = timelineFocus?.first, focused.property == 40,
-           Int(focused.effect) < count, focused.param < 18 { return focused }
+           Int(focused.effect) < count, focused.param < 30 { return focused }
         if transformAnimatorLayer == id, let saved = transformAnimatorFocus,
-           saved.property == 40, Int(saved.effect) < count, saved.param < 18 { return saved }
+           saved.property == 40, Int(saved.effect) < count, saved.param < 30 { return saved }
         if count > 0 { return TimelineTrack(property: 40, effect: 0, param: 0) }
         return nil
     }
@@ -5615,6 +5617,7 @@ final class AureaModel: ObservableObject {
         case 6: return AureaText.t("expfail_file")
         case 7: return AureaText.t("msg_sem_espaco_no_aparelho_libere_espaco")
         case 8: return AureaText.t("expfail_unsupported")
+        case 9: return AureaText.t("expfail_render_hung")
         default: return nil
         }
     }

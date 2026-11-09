@@ -6,6 +6,7 @@
 
 #include "aurea/text/Text.hpp"
 #include "aurea/text/TextAnimator.hpp"
+#include "aurea/Engine.hpp"
 #include "aurea/text/TextTransform.hpp"
 #include "aurea/timeline/Layer.hpp"
 
@@ -33,6 +34,13 @@ std::vector<text::ShapedGlyph> shape(const text::Font& f, const std::string& s, 
     return g;
 }
 } // namespace
+
+static void universal_content(const aurea::Layer& source, f64 time, f64 fps, aurea::TextData& out) {
+    aurea::Layer l = source;
+    aurea::text::migrate_text_effects(l);
+    l.text.content = out.content;
+    aurea::text::apply_text_content(l.text, l.tracks, time, fps, out);
+}
 
 AUREA_TEST(Text, ArabicIsShapedContextuallyAndRightToLeft) {
     auto f = font_at("C:/Windows/Fonts/arial.ttf");
@@ -104,7 +112,18 @@ AUREA_TEST(Text, MissingGlyphsFallBackToAnotherFont) {
 // -----------------------------------------------------------------------------
 namespace {
 std::string repo_font(const char* name) {
+#ifdef AUREA_TEST_FONTS_DIR
+    return (std::filesystem::path(AUREA_TEST_FONTS_DIR) / name).string();
+#else
     return (std::filesystem::path(__FILE__).parent_path().parent_path() / "assets/fonts" / name).string();
+#endif
+}
+std::filesystem::path bundled_roboto() {
+#ifdef AUREA_TEST_FONTS_DIR
+    return std::filesystem::path(AUREA_TEST_FONTS_DIR) / "Roboto-Regular.ttf";
+#else
+    return std::filesystem::path(__FILE__).parent_path().parent_path() / "platform/ios/app/Fonts/Roboto-Regular.ttf";
+#endif
 }
 std::vector<u32> clusters_left_to_right(const std::vector<text::ShapedGlyph>& g) {
     std::vector<text::ShapedGlyph> v = g;
@@ -491,34 +510,16 @@ AUREA_TEST(TextTransform, QueuedPanelWritesAreVisibleToTheNextRead) {
     add.effect_add.effectType = effect_type_id(text::kTransformEffect);
     add.effect_add.index = kInvalidIndex;
     AUREA_CHECK_EQ(r.e.submit_commands(&add, 1, nullptr, 0), 1u);
-    bridge::LayerEffectRow fx[4]{};
-    char names[512]{};
-    AUREA_CHECK_EQ(r.e.query_layer_effects(r.id, fx, 4, names, sizeof names), 1u);
-    const u32 effect = fx[0].effectId;
-    // Deslocamento (ponto) e cor de preenchimento: o mesmo comando de vetor
-    // do painel; nenhum quadro é desenhado entre escrever e ler.
-    Command offset; offset.type = CommandType::EffectSetColorParam;
-    offset.effect_color = EffectColorPayload{LayerId::unpack(r.id), EffectId{effect, 0}, text::kOffset, 40.0f, -12.0f, 0.0f, 1.0f};
-    Command over; over.type = CommandType::EffectSetParam;
-    over.effect_param = EffectParamPayload{LayerId::unpack(r.id), EffectId{effect, 0}, text::kOverrideFill, 1.0f};
-    Command fill; fill.type = CommandType::EffectSetColorParam;
-    fill.effect_color = EffectColorPayload{LayerId::unpack(r.id), EffectId{effect, 0}, text::kFillColor, 1.0f, 0.0f, 0.0f, 1.0f};
-    const Command writes[] = {offset, over, fill};
-    AUREA_CHECK_EQ(r.e.submit_commands(writes, 3, nullptr, 0), 3u);
-    bridge::EffectParamRow rows[text::kTransformParamCount]{};
-    char blob[2048]{};
-    AUREA_CHECK(r.e.query_effect_params(r.id, effect, rows, text::kTransformParamCount, blob, sizeof blob) >= text::kFillColor + 1);
-    AUREA_CHECK_NEAR(rows[text::kOffset].value[0], 40.0f, 1e-4);
-    AUREA_CHECK_NEAR(rows[text::kOffset].value[1], -12.0f, 1e-4);
-    AUREA_CHECK_NEAR(rows[text::kOverrideFill].value[0], 1.0f, 1e-4);
-    AUREA_CHECK_NEAR(rows[text::kFillColor].value[0], 1.0f, 1e-4);
-    AUREA_CHECK_NEAR(rows[text::kFillColor].value[1], 0.0f, 1e-4);
+    AUREA_CHECK(r.e.set_text_anim_param(r.id, 0, text::kPosX, 40.0f));
+    AUREA_CHECK(r.e.set_text_anim_param(r.id, 0, text::kPosY, -12.0f));
+    AUREA_CHECK(r.e.set_text_anim_param(r.id, 0, text::kFillR, 1.0f));
+    AUREA_CHECK(r.e.set_text_anim_param(r.id, 0, text::kFillG, 0.0f));
+    AUREA_CHECK(r.e.set_text_anim_param(r.id, 0, text::kFillB, 0.0f));
+    if (Layer* owner = r.layer()) owner->text.animators[0].props |= kTextPropFill;
     // E o motor aplica: cada letra anda 40 px e fica vermelha.
     Layer* l = r.layer();
     AUREA_CHECK(l != nullptr);
     if (!l) return;
-    EffectRegistry registry;
-    register_builtin_effects(registry);
     text::TextLayout layout;
     layout.chars = 3; layout.words = 1; layout.lines = 1; layout.contentWidth = 60; layout.contentHeight = 20;
     for (u32 i = 0; i < 3; ++i) {
@@ -526,7 +527,7 @@ AUREA_TEST(TextTransform, QueuedPanelWritesAreVisibleToTheNextRead) {
     }
     std::vector<text::GlyphAnim> styles(layout.quads.size());
     std::vector<Mat4> matrices;
-    text::evaluate_transform_effects(*l, registry, 0.0, layout, styles, matrices);
+    { Layer migrated = *l; text::migrate_text_effects(migrated); text::evaluate_text_rigs(migrated, 0.0, layout, styles, matrices); }
     AUREA_CHECK_EQ(matrices.size(), layout.quads.size());
     for (usize g = 0; g < matrices.size(); ++g) {
         AUREA_CHECK_NEAR(matrices[g].col[3].x, 40.0f, 1e-3);
@@ -684,8 +685,13 @@ AUREA_TEST(Text, ScriptFontMissingLatinUsesConfiguredDefaultAndKeepsClusters) {
 // a aresta interna no SDF do stb: risco dentro da letra e o stroke contornando
 // o meio dela. O SDF usado agora nunca contradiz a cobertura real do glifo.
 AUREA_TEST(Text, OverlappingContoursDoNotLeaveSeamsInGlyphSdf) {
+#ifdef AUREA_TEST_FONTS_DIR
+    const std::string robotoFile = repo_font("Roboto-Regular.ttf");
+    const char* fonts[] = {robotoFile.c_str()};
+#else
     const char* fonts[] = {"C:/Windows/Fonts/bahnschrift.ttf", "C:/Windows/Fonts/SegUIVar.ttf",
                            "C:/Windows/Fonts/arial.ttf", "C:/Windows/Fonts/impact.ttf"};
+#endif
     const char* chars = "ABDGKMOQRSWXabdegkmoqsw&@%#48";
     u32 checked = 0;
     for (const char* path : fonts) {
@@ -805,21 +811,162 @@ struct TransformRig {
         }
     }
     ParamValue& at(u32 p) { return layer.effects[0].params[p].constant; }
-    void evaluate(f64 frame = 0) { styles.assign(4, {}); evaluate_transform_effects(layer, registry, frame, layout, styles, matrices); }
+    void evaluate(f64 frame = 0) { styles.assign(4, {}); Layer migrated = layer; migrate_text_effects(migrated); evaluate_text_rigs(migrated, frame, layout, styles, matrices); }
 };
 }
 
-AUREA_TEST(TextTransform, RangePhaseAndWordsSelectExactUnits) {
+AUREA_TEST(TextTransform, RangePhaseAndWordsFollowTheReferenceWindows) {
+    // 4 letras sem sobreposição: 5 janelas de 0,2; as letras em 0,2 0,4 0,6 0,8.
     TransformRig r;
     r.at(kOffset) = ParamValue::vec2(40, 0);
     r.at(kRangeEnd) = ParamValue::scalar(50);
     r.evaluate();
-    for (usize i = 0; i < 4; ++i) AUREA_CHECK_NEAR(r.matrices[i].col[3].x, i < 2 ? 40 : 0, .001);
+    const f32 expected[4] = {40, 20, 0, 0};   // a segunda está a meio caminho da saída
+    for (usize i = 0; i < 4; ++i) AUREA_CHECK_NEAR(r.matrices[i].col[3].x, expected[i], .001);
+    // Faixa inteira: todas com peso 1.
+    r.at(kRangeEnd) = ParamValue::scalar(100); r.evaluate();
+    for (usize i = 0; i < 4; ++i) AUREA_CHECK_NEAR(r.matrices[i].col[3].x, 40, .001);
+    // A fase empurra as UNIDADES: +50 % as leva a 0,7 0,9 1,1 1,3; a saída é (1−t)/0,2.
     r.at(kPhase) = ParamValue::scalar(50); r.evaluate();
-    for (usize i = 0; i < 4; ++i) AUREA_CHECK_NEAR(r.matrices[i].col[3].x, i >= 2 ? 40 : 0, .001);
-    r.at(kPhase) = ParamValue::scalar(0); r.at(kComponent) = ParamValue::scalar(1); r.evaluate();
+    const f32 phased[4] = {40, 20, 0, 0};
+    for (usize i = 0; i < 4; ++i) AUREA_CHECK_NEAR(r.matrices[i].col[3].x, phased[i], .001);
+    // Por palavra: 2 unidades, cada uma com as duas letras juntas.
+    r.at(kPhase) = ParamValue::scalar(0); r.at(kRangeEnd) = ParamValue::scalar(100); r.at(kComponent) = ParamValue::scalar(1); r.evaluate();
     AUREA_CHECK_NEAR(r.matrices[0].col[3].x, r.matrices[1].col[3].x, .001);
-    AUREA_CHECK_NEAR(r.matrices[2].col[3].x, 0, .001);
+    AUREA_CHECK_NEAR(r.matrices[2].col[3].x, r.matrices[3].col[3].x, .001);
+}
+
+AUREA_TEST(TextTransform, InfluenceShapesOverlapEaseAndInvertedRange) {
+    // Conta do Alight: janela O/(N+2O−1), unidade em (ordem+O)/(N+2O−1)+fase.
+    constexpr f32 kEps = 1e-4f;
+    AUREA_CHECK_NEAR(transform_influence(0, 1, 0, 0, 0, 0, 0, 0, 4), 1.f, kEps);
+    AUREA_CHECK_NEAR(transform_influence(.3f, 1, 0, 0, 0, 0, 0, 0, 4), 0.f, kEps);       // (0,2−0,3)/0,2 < 0
+    AUREA_CHECK_NEAR(transform_influence(.1f, 1, 0, 0, 0, 0, 0, 0, 4), .5f, kEps);       // (0,2−0,1)/0,2
+    // Sobreposição 100 %: O = 2, 7 janelas, largura 2/7; letra 0 em 2/7.
+    AUREA_CHECK_NEAR(transform_influence(1.f / 7.f, 1, 0, 1, 0, 0, 0, 0, 4), .5f, kEps);
+    // Faixa invertida: vale fora dela.
+    AUREA_CHECK_NEAR(transform_influence(.9f, .1f, 0, 0, 0, 0, 0, 1, 4), 1.f, kEps);
+    // Suave = gaussiana; triângulo. Rank 1 de 4: 0,4 + meia janela 0,1 = 0,5, o meio da faixa.
+    AUREA_CHECK_NEAR(transform_influence(0, 1, 0, 0, 1, 0, 0, 1, 4), 1.f, kEps);
+    AUREA_CHECK_NEAR(transform_influence(0, 1, 0, 0, 2, 0, 0, 1, 4), 1.f, kEps);
+    // Rank 0: meio em 0,3 → gaussiana e(−(−0,2·2π)²/2); triângulo 0,6.
+    const f32 x = -.2f * 6.28318530718f;
+    AUREA_CHECK_NEAR(transform_influence(0, 1, 0, 0, 1, 0, 0, 0, 4), std::exp(-x * x * .5f), kEps);
+    AUREA_CHECK_NEAR(transform_influence(0, 1, 0, 0, 2, 0, 0, 0, 4), .6f, kEps);
+    // Fora da faixa, suave e triângulo dão 0.
+    AUREA_CHECK_NEAR(transform_influence(.6f, 1, 0, 0, 2, 0, 0, 0, 4), 0.f, kEps);
+    // Ease: mesma Bézier do motor sobre o peso.
+    AUREA_CHECK_NEAR(transform_influence(.1f, 1, 0, 0, 0, 1, 0, 0, 4), cubic_bezier(.5f, 0, 1, 1, .5f), kEps);
+    AUREA_CHECK_NEAR(transform_influence(.1f, 1, 0, 0, 0, 0, -1, 0, 4), cubic_bezier(0, 0, 1, .5f, .5f), kEps);
+    AUREA_CHECK_NEAR(transform_influence(0, 1, 0, 0, 0, 0, 0, 0, 0), 0.f, 0.f);
+}
+
+AUREA_TEST(TextTransform, OpacitySignStretchAndSpacesFollowTheReference) {
+    TransformRig r;
+    r.at(kRangeEnd) = ParamValue::scalar(50);      // pesos 1, 0,5, 0, 0
+    r.at(kAlpha) = ParamValue::scalar(-50); r.evaluate();
+    const f32 dim[4] = {.5f, .75f, 1, 1};
+    for (usize i = 0; i < 4; ++i) AUREA_CHECK_NEAR(r.styles[i].opacity, dim[i], .001);
+    // Positiva apaga quem está FORA: 1 − (1 − p)·0,5.
+    r.at(kAlpha) = ParamValue::scalar(50); r.evaluate();
+    const f32 lit[4] = {1, .75f, .5f, .5f};
+    for (usize i = 0; i < 4; ++i) AUREA_CHECK_NEAR(r.styles[i].opacity, lit[i], .001);
+    // Esticar soma na escala Y: 1 + 1·p + 2·p, em volta da letra.
+    r.at(kAlpha) = ParamValue::scalar(0); r.at(kRangeEnd) = ParamValue::scalar(100);
+    r.at(kAnchor) = ParamValue::scalar(1); r.at(kScale) = ParamValue::scalar(100); r.at(kStretch) = ParamValue::scalar(200); r.evaluate();
+    AUREA_CHECK_NEAR(r.matrices[0].col[0].x, 2, .001);
+    AUREA_CHECK_NEAR(r.matrices[0].col[1].y, 4, .001);
+    // Espaço não ocupa janela: índices 0, 2, 3, 5 valem como 4 unidades seguidas.
+    r.at(kScale) = ParamValue::scalar(0); r.at(kStretch) = ParamValue::scalar(0); r.at(kAnchor) = ParamValue::scalar(0);
+    r.at(kOffset) = ParamValue::vec2(40, 0); r.at(kRangeEnd) = ParamValue::scalar(50);
+    const u32 sparse[4] = {0, 2, 3, 5};
+    for (usize i = 0; i < 4; ++i) r.layout.quads[i].charIndex = sparse[i];
+    r.evaluate();
+    const f32 expected[4] = {40, 20, 0, 0};
+    for (usize i = 0; i < 4; ++i) AUREA_CHECK_NEAR(r.matrices[i].col[3].x, expected[i], .001);
+}
+
+AUREA_TEST(TextContent, ProgressRandomizerAndSpacing) {
+    // Progresso: corte por caractere e cursor.
+    AUREA_CHECK(progress_text("Hello!", 0, .5f, 0, true) == "Hel");
+    AUREA_CHECK(progress_text("Hello!", 0, .5f, 1, true) == "Hel_");
+    AUREA_CHECK(progress_text("Hello!", 0, .5f, 1, false) == "Hel");
+    AUREA_CHECK(progress_text("Hello!", .5f, 1, 0, true) == "lo!");
+    AUREA_CHECK(progress_text("A\xC3\xA7\xC3\xA3o!", 0, .5f, 0, true) == "A\xC3\xA7\xC3\xA3");   // "Ação!": 5 caracteres, 2,5 arredonda para 3
+    // Aleatório: amount 0 mantém; 100 % troca tudo; o espaço fica; a faixa limita.
+    AUREA_CHECK(randomize_text("Hello there", 0, 0, 0, 0, 1, 6, true) == "Hello there");
+    AUREA_CHECK(randomize_text("Hello there", 1.01f, 0, 0, 0, 1, 6, true) == "***** *****");
+    AUREA_CHECK(randomize_text("Hello there", 1.01f, 0, 0, 0, 1, 6, false) == "***********");
+    AUREA_CHECK(randomize_text("abcd", 1.01f, 0, 0, .5f, 1, 6, false) == "ab**");
+    AUREA_CHECK(randomize_text("ab\ncd", 1.01f, 0, 0, 0, 1, 6, false) == "**\n**");
+    // Determinístico, e a evolução troca o sorteio.
+    const std::string a = randomize_text("abcdefgh", 1.01f, 1.25f, 0, 0, 1, 3, true);
+    AUREA_CHECK(a == randomize_text("abcdefgh", 1.01f, 1.25f, 0, 0, 1, 3, true));
+    AUREA_CHECK(a != randomize_text("abcdefgh", 1.01f, 7.75f, 0, 0, 1, 3, true));
+    for (char c : a) AUREA_CHECK(c >= '0' && c <= '9');
+
+    // Pilha na camada: Espaçamento e Progresso na ordem dos efeitos, com keyframe.
+    EffectRegistry registry; register_builtin_effects(registry);
+    Layer layer; layer.kind = LayerKind::Text;
+    EffectInstance spacing; spacing.id = 1; spacing.type = effect_type_id(kSpacingEffect);
+    initialize_instance(spacing, *registry.params(spacing.type));
+    spacing.params[kSpaceLetter].constant = ParamValue::scalar(50);
+    spacing.params[kSpaceLine].constant = ParamValue::scalar(200);
+    layer.effects.push_back(spacing);
+    EffectInstance progress; progress.id = 2; progress.type = effect_type_id(kProgressEffect);
+    initialize_instance(progress, *registry.params(progress.type));
+    layer.effects.push_back(progress);
+    auto& end = layer.tracks.get_or_create(TrackProperty::EffectParam, 2, param_track_key(kProgEnd, 0));
+    (void)end.set(FrameIndex{0}, 0.f, Interpolation::Linear); (void)end.set(FrameIndex{10}, 100.f, Interpolation::Linear);
+    TextData out; out.content = "abcd"; out.tracking = 5; out.lineHeight = 1.5f;
+    universal_content(layer, 5, 30, out);
+    AUREA_CHECK(out.content == "ab");
+    AUREA_CHECK_NEAR(out.tracking, 505.f, .001);
+    AUREA_CHECK_NEAR(out.lineHeight, 3.f, .001);
+}
+
+AUREA_TEST(TextContent, BlinkOnlyWhileTheTextIsStill) {
+    EffectRegistry registry; register_builtin_effects(registry);
+    Layer layer; layer.kind = LayerKind::Text;
+    EffectInstance progress; progress.id = 2; progress.type = effect_type_id(kProgressEffect);
+    initialize_instance(progress, *registry.params(progress.type));
+    progress.params[kProgCursor].constant = ParamValue::scalar(1);
+    progress.params[kProgBlink].constant = ParamValue::boolean(true);
+    layer.effects.push_back(progress);
+    const auto at = [&](f64 frame) { TextData t; t.content = "abcd"; universal_content(layer, frame, 30, t); return t.content; };
+    AUREA_CHECK(at(10) == "abcd_");    // meio ciclo aceso: 0,33 s · 2 = 0,67
+    AUREA_CHECK(at(20) == "abcd");     // 0,67 s · 2 = 1,33: apagado
+    // Digitando (o corte muda de um quadro para o outro): o cursor não pisca.
+    auto& end = layer.tracks.get_or_create(TrackProperty::EffectParam, 2, param_track_key(kProgEnd, 0));
+    (void)end.set(FrameIndex{0}, 0.f, Interpolation::Linear); (void)end.set(FrameIndex{40}, 100.f, Interpolation::Linear);
+    AUREA_CHECK(at(25) == "abc_");     // no quadro 25 o corte muda (2 → 3) e 0,83 s · 2 estaria apagado
+}
+
+AUREA_TEST(TextContent, MotionPresetsReplaceTheAnimationInOneUndo) {
+    Engine e; EngineConfig config; config.disableAutosave = true; config.workerCount = 1;
+    AUREA_CHECK(e.initialize(config).ok()); AUREA_CHECK(e.new_project(320, 180, 30, nullptr).ok());
+    const auto id = e.add_text("Ola mundo"); AUREA_CHECK(id.ok()); if (!id.ok()) return;
+    AUREA_CHECK_EQ(e.add_text_animator(*id, 1), 0);
+    const auto layer_of = [&]() -> Layer* { auto& t = e.project()->timeline(); return t.composition(t.current())->layer(LayerId::unpack(*id)); };
+    for (u32 preset = 0; preset < Engine::kMotionTextPresetCount; ++preset) {
+        AUREA_CHECK(e.apply_motion_text_preset(*id, preset));
+        AUREA_CHECK_EQ(layer_of()->text.animators.size(), usize{1});
+        AUREA_CHECK(layer_of()->effects.empty());
+        AUREA_CHECK(layer_of()->tracks.size() >= 1u);
+    }
+    AUREA_CHECK(!e.apply_motion_text_preset(*id, Engine::kMotionTextPresetCount));
+    // Um desfazer volta exatamente ao preset anterior (Letras para fora → Crescer por palavra).
+    Command undo; undo.type = CommandType::Undo; AUREA_CHECK(e.apply_command(undo).ok());
+    AUREA_CHECK_EQ(layer_of()->text.animators.size(), usize{1});
+    AUREA_CHECK_EQ(static_cast<u32>(layer_of()->text.animators[0].rig), 1u);
+    AUREA_CHECK(layer_of()->tracks.find(TrackProperty::TextAnimParam, 0, kScaleX) != nullptr);
+    // As grades de preset chegam pelo mesmo número do preset antigo, com a base.
+    AUREA_CHECK(e.apply_text_preset(*id, Engine::kMotionTextPresetBase + 8));
+    AUREA_CHECK(!e.apply_text_preset(*id, Engine::kMotionTextPresetBase + Engine::kMotionTextPresetCount));
+    // Só texto 2D.
+    const auto shape = e.add_shape(10); AUREA_CHECK(shape.ok());
+    if (shape.ok()) AUREA_CHECK(!e.apply_motion_text_preset(*shape, 0));
+    e.shutdown();
 }
 
 AUREA_TEST(TextTransform, ShutterSubframePreservesHoldAndEvaluatesAnimatedAnchor) {
@@ -894,8 +1041,9 @@ AUREA_TEST(TextTransform, FillAlphaFollowsRangeKeysAndEffectStackWithoutChanging
     r.at(kFillColor) = ParamValue::color(1, 0, 0, 0);
     r.at(kRangeEnd) = ParamValue::scalar(50);
     r.evaluate();
+    const f32 fillOpacity[4] = {0, .5f, 1, 1};     // pesos 1, 0,5, 0, 0
     for (usize i = 0; i < 4; ++i) {
-        AUREA_CHECK_NEAR(r.styles[i].fillOpacity, i < 2 ? 0 : 1, .001);
+        AUREA_CHECK_NEAR(r.styles[i].fillOpacity, fillOpacity[i], .001);
         AUREA_CHECK_NEAR(r.styles[i].opacity, 1, .001);
     }
     auto& alpha = r.layer.tracks.get_or_create(TrackProperty::EffectParam, 17, param_track_key(kFillColor, 3));
@@ -946,7 +1094,7 @@ AUREA_TEST(Text, LatinTextIsPixelIdenticalWithBundledFallbackEnabled) {
     text::shaped_glyphs(*roboto, t, referenceGlyphs);
     std::vector<std::vector<Vec2>> referenceContours;
     AUREA_CHECK(text::outline(*roboto, t, referenceContours));
-    const auto bundled = std::filesystem::path(__FILE__).parent_path().parent_path() / "platform/ios/app/Fonts/Roboto-Regular.ttf";
+    const auto bundled = bundled_roboto();
     text::set_default_font_path(bundled.string());
     text::TextRaster r;
     const bool ok = text::rasterize(*roboto, t, 1.0f, r);
@@ -997,12 +1145,77 @@ AUREA_TEST(Text, LatinTextIsPixelIdenticalWithBundledFallbackEnabled) {
 // de uma fonte de reserva que TEM o glifo — nada de .notdef (as caixinhas do
 // relato da beta) —, o raster tem tinta em toda a frase e o texto 3D tem
 // contorno para cada ideograma/kana. Latim no meio continua na Roboto.
+AUREA_TEST(Text, KoreanUsesTheBundledFontInsteadOfTofu) {
+    const std::string robotoPath = repo_font("Roboto-Regular.ttf");
+    auto roboto = font_at(robotoPath.c_str());
+    AUREA_CHECK(roboto != nullptr);
+    if (!roboto) return;
+    const auto bundled = bundled_roboto();
+    text::set_default_font_path(bundled.string());
+    const std::string ko = "안녕하세요";
+    const auto g = shape(*roboto, ko, 64.0f);
+    u32 notdef = 0, fromFallback = 0;
+    for (const auto& x : g) { notdef += x.glyph == 0 ? 1u : 0u; fromFallback += x.fallback ? 1u : 0u; }
+    AUREA_CHECK_EQ(g.size(), static_cast<usize>(5));
+    AUREA_CHECK_EQ(notdef, 0u);
+    AUREA_CHECK_EQ(fromFallback, 5u);
+}
+
+AUREA_TEST(Text, LargeTextKeepsGeometryAndFollowsTheOutlineBetter) {
+    auto font = font_at(repo_font("Roboto-Regular.ttf").c_str());
+    AUREA_CHECK(font != nullptr);
+    if (!font) return;
+    TextData t;
+    t.content = "B";   // uma letra: o quadrado do atlas de duas se sobrepõe
+    t.size = 700.0f;
+    text::TextRaster truth;
+    AUREA_CHECK(text::rasterize(*font, t, 1.0f, truth));
+    const f32 pad = truth.padding;
+    text::TextLayout normal, large;
+    AUREA_CHECK(text::layout_quads(*font, t, pad, normal, 0.0f));
+    AUREA_CHECK(text::layout_quads(*font, t, pad, large, t.size));
+    AUREA_CHECK_EQ(normal.quads.size(), large.quads.size());
+    if (normal.quads.empty() || normal.quads.size() != large.quads.size()) return;
+    std::vector<u8> atlas;
+    (void)text::copy_glyph_atlas(atlas);
+    const u32 size = text::kGlyphAtlasSize;
+    const auto wrong = [&](const text::TextLayout& L) {
+        u32 errors = 0;
+        for (const text::GlyphQuad& q : L.quads) {
+            for (u32 y = static_cast<u32>(std::max(q.y0 + 1.0f, 0.0f)); static_cast<f32>(y) + 1.0f < q.y1 && y < truth.height; ++y) {
+                for (u32 x = static_cast<u32>(std::max(q.x0 + 1.0f, 0.0f)); static_cast<f32>(x) + 1.0f < q.x1 && x < truth.width; ++x) {
+                    const f32 u = (q.u0 + (q.u1 - q.u0) * (x + 0.5f - q.x0) / (q.x1 - q.x0)) * size - 0.5f;
+                    const f32 v = (q.v0 + (q.v1 - q.v0) * (y + 0.5f - q.y0) / (q.y1 - q.y0)) * size - 0.5f;
+                    const u32 iu = static_cast<u32>(u), iv = static_cast<u32>(v);
+                    const f32 fu = u - iu, fv = v - iv;
+                    const auto at = [&](u32 a, u32 b) { return static_cast<f32>(atlas[static_cast<usize>(b) * size + a]); };
+                    const f32 d = (at(iu, iv) * (1 - fu) + at(iu + 1, iv) * fu) * (1 - fv) + (at(iu, iv + 1) * (1 - fu) + at(iu + 1, iv + 1) * fu) * fv;
+                    const bool inked = truth.rgba[(static_cast<usize>(y) * truth.width + x) * 4 + 3] > 127;
+                    errors += (d > 128.0f) != inked ? 1u : 0u;
+                }
+            }
+        }
+        return errors;
+    };
+    const u32 before = wrong(normal), after = wrong(large);
+    std::printf("(contorno errado: %u -> %u px) ", before, after);
+    AUREA_CHECK(after < before);
+    for (usize i = 0; i < normal.quads.size(); ++i) {
+        const text::GlyphQuad& a = normal.quads[i];
+        const text::GlyphQuad& b = large.quads[i];
+        AUREA_CHECK_NEAR(a.penX, b.penX, 1e-3f);
+        AUREA_CHECK_NEAR(a.k, b.k, 1e-5f);
+        AUREA_CHECK_NEAR(a.x0, b.x0, a.k);
+        AUREA_CHECK_NEAR(a.x1, b.x1, a.k);
+    }
+}
+
 AUREA_TEST(Text, JapaneseFallsBackPerGlyphInsteadOfTofu) {
     const std::string robotoPath = repo_font("Roboto-Regular.ttf");
     auto roboto = font_at(robotoPath.c_str());
     AUREA_CHECK(roboto != nullptr);
     if (!roboto) return;
-    const auto bundled = std::filesystem::path(__FILE__).parent_path().parent_path() / "platform/ios/app/Fonts/Roboto-Regular.ttf";
+    const auto bundled = bundled_roboto();
     const auto jpFont = text::Font::load((bundled.parent_path() / "NotoSansJP-Regular.otf").string().c_str());
     AUREA_CHECK(jpFont != nullptr);
     if (!jpFont) return;

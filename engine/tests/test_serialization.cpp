@@ -11,8 +11,10 @@
 #include "aurea/command/CommandQueue.hpp"
 
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <limits>
+#include <vector>
 
 using namespace aurea;
 
@@ -167,6 +169,72 @@ AUREA_TEST(Serialization, MotionBlurAmountRecoversNonFiniteValuesAndPreservesVal
     AUREA_CHECK_EQ(comp->order().size(), 9u); if (comp->order().size() != 9) return;
     for (u32 i = 0; i < comp->order().size(); ++i)
         AUREA_CHECK_EQ(comp->layer(comp->order().at(i))->transform.motionBlurAmount, expected[i]);
+}
+
+AUREA_TEST(Serialization, OldProjectTextAnimatorsKeepTheirMath) {
+    auto original = make_project();
+    auto* root = original.timeline().composition(original.timeline().root());
+    const auto textId = root->add_layer(LayerKind::Text, "texto");
+    TextAnimator animator;
+    animator.lineSpacingEm = 123.456f;   // marca o fim dos campos v59 no arquivo
+    root->layer(textId)->text.animators.push_back(animator);
+    AUREA_CHECK_EQ(root->layer(textId)->text.animators[0].aeModel, 1u);
+    std::vector<u8> bytes;
+    SaveOptions opts; opts.compress = false;
+    AUREA_CHECK(ProjectSerializer::encode(original, opts, bytes).ok());
+    {
+        Project current; LoadReport report;
+        AUREA_CHECK(ProjectSerializer::load_bytes(current, bytes.data(), bytes.size(), LoadOptions{}, &report).ok());
+        AUREA_CHECK_EQ(report.timelineVersion, kTimelineSectionVersion);
+        AUREA_CHECK_EQ(current.timeline().composition(current.timeline().root())->layer(textId)->text.animators[0].aeModel, 1u);
+    }
+    auto read = [&](usize at, usize count) {
+        u64 value = 0;
+        for (usize i = 0; i < count; ++i) value |= static_cast<u64>(bytes.at(at + i)) << (8 * i);
+        return value;
+    };
+    auto write = [&](usize at, u64 value, usize count) {
+        for (usize i = 0; i < count; ++i) bytes.at(at + i) = static_cast<u8>(value >> (8 * i));
+    };
+    // O mesmo arquivo como a v59 gravava: sem o campo do modelo, logo depois dos floats do animador.
+    bool converted = false;
+    const auto index = static_cast<usize>(read(12, 8));
+    const u32 count = static_cast<u32>(read(8, 4));
+    for (u32 i = 0; i < count; ++i) {
+        const usize header = index + 40 * i;
+        if (read(header, 2) != static_cast<u16>(SectionKind::Timeline)) continue;
+        AUREA_CHECK_EQ(read(header + 34, 4), 0u);
+        const auto offset = static_cast<usize>(read(header + 6, 8));
+        const auto oldSize = static_cast<usize>(read(header + 14, 8));
+        const f32 marker = 123.456f;
+        usize field = 0;
+        for (usize at = offset; at + 8 <= offset + oldSize; ++at)
+            if (std::memcmp(bytes.data() + at, &marker, 4) == 0) field = at + 4;
+        AUREA_CHECK(field != 0);
+        if (field == 0) return;
+        AUREA_CHECK_EQ(read(field, 4), 1u);
+        std::memmove(bytes.data() + field, bytes.data() + field + 4, offset + oldSize - field - 4);
+        const usize newSize = oldSize - 4;
+        write(header + 2, 59, 4);
+        write(header + 14, newSize, 8); write(header + 22, newSize, 8);
+        u32 checksum = ~0u;
+        for (usize b = offset; b < offset + newSize; ++b) {
+            checksum ^= bytes[b];
+            for (u32 bit = 0; bit < 8; ++bit) checksum = (checksum >> 1) ^ (0xedb88320u & (0u - (checksum & 1u)));
+        }
+        write(header + 30, ~checksum, 4);
+        converted = true;
+    }
+    AUREA_CHECK(converted);
+    Project restored; LoadReport report;
+    AUREA_CHECK(ProjectSerializer::load_bytes(restored, bytes.data(), bytes.size(), LoadOptions{}, &report).ok());
+    AUREA_CHECK_EQ(report.timelineVersion, 59u);
+    const auto* layer = restored.timeline().composition(restored.timeline().root())->layer(textId);
+    AUREA_CHECK(layer != nullptr);
+    if (!layer) return;
+    AUREA_CHECK_EQ(layer->text.animators.size(), 1u);
+    AUREA_CHECK_EQ(layer->text.animators[0].aeModel, 0u);
+    AUREA_CHECK_NEAR(layer->text.animators[0].lineSpacingEm, 123.456f, 1e-3f);
 }
 
 AUREA_TEST(Serialization, MotionBlurVersion40PreservesSettingsAndAddsBoundedAdaptation) {
@@ -1576,7 +1644,7 @@ AUREA_TEST(Serialization, ObjectMaterialOverridesAndAnimationSurviveIndependentl
     std::remove(path.c_str());
 }
 
-AUREA_TEST(Serialization, InvalidMaterialOverridesAreRejectedWithoutPartialLoad) {
+AUREA_TEST(Serialization, InvalidMaterialOverridesAreRepairedOnLoad) {
     const std::string path=temp_path("invalid_materials");
     for (u32 invalid=0; invalid<5; ++invalid) {
         Project original=make_project();
@@ -1590,8 +1658,26 @@ AUREA_TEST(Serialization, InvalidMaterialOverridesAreRejectedWithoutPartialLoad)
         layer->model.materials.push_back(value);
         if (invalid==4) layer->model.materials.push_back(value);
         AUREA_CHECK(ProjectSerializer::save(original,path,SaveOptions{}).ok());
+        // Um material ruim não vale o projeto inteiro: abre, com o valor na faixa
+        // ou o material sem efeito (Serialization.cpp, leitura dos materiais).
         Project loaded;
-        AUREA_CHECK(!ProjectSerializer::load(loaded,path,LoadOptions{}).ok());
+        AUREA_CHECK(ProjectSerializer::load(loaded,path,LoadOptions{}).ok());
+        const auto* restoredComp=loaded.timeline().composition(loaded.timeline().root());
+        AUREA_CHECK(restoredComp != nullptr);
+        if (!restoredComp) continue;
+        const Layer* restored=nullptr;
+        for (u32 i=0; i<restoredComp->order().size(); ++i) {
+            const Layer* l=restoredComp->layer(restoredComp->order().at(i));
+            if (l && l->kind==LayerKind::Model3D) restored=l;
+        }
+        AUREA_CHECK(restored != nullptr);
+        if (!restored) continue;
+        const auto& m=restored->model.materials;
+        AUREA_CHECK_EQ(m.size(),usize{invalid==4 ? 2u : 1u});
+        if (invalid==0 || invalid==1) AUREA_CHECK_EQ(m[0].mask,0u);
+        if (invalid==2) AUREA_CHECK_NEAR(m[0].roughness,1.f,1e-7);
+        if (invalid==3) AUREA_CHECK(std::isfinite(m[0].baseColor.x));
+        if (invalid==4) AUREA_CHECK_EQ(m[1].mask,0u);
     }
     std::remove(path.c_str());
 }

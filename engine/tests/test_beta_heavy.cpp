@@ -169,7 +169,9 @@ AUREA_TEST(BetaHeavy, TrackText3DParticlesTextSurvivePlayScrubEditExport) {
     std::thread render([&] {
         for (u32 f = 0; f < 240 && !done; ++f) {
             r.seek(static_cast<i64>((f * 7) % 90));   // toca e "arrasta" pra trás e pra frente
-            if (r.e.render_offscreen(target, 540, 960, true).ok()) rendered.fetch_add(1); else failed.fetch_add(1);
+            const Status frame = r.e.render_offscreen(target, 540, 960, true);
+            if (frame.ok()) rendered.fetch_add(1);
+            else if (frame.code() != Errc::Cancelled) failed.fetch_add(1);   // edição no meio cancela a captura de propósito
         }
         done = true;
     });
@@ -213,9 +215,10 @@ AUREA_TEST(BetaHeavy, TrackText3DParticlesTextSurvivePlayScrubEditExport) {
     render.join();
     r.e.cancel_motion_track();
     r.e.set_scene_editor(false, 0, 0, 3);
+    AUREA_CHECK(r.e.render_offscreen(target, 540, 960, true).ok());   // parado, a captura volta a sair
     r.e.gpu()->destroy_texture(target);
     std::printf("    %u quadros, %u falhas, %u passos da UI\n", rendered.load(), failed.load(), step);
-    AUREA_CHECK(rendered.load() > 200);
+    AUREA_CHECK_EQ(failed.load(), 0u);
 
     // 4) Exporta tudo junto (o export roda na própria thread).
     ExportSettings s;

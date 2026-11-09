@@ -234,6 +234,55 @@ bool Engine::toggle_vector_path_key(u64 layerId, u32 group, u32 path) noexcept {
     return true;
 }
 
+bool Engine::toggle_vector_path_points_key(u64 layerId, u32 group, u32 path, const u32* indices, u32 count) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = vector_layer(comp, layerId);
+    if (!l || !indices || count == 0 || group >= l->shape.vector.groups.size() || path >= l->shape.vector.groups[group].paths.size()) return false;
+    VectorPath& p = l->shape.vector.groups[group].paths[path];
+    VectorPath work = p;
+    if (work.kind != VectorPathKind::Free) vector::make_editable(work);
+    const i64 local = l->local_time(playback_.current()).value;
+    BezierPath now = vector::path_at(work, static_cast<f64>(local));
+    const usize n = now.v.size();
+    std::vector<u8> chosen(n, 0);
+    u32 valid = 0;
+    for (u32 i = 0; i < count; ++i) {
+        if (indices[i] >= n) continue;
+        if (!chosen[indices[i]]) ++valid;
+        chosen[indices[i]] = 1;
+    }
+    if (valid == 0) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "keyframe de pontos");
+    bump_model_revision_locked();
+    if (p.kind != VectorPathKind::Free) vector::make_editable(p);
+    auto it = std::find_if(p.keys.begin(), p.keys.end(), [&](const PathKey& k) { return k.frame == local; });
+    if (it == p.keys.end()) {
+        PathKey k;
+        k.frame = local;
+        k.path = std::move(now);
+        if (valid < n) k.points = std::move(chosen);
+        p.keys.insert(std::upper_bound(p.keys.begin(), p.keys.end(), local, [](i64 f, const PathKey& x) { return f < x.frame; }), std::move(k));
+    } else {
+        std::vector<u8> mask = it->points.size() == n ? it->points : std::vector<u8>(n, 1);
+        bool allOn = true;
+        for (usize i = 0; i < n; ++i) allOn &= !chosen[i] || mask[i];
+        for (usize i = 0; i < n; ++i) if (chosen[i]) mask[i] = allOn ? 0 : 1;
+        const usize on = static_cast<usize>(std::count(mask.begin(), mask.end(), u8{1}));
+        // O key guarda a forma do instante nos pontos que passam a valer.
+        if (!allOn) for (usize i = 0; i < n && i < it->path.v.size(); ++i) if (chosen[i]) it->path.v[i] = now.v[i];
+        if (on == 0) {
+            if (p.keys.size() == 1) p.path = it->path;
+            p.keys.erase(it);
+        } else {
+            it->points = on == n ? std::vector<u8>{} : std::move(mask);
+        }
+    }
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
 i32 Engine::add_vector_group(u64 layerId, u32 pathKind) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
@@ -443,6 +492,50 @@ u32 Engine::query_shape_params(u64 layerId, f32* out, u32 capacity) noexcept {
     out[kShapeParamCount] = static_cast<f32>(anim);
     out[kShapeParamCount + 1] = static_cast<f32>(keys);
     return kShapeParamFloats;
+}
+
+namespace {
+/// A forma com os valores das trilhas no instante (o mesmo da consulta acima).
+ShapeData shape_at(const Layer& l, FrameIndex local) noexcept {
+    ShapeData sh = l.shape;
+    for (u32 p = 1; p < Engine::kShapeParamCount; ++p) {
+        const Track* tr = l.tracks.find(TrackProperty::ShapeParam, 0, p);
+        if (!tr || tr->keys.empty()) continue;
+        if (f32* r = shape_param_ref(sh, p)) *r = clamp_shape_param(p, tr->sample(local));
+    }
+    return sh;
+}
+} // namespace
+
+u32 Engine::query_shape_param_handles(u64 layerId, f32* out, u32 capacity) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = sdf_shape_layer(comp, layerId);
+    if (!l || !out) return 0;
+    shape::ParamHandle handles[shape::kMaxParamHandles];
+    const u32 n = shape::param_handles(shape_at(*l, l->local_time(playback_.current())), handles);
+    u32 written = 0;
+    for (u32 i = 0; i < n && (written + 1) * kShapeHandleFloats <= capacity; ++i, ++written) {
+        f32* v = out + written * kShapeHandleFloats;
+        v[0] = handles[i].pos.x; v[1] = handles[i].pos.y;
+        v[2] = static_cast<f32>(handles[i].param); v[3] = static_cast<f32>(handles[i].style);
+        v[4] = handles[i].push.x; v[5] = handles[i].push.y;
+    }
+    return written;
+}
+
+bool Engine::drag_shape_param_handle(u64 layerId, u32 param, f32 x, f32 y, bool continuing) noexcept {
+    f32 value = 0.0f;
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        drain_commands_locked();
+        Composition* comp = project_ ? current_composition() : nullptr;
+        Layer* l = sdf_shape_layer(comp, layerId);
+        if (!l || l->locked) return false;
+        if (!shape::value_from_handle(shape_at(*l, l->local_time(playback_.current())), param, Vec2{x, y}, value)) return false;
+    }
+    return set_shape_param(layerId, param, value, continuing);
 }
 
 bool Engine::set_shape_param(u64 layerId, u32 param, f32 value, bool continuing) noexcept {

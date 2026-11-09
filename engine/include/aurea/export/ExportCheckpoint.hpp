@@ -133,6 +133,14 @@ struct Candidate {
     u32 totalFrames = 0;
     u32 safeMode = 0;      ///< o degrau que gravou: é nele que continua
 };
+/// A regra de continuar: pausa sempre; depois de falha ou morte, só com um GOP
+/// novo desde a última continuação e dentro de kMaxFailureResumes.
+[[nodiscard]] constexpr bool resume_allowed(const Manifest& m, u32 resumeFrame) noexcept {
+    if (m.state == SessionState::Paused) return true;
+    const u32 failures = m.failureResumes + (m.state == SessionState::Running ? 1u : 0u);
+    return resumeFrame > m.lastResumeFrame && failures <= kMaxFailureResumes;
+}
+
 /// Procura na pasta o manifesto com `requestKey` e confere o registro. Só vale
 /// com progresso desde a última continuação e dentro de kMaxFailureResumes.
 [[nodiscard]] Candidate find_candidate(const std::string& directory, u64 requestKey) noexcept;

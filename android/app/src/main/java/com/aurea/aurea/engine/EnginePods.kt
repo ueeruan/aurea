@@ -583,6 +583,7 @@ class ExportProgress {
         const val FAILURE_FILE = 6
         const val FAILURE_STORAGE = 7
         const val FAILURE_UNSUPPORTED = 8
+        const val FAILURE_RENDER_HUNG = 9
         /** O codec do aparelho travou (watchdog/quarentena) — não é memória. */
         const val FAILURE_CODEC_HUNG = 9
     }

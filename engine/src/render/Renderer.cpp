@@ -633,8 +633,8 @@ bool can_share_static_pose(const Layer& layer, const scene3d::SceneAsset& asset)
         if (property == TrackProperty::MaterialParam || (asset.shapeParts && property == TrackProperty::ShapePart)) return false;
     }
     if (!asset.textGlyphLayout && !asset.shapeParts) return true;
-    if (layeranim::has_units(layer) || text::has_animator_effect(layer)) return false;
-    if (asset.textGlyphLayout && (text::has_transform_effect(layer) || text::has_animators(layer.text))) return false;
+    if (layeranim::has_units(layer)) return false;
+    if (asset.textGlyphLayout && text::has_animators(layer.text)) return false;
     for (const auto& effect : layer.effects) {
         if (effect.enabled && ((asset.textGlyphLayout && effect.type == effect_type_id(effect_keys::kText3DLayout)) ||
             (asset.shapeParts && effect.type == effect_type_id(effect_keys::kShape3DLayout)))) return false;
@@ -3402,9 +3402,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 const TextData& T = *textData;
                 // Animadores de CAMADA por letra/palavra/linha entram no mesmo GlyphAnim.
                 const bool unitAnim = layeranim::has_units(*l);
-                const bool textEffect = effects_ && text::has_transform_effect(*l);
-                const bool animatorEffect = text::has_animator_effect(*l);
-                const bool animated = text::has_animators(T) || unitAnim || textEffect || animatorEffect;
+                const bool textEffect = text::has_rig_animators(T);
+                const bool animated = text::has_animators(T) || unitAnim;
                 // O contorno cabe na distância do atlas (16 px da base × escala).
                 const f32 strokeMax = text::kGlyphSpread * std::max(1.0f, T.size) / text::kGlyphBasePx - 1.0f;
                 const f32 stroke = std::clamp(T.strokeWidth, 0.0f, std::max(0.0f, strokeMax));
@@ -3439,20 +3438,25 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     pad += std::min(extra, 4000.0f);
                 }
                 if (unitAnim) pad += layeranim::glyph_padding(*l, T.size, T.content.size());
-                if (animatorEffect) pad += text::animator_effect_padding(*l, local.value, T.size, static_cast<u32>(T.content.size()));
                 if (textEffect) {
                     const auto extent = text::measure(*font, T);
-                    pad += text::transform_padding(*l, *effects_, static_cast<f64>(local.value), std::max(extent.width, extent.height));
+                    pad += text::rig_padding(*l, static_cast<f64>(local.value), std::max(extent.width, extent.height));
                 }
                 // Deslocamento de caractere troca as letras antes do layout.
                 TextData shaped;
                 const TextData* src = &T;
                 if (animated) {
-                    const std::string c = text::apply_char_offset(T, *textTracks, static_cast<f64>(local.value), fps);
-                    if (c != T.content) { shaped = T; shaped.content = c; src = &shaped; }
+                    if (text::has_content_animators(T)) {
+                        shaped = T;
+                        text::apply_text_content(T, *textTracks, static_cast<f64>(local.value), fps, shaped);
+                        src = &shaped;
+                    }
                 }
                 text::TextLayout L;
-                if (!text::layout_quads(*font, *src, pad, L)) continue;
+                const Mat4 shownWorld = world_3d_frac(comp, *l, static_cast<f64>(time.value));
+                const f32 shownScale = std::max(Vec3{shownWorld.col[0].x, shownWorld.col[0].y, shownWorld.col[0].z}.length(),
+                                                Vec3{shownWorld.col[1].x, shownWorld.col[1].y, shownWorld.col[1].z}.length());
+                if (!text::layout_quads(*font, *src, pad, L, T.size * shownScale)) continue;
                 {
                     const f32 s = pad - (T.strokeWidth > 0.0f ? T.strokeWidth + 2.0f : 2.0f);   // a mesma margem de recenter_text
                     srcShift = l->captions.empty() ? Vec2{s, s} : Vec2{L.width * .5f - l->transform.anchor.x, L.height * .5f - l->transform.anchor.y};
@@ -3463,6 +3467,16 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 rl.source.glyphFirst = static_cast<u32>(out.glyphs.size());
                 // Perspectiva do 3D por caractere: a distância da câmera padrão.
                 rl.source.textPersp = Vec4{L.width * 0.5f, L.height * 0.5f, static_cast<f32>(std::max(1u, comp.height())) * 1.2f, 0};
+                if (!wants_3d(comp, *l, time) && std::any_of(T.animators.begin(), T.animators.end(), [](const TextAnimator& a) { return a.enabled && a.aeModel != 0 && a.rig == 0; })) {
+                    // 3D por letra sem câmera: a câmera padrão do After Effects (39,6° na largura, no centro da composição).
+                    const Mat4 layerToComp = world_2d_frac(comp, *l, static_cast<f64>(time.value));
+                    const f32 det = layerToComp.col[0].x * layerToComp.col[1].y - layerToComp.col[1].x * layerToComp.col[0].y;
+                    if (std::fabs(det) > 1e-6f) {
+                        const f32 cx = static_cast<f32>(comp.width()) * 0.5f - layerToComp.col[3].x, cy = static_cast<f32>(comp.height()) * 0.5f - layerToComp.col[3].y;
+                        rl.source.textPersp = Vec4{(cx * layerToComp.col[1].y - cy * layerToComp.col[1].x) / det, (cy * layerToComp.col[0].x - cx * layerToComp.col[0].y) / det,
+                                                   static_cast<f32>(std::max(1u, comp.width())) * 0.5f / std::tan(19.8f * kDeg2Rad), 0};
+                    }
+                }
                 auto lin = [](Vec4 c) { return Vec4{srgb_to_linear(c.x), srgb_to_linear(c.y), srgb_to_linear(c.z), c.w}; };
                 const Vec4 strokeCol = lin(T.strokeColor);
                 std::vector<text::GlyphUnits> units(L.quads.size());
@@ -3570,7 +3584,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 auto glyphStroke = [&](const text::GlyphQuad& q, const text::GlyphAnim& a) {
                     return std::clamp(stroke + a.strokeAdd, 0.0f, std::max(0.0f, text::kGlyphSpread * q.k - 1.0f));
                 };
-                const bool outlinePass = stroke > 0 || animatorEffect || std::any_of(T.animators.begin(), T.animators.end(),
+                const bool outlinePass = stroke > 0 || std::any_of(T.animators.begin(), T.animators.end(),
                     [](const TextAnimator& a) { return a.enabled && (a.props & kTextPropStrokeWidth); });
                 std::vector<text::GlyphAnim> anim;
                 const Vec4 emptyBounds{1e30f, 1e30f, -1e30f, -1e30f};
@@ -3591,8 +3605,18 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         x0 = group->x; y0 = group->y; x1 = group->z; y1 = group->w;
                     }
                     // Alinhamento do agrupamento (Pro): −1..1 da meia caixa a partir do centro.
-                    const Vec3 pivot{(x0 + x1) * 0.5f + a.groupAlign.x * (x1 - x0) * 0.5f,
-                                     (y0 + y1) * 0.5f + a.groupAlign.y * (y1 - y0) * 0.5f, 0};
+                    Vec3 pivot{(x0 + x1) * 0.5f + a.groupAlign.x * (x1 - x0) * 0.5f,
+                               (y0 + y1) * 0.5f + a.groupAlign.y * (y1 - y0) * 0.5f, 0};
+                    if (a.aeModel) {
+                        // Medido no After Effects: centro do avanço (sem o tracking) na linha de
+                        // base; palavra e linha na linha de base; "tudo" no centro da caixa. Em Y,
+                        // 100 % de alinhamento andam 1,2 altura do H, em qualquer agrupamento.
+                        const f32 own = std::max(0.0f, q.advance - T.tracking * T.size / 1000.0f);
+                        f32 cx = q.penX + own * 0.5f, half = own * 0.5f;
+                        if (group) { cx = (x0 + x1) * 0.5f; half = std::max(0.0f, (x1 - x0) * 0.5f - text::kGlyphSpread * q.k); }
+                        const f32 cy = a.anchorGrouping == 3 ? (y0 + y1) * 0.5f : q.baseline;
+                        pivot = Vec3{cx + a.groupAlign.x * half, cy + a.groupAlign.y * L.capHeight * 1.2f, 0};
+                    }
                     // Ponto de âncora (Pro): o glifo sai do lugar por −âncora e
                     // gira/escala em volta de pivô + âncora.
                     const Vec3 anchor{a.anchor.x, a.anchor.y, 0};
@@ -3602,15 +3626,22 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     m = m * a.skewTransform;
                     return m * Mat4::scale(Vec3{a.scale.x, a.scale.y, 1}) * Mat4::translation(-pivot - anchor);
                 };
+                // O After Effects mistura a opacidade por letra em gama; aqui a composição é em
+                // luz linear. Sem saber o fundo, supõe contraste: texto claro sobre escuro, e o inverso.
+                auto shownOpacity = [](const text::GlyphAnim& a, const text::GlyphQuad& g) {
+                    if (!a.aeModel || a.opacity <= 0.0f || a.opacity >= 1.0f) return a.opacity;
+                    const f32 luma = std::clamp(0.2126f * g.color.x + 0.7152f * g.color.y + 0.0722f * g.color.z, 0.0f, 1.0f);
+                    const f32 light = std::pow(a.opacity, 2.2f), dark = 1.0f - std::pow(1.0f - a.opacity, 2.2f);
+                    return dark + (light - dark) * luma;
+                };
                 std::vector<Mat4> textTransforms;
                 auto evaluateGlyphs = [&](f64 lt) {
                     text::evaluate_text_animators(T, *textTracks, lt, fps, units, L.chars, L.words, L.lines, anim);
-                    if (animatorEffect) text::evaluate_animator_effects(*l, lt, fps, units, L.chars, L.words, L.lines, anim);
                     if (unitAnim) {
                         const f32 align = T.alignment == 1 ? .5f : T.alignment == 2 ? 1.f : 0.f;
                         layeranim::apply_to_glyphs(*l, lt, fps, units, L.chars, L.words, L.lines, align, anim);
                     }
-                    if (textEffect) text::evaluate_transform_effects(*l, *effects_, lt, L, anim, textTransforms);
+                    if (textEffect) text::evaluate_text_rigs(*l, lt, L, anim, textTransforms);
                 };
                 if (sets > 1) {
                     std::vector<std::array<Vec2, 4>> previous(L.quads.size());
@@ -3686,9 +3717,9 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                             gi.rect = Vec4{q.x0, q.y0, q.x1, q.y1};
                             gi.uv = Vec4{q.u0, q.v0, q.u1, q.v1};
                             gi.fill = sc;
-                            gi.fill.w *= a.opacity * w;
+                            gi.fill.w *= shownOpacity(a, q) * w;
                             gi.stroke = sc;
-                            gi.stroke.w *= a.opacity * w;
+                            gi.stroke.w *= shownOpacity(a, q) * w;
                             gi.xform = Mat4::translation(Vec3{T.shadowOffset.x, T.shadowOffset.y, 0}) * pathM(g)
                                 * (textEffect ? textTransforms[g] : Mat4::identity()) * glyphMatrix(q, a);
                             gi.misc = Vec4{0, 0, q.k, glyphStroke(q, a)};
@@ -3713,8 +3744,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                             const Vec4 as = lin(Vec4{a.stroke.x, a.stroke.y, a.stroke.z, 1});
                             sc = Vec4{sc.x + (as.x - sc.x) * a.stroke.w, sc.y + (as.y - sc.y) * a.stroke.w, sc.z + (as.z - sc.z) * a.stroke.w, sc.w};
                         }
-                        fill.w *= a.opacity * a.fillOpacity * w;
-                        sc.w *= a.opacity * w;
+                        fill.w *= shownOpacity(a, q) * a.fillOpacity * w;
+                        sc.w *= shownOpacity(a, q) * w;
                         gi.fill = fill;
                         gi.stroke = sc;
                         gi.xform = pathM(g) * (textEffect ? textTransforms[g] : Mat4::identity()) * glyphMatrix(q, a);

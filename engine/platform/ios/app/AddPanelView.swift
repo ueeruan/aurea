@@ -205,6 +205,8 @@ private let omegaShapes: [(Int, String)] = [
     (23, "sh_shape_burst"), (24, "sh_shape_line"), (25, "sh_shape_diamond"), (26, "sh_shape_heart"),
     (27, "sh_shape_seal"), (28, "sh_shape_arc"), (29, "sh_shape_bubble"), (30, "sh_shape_bolt"),
     (31, "sh_shape_wave"), (32, "sh_shape_blob"),
+    // 0.5.0 (paridade Alight Motion): presets 33 lua e 34 gota (tipos 25 e 26).
+    (33, "sh_shape_moon"), (34, "sh_shape_teardrop"),
 ]
 
 /// Páginas de 3 fileiras × `max(4, (largura − 18)/48)` colunas, células de 48
@@ -634,7 +636,7 @@ private struct TextPresetStripView: View {
     }
 
     private func load() {
-        let all = PanelPresetEntry.loadAll().filter { $0.kind == .text }
+        let all = PanelPresetEntry.loadAll().filter { $0.kind == .text && $0.fitsText(threeD: false) }
         let recents = UserDefaults.standard.stringArray(forKey: "presetRecents") ?? []
         let recent = recents.compactMap { key in all.first { $0.id == key } }
         entries = recent + all.filter { entry in !recent.contains { $0.id == entry.id } }

@@ -49,6 +49,7 @@
 #pragma once
 
 #include "aurea/core/Types.hpp"
+#include "aurea/core/Math.hpp"
 
 #include <atomic>
 #include <memory>
@@ -140,12 +141,14 @@ private:
 /// The context also participates in memo keys, so letters never share a result.
 class TextScope {
 public:
-    TextScope(u32 index, u32 total) noexcept;
+    /// `selector`: o valor dos seletores de cima, em % por eixo (`selectorValue`).
+    TextScope(u32 index, u32 total, const Vec3* selector = nullptr) noexcept;
     ~TextScope();
     TextScope(const TextScope&) = delete;
     TextScope& operator=(const TextScope&) = delete;
 private:
     u64 previous_;
+    Vec3 previousSelector_;
 };
 
 /// Fora de um Scope (consultas da UI), a avaliação pergunta a quem se

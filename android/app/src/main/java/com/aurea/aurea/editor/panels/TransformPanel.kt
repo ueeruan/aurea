@@ -133,7 +133,7 @@ internal fun uses3D(d: com.aurea.aurea.engine.LayerDetail?): Boolean {
 
 internal fun animatorRailTrack(count: Int, focused: TrackKey?, saved: TrackKey?): TrackKey? =
     listOfNotNull(focused, saved).firstOrNull {
-        it.property == TrackProperty.LAYER_ANIM_PARAM && it.effectIndex in 0 until count && it.paramIndex in 0..17
+        it.property == TrackProperty.LAYER_ANIM_PARAM && it.effectIndex in 0 until count && it.paramIndex in 0..29
     } ?: if (count > 0) TrackKey(TrackProperty.LAYER_ANIM_PARAM, 0, 0) else null
 
 /** A face que a tela mostra para o pedido [tab] (as que saíram voltam para Mover). */
@@ -650,7 +650,7 @@ private fun ColumnScope.AnimatorsFace(env: PanelEnv) {
     ) {
         LayerAnimSection(env)
         if (store.detail?.kind == LayerType.Text.kind || store.text3d != null) {
-            TextAnimSection(env, showAnimatorEffect = false)
+            TextAnimSection(env)
         }
     }
 }

@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -64,6 +65,11 @@ inline void chunk(std::vector<u8>& out, const char* type, const std::vector<u8>&
 
 inline bool write_png(const std::string& path, const Image8& img) {
     using namespace png_detail;
+    // A pasta (relativa ao diretório de onde o teste roda) pode ainda não existir.
+    if (const auto parent = std::filesystem::path(path).parent_path(); !parent.empty()) {
+        std::error_code ignored;
+        std::filesystem::create_directories(parent, ignored);
+    }
     std::vector<u8> raw;
     raw.reserve((static_cast<usize>(img.width) * 4 + 1) * img.height);
     for (u32 y = 0; y < img.height; ++y) {

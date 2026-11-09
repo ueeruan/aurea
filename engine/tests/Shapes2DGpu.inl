@@ -163,6 +163,69 @@ AUREA_TEST(Shape2D, NewTypesAreClosedAndSymmetricWhereExpected) {
     }
 }
 
+// 0.5.0 (paridade Alight Motion 5.0.280: assets/shapes moon e teardrop).
+AUREA_TEST(Shape2D, MoonAndTeardropHaveTheExpectedGeometry) {
+    static_assert(shape::kMoon == 25 && shape::kTeardrop == 26 && shape::kLastSdfType == shape::kTeardrop, "números gravados");
+    auto sd = [](u32 type, Vec2 q, Vec2 half, f32 depth, f32 corner) {
+        ShapeData sh = shape_of(type);
+        sh.depth = depth;
+        sh.cornerRadius = corner;
+        return shape::signed_distance(sh, q, half);
+    };
+    // Lua (raio 100, deslocamento 0,25 → círculo de corte com centro em x = 50).
+    const Vec2 sq{100.0f, 100.0f};
+    AUREA_CHECK(sd(shape::kMoon, Vec2{-90, 0}, sq, 0.25f, 0) < 0.0f);     // a borda grossa, à esquerda
+    AUREA_CHECK(sd(shape::kMoon, Vec2{0, 0}, sq, 0.25f, 0) > 0.0f);       // o centro é recortado
+    AUREA_CHECK(sd(shape::kMoon, Vec2{60, 0}, sq, 0.25f, 0) > 0.0f);
+    AUREA_CHECK(sd(shape::kMoon, Vec2{0, -95}, sq, 0.25f, 0) < 0.0f);     // as pontas, em cima e embaixo
+    AUREA_CHECK(sd(shape::kMoon, Vec2{0, 95}, sq, 0.25f, 0) < 0.0f);
+    AUREA_CHECK(sd(shape::kMoon, Vec2{-101, 0}, sq, 0.25f, 0) > 0.0f);
+    AUREA_CHECK(sd(shape::kMoon, Vec2{-90, 0}, sq, -1.0f, 0) < 0.0f);     // padrão da forma: 0,25
+    ShapeData moonDefault = shape_of(shape::kMoon);
+    AUREA_CHECK_NEAR(shape::param_value(moonDefault, shape::kParamDepth), 0.25f, 1e-6f);
+    // Deslocamento maior = lua mais grossa (menos recorte no centro).
+    AUREA_CHECK(sd(shape::kMoon, Vec2{30, 0}, sq, 0.25f, 0) > 0.0f);
+    AUREA_CHECK(sd(shape::kMoon, Vec2{30, 0}, sq, 0.75f, 0) < 0.0f);
+    // Gota numa caixa alta (meia 60 × 100): base de raio 60 embaixo, ponta em (0, −100).
+    const Vec2 tall{60.0f, 100.0f};
+    AUREA_CHECK(sd(shape::kTeardrop, Vec2{0, -99}, tall, 0, 0) < 0.0f);
+    AUREA_CHECK(sd(shape::kTeardrop, Vec2{0, -101}, tall, 0, 0) > 0.0f);
+    AUREA_CHECK(sd(shape::kTeardrop, Vec2{0, 99}, tall, 0, 0) < 0.0f);
+    AUREA_CHECK(sd(shape::kTeardrop, Vec2{0, 101}, tall, 0, 0) > 0.0f);
+    AUREA_CHECK(sd(shape::kTeardrop, Vec2{59, 40}, tall, 0, 0) < 0.0f);  // largura cheia na altura do centro da base
+    AUREA_CHECK(sd(shape::kTeardrop, Vec2{61, 40}, tall, 0, 0) > 0.0f);
+    AUREA_CHECK(sd(shape::kTeardrop, Vec2{20, -90}, tall, 0, 0) > 0.0f);  // a ponta é fina
+    AUREA_CHECK_NEAR(sd(shape::kTeardrop, Vec2{0, -100}, tall, 0, 0), 0.0f, 1e-3f);
+    // Canto arredondado: a ponta continua no topo, mas fica romba (mais larga
+    // perto do topo); a base fica igual.
+    AUREA_CHECK(sd(shape::kTeardrop, Vec2{10, -95}, tall, 0, 0) > 0.0f);
+    AUREA_CHECK(sd(shape::kTeardrop, Vec2{10, -95}, tall, 0, 30) < 0.0f);
+    AUREA_CHECK_NEAR(sd(shape::kTeardrop, Vec2{0, -100}, tall, 0, 30), 0.0f, 1e-3f);
+    AUREA_CHECK_NEAR(sd(shape::kTeardrop, Vec2{0, 100}, tall, 0, 30), 0.0f, 1e-3f);
+    // Simétrica esquerda/direita; numa caixa larga vira círculo.
+    for (f32 y : {-80.0f, -40.0f, 0.0f, 60.0f})
+        AUREA_CHECK_NEAR(sd(shape::kTeardrop, Vec2{25, y}, tall, 0, 0), sd(shape::kTeardrop, Vec2{-25, y}, tall, 0, 0), 1e-5f);
+    AUREA_CHECK_NEAR(sd(shape::kTeardrop, Vec2{0, 0}, Vec2{100, 80}, 0, 0), -80.0f, 1e-3f);
+    // A Lua e a Gota passam a ser ladrilhos 33 e 34 do catálogo.
+    Engine e;
+    EngineConfig cfg;
+    cfg.workerCount = 1;
+    cfg.disableAutosave = true;
+    AUREA_CHECK(e.initialize(cfg).ok());
+    AUREA_CHECK(e.new_project(320, 320, 30.0, nullptr).ok());
+    const auto moon = e.add_shape(33), drop = e.add_shape(34);
+    AUREA_CHECK(moon.ok() && drop.ok());
+    if (moon.ok() && drop.ok()) {
+        std::vector<f32> v(Engine::kShapeParamFloats);
+        AUREA_CHECK(e.query_shape_params(*moon, v.data(), Engine::kShapeParamFloats) == Engine::kShapeParamFloats);
+        AUREA_CHECK_EQ(static_cast<u32>(v[0]), shape::kMoon);
+        AUREA_CHECK(e.query_shape_params(*drop, v.data(), Engine::kShapeParamFloats) == Engine::kShapeParamFloats);
+        AUREA_CHECK_EQ(static_cast<u32>(v[0]), shape::kTeardrop);
+        AUREA_CHECK(v[shape::kParamHeight] > v[shape::kParamWidth]);   // a gota nasce em pé
+    }
+    e.shutdown();
+}
+
 AUREA_TEST(Shape2D, EveryParameterChangesTheGeometry) {
     const Vec2 half{100.0f, 80.0f};
     struct Case { u32 type; u32 param; f32 a; f32 b; };
@@ -189,6 +252,7 @@ AUREA_TEST(Shape2D, EveryParameterChangesTheGeometry) {
         {shape::kArrow, shape::kParamHead, 0.2f, 0.7f},
         {shape::kArrow, shape::kParamShaft, 0.15f, 0.8f},
         {shape::kDoubleArrow, shape::kParamHead, 0.15f, 0.4f},
+        {shape::kMoon, shape::kParamDepth, 0.1f, 0.7f},
     };
     for (const Case& c : cases) {
         ShapeData a = shape_of(c.type), b = shape_of(c.type);
@@ -336,7 +400,7 @@ AUREA_TEST(Shape2D, ParamsAnimateUndoSaveAndReopen) {
 
 AUREA_TEST(Gpu, ParametricShapesRenderMatchTheCpuAndReactToParams) {
     AUREA_REQUIRE_GPU();
-    for (u32 preset = 23; preset <= 32; ++preset) {
+    for (u32 preset = 23; preset <= 34; ++preset) {   // 33 lua e 34 gota (0.5.0)
         Scene3DRig rig(256, 256);
         auto id = rig.e.add_shape(preset);
         AUREA_CHECK(id.ok());

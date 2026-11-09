@@ -115,6 +115,7 @@ import com.aurea.aurea.R
 import com.aurea.aurea.editor.panels.EditorPanel
 import com.aurea.aurea.presets.PresetEntry
 import com.aurea.aurea.presets.PresetKind
+import com.aurea.aurea.presets.fitsText
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.state.ProjectEntry
 import com.aurea.aurea.ui.theme.AureaColors
@@ -320,6 +321,8 @@ private val SHAPES = listOf(
     26 to R.string.sh_shape_heart, 27 to R.string.sh_shape_seal, 28 to R.string.sh_shape_arc,
     29 to R.string.sh_shape_bubble, 30 to R.string.sh_shape_bolt, 31 to R.string.sh_shape_wave,
     32 to R.string.sh_shape_blob,
+    // 0.5.0 (paridade Alight Motion): presets 33 lua e 34 gota (tipos 25 e 26).
+    33 to R.string.sh_shape_moon, 34 to R.string.sh_shape_teardrop,
 )
 
 /**
@@ -492,6 +495,8 @@ private fun DrawScope.drawShapePreset(preset: Int, fill: Color = ShellColors.Doc
         30 -> drawPath(com.aurea.aurea.editor.panels.boltGlyph(p(0.5f, 0.5f), s * 0.5f), fill)
         31 -> drawPath(com.aurea.aurea.editor.panels.waveGlyph(p(0.5f, 0.5f), s * 0.5f, 3), fill, style = Stroke(s * 0.12f))
         32 -> drawPath(com.aurea.aurea.editor.panels.blobGlyph(p(0.5f, 0.5f), s * 0.5f), fill)
+        33 -> drawPath(com.aurea.aurea.editor.panels.moonGlyph(p(0.5f, 0.5f), s * 0.5f), fill)
+        34 -> drawPath(com.aurea.aurea.editor.panels.teardropGlyph(p(0.5f, 0.5f), s * 0.5f), fill)
         else -> {   // 8: seta (camada nasce 1,6 : 1)
             drawLine(fill, p(0.04f, 0.5f), p(0.66f, 0.5f), s * 0.2f, StrokeCap.Butt)
             drawPath(poly(0.6f, 0.2f, 0.98f, 0.5f, 0.6f, 0.8f), fill)
@@ -887,7 +892,7 @@ private fun TextPresetStrip(store: EditorStore, ui: EditorUi, close: () -> Unit)
     var discoverSeen by remember { mutableStateOf(prefs.getBoolean("presets.discover.seen", false)) }
     var discover by remember { mutableStateOf(false) }
     val entries = remember(lib.user, lib.recents) {
-        val all = lib.entries(PresetKind.Text)
+        val all = lib.entries(PresetKind.Text).filter { it.fitsText(false) }
         val recent = lib.recents.mapNotNull { key -> all.firstOrNull { it.key == key } }
         recent + all.filter { it !in recent }
     }

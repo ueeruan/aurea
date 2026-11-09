@@ -333,10 +333,7 @@ Candidate find_candidate(const std::string& dir, u64 requestKey) noexcept {
                 scanned.info.totalFrames != m.totalFrames || scanned.resumeFrame == 0 ||
                 scanned.resumeFrame >= m.totalFrames)
                 continue;
-            // Uma sessão que morreu (Running) conta como falha nesta continuação.
-            const u32 failures = m.failureResumes + (m.state == SessionState::Running ? 1u : 0u);
-            if (m.state != SessionState::Paused &&
-                (scanned.resumeFrame <= m.lastResumeFrame || failures > kMaxFailureResumes)) continue;
+            if (!resume_allowed(m, scanned.resumeFrame)) continue;
             if (!best.valid || scanned.resumeFrame > best.resumeFrame)
                 best = Candidate{true, scanned.resumeFrame, m.totalFrames, m.safeMode};
         }

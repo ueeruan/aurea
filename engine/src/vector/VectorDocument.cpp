@@ -34,7 +34,7 @@
 
 namespace aurea::vector {
 namespace {
-constexpr f32 kDocVersion = 4.0f;   // v2: afinar do contorno; v3: perfil, apagar, furo, desenho (Omega); v4: curva dos keys de forma
+constexpr f32 kDocVersion = 5.0f;   // v2: afinar do contorno; v3: perfil, apagar, furo, desenho (Omega); v4: curva dos keys de forma; v5: keyframe por ponto
 
 struct In {
     const f32* d;
@@ -135,6 +135,8 @@ void encode_document(const VectorData& data, std::vector<f32>& o, std::string& n
                 o.push_back(static_cast<f32>(k.ease));
                 encode_path(k.path, o);
                 o.insert(o.end(), {static_cast<f32>(k.curve), static_cast<f32>(k.easePower), k.bx1, k.by1, k.bx2, k.by2});   // v4
+                o.push_back(static_cast<f32>(k.points.size()));   // v5
+                for (const u8 on : k.points) o.push_back(on ? 1.0f : 0.0f);
             }
         }
     }
@@ -232,6 +234,12 @@ bool decode_document(const f32* data, usize count, const std::string& names, Vec
                     k.curve = in.u(255);
                     k.easePower = clamp_ease_power(in.u(3));
                     k.bx1 = in.f(); k.by1 = in.f(); k.bx2 = in.f(); k.by2 = in.f();
+                }
+                if (version >= 5.0f) {
+                    const u32 np = in.count(1u << 20);
+                    k.points.resize(np);
+                    for (u8& on : k.points) on = in.b() ? 1 : 0;
+                    if (np != k.path.v.size()) k.points.clear();
                 }
             }
             std::stable_sort(p.keys.begin(), p.keys.end(), [](const PathKey& a, const PathKey& b) { return a.frame < b.frame; });

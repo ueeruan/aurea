@@ -82,7 +82,9 @@ struct MaskPoint {
 
 /// Forma do caminho num keyframe (tempo LOCAL da camada). Entre dois keys com
 /// o mesmo número de pontos, cada ponto e as tangentes interpolam; com número
-/// diferente, a forma segura até o próximo key.
+/// diferente (0.5.0), o caminho menor é subdividido sem mudar a forma e os dois
+/// interpolam (o mesmo morph do vetor, vector::lerp_path). Inserir/apagar
+/// ponto leva a mudança a todos os keys, então isso só acontece em keys antigos.
 struct MaskPathKey {
     i64 frame = 0;
     /// Curva do trecho que SAI do key (a mesma dos keys de forma; 0xFF = só `interp`).
@@ -91,6 +93,8 @@ struct MaskPathKey {
     f32 bx1 = 0.33f, by1 = 0.0f, bx2 = 0.67f, by2 = 1.0f;
     u8  interp = 1;      ///< 0 segura, 1 linear, 2 suave (ease in-out)
     std::vector<MaskPoint> points;
+    /// 0.5.0: 1 = este key anima o ponto; vazio = todos (como PathKey::points).
+    std::vector<u8> pointMask;
 };
 
 struct Mask {
@@ -122,20 +126,46 @@ struct Mask {
 /// Blocos de dado específico de tipo. Mantidos pequenos e POD.
 /// Seletor do animador de texto: quanto cada unidade está "dentro".
 struct TextSelector {
-    u8   basedOn = 0;       ///< 0 caractere, 1 palavra, 2 linha
-    u8   type = 0;          ///< 0 intervalo, 1 wiggly, 2 intervalo AE (rampas saturadas)
+    u8   basedOn = 0;       ///< 0 caractere, 1 palavra, 2 linha, 3 caractere sem espaços
+    u8   type = 0;          ///< TextSelectorType
     u8   shape = 0;         ///< 0 quadrado, 1 rampa sobe, 2 rampa desce, 3 triângulo, 4 redondo, 5 suave
     bool randomOrder = false;
     u32  seed = 1;
     f32  start = 0.0f, end = 100.0f, offset = 0.0f;   ///< %
     f32  amount = 100.0f, easeHigh = 0.0f, easeLow = 0.0f;
     f32  wiggleRate = 2.0f;                           ///< variações por segundo
+    // 0.5.0, animador universal (seção v59 do projeto).
+    bool enabled = true;
+    u8   mode = 0;          ///< TextSelectorMode, como este seletor entra no resultado dos de cima
+    u8   units = 0;         ///< 0 %, 1 índice
+    bool lockDimensions = false;
+    f32  smoothness = 100.0f;                         ///< % (forma quadrada)
+    f32  wiggleMin = -100.0f, wiggleMax = 100.0f;     ///< %
+    f32  correlation = 50.0f;                         ///< %
+    f32  temporalPhase = 0.0f, spatialPhase = 0.0f;   ///< graus
+    Vec3 exprAmount{100.0f, 100.0f, 100.0f};          ///< % por eixo; a expressão fica na trilha
+    f32  overlap = 0.0f;                              ///< % (varredura)
+};
+
+enum TextSelectorType : u8 {
+    kTextSelectorRangeLegacy = 0,   ///< projetos até v58: rampas sem saturar fora do intervalo
+    kTextSelectorWiggleLegacy = 1,
+    kTextSelectorRange = 2,         ///< Range Selector
+    kTextSelectorExpression = 3,    ///< Expression Selector
+    kTextSelectorSweep = 4,         ///< janela do Transformar texto do Motion
+    kTextSelectorWiggly = 5,        ///< Wiggly Selector
+};
+enum TextSelectorMode : u8 {
+    kTextModeAdd = 0, kTextModeSubtract, kTextModeIntersect, kTextModeMin, kTextModeMax, kTextModeDifference,
+    kTextModeReplace,               ///< só migração: o seletor de expressão antigo trocava o valor de cima
 };
 
 enum TextAnimProp : u32 {
     kTextPropPosition = 1u << 0, kTextPropScale = 1u << 1, kTextPropRotation = 1u << 2, kTextPropOpacity = 1u << 3,
     kTextPropTracking = 1u << 4, kTextPropBlur = 1u << 5, kTextPropSkew = 1u << 6, kTextPropStrokeWidth = 1u << 7,
     kTextPropCharOffset = 1u << 8, kTextPropFill = 1u << 9, kTextPropStroke = 1u << 10,
+    kTextPropAnchor = 1u << 11, kTextPropLineSpacing = 1u << 12, kTextPropFillHsb = 1u << 13, kTextPropFillOpacity = 1u << 14,
+    kTextPropReveal = 1u << 15, kTextPropRandomize = 1u << 16, kTextPropSpacing = 1u << 17,
 };
 
 /// Animador de texto: seletor + propriedades (valor com a unidade toda dentro).
@@ -152,6 +182,25 @@ struct TextAnimator {
     f32  blur = 0.0f, skew = 0.0f, strokeWidth = 0.0f, charOffset = 0.0f;
     Vec4 fill{1.0f, 1.0f, 1.0f, 1.0f};     ///< sRGB
     Vec4 stroke{0.0f, 0.0f, 0.0f, 1.0f};
+    // 0.5.0, animador universal (seção v59 do projeto).
+    std::vector<TextSelector> moreSelectors;   ///< `selector` é o primeiro; estes vêm depois, na ordem
+    u8   rig = 0;                              ///< 0 modelo AE, 1 modelo do Motion (matrizes do Transformar texto)
+    u8   rigAnchor = 0;                        ///< rig 1: 0 camada, 1 componente
+    u8   anchorGrouping = 0;                   ///< 0 caractere, 1 palavra, 2 linha, 3 tudo
+    Vec2 groupAlign{0.0f, 0.0f};               ///< %
+    Vec2 anchor{0.0f, 0.0f};                   ///< px
+    Vec2 lineSpacing{0.0f, 0.0f};              ///< px por linha
+    f32  fillHue = 0.0f, fillSaturation = 0.0f, fillBrightness = 0.0f, fillOpacity = 100.0f;
+    // Conteúdo, antes do layout (o que eram os efeitos de progresso, aleatório e espaçamento).
+    u8   cursor = 0;
+    bool cursorBlink = false;
+    u8   charset = 0;
+    bool preserveSpace = true;
+    f32  randAmount = 100.0f, randEvolution = 0.0f, randSeed = 0.0f;
+    f32  letterSpacing = 0.0f, lineSpacingEm = 100.0f;
+    /// v60: 1 = formas, ease, subtrair e pivôs medidos no After Effects; 0 = a
+    /// matemática anterior, para projetos gravados antes não mudarem de aparência.
+    u8   aeModel = 1;
 };
 
 /// Animador de CAMADA (qualquer tipo): entrada "a partir de" — a camada (ou
@@ -186,9 +235,29 @@ struct LayerAnimator {
     f32  wiggleRotation = 0.0f; ///< graus
     f32  wiggleSpeed = 2.0f;    ///< variações por segundo
     f32  wiggleHold = 0.0f;     ///< % de cada variação parado
+    // 0.5.0 (v57): ONDA — oscilação periódica somada por cima, o "animador
+    // automático" do Alight Motion (float.sine, float.sine.mult, v2d.sine,
+    // v2d.tri) com as unidades do After Effects: frequência em Hz (ciclos por
+    // segundo, como Math.sin(time·f·2π)) e fase em graus. No texto, cada
+    // unidade anda atrasada `delayMs`: a onda corre pelas letras.
+    u8   waveShape = 0;         ///< 0 seno, 1 triângulo
+    f32  wavePosX = 0.0f, wavePosY = 0.0f;       ///< px (amplitude)
+    f32  waveFreqX = 1.0f, waveFreqY = 1.0f;     ///< Hz
+    f32  waveRotation = 0.0f;   ///< graus (amplitude)
+    f32  waveRotFreq = 1.0f;    ///< Hz
+    f32  waveScale = 0.0f;      ///< % (amplitude)
+    f32  waveScaleFreq = 1.0f;  ///< Hz
+    /// Pulso da opacidade: multiplica entre `low` e `high` % (100/100 = desligado).
+    f32  waveOpacityLow = 100.0f, waveOpacityHigh = 100.0f;
+    f32  waveOpacityFreq = 1.0f;///< Hz
+    f32  wavePhase = 0.0f;      ///< graus (desloca todos os canais da onda)
 
     [[nodiscard]] bool has_wiggle() const noexcept {
         return wigglePosX != 0.0f || wigglePosY != 0.0f || wiggleScale != 0.0f || wiggleRotation != 0.0f;
+    }
+    [[nodiscard]] bool has_wave() const noexcept {
+        return wavePosX != 0.0f || wavePosY != 0.0f || waveRotation != 0.0f || waveScale != 0.0f
+            || waveOpacityLow != 100.0f || waveOpacityHigh != 100.0f;
     }
 };
 

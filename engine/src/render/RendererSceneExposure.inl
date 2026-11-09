@@ -38,7 +38,7 @@ Status Renderer::render_bounded_scene_exposures(const FrameSnapshot& snap, const
     if (!additive) return additive.status();
     const u64 sampler = shaders_.sampler(CommonSampler::LinearClamp).id;
     const f32 compW = static_cast<f32>(snap.compWidth), compH = static_cast<f32>(snap.compHeight);
-    const auto cancelled = [&] { return settings.cancelFlag && settings.cancelFlag->load(std::memory_order_acquire); };
+    const auto cancelled = [&] { settings.beat(); return settings.cancelFlag && settings.cancelFlag->load(std::memory_order_acquire); };
 
     for (const auto& batch : snap.sceneExposureBatches) {
         if (!batch.samplesPerBatch || batch.scene >= snap.scenes.size())

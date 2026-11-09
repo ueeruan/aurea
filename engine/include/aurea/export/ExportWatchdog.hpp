@@ -160,6 +160,16 @@ inline constexpr u64 kExportWorkerCancelHangNs = 3'000'000'000ull;
     return busy && limitNs > 0 && nowNs > lastBeatNs && nowNs - lastBeatNs > limitNs;
 }
 
+/// O produtor (render) bate a cada passo de um quadro. Acima dos prazos dele
+/// (GPU 120 s) e abaixo do da tela (180 s). Cancelado, responde em segundos.
+inline constexpr u64 kExportProducerHangNs = 150'000'000'000ull;
+inline constexpr u64 kExportProducerCancelHangNs = 20'000'000'000ull;
+
+[[nodiscard]] inline u64 export_producer_hang_limit_ns(u64 baseNs, bool cancelled) noexcept {
+    if (baseNs == 0) baseNs = kExportProducerHangNs;
+    return cancelled ? std::min(baseNs, kExportProducerCancelHangNs) : baseNs;
+}
+
 /// O motivo de um worker abandonado: travar no mix é a MÍDIA (decoder de
 /// áudio); no resto, o encoder.
 [[nodiscard]] inline Errc export_worker_hang_code(ExportWorkerPhase phase) noexcept {

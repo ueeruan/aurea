@@ -9,11 +9,15 @@
 //  Geometria:
 //   - retângulo e elipse: os caminhos exatos (vector::make_rect/make_ellipse);
 //   - caminho livre antigo (tipo 2): os próprios pontos;
-//   - as outras 20+ formas: a MESMA distância com sinal do shader
-//     (shape::signed_distance) amostrada numa grade, o nível zero traçado por
-//     marching squares, os cantos vivos achados pelo ângulo e cada trecho entre
-//     cantos ajustado em bézier (vector::fit_curve). Furos (anel, engrenagem…)
-//     ficam como contornos a mais com a regra par-ímpar.
+//   - 0.5.0: as outras formas saem de curvas EXATAS, forma a forma (arcos,
+//     retas e curvas por amostragem analítica): o número de pontos depende só
+//     dos parâmetros, nunca do tamanho, e o morph casa ponto a ponto, como as
+//     formas vivas do Alight Motion. Furos (anel, engrenagem…) ficam como
+//     contornos a mais com a regra par-ímpar;
+//   - o que muda de topologia (flor com pétalas soltas, número de pontas
+//     fracionário no meio de uma animação) cai no caminho antigo: a MESMA
+//     distância com sinal do shader amostrada numa grade, o nível zero traçado
+//     por marching squares e cada trecho entre cantos ajustado em bézier.
 //  A forma é avaliada no instante do cabeçote (tamanho e parâmetros animados
 //  viram o valor de agora; as trilhas de forma saem). A camada mantém id,
 //  transform, tempo, efeitos e máscaras. Um passo de desfazer.
@@ -233,6 +237,373 @@ BezierPath fit_loop(const Loop& raw, f32 win, f32 error) {
     return out;
 }
 
+// =============================================================================
+// Contorno exato (0.5.0)
+// =============================================================================
+
+constexpr f32 kPi = 3.14159265358979f;
+constexpr f32 kTau = kPi * 2.0f;
+
+/// Giro no sentido horário da tela (y para baixo): o topo vai para a direita.
+Vec2 turned(Vec2 q, f32 a) noexcept {
+    const f32 c = std::cos(a), s = std::sin(a);
+    return Vec2{q.x * c - q.y * s, q.x * s + q.y * c};
+}
+
+/// Caneta de um caminho fechado. `st` estica tudo no fim (formas "redondas" em
+/// caixa não quadrada); bézier continua exata sob a transformação afim.
+struct Pen {
+    Vec2 st{1.0f, 1.0f};
+    BezierPath path;
+
+    [[nodiscard]] Vec2 map(Vec2 q) const noexcept { return Vec2{q.x * st.x, q.y * st.y}; }
+    [[nodiscard]] bool at_end(Vec2 mapped) const noexcept {
+        return !path.v.empty() && (path.v.back().p - mapped).length() < 1e-3f;
+    }
+    void to(Vec2 q) {
+        const Vec2 m = map(q);
+        if (!at_end(m)) path.v.push_back(BezierVertex{m, {}, {}});
+    }
+    /// Arco de elipse; a1 > a0 anda no sentido horário da tela.
+    void arc(Vec2 c, f32 rx, f32 ry, f32 a0, f32 a1) {
+        const f32 span = a1 - a0;
+        const auto point = [&](f32 a) { return Vec2{c.x + rx * std::cos(a), c.y + ry * std::sin(a)}; };
+        const auto speed = [&](f32 a) { return Vec2{-rx * std::sin(a), ry * std::cos(a)}; };
+        to(point(a0));
+        if (std::fabs(span) < 1e-5f) return;
+        const i32 n = std::max(1, static_cast<i32>(std::ceil(std::fabs(span) / (kPi * 0.5f) - 1e-4f)));
+        const f32 step = span / static_cast<f32>(n);
+        const f32 k = 4.0f / 3.0f * std::tan(step * 0.25f);
+        for (i32 i = 0; i < n; ++i) {
+            const f32 a = a0 + step * static_cast<f32>(i), b = a + step;
+            path.v.back().out = map(speed(a) * k);
+            path.v.push_back(BezierVertex{map(point(b)), map(speed(b) * -k), {}});
+        }
+    }
+    /// Curva qualquer `f(t)`, com `n` trechos e tangente pela derivada numérica.
+    template <typename F>
+    void curve(F&& f, f32 t0, f32 t1, u32 n) {
+        const f32 step = (t1 - t0) / static_cast<f32>(n);
+        const f32 eps = step * 0.01f;
+        const auto handle = [&](f32 t) { return (f(t + eps) - f(t - eps)) * (step / (6.0f * eps)); };
+        to(f(t0));
+        for (u32 i = 0; i < n; ++i) {
+            const f32 a = t0 + step * static_cast<f32>(i), b = t0 + step * static_cast<f32>(i + 1);
+            path.v.back().out = map(handle(a));
+            path.v.push_back(BezierVertex{map(f(b)), map(handle(b) * -1.0f), {}});
+        }
+    }
+    /// Fecha: o último ponto em cima do primeiro vira um só.
+    [[nodiscard]] BezierPath finish() {
+        if (path.v.size() > 1 && (path.v.back().p - path.v.front().p).length() < 1e-3f) {
+            path.v.front().in = path.v.back().in;
+            path.v.pop_back();
+        }
+        path.closed = true;
+        return std::move(path);
+    }
+};
+
+BezierPath polygon(std::initializer_list<Vec2> pts) {
+    Pen pen;
+    for (const Vec2 q : pts) pen.to(q);
+    return pen.finish();
+}
+
+[[nodiscard]] bool whole(f32 count) noexcept { return std::fabs(count - std::round(count)) < 1e-3f; }
+
+/// Primeira metade da borda da fita da onda: acha o `t` cujo ponto tem x = alvo.
+template <typename F>
+f32 solve_edge(F&& side, f32 lo, f32 hi, f32 target) {
+    for (int i = 0; i < 40; ++i) {
+        const f32 mid = (lo + hi) * 0.5f;
+        if (side(mid).x < target) lo = mid; else hi = mid;
+    }
+    return (lo + hi) * 0.5f;
+}
+
+/// As curvas exatas da forma, centradas na origem. false = usar o traçado.
+bool exact_outline(u32 type, const shape::SdfParams& p, Vec2 half, std::vector<BezierPath>& out) {
+    const f32 hx = half.x, hy = half.y;
+    const f32 m = std::min(hx, hy);
+    const Vec2 st{hx / m, hy / m};
+    const f32 corner = p.shape.x, count = p.shape.y;
+    const f32 inner = std::clamp(p.shape.z, 0.05f, 0.95f);
+    const f32 depth = p.extra.y, tip = p.extra.z, thick = p.extra.w;
+    const f32 sweep = p.more.x, head = p.more.y, shaft = p.more.z, amp = p.more.w;
+    Pen pen;
+    pen.st = st;
+    switch (type) {
+        case shape::kPolygon: {
+            if (!whole(count)) return false;
+            const i32 n = std::max(3, static_cast<i32>(std::lround(count)));
+            for (i32 k = 0; k < n; ++k) pen.to(turned(Vec2{0.0f, -m}, kTau * static_cast<f32>(k) / static_cast<f32>(n)));
+            out.push_back(pen.finish());
+            return true;
+        }
+        case shape::kStar: {
+            if (!whole(count)) return false;
+            const i32 n = std::max(3, static_cast<i32>(std::lround(count)));
+            const f32 an = kPi / static_cast<f32>(n);
+            for (i32 k = 0; k < n; ++k) {
+                const f32 a = an * 2.0f * static_cast<f32>(k);
+                pen.to(turned(Vec2{0.0f, -inner * m}, a));   // o vale fica no topo
+                pen.to(turned(Vec2{0.0f, -m}, a + an));
+            }
+            out.push_back(pen.finish());
+            return true;
+        }
+        case shape::kCross: {
+            const f32 t = m * inner;
+            out.push_back(polygon({{-t, -hy}, {t, -hy}, {t, -t}, {hx, -t}, {hx, t}, {t, t}, {t, hy}, {-t, hy}, {-t, t}, {-hx, t}, {-hx, -t}, {-t, -t}}));
+            return true;
+        }
+        case shape::kRing: {
+            // As duas bordas são níveis da distância à elipse do meio: em caixa
+            // não quadrada não são elipses. O raio sai da mesma conta do shader.
+            const f32 ring = m * (1.0f - inner) * 0.5f;
+            const Vec2 mid{hx - ring, hy - ring};
+            const auto edge = [&](f32 level) {
+                return [=](f32 t) {
+                    const Vec2 d{mid.x * std::cos(t), mid.y * std::sin(t)};
+                    f32 lo = 0.0f, hi = 3.0f;
+                    for (int i = 0; i < 48; ++i) {
+                        const f32 k = (lo + hi) * 0.5f;
+                        const Vec2 q = d * k;
+                        const f32 k0 = Vec2{q.x / mid.x, q.y / mid.y}.length();
+                        const f32 k1 = Vec2{q.x / (mid.x * mid.x), q.y / (mid.y * mid.y)}.length();
+                        const f32 sd = k0 < 1e-6f ? -std::min(mid.x, mid.y) : k0 * (k0 - 1.0f) / k1;
+                        if (sd < level) lo = k; else hi = k;
+                    }
+                    return d * ((lo + hi) * 0.5f);
+                };
+            };
+            Pen outer, hole;
+            outer.curve(edge(ring), 0.0f, kTau, 8u);
+            hole.curve(edge(-ring), 0.0f, kTau, 8u);
+            out.push_back(outer.finish());
+            out.push_back(hole.finish());
+            return true;
+        }
+        case shape::kPie: {
+            if (sweep >= 359.9f) { out.push_back(vector::make_ellipse(Vec2{0.0f, 0.0f}, Vec2{hx * 2.0f, hy * 2.0f})); return true; }
+            // O corte é uma reta no ângulo real; o arco anda no parâmetro da elipse.
+            const f32 s = sweep * kPi / 180.0f;
+            f32 t = std::atan2(hx * std::sin(s), hy * std::cos(s));
+            if (t < 0.0f) t += kTau;
+            Pen flat;
+            flat.to(Vec2{0.0f, 0.0f});
+            flat.arc(Vec2{0.0f, 0.0f}, hx, hy, 0.0f, t);
+            out.push_back(flat.finish());
+            return true;
+        }
+        case shape::kArc: {
+            const f32 T = std::clamp(thick, 0.02f, 0.5f) * 2.0f * m;
+            if (sweep >= 359.9f) {
+                out.push_back(vector::make_ellipse(Vec2{0.0f, 0.0f}, Vec2{hx * 2.0f, hy * 2.0f}));
+                out.push_back(vector::make_ellipse(Vec2{0.0f, 0.0f}, Vec2{(m - T) * 2.0f * st.x, (m - T) * 2.0f * st.y}));
+                return true;
+            }
+            const f32 s = sweep * kPi / 180.0f;
+            pen.arc(Vec2{0.0f, 0.0f}, m, m, 0.0f, s);
+            pen.arc(Vec2{0.0f, 0.0f}, m - T, m - T, s, 0.0f);
+            out.push_back(pen.finish());
+            return true;
+        }
+        case shape::kFlower: {
+            // Acima de 0,5 as pétalas se soltam no centro: outra topologia.
+            if (!whole(count) || depth > 0.5f) return false;
+            const f32 n = std::max(3.0f, std::round(count));
+            Pen flat;
+            flat.curve([&](f32 a) {
+                const Vec2 d{std::cos(a), std::sin(a)};
+                const f32 r = m * ((1.0f - depth) + depth * std::cos(n * a));
+                return d * (r / Vec2{d.x / st.x, d.y / st.y}.length());
+            }, 0.0f, kTau, static_cast<u32>(n) * 4u);
+            out.push_back(flat.finish());
+            return true;
+        }
+        case shape::kArrow: {
+            const f32 s = hx * (1.0f - 2.0f * head), hs = hy * shaft * 0.5f;
+            out.push_back(polygon({{-hx, -hs}, {s, -hs}, {s, -hy}, {hx, 0.0f}, {s, hy}, {s, hs}, {-hx, hs}}));
+            return true;
+        }
+        case shape::kRightTriangle:
+            out.push_back(polygon({{-hx, -hy}, {hx, hy}, {-hx, hy}}));
+            return true;
+        case shape::kTrapezoid: {
+            const f32 top = hx * inner;
+            out.push_back(polygon({{-top, -hy}, {top, -hy}, {hx, hy}, {-hx, hy}}));
+            return true;
+        }
+        case shape::kParallelogram: {
+            const f32 sk = hx * inner;   // 2·sk da forma
+            out.push_back(polygon({{-hx + sk, -hy}, {hx, -hy}, {hx - sk, hy}, {-hx, hy}}));
+            return true;
+        }
+        case shape::kGear: {
+            if (!whole(count)) return false;
+            const i32 n = std::max(3, static_cast<i32>(std::lround(count)));
+            const f32 root = m * (1.0f - depth), sector = kTau / static_cast<f32>(n);
+            const f32 tw = root * std::sin(sector * 0.25f), yb = root * std::cos(sector * 0.25f);
+            for (i32 k = 0; k < n; ++k) {
+                const f32 a = sector * static_cast<f32>(k);
+                pen.to(turned(Vec2{-tw, -yb}, a));
+                pen.to(turned(Vec2{-tw, -m}, a));
+                pen.to(turned(Vec2{tw, -m}, a));
+                pen.arc(Vec2{0.0f, 0.0f}, root, root, a + sector * 0.25f - kPi * 0.5f, a + sector * 0.75f - kPi * 0.5f);
+            }
+            out.push_back(pen.finish());
+            const f32 hub = inner * root * 2.0f;
+            out.push_back(vector::make_ellipse(Vec2{0.0f, 0.0f}, Vec2{hub * st.x, hub * st.y}));
+            return true;
+        }
+        case shape::kDoubleArrow: {
+            const f32 s = hx * (1.0f - 2.0f * head), t = hy * inner;
+            if (s <= 0.0f) return false;   // as duas pontas se cruzam
+            out.push_back(polygon({{-s, -t}, {s, -t}, {s, -hy}, {hx, 0.0f}, {s, hy}, {s, t}, {-s, t}, {-s, hy}, {-hx, 0.0f}, {-s, -hy}}));
+            return true;
+        }
+        case shape::kLine:
+            out.push_back(vector::make_rect(Vec2{0.0f, 0.0f}, Vec2{hx * 2.0f, std::max(0.5f, hy * thick) * 2.0f}, corner));
+            return true;
+        case shape::kDiamond: {
+            const f32 yw = hy * (2.0f * std::clamp(tip, 0.05f, 0.95f) - 1.0f);
+            out.push_back(polygon({{0.0f, -hy}, {hx, yw}, {0.0f, hy}, {-hx, yw}}));
+            return true;
+        }
+        case shape::kHeart: {
+            const f32 dl = std::clamp(depth, 0.05f, 0.95f) * 0.5f;
+            const f32 R = (1.0f + dl) - std::sqrt(2.0f * dl);
+            const Vec2 C{1.0f - R, R - 1.0f}, P{0.0f, 1.0f};
+            const Vec2 v = P - C;
+            const f32 L = v.length();
+            const Vec2 vh = v / L;
+            const f32 ca = R / L, sa = std::sqrt(std::max(0.0f, 1.0f - ca * ca));
+            const Vec2 T = C + (vh * ca + Vec2{vh.y, -vh.x} * sa) * R;
+            const f32 notchY = C.y - std::sqrt(std::max(0.0f, R * R - C.x * C.x));
+            f32 a0 = std::atan2(notchY - C.y, -C.x), a1 = std::atan2(T.y - C.y, T.x - C.x);
+            if (a1 < a0) a1 += kTau;
+            pen.arc(C * m, R * m, R * m, a0, a1);
+            pen.to(P * m);
+            const Vec2 C2{-C.x, C.y};
+            f32 b0 = std::atan2(T.y - C.y, -T.x - C2.x), b1 = std::atan2(notchY - C.y, C.x);
+            if (b1 < b0) b1 += kTau;
+            pen.arc(C2 * m, R * m, R * m, b0, b1);
+            out.push_back(pen.finish());
+            return true;
+        }
+        case shape::kSeal: {
+            const f32 n = std::clamp(std::round(count), 3.0f, 64.0f), h = kPi / n;
+            const f32 dmax = 1.0f - 1.0f / (std::cos(h) + std::sin(h));
+            const f32 dl = 0.01f + std::clamp(depth, 0.0f, 1.0f) * std::max(0.0f, dmax - 0.01f);
+            const f32 v = 1.0f - dl, c = (1.0f - v * v) / (2.0f * (1.0f - v * std::cos(h))), b = 1.0f - c;
+            const f32 vx = v * std::sin(h), vy = v * std::cos(h);
+            f32 a0 = std::atan2(c - vy, -vx), a1 = std::atan2(c - vy, vx);
+            if (a1 < a0) a1 += kTau;
+            for (i32 k = 0; k < static_cast<i32>(n); ++k) {
+                const f32 a = h * 2.0f * static_cast<f32>(k);
+                pen.arc(turned(Vec2{0.0f, -c * m}, a), b * m, b * m, a0 + a, a1 + a);
+            }
+            out.push_back(pen.finish());
+            return true;
+        }
+        case shape::kBubble: {
+            const f32 bodyH = hy * 2.0f * 0.76f, bottom = -hy + bodyH;
+            const f32 r = std::clamp(corner, 0.0f, std::min(hx, bodyH * 0.5f));
+            const f32 tx = std::clamp(hx * (2.0f * std::clamp(tip, 0.0f, 1.0f) - 1.0f), -hx * 0.92f, hx * 0.92f);
+            const f32 bw = hx * 0.16f, lo = -hx + r + bw, hi = hx - r - bw;
+            const f32 xb = lo < hi ? std::clamp(tx * 0.55f, lo, hi) : 0.0f;
+            const f32 yb = bottom - std::min(bodyH * 0.25f, std::max(r, 2.0f));
+            const f32 t = (bottom - yb) / (hy - yb);
+            const f32 xR = (xb + bw) + (tx - xb - bw) * t, xL = (xb - bw) + (tx - xb + bw) * t;
+            // A cauda precisa sair do trecho reto de baixo.
+            if (xR > hx - r || xL < -hx + r || xL >= xR) return false;
+            Pen flat;
+            flat.arc(Vec2{hx - r, -hy + r}, r, r, -kPi * 0.5f, 0.0f);
+            flat.arc(Vec2{hx - r, bottom - r}, r, r, 0.0f, kPi * 0.5f);
+            flat.to(Vec2{xR, bottom});
+            flat.to(Vec2{tx, hy});
+            flat.to(Vec2{xL, bottom});
+            flat.arc(Vec2{-hx + r, bottom - r}, r, r, kPi * 0.5f, kPi);
+            flat.arc(Vec2{-hx + r, -hy + r}, r, r, kPi, kPi * 1.5f);
+            out.push_back(flat.finish());
+            return true;
+        }
+        case shape::kBolt: {
+            static constexpr f32 kBase[14] = {-0.05f, -1.0f, 0.60f, -1.0f, 0.12f, -0.12f, 0.70f, -0.12f,
+                                              -0.42f, 1.0f, -0.02f, 0.14f, -0.62f, 0.14f};
+            const f32 k = (std::clamp(tip, 0.0f, 1.0f) - 0.5f) * 0.8f;
+            Pen flat;
+            for (int i = 0; i < 7; ++i) flat.to(Vec2{(kBase[2 * i] - k * kBase[2 * i + 1]) * hx, kBase[2 * i + 1] * hy});
+            out.push_back(flat.finish());
+            return true;
+        }
+        case shape::kWave: {
+            const f32 n = std::clamp(std::round(count), 1.0f, 32.0f);
+            const f32 T = std::clamp(thick, 0.02f, 1.0f) * 2.0f * hy;
+            const f32 a = std::clamp(amp, 0.0f, 1.0f) * std::max(0.0f, hy - T * 0.5f);
+            const f32 k = kPi * n / std::max(hx, 1e-3f);
+            if (a < 1e-3f) {
+                out.push_back(vector::make_rect(Vec2{0.0f, 0.0f}, Vec2{hx * 2.0f, T}, 0.0f));
+                return true;
+            }
+            // Com a curva mais fechada que a espessura, a borda dobra sobre si.
+            if (T * 0.5f * a * k * k > 0.9f) return false;
+            const auto side = [&](f32 sign) {
+                return [=](f32 t) {
+                    const f32 slope = a * k * std::cos(k * (t + hx));
+                    const f32 len = std::sqrt(1.0f + slope * slope);
+                    return Vec2{t - sign * T * 0.5f * slope / len, a * std::sin(k * (t + hx)) + sign * T * 0.5f / len};
+                };
+            };
+            const auto top = side(-1.0f), bottom = side(1.0f);
+            const u32 segments = static_cast<u32>(n) * 8u;
+            Pen flat;
+            flat.curve(top, solve_edge(top, -hx - T, -hx + T, -hx), solve_edge(top, hx - T, hx + T, hx), segments);
+            flat.curve(bottom, solve_edge(bottom, hx - T, hx + T, hx), solve_edge(bottom, -hx - T, -hx + T, -hx), segments);
+            out.push_back(flat.finish());
+            return true;
+        }
+        case shape::kBlob: {
+            const f32 n = std::clamp(std::round(count), 2.0f, 16.0f);
+            const f32 a = std::clamp(depth, 0.05f, 0.95f) * 0.35f, R = m / (1.0f + a);
+            const Vec4 ph = p.blob;
+            pen.curve([&](f32 th) {
+                const f32 r = 1.0f + a * (0.55f * std::cos(n * th + ph.x) + 0.30f * std::cos((n + 1.0f) * th + ph.y) + 0.15f * std::cos(2.0f * th + ph.z));
+                return Vec2{R * r * std::cos(th), R * r * std::sin(th)};
+            }, 0.0f, kTau, static_cast<u32>(n) * 4u + 8u);
+            out.push_back(pen.finish());
+            return true;
+        }
+        case shape::kMoon: {
+            const f32 d = depth, Y = m * std::sqrt(std::max(0.0f, 1.0f - d * d));
+            const f32 a = std::atan2(Y, m * d);
+            pen.arc(Vec2{0.0f, 0.0f}, m, m, a, kTau - a);
+            pen.arc(Vec2{2.0f * m * d, 0.0f}, m, m, kPi + a, kPi - a);
+            out.push_back(pen.finish());
+            return true;
+        }
+        case shape::kTeardrop: {
+            const f32 r1 = std::max(1e-3f, m), r2 = std::clamp(corner, 0.0f, r1 * 0.99f);
+            const f32 yc = hy - r1, h = yc + hy - r2;
+            if (h <= 1e-3f || (r1 - r2) / h >= 1.0f) {
+                out.push_back(vector::make_ellipse(Vec2{0.0f, yc}, Vec2{r1 * 2.0f, r1 * 2.0f}));
+                return true;
+            }
+            const f32 b = (r1 - r2) / h, a = std::sqrt(1.0f - b * b), alpha = std::atan2(b, a);
+            Pen flat;
+            if (r2 > 1e-3f) flat.arc(Vec2{0.0f, yc - h}, r2, r2, -kPi + alpha, -alpha);
+            else flat.to(Vec2{0.0f, yc - h});
+            flat.arc(Vec2{0.0f, yc}, r1, r1, -alpha, kPi + alpha);
+            out.push_back(flat.finish());
+            return true;
+        }
+        default:
+            return false;
+    }
+}
+
 void translate(BezierPath& p, Vec2 by) noexcept {
     for (BezierVertex& v : p.v) v.p = v.p + by;
 }
@@ -277,20 +648,30 @@ bool Engine::convert_shape_to_outline(u64 layerId) noexcept {
         for (const Vec2& q : sh.path) p.path.v.push_back(BezierVertex{q, {}, {}});
         g.paths.push_back(std::move(p));
     } else {
-        // 400 células no lado maior: ~0,25 % da forma (sub-pixel até 100 px).
-        const f32 cs = std::max(0.05f, std::max(half.x, half.y) * 2.0f / 400.0f);
-        const Vec2 ext{half.x + 3.0f * cs, half.y + 3.0f * cs};
         const shape::SdfParams params = shape::sdf_params(sh, sh.filled, sw);
-        const std::vector<Loop> loops = trace_zero(
-            [&](Vec2 q) { return shape::signed_distance(type, params, q, half); }, ext, cs);
-        if (loops.empty()) return false;
-        for (const Loop& loop : loops) {
-            BezierPath bp = fit_loop(loop, cs * 3.0f, std::max(0.1f, cs * 0.6f));
-            if (bp.v.size() < 2) continue;
-            translate(bp, centre);
-            VectorPath p;
-            p.path = std::move(bp);
-            g.paths.push_back(std::move(p));
+        std::vector<BezierPath> exact;
+        if (exact_outline(type, params, half, exact)) {
+            for (BezierPath& bp : exact) {
+                translate(bp, centre);
+                VectorPath p;
+                p.path = std::move(bp);
+                g.paths.push_back(std::move(p));
+            }
+        } else {
+            // 400 células no lado maior: ~0,25 % da forma (sub-pixel até 100 px).
+            const f32 cs = std::max(0.05f, std::max(half.x, half.y) * 2.0f / 400.0f);
+            const Vec2 ext{half.x + 3.0f * cs, half.y + 3.0f * cs};
+            const std::vector<Loop> loops = trace_zero(
+                [&](Vec2 q) { return shape::signed_distance(type, params, q, half); }, ext, cs);
+            if (loops.empty()) return false;
+            for (const Loop& loop : loops) {
+                BezierPath bp = fit_loop(loop, cs * 3.0f, std::max(0.1f, cs * 0.6f));
+                if (bp.v.size() < 2) continue;
+                translate(bp, centre);
+                VectorPath p;
+                p.path = std::move(bp);
+                g.paths.push_back(std::move(p));
+            }
         }
         if (g.paths.empty()) return false;
         g.fill.rule = 1;   // par-ímpar: os furos ficam furos em qualquer sentido

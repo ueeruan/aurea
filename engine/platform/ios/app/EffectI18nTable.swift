@@ -696,6 +696,19 @@ enum EffectI18nTable {
     aurea.text.transform|15|shape|fxl_shape|fxo_square_2,fxo_smooth,fxo_triangle
     aurea.text.transform|16|random_order|fxl_random_order|
     aurea.text.transform|17|seed|fxl_seed|
+    aurea.text.progress|0|start|fxl_start|
+    aurea.text.progress|1|end|fxl_end|
+    aurea.text.progress|2|cursor|fxl_cursor|fxo_none_2,fxo_x_2,fxo_x_3,fxo_x_4,fxo_x_5,fxo_x_6,fxo_x_7,fxo_x_8,fxo_x_9
+    aurea.text.progress|3|blink|fxl_blink_cursor|
+    aurea.text.randomizer|0|amount|fxl_amount|
+    aurea.text.randomizer|1|evolution|fx_evolucao|
+    aurea.text.randomizer|2|seed|fxl_seed|
+    aurea.text.randomizer|3|start|fxl_start|
+    aurea.text.randomizer|4|end|fxl_end|
+    aurea.text.randomizer|5|charset|fxl_characters|fxo_uppercase,fxo_lowercase,fxo_mixed_case,fxo_digits,fxo_digits_and_letters,fxo_layer_text_2,fxo_asterisk,fxl_marker,fxo_underscore,fxo_blank,fxo_diamond,fxo_dash,fxo_symbols,fxo_digits_letters_and_symbols,fxo_extended
+    aurea.text.randomizer|6|preserve_space|fxl_preserve_spaces|
+    aurea.text.spacing|0|letter|fxl_letter_spacing_3|
+    aurea.text.spacing|1|line|fxl_line_spacing_2|
     aurea.text.animator|0|start|fxl_start|
     aurea.text.animator|1|end|fxl_end|
     aurea.text.animator|2|offset|fxl_selector_offset|
@@ -2481,6 +2494,11 @@ enum EffectI18nTable {
     }()
 
     private static let sectionsTable = """
+    aurea.text.transform|1|range|fxs_range
+    aurea.text.transform|2|transform|fxs_transform
+    aurea.text.transform|3|visual|fxs_visual_attrs
+    aurea.text.transform|4|interpolation|fxs_interp_ease
+    aurea.text.transform|5|random|fxl_random_order
     aurea.distort.turbulence|1|cycle|fxl_cycle_evolution
     aurea.distort.turbulence|2|offset|fxl_offset
     aurea.distort.turbulence|3|edges|fxl_edges

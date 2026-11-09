@@ -94,9 +94,10 @@ bool is_animator_effect(u32 type) noexcept {
     return type == effect_type_id(kAnimatorEffect) || type == effect_type_id(kAnimatorProEffect);
 }
 
-f32 combine_selector(f32 above, f32 value, u32 mode) noexcept {
+f32 combine_selector(f32 above, f32 value, u32 mode, bool aeMath) noexcept {
     switch (mode) {
-        case 1: return above - value;                    // subtrair
+        // Medido: valor negativo também inverte o que vem de cima.
+        case 1: return aeMath ? above * ((value < 0.0f ? -1.0f : 1.0f) - value) : above - value;   // subtrair
         case 2: return above * value;                    // interseção
         case 3: return std::min(above, value);           // mínimo
         case 4: return std::max(above, value);           // máximo
@@ -136,35 +137,36 @@ f32 ease(f32 w, f32 high, f32 low) {
     if (low != 0.0f) { const f32 k = std::clamp(low, -1.0f, 1.0f); const f32 e = w * w; w += k * ((k > 0 ? e : 1.0f - (1.0f - w) * (1.0f - w)) - w); }
     return std::clamp(w, 0.0f, 1.0f);
 }
-std::vector<u32> shuffled(u32 count, u32 seed) {
-    std::vector<u32> p(count);
-    for (u32 i = 0; i < count; ++i) p[i] = i;
-    for (u32 i = count; i > 1; --i) std::swap(p[i - 1], p[mix(seed, i, 11u) % i]);
-    return p;
+f32 bezier_axis(f32 u, f32 a, f32 b) {
+    const f32 v = 1.0f - u;
+    return u * (3.0f * v * (v * a + u * b) + u * u);
 }
-Vec3 rgb_to_hsv(Vec3 c) {
-    const f32 mx = std::max({c.x, c.y, c.z}), mn = std::min({c.x, c.y, c.z}), d = mx - mn;
-    f32 h = 0;
-    if (d > 1e-6f) {
-        if (mx == c.x) h = std::fmod((c.y - c.z) / d, 6.0f);
-        else if (mx == c.y) h = (c.z - c.x) / d + 2.0f;
-        else h = (c.x - c.y) / d + 4.0f;
-        h /= 6.0f; if (h < 0) h += 1.0f;
+/// y(x) da cúbica de (0,0) a (1,1). x é monótono; a bisseção aguenta tangente vertical.
+f32 bezier_y_at_x(f32 x, f32 x1, f32 y1, f32 x2, f32 y2) {
+    f32 lo = 0.0f, hi = 1.0f;
+    for (int i = 0; i < 28; ++i) {
+        const f32 u = 0.5f * (lo + hi);
+        (bezier_axis(u, x1, x2) < x ? lo : hi) = u;
     }
-    return {h, mx > 0 ? d / mx : 0.0f, mx};
+    return bezier_axis(0.5f * (lo + hi), y1, y2);
 }
-Vec3 hsv_to_rgb(Vec3 c) {
-    const f32 h = (c.x - std::floor(c.x)) * 6.0f, s = std::clamp(c.y, 0.0f, 1.0f), v = std::clamp(c.z, 0.0f, 1.0f);
-    const f32 f = h - std::floor(h), p = v * (1 - s), q = v * (1 - s * f), t = v * (1 - s * (1 - f));
-    switch (static_cast<int>(h) % 6) {
-        case 0: return {v, t, p}; case 1: return {q, v, p}; case 2: return {p, v, t};
-        case 3: return {p, q, v}; case 4: return {t, p, v}; default: return {v, p, q};
-    }
+/// As formas e o ease medidos no After Effects (docs/parity/text-animator-universal.md).
+f32 ae_shape_at(u32 shape, f32 t) {
+    t = std::clamp(t, 0.0f, 1.0f);
+    if (shape == 4) return std::sqrt(std::max(0.0f, std::sin(t * 3.14159265359f)));
+    if (shape == 5) return bezier_y_at_x(1.0f - std::fabs(2.0f * t - 1.0f), 0.5f, 0.0f, 0.5f, 1.0f);
+    return shape_at(shape, t);
+}
+f32 ae_ease(f32 w, f32 high, f32 low) {
+    if (high == 0.0f && low == 0.0f) return std::clamp(w, 0.0f, 1.0f);
+    const f32 L = std::clamp(low, -1.0f, 1.0f), H = std::clamp(high, -1.0f, 1.0f);
+    return std::clamp(bezier_y_at_x(std::clamp(w, 0.0f, 1.0f), L >= 0.0f ? L : 0.0f, L >= 0.0f ? 0.0f : -L,
+                                    H >= 0.0f ? 1.0f - H : 1.0f, H >= 0.0f ? 1.0f : 1.0f + H), 0.0f, 1.0f);
 }
 } // namespace
 
 f32 pro_range_weight(f32 start, f32 end, f32 offset, u32 units, u32 shape, f32 smoothness,
-                     f32 easeHigh, f32 easeLow, u32 unit, u32 count) noexcept {
+                     f32 easeHigh, f32 easeLow, u32 unit, u32 count, bool aeMath) noexcept {
     const f32 n = static_cast<f32>(std::max<u32>(1, count));
     // Índice: as unidades viram % do total (Início 2 = depois da 2a unidade).
     const f32 k = units == 1 ? 100.0f / n : 1.0f;
@@ -184,9 +186,9 @@ f32 pro_range_weight(f32 start, f32 end, f32 offset, u32 units, u32 shape, f32 s
         // crescente, depois do fim = 1), como no animador de referência.
         if (shape == 1) w = c <= st ? 0.0f : c >= en ? 1.0f : shape_at(1, (c - st) / (en - st));
         else if (shape == 2) w = c <= st ? 1.0f : c >= en ? 0.0f : shape_at(2, (c - st) / (en - st));
-        else if (c >= st && c <= en) w = shape_at(shape, (c - st) / (en - st));
+        else if (c >= st && c <= en) w = aeMath ? ae_shape_at(shape, (c - st) / (en - st)) : shape_at(shape, (c - st) / (en - st));
     }
-    return ease(w, easeHigh, easeLow);
+    return aeMath ? ae_ease(w, easeHigh, easeLow) : ease(w, easeHigh, easeLow);
 }
 
 f32 pro_wiggle(u32 seed, u32 unit, u32 dimension, f64 timeSec, f32 rate, f32 correlation,
@@ -201,137 +203,6 @@ f32 pro_wiggle(u32 seed, u32 unit, u32 dimension, f64 timeSec, f32 rate, f32 cor
     const f32 n = std::clamp(own * (1.0f - c) + shared * c, -1.0f, 1.0f);
     const f32 lo = std::min(minAmount, maxAmount), hi = std::max(minAmount, maxAmount);
     return lo + (n * 0.5f + 0.5f) * (hi - lo);
-}
-
-namespace {
-const ParameterRegistry& pro_specs() {
-    static const ParameterRegistry specs = [] { ParameterRegistry p; declare_animator_pro_params(p); return p; }();
-    return specs;
-}
-} // namespace
-
-/// Aplica um Text Animator Pro (chamado por evaluate_animator_effects).
-void evaluate_animator_pro(const Layer& layer, const EffectInstance& fx, f64 time, f64 fps, const std::vector<GlyphUnits>& units,
-                           u32 chars, u32 words, u32 lines, std::vector<GlyphAnim>& out) {
-    std::array<ParamValue, apCount> v{};
-    for (u32 p = 0; p < apCount; ++p) v[p] = evaluate_param_f(layer.tracks, fx, p, pro_specs().at(p), time);
-    const f64 timeSec = time / (fps > 0.0 ? fps : 30.0);
-    const u32 basedOn = v[apBasedOn].as_enum();
-    // Letras sem espaços: a posição do glifo entre os glifos visíveis (os
-    // espaços não viram glifo); os outros contam pelo índice do layout.
-    std::vector<u32> visible;
-    if (basedOn == 1) {
-        std::vector<u32> seen;
-        for (const GlyphUnits& u : units) seen.push_back(u.charIndex);
-        std::sort(seen.begin(), seen.end()); seen.erase(std::unique(seen.begin(), seen.end()), seen.end());
-        visible.reserve(units.size());
-        for (const GlyphUnits& u : units)
-            visible.push_back(static_cast<u32>(std::lower_bound(seen.begin(), seen.end(), u.charIndex) - seen.begin()));
-        chars = static_cast<u32>(seen.size());
-    }
-    const u32 count = std::max<u32>(1, basedOn == 2 ? words : basedOn == 3 ? lines : chars);
-    const std::vector<u32> perm = v[apRandom].as_bool() ? shuffled(count, static_cast<u32>(v[apSeed].v[0]) + 1u) : std::vector<u32>{};
-    const u32 mode = v[apMode].as_enum(), shape = v[apShape].as_enum(), unitsMode = v[apUnits].as_enum();
-    const f32 amount = v[apAmount].v[0] / 100.0f;
-    const bool wiggly = v[apWiggly].as_bool();
-    const bool exprSel = v[apExprOn].as_bool();
-    const u32 wMode = v[apWigglyMode].as_enum();
-    const bool lock = v[apLockDims].as_bool();
-    // A primeira seleção parte de "nada" (somar) ou de "tudo" (subtrair/interseção/mínimo).
-    const f32 above = (mode == 1 || mode == 2 || mode == 3) ? 1.0f : 0.0f;
-
-    const Vec2 anchor = v[apAnchor].as_vec2();
-    const Vec3 pos = v[apPosition].as_vec3(), rot = v[apRotation].as_vec3();
-    const Vec2 scl = v[apScale].as_vec2(), lineSpacing = v[apLineSpacing].as_vec2(), align = v[apGroupAlign].as_vec2();
-    const f32 skew = v[apSkew].v[0], skewAxis = v[apSkewAxis].v[0] * kDeg2Rad, opacity = v[apOpacity].v[0];
-    const f32 blur = v[apBlur].v[0], strokeWidth = v[apStrokeWidth].v[0], tracking = v[apTracking].v[0];
-    const bool fillOn = v[apFillOn].as_bool(), strokeOn = v[apStrokeOn].as_bool();
-    // Cor de efeito é guardada em linear (como nos outros efeitos); o texto pinta em sRGB.
-    auto srgb = [](Vec4 c) { return Vec4{Color::linear_to_srgb(c.x), Color::linear_to_srgb(c.y), Color::linear_to_srgb(c.z), c.w}; };
-    const Vec4 fillColor = srgb(v[apFill].as_color()), strokeColor = srgb(v[apStroke].as_color());
-    const f32 hue = v[apFillHue].v[0], sat = v[apFillSaturation].v[0] / 100.0f, bri = v[apFillBrightness].v[0] / 100.0f;
-    const f32 fillOpacity = v[apFillOpacity].v[0] / 100.0f;
-    const bool hsb = hue != 0.0f || sat != 0.0f || bri != 0.0f;
-    const u32 grouping = std::min(v[apGrouping].as_enum(), 3u);
-
-    if (out.size() != units.size()) out.resize(units.size());
-    std::vector<f32> weightX(units.size(), 0.0f);
-    for (usize g = 0; g < units.size(); ++g) {
-        const GlyphUnits& gu = units[g];
-        u32 unit = basedOn == 1 ? visible[g] : basedOn == 2 ? gu.wordIndex : basedOn == 3 ? gu.lineIndex : gu.charIndex;
-        unit = std::min(unit, count - 1);
-        if (!perm.empty()) unit = perm[unit];
-        const f32 range = pro_range_weight(v[apStart].v[0], v[apEnd].v[0], v[apOffset].v[0], unitsMode, shape,
-                                           v[apSmoothness].v[0] / 100.0f, v[apEaseHigh].v[0] / 100.0f, v[apEaseLow].v[0] / 100.0f,
-                                           unit, count) * amount;
-        // Seletor de expressão: a intensidade da expressão por unidade (índice 1..,
-        // como textIndex) substitui a seleção de cima, eixo a eixo.
-        Vec3 exprW{1, 1, 1};
-        if (exprSel) {
-            const u32 raw = basedOn == 1 ? visible[g] : basedOn == 2 ? gu.wordIndex : basedOn == 3 ? gu.lineIndex : gu.charIndex;
-            expr::TextScope scope(std::min(raw, count - 1) + 1, count);
-            const ParamValue e = evaluate_param_f(layer.tracks, fx, apExprAmount, pro_specs().at(apExprAmount), time);
-            exprW = Vec3{e.v[0] / 100.0f, e.v[1] / 100.0f, e.v[2] / 100.0f};
-        }
-        Vec3 w3;
-        for (u32 d = 0; d < 3; ++d) {
-            f32 w = exprSel ? (&exprW.x)[d] : combine_selector(above, range, mode);
-            if (wiggly) {
-                const f32 wv = pro_wiggle(static_cast<u32>(v[apWigglySeed].v[0]), unit, lock ? 0u : d, timeSec, v[apWigglyRate].v[0],
-                                          v[apCorrelation].v[0] / 100.0f, v[apTemporalPhase].v[0], v[apSpatialPhase].v[0],
-                                          v[apWigglyMin].v[0] / 100.0f, v[apWigglyMax].v[0] / 100.0f);
-                w = combine_selector(w, wv, wMode);
-            }
-            (&w3.x)[d] = std::clamp(w, -1.0f, 1.0f);
-        }
-        const f32 w = w3.x;
-        weightX[g] = w;
-        GlyphAnim& o = out[g];
-        if (w == 0.0f && w3.y == 0.0f && w3.z == 0.0f) continue;
-        o.anchorGrouping = grouping;
-        o.groupAlign = Vec2{align.x / 100.0f, align.y / 100.0f};
-        o.anchor = o.anchor + Vec2{anchor.x * w3.x, anchor.y * w3.y};
-        o.translate = o.translate + Vec3{pos.x * w3.x, pos.y * w3.y, pos.z * w3.z}
-                    + Vec3{lineSpacing.x * w * static_cast<f32>(gu.lineIndex), lineSpacing.y * w * static_cast<f32>(gu.lineIndex), 0};
-        // Escala negativa espelha a letra (como no animador de referência).
-        o.scale.x *= 1.0f + w3.x * (scl.x / 100.0f - 1.0f);
-        o.scale.y *= 1.0f + w3.y * (scl.y / 100.0f - 1.0f);
-        o.rotation = o.rotation + Vec3{rot.x * w3.x, rot.y * w3.y, rot.z * w};
-        o.opacity *= std::clamp(1.0f + w * (opacity / 100.0f - 1.0f), 0.0f, 1.0f);
-        o.blur += std::max(0.0f, w * blur);
-        o.strokeAdd += w * strokeWidth;
-        if (skew != 0.0f) {
-            Mat4 shear;
-            shear.col[1].x = -std::tan(std::clamp(w * skew, -80.0f, 80.0f) * kDeg2Rad);
-            const Mat4 axis = Mat4::from_quat(Quat::from_axis_angle(Vec3{0, 0, 1}, skewAxis));
-            const Mat4 inverseAxis = Mat4::from_quat(Quat::from_axis_angle(Vec3{0, 0, 1}, -skewAxis));
-            o.skewTransform = o.skewTransform * axis * shear * inverseAxis;
-            o.skew += w * skew;
-        }
-        const f32 mixW = std::clamp(std::fabs(w), 0.0f, 1.0f);
-        if (fillOn || hsb) {
-            // A cor de partida é a da camada (ou a do animador, se ligada); o
-            // matiz/saturação/brilho deslocam essa cor.
-            Vec3 c = fillOn ? Vec3{fillColor.x, fillColor.y, fillColor.z} : Vec3{layer.text.color.x, layer.text.color.y, layer.text.color.z};
-            if (hsb) {
-                Vec3 h = rgb_to_hsv(c);
-                h.x += hue / 360.0f; h.y = std::clamp(h.y + sat, 0.0f, 1.0f); h.z = std::clamp(h.z + bri, 0.0f, 1.0f);
-                c = hsv_to_rgb(h);
-            }
-            o.fill = Vec4{c.x, c.y, c.z, mixW};
-        }
-        if (fillOpacity < 1.0f) o.fillOpacity *= std::clamp(1.0f + mixW * (fillOpacity - 1.0f), 0.0f, 1.0f);
-        if (strokeOn) o.stroke = Vec4{strokeColor.x, strokeColor.y, strokeColor.z, mixW};
-    }
-    if (tracking != 0.0f) {
-        // Espaçamento: empurra os glifos seguintes da mesma linha.
-        std::vector<f32> acc(std::max<u32>(1, lines) + 1, 0.0f);
-        for (usize g = 0; g < units.size(); ++g) {
-            const u32 li = std::min<u32>(units[g].lineIndex, static_cast<u32>(acc.size() - 1));
-            out[g].trackingShift += acc[li];
-            acc[li] += weightX[g] * tracking;
-        }
-    }
 }
 
 } // namespace aurea::text

@@ -11,6 +11,14 @@
 
 using namespace aurea;
 using namespace aurea::text;
+static std::vector<aurea::text::GlyphAnim> universal_run(const aurea::Layer& source, f64 time, f64 fps, const std::vector<aurea::text::GlyphUnits>& units, u32 chars, u32 words, u32 lines) {
+    aurea::Layer l = source;
+    if (l.kind != aurea::LayerKind::Text && l.kind != aurea::LayerKind::Model3D) l.kind = aurea::LayerKind::Text;
+    aurea::text::migrate_text_effects(l);
+    std::vector<aurea::text::GlyphAnim> out(units.size());
+    aurea::text::evaluate_text_animators(l.text, l.tracks, time, fps, units, chars, words, lines, out);
+    return out;
+}
 namespace {
 struct Rig2128 {
     test::SyntheticFactory factory;
@@ -30,7 +38,7 @@ EffectInstance animator2128(Layer& l) {
 std::vector<GlyphAnim> glyphs2128(const Layer& l, f64 time=0) {
     std::vector<GlyphUnits> units;
     for(u32 i=0;i<8;++i)units.push_back({i,i/2,i/4});
-    std::vector<GlyphAnim> out(8);evaluate_animator_effects(l,time,30,units,8,4,2,out);return out;
+    return universal_run(l,time,30,units,8,4,2);
 }
 }
 
@@ -130,6 +138,6 @@ AUREA_TEST(Regression2128, ExtrudedLettersUseAnimatorGeometryAndColor) {
     fx.params[aeEnd].constant=ParamValue::scalar(50);fx.params[aePosition].constant=ParamValue::vec3(0,100,0);
     fx.params[aeFillOn].constant=ParamValue::boolean(true);fx.params[aeFill].constant=ParamValue::color(1,0,0,.5f);
     auto rest=built.asset->rest_world_matrices(),pose=rest;std::vector<f32> opacity;std::vector<Vec4> fill;
-    scene3d::apply_text3d_animators(*built.asset,l,0,30,pose,opacity,&fill);
+    text::migrate_text_effects(l);scene3d::apply_text3d_animators(*built.asset,l,0,30,pose,opacity,&fill);
     for(usize i=0;i<pose.size();++i){AUREA_CHECK_NEAR(pose[i].col[3].y-rest[i].col[3].y,i<2?-1:0,.001);AUREA_CHECK_NEAR(opacity[i],i<2?.5:1,.001);AUREA_CHECK_NEAR(fill[i].w,i<2?1:0,.001);}
 }

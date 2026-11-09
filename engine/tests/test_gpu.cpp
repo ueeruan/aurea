@@ -9411,7 +9411,10 @@ AUREA_TEST(Gpu, EveryCatalogEffectChangesTheProjectFrame) {
         if (std::strncmp(key, "aurea.audio.", 12) == 0) {
             // Audio sends must leave video untouched; Audio tests validate PCM.
             AUREA_CHECK_EQ(changed, 0u);
-        } else if (changed == 0) inert.emplace_back(key);
+        } else if (changed == 0 && std::strncmp(key, "aurea.text.", 11) != 0) {
+            // 0.5.0: os efeitos de texto antigos só existem para abrir projetos; viram animadores (migrate_text_effects).
+            inert.emplace_back(key);
+        }
     }
     for (const std::string& k : inert) std::printf("\n    efeito sem efeito no projeto: %s", k.c_str());
     AUREA_CHECK_MSG(inert.empty(), "efeito do catalogo aplicado nao muda o quadro");
@@ -13604,15 +13607,15 @@ AUREA_TEST(Gpu, Regression2128AnimatorEffectChangesPixelsAndReopens) {
     const auto id=rig.e.add_text("AUREA");AUREA_CHECK(id.ok());if(!id.ok())return;
     auto* l=current_comp(rig.e)->layer(LayerId::unpack(*id));
     EffectInstance fx;fx.id=l->alloc_effect_id();fx.type=effect_type_id(text::kAnimatorEffect);
-    ParameterRegistry params;text::declare_animator_effect_params(params);initialize_instance(fx,params);l->effects.push_back(fx);
+    ParameterRegistry params;text::declare_animator_effect_params(params);initialize_instance(fx,params);l->effects.push_back(fx);text::migrate_text_effects(*l);
     auto capture=[&](i64 f=0){seek_frame(rig.e,f);return rig.capture(640);};
     const auto base=capture();AUREA_CHECK(coverage(base)>.001f);
-    l->effects[0].params[text::aeFillOn].constant=ParamValue::boolean(true);
-    l->effects[0].params[text::aeFill].constant=ParamValue::color(1,0,0,1);
+    l->text.animators[0].props|=kTextPropFill;
+    l->text.animators[0].fill=Vec4{1,0,0,1};
     const auto red=capture();AUREA_CHECK(max_diff(base,red)>50);
-    l->effects[0].params[text::aeBlur].constant=ParamValue::scalar(12);
+    l->text.animators[0].blur=12;
     const auto blur=capture();AUREA_CHECK(max_diff(red,blur)>30);
-    auto& track=l->tracks.get_or_create(TrackProperty::EffectParam,fx.id,param_track_key(text::aePosition,0));
+    auto& track=l->tracks.get_or_create(TrackProperty::TextAnimParam,0,text::kPosX);
     track.set(FrameIndex{0},0);track.set(FrameIndex{30},120);for(auto& k:track.keys)k.interp=Interpolation::Linear;
     const auto moved=capture(30);AUREA_CHECK(max_diff(blur,moved)>30);
     AUREA_CHECK(rig.e.save_project("build/regression-2128-animator.aurea").ok());
@@ -13633,28 +13636,23 @@ AUREA_TEST(Gpu, Regression2132AnimatorControlsChangePausedFrameViaCommands) {
     Command add; add.type = CommandType::EffectAdd;
     add.effect_add = {id, effect_type_id(text::kAnimatorEffect), kInvalidIndex};
     AUREA_CHECK(rig.e.apply_command(add).ok());
-    const auto effect = current_comp(rig.e)->layer(id)->effects.back().id;
-    auto scalar = [&](u32 param, f32 value) {
-        Command c; c.type = CommandType::EffectSetParam;
-        c.effect_param = {id, EffectId{effect, 0}, param, value};
-        AUREA_CHECK(rig.e.apply_command(c).ok());
-    };
-    auto vector = [&](u32 param, f32 x, f32 y, f32 z) {
-        Command c; c.type = CommandType::EffectSetColorParam;
-        c.effect_color = {id, EffectId{effect, 0}, param, x, y, z, 1};
-        AUREA_CHECK(rig.e.apply_command(c).ok());
+    auto scalar = [&](u32 param, f32 value) { AUREA_CHECK(rig.e.set_text_anim_param(*added, 0, param, value)); };
+    auto vector = [&](u32 first, f32 x, f32 y, f32 z) {
+        AUREA_CHECK(rig.e.set_text_anim_param(*added, 0, first, x));
+        AUREA_CHECK(rig.e.set_text_anim_param(*added, 0, first + 1, y));
+        if (first == text::kPosX) AUREA_CHECK(rig.e.set_text_anim_param(*added, 0, first + 2, z));
     };
     const auto base = rig.capture(640); AUREA_CHECK(coverage(base) > .001f);
-    vector(text::aePosition, 100, 30, 0);
+    vector(text::kPosX, 100, 30, 0);
     const auto position = rig.capture(640); AUREA_CHECK(max_diff(base, position) > 50);
-    vector(text::aePosition, 0, 0, 0);
-    vector(text::aeScale, 50, 50, 0);
+    vector(text::kPosX, 0, 0, 0);
+    vector(text::kScaleX, 50, 50, 0);
     const auto scale = rig.capture(640); AUREA_CHECK(max_diff(base, scale) > 50);
     AUREA_CHECK(coverage(scale) < coverage(base) * .7f);
-    vector(text::aeScale, 100, 100, 0);
-    scalar(text::aeOpacity, 0);
+    vector(text::kScaleX, 100, 100, 0);
+    scalar(text::kOpacity, 0);
     const auto invisible = rig.capture(640); AUREA_CHECK(coverage(invisible) < .00001f);
-    scalar(text::aeOpacity, 100);
+    scalar(text::kOpacity, 100);
     AUREA_CHECK(max_diff(base, rig.capture(640)) <= 3);
     std::filesystem::create_directories("build/reference/keyframes-2132");
     const std::string prefix = extruded ? "build/reference/keyframes-2132/text3d-" : "build/reference/keyframes-2132/text-";
@@ -13815,16 +13813,12 @@ AUREA_TEST(Regression2136Gpu, TextTransformOffsetFromTheIosBridgeSequenceMovesTh
     add.effect_add.effectType = effect_type_id(text::kTransformEffect);
     add.effect_add.index = 0xFFFFFFFFu;
     AUREA_CHECK_EQ(rig.e.submit_commands(&add, 1, nullptr, 0), 1u);
-    bridge::LayerEffectRow fx[4]{};
-    char names[512]{};
-    AUREA_CHECK_EQ(rig.e.query_layer_effects(*id, fx, 4, names, sizeof names), 1u);
-    const u32 effect = fx[0].effectId;
     const auto added = centroid(rig.capture(320));
+    AUREA_CHECK_EQ(rig.e.query_text_animators(*id, nullptr, 0), 1u);
     AUREA_CHECK_NEAR(added[0], before[0], 1.0);
     AUREA_CHECK_NEAR(added[1], before[1], 1.0);
-    Command offset; offset.type = CommandType::EffectSetColorParam;
-    offset.effect_color = EffectColorPayload{LayerId::unpack(*id), EffectId{effect, 0}, text::kOffset, 30.0f, 12.0f, 0.0f, 0.0f};
-    AUREA_CHECK_EQ(rig.e.submit_commands(&offset, 1, nullptr, 0), 1u);
+    AUREA_CHECK(rig.e.set_text_anim_param(*id, 0, text::kPosX, 30.0f));
+    AUREA_CHECK(rig.e.set_text_anim_param(*id, 0, text::kPosY, 12.0f));
     const auto moved = centroid(rig.capture(320));
     std::printf(" text transform centroid %.1f,%.1f -> %.1f,%.1f\n", before[0], before[1], moved[0], moved[1]);
     AUREA_CHECK_NEAR(moved[0] - before[0], 30.0, 2.0);

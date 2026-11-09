@@ -80,6 +80,37 @@ public:
     bool is_identity(const EffectEval&) const noexcept override { return true; }
 };
 
+// 0.5.0: efeitos de conteúdo do texto, avaliados antes do layout no render.
+class TextProgressEffect final : public Effect {
+public:
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{text::kProgressEffect, "Text Progress", "Text", EffectClass::Domain};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override { text::declare_progress_params(p); }
+    bool is_identity(const EffectEval&) const noexcept override { return true; }
+};
+
+class TextRandomizerEffect final : public Effect {
+public:
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{text::kRandomizerEffect, "Text Randomizer", "Text", EffectClass::Domain};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override { text::declare_randomizer_params(p); }
+    bool is_identity(const EffectEval&) const noexcept override { return true; }
+};
+
+class TextSpacingEffect final : public Effect {
+public:
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{text::kSpacingEffect, "Text Spacing", "Text", EffectClass::Domain};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override { text::declare_spacing_params(p); }
+    bool is_identity(const EffectEval&) const noexcept override { return true; }
+};
+
 class TextAnimatorEffect final : public Effect {
 public:
     const EffectInfo& info() const noexcept override {
@@ -313,6 +344,9 @@ void register_pattern_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<ParentingHelper>());
     (void)r.add(std::make_unique<Text3DLayout>());
     (void)r.add(std::make_unique<TextTransform>());
+    (void)r.add(std::make_unique<TextProgressEffect>());
+    (void)r.add(std::make_unique<TextRandomizerEffect>());
+    (void)r.add(std::make_unique<TextSpacingEffect>());
     (void)r.add(std::make_unique<TextAnimatorEffect>());
     (void)r.add(std::make_unique<TextAnimatorProEffect>());
     (void)r.add(std::make_unique<TextSurfaceEffect>(true));

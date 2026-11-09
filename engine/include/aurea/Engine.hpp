@@ -234,6 +234,11 @@ struct EngineConfig {
     /// 0 = adaptativo por fase (export_worker_hang_limit_ns: preparação 20 s,
     /// regime max(12 s, 8 × média por quadro), teto 45 s). Os testes usam menos.
     u32 exportWorkerHangMs = 0;
+    /// Render do export sem batida por este tempo = preso no driver (0 = 150 s).
+    u32 exportProducerHangMs = 0;
+    /// Testes: o render para neste quadro enquanto o valor for verdadeiro, sem olhar o cancelar.
+    const std::atomic<bool>* testHoldExportProducer = nullptr;
+    u32 testHoldExportProducerFrame = 0;
     /// 0.2.4 (C2): teto de sanidade da duração do export, em segundos.
     /// Acima disso o motor recusa (NotSupported, "duracao acima de 3 h").
     /// 0 = sem teto (testes de linha do tempo longa).
@@ -619,6 +624,9 @@ public:
     bool set_vector_path(u64 layerId, u32 group, u32 path, const f32* bez, usize count, bool continuing) noexcept;
     /// Liga/desliga o keyframe de forma no cabeçote (morph).
     bool toggle_vector_path_key(u64 layerId, u32 group, u32 path) noexcept;
+    /// 0.5.0: liga/desliga o keyframe só dos pontos `indices` no cabeçote. Os
+    /// outros pontos seguem interpolando entre os keys deles.
+    bool toggle_vector_path_points_key(u64 layerId, u32 group, u32 path, const u32* indices, u32 count) noexcept;
     /// Marca o keyframe do caminho aqui — com keyframe no cabeçote, REGRAVA o
     /// valor avaliado em vez de apagá-lo (ver `ensure_shape_param_key`).
     bool ensure_vector_path_key(u64 layerId, u32 group, u32 path) noexcept;
@@ -652,6 +660,16 @@ public:
     static constexpr u32 kShapeParamFloats = kShapeParamCount + 2;
     u32 query_shape_params(u64 layerId, f32* out, u32 capacity) noexcept;
     bool set_shape_param(u64 layerId, u32 param, f32 value, bool continuing) noexcept;
+    /// 0.5.0: alças da forma que mexem nos parâmetros da silhueta, no playhead.
+    /// `out` recebe kShapeHandleFloats por alça: x, y (px da forma, origem no
+    /// centro, Y para baixo), parâmetro, estilo (0 disco, 1 ângulo), empurrão X/Y
+    /// (ver shape::ParamHandle). Devolve quantas alças; 0 em camada vetorial.
+    static constexpr u32 kShapeHandleFloats = 6;
+    u32 query_shape_param_handles(u64 layerId, f32* out, u32 capacity) noexcept;
+    /// Leva a alça do parâmetro `param` ao ponto (x, y) em px da forma. Grava
+    /// pelo mesmo caminho de set_shape_param (respeita keyframes; `continuing`
+    /// junta o arrasto em um desfazer).
+    bool drag_shape_param_handle(u64 layerId, u32 param, f32 x, f32 y, bool continuing) noexcept;
     bool toggle_shape_param_key(u64 layerId, u32 param) noexcept;
     /// Marca o keyframe do parâmetro aqui — e, se já houver um, REGRAVA com o
     /// valor avaliado no cabeçote em vez de apagá-lo.
@@ -705,6 +723,8 @@ public:
         Append = 5,       ///< x, y, noComeço (0/1)        → índice do ponto novo
         SetClosed = 6,    ///< fechado (0/1)
         SetExclude = 7,   ///< furo (0/1) — o contorno recorta o preenchimento do grupo
+        OpenAt = 8,       ///< trecho: abre o caminho nele; o corte vira as pontas (todos os keys)
+        SetFirst = 9,     ///< i: o ponto i vira o primeiro neste key (After Effects: controla o morph)
     };
     i32 edit_vector_path(u64 layerId, u32 group, u32 path, PathOp op, const f32* args, u32 argc, bool continuing) noexcept;
     /// As mesmas operações no caminho da máscara, no espaço da camada. Caminho
@@ -961,6 +981,14 @@ public:
     u32 query_text_animators(u64 layerId, f32* out, u32 capacity) noexcept;
     /// Novo animador com `props`; devolve o índice (−1 = falhou).
     i32 add_text_animator(u64 layerId, u32 props) noexcept;
+    /// 0.5.0, animador universal: campos que não animam (`text::kTextAnimatorFieldCount` floats).
+    u32 query_text_animator_fields(u64 layerId, u32 index, f32* out, u32 capacity) noexcept;
+    bool set_text_animator_field(u64 layerId, u32 index, u32 field, f32 value) noexcept;
+    /// Valor no cabeçote e estado (1 animado, 2 keyframe aqui, 4 expressão): 2 floats por chave.
+    u32 query_text_anim_values(u64 layerId, u32 index, const u32* keys, u32 count, f32* out) noexcept;
+    /// Mais um seletor (tipo `TextSelectorType`: faixa, oscilação ou expressão). Devolve o índice.
+    i32 add_text_selector(u64 layerId, u32 index, u32 type) noexcept;
+    bool remove_text_selector(u64 layerId, u32 index, u32 selector) noexcept;
     bool remove_text_animator(u64 layerId, u32 index) noexcept;
     i32 duplicate_text_animator(u64 layerId, u32 index) noexcept;
     bool move_text_animator(u64 layerId, u32 from, u32 to) noexcept;
@@ -972,6 +1000,16 @@ public:
     bool toggle_text_anim_key(u64 layerId, u32 index, u32 param) noexcept;
     /// Preset nativo (substitui os animadores), a partir do início da camada.
     bool apply_text_preset(u64 layerId, u32 preset) noexcept;
+    /// 0.5.0: presets de texto no modelo do Alight Motion: efeitos Transformar
+    /// texto, Progresso, Aleatório e Espaçamento com keyframes a partir do
+    /// começo da camada. Substituem as animações de texto anteriores da camada
+    /// (animadores e esses mesmos efeitos), em um desfazer. Devolve false se
+    /// a camada não for texto 2D ou o id não existir.
+    static constexpr u32 kMotionTextPresetCount = 10;
+    /// `apply_text_preset` com id a partir daqui aplica o preset do modelo Motion
+    /// (id − base): as grades de preset usam o mesmo número para os dois.
+    static constexpr u32 kMotionTextPresetBase = 1000;
+    bool apply_motion_text_preset(u64 layerId, u32 preset) noexcept;
     /// 0.4.4 Explodir texto: uma camada de texto por letra (0), palavra (1) ou
     /// linha (2), cada uma só com o próprio texto e no mesmo lugar. Sem
     /// `keepOriginal` a original sai. Um desfazer. Devolve quantas criou.
@@ -984,8 +1022,14 @@ public:
     /// 5 semente do wiggle, 6..23 = os LayerAnimParam 0..17 avaliados no
     /// playhead, 24 bits animados (1 << param), 25 bits com keyframe no
     /// playhead, 26 = 1 se a camada é texto ou texto 3D (unidades valem),
-    /// 27 loop (vai e volta; também lido pelo set_layer_animator).
-    static constexpr u32 kLayerAnimFloats = 32;
+    /// 27 loop (vai e volta; também lido pelo set_layer_animator), 28
+    /// sobreposição %, 29 duração do progresso (ms), 30 = 2146 (marca da
+    /// extensão), 31 forma da onda (0 seno, 1 triângulo; lida pelo set com a
+    /// marca), 32..43 = os LayerAnimParam 18..29 da ONDA, 44 bits animados
+    /// da onda (1 << (param − 18)), 45 bits da onda com keyframe no playhead.
+    static constexpr u32 kLayerAnimFloats = 48;
+    /// Posição na consulta do LayerAnimParam `param`.
+    [[nodiscard]] static constexpr u32 layer_anim_slot(u32 param) noexcept { return param < 18 ? 6 + param : 32 + (param - 18); }
     u32 query_layer_animators(u64 layerId, f32* out, u32 capacity) noexcept;
     /// Novo animador (entra desbotando em 1 s a partir do começo da camada);
     /// devolve o índice (−1 = falhou).
@@ -1352,6 +1396,8 @@ public:
     bool toggle_mask_param_key(u64 layerId, u32 maskId, u32 param) noexcept;
     /// Liga/desliga o key do caminho no cabeçote (`keyed` = ficou com key).
     bool toggle_mask_path_key(u64 layerId, u32 maskId, bool* keyed = nullptr) noexcept;
+    /// 0.5.0: keyframe só dos pontos `indices` do caminho da máscara, no cabeçote.
+    bool toggle_mask_path_points_key(u64 layerId, u32 maskId, const u32* indices, u32 count) noexcept;
     /// Canto ↔ curva do ponto da máscara. 1 virou curva, 0 virou canto, −1 nada mudou.
     i32 toggle_mask_point_curve(u64 layerId, u32 maskId, u32 point) noexcept;
     /// Marca o keyframe do caminho da máscara aqui — com keyframe no cabeçote,
@@ -2906,6 +2952,7 @@ private:
 
     // --- Gravação / abertura (Fase 8G) ---------------------------------------
     std::mutex         saveMutex_;              ///< uma gravação por vez
+    bool               deferTextMigration_ = false;   ///< o importador do AE liga as trilhas antes de migrar
     u64                projectSession_ = 0;     ///< under modelMutex_; changes on replacement
     struct ExportRestartGuard {
         u64 session = 0, generation = 0;
@@ -3044,6 +3091,8 @@ private:
         Layer transform;
         std::vector<EffectInstance> effects;
         std::vector<Track> effectTracks;            ///< EffectParam dos efeitos copiados
+        std::vector<TextAnimator> textAnimators;    ///< animadores de texto copiados com os efeitos
+        std::vector<Track> textAnimatorTracks;      ///< TextAnimParam deles (effectIndex = posição na cópia)
         i64 effectsBase = 0;                        ///< offset da camada de origem (início dela em tempo local)
         f64 effectsFps = 0.0;                       ///< fps da composição de origem (colar numa pré-comp com outro fps reescala)
         struct Key { TrackProperty property; u32 effectIndex; u32 effectParamIndex; EffectTypeId effectType; Keyframe key; u32 effectOrdinal = 0; };

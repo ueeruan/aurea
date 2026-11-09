@@ -462,8 +462,10 @@ def main() -> None:
     ff_work = work / f"ffmpeg-{FFMPEG_VERSION}"
     openh_work.mkdir(exist_ok=True)
     ff_work.mkdir(exist_ok=True)
+    # NEON no fallback de software dos aparelhos ARM; o x86_64 pediria nasm e só serve ao emulador.
+    openh264_asm = "USE_ASM=Yes" if args.platform == "android" and native_arch in ("arm64-v8a", "armeabi-v7a") else "USE_ASM=No"
     steps = [
-        [make, "-f", q(openh264 / "Makefile"), f"-j{args.jobs}", "USE_ASM=No", "V=No", f"PREFIX={q(prefix)}", *oh, "install-static"],
+        [make, "-f", q(openh264 / "Makefile"), f"-j{args.jobs}", openh264_asm, "V=No", f"PREFIX={q(prefix)}", *oh, "install-static"],
         ["sh", q(ffmpeg / "configure"), f"--prefix={q(prefix)}", f"--cc={cc}", f"--cxx={cxx}", f"--ar={ar}", f"--nm={nm}", f"--ranlib={ranlib}", f"--pkg-config={q(pkg)}", *common],
         [make, f"-j{args.jobs}"], [make, "install"],
     ]
@@ -481,6 +483,9 @@ def main() -> None:
         for name in ("FFmpeg-GPL-2.0.txt", "x265-GPL-2.0.txt"):
             (license_dir / name).unlink(missing_ok=True)
     write_dependency_notice(license_dir, args, native_arch, kvazaar_patch, ffmpeg_patch)
+    # A pasta é reaproveitada entre versões: só o patch aplicado agora vai para o app.
+    for stale in license_dir.glob("ffmpeg-*-mediacodec-safety.patch"):
+        stale.unlink()
     shutil.copy2(ROOT / "tools/patches" / ffmpeg_patch["patch"], license_dir / ffmpeg_patch["patch"])
     expected_archives = ("avformat", "avcodec", "swscale", "swresample", "avutil", "openh264", "kvazaar") + (("x265",) if args.with_x265 else ())
     if manifest_path.exists() and not args.force:

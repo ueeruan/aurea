@@ -73,7 +73,7 @@ Status Renderer::render_staged_scene_targets(const FrameSnapshot& root, const Re
     if (targets.empty()) return OkStatus;
     if (!settings.stageUnblurredScenes || !settings.finalQuality)
         return Status{Errc::InvalidState, "etapas 3D exigem qualidade final"};
-    const auto cancelled = [&] { return settings.cancelFlag && settings.cancelFlag->load(std::memory_order_acquire); };
+    const auto cancelled = [&] { settings.beat(); return settings.cancelFlag && settings.cancelFlag->load(std::memory_order_acquire); };
     const u64 started = monotonic_ns();
     constexpr u64 hardCap = 120ull * 1000 * 1000 * 1000;
     const u64 limit = std::clamp<u64>(settings.sceneExposureFenceTimeoutNs, 1, hardCap);

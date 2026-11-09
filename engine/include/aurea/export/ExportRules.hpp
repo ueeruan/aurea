@@ -123,6 +123,7 @@ enum class ExportFailure : u32 {
     Media = 5,            ///< uma mídia do projeto não pôde ser lida
     File = 6,             ///< o arquivo de saída não pôde ser gravado
     Storage = 7,          ///< armazenamento cheio
+    RenderHung = 9,       ///< o render travou dentro do driver: só reabrir o app solta a GPU
     Unsupported = 8,      ///< resolução/codec acima do que o aparelho exporta
     Other = 15,
 };

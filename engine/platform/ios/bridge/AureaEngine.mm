@@ -28,7 +28,10 @@
 #import <VideoToolbox/VideoToolbox.h>
 #import <Vision/Vision.h>
 #import <CoreVideo/CoreVideo.h>
+#include "aurea/animation/TemporalEase.hpp"
+#include "aurea/text/TextAnimator.hpp"
 #include "aurea/ai/BackgroundRemoval.hpp"
+#include "aurea/timeline/ShapeGeometry.hpp"
 #include "aurea/DefaultNames.hpp"
 
 #include "aurea/core/Log.hpp"
@@ -2184,10 +2187,48 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     }
 }
 
+- (NSArray<NSNumber*>*)textAnimatorFields:(long long)layerId index:(uint32_t)index {
+    auto* e = self.engine;
+    if (!e) return @[];
+    std::vector<aurea::f32> values(aurea::text::kTextAnimatorFieldCount);
+    if (e->query_text_animator_fields(static_cast<aurea::u64>(layerId), index, values.data(), static_cast<aurea::u32>(values.size())) == 0) return @[];
+    NSMutableArray<NSNumber*>* out = [NSMutableArray arrayWithCapacity:values.size()];
+    for (aurea::f32 v : values) [out addObject:@(v)];
+    return out;
+}
+- (BOOL)setTextAnimatorField:(long long)layerId index:(uint32_t)index field:(uint32_t)field value:(float)value {
+    auto* e = self.engine;
+    return e && e->set_text_animator_field(static_cast<aurea::u64>(layerId), index, field, value);
+}
+- (NSArray<NSNumber*>*)textAnimValues:(long long)layerId index:(uint32_t)index keys:(NSArray<NSNumber*>*)keys {
+    auto* e = self.engine;
+    if (!e || keys.count == 0) return @[];
+    std::vector<aurea::u32> list;
+    list.reserve(keys.count);
+    for (NSNumber* n in keys) list.push_back(n.unsignedIntValue);
+    std::vector<aurea::f32> values(list.size() * 2);
+    (void)e->query_text_anim_values(static_cast<aurea::u64>(layerId), index, list.data(), static_cast<aurea::u32>(list.size()), values.data());
+    NSMutableArray<NSNumber*>* out = [NSMutableArray arrayWithCapacity:values.size()];
+    for (aurea::f32 v : values) [out addObject:@(v)];
+    return out;
+}
+- (NSInteger)addTextSelector:(long long)layerId index:(uint32_t)index type:(uint32_t)type {
+    auto* e = self.engine;
+    return e ? e->add_text_selector(static_cast<aurea::u64>(layerId), index, type) : -1;
+}
+- (BOOL)removeTextSelector:(long long)layerId index:(uint32_t)index selector:(uint32_t)selector {
+    auto* e = self.engine;
+    return e && e->remove_text_selector(static_cast<aurea::u64>(layerId), index, selector);
+}
 - (void)toggleTextAnimKey:(long long)layerId index:(uint32_t)index param:(uint32_t)param {
     if (auto* e = self.engine) {
         (void)e->toggle_text_anim_key(static_cast<aurea::u64>(layerId), index, param);
     }
+}
+
+- (BOOL)applyMotionTextPreset:(long long)layerId preset:(uint32_t)preset {
+    if (auto* e = self.engine) return e->apply_motion_text_preset(static_cast<aurea::u64>(layerId), preset);
+    return NO;
 }
 
 - (BOOL)applyTextPreset:(long long)layerId preset:(uint32_t)preset {
@@ -3649,6 +3690,20 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
         ? aurea::kEaseParamMarker : std::clamp(handles[3].floatValue, -2.f, 3.f);
     return to_ns(aurea::presets::make_curve_preset(to_std(name), interp, std::clamp(handles[0].floatValue, 0.f, 1.f), std::clamp(handles[1].floatValue, -2.f, 3.f), std::clamp(handles[2].floatValue, 0.f, 1.f), y2, power));
 }
+- (NSArray<NSNumber*>*)temporalEase:(BOOL)toHandles values:(NSArray<NSNumber*>*)values seconds:(float)seconds delta:(float)delta {
+    if (values.count < 4) return @[];
+    const float a = values[0].floatValue, b = values[1].floatValue, c = values[2].floatValue, d = values[3].floatValue;
+    float out[4]{};
+    aurea::TemporalEase e;
+    if (toHandles) {
+        e.speedOut = a; e.influenceOut = b; e.speedIn = c; e.influenceIn = d;
+        if (!aurea::temporal_ease_to_handles(e, seconds, delta, out)) return @[];
+    } else {
+        if (!aurea::temporal_ease_from_handles(a, b, c, d, seconds, delta, e)) return @[];
+        out[0] = e.speedOut; out[1] = e.influenceOut; out[2] = e.speedIn; out[3] = e.influenceIn;
+    }
+    return floats_to_array(out, 4);
+}
 - (NSArray<NSNumber*>*)sampleEase:(uint32_t)interpolation handles:(NSArray<NSNumber*>*)handles count:(uint32_t)count {
     // O trecho amostrado pelo MOTOR (`sample_keyframe_ease`): o gráfico desenha estes números.
     if (interpolation > static_cast<uint32_t>(aurea::kLastInterpolation) || handles.count < 4 || count < 2 || count > 1025) return @[];
@@ -4304,6 +4359,22 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
 - (BOOL)makeVectorPathEditable:(long long)layerId group:(uint32_t)group path:(uint32_t)path { auto* e = self.engine; return e && e->make_vector_path_editable(layerId, group, path); }
 // Bugs 0.3.4 (bug 11): converter em contorno (EngineOmegaOutline.cpp).
 - (BOOL)convertShapeToOutline:(long long)layerId { auto* e = self.engine; return e && e->convert_shape_to_outline(static_cast<aurea::u64>(layerId)); }
+- (BOOL)toggleMaskPathPointsKey:(long long)layerId mask:(uint32_t)mask points:(NSArray<NSNumber*>*)points {
+    auto* e = self.engine;
+    if (!e || points.count == 0) return NO;
+    std::vector<aurea::u32> indices;
+    indices.reserve(points.count);
+    for (NSNumber* n in points) indices.push_back(n.unsignedIntValue);
+    return e->toggle_mask_path_points_key(layerId, mask, indices.data(), static_cast<aurea::u32>(indices.size()));
+}
+- (BOOL)toggleVectorPathPointsKey:(long long)layerId group:(uint32_t)group path:(uint32_t)path points:(NSArray<NSNumber*>*)points {
+    auto* e = self.engine;
+    if (!e || points.count == 0) return NO;
+    std::vector<aurea::u32> indices;
+    indices.reserve(points.count);
+    for (NSNumber* n in points) indices.push_back(n.unsignedIntValue);
+    return e->toggle_vector_path_points_key(layerId, group, path, indices.data(), static_cast<aurea::u32>(indices.size()));
+}
 - (BOOL)toggleVectorPathKey:(long long)layerId group:(uint32_t)group path:(uint32_t)path { auto* e = self.engine; return e && e->toggle_vector_path_key(layerId, group, path); }
 - (BOOL)setVectorParam:(long long)layerId group:(uint32_t)group param:(uint32_t)param value:(float)value { auto* e = self.engine; return e && e->set_vector_param(layerId, group, param, value, false); }
 - (BOOL)keyVectorParam:(long long)layerId group:(uint32_t)group param:(uint32_t)param { auto* e = self.engine; return e && e->ensure_vector_param_key(layerId, group, param); }
@@ -4339,6 +4410,17 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
 }
 - (BOOL)dragTextBoxWidth:(long long)layerId dx:(float)dx dy:(float)dy continuing:(BOOL)continuing {
     auto* e = self.engine; return e && e->drag_text_box_width(static_cast<u64>(layerId), dx, dy, continuing);
+}
+- (NSArray<NSNumber*>*)shapeParamHandles:(long long)layerId {
+    auto* e = self.engine;
+    if (!e) return @[];
+    constexpr aurea::u32 k = aurea::Engine::kShapeHandleFloats;
+    float values[aurea::shape::kMaxParamHandles * k];
+    const auto count = e->query_shape_param_handles(static_cast<aurea::u64>(layerId), values, aurea::shape::kMaxParamHandles * k);
+    return floats_to_array(values, count * k);
+}
+- (BOOL)dragShapeParamHandle:(long long)layerId param:(uint32_t)param x:(float)x y:(float)y continuing:(BOOL)continuing {
+    auto* e = self.engine; return e && e->drag_shape_param_handle(static_cast<aurea::u64>(layerId), param, x, y, continuing);
 }
 - (BOOL)resizeShapeHandle:(long long)layerId handle:(uint32_t)handle du:(float)du dv:(float)dv keepRatio:(BOOL)keepRatio fromCenter:(BOOL)fromCenter continuing:(BOOL)continuing {
     auto* e = self.engine; return e && e->resize_shape_handle(static_cast<u64>(layerId), handle, du, dv, keepRatio, fromCenter, continuing);

@@ -3,6 +3,7 @@
 // "tudo", espaçamento de linhas, matiz/brilho, opacidade do preenchimento).
 #include "TestFramework.hpp"
 
+#include "aurea/animation/TemporalEase.hpp"
 #include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/text/TextAnimator.hpp"
 #include "aurea/timeline/Layer.hpp"
@@ -14,6 +15,14 @@
 using namespace aurea;
 using namespace aurea::text;
 
+static std::vector<aurea::text::GlyphAnim> universal_run(const aurea::Layer& source, f64 time, f64 fps, const std::vector<aurea::text::GlyphUnits>& units, u32 chars, u32 words, u32 lines) {
+    aurea::Layer l = source;
+    if (l.kind != aurea::LayerKind::Text && l.kind != aurea::LayerKind::Model3D) l.kind = aurea::LayerKind::Text;
+    aurea::text::migrate_text_effects(l);
+    std::vector<aurea::text::GlyphAnim> out(units.size());
+    aurea::text::evaluate_text_animators(l.text, l.tracks, time, fps, units, chars, words, lines, out);
+    return out;
+}
 namespace {
 EffectInstance pro(Layer& l) {
     ParameterRegistry p; declare_animator_pro_params(p);
@@ -24,9 +33,7 @@ void set(EffectInstance& fx, u32 i, f32 x, f32 y = 0, f32 z = 0) { auto& c = fx.
 /// 8 letras: "AB CD EF" (sem os espaços), 3 palavras, 2 linhas.
 std::vector<GlyphAnim> run(const Layer& l, f64 time = 0) {
     const std::vector<GlyphUnits> units{{0, 0, 0}, {1, 0, 0}, {3, 1, 0}, {4, 1, 0}, {6, 2, 1}, {7, 2, 1}};
-    std::vector<GlyphAnim> out(units.size());
-    evaluate_animator_effects(l, time, 30, units, 8, 3, 2, out);
-    return out;
+    return universal_run(l, time, 30, units, 8, 3, 2);
 }
 } // namespace
 
@@ -41,7 +48,6 @@ AUREA_TEST(TextAnimatorPro, RegisteredWithStableParametersAndOnlyActsWhenEnabled
     AUREA_CHECK(is_animator_effect(effect_type_id(kAnimatorProEffect)) && is_animator_effect(effect_type_id(kAnimatorEffect)));
     // Padrão: seleção inteira, propriedades neutras = nada muda.
     Layer l; l.kind = LayerKind::Text; l.effects.push_back(pro(l));
-    AUREA_CHECK(has_animator_effect(l));
     for (const GlyphAnim& g : run(l)) {
         AUREA_CHECK_NEAR(g.translate.x, 0.0f, 1e-5f); AUREA_CHECK_NEAR(g.scale.x, 1.0f, 1e-5f); AUREA_CHECK_NEAR(g.opacity, 1.0f, 1e-5f);
     }
@@ -113,4 +119,31 @@ AUREA_TEST(TextAnimatorPro, AnchorGroupingLineSpacingAndFillColorAdjustments) {
     // Vermelho + 120° de matiz = verde, com metade do brilho e metade da opacidade.
     AUREA_CHECK_NEAR(g[0].fill.x, 0.0f, 1e-3f); AUREA_CHECK_NEAR(g[0].fill.y, 0.5f, 1e-3f); AUREA_CHECK_NEAR(g[0].fill.z, 0.0f, 1e-3f);
     AUREA_CHECK_NEAR(g[0].fill.w, 1.0f, 1e-5f); AUREA_CHECK_NEAR(g[0].fillOpacity, 0.5f, 1e-5f);
+}
+
+AUREA_TEST(TextAnimatorPro, SpeedAndInfluenceRoundTrip) {
+    TemporalEase e;
+    f32 h[4]{};
+    AUREA_CHECK(temporal_ease_to_handles(e, 1.5f, 100.0f, h));      // Easy Ease do AE
+    AUREA_CHECK_NEAR(h[0], 0.3333f, 1e-3f); AUREA_CHECK_NEAR(h[1], 0.0f, 1e-5f);
+    AUREA_CHECK_NEAR(h[2], 0.6667f, 1e-3f); AUREA_CHECK_NEAR(h[3], 1.0f, 1e-5f);
+    e.speedOut = 80.0f; e.influenceOut = 50.0f; e.speedIn = -20.0f; e.influenceIn = 75.0f;
+    AUREA_CHECK(temporal_ease_to_handles(e, 2.0f, 100.0f, h));
+    TemporalEase back;
+    AUREA_CHECK(temporal_ease_from_handles(h[0], h[1], h[2], h[3], 2.0f, 100.0f, back));
+    AUREA_CHECK_NEAR(back.speedOut, 80.0f, 1e-3f); AUREA_CHECK_NEAR(back.influenceIn, 75.0f, 1e-3f);
+    AUREA_CHECK(!temporal_ease_to_handles(e, 2.0f, 0.0f, h));       // sem variação não há velocidade normalizada
+}
+
+// Valores medidos no After Effects 26.5 (build/reference/ae-medida).
+AUREA_TEST(TextAnimatorPro, ShapesAndEaseMatchAfterEffects) {
+    AUREA_CHECK_NEAR(pro_range_weight(0, 100, 0, 0, 4, 1, 0, 0, 0, 4), 0.6186f, 2e-3f);       // redonda
+    AUREA_CHECK_NEAR(pro_range_weight(0, 100, 0, 0, 5, 1, 0, 0, 0, 4), 0.106f, 2e-3f);        // suave
+    AUREA_CHECK_NEAR(pro_range_weight(0, 100, 0, 0, 1, 1, 0.5f, 0, 0, 1), 0.7219f, 2e-3f);    // suavizar alto
+    AUREA_CHECK_NEAR(pro_range_weight(0, 100, 0, 0, 1, 1, 0, -0.5f, 0, 1), 0.6875f, 2e-3f);   // suavizar baixo negativo
+    AUREA_CHECK_NEAR(pro_range_weight(0, 100, 0, 0, 1, 1, 0, 0, 0, 1), 0.5f, 1e-5f);          // sem ease, sem curva
+    AUREA_CHECK_NEAR(combine_selector(0.6f, -0.4f, 1), -0.36f, 1e-5f);                        // subtrair com negativo
+    // Projeto antigo fica como foi gravado.
+    AUREA_CHECK_NEAR(pro_range_weight(0, 100, 0, 0, 4, 1, 0, 0, 0, 4, false), 0.6614f, 2e-3f);
+    AUREA_CHECK_NEAR(combine_selector(0.6f, 0.25f, 1, false), 0.35f, 1e-5f);
 }

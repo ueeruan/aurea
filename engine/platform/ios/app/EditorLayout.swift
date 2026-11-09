@@ -95,7 +95,7 @@ enum StageDim {
     static let outlineOverWidth: CGFloat = 2
     static let batchUnderWidth: CGFloat = 2.5
     static let batchOverWidth: CGFloat = 1.5
-    static let maskPointHalf: CGFloat = 5.5
+    static let maskPointHalf: CGFloat = 4.5
     static let lockMajor: CGFloat = 24
     static let lockMinor: CGFloat = 12
     static let minPivot: CGFloat = 8
@@ -391,6 +391,8 @@ struct ShellShapeGlyph: View {
             case 30: context.fill(ShapeGlyphPaths.bolt(center: p(0.5, 0.5), radius: s / 2), with: fill)
             case 31: context.stroke(ShapeGlyphPaths.wave(center: p(0.5, 0.5), radius: s / 2, waves: 3), with: fill, lineWidth: s * 0.12)
             case 32: context.fill(ShapeGlyphPaths.blob(center: p(0.5, 0.5), radius: s / 2), with: fill)
+            case 33: context.fill(ShapeGlyphPaths.moon(center: p(0.5, 0.5), radius: s / 2), with: fill)
+            case 34: context.fill(ShapeGlyphPaths.teardrop(center: p(0.5, 0.5), radius: s / 2), with: fill)
             default:
                 var stem = Path(); stem.move(to: p(0.04, 0.5)); stem.addLine(to: p(0.66, 0.5))
                 context.stroke(stem, with: fill, lineWidth: s * 0.2)
@@ -480,6 +482,42 @@ enum ShapeGlyphPaths {
             let point = CGPoint(x: c.x - r + 2 * r * t, y: y)
             if i == 0 { path.move(to: point) } else { path.addLine(to: point) }
         }
+        return path
+    }
+    /// Lua (0.5.0): o círculo de raio `r` menos o mesmo círculo deslocado
+    /// `offset`·2r para a direita (0,25 = a lua do motor). Arco de fora pela
+    /// esquerda e arco de dentro de volta, entre os pontos onde se cruzam.
+    static func moon(center c: CGPoint, radius r: CGFloat, offset: CGFloat = 0.25) -> Path {
+        var path = Path()
+        let o = 2 * r * min(max(offset, 0.05), 0.95)
+        let h = sqrt(max(0, r * r - o * o / 4))
+        let outer0 = atan2(h, o / 2), inner0 = atan2(h, -o / 2)
+        let steps = 48
+        for i in 0...steps {
+            let a = outer0 + (2 * CGFloat.pi - 2 * outer0) * CGFloat(i) / CGFloat(steps)
+            let point = CGPoint(x: c.x + r * cos(a), y: c.y + r * sin(a))
+            if i == 0 { path.move(to: point) } else { path.addLine(to: point) }
+        }
+        for i in 0...steps {
+            let a = (2 * CGFloat.pi - inner0) - (2 * CGFloat.pi - 2 * inner0) * CGFloat(i) / CGFloat(steps)
+            path.addLine(to: CGPoint(x: c.x + o + r * cos(a), y: c.y + r * sin(a)))
+        }
+        path.closeSubpath()
+        return path
+    }
+    /// Gota (0.5.0): ponta em cima, base redonda (raio 0,6·r) embaixo, unidas
+    /// pelas tangentes — as proporções do ladrilho 0,72 : 1.
+    static func teardrop(center c: CGPoint, radius r: CGFloat) -> Path {
+        var path = Path()
+        let rb = 0.6 * r, cy = c.y + r - rb, d = cy - (c.y - r)
+        let beta = acos(min(max(rb / d, -1), 1))
+        path.move(to: CGPoint(x: c.x, y: c.y - r))
+        let steps = 48
+        for i in 0...steps {
+            let a = beta + (2 * CGFloat.pi - 2 * beta) * CGFloat(i) / CGFloat(steps)
+            path.addLine(to: CGPoint(x: c.x + rb * sin(a), y: cy - rb * cos(a)))
+        }
+        path.closeSubpath()
         return path
     }
     /// Mancha: raio polar com três harmônicos (4, 5 e 2), como o blob do motor.

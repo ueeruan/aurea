@@ -1,6 +1,16 @@
 package com.aurea.aurea.editor.panels
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import com.aurea.aurea.ui.theme.CupertinoGlyph
+import com.aurea.aurea.ui.theme.CupertinoIcon
+import com.aurea.aurea.ui.theme.tocavel
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
@@ -46,7 +56,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aurea.aurea.state.EditorStore
-import com.aurea.aurea.ui.ds.ChoiceChips
 import com.aurea.aurea.ui.ds.KeyframeLook
 import com.aurea.aurea.ui.ds.PropertyCustomRow
 import com.aurea.aurea.engine.TrackKey
@@ -76,7 +85,7 @@ internal fun MaskPanel(env: PanelEnv) {
     val st by remember(store) { derivedStateOf { store.masks } }
     val editId by remember(store) { derivedStateOf { store.maskEdit } }
     val drawing by remember(store) { derivedStateOf { store.maskDrawing } }
-    var top by rememberSaveable { mutableIntStateOf(0) }
+    var top by rememberSaveable { mutableIntStateOf(TAB_MASKS) }
     val m = st?.find(editId)
     val look = when {
         m == null -> KeyframeLook.None
@@ -127,7 +136,7 @@ internal fun MaskPanel(env: PanelEnv) {
             }) else null,
         )
         Column(Modifier.weight(1f).fillMaxHeight()) {
-            ParamTabs(listOf(stringResource(R.string.pn_mask_points), stringResource(R.string.panel_mascaras), stringResource(R.string.panel_recorte_outra_camada)), top, onSelect = { top = it })
+            ParamTabs(listOf(stringResource(R.string.panel_mascaras), stringResource(R.string.pn_mask_points), stringResource(R.string.ui_mask_tab_matte)), TabOrder.indexOf(top), onSelect = { top = TabOrder[it] })
             if (pen) {
                 val masks = st?.masks.orEmpty()
                 if (masks.size > 1) Box(Modifier.padding(horizontal = 6.dp)) { MaskChips(store, masks, m) }
@@ -146,6 +155,8 @@ internal fun MaskPanel(env: PanelEnv) {
 private const val TAB_POINTS = 0
 private const val TAB_MASKS = 1
 private const val TAB_MATTE = 2
+/** A ordem na tela: como no Motion, primeiro a lista do que existe. */
+private val TabOrder = listOf(TAB_MASKS, TAB_POINTS, TAB_MATTE)
 
 @Composable
 private fun MaskChips(store: EditorStore, masks: List<EditorStore.MaskPath>, m: EditorStore.MaskPath?) {
@@ -161,48 +172,82 @@ private fun MaskChips(store: EditorStore, masks: List<EditorStore.MaskPath>, m: 
 }
 
 @Composable
-private fun MasksTab(env: PanelEnv, state: EditorStore.MaskState?, m: EditorStore.MaskPath?, drawing: Boolean, showEditor: Boolean, onCreated: () -> Unit) {
+private fun MasksTab(env: PanelEnv, state: EditorStore.MaskState?, m: EditorStore.MaskPath?, drawing: Boolean, showEditor: Boolean, onEditPoints: () -> Unit) {
     val store = env.store
     val masks = state?.masks.orEmpty()
     Spacer(Modifier.height(6.dp))
     // Os três jeitos de criar uma máscara: sempre à vista, um toque cada.
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        ToolTile(stringResource(R.string.panel_desenhar_mao), on = drawing && m?.closed == false, icon = { drawMaskPenIcon(it) }) { store.startMaskDrawing(); onCreated() }
-        ToolTile(stringResource(R.string.panel_retangulo), on = false, icon = { drawMaskShapeIcon(it, oval = false) }) { store.addMaskPreset(0); onCreated() }
-        ToolTile(stringResource(R.string.panel_elipse), on = false, icon = { drawMaskShapeIcon(it, oval = true) }) { store.addMaskPreset(1); onCreated() }
+        ToolTile(stringResource(R.string.panel_desenhar_mao), on = drawing && m?.closed == false, icon = { drawMaskPenIcon(it) }) { store.startMaskDrawing(); onEditPoints() }
+        ToolTile(stringResource(R.string.panel_retangulo), on = false, icon = { drawMaskShapeIcon(it, oval = false) }) { store.addMaskPreset(0); onEditPoints() }
+        ToolTile(stringResource(R.string.panel_elipse), on = false, icon = { drawMaskShapeIcon(it, oval = true) }) { store.addMaskPreset(1); onEditPoints() }
     }
     if (masks.isEmpty()) {
         Spacer(Modifier.height(10.dp))
         KitHint(stringResource(R.string.panel_mascara_mostra_so_parte_camada_escolha))
         return
     }
-    Spacer(Modifier.height(4.dp))
-    MaskChips(store, masks, m)
-    if (!showEditor) return
-    if (m == null) {
-        Spacer(Modifier.height(6.dp))
-        KitHint(stringResource(R.string.panel_escolha_mascara_acima_editar_palco))
-        return
+    PanelSection(stringResource(R.string.panel_mascaras), CupertinoGlyph.RectangleStack, "mask.sec.list", count = masks.size) {
+        masks.forEachIndexed { i, mk ->
+            val open = showEditor && m?.id == mk.id
+            Column(Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(RoundedCornerShape(5.dp)).background(AureaColors.FxLowSurface)) {
+                MaskListRow(i, mk, open) {
+                    store.maskEdit = if (open) null else mk.id
+                    store.maskDrawing = !open && !mk.closed
+                    store.maskPoint = -1
+                }
+                if (open && m != null) Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp).padding(bottom = 8.dp)) { PanelNested { MaskEditor(env, m, drawing, onEditPoints) } }
+            }
+        }
     }
-    MaskEditor(env, m, drawing)
 }
 
-/** A máscara escolhida, tudo numa tela só, na ordem de uso. */
+/** A linha da máscara: seta, ícone, nome e o modo em que ela está. */
 @Composable
-private fun MaskEditor(env: PanelEnv, m: EditorStore.MaskPath, drawing: Boolean) {
+private fun MaskListRow(index: Int, mask: EditorStore.MaskPath, open: Boolean, onClick: () -> Unit) {
+    val modes = maskModes()
+    Row(
+        Modifier.fillMaxWidth().height(37.dp).testTag("mask.item.$index").tocavel(shrink = 1f, onClick = onClick).padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CupertinoIcon(if (open) CupertinoGlyph.ChevronDown else CupertinoGlyph.ChevronRight, 14.dp, AureaColors.Text.copy(alpha = if (open) 0.9f else 0.3f))
+        Spacer(Modifier.width(8.dp))
+        CupertinoIcon(CupertinoGlyph.SquareOnSquare, 18.dp, AureaColors.Text, autoMirror = false)
+        Spacer(Modifier.width(8.dp))
+        Text(
+            if (mask.closed) stringResource(R.string.pn_mask_n, index + 1) else stringResource(R.string.pn_mask_n_open, index + 1),
+            modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+            style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = if (open) FontWeight.W700 else FontWeight.W600)),
+        )
+        modes.firstOrNull { it.op == mask.op }?.let { Text(stringResource(it.label), maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted))) }
+    }
+}
+
+private class MaskMode(val op: Int, @StringRes val label: Int, val glyph: Char)
+
+private fun maskModes() = listOf(
+    MaskMode(0, R.string.panel_somar, CupertinoGlyph.Plus),
+    MaskMode(1, R.string.panel_subtrair, CupertinoGlyph.Minus),
+    MaskMode(2, R.string.panel_intersecao, CupertinoGlyph.SquareOnSquare),
+    MaskMode(3, R.string.panel_diferenca, CupertinoGlyph.CircleLefthalfFill),
+    MaskMode(4, R.string.panel_desligada, CupertinoGlyph.EyeSlash),
+)
+
+/** A máscara aberta na lista, separada em Pontos, Modo, Borda e Seguir objeto. */
+@Composable
+private fun MaskEditor(env: PanelEnv, m: EditorStore.MaskPath, drawing: Boolean, onEditPoints: () -> Unit) {
     val store = env.store
     val isVideo = store.layers.firstOrNull { it.id == store.primary }?.kind == LayerType.Video.kind
-    KitTitle(stringResource(R.string.panel_caminho))
+    val pointsLabel = pluralStringResource(R.plurals.pn_mask_points_so_far, m.count, m.count)
     if (drawing) {
         KitHint(stringResource(R.string.panel_toque_palco_pontos_arraste_curvar_toque))
-        Spacer(Modifier.height(8.dp))
-        ActionCard(stringResource(R.string.panel_fechar_caminho), pluralStringResource(R.plurals.pn_mask_points_so_far, m.count, m.count)) { store.closeMaskPath() }
+        Spacer(Modifier.height(6.dp))
+        PanelItemRow(CupertinoGlyph.CheckmarkCircle, stringResource(R.string.panel_fechar_caminho), "mask.close", detail = pointsLabel) { store.closeMaskPath() }
         // Sem caminho fechado ainda não há modo/borda para ajustar.
-        Spacer(Modifier.height(10.dp))
-        ActionCard(stringResource(R.string.panel_apagar_mascara), null, danger = true) { store.deleteMask(m.id) }
+        PanelItemRow(CupertinoGlyph.Trash, stringResource(R.string.panel_apagar_mascara), "mask.delete", danger = true) { store.deleteMask(m.id) }
         return
     }
-    KitHint(stringResource(R.string.panel_arraste_pontos_palco_toque_num_ponto))
+    PanelItemRow(CupertinoGlyph.Pencil, stringResource(R.string.ui_edit_points), "mask.edit.points", detail = pointsLabel, chevron = true, onClick = onEditPoints)
     val look = when {
         m.keyHere -> KeyframeLook.KeyHere
         m.keyCount > 0 -> KeyframeLook.Animated
@@ -214,43 +259,34 @@ private fun MaskEditor(env: PanelEnv, m: EditorStore.MaskPath, drawing: Boolean)
             style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)),
         )
     }
-
-    val point = store.maskPoint
-    if (point in 0 until m.count) {
-        val curved = (2..5).any { m.points[point * 6 + it] != 0f }
-        Spacer(Modifier.height(8.dp))
-        ActionCard(stringResource(if (curved) R.string.panel_mask_point_corner else R.string.panel_mask_point_curve),
-            stringResource(R.string.panel_mask_point_hint)) { store.toggleMaskPointCurve(m.id, point) }
-    }
-
-    KitTitle(stringResource(R.string.panel_mask_mode))
-    val modes = listOf(0 to stringResource(R.string.panel_somar), 1 to stringResource(R.string.panel_subtrair), 2 to stringResource(R.string.panel_intersecao), 3 to stringResource(R.string.panel_diferenca), 4 to stringResource(R.string.panel_desligada))
-    ChoiceChips(modes.map { it.second }, modes.indexOfFirst { it.first == m.op }, onSelect = { i ->
-        store.setMaskProps(m.id, modes[i].first, m.inverted, m.feather, m.expansion, m.opacity)
-    })
-    ToggleLine(stringResource(R.string.panel_inverter_mostrar_lado_fora), m.inverted) { on ->
-        store.setMaskProps(m.id, m.op, on, m.feather, m.expansion, m.opacity)
-    }
-
-    KitTitle(stringResource(R.string.panel_mask_edge))
-    MaskRow(env, stringResource(R.string.panel_suavizar), m.id, 0, m.feather, 0.5f, 0f, 500f, "px", 0f)
-    MaskRow(env, stringResource(R.string.panel_expandir), m.id, 1, m.expansion, 0.5f, -500f, 500f, "px", 0f)
-    MaskRow(env, stringResource(R.string.panel_opacidade), m.id, 2, m.opacity * 100f, 0.5f, 0f, 100f, "%", 100f)
-
-    if (isVideo) {
-        KitTitle(stringResource(R.string.panel_mask_follow))
-        if (store.maskTracking) {
-            KitHint(stringResource(R.string.panel_rastreando))
-        } else {
-            KitHint(stringResource(R.string.panel_mascara_segue_esta_embaixo_dela_cabecote))
-            Spacer(Modifier.height(8.dp))
-            ActionCard(stringResource(R.string.panel_seguir_posicao), stringResource(R.string.panel_objetos_so_andam_pela_tela)) { store.trackMask(m.id, 0) }
-            Spacer(Modifier.height(6.dp))
-            ActionCard(stringResource(R.string.panel_seguir_posicao_tamanho_giro), stringResource(R.string.panel_objetos_aproximam_ou_giram)) { store.trackMask(m.id, 1) }
+    PanelSection(stringResource(R.string.panel_mask_mode), CupertinoGlyph.SquareStack3dUp, "mask.sec.mode", flat = true) {
+        PanelItemGrid(maskModes().map { mode ->
+            PanelItem(mode.glyph, stringResource(mode.label), "mask.mode.${mode.op}", on = mode.op == m.op) {
+                store.setMaskProps(m.id, mode.op, m.inverted, m.feather, m.expansion, m.opacity)
+            }
+        }, columns = 3)
+        ToggleLine(stringResource(R.string.panel_inverter_mostrar_lado_fora), m.inverted) { on ->
+            store.setMaskProps(m.id, m.op, on, m.feather, m.expansion, m.opacity)
         }
     }
-    Spacer(Modifier.height(14.dp))
-    ActionCard(stringResource(R.string.panel_apagar_mascara), null, danger = true) { store.deleteMask(m.id) }
+    PanelSection(stringResource(R.string.panel_mask_edge), CupertinoGlyph.Drop, "mask.sec.edge", flat = true) {
+        MaskRow(env, stringResource(R.string.panel_suavizar), m.id, 0, m.feather, 0.5f, 0f, 500f, "px", 0f)
+        MaskRow(env, stringResource(R.string.panel_expandir), m.id, 1, m.expansion, 0.5f, -500f, 500f, "px", 0f)
+        MaskRow(env, stringResource(R.string.panel_opacidade), m.id, 2, m.opacity * 100f, 0.5f, 0f, 100f, "%", 100f)
+    }
+    if (isVideo) {
+        PanelSection(stringResource(R.string.panel_mask_follow), CupertinoGlyph.CameraViewfinder, "mask.sec.follow", startOpen = false, flat = true) {
+            if (store.maskTracking) {
+                KitHint(stringResource(R.string.panel_rastreando))
+            } else {
+                KitHint(stringResource(R.string.panel_mascara_segue_esta_embaixo_dela_cabecote))
+                Spacer(Modifier.height(6.dp))
+                PanelItemRow(CupertinoGlyph.Move, stringResource(R.string.panel_seguir_posicao), "mask.follow.0") { store.trackMask(m.id, 0) }
+                PanelItemRow(CupertinoGlyph.ArrowCounterclockwise, stringResource(R.string.panel_seguir_posicao_tamanho_giro), "mask.follow.1") { store.trackMask(m.id, 1) }
+            }
+        }
+    }
+    PanelItemRow(CupertinoGlyph.Trash, stringResource(R.string.panel_apagar_mascara), "mask.delete", danger = true) { store.deleteMask(m.id) }
 }
 
 /** Ícone "desenhar": um caminho com dois pontos (mesmo traço do iOS). */
@@ -323,41 +359,47 @@ private fun TrackMatteTab(store: EditorStore) {
     val rows = store.layers
     val me = rows.firstOrNull { it.id == self }
     val candidates = rows.filter { it.id != self && it.kind != LayerType.Audio.kind && it.kind != LayerType.Camera.kind && it.kind != LayerType.Light.kind }
-    KitTitle(stringResource(R.string.panel_1_recortar_pelo))
-    KitHint(stringResource(R.string.pn_mask_target, me?.name.orEmpty()))
-    val sourceLayer = rows.firstOrNull { it.id == matte }
-    if (sourceLayer != null && mode != 0) {
-        KitHint(stringResource(R.string.pn_mask_source, sourceLayer.name))
-        MatteRelationDiagram(inverted = mode == 2 || mode == 4)
-    }
-    val pickBelowMsg = stringResource(R.string.pn_mask_pick_layer_below)
-    val modes = listOf(0 to stringResource(R.string.panel_nao_recortar), 1 to stringResource(R.string.panel_pela_forma), 2 to stringResource(R.string.panel_pela_forma_invertido), 3 to stringResource(R.string.panel_pelo_brilho), 4 to stringResource(R.string.panel_pelo_brilho_invertido))
-    ChoiceChips(modes.map { it.second }, modes.indexOfFirst { it.first == mode }, onSelect = { i ->
-        val value = modes[i].first
-        if (value == 0) {
-            store.setTrackMatte(0L, 0)
-        } else {
-            // Sem camada escolhida: a logo ABAIXO na pilha. `zIndex` 0 é a frente
-            // (`Engine::query_layers`), então o vizinho de trás é o de zIndex
-            // maior mais próximo. O motor (`set_track_matte`) usa a camada que a
-            // UI passar; os textos do painel dizem "abaixo" (P1-7).
-            val target = if (matte != 0L) matte
-            else candidates.filter { me != null && it.zIndex > me.zIndex }.minByOrNull { it.zIndex }?.id ?: 0L
-            if (target == 0L) store.showToast(pickBelowMsg) else store.setTrackMatte(target, value)
+    PanelSection(stringResource(R.string.panel_1_recortar_pelo), CupertinoGlyph.Crop, "matte.sec.mode") {
+        KitHint(stringResource(R.string.pn_mask_target, me?.name.orEmpty()))
+        val sourceLayer = rows.firstOrNull { it.id == matte }
+        if (sourceLayer != null && mode != 0) {
+            KitHint(stringResource(R.string.pn_mask_source, sourceLayer.name))
+            MatteRelationDiagram(inverted = mode == 2 || mode == 4)
         }
-    })
-    KitTitle(stringResource(R.string.panel_2_qual_camada_recorta))
-    if (candidates.isEmpty()) {
-        KitHint(stringResource(R.string.panel_nao_ha_outra_camada_possa_recortar))
-    } else {
-        ChipRow {
-            candidates.forEach { r ->
-                KitChip(r.name.ifEmpty { stringResource(LayerType.of(r.kind).labelRes) }, matte == r.id) { store.setTrackMatte(r.id, if (mode == 0) 1 else mode) }
+        Spacer(Modifier.height(6.dp))
+        val pickBelowMsg = stringResource(R.string.pn_mask_pick_layer_below)
+        val modes = listOf(
+            Triple(0, R.string.panel_nao_recortar, CupertinoGlyph.XmarkCircle),
+            Triple(1, R.string.panel_pela_forma, CupertinoGlyph.Circle),
+            Triple(2, R.string.panel_pela_forma_invertido, CupertinoGlyph.CircleFill),
+            Triple(3, R.string.panel_pelo_brilho, CupertinoGlyph.Lightbulb),
+            Triple(4, R.string.panel_pelo_brilho_invertido, CupertinoGlyph.CircleLefthalfFill),
+        )
+        PanelItemGrid(modes.map { (value, label, glyph) ->
+            PanelItem(glyph, stringResource(label), "matte.mode.$value", on = value == mode) {
+                if (value == 0) {
+                    store.setTrackMatte(0L, 0)
+                } else {
+                    // Sem camada escolhida: a logo ABAIXO na pilha. `zIndex` 0 é a frente
+                    // (`Engine::query_layers`), então o vizinho de trás é o de zIndex
+                    // maior mais próximo. O motor (`set_track_matte`) usa a camada que a
+                    // UI passar; os textos do painel dizem "abaixo" (P1-7).
+                    val target = if (matte != 0L) matte
+                    else candidates.filter { me != null && it.zIndex > me.zIndex }.minByOrNull { it.zIndex }?.id ?: 0L
+                    if (target == 0L) store.showToast(pickBelowMsg) else store.setTrackMatte(target, value)
+                }
             }
-        }
+        })
     }
-    Spacer(Modifier.height(4.dp))
-    KitHint(if (matte != 0L) stringResource(R.string.panel_camada_escolhida_recorta_esta_some_tela) else stringResource(R.string.panel_pela_forma_aparece_onde_outra_camada))
+    PanelSection(stringResource(R.string.panel_2_qual_camada_recorta), CupertinoGlyph.RectangleStack, "matte.sec.layer", count = candidates.size) {
+        if (candidates.isEmpty()) KitHint(stringResource(R.string.panel_nao_ha_outra_camada_possa_recortar))
+        candidates.forEachIndexed { i, r ->
+            val type = LayerType.of(r.kind)
+            PanelItemRow(type.glyph, r.name.ifEmpty { stringResource(type.labelRes) }, "matte.layer.$i", on = matte == r.id) { store.setTrackMatte(r.id, if (mode == 0) 1 else mode) }
+        }
+        Spacer(Modifier.height(4.dp))
+        KitHint(if (matte != 0L) stringResource(R.string.panel_camada_escolhida_recorta_esta_some_tela) else stringResource(R.string.panel_pela_forma_aparece_onde_outra_camada))
+    }
 }
 
 /** Original schematic: circle = this layer, rectangle = mask. */

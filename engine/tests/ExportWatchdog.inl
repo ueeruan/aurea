@@ -45,6 +45,38 @@ struct HungGate {
 
 } // namespace
 
+AUREA_TEST(ExportWatchdog, HungRenderFailsTheSessionAndBlocksNewExportsUntilItReturns) {
+    SyntheticConfig cfg; cfg.width = 64; cfg.height = 36;
+    auto* backend = new MockBackend(); backend->mapBuffers = true;
+    std::atomic<bool> hold{true};
+    g_holdProducer = &hold; g_holdProducerFrame = 2; g_producerHangMs = 250;
+    Rig r(cfg, 30, 6, 2, nullptr, backend, 1500);
+    g_holdProducer = nullptr; g_holdProducerFrame = 0; g_producerHangMs = 0;
+    AUREA_CHECK(r.ok); if (!r.ok) { hold = false; return; }
+    r.comp()->layer(r.video_layer())->visible = false;
+    ExportSettings s; s.height = 36; s.fps = 30; s.dither = false;
+    const Outcome hung = run_export_with(r, s, 10);
+    AUREA_CHECK(hung.finished);
+    AUREA_CHECK_EQ(hung.p.result, Errc::Timeout);
+    AUREA_CHECK_EQ(hung.p.failure, static_cast<u32>(ExportFailure::RenderHung));
+    AUREA_CHECK_EQ(export_retry_from_flags(hung.p.flags), 0u);
+    // A thread segue presa: nada de esperar por ela nem de abrir outra sessão.
+    AUREA_CHECK_EQ(r.e.start_export(s, "nao-usado.mp4").code(), Errc::Timeout);
+    hold = false;
+    // Voltou depois: o resultado da tela não muda e o export seguinte funciona.
+    Status again = Errc::Timeout;
+    for (int i = 0; i < 5000 && again.code() == Errc::Timeout; ++i) {
+        again = r.e.start_export(s, "nao-usado.mp4");
+        if (again.code() == Errc::Timeout) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    AUREA_CHECK(again.ok());
+    if (again.ok()) {
+        for (int i = 0; i < 10000 && !r.e.export_progress().finished; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        AUREA_CHECK(r.e.export_progress().finished);
+        AUREA_CHECK_EQ(r.e.export_progress().result, Errc::Ok);
+    }
+}
+
 AUREA_TEST(ExportWatchdog, HungEncoderIsAbandonedAndSafeModeRetryFinishes) {
     SyntheticConfig cfg; cfg.width = 64; cfg.height = 36;
     auto* backend = new MockBackend(); backend->mapBuffers = true;

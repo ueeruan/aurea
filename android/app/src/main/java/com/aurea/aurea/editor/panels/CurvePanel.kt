@@ -605,6 +605,7 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
     val symmetricMsg = stringResource(R.string.pn_curve_symmetric)
     val needTwoMsg = stringResource(R.string.pn_curve_need_two_keys)
     var savePrompt by remember { mutableStateOf(false) }
+    var temporalPrompt by remember { mutableStateOf(false) }
     // As curvas que a pessoa salvou (Presets › Curva): lidas uma vez por lista.
     val savedEntries = store.presets.user[com.aurea.aurea.presets.PresetKind.Curve].orEmpty()
     val saved = remember(savedEntries) {
@@ -696,6 +697,7 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
                 }))
         }
         add(MenuEntry.Item(stringResource(R.string.panel_salvar_curva_como_preset), tag = "curve.save") { savePrompt = true })
+        if (ease.hasHandles) add(MenuEntry.Item(stringResource(R.string.om_curve_temporal), enabled = end.value != start.value, tag = "curve.temporal") { temporalPrompt = true })
         add(MenuEntry.Item(stringResource(if (expanded) R.string.editor_sair_tela_cheia else R.string.panel_expandir), tag = "curve.fullscreen") {
             if (expanded) collapse() else fullscreen = true
         })
@@ -768,6 +770,16 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
         }
     }
 
+    if (temporalPrompt) {
+        TemporalEaseDialog(
+            ease = ease,
+            seconds = (end.time - start.time) / (store.project.fps.takeIf { it > 0f } ?: 30f),
+            delta = end.value - start.value,
+            onApply = { setCurve("velocidade e influência", bez(it[0], it[1], it[2], it[3])) },
+            onDismiss = { temporalPrompt = false },
+        )
+    }
+
     if (savePrompt) {
         AureaNamePrompt(
             title = stringResource(R.string.panel_salvar_curva_como_preset),
@@ -783,6 +795,42 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
 }
 
 /** A curva já está do lado "invertido" (o ⇄ fica aceso): bézier que começa rápido, ou parâmetro de sentido. */
+/** Velocidade (unidades por segundo) e influência (%) do trecho, como no After Effects. A conta é do motor. */
+@Composable
+private fun TemporalEaseDialog(ease: Ease, seconds: Float, delta: Float, onApply: (FloatArray) -> Unit, onDismiss: () -> Unit) {
+    val initial = remember(ease, seconds, delta) {
+        val h = ease.handles()
+        FloatArray(4).also { com.aurea.aurea.engine.AureaEngine.nativeTemporalEase(false, h[0], h[1], h[2], h[3], seconds, delta, it) }
+    }
+    val fields = remember(initial) { initial.map { mutableStateOf(String.format(java.util.Locale.US, "%.2f", it)) } }
+    val labels = listOf(R.string.om_curve_speed_out, R.string.om_curve_influence_out, R.string.om_curve_speed_in, R.string.om_curve_influence_in)
+    com.aurea.aurea.ui.ds.AureaAlert(
+        title = stringResource(R.string.om_curve_temporal),
+        onConfirm = {
+            val v = FloatArray(4) { i -> fields[i].value.replace(',', '.').toFloatOrNull() ?: initial[i] }
+            val handles = FloatArray(4)
+            if (com.aurea.aurea.engine.AureaEngine.nativeTemporalEase(true, v[0], v[1], v[2], v[3], seconds, delta, handles)) onApply(handles)
+        },
+        onDismiss = onDismiss,
+        extra = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                labels.forEachIndexed { i, label ->
+                    Text(stringResource(label), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)))
+                    com.aurea.aurea.ui.ds.AureaDialogField(
+                        value = fields[i].value,
+                        onValueChange = { fields[i].value = it },
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                            keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal,
+                            imeAction = androidx.compose.ui.text.input.ImeAction.Next,
+                        ),
+                        tag = "curve.temporal.$i",
+                    )
+                }
+            }
+        },
+    )
+}
+
 private fun isInvertedEase(e: Ease): Boolean = when (e.interp) {
     Interp.BOUNCE, Interp.ELASTIC, Interp.OVERSHOOT -> e.y2 == EASE_PARAM_MARKER && e.x2 < .5f
     Interp.EASE_OUT -> true

@@ -495,40 +495,41 @@ AUREA_TEST(AeImport, SyntheticFfxTextAnimatorIntoTextAnimatorPro) {
     AUREA_CHECK(r.ok);
     AUREA_CHECK_EQ(r.animators, 1u);
     Layer* l = rig.L(layer);
-    AUREA_CHECK(l && l->text.animators.empty());
-    if (!l) return;
-    const EffectInstance* fx = nullptr;
-    for (const EffectInstance& e : l->effects) if (e.type == effect_type_id(text::kAnimatorProEffect)) fx = &e;
-    AUREA_CHECK(fx != nullptr);
-    if (!fx) return;
-    auto at = [&](u32 p, u32 c = 0) { return fx->params[p].constant.v[c]; };
-    AUREA_CHECK_NEAR(at(text::apUnits), 1.0f, 1e-6f);        // índice
-    AUREA_CHECK_NEAR(at(text::apBasedOn), 2.0f, 1e-6f);      // palavras
-    AUREA_CHECK_NEAR(at(text::apMode), 1.0f, 1e-6f);         // subtrair
-    AUREA_CHECK_NEAR(at(text::apShape), 1.0f, 1e-6f);        // rampa sobe
-    AUREA_CHECK_NEAR(at(text::apAmount), 80.0f, 1e-6f);
-    AUREA_CHECK_NEAR(at(text::apSmoothness), 40.0f, 1e-6f);
-    AUREA_CHECK_NEAR(at(text::apEaseHigh), 25.0f, 1e-6f);
-    AUREA_CHECK_NEAR(at(text::apRandom), 1.0f, 1e-6f);
-    AUREA_CHECK_NEAR(at(text::apSeed), 7.0f, 1e-6f);
-    AUREA_CHECK_NEAR(at(text::apEnd), 3.0f, 1e-6f);
-    AUREA_CHECK_NEAR(at(text::apWiggly), 1.0f, 1e-6f);
-    AUREA_CHECK_NEAR(at(text::apWigglyMax), 60.0f, 1e-6f);
-    AUREA_CHECK_NEAR(at(text::apWigglyMin), -20.0f, 1e-6f);
-    AUREA_CHECK_NEAR(at(text::apCorrelation), 75.0f, 1e-6f);
-    AUREA_CHECK_NEAR(at(text::apSpatialPhase), 90.0f, 1e-6f);
-    AUREA_CHECK_NEAR(at(text::apAnchor, 0), 4.0f, 1e-6f);
-    AUREA_CHECK_NEAR(at(text::apAnchor, 1), -6.0f, 1e-6f);
-    AUREA_CHECK_NEAR(at(text::apPosition, 1), -120.0f, 1e-6f);
-    AUREA_CHECK_NEAR(at(text::apScale, 0), 50.0f, 1e-6f);
-    AUREA_CHECK_NEAR(at(text::apScale, 1), 60.0f, 1e-6f);
-    AUREA_CHECK_NEAR(at(text::apOpacity), 0.0f, 1e-6f);
-    AUREA_CHECK_NEAR(at(text::apFillHue), 90.0f, 1e-6f);
-    AUREA_CHECK_NEAR(at(text::apLineSpacing, 1), 14.0f, 1e-6f);
-    AUREA_CHECK_NEAR(at(text::apTracking), static_cast<f32>(50.0 * l->text.size / 1000.0), 1e-3f);
-    AUREA_CHECK_NEAR(at(text::apGrouping), 3.0f, 1e-6f);     // tudo
-    // O Início do intervalo (índice) chegou com as duas keys no parâmetro do efeito.
-    const Track* start = rig.track(layer, TrackProperty::EffectParam, fx->id, param_track_key(text::apStart, 0));
+    AUREA_CHECK(l && l->text.animators.size() == 1u && l->effects.empty());
+    if (!l || l->text.animators.size() != 1u) return;
+    const TextAnimator& a = l->text.animators[0];
+    const TextSelector& s = a.selector;
+    AUREA_CHECK_EQ(static_cast<u32>(s.type), static_cast<u32>(kTextSelectorRange));
+    AUREA_CHECK_EQ(static_cast<u32>(s.units), 1u);          // índice
+    AUREA_CHECK_EQ(static_cast<u32>(s.basedOn), 1u);        // palavras
+    AUREA_CHECK_EQ(static_cast<u32>(s.mode), 1u);           // subtrair
+    AUREA_CHECK_EQ(static_cast<u32>(s.shape), 1u);          // rampa sobe
+    AUREA_CHECK_NEAR(s.amount, 80.0f, 1e-6f);
+    AUREA_CHECK_NEAR(s.smoothness, 40.0f, 1e-6f);
+    AUREA_CHECK_NEAR(s.easeHigh, 25.0f, 1e-6f);
+    AUREA_CHECK(s.randomOrder);
+    AUREA_CHECK_EQ(s.seed, 8u);
+    AUREA_CHECK_NEAR(s.end, 3.0f, 1e-6f);
+    AUREA_CHECK_EQ(a.moreSelectors.size(), usize{1});
+    if (a.moreSelectors.empty()) return;
+    const TextSelector& w = a.moreSelectors.back();
+    AUREA_CHECK_EQ(static_cast<u32>(w.type), static_cast<u32>(kTextSelectorWiggly));
+    AUREA_CHECK_NEAR(w.wiggleMax, 60.0f, 1e-6f);
+    AUREA_CHECK_NEAR(w.wiggleMin, -20.0f, 1e-6f);
+    AUREA_CHECK_NEAR(w.correlation, 75.0f, 1e-6f);
+    AUREA_CHECK_NEAR(w.spatialPhase, 90.0f, 1e-6f);
+    AUREA_CHECK_NEAR(a.anchor.x, 4.0f, 1e-6f);
+    AUREA_CHECK_NEAR(a.anchor.y, -6.0f, 1e-6f);
+    AUREA_CHECK_NEAR(a.position.y, -120.0f, 1e-6f);
+    AUREA_CHECK_NEAR(a.scale.x, 50.0f, 1e-6f);
+    AUREA_CHECK_NEAR(a.scale.y, 60.0f, 1e-6f);
+    AUREA_CHECK_NEAR(a.opacity, 0.0f, 1e-6f);
+    AUREA_CHECK_NEAR(a.fillHue, 90.0f, 1e-6f);
+    AUREA_CHECK_NEAR(a.lineSpacing.y, 14.0f, 1e-6f);
+    AUREA_CHECK_NEAR(a.tracking, static_cast<f32>(50.0 * l->text.size / 1000.0), 1e-3f);
+    AUREA_CHECK_EQ(static_cast<u32>(a.anchorGrouping), 3u); // tudo
+    // O Início do intervalo (índice) chegou com as duas keys no animador.
+    const Track* start = rig.track(layer, TrackProperty::TextAnimParam, 0, text::kSelStart);
     AUREA_CHECK(start && start->keys.size() == 2);
     if (start && start->keys.size() == 2) AUREA_CHECK_NEAR(start->keys[1].value, 3.0, 1e-6);
 }
@@ -549,15 +550,8 @@ AUREA_TEST(AeImport, RealTextPresetIntoTextAnimatorPro) {
     AUREA_CHECK(r.ok);
     Layer* l = rig.L(layer);
     if (!l) return;
-    const EffectInstance* fx = nullptr;
-    for (const EffectInstance& e : l->effects) if (e.type == effect_type_id(text::kAnimatorProEffect)) fx = &e;
-    AUREA_CHECK(fx != nullptr);
-    if (!fx) return;
-    std::printf("\n      expressao=%g fill=(%g %g %g) escala=(%g %g) rotacao=%g opacidade=%g pos=(%g %g)",
-                fx->params[text::apExprOn].constant.v[0], fx->params[text::apFill].constant.v[0], fx->params[text::apFill].constant.v[1],
-                fx->params[text::apFill].constant.v[2], fx->params[text::apScale].constant.v[0], fx->params[text::apScale].constant.v[1],
-                fx->params[text::apRotation].constant.v[2], fx->params[text::apOpacity].constant.v[0],
-                fx->params[text::apPosition].constant.v[0], fx->params[text::apPosition].constant.v[1]);
+    AUREA_CHECK(!l->text.animators.empty());
+    if (l->text.animators.empty()) return;
     // As letras entram uma depois da outra e assentam (escala volta a 1).
     std::vector<text::GlyphUnits> units;
     for (u32 i = 0; i < 10; ++i) units.push_back({i, i < 5 ? 0u : 1u, 0});
@@ -565,7 +559,7 @@ AUREA_TEST(AeImport, RealTextPresetIntoTextAnimatorPro) {
     f32 first = 0, settled = 0;
     for (const f64 frame : {0.0, 3.0, 6.0, 12.0, 24.0, 90.0}) {
         std::vector<text::GlyphAnim> g(units.size());
-        text::evaluate_animator_effects(*l, frame, 30, units, 10, 2, 1, g);
+        { aurea::Layer migrated = *l; text::migrate_text_effects(migrated); g.assign(units.size(), {}); text::evaluate_text_animators(migrated.text, migrated.tracks, frame, 30, units, 10, 2, 1, g); }
         std::printf("\n      quadro %4.0f: escala L1 %.3f L5 %.3f L10 %.3f | opacidade L1 %.3f L10 %.3f | rot L1 %.1f",
                     frame, g[0].scale.x, g[4].scale.x, g[9].scale.x, g[0].opacity, g[9].opacity, g[0].rotation.z);
         if (frame == 0.0) first = g[9].scale.x;

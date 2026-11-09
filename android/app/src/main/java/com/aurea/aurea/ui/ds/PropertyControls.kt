@@ -151,6 +151,9 @@ object ParamRowColors {
     val SwatchBorder = Color(0xFF3C475C)
 }
 
+/** Em seção estreita o rótulo sobe e a régua usa a largura toda: espremida, não dá para arrastar. */
+val LocalParamRowStacked = androidx.compose.runtime.compositionLocalOf { false }
+
 object ParamRowDims {
     val Row = 56.dp
     val Gap = 6.dp
@@ -425,9 +428,10 @@ fun PropertyLabelChip(
     onClick: (() -> Unit)? = null,
     width: Dp = ParamRowDims.LabelW,
 ) {
+    val stacked = LocalParamRowStacked.current
     Box(
         modifier
-            .size(width = width, height = ParamRowDims.LabelH)
+            .then(if (stacked) Modifier.fillMaxWidth().height(30.dp) else Modifier.size(width = width, height = ParamRowDims.LabelH))
             .clip(RoundedCornerShape(ParamRowDims.Radius))
             .background(if (selected) ParamRowColors.LabelOn else ParamRowColors.LabelOff)
             .then(
@@ -445,7 +449,7 @@ fun PropertyLabelChip(
         var shrink by remember(label) { mutableFloatStateOf(1f) }
         Text(
             label,
-            maxLines = ParamRowMath.labelMaxLines(label),
+            maxLines = if (stacked) 1 else ParamRowMath.labelMaxLines(label),
             overflow = TextOverflow.Ellipsis,
             onTextLayout = { if (it.hasVisualOverflow && shrink > 0.72f) shrink = (shrink - 0.06f).coerceAtLeast(0.72f) },
             style = AureaType.Base.merge(
@@ -590,15 +594,19 @@ fun PropertyRow(
     val send by rememberUpdatedState(onValue)
     val end by rememberUpdatedState(onGestureEnd)
     val shown = if (dragging) live else value
+    val stacked = LocalParamRowStacked.current
+    Column(modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.45f).padding(vertical = if (stacked) 3.dp else 0.dp)) {
+    if (stacked) PropertyLabelChip(label, selected, keyframe = keyframe, expression = expression, onLongClick = onExpression, onClick = onSelect)
     Row(
-        modifier
+        Modifier
             .fillMaxWidth()
-            .height(ParamRowDims.Row)
-            .alpha(if (enabled) 1f else 0.45f),
+            .height(if (stacked) 44.dp else ParamRowDims.Row),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        PropertyLabelChip(label, selected, keyframe = keyframe, expression = expression, onLongClick = onExpression, onClick = onSelect)
-        Spacer(Modifier.width(ParamRowDims.Gap))
+        if (!stacked) {
+            PropertyLabelChip(label, selected, keyframe = keyframe, expression = expression, onLongClick = onExpression, onClick = onSelect)
+            Spacer(Modifier.width(ParamRowDims.Gap))
+        }
         TickRuler(
             value = { if (dragging) live else current },
             unitsPerDp = unitsPerDp,
@@ -606,7 +614,7 @@ fun PropertyRow(
             verticalPadding = 2.dp,
             modifier = Modifier
                 .weight(1f)
-                .height(ParamRowDims.LabelH)
+                .height(if (stacked) 44.dp else ParamRowDims.LabelH)
                 .valueDrag(
                     enabled = enabled,
                     start = { current },
@@ -631,6 +639,7 @@ fun PropertyRow(
         )
         Spacer(Modifier.width(ParamRowDims.Gap))
         ParamValueBox(format(shown), enabled = enabled, onTap = onTapValue)
+    }
     }
 }
 
@@ -778,6 +787,13 @@ fun PropertyCustomRow(
     onExpression: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
+    if (LocalParamRowStacked.current) {
+        Column(modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+            PropertyLabelChip(label, selected, keyframe = keyframe, expression = expression, onLongClick = onExpression, onClick = onSelect)
+            Box(Modifier.fillMaxWidth().heightIn(min = 44.dp), contentAlignment = Alignment.CenterStart) { content() }
+        }
+        return
+    }
     Row(
         modifier
             .fillMaxWidth()
@@ -798,6 +814,8 @@ fun PropertyCustomRow(
  * O INTERRUPTOR (CupertinoSwitch da A.01): 51 × 31, ligado em `acao` #245D8C,
  * desligado em `campoAlto`; bola branca de 27 que desliza em 200 ms.
  */
+val LocalToggleOffTrack = androidx.compose.runtime.compositionLocalOf<Color?> { null }
+
 @Composable
 fun AureaToggle(
     checked: Boolean,
@@ -811,7 +829,7 @@ fun AureaToggle(
             .size(width = 51.dp, height = 31.dp)
             .alpha(if (enabled) 1f else 0.45f)
             .clip(RoundedCornerShape(15.5.dp))
-            .background(if (checked) AureaColors.Action else AureaColors.ChipHigh)
+            .background(if (checked) AureaColors.Action else LocalToggleOffTrack.current ?: AureaColors.ChipHigh)
             .tocavel(enabled = enabled, shrink = 1f) { onCheckedChange(!checked) },
     ) {
         Box(

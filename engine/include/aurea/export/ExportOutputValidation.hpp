@@ -18,5 +18,10 @@ struct ExportOutputValidation {
     /// Sem isso a mensagem ficava parada em "validando" e as telas cancelavam
     /// por falta de progresso (180 s) um export longo ou a 200 qps já pronto.
     std::atomic<u64>* validatedFrames = nullptr;
+    /// Threads do decoder independente. Tentativas de memória baixa usam menos:
+    /// a validação roda com o export ainda alocado.
+    int decodeThreads = 4;
+    /// Testes: trata este quadro como se tivesse saído errado no arquivo.
+    u32 simulateContentMismatchFrame = 0xFFFFFFFFu;
 };
 } // namespace aurea

@@ -525,9 +525,24 @@ private fun axisName(property: Int): String? = when (property) {
 
 /** O nome do parâmetro do animador de texto (ids de TextAnimSection.kt). */
 private fun textAnimParamName(param: Int): Int? = when (param) {
+    4 -> R.string.fxl_ease_in
+    5 -> R.string.fxl_ease_out
+    25 -> R.string.fxl_wiggles_second
+    32 -> R.string.fx_suavidade
+    33 -> R.string.fxl_min_amount
+    34 -> R.string.fxl_max_amount
+    35 -> R.string.fxl_correlation
+    36 -> R.string.fxl_temporal_phase
+    37 -> R.string.fxl_spatial_phase
+    38, 39, 40 -> R.string.panel_expressao
+    41 -> R.string.fxl_overlap
+    42, 43 -> R.string.fxl_anchor
+    46 -> R.string.fx_matiz
+    47 -> R.string.fx_saturacao
+    48 -> R.string.fx_brilho
     0 -> R.string.panel_inicio
     1 -> R.string.panel_fim
-    2 -> R.string.edt_selector_offset
+    2 -> R.string.fxl_offset
     3 -> R.string.panel_intensidade
     10 -> R.string.panel_posicao_x
     11 -> R.string.panel_posicao_y

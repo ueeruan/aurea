@@ -290,13 +290,16 @@ constexpr const char* kFallbackPaths[] = {
     "C:/Windows/Fonts/segoeui.ttf", "C:/Windows/Fonts/arial.ttf",                                // 7, 8 geral
     "C:/Windows/Fonts/msyh.ttc",                                                                 // 9 CJK (Windows)
     "C:/Windows/Fonts/seguisym.ttf", "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",     // 10, 11 símbolos
-    "",   // 12 árabe EMBARCADA: NotoNaskhArabic-Regular.ttf ao lado da fonte padrão (ver bundled_arabic_path)
-    "",   // 13 japonês embarcado: funciona também no sandbox do iOS.
+    "/system/fonts/NotoSansDevanagari-VF.ttf",                                                   // 12 devanágari (Android 12+)
+    "",   // 13 árabe EMBARCADA: NotoNaskhArabic-Regular.ttf ao lado da fonte padrão (ver bundled_arabic_path)
+    "",   // 14 japonês embarcado: funciona também no sandbox do iOS.
+    "",   // 15 coreano embarcado: o NotoSansCJK do Android 15 é CFF2, que o stb não lê.
 };
 constexpr usize kFallbackCount = sizeof(kFallbackPaths) / sizeof(kFallbackPaths[0]);
-constexpr u8 kBundledArabic = 12;
-constexpr u8 kBundledJapanese = 13;
-static_assert(kBundledJapanese + 1 == kFallbackCount, "a reserva embarcada e a ultima");
+constexpr u8 kBundledArabic = 13;
+constexpr u8 kBundledJapanese = 14;
+constexpr u8 kBundledKorean = 15;
+static_assert(kBundledKorean + 1 == kFallbackCount, "a reserva embarcada e a ultima");
 std::mutex g_fallbackMutex;
 /// O app traz a Noto Naskh Arabic (OFL 1.1) na MESMA pasta da fonte padrão:
 /// `Fonts/` do bundle no iOS (o iOS não deixa ler as fontes árabes do sistema
@@ -304,6 +307,7 @@ std::mutex g_fallbackMutex;
 /// árabe desenha igual nos dois aparelhos, com ou sem fonte árabe do sistema.
 std::string g_bundledArabicPath;
 std::string g_bundledJapanesePath;
+std::string g_bundledKoreanPath;
 std::shared_ptr<const Font> g_fallbacks[kFallbackCount];
 bool g_fallbackTried[kFallbackCount] = {};
 u32 g_fallbackLoads = 0;
@@ -311,8 +315,8 @@ u64 g_fallbackBytes = 0;
 
 /// Ordem de busca pela escrita do caractere (índices de kFallbackPaths).
 void fallback_order(u32 cp, u8 (&order)[kFallbackCount], usize& n) {
-    static constexpr u8 kArabic[] = {kBundledArabic, 0, 1}, kHebrew[] = {2}, kDeva[] = {3}, kThai[] = {4}, kCjk[] = {kBundledJapanese, 5, 9, 6},
-                        kGeneral[] = {7, 8, 10, 11, 6};
+    static constexpr u8 kArabic[] = {kBundledArabic, 0, 1}, kHebrew[] = {2}, kDeva[] = {3, 12}, kThai[] = {4}, kCjk[] = {kBundledJapanese, 5, 9, 6},
+                        kKorean[] = {kBundledKorean, 5, 9, 6}, kGeneral[] = {7, 8, 10, 11, 6};
     const u8* first = kGeneral;
     usize nf = sizeof(kGeneral);
     if ((cp >= 0x0600 && cp <= 0x06FF) || (cp >= 0x0750 && cp <= 0x077F) || (cp >= 0x08A0 && cp <= 0x08FF)
@@ -320,7 +324,9 @@ void fallback_order(u32 cp, u8 (&order)[kFallbackCount], usize& n) {
     else if ((cp >= 0x0590 && cp <= 0x05FF) || (cp >= 0xFB1D && cp <= 0xFB4F)) { first = kHebrew; nf = sizeof(kHebrew); }
     else if (cp >= 0x0900 && cp <= 0x097F) { first = kDeva; nf = sizeof(kDeva); }
     else if (cp >= 0x0E00 && cp <= 0x0E7F) { first = kThai; nf = sizeof(kThai); }
-    else if ((cp >= 0x2E80 && cp <= 0x9FFF) || (cp >= 0xAC00 && cp <= 0xD7AF) || (cp >= 0xF900 && cp <= 0xFAFF)
+    else if ((cp >= 0x1100 && cp <= 0x11FF) || (cp >= 0x3130 && cp <= 0x318F) || (cp >= 0xA960 && cp <= 0xA97F) ||
+             (cp >= 0xAC00 && cp <= 0xD7FF)) { first = kKorean; nf = sizeof(kKorean); }
+    else if ((cp >= 0x2E80 && cp <= 0x9FFF) || (cp >= 0xF900 && cp <= 0xFAFF)
              || (cp >= 0xFF00 && cp <= 0xFFEF) || (cp >= 0x20000 && cp <= 0x2FFFF)) { first = kCjk; nf = sizeof(kCjk); }
     bool used[kFallbackCount] = {};
     n = 0;
@@ -368,7 +374,8 @@ const Font::Impl* fallback_for(const u32* chars, usize count) {
         if (!g_fallbackTried[i]) {
             g_fallbackTried[i] = true;
             const std::string path = i == kBundledArabic ? g_bundledArabicPath
-                                   : i == kBundledJapanese ? g_bundledJapanesePath : std::string(kFallbackPaths[i]);
+                                   : i == kBundledJapanese ? g_bundledJapanesePath
+                                   : i == kBundledKorean ? g_bundledKoreanPath : std::string(kFallbackPaths[i]);
             if (!path.empty()) g_fallbacks[i] = Font::load(path);
             if (g_fallbacks[i]) {
                 ++g_fallbackLoads;
@@ -772,6 +779,8 @@ void set_default_font_path(const std::string& path) {
     // tentativa que falhou é refeita com o caminho novo.
     if (!g_fallbacks[kBundledArabic]) g_fallbackTried[kBundledArabic] = false;
     if (!g_fallbacks[kBundledJapanese]) g_fallbackTried[kBundledJapanese] = false;
+    g_bundledKoreanPath = slash == std::string::npos ? std::string() : path.substr(0, slash + 1) + "NotoSansKR-Hangul.otf";
+    if (!g_fallbacks[kBundledKorean]) g_fallbackTried[kBundledKorean] = false;
 }
 
 std::shared_ptr<const Font> default_font() {
@@ -917,13 +926,14 @@ Atlas& atlas() {
 }
 
 /// Entrada do glifo (rasteriza e empacota na 1ª vez). Falso = atlas cheio.
-bool atlas_glyph(Atlas& A, const Font::Impl& f, int glyph, AtlasEntry& out) {
-    // Glifo < 2^16 (OpenType): a fonte nos bits de cima, sem colisão.
-    const u64 key = (f.serial << 20) | (static_cast<u64>(glyph) & 0xFFFFFull);
+bool atlas_glyph(Atlas& A, const Font::Impl& f, int glyph, AtlasEntry& out, bool large = false) {
+    // Glifo < 2^16 (OpenType): a fonte nos bits de cima, sem colisão; o nível no bit 16.
+    const u64 key = (f.serial << 20) | (static_cast<u64>(glyph) & 0xFFFFull) | (large ? 0x10000ull : 0ull);
     if (auto it = A.entries.find(key); it != A.entries.end()) { out = it->second; return true; }
-    const f32 fs = stbtt_ScaleForPixelHeight(&f.info, kGlyphBasePx);
+    const f32 factor = large ? kGlyphLargeFactor : 1.0f;
+    const f32 fs = stbtt_ScaleForPixelHeight(&f.info, kGlyphBasePx * factor);
     int w = 0, h = 0, xo = 0, yo = 0;
-    u8* sdf = glyph_sdf(&f.info, fs, glyph, static_cast<int>(kGlyphSpread), 128, kGlyphDistScale, &w, &h, &xo, &yo);
+    u8* sdf = glyph_sdf(&f.info, fs, glyph, static_cast<int>(kGlyphSpread * factor), 128, kGlyphDistScale / factor, &w, &h, &xo, &yo);
     AtlasEntry e;
     if (sdf && w > 0 && h > 0) {
         if (A.shelfX + static_cast<u32>(w) + 1 > kGlyphAtlasSize) { A.shelfX = 1; A.shelfY += A.shelfH + 1; A.shelfH = 0; }
@@ -990,7 +1000,7 @@ void glyph_atlas_clean() noexcept {
     A.dirty = false;
 }
 
-bool layout_quads(const Font& font, const TextData& t, f32 pad, TextLayout& out) {
+bool layout_quads(const Font& font, const TextData& t, f32 pad, TextLayout& out, f32 shownPx) {
     const Font::Impl& f = font.impl();
     Placed p;
     place(f, t, 1.0f, p);
@@ -1001,6 +1011,11 @@ bool layout_quads(const Font& font, const TextData& t, f32 pad, TextLayout& out)
     out.contentHeight = std::ceil(p.height);
     out.width = std::max(1.0f, out.contentWidth + 2.0f * pad);
     out.height = std::max(1.0f, out.contentHeight + 2.0f * pad);
+    {
+        int bx0 = 0, by0 = 0, bx1 = 0, by1 = 0;
+        const bool hasCap = stbtt_GetCodepointBox(&f.info, 'H', &bx0, &by0, &bx1, &by1) != 0 && by1 > 0;
+        out.capHeight = static_cast<f32>(hasCap ? by1 : f.ascent) * stbtt_ScaleForPixelHeight(&f.info, t.size) * (hasCap ? 1.0f : 0.8f);
+    }
     // Palavra de cada caractere (separadas por espaço/quebra), em ordem lógica.
     const std::vector<u32> cps = decode_utf8(t.content);
     std::vector<u32> wordOf(cps.size() + 1, 0);
@@ -1016,21 +1031,26 @@ bool layout_quads(const Font& font, const TextData& t, f32 pad, TextLayout& out)
     out.words = word + (inWord ? 1u : 0u);
     Atlas& A = atlas();
     std::lock_guard<std::mutex> lock(A.mutex);
-    for (int attempt = 0; attempt < 2; ++attempt) {
+    // Tanto glifo grande que não cabe nem no atlas vazio: a última volta usa o nível normal.
+    const bool wantLarge = shownPx >= kGlyphLargeFromPx;
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        const bool large = wantLarge && attempt < 2;
+        const f32 atlasK = large ? 1.0f / kGlyphLargeFactor : 1.0f;
         out.quads.clear();
         bool full = false;
         for (const Glyph& g : p.glyphs) {
             AtlasEntry e;
-            if (!atlas_glyph(A, *g.font, g.id, e)) { full = true; break; }
+            if (!atlas_glyph(A, *g.font, g.id, e, large)) { full = true; break; }
             if (e.w == 0) continue;
             const f32 k = g.fs / stbtt_ScaleForPixelHeight(&g.font->info, kGlyphBasePx);
+            const f32 box = k * atlasK;
             GlyphQuad q;
             q.penX = pad + g.x;
             q.baseline = pad + g.y;
-            q.x0 = q.penX + static_cast<f32>(e.xoff) * k;
-            q.y0 = q.baseline + static_cast<f32>(e.yoff) * k;
-            q.x1 = q.x0 + static_cast<f32>(e.w) * k;
-            q.y1 = q.y0 + static_cast<f32>(e.h) * k;
+            q.x0 = q.penX + static_cast<f32>(e.xoff) * box;
+            q.y0 = q.baseline + static_cast<f32>(e.yoff) * box;
+            q.x1 = q.x0 + static_cast<f32>(e.w) * box;
+            q.y1 = q.y0 + static_cast<f32>(e.h) * box;
             const f32 inv = 1.0f / static_cast<f32>(kGlyphAtlasSize);
             q.u0 = static_cast<f32>(e.x) * inv;
             q.v0 = static_cast<f32>(e.y) * inv;

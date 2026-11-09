@@ -29,6 +29,9 @@ class AureaEngine private constructor() {
         /** [saveProjectIfDirty]: o projeto já estava gravado, nada foi escrito. */
         const val SAVE_CLEAN = -1
 
+        /** Floats por animador de camada (Engine::kLayerAnimFloats; 32..45 = a onda, 0.5.0). */
+        const val LAYER_ANIM_FLOATS = 48
+
         /**
          * Pasta padrão dos plugins de efeito: `files/plugins`, irmã da pasta de
          * projetos (`files/projetos`) que o app passa como `documentsDir`.
@@ -213,6 +216,7 @@ class AureaEngine private constructor() {
          * editor de curva desenha. Devolve quantos escreveu (0 = inválido).
          */
         @JvmStatic external fun nativeSampleEase(interp: Int, x1: Float, y1: Float, x2: Float, y2: Float, power: Int, out: FloatArray): Int
+        @JvmStatic external fun nativeTemporalEase(toHandles: Boolean, a: Float, b: Float, c: Float, d: Float, seconds: Float, delta: Float, out: FloatArray): Boolean
         /** Taxa de vídeo (bps) que o export usaria: a regra do motor (BitratePolicy). `quality` 0/1/2. */
         @JvmStatic external fun nativeExportBitrateBps(width: Int, height: Int, fps: Double, codec: Int, quality: Int, customMbps: Int): Long
         /**
@@ -1085,11 +1089,18 @@ class AureaEngine private constructor() {
     fun setTextAnimator(layer: Long, index: Int, v: FloatArray): Boolean = nativeSetTextAnimator(nativeHandle, layer, index, v)
     fun setTextAnimParam(layer: Long, index: Int, param: Int, value: Float): Boolean = nativeSetTextAnimParam(nativeHandle, layer, index, param, value)
     fun toggleTextAnimKey(layer: Long, index: Int, param: Int): Boolean = nativeToggleTextAnimKey(nativeHandle, layer, index, param)
+    fun textAnimatorFields(layer: Long, index: Int): FloatArray? = nativeTextAnimatorFields(nativeHandle, layer, index)
+    fun setTextAnimatorField(layer: Long, index: Int, field: Int, value: Float): Boolean = nativeSetTextAnimatorField(nativeHandle, layer, index, field, value)
+    fun textAnimValues(layer: Long, index: Int, keys: IntArray): FloatArray? = nativeTextAnimValues(nativeHandle, layer, index, keys)
+    fun addTextSelector(layer: Long, index: Int, type: Int): Int = nativeAddTextSelector(nativeHandle, layer, index, type)
+    fun removeTextSelector(layer: Long, index: Int, selector: Int): Boolean = nativeRemoveTextSelector(nativeHandle, layer, index, selector)
     fun applyTextPreset(layer: Long, preset: Int): Boolean = nativeApplyTextPreset(nativeHandle, layer, preset)
+    /** 0.5.0: preset no modelo do Motion (efeitos de texto com keyframes; 0..9). */
+    fun applyMotionTextPreset(layer: Long, preset: Int): Boolean = nativeApplyMotionTextPreset(nativeHandle, layer, preset)
     /** 0.4.4 Explodir texto: 0 letras, 1 palavras, 2 linhas. Quantas camadas criou (-1 = não deu). */
     fun explodeText(layer: Long, mode: Int, keepOriginal: Boolean = false): Int = nativeExplodeText(nativeHandle, layer, mode, keepOriginal)
 
-    /** Animadores de camada: 32 floats cada (ver Engine::kLayerAnimFloats). */
+    /** Animadores de camada: [LAYER_ANIM_FLOATS] floats cada (ver Engine::kLayerAnimFloats). */
     fun queryLayerAnimators(layer: Long): FloatArray? = nativeQueryLayerAnimators(nativeHandle, layer)
     /** Animação de texto 3D: 3 modos (entrada, saída, loop) × 5 (preset, unidade, duração s, atraso ms, unidades). */
     fun queryText3dAnim(layer: Long): FloatArray? = nativeQueryText3dAnim(nativeHandle, layer)
@@ -1922,6 +1933,7 @@ class AureaEngine private constructor() {
     private external fun nativeSetTextAnimParam(handle: Long, layer: Long, index: Int, param: Int, value: Float): Boolean
     private external fun nativeToggleTextAnimKey(handle: Long, layer: Long, index: Int, param: Int): Boolean
     private external fun nativeApplyTextPreset(handle: Long, layer: Long, preset: Int): Boolean
+    private external fun nativeApplyMotionTextPreset(handle: Long, layer: Long, preset: Int): Boolean
     private external fun nativeExplodeText(handle: Long, layer: Long, mode: Int, keepOriginal: Boolean): Int
     private external fun nativeQueryLayerAnimators(handle: Long, layer: Long): FloatArray?
     private external fun nativeQueryText3dAnim(handle: Long, layer: Long): FloatArray?
@@ -1974,6 +1986,11 @@ class AureaEngine private constructor() {
     private external fun nativeImportAlightMotion(handle: Long, data: ByteArray): ByteArray?
     private external fun nativeApplyPreset(handle: Long, layer: Long, json: ByteArray, duration: Long): ByteArray?
     private external fun nativeImportAeFile(handle: Long, path: ByteArray, layer: Long): ByteArray?
+    private external fun nativeTextAnimatorFields(handle: Long, layer: Long, index: Int): FloatArray?
+    private external fun nativeSetTextAnimatorField(handle: Long, layer: Long, index: Int, field: Int, value: Float): Boolean
+    private external fun nativeTextAnimValues(handle: Long, layer: Long, index: Int, keys: IntArray): FloatArray?
+    private external fun nativeAddTextSelector(handle: Long, layer: Long, index: Int, type: Int): Int
+    private external fun nativeRemoveTextSelector(handle: Long, layer: Long, index: Int, selector: Int): Boolean
     private external fun nativeImportAeData(handle: Long, data: ByteArray, fileName: ByteArray, layer: Long, textAnimatorPro: Boolean): ByteArray?
     private external fun nativeMakeCaptionPreset(name: ByteArray, ints: IntArray, floats: FloatArray): ByteArray?
     private external fun nativeParseCaptionPreset(json: ByteArray): FloatArray?
@@ -2237,6 +2254,12 @@ class AureaEngine private constructor() {
     fun vectorPathAt(layer: Long, group: Int, path: Int): FloatArray? = nativeVectorPathAt(nativeHandle, layer, group, path)
     fun setVectorPath(layer: Long, group: Int, path: Int, bez: FloatArray, continuing: Boolean): Boolean =
         nativeSetVectorPath(nativeHandle, layer, group, path, bez, continuing)
+    /** 0.5.0: keyframe só dos pontos escolhidos da máscara, no cabeçote. */
+    fun toggleMaskPathPointsKey(layer: Long, mask: Int, points: IntArray): Boolean =
+        nativeToggleMaskPathPointsKey(nativeHandle, layer, mask, points)
+    /** 0.5.0: keyframe só dos pontos escolhidos, no cabeçote. */
+    fun toggleVectorPathPointsKey(layer: Long, group: Int, path: Int, points: IntArray): Boolean =
+        nativeToggleVectorPathPointsKey(nativeHandle, layer, group, path, points)
     fun toggleVectorPathKey(layer: Long, group: Int, path: Int): Boolean = nativeToggleVectorPathKey(nativeHandle, layer, group, path)
     fun addVectorGroup(layer: Long, kind: Int): Int = nativeAddVectorGroup(nativeHandle, layer, kind)
     fun removeVectorGroup(layer: Long, group: Int): Boolean = nativeRemoveVectorGroup(nativeHandle, layer, group)
@@ -2297,6 +2320,8 @@ class AureaEngine private constructor() {
     private external fun nativeSetVectorDocument(handle: Long, layer: Long, doc: FloatArray, names: String, continuing: Boolean): Boolean
     private external fun nativeVectorPathAt(handle: Long, layer: Long, group: Int, path: Int): FloatArray?
     private external fun nativeSetVectorPath(handle: Long, layer: Long, group: Int, path: Int, bez: FloatArray, continuing: Boolean): Boolean
+    private external fun nativeToggleMaskPathPointsKey(handle: Long, layer: Long, mask: Int, points: IntArray): Boolean
+    private external fun nativeToggleVectorPathPointsKey(handle: Long, layer: Long, group: Int, path: Int, points: IntArray): Boolean
     private external fun nativeToggleVectorPathKey(handle: Long, layer: Long, group: Int, path: Int): Boolean
     private external fun nativeAddVectorGroup(handle: Long, layer: Long, kind: Int): Int
     private external fun nativeRemoveVectorGroup(handle: Long, layer: Long, group: Int): Boolean
@@ -2337,6 +2362,11 @@ class AureaEngine private constructor() {
     /** Alça de largura da caixa de texto (dx, dy em px da composição). */
     fun dragTextBoxWidth(layer: Long, dx: Float, dy: Float, continuing: Boolean): Boolean =
         nativeDragTextBoxWidth(nativeHandle, layer, dx, dy, continuing)
+    /** 0.5.0: alças dos parâmetros da forma, 6 floats cada (x, y, parâmetro, estilo, empurrão X/Y). */
+    fun queryShapeParamHandles(layer: Long): FloatArray? = nativeQueryShapeParamHandles(nativeHandle, layer)
+    /** 0.5.0: leva a alça do parâmetro ao ponto (x, y), em px da forma, origem no centro. */
+    fun dragShapeParamHandle(layer: Long, param: Int, x: Float, y: Float, continuing: Boolean): Boolean =
+        nativeDragShapeParamHandle(nativeHandle, layer, param, x, y, continuing)
     /** Alça de tamanho da forma (0..7), du/dv = passo em px da forma. */
     fun resizeShapeHandle(layer: Long, handle: Int, du: Float, dv: Float, keepRatio: Boolean, fromCenter: Boolean, continuing: Boolean): Boolean =
         nativeResizeShapeHandle(nativeHandle, layer, handle, du, dv, keepRatio, fromCenter, continuing)
@@ -2349,6 +2379,8 @@ class AureaEngine private constructor() {
     private external fun nativeEditMaskPath(handle: Long, layer: Long, mask: Int, op: Int, args: FloatArray, continuing: Boolean): Int
     private external fun nativeEditVectorPath(handle: Long, layer: Long, group: Int, path: Int, op: Int, args: FloatArray, continuing: Boolean): Int
     private external fun nativeDragTextBoxWidth(handle: Long, layer: Long, dx: Float, dy: Float, continuing: Boolean): Boolean
+    private external fun nativeQueryShapeParamHandles(handle: Long, layer: Long): FloatArray?
+    private external fun nativeDragShapeParamHandle(handle: Long, layer: Long, param: Int, x: Float, y: Float, continuing: Boolean): Boolean
     private external fun nativeResizeShapeHandle(handle: Long, layer: Long, which: Int, du: Float, dv: Float,
                                                  keepRatio: Boolean, fromCenter: Boolean, continuing: Boolean): Boolean
     private external fun nativeRemoveImportedFont(handle: Long, path: String): Boolean

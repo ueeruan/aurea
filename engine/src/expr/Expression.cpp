@@ -892,6 +892,7 @@ struct Tls {
 
 thread_local Tls g_tls;
 thread_local u64 g_textContext = 0;
+thread_local Vec3 g_textSelector{100.0f, 100.0f, 100.0f};
 
 struct Provider { TimelineProvider fn; void* ctx; };
 std::mutex g_providerMutex;
@@ -919,36 +920,8 @@ const char* prop_label(const PropDesc& d) noexcept {
 }
 
 f32 text_anim_base(const TextAnimator& a, u32 p) noexcept {
-    switch (p) {
-        case text::kSelStart: return a.selector.start;
-        case text::kSelEnd: return a.selector.end;
-        case text::kSelOffset: return a.selector.offset;
-        case text::kSelAmount: return a.selector.amount;
-        case text::kSelEaseHigh: return a.selector.easeHigh;
-        case text::kSelEaseLow: return a.selector.easeLow;
-        case text::kWiggleRate: return a.selector.wiggleRate;
-        case text::kPosX: return a.position.x;
-        case text::kPosY: return a.position.y;
-        case text::kPosZ: return a.position.z;
-        case text::kScaleX: return a.scale.x;
-        case text::kScaleY: return a.scale.y;
-        case text::kRotX: return a.rotation.x;
-        case text::kRotY: return a.rotation.y;
-        case text::kRotZ: return a.rotation.z;
-        case text::kOpacity: return a.opacity;
-        case text::kTracking: return a.tracking;
-        case text::kBlur: return a.blur;
-        case text::kSkew: return a.skew;
-        case text::kStrokeWidth: return a.strokeWidth;
-        case text::kCharOffset: return a.charOffset;
-        case text::kFillR: return a.fill.x;
-        case text::kFillG: return a.fill.y;
-        case text::kFillB: return a.fill.z;
-        case text::kStrokeR: return a.stroke.x;
-        case text::kStrokeG: return a.stroke.y;
-        case text::kStrokeB: return a.stroke.z;
-        default: return 0.0f;
-    }
+    const f32* ref = text::animator_param_ref(a, p);
+    return ref ? *ref : 0.0f;
 }
 
 const Track* find_track(const PropDesc& d, u32 c) noexcept {
@@ -1719,8 +1692,8 @@ Val Ctx::global(u32 id, u32 pos) {
         case GTextIndex: return Val::num(static_cast<u32>(g_textContext));
         case GTextTotal: return Val::num(static_cast<u32>(g_textContext >> 32));
         case GSelectorValue: {
-            const f64 full[3] = {100.0, 100.0, 100.0};
-            return Val::vec(full, 3);
+            const f64 selected[3] = {g_textSelector.x, g_textSelector.y, g_textSelector.z};
+            return Val::vec(selected, 3);
         }
         case GValue: return nowValue;
         case GFps: return Val::num(e.fps);
@@ -2654,10 +2627,11 @@ const EffectRegistry& builtin_effects() {
     return reg;
 }
 
-TextScope::TextScope(u32 index, u32 total) noexcept : previous_(g_textContext) {
+TextScope::TextScope(u32 index, u32 total, const Vec3* selector) noexcept : previous_(g_textContext), previousSelector_(g_textSelector) {
+    g_textSelector = selector ? *selector : Vec3{100.0f, 100.0f, 100.0f};
     g_textContext = static_cast<u64>(index) | (static_cast<u64>(total) << 32);
 }
-TextScope::~TextScope() { g_textContext = previous_; }
+TextScope::~TextScope() { g_textContext = previous_; g_textSelector = previousSelector_; }
 
 Scope::Scope(const Timeline& timeline) noexcept {
     if (!g_tls.scopes.empty() && g_tls.scopes.back()->tl == &timeline) return;   // aninhado: reaproveita

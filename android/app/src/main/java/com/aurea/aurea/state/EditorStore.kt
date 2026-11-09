@@ -957,6 +957,15 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                     }
                     check(pending.renameTo(japanese)) { "Could not install Japanese fallback font" }
                 }.onFailure { android.util.Log.w("AureaFonts", "Bundled Japanese fallback unavailable; using system fonts", it) }
+                // Hangul: a fonte CJK do Android 15 é CFF2, que o motor não lê.
+                runCatching {
+                    val korean = File(dirs.cache, "NotoSansKR-Hangul.otf")
+                    val pending = File(dirs.cache, "NotoSansKR-Hangul.otf.tmp")
+                    app.assets.open("NotoSansKR-Hangul.otf").use { input ->
+                        pending.outputStream().use { output -> input.copyTo(output) }
+                    }
+                    check(pending.renameTo(korean)) { "Could not install Korean fallback font" }
+                }.onFailure { android.util.Log.w("AureaFonts", "Bundled Korean fallback unavailable; using system fonts", it) }
                 val debug = (app.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
                 // Sondagem do aparelho: medida UMA vez (primeira abertura ou SO
                 // novo) e guardada; o motor decide orçamento, workers, teto de
@@ -1797,7 +1806,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (anim.size != oldAnimators.size || anim.indices.any { !anim[it].contentEquals(oldAnimators[it]) }) textAnimators = anim
         // Animadores de camada (qualquer tipo), comprimento do desfoque e escopo.
         if (id != null) {
-            val la = engine.queryLayerAnimators(id)?.let { a -> List(a.size / 32) { i -> a.copyOfRange(i * 32, i * 32 + 32) } } ?: emptyList()
+            val la = engine.queryLayerAnimators(id)?.let { a -> val n = AureaEngine.LAYER_ANIM_FLOATS; List(a.size / n) { i -> a.copyOfRange(i * n, i * n + n) } } ?: emptyList()
             val oldLa = layerAnimators
             if (la.size != oldLa.size || la.indices.any { !la[it].contentEquals(oldLa[it]) }) layerAnimators = la
             layerMotionBlurLength = engine.queryLayerMotionBlurLength(id)
@@ -1950,6 +1959,19 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = primary ?: return
         engine.setVectorPath(id, vectorGroup, vectorPath, path.toArray(), continuing)
         refreshVector()
+    }
+
+    /** 0.5.0: ◆ da máscara com pontos escolhidos no laço. */
+    fun toggleMaskPointsKey(mask: Int, points: Collection<Int>) {
+        val id = primary ?: return
+        if (engine.toggleMaskPathPointsKey(id, mask, points.toIntArray())) refreshNow()
+    }
+
+    /** 0.5.0: ◆ com pontos escolhidos no laço: keyframe só deles. */
+    fun toggleVectorPathPointsKey(points: Collection<Int>) {
+        val id = primary ?: return
+        engine.toggleVectorPathPointsKey(id, vectorGroup, vectorPath, points.toIntArray())
+        refreshNow()
     }
 
     fun toggleVectorPathKey() {
@@ -6671,7 +6693,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** Animadores da camada de texto (40 floats cada; ver `query_text_animators`). */
     var textAnimators by mutableStateOf<List<FloatArray>>(emptyList())
-    /** Animadores de camada da escolhida (32 floats cada — Engine::kLayerAnimFloats). */
+    /** Animadores de camada da escolhida (48 floats cada — Engine::kLayerAnimFloats). */
     var layerAnimators by mutableStateOf<List<FloatArray>>(emptyList())
     /** Comprimento do rastro do desfoque desta camada (× o obturador do projeto). */
     var layerMotionBlurLength by mutableStateOf(1f)
@@ -6691,6 +6713,18 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         typingHandler.removeCallbacks(applyText3d)
         if (text3dPending) text3d?.let { pushText3D(id, it) }
         if (!engine.applyTextPreset(id, preset)) {
+            showToast(appText(R.string.msg_animacao_de_texto_so_vale_para))
+            return
+        }
+        refreshNow()
+        refreshDetail()
+    }
+
+    /** 0.5.0: preset de texto no modelo do Motion; substitui a animação de texto da camada. */
+    fun applyMotionTextPreset(preset: Int) {
+        val id = primary ?: return
+        typingHandler.removeCallbacks(applyText3d)
+        if (!engine.applyMotionTextPreset(id, preset)) {
             showToast(appText(R.string.msg_animacao_de_texto_so_vale_para))
             return
         }
@@ -6924,6 +6958,28 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshDetail()
     }
 
+    // Agrupamento, modo e forma não entram em `textAnimators`: quem lê os campos redesenha por esta revisão.
+    private var textAnimatorFieldsRevision by mutableIntStateOf(0)
+    fun textAnimatorFields(index: Int): FloatArray? =
+        primary?.takeIf { textAnimatorFieldsRevision >= 0 }?.let { engine.textAnimatorFields(it, index) }
+    fun setTextAnimatorField(index: Int, field: Int, value: Float) {
+        val id = primary ?: return
+        if (engine.setTextAnimatorField(id, index, field, value)) {
+            textAnimatorFieldsRevision++
+            refreshNow()
+        }
+    }
+    /** Valor no cabeçote e estado (1 animado, 2 keyframe aqui, 4 expressão). */
+    fun textAnimValue(index: Int, key: Int): FloatArray =
+        primary?.let { engine.textAnimValues(it, index, intArrayOf(key)) }?.takeIf { it.size == 2 } ?: floatArrayOf(0f, 0f)
+    fun addTextSelector(index: Int, type: Int) {
+        val id = primary ?: return
+        if (engine.addTextSelector(id, index, type) >= 0) refreshNow()
+    }
+    fun removeTextSelector(index: Int, selector: Int) {
+        val id = primary ?: return
+        if (engine.removeTextSelector(id, index, selector)) refreshNow()
+    }
     fun setTextAnimParam(index: Int, param: Int, value: Float) {
         val id = primary ?: return
         engine.setTextAnimParam(id, index, param, value)
@@ -9736,6 +9792,16 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = primary ?: return
         if (playing) pause()
         if (engine.dragTextBoxWidth(id, dx, dy, continuing)) refreshDetail()
+    }
+
+    /** 0.5.0: alças dos parâmetros da forma escolhida no playhead (6 floats cada). */
+    fun shapeParamHandles(): FloatArray? = primary?.let { engine.queryShapeParamHandles(it) }
+
+    /** 0.5.0: leva a alça do parâmetro ao ponto (x, y), em px da forma, origem no centro. */
+    fun dragShapeParamHandle(param: Int, x: Float, y: Float, continuing: Boolean) {
+        val id = primary ?: return
+        if (playing) pause()
+        if (engine.dragShapeParamHandle(id, param, x, y, continuing)) refreshDetail()
     }
 
     /** Alça de tamanho da forma: du/dv = passo em px da forma desde o último envio. */

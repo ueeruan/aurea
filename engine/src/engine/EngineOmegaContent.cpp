@@ -266,10 +266,59 @@ bool apply_path_op(BezierPath& b, Engine::PathOp op, const f32* args, u32 argc, 
             changed = vector::pathedit::set_closed(b, args[0] > 0.5f);
             break;
         }
+        case Engine::PathOp::OpenAt: {
+            // Motion: corta no trecho escolhido; a ordem gira para o corte virar as pontas.
+            if (argc < 1 || !b.closed || b.v.size() < 2) return false;
+            const u32 segment = index(0);
+            if (segment >= b.v.size()) return false;
+            std::rotate(b.v.begin(), b.v.begin() + static_cast<std::ptrdiff_t>((segment + 1) % b.v.size()), b.v.end());
+            b.closed = false;
+            changed = true;
+            break;
+        }
+        case Engine::PathOp::SetFirst: {
+            // After Effects (Set First Vertex): decide com quem cada ponto casa no morph.
+            if (argc < 1 || !b.closed) return false;
+            const u32 i = index(0);
+            if (i == 0 || i >= b.v.size()) return false;
+            std::rotate(b.v.begin(), b.v.begin() + static_cast<std::ptrdiff_t>(i), b.v.end());
+            changed = true;
+            break;
+        }
         default:
             return false;
     }
     return true;
+}
+
+// 0.5.0 (Alight Motion): a TOPOLOGIA do caminho é a mesma em todos os tempos.
+// Inserir, apagar ou acrescentar ponto com a forma animada não muda só o key
+// do cabeçote: a mesma operação vale nos outros keys, para cada ponto continuar
+// casando com o mesmo ponto no morph. Inserir divide o MESMO trecho no MESMO t
+// (a forma daquele key não muda); acrescentar põe o ponto parado no mesmo
+// lugar; apagar tira o mesmo índice. Key com outra contagem (projeto antigo)
+// fica como está (o morph reamostra).
+bool is_topology_path_op(Engine::PathOp op) noexcept {
+    return op == Engine::PathOp::Insert || op == Engine::PathOp::Remove || op == Engine::PathOp::Append;
+}
+
+/// A máscara do keyframe por ponto acompanha a inserção ou remoção do ponto.
+void adjust_point_mask(std::vector<u8>& mask, Engine::PathOp op, const f32* args, i32 result) {
+    if (mask.empty()) return;
+    if (op == Engine::PathOp::Remove) {
+        const usize i = static_cast<usize>(std::max(0.0f, std::round(args[0])));
+        if (i < mask.size()) mask.erase(mask.begin() + static_cast<std::ptrdiff_t>(i));
+    } else if ((op == Engine::PathOp::Insert || op == Engine::PathOp::Append) && result >= 0) {
+        const usize i = std::min(static_cast<usize>(result), mask.size());
+        mask.insert(mask.begin() + static_cast<std::ptrdiff_t>(i), u8{1});
+    }
+}
+
+void propagate_path_topology(BezierPath& other, usize countBefore, Engine::PathOp op, const f32* args, u32 argc) noexcept {
+    if (!is_topology_path_op(op) || other.v.size() != countBefore) return;
+    i32 ignored = 0;
+    bool changed = false;
+    (void)apply_path_op(other, op, args, argc, ignored, changed);
 }
 
 i32 Engine::edit_vector_path(u64 layerId, u32 group, u32 path, PathOp op, const f32* args, u32 argc, bool continuing) noexcept {
@@ -298,6 +347,8 @@ i32 Engine::edit_vector_path(u64 layerId, u32 group, u32 path, PathOp op, const 
     VectorPath work = vp;
     if (work.kind != VectorPathKind::Free) vector::make_editable(work);
     BezierPath b = work.keys.empty() ? work.path : vector::path_at(work, static_cast<f64>(local));
+    const usize countBefore = b.v.size();
+    const std::vector<BezierVertex> pointsBefore = b.v;
     i32 result = 0;
     bool changed = false;
     if (!apply_path_op(b, op, args, argc, result, changed)) return -1;
@@ -305,6 +356,22 @@ i32 Engine::edit_vector_path(u64 layerId, u32 group, u32 path, PathOp op, const 
     if (!continuing) history_.before_mutation(*comp, project_->timeline().current(), "editar pontos");
     bump_model_revision_locked();
     if (vp.kind != VectorPathKind::Free) vector::make_editable(vp);
+    if (op == PathOp::OpenAt) {
+        // Abrir no trecho é da estrutura: a forma parada e todos os keyframes giram juntos.
+        const usize first = (static_cast<usize>(std::max(0.0f, std::round(args[0]))) + 1) % countBefore;
+        const auto spin = [&](BezierPath& p) {
+            if (p.v.size() == countBefore) std::rotate(p.v.begin(), p.v.begin() + static_cast<std::ptrdiff_t>(first), p.v.end());
+            p.closed = false;
+        };
+        spin(vp.path);
+        for (PathKey& k : vp.keys) {
+            spin(k.path);
+            if (k.points.size() == countBefore) std::rotate(k.points.begin(), k.points.begin() + static_cast<std::ptrdiff_t>(first), k.points.end());
+        }
+        project_->mark_dirty();
+        request_render();
+        return result;
+    }
     if (op == PathOp::SetClosed) {
         // Abrir/fechar é da estrutura: vale para a forma parada e todos os keyframes.
         vp.path.closed = b.closed;
@@ -313,14 +380,35 @@ i32 Engine::edit_vector_path(u64 layerId, u32 group, u32 path, PathOp op, const 
     if (vp.keys.empty()) {
         vp.path = std::move(b);
     } else {
-        // Forma animada: o que se edita é o keyframe do cabeçote (cria se não houver).
+        // Forma animada: o que se edita é o keyframe do cabeçote (cria se não
+        // houver); a mudança de topologia vai também para os outros keys.
+        bool perPoint = false;
+        for (PathKey& k : vp.keys) {
+            perPoint |= !k.points.empty();
+            if (is_topology_path_op(op) && k.path.v.size() == countBefore) adjust_point_mask(k.points, op, args, result);
+            if (k.frame != local) propagate_path_topology(k.path, countBefore, op, args, argc);
+        }
+        // Com keyframe por ponto, só o que mudou entra neste key.
+        std::vector<u8> touched(b.v.size(), 0);
+        if (b.v.size() == pointsBefore.size()) {
+            for (usize i = 0; i < b.v.size(); ++i) touched[i] = b.v[i] == pointsBefore[i] ? 0 : 1;
+        } else if (result >= 0 && static_cast<usize>(result) < touched.size() && op != PathOp::Remove) {
+            touched[static_cast<usize>(result)] = 1;   // o ponto novo
+        }
         auto it = std::find_if(vp.keys.begin(), vp.keys.end(), [&](const PathKey& k) { return k.frame == local; });
         if (it != vp.keys.end()) {
+            if (op == PathOp::SetFirst) {
+                if (it->points.size() == b.v.size())
+                    std::rotate(it->points.begin(), it->points.begin() + static_cast<std::ptrdiff_t>(std::max(0.0f, std::round(args[0]))), it->points.end());
+            } else if (it->points.size() == b.v.size()) {
+                for (usize i = 0; i < touched.size(); ++i) it->points[i] = (it->points[i] || touched[i]) ? 1 : 0;
+            }
             it->path = std::move(b);
         } else {
             PathKey k;
             k.frame = local;
             k.path = std::move(b);
+            if (perPoint && op != PathOp::SetFirst) k.points = std::move(touched);
             vp.keys.insert(std::upper_bound(vp.keys.begin(), vp.keys.end(), local, [](i64 f, const PathKey& x) { return f < x.frame; }),
                            std::move(k));
         }

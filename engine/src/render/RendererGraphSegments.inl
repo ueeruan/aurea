@@ -17,7 +17,7 @@ Status Renderer::render_segmented_graph(const RenderSettings& settings, FrameBeg
         return settings.offscreenFenceDeadline
             ? settings.offscreenFenceDeadline(settings.offscreenFenceContext) : started + limit;
     };
-    const auto cancelled = [&] { return settings.cancelFlag && settings.cancelFlag->load(std::memory_order_acquire); };
+    const auto cancelled = [&] { settings.beat(); return settings.cancelFlag && settings.cancelFlag->load(std::memory_order_acquire); };
     u32 batches = 0;
     f32 waitedMs = 0;
     auto wait = [&](u64 pending) {

@@ -17,6 +17,12 @@ class TransformKeyPropertiesTest {
         assertEquals(saved, animatorRailTrack(1, com.aurea.aurea.engine.TrackKey(0), null))
         assertEquals(null, animatorRailTrack(0, focused, saved))
     }
+    @Test fun animatorRailAcceptsTheWaveParametersButNotUnknownOnes() {
+        val wave = com.aurea.aurea.engine.TrackKey(40, 0, 29)   // fase da onda (0.5.0)
+        val saved = com.aurea.aurea.engine.TrackKey(40, 0, 0)
+        assertEquals(wave, animatorRailTrack(1, wave, saved))
+        assertEquals(saved, animatorRailTrack(1, com.aurea.aurea.engine.TrackKey(40, 0, 30), saved))
+    }
     @Test fun partialXYZKeysAreCompletedBeforeTheyCanBeRemoved() {
         val buffer = ByteBuffer.allocate(LayerDetail.BYTES)
         buffer.putInt(92, 3)

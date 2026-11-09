@@ -1,5 +1,6 @@
 package com.aurea.aurea.editor.panels
 
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -55,45 +56,39 @@ internal fun TextPathSection(env: PanelEnv) {
             store.queryDetail(row.id)?.let { (it.shapeTypePoints and 0xFFFF) == VECTOR_SHAPE_TYPE } == true
     }
     val ownMasks = store.masks?.takeIf { it.layer == store.primary }?.masks.orEmpty()
-    Spacer(Modifier.height(6.dp))
-    Text(stringResource(R.string.panel_texto_caminho), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted)))
-    if (candidates.isEmpty() && ownMasks.isEmpty() && !tp.onPath) {
-        Text(stringResource(R.string.text027_path_hint),
-            style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)), modifier = Modifier.padding(vertical = 8.dp))
-        return
-    }
-    fun apply(next: EditorStore.TextPathState) = store.setTextPathOptions(next)
-    Row(
-        Modifier.fillMaxWidth().testTag("text.path.sources").horizontalScroll(rememberScrollState()).height(44.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        PathChip(stringResource(R.string.panel_linha_reta), !tp.onPath, "text.path.none") { apply(tp.copy(guide = 0L, mask = -1)) }
-        ownMasks.forEachIndexed { i, m ->
-            PathChip(stringResource(R.string.text027_path_mask, i + 1), tp.mask == m.id, "text.path.mask.$i") { apply(tp.copy(guide = 0L, mask = m.id)) }
+    PanelSection(stringResource(R.string.panel_texto_caminho), com.aurea.aurea.ui.theme.CupertinoGlyph.Scribble, "text.sec.path") {
+        if (candidates.isEmpty() && ownMasks.isEmpty() && !tp.onPath) {
+            KitHint(stringResource(R.string.text027_path_hint))
+            return@PanelSection
         }
-        candidates.forEach { row ->
-            PathChip(row.name.ifEmpty { stringResource(R.string.panel_vetor) }, tp.mask < 0 && tp.guide == row.id, "text.path.layer.${row.id}") {
-                apply(tp.copy(guide = row.id, mask = -1))
+        fun apply(next: EditorStore.TextPathState) = store.setTextPathOptions(next)
+        Column(Modifier.fillMaxWidth().testTag("text.path.sources")) {
+            PanelItemRow(com.aurea.aurea.ui.theme.CupertinoGlyph.Minus, stringResource(R.string.panel_linha_reta), "text.path.none", on = !tp.onPath) { apply(tp.copy(guide = 0L, mask = -1)) }
+            ownMasks.forEachIndexed { i, m ->
+                PanelItemRow(com.aurea.aurea.ui.theme.CupertinoGlyph.SquareOnSquare, stringResource(R.string.text027_path_mask, i + 1), "text.path.mask.$i", on = tp.mask == m.id) { apply(tp.copy(guide = 0L, mask = m.id)) }
+            }
+            candidates.forEach { row ->
+                PanelItemRow(com.aurea.aurea.ui.theme.CupertinoGlyph.Scribble, row.name.ifEmpty { stringResource(R.string.panel_vetor) }, "text.path.layer.${row.id}", on = tp.mask < 0 && tp.guide == row.id) {
+                    apply(tp.copy(guide = row.id, mask = -1))
+                }
             }
         }
+        if (!tp.onPath) return@PanelSection
+        val first = stringResource(R.string.panel_margem_inicial)
+        TextRuler(env, first, { store.textPathState?.firstMargin ?: tp.firstMargin }, "${tp.firstMargin.roundToInt()} px", 1f, -20000f, 20000f,
+            "margem inicial do texto no caminho", keyProperty = TrackProperty.TEXT_PATH_FIRST_MARGIN, keyTag = "text.path.first.key") { x ->
+            store.textPathState?.let { apply(it.copy(firstMargin = x)) }
+        }
+        val last = stringResource(R.string.text027_path_last_margin)
+        TextRuler(env, last, { store.textPathState?.lastMargin ?: tp.lastMargin }, "${tp.lastMargin.roundToInt()} px", 1f, -20000f, 20000f,
+            "margem final do texto no caminho", keyProperty = TrackProperty.TEXT_PATH_LAST_MARGIN, keyTag = "text.path.last.key") { x ->
+            store.textPathState?.let { apply(it.copy(lastMargin = x)) }
+        }
+        PathToggle(stringResource(R.string.text027_path_force_align), tp.forceAlign, "text.path.force") { on -> apply(tp.copy(forceAlign = on)) }
+        PathToggle(stringResource(R.string.panel_perpendicular_caminho), tp.perpendicular, "text.path.perpendicular") { on -> apply(tp.copy(perpendicular = on)) }
+        PathToggle(stringResource(R.string.panel_inverter_sentido), tp.reverse, "text.path.reverse") { on -> apply(tp.copy(reverse = on)) }
+        KitHint(stringResource(R.string.text027_path_alignment_note))
     }
-    if (!tp.onPath) return
-    val first = stringResource(R.string.panel_margem_inicial)
-    TextRuler(env, first, { store.textPathState?.firstMargin ?: tp.firstMargin }, "${tp.firstMargin.roundToInt()} px", 1f, -20000f, 20000f,
-        "margem inicial do texto no caminho", keyProperty = TrackProperty.TEXT_PATH_FIRST_MARGIN, keyTag = "text.path.first.key") { x ->
-        store.textPathState?.let { apply(it.copy(firstMargin = x)) }
-    }
-    val last = stringResource(R.string.text027_path_last_margin)
-    TextRuler(env, last, { store.textPathState?.lastMargin ?: tp.lastMargin }, "${tp.lastMargin.roundToInt()} px", 1f, -20000f, 20000f,
-        "margem final do texto no caminho", keyProperty = TrackProperty.TEXT_PATH_LAST_MARGIN, keyTag = "text.path.last.key") { x ->
-        store.textPathState?.let { apply(it.copy(lastMargin = x)) }
-    }
-    PathToggle(stringResource(R.string.text027_path_force_align), tp.forceAlign, "text.path.force") { on -> apply(tp.copy(forceAlign = on)) }
-    PathToggle(stringResource(R.string.panel_perpendicular_caminho), tp.perpendicular, "text.path.perpendicular") { on -> apply(tp.copy(perpendicular = on)) }
-    PathToggle(stringResource(R.string.panel_inverter_sentido), tp.reverse, "text.path.reverse") { on -> apply(tp.copy(reverse = on)) }
-    Text(stringResource(R.string.text027_path_alignment_note),
-        style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)), modifier = Modifier.padding(vertical = 6.dp))
 }
 
 @Composable
@@ -101,17 +96,5 @@ private fun PathToggle(label: String, checked: Boolean, tag: String, onChange: (
     Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
         Box(Modifier.testTag(tag)) { AureaToggle(checked = checked, onCheckedChange = onChange) }
-    }
-}
-
-@Composable
-private fun PathChip(label: String, on: Boolean, tag: String, onClick: () -> Unit) {
-    Box(
-        Modifier.clip(RoundedCornerShape(8.dp)).background(if (on) AureaColors.AccentDim else AureaColors.Chip)
-            .testTag(tag)
-            .semantics { role = Role.RadioButton; selected = on }
-            .tocavel(onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp),
-    ) {
-        Text(label, maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = if (on) AureaColors.Accent else AureaColors.Text)))
     }
 }

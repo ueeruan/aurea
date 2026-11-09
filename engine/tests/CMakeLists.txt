@@ -13,6 +13,8 @@ add_executable(aurea_tests
     main.cpp
     test_regression_2128.cpp
     test_text_animator_pro.cpp
+    test_text_animator_universal.cpp
+    test_reference_video.cpp
     test_regression_2129.cpp
     test_regression_2130.cpp
     test_regression_2132.cpp
@@ -101,6 +103,7 @@ add_executable(aurea_tests
     test_editing_tools.cpp
     test_export.cpp
     test_export_recovery.cpp
+    test_export_content.cpp
     test_export_packet_log.cpp
     test_export_scheduler.cpp
     test_offline_frame_queue.cpp

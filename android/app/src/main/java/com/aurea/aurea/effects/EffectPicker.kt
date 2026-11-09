@@ -221,6 +221,9 @@ private fun EffectBrowserBody(
         val textLayer = kind == 4
         val effects = pickableEffects(catalog, layerHasAudio, layerKind = kind).filter {
             (textLayer || text3dLayer || it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.text.transform")) &&
+                (textLayer || it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.text.progress")) &&
+                (textLayer || it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.text.randomizer")) &&
+                (textLayer || it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.text.spacing")) &&
                 (textLayer || text3dLayer || it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.text.animator")) &&
                 (textLayer || it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.text.animator_pro"))   // 0.4.6: só texto 2D
         }

@@ -18,7 +18,8 @@
 //    14 engrenagem                      15 seta dupla  16 linha
 //    17 losango                         18 coração     19 selo
 //    20 arco                            21 balão       22 raio
-//    23 onda                            24 blob
+//    23 onda                            24 blob        25 lua
+//    26 gota
 // =============================================================================
 #include "../common/bindings.glsl"
 
@@ -277,6 +278,31 @@ float sd_bolt(vec2 q, vec2 half_, float tip) {
     return sd_polygon(q, v, 7);
 }
 
+// 0.5.0 — Lua: círculo de raio m menos o mesmo círculo com centro em x = 2·m·d.
+float sd_moon(vec2 q, float m, float d) {
+    float outer = length(q) - m;
+    float cut = length(q - vec2(2.0 * m * d, 0.0)) - m;
+    return max(outer, -cut);
+}
+
+// 0.5.0 — Gota: base redonda (r1) embaixo, ponta (r2 = canto) em cima, unidas
+// pelas tangentes (cápsula desigual; y para baixo).
+float sd_teardrop(vec2 q, vec2 half_, float corner) {
+    float r1 = max(1e-3, min(half_.x, half_.y));
+    float r2 = clamp(corner, 0.0, r1 * 0.99);
+    float yc = half_.y - r1;
+    float h = yc + half_.y - r2;
+    vec2 pp = vec2(abs(q.x), yc - q.y);
+    if (h <= 1e-3) return length(pp) - r1;
+    float b = (r1 - r2) / h;
+    if (b >= 1.0) return length(pp) - r1;
+    float a = sqrt(1.0 - b * b);
+    float k = dot(pp, vec2(-b, a));
+    if (k < 0.0) return length(pp) - r1;
+    if (k > a * h) return length(pp - vec2(0.0, h)) - r2;
+    return dot(pp, vec2(a, b)) - r1;
+}
+
 float shape_sd(vec2 q, vec2 half_) {
     int type = int(p.size.w + 0.5);
     float m = min(half_.x, half_.y);
@@ -362,6 +388,8 @@ float shape_sd(vec2 q, vec2 half_) {
         return max(wave_distance(q, half_.x, a, k) - T * 0.5, abs(q.x) - half_.x);
     }
     if (type == 24) return sd_blob(q / st, m, p.shape.y, depth, p.blob.xyz) * mst;
+    if (type == 25) return sd_moon(q / st, m, depth) * mst;
+    if (type == 26) return sd_teardrop(q, half_, p.shape.x);
     return sd_round_box(q, half_, 0.0);
 }
 

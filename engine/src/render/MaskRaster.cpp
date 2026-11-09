@@ -35,18 +35,68 @@ PathKey ease_of(const MaskPathKey& k) noexcept {
 void evaluate_path(const Mask& m, f64 localFrame, std::vector<MaskPoint>& out) {
     const std::vector<MaskPathKey>& keys = m.pathKeys;
     if (keys.empty()) { out = m.points; return; }
+    // 0.5.0: keyframe por ponto: cada ponto interpola só entre os keys que o animam.
+    bool masked = false, sameCount = true;
+    for (const MaskPathKey& k : keys) {
+        masked |= !k.pointMask.empty();
+        sameCount &= k.points.size() == keys.front().points.size() && (k.pointMask.empty() || k.pointMask.size() == k.points.size());
+    }
+    if (masked && sameCount) {
+        out = keys.front().points;
+        const auto mix = [](Vec2 a, Vec2 b, f32 t) { return Vec2{a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t}; };
+        for (usize i = 0; i < out.size(); ++i) {
+            const MaskPathKey* before = nullptr;
+            const MaskPathKey* after = nullptr;
+            for (const MaskPathKey& k : keys) {
+                if (!k.pointMask.empty() && !k.pointMask[i]) continue;
+                if (static_cast<f64>(k.frame) <= localFrame) before = &k;
+                else if (!after) after = &k;
+            }
+            if (before && after) {
+                const f32 u = static_cast<f32>((localFrame - static_cast<f64>(before->frame)) / static_cast<f64>(after->frame - before->frame));
+                const f32 t = vector::path_key_ease(ease_of(*before), u);
+                out[i].position = mix(before->points[i].position, after->points[i].position, t);
+                out[i].inTangent = mix(before->points[i].inTangent, after->points[i].inTangent, t);
+                out[i].outTangent = mix(before->points[i].outTangent, after->points[i].outTangent, t);
+            } else if (before) {
+                out[i] = before->points[i];
+            } else if (after) {
+                out[i] = after->points[i];
+            }
+        }
+        return;
+    }
     if (localFrame <= static_cast<f64>(keys.front().frame)) { out = keys.front().points; return; }
     if (localFrame >= static_cast<f64>(keys.back().frame)) { out = keys.back().points; return; }
     usize i = 0;
     while (i + 1 < keys.size() && static_cast<f64>(keys[i + 1].frame) <= localFrame) ++i;
     const MaskPathKey& a = keys[i];
     const MaskPathKey& b = keys[i + 1];
-    // Número de pontos diferente (ponto acrescentado no meio) ou key de
-    // segurar: a forma de `a` vale até `b`.
-    if (a.points.size() != b.points.size() || b.frame <= a.frame) { out = a.points; return; }
+    if (b.frame <= a.frame) { out = a.points; return; }
     f32 t = static_cast<f32>((localFrame - static_cast<f64>(a.frame)) / static_cast<f64>(b.frame - a.frame));
     t = vector::path_key_ease(ease_of(a), t);
     if (t <= 0.0f) { out = a.points; return; }
+    if (a.points.size() != b.points.size()) {
+        // 0.5.0: número de pontos diferente (key antigo, ou ponto que não foi
+        // levado aos outros keys) faz o MESMO morph do vetor: o caminho com
+        // menos pontos é subdividido sem mudar a forma e os dois interpolam.
+        // Antes a forma de `a` segurava até `b`.
+        auto bez = [&](const std::vector<MaskPoint>& pts) {
+            BezierPath p;
+            p.closed = m.closed;
+            p.v.reserve(pts.size());
+            for (const MaskPoint& q : pts) p.v.push_back(BezierVertex{q.position, q.inTangent, q.outTangent});
+            return p;
+        };
+        const BezierPath r = vector::lerp_path(bez(a.points), bez(b.points), t);
+        out.resize(r.v.size());
+        for (usize k = 0; k < out.size(); ++k) {
+            out[k].position = r.v[k].p;
+            out[k].inTangent = r.v[k].in;
+            out[k].outTangent = r.v[k].out;
+        }
+        return;
+    }
     auto lerp = [t](Vec2 x, Vec2 y) { return Vec2{x.x + (y.x - x.x) * t, x.y + (y.y - x.y) * t}; };
     out.resize(a.points.size());
     for (usize k = 0; k < out.size(); ++k) {

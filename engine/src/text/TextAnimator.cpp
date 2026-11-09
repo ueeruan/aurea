@@ -47,86 +47,6 @@ void declare_animator_effect_params(ParameterRegistry& p) {
 }
 
 namespace {
-std::array<ParamValue, aeCount> animator_values(const Layer& layer, const EffectInstance& fx, f64 time) {
-    static const ParameterRegistry specs = [] { ParameterRegistry p; declare_animator_effect_params(p); return p; }();
-    std::array<ParamValue, aeCount> values{};
-    for (u32 p = 0; p < aeCount; ++p) {
-        values[p] = evaluate_param_f(layer.tracks, fx, p, specs.at(p), time);
-    }
-    return values;
-}
-}
-
-bool has_animator_effect(const Layer& layer) noexcept {
-    for (const auto& fx : layer.effects) if (fx.enabled && is_animator_effect(fx.type)) return true;
-    return false;
-}
-
-f32 animator_effect_padding(const Layer& layer, f64 time, f32 size, u32 chars) {
-    f32 pad = 0;
-    // Pro: um teto generoso (âncora, posição, linhas e oscilação somados).
-    for (const auto& fx : layer.effects) if (fx.enabled && fx.type == effect_type_id(kAnimatorProEffect)) {
-        static const ParameterRegistry pro = [] { ParameterRegistry p; declare_animator_pro_params(p); return p; }();
-        auto at = [&](u32 i) { return evaluate_param_f(layer.tracks, fx, i, pro.at(i), time); };
-        const ParamValue P = at(apPosition), A = at(apAnchor), S = at(apScale), L = at(apLineSpacing);
-        pad += std::max({std::fabs(P.v[0]), std::fabs(P.v[1]), std::fabs(P.v[2])}) + std::max(std::fabs(A.v[0]), std::fabs(A.v[1]));
-        pad += std::max(std::fabs(L.v[0]), std::fabs(L.v[1])) * 8.0f;
-        pad += size * std::max(0.f, std::max(std::fabs(S.v[0]), std::fabs(S.v[1])) / 100 - 1) + at(apBlur).v[0] * 2 + at(apStrokeWidth).v[0];
-        if (at(apRotation).v[0] || at(apRotation).v[1] || at(apRotation).v[2] || at(apSkew).v[0]) pad += size;
-        pad += std::fabs(at(apTracking).v[0]) * std::min(chars, 200u);
-    }
-    for (const auto& fx : layer.effects) if (fx.enabled && fx.type == effect_type_id(kAnimatorEffect)) {
-        const auto v = animator_values(layer, fx, time);
-        pad += std::max({std::fabs(v[aePosition].v[0]), std::fabs(v[aePosition].v[1]), std::fabs(v[aePosition].v[2])});
-        pad += size * std::max(0.f, std::max(v[aeScale].v[0], v[aeScale].v[1]) / 100 - 1) + v[aeBlur].v[0] * 2 + v[aeStrokeWidth].v[0];
-        if (v[aeRotation].v[0] || v[aeRotation].v[1] || v[aeRotation].v[2] || v[aeSkew].v[0]) pad += size;
-        pad += std::fabs(v[aeTracking].v[0]) * std::min(chars, 200u);
-    }
-    return std::min(pad, 4000.f);
-}
-
-void evaluate_animator_effects(const Layer& layer, f64 time, f64 fps, const std::vector<GlyphUnits>& units,
-                              u32 chars, u32 words, u32 lines, std::vector<GlyphAnim>& out) {
-    if (out.size() != units.size()) out.resize(units.size());
-    for (const auto& fx : layer.effects) if (fx.enabled && fx.type == effect_type_id(kAnimatorProEffect))
-        evaluate_animator_pro(layer, fx, time, fps, units, chars, words, lines, out);
-    for (const auto& fx : layer.effects) if (fx.enabled && fx.type == effect_type_id(kAnimatorEffect)) {
-        const auto v = animator_values(layer, fx, time);
-        TextData t; t.size = layer.text.size;
-        TextAnimator a;
-        a.selector.start = v[aeStart].v[0]; a.selector.end = v[aeEnd].v[0]; a.selector.offset = v[aeOffset].v[0];
-        a.selector.amount = v[aeAmount].v[0]; a.selector.basedOn = v[aeUnit].as_enum(); a.selector.shape = v[aeShape].as_enum();
-        a.selector.easeHigh = v[aeEaseHigh].v[0]; a.selector.easeLow = v[aeEaseLow].v[0];
-        a.selector.randomOrder = v[aeRandom].as_bool(); a.selector.seed = static_cast<u32>(v[aeSeed].v[0]);
-        a.selector.type = v[aeSelector].as_enum(); a.selector.wiggleRate = v[aeWiggleRate].v[0];
-        a.props = kTextPropPosition | kTextPropScale | kTextPropRotation | kTextPropOpacity | kTextPropBlur |
-                  kTextPropTracking | kTextPropSkew | kTextPropStrokeWidth;
-        a.position = v[aePosition].as_vec3(); a.scale = v[aeScale].as_vec2(); a.rotation = v[aeRotation].as_vec3();
-        a.opacity = v[aeOpacity].v[0]; a.blur = v[aeBlur].v[0]; a.tracking = v[aeTracking].v[0];
-        a.skew = v[aeSkew].v[0]; a.strokeWidth = v[aeStrokeWidth].v[0];
-        a.fill = v[aeFill].as_color(); a.stroke = v[aeStroke].as_color();
-        if (v[aeFillOn].as_bool()) a.props |= kTextPropFill;
-        if (v[aeStrokeOn].as_bool()) a.props |= kTextPropStroke;
-        t.animators.push_back(a);
-        std::vector<GlyphAnim> addition;
-        evaluate_text_animators(t, TrackSet{}, time, fps, units, chars, words, lines, addition);
-        for (usize i = 0; i < out.size(); ++i) {
-            auto& o = out[i]; const auto& b = addition[i];
-            o.translate = o.translate + b.translate; o.rotation = o.rotation + b.rotation;
-            o.scale.x *= b.scale.x; o.scale.y *= b.scale.y; o.opacity *= b.opacity;
-            o.blur += b.blur; o.trackingShift += b.trackingShift; o.strokeAdd += b.strokeAdd;
-            o.skewTransform = o.skewTransform * b.skewTransform;
-            if (b.fill.w > 0) {
-                const f32 w = b.fill.w, prev = o.fill.w * (1-w), total = w + prev;
-                o.fill = {(b.fill.x*w+o.fill.x*prev)/total, (b.fill.y*w+o.fill.y*prev)/total, (b.fill.z*w+o.fill.z*prev)/total, total};
-                o.fillOpacity += (std::clamp(a.fill.w, 0.f, 1.f) - o.fillOpacity) * w;
-            }
-            if (b.stroke.w > 0) o.stroke = b.stroke;
-        }
-    }
-}
-
-namespace {
 
 u32 hash3(u32 a, u32 b, u32 c) {
     u32 h = a * 0x9E3779B1u ^ (b + 0x7F4A7C15u) * 0x85EBCA77u ^ (c + 0x165667B1u) * 0xC2B2AE3Du;
@@ -180,18 +100,30 @@ bool has_animators(const TextData& t) noexcept {
     return false;
 }
 
-f32 selector_weight(const TextAnimator& a, u32 ai, const TrackSet& tracks, f64 local, f64 timeSec, u32 unit, u32 count) noexcept {
-    expr::TextScope glyph(unit + 1, count);
-    const TextSelector& s = a.selector;
-    const f32 amount = anim_param(tracks, ai, kSelAmount, local, s.amount) / 100.0f;
-    if (s.type == 1) {
-        const f32 rate = std::max(0.0f, anim_param(tracks, ai, kWiggleRate, local, s.wiggleRate));
+bool has_rig_animators(const TextData& t) noexcept {
+    for (const TextAnimator& a : t.animators) if (a.enabled && a.rig != 0) return true;
+    return false;
+}
+
+bool has_content_animators(const TextData& t) noexcept {
+    for (const TextAnimator& a : t.animators) if (a.enabled && (a.props & (kTextPropCharOffset | kTextPropReveal | kTextPropRandomize | kTextPropSpacing))) return true;
+    return false;
+}
+
+namespace {
+
+/// Faixa e oscilação no formato dos projetos até v58.
+f32 legacy_range(const TextSelector& s, u32 ai, u32 si, const TrackSet& tracks, f64 local, f64 timeSec, u32 unit, u32 count) noexcept {
+    const auto P = [&](u32 k, f32 fb) { return anim_param(tracks, ai, selector_key(si, k), local, fb); };
+    const f32 amount = P(kSelAmount, s.amount) / 100.0f;
+    if (s.type == kTextSelectorWiggleLegacy) {
+        const f32 rate = std::max(0.0f, P(kWiggleRate, s.wiggleRate));
         return std::clamp(wiggle(s.seed, unit, timeSec * rate), -1.0f, 1.0f) * amount;
     }
     const f32 n = static_cast<f32>(std::max<u32>(1, count));
-    const f32 off = anim_param(tracks, ai, kSelOffset, local, s.offset);
-    f32 st = anim_param(tracks, ai, kSelStart, local, s.start) + off;
-    f32 en = anim_param(tracks, ai, kSelEnd, local, s.end) + off;
+    const f32 off = P(kSelOffset, s.offset);
+    f32 st = P(kSelStart, s.start) + off;
+    f32 en = P(kSelEnd, s.end) + off;
     if (st > en) std::swap(st, en);
     const f32 u0 = static_cast<f32>(unit) / n * 100.0f, u1 = static_cast<f32>(unit + 1) / n * 100.0f;
     f32 w = 0.0f;
@@ -201,31 +133,145 @@ f32 selector_weight(const TextAnimator& a, u32 ai, const TrackSet& tracks, f64 l
         w = ov / (u1 - u0);
     } else {
         const f32 c = (u0 + u1) * 0.5f;
-        if (en > st && ((c >= st && c <= en) || (s.type == 2 && (s.shape == 1 || s.shape == 2))))
-            w = shape_value(s.shape, (c - st) / (en - st));
+        if (en > st && c >= st && c <= en) w = shape_value(s.shape, (c - st) / (en - st));
     }
-    const f32 eh = anim_param(tracks, ai, kSelEaseHigh, local, s.easeHigh), el = anim_param(tracks, ai, kSelEaseLow, local, s.easeLow);
+    const f32 eh = P(kSelEaseHigh, s.easeHigh), el = P(kSelEaseLow, s.easeLow);
     if (eh > 0.0f || el > 0.0f) {
         // Ease alto/baixo: mais tempo perto de 1 (alto) ou de 0 (baixo).
-        const f32 smooth = w * w * (3.0f - 2.0f * w);
         const f32 high = 1.0f - (1.0f - w) * (1.0f - w), low = w * w;
-        w = w + std::clamp(eh / 100.0f, 0.0f, 1.0f) * (high - w) * 0.5f + std::clamp(el / 100.0f, 0.0f, 1.0f) * (low - w) * 0.5f
-          + 0.0f * smooth;
+        w = w + std::clamp(eh / 100.0f, 0.0f, 1.0f) * (high - w) * 0.5f + std::clamp(el / 100.0f, 0.0f, 1.0f) * (low - w) * 0.5f;
     }
     return std::clamp(w, 0.0f, 1.0f) * amount;
 }
+
+} // namespace
+
+f32 selector_weight(const TextAnimator& a, u32 ai, const TrackSet& tracks, f64 local, f64 timeSec, u32 unit, u32 count) noexcept {
+    expr::TextScope glyph(unit + 1, count);
+    return legacy_range(a.selector, ai, 0, tracks, local, timeSec, unit, count);
+}
+
+namespace {
+
+bool selector_active(const TextSelector& s) noexcept { return s.enabled; }
+
+/// O peso de cada glifo (−1..1 por eixo): os seletores do animador, combinados na ordem.
+void selector_weights(const TextAnimator& a, u32 ai, const TrackSet& tracks, f64 local, f64 timeSec, const std::vector<GlyphUnits>& units,
+                      u32 chars, u32 words, u32 lines, std::vector<Vec3>& out) {
+    out.assign(units.size(), Vec3{0, 0, 0});
+    // Letras sem espaços: a posição do glifo entre os que têm tinta.
+    std::vector<u32> visible;
+    u32 inked = 0;
+    const auto ensure_visible = [&] {
+        if (!visible.empty() || units.empty()) return;
+        std::vector<u32> seen;
+        seen.reserve(units.size());
+        for (const GlyphUnits& u : units) seen.push_back(u.charIndex);
+        std::sort(seen.begin(), seen.end());
+        seen.erase(std::unique(seen.begin(), seen.end()), seen.end());
+        inked = static_cast<u32>(seen.size());
+        visible.reserve(units.size());
+        for (const GlyphUnits& u : units) visible.push_back(static_cast<u32>(std::lower_bound(seen.begin(), seen.end(), u.charIndex) - seen.begin()));
+    };
+    bool first = true;
+    const u32 total = 1u + std::min<u32>(static_cast<u32>(a.moreSelectors.size()), kMaxTextSelectors - 1u);
+    for (u32 si = 0; si < total; ++si) {
+        const TextSelector& s = si == 0 ? a.selector : a.moreSelectors[si - 1];
+        if (!selector_active(s)) continue;
+        const auto P = [&](u32 k, f32 fb) { return anim_param(tracks, ai, selector_key(si, k), local, fb); };
+        if (s.basedOn == 3) ensure_visible();
+        const u32 count = std::max<u32>(1, s.basedOn == 1 ? words : s.basedOn == 2 ? lines : s.basedOn == 3 ? inked : chars);
+        const std::vector<u32> perm = s.randomOrder ? shuffled(count, s.seed) : std::vector<u32>{};
+        const u32 mode = s.mode;
+        // O primeiro seletor parte de "nada" (somar) ou de "tudo" (subtrair, interseção, mínimo).
+        const f32 start = first && (mode == kTextModeSubtract || mode == kTextModeIntersect || mode == kTextModeMin) ? 1.0f : 0.0f;
+        for (usize g = 0; g < units.size(); ++g) {
+            const GlyphUnits& gu = units[g];
+            const u32 raw = std::min(s.basedOn == 3 ? visible[g] : unit_of(s, gu), count - 1);
+            const u32 unit = perm.empty() ? raw : perm[raw];
+            Vec3 above = out[g];
+            if (first) above = Vec3{start, start, start};
+            Vec3 value{0, 0, 0};
+            switch (s.type) {
+                case kTextSelectorRangeLegacy: case kTextSelectorWiggleLegacy: {
+                    expr::TextScope glyph(unit + 1, count);
+                    const f32 w = legacy_range(s, ai, si, tracks, local, timeSec, unit, count);
+                    value = Vec3{w, w, w};
+                    break;
+                }
+                case kTextSelectorRange: {
+                    expr::TextScope glyph(raw + 1, count);
+                    const f32 w = pro_range_weight(P(kSelStart, s.start), P(kSelEnd, s.end), P(kSelOffset, s.offset), s.units, s.shape,
+                                                   P(kAnimSmoothness, s.smoothness) / 100.0f, P(kSelEaseHigh, s.easeHigh) / 100.0f,
+                                                   P(kSelEaseLow, s.easeLow) / 100.0f, unit, count, a.aeModel != 0) * P(kSelAmount, s.amount) / 100.0f;
+                    value = Vec3{w, w, w};
+                    break;
+                }
+                case kTextSelectorWiggly: {
+                    const f32 rate = P(kWiggleRate, s.wiggleRate), corr = P(kAnimCorrelation, s.correlation) / 100.0f;
+                    const f32 tp = P(kAnimTemporalPhase, s.temporalPhase), sp = P(kAnimSpatialPhase, s.spatialPhase);
+                    const f32 lo = P(kAnimWigglyMin, s.wiggleMin) / 100.0f, hi = P(kAnimWigglyMax, s.wiggleMax) / 100.0f;
+                    for (u32 d = 0; d < 3; ++d)
+                        (&value.x)[d] = pro_wiggle(s.seed, unit, s.lockDimensions ? 0u : d, timeSec, rate, corr, tp, sp, lo, hi);
+                    break;
+                }
+                case kTextSelectorExpression: {
+                    // textIndex é da unidade na ordem do texto; selectorValue, o resultado de cima em %.
+                    const Vec3 selected{above.x * 100.0f, above.y * 100.0f, above.z * 100.0f};
+                    expr::TextScope glyph(raw + 1, count, &selected);
+                    value = Vec3{P(kAnimExprX, s.exprAmount.x) / 100.0f, P(kAnimExprY, s.exprAmount.y) / 100.0f, P(kAnimExprZ, s.exprAmount.z) / 100.0f};
+                    break;
+                }
+                default: break;
+            }
+            Vec3 result;
+            for (u32 d = 0; d < 3; ++d)
+                (&result.x)[d] = std::clamp(mode == kTextModeReplace ? (&value.x)[d] : combine_selector((&above.x)[d], (&value.x)[d], mode, a.aeModel != 0), -1.0f, 1.0f);
+            out[g] = result;
+        }
+        first = false;
+    }
+}
+
+Vec3 anim_rgb_to_hsv(Vec3 c) {
+    const f32 mx = std::max({c.x, c.y, c.z}), mn = std::min({c.x, c.y, c.z}), d = mx - mn;
+    f32 h = 0;
+    if (d > 1e-6f) {
+        if (mx == c.x) h = std::fmod((c.y - c.z) / d, 6.0f);
+        else if (mx == c.y) h = (c.z - c.x) / d + 2.0f;
+        else h = (c.x - c.y) / d + 4.0f;
+        h /= 6.0f;
+        if (h < 0) h += 1.0f;
+    }
+    return {h, mx > 0 ? d / mx : 0.0f, mx};
+}
+
+Vec3 anim_hsv_to_rgb(Vec3 c) {
+    const f32 h = (c.x - std::floor(c.x)) * 6.0f, s = std::clamp(c.y, 0.0f, 1.0f), v = std::clamp(c.z, 0.0f, 1.0f);
+    const f32 f = h - std::floor(h), p = v * (1 - s), q = v * (1 - s * f), t = v * (1 - s * (1 - f));
+    switch (static_cast<int>(h) % 6) {
+        case 0: return {v, t, p};
+        case 1: return {q, v, p};
+        case 2: return {p, v, t};
+        case 3: return {p, q, v};
+        case 4: return {t, p, v};
+        default: return {v, p, q};
+    }
+}
+
+} // namespace
 
 void evaluate_text_animators(const TextData& t, const TrackSet& tracks, f64 local, f64 fps, const std::vector<GlyphUnits>& units, u32 chars,
                              u32 words, u32 lines, std::vector<GlyphAnim>& out) {
     out.assign(units.size(), GlyphAnim{});
     if (!has_animators(t)) return;
     const f64 timeSec = local / (fps > 0.0 ? fps : 30.0);
+    std::vector<Vec3> weights;
     for (u32 ai = 0; ai < t.animators.size(); ++ai) {
         const TextAnimator& a = t.animators[ai];
-        if (!a.enabled) continue;
-        const TextSelector& s = a.selector;
-        const u32 count = s.basedOn == 1 ? words : s.basedOn == 2 ? lines : chars;
-        const std::vector<u32> perm = s.randomOrder ? shuffled(std::max<u32>(1, count), s.seed) : std::vector<u32>{};
+        // O modelo do Motion avalia em evaluate_text_rigs; o conteúdo, antes do layout.
+        if (!a.enabled || a.rig != 0) continue;
+        selector_weights(a, ai, tracks, local, timeSec, units, chars, words, lines, weights);
         auto P = [&](u32 p, f32 fb) { return anim_param(tracks, ai, p, local, fb); };
         const Vec3 pos{P(kPosX, a.position.x), P(kPosY, a.position.y), P(kPosZ, a.position.z)};
         const Vec2 scl{P(kScaleX, a.scale.x), P(kScaleY, a.scale.y)};
@@ -233,28 +279,33 @@ void evaluate_text_animators(const TextData& t, const TrackSet& tracks, f64 loca
         const f32 op = P(kOpacity, a.opacity), blur = P(kBlur, a.blur), skew = P(kSkew, a.skew);
         const f32 trk = P(kTracking, a.tracking) * (P(kTrackingEm, 0) > 0.5f ? t.size / 1000.0f : 1.0f);
         const f32 skewAxis = P(kSkewAxis, 0) * kDeg2Rad;
-        const u32 anchorGrouping = static_cast<u32>(std::clamp(P(kAnchorGrouping, 0), 0.0f, 2.0f));
+        const u32 anchorGrouping = a.anchorGrouping ? std::min<u32>(a.anchorGrouping, 3u) : static_cast<u32>(std::clamp(P(kAnchorGrouping, 0), 0.0f, 2.0f));
         const f32 sw = P(kStrokeWidth, a.strokeWidth);
         const Vec3 fill{P(kFillR, a.fill.x), P(kFillG, a.fill.y), P(kFillB, a.fill.z)};
         const Vec3 stroke{P(kStrokeR, a.stroke.x), P(kStrokeG, a.stroke.y), P(kStrokeB, a.stroke.z)};
-        std::vector<f32> weight(units.size(), 0.0f);
+        const Vec2 anchor{P(kAnimAnchorX, a.anchor.x), P(kAnimAnchorY, a.anchor.y)};
+        const Vec2 lineGap{P(kAnimLineSpacingX, a.lineSpacing.x), P(kAnimLineSpacingY, a.lineSpacing.y)};
+        const Vec2 groupAlign{P(kAnimGroupAlignX, a.groupAlign.x) / 100.0f, P(kAnimGroupAlignY, a.groupAlign.y) / 100.0f};
+        const f32 hue = P(kAnimFillHue, a.fillHue), sat = P(kAnimFillSaturation, a.fillSaturation) / 100.0f, bri = P(kAnimFillBrightness, a.fillBrightness) / 100.0f;
+        const f32 fillOpacity = P(kAnimFillOpacity, a.fillOpacity) / 100.0f;
         for (usize g = 0; g < units.size(); ++g) {
-            u32 unit = unit_of(s, units[g]);
-            if (!perm.empty() && unit < perm.size()) unit = perm[unit];
-            weight[g] = selector_weight(a, ai, tracks, local, timeSec, unit, count);
-        }
-        for (usize g = 0; g < units.size(); ++g) {
-            const f32 w = weight[g];
-            if (w == 0.0f) continue;
+            const Vec3 w3 = weights[g];
+            const f32 w = w3.x;
+            if (w == 0.0f && w3.y == 0.0f && w3.z == 0.0f) continue;
             GlyphAnim& o = out[g];
             o.anchorGrouping = anchorGrouping;
-            if (a.props & kTextPropPosition) o.translate = o.translate + pos * w;
+            o.aeModel = a.aeModel != 0;
+            o.groupAlign = groupAlign;
+            if (a.props & kTextPropAnchor) o.anchor = o.anchor + Vec2{anchor.x * w3.x, anchor.y * w3.y};
+            if (a.props & kTextPropPosition) o.translate = o.translate + Vec3{pos.x * w3.x, pos.y * w3.y, pos.z * w3.z};
+            if (a.props & kTextPropLineSpacing) o.translate = o.translate + Vec3{lineGap.x * w * static_cast<f32>(units[g].lineIndex), lineGap.y * w * static_cast<f32>(units[g].lineIndex), 0};
             if (a.props & kTextPropScale) {
-                o.scale.x *= std::max(0.0f, 1.0f + w * (scl.x / 100.0f - 1.0f));
-                o.scale.y *= std::max(0.0f, 1.0f + w * (scl.y / 100.0f - 1.0f));
+                // Escala negativa espelha a letra, como no After Effects.
+                o.scale.x *= 1.0f + w3.x * (scl.x / 100.0f - 1.0f);
+                o.scale.y *= 1.0f + w3.y * (scl.y / 100.0f - 1.0f);
             }
-            if (a.props & kTextPropRotation) o.rotation = o.rotation + rot * w;
-            if (a.props & kTextPropOpacity) o.opacity *= std::max(0.0f, 1.0f + w * (op / 100.0f - 1.0f));
+            if (a.props & kTextPropRotation) o.rotation = o.rotation + Vec3{rot.x * w3.x, rot.y * w3.y, rot.z * w};
+            if (a.props & kTextPropOpacity) o.opacity *= std::clamp(1.0f + w * (op / 100.0f - 1.0f), 0.0f, 1.0f);
             if (a.props & kTextPropBlur) o.blur += std::max(0.0f, w * blur);
             if (a.props & kTextPropSkew) {
                 Mat4 shear;
@@ -265,8 +316,20 @@ void evaluate_text_animators(const TextData& t, const TrackSet& tracks, f64 loca
                 o.skew += w * skew;
             }
             if (a.props & kTextPropStrokeWidth) o.strokeAdd += w * sw;
-            if (a.props & kTextPropFill) o.fill = Vec4{fill.x, fill.y, fill.z, std::clamp(std::fabs(w), 0.0f, 1.0f)};
-            if (a.props & kTextPropStroke) o.stroke = Vec4{stroke.x, stroke.y, stroke.z, std::clamp(std::fabs(w), 0.0f, 1.0f)};
+            const f32 mixW = std::clamp(std::fabs(w), 0.0f, 1.0f);
+            if (a.props & (kTextPropFill | kTextPropFillHsb)) {
+                Vec3 c = a.props & kTextPropFill ? fill : Vec3{t.color.x, t.color.y, t.color.z};
+                if (a.props & kTextPropFillHsb) {
+                    Vec3 h = anim_rgb_to_hsv(c);
+                    h.x += hue / 360.0f;
+                    h.y = std::clamp(h.y + sat, 0.0f, 1.0f);
+                    h.z = std::clamp(h.z + bri, 0.0f, 1.0f);
+                    c = anim_hsv_to_rgb(h);
+                }
+                o.fill = Vec4{c.x, c.y, c.z, mixW};
+            }
+            if ((a.props & kTextPropFillOpacity) && fillOpacity < 1.0f) o.fillOpacity *= std::clamp(1.0f + mixW * (fillOpacity - 1.0f), 0.0f, 1.0f);
+            if (a.props & kTextPropStroke) o.stroke = Vec4{stroke.x, stroke.y, stroke.z, mixW};
         }
         if (a.props & kTextPropTracking) {
             // Tracking empurra os glifos seguintes da mesma linha (ordem visual).
@@ -274,10 +337,158 @@ void evaluate_text_animators(const TextData& t, const TrackSet& tracks, f64 loca
             for (usize g = 0; g < units.size(); ++g) {
                 const u32 li = std::min<u32>(units[g].lineIndex, static_cast<u32>(acc.size() - 1));
                 out[g].trackingShift += acc[li];
-                acc[li] += weight[g] * trk;
+                acc[li] += weights[g].x * trk;
             }
         }
     }
+}
+
+namespace {
+f32* selector_param(TextSelector& s, u32 k) noexcept {
+    switch (k) {
+        case kSelStart: return &s.start;
+        case kSelEnd: return &s.end;
+        case kSelOffset: return &s.offset;
+        case kSelAmount: return &s.amount;
+        case kSelEaseHigh: return &s.easeHigh;
+        case kSelEaseLow: return &s.easeLow;
+        case kWiggleRate: return &s.wiggleRate;
+        case kAnimSmoothness: return &s.smoothness;
+        case kAnimWigglyMin: return &s.wiggleMin;
+        case kAnimWigglyMax: return &s.wiggleMax;
+        case kAnimCorrelation: return &s.correlation;
+        case kAnimTemporalPhase: return &s.temporalPhase;
+        case kAnimSpatialPhase: return &s.spatialPhase;
+        case kAnimExprX: return &s.exprAmount.x;
+        case kAnimExprY: return &s.exprAmount.y;
+        case kAnimExprZ: return &s.exprAmount.z;
+        case kAnimOverlap: return &s.overlap;
+        default: return nullptr;
+    }
+}
+} // namespace
+
+f32* animator_param_ref(TextAnimator& a, u32 key) noexcept {
+    const u32 block = key / kSelectorKeyBlock, k = key % kSelectorKeyBlock;
+    if (block > 0) return block <= a.moreSelectors.size() ? selector_param(a.moreSelectors[block - 1], k) : nullptr;
+    if (f32* selector = selector_param(a.selector, k)) return selector;
+    switch (k) {
+        case kPosX: return &a.position.x;
+        case kPosY: return &a.position.y;
+        case kPosZ: return &a.position.z;
+        case kScaleX: return &a.scale.x;
+        case kScaleY: return &a.scale.y;
+        case kRotX: return &a.rotation.x;
+        case kRotY: return &a.rotation.y;
+        case kRotZ: return &a.rotation.z;
+        case kOpacity: return &a.opacity;
+        case kTracking: return &a.tracking;
+        case kBlur: return &a.blur;
+        case kSkew: return &a.skew;
+        case kStrokeWidth: return &a.strokeWidth;
+        case kCharOffset: return &a.charOffset;
+        case kFillR: return &a.fill.x;
+        case kFillG: return &a.fill.y;
+        case kFillB: return &a.fill.z;
+        case kAnimFillA: return &a.fill.w;
+        case kStrokeR: return &a.stroke.x;
+        case kStrokeG: return &a.stroke.y;
+        case kStrokeB: return &a.stroke.z;
+        case kAnimAnchorX: return &a.anchor.x;
+        case kAnimAnchorY: return &a.anchor.y;
+        case kAnimLineSpacingX: return &a.lineSpacing.x;
+        case kAnimLineSpacingY: return &a.lineSpacing.y;
+        case kAnimGroupAlignX: return &a.groupAlign.x;
+        case kAnimGroupAlignY: return &a.groupAlign.y;
+        case kAnimFillHue: return &a.fillHue;
+        case kAnimFillSaturation: return &a.fillSaturation;
+        case kAnimFillBrightness: return &a.fillBrightness;
+        case kAnimFillOpacity: return &a.fillOpacity;
+        case kAnimRandAmount: return &a.randAmount;
+        case kAnimRandEvolution: return &a.randEvolution;
+        case kAnimRandSeed: return &a.randSeed;
+        case kAnimLetterSpacing: return &a.letterSpacing;
+        case kAnimLineSpacingEm: return &a.lineSpacingEm;
+        default: return nullptr;
+    }
+}
+
+const f32* animator_param_ref(const TextAnimator& a, u32 key) noexcept { return animator_param_ref(const_cast<TextAnimator&>(a), key); }
+
+void read_animator_fields(const TextAnimator& a, f32* v) noexcept {
+    std::fill(v, v + kTextAnimatorFieldCount, 0.0f);
+    v[0] = static_cast<f32>(a.props); v[1] = a.rig; v[2] = a.rigAnchor; v[3] = a.anchorGrouping; v[4] = a.cursor;
+    v[5] = a.cursorBlink ? 1.f : 0.f; v[6] = a.charset; v[7] = a.preserveSpace ? 1.f : 0.f; v[8] = a.groupAlign.x; v[9] = a.groupAlign.y;
+    const u32 extra = std::min<u32>(static_cast<u32>(a.moreSelectors.size()), kMaxTextSelectors - 1u);
+    v[15] = static_cast<f32>(1u + extra);
+    for (u32 si = 0; si <= extra; ++si) {
+        const TextSelector& s = si == 0 ? a.selector : a.moreSelectors[si - 1];
+        f32* o = v + 16u * (si + 1u);
+        o[0] = s.enabled ? 1.f : 0.f; o[1] = s.type; o[2] = s.basedOn; o[3] = s.units; o[4] = s.mode; o[5] = s.shape;
+        o[6] = s.randomOrder ? 1.f : 0.f; o[7] = static_cast<f32>(s.seed); o[8] = s.lockDimensions ? 1.f : 0.f;
+    }
+}
+
+bool write_animator_field(TextAnimator& a, u32 field, f32 value) noexcept {
+    if (!std::isfinite(value)) return false;
+    if (field < 16) {
+        switch (field) {
+            case 0: a.props = static_cast<u32>(std::max(0.f, value)) & 0x3FFFFu; return true;
+            case 2: a.rigAnchor = value > .5f ? 1 : 0; return true;
+            case 3: a.anchorGrouping = static_cast<u8>(std::clamp(value, 0.f, 3.f)); return true;
+            case 4: a.cursor = static_cast<u8>(std::clamp(value, 0.f, 8.f)); return true;
+            case 5: a.cursorBlink = value > .5f; return true;
+            case 6: a.charset = static_cast<u8>(std::clamp(value, 0.f, 14.f)); return true;
+            case 7: a.preserveSpace = value > .5f; return true;
+            case 8: a.groupAlign.x = std::clamp(value, -100.f, 100.f); return true;
+            case 9: a.groupAlign.y = std::clamp(value, -100.f, 100.f); return true;
+            default: return false;
+        }
+    }
+    const u32 si = field / 16u - 1u, f = field % 16u;
+    if (si > a.moreSelectors.size() || si >= kMaxTextSelectors) return false;
+    TextSelector& s = si == 0 ? a.selector : a.moreSelectors[si - 1];
+    switch (f) {
+        case 0: s.enabled = value > .5f; return true;
+        case 2: s.basedOn = static_cast<u8>(std::clamp(value, 0.f, 3.f)); return true;
+        case 3: s.units = value > .5f ? 1 : 0; return true;
+        case 4: s.mode = static_cast<u8>(std::clamp(value, 0.f, 5.f)); return true;
+        case 5: s.shape = static_cast<u8>(std::clamp(value, 0.f, 5.f)); return true;
+        case 6: s.randomOrder = value > .5f; return true;
+        case 7: s.seed = static_cast<u32>(std::clamp(value, 0.f, 1e6f)); return true;
+        case 8: s.lockDimensions = value > .5f; return true;
+        default: return false;
+    }
+}
+
+f32 clamp_animator_param(const TextAnimator& a, u32 key, f32 v) noexcept {
+    const u32 block = key / kSelectorKeyBlock, k = key % kSelectorKeyBlock;
+    const TextSelector* s = block == 0 ? &a.selector : block <= a.moreSelectors.size() ? &a.moreSelectors[block - 1] : nullptr;
+    const bool indexUnits = s && s->units == 1;
+    switch (k) {
+        case kFillR: case kFillG: case kFillB: case kAnimFillA:
+        case kStrokeR: case kStrokeG: case kStrokeB: return std::clamp(v, 0.0f, 1.0f);
+        case kSelStart: case kSelEnd: return indexUnits ? std::clamp(v, -1000.0f, 1000.0f) : std::clamp(v, 0.0f, 100.0f);
+        case kSelOffset: return std::clamp(v, -1000.0f, 1000.0f);
+        case kSelAmount: case kSelEaseHigh: case kSelEaseLow: case kAnimWigglyMin: case kAnimWigglyMax:
+        case kAnimGroupAlignX: case kAnimGroupAlignY: return std::clamp(v, -100.0f, 100.0f);
+        case kAnimSmoothness: case kAnimCorrelation: case kAnimFillOpacity: return std::clamp(v, 0.0f, 100.0f);
+        case kWiggleRate: return std::clamp(v, 0.0f, 60.0f);
+        case kOpacity: return a.rig ? std::clamp(v, -100.0f, 100.0f) : std::clamp(v, 0.0f, 100.0f);
+        case kScaleX: case kScaleY: return std::clamp(v, -2000.0f, 2000.0f);
+        case kBlur: return std::clamp(v, 0.0f, 200.0f);
+        case kSkew: return std::clamp(v, -80.0f, 80.0f);
+        case kStrokeWidth: return std::clamp(v, -50.0f, 50.0f);
+        default: return std::clamp(v, -100000.0f, 100000.0f);
+    }
+}
+
+TextSelector make_text_selector(u32 type) noexcept {
+    TextSelector s;
+    s.type = static_cast<u8>(type);
+    // Como no After Effects: oscilação e expressão entram em interseção com o de cima.
+    if (type == kTextSelectorWiggly || type == kTextSelectorExpression) s.mode = kTextModeIntersect;
+    return s;
 }
 
 std::string format_counter(f64 value, u32 decimals, bool grouping) {

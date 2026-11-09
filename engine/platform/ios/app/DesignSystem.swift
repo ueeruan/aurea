@@ -531,7 +531,17 @@ struct ExpressionBadge: View {
 /// (`FxParamRowMath.labelFontSize`). O losango pequeno no canto diz que a trilha
 /// anima (cheio = marca no cabeçote); o "=" no outro canto, que tem expressão.
 /// `PropertyLabelChip` e o rótulo das linhas de Efeitos usam este mesmo desenho.
+/// Em seção estreita o rótulo sobe e a régua usa a largura toda: espremida, não dá para arrastar.
+private struct ParamRowStackedKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    var paramRowStacked: Bool {
+        get { self[ParamRowStackedKey.self] }
+        set { self[ParamRowStackedKey.self] = newValue }
+    }
+}
+
 struct ParamRowLabel: View {
+    @Environment(\.paramRowStacked) private var stacked
     let label: String
     let selected: Bool
     var keyframe: KeyframeLook = .none
@@ -542,12 +552,13 @@ struct ParamRowLabel: View {
         Text(label)
             .font(.aurea(size: 14, weight: selected ? .bold : .regular))
             .multilineTextAlignment(.center)
-            .lineLimit(FxParamRowMath.labelMaxLines(label))
+            .lineLimit(stacked ? 1 : FxParamRowMath.labelMaxLines(label))
             .minimumScaleFactor(0.72)
             .truncationMode(.tail)
             .foregroundStyle(selected ? AureaColors.accent : ParamRowColors.labelOffText)
             .padding(.horizontal, 4)
-            .frame(width: width, height: ParamRowDims.labelH)
+            .frame(width: stacked ? nil : width, height: stacked ? 30 : ParamRowDims.labelH)
+            .frame(maxWidth: stacked ? .infinity : nil)
             .background(selected ? ParamRowColors.labelOn : ParamRowColors.labelOff,
                         in: RoundedRectangle(cornerRadius: ParamRowDims.radius))
             .overlay(alignment: .topTrailing) {
@@ -865,7 +876,16 @@ struct PropertyCustomRow<Content: View>: View {
 
 /// O INTERRUPTOR (CupertinoSwitch da A.01): 51 × 31, ligado em `acao` #245D8C,
 /// desligado em `campoAlto`; bola branca de 27 que desliza em 200 ms.
+private struct ToggleOffTrackKey: EnvironmentKey { static let defaultValue: Color? = nil }
+extension EnvironmentValues {
+    var toggleOffTrack: Color? {
+        get { self[ToggleOffTrackKey.self] }
+        set { self[ToggleOffTrackKey.self] = newValue }
+    }
+}
+
 struct AureaToggle: View {
+    @Environment(\.toggleOffTrack) private var offTrack
     private let checked: Bool
     private let enabled: Bool
     private let onCheckedChange: (Bool) -> Void
@@ -885,7 +905,7 @@ struct AureaToggle: View {
     var body: some View {
         ZStack(alignment: .leading) {
             RoundedRectangle(cornerRadius: AureaDims.toggleRadius)
-                .fill(checked ? AureaColors.action : AureaColors.chipHigh)
+                .fill(checked ? AureaColors.action : offTrack ?? AureaColors.chipHigh)
             Circle()
                 .fill(Color.white)
                 .shadow(radius: 2, y: 1)

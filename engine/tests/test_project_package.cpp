@@ -369,8 +369,10 @@ AUREA_TEST(ProjectPackage, RejectsForeignNewerAndCorruptFiles) {
     const std::string bad = s8(dir / "ruim.aurea");
     write_text(bad, proj);
     const std::string pkgBad = s8(dir / "ruim.aureaproj");
-    // write_package recusa mandar adiante um projeto que não abre.
-    AUREA_CHECK(!package::write_package(bad, pkgBad, "R", "1", {}, nullptr).ok());
+    // Modo de resgate: o projeto que não abre sai assim mesmo, marcado no
+    // manifesto, para a pessoa conseguir tirar o arquivo do aparelho.
+    AUREA_CHECK(package::write_package(bad, pkgBad, "R", "1", {}, nullptr).ok());
+    AUREA_CHECK(read_text(pkgBad).find("damaged 1") != std::string::npos);
 }
 
 // Galaxy A32: "importei o arquivo do projeto e o app fechou". Pacote de outro

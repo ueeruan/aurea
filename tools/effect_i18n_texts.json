@@ -6927,5 +6927,229 @@
   "ar": "مقدار التعبير",
   "hi": "एक्सप्रेशन मात्रा",
   "id": "Jumlah ekspresi"
+ },
+ "Asterisco": {
+  "ar": "نجمة",
+  "en": "Asterisk",
+  "es": "Asterisco",
+  "hi": "तारांकन",
+  "id": "Tanda bintang",
+  "ru": "Звёздочка"
+ },
+ "Caracteres": {
+  "ar": "الأحرف",
+  "en": "Characters",
+  "es": "Caracteres",
+  "hi": "अक्षर",
+  "id": "Karakter",
+  "ru": "Символы"
+ },
+ "Cursor": {
+  "ar": "المؤشر",
+  "en": "Cursor",
+  "es": "Cursor",
+  "hi": "कर्सर",
+  "id": "Kursor",
+  "ru": "Курсор"
+ },
+ "Dígitos": {
+  "ar": "أرقام",
+  "en": "Digits",
+  "es": "Dígitos",
+  "hi": "अंक",
+  "id": "Angka",
+  "ru": "Цифры"
+ },
+ "Dígitos e letras": {
+  "ar": "أرقام وأحرف",
+  "en": "Digits and letters",
+  "es": "Dígitos y letras",
+  "hi": "अंक और अक्षर",
+  "id": "Angka dan huruf",
+  "ru": "Цифры и буквы"
+ },
+ "Dígitos, letras e símbolos": {
+  "ar": "أرقام وأحرف ورموز",
+  "en": "Digits, letters and symbols",
+  "es": "Dígitos, letras y símbolos",
+  "hi": "अंक, अक्षर और चिह्न",
+  "id": "Angka, huruf, dan simbol",
+  "ru": "Цифры, буквы и знаки"
+ },
+ "Em branco": {
+  "ar": "فارغ",
+  "en": "Blank",
+  "es": "En blanco",
+  "hi": "खाली",
+  "id": "Kosong",
+  "ru": "Пусто"
+ },
+ "Espaço entre letras": {
+  "ar": "تباعد الأحرف",
+  "en": "Letter spacing",
+  "es": "Espacio entre letras",
+  "hi": "अक्षरों की दूरी",
+  "id": "Spasi huruf",
+  "ru": "Межбуквенный интервал"
+ },
+ "Espaço entre linhas": {
+  "ar": "تباعد الأسطر",
+  "en": "Line spacing",
+  "es": "Espacio entre líneas",
+  "hi": "पंक्तियों की दूरी",
+  "id": "Spasi baris",
+  "ru": "Межстрочный интервал"
+ },
+ "Estendido": {
+  "ar": "موسع",
+  "en": "Extended",
+  "es": "Extendido",
+  "hi": "विस्तारित",
+  "id": "Diperluas",
+  "ru": "Расширенный"
+ },
+ "Maiúsculas": {
+  "ar": "أحرف كبيرة",
+  "en": "Uppercase",
+  "es": "Mayúsculas",
+  "hi": "बड़े अक्षर",
+  "id": "Huruf besar",
+  "ru": "Прописные"
+ },
+ "Maiúsculas e minúsculas": {
+  "ar": "أحرف كبيرة وصغيرة",
+  "en": "Mixed case",
+  "es": "Mayúsculas y minúsculas",
+  "hi": "बड़े और छोटे अक्षर",
+  "id": "Huruf besar dan kecil",
+  "ru": "Прописные и строчные"
+ },
+ "Manter espaços": {
+  "ar": "الإبقاء على المسافات",
+  "en": "Preserve spaces",
+  "es": "Conservar espacios",
+  "hi": "स्पेस बनाए रखें",
+  "id": "Pertahankan spasi",
+  "ru": "Сохранять пробелы"
+ },
+ "Marcador": {
+  "ar": "نقطة",
+  "en": "Bullet",
+  "es": "Viñeta",
+  "hi": "बुलेट",
+  "id": "Poin",
+  "ru": "Маркер"
+ },
+ "Minúsculas": {
+  "ar": "أحرف صغيرة",
+  "en": "Lowercase",
+  "es": "Minúsculas",
+  "hi": "छोटे अक्षर",
+  "id": "Huruf kecil",
+  "ru": "Строчные"
+ },
+ "Piscar cursor": {
+  "ar": "وميض المؤشر",
+  "en": "Blink cursor",
+  "es": "Parpadear cursor",
+  "hi": "कर्सर झपकाएँ",
+  "id": "Kedipkan kursor",
+  "ru": "Мигание курсора"
+ },
+ "Sublinhado": {
+  "ar": "شرطة سفلية",
+  "en": "Underscore",
+  "es": "Guion bajo",
+  "hi": "अंडरस्कोर",
+  "id": "Garis bawah",
+  "ru": "Подчёркивание"
+ },
+ "Símbolos": {
+  "ar": "رموز",
+  "en": "Symbols",
+  "es": "Símbolos",
+  "hi": "चिह्न",
+  "id": "Simbol",
+  "ru": "Знаки"
+ },
+ "Texto da camada": {
+  "ar": "نص الطبقة",
+  "en": "Layer text",
+  "es": "Texto de la capa",
+  "hi": "लेयर का टेक्स्ट",
+  "id": "Teks layer",
+  "ru": "Текст слоя"
+ },
+ "Traço": {
+  "ar": "شرطة",
+  "en": "Dash",
+  "es": "Guion",
+  "hi": "डैश",
+  "id": "Tanda hubung",
+  "ru": "Тире"
+ },
+ "_": {
+  "ar": "_",
+  "en": "_",
+  "es": "_",
+  "hi": "_",
+  "id": "_",
+  "ru": "_"
+ },
+ "▁": {
+  "ar": "▁",
+  "en": "▁",
+  "es": "▁",
+  "hi": "▁",
+  "id": "▁",
+  "ru": "▁"
+ },
+ "█": {
+  "ar": "█",
+  "en": "█",
+  "es": "█",
+  "hi": "█",
+  "id": "█",
+  "ru": "█"
+ },
+ "▌": {
+  "ar": "▌",
+  "en": "▌",
+  "es": "▌",
+  "hi": "▌",
+  "id": "▌",
+  "ru": "▌"
+ },
+ "▎": {
+  "ar": "▎",
+  "en": "▎",
+  "es": "▎",
+  "hi": "▎",
+  "id": "▎",
+  "ru": "▎"
+ },
+ "▏": {
+  "ar": "▏",
+  "en": "▏",
+  "es": "▏",
+  "hi": "▏",
+  "id": "▏",
+  "ru": "▏"
+ },
+ "▕": {
+  "ar": "▕",
+  "en": "▕",
+  "es": "▕",
+  "hi": "▕",
+  "id": "▕",
+  "ru": "▕"
+ },
+ "▯": {
+  "ar": "▯",
+  "en": "▯",
+  "es": "▯",
+  "hi": "▯",
+  "id": "▯",
+  "ru": "▯"
  }
 }

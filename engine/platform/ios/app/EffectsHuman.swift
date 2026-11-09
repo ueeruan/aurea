@@ -107,6 +107,9 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.text.transform", FxEffectHuman(name: "text_transform_name", keywords: "text transform texto transformar letras palavras linhas intervalo fase", principal: Array(0...17))),
     // 0.4.6: o animador completo (referência: animador de texto do After Effects). Par do Android.
     ("aurea.text.animator_pro", FxEffectHuman(name: "text_animator_pro_name", keywords: "text animator pro animador texto avancado after effects seletor intervalo indice oscilacao wiggly ancora matiz linhas", principal: Array(0...43))),
+    ("aurea.text.progress", FxEffectHuman(name: "text_progress_name", keywords: "text progress progresso texto digitar typewriter cursor", principal: Array(0...3))),
+    ("aurea.text.randomizer", FxEffectHuman(name: "text_randomizer_name", keywords: "text randomizer aleatorio decodificar decode senha censura caracteres", principal: Array(0...6))),
+    ("aurea.text.spacing", FxEffectHuman(name: "text_spacing_name", keywords: "text spacing espacamento letras linhas tracking entrelinha", principal: Array(0...1))),
     ("aurea.text.animator", FxEffectHuman(name: "text_animator_name", keywords: "text animator animador texto letras palavras linhas cor blur desfoque random aleatorio", principal: Array(0...23))),
     ("aurea.stylize.bevel_alpha", FxEffectHuman(name: "bevel_alpha_name", keywords: "bevel alpha bisel alfa relevo texto borda", principal: Array(0...4))),
     ("aurea.color.gradient_map", FxEffectHuman(name: "gradient_map_name", keywords: "gradient map mapa degrade gradiente texto cor tritone cc toner", principal: Array(0...4))),

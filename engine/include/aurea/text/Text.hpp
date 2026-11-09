@@ -113,6 +113,11 @@ inline constexpr u32 kGlyphAtlasSize = 2048;
 inline constexpr f32 kGlyphBasePx = 64.0f;
 inline constexpr f32 kGlyphSpread = 16.0f;       ///< px da base, em volta do glifo
 inline constexpr f32 kGlyphDistScale = 8.0f;     ///< valor (0..255) por px da base
+/// Texto grande na tela: o mesmo glifo com 3× os pixels, no mesmo atlas. A 64 px
+/// a letra ampliada 11× sai com o contorno facetado; a distância por em não
+/// muda, então shader e contorno continuam iguais.
+inline constexpr f32 kGlyphLargeFactor = 3.0f;
+inline constexpr f32 kGlyphLargeFromPx = 160.0f;
 
 /// Diagnóstico do SDF de um glifo na grade do atlas (kGlyphBasePx, kGlyphSpread):
 /// o SDF usado no texto, a cobertura do mesmo glifo na MESMA grade e quantos
@@ -143,12 +148,14 @@ struct TextLayout {
     f32 width = 0, height = 0;            ///< caixa da layer com a margem
     f32 pad = 0;
     f32 contentWidth = 0, contentHeight = 0;   ///< sem a margem
+    f32 capHeight = 0;                         ///< altura do H (px da layer): base do alinhamento vertical
     u32 chars = 0, words = 0, lines = 0;
 };
 
 /// Monta os quads do texto (shaping + atlas). `pad` = margem em px da layer
 /// (contorno). Falso se não há glifo visível.
-bool layout_quads(const Font& font, const TextData& t, f32 pad, TextLayout& out);
+/// `shownPx`: altura em px com que o texto aparece (0 = desconhecida, nível normal).
+bool layout_quads(const Font& font, const TextData& t, f32 pad, TextLayout& out, f32 shownPx = 0.0f);
 
 /// Atlas (R8, kGlyphAtlasSize²): pixels, geração (muda quando é refeito) e se
 /// mudou desde a última leitura. Legado: o `dirty` é UM só para o processo —

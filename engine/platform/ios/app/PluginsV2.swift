@@ -1479,7 +1479,7 @@ struct PluginV2Controls: View {
                 }
                 if p.enabled {
                     ForEach(p.panels.filter { !$0.replaces.isEmpty }, id: \.id) { panel in
-                        PluginPermissionRow(text: AureaText.t("plugv3_replaces", AureaText.t("plugv3_panel_\(panel.replaces)")),
+                        PluginPermissionRow(text: AureaText.t("plugv3_replaces", plugv3PanelName(panel.replaces)),
                                             on: !runtime.replacementsOff.contains(panel.replaces), tag: "plugins.replace.\(panel.replaces)") { runtime.setReplacementOff(panel.replaces, !$0) }
                     }
                     ForEach(p.panels.filter { $0.placement.contains("editor.panel") }, id: \.id) { panel in
@@ -1497,5 +1497,16 @@ struct PluginV2Controls: View {
             }
             .padding(.top, 6)
         }
+    }
+}
+
+/// Nome do painel do editor que um plugin substitui (as mesmas chaves do Android).
+func plugv3PanelName(_ replaces: String) -> String {
+    switch replaces {
+    case "transform": return AureaText.t("plugv3_panel_transform")
+    case "effects": return AureaText.t("plugv3_panel_effects")
+    case "blend": return AureaText.t("plugv3_panel_blend")
+    case "presets": return AureaText.t("plugv3_panel_presets")
+    default: return AureaText.t("plugv3_panel_material")
     }
 }

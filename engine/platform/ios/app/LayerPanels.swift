@@ -2369,7 +2369,7 @@ struct MaskPanel: View {
             PanelSection(title: AureaText.t("panel_2_qual_camada_recorta"), glyph: CupertinoGlyph.RectangleStack, tag: "matte.sec.layer", count: candidates.count) {
                 if candidates.isEmpty { hint("panel_nao_ha_outra_camada_possa_recortar") }
                 ForEach(Array(candidates.enumerated()), id: \.element.id) { n, layer in
-                    PanelItemRow(glyph: layerKindGlyph(layer.kind), title: layer.name, tag: "matte.layer.\(n)", on: matte == layer.id) { write(layer.id, mode == 0 ? 1 : mode) }
+                    PanelItemRow(glyph: layerKindGlyph(Int(layer.kind)), title: layer.name, tag: "matte.layer.\(n)", on: matte == layer.id) { write(layer.id, mode == 0 ? 1 : mode) }
                 }
                 Color.clear.frame(height: 4)
                 hint(matte != 0 ? "panel_camada_escolhida_recorta_esta_some_tela" : "panel_pela_forma_aparece_onde_outra_camada")

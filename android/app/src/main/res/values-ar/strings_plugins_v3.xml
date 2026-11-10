@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Plugin V3 (PluginUi.kt, PluginManagerSheet.kt, GradientParamEditor.kt) -->
+    <string name="plugv3_back_to_original">العودة إلى الأصلي</string>
+    <string name="plugv3_replaces">استخدامه بدلًا من %1$s</string>
+    <string name="plugv3_panel_transform">التحويل</string>
+    <string name="plugv3_panel_effects">التأثيرات</string>
+    <string name="plugv3_panel_blend">المزج والشفافية</string>
+    <string name="plugv3_panel_presets">الإعدادات المسبقة</string>
+    <string name="plugv3_panel_material">مادة ثلاثية الأبعاد</string>
+    <string name="plugv3_safe_mode">الوضع الآمن (يوقف الإضافات)</string>
+    <string name="plugv3_safe_on">الوضع الآمن مفعّل: لا تعمل أي إضافة.</string>
+    <string name="plugv3_safe_auto">أُغلق التطبيق فجأة في المرات الأخيرة، لذا أُوقفت الإضافات. أوقف الوضع الآمن لاستخدامها مجددًا.</string>
+    <string name="plugv3_close">إغلاق</string>
+    <string name="plugv3_gradient_position">الموضع</string>
+    <string name="plugv3_gradient_remove">إزالة اللون</string>
+    <string name="plugv3_gradient_stop">اللون %1$s</string>
+</resources>

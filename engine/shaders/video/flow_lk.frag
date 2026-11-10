@@ -22,7 +22,7 @@ layout(set = 0, binding = AUREA_TEX1) uniform sampler2D u_coarse;   // RG = flux
 
 layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 texel;    // xy = 1/tamanho do nível, zw = tamanho
-    vec4 flags;    // x = tem nível de cima (0/1), y = iterações, z = sentido trocado (0/1)
+    vec4 flags;    // x = tem nível de cima (0/1), y = iterações, z = sentido trocado (0/1), w = amortecimento (0 = LK puro)
 } p;
 
 // Quadro de origem (o "atual") e o de destino, conforme o sentido.
@@ -44,10 +44,43 @@ void main() {
         gxy += gx * gy;
         gyy += gy * gy;
     }
+    // Perto de um contorno, o vetor interpolado do nível de cima é a mistura do
+    // objeto com o fundo. Antes de iterar, parte do vizinho que melhor explica
+    // esta janela; onde os vizinhos concordam não há o que decidir.
+    if (p.flags.w > 0.0 && p.flags.x > 0.5) {
+        vec2 cands[9];
+        float spread = 0.0;
+        for (int c = 0; c < 8; ++c) {
+            const float angle = float(c) * 0.7853981634;
+            cands[c] = textureLod(u_coarse, v_uv + vec2(cos(angle), sin(angle)) * 3.0 * p.texel.xy, 0.0).xy * 2.0;
+            spread = max(spread, length(cands[c] - flow));
+        }
+        if (spread > 0.5) {
+            cands[8] = flow;
+            float bestCost = 1e9;
+            for (int c = 0; c < 9; ++c) {
+                float cost = 0.0;
+                for (int j = 0; j < 3; ++j) {
+                    for (int i = 0; i < 3; ++i) {
+                        const int k = j * 10 + i * 2;
+                        const vec2 uv = v_uv + (vec2(float(k % 5 - 2), float(k / 5 - 2)) + cands[c]) * p.texel.xy;
+                        cost += abs(dst_luma(uv) - av[k]);
+                    }
+                }
+                if (c == 8) cost *= 0.9;
+                if (cost < bestCost) { bestCost = cost; flow = cands[c]; }
+            }
+        }
+    }
+    // Amortecimento: em região lisa ou com ruído a matriz quase não tem
+    // inversa e o passo explodia em vetor aleatório; assim ele fica pequeno e
+    // o pixel mantém o movimento que veio do nível de cima.
+    gxx += p.flags.w;
+    gyy += p.flags.w;
     float det = gxx * gyy - gxy * gxy;
     // Menor autovalor: confiança do rastreio (canto > borda > liso).
     float tr = gxx + gyy;
-    float lmin = 0.5 * (tr - sqrt(max(tr * tr - 4.0 * det, 0.0)));
+    float lmin = max(0.5 * (tr - sqrt(max(tr * tr - 4.0 * det, 0.0))) - p.flags.w, 0.0);
     if (det > 1e-9) {
         int iters = int(p.flags.y);
         for (int it = 0; it < 8; ++it) {

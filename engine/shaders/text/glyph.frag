@@ -28,12 +28,21 @@ layout(location = 0) out vec4 o_color;
 
 const float kDistScale = 8.0;   // valor 0..255 por px da base (Text.hpp)
 
+// Cobertura do contorno. Com preenchimento opaco ele passa inteiro por baixo;
+// com preenchimento translúcido (knockout = 1 - alfa) o miolo não pode vazar,
+// e a divisão já desconta o que a instância do preenchimento cobre depois.
+float strokeCoverage(float inner, float outer, float knockout) {
+    if (knockout <= 0.0) return outer;
+    return clamp(outer * (1.0 - inner) / max(1.0 - inner * (1.0 - knockout), 1e-4), 0.0, 1.0);
+}
+
 vec4 coverageAt(Glyph gl, vec2 uv, float aa) {
     if (any(lessThan(uv, gl.uv.xy)) || any(greaterThan(uv, gl.uv.zw))) return vec4(0.0);
     vec2 inset = 0.5 / vec2(textureSize(u_atlas, 0));
     float sd = (texture(u_atlas, clamp(uv, gl.uv.xy + inset, gl.uv.zw - inset)).r * 255.0 - 128.0) / kDistScale * gl.misc.z;
-    float fillA = smoothstep(-aa, aa, sd) * gl.fill.a;
-    float strokeA = gl.misc.w > 0.0 ? smoothstep(-aa, aa, sd + gl.misc.w) * gl.stroke.a : 0.0;
+    float inner = smoothstep(-aa, aa, sd);
+    float fillA = inner * gl.fill.a;
+    float strokeA = gl.misc.w > 0.0 ? strokeCoverage(inner, smoothstep(-aa, aa, sd + gl.misc.w), gl.misc.x) * gl.stroke.a : 0.0;
     return vec4(gl.fill.rgb * fillA + gl.stroke.rgb * strokeA * (1.0 - fillA), fillA + strokeA * (1.0 - fillA));
 }
 
@@ -95,9 +104,10 @@ void main() {
     const float gy = abs(texture(u_atlas, clamp(gl.uv.xy + (v_uv + dy) * uvExtent, lo, hi)).r
                        - texture(u_atlas, clamp(gl.uv.xy + (v_uv - dy) * uvExtent, lo, hi)).r) * distanceScale;
     const float w = max((gx + gy) * 0.5, 1e-4) + blur;
-    const float fillA = smoothstep(-w, w, sd) * gl.fill.a;
+    const float inner = smoothstep(-w, w, sd);
+    const float fillA = inner * gl.fill.a;
     float strokeA = 0.0;
-    if (gl.misc.w > 0.0) strokeA = smoothstep(-w, w, sd + gl.misc.w) * gl.stroke.a;
+    if (gl.misc.w > 0.0) strokeA = strokeCoverage(inner, smoothstep(-w, w, sd + gl.misc.w), gl.misc.x) * gl.stroke.a;
     // Preenchimento por cima do contorno.
     const vec3 rgb = gl.fill.rgb * fillA + gl.stroke.rgb * strokeA * (1.0 - fillA);
     const float a = fillA + strokeA * (1.0 - fillA);

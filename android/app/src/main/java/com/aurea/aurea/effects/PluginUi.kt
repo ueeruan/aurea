@@ -31,10 +31,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -161,9 +164,6 @@ internal fun PluginPanelContent(plugin: PluginTexts.Plugin, panel: PluginTexts.P
     val tag = localeTag()
     LaunchedEffect(plugin.id) { if (PluginRuntime.states[plugin.id] == null) PluginRuntime.refreshState(plugin.id) }
     val state = PluginRuntime.states[plugin.id]
-    val values = state?.optJSONObject("values")
-    val disabled = strArray(state?.optJSONArray("disabled"))
-    val hidden = strArray(state?.optJSONArray("hidden"))
     val busy = PluginRuntime.busy[plugin.id] == true
     val error = PluginRuntime.errors[plugin.id]
     Column(
@@ -194,14 +194,79 @@ internal fun PluginPanelContent(plugin: PluginTexts.Plugin, panel: PluginTexts.P
                     style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Accent)))
             }
         }
-        panel.controls.forEach { c ->
-            if (c.id in hidden) return@forEach
-            val enabled = !busy && c.id !in disabled
-            val label = state?.optJSONObject("labels")?.optString(c.id)?.takeIf { it.isNotEmpty() } ?: PluginTexts.pick(c.label, tag).orEmpty()
-            Box(Modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.4f).testTag("plugin.ctl.${c.id}")) {
-                PluginControl(plugin.id, c, label, values, state, enabled, tag)
+        PluginNodes(plugin.id, panel.controls, state, busy, true, tag)
+    }
+}
+
+private fun visibleControls(controls: List<PluginTexts.Control>, state: JSONObject?): List<PluginTexts.Control> {
+    val hidden = strArray(state?.optJSONArray("hidden"))
+    return controls.filter { it.id !in hidden }
+}
+
+@Composable
+private fun PluginNodes(pluginId: String, controls: List<PluginTexts.Control>, state: JSONObject?, busy: Boolean, parentEnabled: Boolean, tag: String) {
+    visibleControls(controls, state).forEach { c -> key(c.id) { PluginNode(pluginId, c, state, busy, parentEnabled, tag) } }
+}
+
+/** Um controle da árvore (formato 3): os que guardam outros passam o "desligado" adiante. */
+@Composable
+private fun PluginNode(pluginId: String, c: PluginTexts.Control, state: JSONObject?, busy: Boolean, parentEnabled: Boolean, tag: String) {
+    val own = c.id !in strArray(state?.optJSONArray("disabled"))
+    val enabled = parentEnabled && !busy && own
+    val label = state?.optJSONObject("labels")?.optString(c.id)?.takeIf { it.isNotEmpty() } ?: PluginTexts.pick(c.label, tag).orEmpty()
+    // Quem está dentro de um container apagado não soma outra transparência.
+    Box(Modifier.fillMaxWidth().alpha(if (enabled || !parentEnabled) 1f else 0.4f).testTag("plugin.ctl.${c.id}")) {
+        when (c.type) {
+            "row" -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                visibleControls(c.children, state).forEach { child ->
+                    key(child.id) { Box(Modifier.weight(1f)) { PluginNode(pluginId, child, state, busy, enabled, tag) } }
+                }
+            }
+            "column" -> Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                PluginNodes(pluginId, c.children, state, busy, enabled, tag)
+            }
+            "section" -> PluginSection(pluginId, c, label, state, busy, enabled, tag)
+            "tabs" -> PluginTabs(pluginId, c, state, busy, enabled, tag)
+            else -> PluginControl(pluginId, c, label, state?.optJSONObject("values"), state, enabled, tag)
+        }
+    }
+}
+
+@Composable
+private fun PluginSection(pluginId: String, c: PluginTexts.Control, label: String, state: JSONObject?, busy: Boolean, enabled: Boolean, tag: String) {
+    var open by rememberSaveable(c.id) { mutableStateOf(!c.collapsed) }
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(AureaColors.Chip.copy(alpha = 0.5f))) {
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 44.dp).testTag("plugin.section.${c.id}").semantics { contentDescription = label }
+                .tocavel(shrink = 1f) { open = !open }.padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(label, modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600)))
+            CupertinoIcon(if (open) CupertinoGlyph.ChevronUp else CupertinoGlyph.ChevronDown, 14.dp, AureaColors.Muted)
+        }
+        if (open) {
+            Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                PluginNodes(pluginId, c.children, state, busy, enabled, tag)
             }
         }
+    }
+}
+
+@Composable
+private fun PluginTabs(pluginId: String, c: PluginTexts.Control, state: JSONObject?, busy: Boolean, enabled: Boolean, tag: String) {
+    val sections = visibleControls(c.children, state)
+    if (sections.isEmpty()) return
+    var index by rememberSaveable(c.id) { mutableIntStateOf(0) }
+    val current = index.coerceIn(0, sections.lastIndex)
+    val section = sections[current]
+    val labels = state?.optJSONObject("labels")
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        ChoiceChips(
+            options = sections.map { labels?.optString(it.id)?.takeIf { x -> x.isNotEmpty() } ?: PluginTexts.pick(it.label, tag).orEmpty() },
+            selected = current,
+            onSelect = { index = it },
+        )
+        PluginNodes(pluginId, section.children, state, busy, enabled && section.id !in strArray(state?.optJSONArray("disabled")), tag)
     }
 }
 
@@ -410,6 +475,8 @@ private fun PluginControl(
 @Composable
 internal fun PluginEditorPanelHost(store: EditorStore, modifier: Modifier = Modifier) {
     PluginOverlays(store)
+    // Quinze segundos de editor de pé: esta abertura não foi uma queda (modo seguro).
+    LaunchedEffect(Unit) { kotlinx.coroutines.delay(15_000); PluginRuntime.markHealthy() }
     val open = PluginRuntime.editorPanel ?: return
     val plugin = store.plugins.firstOrNull { it.id == open.first && it.ok && it.enabled }
     val panel = plugin?.panels?.firstOrNull { it.id == open.second }
@@ -418,6 +485,10 @@ internal fun PluginEditorPanelHost(store: EditorStore, modifier: Modifier = Modi
         return
     }
     val tag = localeTag()
+    if ("editor.fullscreen" in panel.placement && "editor.panel" !in panel.placement) {
+        PluginFullscreenPanel(plugin, panel, modifier)
+        return
+    }
     Box(modifier.fillMaxWidth().height(300.dp).background(AureaColors.Background)) {
         PanelFrame(rail = PanelRail(onBack = { PluginRuntime.closeEditorPanel() }, supportsAnimation = false)) {
             Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -427,6 +498,75 @@ internal fun PluginEditorPanelHost(store: EditorStore, modifier: Modifier = Modi
                         style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W600)))
                 }
                 PluginPanelContent(plugin, panel)
+            }
+        }
+    }
+}
+
+/** Painel "editor.fullscreen" (formato 3). O fechar é do app: um plugin não prende a pessoa nele. */
+@Composable
+private fun PluginFullscreenPanel(plugin: PluginTexts.Plugin, panel: PluginTexts.Panel, modifier: Modifier) {
+    val tag = localeTag()
+    val closeLabel = stringResource(R.string.plugv3_close)
+    androidx.activity.compose.BackHandler { PluginRuntime.closeEditorPanel() }
+    Column(modifier.fillMaxSize().background(AureaColors.Background).testTag("plugin.fullscreen")) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(48.dp).testTag("plugin.fullscreen.close").semantics { contentDescription = closeLabel }
+                    .tocavel(shrink = 1f) { PluginRuntime.closeEditorPanel() },
+                contentAlignment = Alignment.Center,
+            ) { CupertinoIcon(CupertinoGlyph.Xmark, 18.dp, AureaColors.Text) }
+            CupertinoIcon(pluginGlyph(panel.icon), 18.dp, AureaColors.Accent)
+            Spacer(Modifier.width(8.dp))
+            Text(PluginTexts.pick(panel.title, tag).orEmpty(), modifier = Modifier.weight(1f),
+                style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W600)))
+        }
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(14.dp)) {
+            PluginPanelContent(plugin, panel)
+        }
+    }
+}
+
+/**
+ * O painel [key] do editor: o do plugin que o substitui ou, sem nenhum, o original.
+ * "Voltar ao original" é do app e fica fora do conteúdo do plugin; a escolha é
+ * guardada por painel (no gerenciador de plugins dá para reativar).
+ */
+@Composable
+internal fun PluginPanelOr(key: String, original: @Composable () -> Unit) {
+    val found = PluginRuntime.replacement(key)
+    if (found == null) {
+        original()
+        return
+    }
+    val (plugin, panel) = found
+    val tag = localeTag()
+    LaunchedEffect(plugin.id, panel.id) { PluginRuntime.openReplacement(plugin.id, panel.id) }
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 6.dp).testTag("plugin.replacement.$key"),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            CupertinoIcon(pluginGlyph(panel.icon), 18.dp, AureaColors.Accent)
+            Text(PluginTexts.pick(panel.title, tag).orEmpty(), modifier = Modifier.weight(1f),
+                style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W600)))
+            Box(Modifier.heightIn(min = 44.dp).testTag("plugin.restore.$key").tocavel(shrink = 1f) { PluginRuntime.setReplacementOff(key, true) }, contentAlignment = Alignment.Center) {
+                Text(stringResource(R.string.plugv3_back_to_original), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Accent)))
+            }
+        }
+        PluginPanelContent(plugin, panel)
+    }
+}
+
+/** As ações "add.menu" (formato 3) na grade Elemento do Adicionar. */
+@Composable
+internal fun pluginAddCells(store: EditorStore, close: () -> Unit): List<com.aurea.aurea.editor.ObjectCell> {
+    val tag = localeTag()
+    return store.plugins.filter { it.ok && it.enabled }.flatMap { p ->
+        p.actions.filter { "add.menu" in it.placement }.map { a ->
+            com.aurea.aurea.editor.ObjectCell(PluginTexts.pick(a.title, tag).orEmpty(), "plugin.action.${p.id}.${a.id}", glyph = pluginGlyph(a.icon)) {
+                close()
+                PluginRuntime.runAction(p.id, a)
             }
         }
     }
@@ -455,7 +595,7 @@ internal fun pluginEditorMenuEntries(store: EditorStore): List<MenuEntry> {
     val tag = localeTag()
     val out = ArrayList<MenuEntry>()
     store.plugins.filter { it.ok && it.enabled }.forEach { p ->
-        p.panels.filter { "editor.panel" in it.placement }.forEach { panel ->
+        p.panels.filter { "editor.panel" in it.placement || "editor.fullscreen" in it.placement }.forEach { panel ->
             out += MenuEntry.Item(PluginTexts.pick(panel.title, tag).orEmpty(), glyph = pluginGlyph(panel.icon),
                 sublabel = PluginTexts.pick(p.names, tag), tag = "plugin.open.${p.id}.${panel.id}") { PluginRuntime.openPanel(p.id, panel.id) }
         }

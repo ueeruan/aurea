@@ -6,6 +6,7 @@
 #include "aurea/media/ImageSequence.hpp"
 #include "aurea/scene3d/Shape3D.hpp"
 #include "aurea/scene3d/Text3D.hpp"
+#include "aurea/scene3d/Image3D.hpp"
 #include "aurea/text/FontManager.hpp"
 #include "cgltf.h"
 
@@ -324,6 +325,7 @@ Status capture_snapshot(std::vector<u8> initial, CompositionId composition, cons
                 std::find(retainedImages->begin(), retainedImages->end(), id.pack()) != retainedImages->end()) return;
             scene3d::Text3DSpec text;
             scene3d::Shape3DSpec shape;
+            scene3d::Image3DSpec image3d;
             ImageSequenceSpec sequence;
             if (decode_image_sequence(asset.sourcePath, sequence)) {
                 // Sequência de imagens: cada quadro presente é uma dependência,
@@ -355,6 +357,9 @@ Status capture_snapshot(std::vector<u8> initial, CompositionId composition, cons
             } else if (scene3d::decode_shape3d(asset.sourcePath, shape)) {
                 for (auto& part : shape.parts) { status = add_path(candidate, part.image, resolve); if (!status.ok()) break; }
                 asset.sourcePath = scene3d::encode_shape3d(shape);
+            } else if (scene3d::decode_image3d(asset.sourcePath, image3d)) {
+                status = add_path(candidate, image3d.imagePath, resolve);
+                asset.sourcePath = scene3d::encode_image3d(image3d);
             } else if (!asset.sourcePath.empty()) {
                 status = add_path(candidate, asset.sourcePath, resolve, !requirePersistentSources);
                 if (status.ok() && requirePersistentSources && asset.kind == AssetKind::Model3D)

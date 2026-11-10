@@ -92,6 +92,18 @@ public:
     /// deles — reinstalar mantém; remover apaga.
     [[nodiscard]] std::string data_directory() const;
 
+    // --- Modo seguro -------------------------------------------------------------
+    /// O app abriu: conta a sessão. Duas seguidas sem `mark_healthy` (o app caiu
+    /// abrindo) e a próxima abre em modo seguro, com os plugins fora do catálogo.
+    void begin_session() noexcept;
+    /// A sessão chegou inteira até aqui: zera a contagem.
+    void mark_healthy() noexcept;
+    /// Vale no próximo `load_all`. Desligar também zera a contagem.
+    void set_safe_mode(bool on) noexcept;
+    [[nodiscard]] bool safe_mode() const noexcept;
+    /// O modo seguro veio das quedas, não da pessoa.
+    [[nodiscard]] bool safe_mode_automatic() const noexcept;
+
 private:
     struct Installed {
         PluginInfo info;
@@ -113,6 +125,10 @@ private:
     std::vector<Installed> plugins_;
     std::set<std::string> messages_;   ///< textos que `Status::detail` aponta
     u32 stagingCounter_ = 0;
+    bool safeMode_ = false;
+    bool safeModeAutomatic_ = false;
+    [[nodiscard]] u32 read_counter(const char* name) const noexcept;
+    void write_counter(const char* name, u32 value) const noexcept;
 };
 
 } // namespace aurea::plugins

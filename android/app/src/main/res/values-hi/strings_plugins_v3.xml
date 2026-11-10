@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Plugin V3 (PluginUi.kt, PluginManagerSheet.kt, GradientParamEditor.kt) -->
+    <string name="plugv3_back_to_original">मूल पर वापस जाएं</string>
+    <string name="plugv3_replaces">%1$s की जगह उपयोग करें</string>
+    <string name="plugv3_panel_transform">ट्रांसफ़ॉर्म</string>
+    <string name="plugv3_panel_effects">इफ़ेक्ट</string>
+    <string name="plugv3_panel_blend">ब्लेंड और अपारदर्शिता</string>
+    <string name="plugv3_panel_presets">प्रीसेट</string>
+    <string name="plugv3_panel_material">3D मटेरियल</string>
+    <string name="plugv3_safe_mode">सेफ़ मोड (प्लगइन बंद करता है)</string>
+    <string name="plugv3_safe_on">सेफ़ मोड चालू है: कोई प्लगइन नहीं चल रहा।</string>
+    <string name="plugv3_safe_auto">पिछली बार ऐप अपने आप बंद हो गया था, इसलिए प्लगइन बंद कर दिए गए। इन्हें फिर से इस्तेमाल करने के लिए सेफ़ मोड बंद करें।</string>
+    <string name="plugv3_close">बंद करें</string>
+    <string name="plugv3_gradient_position">स्थिति</string>
+    <string name="plugv3_gradient_remove">रंग हटाएं</string>
+    <string name="plugv3_gradient_stop">रंग %1$s</string>
+</resources>

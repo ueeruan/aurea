@@ -16,10 +16,15 @@ layout(set = 0, binding = AUREA_TEX0) uniform sampler2D u_a;
 layout(set = 0, binding = AUREA_TEX1) uniform sampler2D u_b;
 
 layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
-    vec4 outTexel;   // xy = tamanho de um pixel de SAÍDA em uv
+    vec4 outTexel;   // xy = tamanho de um pixel de SAÍDA em uv, z = 1: curva perceptual
 } p;
 
-float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+// O vídeo chega em luz linear, onde as sombras quase não têm gradiente e o
+// rastreio fica cego justamente nelas; a raiz devolve o contraste percebido.
+float luma(vec3 c) {
+    const float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    return p.outTexel.z > 0.5 ? sqrt(max(l, 0.0)) : l;
+}
 
 void main() {
     vec2 d = p.outTexel.xy * 0.25;

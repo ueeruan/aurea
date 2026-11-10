@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Plugin V3 (PluginUi.kt, PluginManagerSheet.kt, GradientParamEditor.kt) -->
+    <string name="plugv3_back_to_original">Volver al original</string>
+    <string name="plugv3_replaces">Usar en lugar de %1$s</string>
+    <string name="plugv3_panel_transform">Transformar</string>
+    <string name="plugv3_panel_effects">Efectos</string>
+    <string name="plugv3_panel_blend">Mezcla y opacidad</string>
+    <string name="plugv3_panel_presets">Preajustes</string>
+    <string name="plugv3_panel_material">Material 3D</string>
+    <string name="plugv3_safe_mode">Modo seguro (desactiva los plugins)</string>
+    <string name="plugv3_safe_on">Modo seguro activado: ningún plugin se está ejecutando.</string>
+    <string name="plugv3_safe_auto">La app se cerró sola en las últimas aperturas y los plugins se desactivaron. Desactiva el modo seguro para volver a usarlos.</string>
+    <string name="plugv3_close">Cerrar</string>
+    <string name="plugv3_gradient_position">Posición</string>
+    <string name="plugv3_gradient_remove">Quitar color</string>
+    <string name="plugv3_gradient_stop">Color %1$s</string>
+</resources>

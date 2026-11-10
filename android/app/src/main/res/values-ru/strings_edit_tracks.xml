@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Timeline por faixas da Edição (EditTimeline.kt) -->
+    <string name="edit_tool_select">Выбор</string>
+    <string name="edit_tool_ripple">Ripple</string>
+    <string name="edit_tool_roll">Roll</string>
+    <string name="edit_tool_razor">Лезвие</string>
+    <string name="edit_tool_slip">Slip</string>
+    <string name="edit_tool_slide">Slide</string>
+    <string name="edit_snap">Привязка</string>
+    <string name="edit_mark_in">Вход</string>
+    <string name="edit_mark_out">Выход</string>
+    <string name="edit_lift">Поднять</string>
+    <string name="edit_extract">Извлечь</string>
+    <string name="edit_razor_all">Разрезать все</string>
+    <string name="edit_add_video_track">+ Видео</string>
+    <string name="edit_add_audio_track">+ Аудио</string>
+    <string name="edit_remove_empty_tracks">Убрать пустые</string>
+    <string name="edit_track_lock">Заблокировать дорожку</string>
+    <string name="edit_track_visible">Скрыть дорожку</string>
+    <string name="edit_track_mute">Отключить звук дорожки</string>
+    <string name="edit_track_solo">Соло дорожки</string>
+    <string name="edit_track_target">Целевая дорожка %1$s</string>
+    <string name="edit_track_blocked">Это действие здесь невозможно.</string>
+    <string name="edit_mark_needed">Сначала задайте вход и выход.</string>
+    <string name="edit_place_end">В конец</string>
+    <string name="edit_place_insert">Вставка</string>
+    <string name="edit_place_overwrite">Замена</string>
+    <string name="edit_section_marks">Метки</string>
+    <string name="edit_section_tracks">Дорожки</string>
+    <string name="edit_section_placement">При добавлении</string>
+</resources>

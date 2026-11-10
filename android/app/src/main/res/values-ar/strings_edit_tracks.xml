@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Timeline por faixas da Edição (EditTimeline.kt) -->
+    <string name="edit_tool_select">تحديد</string>
+    <string name="edit_tool_ripple">تموج</string>
+    <string name="edit_tool_roll">تدحرج</string>
+    <string name="edit_tool_razor">شفرة</string>
+    <string name="edit_tool_slip">Slip</string>
+    <string name="edit_tool_slide">Slide</string>
+    <string name="edit_snap">التقاط</string>
+    <string name="edit_mark_in">دخول</string>
+    <string name="edit_mark_out">خروج</string>
+    <string name="edit_lift">رفع</string>
+    <string name="edit_extract">استخراج</string>
+    <string name="edit_razor_all">قص الكل</string>
+    <string name="edit_add_video_track">+ فيديو</string>
+    <string name="edit_add_audio_track">+ صوت</string>
+    <string name="edit_remove_empty_tracks">إزالة المسارات الفارغة</string>
+    <string name="edit_track_lock">قفل المسار</string>
+    <string name="edit_track_visible">إخفاء المسار</string>
+    <string name="edit_track_mute">كتم المسار</string>
+    <string name="edit_track_solo">عزف منفرد للمسار</string>
+    <string name="edit_track_target">المسار المستهدف %1$s</string>
+    <string name="edit_track_blocked">لا يمكن إجراء هذا التعديل هنا.</string>
+    <string name="edit_mark_needed">حدد نقطتي الدخول والخروج أولًا.</string>
+    <string name="edit_place_end">في النهاية</string>
+    <string name="edit_place_insert">إدراج</string>
+    <string name="edit_place_overwrite">استبدال</string>
+    <string name="edit_section_marks">العلامات</string>
+    <string name="edit_section_tracks">المسارات</string>
+    <string name="edit_section_placement">عند إضافة وسائط</string>
+</resources>

@@ -110,7 +110,7 @@ struct OfflineAudioSnapshot::Impl final : audio::BlockSource {
         });
         composition.layers().for_each([&](LayerId, const Layer& layer) {
             if (!status.ok() || layer.kind != LayerKind::Composition || generated_tone(layer) ||
-                layer.muted || (anySolo && !layer.solo) || layer.end.value <= layer.start.value ||
+                layer.muted || layer.trackMuted || (anySolo && !layer.solo) || layer.end.value <= layer.start.value ||
                 (!layer.source_time_varies() && layer.speed <= 0.0f)) return;
             const auto* child = project.timeline().composition(layer.nested.composition);
             if (!child) {

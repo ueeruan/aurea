@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Confere uma pasta de plugin do AUREA e empacota em .aureaplugin.
 
-Formatos 1 (efeitos) e 2 (0.3.4: painéis, script e permissões).
+Formatos 1 (efeitos), 2 (painéis, script e permissões) e 3 (curva, degradê, camada,
+histórico, áudio, script por quadro, interface em árvore e os lugares novos).
 
 Uso:
     python pack_plugin.py <pasta-do-plugin> [-o saida.aureaplugin]
@@ -23,7 +24,9 @@ import zipfile
 from pathlib import Path
 
 # 0.4.6 ("plugin sem limites"): os mesmos tetos de engine/include/aurea/plugins/Plugin.hpp.
-MAX_PARAMS = 64
+MAX_PARAMS = 256         # "stack" e "panel"
+MAX_SHADER_PARAMS = 252  # "shader": o bloco de uniformes de 4 KB
+MAX_SHADER3D_PARAMS = 189
 MAX_PASSES = 32
 MAX_INPUTS = 11          # entradas + texturas do pacote, por passe
 MAX_TEXTURES = 8
@@ -34,7 +37,9 @@ MAX_SHADER_BYTES = 1024 * 1024
 MAX_MANIFEST_BYTES = 4 * 1024 * 1024
 MAX_PACKAGE_BYTES = 512 * 1024 * 1024
 MAX_MARGIN = 4096
-PARAM_TYPES = {"float", "int", "bool", "enum", "color", "point", "angle", "layer"}
+PARAM_TYPES = {"float", "int", "bool", "enum", "color", "point", "angle", "layer", "curve", "gradient", "layerImage"}
+CURVE_SLOTS = 16
+GRADIENT_SLOTS = 32
 ID_RE = re.compile(r"^[a-z0-9._-]{3,64}$")
 VERSION_RE = re.compile(r"^\d{1,5}\.\d{1,5}\.\d{1,5}$")
 IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,31}$")
@@ -95,6 +100,8 @@ def check_param(p, index):
     if kind not in PARAM_TYPES:
         raise Invalid(f'parametro "{pid}": tipo desconhecido "{kind}" (use {", ".join(sorted(PARAM_TYPES))})')
     check_text(p.get("label"), "label", required=False)
+    if kind in ("curve", "gradient", "layerImage"):
+        return pid
     if kind == "layer":
         # 0.3.1: camada ligada (só "shader3d"); "accept" filtra o tipo.
         for a in p.get("accept", []):
@@ -103,8 +110,8 @@ def check_param(p, index):
         return pid
     if kind == "enum":
         options = p.get("options")
-        if not isinstance(options, list) or not options or len(options) > 32:
-            raise Invalid(f'parametro "{pid}": enum precisa de "options" (1 a 32)')
+        if not isinstance(options, list) or not options or len(options) > 256:
+            raise Invalid(f'parametro "{pid}": enum precisa de "options" (1 a 256)')
         default = p.get("default", 0)
         if not isinstance(default, (int, float)) or not 0 <= default < len(options):
             raise Invalid(f'parametro "{pid}": "default" fora das opcoes')
@@ -133,7 +140,11 @@ def check_param(p, index):
 # --- 0.3.4 plugins: formato 2 (interface, script, permissoes) -------------------
 ICONS = set("""wand sparkles text star bolt cloud music photo film layers gear brush clock list cube lightbulb
 wrench book flag grid camera chart sliders eye folder link speed waveform""".split())
-CONTROL_TYPES = {"button", "slider", "ruler", "color", "choice", "text", "list", "image", "label", "toggle"}
+CONTROL_TYPES = {"button", "slider", "ruler", "color", "choice", "text", "list", "image", "label", "toggle",
+                 "row", "column", "section", "tabs"}
+CONTAINER_TYPES = {"row", "column", "section", "tabs"}
+MAX_CONTROL_DEPTH = 6
+REPLACEABLE_PANELS = {"transform", "effects", "blend", "presets", "material"}
 FUNC_RE = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]{0,63}$")
 UI_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,32}$")
 DOMAIN_RE = re.compile(r"^[a-z0-9-]+(\.[a-z0-9-]+)+$")
@@ -159,8 +170,8 @@ def check_v2(m, folder, fmt):
         path = folder / script
         if not path.is_file():
             raise Invalid(f"arquivo de script ausente: {script}")
-        if path.stat().st_size > 512 * 1024:
-            raise Invalid(f"{script} maior que 512 KB")
+        if path.stat().st_size > 8 * 1024 * 1024:
+            raise Invalid(f"{script} maior que 8 MB")
         files.append(script)
     perms = m.get("permissions", {})
     if not isinstance(perms, dict):
@@ -169,8 +180,8 @@ def check_v2(m, folder, fmt):
         if k not in ("network", "clipboard", "files"):
             raise Invalid(f'"permissions": campo desconhecido "{k}"')
     net = perms.get("network", [])
-    if not isinstance(net, list) or len(net) > 8:
-        raise Invalid('"permissions".network deve ser a lista de dominios (ate 8)')
+    if not isinstance(net, list) or len(net) > 64:
+        raise Invalid('"permissions".network deve ser a lista de dominios (ate 64)')
     for d in net:
         if not isinstance(d, str) or "*" in d:
             raise Invalid('"permissions".network: liste cada dominio; "*" nao e aceito')
@@ -182,8 +193,8 @@ def check_v2(m, folder, fmt):
         raise Invalid('"ui" deve ser um objeto com "panels" e/ou "actions"')
     controls = set()
     panels = ui.get("panels", [])
-    if not isinstance(panels, list) or len(panels) > 8:
-        raise Invalid('"ui".panels deve ser uma lista (ate 8)')
+    if not isinstance(panels, list) or len(panels) > 32:
+        raise Invalid('"ui".panels deve ser uma lista (ate 32)')
     panel_ids = {}
     for p in panels:
         pid = p.get("id") if isinstance(p, dict) else None
@@ -194,47 +205,67 @@ def check_v2(m, folder, fmt):
             raise Invalid(f'painel "{pid}": icone desconhecido (use {", ".join(sorted(ICONS))})')
         place = p.get("placement", "editor.panel")
         place = [place] if isinstance(place, str) else place
-        if not place or any(x not in ("editor.panel", "home.tab") for x in place):
-            raise Invalid(f'painel "{pid}": "placement" deve ser editor.panel e/ou home.tab')
+        allowed = ("editor.panel", "home.tab") + (("editor.fullscreen",) if fmt >= 3 else ())
+        if not place or any(x not in allowed for x in place):
+            raise Invalid(f'painel "{pid}": "placement" deve ser {", ".join(allowed)}')
         panel_ids[pid] = place
+        if "replaces" in p:
+            if fmt < 3:
+                raise Invalid(f'painel "{pid}": "replaces" pede "aureaPlugin": 3')
+            if p["replaces"] not in REPLACEABLE_PANELS or "editor.panel" not in place:
+                raise Invalid(f'painel "{pid}": "replaces" aceita {", ".join(sorted(REPLACEABLE_PANELS))} em "editor.panel"')
         if p.get("onOpen"):
             functions.append(p["onOpen"])
         ctrls = p.get("controls")
-        if not isinstance(ctrls, list) or not ctrls or len(ctrls) > 32:
-            raise Invalid(f'painel "{pid}": precisa de "controls" (1 a 32)')
-        for c in ctrls:
-            cid = c.get("id") if isinstance(c, dict) else None
-            if not isinstance(cid, str) or not UI_ID_RE.match(cid) or cid in controls:
-                raise Invalid(f'controle com "id" invalido ou repetido: {cid}')
-            controls.add(cid)
-            ctype = c.get("type")
-            if ctype not in CONTROL_TYPES:
-                raise Invalid(f'controle "{cid}": tipo desconhecido "{ctype}"')
-            for ev in ("onClick", "onChange", "onSelect"):
-                fn = c.get(ev)
-                if fn is not None:
-                    if not isinstance(fn, str) or not FUNC_RE.match(fn):
-                        raise Invalid(f'controle "{cid}": "{ev}" deve ser o nome de uma funcao')
-                    functions.append(fn)
-            if ctype == "button" and not c.get("onClick"):
-                raise Invalid(f'controle "{cid}": botao precisa de "onClick"')
-            if ctype == "choice" and not c.get("options"):
-                raise Invalid(f'controle "{cid}": "choice" precisa de "options"')
-            if ctype == "image" and c.get("src") is not None:
-                src = c["src"]
-                if not safe_file(src) or not src.lower().endswith((".png", ".jpg", ".jpeg")) or not (folder / src).is_file():
-                    raise Invalid(f'controle "{cid}": imagem ausente ou invalida: {src}')
+        if not isinstance(ctrls, list) or not ctrls or len(ctrls) > 256:
+            raise Invalid(f'painel "{pid}": precisa de "controls" (1 a 256)')
+        def visit(items, depth):
+            for c in items:
+                cid = c.get("id") if isinstance(c, dict) else None
+                if not isinstance(cid, str) or not UI_ID_RE.match(cid) or cid in controls:
+                    raise Invalid(f'controle com "id" invalido ou repetido: {cid}')
+                controls.add(cid)
+                ctype = c.get("type")
+                if ctype not in CONTROL_TYPES:
+                    raise Invalid(f'controle "{cid}": tipo desconhecido "{ctype}"')
+                for ev in ("onClick", "onChange", "onSelect"):
+                    fn = c.get(ev)
+                    if fn is not None:
+                        if not isinstance(fn, str) or not FUNC_RE.match(fn):
+                            raise Invalid(f'controle "{cid}": "{ev}" deve ser o nome de uma funcao')
+                        functions.append(fn)
+                if ctype == "button" and not c.get("onClick"):
+                    raise Invalid(f'controle "{cid}": botao precisa de "onClick"')
+                if ctype == "choice" and not c.get("options"):
+                    raise Invalid(f'controle "{cid}": "choice" precisa de "options"')
+                if ctype == "image" and c.get("src") is not None:
+                    src = c["src"]
+                    if not safe_file(src) or not src.lower().endswith((".png", ".jpg", ".jpeg")) or not (folder / src).is_file():
+                        raise Invalid(f'controle "{cid}": imagem ausente ou invalida: {src}')
+                if ctype in CONTAINER_TYPES:
+                    if fmt < 3:
+                        raise Invalid(f'controle "{cid}": "{ctype}" pede "aureaPlugin": 3')
+                    if depth >= MAX_CONTROL_DEPTH:
+                        raise Invalid(f'controle "{cid}": interface com mais de {MAX_CONTROL_DEPTH} niveis')
+                    children = c.get("children")
+                    if not isinstance(children, list) or not children:
+                        raise Invalid(f'controle "{cid}": precisa de "children"')
+                    if ctype == "tabs" and any(not isinstance(x, dict) or x.get("type") != "section" for x in children):
+                        raise Invalid(f'controle "{cid}": "tabs" so aceita "section"')
+                    visit(children, depth + 1)
+        visit(ctrls, 1)
     actions = ui.get("actions", [])
-    if not isinstance(actions, list) or len(actions) > 16:
-        raise Invalid('"ui".actions deve ser uma lista (ate 16)')
+    if not isinstance(actions, list) or len(actions) > 128:
+        raise Invalid('"ui".actions deve ser uma lista (ate 128)')
     for a in actions:
         aid = a.get("id") if isinstance(a, dict) else None
         if not isinstance(aid, str) or not UI_ID_RE.match(aid):
             raise Invalid(f'acao com "id" invalido: {aid}')
         check_text(a.get("title"), f"{aid}.title")
         place = a.get("placement")
-        if place not in ("editor.menu", "layer.menu", "layer.toolbar"):
-            raise Invalid(f'acao "{aid}": "placement" deve ser editor.menu, layer.menu ou layer.toolbar')
+        allowed = ("editor.menu", "layer.menu", "layer.toolbar") + (("add.menu",) if fmt >= 3 else ())
+        if place not in allowed:
+            raise Invalid(f'acao "{aid}": "placement" deve ser {", ".join(allowed)}')
         if place == "layer.toolbar" and "icon" not in a:
             raise Invalid(f'acao "{aid}": botao da barra da camada precisa de "icon"')
         if a.get("icon", "wand") not in ICONS:
@@ -243,8 +274,8 @@ def check_v2(m, folder, fmt):
             raise Invalid(f'acao "{aid}": use "call" (funcao) ou "panel" (painel), um dos dois')
         if a.get("call"):
             functions.append(a["call"])
-        elif "editor.panel" not in panel_ids.get(a["panel"], []):
-            raise Invalid(f'acao "{aid}": o painel "{a["panel"]}" nao existe ou nao tem "editor.panel"')
+        elif not {"editor.panel", "editor.fullscreen"} & set(panel_ids.get(a["panel"], [])):
+            raise Invalid(f'acao "{aid}": o painel "{a["panel"]}" nao existe ou nao tem "editor.panel" nem "editor.fullscreen"')
     if functions and not script:
         raise Invalid(f'a interface chama "{functions[0]}", mas o plugin nao tem "script"')
     if script:
@@ -265,7 +296,7 @@ def check(folder):
         raise Invalid("plugin.json ausente na pasta")
     raw = manifest_path.read_bytes()
     if len(raw) > MAX_MANIFEST_BYTES:
-        raise Invalid("plugin.json maior que 256 KB")
+        raise Invalid("plugin.json maior que 4 MB")
     try:
         m = json.loads(raw.decode("utf-8-sig"))
     except (UnicodeDecodeError, json.JSONDecodeError) as e:
@@ -273,8 +304,8 @@ def check(folder):
     if not isinstance(m, dict):
         raise Invalid("plugin.json invalido: a raiz deve ser um objeto")
     fmt = m.get("aureaPlugin")
-    if fmt not in (1, 2):
-        raise Invalid('falta "aureaPlugin": 1 ou 2 (versao do formato)')
+    if fmt not in (1, 2, 3):
+        raise Invalid('falta "aureaPlugin": 1, 2 ou 3 (versao do formato)')
     if not isinstance(m.get("id"), str) or not ID_RE.match(m["id"]) or m["id"][0] == "." or m["id"][-1] == "." \
             or ".." in m["id"]:
         raise Invalid(f'"id" invalido "{m.get("id")}": use 3 a 64 caracteres a-z, 0-9, ".", "_" ou "-"')
@@ -285,18 +316,32 @@ def check(folder):
     kind = m.get("kind")
     if kind not in ("shader", "shader3d", "stack", "panel"):
         raise Invalid('"kind" deve ser "shader", "shader3d", "stack" ou "panel"')
-    if kind == "panel" and fmt != 2:
+    if kind == "panel" and fmt < 2:
         raise Invalid('"kind": "panel" pede "aureaPlugin": 2')
     params = m.get("params", [])
     if not isinstance(params, list):
         raise Invalid('"params" deve ser uma lista')
+    plugin_kind = m.get("kind")
+    param_limit = MAX_SHADER3D_PARAMS if plugin_kind == "shader3d" else MAX_SHADER_PARAMS if plugin_kind == "shader" else MAX_PARAMS
+    uses = m.get("uses", [])
+    if not isinstance(uses, list) or any(u not in ("history", "audio") for u in uses):
+        raise Invalid('"uses" aceita history e audio')
+    occupied = sum(CURVE_SLOTS if isinstance(p, dict) and p.get("type") == "curve" else GRADIENT_SLOTS
+                   if isinstance(p, dict) and p.get("type") == "gradient" else 1 for p in params) + ("audio" in uses)
+    if kind in ("shader", "shader3d") and occupied > param_limit:
+        raise Invalid(f"os parametros ocupam {occupied} posicoes (limite {param_limit})")
     if len(params) > MAX_PARAMS:
         raise Invalid(f"{len(params)} parametros (limite {MAX_PARAMS})")
     ids = [check_param(p, i) for i, p in enumerate(params)]
+    v3_params = [p for p in params if isinstance(p, dict) and p.get("type") in ("curve", "gradient", "layerImage")]
+    if v3_params and (fmt < 3 or kind not in ("shader", "shader3d")):
+        raise Invalid('parametros curve, gradient e layerImage pedem "aureaPlugin": 3 e um plugin "shader"')
+    if ("uses" in m or "frameScript" in m) and (fmt < 3 or kind not in ("shader", "shader3d")):
+        raise Invalid('"uses" e "frameScript" pedem "aureaPlugin": 3 e um plugin "shader"')
     layers = sum(1 for p in params if isinstance(p, dict) and p.get("type") == "layer")
     if layers and kind != "shader3d":
         raise Invalid('parametro "layer" so em plugin "kind": "shader3d"')
-    if layers > 4:
+    if layers > MAX_LAYER_PARAMS:
         raise Invalid(f'{layers} parametros "layer" (limite {MAX_LAYER_PARAMS})')
     if len(set(ids)) != len(ids):
         raise Invalid("parametro repetido")
@@ -304,6 +349,13 @@ def check(folder):
     if kind == "panel" and params:
         raise Invalid('plugin "panel" nao tem "params" (os controles ficam em "ui")')
     files += check_v2(m, folder, fmt)
+    if "frameScript" in m:
+        frame = m["frameScript"]
+        if not safe_file(frame) or not frame.lower().endswith(".js") or not (folder / frame).is_file():
+            raise Invalid(f'"frameScript": arquivo .js ausente ou invalido: {frame}')
+        if not re.search(r"function\s+onFrame\s*\(", (folder / frame).read_text(encoding="utf-8", errors="replace")):
+            raise Invalid(f'{frame} nao define function onFrame(f)')
+        files.append(frame)
     if kind == "panel":
         pass
     elif kind in ("shader", "shader3d"):
@@ -363,7 +415,8 @@ def check(folder):
             if not isinstance(scale, (int, float)) or not 0.125 <= scale <= 1:
                 raise Invalid(f'{where}: "scale" deve estar entre 0.125 e 1')
             inputs = p.get("inputs", {})
-            if not isinstance(inputs, dict) or len(inputs) + len(textures) > MAX_INPUTS:
+            extra = len(uses) + sum(1 for p in params if isinstance(p, dict) and p.get("type") == "layerImage")
+            if not isinstance(inputs, dict) or len(inputs) + len(textures) + extra > MAX_INPUTS:
                 raise Invalid(f'{where}: entradas + texturas passam de {MAX_INPUTS}')
             for name, src in inputs.items():
                 if not valid_ident(name) or name in ids or name in textures:

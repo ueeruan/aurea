@@ -36,6 +36,7 @@
 #include "aurea/scene3d/Importer.hpp"
 #include "aurea/scene3d/ModelBudget.hpp"
 #include "aurea/scene3d/Text3D.hpp"
+#include "aurea/scene3d/Image3D.hpp"
 #include "aurea/scene3d/Shape3D.hpp"
 #include "aurea/text/FontManager.hpp"
 
@@ -90,6 +91,19 @@ enum class LayerTimeArrangement : u32 {
     AlignStarts = 0, Sequence = 1, AlignEnds = 2,
     DistributeStarts = 3, DistributeGaps = 4,
     StartsAtPlayhead = 5, EndsAtPlayhead = 6,
+};
+
+/// As edições de `Engine::edit_track_clip`. Os números são contrato das pontes.
+enum class TrackEditOp : u32 {
+    Move = 0,            ///< sobrepõe o que estiver no destino
+    MoveInsert = 1,      ///< abre espaço no destino e fecha na origem
+    TrimIn = 2, TrimOut = 3,
+    RippleTrimIn = 4, RippleTrimOut = 5,
+    Roll = 6,            ///< `layer` é o clipe à esquerda do corte
+    Slip = 7, Slide = 8,
+    Razor = 9, RazorAll = 10,
+    RippleDelete = 11, Lift = 12,
+    MoveLinkedAudio = 13,
 };
 
 enum class EngineState : u8 {
@@ -532,6 +546,8 @@ public:
     /// Mídias de um `.aurea` fechado, já com o caminho legível (`resolved`).
     /// É o "Exportar arquivo do projeto" (ProjectPackage.hpp).
     [[nodiscard]] Status project_file_media(const char* path, std::vector<package::MediaRef>& out) noexcept;
+    /// Plugins instalados que um `.aurea` fechado usa (o que vai no arquivo do projeto).
+    [[nodiscard]] Status project_file_plugins(const char* path, std::vector<package::PluginFile>& out) noexcept;
 
     // --- Omega adicionar (área 08) — src/engine/EngineOmegaAdd.cpp -----------------
     /// Como o lote do navegador de mídia arruma as camadas (número estável das pontes).
@@ -1762,6 +1778,9 @@ public:
     /// px do mundo (0..0,05), força dos raios do sol (0..8), cor linear (a luz
     /// ambiente que a neblina espalha). Um passo de desfazer.
     bool set_scene3d_fog(bool on, f32 density, f32 rays, f32 r, f32 g, f32 b) noexcept;
+    /// Oclusão ambiente do grupo 3D: chave, força (0..3) e raio (fração da altura, 0,02..0,2).
+    bool set_scene3d_ao(bool on, f32 strength, f32 radius) noexcept;
+    bool query_scene3d_ao(f32* out3) noexcept;
     /// {ligada (0/1), densidade, raios, r, g, b}.
     bool query_scene3d_fog(f32* out6) noexcept;
 
@@ -2035,6 +2054,25 @@ public:
     /// Neighbours are explicit IDs; invalid/locked edits leave history untouched.
     /// Slip changes source time only. Roll/slide never ripple unrelated layers.
     bool edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous = 0, u64 next = 0) noexcept;
+
+    // --- Faixas da Edição (EngineTracks.inl) -------------------------------------
+    /// Uma edição de montagem, um passo de desfazer. `frame` é o novo início
+    /// (Move, MoveInsert), a nova borda (Trim, RippleTrim), o novo corte (Roll),
+    /// o quadro do corte (Razor) ou o deslocamento (Slip, Slide). Falso = nada
+    /// mudou (faixa travada, sem espaço, sem mídia além da borda).
+    [[nodiscard]] bool edit_track_clip(u32 operation, u64 layerId, i64 frame, u32 track = 0) noexcept;
+    /// [nº de faixas, nº de áudios ligados, entrada, saída], depois (id, flags) de
+    /// cada faixa (1 áudio, 2 trava, 4 mudo/olho, 8 solo, 16 alvo) e (camada, faixa A).
+    [[nodiscard]] std::vector<i64> query_edit_timeline() noexcept;
+    /// `flag`: 0 trava, 1 mudo/olho, 2 solo, 3 alvo.
+    bool set_edit_track_flag(u32 track, u32 flag, bool on) noexcept;
+    [[nodiscard]] u32 add_edit_track(bool audio) noexcept;
+    /// Só faixa vazia, e sempre sobra uma de cada tipo.
+    bool remove_edit_track(u32 track) noexcept;
+    /// `which`: 0 entrada, 1 saída; −1 tira a marca.
+    bool set_edit_mark(u32 which, i64 frame) noexcept;
+    /// Tira o trecho marcado das faixas com alvo. `extract` fecha o buraco; senão, levanta.
+    bool edit_marked_range(bool extract) noexcept;
     // --- Omega timeline (área 03, P1-8): alças de velocidade -----------------------
     /// Estica (ou encolhe) a camada para [newStart, newEnd) mantendo o MESMO
     /// trecho da fonte: a velocidade vira `velocidade × antiga / nova` (faixa
@@ -2261,12 +2299,25 @@ public:
     /// para dizer por que as configurações não mudaram (bug 0.3.6).
     [[nodiscard]] i32 last_text3d_status() const noexcept { return lastText3dStatus_.load(std::memory_order_relaxed); }
 
+    /// PNG para 3D (scene3d/Image3D.hpp): a imagem vira objeto extrudado, com a
+    /// silhueta do alfa. Decodifica e traça aqui: chame fora da thread da UI.
+    [[nodiscard]] Result<u64> add_image3d(const scene3d::Image3DSpec& spec, const std::string& name) noexcept;
+    /// A malha é refeita da receita (desfazível); o motivo de uma recusa fica em last_text3d_status.
+    Status set_image3d(u64 layerId, const scene3d::Image3DSpec& spec) noexcept;
+    /// Receita da camada (falso = não é Imagem 3D).
+    bool query_image3d(u64 layerId, scene3d::Image3DSpec& out) noexcept;
+    bool apply_image3d_preset(u64 layerId, u32 preset) noexcept;
+
     // --- Formas 3D (scene3d/Shape3D.hpp; API em EngineShape3D.cpp) --------------
     /// Nova camada com a forma `kind` (Shape3DKind), centrada, uma cor por
     /// parte. `name` = nome da camada (a UI manda traduzido). Devolve a layer.
     [[nodiscard]] Result<u64> add_shape3d(u32 kind, const char* name = nullptr) noexcept;
     /// Imagem ou vídeo vira uma placa 3D com a camada de textura (sombra, reflexo, profundidade).
     [[nodiscard]] Result<u64> layer_to_3d_object(u64 layerId, const char* name = nullptr) noexcept;
+    /// PNG com transparência: troca a camada por uma Imagem 3D no mesmo lugar, com a
+    /// silhueta do alfa (a placa de `layer_to_3d_object` deixaria o transparente preto).
+    /// `imagePath`: a imagem num arquivo que o motor lê. Um passo de desfazer.
+    [[nodiscard]] Result<u64> layer_to_image3d(u64 layerId, const std::string& imagePath, const std::string& name) noexcept;
     /// Troca a receita (cor/imagem por parte). A malha é gerada de novo; desfazível.
     Status set_shape3d(u64 layerId, const scene3d::Shape3DSpec& spec) noexcept;
     /// Receita da forma 3D da camada (falso = não é forma 3D).
@@ -2466,6 +2517,13 @@ public:
     /// chama depois de subir o motor). Vazio = sem plugins.
     void set_plugin_directory(const char* path) noexcept;
     [[nodiscard]] std::string plugin_directory() const;
+    /// Modo seguro: os plugins ficam fora do catálogo e nada deles roda. Liga
+    /// sozinho depois de duas aberturas seguidas que caíram (`mark_plugins_healthy`).
+    [[nodiscard]] bool plugins_safe_mode() const noexcept;
+    [[nodiscard]] bool plugins_safe_mode_automatic() const noexcept;
+    void set_plugins_safe_mode(bool on) noexcept;
+    /// O app abriu e ficou de pé: esta sessão não conta como queda.
+    void mark_plugins_healthy() noexcept;
 
     // 0.3.4 plugins: interface, scripts e APIs (src/engine/EnginePluginsV2.cpp) --
     // Plugins do formato 2 trazem painéis/ações declarados e um script
@@ -2604,6 +2662,11 @@ private:
     std::recursive_mutex sourceImportMutex_;
     Status ensure_text3d_layout(Layer& layer) noexcept; // modelMutex_ held; caller owns undo.
     Status set_text3d_impl(u64 layerId, const scene3d::Text3DSpec& spec) noexcept;
+    void fit_sequence_locked(Composition& comp) noexcept;
+    void refresh_plugin_refs_locked();
+    Status set_image3d_impl(u64 layerId, const scene3d::Image3DSpec& spec) noexcept;
+    /// Material metálico sem ambiente na cena sai preto: liga o estúdio de cromo.
+    void light_metal_preset(u64 layerId, u32 preset) noexcept;
     std::atomic<i32> lastText3dStatus_{0};
     /// Cada edição de texto 3D guarda uma malha nova e a anterior fica para o
     /// desfazer. Sem espaço: solta as malhas de texto 3D que nenhuma camada (nem
@@ -2611,6 +2674,10 @@ private:
     /// restore_text3d_models_locked as refaz se o desfazer/refazer religar.
     /// modelMutex_ held. Devolve quantas soltou.
     u32 release_unused_text3d_models_locked() noexcept;
+    /// Espaço para malhas de texto 3D: o normal mais uma folga só delas.
+    [[nodiscard]] u64 text3d_room_locked() const noexcept;
+    /// Bytes da malha que a edição troca, se nada mais usa essa malha (0 se não).
+    [[nodiscard]] u64 replaced_text3d_bytes_locked(AssetId scene) const noexcept;
     /// Refaz da receita a malha de texto 3D que uma camada usa e que não está
     /// em memória (solta acima). modelMutex_ held.
     void restore_text3d_models_locked() noexcept;
@@ -2650,6 +2717,12 @@ public:
     /// Ordem, limites e extremos são regras compartilhadas pelo Android/iOS.
     i32 edit_effect_curve(u64 layerId, u32 effectId, u32 param, u32 channel,
                           u32 action, u32 point, f32 x, f32 y) noexcept;
+    /// Degradê de um parâmetro de efeito: `out` recebe [posição, r, g, b, a] por
+    /// parada (RGBA linear). Retorna quantos floats escreveu.
+    u32 query_effect_gradient(u64 layerId, u32 effectId, u32 param, f32* out, u32 capacity) noexcept;
+    /// Troca as paradas (5 floats cada, de 2 a 16): ordena, limita a [0, 1] e
+    /// entra no desfazer. Regra única para Android e iOS.
+    bool set_effect_gradient(u64 layerId, u32 effectId, u32 param, const f32* values, u32 count) noexcept;
 
     /// Declaração dos parâmetros de um TIPO de efeito, sem precisar de layer:
     /// a ficha do catálogo (nome, tipo, faixa, unidade). `value` sai com o

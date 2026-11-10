@@ -22,12 +22,14 @@ layout(location = 0) out vec4 o_ssr;
 layout(set = 0, binding = AUREA_TEX0) uniform sampler2D t_depth;
 layout(set = 0, binding = AUREA_TEX1) uniform sampler2D t_material;
 layout(set = 0, binding = AUREA_TEX2) uniform sampler2D t_scene;
+layout(set = 0, binding = AUREA_TEX3) uniform sampler2D t_holdout;   // objetos com efeitos, iluminados
 
 layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     mat4 proj;      // clip <- vista
     mat4 invProj;   // vista <- clip
     vec4 texel;     // xy = 1/tamanho, zw = tamanho (meia resolução)
     vec4 cfg;       // x = passos, y = espessura (fração da profundidade), z = alcance (× profundidade), w = força
+    vec4 holdout;   // x > 0,5 = t_holdout vale
 } p;
 
 vec3 view_pos(vec2 uv, float d) {
@@ -111,7 +113,10 @@ void main() {
     }
     vec2 huv = to_uv(P + R * (reach * b));
     if (off_screen(huv)) return;
-    vec3 hit = aurea_hdr_decode(textureLod(t_scene, huv, 0.0).rgb);
+    vec3 encoded = textureLod(t_scene, huv, 0.0).rgb;
+    // Recorte: na cena o pixel é zero exato; a cor dele vem do alvo à parte.
+    if (p.holdout.x > 0.5 && dot(encoded, encoded) <= 0.0) encoded = textureLod(t_holdout, huv, 0.0).rgb;
+    vec3 hit = aurea_hdr_decode(encoded);
     hit = min(hit, vec3(16.0));   // sem vagalumes no bloom
 
     float NdotV = clamp(dot(N, V), 0.0, 1.0);

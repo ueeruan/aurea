@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Timeline por faixas da Edição (EditTimeline.kt) -->
+    <string name="edit_tool_select">Seleção</string>
+    <string name="edit_tool_ripple">Ripple</string>
+    <string name="edit_tool_roll">Rolar</string>
+    <string name="edit_tool_razor">Lâmina</string>
+    <string name="edit_tool_slip">Slip</string>
+    <string name="edit_tool_slide">Slide</string>
+    <string name="edit_snap">Encaixe</string>
+    <string name="edit_mark_in">Entrada</string>
+    <string name="edit_mark_out">Saída</string>
+    <string name="edit_lift">Levantar</string>
+    <string name="edit_extract">Extrair</string>
+    <string name="edit_razor_all">Cortar tudo</string>
+    <string name="edit_add_video_track">+ Vídeo</string>
+    <string name="edit_add_audio_track">+ Áudio</string>
+    <string name="edit_remove_empty_tracks">Limpar faixas</string>
+    <string name="edit_track_lock">Travar faixa</string>
+    <string name="edit_track_visible">Ocultar faixa</string>
+    <string name="edit_track_mute">Silenciar faixa</string>
+    <string name="edit_track_solo">Solo da faixa</string>
+    <string name="edit_track_target">Alvo da faixa %1$s</string>
+    <string name="edit_track_blocked">Essa edição não cabe aqui.</string>
+    <string name="edit_mark_needed">Marque a entrada e a saída primeiro.</string>
+    <string name="edit_place_end">No fim</string>
+    <string name="edit_place_insert">Inserir</string>
+    <string name="edit_place_overwrite">Sobrepor</string>
+    <string name="edit_section_marks">Marcas</string>
+    <string name="edit_section_tracks">Faixas</string>
+    <string name="edit_section_placement">Ao adicionar mídia</string>
+</resources>

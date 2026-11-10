@@ -168,8 +168,8 @@ class EditModeUiTest {
             assertTrue(store.layers.first { it.id == audioId }.trackId != main.trackId)
         }
         compose.waitUntil(5000) {
-            compose.onAllNodesWithTag("edit.clip.$videoId.wave").fetchSemanticsNodes().isNotEmpty() &&
-                compose.onAllNodesWithTag("edit.clip.$audioId.wave").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithTag("edit.clip.$videoId").fetchSemanticsNodes().isNotEmpty() &&
+                compose.onAllNodesWithTag("edit.clip.$audioId").fetchSemanticsNodes().isNotEmpty()
         }
         capture("edit-wave")
     }

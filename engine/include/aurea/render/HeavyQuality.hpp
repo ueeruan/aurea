@@ -38,6 +38,11 @@ struct HeavyQuality {
     ///   3 ULTRA   PCSS: 16 bloqueadores + 32    (4096 no export)
     u32 shadowMapSize = 2048;
     u32 shadowFilter = 2;
+    /// GTAO: direções × passos por lado. O export usa 4×6; a prévia desce com a
+    /// escala, mas nunca desliga: o objeto não pode mudar de aparência porque
+    /// o aparelho esquentou.
+    u32 aoDirections = 4;
+    u32 aoSteps = 6;
     /// Multiplica o tamanho projetado na escolha do LOD (< 1 = troca antes
     /// para a malha simplificada). O export usa 1.
     f32 lodBias = 1.0f;
@@ -73,6 +78,8 @@ struct HeavyQuality {
         q.shadowMapSize = shadow;
         q.shadowFilter = s >= 0.75f ? 2u : (s >= 0.4f ? 1u : 0u);
         q.lodBias = s >= 0.75f ? 1.0f : (s >= 0.4f ? 0.75f : 0.5f);
+        q.aoDirections = s >= 0.4f ? 2u : 1u;
+        q.aoSteps = s >= 0.75f ? 4u : 3u;
         q.effects = std::clamp(s, 0.25f, 1.0f);
         // 3D: 4× com o preview cheio, 2× no meio; abaixo disso, 1 amostra +
         // FXAA (o custo do MSAA é banda de tile — o que falta quando o AUTO
@@ -118,6 +125,8 @@ inline void apply_scene3d_quality(HeavyQuality& q, Scene3DQuality tier) noexcept
         // Sombra do arquivo final: sempre ULTRA (mapa 4096 + PCSS 16+32).
         q.shadowMapSize = 4096;
         q.shadowFilter = 3;
+        q.aoDirections = 4;
+        q.aoSteps = 6;
         return;
     }
     // Sombra por nível (AUTO fica com o from_scale; o mapa do preview nunca

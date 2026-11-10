@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.5.1: oclusão ambiente (Render3DTab, Scene3DEnvironment.kt) -->
+    <string name="scene051_ao">Oclusión ambiental</string>
+    <string name="scene051_ao_hint">Oscurece esquinas, rendijas y contactos. Reduce su costo cuando el dispositivo va justo.</string>
+    <string name="scene051_ao_strength">Fuerza</string>
+    <string name="scene051_ao_radius">Radio</string>
+</resources>

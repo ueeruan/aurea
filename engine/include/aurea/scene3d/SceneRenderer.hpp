@@ -347,7 +347,7 @@ struct ScenePlane {
 /// Pós do grupo 3D vindo da composição (PostProcessSettings): o que a pessoa
 /// escolheu. A resolução do AA/bloom vem da qualidade (HeavyQuality + nível).
 struct ScenePost {
-    u32  toneMapper = 0;        ///< 0 PBR Neutral, 1 AgX
+    u32  toneMapper = 0;        ///< 0 PBR Neutral, 1 AgX, 2 AgX Punchy, 3 AgX Golden, 4 Uchimura, 5 ACES
     bool bloom = true;
     f32  bloomIntensity = 0.6f; ///< 0..4
     f32  bloomThreshold = 0.0f; ///< 0 = sem limiar (mistura conservadora)
@@ -357,6 +357,9 @@ struct ScenePost {
     Vec3 fogColor{0.5f, 0.5f, 0.55f};   ///< linear: a luz ambiente que a neblina espalha
     f32  fogDensity = 0.001f;           ///< por px do mundo (1/distância de 63% de absorção)
     f32  fogRays = 1.0f;                ///< força dos raios do sol (0 = só neblina)
+    bool ao = true;                     ///< 0.5.1: oclusão ambiente (PostProcessSettings)
+    f32  aoStrength = 1.0f;             ///< 0..3
+    f32  aoRadius = 0.07f;              ///< fração da altura da tela
 };
 
 /// Chão do grupo 3D (FloorSettings da composição; ver Ground.cpp). Plano
@@ -628,6 +631,7 @@ public:
     /// BAIXO da composição (post.quality 1) desliga sozinha.
     void set_ambient_occlusion(bool on) noexcept { ambientOcclusion_ = on; }
     [[nodiscard]] bool ambient_occlusion() const noexcept { return ambientOcclusion_; }
+    void set_ao_quality(u32 directions, u32 steps) noexcept { aoDirections_ = directions; aoSteps_ = steps; }
     /// 0.4.6: reflexos de tela (SSR) nas superfícies lisas. Ligados por padrão.
     void set_screen_reflections(bool on) noexcept { screenReflections_ = on; }
     [[nodiscard]] bool screen_reflections() const noexcept { return screenReflections_; }
@@ -689,6 +693,7 @@ private:
     u32 shadowCap_ = 4096;      ///< set_shadow_map_cap
     u32 shadowFilter_ = 2;
     bool ambientOcclusion_ = true;   ///< 0.4.6: GTAO (set_ambient_occlusion)
+    u32 aoDirections_ = 2, aoSteps_ = 4;   ///< custo do GTAO neste quadro (HeavyQuality)
     bool screenReflections_ = true;  ///< 0.4.6: SSR (set_screen_reflections)
     f32 lodBias_ = 1.0f;
     bool lodHysteresis_ = true;

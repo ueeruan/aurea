@@ -208,8 +208,10 @@ internal fun FxParamRow(
         ParamType.TEXTURE_REFERENCE ->
             if (typeId == effectTypeId("aurea.3d.part_texture")) PartTextureImageRow(env, effectId, label)
             else CubeLutImportRow(env, effectId)
-        ParamType.CURVE -> ColorCurveEditor(env, effectId, s.index)
-        // Degradê: o motor tem, o app ainda não edita — sem botão falso.
+        ParamType.CURVE ->
+            if (com.aurea.aurea.effects.PluginTexts.isPlugin(typeId)) CollapsibleCurveEditor(env, effectId, s.index, label)
+            else ColorCurveEditor(env, effectId, s.index)
+        ParamType.GRADIENT -> GradientParamEditor(env, effectId, s.index, label)
         else -> Row(Modifier.fillMaxWidth().height(FxRow.Small), verticalAlignment = Alignment.CenterVertically) {
             FxParamLabel(label, FxRow.Small - 6.dp, Modifier.padding(FxRow.Margin))
             Text(

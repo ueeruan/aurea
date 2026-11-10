@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- PNG para 3D (AddLayerPanel.kt, Element3DPanel.kt) -->
+    <string name="image3d_add" formatted="false">PNG ke 3D</string>
+    <string name="image3d_layer" formatted="false">Gambar 3D</string>
+    <string name="image3d_creating" formatted="false">Membuat objek 3D…</string>
+    <string name="image3d_err_empty" formatted="false">Gambar ini sepenuhnya transparan.</string>
+    <string name="image3d_no_alpha" formatted="false">Gambar tidak punya transparansi, jadi objek berbentuk bingkai. Gunakan PNG tanpa latar.</string>
+    <string name="image3d_front" formatted="false">Depan</string>
+    <string name="image3d_back" formatted="false">Belakang</string>
+    <string name="image3d_silhouette" formatted="false">Siluet</string>
+    <string name="image3d_threshold" formatted="false">Batas alfa</string>
+    <string name="image3d_threshold_hint" formatted="false">Menentukan letak tepi pada area semi-transparan.</string>
+    <string name="image3d_depth_hint" formatted="false">100% = tinggi gambar.</string>
+    <string name="image3d_from_photos" formatted="false">Foto</string>
+    <string name="image3d_from_files" formatted="false">File</string>
+</resources>

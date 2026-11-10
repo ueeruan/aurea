@@ -1,4 +1,5 @@
 #include "aurea/project/Serialization.hpp"
+#include "aurea/scene3d/StudioEnvironment.hpp"
 #include "aurea/project/FileIO.hpp"
 #include "aurea/vector/Vector.hpp"
 #include "aurea/core/Log.hpp"
@@ -2274,6 +2275,24 @@ std::vector<u8> build_timeline_section(const Project& p) {
         // v42: independently timed panorama; legacy files stay unbounded.
         w.i64v(env.backgroundStart.value);
         w.i64v(env.backgroundEnd.value);
+        // v62: oclusão ambiente do grupo 3D.
+        w.boolv(pp.aoEnabled);
+        w.f32v(pp.aoStrength);
+        w.f32v(pp.aoRadius);
+        // v63: faixas da Edição, entrada e saída, e o áudio ligado de cada camada.
+        w.u32v(static_cast<u32>(c.edit_tracks().size()));
+        for (const EditTrack& t : c.edit_tracks()) {
+            w.u32v(t.id);
+            w.u32v((t.audio ? 1u : 0u) | (t.locked ? 2u : 0u) | (t.muted ? 4u : 0u) | (t.solo ? 8u : 0u) | (t.target ? 16u : 0u));
+        }
+        w.i64v(c.mark_in());
+        w.i64v(c.mark_out());
+        w.u32v(c.order().size());
+        for (u32 i = 0; i < c.order().size(); ++i) {
+            const Layer* l = c.layer(c.order().at(i));
+            w.u32v(l ? l->audioTrackId : 0u);
+            w.boolv(l && l->audioUnlinked);
+        }
     });
 
     return std::vector<u8>(w.bytes().begin(), w.bytes().end());
@@ -2521,7 +2540,7 @@ bool apply_timeline_section(const u8* data, usize size, Project& p, bool salvage
         }
         if (g_readingTimelineVersion >= 32) {
             auto fin = [](f32 v, f32 lo, f32 hi, f32 def) { return std::isfinite(v) ? std::clamp(v, lo, hi) : def; };
-            c->environment().studioPreset = std::min<u32>(r.u32v(), 3u);
+            c->environment().studioPreset = std::min<u32>(r.u32v(), scene3d::kStudioPresetCount - 1u);
             FloorSettings& fl = c->floor();
             fl.mode = std::min<u32>(r.u32v(), 2u);
             fl.color = r.color();
@@ -2545,6 +2564,28 @@ bool apply_timeline_section(const u8* data, usize size, Project& p, bool salvage
             env.backgroundEnd = FrameIndex{r.i64v()};
             if (env.backgroundEnd.value < 0) env.backgroundEnd = FrameIndex{-1};
             else env.backgroundEnd = FrameIndex{std::max(env.backgroundStart.value, env.backgroundEnd.value)};
+        }
+        if (g_readingTimelineVersion >= 62) {
+            pp.aoEnabled = r.boolv();
+            const f32 strength = r.f32v(), radius = r.f32v();
+            pp.aoStrength = std::isfinite(strength) ? std::clamp(strength, 0.f, 3.f) : 1.f;
+            pp.aoRadius = std::isfinite(radius) ? std::clamp(radius, .02f, .2f) : .07f;
+        }
+        if (g_readingTimelineVersion >= 63) {
+            const u32 trackCount = r.u32v();
+            for (u32 i = 0; i < trackCount && i < 128u; ++i) {
+                const u32 id = r.u32v(), bits = r.u32v();
+                c->restore_edit_track(id, bits);
+            }
+            const i64 in = r.i64v(), out = r.i64v();
+            c->set_marks(in < 0 ? -1 : in, out < 0 ? -1 : out);
+            const u32 layerCount = r.u32v();
+            for (u32 i = 0; i < layerCount; ++i) {
+                const u32 lane = r.u32v();
+                const bool unlinked = r.boolv();
+                if (i >= c->order().size()) continue;
+                if (Layer* l = c->layer(c->order().at(i))) { l->audioTrackId = lane; l->audioUnlinked = unlinked; }
+            }
         }
         c->rebuild_draw_order();
         // Máscara de recorte de um arquivo mexido à mão (ou de versão futura):
@@ -2662,6 +2703,31 @@ void apply_rig3d_section(const u8* data, usize size, Project& p) {
     });
 }
 
+/// Seção Plugins (v1): u32 quantos · por plugin: id, versão, u32 número do efeito.
+std::vector<u8> build_plugins_section(const Project& p) {
+    ByteWriter w;
+    w.u32v(static_cast<u32>(p.plugin_refs().size()));
+    for (const PluginRef& ref : p.plugin_refs()) { w.str(ref.id); w.str(ref.version); w.u32v(ref.typeId); }
+    return std::vector<u8>(w.bytes().begin(), w.bytes().end());
+}
+
+void apply_plugins_section(const u8* data, usize size, Project& p) {
+    ByteReader r(data, size);
+    const u32 count = r.u32v();
+    if (!r.good() || count > 4096) return;
+    std::vector<PluginRef> refs;
+    refs.reserve(count);
+    for (u32 i = 0; i < count; ++i) {
+        PluginRef ref;
+        ref.id = r.str();
+        ref.version = r.str();
+        ref.typeId = r.u32v();
+        if (!r.good()) return;
+        refs.push_back(std::move(ref));
+    }
+    p.set_plugin_refs(std::move(refs));
+}
+
 // -----------------------------------------------------------------------------
 // Migrações registradas. A E/S de arquivo mora em FileIO (escrita atômica com
 // fsync checado, .bak e injeção de falha para os testes de disco cheio).
@@ -2763,6 +2829,8 @@ Status ProjectSerializer::encode(const Project& project, const SaveOptions& opti
         sections.push_back(PendingSection{SectionKind::Scene3D, 1, build_scene3d_section(project)});
     if (project_has_rigs(project))
         sections.push_back(PendingSection{SectionKind::Rig3D, 1, build_rig3d_section(project)});
+    if (!project.plugin_refs().empty())
+        sections.push_back(PendingSection{SectionKind::Plugins, 1, build_plugins_section(project)});
 
     // As seções Animations, Effects, Scene3D, Particles, Fonts e Thumbnails
     // existem no enum e no índice, mas ainda não são gravadas separadamente:
@@ -2856,6 +2924,30 @@ Status ProjectSerializer::load(Project& out, const std::string& path,
                        : Status{Errc::NotFound, "arquivo nao encontrado"};
     }
     return load_bytes(out, file.data(), file.size(), options, outReport, outError);
+}
+
+// Até o v60 o grupo nascia com a chave de motion blur desligada, e as camadas
+// entravam nele com a flag ligada e sem efeito. Repete até a chave descer por
+// grupos dentro de grupos (a ordem do percurso não acompanha o aninhamento).
+void inherit_group_motion_blur(Project& project) {
+    Timeline& tl = project.timeline();
+    bool changed = true;
+    for (u32 pass = 0; changed && pass < 64; ++pass) {
+        changed = false;
+        tl.for_each_composition([&](CompositionId, const Composition& parent) {
+            if (!parent.motion_blur().enabled) return;
+            parent.layers().for_each([&](LayerId, const Layer& layer) {
+                if (layer.kind != LayerKind::Composition) return;
+                Composition* child = tl.composition(layer.nested.composition);
+                if (!child || child->motion_blur().enabled) return;
+                bool flagged = false;
+                child->layers().for_each([&](LayerId, const Layer& inner) { flagged |= inner.motionBlur; });
+                if (!flagged) return;
+                child->motion_blur() = parent.motion_blur();
+                changed = true;
+            });
+        });
+    }
 }
 
 Status ProjectSerializer::load_bytes(Project& out, const u8* fileData, usize fileSize,
@@ -3002,6 +3094,7 @@ Status ProjectSerializer::load_bytes(Project& out, const u8* fileData, usize fil
                     if (outReport) *outReport = report;
                     return fail(Errc::CorruptData, "invalid timeline data");
                 }
+                if (sh.version < 61) inherit_group_motion_blur(out);
                 break;
             }
             case SectionKind::Assets:
@@ -3012,6 +3105,9 @@ Status ProjectSerializer::load_bytes(Project& out, const u8* fileData, usize fil
                 break;
             case SectionKind::Rig3D:
                 apply_rig3d_section(effective, effectiveSize, out);
+                break;
+            case SectionKind::Plugins:
+                apply_plugins_section(effective, effectiveSize, out);
                 break;
             default:
                 // Seções que esta versão não grava ainda. Se aparecerem, foram

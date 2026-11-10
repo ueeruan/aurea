@@ -59,6 +59,7 @@ struct Prepared {
     std::vector<std::vector<u32>> spirv;
     std::vector<CompiledStackStep> stack;
     PluginImages images;   ///< 0.4.6: as "textures" decodificadas, na ordem do manifesto
+    std::string frameSource;   ///< formato 3: o texto do frameScript
 };
 
 u64 fnv64(const void* data, usize n, u64 h = 1469598103934665603ull) noexcept {
@@ -193,22 +194,35 @@ bool prepare(const fs::path& root, const EffectRegistry& registry, Prepared& out
             return false;
         }
     }
+    if (!m.frameScript.empty()) {
+        std::string source;
+        if (!read_text_file(root / path_of(m.frameScript), kMaxScriptBytes, source)) {
+            fail = {Errc::NotFound, "script", "arquivo de script ausente: " + m.frameScript};
+            return false;
+        }
+        script::ScriptError se;
+        if (!script::check_syntax(source, m.frameScript, se)) {
+            fail = {Errc::InvalidArgument, "script", se.text()};
+            return false;
+        }
+        out.frameSource = std::move(source);
+    }
+    bool imagesOk = true;
     for (const PanelDecl& panel : m.ui.panels) {
-        for (const ControlDecl& c : panel.controls) {
-            if (c.src.empty()) continue;
+        for_each_control(panel.controls, [&](const ControlDecl& c) {
+            if (c.src.empty() || !imagesOk) return;
             std::error_code ec;
             const fs::path path = root / path_of(c.src);
             if (!fs::is_regular_file(path, ec)) {
                 fail = {Errc::NotFound, "ui", "imagem do controle \"" + c.id + "\" ausente: " + c.src};
-                return false;
-            }
-            if (fs::file_size(path, ec) > kMaxImageBytes || ec) {
+                imagesOk = false;
+            } else if (fs::file_size(path, ec) > kMaxImageBytes || ec) {
                 fail = {Errc::BudgetExceeded, "ui", "imagem " + c.src + " maior que 32 MB"};
-                return false;
+                imagesOk = false;
             }
-        }
+        });
     }
-    return true;
+    return imagesOk;
 }
 
 PluginInfo info_of(const Manifest& m, const fs::path& dir) {
@@ -237,7 +251,7 @@ PluginInfo info_of(const Manifest& m, const fs::path& dir) {
 
 /// O efeito do plugin (os ids de shader já registrados, se for "shader").
 std::unique_ptr<Effect> make_effect(const Prepared& p, const std::vector<ShaderId>& shaders) {
-    if (p.manifest.kind == Kind::Shader) return make_shader_effect(p.manifest, shaders, p.images);
+    if (p.manifest.kind == Kind::Shader) return make_shader_effect(p.manifest, shaders, p.images, p.frameSource);
     return make_stack_effect(p.manifest, p.stack);
 }
 
@@ -382,6 +396,57 @@ void PluginManager::shutdown() noexcept {
     plugins_.clear();
 }
 
+namespace {
+constexpr const char* kBootCounter = ".sessoes";
+constexpr const char* kSafeFlag = ".modo-seguro";
+constexpr u32 kUncleanSessionsForSafeMode = 2;
+} // namespace
+
+u32 PluginManager::read_counter(const char* name) const noexcept {
+    std::string text;
+    if (directory_.empty() || !read_text_file(path_of(directory_) / name, 32, text)) return 0;
+    return static_cast<u32>(std::strtoul(text.c_str(), nullptr, 10));
+}
+
+void PluginManager::write_counter(const char* name, u32 value) const noexcept {
+    if (directory_.empty()) return;
+    std::error_code ec;
+    fs::create_directories(path_of(directory_), ec);
+    const std::string text = std::to_string(value);
+    (void)fileio::write_atomic(utf8(path_of(directory_) / name), text.data(), text.size());
+}
+
+void PluginManager::begin_session() noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const u32 unclean = read_counter(kBootCounter);
+    safeModeAutomatic_ = unclean >= kUncleanSessionsForSafeMode;
+    safeMode_ = read_counter(kSafeFlag) != 0 || safeModeAutomatic_;
+    write_counter(kBootCounter, unclean + 1);
+}
+
+void PluginManager::mark_healthy() noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    write_counter(kBootCounter, 0);
+}
+
+void PluginManager::set_safe_mode(bool on) noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    safeMode_ = on;
+    safeModeAutomatic_ = false;
+    write_counter(kSafeFlag, on ? 1 : 0);
+    if (!on) write_counter(kBootCounter, 0);
+}
+
+bool PluginManager::safe_mode() const noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return safeMode_;
+}
+
+bool PluginManager::safe_mode_automatic() const noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return safeModeAutomatic_;
+}
+
 u32 PluginManager::load_all() noexcept {
     std::lock_guard<std::mutex> lock(mutex_);
     for (Installed& p : plugins_) unregister_locked(p);
@@ -407,6 +472,21 @@ u32 PluginManager::load_all() noexcept {
     std::sort(dirs.begin(), dirs.end());
     u32 loaded = 0;
     for (const fs::path& dir : dirs) {
+        if (safeMode_) {
+            // Modo seguro: nada compila nem registra. A lista continua dizendo o que há.
+            Installed entry;
+            entry.info.id = utf8(dir.filename());
+            entry.info.directory = utf8(dir);
+            std::string text, why;
+            Manifest manifest;
+            if (read_text_file(dir / "plugin.json", kMaxManifestBytes + 4, text) && parse_manifest(text, manifest, why)) entry.info = info_of(manifest, dir);
+            entry.info.ok = false;
+            entry.info.errorCode = "safe_mode";
+            entry.info.error = "modo seguro ligado";
+            apply_state_locked(entry.info);
+            plugins_.push_back(std::move(entry));
+            continue;
+        }
         Prepared prepared;
         Failure failure;
         Installed entry;

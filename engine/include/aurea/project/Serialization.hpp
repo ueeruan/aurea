@@ -54,6 +54,7 @@ enum class SectionKind : u16 {
     Fonts       = 8,
     Thumbnails  = 9,
     Rig3D       = 10,   ///< 0.3.6: receita do AutoRig/mapa humanoide por asset
+    Plugins     = 11,   ///< Plugin V3: id e versão dos plugins que o projeto usa
     _Count,
 };
 
@@ -82,7 +83,10 @@ struct SectionHeader {
 /// v57 (0.5.0): onda dos animadores de camada (Alight Motion + unidades do AE).
 /// v58 (0.5.0): keyframe por ponto das máscaras. v59: animador de texto universal.
 /// v60 (0.5.0): modelo de cada animador de texto (matemática medida no After Effects).
-constexpr u32 kTimelineSectionVersion = 60;
+/// v61 (0.5.1): mesmos bytes; ao abrir um v60 ou anterior, o grupo herda a chave
+/// de motion blur do pai (o grupo nascia desligado e o blur das camadas sumia).
+/// v62 (0.5.1): oclusão ambiente do grupo 3D (chave, força e raio).
+constexpr u32 kTimelineSectionVersion = 63;
 
 /// Cabeçalho do arquivo.
 struct FileHeader {
@@ -163,6 +167,11 @@ struct LoadReport {
 /// Sem estado entre chamadas de propósito: gravar o arquivo A e ler o arquivo B
 /// não compartilham nada, então o autosave pode rodar numa worker thread
 /// enquanto a UI continua mexendo no projeto em memória.
+/// Migração de projetos até o v60: o grupo herda a chave de motion blur do pai
+/// quando tem camada com a flag ligada. Público para o teste exercitar sem um
+/// arquivo antigo de verdade.
+void inherit_group_motion_blur(Project& project);
+
 class ProjectSerializer {
 public:
     // --- Escrita --------------------------------------------------------------

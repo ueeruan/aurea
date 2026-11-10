@@ -43,6 +43,8 @@ bool Engine::set_project_ui_mode(u32 mode) noexcept {
     const u8 previous = ed.uiMode;
     bool changed = ed.uiMode != mode;
     ed.uiMode = static_cast<u8>(mode);
+    if (mode == 0 && previous == 1)
+        if (Composition* opened = current_composition()) opened->apply_edit_track_state(false);
     if (mode == 0 && previous == 1) {
         // 0.3.6: voltar à Composição devolve o ímã como estava ANTES da Edição.
         // A Edição liga o ímã da composição e a trilha principal magnética só
@@ -103,6 +105,8 @@ bool Engine::set_project_ui_mode(u32 mode) noexcept {
             }
         }
     }
+    if (mode == 1)
+        if (Composition* opened = current_composition()) changed = opened->arrange_edit_tracks() || changed;
     if (changed) project_->mark_dirty();
     return true;
 }

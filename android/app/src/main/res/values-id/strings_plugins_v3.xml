@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Plugin V3 (PluginUi.kt, PluginManagerSheet.kt, GradientParamEditor.kt) -->
+    <string name="plugv3_back_to_original">Kembali ke asli</string>
+    <string name="plugv3_replaces">Gunakan sebagai pengganti %1$s</string>
+    <string name="plugv3_panel_transform">Transformasi</string>
+    <string name="plugv3_panel_effects">Efek</string>
+    <string name="plugv3_panel_blend">Campuran dan opasitas</string>
+    <string name="plugv3_panel_presets">Preset</string>
+    <string name="plugv3_panel_material">Material 3D</string>
+    <string name="plugv3_safe_mode">Mode aman (mematikan plugin)</string>
+    <string name="plugv3_safe_on">Mode aman aktif: tidak ada plugin yang berjalan.</string>
+    <string name="plugv3_safe_auto">Aplikasi tertutup sendiri beberapa kali terakhir, jadi plugin dimatikan. Matikan mode aman untuk memakainya lagi.</string>
+    <string name="plugv3_close">Tutup</string>
+    <string name="plugv3_gradient_position">Posisi</string>
+    <string name="plugv3_gradient_remove">Hapus warna</string>
+    <string name="plugv3_gradient_stop">Warna %1$s</string>
+</resources>

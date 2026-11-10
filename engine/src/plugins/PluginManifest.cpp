@@ -40,6 +40,9 @@ const char* param_kind_name(ParamKind k) noexcept {
         case ParamKind::Point: return "point";
         case ParamKind::Angle: return "angle";
         case ParamKind::Layer: return "layer";
+        case ParamKind::Curve: return "curve";
+        case ParamKind::Gradient: return "gradient";
+        case ParamKind::LayerImage: return "layerImage";
     }
     return "float";
 }
@@ -225,11 +228,12 @@ bool read_param(const Value& v, u32 index, ParamDecl& p, Reader& r) {
         {"float", ParamKind::Float}, {"int", ParamKind::Int}, {"bool", ParamKind::Bool}, {"enum", ParamKind::Enum},
         {"color", ParamKind::Color}, {"point", ParamKind::Point}, {"angle", ParamKind::Angle},
         {"layer", ParamKind::Layer},
+        {"curve", ParamKind::Curve}, {"gradient", ParamKind::Gradient}, {"layerImage", ParamKind::LayerImage},
     };
     bool known = false;
     for (const auto& [name, kind] : kKinds) if (type->string == name) { p.kind = kind; known = true; }
     if (!known) return r.fail("plugin.json: " + pw + ": tipo desconhecido \"" + type->string
-                              + "\" (use float, int, bool, enum, color, point, angle ou layer)");
+                              + "\" (use float, int, bool, enum, color, point, angle, layer, curve, gradient ou layerImage)");
     if (!read_text(v.get("label"), p.label, "label", 48, false, r)) return false;
     if (p.label.empty()) p.label.emplace_back("*", p.id);
     if (const Value* a = v.get("animatable")) {
@@ -256,6 +260,13 @@ bool read_param(const Value& v, u32 index, ParamDecl& p, Reader& r) {
         }
         return true;
     }
+    // Curva, degradê e imagem de camada não têm faixa nem padrão numérico.
+    if (p.kind == ParamKind::Curve || p.kind == ParamKind::Gradient || p.kind == ParamKind::LayerImage) {
+        p.animatable = false;
+        p.min = -1.0f; p.max = 1.0e6f;
+        p.def[0] = p.kind == ParamKind::LayerImage ? -1.0f : 0.0f;
+        return true;
+    }
     // Faixas padrão por tipo.
     switch (p.kind) {
         case ParamKind::Float: p.min = 0.0f; p.max = 1.0f; break;
@@ -263,7 +274,7 @@ bool read_param(const Value& v, u32 index, ParamDecl& p, Reader& r) {
         case ParamKind::Bool: case ParamKind::Enum: case ParamKind::Color: p.min = 0.0f; p.max = 1.0f; break;
         case ParamKind::Point: p.min = -1.0f; p.max = 2.0f; break;
         case ParamKind::Angle: p.min = -360.0f; p.max = 360.0f; break;
-        case ParamKind::Layer: break;
+        default: break;
     }
     const Value* mn = v.get("min");
     const Value* mx = v.get("max");
@@ -520,11 +531,11 @@ bool parse_manifest(std::string_view text, Manifest& m, std::string& error) {
 
     const Value* format = root.get("aureaPlugin");
     f32 fmt = 0.0f;
-    if (!format || !read_number(format, fmt)) return r.fail("plugin.json: falta \"aureaPlugin\": 1 ou 2 (versao do formato)");
+    if (!format || !read_number(format, fmt)) return r.fail("plugin.json: falta \"aureaPlugin\": 1, 2 ou 3 (versao do formato)");
     // 0.3.4 plugins: o formato 2 traz interface, script e permissões.
-    if (fmt != static_cast<f32>(kFormatVersion) && fmt != static_cast<f32>(kFormatVersionV2))
+    if (fmt != static_cast<f32>(kFormatVersion) && fmt != static_cast<f32>(kFormatVersionV2) && fmt != static_cast<f32>(kFormatVersionV3))
         return r.fail("plugin.json: \"aureaPlugin\" " + std::to_string(static_cast<int>(fmt))
-                      + " nao suportado (este app le as versoes 1 e 2 do formato)");
+                      + " nao suportado (este app le as versoes 1, 2 e 3 do formato)");
     m.format = static_cast<u32>(fmt);
 
     const Value* id = root.get("id");
@@ -558,12 +569,17 @@ bool parse_manifest(std::string_view text, Manifest& m, std::string& error) {
 
     if (const Value* params = root.get("params")) {
         if (!params->is_array()) return r.fail("plugin.json: \"params\" deve ser uma lista");
-        if (params->array.size() > kMaxParams)
+        const u32 paramLimit = m.kind != Kind::Shader ? kMaxParams : m.scene3d ? kMaxShader3dParams : kMaxShaderParams;
+        if (params->array.size() > paramLimit)
             return r.fail("plugin.json: " + std::to_string(params->array.size()) + " parametros (limite "
-                          + std::to_string(kMaxParams) + ")");
+                          + std::to_string(paramLimit) + ")");
         for (usize i = 0; i < params->array.size(); ++i) {
             ParamDecl p;
             if (!read_param(params->array[i], static_cast<u32>(i), p, r)) return false;
+            if ((p.kind == ParamKind::Curve || p.kind == ParamKind::Gradient || p.kind == ParamKind::LayerImage)) {
+                if (m.format < kFormatVersionV3) return r.fail("plugin.json: parametro \"" + p.id + "\": este tipo pede \"aureaPlugin\": 3");
+                if (m.kind != Kind::Shader) return r.fail("plugin.json: parametro \"" + p.id + "\": este tipo so vale em \"shader\"");
+            }
             for (const ParamDecl& other : m.params)
                 if (other.id == p.id) return r.fail("plugin.json: parametro repetido \"" + p.id + "\"");
             m.params.push_back(std::move(p));
@@ -578,7 +594,37 @@ bool parse_manifest(std::string_view text, Manifest& m, std::string& error) {
                       + std::to_string(kMaxLayerParams) + ")");
     if (m.kind == Kind::Panel && !m.params.empty())
         return r.fail("plugin.json: plugin \"panel\" nao tem \"params\" (os controles ficam em \"ui\")");
+    // Formato 3: o que o shader consome além da imagem e o script por quadro.
+    const bool hasV3 = root.get("uses") || root.get("frameScript");
+    if (hasV3 && m.format < kFormatVersionV3) return r.fail("plugin.json: \"uses\" e \"frameScript\" pedem \"aureaPlugin\": 3");
+    if (hasV3 && m.kind != Kind::Shader) return r.fail("plugin.json: \"uses\" e \"frameScript\" so valem em \"shader\"");
+    if (const Value* uses = root.get("uses")) {
+        if (!uses->is_array()) return r.fail("plugin.json: \"uses\" deve ser uma lista (history, audio)");
+        for (const Value& u : uses->array) {
+            if (u.is_string() && u.string == "history") m.history = true;
+            else if (u.is_string() && u.string == "audio") m.audio = true;
+            else return r.fail("plugin.json: \"uses\" aceita history e audio");
+        }
+    }
+    if (const Value* frame = root.get("frameScript")) {
+        if (!frame->is_string() || frame->string.empty() || frame->string.find("..") != std::string::npos
+            || frame->string.size() < 4 || frame->string.compare(frame->string.size() - 3, 3, ".js") != 0)
+            return r.fail("plugin.json: \"frameScript\" deve ser um arquivo .js do pacote");
+        m.frameScript = frame->string;
+    }
+    if (m.kind == Kind::Shader) {
+        u32 used = 0;
+        for (const ParamDecl& p : m.params) used += param_slot_size(p);
+        used += m.audio ? 1u : 0u;
+        const u32 limit = m.scene3d ? kMaxShader3dParams : kMaxShaderParams;
+        if (used > limit)
+            return r.fail("plugin.json: os parametros ocupam " + std::to_string(used) + " posicoes (limite " + std::to_string(limit)
+                          + "; curva ocupa " + std::to_string(kCurveSlots) + " e degrade " + std::to_string(kGradientSlots) + ")");
+    }
     if (m.kind == Kind::Shader && !read_passes(root, m, r)) return false;
+    for (const PassDecl& pass : m.passes)
+        if (pass.inputs.size() + m.textures.size() + extra_samplers(m) > kMaxPassInputs)
+            return r.fail("plugin.json: entradas + texturas + camadas + historico + audio passam de " + std::to_string(kMaxPassInputs));
     if (m.kind == Kind::Stack && !read_stack(root, m, r)) return false;
     // 0.3.4 plugins: interface, script e permissões (formato 2).
     return parse_manifest_v2(root, m, m.format, error);

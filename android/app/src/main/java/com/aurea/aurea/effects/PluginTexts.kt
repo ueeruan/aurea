@@ -60,8 +60,19 @@ object PluginTexts {
         val maxLength: Int,
         val aspect: Float,
         val text: Map<String, String>,
+        // Formato 3: row, column, section e tabs guardam outros controles.
+        val collapsed: Boolean = false,
+        val children: List<Control> = emptyList(),
     )
-    class Panel(val id: String, val title: Map<String, String>, val icon: String, val placement: Set<String>, val controls: List<Control>)
+    class Panel(
+        val id: String,
+        val title: Map<String, String>,
+        val icon: String,
+        val placement: Set<String>,
+        val controls: List<Control>,
+        /** Formato 3: o painel do editor que este substitui ("" = nenhum). */
+        val replaces: String = "",
+    )
     class Action(
         val id: String,
         val title: Map<String, String>,
@@ -165,26 +176,31 @@ object PluginTexts {
             title = texts(o.optJSONObject("title")),
             icon = o.optString("icon", "wand"),
             placement = places(o.optJSONArray("placement")),
-            controls = List(controls.length()) { k ->
-                val c = controls.getJSONObject(k)
-                val opts = c.optJSONArray("options") ?: JSONArray()
-                Control(
-                    id = c.optString("id"),
-                    type = c.optString("type"),
-                    label = texts(c.optJSONObject("label")),
-                    style = c.optString("style", "primary"),
-                    min = c.optDouble("min", 0.0),
-                    max = c.optDouble("max", 1.0),
-                    step = c.optDouble("step", 0.0),
-                    unit = c.optString("unit"),
-                    options = List(opts.length()) { texts(opts.optJSONObject(it)) },
-                    placeholder = texts(c.optJSONObject("placeholder")),
-                    multiline = c.optBoolean("multiline"),
-                    maxLength = c.optInt("maxLength", 2000),
-                    aspect = c.optDouble("aspect", 0.0).toFloat(),
-                    text = texts(c.optJSONObject("text")),
-                )
-            },
+            controls = List(controls.length()) { control(controls.getJSONObject(it)) },
+            replaces = o.optString("replaces"),
+        )
+    }
+
+    private fun control(c: JSONObject): Control {
+        val opts = c.optJSONArray("options") ?: JSONArray()
+        val children = c.optJSONArray("children") ?: JSONArray()
+        return Control(
+            id = c.optString("id"),
+            type = c.optString("type"),
+            label = texts(c.optJSONObject("label")),
+            style = c.optString("style", "primary"),
+            min = c.optDouble("min", 0.0),
+            max = c.optDouble("max", 1.0),
+            step = c.optDouble("step", 0.0),
+            unit = c.optString("unit"),
+            options = List(opts.length()) { texts(opts.optJSONObject(it)) },
+            placeholder = texts(c.optJSONObject("placeholder")),
+            multiline = c.optBoolean("multiline"),
+            maxLength = c.optInt("maxLength", 2000),
+            aspect = c.optDouble("aspect", 0.0).toFloat(),
+            text = texts(c.optJSONObject("text")),
+            collapsed = c.optBoolean("collapsed"),
+            children = List(children.length()) { control(children.getJSONObject(it)) },
         )
     }
 

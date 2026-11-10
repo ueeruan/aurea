@@ -99,6 +99,14 @@ struct ExportSettings {
 /// Ajustes de interface persistidos com o projeto — zoom da timeline, escala
 /// do preview, painéis abertos. Ficam aqui e não no projeto porque o usuário
 /// espera reabrir e encontrar a tela como deixou.
+/// Plugin que o projeto usa. O efeito grava só um número derivado da chave:
+/// sem este registro não dá para dizer qual plugin falta nem de qual versão.
+struct PluginRef {
+    std::string id;
+    std::string version;
+    u32 typeId = 0;
+};
+
 struct EditorSettings {
     PreviewScale previewScale = PreviewScale::Auto;
     f32  timelineZoom = 1.0f;
@@ -200,6 +208,8 @@ public:
 
     [[nodiscard]] EditorSettings& editor_settings() noexcept { return editor_; }
     [[nodiscard]] const EditorSettings& editor_settings() const noexcept { return editor_; }
+    [[nodiscard]] const std::vector<PluginRef>& plugin_refs() const noexcept { return pluginRefs_; }
+    void set_plugin_refs(std::vector<PluginRef> refs) noexcept { pluginRefs_ = std::move(refs); }
 
     // --- Assets ---------------------------------------------------------------
 
@@ -288,6 +298,7 @@ private:
 
     /// Comandos lidos do journal de recuperação, aguardando o Engine aplicá-los.
     std::vector<Command> recoveredCommands_;
+    std::vector<PluginRef> pluginRefs_;
 
     u64 revision_ = 1;
 };

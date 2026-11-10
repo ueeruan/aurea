@@ -36,6 +36,9 @@ struct PluginV2Control {
     let maxLength: Int
     let aspect: Double
     let text: [String: String]
+    // Formato 3: row, column, section e tabs guardam outros controles.
+    let collapsed: Bool
+    let children: [PluginV2Control]
 }
 
 struct PluginV2Panel {
@@ -44,6 +47,8 @@ struct PluginV2Panel {
     let icon: String
     let placement: Set<String>
     let controls: [PluginV2Control]
+    /// Formato 3: o painel do editor que este substitui ("" = nenhum).
+    let replaces: String
 }
 
 struct PluginV2Action {
@@ -126,6 +131,18 @@ private func pv2Texts(_ any: Any?) -> [String: String] {
 
 private func pv2Places(_ any: Any?) -> Set<String> { Set((any as? [String]) ?? []) }
 
+private func pv2Control(_ c: [String: Any]) -> PluginV2Control {
+    PluginV2Control(
+        id: c["id"] as? String ?? "", type: c["type"] as? String ?? "", label: pv2Texts(c["label"]),
+        style: c["style"] as? String ?? "primary", min: (c["min"] as? NSNumber)?.doubleValue ?? 0,
+        max: (c["max"] as? NSNumber)?.doubleValue ?? 1, step: (c["step"] as? NSNumber)?.doubleValue ?? 0,
+        unit: c["unit"] as? String ?? "", options: (c["options"] as? [Any] ?? []).map { pv2Texts($0) },
+        placeholder: pv2Texts(c["placeholder"]), multiline: c["multiline"] as? Bool ?? false,
+        maxLength: (c["maxLength"] as? NSNumber)?.intValue ?? 2000, aspect: (c["aspect"] as? NSNumber)?.doubleValue ?? 0,
+        text: pv2Texts(c["text"]), collapsed: c["collapsed"] as? Bool ?? false,
+        children: (c["children"] as? [[String: Any]] ?? []).map { pv2Control($0) })
+}
+
 private func pv2Parse(_ json: String) -> [PluginV2Info] {
     guard let data = json.data(using: .utf8), let list = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
     return list.map { o in
@@ -136,16 +153,8 @@ private func pv2Parse(_ json: String) -> [PluginV2Info] {
             PluginV2Panel(
                 id: p["id"] as? String ?? "", title: pv2Texts(p["title"]), icon: p["icon"] as? String ?? "wand",
                 placement: pv2Places(p["placement"]),
-                controls: (p["controls"] as? [[String: Any]] ?? []).map { c in
-                    PluginV2Control(
-                        id: c["id"] as? String ?? "", type: c["type"] as? String ?? "", label: pv2Texts(c["label"]),
-                        style: c["style"] as? String ?? "primary", min: (c["min"] as? NSNumber)?.doubleValue ?? 0,
-                        max: (c["max"] as? NSNumber)?.doubleValue ?? 1, step: (c["step"] as? NSNumber)?.doubleValue ?? 0,
-                        unit: c["unit"] as? String ?? "", options: (c["options"] as? [Any] ?? []).map { pv2Texts($0) },
-                        placeholder: pv2Texts(c["placeholder"]), multiline: c["multiline"] as? Bool ?? false,
-                        maxLength: (c["maxLength"] as? NSNumber)?.intValue ?? 2000, aspect: (c["aspect"] as? NSNumber)?.doubleValue ?? 0,
-                        text: pv2Texts(c["text"]))
-                })
+                controls: (p["controls"] as? [[String: Any]] ?? []).map { pv2Control($0) },
+                replaces: p["replaces"] as? String ?? "")
         }
         let actions = (ui["actions"] as? [[String: Any]] ?? []).map { a in
             PluginV2Action(id: a["id"] as? String ?? "", title: pv2Texts(a["title"]), icon: a["icon"] as? String ?? "wand",
@@ -218,6 +227,12 @@ final class PluginRuntime: ObservableObject {
     @Published var console: String?
     @Published var pendingInstall: PluginPendingInstall?
     @Published var pickRequest: PluginPickRequest?
+    /// Formato 3: plugins fora do ar (a pedido ou depois de quedas na abertura).
+    @Published private(set) var safeMode = false
+    @Published private(set) var safeModeAutomatic = false
+    /// Painéis do editor em que a pessoa voltou ao original (a chave é o painel, não o plugin).
+    @Published private(set) var replacementsOff = Set(UserDefaults.standard.stringArray(forKey: "pluginReplacementsOff") ?? [])
+    private var backgroundObserver: NSObjectProtocol?
 
     var locale: String { FxPluginTexts.appTag }
     var active: [PluginV2Info] { plugins.filter { $0.ok && $0.enabled } }
@@ -230,6 +245,51 @@ final class PluginRuntime: ObservableObject {
         }
         plugins = pv2Parse(model.engine.pluginsJSON)
         if let open = editorPanel, !active.contains(where: { $0.id == open.plugin }) { editorPanel = nil }
+        safeMode = model.engine.pluginsSafeMode
+        safeModeAutomatic = model.engine.pluginsSafeModeAutomatic
+        if backgroundObserver == nil {
+            // Ir para o fundo é saída normal: só uma queda deixa a contagem do modo seguro subir.
+            backgroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+                self?.markHealthy()
+            }
+        }
+    }
+
+    /// A abertura deu certo: fora da thread da interface (o motor pode estar carregando plugins).
+    func markHealthy() {
+        guard let engine = model?.engine else { return }
+        DispatchQueue.global(qos: .utility).async { engine.markPluginsHealthy() }
+    }
+
+    func setSafeMode(_ on: Bool) {
+        guard let model else { return }
+        let engine = model.engine
+        DispatchQueue.global(qos: .userInitiated).async {
+            engine.setPluginsSafeMode(on)
+            DispatchQueue.main.async { [weak self] in
+                if on { self?.editorPanel = nil; self?.homePanel = nil }
+                model.refreshPlugins()
+            }
+        }
+    }
+
+    /// O painel do plugin que substitui `key`, se houver e a pessoa não tiver voltado ao original.
+    func replacement(_ key: String) -> (PluginV2Info, PluginV2Panel)? {
+        if replacementsOff.contains(key) { return nil }
+        for p in active {
+            if let panel = p.panels.first(where: { $0.replaces == key }) { return (p, panel) }
+        }
+        return nil
+    }
+
+    func setReplacementOff(_ key: String, _ off: Bool) {
+        if off { replacementsOff.insert(key) } else { replacementsOff.remove(key) }
+        UserDefaults.standard.set(Array(replacementsOff), forKey: "pluginReplacementsOff")
+    }
+
+    func openReplacement(_ id: String, _ panel: String) {
+        let loc = locale
+        run(id) { $0.pluginOpenPanel(id, panel: panel, locale: loc) }
     }
 
     func plugin(_ id: String) -> PluginV2Info? { plugins.first { $0.id == id } }
@@ -344,6 +404,19 @@ final class PluginRuntime: ObservableObject {
     }
 
     // --- instalação com consentimento ---
+    private var embedded: [URL] = []
+
+    /// Plugins que vieram no arquivo do projeto e este aparelho não tem: um consentimento por plugin.
+    @MainActor func offerEmbedded(_ plugins: [(id: String, file: String)]) {
+        embedded += plugins.filter { plugin($0.id) == nil }.map { URL(fileURLWithPath: $0.file) }
+        nextEmbedded()
+    }
+
+    @MainActor private func nextEmbedded() {
+        guard pendingInstall == nil, !embedded.isEmpty else { return }
+        beginInstall(embedded.removeFirst())
+    }
+
     @MainActor func beginInstall(_ url: URL) {
         guard let model else { return }
         model.pluginBusy(AureaText.t("pv2_reading"))
@@ -393,6 +466,7 @@ final class PluginRuntime: ObservableObject {
                 } else {
                     model.toast = AureaText.t("plug_failed", raw.hasPrefix("error:") ? String(raw.dropFirst(6)) : raw)
                 }
+                self.nextEmbedded()
             }
         }
     }
@@ -400,6 +474,7 @@ final class PluginRuntime: ObservableObject {
     func cancelInstall() {
         if let path = pendingInstall?.path { try? FileManager.default.removeItem(atPath: path) }
         pendingInstall = nil
+        DispatchQueue.main.async { self.nextEmbedded() }
     }
 
     @MainActor func setEnabled(_ id: String, _ on: Bool) {
@@ -433,7 +508,7 @@ final class PluginRuntime: ObservableObject {
         let tag = locale
         var out: [MenuEntry] = []
         for p in active {
-            for panel in p.panels where panel.placement.contains("editor.panel") {
+            for panel in p.panels where panel.placement.contains("editor.panel") || panel.placement.contains("editor.fullscreen") {
                 out.append(.item(pv2Pick(panel.title, tag), glyph: pv2Glyph(panel.icon), sublabel: pv2Pick(p.names, tag),
                                  tag: "plugin.open.\(p.id).\(panel.id)") { self.openPanel(p.id, panel.id) })
             }
@@ -500,7 +575,6 @@ struct PluginPanelContent: View {
     var body: some View {
         let tag = runtime.locale
         let state = runtime.states[plugin.id] ?? [:]
-        let disabled = Set(state["disabled"] as? [String] ?? [])
         let hidden = Set(state["hidden"] as? [String] ?? [])
         let busy = runtime.busy.contains(plugin.id)
         VStack(alignment: .leading, spacing: 10) {
@@ -532,19 +606,114 @@ struct PluginPanelContent: View {
                 .accessibilityIdentifier("plugin.error")
             }
             ForEach(panel.controls.filter { !hidden.contains($0.id) }, id: \.id) { c in
-                let enabled = !busy && !disabled.contains(c.id)
-                let override = (state["labels"] as? [String: Any])?[c.id] as? String
-                PluginControlView(pluginId: plugin.id, control: c, label: (override?.isEmpty == false ? override! : pv2Pick(c.label, tag)),
-                                  state: state, enabled: enabled, tag: tag)
-                    .opacity(enabled ? 1 : 0.4)
-                    .allowsHitTesting(enabled)
-                    .accessibilityIdentifier("plugin.ctl.\(c.id)")
+                PluginNodeView(pluginId: plugin.id, control: c, state: state, busy: busy, parentEnabled: true, tag: tag)
             }
         }
         .foregroundStyle(AureaColors.text)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("plugin.panel.\(plugin.id).\(panel.id)")
         .onAppear { if runtime.states[plugin.id] == nil { runtime.refreshState(plugin.id) } }
+    }
+}
+
+/// Um controle da árvore (formato 3): os que guardam outros passam o "desligado" adiante.
+private struct PluginNodeView: View {
+    let pluginId: String
+    let control: PluginV2Control
+    let state: [String: Any]
+    let busy: Bool
+    let parentEnabled: Bool
+    let tag: String
+    @State private var open: Bool?
+    @State private var tab = 0
+
+    private var disabled: Set<String> { Set(state["disabled"] as? [String] ?? []) }
+    private var enabled: Bool { parentEnabled && !busy && !disabled.contains(control.id) }
+    private var isOpen: Bool { open ?? !control.collapsed }
+
+    private func labelOf(_ c: PluginV2Control) -> String {
+        let override = (state["labels"] as? [String: Any])?[c.id] as? String
+        return override?.isEmpty == false ? override! : pv2Pick(c.label, tag)
+    }
+
+    private func visible(_ list: [PluginV2Control]) -> [PluginV2Control] {
+        let hidden = Set(state["hidden"] as? [String] ?? [])
+        return list.filter { !hidden.contains($0.id) }
+    }
+
+    private func node(_ c: PluginV2Control, parent: Bool) -> PluginNodeView {
+        PluginNodeView(pluginId: pluginId, control: c, state: state, busy: busy, parentEnabled: parent, tag: tag)
+    }
+
+    var body: some View {
+        content
+            // Quem está dentro de um container apagado não soma outra transparência.
+            .opacity(enabled || !parentEnabled ? 1 : 0.4)
+            .allowsHitTesting(enabled)
+            .accessibilityIdentifier("plugin.ctl.\(control.id)")
+    }
+
+    @ViewBuilder private var content: some View {
+        switch control.type {
+        case "row":
+            HStack(spacing: 8) {
+                ForEach(visible(control.children), id: \.id) { node($0, parent: enabled).frame(maxWidth: .infinity) }
+            }
+            .accessibilityElement(children: .contain)
+        case "column":
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(visible(control.children), id: \.id) { node($0, parent: enabled) }
+            }
+            .accessibilityElement(children: .contain)
+        case "section":
+            VStack(alignment: .leading, spacing: 0) {
+                Button { open = !isOpen } label: {
+                    HStack {
+                        Text(labelOf(control)).font(.aurea(size: 14, weight: .semibold))
+                        Spacer()
+                        CupertinoGlyph.text(isOpen ? CupertinoGlyph.ChevronUp : CupertinoGlyph.ChevronDown, size: 14, color: AureaColors.muted)
+                    }
+                    .padding(.horizontal, 12).frame(minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("plugin.section.\(control.id)")
+                if isOpen {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(visible(control.children), id: \.id) { node($0, parent: enabled) }
+                    }
+                    .padding(.horizontal, 12).padding(.bottom, 12)
+                }
+            }
+            .background(AureaColors.chip.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
+            .accessibilityElement(children: .contain)
+        case "tabs":
+            let sections = visible(control.children)
+            if !sections.isEmpty {
+                let current = min(max(tab, 0), sections.count - 1)
+                VStack(alignment: .leading, spacing: 10) {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(Array(sections.enumerated()), id: \.offset) { i, section in
+                                Button { tab = i } label: {
+                                    Text(labelOf(section)).font(.aurea(size: 14))
+                                        .foregroundStyle(i == current ? AureaColors.onAccent : AureaColors.text)
+                                        .padding(.horizontal, 14).frame(minHeight: 36)
+                                        .background(i == current ? AureaColors.accent : AureaColors.chip, in: Capsule())
+                                }
+                                .buttonStyle(.plain).frame(minHeight: 44)
+                                .accessibilityIdentifier("plugin.tab.\(section.id)")
+                            }
+                        }
+                    }
+                    ForEach(visible(sections[current].children), id: \.id) { child in
+                        node(child, parent: enabled && !disabled.contains(sections[current].id))
+                    }
+                }
+                .accessibilityElement(children: .contain)
+            }
+        default:
+            PluginControlView(pluginId: pluginId, control: control, label: labelOf(control), state: state, enabled: enabled, tag: tag)
+        }
     }
 }
 
@@ -741,6 +910,9 @@ struct PluginEditorPanelHost: View {
             if let open = runtime.editorPanel,
                let plugin = runtime.active.first(where: { $0.id == open.plugin }),
                let panel = plugin.panels.first(where: { $0.id == open.panel }) {
+                if panel.placement.contains("editor.fullscreen") && !panel.placement.contains("editor.panel") {
+                    PluginFullscreenPanel(plugin: plugin, panel: panel)
+                } else {
                 PanelFrame(rail: PanelRail(onBack: { runtime.editorPanel = nil }, supportsAnimation: false)) {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 8) {
@@ -755,8 +927,312 @@ struct PluginEditorPanelHost: View {
                 .frame(height: 300)
                 .background(AureaColors.background)
                 .transition(.move(edge: .bottom))
+                }
             }
         }
+        // Quinze segundos de editor de pé: esta abertura não foi uma queda (modo seguro).
+        .task {
+            try? await Task.sleep(nanoseconds: 15_000_000_000)
+            if !Task.isCancelled { runtime.markHealthy() }
+        }
+    }
+}
+
+/// Painel "editor.fullscreen" (formato 3). O fechar é do app: um plugin não prende a pessoa nele.
+private struct PluginFullscreenPanel: View {
+    @ObservedObject private var runtime = PluginRuntime.shared
+    let plugin: PluginV2Info
+    let panel: PluginV2Panel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Button { runtime.editorPanel = nil } label: {
+                    CupertinoGlyph.text(CupertinoGlyph.Xmark, size: 18, color: AureaColors.text)
+                        .frame(width: 48, height: 48).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(AureaText.t("plugv3_close"))
+                .accessibilityIdentifier("plugin.fullscreen.close")
+                CupertinoGlyph.text(pv2Glyph(panel.icon), size: 18, color: AureaColors.accent)
+                Text(pv2Pick(panel.title, runtime.locale)).font(.aurea(size: 15, weight: .semibold))
+                Spacer()
+            }
+            ScrollView {
+                PluginPanelContent(plugin: plugin, panel: panel).padding(14)
+            }
+        }
+        .foregroundStyle(AureaColors.text)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(AureaColors.background.ignoresSafeArea())
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("plugin.fullscreen")
+    }
+}
+
+/// O painel `key` do editor: o do plugin que o substitui ou, sem nenhum, o original.
+/// "Voltar ao original" é do app e fica fora do conteúdo do plugin; a escolha é
+/// guardada por painel (no gerenciador de plugins dá para reativar).
+struct PluginPanelOr<Original: View>: View {
+    @ObservedObject private var runtime = PluginRuntime.shared
+    let key: String
+    let original: () -> Original
+
+    init(_ key: String, @ViewBuilder original: @escaping () -> Original) {
+        self.key = key
+        self.original = original
+    }
+
+    var body: some View {
+        if let (plugin, panel) = runtime.replacement(key) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        CupertinoGlyph.text(pv2Glyph(panel.icon), size: 18, color: AureaColors.accent)
+                        Text(pv2Pick(panel.title, runtime.locale)).font(.aurea(size: 15, weight: .semibold))
+                        Spacer()
+                        Button { runtime.setReplacementOff(key, true) } label: {
+                            Text(AureaText.t("plugv3_back_to_original")).font(.aurea(size: 13)).foregroundStyle(AureaColors.accent).frame(minHeight: 44)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("plugin.restore.\(key)")
+                    }
+                    PluginPanelContent(plugin: plugin, panel: panel)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 6)
+            }
+            .foregroundStyle(AureaColors.text)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("plugin.replacement.\(key)")
+            .task(id: plugin.id + "/" + panel.id) { runtime.openReplacement(plugin.id, panel.id) }
+        } else {
+            original()
+        }
+    }
+}
+
+/// As ações "add.menu" (formato 3) depois das células do Adicionar.
+func pluginAppended(_ cells: [ObjectCell], close: @escaping () -> Void) -> [ObjectCell] {
+    let runtime = PluginRuntime.shared
+    var out = cells
+    for p in runtime.active {
+        for a in p.actions where a.placement.contains("add.menu") {
+            out.append(ObjectCell(label: pv2Pick(a.title, runtime.locale), tag: "plugin.action.\(p.id).\(a.id)", glyph: pv2Glyph(a.icon)) {
+                close()
+                runtime.runAction(p.id, a)
+            })
+        }
+    }
+    return out
+}
+
+/// Aviso e chave do modo seguro no gerenciador de plugins.
+struct PluginSafeModeView: View {
+    @ObservedObject private var runtime = PluginRuntime.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if runtime.safeMode {
+                Text(AureaText.t(runtime.safeModeAutomatic ? "plugv3_safe_auto" : "plugv3_safe_on")).font(.aurea(size: 13))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(AureaColors.warning.opacity(0.14), in: RoundedRectangle(cornerRadius: 10))
+                    .accessibilityIdentifier("plugins.safeMode.notice")
+            }
+            PluginPermissionRow(text: AureaText.t("plugv3_safe_mode"), on: runtime.safeMode, tag: "plugins.safeMode") { runtime.setSafeMode($0) }
+        }
+    }
+}
+
+/// Curva de um plugin: o gráfico captura o arrasto e ocupa o painel, então começa
+/// fechado para os parâmetros seguintes continuarem ao alcance.
+struct CollapsibleCurveEditor: View {
+    let layer: Int64
+    let effect: UInt32
+    let param: UInt32
+    let label: String
+    @State private var open = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button { open.toggle() } label: {
+                HStack {
+                    Text(label).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted)
+                    Spacer()
+                    CupertinoGlyph.text(open ? CupertinoGlyph.ChevronUp : CupertinoGlyph.ChevronDown, size: 14, color: AureaColors.muted)
+                }
+                .padding(.horizontal, 12).frame(minHeight: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("fx.curve.toggle.\(param)")
+            if open { ColorCurveEditor(layer: layer, effect: effect, param: param) }
+        }
+    }
+}
+
+/// Parâmetro degradê (plugins, formato 3): a barra mostra o resultado, tocar
+/// acrescenta ou escolhe uma parada e arrastar a move. Ordem, limites e desfazer
+/// são do motor (Engine::set_effect_gradient). Par do GradientParamEditor.kt.
+struct GradientParamEditor: View {
+    let layer: Int64
+    let effect: UInt32
+    let param: UInt32
+    let label: String
+    @EnvironmentObject private var model: AureaModel
+    @State private var stops: [Float] = []
+    @State private var selected = 0
+    @State private var grabbed: Int?
+    @State private var dragged = false
+    @State private var gesturing = false
+    private let inset: CGFloat = 14
+    private let gap: Float = 0.001
+    private let maxStops = 16
+
+    private var count: Int { stops.count / 5 }
+    private var locked: Bool { model.selectedLayer?.locked == true }
+
+    private func color(_ i: Int) -> [Float] { Array(stops[(i * 5 + 1)...(i * 5 + 4)]) }
+    private func shown(_ i: Int) -> Color {
+        let c = AureaColorSpace.engineToDisplay(color(i))
+        return Color(.sRGB, red: Double(c[0]), green: Double(c[1]), blue: Double(c[2]), opacity: Double(c[3]))
+    }
+    private func reload() {
+        stops = model.engine.effectGradient(layer, effect: effect, param: param).map { $0.floatValue }
+        selected = min(max(selected, 0), max(count - 1, 0))
+    }
+    private func commit() {
+        _ = model.engine.setEffectGradient(layer, effect: effect, param: param, stops: stops.map { NSNumber(value: $0) })
+        reload()
+        model.refreshModel(force: true)
+    }
+    /// A parada `i` em `t`, sem passar as vizinhas: a ordem não muda durante o gesto.
+    private func move(_ i: Int, _ t: Float) {
+        let lo = i == 0 ? 0 : stops[(i - 1) * 5] + gap
+        let hi = i == count - 1 ? 1 : stops[(i + 1) * 5] - gap
+        stops[i * 5] = min(max(t, lo), max(lo, hi))
+    }
+    /// Uma parada nova em `t` com a cor que o degradê já tinha ali; devolve o índice dela.
+    private func insert(_ t: Float) -> Int {
+        let at = (0..<count).first { stops[$0 * 5] > t } ?? count
+        let a = max(at - 1, 0), b = min(at, count - 1)
+        let span = stops[b * 5] - stops[a * 5]
+        let k = span > 0 ? min(max((t - stops[a * 5]) / span, 0), 1) : 0
+        var fresh: [Float] = [t]
+        for c in 1...4 { fresh.append(stops[a * 5 + c] + (stops[b * 5 + c] - stops[a * 5 + c]) * k) }
+        stops.insert(contentsOf: fresh, at: at * 5)
+        return at
+    }
+    private func removeSelected() {
+        let at = selected
+        stops.removeSubrange((at * 5)..<((at + 1) * 5))
+        selected = max(at - 1, 0)
+        commit()
+    }
+    private func pickColor() {
+        let index = selected
+        model.colorSheet = ColorSheetRequest(title: label, initial: AureaColorSpace.engineToDisplay(color(index)), onChange: { r, g, b, a in
+            let v = AureaColorSpace.displayToEngine(r, g, b, a)
+            for k in 0..<4 where index * 5 + 1 + k < stops.count { stops[index * 5 + 1 + k] = v[k] }
+        }, onDone: { commit() })
+    }
+
+    private func bar(width: CGFloat) -> some View {
+        let usable = max(width - inset * 2, 1)
+        let toT: (CGFloat) -> Float = { Float(min(max(($0 - inset) / usable, 0), 1)) }
+        return ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 6)
+                .fill(LinearGradient(stops: (0..<count).map { Gradient.Stop(color: shown($0), location: CGFloat(stops[$0 * 5])) }, startPoint: .leading, endPoint: .trailing))
+                .frame(width: usable, height: 20)
+                .offset(x: inset)
+            ForEach(0..<count, id: \.self) { i in
+                Circle().fill(shown(i))
+                    .overlay(Circle().stroke(i == selected ? AureaColors.accent : Color.white, lineWidth: 2))
+                    .frame(width: 20, height: 20)
+                    .offset(x: inset + CGFloat(stops[i * 5]) * usable - 10)
+            }
+        }
+        .frame(width: width, height: 44, alignment: .leading)
+        .contentShape(Rectangle())
+        .gesture(DragGesture(minimumDistance: 0).onChanged { g in
+            guard !locked else { return }
+            if grabbed == nil {
+                let x = g.startLocation.x
+                let nearest = (0..<count).min { abs(inset + CGFloat(stops[$0 * 5]) * usable - x) < abs(inset + CGFloat(stops[$1 * 5]) * usable - x) } ?? 0
+                if abs(inset + CGFloat(stops[nearest * 5]) * usable - x) <= 24 {
+                    grabbed = nearest
+                } else if count < maxStops {
+                    grabbed = insert(toT(x))
+                    dragged = true
+                } else {
+                    return
+                }
+                selected = grabbed ?? 0
+            }
+            if let index = grabbed, abs(g.translation.width) > 1 {
+                move(index, toT(g.location.x))
+                dragged = true
+            }
+        }.onEnded { _ in
+            if dragged { commit() }
+            grabbed = nil
+            dragged = false
+        })
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+        .accessibilityIdentifier("fx.gradient.bar")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted)
+            if count >= 2 {
+                GeometryReader { g in bar(width: g.size.width) }.frame(height: 44)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 0) {
+                        ForEach(0..<count, id: \.self) { i in
+                            Button {
+                                if i == selected { pickColor() } else { selected = i }
+                            } label: {
+                                AureaColorSwatch(color: shown(i))
+                                    .frame(width: 30, height: 30)
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(i == selected ? AureaColors.accent : .clear, lineWidth: 2))
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(locked)
+                            .accessibilityLabel(AureaText.t("plugv3_gradient_stop", String(i + 1)))
+                            .accessibilityIdentifier("fx.gradient.stop.\(i)")
+                        }
+                    }
+                }
+                HStack(spacing: 8) {
+                    Text(AureaText.t("plugv3_gradient_position")).font(.aurea(size: 13))
+                    Slider(value: Binding(get: { Double(stops[min(selected, count - 1) * 5]) }, set: { move(selected, Float($0)) }), in: 0...1, onEditingChanged: { editing in
+                        gesturing = editing
+                        if !editing { commit() }
+                    })
+                    .tint(AureaColors.accent)
+                    .disabled(locked)
+                    .accessibilityLabel(AureaText.t("plugv3_gradient_position"))
+                    Text("\(Int((stops[min(selected, count - 1) * 5] * 100).rounded())) %").font(.aurea(size: 13))
+                    if count > 2 {
+                        Button { removeSelected() } label: {
+                            Text(AureaText.t("plugv3_gradient_remove")).font(.aurea(size: 13)).foregroundStyle(AureaColors.danger).frame(minHeight: 44)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(locked)
+                        .accessibilityIdentifier("fx.gradient.remove")
+                    }
+                }
+                .frame(minHeight: 44)
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .foregroundStyle(AureaColors.text)
+        .onAppear { reload() }
+        .onChange(of: model.status.modelRevision) { _ in if grabbed == nil && !gesturing && model.colorSheet == nil { reload() } }
     }
 }
 
@@ -1002,6 +1478,10 @@ struct PluginV2Controls: View {
                     }
                 }
                 if p.enabled {
+                    ForEach(p.panels.filter { !$0.replaces.isEmpty }, id: \.id) { panel in
+                        PluginPermissionRow(text: AureaText.t("plugv3_replaces", AureaText.t("plugv3_panel_\(panel.replaces)")),
+                                            on: !runtime.replacementsOff.contains(panel.replaces), tag: "plugins.replace.\(panel.replaces)") { runtime.setReplacementOff(panel.replaces, !$0) }
+                    }
                     ForEach(p.panels.filter { $0.placement.contains("editor.panel") }, id: \.id) { panel in
                         Button { runtime.openPanel(p.id, panel.id) } label: {
                             Text(AureaText.t("pv2_open_panel", pv2Pick(panel.title, runtime.locale))).font(.aurea(size: 13))

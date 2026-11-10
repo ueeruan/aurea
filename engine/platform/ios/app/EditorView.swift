@@ -1004,18 +1004,19 @@ struct ContextSheet: View {
             switch model.panel {
             case .none, .dock:
                 EmptyView()
+            // Plugin V3: estes cinco um plugin pode substituir (sempre com volta ao original).
             case .transform:
-                TransformView()
+                PluginPanelOr("transform") { TransformView() }
             case .text:
                 TextPanelView()
             case .effects:
-                EffectsView()
+                PluginPanelOr("effects") { EffectsView() }
             case .layer3D:
-                Panel3DView()
+                PluginPanelOr("material") { Panel3DView() }
             case .exportPanel:
                 ExportView()
             case .appearance:
-                AppearancePanel()
+                PluginPanelOr("blend") { AppearancePanel() }
             case .speed:
                 SpeedPanel()
             case .clipEdit:
@@ -1034,7 +1035,7 @@ struct ContextSheet: View {
             case .curve:
                 CurvePanel()
             case .presets:
-                PresetsPanel()
+                PluginPanelOr("presets") { PresetsPanel() }
             case .particles:
                 ParticlesPanel()
             case .tracking:

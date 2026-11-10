@@ -1,6 +1,7 @@
 #include "aurea/effects/Palette.hpp"
 #include "aurea/DefaultNames.hpp"
 #include "aurea/Engine.hpp"
+#include "aurea/scene3d/Image3D.hpp"
 #include "aurea/media/ImageResample.hpp"
 #include "aurea/tracking/RealCameraPreviewScope.hpp"
 #include "aurea/render/PreviewCachePolicy.hpp"
@@ -679,7 +680,7 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
     // um sai sob demanda, quando um projeto usa o efeito.
     if (!plugins_) plugins_ = std::make_unique<plugins::PluginManager>(effectRegistry_);
     plugins_->set_directory(config.pluginDirectory);
-    if (!config.pluginDirectory.empty()) (void)plugins_->load_all();
+    if (!config.pluginDirectory.empty()) { plugins_->begin_session(); (void)plugins_->load_all(); }
     startup_.jobsMs = ms_since(tStart);
 
     {
@@ -891,7 +892,7 @@ Status prepare_original_export_models(Project& project, CompositionId root,
             {
                 scene3d::Shape3DSpec shape;
                 scene3d::Text3DSpec text;
-                if (scene3d::decode_shape3d(source->sourcePath, shape) || scene3d::decode_text3d(source->sourcePath, text)) continue;
+                if (scene3d::decode_shape3d(source->sourcePath, shape) || scene3d::decode_text3d(source->sourcePath, text) || scene3d::is_image3d_source(source->sourcePath)) continue;
             }
             const auto prior = models.find(key);
             if (prior != models.end() && prior->second) {
@@ -1164,7 +1165,7 @@ void Engine::shutdown() noexcept {
     }
     // Os efeitos de plugin saem do registro (aposentados) e os shaders do
     // registro global: um motor novo no mesmo processo recarrega da pasta.
-    if (plugins_) plugins_->shutdown();
+    if (plugins_) { plugins_->mark_healthy(); plugins_->shutdown(); }
     state_ = EngineState::Uninitialized;
 }
 
@@ -1633,6 +1634,8 @@ Status Engine::new_project(u32 width, u32 height, f64 fps, const char* title, co
                                               unit(backgroundRgba[2]), unit(backgroundRgba[3])});
         }
     }
+    // Projeto novo nasce em AgX, a curva padrão do Blender; os salvos guardam a deles.
+    if (Composition* root = result->timeline().composition(result->timeline().root())) root->post_process().toneMapper = 1;
 
     join_camera_track();
     join_motion_track();
@@ -1769,6 +1772,11 @@ u32 rebase_project_paths(Project& project, const std::string& docs) {
             if (!font.empty()) { spec.fontPath = std::move(font); a.sourcePath = scene3d::encode_text3d(spec); ++moved; }
             std::string texture = rebase_moved_documents(spec.texturePath, docs);
             if (!texture.empty()) { spec.texturePath = std::move(texture); a.sourcePath = scene3d::encode_text3d(spec); ++moved; }
+        }
+        scene3d::Image3DSpec image3d;
+        if (scene3d::decode_image3d(a.sourcePath, image3d)) {
+            std::string image = rebase_moved_documents(image3d.imagePath, docs);
+            if (!image.empty()) { image3d.imagePath = std::move(image); a.sourcePath = scene3d::encode_image3d(image3d); ++moved; }
         }
     });
     project.timeline().for_each_composition([&](CompositionId, Composition& c) {
@@ -2137,7 +2145,7 @@ Status Engine::load_project_checked(const char* path, ExportRestartGuard* restar
             {
                 std::lock_guard<std::mutex> lock(modelMutex_);
                 if (!project_ || projectSession_ != loadedSession) return Errc::Cancelled;
-                room = source_asset_room_locked();
+                room = scene3d::is_rebuildable_mesh_source(src) ? text3d_room_locked() : source_asset_room_locked();
             }
             if (room < 4096) { ++missing; continue; }
             scene3d::ImportOptions o;
@@ -2152,9 +2160,12 @@ Status Engine::load_project_checked(const char* path, ExportRestartGuard* restar
             // Forma 3D: também é receita (forma + cor/imagem por parte).
             scene3d::Shape3DSpec shape;
             const bool isShape = !font && scene3d::decode_shape3d(src, shape);
+            scene3d::Image3DSpec image3d;
+            const bool isImage3d = !font && !isShape && scene3d::decode_image3d(src, image3d);
             scene3d::ImportResult r = font ? scene3d::build_text3d(*font, spec, [this](const std::string& path) { return resolve_asset_path(path); }, model_texture_cap())
                                     : isShape ? scene3d::build_shape3d(shape, [this](const std::string& s) { return resolve_asset_path(s); },
                                                                        o.maxTextureSize, room)
+                                    : isImage3d ? scene3d::build_image3d(image3d, [this](const std::string& s) { return resolve_asset_path(s); }, o.maxTextureSize, room)
                                               : [&] {
                                                     // Arquivo importado: a mesma otimização do import, e
                                                     // nunca menos do que ESTE aparelho aguenta.
@@ -2186,7 +2197,7 @@ Status Engine::load_project_checked(const char* path, ExportRestartGuard* restar
                 continue;
             }
             // AutoRig 3D: a receita refaz ossos, skin e pesos (determinístico).
-            if (const auto rigIt = pendingRig.find(key); rigIt != pendingRig.end() && !font && !isShape) {
+            if (const auto rigIt = pendingRig.find(key); rigIt != pendingRig.end() && !font && !isShape && !isImage3d) {
                 const rig::AutoRigError re = rig::apply_rig_spec(*r.asset, rigIt->second);
                 if (re != rig::AutoRigError::None)
                     AUREA_LOG_WARN("rig do modelo 3D nao refeito (%s)", rig::to_string(re));
@@ -2195,7 +2206,7 @@ Status Engine::load_project_checked(const char* path, ExportRestartGuard* restar
             if (!project_ || projectSession_ != loadedSession) return Errc::Cancelled;
             const Asset* a = project_->asset(AssetId::unpack(key));
             if (!a || a->sourcePath != src) continue;
-            if (scene3d::scene_asset_memory_bytes(*r.asset) > source_asset_room_locked()) { ++missing; continue; }
+            if (scene3d::scene_asset_memory_bytes(*r.asset) > (scene3d::is_rebuildable_mesh_source(src) ? text3d_room_locked() : source_asset_room_locked())) { ++missing; continue; }
             models_[key] = std::shared_ptr<const scene3d::SceneAsset>(std::move(r.asset));
             if (repairLetters) {
                 if (restartGuard && !export_restart_matches_locked(*restartGuard)) return Errc::Cancelled;
@@ -2215,6 +2226,8 @@ Status Engine::load_project_checked(const char* path, ExportRestartGuard* restar
         return Status{Errc::Cancelled, "projeto editado durante a restauracao da exportacao"};
     if (missingTotal) notice |= kLoadMissingMedia;
     lastLoadMissing_.store(missingTotal, std::memory_order_relaxed);
+    if (project_->editor_settings().uiMode == 1)
+        if (Composition* opened = current_composition()) (void)opened->arrange_edit_tracks();
     lastLoadNotice_.store(notice, std::memory_order_relaxed);
     set_last_error(OkStatus, nullptr);
     // Proxies de outra sessão voltam do disco; os que faltam são gerados.
@@ -2262,6 +2275,7 @@ Status Engine::save_project_impl(const char* requestedPath, bool idleOnly, bool 
             return OkStatus;
         if (dirtyOnly && !project_->dirty()) return OkStatus;
         project_->metadata().modifiedUnixMs = wall_clock_ms();
+        refresh_plugin_refs_locked();
         if (const Status s = ProjectSerializer::encode(*project_, options, bytes); !s.ok()) {
             set_last_error(s, "salvar projeto");
             return s;
@@ -2577,7 +2591,7 @@ Result<u64> Engine::extract_audio(u64 videoLayerId) noexcept {
     if (const Track* vt = src.tracks.find(TrackProperty::AudioVolume)) {
         l->tracks.get_or_create(TrackProperty::AudioVolume) = *vt;
     }
-    if (Layer* vv = comp->layer(LayerId::unpack(videoLayerId))) vv->muted = true;
+    if (Layer* vv = comp->layer(LayerId::unpack(videoLayerId))) { vv->muted = true; vv->audioUnlinked = true; }
     project_->mark_dirty();
     request_render();
     return lid.pack();
@@ -7326,6 +7340,32 @@ bool Engine::query_scene3d_fog(f32* out) noexcept {
     return true;
 }
 
+bool Engine::set_scene3d_ao(bool on, f32 strength, f32 radius) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp || !std::isfinite(strength) || !std::isfinite(radius)) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "oclusao ambiente 3D");
+    PostProcessSettings& pp = comp->post_process();
+    pp.aoEnabled = on;
+    pp.aoStrength = std::clamp(strength, 0.0f, 3.0f);
+    pp.aoRadius = std::clamp(radius, 0.02f, 0.2f);
+    bump_model_revision_locked();
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::query_scene3d_ao(f32* out) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp || !out) return false;
+    const PostProcessSettings& pp = comp->post_process();
+    out[0] = pp.aoEnabled ? 1.0f : 0.0f;
+    out[1] = pp.aoStrength;
+    out[2] = pp.aoRadius;
+    return true;
+}
+
 bool Engine::query_scene3d_post(f32* out) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     const Composition* comp = project_ ? current_composition() : nullptr;
@@ -7480,6 +7520,12 @@ Result<u64> Engine::precompose_locked(const u64* ids, u32 count, const char* nam
     child->environment().showBackground = false;
     child->shadows() = comp->shadows();
     child->post_process().quality3d = comp->post_process().quality3d;
+    child->post_process().toneMapper = comp->post_process().toneMapper;
+    child->post_process().aoEnabled = comp->post_process().aoEnabled;
+    child->post_process().aoStrength = comp->post_process().aoStrength;
+    child->post_process().aoRadius = comp->post_process().aoRadius;
+    // Layer blur flags move with the layers, and they only act under this switch.
+    child->motion_blur() = comp->motion_blur();
     // The procedural floor belongs to the models it lights/reflects. When
     // the entire 3D scene in this time range moves, its floor must move too;
     // otherwise the parent has no 3D pass left and the floor disappears.
@@ -9811,6 +9857,32 @@ u64 Engine::source_asset_room_locked() const noexcept {
     return room;
 }
 
+u64 Engine::text3d_room_locked() const noexcept {
+    // Cada foto que não cabe inteira leva metade do que sobra, então o espaço
+    // de um projeto cheio de mídia tende a zero e o texto 3D (que vem da
+    // receita, pesa pouco) não abria nem podia ser editado.
+    const u64 allowance = std::min<u64>(process_budget_bytes() / 24, 32ull << 20);
+    u64 used = 0;
+    if (project_) for (const auto& [key, model] : models_) {
+        const Asset* asset = model ? project_->asset(AssetId::unpack(key)) : nullptr;
+        if (asset && scene3d::is_rebuildable_mesh_source(asset->sourcePath)) used += scene3d::scene_asset_memory_bytes(*model);
+    }
+    return source_asset_room_locked() + (allowance - std::min(allowance, used));
+}
+
+u64 Engine::replaced_text3d_bytes_locked(AssetId scene) const noexcept {
+    const auto model = models_.find(scene.pack());
+    const Asset* asset = project_ ? project_->asset(scene) : nullptr;
+    if (model == models_.end() || !model->second || !asset || !scene3d::is_rebuildable_mesh_source(asset->sourcePath)) return 0;
+    for (const auto& copied : clipboard_.layers)
+        if (copied.second.kind == LayerKind::Model3D && copied.second.model.scene == scene) return 0;
+    u32 users = 0;
+    project_->timeline().for_each_composition([&](CompositionId, const Composition& c) {
+        c.layers().for_each([&](LayerId, const Layer& l) { users += l.kind == LayerKind::Model3D && l.model.scene == scene; });
+    });
+    return users == 1 ? scene3d::scene_asset_memory_bytes(*model->second) : 0;
+}
+
 Result<u64> Engine::import_image(const u8* rgba, u32 width, u32 height, const char* name,
                                  const char* sourcePath, u8 orientation) noexcept {
     if (!rgba || width == 0 || height == 0) return Status{Errc::InvalidArgument, "imagem vazia"};
@@ -11323,7 +11395,7 @@ Result<u64> Engine::add_text3d(const scene3d::Text3DSpec& requested) noexcept {
     drain_commands_locked();
         if (!project_) return Status{Errc::InvalidState};
         session = projectSession_; composition = project_->timeline().current();
-        if (source_asset_room_locked() < 4096) return Status{Errc::BudgetExceeded};
+        if (text3d_room_locked() < 4096) return Status{Errc::BudgetExceeded};
     }
     const auto font = scene3d::text3d_font(spec);
     if (!font) return Status{Errc::NotSupported, "nenhuma fonte disponivel neste aparelho"};
@@ -11335,7 +11407,7 @@ Result<u64> Engine::add_text3d(const scene3d::Text3DSpec& requested) noexcept {
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return Status{Errc::InvalidState, "nenhum projeto aberto"};
     if (session != projectSession_ || composition != project_->timeline().current()) return Status{Errc::Cancelled};
-    if (scene3d::scene_asset_memory_bytes(*scene) > source_asset_room_locked()) return Status{Errc::BudgetExceeded};
+    if (scene3d::scene_asset_memory_bytes(*scene) > text3d_room_locked()) return Status{Errc::BudgetExceeded};
     history_.before_mutation(*comp, project_->timeline().current(), "texto 3D");
     bump_model_revision_locked();
     const AssetId assetId = add_model_asset(*project_, *scene, "Texto 3D", scene3d::encode_text3d(spec));
@@ -11453,8 +11525,9 @@ Status Engine::set_text3d_impl(u64 layerId, const scene3d::Text3DSpec& spec) noe
         session = projectSession_; composition = project_->timeline().current();
         // Cada edição guarda uma malha nova; numa sessão longa (ou num projeto
         // cheio de mídia) o espaço acabava e TODA edição era recusada.
-        if (source_asset_room_locked() < 4096) release_unused_text3d_models_locked();
-        if (source_asset_room_locked() < 4096) return Status{Errc::BudgetExceeded, "memoria de imagens e modelos do projeto esgotada"};
+        const u64 replacedBefore = replaced_text3d_bytes_locked(previousScene);
+        if (text3d_room_locked() + replacedBefore < 4096) release_unused_text3d_models_locked();
+        if (text3d_room_locked() + replacedBefore < 4096) return Status{Errc::BudgetExceeded, "memoria de imagens e modelos do projeto esgotada"};
         // A stale panel snapshot must not merge the letters of a live effect.
         if (!edited.separateGlyphs && (std::any_of(l->effects.begin(), l->effects.end(), [](const EffectInstance& effect) {
             return text::is_animator_effect(effect.type) || effect.type == effect_type_id(text::kTransformEffect)
@@ -11488,9 +11561,13 @@ Status Engine::set_text3d_impl(u64 layerId, const scene3d::Text3DSpec& spec) noe
     const Asset* old = project_->asset(l->model.scene);
     scene3d::Text3DSpec prev;
     if (!old || !scene3d::decode_text3d(old->sourcePath, prev)) return Errc::InvalidArgument;
-    if (scene3d::scene_asset_memory_bytes(*scene) > source_asset_room_locked()) release_unused_text3d_models_locked();
-    if (scene3d::scene_asset_memory_bytes(*scene) > source_asset_room_locked())
+    // A malha que esta edição substitui não ocupa espaço depois dela.
+    const u64 meshBytes = scene3d::scene_asset_memory_bytes(*scene);
+    const u64 replaced = replaced_text3d_bytes_locked(l->model.scene);
+    if (meshBytes > text3d_room_locked() + replaced) release_unused_text3d_models_locked();
+    if (meshBytes > text3d_room_locked() + replaced)
         return Status{Errc::BudgetExceeded, "memoria de imagens e modelos do projeto esgotada"};
+    const bool dropReplaced = meshBytes > text3d_room_locked();
     history_.before_mutation(*comp, project_->timeline().current(), "editar texto 3D");
     bump_model_revision_locked();
     follow_text3d_material_edit(*l, prev, edited, *scene, l->local_time(playback_.current()));
@@ -11503,6 +11580,7 @@ Status Engine::set_text3d_impl(u64 layerId, const scene3d::Text3DSpec& spec) noe
     l->text.content = edited.content;
     l->text.size = 100.f;
     l->text.alignment = edited.alignment;
+    if (dropReplaced) release_unused_text3d_models_locked();   // o desfazer refaz pela receita
     project_->mark_dirty();
     request_render();
     return OkStatus;
@@ -11521,7 +11599,7 @@ u32 Engine::release_unused_text3d_models_locked() noexcept {
         if (keep.count(key)) continue;
         const auto it = models_.find(key);
         const Asset* a = project_->asset(id);
-        if (it == models_.end() || !a || a->sourcePath.rfind(scene3d::kText3DScheme, 0) != 0) continue;
+        if (it == models_.end() || !a || !scene3d::is_rebuildable_mesh_source(a->sourcePath)) continue;
         models_.erase(it);
         ++released;
     }
@@ -11542,10 +11620,19 @@ void Engine::restore_text3d_models_locked() noexcept {
     missing.erase(std::unique(missing.begin(), missing.end()), missing.end());
     for (const u64 key : missing) {
         const Asset* a = project_->asset(AssetId::unpack(key));
+        scene3d::Image3DSpec image3d;
+        if (a && scene3d::decode_image3d(a->sourcePath, image3d)) {
+            if (text3d_room_locked() < 4096) release_unused_text3d_models_locked();
+            scene3d::ImportResult r = scene3d::build_image3d(image3d, [this](const std::string& path) { return resolve_asset_path(path); }, model_texture_cap(), text3d_room_locked());
+            if (!r.ok()) continue;
+            if (scene3d::scene_asset_memory_bytes(*r.asset) > text3d_room_locked()) release_unused_text3d_models_locked();
+            if (scene3d::scene_asset_memory_bytes(*r.asset) <= text3d_room_locked()) models_[key] = std::shared_ptr<const scene3d::SceneAsset>(std::move(r.asset));
+            continue;
+        }
         scene3d::Text3DSpec spec;
         if (!a || !scene3d::decode_text3d(a->sourcePath, spec)) continue;
-        if (source_asset_room_locked() < 4096) release_unused_text3d_models_locked();
-        if (source_asset_room_locked() < 4096) continue;
+        if (text3d_room_locked() < 4096) release_unused_text3d_models_locked();
+        if (text3d_room_locked() < 4096) continue;
         const auto font = scene3d::text3d_font(spec);
         if (!font) continue;
         const auto resolve = [this](const std::string& path) { return resolve_asset_path(path); };
@@ -11556,8 +11643,8 @@ void Engine::restore_text3d_models_locked() noexcept {
         }
         if (!r.ok()) continue;
         // Desfazer: a malha da edição desfeita fica sem dono (o refazer a refaz).
-        if (scene3d::scene_asset_memory_bytes(*r.asset) > source_asset_room_locked()) release_unused_text3d_models_locked();
-        if (scene3d::scene_asset_memory_bytes(*r.asset) > source_asset_room_locked()) continue;
+        if (scene3d::scene_asset_memory_bytes(*r.asset) > text3d_room_locked()) release_unused_text3d_models_locked();
+        if (scene3d::scene_asset_memory_bytes(*r.asset) > text3d_room_locked()) continue;
         models_[key] = std::shared_ptr<const scene3d::SceneAsset>(std::move(r.asset));
     }
 }
@@ -11569,6 +11656,139 @@ bool Engine::query_text3d(u64 layerId, scene3d::Text3DSpec& out) noexcept {
     if (!l || l->kind != LayerKind::Model3D) return false;
     const Asset* a = project_->asset(l->model.scene);
     return a && scene3d::decode_text3d(a->sourcePath, out);
+}
+
+// =============================================================================
+// PNG para 3D. O mesmo caminho do texto 3D: a receita fica no projeto, a malha
+// é gerada fora da trava e o asset antigo fica para o desfazer religar.
+// =============================================================================
+namespace {
+Status image3d_failure(const scene3d::ImportResult& r) noexcept {
+    return r.error == scene3d::ImportError::FileNotFound ? Status{Errc::UnsupportedFormat, "imagem ilegivel ou grande demais"}
+                                                         : Status{Errc::OutOfRange, "imagem sem area visivel"};
+}
+} // namespace
+
+Result<u64> Engine::add_image3d(const scene3d::Image3DSpec& requested, const std::string& name) noexcept {
+    std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
+    scene3d::Image3DSpec spec = requested;
+    scene3d::sanitize_image3d(spec);
+    if (spec.imagePath.empty()) return Status{Errc::InvalidArgument, "imagem vazia"};
+    spec.imagePath = store_asset_path(spec.imagePath);
+    u64 session = 0, room = 0; CompositionId composition;
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        drain_commands_locked();
+        if (!project_) return Status{Errc::InvalidState};
+        session = projectSession_; composition = project_->timeline().current();
+        room = text3d_room_locked();
+        if (room < 4096) return Status{Errc::BudgetExceeded};
+    }
+    const auto resolve = [this](const std::string& path) { return resolve_asset_path(path); };
+    (void)scene3d::tint_image3d_sides(spec, resolve, model_texture_cap(), room);
+    scene3d::ImportResult r = scene3d::build_image3d(spec, resolve, model_texture_cap(), room);
+    if (!r.ok()) return image3d_failure(r);
+    std::shared_ptr<const scene3d::SceneAsset> scene(std::move(r.asset));
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+    if (session != projectSession_ || composition != project_->timeline().current()) return Status{Errc::Cancelled};
+    if (scene3d::scene_asset_memory_bytes(*scene) > text3d_room_locked()) return Status{Errc::BudgetExceeded};
+    history_.before_mutation(*comp, project_->timeline().current(), "imagem 3D");
+    bump_model_revision_locked();
+    const AssetId assetId = add_model_asset(*project_, *scene, "Imagem 3D", scene3d::encode_image3d(spec));
+    models_[assetId.pack()] = scene;
+    const LayerId lid = comp->add_layer(LayerKind::Model3D, name.empty() ? std::string("Imagem 3D") : name);
+    Layer* l = comp->layer(lid);
+    if (!l) return Status{Errc::OutOfMemory, "camada nao criada"};
+    l->threeD = true;
+    l->model.scene = assetId;
+    l->model.animationClip = -1;
+    l->start = FrameIndex{std::max<i64>(0, playback_.current().value)};
+    l->end = FrameIndex{new_layer_end_locked(comp, l, l->start.value)};
+    if (l->end.value > comp->duration().value) {
+        comp->set_duration(l->end); configure_playback_locked(comp);
+    }
+    const Vec3 ext = scene->bounds.extent();
+    const f32 w = static_cast<f32>(comp->width()), h = static_cast<f32>(comp->height());
+    l->model.unitScale = std::min(0.6f * h, 0.8f * w / std::max(ext.x, 1e-3f));
+    l->model.pivot = scene->bounds.center();
+    l->transform.position = Vec3{w * 0.5f, h * 0.5f, 0.0f};
+    l->transform.rotation = Vec3{-10.0f, 26.0f, 0.0f};   // de frente a extrusão não aparece
+    l->transform.scale = Vec3{1.0f, 1.0f, 1.0f};
+    // A lateral reflete: sem ambiente na cena ela sairia preta. Mesmo passo de desfazer.
+    if (comp->environment().studioPreset == 0 && !comp->environment().hdri.valid())
+        comp->environment().studioPreset = static_cast<u32>(scene3d::StudioPreset::ChromeStudio);
+    project_->mark_dirty();
+    request_render();
+    return lid.pack();
+}
+
+Status Engine::set_image3d(u64 layerId, const scene3d::Image3DSpec& spec) noexcept {
+    const Status s = set_image3d_impl(layerId, spec);
+    lastText3dStatus_.store(static_cast<i32>(s.code()), std::memory_order_relaxed);
+    return s;
+}
+
+Status Engine::set_image3d_impl(u64 layerId, const scene3d::Image3DSpec& spec) noexcept {
+    std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
+    scene3d::Image3DSpec edited = spec;
+    scene3d::sanitize_image3d(edited);
+    if (edited.imagePath.empty()) return Status{Errc::InvalidArgument, "imagem vazia"};
+    edited.imagePath = store_asset_path(edited.imagePath);
+    AssetId previousScene;
+    u64 session = 0, room = 0; CompositionId composition;
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        drain_commands_locked();
+        Composition* comp = project_ ? current_composition() : nullptr;
+        const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+        if (!l || l->kind != LayerKind::Model3D) return Status{Errc::InvalidArgument, "selecione uma imagem 3D"};
+        if (l->locked) return Status{Errc::InvalidState, "camada bloqueada"};
+        previousScene = l->model.scene;
+        session = projectSession_; composition = project_->timeline().current();
+        const u64 replacedBefore = replaced_text3d_bytes_locked(previousScene);
+        if (text3d_room_locked() + replacedBefore < 4096) release_unused_text3d_models_locked();
+        room = text3d_room_locked() + replacedBefore;
+        if (room < 4096) return Status{Errc::BudgetExceeded, "memoria de imagens e modelos do projeto esgotada"};
+    }
+    scene3d::ImportResult r = scene3d::build_image3d(edited, [this](const std::string& path) { return resolve_asset_path(path); }, model_texture_cap(), room);
+    if (!r.ok()) return image3d_failure(r);
+    std::shared_ptr<const scene3d::SceneAsset> scene(std::move(r.asset));
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    if (!project_ || session != projectSession_ || composition != project_->timeline().current()) return Errc::Cancelled;
+    Composition* comp = current_composition();
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->kind != LayerKind::Model3D || l->model.scene != previousScene) return Errc::InvalidArgument;
+    if (l->locked) return Status{Errc::InvalidState, "camada bloqueada"};
+    const Asset* old = project_->asset(l->model.scene);
+    if (!old || !scene3d::is_image3d_source(old->sourcePath)) return Errc::InvalidArgument;
+    const u64 meshBytes = scene3d::scene_asset_memory_bytes(*scene);
+    const u64 replaced = replaced_text3d_bytes_locked(l->model.scene);
+    if (meshBytes > text3d_room_locked() + replaced) release_unused_text3d_models_locked();
+    if (meshBytes > text3d_room_locked() + replaced) return Status{Errc::BudgetExceeded, "memoria de imagens e modelos do projeto esgotada"};
+    const bool dropReplaced = meshBytes > text3d_room_locked();
+    history_.before_mutation(*comp, project_->timeline().current(), "editar imagem 3D");
+    bump_model_revision_locked();
+    const AssetId assetId = add_model_asset(*project_, *scene, "Imagem 3D", scene3d::encode_image3d(edited));
+    models_[assetId.pack()] = scene;
+    l->model.scene = assetId;
+    l->model.animationClip = -1;
+    l->model.pivot = scene->bounds.center();
+    if (dropReplaced) release_unused_text3d_models_locked();   // o desfazer refaz pela receita
+    project_->mark_dirty();
+    request_render();
+    return OkStatus;
+}
+
+bool Engine::query_image3d(u64 layerId, scene3d::Image3DSpec& out) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->kind != LayerKind::Model3D) return false;
+    const Asset* a = project_->asset(l->model.scene);
+    return a && scene3d::decode_image3d(a->sourcePath, out);
 }
 
 std::shared_ptr<const scene3d::SceneAsset> Engine::model_asset(u64 assetId) const noexcept {
@@ -11594,7 +11814,7 @@ std::string Engine::model_folder(u64 layerId) noexcept {
     if (!l || l->kind != LayerKind::Model3D) return {};
     const Asset* a = project_->asset(l->model.scene);
     scene3d::Text3DSpec spec;
-    if (!a || a->sourcePath.empty() || scene3d::decode_text3d(a->sourcePath, spec) || scene3d::is_shape3d_source(a->sourcePath)) return {};
+    if (!a || a->sourcePath.empty() || scene3d::decode_text3d(a->sourcePath, spec) || scene3d::is_shape3d_source(a->sourcePath) || scene3d::is_image3d_source(a->sourcePath)) return {};
     const std::string path = resolve_asset_path(a->sourcePath);
     const usize slash = path.find_last_of("/\\");
     return slash == std::string::npos ? std::string{} : path.substr(0, slash + 1);
@@ -11612,7 +11832,7 @@ Result<u32> Engine::reload_model_textures(u64 layerId, std::string* detail) noex
         if (!l || l->kind != LayerKind::Model3D) return Status{Errc::InvalidArgument, "selecione um modelo 3D"};
         const Asset* a = project_->asset(l->model.scene);
         scene3d::Text3DSpec spec;
-        if (!a || a->sourcePath.empty() || scene3d::decode_text3d(a->sourcePath, spec) || scene3d::is_shape3d_source(a->sourcePath))
+        if (!a || a->sourcePath.empty() || scene3d::decode_text3d(a->sourcePath, spec) || scene3d::is_shape3d_source(a->sourcePath) || scene3d::is_image3d_source(a->sourcePath))
             return Status{Errc::InvalidArgument, "selecione um modelo 3D importado"};
         old = l->model.scene;
         copy = *a;
@@ -13261,6 +13481,22 @@ void Engine::set_plugin_directory(const char* path) noexcept {
     if (!plugins_) plugins_ = std::make_unique<plugins::PluginManager>(effectRegistry_);
     config_.pluginDirectory = path ? path : "";
     plugins_->set_directory(config_.pluginDirectory);
+    plugins_->begin_session();
+    (void)plugins_->load_all();
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        bump_model_revision_locked();
+    }
+    request_render();
+}
+
+bool Engine::plugins_safe_mode() const noexcept { return plugins_ && plugins_->safe_mode(); }
+bool Engine::plugins_safe_mode_automatic() const noexcept { return plugins_ && plugins_->safe_mode_automatic(); }
+void Engine::mark_plugins_healthy() noexcept { if (plugins_) plugins_->mark_healthy(); }
+
+void Engine::set_plugins_safe_mode(bool on) noexcept {
+    if (!plugins_) return;
+    plugins_->set_safe_mode(on);
     (void)plugins_->load_all();
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
@@ -14685,7 +14921,10 @@ u32 Engine::query_layer_effects(u64 layerId, bridge::LayerEffectRow* out, u32 ca
         row.paramCount = static_cast<u32>(inst.params.size());
         row.known = e ? 1u : 0u;
         row.role = inst.role;   // Omega aparência: decoração de Borda e sombra (≠ 0)
-        (void)put_string(blob, blobCapacity, cursor, e ? e->info().name : "efeito indisponivel",
+        // Plugin que falta neste aparelho: o nome dele, para a pessoa saber o que instalar.
+        const char* missingName = "efeito indisponivel";
+        if (!e) for (const PluginRef& ref : project_->plugin_refs()) if (ref.typeId == inst.type) missingName = ref.id.c_str();
+        (void)put_string(blob, blobCapacity, cursor, e ? e->info().name : missingName,
                          row.nameOffset, row.nameLength);
         out[written++] = row;
     }
@@ -14723,6 +14962,63 @@ u32 Engine::query_effect_curve(u64 layer, u32 effect, u32 param, u32 channel,
     const u32 count = std::min(static_cast<u32>(points.size()), capacity / 2);
     for (u32 i = 0; i < count; ++i) { out[i * 2] = points[i].x; out[i * 2 + 1] = points[i].y; }
     return count * 2;
+}
+
+namespace {
+GradientData* editable_gradient(Composition* comp, const EffectRegistry& registry, u64 layer, u32 effect, u32 param) {
+    Layer* l = comp ? comp->layer(LayerId::unpack(layer)) : nullptr;
+    EffectInstance* inst = l ? l->find_effect(EffectId{effect, 0}) : nullptr;
+    if (!inst || param >= inst->params.size()) return nullptr;
+    const ParameterRegistry* specs = registry.params(inst->type);
+    if (!specs || param >= specs->count() || specs->at(param).type != ParamType::Gradient) return nullptr;
+    const u64 ref = inst->params[param].constant.ref;
+    return ref < inst->gradients.size() ? &inst->gradients[static_cast<size_t>(ref)] : nullptr;
+}
+}
+
+u32 Engine::query_effect_gradient(u64 layer, u32 effect, u32 param, f32* out, u32 capacity) noexcept {
+    if (!out || capacity < 5) return 0;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    const GradientData* gradient = editable_gradient(project_ ? current_composition() : nullptr, effectRegistry_, layer, effect, param);
+    if (!gradient) return 0;
+    const u32 count = std::min(static_cast<u32>(gradient->stops.size()), capacity / 5);
+    for (u32 i = 0; i < count; ++i) {
+        const GradientStop& stop = gradient->stops[i];
+        out[i * 5] = stop.position;
+        out[i * 5 + 1] = stop.color.x; out[i * 5 + 2] = stop.color.y; out[i * 5 + 3] = stop.color.z; out[i * 5 + 4] = stop.color.w;
+    }
+    return count * 5;
+}
+
+bool Engine::set_effect_gradient(u64 layer, u32 effect, u32 param, const f32* values, u32 count) noexcept {
+    constexpr u32 kMaxGradientStops = 16;
+    if (!values || count % 5 != 0 || count < 10 || count > kMaxGradientStops * 5) return false;
+    std::vector<GradientStop> next(count / 5);
+    for (u32 i = 0; i < count; ++i) if (!std::isfinite(values[i])) return false;
+    for (u32 i = 0; i < next.size(); ++i) {
+        const f32* v = values + i * 5;
+        next[i].position = std::clamp(v[0], 0.0f, 1.0f);
+        next[i].color = Vec4{std::max(v[1], 0.0f), std::max(v[2], 0.0f), std::max(v[3], 0.0f), std::clamp(v[4], 0.0f, 1.0f)};
+    }
+    std::stable_sort(next.begin(), next.end(), [](const GradientStop& a, const GradientStop& b) { return a.position < b.position; });
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    GradientData* gradient = editable_gradient(comp, effectRegistry_, layer, effect, param);
+    if (!gradient) return false;
+    bool same = next.size() == gradient->stops.size();
+    for (size_t i = 0; same && i < next.size(); ++i) {
+        const GradientStop& a = next[i];
+        const GradientStop& b = gradient->stops[i];
+        same = a.position == b.position && a.color.x == b.color.x && a.color.y == b.color.y && a.color.z == b.color.z && a.color.w == b.color.w;
+    }
+    if (same) return true;
+    history_.before_mutation(*comp, project_->timeline().current(), "degrade");
+    gradient->stops = std::move(next);
+    bump_model_revision_locked();
+    project_->mark_dirty(); request_render();
+    return true;
 }
 
 i32 Engine::edit_effect_curve(u64 layer, u32 effect, u32 param, u32 channel,
@@ -18514,8 +18810,10 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                 // Interface de Edição (0.2.5): dividir um corte da LINHA MAGNÉTICA
                 // mantém os dois pedaços na mesma trilha (a trilha principal não
                 // vira duas fileiras). Na Composição o pedaço segue ganhando a linha dele.
-                if (project_->editor_settings().uiMode == 1 && l->magneticTrack && l->trackId != 0)
+                if (project_->editor_settings().uiMode == 1 && l->trackId != 0 && (l->magneticTrack || comp->edit_track(l->trackId))) {
                     s->trackId = l->trackId;
+                    s->name = l->name;
+                }
             }
             return OkStatus;
         }
@@ -19913,6 +20211,25 @@ void Engine::fill_export_progress(bridge::ExportProgressPOD& out) const noexcept
     // 128 bytes; os bits 0..23 continuam sendo os ExportFlag).
     out.flags = (p.flags & ((1u << kExportFailureShift) - 1u)) | ((p.failure & 0xFFu) << kExportFailureShift);
     std::snprintf(out.message, sizeof(out.message), "%s", p.message);
+}
+
+#include "EngineTracks.inl"
+
+void Engine::refresh_plugin_refs_locked() {
+    std::unordered_set<u32> used;
+    project_->timeline().for_each_composition([&](CompositionId, const Composition& c) {
+        c.layers().for_each([&](LayerId, const Layer& l) { for (const EffectInstance& e : l.effects) used.insert(e.type); });
+    });
+    std::vector<PluginRef> refs;
+    if (plugins_) for (const plugins::PluginInfo& info : plugins_->list())
+        if (used.count(info.effectTypeId)) refs.push_back({info.id, info.version, info.effectTypeId});
+    // Plugin que não está instalado aqui continua na tabela: o projeto volta inteiro no aparelho de origem.
+    for (const PluginRef& old : project_->plugin_refs()) {
+        const bool known = std::any_of(refs.begin(), refs.end(), [&](const PluginRef& r) { return r.typeId == old.typeId; });
+        if (used.count(old.typeId) && !known) refs.push_back(old);
+    }
+    std::sort(refs.begin(), refs.end(), [](const PluginRef& a, const PluginRef& b) { return a.id < b.id; });
+    project_->set_plugin_refs(std::move(refs));
 }
 
 } // namespace aurea

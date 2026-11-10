@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aurea.aurea.R
 import com.aurea.aurea.state.EditorStore
+import com.aurea.aurea.state.Image3DField
 import com.aurea.aurea.state.Text3DInfo
 import com.aurea.aurea.state.Text3DPreset
 import com.aurea.aurea.ui.theme.AureaColors
@@ -89,8 +90,10 @@ internal fun Element3DPanel(env: PanelEnv) {
     val camera = store.detail?.kind == 8 || store.detail?.kind == 9
     val shape = if (camera) null else store.shape3d
     val text = if (camera) null else t3
+    val image = if (camera) null else store.image3d
     val tabs = when {
         camera -> listOf(Tab3D.Light, Tab3D.Render)
+        image != null -> listOf(Tab3D.Material, Tab3D.Shape, Tab3D.Light, Tab3D.Render)
         text != null -> listOf(Tab3D.Material, Tab3D.Shape, Tab3D.Light, Tab3D.Anim, Tab3D.Render)
         // 0.3.6: modelo importado ganha a aba Esqueleto (AutoRig 3D, ossos, IK, Motion Capture).
         shape == null && store.detail?.kind == com.aurea.aurea.ui.theme.LayerType.Model3D.kind ->
@@ -113,6 +116,7 @@ internal fun Element3DPanel(env: PanelEnv) {
             when (tab) {
                 Tab3D.Material -> {
                     when {
+                        image != null -> Image3DMaterialTab(env, image)
                         text != null -> Text3DMaterialTab(env, text)
                         shape != null -> EnvSection(stringResource(R.string.panel_material), null) {
                             Shape3DSection(env, shape, Shape3DPage.Material)
@@ -130,7 +134,7 @@ internal fun Element3DPanel(env: PanelEnv) {
                     ObjectShadowSection(store)
                     Column(Modifier.padding(horizontal = 10.dp)) { InteriorToggle(store) }
                 }
-                Tab3D.Shape -> if (text != null) Text3DShapeTab(env, text)
+                Tab3D.Shape -> if (image != null) Image3DShapeTab(env, image) else if (text != null) Text3DShapeTab(env, text)
                 Tab3D.Light -> Environment3DTab(env)
                 Tab3D.Render -> Render3DTab(env)
                 Tab3D.Anim -> if (text != null) Box(Modifier.padding(10.dp)) { AnimChip(stringResource(R.string.la_animators), false) { env.onOpenAnimators() } }
@@ -415,6 +419,89 @@ private fun Text3DShapeTab(env: PanelEnv, info: Text3DInfo) {
         env.onOpenPanel(EditorPanel.Effects)
     }
     }
+}
+
+@Composable
+private fun Image3DMaterialTab(env: PanelEnv, f: FloatArray) {
+    val store = env.store
+    EnvSection(stringResource(R.string.ui3d_ready_materials), null) {
+        ChipRow {
+            (listOf(Text3DPreset.CinematicMetal) + Text3DPreset.values().filter { it != Text3DPreset.CinematicMetal }).forEach { preset ->
+                val thumb = rememberPresetThumb(store, preset.ordinal)
+                SwatchChip(stringResource(preset.labelRes), PresetSwatch[preset] ?: Color.White, thumb,
+                    Modifier.testTag("image3d.materialPreset.${preset.ordinal}")) {
+                    store.applyImage3DPreset(preset)
+                }
+            }
+        }
+    }
+    // A cor da frente é a própria imagem.
+    EnvSection(stringResource(R.string.image3d_front), null) {
+        I3DRow(env, stringResource(R.string.pn_t3d_metallic), f, Image3DField.FRONT_METALLIC, 1f, 0f, "metalico da frente")
+        I3DRow(env, stringResource(R.string.pn_t3d_roughness), f, Image3DField.FRONT_ROUGHNESS, 1f, 0.45f, "rugosidade da frente")
+    }
+    Image3DRegion(env, stringResource(R.string.pn_t3d_region_side), f, Image3DField.SIDE)
+    Image3DRegion(env, stringResource(R.string.pn_t3d_region_bevel), f, Image3DField.BEVEL_REGION)
+    Image3DRegion(env, stringResource(R.string.image3d_back), f, Image3DField.BACK)
+}
+
+@Composable
+private fun Image3DRegion(env: PanelEnv, title: String, f: FloatArray, at: Int) {
+    val store = env.store
+    EnvSection(title, null) {
+        ColorLine(stringResource(R.string.panel_cor), Color(f[at], f[at + 1], f[at + 2])) {
+            store.beginGesture("cor da imagem 3D")
+            env.openColor(ColorRequest(floatArrayOf(f[at], f[at + 1], f[at + 2], 1f), onChange = { r, g, b, _ ->
+                store.setImage3D(lazy = true) { it[at] = r; it[at + 1] = g; it[at + 2] = b }
+            }, onDone = { store.endGesture() }))
+        }
+        I3DRow(env, stringResource(R.string.pn_t3d_metallic), f, at + 3, 1f, 0f, "metalico da imagem 3D")
+        I3DRow(env, stringResource(R.string.pn_t3d_roughness), f, at + 4, 1f, 0.35f, "rugosidade da imagem 3D")
+    }
+}
+
+@Composable
+private fun Image3DShapeTab(env: PanelEnv, f: FloatArray) {
+    val store = env.store
+    EnvSection(stringResource(R.string.ui3d_extrusion), null) {
+        I3DRow(env, stringResource(R.string.pn_depth), f, Image3DField.DEPTH, 2f, 0.14f, "profundidade da imagem 3D")
+        KitHint(stringResource(R.string.image3d_depth_hint))
+    }
+    EnvSection(stringResource(R.string.image3d_silhouette), null) {
+        I3DRow(env, stringResource(R.string.image3d_threshold), f, Image3DField.THRESHOLD, 0.95f, 0.5f, "corte do alfa")
+        KitHint(stringResource(R.string.image3d_threshold_hint))
+    }
+    EnvSection(stringResource(R.string.pn_t3d_bevel), null, on = f[Image3DField.BEVEL] >= 0.5f,
+        onSwitch = { on -> store.setImage3D { it[Image3DField.BEVEL] = if (on) 1f else 0f } }) {
+        I3DRow(env, stringResource(R.string.pn_t3d_bevel_width), f, Image3DField.BEVEL_WIDTH, 0.1f, 0.012f, "chanfro", step = 0.05f, decimals = 1)
+        I3DRow(env, stringResource(R.string.pn_t3d_bevel_depth), f, Image3DField.BEVEL_DEPTH, 0.1f, 0.012f, "chanfro", step = 0.05f, decimals = 1)
+        I3DRow(env, stringResource(R.string.pn_t3d_bevel_roundness), f, Image3DField.BEVEL_ROUNDNESS, 1f, 1f, "arredondamento")
+        Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.pn_t3d_bevel_segments), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.5.sp)))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(1, 2, 3, 5, 8).forEach { n ->
+                    KitChip("$n", on = f[Image3DField.BEVEL_SEGMENTS].toInt() == n) { store.setImage3D { it[Image3DField.BEVEL_SEGMENTS] = n.toFloat() } }
+                }
+            }
+        }
+    }
+}
+
+/** Linha da receita da Imagem 3D em % (como [T3DRow]). */
+@Composable
+private fun I3DRow(env: PanelEnv, label: String, f: FloatArray, field: Int, max: Float, default: Float, gesture: String, step: Float = 0.5f, decimals: Int = 0) {
+    val store = env.store
+    HumanRow(
+        env, label, f[field] * 100f, step, 0f, max * 100f, "%", decimals, default * 100f,
+        onStart = { store.beginGesture(gesture) },
+        onValue = { v -> store.setImage3D(lazy = true) { it[field] = v / 100f } },
+        onEnd = { store.endGesture() },
+        onCommit = { v ->
+            store.beginGesture(gesture)
+            store.setImage3D { it[field] = v / 100f }
+            store.endGesture()
+        },
+    )
 }
 
 /**

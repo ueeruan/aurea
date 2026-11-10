@@ -289,9 +289,11 @@ AUREA_TEST(LayerAnim, SaveLoadKeepsEverythingAndOldProjectsReadDefaults) {
     AUREA_CHECK(e.set_layer_motion_blur_length(*a, 1.75f));
     AUREA_CHECK(e.set_adjustment_scope(*a, 1));
     const u64 ids[] = {*a};
+    AUREA_CHECK(e.set_motion_blur(*a, true));
     const auto g = e.precompose(ids, 1);
     AUREA_CHECK(g.ok());
     if (!g.ok()) return;
+    AUREA_CHECK(e.project()->timeline().composition(layer(e, *g)->nested.composition)->motion_blur().enabled);
     AUREA_CHECK(e.set_group_camera_pass_through(*g, true));
     const std::string path = temp_file("aurea_layer_anim_roundtrip.aurea");
     AUREA_CHECK(e.save_project(path.c_str()).ok());
@@ -372,12 +374,15 @@ AUREA_TEST(LayerAnim, AddToGroupAndRemoveFromGroupKeepTimesAndUndo) {
     // Pôr B no grupo: sai daqui, entra lá com o mesmo tempo na tela.
     const u64 moving[] = {*b};
     std::string why;
+    AUREA_CHECK(e.set_motion_blur(*b, true));
+    AUREA_CHECK(!e.project()->timeline().composition(oldChild)->motion_blur().enabled);
     const auto r = e.add_layers_to_group(moving, 1, *g, &why);
     AUREA_CHECK_MSG(r.ok(), why.c_str());
     AUREA_CHECK_EQ(current(e)->order().size(), before - 1);
     const Layer* G = layer(e, *g);
     const Composition* child = e.project()->timeline().composition(G->nested.composition);
     AUREA_CHECK(child != nullptr && G->nested.composition != oldChild);
+    AUREA_CHECK(child && child->motion_blur().enabled);
     AUREA_CHECK(child && child->order().size() == 2);
     const i64 shift = G->start.value - G->offset.value;
     bool timed = false;

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- PNG para 3D (AddLayerPanel.kt, Element3DPanel.kt) -->
+    <string name="image3d_add" formatted="false">PNG в 3D</string>
+    <string name="image3d_layer" formatted="false">3D-изображение</string>
+    <string name="image3d_creating" formatted="false">Создаём 3D-объект…</string>
+    <string name="image3d_err_empty" formatted="false">Это изображение полностью прозрачное.</string>
+    <string name="image3d_no_alpha" formatted="false">В изображении нет прозрачности, поэтому объект принял форму кадра. Используйте PNG без фона.</string>
+    <string name="image3d_front" formatted="false">Лицевая сторона</string>
+    <string name="image3d_back" formatted="false">Задняя сторона</string>
+    <string name="image3d_silhouette" formatted="false">Силуэт</string>
+    <string name="image3d_threshold" formatted="false">Порог альфа</string>
+    <string name="image3d_threshold_hint" formatted="false">Определяет, где проходит край в полупрозрачных областях.</string>
+    <string name="image3d_depth_hint" formatted="false">100 % = высота изображения.</string>
+    <string name="image3d_from_photos" formatted="false">Фото</string>
+    <string name="image3d_from_files" formatted="false">Файлы</string>
+</resources>

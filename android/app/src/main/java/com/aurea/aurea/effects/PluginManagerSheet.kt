@@ -72,6 +72,12 @@ internal fun PluginManagerSheet(store: EditorStore, onDismiss: () -> Unit) {
                 Text(stringResource(R.string.plug_install), style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W600, color = AureaColors.OnAccent)))
             }
             store.busyMessage?.let { Text(it, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted))) }
+            if (PluginRuntime.safeMode) {
+                Text(stringResource(if (PluginRuntime.safeModeAutomatic) R.string.plugv3_safe_auto else R.string.plugv3_safe_on),
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(AureaColors.Warning.copy(alpha = 0.14f)).padding(10.dp).testTag("plugins.safeMode.notice"),
+                    style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+            }
+            PermissionRow(stringResource(R.string.plugv3_safe_mode), PluginRuntime.safeMode, "plugins.safeMode") { PluginRuntime.changeSafeMode(it) }
             if (store.plugins.isEmpty()) {
                 Text(stringResource(R.string.plug_empty), modifier = Modifier.padding(vertical = 8.dp),
                     style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)))
@@ -120,8 +126,9 @@ private fun PluginRow(p: PluginTexts.Plugin, tag: String, onRemove: () -> Unit) 
             PluginTexts.pick(p.descriptions, tag)?.takeIf { it.isNotBlank() }?.let {
                 Text(it, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Text)))
             }
-            if (!p.ok) Text(stringResource(R.string.plug_error, p.error), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Warning)))
-            else if (p.testRenderMs > 0) Text(stringResource(R.string.plug_render_ms, String.format(java.util.Locale.ROOT, "%.1f", p.testRenderMs)),
+            // No modo seguro o aviso do topo já explica: o plugin não está com defeito.
+            if (!p.ok && !PluginRuntime.safeMode) Text(stringResource(R.string.plug_error, p.error), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Warning)))
+            else if (p.ok && p.testRenderMs > 0) Text(stringResource(R.string.plug_render_ms, String.format(java.util.Locale.ROOT, "%.1f", p.testRenderMs)),
                 style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, color = AureaColors.Muted)))
             // 0.3.4 plugins: ligar/desligar, permissões, painéis e console.
             if (p.ok && (p.hasScript || p.panels.isNotEmpty() || p.actions.isNotEmpty())) PluginV2Controls(p, tag)
@@ -132,6 +139,14 @@ private fun PluginRow(p: PluginTexts.Plugin, tag: String, onRemove: () -> Unit) 
 }
 
 /** 0.3.4 plugins: o que o cartão de um plugin com interface/script ganha. */
+private fun replacedPanelName(key: String): Int = when (key) {
+    "transform" -> R.string.plugv3_panel_transform
+    "effects" -> R.string.plugv3_panel_effects
+    "blend" -> R.string.plugv3_panel_blend
+    "presets" -> R.string.plugv3_panel_presets
+    else -> R.string.plugv3_panel_material
+}
+
 @Composable
 private fun PluginV2Controls(p: PluginTexts.Plugin, tag: String) {
     Column(Modifier.fillMaxWidth().padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -147,6 +162,10 @@ private fun PluginV2Controls(p: PluginTexts.Plugin, tag: String) {
                 "plugins.perm.files.${p.id}") { PluginRuntime.setPermission(p.id, 4, it) }
         }
         if (p.enabled) {
+            p.panels.filter { it.replaces.isNotEmpty() }.forEach { panel ->
+                PermissionRow(stringResource(R.string.plugv3_replaces, stringResource(replacedPanelName(panel.replaces))),
+                    panel.replaces !in PluginRuntime.replacementsOff, "plugins.replace.${panel.replaces}") { PluginRuntime.setReplacementOff(panel.replaces, !it) }
+            }
             p.panels.filter { "editor.panel" in it.placement }.forEach { panel ->
                 Text(stringResource(R.string.pv2_open_panel, PluginTexts.pick(panel.title, tag).orEmpty()),
                     modifier = Modifier.padding(vertical = 6.dp).testTag("plugins.open.${p.id}.${panel.id}").tocavel(shrink = 1f) { PluginRuntime.openPanel(p.id, panel.id) },

@@ -108,7 +108,7 @@ PluginRuntime::PluginRuntime(PluginInfo info, std::string dataDirectory, script:
     : info_(std::move(info)), dataDirectory_(std::move(dataDirectory)), limits_(limits) {
     granted_ = info_.granted & info_.permissions.mask();
     for (const PanelDecl& panel : info_.ui.panels) {
-        for (const ControlDecl& c : panel.controls) {
+        for_each_control(panel.controls, [&](const ControlDecl& c) {
             ControlState s;
             s.decl = &c;
             switch (c.type) {
@@ -122,7 +122,7 @@ PluginRuntime::PluginRuntime(PluginInfo info, std::string dataDirectory, script:
                 default: break;
             }
             controls_.emplace_back(c.id, std::move(s));
-        }
+        });
     }
 }
 
@@ -797,7 +797,7 @@ void PluginRuntime::install_runtime_api() {
     });
     c.set_global("ui", Value::object(ui));
 
-    // --- storage: chave-valor do plugin (JSON, 256 KB, persistente) ---
+    // --- storage: chave-valor do plugin (JSON, 16 MB, persistente) ---
     ObjectRef storage = c.new_object();
     c.method(storage, "get", [this](Context& cx, const Value&, std::vector<Value>& a) {
         load_storage();

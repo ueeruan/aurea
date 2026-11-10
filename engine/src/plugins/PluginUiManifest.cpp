@@ -29,6 +29,10 @@ const char* control_type_name(ControlType t) noexcept {
         case ControlType::Image: return "image";
         case ControlType::Label: return "label";
         case ControlType::Toggle: return "toggle";
+        case ControlType::Row: return "row";
+        case ControlType::Column: return "column";
+        case ControlType::Section: return "section";
+        case ControlType::Tabs: return "tabs";
     }
     return "button";
 }
@@ -40,6 +44,8 @@ const char* placement_name(u32 bit) noexcept {
         case kPlaceEditorMenu: return "editor.menu";
         case kPlaceLayerMenu: return "layer.menu";
         case kPlaceLayerToolbar: return "layer.toolbar";
+        case kPlaceAddMenu: return "add.menu";
+        case kPlaceFullscreen: return "editor.fullscreen";
         default: return "";
     }
 }
@@ -113,6 +119,7 @@ std::string lower_ext(std::string_view name) {
 
 struct V2 {
     std::string& error;
+    u32 format = kFormatVersionV2;
     bool fail(std::string m) {
         if (error.empty()) error = "plugin.json: " + std::move(m);
         return false;
@@ -155,7 +162,7 @@ bool parse_color(const std::string& s) {
     return true;
 }
 
-bool read_control(const Value& v, ControlDecl& c, V2& r) {
+bool read_control(const Value& v, ControlDecl& c, V2& r, u32 depth = 1) {
     if (!v.is_object()) return r.fail("controle deve ser um objeto");
     const Value* id = v.get("id");
     if (!id || !id->is_string() || !valid_ui_id(id->string))
@@ -168,15 +175,16 @@ bool read_control(const Value& v, ControlDecl& c, V2& r) {
         {"button", ControlType::Button}, {"slider", ControlType::Slider}, {"ruler", ControlType::Ruler},
         {"color", ControlType::Color}, {"choice", ControlType::Choice}, {"text", ControlType::Text},
         {"list", ControlType::List}, {"image", ControlType::Image}, {"label", ControlType::Label},
-        {"toggle", ControlType::Toggle},
+        {"toggle", ControlType::Toggle}, {"row", ControlType::Row}, {"column", ControlType::Column},
+        {"section", ControlType::Section}, {"tabs", ControlType::Tabs},
     };
     bool known = false;
     for (const auto& [name, t] : kTypes) if (type->string == name) { c.type = t; known = true; }
     if (!known)
         return r.fail(where + ": tipo desconhecido \"" + type->string
-                      + "\" (button, slider, ruler, color, choice, text, list, image, label ou toggle)");
+                      + "\" (button, slider, ruler, color, choice, text, list, image, label, toggle, row, column, section ou tabs)");
     if (!r.only_keys(v, {"id", "type", "label", "placeholder", "text", "style", "min", "max", "step", "default", "unit",
-                         "multiline", "maxLength", "options", "items", "src", "aspect", "onClick", "onChange", "onSelect"},
+                         "multiline", "maxLength", "options", "items", "src", "aspect", "onClick", "onChange", "onSelect", "children", "collapsed"},
                      where))
         return false;
     if (!r.text(v.get("label"), c.label, "\"" + c.id + "\".label", 64, c.type == ControlType::Button)) return false;
@@ -227,7 +235,7 @@ bool read_control(const Value& v, ControlDecl& c, V2& r) {
             const Value* opts = v.get("options");
             if (!opts || !opts->is_array() || opts->array.empty())
                 return r.fail(where + ": \"choice\" precisa de \"options\" (lista de textos)");
-            if (opts->array.size() > kMaxChoiceOptions) return r.fail(where + ": mais de 32 opcoes");
+            if (opts->array.size() > kMaxChoiceOptions) return r.fail(where + ": mais de 256 opcoes");
             for (const Value& o : opts->array) {
                 LocalizedText t;
                 if (!r.text(&o, t, "\"" + c.id + "\".options", 64, true)) return false;
@@ -255,7 +263,7 @@ bool read_control(const Value& v, ControlDecl& c, V2& r) {
         case ControlType::List: {
             if (const Value* items = v.get("items")) {
                 if (!items->is_array()) return r.fail(where + ": \"items\" deve ser uma lista");
-                if (items->array.size() > kMaxListItems) return r.fail(where + ": mais de 200 itens");
+                if (items->array.size() > kMaxListItems) return r.fail(where + ": mais de 10000 itens");
                 for (const Value& it : items->array) {
                     ListItem item;
                     if (!it.is_object()) return r.fail(where + ": item deve ser {\"id\", \"label\"}");
@@ -291,6 +299,21 @@ bool read_control(const Value& v, ControlDecl& c, V2& r) {
             if (!r.boolean(v.get("default"), c.defBool, where + ": \"default\"")) return false;
             break;
         }
+        case ControlType::Row: case ControlType::Column: case ControlType::Section: case ControlType::Tabs: {
+            if (r.format < kFormatVersionV3) return r.fail(where + ": \"" + type->string + "\" pede \"aureaPlugin\": 3");
+            if (depth >= kMaxControlDepth) return r.fail(where + ": interface com mais de " + std::to_string(kMaxControlDepth) + " niveis");
+            if (!r.boolean(v.get("collapsed"), c.collapsed, where + ": \"collapsed\"")) return false;
+            const Value* children = v.get("children");
+            if (!children || !children->is_array() || children->array.empty()) return r.fail(where + ": precisa de \"children\"");
+            for (const Value& child : children->array) {
+                ControlDecl inner;
+                if (!read_control(child, inner, r, depth + 1)) return false;
+                if (c.type == ControlType::Tabs && inner.type != ControlType::Section)
+                    return r.fail(where + ": \"tabs\" so aceita \"section\" (uma por aba)");
+                c.children.push_back(std::move(inner));
+            }
+            break;
+        }
     }
     return true;
 }
@@ -305,10 +328,10 @@ bool read_placement(const Value* v, u32 allowed, u32& out, const std::string& wh
     for (const Value* n : names) {
         if (!n->is_string()) return r.fail(where + ": \"placement\" com valor que nao e texto");
         u32 bit = 0;
-        for (u32 b = 1; b <= kPlaceLayerToolbar; b <<= 1) if (n->string == placement_name(b)) bit = b;
+        for (u32 b = 1; b <= kPlaceLast; b <<= 1) if (n->string == placement_name(b)) bit = b;
         if (!bit || !(bit & allowed)) {
             std::string list;
-            for (u32 b = 1; b <= kPlaceLayerToolbar; b <<= 1) if (b & allowed) { if (!list.empty()) list += ", "; list += placement_name(b); }
+            for (u32 b = 1; b <= kPlaceLast; b <<= 1) if (b & allowed) { if (!list.empty()) list += ", "; list += placement_name(b); }
             return r.fail(where + ": lugar \"" + n->string + "\" invalido aqui (use " + list + ")");
         }
         out |= bit;
@@ -320,7 +343,7 @@ bool read_placement(const Value* v, u32 allowed, u32& out, const std::string& wh
 } // namespace
 
 bool parse_manifest_v2(const json::Value& root, Manifest& m, u32 format, std::string& error) {
-    V2 r{error};
+    V2 r{error, format};
     const bool hasV2 = root.get("ui") || root.get("script") || root.get("permissions") || root.get("strings");
     if (format < kFormatVersionV2) {
         if (hasV2) return r.fail("\"ui\", \"script\", \"permissions\" e \"strings\" pedem \"aureaPlugin\": 2");
@@ -338,7 +361,7 @@ bool parse_manifest_v2(const json::Value& root, Manifest& m, u32 format, std::st
         if (!r.only_keys(*p, {"network", "clipboard", "files"}, "\"permissions\"")) return false;
         if (const Value* net = p->get("network")) {
             if (!net->is_array()) return r.fail("\"permissions\".network deve ser a lista de dominios (ex.: [\"api.exemplo.com\"])");
-            if (net->array.size() > kMaxNetworkDomains) return r.fail("\"permissions\".network com mais de 8 dominios");
+            if (net->array.size() > kMaxNetworkDomains) return r.fail("\"permissions\".network com mais de 64 dominios");
             for (const Value& d : net->array) {
                 if (!d.is_string()) return r.fail("\"permissions\".network deve ter textos");
                 std::string host = d.string;
@@ -363,7 +386,7 @@ bool parse_manifest_v2(const json::Value& root, Manifest& m, u32 format, std::st
                 && std::all_of(lang.begin(), lang.end(), [](char c) { return std::isalpha(static_cast<unsigned char>(c)) || c == '-' || c == '*'; });
             if (!tagOk) return r.fail("\"strings\": idioma invalido \"" + lang + "\"");
             if (!table.is_object()) return r.fail("\"strings\"." + lang + " deve ser um objeto chave -> texto");
-            if (table.object.size() > kMaxStringKeys) return r.fail("\"strings\"." + lang + " com mais de 512 chaves");
+            if (table.object.size() > kMaxStringKeys) return r.fail("\"strings\"." + lang + " com mais de 8192 chaves");
             std::vector<std::pair<std::string, std::string>> rows;
             for (const auto& [key, text] : table.object) {
                 if (!text.is_string() || text.string.size() > 2000) return r.fail("\"strings\"." + lang + "." + key + " deve ser texto (ate 2000)");
@@ -380,7 +403,7 @@ bool parse_manifest_v2(const json::Value& root, Manifest& m, u32 format, std::st
         if (!r.only_keys(*ui, {"panels", "actions"}, "\"ui\"")) return false;
         if (const Value* panels = ui->get("panels")) {
             if (!panels->is_array()) return r.fail("\"ui\".panels deve ser uma lista");
-            if (panels->array.size() > kMaxPanels) return r.fail("\"ui\".panels com mais de 8 paineis");
+            if (panels->array.size() > kMaxPanels) return r.fail("\"ui\".panels com mais de 32 paineis");
             for (const Value& pv : panels->array) {
                 PanelDecl p;
                 if (!pv.is_object()) return r.fail("painel deve ser um objeto");
@@ -388,34 +411,49 @@ bool parse_manifest_v2(const json::Value& root, Manifest& m, u32 format, std::st
                 if (!id || !id->is_string() || !valid_ui_id(id->string)) return r.fail("painel sem \"id\" valido");
                 p.id = id->string;
                 const std::string where = "painel \"" + p.id + "\"";
-                if (!r.only_keys(pv, {"id", "title", "icon", "placement", "controls", "onOpen"}, where)) return false;
+                if (!r.only_keys(pv, {"id", "title", "icon", "placement", "controls", "onOpen", "replaces"}, where)) return false;
                 for (const PanelDecl& other : m.ui.panels) if (other.id == p.id) return r.fail(where + " repetido");
                 if (!r.text(pv.get("title"), p.title, "\"" + p.id + "\".title", 48, true)) return false;
                 if (const Value* icon = pv.get("icon")) {
                     if (!icon->is_string() || !valid_icon(icon->string)) return r.fail(where + ": icone desconhecido (veja a lista em docs/plugins)");
                     p.icon = icon->string;
                 } else p.icon = "wand";
-                if (!read_placement(pv.get("placement"), kPlaceEditorPanel | kPlaceHomeTab, p.placement, where, r)) return false;
+                if (!read_placement(pv.get("placement"), kPlaceEditorPanel | kPlaceHomeTab | (format >= kFormatVersionV3 ? kPlaceFullscreen : 0u), p.placement, where, r)) return false;
+                if (const Value* replaced = pv.get("replaces")) {
+                    static const char* const kReplaceable[] = {"transform", "effects", "blend", "presets", "material"};
+                    if (format < kFormatVersionV3) return r.fail(where + ": \"replaces\" pede \"aureaPlugin\": 3");
+                    if (!replaced->is_string() || std::none_of(std::begin(kReplaceable), std::end(kReplaceable), [&](const char* k) { return replaced->string == k; }))
+                        return r.fail(where + ": \"replaces\" aceita transform, effects, blend, presets ou material");
+                    if (!(p.placement & kPlaceEditorPanel)) return r.fail(where + ": \"replaces\" pede o lugar \"editor.panel\"");
+                    p.replaces = replaced->string;
+                }
                 if (!r.function(pv.get("onOpen"), p.onOpen, where + ": \"onOpen\"")) return false;
                 if (!p.onOpen.empty()) functions.push_back(p.onOpen);
                 const Value* controls = pv.get("controls");
                 if (!controls || !controls->is_array() || controls->array.empty()) return r.fail(where + ": precisa de \"controls\" (1 a 32)");
-                if (controls->array.size() > kMaxControlsPerPanel) return r.fail(where + ": mais de 32 controles");
+                if (controls->array.size() > kMaxControlsPerPanel) return r.fail(where + ": mais de 256 controles");
                 for (const Value& cv : controls->array) {
                     ControlDecl c;
                     if (!read_control(cv, c, r)) return false;
-                    if (std::find(controlIds.begin(), controlIds.end(), c.id) != controlIds.end())
-                        return r.fail("controle \"" + c.id + "\" repetido (os ids valem para o plugin inteiro)");
-                    controlIds.push_back(c.id);
-                    for (const std::string* f : {&c.onClick, &c.onChange, &c.onSelect}) if (!f->empty()) functions.push_back(*f);
                     p.controls.push_back(std::move(c));
                 }
+                // Os ids valem para a árvore inteira, e o teto conta os controles de dentro.
+                usize inPanel = 0;
+                std::string repeated;
+                for_each_control(p.controls, [&](const ControlDecl& c) {
+                    ++inPanel;
+                    if (std::find(controlIds.begin(), controlIds.end(), c.id) != controlIds.end()) repeated = c.id;
+                    controlIds.push_back(c.id);
+                    for (const std::string* f : {&c.onClick, &c.onChange, &c.onSelect}) if (!f->empty()) functions.push_back(*f);
+                });
+                if (!repeated.empty()) return r.fail("controle \"" + repeated + "\" repetido (os ids valem para o plugin inteiro)");
+                if (inPanel > kMaxControlsPerPanel) return r.fail(where + ": mais de 256 controles");
                 m.ui.panels.push_back(std::move(p));
             }
         }
         if (const Value* actions = ui->get("actions")) {
             if (!actions->is_array()) return r.fail("\"ui\".actions deve ser uma lista");
-            if (actions->array.size() > kMaxActions) return r.fail("\"ui\".actions com mais de 16 acoes");
+            if (actions->array.size() > kMaxActions) return r.fail("\"ui\".actions com mais de 128 acoes");
             for (const Value& av : actions->array) {
                 ActionDecl a;
                 if (!av.is_object()) return r.fail("acao deve ser um objeto");
@@ -427,7 +465,7 @@ bool parse_manifest_v2(const json::Value& root, Manifest& m, u32 format, std::st
                 for (const ActionDecl& other : m.ui.actions) if (other.id == a.id) return r.fail(where + " repetida");
                 if (!r.text(av.get("title"), a.title, "\"" + a.id + "\".title", 48, true)) return false;
                 if (!av.get("placement")) return r.fail(where + ": falta \"placement\" (editor.menu, layer.menu ou layer.toolbar)");
-                if (!read_placement(av.get("placement"), kPlaceEditorMenu | kPlaceLayerMenu | kPlaceLayerToolbar, a.placement, where, r))
+                if (!read_placement(av.get("placement"), kPlaceEditorMenu | kPlaceLayerMenu | kPlaceLayerToolbar | (format >= kFormatVersionV3 ? kPlaceAddMenu : 0u), a.placement, where, r))
                     return false;
                 if (const Value* icon = av.get("icon")) {
                     if (!icon->is_string() || !valid_icon(icon->string)) return r.fail(where + ": icone desconhecido (veja a lista em docs/plugins)");
@@ -451,8 +489,8 @@ bool parse_manifest_v2(const json::Value& root, Manifest& m, u32 format, std::st
             if (a.panel.empty()) continue;
             const PanelDecl* p = m.ui.panel(a.panel);
             if (!p) return r.fail("acao \"" + a.id + "\" abre o painel \"" + a.panel + "\", que nao existe");
-            if (!(p->placement & kPlaceEditorPanel))
-                return r.fail("acao \"" + a.id + "\" abre \"" + a.panel + "\", que nao tem o lugar \"editor.panel\"");
+            if (!(p->placement & (kPlaceEditorPanel | kPlaceFullscreen)))
+                return r.fail("acao \"" + a.id + "\" abre \"" + a.panel + "\", que nao tem o lugar \"editor.panel\" nem \"editor.fullscreen\"");
         }
     }
     if (!functions.empty() && m.script.empty())
@@ -475,11 +513,53 @@ void text_json(json::Writer& w, const LocalizedText& t) {
 
 void placement_json(json::Writer& w, u32 placement) {
     w.begin_array();
-    for (u32 b = 1; b <= kPlaceLayerToolbar; b <<= 1) if (placement & b) w.value(placement_name(b));
+    for (u32 b = 1; b <= kPlaceLast; b <<= 1) if (placement & b) w.value(placement_name(b));
     w.end_array();
 }
 
 } // namespace
+
+void control_json(json::Writer& w, const ControlDecl& c) {
+    w.begin_object();
+    w.key("id").value(c.id);
+    w.key("type").value(control_type_name(c.type));
+    w.key("label");
+    text_json(w, c.label);
+    switch (c.type) {
+        case ControlType::Button:
+            w.key("style").value(c.style);
+            break;
+        case ControlType::Slider: case ControlType::Ruler:
+            w.key("min").value(c.min).key("max").value(c.max).key("step").value(c.step).key("unit").value(c.unit);
+            break;
+        case ControlType::Choice:
+            w.key("options").begin_array();
+            for (const LocalizedText& o : c.options) text_json(w, o);
+            w.end_array();
+            break;
+        case ControlType::Text:
+            w.key("placeholder");
+            text_json(w, c.placeholder);
+            w.key("multiline").value(c.multiline).key("maxLength").value(c.maxLength);
+            break;
+        case ControlType::Image:
+            w.key("aspect").value(c.aspect);
+            break;
+        case ControlType::Label:
+            w.key("text");
+            text_json(w, c.text);
+            break;
+        default: break;
+    }
+    if (is_container(c.type)) {
+        w.key("collapsed").value(c.collapsed);
+        w.key("children").begin_array();
+        for (const ControlDecl& child : c.children) control_json(w, child);
+        w.end_array();
+    }
+    w.key("hasHandler").value(!c.onClick.empty() || !c.onChange.empty() || !c.onSelect.empty());
+    w.end_object();
+}
 
 void write_v2_json(json::Writer& w, const PluginInfo& p) {
     w.key("format").value(p.format);
@@ -506,44 +586,11 @@ void write_v2_json(json::Writer& w, const PluginInfo& p) {
         w.key("title");
         text_json(w, panel.title);
         w.key("icon").value(panel.icon);
+        w.key("replaces").value(panel.replaces);
         w.key("placement");
         placement_json(w, panel.placement);
         w.key("controls").begin_array();
-        for (const ControlDecl& c : panel.controls) {
-            w.begin_object();
-            w.key("id").value(c.id);
-            w.key("type").value(control_type_name(c.type));
-            w.key("label");
-            text_json(w, c.label);
-            switch (c.type) {
-                case ControlType::Button:
-                    w.key("style").value(c.style);
-                    break;
-                case ControlType::Slider: case ControlType::Ruler:
-                    w.key("min").value(c.min).key("max").value(c.max).key("step").value(c.step).key("unit").value(c.unit);
-                    break;
-                case ControlType::Choice:
-                    w.key("options").begin_array();
-                    for (const LocalizedText& o : c.options) text_json(w, o);
-                    w.end_array();
-                    break;
-                case ControlType::Text:
-                    w.key("placeholder");
-                    text_json(w, c.placeholder);
-                    w.key("multiline").value(c.multiline).key("maxLength").value(c.maxLength);
-                    break;
-                case ControlType::Image:
-                    w.key("aspect").value(c.aspect);
-                    break;
-                case ControlType::Label:
-                    w.key("text");
-                    text_json(w, c.text);
-                    break;
-                default: break;
-            }
-            w.key("hasHandler").value(!c.onClick.empty() || !c.onChange.empty() || !c.onSelect.empty());
-            w.end_object();
-        }
+        for (const ControlDecl& c : panel.controls) control_json(w, c);
         w.end_array();
         w.end_object();
     }

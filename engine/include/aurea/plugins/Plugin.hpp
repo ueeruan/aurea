@@ -40,7 +40,24 @@ namespace aurea::plugins {
 inline constexpr u32 kFormatVersion = 1;            ///< "aureaPlugin" dos plugins só de efeito
 /// 0.3.4 plugins: formato 2 = painéis, script e permissões (o app lê 1 e 2).
 inline constexpr u32 kFormatVersionV2 = 2;
-inline constexpr u32 kMaxParams = 64;
+/// Formato 3: curva, degradê, imagem de outra camada, histórico, áudio, script por
+/// quadro, interface em árvore e os lugares novos. O app lê 1, 2 e 3.
+inline constexpr u32 kFormatVersionV3 = 3;
+/// Vec4 que cada tipo ocupa no bloco de parâmetros: 64 amostras e 32 cores.
+inline constexpr u32 kCurveSlots = 16;
+inline constexpr u32 kGradientSlots = 32;
+inline constexpr u32 kCurveSamples = kCurveSlots * 4;
+/// Script por quadro: passos, tempo e memória de UMA chamada, e quantas falhas
+/// seguidas desligam o script até o app reabrir (o quadro segue sem ele).
+inline constexpr u64 kFrameScriptMaxSteps = 500000;
+inline constexpr u32 kFrameScriptMaxMs = 8;
+inline constexpr u64 kFrameScriptMaxHeap = 8ull << 20;
+inline constexpr u32 kFrameScriptMaxFailures = 3;
+inline constexpr u32 kMaxParams = 256;          ///< "stack" e "panel" (é o teto de read_effect)
+/// Shader: o bloco de 4 KB (cabeçalho de 64 bytes + 16 por parâmetro).
+inline constexpr u32 kMaxShaderParams = 252;
+/// "shader3d": o mesmo bloco com os 1008 bytes da cena.
+inline constexpr u32 kMaxShader3dParams = 189;
 inline constexpr u32 kMaxPasses = 32;
 inline constexpr u32 kMaxPassInputs = 11;           ///< entradas nomeadas + texturas do pacote, além da fonte
 /// 0.4.6: imagens do pacote amarradas como sampler2D ("textures": o getFile do GLSL).
@@ -76,7 +93,7 @@ using LocalizedText = std::vector<std::pair<std::string, std::string>>;
 /// 0.3.4 plugins: `Panel` = plugin sem efeito (só interface e script).
 enum class Kind : u8 { Shader = 0, Stack, Panel };
 enum class ColorSpace : u8 { Linear = 0, Srgb };
-enum class ParamKind : u8 { Float = 0, Int, Bool, Enum, Color, Point, Angle, Layer };
+enum class ParamKind : u8 { Float = 0, Int, Bool, Enum, Color, Point, Angle, Layer, Curve, Gradient, LayerImage };
 
 /// Que camadas um parâmetro "layer" aceita (bits; 0 = qualquer uma). Os mesmos
 /// bits viram as flags kParamRef* da declaração do efeito (Parameter.hpp).
@@ -151,6 +168,9 @@ struct Manifest {
     std::vector<ParamDecl> params;
     std::vector<PassDecl> passes;
     std::vector<TextureDecl> textures;   ///< 0.4.6: imagens do pacote (todos os passes)
+    bool history = false;                ///< "uses": o quadro anterior (sampler aurea_history)
+    bool audio = false;                  ///< "uses": o som da camada (aurea_audio)
+    std::string frameScript;             ///< .js puro com `onFrame(f)`: muda parâmetros por quadro
     f32 margin = 0.0f;
     ColorSpace colorSpace = ColorSpace::Linear;
     std::vector<StackStepDecl> stack;

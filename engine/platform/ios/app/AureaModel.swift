@@ -2178,6 +2178,8 @@ final class AureaModel: ObservableObject {
         if uiMode != nextUiMode { uiMode = nextUiMode }
         let nextAnchor = engine.mainTrackAnchor
         if mainTrackAnchor != nextAnchor { mainTrackAnchor = nextAnchor }
+        let nextEditTimeline = uiMode != AureaUiMode.composition ? EditTimelineData.parse(engine.editTimeline()) : nil
+        if editTimeline != nextEditTimeline { editTimeline = nextEditTimeline }
         // Bug #6 (par do EditorStore.refreshModel): a composição mudou por fora do
         // abrir/fechar (desfazer com o grupo aberto, "Tirar do grupo"). Os ids de
         // camada da outra composição não valem aqui: miniaturas, trilhas abertas
@@ -3307,6 +3309,7 @@ final class AureaModel: ObservableObject {
                 self.importingMedia = false
                 if !ids.isEmpty {
                     if asOverlay { self.engine.run { e in ids.forEach { if !audioOnly.contains($0) { _ = e.moveClipToOverlay($0, atFrame: overlayFrame) } } } }
+                    else { self.placeImportedClips(ids.filter { !audioOnly.contains($0) }, from: Int64(overlayFrame)) }
                     self.engine.selectLayers(ids.map { NSNumber(value: $0) })
                     self.selection = Set(ids)
                     self.refreshModel(force: true)
@@ -5133,6 +5136,61 @@ final class AureaModel: ObservableObject {
         return Int64(id)
     }
 
+    /// Imagem com transparência: a silhueta vira o objeto. A placa (sem alfa) fica para a
+    /// opaca e para o vídeo. Par de EditorStore.layerTo3DObject.
+    func layerTo3DObject(_ id: Int64, kind: UInt32, name: String, done: @escaping (Int64) -> Void) {
+        let source = kind == 2 ? engine.layerSourcePath(id) : ""
+        guard !source.isEmpty, !importingMedia else { done(Int64(engine.layerTo3DObject(id, name: name))); return }
+        importingMedia = true
+        operationMessage = AureaText.t("image3d_creating")
+        let operation = beginProjectOperation()
+        let engine = self.engine
+        mediaQueue.async { [weak self] in
+            let url = source.contains("://") ? URL(string: source) : URL(fileURLWithPath: source)
+            var made: Int64 = -1
+            if let url, let saved = saveShape3DImage(url), !saved.opaque { made = Int64(engine.layerToImage3D(id, path: saved.path, name: name)) }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.endProjectOperation(operation)
+                self.importingMedia = false
+                done(made >= 0 ? made : Int64(self.engine.layerTo3DObject(id, name: name)))
+            }
+        }
+    }
+
+    /// + › 3D › PNG para 3D. Par de EditorStore.addImage3D: a transparência da
+    /// imagem dá a silhueta do objeto, e o motor a traça fora da thread principal.
+    func addImage3D(url: URL) {
+        guard !importingMedia else { toast = AureaText.t("ios_importing_media"); return }
+        importingMedia = true
+        operationMessage = AureaText.t("image3d_creating")
+        let operation = beginProjectOperation()
+        let project = projectGeneration
+        let scoped = url.startAccessingSecurityScopedResource()
+        let engine = self.engine
+        let name = AureaText.t("image3d_layer")
+        mediaQueue.async { [weak self] in
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            let saved = saveShape3DImage(url)
+            let id: Int64 = saved.map { Int64(engine.addImage3D($0.path, name: name)) } ?? -17   // Errc::UnsupportedFormat
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.endProjectOperation(operation)
+                self.importingMedia = false
+                guard self.projectGeneration == project else { return }
+                if id >= 0 {
+                    self.selection = [id]; self.engine.selectLayers([NSNumber(value: id)])
+                    if saved?.opaque == true { self.toast = AureaText.t("image3d_no_alpha") }
+                } else {
+                    let code = Int32(truncatingIfNeeded: -id)
+                    self.toast = AureaText.t(code == 2 ? "image3d_err_empty" : AureaModel.text3DFailureKey(code: code) ?? "msg_nao_foi_possivel_importar_a_imagem")
+                }
+                self.showAddLayer = false
+                self.syncAfterEdit()
+            }
+        }
+    }
+
     /// 0.4.1 (mockup "interface 03"): Elementos › Aurora — camada de ajuste com o efeito Aurora.
     func addAurora() {
         let id = engine.addAurora()
@@ -5882,6 +5940,10 @@ final class AureaModel: ObservableObject {
     @Published private(set) var uiMode: UInt32 = AureaUiMode.composition
     /// O trecho de mídia mais fundo: a linha dele é a trilha principal da Edição (0 = nenhum).
     @Published private(set) var mainTrackAnchor: Int64 = 0
+    /// Faixas e marcas da Edição (nulo na Composição).
+    @Published private(set) var editTimeline: EditTimelineData?
+    /// Onde a próxima mídia entra: 0 no fim da V1, 1 inserindo no cabeçote, 2 sobrepondo.
+    @Published var editPlacement = 0
     /// A próxima importação de mídia vai para uma linha própria no cabeçote ("Camada" da Edição).
     var pendingOverlayImport = false
     /// Marcas do projeto (só os quadros; o motor guarda cor e tipo).
@@ -7049,7 +7111,9 @@ extension AureaModel {
             if code == 0 {
                 try? FileManager.default.removeItem(at: directory)
                 try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                let r = AureaEngine.exportProjectPackage(path, to: out.path, title: title, appVersion: version, media: media)
+                // Os plugins vão no arquivo completo, como a mídia.
+                let plugins = includeMedia ? importer.projectFilePlugins(path) ?? [] : []
+                let r = AureaEngine.exportProjectPackage(path, to: out.path, title: title, appVersion: version, media: media, plugins: plugins)
                 code = r.first?.intValue ?? 10
                 skipped = r.count > 2 ? r[2].intValue : 0
             }
@@ -7092,9 +7156,11 @@ extension AureaModel {
             let code = Int(r.first ?? "10") ?? 10
             let title = (r.count > 1 && !r[1].isEmpty) ? r[1] : name
             let missing = r.count > 4 ? Int(r[4]) ?? 0 : 0
+            let plugins = stride(from: 5, to: max(5, r.count - 2), by: 3).map { (id: r[$0], file: r[$0 + 2]) }
             DispatchQueue.main.async {
                 guard let self else { done(); return }
                 self.importingMedia = false
+                if code == 0 { PluginRuntime.shared.offerEmbedded(plugins) }
                 if code == 0 {
                     // Sidecar com o título (Home); tamanho e duração vêm na primeira abertura.
                     writeHomeProjectMeta(url: project, title: title, width: 0, height: 0, fps: 30, durationFrames: 0)
@@ -7636,20 +7702,7 @@ extension AureaModel {
         let engine = self.engine
         mediaQueue.async { [weak self] in
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-            var path: String?
-            autoreleasepool {
-                // ImageIO decodes directly at the requested size; Data + UIImage
-                // decoded the full camera image before creating its 2048px copy.
-                if let image = decodeHomeThumbnail(path: url.path, maxPx: 2048) {
-                    let info = image.cgImage?.alphaInfo ?? CGImageAlphaInfo.none
-                    let alpha = info != CGImageAlphaInfo.none && info != .noneSkipFirst && info != .noneSkipLast
-                    let bytes = alpha ? image.pngData() : image.jpegData(compressionQuality: 0.92)
-                    let dir = AureaPaths.documents.appendingPathComponent("formas3d", isDirectory: true)
-                    let file = dir.appendingPathComponent(UUID().uuidString + (alpha ? ".png" : ".jpg"))
-                    if let bytes, (try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)) != nil,
-                       (try? bytes.write(to: file)) != nil { path = file.path }
-                }
-            }
+            let path = saveShape3DImage(url)?.path
             let ok = path.map { file in
                 if let effect { return engine.setEffectImage(file, effect: effect, forLayer: id) }
                 if let material { return engine.setMaterialTextureImage(id, material: material, path: file) }
@@ -7667,6 +7720,23 @@ extension AureaModel {
                 self.refreshModel(force: true)
             }
         }
+    }
+}
+
+/// A imagem do aparelho reduzida a 2048 px em `formas3d/`: o projeto guarda o caminho.
+fileprivate func saveShape3DImage(_ url: URL) -> (path: String, opaque: Bool)? {
+    autoreleasepool {
+        // ImageIO decodes directly at the requested size; Data + UIImage
+        // decoded the full camera image before creating its 2048px copy.
+        guard let image = decodeHomeThumbnail(path: url.path, maxPx: 2048) else { return nil }
+        let info = image.cgImage?.alphaInfo ?? CGImageAlphaInfo.none
+        let alpha = info != CGImageAlphaInfo.none && info != .noneSkipFirst && info != .noneSkipLast
+        let bytes = alpha ? image.pngData() : image.jpegData(compressionQuality: 0.92)
+        let dir = AureaPaths.documents.appendingPathComponent("formas3d", isDirectory: true)
+        let file = dir.appendingPathComponent(UUID().uuidString + (alpha ? ".png" : ".jpg"))
+        guard let bytes, (try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)) != nil,
+              (try? bytes.write(to: file)) != nil else { return nil }
+        return (file.path, !alpha)
     }
 }
 

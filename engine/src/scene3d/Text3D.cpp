@@ -18,6 +18,9 @@
 #include "aurea/text/TextTransform.hpp"
 #include "aurea/text/FontManager.hpp"
 #include "aurea/vector/Vector.hpp"
+#include "aurea/vector/ContourTrace.hpp"
+#include "aurea/scene3d/Image3D.hpp"
+#include <filesystem>
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -694,6 +697,7 @@ struct Chunk {
 /// A geometria do texto inteiro, sem material — é isto que o cache guarda.
 struct TextMesh {
     Chunk caps, walls, bevels;
+    Chunk backs;   ///< só com GroupInput::splitBack; senão o fundo fica em `caps`
 };
 
 /// Perfil do chanfro: 0 = reto (chanfro de 45°), 1 = filete circular.
@@ -776,6 +780,7 @@ Vec3 bevel_normal(Vec3 outward, f32 slopeAway, f32 slopeRise) {
 struct GroupInput {
     const std::vector<std::vector<Vec2>>* cs = nullptr;
     const std::vector<std::vector<u32>>* holesOf = nullptr;
+    bool splitBack = false;   ///< fundo em material próprio (Imagem 3D)
 };
 
 /// Emite um grupo (uma borda e os furos dela) em `out`. Devolve falso quando o
@@ -838,15 +843,21 @@ bool emit_group(TextMesh& out, const GroupInput& in, usize outer, f32 zf, f32 zb
         out.caps.push(Vec3{p.x, p.y, zf}, Vec3{0, 0, 1}, Vec2{(p.x - uvMin.x) / uvSize.x, (p.y - uvMin.y) / uvSize.y});
     // O fundo é a leitura espelhada da frente — é o que se vê ao olhar a letra
     // por trás, e mantém o triedro (tangente, bitangente, normal) coerente.
-    const u32 capB = static_cast<u32>(out.caps.positions.size());
+    Chunk& backChunk = in.splitBack ? out.backs : out.caps;
+    const u32 capB = static_cast<u32>(backChunk.positions.size());
     for (Vec2 p : flat)
-        out.caps.push(Vec3{p.x, p.y, zb}, Vec3{0, 0, -1},
-                      Vec2{1.0f - (p.x - uvMin.x) / uvSize.x, (p.y - uvMin.y) / uvSize.y});
+        backChunk.push(Vec3{p.x, p.y, zb}, Vec3{0, 0, -1},
+                       Vec2{1.0f - (p.x - uvMin.x) / uvSize.x, (p.y - uvMin.y) / uvSize.y});
     for (usize t = 0; t + 2 < idx.size(); t += 3) {
         u32 a = idx[t], b = idx[t + 1], c = idx[t + 2];
         const Vec2 A = flat[a], B = flat[b], C = flat[c];
         if ((B.x - A.x) * (C.y - A.y) - (B.y - A.y) * (C.x - A.x) < 0) std::swap(b, c);   // anti-horário = frente
-        out.caps.indices.insert(out.caps.indices.end(), {capF + a, capF + b, capF + c, capB + a, capB + c, capB + b});
+        if (in.splitBack) {
+            out.caps.indices.insert(out.caps.indices.end(), {capF + a, capF + b, capF + c});
+            out.backs.indices.insert(out.backs.indices.end(), {capB + a, capB + c, capB + b});
+        } else {
+            out.caps.indices.insert(out.caps.indices.end(), {capF + a, capF + b, capF + c, capB + a, capB + c, capB + b});
+        }
     }
 
     // --- paredes e chanfro, contorno a contorno ----------------------------
@@ -931,6 +942,128 @@ bool emit_group(TextMesh& out, const GroupInput& in, usize outer, f32 zf, f32 zb
 constexpr f32 kBevelLimit = 0.6f;
 
 /// Gera a geometria. `detail` sai preenchido quando não há malha.
+/// Do contorno à malha, sem saber de onde ele veio. `cs`: Y para cima; contornos de
+/// donos diferentes não se aninham. Reorienta os anéis (borda anti-horária, furo horário).
+struct ContourMeshParams {
+    f32 depth = 0.25f;
+    bool bevel = false;
+    u32 bevelSegments = 3;
+    f32 bevelWidth = 0.02f, bevelDepth = 0.02f, bevelRoundness = 1.0f;
+    bool explicitUv = false;   ///< senão, as UVs da tampa cobrem a caixa dos contornos
+    Vec2 uvMin{0.0f, 0.0f}, uvSize{1.0f, 1.0f};
+    bool splitBack = false;
+};
+
+std::shared_ptr<const TextMesh> mesh_from_contours(std::vector<std::vector<Vec2>>& cs, const std::vector<u32>& owners, const ContourMeshParams& spec, std::string& detail) {
+    const usize n = cs.size();
+    std::vector<f64> areas(n);
+    std::vector<u32> depth(n, 0);
+    for (usize i = 0; i < n; ++i) areas[i] = signed_area(cs[i]);
+    for (usize i = 0; i < n; ++i)
+        for (usize j = 0; j < n; ++j)
+            // Kerning, combining marks and cursive fonts can overlap glyphs.
+            // A neighbouring glyph must never turn a letter into a hole.
+            if (i != j && owners[i] == owners[j] && std::fabs(areas[j]) > std::fabs(areas[i]) && point_in(cs[j], cs[i][0])) ++depth[i];
+
+    // Orientação normalizada: borda anti-horária, furo horário. Com ela a
+    // normal da aresta (dy, −dx) sai sempre para fora do material, e o recuo
+    // pela bissetriz esquerda sempre entra no material.
+    for (usize i = 0; i < n; ++i) {
+        const bool hole = depth[i] & 1u;
+        if ((areas[i] > 0) == hole) std::reverse(cs[i].begin(), cs[i].end());
+    }
+
+    // Cada furo vai para a borda de menor área que o contém.
+    std::vector<std::vector<u32>> holesOf(n);
+    for (usize h = 0; h < n; ++h) {
+        if (!(depth[h] & 1u)) continue;
+        usize best = n;
+        for (usize k = 0; k < n; ++k) {
+            if (owners[k] != owners[h] || (depth[k] & 1u) || depth[k] + 1 != depth[h] || !point_in(cs[k], cs[h][0])) continue;
+            if (best == n || std::fabs(areas[k]) < std::fabs(areas[best])) best = k;
+        }
+        if (best != n) holesOf[best].push_back(static_cast<u32>(h));
+    }
+
+    // Caixa do texto: as UV planas da tampa, e a checagem de degenerado.
+    Vec2 lo{1e30f, 1e30f}, hi{-1e30f, -1e30f};
+    for (const auto& c : cs)
+        for (Vec2 p : c) {
+            lo.x = std::min(lo.x, p.x); lo.y = std::min(lo.y, p.y);
+            hi.x = std::max(hi.x, p.x); hi.y = std::max(hi.y, p.y);
+        }
+    if (n == 0 || lo.x > hi.x) {
+        detail = "texto sem letras visiveis";
+        return nullptr;
+    }
+    const Vec2 uvSize{std::max(hi.x - lo.x, 1e-6f), std::max(hi.y - lo.y, 1e-6f)};
+    const Vec2 uvMin = spec.explicitUv ? spec.uvMin : lo, uvExtent = spec.explicitUv ? spec.uvSize : uvSize;
+
+    const f32 d = std::max(0.0f, spec.depth);
+    const f32 zf = d * 0.5f, zb = -d * 0.5f;
+    const bool wantBevel = spec.bevel && d > 1e-4f;
+    const u32 segs = wantBevel ? std::clamp(spec.bevelSegments, 1u, 8u) : 0u;
+
+    GroupInput in;
+    in.cs = &cs;
+    in.holesOf = &holesOf;
+    in.splitBack = spec.splitBack;
+
+    auto merge = [](TextMesh& dst, TextMesh& src) {
+        auto move = [](Chunk& d, const Chunk& s) {
+            const u32 base = static_cast<u32>(d.positions.size());
+            d.positions.insert(d.positions.end(), s.positions.begin(), s.positions.end());
+            d.normals.insert(d.normals.end(), s.normals.begin(), s.normals.end());
+            d.uv0.insert(d.uv0.end(), s.uv0.begin(), s.uv0.end());
+            for (u32 i : s.indices) d.indices.push_back(base + i);
+        };
+        move(dst.caps, src.caps);
+        move(dst.walls, src.walls);
+        move(dst.bevels, src.bevels);
+        move(dst.backs, src.backs);
+    };
+
+    auto mesh = std::make_shared<TextMesh>();
+    u32 emitted = 0;
+    for (usize o = 0; o < n; ++o) {
+        if (depth[o] & 1u) continue;
+        // Teto do chanfro: cada contorno tem o seu (um traço fino não pode
+        // encolher o chanfro da letra inteira), e o grupo usa o menor.
+        f32 width = spec.bevelWidth;
+        if (wantBevel) {
+            width = std::min(width, kBevelLimit * contour_offset_limit(cs[o]));
+            for (u32 h : holesOf[o]) width = std::min(width, kBevelLimit * contour_offset_limit(cs[h]));
+        }
+        // O recuo é recalculado a cada tentativa: quando o contorno comporta o
+        // chanfro pedido, sai de primeira; quando não, ele encolhe até a tampa
+        // triangular. Nunca sai malha quebrada — no pior caso sai sem chanfro.
+        bool ok = false;
+        for (u32 attempt = 0; attempt < 6 && !ok; ++attempt) {
+            TextMesh local;
+            ok = emit_group(local, in, o, zf, zb, d, width, segs, spec.bevelDepth, spec.bevelRoundness, uvMin, uvExtent);
+            if (ok) merge(*mesh, local);
+            width *= 0.5f;
+        }
+        if (!ok) {
+            TextMesh local;
+            if (!emit_group(local, in, o, zf, zb, d, 0.0f, 0, 0.0f, 0.0f, uvMin, uvExtent)) {
+                detail = "contorno do texto nao triangulou"; return nullptr;
+            }
+            merge(*mesh, local);
+        }
+        ++emitted;
+    }
+    if (emitted == 0 || mesh->caps.indices.empty()) {
+        detail = "contorno do texto nao triangulou";
+        return nullptr;
+    }
+    compute_tangents(mesh->caps);
+    compute_tangents(mesh->walls);
+    compute_tangents(mesh->bevels);
+    if (!mesh->backs.empty()) compute_tangents(mesh->backs);
+    return mesh;
+}
+
 std::shared_ptr<const TextMesh> build_text_mesh(const text::Font& font, const Text3DSpec& spec, std::string& detail, i32 glyphIndex = -1) {
     TextData td;
     td.content = spec.content;
@@ -976,109 +1109,10 @@ std::shared_ptr<const TextMesh> build_text_mesh(const text::Font& font, const Te
         cs[i].reserve(raw[i].size());
         for (Vec2 p : raw[i]) cs[i].push_back(Vec2{p.x / 100.0f, -p.y / 100.0f});
     }
-    const usize n = cs.size();
-    std::vector<f64> areas(n);
-    std::vector<u32> depth(n, 0);
-    for (usize i = 0; i < n; ++i) areas[i] = signed_area(cs[i]);
-    for (usize i = 0; i < n; ++i)
-        for (usize j = 0; j < n; ++j)
-            // Kerning, combining marks and cursive fonts can overlap glyphs.
-            // A neighbouring glyph must never turn a letter into a hole.
-            if (i != j && owners[i] == owners[j] && std::fabs(areas[j]) > std::fabs(areas[i]) && point_in(cs[j], cs[i][0])) ++depth[i];
-
-    // Orientação normalizada: borda anti-horária, furo horário. Com ela a
-    // normal da aresta (dy, −dx) sai sempre para fora do material, e o recuo
-    // pela bissetriz esquerda sempre entra no material.
-    for (usize i = 0; i < n; ++i) {
-        const bool hole = depth[i] & 1u;
-        if ((areas[i] > 0) == hole) std::reverse(cs[i].begin(), cs[i].end());
-    }
-
-    // Cada furo vai para a borda de menor área que o contém.
-    std::vector<std::vector<u32>> holesOf(n);
-    for (usize h = 0; h < n; ++h) {
-        if (!(depth[h] & 1u)) continue;
-        usize best = n;
-        for (usize k = 0; k < n; ++k) {
-            if (owners[k] != owners[h] || (depth[k] & 1u) || depth[k] + 1 != depth[h] || !point_in(cs[k], cs[h][0])) continue;
-            if (best == n || std::fabs(areas[k]) < std::fabs(areas[best])) best = k;
-        }
-        if (best != n) holesOf[best].push_back(static_cast<u32>(h));
-    }
-
-    // Caixa do texto: as UV planas da tampa, e a checagem de degenerado.
-    Vec2 lo{1e30f, 1e30f}, hi{-1e30f, -1e30f};
-    for (const auto& c : cs)
-        for (Vec2 p : c) {
-            lo.x = std::min(lo.x, p.x); lo.y = std::min(lo.y, p.y);
-            hi.x = std::max(hi.x, p.x); hi.y = std::max(hi.y, p.y);
-        }
-    if (n == 0 || lo.x > hi.x) {
-        detail = "texto sem letras visiveis";
-        return nullptr;
-    }
-    const Vec2 uvSize{std::max(hi.x - lo.x, 1e-6f), std::max(hi.y - lo.y, 1e-6f)};
-
-    const f32 d = std::max(0.0f, spec.depth);
-    const f32 zf = d * 0.5f, zb = -d * 0.5f;
-    const bool wantBevel = spec.bevel && d > 1e-4f;
-    const u32 segs = wantBevel ? std::clamp(spec.bevelSegments, 1u, 8u) : 0u;
-
-    GroupInput in;
-    in.cs = &cs;
-    in.holesOf = &holesOf;
-
-    auto merge = [](TextMesh& dst, TextMesh& src) {
-        auto move = [](Chunk& d, const Chunk& s) {
-            const u32 base = static_cast<u32>(d.positions.size());
-            d.positions.insert(d.positions.end(), s.positions.begin(), s.positions.end());
-            d.normals.insert(d.normals.end(), s.normals.begin(), s.normals.end());
-            d.uv0.insert(d.uv0.end(), s.uv0.begin(), s.uv0.end());
-            for (u32 i : s.indices) d.indices.push_back(base + i);
-        };
-        move(dst.caps, src.caps);
-        move(dst.walls, src.walls);
-        move(dst.bevels, src.bevels);
-    };
-
-    auto mesh = std::make_shared<TextMesh>();
-    u32 emitted = 0;
-    for (usize o = 0; o < n; ++o) {
-        if (depth[o] & 1u) continue;
-        // Teto do chanfro: cada contorno tem o seu (um traço fino não pode
-        // encolher o chanfro da letra inteira), e o grupo usa o menor.
-        f32 width = spec.bevelWidth;
-        if (wantBevel) {
-            width = std::min(width, kBevelLimit * contour_offset_limit(cs[o]));
-            for (u32 h : holesOf[o]) width = std::min(width, kBevelLimit * contour_offset_limit(cs[h]));
-        }
-        // O recuo é recalculado a cada tentativa: quando o contorno comporta o
-        // chanfro pedido, sai de primeira; quando não, ele encolhe até a tampa
-        // triangular. Nunca sai malha quebrada — no pior caso sai sem chanfro.
-        bool ok = false;
-        for (u32 attempt = 0; attempt < 6 && !ok; ++attempt) {
-            TextMesh local;
-            ok = emit_group(local, in, o, zf, zb, d, width, segs, spec.bevelDepth, spec.bevelRoundness, lo, uvSize);
-            if (ok) merge(*mesh, local);
-            width *= 0.5f;
-        }
-        if (!ok) {
-            TextMesh local;
-            if (!emit_group(local, in, o, zf, zb, d, 0.0f, 0, 0.0f, 0.0f, lo, uvSize)) {
-                detail = "contorno do texto nao triangulou"; return nullptr;
-            }
-            merge(*mesh, local);
-        }
-        ++emitted;
-    }
-    if (emitted == 0 || mesh->caps.indices.empty()) {
-        detail = "contorno do texto nao triangulou";
-        return nullptr;
-    }
-    compute_tangents(mesh->caps);
-    compute_tangents(mesh->walls);
-    compute_tangents(mesh->bevels);
-    return mesh;
+    ContourMeshParams params;
+    params.depth = spec.depth; params.bevel = spec.bevel; params.bevelSegments = spec.bevelSegments;
+    params.bevelWidth = spec.bevelWidth; params.bevelDepth = spec.bevelDepth; params.bevelRoundness = spec.bevelRoundness;
+    return mesh_from_contours(cs, owners, params, detail);
 }
 
 
@@ -1823,6 +1857,347 @@ bool apply_text3d_anim_preset(Layer& layer, i32 preset, u32 mode, u32 unit, u32 
         (void)tr.set(FrameIndex{first + frames}, 100.0f, Interpolation::Linear);
     }
     return true;
+}
+
+// ===== Imagem 3D =============================================================
+Image3DSpec::Image3DSpec() {
+    front.color = Vec4{1.0f, 1.0f, 1.0f, 1.0f}; front.roughness = 0.45f; front.specular = 0.5f;
+    side.color = Vec4{0.62f, 0.64f, 0.68f, 1.0f}; side.metallic = 0.85f; side.roughness = 0.34f;
+    bevelMat.color = Vec4{0.86f, 0.87f, 0.9f, 1.0f}; bevelMat.metallic = 1.0f; bevelMat.roughness = 0.2f;
+    back = side;
+}
+
+void sanitize_image3d(Image3DSpec& s) noexcept {
+    const auto clamp = [](f32 v, f32 lo, f32 hi, f32 def) { return std::isfinite(v) ? std::clamp(v, lo, hi) : def; };
+    s.depth = clamp(s.depth, 0.0f, 10.0f, 0.14f);
+    s.threshold = clamp(s.threshold, 0.05f, 0.95f, 0.5f);
+    s.bevelWidth = clamp(s.bevelWidth, 0.0f, 0.5f, 0.012f);
+    s.bevelDepth = clamp(s.bevelDepth, 0.0f, 0.5f, 0.012f);
+    s.bevelRoundness = clamp(s.bevelRoundness, 0.0f, 1.0f, 1.0f);
+    s.bevelSegments = std::clamp(s.bevelSegments, 1u, 8u);
+}
+
+std::string encode_image3d(const Image3DSpec& s) {
+    char head[120];
+    std::snprintf(head, sizeof(head), "v1;d=%.4f;th=%.3f;bv=%u%.4f/%.4f/%.3f/%u;", static_cast<double>(s.depth), static_cast<double>(s.threshold),
+                  s.bevel ? 1u : 0u, static_cast<double>(s.bevelWidth), static_cast<double>(s.bevelDepth), static_cast<double>(s.bevelRoundness), s.bevelSegments);
+    std::string out = std::string(kImage3DScheme) + head;
+    write_material(out, "m0", s.front); write_material(out, "m1", s.side);
+    write_material(out, "m2", s.bevelMat); write_material(out, "m3", s.back);
+    out += "img=";
+    constexpr char hex[] = "0123456789abcdef";
+    for (unsigned char c : s.imagePath) { out += hex[c >> 4]; out += hex[c & 15]; }
+    return out + ";";
+}
+
+bool decode_image3d(const std::string& src, Image3DSpec& out) {
+    const std::string scheme = kImage3DScheme;
+    if (src.rfind(scheme, 0) != 0) return false;
+    const std::string head = src.substr(scheme.size());
+    Image3DSpec s;
+    read_material(head, "m0", s.front); read_material(head, "m1", s.side);
+    read_material(head, "m2", s.bevelMat); read_material(head, "m3", s.back);
+    bool hasImage = false;
+    usize i = 0;
+    while (i < head.size()) {
+        usize j = head.find(';', i);
+        if (j == std::string::npos) j = head.size();
+        const std::string kv = head.substr(i, j - i);
+        if (kv.rfind("d=", 0) == 0) s.depth = std::strtof(kv.c_str() + 2, nullptr);
+        else if (kv.rfind("th=", 0) == 0) s.threshold = std::strtof(kv.c_str() + 3, nullptr);
+        else if (kv.rfind("bv=", 0) == 0 && kv.size() > 4) {
+            s.bevel = kv[3] == '1';
+            float w = s.bevelWidth, d = s.bevelDepth, r = s.bevelRoundness; unsigned n = s.bevelSegments;
+            if (std::sscanf(kv.c_str() + 4, "%f/%f/%f/%u", &w, &d, &r, &n) == 4) { s.bevelWidth = w; s.bevelDepth = d; s.bevelRoundness = r; s.bevelSegments = n; }
+        } else if (kv.rfind("img=", 0) == 0) {
+            const auto digit = [](char c) -> int { return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1; };
+            std::string path;
+            for (usize k = 4; k + 1 < kv.size(); k += 2) {
+                const int a = digit(kv[k]), b = digit(kv[k + 1]);
+                if (a < 0 || b < 0 || (a == 0 && b == 0)) return false;
+                path += static_cast<char>((a << 4) | b);
+            }
+            s.imagePath = std::move(path);
+            hasImage = !s.imagePath.empty();
+        }
+        i = j + 1;
+    }
+    if (!hasImage) return false;
+    sanitize_image3d(s);
+    out = std::move(s);
+    return true;
+}
+
+namespace {
+
+/// Espalha a cor para dentro das áreas transparentes e fecha o alfa: sem isso
+/// a borda da textura e os mips puxam o preto do fundo do PNG para a silhueta.
+std::shared_ptr<const std::vector<u8>> bleed_pixels(const std::vector<u8>& source, u32 w, u32 h) {
+    auto out = std::make_shared<std::vector<u8>>(source);
+    std::vector<u8>& px = *out;
+    const usize count = static_cast<usize>(w) * h;
+    std::vector<u8> state(count);   // 0 sem cor, 1 com cor, 2 na fila
+    for (usize i = 0; i < count; ++i) state[i] = px[i * 4 + 3] >= 16 ? 1 : 0;
+    const auto around = [&](u32 i, auto&& visit) {
+        const u32 x = i % w, y = i / w;
+        if (x > 0) visit(i - 1);
+        if (x + 1 < w) visit(i + 1);
+        if (y > 0) visit(i - w);
+        if (y + 1 < h) visit(i + w);
+    };
+    std::vector<u32> frontier, next;
+    const auto enqueue = [&](u32 k) { if (state[k] == 0) { state[k] = 2; next.push_back(k); } };
+    for (u32 i = 0; i < count; ++i) if (state[i] == 1) around(i, enqueue);
+    for (int pass = 0; pass < 24 && !next.empty(); ++pass) {
+        frontier.swap(next);
+        next.clear();
+        for (const u32 i : frontier) {
+            u32 r = 0, g = 0, b = 0, n = 0;
+            around(i, [&](u32 k) { if (state[k] == 1) { r += px[k * 4]; g += px[k * 4 + 1]; b += px[k * 4 + 2]; ++n; } });
+            if (n == 0) continue;
+            px[i * 4] = static_cast<u8>(r / n); px[i * 4 + 1] = static_cast<u8>(g / n); px[i * 4 + 2] = static_cast<u8>(b / n);
+        }
+        for (const u32 i : frontier) state[i] = 1;
+        for (const u32 i : frontier) around(i, enqueue);
+    }
+    for (usize i = 0; i < count; ++i) px[i * 4 + 3] = 255;
+    return out;
+}
+
+/// A última imagem aberta. Arrastar profundidade, chanfro ou cor refaz o objeto
+/// a cada 90 ms e não pode decodificar nem traçar de novo. Os pixels só ficam
+/// enquanto algum objeto os usa (weak_ptr): não há memória escondida.
+struct ImageSourceCache {
+    std::string key;
+    u32 width = 0, height = 0;
+    std::shared_ptr<const std::vector<u8>> alpha;
+    std::weak_ptr<const std::vector<u8>> pixels;
+    f32 threshold = -1.0f;
+    std::shared_ptr<const std::vector<vector::Contour>> contours;
+};
+std::mutex& image_source_mutex() { static std::mutex m; return m; }
+ImageSourceCache& image_source_cache() { static ImageSourceCache c; return c; }
+
+struct ImageSource {
+    std::string key;
+    u32 width = 0, height = 0;
+    std::shared_ptr<const std::vector<u8>> alpha, pixels;
+};
+
+bool open_image_source(const std::string& path, u32 maxTextureSize, u64 memoryBudget, ImageSource& out) {
+    std::error_code ec;
+    const auto file = std::filesystem::u8path(path);
+    const auto size = std::filesystem::file_size(file, ec);
+    if (ec) return false;
+    const auto stamp = std::filesystem::last_write_time(file, ec).time_since_epoch().count();
+    out.key = path + "|" + std::to_string(size) + "|" + std::to_string(ec ? 0ll : static_cast<long long>(stamp)) + "|" + std::to_string(maxTextureSize);
+    {
+        std::lock_guard<std::mutex> lock(image_source_mutex());
+        const ImageSourceCache& c = image_source_cache();
+        if (c.key == out.key) {
+            out.width = c.width; out.height = c.height; out.alpha = c.alpha; out.pixels = c.pixels.lock();
+            if (out.pixels) return true;
+        }
+    }
+    Image image;
+    if (!load_shape3d_image(path, maxTextureSize, image, memoryBudget)) return false;
+    const std::vector<u8>& px = image.pixels();
+    const usize count = static_cast<usize>(image.width) * image.height;
+    if (count == 0 || px.size() < count * 4) return false;
+    auto alpha = std::make_shared<std::vector<u8>>(count);
+    for (usize i = 0; i < count; ++i) (*alpha)[i] = px[i * 4 + 3];
+    out.width = image.width; out.height = image.height; out.alpha = std::move(alpha);
+    out.pixels = bleed_pixels(px, image.width, image.height);
+    std::lock_guard<std::mutex> lock(image_source_mutex());
+    ImageSourceCache& c = image_source_cache();
+    if (c.key != out.key) { c.threshold = -1.0f; c.contours.reset(); }
+    c.key = out.key; c.width = out.width; c.height = out.height; c.alpha = out.alpha; c.pixels = out.pixels;
+    return true;
+}
+
+std::shared_ptr<const std::vector<vector::Contour>> contours_of(const ImageSource& source, f32 threshold) {
+    {
+        std::lock_guard<std::mutex> lock(image_source_mutex());
+        const ImageSourceCache& c = image_source_cache();
+        if (c.key == source.key && c.contours && std::fabs(c.threshold - threshold) < 1e-4f) return c.contours;
+    }
+    vector::AlphaTraceOptions options;
+    options.threshold = threshold; options.stride = 1; options.alphaOffset = 0;
+    auto traced = std::make_shared<std::vector<vector::Contour>>();
+    if (!vector::trace_alpha(source.alpha->data(), source.width, source.height, options, *traced)) return nullptr;
+    std::lock_guard<std::mutex> lock(image_source_mutex());
+    ImageSourceCache& c = image_source_cache();
+    if (c.key == source.key) { c.threshold = threshold; c.contours = traced; }
+    return traced;
+}
+
+std::shared_ptr<const GeomAsset> build_image_geom(const std::vector<vector::Contour>& contours, u32 width, u32 h, const Image3DSpec& spec, std::string& detail) {
+    const f32 height = static_cast<f32>(h), aspect = static_cast<f32>(width) / height;
+    std::vector<std::vector<Vec2>> cs;
+    cs.reserve(contours.size());
+    for (const auto& contour : contours) {
+        std::vector<Vec2> ring;
+        ring.reserve(contour.pts.size());
+        for (Vec2 p : contour.pts) ring.push_back(Vec2{p.x / height - aspect * 0.5f, 0.5f - p.y / height});
+        cs.push_back(std::move(ring));
+    }
+    const std::vector<u32> owners(cs.size(), 0u);
+    ContourMeshParams params;
+    params.depth = spec.depth; params.bevel = spec.bevel; params.bevelSegments = spec.bevelSegments;
+    params.bevelWidth = spec.bevelWidth; params.bevelDepth = spec.bevelDepth; params.bevelRoundness = spec.bevelRoundness;
+    // V cresce para baixo na imagem e Y para cima na malha.
+    params.explicitUv = true; params.uvMin = Vec2{-aspect * 0.5f, 0.5f}; params.uvSize = Vec2{aspect, -1.0f};
+    params.splitBack = true;
+    auto mesh = mesh_from_contours(cs, owners, params, detail);
+    if (!mesh) return nullptr;
+    auto asset = std::make_unique<SceneAsset>();
+    asset->materials.resize(4u);
+    Mesh mesh0;
+    mesh0.name = "Imagem 3D";
+    const auto add = [&](const Chunk& chunk, i32 material) {
+        if (chunk.empty()) return;
+        Primitive p;
+        append_chunk(p, chunk);
+        p.material = material;
+        p.generatedTangents = true;
+        for (const Vec3& v : p.positions) p.bounds.add(v);
+        mesh0.bounds.add(p.bounds.min); mesh0.bounds.add(p.bounds.max);
+        mesh0.primitives.push_back(std::move(p));
+    };
+    add(mesh->caps, 0); add(mesh->walls, 1); add(mesh->bevels, 2); add(mesh->backs, 3);
+    if (mesh0.primitives.empty()) { detail = "imagem sem geometria"; return nullptr; }
+    asset->sourceName = "Imagem 3D";
+    asset->meshes.push_back(std::move(mesh0));
+    scene3d::Node node; node.name = "Imagem 3D"; node.mesh = 0;
+    asset->nodes.push_back(node); asset->roots.push_back(0);
+    ImportOptions o;
+    o.generateLods = false;
+    ImportResult fin = finalize_scene_asset(std::move(asset), o);
+    if (!fin.ok()) { detail = fin.detail.empty() ? std::string("nao foi possivel finalizar a malha") : fin.detail; return nullptr; }
+    auto geom = std::make_shared<GeomAsset>();
+    geom->primitives = std::move(fin.asset->meshes[0].primitives);
+    geom->bounds = fin.asset->meshes[0].bounds;
+    geom->assetBounds = fin.asset->bounds;
+    return geom;
+}
+
+ImportResult assemble_image3d(std::shared_ptr<const std::vector<u8>> pixels, u32 width, u32 height, const Image3DSpec& spec, std::shared_ptr<const GeomAsset> geom) {
+    ImportResult res;
+    auto asset = std::make_unique<SceneAsset>();
+    asset->sourceName = "Imagem 3D";
+    asset->materials.push_back(make_material("frente", spec.front));
+    asset->materials.push_back(make_material("lateral", spec.side));
+    asset->materials.push_back(make_material("chanfro", spec.bevelMat));
+    asset->materials.push_back(make_material("traseira", spec.back));
+    Image image;
+    image.name = "Imagem 3D";
+    image.width = width; image.height = height;
+    image.sharedRgba = std::move(pixels);
+    image.hasAlpha = false;
+    asset->images.push_back(std::move(image));
+    asset->materials[0].baseColorTex.image = 0;
+    asset->materials[0].baseColorTex.scale = {1, 1};
+    asset->bounds = geom->assetBounds;
+    Mesh mesh0;
+    mesh0.name = asset->sourceName; mesh0.bounds = geom->bounds; mesh0.primitives = geom->primitives;
+    asset->meshes.push_back(std::move(mesh0));
+    scene3d::Node node; node.name = asset->sourceName; node.mesh = 0;
+    asset->nodes.push_back(node); asset->roots.push_back(0);
+    res.error = ImportError::None;
+    res.asset = std::move(asset);
+    return res;
+}
+
+} // namespace
+
+void image3d_to_fields(const Image3DSpec& s, f32* v) noexcept {
+    const auto region = [](const Text3DMaterial& m, f32* o) { o[0] = m.color.x; o[1] = m.color.y; o[2] = m.color.z; o[3] = m.metallic; o[4] = m.roughness; };
+    v[0] = s.depth; v[1] = s.threshold; v[2] = s.bevel ? 1.0f : 0.0f; v[3] = s.bevelWidth; v[4] = s.bevelDepth; v[5] = s.bevelRoundness;
+    v[6] = static_cast<f32>(s.bevelSegments); v[7] = s.front.metallic; v[8] = s.front.roughness;
+    region(s.side, v + 9); region(s.bevelMat, v + 14); region(s.back, v + 19);
+}
+
+void image3d_from_fields(const f32* v, Image3DSpec& s) noexcept {
+    const auto region = [](const f32* o, Text3DMaterial& m) { m.color = Vec4{o[0], o[1], o[2], 1.0f}; m.metallic = o[3]; m.roughness = o[4]; };
+    s.depth = v[0]; s.threshold = v[1]; s.bevel = v[2] >= 0.5f; s.bevelWidth = v[3]; s.bevelDepth = v[4]; s.bevelRoundness = v[5];
+    s.bevelSegments = std::isfinite(v[6]) && v[6] >= 1.0f ? static_cast<u32>(std::min(v[6], 8.0f)) : 1u;
+    s.front.metallic = v[7]; s.front.roughness = v[8];
+    region(v + 9, s.side); region(v + 14, s.bevelMat); region(v + 19, s.back);
+}
+
+bool apply_image3d_material_preset(Image3DSpec& spec, u32 preset) noexcept {
+    Text3DSpec look;
+    if (!apply_text3d_material_preset(look, preset)) return false;
+    const Text3DMaterial flat = look.front_material();
+    spec.side = look.regionMaterials ? look.side : flat;
+    spec.bevelMat = look.regionMaterials ? look.bevelMat : flat;
+    spec.back = spec.side;
+    return true;
+}
+
+bool tint_image3d_sides(Image3DSpec& spec, const std::function<std::string(const std::string&)>& resolvePath, u32 maxTextureSize, u64 memoryBudget) {
+    ImageSource source;
+    if (!open_image_source(resolvePath ? resolvePath(spec.imagePath) : spec.imagePath, maxTextureSize, memoryBudget, source)) return false;
+    u64 r = 0, g = 0, b = 0, n = 0;
+    const usize count = static_cast<usize>(source.width) * source.height;
+    for (usize i = 0; i < count; i += 3) {
+        if ((*source.alpha)[i] < 128) continue;
+        r += (*source.pixels)[i * 4]; g += (*source.pixels)[i * 4 + 1]; b += (*source.pixels)[i * 4 + 2]; ++n;
+    }
+    if (n == 0) return false;
+    const f32 k = 1.0f / (255.0f * static_cast<f32>(n));
+    const Vec3 mean{static_cast<f32>(r) * k, static_cast<f32>(g) * k, static_cast<f32>(b) * k};
+    spec.side.color = Vec4{mean.x * 0.62f, mean.y * 0.62f, mean.z * 0.62f, 1.0f};
+    spec.side.metallic = 0.25f; spec.side.roughness = 0.42f;
+    spec.bevelMat.color = Vec4{mean.x + (1.0f - mean.x) * 0.45f, mean.y + (1.0f - mean.y) * 0.45f, mean.z + (1.0f - mean.z) * 0.45f, 1.0f};
+    spec.bevelMat.metallic = 0.55f; spec.bevelMat.roughness = 0.22f;
+    spec.back = spec.side;
+    return true;
+}
+
+ImportResult build_image3d_from(Image image, const Image3DSpec& spec) {
+    ImportResult res;
+    const std::vector<u8>& px = image.pixels();
+    if (image.width == 0 || image.height == 0 || px.size() < static_cast<usize>(image.width) * image.height * 4) { res.error = ImportError::NoGeometry; res.detail = "imagem vazia"; return res; }
+    vector::AlphaTraceOptions options;
+    options.threshold = spec.threshold;
+    std::vector<vector::Contour> contours;
+    if (!vector::trace_alpha(px.data(), image.width, image.height, options, contours)) { res.error = ImportError::NoGeometry; res.detail = "imagem sem area visivel"; return res; }
+    auto geom = build_image_geom(contours, image.width, image.height, spec, res.detail);
+    if (!geom) { res.error = ImportError::NoGeometry; return res; }
+    return assemble_image3d(bleed_pixels(px, image.width, image.height), image.width, image.height, spec, std::move(geom));
+}
+
+ImportResult build_image3d(const Image3DSpec& spec, const std::function<std::string(const std::string&)>& resolvePath, u32 maxTextureSize, u64 memoryBudget) {
+    ImportResult res;
+    ImageSource source;
+    if (!open_image_source(resolvePath ? resolvePath(spec.imagePath) : spec.imagePath, maxTextureSize, memoryBudget, source)) {
+        res.error = ImportError::FileNotFound;
+        res.detail = "imagem ilegivel ou grande demais";
+        return res;
+    }
+    // Só a geometria entra no cache: mexer em cor ou rugosidade não refaz a malha.
+    char params[96];
+    std::snprintf(params, sizeof(params), "|%.4f|%.3f|%u%.4f/%.4f/%.3f/%u", static_cast<double>(spec.depth), static_cast<double>(spec.threshold), spec.bevel ? 1u : 0u,
+                  static_cast<double>(spec.bevelWidth), static_cast<double>(spec.bevelDepth), static_cast<double>(spec.bevelRoundness), spec.bevelSegments);
+    const std::string cacheKey = "image3d:" + source.key + params;
+    std::shared_ptr<const GeomAsset> geom;
+    {
+        std::lock_guard<std::mutex> lock(geom_cache_mutex());
+        const auto it = geom_cache().find(cacheKey);
+        if (it != geom_cache().end()) geom = it->second;
+    }
+    if (!geom) {
+        const auto contours = contours_of(source, spec.threshold);
+        if (!contours) { res.error = ImportError::NoGeometry; res.detail = "imagem sem area visivel"; return res; }
+        geom = build_image_geom(*contours, source.width, source.height, spec, res.detail);
+        if (!geom) { res.error = ImportError::NoGeometry; return res; }
+        std::lock_guard<std::mutex> lock(geom_cache_mutex());
+        auto& cache = geom_cache();
+        if (cache.size() >= kGeomCacheMax) cache.clear();
+        cache[cacheKey] = geom;
+    }
+    return assemble_image3d(std::move(source.pixels), source.width, source.height, spec, std::move(geom));
 }
 
 } // namespace aurea::scene3d

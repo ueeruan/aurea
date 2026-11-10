@@ -8,6 +8,8 @@
 
 #include "aurea/Engine.hpp"
 #include "aurea/scene3d/Text3D.hpp"
+#include "aurea/scene3d/Image3D.hpp"
+#include "aurea/vector/ContourTrace.hpp"
 #include "aurea/text/FontManager.hpp"
 #include "aurea/text/Text.hpp"
 #include "aurea/scene3d/Animation.hpp"
@@ -1456,6 +1458,27 @@ AUREA_TEST(Text3D036, LockedLayerReportsWhyTheEditWasRefused) {
     e.shutdown();
 }
 
+AUREA_TEST(Text3D036, AnEditThatOnlyReplacesItsOwnMeshFitsAFullProject) {
+    const auto font = text::default_font(); if (!font) return;
+    Text3DSpec spec = receita("AUREA MOTION 3D 0123456789"); spec.bevel = true; spec.bevelSegments = 8;
+    auto probe = build_text3d(*font, spec); AUREA_CHECK(probe.ok()); if (!probe.ok()) return;
+    const u64 mesh = scene_asset_memory_bytes(*probe.asset);
+    // Espaço para 1,5 malha: a nova nunca cabia junto da que ela substitui.
+    EngineConfig config = config036(); config.memoryBudgetBytes = 3 * (mesh * 3 / 2);
+    Engine e; AUREA_CHECK(e.initialize(config).ok()); AUREA_CHECK(e.new_project(320, 180, 30.0, nullptr).ok());
+    const auto id = e.add_text3d(spec); AUREA_CHECK(id.ok()); if (!id.ok()) return;
+    for (u32 i = 0; i < 4; ++i) {
+        spec.depth = 0.3f + 0.05f * static_cast<f32>(i + 1);
+        AUREA_CHECK(e.set_text3d(*id, spec).ok());
+        AUREA_CHECK_EQ(e.last_text3d_status(), 0);
+    }
+    Text3DSpec read; AUREA_CHECK(e.query_text3d(*id, read)); AUREA_CHECK(std::fabs(read.depth - 0.5f) < 1e-3f);
+    Command undo; undo.type = CommandType::Undo;
+    AUREA_CHECK(e.apply_command(undo).ok());
+    AUREA_CHECK(e.model_asset(comp036(e)->layer(LayerId::unpack(*id))->model.scene.pack()) != nullptr);
+    e.shutdown();
+}
+
 AUREA_TEST(Text3D036, ManyEditsInAFullProjectReleaseOldMeshesAndUndoRebuildsThem) {
     const auto font = text::default_font(); if (!font) return;
     Text3DSpec spec = receita("AUREA MOTION 3D 0123456789"); spec.bevel = true; spec.bevelSegments = 8;
@@ -1480,4 +1503,88 @@ AUREA_TEST(Text3D036, ManyEditsInAFullProjectReleaseOldMeshesAndUndoRebuildsThem
     }
     AUREA_CHECK(e.query_text3d(*id, read)); AUREA_CHECK(std::fabs(read.depth - 0.55f) < 1e-3f);
     e.shutdown();
+}
+
+namespace {
+/// Anel preto-e-branco com alfa: furo no meio e uma ilha separada à direita.
+Image anel_png(u32 w = 512, u32 h = 512) {
+    Image image; image.width = w; image.height = h; image.hasAlpha = true; image.rgba.assign(static_cast<usize>(w) * h * 4, 0);
+    for (u32 y = 0; y < h; ++y) for (u32 x = 0; x < w; ++x) {
+        const f32 dx = static_cast<f32>(x) - 200.f, dy = static_cast<f32>(y) - 256.f, r = std::sqrt(dx * dx + dy * dy);
+        const f32 ix = static_cast<f32>(x) - 450.f, iy = static_cast<f32>(y) - 256.f;
+        const bool on = (r < 160.f && r > 70.f) || (ix * ix + iy * iy < 30.f * 30.f);
+        u8* p = &image.rgba[(static_cast<usize>(y) * w + x) * 4];
+        p[0] = 220; p[1] = 40; p[2] = 30; p[3] = on ? 255 : 0;
+    }
+    return image;
+}
+}
+
+AUREA_TEST(Image3D, AlphaContoursKeepHolesAndIslands) {
+    const Image image = anel_png();
+    std::vector<vector::Contour> contours;
+    AUREA_CHECK(vector::trace_alpha(image.rgba.data(), image.width, image.height, {}, contours));
+    AUREA_CHECK_EQ(contours.size(), 3u);
+    std::vector<f64> areas;
+    for (const auto& c : contours) areas.push_back(std::fabs(vector::signed_area(c.pts)));
+    std::sort(areas.begin(), areas.end());
+    const f64 pi = 3.14159265358979;
+    AUREA_CHECK_NEAR(areas[0], pi * 30 * 30, pi * 30 * 30 * .06);
+    AUREA_CHECK_NEAR(areas[1], pi * 70 * 70, pi * 70 * 70 * .04);
+    AUREA_CHECK_NEAR(areas[2], pi * 160 * 160, pi * 160 * 160 * .03);
+}
+
+AUREA_TEST(Image3D, OpaqueImageBecomesItsFrameAndEmptyImageIsRefused) {
+    Image image; image.width = image.height = 64; image.rgba.assign(64 * 64 * 4, 255);
+    std::vector<vector::Contour> contours;
+    AUREA_CHECK(vector::trace_alpha(image.rgba.data(), 64, 64, {}, contours));
+    AUREA_CHECK_EQ(contours.size(), 1u);
+    if (!contours.empty()) AUREA_CHECK(std::fabs(vector::signed_area(contours[0].pts)) > 64.0 * 64.0 * .95);
+    std::fill(image.rgba.begin(), image.rgba.end(), u8{0});
+    AUREA_CHECK(!vector::trace_alpha(image.rgba.data(), 64, 64, {}, contours));
+    AUREA_CHECK(!build_image3d_from(image, Image3DSpec{}).ok());
+}
+
+AUREA_TEST(Image3D, MeshHasFourRegionsImageOnTheFrontAndTrueDepth) {
+    Image3DSpec spec; spec.depth = .2f;
+    const auto result = build_image3d_from(anel_png(), spec);
+    AUREA_CHECK(result.ok()); if (!result.ok()) return;
+    const SceneAsset& a = *result.asset;
+    AUREA_CHECK_EQ(a.materials.size(), 4u);
+    AUREA_CHECK_EQ(a.materials[0].baseColorTex.image, 0);
+    for (u32 m = 1; m < 4; ++m) AUREA_CHECK_EQ(a.materials[m].baseColorTex.image, -1);
+    AUREA_CHECK_EQ(a.images.size(), 1u);
+    if (!a.images.empty()) {
+        const auto& px = a.images[0].pixels();
+        AUREA_CHECK(px[3] == 255);                     // alfa fechado
+        AUREA_CHECK(px[(256u * 512u + 200u) * 4] == 220);   // o furo herdou a cor por dentro
+    }
+    usize tris = 0; bool regions[4]{};
+    for (const auto& p : a.meshes[0].primitives) { regions[std::min(p.material, 3)] = true; tris += p.indices.size() / 3; }
+    for (bool r : regions) AUREA_CHECK(r);
+    std::printf("    triangulos: %zu\n", tris);
+    AUREA_CHECK(tris < 150000u);
+    const Vec3 ext = a.bounds.extent();
+    AUREA_CHECK_NEAR(ext.z, .2f, .002f);
+    AUREA_CHECK_NEAR(ext.y, 320.f / 512.f, .02f);
+    // Frente: U e V seguem a imagem (o topo do anel em y=96 tem V perto de 96/512).
+    f32 minV = 1e9f;
+    for (const auto& p : a.meshes[0].primitives) if (p.material == 0) for (const Vec2& uv : p.uv0) minV = std::min(minV, uv.y);
+    AUREA_CHECK_NEAR(minV, 96.f / 512.f, .02f);
+}
+
+AUREA_TEST(Image3D, RecipeRoundTripsAndSanitizes) {
+    Image3DSpec s; s.imagePath = "docs:Logos/marca final.png"; s.depth = .33f; s.threshold = .3f; s.bevel = false; s.bevelSegments = 5;
+    s.side.metallic = .25f; s.back.roughness = .8f;
+    Image3DSpec r;
+    AUREA_CHECK(decode_image3d(encode_image3d(s), r));
+    AUREA_CHECK(r.imagePath == s.imagePath);
+    AUREA_CHECK_NEAR(r.depth, .33f, .001f); AUREA_CHECK_NEAR(r.threshold, .3f, .001f);
+    AUREA_CHECK(!r.bevel); AUREA_CHECK_EQ(r.bevelSegments, 5u);
+    AUREA_CHECK_NEAR(r.side.metallic, .25f, .002f); AUREA_CHECK_NEAR(r.back.roughness, .8f, .002f);
+    AUREA_CHECK(!decode_image3d("aurea-text3d:v2;t=x", r));
+    AUREA_CHECK(!decode_image3d(std::string(kImage3DScheme) + "v1;d=1;", r));
+    Image3DSpec bad; bad.depth = std::nanf(""); bad.threshold = 9.f; bad.bevelSegments = 0;
+    sanitize_image3d(bad);
+    AUREA_CHECK_NEAR(bad.depth, .14f, .001f); AUREA_CHECK_NEAR(bad.threshold, .95f, .001f); AUREA_CHECK_EQ(bad.bevelSegments, 1u);
 }

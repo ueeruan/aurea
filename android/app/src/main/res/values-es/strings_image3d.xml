@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- PNG para 3D (AddLayerPanel.kt, Element3DPanel.kt) -->
+    <string name="image3d_add" formatted="false">PNG a 3D</string>
+    <string name="image3d_layer" formatted="false">Imagen 3D</string>
+    <string name="image3d_creating" formatted="false">Creando el objeto 3D…</string>
+    <string name="image3d_err_empty" formatted="false">Esta imagen es totalmente transparente.</string>
+    <string name="image3d_no_alpha" formatted="false">Imagen sin transparencia: el objeto salió con la forma del cuadro. Usa un PNG sin fondo.</string>
+    <string name="image3d_front" formatted="false">Frente</string>
+    <string name="image3d_back" formatted="false">Parte trasera</string>
+    <string name="image3d_silhouette" formatted="false">Silueta</string>
+    <string name="image3d_threshold" formatted="false">Corte de alfa</string>
+    <string name="image3d_threshold_hint" formatted="false">Define por dónde pasa el borde en las zonas semitransparentes.</string>
+    <string name="image3d_depth_hint" formatted="false">100 % = la altura de la imagen.</string>
+    <string name="image3d_from_photos" formatted="false">Fotos</string>
+    <string name="image3d_from_files" formatted="false">Archivos</string>
+</resources>

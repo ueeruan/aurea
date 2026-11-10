@@ -50,13 +50,73 @@ object PluginRuntime {
     var console by mutableStateOf<String?>(null)
     /** Instalação esperando consentimento: o caminho copiado e o que o pacote pede. */
     var pendingInstall by mutableStateOf<Pair<String, JSONObject>?>(null)
+    /** Formato 3: plugins fora do ar (a pedido ou depois de quedas na abertura). */
+    var safeMode by mutableStateOf(false)
+        private set
+    var safeModeAutomatic by mutableStateOf(false)
+        private set
+    /** Painéis do editor em que a pessoa voltou ao original (a chave é o painel, não o plugin). */
+    var replacementsOff by mutableStateOf<Set<String>>(emptySet())
+        private set
+    private var lifecycleWatched = false
 
     /** Chamado quando o motor está pronto (EditorStore.refreshPlugins). */
     fun attach(store: EditorStore) {
         this.store = store
         app = store.getApplication<Application>()
         if (!hostInstalled) hostInstalled = store.pluginEngine.installPluginHost()
+        val safe = store.pluginEngine.pluginsSafeMode()
+        safeMode = safe.getOrElse(0) { false }
+        safeModeAutomatic = safe.getOrElse(1) { false }
+        if (!lifecycleWatched) {
+            lifecycleWatched = true
+            replacementsOff = prefs()?.getStringSet(KEY_REPLACEMENTS_OFF, emptySet()).orEmpty().toSet()
+            // Ir para o fundo é saída normal: só uma queda deixa a contagem do modo seguro subir.
+            app?.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
+                override fun onActivityStopped(activity: android.app.Activity) { if (!activity.isChangingConfigurations) markHealthy() }
+                override fun onActivityCreated(activity: android.app.Activity, state: android.os.Bundle?) = Unit
+                override fun onActivityStarted(activity: android.app.Activity) = Unit
+                override fun onActivityResumed(activity: android.app.Activity) = Unit
+                override fun onActivityPaused(activity: android.app.Activity) = Unit
+                override fun onActivitySaveInstanceState(activity: android.app.Activity, state: android.os.Bundle) = Unit
+                override fun onActivityDestroyed(activity: android.app.Activity) = Unit
+            })
+        }
     }
+
+    private const val KEY_REPLACEMENTS_OFF = "replacementsOff"
+    private fun prefs() = app?.getSharedPreferences("aurea_plugins", android.content.Context.MODE_PRIVATE)
+
+    /** A abertura deu certo: fora do caminho da interface (o motor pode estar carregando plugins). */
+    fun markHealthy() {
+        val engine = store?.pluginEngine ?: return
+        Thread { engine.markPluginsHealthy() }.start()
+    }
+
+    fun changeSafeMode(on: Boolean) {
+        val current = store ?: return
+        val engine = current.pluginEngine
+        worker.execute {
+            engine.setPluginsSafeMode(on)
+            main.post {
+                if (on) { editorPanel = null; homePanel = null }
+                current.refreshPlugins()
+            }
+        }
+    }
+
+    /** O painel do plugin que substitui [key], se houver e a pessoa não tiver voltado ao original. */
+    fun replacement(key: String): Pair<PluginTexts.Plugin, PluginTexts.Panel>? {
+        if (key in replacementsOff) return null
+        return active().firstNotNullOfOrNull { p -> p.panels.firstOrNull { it.replaces == key }?.let { p to it } }
+    }
+
+    fun setReplacementOff(key: String, off: Boolean) {
+        replacementsOff = if (off) replacementsOff + key else replacementsOff - key
+        prefs()?.edit()?.putStringSet(KEY_REPLACEMENTS_OFF, replacementsOff)?.apply()
+    }
+
+    fun openReplacement(id: String, panel: String) = run(id) { it.pluginOpenPanel(id, panel, locale()) }
 
     fun locale(): String = app?.resources?.configuration?.locales?.get(0)?.toLanguageTag() ?: "pt-BR"
 
@@ -158,6 +218,18 @@ object PluginRuntime {
     // ------------------------------------------------------------------------
     // Instalação com consentimento
     // ------------------------------------------------------------------------
+    private val embedded = ArrayDeque<File>()
+
+    /** Plugins que vieram no arquivo do projeto e este aparelho não tem: um consentimento por plugin. */
+    fun offerEmbedded(plugins: List<Pair<String, File>>) {
+        embedded.addAll(plugins.filter { (id, _) -> PluginTexts.plugins.none { it.id == id } }.map { it.second })
+        nextEmbedded()
+    }
+
+    private fun nextEmbedded() {
+        if (pendingInstall == null) embedded.removeFirstOrNull()?.let { beginInstall(Uri.fromFile(it)) }
+    }
+
     /** Copia o arquivo escolhido e lê o que ele pede; a folha de consentimento decide. */
     fun beginInstall(uri: Uri) {
         val s = store ?: return
@@ -210,6 +282,7 @@ object PluginRuntime {
                     s.pluginError(context.getString(R.string.plug_failed, result.error))
                 }
                 info.optString("id").let { states.remove(it); errors.remove(it) }
+                nextEmbedded()
             }
         }
     }
@@ -217,6 +290,7 @@ object PluginRuntime {
     fun cancelInstall() {
         pendingInstall?.first?.let { File(it).delete() }
         pendingInstall = null
+        nextEmbedded()
     }
 
     fun setEnabled(id: String, on: Boolean) {

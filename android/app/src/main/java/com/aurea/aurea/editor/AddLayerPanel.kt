@@ -561,7 +561,7 @@ private fun ElementGrid(store: EditorStore, ui: EditorUi, close: () -> Unit) {
             ObjectCell(stringResource(R.string.sh_add_tab_vector), "add.element.vector", glyph = CupertinoGlyph.PencilOutline) {
                 ui.addTab = AddTab.Vector
             },
-        ),
+        ) + com.aurea.aurea.effects.pluginAddCells(store, close),
     )
 }
 
@@ -744,6 +744,13 @@ private fun Model3DGrid(store: EditorStore, close: () -> Unit) {
             close()
         }
     }
+    // PNG para 3D: o alfa da imagem vira a silhueta do objeto.
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) {
+            store.addImage3D(uri)
+            close()
+        }
+    }
     // "Formas 3D": a grade das 10 formas prontas (motor: scene3d/Shape3D.hpp).
     var shapes by rememberSaveable { mutableStateOf(false) }
     if (shapes) {
@@ -769,6 +776,9 @@ private fun Model3DGrid(store: EditorStore, close: () -> Unit) {
                     "application/x-fbx", "application/zip", "text/plain", "image/*", "application/octet-stream", "*/*"))
             },
             ObjectCell(stringResource(R.string.sh_add_text_3d), "add.model3d.text", glyph = ShellGlyph.TextformatAlt, tint = ShellColors.Text3D) { store.addText3D(); close() },
+            ObjectCell(stringResource(R.string.image3d_add), "add.model3d.image", glyph = CupertinoGlyph.Photo, tint = ShellColors.Text3D) {
+                imagePicker.launch(arrayOf("image/png", "image/webp", "image/*"))
+            },
             // 0.4.1: Reflective Floor — camada com o efeito: o chão reflete tudo abaixo dela.
             ObjectCell(stringResource(R.string.scene_floor_reflective), "add.model3d.reflectiveFloor", glyph = CupertinoGlyph.Sparkles, tint = ShellColors.Text3D) {
                 close(); store.addReflectiveFloor()

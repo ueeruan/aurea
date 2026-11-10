@@ -211,7 +211,7 @@ struct Flatten {
         });
         comp.layers().for_each([&](LayerId id, const Layer& l) {
             if (root && id.pack() != only) return;
-            if (!root && (l.muted || (anySolo && !l.solo))) return;
+            if (!root && (l.muted || l.trackMuted || (anySolo && !l.solo))) return;
             const bool tone = has_tone(l);
             // Remapeamento por curva ainda não chega ao áudio; quadro
             // congelado não tem som. Um som fora de sincronia é pior que silêncio.

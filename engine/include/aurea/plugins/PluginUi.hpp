@@ -43,13 +43,19 @@ inline constexpr u32 kPlaceHomeTab = 1u << 1;       ///< aba na Home
 inline constexpr u32 kPlaceEditorMenu = 1u << 2;    ///< menu de plugins do editor
 inline constexpr u32 kPlaceLayerMenu = 1u << 3;     ///< ⋮ da camada
 inline constexpr u32 kPlaceLayerToolbar = 1u << 4;  ///< botão na barra da camada
+inline constexpr u32 kPlaceAddMenu = 1u << 5;       ///< item no menu de adicionar (formato 3)
+inline constexpr u32 kPlaceFullscreen = 1u << 6;    ///< painel em tela cheia no editor (formato 3)
+inline constexpr u32 kPlaceLast = kPlaceFullscreen;
 
 // --- Permissões (bits) -------------------------------------------------------------
 inline constexpr u32 kPermNetwork = 1u << 0;
 inline constexpr u32 kPermClipboard = 1u << 1;
 inline constexpr u32 kPermFiles = 1u << 2;
 
-enum class ControlType : u8 { Button = 0, Slider, Ruler, Color, Choice, Text, List, Image, Label, Toggle };
+enum class ControlType : u8 { Button = 0, Slider, Ruler, Color, Choice, Text, List, Image, Label, Toggle,
+                              Row, Column, Section, Tabs };   ///< os quatro últimos guardam `children`
+inline constexpr u32 kMaxControlDepth = 6;
+[[nodiscard]] constexpr bool is_container(ControlType t) noexcept { return t >= ControlType::Row; }
 
 [[nodiscard]] const char* control_type_name(ControlType t) noexcept;
 [[nodiscard]] const char* placement_name(u32 bit) noexcept;
@@ -90,7 +96,18 @@ struct ControlDecl {
     std::string onClick;              ///< button
     std::string onChange;             ///< slider, ruler, color, choice, text, toggle
     std::string onSelect;             ///< list
+    bool collapsed = false;           ///< section: começa fechada
+    std::vector<ControlDecl> children;   ///< row, column, section, tabs (formato 3)
 };
+
+/// Visita os controles da árvore, os de dentro depois do que os guarda.
+template <typename Fn>
+void for_each_control(const std::vector<ControlDecl>& controls, Fn&& fn) {
+    for (const ControlDecl& c : controls) {
+        fn(c);
+        for_each_control(c.children, fn);
+    }
+}
 
 struct PanelDecl {
     std::string id;
@@ -99,6 +116,9 @@ struct PanelDecl {
     u32 placement = kPlaceEditorPanel;
     std::vector<ControlDecl> controls;
     std::string onOpen;               ///< chamada ao abrir o painel (opcional)
+    /// Painel do editor que este substitui (formato 3). A interface sempre mostra
+    /// como voltar ao original: um plugin com defeito não some com a tela.
+    std::string replaces;
 };
 
 struct ActionDecl {
@@ -125,9 +145,10 @@ struct UiDecl {
     std::vector<ActionDecl> actions;
     [[nodiscard]] bool empty() const noexcept { return panels.empty() && actions.empty(); }
     [[nodiscard]] const ControlDecl* control(std::string_view id) const noexcept {
+        const ControlDecl* found = nullptr;
         for (const PanelDecl& p : panels)
-            for (const ControlDecl& c : p.controls) if (c.id == id) return &c;
-        return nullptr;
+            for_each_control(p.controls, [&](const ControlDecl& c) { if (c.id == id) found = &c; });
+        return found;
     }
     [[nodiscard]] const PanelDecl* panel(std::string_view id) const noexcept {
         for (const PanelDecl& p : panels) if (p.id == id) return &p;

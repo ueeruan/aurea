@@ -2318,6 +2318,7 @@ struct PluginManagerView: View {
                         .frame(maxWidth: .infinity, minHeight: 46).background(AureaColors.accent, in: RoundedRectangle(cornerRadius: 12))
                 }.buttonStyle(.plain).disabled(model.importingMedia).accessibilityIdentifier("plugins.install")
                 if model.importingMedia { Text(model.operationMessage).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted) }
+                PluginSafeModeView()
                 if model.plugins.isEmpty {
                     Text(AureaText.t("plug_empty")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted).padding(.vertical, 8)
                 }
@@ -2351,9 +2352,10 @@ struct PluginManagerView: View {
                      + AureaText.t(p.kind == "stack" ? "plug_kind_stack" : p.kind == "panel" ? "pv2_kind_panel" : (p.scene3d ? "plug_kind_shader3d" : "plug_kind_shader")))
                     .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
                 if let d = FxPluginTexts.pick(p.descriptions, tag), !d.isEmpty { Text(d).font(.aurea(size: 12)) }
-                if !p.ok {
+                // No modo seguro o aviso do topo já explica: o plugin não está com defeito.
+                if !p.ok && !PluginRuntime.shared.safeMode {
                     Text(AureaText.t("plug_error", p.error)).font(.aurea(size: 12)).foregroundStyle(AureaColors.warning)
-                } else if p.testRenderMs > 0 {
+                } else if p.ok && p.testRenderMs > 0 {
                     Text(AureaText.t("plug_render_ms", String(format: "%.1f", p.testRenderMs))).font(.aurea(size: 11)).foregroundStyle(AureaColors.muted)
                 }
                 PluginV2Controls(pluginId: p.id)   // 0.3.4 plugins: ligar, permissões, painéis, console

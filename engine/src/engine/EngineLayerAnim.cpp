@@ -834,6 +834,9 @@ Result<u32> Engine::add_layers_to_group(const u64* ids, u32 count, u64 groupLaye
         Layer* dst = NC->layer(inner);
         if (!dst) continue;
         *dst = *src;
+        // A flag da camada só age com a chave da composição: o grupo liga junto.
+        if (src->motionBlur && comp->motion_blur().enabled && !NC->motion_blur().enabled)
+            NC->motion_blur() = comp->motion_blur();
         dst->trackId = innerTrack(src->trackId);
         dst->start = FrameIndex{src->start.value - shift};
         dst->end = FrameIndex{src->end.value - shift};

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Timeline por faixas da Edição (EditTimeline.kt) -->
+    <string name="edit_tool_select">चयन</string>
+    <string name="edit_tool_ripple">रिपल</string>
+    <string name="edit_tool_roll">रोल</string>
+    <string name="edit_tool_razor">रेज़र</string>
+    <string name="edit_tool_slip">स्लिप</string>
+    <string name="edit_tool_slide">स्लाइड</string>
+    <string name="edit_snap">स्नैप</string>
+    <string name="edit_mark_in">इन</string>
+    <string name="edit_mark_out">आउट</string>
+    <string name="edit_lift">लिफ़्ट</string>
+    <string name="edit_extract">एक्सट्रैक्ट</string>
+    <string name="edit_razor_all">सब काटें</string>
+    <string name="edit_add_video_track">+ वीडियो</string>
+    <string name="edit_add_audio_track">+ ऑडियो</string>
+    <string name="edit_remove_empty_tracks">ट्रैक साफ़ करें</string>
+    <string name="edit_track_lock">ट्रैक लॉक करें</string>
+    <string name="edit_track_visible">ट्रैक छिपाएँ</string>
+    <string name="edit_track_mute">ट्रैक म्यूट करें</string>
+    <string name="edit_track_solo">ट्रैक सोलो</string>
+    <string name="edit_track_target">लक्ष्य ट्रैक %1$s</string>
+    <string name="edit_track_blocked">यह संपादन यहाँ संभव नहीं है।</string>
+    <string name="edit_mark_needed">पहले इन और आउट सेट करें।</string>
+    <string name="edit_place_end">अंत में</string>
+    <string name="edit_place_insert">इन्सर्ट</string>
+    <string name="edit_place_overwrite">ओवरराइट</string>
+    <string name="edit_section_marks">मार्क</string>
+    <string name="edit_section_tracks">ट्रैक</string>
+    <string name="edit_section_placement">मीडिया जोड़ते समय</string>
+</resources>

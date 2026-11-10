@@ -136,7 +136,7 @@ internal fun EditModeEditor(store: EditorStore, ui: EditorUi, stage: @Composable
                     // que passa dele fica com a linha do tempo (112 no mínimo), não com o painel.
                     val fontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale
                     val panelH = (total - 52.dp - previewH - 48.dp - 72.dp).coerceIn(0.dp, EditorLayout.panelMax(fontScale).dp)
-                    KeepLtr { EditTimeline(store, Modifier.fillMaxWidth().weight(1f), compact = true, onAddMedia = actions.addMedia, onAddAudio = { level = EditDockLevel.Audio }, onTransition = { a, b -> cut = a to b }) }
+                    KeepLtr { EditTimeline(store, Modifier.fillMaxWidth().weight(1f), compact = true, onAddMedia = actions.addMedia, onTransition = { a, b -> cut = a to b }) }
                     Box(Modifier.fillMaxWidth().height(panelH).background(AureaColors.EditorPanel)) {
                         // Na Edição a barra de cima não mostra o título da seção: o painel
                         // traz o próprio cabeçalho "‹ Título" (o ✕ de cima fecha o projeto).
@@ -144,7 +144,7 @@ internal fun EditModeEditor(store: EditorStore, ui: EditorUi, stage: @Composable
                             onOpenEffectsBrowser = { ui.effectsBrowser = true }, alwaysHeader = true)
                     }
                 } else {
-                    KeepLtr { EditTimeline(store, Modifier.fillMaxWidth().weight(1f), compact = false, onAddMedia = actions.addMedia, onAddAudio = { level = EditDockLevel.Audio }, onTransition = { a, b -> cut = a to b }) }
+                    KeepLtr { EditTimeline(store, Modifier.fillMaxWidth().weight(1f), compact = false, onAddMedia = actions.addMedia, onTransition = { a, b -> cut = a to b }) }
                     EditDock(level, actions.itemsFor(level, selected)) {
                         if (level in ClipLevels) store.clearSelection()
                         level = EditDockLevel.Root

@@ -318,6 +318,10 @@ void main() {
     // grama de cartão) deixa a luz ATRAVESSAR — o verso acende verde contra o
     // sol, como no "Translucent BSDF" do Blender. Mais forte olhando para a luz.
     bool foliage = (mode == 1 || mode == 3) && u.alpha.w > 0.5;
+    // 0.5.1: R = oclusão de tela, G = sombra de contato do sol (branco = sem efeito).
+    vec2 ssao = vec2(1.0);
+    if (u.aoParams.x > 0.5) ssao = textureLod(t_ssao, gl_FragCoord.xy * u.aoParams.zw, 0.0).rg;
+    int contactLight = int(u.aoParams.y + 0.5) - 1;
     for (int i = 0; i < MAX_LIGHTS; ++i) {
         if (i >= count) break;
         int type = int(u.lightPos[i].w + 0.5);
@@ -372,7 +376,10 @@ void main() {
         int localSlot = int(u.lightSpot2[i].z + 0.5) - 1;
         if (localSlot >= 0) sh = min(sh, local_shadow(localSlot, v_world, Ng));
         sh = mix(1.0, sh, u.lightSpot2[i].y);
-        vec3 radiance = u.lightColor[i].rgb * (NdotL * atten * sh);
+        if (i == contactLight) sh = min(sh, ssao.g);
+        // Um quarto da oclusão também na luz direta: sem isso, em cena escura
+        // (quase só luz direta) os cantos não escurecem.
+        vec3 radiance = u.lightColor[i].rgb * (NdotL * atten * sh * mix(1.0, ssao.r, 0.25));
         colorD += diff * base_ * radiance;
         if (thru > 0.0) colorD += diffuseColor / PI * u.lightColor[i].rgb * (thru * atten * sh);
         colorS += (spec * base_ + ccLobe) * radiance;
@@ -382,9 +389,8 @@ void main() {
     float ao = 1.0;
     if (has_tex(3)) ao = mix(1.0, texture(t_occlusion, uv_for(3)).r, u.mr.w);
     // 0.4.6: oclusão de tela (GTAO) — cantos, contatos e frestas escurecem a
-    // luz AMBIENTE (o sol direto e as pontuais continuam inteiros, como no Eevee).
-    if (u.aoParams.x > 0.5)
-        ao *= max(textureLod(t_ssao, gl_FragCoord.xy * u.aoParams.zw, 0.0).r, u.aoParams.y);
+    // luz ambiente por inteiro (na luz direta só um quarto, acima).
+    ao *= ssao.r;
     vec3 R = reflect(-V, N);
     float specAO = specular_occlusion(NdotV, ao, roughness);
     vec3 diffAmb, specAmb, ccAmb = vec3(0.0);

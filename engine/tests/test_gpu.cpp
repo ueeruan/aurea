@@ -2761,6 +2761,63 @@ AUREA_TEST(Gpu, TwoDLayerRotationXYIsRealPerspective) {
     AUREA_CHECK(worst <= 2);
 }
 
+AUREA_TEST(Gpu, LayersRotatedAroundYStayOnScreen) {
+    AUREA_REQUIRE_GPU();
+    static const char* const kNames[] = {"2D", "marcada 3D", "camera ativa", "filha de nulo 2D", "dentro de grupo", "grupo girado",
+                                         "imagem", "imagem filha de nulo 2D", "blend Tela", "efeito", "motion blur", "camera movida"};
+    for (u32 mode = 0; mode < 12; ++mode) {
+        Scene3DRig rig(640, 360);
+        std::vector<u8> pixels(96 * 96 * 4, 255);
+        const bool image = mode == 6 || mode == 7;
+        const auto shape = image ? rig.e.import_image(pixels.data(), 96, 96, "imagem") : rig.e.add_shape(10);
+        AUREA_CHECK(shape.ok()); if (!shape.ok()) return;
+        Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+        Layer* layer = comp->layer(LayerId::unpack(*shape));
+        layer->transform.position = Vec3{200, 110, 0};
+        u64 target = *shape;
+        if (mode == 1) layer->threeD = true;
+        if (mode == 2) { const auto camera = rig.e.add_camera(); AUREA_CHECK(camera.ok()); }
+        if (mode == 8) layer->blendMode = BlendMode::Screen;
+        if (mode == 9) {
+            Command add; add.type = CommandType::EffectAdd; add.effect_add.layer = LayerId::unpack(*shape);
+            add.effect_add.effectType = effect_type_id(effect_keys::kSaturation); add.effect_add.index = kInvalidIndex;
+            AUREA_CHECK(rig.e.apply_command(add).ok());
+        }
+        if (mode == 10) AUREA_CHECK(rig.e.set_motion_blur(*shape, true));
+        if (mode == 11) {
+            const auto camera = rig.e.add_camera();
+            AUREA_CHECK(camera.ok()); if (!camera.ok()) return;
+            comp->layer(LayerId::unpack(*camera))->transform.position.z -= 400;
+        }
+        if (mode == 3 || mode == 7) {
+            const auto null = rig.e.add_null(false);
+            AUREA_CHECK(null.ok()); if (!null.ok()) return;
+            Command parent; parent.type = CommandType::LayerSetParent;
+            parent.layer_parent.layer = LayerId::unpack(*shape); parent.layer_parent.parent = LayerId::unpack(*null);
+            AUREA_CHECK(rig.e.apply_command(parent).ok());
+            target = *null;
+        }
+        if (mode == 4 || mode == 5) {
+            const u64 ids[] = {*shape};
+            const auto group = rig.e.precompose(ids, 1);
+            AUREA_CHECK(group.ok()); if (!group.ok()) return;
+            if (mode == 5) target = *group;
+        }
+        const f32 before = coverage(rig.capture(640));
+        for (const f32 ry : {27.6f, -27.6f}) {
+            if (mode == 4) continue;   // a camada de dentro não é a atual
+            Command rotate; rotate.type = CommandType::LayerSetRotation;
+            rotate.rotation.layer = LayerId::unpack(target); rotate.rotation.rx = 0; rotate.rotation.ry = ry; rotate.rotation.rz = 0;
+            AUREA_CHECK(rig.e.apply_command(rotate).ok());
+            const f32 after = coverage(rig.capture(640));
+            std::printf("    %s: Y %.1f cobertura %.4f -> %.4f\n", kNames[mode], ry, before, after);
+            // Camera movida: leaving Y=0 makes a 2D layer adopt the scene camera,
+            // so it jumps to that camera's framing. Printed, not yet decided.
+            if (mode != 11) AUREA_CHECK_MSG(after > before * 0.5f, kNames[mode]);
+        }
+    }
+}
+
 AUREA_TEST(Gpu, ChildOfMovedNullRendersWhole) {
     AUREA_REQUIRE_GPU();
     Scene3DRig rig(640, 360);
@@ -14422,6 +14479,7 @@ AUREA_TEST(MotionBlurGpu, FloorReflectionKeepsPerInstanceCamera) {
 #include "DisintegrateBallsGpu.inl"
 #include "Object3DEffectsGpu.inl"
 #include "FlowTimeGpu.inl"
+#include "FlowQualityGpu.inl"
 #include "ModelCameraGpu.inl"
 #include "RigPoseGpu.inl"
 #include "CCEffectsGpu.inl"
@@ -14577,6 +14635,7 @@ AUREA_TEST(Gpu, Scene3DTexturedModelsKeepTexturesOnPhoneBudget) {
 #include "ClipMaskGpu.inl"
 #include "Scene3DImageBlurGpu.inl"
 #include "AmbientOcclusionGpu.inl"
+#include "Image3DGpu.inl"
 
 // Correção de cor (0.3.0).
 #include "ColorGradeTests.inl"

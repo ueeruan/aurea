@@ -1,3 +1,4 @@
+#include <unordered_map>
 #include "aurea/timeline/Composition.hpp"
 #include "aurea/effects/EffectRegistry.hpp"
 
@@ -126,7 +127,8 @@ LayerId Composition::add_layer(LayerKind kind, std::string name) {
     // A linha magnética nasce ligada quando o modo Edição da composição está
     // ligado: quem monta vídeo longo não quer ligar isso camada por camada. A
     // camada pode discordar depois, no inspetor dela.
-    layer.magneticTrack = editMode_;
+    // Com a interface de faixas aberta, quem entra na sequência é a mídia na V1 (abaixo).
+    layer.magneticTrack = editMode_ && !editTracksActive_;
     layer.start = FrameIndex{0};
     layer.end = duration_;
     layer.zOrder = order_.size();
@@ -145,7 +147,17 @@ LayerId Composition::add_layer(LayerKind kind, std::string name) {
     // Sem modo Edição — ou sem nenhuma linha magnética — cada camada nova abre
     // a linha dela, como sempre foi.
     // Foto também é trecho (0.2.5, interface de Edição): entra na sequência como o vídeo.
-    if (editMode_ && (kind == LayerKind::Video || kind == LayerKind::Image || kind == LayerKind::Audio
+    if (editTracksActive_) {
+        if (kind == LayerKind::Video || kind == LayerKind::Image || kind == LayerKind::Composition) {
+            const u32 v1 = editTracks_.front().id;
+            i64 tail = 0;
+            layers_.for_each([&](LayerId, const Layer& other) { if (other.trackId == v1) tail = std::max(tail, other.end.value); });
+            layer.trackId = v1;
+            layer.magneticTrack = true;
+            layer.start = FrameIndex{tail};
+            layer.end = FrameIndex{tail + duration_.value};
+        }
+    } else if (editMode_ && (kind == LayerKind::Video || kind == LayerKind::Image || kind == LayerKind::Audio
                       || kind == LayerKind::Composition)) {
         u32 lastTrack = kInvalidIndex;
         i64 trackEnd = 0;
@@ -412,6 +424,149 @@ u32 Composition::new_track_id() noexcept {
     return nextTrackId_++;
 }
 
+const EditTrack* Composition::edit_track(u32 id) const noexcept {
+    if (id == 0) return nullptr;
+    for (const EditTrack& t : editTracks_) if (t.id == id) return &t;
+    return nullptr;
+}
+
+EditTrack* Composition::edit_track(u32 id) noexcept {
+    return const_cast<EditTrack*>(static_cast<const Composition*>(this)->edit_track(id));
+}
+
+u32 Composition::add_edit_track(bool audio) {
+    EditTrack track;
+    track.id = new_track_id();
+    track.audio = audio;
+    auto at = audio ? editTracks_.end() : std::find_if(editTracks_.begin(), editTracks_.end(), [](const EditTrack& t) { return t.audio; });
+    editTracks_.insert(at, track);
+    return track.id;
+}
+
+void Composition::remove_edit_track(u32 id) noexcept {
+    editTracks_.erase(std::remove_if(editTracks_.begin(), editTracks_.end(), [&](const EditTrack& t) { return t.id == id; }), editTracks_.end());
+}
+
+void Composition::restore_edit_track(u32 id, u32 bits) {
+    if (id == 0 || edit_track(id)) return;
+    EditTrack track;
+    track.id = id;
+    track.audio = bits & 1u; track.locked = bits & 2u; track.muted = bits & 4u; track.solo = bits & 8u; track.target = bits & 16u;
+    auto at = track.audio ? editTracks_.end() : std::find_if(editTracks_.begin(), editTracks_.end(), [](const EditTrack& t) { return t.audio; });
+    editTracks_.insert(at, track);
+    if (id >= nextTrackId_) nextTrackId_ = id + 1;
+}
+
+bool Composition::arrange_edit_tracks() {
+    constexpr u32 kMinPerKind = 3, kMaxPerKind = 32;
+    const auto kind_count = [&](bool audio) {
+        return static_cast<u32>(std::count_if(editTracks_.begin(), editTracks_.end(), [&](const EditTrack& t) { return t.audio == audio; }));
+    };
+    const bool migrating = editTracks_.empty();
+    bool changed = false;
+    editTracksActive_ = true;
+    for (const bool audio : {false, true}) {
+        while (kind_count(audio) < kMinPerKind) { (void)add_edit_track(audio); changed = true; }
+    }
+    struct Span { i64 start, end; };
+    std::unordered_map<u32, std::vector<Span>> taken;
+    const auto fits = [&](u32 track, const Layer& l) {
+        const auto found = taken.find(track);
+        if (found == taken.end()) return true;
+        for (const Span& s : found->second) if (l.start.value < s.end && l.end.value > s.start) return false;
+        return true;
+    };
+    std::vector<LayerId> strays;
+    for (u32 i = 0; i < order_.size(); ++i) {
+        const LayerId id = order_.at(i);
+        const Layer* l = layers_.get(id);
+        if (!l) continue;
+        const EditTrack* t = edit_track(l->trackId);
+        if (t && t->audio == (l->kind == LayerKind::Audio) && fits(t->id, *l)) taken[t->id].push_back({l->start.value, l->end.value});
+        else strays.push_back(id);
+    }
+    std::unordered_map<u32, u32> adopted;
+    for (const LayerId id : strays) {
+        Layer* l = layers_.get(id);
+        const bool audio = l->kind == LayerKind::Audio;
+        const u32 oldLine = l->trackId;
+        u32 chosen = 0;
+        if (oldLine != 0) {
+            const auto it = adopted.find(oldLine);
+            if (it != adopted.end() && fits(it->second, *l)) chosen = it->second;
+        }
+        if (!chosen) {
+            // V1 e A1 são da sequência principal e do áudio ligado: o resto começa uma
+            // acima. Ao migrar, a mídia que couber vai para a V1, a mais funda primeiro.
+            const bool main = migrating && (l->kind == LayerKind::Video || l->kind == LayerKind::Image || l->kind == LayerKind::Composition);
+            u32 seen = 0;
+            for (const EditTrack& t : editTracks_) {
+                if (t.audio != audio) continue;
+                if (seen++ == 0 && !main) continue;
+                if (fits(t.id, *l)) { chosen = t.id; break; }
+            }
+        }
+        if (!chosen) {
+            if (kind_count(audio) < kMaxPerKind) chosen = add_edit_track(audio);
+            else for (const EditTrack& t : editTracks_) if (t.audio == audio) chosen = t.id;
+        }
+        l->trackId = chosen;
+        taken[chosen].push_back({l->start.value, l->end.value});
+        if (oldLine != 0) adopted[oldLine] = chosen;
+        changed = true;
+    }
+    // Ordem de desenho: V1 embaixo, V2 por cima; dentro da faixa, como estava.
+    std::unordered_map<u32, u32> rank;
+    for (u32 i = 0; i < editTracks_.size(); ++i) rank[editTracks_[i].id] = i;
+    std::vector<LayerId> sorted;
+    sorted.reserve(order_.size());
+    for (u32 i = 0; i < order_.size(); ++i) sorted.push_back(order_.at(i));
+    const auto key = [&](LayerId id) {
+        const Layer* l = layers_.get(id);
+        if (!l || l->kind == LayerKind::Audio) return u32{0};
+        const auto it = rank.find(l->trackId);
+        return it == rank.end() ? u32{0} : it->second + 1;
+    };
+    std::vector<LayerId> reordered = sorted;
+    std::stable_sort(reordered.begin(), reordered.end(), [&](LayerId a, LayerId b) { return key(a) < key(b); });
+    if (reordered != sorted) {
+        order_.clear();
+        for (const LayerId id : reordered) order_.push_back(id);
+        changed = true;
+    }
+    apply_edit_track_state(true);
+    if (changed) { rebuild_draw_order(); touch(); }
+    return changed;
+}
+
+void Composition::apply_edit_track_state(bool active) noexcept {
+    editTracksActive_ = active;
+    bool anySolo = false;
+    const EditTrack* firstAudio = nullptr;
+    for (const EditTrack& t : editTracks_) {
+        if (!t.audio) continue;
+        if (!firstAudio) firstAudio = &t;
+        anySolo = anySolo || t.solo;
+    }
+    layers_.for_each([&](LayerId id, const Layer& view) {
+        bool hidden = false, muted = false;
+        if (active) {
+            const EditTrack* own = edit_track(view.trackId);
+            const EditTrack* lane = view.kind == LayerKind::Audio ? own : edit_track(view.audioTrackId);
+            if (view.kind != LayerKind::Audio) {
+                hidden = own && own->muted;
+                if (!lane || !lane->audio) lane = firstAudio;
+            }
+            muted = lane && (lane->muted || (anySolo && !lane->solo));
+        }
+        if (view.trackHidden != hidden || view.trackMuted != muted) {
+            Layer* l = layers_.get(id);
+            l->trackHidden = hidden;
+            l->trackMuted = muted;
+        }
+    });
+}
+
 u32 Composition::track_of(LayerId id) const noexcept {
     const Layer* l = layer(id);
     return l ? l->trackId : kInvalidIndex;
@@ -544,6 +699,10 @@ std::unique_ptr<Composition> Composition::clone() const {
     c->scene_ = scene_;
     c->markers_ = markers_;
     c->editMode_ = editMode_;
+    c->editTracks_ = editTracks_;
+    c->editTracksActive_ = editTracksActive_;
+    c->markIn_ = markIn_;
+    c->markOut_ = markOut_;
     c->revision_ = revision_;
     c->formatRevision_ = formatRevision_;
     c->nestingDepth_ = nestingDepth_;
@@ -572,6 +731,10 @@ void Composition::restore_from(const Composition& snapshot) {
     scene_ = snapshot.scene_;
     markers_ = snapshot.markers_;
     editMode_ = snapshot.editMode_;
+    editTracks_ = snapshot.editTracks_;
+    editTracksActive_ = snapshot.editTracksActive_;
+    markIn_ = snapshot.markIn_;
+    markOut_ = snapshot.markOut_;
     nestingDepth_ = snapshot.nestingDepth_;
     revision_ = revision;
     formatRevision_ = formatRevision;

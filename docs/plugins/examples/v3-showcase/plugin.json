@@ -1,0 +1,173 @@
+{
+  "aureaPlugin": 3,
+  "id": "com.aurea.examples.v3showcase",
+  "version": "1.0.0",
+  "author": "AUREA (exemplo)",
+  "name": {
+    "pt-BR": "Vitrine V3",
+    "en": "V3 Showcase"
+  },
+  "description": {
+    "pt-BR": "Mostra tudo o que o formato 3 acrescenta: curva, degradê, outra camada, histórico, som e script por quadro.",
+    "en": "Shows what format 3 adds: curve, gradient, another layer, history, sound and a per-frame script."
+  },
+  "category": "Exemplos",
+  "kind": "shader",
+  "params": [
+    {
+      "id": "amount",
+      "type": "float",
+      "label": {
+        "pt-BR": "Mistura",
+        "en": "Mix"
+      },
+      "default": 0.6,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "id": "tone",
+      "type": "curve",
+      "label": {
+        "pt-BR": "Tom",
+        "en": "Tone"
+      }
+    },
+    {
+      "id": "paint",
+      "type": "gradient",
+      "label": {
+        "pt-BR": "Cores",
+        "en": "Colors"
+      }
+    },
+    {
+      "id": "overlay",
+      "type": "layerImage",
+      "label": {
+        "pt-BR": "Camada por cima",
+        "en": "Overlay layer"
+      }
+    },
+    {
+      "id": "echo",
+      "type": "float",
+      "label": {
+        "pt-BR": "Rastro",
+        "en": "Trail"
+      },
+      "default": 0.25,
+      "min": 0,
+      "max": 0.95
+    }
+  ],
+  "uses": [
+    "history",
+    "audio"
+  ],
+  "frameScript": "frame.js",
+  "passes": [
+    {
+      "shader": "showcase.frag"
+    }
+  ],
+  "script": "main.js",
+  "ui": {
+    "panels": [
+      {
+        "id": "vitrine",
+        "title": {
+          "pt-BR": "Vitrine V3",
+          "en": "V3 Showcase"
+        },
+        "icon": "wand",
+        "placement": "editor.panel",
+        "controls": [
+          {
+            "id": "abas",
+            "type": "tabs",
+            "children": [
+              {
+                "id": "aba_acoes",
+                "type": "section",
+                "label": {
+                  "pt-BR": "Ações",
+                  "en": "Actions"
+                },
+                "children": [
+                  {
+                    "id": "aviso",
+                    "type": "label",
+                    "text": {
+                      "pt-BR": "Interface em árvore: abas, seções e linhas.",
+                      "en": "Tree UI: tabs, sections and rows."
+                    }
+                  },
+                  {
+                    "id": "linha",
+                    "type": "row",
+                    "children": [
+                      {
+                        "id": "ola",
+                        "type": "button",
+                        "label": {
+                          "pt-BR": "Olá",
+                          "en": "Hello"
+                        },
+                        "onClick": "dizerOla"
+                      },
+                      {
+                        "id": "limpar",
+                        "type": "button",
+                        "label": {
+                          "pt-BR": "Limpar",
+                          "en": "Clear"
+                        },
+                        "style": "secondary",
+                        "onClick": "limpar"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "aba_ajuste",
+                "type": "section",
+                "label": {
+                  "pt-BR": "Ajuste",
+                  "en": "Adjust"
+                },
+                "children": [
+                  {
+                    "id": "forca",
+                    "type": "slider",
+                    "label": {
+                      "pt-BR": "Força",
+                      "en": "Strength"
+                    },
+                    "min": 0,
+                    "max": 100,
+                    "default": 50,
+                    "unit": "%"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "actions": [
+      {
+        "id": "abrir",
+        "title": {
+          "pt-BR": "Vitrine V3",
+          "en": "V3 Showcase"
+        },
+        "icon": "wand",
+        "placement": "add.menu",
+        "panel": "vitrine"
+      }
+    ]
+  }
+}

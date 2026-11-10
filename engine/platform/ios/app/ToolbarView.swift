@@ -436,9 +436,10 @@ struct TopBarView: View {
         if row.kind == 1 || row.kind == 2 {
             out.append(.item(AureaText.t("layer_to_3d_object"), glyph: CupertinoGlyph.Cube, sublabel: AureaText.t("layer_to_3d_object_hint"),
                              enabled: !row.locked, tag: "layer.menu.to3dObject") {
-                let made = model.engine.layerTo3DObject(row.id, name: row.name)
-                if made < 0 { model.toast = AureaText.t("layer_to_3d_failed") }
-                else { refresh(); model.select(layerId: made, additive: false) }
+                model.layerTo3DObject(row.id, kind: row.kind, name: row.name) { made in
+                    if made < 0 { model.toast = AureaText.t("layer_to_3d_failed") }
+                    else { refresh(); model.select(layerId: made, additive: false) }
+                }
             })
         }
         // Omega chrome (área 02, P0-3): "Camada 3D" saiu da barra da camada e mora aqui.

@@ -58,6 +58,8 @@ constexpr u32 kTagComp = 0xC0A1u;
 constexpr u32 kTagLayer = 0x1A7Eu;
 constexpr u32 kTagProp = 0x9607u;
 constexpr u32 kTagEffect = 0xEFFEu;
+constexpr u32 kTagText = 0x7E87u;
+constexpr u32 kTagMask = 0x3A5Cu;
 
 Value arg(const std::vector<Value>& a, usize i) { return i < a.size() ? a[i] : Value(); }
 
@@ -1009,8 +1011,74 @@ void Engine::install_plugin_api(Context& c, plugins::PluginRuntime& rt) {
         apply(cx, cmd, "layer.fillColor");
         return Value::undefined();
     });
+    // Formato 3: "Source Text" com o TextDocument do After Effects.
+    ObjectRef textProto = c.new_object();
+    c.add_root(Value::object(textProto));
+    const std::weak_ptr<plugins::script::Object> wText = textProto;
+    auto make_text = [wText](Context& cx, u64 layer) -> Value {
+        ObjectRef o = cx.new_object_with(wText.lock());
+        o->hostTag = kTagText;
+        o->hostId = layer;
+        return Value::object(o);
+    };
+    c.accessor(layerProto, "sourceText", [layer_id, with_layer, make_text](Context& cx, const Value& self, std::vector<Value>&) {
+        const u64 id = layer_id(cx, self);
+        const bool isText = with_layer(cx, id, [&](Composition&, Layer& l) { return l.kind == LayerKind::Text; });
+        return isText ? make_text(cx, id) : Value::null();
+    });
+    c.accessor(textProto, "name", [](Context& cx, const Value&, std::vector<Value>&) { return cx.str("Source Text"); });
+    c.accessor(textProto, "value", [host, with_layer, color_value](Context& cx, const Value& me, std::vector<Value>&) {
+        return with_layer(cx, host(cx, me, kTagText, "sourceText")->hostId, [&](Composition&, Layer& l) -> Value {
+            if (l.kind != LayerKind::Text) cx.throw_error("TypeError", "sourceText: a camada nao e de texto");
+            const Value doc = Value::object(cx.new_object());
+            cx.set(doc, "text", cx.str(l.text.content));
+            cx.set(doc, "font", cx.str(l.text.fontFamily));
+            cx.set(doc, "fontSize", Value::number(l.text.size));
+            cx.set(doc, "fillColor", color_value(cx, l.text.color, false));
+            return doc;
+        });
+    });
+    c.method(textProto, "setValue", [host, color_arg, apply](Context& cx, const Value& me, std::vector<Value>& a) {
+        const LayerId id = LayerId::unpack(host(cx, me, kTagText, "sourceText")->hostId);
+        const Value v = arg(a, 0);
+        const auto set_text = [&](const Value& t) {
+            std::string text = cx.to_string(t);
+            if (text.size() > 64 * 1024) cx.throw_error("RangeError", "sourceText: texto grande demais");
+            Command cmd;
+            cmd.type = CommandType::TextSetContent;
+            cmd.layer_ref.layer = id;
+            apply(cx, cmd, "sourceText", text.c_str());
+        };
+        if (!v.is_object() || v.is_array()) { set_text(v); return Value::undefined(); }
+        const Value text = cx.get(v, "text"), size = cx.get(v, "fontSize"), fill = cx.get(v, "fillColor");
+        if (!text.is_undefined()) set_text(text);
+        if (!size.is_undefined()) {
+            Command cmd;
+            cmd.type = CommandType::TextSetSize;
+            cmd.text_size.layer = id;
+            cmd.text_size.size = static_cast<f32>(cx.to_number(size));
+            apply(cx, cmd, "sourceText.fontSize");
+        }
+        if (!fill.is_undefined()) {
+            const Vec4 col = color_arg(cx, fill, "sourceText.fillColor");
+            Command cmd;
+            cmd.type = CommandType::TextSetColor;
+            cmd.text_color.layer = id;
+            cmd.text_color.r = col.x; cmd.text_color.g = col.y; cmd.text_color.b = col.z; cmd.text_color.a = col.w;
+            apply(cx, cmd, "sourceText.fillColor");
+        }
+        return Value::undefined();
+    });
     // Propriedades
-    c.method(layerProto, "property", [layer_id, make_prop](Context& cx, const Value& self, std::vector<Value>& a) {
+    c.method(layerProto, "property", [layer_id, make_prop, with_layer, make_text](Context& cx, const Value& self, std::vector<Value>& a) {
+        std::string name = cx.to_string(arg(a, 0));
+        std::transform(name.begin(), name.end(), name.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        std::erase(name, ' ');
+        if (name == "sourcetext" || name == "adbetextdocument") {
+            const u64 id = layer_id(cx, self);
+            const bool isText = with_layer(cx, id, [&](Composition&, Layer& l) { return l.kind == LayerKind::Text; });
+            return isText ? make_text(cx, id) : Value::null();
+        }
         const i64 code = prop_code(cx.to_string(arg(a, 0)));
         if (code < 0) return Value::null();
         return make_prop(cx, layer_id(cx, self), code, 0);
@@ -1553,6 +1621,323 @@ void Engine::install_plugin_api(Context& c, plugins::PluginRuntime& rt) {
         cmd.keyframe_interp.bx1 = 0.33f; cmd.keyframe_interp.by1 = 0.0f;
         cmd.keyframe_interp.bx2 = 0.67f; cmd.keyframe_interp.by2 = 1.0f;
         apply(cx, cmd, "setInterpolationTypeAtKey");
+        return Value::undefined();
+    });
+
+    // =========================================================================
+    // Formato 3: expressões, ease por chave e máscaras. Tudo passa pelo mesmo
+    // caminho da interface, então a chamada inteira é um passo de desfazer.
+    // =========================================================================
+    auto expression_keys = [](const PropShape& s) {
+        std::vector<u32> keys;
+        for (const TrackRef& t : s.tracks) {
+            keys.push_back(static_cast<u32>(t.property));
+            keys.push_back(t.effectIndex);
+            keys.push_back(t.effectParamIndex);
+        }
+        return keys;
+    };
+    auto expression_info = [self](const PropShape& s, u64 layer) {
+        Engine::ExpressionInfo info;
+        const TrackRef& t = s.tracks[0];
+        (void)self->query_expression(layer, static_cast<u32>(t.property), t.effectIndex, t.effectParamIndex, info);
+        return info;
+    };
+    c.accessor(propProto, "canSetExpression", [](Context&, const Value&, std::vector<Value>&) { return Value::boolean(true); });
+    c.accessor(propProto, "expression", [prop_ref, shape_of, expression_info](Context& cx, const Value& me, std::vector<Value>&) {
+        const PropRef r = prop_ref(cx, me);
+        const Engine::ExpressionInfo info = expression_info(shape_of(cx, r), r.layer);
+        return cx.str(info.exists ? info.source : std::string());
+    }, [self, prop_ref, shape_of, expression_keys, fail](Context& cx, const Value& me, std::vector<Value>& a) {
+        const PropRef r = prop_ref(cx, me);
+        const std::string source = cx.to_string(arg(a, 0));
+        if (source.size() > 64 * 1024) cx.throw_error("RangeError", "expression: texto grande demais");
+        const std::vector<u32> keys = expression_keys(shape_of(cx, r));
+        const Status st = self->set_expressions(r.layer, keys.data(), static_cast<u32>(keys.size() / 3), source.c_str());
+        if (!st.ok()) fail(cx, st, "expression");
+        return Value::undefined();
+    });
+    c.accessor(propProto, "expressionEnabled", [prop_ref, shape_of, expression_info](Context& cx, const Value& me, std::vector<Value>&) {
+        const PropRef r = prop_ref(cx, me);
+        const Engine::ExpressionInfo info = expression_info(shape_of(cx, r), r.layer);
+        return Value::boolean(info.exists && info.enabled);
+    }, [self, prop_ref, shape_of, expression_keys](Context& cx, const Value& me, std::vector<Value>& a) {
+        const PropRef r = prop_ref(cx, me);
+        const std::vector<u32> keys = expression_keys(shape_of(cx, r));
+        (void)self->set_expressions_enabled(r.layer, keys.data(), static_cast<u32>(keys.size() / 3), Context::truthy(arg(a, 0)));
+        return Value::undefined();
+    });
+    c.accessor(propProto, "expressionError", [prop_ref, shape_of, expression_info](Context& cx, const Value& me, std::vector<Value>&) {
+        const PropRef r = prop_ref(cx, me);
+        const Engine::ExpressionInfo info = expression_info(shape_of(cx, r), r.layer);
+        return cx.str(info.exists && !info.error.ok ? info.error.message : std::string());
+    });
+
+    // new KeyframeEase(velocidade, influência): o mesmo objeto do After Effects.
+    c.set_global("KeyframeEase", Value::object(c.new_native("KeyframeEase", [](Context& cx, const Value&, std::vector<Value>& a) {
+        const Value out = Value::object(cx.new_object());
+        cx.set(out, "speed", Value::number(cx.to_number(arg(a, 0))));
+        cx.set(out, "influence", Value::number(cx.to_number(arg(a, 1))));
+        return out;
+    }, true)));
+    struct Ease { f64 speed = 0.0, influence = 100.0 / 6.0; };
+    auto ease_list = [](Context& cx, const Value& v, usize dims, const char* what) {
+        std::vector<Ease> out;
+        const auto one = [&](const Value& e) {
+            Ease x;
+            x.speed = cx.to_number(cx.get(e, "speed"));
+            x.influence = cx.to_number(cx.get(e, "influence"));
+            if (!std::isfinite(x.speed) || !std::isfinite(x.influence) || x.influence < 0.1 || x.influence > 100.0)
+                cx.throw_error("RangeError", std::string(what) + ": use new KeyframeEase(velocidade, influencia de 0.1 a 100)");
+            out.push_back(x);
+        };
+        if (v.is_array()) for (const Value& e : v.as_object()->elements) one(e);
+        else if (v.is_object()) one(v);
+        else cx.throw_error("TypeError", std::string(what) + ": precisa de uma lista de KeyframeEase");
+        if (out.empty() || out.size() > dims) cx.throw_error("TypeError", std::string(what) + ": numero de componentes errado");
+        return out;
+    };
+    struct BezierEdit { FrameIndex time; f32 bx1, by1, bx2, by2; };
+    c.method(propProto, "setTemporalEaseAtKey", [prop_ref, shape_of, keys_of, key_index, with_layer, ease_list, fps_now, apply](Context& cx, const Value& me, std::vector<Value>& a) {
+        const PropRef r = prop_ref(cx, me);
+        const PropShape s = shape_of(cx, r);
+        const std::vector<i64> keys = keys_of(cx, r, s);
+        const usize index = key_index(cx, arg(a, 0), keys.size());
+        const std::vector<Ease> incoming = ease_list(cx, arg(a, 1), s.tracks.size(), "setTemporalEaseAtKey");
+        const std::vector<Ease> outgoing = a.size() > 2 ? ease_list(cx, arg(a, 2), s.tracks.size(), "setTemporalEaseAtKey") : incoming;
+        const f64 fps = fps_now(cx);
+        for (usize k = 0; k < s.tracks.size(); ++k) {
+            const Ease& in = incoming[std::min(k, incoming.size() - 1)];
+            const Ease& out = outgoing[std::min(k, outgoing.size() - 1)];
+            const TrackRef& ref = s.tracks[k];
+            std::vector<BezierEdit> edits;
+            with_layer(cx, r.layer, [&](Composition&, Layer& l) {
+                const Track* t = l.tracks.find(ref.property, ref.effectIndex, ref.effectParamIndex);
+                if (!t || index >= t->keys.size()) return 0;
+                // A curva mora na chave da ESQUERDA do trecho; a outra alça fica como estava.
+                const auto edit_of = [](const Keyframe& key) {
+                    const bool curved = key.interp == Interpolation::Bezier || key.interp == Interpolation::CustomCurve;
+                    return curved ? BezierEdit{key.time, key.bx1, key.by1, key.bx2, key.by2} : BezierEdit{key.time, 1.0f / 3.0f, 1.0f / 3.0f, 2.0f / 3.0f, 2.0f / 3.0f};
+                };
+                const auto rise = [&](const Keyframe& from, const Keyframe& to, const Ease& e) {
+                    const f64 delta = (static_cast<f64>(to.value) - from.value) * s.scale;
+                    const f64 seconds = static_cast<f64>(to.time.value - from.time.value) / fps;
+                    if (std::abs(delta) < 1e-9) return 0.0;
+                    return std::clamp(e.speed * seconds / delta * e.influence / 100.0, -4.0, 4.0);
+                };
+                if (index + 1 < t->keys.size()) {
+                    BezierEdit e = edit_of(t->keys[index]);
+                    e.bx1 = static_cast<f32>(out.influence / 100.0);
+                    e.by1 = static_cast<f32>(rise(t->keys[index], t->keys[index + 1], out));
+                    edits.push_back(e);
+                }
+                if (index > 0) {
+                    BezierEdit e = edit_of(t->keys[index - 1]);
+                    e.bx2 = static_cast<f32>(1.0 - in.influence / 100.0);
+                    e.by2 = static_cast<f32>(1.0 - rise(t->keys[index - 1], t->keys[index], in));
+                    edits.push_back(e);
+                }
+                return 0;
+            });
+            for (const BezierEdit& e : edits) {
+                Command cmd;
+                cmd.type = CommandType::KeyframeSetBezier;
+                cmd.keyframe_interp.track = ref;
+                cmd.keyframe_interp.time = e.time;
+                cmd.keyframe_interp.interp = Interpolation::Bezier;
+                cmd.keyframe_interp.power = 0;
+                cmd.keyframe_interp.linkAxes = 0;
+                cmd.keyframe_interp.bx1 = e.bx1; cmd.keyframe_interp.by1 = e.by1;
+                cmd.keyframe_interp.bx2 = e.bx2; cmd.keyframe_interp.by2 = e.by2;
+                apply(cx, cmd, "setTemporalEaseAtKey");
+            }
+        }
+        return Value::undefined();
+    });
+    auto read_ease = [prop_ref, shape_of, keys_of, key_index, with_layer, fps_now](Context& cx, const Value& me, const Value& which, bool outgoing) {
+        const PropRef r = prop_ref(cx, me);
+        const PropShape s = shape_of(cx, r);
+        const std::vector<i64> keys = keys_of(cx, r, s);
+        const usize index = key_index(cx, which, keys.size());
+        const f64 fps = fps_now(cx);
+        std::vector<Value> items;
+        for (const TrackRef& ref : s.tracks) {
+            Ease e;
+            with_layer(cx, r.layer, [&](Composition&, Layer& l) {
+                const Track* t = l.tracks.find(ref.property, ref.effectIndex, ref.effectParamIndex);
+                if (!t || index >= t->keys.size() || (outgoing ? index + 1 >= t->keys.size() : index == 0)) return 0;
+                const Keyframe& from = t->keys[outgoing ? index : index - 1];
+                const Keyframe& to = t->keys[outgoing ? index + 1 : index];
+                const f64 delta = (static_cast<f64>(to.value) - from.value) * s.scale;
+                const f64 seconds = static_cast<f64>(to.time.value - from.time.value) / fps;
+                const bool curved = from.interp == Interpolation::Bezier || from.interp == Interpolation::CustomCurve;
+                const f64 x = !curved ? 1.0 / 6.0 : outgoing ? from.bx1 : 1.0 - from.bx2;
+                const f64 slope = !curved ? 1.0 : x <= 0.0 ? 0.0 : (outgoing ? from.by1 : 1.0 - from.by2) / x;
+                e.influence = x * 100.0;
+                e.speed = seconds > 0.0 ? slope * delta / seconds : 0.0;
+                return 0;
+            });
+            const Value item = Value::object(cx.new_object());
+            cx.set(item, "speed", Value::number(e.speed));
+            cx.set(item, "influence", Value::number(e.influence));
+            items.push_back(item);
+        }
+        return Value::object(cx.new_array(std::move(items)));
+    };
+    c.method(propProto, "keyInTemporalEase", [read_ease](Context& cx, const Value& me, std::vector<Value>& a) { return read_ease(cx, me, arg(a, 0), false); });
+    c.method(propProto, "keyOutTemporalEase", [read_ease](Context& cx, const Value& me, std::vector<Value>& a) { return read_ease(cx, me, arg(a, 0), true); });
+
+    // Máscaras: `path` no formato de Shape do After Effects, em px da camada.
+    ObjectRef maskProto = c.new_object();
+    c.add_root(Value::object(maskProto));
+    const std::weak_ptr<plugins::script::Object> wMask = maskProto;
+    auto make_mask = [wMask](Context& cx, u64 layer, u32 id) -> Value {
+        ObjectRef o = cx.new_object_with(wMask.lock());
+        o->hostTag = kTagMask;
+        o->hostId = layer;
+        o->hostA = id;
+        return Value::object(o);
+    };
+    auto with_mask = [host, with_layer](Context& cx, const Value& me, auto&& f) {
+        const ObjectRef& o = host(cx, me, kTagMask, "mascara");
+        const u64 layer = o->hostId;
+        const u32 id = static_cast<u32>(o->hostA);
+        return with_layer(cx, layer, [&](Composition&, Layer& l) {
+            for (const Mask& m : l.masks) if (m.id == id) return f(m);
+            cx.throw_error("ReferenceError", "a mascara nao existe mais nesta camada");
+        });
+    };
+    auto path_arg = [](Context& cx, const Value& v, std::vector<f32>& pts, bool& closed) {
+        if (!v.is_object() || v.is_array()) cx.throw_error("TypeError", "mascara: use {vertices, inTangents, outTangents, closed}");
+        const Value vertices = cx.get(v, "vertices");
+        if (!vertices.is_array() || vertices.as_object()->elements.empty()) cx.throw_error("TypeError", "mascara: falta \"vertices\"");
+        const auto& list = vertices.as_object()->elements;
+        if (list.size() > 4096) cx.throw_error("RangeError", "mascara: mais de 4096 pontos");
+        const Value inside = cx.get(v, "inTangents"), outside = cx.get(v, "outTangents"), shut = cx.get(v, "closed");
+        const auto xy = [&](const Value& p, f32* out) {
+            if (!p.is_array() || p.as_object()->elements.size() != 2) cx.throw_error("TypeError", "mascara: ponto = [x, y]");
+            for (u32 k = 0; k < 2; ++k) {
+                const f64 n = cx.to_number(p.as_object()->elements[k]);
+                if (!std::isfinite(n)) cx.throw_error("TypeError", "mascara: ponto nao finito");
+                out[k] = static_cast<f32>(n);
+            }
+        };
+        const auto optional = [&](const Value& side, usize i, f32* out) {
+            if (!side.is_array()) return;
+            if (side.as_object()->elements.size() != list.size()) cx.throw_error("TypeError", "mascara: tangentes e vertices com tamanhos diferentes");
+            xy(side.as_object()->elements[i], out);
+        };
+        pts.assign(list.size() * 6, 0.0f);
+        for (usize i = 0; i < list.size(); ++i) {
+            xy(list[i], pts.data() + i * 6);
+            optional(inside, i, pts.data() + i * 6 + 2);
+            optional(outside, i, pts.data() + i * 6 + 4);
+        }
+        closed = shut.is_undefined() || Context::truthy(shut);
+    };
+    c.accessor(layerProto, "masks", [layer_id, with_layer, make_mask](Context& cx, const Value& self, std::vector<Value>&) {
+        const u64 id = layer_id(cx, self);
+        const std::vector<u32> masks = with_layer(cx, id, [&](Composition&, Layer& l) {
+            std::vector<u32> out;
+            for (const Mask& m : l.masks) out.push_back(m.id);
+            return out;
+        });
+        std::vector<Value> items;
+        for (const u32 m : masks) items.push_back(make_mask(cx, id, m));
+        return Value::object(cx.new_array(std::move(items)));
+    });
+    c.method(layerProto, "addMask", [self, layer_id, path_arg, make_mask](Context& cx, const Value& me, std::vector<Value>& a) {
+        const u64 id = layer_id(cx, me);
+        std::vector<f32> pts;
+        bool closed = true;
+        path_arg(cx, arg(a, 0), pts, closed);
+        const i32 mask = self->add_mask(id, pts.data(), static_cast<u32>(pts.size() / 6), closed);
+        if (mask < 0) cx.throw_error("Error", "addMask: nao deu para criar a mascara");
+        return make_mask(cx, id, static_cast<u32>(mask));
+    });
+    c.accessor(maskProto, "name", [with_mask](Context& cx, const Value& me, std::vector<Value>&) {
+        return with_mask(cx, me, [&](const Mask& m) { return cx.str(m.name); });
+    });
+    c.accessor(maskProto, "id", [with_mask](Context& cx, const Value& me, std::vector<Value>&) {
+        return with_mask(cx, me, [&](const Mask& m) { return Value::number(m.id); });
+    });
+    c.accessor(maskProto, "path", [with_mask](Context& cx, const Value& me, std::vector<Value>&) {
+        return with_mask(cx, me, [&](const Mask& m) {
+            std::vector<Value> vertices, inside, outside;
+            const auto pair = [&](Vec2 p) { return Value::object(cx.new_array({Value::number(p.x), Value::number(p.y)})); };
+            for (const MaskPoint& p : m.points) {
+                vertices.push_back(pair(p.position));
+                inside.push_back(pair(p.inTangent));
+                outside.push_back(pair(p.outTangent));
+            }
+            const Value shape = Value::object(cx.new_object());
+            cx.set(shape, "vertices", Value::object(cx.new_array(std::move(vertices))));
+            cx.set(shape, "inTangents", Value::object(cx.new_array(std::move(inside))));
+            cx.set(shape, "outTangents", Value::object(cx.new_array(std::move(outside))));
+            cx.set(shape, "closed", Value::boolean(m.closed));
+            return shape;
+        });
+    }, [self, host, path_arg](Context& cx, const Value& me, std::vector<Value>& a) {
+        const ObjectRef& o = host(cx, me, kTagMask, "mascara");
+        std::vector<f32> pts;
+        bool closed = true;
+        path_arg(cx, arg(a, 0), pts, closed);
+        if (!self->set_mask_path(o->hostId, static_cast<u32>(o->hostA), pts.data(), static_cast<u32>(pts.size() / 6), closed, true))
+            cx.throw_error("Error", "mask.path: nao deu para trocar o caminho");
+        return Value::undefined();
+    });
+    struct MaskProps { u32 op; bool inverted; f32 feather, expansion, opacity; };
+    auto mask_props = [with_mask](Context& cx, const Value& me) {
+        return with_mask(cx, me, [&](const Mask& m) {
+            return MaskProps{static_cast<u32>(m.operation), m.inverted, m.feather, m.expansion, m.opacity};
+        });
+    };
+    auto write_props = [self, host](Context& cx, const Value& me, const MaskProps& p, const char* what) {
+        const ObjectRef& o = host(cx, me, kTagMask, "mascara");
+        if (!self->set_mask_props(o->hostId, static_cast<u32>(o->hostA), p.op, p.inverted, p.feather, p.expansion, p.opacity))
+            cx.throw_error("Error", std::string(what) + ": nao deu para ajustar a mascara");
+    };
+    const auto mask_number = [&c, maskProto, mask_props, write_props](const char* name, f64 scale, f32 lo, f32 hi, f32 MaskProps::* field) {
+        c.accessor(maskProto, name, [mask_props, scale, field](Context& cx, const Value& me, std::vector<Value>&) {
+            return Value::number(static_cast<f64>(mask_props(cx, me).*field) * scale);
+        }, [mask_props, write_props, scale, lo, hi, field, name](Context& cx, const Value& me, std::vector<Value>& a) {
+            const f64 v = cx.to_number(arg(a, 0));
+            if (!std::isfinite(v)) cx.throw_error("TypeError", std::string("mask.") + name + ": valor invalido");
+            MaskProps p = mask_props(cx, me);
+            p.*field = std::clamp(static_cast<f32>(v / scale), lo, hi);
+            write_props(cx, me, p, name);
+            return Value::undefined();
+        });
+    };
+    mask_number("feather", 1.0, 0.0f, 4096.0f, &MaskProps::feather);
+    mask_number("expansion", 1.0, -4096.0f, 4096.0f, &MaskProps::expansion);
+    mask_number("opacity", 100.0, 0.0f, 1.0f, &MaskProps::opacity);
+    c.accessor(maskProto, "inverted", [mask_props](Context& cx, const Value& me, std::vector<Value>&) {
+        return Value::boolean(mask_props(cx, me).inverted);
+    }, [mask_props, write_props](Context& cx, const Value& me, std::vector<Value>& a) {
+        MaskProps p = mask_props(cx, me);
+        p.inverted = Context::truthy(arg(a, 0));
+        write_props(cx, me, p, "inverted");
+        return Value::undefined();
+    });
+    static constexpr const char* kMaskModes[] = {"add", "subtract", "intersect", "difference", "none"};
+    c.accessor(maskProto, "mode", [mask_props](Context& cx, const Value& me, std::vector<Value>&) {
+        const u32 op = mask_props(cx, me).op;
+        return cx.str(op < std::size(kMaskModes) ? kMaskModes[op] : "none");
+    }, [mask_props, write_props](Context& cx, const Value& me, std::vector<Value>& a) {
+        std::string name = cx.to_string(arg(a, 0));
+        std::transform(name.begin(), name.end(), name.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        MaskProps p = mask_props(cx, me);
+        u32 op = 0;
+        while (op < std::size(kMaskModes) && name != kMaskModes[op]) ++op;
+        if (op == std::size(kMaskModes)) cx.throw_error("TypeError", "mask.mode: use add, subtract, intersect, difference ou none");
+        p.op = op;
+        write_props(cx, me, p, "mode");
+        return Value::undefined();
+    });
+    c.method(maskProto, "remove", [self, host](Context& cx, const Value& me, std::vector<Value>&) {
+        const ObjectRef& o = host(cx, me, kTagMask, "mascara");
+        if (!self->remove_mask(o->hostId, static_cast<u32>(o->hostA))) cx.throw_error("ReferenceError", "a mascara nao existe mais nesta camada");
         return Value::undefined();
     });
 }

@@ -1140,7 +1140,17 @@ struct EffectsView: View {
         case fxParamColor:
             colorRow(param, effect: effect, disabledBy: disabledBy)
         case fxParamCurve:
-            if let layer = model.primarySelection { ColorCurveEditor(layer: layer, effect: effect, param: param.index) }
+            if let layer = model.primarySelection {
+                if fxIsPluginEffect(typeOf(effect)) {
+                    CollapsibleCurveEditor(layer: layer, effect: effect, param: param.index, label: display(param, effectId: effect).label)
+                } else {
+                    ColorCurveEditor(layer: layer, effect: effect, param: param.index)
+                }
+            }
+        case fxParamGradient:
+            if let layer = model.primarySelection {
+                GradientParamEditor(layer: layer, effect: effect, param: param.index, label: display(param, effectId: effect).label)
+            }
         case fxParamTextureRef:
             if let layer = model.primarySelection {
                 if typeOf(effect) == fxEffectTypeId("aurea.3d.part_texture") {
@@ -1152,7 +1162,6 @@ struct EffectsView: View {
         case fxParamLayerRef:
             layerRefRow(param, effect: effect)
         default:
-            // Degradê: o motor tem, o app ainda não edita — sem botão falso.
             HStack(spacing: 0) {
                 FxParamLabel(label: display(param, effectId: effect).label, height: FxParamMath.ROW_SMALL - 2 * FxParamMath.LABEL_MARGIN)
                     .padding(FxParamMath.LABEL_MARGIN)

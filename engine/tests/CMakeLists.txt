@@ -79,6 +79,8 @@ add_executable(aurea_tests
     test_beats.cpp
     test_edit.cpp
     test_ui_mode.cpp
+    test_edit_tracks.cpp
+    test_plugins_v3.cpp
     test_export_attempts.cpp
     test_editor_reference.cpp
     test_trackball.cpp

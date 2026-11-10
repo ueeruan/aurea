@@ -1765,6 +1765,7 @@ let fxParamPoint3D = 5
 let fxParamAngle = 6
 let fxParamEnum = 7
 let fxParamCurve = 8
+let fxParamGradient = 9
 /// Outra camada da composição ("Camada de áudio"). O valor é o ÍNDICE da
 /// camada (parte baixa do id); −1 = nenhuma.
 let fxParamLayerRef = 10

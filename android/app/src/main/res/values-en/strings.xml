@@ -1777,7 +1777,7 @@ to edit the curve.</string>
     <string name="am_import_failed">Couldn\'t import: %1$s</string>
     <string name="am_import_nothing">no effect with an Aurea equivalent</string>
     <string name="release_notes_title">Aurea updates</string>
-    <string name="release_notes_body">Aurea Beta 0.5.0 (2214) • 11/09/2026\n\n• New text animator: position, scale, opacity and blur by character, word or line\n• Combinable selectors, with shapes and easing that follow After Effects\n• Curves with keyframe speed and influence\n• Cleaner text and mask panels\n• Masks: choose the first point and open a path at a segment\n• Export checks picture and sound before finishing and recovers better from freezes\n• Sharper large text and Korean fixed on Android 15</string>
+    <string name="release_notes_body">Aurea Beta 0.5.1 (2216) • 11/09/2026\n\n• New Premiere-style Edit timeline, with video and audio tracks and precise editing tools\n• PNG to 3D: turn a PNG without background into a 3D object with depth and material\n• 3D Scene: ambient occlusion for more realistic scenes\n• Plugin V3: curves, gradients, sound, per-frame scripts and custom panels\n• Flow Retime and Flow Motion Blur warp much less on fast motion and scene cuts\n• The 3D Scene studio preset is kept when reopening the project</string>
     <string name="am_import_lossless_required">This preset contains effects, parameters or layers that cannot be preserved during conversion. Nothing was saved or applied.</string>
     <string name="am_import_read_failed">The file could not be read (64 MB limit), or the selected layer changed. Please try again.</string>
     <string name="world_explosive">Explosive</string>

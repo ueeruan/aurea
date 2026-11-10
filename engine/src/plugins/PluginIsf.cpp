@@ -152,7 +152,7 @@ bool isf_to_plugin(std::string_view fileName, std::string_view source, Manifest&
         if (type == "audio" || type == "audioFFT") return fail("entrada de audio \"" + name + "\" nao e suportada");
         if (!valid_shader_identifier(name))
             return fail("entrada \"" + name + "\": nome que o motor nao aceita como parametro (reservado ou invalido)");
-        if (m.params.size() >= kMaxParams) return fail("mais de " + std::to_string(kMaxParams) + " entradas");
+        if (m.params.size() >= kMaxShaderParams) return fail("mais de " + std::to_string(kMaxShaderParams) + " entradas");
         ParamDecl p;
         p.id = name;
         if (const Value* label = in.get("LABEL"); label && label->is_string() && !label->string.empty())

@@ -253,6 +253,7 @@ set(AUREA_CORE_SOURCES
     src/engine/EngineCaptionPresets.cpp
     src/engine/EngineAssistant.cpp
     src/vector/Vector.cpp
+    src/vector/ContourTrace.cpp
     src/vector/Clipper.cpp
     src/vector/Svg.cpp
     src/vector/VectorDocument.cpp
@@ -436,6 +437,7 @@ set(AUREA_IMPORT_BOUNDARIES
     # 0.3.4 plugins: o interpretador usa exceções por dentro (throw do script,
     # limites); as fronteiras públicas dele e do runtime nunca lançam.
     src/engine/EnginePluginsV2.cpp
+    src/plugins/PluginEffects.cpp
     src/plugins/PluginRuntime.cpp
     src/plugins/script/ScriptParser.cpp
     src/plugins/script/ScriptInterp.cpp

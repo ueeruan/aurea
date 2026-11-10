@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.5.1: oclusão ambiente (Render3DTab, Scene3DEnvironment.kt) -->
+    <string name="scene051_ao">Фоновое затенение</string>
+    <string name="scene051_ao_hint">Затемняет углы, щели и места контакта. Снижает нагрузку, когда устройству тяжело.</string>
+    <string name="scene051_ao_strength">Сила</string>
+    <string name="scene051_ao_radius">Радиус</string>
+</resources>

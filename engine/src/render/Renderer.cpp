@@ -2088,6 +2088,32 @@ struct VideoFlowFx {
     f32 duplicateSensitivity = 10.0f;
 };
 
+// Twixtor/RSMB: acha o maior vetor de cada bloco e da vizinhança (dois passes
+// minúsculos) e borra por rastro. Devolve false se algum passe não gravou.
+bool flow_vector_blur(EffectBuildContext& ctx, PassStage stage, FGTexture target, FGTexture image, FGTexture flow, u32 baseW, u32 baseH,
+                      f32 amount, u32 samples, f32 time) noexcept {
+    constexpr u32 kTile = 16;             // px do nível base por bloco
+    constexpr f32 kMaxLength = 32.0f;     // rastro máximo: alcançado pela vizinhança de um bloco
+    constexpr f32 kDeadZone = 0.12f;      // abaixo disto o vetor é ruído do fluxo
+    const u32 tileW = std::max(1u, baseW / kTile), tileH = std::max(1u, baseH / kTile);
+    const FGTexture tiles = ctx.texture("flow-blocos", tileW, tileH);
+    const FGTexture nearby = ctx.texture("flow-vizinhos", tileW, tileH);
+    struct { Vec4 grid; Vec4 scale; } tp{Vec4{1.0f / static_cast<f32>(tileW), 1.0f / static_cast<f32>(tileH), 8.0f, 0},
+                                         Vec4{amount, kMaxLength, 0, 0}};
+    if (ctx.fullscreen_pass("flow-blocos", stage, tiles, ShaderId::video_flow_tile_frag, {PassTexture{flow}}, &tp, sizeof(tp)) == kInvalidIndex)
+        return false;
+    struct { Vec4 grid; Vec4 scale; } np{Vec4{3.0f / static_cast<f32>(tileW), 3.0f / static_cast<f32>(tileH), 3.0f, 0},
+                                         Vec4{1.0f, kMaxLength, 0, 0}};
+    if (ctx.fullscreen_pass("flow-vizinhos", stage, nearby, ShaderId::video_flow_tile_frag,
+                            {PassTexture{tiles, {}, CommonSampler::NearestClamp}}, &np, sizeof(np)) == kInvalidIndex)
+        return false;
+    struct { Vec4 blur; Vec4 limits; } vp{Vec4{amount, 1.0f / static_cast<f32>(baseW), 1.0f / static_cast<f32>(baseH),
+                                               static_cast<f32>(std::clamp<u32>(samples, 8u, 64u))},
+                                          Vec4{kMaxLength, kDeadZone, time, 0}};
+    return ctx.fullscreen_pass("desfoque-vetorial", stage, target, ShaderId::video_flow_vblur_frag,
+                               {PassTexture{image}, PassTexture{flow}, PassTexture{nearby, {}, CommonSampler::NearestClamp}}, &vp, sizeof(vp)) != kInvalidIndex;
+}
+
 VideoFlowFx video_flow_fx(const Layer& l, f64 timelineTime, f64 compShutter) noexcept {
     VideoFlowFx fx;
     fx.srcTimeline = timelineTime;
@@ -2665,6 +2691,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         // Guia: referência de trabalho no editor, nunca no arquivo final.
         if (l->guide && settings.finalQuality) continue;
         if (anySolo && !l->solo && !isMatte && !isInput) continue;
+        if (l->trackHidden && !isMatte && !isInput) continue;   // olho da faixa, na Edição
         // Omega chrome (área 02): "só as escolhidas" da coluna de modos (prévia,
         // raiz): as outras que desenham ficam de fora; câmera e luz ficam.
         const bool omegaChosen = settings.viewSelection != 0 && !settings.finalQuality && prepareDepth_ == 0
@@ -3647,12 +3674,36 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     std::vector<std::array<Vec2, 4>> previous(L.quads.size());
                     std::vector<std::array<f64, 4>> distance(L.quads.size());
                     f64 travel = 0;
+                    // `travel` is the combined path, which is zero when a glyph
+                    // move and a layer move cancel: those still need every instant.
+                    std::vector<text::GlyphAnim> firstAnim;
+                    std::vector<Mat4> firstRig;
+                    bool glyphsChange = false;
                     constexpr u32 probes = 17;
                     for (u32 p = 0; p < probes; ++p) {
                         const f64 unit = p == 0 || p + 1 == probes ? static_cast<f64>(p) / (probes - 1)
                             : (p + .23 * std::sin(p * 2.399963229728653)) / (probes - 1);
                         const f64 offset = textShutter.begin + textShutter.duration * unit;
                         evaluateGlyphs(local.value + offset);
+                        if (p == 0) { firstAnim = anim; firstRig = textTransforms; }
+                        else if (!glyphsChange) {
+                            const auto same = [](f32 x, f32 y) { return std::abs(x - y) <= 1e-4f; };
+                            const auto same2 = [&](const Vec2& x, const Vec2& y) { return same(x.x, y.x) && same(x.y, y.y); };
+                            const auto same3 = [&](const Vec3& x, const Vec3& y) { return same(x.x, y.x) && same(x.y, y.y) && same(x.z, y.z); };
+                            const auto same4 = [&](const Vec4& x, const Vec4& y) { return same(x.x, y.x) && same(x.y, y.y) && same(x.z, y.z) && same(x.w, y.w); };
+                            glyphsChange = firstAnim.size() != anim.size() || firstRig.size() != textTransforms.size();
+                            for (usize g = 0; g < anim.size() && !glyphsChange; ++g) {
+                                const text::GlyphAnim& x = firstAnim[g];
+                                const text::GlyphAnim& y = anim[g];
+                                glyphsChange = !same3(x.translate, y.translate) || !same2(x.scale, y.scale) || !same3(x.rotation, y.rotation)
+                                    || !same(x.skew, y.skew) || !same2(x.anchor, y.anchor) || !same2(x.groupAlign, y.groupAlign)
+                                    || !same(x.trackingShift, y.trackingShift) || !same(x.opacity, y.opacity) || !same(x.blur, y.blur)
+                                    || !same(x.strokeAdd, y.strokeAdd) || !same(x.fillOpacity, y.fillOpacity)
+                                    || !same4(x.fill, y.fill) || !same4(x.stroke, y.stroke);
+                            }
+                            for (usize g = 0; g < textTransforms.size() && !glyphsChange; ++g)
+                                for (u32 c = 0; c < 4 && !glyphsChange; ++c) glyphsChange = !same4(firstRig[g].col[c], textTransforms[g].col[c]);
+                        }
                         const f64 t = time.value + offset;
                         const Mat4 world = (wants_3d(comp, *l, time)
                             ? (settings.sceneEditor.enabled && !settings.finalQuality
@@ -3674,7 +3725,12 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         }
                     }
                     sets = capped_shutter_samples(comp.motion_blur(), settings.finalQuality,
-                        effective_quality(settings).motionBlurSamples, travel, true);
+                        effective_quality(settings).motionBlurSamples, travel, glyphsChange);
+                    // With effects each instant covers the whole animator canvas
+                    // (no crop) and may run the chain again: unbounded here, it
+                    // stalled the preview on the phone. Export keeps every sample.
+                    constexpr u32 kPreviewEffectedTextSamples = 6;
+                    if (!settings.finalQuality && !l->effects.empty()) sets = std::min(sets, kPreviewEffectedTextSamples);
                 }
                 // Charge the same frame allowance as 3D samples, including
                 // already prepared children. No admission means no allocation.
@@ -3744,12 +3800,15 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                             const Vec4 as = lin(Vec4{a.stroke.x, a.stroke.y, a.stroke.z, 1});
                             sc = Vec4{sc.x + (as.x - sc.x) * a.stroke.w, sc.y + (as.y - sc.y) * a.stroke.w, sc.z + (as.z - sc.z) * a.stroke.w, sc.w};
                         }
+                        // A fade multiplies fill and stroke alike and is not a
+                        // see-through fill: only the fill's own alpha opens the core.
+                        const f32 strokeKnockout = 1.0f - std::clamp(fill.w * a.fillOpacity, 0.0f, 1.0f);
                         fill.w *= shownOpacity(a, q) * a.fillOpacity * w;
                         sc.w *= shownOpacity(a, q) * w;
                         gi.fill = fill;
                         gi.stroke = sc;
                         gi.xform = pathM(g) * (textEffect ? textTransforms[g] : Mat4::identity()) * glyphMatrix(q, a);
-                        gi.misc = Vec4{0, 0, q.k, glyphStroke(q, a)};
+                        gi.misc = Vec4{strokeKnockout, 0, q.k, glyphStroke(q, a)};
                         gi.extra = Vec4{a.blur, 0, 0, 0};
                         out.glyphs.push_back(gi);
                     }
@@ -4116,7 +4175,10 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             const u32 k = rl.source.glyphSets > 1 ? rl.source.glyphSets
                 : capped_shutter_samples(mb, settings.finalQuality, effective_quality(settings).motionBlurSamples, travel);
             layerShutter.count = k;
-            if (layerShutter.duration > 0.0 && k > 1) {
+            // Animated text on a still layer: the glyph instants integrate in
+            // the source and the effects run once, as on any other layer.
+            const bool glyphBlurOnly = rl.source.glyphSets > 1 && travel < .01 && !l->effects.empty();
+            if (layerShutter.duration > 0.0 && k > 1 && !glyphBlurOnly) {
                 rl.blurMatrices.resize(k);
                 for (u32 i = 0; i < k; ++i) {
                     rl.blurMatrices[i] = shutterMatrix(layerShutter.offset(i));
@@ -4791,6 +4853,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 req.mode = decodeMode;
                 // Clipe reverso ou congelado: o decoder não tem embalo para a frente.
                 req.direction = (l->speed == 0.0f || l->timeRemapEnabled) ? 0 : (l->reversed ? -playDirection : playDirection);
+                f32 remapSlope = -1.0f;
                 if (flowFx.retime && playDirection != 0) {
                     // Flow Retime: a direção é a do tempo da fonte no próximo quadro.
                     const f64 b = l->source_frame_f(flow_retime_timeline(*l, *flowFx.retime,
@@ -4803,8 +4866,11 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     const f64 a = l->source_frame(layerTime);
                     const f64 b = l->source_frame(FrameIndex{layerTime.value + playDirection});
                     req.direction = b > a + 1e-6 ? 1 : (b < a - 1e-6 ? -1 : 0);
+                    remapSlope = static_cast<f32>(std::abs(b - a));
                 }
-                req.speed = speed * std::max(0.0f, l->speed) * static_cast<f32>(flowFx.rate);
+                // Com remap quem manda no consumo da fonte é a curva: em 4x a
+                // janela de 1x esvaziava antes do decoder alcançar o alvo.
+                req.speed = speed * (remapSlope >= 0.0f ? std::max(0.05f, remapSlope) : std::max(0.0f, l->speed)) * static_cast<f32>(flowFx.rate);
                 // O pedido do quadro principal: quem pede um quadro EXTRA (vizinho
                 // do Aprimorar, assinatura de duplicado) só pede se ninguém trocou.
                 const i64 mainTargetUs = req.targetUs;
@@ -5825,6 +5891,9 @@ void Renderer::fill_scene_context(const Composition& comp, FrameIndex time, Fram
     post.fogColor = Vec3{pp.fogColor.x, pp.fogColor.y, pp.fogColor.z};
     post.fogDensity = std::isfinite(pp.fogDensity) ? std::clamp(pp.fogDensity, 0.0f, 0.05f) : 0.0f;
     post.fogRays = std::isfinite(pp.fogColor.w) ? std::clamp(pp.fogColor.w, 0.0f, 8.0f) : 1.0f;
+    post.ao = pp.aoEnabled;
+    post.aoStrength = std::isfinite(pp.aoStrength) ? std::clamp(pp.aoStrength, 0.0f, 3.0f) : 1.0f;
+    post.aoRadius = std::isfinite(pp.aoRadius) ? std::clamp(pp.aoRadius, 0.02f, 0.2f) : 0.07f;
     const f32 groupExposure = std::isfinite(pp.exposure) ? std::clamp(pp.exposure, 0.01f, 64.0f) : 1.0f;
     // Sombra da composição (ShadowSettings): só pisos e viés — o nível de
     // qualidade escolhe mapa e amostras.
@@ -6243,24 +6312,29 @@ FGTexture Renderer::video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture
     u32 lh = std::max(8u, static_cast<u32>(std::lround(static_cast<f32>(h) * s)));
     baseW = lw;
     baseH = lh;
+    const u32 pyramidW = lw, pyramidH = lh;
+    // O campo final fica 2,5× mais fino que a pirâmide (nunca maior que o vídeo).
+    const f32 fineScale = std::min(1.0f, base * 2.5f / static_cast<f32>(std::max(w, h)));
+    const u32 fineW = std::max(lw, static_cast<u32>(std::lround(static_cast<f32>(w) * fineScale)));
+    const u32 fineH = std::max(lh, static_cast<u32>(std::lround(static_cast<f32>(h) * fineScale)));
     TextureDesc fd;
-    fd.width = lw;
-    fd.height = lh;
+    fd.width = fineW;
+    fd.height = fineH;
     fd.format = kWorkFormat;
     fd.sampled = true;
     fd.renderTarget = true;
     fd.debugName = "flow-cache";
     FlowCache& fc = flowCache_[layerKey];
     fc.lastFrame = frameNumber;
-    if (fc.width != lw || fc.height != lh) {
+    if (fc.width != fineW || fc.height != fineH) {
         for (TextureHandle& t : fc.tex) {
             if (!t.valid()) continue;
             backend_->destroy_texture(t);
             heavyStats_.flowCacheBytes -= std::min<u64>(heavyStats_.flowCacheBytes, static_cast<u64>(fc.width) * fc.height * 8);
         }
         fc = FlowCache{};
-        fc.width = lw;
-        fc.height = lh;
+        fc.width = fineW;
+        fc.height = fineH;
         fc.lastFrame = frameNumber;
     }
     for (u32 i = 0; i < 2 && flowCacheEnabled_; ++i) {
@@ -6277,11 +6351,11 @@ FGTexture Renderer::video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture
     if (!fc.tex[slot].valid()) {
         // Orçamento do cache (todas as camadas): antes de criar, solta as
         // camadas paradas há mais tempo.
-        trim_flow_cache(layerKey, static_cast<u64>(lw) * lh * 8);
+        trim_flow_cache(layerKey, static_cast<u64>(fineW) * fineH * 8);
         auto t = backend_->create_texture(fd);
         if (!t.ok()) return FGTexture{};
         fc.tex[slot] = *t;
-        heavyStats_.flowCacheBytes += static_cast<u64>(lw) * lh * 8;   // RGBA16F
+        heavyStats_.flowCacheBytes += static_cast<u64>(fineW) * fineH * 8;   // RGBA16F
     }
     // A chave só vale com os passes gravados: um fluxo que falhou não pode
     // ser servido do cache como válido nos quadros seguintes.
@@ -6293,7 +6367,7 @@ FGTexture Renderer::video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture
     levels[0] = ctx.texture("flow-nivel", lw, lh);
     sizes[0][0] = lw;
     sizes[0][1] = lh;
-    const Vec4 lumaParams{1.0f / static_cast<f32>(lw), 1.0f / static_cast<f32>(lh), 0, 0};
+    const Vec4 lumaParams{1.0f / static_cast<f32>(lw), 1.0f / static_cast<f32>(lh), 1.0f, 0};
     recorded &= ctx.fullscreen_pass("flow-luma", PassStage::Decode, levels[0], ShaderId::video_flow_luma_frag,
                                     {PassTexture{a}, PassTexture{b}}, &lumaParams, sizeof(lumaParams)) != kInvalidIndex;
     u32 n = 1;
@@ -6312,19 +6386,31 @@ FGTexture Renderer::video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture
     // quadro intermediário usa os dois para saber quem aparece e quem some
     // (flow_warp.frag); o nível base dos dois vai junto para o cache (RG/BA).
     FGTexture baseFlow[2]{};
+    // Nível da busca de vetor: o maior com até 128 px no lado maior. Com o
+    // preview já reduzido pelo orçamento, a busca fica de fora.
+    u32 searchLevel = n;
+    for (u32 i = 0; i < n && heavyQ_.flow >= 0.75f; ++i)
+        if (std::max(sizes[i][0], sizes[i][1]) <= 128u) { searchLevel = i; break; }
     for (u32 dir = 0; dir < 2 && recorded; ++dir) {
         FGTexture flow{};
         bool haveFlow = false;
         for (u32 i = n; i-- > 0;) {
             const f32 fw = static_cast<f32>(sizes[i][0]), fh = static_cast<f32>(sizes[i][1]);
+            if (i == searchLevel && haveFlow) {
+                struct { Vec4 texel; Vec4 flags; } bp{Vec4{1.0f / fw, 1.0f / fh, fw, fh}, Vec4{static_cast<f32>(dir), 0, 0, 0}};
+                const FGTexture searched = ctx.texture("flow-busca", sizes[i][0], sizes[i][1]);
+                recorded &= ctx.fullscreen_pass("flow-busca", PassStage::Decode, searched, ShaderId::video_flow_search_frag,
+                                                {PassTexture{levels[i]}, PassTexture{flow}}, &bp, sizeof(bp)) != kInvalidIndex;
+                flow = searched;
+            }
             struct { Vec4 texel; Vec4 flags; } lp{Vec4{1.0f / fw, 1.0f / fh, fw, fh},
-                                                  Vec4{haveFlow ? 1.0f : 0.0f, 6.0f, static_cast<f32>(dir), 0}};
+                                                  Vec4{haveFlow ? 1.0f : 0.0f, 6.0f, static_cast<f32>(dir), 5e-4f}};
             const FGTexture raw = ctx.texture("flow-bruto", sizes[i][0], sizes[i][1]);
             recorded &= ctx.fullscreen_pass("flow-lk", PassStage::Decode, raw, ShaderId::video_flow_lk_frag,
                                             {PassTexture{levels[i]}, PassTexture{haveFlow ? flow : levels[i]}}, &lp, sizeof(lp)) != kInvalidIndex;
             // Regulariza os níveis de cima (é onde o erro de um nível vira o
-            // ponto de partida do seguinte); o base fica com o LK cru e passa
-            // pelo preenchimento de oclusão — metade do custo, mesma qualidade.
+            // ponto de partida do seguinte); o base segue direto para o
+            // preenchimento de oclusão e o refino, que preservam o contorno.
             if (i == 0) {
                 flow = raw;
                 haveFlow = true;
@@ -6351,11 +6437,32 @@ FGTexture Renderer::video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture
                                          PassTexture{baseFlow[dir ^ 1u], {}, CommonSampler::LinearClamp},
                                          PassTexture{levels[0]}}, &fp, sizeof(fp)) != kInvalidIndex;
     }
-    // O nível base dos dois sentidos vai direto para a textura do cache.
+    // O nível base dos dois sentidos vai para a textura do cache, antes
+    // refinado na grade fina quando ela é maior que a pirâmide.
     const FGTexture packed = graph_.import_texture("flow-cache", fc.tex[slot], fd);
-    recorded &= recorded && ctx.fullscreen_pass("flow-junta", PassStage::Decode, packed, ShaderId::video_flow_pack_frag,
+    const bool refine = fineW > pyramidW || fineH > pyramidH;
+    const FGTexture joined = refine ? ctx.texture("flow-base", pyramidW, pyramidH) : packed;
+    const FGTexture cut = ctx.texture("flow-corte", 1, 1);
+    const Vec4 cutParams{1.0f / static_cast<f32>(pyramidW), 1.0f / static_cast<f32>(pyramidH), 0, 0};
+    if (recorded)
+        recorded &= ctx.fullscreen_pass("flow-corte", PassStage::Decode, cut, ShaderId::video_flow_cut_frag,
+                                        {PassTexture{filled[0], {}, CommonSampler::LinearClamp},
+                                         PassTexture{levels[0], {}, CommonSampler::LinearClamp}}, &cutParams, sizeof(cutParams)) != kInvalidIndex;
+    recorded &= recorded && ctx.fullscreen_pass("flow-junta", PassStage::Decode, joined, ShaderId::video_flow_pack_frag,
                                                 {PassTexture{filled[0], {}, CommonSampler::NearestClamp},
-                                                 PassTexture{filled[1], {}, CommonSampler::NearestClamp}}, nullptr, 0) != kInvalidIndex;
+                                                 PassTexture{filled[1], {}, CommonSampler::NearestClamp},
+                                                 PassTexture{cut, {}, CommonSampler::NearestClamp}}, nullptr, 0) != kInvalidIndex;
+    if (refine && recorded) {
+        const FGTexture fineLuma = ctx.texture("flow-luma-fina", fineW, fineH);
+        const Vec4 fineLumaParams{1.0f / static_cast<f32>(fineW), 1.0f / static_cast<f32>(fineH), 1.0f, 0};
+        recorded &= ctx.fullscreen_pass("flow-luma-fina", PassStage::Decode, fineLuma, ShaderId::video_flow_luma_frag,
+                                        {PassTexture{a}, PassTexture{b}}, &fineLumaParams, sizeof(fineLumaParams)) != kInvalidIndex;
+        struct { Vec4 base; Vec4 fine; } rp{Vec4{1.0f / static_cast<f32>(pyramidW), 1.0f / static_cast<f32>(pyramidH), 0, 0},
+                                            Vec4{1.0f / static_cast<f32>(fineW), 1.0f / static_cast<f32>(fineH), 0, 0}};
+        recorded &= recorded && ctx.fullscreen_pass("flow-refina", PassStage::Decode, packed, ShaderId::video_flow_refine_frag,
+                                                    {PassTexture{joined, {}, CommonSampler::LinearClamp},
+                                                     PassTexture{fineLuma, {}, CommonSampler::LinearClamp}}, &rp, sizeof(rp)) != kInvalidIndex;
+    }
     if (!recorded) return FGTexture{};
     fc.key[slot] = pairKey;
     return packed;
@@ -6838,10 +6945,8 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                     // Borrão ao longo do vetor de cada pixel, obturador centrado no quadro.
                     const FGTexture blurred = graph_.create_texture("layer-video-desfoque-vetorial", d);
                     // Export uses 64 samples; preview follows its adaptive budget.
-                    const Vec4 vp{layer.source.vectorBlur, 1.0f / static_cast<f32>(baseW), 1.0f / static_cast<f32>(baseH),
-                                  static_cast<f32>(std::clamp<u32>(heavyQ_.flowBlurSamples, 8u, 64u))};
-                    if (ctx.fullscreen_pass("desfoque-vetorial", PassStage::Decode, blurred, ShaderId::video_flow_vblur_frag,
-                                           {PassTexture{out.texture}, PassTexture{flow}}, &vp, sizeof(vp)) != kInvalidIndex)
+                    if (flow_vector_blur(ctx, PassStage::Decode, blurred, out.texture, flow, baseW, baseH, layer.source.vectorBlur,
+                                         heavyQ_.flowBlurSamples, warped ? layer.source.blendT : 0.0f))
                         out.texture = blurred;
                     else mark_incomplete(__FILE__, __LINE__); // Retain valid preview pixels; export retries the requested blur.
                 }
@@ -7591,10 +7696,8 @@ void Renderer::adjust_time_input(const FrameSnapshot& snap, const RenderLayer& l
             }
             if (at.vectorBlur > 0.0f && flow.valid()) {
                 const FGTexture blurred = graph_.create_texture("ajuste-desfoque-vetorial", d);
-                const Vec4 vp{at.vectorBlur, 1.0f / static_cast<f32>(baseW), 1.0f / static_cast<f32>(baseH),
-                              static_cast<f32>(std::clamp<u32>(heavyQ_.flowBlurSamples, 8u, 64u))};
-                if (ctx.fullscreen_pass("ajuste-desfoque-vetorial", PassStage::Effects, blurred, ShaderId::video_flow_vblur_frag,
-                                        {PassTexture{in.texture}, PassTexture{flow}}, &vp, sizeof(vp)) != kInvalidIndex)
+                if (flow_vector_blur(ctx, PassStage::Effects, blurred, in.texture, flow, baseW, baseH, at.vectorBlur,
+                                     heavyQ_.flowBlurSamples, warped ? at.blendT : 0.0f))
                     in.texture = blurred;
                 else mark_incomplete(__FILE__, __LINE__);
             }
@@ -7783,7 +7886,8 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
         const RenderLayer& layer = snap.layers[i];
         LayerImage src;
         const bool hasEffects = i < snap.plans.size() && !snap.plans[i].empty();
-        if (layer.source.kind == LayerSource::Kind::Text && layer.source.glyphSets > 1 && layer.temporal.empty()) {
+        if (layer.source.kind == LayerSource::Kind::Text && layer.source.glyphSets > 1 && layer.temporal.empty()
+            && (!hasEffects || !layer.blurMatrices.empty())) {
             // Sample glyph animation and layer motion together. Blurring text
             // locally first and its layer second convolves unrelated times.
             const u32 count = layer.source.glyphSets;

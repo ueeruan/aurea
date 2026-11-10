@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- PNG para 3D (AddLayerPanel.kt, Element3DPanel.kt) -->
+    <string name="image3d_add" formatted="false">PNG إلى 3D</string>
+    <string name="image3d_layer" formatted="false">صورة ثلاثية الأبعاد</string>
+    <string name="image3d_creating" formatted="false">جارٍ إنشاء الكائن ثلاثي الأبعاد…</string>
+    <string name="image3d_err_empty" formatted="false">هذه الصورة شفافة بالكامل.</string>
+    <string name="image3d_no_alpha" formatted="false">لا تحتوي الصورة على شفافية، لذا أخذ الكائن شكل الإطار. استخدم ملف PNG بلا خلفية.</string>
+    <string name="image3d_front" formatted="false">الواجهة</string>
+    <string name="image3d_back" formatted="false">الخلف</string>
+    <string name="image3d_silhouette" formatted="false">الشكل الخارجي</string>
+    <string name="image3d_threshold" formatted="false">حد ألفا</string>
+    <string name="image3d_threshold_hint" formatted="false">يحدد موضع الحافة في المناطق شبه الشفافة.</string>
+    <string name="image3d_depth_hint" formatted="false">100% = ارتفاع الصورة.</string>
+    <string name="image3d_from_photos" formatted="false">الصور</string>
+    <string name="image3d_from_files" formatted="false">الملفات</string>
+</resources>

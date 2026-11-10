@@ -196,6 +196,63 @@ Result<u64> Engine::layer_to_3d_object(u64 layerId, const char* name) noexcept {
     return made;
 }
 
+Result<u64> Engine::layer_to_image3d(u64 layerId, const std::string& imagePath, const std::string& name) noexcept {
+    Vec3 position{}, rotation{}, scale{1, 1, 1};
+    f32 h = 0;
+    FrameIndex start{0}, end{0};
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        drain_commands_locked();
+        Composition* comp = project_ ? current_composition() : nullptr;
+        const Layer* src = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+        if (!src) return Status{Errc::NotFound, "camada nao existe"};
+        if (src->locked || src->adjustment || src->kind != LayerKind::Image) return Status{Errc::InvalidArgument, "so imagem vira imagem 3D"};
+        bridge::LayerDetailPOD pod{};
+        if (!fill_layer_detail_locked(layerId, pod) || !pod.sourceWidth || !pod.sourceHeight)
+            return Status{Errc::InvalidState, "camada sem tamanho"};
+        h = static_cast<f32>(pod.sourceHeight);
+        position = src->transform.position;
+        rotation = src->transform.rotation;
+        scale = src->transform.scale;
+        position.x += (static_cast<f32>(pod.sourceWidth) * 0.5f - src->transform.anchor.x) * scale.x;
+        position.y += (h * 0.5f - src->transform.anchor.y) * scale.y;
+        start = src->start;
+        end = src->end;
+        history_.begin_group("transformar em objeto 3D");
+    }
+    scene3d::Image3DSpec spec;
+    spec.imagePath = imagePath;
+    Result<u64> made = add_image3d(spec, name);
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    if (made.ok()) {
+        Composition* comp = project_ ? current_composition() : nullptr;
+        Layer* object = comp ? comp->layer(LayerId::unpack(*made)) : nullptr;
+        const auto model = object ? models_.find(object->model.scene.pack()) : models_.end();
+        if (object && model != models_.end() && model->second) {
+            // A malha tem altura 1 e o centro da IMAGEM na origem: a silhueta fica onde estava.
+            object->model.unitScale = h;
+            object->model.pivot = Vec3{0.0f, 0.0f, model->second->bounds.center().z};
+            object->transform.position = position;
+            object->transform.rotation = rotation;
+            object->transform.scale = Vec3{scale.x, scale.y, 1.0f};
+            object->start = start;
+            object->end = end;
+        }
+        // A camada vira o objeto: diferente da placa, a imagem não é mais fonte de nada.
+        const LayerId old = LayerId::unpack(layerId);
+        if (comp && comp->layer(old)) {
+            media_.close_layer(old);
+            comp->remove_layer(old);
+            selection_.erase(std::remove(selection_.begin(), selection_.end(), layerId), selection_.end());
+        }
+        bump_model_revision_locked();
+        project_->mark_dirty();
+        request_render();
+    }
+    history_.end_group();
+    return made;
+}
+
 Status Engine::set_shape3d(u64 layerId, const scene3d::Shape3DSpec& in) noexcept {
     std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
     u64 session = 0, room = 0; CompositionId composition; AssetId previous;
@@ -686,6 +743,18 @@ bool Engine::material_preview(u64 layerId, u32 material, u32 size, std::vector<u
 bool Engine::apply_text3d_preset(u64 layerId, u32 preset) noexcept {
     scene3d::Text3DSpec spec;
     if (!query_text3d(layerId, spec) || !scene3d::apply_text3d_material_preset(spec, preset)) return false;
+    light_metal_preset(layerId, preset);
+    return set_text3d(layerId, spec).ok();
+}
+
+bool Engine::apply_image3d_preset(u64 layerId, u32 preset) noexcept {
+    scene3d::Image3DSpec spec;
+    if (!query_image3d(layerId, spec) || !scene3d::apply_image3d_material_preset(spec, preset)) return false;
+    light_metal_preset(layerId, preset);
+    return set_image3d(layerId, spec).ok();
+}
+
+void Engine::light_metal_preset(u64 layerId, u32 preset) noexcept {
     const bool metal = preset == 0 || preset == 1 || preset == 2 || preset == 6;
     bool bare = false;
     {
@@ -698,7 +767,6 @@ bool Engine::apply_text3d_preset(u64 layerId, u32 preset) noexcept {
     }
     if (metal && bare)
         (void)set_studio_environment(static_cast<u32>(scene3d::StudioPreset::ChromeStudio));
-    return set_text3d(layerId, spec).ok();
 }
 
 bool Engine::text3d_preset_preview(u32 preset, u32 size, std::vector<u8>& out) noexcept {

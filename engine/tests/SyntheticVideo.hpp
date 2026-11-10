@@ -35,7 +35,15 @@ namespace aurea::test {
 /// com deslocamento INTEIRO por quadro (⌊5,25·i⌋, ⌊1,75·i⌋). O "decode" em
 /// 1080p custa uma cópia em vez de 2 milhões de senos: benchmark de efeito de
 /// tempo sem a GPU esfriar esperando a CPU (EffectPerf).
-enum class SyntheticPattern : u8 { Quadrants = 0, FrameGray, MovingSquare, FastSquare, Scene3D, PanTexture, PanOcclusion, PanTable };
+enum class SyntheticPattern : u8 { Quadrants = 0, FrameGray, MovingSquare, FastSquare, Scene3D, PanTexture, PanOcclusion, PanTable, Hero };
+
+struct HeroScene {
+    f64 pan = -16.0;
+    f64 radius = 190.0, vx = 46.0, vy = 8.0;
+    f64 startX = 380.0, startY = 640.0;
+    f64 contrast = 1.0;      ///< amplitude da textura do disco (1 = blocos fortes)
+    bool periodic = false;   ///< disco em xadrez: vetor ambíguo, o caso extremo
+};
 
 struct SyntheticConfig {
     u32 width = 64;
@@ -47,6 +55,10 @@ struct SyntheticConfig {
     SyntheticPattern pattern = SyntheticPattern::Quadrants;
     VideoColorInfo color{};
     u32 rotation = 0;
+    /// SyntheticPattern::Hero: fundo em px/quadro e ruído do sensor (níveis de 8 bits).
+    HeroScene hero{};
+    f64 heroNoise = 2.5;
+    i64 heroCutAt = -1;          ///< a partir deste quadro, outra cena (corte seco)
     /// Trilha de áudio sintética (0 = sem áudio): senoide por canal, canal c
     /// em audioFreq·(c+1) Hz, amplitude 0,5.
     u32 audioRate = 0;
@@ -153,6 +165,40 @@ inline const PanTable& pan_table(u32 w, u32 h, u32 frameCount) {
                 pan_texture_value(static_cast<f64>(x) - sx, static_cast<f64>(y) - sy, 0.0)));
     tables.push_back(std::move(t));
     return *tables.back();
+}
+
+/// Cena em escala de vídeo real (1080p), onde o fluxo trabalha reduzido: céu
+/// quase liso (só ruído para o Lucas-Kanade), chão em mosaico de bordas retas
+/// e um disco passando por cima. Valor exato em qualquer instante, com a borda
+/// filtrada como a de uma câmera.
+inline void hero_disc(f64 frame, const HeroScene& h, f64& cx, f64& cy) { cx = h.startX + h.vx * frame; cy = h.startY + h.vy * frame; }
+inline f64 hero_point(f64 x, f64 y, f64 frame, const HeroScene& scene) {
+    f64 cx, cy;
+    hero_disc(frame, scene, cx, cy);
+    const f64 dx = x - cx, dy = y - cy;
+    if (dx * dx + dy * dy <= scene.radius * scene.radius) {
+        const i64 bx = static_cast<i64>(std::floor((dx + 400.0) / 40.0)), by = static_cast<i64>(std::floor((dy + 400.0) / 40.0));
+        const u64 cell = (static_cast<u64>(bx * 40503) ^ static_cast<u64>(by * 92821)) * 0x9E3779B97F4A7C15ull;
+        const f64 tile = scene.periodic ? (((bx + by) & 1) != 0 ? 205.0 : 55.0) : 45.0 + static_cast<f64>((cell >> 44) % 170u);
+        return 130.0 + scene.contrast * (tile - 130.0 + 12.0 * std::sin(dx * 0.09) * std::sin(dy * 0.07));
+    }
+    const f64 u = x - scene.pan * frame, v = y;
+    if (v < 320.0) return 168.0 + 12.0 * std::sin(u * 0.006) + 6.0 * std::sin(u * 0.021 + 1.7) * std::cos(v * 0.013);
+    const i64 ix = static_cast<i64>(std::floor(u / 84.0)), iy = static_cast<i64>(std::floor((v - 320.0) / 84.0));
+    const u64 h = (static_cast<u64>(ix * 73856093) ^ static_cast<u64>(iy * 19349663)) * 0x9E3779B97F4A7C15ull;
+    return 60.0 + static_cast<f64>((h >> 40) % 130u) + 14.0 * std::sin(u * 0.11) * std::cos(v * 0.13);
+}
+inline f64 hero_value(f64 x, f64 y, f64 frame, const HeroScene& scene) {
+    f64 acc = 0.0;
+    for (int k = 0; k < 4; ++k)
+        acc += hero_point(x + ((k & 1) != 0 ? 0.25 : -0.25), y + ((k & 2) != 0 ? 0.25 : -0.25), frame, scene);
+    return std::clamp(acc * 0.25, 16.0, 235.0);
+}
+/// Ruído de sensor determinístico (triangular, até ±2×amount), novo a cada quadro.
+inline f64 hero_noise(u32 x, u32 y, u32 frame, f64 amount) {
+    u64 h = (static_cast<u64>(x) * 73856093u) ^ (static_cast<u64>(y) * 19349663u) ^ (static_cast<u64>(frame) * 83492791u);
+    h = (h ^ (h >> 13)) * 0x9E3779B97F4A7C15ull;
+    return amount * 2.0 * (static_cast<f64>(h >> 56) / 255.0 + static_cast<f64>((h >> 40) & 255u) / 255.0 - 1.0);
 }
 
 /// Oclusão (o caso difícil do optical flow): o fundo texturizado anda para a
@@ -394,6 +440,11 @@ private:
                 u8 Y = 0, Cb = 128, Cr = 128;
                 if (cfg_.pattern == SyntheticPattern::Scene3D) {
                     Y = static_cast<u8>(std::clamp(30.0f + 200.0f * scene[static_cast<usize>(yy) * w + xx], 16.0f, 235.0f));
+                } else if (cfg_.pattern == SyntheticPattern::Hero) {
+                    const bool afterCut = cfg_.heroCutAt >= 0 && static_cast<i64>(index) >= cfg_.heroCutAt;
+                    const f64 shot = hero_value(xx + (afterCut ? 613.0 : 0.0), yy, static_cast<f64>(index), cfg_.hero);
+                    Y = static_cast<u8>(std::lround(std::clamp((afterCut ? 251.0 - shot : shot) +
+                                                               hero_noise(xx, yy, static_cast<u32>(index), cfg_.heroNoise), 16.0, 235.0)));
                 } else if (cfg_.pattern == SyntheticPattern::PanOcclusion) {
                     Y = static_cast<u8>(std::lround(pan_occlusion_value(static_cast<f64>(xx), static_cast<f64>(yy), static_cast<f64>(index % 16))));
                 } else if (cfg_.pattern == SyntheticPattern::PanTexture) {

@@ -77,7 +77,7 @@ struct alignas(16) SceneBlock {
     Vec4 clearcoat;         ///< x = verniz, y = rugosidade do verniz, z = IOR, w = força do specular
     Vec4 specularColor;     ///< rgb = cor do specular dielétrico, w = transmissão
     Vec4 shadowParams2;     ///< x = k da penumbra, y = normal offset (mundo), z = S/R, w = amostras de bloqueador
-    Vec4 aoParams;          ///< 0.4.6 GTAO: x = ligada, y = mínimo, zw = 1/tamanho do alvo
+    Vec4 aoParams;          ///< 0.4.6 GTAO: x = ligada, y = 1 + luz com sombra de contato (0 = nenhuma), zw = 1/tamanho do alvo
     Vec4 localShadow[2];    ///< 0.4.6: x = 1º tile, y = 0 ponto / 1 spot, z = perto, w = longe
     Vec4 localShadowPos[2]; ///< xyz = posição, w = tan(meio ângulo) do spot
     Vec4 localShadowDir[2]; ///< xyz = frente do spot, w = viés
@@ -1244,15 +1244,16 @@ void SceneRenderer::collect_pipelines(std::vector<PipelineKey>& out) const {
         collect_ground_pipelines(out, groundFirst, out.size(), passSamples_);
         out.push_back(shadow_key(false));
         out.push_back(shadow_key(true));
-        if (ambientOcclusion_) {
+        // Sempre no aquecimento: ligar o AO depois não pode compilar no meio da cena.
+        {
             out.push_back(ao_depth_key(false));
             out.push_back(ao_depth_key(true));
             out.push_back(ssr_material_key(false));
             out.push_back(ssr_material_key(true));
             out.push_back(PipelineKey::fullscreen(ShaderId::scene3d_post_ssr_frag, SurfaceFormat::RGBA16F));
             out.push_back(PipelineKey::fullscreen(ShaderId::scene3d_post_ssr_apply_frag, SurfaceFormat::RGBA16F));
-            out.push_back(PipelineKey::fullscreen(ShaderId::scene3d_post_gtao_frag, SurfaceFormat::RGBA16F));
-            out.push_back(PipelineKey::fullscreen(ShaderId::scene3d_post_gtao_blur_frag, SurfaceFormat::RGBA16F));
+            out.push_back(PipelineKey::fullscreen(ShaderId::scene3d_post_gtao_frag, SurfaceFormat::RG8));
+            out.push_back(PipelineKey::fullscreen(ShaderId::scene3d_post_gtao_blur_frag, SurfaceFormat::RG8));
             out.push_back(PipelineKey::fullscreen(ShaderId::scene3d_post_volume_frag, SurfaceFormat::RGBA16F));
             out.push_back(PipelineKey::fullscreen(ShaderId::scene3d_post_volume_apply_frag, SurfaceFormat::RGBA16F));
         }
@@ -1415,7 +1416,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     // 0.4.6 GTAO: decidida AQUI, antes de qualquer bloco por desenho/ambiente
     // (todos copiam o cabeçalho). Sem a textura no fim (pipeline faltando), o
     // slot recebe branco = sem AO.
-    const bool aoOn = ambientOcclusion_ && frame.post.quality != 1u && passMrt_;
+    const bool aoOn = ambientOcclusion_ && frame.post.ao && (frame.post.quality != 1u || !lodHysteresis_) && passMrt_;   // o export nunca herda o BAIXO
     // 0.4.6 SSR: só com algum opaco liso (decidido de novo no pré-passe).
     bool ssrOn = screenReflections_ && frame.post.quality != 1u && passMrt_;
     header.aoParams = Vec4{aoOn ? 1.0f : 0.0f, 0.0f, 1.0f / static_cast<f32>(width), 1.0f / static_cast<f32>(height)};
@@ -1434,6 +1435,13 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         header.lightSpot[i] = Vec4{l.direction.normalized(), std::cos(l.outerCone)};
         header.lightSpot2[i] = Vec4{std::cos(l.innerCone), std::clamp(l.shadowStrength, 0.0f, 1.0f), 0, 0};
     }
+    // 0.5.1: sombra de contato: o sol que projeta sombra, ou o primeiro direcional.
+    i32 contactSun = -1;
+    for (u32 i = 0; i < lights; ++i) {
+        if (frame.lights[i].kind != LightKindGpu::Directional) continue;
+        if (contactSun < 0 || (frame.lights[i].castShadows && !frame.lights[static_cast<u32>(contactSun)].castShadows)) contactSun = static_cast<i32>(i);
+    }
+    header.aoParams.y = aoOn && contactSun >= 0 ? static_cast<f32>(contactSun + 1) : 0.0f;
     // 0.4.6: sombra das luzes LOCAIS (ponto e spot com "projeta sombra"), até 2,
     // num atlas de faces (ponto: 6 de cubo; spot: 1). O BAIXO não tem.
     struct LocalShadow { u32 firstTile; bool spot; f32 nearZ, farZ, tanHalf; Vec3 pos, fwd; };
@@ -2287,7 +2295,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     // matriz no SSBO e o pré-passe não as veria. Fica a lista de antes.
     std::vector<Draw> depthPrepass;
     if (ssrOn) ssrOn = std::any_of(opaque.begin(), opaque.end(), [](const Draw& d) {
-        return d.material && d.material->factors.roughness < 0.65f;
+        return d.material && !d.material->factors.holdout && d.material->factors.roughness < 0.65f;
     });
     if (aoOn || ssrOn || (frame.post.fog && frame.post.fogDensity > 0.0f && passMrt_) || localTiles) depthPrepass = opaque;
 
@@ -2521,8 +2529,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             if (ms.ok() && mk.ok()) { depthStatic = ms; depthSkinned = mk; }
             else { ssrOn = false; mark_incomplete(__FILE__, __LINE__); }
         }
-        auto gtaoPipe = shaders_->pipeline(PipelineKey::fullscreen(ShaderId::scene3d_post_gtao_frag, SurfaceFormat::RGBA16F));
-        auto blurPipe = shaders_->pipeline(PipelineKey::fullscreen(ShaderId::scene3d_post_gtao_blur_frag, SurfaceFormat::RGBA16F));
+        auto gtaoPipe = shaders_->pipeline(PipelineKey::fullscreen(ShaderId::scene3d_post_gtao_frag, SurfaceFormat::RG8));
+        auto blurPipe = shaders_->pipeline(PipelineKey::fullscreen(ShaderId::scene3d_post_gtao_blur_frag, SurfaceFormat::RG8));
         Mat4 invProj = Mat4::identity();
         const bool invertible = rig::inverse(proj, invProj);
         struct AoDraw {
@@ -2547,7 +2555,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 a.prim = d.prim;
                 a.push.model = viewProj * d.push.model;   // clip ← local (a câmera da cena)
                 a.push.normalCol[0] = Vec4{d.skinned ? d.push.normalCol[0].w : 0.0f, 0.0f,
-                                           d.material ? d.material->factors.roughness : 1.0f,
+                                           // Recorte: o reflexo dele sai no grupo em que ele aparece.
+                                           d.material && !d.material->factors.holdout ? d.material->factors.roughness : 1.0f,
                                            d.material ? d.material->factors.metallic : 0.0f};
                 a.pipeline = d.skinned ? *depthSkinned : *depthStatic;
                 a.skinned = d.skinned;
@@ -2595,19 +2604,24 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 TextureDesc ad;
                 ad.width = aw;
                 ad.height = ah;
-                ad.format = SurfaceFormat::RGBA16F;
+                ad.format = SurfaceFormat::RG8;   // R = oclusão, G = sombra de contato
                 ad.sampled = true;
                 ad.renderTarget = true;
                 const FGTexture aoRaw = graph.create_texture("3d-ao", ad);
                 const FGTexture aoTmp = graph.create_texture("3d-ao-desfoque", ad);
                 aoTex = graph.create_texture("3d-ao-final", ad);
-                const bool exportQuality = !lodHysteresis_;
-                struct AoParams { Mat4 invProj; Vec4 texel; Vec4 cfg; Vec4 extra; } ap{};
+                struct AoParams { Mat4 invProj; Vec4 texel; Vec4 cfg; Vec4 extra; Mat4 proj; Vec4 sun; } ap{};
                 ap.invProj = invProj;
                 ap.texel = Vec4{1.0f / static_cast<f32>(aw), 1.0f / static_cast<f32>(ah), static_cast<f32>(aw), static_cast<f32>(ah)};
-                // Raio: 7% da altura; força (expoente) 1,6; 4×6 no export, 2×4 na prévia.
-                ap.cfg = Vec4{0.07f, 1.6f, exportQuality ? 4.0f : 2.0f, exportQuality ? 6.0f : 4.0f};
+                // Raio e força vêm da composição (padrão 7% da altura, expoente 1,6).
+                ap.cfg = Vec4{frame.post.aoRadius, 1.6f * frame.post.aoStrength, static_cast<f32>(aoDirections_), static_cast<f32>(aoSteps_)};
                 ap.extra = Vec4{0.5f, 0.0f, 0.0f, 0.0f};
+                ap.proj = proj;
+                if (contactSun >= 0) {
+                    const Vec4 d = header.lightPos[static_cast<u32>(contactSun)];
+                    const Vec4 toSun = frame.camera.view * Vec4{d.x, d.y, d.z, 0.0f};
+                    ap.sun = Vec4{toSun.x, toSun.y, toSun.z, aoDirections_ >= 4 ? 10.0f : (aoDirections_ >= 2 ? 6.0f : 4.0f)};
+                }
                 const u64 nearest = shaders_->sampler(CommonSampler::NearestClamp).id;
                 const u64 linear = shaders_->sampler(CommonSampler::LinearClamp).id;
                 struct GCap { PipelineHandle p; FGTexture src; u64 sampler; AoParams u; } gcap{*gtaoPipe, aoDepth, nearest, ap};
@@ -2619,9 +2633,9 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                     pc.cmds.draw(3);
                 });
                 graph.read(gpass, aoDepth);
-                struct BCap { PipelineHandle p; FGTexture src; u64 sampler; Vec4 u; };
-                const BCap hcap{*blurPipe, aoRaw, linear, Vec4{ap.texel.x, 0.0f, 8.0f, 0.0f}};
-                const BCap vcap{*blurPipe, aoTmp, linear, Vec4{0.0f, ap.texel.y, 8.0f, 0.0f}};
+                struct BCap { PipelineHandle p; FGTexture src, depth; u64 sampler, nearest; Vec4 u; };
+                const BCap hcap{*blurPipe, aoRaw, aoDepth, linear, nearest, Vec4{ap.texel.x, 0.0f, 8.0f, 0.0f}};
+                const BCap vcap{*blurPipe, aoTmp, aoDepth, linear, nearest, Vec4{0.0f, ap.texel.y, 8.0f, 0.0f}};
                 const BCap caps[2] = {hcap, vcap};
                 const FGTexture dsts[2] = {aoTmp, aoTex};
                 for (u32 b = 0; b < 2; ++b) {
@@ -2631,10 +2645,12 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                                                             [cap](PassContext& pc) {
                         pc.cmds.bind_pipeline(cap.p);
                         pc.cmds.bind_texture(0, pc.texture(cap.src), SamplerHandle{cap.sampler});
+                        pc.cmds.bind_texture(1, pc.texture(cap.depth), SamplerHandle{cap.nearest});
                         pc.cmds.set_uniforms(&cap.u, sizeof(cap.u));
                         pc.cmds.draw(3);
                     });
                     graph.read(bpass, cap.src);
+                    graph.read(bpass, cap.depth);
                 }
                 stats_.ambientOcclusion = true;
                 }
@@ -2749,6 +2765,16 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     // (profundidade vista de baixo) em passes próprios ANTES do principal; o
     // plano é desenhado no principal depois dos opacos (`draw_ground`).
     GroundDraw groundDraw{};
+    const auto groundKey = [this](const Draw& d) {
+        const GpuMaterial& m = *d.material;
+        PipelineKey k = key_for(m.factors.alphaMode == AlphaMode::Mask ? AlphaMode::Mask : AlphaMode::Opaque,
+                                m.factors.doubleSided, d.skinned);
+        const Mat4& w = d.push.model;
+        const Vec3 x{w.col[0].x, w.col[0].y, w.col[0].z}, y{w.col[1].x, w.col[1].y, w.col[1].z},
+                   z{w.col[2].x, w.col[2].y, w.col[2].z};
+        if (x.dot(y.cross(z)) < 0.0f && !m.factors.doubleSided) k.frontFaceCCW = false;
+        return k;
+    };
     if (frame.floor.mode != 0 && passMrt_) {
         GroundInputs gi;
         gi.frame = &frame;
@@ -2785,16 +2811,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         gi.mesh.joints = joints;
         gi.mesh.morph = morphBuf;
         gi.mesh.inst = instBuf;
-        groundDraw = build_ground(graph, arena, *shaders_, gi, list, opaqueCount, [this](const Draw& d) {
-            const GpuMaterial& m = *d.material;
-            PipelineKey k = key_for(m.factors.alphaMode == AlphaMode::Mask ? AlphaMode::Mask : AlphaMode::Opaque,
-                                    m.factors.doubleSided, d.skinned);
-            const Mat4& w = d.push.model;
-            const Vec3 x{w.col[0].x, w.col[0].y, w.col[0].z}, y{w.col[1].x, w.col[1].y, w.col[1].z},
-                       z{w.col[2].x, w.col[2].y, w.col[2].z};
-            if (x.dot(y.cross(z)) < 0.0f && !m.factors.doubleSided) k.frontFaceCCW = false;
-            return k;
-        });
+        groundDraw = build_ground(graph, arena, *shaders_, gi, list, opaqueCount, groundKey);
     }
     // ===== fim do chão ==========================================================
     PipelineHandle skyPipe{};
@@ -2831,7 +2848,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         }
         SkyBlock skyDirect = sky;
         skyDirect.post = Vec4{std::clamp(frame.environment.exposure, 0.01f, 64.0f),
-                              frame.post.toneMapper >= 1 ? 1.0f : 0.0f, 1.0f, 0.0f};
+                              static_cast<f32>(std::min(frame.post.toneMapper, 5u)), 1.0f, 0.0f};
         struct SkyCap { PipelineHandle p; TextureHandle panorama, blurred; SamplerHandle sampler; SkyBlock u; }
             skyCap{direct, skyTexture, cap.prefiltered, cubeSampler_, skyDirect};
         graph.add_raster_pass("3d-fundo", PassStage::Scene3D, color, LoadOp::Clear, Vec4{0, 0, 0, 0},
@@ -3066,7 +3083,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         } else {
             const u32 sw = std::max(1u, width / 2), sh = std::max(1u, height / 2);
             const bool exportQuality = !lodHysteresis_;
-            struct SsrParams { Mat4 proj, invProj; Vec4 texel, cfg; } sp{};
+            struct SsrParams { Mat4 proj, invProj; Vec4 texel, cfg, holdout; } sp{};
             sp.proj = proj;
             sp.invProj = invProj;
             sp.texel = Vec4{1.0f / static_cast<f32>(sw), 1.0f / static_cast<f32>(sh), static_cast<f32>(sw), static_cast<f32>(sh)};
@@ -3081,20 +3098,89 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             const FGTexture ssr = graph.create_texture("3d-ssr", sd);
             const u64 nearest = shaders_->sampler(CommonSampler::NearestClamp).id;
             const u64 linear = shaders_->sampler(CommonSampler::LinearClamp).id;
-            struct SCap { PipelineHandle p; FGTexture depth, material, scene; u64 nearest; SsrParams u; }
-                scap{*ssrPipe, viewDepth, materialTex, sceneHdr, nearest, sp};
+            // Objeto com efeitos: nesta cena ele é um recorte, com cor zero, e o
+            // raio que o acerta leria preto. Como no reflexo do chão, ele aparece
+            // com o material dele, num alvo à parte que só o SSR lê.
+            FGTexture holdoutLit{};
+            std::vector<std::pair<const SceneBlock*, const SceneBlock*>> holdoutBlocks;
+            Draw* holdouts = arena.alloc_array<Draw>(std::max(opaqueCount, 1u));
+            u32 holdoutCount = 0;
+            for (u32 i = 0; holdouts && i < opaqueCount; ++i) {
+                Draw d = list[i];
+                if (!d.block || d.block->alpha.z <= 1.5f) continue;
+                const SceneBlock* lit = nullptr;
+                for (const auto& kv : holdoutBlocks) if (kv.first == d.block) { lit = kv.second; break; }
+                if (!lit) {
+                    auto* b = static_cast<SceneBlock*>(arena.alloc(sizeof(SceneBlock), 16));
+                    if (!b) continue;
+                    *b = *d.block;
+                    b->alpha.z = 0.0f;
+                    if (b->alpha.y > 2.5f) b->alpha.y = 1.0f;   // MASK por cobertura → descarte (1 amostra)
+                    b->aoParams.x = 0.0f;
+                    b->localAtlas.w = 0.0f;
+                    holdoutBlocks.emplace_back(d.block, b);
+                    lit = b;
+                }
+                // ground_reflection_key inverte as faces para o espelho; aqui não há espelho.
+                PipelineKey key = ground_reflection_key(groundKey(d));
+                key.frontFaceCCW = !key.frontFaceCCW;
+                auto pipe = shaders_->pipeline(key);
+                if (!pipe.ok()) continue;
+                d.block = lit;
+                d.pipeline = *pipe;
+                holdouts[holdoutCount++] = d;
+            }
+            if (holdoutCount) {
+                TextureDesc hd = sd;
+                TextureDesc hz = sd;
+                hz.format = SurfaceFormat::Depth32F;
+                hz.sampled = false;
+                hz.transient = true;
+                TextureDesc hm = sd;
+                hm.sampled = false;
+                const FGTexture display = graph.create_texture("3d-ssr-recorte-exibicao", hm);
+                holdoutLit = graph.create_texture("3d-ssr-recorte", hd);
+                const FGTexture holdoutDepth = graph.create_texture("3d-ssr-recorte-prof", hz);
+                GroundMeshContext x;
+                x.white = white_;
+                x.flatNormal = flatNormal_;
+                x.irradiance = cap.irradiance;
+                x.prefiltered = cap.prefiltered;
+                x.brdf = cap.brdf;
+                x.cubeSampler = cubeSampler_;
+                x.linearSampler = cap.linearSampler;
+                x.clampSampler = cap.clampSampler;
+                x.nearestSampler = cap.nearestSampler;
+                x.compareSampler = cap.compareSampler;
+                x.shadow = shadowTex;
+                x.joints = joints;
+                x.morph = morphBuf;
+                x.inst = instBuf;
+                struct HCap { Draw* draws; u32 count; GroundMeshContext x; } hcap{holdouts, holdoutCount, x};
+                const u32 hpass = graph.add_raster_pass_depth("3d-ssr-recorte", PassStage::Scene3D, display, LoadOp::Clear, Vec4{0, 0, 0, 0},
+                                                              holdoutDepth, LoadOp::Clear, false, 0.0f, [hcap](PassContext& pc) {
+                    ground_record_draws(pc.cmds, pc, hcap.draws, hcap.count, hcap.x, nullptr);
+                });
+                graph.set_color1(hpass, holdoutLit);
+                if (shadowTex.valid()) graph.read(hpass, shadowTex);
+                sp.holdout.x = 1.0f;
+            }
+            struct SCap { PipelineHandle p; FGTexture depth, material, scene, holdout; u64 nearest; SsrParams u; }
+                scap{*ssrPipe, viewDepth, materialTex, sceneHdr, holdoutLit.valid() ? holdoutLit : sceneHdr, nearest, sp};
             const u32 spass = graph.add_raster_pass("3d-ssr", PassStage::Scene3D, ssr, LoadOp::DontCare, Vec4{},
                                                     [scap](PassContext& pc) {
                 pc.cmds.bind_pipeline(scap.p);
                 pc.cmds.bind_texture(0, pc.texture(scap.depth), SamplerHandle{scap.nearest});
                 pc.cmds.bind_texture(1, pc.texture(scap.material), SamplerHandle{scap.nearest});
                 pc.cmds.bind_texture(2, pc.texture(scap.scene), SamplerHandle{scap.nearest});
+                pc.cmds.bind_texture(3, pc.texture(scap.holdout), SamplerHandle{scap.nearest});
                 pc.cmds.set_uniforms(&scap.u, sizeof(scap.u));
                 pc.cmds.draw(3);
             });
             graph.read(spass, viewDepth);
             graph.read(spass, materialTex);
             graph.read(spass, sceneHdr);
+            if (holdoutLit.valid()) graph.read(spass, holdoutLit);
             litScene = graph.create_texture("3d-hdr-ssr", graph.desc(sceneHdr));
             struct RCap { PipelineHandle p; FGTexture scene, ssr; u64 nearest, linear; } rcap{*ssrApply, sceneHdr, ssr, nearest, linear};
             const u32 rpass = graph.add_raster_pass("3d-ssr-aplica", PassStage::Scene3D, litScene, LoadOp::DontCare, Vec4{},
@@ -3362,7 +3448,7 @@ FGTexture SceneRenderer::build_post(FrameGraph& graph, const SceneFrame& frame, 
     const f32 mode = levelCount ? (additive ? 2.0f : 1.0f) : 0.0f;
     const f32 strength = additive ? intensity * 0.1f : std::min(intensity / 15.0f, 1.0f);
     struct ToneParams { Vec4 cfg; Vec4 bloom; };
-    const ToneParams tp{Vec4{exposure, strength, mode, post.toneMapper >= 1 ? 1.0f : 0.0f},
+    const ToneParams tp{Vec4{exposure, strength, mode, static_cast<f32>(std::min(post.toneMapper, 5u))},
                         Vec4{levelCount ? 1.0f / static_cast<f32>(levelCount) : 0.0f, 0, 0, 0}};
     TextureDesc od;
     od.width = width;

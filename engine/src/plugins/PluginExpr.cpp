@@ -172,7 +172,7 @@ bool Expr::compile(std::string_view text, const std::vector<ExprSymbol>& symbols
     code_.clear();
     constant_ = true;
     error.clear();
-    if (text.size() > kMaxExprBytes) { error = "expressao com mais de 512 caracteres"; return false; }
+    if (text.size() > kMaxExprBytes) { error = "expressao com mais de 8192 bytes"; return false; }
     ExprParser p{text, symbols, *this, error};
     if (!p.sum()) { code_.clear(); return false; }
     p.skip();

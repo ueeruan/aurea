@@ -170,7 +170,7 @@ struct GlyphInstance {
     Vec4 fill;     ///< linear, alfa
     Vec4 stroke;   ///< linear, alfa
     Mat4 xform = Mat4::identity();   ///< px da layer (Z = profundidade por caractere)
-    Vec4 misc;     ///< _, _, k, largura do contorno (px da layer)
+    Vec4 misc;     ///< recorte do miolo do contorno (1 - alfa do preenchimento), _, k, largura do contorno (px da layer)
     Vec4 extra;    ///< desfoque (px), _, _, _
 };
 static_assert(sizeof(GlyphInstance) == 160, "layout std430 do glifo");

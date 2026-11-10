@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Timeline por faixas da Edição (EditTimeline.kt) -->
+    <string name="edit_tool_select">Pilih</string>
+    <string name="edit_tool_ripple">Ripple</string>
+    <string name="edit_tool_roll">Roll</string>
+    <string name="edit_tool_razor">Pisau</string>
+    <string name="edit_tool_slip">Slip</string>
+    <string name="edit_tool_slide">Slide</string>
+    <string name="edit_snap">Snap</string>
+    <string name="edit_mark_in">Masuk</string>
+    <string name="edit_mark_out">Keluar</string>
+    <string name="edit_lift">Angkat</string>
+    <string name="edit_extract">Ekstrak</string>
+    <string name="edit_razor_all">Potong semua</string>
+    <string name="edit_add_video_track">+ Video</string>
+    <string name="edit_add_audio_track">+ Audio</string>
+    <string name="edit_remove_empty_tracks">Bersihkan trek</string>
+    <string name="edit_track_lock">Kunci trek</string>
+    <string name="edit_track_visible">Sembunyikan trek</string>
+    <string name="edit_track_mute">Bisukan trek</string>
+    <string name="edit_track_solo">Solo trek</string>
+    <string name="edit_track_target">Trek target %1$s</string>
+    <string name="edit_track_blocked">Edit itu tidak bisa dilakukan di sini.</string>
+    <string name="edit_mark_needed">Tetapkan titik masuk dan keluar dulu.</string>
+    <string name="edit_place_end">Di akhir</string>
+    <string name="edit_place_insert">Sisip</string>
+    <string name="edit_place_overwrite">Timpa</string>
+    <string name="edit_section_marks">Tanda</string>
+    <string name="edit_section_tracks">Trek</string>
+    <string name="edit_section_placement">Saat menambah media</string>
+</resources>

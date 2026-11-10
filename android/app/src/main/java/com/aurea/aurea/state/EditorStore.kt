@@ -157,7 +157,7 @@ data class PreviewState(
 /** `aurea::Errc::UnsupportedFormat` (core/Result.hpp). */
 private const val ERRC_UNSUPPORTED_FORMAT = 17L
 /** Linhas de parâmetro lidas por efeito (o iOS dobra o buffer quando enche; aqui cabe o maior efeito). */
-private const val MAX_EFFECT_PARAM_ROWS = 128
+private const val MAX_EFFECT_PARAM_ROWS = 256
 /** Quadros que o leitor de sequência do motor abre (media/ImageSequence.hpp). */
 private val SEQUENCE_FRAME_EXTENSIONS = setOf("png", "exr", "tga", "jpg", "jpeg", "bmp")
 /** `aurea::Errc::IoError` / `StorageFull` (TEMP_STORAGE_FULL). */
@@ -878,7 +878,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     // 0.3.0: a Correção de cor tem 79 parâmetros e a Constelação 65; com 64 linhas
     // o papel, o look e a intensidade (77, 78, 76) não chegavam à interface.
     private val rowBuffer = directBuffer(MAX_EFFECT_PARAM_ROWS * EffectParam.ROW_BYTES)
-    private val textBlob = directBuffer(32 * 1024)
+    private val textBlob = directBuffer(64 * 1024)
     private val status = EngineStatus()
 
     // =========================================================================
@@ -1636,6 +1636,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         editMode = engine.editMode()
         uiMode = engine.projectUiMode()
         mainTrackAnchor = engine.mainTrackAnchor()
+        editTimeline = if (uiMode != UI_MODE_COMPOSITION) com.aurea.aurea.editor.EditTimelineData.parse(engine.queryEditTimeline()) else null
         // Bug #6: a composição mudou por fora do abrir/fechar (desfazer com o grupo
         // aberto, "Tirar do grupo"): os ids de camada da outra composição não
         // valem aqui — a seleção, as trilhas abertas e as miniaturas recomeçam.
@@ -1771,6 +1772,19 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Model3D.kind) {
                 val f = FloatArray(Text3DInfo.FIELDS)
                 engine.queryText3d(id, f)?.let { novo -> Text3DInfo.of(novo, f, engine.queryText3dFont(id)).takeIf { !it.sameAs(text3d) } ?: text3d }
+            } else {
+                null
+            }
+        }
+        if (image3dPending && image3dPendingLayer != 0L && image3dPendingLayer != id) {
+            typingHandler.removeCallbacks(applyImage3d)
+            image3dPending = false
+            image3d?.let { reportText3D(engine.setImage3d(image3dPendingLayer, it)) }
+        }
+        image3d = text3dAfterRefresh(image3dPending, image3dPendingLayer, id, image3d) {
+            if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Model3D.kind) {
+                val f = FloatArray(Image3DField.COUNT)
+                if (engine.queryImage3d(id, f)) (f.takeIf { !it.contentEquals(image3d) } ?: image3d) else null
             } else {
                 null
             }
@@ -2617,6 +2631,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     /** Receita do texto 3D da camada principal (nulo = não é texto 3D). */
+    /** Receita da Imagem 3D escolhida (campos de [Image3DField]); nulo = não é Imagem 3D. */
+    var image3d by mutableStateOf<FloatArray?>(null)
     var text3d by mutableStateOf<Text3DInfo?>(null)
         private set
 
@@ -3297,6 +3313,75 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         return id
     }
 
+    /**
+     * + › 3D › PNG para 3D. A transparência da imagem dá a silhueta do objeto; a
+     * imagem vai em `projetos/formas3d/`, como as das formas 3D, e viaja com o projeto.
+     */
+    fun addImage3D(uri: Uri) {
+        if (!acceptsImport()) return
+        busyMessage = appText(R.string.image3d_creating)
+        launchImport launch@{
+            var opaque = false
+            val id = withContext(Dispatchers.IO) {
+                val file = saveShapeImage(uri) ?: return@withContext -17L   // Errc::UnsupportedFormat
+                opaque = file.extension == "jpg"
+                engine.addImage3d(file.absolutePath, appText(R.string.image3d_layer))
+            }
+            busyMessage = null
+            refreshNow()
+            if (id < 0) {
+                errorMessage = appText(if (id == -2L) R.string.image3d_err_empty else text3dErrorMessage((-id).toInt()) ?: R.string.msg_nao_foi_possivel_importar_a_imagem)
+                return@launch
+            }
+            select(id)
+            if (opaque) showToast(appText(R.string.image3d_no_alpha))
+        }
+    }
+
+    private var image3dPending = false
+    private var image3dPendingLayer = 0L
+    private val applyImage3d = Runnable {
+        val id = image3dPendingLayer.takeIf { image3dPending && it != 0L } ?: primary
+        if (id != null) image3d?.let { pushImage3D(id, it) }
+    }
+
+    /** Muda a receita. `lazy`: arrasto, a malha acompanha em passos de 90 ms. */
+    fun setImage3D(lazy: Boolean = false, change: (FloatArray) -> Unit) {
+        val id = primary ?: return
+        val next = image3d?.copyOf()?.also(change) ?: return
+        image3d = next
+        typingHandler.removeCallbacks(applyImage3d)
+        if (lazy) {
+            image3dPending = true
+            image3dPendingLayer = id
+            typingHandler.postDelayed(applyImage3d, 90)
+            return
+        }
+        pushImage3D(id, next)
+    }
+
+    /** O fim do gesto manda a receita pendente dentro do mesmo desfazer (ver flushText3D). */
+    private fun flushImage3D() {
+        if (destroyed || !ready || !image3dPending) return
+        typingHandler.removeCallbacks(applyImage3d)
+        val id = image3dPendingLayer.takeIf { it != 0L } ?: primary
+        val values = image3d
+        if (id != null && values != null) pushImage3D(id, values) else image3dPending = false
+    }
+
+    fun applyImage3DPreset(preset: Text3DPreset) {
+        val id = primary ?: return
+        flushImage3D()
+        reportText3D(engine.applyImage3dPreset(id, preset.ordinal))
+        refreshNow()
+    }
+
+    private fun pushImage3D(id: Long, values: FloatArray) {
+        image3dPending = false
+        reportText3D(engine.setImage3d(id, values))
+        refreshNow()
+    }
+
     /** Aplica a receita (a malha é gerada de novo). Digitação agrupada como no texto 2D. */
     fun setText3D(info: Text3DInfo, typing: Boolean = false, lazy: Boolean = false) {
         val id = primary ?: return
@@ -3453,7 +3538,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     // navegador, que pode estar compondo enquanto o laço de frame usa o
     // `rowBuffer`. Compartilhar os dois seria uma corrida silenciosa.
     private val specRows = directBuffer(MAX_EFFECT_PARAM_ROWS * EffectParam.ROW_BYTES)
-    private val specBlob = directBuffer(32 * 1024)
+    private val specBlob = directBuffer(64 * 1024)
     private val specCache = HashMap<Int, List<EffectParam>>()
 
     /**
@@ -3559,6 +3644,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun endGesture() {
         if (destroyed || !ready) return
         flushText3D()
+        flushImage3D()
         gestureDepth = max(0, gestureDepth - 1)
         if (gestureDepth == 0) { shapeGestureSent = false; sceneDragSnapshot = null }
         send { endUndoGroup() }
@@ -4447,6 +4533,16 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         return result
     }
 
+    fun effectGradient(effect: Int, param: Int): FloatArray =
+        primary?.let { engine.effectGradient(it, effect, param) } ?: FloatArray(0)
+
+    fun setEffectGradient(effect: Int, param: Int, stops: FloatArray): Boolean {
+        val layer = primary ?: return false
+        val ok = engine.setEffectGradient(layer, effect, param, stops)
+        if (ok) refreshNow()
+        return ok
+    }
+
     /** Losango de keyframe de um parâmetro de efeito (todos os componentes). */
     fun toggleEffectKeyframe(effectId: Int, param: EffectParam) {
         val id = primary ?: return
@@ -4791,6 +4887,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 }
                 // "Camada" da Edição: cada mídia numa linha própria, no cabeçote.
                 if (asOverlay) imported.forEach { if (it !in audioIds) engine.moveClipToOverlay(it, overlayFrame) }
+                else placeImportedClips(imported.filter { it !in audioIds }, overlayFrame)
                 refreshNow()
                 if (imported.isNotEmpty()) {
                     selection = imported.toCollection(LinkedHashSet())
@@ -7251,12 +7348,27 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     /** Imagem ou vídeo vira objeto da cena: sombra, reflexo e profundidade de verdade. */
-    fun layerTo3DObject(id: Long, name: String): Long {
-        val made = engine.layerTo3dObject(id, name)
-        if (made < 0) { showToast(appText(R.string.layer_to_3d_failed)); return -1 }
+    fun layerTo3DObject(id: Long, name: String) {
+        val image = layers.firstOrNull { it.id == id }?.kind == com.aurea.aurea.ui.theme.LayerType.Image.kind
+        val source = if (image) engine.layerSourcePath(id)?.takeIf { it.isNotEmpty() } else null
+        if (source == null || !acceptsImport()) { finishLayerTo3D(engine.layerTo3dObject(id, name)); return }
+        busyMessage = appText(R.string.image3d_creating)
+        launchImport {
+            // Imagem com transparência: a silhueta vira o objeto. A placa (sem alfa) fica para a opaca.
+            val made = withContext(Dispatchers.IO) {
+                val uri = if (source.contains("://")) Uri.parse(source) else Uri.fromFile(File(source))
+                val file = saveShapeImage(uri)?.takeIf { it.extension == "png" }
+                file?.let { engine.layerToImage3d(id, it.absolutePath, name) } ?: -1L
+            }
+            busyMessage = null
+            finishLayerTo3D(if (made >= 0) made else engine.layerTo3dObject(id, name))
+        }
+    }
+
+    private fun finishLayerTo3D(made: Long) {
+        if (made < 0) { showToast(appText(R.string.layer_to_3d_failed)); return }
         refreshNow()
         select(made)
-        return made
     }
 
     fun changeLayer3D(on: Boolean) {
@@ -7794,6 +7906,63 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      */
     var uiMode by mutableStateOf(UI_MODE_COMPOSITION)
         private set
+
+    /** Faixas e marcas da Edição (nulo na Composição). */
+    internal var editTimeline by mutableStateOf<com.aurea.aurea.editor.EditTimelineData?>(null)
+        private set
+    /** Onde a próxima mídia entra: 0 no fim da V1, 1 inserindo no cabeçote, 2 sobrepondo. */
+    var editPlacement by mutableIntStateOf(0)
+
+    fun editTrackClip(op: Int, layer: Long, frame: Long, track: Int): Boolean {
+        val ok = engine.editTrackClip(op, layer, frame, track)
+        if (!ok) showToast(appText(R.string.edit_track_blocked))
+        refreshNow()
+        return ok
+    }
+
+    fun setEditTrackFlag(track: Int, flag: Int, on: Boolean) {
+        engine.setEditTrackFlag(track, flag, on)
+        refreshNow()
+    }
+
+    fun addEditTrack(audio: Boolean) {
+        engine.addEditTrack(audio)
+        refreshNow()
+    }
+
+    /** Tira as faixas vazias acima das três de cada tipo (o motor recusa as que têm clipe). */
+    fun removeEmptyEditTracks() {
+        val tracks = editTimeline?.tracks ?: return
+        listOf(false, true).forEach { audio -> tracks.filter { it.audio == audio }.drop(3).reversed().forEach { engine.removeEditTrack(it.id) } }
+        refreshNow()
+    }
+
+    /** Marca a entrada ou a saída no cabeçote; de novo no mesmo quadro, tira a marca. */
+    fun toggleEditMark(which: Int) {
+        val data = editTimeline ?: return
+        val frame = playhead.toLong()
+        engine.setEditMark(which, if ((if (which == 0) data.markIn else data.markOut) == frame) -1L else frame)
+        refreshNow()
+    }
+
+    fun editMarkedRange(extract: Boolean) {
+        if (!engine.editMarkedRange(extract)) showToast(appText(R.string.edit_mark_needed))
+        refreshNow()
+    }
+
+    fun razorAllAtPlayhead() { editTrackClip(com.aurea.aurea.editor.TrackOp.RAZOR_ALL, 0L, playhead.toLong(), 0) }
+
+    /** Leva a mídia recém-importada (que entrou no fim da V1) para o cabeçote. */
+    private fun placeImportedClips(ids: List<Long>, from: Long) {
+        if (uiMode == UI_MODE_COMPOSITION || editPlacement == 0) return
+        val op = if (editPlacement == 1) com.aurea.aurea.editor.TrackOp.MOVE_INSERT else com.aurea.aurea.editor.TrackOp.MOVE
+        var frame = from
+        ids.forEach { id ->
+            refreshNow()
+            val length = layers.firstOrNull { it.id == id }?.let { (it.endFrame - it.startFrame).toLong() } ?: return@forEach
+            if (engine.editTrackClip(op, id, frame, 0)) frame += length
+        }
+    }
 
     /** O trecho de mídia mais fundo: a linha dele é a trilha principal da Edição (0 = nenhum). */
     var mainTrackAnchor by mutableStateOf(0L)
@@ -9569,6 +9738,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             refreshProjects()
+            com.aurea.aurea.effects.PluginRuntime.offerEmbedded(r.plugins)
             showToast(
                 if (r.missing > 0) appText(R.string.project_file_imported_missing, r.title, r.missing)
                 else appText(R.string.project_file_imported, r.title),
@@ -10066,6 +10236,23 @@ data class Text3DInfo(
 }
 
 /** Presets de material do texto 3D - o MESMO PBR, so parametros. */
+/** Índices da receita da Imagem 3D (scene3d::image3d_to_fields, a mesma ordem no iOS). */
+object Image3DField {
+    const val DEPTH = 0
+    const val THRESHOLD = 1
+    const val BEVEL = 2
+    const val BEVEL_WIDTH = 3
+    const val BEVEL_DEPTH = 4
+    const val BEVEL_ROUNDNESS = 5
+    const val BEVEL_SEGMENTS = 6
+    const val FRONT_METALLIC = 7
+    const val FRONT_ROUGHNESS = 8
+    const val SIDE = 9      // cada região: r, g, b, metal, rugosidade
+    const val BEVEL_REGION = 14
+    const val BACK = 19
+    const val COUNT = 24
+}
+
 enum class Text3DPreset(val labelRes: Int) {
     Chrome(R.string.pn_t3d_preset_chrome),
     Gold(R.string.pn_t3d_preset_gold),

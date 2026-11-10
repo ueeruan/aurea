@@ -59,7 +59,7 @@ void posed(const Composition& comp, const Layer& l, const scene3d::SceneAsset& a
 
 bool is_recipe(const std::string& src) noexcept {
     scene3d::Text3DSpec spec;
-    return src.empty() || scene3d::decode_text3d(src, spec) || scene3d::is_shape3d_source(src);
+    return src.empty() || scene3d::decode_text3d(src, spec) || scene3d::is_shape3d_source(src) || scene3d::is_image3d_source(src);
 }
 
 bool is_auto_spec(const std::string& spec) noexcept { return spec.rfind("arig1 a", 0) == 0; }

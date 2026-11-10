@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.5.1: oclusão ambiente (Render3DTab, Scene3DEnvironment.kt) -->
+    <string name="scene051_ao">Oclusão ambiente</string>
+    <string name="scene051_ao_hint">Escurece cantos, frestas e contatos. Reduz o próprio custo quando o aparelho aperta.</string>
+    <string name="scene051_ao_strength">Força</string>
+    <string name="scene051_ao_radius">Raio</string>
+</resources>

@@ -25,6 +25,8 @@ struct Panel3DView: View {
     @EnvironmentObject private var model: AureaModel
     @State private var sceneSettings: [Float] = []
     @State private var text3D: [String: Any] = [:]
+    /// Receita da Imagem 3D (scene3d::image3d_to_fields); vazia = não é Imagem 3D.
+    @State private var image3D: [Float] = []
     @State private var draft = ""
     @State private var environment: [Float] = [0, 1, 0]
     @State private var objectEnvironment: [NSNumber] = []
@@ -72,8 +74,10 @@ struct Panel3DView: View {
     private var isCamera: Bool { model.selectedLayer?.kind == 8 || model.selectedLayer?.kind == 9 }
     private var isShape: Bool { !isCamera && !model.engine.shape3D(layerId).isEmpty }
     private var isText: Bool { !isCamera && !text3D.isEmpty }
+    private var isImage: Bool { !isCamera && !image3D.isEmpty }
     private var tabs: [Panel3DTab] {
         if isCamera { return [.light, .render] }
+        if isImage { return [.material, .shape, .light, .render] }
         if isText { return [.material, .shape, .light, .anim, .render] }
         // 0.3.6: modelo importado ganha a aba Esqueleto (AutoRig 3D, ossos, IK, Motion Capture).
         if !isShape && model.selectedLayer?.kind == 10 { return [.light, .material, .parts, .rig, .render] }
@@ -95,7 +99,8 @@ struct Panel3DView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     switch currentTab {
                     case .material:
-                        if isText { textMaterialTab }
+                        if isImage { imageMaterialTab }
+                        else if isText { textMaterialTab }
                         else if isShape {
                             envSection("panel_material", id: "panel3d.material") {
                                 Shape3DPanelSection(layerId: layerId, page: .material)
@@ -112,7 +117,8 @@ struct Panel3DView: View {
                         objectShadowSection
                         interiorToggle.padding(.horizontal, 10)
                     case .shape:
-                        if isText { textShapeTab }
+                        if isImage { imageShapeTab }
+                        else if isText { textShapeTab }
                     case .light:
                         environmentTab
                     case .render:
@@ -286,6 +292,102 @@ struct Panel3DView: View {
         }
     }
 
+    // --- Imagem 3D (PNG para 3D) ------------------------------------------------
+    // Índices: scene3d::image3d_to_fields (Image3DField no Android).
+
+    private var imageMaterialTab: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            envSection("ui3d_ready_materials", id: "image3d.presets") {
+                horizontal {
+                    ForEach([6, 0, 1, 2, 3, 4, 5] + Array(7...13), id: \.self) { index in
+                        swatchChip(presetKeys[index], swatch: presetSwatches[index], thumb: presetThumb(index)) {
+                            finishEditing()
+                            model.reportText3D(model.engine.applyImage3DPreset(layerId, preset: UInt32(index)))
+                            refresh()
+                        }
+                        .accessibilityIdentifier("image3d.materialPreset.\(index)")
+                    }
+                }
+            }
+            // A cor da frente é a própria imagem.
+            envSection("image3d_front", id: "image3d.front") {
+                imageRow("pn_t3d_metallic", field: 7, max: 1, reset: 0, gesture: "metalico da frente")
+                imageRow("pn_t3d_roughness", field: 8, max: 1, reset: 0.45, gesture: "rugosidade da frente")
+            }
+            imageRegion("pn_t3d_region_side", id: "image3d.side", at: 9)
+            imageRegion("pn_t3d_region_bevel", id: "image3d.bevelRegion", at: 14)
+            imageRegion("image3d_back", id: "image3d.back", at: 19)
+        }
+    }
+
+    private func imageRegion(_ title: String, id: String, at: Int) -> some View {
+        envSection(title, id: id) {
+            row("panel_cor", height: 48) {
+                Button { openImageColor(at: at) } label: {
+                    AureaColorSwatch(color: AureaColorSpace.color([imageNumber(at), imageNumber(at + 1), imageNumber(at + 2), 1]))
+                        .frame(width: 30, height: 30).clipShape(RoundedRectangle(cornerRadius: 6))
+                }.buttonStyle(AureaPressStyle()).accessibilityLabel(AureaText.t("panel_cor"))
+            }
+            imageRow("pn_t3d_metallic", field: at + 3, max: 1, reset: 0, gesture: "metalico da imagem 3D")
+            imageRow("pn_t3d_roughness", field: at + 4, max: 1, reset: 0.35, gesture: "rugosidade da imagem 3D")
+        }
+    }
+
+    private var imageShapeTab: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            envSection("ui3d_extrusion", id: "image3d.extrusion") {
+                imageRow("pn_depth", field: 0, max: 2, reset: 0.14, gesture: "profundidade da imagem 3D")
+                note("image3d_depth_hint")
+            }
+            envSection("image3d_silhouette", id: "image3d.silhouette") {
+                imageRow("image3d_threshold", field: 1, max: 0.95, reset: 0.5, gesture: "corte do alfa")
+                note("image3d_threshold_hint")
+            }
+            envSection("pn_t3d_bevel", id: "image3d.bevel", on: imageNumber(2) > 0.5, onSwitch: { on in setImage { $0[2] = on ? 1 : 0 } }) {
+                imageRow("pn_t3d_bevel_width", field: 3, max: 0.1, reset: 0.012, gesture: "chanfro", step: 0.05, decimals: 1)
+                imageRow("pn_t3d_bevel_depth", field: 4, max: 0.1, reset: 0.012, gesture: "chanfro", step: 0.05, decimals: 1)
+                imageRow("pn_t3d_bevel_roundness", field: 5, max: 1, reset: 1, gesture: "arredondamento")
+                row("pn_t3d_bevel_segments", height: 48) {
+                    HStack(spacing: 6) {
+                        ForEach([1, 2, 3, 5, 8], id: \.self) { count in
+                            T3DChip(label: "\(count)", on: Int(imageNumber(6)) == count) { setImage { $0[6] = Float(count) } }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func imageRow(_ label: String, field: Int, max: Float, reset: Float, gesture: String,
+                          step: Float = 0.5, decimals: Int = 0) -> some View {
+        let key = "image3d.\(field)"
+        return T3DRow(label: AureaText.t(label), value: imageNumber(field) * 100, step: step, range: 0...(max * 100),
+               unit: "%", decimals: decimals, reset: reset * 100, selected: selectedScalar == key, onSelect: { selectedScalar = key },
+               onStart: { beginContinuous(gesture) }, onValue: { value in lazyImage { $0[field] = value / 100 } }, onEnd: finishEditing,
+               onCommit: { value in beginContinuous(gesture); lazyImage { $0[field] = value / 100 }; finishEditing() })
+    }
+    private func imageNumber(_ index: Int) -> Float { image3D.indices.contains(index) ? image3D[index] : 0 }
+    private func lazyImage(_ change: (inout [Float]) -> Void) {
+        guard !image3D.isEmpty else { return }
+        change(&image3D)
+        schedule(.image(layerId, image3D), delay: 0.09)
+    }
+    private func setImage(_ change: (inout [Float]) -> Void) {
+        finishEditing()
+        guard !image3D.isEmpty else { return }
+        change(&image3D)
+        model.reportText3D(model.engine.setImage3D(layerId, values: image3D.map { NSNumber(value: $0) }))
+        refresh()
+    }
+    private func openImageColor(at: Int) {
+        beginContinuous("cor da imagem 3D")
+        let target = layerId
+        model.colorSheet = ColorSheetRequest(title: AureaText.t("ds_cor"), initial: [imageNumber(at), imageNumber(at + 1), imageNumber(at + 2), 1], onChange: { r, g, b, _ in
+            guard layerId == target else { return }
+            lazyImage { $0[at] = r; $0[at + 1] = g; $0[at + 2] = b }
+        }, onDone: finishEditing)
+    }
+
     /// Linha de valor do texto 3D em % (1 = 100 %): arrasto em passos leves (a
     /// malha acompanha), um passo de desfazer por gesto; teclado e ↺ gravam.
     private func textRow(_ label: String, key: String, max: Float, reset: Float, gesture: String,
@@ -399,6 +501,20 @@ struct Panel3DView: View {
                         ForEach(Array(toneMapKeys.enumerated()), id: \.offset) { i, key in
                             let on = Int(sceneSettings[3]) == i
                             envChoice(AureaText.t(key), on: on, id: "env3d.tonemap.\(i)") { if !on { finishEditing(); setScene(3, Float(i)) } }
+                        }
+                    }
+                }
+                // 0.5.1: oclusão ambiente (par do Render3DTab do Android).
+                if sceneSettings.count >= 18 {
+                    envSection("scene051_ao", hint: "scene051_ao_hint", id: "env3d.ao") {
+                        envToggle("scene051_ao", on: sceneSettings[15] > 0.5, id: "env3d.ao.switch") { value in finishEditing(); setScene(13, value ? 1 : 0) }
+                        if sceneSettings[15] > 0.5 {
+                            sceneRow("scene051_ao_strength", value: sceneSettings[16] * 100, range: 0...300, unit: "%", reset: 100, gesture: "oclusao 3D") { value in
+                                setScene(14, value / 100)
+                            }
+                            sceneRow("scene051_ao_radius", value: sceneSettings[17] * 100, range: 2...20, unit: "%", reset: 7, gesture: "oclusao 3D", step: 0.5, decimals: 1) { value in
+                                setScene(15, value / 100)
+                            }
                         }
                     }
                 }
@@ -912,6 +1028,8 @@ struct Panel3DView: View {
             model.reportText3D(model.engine.setText3D(forLayer: id, property: key, stringValue: nil, numberValue: value))
         case let .color(id, region, value):
             model.reportText3D(model.engine.setText3DColor(id, region: region, values: value.map { NSNumber(value: $0) }))
+        case let .image(id, values):
+            model.reportText3D(model.engine.setImage3D(id, values: values.map { NSNumber(value: $0) }))
         case let .content(id, content):
             if !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 model.reportText3D(model.engine.setText3D(forLayer: id, property: "content", stringValue: content, numberValue: 0))
@@ -930,6 +1048,7 @@ struct Panel3DView: View {
         sceneSettings = model.engine.sceneSettings().map(\.floatValue)
         if pending == nil {
             text3D = model.engine.text3D(forLayer: layerId) ?? [:]
+            image3D = (model.engine.image3D(forLayer: layerId) ?? []).map(\.floatValue)
             if !typingActive && !editingText { draft = text3D["content"] as? String ?? "" }
         }
         let values = model.engine.environment().map(\.floatValue)
@@ -1027,6 +1146,7 @@ private enum Text3DChange {
     case number(Int64, String, Float)
     case color(Int64, UInt32, [Float])
     case content(Int64, String)
+    case image(Int64, [Float])
 }
 
 private struct T3DChip: View {

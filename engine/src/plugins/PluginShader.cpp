@@ -16,6 +16,7 @@
 // =============================================================================
 #include "PluginInternal.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 
@@ -98,6 +99,23 @@ vec3 aurea_world_to_comp(vec3 p) {
 vec3 aurea_world_to_view(vec3 p) { return (aurea.view * vec4(p, 1.0)).xyz; }
 )GLSL";
 
+// Formato 3: só entram no cabeçalho de quem usa (o dos outros não muda, e o cache de SPIR-V segue valendo).
+constexpr const char* kHelpersCurve = R"GLSL(
+float aurea_curve_at(int first, float t) {
+    float x = clamp(t, 0.0, 1.0) * 63.0;
+    int i = int(floor(x)), j = min(i + 1, 63);
+    float a = aurea.params[first + i / 4][i % 4], b = aurea.params[first + j / 4][j % 4];
+    return mix(a, b, x - float(i));
+}
+)GLSL";
+constexpr const char* kHelpersGradient = R"GLSL(
+vec4 aurea_gradient_at(int first, float t) {
+    float x = clamp(t, 0.0, 1.0) * 31.0;
+    int i = int(floor(x)), j = min(i + 1, 31);
+    return mix(aurea.params[first + i], aurea.params[first + j], x - float(i));
+}
+)GLSL";
+
 std::string param_macro(const ParamDecl& p, u32 slot) {
     const std::string ref = "aurea.params[" + std::to_string(slot) + "]";
     switch (p.kind) {
@@ -131,6 +149,17 @@ std::string shader_header(const Manifest& m, u32 pass) {
     for (usize i = 0; i < m.textures.size(); ++i)
         h += "layout(set = 0, binding = " + std::to_string(1 + p.inputs.size() + i) + ") uniform sampler2D "
              + m.textures[i].name + ";\n";
+    // Formato 3, depois das imagens do pacote e na mesma ordem em PluginEffects.cpp.
+    u32 nextBinding = static_cast<u32>(1 + p.inputs.size() + m.textures.size());
+    if (m.history) {
+        h += "layout(set = 0, binding = " + std::to_string(nextBinding++) + ") uniform sampler2D aurea_history;\n#define AUREA_HISTORY 1\n";
+    }
+    if (m.audio) {
+        h += "layout(set = 0, binding = " + std::to_string(nextBinding++) + ") uniform sampler2D aurea_audio_spectrum;\n#define AUREA_AUDIO 1\n";
+    }
+    for (const ParamDecl& d : m.params)
+        if (d.kind == ParamKind::LayerImage)
+            h += "layout(set = 0, binding = " + std::to_string(nextBinding++) + ") uniform sampler2D " + d.id + ";\n";
     h += "#define getFile(name) (name)\n";
     h += "#define AUREA_TEXTURE_COUNT " + std::to_string(m.textures.size()) + "\n";
     h += "layout(set = 0, binding = 12, std140) uniform AureaPluginBlock {\n"
@@ -154,12 +183,22 @@ std::string shader_header(const Manifest& m, u32 pass) {
     u32 layerSlot = 0;
     for (u32 i = 0; i < m.params.size(); ++i) {
         // "layer": o nome vira a POSIÇÃO da camada ligada (aurea_layer_*(nome)).
-        if (m.params[i].kind == ParamKind::Layer) h += "#define " + m.params[i].id + " " + std::to_string(layerSlot++) + "\n";
-        else h += "#define " + m.params[i].id + " " + param_macro(m.params[i], i) + "\n";
+        const ParamDecl& d = m.params[i];
+        const u32 slot = param_slot_at(m, i);
+        if (d.kind == ParamKind::Layer) h += "#define " + d.id + " " + std::to_string(layerSlot++) + "\n";
+        else if (d.kind == ParamKind::Curve) h += "#define " + d.id + "(t) aurea_curve_at(" + std::to_string(slot) + ", t)\n";
+        else if (d.kind == ParamKind::Gradient) h += "#define " + d.id + "(t) aurea_gradient_at(" + std::to_string(slot) + ", t)\n";
+        else if (d.kind == ParamKind::LayerImage) h += "#define " + d.id + "_connected (aurea.params[" + std::to_string(slot) + "].x > 0.5)\n";
+        else h += "#define " + d.id + " " + param_macro(d, slot) + "\n";
     }
+    if (m.audio) h += "#define AUREA_AUDIO_PEAK (aurea.params[" + std::to_string(param_slots(m) - 1) + "].x)\n"
+                      "#define aurea_audio(band) (texture(aurea_audio_spectrum, vec2((band), 0.5)).r)\n";
     if (m.scene3d) h += "#define AUREA_SCENE3D 1\n";
     h += kHelpers;
     if (m.scene3d) h += kHelpers3D;
+    const auto uses = [&](ParamKind k) { return std::any_of(m.params.begin(), m.params.end(), [&](const ParamDecl& d) { return d.kind == k; }); };
+    if (uses(ParamKind::Curve)) h += kHelpersCurve;
+    if (uses(ParamKind::Gradient)) h += kHelpersGradient;
     return h;
 }
 

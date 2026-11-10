@@ -807,6 +807,13 @@ struct Layer {
     /// é por ele que o ripple magnético anda: aparar e apagar mexem só nos
     /// vizinhos de `trackId`, nunca em quem está em outra linha.
     u32      trackId = 0;
+    /// Faixa A onde o áudio ligado deste vídeo aparece (0 = a primeira faixa A).
+    u32      audioTrackId = 0;
+    /// O áudio já virou um clipe próprio: a faixa A não mostra mais este vídeo.
+    bool     audioUnlinked = false;
+    /// Derivados da faixa (olho, mudo, solo); não vão para o arquivo.
+    bool     trackHidden = false;
+    bool     trackMuted = false;
     /// LINHA MAGNÉTICA: os cortes desta camada se comportam como uma faixa de
     /// montagem de vídeo, não como uma camada solta no tempo.
     ///

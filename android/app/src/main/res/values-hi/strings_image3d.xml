@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- PNG para 3D (AddLayerPanel.kt, Element3DPanel.kt) -->
+    <string name="image3d_add" formatted="false">PNG से 3D</string>
+    <string name="image3d_layer" formatted="false">3D इमेज</string>
+    <string name="image3d_creating" formatted="false">3D ऑब्जेक्ट बन रहा है…</string>
+    <string name="image3d_err_empty" formatted="false">यह इमेज पूरी तरह पारदर्शी है।</string>
+    <string name="image3d_no_alpha" formatted="false">इमेज में पारदर्शिता नहीं है, इसलिए ऑब्जेक्ट फ़्रेम के आकार का बना। बिना बैकग्राउंड वाला PNG इस्तेमाल करें।</string>
+    <string name="image3d_front" formatted="false">सामने</string>
+    <string name="image3d_back" formatted="false">पीछे</string>
+    <string name="image3d_silhouette" formatted="false">सिल्हूट</string>
+    <string name="image3d_threshold" formatted="false">अल्फ़ा कटऑफ़</string>
+    <string name="image3d_threshold_hint" formatted="false">तय करता है कि अर्ध-पारदर्शी हिस्सों में किनारा कहाँ बने।</string>
+    <string name="image3d_depth_hint" formatted="false">100% = इमेज की ऊँचाई।</string>
+    <string name="image3d_from_photos" formatted="false">फ़ोटो</string>
+    <string name="image3d_from_files" formatted="false">फ़ाइलें</string>
+</resources>

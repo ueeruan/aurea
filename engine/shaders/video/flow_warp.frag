@@ -2,17 +2,18 @@
 // =============================================================================
 //  Aurea / shaders / video / flow_warp.frag
 //
-//  Quadro intermediário por movimento de pixels (0.1.8: nos DOIS sentidos).
+//  Quadro intermediário por movimento de pixels (Twixtor), nos DOIS sentidos.
 //  No instante t entre o quadro atual A e o seguinte B:
 //    * de A: o pixel que chega em p saiu de xa = p − t·F(xa)  (F = A → B);
 //    * de B: o pixel que chega em p saiu de xb = p − (1−t)·G(xb)  (G = B → A).
-//  Os dois pontos fixos são resolvidos por iteração. Se a iteração NÃO
-//  converge (o fluxo no ponto achado não é o que levou até lá), aquele lado
-//  não tem o pixel no instante t — ele está coberto (some) ou ainda não
-//  apareceu. É assim que a borda de um objeto que passa por cima do fundo sai
-//  limpa: o fundo que vai ser coberto vem de A, o que aparece vem de B. Onde
-//  os dois lados valem, a mistura pesa pela proximidade no tempo.
-//  Leituras do fluxo reaproveitadas: 6 por lado (o passe mais repetido).
+//  Os dois pontos fixos são resolvidos por iteração. Um lado só vale se a
+//  iteração converge, a ida e volta fecha e a origem está dentro do quadro:
+//  sem isso o pixel está coberto ou ainda não apareceu naquele lado. Assim o
+//  fundo que vai ser coberto vem de A e o que aparece vem de B.
+//
+//  Vetor errado é pior que fantasma: deforma o objeto. Quando nenhum lado vale,
+//  ou quando os dois valem mas trazem imagens diferentes, o pixel cai na
+//  mistura simples dos quadros no lugar, que não entorta nada.
 // =============================================================================
 #include "../common/bindings.glsl"
 
@@ -27,9 +28,20 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 blend;   // x = t, yz = uv por pixel do nível base (converte o fluxo em uv)
 } p;
 
+float inside(vec2 uv) {
+    return (uv.x >= 0.0 && uv.y >= 0.0 && uv.x <= 1.0 && uv.y <= 1.0) ? 1.0 : 0.0;
+}
+
+float tone(vec3 c) { return sqrt(max(dot(c, vec3(0.2126, 0.7152, 0.0722)), 0.0)); }
+
 void main() {
     const float t = p.blend.x;
     const vec2 scale = p.blend.yz;
+    // Corte de cena (flow_pack.frag): não existe quadro intermediário.
+    if (textureLod(u_flow, v_uv, 0.0).r > 5000.0) {
+        o_color = t < 0.5 ? texture(u_a, v_uv) : texture(u_b, v_uv);
+        return;
+    }
     // Lado A: ponto fixo, resíduo (o fluxo no ponto achado) e ida e volta.
     vec2 fa = textureLod(u_flow, v_uv, 0.0).rg;
     for (int i = 0; i < 3; ++i) fa = textureLod(u_flow, v_uv - t * fa * scale, 0.0).rg;
@@ -46,15 +58,14 @@ void main() {
     const float cb = length(gxb + textureLod(u_flow, xb + gxb * scale, 0.0).rg);
     const vec4 a = texture(u_a, xa);
     const vec4 b = texture(u_b, xb);
-    // Validade pelo resíduo (σ ≈ 0,6 px do nível) e pela ida e volta; peso no
-    // tempo: o lado mais perto conta mais.
-    const float va = exp(-ra * ra * 1.4) * mix(1.0, exp(-ca * ca * 0.25), 0.5);
-    const float vb = exp(-rb * rb * 1.4) * mix(1.0, exp(-cb * cb * 0.25), 0.5);
+    const float va = inside(xa) * exp(-ra * ra * 1.4) * exp(-ca * ca * 0.3);
+    const float vb = inside(xb) * exp(-rb * rb * 1.4) * exp(-cb * cb * 0.3);
     const float wa = (1.0 - t) * va + 1e-4;
     const float wb = t * vb + 1e-4;
-    const vec4 o = (a * wa + b * wb) / (wa + wb);
-    // Os dois lados sem o pixel (fluxo errado demais): o lado mais confiável,
-    // com transição suave para não piscar.
+    const vec4 moved = (a * wa + b * wb) / (wa + wb);
+    const vec4 still = mix(texture(u_a, v_uv), texture(u_b, v_uv), t);
+    // Só compara as imagens onde os dois lados afirmam ter o pixel.
+    const float disagree = min(va, vb) * smoothstep(0.10, 0.28, abs(tone(a.rgb) - tone(b.rgb)));
     const float lost = 1.0 - smoothstep(0.02, 0.15, max(va, vb));
-    o_color = mix(o, va >= vb ? a : b, lost);
+    o_color = mix(moved, still, max(lost, disagree));
 }

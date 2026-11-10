@@ -9,14 +9,17 @@ struct FlowTimeRig {
     TextureHandle target{};
     u32 w, h;
     std::vector<u16> half;
-    FlowTimeRig(SyntheticPattern pattern, u32 width, u32 height) : factory([&] {
+    FlowTimeRig(SyntheticPattern pattern, u32 width, u32 height) : FlowTimeRig([&] {
         SyntheticConfig cfg;
         cfg.width = width;
         cfg.height = height;
         cfg.frameCount = 300;
         cfg.pattern = pattern;
         return cfg;
-    }()), w(width), h(height), half(static_cast<usize>(width) * height * 4) {
+    }()) {}
+    explicit FlowTimeRig(const SyntheticConfig& config) : factory(config), w(config.width), h(config.height),
+        half(static_cast<usize>(config.width) * config.height * 4) {
+        const u32 width = w, height = h;
         EngineConfig ec;
         ec.backend = new vk::Backend();
         ec.backendConfig.framesInFlight = 2;

@@ -11,6 +11,7 @@
 //      manifest.txt        "aurea-project <versão>" + título, app, mídias
 //      project.aurea       o projeto, byte a byte
 //      media/NNN-nome.ext  a mídia (opção "Incluir mídia")
+//      plugins/ID-VER.aureaplugin  os plugins que o projeto usa (idem)
 //
 //  Importar NUNCA sobrescreve: quem chama escolhe um caminho livre para o
 //  `.aurea` e uma pasta nova para a mídia. A mídia que veio no pacote é
@@ -24,6 +25,7 @@
 #include "aurea/core/Result.hpp"
 #include "aurea/core/Types.hpp"
 #include "aurea/project/Asset.hpp"
+#include "aurea/project/Project.hpp"
 
 #include <string>
 #include <vector>
@@ -56,6 +58,16 @@ struct MediaFile {
     std::string name;
 };
 
+/// Um plugin instalado que vai no pacote: `directory` é a pasta dele.
+struct PluginFile {
+    std::string id;
+    std::string version;
+    std::string directory;
+};
+
+/// Plugins que o `.aurea` usa (sem abrir no editor).
+[[nodiscard]] Status list_plugins(const std::string& aureaPath, std::vector<PluginRef>& out) noexcept;
+
 struct ExportResult {
     u32 included = 0;
     u32 skipped = 0;       ///< pedida mas ilegível agora (fica de fora, sem falhar)
@@ -66,13 +78,17 @@ struct ExportResult {
 /// metade). `media` vazio = só o projeto.
 [[nodiscard]] Status write_package(const std::string& aureaPath, const std::string& outPath,
                                    const std::string& title, const std::string& appVersion,
-                                   const std::vector<MediaFile>& media, ExportResult* result = nullptr) noexcept;
+                                   const std::vector<MediaFile>& media, ExportResult* result = nullptr,
+                                   const std::vector<PluginFile>& plugins = {}) noexcept;
 
 struct ImportResult {
     std::string title;       ///< título gravado no pacote (vazio num `.aurea` solto)
     std::string appVersion;  ///< versão do app que exportou
     u32 relinked = 0;        ///< mídias religadas aos arquivos extraídos
     u32 missing = 0;         ///< mídias do projeto que não vieram no pacote
+    /// Plugins que vieram no pacote: `directory` aqui é o `.aureaplugin` extraído.
+    /// O motor não instala: quem instala é a pessoa, na folha de consentimento.
+    std::vector<PluginFile> plugins;
 };
 
 /// Lê o pacote (ou um `.aurea` solto): grava o projeto em `projectOut` (que

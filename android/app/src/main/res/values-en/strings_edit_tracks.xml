@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Timeline por faixas da Edição (EditTimeline.kt) -->
+    <string name="edit_tool_select">Select</string>
+    <string name="edit_tool_ripple">Ripple</string>
+    <string name="edit_tool_roll">Roll</string>
+    <string name="edit_tool_razor">Razor</string>
+    <string name="edit_tool_slip">Slip</string>
+    <string name="edit_tool_slide">Slide</string>
+    <string name="edit_snap">Snap</string>
+    <string name="edit_mark_in">In</string>
+    <string name="edit_mark_out">Out</string>
+    <string name="edit_lift">Lift</string>
+    <string name="edit_extract">Extract</string>
+    <string name="edit_razor_all">Cut all</string>
+    <string name="edit_add_video_track">+ Video</string>
+    <string name="edit_add_audio_track">+ Audio</string>
+    <string name="edit_remove_empty_tracks">Clear tracks</string>
+    <string name="edit_track_lock">Lock track</string>
+    <string name="edit_track_visible">Hide track</string>
+    <string name="edit_track_mute">Mute track</string>
+    <string name="edit_track_solo">Solo track</string>
+    <string name="edit_track_target">Target track %1$s</string>
+    <string name="edit_track_blocked">That edit does not fit here.</string>
+    <string name="edit_mark_needed">Set the In and Out points first.</string>
+    <string name="edit_place_end">At end</string>
+    <string name="edit_place_insert">Insert</string>
+    <string name="edit_place_overwrite">Overwrite</string>
+    <string name="edit_section_marks">Marks</string>
+    <string name="edit_section_tracks">Tracks</string>
+    <string name="edit_section_placement">When adding media</string>
+</resources>

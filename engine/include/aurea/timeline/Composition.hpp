@@ -99,6 +99,12 @@ struct PostProcessSettings {
     /// Exposição do grupo 3D (multiplicador linear da luz da cena; 1 = neutro).
     /// Vale para modelos e céu; o 2D dentro da cena não muda.
     f32  exposure = 1.0f;
+    // --- v62 -----------------------------------------------------------------
+    /// Oclusão ambiente (GTAO) do grupo 3D. Campos novos porque `ssao`, acima,
+    /// nasce desligado em todo projeto já salvo e nunca teve efeito.
+    bool aoEnabled = true;
+    f32  aoStrength = 1.0f;   ///< 0..3 (1 = padrão)
+    f32  aoRadius = 0.07f;    ///< fração da altura da tela, 0,02..0,2
 };
 
 /// Motion blur da composição (o global; cada layer multiplica por seu próprio).
@@ -145,6 +151,16 @@ inline constexpr f64 kMaxCompositionFps = 240.0;
     if (fps - whole < 1e-4 && whole - fps < 1e-4) fps = whole;
     return fps < kMinCompositionFps ? kMinCompositionFps : fps > kMaxCompositionFps ? kMaxCompositionFps : fps;
 }
+
+/// Uma faixa da interface de Edição. Os clipes dela têm `Layer::trackId == id`.
+struct EditTrack {
+    u32  id = 0;
+    bool audio = false;
+    bool locked = false;
+    bool muted = false;   ///< vídeo: olho apagado; áudio: mudo
+    bool solo = false;
+    bool target = true;   ///< entra em cortar tudo, levantar e extrair
+};
 
 class Composition {
 public:
@@ -314,6 +330,25 @@ public:
     /// removidos.
     i64 close_gaps_in_track(FrameIndex from, FrameIndex to, u32 track) noexcept;
 
+    // --- Faixas da Edição (V1, V2…, A1, A2…) -----------------------------------
+    /// Vídeo primeiro (V1 embaixo), depois áudio. `EditTrack::id` é o `Layer::trackId`.
+    [[nodiscard]] const std::vector<EditTrack>& edit_tracks() const noexcept { return editTracks_; }
+    [[nodiscard]] const EditTrack* edit_track(u32 id) const noexcept;
+    [[nodiscard]] EditTrack* edit_track(u32 id) noexcept;
+    u32 add_edit_track(bool audio);
+    void remove_edit_track(u32 id) noexcept;
+    /// Leitura do arquivo: a faixa como foi gravada (bits de Engine::query_edit_timeline).
+    void restore_edit_track(u32 id, u32 bits);
+    /// Garante as faixas e põe cada clipe numa faixa do tipo dele, sem dois se
+    /// cobrirem. Só mexe em quem está fora do lugar; devolve se algo mudou.
+    bool arrange_edit_tracks();
+    /// Recalcula olho, mudo e solo nos clipes (`active` falso apaga, na Composição).
+    void apply_edit_track_state(bool active) noexcept;
+    /// Entrada e saída da sequência (−1 = sem marca).
+    [[nodiscard]] i64 mark_in() const noexcept { return markIn_; }
+    [[nodiscard]] i64 mark_out() const noexcept { return markOut_; }
+    void set_marks(i64 in, i64 out) noexcept { markIn_ = in; markOut_ = out; }
+
     // --- Marcas ----------------------------------------------------------------
     /// Sempre em ordem de frame; no máximo uma marca por frame.
     [[nodiscard]] const std::vector<Marker>& markers() const noexcept { return markers_; }
@@ -381,6 +416,10 @@ private:
     /// Próxima LINHA livre. Cresce e nunca é reaproveitada: um trecho que
     /// ficou sozinho na linha dele não passa a dividi-la com um trecho novo.
     u32                 nextTrackId_ = 1;
+    std::vector<EditTrack> editTracks_;
+    bool                editTracksActive_ = false;   ///< a interface de Edição está aberta (não vai para o arquivo)
+    i64                 markIn_ = -1;
+    i64                 markOut_ = -1;
 
     u64 revision_       = 1;
     u64 formatRevision_ = 1;

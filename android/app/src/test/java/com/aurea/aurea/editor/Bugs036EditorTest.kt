@@ -10,41 +10,40 @@ import org.junit.Test
 /** 0.3.6 (editor): Edição, transporte, tamanho do texto e o ícone de corte. */
 class Bugs036EditorTest {
     // Os mesmos números do desenho da Edição em 1× (régua 26 + 8, principal 56, linha 34, folga 6, base 12).
-    private fun layout(mains: List<Boolean>, hasAudio: Boolean, compact: Boolean) =
-        EditRowLayout.compute(mains, hasAudio, compact, rulerTop = 34f, main = 56f, row = 34f, gap = 6f, pad = 12f)
-
-    @Test fun editRowsKeepTheDrawingGeometry() {
-        // Principal + texto + áudio, sem a faixa "+ áudio" (já há áudio).
-        val l = layout(listOf(true, false, false), hasAudio = true, compact = false)
-        assertEquals(34f, l.rowTops[0], 0.01f)
-        assertEquals(34f + 56f + 6f, l.rowTops[1], 0.01f)
-        assertEquals(34f + 56f + 6f + 34f + 6f, l.rowTops[2], 0.01f)
-        assertEquals(l.rowTops[2] + 34f + 12f, l.contentBottom, 0.01f)
-        // Sem áudio a faixa "+ áudio" ocupa uma linha embaixo da principal (fora do compacto).
-        val lane = layout(listOf(true, false), hasAudio = false, compact = false)
-        assertEquals(34f + 56f + 6f + 34f + 6f, lane.rowTops[1], 0.01f)
-        val compact = layout(listOf(true, false), hasAudio = false, compact = true)
-        assertEquals(34f + 56f + 6f, compact.rowTops[1], 0.01f)
-        // Sem trilha principal: a dica vazia ocupa o lugar dela.
-        val empty = layout(listOf(false), hasAudio = false, compact = false)
-        assertEquals(34f + 56f + 6f, empty.rowTops[0], 0.01f)
+    @Test fun laneLayoutStopsWhenTheLastTrackReachesTheBottom() {
+        val l = EditLaneLayout.compute(6, rulerH = 26f, laneH = 44f, gap = 1f)
+        assertEquals(26f, l.tops[0], 0f)
+        assertEquals(71f, l.tops[1], 0f)
+        assertEquals(296f, l.bottom, 0f)
+        assertEquals(2, l.laneAt(120f))
+        assertEquals(-1, l.laneAt(10f))
+        assertEquals(96f, EditLaneLayout.maxScroll(l.bottom, 200f), 0f)
+        assertEquals(0f, EditLaneLayout.maxScroll(120f, 400f), 0f)
+        assertEquals(0f, EditLaneLayout.maxScroll(900f, 0f), 0f)
     }
 
-    @Test fun scrollStopsWhenTheLastRowReachesTheBottom() {
-        val l = layout(List(6) { it == 0 }, hasAudio = true, compact = false)
-        val viewport = 200f
-        val max = EditRowLayout.maxScroll(l.contentBottom, viewport)
-        assertEquals(l.contentBottom - viewport, max, 0.01f)
-        // Poucas fileiras: não rola. Antes de medir: não rola.
-        assertEquals(0f, EditRowLayout.maxScroll(120f, 400f), 0f)
-        assertEquals(0f, EditRowLayout.maxScroll(900f, 0f), 0f)
+    @Test fun snapGoesToTheNearestTargetInReach() {
+        val targets = intArrayOf(100, 130)
+        assertEquals(100, snapFrame(103, targets, 5f))
+        assertEquals(130, snapFrame(127, targets, 5f))
+        assertEquals(115, snapFrame(115, targets, 5f))
     }
 
-    @Test fun oneAxisPerDrag() {
-        assertEquals(EditPanAxis.TIME, EditPanAxis.of(20f, 5f))
-        assertEquals(EditPanAxis.TIME, EditPanAxis.of(-20f, 19f))
-        assertEquals(EditPanAxis.TIME, EditPanAxis.of(10f, 10f))
-        assertEquals(EditPanAxis.ROWS, EditPanAxis.of(3f, -12f))
+    @Test fun timelinePayloadBecomesLanesFromTopToBottom() {
+        val raw = longArrayOf(
+            4, 1, 12, -1,
+            10, 16L, 11, 18L,
+            20, 1L or 16L, 21, 1L or 4L,
+            77, 20,
+        )
+        val data = EditTimelineData.parse(raw)!!
+        assertEquals(listOf("V2", "V1", "A1", "A2"), data.lanes.map { it.label })
+        assertEquals(true, data.tracks[1].locked)
+        assertEquals(true, data.tracks[3].muted)
+        assertEquals(false, data.tracks[3].target)
+        assertEquals(20, data.linkedAudio[77L])
+        assertEquals(12L, data.markIn)
+        assertEquals(null, EditTimelineData.parse(longArrayOf(9, 9, 0, 0)))
     }
 
     @Test fun playIsInTheMiddleOfTheTransport() {

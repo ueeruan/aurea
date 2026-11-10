@@ -61,13 +61,13 @@ struct EditModeView: View {
                     // que passa dele fica com a linha do tempo (112 no mínimo). Par do Android.
                     let panelH = min(max(0, height - 52 - previewH - 48 - 72),
                                      EditorLayout.panelMax(fontScale: UIFont.preferredFont(forTextStyle: .body).pointSize / 17))
-                    EditTimelineView(compact: true, onAddMedia: addMedia, onAddAudio: { level = .audio }, onTransition: { cut = EditCut(outgoing: $0, incoming: $1) })
+                    EditTimelineView(compact: true, onAddMedia: addMedia, onTransition: { cut = EditCut(outgoing: $0, incoming: $1) })
                         .frame(minHeight: 72, maxHeight: .infinity)
                         .environment(\.layoutDirection, .leftToRight)
                     ContextSheet(metrics: EditorMetrics(topBar: 0, preview: 0, strip: 0, transport: 0, timeline: 0, sheet: 0))
                         .frame(height: panelH)
                 } else {
-                    EditTimelineView(compact: false, onAddMedia: addMedia, onAddAudio: { level = .audio }, onTransition: { cut = EditCut(outgoing: $0, incoming: $1) }).frame(maxHeight: .infinity)
+                    EditTimelineView(compact: false, onAddMedia: addMedia, onTransition: { cut = EditCut(outgoing: $0, incoming: $1) }).frame(maxHeight: .infinity)
                         .environment(\.layoutDirection, .leftToRight)
                     dock
                 }
@@ -393,111 +393,239 @@ func editClock(_ frame: Int64, _ fps: Double) -> String {
 }
 
 // =============================================================================
-//  A LINHA DO TEMPO DA EDIÇÃO (espelho de EditTimeline.kt): o cabeçote fica
-//  PARADO no meio e o tempo corre por baixo dele. Arrastar na horizontal anda
-//  no tempo; pinça aproxima; arrastar na vertical rola as linhas. A TRILHA
-//  PRINCIPAL (miniaturas, "+" no fim) vem logo abaixo da régua.
+//  A LINHA DO TEMPO DA EDIÇÃO (espelho de EditTimeline.kt): faixas de montagem
+//  (V3, V2, V1 em cima; A1, A2, A3 embaixo), no fluxo de um editor não linear.
+//
+//  Adaptado ao toque: arrastar no vazio rola, a régua move o cabeçote e a pinça
+//  aproxima. A ferramenta da faixa de cima decide o que o arrasto faz; o clipe
+//  escolhido responde na hora e o outro pede um toque (ou segurar), para rolar
+//  nunca virar edição sem querer. As regras moram no motor (EngineTracks.inl).
 // =============================================================================
 
-private struct EditRow: Identifiable {
-    let id: String
-    let clips: [LayerItem]
-    let main: Bool
+struct EditTrackInfo: Identifiable, Equatable {
+    let id: UInt32
     let audio: Bool
+    let locked: Bool
+    let muted: Bool
+    let solo: Bool
+    let target: Bool
+    let label: String
 }
 
-/// Fileiras: a principal primeiro, depois as linhas de cima para baixo na pilha, e o áudio no fim.
-private func editRows(_ layers: [LayerItem], anchor: Int64) -> [EditRow] {
-    func key(_ l: LayerItem) -> String { l.trackId != 0 ? "t\(l.trackId)" : "l\(l.id)" }
-    let anchorRow = layers.first { $0.id == anchor }
-    let mainKey = anchorRow.map(key)
-    let grouped = Dictionary(grouping: layers.enumerated(), by: { key($0.element) })
-    var main: EditRow?
-    var others: [(EditRow, Int)] = []
-    for (k, entries) in grouped {
-        let clips = entries.map { $0.element }.sorted { $0.startFrame < $1.startFrame }
-        // A lista do motor vem do topo da pilha para o fundo: índice menor = mais à frente.
-        let front = entries.map { $0.offset }.min() ?? 0
-        if k == mainKey { main = EditRow(id: k, clips: clips, main: true, audio: false) }
-        else { others.append((EditRow(id: k, clips: clips, main: false, audio: clips.allSatisfy { $0.kind == 3 }), front)) }
+/// O que `Engine::query_edit_timeline` devolve, em fileiras prontas para desenhar.
+struct EditTimelineData: Equatable {
+    let tracks: [EditTrackInfo]
+    let linkedAudio: [Int64: UInt32]
+    let markIn: Int64
+    let markOut: Int64
+
+    /// De cima para baixo na tela: V3, V2, V1, A1, A2, A3.
+    var lanes: [EditTrackInfo] { tracks.filter { !$0.audio }.reversed() + tracks.filter(\.audio) }
+
+    static func parse(_ raw: [NSNumber]) -> EditTimelineData? {
+        guard raw.count >= 4 else { return nil }
+        let trackCount = raw[0].intValue, linkedCount = raw[1].intValue
+        guard trackCount >= 0, linkedCount >= 0, raw.count >= 4 + trackCount * 2 + linkedCount * 2 else { return nil }
+        var video = 0, audio = 0
+        var tracks: [EditTrackInfo] = []
+        for i in 0..<trackCount {
+            let flags = raw[5 + i * 2].intValue
+            let isAudio = flags & 1 != 0
+            if isAudio { audio += 1 } else { video += 1 }
+            tracks.append(EditTrackInfo(id: raw[4 + i * 2].uint32Value, audio: isAudio, locked: flags & 2 != 0, muted: flags & 4 != 0,
+                                        solo: flags & 8 != 0, target: flags & 16 != 0, label: isAudio ? "A\(audio)" : "V\(video)"))
+        }
+        var linked: [Int64: UInt32] = [:]
+        for i in 0..<linkedCount {
+            linked[raw[4 + trackCount * 2 + i * 2].int64Value] = raw[5 + trackCount * 2 + i * 2].uint32Value
+        }
+        return EditTimelineData(tracks: tracks, linkedAudio: linked, markIn: raw[2].int64Value, markOut: raw[3].int64Value)
     }
-    let ordered = others.sorted { a, b in a.0.audio != b.0.audio ? !a.0.audio : a.1 < b.1 }.map { $0.0 }
-    return (main.map { [$0] } ?? []) + ordered
+}
+
+/// Números de `TrackEditOp` (Engine.hpp).
+enum TrackOp {
+    static let move: UInt32 = 0, moveInsert: UInt32 = 1, trimIn: UInt32 = 2, trimOut: UInt32 = 3
+    static let rippleTrimIn: UInt32 = 4, rippleTrimOut: UInt32 = 5, roll: UInt32 = 6, slip: UInt32 = 7, slide: UInt32 = 8
+    static let razor: UInt32 = 9, razorAll: UInt32 = 10, rippleDelete: UInt32 = 11, lift: UInt32 = 12, moveLinkedAudio: UInt32 = 13
+}
+
+extension AureaModel {
+    @discardableResult
+    func editTrackClip(_ op: UInt32, layer: Int64, frame: Int64, track: UInt32 = 0) -> Bool {
+        let ok = engine.editTrackClip(op, layer: layer, frame: frame, track: track)
+        if !ok { toast = AureaText.t("edit_track_blocked") }
+        refreshModel(force: true)
+        return ok
+    }
+
+    func setEditTrackFlag(_ track: UInt32, flag: UInt32, on: Bool) {
+        _ = engine.setEditTrackFlag(track, flag: flag, on: on)
+        refreshModel(force: true)
+    }
+
+    func addEditTrack(audio: Bool) {
+        _ = engine.addEditTrack(audio: audio)
+        refreshModel(force: true)
+    }
+
+    /// Tira as faixas vazias acima das três de cada tipo (o motor recusa as que têm clipe).
+    func removeEmptyEditTracks() {
+        guard let tracks = editTimeline?.tracks else { return }
+        for audio in [false, true] {
+            for track in tracks.filter({ $0.audio == audio }).dropFirst(3).reversed() { _ = engine.removeEditTrack(track.id) }
+        }
+        refreshModel(force: true)
+    }
+
+    /// Marca a entrada ou a saída no cabeçote; de novo no mesmo quadro, tira a marca.
+    func toggleEditMark(_ which: UInt32) {
+        guard let data = editTimeline else { return }
+        let frame = Int64(status.playhead)
+        _ = engine.setEditMark(which, frame: (which == 0 ? data.markIn : data.markOut) == frame ? -1 : frame)
+        refreshModel(force: true)
+    }
+
+    func editMarkedRange(extract: Bool) {
+        if !engine.editMarkedRange(extract: extract) { toast = AureaText.t("edit_mark_needed") }
+        refreshModel(force: true)
+    }
+
+    func razorAllAtPlayhead() { editTrackClip(TrackOp.razorAll, layer: 0, frame: Int64(status.playhead)) }
+
+    /// Leva a mídia recém-importada (que entrou no fim da V1) para o cabeçote. Par do Android.
+    func placeImportedClips(_ ids: [Int64], from: Int64) {
+        guard uiMode != AureaUiMode.composition, editPlacement != 0 else { return }
+        let op = editPlacement == 1 ? TrackOp.moveInsert : TrackOp.move
+        var frame = from
+        for id in ids {
+            refreshModel(force: true)
+            guard let row = layers.first(where: { $0.id == id }) else { continue }
+            if engine.editTrackClip(op, layer: id, frame: frame, track: 0) { frame += Int64(row.endFrame - row.startFrame) }
+        }
+    }
+}
+
+enum EditIcon {
+    case select, ripple, roll, razor, slip, slide, snap, markIn, markOut, lift, extract, razorAll, addVideo, addAudio, clearTracks, placeEnd, placeInsert, placeOverwrite
+
+    var filled: Bool { self == .select }
+
+    var strokes: [[CGFloat]] {
+        switch self {
+        case .select: return [[6, 3, 6, 19.5, 10.4, 15.6, 13.2, 21.6, 15.9, 20.4, 13.1, 14.4, 19, 14.4, 6, 3]]
+        case .ripple: return [[9.5, 4, 5, 4, 5, 20, 9.5, 20], [9, 12, 20, 12], [16, 8, 20, 12, 16, 16]]
+        case .roll: return [[3, 4, 7.5, 4, 7.5, 20, 3, 20], [21, 4, 16.5, 4, 16.5, 20, 21, 20], [10, 12, 14, 12], [11.5, 9.5, 9.5, 12, 11.5, 14.5], [12.5, 9.5, 14.5, 12, 12.5, 14.5]]
+        case .razor: return [[9.1, 18, 8.84, 19.13, 8.12, 20.03, 7.08, 20.53, 5.92, 20.53, 4.88, 20.03, 4.16, 19.13, 3.9, 18, 4.16, 16.87, 4.88, 15.97, 5.92, 15.47, 7.08, 15.47, 8.12, 15.97, 8.84, 16.87, 9.1, 18], [9.1, 6, 8.84, 7.13, 8.12, 8.03, 7.08, 8.53, 5.92, 8.53, 4.88, 8.03, 4.16, 7.13, 3.9, 6, 4.16, 4.87, 4.88, 3.97, 5.92, 3.47, 7.08, 3.47, 8.12, 3.97, 8.84, 4.87, 9.1, 6], [8.7, 7.5, 20.5, 18.5], [8.7, 16.5, 20.5, 5.5]]
+        case .slip: return [[7, 4, 3, 4, 3, 20, 7, 20], [17, 4, 21, 4, 21, 20, 17, 20], [7.5, 12, 16.5, 12], [10, 9, 7, 12, 10, 15], [14, 9, 17, 12, 14, 15]]
+        case .slide: return [[8, 4, 16, 4, 16, 13, 8, 13, 8, 4], [3, 19, 21, 19], [6, 16, 3, 19, 6, 22], [18, 16, 21, 19, 18, 22]]
+        case .snap: return [[4, 4, 4, 12, 4, 12, 4.39, 14.47, 5.53, 16.7, 7.3, 18.47, 9.53, 19.61, 12, 20, 14.47, 19.61, 16.7, 18.47, 18.47, 16.7, 19.61, 14.47, 20, 12, 20, 4], [9, 4, 9, 12, 9, 12, 9.15, 12.93, 9.57, 13.76, 10.24, 14.43, 11.07, 14.85, 12, 15, 12.93, 14.85, 13.76, 14.43, 14.43, 13.76, 14.85, 12.93, 15, 12, 15, 4], [4, 4, 9, 4], [15, 4, 20, 4], [4, 8, 9, 8], [15, 8, 20, 8]]
+        case .markIn: return [[15, 3.5, 12, 3.5, 10.5, 5, 10.5, 10, 8, 12, 10.5, 14, 10.5, 19, 12, 20.5, 15, 20.5]]
+        case .markOut: return [[9, 3.5, 12, 3.5, 13.5, 5, 13.5, 10, 16, 12, 13.5, 14, 13.5, 19, 12, 20.5, 9, 20.5]]
+        case .lift: return [[12, 15, 12, 4], [8, 8, 12, 4, 16, 8], [3, 20, 9, 20], [15, 20, 21, 20]]
+        case .extract: return [[12, 15, 12, 4], [8, 8, 12, 4, 16, 8], [3, 20, 9, 20], [6.5, 17.5, 9, 20, 6.5, 22.5], [21, 20, 15, 20], [17.5, 17.5, 15, 20, 17.5, 22.5]]
+        case .razorAll: return [[3, 6, 10, 6], [14, 6, 21, 6], [3, 12, 10, 12], [14, 12, 21, 12], [3, 18, 10, 18], [14, 18, 21, 18], [12, 2.5, 12, 21.5]]
+        case .addVideo: return [[3, 7, 14.5, 7, 14.5, 17, 3, 17, 3, 7], [19, 9, 19, 15], [16, 12, 22, 12]]
+        case .addAudio: return [[3.5, 10, 3.5, 14], [7, 7, 7, 17], [10.5, 9, 10.5, 15], [14, 11, 14, 13], [19, 9, 19, 15], [16, 12, 22, 12]]
+        case .clearTracks: return [[4, 6, 20, 6], [9, 6, 9, 3.5, 15, 3.5, 15, 6], [6, 6, 7, 21, 17, 21, 18, 6]]
+        case .placeEnd: return [[3, 12, 15, 12], [11, 8, 15, 12, 11, 16], [19, 5, 19, 19]]
+        case .placeInsert: return [[3, 20, 9, 20], [15, 20, 21, 20], [12, 3, 12, 15], [8, 11, 12, 15, 16, 11]]
+        case .placeOverwrite: return [[12, 3, 12, 13], [8, 9, 12, 13, 16, 9], [3, 17, 21, 17, 21, 21, 3, 21, 3, 17]]
+        }
+    }
+}
+
+private struct EditToolIcon: View {
+    let icon: EditIcon
+    let color: Color
+    var size: CGFloat = 22
+
+    var body: some View {
+        Canvas { context, canvasSize in
+            let k = canvasSize.width / 24
+            for points in icon.strokes {
+                var path = Path()
+                path.move(to: CGPoint(x: points[0] * k, y: points[1] * k))
+                for i in stride(from: 2, to: points.count - 1, by: 2) { path.addLine(to: CGPoint(x: points[i] * k, y: points[i + 1] * k)) }
+                if icon.filled { context.fill(path, with: .color(color)) }
+                else { context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 1.7 * k, lineCap: .round, lineJoin: .round)) }
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}
+
+private enum EditToolKind: String, CaseIterable {
+    case select, ripple, roll, razor, slip, slide
+    var key: String { "edit_tool_\(rawValue)" }
+    var icon: EditIcon {
+        switch self {
+        case .select: return .select
+        case .ripple: return .ripple
+        case .roll: return .roll
+        case .razor: return .razor
+        case .slip: return .slip
+        case .slide: return .slide
+        }
+    }
+}
+
+private enum EditPalette {
+    static func hex(_ value: UInt32) -> Color {
+        Color(red: Double((value >> 16) & 255) / 255, green: Double((value >> 8) & 255) / 255, blue: Double(value & 255) / 255)
+    }
+    static let lane = hex(0x17191E), head = hex(0x20232A), rulerBg = hex(0x101114), tick = hex(0x5B606B), separator = hex(0x3A3E47)
+    static let video = hex(0x1F6F8B), videoTop = hex(0x17566C), overlay = hex(0x7A2FA8), overlayTop = hex(0x5E2482)
+    static let adjustment = hex(0xD016C4), adjustmentTop = hex(0xA30F99), audio = hex(0x2F6A23), audioWave = hex(0x9FE08A)
+    static let linked = hex(0x17465A), linkedWave = hex(0x67C4F2), playhead = hex(0x4EA8F2), snap = hex(0xFFD54A), cut = hex(0xE8EDF5)
+}
+
+private struct LaneClip {
+    let row: LayerItem
+    let virtual: Bool
+}
+
+private enum EditDragKind { case trimIn, trimOut, move, slip, slide, audioLane }
+
+private struct ClipDrag {
+    let kind: EditDragKind
+    let clip: LayerItem
+    let neighbour: LayerItem?
+    let targets: [Int32]
+    var frames: Int32 = 0
+    var lane: UInt32
+    var snapped: Int32 = -1
+}
+
+/// Encaixe: o alvo mais perto de `frame` dentro de `reach` quadros, ou o próprio `frame`.
+private func snapFrame(_ frame: Int32, _ targets: [Int32], reach: CGFloat) -> Int32 {
+    var best = frame
+    var distance = reach
+    for t in targets {
+        let d = CGFloat(abs(t - frame))
+        if d < distance { distance = d; best = t }
+    }
+    return best
 }
 
 private struct EditTimelineView: View {
     @EnvironmentObject private var model: AureaModel
     let compact: Bool
     let onAddMedia: () -> Void
-    let onAddAudio: () -> Void
     var onTransition: (Int64, Int64) -> Void = { _, _ in }
-    var body: some View {
-        EditTimelineBody(clock: model.playheadClock, compact: compact, onAddMedia: onAddMedia, onAddAudio: onAddAudio,
-                         onTransition: onTransition)
-    }
-}
-
-private struct EditTimelineBody: View {
-    @EnvironmentObject private var model: AureaModel
-    @ObservedObject var clock: PlayheadClock
-    let compact: Bool
-    let onAddMedia: () -> Void
-    let onAddAudio: () -> Void
-    let onTransition: (Int64, Int64) -> Void
-    @State private var pxPerSecond: CGFloat = 72
-    @State private var zoomStart: CGFloat?
-    @State private var scrubStart: Int64?
-    @State private var scrollY: CGFloat = 0
-    @State private var scrollStart: CGFloat?
-    /// 0.3.6: o eixo do arrasto, decidido uma vez por gesto (true = tempo, false = fileiras).
-    @State private var scrubHorizontal: Bool?
-    @State private var thumbs = TimelineThumbStrip()
-    /// Onda do som por corte (par do EditWaveCache em EditTimeline.kt).
-    @State private var waves = EditWaveCache()
-
-    private let rulerH: CGFloat = 26, mainH: CGFloat = 56, rowH: CGFloat = 34, gap: CGFloat = 6
+    @State private var tool = EditToolKind.select
+    @State private var snap = true
+    @State private var showMore = false
 
     var body: some View {
-        GeometryReader { geometry in
-            let fps = max(model.compositionFps, 1)
-            let playhead = clock.frame
-            let pxPerFrame = pxPerSecond / CGFloat(fps)
-            let centerX = geometry.size.width / 2
-            let rows = editRows(model.layers, anchor: model.mainTrackAnchor)
-            let hasAudio = rows.contains { $0.audio }
-            // 0.3.6: a rolagem vertical vai só até a última fileira encostar embaixo (sem
-            // teto o arrasto levava as fileiras para fora da tela: "o clipe some").
-            let maxScroll = maxScrollY(rows: rows, hasAudio: hasAudio, height: geometry.size.height)
-            let shownScroll = min(max(0, scrollY), maxScroll)
-            // Orçamento de miniaturas por quadro (o resto chega nos próximos).
-            let _ = thumbs.beginFrame(48)
-            ZStack(alignment: .topLeading) {
-                Color.clear.contentShape(Rectangle())
-                    .onTapGesture { model.clearSelection() }
-                ruler(playhead: playhead, fps: fps, centerX: centerX, width: geometry.size.width)
-                rowsLayer(rows: rows, hasAudio: hasAudio, playhead: playhead, pxPerFrame: pxPerFrame, centerX: centerX, width: geometry.size.width,
-                          scroll: shownScroll)
-                // O cabeçote fixo no meio.
-                Rectangle().fill(Color.white).frame(width: 2).frame(maxHeight: .infinity).offset(x: centerX - 1)
-                    .allowsHitTesting(false)
-                Circle().fill(Color.white).frame(width: 10, height: 10).offset(x: centerX - 5, y: rulerH - 4)
-                    .allowsHitTesting(false)
-                magnetToggle.padding(.leading, 6).padding(.top, 2)
+        VStack(spacing: 0) {
+            toolStrip
+            if let data = model.editTimeline {
+                EditTimelineBody(clock: model.playheadClock, data: data, tool: tool, snap: snap, compact: compact, onTransition: onTransition)
+            } else {
+                Spacer(minLength: 0)
             }
-            .clipped()
-            // Arrastar em qualquer ponto (também em cima de um corte) anda no tempo;
-            // os gestos dos cortes (alças, segurar e arrastar) têm prioridade.
-            .gesture(scrubGesture(fps: fps, pxPerFrame: pxPerFrame, maxScroll: maxScroll))
-            // 0.3.6: o corte escolhido rola para dentro da vista (com o painel aberto a
-            // linha do tempo encolhe e a fileira dele ficava escondida atrás do painel).
-            .onChange(of: model.primarySelection) { _ in revealSelected(rows: rows, hasAudio: hasAudio, height: geometry.size.height) }
-            .onChange(of: geometry.size.height) { h in revealSelected(rows: rows, hasAudio: hasAudio, height: h) }
-            .simultaneousGesture(MagnificationGesture()
-                .onChanged { scale in
-                    if zoomStart == nil { zoomStart = pxPerSecond }
-                    pxPerSecond = min(max((zoomStart ?? pxPerSecond) * scale, 12), 640)
-                }
-                .onEnded { _ in zoomStart = nil })
         }
         .background(EditColors.canvas)
         .accessibilityElement(children: .contain)
@@ -505,365 +633,698 @@ private struct EditTimelineBody: View {
         .accessibilityIdentifier("edit.timeline")
     }
 
-    private func scrubGesture(fps: Double, pxPerFrame: CGFloat, maxScroll: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 4)
-            .onChanged { value in
-                if scrubStart == nil {
-                    scrubStart = clock.frame; scrollStart = min(max(0, scrollY), maxScroll)
-                    // 0.3.6: o eixo fica o do começo do gesto (de lado = tempo, de pé = fileiras).
-                    scrubHorizontal = abs(value.translation.width) >= abs(value.translation.height)
-                    if scrubHorizontal == true && model.status.playing != 0 { model.pause() }
-                }
-                if scrubHorizontal ?? true {
-                    let frames = Int64((-value.translation.width / max(pxPerFrame, 0.0001)).rounded())
-                    let target = min(max(0, (scrubStart ?? 0) + frames), model.compositionDuration)
-                    if target != clock.frame { model.seek(toFrame: target) }
-                } else {
-                    scrollY = min(max(0, (scrollStart ?? 0) - value.translation.height), maxScroll)
+    /// A linha fixa: mídia, as seis ferramentas num grupo só, encaixe e o resto no "⋯".
+    private var toolStrip: some View {
+        HStack(spacing: 0) {
+            Button(action: onAddMedia) {
+                CupertinoGlyph.text(CupertinoGlyph.Plus, size: 18, color: .black)
+                    .frame(width: 34, height: 34).background(model.editPlacement != 0 ? AureaColors.accent : Color.white, in: RoundedRectangle(cornerRadius: 9))
+            }.buttonStyle(AureaPressStyle(shrink: 0.9))
+                .accessibilityLabel(AureaText.t("edit_add_media")).accessibilityIdentifier("edit.add")
+            HStack(spacing: 0) {
+                ForEach(EditToolKind.allCases, id: \.self) { kind in
+                    toolButton(kind.icon, key: kind.key, id: "edit.tool.\(kind.rawValue)", on: kind == tool) { tool = kind }
                 }
             }
-            .onEnded { _ in scrubStart = nil; scrollStart = nil; scrubHorizontal = nil }
+            .padding(2).background(EditColors.dockLevel, in: RoundedRectangle(cornerRadius: 10)).padding(.leading, 8)
+            Spacer(minLength: 0)
+            toolButton(.snap, key: "edit_snap", id: "edit.snap", on: snap) { snap.toggle() }
+            Button { showMore = true } label: {
+                CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: 20).foregroundStyle(AureaColors.text).frame(width: 36, height: 36).contentShape(Rectangle())
+            }.buttonStyle(AureaPressStyle(shrink: 0.92))
+                .accessibilityLabel(AureaText.t("edit_more")).accessibilityIdentifier("edit.tools.more")
+        }
+        .padding(.horizontal, 8).frame(height: 44).background(EditColors.bar)
+        .sheet(isPresented: $showMore) { moreSheet.presentationDetents([.height(340)]) }
     }
 
-    /// 0.3.6: onde cada fileira fica sem rolagem e onde o conteúdo termina (a mesma
-    /// conta do desenho; par do `EditRowLayout` do Android).
-    private func rowLayout(rows: [EditRow], hasAudio: Bool) -> (tops: [CGFloat], heights: [CGFloat], bottom: CGFloat) {
-        let layout = rowOffsets(rows: rows, hasAudio: hasAudio, top: rulerH + 8)
-        let heights = rows.map { $0.main ? mainH : rowH }
-        var bottom = rulerH + 8 + (rows.contains(where: \.main) ? 0 : mainH + gap)
-        if let last = layout.rows.indices.last { bottom = layout.rows[last] + heights[last] + gap }
-        if let lane = layout.audioLane, !compact { bottom = max(bottom, lane + rowH + gap) }
-        return (layout.rows, heights, bottom - gap + 12)
+    private func toolButton(_ icon: EditIcon, key: String, id: String, on: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            EditToolIcon(icon: icon, color: on ? AureaColors.accent : AureaColors.text)
+                .frame(width: 36, height: 34).background(on ? AureaColors.accentDim : Color.clear, in: RoundedRectangle(cornerRadius: 8)).contentShape(Rectangle())
+        }.buttonStyle(AureaPressStyle(shrink: 0.92))
+            .accessibilityLabel(AureaText.t(key))
+            .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
+            .accessibilityIdentifier(id)
     }
 
-    /// O teto da rolagem: a última fileira encosta embaixo (nunca negativo).
-    private func maxScrollY(rows: [EditRow], hasAudio: Bool, height: CGFloat) -> CGFloat {
-        guard height > 0 else { return 0 }
-        return max(0, rowLayout(rows: rows, hasAudio: hasAudio).bottom - height)
-    }
-
-    private func revealSelected(rows: [EditRow], hasAudio: Bool, height: CGFloat) {
-        guard height > 0, let id = model.primarySelection,
-              let index = rows.firstIndex(where: { $0.clips.contains { $0.id == id } }) else { return }
-        let layout = rowLayout(rows: rows, hasAudio: hasAudio)
-        let rowsTop = rulerH + 8
-        let top = layout.tops[index] - rowsTop, bottom = top + layout.heights[index]
-        let limit = maxScrollY(rows: rows, hasAudio: hasAudio, height: height)
-        let current = min(max(0, scrollY), limit)
-        let viewport = TimelineReveal.viewport(height: height, rowsTop: rowsTop, obscured: 0)
-        let target = min(max(0, TimelineReveal.target(top: top, bottom: bottom, scroll: current, viewport: viewport)), limit)
-        if target != current { scrollY = target }
-    }
-
-    private func ruler(playhead: Int64, fps: Double, centerX: CGFloat, width: CGFloat) -> some View {
-        let step = [1, 2, 5, 10, 15, 30, 60, 120, 300].first { CGFloat($0) * pxPerSecond >= 64 } ?? 600
-        let now = Double(playhead) / fps
-        let first = max(0, Int(now - Double(centerX / pxPerSecond)))
-        let last = Int(now + Double(centerX / pxPerSecond)) + 1
-        let seconds = Array(stride(from: (first / step) * step, through: last, by: step))
-        return ZStack(alignment: .topLeading) {
-            ForEach(seconds, id: \.self) { s in
-                let x = centerX + CGFloat(Double(s) - now) * pxPerSecond
-                Text(String(format: "%02d:%02d", s / 60, s % 60)).font(.aurea(size: 10)).foregroundStyle(EditColors.ruler)
-                    .offset(x: x - 14, y: 6)
-                Circle().fill(EditColors.ruler).frame(width: 3, height: 3)
-                    .offset(x: x + CGFloat(step) * pxPerSecond / 2 - 1.5, y: rulerH * 0.62)
+    /// O que não é ferramenta de arrasto, em três grupos.
+    private var moreSheet: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            moreSection("edit_section_marks") {
+                moreTile(.markIn, key: "edit_mark_in", id: "edit.markIn") { model.toggleEditMark(0) }
+                moreTile(.markOut, key: "edit_mark_out", id: "edit.markOut") { model.toggleEditMark(1) }
+                moreTile(.lift, key: "edit_lift", id: "edit.lift") { model.editMarkedRange(extract: false) }
+                moreTile(.extract, key: "edit_extract", id: "edit.extract") { model.editMarkedRange(extract: true) }
+            }
+            moreSection("edit_section_tracks") {
+                moreTile(.razorAll, key: "edit_razor_all", id: "edit.razorAll") { model.razorAllAtPlayhead() }
+                moreTile(.addVideo, key: "edit_add_video_track", id: "edit.addVideoTrack") { model.addEditTrack(audio: false) }
+                moreTile(.addAudio, key: "edit_add_audio_track", id: "edit.addAudio") { model.addEditTrack(audio: true) }
+                moreTile(.clearTracks, key: "edit_remove_empty_tracks", id: "edit.clearTracks") { model.removeEmptyEditTracks() }
+            }
+            moreSection("edit_section_placement") {
+                moreTile(.placeEnd, key: "edit_place_end", id: "edit.placement.0", on: model.editPlacement == 0) { model.editPlacement = 0 }
+                moreTile(.placeInsert, key: "edit_place_insert", id: "edit.placement.1", on: model.editPlacement == 1) { model.editPlacement = 1 }
+                moreTile(.placeOverwrite, key: "edit_place_overwrite", id: "edit.placement.2", on: model.editPlacement == 2) { model.editPlacement = 2 }
+                Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
             }
         }
-        .frame(width: width, height: rulerH, alignment: .topLeading)
-        .allowsHitTesting(false)
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(EditColors.bar.ignoresSafeArea())
     }
 
-    @ViewBuilder
-    private func rowsLayer(rows: [EditRow], hasAudio: Bool, playhead: Int64, pxPerFrame: CGFloat, centerX: CGFloat, width: CGFloat,
-                           scroll: CGFloat) -> some View {
-        let top = rulerH + 8 - scroll
-        let layout = rowOffsets(rows: rows, hasAudio: hasAudio, top: top)
-        ZStack(alignment: .topLeading) {
-            if !rows.contains(where: \.main) {
-                HStack {
-                    Text(AureaText.t("edit_empty_hint")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted)
-                    Spacer()
-                    addButton
-                }.padding(.horizontal, 16).frame(width: width, height: mainH).offset(y: top)
-            }
-            ForEach(rows.indices, id: \.self) { index in
-                let row = rows[index]
-                let y = layout.rows[index]
-                let h = row.main ? mainH : rowH
-                ForEach(row.clips) { clip in
-                    let left = centerX + CGFloat(Int64(clip.startFrame) - playhead) * pxPerFrame
-                    let w = CGFloat(clip.endFrame - clip.startFrame) * pxPerFrame
-                    if left + w > -width && left < width * 2 {
-                        EditClipView(clip: clip, main: row.main, x: left, width: w, y: y, height: h,
-                                     pxPerFrame: pxPerFrame, thumbs: thumbs, waves: waves, viewport: width)
-                    }
-                }
-                if row.main {
-                    // O quadradinho de TRANSIÇÃO em cada corte encostado da trilha principal.
-                    ForEach(Array(row.clips.indices.dropLast()), id: \.self) { i in
-                        let a = row.clips[i], b = row.clips[i + 1]
-                        if a.endFrame == b.startFrame {
-                            let cx = centerX + CGFloat(Int64(a.endFrame) - playhead) * pxPerFrame
-                            Button { onTransition(a.id, b.id) } label: {
-                                CupertinoGlyph.text(CupertinoGlyph.ArrowLeftRight, size: 12, color: .black)
-                                    .frame(width: 22, height: 22).background(Color.white, in: RoundedRectangle(cornerRadius: 5))
-                            }.buttonStyle(AureaPressStyle(shrink: 0.9))
-                                .offset(x: cx - 11, y: y + (h - 22) / 2)
-                                .accessibilityLabel(AureaText.t("edit_transition_between", a.name, b.name))
-                                .accessibilityIdentifier("edit.cut.\(a.id).\(b.id)")
-                        }
-                    }
-                    let end = row.clips.map(\.endFrame).max() ?? 0
-                    let x = min(centerX + CGFloat(Int64(end) - playhead) * pxPerFrame + 10, width - 46)
-                    addButton.offset(x: x, y: y + (h - 36) / 2)
-                }
-            }
-            if let lane = layout.audioLane, !compact {
-                Button(action: onAddAudio) {
-                    HStack(spacing: 6) {
-                        CupertinoGlyph.text(CupertinoGlyph.Plus, size: 14, color: AureaColors.muted)
-                        Text(AureaText.t("edit_add_audio_lane")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
-                    }.padding(.horizontal, 10).frame(height: rowH)
-                        .background(Color(red: 0.086, green: 0.086, blue: 0.102), in: RoundedRectangle(cornerRadius: 6))
-                }.buttonStyle(AureaPressStyle(shrink: 0.96)).offset(x: centerX + 8, y: lane)
-                    .accessibilityIdentifier("edit.addAudio")
-            }
+    private func moreSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(AureaText.t(title)).font(.aurea(size: 13, weight: .semibold)).foregroundStyle(AureaColors.muted)
+            HStack(spacing: 8) { content() }
         }
     }
 
-    private func rowOffsets(rows: [EditRow], hasAudio: Bool, top: CGFloat) -> (rows: [CGFloat], audioLane: CGFloat?) {
-        var y = top
-        if !rows.contains(where: \.main) { y += mainH + gap }
-        var offsets: [CGFloat] = []
-        var lane: CGFloat?
-        for row in rows {
-            offsets.append(y)
-            y += (row.main ? mainH : rowH) + gap
-            if row.main && !hasAudio { lane = y; y += rowH + gap }
-        }
-        return (offsets, lane)
-    }
-
-    private var addButton: some View {
-        Button(action: onAddMedia) {
-            CupertinoGlyph.text(CupertinoGlyph.Plus, size: 20, color: .black)
-                .frame(width: 36, height: 36).background(Color.white, in: RoundedRectangle(cornerRadius: 8))
-        }.buttonStyle(AureaPressStyle(shrink: 0.9))
-            .accessibilityLabel(AureaText.t("edit_add_media")).accessibilityIdentifier("edit.add")
-    }
-
-    private var magnetToggle: some View {
-        Button { model.toggleEditMode() } label: {
-            CupertinoGlyph.text(CupertinoGlyph.Link, size: 13, color: model.editMode ? AureaColors.accent : AureaColors.muted)
-                .frame(width: 22, height: 22)
-                .background(model.editMode ? AureaColors.accentDim : EditColors.dockLevel, in: RoundedRectangle(cornerRadius: 6))
-        }.buttonStyle(AureaPressStyle(shrink: 0.9))
-            .accessibilityLabel(AureaText.t("edit_magnet"))
-            .accessibilityAddTraits(model.editMode ? [.isButton, .isSelected] : .isButton)
-            .accessibilityIdentifier("edit.magnet")
+    private func moreTile(_ icon: EditIcon, key: String, id: String, on: Bool = false, action: @escaping () -> Void) -> some View {
+        Button { action(); showMore = false } label: {
+            VStack(spacing: 4) {
+                EditToolIcon(icon: icon, color: on ? AureaColors.accent : AureaColors.text, size: 24)
+                Text(AureaText.t(key)).font(.aurea(size: 11, weight: .medium)).lineLimit(1).minimumScaleFactor(0.8)
+                    .foregroundStyle(on ? AureaColors.accent : AureaColors.text)
+            }
+            .padding(.horizontal, 4).frame(maxWidth: .infinity).frame(height: 68)
+            .background(on ? AureaColors.accentDim : EditColors.dockLevel, in: RoundedRectangle(cornerRadius: 11))
+        }.buttonStyle(AureaPressStyle(shrink: 0.95))
+            .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
+            .accessibilityIdentifier(id)
     }
 }
 
-/// Um corte. Toque escolhe; escolhido, ganha a borda branca com as alças de
-/// aparar; segurar e arrastar reordena (trilha principal) ou move no tempo.
-private struct EditClipView: View {
+private struct EditTimelineBody: View {
     @EnvironmentObject private var model: AureaModel
-    let clip: LayerItem
-    let main: Bool
-    let x: CGFloat
-    let width: CGFloat
-    let y: CGFloat
-    let height: CGFloat
+    let clock: PlayheadClock
+    let data: EditTimelineData
+    let tool: EditToolKind
+    let snap: Bool
+    let compact: Bool
+    let onTransition: (Int64, Int64) -> Void
+
+    @State private var pxPerSecond: CGFloat = 72
+    @State private var zoomStart: CGFloat?
+    @State private var zoomAnchor: CGFloat?
+    @State private var scrollFrames: CGFloat = -8
+    @State private var scrollY: CGFloat = 0
+    @State private var drag: ClipDrag?
+    @State private var gestureStart: CGPoint?
+    @State private var gestureLast: CGPoint = .zero
+    @State private var gestureMoved = false
+    @State private var scrubbing = false
+    @State private var longPress: DispatchWorkItem?
+    @State private var thumbs = TimelineThumbStrip()
+    @State private var waves = EditWaveCache()
+
+    private let headW: CGFloat = 98, rulerH: CGFloat = 26, gap: CGFloat = 1, edge: CGFloat = 13, slop: CGFloat = 6
+    private var laneH: CGFloat { compact ? 34 : 44 }
+    private var fps: Double { max(model.compositionFps, 1) }
+    private var pxPerFrame: CGFloat { pxPerSecond / CGFloat(fps) }
+    private var lanes: [EditTrackInfo] { data.lanes }
+    private func laneTop(_ index: Int) -> CGFloat { rulerH + CGFloat(index) * (laneH + gap) }
+    private var contentBottom: CGFloat { rulerH + CGFloat(lanes.count) * (laneH + gap) }
+
+    private var laneClips: [[LaneClip]] {
+        let byTrack = Dictionary(grouping: model.layers, by: \.trackId)
+        return lanes.map { lane in
+            let real = (byTrack[lane.id] ?? []).map { LaneClip(row: $0, virtual: false) }
+            let linked = lane.audio ? model.layers.filter { data.linkedAudio[$0.id] == lane.id }.map { LaneClip(row: $0, virtual: true) } : []
+            return (real + linked).sorted { $0.row.startFrame < $1.row.startFrame }
+        }
+    }
+
+    private func frameAt(_ x: CGFloat) -> CGFloat { scrollFrames + (x - headW) / pxPerFrame }
+    private func maxScroll(_ height: CGFloat) -> CGFloat { height > 0 ? max(0, contentBottom - height) : 0 }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let clips = laneClips
+            let size = geometry.size
+            ZStack(alignment: .topLeading) {
+                EditLanesCanvas(clock: clock, data: data, lanes: lanes, clips: clips, drag: drag, pxPerFrame: pxPerFrame, scrollFrames: scrollFrames,
+                                scrollY: scrollY, headW: headW, rulerH: rulerH, laneH: laneH, gap: gap, fps: fps, thumbs: thumbs, waves: waves) { frame in
+                    follow(frame: frame, width: size.width)
+                }
+                .frame(width: size.width, height: size.height)
+                .contentShape(Rectangle())
+                .gesture(touchGesture(clips: clips, height: size.height))
+                .simultaneousGesture(zoomGesture)
+
+                ForEach(lanes.indices, id: \.self) { index in
+                    trackHead(lanes[index]).frame(width: headW, height: laneH).background(EditPalette.head)
+                        .offset(y: laneTop(index) - scrollY)
+                        .opacity(laneTop(index) - scrollY + laneH <= rulerH ? 0 : 1)
+                }
+                // O canto da régua diz qual ferramenta está ativa: a barra é só de ícones.
+                Text(AureaText.t(tool.key)).font(.aurea(size: 11, weight: .semibold)).lineLimit(1).foregroundStyle(AureaColors.accent)
+                    .frame(width: headW, height: rulerH).background(EditPalette.rulerBg)
+
+                // Alvos do leitor de tela: não interceptam toque, só dão nome e ação ao clipe.
+                ForEach(lanes.indices, id: \.self) { index in
+                    ForEach(clips[index].filter { !$0.virtual }, id: \.row.id) { clip in
+                        Color.clear
+                            .frame(width: max(1, CGFloat(clip.row.endFrame - clip.row.startFrame) * pxPerFrame), height: laneH)
+                            .offset(x: headW + (CGFloat(clip.row.startFrame) - scrollFrames) * pxPerFrame, y: max(rulerH, laneTop(index) - scrollY))
+                            .allowsHitTesting(false)
+                            .accessibilityElement()
+                            .accessibilityLabel(model.selection.contains(clip.row.id) ? AureaText.t("edit_clip_selected", clip.row.name) : clip.row.name)
+                            .accessibilityAddTraits(model.selection.contains(clip.row.id) ? [.isButton, .isSelected] : .isButton)
+                            .accessibilityAction { model.select(layerId: clip.row.id) }
+                            .accessibilityIdentifier("edit.clip.\(clip.row.id)")
+                    }
+                }
+                if model.layers.isEmpty {
+                    Text(AureaText.t("edit_empty_hint")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted)
+                        .offset(x: headW + 12, y: rulerH + 12).allowsHitTesting(false)
+                }
+            }
+            .clipped()
+            .onChange(of: model.primarySelection) { _ in reveal(clips: clips, height: size.height) }
+            .onChange(of: size.height) { h in reveal(clips: clips, height: h) }
+        }
+    }
+
+    /// Tocando, o cabeçote nunca sai da tela: a vista vira a página, como no Premiere.
+    private func follow(frame: Int64, width: CGFloat) {
+        guard drag == nil, !scrubbing, width > headW else { return }
+        let visible = (width - headW) / pxPerFrame
+        let f = CGFloat(frame)
+        if f < scrollFrames || f > scrollFrames + visible * 0.92 { scrollFrames = f - visible * 0.08 }
+    }
+
+    private func reveal(clips: [[LaneClip]], height: CGFloat) {
+        guard height > 0, let id = model.primarySelection,
+              let index = clips.firstIndex(where: { $0.contains { $0.row.id == id && !$0.virtual } }) else { return }
+        let top = laneTop(index) - scrollY
+        var next = scrollY
+        if top < rulerH { next -= rulerH - top } else if top + laneH > height { next += top + laneH - height }
+        next = min(max(0, next), maxScroll(height))
+        if next != scrollY { scrollY = next }
+    }
+
+    private var zoomGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { scale in
+                if zoomStart == nil {
+                    zoomStart = pxPerSecond
+                    longPress?.cancel(); longPress = nil
+                    drag = nil
+                    gestureMoved = true
+                    zoomAnchor = gestureStart.map { frameAt($0.x) }
+                }
+                pxPerSecond = min(max((zoomStart ?? pxPerSecond) * scale, 4.5), 1200)
+                if let anchor = zoomAnchor, let start = gestureStart { scrollFrames = anchor - (start.x - headW) / pxPerFrame }
+            }
+            .onEnded { _ in zoomStart = nil; zoomAnchor = nil }
+    }
+
+    private func touchGesture(clips: [[LaneClip]], height: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                if gestureStart == nil { touchBegan(value.startLocation, clips: clips) }
+                touchMoved(value, height: height, clips: clips)
+            }
+            .onEnded { value in touchEnded(value, clips: clips) }
+    }
+
+    private func hitClip(_ p: CGPoint, clips: [[LaneClip]]) -> (lane: Int, clip: LaneClip, zone: EditDragKind)? {
+        guard p.x >= headW, p.y >= rulerH else { return nil }
+        let y = p.y + scrollY
+        guard let lane = lanes.indices.first(where: { y >= laneTop($0) && y < laneTop($0) + laneH }) else { return nil }
+        let frame = frameAt(p.x)
+        let edgeFrames = edge / pxPerFrame
+        var near: (lane: Int, clip: LaneClip, zone: EditDragKind)?
+        for clip in clips[lane] {
+            let s = CGFloat(clip.row.startFrame), e = CGFloat(clip.row.endFrame)
+            if frame < s - edgeFrames || frame > e + edgeFrames { continue }
+            let wide = (e - s) * pxPerFrame > edge * 3
+            // Clipe estreito: o miolo continua alcançável.
+            let zone: EditDragKind = wide && frame <= s + edgeFrames ? .trimIn : wide && frame >= e - edgeFrames ? .trimOut : .move
+            if frame >= s && frame <= e { return (lane, clip, zone) }
+            near = (lane, clip, frame < s ? .trimIn : .trimOut)
+        }
+        return near
+    }
+
+    private func touchBegan(_ start: CGPoint, clips: [[LaneClip]]) {
+        gestureStart = start
+        gestureLast = start
+        gestureMoved = false
+        guard start.x >= headW else { return }
+        if start.y < rulerH {
+            if model.status.playing != 0 { model.pause() }
+            scrubbing = true
+            model.seek(toFrame: max(0, Int64(frameAt(start.x).rounded())))
+            return
+        }
+        // Segurar: pega o clipe mesmo sem estar escolhido.
+        let hit = hitClip(start, clips: clips)
+        guard let hit else { return }
+        let work = DispatchWorkItem {
+            guard !gestureMoved, drag == nil else { return }
+            if let began = beginDrag(hit, longPress: true, clips: clips) {
+                drag = began
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            }
+        }
+        longPress = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
+    }
+
+    private func beginDrag(_ hit: (lane: Int, clip: LaneClip, zone: EditDragKind), longPress: Bool, clips: [[LaneClip]]) -> ClipDrag? {
+        let row = hit.clip.row
+        let selected = model.selection.contains(row.id)
+        guard selected || longPress || tool != .select else { return nil }
+        var kind = hit.zone
+        if hit.clip.virtual {
+            guard hit.zone == .move else { return nil }
+            kind = .audioLane
+        } else {
+            switch tool {
+            case .slip: kind = .slip
+            case .slide: kind = .slide
+            case .razor: return nil
+            case .roll: if hit.zone == .move { return nil }
+            default: break
+            }
+        }
+        var neighbour: LayerItem?
+        if tool == .roll && kind == .trimIn {
+            neighbour = clips[hit.lane].first { !$0.virtual && $0.row.endFrame == row.startFrame }?.row
+            if neighbour == nil { return nil }
+        }
+        if model.status.playing != 0 { model.pause() }
+        if !selected { model.select(layerId: row.id) }
+        var targets: [Int32] = []
+        if snap {
+            targets.append(Int32(clock.frame))
+            if data.markIn >= 0 { targets.append(Int32(data.markIn)) }
+            if data.markOut >= 0 { targets.append(Int32(data.markOut)) }
+            for lane in clips { for c in lane where c.row.id != row.id { targets.append(c.row.startFrame); targets.append(c.row.endFrame) } }
+        }
+        return ClipDrag(kind: kind, clip: row, neighbour: neighbour, targets: targets, lane: lanes[hit.lane].id)
+    }
+
+    private func touchMoved(_ value: DragGesture.Value, height: CGFloat, clips: [[LaneClip]]) {
+        guard let start = gestureStart, start.x >= headW, zoomStart == nil else { return }
+        if scrubbing {
+            let target = min(max(0, Int64(frameAt(value.location.x).rounded())), model.compositionDuration)
+            if target != clock.frame { model.seek(toFrame: target) }
+            return
+        }
+        if !gestureMoved && hypot(value.translation.width, value.translation.height) > slop {
+            gestureMoved = true
+            longPress?.cancel(); longPress = nil
+            if drag == nil, let hit = hitClip(start, clips: clips) { drag = beginDrag(hit, longPress: false, clips: clips) }
+        }
+        guard gestureMoved || drag != nil else { return }
+        if var current = drag {
+            update(&current, translation: value.translation.width, location: value.location)
+            drag = current
+        } else {
+            scrollFrames -= (value.location.x - gestureLast.x) / pxPerFrame
+            scrollY = min(max(0, scrollY - (value.location.y - gestureLast.y)), maxScroll(height))
+        }
+        gestureLast = value.location
+    }
+
+    private func update(_ current: inout ClipDrag, translation: CGFloat, location: CGPoint) {
+        let raw = Int32((translation / pxPerFrame).rounded())
+        let reach = 9 / pxPerFrame
+        var frames = raw
+        var snappedAt: Int32 = -1
+        if !current.targets.isEmpty {
+            let start = current.clip.startFrame, end = current.clip.endFrame
+            switch current.kind {
+            case .trimIn:
+                let s = snapFrame(start + raw, current.targets, reach: reach)
+                if s != start + raw { frames = s - start; snappedAt = s }
+            case .trimOut:
+                let s = snapFrame(end + raw, current.targets, reach: reach)
+                if s != end + raw { frames = s - end; snappedAt = s }
+            case .move, .slide:
+                let a = snapFrame(start + raw, current.targets, reach: reach), b = snapFrame(end + raw, current.targets, reach: reach)
+                if a != start + raw { frames = a - start; snappedAt = a } else if b != end + raw { frames = b - end; snappedAt = b }
+            default: break
+            }
+        }
+        if snappedAt >= 0 && snappedAt != current.snapped { UISelectionFeedbackGenerator().selectionChanged() }
+        current.frames = frames
+        current.snapped = snappedAt
+        if current.kind == .move || current.kind == .audioLane {
+            let y = location.y + scrollY
+            if location.y >= rulerH, let lane = lanes.first(where: { track in
+                guard let i = lanes.firstIndex(of: track) else { return false }
+                return y >= laneTop(i) && y < laneTop(i) + laneH
+            }), lane.audio == (current.kind == .audioLane || current.clip.kind == 3) {
+                current.lane = lane.id
+            }
+        }
+    }
+
+    private func touchEnded(_ value: DragGesture.Value, clips: [[LaneClip]]) {
+        longPress?.cancel(); longPress = nil
+        defer { gestureStart = nil; drag = nil; scrubbing = false; gestureMoved = false }
+        guard let start = gestureStart, start.x >= headW else { return }
+        if scrubbing { return }
+        if let current = drag { commit(current); return }
+        if !gestureMoved && zoomStart == nil { tap(start, clips: clips) }
+    }
+
+    private func commit(_ drag: ClipDrag) {
+        let clip = drag.clip
+        let ripple = tool == .ripple
+        switch drag.kind {
+        case .move:
+            if drag.frames != 0 || drag.lane != clip.trackId {
+                model.editTrackClip(ripple ? TrackOp.moveInsert : TrackOp.move, layer: clip.id, frame: Int64(max(0, clip.startFrame + drag.frames)), track: drag.lane)
+            }
+        case .trimIn:
+            guard drag.frames != 0 else { return }
+            if let left = drag.neighbour { model.editTrackClip(TrackOp.roll, layer: left.id, frame: Int64(clip.startFrame + drag.frames)) }
+            else { model.editTrackClip(ripple ? TrackOp.rippleTrimIn : TrackOp.trimIn, layer: clip.id, frame: Int64(clip.startFrame + drag.frames)) }
+        case .trimOut:
+            guard drag.frames != 0 else { return }
+            model.editTrackClip(tool == .roll ? TrackOp.roll : ripple ? TrackOp.rippleTrimOut : TrackOp.trimOut, layer: clip.id, frame: Int64(clip.endFrame + drag.frames))
+        case .slip:
+            if drag.frames != 0 { model.editTrackClip(TrackOp.slip, layer: clip.id, frame: Int64(drag.frames)) }
+        case .slide:
+            if drag.frames != 0 { model.editTrackClip(TrackOp.slide, layer: clip.id, frame: Int64(drag.frames)) }
+        case .audioLane:
+            if drag.lane != data.linkedAudio[clip.id] { model.editTrackClip(TrackOp.moveLinkedAudio, layer: clip.id, frame: 0, track: drag.lane) }
+        }
+    }
+
+    private func tap(_ p: CGPoint, clips: [[LaneClip]]) {
+        let hit = hitClip(p, clips: clips)
+        if tool == .razor {
+            if let hit, !hit.clip.virtual {
+                var frame = Int64(frameAt(p.x).rounded())
+                // Cair em cima do cabeçote é quase sempre o que se queria.
+                if CGFloat(abs(frame - clock.frame)) * pxPerFrame < edge { frame = clock.frame }
+                model.editTrackClip(TrackOp.razor, layer: hit.clip.row.id, frame: frame)
+            }
+            return
+        }
+        guard let hit else { model.clearSelection(); return }
+        let row = hit.clip.row
+        // Um corte encostado de clipes não escolhidos abre as transições dele.
+        if !hit.clip.virtual && !model.selection.contains(row.id) && !lanes[hit.lane].audio {
+            let frame = frameAt(p.x)
+            let reach = edge * 0.75
+            if abs(frame - CGFloat(row.startFrame)) * pxPerFrame < reach,
+               let left = clips[hit.lane].first(where: { !$0.virtual && $0.row.endFrame == row.startFrame }) {
+                onTransition(left.row.id, row.id); return
+            }
+            if abs(frame - CGFloat(row.endFrame)) * pxPerFrame < reach,
+               let right = clips[hit.lane].first(where: { !$0.virtual && $0.row.startFrame == row.endFrame }) {
+                onTransition(row.id, right.row.id); return
+            }
+        }
+        model.select(layerId: row.id)
+    }
+
+    private func trackHead(_ lane: EditTrackInfo) -> some View {
+        HStack(spacing: 2) {
+            Button { model.setEditTrackFlag(lane.id, flag: 3, on: !lane.target) } label: {
+                Text(lane.label).font(.aurea(size: 10, weight: .bold)).foregroundStyle(.white)
+                    .frame(width: 24, height: 24)
+                    .background(lane.target ? EditPalette.hex(0x3B6EA8) : EditColors.dockLevel, in: RoundedRectangle(cornerRadius: 5))
+            }.buttonStyle(AureaPressStyle(shrink: 0.92))
+                .accessibilityLabel(AureaText.t("edit_track_target", lane.label))
+                .accessibilityAddTraits(lane.target ? [.isButton, .isSelected] : .isButton)
+                .accessibilityIdentifier("edit.track.\(lane.label).target")
+            headIcon(lane.locked ? CupertinoGlyph.LockFill : CupertinoGlyph.LockOpen, on: lane.locked, key: "edit_track_lock", id: "edit.track.\(lane.label).lock") {
+                model.setEditTrackFlag(lane.id, flag: 0, on: !lane.locked)
+            }
+            if lane.audio {
+                headLetter("M", on: lane.muted, key: "edit_track_mute", id: "edit.track.\(lane.label).mute") { model.setEditTrackFlag(lane.id, flag: 1, on: !lane.muted) }
+                headLetter("S", on: lane.solo, key: "edit_track_solo", id: "edit.track.\(lane.label).solo") { model.setEditTrackFlag(lane.id, flag: 2, on: !lane.solo) }
+            } else {
+                headIcon(lane.muted ? CupertinoGlyph.EyeSlash : CupertinoGlyph.Eye, on: lane.muted, key: "edit_track_visible", id: "edit.track.\(lane.label).visible") {
+                    model.setEditTrackFlag(lane.id, flag: 1, on: !lane.muted)
+                }
+            }
+            Spacer(minLength: 0)
+        }.padding(.horizontal, 3)
+    }
+
+    private func headIcon(_ glyph: Character, on: Bool, key: String, id: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            CupertinoGlyph.text(glyph, size: 13, color: on ? AureaColors.accent : AureaColors.muted).frame(width: 22, height: 22).contentShape(Rectangle())
+        }.buttonStyle(AureaPressStyle(shrink: 0.9))
+            .accessibilityLabel(AureaText.t(key))
+            .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
+            .accessibilityIdentifier(id)
+    }
+
+    private func headLetter(_ letter: String, on: Bool, key: String, id: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(letter).font(.aurea(size: 11, weight: .bold)).foregroundStyle(on ? Color.white : AureaColors.muted)
+                .frame(width: 22, height: 22).background(on ? EditPalette.hex(0xB9472F) : Color.clear, in: RoundedRectangle(cornerRadius: 4))
+        }.buttonStyle(AureaPressStyle(shrink: 0.9))
+            .accessibilityLabel(AureaText.t(key))
+            .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
+            .accessibilityIdentifier(id)
+    }
+}
+
+/// O desenho das faixas. Só esta view observa o relógio: tocar um vídeo redesenha o
+/// Canvas e não refaz a tela. Onda e miniatura saem antes dele, dos caches.
+private struct EditLanesCanvas: View {
+    @EnvironmentObject private var model: AureaModel
+    @ObservedObject var clock: PlayheadClock
+    let data: EditTimelineData
+    let lanes: [EditTrackInfo]
+    let clips: [[LaneClip]]
+    let drag: ClipDrag?
     let pxPerFrame: CGFloat
+    let scrollFrames: CGFloat
+    let scrollY: CGFloat
+    let headW: CGFloat
+    let rulerH: CGFloat
+    let laneH: CGFloat
+    let gap: CGFloat
+    let fps: Double
     let thumbs: TimelineThumbStrip
     let waves: EditWaveCache
-    /// Largura da linha do tempo: a onda só desenha o trecho que está na tela.
-    let viewport: CGFloat
-    @State private var trimStart: CGFloat = 0
-    @State private var trimEnd: CGFloat = 0
-    @State private var drag: CGFloat = 0
+    let onFrame: (Int64) -> Void
 
-    private var selected: Bool { model.selection.contains(clip.id) }
+    private struct Paint {
+        let clip: LaneClip
+        let lane: EditTrackInfo
+        let top: CGFloat
+        let start: Int32
+        let end: Int32
+        let wave: EditWaveCache.Wave?
+        let fpb: Double
+        let first: Int64
+        let last: Int64
+        let thumb: UIImage?
+    }
+
+    private func xOf(_ frame: CGFloat) -> CGFloat { headW + (frame - scrollFrames) * pxPerFrame }
+
+    private func geometry(_ row: LayerItem) -> (Int32, Int32) {
+        var s = row.startFrame, e = row.endFrame
+        guard let drag else { return (s, e) }
+        if drag.clip.id == row.id {
+            switch drag.kind {
+            case .move, .slide: s += drag.frames; e += drag.frames
+            case .trimIn: s = min(s + drag.frames, e - 1)
+            case .trimOut: e = max(e + drag.frames, s + 1)
+            default: break
+            }
+        } else if drag.neighbour?.id == row.id && drag.kind == .trimIn {
+            e += drag.frames
+        }
+        return (s, e)
+    }
+
+    private func paint(_ clip: LaneClip, lane: EditTrackInfo, top: CGFloat, width: CGFloat) -> Paint? {
+        let (s, e) = geometry(clip.row)
+        let left = xOf(CGFloat(s)), right = xOf(CGFloat(e))
+        guard right >= headW, left <= width else { return nil }
+        var wave: EditWaveCache.Wave?
+        var fpb = 1.0
+        var first: Int64 = 0, last: Int64 = -1
+        if clip.virtual || clip.row.kind == 3 {
+            fpb = WaveGrid.framesPerBucket(targetPx: 1.5, pxPerFrame: pxPerFrame)
+            let from = Double((max(left, headW) - xOf(0)) / pxPerFrame), to = Double((min(right, width) - xOf(0)) / pxPerFrame)
+            first = WaveGrid.bucketAt(max(from, Double(clip.row.startFrame)), fpb)
+            last = WaveGrid.bucketAt(min(to, Double(clip.row.endFrame)) - 1e-6, fpb)
+            if last >= first { wave = waves.get(model, clip: clip.row, fpb: fpb, generation: model.status.thumbnailGeneration, first: first, last: last) }
+        }
+        var thumb: UIImage?
+        if [1, 2, 12].contains(clip.row.kind), !clip.virtual, right - left > 44, left >= headW - 44 {
+            let heightPx = Int(((laneH * 0.66) * UIScreen.main.scale).rounded())
+            thumb = thumbs.get(model, layer: clip.row.id, bucket: 0, timelineFrame: clip.row.startFrame, heightPx: min(max(heightPx, 16), 128), generation: 0)
+        }
+        return Paint(clip: clip, lane: lane, top: top, start: s, end: e, wave: wave, fpb: fpb, first: first, last: last, thumb: thumb)
+    }
 
     var body: some View {
-        let w = max(8, width - trimStart + trimEnd)
-        ZStack(alignment: .leading) {
-            if main && [1, 2, 12].contains(clip.kind) {
-                filmstrip
-            } else if clip.kind != 3 {
-                Text(clip.name).font(.aurea(size: 11, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
-                    .padding(.horizontal, selected ? 18 : 8)
-            }
-            if clip.kind == 1 || clip.kind == 3 {
-                // Vídeo: faixa escura embaixo das miniaturas (ou do nome), barras
-                // subindo do pé. Áudio: a onda ocupa o corte inteiro, espelhada.
-                let originX = x + trimStart + drag
-                let visL = max(0, -originX), visR = min(w, viewport - originX)
-                if visR > visL {
-                    let bandH: CGFloat = clip.kind == 3 ? height : (main ? 16 : 10)
-                    EditClipWaveform(clip: clip, waves: waves, pxPerFrame: pxPerFrame,
-                                     frameAtLeft: Double(clip.startFrame) + Double((visL - trimStart) / max(pxPerFrame, 0.0001)),
-                                     band: clip.kind != 3, width: visR - visL, height: bandH)
-                        .frame(width: visR - visL, height: bandH)
-                        .offset(x: visL)
-                        .frame(width: w, height: height, alignment: .bottomLeading)
-                        .allowsHitTesting(false)
+        let frame = clock.frame
+        GeometryReader { proxy in
+            let width = proxy.size.width
+            let _ = thumbs.beginFrame(12)
+            let paints: [Paint] = lanes.indices.flatMap { i -> [Paint] in
+                let top = rulerH + CGFloat(i) * (laneH + gap) - scrollY
+                guard top + laneH >= rulerH, top <= proxy.size.height else { return [] }
+                return clips[i].compactMap { clip -> Paint? in
+                    if let drag, drag.kind == .move, drag.clip.id == clip.row.id, !clip.virtual { return nil }
+                    return paint(clip, lane: lanes[i], top: top, width: width)
                 }
             }
-            if clip.kind == 3 {
-                Text(clip.name).font(.aurea(size: 10, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
-                    .padding(.leading, selected ? 18 : 6).padding(.top, 2)
-                    .frame(width: w, height: height, alignment: .topLeading)
-            }
-            if main && selected {
-                Text(String(format: "%.1fs", Double(clip.endFrame - clip.startFrame) / max(model.compositionFps, 1)))
-                    .font(.aurea(size: 10, weight: .semibold)).foregroundStyle(.white).padding(.horizontal, 4)
-                    .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 4))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(.leading, 18).padding(.top, 3)
-            }
-            if selected {
-                HStack(spacing: 0) {
-                    handle(start: true)
-                    Spacer(minLength: 0)
-                    handle(start: false)
-                }
+            let dragged: Paint? = {
+                guard let drag, drag.kind == .move, let index = lanes.firstIndex(where: { $0.id == drag.lane }) else { return nil }
+                return paint(LaneClip(row: drag.clip, virtual: false), lane: lanes[index], top: rulerH + CGFloat(index) * (laneH + gap) - scrollY, width: width)
+            }()
+            let firstAudio = lanes.firstIndex(where: \.audio)
+            Canvas { context, size in
+                drawContent(&context, size: size, paints: paints, dragged: dragged, firstAudio: firstAudio, playhead: frame)
             }
         }
-        .frame(width: w, height: height, alignment: .leading)
-        .background(main ? Color(red: 0.118, green: 0.118, blue: 0.133) : layerColor.opacity(0.85))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white, lineWidth: selected ? 2 : 0))
-        .offset(x: x + trimStart + drag, y: y)
-        .onTapGesture { model.select(layerId: clip.id) }
-        .gesture(LongPressGesture(minimumDuration: 0.4).sequenced(before: DragGesture(minimumDistance: 0))
-            .onChanged { value in
-                if case .second(true, let dragValue?) = value {
-                    if !selected { model.select(layerId: clip.id) }
-                    drag = dragValue.translation.width
-                }
-            }
-            .onEnded { _ in
-                let frames = Int64((drag / max(pxPerFrame, 0.0001)).rounded())
-                let target = max(0, Int64(clip.startFrame) + frames)
-                if frames != 0 {
-                    if main { model.reorderClip(clip.id, toFrame: target) }
-                    else { model.editClipTime(6, amount: target) }
-                }
-                drag = 0
-            })
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(selected ? AureaText.t("edit_clip_selected", clip.name) : clip.name)
-        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
-        .accessibilityIdentifier("edit.clip.\(clip.id)")
+        .onChange(of: frame) { onFrame($0) }
+        .accessibilityHidden(true)
     }
 
-    private var layerColor: Color {
-        switch clip.kind {
-        case 1: return Color(red: 0.416, green: 0.322, blue: 0.878)
-        case 2: return Color(red: 0.239, green: 0.435, blue: 0.851)
-        case 3: return Color(red: 0.122, green: 0.549, blue: 0.576)
-        case 4: return Color(red: 0.690, green: 0.478, blue: 0.086)
-        case 5: return Color(red: 0.180, green: 0.580, blue: 0.349)
-        case 7: return Color(red: 0.353, green: 0.290, blue: 0.478)
-        default: return Color(red: 0.267, green: 0.298, blue: 0.361)
+    private func drawContent(_ context: inout GraphicsContext, size: CGSize, paints: [Paint], dragged: Paint?, firstAudio: Int?, playhead: Int64) {
+        var lanesContext = context
+        lanesContext.clip(to: Path(CGRect(x: headW, y: rulerH, width: size.width - headW, height: size.height - rulerH)))
+        for i in lanes.indices {
+            let top = rulerH + CGFloat(i) * (laneH + gap) - scrollY
+            lanesContext.fill(Path(CGRect(x: headW, y: top, width: size.width - headW, height: laneH)), with: .color(EditPalette.lane))
+            if i == firstAudio { lanesContext.fill(Path(CGRect(x: headW, y: top - 1.5, width: size.width - headW, height: 1.5)), with: .color(EditPalette.separator)) }
         }
-    }
-
-    /// A alça branca de aparar: arrastar mostra o novo limite; soltar manda ao motor.
-    private func handle(start: Bool) -> some View {
-        ZStack {
-            Color.white
-            RoundedRectangle(cornerRadius: 1).fill(Color.black.opacity(0.7)).frame(width: 2, height: 14)
-        }
-        .frame(width: 14)
-        .gesture(DragGesture(minimumDistance: 1)
-            .onChanged { value in if start { trimStart = value.translation.width } else { trimEnd = value.translation.width } }
-            .onEnded { _ in
-                let delta = start ? trimStart : trimEnd
-                let frames = Int64((delta / max(pxPerFrame, 0.0001)).rounded())
-                if frames != 0 {
-                    if start { model.editClipTime(0, amount: Int64(clip.startFrame) + frames) }
-                    else { model.editClipTime(1, amount: Int64(clip.endFrame) + frames) }
-                }
-                trimStart = 0; trimEnd = 0
-            })
-        .accessibilityLabel(AureaText.t(start ? "edit_trim_start" : "edit_trim_end"))
-    }
-
-    /// As miniaturas da mídia ao longo do corte (um ladrilho por largura de altura × 16:9).
-    private var filmstrip: some View {
-        let fps = max(model.compositionFps, 1)
-        let bucketFrames = max(1, fps * 0.25)
-        let tileW = height * 16 / 9
-        let tiles = max(1, Int(width / tileW) + 1)
-        let heightPx = Int((height * UIScreen.main.scale).rounded())
-        return HStack(spacing: 0) {
-            ForEach(0..<tiles, id: \.self) { i in
-                let localFrame = (CGFloat(i) * tileW - trimStart) / max(pxPerFrame, 0.0001)
-                let bucket = Int32((Double(localFrame) / bucketFrames).rounded())
-                let frame = Int32(clip.startFrame) + Int32(Double(bucket) * bucketFrames)
-                Group {
-                    if let image = thumbs.get(model, layer: clip.id, bucket: bucket, timelineFrame: max(frame, clip.startFrame),
-                                              heightPx: min(max(heightPx, 16), 256), generation: 0) {
-                        Image(uiImage: image).resizable().scaledToFill()
-                    } else {
-                        Color(red: 0.165, green: 0.165, blue: 0.188)
-                    }
-                }.frame(width: tileW, height: height).clipped()
+        for paint in paints { drawClip(&lanesContext, paint, width: size.width) }
+        // A marca de cada corte encostado.
+        for i in lanes.indices where !lanes[i].audio {
+            let top = rulerH + CGFloat(i) * (laneH + gap) - scrollY
+            for (a, b) in zip(clips[i], clips[i].dropFirst()) where a.row.endFrame == b.row.startFrame {
+                let cx = xOf(CGFloat(a.row.endFrame))
+                guard cx > headW, cx < size.width else { continue }
+                let mid = top + laneH / 2, s: CGFloat = 3.5
+                var bow = Path()
+                bow.move(to: CGPoint(x: cx - s, y: mid - s)); bow.addLine(to: CGPoint(x: cx + s, y: mid + s))
+                bow.addLine(to: CGPoint(x: cx + s, y: mid - s)); bow.addLine(to: CGPoint(x: cx - s, y: mid + s)); bow.closeSubpath()
+                lanesContext.fill(bow, with: .color(EditPalette.cut))
             }
         }
-        .frame(width: max(8, width - trimStart + trimEnd), height: height, alignment: .leading).clipped()
+        if let dragged { drawClip(&lanesContext, dragged, width: size.width) }
+        if let drag, drag.snapped >= 0 {
+            let x = xOf(CGFloat(drag.snapped))
+            lanesContext.fill(Path(CGRect(x: x - 0.75, y: rulerH, width: 1.5, height: size.height - rulerH)), with: .color(EditPalette.snap))
+        }
+        if data.markIn >= 0 || data.markOut >= 0 {
+            let from = max(xOf(CGFloat(max(data.markIn, 0))), headW)
+            let to = data.markOut >= 0 ? min(xOf(CGFloat(data.markOut)), size.width) : size.width
+            if to > from { lanesContext.fill(Path(CGRect(x: from, y: rulerH, width: to - from, height: size.height - rulerH)), with: .color(EditPalette.playhead.opacity(0.2))) }
+        }
+
+        // Régua por cima das faixas.
+        context.fill(Path(CGRect(x: headW, y: 0, width: size.width - headW, height: rulerH)), with: .color(EditPalette.rulerBg))
+        let pxPerSecond = pxPerFrame * CGFloat(fps)
+        let stepSeconds = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600].first { CGFloat($0) * pxPerSecond >= 64 } ?? 1200
+        let step = max(1, Int((Double(stepSeconds) * fps).rounded()))
+        var tick = max(0, Int(scrollFrames) / step) * step
+        let lastFrame = scrollFrames + (size.width - headW) / pxPerFrame
+        while CGFloat(tick) <= lastFrame {
+            let x = xOf(CGFloat(tick))
+            if x >= headW {
+                context.fill(Path(CGRect(x: x, y: rulerH - 8, width: 1, height: 8)), with: .color(EditPalette.tick))
+                let seconds = Int((Double(tick) / fps).rounded())
+                context.draw(Text(String(format: "%02d:%02d", seconds / 60, seconds % 60)).font(.system(size: 10)).foregroundColor(EditColors.ruler),
+                             at: CGPoint(x: x + 3, y: 3), anchor: .topLeading)
+            }
+            let half = xOf(CGFloat(tick) + CGFloat(step) / 2)
+            if half >= headW { context.fill(Path(CGRect(x: half, y: rulerH - 4, width: 1, height: 4)), with: .color(EditPalette.tick)) }
+            tick += step
+        }
+        if data.markIn >= 0 { drawMark(&context, x: xOf(CGFloat(data.markIn)), direction: 1) }
+        if data.markOut >= 0 { drawMark(&context, x: xOf(CGFloat(data.markOut)), direction: -1) }
+
+        let playX = xOf(CGFloat(playhead))
+        if playX >= headW && playX <= size.width {
+            context.fill(Path(CGRect(x: playX - 0.75, y: rulerH - 8, width: 1.5, height: size.height - rulerH + 8)), with: .color(EditPalette.playhead))
+            var head = Path()
+            head.move(to: CGPoint(x: playX - 5, y: rulerH - 12)); head.addLine(to: CGPoint(x: playX + 5, y: rulerH - 12))
+            head.addLine(to: CGPoint(x: playX, y: rulerH - 5)); head.closeSubpath()
+            context.fill(head, with: .color(EditPalette.playhead))
+        }
     }
-}
 
-/// Onda do som de um corte (a mesma do motor que a Composição desenha), só no
-/// trecho visível: um balde a cada ~1,5 pt na grade fixa do tempo (WaveGrid).
-/// Par de `ClipWaveform` em EditTimeline.kt. Corte sem som não desenha nada.
-private struct EditClipWaveform: View {
-    @EnvironmentObject private var model: AureaModel
-    let clip: LayerItem
-    let waves: EditWaveCache
-    let pxPerFrame: CGFloat
-    /// Frame da timeline na borda esquerda desta caixa.
-    let frameAtLeft: Double
-    let band: Bool
-    let width: CGFloat
-    let height: CGFloat
+    private func drawMark(_ context: inout GraphicsContext, x: CGFloat, direction: CGFloat) {
+        guard x >= headW else { return }
+        var path = Path()
+        path.move(to: CGPoint(x: x, y: rulerH - 12)); path.addLine(to: CGPoint(x: x + 5 * direction, y: rulerH - 12))
+        path.addLine(to: CGPoint(x: x, y: rulerH - 7)); path.addLine(to: CGPoint(x: x, y: rulerH)); path.closeSubpath()
+        context.fill(path, with: .color(EditPalette.snap))
+    }
 
-    var body: some View {
-        // A consulta (cache no ator principal) sai do corpo; o Canvas só desenha números.
-        let fpb = WaveGrid.framesPerBucket(targetPx: 1.5, pxPerFrame: pxPerFrame)
-        let toFrame = frameAtLeft + Double(width / max(pxPerFrame, 0.0001))
-        let first = WaveGrid.bucketAt(max(frameAtLeft, Double(clip.startFrame)), fpb)
-        let last = WaveGrid.bucketAt(min(toFrame, Double(clip.endFrame)) - 1e-6, fpb)
-        let wave = pxPerFrame > 0 && width >= 1 && last >= first
-            ? waves.get(model, clip: clip, fpb: fpb, generation: model.status.thumbnailGeneration, first: first, last: last)
-            : nil
-        let band = self.band, frameAtLeft = self.frameAtLeft, pxPerFrame = self.pxPerFrame
-        Canvas { context, size in
-            guard let wave, size.width >= 1, size.height >= 1 else { return }
-            if band { context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.black.opacity(0.45))) }
-            let stroke = max(1, CGFloat(fpb) * pxPerFrame * 0.72)
-            let top = size.height * 0.12
-            var path = Path()
-            var b = first
-            while b <= last {
-                let v = CGFloat(wave.at(b)) / 255
-                let x = CGFloat((Double(b) + 0.5) * fpb - frameAtLeft) * pxPerFrame
-                b += 1
-                if v <= 0 { continue }
-                if band {
-                    let h = v * (size.height - top)
-                    path.move(to: CGPoint(x: x, y: size.height - h)); path.addLine(to: CGPoint(x: x, y: size.height))
-                } else {
-                    let half = v * (size.height - top) / 2, mid = (size.height + top) / 2
+    private func drawClip(_ context: inout GraphicsContext, _ paint: Paint, width: CGFloat) {
+        let row = paint.clip.row
+        let left = xOf(CGFloat(paint.start)), right = xOf(CGFloat(paint.end))
+        let w = max(right - left, 1), top = paint.top + 1, h = laneH - 2
+        let isVisual = [1, 2, 12].contains(row.kind)
+        let audioKind = row.kind == 3
+        let body: Color, strip: Color
+        if paint.clip.virtual { body = EditPalette.linked; strip = EditPalette.linked }
+        else if audioKind { body = EditPalette.audio; strip = EditPalette.audio }
+        else if row.adjustment { body = EditPalette.adjustment; strip = EditPalette.adjustmentTop }
+        else if isVisual { body = EditPalette.video; strip = EditPalette.videoTop }
+        else { body = EditPalette.overlay; strip = EditPalette.overlayTop }
+        let alpha = paint.lane.muted || paint.lane.locked ? 0.45 : 1.0
+        let rect = CGRect(x: left, y: top, width: w, height: h)
+        context.fill(Path(roundedRect: rect, cornerRadius: 2), with: .color(body.opacity(alpha)))
+        let visibleLeft = max(left, headW), visibleRight = min(right, width), visibleW = visibleRight - visibleLeft
+        if audioKind || paint.clip.virtual {
+            if let wave = paint.wave {
+                let stroke = max(1, CGFloat(paint.fpb) * pxPerFrame * 0.72)
+                let mid = top + h / 2
+                var path = Path()
+                var b = paint.first
+                while b <= paint.last {
+                    let v = CGFloat(wave.at(b)) / 255
+                    let x = xOf(CGFloat((Double(b) + 0.5) * paint.fpb))
+                    b += 1
+                    if v <= 0 { continue }
+                    let half = v * h / 2 * 0.92
                     path.move(to: CGPoint(x: x, y: mid - half)); path.addLine(to: CGPoint(x: x, y: mid + half))
                 }
+                context.stroke(path, with: .color(paint.clip.virtual ? EditPalette.linkedWave : EditPalette.audioWave), lineWidth: stroke)
             }
-            context.stroke(path, with: .color(.white.opacity(band ? 0.8 : 0.75)), lineWidth: stroke)
+        } else {
+            let stripH = min(13, laneH * 0.34)
+            context.fill(Path(CGRect(x: left, y: top, width: w, height: stripH)), with: .color(strip.opacity(alpha)))
+            // Miniatura no começo do clipe, como no Premiere.
+            if let thumb = paint.thumb {
+                let thumbH = h - stripH
+                context.opacity = alpha
+                context.draw(Image(uiImage: thumb), in: CGRect(x: left, y: top + stripH, width: thumbH * thumb.size.width / max(thumb.size.height, 1), height: thumbH))
+                context.opacity = 1
+            }
+            if visibleW > 16 {
+                var label = context
+                label.clip(to: Path(CGRect(x: visibleLeft + 3, y: top, width: max(0, visibleW - 6 - (row.effectCount > 0 ? 16 : 0)), height: stripH)))
+                label.draw(Text(row.name).font(.system(size: 9.5)).foregroundColor(.white), at: CGPoint(x: visibleLeft + 3, y: top), anchor: .topLeading)
+            }
+            if row.effectCount > 0 && visibleW > 26 {
+                context.draw(Text("fx").font(.system(size: 9.5)).foregroundColor(.white), at: CGPoint(x: visibleRight - 14, y: top), anchor: .topLeading)
+            }
         }
-        .accessibilityHidden(true)
+        if model.selection.contains(row.id) {
+            context.stroke(Path(roundedRect: rect, cornerRadius: 2), with: .color(.white), lineWidth: 1.5)
+            if !paint.clip.virtual && w > 26 {
+                let y = paint.top + laneH * 0.25, tickH = laneH * 0.5
+                context.fill(Path(roundedRect: CGRect(x: left + 1, y: y, width: 3, height: tickH), cornerRadius: 1.5), with: .color(.white))
+                context.fill(Path(roundedRect: CGRect(x: right - 4, y: y, width: 3, height: tickH), cornerRadius: 1.5), with: .color(.white))
+            }
+        }
     }
 }
 

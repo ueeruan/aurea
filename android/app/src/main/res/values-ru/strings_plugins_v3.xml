@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Plugin V3 (PluginUi.kt, PluginManagerSheet.kt, GradientParamEditor.kt) -->
+    <string name="plugv3_back_to_original">Вернуть оригинал</string>
+    <string name="plugv3_replaces">Использовать вместо: %1$s</string>
+    <string name="plugv3_panel_transform">Трансформация</string>
+    <string name="plugv3_panel_effects">Эффекты</string>
+    <string name="plugv3_panel_blend">Наложение и непрозрачность</string>
+    <string name="plugv3_panel_presets">Пресеты</string>
+    <string name="plugv3_panel_material">3D-материал</string>
+    <string name="plugv3_safe_mode">Безопасный режим (плагины отключены)</string>
+    <string name="plugv3_safe_on">Безопасный режим включён: плагины не работают.</string>
+    <string name="plugv3_safe_auto">Приложение несколько раз закрылось само, поэтому плагины отключены. Выключите безопасный режим, чтобы снова их использовать.</string>
+    <string name="plugv3_close">Закрыть</string>
+    <string name="plugv3_gradient_position">Положение</string>
+    <string name="plugv3_gradient_remove">Удалить цвет</string>
+    <string name="plugv3_gradient_stop">Цвет %1$s</string>
+</resources>

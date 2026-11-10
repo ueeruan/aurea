@@ -26,6 +26,8 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 texel;     // xy = 1/tamanho, zw = tamanho (meia resolução)
     vec4 cfg;       // x = raio na tela (fração da altura), y = força, z = direções, w = passos por lado
     vec4 extra;     // x = queda (0..1 do raio onde começa a sumir), y = viés do cosseno
+    mat4 proj;      // clip <- vista
+    vec4 sun;       // xyz = direção ao sol na vista, w = passos da sombra de contato (0 = sem sol)
 } p;
 
 const float PI = 3.14159265359;
@@ -42,7 +44,7 @@ vec3 view_at(vec2 uv) {
 
 void main() {
     float d = textureLod(t_depth, v_uv, 0.0).r;
-    if (d <= 0.0) { o_ao = vec4(1.0, 0.0, 0.0, 1.0); return; }   // céu: nada oclui
+    if (d <= 0.0) { o_ao = vec4(1.0, 1.0, 0.0, 1.0); return; }   // céu: nada oclui
     vec3 P = view_pos(v_uv, d);
     float z = abs(P.z);
 
@@ -115,5 +117,25 @@ void main() {
     }
     visibility = clamp(visibility / float(max(dirs, 1)), 0.0, 1.0);
     float ao = pow(visibility, max(p.cfg.y, 0.0));
-    o_ao = vec4(ao, z, 0.0, 1.0);
+
+    // Sombra de contato (0.5.1): marcha curta em direção ao sol. Pega o que o
+    // mapa de sombra perde perto do chão: pés, cantos e objetos encostados.
+    float contact = 1.0;
+    int contactSteps = int(p.sun.w + 0.5);
+    if (contactSteps > 0) {
+        float reach = z * 0.035, thickness = z * 0.012;
+        vec3 origin = P + N * z * 0.002;
+        for (int k = 0; k < contactSteps; ++k) {
+            float t = (float(k) + 0.2 + 0.8 * jitter) / float(contactSteps);
+            vec3 X = origin + p.sun.xyz * (reach * t);
+            vec4 c = p.proj * vec4(X, 1.0);
+            vec2 suv = c.xy / c.w * 0.5 + 0.5;
+            if (any(lessThan(suv, vec2(0.0))) || any(greaterThan(suv, vec2(1.0)))) break;
+            float sd = textureLod(t_depth, suv, 0.0).r;
+            if (sd <= 0.0) continue;
+            float diff = X.z - view_pos(suv, sd).z;
+            if (diff > 0.0 && diff < thickness) { contact = mix(0.1, 1.0, t * t); break; }
+        }
+    }
+    o_ao = vec4(ao, contact, 0.0, 1.0);
 }

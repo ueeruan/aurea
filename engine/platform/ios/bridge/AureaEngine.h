@@ -858,6 +858,21 @@ NS_SWIFT_NAME(AureaEngine)
 /// 0.4.1: Elementos › Aurora (Engine::add_aurora).
 - (long long)addAurora;
 /// 0.4.1: + › 3D › Reflective Floor (Engine::add_reflective_floor).
+/// PNG para 3D. Decodifica e traça: chame fora da thread principal. Negativo = -Errc.
+- (long long)addImage3D:(NSString*)path name:(NSString*)name NS_SWIFT_NAME(addImage3D(_:name:));
+/// A receita em números (scene3d::image3d_to_fields); nil = não é Imagem 3D.
+- (nullable NSArray<NSNumber*>*)image3DForLayer:(long long)layerId NS_SWIFT_NAME(image3D(forLayer:));
+- (BOOL)setImage3D:(long long)layerId values:(NSArray<NSNumber*>*)values NS_SWIFT_NAME(setImage3D(_:values:));
+- (BOOL)applyImage3DPreset:(long long)layerId preset:(uint32_t)preset NS_SWIFT_NAME(applyImage3DPreset(_:preset:));
+/// Faixas da Edição (EngineTracks.inl). `op` é o número de TrackEditOp.
+- (BOOL)editTrackClip:(uint32_t)op layer:(long long)layer frame:(long long)frame track:(uint32_t)track NS_SWIFT_NAME(editTrackClip(_:layer:frame:track:));
+/// Formato em Engine::query_edit_timeline.
+- (NSArray<NSNumber*>*)editTimeline NS_SWIFT_NAME(editTimeline());
+- (BOOL)setEditTrackFlag:(uint32_t)track flag:(uint32_t)flag on:(BOOL)on NS_SWIFT_NAME(setEditTrackFlag(_:flag:on:));
+- (uint32_t)addEditTrack:(BOOL)audio NS_SWIFT_NAME(addEditTrack(audio:));
+- (BOOL)removeEditTrack:(uint32_t)track NS_SWIFT_NAME(removeEditTrack(_:));
+- (BOOL)setEditMark:(uint32_t)which frame:(long long)frame NS_SWIFT_NAME(setEditMark(_:frame:));
+- (BOOL)editMarkedRange:(BOOL)extract NS_SWIFT_NAME(editMarkedRange(extract:));
 - (long long)addReflectiveFloor;
 - (long long)freezeFrameForLayer:(long long)layerId frame:(int32_t)frame hold:(int32_t)holdFrames;
 /// Motivo legível da última importação que falhou ("" quando deu certo).
@@ -954,6 +969,8 @@ NS_SWIFT_NAME(AureaEngine)
 // cabeçote: 14 floats cada (Engine::kShapePartFloats).
 - (long long)addShape3D:(uint32_t)kind name:(NSString*)name NS_SWIFT_NAME(addShape3D(kind:name:));
 - (long long)layerTo3DObject:(long long)layerId name:(NSString*)name NS_SWIFT_NAME(layerTo3DObject(_:name:));
+/// PNG com transparência vira Imagem 3D no mesmo lugar. Decodifica e traça: fora da thread principal.
+- (long long)layerToImage3D:(long long)layerId path:(NSString*)path name:(NSString*)name NS_SWIFT_NAME(layerToImage3D(_:path:name:));
 - (NSArray<NSNumber*>*)shape3D:(long long)layerId NS_SWIFT_NAME(shape3D(_:));
 - (BOOL)setShape3DPartStyle:(long long)layerId part:(int32_t)part color:(nullable NSArray<NSNumber*>*)color image:(nullable NSString*)image NS_SWIFT_NAME(setShape3DPartStyle(_:part:color:image:));
 - (NSArray<NSNumber*>*)shape3DParts:(long long)layerId NS_SWIFT_NAME(shape3DParts(_:));
@@ -1063,10 +1080,12 @@ NS_SWIFT_NAME(AureaEngine)
 - (NSString*)layerSourcePath:(long long)layerId;
 /// Mídias de um `.aurea` fechado: 4 strings por mídia (gravado, legível, nome, tipo). nil = não abre.
 - (nullable NSArray<NSString*>*)projectFileMedia:(NSString*)path;
+/// Plugins instalados que um `.aurea` fechado usa: 3 strings por plugin (id, versão, pasta).
+- (nullable NSArray<NSString*>*)projectFilePlugins:(NSString*)path NS_SWIFT_NAME(projectFilePlugins(_:));
 /// Arquivo do projeto (ProjectPackage.cpp): [erro (0 = ok), incluídas, puladas].
 /// `media` = 3 strings por mídia (gravado, legível agora, nome).
 + (NSArray<NSNumber*>*)exportProjectPackage:(NSString*)projectPath to:(NSString*)outPath title:(NSString*)title
-                                  appVersion:(NSString*)appVersion media:(NSArray<NSString*>*)media;
+                                  appVersion:(NSString*)appVersion media:(NSArray<NSString*>*)media plugins:(NSArray<NSString*>*)plugins;
 /// [erro (0 = ok), título, versão do app, religadas, ausentes]. Nunca sobrescreve `projectOut`.
 + (NSArray<NSString*>*)importProjectPackage:(NSString*)packagePath project:(NSString*)projectOut mediaDir:(NSString*)mediaDir;
 - (NSArray<NSDictionary<NSString*, id>*>*)parseSRT:(NSString*)srt;
@@ -1320,6 +1339,11 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)removePlugin:(NSString*)pluginId NS_SWIFT_NAME(removePlugin(_:));
 /// A pasta de plugins em uso pelo motor.
 @property (nonatomic, readonly, copy) NSString* pluginDirectory;
+/// Modo seguro: plugins fora do catálogo. `Automatic` = ligou sozinho depois de quedas na abertura.
+@property (nonatomic, readonly) BOOL pluginsSafeMode;
+@property (nonatomic, readonly) BOOL pluginsSafeModeAutomatic;
+- (void)setPluginsSafeMode:(BOOL)on NS_SWIFT_NAME(setPluginsSafeMode(_:));
+- (void)markPluginsHealthy NS_SWIFT_NAME(markPluginsHealthy());
 
 // --- 0.3.4 plugins: painéis, scripts e APIs (EnginePluginsV2.cpp) -----------
 // As chamadas BLOQUEIAM (o script roda na thread de quem chama): só de uma
@@ -1345,6 +1369,9 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)pluginReload:(NSString*)pluginId NS_SWIFT_NAME(pluginReload(_:));
 - (NSArray<NSNumber*>*)effectCurve:(long long)layerId effect:(uint32_t)effect param:(uint32_t)param channel:(uint32_t)channel samples:(BOOL)samples NS_SWIFT_NAME(effectCurve(_:effect:param:channel:samples:));
 - (int32_t)editEffectCurve:(long long)layerId effect:(uint32_t)effect param:(uint32_t)param channel:(uint32_t)channel action:(uint32_t)action point:(uint32_t)point x:(float)x y:(float)y NS_SWIFT_NAME(editEffectCurve(_:effect:param:channel:action:point:x:y:));
+/// Paradas do degradê: [posição, r, g, b, a] por parada (RGBA linear).
+- (NSArray<NSNumber*>*)effectGradient:(long long)layerId effect:(uint32_t)effect param:(uint32_t)param NS_SWIFT_NAME(effectGradient(_:effect:param:));
+- (BOOL)setEffectGradient:(long long)layerId effect:(uint32_t)effect param:(uint32_t)param stops:(NSArray<NSNumber*>*)stops NS_SWIFT_NAME(setEffectGradient(_:effect:param:stops:));
 /// Declaração dos parâmetros de um TIPO (o catálogo, sem camada).
 - (NSArray<NSDictionary<NSString*, id>*>*)effectSpecs:(uint32_t)typeId;
 /// Abre/recolhe a seção `section` (ordinal 1..N) do efeito no painel. Apresentação:

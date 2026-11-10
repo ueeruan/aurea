@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- PNG para 3D (AddLayerPanel.kt, Element3DPanel.kt) -->
+    <string name="image3d_add" formatted="false">PNG to 3D</string>
+    <string name="image3d_layer" formatted="false">3D Image</string>
+    <string name="image3d_creating" formatted="false">Creating the 3D object…</string>
+    <string name="image3d_err_empty" formatted="false">This image is fully transparent.</string>
+    <string name="image3d_no_alpha" formatted="false">This image has no transparency, so the object took the shape of the frame. Use a PNG with no background.</string>
+    <string name="image3d_front" formatted="false">Front</string>
+    <string name="image3d_back" formatted="false">Back</string>
+    <string name="image3d_silhouette" formatted="false">Silhouette</string>
+    <string name="image3d_threshold" formatted="false">Alpha cutoff</string>
+    <string name="image3d_threshold_hint" formatted="false">Sets where the edge falls in semi-transparent areas.</string>
+    <string name="image3d_depth_hint" formatted="false">100% = the image height.</string>
+    <string name="image3d_from_photos" formatted="false">Photos</string>
+    <string name="image3d_from_files" formatted="false">Files</string>
+</resources>

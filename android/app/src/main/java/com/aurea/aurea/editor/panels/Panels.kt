@@ -173,10 +173,11 @@ fun PanelContent(
                 CaptionsPanel(env)
             } else if (hasLayer) {
                 when (panel) {
-                    EditorPanel.Transform -> TransformPanel(env, transformTab, onTab = { transformTab = it })
-                    EditorPanel.Effects -> EffectsPanel(env)
+                    // Plugin V3: estes cinco um plugin pode substituir (sempre com volta ao original).
+                    EditorPanel.Transform -> com.aurea.aurea.effects.PluginPanelOr("transform") { TransformPanel(env, transformTab, onTab = { transformTab = it }) }
+                    EditorPanel.Effects -> com.aurea.aurea.effects.PluginPanelOr("effects") { EffectsPanel(env) }
                     EditorPanel.Curve -> CurvePanel(env)
-                    EditorPanel.Appearance -> AppearancePanel(env)
+                    EditorPanel.Appearance -> com.aurea.aurea.effects.PluginPanelOr("blend") { AppearancePanel(env) }
                     EditorPanel.Speed -> SpeedPanel(env)
                     EditorPanel.ClipEdit -> ClipEditPanel(env)
                     EditorPanel.Audio -> AudioPanel(env)
@@ -185,9 +186,9 @@ fun PanelContent(
                     EditorPanel.Font -> FontPanel(env)
                     EditorPanel.Particles -> ParticlesPanel(env)
                     EditorPanel.Tracking -> TrackingPanel(env)
-                    EditorPanel.Element3D -> Element3DPanel(env)
+                    EditorPanel.Element3D -> com.aurea.aurea.effects.PluginPanelOr("material") { Element3DPanel(env) }
                     EditorPanel.Captions -> CaptionsPanel(env)
-                    EditorPanel.Presets -> PresetsPanel(env)
+                    EditorPanel.Presets -> com.aurea.aurea.effects.PluginPanelOr("presets") { PresetsPanel(env) }
                     EditorPanel.Mask -> MaskPanel(env)
                     EditorPanel.Vector -> VectorPanel(env)
                     EditorPanel.ShapeEdit -> ShapeEditPanel(env)

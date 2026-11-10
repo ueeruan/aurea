@@ -90,13 +90,29 @@ using PluginImages = std::vector<std::shared_ptr<const PluginImage>>;
 [[nodiscard]] bool decode_plugin_image(const std::string& path, const std::string& pluginId, const TextureDecl& decl,
                                        bool srgbPlugin, PluginImage& out, std::string& error);
 /// Quantos vec4 de parâmetro o bloco `aurea` declara (≥ 1: GLSL não aceita array vazio).
+[[nodiscard]] inline u32 param_slot_size(const ParamDecl& p) noexcept {
+    return p.kind == ParamKind::Curve ? kCurveSlots : p.kind == ParamKind::Gradient ? kGradientSlots : 1u;
+}
+/// Primeiro vec4 do parâmetro `index` (igual ao índice se não há curva nem degradê).
+[[nodiscard]] inline u32 param_slot_at(const Manifest& m, u32 index) noexcept {
+    u32 slot = 0;
+    for (u32 i = 0; i < index && i < m.params.size(); ++i) slot += param_slot_size(m.params[i]);
+    return slot;
+}
 [[nodiscard]] inline u32 param_slots(const Manifest& m) noexcept {
-    return m.params.empty() ? 1u : static_cast<u32>(m.params.size());
+    const u32 used = param_slot_at(m, static_cast<u32>(m.params.size())) + (m.audio ? 1u : 0u);
+    return used ? used : 1u;
+}
+/// Samplers que o formato 3 acrescenta depois das entradas e das texturas do pacote.
+[[nodiscard]] inline u32 extra_samplers(const Manifest& m) noexcept {
+    u32 n = (m.history ? 1u : 0u) + (m.audio ? 1u : 0u);
+    for (const ParamDecl& p : m.params) n += p.kind == ParamKind::LayerImage;
+    return n;
 }
 
 /// O efeito de um plugin "shader": um `ShaderId` dinâmico por passe.
 [[nodiscard]] std::unique_ptr<Effect> make_shader_effect(const Manifest& m, std::vector<ShaderId> passShaders,
-                                                         PluginImages images = {});
+                                                         PluginImages images = {}, std::string frameSource = {});
 /// O efeito de um plugin "stack".
 [[nodiscard]] std::unique_ptr<Effect> make_stack_effect(const Manifest& m, std::vector<CompiledStackStep> steps);
 

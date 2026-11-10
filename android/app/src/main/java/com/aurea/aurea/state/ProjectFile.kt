@@ -55,7 +55,9 @@ internal object ProjectFile {
             // O motor carrega o projeto inteiro para empacotar: etapa vigiada.
             ProjectGuard.begin(context, ProjectGuard.Stage.EXPORT_FILE, projectPath)
             val r = try {
-                engine.exportProjectPackage(projectPath, tmp.absolutePath, title, BuildConfig.VERSION_NAME, media.toTypedArray())
+                // Os plugins vão no arquivo completo, como a mídia.
+                val plugins = if (includeMedia) engine.projectFilePlugins(projectPath) ?: emptyArray() else emptyArray()
+                engine.exportProjectPackage(projectPath, tmp.absolutePath, title, BuildConfig.VERSION_NAME, media.toTypedArray(), plugins)
             } finally {
                 ProjectGuard.end(context, ProjectGuard.Stage.EXPORT_FILE)
             }
@@ -75,7 +77,7 @@ internal object ProjectFile {
         }
     }
 
-    data class ImportOutcome(val code: Int, val path: String = "", val title: String = "", val missing: Int = 0)
+    data class ImportOutcome(val code: Int, val path: String = "", val title: String = "", val missing: Int = 0, val plugins: List<Pair<String, File>> = emptyList())
 
     /**
      * Lê o pacote de `source` para um projeto NOVO em `projectsDir` (nome livre
@@ -105,7 +107,8 @@ internal object ProjectFile {
             }
             val code = r.getOrNull(0)?.toIntOrNull() ?: ERR_IO
             if (code != 0) return ImportOutcome(code)
-            return ImportOutcome(0, project.absolutePath, r.getOrNull(1).orEmpty().ifBlank { fallbackTitle }, r.getOrNull(4)?.toIntOrNull() ?: 0)
+            val plugins = (5 until r.size - 2 step 3).map { r[it] to File(r[it + 2]) }
+            return ImportOutcome(0, project.absolutePath, r.getOrNull(1).orEmpty().ifBlank { fallbackTitle }, r.getOrNull(4)?.toIntOrNull() ?: 0, plugins)
         } catch (e: java.io.IOException) {
             return ImportOutcome(if (e.message?.contains("ENOSPC") == true) ERR_STORAGE_FULL else ERR_IO)
         } catch (_: RuntimeException) {

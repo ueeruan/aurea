@@ -258,6 +258,11 @@ Result<u64> Engine::add_empty_group(const char* name) noexcept {
     child->environment().showBackground = false;
     child->shadows() = comp->shadows();
     child->post_process().quality3d = comp->post_process().quality3d;
+    child->post_process().toneMapper = comp->post_process().toneMapper;
+    child->post_process().aoEnabled = comp->post_process().aoEnabled;
+    child->post_process().aoStrength = comp->post_process().aoStrength;
+    child->post_process().aoRadius = comp->post_process().aoRadius;
+    child->motion_blur() = comp->motion_blur();
 
     const LayerId pl = comp->add_layer(LayerKind::Composition, label);
     Layer* p = comp->layer(pl);

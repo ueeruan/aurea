@@ -2,18 +2,16 @@ package com.aurea.aurea.editor
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -25,23 +23,36 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -50,7 +61,6 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -62,46 +72,167 @@ import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
-import com.aurea.aurea.ui.theme.LayerType
 import com.aurea.aurea.ui.theme.tocavel
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
 // =============================================================================
-//  A LINHA DO TEMPO DA EDIÇÃO (0.2.5): o cabeçote fica PARADO no meio e o tempo
-//  corre por baixo dele. Arrastar na horizontal anda no tempo; pinça aproxima;
-//  arrastar na vertical rola as linhas. Embaixo da régua, a TRILHA PRINCIPAL
-//  (miniaturas da mídia, "+" no fim) e as outras linhas por baixo dela
-//  (camadas, texto e, por último, áudio). Vídeo com som mostra a ONDA do áudio
-//  numa faixa embaixo das miniaturas; o corte de áudio é a onda inteira.
+//  A LINHA DO TEMPO DA EDIÇÃO: faixas de montagem (V3, V2, V1 em cima; A1, A2,
+//  A3 embaixo), no fluxo de um editor não linear.
 //
-//  Num corte escolhido, as alças brancas aparam o começo e o fim (o motor
-//  puxa os vizinhos da trilha magnética); segurar e arrastar reordena na
-//  trilha principal ou move no tempo nas outras linhas. Tocar no vazio solta.
+//  Adaptado ao toque: arrastar no vazio rola a linha do tempo, a régua move o
+//  cabeçote e a pinça aproxima. Num dedo só, quem decide o que o arrasto faz é a
+//  ferramenta escolhida na faixa de cima; o clipe escolhido responde na hora, e
+//  o que não está escolhido pede um toque (ou segurar), para rolar nunca virar
+//  edição sem querer.
+//
+//  Tudo é desenhado num Canvas só, com o cabeçote e a rolagem lidos na fase de
+//  desenho: tocar um vídeo não recompõe a tela. As regras de cada edição moram
+//  no motor (EngineTracks.inl); aqui só se escolhe a operação e o quadro.
 // =============================================================================
 
+private val ToolH = 44.dp
 private val RulerH = 26.dp
-private val MainH = 56.dp
-private val RowH = 34.dp
-private val RowGap = 6.dp
-private val HandleW = 14.dp
+private val HeadW = 98.dp
+private val LaneH = 44.dp
+private val CompactLaneH = 34.dp
+private val LaneGap = 1.dp
+private val EdgeW = 13.dp
 
-/** Uma fileira da linha do tempo: os cortes dela e se é a trilha principal. */
-internal class EditRow(val key: String, val clips: List<LayerRow>, val main: Boolean, val audio: Boolean)
+private object EditPalette {
+    val Lane = Color(0xFF17191E)
+    val Head = Color(0xFF20232A)
+    val RulerBg = Color(0xFF101114)
+    val Tick = Color(0xFF5B606B)
+    val Separator = Color(0xFF3A3E47)
+    val Video = Color(0xFF1F6F8B)
+    val VideoTop = Color(0xFF17566C)
+    val Overlay = Color(0xFF7A2FA8)
+    val OverlayTop = Color(0xFF5E2482)
+    val Adjustment = Color(0xFFD016C4)
+    val AdjustmentTop = Color(0xFFA30F99)
+    val Audio = Color(0xFF2F6A23)
+    val AudioWave = Color(0xFF9FE08A)
+    val LinkedAudio = Color(0xFF17465A)
+    val LinkedWave = Color(0xFF67C4F2)
+    val Playhead = Color(0xFF4EA8F2)
+    val Selected = Color.White
+    val Range = Color(0x334EA8F2)
+    val Snap = Color(0xFFFFD54A)
+    val Cut = Color(0xFFE8EDF5)
+}
 
-/** Fileiras: a principal primeiro, depois as linhas de cima para baixo na pilha, e o áudio no fim. */
-private fun editRows(layers: List<LayerRow>, anchor: Long): List<EditRow> {
-    val anchorRow = layers.firstOrNull { it.id == anchor }
-    fun keyOf(l: LayerRow) = if (l.trackId != 0) "t${l.trackId}" else "l${l.id}"
-    val mainKey = anchorRow?.let(::keyOf)
-    val byRow = layers.groupBy(::keyOf)
-    val main = mainKey?.let { k -> byRow[k]?.let { EditRow(k, it.sortedBy { c -> c.startFrame }, main = true, audio = false) } }
-    // Ordem de desenho: zIndex maior = na frente. A fileira mais à frente vem logo abaixo da principal.
-    val others = byRow.filterKeys { it != mainKey }.map { (k, clips) ->
-        EditRow(k, clips.sortedBy { it.startFrame }, main = false, audio = clips.all { it.kind == 3 })
-    }.sortedWith(compareBy<EditRow> { it.audio }.thenByDescending { r -> r.clips.maxOf { it.zIndex } })
-    return listOfNotNull(main) + others
+/** Faixa como a interface mostra: `label` é V1, A2… */
+internal class EditTrackInfo(val id: Int, val audio: Boolean, val locked: Boolean, val muted: Boolean, val solo: Boolean, val target: Boolean, val label: String)
+
+/** O que `Engine::query_edit_timeline` devolve, em fileiras prontas para desenhar. */
+internal class EditTimelineData(val tracks: List<EditTrackInfo>, val linkedAudio: Map<Long, Int>, val markIn: Long, val markOut: Long) {
+    /** De cima para baixo na tela: V3, V2, V1, A1, A2, A3. */
+    val lanes: List<EditTrackInfo> = tracks.filter { !it.audio }.reversed() + tracks.filter { it.audio }
+
+    companion object {
+        fun parse(raw: LongArray): EditTimelineData? {
+            if (raw.size < 4) return null
+            val trackCount = raw[0].toInt()
+            val linkedCount = raw[1].toInt()
+            if (trackCount < 0 || linkedCount < 0 || raw.size < 4 + trackCount * 2 + linkedCount * 2) return null
+            var video = 0
+            var audio = 0
+            val tracks = (0 until trackCount).map { i ->
+                val flags = raw[5 + i * 2].toInt()
+                val isAudio = flags and 1 != 0
+                EditTrackInfo(
+                    raw[4 + i * 2].toInt(), isAudio, flags and 2 != 0, flags and 4 != 0, flags and 8 != 0, flags and 16 != 0,
+                    if (isAudio) "A${++audio}" else "V${++video}",
+                )
+            }
+            val linked = HashMap<Long, Int>(linkedCount)
+            for (i in 0 until linkedCount) linked[raw[4 + trackCount * 2 + i * 2]] = raw[5 + trackCount * 2 + i * 2].toInt()
+            return EditTimelineData(tracks, linked, raw[2], raw[3])
+        }
+    }
+}
+
+/** A ferramenta da faixa de cima; as letras do Premiere viram nomes no toque. */
+internal enum class EditTool(val label: Int, val tag: String, val icon: EditIcon) {
+    Select(R.string.edit_tool_select, "select", EditIcon.Select),
+    Ripple(R.string.edit_tool_ripple, "ripple", EditIcon.Ripple),
+    Roll(R.string.edit_tool_roll, "roll", EditIcon.Roll),
+    Razor(R.string.edit_tool_razor, "razor", EditIcon.Razor),
+    Slip(R.string.edit_tool_slip, "slip", EditIcon.Slip),
+    Slide(R.string.edit_tool_slide, "slide", EditIcon.Slide),
+}
+
+/** Números de `TrackEditOp` (Engine.hpp). */
+internal object TrackOp {
+    const val MOVE = 0
+    const val MOVE_INSERT = 1
+    const val TRIM_IN = 2
+    const val TRIM_OUT = 3
+    const val RIPPLE_TRIM_IN = 4
+    const val RIPPLE_TRIM_OUT = 5
+    const val ROLL = 6
+    const val SLIP = 7
+    const val SLIDE = 8
+    const val RAZOR = 9
+    const val RAZOR_ALL = 10
+    const val RIPPLE_DELETE = 11
+    const val LIFT = 12
+    const val MOVE_LINKED_AUDIO = 13
+}
+
+/** Onde cada faixa fica (px, sem rolagem) e onde o conteúdo termina. A conta é testada na JVM. */
+internal class EditLaneLayout(val tops: FloatArray, val heights: FloatArray, val bottom: Float) {
+    fun laneAt(y: Float): Int {
+        for (i in tops.indices) if (y >= tops[i] && y < tops[i] + heights[i]) return i
+        return -1
+    }
+
+    companion object {
+        fun compute(count: Int, rulerH: Float, laneH: Float, gap: Float): EditLaneLayout {
+            val tops = FloatArray(count) { rulerH + it * (laneH + gap) }
+            return EditLaneLayout(tops, FloatArray(count) { laneH }, rulerH + count * (laneH + gap))
+        }
+
+        /** O teto da rolagem: a última faixa encosta embaixo (nunca negativo). */
+        fun maxScroll(bottom: Float, viewport: Float): Float = if (viewport <= 0f) 0f else max(0f, bottom - viewport)
+    }
+}
+
+/** Encaixe: o alvo mais perto de `frame` dentro de `reach` quadros, ou o próprio `frame`. */
+internal fun snapFrame(frame: Int, targets: IntArray, reach: Float): Int {
+    var best = frame
+    var distance = reach
+    for (t in targets) {
+        val d = abs(t - frame).toFloat()
+        if (d < distance) { distance = d; best = t }
+    }
+    return best
+}
+
+private class LaneClip(val row: LayerRow, val virtual: Boolean)
+
+private const val DRAG_TRIM_IN = 1
+private const val DRAG_TRIM_OUT = 2
+private const val DRAG_MOVE = 3
+private const val DRAG_SLIP = 4
+private const val DRAG_SLIDE = 5
+private const val DRAG_AUDIO_LANE = 6
+
+private class ClipDrag(val kind: Int, val clip: LayerRow, val neighbour: LayerRow?, val targets: IntArray) {
+    var frames by mutableIntStateOf(0)
+    var lane by mutableIntStateOf(0)
+    var snapped by mutableIntStateOf(-1)
+}
+
+@Stable
+private class EditView(pxPerFrame: Float) {
+    var pxPerFrame by mutableFloatStateOf(pxPerFrame)
+    var scrollFrames by mutableFloatStateOf(-8f)
+    var scrollY by mutableFloatStateOf(0f)
+    var drag by mutableStateOf<ClipDrag?>(null)
 }
 
 @Composable
@@ -110,486 +241,725 @@ internal fun EditTimeline(
     modifier: Modifier,
     compact: Boolean,
     onAddMedia: () -> Unit,
-    onAddAudio: () -> Unit,
     onTransition: (Long, Long) -> Unit = { _, _ -> },
 ) {
     val density = LocalDensity.current
-    var pxPerSecond by remember { mutableFloatStateOf(with(density) { 72.dp.toPx() }) }
-    var scrollY by remember { mutableFloatStateOf(0f) }
-    // 0.3.6: a altura medida da linha do tempo (0 até o primeiro layout).
-    var viewportH by remember { mutableIntStateOf(0) }
     val fps = store.project.fps.takeIf { it > 0f } ?: 30f
-    val playhead = store.playhead
-    val pxPerFrame = pxPerSecond / fps
-    val rows = remember(store.layers, store.mainTrackAnchor) { editRows(store.layers, store.mainTrackAnchor) }
-    val hasAudio = rows.any { it.audio }
+    val view = remember(store) { EditView(with(density) { 72.dp.toPx() } / fps) }
+    var tool by remember { mutableStateOf(EditTool.Select) }
+    var snap by remember { mutableStateOf(true) }
     val timelineLabel = stringResource(R.string.edit_timeline)
-    val currentPlayhead by rememberUpdatedState(playhead)
-    val currentPxPerFrame by rememberUpdatedState(pxPerFrame)
-    // 0.3.6: a rolagem vertical vai só até a última fileira encostar embaixo. Antes não
-    // tinha teto e o arrasto de lado (com um pouco de vertical) levava as fileiras para
-    // fora da tela: "o clipe some" ao deslizar logo depois de abrir o projeto.
-    val layout = remember(rows, hasAudio, compact, density.density) { EditRowLayout.of(rows, hasAudio, compact, density) }
-    val maxScroll = EditRowLayout.maxScroll(layout.contentBottom, viewportH.toFloat())
-    val currentMaxScroll by rememberUpdatedState(maxScroll)
-    val shownScroll = scrollY.coerceIn(0f, maxScroll)
-    // 0.3.6: o corte escolhido rola para dentro da vista (com o painel aberto a linha do
-    // tempo encolhe e a fileira dele ficava escondida embaixo, atrás do painel).
-    val primary = store.primary
-    LaunchedEffect(primary, layout, viewportH) {
-        val id = primary ?: return@LaunchedEffect
-        if (viewportH <= 0) return@LaunchedEffect
-        val index = rows.indexOfFirst { r -> r.clips.any { it.id == id } }
-        if (index < 0) return@LaunchedEffect
-        val top = layout.rowTops[index] - layout.rowsTop
-        val bottom = top + layout.rowHeights[index]
-        val viewport = com.aurea.aurea.editor.timeline.TimelineReveal.viewport(viewportH.toFloat(), layout.rowsTop, 0f)
-        val current = scrollY.coerceIn(0f, maxScroll)
-        val target = com.aurea.aurea.editor.timeline.TimelineReveal.target(top, bottom, current, viewport).coerceIn(0f, maxScroll)
-        if (target != current) scrollY = target
-    }
-    // Onda do som: uma janela por corte, pedida ao motor só quando a vista sai dela,
-    // o zoom muda de degrau ou chega pedaço novo (a geração das miniaturas muda).
-    val waves = remember { EditWaveCache() }
-    val waveGeneration = store.thumbnailGeneration
+    val data = store.editTimeline
 
-    BoxWithConstraints(
-        modifier.background(EditColors.Canvas).clipToBounds().testTag("edit.timeline")
-            .onSizeChanged { viewportH = it.height }
-            .semantics { contentDescription = timelineLabel }
-            // Fundo: tocar solta a seleção; arrastar anda no tempo (e rola as
-            // linhas na vertical); pinça muda a escala.
-            .pointerInput(store) { detectTapGestures { store.clearSelection() } }
-            .pointerInput(store) {
-                // 0.3.6: o eixo é decidido UMA vez por gesto (depois da folga do toque):
-                // de lado só anda no tempo, de pé só rola as fileiras. O tempo anda a
-                // partir do quadro em que o gesto começou (o cabeçote do motor chega
-                // atrasado; somar ao valor velho fazia o conteúdo pular).
-                val slop = viewConfiguration.touchSlop
-                awaitEachGesture {
-                    awaitFirstDown(requireUnconsumed = false)
-                    var axis = EditPanAxis.NONE
-                    var total = Offset.Zero
-                    var startFrame = 0
-                    var pinching = false
+    Column(modifier.background(EditColors.Canvas).testTag("edit.timeline").semantics { contentDescription = timelineLabel }) {
+        EditToolStrip(store, tool, { tool = it }, snap, { snap = it }, onAddMedia)
+        BoxWithConstraints(Modifier.fillMaxWidth().weight(1f).clipToBounds()) {
+            if (data != null) EditLanes(store, data, view, tool, snap, compact, fps, constraints.maxWidth.toFloat(), constraints.maxHeight.toFloat(), onTransition)
+        }
+    }
+}
+
+/** A linha fixa: mídia, as seis ferramentas num grupo só, encaixe e o resto no "⋯". */
+@Composable
+private fun EditToolStrip(
+    store: EditorStore,
+    tool: EditTool,
+    onTool: (EditTool) -> Unit,
+    snap: Boolean,
+    onSnap: (Boolean) -> Unit,
+    onAddMedia: () -> Unit,
+) {
+    var more by remember { mutableStateOf(false) }
+    Row(
+        Modifier.fillMaxWidth().height(ToolH).background(EditColors.Bar).padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val addLabel = stringResource(R.string.edit_add_media)
+        Box(
+            Modifier.size(34.dp).clip(RoundedCornerShape(9.dp)).background(if (store.editPlacement != 0) AureaColors.Accent else Color.White).testTag("edit.add")
+                .semantics { contentDescription = addLabel; role = Role.Button }
+                .tocavel(shrink = 0.9f, haptic = true, onClick = onAddMedia),
+            contentAlignment = Alignment.Center,
+        ) { CupertinoIcon(CupertinoGlyph.Plus, 18.dp, Color.Black) }
+        Row(
+            Modifier.padding(start = 8.dp).clip(RoundedCornerShape(10.dp)).background(EditColors.DockLevel).padding(2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            EditTool.values().forEach { t ->
+                ToolButton(t.icon, stringResource(t.label), "edit.tool.${t.tag}", t == tool) { onTool(t) }
+            }
+        }
+        Box(Modifier.weight(1f))
+        ToolButton(EditIcon.Snap, stringResource(R.string.edit_snap), "edit.snap", snap) { onSnap(!snap) }
+        val moreLabel = stringResource(R.string.edit_more)
+        Box(
+            Modifier.size(36.dp).testTag("edit.tools.more").semantics { contentDescription = moreLabel; role = Role.Button }
+                .tocavel(shrink = 0.92f) { more = true },
+            contentAlignment = Alignment.Center,
+        ) { CupertinoIcon(CupertinoGlyph.Ellipsis, 20.dp, AureaColors.Text) }
+    }
+    if (more) EditMoreSheet(store) { more = false }
+}
+
+@Composable
+private fun ToolButton(icon: EditIcon, label: String, tag: String, on: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier.size(36.dp, 34.dp).clip(RoundedCornerShape(8.dp)).background(if (on) AureaColors.AccentDim else Color.Transparent)
+            .testTag(tag).semantics { contentDescription = label; role = Role.Button; selected = on }
+            .tocavel(shrink = 0.92f, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { EditToolIcon(icon, if (on) AureaColors.Accent else AureaColors.Text) }
+}
+
+/** O que não é ferramenta de arrasto, em três grupos. */
+@Composable
+private fun EditMoreSheet(store: EditorStore, onDismiss: () -> Unit) {
+    com.aurea.aurea.ui.ds.AureaModalSheet(onDismiss = onDismiss) {
+        Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            MoreSection(stringResource(R.string.edit_section_marks)) {
+                MoreTile(EditIcon.MarkIn, stringResource(R.string.edit_mark_in), "edit.markIn") { store.toggleEditMark(0); onDismiss() }
+                MoreTile(EditIcon.MarkOut, stringResource(R.string.edit_mark_out), "edit.markOut") { store.toggleEditMark(1); onDismiss() }
+                MoreTile(EditIcon.Lift, stringResource(R.string.edit_lift), "edit.lift") { store.editMarkedRange(false); onDismiss() }
+                MoreTile(EditIcon.Extract, stringResource(R.string.edit_extract), "edit.extract") { store.editMarkedRange(true); onDismiss() }
+            }
+            MoreSection(stringResource(R.string.edit_section_tracks)) {
+                MoreTile(EditIcon.RazorAll, stringResource(R.string.edit_razor_all), "edit.razorAll") { store.razorAllAtPlayhead(); onDismiss() }
+                MoreTile(EditIcon.AddVideo, stringResource(R.string.edit_add_video_track), "edit.addVideoTrack") { store.addEditTrack(false); onDismiss() }
+                MoreTile(EditIcon.AddAudio, stringResource(R.string.edit_add_audio_track), "edit.addAudio") { store.addEditTrack(true); onDismiss() }
+                MoreTile(EditIcon.ClearTracks, stringResource(R.string.edit_remove_empty_tracks), "edit.clearTracks") { store.removeEmptyEditTracks(); onDismiss() }
+            }
+            MoreSection(stringResource(R.string.edit_section_placement)) {
+                MoreTile(EditIcon.PlaceEnd, stringResource(R.string.edit_place_end), "edit.placement.0", store.editPlacement == 0) { store.editPlacement = 0; onDismiss() }
+                MoreTile(EditIcon.PlaceInsert, stringResource(R.string.edit_place_insert), "edit.placement.1", store.editPlacement == 1) { store.editPlacement = 1; onDismiss() }
+                MoreTile(EditIcon.PlaceOverwrite, stringResource(R.string.edit_place_overwrite), "edit.placement.2", store.editPlacement == 2) { store.editPlacement = 2; onDismiss() }
+                Box(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun MoreSection(title: String, content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(title, style = AureaType.of(13f, FontWeight.W600, color = AureaColors.Muted))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), content = content)
+    }
+}
+
+@Composable
+private fun androidx.compose.foundation.layout.RowScope.MoreTile(icon: EditIcon, label: String, tag: String, on: Boolean = false, onClick: () -> Unit) {
+    Column(
+        Modifier.weight(1f).height(68.dp).clip(RoundedCornerShape(11.dp)).background(if (on) AureaColors.AccentDim else AureaColors.SurfaceHigh)
+            .testTag(tag).semantics(mergeDescendants = true) { role = Role.Button; selected = on }
+            .tocavel(shrink = 0.95f, onClick = onClick).padding(horizontal = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        EditToolIcon(icon, if (on) AureaColors.Accent else AureaColors.Text, 24.dp)
+        Text(label, style = AureaType.of(11f, FontWeight.W500, color = if (on) AureaColors.Accent else AureaColors.Text), maxLines = 1, modifier = Modifier.padding(top = 4.dp))
+    }
+}
+
+@Composable
+private fun EditLanes(
+    store: EditorStore,
+    data: EditTimelineData,
+    view: EditView,
+    tool: EditTool,
+    snap: Boolean,
+    compact: Boolean,
+    fps: Float,
+    width: Float,
+    height: Float,
+    onTransition: (Long, Long) -> Unit,
+) {
+    val density = LocalDensity.current
+    val haptics = LocalHapticFeedback.current
+    val headW = with(density) { HeadW.toPx() }
+    val rulerH = with(density) { RulerH.toPx() }
+    val laneH = with(density) { (if (compact) CompactLaneH else LaneH).toPx() }
+    val gap = with(density) { LaneGap.toPx() }
+    val edge = with(density) { EdgeW.toPx() }
+    val layout = remember(data.lanes.size, rulerH, laneH, gap) { EditLaneLayout.compute(data.lanes.size, rulerH, laneH, gap) }
+    val laneClips = remember(store.layers, data) {
+        val byTrack = store.layers.groupBy { it.trackId }
+        data.lanes.map { lane ->
+            val real = byTrack[lane.id].orEmpty().map { LaneClip(it, false) }
+            val linked = if (lane.audio) store.layers.filter { data.linkedAudio[it.id] == lane.id }.map { LaneClip(it, true) } else emptyList()
+            (real + linked).sortedBy { it.row.startFrame }
+        }
+    }
+    val waves = remember { EditWaveCache() }
+    val currentLanes by rememberUpdatedState(laneClips)
+    val currentData by rememberUpdatedState(data)
+    val currentTool by rememberUpdatedState(tool)
+    val currentSnap by rememberUpdatedState(snap)
+    val currentLayout by rememberUpdatedState(layout)
+    val currentHeight by rememberUpdatedState(height)
+    val currentTransition by rememberUpdatedState(onTransition)
+
+    fun xOf(frame: Float) = headW + (frame - view.scrollFrames) * view.pxPerFrame
+    fun frameAt(x: Float) = view.scrollFrames + (x - headW) / view.pxPerFrame
+    fun clampScrollY() { view.scrollY = view.scrollY.coerceIn(0f, EditLaneLayout.maxScroll(currentLayout.bottom, currentHeight)) }
+
+    // Tocando, o cabeçote nunca sai da tela: a vista vira a página, como no Premiere.
+    LaunchedEffect(view, width) {
+        snapshotFlow { store.playhead }.collect { frame ->
+            if (view.drag != null) return@collect
+            val visible = (width - headW) / view.pxPerFrame
+            if (frame < view.scrollFrames || frame > view.scrollFrames + visible * 0.92f) view.scrollFrames = frame - visible * 0.08f
+        }
+    }
+    // O clipe escolhido rola para dentro da vista (com painel aberto a área encolhe).
+    val primary = store.primary
+    LaunchedEffect(primary, layout, height) {
+        val id = primary ?: return@LaunchedEffect
+        val index = laneClips.indexOfFirst { lane -> lane.any { it.row.id == id && !it.virtual } }
+        if (index < 0 || height <= 0f) return@LaunchedEffect
+        val top = layout.tops[index] - view.scrollY
+        if (top < rulerH) view.scrollY -= rulerH - top
+        else if (top + layout.heights[index] > height) view.scrollY += top + layout.heights[index] - height
+        clampScrollY()
+    }
+
+    Canvas(
+        Modifier.fillMaxSize().pointerInput(store, width, headW) {
+            val slop = viewConfiguration.touchSlop
+            val longPressMs = viewConfiguration.longPressTimeoutMillis
+
+            fun hitClip(p: Offset): Triple<Int, LaneClip, Int>? {
+                if (p.x < headW || p.y < rulerH) return null
+                val lane = currentLayout.laneAt(p.y + view.scrollY)
+                if (lane < 0) return null
+                val frame = frameAt(p.x)
+                val edgeFrames = edge / view.pxPerFrame
+                var near: Triple<Int, LaneClip, Int>? = null
+                for (clip in currentLanes[lane]) {
+                    val s = clip.row.startFrame.toFloat()
+                    val e = clip.row.endFrame.toFloat()
+                    if (frame < s - edgeFrames || frame > e + edgeFrames) continue
+                    val inside = frame >= s && frame <= e
+                    val zone = when {
+                        // Clipe estreito: o miolo continua alcançável.
+                        (e - s) * view.pxPerFrame > edge * 3 && frame <= s + edgeFrames -> DRAG_TRIM_IN
+                        (e - s) * view.pxPerFrame > edge * 3 && frame >= e - edgeFrames -> DRAG_TRIM_OUT
+                        else -> DRAG_MOVE
+                    }
+                    if (inside) return Triple(lane, clip, zone)
+                    near = Triple(lane, clip, if (frame < s) DRAG_TRIM_IN else DRAG_TRIM_OUT)
+                }
+                return near
+            }
+
+            fun neighbourLeft(lane: Int, clip: LayerRow): LayerRow? =
+                currentLanes[lane].firstOrNull { !it.virtual && it.row.endFrame == clip.startFrame }?.row
+
+            fun snapTargets(self: LayerRow): IntArray {
+                val out = ArrayList<Int>()
+                out.add(store.playhead)
+                if (currentData.markIn >= 0) out.add(currentData.markIn.toInt())
+                if (currentData.markOut >= 0) out.add(currentData.markOut.toInt())
+                currentLanes.forEach { lane -> lane.forEach { c -> if (c.row.id != self.id) { out.add(c.row.startFrame); out.add(c.row.endFrame) } } }
+                return out.toIntArray()
+            }
+
+            fun beginDrag(hit: Triple<Int, LaneClip, Int>, longPress: Boolean): ClipDrag? {
+                val (lane, clip, zone) = hit
+                val selected = clip.row.id in store.selection
+                val active = selected || longPress || currentTool != EditTool.Select
+                if (!active) return null
+                val kind = when {
+                    clip.virtual -> if (zone == DRAG_MOVE) DRAG_AUDIO_LANE else return null
+                    currentTool == EditTool.Slip -> DRAG_SLIP
+                    currentTool == EditTool.Slide -> DRAG_SLIDE
+                    currentTool == EditTool.Razor -> return null
+                    zone == DRAG_MOVE && currentTool == EditTool.Roll -> return null
+                    else -> zone
+                }
+                val neighbour = if (currentTool == EditTool.Roll && kind == DRAG_TRIM_IN) neighbourLeft(lane, clip.row) else null
+                if (currentTool == EditTool.Roll && kind == DRAG_TRIM_IN && neighbour == null) return null
+                if (store.playing) store.pause()
+                if (!selected) store.select(clip.row.id)
+                return ClipDrag(kind, clip.row, neighbour, if (currentSnap) snapTargets(clip.row) else IntArray(0)).also {
+                    it.lane = currentData.lanes[lane].id
+                }
+            }
+
+            fun updateDrag(drag: ClipDrag, start: Offset, now: Offset) {
+                val raw = ((now.x - start.x) / view.pxPerFrame).roundToInt()
+                val reach = with(density) { 9.dp.toPx() } / view.pxPerFrame
+                var frames = raw
+                var snappedAt = -1
+                if (drag.targets.isNotEmpty()) when (drag.kind) {
+                    DRAG_TRIM_IN -> { val s = snapFrame(drag.clip.startFrame + raw, drag.targets, reach); if (s != drag.clip.startFrame + raw) { frames = s - drag.clip.startFrame; snappedAt = s } }
+                    DRAG_TRIM_OUT -> { val s = snapFrame(drag.clip.endFrame + raw, drag.targets, reach); if (s != drag.clip.endFrame + raw) { frames = s - drag.clip.endFrame; snappedAt = s } }
+                    DRAG_MOVE, DRAG_SLIDE -> {
+                        val a = snapFrame(drag.clip.startFrame + raw, drag.targets, reach)
+                        val b = snapFrame(drag.clip.endFrame + raw, drag.targets, reach)
+                        if (a != drag.clip.startFrame + raw) { frames = a - drag.clip.startFrame; snappedAt = a }
+                        else if (b != drag.clip.endFrame + raw) { frames = b - drag.clip.endFrame; snappedAt = b }
+                    }
+                }
+                if (snappedAt != drag.snapped && snappedAt >= 0) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                drag.frames = frames
+                drag.snapped = snappedAt
+                if (drag.kind == DRAG_MOVE || drag.kind == DRAG_AUDIO_LANE) {
+                    val lane = currentLayout.laneAt(now.y + view.scrollY)
+                    if (lane >= 0 && now.y >= rulerH) {
+                        val info = currentData.lanes[lane]
+                        if (info.audio == (drag.kind == DRAG_AUDIO_LANE || drag.clip.kind == 3)) drag.lane = info.id
+                    }
+                }
+            }
+
+            fun commitDrag(drag: ClipDrag) {
+                val clip = drag.clip
+                val ripple = currentTool == EditTool.Ripple
+                when (drag.kind) {
+                    DRAG_MOVE -> if (drag.frames != 0 || drag.lane != clip.trackId)
+                        store.editTrackClip(if (ripple) TrackOp.MOVE_INSERT else TrackOp.MOVE, clip.id, (clip.startFrame + drag.frames).coerceAtLeast(0).toLong(), drag.lane)
+                    DRAG_TRIM_IN -> if (drag.frames != 0) when {
+                        drag.neighbour != null -> store.editTrackClip(TrackOp.ROLL, drag.neighbour.id, (clip.startFrame + drag.frames).toLong(), 0)
+                        else -> store.editTrackClip(if (ripple) TrackOp.RIPPLE_TRIM_IN else TrackOp.TRIM_IN, clip.id, (clip.startFrame + drag.frames).toLong(), 0)
+                    }
+                    DRAG_TRIM_OUT -> if (drag.frames != 0) store.editTrackClip(
+                        when { currentTool == EditTool.Roll -> TrackOp.ROLL; ripple -> TrackOp.RIPPLE_TRIM_OUT; else -> TrackOp.TRIM_OUT },
+                        clip.id, (clip.endFrame + drag.frames).toLong(), 0,
+                    )
+                    DRAG_SLIP -> if (drag.frames != 0) store.editTrackClip(TrackOp.SLIP, clip.id, drag.frames.toLong(), 0)
+                    DRAG_SLIDE -> if (drag.frames != 0) store.editTrackClip(TrackOp.SLIDE, clip.id, drag.frames.toLong(), 0)
+                    DRAG_AUDIO_LANE -> if (drag.lane != currentData.linkedAudio[clip.id]) store.editTrackClip(TrackOp.MOVE_LINKED_AUDIO, clip.id, 0, drag.lane)
+                }
+            }
+
+            fun tap(p: Offset) {
+                val hit = hitClip(p)
+                if (currentTool == EditTool.Razor) {
+                    if (hit != null && !hit.second.virtual) {
+                        var frame = frameAt(p.x).roundToInt()
+                        // Cair em cima do cabeçote é quase sempre o que se queria.
+                        if (abs(frame - store.playhead) * view.pxPerFrame < edge) frame = store.playhead
+                        store.editTrackClip(TrackOp.RAZOR, hit.second.row.id, frame.toLong(), 0)
+                    }
+                    return
+                }
+                if (hit == null) { store.clearSelection(); return }
+                val (lane, clip, _) = hit
+                // Um corte encostado de clipes não escolhidos abre as transições dele.
+                if (!clip.virtual && clip.row.id !in store.selection && !currentData.lanes[lane].audio) {
+                    val atCut = { f: Int -> abs(frameAt(p.x) - f) * view.pxPerFrame < edge * 0.75f }
+                    if (atCut(clip.row.startFrame)) neighbourLeft(lane, clip.row)?.let { currentTransition(it.id, clip.row.id); return }
+                    if (atCut(clip.row.endFrame)) currentLanes[lane].firstOrNull { !it.virtual && it.row.startFrame == clip.row.endFrame }?.let { currentTransition(clip.row.id, it.row.id); return }
+                }
+                store.select(clip.row.id)
+            }
+
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                val start = down.position
+                if (start.x < headW) return@awaitEachGesture
+                if (start.y < rulerH) {
+                    // Régua: o cabeçote vai para o dedo e segue o arrasto.
+                    store.pause()
+                    store.scrubStart(frameAt(start.x).roundToInt().coerceAtLeast(0))
                     while (true) {
                         val event = awaitPointerEvent()
-                        // Um corte (alça de aparar, segurar e arrastar) ficou com o gesto.
-                        if (event.changes.any { it.isConsumed }) break
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        if (!change.pressed) break
+                        store.scrubTo(frameAt(change.position.x).roundToInt().coerceIn(0, store.project.durationFrames.coerceAtLeast(0)))
+                        change.consume()
+                    }
+                    store.scrubEnd()
+                    return@awaitEachGesture
+                }
+                val hit = hitClip(start)
+                // 0 toque, 1 passou da folga, 2 dois dedos.
+                val phase = withTimeoutOrNull(longPressMs) {
+                    var result = 0
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        if (event.changes.count { it.pressed } >= 2) { result = 2; break }
+                        val change = event.changes.firstOrNull { it.id == down.id }
+                        if (change == null || !change.pressed) { result = 0; break }
+                        if ((change.position - start).getDistance() > slop) { result = 1; break }
+                    }
+                    result
+                }
+                if (phase == 0) { tap(start); return@awaitEachGesture }
+                var drag: ClipDrag? = null
+                if (phase == null && hit != null) {
+                    drag = beginDrag(hit, longPress = true)
+                    if (drag != null) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                } else if (phase == 1 && hit != null) {
+                    drag = beginDrag(hit, longPress = false)
+                }
+                view.drag = drag
+                var last = start
+                var pinching = phase == 2
+                try {
+                    while (true) {
+                        val event = awaitPointerEvent()
                         val pressed = event.changes.count { it.pressed }
                         if (pressed == 0) break
-                        if (pressed >= 2) pinching = true
+                        if (pressed >= 2 && view.drag == null) pinching = true
+                        val change = event.changes.firstOrNull { it.id == down.id }
                         if (pinching) {
-                            val zoom = event.calculateZoom()
-                            if (zoom != 1f) {
-                                pxPerSecond = (pxPerSecond * zoom).coerceIn(with(density) { 12.dp.toPx() }, with(density) { 640.dp.toPx() })
+                            if (pressed >= 2) {
+                                val zoom = event.calculateZoom()
+                                val focus = event.calculateCentroid(useCurrent = true)
+                                if (zoom != 1f && focus != Offset.Unspecified) {
+                                    val anchor = frameAt(focus.x)
+                                    view.pxPerFrame = (view.pxPerFrame * zoom).coerceIn(with(density) { 0.15.dp.toPx() }, with(density) { 40.dp.toPx() })
+                                    view.scrollFrames = anchor - (focus.x - headW) / view.pxPerFrame
+                                }
+                                val pan = event.calculatePan()
+                                view.scrollFrames -= pan.x / view.pxPerFrame
                             }
-                            event.changes.forEach { it.consume() }
+                            event.changes.forEach { if (it.positionChanged()) it.consume() }
                             continue
                         }
-                        val pan = event.calculatePan()
-                        total += pan
-                        if (axis == EditPanAxis.NONE && total.getDistance() > slop) {
-                            axis = EditPanAxis.of(total.x, total.y)
-                            if (axis == EditPanAxis.TIME) {
-                                if (store.playing) store.pause()
-                                startFrame = currentPlayhead
-                                total = Offset.Zero
-                            }
+                        if (change == null) break
+                        val current = view.drag
+                        if (current != null) updateDrag(current, start, change.position)
+                        else {
+                            view.scrollFrames -= (change.position.x - last.x) / view.pxPerFrame
+                            view.scrollY -= change.position.y - last.y
+                            clampScrollY()
                         }
-                        when (axis) {
-                            EditPanAxis.TIME -> {
-                                val frame = (startFrame - total.x / currentPxPerFrame).roundToInt()
-                                    .coerceIn(0, store.project.durationFrames.coerceAtLeast(0))
-                                if (frame != currentPlayhead) store.seek(frame)
-                            }
-                            EditPanAxis.ROWS -> scrollY = (scrollY.coerceIn(0f, currentMaxScroll) - pan.y).coerceIn(0f, currentMaxScroll)
-                            else -> {}
-                        }
-                        if (axis != EditPanAxis.NONE) event.changes.forEach { it.consume() }
+                        last = change.position
+                        change.consume()
                     }
+                    view.drag?.let { commitDrag(it) }
+                } finally {
+                    view.drag = null
                 }
-            },
+            }
+        },
     ) {
-        val width = constraints.maxWidth.toFloat()
-        val centerX = width / 2f
-        fun xOf(frame: Int): Float = centerX + (frame - playhead) * pxPerFrame
+        drawLanes(store, data, layout, laneClips, view, waves, headW, rulerH, fps, density.density)
+    }
 
-        // Régua (fixa no topo).
-        Canvas(Modifier.fillMaxWidth().height(RulerH)) {
-            val step = rulerStep(pxPerSecond, with(density) { 64.dp.toPx() })
-            val firstSecond = ((playhead / fps) - centerX / pxPerSecond).toInt().coerceAtLeast(0)
-            val lastSecond = ((playhead / fps) + centerX / pxPerSecond).toInt() + 1
-            var s = (firstSecond / step) * step
-            while (s <= lastSecond) {
-                val x = centerX + (s - playhead / fps) * pxPerSecond
-                drawCircle(EditColors.Ruler, radius = 1.5.dp.toPx(), center = Offset(x + step * pxPerSecond / 2f, size.height * 0.62f))
-                s += step
-            }
-        }
-        RulerLabels(playhead, fps, pxPerSecond, centerX)
-
-        // As fileiras, roladas na vertical.
-        val mainHpx = with(density) { MainH.toPx() }
-        val rowHpx = with(density) { RowH.toPx() }
-        val gapPx = with(density) { RowGap.toPx() }
-        val top = with(density) { (RulerH + 8.dp).toPx() } - shownScroll
-        var y = top
-        val anchorRow = rows.firstOrNull { it.main }
-        if (anchorRow == null) {
-            val emptyY = y
-            EmptyMainTrack(Modifier.offset { IntOffset(0, emptyY.roundToInt()) }.fillMaxWidth().height(MainH), onAddMedia)
-            y += mainHpx + gapPx
-        }
-        rows.forEach { row ->
-            val h = if (row.main) mainHpx else rowHpx
-            val rowTop = y
-            row.clips.forEach { clip ->
-                val left = xOf(clip.startFrame)
-                val right = xOf(clip.endFrame)
-                if (right < 0f || left > width) return@forEach
-                // Só o trecho que cabe na tela é desenhado: o Compose limita a
-                // largura de um filho à do pai, e um corte mais longo que a tela
-                // saía cortado no meio. A borda fora da tela não mostra alça.
-                val drawLeft = maxOf(left, 0f)
-                val drawRight = minOf(right, width)
-                EditClip(
-                    store, clip, row.main, drawLeft, drawRight - drawLeft, rowTop, h,
-                    pxPerFrame, playhead,
-                    startVisible = left >= 0f, endVisible = right <= width, contentShift = drawLeft - left,
-                    waves = waves, waveGeneration = waveGeneration,
-                )
-            }
-            if (row.main) {
-                // O quadradinho de TRANSIÇÃO em cada corte encostado da trilha principal.
-                row.clips.zipWithNext().forEach { (a, b) ->
-                    if (a.endFrame == b.startFrame) {
-                        val cx = xOf(a.endFrame)
-                        if (cx > -width && cx < width * 2) {
-                            CutButton(
-                                Modifier.offset { IntOffset((cx - with(density) { 11.dp.toPx() }).roundToInt(), (rowTop + (h - with(density) { 22.dp.toPx() }) / 2f).roundToInt()) },
-                                a, b, onTransition,
-                            )
-                        }
-                    }
-                }
-                // "+" no fim da trilha principal (fica na borda quando o fim sai da tela).
-                val end = row.clips.maxOf { it.endFrame }
-                val x = (xOf(end) + with(density) { 10.dp.toPx() }).coerceAtMost(width - with(density) { 46.dp.toPx() })
-                AddButton(Modifier.offset { IntOffset(x.roundToInt(), (rowTop + (h - with(density) { 36.dp.toPx() }) / 2f).roundToInt()) }, onAddMedia)
-            }
-            y += h + gapPx
-            if (row.main && !hasAudio && !compact) {
-                val laneY = y
-                AddAudioLane(Modifier.offset { IntOffset(centerX.roundToInt() + with(density) { 8.dp.roundToPx() }, laneY.roundToInt()) }, onAddAudio)
-                y += rowHpx + gapPx
-            }
-        }
-
-        // O cabeçote fixo no meio.
+    // Colunas de faixa e os alvos de acessibilidade: compostos só quando o modelo muda.
+    data.lanes.forEachIndexed { i, lane ->
+        val top = layout.tops[i]
+        val rowH = with(density) { layout.heights[i].toDp() }
         Box(
-            Modifier.offset { IntOffset((centerX - with(density) { 1.dp.toPx() }).roundToInt(), 0) }
-                .width(2.dp).fillMaxHeight().background(Color.White),
+            Modifier.width(HeadW).height(rowH)
+                .graphicsLayer { translationY = top - view.scrollY; alpha = if (top - view.scrollY + layout.heights[i] <= rulerH) 0f else 1f }
+                .background(EditPalette.Head),
+        ) { TrackHead(store, lane) }
+    }
+    laneClips.forEachIndexed { i, lane ->
+        lane.forEach { clip ->
+            if (!clip.virtual) ClipTarget(store, clip.row, view, layout.tops[i], layout.heights[i], headW, rulerH)
+        }
+    }
+    // O canto da régua diz qual ferramenta está ativa: a barra é só de ícones.
+    Box(Modifier.width(HeadW).height(RulerH).background(EditPalette.RulerBg), contentAlignment = Alignment.Center) {
+        Text(stringResource(tool.label), style = AureaType.of(11f, FontWeight.W600, color = AureaColors.Accent), maxLines = 1)
+    }
+    if (store.layers.isEmpty()) {
+        Text(
+            stringResource(R.string.edit_empty_hint), style = AureaType.of(13f, color = AureaColors.Muted),
+            modifier = Modifier.offset(x = HeadW + 12.dp, y = RulerH + 12.dp),
         )
-        Box(
-            Modifier.offset { IntOffset((centerX - with(density) { 5.dp.toPx() }).roundToInt(), with(density) { (RulerH - 4.dp).roundToPx() }) }
-                .size(10.dp).clip(RoundedCornerShape(5.dp)).background(Color.White),
-        )
-        // Ímã da trilha principal, no canto (o estado do motor, um toque troca).
-        MagnetToggle(store, Modifier.align(Alignment.TopStart).padding(start = 6.dp, top = 2.dp))
     }
 }
-
-/** 0.3.6: o eixo de um arrasto de um dedo na linha do tempo da Edição, decidido uma vez. */
-internal object EditPanAxis {
-    const val NONE = 0
-    /** De lado: anda no tempo. */
-    const val TIME = 1
-    /** De pé: rola as fileiras. */
-    const val ROWS = 2
-
-    /** Mais de lado que de pé (empate = tempo, o gesto principal). */
-    fun of(dx: Float, dy: Float): Int = if (kotlin.math.abs(dx) >= kotlin.math.abs(dy)) TIME else ROWS
-}
-
-/**
- * 0.3.6: onde cada fileira fica (sem rolagem, px a partir do topo da linha do tempo)
- * e onde o conteúdo termina — a mesma conta do desenho, para o teto da rolagem e
- * para trazer o corte escolhido à vista.
- */
-internal class EditRowLayout(val rowsTop: Float, val rowTops: FloatArray, val rowHeights: FloatArray, val contentBottom: Float) {
-    companion object {
-        /** Folga embaixo da última fileira. */
-        private val BottomPad = 12.dp
-
-        fun of(rows: List<EditRow>, hasAudio: Boolean, compact: Boolean, density: androidx.compose.ui.unit.Density): EditRowLayout =
-            with(density) {
-                compute(
-                    rows.map { it.main }, hasAudio, compact,
-                    rulerTop = (RulerH + 8.dp).toPx(), main = MainH.toPx(), row = RowH.toPx(), gap = RowGap.toPx(), pad = BottomPad.toPx(),
-                )
-            }
-
-        /** A conta pura (testada na JVM): [mains] diz quais fileiras são a trilha principal. */
-        fun compute(mains: List<Boolean>, hasAudio: Boolean, compact: Boolean, rulerTop: Float, main: Float, row: Float, gap: Float, pad: Float): EditRowLayout {
-            var y = rulerTop
-            if (mains.none { it }) y += main + gap
-            val tops = FloatArray(mains.size)
-            val heights = FloatArray(mains.size)
-            mains.forEachIndexed { i, isMain ->
-                val h = if (isMain) main else row
-                tops[i] = y
-                heights[i] = h
-                y += h + gap
-                if (isMain && !hasAudio && !compact) y += row + gap
-            }
-            return EditRowLayout(rulerTop, tops, heights, y - gap + pad)
-        }
-
-        /** O teto da rolagem: a última fileira encosta embaixo (nunca negativo). */
-        fun maxScroll(contentBottom: Float, viewport: Float): Float =
-            if (viewport <= 0f) 0f else kotlin.math.max(0f, contentBottom - viewport)
-    }
-}
-
-/** Passo dos rótulos da régua, em segundos, para caber ~[minGapPx] entre eles. */
-private fun rulerStep(pxPerSecond: Float, minGapPx: Float): Int =
-    listOf(1, 2, 5, 10, 15, 30, 60, 120, 300).firstOrNull { it * pxPerSecond >= minGapPx } ?: 600
 
 @Composable
-private fun RulerLabels(playhead: Int, fps: Float, pxPerSecond: Float, centerX: Float) {
-    val density = LocalDensity.current
-    val step = rulerStep(pxPerSecond, with(density) { 64.dp.toPx() })
-    val first = ((playhead / fps) - centerX / pxPerSecond).toInt().coerceAtLeast(0)
-    val last = ((playhead / fps) + centerX / pxPerSecond).toInt() + 1
-    var s = (first / step) * step
-    while (s <= last) {
-        val x = centerX + (s - playhead / fps) * pxPerSecond
-        val label = "%02d:%02d".format(java.util.Locale.ROOT, s / 60, s % 60)
-        Text(label, style = AureaType.of(10f, color = EditColors.Ruler),
-            modifier = Modifier.offset { IntOffset((x - with(density) { 14.dp.toPx() }).roundToInt(), with(density) { 6.dp.roundToPx() }) })
-        s += step
+private fun TrackHead(store: EditorStore, lane: EditTrackInfo) {
+    val targetLabel = stringResource(R.string.edit_track_target, lane.label)
+    Row(Modifier.fillMaxSize().padding(horizontal = 3.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+        Box(
+            Modifier.size(24.dp).clip(RoundedCornerShape(5.dp)).background(if (lane.target) Color(0xFF3B6EA8) else EditColors.DockLevel)
+                .testTag("edit.track.${lane.label}.target").semantics { contentDescription = targetLabel; role = Role.Switch; selected = lane.target }
+                .tocavel(shrink = 0.92f) { store.setEditTrackFlag(lane.id, 3, !lane.target) },
+            contentAlignment = Alignment.Center,
+        ) { Text(lane.label, style = AureaType.of(10f, FontWeight.W700, color = Color.White), maxLines = 1) }
+        HeadIcon(if (lane.locked) CupertinoGlyph.LockFill else CupertinoGlyph.LockOpen, lane.locked, stringResource(R.string.edit_track_lock), "edit.track.${lane.label}.lock") {
+            store.setEditTrackFlag(lane.id, 0, !lane.locked)
+        }
+        if (lane.audio) {
+            HeadLetter("M", lane.muted, stringResource(R.string.edit_track_mute), "edit.track.${lane.label}.mute") { store.setEditTrackFlag(lane.id, 1, !lane.muted) }
+            HeadLetter("S", lane.solo, stringResource(R.string.edit_track_solo), "edit.track.${lane.label}.solo") { store.setEditTrackFlag(lane.id, 2, !lane.solo) }
+        } else {
+            HeadIcon(if (lane.muted) CupertinoGlyph.EyeSlash else CupertinoGlyph.Eye, lane.muted, stringResource(R.string.edit_track_visible), "edit.track.${lane.label}.visible") {
+                store.setEditTrackFlag(lane.id, 1, !lane.muted)
+            }
+        }
     }
 }
 
-/**
- * Um corte. Toque escolhe; escolhido, ganha a borda branca com as alças de
- * aparar; segurar e arrastar reordena (trilha principal) ou move no tempo.
- */
 @Composable
-private fun EditClip(
-    store: EditorStore,
-    clip: LayerRow,
-    main: Boolean,
-    x: Float,
-    widthPx: Float,
-    y: Float,
-    heightPx: Float,
-    pxPerFrame: Float,
-    playhead: Int,
-    startVisible: Boolean = true,
-    endVisible: Boolean = true,
-    contentShift: Float = 0f,
-    waves: EditWaveCache? = null,
-    waveGeneration: Int = 0,
-) {
+private fun HeadIcon(glyph: Char, on: Boolean, label: String, tag: String, onClick: () -> Unit) {
+    Box(
+        Modifier.size(22.dp).testTag(tag).semantics { contentDescription = label; role = Role.Switch; selected = on }.tocavel(shrink = 0.9f, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { CupertinoIcon(glyph, 13.dp, if (on) AureaColors.Accent else AureaColors.Muted) }
+}
+
+@Composable
+private fun HeadLetter(letter: String, on: Boolean, label: String, tag: String, onClick: () -> Unit) {
+    Box(
+        Modifier.size(22.dp).clip(RoundedCornerShape(4.dp)).background(if (on) Color(0xFFB9472F) else Color.Transparent)
+            .testTag(tag).semantics { contentDescription = label; role = Role.Switch; selected = on }.tocavel(shrink = 0.9f, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { Text(letter, style = AureaType.of(11f, FontWeight.W700, color = if (on) Color.White else AureaColors.Muted)) }
+}
+
+/** O alvo de acessibilidade de um clipe: não intercepta toque, só dá nome e ação ao leitor de tela. */
+@Composable
+private fun ClipTarget(store: EditorStore, clip: LayerRow, view: EditView, top: Float, heightPx: Float, headW: Float, rulerH: Float) {
     val density = LocalDensity.current
     val selected = clip.id in store.selection
-    var trimStart by remember(clip.id) { mutableFloatStateOf(0f) }
-    var trimEnd by remember(clip.id) { mutableFloatStateOf(0f) }
-    var drag by remember(clip.id) { mutableFloatStateOf(0f) }
-    val currentClip by rememberUpdatedState(clip)
-    val currentPxPerFrame by rememberUpdatedState(pxPerFrame)
-    val color = LayerType.of(clip.kind).color
-    val name = clip.name.ifEmpty { stringResource(R.string.edit_main_track) }
-    val description = if (selected) stringResource(R.string.edit_clip_selected, name) else name
-    val left = x + trimStart + drag
-    val w = (widthPx - trimStart + trimEnd).coerceAtLeast(with(density) { 8.dp.toPx() })
+    val description = if (selected) stringResource(R.string.edit_clip_selected, clip.name) else clip.name
     Box(
         Modifier
-            .offset { IntOffset(left.roundToInt(), y.roundToInt()) }
-            .size(with(density) { w.toDp() }, with(density) { heightPx.toDp() })
-            .clip(RoundedCornerShape(6.dp))
-            .background(if (main) Color(0xFF1E1E22) else color.copy(alpha = 0.85f))
-            .then(if (selected) Modifier.border(2.dp, Color.White, RoundedCornerShape(6.dp)) else Modifier)
+            .offset { IntOffset((headW + (clip.startFrame - view.scrollFrames) * view.pxPerFrame).roundToInt(), (top - view.scrollY).roundToInt().coerceAtLeast(rulerH.roundToInt())) }
+            .size(with(density) { ((clip.endFrame - clip.startFrame) * view.pxPerFrame).coerceAtLeast(1f).toDp() }, with(density) { heightPx.toDp() })
             .testTag("edit.clip.${clip.id}")
-            .semantics { contentDescription = description; this.selected = selected; role = Role.Button }
-            .pointerInput(clip.id) { detectTapGestures { store.select(currentClip.id) } }
-            .pointerInput(clip.id, main) {
-                detectDragGesturesAfterLongPress(
-                    onDragStart = { if (store.playing) store.pause(); store.select(currentClip.id) },
-                    onDragEnd = {
-                        val frames = (drag / currentPxPerFrame).roundToInt()
-                        val target = (currentClip.startFrame + frames).coerceAtLeast(0)
-                        if (frames != 0) {
-                            if (main) store.reorderClip(currentClip.id, target.toLong())
-                            else store.editClipTime(6, target)
-                        }
-                        drag = 0f
-                    },
-                    onDragCancel = { drag = 0f },
-                    onDrag = { change, amount -> change.consume(); drag += amount.x },
-                )
-            },
-    ) {
-        val audioClip = clip.kind == 3
-        if (main && (clip.kind == 1 || clip.kind == 2 || clip.kind == 12)) {
-            Filmstrip(store, clip, pxPerFrame, heightPx, trimStart - contentShift)
-        } else if (!audioClip) {
-            Text(
-                clip.name, style = AureaType.of(11f, FontWeight.W600, color = Color.White), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.align(Alignment.CenterStart).padding(horizontal = if (selected) 18.dp else 8.dp),
-            )
-        }
-        if (waves != null && (clip.kind == 1 || audioClip)) {
-            // Vídeo: faixa escura embaixo das miniaturas (ou do nome), barras subindo
-            // do pé. Áudio: a onda ocupa o corte inteiro, espelhada no meio.
-            val bandH = if (audioClip) heightPx else with(density) { (if (main) 16.dp else 10.dp).toPx() }
-            ClipWaveform(
-                store, clip, waves, waveGeneration, pxPerFrame, trimStart - contentShift, band = !audioClip,
-                modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth().height(with(density) { bandH.toDp() })
-                    .testTag("edit.clip.${clip.id}.wave"),
-            )
-        }
-        if (audioClip) {
-            Text(
-                clip.name, style = AureaType.of(10f, FontWeight.W600, color = Color.White), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.align(Alignment.TopStart).padding(start = if (selected) 18.dp else 6.dp, top = 2.dp),
-            )
-        }
-        if (main && selected) {
-            // A duração do corte, no canto (como nos editores de vídeo).
-            val fps = store.project.fps.takeIf { it > 0f } ?: 30f
-            Text(
-                "%.1fs".format(java.util.Locale.ROOT, (clip.endFrame - clip.startFrame) / fps),
-                style = AureaType.of(10f, FontWeight.W600, color = Color.White),
-                modifier = Modifier.align(Alignment.TopStart).padding(start = 18.dp, top = 3.dp)
-                    .clip(RoundedCornerShape(4.dp)).background(Color.Black.copy(alpha = 0.55f)).padding(horizontal = 4.dp),
-            )
-        }
-        if (selected) {
-            if (startVisible) TrimHandle(Modifier.align(Alignment.CenterStart), stringResource(R.string.edit_trim_start)) { dx, done ->
-                if (!done) trimStart += dx
-                else {
-                    val frames = (trimStart / currentPxPerFrame).roundToInt()
-                    if (frames != 0) store.editClipTime(0, currentClip.startFrame + frames)
-                    trimStart = 0f
-                }
-            }
-            if (endVisible) TrimHandle(Modifier.align(Alignment.CenterEnd), stringResource(R.string.edit_trim_end)) { dx, done ->
-                if (!done) trimEnd += dx
-                else {
-                    val frames = (trimEnd / currentPxPerFrame).roundToInt()
-                    if (frames != 0) store.editClipTime(1, currentClip.endFrame + frames)
-                    trimEnd = 0f
-                }
-            }
-        }
-    }
+            .semantics { contentDescription = description; this.selected = selected; role = Role.Button },
+    )
 }
 
-/** A alça branca de aparar: arrastar mostra o novo limite; soltar manda ao motor. */
-@Composable
-private fun TrimHandle(modifier: Modifier, label: String, onDrag: (Float, Boolean) -> Unit) {
-    val current by rememberUpdatedState(onDrag)
-    Box(
-        modifier.width(HandleW).fillMaxHeight().background(Color.White)
-            .semantics { contentDescription = label }
-            .pointerInput(Unit) {
-                detectHorizontalDragGestures(
-                    onDragEnd = { current(0f, true) },
-                    onDragCancel = { current(0f, true) },
-                    onHorizontalDrag = { change, dx -> change.consume(); current(dx, false) },
-                )
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        Box(Modifier.width(2.dp).height(14.dp).clip(RoundedCornerShape(1.dp)).background(Color.Black.copy(alpha = 0.7f)))
+private val TextPaint by lazy(LazyThreadSafetyMode.NONE) { android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG) }
+
+private fun DrawScope.label(text: String, x: Float, y: Float, sizePx: Float, color: Color, maxW: Float = Float.MAX_VALUE) {
+    TextPaint.textSize = sizePx
+    TextPaint.color = color.toArgb()
+    val shown = if (maxW == Float.MAX_VALUE) text else {
+        val n = TextPaint.breakText(text, true, maxW, null)
+        if (n <= 0) return
+        text.substring(0, n)
     }
+    drawContext.canvas.nativeCanvas.drawText(shown, x, y, TextPaint)
 }
 
-/** As miniaturas da mídia ao longo do corte (um ladrilho por largura de altura × 16:9). */
-@Composable
-private fun Filmstrip(store: EditorStore, clip: LayerRow, pxPerFrame: Float, heightPx: Float, trimShift: Float) {
-    val fps = store.project.fps.takeIf { it > 0f } ?: 30f
-    val bucket = (fps * 0.25f).coerceAtLeast(1f)
-    Canvas(Modifier.fillMaxSize()) {
-        val tileW = heightPx * 16f / 9f
-        val tiles = (size.width / tileW).toInt() + 1
-        for (i in 0 until tiles) {
-            val px = i * tileW
-            val frameOffset = ((px - trimShift) / pxPerFrame)
-            val frame = ((clip.startFrame + frameOffset) / bucket).roundToInt() * bucket
-            val bmp = store.thumbnails.get(clip.id, frame.toInt().coerceAtLeast(clip.startFrame), heightPx.roundToInt().coerceIn(16, 256))
-            if (bmp != null) {
-                val image = bmp.asImageBitmap()
-                val scale = size.height / image.height
-                drawImage(
-                    image,
-                    srcOffset = IntOffset.Zero, srcSize = IntSize(image.width, image.height),
-                    dstOffset = IntOffset(px.roundToInt(), 0),
-                    dstSize = IntSize((image.width * scale).roundToInt(), size.height.roundToInt()),
-                )
-            } else {
-                drawRect(Color(0xFF2A2A30), topLeft = Offset(px, 0f), size = Size(tileW - 1f, size.height))
-            }
-        }
-    }
+private fun rulerStepFrames(pxPerFrame: Float, fps: Float, minGap: Float): Int {
+    val seconds = intArrayOf(1, 2, 5, 10, 15, 30, 60, 120, 300, 600).firstOrNull { it * fps * pxPerFrame >= minGap } ?: 1200
+    return (seconds * fps).roundToInt().coerceAtLeast(1)
 }
 
-/**
- * Onda do som de um corte (a mesma do motor que a Composição desenha, ver
- * `Engine::query_waveform`), só no trecho visível: um balde a cada ~1,5 dp na
- * grade fixa do tempo ([WaveGrid]). Corte sem som não desenha nada.
- */
-@Composable
-private fun ClipWaveform(
+private fun DrawScope.drawLanes(
     store: EditorStore,
-    clip: LayerRow,
+    data: EditTimelineData,
+    layout: EditLaneLayout,
+    lanes: List<List<LaneClip>>,
+    view: EditView,
+    waves: EditWaveCache,
+    headW: Float,
+    rulerH: Float,
+    fps: Float,
+    dp: Float,
+) {
+    val pxPerFrame = view.pxPerFrame
+    val scroll = view.scrollFrames
+    val scrollY = view.scrollY
+    val drag = view.drag
+    val width = size.width
+    val generation = store.thumbnailGeneration
+    val selection = store.selection
+    fun xOf(frame: Float) = headW + (frame - scroll) * pxPerFrame
+
+    clipRect(left = headW, top = rulerH, right = width, bottom = size.height) {
+        val firstVideoAudio = data.lanes.indexOfFirst { it.audio }
+        data.lanes.forEachIndexed { i, _ ->
+            val top = layout.tops[i] - scrollY
+            drawRect(EditPalette.Lane, Offset(headW, top), Size(width - headW, layout.heights[i]))
+            if (i == firstVideoAudio) drawRect(EditPalette.Separator, Offset(headW, top - 1.5f * dp), Size(width - headW, 1.5f * dp))
+        }
+        lanes.forEachIndexed { i, clips ->
+            val top = layout.tops[i] - scrollY
+            val laneH = layout.heights[i]
+            if (top + laneH < rulerH || top > size.height) return@forEachIndexed
+            clips.forEach { clip ->
+                // Enquanto arrasta, o clipe levado se desenha no fim, por cima.
+                if (drag != null && drag.clip.id == clip.row.id && !clip.virtual && drag.kind == DRAG_MOVE) return@forEach
+                drawClip(store, clip, top, laneH, drag, data.lanes[i], selection, xOf(0f), pxPerFrame, waves, generation, headW, width, dp)
+            }
+            // A marca de cada corte encostado.
+            if (!data.lanes[i].audio) clips.zipWithNext().forEach { (a, b) ->
+                if (a.row.endFrame == b.row.startFrame) {
+                    val cx = xOf(a.row.endFrame.toFloat())
+                    if (cx > headW && cx < width) {
+                        val mid = top + laneH / 2f
+                        val s = 3.5f * dp
+                        val bow = Path().apply { moveTo(cx - s, mid - s); lineTo(cx + s, mid + s); lineTo(cx + s, mid - s); lineTo(cx - s, mid + s); close() }
+                        drawPath(bow, EditPalette.Cut)
+                    }
+                }
+            }
+        }
+        if (drag != null && drag.kind == DRAG_MOVE) {
+            val index = data.lanes.indexOfFirst { it.id == drag.lane }
+            if (index >= 0) drawClip(store, LaneClip(drag.clip, false), layout.tops[index] - scrollY, layout.heights[index], drag, data.lanes[index], selection, xOf(0f), pxPerFrame, waves, generation, headW, width, dp)
+        }
+        if (drag != null && drag.snapped >= 0) {
+            val x = xOf(drag.snapped.toFloat())
+            drawLine(EditPalette.Snap, Offset(x, rulerH), Offset(x, size.height), strokeWidth = 1.5f * dp)
+        }
+        if (data.markIn >= 0 || data.markOut >= 0) {
+            val from = xOf((if (data.markIn >= 0) data.markIn else 0L).toFloat()).coerceAtLeast(headW)
+            val to = if (data.markOut >= 0) xOf(data.markOut.toFloat()).coerceAtMost(width) else width
+            if (to > from) drawRect(EditPalette.Range, Offset(from, rulerH), Size(to - from, size.height - rulerH))
+        }
+    }
+
+    // Régua por cima das faixas.
+    drawRect(EditPalette.RulerBg, Offset(headW, 0f), Size(width - headW, rulerH))
+    val step = rulerStepFrames(pxPerFrame, fps, 64f * dp)
+    var tick = (scroll / step).toInt().coerceAtLeast(0) * step
+    val lastFrame = scroll + (width - headW) / pxPerFrame
+    while (tick <= lastFrame) {
+        val x = xOf(tick.toFloat())
+        if (x >= headW) {
+            drawLine(EditPalette.Tick, Offset(x, rulerH - 8f * dp), Offset(x, rulerH), strokeWidth = 1f * dp)
+            val seconds = (tick / fps).roundToInt()
+            label("%02d:%02d".format(java.util.Locale.ROOT, seconds / 60, seconds % 60), x + 3f * dp, 12f * dp, 10f * dp, EditColors.Ruler)
+        }
+        val half = xOf(tick + step / 2f)
+        if (half >= headW) drawLine(EditPalette.Tick, Offset(half, rulerH - 4f * dp), Offset(half, rulerH), strokeWidth = 1f * dp)
+        tick += step
+    }
+    if (data.markIn >= 0) drawMark(xOf(data.markIn.toFloat()), rulerH, headW, dp, true)
+    if (data.markOut >= 0) drawMark(xOf(data.markOut.toFloat()), rulerH, headW, dp, false)
+
+    // Cabeçote: lido aqui, na fase de desenho.
+    val playX = xOf(store.playhead.toFloat())
+    if (playX >= headW && playX <= width) {
+        drawLine(EditPalette.Playhead, Offset(playX, rulerH - 8f * dp), Offset(playX, size.height), strokeWidth = 1.5f * dp)
+        val s = 5f * dp
+        drawPath(Path().apply { moveTo(playX - s, rulerH - 12f * dp); lineTo(playX + s, rulerH - 12f * dp); lineTo(playX, rulerH - 5f * dp); close() }, EditPalette.Playhead)
+    }
+}
+
+private fun DrawScope.drawMark(x: Float, rulerH: Float, headW: Float, dp: Float, entrance: Boolean) {
+    if (x < headW) return
+    val w = 5f * dp * if (entrance) 1f else -1f
+    val path = Path().apply { moveTo(x, rulerH - 12f * dp); lineTo(x + w, rulerH - 12f * dp); lineTo(x, rulerH - 7f * dp); lineTo(x, rulerH); close() }
+    drawPath(path, EditPalette.Snap)
+}
+
+private fun DrawScope.drawClip(
+    store: EditorStore,
+    clip: LaneClip,
+    top: Float,
+    laneH: Float,
+    drag: ClipDrag?,
+    lane: EditTrackInfo,
+    selection: Set<Long>,
+    originX: Float,
+    pxPerFrame: Float,
     waves: EditWaveCache,
     generation: Int,
-    pxPerFrame: Float,
-    trimShift: Float,
-    band: Boolean,
-    modifier: Modifier,
+    headW: Float,
+    width: Float,
+    dp: Float,
 ) {
-    val density = LocalDensity.current
-    val bucketPx = with(density) { 1.5.dp.toPx() }
-    Canvas(modifier) {
-        if (pxPerFrame <= 0f || size.width < 1f || size.height < 1f) return@Canvas
-        val fpb = WaveGrid.framesPerBucket(bucketPx, pxPerFrame)
-        // Frames da timeline nas bordas desta caixa (x = 0 e x = largura).
-        val fromFrame = clip.startFrame + (-trimShift / pxPerFrame).toDouble()
-        val toFrame = fromFrame + size.width / pxPerFrame
-        val first = WaveGrid.bucketAt(max(fromFrame, clip.startFrame.toDouble()), fpb)
-        val last = WaveGrid.bucketAt(min(toFrame, clip.endFrame.toDouble()) - 1e-6, fpb)
-        if (last < first) return@Canvas
-        val wave = waves.get(store, clip, fpb, generation, first, last) ?: return@Canvas
-        if (band) drawRect(Color.Black.copy(alpha = 0.45f))
-        val stroke = max(1f, (fpb * pxPerFrame).toFloat() * 0.72f)
-        val top = size.height * 0.12f
-        val color = Color.White.copy(alpha = if (band) 0.8f else 0.75f)
-        var b = first
-        while (b <= last) {
-            val v = wave.at(b) / 255f
-            val x = (((b + 0.5) * fpb - clip.startFrame) * pxPerFrame).toFloat() + trimShift
-            b++
-            if (v <= 0f) continue
-            if (band) {
-                val h = v * (size.height - top)
-                drawLine(color, Offset(x, size.height - h), Offset(x, size.height), strokeWidth = stroke)
-            } else {
-                val half = v * (size.height - top) / 2f
-                val mid = (size.height + top) / 2f
-                drawLine(color, Offset(x, mid - half), Offset(x, mid + half), strokeWidth = stroke)
+    val row = clip.row
+    var startFrame = row.startFrame
+    var endFrame = row.endFrame
+    if (drag != null) {
+        if (drag.clip.id == row.id) when (drag.kind) {
+            DRAG_MOVE, DRAG_SLIDE -> { startFrame += drag.frames; endFrame += drag.frames }
+            DRAG_TRIM_IN -> startFrame = min(startFrame + drag.frames, endFrame - 1)
+            DRAG_TRIM_OUT -> endFrame = max(endFrame + drag.frames, startFrame + 1)
+        } else if (drag.neighbour?.id == row.id && drag.kind == DRAG_TRIM_IN) {
+            endFrame += drag.frames
+        }
+    }
+    val left = originX + startFrame * pxPerFrame
+    val right = originX + endFrame * pxPerFrame
+    if (right < headW || left > width) return
+    val selected = row.id in selection
+    val kind = row.kind
+    val adjustment = row.flags and (1 shl 6) != 0
+    val audioKind = kind == 3
+    val body: Color
+    val strip: Color
+    when {
+        clip.virtual -> { body = EditPalette.LinkedAudio; strip = EditPalette.LinkedAudio }
+        audioKind -> { body = EditPalette.Audio; strip = EditPalette.Audio }
+        adjustment -> { body = EditPalette.Adjustment; strip = EditPalette.AdjustmentTop }
+        kind == 1 || kind == 2 || kind == 12 -> { body = EditPalette.Video; strip = EditPalette.VideoTop }
+        else -> { body = EditPalette.Overlay; strip = EditPalette.OverlayTop }
+    }
+    val pad = 1f * dp
+    val w = max(right - left, 1f)
+    val alpha = if (lane.muted || lane.locked) 0.45f else 1f
+    drawRoundRect(body.copy(alpha = alpha), Offset(left, top + pad), Size(w, laneH - 2 * pad), CornerRadius(2f * dp))
+    val visibleLeft = max(left, headW)
+    val visibleRight = min(right, width)
+    val visibleW = visibleRight - visibleLeft
+    if (audioKind || clip.virtual) {
+        drawWave(store, row, waves, generation, top + pad, laneH - 2 * pad, originX, pxPerFrame, visibleLeft, visibleRight, dp,
+            if (clip.virtual) EditPalette.LinkedWave else EditPalette.AudioWave)
+    } else {
+        val stripH = min(13f * dp, laneH * 0.34f)
+        drawRect(strip.copy(alpha = alpha), Offset(left, top + pad), Size(w, stripH))
+        val textX = visibleLeft + 3f * dp
+        // Miniatura no começo do clipe, como no Premiere.
+        if ((kind == 1 || kind == 2 || kind == 12) && w > 44f * dp && left >= headW - 44f * dp) {
+            val heightPx = (laneH - stripH - 2 * pad).roundToInt().coerceIn(16, 128)
+            val thumb = store.thumbnails.get(row.id, row.startFrame, heightPx)
+            if (thumb != null) {
+                val image = thumb.asImageBitmap()
+                val scale = heightPx.toFloat() / image.height
+                val thumbW = (image.width * scale).roundToInt()
+                drawImage(image, IntOffset.Zero, IntSize(image.width, image.height), IntOffset(left.roundToInt(), (top + pad + stripH).roundToInt()), IntSize(thumbW, heightPx), alpha = alpha)
             }
         }
+        if (visibleW > 16f * dp) label(row.name, textX, top + pad + stripH - 3f * dp, 9.5f * dp, Color.White, visibleW - 6f * dp - if (row.effectCount > 0) 16f * dp else 0f)
+        if (row.effectCount > 0 && visibleW > 26f * dp) label("fx", visibleRight - 14f * dp, top + pad + stripH - 3f * dp, 9.5f * dp, Color.White)
+    }
+    if (selected) drawRoundRect(EditPalette.Selected, Offset(left, top + pad), Size(w, laneH - 2 * pad), CornerRadius(2f * dp), style = Stroke(width = 1.5f * dp))
+    if (selected && !clip.virtual && w > 26f * dp) {
+        // As bordas ativas do clipe escolhido.
+        val tick = Size(3f * dp, laneH * 0.5f)
+        val y = top + laneH * 0.25f
+        drawRoundRect(EditPalette.Selected, Offset(left + 1f * dp, y), tick, CornerRadius(1.5f * dp))
+        drawRoundRect(EditPalette.Selected, Offset(right - 4f * dp, y), tick, CornerRadius(1.5f * dp))
+    }
+}
+
+private fun DrawScope.drawWave(
+    store: EditorStore,
+    row: LayerRow,
+    waves: EditWaveCache,
+    generation: Int,
+    top: Float,
+    height: Float,
+    originX: Float,
+    pxPerFrame: Float,
+    visibleLeft: Float,
+    visibleRight: Float,
+    dp: Float,
+    color: Color,
+) {
+    if (visibleRight - visibleLeft < 1f || pxPerFrame <= 0f) return
+    val fpb = WaveGrid.framesPerBucket(1.5f * dp, pxPerFrame)
+    val fromFrame = ((visibleLeft - originX) / pxPerFrame).toDouble()
+    val toFrame = ((visibleRight - originX) / pxPerFrame).toDouble()
+    val first = WaveGrid.bucketAt(max(fromFrame, row.startFrame.toDouble()), fpb)
+    val last = WaveGrid.bucketAt(min(toFrame, row.endFrame.toDouble()) - 1e-6, fpb)
+    if (last < first) return
+    val wave = waves.get(store, row, fpb, generation, first, last) ?: return
+    val stroke = max(1f, (fpb * pxPerFrame).toFloat() * 0.72f)
+    val mid = top + height / 2f
+    var b = first
+    while (b <= last) {
+        val v = wave.at(b) / 255f
+        val x = (originX + (b + 0.5) * fpb * pxPerFrame).toFloat()
+        b++
+        if (v <= 0f) continue
+        val half = v * height / 2f * 0.92f
+        drawLine(color, Offset(x, mid - half), Offset(x, mid + half), strokeWidth = stroke)
     }
 }
 
 /**
- * Janelas da onda por corte. O motor só é consultado quando a vista sai da
- * janela guardada, o degrau de zoom muda, o corte muda de lugar ou chega
+ * Janelas da onda por clipe. O motor só é consultado quando a vista sai da
+ * janela guardada, o degrau de zoom muda, o clipe muda de lugar ou chega
  * pedaço novo da onda: tocando, o quadro só lê números daqui.
  */
 internal class EditWaveCache {
@@ -623,61 +993,4 @@ internal class EditWaveCache {
     }
 
     private companion object { const val MAX = 4096 }
-}
-
-@Composable
-private fun AddButton(modifier: Modifier, onClick: () -> Unit) {
-    val label = stringResource(R.string.edit_add_media)
-    Box(
-        modifier.size(36.dp).clip(RoundedCornerShape(8.dp)).background(Color.White).testTag("edit.add")
-            .semantics { contentDescription = label; role = Role.Button }
-            .tocavel(shrink = 0.9f, haptic = true, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) { CupertinoIcon(CupertinoGlyph.Plus, 20.dp, Color.Black) }
-}
-
-@Composable
-private fun EmptyMainTrack(modifier: Modifier, onAddMedia: () -> Unit) {
-    Row(modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(stringResource(R.string.edit_empty_hint), style = AureaType.of(13f, color = AureaColors.Muted), modifier = Modifier.weight(1f))
-        AddButton(Modifier, onAddMedia)
-    }
-}
-
-@Composable
-private fun AddAudioLane(modifier: Modifier, onClick: () -> Unit) {
-    val label = stringResource(R.string.edit_add_audio_lane)
-    Row(
-        modifier.height(RowH).clip(RoundedCornerShape(6.dp)).background(Color(0xFF16161A))
-            .testTag("edit.addAudio").semantics { contentDescription = label; role = Role.Button }
-            .tocavel(shrink = 0.96f, onClick = onClick).padding(horizontal = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        CupertinoIcon(CupertinoGlyph.Plus, 14.dp, AureaColors.Muted)
-        Text(label, style = AureaType.of(12f, color = AureaColors.Muted), modifier = Modifier.padding(start = 6.dp))
-    }
-}
-
-@Composable
-private fun MagnetToggle(store: EditorStore, modifier: Modifier) {
-    val label = stringResource(R.string.edit_magnet)
-    val on = store.editMode
-    Box(
-        modifier.size(22.dp).clip(RoundedCornerShape(6.dp)).background(if (on) AureaColors.AccentDim else Color(0xFF1B1B1F))
-            .testTag("edit.magnet").semantics { contentDescription = label; selected = on; role = Role.Switch }
-            .tocavel(shrink = 0.9f) { store.toggleEditMode() },
-        contentAlignment = Alignment.Center,
-    ) { CupertinoIcon(CupertinoGlyph.Link, 13.dp, if (on) AureaColors.Accent else AureaColors.Muted) }
-}
-
-/** O quadradinho branco num corte da trilha principal: abre as transições daquele corte. */
-@Composable
-private fun CutButton(modifier: Modifier, a: LayerRow, b: LayerRow, onTransition: (Long, Long) -> Unit) {
-    val label = stringResource(R.string.edit_transition_between, a.name, b.name)
-    Box(
-        modifier.size(22.dp).clip(RoundedCornerShape(5.dp)).background(Color.White).testTag("edit.cut.${a.id}.${b.id}")
-            .semantics { contentDescription = label; role = Role.Button }
-            .tocavel(shrink = 0.9f, haptic = true) { onTransition(a.id, b.id) },
-        contentAlignment = Alignment.Center,
-    ) { CupertinoIcon(CupertinoGlyph.ArrowLeftRight, 12.dp, Color.Black) }
 }

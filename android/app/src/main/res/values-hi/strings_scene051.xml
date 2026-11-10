@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.5.1: oclusão ambiente (Render3DTab, Scene3DEnvironment.kt) -->
+    <string name="scene051_ao">एम्बिएंट ऑक्लूज़न</string>
+    <string name="scene051_ao_hint">कोनों, दरारों और संपर्क बिंदुओं को गहरा करता है। डिवाइस पर दबाव होने पर अपनी लागत घटाता है।</string>
+    <string name="scene051_ao_strength">तीव्रता</string>
+    <string name="scene051_ao_radius">त्रिज्या</string>
+</resources>

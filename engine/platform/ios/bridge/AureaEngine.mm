@@ -2327,11 +2327,12 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     auto* e = self.engine; if (!e) return @[];
     float post[6]{}, floor[8]{}, fog[6]{};
     e->query_scene3d_post(post); e->query_scene_floor(floor); e->query_scene3d_fog(fog);
+    float ao[3]{}; e->query_scene3d_ao(ao);   // [15..17] (0.5.1): oclusão ambiente
     // [8] (0.4.1): 1 = o chão é o "Reflective Floor". [9..14] (0.4.6): névoa
     // (ligada, densidade, raios, cor RGB). Par do Android (nativeSceneSettings).
     return @[@(e->studio_environment()), @(floor[0]), @(post[0]), @(post[1]), @(post[2]), @(post[3]), @(post[4]), @(post[5]),
              @(aurea::Engine::is_reflective_floor(floor) ? 1.f : 0.f),
-             @(fog[0]), @(fog[1]), @(fog[2]), @(fog[3]), @(fog[4]), @(fog[5])];
+             @(fog[0]), @(fog[1]), @(fog[2]), @(fog[3]), @(fog[4]), @(fog[5]), @(ao[0]), @(ao[1]), @(ao[2])];
 }
 - (BOOL)setSceneSetting:(uint32_t)parameter value:(float)value {
     if (!self.engine || !std::isfinite(value)) return NO;
@@ -2375,7 +2376,10 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     case 10: return e.set_scene3d_fog(fog[0] > 0, value, fog[2], fog[3], fog[4], fog[5]);
     case 11: return e.set_scene3d_fog(fog[0] > 0, fog[1], value, fog[3], fog[4], fog[5]);
     case 12: e.renderer().scene_renderer().set_screen_reflections(value > 0); return YES;
-    case 13: e.renderer().scene_renderer().set_ambient_occlusion(value > 0); return YES;
+    case 13: case 14: case 15: {
+        float ao[3]{}; e.query_scene3d_ao(ao);
+        return e.set_scene3d_ao(parameter == 13 ? value > 0 : ao[0] > 0, parameter == 14 ? value : ao[1], parameter == 15 ? value : ao[2]) ? YES : NO;
+    }
     default: return false;
     }
 }
@@ -2898,6 +2902,85 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     return res.ok() ? static_cast<long long>(*res) : -static_cast<long long>(res.status().code());
 }
 
+- (BOOL)pluginsSafeMode { auto* e = self.engine; return e && e->plugins_safe_mode(); }
+- (BOOL)pluginsSafeModeAutomatic { auto* e = self.engine; return e && e->plugins_safe_mode_automatic(); }
+- (void)setPluginsSafeMode:(BOOL)on { if (auto* e = self.engine) e->set_plugins_safe_mode(on); }
+- (void)markPluginsHealthy { if (auto* e = self.engine) e->mark_plugins_healthy(); }
+
+- (BOOL)editTrackClip:(uint32_t)op layer:(long long)layer frame:(long long)frame track:(uint32_t)track {
+    auto* e = self.engine;
+    return e && e->edit_track_clip(op, static_cast<aurea::u64>(layer), frame, track);
+}
+
+- (NSArray<NSNumber*>*)editTimeline {
+    auto* e = self.engine;
+    if (!e) return @[];
+    const std::vector<aurea::i64> rows = e->query_edit_timeline();
+    NSMutableArray<NSNumber*>* out = [NSMutableArray arrayWithCapacity:rows.size()];
+    for (aurea::i64 v : rows) [out addObject:@(v)];
+    return out;
+}
+
+- (BOOL)setEditTrackFlag:(uint32_t)track flag:(uint32_t)flag on:(BOOL)on {
+    auto* e = self.engine;
+    return e && e->set_edit_track_flag(track, flag, on);
+}
+
+- (uint32_t)addEditTrack:(BOOL)audio {
+    auto* e = self.engine;
+    return e ? e->add_edit_track(audio) : 0;
+}
+
+- (BOOL)removeEditTrack:(uint32_t)track {
+    auto* e = self.engine;
+    return e && e->remove_edit_track(track);
+}
+
+- (BOOL)setEditMark:(uint32_t)which frame:(long long)frame {
+    auto* e = self.engine;
+    return e && e->set_edit_mark(which, frame);
+}
+
+- (BOOL)editMarkedRange:(BOOL)extract {
+    auto* e = self.engine;
+    return e && e->edit_marked_range(extract);
+}
+
+- (long long)addImage3D:(NSString*)path name:(NSString*)name {
+    auto* e = self.engine;
+    if (!e || !path) return -static_cast<long long>(aurea::Errc::InvalidState);
+    aurea::scene3d::Image3DSpec spec;
+    spec.imagePath = to_std(path);
+    const aurea::Result<aurea::u64> res = e->add_image3d(spec, to_std(name));
+    return res.ok() ? static_cast<long long>(*res) : -static_cast<long long>(res.status().code());
+}
+
+- (NSArray<NSNumber*>*)image3DForLayer:(long long)layerId {
+    auto* e = self.engine;
+    aurea::scene3d::Image3DSpec spec;
+    if (!e || !e->query_image3d(static_cast<aurea::u64>(layerId), spec)) return nil;
+    aurea::f32 v[aurea::scene3d::kImage3DFields]{};
+    aurea::scene3d::image3d_to_fields(spec, v);
+    NSMutableArray<NSNumber*>* out = [NSMutableArray arrayWithCapacity:aurea::scene3d::kImage3DFields];
+    for (aurea::u32 i = 0; i < aurea::scene3d::kImage3DFields; ++i) [out addObject:@(v[i])];
+    return out;
+}
+
+- (BOOL)setImage3D:(long long)layerId values:(NSArray<NSNumber*>*)values {
+    auto* e = self.engine;
+    aurea::scene3d::Image3DSpec spec;
+    if (!e || values.count != aurea::scene3d::kImage3DFields || !e->query_image3d(static_cast<aurea::u64>(layerId), spec)) return NO;
+    aurea::f32 v[aurea::scene3d::kImage3DFields]{};
+    for (aurea::u32 i = 0; i < aurea::scene3d::kImage3DFields; ++i) v[i] = values[i].floatValue;
+    aurea::scene3d::image3d_from_fields(v, spec);
+    return e->set_image3d(static_cast<aurea::u64>(layerId), spec).ok();
+}
+
+- (BOOL)applyImage3DPreset:(long long)layerId preset:(uint32_t)preset {
+    auto* e = self.engine;
+    return e && e->apply_image3d_preset(static_cast<aurea::u64>(layerId), preset);
+}
+
 - (long long)addReflectiveFloor {
     auto* e = self.engine;
     if (!e) return -static_cast<long long>(aurea::Errc::InvalidState);
@@ -3120,8 +3203,8 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 - (NSArray<NSDictionary<NSString*, id>*>*)effectParamsForLayer:(long long)layerId effectId:(uint32_t)effectId {
     auto* e = self.engine;
     if (!e) return @[];
-    std::vector<aurea::bridge::EffectParamRow> rows(64);
-    std::vector<char> blob(32 * 1024);
+    std::vector<aurea::bridge::EffectParamRow> rows(256);
+    std::vector<char> blob(64 * 1024);
     u32 written = e->query_effect_params(static_cast<aurea::u64>(layerId), effectId, rows.data(),
                                          static_cast<u32>(rows.size()), blob.data(),
                                          static_cast<u32>(blob.size()));
@@ -3327,6 +3410,21 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
     return e ? e->edit_effect_curve(layerId, effect, param, channel, action, point, x, y) : -1;
 }
 
+- (NSArray<NSNumber*>*)effectGradient:(long long)layerId effect:(uint32_t)effect param:(uint32_t)param {
+    auto* e = self.engine; if (!e) return @[];
+    float values[80]{};
+    const u32 n = e->query_effect_gradient(layerId, effect, param, values, 80);
+    NSMutableArray<NSNumber*>* result = [NSMutableArray arrayWithCapacity:n];
+    for (u32 i = 0; i < n; ++i) [result addObject:@(values[i])];
+    return result;
+}
+- (BOOL)setEffectGradient:(long long)layerId effect:(uint32_t)effect param:(uint32_t)param stops:(NSArray<NSNumber*>*)stops {
+    auto* e = self.engine; if (!e || stops.count > 80) return NO;
+    float values[80]{};
+    for (NSUInteger i = 0; i < stops.count; ++i) values[i] = stops[i].floatValue;
+    return e->set_effect_gradient(layerId, effect, param, values, static_cast<u32>(stops.count));
+}
+
 - (BOOL)setEffectSection:(long long)layerId effect:(uint32_t)effect section:(uint32_t)section open:(BOOL)open {
     auto* e = self.engine;
     return e && section > 0 && e->set_effect_section_open(static_cast<aurea::u64>(layerId), effect, section, open == YES);
@@ -3335,8 +3433,8 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
 - (NSArray<NSDictionary<NSString*, id>*>*)effectSpecs:(uint32_t)typeId {
     auto* e = self.engine;
     if (!e) return @[];
-    std::vector<aurea::bridge::EffectParamRow> rows(64);
-    std::vector<char> blob(32 * 1024);
+    std::vector<aurea::bridge::EffectParamRow> rows(256);
+    std::vector<char> blob(64 * 1024);
     u32 written = e->query_effect_specs(typeId, rows.data(), static_cast<u32>(rows.size()),
                                         blob.data(), static_cast<u32>(blob.size()));
     if (written == static_cast<u32>(rows.size())) {
@@ -3908,22 +4006,34 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
     }
     return out;
 }
+- (NSArray<NSString*>*)projectFilePlugins:(NSString*)path {
+    auto* e = self.engine; if (!e) return nil;
+    std::vector<aurea::package::PluginFile> plugins;
+    if (!e->project_file_plugins(to_std(path).c_str(), plugins).ok()) return nil;
+    NSMutableArray<NSString*>* out = [NSMutableArray arrayWithCapacity:plugins.size() * 3];
+    for (const auto& p : plugins) { [out addObject:to_ns(p.id)]; [out addObject:to_ns(p.version)]; [out addObject:to_ns(p.directory)]; }
+    return out;
+}
 + (NSArray<NSNumber*>*)exportProjectPackage:(NSString*)projectPath to:(NSString*)outPath title:(NSString*)title
-                                  appVersion:(NSString*)appVersion media:(NSArray<NSString*>*)media {
+                                  appVersion:(NSString*)appVersion media:(NSArray<NSString*>*)media plugins:(NSArray<NSString*>*)plugins {
+    std::vector<aurea::package::PluginFile> carried;
+    for (NSUInteger i = 0; i + 2 < plugins.count; i += 3) carried.push_back({to_std(plugins[i]), to_std(plugins[i + 1]), to_std(plugins[i + 2])});
     std::vector<aurea::package::MediaFile> files;
     for (NSUInteger i = 0; i + 2 < media.count; i += 3) {
         files.push_back({to_std(media[i]), to_std(media[i + 1]), to_std(media[i + 2])});
     }
     aurea::package::ExportResult r;
     const aurea::Status s = aurea::package::write_package(to_std(projectPath), to_std(outPath), to_std(title),
-                                                          to_std(appVersion), files, &r);
+                                                          to_std(appVersion), files, &r, carried);
     return @[@(static_cast<int>(s.code())), @(r.included), @(r.skipped)];
 }
 + (NSArray<NSString*>*)importProjectPackage:(NSString*)packagePath project:(NSString*)projectOut mediaDir:(NSString*)mediaDir {
     aurea::package::ImportResult r;
     const aurea::Status s = aurea::package::read_package(to_std(packagePath), to_std(projectOut), to_std(mediaDir), r);
-    return @[[NSString stringWithFormat:@"%d", static_cast<int>(s.code())], to_ns(r.title), to_ns(r.appVersion),
-             [NSString stringWithFormat:@"%u", r.relinked], [NSString stringWithFormat:@"%u", r.missing]];
+    NSMutableArray<NSString*>* out = [@[[NSString stringWithFormat:@"%d", static_cast<int>(s.code())], to_ns(r.title), to_ns(r.appVersion),
+             [NSString stringWithFormat:@"%u", r.relinked], [NSString stringWithFormat:@"%u", r.missing]] mutableCopy];
+    for (const auto& p : r.plugins) { [out addObject:to_ns(p.id)]; [out addObject:to_ns(p.version)]; [out addObject:to_ns(p.directory)]; }
+    return out;
 }
 - (NSArray<NSDictionary<NSString*, id>*>*)parseSRT:(NSString*)srt {
     NSMutableArray* out = [NSMutableArray array];
@@ -4645,6 +4755,12 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
     return e && effectId >= 0 && pivot >= 0
         && e->puppet_rotate_pins(layerId, static_cast<aurea::u32>(effectId), static_cast<aurea::u32>(pivot),
                                  static_cast<aurea::u32>(mask), u0, v0, u1, v1, autoKey, continuing);
+}
+- (long long)layerToImage3D:(long long)layerId path:(NSString*)path name:(NSString*)name {
+    auto* e = self.engine;
+    if (!e || !path) return -1;
+    const aurea::Result<aurea::u64> r = e->layer_to_image3d(static_cast<aurea::u64>(layerId), to_std(path), to_std(name));
+    return r.ok() ? static_cast<long long>(*r) : -1;
 }
 - (long long)layerTo3DObject:(long long)layerId name:(NSString*)name {
     auto* e = self.engine;

@@ -319,6 +319,11 @@ class AureaEngine private constructor() {
     /** Desinstala; o efeito sai do catálogo (projetos guardam os valores). */
     fun removePlugin(id: String): Boolean = nativeWork.run(false) { nativeRemovePlugin(nativeHandle, id) }
 
+    /** Formato 3: [modo seguro ligado, ligado sozinho pelas quedas]. */
+    fun pluginsSafeMode(): BooleanArray = nativeWork.run(BooleanArray(2)) { nativePluginsSafeMode(nativeHandle) ?: BooleanArray(2) }
+    fun setPluginsSafeMode(on: Boolean) = nativeWork.run(Unit) { nativeSetPluginsSafeMode(nativeHandle, on) }
+    fun markPluginsHealthy() = nativeWork.run(Unit) { nativeMarkPluginsHealthy(nativeHandle) }
+
     /** A pasta de plugins em uso pelo motor. */
     fun pluginDirectory(): String = nativeWork.run("") { nativePluginDirectory(nativeHandle) }
 
@@ -575,6 +580,14 @@ class AureaEngine private constructor() {
         val count = nativeQueryEffectCurve(nativeHandle, layer, effect, param, channel, samples, out)
         return out.copyOf(count.coerceIn(0, out.size))
     }
+    /** Paradas do degradê: [posição, r, g, b, a] por parada (RGBA linear). */
+    fun effectGradient(layer: Long, effect: Int, param: Int): FloatArray {
+        val out = FloatArray(80)
+        val count = nativeQueryEffectGradient(nativeHandle, layer, effect, param, out)
+        return out.copyOf(count.coerceIn(0, out.size))
+    }
+    fun setEffectGradient(layer: Long, effect: Int, param: Int, stops: FloatArray): Boolean =
+        nativeWork.run(false) { nativeSetEffectGradient(nativeHandle, layer, effect, param, stops) }
     fun editEffectCurve(layer: Long, effect: Int, param: Int, channel: Int, action: Int, point: Int, x: Float, y: Float): Int =
         nativeWork.run(-1) { nativeEditEffectCurve(nativeHandle, layer, effect, param, channel, action, point, x, y) }
 
@@ -875,6 +888,19 @@ class AureaEngine private constructor() {
     fun setText3dTexture(layer: Long, path: String): Boolean = nativeSetText3dTexture(nativeHandle, layer, path)
     fun queryText3d(layer: Long, out: FloatArray): String? = nativeQueryText3d(nativeHandle, layer, out)
     fun applyText3dPreset(layer: Long, preset: Int): Boolean = nativeApplyText3dPreset(nativeHandle, layer, preset)
+    // Faixas da Edição: `op` é o número de TrackEditOp (EditTimeline.kt, TrackOp).
+    fun editTrackClip(op: Int, layer: Long, frame: Long, track: Int): Boolean = nativeEditTrackClip(nativeHandle, op, layer, frame, track)
+    fun queryEditTimeline(): LongArray = nativeQueryEditTimeline(nativeHandle) ?: LongArray(0)
+    fun setEditTrackFlag(track: Int, flag: Int, on: Boolean): Boolean = nativeSetEditTrackFlag(nativeHandle, track, flag, on)
+    fun addEditTrack(audio: Boolean): Int = nativeAddEditTrack(nativeHandle, audio)
+    fun removeEditTrack(track: Int): Boolean = nativeRemoveEditTrack(nativeHandle, track)
+    fun setEditMark(which: Int, frame: Long): Boolean = nativeSetEditMark(nativeHandle, which, frame)
+    fun editMarkedRange(extract: Boolean): Boolean = nativeEditMarkedRange(nativeHandle, extract)
+    /** PNG para 3D: decodifica e traça, então fora da thread principal. Negativo = -Errc. */
+    fun addImage3d(path: String, name: String): Long = nativeAddImage3d(nativeHandle, path, name)
+    fun queryImage3d(layer: Long, out: FloatArray): Boolean = nativeQueryImage3d(nativeHandle, layer, out)
+    fun setImage3d(layer: Long, values: FloatArray): Boolean = nativeSetImage3d(nativeHandle, layer, values)
+    fun applyImage3dPreset(layer: Long, preset: Int): Boolean = nativeApplyImage3dPreset(nativeHandle, layer, preset)
 
     /** Real Camera: andar (m/s, + frente, 0 parado) e profundidade (× do frente/trás medido). */
     fun realCameraWalk(speed: Float, depth: Float): Boolean = nativeWork.run(false) { nativeRealCameraWalk(nativeHandle, speed, depth) }
@@ -927,6 +953,8 @@ class AureaEngine private constructor() {
     /** Nova camada de forma 3D ([kind] = Shape3DKind 0..9). Id da camada, ou −Errc. */
     fun addShape3d(kind: Int, name: String): Long = nativeAddShape3d(nativeHandle, kind, name)
     fun layerTo3dObject(layer: Long, name: String): Long = nativeLayerTo3dObject(nativeHandle, layer, name)
+    /** PNG com transparência vira Imagem 3D no mesmo lugar. Decodifica e traça: fora da thread principal. */
+    fun layerToImage3d(layer: Long, path: String, name: String): Long = nativeLayerToImage3d(nativeHandle, layer, path, name)
     /** Receita: out[0] forma, out[1] partes, 5 por parte (RGBA sRGB, tem imagem). −1 = não é forma. */
     fun queryShape3d(layer: Long, out: FloatArray): Int = nativeQueryShape3d(nativeHandle, layer, out)
     /** Cor ([rgba] nula = mantém) e imagem ([image] nula = mantém, "" = tira) da parte (−1 = todas). */
@@ -1032,8 +1060,9 @@ class AureaEngine private constructor() {
     /** Mídias de um `.aurea` fechado: 4 strings por mídia (gravado, legível, nome, tipo). null = não abre. */
     fun projectFileMedia(path: String): Array<String>? = nativeWork.run(null) { nativeProjectFileMedia(nativeHandle, path) }
     /** Arquivo do projeto: [erro (0 = ok), incluídas, puladas]. `media` = 3 strings por mídia. */
-    fun exportProjectPackage(project: String, out: String, title: String, appVersion: String, media: Array<String>): IntArray =
-        nativeExportProjectPackage(project, out, title, appVersion, media) ?: intArrayOf(10, 0, 0)   // 10 = Errc::IoError
+    fun projectFilePlugins(path: String): Array<String>? = nativeWork.run(null) { nativeProjectFilePlugins(nativeHandle, path) }
+    fun exportProjectPackage(project: String, out: String, title: String, appVersion: String, media: Array<String>, plugins: Array<String> = emptyArray()): IntArray =
+        nativeExportProjectPackage(project, out, title, appVersion, media, plugins) ?: intArrayOf(10, 0, 0)   // 10 = Errc::IoError
     /** [erro (0 = ok), título, versão do app, religadas, ausentes]. */
     fun importProjectPackage(pkg: String, projectOut: String, mediaDir: String): Array<String> =
         nativeImportProjectPackage(pkg, projectOut, mediaDir) ?: arrayOf("10", "", "", "0", "0")
@@ -1783,6 +1812,11 @@ class AureaEngine private constructor() {
     private external fun nativeListPlugins(handle: Long): String
     private external fun nativeRemovePlugin(handle: Long, id: String): Boolean
     private external fun nativePluginDirectory(handle: Long): String
+    private external fun nativePluginsSafeMode(handle: Long): BooleanArray?
+    private external fun nativeSetPluginsSafeMode(handle: Long, on: Boolean)
+    private external fun nativeMarkPluginsHealthy(handle: Long)
+    private external fun nativeQueryEffectGradient(handle: Long, layer: Long, effect: Int, param: Int, out: FloatArray): Int
+    private external fun nativeSetEffectGradient(handle: Long, layer: Long, effect: Int, param: Int, stops: FloatArray): Boolean
     private external fun nativeDeviceReport(handle: Long, out: LongArray): Boolean
     private external fun nativeDeviceSummary(handle: Long): String?
     private external fun nativeSetEffectPreviewSource(handle: Long, rgba: ByteArray, width: Int, height: Int): Boolean
@@ -1917,7 +1951,8 @@ class AureaEngine private constructor() {
     ): Long
     private external fun nativeLayerSourcePath(handle: Long, layer: Long): String?
     private external fun nativeProjectFileMedia(handle: Long, path: String): Array<String>?
-    private external fun nativeExportProjectPackage(project: String, out: String, title: String, appVersion: String, media: Array<String>): IntArray?
+    private external fun nativeProjectFilePlugins(handle: Long, path: String): Array<String>?
+    private external fun nativeExportProjectPackage(project: String, out: String, title: String, appVersion: String, media: Array<String>, plugins: Array<String>): IntArray?
     private external fun nativeImportProjectPackage(pkg: String, projectOut: String, mediaDir: String): Array<String>?
     private external fun nativeExtractModelArchive(archive: String, directory: String): Array<String>?
     private external fun nativeCreateCaptions(handle: Long, layer: Long, texts: Array<String>, times: DoubleArray, ints: IntArray, floats: FloatArray): Int
@@ -2069,6 +2104,17 @@ class AureaEngine private constructor() {
     private external fun nativeAddReflectiveFloor(handle: Long): Long
     private external fun nativeAddText3d(handle: Long, content: String, fields: FloatArray, fontPath: String): Long
     private external fun nativeSetText3d(handle: Long, layer: Long, content: String, fields: FloatArray, fontPath: String): Boolean
+    private external fun nativeEditTrackClip(handle: Long, op: Int, layer: Long, frame: Long, track: Int): Boolean
+    private external fun nativeQueryEditTimeline(handle: Long): LongArray?
+    private external fun nativeSetEditTrackFlag(handle: Long, track: Int, flag: Int, on: Boolean): Boolean
+    private external fun nativeAddEditTrack(handle: Long, audio: Boolean): Int
+    private external fun nativeRemoveEditTrack(handle: Long, track: Int): Boolean
+    private external fun nativeSetEditMark(handle: Long, which: Int, frame: Long): Boolean
+    private external fun nativeEditMarkedRange(handle: Long, extract: Boolean): Boolean
+    private external fun nativeAddImage3d(handle: Long, path: String, name: String): Long
+    private external fun nativeQueryImage3d(handle: Long, layer: Long, out: FloatArray): Boolean
+    private external fun nativeSetImage3d(handle: Long, layer: Long, values: FloatArray): Boolean
+    private external fun nativeApplyImage3dPreset(handle: Long, layer: Long, preset: Int): Boolean
     private external fun nativeSetText3dTexture(handle: Long, layer: Long, path: String): Boolean
     private external fun nativeLastText3dStatus(handle: Long): Int
     private external fun nativeQueryText3dTexture(handle: Long, layer: Long): String?
@@ -2083,6 +2129,7 @@ class AureaEngine private constructor() {
     private external fun nativeText3DPresetPreview(handle: Long, preset: Int, size: Int): IntArray?
     private external fun nativeAddShape3d(handle: Long, kind: Int, name: String): Long
     private external fun nativeLayerTo3dObject(handle: Long, layer: Long, name: String): Long
+    private external fun nativeLayerToImage3d(handle: Long, layer: Long, path: String, name: String): Long
     private external fun nativeQueryShape3d(handle: Long, layer: Long, out: FloatArray): Int
     private external fun nativeSetShape3dPartStyle(handle: Long, layer: Long, part: Int, rgba: FloatArray?, image: String?): Boolean
     private external fun nativeQueryShape3dParts(handle: Long, layer: Long, out: FloatArray): Int

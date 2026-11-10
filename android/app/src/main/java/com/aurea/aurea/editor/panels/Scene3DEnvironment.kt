@@ -192,6 +192,17 @@ internal fun Render3DTab(env: PanelEnv) {
             }
         }
     }
+    if (settings.size >= 18) EnvSection(stringResource(R.string.scene051_ao), stringResource(R.string.scene051_ao_hint), Modifier.testTag("env3d.ao")) {
+        EnvToggle(stringResource(R.string.scene051_ao), settings[15] > 0.5f, "env3d.ao.switch") { change(13, if (it) 1f else 0f) }
+        if (settings[15] > 0.5f) {
+            EnvValueRow(env, stringResource(R.string.scene051_ao_strength), settings[16] * 100f, 5f, 0f, 300f, "%", 100f, "oclusao 3D") {
+                change(14, it / 100f)
+            }
+            EnvValueRow(env, stringResource(R.string.scene051_ao_radius), settings[17] * 100f, .5f, 2f, 20f, "%", 7f, "oclusao 3D") {
+                change(15, it / 100f)
+            }
+        }
+    }
     EnvSection(stringResource(R.string.scene_bloom), null, Modifier.testTag("env3d.bloom")) {
         EnvToggle(stringResource(R.string.scene_bloom), settings[5] > 0.5f, "env3d.bloom.switch") { change(5, if (it) 1f else 0f) }
         if (settings[5] > 0.5f) {

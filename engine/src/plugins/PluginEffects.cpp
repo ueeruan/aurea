@@ -22,8 +22,12 @@
 #include "aurea/timeline/Layer.hpp"
 #include "effects/builtin/BuiltinEffects.hpp"
 
+#include "aurea/core/Log.hpp"
+#include "aurea/plugins/Script.hpp"
+
 #include <algorithm>
 #include <array>
+#include <mutex>
 #include <string>
 #include <cctype>
 #include <cmath>
@@ -53,10 +57,11 @@ struct PluginUniforms {
     Vec4 time;
     Vec4 layer;
     Vec4 region;
-    Vec4 params[kMaxParams];
+    Vec4 params[kMaxShaderParams];
 };
 constexpr usize kUniformHeaderBytes = 4 * sizeof(Vec4);
-static_assert(sizeof(PluginUniforms) == kUniformHeaderBytes + kMaxParams * sizeof(Vec4), "layout std140 do bloco aurea");
+static_assert(sizeof(PluginUniforms) == kUniformHeaderBytes + kMaxShaderParams * sizeof(Vec4), "layout std140 do bloco aurea");
+static_assert(sizeof(PluginUniforms) <= binding::kMaxUniformBytes);
 
 /// 0.3.1, plugins "shader3d": o mesmo bloco com a cena acrescentada no FIM
 /// (os plugins "shader" seguem recebendo só os 320 bytes de antes). Mat4 é
@@ -75,11 +80,12 @@ struct PluginUniforms3D {
 };
 constexpr usize kUniformSceneBytes = sizeof(PluginUniforms3D) - sizeof(PluginUniforms);
 static_assert(kUniformSceneBytes == 3 * 64 + 3 * 16 + kMaxLayerParams * (64 + 16 + 16), "layout std140 da cena dos plugins 3D");
-static_assert(sizeof(PluginUniforms3D) <= binding::kMaxUniformBytes);
+static_assert(kUniformHeaderBytes + kMaxShader3dParams * sizeof(Vec4) + kUniformSceneBytes <= binding::kMaxUniformBytes);
 
 /// O bloco como o shader o declara: cabeçalho, `slots` parâmetros e a cena (3D).
 u32 pack_uniforms(const PluginUniforms3D& u, u32 slots, bool scene3d, u8* out) noexcept {
-    const usize params = static_cast<usize>(slots) * sizeof(Vec4);
+    // O manifesto recusa acima disto; aqui é a última linha antes de escrever fora do bloco.
+    const usize params = static_cast<usize>(std::min(slots, scene3d ? kMaxShader3dParams : kMaxShaderParams)) * sizeof(Vec4);
     std::memcpy(out, &u.base, kUniformHeaderBytes + params);
     if (!scene3d) return static_cast<u32>(kUniformHeaderBytes + params);
     std::memcpy(out + kUniformHeaderBytes + params, &u.view, kUniformSceneBytes);
@@ -142,6 +148,14 @@ void declare_from_manifest(const Manifest& m, const std::vector<ParamStrings>& s
                 spec.defaultValue = ParamValue::scalar(d.def[0]);
                 spec.unit = "°";
                 break;
+            case ParamKind::Curve: spec.type = ParamType::Curve; spec.flags = kParamNone; break;
+            case ParamKind::Gradient: spec.type = ParamType::Gradient; spec.flags = kParamNone; break;
+            case ParamKind::LayerImage:
+                spec.type = ParamType::LayerReference;
+                spec.flags = kParamNone;
+                spec.defaultValue = ParamValue::scalar(-1.0f);
+                spec.minValue = -1.0f; spec.maxValue = 1.0e6f;
+                break;
             case ParamKind::Layer:
                 // A mesma referência de camada dos embutidos (reabrir, presets,
                 // copiar e colar já a remapeiam); as telas filtram pelo tipo.
@@ -168,13 +182,98 @@ std::vector<ParamStrings> make_strings(const Manifest& m) {
     return out;
 }
 
+/// `onFrame(f)` do plugin: devolve valores novos para os parâmetros neste quadro.
+/// Roda no planejamento, sob o lock do modelo: passos, tempo e memória curtos, e
+/// três falhas seguidas o desligam até reabrir o app. O efeito segue sem ele.
+class FrameScript {
+public:
+    FrameScript(const std::string& source, const std::string& id) : id_(id) {
+        script::Limits limits;
+        limits.maxSteps = kFrameScriptMaxSteps;
+        limits.maxTimeMs = kFrameScriptMaxMs;
+        limits.maxHeapBytes = kFrameScriptMaxHeap;
+        limits.maxDepth = 64;
+        ctx_ = std::make_unique<script::Context>(limits);
+        script::ScriptError error;
+        ready_ = ctx_->run(source, "frameScript", error) && ctx_->has_function("onFrame");
+        if (!ready_) AUREA_LOG_WARN("plugin '%s': frameScript sem onFrame ou com erro: %s", id_.c_str(), error.text().c_str());
+    }
+
+    /// `out`: dois Vec4 por parâmetro (valor; x = 1 se o script mudou). Falso = sem mudança.
+    bool eval(const Manifest& m, const EffectEval& e, std::vector<Vec4>& out) noexcept {
+        std::unique_lock<std::mutex> lock(mutex_, std::try_to_lock);
+        if (!lock.owns_lock() || !ready_ || failures_ >= kFrameScriptMaxFailures) return false;
+        const usize base = out.size();
+        const f64 frame = e.time_frames(), fps = e.framesPerSecond > 0.0 ? e.framesPerSecond : 30.0;
+        script::ScriptError error;
+        bool ok = false;
+        try {
+            using script::Value;
+            // Mesmo quadro, mesmo Math.random: prévia e exportação batem.
+            ctx_->seed(0x9E3779B97F4A7C15ull ^ static_cast<u64>(std::llround(frame * 1000.0)));
+            const Value arg = Value::object(ctx_->new_object());
+            ctx_->set(arg, "time", Value::number(frame / fps));
+            ctx_->set(arg, "frame", Value::number(frame));
+            ctx_->set(arg, "fps", Value::number(fps));
+            ctx_->set(arg, "progress", Value::number(e.clipProgress));
+            const Value params = Value::object(ctx_->new_object());
+            for (u32 i = 0; i < m.params.size() && i < e.count; ++i) {
+                const ParamKind k = m.params[i].kind;
+                if (k == ParamKind::Curve || k == ParamKind::Gradient || k == ParamKind::Layer || k == ParamKind::LayerImage) continue;
+                ctx_->set(params, m.params[i].id, Value::number(e.values[i].v[0]));
+            }
+            ctx_->set(arg, "params", params);
+            Value result;
+            ok = ctx_->call("onFrame", {arg}, result, error);
+            if (ok && script::Context::type_name(result) == "object") {
+                out.resize(base + m.params.size() * 2, Vec4{});
+                for (u32 i = 0; i < m.params.size() && i < e.count; ++i) {
+                    const Value v = ctx_->get(result, m.params[i].id);
+                    const std::string type = script::Context::type_name(v);
+                    Vec4 value{e.values[i].v[0], e.values[i].v[1], e.values[i].v[2], e.values[i].v[3]};
+                    if (type == "number") value.x = finite(ctx_->to_number(v), value.x);
+                    else if (type == "object") {
+                        f32* parts[4] = {&value.x, &value.y, &value.z, &value.w};
+                        for (u32 c = 0; c < 4; ++c) {
+                            const Value part = ctx_->get(v, std::to_string(c));
+                            if (script::Context::type_name(part) == "number") *parts[c] = finite(ctx_->to_number(part), *parts[c]);
+                        }
+                    } else continue;
+                    out[base + i * 2] = value;
+                    out[base + i * 2 + 1] = Vec4{1.0f, 0.0f, 0.0f, 0.0f};
+                }
+            }
+            if ((++calls_ & 255u) == 0u) (void)ctx_->collect();
+        } catch (...) {
+            ok = false;
+        }
+        if (ok) { failures_ = 0; return out.size() > base; }
+        out.resize(base);
+        if (++failures_ == kFrameScriptMaxFailures)
+            AUREA_LOG_WARN("plugin '%s': frameScript desligado depois de %u falhas: %s", id_.c_str(), kFrameScriptMaxFailures, error.text().c_str());
+        return false;
+    }
+
+private:
+    static f32 finite(f64 v, f32 fallback) noexcept { return std::isfinite(v) ? static_cast<f32>(v) : fallback; }
+    std::string id_;
+    std::unique_ptr<script::Context> ctx_;
+    std::mutex mutex_;
+    bool ready_ = false;
+    u32 failures_ = 0;
+    u32 calls_ = 0;
+};
+
 // =============================================================================
 // Plugin "shader"
 // =============================================================================
 class PluginShaderEffect final : public Effect {
 public:
-    PluginShaderEffect(const Manifest& m, std::vector<ShaderId> shaders, PluginImages images)
+    PluginShaderEffect(const Manifest& m, std::vector<ShaderId> shaders, PluginImages images, const std::string& frameSource)
         : manifest_(m), shaders_(std::move(shaders)), images_(std::move(images)) {
+        if (!frameSource.empty()) frameScript_ = std::make_unique<FrameScript>(frameSource, m.id);
+        for (u32 i = 0; i < manifest_.params.size(); ++i)
+            if (manifest_.params[i].kind == ParamKind::LayerImage) imageParams_.push_back(i);
         key_ = effect_key(m.id);
         name_ = localized(m.name, "pt-BR");
         strings_ = make_strings(manifest_);
@@ -189,6 +288,9 @@ public:
         for (const ShaderId id : shaders_) out.push_back(PipelineKey::fullscreen(id, work));
     }
     f32 input_margin(const EffectEval&) const noexcept override { return manifest_.margin; }
+    bool wants_history() const noexcept override { return manifest_.history; }
+    u32 input_layer_count() const noexcept override { return static_cast<u32>(imageParams_.size()); }
+    i32 input_layer_param_at(u32 slot) const noexcept override { return slot < imageParams_.size() ? static_cast<i32>(imageParams_[slot]) : -1; }
 
     /// "shader3d": o mundo de cada camada ligada, lido sob o lock do modelo e
     /// levado até a montagem em `pathSamples` (kLayerWorldStride por camada).
@@ -200,8 +302,29 @@ public:
             if (img && !img->rgba.empty())
                 e.auxImages[i] = e.resources->image_texture(img->key, img->rgba.data(), img->width, img->height, img->srgb);
         }
-        if (!manifest_.scene3d || !e.layer) return;
+        if (manifest_.audio && e.layer) {
+            AudioAnalysisRequest req;
+            req.host = e.layer;
+            req.instance = e.instance;
+            req.spectrum = true;
+            req.count = 64;
+            req.durationMs = 200.0f;
+            req.startHz = 20.0f;
+            req.endHz = 12000.0f;
+            const AudioAnalysisResult r = e.resources->audio_analysis(req);
+            e.aux = r.texture;
+            e.auxInfo = Vec4{r.texture.valid() ? 1.0f : 0.0f, r.peak, 0.0f, 0.0f};
+        }
         auto data = std::make_shared<std::vector<Vec4>>();
+        // Ordem em `pathSamples`: mundo das camadas, curvas e degradês, script por quadro.
+        if (manifest_.scene3d && e.layer) resolve_layers(e, *data);
+        bake_tables(e, *data);
+        if (frameScript_) (void)frameScript_->eval(manifest_, e, *data);
+        if (!data->empty()) e.pathSamples = std::move(data);
+    }
+
+    void resolve_layers(EffectEval& e, std::vector<Vec4>& out) const noexcept {
+        auto* data = &out;
         data->reserve(kMaxLayerParams * kLayerWorldStride);
         const f64 compTime = e.time_frames() + static_cast<f64>(e.layer->start.value) - static_cast<f64>(e.layer->offset.value);
         for (u32 i = 0; i < manifest_.params.size() && i < e.count; ++i) {
@@ -213,7 +336,47 @@ public:
             data->push_back(Vec4{w.position.x, w.position.y, w.position.z, ok ? 1.0f : 0.0f});
             data->push_back(Vec4{static_cast<f32>(w.kind), w.fovY, w.threeD ? 1.0f : 0.0f, 0.0f});
         }
-        e.pathSamples = std::move(data);
+    }
+
+    /// Curvas e degradês viram números: só existem na instância durante o planejamento.
+    void bake_tables(const EffectEval& e, std::vector<Vec4>& out) const noexcept {
+        const bool srgb = manifest_.colorSpace == ColorSpace::Srgb;
+        for (u32 i = 0; i < manifest_.params.size() && i < e.count; ++i) {
+            const ParamKind kind = manifest_.params[i].kind;
+            if (kind == ParamKind::Curve) {
+                const CurveData* curve = e.curve(i);
+                for (u32 slot = 0; slot < kCurveSlots; ++slot) {
+                    f32 v[4];
+                    for (u32 c = 0; c < 4; ++c) {
+                        const f32 t = static_cast<f32>(slot * 4 + c) / static_cast<f32>(kCurveSamples - 1);
+                        v[c] = curve ? curve->evaluate(0, t) : t;
+                    }
+                    out.push_back(Vec4{v[0], v[1], v[2], v[3]});
+                }
+            } else if (kind == ParamKind::Gradient) {
+                const u64 ref = e.values[i].ref;
+                const GradientData* g = e.instance && ref < e.instance->gradients.size() ? &e.instance->gradients[ref] : nullptr;
+                for (u32 slot = 0; slot < kGradientSlots; ++slot) {
+                    Vec4 color = sample_gradient(g, static_cast<f32>(slot) / static_cast<f32>(kGradientSlots - 1));
+                    if (srgb) color = Vec4{linear_to_srgb(color.x), linear_to_srgb(color.y), linear_to_srgb(color.z), color.w};
+                    out.push_back(color);
+                }
+            }
+        }
+    }
+
+    static Vec4 sample_gradient(const GradientData* g, f32 t) noexcept {
+        if (!g || g->stops.empty()) return Vec4{t, t, t, 1.0f};
+        const auto& stops = g->stops;
+        if (t <= stops.front().position) return stops.front().color;
+        for (usize k = 1; k < stops.size(); ++k) {
+            if (t > stops[k].position) continue;
+            const GradientStop& a = stops[k - 1], &b = stops[k];
+            const f32 span = std::max(b.position - a.position, 1e-5f), f = (t - a.position) / span;
+            return Vec4{a.color.x + (b.color.x - a.color.x) * f, a.color.y + (b.color.y - a.color.y) * f,
+                        a.color.z + (b.color.z - a.color.z) * f, a.color.w + (b.color.w - a.color.w) * f};
+        }
+        return stops.back().color;
     }
 
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
@@ -252,9 +415,32 @@ public:
         const f32 layerW = e.placement && e.placement->layerWidth ? static_cast<f32>(e.placement->layerWidth) : region.w;
         const f32 layerH = e.placement && e.placement->layerHeight ? static_cast<f32>(e.placement->layerHeight) : region.h;
         u.region = Vec4{region.x, region.y, region.w, region.h};
+        // Depois do mundo das camadas: as tabelas; depois delas, o script por quadro.
+        const std::vector<Vec4>* samples = e.pathSamples.get();
+        usize cursor = manifest_.scene3d ? scene_layer_count(e) * kLayerWorldStride : 0;
+        usize tableBytes = 0;
+        for (const ParamDecl& d : manifest_.params) tableBytes += d.kind == ParamKind::Curve ? kCurveSlots : d.kind == ParamKind::Gradient ? kGradientSlots : 0u;
+        const usize overrides = cursor + tableBytes;
+        const bool driven = samples && samples->size() >= overrides + manifest_.params.size() * 2 && !manifest_.params.empty();
         for (u32 i = 0; i < manifest_.params.size() && i < e.count; ++i) {
-            const ParamValue& v = e.values[i];
-            Vec4& slot = u.params[i];
+            const u32 at = param_slot_at(manifest_, i);
+            if (at >= kMaxShaderParams) break;
+            ParamValue v = e.values[i];
+            if (driven && (*samples)[overrides + i * 2 + 1].x > 0.5f) {
+                const Vec4 o = (*samples)[overrides + i * 2];
+                v.v[0] = o.x; v.v[1] = o.y; v.v[2] = o.z; v.v[3] = o.w;
+            }
+            Vec4& slot = u.params[at];
+            if (manifest_.params[i].kind == ParamKind::Curve || manifest_.params[i].kind == ParamKind::Gradient) {
+                const u32 count = param_slot_size(manifest_.params[i]);
+                for (u32 k = 0; k < count && samples && cursor + k < samples->size() && at + k < kMaxShaderParams; ++k) u.params[at + k] = (*samples)[cursor + k];
+                cursor += count;
+                continue;
+            }
+            if (manifest_.params[i].kind == ParamKind::LayerImage) {
+                slot = Vec4{v.ref && ctx.layer_input(v.ref) ? 1.0f : 0.0f, 0, 0, 0};
+                continue;
+            }
             switch (manifest_.params[i].kind) {
                 case ParamKind::Angle: slot = Vec4{v.v[0] * kDegToRad, 0, 0, 0}; break;
                 case ParamKind::Color: {
@@ -273,6 +459,7 @@ public:
                 default: slot = Vec4{v.v[0], 0, 0, 0}; break;
             }
         }
+        if (manifest_.audio && slots > 0) u.params[slots - 1] = Vec4{e.auxInfo.y, e.auxInfo.x, 0.0f, 0.0f};
         if (manifest_.scene3d) fill_scene(e, u3);
 
         FGTexture targets[kMaxPasses]{};
@@ -305,6 +492,19 @@ public:
                 const TextureHandle img = i < kEffectAuxImages ? e.auxImages[i] : TextureHandle{};
                 t[n++] = img.valid() ? PassTexture{{}, img, texture_sampler(manifest_.textures[i])}
                                      : PassTexture{src, {}, CommonSampler::LinearClamp};
+            }
+            // Formato 3: sem o recurso, o slot recebe a fonte (nunca um descritor vazio).
+            if (manifest_.history && n < 1 + kMaxPassInputs) {
+                const LayerImage& past = ctx.history();
+                t[n++] = past.valid() ? PassTexture{past.texture, {}, CommonSampler::LinearClamp} : PassTexture{src, {}, CommonSampler::LinearClamp};
+            }
+            if (manifest_.audio && n < 1 + kMaxPassInputs)
+                t[n++] = e.aux.valid() ? PassTexture{{}, e.aux, CommonSampler::LinearClamp} : PassTexture{src, {}, CommonSampler::LinearClamp};
+            for (const u32 index : imageParams_) {
+                if (n >= 1 + kMaxPassInputs) break;
+                const u64 ref = index < e.count ? e.values[index].ref : 0;
+                const LayerImage* other = ref ? ctx.layer_input(ref) : nullptr;
+                t[n++] = other && other->valid() ? PassTexture{other->texture, {}, CommonSampler::LinearClamp} : PassTexture{src, {}, CommonSampler::LinearClamp};
             }
             const u32 bytes = pack_uniforms(u3, slots, manifest_.scene3d, packed);
             const u32 added = ctx.fullscreen_pass(pass_name(p), PassStage::Effects, dst, shaders_[p], t, n, packed, bytes);
@@ -361,14 +561,22 @@ private:
                 u.layerInfo[slot] = (*data)[at + 5];
             }
             // params[i] da camada: (ligada, tipo, posição entre as camadas, 0).
-            u.base.params[i] = Vec4{u.layerPos[slot].w, u.layerInfo[slot].x, static_cast<f32>(slot), 0.0f};
+            u.base.params[param_slot_at(manifest_, i)] = Vec4{u.layerPos[slot].w, u.layerInfo[slot].x, static_cast<f32>(slot), 0.0f};
             ++slot;
         }
+    }
+
+    [[nodiscard]] usize scene_layer_count(const EffectEval& e) const noexcept {
+        usize n = 0;
+        for (u32 i = 0; i < manifest_.params.size() && i < e.count; ++i) n += manifest_.params[i].kind == ParamKind::Layer;
+        return std::min<usize>(n, kMaxLayerParams);
     }
 
     Manifest manifest_;
     std::vector<ShaderId> shaders_;
     PluginImages images_;
+    std::unique_ptr<FrameScript> frameScript_;
+    std::vector<u32> imageParams_;
     std::string key_, name_;
     std::vector<ParamStrings> strings_;
     EffectInfo info_{};
@@ -614,8 +822,8 @@ bool compile_stack(const Manifest& m, const EffectRegistry& registry, std::vecto
     return true;
 }
 
-std::unique_ptr<Effect> make_shader_effect(const Manifest& m, std::vector<ShaderId> passShaders, PluginImages images) {
-    return std::make_unique<PluginShaderEffect>(m, std::move(passShaders), std::move(images));
+std::unique_ptr<Effect> make_shader_effect(const Manifest& m, std::vector<ShaderId> passShaders, PluginImages images, std::string frameSource) {
+    return std::make_unique<PluginShaderEffect>(m, std::move(passShaders), std::move(images), frameSource);
 }
 
 std::unique_ptr<Effect> make_stack_effect(const Manifest& m, std::vector<CompiledStackStep> steps) {

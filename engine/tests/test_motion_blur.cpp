@@ -2,8 +2,10 @@
 #include "MockBackend.hpp"
 #include "aurea/effects/EffectGraph.hpp"
 #include "aurea/project/Project.hpp"
+#include "aurea/project/Serialization.hpp"
 #include "aurea/render/Renderer.hpp"
 #include "aurea/text/FontManager.hpp"
+#include "aurea/text/TextAnimator.hpp"
 #include <cmath>
 #include <limits>
 
@@ -87,10 +89,95 @@ struct MorphExposureFixture {
             TextAnimator animator;
             animator.props = kTextPropPosition;
             layer->text.animators.push_back(std::move(animator));
+            auto& x = layer->tracks.get_or_create(TrackProperty::TextAnimParam, 0, text::kPosX);
+            x.set(FrameIndex{0}, -30); x.set(FrameIndex{30}, 30);
         }
         return id;
     }
+
+    void add_effect(LayerId id, const char* key) {
+        Layer* l = comp->layer(id);
+        EffectInstance e;
+        e.id = l->alloc_effect_id();
+        e.type = effect_type_id(key);
+        initialize_instance(e, *effects.params(e.type));
+        l->effects.push_back(std::move(e));
+    }
 };
+}
+
+AUREA_TEST(MotionBlur, AnimatedTextWithEffectsStaysBoundedInPreviewOnly) {
+    MorphExposureFixture f(4);
+    f.comp->layer(f.comp->order().at(0))->visible = false;
+    const auto id = f.add_text(8, true);
+    AUREA_CHECK(text::FontManager::instance().font_for(f.comp->layer(id)->text) != nullptr);
+    FrameSnapshot plain; f.prepare(plain, false);
+    AUREA_CHECK_EQ(plain.layers.size(), 1u); if (plain.layers.empty()) return;
+    AUREA_CHECK(plain.layers[0].source.glyphSets > 6u);
+
+    f.add_effect(id, effect_keys::kGaussianBlur);
+    FrameSnapshot preview; f.prepare(preview, false);
+    AUREA_CHECK_EQ(preview.layers.size(), 1u); if (preview.layers.empty()) return;
+    AUREA_CHECK(preview.layers[0].source.glyphSets >= 2u && preview.layers[0].source.glyphSets <= 6u);
+    // Still layer: the glyphs integrate in the source, the chain runs once.
+    AUREA_CHECK(preview.layers[0].blurMatrices.empty());
+
+    FrameSnapshot exported; f.prepare(exported, true);
+    AUREA_CHECK_EQ(exported.layers.size(), 1u); if (exported.layers.empty()) return;
+    AUREA_CHECK(exported.layers[0].source.glyphSets > 6u);
+    AUREA_CHECK(exported.layers[0].blurMatrices.empty());
+
+    // A moving layer keeps one matrix per instant, so its trail stays correct.
+    auto& x = f.comp->layer(id)->tracks.get_or_create(TrackProperty::PositionX);
+    x.set(FrameIndex{0}, 40); x.set(FrameIndex{30}, 280);
+    FrameSnapshot moving; f.prepare(moving, false);
+    AUREA_CHECK_EQ(moving.layers.size(), 1u); if (moving.layers.empty()) return;
+    AUREA_CHECK_EQ(moving.layers[0].blurMatrices.size(), static_cast<usize>(moving.layers[0].source.glyphSets));
+    AUREA_CHECK(moving.layers[0].source.glyphSets <= 6u);
+}
+
+AUREA_TEST(MotionBlur, TextAnimatorThatChangesNothingInTheShutterCostsOneSample) {
+    MorphExposureFixture f(4);
+    f.comp->layer(f.comp->order().at(0))->visible = false;
+    const auto id = f.add_text(8, true);
+    auto& x = f.comp->layer(id)->tracks.get_or_create(TrackProperty::TextAnimParam, 0, text::kPosX);
+    x.keys.clear(); x.set(FrameIndex{0}, 12); x.set(FrameIndex{100}, 12);
+    FrameSnapshot held; f.prepare(held, true);
+    AUREA_CHECK_EQ(held.layers.size(), 1u); if (held.layers.empty()) return;
+    AUREA_CHECK_EQ(held.layers[0].source.glyphSets, 1u);
+
+    // Opacity moves no corner: it must still be sampled.
+    TextAnimator fade; fade.props = kTextPropOpacity;
+    f.comp->layer(id)->text.animators.push_back(std::move(fade));
+    auto& opacity = f.comp->layer(id)->tracks.get_or_create(TrackProperty::TextAnimParam, 1, text::kOpacity);
+    opacity.set(FrameIndex{0}, 0); opacity.set(FrameIndex{30}, 100);
+    FrameSnapshot fading; f.prepare(fading, true);
+    AUREA_CHECK_EQ(fading.layers.size(), 1u); if (fading.layers.empty()) return;
+    AUREA_CHECK(fading.layers[0].source.glyphSets >= 16u);
+}
+
+AUREA_TEST(MotionBlur, GroupsKeepTheBlurOfTheLayersMovedIntoThem) {
+    Project project = std::move(*Project::create_new(320, 180, 30, "old group"));
+    auto& tl = project.timeline();
+    auto* root = tl.composition(tl.root());
+    root->motion_blur().enabled = true; root->motion_blur().shutterAngle = 270;
+    const auto middleId = tl.create_composition("middle", 320, 180, 30);
+    const auto leafId = tl.create_composition("leaf", 320, 180, 30);
+    root = tl.composition(tl.root());
+    root->layer(root->add_layer(LayerKind::Composition, "middle"))->nested.composition = middleId;
+    auto* middle = tl.composition(middleId);
+    middle->layer(middle->add_layer(LayerKind::Shape, "flag"))->motionBlur = true;
+    middle->layer(middle->add_layer(LayerKind::Composition, "leaf"))->nested.composition = leafId;
+    auto* leaf = tl.composition(leafId);
+    leaf->layer(leaf->add_layer(LayerKind::Shape, "deep"))->motionBlur = true;
+    const auto plainId = tl.create_composition("no flags", 320, 180, 30);
+    root = tl.composition(tl.root());
+    root->layer(root->add_layer(LayerKind::Composition, "no flags"))->nested.composition = plainId;
+    inherit_group_motion_blur(project);
+    AUREA_CHECK(tl.composition(middleId)->motion_blur().enabled);
+    AUREA_CHECK_NEAR(tl.composition(leafId)->motion_blur().shutterAngle, 270.f, .001f);
+    AUREA_CHECK(tl.composition(leafId)->motion_blur().enabled);
+    AUREA_CHECK(!tl.composition(plainId)->motion_blur().enabled);
 }
 
 #include "BoundedSceneExposureTests.inl"

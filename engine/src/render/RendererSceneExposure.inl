@@ -13,6 +13,7 @@ void Renderer::configure_scene_quality(const scene3d::SceneFrame& group) noexcep
     scene3d_.set_shadow_map_cap(heavyQ_.exportFrame || !lowMemoryDevice_ ? 4096u : 2048u);
     scene3d_.set_quality(q.shadowMapSize, q.shadowFilter, heavyQ_.lodBias, !heavyQ_.exportFrame);
     scene3d_.set_post_quality(q.msaaSamples, q.fxaa, q.bloomStartDiv, q.bloomLevels);
+    scene3d_.set_ao_quality(q.aoDirections, q.aoSteps);
     scene3d_.set_dof_quality(heavyQ_.exportFrame ? 96u
         : static_cast<Scene3DQuality>(group.post.quality) == Scene3DQuality::Low ? 16u : 32u);
     const auto tier = static_cast<Scene3DQuality>(group.post.quality);

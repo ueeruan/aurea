@@ -1809,7 +1809,7 @@
     <string name="am_import_failed">Não deu para importar: %1$s</string>
     <string name="am_import_nothing">nenhum efeito com equivalente no Aurea</string>
     <string name="release_notes_title">Novidades do Aurea</string>
-    <string name="release_notes_body">Aurea Beta 0.5.0 (2214) • 09/11/2026\n\n• Novo animador de texto: posição, escala, opacidade e desfoque por letra, palavra ou linha\n• Seletores combináveis, com formas e suavização que seguem o After Effects\n• Curvas com velocidade e influência nos keyframes\n• Painéis de texto e máscara mais organizados\n• Máscaras: escolha o ponto inicial e abra o caminho em um segmento\n• Exportação confere imagem e som antes de concluir e se recupera melhor de travamentos\n• Texto grande mais nítido e coreano corrigido no Android 15</string>
+    <string name="release_notes_body">Aurea Beta 0.5.1 (2216) • 09/11/2026\n\n• Nova timeline da Edição no estilo do Premiere, com faixas de vídeo e áudio e ferramentas de edição precisas\n• PNG para 3D: transforme um PNG sem fundo em objeto 3D com profundidade e material\n• Cena 3D: oclusão ambiente para cenas mais realistas\n• Plugin V3: curvas, degradês, som, script por quadro e painéis próprios\n• Flow Retime e Flow Motion Blur deformam bem menos em movimentos rápidos e cortes de cena\n• O preset de estúdio da Cena 3D é mantido ao reabrir o projeto</string>
     <string name="am_import_lossless_required">Este preset tem efeitos, parâmetros ou camadas que não podem ser preservados na conversão. Nada foi salvo nem aplicado.</string>
     <string name="am_import_read_failed">Não foi possível ler o arquivo (limite de 64 MB), ou a camada selecionada mudou. Tente novamente.</string>
     <string name="world_explosive">Explosivo</string>

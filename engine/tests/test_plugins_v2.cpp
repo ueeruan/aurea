@@ -251,7 +251,7 @@ AUREA_TEST(PluginsV2, ManifestV2AcceptsPanelsAndRefusesNamingTheField) {
     const Bad bad[] = {
         {R"({"aureaPlugin":1,"id":"a.b.c","version":"1.0.0","name":"x","kind":"stack","stack":[{"effect":"aurea.blur.gaussian"}],"script":"m.js"})", "aureaPlugin\": 2"},
         {R"({"aureaPlugin":1,"id":"a.b.c","version":"1.0.0","name":"x","kind":"panel"})", "aureaPlugin\": 2"},
-        {R"({"aureaPlugin":3,"id":"a.b.c","version":"1.0.0","name":"x","kind":"panel"})", "versoes 1 e 2"},
+        {R"({"aureaPlugin":4,"id":"a.b.c","version":"1.0.0","name":"x","kind":"panel"})", "versoes 1, 2 e 3"},
         {panel_manifest("a.b.c", R"("permissions":{"network":["*"]},)"), "\"*\" nao e aceito"},
         {panel_manifest("a.b.c", R"("permissions":{"network":["https://x.com/api"]},)"), "so o dominio"},
         {panel_manifest("a.b.c", R"("permissions":{"camera":true},)"), "campo desconhecido \"camera\""},

@@ -14,7 +14,7 @@ struct Glyph {
     vec4 fill;     // cor linear, alfa
     vec4 stroke;   // cor linear, alfa
     mat4 xform;    // px da layer (Z = profundidade por caractere)
-    vec4 misc;     // _, _, k (px da layer por px da base), largura do contorno (px da layer)
+    vec4 misc;     // recorte do miolo do contorno, _, k (px da layer por px da base), largura do contorno (px da layer)
     vec4 extra;    // desfoque (px), _, _, _
 };
 

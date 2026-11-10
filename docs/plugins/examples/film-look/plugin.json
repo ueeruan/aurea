@@ -1,0 +1,33 @@
+{
+  "aureaPlugin": 1,
+  "id": "com.aurea.examples.filmlook",
+  "version": "1.0.0",
+  "author": "AUREA (exemplo)",
+  "name": {
+    "pt-BR": "Filme (LUT + grão)",
+    "en": "Film Look (LUT + grain)",
+    "es": "Película (LUT + grano)"
+  },
+  "description": {
+    "pt-BR": "Usa imagens do próprio pacote (getFile): uma curva de cor em PNG e um grão de filme que se repete.",
+    "en": "Uses images from its own package (getFile): a colour curve PNG and a tiling film grain."
+  },
+  "category": "Cor",
+  "kind": "shader",
+  "colorSpace": "srgb",
+  "params": [
+    { "id": "amount", "type": "float", "label": { "pt-BR": "Curva", "en": "Curve" },
+      "default": 1, "min": 0, "max": 1 },
+    { "id": "grain", "type": "float", "label": { "pt-BR": "Grão", "en": "Grain" },
+      "default": 0.35, "min": 0, "max": 1 },
+    { "id": "grainSize", "type": "float", "label": { "pt-BR": "Tamanho do grão (px)", "en": "Grain size (px)" },
+      "default": 1.5, "min": 0.5, "max": 6 }
+  ],
+  "textures": {
+    "curve": { "file": "textures/curve.png", "colorSpace": "data" },
+    "grainTex": { "file": "textures/grain.png", "colorSpace": "data", "wrap": "repeat" }
+  },
+  "passes": [
+    { "shader": "film.frag" }
+  ]
+}

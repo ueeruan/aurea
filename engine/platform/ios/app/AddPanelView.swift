@@ -12,6 +12,7 @@
 // =============================================================================
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 // MARK: - Papéis de cor (Omega adicionar; derivados dos tons que todo tema tem)
 extension AureaColors {
@@ -398,7 +399,7 @@ private struct ElementGridView: View {
         if projects {
             ProjectStripView(close: close) { projects = false }
         } else {
-            ObjectGridView(cells: [
+            ObjectGridView(cells: pluginAppended([
                 // D6: Câmera aqui (referência) e também na 3D.
                 ObjectCell(label: AureaText.t("om_add_camera"), tag: "add.element.camera", glyph: CupertinoGlyph.CameraFill) { model.addCamera(); close() },
                 ObjectCell(label: AureaText.t("sh_add_null"), tag: "add.element.null", icon: AnyView(ShellNullGlyph())) { model.addNull(threeD: false); close() },
@@ -425,7 +426,7 @@ private struct ElementGridView: View {
                 ObjectCell(label: AureaText.t("sh_add_tab_vector"), tag: "add.element.vector", glyph: CupertinoGlyph.PencilOutline) {
                     shell.addCategory = 7
                 },
-            ])
+            ], close: close))
         }
     }
 }
@@ -530,6 +531,8 @@ private struct Model3DGridView: View {
     @EnvironmentObject private var shell: ShellPresentation
     let close: () -> Void
     @State private var shapes = false
+    @State private var choosingImage3D = false
+    @State private var pickingImage3D = false
 
     var body: some View {
         if shapes {
@@ -549,6 +552,10 @@ private struct Model3DGridView: View {
                     _ = model.addText3D(content: AureaText.t("panel_texto"), depth: 0.25); close()
                 },
                 // 0.4.1: Reflective Floor — o chão polido que espelha tudo o que é 3D, num toque. Par do Android.
+                // PNG para 3D: o alfa da imagem vira a silhueta do objeto. Par do Android.
+                ObjectCell(label: AureaText.t("image3d_add"), tag: "add.model3d.image", glyph: CupertinoGlyph.Photo, tint: ShellColors.text3D) {
+                    choosingImage3D = true
+                },
                 ObjectCell(label: AureaText.t("scene_floor_reflective"), tag: "add.model3d.reflectiveFloor", glyph: CupertinoGlyph.Sparkles, tint: ShellColors.text3D) {
                     close(); model.addReflectiveFloor()
                 },
@@ -557,6 +564,22 @@ private struct Model3DGridView: View {
                 ObjectCell(label: AureaText.t("real_camera_title"), tag: "add.model3d.realCamera", glyph: CupertinoGlyph.CameraViewfinder) { model.startRealCamera(); close() },
                 ObjectCell(label: AureaText.t("sh_add_null_3d"), tag: "add.model3d.null", icon: AnyView(ShellNullGlyph())) { model.addNull(threeD: true); close() },
             ], footer: AureaText.t("sh_add_model_3d_hint"), warning: AureaText.t("model3d_risk_warning"))
+            // O seletor de Fotos não abre o app Arquivos, onde costuma estar o PNG sem fundo.
+            .confirmationDialog(AureaText.t("image3d_add"), isPresented: $choosingImage3D, titleVisibility: .visible) {
+                Button(AureaText.t("image3d_from_photos")) { pickingImage3D = true }
+                Button(AureaText.t("image3d_from_files")) {
+                    DocumentImportPicker.present(types: [.png, .webP, .image]) { urls in
+                        guard let url = urls?.first else { return }
+                        model.addImage3D(url: url); close()
+                    }
+                }
+            }
+            .sheet(isPresented: $pickingImage3D) {
+                ShellMediaPicker(selectionLimit: 1, filter: .images) { items in
+                    pickingImage3D = false
+                    if let (url, _) = items.first { model.addImage3D(url: url); close() }
+                }
+            }
         }
     }
 }

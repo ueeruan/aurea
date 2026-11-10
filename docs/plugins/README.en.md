@@ -30,6 +30,7 @@ and package, and what to do when installation refuses a plugin.
 - [12. Engine API (for UI integrators)](#12-engine-api-for-ui-integrators)
 - [13. Licences](#13-licences)
 - [14. Panels, scripts and APIs (format 2, 0.3.4)](#14-panels-scripts-and-apis-format-2-034)
+- [15. Format 3 (Plugin V3)](#15-format-3-plugin-v3)
 
 Ready-made examples in [`examples/`](examples/):
 
@@ -42,6 +43,7 @@ Ready-made examples in [`examples/`](examples/):
 | `target-3d/` → `target-3d.aureaplugin` | shader3d, 1 pass | a ring around a 3D null seen through the scene camera; `layer` parameter with `accept`; `aurea_ray` |
 | `animated-text/` → `animated-text.aureaplugin` | panel + script (0.3.4) | **Animated text generator**: panel, Home tab, layer-bar button; creates layers and keyframes |
 | `weather-text/` → `weather-text.aureaplugin` | panel + script (0.3.4) | **Weather on screen**: `fetch` from a declared public API (Open-Meteo) and creates a text |
+| `v3-showcase/` → `v3-showcase.aureaplugin` | shader + script (format 3) | curve, gradient, another layer, history, sound, `frameScript`, tabs and sections, Add menu item |
 
 ---
 
@@ -50,7 +52,7 @@ Ready-made examples in [`examples/`](examples/):
 **`"kind": "shader"`** — you write the effect in **GLSL 4.50**: a function
 `vec4 aurea_main(vec2 uv)` returning each pixel's colour. A plugin has 1 to 8
 passes (each with its own shader), intermediate textures at reduced resolution
-and up to 16 parameters. AUREA compiles the shader **on the device** at install
+and up to 252 parameters (189 for `shader3d`; 256 for `stack` and `panel`). AUREA compiles the shader **on the device** at install
 time: GLSL → SPIR-V (glslang) → the device's GPU API (Vulkan consumes SPIR-V;
 OpenGL ES gets ESSL 3.10 and Metal gets MSL, translated by SPIRV-Cross with the
 same options as the app's own shaders).
@@ -61,7 +63,7 @@ expressions (`amount * 40`). No shader: the safest kind, works on every device.
 It is how you ship a "look" with its own controls.
 
 **`"kind": "shader3d"`** (0.3.1) — a `shader` that also sees the **3D scene**:
-the composition camera and up to 4 linked layers (3D null, camera, light). Use it
+the composition camera and up to 8 linked layers (3D null, camera, light). Use it
 for effects that live in 3D space and follow the camera. See
 [3D plugins](#3d-plugins-kind-shader3d-031) in section 4.
 
@@ -119,7 +121,7 @@ UTF-8 text. Full example (from `rgb-wave`):
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `aureaPlugin` | number | yes | Format version. This app reads **`1`**. |
+| `aureaPlugin` | number | yes | Format version. This app reads **`1`** and **`2`**. |
 | `id` | text | yes | Unique reverse-domain identity: 3–64 chars `a-z 0-9 . _ -`, not starting/ending with `.`, no `..`. E.g. `com.studio.glow`. The project stores the effect under `plugin.<id>` — **never change the id** of a published plugin. |
 | `version` | text | yes | `x.y.z` (each part 0..99999). Re-installing the same `id` with an **equal or newer** version replaces it; older is refused. |
 | `author` | text | no | Author (up to 128). |
@@ -258,7 +260,7 @@ semantics:
 | `aurea.time` | `vec4` | `x` = seconds, `y` = frame (fractional under motion blur), `z` = composition fps. Layer time (0 at the layer start). |
 | `aurea.layer` | `vec4` | `xy` = layer size in px; `zw` = **texels per layer px in this pass** (1 for a natural-size export, 0.25 in a 1/4 preview or a `scale: 0.25` pass). |
 | `aurea.region` | `vec4` | The area `uv` 0..1 covers, in layer px: `xy` = origin, `zw` = size. Without `margin` it is the layer box (`0, 0, width, height`). |
-| `aurea.params[16]` | `vec4[16]` | Parameter values, one `vec4` each, in `plugin.json` order. Use the macros below. |
+| `aurea.params[N]` | `vec4[N]` | Parameter values, one `vec4` each, in `plugin.json` order (`N` = declared parameters, up to 252 (189 for `shader3d`)). Use the macros below. |
 | `<parameter id>` | macro | `#define amount (aurea.params[0].x)` — the value already converted (table in section 3). `color` = `aurea.params[i]` (vec4), `point` = `aurea.params[i].xy`. |
 | `AUREA_PI` | `const float` | π. |
 | `aurea_srgb_to_linear(x)`, `aurea_linear_to_srgb(x)` | `float`/`vec3` | The sRGB curve (IEC 61966-2-1), identical to the engine's. |
@@ -316,7 +318,7 @@ A 3D plugin is a `shader` that can also see the **3D scene**:
 
 - the **scene camera**: the composition's active camera, or the default camera
   when there is none;
-- the **world** of up to **4 linked layers**, chosen through `layer`
+- the **world** of up to **8 linked layers**, chosen through `layer`
   parameters: a **3D null** as a target or pivot, a **camera**, a **light**.
 
 With that the shader can work in 3D: cast the camera ray through each pixel,
@@ -359,7 +361,7 @@ expressions, and the test frame at install time.
 
 #### What the shader receives
 
-The `aurea` block gains these fields **after** `params[16]`. Nothing before
+The `aurea` block gains these fields **after** `params[N]`. Nothing before
 them changes, so a 2D shader pasted into a `shader3d` plugin keeps working:
 
 | Symbol | Type | Contents |
@@ -370,9 +372,9 @@ them changes, so a 2D shader pasted into a `shader3d` plugin keeps working:
 | `aurea.camera` | `vec4` | `xyz` camera position in the world; `w` = 1 camera layer, 0 default camera |
 | `aurea.lens` | `vec4` | `x` vertical field of view (rad), `y` near plane (px), `z` aspect (width/height), `w` focal length in px |
 | `aurea.comp` | `vec4` | `xy` composition size (px), `zw` = 1/xy |
-| `aurea.layerWorld[4]` | `mat4` | world ← px of each linked layer (parents included) |
-| `aurea.layerPos[4]` | `vec4` | `xyz` the linked layer's anchor point in the world; `w` = 1 linked, 0 no layer |
-| `aurea.layerInfo[4]` | `vec4` | `x` kind (6 null, 8 camera, 9 light; anything else = another layer), `y` field of view (rad) for a camera, `z` = 1 if the layer is 3D |
+| `aurea.layerWorld[8]` | `mat4` | world ← px of each linked layer (parents included) |
+| `aurea.layerPos[8]` | `vec4` | `xyz` the linked layer's anchor point in the world; `w` = 1 linked, 0 no layer |
+| `aurea.layerInfo[8]` | `vec4` | `x` kind (6 null, 8 camera, 9 light; anything else = another layer), `y` field of view (rad) for a camera, `z` = 1 if the layer is 3D |
 
 Helpers (only in `shader3d`; the header defines `AUREA_SCENE3D 1`):
 
@@ -459,7 +461,7 @@ Other common recipes:
 
 - The test frame at install time runs with the default camera and no linked
   layer. Handle the `aurea_layer_valid(...) == false` case.
-- The 3D block takes 944 of the 1024 parameter bytes per pass; all 16
+- The 3D block takes up to 2096 of the 4096 parameter bytes per pass; all 64
   parameters are still available.
 - There is no access to 3D models, meshes or the scene depth: the plugin sees
   the camera and the linked layers, not the geometry.
@@ -554,7 +556,7 @@ not creativity.
 | Limit | Value | Why |
 | --- | --- | --- |
 | Passes | 32 | Every pass is a texture and a memory round trip; memory bandwidth is the bottleneck on mobile GPUs. Use `scale` on intermediate passes. |
-| Parameters | 64 | The block is packed: only the declared parameters are uploaded per pass (up to 4 KB in the engine). |
+| Parameters | 252 in `shader`, 189 in `shader3d`, 256 in `stack` and panels | The block is packed: only the declared parameters are uploaded per pass (up to 4 KB in the engine). |
 | Inputs + textures per pass | 11 + the source | 12 texture slots per pass in the engine. |
 | Package images (`textures`) | 8, up to 64 MB and 8192 px each | Kept decoded in RAM and on the GPU while the effect is in use. |
 | Linked layers (`layer`) | 8, `shader3d` only | Each layer's world travels in the parameter block. |
@@ -628,7 +630,7 @@ value from your package. The meaning of each:
 | `pacote maior que 512 MB` | Remove files the plugin does not use. |
 | `plugin.json ausente no pacote` / `plugin.json ausente ou ilegivel no pacote` | `plugin.json` must be at the ZIP root (or in a single subfolder). |
 | `plugin.json invalido: <detail>` | Malformed JSON (trailing comma, quotes). |
-| `plugin.json: falta "aureaPlugin": 1 (versao do formato)` / `... nao suportado (este app le a versao 1 do formato)` | Declare `"aureaPlugin": 1`. |
+| `plugin.json: falta "aureaPlugin": 1 (versao do formato)` / `... nao suportado (este app le as versoes 1 e 2 do formato)` | Declare `"aureaPlugin": 1` or `2`. |
 | `plugin.json: "id" invalido "<id>": use 3 a 64 caracteres a-z, 0-9, '.', '_' ou '-' (ex.: com.estudio.brilho)` | Lower case only; no spaces. |
 | `plugin.json: "version" deve ser "x.y.z" (ex.: "1.0.0")` | — |
 | `plugin.json: "kind" deve ser "shader", "shader3d" ou "stack"` | — |
@@ -645,7 +647,7 @@ value from your package. The meaning of each:
 | `plugin.json: o ultimo passe nao tem "target": ele e a saida do efeito` | Remove the last pass's `target`. |
 | `plugin.json: passe <n>: "scale" deve estar entre 0.125 e 1` | — |
 | `plugin.json: passe <n>: entrada "<name>" le "<x>", que nao e "source" nem o target de um passe anterior` | A pass only reads targets of **earlier** passes. |
-| `plugin.json: "margin" deve estar entre 0 e 1024 (px da camada)` | — |
+| `plugin.json: "margin" deve estar entre 0 e 4096 (px da camada)` | — |
 | `passe <n>: caminho de shader invalido "<file>"` | Relative path, no `..`, `:` or leading `/`. |
 | `passe <n>: arquivo de shader ausente: <file>` | File missing from the package (case matters). |
 | `passe <n>: <file> maior que 1 MB` | — |
@@ -796,10 +798,10 @@ same `.aureaplugin`, with `"aureaPlugin": 2`.
 | --- | --- |
 | `aureaPlugin` | `2`. An older app (format 1 only) refuses it with "format version not supported". `ui`, `script`, `permissions` and `strings` with `1` are refused. |
 | `kind` | `"panel"` (new: no effect, only interface and script) or the effect kinds (`shader`, `shader3d`, `stack`), which may now also carry an interface and a script. |
-| `script` | A `.js` file in the package (up to 512 KB). Its syntax is checked on install: an error refuses the package with `file:line:column`. |
+| `script` | A `.js` file in the package (up to 8 MB). Its syntax is checked on install: an error refuses the package with `file:line:column`. |
 | `permissions` | What the plugin asks for (section 14.6). Unknown fields are refused. |
 | `strings` | Script texts per language (`app.t("key", ...)`, with `{0}`, `{1}`...). Up to 512 keys per language. |
-| `ui` | `panels` (up to 8) and `actions` (up to 16). |
+| `ui` | `panels` (up to 32) and `actions` (up to 128). |
 
 Every text (`title`, `label`, `options`, `placeholder`, `text`) takes plain text or
 a language → text object, like `name`, with the fallback order of section 3. Size
@@ -831,7 +833,7 @@ limits count **characters** (Hindi, Russian and Arabic count the same as English
   cube lightbulb wrench book flag grid camera chart sliders eye folder link speed
   waveform`. Any other name is refused.
 - **`onOpen`**: function called when the panel opens (optional).
-- **`controls`**: 1 to 32. Control ids are unique across the whole plugin (the
+- **`controls`**: 1 to 256. Control ids are unique across the whole plugin (the
   script reads them with `ui.get("id")`).
 
 | `type` | Fields | Value (`ui.get`) | Event |
@@ -1115,3 +1117,140 @@ Android: `AureaEngine.kt` (`inspectPlugin`, `setPluginEnabled`,
 `pluginReload`, `installPluginHost`); I/O in `effects/PluginHost.kt`; the interface
 in `effects/PluginRuntime.kt` and `effects/PluginUi.kt`. iOS: `AureaEngine.h` (same
 names, `installPluginHost` and the `pluginPickFile` block) and `PluginsV2.swift`.
+
+---
+
+## 15. Format 3 (Plugin V3)
+
+With `"aureaPlugin": 3` a plugin gets curve, gradient and layer parameters, frame
+history, sound, a per-frame script, a tree UI, fullscreen panels and the ability
+to replace editor panels. Everything is still **declared**: AUREA's own components
+draw it on both platforms. There are no downloaded binaries and no HTML. Formats
+1 and 2 keep working unchanged.
+
+The [`examples/v3-showcase/`](examples/v3-showcase/) example uses nearly all of this.
+
+### 15.1 New parameters
+
+Only in `"kind": "shader"` or `"shader3d"` plugins with format 3.
+
+| `type` | In the panel | In the shader |
+| --- | --- | --- |
+| `curve` | curve editor (master, R, G, B) | `float id(float t)`; takes 16 slots |
+| `gradient` | gradient editor (up to 16 colors) | `vec4 id(float t)`, linear RGBA; takes 32 slots |
+| `layerImage` | layer picker | `sampler2D id` and `bool id_connected`; takes 1 sampler |
+
+`layerImage` arrives at composition size, with the chosen layer's effects and
+transforms applied. With no layer, `id_connected` is false and the sampler returns
+the effect input. Slots count against the parameter limit (252 in `shader`, 189 in
+`shader3d`), and samplers count against the input limit.
+
+### 15.2 `uses`: history and sound
+
+```json
+"uses": ["history", "audio"]
+```
+
+| Request | What the shader gets |
+| --- | --- |
+| `history` | `sampler2D aurea_history` (the previous frame's result) and the `AUREA_HISTORY` macro |
+| `audio` | `sampler2D aurea_audio_spectrum`, `float aurea_audio(float band)` (band 0 to 1), `float AUREA_AUDIO_PEAK` and the `AUREA_AUDIO` macro |
+
+### 15.3 Per-frame script (`frameScript`)
+
+```json
+"frameScript": "frame.js"
+```
+
+```js
+function onFrame(f) {
+  // f.time (s), f.frame, f.fps, f.progress (0..1 in the clip), f.params
+  return { amount: 0.5 + 0.5 * Math.sin(f.time * 3) };
+}
+```
+
+Return an object with the ids you want to change: a number, or a list for colors
+and points. Anything left out keeps the panel value. The script cannot reach the
+project and `Math.random` repeats per frame, so preview and export match.
+
+Limits per frame: 500,000 steps, 8 ms and 8 MB. Three failures in a row turn the
+script off until the app reopens; the effect keeps running with the panel values.
+
+### 15.4 Tree UI
+
+Four controls hold others in `children`, up to 6 levels:
+
+| `type` | What it does |
+| --- | --- |
+| `row` | side by side, sharing the width |
+| `column` | stacked |
+| `section` | title that opens and closes; `"collapsed": true` starts closed |
+| `tabs` | tabs; children must be `section` |
+
+Ids are unique across the whole tree, and a repeated id refuses the plugin.
+`ui.setVisible` and `ui.setEnabled` on a container apply to everything inside.
+
+### 15.5 New places and replacing panels
+
+| Where | Field |
+| --- | --- |
+| Fullscreen in the editor | panel with `"placement": "editor.fullscreen"` (the close button belongs to the app) |
+| Add's Element grid | action with `"placement": "add.menu"` |
+| Replace a panel | panel with `"replaces"` and `"placement": "editor.panel"` |
+
+`replaces` accepts `transform`, `effects`, `blend`, `presets` and `material`. The
+app **always** shows "Back to original" above the plugin's panel, outside the
+plugin's control. The choice is stored per panel, and the plugin manager has the
+switch to use the plugin's panel again.
+
+### 15.6 Script: expressions, ease, text and masks
+
+All of it joins the call's undo step.
+
+```js
+var o = layer.opacity;
+o.expression = "wiggle(2, 10)";        // "" removes it
+o.expressionEnabled = false;
+o.expressionError;                     // error text, "" when fine
+
+o.setTemporalEaseAtKey(2, [new KeyframeEase(0, 33)], [new KeyframeEase(0, 66)]);
+o.keyInTemporalEase(2);                // [{speed, influence}]
+o.keyOutTemporalEase(2);
+
+var doc = text.sourceText.value;       // {text, font, fontSize, fillColor}
+doc.text = "New";
+doc.fontSize = 80;
+text.property("Source Text").setValue(doc);
+
+var m = layer.addMask({vertices: [[0, 0], [100, 0], [100, 100]], closed: true});
+m.feather = 8;
+m.expansion = 2;
+m.opacity = 50;                        // 0 to 100
+m.inverted = true;
+m.mode = "subtract";                   // add, subtract, intersect, difference, none
+m.path = {vertices: [...], inTangents: [...], outTangents: [...], closed: true};
+layer.masks;                           // list
+m.remove();
+```
+
+`mask.path` reads the stored shape; on an animated path, writing records a key at
+the playhead. `font` is read-only.
+
+### 15.7 Safe mode
+
+If the app opens and crashes twice in a row, the next launch turns plugins off and
+the manager explains why. The **Safe mode** switch in the manager does the same by
+hand. Plugins stay listed, and projects using their effects keep those effects for
+when safe mode ends.
+
+Engine: `plugins_safe_mode()`, `plugins_safe_mode_automatic()`,
+`set_plugins_safe_mode(on)` and `mark_plugins_healthy()`. The app marks a launch
+as good when it goes to the background or after 15 s in the editor. The gradient
+panel uses `query_effect_gradient` and `set_effect_gradient`.
+
+### 15.8 What format 3 does not do
+
+- **Package signing:** none yet; installing is at the installer's own risk. It
+  needs a key and a store service.
+- **GPU time per frame:** not measured on phones. There is the install-time render
+  test and the `frameScript` budget.

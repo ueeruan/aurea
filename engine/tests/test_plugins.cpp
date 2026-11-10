@@ -248,18 +248,22 @@ AUREA_TEST(Plugins, ManifestValidationNamesFieldAndReason) {
                                     + (i < 32 ? ",\"target\":\"t" + std::to_string(i) + "\"" : "") + "}";
     nine += "]}";
     std::string many = "{\"aureaPlugin\":1,\"id\":\"com.x.many\",\"version\":\"1.0.0\",\"name\":\"N\",\"kind\":\"shader\",\"params\":[";
-    for (int i = 0; i < 65; ++i) many += std::string(i ? "," : "") + "{\"id\":\"p" + std::to_string(i) + "\",\"type\":\"float\"}";
+    for (int i = 0; i < 253; ++i) many += std::string(i ? "," : "") + "{\"id\":\"p" + std::to_string(i) + "\",\"type\":\"float\"}";
     many += "],\"passes\":[{\"shader\":\"a.frag\"}]}";
+    std::string many3d = "{\"aureaPlugin\":1,\"id\":\"com.x.many3d\",\"version\":\"1.0.0\",\"name\":\"N\",\"kind\":\"shader3d\",\"params\":[";
+    for (int i = 0; i < 190; ++i) many3d += std::string(i ? "," : "") + "{\"id\":\"p" + std::to_string(i) + "\",\"type\":\"float\"}";
+    many3d += "],\"passes\":[{\"shader\":\"a.frag\"}]}";
     const Case cases[] = {
         {one_pass_manifest("AB"), "\"id\" invalido"},
         {one_pass_manifest("Com.Upper.Case"), "\"id\" invalido"},
         {one_pass_manifest("com.x.ver", "1.0"), "\"version\""},
         {nine, "33 passes (limite 32)"},
-        {many, "65 parametros (limite 64)"},
+        {many, "253 parametros (limite 252)"},
+        {many3d, "190 parametros (limite 189)"},
         {one_pass_manifest("com.x.res", "1.0.0", "a.frag", "{\"id\":\"mix\",\"type\":\"float\"}"), "id invalido"},
         {one_pass_manifest("com.x.enum", "1.0.0", "a.frag", "{\"id\":\"mode\",\"type\":\"enum\"}"), "options"},
         {one_pass_manifest("com.x.type", "1.0.0", "a.frag", "{\"id\":\"q\",\"type\":\"vec9\"}"), "tipo desconhecido"},
-        {"{\"aureaPlugin\":3,\"id\":\"com.x.fmt\",\"version\":\"1.0.0\",\"name\":\"N\",\"kind\":\"shader\"}", "versoes 1 e 2"},
+        {"{\"aureaPlugin\":4,\"id\":\"com.x.fmt\",\"version\":\"1.0.0\",\"name\":\"N\",\"kind\":\"shader\"}", "versoes 1, 2 e 3"},
         {"{\"aureaPlugin\":1,\"id\":\"com.x.kind\",\"version\":\"1.0.0\",\"name\":\"N\",\"kind\":\"compute\"}", "\"kind\""},
         {"{\"aureaPlugin\":1,\"id\":\"com.x.tgt\",\"version\":\"1.0.0\",\"name\":\"N\",\"kind\":\"shader\","
          "\"passes\":[{\"shader\":\"a.frag\",\"target\":\"x\"}]}", "ultimo passe"},
@@ -420,7 +424,7 @@ AUREA_TEST(Plugins, CompileErrorReportsFileAndLine) {
 
 AUREA_TEST(Plugins, ShadersTranslateForGlesAndMetal) {
     // O mesmo tradutor dos backends GLES (ESSL 3.10) e Metal (MSL 2.1).
-    for (const char* folder : {"rgb-wave", "soft-glow", "target-3d"}) {
+    for (const char* folder : {"rgb-wave", "soft-glow", "target-3d", "v3-showcase"}) {
         const fs::path root = fs::path(examples()) / folder;
         plugins::Manifest m;
         std::string err;
@@ -1209,7 +1213,7 @@ AUREA_TEST(PluginsGpu, ProjectKeepsPluginEffectWithoutThePluginAndRestoresOnRein
 AUREA_TEST(PluginsGpu, EveryExamplePluginRendersFiniteInTheCatalogPreview) {
     AUREA_REQUIRE_PLUGIN_GPU();
     for (const char* p : {"rgb-wave.aureaplugin", "soft-glow.aureaplugin", "dream-look.aureaplugin", "pulse-vignette.fs",
-                          "target-3d.aureaplugin", "film-look.aureaplugin"})
+                          "target-3d.aureaplugin", "film-look.aureaplugin", "v3-showcase.aureaplugin"})
         ensure_installed(p);
     const auto list = plugin_rig().manager->list();
     AUREA_CHECK(list.size() >= 4u);
@@ -1243,3 +1247,60 @@ AUREA_TEST(PluginsGpu, PackageTexturesReachTheShaderThroughGetFile) {
 }
 
 #endif // AUREA_TEST_VULKAN
+
+AUREA_TEST(PluginsGpu, FrameScriptChangesTheFrameAndTablesReachTheShader) {
+    AUREA_REQUIRE_PLUGIN_GPU();
+    const fs::path pluginDir = fresh_dir("v3-frame");
+    Engine e;
+    EngineConfig ec;
+    ec.backend = new vk::Backend();
+    ec.backendConfig.enableValidation = false;
+    ec.disableAutosave = true;
+    ec.workerCount = 2;
+    ec.pluginDirectory = str(pluginDir);
+    AUREA_CHECK(e.initialize(ec).ok());
+    if (!e.gpu()) { e.shutdown(); return; }
+    const auto installed = e.install_plugin((examples() + "/v3-showcase.aureaplugin").c_str());
+    AUREA_CHECK_MSG(installed.ok(), std::string(installed.status().detail()).c_str());
+    if (!installed.ok()) { e.shutdown(); return; }
+    AUREA_CHECK(e.new_project(64, 32, 30.0, "v3").ok());
+    const auto shape = e.add_shape(0);
+    AUREA_CHECK(shape.ok());
+    if (!shape.ok()) { e.shutdown(); return; }
+    Composition* comp = e.project()->timeline().composition(e.project()->timeline().root());
+    Layer* l = comp->layer(LayerId::unpack(*shape));
+    l->shape.bounds = Rect{0, 0, 64, 32};
+    l->shape.fillColor = Vec4{1, 0, 0, 1};
+    l->transform.anchor = Vec3{32, 16, 0};
+    l->transform.position = Vec3{32, 16, 0};
+    EffectInstance fx;
+    fx.id = l->alloc_effect_id();
+    fx.type = effect_type_id("plugin.com.aurea.examples.v3showcase");
+    initialize_instance(fx, *e.effects().params(fx.type));
+    AUREA_CHECK_EQ(fx.curves.size(), 1u);
+    AUREA_CHECK_EQ(fx.gradients.size(), 1u);
+    l->effects.push_back(fx);
+    e.project()->mark_dirty();
+    const auto at = [&](i64 frame) {
+        Command c;
+        c.type = CommandType::PlaybackSeek;
+        c.seek.time = tick_at(FrameIndex{frame}, 30.0);
+        AUREA_CHECK(e.apply_command(c).ok());
+        std::vector<u8> rgba;
+        u32 w = 0, h = 0;
+        AUREA_CHECK(e.capture_frame_rgba(64, rgba, w, h).ok());
+        return rgba;
+    };
+    const std::vector<u8> a = at(0), b = at(15), again = at(0);
+    int moved = 0, repeated = 0;
+    AUREA_CHECK(a.size() == b.size() && a.size() == again.size() && !a.empty());
+    for (usize i = 0; i < a.size() && i < b.size() && i < again.size(); ++i) {
+        moved = std::max(moved, std::abs(static_cast<int>(a[i]) - static_cast<int>(b[i])));
+        repeated = std::max(repeated, std::abs(static_cast<int>(a[i]) - static_cast<int>(again[i])));
+    }
+    std::printf("\n    frameScript: mudou %d, voltou %d", moved, repeated);
+    AUREA_CHECK_MSG(moved > 20, "o frameScript deve mudar o quadro");
+    e.shutdown();
+    std::error_code ec2;
+    fs::remove_all(pluginDir, ec2);
+}

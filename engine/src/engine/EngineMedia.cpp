@@ -636,6 +636,20 @@ std::string Engine::layer_source_path(u64 layerId) noexcept {
     return a && !a->sourcePath.empty() ? resolve_asset_path(a->sourcePath) : std::string{};
 }
 
+Status Engine::project_file_plugins(const char* path, std::vector<package::PluginFile>& out) noexcept {
+    out.clear();
+    if (!path || !*path) return Errc::InvalidArgument;
+    std::vector<PluginRef> refs;
+    const Status s = package::list_plugins(path, refs);
+    if (!s.ok() || !plugins_) return s;
+    for (const PluginRef& ref : refs) {
+        plugins::PluginInfo info;
+        // Faltando aqui, o plugin só não vai junto: o projeto segue exportável.
+        if (plugins_->find(ref.id, info) && !info.directory.empty()) out.push_back({info.id, info.version, info.directory});
+    }
+    return OkStatus;
+}
+
 Status Engine::project_file_media(const char* path, std::vector<package::MediaRef>& out) noexcept {
     if (!path || !*path) return Errc::InvalidArgument;
     const Status s = package::list_media(path, out);

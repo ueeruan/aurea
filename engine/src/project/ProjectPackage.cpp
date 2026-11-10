@@ -15,6 +15,7 @@
 #include "aurea/project/Serialization.hpp"
 #include "aurea/scene3d/Shape3D.hpp"
 #include "aurea/scene3d/Text3D.hpp"
+#include "aurea/scene3d/Image3D.hpp"
 #include "ufbx.h"
 
 #include <algorithm>
@@ -493,8 +494,13 @@ Status list_media(const std::string& aureaPath, std::vector<MediaRef>& out) noex
                 for (const auto& part : shape.parts) add(AssetKind::Image, part.image, {});
                 return;
             }
+            scene3d::Image3DSpec image3d;
+            if (scene3d::decode_image3d(a.sourcePath, image3d)) {
+                add(AssetKind::Image, image3d.imagePath, {});
+                return;
+            }
             if (a.sourcePath.rfind(scene3d::kShape3DScheme, 0) == 0 ||
-                a.sourcePath.rfind(scene3d::kText3DScheme, 0) == 0) return;
+                scene3d::is_rebuildable_mesh_source(a.sourcePath)) return;
         }
         if (packable(a.kind)) add(a.kind, a.sourcePath, a.originalFilename.empty() ? a.name : a.originalFilename);
     });
@@ -506,9 +512,40 @@ Status list_media(const std::string& aureaPath, std::vector<MediaRef>& out) noex
     return OkStatus;
 }
 
+Status list_plugins(const std::string& aureaPath, std::vector<PluginRef>& out) noexcept {
+    out.clear();
+    Project p;
+    if (const Status s = load_project(p, aureaPath); !s.ok()) return s;
+    out = p.plugin_refs();
+    return OkStatus;
+}
+
+namespace {
+/// O plugin instalado de volta num `.aureaplugin`, sem o cache de shaders de
+/// quem exportou (depende do aparelho e o instalador recompila).
+Status zip_plugin_directory(const std::string& directory, const std::string& outPath) noexcept {
+    File out(fileio::open_file(outPath, "wb"));
+    if (!out.f) return Status{Errc::IoError, "destino"};
+    ZipWriter zip(out.f);
+    const fs::path root = fs::u8path(directory);
+    std::error_code ec;
+    for (fs::recursive_directory_iterator it(root, ec), last; !ec && it != last; it.increment(ec)) {
+        if (!it->is_regular_file(ec)) continue;
+        std::string name = utf8_of(fs::relative(it->path(), root, ec));
+        std::replace(name.begin(), name.end(), '\\', '/');
+        if (ec || name.empty() || name.rfind(".cache/", 0) == 0) continue;
+        File src(fileio::open_file(utf8_of(it->path()), "rb"));
+        if (!src.f) return Status{Errc::IoError, "arquivo do plugin"};
+        if (const Status s = zip.add_file(name, src.f); !s.ok()) return s;
+    }
+    if (ec) return Status{Errc::IoError, "pasta do plugin"};
+    return zip.finish();
+}
+} // namespace
+
 Status write_package(const std::string& aureaPath, const std::string& outPath, const std::string& title,
                      const std::string& appVersion, const std::vector<MediaFile>& media,
-                     ExportResult* result) noexcept {
+                     ExportResult* result, const std::vector<PluginFile>& plugins) noexcept {
     std::lock_guard<std::mutex> writeLock(packageWriteMutex);
     // Projeto que não abre sai assim mesmo, em modo de resgate: sem isto a pessoa
     // não tem como tirar o arquivo do aparelho, e é ele que permite recuperar. Vai
@@ -551,6 +588,22 @@ Status write_package(const std::string& aureaPath, const std::string& outPath, c
         if (!s.ok()) break;
         manifest += "media " + escape(entry) + "\t" + escape(m->stored) + "\n";
         ++r.included;
+    }
+    for (const PluginFile& plugin : plugins) {
+        if (!s.ok()) break;
+        const std::string packed = tmp + ".plugin";
+        // Um plugin que não empacota não derruba a exportação do projeto.
+        if (zip_plugin_directory(plugin.directory, packed).ok()) {
+            const std::string entry = "plugins/" + safe_file_name(plugin.id + "-" + plugin.version) + ".aureaplugin";
+            File src(fileio::open_file(packed, "rb"));
+            if (src.f) {
+                s = zip.add_file(entry, src.f);
+                if (s.ok()) manifest += "plugin " + escape(entry) + "\t" + escape(plugin.id) + "\t" + escape(plugin.version) + "\n";
+            }
+        } else {
+            ++r.skipped;
+        }
+        fileio::remove_file(packed);
     }
     if (s.ok()) s = zip.add_file(kProjectEntry, project.f);
     if (s.ok() && damaged) {
@@ -632,6 +685,12 @@ Status relink_media(const std::string& aureaPath,
                 bool partsChanged = false;
                 for (auto& part : shape.parts) partsChanged = relink(part.image) || partsChanged;
                 if (partsChanged) { a.sourcePath = scene3d::encode_shape3d(shape); changed = true; }
+            } else {
+                scene3d::Image3DSpec image3d;
+                if (scene3d::decode_image3d(a.sourcePath, image3d) && relink(image3d.imagePath)) {
+                    a.sourcePath = scene3d::encode_image3d(image3d);
+                    changed = true;
+                }
             }
         }
         if (!changed) return;
@@ -733,6 +792,8 @@ Status read_package(const std::string& packagePath, const std::string& projectOu
 
     // Primeira linha: "aurea-project <versão>".
     std::vector<std::pair<std::string, std::string>> mediaLines;   // entrada → caminho gravado
+    struct PluginLine { std::string entry, id, version; };
+    std::vector<PluginLine> pluginLines;
     {
         usize pos = 0;
         bool first = true;
@@ -757,6 +818,11 @@ Status read_package(const std::string& packagePath, const std::string& projectOu
             else if (line.rfind("media ", 0) == 0) {
                 const usize tab = line.find('\t', 6);
                 if (tab != std::string::npos) mediaLines.emplace_back(unescape(line.substr(6, tab - 6)), unescape(line.substr(tab + 1)));
+            } else if (line.rfind("plugin ", 0) == 0) {
+                const usize first = line.find('\t', 7);
+                const usize second = first == std::string::npos ? first : line.find('\t', first + 1);
+                if (second != std::string::npos)
+                    pluginLines.push_back({unescape(line.substr(7, first - 7)), unescape(line.substr(first + 1, second - first - 1)), unescape(line.substr(second + 1))});
             }
         }
     }
@@ -768,6 +834,7 @@ Status read_package(const std::string& packagePath, const std::string& projectOu
         fileio::remove_file(projectOut);
         std::error_code e2;
         for (const std::string& d : createdSequenceDirs) if (fs::is_empty(fs::u8path(d), e2)) fs::remove(fs::u8path(d), e2);
+        if (fs::is_empty(fs::u8path(mediaDir) / "plugins", e2)) fs::remove(fs::u8path(mediaDir) / "plugins", e2);
         if (fs::is_empty(fs::u8path(mediaDir), e2)) fs::remove(fs::u8path(mediaDir), e2);
     };
 
@@ -838,6 +905,18 @@ Status read_package(const std::string& packagePath, const std::string& projectOu
         }
         written.push_back(dest);
         relink.emplace_back(stored, dest);
+    }
+    for (const PluginLine& line : pluginLines) {
+        const ZipEntry* e = find(root + line.entry);
+        if (!e || line.entry.rfind("plugins/", 0) != 0) continue;
+        const fs::path dir = fs::u8path(mediaDir) / "plugins";
+        fs::create_directories(dir, ec);
+        const std::string dest = ec ? std::string{} : free_path(dir, safe_file_name(line.entry.substr(8)));
+        if (dest.empty()) continue;
+        // Plugin ilegível não impede abrir o projeto: o efeito só fica indisponível.
+        if (!extract(f.f, *e, dest).ok()) { fileio::remove_file(dest); continue; }
+        written.push_back(dest);
+        out.plugins.push_back({line.id, line.version, dest});
     }
     u32 relinked = 0;
     if (!relink.empty()) {

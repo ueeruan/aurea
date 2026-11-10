@@ -49,6 +49,9 @@ struct MediaRef {
 /// Mídias do `.aurea` (sem abrir no editor). Só o que cabe num arquivo: vídeo,
 /// áudio, imagem, fonte, ambiente (HDRI), vetor e o arquivo do modelo 3D.
 [[nodiscard]] Status list_media(const std::string& aureaPath, std::vector<MediaRef>& out) noexcept;
+/// O mesmo de `list_media` sobre um projeto já lido (a limpeza de armazenamento
+/// lê também as cópias .bak/.tmp e o projeto aberto em memória). Acrescenta a `out`.
+void collect_media(const Project& project, std::vector<MediaRef>& out);
 
 /// Uma mídia a incluir: `stored` é a chave (igual à do projeto), `readable`
 /// é de onde ler agora (no Android pode ser `/proc/self/fd/N`).

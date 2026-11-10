@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: export que termina com aviso em vez de parar (E1) e partida com prazo (E4). -->
+<resources>
+    <string name="export_note_elements_omitted">Satu elemen yang tidak bisa digambar di perangkat ini tidak masuk ke video, sama seperti di pratinjau.</string>
+    <string name="eng_media_open_timeout">satu file proyek terlalu lama dibuka (mungkin hanya ada di cloud). Buka file itu di perangkat lalu coba lagi</string>
+</resources>

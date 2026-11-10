@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: export que termina com aviso em vez de parar (E1) e partida com prazo (E4). -->
+<resources>
+    <string name="export_note_elements_omitted">Элемент, который не удалось отрисовать на этом устройстве, не вошёл в видео — как и в предпросмотре.</string>
+    <string name="eng_media_open_timeout">файл проекта слишком долго открывался (возможно, он есть только в облаке). Откройте его на устройстве и попробуйте снова</string>
+</resources>

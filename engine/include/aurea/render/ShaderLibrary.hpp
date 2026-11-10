@@ -33,6 +33,7 @@
 #include "aurea/render/GPUBackend.hpp"
 #include "aurea/shaders/ShaderIds.hpp"
 
+#include <atomic>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -159,6 +160,12 @@ public:
 
     /// Compila antecipadamente. Devolve quantos foram criados agora.
     u32 prewarm(const PipelineKey* keys, u32 count) noexcept;
+    /// 0.5.2 (E4): o pré-aquecimento para entre um pipeline e o próximo quando
+    /// `*abort` fica verdadeiro (prévia: o export começou; export: cancelar).
+    /// Numa GPU lenta para compilar (PowerVR GE8320) a lista inteira segurava
+    /// o renderMutex_ por dezenas de segundos e a partida do export esperava
+    /// sem cancelar. O que não foi compilado compila no primeiro uso.
+    void set_abort(const std::atomic<bool>* abort) noexcept { abort_ = abort; }
 
     /// A partir daqui, toda criação de pipeline conta como "durante o
     /// playback" — o painel DEV mostra, e o número certo é zero.
@@ -243,6 +250,7 @@ private:
     u32 failures_ = 0;
     u32 compilesSinceMark_ = 0;
     bool steady_ = false;
+    const std::atomic<bool>* abort_ = nullptr;   ///< set_abort
     PipelineCreationProbe pipelineProbe_ = nullptr;
     void* pipelineProbeContext_ = nullptr;
     std::string lastError_;

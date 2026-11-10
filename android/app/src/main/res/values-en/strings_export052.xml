@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: export que termina com aviso em vez de parar (E1) e partida com prazo (E4). -->
+<resources>
+    <string name="export_note_elements_omitted">An element that could not be drawn on this device was left out of the video, as in the preview.</string>
+    <string name="eng_media_open_timeout">a project file took too long to open (it may be in the cloud only). Open it on the device and try again</string>
+</resources>

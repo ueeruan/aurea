@@ -1042,7 +1042,12 @@ const GpuModel* SceneRenderer::model(u64 assetKey, const SceneAsset& asset) noex
     if (e.model) return e.model.get();
     const u64 now = static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count());
-    if (e.failed || !gpu_ || now < e.retryAfterNs) { mark_incomplete(__FILE__, __LINE__); return nullptr; }
+    // 0.5.2 (E1): o modelo que falhou de vez (`failed`) não volta nesta
+    // sessão: "indisponível", não "incompleto". Antes todo quadro com ele
+    // ficava incompleto para sempre e o export parava nele em todo degrau. A
+    // espera curta depois de falta de memória (retryAfterNs) segue incompleta.
+    if (e.failed || !gpu_) { mark_unavailable(__FILE__, __LINE__); return nullptr; }
+    if (now < e.retryAfterNs) { mark_incomplete(__FILE__, __LINE__); return nullptr; }
     auto m = std::make_unique<GpuModel>();
     if (const Status s = m->upload(*gpu_, asset); !s.ok()) {
         AUREA_LOG_ERROR("3D: upload do modelo falhou: %s", s.message().data());
@@ -1052,7 +1057,8 @@ const GpuModel* SceneRenderer::model(u64 assetKey, const SceneAsset& asset) noex
         e.failed = s.code() != Errc::OutOfDeviceMemory && s.code() != Errc::OutOfMemory
             && s.code() != Errc::BudgetExceeded && s.code() != Errc::Timeout;
         e.retryAfterNs = now + 500'000'000ull;
-        mark_incomplete(__FILE__, __LINE__);
+        if (e.failed) mark_unavailable(__FILE__, __LINE__);
+        else mark_incomplete(__FILE__, __LINE__);
         return nullptr;
     }
     AUREA_LOG_INFO("3D: modelo na GPU (%.1f MB geometria, %.1f MB texturas)", m->geometryBytes / 1048576.0,
@@ -1790,7 +1796,12 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             buildModels.emplace(inst.assetKey, instanceModels[i]);
             if (auto it = models_.find(inst.assetKey); it != models_.end()) it->second.lastFrame = frameNumber;
         }
-        if (!instanceModels[i]) mark_incomplete(__FILE__, __LINE__);
+        // model() já marcou o motivo; um modelo que falhou de vez não volta a
+        // marcar o quadro incompleto aqui (0.5.2, E1).
+        if (!instanceModels[i]) {
+            const auto it = models_.find(inst.assetKey);
+            if (it == models_.end() || !it->second.failed) mark_incomplete(__FILE__, __LINE__);
+        }
     }
 
     // Juntas de todas as instâncias num SSBO só; cada desenho com skin recebe

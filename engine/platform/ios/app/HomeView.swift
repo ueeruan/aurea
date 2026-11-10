@@ -1864,6 +1864,7 @@ struct HomeSettingsDrawer: View {
     @State private var betaTaps = 0
     @State private var licenses = false
     @State private var performanceTest = false
+    @State private var storageDialog = false
     @AppStorage("home.developerTools") private var developerTools = false
     @AppStorage(FxEffectPrefs.previewsEnabledKey) private var effectPreviewsEnabled = true
     /// "Otimizar vídeos pesados" (0.2.5): modo e mídia otimizada (ProxyOptimizer.swift).
@@ -1944,6 +1945,9 @@ struct HomeSettingsDrawer: View {
                 group("settings_group_general") {
                     tapRow("settings_clear_cache", subtitle: AureaText.t("settings_clear_cache_note")) { model.clearHomeCaches() }
                     divider
+                    // 0.5.2: o que ocupa espaço, por tipo, e o que pode sair (StorageView.swift).
+                    tapRow("storage_title", subtitle: AureaText.t("storage_row_note"), tag: "home.drawer.storage.open") { storageDialog = true }
+                    divider
                     switchRow("settings_effect_previews", note: "settings_effect_previews_note", isOn: $effectPreviewsEnabled, tag: nil)
                     divider
                     tapRow("settings_clear_recents", subtitle: AureaText.t("settings_clear_recents_note")) {
@@ -2018,6 +2022,7 @@ struct HomeSettingsDrawer: View {
                                 .background(AureaColors.lightSurface, in: RoundedRectangle(cornerRadius: 6))
                                 .accessibilityIdentifier("dialog.field")))
             }
+            if storageDialog { StorageDialog(model: model) { storageDialog = false } }
         }
         .onAppear { hasGroqKey = !CaptionKeychain.read().isEmpty }
         .sheet(isPresented: $performanceTest) { PerformanceTestPanel() }

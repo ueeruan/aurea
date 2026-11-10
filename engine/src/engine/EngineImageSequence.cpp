@@ -9,6 +9,7 @@
 #include "aurea/Engine.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/project/FileIO.hpp"
+#include "aurea/project/MediaStorage.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -16,6 +17,8 @@
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <map>
+#include <mutex>
 #include <new>
 
 namespace aurea {
@@ -51,20 +54,39 @@ void list_files(const fs::path& dir, bool recursive, std::vector<std::string>& o
     }
 }
 
-/// Pasta do .zip extraído: a mesma para o mesmo arquivo (sondar e depois
-/// importar não extrai duas vezes; reimportar reaproveita).
-std::string archive_directory(const std::string& documents, const fs::path& archive) {
+/// Pasta do .zip extraído: a chave é o CONTEÚDO (tamanho + hash de todos os
+/// bytes), não o caminho. O Android copia o .zip escolhido para um nome novo a
+/// cada importação e o iOS para uma pasta temporária nova: com a chave antiga
+/// (caminho + data) o mesmo .zip era extraído de novo a cada vez. Sondar e
+/// depois importar o mesmo arquivo lê o hash uma vez só (memória do processo,
+/// por caminho + tamanho + data).
+Status archive_directory(const std::string& documents, const fs::path& archive, std::string& out) {
     std::error_code ec;
+    if (documents.empty()) { out = utf8_of(fs::u8path(utf8_of(archive) + ".aurea-seq")); return OkStatus; }
     const auto size = fs::file_size(archive, ec);
     const auto time = fs::last_write_time(archive, ec);
-    u64 h = 1469598103934665603ull;
-    const std::string key = utf8_of(fs::weakly_canonical(archive, ec)) + "|" + std::to_string(size) + "|"
+    const std::string seen = utf8_of(fs::weakly_canonical(archive, ec)) + "|" + std::to_string(size) + "|"
         + std::to_string(static_cast<long long>(time.time_since_epoch().count()));
-    for (unsigned char c : key) { h ^= c; h *= 1099511628211ull; }
-    char name[24];
-    std::snprintf(name, sizeof(name), "%016llx", static_cast<unsigned long long>(h));
-    if (documents.empty()) return utf8_of(fs::u8path(utf8_of(archive) + ".aurea-seq"));
-    return utf8_of(fs::u8path(documents) / "Media" / "sequences" / name);
+    static std::mutex cacheMutex;
+    static std::map<std::string, std::string> keys;
+    std::string name;
+    {
+        std::lock_guard<std::mutex> lock(cacheMutex);
+        if (const auto it = keys.find(seen); it != keys.end()) name = it->second;
+    }
+    if (name.empty()) {
+        u64 hash = 0, bytes = 0;
+        if (const Status s = storage::file_content_key(utf8_of(archive), hash, bytes); !s.ok()) return s;
+        char text[48];
+        std::snprintf(text, sizeof(text), "%016llx-%llu", static_cast<unsigned long long>(hash),
+                      static_cast<unsigned long long>(bytes));
+        name = text;
+        std::lock_guard<std::mutex> lock(cacheMutex);
+        if (keys.size() > 64) keys.clear();
+        keys[seen] = name;
+    }
+    out = utf8_of(fs::u8path(documents) / "Media" / "sequences" / name);
+    return OkStatus;
 }
 
 } // namespace
@@ -85,7 +107,8 @@ Status Engine::collect_sequence_inputs(const std::vector<std::string>& paths, st
         if (fs::is_directory(status)) { list_files(p, false, files); continue; }
         if (!fs::is_regular_file(status)) continue;
         if (lower_extension(p) == ".zip") {
-            const std::string dir = archive_directory(config_.documentsDirectory, p);
+            std::string dir;
+            if (const Status s = archive_directory(config_.documentsDirectory, p, dir); !s.ok()) return s;
             if (!fs::is_directory(fs::u8path(dir), ec)) {
                 // Extrai numa pasta temporária e só então dá o nome final: o app
                 // morto no meio não deixa uma sequência pela metade para a
@@ -96,6 +119,12 @@ Status Engine::collect_sequence_inputs(const std::vector<std::string>& paths, st
                 std::vector<std::string> extracted;
                 if (const Status s = package::extract_model_archive(raw, staging, extracted, kSequenceArchiveDiskLimit); !s.ok())
                     return s;
+                // A pasta inteira nasceu deste .zip: sai inteira (MediaStorage) e só
+                // quando nenhum projeto usa quadro nenhum dela.
+                if (!config_.documentsDirectory.empty() && !storage::mark_derived(staging)) {
+                    fs::remove_all(fs::u8path(staging), ec);
+                    return Status{Errc::IoError, "pasta da sequencia extraida"};
+                }
                 fs::rename(fs::u8path(staging), fs::u8path(dir), ec);
                 if (ec) {
                     fs::remove_all(fs::u8path(staging), ec);
@@ -185,6 +214,44 @@ Result<ImageSequenceProbe> Engine::probe_sequence_files(const std::vector<std::s
 Result<ImageSequenceProbe> Engine::probe_image_sequence(const std::vector<std::string>& paths) noexcept {
     ImageSequenceSpec spec;
     return probe_sequence_files(paths, spec);
+}
+
+namespace {
+/// Onde ficam as sequências (a mesma pasta do .zip extraído).
+std::string sequences_root(const std::string& documents) {
+    return documents.empty() ? std::string{} : utf8_of(fs::u8path(documents) / "Media" / "sequences");
+}
+} // namespace
+
+Status Engine::plan_sequence_frames(const std::vector<storage::FrameKey>& frames,
+                                    storage::FrameFolderPlan& out) noexcept try {
+    out = storage::FrameFolderPlan{};
+    const std::string root = sequences_root(config_.documentsDirectory);
+    if (root.empty()) return Status{Errc::NotSupported, "sem pasta de documentos"};
+    const Status s = storage::plan_frame_folder(root, frames, out);
+    if (s.ok())
+        AUREA_LOG_INFO("sequencia: %zu quadro(s) soltos, %s", frames.size(),
+                       out.reuse ? "pasta pronta reaproveitada (nada copiado)" : "copia nova");
+    return s;
+} catch (...) {
+    return Status{Errc::IoError};
+}
+
+Status Engine::commit_sequence_frames(const std::string& staging, std::string& directory, bool& reused) noexcept try {
+    directory.clear();
+    reused = false;
+    const std::string root = sequences_root(config_.documentsDirectory);
+    if (root.empty()) return Status{Errc::NotSupported, "sem pasta de documentos"};
+    return storage::commit_frame_folder(root, staging, directory, reused);
+} catch (...) {
+    return Status{Errc::IoError};
+}
+
+bool Engine::discard_sequence_frames(const std::string& staging) noexcept try {
+    const std::string root = sequences_root(config_.documentsDirectory);
+    return !root.empty() && storage::discard_frame_folder(root, staging);
+} catch (...) {
+    return false;
 }
 
 Result<u64> Engine::import_image_sequence(const ImageSequenceImport& request) noexcept try {

@@ -464,6 +464,11 @@ u32 distinct_media(const std::string& aureaPath) {
 Status list_media(const std::string& aureaPath, std::vector<MediaRef>& out) noexcept {
     Project p;
     if (const Status s = load_project(p, aureaPath); !s.ok()) return s;
+    collect_media(p, out);
+    return OkStatus;
+}
+
+void collect_media(const Project& p, std::vector<MediaRef>& out) {
     std::set<std::string> seen;
     const auto add = [&](AssetKind kind, const std::string& path, const std::string& name) {
         if (path.empty() || !seen.insert(path).second) return;
@@ -509,7 +514,6 @@ Status list_media(const std::string& aureaPath, std::vector<MediaRef>& out) noex
             if (layer.kind == LayerKind::Text) add(AssetKind::Font, layer.text.fontPath, {});
         });
     });
-    return OkStatus;
 }
 
 Status list_plugins(const std::string& aureaPath, std::vector<PluginRef>& out) noexcept {

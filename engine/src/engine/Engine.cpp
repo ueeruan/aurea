@@ -41,6 +41,7 @@
 #include "aurea/export/BitratePolicy.hpp"
 #include "aurea/export/ExportRules.hpp"
 #include "aurea/export/ExportAttempts.hpp"
+#include "aurea/export/ExportBoundedCall.hpp"
 #include "aurea/platform/AddressSpace.hpp"
 #include "aurea/export/ExportWatchdog.hpp"
 #include "aurea/export/ExportRecovery.hpp"
@@ -323,6 +324,28 @@ bool put_string(char* blob, u32 capacity, u32& cursor, const char* s, u32& outOf
     return true;
 }
 
+/// 0.5.2 (E4): a partida do export pega o renderMutex_ com prazo e olhando o
+/// cancelar. Antes era um lock_guard: com a prévia (ou outro dono do lock)
+/// presa no driver, a partida esperava sem fim, sem cancelar, e o relatório
+/// dizia só a última etapa marcada ("sources"). A prévia já foi avisada
+/// (exportActive_) e estaciona no fim do quadro atual; aqui só se espera ela.
+[[nodiscard]] Status lock_for_export_start(std::unique_lock<std::mutex>& lock, const std::atomic<bool>* cancel,
+                                           const std::atomic<bool>* cancelToo, u64 waitNs) noexcept {
+    const u64 until = monotonic_ns() + waitNs;
+    for (u32 tries = 0;; ++tries) {
+        if (lock.try_lock()) return OkStatus;
+        if ((cancel && cancel->load(std::memory_order_acquire)) || (cancelToo && cancelToo->load(std::memory_order_acquire)))
+            return Errc::Cancelled;
+        if (monotonic_ns() >= until) return Status{Errc::Timeout, "a previa nao liberou a GPU para a exportacao"};
+        std::this_thread::sleep_for(std::chrono::milliseconds(tries < 20 ? 1 : 5));
+    }
+}
+/// Padrões dos prazos da partida (EngineConfig::exportStart*WaitMs = 0).
+constexpr u64 kExportStartLockWaitNs = 20'000'000'000ull;
+constexpr u64 kExportStartDrainWaitNs = 30'000'000'000ull;
+/// Uma partida abandonada pela tela segura o lifecycle até a plataforma voltar.
+constexpr u64 kExportLifecycleWaitNs = 5'000'000'000ull;
+
 } // namespace
 
 // -----------------------------------------------------------------------------
@@ -482,6 +505,14 @@ struct Engine::ExportContext {
     ExportWorkerPhase hungPhase = ExportWorkerPhase::Idle;   ///< qMutex: onde travou
     /// Nível do modo de segurança desta sessão (ExportSettings::safeMode).
     u32 safeMode = 0;
+    /// 0.5.2 (E2): o degrau da escada desta sessão e onde o render parou
+    /// (segundos da timeline; < 0 = não parou no render). Vão para o
+    /// histórico da escada (ExportAttemptLedger) no fim da sessão.
+    u32 attempt = 0;
+    f64 failedAt = -1.0;
+    /// 0.5.2 (E1b): o degrau tira pixels (shortSideCap): a densidade das
+    /// camadas segue a saída (render_export_frame).
+    bool attemptMatchDensity = false;
 
     void beat() noexcept { encoderBeatNs.store(monotonic_ns(), std::memory_order_release); }
     void enter(ExportWorkerPhase p) noexcept {
@@ -691,6 +722,9 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
     renderer_.set_model_lookup(&Engine::model_lookup, this);
     renderer_.set_hdri_lookup(&Engine::hdri_lookup, this);
     renderer_.set_cube_lookup(&Engine::cube_lookup, this);
+    // 0.5.2 (E4): o pré-aquecimento da prévia para quando o export começa
+    // (ShaderLibrary::set_abort): a partida não espera a lista inteira.
+    renderer_.shaders().set_abort(&exportActive_);
     if (gpu_) {
         // O backend guarda o caminho do cache de pipeline: por padrão, o mesmo
         // diretório de cache do motor (que vive em config_, não no chamador).
@@ -744,6 +778,19 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
         // Onde cada app copia a fonte importada: Android docs/fontes, iOS docs/Media.
         text::FontManager::instance().set_imported_dirs({config.documentsDirectory + "/fontes",
                                                          config.documentsDirectory + "/Media"});
+    }
+    // 0.5.2: PreRender de uma sessão que morreu (crash, app fechado à força)
+    // nunca mais é lido — a chave é da sessão do processo — e ficava no disco
+    // até o próximo PreRender. Sai agora, na thread de limpeza do cache.
+    if (!config_.cacheDirectory.empty()) preRenderCache_->sweep_orphans(config_.cacheDirectory);
+    // Checkpoint de export que nenhum export vai continuar (ou a pausa
+    // esquecida há uma semana): o registro tem o tamanho do vídeo e só saía
+    // quando outro export começasse.
+    if (config_.enableResumableExport && (!config_.exportTemporaryDirectory.empty() || !config_.cacheDirectory.empty())) {
+        const std::string dir = export_checkpoint::directory(config_.exportTemporaryDirectory, config_.cacheDirectory, {});
+        if (const u32 removed = export_checkpoint::sweep_stale(dir, export_checkpoint::kStaleIdleSeconds,
+                                                               export_checkpoint::kStaleMaxAgeSeconds))
+            AUREA_LOG_INFO("export: %u checkpoint(s) parado(s) apagado(s) na abertura", removed);
     }
     media_.set_factory(config_.mediaFactory);
     media_.set_memory(&memory_);
@@ -10089,6 +10136,14 @@ std::string Engine::resolve_asset_path(const std::string& stored) const {
     return stored;
 }
 
+std::string Engine::resolve_media_for_storage(const std::string& stored) const {
+    // Caminho absoluto do contêiner anterior do iOS (o app atualizado muda o
+    // UUID da pasta): a abertura religa ao arquivo de agora; a limpeza também,
+    // senão a mídia em uso pareceria sem dono.
+    if (std::string moved = rebase_moved_documents(stored, config_.documentsDirectory); !moved.empty()) return moved;
+    return resolve_asset_path(stored);
+}
+
 /// Câmeras do arquivo (glTF/FBX) viram camadas de câmera na timeline (0.1.8):
 /// filhas do modelo (mover, girar ou escalar o modelo leva a câmera junto),
 /// com o movimento da animação do arquivo gravado em keyframes por quadro. A
@@ -12116,6 +12171,7 @@ Status Engine::recover_device_locked() noexcept {
     renderer_.set_model_lookup(&Engine::model_lookup, this);
     renderer_.set_hdri_lookup(&Engine::hdri_lookup, this);
     renderer_.set_cube_lookup(&Engine::cube_lookup, this);
+    renderer_.shaders().set_abort(&exportActive_);   // 0.5.2 (E4): ShaderLibrary::set_abort
     if (const Status s = renderer_.initialize(*gpu_, effectRegistry_); !s.ok()) {
         renderer_.forget_device(); gpu_->shutdown();
         return s;
@@ -15398,7 +15454,27 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
 
 Status Engine::start_export_checked(const ExportSettings& requested, const char* outputPath,
                                   const ExportRestartGuard* restartGuard, const HyperExportOverride* hyper) noexcept {
-    std::lock_guard<std::mutex> lifecycle(exportLifecycleMutex_);
+    // 0.5.2 (E4): a partida anterior que a tela abandonou (a plataforma não
+    // voltou) ainda segura o lifecycle; esta não espera sem fim por ela.
+    std::unique_lock<std::mutex> lifecycle(exportLifecycleMutex_, std::defer_lock);
+    for (const u64 until = monotonic_ns() + kExportLifecycleWaitNs; !lifecycle.try_lock();) {
+        if (monotonic_ns() >= until) return Status{Errc::Busy, "ja existe um export em andamento"};
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    // Cancelar daqui até o portão de cancelamento (StartupCancellation) existir
+    // fica em exportStartCancel_ (cancel_export); antes se perdia.
+    exportStartCancel_.store(false, std::memory_order_release);
+    exportStarting_.store(true, std::memory_order_release);
+    struct StartingMark {
+        std::atomic<bool>& starting;
+        ~StartingMark() { starting.store(false, std::memory_order_release); }
+    } startingMark{exportStarting_};
+    const u64 startLockWaitNs = config_.exportStartLockWaitMs
+        ? static_cast<u64>(config_.exportStartLockWaitMs) * 1'000'000ull : kExportStartLockWaitNs;
+    const u64 startDrainWaitNs = config_.exportStartDrainWaitMs
+        ? static_cast<u64>(config_.exportStartDrainWaitMs) * 1'000'000ull : kExportStartDrainWaitNs;
+    const u64 sourceOpenWaitNs = config_.exportSourceOpenWaitMs
+        ? static_cast<u64>(config_.exportSourceOpenWaitMs) * 1'000'000ull : kExportSourceOpenWaitNs;
     // 0.2.6: `safeMode` traz o DEGRAU da escada de tentativas
     // (export/ExportAttempts.hpp). O encoder (0..2), o codec e o upscale saem
     // daqui; o teto do lado menor e da taxa entram onde o tamanho é resolvido.
@@ -15457,13 +15533,53 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
             }
         }
     } startupOwnership{exportActive_, *this};
+    // 0.5.2 (E4): o diagnóstico desta sessão nasce ANTES da primeira espera
+    // pelo renderMutex_ (antes nascia depois dela: uma partida presa ali
+    // mostrava a sessão anterior no relatório). Se a partida desistir antes de
+    // soltar o contexto anterior, o diagnóstico anterior volta a ser o
+    // publicado: o progresso que as telas leem ainda é o daquela sessão, e o
+    // token novo faria a falha antiga parecer desta partida.
+    std::shared_ptr<ExportDiagnostics> previousDiagnostics;
+    try { ownedDiagnostics = std::make_shared<ExportDiagnostics>(); } catch (...) {}
+    {
+        std::lock_guard lock(exportDiagnosticsMutex_);
+        previousDiagnostics = exportDiagnostics_;
+        exportDiagnostics_ = ownedDiagnostics;
+    }
+    struct AdmissionDiagnostics {
+        Engine& engine;
+        std::shared_ptr<ExportDiagnostics>& previous;
+        const std::shared_ptr<ExportDiagnostics>& owned;
+        bool admitted = false;
+        ~AdmissionDiagnostics() {
+            if (admitted) return;
+            std::lock_guard lock(engine.exportDiagnosticsMutex_);
+            if (engine.exportDiagnostics_ == owned) engine.exportDiagnostics_ = previous;
+        }
+    } admissionDiagnostics{*this, previousDiagnostics, ownedDiagnostics};
+    const auto startStage = [&](ExportDiagnostics::Stage stage) noexcept {
+        if (ownedDiagnostics) ownedDiagnostics->stage(ExportDiagnostics::Lane::Session, stage);
+    };
+    startStage(ExportDiagnostics::Stage::Admission);
     // A prévia cede a GPU ANTES de o export disputar renderMutex_: a thread de
     // render (prioridade de exibição) emendava compilações de pipeline uma
     // atrás da outra e o "Preparando" esperava o mutex sem fim (vivo V2026,
-    // PowerVR GE8320). Com a marca, ela termina o quadro atual e estaciona.
+    // PowerVR GE8320). Com a marca, ela termina o quadro atual e estaciona
+    // (0.5.2: e o pré-aquecimento de pipelines dela para entre um e outro,
+    // ShaderLibrary::set_abort).
     exportActive_.store(true, std::memory_order_release);
     {
-        std::lock_guard<std::mutex> rl(renderMutex_);
+        startStage(ExportDiagnostics::Stage::RenderLock);
+        std::unique_lock<std::mutex> rl(renderMutex_, std::defer_lock);
+        if (const Status locked = lock_for_export_start(rl, &exportStartCancel_, nullptr, startLockWaitNs); !locked.ok()) {
+            // Ninguém soltou a GPU no prazo: "ocupado" (a tela espera e refaz
+            // o mesmo degrau; o vigia da tela cobre o resto).
+            if (locked.code() == Errc::Cancelled) return locked;
+            AUREA_LOG_WARN("export: renderMutex_ ocupado por %llu ms na partida",
+                           static_cast<unsigned long long>(startLockWaitNs / 1'000'000ull));
+            return Status{Errc::Busy, "a previa nao liberou a GPU para a exportacao"};
+        }
+        startStage(ExportDiagnostics::Stage::Admission);
         Status ready = poll_export_gpu_locked(1'000'000'000ull);
         // O ultimo quadro do PreRender cancelado pode ainda estar na GPU.
         while (cancelledPreRender && ready.code() == Errc::Timeout && pendingExportGpuFrame_
@@ -15475,13 +15591,12 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
         // Complete retained GPU ownership before replacing the previous session.
         std::lock_guard<std::mutex> context(exportContextMutex_);
         exportCtx_.reset();
+        admissionDiagnostics.admitted = true;
     }
 
     auto ctx = std::make_unique<ExportContext>();
     ctx->queue = std::make_unique<OfflineFrameQueue>();
-    try { ctx->diagnostics = std::make_shared<ExportDiagnostics>(); } catch (...) {}
-    ownedDiagnostics = ctx->diagnostics;
-    { std::lock_guard lock(exportDiagnosticsMutex_); exportDiagnostics_ = ctx->diagnostics; }
+    ctx->diagnostics = ownedDiagnostics;   // 0.5.2: nasceu antes da primeira espera (acima)
     ctx->diagnostic_stage(ExportDiagnostics::Lane::Session, ExportDiagnostics::Stage::Preparation);
     struct StartupCancellation {
         Engine& engine;
@@ -15491,6 +15606,8 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
             if (!enabled) return;
             std::lock_guard<std::mutex> lock(engine.exportContextMutex_);
             engine.exportStartupCancel_ = &flag;
+            // 0.5.2 (E4): o Cancelar que chegou antes do portão vale aqui.
+            if (engine.exportStartCancel_.load(std::memory_order_acquire)) flag.store(true, std::memory_order_release);
         }
         ~StartupCancellation() {
             if (!enabled) return;
@@ -15498,9 +15615,11 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
             if (engine.exportStartupCancel_ == &flag) engine.exportStartupCancel_ = nullptr;
         }
     } startupCancellation{*this, ctx->cancelRequested, true};
+    if (ctx->cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
     ctx->settings = settings;
     ctx->outputPath = outputPath;
     ctx->dither = settings.dither;
+    ctx->attempt = std::min(requested.safeMode, kExportAttemptMax);
     if (hyper) {
         try { ctx->hyper = std::make_shared<const HyperExportOverride>(*hyper); }
         catch (...) { return Errc::OutOfMemory; }
@@ -15537,6 +15656,7 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
         ctx->compFps = hyper->compFps;
         ctx->attemptBlurCap = attemptPlan.blurCap;
         ctx->attemptGpuStep = attemptPlan.gpuStep;
+        ctx->attemptMatchDensity = attemptPlan.shortSideCap > 0;
         ctx->frozenAssetBudget = source_asset_room_locked();
         ctx->diagnostic_stage(ExportDiagnostics::Lane::Session, ExportDiagnostics::Stage::Snapshot);
         try { frozenBytes = hyper->projectBytes; } catch (...) { return Errc::OutOfMemory; }
@@ -15551,6 +15671,7 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
         ctx->compFps = comp->fps();
         ctx->attemptBlurCap = attemptPlan.blurCap;
         ctx->attemptGpuStep = attemptPlan.gpuStep;
+        ctx->attemptMatchDensity = attemptPlan.shortSideCap > 0;
         // Freeze with the established serializer; the editor document and its
         // historical file formats are never rewritten by export.
         const u64 room = source_asset_room_locked();
@@ -15590,8 +15711,27 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
             if (const auto found = preparedPaths.find(path); found != preparedPaths.end()) return found->second;
             std::string resolved = resolve_asset_path(path);
             if (config_.exportAssetPathResolver) {
-                auto persistent = config_.exportAssetPathResolver(resolved, config_.documentsDirectory, &ctx->cancelRequested);
-                if (!persistent.ok()) { sourceStatus = persistent.status(); return std::string{}; }
+                // 0.5.2 (E4): a plataforma abre a fonte (Android: content:// pelo
+                // ContentResolver, que num provedor de nuvem baixa o arquivo
+                // inteiro antes de voltar) com prazo e cancelar
+                // (ExportBoundedCall.hpp). O detalhe de um Status vindo de outra
+                // thread não é guardado: só o código.
+                const auto resolver = config_.exportAssetPathResolver;
+                const std::string documents = config_.documentsDirectory;
+                Result<std::string> persistent = Status{Errc::Cancelled};
+                const Status called = run_bounded_platform_call(
+                    [resolver, resolved, documents](const std::atomic<bool>* cancel) noexcept {
+                        return resolver(resolved, documents, cancel);
+                    }, persistent, &ctx->cancelRequested, sourceOpenWaitNs);
+                if (!called.ok()) {
+                    if (called.code() == Errc::Timeout)
+                        AUREA_LOG_WARN("export: uma fonte nao abriu em %llu ms; partida recusada",
+                                       static_cast<unsigned long long>(sourceOpenWaitNs / 1'000'000ull));
+                    sourceStatus = called.code() == Errc::Cancelled ? Status{Errc::Cancelled}
+                        : Status{Errc::MediaSourceMissing, "uma midia do projeto nao abriu a tempo"};
+                    return std::string{};
+                }
+                if (!persistent.ok()) { sourceStatus = Status{persistent.code()}; return std::string{}; }
                 resolved = std::move(*persistent);
             }
             preparedPaths.emplace(path, resolved);
@@ -15760,7 +15900,7 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
             if (!ec) planned += export_checkpoint::sampled_bytes(static_cast<u64>(bytes));
         }
         Preparing preparing{*this, planned};
-        ctx->diagnostic_stage(ExportDiagnostics::Lane::Session, ExportDiagnostics::Stage::Sources);
+        ctx->diagnostic_stage(ExportDiagnostics::Lane::Session, ExportDiagnostics::Stage::SourceIdentity);
         fileIdentities.resize(ctx->recovery.dependencies.size());
         for (usize i = 0; i < ctx->recovery.dependencies.size() && checkpointWanted; ++i) {
             const Status s = export_checkpoint::file_identity(ctx->recovery.dependencies[i].path, fileIdentities[i],
@@ -15778,9 +15918,22 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
         // o projeto não retoma — nunca se continua com fonte não conferida.
         uriIdentities.resize(ctx->recovery.uriSources.size());
         for (usize i = 0; i < ctx->recovery.uriSources.size() && checkpointWanted; ++i) {
-            const Status s = config_.exportSourceIdentity
-                ? config_.exportSourceIdentity(ctx->recovery.uriSources[i], uriIdentities[i], &ctx->cancelRequested)
-                : Status{Errc::NotSupported, "plataforma sem identidade de fonte por URI"};
+            // 0.5.2 (E4): a mesma abertura pela plataforma, com prazo e cancelar.
+            // Sem resposta no prazo = fonte não verificável: o export segue sem
+            // checkpoint, como já fazia para pipe/provedor virtual.
+            Status s{Errc::NotSupported, "plataforma sem identidade de fonte por URI"};
+            if (const auto identify = config_.exportSourceIdentity) {
+                struct Identity { Status status; export_checkpoint::SourceIdentity id; };
+                Identity got{Status{Errc::Cancelled}, {}};
+                const std::string uri = ctx->recovery.uriSources[i];
+                const Status called = run_bounded_platform_call([identify, uri](const std::atomic<bool>* cancel) noexcept {
+                        Identity out{OkStatus, {}};
+                        out.status = identify(uri, out.id, cancel);
+                        return out;
+                    }, got, &ctx->cancelRequested, sourceOpenWaitNs);
+                s = called.ok() ? got.status : called;
+                if (s.ok()) uriIdentities[i] = got.id;
+            }
             if (s.code() == Errc::Cancelled || ctx->cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
             if (!s.ok()) {
                 AUREA_LOG_WARN("export: fonte por URI nao verificavel (%d); export sem checkpoint", s.raw());
@@ -15841,6 +15994,7 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
     export_checkpoint::Manifest priorCheckpoint{};
     bool havePriorCheckpoint = false;
     if (checkpointWanted) {
+        ctx->diagnostic_stage(ExportDiagnostics::Lane::Session, ExportDiagnostics::Stage::CheckpointScan);
         namespace ckpt = export_checkpoint;
         u64 key = ckpt::mix(ckpt::build_identity(), requestKey);
         const u64 effective[] = {
@@ -15908,6 +16062,7 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
     // baixa), então só recusa quando nem metade cabe; o resto o sink pega
     // (ENOSPC → StorageFull) e o encoder confere a cada 300 quadros.
     {
+        ctx->diagnostic_stage(ExportDiagnostics::Lane::Session, ExportDiagnostics::Stage::DiskCheck);
         const f64 seconds = static_cast<f64>(ctx->frames) / ctx->fps;
         const f64 bps = static_cast<f64>(vc.bitrateBps) + (withAudio ? static_cast<f64>(ac.bitrateBps) : 0.0);
         const u64 estimate = static_cast<u64>(seconds * bps / 8.0 * 1.05) + (8ull << 20);
@@ -15960,8 +16115,12 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
         ExportContext& context;
         std::unique_ptr<ExportContext>& owner;
         bool committed = false;
+        /// 0.5.2: só depois de a partida ter tido o renderMutex_ há o que
+        /// soltar; sem isso, a partida que desistiu de esperar o lock voltaria
+        /// a esperá-lo aqui, sem prazo.
+        bool armed = false;
         ~OfflineStartupCleanup() {
-            if (committed) return;
+            if (committed || !armed) return;
             std::lock_guard<std::mutex> lock(engine.renderMutex_);
             engine.release_offline_export(context);
             if ((context.deferredGpuCleanup || context.deferredSourceCleanup) && owner)
@@ -15969,10 +16128,10 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
         }
     } offlineCleanup{*this, *ctx, ctx};
 
-    auto drainExportStartup = [&]() -> Status {
+    auto drainExportStartup = [&](u64 boundNs = 0) -> Status {
         const u64 frame = gpu_->last_submitted_frame();
         if (!frame) return OkStatus;
-        const u64 deadline = monotonic_ns() + (config_.exportGpuTimeoutMs
+        const u64 deadline = monotonic_ns() + (boundNs ? boundNs : config_.exportGpuTimeoutMs
             ? static_cast<u64>(config_.exportGpuTimeoutMs) * 1'000'000ull : 120'000'000'000ull);
         for (;;) {
             if (ctx->cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
@@ -15981,14 +16140,42 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
             if (monotonic_ns() >= deadline) return Status{Errc::Timeout, "GPU sem resposta ao preparar exportacao"};
         }
     };
+    // 0.5.2 (E4): a prévia ou a GPU não soltaram a partida no prazo. Outro
+    // degrau não resolve (a GPU está presa no driver): a sessão termina como
+    // RenderHung — a escada para e as telas dizem para reabrir o app — com a
+    // etapa no diagnóstico (endedFrom), em vez de o "Preparando" ficar parado.
+    const auto startupHung = [&](const Status& why) -> Status {
+        static thread_local char detail[160];   // Status guarda o ponteiro
+        std::snprintf(detail, sizeof(detail), "%s", why.detail().empty() ? why.message().data() : why.detail().data());
+        AUREA_LOG_ERROR("export: partida presa (%s)", detail);
+        ctx->progress.running = false;
+        ctx->progress.finished = true;
+        ctx->progress.result = Errc::Timeout;
+        ctx->progress.failure = static_cast<u32>(ExportFailure::RenderHung);
+        ctx->progress.flags &= ~kExportRetryMask;
+        ctx->set_message(detail);
+        { std::lock_guard<std::mutex> context(exportContextMutex_); exportCtx_ = std::move(ctx); }
+        return Status{Errc::Timeout, detail};
+    };
     {
-        std::lock_guard<std::mutex> rl(renderMutex_);
+        ctx->diagnostic_stage(ExportDiagnostics::Lane::Session, ExportDiagnostics::Stage::RenderLock);
+        std::unique_lock<std::mutex> rl(renderMutex_, std::defer_lock);
+        if (const Status locked = lock_for_export_start(rl, &ctx->cancelRequested, nullptr, startLockWaitNs); !locked.ok())
+            return locked.code() == Errc::Cancelled ? locked : startupHung(locked);
+        offlineCleanup.armed = true;
         if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
         if (const Status healthy = ensure_gpu_healthy_locked(); !healthy.ok()) return healthy;
         cancel_preview_graph_locked();
         exportActive_.store(true, std::memory_order_release);
-        if (const Status drained = drainExportStartup(); !drained.ok()) return drained;
+        // O último quadro da prévia na GPU: com prazo próprio, curto (30 s). Um
+        // quadro de prévia que não terminou nisso não termina (driver preso).
+        ctx->diagnostic_stage(ExportDiagnostics::Lane::Session, ExportDiagnostics::Stage::GpuDrain);
+        if (const Status drained = drainExportStartup(startDrainWaitNs); !drained.ok())
+            return drained.code() == Errc::Timeout ? startupHung(drained) : drained;
+        if (ctx->cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
+        ctx->diagnostic_stage(ExportDiagnostics::Lane::Session, ExportDiagnostics::Stage::OfflineInit);
         if (const Status initialized = initialize_offline_export(*ctx); !initialized.ok()) return initialized;
+        if (ctx->cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
     }
     ExportSinkStartupResult startupResult;
     ctx->diagnostic_stage(ExportDiagnostics::Lane::Session, ExportDiagnostics::Stage::CodecOpen);
@@ -16272,6 +16459,15 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
         ownedDiagnostics->stage(ExportDiagnostics::Lane::Session, result.code() == Errc::Cancelled
             ? ExportDiagnostics::Stage::Cancelled : ExportDiagnostics::Stage::Failed);
     }
+    // 0.5.2 (E2): a partida recusada também entra no histórico da escada (sem
+    // quadro renderizado: a escada de sempre decide, ela não conta no teto).
+    if (!result.ok() && outputPath) {
+        ExportAttemptRecord record;
+        record.attempt = std::min(requested.safeMode, kExportAttemptMax);
+        record.request = ExportAttemptLedger::request_key(outputPath);
+        record.code = result.raw();
+        ExportAttemptLedger::process().record(record);
+    }
     return result;
 }
 
@@ -16443,7 +16639,8 @@ Status Engine::initialize_offline_export(ExportContext& ctx) noexcept {
     ctx.offline = std::make_unique<OfflineFrameRenderer>();
     const u64 renderBudget = address_space::export_render_budget(std::max<u64>(32ull << 20, caps_.memory_budget_bytes() / 2));
     if (const Status initialized = ctx.offline->initialize(*gpu_, effectRegistry_, config_.mediaFactory,
-            &memory_, renderBudget, static_cast<u64>(config_.exportGpuTimeoutMs) * 1'000'000ull); !initialized.ok())
+            &memory_, renderBudget, static_cast<u64>(config_.exportGpuTimeoutMs) * 1'000'000ull,
+            &ctx.cancelRequested); !initialized.ok())
         return initialized;
     ctx.offline->set_software_decode(ctx.settings.softwareDecode);
     auto& offlineRenderer = ctx.offline->compositor();
@@ -16473,14 +16670,24 @@ Status Engine::initialize_offline_export(ExportContext& ctx) noexcept {
     }, &ctx);
     offlineRenderer.set_hdri_lookup([](void* p, AssetId id) -> std::shared_ptr<const scene3d::HdriPixels> {
         auto& c = *static_cast<ExportContext*>(p);
-        if (const auto it = c.frozenHdris.find(id.pack()); it != c.frozenHdris.end()) return it->second;
-        const Asset* asset = c.frozenProject->asset(id);
-        if (!asset || asset->kind != AssetKind::Environment) return {};
         // 0.2.6: como na prévia (Engine::hdri_lookup), HDRI ausente, ilegível
         // ou grande demais para o orçamento (32 bits: ~85 MB) vira o estúdio
         // neutro — o vídeo sai como a tela mostrou, em vez de o export falhar
         // com "mídia ausente" (erro 18).
         static const std::shared_ptr<const scene3d::HdriPixels> neutral = std::make_shared<const scene3d::HdriPixels>();
+        // 0.5.2 (E1): o mapa congelado guarda NULO para o HDRI que a prévia
+        // não conseguiu ler (Engine::hdri_lookup: "nulo também fica"), e a
+        // prévia o mostra como estúdio neutro. Aqui nulo voltava cru, e para o
+        // renderizador nulo = "ainda carregando": todo quadro com ele ficava
+        // incompleto e o export parava nele. Nulo e asset ausente = neutro.
+        if (const auto it = c.frozenHdris.find(id.pack()); it != c.frozenHdris.end()) {
+            if (it->second) return it->second;
+            std::lock_guard<std::mutex> pl(c.mutex);
+            c.progress.flags |= kExportEnvironmentFallback;
+            return neutral;
+        }
+        const Asset* asset = c.frozenProject->asset(id);
+        if (!asset || asset->kind != AssetKind::Environment) return neutral;
         std::shared_ptr<const scene3d::HdriPixels> pixels = read_hdri_file(asset->sourcePath, c.frozenAssetBudget).pixels;
         if (pixels) c.frozenAssetBudget -= std::min<u64>(c.frozenAssetBudget, pixels->rgb.capacity() * sizeof(f32));
         else {
@@ -16613,6 +16820,20 @@ Status Engine::render_export_frame(FrameIndex time, const OffscreenTarget& targe
     settings.gpuTimers = config_.enableTelemetry && detailGpuTimers_.load(std::memory_order_relaxed);
     settings.cancelFlag = &c.cancelRequested;
     settings.heartbeatNs = &c.producerBeatNs;
+    // 0.5.2 (E1b): nos degraus da escada que tiram pixels (shortSideCap), as
+    // texturas das camadas e dos efeitos também ficam na densidade da SAÍDA.
+    // Antes o export renderizava toda camada na densidade da composição/fonte
+    // (um clipe 4K com zoom de 105% = 66 MB por textura RGBA16F) e o degrau
+    // de 480p só mudava o alvo final: a transição com shake de 2 clipes 4K
+    // estourava o pool no MESMO quadro em todo degrau. Coordenadas e
+    // parâmetros continuam em unidades da composição (o mesmo caminho da
+    // prévia em escala). O degrau 0 (o pedido) fica como sempre.
+    if (c.attemptMatchDensity) {
+        if (const Composition* comp = c.frozenProject ? c.frozenProject->timeline().composition(c.recovery.composition) : nullptr) {
+            const u32 out = std::max(c.width, c.height), full = std::max(comp->width(), comp->height());
+            if (out > 0 && out < full) { settings.previewNumerator = out; settings.previewDenominator = full; }
+        }
+    }
     const u64 begin = monotonic_ns();
     const Status result = c.offline->render(*c.frozenProject, c.recovery.composition, time, target,
         [](void* p, AssetId id) -> const ImagePixels* {
@@ -16622,12 +16843,28 @@ Status Engine::render_export_frame(FrameIndex time, const OffscreenTarget& targe
         }, &c, settings, gpuFrame, c.preRenderMode ? &renderMutex_ : nullptr,
         c.preRenderMode ? &preRenderCancel_ : nullptr);
     c.renderNs.fetch_add(monotonic_ns() - begin, std::memory_order_relaxed);
+    // 0.5.2 (E2): onde o render parou, em segundos da timeline (o degrau que
+    // limita a taxa muda o índice do mesmo instante). A escada compara isso
+    // entre tentativas para não refazer uma falha determinística.
+    if (!result.ok() && result.code() != Errc::Cancelled && c.failedAt < 0.0)
+        c.failedAt = static_cast<f64>(time.value) / std::max(1e-6, c.compFps);
     // Quadro com o vídeo mais próximo do trecho (a fonte não entregou o exato
     // nem depois de reaberta): o export segue e as telas avisam.
     if (result.ok() && c.offline->take_approximate()) {
         std::lock_guard<std::mutex> pl(c.mutex);
         c.progress.flags |= kExportFrameFallback;
     }
+    // 0.5.2 (E1): o quadro saiu sem um recurso que não chega nesta sessão
+    // (modelo 3D que falhou ao subir, ponto declarado sem solução): o export
+    // termina e as telas avisam, em vez de parar nesse quadro em todo degrau.
+    if (result.ok() && c.offline->take_omitted()) {
+        std::lock_guard<std::mutex> pl(c.mutex);
+        c.progress.flags |= kExportElementsOmitted;
+    }
+    // O ponto que segurou o quadro (arquivo:linha) vai para o diagnóstico.
+    if (c.diagnostics && c.offline->last_incomplete_file())
+        c.diagnostics->incomplete_site(c.offline->last_incomplete_file(), c.offline->last_incomplete_line(),
+                                       c.offline->unresolved_sites());
     // 0.3.2: o motion blur deste quadro saiu com menos amostras que o pedido
     // (orçamento do quadro, teto de cena do aparelho, degrau da escada): o
     // export segue e as telas avisam, em vez de só o log saber.
@@ -17031,6 +17268,23 @@ void Engine::export_thread_main() noexcept {
     std::vector<u8>().swap(ctx.recovery.projectBytes);
     {
         std::lock_guard<std::mutex> pl(ctx.mutex);
+        // 0.5.2 (E2): o fim desta tentativa entra no histórico da escada ANTES
+        // de as telas verem `finished` (elas perguntam o próximo degrau logo).
+        if (!ctx.preRenderMode && !ctx.imageMode && !result.ok()) {
+            ExportAttemptRecord record;
+            record.attempt = ctx.attempt;
+            record.request = ExportAttemptLedger::request_key(ctx.outputPath.c_str());
+            record.code = result.raw();
+            record.failure = static_cast<u32>(ctx.producerAbandoned.load(std::memory_order_acquire)
+                ? ExportFailure::RenderHung : export_failure_reason(stage, result.code()));
+            record.started = true;
+            record.framesDone = ctx.progress.framesDone > ctx.startFrame ? ctx.progress.framesDone - ctx.startFrame : 0u;
+            record.frameSeconds = ctx.fps > 0.0 ? 1.0 / ctx.fps : 0.0;
+            record.failedAt = ctx.failedAt >= 0.0 ? ctx.failedAt
+                // Encoder que falha antes do 1o quadro não tem "ponto": a escada de sempre.
+                : record.framesDone > 0 && ctx.fps > 0.0 ? static_cast<f64>(ctx.progress.framesDone) / ctx.fps : -1.0;
+            ExportAttemptLedger::process().record(record);
+        }
         ctx.progress.running = false;
         ctx.progress.finished = true;
         ctx.progress.result = result.code();
@@ -17563,6 +17817,13 @@ Engine::ExportResumeCandidate Engine::export_resume_candidate(const ExportSettin
     return out;
 }
 
+void Engine::hold_render_lock_for_tests(const std::atomic<bool>& release, std::atomic<bool>* held) noexcept {
+    std::lock_guard<std::mutex> rl(renderMutex_);
+    if (held) held->store(true, std::memory_order_release);
+    while (!release.load(std::memory_order_acquire)) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    if (held) held->store(false, std::memory_order_release);
+}
+
 Status Engine::pause_export() noexcept {
     // A marca vale até a próxima partida (start_export_checked a limpa).
     exportSuspendCancel_.store(true, std::memory_order_release);
@@ -17573,6 +17834,11 @@ Status Engine::cancel_export() noexcept {
     // Job Hyper: para o job (a passagem atual é cancelada logo abaixo).
     const bool hyperJob = hyper_cancel_job();
     std::lock_guard<std::mutex> context(exportContextMutex_);
+    // 0.5.2 (E4): uma partida antes do portão (PreRender, primeiro
+    // renderMutex_) também ouve: a marca vai para o contexto quando ele nasce.
+    const bool starting = exportStarting_.load(std::memory_order_acquire);
+    if (starting) exportStartCancel_.store(true, std::memory_order_release);
+    if (starting && !exportStartupCancel_ && !exportCtx_) return OkStatus;
     if (exportStartupCancel_) {
         exportStartupCancel_->store(true, std::memory_order_release);
         // The gate polls this flag independently. Its local context has not

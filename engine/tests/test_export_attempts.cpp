@@ -9,6 +9,7 @@
 #include "aurea/platform/AddressSpace.hpp"
 #include "../src/export/AndroidCodecName.hpp"
 
+#include <cmath>
 #include <cstdio>
 
 using namespace aurea;
@@ -341,4 +342,149 @@ AUREA_TEST(ExportAttempts, EncoderBitrateRespectsTheAnnouncedCeiling) {
     AUREA_CHECK_EQ(export_encoder_bitrate_bps(18'000'000u, 0u), 18'000'000u);
     AUREA_CHECK_EQ(export_encoder_bitrate_bps(0u, 14'000'000u), 0u);
     AUREA_CHECK_EQ(export_encoder_bitrate_bps(18'000'000u, 1u), 100'000u);
+}
+
+// =============================================================================
+//  0.5.2 (E2): a escada com memória (ExportAttemptHistory). Uma falha no MESMO
+//  ponto em duas tentativas seguidas é determinística: a escada para em vez de
+//  refazer o export inteiro até 7 vezes (Galaxy A23, quadro 19 de 38 nos 7).
+// =============================================================================
+namespace {
+ExportAttemptRecord ran(u32 attempt, f64 failedAt, u32 frames, f64 fps = 30.0, u64 request = 7) {
+    ExportAttemptRecord r;
+    r.attempt = attempt;
+    r.request = request;
+    r.code = static_cast<i32>(Errc::Timeout);
+    r.failure = static_cast<u32>(ExportFailure::Render);
+    r.started = true;
+    r.framesDone = frames;
+    r.failedAt = failedAt;
+    r.frameSeconds = 1.0 / fps;
+    return r;
+}
+} // namespace
+
+AUREA_TEST(ExportAttempts, SameFailureAtTheSamePointStopsTheLadder) {
+    const ExportRequestShape r = shape(1080, 30.0);
+    ExportAttemptHistory h;
+    h.record(ran(0, 19.0 / 30.0, 18));
+    AUREA_CHECK_EQ(export_next_attempt_with_history(0, ExportRetryKind::Memory, r, h), 3u);   // 1a falha: a escada de sempre
+    h.record(ran(3, 19.0 / 30.0, 18));
+    AUREA_CHECK_EQ(export_next_attempt_with_history(3, ExportRetryKind::Memory, r, h), 0u);   // mesmo quadro: para
+    AUREA_CHECK(h.lastStop == ExportLadderStop::Deterministic);
+    // Até 3 quadros de diferença ainda é o mesmo ponto (a fila do encoder).
+    ExportAttemptHistory near;
+    near.record(ran(0, 1.00, 29));
+    (void)export_next_attempt_with_history(0, ExportRetryKind::Memory, r, near);
+    near.record(ran(3, 1.00 + 2.0 / 30.0, 31));
+    AUREA_CHECK_EQ(export_next_attempt_with_history(3, ExportRetryKind::Memory, r, near), 0u);
+    // Em outro ponto não é determinístico: segue.
+    ExportAttemptHistory moved;
+    moved.record(ran(0, 1.0, 29));
+    (void)export_next_attempt_with_history(0, ExportRetryKind::Memory, r, moved);
+    moved.record(ran(3, 4.0, 119));
+    AUREA_CHECK_EQ(export_next_attempt_with_history(3, ExportRetryKind::Memory, r, moved), 5u);
+    AUREA_CHECK(moved.lastStop == ExportLadderStop::None);
+}
+
+AUREA_TEST(ExportAttempts, SamePointIsMeasuredInSecondsAcrossFpsCaps) {
+    // 60 qps no degrau 0, 30 qps no 3: o quadro 120 e o 60 são o mesmo instante.
+    const ExportRequestShape r = shape(1080, 60.0);
+    ExportAttemptHistory h;
+    h.record(ran(0, 2.0, 119, 60.0));
+    AUREA_CHECK_EQ(export_next_attempt_with_history(0, ExportRetryKind::Memory, r, h), 3u);
+    h.record(ran(3, 2.0, 59, 30.0));
+    AUREA_CHECK_EQ(export_next_attempt_with_history(3, ExportRetryKind::Memory, r, h), 0u);
+}
+
+AUREA_TEST(ExportAttempts, DeterministicEncoderOrDecoderStopTriesSoftwareOnce) {
+    // Encoder do aparelho e o Baseline param no mesmo quadro: o software
+    // (encoder E decoder compatíveis) ainda não foi tentado — UMA vez.
+    const ExportRequestShape r = shape(1080, 30.0);
+    ExportAttemptHistory h;
+    h.record(ran(0, 5.0, 149));
+    AUREA_CHECK_EQ(export_next_attempt_with_history(0, ExportRetryKind::Encoder, r, h), 1u);
+    h.record(ran(1, 5.0, 149));
+    AUREA_CHECK_EQ(export_next_attempt_with_history(1, ExportRetryKind::Encoder, r, h), 2u);
+    h.record(ran(2, 5.0, 149));
+    AUREA_CHECK_EQ(export_next_attempt_with_history(2, ExportRetryKind::Encoder, r, h), 0u);
+    AUREA_CHECK(h.lastStop == ExportLadderStop::Deterministic);
+    // Decoder parado: o 1o degrau já é o de software; o mesmo ponto depois dele para.
+    ExportAttemptHistory s;
+    s.record(ran(0, 3.0, 89));
+    AUREA_CHECK_EQ(export_next_attempt_with_history(0, ExportRetryKind::Stall, r, s), 2u);
+    s.record(ran(2, 3.0, 89));
+    AUREA_CHECK_EQ(export_next_attempt_with_history(2, ExportRetryKind::Stall, r, s), 0u);
+}
+
+AUREA_TEST(ExportAttempts, GpuTimeAndStartFailuresKeepTheOldLadder) {
+    const ExportRequestShape r = shape(1080, 30.0);
+    // GpuTime: o quadro mais pesado é sempre o mesmo; cada degrau tira custo dele.
+    ExportAttemptHistory g;
+    g.record(ran(0, 2.0, 59));
+    AUREA_CHECK_EQ(export_next_attempt_with_history(0, ExportRetryKind::GpuTime, r, g), 1u);
+    g.record(ran(1, 2.0, 59));
+    AUREA_CHECK_EQ(export_next_attempt_with_history(1, ExportRetryKind::GpuTime, r, g), 2u);
+    // Falha ao abrir (sem render): troca de encoder, como sempre.
+    ExportAttemptHistory o;
+    ExportAttemptRecord open; open.attempt = 0; open.request = 7; open.code = static_cast<i32>(Errc::EncoderUnavailable);
+    o.record(open);
+    AUREA_CHECK_EQ(export_next_attempt_with_history(0, ExportRetryKind::Encoder, r, o), 1u);
+    open.attempt = 1; o.record(open);
+    AUREA_CHECK_EQ(export_next_attempt_with_history(1, ExportRetryKind::Encoder, r, o), 2u);
+    // Sem registro (o app morreu no export anterior): a escada de sempre.
+    ExportAttemptHistory none;
+    AUREA_CHECK_EQ(export_next_attempt_with_history(0, ExportRetryKind::Memory, r, none), 3u);
+}
+
+AUREA_TEST(ExportAttempts, AttemptsThatRenderedFramesAreCapped) {
+    const ExportRequestShape r = shape(1080, 30.0);
+    ExportAttemptHistory h;
+    u32 attempt = 0, renderedAttempts = 0;
+    // Cada tentativa para num ponto diferente (nada determinístico): o teto para.
+    for (u32 i = 0; attempt != 0 || i == 0; ++i) {
+        h.record(ran(attempt, 1.0 + i, 30 + 30 * i));
+        ++renderedAttempts;
+        attempt = export_next_attempt_with_history(attempt, ExportRetryKind::Stall, r, h);
+        if (i > 10) break;
+    }
+    AUREA_CHECK_EQ(renderedAttempts, kExportRenderedAttemptsMax);
+    AUREA_CHECK(h.lastStop == ExportLadderStop::RenderedCap);
+}
+
+AUREA_TEST(ExportAttempts, HistoryStartsOverForANewRequest) {
+    const ExportRequestShape r = shape(1080, 30.0);
+    ExportAttemptHistory h;
+    h.record(ran(0, 1.0, 29, 30.0, 1));
+    (void)export_next_attempt_with_history(0, ExportRetryKind::Memory, r, h);
+    h.record(ran(3, 1.0, 29, 30.0, 1));
+    AUREA_CHECK_EQ(export_next_attempt_with_history(3, ExportRetryKind::Memory, r, h), 0u);
+    // Outro arquivo de saída = outro pedido: começa do zero.
+    h.record(ran(0, 1.0, 29, 30.0, 2));
+    AUREA_CHECK_EQ(h.count, 1u);
+    AUREA_CHECK_EQ(export_next_attempt_with_history(0, ExportRetryKind::Memory, r, h), 3u);
+    // O mesmo pedido de novo no degrau 0 (a pessoa tocou Exportar outra vez).
+    h.record(ran(3, 1.0, 29, 30.0, 2));
+    h.record(ran(0, 1.0, 29, 30.0, 2));
+    AUREA_CHECK_EQ(h.count, 1u);
+    // O MESMO degrau (continuação do checkpoint) substitui o registro.
+    h.record(ran(0, 2.0, 59, 30.0, 2));
+    AUREA_CHECK_EQ(h.count, 1u);
+    AUREA_CHECK(std::abs(h.items[0].failedAt - 2.0) < 1e-9);
+    AUREA_CHECK_EQ(ExportAttemptLedger::request_key("a.mp4"), ExportAttemptLedger::request_key("a.mp4"));
+    AUREA_CHECK(ExportAttemptLedger::request_key("a.mp4") != ExportAttemptLedger::request_key("b.mp4"));
+}
+
+AUREA_TEST(ExportAttempts, StartRefusedAsBusyOnTwoRungsStopsTheLadder) {
+    // A prévia não soltou a GPU no prazo da partida (Engine: Busy) no degrau 0
+    // e de novo no 1: outro degrau não solta a GPU — a escada para.
+    const ExportRequestShape r = shape(1080, 30.0);
+    ExportAttemptHistory h;
+    ExportAttemptRecord busy; busy.attempt = 0; busy.request = 9; busy.code = static_cast<i32>(Errc::Busy);
+    h.record(busy);
+    AUREA_CHECK_EQ(export_next_attempt_with_history(0, ExportRetryKind::Busy, r, h), 0u | kExportAttemptWait);
+    AUREA_CHECK_EQ(export_next_attempt_with_history(0, ExportRetryKind::Encoder, r, h), 1u);
+    busy.attempt = 1; h.record(busy);
+    AUREA_CHECK_EQ(export_next_attempt_with_history(1, ExportRetryKind::Encoder, r, h), 0u);
+    AUREA_CHECK(h.lastStop == ExportLadderStop::Deterministic);
 }

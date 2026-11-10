@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: tela de armazenamento (mídia dos projetos, sem projeto, exportações guardadas, PreRender, caches). -->
+<resources>
+    <string name="storage_title">Almacenamiento</string>
+    <string name="storage_row_note">Mira qué ocupa espacio y libera lo que no se usa</string>
+    <string name="storage_measuring">Midiendo el espacio…</string>
+    <string name="storage_total">Total en la app: %1$s</string>
+    <string name="storage_media_title">Multimedia de los proyectos</string>
+    <string name="storage_media_detail">Videos, fotos y audios que usa algún proyecto, y los modelos, LUT y fuentes importados</string>
+    <string name="storage_orphans_title">Multimedia sin proyecto</string>
+    <string name="storage_orphans_detail">Archivos importados que ningún proyecto usa ya</string>
+    <string name="storage_orphans_blocked">No se pudo leer un proyecto; la multimedia sin proyecto solo se calcula cuando todos se abren</string>
+    <string name="storage_exports_title">Exportaciones guardadas en la app</string>
+    <string name="storage_exports_detail">Copias de exportaciones que quedaron dentro de la app</string>
+    <string name="storage_prerender_title">PreRender</string>
+    <string name="storage_prerender_detail">Fotogramas listos para que la vista previa se reproduzca fluida; se rehacen cuando hace falta</string>
+    <string name="storage_proxies_title">Multimedia optimizada</string>
+    <string name="storage_proxies_detail">Versiones ligeras de los videos para editar; se rehacen cuando hace falta</string>
+    <string name="storage_caches_title">Otras cachés</string>
+    <string name="storage_caches_detail">Vistas previas, gráficos y temporales; se rehacen solos</string>
+    <string name="storage_clean">Limpiar</string>
+    <string name="storage_clean_a11y">Limpiar %1$s</string>
+    <string name="storage_row_a11y">%1$s, %2$s</string>
+    <string name="storage_confirm_orphans_title">¿Borrar la multimedia sin proyecto?</string>
+    <string name="storage_confirm_orphans_message">Elementos: %1$d · %2$s. Ningún proyecto usa estos archivos. No se puede deshacer.</string>
+    <string name="storage_confirm_exports_title">¿Borrar las exportaciones guardadas en la app?</string>
+    <string name="storage_confirm_exports_message">%1$s. Algunas pueden no estar en la galería ni en Fotos: guarda antes lo que quieras conservar. No se puede deshacer.</string>
+    <string name="storage_cleaned">%1$s liberados</string>
+    <string name="storage_nothing">Nada que liberar ahora</string>
+    <string name="storage_busy">Espera a que termine la exportación para limpiar</string>
+</resources>

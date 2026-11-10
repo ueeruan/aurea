@@ -599,6 +599,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Arquivos regeneráveis do app (Ajustes › Armazenamento, Fase 8B §49–52). */
     val storage = CacheStorage(getApplication())
 
+    /** Mídia dos projetos, a órfã e as exportações guardadas (0.5.2; a regra é do motor). */
+    val appStorage by lazy { AppStorage(getApplication(), engine) { quarantinedPaths } }
+
     /** Camada principal da seleção. */
     val primary: Long? get() = selection.firstOrNull()
 
@@ -1332,6 +1335,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
+        // A folha da sequência aberta quando o editor some: nada entrou na timeline.
+        sequenceDraft?.let { draft ->
+            sequenceDraft = null
+            runCatching { draft.tempZip?.delete(); draft.copied?.deleteRecursively() }
+        }
         shutdown()
         super.onCleared()
     }
@@ -2259,6 +2267,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     // O motor lê CAMINHOS: os quadros são copiados para projetos/Media/sequences/
     // (guardado relativo, sobrevive a reabrir e ao pacote do projeto); um .zip vai
     // para o cache e o motor o extrai na mesma pasta de Documentos.
+    // 0.5.2: a pasta dos quadros soltos tem o nome da chave do CONTEÚDO (o motor
+    // decide, MediaStorage::plan_frame_folder): a mesma seleção importada de novo
+    // acha a pasta pronta e nada é copiado. A cópia vai para uma `.parcial` que só
+    // vira a pasta final depois do último quadro conferido.
     // =========================================================================
 
     /** O que a sondagem achou, à espera de "Importar" (ImageSequenceSheet). */
@@ -2289,16 +2301,18 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             val frames = if (zip != null) emptyList() else sources.filter { sequenceFrameName(it.second) }
             if (zip == null && frames.isEmpty()) { busyMessage = null; errorMessage = appText(R.string.seq_none_found); return@launch }
             val bytes = withContext(Dispatchers.IO) { (zip?.let { listOf(it) } ?: frames).sumOf { sizeOf(app, it.first) } }
-            val free = android.os.StatFs(app.filesDir.absolutePath).availableBytes
             // O .zip ocupa duas vezes (a cópia e o que o motor extrai).
             val needed = bytes * (if (zip != null) 2 else 1) + 64L * 1024 * 1024
-            if (bytes > 0 && needed > free) {
+            fun noSpace(): Boolean {
+                if (bytes <= 0 || needed <= android.os.StatFs(app.filesDir.absolutePath).availableBytes) return false
                 busyMessage = null
                 errorMessage = appText(R.string.seq_no_space, android.text.format.Formatter.formatShortFileSize(app, needed))
-                return@launch
+                return true
             }
+            if (zip != null && noSpace()) return@launch
             var copied: File? = null
             var tempZip: File? = null
+            var staging: File? = null
             val paths: Array<String>
             try {
                 if (zip != null) {
@@ -2308,11 +2322,37 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                     }
                     paths = arrayOf(tempZip.absolutePath)
                 } else {
-                    val dir = File(directories().projects, "Media/sequences/seq-${System.currentTimeMillis()}").apply { mkdirs() }
-                    copied = dir
-                    frames.forEachIndexed { i, (uri, name) ->
-                        if (i % 8 == 0) busyMessage = appText(R.string.seq_copying, i + 1, frames.size)
-                        withContext(Dispatchers.IO) { copyUri(app, uri, File(dir, File(name).name)) }
+                    // Um nome por quadro (o seletor pode repetir a mesma URI).
+                    val unique = frames.distinctBy { File(it.second).name }
+                    val names = unique.map { File(it.second).name }.toTypedArray()
+                    val hashes = LongArray(unique.size)
+                    val sizes = LongArray(unique.size)
+                    withContext(Dispatchers.IO) {
+                        unique.forEachIndexed { i, (uri, _) ->
+                            // A chave é lida da URI: nada é gravado para saber se já existe.
+                            val key = app.contentResolver.openFileDescriptor(uri, "r")?.use { AureaEngine.nativeContentKeyFd(it.fd) }
+                                ?: throw java.io.IOException("sem leitura: $uri")
+                            hashes[i] = key[0]
+                            sizes[i] = key[1]
+                        }
+                    }
+                    val plan = withContext(Dispatchers.IO) { engine.planSequenceFrames(names, hashes, sizes) }
+                    if (plan == null || plan.size < 4 || plan[0] != "0") throw java.io.IOException("plano da sequencia: ${plan?.firstOrNull()}")
+                    val dir = if (plan[1] == "1") {
+                        // A mesma seleção já está no app (outro projeto, outra vez): nada a copiar,
+                        // e a pasta não é desta importação (não sai no cancelar).
+                        File(plan[2])
+                    } else {
+                        if (noSpace()) { withContext(Dispatchers.IO) { engine.discardSequenceFrames(plan[3]) }; return@launch }
+                        val target = File(plan[3]).also { staging = it }
+                        unique.forEachIndexed { i, (uri, _) ->
+                            if (i % 8 == 0) busyMessage = appText(R.string.seq_copying, i + 1, unique.size)
+                            withContext(Dispatchers.IO) { copyUri(app, uri, File(target, names[i])) }
+                        }
+                        val done = withContext(Dispatchers.IO) { engine.commitSequenceFrames(target.absolutePath) }
+                        staging = null   // virou a pasta final, ou o motor já a apagou no erro
+                        if (done == null || done.size < 3 || done[0] != "0") throw java.io.IOException("copia da sequencia: ${done?.firstOrNull()}")
+                        File(done[2]).also { if (done[1] != "1") copied = it }
                     }
                     paths = arrayOf(dir.absolutePath)
                 }
@@ -2327,7 +2367,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 }
                 sequenceDraft = ImageSequenceDraft(paths, info, copied, tempZip, asOverlay)
             } catch (failure: Exception) {
-                withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) { copied?.deleteRecursively(); tempZip?.delete() }
+                // Erro ou cancelamento no meio: a cópia desta operação sai agora (a
+                // pasta pronta reaproveitada nunca é dela).
+                withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
+                    staging?.let { engine.discardSequenceFrames(it.absolutePath) }
+                    copied?.deleteRecursively(); tempZip?.delete()
+                }
                 throw failure
             } finally { busyMessage = null }
         }
@@ -2341,11 +2386,18 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val overlayFrame = playhead.toLong()
         busyMessage = appText(R.string.seq_importing)
         launchImport launch@{
-            val id = withContext(Dispatchers.IO) { engine.importImageSequence(draft.paths, fps, alphaMode, colorMode) }
-            withContext(Dispatchers.IO) { draft.tempZip?.delete() }
+            var id = -1L
+            try {
+                id = withContext(Dispatchers.IO) { engine.importImageSequence(draft.paths, fps, alphaMode, colorMode) }
+            } finally {
+                // O .zip copiado é só desta operação: sai com sucesso, erro ou cancelamento.
+                withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
+                    draft.tempZip?.delete()
+                    if (id < 0) draft.copied?.deleteRecursively()
+                }
+            }
             busyMessage = null
             if (id < 0) {
-                withContext(Dispatchers.IO) { draft.copied?.deleteRecursively() }
                 errorMessage = appText(R.string.seq_failed, humanError(-id.toInt()))
                 return@launch
             }
@@ -9625,8 +9677,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun deleteProjects(paths: Collection<String>) {
+    fun deleteProjects(paths: Collection<String>, neverRead: Collection<String> = emptyList()) {
+        val editorOpen = screen == Screen.Editor
         viewModelScope.launch(Dispatchers.IO) {
+            // 0.5.2: apagar o projeto também libera a mídia que SÓ ele usava. O
+            // motor lê todos os projetos (com .bak e cópias) ANTES de qualquer
+            // arquivo sair; ilegível ou export em andamento = a mídia fica.
+            val release = if (ready) runCatching { appStorage.planRelease(paths, editorOpen, neverRead) }.getOrNull() else null
             paths.forEach { p ->
                 val f = File(p)
                 File(directories().thumbs, f.nameWithoutExtension + ".jpg").delete()
@@ -9635,6 +9692,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 // Arquivos de recuperação do motor: .bak, .tmp, .corrompido, .vN.bak.
                 f.parentFile?.listFiles { s -> s.name.startsWith(f.name + ".") }?.forEach { it.delete() }
             }
+            release?.let { plan -> runCatching { appStorage.release(plan) } }
             withContext(Dispatchers.Main) { refreshProjects() }
         }
     }
@@ -9807,7 +9865,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         quarantinePrompt = null
         viewModelScope.launch {
             applyQuarantine(withContext(Dispatchers.IO) { ProjectGuard.release(app, path) })
-            deleteProjects(listOf(path))
+            // Já derrubou o app ao abrir: o motor não o lê nem para liberar a mídia
+            // (ela fica e aparece depois como "sem projeto").
+            deleteProjects(listOf(path), neverRead = listOf(path))
         }
     }
 
@@ -9875,6 +9935,17 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             return freed
         }
         if (id == CacheStorage.EXPORT && exporter.busy) return 0L
+        // 0.5.2: PreRender e mídia otimizada são do motor (ele sabe o que está em uso).
+        if (id == CacheStorage.PRERENDER) {
+            if (!ready || exporter.busy) return 0L
+            val before = storage.scan(exporter.busy).firstOrNull { it.id == id }?.bytes ?: 0L
+            return if (engine.clearPreRenderCache()) before else 0L
+        }
+        if (id == CacheStorage.PROXIES) return if (ready) engine.clearProxyCache() else 0L
+        if (id == AppStorage.ORPHAN_MEDIA || id == AppStorage.APP_EXPORTS) {
+            if (!ready || exporter.busy) return 0L
+            return appStorage.clean(id)
+        }
         val freed = storage.clear(id)
         if (id == CacheStorage.PREVIEWS) effectPreviews?.clear()
         return freed
@@ -9891,6 +9962,44 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         freed += clearStorage(MEMORY)
         main.post { showToast(appText(R.string.msg_cache_cleared, "%.1f".format(freed / (1024.0 * 1024.0)))) }
         return freed
+    }
+
+    /**
+     * Tela de armazenamento (0.5.2): as linhas medidas agora, null = medindo.
+     * Medir lê todos os projetos e as pastas inteiras: sempre fora da main.
+     */
+    var storageLines by mutableStateOf<List<StorageLine>?>(null)
+        private set
+
+    fun refreshStorage() {
+        storageLines = null
+        viewModelScope.launch(Dispatchers.IO) {
+            val caches = storage.scan(exporter.busy)
+            val project = if (ready) runCatching { appStorage.scan() }.getOrDefault(emptyList()) else emptyList()
+            val byId = caches.associateBy { it.id }
+            fun line(id: String) = byId[id]?.let { StorageLine(it.id, it.title, it.detail, it.bytes, it.files, StorageClean.CACHE) }
+            val rest = caches.filter { it.id in OTHER_CACHE_IDS }
+            val lines = project + listOfNotNull(line(CacheStorage.PRERENDER), line(CacheStorage.PROXIES)) +
+                StorageLine(OTHER_CACHES, appText(R.string.storage_caches_title), appText(R.string.storage_caches_detail),
+                    rest.sumOf { it.bytes }, rest.sumOf { it.files }, StorageClean.CACHE)
+            withContext(Dispatchers.Main) { storageLines = lines }
+        }
+    }
+
+    /** Limpa uma linha da tela (a de confirmação já foi confirmada na tela). */
+    fun cleanStorage(id: String) {
+        if (exporter.busy) { showToast(appText(R.string.storage_busy)); return }
+        viewModelScope.launch(Dispatchers.IO) {
+            val freed = runCatching {
+                if (id == OTHER_CACHES) OTHER_CACHE_IDS.sumOf { clearStorage(it) } else clearStorage(id)
+            }.getOrDefault(0L)
+            withContext(Dispatchers.Main) {
+                if (id == OTHER_CACHES) effectPreviews?.clear()
+                showToast(if (freed > 0) appText(R.string.storage_cleaned,
+                    android.text.format.Formatter.formatShortFileSize(getApplication(), freed)) else appText(R.string.storage_nothing))
+            }
+            refreshStorage()
+        }
     }
 
     fun dismissError() {
@@ -10044,6 +10153,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         const val SPEED_GRAPH_SAMPLES = 96
         /** Id do "tipo" memória na tela Armazenamento. */
         const val MEMORY = "memoria"
+        /** Tela de armazenamento: os caches pequenos numa linha só. */
+        const val OTHER_CACHES = "outros-caches"
+        val OTHER_CACHE_IDS = listOf(CacheStorage.PIPELINES, CacheStorage.PREVIEWS, CacheStorage.EXPORT,
+            CacheStorage.CAPTIONS, CacheStorage.ORPHAN_THUMBS, CacheStorage.OTHER)
         // ComponentCallbacks2.TRIM_MEMORY_* (valores do SDK).
         const val TRIM_RUNNING_LOW = 10
         const val TRIM_RUNNING_CRITICAL = 15

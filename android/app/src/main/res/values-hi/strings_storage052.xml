@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: tela de armazenamento (mídia dos projetos, sem projeto, exportações guardadas, PreRender, caches). -->
+<resources>
+    <string name="storage_title">स्टोरेज</string>
+    <string name="storage_row_note">देखें कि कौन जगह ले रहा है और जो इस्तेमाल नहीं होता उसे खाली करें</string>
+    <string name="storage_measuring">जगह मापी जा रही है…</string>
+    <string name="storage_total">ऐप में कुल: %1$s</string>
+    <string name="storage_media_title">प्रोजेक्ट मीडिया</string>
+    <string name="storage_media_detail">वीडियो, फ़ोटो और ऑडियो जिन्हें कोई प्रोजेक्ट इस्तेमाल करता है, साथ में इम्पोर्ट किए गए मॉडल, LUT और फ़ॉन्ट</string>
+    <string name="storage_orphans_title">बिना प्रोजेक्ट वाला मीडिया</string>
+    <string name="storage_orphans_detail">इम्पोर्ट की गई फ़ाइलें जिन्हें अब कोई प्रोजेक्ट इस्तेमाल नहीं करता</string>
+    <string name="storage_orphans_blocked">एक प्रोजेक्ट पढ़ा नहीं जा सका; बिना प्रोजेक्ट वाला मीडिया तभी गिना जाता है जब सारे प्रोजेक्ट खुलें</string>
+    <string name="storage_exports_title">ऐप में रखे एक्सपोर्ट</string>
+    <string name="storage_exports_detail">एक्सपोर्ट की कॉपियाँ जो ऐप के अंदर रह गईं</string>
+    <string name="storage_prerender_title">PreRender</string>
+    <string name="storage_prerender_detail">प्रीव्यू को बिना अटके चलाने के लिए तैयार फ़्रेम; ज़रूरत पड़ने पर फिर बनते हैं</string>
+    <string name="storage_proxies_title">ऑप्टिमाइज़ किया मीडिया</string>
+    <string name="storage_proxies_detail">एडिटिंग के लिए वीडियो के हल्के वर्ज़न; ज़रूरत पड़ने पर फिर बनते हैं</string>
+    <string name="storage_caches_title">अन्य कैश</string>
+    <string name="storage_caches_detail">प्रीव्यू, ग्राफ़िक्स और अस्थायी फ़ाइलें; अपने आप फिर बनती हैं</string>
+    <string name="storage_clean">साफ़ करें</string>
+    <string name="storage_clean_a11y">%1$s साफ़ करें</string>
+    <string name="storage_row_a11y">%1$s, %2$s</string>
+    <string name="storage_confirm_orphans_title">बिना प्रोजेक्ट वाला मीडिया हटाएँ?</string>
+    <string name="storage_confirm_orphans_message">आइटम: %1$d · %2$s. कोई प्रोजेक्ट इन फ़ाइलों को इस्तेमाल नहीं करता। इसे वापस नहीं किया जा सकता।</string>
+    <string name="storage_confirm_exports_title">ऐप में रखे एक्सपोर्ट हटाएँ?</string>
+    <string name="storage_confirm_exports_message">%1$s. हो सकता है कुछ गैलरी या Photos में न हों: जो रखना है उसे पहले सेव कर लें। इसे वापस नहीं किया जा सकता।</string>
+    <string name="storage_cleaned">%1$s खाली हुआ</string>
+    <string name="storage_nothing">अभी खाली करने को कुछ नहीं</string>
+    <string name="storage_busy">साफ़ करने से पहले एक्सपोर्ट खत्म होने दें</string>
+</resources>

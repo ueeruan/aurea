@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: tela de armazenamento (mídia dos projetos, sem projeto, exportações guardadas, PreRender, caches). -->
+<resources>
+    <string name="storage_title">Storage</string>
+    <string name="storage_row_note">See what takes up space and free what isn\'t used</string>
+    <string name="storage_measuring">Measuring space…</string>
+    <string name="storage_total">Total in the app: %1$s</string>
+    <string name="storage_media_title">Project media</string>
+    <string name="storage_media_detail">Videos, photos and audio a project uses, plus imported models, LUTs and fonts</string>
+    <string name="storage_orphans_title">Media without a project</string>
+    <string name="storage_orphans_detail">Imported files that no project uses anymore</string>
+    <string name="storage_orphans_blocked">A project couldn\'t be read; media without a project is only calculated when every project opens</string>
+    <string name="storage_exports_title">Exports kept in the app</string>
+    <string name="storage_exports_detail">Copies of exports that stayed inside the app</string>
+    <string name="storage_prerender_title">PreRender</string>
+    <string name="storage_prerender_detail">Frames ready for smooth preview playback; rebuilt when needed</string>
+    <string name="storage_proxies_title">Optimized media</string>
+    <string name="storage_proxies_detail">Light versions of videos for editing; rebuilt when needed</string>
+    <string name="storage_caches_title">Other caches</string>
+    <string name="storage_caches_detail">Previews, graphics and temporary files; rebuilt automatically</string>
+    <string name="storage_clean">Clean</string>
+    <string name="storage_clean_a11y">Clean %1$s</string>
+    <string name="storage_row_a11y">%1$s, %2$s</string>
+    <string name="storage_confirm_orphans_title">Delete media without a project?</string>
+    <string name="storage_confirm_orphans_message">Items: %1$d · %2$s. No project uses these files. This can\'t be undone.</string>
+    <string name="storage_confirm_exports_title">Delete exports kept in the app?</string>
+    <string name="storage_confirm_exports_message">%1$s. Some may not be in your gallery or Photos: save what you want to keep first. This can\'t be undone.</string>
+    <string name="storage_cleaned">%1$s freed</string>
+    <string name="storage_nothing">Nothing to free right now</string>
+    <string name="storage_busy">Wait for the export to finish before cleaning</string>
+</resources>

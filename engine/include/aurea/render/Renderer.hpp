@@ -830,6 +830,19 @@ public:
     using ModelLookup = std::shared_ptr<const scene3d::SceneAsset> (*)(void* ctx, AssetId id);
     /// O último quadro deixou alguma camada de fora por recurso pendente? (lê e zera)
     [[nodiscard]] bool take_incomplete() noexcept { const bool b = incomplete_; incomplete_ = false; return b; }
+    /// 0.5.2 (E1): algum quadro desde a última leitura saiu SEM um recurso que
+    /// nunca vai chegar nesta sessão (o modelo 3D que falhou ao subir). Ao
+    /// contrário de take_incomplete, o quadro está pronto: é o que a prévia
+    /// mostra (sem aquilo), e o export o codifica e avisa em vez de esperar
+    /// para sempre. Lê e zera; o ponto (arquivo:linha) fica nos getters.
+    [[nodiscard]] bool take_unavailable() noexcept { const bool b = unavailable_; unavailable_ = false; return b; }
+    [[nodiscard]] const char* unavailable_file() const noexcept { return unavailableFile_; }
+    [[nodiscard]] u32 unavailable_line() const noexcept { return unavailableLine_; }
+    /// 0.5.2 (E1): o quadro ficou incompleto por FALTA DE MEMÓRIA (buffer de
+    /// glifos, vetores ou máscaras não alocado). Não é "nunca chega": um degrau
+    /// com menos pixels pode resolver, e um texto sumir do vídeo é pior que a
+    /// falha — o export não aceita o quadro sem ele. Lê e zera.
+    [[nodiscard]] bool take_memory_short() noexcept { const bool b = memoryShort_; memoryShort_ = false; return b; }
     /// Onde o último quadro incompleto foi marcado (arquivo:linha do motor), para
     /// o motivo do export dizer QUAL recurso faltou. Nulo = nenhum ainda.
     /// Degrau de custo 3D do export (0 = qualidade final cheia). Cada degrau
@@ -964,6 +977,12 @@ public:
     [[nodiscard]] u32 last_gpu_passes(const GpuTiming*& out) const noexcept { out = timingScratch_.data(); return lastGpuPasses_; }
     [[nodiscard]] ShaderLibrary& shaders() noexcept { return shaders_; }
     [[nodiscard]] u32 pipelines_prewarmed() const noexcept { return prewarmed_; }
+    /// 0.5.2 (E4): antes de initialize. Falso = o renderizador do export: a
+    /// abertura compila só o pipeline de composição (o resto no primeiro uso,
+    /// dentro do quadro, com o vigia do render e o cancelar do export) e não
+    /// exige o de saída para a tela, que ele nunca usa. A partida no PowerVR
+    /// GE8320 recompilava a lista base inteira sob o renderMutex_, sem cancelar.
+    void set_startup_prewarm(bool enabled) noexcept { startupPrewarm_ = enabled; }
     /// Pipelines de efeito/3D compilados pela varredura do projeto (fora do
     /// playback), depois da abertura. Teste de abertura e HUD.
     [[nodiscard]] u32 pipelines_warmed_for_project() const noexcept { return warmedForProject_; }
@@ -1452,6 +1471,10 @@ private:
     bool incomplete_ = false;   ///< o último quadro deixou camada de fora (recurso pendente)
     const char* incompleteFile_ = nullptr;
     u32 incompleteLine_ = 0;
+    bool unavailable_ = false;  ///< take_unavailable: deixou de fora algo que nunca chega
+    bool memoryShort_ = false;  ///< take_memory_short
+    const char* unavailableFile_ = nullptr;
+    u32 unavailableLine_ = 0;
     u32 exportGpuStep_ = 0;
     u32 exportBlurHardCap_ = 0;
     u32 reductions_ = 0;          ///< RenderReduction (take_reductions)   ///< degrau da escada (0 = nenhum; 1 = sem desfoque)
@@ -1465,6 +1488,8 @@ private:
         return shutter_sample_count(settings, finalQuality, quality, pathPixels, changing, resourceLimit);
     }
     void mark_incomplete(const char* file, u32 line) noexcept { incomplete_ = true; incompleteFile_ = file; incompleteLine_ = line; }
+    void mark_unavailable(const char* file, u32 line) noexcept { unavailable_ = true; unavailableFile_ = file; unavailableLine_ = line; }
+    void mark_incomplete_memory(const char* file, u32 line) noexcept { mark_incomplete(file, line); memoryShort_ = true; }
     bool videoSourceFailed_ = false; ///< principal source could not supply GPU pixels for this frame
     struct PreviewFrame { i64 time = -1; TextureHandle texture{}; bool complete = false; u64 used = 0, gpuFrame = 0; };
     std::vector<PreviewFrame> previewFrames_;
@@ -1504,6 +1529,7 @@ private:
     u32 backdropBudget_ = 0;   ///< fundos re-renderizados restantes neste quadro (raiz)
     u32 compTargetW_ = 0, compTargetH_ = 0;
     u32 prewarmed_ = 0;
+    bool startupPrewarm_ = true;   ///< set_startup_prewarm
     // --- Pré-aquecimento preguiçoso (Fase 8I, §60–62) ------------------------
     // A abertura só compila o que todo projeto usa. Fora do playback, cada
     // quadro preparado varre o projeto (efeitos e 3D de TODAS as camadas, não

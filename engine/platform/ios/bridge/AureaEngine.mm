@@ -366,6 +366,17 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     };
 }
 
+// Armazenamento (0.5.2): listas de caminhos entre Swift e o motor.
+std::vector<std::string> aurea_storage_list(NSArray<NSString*>* _Nullable items) {
+    std::vector<std::string> out;
+    for (NSString* item in items ?: @[]) out.push_back(to_std(item));
+    return out;
+}
+NSArray<NSString*>* aurea_storage_strings(const std::vector<std::string>& items) {
+    NSMutableArray<NSString*>* out = [NSMutableArray arrayWithCapacity:items.size()];
+    for (const auto& item : items) [out addObject:to_ns(item)];
+    return out;
+}
 } // namespace
 
 // =============================================================================
@@ -4006,6 +4017,75 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
     }
     return out;
 }
+- (NSDictionary<NSString*, id>*)mediaReleasePlanIn:(NSString*)projectsDirectory deleted:(NSArray<NSString*>*)deleted
+    roots:(NSArray<NSString*>*)roots keep:(NSArray<NSString*>*)keep editorOpen:(BOOL)editorOpen {
+    auto* e = self.engine; if (!e) return nil;
+    aurea::Engine::MediaStorageRequest r;
+    r.projectsDirectory = to_std(projectsDirectory);
+    r.deleted = aurea_storage_list(deleted);
+    r.managedRoots = aurea_storage_list(roots);
+    r.keepRoots = aurea_storage_list(keep);
+    r.editorOpen = editorOpen;
+    aurea::storage::ReleasePlan plan;
+    const aurea::Status s = e->media_release_plan(r, plan);
+    const bool blocked = plan.blocked || !s.ok();
+    return @{@"blocked": @(blocked), @"bytes": @(plan.bytes), @"unreadable": @(plan.unreadable),
+             @"paths": blocked ? @[] : aurea_storage_strings(plan.paths)};
+}
+- (NSDictionary<NSString*, id>*)mediaStorageScanIn:(NSString*)projectsDirectory roots:(NSArray<NSString*>*)roots
+    keep:(NSArray<NSString*>*)keep minAgeSeconds:(int64_t)minAgeSeconds anyFile:(BOOL)anyFile {
+    auto* e = self.engine; if (!e) return nil;
+    aurea::Engine::MediaStorageRequest r;
+    r.projectsDirectory = to_std(projectsDirectory);
+    r.managedRoots = aurea_storage_list(roots);
+    r.keepRoots = aurea_storage_list(keep);
+    r.minAgeSeconds = static_cast<aurea::u64>(std::max<int64_t>(0, minAgeSeconds));
+    r.anyFile = anyFile;
+    aurea::storage::ScanResult scan;
+    const aurea::Status s = e->media_storage_scan(r, scan);
+    const bool blocked = scan.blocked || !s.ok();
+    return @{@"blocked": @(blocked), @"usedBytes": @(scan.referencedBytes), @"usedFiles": @(scan.referencedFiles),
+             @"orphanBytes": @(scan.orphanBytes), @"orphanFiles": @(scan.orphanFiles), @"unreadable": @(scan.unreadable),
+             @"orphans": blocked ? @[] : aurea_storage_strings(scan.orphans)};
+}
+- (NSArray<NSNumber*>*)removeManagedMedia:(NSArray<NSString*>*)paths roots:(NSArray<NSString*>*)roots keep:(NSArray<NSString*>*)keep {
+    auto* e = self.engine; if (!e) return @[@0, @0, @0];
+    const auto r = e->remove_managed_media(aurea_storage_list(paths), aurea_storage_list(roots), aurea_storage_list(keep));
+    return @[@(r.bytes), @(r.files), @(r.refused)];
+}
+- (BOOL)clearPreRenderCache {
+    auto* e = self.engine;
+    return e && e->clear_prerender_cache() ? YES : NO;
+}
++ (NSArray<NSNumber*>*)contentKeyOfFile:(NSString*)path {
+    aurea::u64 hash = 0, bytes = 0;
+    if (!aurea::storage::file_content_key(to_std(path), hash, bytes).ok()) return nil;
+    return @[@(static_cast<unsigned long long>(hash)), @(static_cast<unsigned long long>(bytes))];
+}
+- (NSDictionary<NSString*, id>*)planSequenceFrames:(NSArray<NSString*>*)names hashes:(NSArray<NSNumber*>*)hashes
+    sizes:(NSArray<NSNumber*>*)sizes {
+    auto* e = self.engine; if (!e) return nil;
+    if (names.count != hashes.count || names.count != sizes.count) return @{@"error": @(static_cast<int>(aurea::Errc::InvalidArgument))};
+    std::vector<aurea::storage::FrameKey> frames(names.count);
+    for (NSUInteger i = 0; i < names.count; ++i)
+        frames[i] = {to_std(names[i]), static_cast<aurea::u64>(hashes[i].unsignedLongLongValue),
+                     static_cast<aurea::u64>(sizes[i].unsignedLongLongValue)};
+    aurea::storage::FrameFolderPlan plan;
+    const aurea::Status s = e->plan_sequence_frames(frames, plan);
+    return @{@"error": @(s.ok() ? 0 : static_cast<int>(s.code())), @"reuse": @(plan.reuse),
+             @"directory": to_ns(plan.directory), @"staging": to_ns(plan.staging)};
+}
+- (NSDictionary<NSString*, id>*)commitSequenceFrames:(NSString*)staging {
+    auto* e = self.engine; if (!e) return nil;
+    std::string directory;
+    bool reused = false;
+    const aurea::Status s = e->commit_sequence_frames(to_std(staging), directory, reused);
+    return @{@"error": @(s.ok() ? 0 : static_cast<int>(s.code())), @"reused": @(reused), @"directory": to_ns(directory)};
+}
+- (BOOL)discardSequenceFrames:(NSString*)staging {
+    auto* e = self.engine;
+    return e && e->discard_sequence_frames(to_std(staging)) ? YES : NO;
+}
 - (NSArray<NSString*>*)projectFilePlugins:(NSString*)path {
     auto* e = self.engine; if (!e) return nil;
     std::vector<aurea::package::PluginFile> plugins;
@@ -5493,7 +5573,9 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
     shape.fps = fps > 0.0 ? fps : 0.0;
     shape.hevc = hevc != NO;
     shape.upscale = upscale != NO;
-    return aurea::export_next_attempt(std::min(attempt, aurea::kExportAttemptMax), kind, shape);
+    // 0.5.2: com a memória das tentativas deste pedido (ExportAttemptLedger,
+    // gravada pelo motor): falha determinística no mesmo ponto para a escada.
+    return aurea::ExportAttemptLedger::process().next(std::min(attempt, aurea::kExportAttemptMax), kind, shape);
 }
 
 + (uint32_t)exportAttemptShortSide:(uint32_t)attempt requested:(uint32_t)requested {

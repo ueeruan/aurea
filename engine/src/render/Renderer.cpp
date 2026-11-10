@@ -1189,7 +1189,15 @@ Status Renderer::initialize(GPUBackend& backend, const EffectRegistry& effects) 
     }
     // Export (planos Y em R8 e CbCr em RG8) não entra: compila no primeiro
     // quadro do export, que não é tempo real.
-    prewarmed_ = shaders_.prewarm(keys.data(), static_cast<u32>(keys.size()));
+    if (startupPrewarm_) {
+        prewarmed_ = shaders_.prewarm(keys.data(), static_cast<u32>(keys.size()));
+    } else {
+        // Renderizador do export (set_startup_prewarm): só a composição, que
+        // todo quadro usa e que prova que a GPU compila; o resto no 1o quadro.
+        const PipelineKey composite = PipelineKey::graphics(ShaderId::composite_layer_vert, ShaderId::composite_layer_frag,
+                                                            kWorkFormat, true, BlendMode::Normal);
+        prewarmed_ = shaders_.prewarm(&composite, 1);
+    }
     AUREA_LOG_INFO("renderer: %u pipelines pre-aquecidos", prewarmed_);
     // 0.3.0 (Huawei P30 lite, prévia que nunca aparece): sem o pipeline que
     // compõe camadas e o de saída, nenhum quadro chega à tela. Antes o backend
@@ -1197,7 +1205,7 @@ Status Renderer::initialize(GPUBackend& backend, const EffectRegistry& effects) 
     // motor largar a GPU e o Android tentar OpenGL ES (aurea_jni.cpp).
     const bool composite = shaders_.has_pipeline(PipelineKey::graphics(ShaderId::composite_layer_vert,
         ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Normal));
-    const bool output = shaders_.has_pipeline(PipelineKey::graphics(ShaderId::composite_layer_vert,
+    const bool output = !startupPrewarm_ || shaders_.has_pipeline(PipelineKey::graphics(ShaderId::composite_layer_vert,
                             ShaderId::composite_output_frag, SurfaceFormat::RGBA8))
                      || shaders_.has_pipeline(PipelineKey::graphics(ShaderId::composite_layer_vert,
                             ShaderId::composite_output_frag, SurfaceFormat::BGRA8));
@@ -5989,7 +5997,7 @@ void Renderer::upload_glyphs(FrameSnapshot& snap) noexcept {
         glyphCap_[slot] = b.ok() ? bd.bytes : 0;
     }
     void* ptr = nullptr;
-    if (!glyphBuf_[slot].valid() || !backend_->map_buffer(glyphBuf_[slot], ptr).ok() || !ptr) { mark_incomplete(__FILE__, __LINE__); return; }
+    if (!glyphBuf_[slot].valid() || !backend_->map_buffer(glyphBuf_[slot], ptr).ok() || !ptr) { mark_incomplete_memory(__FILE__, __LINE__); return; }
     auto* dst = static_cast<GlyphInstance*>(ptr);
     for (FrameSnapshot* s : all) std::copy(s->glyphs.begin(), s->glyphs.end(), dst + s->glyphBase);
     backend_->unmap_buffer(glyphBuf_[slot]);
@@ -6027,7 +6035,7 @@ void Renderer::upload_vectors(FrameSnapshot& snap) noexcept {
         vecCap_[slot] = b.ok() ? bd.bytes : 0;
     }
     void* ptr = nullptr;
-    if (!vecBuf_[slot].valid() || !backend_->map_buffer(vecBuf_[slot], ptr).ok() || !ptr) { mark_incomplete(__FILE__, __LINE__); return; }
+    if (!vecBuf_[slot].valid() || !backend_->map_buffer(vecBuf_[slot], ptr).ok() || !ptr) { mark_incomplete_memory(__FILE__, __LINE__); return; }
     auto* dst = static_cast<Vec4*>(ptr);
     for (FrameSnapshot* s : all) std::copy(s->vec.begin(), s->vec.end(), dst + s->vecBase);
     backend_->unmap_buffer(vecBuf_[slot]);
@@ -7437,7 +7445,7 @@ void Renderer::upload_masks(FrameSnapshot& snap) noexcept {
         maskCap_[slot] = b.ok() ? bd.bytes : 0;
     }
     void* ptr = nullptr;
-    if (!maskBuf_[slot].valid() || !backend_->map_buffer(maskBuf_[slot], ptr).ok() || !ptr) { mark_incomplete(__FILE__, __LINE__); return; }
+    if (!maskBuf_[slot].valid() || !backend_->map_buffer(maskBuf_[slot], ptr).ok() || !ptr) { mark_incomplete_memory(__FILE__, __LINE__); return; }
     auto* dst = static_cast<Vec4*>(ptr);
     for (FrameSnapshot* s : all) std::copy(s->maskData.begin(), s->maskData.end(), dst + s->maskBase);
     backend_->unmap_buffer(maskBuf_[slot]);
@@ -9590,6 +9598,9 @@ Status Renderer::finish_render(FrameSnapshot& snap, const RenderSettings& settin
     }
     incomplete_ = incomplete_ || scene3d_.incomplete()
         || EffectGraph::bypassed_total() != completion.effectsBefore;
+    // 0.5.2 (E1): o que o 3D nunca vai ter (modelo que falhou ao subir) não
+    // segura o quadro: ele sai como a prévia mostra e o export avisa.
+    if (scene3d_.unavailable()) mark_unavailable(scene3d_.unavailable_file(), scene3d_.unavailable_line());
     if (completion.cached) completion.cached->complete = result.ok() && endStatus.ok() && !incomplete_
         && !sliceApprox_ && !snap.missingVideoFrames && !snap.staleVideoFrames
         && EffectGraph::bypassed_total() == completion.effectsBefore

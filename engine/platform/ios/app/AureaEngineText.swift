@@ -51,6 +51,10 @@ enum AureaEngineText {
         ("sem backend grafico", "eng_no_gpu"),
         ("renderer sem backend", "eng_no_gpu"),
         ("ja existe um export em andamento", "eng_export_busy"),
+        // 0.5.2 (E4): a partida do export com prazo (Engine.cpp).
+        ("a previa nao liberou a gpu para a exportacao", "expfail_render_hung"),
+        ("gpu sem resposta ao preparar exportacao", "expfail_render_hung"),
+        ("uma midia do projeto nao abriu a tempo", "eng_media_open_timeout"),
         ("export ja aberto", "eng_export_busy"),
         ("gif longo demais: use um trecho menor ou menos quadros por segundo", "eng_too_long"),
         ("sequencia longa demais: use um trecho menor ou menos quadros por segundo", "eng_too_long"),

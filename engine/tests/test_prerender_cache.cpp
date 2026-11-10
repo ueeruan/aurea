@@ -151,6 +151,46 @@ AUREA_TEST(PreRenderCache, OrphanCleanupPreservesTwoLiveSessionsAndUnknownFiles)
     AUREA_CHECK(fixture.cache.finish(*firstToken).ok());
 }
 
+// Até a 0.5.1 o app Android aparava o cache por fora, do arquivo mais antigo
+// para o mais novo: o owner.bin e o session.lease saíam e os quadros ficavam.
+AUREA_TEST(PreRenderCache, FolderStrippedOfItsMarkerByAnOutsideTrimIsReclaimed) {
+    CacheFixture fixture;
+    const auto token = fixture.begin(2); AUREA_CHECK(token.ok()); if (!token.ok()) return;
+    AUREA_CHECK(fixture.cache.write(*token, 0, pixels(16, 12)).ok());
+    const auto live = fixture.owned();
+    const auto parent = live.parent_path();
+    std::error_code error;
+    const auto strip = [&](const char* name) {
+        const auto folder = parent / name;
+        fs::create_directory(folder, error); AUREA_CHECK(!error);
+        u32 frames = 0;
+        for (const auto& file : fs::directory_iterator(live)) {
+            const auto leaf = file.path().filename().string();
+            if (leaf == "session.lease" || leaf == "owner.bin") continue;
+            fs::copy_file(file.path(), folder / leaf, error); AUREA_CHECK(!error);
+            if (leaf.rfind("frame-", 0) == 0) ++frames;
+        }
+        AUREA_CHECK(frames > 0);
+        return folder;
+    };
+    const auto stripped = strip("owned-0000000000000021-0000000000000022");
+    const auto leased = strip("owned-0000000000000023-0000000000000024");
+    { std::ofstream file(leased / "session.lease"); }
+    const auto foreign = strip("owned-0000000000000025-0000000000000026");
+    { std::ofstream file(foreign / "frame-notes.bin"); file << "keep"; }
+    const auto nested = strip("owned-0000000000000027-0000000000000028");
+    fs::create_directory(nested / "frame-00000000000000000009.bin", error); AUREA_CHECK(!error);
+    const auto otherName = parent / "cache-0000000000000029-000000000000002a";
+    fs::copy(stripped, otherName, fs::copy_options::recursive, error); AUREA_CHECK(!error);
+
+    AUREA_CHECK(PreRenderCache::reclaim_orphans(fixture.directory.string()).ok());
+    AUREA_CHECK(!fs::exists(stripped)); AUREA_CHECK(!fs::exists(leased));
+    AUREA_CHECK(fs::exists(foreign / "frame-notes.bin")); AUREA_CHECK(fs::exists(nested)); AUREA_CHECK(fs::exists(otherName));
+    AUREA_CHECK(fs::exists(live)); AUREA_CHECK(fixture.cache.matches(*token, fixture.key()));
+    std::vector<u16> output;
+    AUREA_CHECK(load(fixture.cache, *token, 0, output).ok()); AUREA_CHECK(output == pixels(16, 12));
+}
+
 AUREA_TEST(PreRenderCache, CumulativeDiskQuotaIncludesAnotherLiveInstance) {
     CacheFixture fixture; PreRenderCache other;
     PreRenderCache::Limits limits; limits.diskBytes = 512;

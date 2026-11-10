@@ -68,7 +68,7 @@ struct DecodeResult {
     bool opened = false, cleanEof = false, pixelsOrdered = true, exactClock = true;
     u32 videoFrames = 0, width = 0, height = 0, audioChannels = 0, sampleRate = 0;
     u64 audioSamples = 0;
-    double audioSquare = 0, stereoDifferenceSquare = 0;
+    double audioSquare = 0, stereoDifferenceSquare = 0, leftSquare = 0;
     i64 firstAudioPtsUs = -1, lastVideoPtsUs = -1;
 };
 
@@ -148,6 +148,7 @@ DecodeResult decode(const std::string& path, double fps) {
                         const float* right = frame->ch_layout.nb_channels == 2 ? reinterpret_cast<const float*>(frame->extended_data[1]) : nullptr;
                         for (int n = 0; n < frame->nb_samples; ++n) {
                             result.audioSquare += left[n] * left[n];
+                            result.leftSquare += left[n] * left[n];
                             if (right) {
                                 result.audioSquare += right[n] * right[n];
                                 const double difference = left[n] - right[n];
@@ -438,5 +439,215 @@ AUREA_TEST(FFmpegExport, CancellationAbortsPartialFileAndAllowsNewSession) {
     AUREA_CHECK(!std::filesystem::exists(path));
     cancel = false;
     (void)exportNumbered(*sink, output("after-cancel"), 15, 30, false);
+}
+
+namespace {
+// Som dos exports abaixo, em 48 kHz estéreo a 30 qps.
+enum class Tone { None, Stereo, RightOnly, Silent };
+
+// Export de quadros numerados sem as conferências extras de exportNumbered:
+// finish() já roda a validação interna estrita (decode inteiro) e publica.
+Status exportTone(ExportSink& sink, const std::string& path, u32 frames, Tone tone) {
+    std::error_code ec; std::filesystem::remove(path, ec);
+    const auto video = configuration(30); AudioStreamConfig audio;
+    if (const Status s = sink.open(path.c_str(), video, tone == Tone::None ? nullptr : &audio); !s.ok()) return s;
+    Picture picture; std::vector<i16> pcm(4096 * 2); u64 samples = 0;
+    for (u32 n = 0; n < frames; ++n) {
+        picture.numbered(n);
+        if (const Status s = sink.write_video(picture.y.data(), kStride, picture.uv.data(), kStride,
+                                              std::llround(n * 1'000'000.0 / 30)); !s.ok()) return s;
+        if (tone == Tone::None) continue;
+        const u64 target = static_cast<u64>(std::llround((n + 1) * kRate / 30.0));
+        while (samples < target) {
+            const u32 count = static_cast<u32>(std::min<u64>(4096, target - samples));
+            for (u32 s = 0; s < count; ++s) {
+                const double t = double(samples + s) / kRate;
+                pcm[s * 2] = tone == Tone::Stereo ? static_cast<i16>(12000 * std::sin(t * 440 * 6.283185307179586)) : i16{0};
+                pcm[s * 2 + 1] = tone == Tone::Silent ? i16{0} : static_cast<i16>(12000 * std::sin(t * 880 * 6.283185307179586));
+            }
+            if (const Status s = sink.write_audio(pcm.data(), count, std::llround(samples * 1'000'000.0 / kRate)); !s.ok()) return s;
+            samples += count;
+        }
+    }
+    return sink.finish();
+}
+std::string detailOf(const Status& status) { return std::string(status.detail().data(), status.detail().size()); }
+std::string warningsOf(const ExportSink& sink) { const char* w = sink.validation_warnings(); return w ? w : ""; }
+
+struct PacketSpan { i64 pos = -1; int size = 0; bool key = false; };
+// Pacotes de vídeo do arquivo, na ordem do contêiner (posição e tamanho no arquivo).
+std::vector<PacketSpan> videoPackets(const std::string& path) {
+    std::vector<PacketSpan> spans;
+    AVFormatContext* format = nullptr; AVPacket* packet = av_packet_alloc();
+    if (packet && avformat_open_input(&format, path.c_str(), nullptr, nullptr) >= 0 &&
+        avformat_find_stream_info(format, nullptr) >= 0) {
+        const int vi = av_find_best_stream(format, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
+        while (vi >= 0 && av_read_frame(format, packet) >= 0) {
+            if (packet->stream_index == vi)
+                spans.push_back(PacketSpan{packet->pos, packet->size, (packet->flags & AV_PKT_FLAG_KEY) != 0});
+            av_packet_unref(packet);
+        }
+    }
+    av_packet_free(&packet); avformat_close_input(&format);
+    return spans;
+}
+// Zera o conteúdo do slice (depois do prefixo de 4 bytes e do cabeçalho NAL):
+// o pacote continua com tamanho, posição e PTS certos — só o bitstream estraga.
+bool corruptPayload(const std::string& path, const PacketSpan& span) {
+    if (span.pos < 0 || span.size <= 6) return false;
+    std::fstream file(path, std::ios::in | std::ios::out | std::ios::binary);
+    if (!file) return false;
+    file.seekp(span.pos + 5);
+    const std::vector<char> zeros(static_cast<size_t>(span.size - 5), 0);
+    file.write(zeros.data(), static_cast<std::streamsize>(zeros.size()));
+    return static_cast<bool>(file);
+}
+// Acima dos 900 quadros do decode inteiro do sink (kFullValidationFrames). GOP
+// de 2 s = 60 quadros → 50 GOPs; orçamento 20·√3000 ≈ 1095 quadros → blocos de
+// 3 GOPs, um decodificado por bloco: o GOP 0 (1o bloco) é decodificado e o GOP 1
+// nunca (FFmpegExportSink.cpp, plan_bounded_validation).
+constexpr u32 kBoundedFrames = 3000;
+} // namespace
+
+/// E3: o nível do som decodificado é medido em todos os canais. Uma mixagem
+/// só no canal direito (esquerdo mudo) era reprovada como "saiu sem som"
+/// porque só o canal 0 contava; o finish() abaixo já roda a validação estrita.
+AUREA_TEST(FFmpegExport, RightOnlyMixPassesAudioLossCheckInBothModes) {
+    auto sink = make_ffmpeg_export_sink(nullptr); AUREA_CHECK(sink != nullptr); if (!sink) return;
+    const auto path = output("right-only-audio");
+    if (!good(exportTone(*sink, path, 30, Tone::RightOnly))) return;
+    ExportOutputValidation expected{kWidth, kHeight, 30, 30, true};
+    if (!good(sink->validate_output(expected))) return;
+    expected.strict = false;
+    if (!good(sink->validate_output(expected))) return;
+    // Pré-condição do caso: o arquivo tem som e o canal esquerdo está mudo
+    // (abaixo de 1 % da energia; o AAC só deixa vazar ruído de quantização).
+    const auto decoded = decode(path, 30);
+    AUREA_CHECK(decoded.opened && decoded.cleanEof);
+    AUREA_CHECK_EQ(decoded.audioChannels, 2u);
+    AUREA_CHECK(decoded.audioSamples > 0 && decoded.audioSquare / (decoded.audioSamples * 2) > .01);
+    AUREA_CHECK(decoded.leftSquare < decoded.audioSquare * .01);
+}
+
+/// E3: arquivo realmente mudo com fonte audível continua reprovado nos dois
+/// modos. O MP4 publicado do export audível é trocado pelo de um export mudo
+/// com os mesmos quadros e relógio: só o som diverge do que o encoder recebeu.
+AUREA_TEST(FFmpegExport, SilentOutputWithAudibleSourceFailsAudioLossCheckInBothModes) {
+    auto silent = make_ffmpeg_export_sink(nullptr); AUREA_CHECK(silent != nullptr); if (!silent) return;
+    const auto silentPath = output("audio-lost-silent");
+    if (!good(exportTone(*silent, silentPath, 30, Tone::Silent))) return;   // fonte muda: passa
+    const Tone audible[] = {Tone::RightOnly, Tone::Stereo};
+    for (const bool strict : {false, true}) {
+        auto sink = make_ffmpeg_export_sink(nullptr); AUREA_CHECK(sink != nullptr); if (!sink) return;
+        const auto path = output(strict ? "audio-lost-strict" : "audio-lost-tolerant");
+        if (!good(exportTone(*sink, path, 30, audible[strict ? 1 : 0]))) return;
+        std::error_code ec;
+        std::filesystem::copy_file(silentPath, path, std::filesystem::copy_options::overwrite_existing, ec);
+        AUREA_CHECK(!ec); if (ec) return;
+        ExportOutputValidation expected{kWidth, kHeight, 30, 30, true};
+        expected.strict = strict;
+        const Status lost = sink->validate_output(expected);
+        AUREA_CHECK(!lost.ok());
+        AUREA_CHECK_MSG(detailOf(lost).find("sem som") != std::string::npos, detailOf(lost).c_str());
+    }
+}
+
+/// E6: export longo no modo tolerante usa a validação limitada (pacotes de
+/// todo o arquivo, decode de parte dos GOPs, áudio inteiro): passa sem aviso, e
+/// o progresso "validando N/M" termina em M. O estrito (decode inteiro) também.
+AUREA_TEST(FFmpegExport, BoundedValidationPassesLongExportAndProgressEndsAtEveryFrame) {
+    auto sink = make_ffmpeg_export_sink(nullptr); AUREA_CHECK(sink != nullptr); if (!sink) return;
+    const auto path = output("bounded-long");
+    if (!good(exportTone(*sink, path, kBoundedFrames, Tone::Stereo))) return;
+    const auto packets = videoPackets(path);
+    AUREA_CHECK_EQ(packets.size(), size_t{kBoundedFrames});
+    const auto keys = std::count_if(packets.begin(), packets.end(), [](const PacketSpan& p) { return p.key; });
+    AUREA_CHECK(keys >= 20);   // GOPs bastantes para o plano limitado valer
+    std::atomic<u64> progress{0};
+    ExportOutputValidation expected{kWidth, kHeight, kBoundedFrames, 30, true};
+    expected.validatedFrames = &progress; expected.strict = false;
+    auto began = std::chrono::steady_clock::now();
+    if (!good(sink->validate_output(expected))) return;
+    const double limitedMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count();
+    AUREA_CHECK_EQ(progress.load(), u64{kBoundedFrames});
+    AUREA_CHECK_MSG(warningsOf(*sink).empty(), warningsOf(*sink).c_str());
+    progress = 0; expected.strict = true;
+    began = std::chrono::steady_clock::now();
+    if (!good(sink->validate_output(expected))) return;
+    const double fullMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count();
+    AUREA_CHECK_EQ(progress.load(), u64{kBoundedFrames});
+    std::printf("\n    %u quadros, %lld GOPs: limitada %.0f ms, inteira %.0f ms\n",
+        kBoundedFrames, static_cast<long long>(keys), limitedMs, fullMs);
+}
+
+/// E6: arquivo cortado no fim. A leitura de TODOS os pacotes continua na
+/// validação limitada, então o corte é visto como no decode inteiro: o estrito
+/// reprova; o tolerante segue a política existente ("arquivo truncado no fim
+/// ainda serve se tem quadros") e publica COM aviso de leitura/quadros ausentes.
+/// O teste exige que o corte seja notado (reprovado ou avisado), nunca silencioso.
+AUREA_TEST(FFmpegExport, BoundedValidationStillSeesTruncatedFileAndStrictRejectsIt) {
+    auto sink = make_ffmpeg_export_sink(nullptr); AUREA_CHECK(sink != nullptr); if (!sink) return;
+    const auto path = output("bounded-truncated");
+    if (!good(exportTone(*sink, path, kBoundedFrames, Tone::None))) return;
+    std::error_code ec;
+    const auto bytes = std::filesystem::file_size(path, ec); AUREA_CHECK(!ec); if (ec) return;
+    std::filesystem::resize_file(path, bytes - bytes / 8, ec); AUREA_CHECK(!ec); if (ec) return;
+    std::atomic<u64> progress{0};
+    ExportOutputValidation expected{kWidth, kHeight, kBoundedFrames, 30, false};
+    expected.validatedFrames = &progress; expected.strict = false;
+    const Status tolerant = sink->validate_output(expected);
+    const std::string warned = warningsOf(*sink);
+    std::printf("\n    tolerante: %s%s [%s], progresso %llu/%u\n", tolerant.ok() ? "publicado" : "reprovado: ",
+        tolerant.ok() ? "" : detailOf(tolerant).c_str(), warned.c_str(),
+        static_cast<unsigned long long>(progress.load()), kBoundedFrames);
+    AUREA_CHECK(!tolerant.ok() || warned.find("frames ausentes") != std::string::npos);
+    AUREA_CHECK(progress.load() < kBoundedFrames);   // pacotes cortados não contam como conferidos
+    if (!tolerant.ok()) return;   // reprovado: a sessão fica em Failed, o estrito não roda de novo
+    expected.strict = true;
+    AUREA_CHECK(!sink->validate_output(expected).ok());
+}
+
+/// E6, limite honesto da validação limitada: o bitstream estragado de um pacote
+/// num GOP que ela NÃO decodifica passa sem aviso — tamanho, posição, PTS,
+/// contagem e relógio do pacote seguem certos, e só o decoder veria o defeito.
+/// (No tolerante o decode inteiro também só AVISARIA disso, a menos que a
+/// imagem mudasse o bastante para a amostra de conteúdo reprovar.) O mesmo
+/// estrago num GOP decodificado (o GOP 0, sempre decodificado) é notado, e o
+/// estrito (decode inteiro) reprova o arquivo.
+AUREA_TEST(FFmpegExport, BoundedValidationSkipsPayloadOfUndecodedGopButSeesDecodedOnes) {
+    const auto exportCorrupt = [](const char* name, bool firstGop, std::unique_ptr<ExportSink>& sink,
+                                  std::string& path) {
+        sink = make_ffmpeg_export_sink(nullptr); AUREA_CHECK(sink != nullptr); if (!sink) return false;
+        path = output(name);
+        if (!good(exportTone(*sink, path, kBoundedFrames, Tone::None))) return false;
+        const auto packets = videoPackets(path);
+        std::vector<size_t> keys;
+        for (size_t i = 0; i < packets.size(); ++i) if (packets[i].key) keys.push_back(i);
+        AUREA_CHECK(keys.size() >= 4 && keys[0] == 0); if (keys.size() < 4 || keys[0] != 0) return false;
+        // Pacote do meio do GOP 0 (quadros 0..k1) ou do GOP 1 (k1..k2), nunca o keyframe.
+        const size_t target = firstGop ? keys[1] / 2 : (keys[1] + keys[2]) / 2;
+        AUREA_CHECK(!packets[target].key);
+        const bool corrupted = corruptPayload(path, packets[target]);
+        AUREA_CHECK(corrupted);
+        return corrupted;
+    };
+    ExportOutputValidation expected{kWidth, kHeight, kBoundedFrames, 30, false};
+    std::unique_ptr<ExportSink> sink; std::string path;
+    // GOP 1 (fora do plano): limitado passa sem aviso; o estrito reprova.
+    if (!exportCorrupt("bounded-undecoded-gop", false, sink, path)) return;
+    expected.strict = false;
+    const Status skipped = sink->validate_output(expected);
+    AUREA_CHECK(skipped.ok());
+    AUREA_CHECK_MSG(warningsOf(*sink).empty(), warningsOf(*sink).c_str());
+    expected.strict = true;
+    AUREA_CHECK(!sink->validate_output(expected).ok());
+    // GOP 0 (sempre decodificado): o limitado nota (aviso ou reprovação).
+    if (!exportCorrupt("bounded-decoded-gop", true, sink, path)) return;
+    expected.strict = false;
+    const Status seen = sink->validate_output(expected);
+    const std::string warned = warningsOf(*sink);
+    std::printf("\n    GOP 0 estragado, limitado: %s [%s]\n", seen.ok() ? "publicado com aviso" : detailOf(seen).c_str(),
+        warned.c_str());
+    AUREA_CHECK(!seen.ok() || !warned.empty());
 }
 #endif

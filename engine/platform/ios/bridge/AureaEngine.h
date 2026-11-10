@@ -232,6 +232,9 @@ typedef NS_OPTIONS(uint32_t, AureaExportFlag) {
     AureaExportFlagResolutionCapped = 1u << 14,
     AureaExportFlagEnvironmentFallback = 1u << 15,
     AureaExportFlagModelFallback   = 1u << 18,
+    /// 0.5.2 (Engine::kExportElementsOmitted): algum quadro saiu sem um
+    /// elemento que não pôde ser desenhado (como a prévia mostra).
+    AureaExportFlagElementsOmitted = 1u << 19,
 };
 
 /// Códigos de codec de saída (ExportCodec).
@@ -1082,6 +1085,37 @@ NS_SWIFT_NAME(AureaEngine)
 - (nullable NSArray<NSString*>*)projectFileMedia:(NSString*)path;
 /// Plugins instalados que um `.aurea` fechado usa: 3 strings por plugin (id, versão, pasta).
 - (nullable NSArray<NSString*>*)projectFilePlugins:(NSString*)path NS_SWIFT_NAME(projectFilePlugins(_:));
+// --- Armazenamento (0.5.2, EngineStorage.cpp; par do AureaEngine.kt) --------
+// A regra de o que pode sair do disco é do motor. `roots` = pastas de mídia do
+// app (as únicas apagáveis); `keep` = bibliotecas dentro delas (Media/Modelos).
+/// Apagar projetos: a mídia que SÓ eles usam. Chame com os projetos ainda no disco.
+/// Chaves: blocked (BOOL), bytes, unreadable, paths ([String]). nil = sem motor.
+- (nullable NSDictionary<NSString*, id>*)mediaReleasePlanIn:(NSString*)projectsDirectory deleted:(NSArray<NSString*>*)deleted
+    roots:(NSArray<NSString*>*)roots keep:(NSArray<NSString*>*)keep editorOpen:(BOOL)editorOpen
+    NS_SWIFT_NAME(mediaReleasePlan(in:deleted:roots:keep:editorOpen:));
+/// Tela de armazenamento. Chaves: blocked, usedBytes, usedFiles, orphanBytes, orphanFiles,
+/// unreadable, orphans ([String]). `anyFile` = qualquer arquivo (varredura do tmp).
+- (nullable NSDictionary<NSString*, id>*)mediaStorageScanIn:(NSString*)projectsDirectory roots:(NSArray<NSString*>*)roots
+    keep:(NSArray<NSString*>*)keep minAgeSeconds:(int64_t)minAgeSeconds anyFile:(BOOL)anyFile
+    NS_SWIFT_NAME(mediaStorageScan(in:roots:keep:minAgeSeconds:anyFile:));
+/// Apaga só o que continua dentro de `roots` (e fora de `keep`): [bytes, arquivos, recusados].
+- (NSArray<NSNumber*>*)removeManagedMedia:(NSArray<NSString*>*)paths roots:(NSArray<NSString*>*)roots
+    keep:(NSArray<NSString*>*)keep NS_SWIFT_NAME(removeManagedMedia(_:roots:keep:));
+/// "Limpar PreRender": NO = um PreRender está gravando agora.
+- (BOOL)clearPreRenderCache NS_SWIFT_NAME(clearPreRenderCache());
+// --- Quadros soltos de sequência (MediaStorage::plan_frame_folder) -----------
+// A mesma seleção importada de novo acha a pasta pronta (nada é copiado); a
+// cópia vai para uma `.parcial` que só vira a pasta depois de conferida.
+/// Chave do conteúdo de um arquivo (MediaStorage): [hash (UInt64), bytes]. nil = ilegível.
++ (nullable NSArray<NSNumber*>*)contentKeyOfFile:(NSString*)path NS_SWIFT_NAME(contentKey(ofFile:));
+/// Chaves: error (0 = ok), reuse (BOOL: a pasta pronta, nada a copiar), directory, staging
+/// (a `.parcial` vazia onde copiar). nil = sem motor.
+- (nullable NSDictionary<NSString*, id>*)planSequenceFrames:(NSArray<NSString*>*)names hashes:(NSArray<NSNumber*>*)hashes
+    sizes:(NSArray<NSNumber*>*)sizes NS_SWIFT_NAME(planSequenceFrames(names:hashes:sizes:));
+/// Depois da cópia. Chaves: error (0 = ok; erro = a cópia já saiu), reused (BOOL), directory.
+- (nullable NSDictionary<NSString*, id>*)commitSequenceFrames:(NSString*)staging NS_SWIFT_NAME(commitSequenceFrames(_:));
+/// Cancelou ou falhou no meio da cópia: a `.parcial` sai agora.
+- (BOOL)discardSequenceFrames:(NSString*)staging NS_SWIFT_NAME(discardSequenceFrames(_:));
 /// Arquivo do projeto (ProjectPackage.cpp): [erro (0 = ok), incluídas, puladas].
 /// `media` = 3 strings por mídia (gravado, legível agora, nome).
 + (NSArray<NSNumber*>*)exportProjectPackage:(NSString*)projectPath to:(NSString*)outPath title:(NSString*)title

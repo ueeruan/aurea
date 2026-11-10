@@ -1281,8 +1281,8 @@ struct HomeProjectDialogs: View {
             AureaAlert(title: entry.title, message: AureaText.t("common_irreversible"),
                        confirmLabel: AureaText.t("project_delete"), destructive: true,
                        onConfirm: {
-                           deleteHomeProjects([entry.id])
-                           library.refresh()
+                           // 0.5.2: a mídia que só ele usava sai junto (a lista vem do motor).
+                           model.deleteProjectsReleasingMedia([entry.id]) { library.refresh() }
                        }, onDismiss: close)
         case .rename(let entry):
             AureaNamePrompt(title: AureaText.t("common_rename"), initial: entry.title,
@@ -1295,9 +1295,8 @@ struct HomeProjectDialogs: View {
             AureaAlert(title: AureaText.t("project_delete_many_title", paths.count), message: AureaText.t("common_irreversible"),
                        confirmLabel: AureaText.t("common_delete"), destructive: true,
                        onConfirm: {
-                           deleteHomeProjects(Array(paths))
                            selection = []
-                           library.refresh()
+                           model.deleteProjectsReleasingMedia(Array(paths)) { library.refresh() }
                        }, onDismiss: close)
         }
     }

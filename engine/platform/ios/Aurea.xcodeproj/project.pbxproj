@@ -50,6 +50,7 @@
 		B4A30000000000000000000C /* LicensesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4A300000000000000000010 /* LicensesView.swift */; };
 		B4A30000000000000000000D /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4A300000000000000000011 /* AppConfig.swift */; };
 		AE00000000000000000029D1 /* ProxyOptimizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000029D0 /* ProxyOptimizer.swift */; };
+		AE00000000000000000052A1 /* StorageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000052A0 /* StorageView.swift */; };
 		AE00000000000000000000F4 /* RealCameraStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000000F3 /* RealCameraStage.swift */; };
 		AE0000000000000000000E02 /* VoiceRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000E01 /* VoiceRecorder.swift */; };
 		AE0000000000000000003402 /* PluginsV2.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000003401 /* PluginsV2.swift */; };
@@ -191,6 +192,7 @@
 		B4A300000000000000000010 /* LicensesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LicensesView.swift; sourceTree = "<group>"; };
 		B4A300000000000000000011 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
 		AE00000000000000000029D0 /* ProxyOptimizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyOptimizer.swift; sourceTree = "<group>"; };
+		AE00000000000000000052A0 /* StorageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageView.swift; sourceTree = "<group>"; };
 		AE00000000000000000000F3 /* RealCameraStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealCameraStage.swift; sourceTree = "<group>"; };
 		AE0000000000000000000E01 /* VoiceRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceRecorder.swift; sourceTree = "<group>"; };
 		AE0000000000000000003401 /* PluginsV2.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginsV2.swift; sourceTree = "<group>"; };
@@ -379,6 +381,7 @@
 				B4A300000000000000000010 /* LicensesView.swift */,
 				B4A300000000000000000011 /* AppConfig.swift */,
 				AE00000000000000000029D0 /* ProxyOptimizer.swift */,
+				AE00000000000000000052A0 /* StorageView.swift */,
 				AE00000000000000000000F3 /* RealCameraStage.swift */,
 				AE0000000000000000000E01 /* VoiceRecorder.swift */,
 				AE0000000000000000003401 /* PluginsV2.swift */,
@@ -704,6 +707,7 @@
 				B4A30000000000000000000C /* LicensesView.swift in Sources */,
 				B4A30000000000000000000D /* AppConfig.swift in Sources */,
 				AE00000000000000000029D1 /* ProxyOptimizer.swift in Sources */,
+				AE00000000000000000052A1 /* StorageView.swift in Sources */,
 				AE00000000000000000000F4 /* RealCameraStage.swift in Sources */,
 				AE0000000000000000000E02 /* VoiceRecorder.swift in Sources */,
 				AE0000000000000000003402 /* PluginsV2.swift in Sources */,

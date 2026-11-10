@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: export que termina com aviso em vez de parar (E1) e partida com prazo (E4). -->
+<resources>
+    <string name="export_note_elements_omitted">Un elemento que no se pudo dibujar en este dispositivo quedó fuera del video, como en la vista previa.</string>
+    <string name="eng_media_open_timeout">un archivo del proyecto tardó demasiado en abrirse (puede estar solo en la nube). Ábrelo en el dispositivo y vuelve a intentarlo</string>
+</resources>

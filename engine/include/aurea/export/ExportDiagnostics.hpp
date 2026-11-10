@@ -19,10 +19,16 @@ namespace aurea {
 class ExportDiagnostics {
 public:
     enum class Lane : u32 { Session, Producer, Encoder };
+    /// 0.5.2 (E4): as etapas novas vão NO FIM (os números das antigas não
+    /// mudam). Antes, "sources"/"audio_snapshot" cobriam tudo até CodecOpen
+    /// (identidade das fontes, varredura do checkpoint, espera do renderMutex_,
+    /// esvaziamento da GPU, renderizador do export) e o relatório do LG K61 não
+    /// dizia qual delas prendeu a partida.
     enum class Stage : u32 {
         Idle, Admission, Preparation, Snapshot, Sources, AudioSnapshot, CodecOpen,
         GpuSetup, Decode, Render, Readback, VideoInput, AudioInput, Drain,
-        Validation, Publish, Abort, Complete, Failed, Cancelled
+        Validation, Publish, Abort, Complete, Failed, Cancelled,
+        SourceIdentity, CheckpointScan, DiskCheck, RenderLock, GpuDrain, OfflineInit
     };
     enum class Counter : u32 { Rendered, Submitted, VideoPackets, AudioPackets, InputAgain, OutputAgain, Count };
     struct Format {
@@ -36,6 +42,13 @@ public:
         std::lock_guard lock(mutex_);
         if (state_.ended) return;
         auto& target = state_.lanes[static_cast<usize>(lane)];
+        // 0.5.2: a etapa em que a sessão acabou some quando ela vira
+        // "failed"/"cancelled"; `endedFrom` guarda qual era (e há quanto tempo).
+        if (lane == Lane::Session && target.stage != stage &&
+            (stage == Stage::Failed || stage == Stage::Cancelled)) {
+            state_.endedFrom = target.stage;
+            state_.endedFromSince = target.since;
+        }
         if (target.stage != stage) { target.stage = stage; target.since = monotonic_ns(); }
         if (lane == Lane::Session && (stage == Stage::Complete || stage == Stage::Failed || stage == Stage::Cancelled)) {
             state_.ended = monotonic_ns();
@@ -85,6 +98,21 @@ public:
         copy_token(state_.checkpoint, state);
         state_.resumeFrame = resumeFrame;
     }
+    /// 0.5.2 (E1): onde o renderizador marcou o quadro incompleto que o export
+    /// esperou (arquivo:linha do motor), e quantos pontos foram aceitos sem o
+    /// recurso (OfflineFrameRenderer). ASCII seguro.
+    void incomplete_site(const char* file, u32 line, u32 unresolved) noexcept {
+        std::lock_guard lock(mutex_);
+        if (state_.ended) return;
+        char text[sizeof(state_.site)]{};
+        if (file) {
+            const char* base = file;
+            for (const char* c = file; *c; ++c) if (*c == '/' || *c == '\\') base = c + 1;
+            std::snprintf(text, sizeof(text), "%s:%u", base, line);
+        }
+        copy_token(state_.site, text);
+        state_.unresolvedSites = unresolved;
+    }
     [[nodiscard]] std::string json() const noexcept {
 #if defined(__cpp_exceptions) || defined(_CPPUNWIND)
         try {
@@ -107,7 +135,8 @@ public:
                 "\"rendered\":%llu,\"submitted\":%llu,\"videoPackets\":%llu,\"audioPackets\":%llu,"
                 "\"inputAgain\":%llu,\"outputAgain\":%llu,\"firstInputMs\":%lld,\"firstPacketMs\":%lld,"
                 "\"hasResult\":%s,\"result\":%d,\"negotiatedColor\":null,\"encoderPath\":\"%s\","
-                "\"checkpoint\":\"%s\",\"resumeFrame\":%u}",
+                "\"checkpoint\":\"%s\",\"resumeFrame\":%u,\"endedFrom\":\"%s\",\"endedFromMs\":%llu,"
+                "\"incompleteSite\":\"%s\",\"unresolvedSites\":%u}",
                 static_cast<unsigned long long>(start_), ms(now, start_), name(snapshot.lanes[0].stage), ms(now, snapshot.lanes[0].since),
                 name(snapshot.lanes[1].stage), ms(now, snapshot.lanes[1].since),
                 name(snapshot.lanes[2].stage), ms(now, snapshot.lanes[2].since),
@@ -122,7 +151,9 @@ public:
                 input ? static_cast<long long>(ms(input, start_)) : -1ll,
                 packet ? static_cast<long long>(ms(packet, start_)) : -1ll,
                 snapshot.hasResult ? "true" : "false", snapshot.result, snapshot.path,
-                snapshot.checkpoint[0] ? snapshot.checkpoint : "off", snapshot.resumeFrame);
+                snapshot.checkpoint[0] ? snapshot.checkpoint : "off", snapshot.resumeFrame,
+                snapshot.endedFromSince ? name(snapshot.endedFrom) : "", snapshot.endedFromSince ? ms(now, snapshot.endedFromSince) : 0ull,
+                snapshot.site, snapshot.unresolvedSites);
             return written > 0 && written < static_cast<int>(sizeof(buffer)) ? std::string(buffer, written) : "{}";
 #if defined(__cpp_exceptions) || defined(_CPPUNWIND)
         } catch (...) { return "{}"; }
@@ -137,6 +168,10 @@ private:
         char path[320]{};   ///< encoderPath: degrau da escada em uso + falhas
         char checkpoint[24]{};   ///< estado do checkpoint (ver checkpoint())
         u32 resumeFrame = 0;
+        Stage endedFrom = Stage::Idle;   ///< a etapa antes de "failed"/"cancelled"
+        u64 endedFromSince = 0;          ///< desde quando estava nela (0 = não acabou assim)
+        char site[48]{};                 ///< incompleteSite (arquivo:linha, só o nome)
+        u32 unresolvedSites = 0;
         u32 candidates = 0;
         u32 codedWidth = 0, codedHeight = 0;
         i32 result = 0;
@@ -159,13 +194,14 @@ private:
         usize count = 0;
         if (text) for (; text[count] && count + 1 < N; ++count) {
             const unsigned char c = static_cast<unsigned char>(text[count]);
-            out[count] = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-' ? c : '_';
+            out[count] = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-' || c == ':' ? c : '_';
         }
         out[count] = '\0';
     }
     static const char* name(Stage stage) noexcept {
         static constexpr const char* names[] = {"idle", "admission", "preparation", "snapshot", "sources", "audio_snapshot", "codec_open",
-            "gpu_setup", "decode", "render", "readback", "video_input", "audio_input", "drain", "validation", "publish", "abort", "complete", "failed", "cancelled"};
+            "gpu_setup", "decode", "render", "readback", "video_input", "audio_input", "drain", "validation", "publish", "abort", "complete", "failed", "cancelled",
+            "source_identity", "checkpoint_scan", "disk_check", "render_lock", "gpu_drain", "offline_init"};
         const auto index = static_cast<usize>(stage);
         return index < std::size(names) ? names[index] : "unknown";
     }

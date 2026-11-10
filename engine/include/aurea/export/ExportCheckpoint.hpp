@@ -141,6 +141,16 @@ struct Candidate {
     return resumeFrame > m.lastResumeFrame && failures <= kMaxFailureResumes;
 }
 
+/// Limpeza da abertura do motor (o limite de TEMPO do checkpoint; o de
+/// quantidade é `remove_others`, um por vez). Sai o checkpoint que nenhum
+/// export vai continuar: sem manifesto legível, ou com as continuações
+/// esgotadas, parado há mais de `idleSeconds`; e qualquer um (a pausa
+/// esquecida) parado há mais de `maxAgeSeconds`. O vivo cresce a cada GOP:
+/// nunca é tão velho. Devolve quantos registros saíram.
+u32 sweep_stale(const std::string& directory, u64 idleSeconds, u64 maxAgeSeconds) noexcept;
+inline constexpr u64 kStaleIdleSeconds = 3600;
+inline constexpr u64 kStaleMaxAgeSeconds = 7ull * 24 * 3600;
+
 /// Procura na pasta o manifesto com `requestKey` e confere o registro. Só vale
 /// com progresso desde a última continuação e dentro de kMaxFailureResumes.
 [[nodiscard]] Candidate find_candidate(const std::string& directory, u64 requestKey) noexcept;

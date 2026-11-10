@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <atomic>
 #include <bit>
+#include <chrono>
 #include <cinttypes>
 #include <cstdio>
 #include <cstring>
@@ -270,6 +271,44 @@ u32 remove_others(const std::string& dir, const std::string& keepLog) noexcept {
             if (std::find(logs.begin(), logs.end(), log) == logs.end()) logs.push_back(log);
         }
         for (const auto& log : logs) {
+            if (fileio::exists(log)) ++removed;
+            remove(log);
+        }
+    } catch (...) {}
+    return removed;
+}
+
+u32 sweep_stale(const std::string& dir, u64 idleSeconds, u64 maxAgeSeconds) noexcept {
+    if (dir.empty()) return 0;
+    u32 removed = 0;
+    try {
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        // Registro → o mais novo da família (registro, PCM, manifesto).
+        std::vector<std::pair<std::string, fs::file_time_type>> logs;
+        for (fs::directory_iterator it(fs::u8path(dir), ec), end; !ec && it != end; it.increment(ec)) {
+            const auto status = it->symlink_status(ec);
+            if (ec) break;
+            if (!fs::is_regular_file(status)) continue;
+            const std::string name = utf8(it->path().filename());
+            if (name.rfind(kPrefix, 0) != 0) continue;
+            std::string log = utf8(it->path());
+            if (ends_with(log, ".pcm") || ends_with(log, ".ckpt")) log.erase(log.rfind('.'));
+            if (!ends_with(log, kLogExtension)) continue;
+            const auto time = it->last_write_time(ec);
+            if (ec) { ec.clear(); continue; }
+            const auto at = std::find_if(logs.begin(), logs.end(), [&](const auto& l) { return l.first == log; });
+            if (at == logs.end()) logs.emplace_back(log, time);
+            else at->second = std::max(at->second, time);
+        }
+        const auto now = fs::file_time_type::clock::now();
+        for (const auto& [log, newest] : logs) {
+            const auto idle = now - newest;
+            Manifest m;
+            const bool readable = read_manifest(log, m);
+            const u32 failures = readable ? m.failureResumes + (m.state == SessionState::Running ? 1u : 0u) : 0u;
+            const bool dead = !readable || (m.state != SessionState::Paused && failures > kMaxFailureResumes);
+            if (idle < std::chrono::seconds(static_cast<i64>(dead ? idleSeconds : maxAgeSeconds))) continue;
             if (fileio::exists(log)) ++removed;
             remove(log);
         }

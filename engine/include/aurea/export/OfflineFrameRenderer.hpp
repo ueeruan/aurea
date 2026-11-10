@@ -10,7 +10,8 @@ public:
     ~OfflineFrameRenderer() { shutdown(); }
     Status initialize(GPUBackend& gpu, const EffectRegistry& effects,
                       VideoSourceFactory* sources, MemoryManager* memory,
-                      u64 transientBudget, u64 fenceTimeoutNs) noexcept;
+                      u64 transientBudget, u64 fenceTimeoutNs,
+                      const std::atomic<bool>* cancel = nullptr) noexcept;
     Renderer& compositor() noexcept { return renderer_; }
     Status render(const Project& project, CompositionId composition,
                   FrameIndex time, const OffscreenTarget& target,
@@ -24,6 +25,23 @@ public:
     [[nodiscard]] bool take_approximate() noexcept { const bool a = approximate_; approximate_ = false; return a; }
     /// Quadros aproximados nesta sessão (diagnóstico).
     [[nodiscard]] u32 approximate_frames() const noexcept { return approximateFrames_; }
+    /// 0.5.2 (E1): algum quadro desde a última leitura saiu sem um recurso que
+    /// não chega (Renderer::take_unavailable, ou um ponto declarado sem
+    /// solução abaixo): o motor marca kExportElementsOmitted e as telas avisam.
+    [[nodiscard]] bool take_omitted() noexcept { const bool o = omitted_; omitted_ = false; return o; }
+    /// Pontos (arquivo:linha) declarados sem solução nesta sessão.
+    [[nodiscard]] u32 unresolved_sites() const noexcept { return unresolvedCount_; }
+    /// O último ponto que deixou um quadro incompleto (diagnóstico do export).
+    [[nodiscard]] const char* last_incomplete_file() const noexcept { return siteFile_; }
+    [[nodiscard]] u32 last_incomplete_line() const noexcept { return siteLine_; }
+    /// 0.5.2 (E1): um quadro EXATO que ficou incompleto pelo prazo inteiro, sem
+    /// nada a caminho (upload pendente, ambiente carregando), tem o ponto que o
+    /// segurou declarado sem solução: ele sai como a prévia mostra (sem aquilo)
+    /// e o export segue com aviso, em vez de falhar no mesmo quadro em todo
+    /// degrau. Os quadros seguintes presos SÓ por esse ponto saem depois desta
+    /// espera curta — o custo do prazo é pago uma vez por ponto, não por quadro.
+    static constexpr u64 kUnresolvedSiteWaitNs = 150'000'000ull;
+    static constexpr u32 kMaxUnresolvedSites = 8;
     /// Prazos do quadro exato (0.3.0). Sem avanço do decoder por `reopenNs`, a
     /// fonte que espera é reaberta (uma vez por quadro); sem o exato depois de
     /// `approximateNs` sem avanço (ou `approximateTotalNs` no total), sai o mais
@@ -70,6 +88,15 @@ private:
     std::condition_variable wake_;
     ExactFrameDeadlines deadlines_{};
     bool approximate_ = false;
+    bool omitted_ = false;          ///< take_omitted
+    struct Site { const char* file = nullptr; u32 line = 0; };
+    Site unresolved_[kMaxUnresolvedSites]{};
+    u32 unresolvedCount_ = 0;
+    const char* siteFile_ = nullptr;
+    u32 siteLine_ = 0;
+    char failure_[192]{};           ///< o detalhe da falha (o Status guarda o ponteiro)
+    [[nodiscard]] bool site_unresolved(const char* file, u32 line) const noexcept;
+    void remember_unresolved(const char* file, u32 line) noexcept;
     bool softwareDecode_ = false;
     u32 approximateFrames_ = 0;
     u32 approximateRun_ = 0;   ///< aproximados SEGUIDOS (zera no próximo exato)

@@ -863,10 +863,25 @@ struct Encoder::Impl {
         const u32 bitrateBps = export_encoder_bitrate_bps(askedBps, info.maxBitrateBps);
         if (bitrateBps != askedBps)
             AUREA_LOG_INFO("export: %s anuncia ate %u bps; taxa %u -> %u", info.name, info.maxBitrateBps, askedBps, bitrateBps);
+        // Export é trabalho OFFLINE: sem "operating-rate" e "priority" o
+        // encoder do aparelho se configura como o de uma chamada de vídeo
+        // (tempo real, no ritmo do frame-rate, prioridade de câmera) e o
+        // fabricante pode segurar o clock dele no mínimo que dá conta de 30 qps.
+        // operating-rate = Short.MAX_VALUE é a convenção do framework para "o
+        // mais rápido possível" (a mesma do Media3 Transformer; Integer.MAX_VALUE
+        // é recusado por alguns codecs Qualcomm); priority 1 = não tempo real
+        // (API 23+). São só dicas: encoder que recusa o configure com elas é
+        // recriado e configurado sem elas UMA vez (configure_offline abaixo) —
+        // a recusa nunca condena o encoder nem desce a escada.
+        bool offlineHints = true;
         const auto configure = [&](i32 rate) noexcept -> media_status_t {
             AMediaFormat* format = AMediaFormat_new();
             if (!format) return AMEDIA_ERROR_UNKNOWN;
             AMediaFormat_setString(format, "mime", r.hevc ? "video/hevc" : "video/avc");
+            if (offlineHints) {
+                AMediaFormat_setInt32(format, "priority", 1);
+                AMediaFormat_setInt32(format, "operating-rate", 32767);
+            }
             AMediaFormat_setInt32(format, "width", static_cast<i32>(r.width));
             AMediaFormat_setInt32(format, "height", static_cast<i32>(r.height));
             AMediaFormat_setInt32(format, "color-format", colorFormat);
@@ -893,21 +908,37 @@ struct Encoder::Impl {
             AMediaFormat_delete(format);
             return done;
         };
+        // Um configure recusado deixa o MediaCodec em erro: recria antes de
+        // tentar de novo (o mesmo que o caminho do CBR já fazia). Sem codec
+        // recriado, `codec` fica nulo e quem chama devolve EncoderUnavailable.
+        const auto recreate = [&]() noexcept -> bool {
+            (void)AMediaCodec_delete(codec);
+            codec = AMediaCodec_createCodecByName(info.name);
+            return codec != nullptr;
+        };
+        const auto configure_offline = [&](i32 rate) noexcept -> media_status_t {
+            const media_status_t done = configure(rate);
+            if (done == AMEDIA_OK || !offlineHints) return done;
+            AUREA_LOG_WARN("export: %s recusou operating-rate/priority (%d); configura sem as dicas offline",
+                           info.name, static_cast<int>(done));
+            offlineHints = false;
+            if (!recreate()) return AMEDIA_ERROR_UNKNOWN;
+            return configure(rate);
+        };
         media_status_t configured = AMEDIA_ERROR_UNKNOWN;
         if (forcedCbr) {
             // android_codec::vbr_drops_frames: o VBR deste encoder descarta quadros.
             AUREA_LOG_INFO("export: %s descarta quadros em VBR; usando CBR na mesma taxa", info.name);
-            configured = configure(kBitrateCbr);
-            if (configured != AMEDIA_OK) {
+            configured = configure_offline(kBitrateCbr);
+            if (configured != AMEDIA_OK && codec) {
                 AUREA_LOG_WARN("export: %s recusou CBR (%d); abre no modo pedido", info.name, static_cast<int>(configured));
-                (void)AMediaCodec_delete(codec);
-                codec = AMediaCodec_createCodecByName(info.name);
-                if (!codec) return fail(Errc::EncoderUnavailable, "MediaCodec nao criou %s", info.name);
-                configured = configure(mode);
+                if (!recreate()) return fail(Errc::EncoderUnavailable, "MediaCodec nao criou %s", info.name);
+                configured = configure_offline(mode);
             }
         } else {
-            configured = configure(mode);
+            configured = configure_offline(mode);
         }
+        if (!codec) return fail(Errc::EncoderUnavailable, "MediaCodec nao criou %s", info.name);
         if (configured != AMEDIA_OK)
             return fail(Errc::EncoderUnavailable, "MediaCodec configure recusou %s (%d)", description, static_cast<int>(configured));
         if (const Status s = surfaceInput ? open_surface() : read_buffer_layout(); !s.ok()) return s;

@@ -509,6 +509,8 @@ class ExportProgress {
     val environmentFallback: Boolean get() = flags and FLAG_ENVIRONMENT_FALLBACK != 0
     /** 0.3.2: o modelo Original não coube; saiu o da prévia. */
     val modelFallback: Boolean get() = flags and FLAG_MODEL_FALLBACK != 0
+    /** 0.5.2: algum quadro saiu sem um elemento que não pôde ser desenhado (como a prévia mostra). */
+    val elementsOmitted: Boolean get() = flags and FLAG_ELEMENTS_OMITTED != 0
     /** Este export roda no modo de segurança (refeito depois de o encoder travar). */
     val safeMode: Boolean get() = flags and FLAG_SAFE_MODE != 0
     /**
@@ -567,8 +569,10 @@ class ExportProgress {
         const val FLAG_RESOLUTION_CAPPED = 1 shl 14
         const val FLAG_ENVIRONMENT_FALLBACK = 1 shl 15
         const val FLAG_MODEL_FALLBACK = 1 shl 18
+        /** 0.5.2 (Engine::kExportElementsOmitted). */
+        const val FLAG_ELEMENTS_OMITTED = 1 shl 19
         const val QUALITY_NOTICE_FLAGS = FLAG_BLUR_REDUCED or FLAG_RESOLUTION_CAPPED or
-            FLAG_ENVIRONMENT_FALLBACK or FLAG_MODEL_FALLBACK
+            FLAG_ENVIRONMENT_FALLBACK or FLAG_MODEL_FALLBACK or FLAG_ELEMENTS_OMITTED
         // aurea::kExportRetryShift / kExportRetrySoftwareDecode (ExportWatchdog.hpp).
         const val RETRY_SHIFT = 16
         const val RETRY_SOFTWARE_DECODE = 1 shl 18

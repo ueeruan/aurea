@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: export que termina com aviso em vez de parar (E1) e partida com prazo (E4). -->
+<resources>
+    <string name="export_note_elements_omitted">जो एलिमेंट इस डिवाइस पर नहीं बन सका, वह प्रीव्यू की तरह वीडियो में शामिल नहीं हुआ।</string>
+    <string name="eng_media_open_timeout">प्रोजेक्ट की एक फ़ाइल खुलने में बहुत देर लगी (हो सकता है वह सिर्फ़ क्लाउड में हो)। उसे डिवाइस पर खोलें और फिर से कोशिश करें</string>
+</resources>

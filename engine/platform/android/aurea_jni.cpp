@@ -2963,6 +2963,133 @@ AUREA_JNI jobjectArray AUREA_FN(nativeProjectFilePlugins)(JNIEnv* env, jclass, j
     return string_array(env, flat);
 }
 
+// --- Armazenamento (0.5.2, EngineStorage.cpp) --------------------------------
+// A regra de o que pode sair do disco é do motor; o Kotlin só passa as pastas
+// do app e apaga o que voltar, pela porta do motor (que confere de novo).
+namespace {
+Engine::MediaStorageRequest storage_request(JNIEnv* env, jstring projects, jobjectArray deleted, jobjectArray roots,
+                                            jobjectArray keep, jobjectArray skip) {
+    Engine::MediaStorageRequest r;
+    r.projectsDirectory = to_string(env, projects);
+    r.deleted = jni_string_list(env, deleted);
+    r.managedRoots = jni_string_list(env, roots);
+    r.keepRoots = jni_string_list(env, keep);
+    r.skipProjects = jni_string_list(env, skip);   // quarentena (ProjectGuard): nunca lidos
+    return r;
+}
+} // namespace
+
+/// Apagar projetos: [bloqueado (0/1), bytes, ilegíveis, caminhos…]. null = sem motor.
+AUREA_JNI jobjectArray AUREA_FN(nativeMediaReleasePlan)(JNIEnv* env, jclass, jlong handle, jstring projects,
+                                                        jobjectArray deleted, jobjectArray roots, jobjectArray keep,
+                                                        jobjectArray skip, jboolean editorOpen) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return nullptr;
+    Engine::MediaStorageRequest r = storage_request(env, projects, deleted, roots, keep, skip);
+    r.editorOpen = editorOpen == JNI_TRUE;
+    storage::ReleasePlan plan;
+    const Status s = c->engine.media_release_plan(r, plan);
+    std::vector<std::string> flat{(plan.blocked || !s.ok()) ? "1" : "0", std::to_string(plan.bytes), std::to_string(plan.unreadable)};
+    if (s.ok() && !plan.blocked) flat.insert(flat.end(), plan.paths.begin(), plan.paths.end());
+    return string_array(env, flat);
+}
+
+/// Tela de armazenamento: [bloqueado, bytes usados, arquivos usados, bytes órfãos,
+/// arquivos órfãos, ilegíveis, órfãos…]. `minAgeSeconds`/`anyFile`: ver MediaStorage.hpp.
+AUREA_JNI jobjectArray AUREA_FN(nativeMediaStorageScan)(JNIEnv* env, jclass, jlong handle, jstring projects,
+                                                        jobjectArray roots, jobjectArray keep, jobjectArray skip,
+                                                        jlong minAgeSeconds, jboolean anyFile) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return nullptr;
+    Engine::MediaStorageRequest r = storage_request(env, projects, nullptr, roots, keep, skip);
+    r.minAgeSeconds = static_cast<u64>(std::max<jlong>(0, minAgeSeconds));
+    r.anyFile = anyFile == JNI_TRUE;
+    storage::ScanResult scan;
+    const Status s = c->engine.media_storage_scan(r, scan);
+    const bool blocked = scan.blocked || !s.ok();
+    std::vector<std::string> flat{blocked ? "1" : "0", std::to_string(scan.referencedBytes), std::to_string(scan.referencedFiles),
+                                  std::to_string(scan.orphanBytes), std::to_string(scan.orphanFiles), std::to_string(scan.unreadable)};
+    if (!blocked) flat.insert(flat.end(), scan.orphans.begin(), scan.orphans.end());
+    return string_array(env, flat);
+}
+
+/// Apaga só o que continua dentro das pastas de mídia do app: [bytes, arquivos, recusados].
+AUREA_JNI jlongArray AUREA_FN(nativeRemoveManagedMedia)(JNIEnv* env, jclass, jlong handle, jobjectArray paths,
+                                                        jobjectArray roots, jobjectArray keep) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return nullptr;
+    const storage::RemoveResult r = c->engine.remove_managed_media(jni_string_list(env, paths), jni_string_list(env, roots),
+                                                                   jni_string_list(env, keep));
+    jlongArray out = env->NewLongArray(3);
+    if (!out) return nullptr;
+    const jlong values[3] = {static_cast<jlong>(r.bytes), static_cast<jlong>(r.files), static_cast<jlong>(r.refused)};
+    env->SetLongArrayRegion(out, 0, 3, values);
+    return out;
+}
+
+/// "Limpar PreRender" da tela de armazenamento. false = um PreRender está gravando.
+AUREA_JNI jboolean AUREA_FN(nativeClearPreRenderCache)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.clear_prerender_cache() ? JNI_TRUE : JNI_FALSE;
+}
+
+// --- Quadros soltos de sequência (storage::plan_frame_folder) ------------------
+// O Kotlin lê a chave de cada URI escolhida pelo descritor (nada é gravado),
+// pede o plano, copia só quando não há pasta pronta e entrega a cópia.
+
+/// Chave do conteúdo (MediaStorage) de um descritor aberto: [hash, bytes]; null = ilegível.
+/// O descritor continua do Kotlin (é lido por uma cópia dele).
+AUREA_JNI jlongArray AUREA_FN(nativeContentKeyFd)(JNIEnv* env, jclass, jint fd) {
+    const int own = fd >= 0 ? ::dup(fd) : -1;
+    if (own < 0) return nullptr;
+    std::FILE* f = ::fdopen(own, "rb");
+    if (!f) { ::close(own); return nullptr; }
+    u64 hash = 0, bytes = 0;
+    const Status s = storage::stream_content_key(f, hash, bytes);
+    std::fclose(f);
+    if (!s.ok()) return nullptr;
+    jlongArray out = env->NewLongArray(2);
+    if (!out) return nullptr;
+    const jlong values[2] = {static_cast<jlong>(hash), static_cast<jlong>(bytes)};
+    env->SetLongArrayRegion(out, 0, 2, values);
+    return out;
+}
+
+/// [erro (0 = ok), reaproveitada (1/0), pasta, cópia (.parcial; vazia quando reaproveitada)].
+AUREA_JNI jobjectArray AUREA_FN(nativePlanSequenceFrames)(JNIEnv* env, jclass, jlong handle, jobjectArray names,
+                                                          jlongArray hashes, jlongArray sizes) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !names || !hashes || !sizes) return nullptr;
+    const std::vector<std::string> list = jni_string_list(env, names);
+    const jsize n = env->GetArrayLength(hashes);
+    if (n != env->GetArrayLength(sizes) || static_cast<usize>(n) != list.size()) return nullptr;
+    std::vector<jlong> h(static_cast<usize>(n)), b(static_cast<usize>(n));
+    env->GetLongArrayRegion(hashes, 0, n, h.data());
+    env->GetLongArrayRegion(sizes, 0, n, b.data());
+    std::vector<storage::FrameKey> frames(list.size());
+    for (usize i = 0; i < list.size(); ++i) frames[i] = {list[i], static_cast<u64>(h[i]), static_cast<u64>(b[i])};
+    storage::FrameFolderPlan plan;
+    const Status s = c->engine.plan_sequence_frames(frames, plan);
+    return string_array(env, {std::to_string(s.ok() ? 0 : static_cast<int>(s.code())), plan.reuse ? "1" : "0",
+                              plan.directory, plan.staging});
+}
+
+/// Depois da cópia: [erro (0 = ok), reaproveitada (1/0), pasta]. Erro = a cópia já saiu.
+AUREA_JNI jobjectArray AUREA_FN(nativeCommitSequenceFrames)(JNIEnv* env, jclass, jlong handle, jstring staging) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return nullptr;
+    std::string directory;
+    bool reused = false;
+    const Status s = c->engine.commit_sequence_frames(to_string(env, staging), directory, reused);
+    return string_array(env, {std::to_string(s.ok() ? 0 : static_cast<int>(s.code())), reused ? "1" : "0", directory});
+}
+
+/// Cancelou ou falhou no meio da cópia: a `.parcial` sai agora.
+AUREA_JNI jboolean AUREA_FN(nativeDiscardSequenceFrames)(JNIEnv* env, jclass, jlong handle, jstring staging) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.discard_sequence_frames(to_string(env, staging)) ? JNI_TRUE : JNI_FALSE;
+}
+
 /// `media`: 3 strings por mídia (gravado, legível agora, nome). Devolve
 /// [código do erro (0 = ok), incluídas, puladas].
 AUREA_JNI jintArray AUREA_FN(nativeExportProjectPackage)(JNIEnv* env, jclass, jstring project, jstring out, jstring title,
@@ -5134,8 +5261,10 @@ AUREA_JNI jint AUREA_FN(nativeExportNextAttempt)(JNIEnv*, jclass, jint attempt, 
     shape.fps = fps > 0.0 ? fps : 0.0;
     shape.hevc = hevc == JNI_TRUE;
     shape.upscale = upscale == JNI_TRUE;
-    return static_cast<jint>(export_next_attempt(static_cast<u32>(std::clamp<jint>(attempt, 0, static_cast<jint>(kExportAttemptMax))),
-                                                 kind, shape));
+    // 0.5.2: com a memória das tentativas deste pedido (ExportAttemptLedger,
+    // gravada pelo motor): falha determinística no mesmo ponto para a escada.
+    return static_cast<jint>(ExportAttemptLedger::process().next(
+        static_cast<u32>(std::clamp<jint>(attempt, 0, static_cast<jint>(kExportAttemptMax))), kind, shape));
 }
 
 /// O lado menor que o degrau exporta (`requested` 0 = o da composição).

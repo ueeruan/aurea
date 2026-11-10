@@ -126,10 +126,12 @@ internal fun SettingsDrawer(
     var keyDialog by remember { mutableStateOf(false) }
     var languageMenu by remember { mutableStateOf(false) }
     var stressSheet by remember { mutableStateOf(false) }
+    var storageDialog by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val version = remember { readVersion(context) }
     var taps by remember { mutableIntStateOf(0) }
     if (keyDialog) GroqKeyDialog(store, onDismiss = { keyDialog = false })
+    if (storageDialog) StorageDialog(store, onDismiss = { storageDialog = false })
     if (stressSheet) {
         StressSheet(store, version.name to version.build, onDismiss = { stressSheet = false })
     }
@@ -253,6 +255,11 @@ internal fun SettingsDrawer(
                 TapRow(stringResource(R.string.settings_clear_cache), stringResource(R.string.settings_clear_cache_note)) {
                     store.clearCache()
                     store.effectPreviews?.clear()
+                }
+                GroupDivider()
+                // 0.5.2: o que ocupa espaço, por tipo, e o que pode sair (StorageDialog).
+                TapRow(stringResource(R.string.storage_title), stringResource(R.string.storage_row_note), tag = "home.drawer.storage.open") {
+                    storageDialog = true
                 }
                 GroupDivider()
                 // Prévias de efeitos: desligado, os cartões de efeito mostram só a

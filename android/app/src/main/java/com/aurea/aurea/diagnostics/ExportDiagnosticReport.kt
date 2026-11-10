@@ -20,7 +20,9 @@ object ExportDiagnosticReport {
     private val keys = listOf("sessionToken", "elapsedMs", "sessionStage", "sessionWaitMs", "producerStage", "producerWaitMs",
         "encoderStage", "encoderWaitMs", "encoder", "backend", "candidateCount", "requestedColor", "codedWidth", "codedHeight",
         "width", "height", "fpsNumerator", "fpsDenominator", "bitrate", "requestedProfile", "safeMode", "rendered", "submitted",
-        "videoPackets", "audioPackets", "inputAgain", "outputAgain", "firstInputMs", "firstPacketMs", "hasResult", "result", "negotiatedColor")
+        "videoPackets", "audioPackets", "inputAgain", "outputAgain", "firstInputMs", "firstPacketMs", "hasResult", "result", "negotiatedColor",
+        // 0.5.2 (E4/E1): onde a partida parou e o ponto do quadro incompleto (ExportDiagnostics.hpp).
+        "checkpoint", "endedFrom", "endedFromMs", "incompleteSite", "unresolvedSites")
 
     @Synchronized fun begin(context: Context, previous: String): Long {
         generation++

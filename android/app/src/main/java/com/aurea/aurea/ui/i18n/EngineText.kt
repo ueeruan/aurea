@@ -59,6 +59,10 @@ object EngineText {
         "sem backend grafico" to R.string.eng_no_gpu,
         "renderer sem backend" to R.string.eng_no_gpu,
         "ja existe um export em andamento" to R.string.eng_export_busy,
+        // 0.5.2 (E4): a partida do export com prazo (Engine.cpp).
+        "a previa nao liberou a gpu para a exportacao" to R.string.expfail_render_hung,
+        "gpu sem resposta ao preparar exportacao" to R.string.expfail_render_hung,
+        "uma midia do projeto nao abriu a tempo" to R.string.eng_media_open_timeout,
         "export ja aberto" to R.string.eng_export_busy,
         "gif longo demais: use um trecho menor ou menos quadros por segundo" to R.string.eng_too_long,
         "sequencia longa demais: use um trecho menor ou menos quadros por segundo" to R.string.eng_too_long,

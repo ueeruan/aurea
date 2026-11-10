@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: export que termina com aviso em vez de parar (E1) e partida com prazo (E4). -->
+<resources>
+    <string name="export_note_elements_omitted">تُرك خارج الفيديو عنصر تعذّر رسمه على هذا الجهاز، كما في المعاينة.</string>
+    <string name="eng_media_open_timeout">استغرق فتح أحد ملفات المشروع وقتًا طويلًا (قد يكون في السحابة فقط). افتحه على الجهاز وحاول مرة أخرى</string>
+</resources>

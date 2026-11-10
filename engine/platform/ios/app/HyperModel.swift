@@ -564,6 +564,12 @@ final class HyperFlow: ObservableObject {
                     self.error = AureaText.t("hyper_error_video"); return
                 }
             }
+            // 0.5.2: a pasta tmp/HyperImports/<UUID> do seletor ficou vazia: sai.
+            let picked = url.standardizedFileURL.deletingLastPathComponent()
+            if picked.path.hasPrefix(FileManager.default.temporaryDirectory.standardizedFileURL.path + "/"),
+               (try? FileManager.default.contentsOfDirectory(atPath: picked.path))?.isEmpty == true {
+                try? FileManager.default.removeItem(at: picked)
+            }
             guard let probed = await Self.probe(target, name: url.deletingPathExtension().lastPathComponent) else {
                 try? FileManager.default.removeItem(at: target)
                 self.error = AureaText.t("hyper_error_video"); return

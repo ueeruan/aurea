@@ -2,10 +2,12 @@
 #include "aurea/DefaultNames.hpp"
 #include "aurea/project/Psd.hpp"
 #include "aurea/project/FileIO.hpp"
+#include "aurea/project/MediaStorage.hpp"
 #include "stb_image.h"
 #include <algorithm>
 #include <limits>
 #include <array>
+#include <cstdio>
 #include <filesystem>
 #include <new>
 #include <type_traits>
@@ -63,6 +65,24 @@ bool persist_png(const std::string& path,const psd::Layer& layer) {
     return ok;
 }
 }
+/// Pasta da expansão de um PSD/GIF: a chave é o CONTEÚDO da fonte (hash +
+/// tamanho), não a hora. Importar o mesmo arquivo de novo (outro projeto, o
+/// projeto duplicado) reaproveita os PNGs em vez de gravar outra cópia; a
+/// pasta é derivada (MediaStorage) e sai inteira quando ninguém mais a usa.
+std::string expansion_name(const char* kind, const std::vector<u8>& bytes) {
+    char text[64];
+    std::snprintf(text, sizeof(text), "%s-%016llx-%llu", kind,
+                  static_cast<unsigned long long>(storage::content_hash(bytes.data(), bytes.size())),
+                  static_cast<unsigned long long>(bytes.size()));
+    return text;
+}
+/// PNG já gravado por uma importação anterior completa (pasta marcada)?
+bool reusable_png(bool derived, const std::string& path) {
+    if (!derived) return false;
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(std::filesystem::u8path(path), ec);
+    return !ec && size > 0;
+}
 // Scoped, thread-local fault injection for transaction regressions; no allocator
 // replacement and no cross-thread failures. Not exposed by either mobile bridge.
 namespace psd { void set_import_failure_after_for_testing(i32 after) noexcept { importFailureAfter = after; } }
@@ -86,14 +106,18 @@ Result<u64> Engine::import_psd(const std::string& path, const char* name, bool* 
     const auto fileBytes = std::filesystem::file_size(std::filesystem::u8path(path), sizeError);
     if (!sizeError && fileBytes > fileLimit) return Status{Errc::BudgetExceeded};
     if (!fileio::read_all(path, bytes, fileLimit)) return Status{Errc::IoError};
+    const std::string expansion = expansion_name("PSD", bytes);
     psd::Document doc;
     if (auto s = psd::read(bytes, doc, static_cast<usize>(std::min<u64>(psd::kMaxDecodedBytes, room / 2))); !s.ok()) return s;
     bytes.clear(); bytes.shrink_to_fit();
     namespace fs=std::filesystem;std::error_code error;
     const fs::path base=config_.documentsDirectory.empty()?fs::temp_directory_path(error):fs::u8path(config_.documentsDirectory)/"Media";
     if(error)return Status{Errc::IoError};
-    const auto folder=base/("PSD-"+std::to_string(monotonic_ns()));
-    if (!fs::create_directories(folder,error) || error) return Status{Errc::IoError};
+    const auto folder=base/fs::u8path(expansion);
+    const auto folderUtf=folder.u8string();
+    const bool derived=storage::is_derived({folderUtf.begin(),folderUtf.end()});
+    const bool existed=fs::exists(folder,error);error.clear();
+    if (!existed && (!fs::create_directories(folder,error) || error)) return Status{Errc::IoError};
     struct FolderGuard {
         const fs::path& path;
         bool keep = false;
@@ -101,12 +125,16 @@ Result<u64> Engine::import_psd(const std::string& path, const char* name, bool* 
             if (!keep) try { std::error_code ignored; fs::remove_all(path, ignored); } catch (...) {}
         }
     } folderGuard{folder};
+    // A pasta de uma importação anterior (de outro projeto, talvez) nunca é
+    // apagada por uma falha DESTA importação.
+    folderGuard.keep = existed;
     std::vector<std::string> sources(doc.layers.size());
     for(usize i=0;i<doc.layers.size();++i)if(!doc.layers[i].group){
         const auto utf=(folder/(std::to_string(i)+".png")).u8string();sources[i]={utf.begin(),utf.end()};
-        if(!persist_png(sources[i],doc.layers[i])) return Status{Errc::IoError};
+        if(!reusable_png(derived,sources[i]) && !persist_png(sources[i],doc.layers[i])) return Status{Errc::IoError};
         allocation_checkpoint();
     }
+    if(!derived && !storage::mark_derived({folderUtf.begin(),folderUtf.end()})) return Status{Errc::IoError};
     std::lock_guard<std::mutex> lock(modelMutex_);
     auto* parent = project_ ? current_composition() : nullptr;
     if (!parent) return Status{Errc::InvalidState};
@@ -231,6 +259,7 @@ Result<u64> Engine::import_gif(const std::string& path, const char* name) noexce
     const usize fileLimit = static_cast<usize>(std::min<u64>(kMaxGifFile, room / 2));
     if (!fileio::read_all(path, bytes, fileLimit)) return Status{Errc::IoError};
     if (bytes.size() < 6 || bytes.size() > static_cast<usize>(std::numeric_limits<int>::max())) return Status{Errc::UnsupportedFormat};
+    const std::string expansion = expansion_name("GIF", bytes);
     int w = 0, h = 0, frames = 0, channels = 0;
     int* delays = nullptr;
     stbi_uc* pixels = stbi_load_gif_from_memory(bytes.data(), static_cast<int>(bytes.size()), &delays, &w, &h, &frames, &channels, 4);
@@ -246,12 +275,16 @@ Result<u64> Engine::import_gif(const std::string& path, const char* name) noexce
     namespace fs = std::filesystem; std::error_code error;
     const fs::path base = config_.documentsDirectory.empty() ? fs::temp_directory_path(error) : fs::u8path(config_.documentsDirectory) / "Media";
     if (error) return Status{Errc::IoError};
-    const auto folder = base / ("GIF-" + std::to_string(monotonic_ns()));
-    if (!fs::create_directories(folder, error) || error) return Status{Errc::IoError};
+    const auto folder = base / fs::u8path(expansion);
+    const auto folderUtf = folder.u8string();
+    const bool derived = storage::is_derived({folderUtf.begin(), folderUtf.end()});
+    const bool existed = fs::exists(folder, error); error.clear();
+    if (!existed && (!fs::create_directories(folder, error) || error)) return Status{Errc::IoError};
     struct FolderGuard {
         const fs::path& path; bool keep = false;
         ~FolderGuard() noexcept { if (!keep) try { std::error_code ignored; fs::remove_all(path, ignored); } catch (...) {} }
     } folderGuard{folder};
+    folderGuard.keep = existed;   // a de uma importação anterior nunca sai por esta falha
     // Quadro idêntico ao anterior (a "pausa" do GIF) reaproveita a mesma imagem.
     std::vector<psd::Layer> images; images.reserve(static_cast<usize>(frames));
     std::vector<u32> imageOf(static_cast<usize>(frames));
@@ -267,10 +300,11 @@ Result<u64> Engine::import_gif(const std::string& path, const char* name) noexce
         image.rgba.assign(frame, frame + frameBytes);
         const auto utf = (folder / (std::to_string(images.size()) + ".png")).u8string();
         sources.emplace_back(utf.begin(), utf.end());
-        if (!persist_png(sources.back(), image)) return Status{Errc::IoError};
+        if (!reusable_png(derived, sources.back()) && !persist_png(sources.back(), image)) return Status{Errc::IoError};
         imageOf[static_cast<usize>(f)] = static_cast<u32>(images.size());
         images.push_back(std::move(image));
     }
+    if (!derived && !storage::mark_derived({folderUtf.begin(), folderUtf.end()})) return Status{Errc::IoError};
     std::lock_guard<std::mutex> lock(modelMutex_);
     auto* parent = project_ ? current_composition() : nullptr;
     if (!parent) return Status{Errc::InvalidState};

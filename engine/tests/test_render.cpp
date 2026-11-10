@@ -2829,6 +2829,7 @@ AUREA_TEST(MemoryPressure, DenseMotionBlurCompositesReleaseEarlierLayerTargets) 
 }
 
 #include "NormalCompositeLivenessTests.inl"
+#include "ExportDensityPressure.inl"
 #include "MaterialOverrideTests.inl"
 #include "MorphSharingTests.inl"
 #include "SceneTargetTests.inl"

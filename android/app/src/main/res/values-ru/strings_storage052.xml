@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: tela de armazenamento (mídia dos projetos, sem projeto, exportações guardadas, PreRender, caches). -->
+<resources>
+    <string name="storage_title">Хранилище</string>
+    <string name="storage_row_note">Посмотрите, что занимает место, и освободите неиспользуемое</string>
+    <string name="storage_measuring">Измеряем место…</string>
+    <string name="storage_total">Всего в приложении: %1$s</string>
+    <string name="storage_media_title">Медиа проектов</string>
+    <string name="storage_media_detail">Видео, фото и аудио, которые использует какой-либо проект, а также импортированные модели, LUT и шрифты</string>
+    <string name="storage_orphans_title">Медиа без проекта</string>
+    <string name="storage_orphans_detail">Импортированные файлы, которые больше не использует ни один проект</string>
+    <string name="storage_orphans_blocked">Не удалось прочитать проект; медиа без проекта считается, только когда открываются все проекты</string>
+    <string name="storage_exports_title">Экспорт, сохранённый в приложении</string>
+    <string name="storage_exports_detail">Копии экспорта, оставшиеся внутри приложения</string>
+    <string name="storage_prerender_title">PreRender</string>
+    <string name="storage_prerender_detail">Готовые кадры для плавного воспроизведения превью; создаются заново при необходимости</string>
+    <string name="storage_proxies_title">Оптимизированные медиа</string>
+    <string name="storage_proxies_detail">Облегчённые версии видео для монтажа; создаются заново при необходимости</string>
+    <string name="storage_caches_title">Другой кэш</string>
+    <string name="storage_caches_detail">Превью, графика и временные файлы; восстанавливаются автоматически</string>
+    <string name="storage_clean">Очистить</string>
+    <string name="storage_clean_a11y">Очистить: %1$s</string>
+    <string name="storage_row_a11y">%1$s, %2$s</string>
+    <string name="storage_confirm_orphans_title">Удалить медиа без проекта?</string>
+    <string name="storage_confirm_orphans_message">Элементов: %1$d · %2$s. Эти файлы не использует ни один проект. Отменить нельзя.</string>
+    <string name="storage_confirm_exports_title">Удалить экспорт, сохранённый в приложении?</string>
+    <string name="storage_confirm_exports_message">%1$s. Некоторых файлов может не быть в галерее или «Фото»: сначала сохраните то, что хотите оставить. Отменить нельзя.</string>
+    <string name="storage_cleaned">Освобождено: %1$s</string>
+    <string name="storage_nothing">Сейчас нечего освобождать</string>
+    <string name="storage_busy">Дождитесь окончания экспорта, чтобы очистить</string>
+</resources>

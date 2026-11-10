@@ -30,7 +30,7 @@ namespace {
 namespace fs = std::filesystem;
 constexpr u32 kChunk = 64u << 10;
 constexpr u64 kScratch = 2ull << 20; // conservative compressor workspace bound
-constexpr u64 kMaxDisk = 8ull << 30, kMinReserve = 16ull << 20;
+constexpr u64 kMaxDisk = 4ull << 30, kMinReserve = 512ull << 20;
 constexpr usize kHeader = 96, kManifest = 128;
 constexpr char kFrameMagic[8]{'A','U','R','P','R','F','0','1'};
 constexpr char kManifestMagic[8]{'A','U','R','P','R','M','0','1'};
@@ -162,10 +162,56 @@ Status namespace_bytes(const fs::path& parent, u64& bytes) {
     }
     return ec ? Status{Errc::IoError, "nao foi possivel contabilizar o cache PreRender"} : OkStatus;
 }
+// Pasta com o nome desta classe e SEM owner.bin. Dois caminhos chegam aqui:
+//  - queda entre criar a pasta e gravar o owner.bin (no máximo o session.lease
+//    vazio dentro);
+//  - cache aparado por fora, do arquivo mais antigo para o mais novo: o app
+//    Android fazia isso até a 0.5.1 e o iOS esvazia Caches quando falta espaço.
+//    O owner.bin e o session.lease saem primeiro e os quadros que sobram ficavam
+//    numa pasta que ninguém mais reconhecia — nem o "Limpar" a tirava.
+// Só arquivos com os nomes que esta classe grava; qualquer outro, a pasta fica.
+bool cache_file_name(const std::string& name) {
+    if (name == "session.lease" || name == "complete.bin" || name == "manifest.bin" || name == "manifest.part") return true;
+    // frame-<20 dígitos>.bin, com ".part" no fim durante a gravação.
+    constexpr usize kFrameName = 6 + 20 + 4;
+    if (name.size() != kFrameName && !(name.size() == kFrameName + 5 && name.compare(kFrameName, 5, ".part") == 0)) return false;
+    if (name.compare(0, 6, "frame-") != 0 || name.compare(26, 4, ".bin") != 0) return false;
+    for (usize i = 6; i < 26; ++i) if (name[i] < '0' || name[i] > '9') return false;
+    return true;
+}
+bool unmarked(const fs::path& directory) {
+    if (!owned_name(directory) || !plain(directory, true)) return false;
+    std::error_code ec;
+    // Erro ao consultar não é "não existe": na dúvida a pasta fica.
+    if (fs::symlink_status(directory / "owner.bin", ec).type() != fs::file_type::not_found) return false;
+    ec.clear(); fs::directory_iterator it(directory, ec), end;
+    for (; !ec && it != end; it.increment(ec))
+        if (!plain(it->path(), false) || !cache_file_name(it->path().filename().string())) return false;
+    return !ec;
+}
+std::error_code remove_unmarked(const fs::path& directory) {
+    std::error_code ec;
+    const auto lease = directory / "session.lease";
+    if (fs::exists(lease, ec)) {
+        Lease held;
+        if (!held.acquire(lease, false)) return std::make_error_code(std::errc::device_or_resource_busy);
+        held.release(); // Windows forbids deleting the exclusively held file.
+    }
+    std::error_code failure; fs::directory_iterator it(directory, ec), end;
+    while (!ec && it != end) {
+        const auto path = it->path(); it.increment(ec);
+        std::error_code removed; fs::remove(path, removed);
+        if (removed) failure = removed;
+    }
+    if (ec) return ec;
+    if (failure) return failure;
+    fs::remove(directory, ec); return ec;
+}
 Status collect_orphans(const fs::path& parent) {
     std::error_code ec; fs::directory_iterator it(parent, ec), end;
     while (!ec && it != end) {
         const auto path = it->path(); it.increment(ec);
+        if (unmarked(path)) { (void)remove_unmarked(path); continue; }
         if (!flat_owned(path)) continue;
         Lease lease;
         // A pre-marker crash is deliberately unowned. A complete marker with
@@ -269,6 +315,9 @@ struct PreRenderCache::Impl {
     u32 cleaning = 0;
     std::vector<std::pair<u64, u64>> inflight; // token, frame being read
     bool cleanupFailed = false;
+    /// sweep_orphans: raiz pendente e quando tentar de novo (Busy).
+    std::string sweepRoot;
+    std::chrono::steady_clock::time_point sweepRetry{};
     Impl() {
         const u32 hw = std::thread::hardware_concurrency();
         const u32 count = std::clamp<u32>(hw ? hw / 2 : 2, 2, 3);
@@ -379,17 +428,22 @@ struct PreRenderCache::Impl {
     void run(bool cleaner) {
         for (;;) {
             Read job; std::shared_ptr<Session> disposable; u64 charge = 0; bool idle = false;
+            std::string sweep;
             {
                 std::unique_lock lock(mutex);
                 // Sem pedido nada muda até um notify: acordar a cada 10 ms em três
                 // threads gastava CPU o tempo todo, sem pré-render nenhum em uso.
                 // 250 ms é só a rede de um `token` trocado fora do lock.
                 wake.wait_for(lock, std::chrono::milliseconds(cleaner && !garbage.empty() ? 10 : 250), [&] {
-                    return stopping || !requests.empty() || (active && !valid(active->token)) || (cleaner && !garbage.empty());
+                    return stopping || !requests.empty() || (active && !valid(active->token)) || (cleaner && !garbage.empty())
+                        || (cleaner && !sweepRoot.empty() && std::chrono::steady_clock::now() >= sweepRetry);
                 });
                 retire_locked();
                 // Só o primeiro leitor apaga pastas: uma remoção por vez.
-                if (cleaner && !garbage.empty() && garbage.front().use_count() == 1
+                if (cleaner && !stopping && !sweepRoot.empty() && garbage.empty()
+                    && std::chrono::steady_clock::now() >= sweepRetry) {
+                    sweep = std::move(sweepRoot); sweepRoot.clear(); ++cleaning;
+                } else if (cleaner && !garbage.empty() && garbage.front().use_count() == 1
                     && std::chrono::steady_clock::now() >= garbage.front()->cleanupRetry) {
                     disposable = std::move(garbage.front()); garbage.pop_front(); ++cleaning;
                 } else if (!requests.empty()) {
@@ -404,7 +458,15 @@ struct PreRenderCache::Impl {
                 } else if (stopping && (!cleaner || (!active && garbage.empty() && !working && !cleaning))) break;
                 else idle = true;
             }
-            if (disposable) {
+            if (!sweep.empty()) {
+                const Status swept = reclaim_orphans(sweep);
+                std::lock_guard lock(mutex); --cleaning;
+                // Outro objeto admitindo agora: tenta de novo daqui a pouco.
+                if (swept.code() == Errc::Busy && !stopping && sweepRoot.empty()) {
+                    sweepRoot = std::move(sweep);
+                    sweepRetry = std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
+                }
+            } else if (disposable) {
                 // Only an exact unique child created by begin. Never delete the
                 // caller's cache root, siblings, project files or source media.
                 std::error_code error;
@@ -483,6 +545,17 @@ Result<u64> PreRenderCache::begin(const std::string& root, Key key, u64 frames, 
     if (const Status collected = collect_orphans(session->parent); !collected.ok()) return collected;
     u64 namespaceBytes = 0;
     if (const Status counted = namespace_bytes(session->parent, namespaceBytes); !counted.ok()) return counted;
+    // Teto também pelo espaço livre: no máximo metade do que sobra acima da
+    // reserva (um aparelho com 6 GB livres não entrega 4 GB a um cache).
+    {
+        std::error_code spaceError;
+        const auto space = fs::space(session->parent, spaceError);
+        if (!spaceError && space.available != static_cast<std::uintmax_t>(-1)) {
+            const u64 usable = space.available > limits.reserveFreeBytes ? space.available - limits.reserveFreeBytes : 0;
+            limits.diskBytes = std::min(limits.diskBytes, namespaceBytes + usable / 2);
+            session->limits = limits;
+        }
+    }
     if (const Status room = disk_room(session->parent, namespaceBytes, kOwner + kManifest, limits); !room.ok()) return room;
     session->directory = session->parent / unique_name();
     if (!fs::create_directory(session->directory, ec) || ec) return Status{Errc::IoError};
@@ -677,6 +750,23 @@ Status PreRenderCache::take(u64 token, u64 frame, std::vector<u16>& rgba) noexce
         rgba = std::move(it->pixels); impl_->ready.erase(it); return result;
     }
     return Errc::NotFound;
+}
+Status PreRenderCache::reclaim_orphans(const std::string& root) noexcept {
+    if (root.empty()) return Status{Errc::InvalidArgument};
+    std::error_code ec;
+    const auto parent = fs::absolute(fs::u8path(root), ec) / "pre-render";
+    if (ec) return Status{Errc::IoError};
+    if (!fs::exists(parent, ec)) return OkStatus;
+    if (!plain(parent, true)) return Status{Errc::IoError, "pasta PreRender nao pode ser link"};
+    // A mesma porta das admissões: nunca apaga uma pasta que um begin() está criando.
+    Lease admission;
+    if (!admission.acquire(parent / "namespace.lease", true)) return Status{Errc::Busy};
+    return collect_orphans(parent);
+}
+void PreRenderCache::sweep_orphans(const std::string& root) noexcept {
+    if (root.empty()) return;
+    { std::lock_guard lock(impl_->mutex); impl_->sweepRoot = root; impl_->sweepRetry = {}; }
+    impl_->wake.notify_all();
 }
 void PreRenderCache::invalidate() noexcept {
     impl_->generation.fetch_add(1, std::memory_order_acq_rel);

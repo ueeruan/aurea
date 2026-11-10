@@ -52,6 +52,9 @@
 #include "aurea/export/ExportRules.hpp"
 
 #include <algorithm>
+#include <array>
+#include <cmath>
+#include <mutex>
 
 namespace aurea {
 
@@ -293,5 +296,158 @@ struct ExportAttemptEffect {
     }
     return kind == ExportRetryKind::Memory ? lessBlur : 0;
 }
+
+// =============================================================================
+//  0.5.2 (E2): a escada com MEMÓRIA. export_next_attempt é pura e não sabe
+//  onde a tentativa anterior parou: uma falha determinística (o mesmo recurso
+//  que nunca chega no mesmo quadro: Galaxy A23 parado no quadro 19 de 38 nos 7
+//  degraus, inclusive 480p) era refeita até 7 vezes do zero, e a pessoa via o
+//  progresso voltar a ~50% várias vezes antes do erro. O motor grava o fim de
+//  cada tentativa (Engine.cpp: fim da sessão e partida recusada) e as duas
+//  pontes (JNI e AureaEngine.mm) perguntam o próximo degrau por aqui; as
+//  telas não ganham regra própria.
+//
+//  - Mesmo tipo de falha no MESMO ponto da timeline (até 3 quadros) em duas
+//    tentativas seguidas que passaram da partida = determinístico: para e
+//    mostra o motivo. Exceção: encoder ou decoder parado (Encoder/Stall) ainda
+//    não tentado no software tenta UMA vez o degrau de software (encoder e
+//    decoder compatíveis, 0.4.6), que é o que muda nesse caso.
+//  - GpuTime (quadro acima do prazo da GPU) não entra: cada degrau tira custo
+//    do MESMO quadro, que é sempre o mais pesado; parar no mesmo ponto é o
+//    esperado até o custo caber. O teto de tentativas abaixo o limita.
+//  - No máximo kExportRenderedAttemptsMax tentativas que renderizaram quadros
+//    por pedido: cada uma custa o export até o ponto da falha.
+//  - Falha ao abrir (sem quadro renderizado) segue a escada de sempre: trocar
+//    de encoder é exatamente o que a escada faz por elas.
+//
+//  O ponto é em SEGUNDOS da timeline, não em índice: os degraus que limitam a
+//  taxa (60 → 30 qps) mudam o índice do mesmo instante.
+// =============================================================================
+
+/// Histórico de um pedido: tentativas guardadas (as mais antigas saem).
+inline constexpr u32 kExportAttemptHistoryMax = 8;
+/// Tentativas que renderizaram quadros, por pedido, antes de a escada parar.
+/// 4 cobre aparelho → Baseline → software → 720p (GpuTime anda de um em um).
+inline constexpr u32 kExportRenderedAttemptsMax = 4;
+/// "Mesmo ponto": até 3 quadros da saída mais lenta (a fila entre render e
+/// encoder deixa o quadro entregue alguns atrás do que falhou).
+inline constexpr u32 kExportSamePointFrames = 3;
+
+/// O fim de uma tentativa de vídeo, gravado pelo motor.
+struct ExportAttemptRecord {
+    u32 attempt = 0;            ///< degrau (ExportSettings::safeMode)
+    u64 request = 0;            ///< identidade do pedido: hash do arquivo de saída (o mesmo em todos os degraus)
+    i32 code = 0;               ///< Errc do resultado
+    u32 failure = 0;            ///< ExportFailure (0 = falha antes de existir motivo)
+    bool started = false;       ///< passou da partida: o render rodou
+    u32 framesDone = 0;         ///< quadros entregues NESTA tentativa (fora os do checkpoint retomado)
+    f64 failedAt = -1.0;        ///< segundos da timeline onde parou (< 0 = desconhecido)
+    f64 frameSeconds = 0.0;     ///< 1/fps da saída desta tentativa (tolerância do "mesmo ponto")
+    ExportRetryKind kind = ExportRetryKind::None;   ///< o tipo que a tela deu (export_retry_kind)
+    bool classified = false;    ///< `kind` já veio de uma pergunta da tela
+};
+
+/// Por que a escada parou antes do fim (diagnóstico e testes).
+enum class ExportLadderStop : u32 { None = 0, Deterministic = 1, RenderedCap = 2 };
+
+/// As tentativas do pedido atual, na ordem.
+struct ExportAttemptHistory {
+    std::array<ExportAttemptRecord, kExportAttemptHistoryMax> items{};
+    u32 count = 0;
+    ExportLadderStop lastStop = ExportLadderStop::None;
+    void reset() noexcept { count = 0; lastStop = ExportLadderStop::None; }
+    /// Outro pedido (outro arquivo) ou um degrau abaixo do último começa um
+    /// histórico novo: a escada só sobe. O MESMO degrau do mesmo pedido
+    /// (continuação do checkpoint, "ocupado") substitui o último registro.
+    void record(const ExportAttemptRecord& r) noexcept {
+        if (count) {
+            const ExportAttemptRecord& last = items[count - 1];
+            if (last.request != r.request || r.attempt < last.attempt) reset();
+            else if (r.attempt == last.attempt) { items[count - 1] = r; return; }
+        }
+        if (count == items.size()) {
+            for (u32 i = 1; i < count; ++i) items[i - 1] = items[i];
+            --count;
+        }
+        items[count++] = r;
+    }
+};
+
+[[nodiscard]] inline bool export_attempt_same_point(const ExportAttemptRecord& a, const ExportAttemptRecord& b) noexcept {
+    if (!(a.failedAt >= 0.0) || !(b.failedAt >= 0.0)) return false;
+    const f64 frame = std::max({a.frameSeconds, b.frameSeconds, 1.0 / 240.0});
+    return std::abs(a.failedAt - b.failedAt) <= kExportSamePointFrames * frame + 1e-9;
+}
+
+/// export_next_attempt com o histórico do pedido. `h` recebe o tipo da falha
+/// atual (a tela sabe se ela mesma cancelou por falta de progresso; o motor não).
+[[nodiscard]] inline u32 export_next_attempt_with_history(u32 attempt, ExportRetryKind kind, const ExportRequestShape& r,
+                                                          ExportAttemptHistory& h) noexcept {
+    h.lastStop = ExportLadderStop::None;
+    // Dois degraus seguidos recusados já na partida por "ocupado" (a prévia
+    // não soltou a GPU, o export anterior não saiu): outro degrau não solta a
+    // GPU. As telas refazem o mesmo degrau por "ocupado" e depois pedem o
+    // próximo como falha de encoder; sem isto a escada inteira esperava o
+    // prazo da partida em cada degrau.
+    if (h.count >= 2 && h.items[h.count - 1].attempt == attempt) {
+        const ExportAttemptRecord& a = h.items[h.count - 2];
+        const ExportAttemptRecord& b = h.items[h.count - 1];
+        if (!a.started && !b.started && a.code == static_cast<i32>(Errc::Busy) && b.code == static_cast<i32>(Errc::Busy)) {
+            h.lastStop = ExportLadderStop::Deterministic;
+            return 0;
+        }
+    }
+    const u32 next = export_next_attempt(attempt, kind, r);
+    if (next == 0 || (next & kExportAttemptWait)) return next;
+    // Sem registro desta tentativa (o app morreu no export anterior e a tela
+    // pergunta o degrau inicial): a escada de sempre.
+    if (!h.count || h.items[h.count - 1].attempt != attempt) return next;
+    ExportAttemptRecord& now = h.items[h.count - 1];
+    now.kind = kind;
+    now.classified = true;
+    u32 rendered = 0;
+    for (u32 i = 0; i < h.count; ++i) rendered += h.items[i].started && h.items[i].framesDone > 0 ? 1u : 0u;
+    if (rendered >= kExportRenderedAttemptsMax) { h.lastStop = ExportLadderStop::RenderedCap; return 0; }
+    if (h.count < 2 || kind == ExportRetryKind::GpuTime) return next;
+    const ExportAttemptRecord& before = h.items[h.count - 2];
+    if (!before.classified || before.kind != kind || !before.started || !now.started ||
+        !export_attempt_same_point(before, now))
+        return next;
+    if (kind == ExportRetryKind::Encoder || kind == ExportRetryKind::Stall) {
+        const auto software = [](u32 a) noexcept {
+            const ExportAttemptPlan p = export_attempt_plan(a);
+            return p.safeMode >= 2 && p.softwareDecode;
+        };
+        bool tried = false;
+        for (u32 i = 0; i < h.count; ++i) tried |= software(h.items[i].attempt);
+        if (!tried) for (u32 a = attempt + 1; a <= kExportAttemptMax; ++a)
+            if (software(a)) return a;
+    }
+    h.lastStop = ExportLadderStop::Deterministic;
+    return 0;
+}
+
+/// O histórico do processo. Um motor por processo nos apps; as pontes da
+/// escada são estáticas (sem o handle do motor), então o registro também é.
+class ExportAttemptLedger {
+public:
+    [[nodiscard]] static ExportAttemptLedger& process() noexcept { static ExportAttemptLedger ledger; return ledger; }
+    void record(const ExportAttemptRecord& r) noexcept { std::lock_guard lock(mutex_); history_.record(r); }
+    [[nodiscard]] u32 next(u32 attempt, ExportRetryKind kind, const ExportRequestShape& r) noexcept {
+        std::lock_guard lock(mutex_);
+        return export_next_attempt_with_history(attempt, kind, r, history_);
+    }
+    [[nodiscard]] ExportAttemptHistory snapshot() const noexcept { std::lock_guard lock(mutex_); return history_; }
+    void reset() noexcept { std::lock_guard lock(mutex_); history_.reset(); }
+    /// FNV-1a do caminho de saída (a identidade do pedido no histórico).
+    [[nodiscard]] static u64 request_key(const char* outputPath) noexcept {
+        u64 h = 1469598103934665603ull;
+        if (outputPath) for (const char* c = outputPath; *c; ++c) { h ^= static_cast<unsigned char>(*c); h *= 1099511628211ull; }
+        return h;
+    }
+private:
+    mutable std::mutex mutex_;
+    ExportAttemptHistory history_{};
+};
 
 } // namespace aurea

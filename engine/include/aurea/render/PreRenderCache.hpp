@@ -21,8 +21,10 @@ public:
     /// vários à frente: um quadro 540p custa mais que um intervalo de 30 fps.
     static constexpr u32 kMaxResidentFrames = 8;
     struct Limits {
-        u64 diskBytes = 8ull << 30; // cumulative private namespace cap; hard-clamped
-        u64 reserveFreeBytes = 256ull << 20;
+        // 0.5.2: 4 GiB no máximo (eram 8) e nunca mais que metade do espaço
+        // livre acima da reserva; a reserva subiu de 256 MiB para 1 GiB.
+        u64 diskBytes = 4ull << 30; // cumulative private namespace cap; hard-clamped
+        u64 reserveFreeBytes = 1ull << 30;
         u64 memoryBytes = 16ull << 20;
         // Clamped to 1..kMaxResidentFrames and then to what memoryBytes holds
         // (each frame is charged its pixels plus its decompression workspace).
@@ -70,6 +72,16 @@ public:
     // First invalidates the token atomically, with no lock/join/filesystem I/O.
     // Reader retires only this class's unique private directory after leases end.
     void invalidate() noexcept;
+    /// Apaga as pastas que nenhum processo segura mais em `cacheRoot/pre-render`:
+    /// as de uma sessão que morreu (crash, app fechado à força) e as que a queda
+    /// pegou antes do marcador de dono (só o `session.lease`, nada mais). A
+    /// chave de um PreRender é da sessão do processo: pasta sem lease nunca
+    /// mais é lida. Pasta desconhecida (outro conteúdo) fica. Busy = outro
+    /// processo/objeto está admitindo ou limpando agora.
+    [[nodiscard]] static Status reclaim_orphans(const std::string& cacheRoot) noexcept;
+    /// O mesmo, na thread de limpeza deste cache (a abertura do motor não espera
+    /// o disco). Tenta de novo enquanto der Busy.
+    void sweep_orphans(const std::string& cacheRoot) noexcept;
     [[nodiscard]] bool matches(u64 token, const Key& key) const noexcept;
     [[nodiscard]] Stats stats() const noexcept;
 private:

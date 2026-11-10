@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: tela de armazenamento (mídia dos projetos, sem projeto, exportações guardadas, PreRender, caches). -->
+<resources>
+    <string name="storage_title">Penyimpanan</string>
+    <string name="storage_row_note">Lihat apa yang memakan ruang dan kosongkan yang tidak dipakai</string>
+    <string name="storage_measuring">Mengukur ruang…</string>
+    <string name="storage_total">Total di aplikasi: %1$s</string>
+    <string name="storage_media_title">Media proyek</string>
+    <string name="storage_media_detail">Video, foto, dan audio yang dipakai suatu proyek, serta model, LUT, dan font yang diimpor</string>
+    <string name="storage_orphans_title">Media tanpa proyek</string>
+    <string name="storage_orphans_detail">File impor yang tidak lagi dipakai proyek mana pun</string>
+    <string name="storage_orphans_blocked">Satu proyek tidak dapat dibaca; media tanpa proyek hanya dihitung saat semua proyek terbuka</string>
+    <string name="storage_exports_title">Ekspor yang disimpan di aplikasi</string>
+    <string name="storage_exports_detail">Salinan ekspor yang tertinggal di dalam aplikasi</string>
+    <string name="storage_prerender_title">PreRender</string>
+    <string name="storage_prerender_detail">Frame siap agar pratinjau diputar lancar; dibuat ulang saat perlu</string>
+    <string name="storage_proxies_title">Media yang dioptimalkan</string>
+    <string name="storage_proxies_detail">Versi ringan video untuk mengedit; dibuat ulang saat perlu</string>
+    <string name="storage_caches_title">Cache lainnya</string>
+    <string name="storage_caches_detail">Pratinjau, grafis, dan file sementara; dibuat ulang otomatis</string>
+    <string name="storage_clean">Bersihkan</string>
+    <string name="storage_clean_a11y">Bersihkan %1$s</string>
+    <string name="storage_row_a11y">%1$s, %2$s</string>
+    <string name="storage_confirm_orphans_title">Hapus media tanpa proyek?</string>
+    <string name="storage_confirm_orphans_message">Item: %1$d · %2$s. Tidak ada proyek yang memakai file ini. Tidak dapat diurungkan.</string>
+    <string name="storage_confirm_exports_title">Hapus ekspor yang disimpan di aplikasi?</string>
+    <string name="storage_confirm_exports_message">%1$s. Sebagian mungkin tidak ada di galeri atau Foto: simpan dulu yang ingin Anda pertahankan. Tidak dapat diurungkan.</string>
+    <string name="storage_cleaned">%1$s dikosongkan</string>
+    <string name="storage_nothing">Tidak ada yang bisa dikosongkan sekarang</string>
+    <string name="storage_busy">Tunggu ekspor selesai sebelum membersihkan</string>
+</resources>

@@ -104,6 +104,7 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/CopyBackgroundEffect.cpp
     src/effects/builtin/WaterWrapBallpointEffects.cpp
     src/project/ProjectPackage.cpp
+    src/project/MediaStorage.cpp   # 0.5.2 armazenamento: o que pode sair do disco
     src/export/ImageEncode.cpp
     src/export/ExportRecovery.cpp
     src/export/ExportPacketLog.cpp
@@ -282,6 +283,7 @@ set(AUREA_CORE_SOURCES
     src/engine/EngineOmegaOutline.cpp   # bugs 0.3.4: converter em contorno
     src/engine/EnginePluginsV2.cpp   # 0.3.4 plugins
     src/engine/EngineImageSequence.cpp
+    src/engine/EngineStorage.cpp   # 0.5.2 armazenamento (apagar projeto, tela, PreRender)
     src/engine/EngineProxy.cpp
     src/engine/EngineLayerAnim.cpp
     src/engine/EngineRoto.cpp
@@ -460,6 +462,8 @@ set(AUREA_IMPORT_BOUNDARIES
     src/timeline/Timeline.cpp
     src/scene3d/EnvironmentJob.cpp
 )
+# 0.5.2 armazenamento: leitura de projetos e varredura de pastas devolvem Status.
+list(APPEND AUREA_IMPORT_BOUNDARIES src/project/MediaStorage.cpp src/engine/EngineStorage.cpp)
 list(APPEND AUREA_IMPORT_BOUNDARIES src/export/ExportRecovery.cpp src/export/ExportCheckpoint.cpp src/export/ExportSinkStartup.cpp
     src/export/FFmpegExportSink.cpp src/export/AndroidVideoEncoder.cpp
     src/export/OfflineAudioSnapshot.cpp src/export/OfflineAudioBlockSource.cpp)

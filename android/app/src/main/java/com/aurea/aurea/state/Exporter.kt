@@ -30,12 +30,15 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.atomic.AtomicBoolean
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -558,6 +561,12 @@ class Exporter internal constructor(
                 delay(1000)
             }
         } else null
+        // Temporário com dono (§52): o arquivo desta tentativa sai no fim dela em
+        // QUALQUER desfecho (erro, cancelamento, exceção, partida recusada), não só
+        // na limpeza da próxima abertura. Fica só o resultado do Hyper (vira projeto)
+        // e o que o motor ainda pode estar gravando (a tela desistiu de esperar).
+        var keepFile = false
+        var engineMayWrite = false
         try {
         run {
             var previousProgress: ExportStartupFailure.Snapshot? = null
@@ -565,7 +574,7 @@ class Exporter internal constructor(
             // Abrir o encoder, o MP4 e os alvos de GPU leva segundos em aparelho
             // lento (e no emulador): na main thread isso dava "Aurea não está
             // respondendo" no toque de Exportar.
-            val code = withContext(Dispatchers.IO) {
+            withContext(Dispatchers.IO) {
                 check(dir.isDirectory || dir.mkdirs()) { "Export directory unavailable" }
                 if (options.format == ExportFormat.Video) {
                     if (engine.exportProgress(progressBuffer)) {
@@ -574,15 +583,43 @@ class Exporter internal constructor(
                     }
                     previousToken = diagnosticSessionToken(engine.exportDiagnostics())
                 }
-                // Native preflight reclaims owned orphan outputs only after
-                // previous-session admission; in-process staging remains owned.
-                if (cancelPending) CANCELLED else startJob()
             }
+            // Native preflight reclaims owned orphan outputs only after
+            // previous-session admission; in-process staging remains owned.
+            val started = awaitStart(startJob)
             state = state.copy(preparing = false, notice = "")
+            if (started.abandoned) {
+                engineMayWrite = true
+                // 0.5.2 (E4): a partida não voltou (a plataforma ou o driver não
+                // devolveram a chamada). A tela se libera com o motivo; o motor
+                // termina sozinho depois e um export que comece tarde é
+                // cancelado (awaitStart). A etapa vai para o próximo relato.
+                val stage = withContext(Dispatchers.IO) { diagnosticStage(engine.exportDiagnostics()) }
+                android.util.Log.e("AureaExport", "Export start did not return ($stage); releasing the screen")
+                if (cancelPending) {
+                    state = state.copy(phase = ExportPhase.Cancelled, message = text(R.string.app_export_cancelled))
+                } else {
+                    state = state.copy(phase = ExportPhase.Failed,
+                        message = text(R.string.app_export_failed, text(R.string.expfail_stuck)))
+                    com.aurea.aurea.diagnostics.ProblemReport.noteExport(app,
+                        "Android ${Build.VERSION.SDK_INT}: partida presa $stage seguranca=$safeMode formato=${options.format}")
+                }
+                return 0
+            }
+            val code = started.code
             if (code != 0) {
                 var freshFailure = false
                 if (code == CANCELLED && cancelPending) {
                     state = state.copy(phase = ExportPhase.Cancelled, message = text(R.string.app_export_cancelled))
+                    return 0
+                }
+                if (code == CANCELLED && started.stalled) {
+                    // O vigia da partida cancelou (nada mudou por minutos): é falha, com o motivo.
+                    val stage = withContext(Dispatchers.IO) { diagnosticStage(engine.exportDiagnostics()) }
+                    state = state.copy(phase = ExportPhase.Failed,
+                        message = text(R.string.app_export_failed, text(R.string.expfail_stuck)))
+                    com.aurea.aurea.diagnostics.ProblemReport.noteExport(app,
+                        "Android ${Build.VERSION.SDK_INT}: partida sem progresso cancelada $stage seguranca=$safeMode formato=${options.format}")
                     return 0
                 }
                 if (options.format == ExportFormat.Video && !cancelPending) {
@@ -601,9 +638,11 @@ class Exporter internal constructor(
                 state = state.copy(phase = ExportPhase.Failed,
                     message = afterLadder(nativeCause, safeMode, if (freshFailure) progress.failure else 0, code))
                 android.util.Log.e("AureaExport", "Export did not start: code=$code safeMode=$safeMode format=${options.format}")
+                // 0.5.2 (E4): a etapa da partida em que parou (diagnóstico do motor).
+                val stage = withContext(Dispatchers.IO) { diagnosticStage(engine.exportDiagnostics()) }
                 com.aurea.aurea.diagnostics.ProblemReport.noteExport(app,
                     "Android ${Build.VERSION.SDK_INT}: nao iniciou codigo=$code seguranca=$safeMode formato=${options.format} " +
-                        "lado=${options.shortSide} hevc=${options.hevc}")
+                        "lado=${options.shortSide} hevc=${options.hevc} $stage motor=\"${if (freshFailure) progress.message else ""}\"")
                 return 0
             }
             if (cancelPending) engine.cancelExport()
@@ -624,6 +663,7 @@ class Exporter internal constructor(
                         }
                         ExportStallWatchdog.Verdict.GiveUp -> {
                             android.util.Log.e("AureaExport", "Export engine did not conclude after the stall cancel; releasing the screen")
+                            engineMayWrite = true
                             if (options.format == ExportFormat.Video && !cancelPending && !hyperJob) {
                                 val retry = AureaEngine.nativeExportNextAttempt(safeMode, CANCELLED, 0, true, false,
                                     options.shortSide, options.fps, options.hevc, options.aiUpscale > 0)
@@ -681,7 +721,7 @@ class Exporter internal constructor(
                     return retry
                 }
                 when (progress.result) {
-                    0 -> if (hyperJob) finishHyper(file) else publish(file, options.format)
+                    0 -> if (hyperJob) { finishHyper(file); keepFile = hyperOutput == file } else publish(file, options.format)
                     // Cancelado pela própria tela (sem progresso por minutos), não
                     // pelo usuário: é falha, com o motivo.
                     CANCELLED -> state = if (watchdog.cancelled && !cancelPending) {
@@ -705,9 +745,10 @@ class Exporter internal constructor(
                 if (progress.result != 0) withContext(Dispatchers.IO) { file.delete() }
                 if (progress.result != 0 && (progress.result != CANCELLED || watchdog.cancelled) && !cancelPending) {
                     // A causa vai para o log e para o próximo "Relatar um problema".
+                    val stage = withContext(Dispatchers.IO) { diagnosticStage(engine.exportDiagnostics()) }
                     val cause = "falhou: motivo=${progress.failure} codigo=${progress.result} " +
                         "quadro=${progress.framesDone}/${progress.framesTotal} seguranca=$safeMode " +
-                        "travou=${watchdog.cancelled} formato=${options.format} motor=\"${progress.message}\""
+                        "travou=${watchdog.cancelled} formato=${options.format} $stage motor=\"${progress.message}\""
                     android.util.Log.e("AureaExport", "Export $cause")
                     com.aurea.aurea.diagnostics.ProblemReport.noteExport(app, "Android ${Build.VERSION.SDK_INT}: $cause")
                 }
@@ -717,11 +758,85 @@ class Exporter internal constructor(
         return 0
         } finally {
             withContext(NonCancellable + Dispatchers.IO) {
+                if (!keepFile && !engineMayWrite) file.delete()
                 diagnostic?.cancelAndJoin()
                 if (options.format == ExportFormat.Video) ExportDiagnosticReport.record(app, ticket, engine.exportDiagnostics())
             }
         }
     }
+
+    /** O resultado de [awaitStart]: o código da partida, ou que a tela desistiu dela. */
+    private data class StartOutcome(val code: Int, val abandoned: Boolean, val stalled: Boolean)
+
+    /**
+     * 0.5.2 (E4): a partida do motor com vigia — a mesma regra do iOS
+     * (AureaModel.startPreparingWatch). Antes a chamada rodava sem prazo e o
+     * [ExportStallWatchdog] só nascia depois de ela voltar: o LG K61 ficou em
+     * "Preparando" para sempre e o Cancelar não fazia nada. Agora: sem mudança
+     * na mensagem do motor por [ExportStallWatchdog.STALL_MS], a tela cancela;
+     * sem volta [ExportStallWatchdog.GIVE_UP_MS] depois (ou depois do Cancelar
+     * da pessoa), desiste e se libera. O motor já tem prazo e cancelar em cada
+     * espera da partida; isto cobre a chamada da plataforma/driver que não volta.
+     * A chamada abandonada segue no IO até voltar; se ela abrir o export
+     * mesmo assim, ele é cancelado na hora (ninguém mais o acompanha).
+     */
+    private suspend fun awaitStart(startJob: () -> Int): StartOutcome {
+        val abandoned = AtomicBoolean(false)
+        val start = scope.async(Dispatchers.IO) {
+            val code = if (cancelPending) CANCELLED else startJob()
+            if (abandoned.get() && code == 0) runCatching { engine.cancelExport() }
+            code
+        }
+        val watchdog = ExportStallWatchdog()
+        val watchBuffer = directBuffer(128)
+        val watchProgress = ExportProgress()
+        var cancelledAt = 0L
+        // A tela saiu daqui sem o resultado (desistiu, ou a corrotina do export
+        // foi cancelada): uma partida que ainda volte com sucesso é cancelada.
+        try {
+        while (true) {
+            val done = withTimeoutOrNull(START_POLL_MS) { start.await() }
+            if (done != null) return StartOutcome(done, false, watchdog.cancelled)
+            val now = SystemClock.elapsedRealtime()
+            val message = withContext(Dispatchers.IO) {
+                runCatching { if (engine.exportProgress(watchBuffer)) { watchProgress.readFrom(watchBuffer); watchProgress.message } else "" }
+                    .getOrDefault("")
+            }
+            when (watchdog.observe(now, 0, message)) {
+                ExportStallWatchdog.Verdict.Cancel -> {
+                    android.util.Log.w("AureaExport", "Export start without progress for ${ExportStallWatchdog.STALL_MS / 1000} s; cancelling")
+                    withContext(Dispatchers.IO) { runCatching { engine.cancelExport() } }
+                }
+                ExportStallWatchdog.Verdict.GiveUp -> { abandoned.set(true); return StartOutcome(0, true, true) }
+                ExportStallWatchdog.Verdict.Running -> Unit
+            }
+            if (cancelPending) {
+                if (cancelledAt == 0L) cancelledAt = now
+                else if (now - cancelledAt >= ExportStallWatchdog.GIVE_UP_MS) {
+                    abandoned.set(true)
+                    return StartOutcome(CANCELLED, true, false)
+                }
+            }
+        }
+        } finally {
+            if (!start.isCompleted) abandoned.set(true)
+        }
+    }
+
+    /**
+     * 0.5.2 (E4): "etapa=<onde a sessão está ou parou> espera=<ms>" do
+     * diagnóstico do motor (ExportDiagnostics.hpp: sessionStage; endedFrom
+     * quando ela já acabou em failed/cancelled) e o ponto do quadro incompleto.
+     */
+    private fun diagnosticStage(raw: String): String = runCatching {
+        val json = JSONObject(raw)
+        val stage = json.optString("sessionStage")
+        val ended = json.optString("endedFrom")
+        val (name, waited) = if ((stage == "failed" || stage == "cancelled") && ended.isNotEmpty())
+            ended to json.optLong("endedFromMs") else stage to json.optLong("sessionWaitMs")
+        val site = json.optString("incompleteSite")
+        "etapa=${name.ifEmpty { "?" }} espera=${waited}ms" + (if (site.isNotEmpty()) " ponto=$site" else "")
+    }.getOrDefault("etapa=?")
 
     /** O job Hyper terminou: o arquivo fica no app (vira projeto), sem galeria. */
     private suspend fun finishHyper(file: File) {
@@ -737,7 +852,9 @@ class Exporter internal constructor(
 
     fun cancel() {
         if (state.phase != ExportPhase.Running) return
-        cancelPending = true   // ainda abrindo: cancela assim que o motor começar
+        // Ainda abrindo: o motor ouve o cancelar também na partida (0.5.2) e,
+        // se a chamada não voltar, awaitStart libera a tela.
+        cancelPending = true
         engine.cancelExport()
     }
 
@@ -838,6 +955,14 @@ class Exporter internal constructor(
             val result = withContext(NonCancellable + Dispatchers.IO) {
                 runCatching { if (format == ExportFormat.Video) copyToGallery(kept.first) else copyImageOut(kept.first, format) }
             }
+            // 0.5.2: a galeria aceitou — a cópia da pasta do app era só a reserva
+            // e ficava para sempre. Sai, a não ser que o "salvo" seja ela mesma
+            // (Android 8–9 sem permissão grava na mesma pasta do app).
+            result.getOrNull()?.let { (uri, _) ->
+                if (uri.authority != "${app.packageName}.exports") withContext(NonCancellable + Dispatchers.IO) {
+                    runCatching { kept.first.delete() }
+                }
+            }
             state = result.fold(
                 onSuccess = { (uri, label) ->
                     fallbackCopy = null
@@ -925,7 +1050,9 @@ class Exporter internal constructor(
         }
         val dir = File(app.getExternalFilesDir(publicDir), "Aurea").apply { mkdirs() }
         val dst = File(dir, file.name)
-        file.copyTo(dst, overwrite = true)
+        // O "Salvar" de novo da cópia que JÁ está aqui: copyTo(overwrite) apagaria
+        // o destino — a própria origem — antes de ler.
+        if (dst.canonicalPath != file.canonicalPath) file.copyTo(dst, overwrite = true)
         runCatching { GalleryPublish.scan(app, dst, format.mime, 3_000) }
         return FileProvider.getUriForFile(app, "${app.packageName}.exports", dst) to text(R.string.app_saved_to_path, dst.absolutePath)
     }
@@ -987,6 +1114,7 @@ class Exporter internal constructor(
         if (flags and ExportProgress.FLAG_BLUR_REDUCED != 0) add(text(R.string.export_note_blur_reduced))
         if (flags and ExportProgress.FLAG_ENVIRONMENT_FALLBACK != 0) add(text(R.string.export_note_environment_fallback))
         if (flags and ExportProgress.FLAG_MODEL_FALLBACK != 0) add(text(R.string.export_note_model_fallback))
+        if (flags and ExportProgress.FLAG_ELEMENTS_OMITTED != 0) add(text(R.string.export_note_elements_omitted))
     }
 
     private fun noticeFor(p: ExportProgress, options: ExportOptions): String {
@@ -1082,6 +1210,8 @@ class Exporter internal constructor(
         const val RETRY_SAME_ATTEMPT = 1 shl 20
         /** Espera antes de refazer quando o motor ainda estava ocupado (kExportAttemptWait). */
         const val BUSY_WAIT_MS = 1500L
+        /** awaitStart: de quanto em quanto a partida é vigiada. */
+        const val START_POLL_MS = 500L
         /** AAC do export (kExportAudioKbps no motor). */
         const val AUDIO_BPS = 192_000.0
     }

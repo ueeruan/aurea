@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: tela de armazenamento (mídia dos projetos, sem projeto, exportações guardadas, PreRender, caches). -->
+<resources>
+    <string name="storage_title">التخزين</string>
+    <string name="storage_row_note">اعرف ما يشغل المساحة وحرّر ما لا يُستخدم</string>
+    <string name="storage_measuring">جارٍ قياس المساحة…</string>
+    <string name="storage_total">الإجمالي في التطبيق: %1$s</string>
+    <string name="storage_media_title">وسائط المشاريع</string>
+    <string name="storage_media_detail">فيديوهات وصور وملفات صوت يستخدمها مشروع ما، إضافة إلى النماذج وجداول LUT والخطوط المستوردة</string>
+    <string name="storage_orphans_title">وسائط بلا مشروع</string>
+    <string name="storage_orphans_detail">ملفات مستوردة لم يعد أي مشروع يستخدمها</string>
+    <string name="storage_orphans_blocked">تعذّرت قراءة أحد المشاريع؛ لا تُحسب الوسائط بلا مشروع إلا عندما تُفتح كل المشاريع</string>
+    <string name="storage_exports_title">تصديرات محفوظة في التطبيق</string>
+    <string name="storage_exports_detail">نسخ من التصديرات بقيت داخل التطبيق</string>
+    <string name="storage_prerender_title">PreRender</string>
+    <string name="storage_prerender_detail">إطارات جاهزة لتشغيل المعاينة بسلاسة؛ يُعاد إنشاؤها عند الحاجة</string>
+    <string name="storage_proxies_title">وسائط محسّنة</string>
+    <string name="storage_proxies_detail">نسخ خفيفة من الفيديوهات للتحرير؛ يُعاد إنشاؤها عند الحاجة</string>
+    <string name="storage_caches_title">ذاكرات تخزين مؤقت أخرى</string>
+    <string name="storage_caches_detail">معاينات ورسومات وملفات مؤقتة؛ يُعاد إنشاؤها تلقائيًا</string>
+    <string name="storage_clean">تنظيف</string>
+    <string name="storage_clean_a11y">تنظيف %1$s</string>
+    <string name="storage_row_a11y">%1$s، %2$s</string>
+    <string name="storage_confirm_orphans_title">حذف الوسائط بلا مشروع؟</string>
+    <string name="storage_confirm_orphans_message">العناصر: %1$d · %2$s. لا يستخدم أي مشروع هذه الملفات. لا يمكن التراجع عن ذلك.</string>
+    <string name="storage_confirm_exports_title">حذف التصديرات المحفوظة في التطبيق؟</string>
+    <string name="storage_confirm_exports_message">%1$s. قد لا يكون بعضها في المعرض أو الصور: احفظ أولًا ما تريد الاحتفاظ به. لا يمكن التراجع عن ذلك.</string>
+    <string name="storage_cleaned">تم تحرير %1$s</string>
+    <string name="storage_nothing">لا يوجد ما يمكن تحريره الآن</string>
+    <string name="storage_busy">انتظر انتهاء التصدير قبل التنظيف</string>
+</resources>

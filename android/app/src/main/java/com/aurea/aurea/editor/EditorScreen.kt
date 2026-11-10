@@ -305,7 +305,11 @@ fun EditorScreen(store: EditorStore) {
     // A workspace transition must dispose its whole layout instead: moving the
     // AndroidView out of the removed scene Column leaves its trailing controls
     // attached to the Compose owner (including live, focusable numeric fields).
-    val stage = remember(store, ui, store.sceneEditor) {
+    // Trocar a interface (Edição ↔ Composição) também é uma troca de layout
+    // inteiro: movido da coluna da Edição, o palco deixava um nó vazio de meia
+    // tela acima dele, e o "+" da Composição empurrava timeline e barra para
+    // fora da tela.
+    val stage = remember(store, ui, store.sceneEditor, store.uiMode) {
         movableContentOf { modifier: Modifier -> PreviewStage(store, ui, modifier) }
     }
 

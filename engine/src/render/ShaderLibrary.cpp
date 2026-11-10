@@ -385,6 +385,7 @@ u32 ShaderLibrary::prewarm(const PipelineKey* keys, u32 count) noexcept {
     const bool wasSteady = steady_;
     steady_ = false;   // pré-aquecer não é "durante o playback"
     for (u32 i = 0; i < count; ++i) {
+        if (abort_ && abort_->load(std::memory_order_acquire)) break;   // set_abort
         const usize before = pipelines_.size();
         (void)pipeline(keys[i]);
         if (pipelines_.size() > before) ++created;

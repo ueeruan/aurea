@@ -1764,6 +1764,9 @@ final class AureaModel: ObservableObject {
             ProxyOptimizer.shared.onOptimized = { [weak self] in self?.toast = AureaText.t("proxy_ready") }
             ProxyOptimizer.shared.onFailed = { [weak self] in self?.toast = AureaText.t("proxy_failed") }
             ProxyOptimizer.shared.attach(engine)
+            // 0.5.2 (StorageView.swift): caches acima do teto e sobras do tmp que
+            // nenhum projeto usa saem na abertura, fora da main (par do Android).
+            AureaStorage.launchCleanup(engine)
         } else {
             started = false
             startError = (error as String?).map { AureaEngineText.sentence($0) } ?? AureaText.t("ios_engine_not_started")
@@ -3275,9 +3278,9 @@ final class AureaModel: ObservableObject {
             // (fora da "Camada" da Edição); a falha diz a frase do motor, como o "Música ou som".
             var audioIds: Set<Int64> = [], audioFailure: String?
             for (url, video) in items {
-                let destination = AureaPaths.mediaDestination(for: url.lastPathComponent)
                 do {
-                    try AureaPaths.copyImport(url, to: destination)
+                    // 0.5.2: do tmp move (e a pasta sai); conteúdo repetido vira link do que já existe.
+                    let destination = try AureaPaths.importIntoMedia(url)
                     let name = url.deletingPathExtension().lastPathComponent
                     // 0.2.7 (EditorStore.importMediaBatch): GIF toca (quadros numa pré-composição) e
                     // PSD chega com as camadas — antes os dois viravam uma imagem parada. O motor lê
@@ -3356,9 +3359,8 @@ final class AureaModel: ObservableObject {
             importer.beginImportBatch()
             var imported: [Int64] = [], failures = 0
             for pick in picks {
-                let destination = AureaPaths.mediaDestination(for: pick.url.lastPathComponent)
                 do {
-                    try AureaPaths.copyImport(pick.url, to: destination)
+                    let destination = try AureaPaths.importIntoMedia(pick.url)
                     let name = pick.url.deletingPathExtension().lastPathComponent
                     let ext = pick.url.pathExtension.lowercased()
                     let layered = !pick.video && (ext == "gif" || ext == "psd")
@@ -3476,7 +3478,6 @@ final class AureaModel: ObservableObject {
         importingMedia = true
         if status.playing != 0 { engine.run { $0.pause() }; status.playing = 0 }
         let scoped = url.startAccessingSecurityScopedResource()
-        let destination = AureaPaths.mediaDestination(for: url.lastPathComponent)
         let name = url.deletingPathExtension().lastPathComponent
         let importer = engine
         mediaQueue.async { [weak self] in
@@ -3484,7 +3485,7 @@ final class AureaModel: ObservableObject {
             var result: Int64 = -1
             var failure = ""
             do {
-                try AureaPaths.copyImport(url, to: destination)
+                let destination = try AureaPaths.importIntoMedia(url)
                 switch kind {
                 case .video: result = importer.importVideo(destination.path, name: name)
                 case .audio: result = importer.importAudio(destination.path, name: name)
@@ -4341,6 +4342,11 @@ final class AureaModel: ObservableObject {
     // clipe com transparência. O motor lê caminhos: os quadros vão para
     // Documents/Media/sequences/ (guardado relativo, sobrevive a reabrir e ao pacote);
     // um .zip vai para Caches e o motor o extrai em Documents/Media/sequences/.
+    // 0.5.2 (par do EditorStore): a pasta dos quadros soltos tem o nome da chave do
+    // CONTEÚDO (o motor decide, MediaStorage::plan_frame_folder): a mesma seleção
+    // importada de novo acha a pasta pronta e nada é copiado. A cópia vai para uma
+    // `.parcial` que só vira a pasta depois do último quadro conferido. As cópias do
+    // seletor (tmp do app) são desta operação: saem no fim dela, em qualquer desfecho.
 
     struct ImageSequenceDraft: Identifiable {
         let id = UUID()
@@ -4368,6 +4374,16 @@ final class AureaModel: ObservableObject {
             let fm = FileManager.default
             let scoped = urls.filter { $0.startAccessingSecurityScopedResource() }
             defer { scoped.forEach { $0.stopAccessingSecurityScopedResource() } }
+            // Cópia do seletor (asCopy) mora no tmp do app; a pasta aberta no lugar, nunca.
+            let tmp = fm.temporaryDirectory.standardizedFileURL.path + "/"
+            func pickerCopy(_ url: URL) -> Bool { url.standardizedFileURL.path.hasPrefix(tmp) }
+            defer {
+                for url in urls where pickerCopy(url) {
+                    try? fm.removeItem(at: url)
+                    let folder = url.deletingLastPathComponent()
+                    if pickerCopy(folder), (try? fm.contentsOfDirectory(atPath: folder.path))?.isEmpty == true { try? fm.removeItem(at: folder) }
+                }
+            }
             var frames: [URL] = [], zip: URL?
             for url in urls {
                 if (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
@@ -4391,34 +4407,66 @@ final class AureaModel: ObservableObject {
             if zip == nil && frames.isEmpty { finish(nil, AureaText.t("seq_none_found")); return }
             let sources = zip.map { [$0] } ?? frames
             let bytes = sources.reduce(Int64(0)) { $0 + Int64((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
-            let free = (try? AureaPaths.documents.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]).volumeAvailableCapacityForImportantUsage) ?? Int64.max
             // O .zip ocupa duas vezes (a cópia e o que o motor extrai).
             let needed = bytes * (zip != nil ? 2 : 1) + 64 * 1024 * 1024
-            if bytes > 0, needed > free {
-                finish(nil, AureaText.t("seq_no_space", ByteCountFormatter.string(fromByteCount: needed, countStyle: .file))); return
+            func noSpace() -> Bool {
+                let free = (try? AureaPaths.documents.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]).volumeAvailableCapacityForImportantUsage) ?? Int64.max
+                guard bytes > 0, needed > free else { return false }
+                finish(nil, AureaText.t("seq_no_space", ByteCountFormatter.string(fromByteCount: needed, countStyle: .file)))
+                return true
             }
-            var copied: URL?, tempZip: URL?, paths: [String] = []
+            if zip != nil, noSpace() { return }
+            var copied: URL?, tempZip: URL?, staging: String?, paths: [String] = []
             do {
                 if let zip {
                     let dir = AureaPaths.caches.appendingPathComponent("sequences", isDirectory: true)
                     try fm.createDirectory(at: dir, withIntermediateDirectories: true)
                     let target = dir.appendingPathComponent("seq-\(Int(Date().timeIntervalSince1970 * 1000)).zip")
-                    try fm.copyItem(at: zip, to: target)
+                    if !pickerCopy(zip) || (try? fm.moveItem(at: zip, to: target)) == nil { try fm.copyItem(at: zip, to: target) }
                     tempZip = target; paths = [target.path]
                 } else {
-                    let dir = AureaPaths.media.appendingPathComponent("sequences/seq-\(Int(Date().timeIntervalSince1970 * 1000))", isDirectory: true)
-                    try fm.createDirectory(at: dir, withIntermediateDirectories: true)
-                    copied = dir
-                    for (i, frame) in frames.enumerated() {
-                        if i % 8 == 0 {
-                            let text = AureaText.t("seq_copying", i + 1, frames.count)
-                            DispatchQueue.main.async { self?.operationMessage = text }
-                        }
-                        try fm.copyItem(at: frame, to: dir.appendingPathComponent(frame.lastPathComponent))
+                    // Um nome por quadro (a mesma imagem escolhida duas vezes).
+                    var seen = Set<String>()
+                    let unique = frames.filter { seen.insert($0.lastPathComponent).inserted }
+                    var hashes: [NSNumber] = [], sizes: [NSNumber] = []
+                    for frame in unique {
+                        guard let key = AureaEngine.contentKey(ofFile: frame.path), key.count == 2 else { throw CocoaError(.fileReadUnknown) }
+                        hashes.append(key[0]); sizes.append(key[1])
                     }
-                    paths = [dir.path]
+                    guard let plan = native.planSequenceFrames(names: unique.map { $0.lastPathComponent }, hashes: hashes, sizes: sizes),
+                          (plan["error"] as? NSNumber)?.intValue == 0, let directory = plan["directory"] as? String else {
+                        throw CocoaError(.fileWriteUnknown)
+                    }
+                    if (plan["reuse"] as? NSNumber)?.boolValue == true {
+                        // A mesma seleção já está no app: nada a copiar, e a pasta não
+                        // é desta importação (não sai no cancelar).
+                        paths = [directory]
+                    } else {
+                        guard let target = plan["staging"] as? String, !target.isEmpty else { throw CocoaError(.fileWriteUnknown) }
+                        if noSpace() { _ = native.discardSequenceFrames(target); return }
+                        staging = target
+                        let into = URL(fileURLWithPath: target, isDirectory: true)
+                        for (i, frame) in unique.enumerated() {
+                            if i % 8 == 0 {
+                                let text = AureaText.t("seq_copying", i + 1, unique.count)
+                                DispatchQueue.main.async { self?.operationMessage = text }
+                            }
+                            let destination = into.appendingPathComponent(frame.lastPathComponent)
+                            // A cópia do seletor é movida (já é nossa); a pasta aberta no lugar, copiada.
+                            if pickerCopy(frame), (try? fm.moveItem(at: frame, to: destination)) != nil { continue }
+                            try fm.copyItem(at: frame, to: destination)
+                        }
+                        let done = native.commitSequenceFrames(target)
+                        staging = nil   // virou a pasta final, ou o motor já a apagou no erro
+                        guard let done, (done["error"] as? NSNumber)?.intValue == 0, let final = done["directory"] as? String else {
+                            throw CocoaError(.fileWriteUnknown)
+                        }
+                        if (done["reused"] as? NSNumber)?.boolValue != true { copied = URL(fileURLWithPath: final, isDirectory: true) }
+                        paths = [final]
+                    }
                 }
             } catch {
+                if let staging { _ = native.discardSequenceFrames(staging) }
                 if let copied { try? fm.removeItem(at: copied) }
                 if let tempZip { try? fm.removeItem(at: tempZip) }
                 finish(nil, AureaText.t("ios_import_copy_failed", error.localizedDescription)); return
@@ -5391,12 +5439,19 @@ final class AureaModel: ObservableObject {
                 }
                 self.exporting = false
                 self.recordExportDiagnostics()
+                // A partida falhou: o motor não abriu este export; o destino (só dele) sai.
+                DispatchQueue.global(qos: .utility).async { try? FileManager.default.removeItem(at: url) }
                 self.pendingExportURL = nil; self.pendingExportOptions = nil
                 self.exportProgress = finalProgress
                 if request.isCancelled || self.exportCancelled { return }
                 if options.kind == .video {
                     let message = finalProgress["message"] as? String ?? ""
                     let code = (finalProgress["result"] as? NSNumber)?.intValue ?? 0
+                    // 0.5.2: a mesma linha do Android (Exporter: "nao iniciou"), com a
+                    // etapa da partida; antes o iOS nunca gravava o último export.
+                    ProblemReport.noteExport("iOS \(UIDevice.current.systemVersion): nao iniciou codigo=\(code) seguranca=\(usedSafeMode) " +
+                        "formato=\(options.kind) lado=\(options.shortSide) hevc=\(options.codec == .hevc) " +
+                        "\(Self.exportDiagnosticStage(self.engine.exportDiagnostics())) motor=\"\(message)\"")
                     self.exportMessage = code == 0 ? AureaText.t("ios_export_could_not_start")
                         : code == 6 && self.plannedExportSeconds(options) > Self.exportMaxSeconds
                         ? AureaText.t("exp_too_long_3h")
@@ -5468,6 +5523,21 @@ final class AureaModel: ObservableObject {
     nonisolated static let exportAttemptWait: UInt32 = 0x100
     nonisolated static let exportBusyRetries = 2
 
+    /// 0.5.2 (E4): "etapa=<onde a sessão está ou parou> espera=<ms>" do
+    /// diagnóstico do motor (ExportDiagnostics.hpp: sessionStage, ou endedFrom
+    /// quando ela já acabou em failed/cancelled) e o ponto do quadro
+    /// incompleto. O mesmo texto do Android (Exporter.diagnosticStage).
+    nonisolated static func exportDiagnosticStage(_ raw: String) -> String {
+        guard let json = (try? JSONSerialization.jsonObject(with: Data(raw.utf8))) as? [String: Any] else { return "etapa=?" }
+        let stage = json["sessionStage"] as? String ?? ""
+        let ended = json["endedFrom"] as? String ?? ""
+        let useEnded = (stage == "failed" || stage == "cancelled") && !ended.isEmpty
+        let name = useEnded ? ended : stage
+        let waited = ((useEnded ? json["endedFromMs"] : json["sessionWaitMs"]) as? NSNumber)?.int64Value ?? 0
+        let site = json["incompleteSite"] as? String ?? ""
+        return "etapa=\(name.isEmpty ? "?" : name) espera=\(waited)ms" + (site.isEmpty ? "" : " ponto=\(site)")
+    }
+
     /// O próximo degrau da escada de tentativas depois de uma falha (a regra do motor).
     nonisolated static func nextExportAttempt(_ attempt: UInt32, code: Int32, failure: UInt32, stalled: Bool, tooLong: Bool,
                                               options: ExportOptions) -> UInt32 {
@@ -5491,6 +5561,7 @@ final class AureaModel: ObservableObject {
         if flags & AureaExportFlag.blurReduced.rawValue != 0 { notes.append(AureaText.t("export_note_blur_reduced")) }
         if flags & AureaExportFlag.environmentFallback.rawValue != 0 { notes.append(AureaText.t("export_note_environment_fallback")) }
         if flags & AureaExportFlag.modelFallback.rawValue != 0 { notes.append(AureaText.t("export_note_model_fallback")) }
+        if flags & AureaExportFlag.elementsOmitted.rawValue != 0 { notes.append(AureaText.t("export_note_elements_omitted")) }
         return notes
     }
 
@@ -5544,6 +5615,12 @@ final class AureaModel: ObservableObject {
     /// A preparação não voltou: a tela se libera. O motor segue com o próprio
     /// prazo; o próximo export espera ou recebe o motivo dele.
     private func abandonPreparingExport(_ message: String) {
+        // 0.5.2: a partida que não voltou vai para o próximo relato com a etapa
+        // em que parou (a mesma linha do Android: "partida presa").
+        if !exportCancelled {
+            ProblemReport.noteExport("iOS \(UIDevice.current.systemVersion): partida presa " +
+                "\(Self.exportDiagnosticStage(engine.exportDiagnostics())) seguranca=\(exportSafeMode) formato=\(exportedKind)")
+        }
         stopPreparingWatch()
         exportStartup?.cancel()
         engine.cancelExport()
@@ -5780,8 +5857,16 @@ final class AureaModel: ObservableObject {
                     }
                     self.exportedURL = result == 0 && !self.exportCancelled ? self.pendingExportURL : nil
                     let hyperJob = self.pendingExportOptions?.hyperJob != nil
+                    // Temporário com dono (par do Exporter.kt): falhou ou cancelou, o que
+                    // o motor deixou no destino (nome novo, só deste export) sai agora,
+                    // e não fica listado como "exportação guardada no app".
+                    if self.exportedURL == nil, let url = self.pendingExportURL {
+                        DispatchQueue.global(qos: .utility).async { try? FileManager.default.removeItem(at: url) }
+                    }
                     self.pendingExportURL = nil
                     self.pendingExportOptions = nil
+                    // 0.5.2: ao fim de cada export, caches acima do teto (par do Android).
+                    DispatchQueue.global(qos: .utility).async { AureaStorage.trimCaches(atLaunch: false) }
                     if let url = self.exportedURL {
                         self.exportCancelled = false
                         // AureaHyper: o arquivo vira projeto (HyperFlow.finishIfDone), não vai para Fotos.
@@ -5796,6 +5881,13 @@ final class AureaModel: ObservableObject {
                             let total = (self.exportProgress["framesTotal"] as? NSNumber)?.intValue ?? 0
                             NSLog("%@", "AureaExport: falhou motivo=\(failure) codigo=\(result) quadro=\(done)/\(total) " +
                                   "seguranca=\(self.exportSafeMode) travou=\(self.exportStalled) motor=\(message)")
+                            // 0.5.2: a mesma linha do Android (Exporter: "falhou"), que vai junto
+                            // do próximo "Relatar um problema"; antes nada no iOS a gravava.
+                            if result != 25 || self.exportStalled {
+                                ProblemReport.noteExport("iOS \(UIDevice.current.systemVersion): falhou: motivo=\(failure) codigo=\(result) " +
+                                    "quadro=\(done)/\(total) seguranca=\(self.exportSafeMode) travou=\(self.exportStalled) " +
+                                    "formato=\(self.exportedKind) \(Self.exportDiagnosticStage(self.engine.exportDiagnostics())) motor=\"\(message)\"")
+                            }
                             // O motivo (código estável do motor) vira texto do
                             // catálogo; a frase crua do motor (português) não
                             // vai para a tela.
@@ -5847,6 +5939,11 @@ final class AureaModel: ObservableObject {
             }) { saved, error in
                 Task { @MainActor in
                     self?.exportSavedToPhotos = saved
+                    // 0.5.2: o Fotos CONFIRMOU — das exportações deste projeto já no Fotos,
+                    // só a mais nova fica no app. Recusada ou sem permissão: o arquivo fica.
+                    if saved, let project = self?.projectURL?.path ?? self?.projectName {
+                        DispatchQueue.global(qos: .utility).async { AureaStorage.exportSavedToPhotos(url, project: project) }
+                    }
                     self?.exportPublishing = false; self?.exporting = false
                     // Confirmação visível: o vídeo está no Fotos (ou o porquê de não estar).
                     if !saved { NSLog("AureaExport: Photos save failed: %@", error?.localizedDescription ?? "-") }
@@ -7032,7 +7129,6 @@ extension AureaModel {
         importingMedia = true; operationMessage = AureaText.t("ios_importing_media")
         let operation = beginProjectOperation()
         let scoped = url.startAccessingSecurityScopedResource()
-        let destination = AureaPaths.mediaDestination(for: url.lastPathComponent)
         let name = url.deletingPathExtension().lastPathComponent
         let importer = engine
         if status.playing != 0 { engine.run { $0.pause() }; status.playing = 0 }
@@ -7041,7 +7137,7 @@ extension AureaModel {
             var result: Int64 = -1
             var failure = ""
             do {
-                try AureaPaths.copyImport(url, to: destination)
+                let destination = try AureaPaths.importIntoMedia(url)
                 result = video ? importer.replaceLayer(layer, withVideo: destination.path, name: name)
                                : importer.replaceLayer(layer, withImageFile: destination.path, name: name)
                 if result < 0 {
@@ -7089,8 +7185,15 @@ extension AureaModel {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
         let invalid = CharacterSet(charactersIn: "/\\:").union(.controlCharacters)
         let safe = title.components(separatedBy: invalid).joined(separator: "-").trimmingCharacters(in: .whitespaces)
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArquivoProjeto", isDirectory: true)
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let packages = FileManager.default.temporaryDirectory.appendingPathComponent("ArquivoProjeto", isDirectory: true)
+        // 0.5.2: o pacote (com a mídia, às vezes GBs) ficava no tmp depois de
+        // compartilhado. Os de mais de 1 h saem antes do novo (o de agora pode
+        // estar na folha de compartilhar ou subindo para a comunidade).
+        for old in (try? FileManager.default.contentsOfDirectory(at: packages, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [] {
+            let date = (try? old.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantFuture
+            if date < Date().addingTimeInterval(-3600) { try? FileManager.default.removeItem(at: old) }
+        }
+        let directory = packages.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let out = directory.appendingPathComponent((safe.isEmpty ? "Aurea" : safe) + ".aureaproj")
         toast = AureaText.t("project_file_exporting")
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -7118,7 +7221,9 @@ extension AureaModel {
                 skipped = r.count > 2 ? r[2].intValue : 0
             }
             let finalCode = code, finalSkipped = skipped
-            if requireComplete && skipped > 0 { try? FileManager.default.removeItem(at: out) }
+            // Falhou (ou publicar exigia o projeto inteiro): o pacote pela metade é só
+            // desta operação e sai agora, com a pasta dele.
+            if code != 0 || (requireComplete && skipped > 0) { try? FileManager.default.removeItem(at: directory) }
             DispatchQueue.main.async {
                 guard let self else { return }
                 if finalCode != 0 || (requireComplete && finalSkipped > 0) {

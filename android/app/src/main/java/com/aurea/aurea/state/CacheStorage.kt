@@ -16,6 +16,12 @@ import java.io.File
 //  Limpeza automática: ao abrir o app e ao fim de cada export, cada tipo acima
 //  do teto perde os arquivos mais antigos (LRU pela data de modificação).
 //
+//  0.5.2: o PreRender (`motor/pre-render`) é do MOTOR — a limpeza por idade
+//  apagava quadros de dentro de uma pasta viva; agora o motor apaga as pastas
+//  sem dono na abertura e a tela pede a ele ("Limpar PreRender"). A mídia
+//  otimizada (`motor/preview-proxies`) tem linha própria. O resto do armazenamento
+//  (mídia dos projetos, órfã, exportações guardadas) está em [AppStorage].
+//
 //  Temporários com dono e ciclo de vida (§52):
 //   - export: `cacheDir/export/` — sucesso copia para a galeria e apaga;
 //     falha e cancelamento apagam na hora; crash/force kill = sobra que a
@@ -40,6 +46,11 @@ class CacheStorage(private val context: Context) {
     private fun text(id: Int) = AppText.get(context, id)
     private val motor get() = File(context.cacheDir, "motor")
     private val previews get() = File(motor, "previas")
+    private val preRender get() = File(motor, "pre-render")
+    private val proxies get() = File(motor, "preview-proxies")
+    /** Pipelines e o resto do motor: fora prévias, PreRender e proxies (linhas próprias). */
+    private fun pipeline(f: File) = !f.path.startsWith(previews.path) && !f.path.startsWith(preRender.path) &&
+        !f.path.startsWith(proxies.path)
     private val export get() = File(context.cacheDir, "export")
     private val captions get() = File(context.cacheDir, "legendas")
     private val projects get() = File(context.filesDir, "projetos")
@@ -47,8 +58,10 @@ class CacheStorage(private val context: Context) {
 
     /** Os tipos, com os tamanhos lidos do disco. Chamar fora da main thread. */
     fun scan(exporting: Boolean = false): List<CacheKind> {
-        val (pipeBytes, pipeFiles) = measure(motor) { !it.path.startsWith(previews.path) }
+        val (pipeBytes, pipeFiles) = measure(motor, ::pipeline)
         val (prevBytes, prevFiles) = measure(previews)
+        val (preBytes, preFiles) = measure(preRender)
+        val (proxyBytes, proxyFiles) = measure(proxies)
         val (expBytes, expFiles) = measure(export)
         val (capBytes, capFiles) = measure(captions)
         val orphans = orphanProjectThumbs()
@@ -62,6 +75,11 @@ class CacheStorage(private val context: Context) {
                 pipeBytes, pipeFiles, PIPELINE_LIMIT),
             CacheKind(PREVIEWS, text(R.string.app_cache_previews_title), text(R.string.app_cache_previews_detail),
                 prevBytes, prevFiles, PREVIEW_LIMIT),
+            // O motor limita e apaga (PreRenderCache: 4 GiB, metade do livre); aqui só a medida.
+            CacheKind(PRERENDER, text(R.string.storage_prerender_title), text(R.string.storage_prerender_detail),
+                preBytes, preFiles, Long.MAX_VALUE),
+            CacheKind(PROXIES, text(R.string.storage_proxies_title), text(R.string.storage_proxies_detail),
+                proxyBytes, proxyFiles, PROXY_LIMIT),
             CacheKind(EXPORT, text(R.string.app_cache_export_title), text(R.string.app_cache_export_detail),
                 expBytes, expFiles, if (exporting) Long.MAX_VALUE else 0L),
             CacheKind(CAPTIONS, text(R.string.app_cache_captions_title), text(R.string.app_cache_captions_detail),
@@ -75,8 +93,10 @@ class CacheStorage(private val context: Context) {
 
     /** Apaga um tipo inteiro. Devolve os bytes liberados. Nunca toca em projeto. */
     fun clear(id: String): Long = when (id) {
-        PIPELINES -> deleteWhere(motor) { !it.path.startsWith(previews.path) }
+        PIPELINES -> deleteWhere(motor, ::pipeline)
         PREVIEWS -> deleteWhere(previews) { true }
+        // Do motor: o EditorStore pede a ele (clearPreRenderCache / clearProxyCache).
+        PRERENDER, PROXIES -> 0L
         EXPORT -> deleteWhere(export) { true }
         CAPTIONS -> deleteWhere(captions) { true }
         ORPHAN_THUMBS -> orphanProjectThumbs().sumOf { f -> f.length().also { f.delete() } }
@@ -94,8 +114,11 @@ class CacheStorage(private val context: Context) {
      */
     fun enforceLimits(exporting: Boolean = false): Long {
         var freed = 0L
-        freed += trimToLimit(listFiles(motor) { !it.path.startsWith(previews.path) }, PIPELINE_LIMIT)
+        freed += trimToLimit(listFiles(motor, ::pipeline), PIPELINE_LIMIT)
         freed += trimToLimit(listFiles(previews), PREVIEW_LIMIT)
+        // A mídia otimizada seguia o teto do motor inteiro (64 MB) por estar dentro
+        // dele: o mesmo teto, agora só dela. O PreRender nunca é aparado aqui.
+        freed += trimToLimit(listFiles(proxies), PROXY_LIMIT)
         if (!exporting) freed += trimToLimit(listFiles(export), 0L)
         freed += trimToLimit(listFiles(captions), 0L)
         freed += orphanProjectThumbs().sumOf { f -> f.length().also { f.delete() } }
@@ -155,10 +178,13 @@ class CacheStorage(private val context: Context) {
         const val CAPTIONS = "legendas"
         const val ORPHAN_THUMBS = "capas"
         const val OTHER = "outros"
+        const val PRERENDER = "prerender"
+        const val PROXIES = "proxies"
 
         /** Cache de pipeline do Vulkan: poucos MB; o teto só pega algo anormal. */
         const val PIPELINE_LIMIT = 64L shl 20
         const val PREVIEW_LIMIT = 64L shl 20
+        const val PROXY_LIMIT = 64L shl 20
         const val OTHER_LIMIT = 32L shl 20
     }
 }

@@ -120,6 +120,130 @@ u64 timestamp_hash(u64 hash, i64 value) noexcept {
     return hash;
 }
 
+// Nível do som decodificado na MESMA régua da fonte (write_audio_direct): média
+// de |amostra| em escala de 16 bits, de 7 em 7 amostras INTERCALADAS — o passo
+// ímpar alterna os canais, então todos entram, como na fonte. Antes só o canal
+// 0 em FLTP contava: uma mixagem só no canal direito saía "sem som" e o export
+// bom era reprovado. Cobre todo AVSampleFormat (planar e intercalado); falso =
+// formato desconhecido (nenhuma amostra medida).
+bool accumulate_audio_level(const AVFrame* frame, f64& sum, u64& count) noexcept {
+    const int channels = frame->ch_layout.nb_channels;
+    if (channels <= 0 || frame->nb_samples <= 0 || !frame->extended_data) return true;
+    const auto format = static_cast<AVSampleFormat>(frame->format);
+    const bool planar = av_sample_fmt_is_planar(format) != 0;
+    const AVSampleFormat packed = av_get_packed_sample_fmt(format);
+    switch (packed) {
+        case AV_SAMPLE_FMT_U8: case AV_SAMPLE_FMT_S16: case AV_SAMPLE_FMT_S32:
+        case AV_SAMPLE_FMT_S64: case AV_SAMPLE_FMT_FLT: case AV_SAMPLE_FMT_DBL: break;
+        default: return false;
+    }
+    const i64 total = static_cast<i64>(frame->nb_samples) * channels;
+    for (i64 i = 0; i < total; i += 7) {
+        const int channel = static_cast<int>(i % channels);
+        const u8* plane = frame->extended_data[planar ? channel : 0];
+        if (!plane) return false;
+        const i64 at = planar ? i / channels : i;
+        f64 value = 0.0;
+        switch (packed) {
+            case AV_SAMPLE_FMT_U8: value = (static_cast<int>(plane[at]) - 128) * 256.0; break;
+            case AV_SAMPLE_FMT_S16: value = reinterpret_cast<const i16*>(plane)[at]; break;
+            case AV_SAMPLE_FMT_S32: value = reinterpret_cast<const i32*>(plane)[at] / 65536.0; break;
+            case AV_SAMPLE_FMT_S64: value = static_cast<f64>(reinterpret_cast<const i64*>(plane)[at]) / 281474976710656.0; break;
+            case AV_SAMPLE_FMT_FLT: value = reinterpret_cast<const float*>(plane)[at] * 32768.0; break;
+            case AV_SAMPLE_FMT_DBL: value = reinterpret_cast<const double*>(plane)[at] * 32768.0; break;
+            default: break;
+        }
+        // NaN/inf não é som: conta como silêncio (puxa para "perdeu o áudio").
+        sum += std::isfinite(value) ? std::fabs(value) : 0.0;
+        ++count;
+    }
+    return true;
+}
+
+// --- Validação limitada (export longo no modo tolerante) --------------------
+// O decode de software de TODOS os quadros do arquivo pronto deixava a fase
+// depois dos 100% proporcional à duração (10 min a 30 qps = 18 000 quadros, de
+// 2,5 a 5 min num celular fraco em 1080p — estimativa, não medida). Agora:
+// os pacotes de TODO o arquivo continuam conferidos (abre, estrutura, contagem,
+// PTS crescente, relógio CFR, hash, duração, áudio inteiro), mas só um conjunto
+// limitado de GOPs inteiros passa pelo decoder: o primeiro, o último e GOPs
+// espaçados por igual no meio, cada um com amostra de imagem quando houver.
+// Orçamento ~ 20·√N quadros entre 600 e 2400: cresce menos que a duração, e um
+// dano que cubra a fração f do arquivo escapa com chance ~(1−f)^K para K GOPs
+// decodificados (GOP de 2 s: K de 10 a 40; f = 10 % → de 35 % a 1,5 %).
+// Até 900 quadros (30 s a 30 qps) o decode inteiro custa poucos segundos e
+// fica; o modo estrito (testes, guardas do retomável) também fica no inteiro.
+constexpr u64 kFullValidationFrames = 900;
+constexpr f64 kBoundedBudgetScale = 20.0;
+constexpr u64 kBoundedBudgetFloor = 600, kBoundedBudgetCap = 2400;
+/// Amostras de imagem que os GOPs escolhidos têm de cobrir (ou todas, se menos).
+constexpr u64 kBoundedMinSamples = 8;
+
+struct BoundedPlan {
+    std::vector<u32> start;   ///< 1o quadro de cada GOP pelo índice do contêiner, + sentinela no total
+    std::vector<u8> decode;   ///< 1 = GOP decodificado inteiro
+    u64 frames = 0;           ///< quadros dos GOPs escolhidos
+    u64 samples = 0;          ///< amostras de imagem dentro deles
+    usize gops = 0;           ///< GOPs escolhidos
+};
+
+/// Falso = decode inteiro (sem índice confiável, poucos GOPs, o orçamento já
+/// cobre tudo ou os GOPs escolhidos não alcançam amostras de imagem).
+bool plan_bounded_validation(AVStream* stream, u64 total,
+                             const std::vector<export_content::Fingerprint>& samples,
+                             BoundedPlan& plan) noexcept {
+    try {
+        // O índice do MP4 (moov, na frente pelo +faststart) dá os keyframes sem
+        // ler nenhum pacote; ele tem de listar exatamente os quadros enviados.
+        const int entries = avformat_index_get_entries_count(stream);
+        if (entries <= 0 || static_cast<u64>(entries) != total) return false;
+        plan = BoundedPlan{};
+        for (int i = 0; i < entries; ++i) {
+            const AVIndexEntry* entry = avformat_index_get_entry(stream, i);
+            if (!entry) return false;
+            if (i == 0 || (entry->flags & AVINDEX_KEYFRAME)) plan.start.push_back(static_cast<u32>(i));
+        }
+        const usize gops = plan.start.size();
+        plan.start.push_back(static_cast<u32>(entries));
+        const u64 budget = std::clamp<u64>(static_cast<u64>(kBoundedBudgetScale * std::sqrt(static_cast<f64>(total))),
+                                           kBoundedBudgetFloor, kBoundedBudgetCap);
+        const u64 average = std::max<u64>(1, (total + gops - 1) / gops);
+        const u64 slots = std::max<u64>(2, budget / average);
+        if (gops < 3 || slots >= gops) return false;
+        // Blocos de `stride` GOPs seguidos; cada bloco decodifica UM: o 1o bloco
+        // o GOP 0 (início do relógio), o último o GOP final (fim e EOS), os do
+        // meio o 1o GOP do bloco que contém uma amostra de imagem (sem amostra,
+        // o 1o do bloco). Com `stride` >= 2, o GOP 1 nunca é decodificado.
+        const usize stride = static_cast<usize>((gops + slots - 1) / slots);
+        plan.decode.assign(gops, 0);
+        const auto length = [&](usize g) { return static_cast<u64>(plan.start[g + 1] - plan.start[g]); };
+        const auto gop_of = [&](u64 frame) {
+            return static_cast<usize>(std::upper_bound(plan.start.begin(), plan.start.begin() + gops, frame) -
+                                      plan.start.begin()) - 1;
+        };
+        for (usize first = 0; first < gops; first += stride) {
+            const usize end = std::min(gops, first + stride);
+            usize pick = first;
+            if (end == gops) pick = gops - 1;
+            else if (first != 0) {
+                const auto found = std::lower_bound(samples.begin(), samples.end(), plan.start[first],
+                    [](const export_content::Fingerprint& f, u64 wanted) { return f.frame < wanted; });
+                if (found != samples.end() && found->frame < plan.start[end]) pick = gop_of(found->frame);
+            }
+            // GOP muito maior que a média (cena estática num encoder de GOP
+            // variável) não estoura o orçamento; o primeiro e o último entram sempre.
+            if (pick != 0 && pick != gops - 1 && plan.frames + length(pick) > budget) continue;
+            if (!plan.decode[pick]) { plan.decode[pick] = 1; plan.frames += length(pick); ++plan.gops; }
+        }
+        for (const export_content::Fingerprint& f : samples)
+            if (f.frame < total && plan.decode[gop_of(f.frame)]) ++plan.samples;
+        if (plan.samples < std::min<u64>(samples.size(), kBoundedMinSamples)) return false;
+        return plan.frames < total;
+    } catch (...) {
+        return false;   // sem memória para o plano: decode inteiro, como antes
+    }
+}
+
 AVCodecID codec_id(ExportCodec codec) noexcept {
     switch (codec) {
         case ExportCodec::H264: return AV_CODEC_ID_H264;
@@ -830,8 +954,21 @@ Status FFmpegSink::try_video(const char* name, bool hardware, const char* native
         av_dict_set(&options, "allow_skip_frames", "0", 0);
         // OpenH264 só paraleliza ENTRE fatias: com uma fatia por quadro as 4
         // threads ficavam paradas (moto g52, 4K do upscale: 306 ms/quadro num
-        // núcleo). 4 fatias = 4 núcleos; a perda de compressão é pequena.
-        if (ctx->height >= 720) ctx->slices = 4;
+        // núcleo). Uma fatia por thread em TODA altura: antes só a partir de
+        // 720 linhas, e os degraus de 480p (o software dos celulares fracos)
+        // codificavam num núcleo só. Piso de 4 linhas de macrobloco (64 px)
+        // por fatia: com controle de taxa (rc_mode bitrate acima) o OpenH264
+        // 2.6 exige ao menos um GOM por fatia — 2 linhas de MB até 480 px de
+        // largura, 4 acima (GomValidCheckSliceNum/GomValidCheckSliceMbNum) — e,
+        // quando a conta não fecha, RECUSA a abertura (UNSUPPORTED_PARA) em vez
+        // de reduzir; 4 linhas cobrem o maior GOM em qualquer largura. Fatia
+        // menor também perde mais compressão (predição e contexto zeram na
+        // borda, e o deblocking desliga nela com threads). 480p = 30 linhas de
+        // MB = 4 fatias; 240p = 3; 144p = 2; menos de 8 linhas = fatia única
+        // (slices 0 = SM_SINGLE_SLICE no libopenh264enc.c).
+        const int sliceThreads = std::max(1, ctx->thread_count);
+        const int slices = std::min(sliceThreads, ((ctx->height + 15) / 16) / 4);
+        if (slices > 1) ctx->slices = slices;
         if (video_.profile == 1) av_dict_set(&options, "profile", "constrained_baseline", 0);
     } else if (std::strcmp(name, "libsvtav1") == 0) {
         av_dict_set(&options, "preset", "10", 0);
@@ -2404,13 +2541,25 @@ Status FFmpegSink::decode_validate(const ExportOutputValidation& expected) noexc
     u64 progressAt = monotonic_ns();
     const u64 stall = expected.stallNs ? expected.stallNs : codecStallNs;
     f64 decodedAudioSum = 0.0;
-    u64 decodedAudioCount = 0, contentChecked = 0;
+    u64 decodedAudioCount = 0, contentChecked = 0, contentFound = 0;
+    // Validação limitada (plan_bounded_validation): só no modo tolerante e
+    // em export longo. `runBase`/`runDecoded`: 1o quadro do trecho decodificado
+    // agora e quantos dele já saíram — o índice de cada quadro decodificado sem
+    // depender de ter decodificado os anteriores (no decode inteiro, 0 e `frames`).
+    BoundedPlan plan;
+    const bool bounded = !strict && videoFrames_ > kFullValidationFrames &&
+        plan_bounded_validation(decoded.format->streams[videoIndex], videoFrames_, fingerprints_, plan);
+    u64 videoPacketCount = 0, packetHash = hashSeed, submittedVideo = 0, runBase = 0, runDecoded = 0;
+    i64 previousPacket = AV_NOPTS_VALUE;
+    usize gop = 0;
+    bool running = false;
     // Quadro decodificado x o que o encoder recebeu. Reprova nos dois modos:
     // verde, preto ou cor trocada não são divergência de relógio.
     auto check_content = [&](const AVFrame* picture, u64 index) noexcept -> Status {
         const auto found = std::lower_bound(fingerprints_.begin(), fingerprints_.end(), index,
             [](const export_content::Fingerprint& f, u64 wanted) { return f.frame < wanted; });
         if (found == fingerprints_.end() || found->frame != index) return OkStatus;
+        ++contentFound;
         const bool planar = picture->format == AV_PIX_FMT_YUV420P || picture->format == AV_PIX_FMT_YUVJ420P;
         if (!planar && picture->format != AV_PIX_FMT_NV12) return OkStatus;
         export_content::Planes planes;
@@ -2443,7 +2592,7 @@ Status FFmpegSink::decode_validate(const ExportOutputValidation& expected) noexc
             // fim é haver quadros decodificados.
             if (code < 0) return soft(Errc::DecodeFailed, "decodificar arquivo exportado FFmpeg", code);
             progressAt = monotonic_ns(); ++obtained;
-            if (video && expected.validatedFrames) expected.validatedFrames->fetch_add(1, std::memory_order_relaxed);
+            if (video && !bounded && expected.validatedFrames) expected.validatedFrames->fetch_add(1, std::memory_order_relaxed);
             const AVFrame* frame = decoded.frame;
             const AVStream* stream = decoded.format->streams[index];
             Status checked = OkStatus;
@@ -2452,7 +2601,7 @@ Status FFmpegSink::decode_validate(const ExportOutputValidation& expected) noexc
             const i64 pts = frame->best_effort_timestamp;
             if (checked.ok() && pts == AV_NOPTS_VALUE) {
                 checked = soft(Errc::CorruptData, "frame exportado FFmpeg sem PTS");
-                if (checked.ok() && video) ++frames;   // decodificou; só não tem relógio
+                if (checked.ok() && video) { ++frames; ++runDecoded; }   // decodificou; só não tem relógio
             } else if (checked.ok() && video) {
                 if (frame->width != static_cast<int>(expected.width) || frame->height != static_cast<int>(expected.height))
                     checked = soft(Errc::CorruptData, "dimensoes exportadas FFmpeg divergentes");
@@ -2461,17 +2610,17 @@ Status FFmpegSink::decode_validate(const ExportOutputValidation& expected) noexc
                     (previousVideo != AV_NOPTS_VALUE && normalized <= previousVideo)))
                     checked = soft(Errc::CorruptData, "PTS de video FFmpeg duplicado, ausente ou fora de ordem");
                 if (checked.ok() && timing_ == Timing::Constant && normalized !=
-                    av_rescale_q(static_cast<i64>(frames), av_inv_q(rate_), videoTimebase_))
+                    av_rescale_q(static_cast<i64>(runBase + runDecoded), av_inv_q(rate_), videoTimebase_))
                     checked = soft(Errc::CorruptData, "arquivo FFmpeg perdeu um frame do relogio absoluto");
                 if (checked.ok() && frame->width == static_cast<int>(expected.width) &&
                     frame->height == static_cast<int>(expected.height)) {
                     const i64 index = timing_ == Timing::Constant
                         ? av_rescale_q_rnd(normalized, videoTimebase_, av_inv_q(rate_), AV_ROUND_NEAR_INF)
-                        : static_cast<i64>(frames);
+                        : static_cast<i64>(runBase + runDecoded);
                     checked = check_content(frame, static_cast<u64>(std::max<i64>(index, 0)));
                 }
                 if (checked.ok()) {
-                    hash = timestamp_hash(hash, normalized); previousVideo = normalized;
+                    hash = timestamp_hash(hash, normalized); previousVideo = normalized; ++runDecoded;
                     if (++frames > videoFrames_) checked = soft(Errc::CorruptData, "arquivo FFmpeg possui frames adicionais");
                 }
             } else if (checked.ok()) {
@@ -2488,10 +2637,8 @@ Status FFmpegSink::decode_validate(const ExportOutputValidation& expected) noexc
                             (previousAudioRawEnd != AV_NOPTS_VALUE && std::abs(start - previousAudioRawEnd) > 1))
                             checked = soft(Errc::CorruptData, "AAC FFmpeg possui pacote repetido, lacuna ou padding excessivo");
                         previousAudioRawEnd = end;
-                        if (frame->format == AV_SAMPLE_FMT_FLTP) {
-                            const auto* samples = reinterpret_cast<const float*>(frame->extended_data[0]);
-                            for (int i = 0; i < frame->nb_samples; i += 7) { decodedAudioSum += std::fabs(samples[i]) * 32768.0; ++decodedAudioCount; }
-                        }
+                        if (!accumulate_audio_level(frame, decodedAudioSum, decodedAudioCount) && checked.ok())
+                            checked = soft(Errc::CorruptData, "audio decodificado em formato sem medida de nivel");
                         // AAC priming is removed by the MP4 edit list / decoder. The
                         // final coded frame may extend past the exact stream duration.
                         const i64 clippedStart = std::max<i64>(0, start);
@@ -2537,7 +2684,46 @@ Status FFmpegSink::decode_validate(const ExportOutputValidation& expected) noexc
         }
         if (decoded.packet->flags & AV_PKT_FLAG_CORRUPT)
             if (const Status s = soft(Errc::CorruptData, "pacote exportado FFmpeg corrompido"); !s.ok()) return s;
-        if (decoded.packet->stream_index == videoIndex) {
+        if (decoded.packet->stream_index == videoIndex && bounded) {
+            // Limitado: o relógio e a contagem conferidos em TODO pacote (o que
+            // o decode inteiro confere em cada quadro: sem B-frames, a ordem
+            // dos pacotes é a de exibição — drain recusa reordenação).
+            const u64 index = videoPacketCount++;
+            const AVStream* stream = decoded.format->streams[videoIndex];
+            if (decoded.packet->pts == AV_NOPTS_VALUE) {
+                if (const Status s = soft(Errc::CorruptData, "pacote de video FFmpeg sem PTS"); !s.ok()) return s;
+            } else {
+                const i64 normalized = av_rescale_q(decoded.packet->pts, stream->time_base, videoTimebase_);
+                if (normalized < 0 || (index == 0 && normalized != 0) ||
+                    (previousPacket != AV_NOPTS_VALUE && normalized <= previousPacket))
+                    if (const Status s = soft(Errc::CorruptData, "pacote de video FFmpeg com PTS duplicado ou fora de ordem"); !s.ok())
+                        return s;
+                if (timing_ == Timing::Constant &&
+                    normalized != av_rescale_q(static_cast<i64>(index), av_inv_q(rate_), videoTimebase_))
+                    if (const Status s = soft(Errc::CorruptData, "pacote de video FFmpeg fora do relogio absoluto"); !s.ok()) return s;
+                packetHash = timestamp_hash(packetHash, normalized); previousPacket = normalized;
+            }
+            if (index >= videoFrames_)
+                if (const Status s = soft(Errc::CorruptData, "arquivo FFmpeg possui pacotes de video adicionais"); !s.ok()) return s;
+            while (gop + 1 < plan.decode.size() && index >= plan.start[gop + 1]) ++gop;
+            // Além do índice (não acontece num MP4 íntegro): decodifica, para conferir.
+            const bool wanted = index >= plan.start.back() || plan.decode[gop];
+            if (running && !wanted) {
+                // Fim de um GOP escolhido: drena e zera o decoder; o próximo
+                // trecho começa num keyframe (início de GOP pelo índice).
+                if (const Status status = submit(decoded.video, videoIndex, true, nullptr); !status.ok()) return status;
+                avcodec_flush_buffers(decoded.video);
+                running = false;
+            }
+            if (wanted) {
+                if (!running) { running = true; runBase = index; runDecoded = 0; }
+                ++submittedVideo;
+                if (const Status status = submit(decoded.video, videoIndex, true, decoded.packet); !status.ok()) return status;
+            } else {
+                progressAt = monotonic_ns();   // pular pacote é progresso: o prazo do decoder não corre
+            }
+            if (expected.validatedFrames) expected.validatedFrames->fetch_add(1, std::memory_order_relaxed);
+        } else if (decoded.packet->stream_index == videoIndex) {
             if (const Status status = submit(decoded.video, videoIndex, true, decoded.packet); !status.ok()) return status;
         } else if (audioDecoding && decoded.packet->stream_index == audioIndex) {
             if (const Status status = submit(decoded.audio, audioIndex, false, decoded.packet); !status.ok()) return status;
@@ -2548,13 +2734,28 @@ Status FFmpegSink::decode_validate(const ExportOutputValidation& expected) noexc
     if (audioDecoding) if (const Status status = submit(decoded.audio, audioIndex, false, nullptr); !status.ok()) return status;
     // Nos dois modos: um arquivo sem nenhum quadro decodificável não é vídeo.
     if (frames == 0) return error(Errc::CorruptData, "arquivo exportado FFmpeg sem nenhum quadro decodificavel");
-    AUREA_LOG_INFO("export: imagem conferida em %llu de %llu amostras",
-                   static_cast<unsigned long long>(contentChecked), static_cast<unsigned long long>(fingerprints_.size()));
+    if (bounded) {
+        AUREA_LOG_INFO("export: validacao limitada: %llu de %llu quadros decodificados em %llu GOPs; "
+                       "imagem conferida em %llu de %llu amostras (%llu nos GOPs escolhidos)",
+                       static_cast<unsigned long long>(frames), static_cast<unsigned long long>(videoPacketCount),
+                       static_cast<unsigned long long>(plan.gops), static_cast<unsigned long long>(contentChecked),
+                       static_cast<unsigned long long>(fingerprints_.size()), static_cast<unsigned long long>(plan.samples));
+        // Todo pacote enviado ao decoder virou quadro, e toda amostra de imagem
+        // dos GOPs escolhidos saiu do decoder (a comparação em si reprova acima).
+        if (frames != submittedVideo)
+            if (const Status s = soft(Errc::CorruptData, "GOP conferido nao decodificou todos os quadros"); !s.ok()) return s;
+        if (contentFound < plan.samples)
+            if (const Status s = soft(Errc::CorruptData, "amostras de imagem dos GOPs conferidos sem quadro decodificado"); !s.ok())
+                return s;
+    } else {
+        AUREA_LOG_INFO("export: imagem conferida em %llu de %llu amostras",
+                       static_cast<unsigned long long>(contentChecked), static_cast<unsigned long long>(fingerprints_.size()));
+    }
     if (audioDecoding && audioSourceCount_ && decodedAudioCount &&
         export_content::audio_lost(static_cast<f64>(audioSourceSum_) / static_cast<f64>(audioSourceCount_),
                                    decodedAudioSum / static_cast<f64>(decodedAudioCount)))
         return error(Errc::CorruptData, "o video final saiu sem som, mas o projeto tem audio");
-    if (frames != videoFrames_ || hash != videoHash_)
+    if ((bounded ? videoPacketCount : frames) != videoFrames_ || (bounded ? packetHash : hash) != videoHash_)
         if (const Status s = soft(Errc::CorruptData, "validacao FFmpeg encontrou frames ausentes ou PTS alterados"); !s.ok())
             return s;
     const AVStream* videoStream = decoded.format->streams[videoIndex];
@@ -2574,7 +2775,9 @@ Status FFmpegSink::decode_validate(const ExportOutputValidation& expected) noexc
             if (const Status s = soft(Errc::CorruptData, "duracao ou amostras de audio FFmpeg divergentes apos decode"); !s.ok())
                 return s;
     }
-    finish_warnings(frames);
+    // Limitado: o "[N/M quadros]" do aviso conta pacotes lidos (decodificar uma
+    // parte não é quadro faltando).
+    finish_warnings(bounded ? videoPacketCount : frames);
     return OkStatus;
 }
 

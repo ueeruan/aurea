@@ -60,6 +60,7 @@
 #include "aurea/plugins/PluginRuntime.hpp"
 #include "aurea/tracking/RealCameraCapture.hpp"
 #include "aurea/project/Project.hpp"
+#include "aurea/project/MediaStorage.hpp"
 #include "aurea/render/GPUBackend.hpp"
 #include "aurea/render/RenderScheduler.hpp"
 #include "aurea/render/Renderer.hpp"
@@ -289,6 +290,14 @@ struct EngineConfig {
     bool enableDirectSurfaceExport = false;
     /// Deadline for a submitted export/startup GPU fence. Zero = 120 seconds.
     u32 exportGpuTimeoutMs = 0;
+    /// 0.5.2 (E4): a partida do export espera o renderMutex_ (a prévia
+    /// terminando o quadro), o fence do último quadro da prévia e cada fonte
+    /// abrir pela plataforma no máximo isto. Zero = os padrões (20 s, 30 s, 30 s).
+    /// Antes não havia prazo nem cancelar nesses pontos: o "Preparando" do LG
+    /// K61 (PowerVR GE8320) ficou parado sem fim e o Cancelar não fazia nada.
+    u32 exportStartLockWaitMs = 0;
+    u32 exportStartDrainWaitMs = 0;
+    u32 exportSourceOpenWaitMs = 0;
     /// Quanto o export espera, sem avanço do decoder, o quadro EXATO da fonte
     /// antes de usar o mais próximo do mesmo trecho (OfflineFrameRenderer::
     /// ExactFrameDeadlines; a fonte é reaberta na metade). Zero = 16 s.
@@ -532,6 +541,17 @@ public:
     /// do mesmo jeito que `import_video` (no topo, no cabeçote; no modo Edição,
     /// no fim da linha magnética). Duração = quadros / fps. Devolve o id da camada.
     [[nodiscard]] Result<u64> import_image_sequence(const ImageSequenceImport& request) noexcept;
+    /// Quadros SOLTOS (a plataforma copia de URI/seletor para o app), em
+    /// `Documentos/Media/sequences` (storage::plan_frame_folder): com a chave de
+    /// cada quadro, a pasta pronta da mesma seleção (`reuse`, nada a copiar) ou
+    /// a `.parcial` vazia onde copiar. Sem pasta de documentos = NotSupported.
+    [[nodiscard]] Status plan_sequence_frames(const std::vector<storage::FrameKey>& frames,
+                                              storage::FrameFolderPlan& out) noexcept;
+    /// Depois da cópia: confere, marca e dá o nome final (ou devolve a pronta
+    /// com o mesmo conteúdo e apaga a cópia). Erro = a cópia já saiu.
+    [[nodiscard]] Status commit_sequence_frames(const std::string& staging, std::string& directory, bool& reused) noexcept;
+    /// Cancelou ou falhou no meio da cópia: a `.parcial` sai agora.
+    bool discard_sequence_frames(const std::string& staging) noexcept;
     /// "Substituir mídia" (EngineMedia.cpp): troca a fonte da camada de vídeo
     /// ou imagem por outro vídeo/foto, mantendo transform, keyframes, efeitos,
     /// máscaras e tempo. A mídia nova ocupa a MESMA caixa na tela (cabe dentro
@@ -548,6 +568,41 @@ public:
     [[nodiscard]] Status project_file_media(const char* path, std::vector<package::MediaRef>& out) noexcept;
     /// Plugins instalados que um `.aurea` fechado usa (o que vai no arquivo do projeto).
     [[nodiscard]] Status project_file_plugins(const char* path, std::vector<package::PluginFile>& out) noexcept;
+
+    // --- Armazenamento (0.5.2) — src/engine/EngineStorage.cpp ---------------------
+    // A regra de o que pode sair mora em project/MediaStorage.hpp; aqui entram o
+    // resolvedor de caminhos deste aparelho, o projeto aberto e o export em curso.
+    struct MediaStorageRequest {
+        std::string projectsDirectory;            ///< varrida inteira atrás de .aurea e cópias
+        std::vector<std::string> deleted;         ///< .aurea principais que a pessoa mandou apagar
+        std::vector<std::string> extraProjects;   ///< arquivos de projeto fora da pasta
+        std::vector<std::string> managedRoots;    ///< pastas de mídia do app (as únicas apagáveis)
+        std::vector<std::string> keepRoots;       ///< bibliotecas dentro delas (modelos, LUTs)
+        /// Projetos que NÃO podem ser lidos agora (a quarentena do Android: já
+        /// derrubaram o app ao abrir). Um que fica = nada sai; um apagado só
+        /// não libera a mídia dele.
+        std::vector<std::string> skipProjects;
+        /// O editor está mostrando o projeto carregado (ele conta como usado
+        /// mesmo se for um dos apagados). Na Home, o carregado só conta se não
+        /// for apagado: ele já foi gravado ao sair do editor.
+        bool editorOpen = false;
+        u64 minAgeSeconds = 24ull * 3600;          ///< scan: mais novo que isto nunca é órfão
+        bool anyFile = false;                      ///< scan: qualquer arquivo (temporários)
+    };
+    /// Apagar projetos: a mídia que SÓ eles usam (vídeo, imagem, pastas
+    /// derivadas inteiras). Chame ANTES de apagar os arquivos de projeto.
+    /// Export/PreRender em andamento ou projeto ilegível = `blocked` (nada sai).
+    [[nodiscard]] Status media_release_plan(const MediaStorageRequest& request, storage::ReleasePlan& out) noexcept;
+    /// Tela de armazenamento: quanto a mídia ocupa e o que nenhum projeto usa.
+    [[nodiscard]] Status media_storage_scan(const MediaStorageRequest& request, storage::ScanResult& out) noexcept;
+    /// Apaga o que a plataforma recebeu do plano ou do scan, conferindo de novo
+    /// que cada caminho continua dentro das pastas de mídia do app.
+    [[nodiscard]] storage::RemoveResult remove_managed_media(const std::vector<std::string>& paths,
+                                                             const std::vector<std::string>& managedRoots,
+                                                             const std::vector<std::string>& keepRoots) noexcept;
+    /// "Limpar PreRender": descarta o cache pronto e apaga as pastas sem dono.
+    /// false = há um PreRender sendo gravado (nada é mexido).
+    bool clear_prerender_cache() noexcept;
 
     // --- Omega adicionar (área 08) — src/engine/EngineOmegaAdd.cpp -----------------
     /// Como o lote do navegador de mídia arruma as camadas (número estável das pontes).
@@ -2757,6 +2812,10 @@ public:
     /// video is reused. The caller supplies a fresh output destination.
     [[nodiscard]] Status restart_export(const char* recoveryPath, const char* outputPath) noexcept;
     [[nodiscard]] Status cancel_export() noexcept;
+    /// Testes (0.5.2, E4): segura o renderMutex_ até `release`, como uma prévia
+    /// presa no driver, para conferir que a partida do export espera com prazo
+    /// e cancelar. `held` fica verdadeiro com o lock na mão.
+    void hold_render_lock_for_tests(const std::atomic<bool>& release, std::atomic<bool>* held = nullptr) noexcept;
     /// 0.3.2 (CheckpointManager): PAUSA — interrompe o export (ou a partida dele)
     /// como a suspensão do app faz: o checkpoint fica para o mesmo start_export
     /// continuar. O iOS chama ao ir para segundo plano ainda no "Preparando"
@@ -2823,6 +2882,10 @@ public:
         kExportEnvironmentFallback = 1u << 15, ///< a imagem HDR do ambiente 3D não coube: ambiente neutro
         // Bits 16..17: modo de segurança sugerido (kExportRetryShift).
         kExportModelFallback   = 1u << 18,  ///< modelo 3D "Original" não coube: saiu o modelo da prévia
+        /// 0.5.2 (E1): algum quadro saiu sem um elemento que não pôde ser
+        /// desenhado nesta sessão (modelo 3D que falhou ao subir, recurso que
+        /// nunca chegou), como a prévia mostra; antes o export parava nele.
+        kExportElementsOmitted = 1u << 19,
         // Bits 16..17: o próximo modo de segurança sugerido quando o export
         // falhou pelo encoder (kExportRetryShift, export/ExportWatchdog.hpp).
     };
@@ -3190,6 +3253,9 @@ private:
     std::unordered_map<u64, std::shared_ptr<const scene3d::SceneAsset>> models_;
     static std::shared_ptr<const scene3d::SceneAsset> model_lookup(void* self, AssetId id);
     [[nodiscard]] std::string resolve_asset_path(const std::string& stored) const;
+    /// resolve_asset_path + o contêiner anterior do iOS (o mesmo religamento da
+    /// abertura): a limpeza de armazenamento compara com o arquivo de AGORA.
+    [[nodiscard]] std::string resolve_media_for_storage(const std::string& stored) const;
     [[nodiscard]] u32 caption_count_locked(const Composition& comp, u64 sourceLayer) const noexcept;
     void migrate_echo_to_effect() noexcept;
     [[nodiscard]] std::string store_asset_path(const std::string& absolute) const;
@@ -3399,6 +3465,12 @@ private:
     /// "Preparando" (hash das fontes do checkpoint): bytes lidos/total, para
     /// export_progress mostrar a preparação andando antes de haver contexto.
     std::atomic<bool> exportPreparing_{false};
+    /// 0.5.2 (E4): uma partida de vídeo está entre o lifecycle e a publicação
+    /// do contexto. Cancelar nesse trecho marca exportStartCancel_, que a
+    /// partida lê nas esperas de antes de o portão de cancelamento existir
+    /// (PreRender, primeiro renderMutex_) e copia para o contexto quando ele
+    /// nasce. Antes, um Cancelar nesse trecho voltava InvalidState e se perdia.
+    std::atomic<bool> exportStarting_{false}, exportStartCancel_{false};
     std::atomic<u64> exportPrepareDone_{0}, exportPrepareTotal_{0}, exportPrepareBeatNs_{0};
     /// Export em andamento: o render do preview não toca na GPU nem nos
     /// decoders (que o export usa em sequência).

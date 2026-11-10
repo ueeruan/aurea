@@ -615,7 +615,13 @@ public:
     [[nodiscard]] bool incomplete() const noexcept { return incomplete_; }
     [[nodiscard]] const char* incomplete_file() const noexcept { return incompleteFile_; }
     [[nodiscard]] u32 incomplete_line() const noexcept { return incompleteLine_; }
-    void reset_incomplete() noexcept { incomplete_ = false; }
+    /// 0.5.2 (E1): algo ficou de fora e NUNCA vai chegar nesta sessão (modelo
+    /// com `failed`): o quadro não é incompleto — é o que a prévia mostra — e
+    /// o Renderer passa o aviso adiante (Renderer::take_unavailable).
+    [[nodiscard]] bool unavailable() const noexcept { return unavailable_; }
+    [[nodiscard]] const char* unavailable_file() const noexcept { return unavailableFile_; }
+    [[nodiscard]] u32 unavailable_line() const noexcept { return unavailableLine_; }
+    void reset_incomplete() noexcept { incomplete_ = false; unavailable_ = false; }
     /// Qualidade (HeavyQuality): mapa de sombra (256..4096), nível da sombra
     /// (0 BAIXO = PCF 8, 1 MÉDIO = PCF 16, 2 ALTO = PCSS 12+24, 3 ULTRA =
     /// PCSS 16+32) e viés do LOD. O export chama com (4096, 3, 1).
@@ -779,6 +785,10 @@ private:
     const char* incompleteFile_ = nullptr;
     u32 incompleteLine_ = 0;
     void mark_incomplete(const char* file, u32 line) noexcept { incomplete_ = true; incompleteFile_ = file; incompleteLine_ = line; }
+    bool unavailable_ = false;
+    const char* unavailableFile_ = nullptr;
+    u32 unavailableLine_ = 0;
+    void mark_unavailable(const char* file, u32 line) noexcept { unavailable_ = true; unavailableFile_ = file; unavailableLine_ = line; }
 };
 
 } // namespace aurea::scene3d

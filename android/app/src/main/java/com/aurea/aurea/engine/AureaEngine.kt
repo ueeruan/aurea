@@ -79,6 +79,12 @@ class AureaEngine private constructor() {
         }
 
         /** AureaHyper: o modelo sob demanda que cada pasta guarda (hyper/HyperNeural.hpp). */
+        /**
+         * Chave do conteúdo (MediaStorage) de um descritor aberto, sem gravar nada:
+         * [hash, bytes]; null = ilegível. O descritor continua de quem chamou.
+         */
+        @JvmStatic external fun nativeContentKeyFd(fd: Int): LongArray?
+
         @JvmStatic external fun nativeHyperSetModelDirectory(path: String)
         /** [detector de rostos registrado, modelo de rostos (gfpgan-v1.4) presente]. */
         @JvmStatic external fun nativeHyperFaceStatus(): BooleanArray?
@@ -1061,6 +1067,41 @@ class AureaEngine private constructor() {
     fun projectFileMedia(path: String): Array<String>? = nativeWork.run(null) { nativeProjectFileMedia(nativeHandle, path) }
     /** Arquivo do projeto: [erro (0 = ok), incluídas, puladas]. `media` = 3 strings por mídia. */
     fun projectFilePlugins(path: String): Array<String>? = nativeWork.run(null) { nativeProjectFilePlugins(nativeHandle, path) }
+
+    // --- Armazenamento (0.5.2, EngineStorage.cpp): a regra é do motor ---------
+    /**
+     * Apagar projetos: a mídia que SÓ eles usam. Chame com os projetos ainda no
+     * disco. [bloqueado (0/1), bytes, ilegíveis, caminhos…]; null = sem motor.
+     */
+    fun mediaReleasePlan(projectsDir: String, deleted: Array<String>, roots: Array<String>, keep: Array<String>,
+                         skip: Array<String>, editorOpen: Boolean): Array<String>? =
+        nativeWork.run(null) { nativeMediaReleasePlan(nativeHandle, projectsDir, deleted, roots, keep, skip, editorOpen) }
+    /**
+     * [bloqueado, bytes usados, arquivos usados, bytes órfãos, arquivos órfãos, ilegíveis, órfãos…].
+     * `skip` = projetos em quarentena (nunca lidos: contam como ilegíveis).
+     */
+    fun mediaStorageScan(projectsDir: String, roots: Array<String>, keep: Array<String>, skip: Array<String>,
+                         minAgeSeconds: Long, anyFile: Boolean): Array<String>? =
+        nativeWork.run(null) { nativeMediaStorageScan(nativeHandle, projectsDir, roots, keep, skip, minAgeSeconds, anyFile) }
+    /** Apaga pela porta do motor (só dentro de `roots`, fora de `keep`): [bytes, arquivos, recusados]. */
+    fun removeManagedMedia(paths: Array<String>, roots: Array<String>, keep: Array<String>): LongArray =
+        nativeWork.run(null) { nativeRemoveManagedMedia(nativeHandle, paths, roots, keep) } ?: longArrayOf(0L, 0L, 0L)
+    /** "Limpar PreRender": false = um PreRender está gravando agora. */
+    fun clearPreRenderCache(): Boolean = nativeWork.run(false) { nativeClearPreRenderCache(nativeHandle) }
+    /**
+     * Quadros soltos de sequência (MediaStorage::plan_frame_folder): com o nome e a
+     * chave de cada quadro, [erro (0 = ok), reaproveitada (1/0), pasta, cópia]. Pasta
+     * reaproveitada = a mesma seleção já está no app: nada a copiar. Senão, copie
+     * para `cópia` (.parcial) e entregue em [commitSequenceFrames].
+     */
+    fun planSequenceFrames(names: Array<String>, hashes: LongArray, sizes: LongArray): Array<String>? =
+        nativeWork.run(null) { nativePlanSequenceFrames(nativeHandle, names, hashes, sizes) }
+    /** Depois da cópia: [erro (0 = ok), reaproveitada (1/0), pasta]. Erro = a cópia já saiu. */
+    fun commitSequenceFrames(staging: String): Array<String>? =
+        nativeWork.run(null) { nativeCommitSequenceFrames(nativeHandle, staging) }
+    /** Cancelou ou falhou no meio da cópia: a `.parcial` sai agora. */
+    fun discardSequenceFrames(staging: String): Boolean =
+        nativeWork.run(false) { nativeDiscardSequenceFrames(nativeHandle, staging) }
     fun exportProjectPackage(project: String, out: String, title: String, appVersion: String, media: Array<String>, plugins: Array<String> = emptyArray()): IntArray =
         nativeExportProjectPackage(project, out, title, appVersion, media, plugins) ?: intArrayOf(10, 0, 0)   // 10 = Errc::IoError
     /** [erro (0 = ok), título, versão do app, religadas, ausentes]. */
@@ -1952,6 +1993,19 @@ class AureaEngine private constructor() {
     private external fun nativeLayerSourcePath(handle: Long, layer: Long): String?
     private external fun nativeProjectFileMedia(handle: Long, path: String): Array<String>?
     private external fun nativeProjectFilePlugins(handle: Long, path: String): Array<String>?
+    private external fun nativeMediaReleasePlan(
+        handle: Long, projects: String, deleted: Array<String>, roots: Array<String>, keep: Array<String>, skip: Array<String>,
+        editorOpen: Boolean,
+    ): Array<String>?
+    private external fun nativeMediaStorageScan(
+        handle: Long, projects: String, roots: Array<String>, keep: Array<String>, skip: Array<String>, minAgeSeconds: Long,
+        anyFile: Boolean,
+    ): Array<String>?
+    private external fun nativeRemoveManagedMedia(handle: Long, paths: Array<String>, roots: Array<String>, keep: Array<String>): LongArray?
+    private external fun nativeClearPreRenderCache(handle: Long): Boolean
+    private external fun nativePlanSequenceFrames(handle: Long, names: Array<String>, hashes: LongArray, sizes: LongArray): Array<String>?
+    private external fun nativeCommitSequenceFrames(handle: Long, staging: String): Array<String>?
+    private external fun nativeDiscardSequenceFrames(handle: Long, staging: String): Boolean
     private external fun nativeExportProjectPackage(project: String, out: String, title: String, appVersion: String, media: Array<String>, plugins: Array<String>): IntArray?
     private external fun nativeImportProjectPackage(pkg: String, projectOut: String, mediaDir: String): Array<String>?
     private external fun nativeExtractModelArchive(archive: String, directory: String): Array<String>?

@@ -324,6 +324,9 @@ ProcMem proc_mem() {
 bool gRigDirectSurface = false;
 /// EngineConfig::exportApproximateFrameMs dos próximos Rig (0 = o padrão do motor).
 u32 gRigApproximateMs = 0;
+/// ExportStartPhase.inl (0.5.2): EngineConfig::exportStartLockWaitMs e
+/// exportSourceOpenWaitMs dos próximos Rig (0 = os padrões do motor).
+u32 gRigStartLockWaitMs = 0, gRigSourceOpenWaitMs = 0;
 /// ExportCheckpoint.inl: export retomável e a pasta dos checkpoints dos próximos Rig.
 bool gRigResumable = false;
 std::string gRigCheckpointDir;
@@ -373,6 +376,8 @@ struct Rig {
         ec.exportExecutionProfile = profile;
         ec.enableDirectSurfaceExport = gRigDirectSurface;
         ec.exportApproximateFrameMs = gRigApproximateMs;
+        ec.exportStartLockWaitMs = gRigStartLockWaitMs;
+        ec.exportSourceOpenWaitMs = gRigSourceOpenWaitMs;
         ec.enableResumableExport = gRigResumable;
         ec.exportTemporaryDirectory = gRigCheckpointDir;
         ec.cacheDirectory = gRigCacheDirectory;
@@ -2863,6 +2868,7 @@ AUREA_TEST(Regression2135Gpu, SharedTextTransformAndPresetReach3DExportAndSurviv
 #include "ExportWatchdog.inl"
 #include "ExportSlowMedia.inl"
 #include "ExportSourceStartup.inl"
+#include "ExportStartPhase.inl"
 #include "OriginalModelExport.inl"
 #include "ExportSwapTexture.inl"
 #include "ExportCheckpoint.inl"

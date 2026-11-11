@@ -36,7 +36,9 @@ on:
     branches: ['codex/native-beta2-ipa', 'claude/release-2194', 'claude/omega-0.3.2']
     paths: ['engine/**', '.github/workflows/build-ipa.yml']
 concurrency:
-  group: native-ipa-${{ github.ref }}-${{ github.sha }}${{ inputs.capture_only && '-capture' || '' }}
+  # 0.5.2: um push novo no mesmo ramo cancela o IPA anterior (antes o grupo
+  # levava o commit e as rodadas se acumulavam no runner).
+  group: native-ipa-${{ github.ref }}${{ inputs.capture_only && '-capture' || '' }}
   cancel-in-progress: true
 permissions:
   contents: read
@@ -44,7 +46,8 @@ jobs:
   build-ipa:
     if: github.event_name != 'workflow_dispatch' || (!inputs.capture_only && !inputs.skip_ipa)
     runs-on: macos-15
-    timeout-minutes: 60
+    # 0.5.2: 120 — uma recompilação completa do motor passa de 45 min no M1 de 3 núcleos.
+    timeout-minutes: 120
     env:
       CCACHE_DIR: ${{ github.workspace }}/build/ccache
       CCACHE_BASEDIR: ${{ github.workspace }}
@@ -164,6 +167,7 @@ jobs:
             -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
             -derivedDataPath build/ios CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
             SWIFT_COMPILATION_MODE=singlefile COMPILER_INDEX_STORE_ENABLE=NO -IDEBuildingContinueBuildingAfterErrors=YES \
+            COMPILATION_CACHE_ENABLE_CACHING=YES -skipPackagePluginValidation -skipMacroValidation \
             build 2>&1 | tee build-ios.log
           ccache -s || true
       # 0.4.7: os logs do Actions pedem login; as anotações não. Com isto o erro de

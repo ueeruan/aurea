@@ -490,58 +490,92 @@ func bgRemoveFailedKey(_ reason: Int64) -> String {
         }
     }
 
+    // O corpo em partes pequenas: num bloco só o Swift não termina de inferir
+    // os tipos ("unable to type-check this expression in reasonable time").
+    private var running: Bool { task != nil }
+
+    private var stateText: String {
+        let rig: Int64 = status[5]
+        if running { return AureaText.t("headbop_analyzing") }
+        if rig >= 2 { return String(format: AureaText.t("headbop_people_found"), Int(rig - 1)) }
+        if rig == 1 { return AureaText.t("headbop_no_person") }
+        return AureaText.t("headbop_not_analyzed")
+    }
+
+    private var progressValue: Double {
+        if detecting >= 0 { return Double(detecting) * 0.6 }
+        let analyzed: Double = Double(status[1]) / 1000.0
+        return 0.6 + 0.4 * analyzed
+    }
+
+    private var bpmText: String {
+        let bpm: Double = Double(status[6]) / 100.0
+        return String(format: AureaText.t("headbop_bpm_value"), Int(bpm.rounded()))
+    }
+
+    private var tapLabel: String {
+        let base: String = AureaText.t("headbop_tap")
+        return taps.count >= 2 ? base + " · \(taps.count)" : base
+    }
+
+    private func tap(layer: Int64) {
+        // Tempo da composição do toque: o cabeçote no 1º toque + o relógio desde então.
+        let now: Double = ProcessInfo.processInfo.systemUptime
+        let fps: Double = Double(model.status.compFps > 0 ? model.status.compFps : 30)
+        let last: Double = taps.last ?? 0
+        if taps.isEmpty || (now - tapStartClock) - (last - tapStartComp) > 3 {
+            taps = []
+            tapStartClock = now
+            tapStartComp = Double(model.status.playhead) / fps
+        }
+        taps.append(tapStartComp + (now - tapStartClock))
+        if taps.count >= 2 {
+            let values: [NSNumber] = taps.map { NSNumber(value: $0) }
+            if model.engine.headbopSetTaps(values, effect: effectId, layer: layer) { model.refreshModel(force: true) }
+        }
+    }
+
+    @ViewBuilder private func actionRow(layer: Int64) -> some View {
+        HStack(spacing: 6) {
+            if running {
+                chip(AureaText.t("headbop_cancel"), "fx.headbop.cancel", true) {
+                    model.engine.headbopCancel()
+                    task?.cancel()
+                }
+            } else {
+                chip(AureaText.t(status[5] > 0 ? "headbop_reanalyze" : "headbop_analyze"), "fx.headbop.analyze", false) {
+                    analyze(layer: layer)
+                }
+            }
+            chip(tapLabel, "fx.headbop.tap", !taps.isEmpty) { tap(layer: layer) }
+            chip(AureaText.t("headbop_bake"), "fx.headbop.bake", status[7] == 1) {
+                if model.engine.headbopBake(effect: effectId, layer: layer) > 0 { model.refreshModel(force: true) }
+            }
+        }
+    }
+
     var body: some View {
-        let layer = model.primarySelection ?? 0
-        let running = task != nil
-        let rig = status[5]
+        let layer: Int64 = model.primarySelection ?? 0
         VStack(alignment: .leading, spacing: 6) {
             Text(AureaText.t("headbop_note"))
                 .font(.system(size: 11.5)).foregroundStyle(AureaColors.muted)
                 .fixedSize(horizontal: false, vertical: true)
-            Text(running ? AureaText.t("headbop_analyzing")
-                 : rig >= 2 ? String(format: AureaText.t("headbop_people_found"), Int(rig - 1))
-                 : rig == 1 ? AureaText.t("headbop_no_person") : AureaText.t("headbop_not_analyzed"))
+            Text(stateText)
                 .font(.system(size: 11.5, weight: .semibold)).foregroundStyle(AureaColors.text)
                 .accessibilityIdentifier("fx.headbop.state")
             if status[6] > 0 {
-                Text(String(format: AureaText.t("headbop_bpm_value"), Int((Double(status[6]) / 100).rounded())))
+                Text(bpmText)
                     .font(.system(size: 11.5)).foregroundStyle(AureaColors.muted)
                     .accessibilityIdentifier("fx.headbop.bpm")
             }
             if running {
-                ProgressView(value: Double(detecting >= 0 ? detecting * 0.6 : 0.6 + 0.4 * Float(status[1]) / 1000))
+                ProgressView(value: progressValue)
                     .accessibilityIdentifier("fx.headbop.progress")
             }
             if status[0] == 3 && !running {
                 Text(AureaText.t("headbop_failed")).font(.system(size: 11.5)).foregroundStyle(Color.red)
             }
-            HStack(spacing: 6) {
-                if running {
-                    chip(AureaText.t("headbop_cancel"), "fx.headbop.cancel", true) {
-                        model.engine.headbopCancel()
-                        task?.cancel()
-                    }
-                } else {
-                    chip(AureaText.t(rig > 0 ? "headbop_reanalyze" : "headbop_analyze"), "fx.headbop.analyze", false) { analyze(layer: layer) }
-                }
-                chip(AureaText.t("headbop_tap") + (taps.count >= 2 ? " · \(taps.count)" : ""), "fx.headbop.tap", !taps.isEmpty) {
-                    // Tempo da composição do toque: o cabeçote no 1º toque + o relógio desde então.
-                    let now = ProcessInfo.processInfo.systemUptime
-                    let fps = Double(model.status.compFps > 0 ? model.status.compFps : 30)
-                    if taps.isEmpty || (now - tapStartClock) - ((taps.last ?? 0) - tapStartComp) > 3 {
-                        taps = []
-                        tapStartClock = now
-                        tapStartComp = Double(model.status.playhead) / fps
-                    }
-                    taps.append(tapStartComp + (now - tapStartClock))
-                    if taps.count >= 2 && model.engine.headbopSetTaps(taps.map { NSNumber(value: $0) }, effect: effectId, layer: layer) {
-                        model.refreshModel(force: true)
-                    }
-                }
-                chip(AureaText.t("headbop_bake"), "fx.headbop.bake", status[7] == 1) {
-                    if model.engine.headbopBake(effect: effectId, layer: layer) > 0 { model.refreshModel(force: true) }
-                }
-            }
+            actionRow(layer: layer)
         }
         .onAppear { refresh() }
         .onReceive(timer) { _ in refresh() }

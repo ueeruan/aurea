@@ -464,7 +464,8 @@ func bgRemoveFailedKey(_ reason: Int64) -> String {
         if model.status.playing != 0 { model.pause() }
         let engine = model.engine
         let path = model.layerSourcePath(layer)
-        let kind = model.layers.first { $0.id == layer }?.kind ?? -1
+        // kind é UInt32 no modelo; -1 = camada não encontrada.
+        let kind: Int = model.layers.first(where: { $0.id == layer }).map { Int($0.kind) } ?? -1
         let effect = effectId
         task = Task {
             defer { task = nil; detecting = -1 }

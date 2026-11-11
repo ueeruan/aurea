@@ -77,6 +77,10 @@ internal object PodLayout {
     const val FLAG_CLIP_TO_BELOW = 1 shl 14
     /** "Criar máscara de recorte" vale agora (camada visual com base visual abaixo). */
     const val FLAG_CLIP_CANDIDATE = 1 shl 15
+    /** Tímida (o Shy do AE): some da timeline com "Ocultar camadas tímidas". */
+    const val FLAG_SHY = 1 shl 16
+    /** Preservar transparência (o T do AE): pinta só onde a pilha abaixo tem alfa. */
+    const val FLAG_PRESERVE_TRANSPARENCY = 1 shl 17
     /** Etiqueta de cor (0 = nenhuma) nos bits 8..11 (`kLayerRowLabelShift`). */
     const val LABEL_SHIFT = 8
     const val LABEL_MASK = 0xF
@@ -227,6 +231,10 @@ class LayerRow internal constructor(
     val clipToBelow: Boolean get() = (flags and PodLayout.FLAG_CLIP_TO_BELOW) != 0
     /** Pode ganhar "Criar máscara de recorte" agora. */
     val clipCandidate: Boolean get() = (flags and PodLayout.FLAG_CLIP_CANDIDATE) != 0
+    /** Tímida: a timeline a esconde com "Ocultar camadas tímidas" ligado. */
+    val shy: Boolean get() = (flags and PodLayout.FLAG_SHY) != 0
+    /** Preservar transparência (source-atop sobre a pilha abaixo). */
+    val preserveTransparency: Boolean get() = (flags and PodLayout.FLAG_PRESERVE_TRANSPARENCY) != 0
     /** Etiqueta de cor: 0 = nenhuma, 1..12 = `ShellColors.LabelPalette[label - 1]`. */
     val label: Int get() = (flags ushr PodLayout.LABEL_SHIFT) and PodLayout.LABEL_MASK
 
@@ -1028,6 +1036,12 @@ object TrackProperty {
     /** Keys de FORMA de um caminho vetorial (trilha virtual): effect = grupo, param = caminho. */
     const val VECTOR_PATH = 48
     const val MASK_PATH = 49
+    /** AE animation: keys do texto-fonte (trilha virtual, sempre congelados). */
+    const val TEXT_SOURCE = 50
+    /** Câmera de dois nós: Ponto de Interesse X/Y/Z (px do espaço do pai). */
+    const val CAMERA_POI_X = 51
+    const val CAMERA_POI_Y = 52
+    const val CAMERA_POI_Z = 53
     const val VECTOR_PARAM = 34
     const val SHAPE_PARAM = 35
     const val PARTICLE_PARAM = 36
@@ -1154,6 +1168,8 @@ data class LayerDetail(
     val magnetic: Boolean get() = (flags and PodLayout.FLAG_MAGNETIC) != 0
     val clipToBelow: Boolean get() = (flags and PodLayout.FLAG_CLIP_TO_BELOW) != 0
     val clipCandidate: Boolean get() = (flags and PodLayout.FLAG_CLIP_CANDIDATE) != 0
+    val shy: Boolean get() = (flags and PodLayout.FLAG_SHY) != 0
+    val preserveTransparency: Boolean get() = (flags and PodLayout.FLAG_PRESERVE_TRANSPARENCY) != 0
     val label: Int get() = (flags ushr PodLayout.LABEL_SHIFT) and PodLayout.LABEL_MASK
 
     companion object {

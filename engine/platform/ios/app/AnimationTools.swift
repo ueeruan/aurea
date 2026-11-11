@@ -1963,7 +1963,12 @@ struct ExpressionSheet: View {
     @State private var refused = false
     @State private var loaded = false
     @State private var codeScroll: CGFloat = 0
-    private let snippets = ["wiggle(2, 30)", "shake(30, 8)", "shake(80, 14, 0.6, 0.6, inPoint)", "ease(timeSinceMarker(), 0, 0.3, 120, 100)", "posterizeTime(12); wiggle(2, 30)", "loopOut(\"cycle\")", "time * 90", "value", "loopOut(\"pingpong\")", "linear(time, 0, 1, 0, 100)", "effect(\"Slider Control\")(\"Slider\")", "thisComp.layer(1).transform.position", "random(0, 100)"]
+    private let snippets = ["wiggle(2, 30)", "shake(30, 8)", "shake(80, 14, 0.6, 0.6, inPoint)", "ease(timeSinceMarker(), 0, 0.3, 120, 100)", "posterizeTime(12); wiggle(2, 30)", "loopOut(\"cycle\")", "time * 90", "value", "loopOut(\"pingpong\")", "linear(time, 0, 1, 0, 100)", "effect(\"Slider Control\")(\"Slider\")", "thisComp.layer(1).transform.position", "random(0, 100)",
+        // AE animation: espaço da camada, mira, caixa do conteúdo e outra composição (ExpressionSheet.kt).
+        "thisComp.layer(1).toComp([0, 0])", "fromComp(thisComp.layer(1).toComp([0, 0]))",
+        "thisComp.layer(1).toWorld(thisComp.layer(1).anchorPoint)", "lookAt(position, thisComp.layer(1).position)",
+        "var r = thisLayer.sourceRectAtTime(); [r.left + r.width / 2, r.top + r.height / 2]",
+        "comp(\"Comp 1\").layer(1).transform.position"]
     private var applied: Bool { (info["exists"] as? NSNumber)?.boolValue == true }
     private var enabled: Bool { (info["enabled"] as? NSNumber)?.boolValue == true }
     private var dirty: Bool { source != (info["source"] as? String ?? "") }

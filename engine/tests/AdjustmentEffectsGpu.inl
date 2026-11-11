@@ -69,6 +69,8 @@ inline void configure(const Effect& fx, const ParameterRegistry& params, EffectI
     // 0.4.6: a sombra longa fica ATRÁS da camada; com o quadro inteiro opaco só
     // aparece no modo "só a sombra".
     if (std::strcmp(key, "aurea.stylize.long_shadow") == 0) e.params[5].constant = ParamValue::scalar(1.0f);
+    // AE 2026: a sombra radial também (o quadro inteiro opaco a cobre).
+    if (std::strcmp(key, "aurea.stylize.radial_shadow") == 0) e.params[7].constant = ParamValue::boolean(true);
     if (fx.type_id() == effect_type_id(effect_keys::kCubeLut)) e.params[0].constant.ref = AssetId{12, 1}.pack();
     if (std::strncmp(key, "aurea.repeat.", 13) == 0) {
         e.params[0].constant = ParamValue::scalar(4);
@@ -205,6 +207,11 @@ AUREA_TEST(Gpu, EveryCatalogEffectChangesTheFrameOnAnAdjustmentLayer) {
         const char* key = fx.info().key;
         if (only && *only && std::strcmp(only, key) != 0) continue;
         if (adjfx::not_for_adjustment(fx)) continue;
+        // AE 2026: Mesclar precisa de OUTRA camada escolhida e Remover fosco de cor só
+        // muda borda semitransparente (o quadro de baixo é opaco). Cobertos por
+        // AeFx2026.BlendAndDifferenceMatteReadTheOtherLayer e pelo catálogo (meio alfa).
+        if (std::strcmp(key, "aurea.color.blend_layers") == 0 || std::strcmp(key, "aurea.color.remove_color_matting") == 0)
+            continue;
         const ParameterRegistry& params = gpu().effects.params_at(i);
         const bool audio = std::strncmp(key, "aurea.audio.", 12) == 0;
         const bool timed = adjfx::time_based(fx);

@@ -202,6 +202,12 @@ struct EditorView: View {
                 .environmentObject(model)
                 .presentationDetents([.medium, .large])
         }
+        // Timeline do AE: a marca da camada.
+        .sheet(item: $model.layerMarkerEditing) { item in
+            LayerMarkerEditorSheet(layer: item.layer, frame: item.frame, isNew: item.isNew)
+                .environmentObject(model)
+                .presentationDetents([.medium, .large])
+        }
         .overlay(alignment: .topTrailing) {
             if model.fullscreen {
                 Button { model.fullscreen = false } label: {
@@ -1163,6 +1169,8 @@ private struct BatchToolsView: View {
                 tool(CupertinoGlyph.FullscreenExit, "editor_ajustar_tela", size: 18) { pause(); model.fitToCanvas(selected.map(\.id), fill: false) }
                 tool(CupertinoGlyph.Fullscreen, "editor_preencher_tela", size: 18) { pause(); model.fitToCanvas(selected.map(\.id), fill: true) }
             }.frame(height: 48).background(StageInk.dockRow, in: RoundedRectangle(cornerRadius: 10))
+            // Timeline do AE: o passo do "Escalonar" (Engine::stagger_layers) exposto.
+            StaggerStepperView().frame(height: 48).background(StageInk.dockRow, in: RoundedRectangle(cornerRadius: 10))
             Spacer(minLength: 0)
         }.padding(.horizontal, 10).padding(.top, 4)
         }.accessibilityIdentifier("timeline.batch.tools")
@@ -1192,53 +1200,10 @@ private struct BatchToolsView: View {
         guard !timeTargets.isEmpty else { model.toast = AureaText.t("editor_leve_cabecote_dentro_camadas"); return }
         pause(); model.splitAtPlayhead(timeTargets.map(\.id))
     }
-    private struct Box {
-        let id: Int64
-        let x: Float, y: Float, left: Float, top: Float, right: Float, bottom: Float
-    }
-    private var boxes: [Box] {
-        selected.filter { !$0.locked }.compactMap { row in
-            guard let detail = model.queryDetail(row.id), let b = StageGeom.bounds(detail) else { return nil }
-            let pos = StageGeom.floats(detail["position"])
-            guard pos.count >= 2 else { return nil }
-            return Box(id: row.id, x: pos[0], y: pos[1], left: b.0, top: b.1, right: b.2, bottom: b.3)
-        }
-    }
-    private func align(_ edge: Int) {
-        let moves: [(Int64, Float, Float)] = boxes.map { box in
-            var x = box.x, y = box.y
-            switch edge {
-            case 0: x -= box.left
-            case 1: x += Float(model.compositionWidth) / 2 - (box.left + box.right) / 2
-            case 2: x += Float(model.compositionWidth) - box.right
-            case 3: y -= box.top
-            case 4: y += Float(model.compositionHeight) / 2 - (box.top + box.bottom) / 2
-            default: y += Float(model.compositionHeight) - box.bottom
-            }
-            return (box.id, x, y)
-        }
-        apply(moves, label: "alinhar")
-    }
-    private func distribute(horizontal: Bool) {
-        let items = boxes.sorted { horizontal ? $0.left < $1.left : $0.top < $1.top }
-        guard let first = items.first, let last = items.last, items.count >= 3 else { return }
-        let span = horizontal ? last.right - first.left : last.bottom - first.top
-        let sizes = items.reduce(Float(0)) { $0 + (horizontal ? $1.right - $1.left : $1.bottom - $1.top) }
-        let gap = (span - sizes) / Float(items.count - 1)
-        var cursor = horizontal ? first.left : first.top
-        let moves: [(Int64, Float, Float)] = items.map { box in
-            let delta = cursor - (horizontal ? box.left : box.top)
-            cursor += (horizontal ? box.right - box.left : box.bottom - box.top) + gap
-            return (box.id, box.x + (horizontal ? delta : 0), box.y + (horizontal ? 0 : delta))
-        }
-        apply(moves, label: "distribuir")
-    }
-    private func apply(_ moves: [(Int64, Float, Float)], label: String) {
-        guard !moves.isEmpty else { return }
-        pause(); model.beginGesture(label)
-        for move in moves { model.setTransform2(0, move.1, 1, move.2, layer: move.0) }
-        model.endGesture()
-    }
+    /// Timeline do AE (B6): alinhar e distribuir moram no motor (`Engine::align_layers`),
+    /// com a mesma regra do Android; um passo de desfazer.
+    private func align(_ edge: Int) { model.alignLayers(selected.map(\.id), mode: UInt32(edge)) }
+    private func distribute(horizontal: Bool) { model.alignLayers(selected.map(\.id), mode: horizontal ? 6 : 7) }
     private func pause() { if model.status.playing != 0 { model.playPause() } }
 }
 
@@ -1263,7 +1228,7 @@ private struct TextPanelView: View {
     private var layerId: Int64 { model.primarySelection ?? 0 }
     /// A propriedade escolhida: o losango e a curva da coluna valem para ela.
     private var railTrack: TimelineTrack? {
-        guard let focus = model.timelineFocus, focus.count == 1, [29, 33, 46, 47].contains(focus[0].property) else { return nil }
+        guard let focus = model.timelineFocus, focus.count == 1, [29, 33, 46, 47, 50].contains(focus[0].property) else { return nil }
         return focus[0]
     }
     private var railKeys: [KeyframeItem] {
@@ -1282,6 +1247,8 @@ private struct TextPanelView: View {
             model.refreshModel(force: true)
             return
         }
+        // AE animation: texto-fonte (50), os keys congelados do conteúdo.
+        if t.property == 50 { model.toggleTextSourceKey(); return }
         // Espaçamento entre letras (29) e margens do texto no caminho (46, 47).
         let property = UInt32(t.property), layer = layerId, time = model.localPlayhead
         let here = railKeys.contains { $0.time == time }
@@ -1313,7 +1280,7 @@ private struct TextPanelView: View {
                 // centro e as abas em ícones à direita.
                 HStack(spacing: 0) {
                     LeftRail(keyframeLook: railLook, onKeyframe: railTrack == nil ? nil : { toggleRailKey() }, curveAnimated: !railKeys.isEmpty,
-                             onCurve: railKeys.count >= 2 ? { openRailCurve() } : nil, onBack: { dismissEditing(); model.panel = .none })
+                             onCurve: railKeys.count >= 2 && railTrack?.property != 50 ? { openRailCurve() } : nil, onBack: { dismissEditing(); model.panel = .none })
                     AureaColors.contentStrongLine.frame(width: 0.7)
                     VStack(spacing: 0) {
                         ScrollView {
@@ -1808,7 +1775,7 @@ private struct AddLayerSheet: View {
                         card("particular_title", glyph: CupertinoGlyph.Sparkles, color: ShellColors.text3D) { model.addParticles(20); close() }   // 20 = Particular (preset Padrão)
                         card("add_element_aurora", glyph: CupertinoGlyph.Sparkles, color: ShellColors.text3D) { model.addAurora(); close() }
                         card("editor_camada_ajuste", glyph: CupertinoGlyph.WandStars) { close(); model.addAdjustmentLayer() }
-                        card("scene_flare3d", glyph: CupertinoGlyph.Sparkles, color: ShellColors.text3D) { model.addLight(3); close() }
+                        card("scene_flare3d", glyph: CupertinoGlyph.Sparkles, color: ShellColors.text3D) { model.addLight(AureaModel.lightFlare); close() }
                         card("grid_builder", glyph: CupertinoGlyph.SquareGrid2x2) { model.createGrid(); close() }
                         card("sh_add_group_selection", glyph: CupertinoGlyph.Folder) {
                             if model.selection.isEmpty { model.toast = AureaText.t("sh_add_pick_layers_to_group") }
@@ -2571,7 +2538,9 @@ private struct Scene3DPill: View {
                     (CupertinoGlyph.Lightbulb, AureaText.t("scene_light_point"), { model.addLight(1) }),
                     (CupertinoGlyph.Lightbulb, AureaText.t("scene_light_directional"), { model.addLight(0) }),
                     (CupertinoGlyph.Lightbulb, AureaText.t("scene_light_spot"), { model.addLight(2) }),
-                    (CupertinoGlyph.Sparkles, AureaText.t("scene_flare3d"), { model.addLight(3) }),
+                    // AE compositing (bug B9): 3 = luz ambiente; o Flare 3D passou para 4 (Engine::kAddLightFlare).
+                    (CupertinoGlyph.Lightbulb, AureaText.t("scene_light_ambient"), { model.addLight(3) }),
+                    (CupertinoGlyph.Sparkles, AureaText.t("scene_flare3d"), { model.addLight(AureaModel.lightFlare) }),
                     (CupertinoGlyph.Videocam, AureaText.t("panel_camera_3d"), { model.addCamera() }),
                     (CupertinoGlyph.SmallcircleCircle, AureaText.t("s3d_empty"), { model.addNull(threeD: true) }),
                     (CupertinoGlyph.Camera, AureaText.t("real_camera_title"), { model.startRealCamera() }),
@@ -3246,10 +3215,13 @@ private struct Scene3DLane: Hashable {
     }
     private var controls: some View {
         ScrollView { VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
+            // 0.5.2: três por linha, com o Flare 3D (par do SceneLightAddButtons do Android).
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
                 addLight("scene_light_directional", kind: 0)
                 addLight("scene_light_point", kind: 1)
                 addLight("scene_light_spot", kind: 2)
+                addLight("scene_light_ambient", kind: 3)
+                addLight("scene_flare3d", kind: AureaModel.lightFlare)
             }
             if let id = model.primarySelection {
                 let values = model.engine.lightInfo(id).map(\.floatValue)
@@ -3270,7 +3242,9 @@ private struct Scene3DLane: Hashable {
         Button { model.addLight(kind) } label: {
             Text(AureaText.t(key)).font(.aurea(size: 13, weight: .medium)).lineLimit(1).minimumScaleFactor(0.75)
                 .frame(maxWidth: .infinity, minHeight: 44).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
-        }.buttonStyle(AureaPressStyle()).accessibilityIdentifier("scene.light.add.\(kind)")
+        }.buttonStyle(AureaPressStyle())
+            .accessibilityLabel(AureaText.t("s3d_add_named", AureaText.t(key)))
+            .accessibilityIdentifier("scene.light.add.\(kind)")
     }
 }
 

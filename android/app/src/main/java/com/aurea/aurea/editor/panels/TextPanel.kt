@@ -105,7 +105,8 @@ internal fun TextPanel(env: PanelEnv) {
     val focus = store.timelineFocus?.singleOrNull()?.takeIf { it.property in TEXT_RAIL_PROPERTIES }
     val keys = focus?.let { f -> store.primaryKeys().filter { it.property == f.property && it.effectIndex == f.effectIndex && it.paramIndex == f.paramIndex } }.orEmpty()
     val local = store.detail?.localPlayhead
-    val curveFrom = store.curveStart(keys)
+    // O texto-fonte é sempre congelado: não tem curva.
+    val curveFrom = if (focus?.property == com.aurea.aurea.engine.TrackProperty.TEXT_SOURCE) null else store.curveStart(keys)
     Row(Modifier.fillMaxSize().testTag("text.panel")) {
         LeftRail(
             onBack = env.onClose,
@@ -116,6 +117,7 @@ internal fun TextPanel(env: PanelEnv) {
             },
             onKeyframe = focus?.let { f -> {
                 if (f.property == com.aurea.aurea.engine.TrackProperty.TEXT_ANIM_PARAM) store.toggleTextAnimKey(f.effectIndex, f.paramIndex)
+                else if (f.property == com.aurea.aurea.engine.TrackProperty.TEXT_SOURCE) store.toggleTextSourceKey()
                 else store.toggleTransformKeyframe(intArrayOf(f.property))
             } },
             curveAnimated = keys.isNotEmpty(),
@@ -154,6 +156,8 @@ internal fun TextPanel(env: PanelEnv) {
                 com.aurea.aurea.ui.theme.CupertinoIcon(com.aurea.aurea.ui.theme.CupertinoGlyph.Pencil, 18.dp, AureaColors.Text)
             }
         }
+        // AE animation: keys do texto-fonte (o texto troca em degraus no tempo).
+        TextSourceKeysRow(env)
         // Trecho selecionado no campo: estilo próprio (rich text).
         val sel = field.selection
         if (!sel.collapsed) {
@@ -216,6 +220,7 @@ internal fun TextPanel(env: PanelEnv) {
         TextDynamicSection(env)
                     }
                     1 -> {
+        TextTextureSection(env)
         PanelSection(stringResource(R.string.panel_contorno), com.aurea.aurea.ui.theme.CupertinoGlyph.Circle, "text.sec.stroke") {
             ColorLine(stringResource(R.string.panel_cor_contorno), Color(td.strokeColor[0], td.strokeColor[1], td.strokeColor[2])) {
                 store.beginGesture("cor do contorno do texto")
@@ -365,9 +370,42 @@ private fun TextBackdropSection(env: PanelEnv) {
     }
 }
 
+/**
+ * AE animation: TEXTO-FONTE ("Source Text" do After Effects). "Keyframe do texto
+ * aqui" grava no cabeçote o texto que aparece (conteúdo, trechos e estilo); com
+ * keys, editar o texto num instante cria/troca o key dele. Os keys são sempre
+ * congelados e aparecem na timeline como a trilha "Texto-fonte".
+ */
+@Composable
+private fun TextSourceKeysRow(env: PanelEnv) {
+    val store = env.store
+    val id = store.primary ?: return
+    val keys = store.keyframes[id].orEmpty().filter { it.property == com.aurea.aurea.engine.TrackProperty.TEXT_SOURCE }
+    val local = store.detail?.localPlayhead
+    val here = keys.any { it.time == local }
+    val track = com.aurea.aurea.engine.TrackKey(com.aurea.aurea.engine.TrackProperty.TEXT_SOURCE, 0, 0)
+    val look = when {
+        here -> com.aurea.aurea.ui.ds.KeyframeLook.KeyHere
+        keys.isNotEmpty() -> com.aurea.aurea.ui.ds.KeyframeLook.Animated
+        else -> com.aurea.aurea.ui.ds.KeyframeLook.None
+    }
+    Spacer(Modifier.height(6.dp))
+    PropertyCustomRow(stringResource(R.string.ae_anim_source_text), selected = store.timelineFocus?.singleOrNull() == track,
+        onSelect = { store.timelineFocus = listOf(track) }, keyframe = look) {
+        PanelItemRow(
+            com.aurea.aurea.ui.theme.CupertinoGlyph.SuitDiamond,
+            stringResource(if (here) R.string.ae_anim_source_key_remove else R.string.ae_anim_source_key_add),
+            "text.source.key",
+            detail = if (keys.isEmpty()) null else stringResource(R.string.ae_anim_source_key_count, keys.size),
+            on = here,
+        ) { store.timelineFocus = listOf(track); store.toggleTextSourceKey() }
+    }
+}
+
 /** As propriedades do painel de texto que o ◆ e a curva da coluna alcançam. */
 private val TEXT_RAIL_PROPERTIES = setOf(
     com.aurea.aurea.engine.TrackProperty.TEXT_ANIM_PARAM,
+    com.aurea.aurea.engine.TrackProperty.TEXT_SOURCE,
     com.aurea.aurea.engine.TrackProperty.TEXT_TRACKING,
     com.aurea.aurea.engine.TrackProperty.TEXT_PATH_FIRST_MARGIN,
     com.aurea.aurea.engine.TrackProperty.TEXT_PATH_LAST_MARGIN,

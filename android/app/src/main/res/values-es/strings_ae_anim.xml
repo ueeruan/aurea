@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE animation (2026-11-11): texto-fonte, auto-orientar, câmera de dois nós e os controles do animador de texto (B5). -->
+<resources>
+    <string name="ae_anim_source_text">Texto de origen</string>
+    <string name="ae_anim_source_key_add">Fotograma clave del texto aquí</string>
+    <string name="ae_anim_source_key_remove">Quitar fotograma clave del texto aquí</string>
+    <string name="ae_anim_source_key_count">%1$d fotogramas clave</string>
+    <string name="ae_anim_auto_orient">Orientación automática</string>
+    <string name="ae_anim_auto_orient_off">Desactivada</string>
+    <string name="ae_anim_auto_orient_path">A lo largo del trazado</string>
+    <string name="ae_anim_auto_orient_camera">Hacia la cámara</string>
+    <string name="ae_anim_two_node">Cámara de dos nodos</string>
+    <string name="ae_anim_two_node_hint">La cámara apunta al punto de interés; la rotación gira encima</string>
+    <string name="ae_anim_poi">Punto de interés</string>
+    <string name="ae_anim_poi_axis">Punto de interés %1$s</string>
+    <string name="ae_anim_poi_key_add">Fotograma clave del punto de interés</string>
+    <string name="ae_anim_poi_key_remove">Quitar fotograma clave del punto de interés</string>
+    <string name="ae_anim_char_offset">Desplazamiento de carácter</string>
+    <string name="ae_anim_skew_axis">Eje de inclinación</string>
+</resources>

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Headbop (0.5.2): nome, descrição e o cartão (HeadbopPanel.kt). Par do iOS: AureaStrings.swift // Headbop. -->
+<resources>
+    <string name="fx_name_headbop">Headbop</string>
+    <string name="fx_desc_headbop">Orang di foto atau video mengangguk dan menggoyangkan badan mengikuti ketukan musik</string>
+    <string name="headbop_note">Analisis layer untuk menemukan kepala dan bahu. Tanpa orang, seluruh bingkai bergoyang.</string>
+    <string name="headbop_analyze">Analisis</string>
+    <string name="headbop_reanalyze">Analisis ulang</string>
+    <string name="headbop_analyzing">Menganalisis orang dan ketukan…</string>
+    <string name="headbop_cancel">Batal</string>
+    <string name="headbop_people_found">%1$d orang ditemukan</string>
+    <string name="headbop_no_person">Tidak ada orang: seluruh bingkai bergoyang</string>
+    <string name="headbop_not_analyzed">Belum dianalisis</string>
+    <string name="headbop_failed">Tidak dapat menganalisis</string>
+    <string name="headbop_bpm_value">%1$d BPM</string>
+    <string name="headbop_tap">Tap</string>
+    <string name="headbop_bake">Ubah ke keyframe</string>
+    <string name="headbop_free_for_now">Gratis untuk saat ini</string>
+    <string name="effect_future_paid_notice">Anda memakai efek yang nantinya akan berbayar. Selamat menikmati!</string>
+</resources>

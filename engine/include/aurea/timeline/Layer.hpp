@@ -27,6 +27,7 @@
 #include "aurea/effects/Parameter.hpp"
 #include "aurea/vector/VectorData.hpp"
 #include "aurea/text/Captions.hpp"
+#include "aurea/text/TextTexture.hpp"
 
 namespace aurea::rig { struct MocapPreview; }   // rig/Mocap.hpp (prévia do Motion Capture)
 
@@ -108,6 +109,9 @@ struct Mask {
     f32           expansion = 0.0f;    ///< px da camada: dilata (+) / erode (−) o path
     f32           opacity  = 1.0f;
     bool          closed   = true;
+    /// Queda do feather (AE "Mask Feather Falloff"): 0 suave (gaussiano, o de
+    /// sempre), 1 linear (rampa reta da mesma largura). Gravado na v65.
+    u8            featherFalloff = 0;
 
     std::vector<MaskPoint> points;
     /// Caminho animado: vazio = `points` parado; senão os keys mandam (e
@@ -180,6 +184,9 @@ struct TextAnimator {
     f32  opacity = 100.0f;                 ///< %
     f32  tracking = 0.0f;                  ///< px entre caracteres
     f32  blur = 0.0f, skew = 0.0f, strokeWidth = 0.0f, charOffset = 0.0f;
+    /// AE animation (v68): eixo da inclinação (graus; o Skew Axis do AE). Antes
+    /// só existia como trilha (importação do AE); agora tem valor parado.
+    f32  skewAxis = 0.0f;
     Vec4 fill{1.0f, 1.0f, 1.0f, 1.0f};     ///< sRGB
     Vec4 stroke{0.0f, 0.0f, 0.0f, 1.0f};
     // 0.5.0, animador universal (seção v59 do projeto).
@@ -270,6 +277,26 @@ struct TextSpan {
     f32  scale = 1.0f;      ///< tamanho relativo ao do texto
 };
 
+/// AE animation (timeline v68): key do TEXTO-FONTE (o "Source Text" do After
+/// Effects). Sempre congelado (hold): do quadro LOCAL `frame` até o próximo key
+/// a camada mostra este conteúdo, com estes trechos e este estilo. Antes do
+/// primeiro key vale o primeiro (como no AE). Trilha virtual
+/// `TrackProperty::TextSource`; a amostragem é `text::apply_source_text`.
+struct TextKey {
+    i64         frame = 0;
+    std::string content;
+    std::vector<TextSpan> spans;
+    f32         size = 72.0f;
+    Vec4        color{1.0f, 1.0f, 1.0f, 1.0f};
+    f32         strokeWidth = 0.0f;
+    Vec4        strokeColor{0.0f, 0.0f, 0.0f, 1.0f};
+    std::string fontFamily;
+    u16         fontWeight = 400;
+    bool        fontItalic = false;
+    std::string fontPath;
+    u32         alignment = 0;
+};
+
 struct TextData {
     std::string content  = "Texto";
     FontId      font{};
@@ -344,6 +371,12 @@ struct TextData {
     /// Projeto de antes da v49: a letra ia para margem + posição na caixa
     /// (o alinhamento não contava). Fica assim até mexerem no caminho.
     bool        pathLegacyLayout = false;
+    /// AE animation (v68): keys do texto-fonte, em ordem de `frame` (vazio =
+    /// o texto acima vale o tempo todo; projeto antigo abre assim).
+    std::vector<TextKey> sourceKeys;
+    /// 0.5.2 (v69): preenchimento com TEXTURA (text/TextTexture.hpp). Padrão =
+    /// cor lisa: projeto antigo abre igual.
+    TextTexture texture;
 };
 
 struct ShapeData {
@@ -417,6 +450,11 @@ struct CameraData {
     /// 0.4.6 (v53): câmera PARALELA (ortográfica): sem perspectiva; o
     /// enquadramento no plano das camadas 2D (z = 0) é o mesmo da perspectiva.
     bool parallel = false;
+    /// AE animation (v68): câmera de DOIS NÓS. Ligada, a câmera mira o Ponto de
+    /// Interesse `poi` (px do espaço do pai, como a posição; animável pelas
+    /// trilhas CameraPoiX/Y/Z) e a rotação X/Y/Z vale por cima da mira.
+    bool twoNode = false;
+    Vec3 poi{0.0f, 0.0f, 0.0f};
 };
 
 /// LENTE: sensor full frame 36 × 24 mm. A projeção do Aurea é por FOV
@@ -727,6 +765,28 @@ struct RigData {
     [[nodiscard]] bool operator==(const RigData&) const noexcept = default;
 };
 
+/// Marca: na régua da composição (`Composition::markers`) ou numa camada
+/// (`Layer::markers`, em tempo LOCAL, o mesmo relógio dos keyframes: a marca
+/// anda junto quando a camada anda). `kind` 0 = marca da pessoa, 1 = batida
+/// detectada (substituída em bloco quando a detecção roda de novo).
+struct Marker {
+    FrameIndex  frame{0};
+    u32         color = 0xFFF7C34Fu;   ///< RGBA8 sRGB (r no byte baixo)
+    u32         kind = 0;
+    std::string label;
+    // --- v67 (AE timeline) ------------------------------------------------------
+    /// Duração em quadros (0 = marca de um instante, como sempre foi).
+    i64         duration = 0;
+    /// Comentário livre (o "comment" do AE). O `label` continua o nome curto
+    /// que a régua desenha.
+    std::string comment;
+};
+inline constexpr u32 kMarkerManual = 0;
+inline constexpr u32 kMarkerBeat = 1;
+/// Limites de uma marca editada pela interface.
+inline constexpr i64 kMaxMarkerDuration = i64{1} << 30;
+inline constexpr usize kMaxMarkerText = 4096;
+
 struct Layer {
     LayerKind kind = LayerKind::Unknown;
     std::string name;
@@ -786,6 +846,11 @@ struct Layer {
 
     // --- Hierarquia e composição --------------------------------------------
     LayerId  parent{};
+    /// 0.5.2 "Prender a um osso": com o pai sendo um modelo 3D, a camada segue
+    /// a junta deste nó dele (posição e giro do osso no instante, sem a escala
+    /// do arquivo) — ex. partículas na mão de um personagem animado. −1 = segue
+    /// o modelo inteiro (o vínculo comum). Trocar de pai solta o osso.
+    i32      parentBone = -1;
     // Bind-space compensation for 3D parenting. A rotated nonuniform scale
     // cannot be represented by Euler rotation + diagonal scale without loss.
     // Keep it separate from editable/animated TRS, including after unlinking.
@@ -863,6 +928,23 @@ struct Layer {
     /// regras que mantêm as cadeias coerentes moram em `enforce_clip_chains`
     /// (Composition.hpp). Gravado na v48; projeto anterior abre desligado.
     bool      clipToBelow = false;
+    /// PRESERVAR TRANSPARÊNCIA (o T do AE): a camada só pinta onde a pilha já
+    /// composta ABAIXO dela tem alfa, e o alfa do resultado é o dessa pilha
+    /// (source-atop). Diferente do `clipToBelow`, vale contra tudo o que está
+    /// abaixo, não só a camada logo abaixo. Gravado na v65; padrão desligado.
+    bool      preserveTransparency = false;
+    /// TÍMIDA (o Shy do AE): com `Composition::hide_shy()` ligado, a timeline
+    /// não mostra a camada. Só organização: o quadro não muda. Gravado na v65.
+    bool      shy = false;
+    /// MARCAS DA CAMADA (layer markers do AE), em ordem de quadro LOCAL, no
+    /// máximo uma por quadro. Andam com a camada (mover/aparar não muda o
+    /// quadro local); `thisLayer.marker` nas expressões. Gravado na v67.
+    std::vector<Marker> markers;
+    /// AE animation (v68): AUTO-ORIENTAR (o Auto-Orient do AE). 0 desligado;
+    /// 1 ao longo do caminho (o eixo X da camada segue a tangente do caminho
+    /// de movimento, somado à rotação); 2 para a câmera (camada 3D de frente
+    /// para a câmera ativa). Aplicado na matriz da camada (timeline/LayerWorld).
+    u8        autoOrient = 0;
 
     // --- Conteúdo ------------------------------------------------------------
     AssetId source{};              ///< vídeo, imagem, áudio ou modelo
@@ -936,14 +1018,15 @@ struct Layer {
 
     /// `source_frame` num instante fracionário da timeline (áudio amostra a
     /// amostra). Com o remapeamento ligado, a curva manda: o VALOR da trilha é
-    /// o quadro da fonte (entre quadros, interpolado linearmente).
+    /// o quadro da fonte, avaliado no instante fracionário (a curva entre os
+    /// quadros, não uma poligonal: bug B2 do gap_system). Nos quadros inteiros
+    /// é o mesmo valor de `timeRemap.sample`, então o seek cai no mesmo quadro.
     [[nodiscard]] f64 source_frame_f(f64 timelineTime) const noexcept {
         if (timeRemapEnabled && !timeRemap.keys.empty()) {
             const f64 local = timelineTime - static_cast<f64>(start.value) + static_cast<f64>(offset.value);
-            const f64 f = std::floor(local);
-            const f64 a = timeRemap.sample(FrameIndex{static_cast<i64>(f)});
-            const f64 b = timeRemap.sample(FrameIndex{static_cast<i64>(f) + 1});
-            return a + (b - a) * (local - f);
+            const f64 whole = std::floor(local);
+            if (local == whole) return timeRemap.sample(FrameIndex{static_cast<i64>(whole)});
+            return timeRemap.sample_f(local);
         }
         if (const Track* st = speed_track()) {
             // Velocidade com keyframes: a fonte anda a INTEGRAL da velocidade

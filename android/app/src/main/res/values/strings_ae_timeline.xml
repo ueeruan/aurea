@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Timeline do AE (2026-11-11): marcas de camada, duração/comentário das marcas, área de trabalho, Easy Ease, escalar keyframes e escalonar. -->
+<resources>
+    <string name="aet_marker_duration">Duração (quadros)</string>
+    <string name="aet_marker_comment">Comentário</string>
+    <string name="aet_marker_comment_hint">Nota da marca (as expressões leem com .comment)</string>
+    <string name="aet_layer_marker_edit">Marca da camada</string>
+    <string name="aet_layer_marker_hint">A marca anda junto com a camada. Nas expressões: thisLayer.marker.</string>
+    <string name="aet_layer_marker_here">Marca na camada aqui</string>
+    <string name="aet_stagger">Escalonar</string>
+    <string name="aet_stagger_step_value">Passo de %1$d quadros</string>
+    <string name="aet_stagger_less">Menos um quadro de passo</string>
+    <string name="aet_stagger_more">Mais um quadro de passo</string>
+    <string name="aet_stagger_keys_only">Só keyframes</string>
+    <string name="aet_stagger_apply">Escalonar</string>
+    <string name="aet_on">Ligado</string>
+    <string name="aet_off">Desligado</string>
+    <string name="aet_export_work_area">Só a área de trabalho</string>
+    <string name="aet_export_work_area_range">%1$s – %2$s</string>
+    <string name="aet_easy_ease">Easy Ease</string>
+    <string name="aet_easy_ease_in">Suavizar entrada</string>
+    <string name="aet_easy_ease_out">Suavizar saída</string>
+    <string name="aet_ease_nothing">Nenhum trecho para suavizar nos keyframes escolhidos</string>
+    <string name="aet_keys_scale">Escalar tempo</string>
+    <string name="aet_keys_scale_to">Tempo em %1$s</string>
+    <string name="aet_keys_scale_refused">Não deu para escalar: dois keyframes cairiam no mesmo quadro</string>
+    <string name="aet_work_area_start_here">Início da área de trabalho aqui</string>
+    <string name="aet_work_area_end_here">Fim da área de trabalho aqui</string>
+    <string name="aet_work_area_clear">Limpar área de trabalho</string>
+    <string name="aet_trim_to_work_area">Aparar composição à área de trabalho</string>
+    <string name="aet_trimmed_to_work_area">Composição aparada à área de trabalho</string>
+</resources>

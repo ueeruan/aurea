@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
@@ -20,6 +21,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
@@ -30,7 +32,10 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aurea.aurea.editor.PointTool
@@ -41,17 +46,25 @@ import com.aurea.aurea.engine.VPaint
 import com.aurea.aurea.engine.VParam
 import com.aurea.aurea.engine.VStop
 import com.aurea.aurea.state.EditorStore
+import com.aurea.aurea.ui.ds.AureaToggle
 import com.aurea.aurea.ui.ds.ChoiceChips
 import com.aurea.aurea.ui.ds.KeyframeLook
 import com.aurea.aurea.ui.ds.PropertyCustomRow
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
+import com.aurea.aurea.ui.theme.CupertinoGlyph
+import com.aurea.aurea.ui.theme.CupertinoIcon
+import com.aurea.aurea.ui.theme.tocavel
 
 private val PATH_KINDS = listOf(R.string.edt_vec_free_path, R.string.editor_retangulo, R.string.editor_elipse, R.string.editor_poligono, R.string.editor_estrela)
 private val VECTOR_TABS = listOf(R.string.target_shape, R.string.panel_preenchimento, R.string.panel_borda, R.string.panel_caminho,
     R.string.panel_transformar, R.string.edt_vec_operators, R.string.panel_efeitos)
 
-/** Alvo do losango do trilho: um VParam (≥ 0), a forma do caminho, ou nada. */
+/** Operadores de caminho (VModType, mesma ordem do motor). */
+private val MOD_NAMES = listOf(R.string.ae_shapeop_offset, R.string.ae_shapeop_pucker, R.string.ae_shapeop_roughen, R.string.ae_shapeop_wiggle_paths,
+    R.string.ae_shapeop_round_corners, R.string.ae_shapeop_twist, R.string.ae_shapeop_zigzag, R.string.ae_shapeop_wiggle_transform)
+
+/** Alvo do losango do trilho: um VParam (≥ 0; ≥ VParam.MOD_BASE = parâmetro de operador), a forma do caminho, ou nada. */
 private const val SEL_NONE = -1
 private const val SEL_SHAPE = -2
 
@@ -81,6 +94,7 @@ internal fun VectorPanel(env: PanelEnv) {
     val at = store.vectorPathAt
     val params = store.vectorParams
     val railLook = when {
+        VParam.isMod(sel) -> modLook(store.vectorModifiers, sel)
         sel >= 0 && params != null -> paramLook(params, sel)
         sel == SEL_SHAPE && at != null -> when {
             at.keyHere -> KeyframeLook.KeyHere
@@ -94,6 +108,7 @@ internal fun VectorPanel(env: PanelEnv) {
             onBack = env.onClose,
             keyframeLook = railLook,
             onKeyframe = when {
+                VParam.isMod(sel) && store.vectorModifiers != null -> ({ store.toggleVectorParamKey(sel) })
                 sel >= 0 && params != null -> ({ store.toggleVectorParamKey(sel) })
                 sel == SEL_SHAPE && at != null && at.free -> ({ store.toggleVectorPathKey() })
                 else -> null
@@ -133,12 +148,28 @@ internal fun VectorPanel(env: PanelEnv) {
 private class Sel(val value: Int, val set: (Int) -> Unit)
 
 private fun paramLook(v: FloatArray, param: Int): KeyframeLook {
+    if (param !in 0 until VParam.COUNT) return KeyframeLook.None
     val anim = v.getOrElse(VParam.COUNT) { 0f }.toInt()
     val keys = v.getOrElse(VParam.COUNT + 1) { 0f }.toInt()
     val bit = 1 shl param
     return when {
         keys and bit != 0 -> KeyframeLook.KeyHere
         anim and bit != 0 -> KeyframeLook.Animated
+        else -> KeyframeLook.None
+    }
+}
+
+/** Losango de um parâmetro de operador (bits da linha dele em queryVectorModifiers). */
+private fun modLook(mods: FloatArray?, id: Int): KeyframeLook {
+    if (mods == null || !VParam.isMod(id)) return KeyframeLook.None
+    val index = (id - VParam.MOD_BASE) / VParam.MOD_PARAMS
+    val slot = (id - VParam.MOD_BASE) % VParam.MOD_PARAMS
+    val base = index * VParam.MOD_FLOATS
+    if (base + VParam.MOD_FLOATS > mods.size) return KeyframeLook.None
+    val bit = 1 shl slot
+    return when {
+        mods[base + 3].toInt() and bit != 0 -> KeyframeLook.KeyHere
+        mods[base + 2].toInt() and bit != 0 -> KeyframeLook.Animated
         else -> KeyframeLook.None
     }
 }
@@ -443,6 +474,7 @@ private fun OperatorsTab(env: PanelEnv, g: VGroup, s: Sel) {
     KitTitle(stringResource(R.string.panel_juntar_caminhos_grupo))
     ChoiceChips(listOf(stringResource(R.string.panel_nao_juntar), stringResource(R.string.panel_unir), stringResource(R.string.panel_subtrair), stringResource(R.string.panel_intersecao), stringResource(R.string.panel_excluir_sobreposicao)), g.merge, onSelect = { m -> store.editVectorGroup { it.merge = m } })
     if (g.paths.size < 2) KitHint(stringResource(R.string.panel_juntar_precisa_2_caminhos_grupo_use))
+    ModifiersSection(env, s)
     ToggleLine(stringResource(R.string.panel_repetir_copias), g.repOn) { on -> store.editVectorGroup { it.repOn = on } }
     if (!g.repOn) return
     ParamRow(env, s, stringResource(R.string.panel_copias), VParam.REP_COPIES, 0.05f, 0f, 500f, "", 0, 3f)
@@ -450,13 +482,179 @@ private fun OperatorsTab(env: PanelEnv, g: VGroup, s: Sel) {
     ParamRow(env, s, stringResource(R.string.panel_distancia_y), VParam.REP_POS_Y, 0.5f, -100000f, 100000f, "px", 0, 0f)
     ParamRow(env, s, stringResource(R.string.panel_rotacao), VParam.REP_ROTATION, 0.5f, -3600f, 3600f, "°", 0, 0f)
     AdvancedSection(adv, { adv = !adv }) {
-        ParamRow(env, s, stringResource(R.string.panel_escala), VParam.REP_SCALE, 0.3f, -10000f, 10000f, "%", 0, 100f)
+        // Escala X/Y do After Effects; ligada = uniforme (o repetidor de sempre).
+        ToggleLine(stringResource(R.string.ae_shapeop_rep_separate), !g.repScaleLinked) { on ->
+            val now = store.vectorParams?.getOrNull(VParam.REP_SCALE)
+            store.editVectorGroup { gr -> gr.repScaleLinked = !on; if (on) gr.repScaleY = now ?: gr.repScale }
+        }
+        if (g.repScaleLinked) {
+            ParamRow(env, s, stringResource(R.string.panel_escala), VParam.REP_SCALE, 0.3f, -10000f, 10000f, "%", 0, 100f)
+        } else {
+            ParamRow(env, s, stringResource(R.string.ae_shapeop_scale_x), VParam.REP_SCALE, 0.3f, -10000f, 10000f, "%", 0, 100f)
+            ParamRow(env, s, stringResource(R.string.ae_shapeop_scale_y), VParam.REP_SCALE_Y, 0.3f, -10000f, 10000f, "%", 0, 100f)
+        }
         ParamRow(env, s, stringResource(R.string.panel_deslocamento), VParam.REP_OFFSET, 0.05f, -500f, 500f, "", 1, 0f)
         ParamRow(env, s, stringResource(R.string.panel_opacidade_inicial), VParam.REP_START_OPACITY, 0.5f, 0f, 100f, "%", 0, 100f)
         ParamRow(env, s, stringResource(R.string.panel_opacidade_final), VParam.REP_END_OPACITY, 0.5f, 0f, 100f, "%", 0, 100f)
         KitTitle(stringResource(R.string.panel_ordem_copias))
         ChoiceChips(listOf(stringResource(R.string.panel_copias_embaixo), stringResource(R.string.panel_copias_cima)), g.repAbove, onSelect = { a -> store.editVectorGroup { it.repAbove = a } })
     }
+}
+
+// =============================================================================
+// Operadores de caminho (AE shape operators)
+// =============================================================================
+
+/**
+ * Lista dos operadores do grupo, em ordem (valem de cima para baixo), e
+ * "+ Adicionar operador". Cada operador é uma seção que abre e fecha, com o
+ * interruptor, os valores (animáveis: o losango do trilho age na linha
+ * escolhida) e subir / descer / remover. Tudo pelo motor.
+ */
+@Composable
+private fun ModifiersSection(env: PanelEnv, s: Sel) {
+    val store = env.store
+    val mods = store.vectorModifiers ?: FloatArray(0)
+    val count = mods.size / VParam.MOD_FLOATS
+    var adding by remember { mutableStateOf(false) }
+    KitTitle(stringResource(R.string.ae_shapeop_title))
+    if (count > 0) KitHint(stringResource(R.string.ae_shapeop_hint))
+    for (i in 0 until count) ModifierBlock(env, s, i, count, mods)
+    ChipRow {
+        KitChip(if (adding) stringResource(R.string.panel_fechar) else "+ " + stringResource(R.string.ae_shapeop_add), adding) { adding = !adding }
+    }
+    if (adding) {
+        ChipRow {
+            MOD_NAMES.forEachIndexed { type, name ->
+                KitChip(stringResource(name), false) {
+                    store.addVectorModifier(type)
+                    adding = false
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModifierBlock(env: PanelEnv, s: Sel, index: Int, count: Int, mods: FloatArray) {
+    val store = env.store
+    val base = index * VParam.MOD_FLOATS
+    val type = mods[base].toInt()
+    val on = mods[base + 1] > 0.5f
+    val name = stringResource(MOD_NAMES.getOrElse(type) { R.string.ae_shapeop_title })
+    var open by remember(store.vectorGroup, index, type) { mutableStateOf(true) }
+    val toggleDesc = stringResource(if (open) R.string.ae_shapeop_collapse else R.string.ae_shapeop_expand, name)
+    val enabledDesc = stringResource(R.string.ae_shapeop_enabled) + " · " + name
+    Spacer(Modifier.height(4.dp))
+    Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.weight(1f).fillMaxHeight().semantics(mergeDescendants = true) { contentDescription = toggleDesc }.tocavel(shrink = 1f) { open = !open },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CupertinoIcon(if (open) CupertinoGlyph.ChevronUp else CupertinoGlyph.ChevronDown, 12.dp, AureaColors.Muted)
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "${index + 1}. $name", maxLines = 1,
+                style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600, color = if (on) AureaColors.Text else AureaColors.Muted)),
+            )
+        }
+        Box(Modifier.semantics { contentDescription = enabledDesc }) {
+            AureaToggle(checked = on, onCheckedChange = { store.setVectorModifierEnabled(index, it) })
+        }
+    }
+    if (!open) return
+    ModifierParams(env, s, index, type, mods)
+    ChipRow {
+        if (index > 0) KitChip("↑ " + stringResource(R.string.ae_shapeop_move_up), false) { store.moveVectorModifier(index, index - 1) }
+        if (index + 1 < count) KitChip("↓ " + stringResource(R.string.ae_shapeop_move_down), false) { store.moveVectorModifier(index, index + 1) }
+        KitChip(stringResource(R.string.ae_shapeop_remove), false) { store.removeVectorModifier(index) }
+    }
+}
+
+/** Valores do operador `index` (índices por tipo: VectorData.hpp, kVecMod*). */
+@Composable
+private fun ModifierParams(env: PanelEnv, s: Sel, index: Int, type: Int, mods: FloatArray) {
+    val store = env.store
+    val base = index * VParam.MOD_FLOATS
+    fun value(slot: Int) = mods.getOrElse(base + 4 + slot) { 0f }
+    fun choose(slot: Int, v: Int) = store.setVectorParam(VParam.mod(index, slot), v.toFloat(), continuing = false)
+    when (type) {
+        com.aurea.aurea.engine.VModType.OFFSET -> {
+            ModParamRow(env, s, stringResource(R.string.ae_shapeop_amount), index, 0, mods, 0.3f, -10000f, 10000f, "px", 1, 10f)
+            KitTitle(stringResource(R.string.ae_shapeop_line_join))
+            ChoiceChips(listOf(stringResource(R.string.ae_shapeop_join_miter), stringResource(R.string.ae_shapeop_join_round), stringResource(R.string.ae_shapeop_join_bevel)),
+                value(1).toInt(), onSelect = { choose(1, it) })
+            if (value(1).toInt() == 0) ModParamRow(env, s, stringResource(R.string.ae_shapeop_miter_limit), index, 2, mods, 0.05f, 1f, 100f, "", 1, 4f)
+            ModParamRow(env, s, stringResource(R.string.ae_shapeop_copies), index, 3, mods, 0.05f, 1f, 100f, "", 0, 1f)
+            ModParamRow(env, s, stringResource(R.string.ae_shapeop_copy_offset), index, 4, mods, 0.02f, -100f, 100f, "", 2, 0f)
+        }
+        com.aurea.aurea.engine.VModType.PUCKER_BLOAT ->
+            ModParamRow(env, s, stringResource(R.string.ae_shapeop_amount), index, 0, mods, 0.3f, -100f, 100f, "%", 0, 30f)
+        com.aurea.aurea.engine.VModType.ROUGHEN, com.aurea.aurea.engine.VModType.WIGGLE_PATHS -> {
+            ModParamRow(env, s, stringResource(R.string.ae_shapeop_size), index, 0, mods, 0.2f, 0f, 10000f, "px", 1, 10f)
+            ModParamRow(env, s, stringResource(R.string.ae_shapeop_detail), index, 1, mods, 0.05f, 0f, 100f, "", 0, 3f)
+            KitTitle(stringResource(R.string.ae_shapeop_points))
+            ChoiceChips(listOf(stringResource(R.string.ae_shapeop_points_corner), stringResource(R.string.ae_shapeop_points_smooth)),
+                value(2).toInt(), onSelect = { choose(2, it) })
+            ModParamRow(env, s, stringResource(R.string.ae_shapeop_frequency), index, 3, mods, 0.02f, 0f, 100f, "", 1,
+                if (type == com.aurea.aurea.engine.VModType.WIGGLE_PATHS) 2f else 0f)
+            ModParamRow(env, s, stringResource(R.string.ae_shapeop_correlation), index, 4, mods, 0.3f, 0f, 100f, "%", 0, 50f)
+            ModParamRow(env, s, stringResource(R.string.ae_shapeop_temporal_phase), index, 5, mods, 0.5f, -36000f, 36000f, "°", 0, 0f)
+            ModParamRow(env, s, stringResource(R.string.ae_shapeop_spatial_phase), index, 6, mods, 0.5f, -36000f, 36000f, "°", 0, 0f)
+            ModParamRow(env, s, stringResource(R.string.ae_shapeop_seed), index, VParam.MOD_SEED, mods, 0.05f, 0f, 100000f, "", 0, 0f)
+        }
+        com.aurea.aurea.engine.VModType.ROUND_CORNERS ->
+            ModParamRow(env, s, stringResource(R.string.ae_shapeop_radius), index, 0, mods, 0.3f, 0f, 10000f, "px", 1, 10f)
+        com.aurea.aurea.engine.VModType.TWIST -> {
+            ModParamRow(env, s, stringResource(R.string.ae_shapeop_angle), index, 0, mods, 0.5f, -36000f, 36000f, "°", 0, 45f)
+            ModParamRow(env, s, stringResource(R.string.ae_shapeop_center_x), index, 1, mods, 0.5f, -100000f, 100000f, "px", 0, 0f)
+            ModParamRow(env, s, stringResource(R.string.ae_shapeop_center_y), index, 2, mods, 0.5f, -100000f, 100000f, "px", 0, 0f)
+        }
+        com.aurea.aurea.engine.VModType.ZIGZAG -> {
+            ModParamRow(env, s, stringResource(R.string.ae_shapeop_size), index, 0, mods, 0.2f, -10000f, 10000f, "px", 1, 10f)
+            ModParamRow(env, s, stringResource(R.string.ae_shapeop_ridges), index, 1, mods, 0.05f, 0f, 100f, "", 0, 5f)
+            KitTitle(stringResource(R.string.ae_shapeop_points))
+            ChoiceChips(listOf(stringResource(R.string.ae_shapeop_points_corner), stringResource(R.string.ae_shapeop_points_smooth)),
+                value(2).toInt(), onSelect = { choose(2, it) })
+        }
+        com.aurea.aurea.engine.VModType.WIGGLE_TRANSFORM -> {
+            ModParamRow(env, s, stringResource(R.string.ae_shapeop_anchor_x), index, 0, mods, 0.5f, -100000f, 100000f, "px", 0, 0f)
+            ModParamRow(env, s, stringResource(R.string.ae_shapeop_anchor_y), index, 1, mods, 0.5f, -100000f, 100000f, "px", 0, 0f)
+            ModParamRow(env, s, stringResource(R.string.ae_shapeop_position_x), index, 2, mods, 0.5f, -100000f, 100000f, "px", 0, 20f)
+            ModParamRow(env, s, stringResource(R.string.ae_shapeop_position_y), index, 3, mods, 0.5f, -100000f, 100000f, "px", 0, 20f)
+            ModParamRow(env, s, stringResource(R.string.ae_shapeop_scale_x), index, 4, mods, 0.3f, -1000f, 1000f, "%", 0, 0f)
+            ModParamRow(env, s, stringResource(R.string.ae_shapeop_scale_y), index, 5, mods, 0.3f, -1000f, 1000f, "%", 0, 0f)
+            ModParamRow(env, s, stringResource(R.string.ae_shapeop_rotation), index, 6, mods, 0.5f, -36000f, 36000f, "°", 0, 0f)
+            ModParamRow(env, s, stringResource(R.string.ae_shapeop_frequency), index, 7, mods, 0.02f, 0f, 100f, "", 1, 2f)
+            ModParamRow(env, s, stringResource(R.string.ae_shapeop_correlation), index, 8, mods, 0.3f, 0f, 100f, "%", 0, 50f)
+            ModParamRow(env, s, stringResource(R.string.ae_shapeop_temporal_phase), index, 9, mods, 0.5f, -36000f, 36000f, "°", 0, 0f)
+            ModParamRow(env, s, stringResource(R.string.ae_shapeop_spatial_phase), index, 10, mods, 0.5f, -36000f, 36000f, "°", 0, 0f)
+            ModParamRow(env, s, stringResource(R.string.ae_shapeop_seed), index, VParam.MOD_SEED, mods, 0.05f, 0f, 100000f, "", 0, 0f)
+        }
+        else -> Unit
+    }
+}
+
+/** Valor animável de um operador: o id dele vai pelo mesmo setVectorParam/losango dos outros valores do grupo. */
+@Composable
+private fun ModParamRow(
+    env: PanelEnv, s: Sel, label: String, index: Int, slot: Int, mods: FloatArray,
+    step: Float, min: Float, max: Float, unit: String, decimals: Int, default: Float,
+) {
+    val store = env.store
+    val id = VParam.mod(index, slot)
+    val live = remember { BooleanArray(1) }
+    HumanRow(
+        env, label, mods.getOrElse(index * VParam.MOD_FLOATS + 4 + slot) { default }, step, min, max, unit, decimals, default,
+        selected = s.value == id,
+        onSelect = { s.set(id) },
+        keyframe = modLook(mods, id),
+        onStart = { live[0] = false },
+        onValue = { x -> store.setVectorParam(id, x, continuing = live[0]); live[0] = true },
+        onEnd = { },
+        onCommit = { x -> store.setVectorParam(id, x, continuing = false) },
+        keyTag = "vector.mod.$index.$slot",
+    )
 }
 
 // =============================================================================

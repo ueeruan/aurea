@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: "Prender a um osso" (camada segue uma junta de um modelo 3D) e chão molhado da Cena 3D. -->
+<resources>
+    <string name="bone_attach_title">ربط بعظمة</string>
+    <string name="bone_attach_hint">تتبع الطبقة موضع العظمة المختارة ودورانها في المعاينة والتصدير.</string>
+    <string name="bone_attach_menu_hint">تتبّع اليد أو الرأس أو عظمة أخرى لنموذج ثلاثي الأبعاد</string>
+    <string name="bone_attach_current">مربوطة بـ: %1$s</string>
+    <string name="bone_attach_no_rig">لا يوجد نموذج ثلاثي الأبعاد بهيكل عظمي في هذا التكوين.</string>
+    <string name="bone_attach_release">فك الربط بالعظمة</string>
+    <string name="bone_attach_done">رُبطت الطبقة بـ %1$s</string>
+    <string name="bone_attach_released">فُك ربط الطبقة بالعظمة</string>
+    <string name="bone_attach_failed">تعذّر ربط الطبقة بهذه العظمة</string>
+    <string name="scene052_floor_wet">أرضية مبللة</string>
+    <string name="scene052_puddle_size">حجم البرك</string>
+</resources>

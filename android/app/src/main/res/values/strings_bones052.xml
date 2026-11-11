@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: "Prender a um osso" (camada segue uma junta de um modelo 3D) e chão molhado da Cena 3D. -->
+<resources>
+    <string name="bone_attach_title">Prender a um osso</string>
+    <string name="bone_attach_hint">A camada segue a posição e o giro do osso escolhido, na prévia e no export.</string>
+    <string name="bone_attach_menu_hint">Seguir a mão, a cabeça ou outro osso de um modelo 3D</string>
+    <string name="bone_attach_current">Presa a: %1$s</string>
+    <string name="bone_attach_no_rig">Nenhum modelo 3D com rig nesta composição.</string>
+    <string name="bone_attach_release">Soltar do osso</string>
+    <string name="bone_attach_done">Camada presa a %1$s</string>
+    <string name="bone_attach_released">Camada solta do osso</string>
+    <string name="bone_attach_failed">Não deu para prender a camada a esse osso</string>
+    <string name="scene052_floor_wet">Chão molhado</string>
+    <string name="scene052_puddle_size">Tamanho das poças</string>
+</resources>

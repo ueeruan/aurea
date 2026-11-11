@@ -1431,7 +1431,11 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     header.skyColor = Vec4{frame.environment.sky, 1.0f};
     header.groundColor = Vec4{frame.environment.ground, 1.0f};
     const u32 lights = static_cast<u32>(std::min<usize>(frame.lights.size(), 4));
-    header.lightCount = Vec4{static_cast<f32>(lights), 0, 0, 0};
+    // 0.5.2: yzw = luz ambiente da composição (zero sem luz ambiente: a conta
+    // do shader soma zero e a imagem não muda).
+    const auto finite_amb = [](f32 v) { return std::isfinite(v) ? std::max(0.0f, v) : 0.0f; };
+    header.lightCount = Vec4{static_cast<f32>(lights), finite_amb(frame.ambientLight.x), finite_amb(frame.ambientLight.y),
+                             finite_amb(frame.ambientLight.z)};
     for (u32 i = 0; i < lights; ++i) {
         const SceneLight& l = frame.lights[i];
         const f32 type = static_cast<f32>(static_cast<u8>(l.kind));

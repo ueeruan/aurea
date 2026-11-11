@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE animation (2026-11-11): texto-fonte, auto-orientar, câmera de dois nós e os controles do animador de texto (B5). -->
+<resources>
+    <string name="ae_anim_source_text">Teks Sumber</string>
+    <string name="ae_anim_source_key_add">Keyframe teks di sini</string>
+    <string name="ae_anim_source_key_remove">Hapus keyframe teks di sini</string>
+    <string name="ae_anim_source_key_count">%1$d keyframe</string>
+    <string name="ae_anim_auto_orient">Orientasi Otomatis</string>
+    <string name="ae_anim_auto_orient_off">Mati</string>
+    <string name="ae_anim_auto_orient_path">Mengikuti jalur</string>
+    <string name="ae_anim_auto_orient_camera">Menghadap kamera</string>
+    <string name="ae_anim_two_node">Kamera dua titik</string>
+    <string name="ae_anim_two_node_hint">Kamera membidik titik perhatian; rotasi berputar di atasnya</string>
+    <string name="ae_anim_poi">Titik perhatian</string>
+    <string name="ae_anim_poi_axis">Titik perhatian %1$s</string>
+    <string name="ae_anim_poi_key_add">Keyframe titik perhatian</string>
+    <string name="ae_anim_poi_key_remove">Hapus keyframe titik perhatian</string>
+    <string name="ae_anim_char_offset">Geser karakter</string>
+    <string name="ae_anim_skew_axis">Sumbu kemiringan</string>
+</resources>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: "Prender a um osso" (camada segue uma junta de um modelo 3D) e chão molhado da Cena 3D. -->
+<resources>
+    <string name="bone_attach_title">Sujetar a un hueso</string>
+    <string name="bone_attach_hint">La capa sigue la posición y el giro del hueso elegido, en la vista previa y en la exportación.</string>
+    <string name="bone_attach_menu_hint">Seguir la mano, la cabeza u otro hueso de un modelo 3D</string>
+    <string name="bone_attach_current">Sujeta a: %1$s</string>
+    <string name="bone_attach_no_rig">No hay ningún modelo 3D con rig en esta composición.</string>
+    <string name="bone_attach_release">Soltar del hueso</string>
+    <string name="bone_attach_done">Capa sujeta a %1$s</string>
+    <string name="bone_attach_released">Capa soltada del hueso</string>
+    <string name="bone_attach_failed">No se pudo sujetar la capa a ese hueso</string>
+    <string name="scene052_floor_wet">Suelo mojado</string>
+    <string name="scene052_puddle_size">Tamaño de los charcos</string>
+</resources>

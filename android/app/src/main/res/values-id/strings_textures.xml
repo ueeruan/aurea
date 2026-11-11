@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: preenchimento com textura do texto (TextTextureSection.kt). -->
+<resources>
+    <string name="tex_section">Tekstur</string>
+    <string name="tex_preset_gold">Emas</string>
+    <string name="tex_preset_silver">Perak/Krom</string>
+    <string name="tex_preset_brushed">Logam disikat</string>
+    <string name="tex_preset_wood">Kayu</string>
+    <string name="tex_preset_marble">Marmer</string>
+    <string name="tex_preset_stone">Batu</string>
+    <string name="tex_preset_concrete">Beton</string>
+    <string name="tex_preset_glitter">Glitter</string>
+    <string name="tex_preset_holo">Holografik</string>
+    <string name="tex_preset_neon">Neon</string>
+    <string name="tex_preset_fire">Api</string>
+    <string name="tex_preset_water">Air</string>
+    <string name="tex_preset_galaxy">Galaksi</string>
+    <string name="tex_preset_paper">Kertas</string>
+    <string name="tex_preset_denim">Denim</string>
+    <string name="tex_preset_leather">Kulit</string>
+    <string name="tex_preset_rust">Karat</string>
+    <string name="tex_preset_ice">Es</string>
+    <string name="tex_preset_desc">Tekstur %1$s</string>
+    <string name="tex_mapping">Pemetaan</string>
+    <string name="tex_map_block">Seluruh blok</string>
+    <string name="tex_map_letter">Per huruf</string>
+    <string name="tex_stroke_too">Garis tepi juga</string>
+    <string name="tex_scale">Skala</string>
+    <string name="tex_rotation">Rotasi</string>
+    <string name="tex_offset_x">Geser X</string>
+    <string name="tex_offset_y">Geser Y</string>
+    <string name="tex_contrast">Kontras</string>
+    <string name="tex_brightness">Kecerahan</string>
+    <string name="tex_tint">Warna tint</string>
+    <string name="tex_speed">Animasikan (kecepatan)</string>
+    <string name="tex_relief">Relief</string>
+    <string name="tex_light_angle">Sudut cahaya</string>
+    <string name="tex_variation">Variasi</string>
+</resources>

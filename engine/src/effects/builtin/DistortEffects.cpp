@@ -265,7 +265,7 @@ public:
 class WaveWarp final : public Effect {
 public:
     enum : u32 { kHeight = 0, kWavelength, kSpeed, kPhase, kDirection, kSquare, kEdges, kPin, kMix,
-                 kDirectionAngle };
+                 kDirectionAngle, kWaveType };
 
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kWaveWarp, "Onda", "Distorcer", EffectClass::Domain};
@@ -290,6 +290,11 @@ public:
         // Append, never reinterpret the four direction values saved before
         // this control existed. It is read only by the new angular mode.
         p.add_angle("direction_angle", "Ângulo", 0.0f, -360.0f, 360.0f);
+        // AE 2026 (no fim): os tipos de onda. "Seno" (o padrão) respeita a
+        // chave "Onda quadrada" de antes; os outros mandam sobre ela.
+        static const char* const kTypes[] = {"Seno", "Quadrada", "Triângulo", "Dente de serra", "Círculo",
+                                             "Semicírculo", "Semicírculo invertido", "Ruído", "Ruído suave"};
+        p.add_enum("wave_type", "Tipo de onda", kTypes, 9, 0);
     }
     bool is_identity(const EffectEval& e) const noexcept override { return e.f(kMix) < 0.01f || e.f(kHeight) < 0.01f; }
     f32 input_margin(const EffectEval& e) const noexcept override { return e.f(kHeight); }
@@ -310,9 +315,11 @@ public:
         u.texel = Vec4{region.w > 0.0f ? 1.0f / region.w : 0.0f, region.h > 0.0f ? 1.0f / region.h : 0.0f,
                        input.texel_scale_x(), input.texel_scale_y()};
         u.p0 = Vec4{h, e.f(kWavelength), e.f(kSpeed), e.f(kPhase)};
-        u.p1 = Vec4{static_cast<f32>(e.e(kDirection)), e.b(kSquare) ? 1.0f : 0.0f,
+        const u32 waveType = e.count > kWaveType ? std::min<u32>(e.e(kWaveType), 8u) : 0u;
+        u.p1 = Vec4{static_cast<f32>(e.e(kDirection)), e.b(kSquare) || waveType == 1u ? 1.0f : 0.0f,
                     static_cast<f32>(e.e(kEdges)), e.b(kPin) ? 1.0f : 0.0f};
-        u.p3 = Vec4{static_cast<f32>(e.time_frames()), 0.0f, 0.0f, 0.0f};
+        // p3.y = tipo de onda novo (2..8); 0 = seno/quadrada como antes.
+        u.p3 = Vec4{static_cast<f32>(e.time_frames()), waveType >= 2u ? static_cast<f32>(waveType) : 0.0f, 0.0f, 0.0f};
         const f32 angle = e.count > kDirectionAngle && std::isfinite(e.f(kDirectionAngle))
             ? std::remainder(e.f(kDirectionAngle), 360.0f) * kDeg2Rad : 0.0f;
         u.p2 = Vec4{std::cos(angle), std::sin(angle), input.region.x, input.region.y};

@@ -25,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -109,6 +110,7 @@ internal fun SceneLayoutWorkspace(store: EditorStore, ui: EditorUi, stage: @Comp
         Column(Modifier.fillMaxWidth().fillMaxHeight(.8f)) {
             SceneSheetHeader(stringResource(R.string.pn_t3d_lighting)) { lights = false }
             Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 12.dp).padding(bottom = 12.dp)) {
+                SceneLightAddButtons(store)
                 val light = remember(store.primary, store.curveRevision, store.detail, store.sceneSettingsRevision, store.playhead) { store.lightInfo() }
                 light?.let { values -> AureaPropertyPanel(store, "light", values, onOpenCurve = {
                     lights = false; materialPanel = EditorPanel.Curve; materials = true
@@ -144,6 +146,42 @@ internal fun SceneLayoutWorkspace(store: EditorStore, ui: EditorUi, stage: @Comp
         }
         if (!fullscreen) StudioBottomArea(store, isModel, area, chooseArea, menus, { addMenu = !addMenu }, openMaterial, openLights) {
             materialPanel = EditorPanel.Curve; materials = true
+        }
+    }
+}
+
+/**
+ * 0.5.2: adicionar luz direto na folha de Iluminação (par do `SceneLightControls`
+ * do iOS): pontual, paralela, spot, ambiente e o Flare 3D. A luz nova vira a
+ * selecionada e o painel logo abaixo já é o dela.
+ */
+@Composable
+private fun SceneLightAddButtons(store: EditorStore) {
+    // Tipos do motor (Engine::add_light): 0 paralela, 1 pontual, 2 spot, 3 ambiente, 4 Flare 3D.
+    val kinds = listOf(
+        R.string.scene_light_directional to 0,
+        R.string.scene_light_point to 1,
+        R.string.scene_light_spot to 2,
+        R.string.scene_light_ambient to 3,
+        R.string.scene_flare3d to EditorStore.LIGHT_FLARE,
+    )
+    Column(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        kinds.chunked(3).forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEach { (label, kind) ->
+                    val text = stringResource(label)
+                    val description = stringResource(R.string.s3d_add_named, text)
+                    Box(Modifier.weight(1f).heightIn(min = 44.dp).clip(RoundedCornerShape(8.dp)).background(AureaColors.SurfaceHigh)
+                        .semantics { contentDescription = description; role = androidx.compose.ui.semantics.Role.Button }
+                        .tocavel(haptic = true) { store.addLight(kind) }
+                        .padding(horizontal = 6.dp, vertical = 10.dp).testTag("scene.light.add.$kind"),
+                        contentAlignment = Alignment.Center) {
+                        Text(text, color = AureaColors.Text, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1,
+                            overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                    }
+                }
+                repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+            }
         }
     }
 }
@@ -346,7 +384,9 @@ private fun StudioAddMenu(store: EditorStore, ui: EditorUi, onClose: () -> Unit)
             Triple(CupertinoGlyph.Lightbulb, stringResource(R.string.scene_light_point)) { store.addLight(1) },
             Triple(CupertinoGlyph.Lightbulb, stringResource(R.string.scene_light_directional)) { store.addLight(0) },
             Triple(CupertinoGlyph.Lightbulb, stringResource(R.string.scene_light_spot)) { store.addLight(2) },
-            Triple(CupertinoGlyph.Sparkles, stringResource(R.string.scene_flare3d)) { store.addLight(3) },
+            // AE compositing (bug B9): 3 = luz ambiente; o Flare 3D passou para 4 (Engine::kAddLightFlare).
+            Triple(CupertinoGlyph.Lightbulb, stringResource(R.string.scene_light_ambient)) { store.addLight(3) },
+            Triple(CupertinoGlyph.Sparkles, stringResource(R.string.scene_flare3d)) { store.addLight(EditorStore.LIGHT_FLARE) },
             Triple(CupertinoGlyph.Videocam, stringResource(R.string.panel_camera_3d)) { store.addCamera() },
             Triple(CupertinoGlyph.SmallcircleCircle, stringResource(R.string.s3d_empty)) { store.addNull(true) },
             Triple(CupertinoGlyph.Camera, stringResource(R.string.real_camera_title)) { store.startRealCamera() },

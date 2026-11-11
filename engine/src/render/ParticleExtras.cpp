@@ -270,11 +270,12 @@ bool shape_grid(const ShapeData& sh, Grid& g) {
 /// Camada vetorial: os triângulos da MESMA malha do render, rasterizados na
 /// grade (só o miolo — distância à borda > 0; a franja do antisserrilhado
 /// fica de fora).
-bool vector_grid(const Layer& src, f64 frame, Grid& g) {
+bool vector_grid(const Layer& src, f64 frame, f64 fps, Grid& g) {
     const VectorData& vd = src.shape.vector;
     std::vector<VectorGroup> ev;
     ev.reserve(vd.groups.size());
-    for (u32 gi = 0; gi < vd.groups.size(); ++gi) ev.push_back(vector::evaluate_group(vd.groups[gi], src.tracks, gi, frame));
+    // fps da composição: os operadores animados (Ondular) andam em segundos.
+    for (u32 gi = 0; gi < vd.groups.size(); ++gi) ev.push_back(vector::evaluate_group(vd.groups[gi], src.tracks, gi, frame, fps));
     vector::VectorMesh mesh;
     vector::build_mesh(ev, frame, 1.0f, mesh);
     if (mesh.verts.empty()) return false;
@@ -549,7 +550,7 @@ bool build_points(const BuildContext& ctx, const Layer& src, u32 type, u32 emitF
         const ImagePixels* px = ctx.imageLookup ? ctx.imageLookup(ctx.imageCtx, src.source) : nullptr;
         ok = px && image_grid(*px, g);
     } else if (src.kind == LayerKind::Shape) {
-        ok = src.shape.shapeType == kShapeVector ? vector_grid(src, lf, g) : shape_grid(src.shape, g);
+        ok = src.shape.shapeType == kShapeVector ? vector_grid(src, lf, ctx.comp ? ctx.comp->fps() : 30.0, g) : shape_grid(src.shape, g);
     }
     if (!ok) return false;
     grid_points(g, edges || E == ParticleEmitter::Path, out);
@@ -571,7 +572,7 @@ u32 sorted_copy(const T* in, u32 n, T* out) {
 // =============================================================================
 // Chave de conteúdo
 // =============================================================================
-u64 source_key(const Layer& src, u32 emitterType, u32 emitFrom, FrameIndex localTime) noexcept {
+u64 source_key(const Layer& src, u32 emitterType, u32 emitFrom, FrameIndex localTime, f64 fps) noexcept {
     u64 h = mix64(0x51A7E5ull, static_cast<u64>(src.kind));
     h = mix64(h, emitterType);
     h = mix64(h, emitFrom);
@@ -591,7 +592,7 @@ u64 source_key(const Layer& src, u32 emitterType, u32 emitFrom, FrameIndex local
             if (s.shapeType == kShapeVector) {
                 const f64 lf = static_cast<f64>(localTime.value);
                 std::vector<VectorGroup> ev;
-                for (u32 gi = 0; gi < s.vector.groups.size(); ++gi) ev.push_back(vector::evaluate_group(s.vector.groups[gi], src.tracks, gi, lf));
+                for (u32 gi = 0; gi < s.vector.groups.size(); ++gi) ev.push_back(vector::evaluate_group(s.vector.groups[gi], src.tracks, gi, lf, fps));
                 h = mix64(h, vector::content_hash(ev, lf));
             } else {
                 h = mixf(mixf(mixf(mixf(h, s.bounds.w), s.bounds.h), s.cornerRadius), s.points);
@@ -709,7 +710,7 @@ void build_frame(const BuildContext& ctx, const Layer& pl, const ParticleData& p
     if (src == &pl) src = nullptr;
     std::shared_ptr<const StaticData> points;
     if (src) {
-        const u64 key = source_key(*src, pd.emitterType, pd.emitFrom, src->local_time(ctx.time));
+        const u64 key = source_key(*src, pd.emitterType, pd.emitFrom, src->local_time(ctx.time), ctx.comp ? ctx.comp->fps() : 30.0);
         if (key != 0) {
             points = cache.find(key, ctx.frameNumber);
             if (!points) {

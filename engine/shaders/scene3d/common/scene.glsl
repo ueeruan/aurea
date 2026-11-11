@@ -35,7 +35,7 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform SceneBlock {
                             // z = mips do prefiltrado, w = rotação do ambiente (rad)
     vec4 skyColor;          // ambiente analítico (sem IBL): céu
     vec4 groundColor;       //                               chão
-    vec4 lightCount;        // x = luzes ativas
+    vec4 lightCount;        // x = luzes ativas; yzw = luz ambiente (rgb × intensidade, 0.5.2)
     vec4 lightPos[MAX_LIGHTS];    // xyz = posição (ponto/spot) ou direção PARA a luz (direcional); w = tipo (0 dir, 1 ponto, 2 spot)
     vec4 lightColor[MAX_LIGHTS];  // rgb * intensidade; w = alcance (0 = infinito)
     vec4 lightSpot[MAX_LIGHTS];   // xyz = direção do feixe; w = cos do cone externo

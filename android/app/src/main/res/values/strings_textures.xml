@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: preenchimento com textura do texto (TextTextureSection.kt). -->
+<resources>
+    <string name="tex_section">Textura</string>
+    <string name="tex_preset_gold">Ouro</string>
+    <string name="tex_preset_silver">Prata/Cromo</string>
+    <string name="tex_preset_brushed">Metal escovado</string>
+    <string name="tex_preset_wood">Madeira</string>
+    <string name="tex_preset_marble">Mármore</string>
+    <string name="tex_preset_stone">Pedra</string>
+    <string name="tex_preset_concrete">Concreto</string>
+    <string name="tex_preset_glitter">Glitter</string>
+    <string name="tex_preset_holo">Holográfico</string>
+    <string name="tex_preset_neon">Neon</string>
+    <string name="tex_preset_fire">Fogo</string>
+    <string name="tex_preset_water">Água</string>
+    <string name="tex_preset_galaxy">Galáxia</string>
+    <string name="tex_preset_paper">Papel</string>
+    <string name="tex_preset_denim">Jeans</string>
+    <string name="tex_preset_leather">Couro</string>
+    <string name="tex_preset_rust">Ferrugem</string>
+    <string name="tex_preset_ice">Gelo</string>
+    <string name="tex_preset_desc">Textura %1$s</string>
+    <string name="tex_mapping">Mapeamento</string>
+    <string name="tex_map_block">Bloco todo</string>
+    <string name="tex_map_letter">Por letra</string>
+    <string name="tex_stroke_too">Contorno também</string>
+    <string name="tex_scale">Escala</string>
+    <string name="tex_rotation">Rotação</string>
+    <string name="tex_offset_x">Deslocamento X</string>
+    <string name="tex_offset_y">Deslocamento Y</string>
+    <string name="tex_contrast">Contraste</string>
+    <string name="tex_brightness">Brilho</string>
+    <string name="tex_tint">Cor de tinta</string>
+    <string name="tex_speed">Animar (velocidade)</string>
+    <string name="tex_relief">Relevo</string>
+    <string name="tex_light_angle">Ângulo da luz</string>
+    <string name="tex_variation">Variação</string>
+</resources>

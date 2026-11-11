@@ -60,6 +60,8 @@ public:
         p.add_float("feedback", "Realimentação", 50.0f, 0.0f, 100.0f, kAnimPct, "%");
         p.add_float("dry_out", "Saída seca", 75.0f, 0.0f, 100.0f, kAnimPct, "%");
         p.add_float("wet_out", "Saída molhada", 75.0f, 0.0f, 100.0f, kAnimPct, "%");
+        // AE 2026: Pan do eco (acrescentado no fim; 0 = centro, o som de antes).
+        p.add_float("pan", "Pan", 0.0f, -100.0f, 100.0f, kAnim);
     }
 };
 
@@ -181,11 +183,12 @@ public:
         return i;
     }
     void declare_parameters(ParameterRegistry& p) const override {
-        static const char* const kShapes[] = {"Seno", "Triângulo", "Dente de serra", "Quadrada"};
+        // "Ruído branco" (AE 2026) entra no FIM da lista: os índices antigos não mudam.
+        static const char* const kShapes[] = {"Seno", "Triângulo", "Dente de serra", "Quadrada", "Ruído branco"};
         static const char* const kIds[] = {"frequency1", "frequency2", "frequency3", "frequency4", "frequency5"};
         static const char* const kLabels[] = {"Frequência 1", "Frequência 2", "Frequência 3", "Frequência 4", "Frequência 5"};
         constexpr f32 kHz[] = {440.0f, 493.88f, 587.33f, 659.26f, 783.99f};
-        p.add_enum("waveform", "Forma de onda", kShapes, 4, 0);
+        p.add_enum("waveform", "Forma de onda", kShapes, 5, 0);
         for (u32 k = 0; k < 5; ++k) {
             p.add_float(kIds[k], kLabels[k], kHz[k], 0.0f, 2000.0f, kAnim, "Hz");
             p.typed_range(0.0f, 20000.0f);

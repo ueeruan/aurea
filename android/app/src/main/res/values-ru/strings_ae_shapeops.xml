@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE shape operators: operadores de caminho da camada vetorial (VectorPanel). -->
+<resources>
+    <string name="ae_shapeop_title">Операторы контура</string>
+    <string name="ae_shapeop_hint">Применяются по порядку, сверху вниз, к контурам этой группы.</string>
+    <string name="ae_shapeop_add">Добавить оператор</string>
+    <string name="ae_shapeop_offset">Смещение контуров</string>
+    <string name="ae_shapeop_pucker">Втягивание и раздувание</string>
+    <string name="ae_shapeop_roughen">Шероховатость</string>
+    <string name="ae_shapeop_wiggle_paths">Колебание контуров</string>
+    <string name="ae_shapeop_round_corners">Скругление углов</string>
+    <string name="ae_shapeop_twist">Скручивание</string>
+    <string name="ae_shapeop_zigzag">Зигзаг</string>
+    <string name="ae_shapeop_wiggle_transform">Колебание трансформации</string>
+    <string name="ae_shapeop_amount">Величина</string>
+    <string name="ae_shapeop_line_join">Соединение</string>
+    <string name="ae_shapeop_join_miter">Острое</string>
+    <string name="ae_shapeop_join_round">Скруглённое</string>
+    <string name="ae_shapeop_join_bevel">Срезанное</string>
+    <string name="ae_shapeop_miter_limit">Предел острого угла</string>
+    <string name="ae_shapeop_copies">Копии</string>
+    <string name="ae_shapeop_copy_offset">Смещение копий</string>
+    <string name="ae_shapeop_size">Размер</string>
+    <string name="ae_shapeop_detail">Детализация</string>
+    <string name="ae_shapeop_points">Точки</string>
+    <string name="ae_shapeop_points_corner">Угловые</string>
+    <string name="ae_shapeop_points_smooth">Гладкие</string>
+    <string name="ae_shapeop_frequency">Колебаний в секунду</string>
+    <string name="ae_shapeop_correlation">Корреляция</string>
+    <string name="ae_shapeop_temporal_phase">Временная фаза</string>
+    <string name="ae_shapeop_spatial_phase">Пространственная фаза</string>
+    <string name="ae_shapeop_seed">Случайное зерно</string>
+    <string name="ae_shapeop_radius">Радиус</string>
+    <string name="ae_shapeop_angle">Угол</string>
+    <string name="ae_shapeop_center_x">Центр X</string>
+    <string name="ae_shapeop_center_y">Центр Y</string>
+    <string name="ae_shapeop_ridges">Зубцов на сегмент</string>
+    <string name="ae_shapeop_anchor_x">Опорная точка X</string>
+    <string name="ae_shapeop_anchor_y">Опорная точка Y</string>
+    <string name="ae_shapeop_position_x">Положение X</string>
+    <string name="ae_shapeop_position_y">Положение Y</string>
+    <string name="ae_shapeop_scale_x">Масштаб X</string>
+    <string name="ae_shapeop_scale_y">Масштаб Y</string>
+    <string name="ae_shapeop_rotation">Поворот</string>
+    <string name="ae_shapeop_enabled">Включён</string>
+    <string name="ae_shapeop_move_up">Выше</string>
+    <string name="ae_shapeop_move_down">Ниже</string>
+    <string name="ae_shapeop_remove">Удалить оператор</string>
+    <string name="ae_shapeop_expand">Показать настройки: %1$s</string>
+    <string name="ae_shapeop_collapse">Скрыть настройки: %1$s</string>
+    <string name="ae_shapeop_lane">Оператор %1$d · %2$d</string>
+    <string name="ae_shapeop_rep_separate">Раздельный масштаб X и Y</string>
+</resources>

@@ -364,6 +364,8 @@ struct TimelineRow {
     var hasKeys: Bool { !instants.isEmpty || !dimInstants.isEmpty }
     /// Máscara de recorte: recortada pela camada abaixo (indicador na pílula).
     var clipToBelow: Bool = false
+    /// Tímida (o Shy do AE): sai da lista com "Ocultar camadas tímidas" (`timelineWithoutShy`).
+    var shy: Bool = false
 
     /// Os trechos desenhados e tocados nesta fileira: os da linha, ou só ela.
     var segments: [TimelineRow] { shared ?? [self] }
@@ -410,7 +412,16 @@ func buildTimelineRow(_ l: LayerItem, _ all: [KeyframeItem]) -> TimelineRow {
                        instants: instants,
                        keysAt: groups,
                        line: l.trackId,
-                       clipToBelow: l.clipToBelow)
+                       clipToBelow: l.clipToBelow,
+                       shy: l.shy)
+}
+
+/// AE "Ocultar camadas tímidas": com a chave da composição ligada, as fileiras
+/// tímidas saem da timeline (o quadro não muda). Sem tímida, a MESMA lista
+/// volta (par do `withoutShy` do Android).
+func timelineWithoutShy(_ rows: [TimelineRow], hide: Bool) -> [TimelineRow] {
+    guard hide, rows.contains(where: { $0.shy }) else { return rows }
+    return rows.filter { !$0.shy }
 }
 
 /**
@@ -568,7 +579,8 @@ enum TimelineRowOrder {
                 start == l.startFrame && end == l.endFrame && offset == l.offsetFrames &&
                 visible == l.visible && locked == l.locked && animated == l.animated &&
                 name == l.name && row.label == l.label &&
-                row.magnetic == l.magnetic && row.line == l.trackId
+                row.magnetic == l.magnetic && row.line == l.trackId &&
+                row.clipToBelow == l.clipToBelow && row.shy == l.shy
         }
     }
 
@@ -883,6 +895,9 @@ private func timelineTrackName(_ track: TimelineTrack, _ effects: [EffectItem]) 
     case 46: return AureaText.t("panel_margem_inicial")
     case 47: return AureaText.t("text027_path_last_margin")
     case 48: return AureaText.t("om_pts_contour_n", param + 1)
+    // AE animation: texto-fonte e o Ponto de Interesse da câmera de dois nós.
+    case 50: return AureaText.t("ae_anim_source_text")
+    case 51, 52, 53: return AureaText.t("ae_anim_poi_axis", ["X", "Y", "Z"][track.property - 51])
     case 32: return AureaText.t("tl_audio", param + 1)
     case 33:
         let names: [Int: String] = [0: "panel_inicio", 1: "panel_fim", 2: "ios_anim_delay_between", 3: "panel_intensidade", 10: "panel_posicao_x",
@@ -896,7 +911,8 @@ private func timelineTrackName(_ track: TimelineTrack, _ effects: [EffectItem]) 
     case 43:
         let labels = ["tl_feather", "tl_expansion", "tl_opacity"]
         return AureaText.t("tl_mask", effect, param < labels.count ? AureaText.t(labels[param]) : String(track.param))
-    case 34: return AureaText.t("tl_vector", param + 1)
+    // Operadores de caminho (AE shape operators): "Operador 1 · 3" (operador, parâmetro).
+    case 34: return param >= 0x10000 ? AureaText.t("ae_shapeop_lane", (param - 0x10000) / 16 + 1, (param - 0x10000) % 16 + 1) : AureaText.t("tl_vector", param + 1)
     case 35: return AureaText.t("tl_shape", param + 1)
     case 36: return AureaText.t("tl_particles", param + 1)
     case 37:

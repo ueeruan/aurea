@@ -730,6 +730,18 @@ Result<PipelineHandle> Backend::create_pipeline(const PipelineDesc& desc) noexce
                                                                            : MTLBlendFactorOneMinusSourceAlpha;
                 a.destinationAlphaBlendFactor = desc.blend == BlendMode::Add ? MTLBlendFactorOne
                                                                              : MTLBlendFactorOneMinusSourceAlpha;
+                // Operador do Eco (AE 2026): máximo/mínimo por canal e tela
+                // pré-multiplicada (s + d·(1 − s); alfa = "sobre"). Par do Vulkan.
+                if (desc.blend == BlendMode::Lighten || desc.blend == BlendMode::Darken) {
+                    const MTLBlendOperation op = desc.blend == BlendMode::Lighten ? MTLBlendOperationMax
+                                                                                  : MTLBlendOperationMin;
+                    a.rgbBlendOperation = op;
+                    a.alphaBlendOperation = op;
+                    a.destinationRGBBlendFactor = MTLBlendFactorOne;
+                    a.destinationAlphaBlendFactor = MTLBlendFactorOne;
+                } else if (desc.blend == BlendMode::Screen) {
+                    a.destinationRGBBlendFactor = MTLBlendFactorOneMinusSourceColor;
+                }
             }
         }
         pd.colorAttachments[0].writeMask = MTLColorWriteMaskAll;

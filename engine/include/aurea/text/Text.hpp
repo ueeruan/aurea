@@ -26,6 +26,7 @@
 namespace aurea {
 
 struct TextData;
+struct TextKey;
 
 namespace text {
 
@@ -178,6 +179,22 @@ void fallback_font_stats(u32& loaded, u64& bytes) noexcept;
 
 /// Chave de cache: muda quando qualquer coisa que altera os pixels muda.
 [[nodiscard]] u64 raster_key(const TextData& t, f32 scale) noexcept;
+
+// -----------------------------------------------------------------------------
+// AE animation (v68): keys do TEXTO-FONTE ("Source Text" do After Effects).
+// -----------------------------------------------------------------------------
+/// Índice do key congelado no quadro LOCAL `localFrame` (o último com
+/// frame <= localFrame; antes do primeiro, o primeiro). −1 = sem keys.
+[[nodiscard]] i32 source_key_index(const TextData& t, i64 localFrame) noexcept;
+/// Copia `t` para `out` com o key congelado no instante aplicado (conteúdo,
+/// trechos e estilo). Falso = sem keys (`out` não muda). Quem desenha (prévia,
+/// export, consultas da UI) passa por aqui: o layout e as chaves de cache
+/// (`raster_key`) mudam junto com o key.
+bool apply_source_text(const TextData& t, i64 localFrame, TextData& out);
+/// O key leva o conteúdo/trechos/estilo atuais de `t` (o quadro fica).
+void capture_source_key(const TextData& t, TextKey& key);
+/// Insere ou substitui (mesmo quadro) mantendo a ordem. Devolve o índice.
+u32 upsert_source_key(TextData& t, TextKey key);
 
 } // namespace text
 } // namespace aurea

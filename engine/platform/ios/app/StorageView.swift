@@ -75,7 +75,7 @@ enum AureaStorage {
         // `preview-proxies` fica de fora: o motor tem o índice e o teto dessa
         // pasta, e aparar por fora ao fim de cada export apagava o proxy do
         // projeto aberto (refeito em seguida, com a prévia pesada enquanto isso).
-        for name in ["effect-previews", "waveform"] {
+        for name in ["effect-previews", "waveform", "headbop"] {   // headbop: rig do Headbop (regenerável)
             trim(caches.appendingPathComponent(name, isDirectory: true), to: cacheLimit)
         }
     }
@@ -352,7 +352,7 @@ final class StorageScreen: ObservableObject {
         let exports = AureaStorage.measure(AureaStorage.exportFiles())
         let preRender = AureaStorage.measure([caches.appendingPathComponent("pre-render", isDirectory: true)])
         let proxies = AureaStorage.measure([caches.appendingPathComponent("preview-proxies", isDirectory: true)])
-        let others = AureaStorage.measure(["effect-previews", "waveform", "sequences", "plugin-install"]
+        let others = AureaStorage.measure(["effect-previews", "waveform", "headbop", "sequences", "plugin-install"]
             .map { caches.appendingPathComponent($0, isDirectory: true) }
             + ((try? FileManager.default.contentsOfDirectory(at: FileManager.default.temporaryDirectory, includingPropertiesForKeys: nil)) ?? [])
                 .filter { AureaStorage.ownedTemporary($0.path) })
@@ -404,7 +404,7 @@ final class StorageScreen: ObservableObject {
             case StorageLineId.proxies where ready:
                 freed = Int64(engine.clearProxyCache())
             case StorageLineId.otherCaches:
-                for name in ["effect-previews", "waveform", "sequences", "plugin-install"] {
+                for name in ["effect-previews", "waveform", "headbop", "sequences", "plugin-install"] {
                     freed += AureaStorage.removeContents(of: AureaPaths.caches.appendingPathComponent(name, isDirectory: true))
                 }
                 // O tmp em uso agora (a folha de compartilhar aberta) tem menos de 1 h.

@@ -45,6 +45,14 @@ void main() {
         float decay = exp(-p.p1.z * radius / max(min(p.p3.x,p.p3.y),1.0));
         vec2 shift = radius > .001 ? delta/radius * sin(phase)*p.p0.z*decay : vec2(0.0);
         o_color = atPoint(point + shift);
+        if (p.p1.w > 0.0 && radius > .001) {
+            // Brilho (0.5.2): a inclinação do anel (derivada do deslocamento)
+            // vira normal; especular de uma luz alta à esquerda, só nas cristas.
+            float slope = cos(phase) * 6.28318530718 / max(p.p0.w, 2.0) * p.p0.z * decay;
+            vec3 n = normalize(vec3(-delta/radius * slope, 1.0));
+            float spec = pow(max(dot(n, normalize(vec3(-0.5, -0.8, 1.0))), 0.0), 48.0);
+            o_color.rgb += vec3(spec * p.p1.w * o_color.a);
+        }
     } else {
         // Radial equidistant/rectilinear mapping. Reverse applies its inverse.
         float halfWidth = max(p.p3.x*.5, 1.0);

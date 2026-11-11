@@ -17,6 +17,7 @@
 #include "aurea/project/Project.hpp"
 #include "aurea/timeline/Composition.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -746,4 +747,75 @@ AUREA_TEST(AudioFx, DumpBeforeAfterWavs) {
         const auto after = rig.render(snap_of(c), 0, len);
         dump_wav(k.name, after);
     }
+}
+
+// Lote "AE 2026", segunda leva: Distorção (curvas, redutor de bits e de
+// amostragem) e Portão de ruído. O seno sintético tem amplitude 0,5.
+AUREA_TEST(AudioFx, DistortionClipsCrushesAndHoldsSamples) {
+    Rig rig;
+    auto peak = [](const std::vector<f32>& pcm, i64 a, i64 b) {
+        f32 m = 0.0f;
+        for (i64 i = a; i < b; ++i) m = std::fmax(m, std::fabs(pcm[static_cast<usize>(i) * 2]));
+        return m;
+    };
+    // Corte duro: drive +12 dB leva 0,5 a ~2 (corta em 1), ganho −12 dB → pico 0,251, topo achatado.
+    auto out = rig.render(snap_of(fx_clip(kSr, {stage(audio::FxKind::Distortion, {1, 12, -12, 100, 0, 24, 1})})), 0, kSr);
+    const f32 top = peak(out, 12000, kSr);
+    u32 flat = 0;
+    for (i64 i = 12000; i < kSr; ++i) flat += std::fabs(out[static_cast<usize>(i) * 2]) > top * 0.98f ? 1u : 0u;
+    std::printf("    distorcao: pico %.4f, %.0f%% no topo\n", top, 100.0 * flat / (kSr - 12000));
+    AUREA_CHECK_NEAR(top, std::pow(10.0, -12.0 / 20.0), 0.003);
+    AUREA_CHECK(flat > (kSr - 12000) * 4 / 10);
+    // Mistura 0 % = seco.
+    const auto dry = rig.render(snap_of(dry_clip(kSr)), 0, kSr);
+    out = rig.render(snap_of(fx_clip(kSr, {stage(audio::FxKind::Distortion, {1, 12, -12, 0, 0, 24, 1})})), 0, kSr);
+    AUREA_CHECK_NEAR(out[30000 * 2], dry[30000 * 2], 1e-5);
+    // Redutor de bits: 2 bits = degraus de 0,5.
+    out = rig.render(snap_of(fx_clip(kSr, {stage(audio::FxKind::Distortion, {0, 0, 0, 100, 0, 2, 1})})), 0, kSr);
+    f32 off = 0.0f;
+    for (i64 i = 12000; i < kSr; ++i) {
+        const f32 v = out[static_cast<usize>(i) * 2];
+        off = std::fmax(off, std::fabs(v / 0.5f - std::round(v / 0.5f)));
+    }
+    AUREA_CHECK(off < 1e-4f);
+    // Redução de amostragem ×4: o valor só muda a cada 4 amostras (degraus de 4).
+    out = rig.render(snap_of(fx_clip(kSr, {stage(audio::FxKind::Distortion, {0, 0, 0, 100, 0, 24, 4})})), 0, kSr);
+    u32 changes = 0, shortRuns = 0;
+    i64 lastChange = -1;
+    for (i64 i = 12001; i < 12401; ++i) {
+        if (out[static_cast<usize>(i) * 2] != out[static_cast<usize>(i - 1) * 2]) {
+            ++changes;
+            if (lastChange >= 0 && i - lastChange != 4) ++shortRuns;
+            lastChange = i;
+        }
+    }
+    std::printf("    reducao x4: %u mudancas em 400 amostras, %u degraus fora de 4\n", changes, shortRuns);
+    AUREA_CHECK(changes >= 95u && changes <= 101u);
+    AUREA_CHECK_EQ(shortRuns, 0u);
+    // Curvas: todas limitadas a ±1 e ímpares (menos a válvula).
+    for (u32 t = 0; t < 6; ++t) {
+        AUREA_CHECK(std::fabs(audio::distortion_curve(t, 50.0f)) <= 1.0f);
+        if (t != 4) AUREA_CHECK_NEAR(audio::distortion_curve(t, -0.3f), -audio::distortion_curve(t, 0.3f), 1e-6);
+    }
+    AUREA_CHECK(std::fabs(audio::distortion_curve(4, 0.3f) + audio::distortion_curve(4, -0.3f)) > 1e-3f);
+}
+
+AUREA_TEST(AudioFx, GateClosesBelowTheThresholdAndMatchesMidStart) {
+    Rig rig;
+    const auto dry = rig.render(snap_of(dry_clip(kSr)), 0, kSr);
+    // Limiar −100 dB: o portão abre no ataque e o som passa.
+    auto open = rig.render(snap_of(fx_clip(kSr, {stage(audio::FxKind::Gate, {-100, 1, 50, 100})})), 0, kSr);
+    AUREA_CHECK_NEAR(rms(open, 0, 12000, kSr) / rms(dry, 0, 12000, kSr), 1.0, 0.01);
+    // Limiar 0 dB acima do seno (−6 dB): fica fechado.
+    auto shut = rig.render(snap_of(fx_clip(kSr, {stage(audio::FxKind::Gate, {0, 1, 50, 100})})), 0, kSr);
+    AUREA_CHECK(rms(shut, 0, 12000, kSr) < 1e-4);
+    // Limiar −7 dB, um pouco abaixo do pico: o seno abre o portão em cada pico
+    // e a retenção (50 ms > meio período) o mantém aberto.
+    auto edge = rig.render(snap_of(fx_clip(kSr, {stage(audio::FxKind::Gate, {-7, 1, 50, 100})})), 0, kSr);
+    AUREA_CHECK_NEAR(rms(edge, 0, 12000, kSr) / rms(dry, 0, 12000, kSr), 1.0, 0.02);
+    // Começar no meio dá o mesmo que tocar do início (pré-rolagem cobre a soltura).
+    auto clip = fx_clip(kSr, {stage(audio::FxKind::Gate, {-7, 1, 50, 100})});
+    const auto whole = rig.render(snap_of(clip), 0, kSr);
+    const auto mid = rig.render(snap_of(clip), 24000, 8000);
+    AUREA_CHECK_NEAR(mid[4000 * 2], whole[(24000 + 4000) * 2], 1e-5);
 }

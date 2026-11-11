@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Timeline do AE (2026-11-11): marcas de camada, duração/comentário das marcas, área de trabalho, Easy Ease, escalar keyframes e escalonar. -->
+<resources>
+    <string name="aet_marker_duration">अवधि (फ़्रेम)</string>
+    <string name="aet_marker_comment">टिप्पणी</string>
+    <string name="aet_marker_comment_hint">मार्कर की टिप्पणी (एक्सप्रेशन इसे .comment से पढ़ते हैं)</string>
+    <string name="aet_layer_marker_edit">लेयर मार्कर</string>
+    <string name="aet_layer_marker_hint">मार्कर लेयर के साथ चलता है। एक्सप्रेशन में: thisLayer.marker</string>
+    <string name="aet_layer_marker_here">यहाँ लेयर मार्कर</string>
+    <string name="aet_stagger">स्टैगर</string>
+    <string name="aet_stagger_step_value">%1$d फ़्रेम का अंतर</string>
+    <string name="aet_stagger_less">अंतर एक फ़्रेम कम</string>
+    <string name="aet_stagger_more">अंतर एक फ़्रेम ज़्यादा</string>
+    <string name="aet_stagger_keys_only">केवल कीफ़्रेम</string>
+    <string name="aet_stagger_apply">स्टैगर करें</string>
+    <string name="aet_on">चालू</string>
+    <string name="aet_off">बंद</string>
+    <string name="aet_export_work_area">केवल वर्क एरिया</string>
+    <string name="aet_export_work_area_range">%1$s – %2$s</string>
+    <string name="aet_easy_ease">ईज़ी ईज़</string>
+    <string name="aet_easy_ease_in">ईज़ इन</string>
+    <string name="aet_easy_ease_out">ईज़ आउट</string>
+    <string name="aet_ease_nothing">चुने गए कीफ़्रेम में ईज़ करने को कोई हिस्सा नहीं</string>
+    <string name="aet_keys_scale">समय स्केल</string>
+    <string name="aet_keys_scale_to">समय %1$s</string>
+    <string name="aet_keys_scale_refused">स्केल नहीं हो सका: दो कीफ़्रेम एक ही फ़्रेम पर आ जाते</string>
+    <string name="aet_work_area_start_here">वर्क एरिया यहाँ से शुरू</string>
+    <string name="aet_work_area_end_here">वर्क एरिया यहाँ खत्म</string>
+    <string name="aet_work_area_clear">वर्क एरिया हटाएँ</string>
+    <string name="aet_trim_to_work_area">कंपोज़िशन को वर्क एरिया तक ट्रिम करें</string>
+    <string name="aet_trimmed_to_work_area">कंपोज़िशन वर्क एरिया तक ट्रिम हो गई</string>
+</resources>

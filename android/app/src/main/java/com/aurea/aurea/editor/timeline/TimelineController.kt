@@ -100,7 +100,8 @@ internal class TimelineController(
     private var sharedResult: List<RowModel> = emptyList()
     val rows = derivedStateOf {
         val focus = store.timelineFocus
-        val cached = rowCache.build(store.layers, store.keyframes)
+        // AE "Ocultar camadas tímidas": as tímidas saem antes de tudo (a ordem e o reordenar usam ids).
+        val cached = withoutShy(rowCache.build(store.layers, store.keyframes), store.hideShy)
         // Painel focado: na principal, o parâmetro dele forte e os outros
         // parâmetros animados esmaecidos (antes sumiam da barra).
         val perLayer = if (focus == null) cached else cached.map { row ->
@@ -1083,7 +1084,10 @@ internal class TimelineController(
         val d = slopAt - down.position
         val horizontal = Press.horizontal(d.x, d.y)
         val r = hit.row
+        val workHandle = if (hit.kind == HitKind.RULER && !state.compact) workAreaHandleAt(down.position) else 0
         when {
+            // Timeline do AE: as alças da área de trabalho na régua.
+            workHandle != 0 -> workAreaDrag(down, workHandle)
             r != null && store.layerSelectMode && hit.kind == HitKind.HEADER && r.track == null && !state.compact && !horizontal ->
                 sweepSelect(down.id, slopAt, r)
             // Trilha de propriedade aberta (só do AUREA): o losango anda direto, como antes.
@@ -1093,6 +1097,40 @@ internal class TimelineController(
             !state.compact -> scroll(down.id, slopAt, tracker)
             else -> consumeUntilUp()
         }
+    }
+
+    // --- Timeline do AE: alças da área de trabalho na régua -------------------------
+    /** Rascunho do arrasto de uma alça: o pintor desenha este enquanto o dedo anda. */
+    var workAreaDraft: Pair<Int, Int>? = null
+        private set
+
+    /** Alça sob o dedo (alvo de 22 dp): −1 início, 1 fim, 0 nenhuma. */
+    private fun workAreaHandleAt(p: Offset): Int {
+        val area = store.workArea ?: return 0
+        if (p.y >= metrics.rowsTop) return 0
+        val reach = 22f * metrics.density
+        val d0 = abs(p.x - TimeAxis.xOf(area.first.toDouble(), view(), pxPerFrame(), centerX()))
+        val d1 = abs(p.x - TimeAxis.xOf(area.second.toDouble(), view(), pxPerFrame(), centerX()))
+        if (minOf(d0, d1) > reach) return 0
+        return if (d0 <= d1) -1 else 1
+    }
+
+    /** Arrasta o início (−1) ou o fim (1) da área; solta = um passo de desfazer no motor. */
+    private suspend fun AwaitPointerEventScope.workAreaDrag(down: PointerInputChange, handle: Int) {
+        val area = store.workArea ?: return
+        var draft = area
+        if (store.playing) store.pause()
+        tick()
+        val released = dragLoop(down.id, down.position, horizontal = true) { p ->
+            val f = frameAt(p.x).toFrame().coerceIn(0, maxOf(1, store.project.durationFrames))
+            draft = if (handle < 0) f.coerceAtMost(area.second - 1) to area.second
+                    else area.first to f.coerceAtLeast(area.first + 1)
+            workAreaDraft = draft
+            requestRedraw()
+        }
+        workAreaDraft = null
+        if (released && draft != area) store.setWorkArea(draft.first, draft.second)
+        requestRedraw()
     }
 
     /** O toque longo da Omega começa uma linha a reordenar? (fundo da linha ou alça ≡, na visão geral). */

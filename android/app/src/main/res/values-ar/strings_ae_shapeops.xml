@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE shape operators: operadores de caminho da camada vetorial (VectorPanel). -->
+<resources>
+    <string name="ae_shapeop_title">معاملات المسار</string>
+    <string name="ae_shapeop_hint">تُطبَّق بالترتيب، من الأعلى إلى الأسفل، على مسارات هذه المجموعة.</string>
+    <string name="ae_shapeop_add">إضافة معامل</string>
+    <string name="ae_shapeop_offset">إزاحة المسارات</string>
+    <string name="ae_shapeop_pucker">تجعيد وانتفاخ</string>
+    <string name="ae_shapeop_roughen">تخشين</string>
+    <string name="ae_shapeop_wiggle_paths">تمويج المسارات</string>
+    <string name="ae_shapeop_round_corners">تدوير الزوايا</string>
+    <string name="ae_shapeop_twist">لَيّ</string>
+    <string name="ae_shapeop_zigzag">متعرج</string>
+    <string name="ae_shapeop_wiggle_transform">تمويج التحويل</string>
+    <string name="ae_shapeop_amount">المقدار</string>
+    <string name="ae_shapeop_line_join">وصلة الخط</string>
+    <string name="ae_shapeop_join_miter">حادة</string>
+    <string name="ae_shapeop_join_round">مستديرة</string>
+    <string name="ae_shapeop_join_bevel">مشطوفة</string>
+    <string name="ae_shapeop_miter_limit">حد الزاوية الحادة</string>
+    <string name="ae_shapeop_copies">النسخ</string>
+    <string name="ae_shapeop_copy_offset">إزاحة النسخ</string>
+    <string name="ae_shapeop_size">الحجم</string>
+    <string name="ae_shapeop_detail">التفاصيل</string>
+    <string name="ae_shapeop_points">النقاط</string>
+    <string name="ae_shapeop_points_corner">زاوية</string>
+    <string name="ae_shapeop_points_smooth">ناعمة</string>
+    <string name="ae_shapeop_frequency">تموجات في الثانية</string>
+    <string name="ae_shapeop_correlation">الترابط</string>
+    <string name="ae_shapeop_temporal_phase">الطور الزمني</string>
+    <string name="ae_shapeop_spatial_phase">الطور المكاني</string>
+    <string name="ae_shapeop_seed">البذرة العشوائية</string>
+    <string name="ae_shapeop_radius">نصف القطر</string>
+    <string name="ae_shapeop_angle">الزاوية</string>
+    <string name="ae_shapeop_center_x">المركز X</string>
+    <string name="ae_shapeop_center_y">المركز Y</string>
+    <string name="ae_shapeop_ridges">نتوءات لكل مقطع</string>
+    <string name="ae_shapeop_anchor_x">نقطة الارتكاز X</string>
+    <string name="ae_shapeop_anchor_y">نقطة الارتكاز Y</string>
+    <string name="ae_shapeop_position_x">الموضع X</string>
+    <string name="ae_shapeop_position_y">الموضع Y</string>
+    <string name="ae_shapeop_scale_x">المقياس X</string>
+    <string name="ae_shapeop_scale_y">المقياس Y</string>
+    <string name="ae_shapeop_rotation">الدوران</string>
+    <string name="ae_shapeop_enabled">مُفعَّل</string>
+    <string name="ae_shapeop_move_up">نقل لأعلى</string>
+    <string name="ae_shapeop_move_down">نقل لأسفل</string>
+    <string name="ae_shapeop_remove">إزالة المعامل</string>
+    <string name="ae_shapeop_expand">إظهار إعدادات %1$s</string>
+    <string name="ae_shapeop_collapse">إخفاء إعدادات %1$s</string>
+    <string name="ae_shapeop_lane">المعامل %1$d · %2$d</string>
+    <string name="ae_shapeop_rep_separate">مقياس X وY منفصلان</string>
+</resources>

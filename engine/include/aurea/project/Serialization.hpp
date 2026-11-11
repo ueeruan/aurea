@@ -86,7 +86,16 @@ struct SectionHeader {
 /// v61 (0.5.1): mesmos bytes; ao abrir um v60 ou anterior, o grupo herda a chave
 /// de motion blur do pai (o grupo nascia desligado e o blur das camadas sumia).
 /// v62 (0.5.1): oclusão ambiente do grupo 3D (chave, força e raio).
-constexpr u32 kTimelineSectionVersion = 63;
+/// v63 (0.5.1): faixas da Edição, entrada e saída, e o áudio ligado de cada camada.
+/// v64 (0.5.2): o osso do pai de cada camada ("Prender a um osso").
+/// v65: composição do AE — "ocultar tímidas" da composição; tímida e preservar
+/// transparência de cada camada; queda do feather de cada máscara.
+/// v67: timeline do AE — duração e comentário das marcas da composição, marcas
+/// de cada camada e a área de trabalho da composição.
+/// v68: AE animation — auto-orientar de cada camada, câmera de dois nós com o
+/// Ponto de Interesse e os keys do texto-fonte (Source Text).
+/// v69 (0.5.2): preenchimento com textura do texto (TextData::texture).
+constexpr u32 kTimelineSectionVersion = 69;
 
 /// Cabeçalho do arquivo.
 struct FileHeader {

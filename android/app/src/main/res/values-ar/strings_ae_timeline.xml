@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Timeline do AE (2026-11-11): marcas de camada, duração/comentário das marcas, área de trabalho, Easy Ease, escalar keyframes e escalonar. -->
+<resources>
+    <string name="aet_marker_duration">المدة (إطارات)</string>
+    <string name="aet_marker_comment">تعليق</string>
+    <string name="aet_marker_comment_hint">ملاحظة العلامة (تقرؤها التعبيرات عبر ‎.comment)</string>
+    <string name="aet_layer_marker_edit">علامة الطبقة</string>
+    <string name="aet_layer_marker_hint">تتحرك العلامة مع الطبقة. في التعبيرات: ‎thisLayer.marker</string>
+    <string name="aet_layer_marker_here">علامة طبقة هنا</string>
+    <string name="aet_stagger">تتابع</string>
+    <string name="aet_stagger_step_value">خطوة من %1$d إطار</string>
+    <string name="aet_stagger_less">إطار أقل في الخطوة</string>
+    <string name="aet_stagger_more">إطار أكثر في الخطوة</string>
+    <string name="aet_stagger_keys_only">الإطارات المفتاحية فقط</string>
+    <string name="aet_stagger_apply">طبّق التتابع</string>
+    <string name="aet_on">مفعّل</string>
+    <string name="aet_off">معطّل</string>
+    <string name="aet_export_work_area">منطقة العمل فقط</string>
+    <string name="aet_export_work_area_range">%1$s – %2$s</string>
+    <string name="aet_easy_ease">تسهيل</string>
+    <string name="aet_easy_ease_in">تسهيل الدخول</string>
+    <string name="aet_easy_ease_out">تسهيل الخروج</string>
+    <string name="aet_ease_nothing">لا يوجد مقطع لتسهيله في الإطارات المفتاحية المختارة</string>
+    <string name="aet_keys_scale">تحجيم الوقت</string>
+    <string name="aet_keys_scale_to">الوقت إلى %1$s</string>
+    <string name="aet_keys_scale_refused">تعذّر التحجيم: سيقع إطاران مفتاحيان في الإطار نفسه</string>
+    <string name="aet_work_area_start_here">بداية منطقة العمل هنا</string>
+    <string name="aet_work_area_end_here">نهاية منطقة العمل هنا</string>
+    <string name="aet_work_area_clear">مسح منطقة العمل</string>
+    <string name="aet_trim_to_work_area">قصّ التركيب إلى منطقة العمل</string>
+    <string name="aet_trimmed_to_work_area">تم قصّ التركيب إلى منطقة العمل</string>
+</resources>

@@ -33,6 +33,29 @@ f32 pct(const EffectEval& e, u32 i, f32 lo = 0.0f, f32 hi = 1.0f) {
     return std::clamp(finite_or(e.f(i), 0.0f) * 0.01f, lo, hi);
 }
 
+/// Tamanho natural da camada (px); sem posicionamento, a região da entrada.
+Vec2 layer_size(const EffectEval& e, const LayerImage& input) noexcept {
+    if (e.placement && e.placement->layerWidth && e.placement->layerHeight)
+        return Vec2{static_cast<f32>(e.placement->layerWidth), static_cast<f32>(e.placement->layerHeight)};
+    return Vec2{std::max(input.region.w, 1e-4f), std::max(input.region.h, 1e-4f)};
+}
+
+/// Os pontos relativos (centro) são da CAMADA; o shader mede no uv da REGIÃO da
+/// entrada, que um efeito anterior (sombra, brilho) pode ter aumentado. Leva o
+/// ponto ao uv da região e devolve a escala de "fração da altura da camada"
+/// para "fração da altura da região". Região = caixa da camada: identidade.
+Vec2 region_uv(const EffectEval& e, const LayerImage& input, Vec2 rel, f32& heightScale) noexcept {
+    const Rect& r = input.region;
+    const Vec2 ls = layer_size(e, input);
+    heightScale = 1.0f;
+    // Depois do Motion Tile a PAREDE é o plano (o efeito chega aos ladrilhos):
+    // o centro relativo continua medido nela, como antes.
+    if (input.tiled) return rel;
+    if (r.x == 0.0f && r.y == 0.0f && r.w == ls.x && r.h == ls.y) return rel;
+    heightScale = ls.y / std::max(r.h, 1e-4f);
+    return Vec2{(rel.x * ls.x - r.x) / std::max(r.w, 1e-4f), (rel.y * ls.y - r.y) / std::max(r.h, 1e-4f)};
+}
+
 /// Um passe na região da entrada (saída do mesmo tamanho).
 Status same_region_pass(EffectBuildContext& ctx, const LayerImage& input, const EffectUniforms& u, ShaderId shader,
                         const char* name, CommonSampler sampler, LayerImage& out) {
@@ -72,8 +95,9 @@ public:
     }
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32, LayerImage& out) const override {
         EffectUniforms u = base_uniforms(input);
-        const Vec2 c = e.p2(kCenter);
-        u.p0 = Vec4{c.x, c.y, std::clamp(finite_or(e.f(kRadius), 45.0f) * 0.01f, 1e-4f, 20.0f),
+        f32 hs = 1.0f;
+        const Vec2 c = region_uv(e, input, e.p2(kCenter), hs);
+        u.p0 = Vec4{c.x, c.y, std::clamp(finite_or(e.f(kRadius), 45.0f) * 0.01f, 1e-4f, 20.0f) * hs,
                     finite_or(e.f(kAngle), 0.0f) * kDeg2Rad};
         u.p1 = Vec4{pct(e, kMix), 0.0f, 0.0f, 0.0f};
         return same_region_pass(ctx, input, u, ShaderId::effects_swirl_frag, "redemoinho", CommonSampler::LinearBorder, out);
@@ -129,7 +153,8 @@ public:
     }
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32, LayerImage& out) const override {
         EffectUniforms u = base_uniforms(input);
-        const Vec2 c = e.p2(kCenter);
+        f32 hs = 1.0f;
+        const Vec2 c = region_uv(e, input, e.p2(kCenter), hs);
         u.p0 = Vec4{c.x, c.y, std::clamp(finite_or(e.f(kDepth), 1.0f), 0.05f, 50.0f), finite_or(e.f(kTravel), 0.0f)};
         u.p1 = Vec4{std::clamp(finite_or(e.f(kTwist), 0.0f), -50.0f, 50.0f), pct(e, kFog), pct(e, kMix), 0.0f};
         return same_region_pass(ctx, input, u, ShaderId::effects_tunnel_frag, "tunel", CommonSampler::LinearRepeat, out);
@@ -161,10 +186,11 @@ public:
     }
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32, LayerImage& out) const override {
         EffectUniforms u = base_uniforms(input);
-        const Vec2 c = e.p2(kCenter);
-        u.p0 = Vec4{c.x, c.y, std::clamp(finite_or(e.f(kRadius), 25.0f) * 0.01f, 1e-4f, 20.0f),
+        f32 hs = 1.0f;
+        const Vec2 c = region_uv(e, input, e.p2(kCenter), hs);
+        u.p0 = Vec4{c.x, c.y, std::clamp(finite_or(e.f(kRadius), 25.0f) * 0.01f, 1e-4f, 20.0f) * hs,
                     std::clamp(finite_or(e.f(kZoom), 200.0f) * 0.01f, 0.05f, 50.0f)};
-        u.p1 = Vec4{pct(e, kRim, 0.0f, 1.0f), pct(e, kSoftness, 0.0f, 1.0f), 0.0f, 0.0f};
+        u.p1 = Vec4{pct(e, kRim, 0.0f, 1.0f) * hs, pct(e, kSoftness, 0.0f, 1.0f), 0.0f, 0.0f};
         u.color = e.color(kRimColor);
         return same_region_pass(ctx, input, u, ShaderId::effects_magnify_frag, "lupa", CommonSampler::LinearBorder, out);
     }
@@ -343,10 +369,13 @@ public:
     }
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32, LayerImage& out) const override {
         EffectUniforms u = base_uniforms(input);
-        // Pontos relativos (0..1 da camada) → px da região da entrada.
+        // Pontos relativos (0..1 da CAMADA, não da região: um efeito anterior
+        // pode ter crescido a região) → px da região da entrada.
         const Rect& r = input.region;
+        // Com Motion Tile a parede é o plano (como antes); senão, a caixa da camada.
+        const Vec2 ls = input.tiled ? Vec2{r.w, r.h} : layer_size(e, input);
         const Vec2 a = e.p2(kStart), b = e.p2(kEnd);
-        u.p0 = Vec4{a.x * r.w, a.y * r.h, b.x * r.w, b.y * r.h};
+        u.p0 = Vec4{a.x * ls.x, a.y * ls.y, b.x * ls.x, b.y * ls.y};
         // A região pode ser maior que a camada: os pontos andam pela origem dela.
         u.p0.x -= r.x; u.p0.z -= r.x; u.p0.y -= r.y; u.p0.w -= r.y;
         u.p1 = Vec4{std::clamp(finite_or(e.f(kDisplacement), 60.0f), 0.0f, 5000.0f), std::clamp(finite_or(e.f(kWidth), 3.0f), 0.2f, 100.0f),

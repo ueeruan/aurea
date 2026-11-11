@@ -135,6 +135,7 @@ struct TopBarView: View {
     /// Omega chrome (área 02, P1-1): o ⋮ da camada é um menu ancorado; o seletor de "Substituir mídia" mora aqui.
     @State private var layerMenu = false
     @State private var replaceTarget: LayerRef?
+    @State private var boneTarget: LayerRef?
     /// A barra da camada entra descendo da borda de cima em 100 ms (a `action_bar_show` da referência).
     @State private var layerEnter: CGFloat = 0
     private var parent: Int64 { (model.detail["parentId"] as? NSNumber)?.int64Value ?? 0 }
@@ -156,6 +157,12 @@ struct TopBarView: View {
         // A busca de ferramentas (lupa dos Ajustes ou do Copiar e colar) e o teste de desempenho.
         .sheet(isPresented: $shell.performanceTest) { PerformanceTestPanel() }
         .sheet(isPresented: $shell.commandSearch) { CommandSearchView().environmentObject(model).environmentObject(shell) }
+        // 0.5.2: "Prender a um osso" (par do BoneAttachSheet.kt).
+        .sheet(item: $boneTarget) { target in
+            BoneAttachSheet(layerId: target.id) { boneTarget = nil }
+                .environmentObject(model)
+                .presentationDetents([.medium, .large])
+        }
         .sheet(item: $replaceTarget) { target in
             ShellMediaPicker(selectionLimit: 1, filter: .any(of: [.images, .videos])) { items in
                 replaceTarget = nil
@@ -432,6 +439,22 @@ struct TopBarView: View {
                          glyph: CupertinoGlyph.Rhombus) { model.toggleTimelineTracks(row.id) })
         out.append(.item(AureaText.t("editor_solo"), glyph: CupertinoGlyph.Speaker2, sublabel: AureaText.t("editor_alguma_camada_solo_previa_som_so"),
                          checked: row.solo, keepOpen: true) { model.mutate { $0.setLayer(row.id, solo: !row.solo) }; refresh() })
+        // AE compositing: Tímida (Shy) da camada e "Ocultar camadas tímidas" da composição (par do Menus.kt).
+        out.append(.item(AureaText.t("ae_layer_shy"), glyph: CupertinoGlyph.PersonCropCircle, sublabel: AureaText.t("ae_layer_shy_hint"),
+                         checked: row.shy, keepOpen: true, tag: "layer.menu.shy") { model.setLayerShy(row.id, !row.shy) })
+        out.append(.item(AureaText.t("ae_comp_hide_shy"), glyph: CupertinoGlyph.EyeSlash, sublabel: AureaText.t("ae_comp_hide_shy_hint"),
+                         checked: model.hideShy, keepOpen: true, tag: "layer.menu.hideShy") { model.changeHideShy(!model.hideShy) })
+        // 0.5.2: "Prender a um osso" — com algum modelo 3D com rig na composição (par do Menus.kt).
+        if row.kind != 3 && row.kind != 10 && model.layers.contains(where: { $0.kind == 10 && $0.id != row.id }) {
+            let bone = model.layerParentBone(row.id)
+            let parentModel: LayerItem? = row.parentIndex >= 0 && Int(row.parentIndex) < model.layers.count
+                && model.layers[Int(row.parentIndex)].kind == 10 ? model.layers[Int(row.parentIndex)] : nil
+            let sub = bone >= 0 && parentModel != nil
+                ? AureaText.t("bone_attach_current", boneLabel(model.boneName(parentModel!.id, bone), bone))
+                : AureaText.t("bone_attach_menu_hint")
+            out.append(.item(AureaText.t("bone_attach_title"), glyph: CupertinoGlyph.Link, sublabel: sub,
+                             enabled: !row.locked, tag: "layer.menu.boneAttach") { boneTarget = LayerRef(id: row.id) })
+        }
         // 0.4.7: imagem ou vídeo vira objeto da cena (par do Menus.kt).
         if row.kind == 1 || row.kind == 2 {
             out.append(.item(AureaText.t("layer_to_3d_object"), glyph: CupertinoGlyph.Cube, sublabel: AureaText.t("layer_to_3d_object_hint"),
@@ -482,6 +505,12 @@ struct TopBarView: View {
             }
             out.append(.item(AureaText.t("editor_guia_nao_exporta"), glyph: CupertinoGlyph.Grid, sublabel: AureaText.t("editor_aparece_aqui_editor_fica_fora_video"),
                              checked: row.guide, keepOpen: true) { model.mutate { $0.setLayer(row.id, guide: !row.guide) }; refresh() })
+            // AE compositing: Preservar transparência (o T do AE; par do Menus.kt).
+            out.append(.item(AureaText.t("ae_layer_preserve_transparency"), glyph: CupertinoGlyph.SquareStack3dUp,
+                             sublabel: AureaText.t("ae_layer_preserve_transparency_hint"), checked: row.preserveTransparency,
+                             enabled: !row.locked, keepOpen: true, tag: "layer.menu.preserveTransparency") {
+                model.setLayerPreserveTransparency(row.id, !row.preserveTransparency)
+            })
         }
         out.append(.item(AureaText.t("editor_duplicar"), glyph: CupertinoGlyph.PlusSquareOnSquare) { model.engine.duplicateLayers(ids); refresh() })
         out.append(.item(AureaText.t("editor_puxar_cabecote"), glyph: CupertinoGlyph.ArrowDownToLine, enabled: !row.locked) {
@@ -2000,5 +2029,92 @@ private struct ShellLinkPopup: View {
         let fps = Float(model.compositionFps), bucket = Thumbs.bucketOf(Double(row.offsetFrames), Float(model.compositionFps))
         let frame = row.kind == 2 ? row.startFrame : Int32(clamping: Int64(Thumbs.requestLocalFrame(bucket, fps)) + Int64(row.startFrame) - Int64(row.offsetFrames))
         image = cache.get(model, layer: row.id, bucket: bucket, timelineFrame: frame, heightPx: Int((size * UIScreen.main.scale).clamped(to: 16...256)), generation: model.status.thumbnailGeneration)
+    }
+}
+
+
+// =============================================================================
+//  "Prender a um osso" (0.5.2) — par do BoneAttachSheet.kt do Android.
+//
+//  A camada segue a posição e o giro de uma junta de um modelo 3D com rig
+//  (Engine::set_layer_parent_bone): partículas na mão, um objeto na cabeça.
+//  Os ossos de cada modelo com rig da composição; escolher um prende (o
+//  modelo vira o pai); "Soltar do osso" volta a seguir o modelo inteiro.
+// =============================================================================
+
+/// Nome legível do osso: sem o prefixo do Mixamo ("mixamorig:LeftHand" → "LeftHand").
+func boneLabel(_ raw: String, _ node: Int32) -> String {
+    let name = raw.split(separator: ":").last.map(String.init) ?? raw
+    return name.isEmpty ? (raw.isEmpty ? "#\(node)" : raw) : name
+}
+
+struct BoneAttachSheet: View {
+    @EnvironmentObject var model: AureaModel
+    let layerId: Int64
+    var dismiss: () -> Void
+
+    private var parentId: Int64 {
+        guard let row = model.layers.first(where: { $0.id == layerId }), row.parentIndex >= 0,
+              Int(row.parentIndex) < model.layers.count else { return 0 }
+        return model.layers[Int(row.parentIndex)].id
+    }
+
+    var body: some View {
+        let rigs = model.layers.filter { $0.id != layerId && $0.kind == 10 }
+            .map { ($0, model.modelAttachBones($0.id)) }.filter { !$0.1.isEmpty }
+        let models = rigs.filter { $0.0.id == parentId } + rigs.filter { $0.0.id != parentId }
+        let currentBone = model.layerParentBone(layerId)
+        VStack(alignment: .leading, spacing: 0) {
+            Text(AureaText.t("bone_attach_title")).font(.system(size: 16, weight: .bold)).foregroundColor(AureaColors.text)
+                .accessibilityAddTraits(.isHeader)
+            Text(AureaText.t("bone_attach_hint")).font(.system(size: 13)).foregroundColor(AureaColors.muted)
+                .padding(.top, 4).padding(.bottom, 12)
+            if models.isEmpty {
+                Text(AureaText.t("bone_attach_no_rig")).font(.system(size: 14)).foregroundColor(AureaColors.muted)
+                    .padding(.vertical, 12).accessibilityIdentifier("boneAttach.empty")
+            } else {
+                if currentBone >= 0 && parentId != 0 {
+                    boneRow(AureaText.t("bone_attach_release"), selected: false, tag: "boneAttach.release") {
+                        model.setLayerParentBone(layerId, model: parentId, node: -1)
+                        dismiss()
+                    }
+                }
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(models, id: \.0.id) { entry in
+                            Text(entry.0.name.isEmpty ? AureaText.t("app_layer_type_model") : entry.0.name)
+                                .font(.system(size: 13, weight: .bold)).foregroundColor(AureaColors.muted)
+                                .padding(.top, 12).padding(.bottom, 4).accessibilityAddTraits(.isHeader)
+                            ForEach(entry.1, id: \.self) { node in
+                                let label = boneLabel(model.boneName(entry.0.id, node), node)
+                                boneRow(label, selected: entry.0.id == parentId && node == currentBone, tag: "boneAttach.bone.\(node)") {
+                                    model.setLayerParentBone(layerId, model: entry.0.id, node: node, label: label)
+                                    dismiss()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .background(AureaColors.editorPanel.ignoresSafeArea())
+        .accessibilityIdentifier("boneAttach.sheet")
+    }
+
+    private func boneRow(_ label: String, selected: Bool, tag: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label).font(.system(size: 15, weight: selected ? .bold : .medium))
+                .foregroundColor(selected ? AureaColors.accent : AureaColors.text)
+                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                .padding(.horizontal, 12)
+                .background(RoundedRectangle(cornerRadius: 10).fill(selected ? AureaColors.accentDim : Color.clear))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityIdentifier(tag)
     }
 }

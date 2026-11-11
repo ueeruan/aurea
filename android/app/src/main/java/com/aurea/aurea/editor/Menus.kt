@@ -77,6 +77,8 @@ internal fun LayerMenu(store: EditorStore, ui: EditorUi, id: Long, expanded: Boo
     }
     var showInfo by remember(id) { mutableStateOf(false) }
     if (showInfo) MediaInfoDialog(store, id) { showInfo = false }
+    var showBones by remember(id) { mutableStateOf(false) }
+    if (showBones) BoneAttachSheet(store, id) { showBones = false }
     if (!expanded) return
     val index = store.layers.indexOfFirst { it.id == id }
     val row = store.layers.getOrNull(index)
@@ -88,6 +90,7 @@ internal fun LayerMenu(store: EditorStore, ui: EditorUi, id: Long, expanded: Boo
         store, ui, row, index,
         onReplace = { replacePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) },
         onInfo = { showInfo = true },
+        onBones = { showBones = true },
     ) + com.aurea.aurea.effects.pluginLayerMenuEntries(store)   // 0.3.4 plugins: ações "layer.menu"
     AnchoredMenu(expanded = true, onDismiss = onDismiss, entries = entries, alignEnd = true, tag = "layer.menu.popup")
 }
@@ -101,6 +104,7 @@ private fun layerMenuEntries(
     index: Int,
     onReplace: () -> Unit,
     onInfo: () -> Unit,
+    onBones: () -> Unit,
 ): List<MenuEntry> {
     val id = row.id
     val type = LayerType.of(row.kind)
@@ -154,6 +158,23 @@ private fun layerMenuEntries(
         checked = row.solo,
         keepOpen = true,
     ) { store.setLayerSolo(id, !row.solo) }
+    // AE compositing: Tímida (Shy) da camada e "Ocultar camadas tímidas" da composição.
+    out += MenuEntry.Item(
+        stringResource(R.string.ae_layer_shy),
+        glyph = CupertinoGlyph.PersonCropCircle,
+        sublabel = stringResource(R.string.ae_layer_shy_hint),
+        checked = row.shy,
+        keepOpen = true,
+        tag = "layer.menu.shy",
+    ) { store.setLayerShy(id, !row.shy) }
+    out += MenuEntry.Item(
+        stringResource(R.string.ae_comp_hide_shy),
+        glyph = CupertinoGlyph.EyeSlash,
+        sublabel = stringResource(R.string.ae_comp_hide_shy_hint),
+        checked = store.hideShy,
+        keepOpen = true,
+        tag = "layer.menu.hideShy",
+    ) { store.changeHideShy(!store.hideShy) }
     // Omega chrome (área 02, P0-3): "Camada 3D" saiu da barra da camada e mora aqui.
     if (visual) {
         val intrinsic = row.kind in 8..10
@@ -166,6 +187,22 @@ private fun layerMenuEntries(
             keepOpen = true,
             tag = "layer.menu.threeD",
         ) { store.changeLayer3D(!threeD) }
+        // 0.5.2: "Prender a um osso" — com algum modelo 3D com rig na composição.
+        // Áudio não tem lugar na cena (par do ToolbarView.swift: kind 3 e 10 ficam de fora).
+        if (row.kind != LayerType.Model3D.kind && row.kind != LayerType.Audio.kind &&
+            store.layers.any { it.kind == LayerType.Model3D.kind && it.id != id }) {
+            val bone = store.layerParentBone(id)
+            val parentModel = store.layers.getOrNull(row.parentIndex)?.takeIf { it.kind == LayerType.Model3D.kind }
+            out += MenuEntry.Item(
+                stringResource(R.string.bone_attach_title),
+                glyph = CupertinoGlyph.Link,
+                sublabel = if (bone >= 0 && parentModel != null)
+                    stringResource(R.string.bone_attach_current, boneLabel(store.boneName(parentModel.id, bone), bone))
+                else stringResource(R.string.bone_attach_menu_hint),
+                enabled = !row.locked,
+                tag = "layer.menu.boneAttach",
+            ) { onBones() }
+        }
         if (row.kind == LayerType.Image.kind || row.kind == LayerType.Video.kind) {
             out += MenuEntry.Item(
                 stringResource(R.string.layer_to_3d_object),
@@ -228,6 +265,16 @@ private fun layerMenuEntries(
             checked = row.guide,
             keepOpen = true,
         ) { store.setLayerGuide(id, !row.guide) }
+        // AE compositing: Preservar transparência (o T do AE).
+        out += MenuEntry.Item(
+            stringResource(R.string.ae_layer_preserve_transparency),
+            glyph = CupertinoGlyph.SquareStack3dUp,
+            sublabel = stringResource(R.string.ae_layer_preserve_transparency_hint),
+            checked = row.preserveTransparency,
+            enabled = !row.locked,
+            keepOpen = true,
+            tag = "layer.menu.preserveTransparency",
+        ) { store.setLayerPreserveTransparency(id, !row.preserveTransparency) }
     }
     out += MenuEntry.Item(stringResource(R.string.editor_duplicar), glyph = CupertinoGlyph.PlusSquareOnSquare) { store.duplicateLayers(listOf(id)) }
     out += MenuEntry.Item(stringResource(R.string.editor_puxar_cabecote), glyph = CupertinoGlyph.ArrowDownToLine, enabled = !row.locked) {

@@ -6599,6 +6599,11 @@ struct BlendRef {
             case BlendMode::LinearLight: return std::clamp(b + 2 * s - 1, 0.0f, 1.0f);
             case BlendMode::PinLight: return s <= 0.5f ? std::min(b, 2 * s) : std::max(b, 2 * s - 1);
             case BlendMode::SoftOverlay: return (1 - 2 * s) * b * b + 2 * s * b;
+            // AE compositing (2026-11-10): as fórmulas do cabeçalho do blend.frag.
+            case BlendMode::HardMix: return b + s >= 1.0f ? 1.0f : 0.0f;
+            case BlendMode::ClassicColorBurn: return s <= 0 ? 0.0f : std::clamp(1 - (1 - b) / s, 0.0f, 1.0f);
+            case BlendMode::ClassicColorDodge: return s >= 1 ? 1.0f : std::clamp(b / (1 - s), 0.0f, 1.0f);
+            case BlendMode::ClassicDifference: return std::fabs(b - s);
             default: return s;
         }
     }
@@ -6626,7 +6631,10 @@ const char* blend_name(BlendMode m) {
                                     "Divide", "VividLight", "LinearDodge", "LinearBurn",
                                     // Omega aparência: Mask/Exclude (recorte, testados à parte) e os cinco novos.
                                     "Mask", "Exclude", "DarkerColor", "LighterColor", "LinearLight", "PinLight",
-                                    "SoftOverlay"};
+                                    "SoftOverlay",
+                                    // AE compositing: os seis que não são fórmula de cor têm teste próprio (AeCompositingGpu.inl).
+                                    "StencilLuma", "SilhouetteLuma", "Dissolve", "DancingDissolve", "HardMix",
+                                    "ClassicColorBurn", "ClassicColorDodge", "ClassicDifference", "AlphaAdd", "LuminescentPremul"};
     static_assert(std::size(k) == static_cast<usize>(kLastBlendMode) + 1, "um nome por BlendMode");
     return k[static_cast<u16>(m)];
 }
@@ -6652,6 +6660,10 @@ AUREA_TEST(Gpu, EveryBlendModeMatchesTheFormulaPixelForPixel) {
         for (u16 mi = 0; mi <= static_cast<u16>(kLastBlendMode); ++mi) {
             const BlendMode m = static_cast<BlendMode>(mi);
             if (m == BlendMode::Mask || m == BlendMode::Exclude) continue;
+            // AE compositing: recorte por luma, dissolver e os utilitários não são uma
+            // fórmula B(Cb, Cs) — conferidos à parte em AeCompositingGpu.inl.
+            if (blend_is_stencil(m) || m == BlendMode::Dissolve || m == BlendMode::DancingDissolve || m == BlendMode::AlphaAdd
+                || m == BlendMode::LuminescentPremul) continue;
             Scene s(64, 64);
             s.solid(64, 64, Vec4{pc[0], pc[1], pc[2], 1}, 32, 32);
             // Camada de cima só no quadrado central (32×32): o canto mostra que
@@ -9396,6 +9408,10 @@ AUREA_TEST(Gpu, EveryCatalogEffectChangesTheProjectFrame) {
         // Repeat/Move Along Path: o caminho é a camada logo abaixo.
         const bool repeatPath = std::strcmp(key, "aurea.repeat.path") == 0 || std::strcmp(key, "aurea.move.path") == 0;
         const bool solidMatte = std::strcmp(key, "aurea.key.solid_matte") == 0;
+        // AE 2026: Remover fosco de cor só mexe em borda SEMITRANSPARENTE; Mesclar
+        // precisa de outra camada (escondida, só serve de entrada).
+        const bool halfAlpha = std::strcmp(key, "aurea.color.remove_color_matting") == 0;
+        const bool blendLayer = std::strcmp(key, "aurea.color.blend_layers") == 0;
         const bool timedMotion = std::strcmp(key, "aurea.motion.blink") == 0 || std::strcmp(key, "aurea.motion.swing_range") == 0;
         const FrameIndex sampleFrame{timedMotion ? 11 : 0};
         // Sombra projetada e Borda desenham FORA da caixa da camada: com a
@@ -9404,7 +9420,8 @@ AUREA_TEST(Gpu, EveryCatalogEffectChangesTheProjectFrame) {
         const bool outside = shadow ||
                              fx.type_id() == effect_type_id(effect_keys::kDropShadow) ||
                              fx.type_id() == effect_type_id(effect_keys::kBorder) ||
-                             std::strcmp(key, "aurea.stylize.long_shadow") == 0;   // 0.4.6: sombra longa também
+                             std::strcmp(key, "aurea.stylize.long_shadow") == 0 ||   // 0.4.6: sombra longa também
+                             std::strcmp(key, "aurea.stylize.radial_shadow") == 0;   // AE 2026: sombra radial
         const ParameterRegistry& params = gpu().effects.params_at(i);
         Scene s(96, 96);
         // Black shadows need exposed, lit background; a full opaque image
@@ -9413,6 +9430,10 @@ AUREA_TEST(Gpu, EveryCatalogEffectChangesTheProjectFrame) {
         const u32 size = repeat ? 12u : outside || parenting ? 40u : 96u;
         if (repeatPath) s.solid(60, 60, {0, 0, 0, 1}, 48, 48);
         auto pixels = reference_image(size, size);
+        if (halfAlpha) {
+            for (u32 y = 0; y < size / 2; ++y) for (u32 x = 0; x < size; ++x)
+                pixels.rgba[(static_cast<usize>(y) * size + x) * 4 + 3] = 128;
+        }
         if (solidMatte) {
             for (u32 y = 0; y < size / 2; ++y) for (u32 x = 0; x < size / 2; ++x)
                 pixels.rgba[(static_cast<usize>(y) * size + x) * 4 + 3] = 0;
@@ -9457,6 +9478,13 @@ AUREA_TEST(Gpu, EveryCatalogEffectChangesTheProjectFrame) {
         }
         if (solidMatte) e.params[0].constant = ParamValue::color(0, 0, 1, 1);
         if (std::strcmp(key, "aurea.transform.offset") == 0) e.params[0].constant = ParamValue::vec2(17, 11);
+        if (blendLayer) {
+            const LayerId other = s.image(quadrants(size, size), 48, 48);
+            s.comp->layer(other)->visible = false;
+            s.comp->reorder_layer(id, s.comp->order().size() - 1);
+            e.params[0].constant.ref = other.pack();
+            e.params[0].constant.v[0] = static_cast<f32>(other.index);
+        }
         s.comp->layer(id)->effects.push_back(std::move(e));
         // A prévia da IA local é assíncrona (não trava o render); a qualidade
         // final espera o mapa, como a exportação.
@@ -13772,7 +13800,7 @@ AUREA_TEST(Regression2135Gpu, CubeLutTrilinearMixAndPreviewMatchExport) {
 
 AUREA_TEST(Regression2135Gpu, SceneFlareFollowsParentCameraAndCullsBehindLens) {
     AUREA_REQUIRE_GPU();
-    Scene3DRig rig(320,180); const auto result=rig.e.add_light(3);
+    Scene3DRig rig(320,180); const auto result=rig.e.add_light(Engine::kAddLightFlare);
     AUREA_CHECK(result.ok()); if(!result.ok())return;
     auto* comp=current_comp(rig.e); const auto id=LayerId::unpack(*result);
     auto layer=[&](){return current_comp(rig.e)->layer(id);};
@@ -14487,6 +14515,7 @@ AUREA_TEST(MotionBlurGpu, FloorReflectionKeepsPerInstanceCamera) {
 #include "DrawingProgressGpu.inl"
 #include "SplitParentNullGpu.inl"
 #include "GlesFallbackGpu.inl"
+#include "AeCompositingGpu.inl"
 
 // -----------------------------------------------------------------------------
 // Build 2140: modelos com textura entravam CINZA em aparelho real. O espaço do
@@ -14635,6 +14664,7 @@ AUREA_TEST(Gpu, Scene3DTexturedModelsKeepTexturesOnPhoneBudget) {
 #include "ClipMaskGpu.inl"
 #include "Scene3DImageBlurGpu.inl"
 #include "AmbientOcclusionGpu.inl"
+#include "Scene3D052Gpu.inl"   // 0.5.2: luz ambiente nos modelos PBR e chão molhado
 #include "Image3DGpu.inl"
 
 // Correção de cor (0.3.0).
@@ -14728,3 +14758,15 @@ AUREA_TEST(Gpu, BorderOnOpaqueImageUsesTheChosenColor) {
     const Vec4 blue = s.render().v(147, 128);
     AUREA_CHECK(blue.z > 0.9f && blue.x < 0.05f && blue.y < 0.05f);
 }
+
+// Lote "AE 2026": contas dos efeitos novos e consertos dos parciais.
+#include "AeEffects2026Gpu.inl"
+
+// Pacote "Mar" (0.5.2): oceano, embaixo d'água, cáusticas, onda na praia, ondulação e reflexo.
+#include "SeaEffectsGpu.inl"
+
+// 0.5.2: Headbop — golden, export = preview, quadro inteiro e custo do passe.
+#include "HeadbopGpu.inl"
+
+// 0.5.2: preenchimento com textura do texto e o efeito Textura.
+#include "TextTextureGpu.inl"

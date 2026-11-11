@@ -149,7 +149,8 @@ private:
 
 /// Chave de conteúdo do que a camada `src` oferece como fonte de emissão
 /// (0 = nada a emitir). Exposta para os testes de cache.
-[[nodiscard]] u64 source_key(const Layer& src, u32 emitterType, u32 emitFrom, FrameIndex localTime) noexcept;
+[[nodiscard]] u64 source_key(const Layer& src, u32 emitterType, u32 emitFrom, FrameIndex localTime,
+                               f64 fps = 30.0) noexcept;
 
 } // namespace particles
 } // namespace aurea

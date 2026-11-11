@@ -33,7 +33,11 @@ class Glow final : public Effect {
 public:
     // Índices salvos nos projetos: só se acrescenta no fim.
     enum : u32 { kThreshold = 0, kRadius, kIntensity, kColor, kAlgorithm, kSoftness, kFalloff,
-                 kTintAmount, kChromatic, kAddMode, kGlowOnly };
+                 kTintAmount, kChromatic, kAddMode, kGlowOnly,
+                 // AE 2026 (no fim; só o brilho em oitavas lê):
+                 kBasedOn, kComposite, kGlowColors, kColorA, kColorB, kLooping, kLoops, kPhase, kMidpoint,
+                 // AE 2026, depois (no fim): Glow Dimensions.
+                 kDimensions };
 
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kGlow, "Brilho", "Luz", EffectClass::Neighborhood};
@@ -57,6 +61,27 @@ public:
         p.add_float("chromatic", "Aberração cromática", 0.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_bool("add_mode", "Modo somar", false);
         p.add_bool("glow_only", "Só o brilho", false);
+        // AE 2026: Glow Based On, Composite Original e Glow Colors A & B (padrões = antes).
+        static const char* const kBasedOn[] = {"Valores de cor", "Canal alfa"};
+        p.add_enum("glow_based_on", "Brilho baseado em", kBasedOn, 2, 0);
+        static const char* const kComposites[] = {"Na frente", "Atrás", "Nenhum"};
+        p.add_enum("composite_original", "Compor o original", kComposites, 3, 0);
+        static const char* const kColorModes[] = {"Cor única", "Cores A e B"};
+        p.add_enum("glow_colors", "Cores do brilho", kColorModes, 2, 0);
+        p.add_color("color_a", "Cor A", Vec4{1.0f, 1.0f, 1.0f, 1.0f});
+        p.add_color("color_b", "Cor B", Vec4{0.0f, 0.0f, 0.0f, 1.0f});
+        static const char* const kLoopings[] = {"Dente de serra A>B", "Dente de serra B>A", "Triângulo A>B>A",
+                                                "Triângulo B>A>B"};
+        p.add_enum("color_looping", "Repetição das cores", kLoopings, 4, 2);
+        p.add_float("color_loops", "Repetições das cores", 1.0f, 1.0f, 10.0f, kParamAnimatable);
+        p.add_angle("color_phase", "Fase das cores", 0.0f);
+        p.add_float("ab_midpoint", "Ponto médio A e B", 50.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        for (u32 k : {static_cast<u32>(kColorA), static_cast<u32>(kColorB), static_cast<u32>(kLooping),
+                      static_cast<u32>(kLoops), static_cast<u32>(kPhase), static_cast<u32>(kMidpoint)})
+            p.set_enabled_by(k, kGlowColors, 2u);
+        // AE 2026 (no fim): Glow Dimensions. Padrão = os dois eixos (o de sempre).
+        static const char* const kDims[] = {"Horizontal e vertical", "Horizontal", "Vertical"};
+        p.add_enum("glow_dimensions", "Dimensões do brilho", kDims, 3, 0);
     }
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
         v[kThreshold] = ParamValue::scalar(70.0f);    // só o clarão entra
@@ -93,11 +118,24 @@ public:
             g.chromatic = e.f(kChromatic) / 100.0f;
             g.addMode = e.b(kAddMode);
             g.glowOnly = e.b(kGlowOnly);
+            if (e.count > kMidpoint) {
+                g.basedOnAlpha = e.e(kBasedOn) == 1u;
+                g.composite = std::min<u32>(e.e(kComposite), 2u);
+                g.abColors = e.e(kGlowColors) == 1u;
+                g.colorA = e.color(kColorA);
+                g.colorB = e.color(kColorB);
+                g.looping = std::min<u32>(e.e(kLooping), 3u);
+                g.loops = std::isfinite(e.f(kLoops)) ? std::clamp(e.f(kLoops), 1.0f, 100.0f) : 1.0f;
+                g.phase = std::isfinite(e.f(kPhase)) ? e.f(kPhase) / 360.0f : 0.0f;
+                g.midpoint = std::isfinite(e.f(kMidpoint)) ? std::clamp(e.f(kMidpoint) / 100.0f, 0.01f, 0.99f) : 0.5f;
+            }
+            if (e.count > kDimensions) g.dimensions = std::min<u32>(e.e(kDimensions), 2u);
             return build_octave_glow(ctx, g, e.placement, input, margin, out);
         }
         // Algoritmo 0 (projetos salvos até a build 2143): inalterado.
         const f32 radius = std::max(0.0f, e.f(kRadius));
-        const Rect region = spread_region(input.region, radius, radius, e.placement, margin);
+        const u32 dims = e.count > kDimensions ? std::min<u32>(e.e(kDimensions), 2u) : 0u;
+        const Rect region = spread_region(input.region, dims == 2 ? 0.0f : radius, dims == 1 ? 0.0f : radius, e.placement, margin);
         const f32 k = input.texel_scale_x();
 
         // 1. Brilho em meia resolução.
@@ -125,7 +163,8 @@ public:
         LayerImage blurred = brightImage;
         if (radius > 0.01f) {
             BlurRequest req;
-            req.sigmaX = req.sigmaY = radius / 3.0f;
+            req.sigmaX = dims == 2 ? 0.0f : radius / 3.0f;
+            req.sigmaY = dims == 1 ? 0.0f : radius / 3.0f;
             req.repeatEdges = false;
             req.outRegion = region;
             req.label = "glow";
@@ -200,7 +239,11 @@ void octave_glow_pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) {
 Status build_octave_glow(EffectBuildContext& ctx, const OctaveGlow& g, const LayerPlacement* placement,
                          const LayerImage& input, f32 margin, LayerImage& out) {
     const f32 reach = octave_glow_reach(g.radius);
-    const Rect region = spread_region(input.region, reach, reach, placement, margin);
+    // AE 2026 (Glow Dimensions): 1 só horizontal, 2 só vertical. O eixo
+    // parado não cresce, não reduz na pirâmide e não tem taps (texel 0).
+    const u32 dims = std::min<u32>(g.dimensions, 2u);
+    const bool spreadX = dims != 2, spreadY = dims != 1;
+    const Rect region = spread_region(input.region, spreadX ? reach : 0.0f, spreadY ? reach : 0.0f, placement, margin);
     const f32 k = std::max(input.texel_scale_x(), 1e-4f);
 
     // Densidade da primeira oitava: meia, nunca mais fina que a oitava 0.
@@ -235,7 +278,8 @@ Status build_octave_glow(EffectBuildContext& ctx, const OctaveGlow& g, const Lay
         EffectUniforms u;
         u.uvMap = EffectBuildContext::uv_map(region, input.region);
         u.texel = Vec4{1.0f / static_cast<f32>(std::max(1u, input.width)), 1.0f / static_cast<f32>(std::max(1u, input.height)), 0, 0};
-        u.p0 = Vec4{std::clamp(g.threshold, 0.0f, 1.0f), std::clamp(g.softness, 0.0f, 1.0f) * 0.5f, 0, 0};
+        u.p0 = Vec4{std::clamp(g.threshold, 0.0f, 1.0f), std::clamp(g.softness, 0.0f, 1.0f) * 0.5f,
+                    g.basedOnAlpha ? 1.0f : 0.0f, 0};
         if (ctx.fullscreen_pass("brilho-oitava-limiar", PassStage::Effects, pyr[0].tex,
                                 ShaderId::effects_glow_octave_prefilter_frag,
                                 {PassTexture{input.texture, {}, CommonSampler::LinearBorder}},
@@ -246,11 +290,14 @@ Status build_octave_glow(EffectBuildContext& ctx, const OctaveGlow& g, const Lay
     // 2. Descida.
     for (u32 j = 1; j < levels; ++j) {
         ctx.region_size(region, d0 / static_cast<f32>(1u << j), pyr[j].w, pyr[j].h);
+        if (!spreadX) pyr[j].w = pyr[0].w;
+        if (!spreadY) pyr[j].h = pyr[0].h;
         pyr[j].w = std::max(1u, pyr[j].w); pyr[j].h = std::max(1u, pyr[j].h);
         pyr[j].tex = ctx.texture("brilho-oitava", pyr[j].w, pyr[j].h);
         EffectUniforms u;
         u.uvMap = same;
-        u.texel = Vec4{1.0f / static_cast<f32>(pyr[j - 1].w), 1.0f / static_cast<f32>(pyr[j - 1].h), 0, 0};
+        u.texel = Vec4{spreadX ? 1.0f / static_cast<f32>(pyr[j - 1].w) : 0.0f,
+                       spreadY ? 1.0f / static_cast<f32>(pyr[j - 1].h) : 0.0f, 0, 0};
         if (ctx.fullscreen_pass("brilho-oitava-desce", PassStage::Effects, pyr[j].tex,
                                 ShaderId::effects_glow_octave_down_frag,
                                 {PassTexture{pyr[j - 1].tex, {}, CommonSampler::LinearBorder}},
@@ -265,7 +312,8 @@ Status build_octave_glow(EffectBuildContext& ctx, const OctaveGlow& g, const Lay
         const FGTexture next = ctx.texture("brilho-oitava-soma", pyr[j].w, pyr[j].h);
         EffectUniforms u;
         u.uvMap = same;
-        u.texel = Vec4{1.0f / static_cast<f32>(pyr[j + 1].w), 1.0f / static_cast<f32>(pyr[j + 1].h), 0, 0};
+        u.texel = Vec4{spreadX ? 1.0f / static_cast<f32>(pyr[j + 1].w) : 0.0f,
+                       spreadY ? 1.0f / static_cast<f32>(pyr[j + 1].h) : 0.0f, 0, 0};
         u.p0 = Vec4{w, j == 0 ? own0 : 1.0f, 0, 0};
         if (ctx.fullscreen_pass("brilho-oitava-sobe", PassStage::Effects, next,
                                 ShaderId::effects_glow_octave_up_frag,
@@ -281,18 +329,28 @@ Status build_octave_glow(EffectBuildContext& ctx, const OctaveGlow& g, const Lay
     u32 ow = 0, oh = 0;
     ctx.region_size(region, input.texel_scale_x(), ow, oh);
     out = LayerImage{ctx.texture("brilho-oitavas", ow, oh), region, ow, oh};
-    EffectUniforms u;
+    // AE 2026: o bloco ganhou a cor B no fim (compor o original e cores A e B
+    // em p1.zw, p2, p3); com os padrões o shader faz a conta de sempre.
+    struct {
+        EffectUniforms base;
+        Vec4 colorB;
+    } cu{};
+    EffectUniforms& u = cu.base;
     u.uvMap = EffectBuildContext::uv_map(region, input.region);
     u.texel = same;
     u.p0 = Vec4{std::max(0.0f, g.exposure), std::clamp(g.tintAmount, 0.0f, 1.0f),
                 std::clamp(g.chromatic, 0.0f, 1.0f), g.addMode ? 1.0f : 0.0f};
-    u.p1 = Vec4{g.glowOnly ? 1.0f : 0.0f, levels == 1 ? own0 : 1.0f, 0, 0};
+    u.p1 = Vec4{g.glowOnly ? 1.0f : 0.0f, levels == 1 ? own0 : 1.0f, static_cast<f32>(std::min<u32>(g.composite, 2u)),
+                g.abColors ? 1.0f : 0.0f};
+    u.p2 = Vec4{g.loops, g.phase, g.midpoint, static_cast<f32>(std::min<u32>(g.looping, 3u))};
+    u.p3 = g.colorA;
+    cu.colorB = g.colorB;
     u.color = g.color;
     if (ctx.fullscreen_pass("brilho-oitavas", PassStage::Effects, out.texture,
                             ShaderId::effects_glow_octave_composite_frag,
                             {PassTexture{input.texture, {}, CommonSampler::LinearBorder},
                              PassTexture{acc, {}, CommonSampler::LinearClamp}},
-                            &u, sizeof(u)) == kInvalidIndex) {
+                            &cu, sizeof(cu)) == kInvalidIndex) {
         return Errc::PipelineCompileFailed;
     }
     return OkStatus;

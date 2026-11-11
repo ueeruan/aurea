@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE compositing (2026-11-10): modos de mesclagem e de máscara do After Effects, queda do feather, tímidas, preservar transparência e luz ambiente. -->
+<resources>
+    <string name="ae_blend_stencil_luma">स्टेंसिल लूमा</string>
+    <string name="ae_blend_silhouette_luma">सिल्हूट लूमा</string>
+    <string name="ae_blend_dissolve">डिज़ॉल्व</string>
+    <string name="ae_blend_dancing_dissolve">डांसिंग डिज़ॉल्व</string>
+    <string name="ae_blend_hard_mix">हार्ड मिक्स</string>
+    <string name="ae_blend_classic_color_burn">क्लासिक कलर बर्न</string>
+    <string name="ae_blend_classic_color_dodge">क्लासिक कलर डॉज</string>
+    <string name="ae_blend_classic_difference">क्लासिक डिफ़रेंस</string>
+    <string name="ae_blend_alpha_add">अल्फ़ा जोड़</string>
+    <string name="ae_blend_luminescent_premul">ल्यूमिनेसेंट प्रीमल्टिप्लाइड</string>
+    <string name="ae_blend_cat_utility">उपयोगिता</string>
+    <string name="ae_blend_cat_dissolve">डिज़ॉल्व मोड</string>
+    <string name="ae_mask_lighten">लाइटन</string>
+    <string name="ae_mask_darken">डार्कन</string>
+    <string name="ae_mask_falloff_smooth">सौम्य फ़ॉलऑफ़</string>
+    <string name="ae_mask_falloff_linear">रैखिक फ़ॉलऑफ़</string>
+    <string name="ae_layer_shy">शर्मीली</string>
+    <string name="ae_layer_shy_hint">शर्मीली लेयर छिपी होने पर टाइमलाइन से हट जाती है</string>
+    <string name="ae_comp_hide_shy">शर्मीली लेयर छिपाएँ</string>
+    <string name="ae_comp_hide_shy_hint">पूरे कंपोज़िशन पर लागू; वीडियो नहीं बदलता</string>
+    <string name="ae_layer_preserve_transparency">पारदर्शिता बनाए रखें</string>
+    <string name="ae_layer_preserve_transparency_hint">सिर्फ़ वहीं रंगती है जहाँ नीचे की लेयर में पहले से छवि है</string>
+    <string name="scene_light_ambient">परिवेश प्रकाश</string>
+</resources>

@@ -1374,6 +1374,8 @@ internal class TimelinePainter(
         // A régua é opaca: cobre os clipes que rolam para cima dela.
         drawRect(AureaColors.EditorCanvas, Offset.Zero, Size(w, m.rowsTop))
         omegaRuler(st, w, view, ppf, cx, fps)
+        // Timeline do AE: a área de trabalho na régua (o rascunho do arrasto vale antes).
+        drawWorkArea(c.workAreaDraft ?: store.workArea, w, view, ppf, cx)
         val buffer = 3f * m.density
         for (range in store.previewBufferRanges) {
             val left = TimeAxis.xOf(range.startFrame.toDouble(), view, ppf, cx).coerceAtLeast(0f)
@@ -1585,6 +1587,8 @@ internal class TimelinePainter(
                 }
                 // 6. Rótulo de 11 sp na borda do clipe (14 dp para dentro), reticências no meio.
                 omegaLabel(r, top, x0, x1)
+                // 7. Timeline do AE: as marcas da CAMADA (andam com o clipe).
+                drawLayerMarkers(store.layerMarkers, r.id, top, left, right, view, ppf, cx)
                 canvas.restore()
             }
             // Escolhida na visão geral: o contorno branco de 2 dp do AUREA.
@@ -2045,6 +2049,53 @@ internal class TimelinePainter(
         }
     }
 
+    // --- Timeline do AE ---------------------------------------------------------
+    /**
+     * Área de trabalho na régua: faixa de 4 dp sobre o buffer da prévia, as
+     * duas alças (3 × 14 dp) que o dedo arrasta e um véu leve fora dela.
+     */
+    private fun DrawScope.drawWorkArea(area: Pair<Int, Int>?, w: Float, view: Double, ppf: Float, cx: Float) {
+        area ?: return
+        val x0 = TimeAxis.xOf(area.first.toDouble(), view, ppf, cx)
+        val x1 = TimeAxis.xOf(area.second.toDouble(), view, ppf, cx)
+        val bottom = m.rowsTop - 3f * m.density
+        if (x0 > 0f) drawRect(WORK_AREA_VEIL, Offset.Zero, Size(min(x0, w), bottom))
+        if (x1 < w) drawRect(WORK_AREA_VEIL, Offset(max(x1, 0f), 0f), Size(w - max(x1, 0f), bottom))
+        if (x1 < 0f || x0 > w) return
+        val band = 4f * m.density
+        drawRect(WORK_AREA_FILL, Offset(max(x0, 0f), bottom - band), Size(min(x1, w) - max(x0, 0f), band))
+        val handleW = 3f * m.density
+        val handleH = 14f * m.density
+        drawRoundRect(WORK_AREA_HANDLE, Offset(x0, bottom - handleH), Size(handleW, handleH), CornerRadius(handleW / 2f))
+        drawRoundRect(WORK_AREA_HANDLE, Offset(x1 - handleW, bottom - handleH), Size(handleW, handleH), CornerRadius(handleW / 2f))
+    }
+
+    /** Marcas da camada dentro do clipe: fio, triângulo no topo e a duração como faixa na base. */
+    private fun DrawScope.drawLayerMarkers(
+        mk: com.aurea.aurea.state.EditorStore.LayerMarkers, layer: Long, top: Float, left: Float, right: Float,
+        view: Double, ppf: Float, cx: Float,
+    ) {
+        if (mk.size == 0) return
+        val s = 3.5f * m.density
+        for (i in 0 until mk.size) {
+            if (mk.layers[i] != layer) continue
+            val x = TimeAxis.xOf(mk.frames[i].toDouble(), view, ppf, cx)
+            if (x < left - s || x > right + s) continue
+            val color = Color(MarkerColors.display(mk.colors[i]))
+            if (mk.durations[i] > 0) {
+                val xe = min(TimeAxis.xOf((mk.frames[i] + mk.durations[i]).toDouble(), view, ppf, cx), right)
+                if (xe > x) drawRect(color.copy(alpha = 0.55f), Offset(x, top + m.bar - 3f * m.density), Size(xe - x, 3f * m.density))
+            }
+            drawLine(color, Offset(x, top), Offset(x, top + m.bar), strokeWidth = 1.5f * m.density)
+            markerPath.reset()
+            markerPath.moveTo(x - s, top)
+            markerPath.lineTo(x + s, top)
+            markerPath.lineTo(x, top + s * 1.4f)
+            markerPath.close()
+            drawPath(markerPath, color)
+        }
+    }
+
     private fun DrawScope.omegaHighlightTick(frame: Int, color: Color, view: Double, ppf: Float, cx: Float, fps: Float) {
         if (frame == Snap.NONE) return
         val x = TimeAxis.xOf(frame.toDouble(), view, ppf, cx)
@@ -2132,6 +2183,10 @@ internal class TimelinePainter(
     private companion object {
         /** Faixa da prévia já calculada (a mesma cor do desenho de antes). */
         val PREVIEW_BUFFER = Color(0xFF4DA3FF)
+        /** Timeline do AE: área de trabalho (faixa, alças e o véu fora dela). */
+        val WORK_AREA_FILL = Color(0xB3FFC94D)
+        val WORK_AREA_HANDLE = Color(0xFFFFC94D)
+        val WORK_AREA_VEIL = Color(0x40000000)
         /** Fio do marcador: alfa 150/255 da referência. */
         const val MARKER_LINE_ALPHA = 150f / 255f
         /** Teto de faixas da zebra por clipe e quadro (uma tela larga cabe com folga). */

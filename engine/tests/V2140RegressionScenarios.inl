@@ -347,7 +347,7 @@ std::vector<u64> media_3d(Rig& r) {
 /// Flare 3D (a luz com o Flare da cena, como o "+ > Flare 3D" das telas)
 /// andando pela cena.
 u64 flare(Rig& r) {
-    const auto f = r.e.add_light(3);
+    const auto f = r.e.add_light(Engine::kAddLightFlare);   // era 3 antes da luz ambiente (B9)
     AUREA_CHECK(f.ok());
     if (!f.ok()) return 0;
     const Layer* l = r.layer(*f);

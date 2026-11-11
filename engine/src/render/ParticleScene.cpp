@@ -146,7 +146,9 @@ void Renderer::prepare_particle_space(const Composition& comp, const Layer& l, F
         const f64 T = localFrame + toTimeline;
         // The emitter may leave a trail, but a parent transforms the whole
         // system, including particles born before the null moved.
-        const f64 parentTime = world ? static_cast<f64>(local.value) + toTimeline : T;
+        // 0.5.2: preso a um osso, o emissor É a junta (a mão que gira): o rastro
+        // fica onde cada partícula nasceu, então a cadeia inteira anda no tempo.
+        const f64 parentTime = world && l.parentBone < 0 ? static_cast<f64>(local.value) + toTimeline : T;
         if (in3d) return particle_world_3d_at(comp, l, T, parentTime);
         if (ps.compSpace) return particle_world_2d_at(comp, l, T, parentTime);
         return Mat4::identity();

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: "Prender a um osso" (camada segue uma junta de um modelo 3D) e chão molhado da Cena 3D. -->
+<resources>
+    <string name="bone_attach_title">Прикрепить к кости</string>
+    <string name="bone_attach_hint">Слой повторяет положение и поворот выбранной кости — в превью и при экспорте.</string>
+    <string name="bone_attach_menu_hint">Следовать за рукой, головой или другой костью 3D-модели</string>
+    <string name="bone_attach_current">Прикреплён к: %1$s</string>
+    <string name="bone_attach_no_rig">В этой композиции нет 3D-модели с ригом.</string>
+    <string name="bone_attach_release">Открепить от кости</string>
+    <string name="bone_attach_done">Слой прикреплён к %1$s</string>
+    <string name="bone_attach_released">Слой откреплён от кости</string>
+    <string name="bone_attach_failed">Не удалось прикрепить слой к этой кости</string>
+    <string name="scene052_floor_wet">Мокрый пол</string>
+    <string name="scene052_puddle_size">Размер луж</string>
+</resources>

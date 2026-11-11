@@ -23,7 +23,7 @@ layout(set = 0, binding = AUREA_TEX0) uniform sampler2D u_tex0;
 layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 uvMap;    // uv da entrada = v_uv * xy + zw
     vec4 texel;    // xy = texel da ENTRADA em uv
-    vec4 p0;       // x = limiar (0..1, sRGB), y = meia largura do joelho
+    vec4 p0;       // x = limiar (0..1, sRGB), y = meia largura do joelho, z = 1 brilho pelo alfa (AE 2026)
     vec4 p1;
     vec4 p2;
     vec4 p3;
@@ -39,6 +39,12 @@ void main() {
     vec3 straight = clamp(c.rgb / max(a, 1e-4), 0.0, 1.0);
     vec3 encoded = linear_to_srgb(straight);
     float level = max(encoded.r, max(encoded.g, encoded.b));
+    // Brilho baseado no canal alfa: o limiar julga o alfa e a luz é branca
+    // (a cor vem depois, pela cor do brilho ou pelas cores A e B).
+    if (p.p0.z > 0.5) {
+        level = a;
+        straight = vec3(1.0);
+    }
     float lo = p.p0.x - p.p0.y;
     float hi = p.p0.x + p.p0.y + 1e-4;
     float mask = clamp((level - lo) / (hi - lo), 0.0, 1.0);

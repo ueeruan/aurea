@@ -719,6 +719,22 @@ public:
     /// Marca o keyframe do parâmetro aqui — com keyframe no cabeçote, REGRAVA o
     /// valor avaliado em vez de apagá-lo (ver `ensure_shape_param_key`).
     bool ensure_vector_param_key(u64 layerId, u32 group, u32 param) noexcept;
+    /// Operadores de caminho do grupo (VectorGroup::modifiers, After Effects
+    /// ADBE Vector Filter *). Os valores deles são VectorParam com o id
+    /// `vector_modifier_param(operador, parâmetro)`: `set_vector_param`,
+    /// `toggle_vector_param_key` e `ensure_vector_param_key` valem para eles.
+    /// Consulta: kVectorModifierFloats por operador — tipo, ligado, bits
+    /// animados, bits com keyframe no cabeçote, os kVecModParams valores no
+    /// cabeçote. Devolve quantos operadores.
+    static constexpr u32 kVectorModifierFloats = 4 + kVecModParams;
+    u32 query_vector_modifiers(u64 layerId, u32 group, f32* out, u32 capacity) noexcept;
+    /// Operador novo (VectorModifierType, valores padrão) no FIM da lista. Índice ou −1.
+    i32 add_vector_modifier(u64 layerId, u32 group, u32 type) noexcept;
+    /// Remove o operador (as trilhas dele saem; as dos seguintes sobem).
+    bool remove_vector_modifier(u64 layerId, u32 group, u32 index) noexcept;
+    /// Leva o operador `from` para a posição `to` (as trilhas acompanham).
+    bool move_vector_modifier(u64 layerId, u32 group, u32 from, u32 to) noexcept;
+    bool set_vector_modifier_enabled(u64 layerId, u32 group, u32 index, bool enabled) noexcept;
 
     /// Forma (SDF): os mesmos parâmetros de `ShapeSetParam` (1 raio, 2 lados,
     /// 3 raio interno, 4 contorno, 5 largura, 6 altura, 7 profundidade,
@@ -959,6 +975,20 @@ public:
     bool humanoid_assign_bone(u64 layerId, u32 bone, i32 node) noexcept;
     /// Nome do nó do modelo (para a lista de ossos do rig importado).
     [[nodiscard]] std::string model_node_name(u64 layerId, i32 node) noexcept;
+    // --- Prender a um osso (0.5.2) -------------------------------------------
+    /// Os ossos do modelo onde uma camada pode ser presa (os mesmos posáveis
+    /// de `query_model_bones`), na ordem da hierarquia. Vazio = modelo sem rig.
+    [[nodiscard]] std::vector<i32> model_attach_bones(u64 modelLayerId) noexcept;
+    /// Prende a camada à junta `node` do modelo 3D `modelLayerId` (que vira o
+    /// pai, se ainda não for): ela passa a seguir a posição e o giro do osso
+    /// no instante, na prévia e no export. A camada vai para o osso — a
+    /// posição parada vira zero (no osso); posição com keyframes fica como
+    /// deslocamento a partir dele. `node` −1 solta do osso (continua filha do
+    /// modelo). Um passo de desfazer. Camada bloqueada, o próprio modelo,
+    /// ciclo ou osso que não é do rig: recusa.
+    [[nodiscard]] Status set_layer_parent_bone(u64 layerId, u64 modelLayerId, i32 node) noexcept;
+    /// O osso do pai da camada (−1 = nenhum).
+    [[nodiscard]] i32 layer_parent_bone(u64 layerId) noexcept;
     /// Grava keys de osso em lote (mocap): UMA ação de desfazer. Com
     /// clearFrom ≤ clearTo, apaga antes as keys dos mesmos nós no intervalo
     /// (quadros locais). Rotações nos params 0..2; translação (3..5) opcional.
@@ -1033,6 +1063,48 @@ public:
     /// no espaço do pai. Devolve quantos floats escreveu (0 = sem caminho).
     u32 query_position_path(u64 layerId, f32* out, u32 capacity) noexcept;
     bool query_text_dynamic(u64 layerId, f64* out6) noexcept;
+    /// 0.5.2: PREENCHIMENTO COM TEXTURA do texto (TextData::texture,
+    /// text/TextTexture.hpp; EngineMedia.cpp). v = {tipo (0 cor lisa, 1..18
+    /// procedural, 19 imagem), mapeamento (0 bloco, 1 letra), contorno também,
+    /// escala, rotação (graus), deslocamento x, y, contraste, brilho (−1..1),
+    /// tinta r, g, b, a, velocidade, relevo (0..1), ângulo da luz (graus),
+    /// semente} — kTextTextureValues. Um passo de desfazer.
+    bool set_text_texture(u64 layerId, const f32* v, u32 count) noexcept;
+    /// Os mesmos valores; com capacidade maior, mais 1 = há imagem guardada.
+    bool query_text_texture(u64 layerId, f32* out, u32 capacity) noexcept;
+    /// A imagem do aparelho vira a textura do texto (tipo 19, asset do projeto).
+    Status set_text_texture_image(u64 layerId, const char* path) noexcept;
+
+    // --- AE animation (EngineAeAnimation.cpp; gap_system itens 5, 6, 7) --------
+    /// TEXTO-FONTE (Source Text do AE): key congelado no quadro do cabeçote com
+    /// o texto que aparece agora (conteúdo, trechos e estilo). Já existindo um
+    /// key ali, ele é refeito. Um passo de desfazer. Devolve o quadro LOCAL do
+    /// key; −1 = recusado (camada não é texto, travada).
+    i64 add_text_source_key(u64 layerId) noexcept;
+    /// Troca o conteúdo do key do quadro LOCAL `frame` (os trechos que passam
+    /// do fim são cortados). Um passo de desfazer.
+    bool set_text_source_key(u64 layerId, i64 frame, const std::string& content) noexcept;
+    /// Apaga o key do quadro LOCAL `frame`. Tirar o último deixa parado o texto
+    /// que aparecia no cabeçote. Um passo de desfazer.
+    bool delete_text_source_key(u64 layerId, i64 frame) noexcept;
+    /// Quadros LOCAIS dos keys (até `capacity`). Devolve o total.
+    u32 query_text_source_keys(u64 layerId, i64* frames, u32 capacity) noexcept;
+    /// Conteúdo do key do quadro LOCAL `frame` (false = não existe).
+    bool text_source_key_content(u64 layerId, i64 frame, std::string& out) noexcept;
+    /// AUTO-ORIENTAR: 0 desligado, 1 ao longo do caminho, 2 para a câmera
+    /// (câmera e luz recusam o 2). Um passo de desfazer.
+    bool set_layer_auto_orient(u64 layerId, u32 mode) noexcept;
+    [[nodiscard]] i32 query_layer_auto_orient(u64 layerId) noexcept;
+    /// Câmera de DOIS NÓS. Ligar põe o Ponto de Interesse à frente da câmera
+    /// (posição + Z × distância de foco, no espaço do pai): a imagem não pula.
+    /// Um passo de desfazer.
+    bool set_camera_two_node(u64 layerId, bool on) noexcept;
+    /// Ponto de Interesse (px do espaço do pai). Com keys no POI, grava/troca o
+    /// key no cabeçote (como a posição). `undo` falso = arrasto contínuo (o
+    /// primeiro passo do gesto já abriu o desfazer).
+    bool set_camera_poi(u64 layerId, f32 x, f32 y, f32 z, bool undo = true) noexcept;
+    /// out4 = {dois nós (0/1), x, y, z} no cabeçote (com a animação).
+    bool query_camera_poi(u64 layerId, f32* out4) noexcept;
     /// Estilo de um trecho [start, end) em caracteres: cor (opcional), peso
     /// (0 = o do texto), escala. Substitui o que havia no trecho.
     bool set_text_span(u64 layerId, u32 start, u32 end, bool hasColor, Vec4 color, u32 weight, f32 scale) noexcept;
@@ -1185,6 +1257,26 @@ public:
     bool bg_remove_status(u64 layerId, u32 effectId, i64* out8) noexcept;
     /// Há segmentador nativo de pessoa nesta plataforma (Vision no iOS).
     [[nodiscard]] static bool bg_remove_native_available() noexcept;
+    // --- Headbop (EngineHeadbop.cpp, 0.5.2) ------------------------------------
+    /// Começa a análise do efeito Headbop `effectId` da camada (zera os pontos).
+    bool headbop_begin(u64 layerId, u32 effectId) noexcept;
+    /// Pontos de corpo detectados pela plataforma: headbop::kFrameFloats por
+    /// quadro ([tempo s da fonte, pessoa, 33 × (x, y, z, confiança)]).
+    bool headbop_push_frames(const f32* data, u32 frames, f32 aspect) noexcept;
+    /// Rig por quadro + batidas do áudio; grava num passo de desfazer. Bloqueia
+    /// (chamar fora da main); cancela por headbop_cancel; progresso em headbop_status.
+    bool headbop_analyze() noexcept;
+    void headbop_cancel() noexcept;
+    /// [estado (0 parado, 1 rodando, 2 pronto, 3 falhou, 4 cancelado),
+    ///  progresso ×1000, pessoas, BPM ×100 (análise), quadros recebidos,
+    ///  rig (0 sem análise, 1 sem pessoa, 2.. pessoas + 1), BPM em uso ×100,
+    ///  fonte da pose (0 batida, 1 keyframes)].
+    bool headbop_status(u64 layerId, u32 effectId, i64* out8) noexcept;
+    /// Tap tempo: toques em segundos da composição → BPM/fase; Fonte = Tap.
+    bool headbop_set_taps(u64 layerId, u32 effectId, const f64* times, u32 count) noexcept;
+    /// "Converter em keyframes": os canais da pose por quadro viram keys e a
+    /// Fonte da pose passa a Keyframes (um passo de desfazer). Quadros; −1 falhou.
+    i32 headbop_bake(u64 layerId, u32 effectId) noexcept;
     /// Grupo (pré-composição): a câmera de fora alcança as camadas 3D de dentro.
     bool set_group_camera_pass_through(u64 layerId, bool on) noexcept;
     /// −1 = não é grupo; 0/1.
@@ -1333,7 +1425,9 @@ public:
     [[nodiscard]] Status real_camera_hold() noexcept;
     void real_camera_stop() noexcept;
     [[nodiscard]] RealCameraStatus real_camera_status() noexcept;
-    /// 0 directional, 1 point, 2 spot, 3 point light with a camera-projected flare.
+    /// 0 directional, 1 point, 2 spot, 3 ambient (LightKind), kAddLightFlare =
+    /// point light with a camera-projected flare (was 3 before the ambient fix).
+    static constexpr u32 kAddLightFlare = 4;
     [[nodiscard]] Result<u64> add_light(u32 kind) noexcept;
     [[nodiscard]] u32 query_materials(u64 layer, f32* values, u32 capacity) noexcept;
     [[nodiscard]] Status set_material_param(u64 layer, u32 material, u32 param, f32 value) noexcept;
@@ -1461,8 +1555,12 @@ public:
     /// seguintes de um arrasto, que entram no mesmo passo).
     bool set_mask_path(u64 layerId, u32 maskId, const f32* pts6, u32 count, bool closed, bool undo) noexcept;
     /// Modo (MaskOperation: 0 somar, 1 subtrair, 2 intersectar, 3 diferença,
-    /// 4 nenhum), invertida, feather e expansão (px da camada), opacidade 0..1.
+    /// 4 nenhum, 5 clarear, 6 escurecer), invertida, feather e expansão (px da
+    /// camada), opacidade 0..1.
     bool set_mask_props(u64 layerId, u32 maskId, u32 op, bool inverted, f32 feather, f32 expansion, f32 opacity) noexcept;
+    /// Queda do feather (Mask::featherFalloff): 0 suave (gaussiana), 1 linear.
+    /// Um passo de desfazer. O valor atual vem em `query_masks` (float 11).
+    bool set_mask_falloff(u64 layerId, u32 maskId, u32 falloff) noexcept;
     bool set_mask_param(u64 layerId, u32 maskId, u32 param, f32 value) noexcept;
     bool toggle_mask_param_key(u64 layerId, u32 maskId, u32 param) noexcept;
     /// Liga/desliga o key do caminho no cabeçote (`keyed` = ficou com key).
@@ -1613,6 +1711,15 @@ public:
     /// camada visual com base visual abaixo (`can_create_clip`); liberar solta
     /// também a cadeia recortada logo acima. Um passo de desfazer.
     bool set_layer_clip_to_below(u64 layerId, bool on) noexcept;
+    /// AE compositing (EngineAeCompositing.cpp). Preservar transparência (o T
+    /// do AE): a camada só pinta onde a pilha abaixo tem alfa e mantém o alfa
+    /// dela (Layer::preserveTransparency; bit kLayerRowFlagPreserveTransparency).
+    bool set_layer_preserve_transparency(u64 layerId, bool on) noexcept;
+    /// Tímida (Layer::shy; bit kLayerRowFlagShy) e "Ocultar camadas tímidas" da
+    /// composição atual: a timeline filtra, o quadro não muda.
+    bool set_layer_shy(u64 layerId, bool on) noexcept;
+    bool set_hide_shy(bool on) noexcept;
+    [[nodiscard]] bool hide_shy() noexcept;
     /// Solo: com alguma camada em solo, o preview (e o áudio) só tocam as em solo.
     bool set_layer_solo(u64 layerId, bool on) noexcept;
     /// Camadas da composição atual cujo nome ou texto contém `query` (sem
@@ -1789,6 +1896,12 @@ public:
                          f32 contactShadow = 0.8f, f32 fade = 6.0f) noexcept;
     /// {modo, r, g, b, rugosidade, refletividade, sombra de contato, fade}.
     bool query_scene_floor(f32* out8) noexcept;
+    /// 0.5.2 chão molhado: `wetness` 0..1 (quanto vira poça; 0 = seco) e o
+    /// tamanho típico das poças em px do mundo (20..4000). Na poça o chão fica
+    /// espelhado e escuro (as luzes aparecem refletidas); fora, só úmido. Um desfazer.
+    bool set_scene_floor_wetness(f32 wetness, f32 puddleSize) noexcept;
+    /// {molhado 0..1, tamanho das poças}.
+    bool query_scene_floor_wetness(f32* out2) noexcept;
     /// 0.4.1 "Reflective Floor": o chão visível pronto para espelhar a cena — quase
     /// preto, polido (rugosidade 0,06), refletividade 0,9 e desbotamento longo.
     /// O reflexo mostra modelos, transparentes e camadas 2D no espaço 3D. Um desfazer.
@@ -2294,6 +2407,68 @@ public:
     /// Marcas da composição atual: frame, cor e tipo intercalados em `out`
     /// (3 por marca). Devolve o total (pode passar de `capacity`).
     u32 query_markers(i64* out, u32 capacity) noexcept;
+
+    // --- Timeline do AE (EngineAeTimeline.cpp; gap_system itens 3, 4 e 8) -------
+    /// Marca da composição com tudo: `from` < 0 insere; senão troca a de
+    /// `from` (que vai para `to`). Destino ocupado por outra = recusa, sem
+    /// histórico. `duration` em quadros (0 = instante). Um passo de desfazer.
+    /// O `edit_marker` antigo mantém a duração e o comentário que já havia.
+    bool edit_marker_ex(i64 from, i64 to, u32 color, const std::string& label,
+                        i64 duration, const std::string& comment) noexcept;
+    /// Duração e comentário da marca da composição no quadro; false = não há.
+    bool marker_details(i64 frame, i64& duration, std::string& comment) noexcept;
+    /// Marcas da CAMADA. A interface fala em quadros da COMPOSIÇÃO; o motor
+    /// guarda em tempo local (a marca anda com a camada). `fromFrame` < 0
+    /// insere. Camada travada, destino ocupado ou texto grande = recusa.
+    bool edit_layer_marker(u64 layerId, i64 fromFrame, i64 toFrame, u32 color, const std::string& label,
+                           i64 duration, const std::string& comment) noexcept;
+    /// Arrasto da marca da camada (mantém o resto). Um passo de desfazer.
+    bool move_layer_marker(u64 layerId, i64 fromFrame, i64 toFrame) noexcept;
+    bool delete_layer_marker(u64 layerId, i64 frame) noexcept;
+    /// Marcas da camada: quadro (composição), duração, cor e tipo — 4 por
+    /// marca. Devolve o total (pode passar de `capacity`).
+    u32 query_layer_markers(u64 layerId, i64* out, u32 capacity) noexcept;
+    /// Todas as marcas de camada da composição atual numa consulta (a
+    /// timeline desenha nos clipes): id da camada, quadro (composição),
+    /// duração e cor — 4 por marca. Devolve o total.
+    u32 query_all_layer_markers(i64* out, u32 capacity) noexcept;
+    /// Nome e comentário da marca da camada no quadro (composição).
+    bool layer_marker_text(u64 layerId, i64 frame, std::string& label, std::string& comment) noexcept;
+
+    /// Estica (factor > 1) ou encolhe no tempo os keyframes escolhidos em
+    /// volta de `anchorFrame` (quadro LOCAL): t' = âncora + round((t − âncora)
+    /// · factor). As mesmas referências de `edit_keyframe_selection`; dois
+    /// keys no mesmo quadro (ou em cima de um não escolhido) = recusa inteira.
+    /// Um passo de desfazer; devolve quantos andaram.
+    u32 scale_keyframe_selection(u64 layerId, const i64* references, u32 count,
+                                 i64 anchorFrame, f64 factor) noexcept;
+    /// "Easy Ease" (F9) nos escolhidos: 0 = os dois lados, 1 = só a entrada
+    /// (Easy Ease In, Shift+F9), 2 = só a saída (Ctrl+Shift+F9). Velocidade
+    /// zero no key com influência de 1/3, como no AE. Um passo de desfazer.
+    u32 ease_keyframe_selection(u64 layerId, const i64* references, u32 count, u32 mode) noexcept;
+    static constexpr u32 kEasyEaseBoth = 0, kEasyEaseIn = 1, kEasyEaseOut = 2;
+
+    /// Área de trabalho [in, out) em quadros da composição. in < 0 ou
+    /// out <= in apaga (volta a composição inteira). Um passo de desfazer.
+    bool set_work_area(i64 in, i64 out) noexcept;
+    /// A área efetiva; true = há uma área menor que a composição.
+    bool query_work_area(i64& in, i64& out) noexcept;
+    /// "Aparar composição à área de trabalho": o começo dela vira o quadro 0
+    /// e a duração vira o tamanho dela (camadas fora somem, as que cruzam são
+    /// aparadas, marcas acompanham). Um passo de desfazer.
+    bool trim_composition_to_work_area() noexcept;
+    /// Opção da sessão (não vai para o projeto): a próxima exportação sai só
+    /// com a área de trabalho da composição (se houver uma).
+    void set_export_work_area_only(bool on) noexcept;
+    [[nodiscard]] bool export_work_area_only() const noexcept;
+
+    /// Alinhar/distribuir no ESPAÇO, pela caixa que o palco mostra (B6 do
+    /// gap_system: a conta era das telas). 0 esquerda, 1 centro horizontal,
+    /// 2 direita, 3 topo, 4 centro vertical, 5 base (à composição); 6
+    /// distribuir na horizontal, 7 na vertical (vãos iguais, 3 ou mais). A
+    /// posição segue a regra do gesto (keyframe no cabeçote se animada). Um
+    /// passo de desfazer; devolve quantas camadas andaram.
+    u32 align_layers(const u64* layerIds, u32 count, u32 mode) noexcept;
     /// Detecta as batidas do som da camada e troca as marcas de batida dentro
     /// do trecho dela. Síncrono (decodifica o áudio): chamar fora da thread de
     /// UI. Devolve o número de batidas; `bpm` recebe o tempo.
@@ -3172,6 +3347,13 @@ private:
     /// anel e re-ancorava o relógio mestre (tranco no som e no vídeo). Sob o
     /// lock do modelo.
     void bump_revision_without_audio_locked() noexcept;
+    /// Timeline do AE: mover (delta) ou escalar (âncora, fator) a seleção de
+    /// keyframes — o corpo de edit_keyframe_selection e scale_keyframe_selection.
+    u32 retime_keyframe_selection(u64 layerId, const i64* refs, u32 count, i64 delta, bool remove,
+                                  i64 anchor, f64 factor) noexcept;
+    /// Apara a composição à área de trabalho (sob o lock do modelo, sem
+    /// histórico). `closeMedia` fecha a mídia das camadas que somem.
+    bool trim_to_work_area_locked(Composition& comp, bool closeMedia) noexcept;
     static std::string audio_path_resolver(void* self, const std::string& stored);
     FrameScheduler     frameScheduler_;
     FrameSnapshot      snapshot_;
@@ -3375,6 +3557,7 @@ private:
     std::atomic<u32> interactionDepth_{0};
     std::atomic<bool> lastFrameDrafted_{false};
     bool contentBoundedPlayback_ = false;
+    std::atomic<bool> exportWorkAreaOnly_{false};   ///< timeline do AE: exportar só a área de trabalho
     // A paused transport jump may target a project marker after the last clip.
     // Keep that cursor across preview reconfiguration while the marker exists.
     i64 pausedTimelineEventFrame_ = -1;

@@ -44,6 +44,31 @@
 //    28 Sobreposição suave (definição do AUREA; a da referência não foi
 //       comprovada): B = (1 − 2s)·b² + 2s·b — a "luz suave" contínua (Pegtop):
 //       s = 0 → b², s = ½ → b, s = 1 → b·(2 − b), sem quebra em ½.
+//
+//  AE compositing (2026-11-10). O After Effects é só a especificação de
+//  comportamento; as contas abaixo são do AUREA:
+//    29 Estêncil luma     co = cb·L, L = clamp(lum(src pré-mult.), 0, 1)
+//                         (o Mask com a luminância no lugar do alfa)
+//    30 Silhueta luma     co = cb·(1 − L)
+//    31 Dissolver         o pixel da camada aparece INTEIRO (alfa 1, cor reta)
+//                         quando ruído(pixel, semente) < αs; senão fica o fundo.
+//                         Semente = params.z (fixa por camada)
+//    32 Dissolver dançante o mesmo, com a semente refeita a cada quadro
+//    33 Mistura forte     B = b + s ≥ 1 ? 1 : 0 por canal
+//    34 Superexp. de cor clássica  B = s ≤ 0 ? 0 : clamp(1 − (1 − b)/s, 0, 1)
+//    35 Subexp. de cor clássica    B = s ≥ 1 ? 1 : clamp(b/(1 − s), 0, 1)
+//       (sem os casos de borda do moderno: b = 1 no Burn e b = 0 no Dodge)
+//    36 Diferença clássica |b − s| com b e s presos em [0,1]
+//    37 Adição de alfa    "disjunta": co = cs·αs + cb·αb·min(1, (1 − αs)/αb),
+//                         αo = min(1, αs + αb). Duas bordas suavizadas que se
+//                         encostam somam alfa 1 (sem a costura do "sobre")
+//    38 Luminescente pré-mult.  co = src.rgb + dst.rgb·(1 − αs) SEM tirar o
+//                         pré-multiplicado: a cor acima do alfa (brilho sobre
+//                         alfa 0) entra somada, em vez de sumir na divisão
+//
+//  PRESERVAR TRANSPARÊNCIA (o T do AE) chega com o mesmo params.w = 1: é o
+//  source-atop do recorte, mas com o fundo = tudo o que já foi composto
+//  abaixo. O alfa do resultado é o do fundo; a camada só pinta onde ele existe.
 // =============================================================================
 #include "../common/bindings.glsl"
 
@@ -69,6 +94,10 @@ const int kAdd = 1, kSubtract = 2, kMultiply = 3, kScreen = 4, kOverlay = 5, kDa
           kMask = 22, kExclude = 23,
           // Omega aparência (P1-5).
           kDarkerColor = 24, kLighterColor = 25, kLinearLight = 26, kPinLight = 27, kSoftOverlay = 28,
+          // AE compositing.
+          kStencilLuma = 29, kSilhouetteLuma = 30, kDissolve = 31, kDancingDissolve = 32, kHardMix = 33,
+          kClassicColorBurn = 34, kClassicColorDodge = 35, kClassicDifference = 36, kAlphaAdd = 37,
+          kLuminescentPremul = 38,
           kAdjustMix = 100;
 
 const vec3 kLuma = vec3(0.2126, 0.7152, 0.0722);
@@ -127,6 +156,16 @@ vec3 exclusion(vec3 b, vec3 s) {
 }
 
 float lum(vec3 c) { return dot(c, kLuma); }
+
+// Ruído do Dissolver: hash inteiro (pcg3d) do pixel do alvo e da semente, em
+// [0, 1). A mesma conta em tests/test_gpu.cpp (dissolve_noise).
+float dissolve_noise(uvec2 px, uint seed) {
+    uvec3 v = uvec3(px, seed) * 1664525u + 1013904223u;
+    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+    v ^= v >> 16u;
+    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+    return float(v.x >> 8u) * (1.0 / 16777216.0);
+}
 vec3 clip_color(vec3 c) {
     const float l = lum(c);
     const float n = min(c.r, min(c.g, c.b));
@@ -181,6 +220,17 @@ vec3 blend(int mode, vec3 b, vec3 s) {
         case kLinearLight: return clamp(b + 2.0 * s - 1.0, 0.0, 1.0);
         case kPinLight:    return mix(max(b, 2.0 * s - 1.0), min(b, 2.0 * s), lessThanEqual(s, vec3(0.5)));
         case kSoftOverlay: return (1.0 - 2.0 * s) * b * b + 2.0 * s * b;
+        // AE compositing.
+        case kHardMix:     return step(vec3(1.0), b + s);
+        case kClassicColorBurn:
+            return vec3(s.r <= 0.0 ? 0.0 : clamp(1.0 - (1.0 - b.r) / s.r, 0.0, 1.0),
+                        s.g <= 0.0 ? 0.0 : clamp(1.0 - (1.0 - b.g) / s.g, 0.0, 1.0),
+                        s.b <= 0.0 ? 0.0 : clamp(1.0 - (1.0 - b.b) / s.b, 0.0, 1.0));
+        case kClassicColorDodge:
+            return vec3(s.r >= 1.0 ? 1.0 : clamp(b.r / (1.0 - s.r), 0.0, 1.0),
+                        s.g >= 1.0 ? 1.0 : clamp(b.g / (1.0 - s.g), 0.0, 1.0),
+                        s.b >= 1.0 ? 1.0 : clamp(b.b / (1.0 - s.b), 0.0, 1.0));
+        case kClassicDifference: return abs(b - s);
         default:          return s;   // modo desconhecido: Normal
     }
 }
@@ -212,7 +262,27 @@ void main() {
     // não copia o fundo no Mask (fica transparente) e copia no Exclude.
     if (mode == kMask)    { o_color = dst * src.a; return; }
     if (mode == kExclude) { o_color = dst * (1.0 - src.a); return; }
+    // Estêncil/Silhueta luma: a luminância da cor PRÉ-multiplicada já traz o alfa.
+    if (mode == kStencilLuma)    { o_color = dst * clamp(lum(src.rgb), 0.0, 1.0); return; }
+    if (mode == kSilhouetteLuma) { o_color = dst * (1.0 - clamp(lum(src.rgb), 0.0, 1.0)); return; }
     const float as = src.a, ab = dst.a;
+    if (mode == kDissolve || mode == kDancingDissolve) {
+        const float n = dissolve_noise(uvec2(gl_FragCoord.xy), uint(max(pc.params.z, 0.0) + 0.5));
+        const bool shown = as > 0.0 && n < as;
+        const vec3 straight = as > 1e-6 ? src.rgb / as : vec3(0.0);
+        if (pc.params.w > 0.5) { o_color = shown ? vec4(straight * ab, ab) : dst; return; }
+        o_color = shown ? vec4(straight, 1.0) : dst;
+        return;
+    }
+    if (mode == kLuminescentPremul && pc.params.w <= 0.5) {
+        o_color = vec4(src.rgb + dst.rgb * (1.0 - as), min(1.0, as + ab * (1.0 - as)));
+        return;
+    }
+    if (mode == kAlphaAdd && pc.params.w <= 0.5) {
+        const float keep = ab > 1e-6 ? min(1.0, (1.0 - as) / ab) : 0.0;
+        o_color = vec4(src.rgb + dst.rgb * keep, min(1.0, as + ab));
+        return;
+    }
     const vec3 cs = as > 1e-6 ? src.rgb / as : vec3(0.0);
     const vec3 cb = ab > 1e-6 ? dst.rgb / ab : vec3(0.0);
     const vec3 B = blend(mode, cb, cs);

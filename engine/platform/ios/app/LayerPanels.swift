@@ -25,6 +25,7 @@ struct TextAppearanceControls: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if page <= 0 {
+            sourceTextRow
             NativePanelRuler(label: AureaText.t("panel_tamanho"), value: value("size", 72), step: 0.5, range: 4...TextSizeSteps.max, unit: "px", keypad: true) { model.engine.setText(id, size: $0); refresh() }
             colorRow("panel_cor", values: components("color")) { color("color", "panel_cor") }
             // O rótulo em cima e os três botões do mesmo tamanho: com as abas à direita a linha
@@ -35,6 +36,7 @@ struct TextAppearanceControls: View {
             }, columns: 3).padding(.top, 6).padding(.bottom, 8)
             }
             if page == -1 || page == 1 {
+            NativeTextTextureSection()
             PanelSection(title: AureaText.t("panel_contorno"), glyph: CupertinoGlyph.Circle, tag: "text.sec.stroke") {
                 colorRow("panel_cor_contorno", values: components("strokeColor")) { color("strokeColor", "panel_cor_contorno") }
                 NativePanelRuler(label: AureaText.t("panel_largura_contorno"), value: value("strokeWidth"), step: 0.1, range: 0...60, unit: "px", keypad: true) { model.engine.setText(id, strokeWidth: $0); refresh() }
@@ -84,6 +86,26 @@ struct TextAppearanceControls: View {
     }
     private func styleBinding(_ slot: Int) -> Binding<Bool> {
         Binding(get: { style.count > slot && style[slot] > 0.5 }, set: { set(slot, $0 ? 1 : 0) })
+    }
+    /// AE animation: keys do TEXTO-FONTE (TextPanel.kt `TextSourceKeysRow`). "Keyframe do
+    /// texto aqui" grava no cabeçote o texto que aparece; com keys, editar o texto num
+    /// instante cria/troca o key dele. Sempre congelados; na timeline, "Texto-fonte".
+    private var sourceTextRow: some View {
+        let track = TimelineTrack(property: 50, effect: 0, param: 0)
+        let keys = (model.keyframes[id] ?? []).filter { $0.property == 50 }
+        let here = keys.contains { $0.time == model.localPlayhead }
+        return PropertyCustomRow(AureaText.t("ae_anim_source_text"), selected: model.timelineFocus == [track],
+            onSelect: { model.timelineFocus = [track] }, keyframe: here ? .keyHere : keys.isEmpty ? .none : .animated) {
+            PanelItemRow(glyph: CupertinoGlyph.SuitDiamond,
+                         title: AureaText.t(here ? "ae_anim_source_key_remove" : "ae_anim_source_key_add"),
+                         tag: "text.source.key",
+                         detail: keys.isEmpty ? nil : AureaText.t("ae_anim_source_key_count", Int32(keys.count)),
+                         on: here) {
+                model.timelineFocus = [track]
+                model.toggleTextSourceKey()
+                load()
+            }
+        }.padding(.top, 4)
     }
     /// O losango fica no rótulo, como no Alight: tocar nele escolhe a propriedade e o ◆ da coluna marca.
     private var trackingRow: some View {
@@ -1180,25 +1202,34 @@ struct AppearancePanel: View {
     }
     /// A ORDEM DA REFERÊNCIA (catálogo de 28). Números = `aurea::BlendMode` (Types.hpp);
     /// "Adicionar" (1) é extra do AUREA, no fim de Clarear. `direct` = toque aplica sem abrir.
+    /// AE compositing (2026-11-10), nos grupos do After Effects (par do AppearancePanel.kt):
+    /// 29 Estêncil luma, 30 Silhueta luma, 31 Dissolver, 32 Dissolver dançante, 33 Mistura forte,
+    /// 34/35/36 clássicos (Superexp., Subexp., Diferença), 37 Adição de alfa, 38 Luminescente pré-mult.
     private static let categories: [(key: String, title: String, modes: [Int], direct: Int?)] = [
         ("normal", "panel_normal", [0], 0),
-        ("darken", "pn_blend_darken", [3, 6, 24, 9, 21], nil),
-        ("lighten", "pn_blend_lighten", [4, 7, 25, 8, 20, 1], nil),
-        ("contrast", "pn_blend_cat_contrast", [5, 11, 10, 28, 19, 26, 27], nil),
-        ("difference", "pn_blend_difference", [12, 13, 2, 18], nil),
+        ("dissolve", "ae_blend_cat_dissolve", [31, 32], nil),
+        ("darken", "pn_blend_darken", [3, 6, 24, 9, 34, 21], nil),
+        ("lighten", "pn_blend_lighten", [4, 7, 25, 8, 35, 20, 1], nil),
+        ("contrast", "pn_blend_cat_contrast", [5, 11, 10, 28, 19, 26, 27, 33], nil),
+        ("difference", "pn_blend_difference", [12, 36, 13, 2, 18], nil),
         ("color", "pn_blend_color", [14, 15, 16, 17], nil),
-        ("mask", "pn_blend_cat_mask", [22, 23], nil),
+        ("mask", "pn_blend_cat_mask", [22, 29, 23, 30], nil),
+        ("utility", "ae_blend_cat_utility", [37, 38], nil),
     ]
     static let modes = ["panel_normal", "pn_blend_add", "pn_blend_subtract", "pn_blend_multiply", "pn_blend_screen", "pn_blend_overlay",
         "pn_blend_darken", "pn_blend_lighten", "pn_blend_color_dodge", "pn_blend_color_burn", "pn_blend_hard_light", "pn_blend_soft_light",
         "pn_blend_difference", "pn_blend_exclusion", "pn_blend_hue", "pn_blend_saturation", "pn_blend_color", "pn_blend_luminosity",
         "pn_blend_divide", "pn_blend_vivid_light", "pn_blend_linear_dodge", "pn_blend_linear_burn", "pn_blend_mask", "pn_blend_exclude",
-        "om_ap_blend_darker_color", "om_ap_blend_lighter_color", "om_ap_blend_linear_light", "om_ap_blend_pin_light", "om_ap_blend_soft_overlay"]
+        "om_ap_blend_darker_color", "om_ap_blend_lighter_color", "om_ap_blend_linear_light", "om_ap_blend_pin_light", "om_ap_blend_soft_overlay",
+        "ae_blend_stencil_luma", "ae_blend_silhouette_luma", "ae_blend_dissolve", "ae_blend_dancing_dissolve", "ae_blend_hard_mix",
+        "ae_blend_classic_color_burn", "ae_blend_classic_color_dodge", "ae_blend_classic_difference", "ae_blend_alpha_add",
+        "ae_blend_luminescent_premul"]
     /// A miniatura é ilustrativa (o modo do sistema mais próximo); a conta é a do motor (blend.frag).
     private static let previews: [GraphicsContext.BlendMode] = [.normal, .plusLighter, .difference, .multiply, .screen, .overlay, .darken, .lighten,
         .colorDodge, .colorBurn, .hardLight, .softLight, .difference, .exclusion, .hue, .saturation, .color, .luminosity,
         .colorDodge, .colorDodge, .plusLighter, .multiply, .destinationIn, .destinationOut,
-        .darken, .lighten, .hardLight, .overlay, .softLight]
+        .darken, .lighten, .hardLight, .overlay, .softLight,
+        .destinationIn, .destinationOut, .normal, .normal, .hardLight, .colorBurn, .colorDodge, .difference, .plusLighter, .normal]
 
     private func write(_ value: Float) { model.editTransform(12, value: value.clamped(to: 0...100) / 100) }
     private func setMode(_ value: Int) {
@@ -1356,8 +1387,8 @@ struct AppearancePanel: View {
             VStack(spacing: 4) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 9).fill(AureaColors.surface)
-                    if value == 22 || value == 23 {
-                        BlendCutThumb(exclude: value == 23, size: CGSize(width: 50, height: 50))
+                    if value == 22 || value == 23 || value == 29 || value == 30 {
+                        BlendCutThumb(exclude: value == 23 || value == 30, size: CGSize(width: 50, height: 50))
                     } else {
                         Canvas { context, size in
                             let r = min(size.width, size.height) * 0.30
@@ -2257,6 +2288,8 @@ struct MaskPanel: View {
     }
     private var maskModes: [(op: UInt32, key: String, glyph: Character)] { [
         (0, "panel_somar", CupertinoGlyph.Plus), (1, "panel_subtrair", CupertinoGlyph.Minus), (2, "panel_intersecao", CupertinoGlyph.SquareOnSquare),
+        // AE compositing: Clarear (o maior valor) e Escurecer (o menor), na ordem do AE (par do MaskPanel.kt).
+        (5, "ae_mask_lighten", CupertinoGlyph.Circle), (6, "ae_mask_darken", CupertinoGlyph.CircleFill),
         (3, "panel_diferenca", CupertinoGlyph.CircleLefthalfFill), (4, "panel_desligada", CupertinoGlyph.EyeSlash),
     ] }
     private var maskChips: some View {
@@ -2297,6 +2330,11 @@ struct MaskPanel: View {
             }
             PanelSection(title: AureaText.t("panel_mask_edge"), glyph: CupertinoGlyph.Drop, tag: "mask.sec.edge", flat: true) {
                 maskRuler(m, param: 0, label: "panel_suavizar", value: m.feather, range: 0...500, unit: "px", reset: 0)
+                // AE compositing: queda do feather (Mask Feather Falloff), suave ou linear (par do MaskPanel.kt).
+                PanelItemGrid(items: [
+                    PanelItem(glyph: CupertinoGlyph.Drop, label: AureaText.t("ae_mask_falloff_smooth"), tag: "mask.falloff.0", on: m.falloff == 0) { setFalloff(m, 0) },
+                    PanelItem(glyph: CupertinoGlyph.Minus, label: AureaText.t("ae_mask_falloff_linear"), tag: "mask.falloff.1", on: m.falloff == 1) { setFalloff(m, 1) },
+                ], columns: 2)
                 maskRuler(m, param: 1, label: "panel_expandir", value: m.expansion, range: -500...500, unit: "px", reset: 0)
                 maskRuler(m, param: 2, label: "panel_opacidade", value: m.opacity * 100, range: 0...100, unit: "%", reset: 100)
             }
@@ -2416,6 +2454,10 @@ struct MaskPanel: View {
     private func track(_ mask: UInt32, mode: UInt32) { let layer = id; model.performMediaOperation(AureaText.t("panel_rastreando")) { $0.trackMask(layer, mask: mask, mode: mode) } }
     private func update(_ mask: MaskItem, operation: UInt32? = nil, inverted: Bool? = nil, feather: Float? = nil, expansion: Float? = nil, opacity: Float? = nil) {
         _ = model.engine.setMaskProps(id, mask: mask.id, operation: operation ?? mask.operation, inverted: inverted ?? mask.inverted, feather: feather ?? mask.feather, expansion: expansion ?? mask.expansion, opacity: opacity ?? mask.opacity)
+        model.refreshModel(force: true)
+    }
+    private func setFalloff(_ mask: MaskItem, _ falloff: UInt32) {
+        _ = model.engine.setMaskFalloff(id, mask: mask.id, falloff: falloff)
         model.refreshModel(force: true)
     }
 }
@@ -2728,11 +2770,17 @@ private struct TextAnimatorEditor: View {
             row(param(18, "panel_opacidade", "%", 0.5, 0...100))
             if props & (1 << 5) != 0 { row(param(20, "panel_desfoque", "px", 0.2, 0...200)) }
             if props & (1 << 4) != 0 { row(param(19, "edt_prop_spacing", "px", 0.5, -500...500)) }
-            if props & (1 << 6) != 0 { row(param(21, "edt_prop_skew", "°", 0.5, -80...80)) }
+            if props & (1 << 6) != 0 {
+                row(param(21, "edt_prop_skew", "°", 0.5, -80...80))
+                // B5 (AE animation): o eixo da inclinação (Skew Axis do AE) junto da inclinação.
+                row(param(26, "ae_anim_skew_axis", "°", 1, -3600...3600))
+            }
             if props & (1 << 7) != 0 { row(param(22, "panel_contorno", "px", 0.1, -50...50)) }
+            // B5: Character Offset do AE (troca cada letra pela N-ésima seguinte).
+            if props & (1 << 8) != 0 { row(param(23, "ae_anim_char_offset", "", 0.05, -1000...1000)) }
             if props & (1 << 12) != 0 { row(param(45, "fxl_line_spacing", "px", 1, -20000...20000)) }
             if props & (1 << 11) != 0 { row(param(42, "fxl_anchor", "px", 1, -20000...20000)); row(param(43, "fxl_anchor", "px", 1, -20000...20000)) }
-            let extras = [(1 << 5, "panel_desfoque"), (1 << 4, "edt_prop_spacing"), (1 << 6, "edt_prop_skew"), (1 << 7, "panel_contorno"), (1 << 12, "fxl_line_spacing"), (1 << 11, "fxl_anchor")]
+            let extras = [(1 << 5, "panel_desfoque"), (1 << 4, "edt_prop_spacing"), (1 << 6, "edt_prop_skew"), (1 << 7, "panel_contorno"), (1 << 12, "fxl_line_spacing"), (1 << 8, "ae_anim_char_offset"), (1 << 11, "fxl_anchor")]
             PanelChoiceRow(label: AureaText.t("panel_propriedades"), options: extras.map { AureaText.t($0.1) }, isOn: { props & extras[$0].0 != 0 }) { toggleProp(extras[$0].0) }
         }
     }
@@ -2762,6 +2810,8 @@ private struct TextAnimatorEditor: View {
         return PanelSection(title: "\(title) \(s + 1)", glyph: glyph, tag: "\(tag).sel.\(s).\(type)", flat: true, stacked: false) {
             choice("fxl_mode", Self.modes, field: selectorField(s, 4), current: Int(f[selectorField(s, 4)]))
             if type == 5 {
+                // B7: a base (letra/palavra/linha) vale em cada seletor.
+                choice("panel_anima_cada", ["panel_letra", "panel_palavra", "panel_linha", "ui_char_no_spaces"], field: selectorField(s, 2), current: Int(f[selectorField(s, 2)]))
                 row(param(block + 34, "fxl_max_amount", "%", 0.5, -100...100)); row(param(block + 33, "fxl_min_amount", "%", 0.5, -100...100))
                 row(param(block + 25, "fxl_wiggles_second", "/s", 0.05, 0...60)); row(param(block + 35, "fxl_correlation", "%", 0.5, 0...100))
                 row(param(block + 36, "fxl_temporal_phase", "°", 1, -3600...3600)); row(param(block + 37, "fxl_spatial_phase", "°", 1, -3600...3600))
@@ -2772,6 +2822,21 @@ private struct TextAnimatorEditor: View {
             } else {
                 row(param(block, "panel_inicio", "%", 0.5, -1000...1000)); row(param(block + 1, "panel_fim", "%", 0.5, -1000...1000)); row(param(block + 2, "fxl_offset", "%", 0.5, -1000...1000))
                 row(param(block + 3, "panel_intensidade", "%", 0.5, -100...100))
+                // B7 (AE animation): forma, suavidade, ease, unidades, base e ordem aleatória em
+                // CADA seletor de faixa — antes só o 1º tinha estes controles.
+                choice("panel_anima_cada", ["panel_letra", "panel_palavra", "panel_linha", "ui_char_no_spaces"], field: selectorField(s, 2), current: Int(f[selectorField(s, 2)]))
+                choice("fxl_units", ["fxo_percentage", "fxo_index"], field: selectorField(s, 3), current: Int(f[selectorField(s, 3)]))
+                choice("fxl_shape", ["fxo_square_2", "panel_sobe", "panel_desce", "fxo_triangle", "panel_redondo", "fxo_smooth"], field: selectorField(s, 5), current: Int(f[selectorField(s, 5)]))
+                row(param(block + 32, "fx_suavidade", "%", 0.5, 0...100))
+                row(param(block + 4, "fxl_ease_high", "%", 0.5, -100...100)); row(param(block + 5, "fxl_ease_low", "%", 0.5, -100...100))
+                toggle("fxl_random_order", f[selectorField(s, 6)] > 0.5) { setField(selectorField(s, 6), $0 ? 1 : 0) }
+                if f[selectorField(s, 6)] > 0.5 {
+                    HStack(spacing: 8) {
+                        Text(AureaText.t("fxl_seed")).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
+                        Text("\(Int(f[selectorField(s, 7)]))").font(.aurea(size: 13)).foregroundStyle(AureaColors.muted)
+                        NativePanelChip(AureaText.t("la_reroll")) { setField(selectorField(s, 7), Float(Int.random(in: 1...999_999))) }
+                    }.frame(height: 44).accessibilityIdentifier("\(tag).sel.\(s).seed")
+                }
             }
             PanelItemRow(glyph: CupertinoGlyph.Trash, title: AureaText.t("panel_remover"), tag: "\(tag).sel.\(s).delete", danger: true) {
                 _ = model.engine.removeTextSelector(id, index: UInt32(index), selector: UInt32(s))

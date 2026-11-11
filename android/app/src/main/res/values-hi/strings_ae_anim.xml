@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE animation (2026-11-11): texto-fonte, auto-orientar, câmera de dois nós e os controles do animador de texto (B5). -->
+<resources>
+    <string name="ae_anim_source_text">स्रोत टेक्स्ट</string>
+    <string name="ae_anim_source_key_add">यहाँ टेक्स्ट का कीफ़्रेम</string>
+    <string name="ae_anim_source_key_remove">यहाँ से टेक्स्ट कीफ़्रेम हटाएँ</string>
+    <string name="ae_anim_source_key_count">%1$d कीफ़्रेम</string>
+    <string name="ae_anim_auto_orient">स्वतः-अभिमुखन</string>
+    <string name="ae_anim_auto_orient_off">बंद</string>
+    <string name="ae_anim_auto_orient_path">पथ के साथ</string>
+    <string name="ae_anim_auto_orient_camera">कैमरे की ओर</string>
+    <string name="ae_anim_two_node">दो-नोड कैमरा</string>
+    <string name="ae_anim_two_node_hint">कैमरा रुचि-बिंदु की ओर देखता है; घुमाव उसके ऊपर लगता है</string>
+    <string name="ae_anim_poi">रुचि-बिंदु</string>
+    <string name="ae_anim_poi_axis">रुचि-बिंदु %1$s</string>
+    <string name="ae_anim_poi_key_add">रुचि-बिंदु का कीफ़्रेम</string>
+    <string name="ae_anim_poi_key_remove">रुचि-बिंदु कीफ़्रेम हटाएँ</string>
+    <string name="ae_anim_char_offset">अक्षर विस्थापन</string>
+    <string name="ae_anim_skew_axis">झुकाव अक्ष</string>
+</resources>

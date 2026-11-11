@@ -36,7 +36,7 @@ u32 scale_for_radius(f32 radius, f32 limit) noexcept {
 // -----------------------------------------------------------------------------
 class Invert final : public Effect {
 public:
-    enum : u32 { kColor = 0, kAlpha };
+    enum : u32 { kColor = 0, kAlpha, kChannel, kBlend };
 
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kInvert, "Inverter", "Cor", EffectClass::PerPixel};
@@ -45,12 +45,25 @@ public:
     void declare_parameters(ParameterRegistry& p) const override {
         p.add_bool("invert_color", "Inverter as cores", true);
         p.add_bool("invert_alpha", "Inverter a transparência", false);
+        // AE 2026 (no fim): o canal que "Inverter as cores" inverte e a mistura
+        // com o original. Padrões = o comportamento de antes (RGB, 0%).
+        static const char* const kChannels[] = {"RGB", "Vermelho", "Verde", "Azul", "HLS", "Matiz", "Luminosidade",
+                                                "Saturação", "YIQ", "Luminância", "Croma em fase (I)",
+                                                "Croma em quadratura (Q)", "Alfa"};
+        p.add_enum("channel", "Canal", kChannels, 13, 0);
+        p.add_float("blend", "Misturar com o original", 0.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
     }
-    bool is_identity(const EffectEval& e) const noexcept override { return !e.b(kColor) && !e.b(kAlpha); }
+    bool is_identity(const EffectEval& e) const noexcept override {
+        const f32 blend = std::isfinite(e.f(kBlend)) ? e.f(kBlend) : 0.0f;
+        return (!e.b(kColor) && !e.b(kAlpha)) || blend >= 99.999f;
+    }
     bool color_op(const EffectEval& e, ColorOp& op) const noexcept override {
         op.code = ColorOpCode::Invert;
         op.p[1] = e.b(kColor) ? 1.0f : 0.0f;
         op.p[2] = e.b(kAlpha) ? 1.0f : 0.0f;
+        op.p[3] = static_cast<f32>(std::min<u32>(e.e(kChannel), 12u));
+        const f32 blend = std::isfinite(e.f(kBlend)) ? e.f(kBlend) : 0.0f;
+        op.p[4] = std::clamp(blend / 100.0f, 0.0f, 1.0f);
         return true;
     }
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
@@ -388,7 +401,7 @@ public:
     explicit AudioSendEffect(u32 kind):kind_(kind) {}
     const EffectInfo& info() const noexcept override {
         static const EffectInfo infos[] = {
-            {"aurea.audio.reverb","Reverb","Áudio",EffectClass::PerPixel},
+            {"aurea.audio.reverb","Reverb (envio antigo)","Áudio",EffectClass::PerPixel},
             {"aurea.audio.flanger","Flanger","Áudio",EffectClass::PerPixel},
             {"aurea.audio.echo","Echo / Delay","Áudio",EffectClass::PerPixel}};
         return infos[kind_];

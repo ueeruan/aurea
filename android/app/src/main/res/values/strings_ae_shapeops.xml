@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE shape operators: operadores de caminho da camada vetorial (VectorPanel). -->
+<resources>
+    <string name="ae_shapeop_title">Operadores de caminho</string>
+    <string name="ae_shapeop_hint">Valem em ordem, de cima para baixo, sobre os caminhos deste grupo.</string>
+    <string name="ae_shapeop_add">Adicionar operador</string>
+    <string name="ae_shapeop_offset">Deslocar caminhos</string>
+    <string name="ae_shapeop_pucker">Franzir e inflar</string>
+    <string name="ae_shapeop_roughen">Aspereza</string>
+    <string name="ae_shapeop_wiggle_paths">Ondular caminhos</string>
+    <string name="ae_shapeop_round_corners">Arredondar cantos</string>
+    <string name="ae_shapeop_twist">Torcer</string>
+    <string name="ae_shapeop_zigzag">Zigue-zague</string>
+    <string name="ae_shapeop_wiggle_transform">Ondular transformação</string>
+    <string name="ae_shapeop_amount">Quantidade</string>
+    <string name="ae_shapeop_line_join">Junção</string>
+    <string name="ae_shapeop_join_miter">Viva</string>
+    <string name="ae_shapeop_join_round">Redonda</string>
+    <string name="ae_shapeop_join_bevel">Chanfrada</string>
+    <string name="ae_shapeop_miter_limit">Limite de canto</string>
+    <string name="ae_shapeop_copies">Cópias</string>
+    <string name="ae_shapeop_copy_offset">Deslocamento das cópias</string>
+    <string name="ae_shapeop_size">Tamanho</string>
+    <string name="ae_shapeop_detail">Detalhe</string>
+    <string name="ae_shapeop_points">Pontos</string>
+    <string name="ae_shapeop_points_corner">Canto</string>
+    <string name="ae_shapeop_points_smooth">Suave</string>
+    <string name="ae_shapeop_frequency">Oscilações por segundo</string>
+    <string name="ae_shapeop_correlation">Correlação</string>
+    <string name="ae_shapeop_temporal_phase">Fase temporal</string>
+    <string name="ae_shapeop_spatial_phase">Fase espacial</string>
+    <string name="ae_shapeop_seed">Semente aleatória</string>
+    <string name="ae_shapeop_radius">Raio</string>
+    <string name="ae_shapeop_angle">Ângulo</string>
+    <string name="ae_shapeop_center_x">Centro X</string>
+    <string name="ae_shapeop_center_y">Centro Y</string>
+    <string name="ae_shapeop_ridges">Cristas por segmento</string>
+    <string name="ae_shapeop_anchor_x">Âncora X</string>
+    <string name="ae_shapeop_anchor_y">Âncora Y</string>
+    <string name="ae_shapeop_position_x">Posição X</string>
+    <string name="ae_shapeop_position_y">Posição Y</string>
+    <string name="ae_shapeop_scale_x">Escala X</string>
+    <string name="ae_shapeop_scale_y">Escala Y</string>
+    <string name="ae_shapeop_rotation">Rotação</string>
+    <string name="ae_shapeop_enabled">Ligado</string>
+    <string name="ae_shapeop_move_up">Subir</string>
+    <string name="ae_shapeop_move_down">Descer</string>
+    <string name="ae_shapeop_remove">Remover operador</string>
+    <string name="ae_shapeop_expand">Mostrar ajustes de %1$s</string>
+    <string name="ae_shapeop_collapse">Esconder ajustes de %1$s</string>
+    <string name="ae_shapeop_lane">Operador %1$d · %2$d</string>
+    <string name="ae_shapeop_rep_separate">Escala X e Y separadas</string>
+</resources>

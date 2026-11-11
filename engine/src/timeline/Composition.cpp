@@ -347,6 +347,10 @@ void Composition::retime(f64 fps, const EffectRegistry* effects, bool coverEnds)
         for (auto& mask : l.masks) { retimePath(mask.pathKeys); mask.cacheKey = 0; }
         for (auto& group : l.shape.vector.groups) for (auto& path : group.paths) retimePath(path.keys);
         for (auto& effect : l.effects) for (auto& mesh : effect.meshes) retimePath(mesh.keys);
+        // Marcas da camada (v67): mesmo segundo, duração também.
+        for (Marker& m : l.markers) { m.frame = scale(m.frame); m.duration = scale(FrameIndex{m.duration}).value; }
+        l.markers.erase(std::unique(l.markers.begin(), l.markers.end(),
+                                    [](const Marker& a, const Marker& b) { return a.frame == b.frame; }), l.markers.end());
         // Durações guardadas em QUADROS fora das tracks: mesmos segundos.
         const auto frames = [k](u32 f) { return f ? std::max<u32>(1, static_cast<u32>(std::llround(f * k))) : 0u; };
         l.transitionInFrames = frames(l.transitionInFrames);
@@ -391,7 +395,12 @@ void Composition::retime(f64 fps, const EffectRegistry* effects, bool coverEnds)
         // Rounding down the duration can otherwise put the last marker exactly
         // at the exclusive end (e.g. frame 59 at 60 fps -> 30 at 30 fps).
         m.frame = FrameIndex{std::clamp<i64>(scale(m.frame).value, 0, duration_.value - 1)};
+        m.duration = scale(FrameIndex{m.duration}).value;
         put_marker(std::move(m));
+    }
+    if (workOut_ > workIn_ && workIn_ >= 0) {
+        workIn_ = scale(FrameIndex{workIn_}).value;
+        workOut_ = std::max(workIn_ + 1, scaleEnd(FrameIndex{workOut_}).value);
     }
     touch();
 }
@@ -699,10 +708,13 @@ std::unique_ptr<Composition> Composition::clone() const {
     c->scene_ = scene_;
     c->markers_ = markers_;
     c->editMode_ = editMode_;
+    c->hideShy_ = hideShy_;   // AE "ocultar tímidas": desfazível como o resto
     c->editTracks_ = editTracks_;
     c->editTracksActive_ = editTracksActive_;
     c->markIn_ = markIn_;
     c->markOut_ = markOut_;
+    c->workIn_ = workIn_;     // área de trabalho (v67): desfazível
+    c->workOut_ = workOut_;
     c->revision_ = revision_;
     c->formatRevision_ = formatRevision_;
     c->nestingDepth_ = nestingDepth_;
@@ -731,10 +743,13 @@ void Composition::restore_from(const Composition& snapshot) {
     scene_ = snapshot.scene_;
     markers_ = snapshot.markers_;
     editMode_ = snapshot.editMode_;
+    hideShy_ = snapshot.hideShy_;
     editTracks_ = snapshot.editTracks_;
     editTracksActive_ = snapshot.editTracksActive_;
     markIn_ = snapshot.markIn_;
     markOut_ = snapshot.markOut_;
+    workIn_ = snapshot.workIn_;
+    workOut_ = snapshot.workOut_;
     nestingDepth_ = snapshot.nestingDepth_;
     revision_ = revision;
     formatRevision_ = formatRevision;

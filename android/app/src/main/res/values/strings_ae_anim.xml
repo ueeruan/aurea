@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE animation (2026-11-11): texto-fonte, auto-orientar, câmera de dois nós e os controles do animador de texto (B5). -->
+<resources>
+    <string name="ae_anim_source_text">Texto-fonte</string>
+    <string name="ae_anim_source_key_add">Keyframe do texto aqui</string>
+    <string name="ae_anim_source_key_remove">Remover keyframe do texto aqui</string>
+    <string name="ae_anim_source_key_count">%1$d keyframes</string>
+    <string name="ae_anim_auto_orient">Auto-orientar</string>
+    <string name="ae_anim_auto_orient_off">Desligado</string>
+    <string name="ae_anim_auto_orient_path">Ao longo do caminho</string>
+    <string name="ae_anim_auto_orient_camera">Para a câmera</string>
+    <string name="ae_anim_two_node">Câmera de dois nós</string>
+    <string name="ae_anim_two_node_hint">A câmera mira o ponto de interesse; a rotação gira por cima</string>
+    <string name="ae_anim_poi">Ponto de interesse</string>
+    <string name="ae_anim_poi_axis">Ponto de interesse %1$s</string>
+    <string name="ae_anim_poi_key_add">Keyframe do ponto de interesse</string>
+    <string name="ae_anim_poi_key_remove">Remover keyframe do ponto de interesse</string>
+    <string name="ae_anim_char_offset">Deslocamento de caractere</string>
+    <string name="ae_anim_skew_axis">Eixo da inclinação</string>
+</resources>

@@ -20,7 +20,8 @@ bool near(f32 a, f32 b) noexcept { return std::fabs(a - b) < 1e-5f; }
 // -----------------------------------------------------------------------------
 class Exposure final : public Effect {
 public:
-    enum : u32 { kExposure = 0, kOffset, kGamma, kSpace };
+    enum : u32 { kExposure = 0, kOffset, kGamma, kSpace, kChannels, kRedExposure, kRedOffset, kRedGamma,
+                 kGreenExposure, kGreenOffset, kGreenGamma, kBlueExposure, kBlueOffset, kBlueGamma };
 
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kExposure, "Exposição", "Cor", EffectClass::PerPixel};
@@ -41,12 +42,38 @@ public:
         // No fim da lista: projetos antigos abrem com o padrão, luz linear.
         static const char* const kSpaces[] = {"Luz linear", "Valor codificado"};
         p.add_enum("space", "Aplicar em", kSpaces, 2, 0);
+        // AE 2026 (no fim): canais individuais — exposição, deslocamento e gama
+        // por canal. "Mestre" (o padrão) é a conta de sempre com os três acima.
+        static const char* const kModes[] = {"Mestre", "Canais individuais"};
+        p.add_enum("channels", "Canais", kModes, 2, 0);
+        static const char* const kIds[] = {"red_exposure", "red_offset", "red_gamma", "green_exposure", "green_offset",
+                                           "green_gamma", "blue_exposure", "blue_offset", "blue_gamma"};
+        static const char* const kLabels[] = {"Exposição do vermelho", "Deslocamento do vermelho", "Gama do vermelho",
+                                              "Exposição do verde", "Deslocamento do verde", "Gama do verde",
+                                              "Exposição do azul", "Deslocamento do azul", "Gama do azul"};
+        for (u32 c = 0; c < 3; ++c) {
+            const u32 exp = p.add_float(kIds[c * 3], kLabels[c * 3], 0.0f, -10.0f, 10.0f, kParamAnimatable, "stops");
+            p.set_typed_range(exp, -14.0f, 14.0f);
+            const u32 off = p.add_float(kIds[c * 3 + 1], kLabels[c * 3 + 1], 0.0f, -0.5f, 0.5f);
+            p.set_typed_range(off, -2.0f, 2.0f);
+            const u32 gam = p.add_float(kIds[c * 3 + 2], kLabels[c * 3 + 2], 1.0f, 0.1f, 10.0f);
+            p.set_typed_range(gam, 0.1f, 100.0f);
+            for (u32 k : {exp, off, gam}) p.set_enabled_by(k, kChannels, 2u);   // só com "Canais individuais"
+        }
     }
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
         v[kExposure] = ParamValue::scalar(1.0f);      // um ponto de luz já se vê
         return true;
     }
+    static bool individual(const EffectEval& e) noexcept { return e.count > kChannels && e.e(kChannels) == 1u; }
     bool is_identity(const EffectEval& e) const noexcept override {
+        if (individual(e)) {
+            for (u32 c = 0; c < 3; ++c) {
+                if (!near(e.f(kRedExposure + c * 3), 0.0f) || !near(e.f(kRedOffset + c * 3), 0.0f)
+                    || !near(e.f(kRedGamma + c * 3), 1.0f)) return false;
+            }
+            return true;
+        }
         return near(e.f(kExposure), 0.0f) && near(e.f(kOffset), 0.0f) && near(e.f(kGamma), 1.0f);
     }
     bool color_op(const EffectEval& e, ColorOp& op) const noexcept override {
@@ -55,6 +82,21 @@ public:
         op.p[2] = e.f(kOffset);
         op.p[3] = e.f(kGamma) > 0.01f ? e.f(kGamma) : 0.01f;
         op.p[4] = e.e(kSpace) == 1u ? 1.0f : 0.0f;
+        if (individual(e)) {
+            // b.y = 1: canais individuais. b.zw/d.x = exposições R/G/B, d.yzw =
+            // deslocamentos, e4.xyz = gamas.
+            auto g = [&](u32 i) { return e.f(i) > 0.01f ? e.f(i) : 0.01f; };
+            op.p[5] = 1.0f;
+            op.p[6] = e.f(kRedExposure);
+            op.p[7] = e.f(kGreenExposure);
+            op.p[8] = e.f(kBlueExposure);
+            op.p[9] = e.f(kRedOffset);
+            op.p[10] = e.f(kGreenOffset);
+            op.p[11] = e.f(kBlueOffset);
+            op.p[12] = g(kRedGamma);
+            op.p[13] = g(kGreenGamma);
+            op.p[14] = g(kBlueGamma);
+        }
         return true;
     }
 };
@@ -220,7 +262,7 @@ public:
 // -----------------------------------------------------------------------------
 class Levels final : public Effect {
 public:
-    enum : u32 { kInBlack = 0, kInWhite, kGamma, kOutBlack, kOutWhite };
+    enum : u32 { kInBlack = 0, kInWhite, kGamma, kOutBlack, kOutWhite, kChannel, kClipBlack, kClipWhite };
 
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kLevels, "Níveis", "Cor", EffectClass::PerPixel};
@@ -232,6 +274,12 @@ public:
         p.add_float("gamma", "Gama", 1.0f, 0.1f, 10.0f);
         p.add_float("output_black", "Preto de saída", 0.0f, 0.0f, 255.0f);
         p.add_float("output_white", "Branco de saída", 255.0f, 0.0f, 255.0f);
+        // AE 2026 (no fim): o canal (RGB = o de sempre; R, G, B ou Alfa sozinhos)
+        // e os recortes na saída — ligados, como antes.
+        static const char* const kChannels[] = {"RGB", "Vermelho", "Verde", "Azul", "Alfa"};
+        p.add_enum("channel", "Canal", kChannels, 5, 0);
+        p.add_bool("clip_to_output_black", "Recortar no preto de saída", true);
+        p.add_bool("clip_to_output_white", "Recortar no branco de saída", true);
     }
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
         v[0] = ParamValue::scalar(32.0f);    // preto de entrada
@@ -250,6 +298,9 @@ public:
         op.p[3] = e.f(kGamma);
         op.p[4] = e.f(kOutBlack) / 255.0f;
         op.p[5] = e.f(kOutWhite) / 255.0f;
+        op.p[6] = static_cast<f32>(std::min<u32>(e.e(kChannel), 4u));
+        // Bits dos recortes DESLIGADOS (0 = os dois ligados, o de sempre).
+        op.p[7] = (e.b(kClipBlack) ? 0.0f : 1.0f) + (e.b(kClipWhite) ? 0.0f : 2.0f);
         return true;
     }
 };

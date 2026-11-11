@@ -549,7 +549,7 @@ private fun ElementGrid(store: EditorStore, ui: EditorUi, close: () -> Unit) {
                 close(); store.addAdjustmentLayer()
             },
             ObjectCell(stringResource(R.string.scene_flare3d), "add.element.flare", glyph = CupertinoGlyph.Sparkles, tint = ShellColors.Text3D) {
-                store.addLight(3); close()
+                store.addLight(EditorStore.LIGHT_FLARE); close()
             },
             ObjectCell(stringResource(R.string.grid_builder), "add.element.grid", glyph = ShellGlyph.CircleGridHex) {
                 store.createGrid(); close()

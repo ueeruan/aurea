@@ -1045,6 +1045,9 @@ struct EffectsView: View {
         if type == fxEffectTypeId(bgRemoveEffectKey) {
             BgRemoveCardTools(effectId: effect.effectId).padding(.horizontal, 6).padding(.vertical, 4)
         }
+        if type == fxEffectTypeId("aurea.distort.headbop") {
+            HeadbopCardTools(effectId: effect.effectId).padding(.horizontal, 6).padding(.vertical, 4)
+        }
         if type == fxEffectTypeId("aurea.key.rotobrush") {
             VStack(spacing: 0) {
                 FxBodyNotice(text: AureaText.t("roto_note"))

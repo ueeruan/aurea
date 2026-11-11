@@ -189,6 +189,7 @@ struct CameraOptionsPanel: View {
                     beginGesture(); model.setCameraLens(AureaModel.cameraAffectsBelow, value: enabled ? 1 : 0); endGesture()
                 }
                 .padding(.horizontal, 6)
+                twoNodeRows
                 angleRow
                 zoomRow.padding(.top, 8)
                 presetChips.padding(.top, 6)
@@ -572,6 +573,42 @@ struct CameraOptionsPanel: View {
         .accessibilityLabel(label)
         .accessibilityValue(text)
         .accessibilityIdentifier(identifier)
+    }
+
+    /// AE animation: câmera de DOIS NÓS (CameraOptionsPanel.kt `CameraTwoNodeRows`). Ligada,
+    /// a câmera mira o Ponto de Interesse (px do espaço do pai) e a rotação gira por cima.
+    /// O POI nasce à frente da câmera (a imagem não pula) e tem keyframe próprio (X/Y/Z).
+    @ViewBuilder private var twoNodeRows: some View {
+        let _ = model.aeAnimRevision
+        if let poi = model.cameraPoi() {
+            let twoNode = poi[0] >= 0.5
+            cameraToggle("ae_anim_two_node", hint: "ae_anim_two_node_hint", checked: twoNode,
+                         identifier: "camera.view.twoNode") { on in model.setCameraTwoNode(on) }
+                .padding(.horizontal, 6)
+            if twoNode {
+                let label = AureaText.t("ae_anim_poi")
+                let props: [UInt32] = [51, 52, 53]   // TrackProperty::CameraPoiX/Y/Z
+                let here = (model.keyframes[id] ?? []).contains { props.contains($0.property) && $0.time == model.localPlayhead }
+                HStack(spacing: 4) {
+                    Text(label).font(.aurea(size: 13)).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+                    ForEach(0..<3, id: \.self) { i in
+                        let axis = ["X", "Y", "Z"][i]
+                        cameraValueBox("\(axis) \(Int(poi[i + 1].rounded()))", label: "\(label) \(axis)", identifier: "camera.poi.\(i)") {
+                            keypad("\(label) \(axis)", poi[i + 1], unit: "px", min: -100000, max: 100000, decimals: 0) { v in
+                                guard var now = model.cameraPoi() else { return }
+                                now[i + 1] = v
+                                model.setCameraPoi(x: now[1], y: now[2], z: now[3])
+                            }
+                        }
+                    }
+                }
+                .frame(minHeight: 44).padding(.horizontal, 10)
+                PanelItemRow(glyph: CupertinoGlyph.SuitDiamond,
+                             title: AureaText.t(here ? "ae_anim_poi_key_remove" : "ae_anim_poi_key_add"),
+                             tag: "camera.poi.key", on: here) { model.toggleCameraPoiKey() }
+                    .padding(.horizontal, 10)
+            }
+        }
     }
 
     private func cameraToggle(_ title: String, hint: String, checked: Bool, identifier: String,

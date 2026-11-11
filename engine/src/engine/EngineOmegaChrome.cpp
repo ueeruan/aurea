@@ -299,6 +299,7 @@ u32 Engine::paste_style_parts(const u64* ids, u32 count, u32 parts) noexcept {
             d.text.backgroundColor = s.text.backgroundColor;
             d.text.backgroundPadding = s.text.backgroundPadding;
             d.text.backgroundRadius = s.text.backgroundRadius;
+            d.text.texture = s.text.texture;   // 0.5.2: textura (mesmo projeto: o asset vale)
             replace_track(d, s, TrackProperty::TextTracking);
             changed = true;
         }

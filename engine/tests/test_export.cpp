@@ -2874,6 +2874,8 @@ AUREA_TEST(Regression2135Gpu, SharedTextTransformAndPresetReach3DExportAndSurviv
 #include "ExportCheckpoint.inl"
 // AureaHyper (0.3.2): o job da Home e o medidor.
 #include "HyperExport.inl"
+// 0.5.2: camada presa a um osso no export (igual à prévia).
+#include "ExportBoneAttach.inl"
 
 #endif // AUREA_TEST_VULKAN
 
@@ -3059,3 +3061,4 @@ AUREA_TEST(ExportWatchdogRules, StreamEndsWithoutEosOnlyWhenEverythingCameOut) {
 #include "ExportDiagnosticsTiming.inl"
 #include "ExportDiagnosticsProbe.inl"
 #include "ExportDirectSurface.inl"
+#include "ExportSourceText.inl"

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: "Prender a um osso" (camada segue uma junta de um modelo 3D) e chão molhado da Cena 3D. -->
+<resources>
+    <string name="bone_attach_title">Tempel ke tulang</string>
+    <string name="bone_attach_hint">Lapisan mengikuti posisi dan putaran tulang yang dipilih, di pratinjau dan ekspor.</string>
+    <string name="bone_attach_menu_hint">Ikuti tangan, kepala, atau tulang lain dari model 3D</string>
+    <string name="bone_attach_current">Tertempel ke: %1$s</string>
+    <string name="bone_attach_no_rig">Tidak ada model 3D dengan rig di komposisi ini.</string>
+    <string name="bone_attach_release">Lepas dari tulang</string>
+    <string name="bone_attach_done">Lapisan tertempel ke %1$s</string>
+    <string name="bone_attach_released">Lapisan dilepas dari tulang</string>
+    <string name="bone_attach_failed">Lapisan tidak bisa ditempel ke tulang itu</string>
+    <string name="scene052_floor_wet">Lantai basah</string>
+    <string name="scene052_puddle_size">Ukuran genangan</string>
+</resources>

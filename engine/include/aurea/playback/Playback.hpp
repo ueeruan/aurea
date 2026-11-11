@@ -65,6 +65,13 @@ public:
     void configure(f64 fps, FrameIndex duration) noexcept;
     /// Inclusive editing boundary; negative restores unrestricted navigation.
     void set_navigation_end(FrameIndex end) noexcept { navigationEnd_ = end; }
+    /// Área de trabalho (work area): tocando, a reprodução fica em [in, out)
+    /// — o play de fora dela começa no `in` e o fim volta ao `in` (com loop)
+    /// ou para no último quadro dela. in >= out (ou negativo) = sem área.
+    void set_play_range(FrameIndex in, FrameIndex out) noexcept { rangeIn_ = in; rangeOut_ = out; }
+    [[nodiscard]] bool has_play_range() const noexcept {
+        return rangeIn_.value >= 0 && rangeOut_.value > rangeIn_.value && rangeOut_.value <= duration_.value;
+    }
 
     void play(u64 nowNs) noexcept;
     void pause(u64 nowNs) noexcept;
@@ -126,6 +133,8 @@ private:
     f64 fps_ = 30.0;
     FrameIndex duration_{1};
     FrameIndex navigationEnd_{-1};
+    FrameIndex rangeIn_{-1};
+    FrameIndex rangeOut_{-1};
     FrameIndex current_{0};
     i64 currentNs_ = 0;
     f32 speed_ = 1.0f;

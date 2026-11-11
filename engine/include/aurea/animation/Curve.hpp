@@ -23,6 +23,7 @@
 #include "aurea/core/Math.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <memory>
 #include <vector>
 
@@ -115,6 +116,25 @@ inline bool mirror_parametric_ease(Keyframe& k) noexcept {
     return true;
 }
 
+/// Cache de índice lido e escrito por várias threads ao mesmo tempo (render,
+/// mixagem de áudio, consultas da UI): atômico com ordem relaxada (bug B3 do
+/// gap_system). O valor é só uma dica — quem lê valida antes de usar —, então
+/// relaxado basta; o atômico só tira a corrida (UB) do acesso. Copiável como
+/// um u32 para a Track continuar um valor comum (histórico, duplicar).
+class RelaxedIndex {
+public:
+    constexpr RelaxedIndex() noexcept = default;
+    RelaxedIndex(u32 v) noexcept : v_(v) {}
+    RelaxedIndex(const RelaxedIndex& o) noexcept : v_(o.load()) {}
+    RelaxedIndex& operator=(const RelaxedIndex& o) noexcept { store(o.load()); return *this; }
+    RelaxedIndex& operator=(u32 v) noexcept { store(v); return *this; }
+    operator u32() const noexcept { return load(); }
+    [[nodiscard]] u32 load() const noexcept { return v_.load(std::memory_order_relaxed); }
+    void store(u32 v) noexcept { v_.store(v, std::memory_order_relaxed); }
+private:
+    std::atomic<u32> v_{0};
+};
+
 /// Uma propriedade animável de uma layer — ou uma propriedade estática, se
 /// tiver zero ou um keyframe.
 ///
@@ -135,7 +155,7 @@ struct Track {
     /// Cache do último índice avaliado. Reprodução anda para frente, então a
     /// busca binária quase sempre cai no mesmo intervalo — guardar o índice
     /// transforma a busca em um teste.
-    mutable u32 lastIndex = 0;
+    mutable RelaxedIndex lastIndex{0u};
 
     /// Expressão (expr/Expression.hpp): nula = sem expressão. O objeto é
     /// imutável e compartilhado entre cópias da track (histórico, duplicar);

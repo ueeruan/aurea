@@ -215,7 +215,7 @@ AUREA_TEST(Vector, StrokeTaperThinsTheEndsAndRoundTrips) {
     std::vector<f32> s;
     std::string names;
     encode_document(d, s, names);
-    AUREA_CHECK_EQ(s[0], 5.0f);
+    AUREA_CHECK_EQ(s[0], 6.0f);   // v6: operadores de caminho
     VectorData back;
     AUREA_CHECK(decode_document(s.data(), s.size(), names, back));
     AUREA_CHECK(back == d);

@@ -1016,6 +1016,34 @@ class AureaEngine private constructor() {
      * cadeia recortada logo acima. Um passo de desfazer.
      */
     fun setLayerClipToBelow(layer: Long, on: Boolean): Boolean = nativeSetLayerClipToBelow(nativeHandle, layer, on)
+    // AE compositing (EngineAeCompositing.cpp).
+    /** Preservar transparência (o T do AE): pinta só onde a pilha abaixo tem alfa. */
+    fun setLayerPreserveTransparency(layer: Long, on: Boolean): Boolean = nativeSetLayerPreserveTransparency(nativeHandle, layer, on)
+    /** Tímida (o Shy do AE): some da timeline com [setHideShy] ligado. */
+    fun setLayerShy(layer: Long, on: Boolean): Boolean = nativeSetLayerShy(nativeHandle, layer, on)
+    /** "Ocultar camadas tímidas" da composição atual. */
+    fun setHideShy(on: Boolean): Boolean = nativeSetHideShy(nativeHandle, on)
+    fun hideShy(): Boolean = nativeHideShy(nativeHandle)
+    /** Queda do feather da máscara: 0 suave, 1 linear (o atual vem no float 11 de `queryMasks`). */
+    fun setMaskFalloff(layer: Long, mask: Int, falloff: Int): Boolean = nativeSetMaskFalloff(nativeHandle, layer, mask, falloff)
+    // AE animation (EngineAeAnimation.cpp).
+    /** Key do texto-fonte no cabeçote com o texto que aparece agora. Devolve o quadro LOCAL (-1 = recusado). */
+    fun addTextSourceKey(layer: Long): Long = nativeAddTextSourceKey(nativeHandle, layer)
+    /** Troca o conteúdo do key do quadro LOCAL [frame]. Um passo de desfazer. */
+    fun setTextSourceKey(layer: Long, frame: Long, content: String): Boolean = nativeSetTextSourceKey(nativeHandle, layer, frame, content)
+    fun deleteTextSourceKey(layer: Long, frame: Long): Boolean = nativeDeleteTextSourceKey(nativeHandle, layer, frame)
+    /** Quadros LOCAIS dos keys do texto-fonte, em ordem. */
+    fun textSourceKeys(layer: Long): LongArray = nativeTextSourceKeys(nativeHandle, layer)
+    /** Auto-orientar: 0 desligado, 1 ao longo do caminho, 2 para a câmera. */
+    fun setLayerAutoOrient(layer: Long, mode: Int): Boolean = nativeSetLayerAutoOrient(nativeHandle, layer, mode)
+    fun layerAutoOrient(layer: Long): Int = nativeLayerAutoOrient(nativeHandle, layer)
+    /** Câmera de dois nós (mira no Ponto de Interesse). */
+    fun setCameraTwoNode(layer: Long, on: Boolean): Boolean = nativeSetCameraTwoNode(nativeHandle, layer, on)
+    /** Ponto de Interesse (px do espaço do pai); [undo] falso = continuação de um arrasto. */
+    fun setCameraPoi(layer: Long, x: Float, y: Float, z: Float, undo: Boolean = true): Boolean =
+        nativeSetCameraPoi(nativeHandle, layer, x, y, z, undo)
+    /** {dois nós (0/1), x, y, z} no cabeçote; nulo = não é câmera. */
+    fun cameraPoi(layer: Long): FloatArray? = nativeCameraPoi(nativeHandle, layer)
     fun setLayerSolo(layer: Long, on: Boolean): Boolean = nativeSetLayerSolo(nativeHandle, layer, on)
     /** Camadas cujo nome/texto contém [query] (sem maiúscula nem acento), da frente para o fundo. */
     fun searchLayers(query: String): LongArray = nativeSearchLayers(nativeHandle, query)
@@ -1041,6 +1069,18 @@ class AureaEngine private constructor() {
     fun queryTextStyle(layer: Long, out: FloatArray): Boolean = nativeQueryTextStyle(nativeHandle, layer, out)
     /** 0.4.6: texto dinâmico — {ligado, de, até, casas, separador, curva} (`set_text_dynamic`). */
     fun setTextDynamic(layer: Long, v: DoubleArray): Boolean = nativeSetTextDynamic(nativeHandle, layer, v)
+    /**
+     * 0.5.2: preenchimento com textura do texto (`set_text_texture`): {tipo (0 lisa, 1..18, 19 imagem),
+     * mapeamento, contorno, escala, rotação, desloc. x, y, contraste, brilho, tinta r g b a, velocidade,
+     * relevo, ângulo da luz, semente}. A consulta traz mais 1: há imagem guardada.
+     */
+    fun setTextTexture(layer: Long, v: FloatArray): Boolean = nativeSetTextTexture(nativeHandle, layer, v)
+    fun queryTextTexture(layer: Long): FloatArray? = nativeQueryTextTexture(nativeHandle, layer)
+    fun setTextTextureImage(layer: Long, path: String): Boolean =
+        nativeWork.run(false) { nativeSetTextTextureImage(nativeHandle, layer, path) }
+    private external fun nativeSetTextTexture(handle: Long, layer: Long, v: FloatArray): Boolean
+    private external fun nativeQueryTextTexture(handle: Long, layer: Long): FloatArray?
+    private external fun nativeSetTextTextureImage(handle: Long, layer: Long, path: String): Boolean
     /** 0.4.6: repetir o vídeo além do fim da fonte. */
     fun setLayerMediaLoop(layer: Long, on: Boolean): Boolean = nativeSetLayerMediaLoop(nativeHandle, layer, on)
     /** 0.4.6: caminho curvo — tangentes do keyframe de posição (entrada xyz, saída xyz). */
@@ -1234,6 +1274,18 @@ class AureaEngine private constructor() {
         nativeBgRemoveStatus(nativeHandle, layer, effectId)?.takeIf { it.size >= 9 } ?: LongArray(9)
     /** Há segmentador nativo de pessoa (no Android não há: o modelo embutido vale). */
     fun bgRemoveNativeAvailable(): Boolean = nativeBgRemoveNativeAvailable()
+    // --- Headbop (0.5.2) ---
+    fun headbopBegin(layer: Long, effectId: Int): Boolean = nativeHeadbopBegin(nativeHandle, layer, effectId)
+    /** Quadros do formato do Motion Capture: [tempo s, pessoa, 33 × (x, y, z, confiança)]. */
+    fun headbopPushFrames(data: FloatArray, frames: Int, aspect: Float): Boolean = nativeHeadbopPushFrames(nativeHandle, data, frames, aspect)
+    /** Bloqueia (chame fora da main): rig + batidas, um passo de desfazer. */
+    fun headbopAnalyze(): Boolean = nativeHeadbopAnalyze(nativeHandle)
+    fun headbopCancel() = nativeHeadbopCancel(nativeHandle)
+    /** [estado, progresso ×1000, pessoas, BPM ×100, quadros, rig, BPM em uso ×100, fonte da pose, válido]. */
+    fun headbopStatus(layer: Long, effectId: Int): LongArray =
+        nativeHeadbopStatus(nativeHandle, layer, effectId)?.takeIf { it.size >= 9 } ?: LongArray(9)
+    fun headbopSetTaps(layer: Long, effectId: Int, times: DoubleArray): Boolean = nativeHeadbopSetTaps(nativeHandle, layer, effectId, times)
+    fun headbopBake(layer: Long, effectId: Int): Int = nativeHeadbopBake(nativeHandle, layer, effectId)
     fun setGroupCameraPassThrough(layer: Long, on: Boolean): Boolean = nativeSetGroupCameraPassThrough(nativeHandle, layer, on)
     /** −1 = não é grupo. */
     fun queryGroupCameraPassThrough(layer: Long): Int = nativeQueryGroupCameraPassThrough(nativeHandle, layer)
@@ -1405,6 +1457,11 @@ class AureaEngine private constructor() {
     fun humanoidMoveJoint(layer: Long, bone: Int, x: Float, y: Float): Boolean = nativeHumanoidMoveJoint(nativeHandle, layer, bone, x, y)
     fun humanoidAssignBone(layer: Long, bone: Int, node: Int): Boolean = nativeHumanoidAssignBone(nativeHandle, layer, bone, node)
     fun modelNodeName(layer: Long, node: Int): String = nativeModelNodeName(nativeHandle, layer, node) ?: ""
+    /** 0.5.2 "Prender a um osso": os ossos do modelo onde uma camada pode ser presa. */
+    fun modelAttachBones(model: Long): IntArray = nativeModelAttachBones(nativeHandle, model) ?: IntArray(0)
+    /** Prende [layer] à junta [node] do modelo [model] (−1 = solta do osso). Um passo de desfazer. */
+    fun setLayerParentBone(layer: Long, model: Long, node: Int): Boolean = nativeSetLayerParentBone(nativeHandle, layer, model, node)
+    fun layerParentBone(layer: Long): Int = nativeLayerParentBone(nativeHandle, layer)
     fun dragBoneTranslate(layer: Long, node: Int, dx: Float, dy: Float, continuing: Boolean): Boolean =
         nativeDragBoneTranslate(nativeHandle, layer, node, dx, dy, continuing)
     fun humanoidSetIk(layer: Long, limb: Int, on: Boolean): Boolean = nativeHumanoidSetIk(nativeHandle, layer, limb, on)
@@ -1572,6 +1629,46 @@ class AureaEngine private constructor() {
     fun markerLabel(frame: Long): String = nativeMarkerLabel(nativeHandle, frame).toString(Charsets.UTF_8)
     /** Marcas: frame, cor, tipo (3 longs cada). Devolve o total. */
     fun queryMarkers(out: LongArray): Int = nativeQueryMarkers(nativeHandle, out)
+
+    // --- Timeline do AE (EngineAeTimeline.cpp) ---------------------------------------
+    /** Marca da composição com duração (quadros) e comentário; from < 0 insere. Um passo de desfazer. */
+    fun editMarkerEx(from: Long, to: Long, color: Int, label: String, duration: Long, comment: String): Boolean =
+        nativeEditMarkerEx(nativeHandle, from, to, color, label.toByteArray(Charsets.UTF_8), duration, comment.toByteArray(Charsets.UTF_8))
+    /** Duração e comentário da marca da composição; null = não há marca no quadro. */
+    fun markerDetails(frame: Long): Pair<Long, String>? {
+        val duration = LongArray(1)
+        val bytes = nativeMarkerDetails(nativeHandle, frame, duration) ?: return null
+        return duration[0] to bytes.toString(Charsets.UTF_8)
+    }
+    /** Marca da CAMADA (quadros da composição; o motor guarda em tempo local). from < 0 insere. */
+    fun editLayerMarker(layer: Long, from: Long, to: Long, color: Int, label: String, duration: Long, comment: String): Boolean =
+        nativeEditLayerMarker(nativeHandle, layer, from, to, color, label.toByteArray(Charsets.UTF_8), duration, comment.toByteArray(Charsets.UTF_8))
+    fun moveLayerMarker(layer: Long, from: Long, to: Long): Boolean = nativeMoveLayerMarker(nativeHandle, layer, from, to)
+    fun deleteLayerMarker(layer: Long, frame: Long): Boolean = nativeDeleteLayerMarker(nativeHandle, layer, frame)
+    /** Todas as marcas de camada: id, quadro, duração, cor (4 longs cada). Devolve o total. */
+    fun queryAllLayerMarkers(out: LongArray): Int = nativeQueryAllLayerMarkers(nativeHandle, out)
+    /** Nome e comentário da marca da camada; null = não há. */
+    fun layerMarkerText(layer: Long, frame: Long): Pair<String, String>? {
+        val bytes = nativeLayerMarkerText(nativeHandle, layer, frame) ?: return null
+        val cut = bytes.indexOf(0.toByte())
+        if (cut < 0) return bytes.toString(Charsets.UTF_8) to ""
+        return bytes.copyOfRange(0, cut).toString(Charsets.UTF_8) to bytes.copyOfRange(cut + 1, bytes.size).toString(Charsets.UTF_8)
+    }
+    /** Escala no tempo os keyframes escolhidos em volta de [anchor] (quadro local). Quantos andaram. */
+    fun scaleKeyframeSelection(layer: Long, references: LongArray, anchor: Long, factor: Double): Int =
+        nativeScaleKeyframeSelection(nativeHandle, layer, references, anchor, factor)
+    /** Easy Ease nos escolhidos: 0 os dois lados, 1 entrada, 2 saída. Quantos mudaram. */
+    fun easeKeyframeSelection(layer: Long, references: LongArray, mode: Int): Int =
+        nativeEaseKeyframeSelection(nativeHandle, layer, references, mode)
+    /** Área de trabalho [in, out); in < 0 apaga. */
+    fun setWorkArea(start: Long, end: Long): Boolean = nativeSetWorkArea(nativeHandle, start, end)
+    /** [in, out) efetivos em [out]; true = há uma área menor que a composição. */
+    fun queryWorkArea(out: LongArray): Boolean = nativeQueryWorkArea(nativeHandle, out)
+    fun trimToWorkArea(): Boolean = nativeTrimToWorkArea(nativeHandle)
+    /** Opção da sessão: a próxima exportação sai só com a área de trabalho. */
+    fun setExportWorkAreaOnly(on: Boolean) = nativeSetExportWorkAreaOnly(nativeHandle, on)
+    /** Alinhar (0..5) / distribuir (6 horizontal, 7 vertical) no motor; um passo de desfazer. */
+    fun alignLayers(ids: LongArray, mode: Int): Int = nativeAlignLayers(nativeHandle, ids, mode)
     /** Síncrono (decodifica o som): fora da thread de UI. Nº de batidas ou −Errc. */
     fun detectBeats(layer: Long, bpm: DoubleArray): Long = nativeWork.run(-5L) { nativeDetectBeats(nativeHandle, layer, bpm) }
 
@@ -1963,6 +2060,20 @@ class AureaEngine private constructor() {
     private external fun nativeSetLayerGuide(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeSetLayerLabel(handle: Long, layer: Long, label: Int): Boolean
     private external fun nativeSetLayerClipToBelow(handle: Long, layer: Long, on: Boolean): Boolean
+    private external fun nativeSetLayerPreserveTransparency(handle: Long, layer: Long, on: Boolean): Boolean
+    private external fun nativeSetLayerShy(handle: Long, layer: Long, on: Boolean): Boolean
+    private external fun nativeSetHideShy(handle: Long, on: Boolean): Boolean
+    private external fun nativeHideShy(handle: Long): Boolean
+    private external fun nativeSetMaskFalloff(handle: Long, layer: Long, mask: Int, falloff: Int): Boolean
+    private external fun nativeAddTextSourceKey(handle: Long, layer: Long): Long
+    private external fun nativeSetTextSourceKey(handle: Long, layer: Long, frame: Long, content: String): Boolean
+    private external fun nativeDeleteTextSourceKey(handle: Long, layer: Long, frame: Long): Boolean
+    private external fun nativeTextSourceKeys(handle: Long, layer: Long): LongArray
+    private external fun nativeSetLayerAutoOrient(handle: Long, layer: Long, mode: Int): Boolean
+    private external fun nativeLayerAutoOrient(handle: Long, layer: Long): Int
+    private external fun nativeSetCameraTwoNode(handle: Long, layer: Long, on: Boolean): Boolean
+    private external fun nativeSetCameraPoi(handle: Long, layer: Long, x: Float, y: Float, z: Float, undo: Boolean): Boolean
+    private external fun nativeCameraPoi(handle: Long, layer: Long): FloatArray?
     private external fun nativeSetLayerSolo(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeSearchLayers(handle: Long, query: String): LongArray
     private external fun nativeSetThermal(handle: Long, status: Int)
@@ -2134,6 +2245,9 @@ class AureaEngine private constructor() {
     private external fun nativeHumanoidMoveJoint(handle: Long, layer: Long, bone: Int, x: Float, y: Float): Boolean
     private external fun nativeHumanoidAssignBone(handle: Long, layer: Long, bone: Int, node: Int): Boolean
     private external fun nativeModelNodeName(handle: Long, layer: Long, node: Int): String?
+    private external fun nativeModelAttachBones(handle: Long, model: Long): IntArray?
+    private external fun nativeSetLayerParentBone(handle: Long, layer: Long, model: Long, node: Int): Boolean
+    private external fun nativeLayerParentBone(handle: Long, layer: Long): Int
     private external fun nativeDragBoneTranslate(handle: Long, layer: Long, node: Int, dx: Float, dy: Float, continuing: Boolean): Boolean
     private external fun nativeHumanoidSetIk(handle: Long, layer: Long, limb: Int, on: Boolean): Boolean
     private external fun nativeQueryHumanoidIk(handle: Long, layer: Long, out: FloatArray?): Int
@@ -2141,6 +2255,13 @@ class AureaEngine private constructor() {
     private external fun nativeToggleHumanoidIkKey(handle: Long, layer: Long, limb: Int): Int
     private external fun nativeMocapBegin(handle: Long, layer: Long): Int
     private external fun nativeMocapPushFrames(handle: Long, data: FloatArray, frames: Int, aspect: Float): Boolean
+    private external fun nativeHeadbopBegin(handle: Long, layer: Long, effectId: Int): Boolean
+    private external fun nativeHeadbopPushFrames(handle: Long, data: FloatArray, frames: Int, aspect: Float): Boolean
+    private external fun nativeHeadbopAnalyze(handle: Long): Boolean
+    private external fun nativeHeadbopCancel(handle: Long)
+    private external fun nativeHeadbopStatus(handle: Long, layer: Long, effectId: Int): LongArray?
+    private external fun nativeHeadbopSetTaps(handle: Long, layer: Long, effectId: Int, times: DoubleArray): Boolean
+    private external fun nativeHeadbopBake(handle: Long, layer: Long, effectId: Int): Int
     private external fun nativeMocapAnalyze(handle: Long, params: FloatArray?): Boolean
     private external fun nativeMocapCancel(handle: Long)
     private external fun nativeMocapProgress(handle: Long): Float
@@ -2301,6 +2422,20 @@ class AureaEngine private constructor() {
     private external fun nativeDeleteMarker(handle: Long, frame: Long): Boolean
     private external fun nativeMarkerLabel(handle: Long, frame: Long): ByteArray
     private external fun nativeQueryMarkers(handle: Long, out: LongArray): Int
+    private external fun nativeEditMarkerEx(handle: Long, from: Long, to: Long, color: Int, label: ByteArray, duration: Long, comment: ByteArray): Boolean
+    private external fun nativeMarkerDetails(handle: Long, frame: Long, durationOut: LongArray): ByteArray?
+    private external fun nativeEditLayerMarker(handle: Long, layer: Long, from: Long, to: Long, color: Int, label: ByteArray, duration: Long, comment: ByteArray): Boolean
+    private external fun nativeMoveLayerMarker(handle: Long, layer: Long, from: Long, to: Long): Boolean
+    private external fun nativeDeleteLayerMarker(handle: Long, layer: Long, frame: Long): Boolean
+    private external fun nativeQueryAllLayerMarkers(handle: Long, out: LongArray): Int
+    private external fun nativeLayerMarkerText(handle: Long, layer: Long, frame: Long): ByteArray?
+    private external fun nativeScaleKeyframeSelection(handle: Long, layer: Long, references: LongArray, anchor: Long, factor: Double): Int
+    private external fun nativeEaseKeyframeSelection(handle: Long, layer: Long, references: LongArray, mode: Int): Int
+    private external fun nativeSetWorkArea(handle: Long, start: Long, end: Long): Boolean
+    private external fun nativeQueryWorkArea(handle: Long, out: LongArray): Boolean
+    private external fun nativeTrimToWorkArea(handle: Long): Boolean
+    private external fun nativeSetExportWorkAreaOnly(handle: Long, on: Boolean)
+    private external fun nativeAlignLayers(handle: Long, ids: LongArray, mode: Int): Int
     private external fun nativeDetectBeats(handle: Long, layer: Long, bpm: DoubleArray): Long
     private external fun nativeAddText(handle: Long, content: String): Long
     private external fun nativeQueryText(handle: Long, layer: Long, out: FloatArray): String?
@@ -2378,6 +2513,17 @@ class AureaEngine private constructor() {
     fun setVectorParam(layer: Long, group: Int, param: Int, value: Float, continuing: Boolean): Boolean =
         nativeSetVectorParam(nativeHandle, layer, group, param, value, continuing)
     fun toggleVectorParamKey(layer: Long, group: Int, param: Int): Boolean = nativeToggleVectorParamKey(nativeHandle, layer, group, param)
+    /**
+     * Operadores de caminho do grupo (AE shape operators): [VParam.MOD_FLOATS] floats por operador —
+     * tipo, ligado, bits animados, bits com keyframe, os [VParam.MOD_PARAMS] valores no cabeçote.
+     * Os valores mudam por [setVectorParam] / [toggleVectorParamKey] com [VParam.mod].
+     */
+    fun queryVectorModifiers(layer: Long, group: Int): FloatArray? = nativeQueryVectorModifiers(nativeHandle, layer, group)
+    fun addVectorModifier(layer: Long, group: Int, type: Int): Int = nativeAddVectorModifier(nativeHandle, layer, group, type)
+    fun removeVectorModifier(layer: Long, group: Int, index: Int): Boolean = nativeRemoveVectorModifier(nativeHandle, layer, group, index)
+    fun moveVectorModifier(layer: Long, group: Int, from: Int, to: Int): Boolean = nativeMoveVectorModifier(nativeHandle, layer, group, from, to)
+    fun setVectorModifierEnabled(layer: Long, group: Int, index: Int, enabled: Boolean): Boolean =
+        nativeSetVectorModifierEnabled(nativeHandle, layer, group, index, enabled)
     /** Traço do dedo (x,y em px da composição) → caminho suave. `layer` 0 = camada nova. Id ≥ 0 ou −Errc. */
     fun addFreehandPath(layer: Long, xy: FloatArray, error: Float): Long = nativeAddFreehandPath(nativeHandle, layer, xy, error)
     fun importSvg(bytes: ByteArray, name: String): Long = nativeWork.run(-5L) { nativeImportSvg(nativeHandle, bytes, name) }
@@ -2436,6 +2582,11 @@ class AureaEngine private constructor() {
     private external fun nativeQueryVectorParams(handle: Long, layer: Long, group: Int): FloatArray?
     private external fun nativeSetVectorParam(handle: Long, layer: Long, group: Int, param: Int, value: Float, continuing: Boolean): Boolean
     private external fun nativeToggleVectorParamKey(handle: Long, layer: Long, group: Int, param: Int): Boolean
+    private external fun nativeQueryVectorModifiers(handle: Long, layer: Long, group: Int): FloatArray?
+    private external fun nativeAddVectorModifier(handle: Long, layer: Long, group: Int, type: Int): Int
+    private external fun nativeRemoveVectorModifier(handle: Long, layer: Long, group: Int, index: Int): Boolean
+    private external fun nativeMoveVectorModifier(handle: Long, layer: Long, group: Int, from: Int, to: Int): Boolean
+    private external fun nativeSetVectorModifierEnabled(handle: Long, layer: Long, group: Int, index: Int, enabled: Boolean): Boolean
     private external fun nativeAddFreehandPath(handle: Long, layer: Long, xy: FloatArray, error: Float): Long
     private external fun nativeImportSvg(handle: Long, bytes: ByteArray, name: String): Long
     private external fun nativeSetTextPath(handle: Long, layer: Long, pathLayer: Long, offset: Float, perpendicular: Boolean, reverse: Boolean): Boolean

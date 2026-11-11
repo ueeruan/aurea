@@ -69,8 +69,13 @@ void PlaybackController::set_held(bool held, u64 nowNs) noexcept {
 void PlaybackController::play(u64 nowNs) noexcept {
     held_ = false;
     if (mode_ == PlaybackMode::Playing) return;
+    // Área de trabalho: fora dela (ou no último quadro dela), começa no início dela.
+    if (has_play_range() && (current_.value < rangeIn_.value || current_.value >= rangeOut_.value - 1)) {
+        current_ = rangeIn_;
+        ++generation_;
+        ++mediaEpoch_;
+    } else if (current_.value >= duration_.value - 1) {
     // Tocar a partir do último frame volta ao começo — é o que todo player faz.
-    if (current_.value >= duration_.value - 1) {
         current_ = FrameIndex{0};
         ++generation_;
         ++mediaEpoch_;
@@ -182,15 +187,19 @@ FrameIndex PlaybackController::update(u64 nowNs) noexcept {
     if (held_) return current_;
 
     i64 ns = clock_.media_ns(nowNs);
-    const i64 endNs = frame_to_ns(duration_);
+    // Área de trabalho: o fim dela é o fim da reprodução (e o loop volta ao início dela).
+    const bool ranged = has_play_range();
+    const i64 startNs = ranged ? frame_to_ns(rangeIn_) : 0;
+    const FrameIndex endFrame = ranged ? rangeOut_ : duration_;
+    const i64 endNs = frame_to_ns(endFrame);
     if (ns >= endNs) {
-        if (loop_ && endNs > 0) {
-            ns = ns % endNs;
+        if (loop_ && endNs > startNs) {
+            ns = startNs + (ns - startNs) % (endNs - startNs);
             clock_.start(ns, nowNs, speed_);
             ++generation_;
             ++mediaEpoch_;
         } else {
-            current_ = FrameIndex{duration_.value - 1};
+            current_ = FrameIndex{endFrame.value - 1};
             currentNs_ = frame_to_ns(current_);
             clock_.stop(nowNs);
             mode_ = PlaybackMode::Paused;

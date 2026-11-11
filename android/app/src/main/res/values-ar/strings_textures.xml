@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: preenchimento com textura do texto (TextTextureSection.kt). -->
+<resources>
+    <string name="tex_section">خامة</string>
+    <string name="tex_preset_gold">ذهب</string>
+    <string name="tex_preset_silver">فضة/كروم</string>
+    <string name="tex_preset_brushed">معدن مصقول</string>
+    <string name="tex_preset_wood">خشب</string>
+    <string name="tex_preset_marble">رخام</string>
+    <string name="tex_preset_stone">حجر</string>
+    <string name="tex_preset_concrete">خرسانة</string>
+    <string name="tex_preset_glitter">لمعان</string>
+    <string name="tex_preset_holo">هولوغرافي</string>
+    <string name="tex_preset_neon">نيون</string>
+    <string name="tex_preset_fire">نار</string>
+    <string name="tex_preset_water">ماء</string>
+    <string name="tex_preset_galaxy">مجرة</string>
+    <string name="tex_preset_paper">ورق</string>
+    <string name="tex_preset_denim">جينز</string>
+    <string name="tex_preset_leather">جلد</string>
+    <string name="tex_preset_rust">صدأ</string>
+    <string name="tex_preset_ice">جليد</string>
+    <string name="tex_preset_desc">خامة %1$s</string>
+    <string name="tex_mapping">التوزيع</string>
+    <string name="tex_map_block">الكتلة كاملة</string>
+    <string name="tex_map_letter">لكل حرف</string>
+    <string name="tex_stroke_too">الحد أيضًا</string>
+    <string name="tex_scale">المقياس</string>
+    <string name="tex_rotation">الدوران</string>
+    <string name="tex_offset_x">الإزاحة X</string>
+    <string name="tex_offset_y">الإزاحة Y</string>
+    <string name="tex_contrast">التباين</string>
+    <string name="tex_brightness">السطوع</string>
+    <string name="tex_tint">لون الصبغة</string>
+    <string name="tex_speed">تحريك (السرعة)</string>
+    <string name="tex_relief">البروز</string>
+    <string name="tex_light_angle">زاوية الضوء</string>
+    <string name="tex_variation">التنويع</string>
+</resources>

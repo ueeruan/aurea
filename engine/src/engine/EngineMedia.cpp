@@ -661,4 +661,92 @@ Status Engine::project_file_media(const char* path, std::vector<package::MediaRe
     return OkStatus;
 }
 
+// =============================================================================
+// 0.5.2 PREENCHIMENTO COM TEXTURA do texto (TextData::texture, timeline v69).
+// v = {tipo, mapeamento, contorno, escala, rotação, deslocamento x, y,
+// contraste, brilho, tinta r, g, b, a, velocidade, relevo, ângulo da luz,
+// semente}. A imagem da galeria entra por set_text_texture_image.
+// =============================================================================
+bool Engine::set_text_texture(u64 layerId, const f32* v, u32 count) noexcept {
+    if (!v || count < kTextTextureValues) return false;
+    for (u32 i = 0; i < kTextTextureValues; ++i) if (!std::isfinite(v[i])) return false;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->locked || l->kind != LayerKind::Text) return false;
+    TextTexture t = l->text.texture;
+    t.kind = static_cast<u8>(std::lround(std::clamp(v[0], 0.0f, static_cast<f32>(kTextTextureImage))));
+    t.mapping = v[1] > 0.5f ? u8{1} : u8{0};
+    t.stroke = v[2] > 0.5f;
+    t.scale = v[3];
+    t.rotation = v[4];
+    t.offset = Vec2{v[5], v[6]};
+    t.contrast = v[7];
+    t.brightness = v[8];
+    t.tint = Vec4{v[9], v[10], v[11], v[12]};
+    t.speed = v[13];
+    t.relief = v[14];
+    t.lightAngle = v[15];
+    t.seed = static_cast<u32>(std::lround(std::clamp(v[16], 0.0f, 9999.0f)));
+    t = sanitized(t);
+    if (t == l->text.texture) return true;
+    history_.before_mutation(*comp, project_->timeline().current(), "textura do texto");
+    bump_model_revision_locked();
+    l->text.texture = t;
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::query_text_texture(u64 layerId, f32* out, u32 capacity) noexcept {
+    if (!out || capacity < kTextTextureValues) return false;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->kind != LayerKind::Text) return false;
+    const TextTexture& t = l->text.texture;
+    const f32 v[kTextTextureValues] = {static_cast<f32>(t.kind), static_cast<f32>(t.mapping), t.stroke ? 1.0f : 0.0f, t.scale,
+                                       t.rotation, t.offset.x, t.offset.y, t.contrast, t.brightness, t.tint.x, t.tint.y,
+                                       t.tint.z, t.tint.w, t.speed, t.relief, t.lightAngle, static_cast<f32>(t.seed)};
+    std::copy(v, v + kTextTextureValues, out);
+    // Há imagem da galeria guardada (o painel mostra "Imagem escolhida").
+    if (capacity > kTextTextureValues) out[kTextTextureValues] = t.image != 0 ? 1.0f : 0.0f;
+    return true;
+}
+
+Status Engine::set_text_texture_image(u64 layerId, const char* path) noexcept {
+    if (!path || !*path) return Errc::InvalidArgument;
+    ImagePixels px;
+    if (!decode_image_file(config_.imageLoader, config_.imageLoaderContext, resolve_asset_path(path), px))
+        return Status{Errc::InvalidArgument, "imagem ilegivel"};
+    std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!layer || layer->kind != LayerKind::Text) return Errc::NotFound;
+    if (layer->locked) return Errc::InvalidState;
+    if (px.rgba.capacity() + sizeof(px) > source_asset_room_locked())
+        return Status{Errc::BudgetExceeded, "memoria de imagens e modelos do projeto esgotada"};
+    history_.before_mutation(*comp, project_->timeline().current(), "textura do texto");
+    Asset asset;
+    asset.kind = AssetKind::Image;
+    asset.sourcePath = store_asset_path(path);
+    asset.name = path;
+    if (const usize slash = asset.name.find_last_of("/\\"); slash != std::string::npos) asset.name.erase(0, slash + 1);
+    asset.originalFilename = asset.name;
+    asset.video.width = px.width;
+    asset.video.height = px.height;
+    const AssetId id = project_->add_asset(std::move(asset));
+    images_[id.pack()] = std::make_shared<const ImagePixels>(std::move(px));
+    layer->text.texture.kind = kTextTextureImage;
+    layer->text.texture.image = id.pack();
+    bump_model_revision_locked();
+    project_->mark_dirty();
+    request_render();
+    return OkStatus;
+}
+
 } // namespace aurea

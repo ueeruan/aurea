@@ -145,7 +145,64 @@ struct VectorRepeater {
     f32  rotation = 0.0f;                ///< graus por cópia
     f32  startOpacity = 100.0f, endOpacity = 100.0f;   ///< %
     u8   above = 0;                      ///< 0 cópias novas embaixo, 1 por cima
+    /// Documento v6 (escala X/Y do After Effects): `scale` é a escala X e
+    /// `scaleY` a Y. `scaleLinked` = Y acompanha X (o repetidor de sempre:
+    /// documentos antigos e trilhas antigas de kVecRepScale continuam iguais).
+    f32  scaleY = 100.0f;                ///< % por cópia (acumula), só com scaleLinked == 0
+    u8   scaleLinked = 1;
     friend bool operator==(const VectorRepeater&, const VectorRepeater&) noexcept = default;
+};
+
+/// Operadores de caminho do grupo (shape layer do After Effects, ADBE Vector
+/// Filter *). Valem em ORDEM, sobre os caminhos do grupo, depois de montar os
+/// caminhos e antes de Mesclar/Aparar. Os números estão gravados em projetos:
+/// novos entram no fim.
+enum class VectorModifierType : u8 {
+    OffsetPaths = 0,     ///< Deslocar caminhos (Clipper do motor)
+    PuckerBloat,         ///< Franzir e inflar
+    Roughen,             ///< Aspereza (parada; Frequência temporal > 0 anima)
+    WigglePaths,         ///< Ondular caminhos (o mesmo código do Roughen, animado)
+    RoundCorners,        ///< Arredondar cantos
+    Twist,               ///< Torcer
+    ZigZag,              ///< Zigue-zague
+    WiggleTransform,     ///< Ondular transform (afim aleatória sobre os caminhos)
+    Count
+};
+
+/// Parâmetros por operador (VectorModifier::params). Índices por tipo —
+/// gravados em projetos e nas trilhas: nunca renumerar.
+inline constexpr u32 kVecModParams = 16;
+/// Semente aleatória: o mesmo índice em todos os tipos que sorteiam.
+inline constexpr u32 kVecModSeed = 15;
+// Deslocar caminhos
+inline constexpr u32 kVecModOffsetAmount = 0, kVecModOffsetJoin = 1, kVecModOffsetMiter = 2,
+                     kVecModOffsetCopies = 3, kVecModOffsetCopyOffset = 4;
+// Franzir e inflar
+inline constexpr u32 kVecModPuckerAmount = 0;
+// Aspereza / Ondular caminhos
+inline constexpr u32 kVecModRoughSize = 0, kVecModRoughDetail = 1, kVecModRoughPoints = 2, kVecModRoughFreq = 3,
+                     kVecModRoughCorrelation = 4, kVecModRoughTemporalPhase = 5, kVecModRoughSpatialPhase = 6;
+// Arredondar cantos
+inline constexpr u32 kVecModRoundRadius = 0;
+// Torcer
+inline constexpr u32 kVecModTwistAngle = 0, kVecModTwistCenterX = 1, kVecModTwistCenterY = 2;
+// Zigue-zague
+inline constexpr u32 kVecModZigSize = 0, kVecModZigRidges = 1, kVecModZigPoints = 2;
+// Ondular transform
+inline constexpr u32 kVecModWigAnchorX = 0, kVecModWigAnchorY = 1, kVecModWigPosX = 2, kVecModWigPosY = 3,
+                     kVecModWigScaleX = 4, kVecModWigScaleY = 5, kVecModWigRotation = 6, kVecModWigFreq = 7,
+                     kVecModWigCorrelation = 8, kVecModWigTemporalPhase = 9, kVecModWigSpatialPhase = 10;
+
+/// Um operador de caminho. `params` por tipo (ver os kVecMod* acima);
+/// animáveis pela trilha VectorParam com o id `vector_modifier_param`.
+struct VectorModifier {
+    VectorModifierType type = VectorModifierType::OffsetPaths;
+    bool enabled = true;
+    f32  params[kVecModParams]{};
+    /// Tempo da camada em segundos no instante avaliado (NÃO é gravado):
+    /// `evaluate_group` preenche, os operadores animados (Ondular) leem.
+    f64  time = 0.0;
+    friend bool operator==(const VectorModifier&, const VectorModifier&) noexcept = default;
 };
 
 /// Mesclar: 0 nenhum (os caminhos juntos pela regra do preenchimento),
@@ -168,6 +225,10 @@ struct VectorGroup {
     /// a forma do grupo é tirada da geometria dos grupos anteriores — destino
     /// × (1 − α), com α = 1. Documento v3.
     u8   composite = 0;
+    /// Documento v6: operadores de caminho (Deslocar, Franzir e inflar,
+    /// Aspereza, Ondular, Arredondar cantos, Torcer, Zigue-zague, Ondular
+    /// transform), em ordem, entre os caminhos e o Mesclar/Aparar.
+    std::vector<VectorModifier> modifiers;
     friend bool operator==(const VectorGroup&, const VectorGroup&) noexcept = default;
 };
 
@@ -192,7 +253,20 @@ enum VectorParam : u32 {
     kVecRepCopies, kVecRepOffset, kVecRepPosX, kVecRepPosY, kVecRepRotation, kVecRepScale,
     kVecRepStartOpacity, kVecRepEndOpacity,
     kVecPosX, kVecPosY, kVecRotation, kVecScale, kVecOpacity,
+    kVecRepScaleY,       ///< v6: escala Y do repetidor (só com scaleLinked == 0)
     kVecParamCount
 };
+
+/// Parâmetros dos operadores de caminho na trilha VectorParam: um bloco de
+/// kVecModParams ids por operador, depois de todos os VectorParam comuns
+/// (effectIndex = grupo, effectParamIndex = este id).
+inline constexpr u32 kVecModParamBase = 0x10000;
+inline constexpr u32 kVecMaxModifiers = 256;
+[[nodiscard]] constexpr u32 vector_modifier_param(u32 modifier, u32 param) noexcept {
+    return kVecModParamBase + modifier * kVecModParams + param;
+}
+[[nodiscard]] constexpr bool is_vector_modifier_param(u32 id) noexcept {
+    return id >= kVecModParamBase && id < kVecModParamBase + kVecMaxModifiers * kVecModParams;
+}
 
 } // namespace aurea

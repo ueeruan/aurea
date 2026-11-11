@@ -420,7 +420,7 @@ void write_mask(ByteWriter& w, const Mask& m) {
 void read_mask(ByteReader& r, Mask& m) {
     m.id = r.u32v();
     m.name = r.str();
-    m.operation = checked_enum(r.u8v(), MaskOperation::None, MaskOperation::Add);
+    m.operation = checked_enum(r.u8v(), kLastMaskOperation, MaskOperation::Add);
     m.inverted = r.boolv();
     m.feather = r.f32v();
     m.expansion = r.f32v();
@@ -2293,6 +2293,99 @@ std::vector<u8> build_timeline_section(const Project& p) {
             w.u32v(l ? l->audioTrackId : 0u);
             w.boolv(l && l->audioUnlinked);
         }
+        // v64: o osso do pai ("Prender a um osso"), só das camadas que têm.
+        u32 boned = 0;
+        for (u32 i = 0; i < c.order().size(); ++i)
+            if (const Layer* l = c.layer(c.order().at(i)); l && l->parentBone >= 0) ++boned;
+        w.u32v(boned);
+        for (u32 i = 0; i < c.order().size(); ++i) {
+            const Layer* l = c.layer(c.order().at(i));
+            if (!l || l->parentBone < 0) continue;
+            w.u32v(i);
+            w.i32v(l->parentBone);
+        }
+        // v64: chão molhado (poças).
+        w.f32v(c.floor().wetness);
+        w.f32v(c.floor().puddleSize);
+        // v65: composição do AE. "Ocultar tímidas" da composição; por camada
+        // (na ordem) bit 0 tímida, bit 1 preservar transparência, e a queda
+        // do feather de cada máscara.
+        w.boolv(c.hide_shy());
+        w.u32v(c.order().size());
+        for (u32 i = 0; i < c.order().size(); ++i) {
+            const Layer* l = c.layer(c.order().at(i));
+            w.u32v(l ? ((l->shy ? 1u : 0u) | (l->preserveTransparency ? 2u : 0u)) : 0u);
+            w.u32v(l ? static_cast<u32>(l->masks.size()) : 0u);
+            if (l) for (const Mask& m : l->masks) w.u8v(m.featherFalloff);
+        }
+        // v67: timeline do AE. Duração e comentário de cada marca da
+        // composição (na ordem da v4), a área de trabalho e as marcas de cada
+        // camada (na ordem; quadro LOCAL).
+        w.u32v(static_cast<u32>(c.markers().size()));
+        for (const Marker& m : c.markers()) { w.i64v(m.duration); w.str(m.comment); }
+        w.i64v(c.work_in_raw());
+        w.i64v(c.work_out_raw());
+        w.u32v(c.order().size());
+        for (u32 i = 0; i < c.order().size(); ++i) {
+            const Layer* l = c.layer(c.order().at(i));
+            w.u32v(l ? static_cast<u32>(l->markers.size()) : 0u);
+            if (l) for (const Marker& m : l->markers) {
+                w.i64v(m.frame.value); w.u32v(m.color); w.u32v(m.kind); w.str(m.label);
+                w.i64v(m.duration); w.str(m.comment);
+            }
+        }
+        // v68: AE animation. Por camada (na ordem): auto-orientar, câmera de
+        // dois nós + Ponto de Interesse e os keys do texto-fonte.
+        w.u32v(c.order().size());
+        for (u32 i = 0; i < c.order().size(); ++i) {
+            const Layer* l = c.layer(c.order().at(i));
+            w.u8v(l ? l->autoOrient : u8{0});
+            w.boolv(l && l->camera.twoNode);
+            const Vec3 poi = l ? l->camera.poi : Vec3{};
+            w.f32v(poi.x); w.f32v(poi.y); w.f32v(poi.z);
+            const bool text = l && l->kind == LayerKind::Text;
+            w.u32v(text ? static_cast<u32>(l->text.sourceKeys.size()) : 0u);
+            if (!text) continue;
+            for (const TextKey& k : l->text.sourceKeys) {
+                w.i64v(k.frame);
+                w.str(k.content);
+                w.u32v(static_cast<u32>(k.spans.size()));
+                for (const TextSpan& sp : k.spans) {
+                    w.u32v(sp.start); w.u32v(sp.end); w.boolv(sp.hasColor);
+                    w.f32v(sp.color.x); w.f32v(sp.color.y); w.f32v(sp.color.z); w.f32v(sp.color.w);
+                    w.u32v(sp.weight); w.f32v(sp.scale);
+                }
+                w.f32v(k.size);
+                w.f32v(k.color.x); w.f32v(k.color.y); w.f32v(k.color.z); w.f32v(k.color.w);
+                w.f32v(k.strokeWidth);
+                w.f32v(k.strokeColor.x); w.f32v(k.strokeColor.y); w.f32v(k.strokeColor.z); w.f32v(k.strokeColor.w);
+                w.str(k.fontFamily); w.u32v(k.fontWeight); w.boolv(k.fontItalic); w.str(k.fontPath);
+                w.u32v(k.alignment);
+            }
+            // O eixo da inclinação parado de cada animador de texto.
+            w.u32v(static_cast<u32>(l->text.animators.size()));
+            for (const TextAnimator& a : l->text.animators) w.f32v(a.skewAxis);
+        }
+        // v69: preenchimento com TEXTURA do texto (text/TextTexture.hpp). Só as
+        // camadas de texto com textura: o índice na ordem e os campos.
+        u32 textured = 0;
+        for (u32 i = 0; i < c.order().size(); ++i) {
+            const Layer* l = c.layer(c.order().at(i));
+            if (l && l->kind == LayerKind::Text && l->text.texture.kind != 0) ++textured;
+        }
+        w.u32v(textured);
+        for (u32 i = 0; i < c.order().size(); ++i) {
+            const Layer* l = c.layer(c.order().at(i));
+            if (!l || l->kind != LayerKind::Text || l->text.texture.kind == 0) continue;
+            const TextTexture& t = l->text.texture;
+            w.u32v(i);
+            w.u8v(t.kind); w.u8v(t.mapping); w.boolv(t.stroke);
+            w.f32v(t.scale); w.f32v(t.rotation); w.f32v(t.offset.x); w.f32v(t.offset.y);
+            w.f32v(t.contrast); w.f32v(t.brightness);
+            w.f32v(t.tint.x); w.f32v(t.tint.y); w.f32v(t.tint.z); w.f32v(t.tint.w);
+            w.f32v(t.speed); w.f32v(t.relief); w.f32v(t.lightAngle);
+            w.u32v(t.seed); w.u64v(t.image);
+        }
     });
 
     return std::vector<u8>(w.bytes().begin(), w.bytes().end());
@@ -2585,6 +2678,155 @@ bool apply_timeline_section(const u8* data, usize size, Project& p, bool salvage
                 const bool unlinked = r.boolv();
                 if (i >= c->order().size()) continue;
                 if (Layer* l = c->layer(c->order().at(i))) { l->audioTrackId = lane; l->audioUnlinked = unlinked; }
+            }
+        }
+        if (g_readingTimelineVersion >= 64) {
+            const u32 boned = r.u32v();
+            if (boned > c->order().size()) { r.fail(); return false; }
+            for (u32 i = 0; i < boned; ++i) {
+                const u32 index = r.u32v();
+                const i32 node = r.i32v();
+                if (index >= c->order().size() || node < 0 || node > 1'000'000) { r.fail(); return false; }
+                if (Layer* l = c->layer(c->order().at(index)); l && l->parent.valid()) l->parentBone = node;
+            }
+            const f32 wet = r.f32v(), size = r.f32v();
+            c->floor().wetness = std::isfinite(wet) ? std::clamp(wet, 0.0f, 1.0f) : 0.0f;
+            c->floor().puddleSize = std::isfinite(size) ? std::clamp(size, 20.0f, 4000.0f) : 260.0f;
+        }
+        if (g_readingTimelineVersion >= 65) {
+            c->set_hide_shy(r.boolv());
+            const u32 layerCount = r.u32v();
+            if (layerCount > c->order().size()) { r.fail(); return false; }
+            for (u32 i = 0; i < layerCount; ++i) {
+                const u32 bits = r.u32v();
+                const u32 maskCount = r.u32v();
+                Layer* l = c->layer(c->order().at(i));
+                if (maskCount > kMaxMaskCount * 4u || (l && maskCount != l->masks.size())) { r.fail(); return false; }
+                if (l) { l->shy = (bits & 1u) != 0; l->preserveTransparency = (bits & 2u) != 0; }
+                for (u32 k = 0; k < maskCount; ++k) {
+                    const u8 falloff = r.u8v();
+                    if (l) l->masks[k].featherFalloff = falloff == 1 ? u8{1} : u8{0};
+                }
+            }
+        }
+        if (g_readingTimelineVersion >= 67) {
+            const auto duration = [](i64 d) { return std::clamp<i64>(d, 0, kMaxMarkerDuration); };
+            const u32 compMarkers = r.u32v();
+            if (compMarkers > 100000u) { r.fail(); return false; }
+            std::vector<Marker> marks = c->markers();
+            for (u32 i = 0; i < compMarkers && r.good(); ++i) {
+                const i64 d = r.i64v();
+                std::string comment = r.str();
+                if (i < marks.size()) { marks[i].duration = duration(d); marks[i].comment = std::move(comment); }
+            }
+            for (Marker& m : marks) c->put_marker(std::move(m));   // mesmo quadro: troca no lugar
+            const i64 workIn = r.i64v(), workOut = r.i64v();
+            c->set_work_area(workIn >= 0 && workOut > workIn ? workIn : -1, workIn >= 0 && workOut > workIn ? workOut : -1);
+            const u32 layerCount = r.u32v();
+            if (layerCount > c->order().size()) { r.fail(); return false; }
+            for (u32 i = 0; i < layerCount && r.good(); ++i) {
+                const u32 n = r.u32v();
+                if (n > 100000u) { r.fail(); return false; }
+                Layer* l = c->layer(c->order().at(i));
+                for (u32 k = 0; k < n && r.good(); ++k) {
+                    Marker m;
+                    m.frame = FrameIndex{r.i64v()};
+                    m.color = r.u32v();
+                    m.kind = r.u32v();
+                    m.label = r.str();
+                    m.duration = duration(r.i64v());
+                    m.comment = r.str();
+                    if (l) l->markers.push_back(std::move(m));
+                }
+                if (l) {
+                    std::stable_sort(l->markers.begin(), l->markers.end(),
+                                     [](const Marker& a, const Marker& b) { return a.frame.value < b.frame.value; });
+                    l->markers.erase(std::unique(l->markers.begin(), l->markers.end(),
+                                                 [](const Marker& a, const Marker& b) { return a.frame == b.frame; }),
+                                     l->markers.end());
+                }
+            }
+        }
+        // v68 (AE animation): auto-orientar, câmera de dois nós + POI e os keys
+        // do texto-fonte de cada camada (na ordem). Antes dela: tudo desligado.
+        if (g_readingTimelineVersion >= 68) {
+            const u32 layerCount = r.u32v();
+            if (layerCount > c->order().size()) { r.fail(); return false; }
+            const auto fin = [](f32 v, f32 lo, f32 hi, f32 fallback) { return std::isfinite(v) ? std::clamp(v, lo, hi) : fallback; };
+            const auto color = [&r, &fin]() {
+                Vec4 c4;
+                c4.x = fin(r.f32v(), 0.0f, 1.0f, 1.0f); c4.y = fin(r.f32v(), 0.0f, 1.0f, 1.0f);
+                c4.z = fin(r.f32v(), 0.0f, 1.0f, 1.0f); c4.w = fin(r.f32v(), 0.0f, 1.0f, 1.0f);
+                return c4;
+            };
+            for (u32 i = 0; i < layerCount && r.good(); ++i) {
+                Layer* l = c->layer(c->order().at(i));
+                const u8 orient = r.u8v();
+                const bool twoNode = r.boolv();
+                const f32 px = r.f32v(), py = r.f32v(), pz = r.f32v();
+                const u32 keyCount = r.u32v();
+                if (keyCount > 100000u) { r.fail(); return false; }
+                std::vector<TextKey> keys;
+                for (u32 k = 0; k < keyCount && r.good(); ++k) {
+                    TextKey key;
+                    key.frame = r.i64v();
+                    key.content = r.str();
+                    const u32 spans = r.u32v();
+                    if (spans > 100000u) { r.fail(); return false; }
+                    for (u32 s = 0; s < spans && r.good(); ++s) {
+                        TextSpan sp;
+                        sp.start = r.u32v(); sp.end = r.u32v(); sp.hasColor = r.boolv();
+                        sp.color = color();
+                        sp.weight = static_cast<u16>(std::min<u32>(r.u32v(), 1000u));
+                        sp.scale = fin(r.f32v(), 0.1f, 10.0f, 1.0f);
+                        if (sp.end > sp.start) key.spans.push_back(sp);
+                    }
+                    key.size = fin(r.f32v(), 1.0f, 2000.0f, 72.0f);
+                    key.color = color();
+                    key.strokeWidth = fin(r.f32v(), 0.0f, 200.0f, 0.0f);
+                    key.strokeColor = color();
+                    key.fontFamily = r.str();
+                    key.fontWeight = static_cast<u16>(std::clamp<u32>(r.u32v(), 100u, 1000u));
+                    key.fontItalic = r.boolv();
+                    key.fontPath = r.str();
+                    key.alignment = std::min(r.u32v(), 2u);
+                    keys.push_back(std::move(key));
+                }
+                if (l && l->kind == LayerKind::Text) {
+                    const u32 animators = r.u32v();
+                    if (animators != l->text.animators.size()) { r.fail(); return false; }
+                    for (TextAnimator& a : l->text.animators) a.skewAxis = fin(r.f32v(), -36000.0f, 36000.0f, 0.0f);
+                }
+                if (!l) continue;
+                l->autoOrient = orient <= 2 ? orient : u8{0};
+                if (l->kind == LayerKind::Camera) {
+                    l->camera.twoNode = twoNode;
+                    l->camera.poi = Vec3{fin(px, -1.0e6f, 1.0e6f, 0.0f), fin(py, -1.0e6f, 1.0e6f, 0.0f), fin(pz, -1.0e6f, 1.0e6f, 0.0f)};
+                }
+                if (l->kind == LayerKind::Text) {
+                    std::stable_sort(keys.begin(), keys.end(), [](const TextKey& a, const TextKey& b) { return a.frame < b.frame; });
+                    keys.erase(std::unique(keys.begin(), keys.end(), [](const TextKey& a, const TextKey& b) { return a.frame == b.frame; }),
+                               keys.end());
+                    l->text.sourceKeys = std::move(keys);
+                }
+            }
+        }
+        // v69: preenchimento com TEXTURA do texto. Antes dela: cor lisa.
+        if (g_readingTimelineVersion >= 69) {
+            const u32 textured = r.u32v();
+            if (textured > c->order().size()) { r.fail(); return false; }
+            for (u32 i = 0; i < textured && r.good(); ++i) {
+                const u32 index = r.u32v();
+                TextTexture t;
+                t.kind = r.u8v(); t.mapping = r.u8v(); t.stroke = r.boolv();
+                t.scale = r.f32v(); t.rotation = r.f32v(); t.offset.x = r.f32v(); t.offset.y = r.f32v();
+                t.contrast = r.f32v(); t.brightness = r.f32v();
+                t.tint.x = r.f32v(); t.tint.y = r.f32v(); t.tint.z = r.f32v(); t.tint.w = r.f32v();
+                t.speed = r.f32v(); t.relief = r.f32v(); t.lightAngle = r.f32v();
+                t.seed = r.u32v(); t.image = r.u64v();
+                if (index >= c->order().size()) { r.fail(); return false; }
+                Layer* l = c->layer(c->order().at(index));
+                if (l && l->kind == LayerKind::Text) l->text.texture = sanitized(t);
             }
         }
         c->rebuild_draw_order();

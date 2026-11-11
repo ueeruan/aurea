@@ -581,7 +581,7 @@ private fun SettingsPage(
                 )
                 if (item == ExportItem.Sequence) {
                     FpsRow(opts, compFps, "export.settings.fps", onChange)
-                    RangeRow(opts, onChange)
+                    RangeRow(opts, onChange, store)
                 }
                 BackgroundRow(store, onOpenProjectSettings)
             }
@@ -594,7 +594,7 @@ private fun SettingsPage(
                 Segmented(ImageExportRules.GifFrameRates.map { fmt(it) to fmt(it) }, fmt(opts.gifFps), "export.settings.gifFps") {
                     onChange(opts.copy(gifFps = it.replace(',', '.').toDouble()))
                 }
-                RangeRow(opts, onChange)
+                RangeRow(opts, onChange, store)
                 BackgroundRow(store, onOpenProjectSettings)
             }
         }
@@ -753,10 +753,12 @@ private fun QualitySlider(value: Int, enabled: Boolean, modifier: Modifier, onCh
 }
 
 @Composable
-private fun RangeRow(opts: ExportOptions, onChange: (ExportOptions) -> Unit) {
+private fun RangeRow(opts: ExportOptions, onChange: (ExportOptions) -> Unit, store: EditorStore? = null) {
     SettingLabel(stringResource(R.string.exp2_range))
     Segmented(listOf("content" to stringResource(R.string.export_range_content), "full" to stringResource(R.string.export_range_full)),
         if (opts.trimToContent) "content" else "full", "export.settings.range") { onChange(opts.copy(trimToContent = it == "content")) }
+    // Timeline do AE: só a área de trabalho (com a composição tendo uma).
+    if (store != null) com.aurea.aurea.editor.timeline.ExportWorkAreaOption(store, Modifier.padding(top = 10.dp))
 }
 
 /** P2-4: "Fundo: <cor | Transparente>" com o atalho para os ajustes do projeto. */
@@ -827,7 +829,7 @@ private fun Advanced(store: EditorStore, opts: ExportOptions, compW: Int, compH:
             )
         }
     }
-    RangeRow(opts, onChange)
+    RangeRow(opts, onChange, store)
     val (w, h) = VideoExportRules.frameSize(compW, compH, opts.shortSide)
     val fps = if (opts.fps > 0) opts.fps else compFps
     val seconds = if (compFps > 0) store.exportDuration(opts.trimToContent) / compFps else 0.0

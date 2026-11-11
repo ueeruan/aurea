@@ -23,7 +23,7 @@ namespace {
 
 class TransformEffect final : public Effect {
 public:
-    enum : u32 { kAnchor = 0, kPosition, kScale, kRotation, kOpacity };
+    enum : u32 { kAnchor = 0, kPosition, kScale, kRotation, kOpacity, kSkew, kSkewAxis };
 
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kTransform, "Transformar", "Distorcer", EffectClass::Domain};
@@ -44,6 +44,10 @@ public:
         p.typed_range(-100000.0f, 100000.0f);
         p.add_angle("rotation", "Rotação", 0.0f);
         p.add_float("opacity", "Opacidade", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        // AE 2026 (no fim): inclinação (graus) num eixo girado. 0 = como antes.
+        p.add_float("skew", "Inclinação", 0.0f, -70.0f, 70.0f, kParamAnimatable, "°");
+        p.typed_range(-85.0f, 85.0f);
+        p.add_angle("skew_axis", "Eixo da inclinação", 0.0f);
     }
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
         v[kScale] = ParamValue::vec2(78.0f, 78.0f);
@@ -66,7 +70,16 @@ public:
         const Mat4 rot = Mat4::from_quat(Quat::from_axis_angle(Vec3{0, 0, 1}, r));
         const Mat4 sc = Mat4::scale(Vec3{s.x / 100.0f, s.y / 100.0f, 1.0f});
         const Mat4 an = Mat4::translation(Vec3{-a.x * w, -a.y * h, 0.0f});
-        return t * rot * sc * an;
+        const f32 skew = e.count > kSkew && std::isfinite(e.f(kSkew)) ? std::clamp(e.f(kSkew), -85.0f, 85.0f) : 0.0f;
+        if (std::fabs(skew) < 1e-4f) return t * rot * sc * an;
+        // Inclinação no eixo girado: R(eixo) · cisalhamento · R(−eixo), entre a
+        // escala e a rotação (a ordem do Transformar do AE).
+        const f32 axis = e.count > kSkewAxis && std::isfinite(e.f(kSkewAxis)) ? e.f(kSkewAxis) * kDeg2Rad : 0.0f;
+        Mat4 shear = Mat4::identity();
+        shear.col[1].x = -std::tan(skew * kDeg2Rad);
+        const Mat4 ra = Mat4::from_quat(Quat::from_axis_angle(Vec3{0, 0, 1}, axis));
+        const Mat4 rb = Mat4::from_quat(Quat::from_axis_angle(Vec3{0, 0, 1}, -axis));
+        return t * rot * (ra * shear * rb) * sc * an;
     }
 
     bool is_identity(const EffectEval& e) const noexcept override {

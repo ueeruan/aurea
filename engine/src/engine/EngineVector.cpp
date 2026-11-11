@@ -59,6 +59,35 @@ VectorGroup default_group(u32 kind, Vec2 center, f32 base, u32 index) {
     return g;
 }
 
+/// Parâmetro animável do grupo: os comuns (VectorParam) e os dos operadores.
+bool valid_vector_param(u32 param) noexcept { return param < kVecParamCount || is_vector_modifier_param(param); }
+
+/// Faixa do parâmetro: a do VectorParam ou a do tipo do operador.
+f32 clamp_group_param(const VectorGroup& g, u32 param, f32 v) noexcept {
+    if (is_vector_modifier_param(param)) {
+        const u32 m = (param - kVecModParamBase) / kVecModParams;
+        if (m < g.modifiers.size()) return vector::clamp_modifier_param(g.modifiers[m].type, (param - kVecModParamBase) % kVecModParams, v);
+    }
+    return vector::clamp_param(param, v);
+}
+
+/// Trilhas dos operadores do grupo quando a lista muda: `map(índice antigo)`
+/// devolve o novo índice ou -1 (operador removido: a trilha sai).
+template <class Map>
+void remap_modifier_tracks(Layer& l, u32 group, Map map) {
+    l.tracks.remove_if([&](const Track& t) {
+        return t.property == TrackProperty::VectorParam && t.effectIndex == group && is_vector_modifier_param(t.effectParamIndex)
+            && map((t.effectParamIndex - kVecModParamBase) / kVecModParams) < 0;
+    });
+    for (u32 i = 0; i < l.tracks.size(); ++i) {
+        Track& t = l.tracks.at(i);
+        if (t.property != TrackProperty::VectorParam || t.effectIndex != group || !is_vector_modifier_param(t.effectParamIndex)) continue;
+        const u32 slot = (t.effectParamIndex - kVecModParamBase) % kVecModParams;
+        const i32 to = map((t.effectParamIndex - kVecModParamBase) / kVecModParams);
+        t.effectParamIndex = vector_modifier_param(static_cast<u32>(to), slot);
+    }
+}
+
 /// Trilhas do grupo removido saem; as dos seguintes descem um índice.
 void drop_group_tracks(Layer& l, u32 group) {
     l.tracks.remove_if([&](const Track& t) { return t.property == TrackProperty::VectorParam && t.effectIndex == group; });
@@ -112,6 +141,16 @@ bool Engine::set_vector_document(u64 layerId, const f32* data, usize count, cons
     if (!vector::decode_document(data, count, names, d) || d.groups.size() != l->shape.vector.groups.size()) return false;
     // Omega conteúdo (área 06): um fluxo anterior à v3 não carrega o furo, o
     // apagar, o perfil do pincel nem a marca de desenho — ficam os da camada.
+    // Um fluxo anterior à v6 não carrega os operadores de caminho nem a escala
+    // Y do repetidor: ficam os da camada (as trilhas deles continuam valendo).
+    if (count > 0 && data[0] < 6.0f) {
+        const VectorData& cur = l->shape.vector;
+        for (usize gi = 0; gi < d.groups.size(); ++gi) {
+            d.groups[gi].modifiers = cur.groups[gi].modifiers;
+            d.groups[gi].repeater.scaleY = cur.groups[gi].repeater.scaleY;
+            d.groups[gi].repeater.scaleLinked = cur.groups[gi].repeater.scaleLinked;
+        }
+    }
     if (count > 0 && data[0] < 3.0f) {
         const VectorData& cur = l->shape.vector;
         d.drawing = cur.drawing;
@@ -139,7 +178,7 @@ bool Engine::vector_path_at(u64 layerId, u32 group, u32 path, std::vector<f32>& 
     if (!l || group >= l->shape.vector.groups.size() || path >= l->shape.vector.groups[group].paths.size()) return false;
     const FrameIndex now = playback_.current();
     const f64 local = static_cast<f64>(l->local_time(now).value);
-    const VectorGroup g = vector::evaluate_group(l->shape.vector.groups[group], l->tracks, group, local);
+    const VectorGroup g = vector::evaluate_group(l->shape.vector.groups[group], l->tracks, group, local, comp->fps());
     const vector::Affine2 M = affine_of(layer_world_matrix(*comp, *l, now)) * vector::group_matrix(g);
     const VectorPath& p = g.paths[path];
     u32 flags = p.kind == VectorPathKind::Free ? 1u : 0u;
@@ -387,13 +426,13 @@ bool Engine::set_vector_param(u64 layerId, u32 group, u32 param, f32 value, bool
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = vector_layer(comp, layerId);
-    if (!l || group >= l->shape.vector.groups.size() || param >= kVecParamCount) return false;
+    if (!l || group >= l->shape.vector.groups.size() || !valid_vector_param(param)) return false;
     VectorGroup& g = l->shape.vector.groups[group];
     f32* r = vector::param_ref(g, param);
     if (!r) return false;
     if (!continuing) history_.before_mutation(*comp, project_->timeline().current(), "valor vetorial");
     bump_model_revision_locked();
-    value = vector::clamp_param(param, value);
+    value = clamp_group_param(g, param, value);
     Track* tr = l->tracks.find(TrackProperty::VectorParam, group, param);
     if (tr && !tr->keys.empty()) {
         const FrameIndex local = l->local_time(playback_.current());
@@ -414,7 +453,7 @@ bool Engine::ensure_vector_param_key(u64 layerId, u32 group, u32 param) noexcept
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = vector_layer(comp, layerId);
-    if (!l || group >= l->shape.vector.groups.size() || param >= kVecParamCount) return false;
+    if (!l || group >= l->shape.vector.groups.size() || !valid_vector_param(param)) return false;
     f32* r = vector::param_ref(l->shape.vector.groups[group], param);
     if (!r) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "keyframe vetorial");
@@ -422,7 +461,7 @@ bool Engine::ensure_vector_param_key(u64 layerId, u32 group, u32 param) noexcept
     const FrameIndex local = l->local_time(playback_.current());
     Track& tr = l->tracks.get_or_create(TrackProperty::VectorParam, group, param);
     const f32 atual = tr.keys.empty() ? *r : tr.sample(local);
-    (void)tr.set(local, vector::clamp_param(param, atual), Interpolation::Bezier);
+    (void)tr.set(local, clamp_group_param(l->shape.vector.groups[group], param, atual), Interpolation::Bezier);
     project_->mark_dirty();
     request_render();
     return true;
@@ -432,7 +471,7 @@ bool Engine::toggle_vector_param_key(u64 layerId, u32 group, u32 param) noexcept
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = vector_layer(comp, layerId);
-    if (!l || group >= l->shape.vector.groups.size() || param >= kVecParamCount) return false;
+    if (!l || group >= l->shape.vector.groups.size() || !valid_vector_param(param)) return false;
     f32* r = vector::param_ref(l->shape.vector.groups[group], param);
     if (!r) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "keyframe vetorial");
@@ -446,6 +485,101 @@ bool Engine::toggle_vector_param_key(u64 layerId, u32 group, u32 param) noexcept
     } else {
         (void)tr.set(local, tr.keys.empty() ? *r : tr.sample(local), Interpolation::Bezier);
     }
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+u32 Engine::query_vector_modifiers(u64 layerId, u32 group, f32* out, u32 capacity) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = vector_layer(comp, layerId);
+    if (!l || !out || group >= l->shape.vector.groups.size()) return 0;
+    const FrameIndex local = l->local_time(playback_.current());
+    const VectorGroup g = vector::evaluate_group(l->shape.vector.groups[group], l->tracks, group, static_cast<f64>(local.value), comp->fps());
+    u32 written = 0;
+    for (u32 m = 0; m < g.modifiers.size() && (written + 1) * kVectorModifierFloats <= capacity; ++m, ++written) {
+        f32* v = out + written * kVectorModifierFloats;
+        u32 anim = 0, keys = 0;
+        for (u32 p = 0; p < kVecModParams; ++p) {
+            v[4 + p] = g.modifiers[m].params[p];
+            const Track* tr = l->tracks.find(TrackProperty::VectorParam, group, vector_modifier_param(m, p));
+            if (!tr || tr->keys.empty()) continue;
+            anim |= 1u << p;
+            if (tr->find_exact(local) != kInvalidIndex) keys |= 1u << p;
+        }
+        v[0] = static_cast<f32>(g.modifiers[m].type);
+        v[1] = g.modifiers[m].enabled ? 1.0f : 0.0f;
+        v[2] = static_cast<f32>(anim);
+        v[3] = static_cast<f32>(keys);
+    }
+    return written;
+}
+
+i32 Engine::add_vector_modifier(u64 layerId, u32 group, u32 type) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = vector_layer(comp, layerId);
+    if (!l || group >= l->shape.vector.groups.size() || type >= static_cast<u32>(VectorModifierType::Count)) return -1;
+    auto& mods = l->shape.vector.groups[group].modifiers;
+    if (mods.size() >= kVecMaxModifiers) return -1;
+    history_.before_mutation(*comp, project_->timeline().current(), "operador de caminho");
+    bump_model_revision_locked();
+    mods.push_back(vector::make_modifier(static_cast<VectorModifierType>(type)));
+    project_->mark_dirty();
+    request_render();
+    return static_cast<i32>(mods.size() - 1);
+}
+
+bool Engine::remove_vector_modifier(u64 layerId, u32 group, u32 index) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = vector_layer(comp, layerId);
+    if (!l || group >= l->shape.vector.groups.size() || index >= l->shape.vector.groups[group].modifiers.size()) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "remover operador de caminho");
+    bump_model_revision_locked();
+    auto& mods = l->shape.vector.groups[group].modifiers;
+    mods.erase(mods.begin() + index);
+    remap_modifier_tracks(*l, group, [index](u32 m) { return m == index ? -1 : static_cast<i32>(m > index ? m - 1 : m); });
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::move_vector_modifier(u64 layerId, u32 group, u32 from, u32 to) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = vector_layer(comp, layerId);
+    if (!l || group >= l->shape.vector.groups.size()) return false;
+    auto& mods = l->shape.vector.groups[group].modifiers;
+    if (from >= mods.size() || to >= mods.size()) return false;
+    if (from == to) return true;
+    history_.before_mutation(*comp, project_->timeline().current(), "ordem dos operadores de caminho");
+    bump_model_revision_locked();
+    VectorModifier moved = mods[from];
+    mods.erase(mods.begin() + from);
+    mods.insert(mods.begin() + to, std::move(moved));
+    remap_modifier_tracks(*l, group, [from, to](u32 m) {
+        if (m == from) return static_cast<i32>(to);
+        if (from < to && m > from && m <= to) return static_cast<i32>(m - 1);
+        if (from > to && m >= to && m < from) return static_cast<i32>(m + 1);
+        return static_cast<i32>(m);
+    });
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::set_vector_modifier_enabled(u64 layerId, u32 group, u32 index, bool enabled) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = vector_layer(comp, layerId);
+    if (!l || group >= l->shape.vector.groups.size() || index >= l->shape.vector.groups[group].modifiers.size()) return false;
+    VectorModifier& m = l->shape.vector.groups[group].modifiers[index];
+    if (m.enabled == enabled) return true;
+    history_.before_mutation(*comp, project_->timeline().current(), "operador de caminho");
+    bump_model_revision_locked();
+    m.enabled = enabled;
     project_->mark_dirty();
     request_render();
     return true;

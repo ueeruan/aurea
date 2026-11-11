@@ -166,7 +166,9 @@ u32 build_block(const Layer& l, f64 localFrame, Vec2 offset, f32 tolerance, std:
     for (const Mask& m : l.masks) {
         if (!active_in(l, m)) continue;
         if (firstActive) {
-            start = (m.operation == MaskOperation::Subtract || m.operation == MaskOperation::Intersect) ? 1.0f : 0.0f;
+            // Escurecer também começa do "tudo dentro": é a interseção pelo mínimo.
+            start = (m.operation == MaskOperation::Subtract || m.operation == MaskOperation::Intersect
+                     || m.operation == MaskOperation::Darken) ? 1.0f : 0.0f;
             firstActive = false;
         }
         evaluate_path(m, localFrame, pts);
@@ -184,7 +186,9 @@ u32 build_block(const Layer& l, f64 localFrame, Vec2 offset, f32 tolerance, std:
         const Vec3 props = evaluate_props(l, m, localFrame);
         h[0] = Vec4{static_cast<f32>(static_cast<u8>(m.operation)), m.inverted ? 1.0f : 0.0f,
                     props.z, props.x * 0.25f};
-        h[1] = Vec4{props.y, static_cast<f32>(out.size() - first), static_cast<f32>(edges.size()), 0.0f};
+        // h1.w: queda do feather (0 suave/gaussiano, 1 linear).
+        h[1] = Vec4{props.y, static_cast<f32>(out.size() - first), static_cast<f32>(edges.size()),
+                    m.featherFalloff == 1 ? 1.0f : 0.0f};
         h[2] = box;
         out.insert(out.end(), edges.begin(), edges.end());
         ++mi;
@@ -242,7 +246,12 @@ f32 coverage_at(const Vec4* block, u32 count, f32 start, Vec2 p, f32 k) noexcept
             }
             const f32 d = std::sqrt(d2);
             const f32 sd = (wind != 0 ? d : -d) + expand;
-            if (sigma > 0.0f) {
+            if (sigma > 0.0f && h1.w > 0.5f) {
+                // Linear: rampa reta com a largura do feather (±2σ), somada à
+                // largura do texel para a borda continuar antisserrilhada.
+                const f32 w = std::sqrt(16.0f * sigma * sigma + 1.0f / (k * k));
+                cov = std::clamp(sd / w + 0.5f, 0.0f, 1.0f);
+            } else if (sigma > 0.0f) {
                 const f32 s = std::sqrt(sigma * sigma + 1.0f / (12.0f * k * k));
                 cov = 0.5f * (1.0f + erf_approx(sd / (s * 1.41421356f)));
             } else {
@@ -256,6 +265,8 @@ f32 coverage_at(const Vec4* block, u32 count, f32 start, Vec2 p, f32 k) noexcept
             case 1: acc = acc * (1.0f - cov); break;                 // Subtract
             case 2: acc = acc * cov; break;                          // Intersect
             case 3: acc = acc + cov - 2.0f * acc * cov; break;       // Difference
+            case 5: acc = std::max(acc, cov); break;                 // Lighten (Clarear)
+            case 6: acc = std::min(acc, cov); break;                 // Darken (Escurecer)
             default: break;
         }
     }

@@ -90,7 +90,14 @@ public:
         p.add_point2("center", "Centro", Vec2{0.5f, 0.5f}, -1.f, 2.f, kParamAnimatable | kParamRelative);
         p.typed_range(-10.f, 10.f);
         p.add_angle("rotation", "Rotação", 0.f);
-        if (mode_ == kIris) p.add_int("sides", "Lados da íris", 0, 0, 16);   // 0..2 = círculo
+        if (mode_ == kIris) {
+            p.add_int("sides", "Lados da íris", 0, 0, 16);   // 0..2 = círculo
+            // AE 2026 (no fim): "Usar raio interno" faz das pontas uma ESTRELA —
+            // o raio interno é a fração do externo nos vales (com 3+ lados).
+            p.add_bool("use_inner_radius", "Usar raio interno", false);
+            p.add_float("inner_radius", "Raio interno", 50.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
+            p.set_enabled_by(7, 6, 1u);
+        }
     }
     bool is_identity(const EffectEval& e) const noexcept override { return e.f(kCompletion) <= 0.f; }
     void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
@@ -121,6 +128,11 @@ public:
         }
         u.p2 = {input.region.x, input.region.y, input.region.w, input.region.h};
         u.p3 = {w, h, 0.f, 0.f};
+        if (mode_ == kIris && e.count > 7 && e.b(6)) {
+            // p3.z > 0: estrela, raio interno/externo (o polígono de antes = 0).
+            const f32 inner = std::isfinite(e.f(7)) ? std::clamp(e.f(7) / 100.f, 0.01f, 1.f) : 0.5f;
+            u.p3.z = inner;
+        }
         return single_pass(ctx, ShaderId::effects_shape_wipe_frag, input, u, "shape-wipe", out);
     }
 private:

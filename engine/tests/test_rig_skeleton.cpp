@@ -3,14 +3,18 @@
 //  conta do anel na tela, anéis do osso (eixos locais na articulação), giro
 //  pelo anel com um desfazer por gesto, rotações em lote, espelhar osso e
 //  pose inteira, IK simples arrastando a ponta e giro de pinos em volta de
-//  um pino-pivô. Tudo nas trilhas de sempre (sem GPU).
+//  um pino-pivô. Tudo nas trilhas de sempre (sem GPU). 0.5.2: camada presa a
+//  um osso (segue a mão, um desfazer, sobrevive a salvar e abrir).
 // =============================================================================
 #include "TestFramework.hpp"
 
 #include "aurea/Engine.hpp"
 #include "aurea/effects/EffectRegistry.hpp"
+#include "aurea/project/Serialization.hpp"
+#include "aurea/render/Renderer.hpp"
 #include "aurea/scene3d/RigSkeleton.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -342,4 +346,241 @@ AUREA_TEST(RigSkeleton, PuppetPinsRotateAroundThePivotPinInLayerPixels) {
     AUREA_CHECK_NEAR(pins[4 + 1], 0.75f, 1e-4f);
     AUREA_CHECK_NEAR(pins[4 + 2], 0.5f, 1e-4f);
     e.shutdown();
+}
+
+// 0.5.2 "Prender a um osso": a camada fica na junta, segue o osso girado e
+// gira com ele; sem o acesso aos modelos segue o modelo inteiro; um desfazer;
+// salvar e abrir guarda o osso.
+AUREA_TEST(RigSkeleton, ALayerAttachedToTheHandBoneFollowsItAndSurvivesSaving) {
+    Engine e;
+    AUREA_CHECK(e.initialize(skeleton_config()).ok());
+    AUREA_CHECK(e.new_project(640, 640, 30.0, "osso").ok());
+    ModelImport req;
+    req.path = write_symmetric_rig();
+    auto imported = e.import_model(req);
+    AUREA_CHECK(imported.ok());
+    if (!imported.ok()) { e.shutdown(); std::remove(req.path.c_str()); return; }
+    const u64 model = *imported;
+    const std::vector<i32> bones = e.model_attach_bones(model);
+    AUREA_CHECK(std::find(bones.begin(), bones.end(), kLHand) != bones.end());
+    auto null3d = e.add_null(true);
+    AUREA_CHECK(null3d.ok());
+    if (!null3d.ok()) { e.shutdown(); std::remove(req.path.c_str()); return; }
+    const u64 child = *null3d;
+    AUREA_CHECK(!e.set_layer_parent_bone(child, model, 0).ok());   // nó da malha não é osso
+    AUREA_CHECK(e.set_layer_parent_bone(child, model, kLHand).ok());
+    AUREA_CHECK_EQ(e.layer_parent_bone(child), kLHand);
+
+    Project* project = e.project();
+    Composition* comp = project->timeline().composition(project->timeline().current());
+    const Layer* m = comp->layer(LayerId::unpack(model));
+    const Layer* c = comp->layer(LayerId::unpack(child));
+    AUREA_CHECK(m && c && c->parent == LayerId::unpack(model));
+    if (!m || !c) { e.shutdown(); std::remove(req.path.c_str()); return; }
+    struct Ctx { std::shared_ptr<const scene3d::SceneAsset> asset; } ctx{e.model_asset(m->model.scene.pack())};
+    AUREA_CHECK(ctx.asset != nullptr);
+    const auto lookup = [](void* p, AssetId) { return static_cast<Ctx*>(p)->asset; };
+    // O ponto do arquivo no mundo (o mesmo layer_from_model do renderer).
+    const auto file_to_world = [&](Vec3 p) {
+        Mat4 flip;
+        flip.col[1] = Vec4{0, -1, 0, 0};
+        flip.col[2] = Vec4{0, 0, -1, 0};
+        const Mat4 fromFile = flip * Mat4::scale(Vec3{m->model.unitScale, m->model.unitScale, m->model.unitScale})
+                            * Mat4::translation(-m->model.pivot);
+        return (layer_world_3d(*comp, *m, FrameIndex{0}) * fromFile).transform_point(p);
+    };
+    // O ponto de âncora da camada é o que fica no osso (o nulo tem âncora no centro).
+    const Vec3 anchor = c->transform.anchor;
+    const auto position_of = [anchor](const Mat4& w) { return w.transform_point(anchor); };
+    Vec3 atHand;
+    {
+        const BoneAttachScope scope(lookup, &ctx);
+        atHand = position_of(layer_world_3d(*comp, *c, FrameIndex{0}));
+    }
+    const Vec3 hand = file_to_world(Vec3{1.3f, 1.0f, 0.0f});
+    std::printf("    na mao: (%.1f, %.1f, %.1f), esperado (%.1f, %.1f, %.1f)\n", atHand.x, atHand.y, atHand.z, hand.x, hand.y, hand.z);
+    AUREA_CHECK(near3(atHand, hand, 0.05f));
+    // Sem o acesso aos modelos (fora do render): segue o modelo inteiro.
+    AUREA_CHECK(!near3(position_of(layer_world_3d(*comp, *c, FrameIndex{0})), hand, 1.0f));
+
+    // Braço girado 90° no Z local: a mão vai para cima e a camada vai junto,
+    // girando 90° também.
+    AUREA_CHECK(e.rotate_bone_axis(model, kLArm, 2, 90.0f, false));
+    Mat4 turned;
+    {
+        const BoneAttachScope scope(lookup, &ctx);
+        turned = layer_world_3d(*comp, *c, FrameIndex{0});
+    }
+    const Vec3 up = file_to_world(Vec3{0.3f, 2.0f, 0.0f});
+    std::printf("    braco a 90: (%.1f, %.1f, %.1f), esperado (%.1f, %.1f, %.1f)\n", position_of(turned).x, position_of(turned).y,
+                position_of(turned).z, up.x, up.y, up.z);
+    AUREA_CHECK(near3(position_of(turned), up, 0.05f));
+    // O X da camada aponta para onde o X do osso foi (+Y do arquivo).
+    const Vec3 xAxis = Vec3{turned.col[0].x, turned.col[0].y, turned.col[0].z}.normalized();
+    const Vec3 expect = (file_to_world(Vec3{0.3f, 3.0f, 0.0f}) - up).normalized();
+    AUREA_CHECK(xAxis.dot(expect) > 0.999f);
+
+    // Salvar e abrir guarda o osso (e o chão molhado, no mesmo bloco v64).
+    AUREA_CHECK(e.set_scene_floor_wetness(0.6f, 300.0f));
+    std::vector<u8> bytes;
+    AUREA_CHECK(ProjectSerializer::encode(*project, SaveOptions{}, bytes).ok());
+    Project reopened;
+    AUREA_CHECK(ProjectSerializer::load_bytes(reopened, bytes.data(), bytes.size(), LoadOptions{}).ok());
+    const Composition* rc = reopened.timeline().composition(reopened.timeline().current());
+    const Layer* rl = rc ? rc->layer(LayerId::unpack(child)) : nullptr;
+    AUREA_CHECK(rl && rl->parentBone == kLHand && rl->parent == LayerId::unpack(model));
+    AUREA_CHECK(rc && std::fabs(rc->floor().wetness - 0.6f) < 1e-6f && std::fabs(rc->floor().puddleSize - 300.0f) < 1e-3f);
+    undo(e);   // o chão molhado
+
+    // Desfazer: o giro, depois o vínculo inteiro (pai e osso) num passo só.
+    undo(e);
+    undo(e);
+    AUREA_CHECK_EQ(e.layer_parent_bone(child), -1);
+    comp = project->timeline().composition(project->timeline().current());   // o desfazer pode trocar a composição
+    c = comp ? comp->layer(LayerId::unpack(child)) : nullptr;
+    AUREA_CHECK(c && !c->parent.valid());
+    e.shutdown();
+    std::remove(req.path.c_str());
+}
+
+// 0.5.2 "Soltar do osso": a camada fica onde está na tela (posição e giro do
+// osso no cabeçote) e passa a seguir o modelo inteiro — girar o braço depois
+// não a move mais. Um desfazer volta a prender; a base do vínculo sobrevive a
+// salvar e abrir (o arquivo só aceita uma base afim exata).
+AUREA_TEST(RigSkeleton, ReleasingFromTheBoneKeepsTheLayerInPlaceAndOneUndoReattaches) {
+    Engine e;
+    AUREA_CHECK(e.initialize(skeleton_config()).ok());
+    AUREA_CHECK(e.new_project(640, 640, 30.0, "soltar").ok());
+    ModelImport req;
+    req.path = write_symmetric_rig();
+    auto imported = e.import_model(req);
+    AUREA_CHECK(imported.ok());
+    if (!imported.ok()) { e.shutdown(); std::remove(req.path.c_str()); return; }
+    const u64 model = *imported;
+    auto null3d = e.add_null(true);
+    AUREA_CHECK(null3d.ok());
+    if (!null3d.ok()) { e.shutdown(); std::remove(req.path.c_str()); return; }
+    const u64 child = *null3d;
+    AUREA_CHECK(e.set_layer_parent_bone(child, model, kLHand).ok());
+    AUREA_CHECK(e.rotate_bone_axis(model, kLArm, 2, 90.0f, false));   // a mão sobe: o osso não está na pose de bind
+
+    Project* project = e.project();
+    auto comp_of = [&] { return project->timeline().composition(project->timeline().current()); };
+    const Layer* m = comp_of()->layer(LayerId::unpack(model));
+    AUREA_CHECK(m != nullptr);
+    if (!m) { e.shutdown(); std::remove(req.path.c_str()); return; }
+    struct Ctx { std::shared_ptr<const scene3d::SceneAsset> asset; } ctx{e.model_asset(m->model.scene.pack())};
+    const auto lookup = [](void* p, AssetId) { return static_cast<Ctx*>(p)->asset; };
+    const auto world_now = [&]() {
+        const BoneAttachScope scope(lookup, &ctx);
+        const Composition* comp = comp_of();
+        const Layer* c = comp ? comp->layer(LayerId::unpack(child)) : nullptr;
+        return c ? layer_world_3d(*comp, *c, FrameIndex{0}) : Mat4::identity();
+    };
+    const auto pos = [](const Mat4& w) { return Vec3{w.col[3].x, w.col[3].y, w.col[3].z}; };
+    const auto axis = [](const Mat4& w, u32 i) { return Vec3{w.col[i].x, w.col[i].y, w.col[i].z}.normalized(); };
+    const Mat4 attached = world_now();
+
+    AUREA_CHECK(e.set_layer_parent_bone(child, model, -1).ok());
+    AUREA_CHECK_EQ(e.layer_parent_bone(child), -1);
+    const Layer* c = comp_of()->layer(LayerId::unpack(child));
+    AUREA_CHECK(c && c->parent == LayerId::unpack(model) && c->hasParentBasis);
+    const Mat4 released = world_now();
+    std::printf("    preso (%.1f, %.1f, %.1f) -> solto (%.1f, %.1f, %.1f)\n", pos(attached).x, pos(attached).y, pos(attached).z,
+                pos(released).x, pos(released).y, pos(released).z);
+    AUREA_CHECK(near3(pos(released), pos(attached), 0.05f));
+    for (u32 i = 0; i < 3; ++i) AUREA_CHECK(axis(released, i).dot(axis(attached, i)) > 0.9999f);
+    // Solta de verdade: o braço volta e a camada fica.
+    AUREA_CHECK(e.rotate_bone_axis(model, kLArm, 2, -90.0f, false));
+    AUREA_CHECK(near3(pos(world_now()), pos(attached), 0.05f));
+
+    // Salvar e abrir: a base afim do vínculo passa pela validação do leitor.
+    std::vector<u8> bytes;
+    AUREA_CHECK(ProjectSerializer::encode(*project, SaveOptions{}, bytes).ok());
+    Project reopened;
+    AUREA_CHECK(ProjectSerializer::load_bytes(reopened, bytes.data(), bytes.size(), LoadOptions{}).ok());
+    const Composition* rc = reopened.timeline().composition(reopened.timeline().current());
+    const Layer* rl = rc ? rc->layer(LayerId::unpack(child)) : nullptr;
+    AUREA_CHECK(rl && rl->parentBone == -1 && rl->hasParentBasis && rl->parent == LayerId::unpack(model));
+    if (rl) AUREA_CHECK(near3(pos(layer_world_3d(*rc, *rl, FrameIndex{0})), pos(attached), 0.05f));
+
+    // Desfazer: o giro de volta, depois o soltar (presa à mão de novo, sem base).
+    undo(e);
+    undo(e);
+    AUREA_CHECK_EQ(e.layer_parent_bone(child), kLHand);
+    c = comp_of()->layer(LayerId::unpack(child));
+    AUREA_CHECK(c && !c->hasParentBasis);
+    AUREA_CHECK(near3(pos(world_now()), pos(attached), 0.05f));
+    // Soltar duas vezes: a segunda não acha osso preso e não faz nada.
+    AUREA_CHECK(e.set_layer_parent_bone(child, model, -1).ok());
+    AUREA_CHECK(e.set_layer_parent_bone(child, model, -1).ok());
+    e.shutdown();
+    std::remove(req.path.c_str());
+}
+
+// Arquivos de antes da v64 abrem sem osso preso e com o chão seco.
+AUREA_TEST(RigSkeleton, OldProjectsOpenWithNoBoneAttachmentAndADryFloor) {
+    Project restored;
+    LoadReport report;
+    const std::string path = std::string(AUREA_TEST_DATA_DIR) + "/legacy-032/projeto-032-v50.aurea";
+    AUREA_CHECK(ProjectSerializer::load(restored, path, LoadOptions{}, &report).ok());
+    AUREA_CHECK(report.timelineVersion > 0 && report.timelineVersion < 64);
+    u32 layers = 0, comps = 0;
+    restored.timeline().for_each_composition([&](CompositionId, const Composition& comp) {
+        ++comps;
+        AUREA_CHECK_EQ(comp.floor().wetness, 0.0f);
+        AUREA_CHECK_EQ(comp.floor().puddleSize, 260.0f);
+        comp.layers().for_each([&](LayerId, const Layer& layer) {
+            ++layers;
+            AUREA_CHECK_EQ(layer.parentBone, -1);
+        });
+    });
+    AUREA_CHECK(comps > 0 && layers > 0);
+}
+
+// O mesmo boneco em T para o teste de export da camada presa ao osso
+// (ExportBoneAttach.inl, em test_export.cpp).
+std::string aurea_test_write_symmetric_rig() { return write_symmetric_rig(); }
+
+// A alça de mover de uma camada presa a um osso girado: o passo no eixo X do
+// mundo vira o passo certo no espaço do osso (antes ia pelo espaço do modelo
+// e a camada andava de lado).
+AUREA_TEST(RigSkeleton, GizmoMovesALayerAttachedToATurnedBoneAlongTheWorldAxis) {
+    Engine e;
+    AUREA_CHECK(e.initialize(skeleton_config()).ok());
+    AUREA_CHECK(e.new_project(640, 640, 30.0, "alca").ok());
+    ModelImport req;
+    req.path = write_symmetric_rig();
+    auto imported = e.import_model(req);
+    auto null3d = e.add_null(true);
+    AUREA_CHECK(imported.ok() && null3d.ok());
+    if (!imported.ok() || !null3d.ok()) { e.shutdown(); std::remove(req.path.c_str()); return; }
+    const u64 model = *imported, child = *null3d;
+    AUREA_CHECK(e.set_layer_parent_bone(child, model, kLHand).ok());
+    AUREA_CHECK(e.rotate_bone_axis(model, kLArm, 2, 90.0f, false));
+    Project* project = e.project();
+    Composition* comp = project->timeline().composition(project->timeline().current());
+    Layer* c = comp->layer(LayerId::unpack(child));
+    const Layer* m = comp->layer(LayerId::unpack(model));
+    AUREA_CHECK(c && m);
+    if (!c || !m) { e.shutdown(); std::remove(req.path.c_str()); return; }
+    struct Ctx { std::shared_ptr<const scene3d::SceneAsset> asset; } ctx{e.model_asset(m->model.scene.pack())};
+    const auto lookup = [](void* p, AssetId) { return static_cast<Ctx*>(p)->asset; };
+    const auto where = [&] {
+        const BoneAttachScope scope(lookup, &ctx);
+        const Mat4 w = layer_world_3d(*comp, *c, FrameIndex{0});
+        return Vec3{w.col[3].x, w.col[3].y, w.col[3].z};
+    };
+    const Vec3 before = where();
+    f32 out[3]{};
+    AUREA_CHECK(e.gizmo_move_local(child, 0, 25.0f, out));   // +25 px no X do mundo
+    c->transform.position = Vec3{out[0], out[1], out[2]};
+    const TrackProperty props[3] = {TrackProperty::PositionX, TrackProperty::PositionY, TrackProperty::PositionZ};
+    for (u32 i = 0; i < 3; ++i)
+        if (Track* t = c->tracks.find(props[i])) t->staticValue = out[i];
+    const Vec3 after = where();
+    std::printf("    alca: (%.1f, %.1f, %.1f) -> (%.1f, %.1f, %.1f)\n", before.x, before.y, before.z, after.x, after.y, after.z);
+    AUREA_CHECK(near3(Vec3{after.x - before.x, after.y - before.y, after.z - before.z}, Vec3{25.0f, 0.0f, 0.0f}, 0.05f));
+    e.shutdown();
+    std::remove(req.path.c_str());
 }

@@ -139,7 +139,8 @@ AUREA_TEST(OmegaAppearance, SkewFactorIsTheRadianValue) {
 AUREA_TEST(OmegaAppearance, NewBlendModesAppendAndSurviveSaving) {
     static_assert(static_cast<u16>(BlendMode::DarkerColor) == 24);
     static_assert(static_cast<u16>(BlendMode::SoftOverlay) == 28);
-    AUREA_CHECK(kLastBlendMode == BlendMode::SoftOverlay);
+    // AE compositing (2026-11-10) acrescentou dez modos depois deste bloco.
+    AUREA_CHECK(static_cast<u16>(kLastBlendMode) >= static_cast<u16>(BlendMode::SoftOverlay));
     AppearanceRig r;
     const u64 id = r.square(10.0f, 10.0f);
     if (!id) return;

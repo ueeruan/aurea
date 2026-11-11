@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE compositing (2026-11-10): modos de mesclagem e de máscara do After Effects, queda do feather, tímidas, preservar transparência e luz ambiente. -->
+<resources>
+    <string name="ae_blend_stencil_luma">Stensil luma</string>
+    <string name="ae_blend_silhouette_luma">Siluet luma</string>
+    <string name="ae_blend_dissolve">Larutkan</string>
+    <string name="ae_blend_dancing_dissolve">Larutkan dinamis</string>
+    <string name="ae_blend_hard_mix">Campuran keras</string>
+    <string name="ae_blend_classic_color_burn">Bakar warna klasik</string>
+    <string name="ae_blend_classic_color_dodge">Pencerah warna klasik</string>
+    <string name="ae_blend_classic_difference">Selisih klasik</string>
+    <string name="ae_blend_alpha_add">Tambah alfa</string>
+    <string name="ae_blend_luminescent_premul">Premultiplied bercahaya</string>
+    <string name="ae_blend_cat_utility">Utilitas</string>
+    <string name="ae_blend_cat_dissolve">Mode larut</string>
+    <string name="ae_mask_lighten">Terangkan</string>
+    <string name="ae_mask_darken">Gelapkan</string>
+    <string name="ae_mask_falloff_smooth">Tepi halus</string>
+    <string name="ae_mask_falloff_linear">Tepi linear</string>
+    <string name="ae_layer_shy">Pemalu</string>
+    <string name="ae_layer_shy_hint">Hilang dari timeline saat lapisan pemalu disembunyikan</string>
+    <string name="ae_comp_hide_shy">Sembunyikan lapisan pemalu</string>
+    <string name="ae_comp_hide_shy_hint">Berlaku untuk seluruh komposisi; video tidak berubah</string>
+    <string name="ae_layer_preserve_transparency">Pertahankan transparansi</string>
+    <string name="ae_layer_preserve_transparency_hint">Hanya melukis di tempat lapisan di bawah sudah punya gambar</string>
+    <string name="scene_light_ambient">Cahaya sekitar</string>
+</resources>

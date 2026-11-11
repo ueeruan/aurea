@@ -278,7 +278,7 @@ void evaluate_text_animators(const TextData& t, const TrackSet& tracks, f64 loca
         const Vec3 rot{P(kRotX, a.rotation.x), P(kRotY, a.rotation.y), P(kRotZ, a.rotation.z)};
         const f32 op = P(kOpacity, a.opacity), blur = P(kBlur, a.blur), skew = P(kSkew, a.skew);
         const f32 trk = P(kTracking, a.tracking) * (P(kTrackingEm, 0) > 0.5f ? t.size / 1000.0f : 1.0f);
-        const f32 skewAxis = P(kSkewAxis, 0) * kDeg2Rad;
+        const f32 skewAxis = P(kSkewAxis, a.skewAxis) * kDeg2Rad;
         const u32 anchorGrouping = a.anchorGrouping ? std::min<u32>(a.anchorGrouping, 3u) : static_cast<u32>(std::clamp(P(kAnchorGrouping, 0), 0.0f, 2.0f));
         const f32 sw = P(kStrokeWidth, a.strokeWidth);
         const Vec3 fill{P(kFillR, a.fill.x), P(kFillG, a.fill.y), P(kFillB, a.fill.z)};
@@ -387,6 +387,7 @@ f32* animator_param_ref(TextAnimator& a, u32 key) noexcept {
         case kSkew: return &a.skew;
         case kStrokeWidth: return &a.strokeWidth;
         case kCharOffset: return &a.charOffset;
+        case kSkewAxis: return &a.skewAxis;   // AE animation (v68)
         case kFillR: return &a.fill.x;
         case kFillG: return &a.fill.y;
         case kFillB: return &a.fill.z;

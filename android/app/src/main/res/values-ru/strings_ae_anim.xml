@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE animation (2026-11-11): texto-fonte, auto-orientar, câmera de dois nós e os controles do animador de texto (B5). -->
+<resources>
+    <string name="ae_anim_source_text">Исходный текст</string>
+    <string name="ae_anim_source_key_add">Ключ текста здесь</string>
+    <string name="ae_anim_source_key_remove">Удалить ключ текста здесь</string>
+    <string name="ae_anim_source_key_count">Ключей: %1$d</string>
+    <string name="ae_anim_auto_orient">Автоориентация</string>
+    <string name="ae_anim_auto_orient_off">Выкл.</string>
+    <string name="ae_anim_auto_orient_path">Вдоль траектории</string>
+    <string name="ae_anim_auto_orient_camera">К камере</string>
+    <string name="ae_anim_two_node">Камера с двумя узлами</string>
+    <string name="ae_anim_two_node_hint">Камера смотрит на точку интереса; поворот добавляется сверху</string>
+    <string name="ae_anim_poi">Точка интереса</string>
+    <string name="ae_anim_poi_axis">Точка интереса %1$s</string>
+    <string name="ae_anim_poi_key_add">Ключ точки интереса</string>
+    <string name="ae_anim_poi_key_remove">Удалить ключ точки интереса</string>
+    <string name="ae_anim_char_offset">Смещение символов</string>
+    <string name="ae_anim_skew_axis">Ось наклона</string>
+</resources>

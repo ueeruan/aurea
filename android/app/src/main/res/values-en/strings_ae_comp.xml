@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE compositing (2026-11-10): modos de mesclagem e de máscara do After Effects, queda do feather, tímidas, preservar transparência e luz ambiente. -->
+<resources>
+    <string name="ae_blend_stencil_luma">Stencil luma</string>
+    <string name="ae_blend_silhouette_luma">Silhouette luma</string>
+    <string name="ae_blend_dissolve">Dissolve</string>
+    <string name="ae_blend_dancing_dissolve">Dancing dissolve</string>
+    <string name="ae_blend_hard_mix">Hard mix</string>
+    <string name="ae_blend_classic_color_burn">Classic color burn</string>
+    <string name="ae_blend_classic_color_dodge">Classic color dodge</string>
+    <string name="ae_blend_classic_difference">Classic difference</string>
+    <string name="ae_blend_alpha_add">Alpha add</string>
+    <string name="ae_blend_luminescent_premul">Luminescent premul</string>
+    <string name="ae_blend_cat_utility">Utility</string>
+    <string name="ae_blend_cat_dissolve">Dissolve modes</string>
+    <string name="ae_mask_lighten">Lighten</string>
+    <string name="ae_mask_darken">Darken</string>
+    <string name="ae_mask_falloff_smooth">Smooth falloff</string>
+    <string name="ae_mask_falloff_linear">Linear falloff</string>
+    <string name="ae_layer_shy">Shy</string>
+    <string name="ae_layer_shy_hint">Leaves the timeline while shy layers are hidden</string>
+    <string name="ae_comp_hide_shy">Hide shy layers</string>
+    <string name="ae_comp_hide_shy_hint">Applies to the whole composition; the video does not change</string>
+    <string name="ae_layer_preserve_transparency">Preserve transparency</string>
+    <string name="ae_layer_preserve_transparency_hint">Paints only where the layers below already have pixels</string>
+    <string name="scene_light_ambient">Ambient light</string>
+</resources>

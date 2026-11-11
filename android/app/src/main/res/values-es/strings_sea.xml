@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: pacote "Mar" (SeaEffects.cpp): nomes e textos dos efeitos de mar. -->
+<resources>
+    <string name="sea_name_ocean">Océano</string>
+    <string name="sea_name_underwater">Bajo el agua</string>
+    <string name="sea_name_caustics">Cáusticas</string>
+    <string name="sea_name_shore_wave">Ola en la playa</string>
+    <string name="fxl_sea_wave_height">Altura de las olas</string>
+    <string name="fxl_sea_wavelength">Longitud de las olas</string>
+    <string name="fxl_sea_wind_direction">Dirección del viento</string>
+    <string name="fxl_sea_choppiness">Agitación</string>
+    <string name="fxl_sea_shallow_color">Color del agua poco profunda</string>
+    <string name="fxl_sea_deep_color">Color del agua profunda</string>
+    <string name="fxl_sea_sky">Cielo</string>
+    <string name="fxl_sea_sky_color">Color del cielo</string>
+    <string name="fxl_sea_sky_layer">Capa del cielo</string>
+    <string name="fxl_sea_foam">Espuma</string>
+    <string name="fxl_sea_sun_glitter">Brillo del sol</string>
+    <string name="fxl_sea_sun_direction">Dirección del sol</string>
+    <string name="fxl_sea_sun_height">Altura del sol</string>
+    <string name="fxl_sea_camera_angle">Ángulo de la cámara</string>
+    <string name="fxl_sea_haze">Bruma</string>
+    <string name="fxl_sea_stylize">Estilizado</string>
+    <string name="fxl_sea_clip_layer">Recortar por la capa</string>
+    <string name="fxl_sea_wave_size">Tamaño de las olas</string>
+    <string name="fxl_sea_caustics">Cáusticas</string>
+    <string name="fxl_sea_caustics_scale">Escala de las cáusticas</string>
+    <string name="fxl_sea_depth">Profundidad</string>
+    <string name="fxl_sea_light_rays">Rayos de luz</string>
+    <string name="fxl_sea_particles">Partículas</string>
+    <string name="fxl_sea_particle_size">Tamaño de las partículas</string>
+    <string name="fxl_sea_sharpness">Nitidez</string>
+    <string name="fxl_sea_refraction">Refracción</string>
+    <string name="fxl_sea_edge_wave">Ondulación del borde</string>
+    <string name="fxl_sea_edge_size">Tamaño de las ondas del borde</string>
+    <string name="fxl_sea_foam_width">Ancho de la espuma</string>
+    <string name="fxl_sea_foam_color">Color de la espuma</string>
+    <string name="fxl_sea_water_width">Ancho del agua</string>
+    <string name="fxl_sea_water_distortion">Distorsión del agua</string>
+    <string name="fxo_sea_sky_color">Color</string>
+    <string name="fxo_sea_layer_image">Imagen de la capa</string>
+    <string name="fxo_sea_other_layer">Otra capa</string>
+    <string name="fxo_sea_caustics_only">Solo las cáusticas</string>
+    <string name="fxl_sea_tip_sky">Imagen de la capa: el cielo y su reflejo vienen de esta capa. Otra capa: elige la capa del cielo (aparece sobre el horizonte).</string>
+    <string name="fxl_sea_tip_ripple_speed">Ondas por segundo, de dentro hacia fuera. 0 = manda la fase.</string>
+</resources>

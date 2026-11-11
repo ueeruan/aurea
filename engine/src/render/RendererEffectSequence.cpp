@@ -300,15 +300,16 @@ bool compose_temporal(TemporalKind kind, const std::vector<ParamValue>& v, Scene
             const f64 delay = std::clamp(static_cast<f64>(val(v, 1, 2.0f)), 0.25, 120.0);
             const f32 decay = std::clamp(val(v, 2, 0.6f), 0.0f, 1.0f);
             const f32 rgb = val(v, 3, 0.0f);
+            const f32 start = std::clamp(val(v, 4, 100.0f) / 100.0f, 0.0f, 1.0f);   // AE 2026
             if (rgb > 0.0f) {
                 const f64 d = std::clamp(static_cast<f64>(rgb), 0.0, 60.0);
-                add(scene.at(t), 1.0f, 1, 0, 0);
-                add(scene.at(t - d), 1.0f, 0, 1, 0);
-                add(scene.at(t - 2.0 * d), 1.0f, 0, 0, 1);
+                add(scene.at(t), start, 1, 0, 0);
+                add(scene.at(t - d), start, 0, 1, 0);
+                add(scene.at(t - 2.0 * d), start, 0, 0, 1);
             } else {
-                add(scene.at(t), 1.0f, 1, 1, 1);
+                add(scene.at(t), start, 1, 1, 1);
             }
-            f32 wgt = 1.0f;
+            f32 wgt = start;
             for (u32 i = 1; i <= copies; ++i) {
                 wgt *= decay;
                 if (wgt < 0.01f) break;

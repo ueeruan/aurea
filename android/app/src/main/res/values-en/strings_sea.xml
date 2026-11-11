@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: pacote "Mar" (SeaEffects.cpp): nomes e textos dos efeitos de mar. -->
+<resources>
+    <string name="sea_name_ocean">Ocean</string>
+    <string name="sea_name_underwater">Underwater</string>
+    <string name="sea_name_caustics">Caustics</string>
+    <string name="sea_name_shore_wave">Shore Wave</string>
+    <string name="fxl_sea_wave_height">Wave height</string>
+    <string name="fxl_sea_wavelength">Wavelength</string>
+    <string name="fxl_sea_wind_direction">Wind direction</string>
+    <string name="fxl_sea_choppiness">Choppiness</string>
+    <string name="fxl_sea_shallow_color">Shallow water color</string>
+    <string name="fxl_sea_deep_color">Deep water color</string>
+    <string name="fxl_sea_sky">Sky</string>
+    <string name="fxl_sea_sky_color">Sky color</string>
+    <string name="fxl_sea_sky_layer">Sky layer</string>
+    <string name="fxl_sea_foam">Foam</string>
+    <string name="fxl_sea_sun_glitter">Sun glitter</string>
+    <string name="fxl_sea_sun_direction">Sun direction</string>
+    <string name="fxl_sea_sun_height">Sun height</string>
+    <string name="fxl_sea_camera_angle">Camera angle</string>
+    <string name="fxl_sea_haze">Haze</string>
+    <string name="fxl_sea_stylize">Stylized</string>
+    <string name="fxl_sea_clip_layer">Clip to layer</string>
+    <string name="fxl_sea_wave_size">Wave size</string>
+    <string name="fxl_sea_caustics">Caustics</string>
+    <string name="fxl_sea_caustics_scale">Caustics scale</string>
+    <string name="fxl_sea_depth">Depth</string>
+    <string name="fxl_sea_light_rays">Light rays</string>
+    <string name="fxl_sea_particles">Particles</string>
+    <string name="fxl_sea_particle_size">Particle size</string>
+    <string name="fxl_sea_sharpness">Sharpness</string>
+    <string name="fxl_sea_refraction">Refraction</string>
+    <string name="fxl_sea_edge_wave">Edge waviness</string>
+    <string name="fxl_sea_edge_size">Edge wave size</string>
+    <string name="fxl_sea_foam_width">Foam width</string>
+    <string name="fxl_sea_foam_color">Foam color</string>
+    <string name="fxl_sea_water_width">Water width</string>
+    <string name="fxl_sea_water_distortion">Water distortion</string>
+    <string name="fxo_sea_sky_color">Color</string>
+    <string name="fxo_sea_layer_image">Layer image</string>
+    <string name="fxo_sea_other_layer">Other layer</string>
+    <string name="fxo_sea_caustics_only">Caustics only</string>
+    <string name="fxl_sea_tip_sky">Layer image: the sky and its reflection come from this layer. Other layer: pick the sky layer (it shows above the horizon).</string>
+    <string name="fxl_sea_tip_ripple_speed">Waves per second, moving outward. 0 = the phase controls it.</string>
+</resources>

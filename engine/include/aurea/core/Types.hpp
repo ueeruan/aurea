@@ -166,11 +166,34 @@ enum class BlendMode : u16 {
     LinearLight,   ///< 26: B + 2S − 1, preso em [0,1]
     PinLight,      ///< 27: S ≤ ½ → min(B, 2S); senão max(B, 2S − 1)
     SoftOverlay,   ///< 28: definição do AUREA (a da referência é [NC]): (1 − 2S)·B² + 2S·B
+    // AE compositing (2026-11-10): os dez modos do After Effects que faltavam
+    // (o AE é só a especificação de comportamento). Fórmulas no cabeçalho de
+    // shaders/composite/blend.frag; referência independente em tests/test_gpu.cpp.
+    StencilLuma,        ///< 29: recorta o fundo pela LUMINÂNCIA da camada (o Mask com luma)
+    SilhouetteLuma,     ///< 30: fura o fundo pela luminância da camada (o Exclude com luma)
+    Dissolve,           ///< 31: cada pixel aparece inteiro ou não, sorteado contra o alfa (padrão fixo)
+    DancingDissolve,    ///< 32: o Dissolve com o sorteio refeito a cada quadro
+    HardMix,            ///< 33: por canal, 1 se B + S ≥ 1, senão 0
+    ClassicColorBurn,   ///< 34: Color Burn antigo: 1 − (1 − B)/S preso, sem os casos de borda
+    ClassicColorDodge,  ///< 35: Color Dodge antigo: B/(1 − S) preso, sem os casos de borda
+    ClassicDifference,  ///< 36: |B − S| com as cores presas em [0,1] (o novo vale para HDR)
+    AlphaAdd,           ///< 37: soma "disjunta": alfa = min(1, αs + αb), cor sem a sobreposição
+    LuminescentPremul,  ///< 38: "sobre" pré-multiplicado que guarda a cor acima do alfa (luz)
 };
 /// O último modo conhecido (leitura de projeto e validação de comando).
-inline constexpr BlendMode kLastBlendMode = BlendMode::SoftOverlay;
-static_assert(static_cast<u16>(BlendMode::Exclude) == 23 && static_cast<u16>(BlendMode::SoftOverlay) == 28,
+inline constexpr BlendMode kLastBlendMode = BlendMode::LuminescentPremul;
+static_assert(static_cast<u16>(BlendMode::Exclude) == 23 && static_cast<u16>(BlendMode::SoftOverlay) == 28
+                  && static_cast<u16>(BlendMode::LuminescentPremul) == 38,
               "BlendMode é contrato de arquivo: só acrescente no fim");
+/// Modos que não pintam cor: o alfa (ou a luma) da camada só recorta o que já
+/// foi composto abaixo (Stencil/Silhouette do AE).
+[[nodiscard]] constexpr bool blend_is_stencil(BlendMode m) noexcept {
+    return m == BlendMode::Mask || m == BlendMode::Exclude || m == BlendMode::StencilLuma || m == BlendMode::SilhouetteLuma;
+}
+/// Stencil (destino-dentro): fora do quad da camada o fundo some.
+[[nodiscard]] constexpr bool blend_keeps_inside_only(BlendMode m) noexcept {
+    return m == BlendMode::Mask || m == BlendMode::StencilLuma;
+}
 
 enum class Interpolation : u8 {
     Hold = 0,
@@ -201,7 +224,13 @@ inline constexpr Interpolation kLastInterpolation = Interpolation::Random;
 /// gravados antes dele continuarem com os mesmos números.
 enum class MaskOperation : u8 {
     Add = 0, Subtract, Intersect, Difference, None,
+    // AE compositing (2026-11-10): Clarear = união pelo maior valor (max),
+    // Escurecer = interseção pelo menor (min).
+    Lighten, Darken,
 };
+inline constexpr MaskOperation kLastMaskOperation = MaskOperation::Darken;
+static_assert(static_cast<u8>(MaskOperation::None) == 4 && static_cast<u8>(MaskOperation::Darken) == 6,
+              "MaskOperation é contrato de arquivo: só acrescente no fim");
 
 /// Track matte: a camada só aparece através do alfa/luma de outra (a matte,
 /// que deixa de ser desenhada por conta própria — semântica do AE).
@@ -254,6 +283,12 @@ enum class TrackProperty : u16 {
     /// Keys do CAMINHO de uma máscara: effectIndex = id da máscara, paramIndex = 0;
     /// dados em Mask::pathKeys (trilha virtual, como a VectorPath).
     MaskPath,
+    /// AE animation (v68): keys do TEXTO-FONTE (o "Source Text" do AE): trilha
+    /// virtual de keys congelados (hold); dados em TextData::sourceKeys.
+    /// effectIndex = 0, paramIndex = 0.
+    TextSource,
+    /// Câmera de dois nós: o Ponto de Interesse (px do espaço do pai), animável.
+    CameraPoiX, CameraPoiY, CameraPoiZ,
     _Count,
 };
 static_assert(static_cast<u16>(TrackProperty::MeshWarp) == 44);
@@ -261,6 +296,7 @@ static_assert(static_cast<u16>(TrackProperty::BonePose) == 45);
 static_assert(static_cast<u16>(TrackProperty::TextPathLastMargin) == 47);
 static_assert(static_cast<u16>(TrackProperty::VectorPath) == 48);
 static_assert(static_cast<u16>(TrackProperty::MaskPath) == 49);
+static_assert(static_cast<u16>(TrackProperty::TextSource) == 50 && static_cast<u16>(TrackProperty::CameraPoiZ) == 53);
 
 enum class ExportCodec : u16 {
     H264 = 0, HEVC, AV1, ProRes,

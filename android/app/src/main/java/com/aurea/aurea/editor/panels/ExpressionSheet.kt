@@ -72,6 +72,13 @@ private val Snippets = listOf(
     "effect(\"Slider Control\")(\"Slider\")",
     "thisComp.layer(1).transform.position",
     "random(0, 100)",
+    // AE animation: espaço da camada, mira, caixa do conteúdo e outra composição.
+    "thisComp.layer(1).toComp([0, 0])",
+    "fromComp(thisComp.layer(1).toComp([0, 0]))",
+    "thisComp.layer(1).toWorld(thisComp.layer(1).anchorPoint)",
+    "lookAt(position, thisComp.layer(1).position)",
+    "var r = thisLayer.sourceRectAtTime(); [r.left + r.width / 2, r.top + r.height / 2]",
+    "comp(\"Comp 1\").layer(1).transform.position",
 )
 
 private val Mono = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 14.sp, lineHeight = 20.sp)

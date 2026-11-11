@@ -1421,6 +1421,8 @@ private const val SPECIAL_EQ = 7
 private const val SPECIAL_GRID = 8
 // 0.4.5: Remover fundo (análise do clipe, progresso, estado) — BgRemovePanel.kt.
 private const val SPECIAL_BG_REMOVE = 45
+// 0.5.2: Headbop (Analisar, tap tempo, Converter em keyframes) — HeadbopPanel.kt.
+private const val SPECIAL_HEADBOP = 52
 
 /**
  * O CORPO, na ordem do P0-3: 1) ferramentas do efeito especial; 2) "Variação"
@@ -1430,6 +1432,7 @@ private const val SPECIAL_BG_REMOVE = 45
 private fun fxBodyItems(store: EditorStore, effectId: Int, typeId: Int, visible: List<ParamSlot>, advancedOpen: Boolean): List<FxBody> = buildList {
     if (typeId == effectTypeId("aurea.key.rotobrush")) add(FxBody.Special(SPECIAL_ROTO))
     if (typeId == BG_REMOVE_TYPE_ID) add(FxBody.Special(SPECIAL_BG_REMOVE))
+    if (typeId == effectTypeId("aurea.distort.headbop")) add(FxBody.Special(SPECIAL_HEADBOP))
     if (typeId == effectTypeId("aurea.ai.depth_map") || typeId == effectTypeId("aurea.key.rotobrush")) add(FxBody.Special(SPECIAL_LOCAL_AI))
     if (typeId == effectTypeId("aurea.time.remap")) {
         add(FxBody.Special(SPECIAL_TIME_REMAP))
@@ -1648,6 +1651,7 @@ private fun FxSpecialTools(env: PanelEnv, effect: LayerEffect, what: Int, meshSe
             SPECIAL_EQ -> EqResponseGraph(env, id)
             SPECIAL_GRID -> GridControlRow(store)   // Omega grid
             SPECIAL_BG_REMOVE -> BgRemoveControls(store, id)
+            SPECIAL_HEADBOP -> HeadbopCardTools(store, id)
         }
     }
 }

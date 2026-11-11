@@ -837,7 +837,9 @@ void Engine::install_plugin_api(Context& c, plugins::PluginRuntime& rt) {
         return created(cx, self->add_camera(), "addCamera");
     });
     c.method(collProto, "addLight", [self, created](Context& cx, const Value&, std::vector<Value>& a) {
-        return created(cx, self->add_light(static_cast<u32>(std::clamp(cx.to_number(arg(a, 0).is_nullish() ? Value::number(0) : arg(a, 0)), 0.0, 3.0))), "addLight");
+        // 0 direcional, 1 pontual, 2 spot, 3 ambiente, 4 Flare 3D (Engine::kAddLightFlare).
+        return created(cx, self->add_light(static_cast<u32>(std::clamp(cx.to_number(arg(a, 0).is_nullish() ? Value::number(0) : arg(a, 0)), 0.0,
+                                                                       static_cast<f64>(Engine::kAddLightFlare)))), "addLight");
     });
     c.method(collProto, "byName", [with_comp, layer_ids, make_layer](Context& cx, const Value&, std::vector<Value>& a) {
         const std::string name = cx.to_string(arg(a, 0));

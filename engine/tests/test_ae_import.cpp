@@ -1521,3 +1521,79 @@ AUREA_TEST(AeImport, ReportJsonIsValidUtf8AndScriptErrorsKeepCounts) {
         AUREA_CHECK(r.message.find("não mudou nada") != std::string::npos);
     }
 }
+
+// =============================================================================
+// AE 2026 (segunda leva): BlendingMode do DOM com os modos acrescentados depois
+// dos 22 primeiros (os dez do AE compositing, estêncil/silhueta, cor mais
+// escura/clara, luz linear/pontual) e os parâmetros novos do Eco e do Brilho.
+// =============================================================================
+AUREA_TEST(AeImport, JsxBlendingModesCoverTheAeCompositingModes) {
+    struct Mode { const char* name; BlendMode mode; };
+    const Mode modes[] = {
+        {"SCREEN", BlendMode::Screen},
+        {"LINEAR_BURN", BlendMode::LinearBurn},
+        {"STENCIL_ALPHA", BlendMode::Mask},
+        {"SILHOUETE_ALPHA", BlendMode::Exclude},
+        {"DARKER_COLOR", BlendMode::DarkerColor},
+        {"LIGHTER_COLOR", BlendMode::LighterColor},
+        {"LINEAR_LIGHT", BlendMode::LinearLight},
+        {"PIN_LIGHT", BlendMode::PinLight},
+        {"STENCIL_LUMA", BlendMode::StencilLuma},
+        {"SILHOUETE_LUMA", BlendMode::SilhouetteLuma},
+        {"SILHOUETTE_LUMA", BlendMode::SilhouetteLuma},
+        {"DISSOLVE", BlendMode::Dissolve},
+        {"DANCING_DISSOLVE", BlendMode::DancingDissolve},
+        {"HARD_MIX", BlendMode::HardMix},
+        {"CLASSIC_COLOR_BURN", BlendMode::ClassicColorBurn},
+        {"CLASSIC_COLOR_DODGE", BlendMode::ClassicColorDodge},
+        {"CLASSIC_DIFFERENCE", BlendMode::ClassicDifference},
+        {"ALPHA_ADD", BlendMode::AlphaAdd},
+        {"LUMINESCENT_PREMUL", BlendMode::LuminescentPremul},
+    };
+    AeRig rig;
+    const u64 layer = rig.shape();
+    for (const Mode& m : modes) {
+        // Escreve o modo e lê de volta pelo DOM: o nome da camada diz se bateu.
+        const std::string src = std::string("var l = app.project.activeItem.selectedLayers[0];\nl.blendingMode = BlendingMode.") + m.name
+            + ";\nl.name = (l.blendingMode == BlendingMode." + m.name + ") ? 'ok' : ('x' + l.blendingMode);\n";
+        const ae::ImportReport r = rig.e.import_ae_data(src, "modo.jsx", layer);
+        if (!r.ok) dump(r);
+        Layer* l = rig.L(layer);
+        AUREA_CHECK_MSG(l && l->blendMode == m.mode, m.name);
+        AUREA_CHECK_MSG(l && l->name == "ok", m.name);
+    }
+    // Um número fora do enum volta a Normal.
+    const ae::ImportReport r = rig.e.import_ae_data("app.project.activeItem.selectedLayers[0].blendingMode = 9999;\n", "fora.jsx", layer);
+    (void)r;
+    AUREA_CHECK(rig.L(layer)->blendMode == BlendMode::Normal);
+}
+
+AUREA_TEST(AeImport, JsxEchoOperatorAndGlowDimensionsAreRead) {
+    const char* src = R"JS(var l = app.project.activeItem.selectedLayers[0];
+var echo = l.Effects.addProperty("ADBE Echo");
+echo.property("Echo Operator").setValue(2);
+var glow = l.Effects.addProperty("ADBE Glo2");
+glow.property("Glow Dimensions").setValue(3);
+var cc = l.Effects.addProperty("ADBE Channel Combiner");
+cc.property("From").setValue(13);
+cc.property("To").setValue(12);
+)JS";
+    AeRig rig;
+    const u64 layer = rig.shape();
+    const ae::ImportReport r = rig.e.import_ae_data(src, "eco.jsx", layer);
+    if (!r.ok) dump(r);
+    AUREA_CHECK(r.ok);
+    AUREA_CHECK_EQ(r.effects, 3u);
+    Layer* l = rig.L(layer);
+    AUREA_CHECK(l && l->effects.size() == 3);
+    if (!l || l->effects.size() != 3) return;
+    const u32 op = param_index(rig.e, effect_keys::kEchoTrail, "echo_operator");
+    const u32 dims = param_index(rig.e, effect_keys::kGlow, "glow_dimensions");
+    const u32 from = param_index(rig.e, "aurea.color.channel_combiner", "from");
+    const u32 to = param_index(rig.e, "aurea.color.channel_combiner", "to");
+    AUREA_CHECK(op != kInvalidIndex && dims != kInvalidIndex);
+    AUREA_CHECK_NEAR(l->effects[0].params[op].constant.v[0], 1.0, 1e-6);     // AE 2 (Maximum) → 1
+    AUREA_CHECK_NEAR(l->effects[1].params[dims].constant.v[0], 2.0, 1e-6);   // AE 3 (Vertical) → 2
+    AUREA_CHECK_NEAR(l->effects[2].params[from].constant.v[0], 1.0, 1e-6);   // AE 13 (Lightness) → 1
+    AUREA_CHECK_NEAR(l->effects[2].params[to].constant.v[0], 2.0, 1e-6);     // AE 12 (Blue only) → 2
+}

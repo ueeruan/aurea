@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE animation (2026-11-11): texto-fonte, auto-orientar, câmera de dois nós e os controles do animador de texto (B5). -->
+<resources>
+    <string name="ae_anim_source_text">النص المصدر</string>
+    <string name="ae_anim_source_key_add">إطار مفتاحي للنص هنا</string>
+    <string name="ae_anim_source_key_remove">إزالة إطار النص المفتاحي هنا</string>
+    <string name="ae_anim_source_key_count">%1$d إطارات مفتاحية</string>
+    <string name="ae_anim_auto_orient">التوجيه التلقائي</string>
+    <string name="ae_anim_auto_orient_off">متوقف</string>
+    <string name="ae_anim_auto_orient_path">على طول المسار</string>
+    <string name="ae_anim_auto_orient_camera">نحو الكاميرا</string>
+    <string name="ae_anim_two_node">كاميرا بعقدتين</string>
+    <string name="ae_anim_two_node_hint">توجّه الكاميرا نحو نقطة الاهتمام، ويُضاف الدوران فوق ذلك</string>
+    <string name="ae_anim_poi">نقطة الاهتمام</string>
+    <string name="ae_anim_poi_axis">نقطة الاهتمام %1$s</string>
+    <string name="ae_anim_poi_key_add">إطار مفتاحي لنقطة الاهتمام</string>
+    <string name="ae_anim_poi_key_remove">إزالة إطار نقطة الاهتمام المفتاحي</string>
+    <string name="ae_anim_char_offset">إزاحة الحرف</string>
+    <string name="ae_anim_skew_axis">محور الإمالة</string>
+</resources>

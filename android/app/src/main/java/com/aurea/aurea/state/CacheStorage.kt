@@ -48,7 +48,8 @@ class CacheStorage(private val context: Context) {
     private val previews get() = File(motor, "previas")
     private val preRender get() = File(motor, "pre-render")
     private val proxies get() = File(motor, "preview-proxies")
-    /** Pipelines e o resto do motor: fora prévias, PreRender e proxies (linhas próprias). */
+    /** Pipelines e o resto do motor: fora prévias, PreRender e proxies (linhas próprias).
+     *  Inclui `motor/headbop` (rig do Headbop, regenerável: sem ele vale o rig parado do efeito). */
     private fun pipeline(f: File) = !f.path.startsWith(previews.path) && !f.path.startsWith(preRender.path) &&
         !f.path.startsWith(proxies.path)
     private val export get() = File(context.cacheDir, "export")

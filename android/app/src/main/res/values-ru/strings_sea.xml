@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: pacote "Mar" (SeaEffects.cpp): nomes e textos dos efeitos de mar. -->
+<resources>
+    <string name="sea_name_ocean">Океан</string>
+    <string name="sea_name_underwater">Под водой</string>
+    <string name="sea_name_caustics">Каустика</string>
+    <string name="sea_name_shore_wave">Волна на берегу</string>
+    <string name="fxl_sea_wave_height">Высота волн</string>
+    <string name="fxl_sea_wavelength">Длина волн</string>
+    <string name="fxl_sea_wind_direction">Направление ветра</string>
+    <string name="fxl_sea_choppiness">Волнение</string>
+    <string name="fxl_sea_shallow_color">Цвет мелкой воды</string>
+    <string name="fxl_sea_deep_color">Цвет глубокой воды</string>
+    <string name="fxl_sea_sky">Небо</string>
+    <string name="fxl_sea_sky_color">Цвет неба</string>
+    <string name="fxl_sea_sky_layer">Слой неба</string>
+    <string name="fxl_sea_foam">Пена</string>
+    <string name="fxl_sea_sun_glitter">Солнечные блики</string>
+    <string name="fxl_sea_sun_direction">Направление солнца</string>
+    <string name="fxl_sea_sun_height">Высота солнца</string>
+    <string name="fxl_sea_camera_angle">Угол камеры</string>
+    <string name="fxl_sea_haze">Дымка</string>
+    <string name="fxl_sea_stylize">Стилизация</string>
+    <string name="fxl_sea_clip_layer">Обрезать по слою</string>
+    <string name="fxl_sea_wave_size">Размер волн</string>
+    <string name="fxl_sea_caustics">Каустика</string>
+    <string name="fxl_sea_caustics_scale">Масштаб каустики</string>
+    <string name="fxl_sea_depth">Глубина</string>
+    <string name="fxl_sea_light_rays">Лучи света</string>
+    <string name="fxl_sea_particles">Частицы</string>
+    <string name="fxl_sea_particle_size">Размер частиц</string>
+    <string name="fxl_sea_sharpness">Резкость</string>
+    <string name="fxl_sea_refraction">Преломление</string>
+    <string name="fxl_sea_edge_wave">Волнистость края</string>
+    <string name="fxl_sea_edge_size">Размер волн края</string>
+    <string name="fxl_sea_foam_width">Ширина пены</string>
+    <string name="fxl_sea_foam_color">Цвет пены</string>
+    <string name="fxl_sea_water_width">Ширина воды</string>
+    <string name="fxl_sea_water_distortion">Искажение воды</string>
+    <string name="fxo_sea_sky_color">Цвет</string>
+    <string name="fxo_sea_layer_image">Изображение слоя</string>
+    <string name="fxo_sea_other_layer">Другой слой</string>
+    <string name="fxo_sea_caustics_only">Только каустика</string>
+    <string name="fxl_sea_tip_sky">Изображение слоя: небо и его отражение берутся из этого слоя. Другой слой: выберите слой неба (он виден над горизонтом).</string>
+    <string name="fxl_sea_tip_ripple_speed">Волн в секунду, от центра наружу. 0 = управляет фаза.</string>
+</resources>

@@ -100,6 +100,10 @@ inline constexpr u32 kLayerRowFlagClipToBelow = 1u << 14;
 /// "Criar máscara de recorte" vale agora: camada visual, não recortada, com
 /// uma base visual (ou uma cadeia) logo abaixo na ordem de desenho.
 inline constexpr u32 kLayerRowFlagClipCandidate = 1u << 15;
+/// Tímida (o Shy do AE): some da timeline com "Ocultar camadas tímidas".
+inline constexpr u32 kLayerRowFlagShy = 1u << 16;
+/// Preservar transparência (o T do AE): pinta só onde a pilha abaixo tem alfa.
+inline constexpr u32 kLayerRowFlagPreserveTransparency = 1u << 17;
 /// Etiqueta de cor (0 = nenhuma) nos bits 8..11.
 inline constexpr u32 kLayerRowLabelShift   = 8;
 inline constexpr u32 kLayerRowLabelMask    = 0xFu << kLayerRowLabelShift;

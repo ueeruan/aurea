@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Timeline do AE (2026-11-11): marcas de camada, duração/comentário das marcas, área de trabalho, Easy Ease, escalar keyframes e escalonar. -->
+<resources>
+    <string name="aet_marker_duration">Duration (frames)</string>
+    <string name="aet_marker_comment">Comment</string>
+    <string name="aet_marker_comment_hint">Marker note (expressions read it with .comment)</string>
+    <string name="aet_layer_marker_edit">Layer marker</string>
+    <string name="aet_layer_marker_hint">The marker moves with the layer. In expressions: thisLayer.marker.</string>
+    <string name="aet_layer_marker_here">Layer marker here</string>
+    <string name="aet_stagger">Stagger</string>
+    <string name="aet_stagger_step_value">Step of %1$d frames</string>
+    <string name="aet_stagger_less">One frame less per step</string>
+    <string name="aet_stagger_more">One frame more per step</string>
+    <string name="aet_stagger_keys_only">Keyframes only</string>
+    <string name="aet_stagger_apply">Stagger</string>
+    <string name="aet_on">On</string>
+    <string name="aet_off">Off</string>
+    <string name="aet_export_work_area">Work area only</string>
+    <string name="aet_export_work_area_range">%1$s – %2$s</string>
+    <string name="aet_easy_ease">Easy Ease</string>
+    <string name="aet_easy_ease_in">Easy Ease In</string>
+    <string name="aet_easy_ease_out">Easy Ease Out</string>
+    <string name="aet_ease_nothing">No segment to ease in the selected keyframes</string>
+    <string name="aet_keys_scale">Scale time</string>
+    <string name="aet_keys_scale_to">Time to %1$s</string>
+    <string name="aet_keys_scale_refused">Can\'t scale: two keyframes would land on the same frame</string>
+    <string name="aet_work_area_start_here">Work area starts here</string>
+    <string name="aet_work_area_end_here">Work area ends here</string>
+    <string name="aet_work_area_clear">Clear work area</string>
+    <string name="aet_trim_to_work_area">Trim composition to work area</string>
+    <string name="aet_trimmed_to_work_area">Composition trimmed to the work area</string>
+</resources>

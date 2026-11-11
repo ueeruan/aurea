@@ -23,7 +23,7 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform GroundBlock {
     vec4 viewport;          // xy = 1/tamanho do alvo, z = tem reflexo planar, w = raio do início do desbotamento
     vec4 skyColor;          // ambiente analítico (sem IBL)
     vec4 groundColor;
-    vec4 lightCount;        // x = luzes
+    vec4 lightCount;        // x = luzes; yzw = luz ambiente (rgb × intensidade, 0.5.2)
     vec4 lightPos[GROUND_MAX_LIGHTS];
     vec4 lightColor[GROUND_MAX_LIGHTS];
     vec4 lightSpot[GROUND_MAX_LIGHTS];
@@ -32,7 +32,7 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform GroundBlock {
     vec4 shadowParams;
     vec4 shadowParams2;
     mat4 contactMatrix;     // uv do mapa de contato ← mundo
-    vec4 contactParams;     // x = contato ligado, y = reflexo unlit presente, z..w livres
+    vec4 contactParams;     // x = contato ligado, y = reflexo unlit presente, z = molhado (0..1), w = tamanho das poças (px)
 } g;
 
 #endif

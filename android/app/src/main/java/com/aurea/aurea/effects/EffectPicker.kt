@@ -533,6 +533,7 @@ private fun RecommendedItem(entry: EffectCatalogEntry, previews: EffectPreviewSt
                 EffectAfterPreview(entry, previews, previewsOn, FX_PREVIEW_LARGE_W, FX_PREVIEW_LARGE_H)
             }
             if (entry.isNew) NewBadge(Modifier.align(Alignment.TopStart).padding(5.dp))
+            if (com.aurea.aurea.editor.panels.effectFuturePaid(entry.typeId)) FreeForNowBadge(Modifier.align(Alignment.BottomStart).padding(5.dp))
             EffectBadge(entry, Modifier.align(Alignment.TopEnd).offset(x = 5.dp, y = (-5).dp))
         }
         Text(
@@ -776,6 +777,7 @@ private fun GridCard(entry: EffectCatalogEntry, previews: EffectPreviewStore?, p
                 EffectAfterPreview(entry, previews, previewsOn)
             }
             if (entry.isNew) NewBadge(Modifier.align(Alignment.TopStart).padding(4.dp))
+            if (com.aurea.aurea.editor.panels.effectFuturePaid(entry.typeId)) FreeForNowBadge(Modifier.align(Alignment.BottomStart).padding(4.dp))
             EffectBadge(entry, Modifier.align(Alignment.TopEnd).offset(x = 4.dp, y = (-4).dp))
         }
         Text(
@@ -831,6 +833,18 @@ private fun HeavyBadge(modifier: Modifier = Modifier) {
     ) {
         Text("!", style = AureaType.of(13f, FontWeight.W900, color = AureaColors.FxDarkest))
     }
+}
+
+/** Selo "Grátis por enquanto" (efeito que será pago numa versão futura): o mesmo desenho do "Novo". */
+@Composable
+private fun FreeForNowBadge(modifier: Modifier = Modifier) {
+    Text(
+        stringResource(R.string.headbop_free_for_now),
+        style = AureaType.of(9f, FontWeight.W700, color = AureaColors.OnAccent),
+        maxLines = 1,
+        modifier = modifier.clip(RoundedCornerShape(4.dp)).background(AureaColors.Accent).padding(horizontal = 4.dp, vertical = 1.dp)
+            .testTag("effects.badge.free_for_now"),
+    )
 }
 
 /** O selo "Novo" do AUREA (efeito marcado como novo pelo motor). */
@@ -1096,6 +1110,7 @@ private fun ResultRow(
                 EffectAfterPreview(entry, previews, previewsOn)
             }
             if (entry.isNew) NewBadge(Modifier.align(Alignment.TopStart).padding(4.dp))
+            if (com.aurea.aurea.editor.panels.effectFuturePaid(entry.typeId)) FreeForNowBadge(Modifier.align(Alignment.BottomStart).padding(4.dp))
             EffectBadge(entry, Modifier.align(Alignment.TopEnd).offset(x = 4.dp, y = (-4).dp))
         }
         Spacer(Modifier.width(12.dp))

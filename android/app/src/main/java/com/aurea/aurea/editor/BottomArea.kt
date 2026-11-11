@@ -167,6 +167,12 @@ internal fun MultiSelectionPanel(store: EditorStore, @Suppress("UNUSED_PARAMETER
             BatchTool(CupertinoGlyph.FullscreenExit, stringResource(R.string.editor_ajustar_tela), 18) { LayerOps.fitToCanvas(store, store.selection, fill = false) }
             BatchTool(CupertinoGlyph.Fullscreen, stringResource(R.string.editor_preencher_tela), 18) { LayerOps.fitToCanvas(store, store.selection, fill = true) }
         }
+        // Timeline do AE: o passo do "Escalonar" (Engine::stagger_layers) exposto.
+        Spacer(Modifier.height(8.dp))
+        com.aurea.aurea.editor.timeline.StaggerStepper(
+            store,
+            Modifier.height(48.dp).clip(RoundedCornerShape(10.dp)).background(ShellColors.DockRow),
+        )
     }
 }
 

@@ -9,8 +9,11 @@
 // =============================================================================
 #include "aurea/Engine.hpp"
 
+#include "aurea/command/Command.hpp"
+#include "aurea/core/Log.hpp"
 #include "aurea/core/Trackball.hpp"
 #include "aurea/render/Renderer.hpp"
+#include "aurea/rig/Ik.hpp"
 #include "aurea/scene3d/Animation.hpp"
 #include "aurea/scene3d/RigPose.hpp"
 
@@ -67,6 +70,112 @@ Vec3 rotate(const Quat& q, Vec3 v) noexcept {
 }
 
 } // namespace
+
+std::vector<i32> Engine::model_attach_bones(u64 modelLayerId) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = model_layer(comp, modelLayerId);
+    if (!l) return {};
+    const auto it = models_.find(l->model.scene.pack());
+    if (it == models_.end() || !it->second) return {};
+    return scene3d::pose_bones(*it->second);
+}
+
+Status Engine::set_layer_parent_bone(u64 layerId, u64 modelLayerId, i32 node) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+    // Edições ainda na fila vêm antes: o vínculo mede o estado final.
+    drain_commands_locked();
+    Composition* comp = current_composition();
+    if (!comp) return Status{Errc::InvalidState, "projeto sem composicao"};
+    const LayerId childId = LayerId::unpack(layerId), modelId = LayerId::unpack(modelLayerId);
+    Layer* l = comp->layer(childId);
+    const Layer* model = model_layer(comp, modelLayerId);
+    if (!l || !model) return Status{Errc::NotFound, "camada ou modelo nao encontrado"};
+    if (l->locked) return Status{Errc::InvalidState, "camada bloqueada"};
+    if (childId == modelId) return Status{Errc::InvalidArgument, "a camada nao pode seguir a si mesma"};
+    if (node >= 0) {
+        const auto it = models_.find(model->model.scene.pack());
+        if (it == models_.end() || !it->second) return Status{Errc::NotFound, "modelo sem dados"};
+        const std::vector<i32> bones = scene3d::pose_bones(*it->second);
+        if (std::find(bones.begin(), bones.end(), node) == bones.end()) return Status{Errc::InvalidArgument, "osso fora do rig"};
+    } else if (l->parent != modelId) {
+        return OkStatus;   // nada preso neste modelo
+    }
+    if (l->parent == modelId && l->parentBone == node) return OkStatus;
+    const char* label = node >= 0 ? "prender ao osso" : "soltar do osso";
+    history_.begin_group(label);
+    history_.before_mutation(*comp, project_->timeline().current(), label);
+    bump_model_revision_locked();
+    if (l->parent != modelId) {
+        Command c;
+        c.type = CommandType::LayerSetParent;
+        c.layer_parent.layer = childId;
+        c.layer_parent.parent = modelId;
+        if (const Status s = apply_command_internal(c, nullptr, true); !s.ok()) {
+            history_.end_group();
+            return s;
+        }
+        l = comp->layer(childId);
+        if (!l) { history_.end_group(); return Errc::NotFound; }
+    }
+    if (node < 0 && l->parentBone >= 0) {
+        // Soltar: a camada fica onde está na tela (no quadro do cabeçote) e
+        // passa a seguir o modelo inteiro. O osso de agora vira a base do
+        // vínculo (parentBasis): mundo = pai × osso(agora) × base × camada —
+        // a animação da camada continua igual, só sem o osso andando.
+        const FrameIndex now = playback_.current();
+        Mat4 withBone, parentWorld;
+        {
+            const BoneAttachScope bones(&Engine::model_lookup, this);
+            withBone = layer_world_3d(*comp, *l, now);
+            parentWorld = layer_world_3d(*comp, *model, now);
+        }
+        l->parentBone = -1;
+        const Mat4 withoutBone = layer_world_3d(*comp, *l, now);
+        Mat4 invParent, invWithout;
+        if (rig::inverse(parentWorld, invParent) && rig::inverse(withoutBone, invWithout)) {
+            Mat4 basis = invParent * withBone * invWithout * parentWorld * (l->hasParentBasis ? l->parentBasis : Mat4::identity());
+            // Afim exata (o arquivo só aceita a última linha 0 0 0 1).
+            for (u32 c = 0; c < 3; ++c) basis.col[c].w = 0.0f;
+            basis.col[3].w = 1.0f;
+            bool finite = true;
+            for (const Vec4& col : basis.col)
+                finite = finite && std::isfinite(col.x) && std::isfinite(col.y) && std::isfinite(col.z);
+            if (finite) {
+                l->parentBasis = basis;
+                l->hasParentBasis = true;
+            }
+        }
+    }
+    l->parentBone = node;
+    if (node >= 0) {
+        // No osso: a compensação do vínculo comum (ficar parado na tela) não
+        // vale aqui — a camada vai para a junta. Posição animada vira o
+        // deslocamento a partir dela.
+        l->parentBasis = Mat4::identity();
+        l->hasParentBasis = false;
+        l->threeD = true;
+        auto animated = [&](TrackProperty p) { const Track* t = l->tracks.find(p); return t && !t->keys.empty(); };
+        if (!animated(TrackProperty::PositionX) && !animated(TrackProperty::PositionY) && !animated(TrackProperty::PositionZ)) {
+            l->transform.position = Vec3{0, 0, 0};
+            for (TrackProperty p : {TrackProperty::PositionX, TrackProperty::PositionY, TrackProperty::PositionZ})
+                if (Track* t = l->tracks.find(p)) t->staticValue = 0.0f;
+        }
+    }
+    history_.end_group();
+    project_->mark_dirty();
+    request_render();
+    AUREA_LOG_INFO("camada %llu %s %d", static_cast<unsigned long long>(layerId), label, node);
+    return OkStatus;
+}
+
+i32 Engine::layer_parent_bone(u64 layerId) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    return l && l->parent.valid() ? l->parentBone : -1;
+}
 
 u32 Engine::query_model_bones(u64 layerId, f32* out, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);

@@ -40,6 +40,10 @@ internal fun MarkerEditor(store: EditorStore) {
         var name by remember(original, isNew) { mutableStateOf(if (isNew) "" else store.markerLabel(original)) }
         var frame by remember(original, isNew) { mutableStateOf(original.toString()) }
         var color by remember(original, isNew) { mutableStateOf(if (index >= 0) markers.colors[index] else MarkerColors.ENGINE_DEFAULT) }
+        // Timeline do AE: duração (quadros) e comentário da marca.
+        val details = remember(original, isNew) { if (isNew) null else store.markerDetails(original) }
+        var duration by remember(original, isNew) { mutableStateOf((details?.first ?: 0).toString()) }
+        var comment by remember(original, isNew) { mutableStateOf(details?.second.orEmpty()) }
         // Aberto de dentro do palco (LTR): o diálogo volta à direção do idioma.
         LocaleDirection { AlertDialog(onDismissRequest = { store.closeMarkerEditor(); failure = false },
             title = { Text(stringResource(R.string.marker_edit)) },
@@ -52,6 +56,7 @@ internal fun MarkerEditor(store: EditorStore) {
                     label = { Text(stringResource(R.string.marker_frame)) })
                 Text(frame.toIntOrNull()?.let { Timecode.format(it.coerceAtLeast(0), store.project.fps) } ?: "—")
                 TextButton(onClick = { frame = store.playhead.toString() }) { Text(stringResource(R.string.marker_at_playhead)) }
+                MarkerExtraFields(duration, { duration = it }, comment, { comment = it }, store.project.fps)
                 Row(Modifier.fillMaxWidth()) {
                     val chosen = MarkerColors.legacyIndex(color)
                     MarkerColors.LEGACY.forEachIndexed { i, argb ->
@@ -69,7 +74,9 @@ internal fun MarkerEditor(store: EditorStore) {
             } },
             confirmButton = { TextButton(onClick = {
                 val target = frame.toIntOrNull()
-                if (target != null && store.editMarker(if (isNew) -1 else original, target, color, name)) { store.closeMarkerEditor(); failure = false }
+                val length = duration.trim().ifEmpty { "0" }.toIntOrNull()
+                if (target != null && length != null && length >= 0 &&
+                    store.editMarkerFull(if (isNew) -1 else original, target, color, name, length, comment)) { store.closeMarkerEditor(); failure = false }
                 else failure = true
             }) { Text(stringResource(R.string.common_save)) } },
             dismissButton = { TextButton(onClick = { store.closeMarkerEditor(); failure = false }) { Text(stringResource(R.string.common_cancel)) } }) }

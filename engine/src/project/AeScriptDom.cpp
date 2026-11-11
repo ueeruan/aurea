@@ -331,7 +331,14 @@ public:
                                 {"COLOR_BURN", 5221}, {"HARD_LIGHT", 5222}, {"SOFT_LIGHT", 5223}, {"DIFFERENCE", 5224},
                                 {"EXCLUSION", 5225}, {"HUE", 5226}, {"SATURATION", 5227}, {"COLOR", 5228},
                                 {"LUMINOSITY", 5229}, {"DIVIDE", 5230}, {"VIVID_LIGHT", 5231}, {"LINEAR_DODGE", 5232},
-                                {"LINEAR_BURN", 5233}});
+                                {"LINEAR_BURN", 5233},
+                                // 5212 + aurea::BlendMode (ver blend_index): os acrescentados depois.
+                                {"STENCIL_ALPHA", 5234}, {"SILHOUETE_ALPHA", 5235}, {"SILHOUETTE_ALPHA", 5235},
+                                {"DARKER_COLOR", 5236}, {"LIGHTER_COLOR", 5237}, {"LINEAR_LIGHT", 5238},
+                                {"PIN_LIGHT", 5239}, {"STENCIL_LUMA", 5241}, {"SILHOUETE_LUMA", 5242},
+                                {"SILHOUETTE_LUMA", 5242}, {"DISSOLVE", 5243}, {"DANCING_DISSOLVE", 5244},
+                                {"HARD_MIX", 5245}, {"CLASSIC_COLOR_BURN", 5246}, {"CLASSIC_COLOR_DODGE", 5247},
+                                {"CLASSIC_DIFFERENCE", 5248}, {"ALPHA_ADD", 5249}, {"LUMINESCENT_PREMUL", 5250}});
         consts("PropertyType", {{"PROPERTY", 6212}, {"INDEXED_GROUP", 6213}, {"NAMED_GROUP", 6214}});
         consts("PropertyValueType", {{"NO_VALUE", 6412}, {"ThreeD_SPATIAL", 6413}, {"ThreeD", 6414}, {"TwoD_SPATIAL", 6415},
                                      {"TwoD", 6416}, {"OneD", 6417}, {"COLOR", 6418}, {"CUSTOM_VALUE", 6419},
@@ -1160,27 +1167,19 @@ public:
         return method(in, obj, name);
     }
 
+    // Numeração PRÓPRIA do DOM (não a do AE): BlendingMode.X = 5212 + o valor
+    // do enum `aurea::BlendMode` (Types.hpp). Os 22 primeiros sempre foram
+    // assim; os modos acrescentados depois (estêncil/silhueta, cor mais escura
+    // e mais clara, luz linear e pontual, e os dez do AE compositing de
+    // 2026-11-10) seguem a MESMA regra, então um modo novo no fim do enum já
+    // entra aqui sem tabela.
     static u32 blend_index(BlendMode m) noexcept {
-        switch (m) {
-            case BlendMode::Add: return 1; case BlendMode::Subtract: return 2; case BlendMode::Multiply: return 3;
-            case BlendMode::Screen: return 4; case BlendMode::Overlay: return 5; case BlendMode::Darken: return 6;
-            case BlendMode::Lighten: return 7; case BlendMode::ColorDodge: return 8; case BlendMode::ColorBurn: return 9;
-            case BlendMode::HardLight: return 10; case BlendMode::SoftLight: return 11; case BlendMode::Difference: return 12;
-            case BlendMode::Exclusion: return 13; case BlendMode::Hue: return 14; case BlendMode::Saturation: return 15;
-            case BlendMode::Color: return 16; case BlendMode::Luminosity: return 17; case BlendMode::Divide: return 18;
-            case BlendMode::VividLight: return 19; case BlendMode::LinearDodge: return 20; case BlendMode::LinearBurn: return 21;
-            default: return 0;
-        }
+        const u32 v = static_cast<u32>(m);
+        return v <= static_cast<u32>(kLastBlendMode) ? v : 0u;
     }
     static BlendMode blend_from(i64 v) noexcept {
-        static const BlendMode m[] = {BlendMode::Normal, BlendMode::Add, BlendMode::Subtract, BlendMode::Multiply, BlendMode::Screen,
-                                      BlendMode::Overlay, BlendMode::Darken, BlendMode::Lighten, BlendMode::ColorDodge,
-                                      BlendMode::ColorBurn, BlendMode::HardLight, BlendMode::SoftLight, BlendMode::Difference,
-                                      BlendMode::Exclusion, BlendMode::Hue, BlendMode::Saturation, BlendMode::Color,
-                                      BlendMode::Luminosity, BlendMode::Divide, BlendMode::VividLight, BlendMode::LinearDodge,
-                                      BlendMode::LinearBurn};
         const i64 i = v - 5212;
-        return i >= 0 && i < static_cast<i64>(std::size(m)) ? m[i] : BlendMode::Normal;
+        return i >= 0 && i <= static_cast<i64>(kLastBlendMode) ? static_cast<BlendMode>(i) : BlendMode::Normal;
     }
 
     Value prop_get(Interp& in, u32 obj, const std::string& name) {
@@ -1212,7 +1211,8 @@ public:
                 if (name == "maskMode" && m) {
                     const MaskOperation op = m->operation;
                     return Value::num(op == MaskOperation::None ? 6812 : op == MaskOperation::Subtract ? 6814
-                                    : op == MaskOperation::Intersect ? 6815 : op == MaskOperation::Difference ? 6818 : 6813);
+                                    : op == MaskOperation::Intersect ? 6815 : op == MaskOperation::Lighten ? 6816
+                                    : op == MaskOperation::Darken ? 6817 : op == MaskOperation::Difference ? 6818 : 6813);
                 }
                 if (name == "inverted" && m) return Value::boolean(m->inverted);
             }
@@ -1392,8 +1392,8 @@ public:
                 if (name == "maskMode") {
                     const i64 x = std::llround(in.to_num(v));
                     m.operation = x == 6812 ? MaskOperation::None : x == 6814 ? MaskOperation::Subtract : x == 6815 ? MaskOperation::Intersect
+                                : x == 6816 ? MaskOperation::Lighten : x == 6817 ? MaskOperation::Darken
                                 : x == 6818 ? MaskOperation::Difference : MaskOperation::Add;
-                    if (x == 6816 || x == 6817) in.approx("maskMode", "clarear/escurecer viraram adicionar");
                 } else if (name == "inverted") m.inverted = in.truthy(v);
             }
             ++in.report().changes;

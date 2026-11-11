@@ -303,8 +303,14 @@ GroundDraw build_ground(FrameGraph& graph, Arena& arena, ShaderLibrary& shaders,
     if (cam.y >= h) return gd;
 
     // --- 1. Reflexo planar -----------------------------------------------------
-    const f32 reflectivity = std::isfinite(fl.reflectivity) ? std::clamp(fl.reflectivity, 0.0f, 1.0f) : 0.0f;
+    const f32 baseReflectivity = std::isfinite(fl.reflectivity) ? std::clamp(fl.reflectivity, 0.0f, 1.0f) : 0.0f;
     const f32 roughness = std::isfinite(fl.roughness) ? std::clamp(fl.roughness, 0.0f, 1.0f) : 0.35f;
+    // 0.5.2 chão molhado: a poça é um espelho (o passe de reflexo roda mesmo com
+    // o chão seco fosco, e sai nítido — o fosco do seco fica no shader).
+    const f32 wetness = std::isfinite(fl.wetness) ? std::clamp(fl.wetness, 0.0f, 1.0f) : 0.0f;
+    const f32 puddleSize = std::isfinite(fl.puddleSize) ? std::clamp(fl.puddleSize, 20.0f, 4000.0f) : 260.0f;
+    const f32 reflectivity = wetness > 0.0f ? std::max(baseReflectivity, 0.92f) : baseReflectivity;
+    const f32 blurRoughness = wetness > 0.0f ? std::min(roughness, 0.06f) : roughness;
     FGTexture reflection{}, reflectionDisplay{};
     const u32 div = in.exportQuality ? 1u : 2u;
     const u32 rw = std::max(1u, in.width / div), rh = std::max(1u, in.height / div);
@@ -410,7 +416,7 @@ GroundDraw build_ground(FrameGraph& graph, Arena& arena, ShaderLibrary& shaders,
                 reflection = reflHdr;
                 if (hasDisplayReflection) reflectionDisplay = reflDisplay;
                 // Desfoque pela rugosidade (σ em px da resolução inteira).
-                const f32 sigma = roughness * 0.03f * static_cast<f32>(in.height) / static_cast<f32>(div);
+                const f32 sigma = blurRoughness * 0.03f * static_cast<f32>(in.height) / static_cast<f32>(div);
                 if (sigma >= 0.6f) {
                     const FGTexture blurred = ground_blur(graph, shaders, reflHdr, rw, rh, sigma, false);
                     if (blurred.valid()) reflection = blurred;
@@ -500,7 +506,7 @@ GroundDraw build_ground(FrameGraph& graph, Arena& arena, ShaderLibrary& shaders,
     gb->center = Vec4{place.center.x, h, place.center.z, fadeEnd * 1.02f};
     gb->color = Vec4{std::clamp(fl.color.x, 0.0f, 1.0f), std::clamp(fl.color.y, 0.0f, 1.0f), std::clamp(fl.color.z, 0.0f, 1.0f),
                      static_cast<f32>(fl.mode)};
-    gb->params = Vec4{roughness, reflectivity, contactStrength, fadeEnd};
+    gb->params = Vec4{roughness, baseReflectivity, contactStrength, fadeEnd};
     gb->envParams = hd.envParams;
     gb->viewport = Vec4{1.0f / static_cast<f32>(in.width), 1.0f / static_cast<f32>(in.height), reflection.valid() ? 1.0f : 0.0f,
                         std::min(R * 1.2f, fadeEnd * 0.5f)};
@@ -517,7 +523,7 @@ GroundDraw build_ground(FrameGraph& graph, Arena& arena, ShaderLibrary& shaders,
     gb->shadowParams = hd.shadowParams;
     gb->shadowParams2 = hd.shadowParams2;
     gb->contactMatrix = contactMatrix;
-    gb->contactParams = Vec4{contact.valid() ? 1.0f : 0.0f, reflectionDisplay.valid() ? 1.0f : 0.0f, 0, 0};
+    gb->contactParams = Vec4{contact.valid() ? 1.0f : 0.0f, reflectionDisplay.valid() ? 1.0f : 0.0f, wetness, puddleSize};
     gd.pipeline = *pipe;
     gd.block = gb;
     gd.reflection = reflection;

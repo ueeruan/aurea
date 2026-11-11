@@ -477,6 +477,15 @@ struct Panel3DView: View {
                             if !reflective { finishEditing(); setScene(8, 1) }
                         }
                     }
+                    // 0.5.2: chão molhado — poças que espelham as luzes (par do Scene3DEnvironment.kt).
+                    if floor >= 1 && sceneSettings.count > 19 {
+                        sceneRow("scene052_floor_wet", value: sceneSettings[18] * 100, range: 0...100, unit: "%", reset: 0,
+                                 gesture: "chao molhado") { value in setScene(16, value / 100) }
+                        if sceneSettings[18] > 0 {
+                            sceneRow("scene052_puddle_size", value: sceneSettings[19], range: 20...2000, unit: "px", reset: 260,
+                                     gesture: "chao molhado", step: 10) { value in setScene(17, value) }
+                        }
+                    }
                 }
             }
             gap(16)

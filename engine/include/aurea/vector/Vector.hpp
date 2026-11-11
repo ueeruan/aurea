@@ -7,6 +7,9 @@
 //
 //  Cadeia de um grupo, no quadro:
 //    caminhos (paramétrico → bezier; morph pelos keyframes de forma)
+//      → operadores de caminho, em ordem (Deslocar, Franzir e inflar,
+//        Aspereza/Ondular, Arredondar cantos, Torcer, Zigue-zague, Ondular
+//        transform — VectorGroup::modifiers)
 //      → achatar (tolerância em px de TEXTURA: nítido em qualquer zoom)
 //      → Mesclar (booleanas no arranjo planar)
 //      → Aparar (trim por comprimento de arco)
@@ -185,9 +188,47 @@ void group_amounts(const std::vector<f64>& lengths, const DrawProgress& p, std::
 
 /// Grupo no instante local `frame`: valores animados (TrackSet, VectorParam)
 /// aplicados; caminhos continuam bezier (o morph é resolvido em path_at).
-[[nodiscard]] VectorGroup evaluate_group(const VectorGroup& g, const TrackSet& tracks, u32 groupIndex, f64 frame);
+/// `fps` converte o quadro no tempo (s) dos operadores animados (Ondular).
+[[nodiscard]] VectorGroup evaluate_group(const VectorGroup& g, const TrackSet& tracks, u32 groupIndex, f64 frame,
+                                         f64 fps = 30.0);
 [[nodiscard]] f32* param_ref(VectorGroup& g, u32 param) noexcept;
 [[nodiscard]] f32 clamp_param(u32 param, f32 v) noexcept;
+
+// --- Operadores de caminho (VectorModifier) ----------------------------------------
+
+/// Operador novo com os valores padrão do tipo.
+[[nodiscard]] VectorModifier make_modifier(VectorModifierType type) noexcept;
+/// O operador muda com o tempo (Ondular com frequência > 0).
+[[nodiscard]] bool modifier_animated(const VectorModifier& m) noexcept;
+/// Valor do parâmetro preso à faixa que o operador aceita.
+[[nodiscard]] f32 clamp_modifier_param(VectorModifierType type, u32 param, f32 v) noexcept;
+/// Aplica os operadores LIGADOS, em ordem, sobre os caminhos (espaço do
+/// grupo). `tags` (opcional, um por caminho) acompanha cada caminho pelos
+/// operadores que multiplicam caminhos (Deslocar com cópias). `tolerance` =
+/// achatamento do Deslocar, em px do grupo.
+void apply_modifiers(const std::vector<VectorModifier>& mods, std::vector<BezierPath>& paths, f32 tolerance,
+                     std::vector<u8>* tags = nullptr);
+/// Os operadores um a um (os parâmetros já nos tipos de cada um).
+void offset_paths(std::vector<BezierPath>& paths, f32 amount, u8 join, f32 miterLimit, f32 copies, f32 copyOffset,
+                  f32 tolerance, std::vector<u8>* tags = nullptr);
+void pucker_bloat(std::vector<BezierPath>& paths, f32 amountPercent);
+/// Aspereza/Ondular: `detail` pontos novos por segmento, deslocados até
+/// `size` px; `smooth` = pontos suaves. Tempo em s, frequência por s.
+void roughen(std::vector<BezierPath>& paths, f32 size, f32 detail, bool smooth, f64 timeSec, f32 frequency,
+             f32 correlationPercent, f32 temporalPhase, f32 spatialPhase, u32 seed);
+void round_corners(std::vector<BezierPath>& paths, f32 radius);
+void twist(std::vector<BezierPath>& paths, f32 angle, Vec2 centerOffset);
+void zigzag(std::vector<BezierPath>& paths, f32 size, f32 ridges, bool smooth);
+void wiggle_transform(std::vector<BezierPath>& paths, Vec2 anchor, Vec2 position, Vec2 scalePercent, f32 rotation,
+                      f64 timeSec, f32 frequency, f32 correlationPercent, f32 temporalPhase, f32 spatialPhase, u32 seed);
+
+/// After Effects: o operador do match name ("ADBE Vector Filter - Offset"…).
+bool modifier_from_ae_match_name(const std::string& matchName, VectorModifierType& out) noexcept;
+/// After Effects: o índice do parâmetro (kVecMod*) do match name da
+/// propriedade ("ADBE Vector Offset Amount"…) dentro do operador; −1 = não há.
+/// Propriedades 2D (Twist Center, Wiggler Position…) devolvem o índice de X
+/// (Y é o seguinte).
+[[nodiscard]] i32 modifier_param_from_ae_match_name(VectorModifierType type, const std::string& matchName) noexcept;
 
 /// Transform do grupo e de cada cópia do repetidor (cópia k, 0 = original).
 [[nodiscard]] Affine2 group_matrix(const VectorGroup& g) noexcept;

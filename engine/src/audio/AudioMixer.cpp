@@ -56,6 +56,9 @@ bool fx_kind_of(EffectTypeId type, FxKind& kind) noexcept {
         {effect_type_id(fx_keys::kParametricEq), FxKind::ParametricEq},
         {effect_type_id(fx_keys::kReverb), FxKind::Reverb},
         {effect_type_id(fx_keys::kTone), FxKind::Tone},
+        {effect_type_id(fx_keys::kBassTreble), FxKind::BassTreble},
+        {effect_type_id(fx_keys::kDistortion), FxKind::Distortion},
+        {effect_type_id(fx_keys::kGate), FxKind::Gate},
     };
     for (const Row& r : rows) {
         if (r.id == type) { kind = r.kind; return true; }
@@ -80,7 +83,9 @@ void layer_stages(const Layer& l, f64 fps, i64 shift, std::vector<FxStage>& out,
         FxKind kind{};
         if (!e.enabled || !fx_kind_of(e.type, kind)) continue;
         const ParameterRegistry* reg = registry.params(e.type);
-        if (!reg || e.params.size() < reg->count()) continue;
+        // Parâmetro acrescentado depois (Pan do Atraso...) que um projeto antigo
+        // não tem: evaluate_param devolve o padrão da declaração.
+        if (!reg) continue;
         FxStage s;
         s.kind = kind;
         s.envShift = shift;
@@ -93,7 +98,7 @@ void layer_stages(const Layer& l, f64 fps, i64 shift, std::vector<FxStage>& out,
             FxParam& p = s.params[i];
             const Track* t = l.tracks.find(TrackProperty::EffectParam, e.id, param_track_key(i, 0));
             const bool animated = component_count(spec.type) > 0
-                               && (e.params[i].source == ParamSource::Expression || (t && t->animated()));
+                               && ((i < e.params.size() && e.params[i].source == ParamSource::Expression) || (t && t->animated()));
             p.value = evaluate_param(l.tracks, e, i, spec, FrameIndex{l.offset.value}).v[0];
             if (!animated) continue;
             p.byFrame.resize(static_cast<usize>(frames));

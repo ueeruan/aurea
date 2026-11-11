@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE shape operators: operadores de caminho da camada vetorial (VectorPanel). -->
+<resources>
+    <string name="ae_shapeop_title">Operator jalur</string>
+    <string name="ae_shapeop_hint">Diterapkan berurutan, dari atas ke bawah, pada jalur grup ini.</string>
+    <string name="ae_shapeop_add">Tambah operator</string>
+    <string name="ae_shapeop_offset">Offset jalur</string>
+    <string name="ae_shapeop_pucker">Kerut &amp; gembung</string>
+    <string name="ae_shapeop_roughen">Kasarkan</string>
+    <string name="ae_shapeop_wiggle_paths">Goyangkan jalur</string>
+    <string name="ae_shapeop_round_corners">Bulatkan sudut</string>
+    <string name="ae_shapeop_twist">Puntir</string>
+    <string name="ae_shapeop_zigzag">Zig-zag</string>
+    <string name="ae_shapeop_wiggle_transform">Goyangkan transformasi</string>
+    <string name="ae_shapeop_amount">Jumlah</string>
+    <string name="ae_shapeop_line_join">Sambungan</string>
+    <string name="ae_shapeop_join_miter">Runcing</string>
+    <string name="ae_shapeop_join_round">Bulat</string>
+    <string name="ae_shapeop_join_bevel">Siku</string>
+    <string name="ae_shapeop_miter_limit">Batas runcing</string>
+    <string name="ae_shapeop_copies">Salinan</string>
+    <string name="ae_shapeop_copy_offset">Offset salinan</string>
+    <string name="ae_shapeop_size">Ukuran</string>
+    <string name="ae_shapeop_detail">Detail</string>
+    <string name="ae_shapeop_points">Titik</string>
+    <string name="ae_shapeop_points_corner">Sudut</string>
+    <string name="ae_shapeop_points_smooth">Halus</string>
+    <string name="ae_shapeop_frequency">Goyangan per detik</string>
+    <string name="ae_shapeop_correlation">Korelasi</string>
+    <string name="ae_shapeop_temporal_phase">Fase waktu</string>
+    <string name="ae_shapeop_spatial_phase">Fase ruang</string>
+    <string name="ae_shapeop_seed">Benih acak</string>
+    <string name="ae_shapeop_radius">Radius</string>
+    <string name="ae_shapeop_angle">Sudut</string>
+    <string name="ae_shapeop_center_x">Pusat X</string>
+    <string name="ae_shapeop_center_y">Pusat Y</string>
+    <string name="ae_shapeop_ridges">Gerigi per segmen</string>
+    <string name="ae_shapeop_anchor_x">Jangkar X</string>
+    <string name="ae_shapeop_anchor_y">Jangkar Y</string>
+    <string name="ae_shapeop_position_x">Posisi X</string>
+    <string name="ae_shapeop_position_y">Posisi Y</string>
+    <string name="ae_shapeop_scale_x">Skala X</string>
+    <string name="ae_shapeop_scale_y">Skala Y</string>
+    <string name="ae_shapeop_rotation">Rotasi</string>
+    <string name="ae_shapeop_enabled">Aktif</string>
+    <string name="ae_shapeop_move_up">Naikkan</string>
+    <string name="ae_shapeop_move_down">Turunkan</string>
+    <string name="ae_shapeop_remove">Hapus operator</string>
+    <string name="ae_shapeop_expand">Tampilkan pengaturan %1$s</string>
+    <string name="ae_shapeop_collapse">Sembunyikan pengaturan %1$s</string>
+    <string name="ae_shapeop_lane">Operator %1$d · %2$d</string>
+    <string name="ae_shapeop_rep_separate">Skala X dan Y terpisah</string>
+</resources>

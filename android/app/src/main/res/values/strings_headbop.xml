@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Headbop (0.5.2): nome, descrição e o cartão (HeadbopPanel.kt). Par do iOS: AureaStrings.swift // Headbop. -->
+<resources>
+    <string name="fx_name_headbop">Headbop</string>
+    <string name="fx_desc_headbop">A pessoa da foto ou do vídeo balança a cabeça e o corpo na batida da música</string>
+    <string name="headbop_note">Analise a camada para achar a cabeça e os ombros. Sem pessoa, o quadro inteiro balança.</string>
+    <string name="headbop_analyze">Analisar</string>
+    <string name="headbop_reanalyze">Reanalisar</string>
+    <string name="headbop_analyzing">Analisando a pessoa e a batida…</string>
+    <string name="headbop_cancel">Cancelar</string>
+    <string name="headbop_people_found">%1$d pessoa(s) encontrada(s)</string>
+    <string name="headbop_no_person">Nenhuma pessoa: o quadro inteiro balança</string>
+    <string name="headbop_not_analyzed">Ainda não analisado</string>
+    <string name="headbop_failed">Não foi possível analisar</string>
+    <string name="headbop_bpm_value">%1$d BPM</string>
+    <string name="headbop_tap">Tap</string>
+    <string name="headbop_bake">Converter em keyframes</string>
+    <string name="headbop_free_for_now">Grátis por enquanto</string>
+    <string name="effect_future_paid_notice">Você está usando um efeito que será pago. Aproveite!</string>
+</resources>

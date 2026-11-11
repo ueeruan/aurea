@@ -27,7 +27,7 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 p0;   // x = conclusão 0..1, y = suavidade 0..1, z = 1 inverte, w = forma (0 íris, 1 caixa, 2 persianas)
     vec4 p1;   // xy = centro (px da camada), z = lados da íris / faixas, w = rotação (rad)
     vec4 p2;   // região da imagem (px da camada): x, y, largura, altura
-    vec4 p3;   // xy = tamanho natural da camada (px)
+    vec4 p3;   // xy = tamanho natural da camada (px), z = íris em estrela: raio interno/externo (0 = polígono)
     vec4 color;
 } p;
 
@@ -39,6 +39,24 @@ float shape_metric(vec2 v, int mode, float sides, vec2 size) {
     }
     const int n = int(sides + 0.5);
     if (n < 3) return length(v);
+    if (mode == 0 && p.p3.z > 0.0) {
+        // Estrela (AE 2026): pontas no raio 1 a cada setor, vales no raio
+        // interno no meio do setor, ligados por retas — a medida é a distância
+        // dividida pelo raio da borda na direção do ponto.
+        const float sect = AUREA_TAU / float(n);
+        const float a = atan(v.y, v.x);
+        const float local = mod(a + AUREA_TAU, sect);
+        const float r = clamp(p.p3.z, 0.01, 1.0);
+        const float halfS = sect * 0.5;
+        const bool first = local < halfS;
+        const vec2 P0 = first ? vec2(1.0, 0.0) : r * vec2(cos(halfS), sin(halfS));
+        const vec2 P1 = first ? r * vec2(cos(halfS), sin(halfS)) : vec2(cos(sect), sin(sect));
+        const vec2 d = vec2(cos(local), sin(local));
+        const vec2 e = P1 - P0;
+        const float den = d.x * e.y - d.y * e.x;
+        const float edge = abs(den) > 1e-6 ? (P0.x * e.y - P0.y * e.x) / den : 1.0;
+        return length(v) / max(edge, 1e-4);
+    }
     // Polígono regular pela apótema: todo ponto da borda tem a mesma medida.
     const float sect = AUREA_TAU / float(n);
     const float a = atan(v.y, v.x);

@@ -463,6 +463,33 @@ NS_SWIFT_NAME(AureaEngine)
 /// tem alfa. Criar exige o bit `clipCandidate`; liberar solta também a cadeia
 /// recortada logo acima. Um passo de desfazer. NO = recusado.
 - (BOOL)setLayer:(long long)layerId clipToBelow:(BOOL)on;
+/// AE compositing (EngineAeCompositing.cpp). Preservar transparência (o T do
+/// AE): a camada só pinta onde a pilha abaixo tem alfa (bit 17 das flags).
+- (BOOL)setLayer:(long long)layerId preserveTransparency:(BOOL)on;
+/// Tímida (o Shy do AE; bit 16 das flags) e "Ocultar camadas tímidas" da
+/// composição atual: a timeline filtra, o quadro não muda.
+- (BOOL)setLayer:(long long)layerId shy:(BOOL)on;
+- (BOOL)setHideShy:(BOOL)on NS_SWIFT_NAME(setHideShy(_:));
+- (BOOL)hideShy NS_SWIFT_NAME(hideShy());
+// --- AE animation (EngineAeAnimation.cpp) --------------------------------------
+/// Key do texto-fonte no cabeçote com o texto que aparece agora. Devolve o
+/// quadro LOCAL do key (−1 = recusado). Um passo de desfazer.
+- (long long)addTextSourceKey:(long long)layerId NS_SWIFT_NAME(addTextSourceKey(_:));
+/// Troca o conteúdo do key do quadro LOCAL `frame`. Um passo de desfazer.
+- (BOOL)setTextSourceKey:(long long)layerId frame:(long long)frame content:(NSString*)content
+    NS_SWIFT_NAME(setTextSourceKey(_:frame:content:));
+- (BOOL)deleteTextSourceKey:(long long)layerId frame:(long long)frame NS_SWIFT_NAME(deleteTextSourceKey(_:frame:));
+/// Quadros LOCAIS dos keys do texto-fonte, em ordem.
+- (NSArray<NSNumber*>*)textSourceKeys:(long long)layerId NS_SWIFT_NAME(textSourceKeys(_:));
+/// Auto-orientar: 0 desligado, 1 ao longo do caminho, 2 para a câmera.
+- (BOOL)setLayerAutoOrient:(long long)layerId mode:(int32_t)mode NS_SWIFT_NAME(setLayerAutoOrient(_:mode:));
+- (int32_t)layerAutoOrient:(long long)layerId NS_SWIFT_NAME(layerAutoOrient(_:));
+/// Câmera de dois nós (mira no Ponto de Interesse) e o POI (px do espaço do pai).
+- (BOOL)setCameraTwoNode:(long long)layerId on:(BOOL)on NS_SWIFT_NAME(setCameraTwoNode(_:on:));
+- (BOOL)setCameraPoi:(long long)layerId x:(float)x y:(float)y z:(float)z undo:(BOOL)undo
+    NS_SWIFT_NAME(setCameraPoi(_:x:y:z:undo:));
+/// {dois nós (0/1), x, y, z} no cabeçote; nil = não é câmera.
+- (NSArray<NSNumber*>* _Nullable)cameraPoi:(long long)layerId NS_SWIFT_NAME(cameraPoi(_:));
 - (void)setLayer:(long long)layerId blendMode:(uint32_t)blendMode;
 - (void)setLayer:(long long)layerId parent:(long long)parentId;
 - (void)setLayer:(long long)layerId startFrame:(int32_t)start endFrame:(int32_t)end offsetFrames:(int32_t)offset setOffset:(BOOL)setOffset;
@@ -666,6 +693,17 @@ NS_SWIFT_NAME(AureaEngine)
 - (NSArray<NSNumber *> *)bgRemoveStatusForEffect:(uint32_t)effectId layer:(long long)layerId NS_SWIFT_NAME(bgRemoveStatus(effect:layer:));
 /// Há segmentador nativo de pessoa (Vision) registrado no motor.
 @property (nonatomic, readonly) BOOL bgRemoveNativeAvailable;
+/// Headbop (0.5.2, EngineHeadbop.cpp): pontos de corpo/rosto da plataforma
+/// (formato do Motion Capture: [tempo s, pessoa, 33 × (x, y, z, confiança)]),
+/// análise (bloqueia: chamar fora da main), tap tempo e "Converter em keyframes".
+- (BOOL)headbopBeginEffect:(uint32_t)effectId layer:(long long)layerId NS_SWIFT_NAME(headbopBegin(effect:layer:));
+- (BOOL)headbopPushFrames:(NSData *)data frames:(int32_t)frames aspect:(float)aspect NS_SWIFT_NAME(headbopPushFrames(_:frames:aspect:));
+- (BOOL)headbopAnalyze NS_SWIFT_NAME(headbopAnalyze());
+- (void)headbopCancel NS_SWIFT_NAME(headbopCancel());
+/// [estado, progresso ×1000, pessoas, BPM ×100, quadros, rig, BPM em uso ×100, fonte da pose, válido].
+- (NSArray<NSNumber *> *)headbopStatusForEffect:(uint32_t)effectId layer:(long long)layerId NS_SWIFT_NAME(headbopStatus(effect:layer:));
+- (BOOL)headbopSetTaps:(NSArray<NSNumber *> *)times effect:(uint32_t)effectId layer:(long long)layerId NS_SWIFT_NAME(headbopSetTaps(_:effect:layer:));
+- (int32_t)headbopBakeEffect:(uint32_t)effectId layer:(long long)layerId NS_SWIFT_NAME(headbopBake(effect:layer:));
 /// Grupo: câmera de fora alcança as camadas de dentro (−1 = não é grupo).
 - (BOOL)setGroupCameraPassThrough:(BOOL)on forLayer:(long long)layerId;
 - (int32_t)groupCameraPassThrough:(long long)layerId;
@@ -936,6 +974,8 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)removeMask:(long long)layerId mask:(uint32_t)mask;
 - (BOOL)setMaskPath:(long long)layerId mask:(uint32_t)mask points:(NSArray<NSNumber*>*)points closed:(BOOL)closed undo:(BOOL)undo;
 - (BOOL)setMaskProps:(long long)layerId mask:(uint32_t)mask operation:(uint32_t)operation inverted:(BOOL)inverted feather:(float)feather expansion:(float)expansion opacity:(float)opacity;
+/// Queda do feather da máscara: 0 suave (gaussiana), 1 linear (float 11 de `maskData`).
+- (BOOL)setMaskFalloff:(long long)layerId mask:(uint32_t)mask falloff:(uint32_t)falloff;
 - (BOOL)keyMask:(long long)layerId mask:(uint32_t)mask;
 - (BOOL)toggleMaskKey:(long long)layerId mask:(uint32_t)mask NS_SWIFT_NAME(toggleMaskKey(_:mask:));
 - (int)toggleMaskPointCurve:(long long)layerId mask:(uint32_t)mask point:(uint32_t)point NS_SWIFT_NAME(toggleMaskPointCurve(_:mask:point:));
@@ -997,6 +1037,11 @@ NS_SWIFT_NAME(AureaEngine)
 // 0.4.6: texto dinâmico (Engine::set_text_dynamic) — {ligado, de, até, casas, separador, curva}.
 - (NSArray<NSNumber*>*)textDynamic:(long long)layerId;
 - (BOOL)setTextDynamic:(long long)layerId values:(NSArray<NSNumber*>*)values;
+// 0.5.2: preenchimento com textura do texto (Engine::set_text_texture) — 17 valores; a consulta
+// devolve 18 (o último = há imagem da galeria). Vazio = não é texto.
+- (NSArray<NSNumber*>*)textTexture:(long long)layerId;
+- (BOOL)setTextTexture:(long long)layerId values:(NSArray<NSNumber*>*)values;
+- (BOOL)setTextTextureImage:(long long)layerId path:(NSString*)path;
 - (NSArray<NSNumber*>*)particleParams:(long long)layerId;
 - (BOOL)setParticle:(long long)layerId param:(uint32_t)param value:(float)value;
 - (BOOL)applyParticlePreset:(long long)layerId preset:(uint32_t)preset;
@@ -1201,6 +1246,11 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)humanoidMoveJoint:(long long)layerId bone:(int32_t)bone x:(float)x y:(float)y NS_SWIFT_NAME(humanoidMoveJoint(_:bone:x:y:));
 - (BOOL)humanoidAssignBone:(long long)layerId bone:(int32_t)bone node:(int32_t)node NS_SWIFT_NAME(humanoidAssignBone(_:bone:node:));
 - (NSString*)modelNodeName:(long long)layerId node:(int32_t)node NS_SWIFT_NAME(modelNodeName(_:node:));
+/// 0.5.2 "Prender a um osso": os ossos do modelo onde uma camada pode ser presa.
+- (NSArray<NSNumber*>*)modelAttachBones:(long long)modelId NS_SWIFT_NAME(modelAttachBones(_:));
+/// Prende a camada à junta `node` do modelo (−1 = solta do osso). Um passo de desfazer.
+- (BOOL)setLayerParentBone:(long long)layerId model:(long long)modelId node:(int32_t)node NS_SWIFT_NAME(setLayerParentBone(_:model:node:));
+- (int32_t)layerParentBone:(long long)layerId NS_SWIFT_NAME(layerParentBone(_:));
 - (BOOL)dragBoneTranslate:(long long)layerId node:(int32_t)node dx:(float)dx dy:(float)dy continuing:(BOOL)continuing NS_SWIFT_NAME(dragBoneTranslate(_:node:dx:dy:continuing:));
 - (BOOL)humanoidSetIk:(long long)layerId limb:(int32_t)limb on:(BOOL)on NS_SWIFT_NAME(humanoidSetIk(_:limb:on:));
 /// 7 floats por membro (Engine::query_humanoid_ik).
@@ -1243,6 +1293,13 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)setVectorParam:(long long)layerId group:(uint32_t)group param:(uint32_t)param value:(float)value;
 - (BOOL)keyVectorParam:(long long)layerId group:(uint32_t)group param:(uint32_t)param;
 - (BOOL)toggleVectorParamKey:(long long)layerId group:(uint32_t)group param:(uint32_t)param NS_SWIFT_NAME(toggleVectorParamKey(_:group:param:));
+/// Operadores de caminho do grupo (AE shape operators; Engine::add_vector_modifier e companhia).
+/// Os valores vão por setVectorParam/toggleVectorParamKey com o id 0x10000 + operador × 16 + parâmetro;
+/// vectorGroups traz "modifiers" (por operador: tipo, ligado, bits animados, bits com keyframe, 16 valores).
+- (int32_t)addVectorModifier:(long long)layerId group:(uint32_t)group type:(uint32_t)type NS_SWIFT_NAME(addVectorModifier(_:group:type:));
+- (BOOL)removeVectorModifier:(long long)layerId group:(uint32_t)group index:(uint32_t)index NS_SWIFT_NAME(removeVectorModifier(_:group:index:));
+- (BOOL)moveVectorModifier:(long long)layerId group:(uint32_t)group from:(uint32_t)from to:(uint32_t)to NS_SWIFT_NAME(moveVectorModifier(_:group:from:to:));
+- (BOOL)setVectorModifierEnabled:(long long)layerId group:(uint32_t)group index:(uint32_t)index enabled:(BOOL)enabled NS_SWIFT_NAME(setVectorModifierEnabled(_:group:index:enabled:));
 - (long long)addFreehand:(long long)layerId points:(NSArray<NSNumber*>*)points error:(float)error;
 // --- Omega conteúdo (área 06; Engine::add_drawing_* e companhia) ---------------
 /// Camada de desenho vazia. Id ou −código.
@@ -1441,6 +1498,37 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)deleteMarker:(int64_t)frame;
 - (NSString*)markerLabel:(int64_t)frame;
 - (NSArray<NSNumber*>*)markers;   ///< tripletas (frame, cor, tipo)
+// --- Timeline do AE (EngineAeTimeline.cpp) --------------------------------------
+/// Marca da composição com duração (quadros) e comentário; from < 0 cria. Um passo de desfazer.
+- (BOOL)editMarkerEx:(int64_t)from to:(int64_t)to color:(uint32_t)color label:(NSString*)label
+            duration:(int64_t)duration comment:(NSString*)comment NS_SWIFT_NAME(editMarkerEx(from:to:color:label:duration:comment:));
+/// Duração e comentário da marca da composição: @{"duration": n, "comment": s}; nil = não há.
+- (nullable NSDictionary<NSString*, id>*)markerDetails:(int64_t)frame NS_SWIFT_NAME(markerDetails(_:));
+/// Marca da CAMADA (quadros da composição; o motor guarda em tempo local). from < 0 cria.
+- (BOOL)editLayerMarker:(long long)layerId from:(int64_t)from to:(int64_t)to color:(uint32_t)color label:(NSString*)label
+               duration:(int64_t)duration comment:(NSString*)comment
+    NS_SWIFT_NAME(editLayerMarker(_:from:to:color:label:duration:comment:));
+- (BOOL)moveLayerMarker:(long long)layerId from:(int64_t)from to:(int64_t)to NS_SWIFT_NAME(moveLayerMarker(_:from:to:));
+- (BOOL)deleteLayerMarker:(long long)layerId frame:(int64_t)frame NS_SWIFT_NAME(deleteLayerMarker(_:frame:));
+/// Todas as marcas de camada: quádruplas (id da camada, quadro, duração, cor).
+- (NSArray<NSNumber*>*)allLayerMarkers;
+/// Nome e comentário da marca da camada: @[nome, comentário]; nil = não há.
+- (nullable NSArray<NSString*>*)layerMarkerText:(long long)layerId frame:(int64_t)frame NS_SWIFT_NAME(layerMarkerText(_:frame:));
+/// Escala no tempo os keyframes escolhidos em volta de `anchor` (quadro local). Quantos andaram.
+- (uint32_t)scaleKeyframeSelection:(long long)layerId references:(NSArray<NSNumber*>*)references anchor:(int64_t)anchor
+                            factor:(double)factor NS_SWIFT_NAME(scaleKeyframeSelection(_:references:anchor:factor:));
+/// Easy Ease nos escolhidos: 0 os dois lados, 1 entrada, 2 saída.
+- (uint32_t)easeKeyframeSelection:(long long)layerId references:(NSArray<NSNumber*>*)references mode:(uint32_t)mode
+    NS_SWIFT_NAME(easeKeyframeSelection(_:references:mode:));
+/// Área de trabalho [início, fim); início < 0 apaga.
+- (BOOL)setWorkAreaStart:(int64_t)start end:(int64_t)end NS_SWIFT_NAME(setWorkArea(start:end:));
+/// @[início, fim] efetivos quando há uma área menor que a composição; nil = não há.
+- (nullable NSArray<NSNumber*>*)workArea;
+- (BOOL)trimToWorkArea;
+/// Opção da sessão: a próxima exportação sai só com a área de trabalho.
+- (void)setExportWorkAreaOnly:(BOOL)on;
+/// Alinhar (0..5) / distribuir (6 horizontal, 7 vertical) no motor; um passo de desfazer.
+- (uint32_t)alignLayers:(NSArray<NSNumber*>*)layerIds mode:(uint32_t)mode NS_SWIFT_NAME(alignLayers(_:mode:));
 
 // --- Imagens (miniatura / captura / prévia de efeito) -----------------------
 /// Miniatura da camada em RGBA8 sRGB (nil = ainda na fila; `AureaStatus.

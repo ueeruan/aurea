@@ -229,6 +229,9 @@ private fun maskModes() = listOf(
     MaskMode(0, R.string.panel_somar, CupertinoGlyph.Plus),
     MaskMode(1, R.string.panel_subtrair, CupertinoGlyph.Minus),
     MaskMode(2, R.string.panel_intersecao, CupertinoGlyph.SquareOnSquare),
+    // AE compositing: Clarear (o maior valor) e Escurecer (o menor), na ordem do AE.
+    MaskMode(5, R.string.ae_mask_lighten, CupertinoGlyph.Circle),
+    MaskMode(6, R.string.ae_mask_darken, CupertinoGlyph.CircleFill),
     MaskMode(3, R.string.panel_diferenca, CupertinoGlyph.CircleLefthalfFill),
     MaskMode(4, R.string.panel_desligada, CupertinoGlyph.EyeSlash),
 )
@@ -271,6 +274,15 @@ private fun MaskEditor(env: PanelEnv, m: EditorStore.MaskPath, drawing: Boolean,
     }
     PanelSection(stringResource(R.string.panel_mask_edge), CupertinoGlyph.Drop, "mask.sec.edge", flat = true) {
         MaskRow(env, stringResource(R.string.panel_suavizar), m.id, 0, m.feather, 0.5f, 0f, 500f, "px", 0f)
+        // AE compositing: queda do feather (Mask Feather Falloff), suave ou linear.
+        PanelItemGrid(listOf(
+            PanelItem(CupertinoGlyph.Drop, stringResource(R.string.ae_mask_falloff_smooth), "mask.falloff.0", on = m.falloff == 0) {
+                store.setMaskFalloff(m.id, 0)
+            },
+            PanelItem(CupertinoGlyph.Minus, stringResource(R.string.ae_mask_falloff_linear), "mask.falloff.1", on = m.falloff == 1) {
+                store.setMaskFalloff(m.id, 1)
+            },
+        ), columns = 2)
         MaskRow(env, stringResource(R.string.panel_expandir), m.id, 1, m.expansion, 0.5f, -500f, 500f, "px", 0f)
         MaskRow(env, stringResource(R.string.panel_opacidade), m.id, 2, m.opacity * 100f, 0.5f, 0f, 100f, "%", 100f)
     }

@@ -72,6 +72,10 @@ struct FloorSettings {
     f32   reflectivity = 0.5f;             ///< 0..1 (0 = sem passe de reflexo)
     f32   contactShadow = 0.8f;            ///< força da sombra de contato (0..1)
     f32   fade = 6.0f;                     ///< raio do desbotamento (× raio dos modelos)
+    /// v64 (0.5.2) chão molhado: quanto do chão vira poça (0 = seco, 1 = alagado).
+    /// Na poça o chão fica espelhado e escuro; fora dela, só úmido.
+    f32   wetness = 0.0f;
+    f32   puddleSize = 260.0f;             ///< tamanho típico das poças (px do mundo)
 };
 
 /// Grafo de pós-processamento 3D habilitado na composição.
@@ -118,16 +122,8 @@ struct MotionBlurSettings {
     u32  adaptiveLimit = 128;  ///< bounded adaptive sample ceiling (export)
 };
 
-/// Marca na régua da composição. `kind` 0 = marca da pessoa, 1 = batida
-/// detectada (substituída em bloco quando a detecção roda de novo).
-struct Marker {
-    FrameIndex  frame{0};
-    u32         color = 0xFFF7C34Fu;   ///< RGBA8 sRGB (r no byte baixo)
-    u32         kind = 0;
-    std::string label;
-};
-inline constexpr u32 kMarkerManual = 0;
-inline constexpr u32 kMarkerBeat = 1;
+// `Marker` (a marca da régua e da camada) mora em Layer.hpp desde a v67:
+// a camada também tem as suas.
 
 /// Faixa de taxa da composição. "fps livre" na prática: qualquer valor real
 /// nesta faixa (23,976, 29,97, 144…). O teto é o que os encoders de vídeo dos
@@ -296,6 +292,10 @@ public:
     /// fecha o buraco. Modo Composição (padrão): tudo livre, camada por camada.
     [[nodiscard]] bool edit_mode() const noexcept { return editMode_; }
     void set_edit_mode(bool on) noexcept { editMode_ = on; }
+    /// "Ocultar camadas tímidas" (o Hide Shy Layers do AE): a timeline deixa
+    /// de mostrar as camadas com `Layer::shy`. Não muda o quadro. v65.
+    [[nodiscard]] bool hide_shy() const noexcept { return hideShy_; }
+    void set_hide_shy(bool on) noexcept { hideShy_ = on; }
 
     /// Desloca no tempo toda camada que começa em `from` ou depois (menos
     /// `except`) e as marcas a partir de `from`. `delta` < 0 puxa para trás.
@@ -348,6 +348,31 @@ public:
     [[nodiscard]] i64 mark_in() const noexcept { return markIn_; }
     [[nodiscard]] i64 mark_out() const noexcept { return markOut_; }
     void set_marks(i64 in, i64 out) noexcept { markIn_ = in; markOut_ = out; }
+
+    // --- Área de trabalho (work area do AE) ------------------------------------
+    /// Separada das marcas de entrada/saída da Edição. [workIn, workOut) em
+    /// quadros da composição; −1/−1 = sem área (a composição inteira). A
+    /// prévia toca e repete dentro dela, a exportação pode sair só com ela e
+    /// "Aparar composição à área de trabalho" corta o resto. Gravada na v67.
+    [[nodiscard]] i64 work_in_raw() const noexcept { return workIn_; }
+    [[nodiscard]] i64 work_out_raw() const noexcept { return workOut_; }
+    /// Há uma área de trabalho válida (menor que a composição inteira)?
+    [[nodiscard]] bool has_work_area() const noexcept {
+        const i64 in = work_in(), out = work_out();
+        return workOut_ > workIn_ && workIn_ >= 0 && (in > 0 || out < duration_.value);
+    }
+    /// Início efetivo (preso na composição); 0 sem área.
+    [[nodiscard]] i64 work_in() const noexcept {
+        if (!(workOut_ > workIn_ && workIn_ >= 0)) return 0;
+        return std::min<i64>(workIn_, duration_.value - 1);
+    }
+    /// Fim efetivo (exclusivo, preso na composição); a duração sem área.
+    [[nodiscard]] i64 work_out() const noexcept {
+        if (!(workOut_ > workIn_ && workIn_ >= 0)) return duration_.value;
+        return std::clamp<i64>(workOut_, work_in() + 1, duration_.value);
+    }
+    /// Grava sem validar (leitura do arquivo; o motor valida antes).
+    void set_work_area(i64 in, i64 out) noexcept { workIn_ = in; workOut_ = out; }
 
     // --- Marcas ----------------------------------------------------------------
     /// Sempre em ordem de frame; no máximo uma marca por frame.
@@ -413,6 +438,7 @@ private:
     Scene3DId           scene_{};
     std::vector<Marker> markers_;
     bool                editMode_ = false;
+    bool                hideShy_ = false;
     /// Próxima LINHA livre. Cresce e nunca é reaproveitada: um trecho que
     /// ficou sozinho na linha dele não passa a dividi-la com um trecho novo.
     u32                 nextTrackId_ = 1;
@@ -420,6 +446,8 @@ private:
     bool                editTracksActive_ = false;   ///< a interface de Edição está aberta (não vai para o arquivo)
     i64                 markIn_ = -1;
     i64                 markOut_ = -1;
+    i64                 workIn_ = -1;    ///< área de trabalho (v67); −1 = nenhuma
+    i64                 workOut_ = -1;
 
     u64 revision_       = 1;
     u64 formatRevision_ = 1;

@@ -141,6 +141,21 @@ struct Layer;
 [[nodiscard]] bool wants_layer_3d(const Composition& comp, const Layer& l, FrameIndex time) noexcept;
 /// Mundo 3D da camada com a cadeia de pais (o mesmo dos modelos/luzes).
 [[nodiscard]] Mat4 layer_world_3d(const Composition& comp, const Layer& l, FrameIndex time) noexcept;
+/// 0.5.2 "Prender a um osso": a cadeia de pais (layer_world_3d e o render) lê
+/// a pose do modelo pai por este acesso, aberto na thread enquanto o objeto
+/// vive. Renderer::prepare abre o dele; consultas fora do render (UI, testes)
+/// abrem o seu com os modelos já travados. Sem acesso aberto, a camada presa
+/// segue o modelo inteiro. Aninhável: vale o de fora.
+class BoneAttachScope {
+public:
+    using Lookup = std::shared_ptr<const scene3d::SceneAsset> (*)(void* ctx, AssetId id);
+    BoneAttachScope(Lookup fn, void* ctx) noexcept;
+    ~BoneAttachScope();
+    BoneAttachScope(const BoneAttachScope&) = delete;
+    BoneAttachScope& operator=(const BoneAttachScope&) = delete;
+private:
+    void* state_ = nullptr;
+};
 /// FOV vertical (graus) de uma camada de câmera no instante LOCAL: a trilha de
 /// distância focal (mm) manda quando tem keyframe; senão a de FOV; senão o
 /// valor parado. É a MESMA conta da projeção do render (preview e export).
@@ -240,6 +255,9 @@ struct LayerSource {
     u32      glyphCount = 0;
     u32      glyphSets = 1;
     Vec4     textPersp{0, 0, 0, 0};   ///< cx, cy da layer, distância focal (px) para o 3D por caractere
+    /// 0.5.2: a imagem da galeria do preenchimento com textura (u_texfill do
+    /// glyph.frag); nula = textura procedural ou cor lisa.
+    TextureHandle textFillImage{};
 
     // Partículas (Aurea Particular): o bloco de parâmetros do shader, nº de
     // instâncias e blend. O bloco cresceu de 7 para 20 vec4 quando o sistema
@@ -293,6 +311,9 @@ struct RenderLayer {
     Mat4        compFromLayer = Mat4::identity();
     f32         opacity = 1.0f;
     BlendMode   blend = BlendMode::Normal;
+    /// Preservar transparência (Layer::preserveTransparency): entra como
+    /// source-atop sobre tudo o que já foi composto abaixo.
+    bool        preserveAlpha = false;
     f32         texelScale = 1.0f;
     /// Desfoque de movimento: composição ← camada em cada amostra do
     /// obturador. Vazio = sem desfoque (ou camada parada no intervalo).
@@ -318,6 +339,10 @@ struct RenderLayer {
         Vec4 slice{0, 0, 0, 0}; i64 sourceUs = -1; FrameRef frame;
         bool content = false;
         Vec4 displace{0, 0, 0, 0};
+        /// Eco e rastro (AE 2026): como as amostras se juntam — 0 somar (o de
+        /// sempre), 1 máximo, 2 mínimo, 3 tela, 4 compor atrás, 5 compor na
+        /// frente, 6 mesclar (média). Só as amostras do eco o preenchem.
+        u8 echoOp = 0;
     };
     /// As amostras trazem o conteúdo de cada instante (TimeSlice, Tempo amplo).
     [[nodiscard]] bool per_sample_content() const noexcept {
@@ -1021,6 +1046,9 @@ private:
         /// SOURCE-ATOP — fonte·α_destino + destino·(1 − α_fonte), com a
         /// mistura dela; o alfa do grupo continua o da base.
         bool      clipAtop = false;
+        /// Preservar transparência: o mesmo source-atop, com o fundo = a pilha
+        /// já composta abaixo (o alfa dela não muda).
+        bool      preserveAlpha = false;
     };
     /// Os desenhos da pilha → alvo: lotes de blend de hardware (Normal, Add)
     /// no mesmo alvo; modo que lê o fundo ou camada de ajuste = ping-pong.

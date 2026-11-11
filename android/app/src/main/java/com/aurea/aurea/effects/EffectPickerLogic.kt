@@ -519,8 +519,10 @@ fun effectSearchDoc(names: Collection<String>, extra: Collection<String>): Effec
 }
 
 /**
- * A busca: todo termo tem de aparecer em algum lugar do efeito. A ordem é por
- * PONTOS e, no empate, a do catálogo. Pontos = os da busca do AUREA em 7
+ * A busca: todo termo tem de aparecer em algum lugar do efeito. Primeiro os
+ * efeitos cujo NOME (em qualquer dos 7 idiomas) é o texto, depois os cujo nome
+ * começa com ele; dentro de cada faixa a ordem é por PONTOS e, no empate, a do
+ * catálogo. Pontos = os da busca do AUREA em 7
  * idiomas (4 nome igual · 3 nome começa · 2 palavra do nome começa · 1 todos os
  * termos no nome · 0 achado no resto) SOMADOS aos da referência
  * ([effectSearchScore], com [fields]: etiqueta ×7, nome ×3, inglês ×2,
@@ -545,9 +547,15 @@ fun searchEffects(
             doc.names.any { n -> terms.all { n.contains(it) } } -> 3
             else -> 4
         }
-        Triple((4 - rank) + effectSearchScore(fields[e.typeId], q), order, e)
-    }.sortedWith(compareByDescending<Triple<Int, Int, EffectCatalogEntry>> { it.first }.thenBy { it.second }).map { it.third }
+        // Nome igual / nome que começa com o texto vêm SEMPRE antes (AE 2026:
+        // "warp" achava etiquetas e categorias antes de "Warp (Styles)"); dentro
+        // de cada faixa, os pontos e depois a ordem do catálogo.
+        val tier = when (rank) { 0 -> 2; 1 -> 1; else -> 0 }
+        SearchHit(tier, (4 - rank) + effectSearchScore(fields[e.typeId], q), order, e)
+    }.sortedWith(compareByDescending<SearchHit> { it.tier }.thenByDescending { it.points }.thenBy { it.order }).map { it.entry }
 }
+
+private class SearchHit(val tier: Int, val points: Int, val order: Int, val entry: EffectCatalogEntry)
 
 /**
  * O que a pontuação da referência olha em UM efeito, já sem acento e em

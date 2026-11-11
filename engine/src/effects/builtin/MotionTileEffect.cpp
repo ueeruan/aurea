@@ -677,6 +677,15 @@ void register_builtin_effects(EffectRegistry& registry) {
     builtin::register_tile_shift_effects(registry);
     builtin::register_hollow_box_effect(registry);
     builtin::register_time_displacement_effect(registry);
+    // Lote "AE 2026": os efeitos do AE que faltavam (cor, recorte, estilizar,
+    // gerar, transições, profundidade da IA, áudio). Sempre no FIM.
+    builtin::register_ae_effects_2026(registry);
+    // Headbop (Distorcer) — 0.5.2: a pessoa balança na batida. No fim.
+    builtin::register_headbop_effect(registry);
+    // Pacote "Mar" — 0.5.2: Oceano, Embaixo d'água, Cáusticas, Onda na praia. No fim.
+    builtin::register_sea_effects(registry);
+    // Textura — 0.5.2: textura procedural (ou imagem) por cima da camada. No fim.
+    builtin::register_texture_overlay_effect(registry);
 }
 
 } // namespace aurea

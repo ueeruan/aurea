@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE shape operators: operadores de caminho da camada vetorial (VectorPanel). -->
+<resources>
+    <string name="ae_shapeop_title">पाथ ऑपरेटर</string>
+    <string name="ae_shapeop_hint">ये क्रम से, ऊपर से नीचे, इस समूह के पाथ पर लागू होते हैं।</string>
+    <string name="ae_shapeop_add">ऑपरेटर जोड़ें</string>
+    <string name="ae_shapeop_offset">पाथ ऑफ़सेट</string>
+    <string name="ae_shapeop_pucker">सिकोड़ें और फुलाएँ</string>
+    <string name="ae_shapeop_roughen">खुरदरापन</string>
+    <string name="ae_shapeop_wiggle_paths">पाथ हिलाएँ</string>
+    <string name="ae_shapeop_round_corners">कोने गोल करें</string>
+    <string name="ae_shapeop_twist">मरोड़</string>
+    <string name="ae_shapeop_zigzag">ज़िगज़ैग</string>
+    <string name="ae_shapeop_wiggle_transform">ट्रांसफ़ॉर्म हिलाएँ</string>
+    <string name="ae_shapeop_amount">मात्रा</string>
+    <string name="ae_shapeop_line_join">जोड़</string>
+    <string name="ae_shapeop_join_miter">नुकीला</string>
+    <string name="ae_shapeop_join_round">गोल</string>
+    <string name="ae_shapeop_join_bevel">कटा हुआ</string>
+    <string name="ae_shapeop_miter_limit">नुकीलेपन की सीमा</string>
+    <string name="ae_shapeop_copies">प्रतियाँ</string>
+    <string name="ae_shapeop_copy_offset">प्रति ऑफ़सेट</string>
+    <string name="ae_shapeop_size">आकार</string>
+    <string name="ae_shapeop_detail">विवरण</string>
+    <string name="ae_shapeop_points">बिंदु</string>
+    <string name="ae_shapeop_points_corner">कोना</string>
+    <string name="ae_shapeop_points_smooth">चिकना</string>
+    <string name="ae_shapeop_frequency">प्रति सेकंड हिलना</string>
+    <string name="ae_shapeop_correlation">सहसंबंध</string>
+    <string name="ae_shapeop_temporal_phase">समय चरण</string>
+    <string name="ae_shapeop_spatial_phase">स्थानिक चरण</string>
+    <string name="ae_shapeop_seed">रैंडम सीड</string>
+    <string name="ae_shapeop_radius">त्रिज्या</string>
+    <string name="ae_shapeop_angle">कोण</string>
+    <string name="ae_shapeop_center_x">केंद्र X</string>
+    <string name="ae_shapeop_center_y">केंद्र Y</string>
+    <string name="ae_shapeop_ridges">प्रति खंड उभार</string>
+    <string name="ae_shapeop_anchor_x">एंकर X</string>
+    <string name="ae_shapeop_anchor_y">एंकर Y</string>
+    <string name="ae_shapeop_position_x">स्थिति X</string>
+    <string name="ae_shapeop_position_y">स्थिति Y</string>
+    <string name="ae_shapeop_scale_x">स्केल X</string>
+    <string name="ae_shapeop_scale_y">स्केल Y</string>
+    <string name="ae_shapeop_rotation">घुमाव</string>
+    <string name="ae_shapeop_enabled">चालू</string>
+    <string name="ae_shapeop_move_up">ऊपर ले जाएँ</string>
+    <string name="ae_shapeop_move_down">नीचे ले जाएँ</string>
+    <string name="ae_shapeop_remove">ऑपरेटर हटाएँ</string>
+    <string name="ae_shapeop_expand">%1$s की सेटिंग दिखाएँ</string>
+    <string name="ae_shapeop_collapse">%1$s की सेटिंग छिपाएँ</string>
+    <string name="ae_shapeop_lane">ऑपरेटर %1$d · %2$d</string>
+    <string name="ae_shapeop_rep_separate">X और Y स्केल अलग</string>
+</resources>

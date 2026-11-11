@@ -78,6 +78,7 @@ set(AUREA_CORE_SOURCES
     src/timeline/Timeline.cpp
     src/timeline/Rig.cpp
     src/timeline/ShapeGeometry.cpp
+    src/timeline/LayerWorld.cpp   # AE animation: matrizes da camada + Auto-Orientar + câmera de dois nós
     src/project/Project.cpp
     src/project/Serialization.cpp
     src/project/FileIO.cpp
@@ -133,6 +134,7 @@ set(AUREA_CORE_SOURCES
     src/render/RendererAudio.cpp
     src/effects/Parameter.cpp
     src/effects/CubeLut.cpp
+    src/effects/HeadbopMotion.cpp
     src/effects/Palette.cpp
     src/effects/EffectGraph.cpp
     src/effects/builtin/ColorEffects.cpp
@@ -149,6 +151,12 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/EffectsSupport.cpp
     src/effects/builtin/DistortEffects.cpp
     src/effects/builtin/GapEffects046.cpp
+    src/effects/builtin/SeaEffects.cpp   # 0.5.2 pacote "Mar": oceano, embaixo d'água, cáusticas, onda na praia
+    src/effects/builtin/TextureOverlayEffect.cpp   # 0.5.2 Textura (sobreposição procedural)
+    src/effects/builtin/AeEffects2026Color.cpp
+    src/effects/builtin/AeEffects2026Stylize.cpp
+    src/effects/builtin/AeEffects2026Generate.cpp
+    src/effects/builtin/AeEffects2026Extra.cpp
     src/effects/builtin/SurfaceDeformEffects.cpp
     src/effects/builtin/PageTurnEffect.cpp
     src/effects/builtin/OpticalStylizeEffects.cpp
@@ -179,6 +187,8 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/MeshWarpEffect.cpp
     src/effects/Puppet.cpp
     src/effects/builtin/PuppetEffect.cpp
+    src/effects/HeadbopRig.cpp
+    src/effects/builtin/HeadbopEffect.cpp
     src/effects/builtin/KeyingExtras.cpp
     src/effects/builtin/FinishingEffects.cpp
     src/effects/builtin/GenerateEffects.cpp
@@ -259,10 +269,12 @@ set(AUREA_CORE_SOURCES
     src/vector/Svg.cpp
     src/vector/VectorDocument.cpp
     src/vector/PathEdit.cpp
+    src/vector/VectorModifiers.cpp
     src/engine/EngineVector.cpp
     src/engine/EngineRig.cpp
     src/engine/EngineMeshWarp.cpp
     src/engine/EnginePuppet.cpp
+    src/engine/EngineHeadbop.cpp   # 0.5.2 Headbop
     src/engine/EngineShape3D.cpp
     src/engine/EngineRigPose.cpp
     src/engine/EngineRigSkeleton.cpp
@@ -281,6 +293,9 @@ set(AUREA_CORE_SOURCES
     src/engine/EngineOmegaAppearance.cpp
     src/engine/EngineOmegaChrome.cpp
     src/engine/EngineOmegaOutline.cpp   # bugs 0.3.4: converter em contorno
+    src/engine/EngineAeCompositing.cpp  # AE compositing: tímidas, preservar transparência, queda do feather
+    src/engine/EngineAeTimeline.cpp     # timeline do AE: marcas de camada, área de trabalho, escalar/easy ease, alinhar
+    src/engine/EngineAeAnimation.cpp    # AE animation: texto-fonte, auto-orientar, câmera de dois nós
     src/engine/EnginePluginsV2.cpp   # 0.3.4 plugins
     src/engine/EngineImageSequence.cpp
     src/engine/EngineStorage.cpp   # 0.5.2 armazenamento (apagar projeto, tela, PreRender)

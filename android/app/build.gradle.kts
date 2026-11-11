@@ -117,6 +117,7 @@ android {
         // Afinidade da MainActivity (AndroidManifest): o pacote de cada distribuição,
         // para o app da Play e o de sideload não dividirem a mesma tarefa.
         manifestPlaceholders["aureaTaskAffinity"] = aureaApplicationId
+        manifestPlaceholders["aureaAppLabel"] = "Aurea Beta"
 
         // 26 (Android 8.0) é o piso: abaixo disso não há AHardwareBuffer nem
         // Vulkan de forma confiável, e o pipeline zero-copy do motor não roda.
@@ -125,8 +126,8 @@ android {
         minSdk = 26
         targetSdk = 36
         // Deve superar os builds 2181–2191 já distribuídos; nunca reduzir o código.
-        versionCode = 2216
-        versionName = "0.5.1-beta"
+        versionCode = 2217
+        versionName = "0.5.2-beta"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -251,6 +252,16 @@ android {
             applicationIdSuffix = ".uitest"
             versionNameSuffix = "-uitest"
             matchingFallbacks += "debug"
+        }
+        // Aurea Alpha: build pessoal do dono para testar o que ainda não foi
+        // para o Beta. Pacote próprio (.alpha), instala ao lado do Beta e do
+        // debug sem dividir projetos; depurável, então o emulador pula o login.
+        create("alpha") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".alpha"
+            versionNameSuffix = "-alpha"
+            matchingFallbacks += "debug"
+            manifestPlaceholders["aureaAppLabel"] = "Aurea Alpha"
         }
     }
     testBuildType = "uiTest"

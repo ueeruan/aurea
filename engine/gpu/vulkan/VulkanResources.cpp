@@ -1124,6 +1124,16 @@ Result<PipelineHandle> Backend::create_pipeline(const PipelineDesc& desc) noexce
         if (desc.blend == BlendMode::Add) {
             blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
             blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        } else if (desc.blend == BlendMode::Lighten || desc.blend == BlendMode::Darken) {
+            // Máximo/mínimo por canal (o operador do Eco, AE 2026); os fatores
+            // não entram nas operações MAX/MIN.
+            blend.colorBlendOp = blend.alphaBlendOp = desc.blend == BlendMode::Lighten ? VK_BLEND_OP_MAX : VK_BLEND_OP_MIN;
+            blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+            blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        } else if (desc.blend == BlendMode::Screen) {
+            // Tela pré-multiplicada: s + d·(1 − s) por canal; alfa = "sobre".
+            blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR;
+            blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
         } else {
             blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
             blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;

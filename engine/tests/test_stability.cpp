@@ -1440,6 +1440,7 @@ AUREA_TEST(Fuzz, EffectParametersWithWildValuesRenderOnGpu) {
             l->effects.clear();
         }
         const auto added=e.apply_command(effect_add(targetLayer,reg.at(t).type_id()));
+        if(!added.ok()) std::printf("\n      recusado: %s", reg.at(t).info().key);
         AUREA_CHECK(added.ok());if(!added.ok())continue;
         for (u32 it = 0; it < 6; ++it) {
             {

@@ -26,14 +26,33 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 p0;   // x = altura da onda (px da layer), y = largura de onda (px), z = velocidade (px/quadro), w = fase (graus)
     vec4 p1;   // x = direção (0 horiz, 1 vert, 2 diag, 3 horiz+vert, 4 ângulo), y = quadrada, z = borda, w = travar
     vec4 p2;   // xy = direção angular unitária; zw = origem da entrada em px da camada
-    vec4 p3;   // x = quadro local
+    vec4 p3;   // x = quadro local, y = tipo de onda AE 2026 (0 = seno/quadrada de p1.y; 2 triângulo,
+               // 3 dente de serra, 4 círculo, 5 semicírculo, 6 semicírculo invertido, 7 ruído, 8 ruído suave)
     vec4 color;
 } p;
 
 /// Uma senoide (ou degrau) de período `wavelength`, andando `travel`.
 float wave_at(float along, float wavelength, float travel, float phase, bool square) {
     const float a = (along + travel) / wavelength * AUREA_TAU + phase;
-    return square ? (sin(a) >= 0.0 ? 1.0 : -1.0) : sin(a);
+    const int type = int(p.p3.y + 0.5);
+    if (type < 2) return square ? (sin(a) >= 0.0 ? 1.0 : -1.0) : sin(a);
+    // AE 2026: as outras formas, todas com o mesmo período e a mesma fase do
+    // seno (0 em x = 0, subindo), amplitude −1..1.
+    const float x = fract(a / AUREA_TAU);
+    if (type == 2) return 4.0 * abs(fract(x + 0.75) - 0.5) - 1.0;                 // triângulo
+    if (type == 3) return 2.0 * fract(x + 0.5) - 1.0;                             // dente de serra
+    if (type == 4) {                                                              // círculo
+        const float h = x < 0.5 ? 4.0 * x - 1.0 : 4.0 * x - 3.0;
+        const float y = sqrt(max(1.0 - h * h, 0.0));
+        return x < 0.5 ? y : -y;
+    }
+    if (type == 5) { const float h = 2.0 * x - 1.0; return 2.0 * sqrt(max(1.0 - h * h, 0.0)) - 1.0; }   // semicírculo
+    if (type == 6) { const float h = 2.0 * x - 1.0; return 1.0 - 2.0 * sqrt(max(1.0 - h * h, 0.0)); }   // invertido
+    const float cell = a / AUREA_TAU * 2.0;                                       // meia onda por sorteio
+    if (type == 7) return aurea_hash2(vec2(floor(cell), 17.0)) * 2.0 - 1.0;       // ruído
+    const float i = floor(cell), f = fract(cell);
+    const float s = f * f * (3.0 - 2.0 * f);
+    return mix(aurea_hash2(vec2(i, 17.0)), aurea_hash2(vec2(i + 1.0, 17.0)), s) * 2.0 - 1.0;   // ruído suave
 }
 
 void main() {

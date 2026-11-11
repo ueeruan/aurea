@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: pacote "Mar" (SeaEffects.cpp): nomes e textos dos efeitos de mar. -->
+<resources>
+    <string name="sea_name_ocean">محيط</string>
+    <string name="sea_name_underwater">تحت الماء</string>
+    <string name="sea_name_caustics">الكاوية الضوئية</string>
+    <string name="sea_name_shore_wave">موجة الشاطئ</string>
+    <string name="fxl_sea_wave_height">ارتفاع الأمواج</string>
+    <string name="fxl_sea_wavelength">طول الأمواج</string>
+    <string name="fxl_sea_wind_direction">اتجاه الرياح</string>
+    <string name="fxl_sea_choppiness">الاضطراب</string>
+    <string name="fxl_sea_shallow_color">لون المياه الضحلة</string>
+    <string name="fxl_sea_deep_color">لون المياه العميقة</string>
+    <string name="fxl_sea_sky">السماء</string>
+    <string name="fxl_sea_sky_color">لون السماء</string>
+    <string name="fxl_sea_sky_layer">طبقة السماء</string>
+    <string name="fxl_sea_foam">الزبد</string>
+    <string name="fxl_sea_sun_glitter">بريق الشمس</string>
+    <string name="fxl_sea_sun_direction">اتجاه الشمس</string>
+    <string name="fxl_sea_sun_height">ارتفاع الشمس</string>
+    <string name="fxl_sea_camera_angle">زاوية الكاميرا</string>
+    <string name="fxl_sea_haze">الضباب</string>
+    <string name="fxl_sea_stylize">مُنمّق</string>
+    <string name="fxl_sea_clip_layer">القص حسب الطبقة</string>
+    <string name="fxl_sea_wave_size">حجم الأمواج</string>
+    <string name="fxl_sea_caustics">الكاوية الضوئية</string>
+    <string name="fxl_sea_caustics_scale">مقياس الكاوية</string>
+    <string name="fxl_sea_depth">العمق</string>
+    <string name="fxl_sea_light_rays">أشعة الضوء</string>
+    <string name="fxl_sea_particles">الجسيمات</string>
+    <string name="fxl_sea_particle_size">حجم الجسيمات</string>
+    <string name="fxl_sea_sharpness">الحدة</string>
+    <string name="fxl_sea_refraction">الانكسار</string>
+    <string name="fxl_sea_edge_wave">تموج الحافة</string>
+    <string name="fxl_sea_edge_size">حجم تموجات الحافة</string>
+    <string name="fxl_sea_foam_width">عرض الزبد</string>
+    <string name="fxl_sea_foam_color">لون الزبد</string>
+    <string name="fxl_sea_water_width">عرض الماء</string>
+    <string name="fxl_sea_water_distortion">تشويه الماء</string>
+    <string name="fxo_sea_sky_color">لون</string>
+    <string name="fxo_sea_layer_image">صورة الطبقة</string>
+    <string name="fxo_sea_other_layer">طبقة أخرى</string>
+    <string name="fxo_sea_caustics_only">الكاوية فقط</string>
+    <string name="fxl_sea_tip_sky">صورة الطبقة: السماء وانعكاسها من هذه الطبقة. طبقة أخرى: اختر طبقة السماء (تظهر فوق الأفق).</string>
+    <string name="fxl_sea_tip_ripple_speed">موجات في الثانية من الداخل إلى الخارج. 0 = الطور هو المتحكم.</string>
+</resources>

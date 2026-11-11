@@ -25,6 +25,16 @@ public:
         p.add_float("delay", "Intervalo (quadros)", 2.0f, 0.25f, 120.0f, kParamAnimatable | kParamFrames);
         p.add_float("decay", "Decaimento", 0.6f, 0.0f, 1.0f);
         p.add_float("rgb", "Atraso RGB (quadros)", 0.0f, 0.0f, 60.0f, kParamAnimatable | kParamFrames);
+        // AE 2026 (no fim): a opacidade da primeira imagem (a de agora); os ecos
+        // decaem a partir dela. 100% = como antes.
+        p.add_float("starting_intensity", "Intensidade inicial", 100.0f, 0.0f, 100.0f,
+                    kParamAnimatable | kParamPercent, "%");
+        // AE 2026 (no fim): como as cópias se juntam. "Somar" = a soma de
+        // sempre (padrão; projeto salvo sem o slot desenha igual). Contrato com
+        // o Renderer (RenderLayer::TemporalSample::echoOp): só acrescentar.
+        static const char* const kOperators[] = {"Somar", "Máximo", "Mínimo", "Tela", "Compor atrás",
+                                                 "Compor na frente", "Mesclar"};
+        p.add_enum("echo_operator", "Operador do eco", kOperators, 7, 0);
     }
 
     bool is_identity(const EffectEval&) const noexcept override { return true; }

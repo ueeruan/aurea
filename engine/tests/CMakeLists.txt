@@ -72,12 +72,17 @@ add_executable(aurea_tests
     test_omega_timeline.cpp
     test_omega_content.cpp
     test_omega_appearance.cpp
+    test_ae_compositing.cpp   # AE compositing: modos, máscaras, tímidas, preservar transparência, B1/B2/B3/B9
+    test_ae_timeline.cpp      # timeline do AE: marcas de camada, área de trabalho, escalar/easy ease, alinhar
+    test_ae_animation.cpp     # AE animation: texto-fonte, toComp/lookAt/sourceRectAtTime/comp(), auto-orientar, câmera de dois nós
     test_omega_chrome.cpp
     test_omega_layer.cpp
     test_omega_effects.cpp
     test_omega_add.cpp
     test_omega_outline.cpp
     test_beats.cpp
+    test_headbop_motion.cpp
+    test_headbop.cpp          # 0.5.2 Headbop: rig e deformação
     test_edit.cpp
     test_ui_mode.cpp
     test_edit_tracks.cpp
@@ -102,6 +107,7 @@ add_executable(aurea_tests
     test_keyframe_shape.cpp
     test_vector.cpp
     test_vector_gpu.cpp
+    test_vector_modifiers.cpp
     test_drawing_progress.cpp
     test_editing_tools.cpp
     test_export.cpp

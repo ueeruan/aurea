@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Timeline do AE (2026-11-11): marcas de camada, duração/comentário das marcas, área de trabalho, Easy Ease, escalar keyframes e escalonar. -->
+<resources>
+    <string name="aet_marker_duration">Длительность (кадры)</string>
+    <string name="aet_marker_comment">Комментарий</string>
+    <string name="aet_marker_comment_hint">Заметка к маркеру (выражения читают её через .comment)</string>
+    <string name="aet_layer_marker_edit">Маркер слоя</string>
+    <string name="aet_layer_marker_hint">Маркер движется вместе со слоем. В выражениях: thisLayer.marker.</string>
+    <string name="aet_layer_marker_here">Маркер слоя здесь</string>
+    <string name="aet_stagger">Лесенка</string>
+    <string name="aet_stagger_step_value">Шаг %1$d кадр.</string>
+    <string name="aet_stagger_less">На кадр меньше</string>
+    <string name="aet_stagger_more">На кадр больше</string>
+    <string name="aet_stagger_keys_only">Только ключи</string>
+    <string name="aet_stagger_apply">Лесенкой</string>
+    <string name="aet_on">Вкл.</string>
+    <string name="aet_off">Выкл.</string>
+    <string name="aet_export_work_area">Только рабочая область</string>
+    <string name="aet_export_work_area_range">%1$s – %2$s</string>
+    <string name="aet_easy_ease">Плавно</string>
+    <string name="aet_easy_ease_in">Плавный вход</string>
+    <string name="aet_easy_ease_out">Плавный выход</string>
+    <string name="aet_ease_nothing">У выбранных ключей нет отрезков для сглаживания</string>
+    <string name="aet_keys_scale">Масштаб времени</string>
+    <string name="aet_keys_scale_to">Время: %1$s</string>
+    <string name="aet_keys_scale_refused">Нельзя масштабировать: два ключа попали бы в один кадр</string>
+    <string name="aet_work_area_start_here">Начало рабочей области здесь</string>
+    <string name="aet_work_area_end_here">Конец рабочей области здесь</string>
+    <string name="aet_work_area_clear">Сбросить рабочую область</string>
+    <string name="aet_trim_to_work_area">Обрезать композицию по рабочей области</string>
+    <string name="aet_trimmed_to_work_area">Композиция обрезана по рабочей области</string>
+</resources>

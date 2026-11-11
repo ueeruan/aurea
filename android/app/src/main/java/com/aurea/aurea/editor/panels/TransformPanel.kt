@@ -362,6 +362,12 @@ private fun transformMoreEntries(
     val motionBlur = stringResource(R.string.panel_desfoque_movimento)
     val animators = stringResource(R.string.la_animators)
     val cameraOptions = stringResource(R.string.om_ap_cam_title)
+    // AE animation: Auto-Orientar (lido do motor; a revisão relê depois de cada troca).
+    val autoOrientTitle = stringResource(R.string.ae_anim_auto_orient)
+    val orientOff = stringResource(R.string.ae_anim_auto_orient_off)
+    val orientPath = stringResource(R.string.ae_anim_auto_orient_path)
+    val orientCamera = stringResource(R.string.ae_anim_auto_orient_camera)
+    val orient = remember(store.aeAnimRevision, store.primary, store.detail) { store.layerAutoOrient() }
     val navigation = store.trackNavigation(curveKeys)
     val detail = store.detail
     val fitState = if (face == TransformTab.Escalar && !isCamera) mediaFitState(store) else null
@@ -416,6 +422,16 @@ private fun transformMoreEntries(
             add(MenuEntry.Item(accelerate, checked = TransformPrefs.accelerate, keepOpen = true, tag = "transform.more.accelerate") {
                 TransformPrefs.toggleAccelerate()
             })
+        }
+        // AE animation: Auto-Orientar. Ao longo do caminho, o X da camada (o olhar,
+        // na câmera) segue o caminho de movimento; para a câmera, a camada 3D a encara.
+        if (detail != null && (face == TransformTab.Mover || face == TransformTab.Girar)) {
+            add(MenuEntry.Divider)
+            add(MenuEntry.Header(autoOrientTitle, tag = "transform.autoorient"))
+            add(MenuEntry.Item(orientOff, checked = orient == 0, tag = "transform.autoorient.0") { store.setLayerAutoOrient(0) })
+            add(MenuEntry.Item(orientPath, checked = orient == 1, tag = "transform.autoorient.1") { store.setLayerAutoOrient(1) })
+            if (show3D && !isCameraOrLight(detail))
+                add(MenuEntry.Item(orientCamera, checked = orient == 2, tag = "transform.autoorient.2") { store.setLayerAutoOrient(2) })
         }
         // Mais do AUREA: as faces extras e, na câmera, o painel das opções da lente.
         add(MenuEntry.Divider)

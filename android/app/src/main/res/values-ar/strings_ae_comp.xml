@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE compositing (2026-11-10): modos de mesclagem e de máscara do After Effects, queda do feather, tímidas, preservar transparência e luz ambiente. -->
+<resources>
+    <string name="ae_blend_stencil_luma">استنسل حسب السطوع</string>
+    <string name="ae_blend_silhouette_luma">صورة ظلية حسب السطوع</string>
+    <string name="ae_blend_dissolve">ذوبان</string>
+    <string name="ae_blend_dancing_dissolve">ذوبان متحرّك</string>
+    <string name="ae_blend_hard_mix">مزج حاد</string>
+    <string name="ae_blend_classic_color_burn">حرق اللون الكلاسيكي</string>
+    <string name="ae_blend_classic_color_dodge">تفتيح اللون الكلاسيكي</string>
+    <string name="ae_blend_classic_difference">الفرق الكلاسيكي</string>
+    <string name="ae_blend_alpha_add">جمع ألفا</string>
+    <string name="ae_blend_luminescent_premul">مضيء مضروب مسبقًا</string>
+    <string name="ae_blend_cat_utility">أدوات</string>
+    <string name="ae_blend_cat_dissolve">أوضاع الذوبان</string>
+    <string name="ae_mask_lighten">تفتيح</string>
+    <string name="ae_mask_darken">تغميق</string>
+    <string name="ae_mask_falloff_smooth">حافة ناعمة</string>
+    <string name="ae_mask_falloff_linear">حافة خطية</string>
+    <string name="ae_layer_shy">خجولة</string>
+    <string name="ae_layer_shy_hint">تختفي من الخط الزمني عند إخفاء الطبقات الخجولة</string>
+    <string name="ae_comp_hide_shy">إخفاء الطبقات الخجولة</string>
+    <string name="ae_comp_hide_shy_hint">يسري على التركيب كله؛ الفيديو لا يتغيّر</string>
+    <string name="ae_layer_preserve_transparency">الحفاظ على الشفافية</string>
+    <string name="ae_layer_preserve_transparency_hint">ترسم فقط حيث توجد صورة في الطبقات التي تحتها</string>
+    <string name="scene_light_ambient">ضوء محيط</string>
+</resources>

@@ -36,7 +36,8 @@ const std::array<BuiltinPropertySpec, 9>& lights() noexcept {
         std::array<BuiltinPropertySpec, 9> p;
         // Typed bounds match Engine's LayerSetLightParam validation. Sliders
         // provide a comfortable subset; numeric input retains the full range.
-        p[0] = scalar("kind", "Tipo de luz", ParamType::Enum, 0, -1, static_cast<f32>(d.kind), 0, 2, 0, 2, "", 0, "light");
+        // 3 = ambiente (bug B9): sem direção nem alcance, soma por igual.
+        p[0] = scalar("kind", "Tipo de luz", ParamType::Enum, 0, -1, static_cast<f32>(d.kind), 0, 3, 0, 3, "", 0, "light");
         p[1] = scalar("intensity", "Intensidade", ParamType::Float, 1, track(TrackProperty::LightIntensity), d.intensity, 0, 10, 0, 1'000'000, "", 2, "light");
         p[2] = scalar("color", "Cor", ParamType::Color, 2, track(TrackProperty::LightColorR), d.color.x, 0, 1, 0, 1, "", 3, "light");
         p[2].components = 3; p[2].bindingParams = {2, 3, 4, -1};
@@ -135,7 +136,7 @@ void panel(Json& j, const char* domain, std::span<const BuiltinPropertySpec> pro
             j.text("]}");
         }
         j.text("]");
-        if (p.type == ParamType::Enum) j.text(",\"options\":[{\"value\":0,\"id\":\"directional\",\"label\":\"Luz direcional\"},{\"value\":1,\"id\":\"point\",\"label\":\"Luz pontual\"},{\"value\":2,\"id\":\"spot\",\"label\":\"Luz spot\"}]");
+        if (p.type == ParamType::Enum) j.text(",\"options\":[{\"value\":0,\"id\":\"directional\",\"label\":\"Luz direcional\"},{\"value\":1,\"id\":\"point\",\"label\":\"Luz pontual\"},{\"value\":2,\"id\":\"spot\",\"label\":\"Luz spot\"},{\"value\":3,\"id\":\"ambient\",\"label\":\"Luz ambiente\"}]");
         j.text("}");
     }
     j.text("]}");

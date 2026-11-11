@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Headbop (0.5.2): nome, descrição e o cartão (HeadbopPanel.kt). Par do iOS: AureaStrings.swift // Headbop. -->
+<resources>
+    <string name="fx_name_headbop">हेडबॉप</string>
+    <string name="fx_desc_headbop">फ़ोटो या वीडियो में व्यक्ति संगीत की बीट पर सिर और शरीर हिलाता है</string>
+    <string name="headbop_note">सिर और कंधे खोजने के लिए लेयर का विश्लेषण करें। कोई व्यक्ति न हो तो पूरा फ़्रेम हिलता है।</string>
+    <string name="headbop_analyze">विश्लेषण करें</string>
+    <string name="headbop_reanalyze">फिर से विश्लेषण करें</string>
+    <string name="headbop_analyzing">व्यक्ति और बीट का विश्लेषण हो रहा है…</string>
+    <string name="headbop_cancel">रद्द करें</string>
+    <string name="headbop_people_found">%1$d व्यक्ति मिले</string>
+    <string name="headbop_no_person">कोई व्यक्ति नहीं: पूरा फ़्रेम हिलता है</string>
+    <string name="headbop_not_analyzed">अभी विश्लेषण नहीं हुआ</string>
+    <string name="headbop_failed">विश्लेषण नहीं हो सका</string>
+    <string name="headbop_bpm_value">%1$d BPM</string>
+    <string name="headbop_tap">टैप</string>
+    <string name="headbop_bake">कीफ़्रेम में बदलें</string>
+    <string name="headbop_free_for_now">अभी के लिए मुफ़्त</string>
+    <string name="effect_future_paid_notice">आप एक ऐसा इफ़ेक्ट इस्तेमाल कर रहे हैं जो आगे पेड होगा। आनंद लें!</string>
+</resources>

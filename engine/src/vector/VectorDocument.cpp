@@ -15,8 +15,10 @@
 //                      [v3] nº do perfil de largura, perfil…, composição do grupo),
 //            aparar (liga, início, fim, deslocamento, modo),
 //            repetidor (liga, cópias, desloc., âncora x/y, posição x/y,
-//                       escala, giro, opac. inicial/final, por cima),
-//            nº de caminhos, caminho…
+//                       escala, giro, opac. inicial/final, por cima,
+//                       [v6] escala Y, escala ligada),
+//            nº de caminhos, caminho…,
+//            [v6] nº de operadores, operador… (tipo, liga, 16 parâmetros)
 //   tinta  : tipo, rgba, início x/y, fim x/y, opacidade, nº de paradas,
 //            parada… (posição, rgba)
 //   caminho: tipo, invertido, centro x/y, tamanho x/y, arredondar, pontas,
@@ -34,7 +36,7 @@
 
 namespace aurea::vector {
 namespace {
-constexpr f32 kDocVersion = 5.0f;   // v2: afinar do contorno; v3: perfil, apagar, furo, desenho (Omega); v4: curva dos keys de forma; v5: keyframe por ponto
+constexpr f32 kDocVersion = 6.0f;   // v2: afinar do contorno; v3: perfil, apagar, furo, desenho (Omega); v4: curva dos keys de forma; v5: keyframe por ponto; v6: operadores de caminho e escala X/Y do repetidor
 
 struct In {
     const f32* d;
@@ -123,6 +125,7 @@ void encode_document(const VectorData& data, std::vector<f32>& o, std::string& n
         const VectorRepeater& r = g.repeater;
         o.insert(o.end(), {r.enabled ? 1.0f : 0.0f, r.copies, r.offset, r.anchor.x, r.anchor.y, r.position.x, r.position.y, r.scale,
                            r.rotation, r.startOpacity, r.endOpacity, static_cast<f32>(r.above)});
+        o.insert(o.end(), {r.scaleY, r.scaleLinked ? 1.0f : 0.0f});   // v6
         o.push_back(static_cast<f32>(g.paths.size()));
         for (const VectorPath& p : g.paths) {
             o.insert(o.end(), {static_cast<f32>(p.kind), p.reversed ? 1.0f : 0.0f, p.center.x, p.center.y, p.size.x, p.size.y, p.roundness,
@@ -138,6 +141,13 @@ void encode_document(const VectorData& data, std::vector<f32>& o, std::string& n
                 o.push_back(static_cast<f32>(k.points.size()));   // v5
                 for (const u8 on : k.points) o.push_back(on ? 1.0f : 0.0f);
             }
+        }
+        // v6: operadores de caminho, em ordem.
+        o.push_back(static_cast<f32>(g.modifiers.size()));
+        for (const VectorModifier& m : g.modifiers) {
+            o.push_back(static_cast<f32>(m.type));
+            o.push_back(m.enabled ? 1.0f : 0.0f);
+            o.insert(o.end(), m.params, m.params + kVecModParams);
         }
     }
     o.push_back(data.drawing ? 1.0f : 0.0f);   // v3: camada de desenho
@@ -208,6 +218,12 @@ bool decode_document(const f32* data, usize count, const std::string& names, Vec
         r.startOpacity = in.f();
         r.endOpacity = in.f();
         r.above = in.u(1);
+        if (version >= 6.0f) {
+            r.scaleY = in.f();
+            r.scaleLinked = in.b() ? 1 : 0;
+        } else {
+            r.scaleY = r.scale;   // antes da v6 a escala era uniforme
+        }
         const u32 np = in.count(100000);
         g.paths.resize(np);
         for (VectorPath& p : g.paths) {
@@ -243,6 +259,18 @@ bool decode_document(const f32* data, usize count, const std::string& names, Vec
                 }
             }
             std::stable_sort(p.keys.begin(), p.keys.end(), [](const PathKey& a, const PathKey& b) { return a.frame < b.frame; });
+        }
+        if (version >= 6.0f) {
+            const u32 nm = in.count(kVecMaxModifiers);
+            g.modifiers.resize(nm);
+            for (VectorModifier& m : g.modifiers) {
+                // Tipo desconhecido (documento de uma versão mais nova) fica desligado.
+                const f32 type = in.f();
+                const bool known = type >= 0.0f && type < static_cast<f32>(VectorModifierType::Count);
+                m.type = known ? static_cast<VectorModifierType>(static_cast<u8>(type)) : VectorModifierType::OffsetPaths;
+                m.enabled = in.b() && known;
+                for (u32 i = 0; i < kVecModParams; ++i) m.params[i] = in.f();
+            }
         }
     }
     if (version >= 3.0f && in.ok) d.drawing = in.b();

@@ -223,6 +223,7 @@ private fun ColumnScope.CameraViewTab(env: PanelEnv, lens: FloatArray) {
             store.setCameraLens(EditorStore.CAMERA_AFFECTS_BELOW, if (on) 1f else 0f)
             store.endGesture()
         }
+        CameraTwoNodeRows(env, enabled)
         // 0.3.4 painéis: 140 (antes 124) para o rótulo em cima do valor maior.
         Row(Modifier.fillMaxWidth().height(140.dp), verticalAlignment = Alignment.CenterVertically) {
             CurvedAngleRuler(
@@ -356,6 +357,49 @@ private fun CameraValueBox(text: String, description: String, tag: String, enabl
             )
         }
     }
+}
+
+/**
+ * AE animation: câmera de DOIS NÓS. Ligada, a câmera mira o Ponto de Interesse
+ * (px do espaço do pai, como a posição) e a rotação gira por cima da mira. O POI
+ * nasce à frente da câmera (a imagem não pula), anda pelo teclado ou pela alça no
+ * palco e tem keyframe próprio (X/Y/Z juntos).
+ */
+@Composable
+private fun CameraTwoNodeRows(env: PanelEnv, enabled: Boolean) {
+    val store = env.store
+    val poi = remember(store.aeAnimRevision, store.detail) { store.cameraPoi() } ?: return
+    val twoNode = poi[0] >= 0.5f
+    BlurToggleRow(stringResource(R.string.ae_anim_two_node), stringResource(R.string.ae_anim_two_node_hint), twoNode,
+        Modifier.testTag("camera.view.twoNode").semantics(mergeDescendants = true) {}) { on -> store.setCameraTwoNode(on) }
+    if (!twoNode) return
+    val poiLabel = stringResource(R.string.ae_anim_poi)
+    val props = intArrayOf(com.aurea.aurea.engine.TrackProperty.CAMERA_POI_X, com.aurea.aurea.engine.TrackProperty.CAMERA_POI_Y,
+        com.aurea.aurea.engine.TrackProperty.CAMERA_POI_Z)
+    val keys = store.keyframes[store.primary].orEmpty().filter { it.property in props }
+    val here = keys.any { it.time == store.detail?.localPlayhead }
+    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(poiLabel, modifier = Modifier.weight(1f), maxLines = 2,
+            style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Text)))
+        listOf("X", "Y", "Z").forEachIndexed { i, axis ->
+            val value = poi[i + 1]
+            CameraValueBox("$axis ${kotlin.math.round(value).toInt()}", "$poiLabel $axis", "camera.poi.$i", enabled) {
+                env.openKeypad(KeypadRequest("$poiLabel $axis", value, "px", -100000f, 100000f, 0) { v ->
+                    val now = store.cameraPoi() ?: return@KeypadRequest
+                    val xyz = floatArrayOf(now[1], now[2], now[3])
+                    xyz[i] = v
+                    store.setCameraPoi(xyz[0], xyz[1], xyz[2])
+                })
+            }
+        }
+    }
+    PanelItemRow(
+        com.aurea.aurea.ui.theme.CupertinoGlyph.SuitDiamond,
+        stringResource(if (here) R.string.ae_anim_poi_key_remove else R.string.ae_anim_poi_key_add),
+        "camera.poi.key",
+        on = here,
+    ) { store.toggleTransformKeyframe(props) }
 }
 
 /** Perspectiva / Paralela (0.4.6: a ortográfica do motor, `CameraData::parallel`). */

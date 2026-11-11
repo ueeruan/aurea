@@ -16,6 +16,44 @@ GroundPlacement ground_placement(const SceneFrame& frame, std::span<const GpuMod
             gp.valid = true;
         }
     };
+    // Vértices com skin na pose (Σ peso · junta × inversa de bind), no mundo.
+    // Até ~8 mil por primitiva: o passo pula vértices vizinhos, e a sola de um
+    // pé tem centenas deles. Morph fica na caixa (a deformação não está aqui).
+    auto skin_points = [&](const Primitive& p, const auto& pose, i32 skin, const Mat4& world) {
+        if (!p.skinned() || !p.morphTargets.empty() || skin < 0) return false;
+        if (static_cast<usize>(skin) >= pose.skinJointOffset.size()) return false;
+        const usize nv = p.positions.size();
+        if (nv == 0 || p.joints.size() < 4 * nv || p.weights.size() < nv) return false;
+        const usize first = pose.skinJointOffset[static_cast<usize>(skin)];
+        const usize last = static_cast<usize>(skin) + 1 < pose.skinJointOffset.size()
+                         ? pose.skinJointOffset[static_cast<usize>(skin) + 1] : pose.jointMatrices.size();
+        if (first >= last || last > pose.jointMatrices.size()) return false;
+        const usize step = std::max<usize>(1, nv / 8192);
+        bool added = false;
+        for (usize v = 0; v < nv; v += step) {
+            const Vec4& w = p.weights[v];
+            const f32 ws[4] = {w.x, w.y, w.z, w.w};
+            Vec3 s{0, 0, 0};
+            f32 total = 0.0f;
+            for (int k = 0; k < 4; ++k) {
+                if (!(ws[k] > 0.0f)) continue;
+                const usize j = first + p.joints[4 * v + static_cast<usize>(k)];
+                if (j >= last) continue;
+                const Vec3 q = pose.jointMatrices[j].transform_point(p.positions[v]);
+                s = Vec3{s.x + q.x * ws[k], s.y + q.y * ws[k], s.z + q.z * ws[k]};
+                total += ws[k];
+            }
+            if (!(total > 1e-6f)) continue;
+            const Vec3 pt = world.transform_point(Vec3{s.x / total, s.y / total, s.z / total});
+            if (!std::isfinite(pt.x) || !std::isfinite(pt.y) || !std::isfinite(pt.z)) continue;
+            lo = Vec3{std::min(lo.x, pt.x), std::min(lo.y, pt.y), std::min(lo.z, pt.z)};
+            hi = Vec3{std::max(hi.x, pt.x), std::max(hi.y, pt.y), std::max(hi.z, pt.z)};
+            gp.valid = true;
+            added = true;
+        }
+        gp.verticesVisited += (nv + step - 1) / step;
+        return added;
+    };
     struct Candidate { f32 boxY; const Primitive* prim; Mat4 world; };
     std::vector<Candidate> cands;
     bool hasSkin = false;
@@ -36,6 +74,15 @@ GroundPlacement ground_placement(const SceneFrame& frame, std::span<const GpuMod
                 if (p.material >= 0 && p.material < static_cast<i32>(a.materials.size())) {
                     const Material& m = a.materials[static_cast<usize>(p.material)];
                     if (m.alphaMode == AlphaMode::Blend || m.transmission > 0.0f) continue;
+                }
+                // 0.5.2: com skin, os vértices na pose do quadro. A caixa de
+                // bind × camada não passa pelas juntas: num FBX em centímetros
+                // (esqueleto com escala 0,01) ela fica ~100× maior, e o balanço
+                // de poucos graus da camada inclinava os cantos dela centenas
+                // de px abaixo dos pés — o chão descia e sumia no giro.
+                if (p.bounds.valid() && a.nodes[n].skin >= 0 && skin_points(p, inst.pose(), a.nodes[n].skin, inst.world)) {
+                    any = true;
+                    continue;
                 }
                 add(p.bounds, world);
                 any = any || p.bounds.valid();

@@ -21,6 +21,10 @@ struct MarkerEditorSheet: View {
     @State private var frameText: String
     @State private var color: UInt32
     @State private var failure = false
+    // Timeline do AE: duração (quadros) e comentário da marca.
+    @State private var durationText = "0"
+    @State private var comment = ""
+    @State private var loadedDetails = false
     // 0.3.3 recursos: o marcador antigo (a paleta de seis cores da 0.3.2) volta, com a
     // correção da área 03: o motor guarda RGBA com o R no byte BAIXO (Marker::color) e
     // `MarkerColors.pack` grava a cor certa; as marcas da 0.3.2 aparecem certas (`display`).
@@ -41,6 +45,7 @@ struct MarkerEditorSheet: View {
                 TextField(AureaText.t("marker_frame"), text: $frameText).keyboardType(.numberPad)
                 Text(Timecode.format(Int32(clamping: max(0, Int64(frameText) ?? 0)), Float(model.compositionFps)))
                 Button(AureaText.t("marker_at_playhead")) { frameText = String(model.status.playhead) }
+                MarkerExtraFields(durationText: $durationText, comment: $comment)
                 HStack(spacing: 0) {
                     let chosen = MarkerColors.legacyIndex(color)
                     ForEach(Array(palette.enumerated()), id: \.offset) { index, packed in
@@ -57,16 +62,155 @@ struct MarkerEditorSheet: View {
                 }
             }
             .navigationTitle(AureaText.t("marker_edit"))
+            .onAppear {
+                guard !loadedDetails else { return }
+                loadedDetails = true
+                if !isNew, let details = model.markerDetails(original) { durationText = String(details.0); comment = details.1 }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(AureaText.t("common_cancel")) { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(AureaText.t("common_save")) {
-                        if let target = Int64(frameText), model.editMarker(from: isNew ? -1 : original, to: target, color: color, label: name) { dismiss() }
+                        let length = Int64(durationText.isEmpty ? "0" : durationText)
+                        if let target = Int64(frameText), let length, length >= 0,
+                           model.editMarkerFull(from: isNew ? -1 : original, to: target, color: color, label: name,
+                                                duration: length, comment: comment) { dismiss() }
                         else { failure = true }
                     }
                 }
             }
         }
+    }
+}
+
+// =============================================================================
+// Timeline do AE (EngineAeTimeline.cpp): duração/comentário das marcas, o
+// editor da marca de CAMADA, o passo do "Escalonar" e a área de trabalho. O
+// mesmo do Android (editor/timeline/AeTimeline.kt).
+// =============================================================================
+
+/// Duração (quadros, com o tempo ao lado) e comentário de uma marca.
+struct MarkerExtraFields: View {
+    @EnvironmentObject private var model: AureaModel
+    @Binding var durationText: String
+    @Binding var comment: String
+    var body: some View {
+        TextField(AureaText.t("aet_marker_duration"), text: $durationText).keyboardType(.numberPad)
+            .onChange(of: durationText) { value in
+                let digits = String(value.filter(\.isNumber).prefix(9))
+                if digits != value { durationText = digits }
+            }
+            .accessibilityIdentifier("marker.duration")
+        Text(Timecode.format(Int32(clamping: max(0, Int64(durationText) ?? 0)), Float(model.compositionFps)))
+            .font(.footnote).foregroundColor(.secondary)
+        TextField(AureaText.t("aet_marker_comment"), text: $comment, prompt: Text(AureaText.t("aet_marker_comment_hint")), axis: .vertical)
+            .lineLimit(2...4)
+            .onChange(of: comment) { value in if value.count > 1000 { comment = String(value.prefix(1000)) } }
+            .accessibilityIdentifier("marker.comment")
+    }
+}
+
+/// Editor da marca da CAMADA (anda com o clipe; `thisLayer.marker` lê). Nova só no Salvar.
+struct LayerMarkerEditorSheet: View {
+    @EnvironmentObject private var model: AureaModel
+    @Environment(\.dismiss) private var dismiss
+    let layer: Int64
+    let original: Int64
+    let isNew: Bool
+    @State private var name = ""
+    @State private var frameText: String
+    @State private var durationText = "0"
+    @State private var comment = ""
+    @State private var color: UInt32 = MarkerColors.engineDefault
+    @State private var failure = false
+    @State private var loaded = false
+    private let palette: [UInt32] = MarkerColors.legacy.map { MarkerColors.pack($0) }
+    init(layer: Int64, frame: Int64, isNew: Bool) {
+        self.layer = layer
+        original = frame
+        self.isNew = isNew
+        _frameText = State(initialValue: String(frame))
+    }
+    var body: some View {
+        NavigationView {
+            Form {
+                if let row = model.layers.first(where: { $0.id == layer }) { Text(row.name).font(.footnote).foregroundColor(.secondary) }
+                TextField(AureaText.t("marker_name"), text: $name, prompt: Text(AureaText.t("marker_name_hint")))
+                    .onChange(of: name) { value in if value.count > 200 { name = String(value.prefix(200)) } }
+                    .accessibilityIdentifier("layerMarker.name")
+                TextField(AureaText.t("marker_frame"), text: $frameText).keyboardType(.numberPad)
+                Text(Timecode.format(Int32(clamping: max(0, Int64(frameText) ?? 0)), Float(model.compositionFps)))
+                Button(AureaText.t("marker_at_playhead")) { frameText = String(model.status.playhead) }
+                MarkerExtraFields(durationText: $durationText, comment: $comment)
+                HStack(spacing: 0) {
+                    let chosen = MarkerColors.legacyIndex(color)
+                    ForEach(Array(palette.enumerated()), id: \.offset) { index, packed in
+                        Button { color = packed } label: {
+                            Circle().fill(markerTint(packed)).frame(width: chosen == index ? 32 : 22, height: chosen == index ? 32 : 22)
+                                .frame(maxWidth: .infinity).frame(height: 44)
+                        }.buttonStyle(.borderless).accessibilityLabel(AureaText.t("marker_color", index + 1))
+                            .accessibilityIdentifier("layerMarker.color.\(index)")
+                    }
+                }
+                Text(AureaText.t(failure ? "marker_error" : "aet_layer_marker_hint")).font(.footnote)
+                if !isNew {
+                    Button(AureaText.t("common_delete"), role: .destructive) { model.deleteLayerMarker(layer, frame: original); dismiss() }
+                        .accessibilityIdentifier("layerMarker.delete")
+                }
+            }
+            .navigationTitle(AureaText.t("aet_layer_marker_edit"))
+            .onAppear {
+                guard !loaded else { return }
+                loaded = true
+                guard !isNew else { return }
+                if let text = model.layerMarkerText(layer, frame: original) { name = text.0; comment = text.1 }
+                if let item = model.layerMarker(layer, at: original) { durationText = String(item.duration); color = item.color }
+            }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button(AureaText.t("common_cancel")) { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(AureaText.t("common_save")) {
+                        let length = Int64(durationText.isEmpty ? "0" : durationText)
+                        if let target = Int64(frameText), let length,
+                           model.editLayerMarker(layer, from: isNew ? -1 : original, to: target, color: color, label: name,
+                                                 duration: length, comment: comment) { dismiss() }
+                        else { failure = true }
+                    }.accessibilityIdentifier("layerMarker.save")
+                }
+            }
+        }
+    }
+}
+
+/// O passo do "Escalonar" (`Engine::stagger_layers`): −/+ em quadros, camadas ou só keyframes.
+struct StaggerStepperView: View {
+    @EnvironmentObject private var model: AureaModel
+    @State private var step = 3
+    @State private var keysOnly = false
+    private var enabled: Bool { model.layers.filter { model.selection.contains($0.id) && !$0.locked }.count >= 2 }
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(AureaText.t("aet_stagger")).font(.system(size: 13)).foregroundColor(AureaColors.text)
+            Button { step = Self.next(step, -1) } label: { Text("−").font(.system(size: 18)).frame(width: 36, height: 44) }
+                .buttonStyle(.plain).accessibilityLabel(AureaText.t("aet_stagger_less")).accessibilityIdentifier("stagger.minus")
+            Text("\(step)").font(.system(size: 14)).frame(width: 40)
+                .accessibilityLabel(AureaText.t("aet_stagger_step_value", step)).accessibilityIdentifier("stagger.value")
+            Button { step = Self.next(step, 1) } label: { Text("+").font(.system(size: 18)).frame(width: 36, height: 44) }
+                .buttonStyle(.plain).accessibilityLabel(AureaText.t("aet_stagger_more")).accessibilityIdentifier("stagger.plus")
+            Toggle(AureaText.t("aet_stagger_keys_only"), isOn: $keysOnly).font(.system(size: 12)).fixedSize()
+                .accessibilityIdentifier("stagger.keysOnly")
+            Spacer(minLength: 0)
+            Button(AureaText.t("aet_stagger_apply")) { model.staggerSelection(step: step, keysOnly: keysOnly) }
+                .disabled(!enabled).font(.system(size: 13)).padding(.horizontal, 10).frame(height: 36)
+                .background(AureaColors.surfaceHigh, in: RoundedRectangle(cornerRadius: 8))
+                .accessibilityIdentifier("stagger.apply")
+        }.padding(.horizontal, 8)
+    }
+    /// O mesmo contador do Android (`Stagger.step`): nunca para no 0 e fica em [−120, 120].
+    static func next(_ current: Int, _ delta: Int) -> Int {
+        var value = min(120, max(-120, current + delta))
+        if value == 0 { value = delta > 0 ? 1 : -1 }
+        return value
     }
 }
 
@@ -160,7 +304,11 @@ struct TimelineView: View {
     /// `.box`: modo "Selecionar" — arrastar no vazio desenha o retângulo de seleção dos losangos.
     /// `.lift`: toque longo + vertical num trecho — só ELE sobe/desce (a linha não vai junto).
     /// `.stretch`: Omega (P1-8) — a alça de velocidade do foco (prévia; o motor estica ao soltar).
-    private enum Mode { case scrub, scroll, step, move, trimStart, trimEnd, key, keys, reorder, hold, blocked, box, lift, sweep, stretch }
+    /// `.workArea`: timeline do AE — uma alça da área de trabalho na régua.
+    private enum Mode { case scrub, scroll, step, move, trimStart, trimEnd, key, keys, reorder, hold, blocked, box, lift, sweep, stretch, workArea }
+    /// Timeline do AE: rascunho do arrasto da alça (−1 início, 1 fim) que o pintor desenha.
+    @State private var workAreaDraft: [Int64]?
+    @State private var workAreaHandle = 0
     /// Varredura do modo de escolher várias camadas: as que o dedo já somou.
     @State private var sweepSeen = Set<Int64>()
     // --- Omega 0.3.2 (área 03) ------------------------------------------------------
@@ -252,8 +400,10 @@ struct TimelineView: View {
         // de um split os dois pedaços continuam à vista (só o trecho escolhido
         // fazia a metade nova sumir, e o corte parecia não ter funcionado).
         // Omega (P0-1): uma camada por linha, sem mudar o motor (o `trackId` fica).
-        let shared = EditorTimelineRefresh.enabled ? timelineLayerRows(all, perLayer: true)
+        let lines = EditorTimelineRefresh.enabled ? timelineLayerRows(all, perLayer: true)
             : rowCache.shared(all, focus: model.primarySelection, tracks: focusTracks)
+        // AE "Ocultar camadas tímidas": depois do cache das linhas (a chave não muda a geração dele).
+        let shared = timelineWithoutShy(lines, hide: model.hideShy)
         if compact {
             guard let primary = model.primarySelection else { return [] }
             // Omega (P1-7): o foco mostra SÓ a linha da camada escolhida.
@@ -497,6 +647,11 @@ struct TimelineView: View {
                         keyAction(AureaText.t("common_paste"), id: "timeline.keys.paste", enabled: canPaste) { model.pasteTimelineKeys() }
                         keyAction(AureaText.t("common_duplicate"), id: "timeline.keys.duplicate", enabled: count > 0 && !selection.crossLayer) { model.duplicateTimelineKeys() }
                         keyAction(AureaText.t("common_delete"), id: "timeline.keys.delete", enabled: count > 0, danger: true) { model.deleteTimelineKeys() }
+                        // Timeline do AE: Easy Ease (F9), só entrada, só saída e escalar no tempo.
+                        keyAction(AureaText.t("aet_easy_ease"), id: "timeline.keys.easyEase", enabled: count > 0) { model.easeTimelineKeys(0) }
+                        keyAction(AureaText.t("aet_easy_ease_in"), id: "timeline.keys.easyEaseIn", enabled: count > 0) { model.easeTimelineKeys(1) }
+                        keyAction(AureaText.t("aet_easy_ease_out"), id: "timeline.keys.easyEaseOut", enabled: count > 0) { model.easeTimelineKeys(2) }
+                        keyScaleMenu(enabled: count > 1)
                         keyAction(AureaText.t("editor_concluir"), id: "timeline.keys.done") { model.clearTimelineKeySelection() }
                     }
                     .padding(.horizontal, 4)
@@ -529,6 +684,28 @@ struct TimelineView: View {
             .padding(.horizontal, 8)
             .padding(.bottom, 6)
         }
+    }
+
+    /// Timeline do AE: "Escalar tempo" da seleção (em volta do primeiro key): ×½, ×¾, ×1½, ×2.
+    private func keyScaleMenu(enabled: Bool) -> some View {
+        let factors: [Double] = [0.5, 0.75, 1.5, 2.0]
+        let labels: [String] = ["50%", "75%", "150%", "200%"]
+        return Menu {
+            ForEach(0..<factors.count, id: \.self) { index in
+                Button(AureaText.t("aet_keys_scale_to", NSString(string: labels[index]))) { model.scaleTimelineKeys(factors[index]) }
+                    .accessibilityIdentifier("timeline.keys.scale.\(labels[index])")
+            }
+        } label: {
+            Text(AureaText.t("aet_keys_scale"))
+                .font(.aurea(size: 13))
+                .lineLimit(1)
+                .foregroundColor(enabled ? Color.white : AureaColors.muted)
+                .padding(.horizontal, 12)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .disabled(!enabled)
+        .accessibilityIdentifier("timeline.keys.scale")
     }
 
     /// Botão da barra: alvo de 44 pt no mínimo.
@@ -1835,7 +2012,10 @@ struct TimelineView: View {
             let dx = point.x - start.x, dy = point.y - start.y
             let horizontal = TimelinePress.horizontal(dx, dy)
             let mode: Mode
-            if model.timelineLayerSelectMode && touched.kind == .header && row?.track == nil && !compact && !horizontal { mode = .sweep }
+            let handle = touched.kind == .ruler && !compact ? workAreaHandleAt(start, width: size.width) : 0
+            // Timeline do AE: as alças da área de trabalho na régua.
+            if handle != 0 { workAreaHandle = handle; mode = .workArea }
+            else if model.timelineLayerSelectMode && touched.kind == .header && row?.track == nil && !compact && !horizontal { mode = .sweep }
             // Trilha de propriedade aberta (só do AUREA): o losango anda direto, como antes.
             else if row?.track != nil && touched.kind == .key && TimelinePress.timeEdit(dx, dy) { mode = .key }
             else if boxStarts(row, touched) { mode = .box }
@@ -2133,9 +2313,23 @@ struct TimelineView: View {
                 keysVisible: { KeyframeVisibility.visible(showAll: showAll, isPropertyLane: $0.track != nil, selected: selection.contains($0.id)) })
             let next = base.plusAll(picked)
             if model.timelineKeySelectMode && next != model.timelineKeySelection { model.timelineKeySelection = next }
+        case .workArea:
+            let area = model.workArea
+            guard area.count == 2 else { break }
+            let f = min(max(0, Int64(timelineFrame(frame(point.x, width: size.width)))), max(1, model.compositionDuration))
+            workAreaDraft = workAreaHandle < 0 ? [min(f, area[1] - 1), area[1]] : [area[0], max(f, area[0] + 1)]
         case .hold, .blocked: break
         }
         gesture = g
+    }
+
+    /// Timeline do AE: alça da área de trabalho sob o dedo (alvo de 22 pt): −1 início, 1 fim, 0 nenhuma.
+    private func workAreaHandleAt(_ point: CGPoint, width: CGFloat) -> Int {
+        let area = model.workArea
+        guard area.count == 2, point.y < m.rowsTop else { return 0 }
+        let d0 = abs(point.x - x(Double(area[0]), width: width)), d1 = abs(point.x - x(Double(area[1]), width: width))
+        if min(d0, d1) > 22 { return 0 }
+        return d0 <= d1 ? -1 : 1
     }
     private func openUndo(_ g: inout Interaction) {
         if !g.undoOpen { model.engine.run { $0.beginUndoGroup() }; g.undoOpen = true }
@@ -2149,6 +2343,15 @@ struct TimelineView: View {
     private func finish(cancelled: Bool) {
         pendingPointer = false
         guard let g = gesture else { return }
+        // Timeline do AE: soltar a alça grava a área (um passo de desfazer no motor).
+        if g.mode == .workArea {
+            if !cancelled, let draft = workAreaDraft, draft.count == 2, draft != model.workArea {
+                model.setWorkArea(start: draft[0], end: draft[1])
+                haptics.light()
+            }
+            workAreaDraft = nil
+            workAreaHandle = 0
+        }
         if g.mode == .reorder && !cancelled, g.row != nil, rows.indices.contains(reorderTarget), reorderTarget != reorderSource {
             commitReorder(source: reorderSource, target: reorderTarget)
         }
@@ -2848,6 +3051,22 @@ extension TimelineView {
             entries.append(.item(AureaText.t("common_delete"), glyph: CupertinoGlyph.Trash, destructive: true,
                                  tag: "timeline.currentTime.menu.delete") { model.deleteMarker(frame) })
         }
+        // Timeline do AE: marca na camada escolhida e a área de trabalho no cabeçote.
+        if let layer = model.selection.first, model.selection.count == 1,
+           model.layers.contains(where: { $0.id == layer && !$0.locked }) {
+            entries.append(.item(AureaText.t("aet_layer_marker_here"), glyph: CupertinoGlyph.Bookmark,
+                                 tag: "timeline.currentTime.menu.layerMarker") { model.openLayerMarkerEditor(layer, frame: frame) })
+        }
+        entries.append(.item(AureaText.t("aet_work_area_start_here"), tag: "timeline.currentTime.menu.workIn") {
+            model.setWorkAreaStartAtPlayhead()
+        })
+        entries.append(.item(AureaText.t("aet_work_area_end_here"), tag: "timeline.currentTime.menu.workOut") {
+            model.setWorkAreaEndAtPlayhead()
+        })
+        if model.workArea.count == 2 {
+            entries.append(.item(AureaText.t("aet_trim_to_work_area"), tag: "timeline.currentTime.menu.trimWork") { model.trimToWorkArea() })
+            entries.append(.item(AureaText.t("aet_work_area_clear"), tag: "timeline.currentTime.menu.clearWork") { model.clearWorkArea() })
+        }
         return entries
     }
 
@@ -2992,6 +3211,10 @@ extension TimelineView {
             .accessibilityValue(Timecode.format(Int32(clamping: model.status.playhead), fps))
             .accessibilityHint(AureaText.t("editor_marcar_ou_desmarcar_este_instante"))
             .accessibilityAction(named: Text(AureaText.t("om_tl_time_options"))) { model.openMarkerEditor(model.status.playhead) }
+            // Timeline do AE: a área de trabalho também pelo VoiceOver (par do Android).
+            .accessibilityAction(named: Text(AureaText.t("aet_work_area_start_here"))) { model.setWorkAreaStartAtPlayhead() }
+            .accessibilityAction(named: Text(AureaText.t("aet_work_area_end_here"))) { model.setWorkAreaEndAtPlayhead() }
+            .accessibilityAction(named: Text(AureaText.t("aet_work_area_clear"))) { model.clearWorkArea() }
             .accessibilityIdentifier("timeline.currentTime")
         // Alças do foco (P1-7/P1-8): aparar (ou esticar a velocidade) um quadro por vez.
         if compact, model.selection.count == 1, let id = model.primarySelection,
@@ -3022,6 +3245,48 @@ extension TimelineView {
         }
     }
 
+    // MARK: Timeline do AE · pintura
+    /// Área de trabalho na régua: faixa de 4 pt sobre o buffer da prévia, as duas
+    /// alças (3 × 14 pt) que o dedo arrasta e um véu leve fora dela (par do Android).
+    private func drawWorkArea(_ context: inout GraphicsContext, size: CGSize) {
+        let area: [Int64] = workAreaDraft ?? model.workArea
+        guard area.count == 2 else { return }
+        let x0 = x(Double(area[0]), width: size.width), x1 = x(Double(area[1]), width: size.width)
+        let bottom = m.rowsTop - 3
+        let veil = Color.black.opacity(0.25)
+        if x0 > 0 { context.fill(Path(CGRect(x: 0, y: 0, width: min(x0, size.width), height: bottom)), with: .color(veil)) }
+        if x1 < size.width { context.fill(Path(CGRect(x: max(x1, 0), y: 0, width: size.width - max(x1, 0), height: bottom)), with: .color(veil)) }
+        guard x1 >= 0, x0 <= size.width else { return }
+        let gold = Color(.sRGB, red: 1, green: 0.79, blue: 0.30, opacity: 1)
+        context.fill(Path(CGRect(x: max(x0, 0), y: bottom - 4, width: min(x1, size.width) - max(x0, 0), height: 4)), with: .color(gold.opacity(0.7)))
+        context.fill(Path(roundedRect: CGRect(x: x0, y: bottom - 14, width: 3, height: 14), cornerRadius: 1.5), with: .color(gold))
+        context.fill(Path(roundedRect: CGRect(x: x1 - 3, y: bottom - 14, width: 3, height: 14), cornerRadius: 1.5), with: .color(gold))
+    }
+
+    /// Marcas da camada dentro do clipe: fio, triângulo no topo e a duração como faixa na base.
+    private func drawLayerMarkers(_ context: inout GraphicsContext, layer: Int64, top: CGFloat, left: CGFloat, right: CGFloat, width: CGFloat) {
+        let s: CGFloat = 3.5
+        for marker in model.layerMarkers where marker.layer == layer {
+            let px = x(Double(marker.frame), width: width)
+            if px < left - s || px > right + s { continue }
+            let color = markerTint(marker.color)
+            if marker.duration > 0 {
+                let xe = min(x(Double(marker.frame + marker.duration), width: width), right)
+                if xe > px { context.fill(Path(CGRect(x: px, y: top + m.bar - 3, width: xe - px, height: 3)), with: .color(color.opacity(0.55))) }
+            }
+            var line = Path()
+            line.move(to: CGPoint(x: px, y: top))
+            line.addLine(to: CGPoint(x: px, y: top + m.bar))
+            context.stroke(line, with: .color(color), lineWidth: 1.5)
+            var tri = Path()
+            tri.move(to: CGPoint(x: px - s, y: top))
+            tri.addLine(to: CGPoint(x: px + s, y: top))
+            tri.addLine(to: CGPoint(x: px, y: top + s * 1.4))
+            tri.closeSubpath()
+            context.fill(tri, with: .color(color))
+        }
+    }
+
     // MARK: Omega · pintura
     func drawOmega(_ context: inout GraphicsContext, size: CGSize, now: TimeInterval, pulse: TimeInterval) {
         _ = pulse   // lido: o pulso do clipe levantado redesenha a cada tique
@@ -3029,6 +3294,8 @@ extension TimelineView {
         // A régua é opaca: cobre os clipes que rolam para cima dela.
         context.fill(Path(CGRect(x: 0, y: 0, width: size.width, height: m.rowsTop)), with: .color(AureaColors.editorCanvas))
         omegaRuler(&context, size: size)
+        // Timeline do AE: a área de trabalho na régua (o rascunho do arrasto vale antes).
+        drawWorkArea(&context, size: size)
         for range in model.previewBufferRanges {
             guard let span = TimelinePreviewBuffer.span(range, view: viewFrame, pxPerFrame: ppf, width: size.width) else { continue }
             let rect = CGRect(x: span.lowerBound, y: m.rowsTop - TimelinePreviewBuffer.height,
@@ -3226,6 +3493,8 @@ extension TimelineView {
             }
             // 6. Rótulo de 11 pt na borda do clipe (14 para dentro), reticências no meio (D-3).
             omegaLabel(&bar, row: row, top: top, x0: x0, x1: x1)
+            // 7. Timeline do AE: as marcas da CAMADA (andam com o clipe).
+            drawLayerMarkers(&bar, layer: row.id, top: top, left: left, right: right, width: width)
             // Escolhida na visão geral: o contorno branco de 2 do AUREA.
             if selected && !compact {
                 var outline = context

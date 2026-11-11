@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: preenchimento com textura do texto (TextTextureSection.kt). -->
+<resources>
+    <string name="tex_section">Texture</string>
+    <string name="tex_preset_gold">Gold</string>
+    <string name="tex_preset_silver">Silver/Chrome</string>
+    <string name="tex_preset_brushed">Brushed metal</string>
+    <string name="tex_preset_wood">Wood</string>
+    <string name="tex_preset_marble">Marble</string>
+    <string name="tex_preset_stone">Stone</string>
+    <string name="tex_preset_concrete">Concrete</string>
+    <string name="tex_preset_glitter">Glitter</string>
+    <string name="tex_preset_holo">Holographic</string>
+    <string name="tex_preset_neon">Neon</string>
+    <string name="tex_preset_fire">Fire</string>
+    <string name="tex_preset_water">Water</string>
+    <string name="tex_preset_galaxy">Galaxy</string>
+    <string name="tex_preset_paper">Paper</string>
+    <string name="tex_preset_denim">Denim</string>
+    <string name="tex_preset_leather">Leather</string>
+    <string name="tex_preset_rust">Rust</string>
+    <string name="tex_preset_ice">Ice</string>
+    <string name="tex_preset_desc">%1$s texture</string>
+    <string name="tex_mapping">Mapping</string>
+    <string name="tex_map_block">Whole block</string>
+    <string name="tex_map_letter">Per letter</string>
+    <string name="tex_stroke_too">Stroke too</string>
+    <string name="tex_scale">Scale</string>
+    <string name="tex_rotation">Rotation</string>
+    <string name="tex_offset_x">Offset X</string>
+    <string name="tex_offset_y">Offset Y</string>
+    <string name="tex_contrast">Contrast</string>
+    <string name="tex_brightness">Brightness</string>
+    <string name="tex_tint">Tint color</string>
+    <string name="tex_speed">Animate (speed)</string>
+    <string name="tex_relief">Relief</string>
+    <string name="tex_light_angle">Light angle</string>
+    <string name="tex_variation">Variation</string>
+</resources>

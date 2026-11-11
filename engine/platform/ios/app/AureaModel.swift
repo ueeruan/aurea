@@ -110,6 +110,10 @@ struct LayerItem: Identifiable, Equatable {
     var clipToBelow: Bool = false
     /// "Criar máscara de recorte" vale agora (bit 15): o motor decide.
     var clipCandidate: Bool = false
+    /// Tímida (o Shy do AE, bit 16): some da timeline com "Ocultar camadas tímidas".
+    var shy: Bool = false
+    /// Preservar transparência (o T do AE, bit 17): pinta só onde a pilha abaixo tem alfa.
+    var preserveTransparency: Bool = false
 
     var duration: Int32 { max(0, endFrame - startFrame) }
 }
@@ -136,6 +140,8 @@ struct MaskItem: Identifiable {
     var keyed: Bool
     var points: [Float]
     var keyCount: Int = 0
+    /// Queda do feather: 0 suave (gaussiana), 1 linear (float 11 do cabeçalho).
+    var falloff: UInt32 = 0
 }
 
 struct EffectItem: Identifiable, Equatable {
@@ -408,6 +414,8 @@ private final class DisplayLinkProxy: NSObject {
 final class AureaModel: ObservableObject {
     /// Floats por animador de camada (Engine::kLayerAnimFloats; 32..45 = a onda, 0.5.0).
     static let layerAnimFloats = 48
+    /// `addLight`: 0 direcional, 1 pontual, 2 spot, 3 ambiente, 4 Flare 3D (Engine::kAddLightFlare).
+    static let lightFlare: UInt32 = 4
 
     // --- Ponte e estado do motor -------------------------------------------
     let engine: AureaEngine
@@ -2177,6 +2185,8 @@ final class AureaModel: ObservableObject {
         refreshPreviewBufferRanges(revision: status.modelRevision)
         let nextEditMode = engine.timelineEditMode
         if editMode != nextEditMode { editMode = nextEditMode }
+        let nextHideShy = engine.hideShy()
+        if hideShy != nextHideShy { hideShy = nextHideShy }
         let nextUiMode = engine.projectUiMode
         if uiMode != nextUiMode { uiMode = nextUiMode }
         let nextAnchor = engine.mainTrackAnchor
@@ -2197,6 +2207,7 @@ final class AureaModel: ObservableObject {
         // Desfazer/refazer, abrir projeto e ripple também mexem nas marcas: a
         // lista local não pode ficar velha (a âncora acendia numa marca extinta).
         refreshMarkers()
+        refreshAeTimeline()   // timeline do AE: marcas de camada e área de trabalho
         let rows = engine.layers()
         // Cada atribuição a um @Published redesenha TODA tela que observa o
         // modelo (a timeline inteira, o preview por cima): só publica o que
@@ -2226,7 +2237,9 @@ final class AureaModel: ObservableObject {
                       magnetic: ((row["flags"] as? NSNumber)?.uint32Value ?? 0) & (1 << 13) != 0,
                       trackId: (row["trackId"] as? NSNumber)?.uint32Value ?? 0,
                       clipToBelow: ((row["flags"] as? NSNumber)?.uint32Value ?? 0) & (1 << 14) != 0,
-                      clipCandidate: ((row["flags"] as? NSNumber)?.uint32Value ?? 0) & (1 << 15) != 0)
+                      clipCandidate: ((row["flags"] as? NSNumber)?.uint32Value ?? 0) & (1 << 15) != 0,
+                      shy: ((row["flags"] as? NSNumber)?.uint32Value ?? 0) & (1 << 16) != 0,
+                      preserveTransparency: ((row["flags"] as? NSNumber)?.uint32Value ?? 0) & (1 << 17) != 0)
         }
         if nextLayers != layers { layers = nextLayers }
         resolvePendingSplit()
@@ -2374,6 +2387,8 @@ final class AureaModel: ObservableObject {
     func addEffectAndFocus(_ type: UInt32, layer: Int64) {
         // 0.3.2: efeito Hyper só com o acesso (a folha de efeitos já abre a tela bloqueada).
         if HyperEffectGate.locked(typeId: type) { toast = AureaText.t("hyper_effect_locked"); return }
+        // Efeito que será pago numa versão futura: grátis agora, só o aviso (nada é bloqueado).
+        if fxEffectFuturePaid(type) { toast = AureaText.t("effect_future_paid_notice") }
         let previous = Set(effects.map(\.effectId))
         pendingEffectFocus = EffectFocusRequest(layer: layer, type: type, previous: previous)
         seenEffectIds[layer] = previous
@@ -2771,7 +2786,7 @@ final class AureaModel: ObservableObject {
             guard count >= 0, offset + count <= data.count else { break }
             next.append(MaskItem(id: UInt32(h[0]), operation: UInt32(h[1]), inverted: h[2] > 0.5,
                                  feather: h[3], expansion: h[4], opacity: h[5], closed: h[6] > 0.5, keyed: h[9] > 0.5,
-                                 points: Array(data[offset..<(offset + count)]), keyCount: Int(h[8])))
+                                 points: Array(data[offset..<(offset + count)]), keyCount: Int(h[8]), falloff: h[11] > 0.5 ? 1 : 0))
             offset += count
         }
         maskPerspective = offset + 3 <= data.count ? Array(data[offset..<(offset + 3)]) : [0, 0, 1]
@@ -4564,6 +4579,8 @@ final class AureaModel: ObservableObject {
     func addCatalogEffect(_ type: UInt32, layers ids: [Int64]) {
         guard !ids.isEmpty else { return }
         if HyperEffectGate.locked(typeId: type) { toast = AureaText.t("hyper_effect_locked"); return }
+        // Efeito que será pago numa versão futura: grátis agora, só o aviso (nada é bloqueado).
+        if fxEffectFuturePaid(type) { toast = AureaText.t("effect_future_paid_notice") }
         func add() {
             mutate { native in
                 native.beginUndoGroup()
@@ -6031,6 +6048,8 @@ final class AureaModel: ObservableObject {
     @Published private(set) var hudVisible = false
     /// Modo Edição (timeline magnética).
     @Published private(set) var editMode = false
+    /// AE "Ocultar camadas tímidas" da composição atual (a timeline filtra as tímidas).
+    @Published private(set) var hideShy = false
     /// INTERFACE do projeto (0.2.5): `AureaUiMode.composition` (a principal,
     /// padrão) ou `.edit` (trilha principal, cortes em sequência). Vem do
     /// motor: fica gravada no projeto e pode ser trocada a qualquer momento.
@@ -6163,6 +6182,197 @@ final class AureaModel: ObservableObject {
             index += 3
         }
         if frames != markerFrames { markerFrames = frames }
+    }
+
+    // =========================================================================
+    // Timeline do AE (EngineAeTimeline.cpp): marcas com duração e comentário,
+    // marcas de camada, área de trabalho, escalar/Easy Ease da seleção de
+    // keyframes e alinhar/distribuir no motor. O mesmo contrato do Android
+    // (EditorStore.kt, bloco "Timeline do AE").
+    // =========================================================================
+    /// Uma marca de camada, em quadros da COMPOSIÇÃO.
+    struct LayerMarkerItem: Equatable {
+        let layer: Int64
+        let frame: Int64
+        let duration: Int64
+        let color: UInt32
+    }
+    @Published private(set) var layerMarkers: [LayerMarkerItem] = []
+    /// Área de trabalho [início, fim) em quadros; vazio = a composição inteira.
+    @Published private(set) var workArea: [Int64] = []
+    /// Exportar só a área de trabalho (opção da sessão; o motor guarda a mesma).
+    @Published private(set) var exportWorkAreaOnly = false
+    struct LayerMarkerEditing: Identifiable {
+        let layer: Int64
+        let frame: Int64
+        var isNew = false
+        var id: String { "\(layer):\(frame)" }
+    }
+    @Published var layerMarkerEditing: LayerMarkerEditing?
+
+    func refreshAeTimeline() {
+        let values = engine.allLayerMarkers()
+        var items: [LayerMarkerItem] = []
+        var index = 0
+        while index + 3 < values.count {
+            items.append(LayerMarkerItem(layer: values[index].int64Value, frame: values[index + 1].int64Value,
+                                         duration: values[index + 2].int64Value, color: values[index + 3].uint32Value))
+            index += 4
+        }
+        if items != layerMarkers { layerMarkers = items }
+        let next: [Int64] = (engine.workArea() ?? []).map(\.int64Value)
+        let area: [Int64] = next.count == 2 ? next : []
+        if area != workArea { workArea = area }
+    }
+
+    /// Duração (quadros) e comentário da marca da composição; nil = não há marca.
+    func markerDetails(_ frame: Int64) -> (Int64, String)? {
+        guard let d = engine.markerDetails(frame) else { return nil }
+        return ((d["duration"] as? NSNumber)?.int64Value ?? 0, d["comment"] as? String ?? "")
+    }
+
+    /// Marca da composição com tudo (um passo de desfazer); from < 0 cria.
+    func editMarkerFull(from: Int64, to: Int64, color: UInt32, label: String, duration: Int64, comment: String) -> Bool {
+        let ok = engine.editMarkerEx(from: from, to: to, color: color, label: label, duration: duration, comment: comment)
+        if ok { refreshModel(force: true); refreshMarkers() }
+        return ok
+    }
+
+    func layerMarker(_ layer: Int64, at frame: Int64) -> LayerMarkerItem? {
+        layerMarkers.first { $0.layer == layer && $0.frame == frame }
+    }
+
+    /// Editor da marca da camada; sem marca ali, um rascunho que só nasce no Salvar.
+    func openLayerMarkerEditor(_ layer: Int64, frame: Int64) {
+        layerMarkerEditing = LayerMarkerEditing(layer: layer, frame: max(0, frame), isNew: layerMarker(layer, at: frame) == nil)
+    }
+
+    /// Nome e comentário da marca da camada; nil = não há.
+    func layerMarkerText(_ layer: Int64, frame: Int64) -> (String, String)? {
+        guard let pair = engine.layerMarkerText(layer, frame: frame), pair.count == 2 else { return nil }
+        return (pair[0], pair[1])
+    }
+
+    func editLayerMarker(_ layer: Int64, from: Int64, to: Int64, color: UInt32, label: String, duration: Int64, comment: String) -> Bool {
+        let ok = engine.editLayerMarker(layer, from: from, to: to, color: color, label: label, duration: duration, comment: comment)
+        if ok { refreshModel(force: true) }
+        return ok
+    }
+
+    @discardableResult
+    func moveLayerMarker(_ layer: Int64, from: Int64, to: Int64) -> Bool {
+        let ok = engine.moveLayerMarker(layer, from: from, to: to)
+        if ok { refreshModel(force: true) }
+        return ok
+    }
+
+    func deleteLayerMarker(_ layer: Int64, frame: Int64) {
+        if engine.deleteLayerMarker(layer, frame: frame) { refreshModel(force: true) }
+    }
+
+    /// Área de trabalho [start, end); start < 0 apaga. Um passo de desfazer.
+    @discardableResult
+    func setWorkArea(start: Int64, end: Int64) -> Bool {
+        let ok = engine.setWorkArea(start: start, end: end)
+        if ok { refreshModel(force: true) }
+        return ok
+    }
+
+    /// O "B" do AE: a área começa no cabeçote (o fim fica, ou vai ao fim da composição).
+    func setWorkAreaStartAtPlayhead() {
+        let playhead = status.playhead
+        let end: Int64 = workArea.count == 2 && workArea[1] > playhead ? workArea[1] : compositionDuration
+        setWorkArea(start: playhead, end: end)
+    }
+
+    /// O "N" do AE: a área termina no quadro do cabeçote (inclusive).
+    func setWorkAreaEndAtPlayhead() {
+        let playhead = status.playhead
+        let start: Int64 = workArea.count == 2 && workArea[0] <= playhead ? workArea[0] : 0
+        setWorkArea(start: start, end: playhead + 1)
+    }
+
+    func clearWorkArea() { setWorkArea(start: -1, end: -1) }
+
+    /// "Aparar composição à área de trabalho" (um passo de desfazer).
+    func trimToWorkArea() {
+        if status.playing != 0 { playPause() }
+        if engine.trimToWorkArea() {
+            refreshModel(force: true)
+            refreshMarkers()
+            toast = AureaText.t("aet_trimmed_to_work_area")
+        }
+    }
+
+    func changeExportWorkAreaOnly(_ on: Bool) {
+        exportWorkAreaOnly = on
+        engine.setExportWorkAreaOnly(on)
+    }
+
+    /// Escala no tempo a seleção de keyframes em volta do PRIMEIRO escolhido (o
+    /// Alt+arrastar do AE). Várias camadas = um passo; recusa em uma = tudo volta.
+    func scaleTimelineKeys(_ factor: Double) {
+        guard let sel = timelineKeySelection, !sel.isEmpty, factor > 0, factor != 1 else { return }
+        var rows: [Int64: LayerItem] = [:]
+        var anchorComp = Int64.max
+        for id in sel.layerIds {
+            guard let row = layers.first(where: { $0.id == id }), let first = sel.on(id).map(\.time).min() else { return }
+            rows[id] = row
+            anchorComp = min(anchorComp, Int64(first) + Int64(row.startFrame) - Int64(row.offsetFrames))
+        }
+        func anchor(_ id: Int64) -> Int64 {
+            guard let row = rows[id] else { return 0 }
+            return anchorComp - Int64(row.startFrame) + Int64(row.offsetFrames)
+        }
+        if status.playing != 0 { playPause() }
+        engine.run { $0.beginUndoGroup() }
+        var ok = true
+        var any = false
+        for id in sel.layerIds {
+            if engine.scaleKeyframeSelection(id, references: sel.references(on: id), anchor: anchor(id), factor: factor) > 0 { any = true }
+            else { ok = false; break }
+        }
+        engine.run { $0.endUndoGroup() }
+        if !ok {
+            if any { undo() }
+            toast = AureaText.t("aet_keys_scale_refused")
+            return
+        }
+        func mapped(_ id: Int64, _ refs: Set<TimelineKeyRef>) -> Set<TimelineKeyRef> {
+            let a = anchor(id)
+            return Set(refs.map { ref in
+                let t = Double(Int64(ref.time) - a) * factor
+                return TimelineKeyRef(property: ref.property, effect: ref.effect, param: ref.param,
+                                      time: Int32(clamping: a + Int64((t + 0.5).rounded(.down))))
+            })
+        }
+        var next = sel
+        next.keys = mapped(sel.layer, sel.keys)
+        for (id, refs) in sel.others { next.others[id] = mapped(id, refs) }
+        timelineKeySelection = next
+        curveSelectedTime = nil
+        refreshModel(force: true)
+    }
+
+    /// Easy Ease (0), Easy Ease In (1) ou Out (2) nos keyframes escolhidos; um passo de desfazer.
+    func easeTimelineKeys(_ mode: UInt32) {
+        guard let sel = timelineKeySelection, !sel.isEmpty else { return }
+        let many: Bool = sel.crossLayer
+        if many { engine.run { $0.beginUndoGroup() } }
+        var changed: UInt32 = 0
+        for id in sel.layerIds { changed += engine.easeKeyframeSelection(id, references: sel.references(on: id), mode: mode) }
+        if many { engine.run { $0.endUndoGroup() } }
+        if changed == 0 { toast = AureaText.t("aet_ease_nothing"); return }
+        refreshModel(force: true)
+    }
+
+    /// Alinhar (0 esquerda, 1 centro H, 2 direita, 3 topo, 4 centro V, 5 base) ou
+    /// distribuir (6 horizontal, 7 vertical): a conta é do motor (B6), um passo de desfazer.
+    func alignLayers(_ ids: [Int64], mode: UInt32) {
+        let free: [NSNumber] = layers.filter { ids.contains($0.id) && !$0.locked }.map { NSNumber(value: $0.id) }
+        guard !free.isEmpty else { return }
+        if status.playing != 0 { playPause() }
+        if engine.alignLayers(free, mode: mode) > 0 { refreshModel(force: true) }
     }
 
     func seekToNextMarker() {
@@ -6327,6 +6537,95 @@ final class AureaModel: ObservableObject {
 
     func setLayerClipToBelow(_ id: Int64, _ on: Bool) {
         mutate { engine in _ = engine.setLayer(id, clipToBelow: on) }
+        refreshModel(force: true)
+    }
+
+    // AE compositing: a regra mora no motor (EngineAeCompositing.cpp); aqui só pede e relê.
+    /// Preservar transparência (o T do AE): a camada só pinta onde a pilha abaixo tem alfa.
+    func setLayerPreserveTransparency(_ id: Int64, _ on: Bool) {
+        mutate { engine in _ = engine.setLayer(id, preserveTransparency: on) }
+        refreshModel(force: true)
+    }
+
+    /// Tímida (o Shy do AE): com "Ocultar camadas tímidas" ligado, some da timeline.
+    func setLayerShy(_ id: Int64, _ on: Bool) {
+        mutate { engine in _ = engine.setLayer(id, shy: on) }
+        refreshModel(force: true)
+    }
+
+    /// "Ocultar camadas tímidas" da composição atual.
+    func changeHideShy(_ on: Bool) {
+        mutate { engine in _ = engine.setHideShy(on) }
+        refreshModel(force: true)
+    }
+
+    // AE animation: texto-fonte, auto-orientar e câmera de dois nós (EngineAeAnimation.cpp).
+    /// Muda a cada edição daqui: as telas releem o auto-orientar e o POI do motor.
+    @Published private(set) var aeAnimRevision = 0
+
+    /// Quadros LOCAIS dos keys do texto-fonte da camada escolhida.
+    func textSourceKeyFrames() -> [Int64] {
+        guard let id = primarySelection else { return [] }
+        return engine.textSourceKeys(id).map { $0.int64Value }
+    }
+
+    /// "Keyframe do texto aqui": cria o key no cabeçote com o texto que aparece; havendo um ali, apaga.
+    func toggleTextSourceKey() {
+        guard let id = primarySelection else { return }
+        let local = Int64(localPlayhead)
+        let here = engine.textSourceKeys(id).contains { $0.int64Value == local }
+        var ok = false
+        mutate { engine in ok = here ? engine.deleteTextSourceKey(id, frame: local) : engine.addTextSourceKey(id) >= 0 }
+        if ok { aeAnimRevision += 1; refreshModel(force: true) }
+    }
+
+    /// Auto-orientar da camada escolhida: 0 desligado, 1 ao longo do caminho, 2 para a câmera.
+    func layerAutoOrient() -> Int {
+        guard let id = primarySelection else { return 0 }
+        return max(0, Int(engine.layerAutoOrient(id)))
+    }
+
+    func setLayerAutoOrient(_ mode: Int) {
+        guard let id = primarySelection else { return }
+        var ok = false
+        mutate { engine in ok = engine.setLayerAutoOrient(id, mode: Int32(mode)) }
+        if ok { aeAnimRevision += 1; refreshModel(force: true) }
+    }
+
+    /// [dois nós (0/1), x, y, z] da câmera escolhida no cabeçote; nil = não é câmera.
+    func cameraPoi() -> [Float]? {
+        guard let id = primarySelection, let v = engine.cameraPoi(id), v.count == 4 else { return nil }
+        return v.map { $0.floatValue }
+    }
+
+    func setCameraTwoNode(_ on: Bool) {
+        guard let id = primarySelection else { return }
+        var ok = false
+        mutate { engine in ok = engine.setCameraTwoNode(id, on: on) }
+        if ok { aeAnimRevision += 1; refreshModel(force: true) }
+    }
+
+    /// Ponto de Interesse; `undo` falso = continuação de um arrasto.
+    func setCameraPoi(x: Float, y: Float, z: Float, undo: Bool = true) {
+        guard let id = primarySelection else { return }
+        var ok = false
+        mutate { engine in ok = engine.setCameraPoi(id, x: x, y: y, z: z, undo: undo) }
+        if ok { aeAnimRevision += 1; refreshModel(force: true) }
+    }
+
+    /// Keyframe do Ponto de Interesse (X/Y/Z juntos) no cabeçote; havendo ali, apaga.
+    func toggleCameraPoiKey() {
+        guard let id = primarySelection, let poi = cameraPoi() else { return }
+        let local = localPlayhead
+        let props: [UInt32] = [51, 52, 53]   // TrackProperty::CameraPoiX/Y/Z
+        let here = (keyframes[id] ?? []).contains { props.contains($0.property) && $0.time == local }
+        mutate { engine in
+            for (i, p) in props.enumerated() {
+                if here { engine.deleteKeyframe(forLayer: id, property: p, time: local) }
+                else { engine.insertKeyframe(forLayer: id, property: p, time: local, value: poi[i + 1]) }
+            }
+        }
+        aeAnimRevision += 1
         refreshModel(force: true)
     }
 
@@ -6627,6 +6926,20 @@ final class AureaModel: ObservableObject {
     func setParent(_ layerId: Int64, parent: Int64) {
         engine.run { $0.setLayer(layerId, parent: parent) }
         refreshModel(force: true)
+    }
+
+    // --- Prender a um osso (0.5.2) — par do EditorStore.kt ----------------------
+    func modelAttachBones(_ modelId: Int64) -> [Int32] { engine.modelAttachBones(modelId).map { $0.int32Value } }
+    func boneName(_ modelId: Int64, _ node: Int32) -> String { engine.modelNodeName(modelId, node: node) }
+    func layerParentBone(_ layerId: Int64) -> Int32 { engine.layerParentBone(layerId) }
+    /// Prende `layerId` ao osso `node` do modelo (−1 = solta); `label` vai no aviso.
+    func setLayerParentBone(_ layerId: Int64, model modelId: Int64, node: Int32, label: String = "") {
+        if status.playing != 0 { pause() }
+        let ok = engine.setLayerParentBone(layerId, model: modelId, node: node)
+        refreshModel(force: true)
+        if !ok { toast = AureaText.t("bone_attach_failed") }
+        else if node >= 0 { toast = AureaText.t("bone_attach_done", label) }
+        else { toast = AureaText.t("bone_attach_released") }
     }
 
     /// Vários filhos para o mesmo pai (0 = soltar), num passo de desfazer.

@@ -10,6 +10,16 @@ struct VectorPanel: View {
     @State private var adding = false
     @State private var advanced = Set<Int>()
     @State private var pathFlags = 0
+    @State private var addingModifier = false
+    @State private var collapsedModifiers = Set<Int>()
+    /// VectorParam: 21 valores (o 20 é a escala Y do repetidor, v6) + bits animados + bits com keyframe.
+    private static let paramCount = 21
+    /// Operadores de caminho: id = modBase + operador × modParams + parâmetro (vector_modifier_param do motor).
+    private static let modBase = 0x10000
+    private static let modParams = 16
+    private static let modSeed = 15
+    private static let modifierNames = ["ae_shapeop_offset", "ae_shapeop_pucker", "ae_shapeop_roughen", "ae_shapeop_wiggle_paths",
+                                        "ae_shapeop_round_corners", "ae_shapeop_twist", "ae_shapeop_zigzag", "ae_shapeop_wiggle_transform"]
     private var pathKinds: [String] { ["ios_vector_free_path", "panel_retangulo", "panel_elipse", "editor_poligono", "editor_estrela"].map { AureaText.t($0) } }
     private var tabs: [String] { ["target_shape", "panel_preenchimento", "panel_borda", "panel_caminho", "panel_transformar", "ios_vector_operators", "panel_efeitos"].map { AureaText.t($0) } }
     private var id: Int64 { model.primarySelection ?? 0 }
@@ -20,12 +30,18 @@ struct VectorPanel: View {
     private var kind: Int { path.first.map(Int.init) ?? 0 }
     private var free: Bool { kind == 0 }
     private var pointCount: Int { (model.editingMask?.points.count ?? 0) / 6 }
+    /// Operadores de caminho no cabeçote: tipo, ligado, bits animados, bits com keyframe, 16 valores.
+    private var modifiers: [[Float]] { (group["modifiers"] as? [[NSNumber]] ?? []).map { $0.map(\.floatValue) } }
     private var railLook: KeyframeLook {
+        if selected >= Self.modBase { return modLook(selected) }
         if selected >= 0 { return look(selected) }
         if selected == -2 { return pathFlags & 4 != 0 ? .keyHere : pathFlags & 2 != 0 ? .animated : .none }
         return .none
     }
-    private var canKey: Bool { selected >= 0 ? params.count >= 22 : selected == -2 && free && !path.isEmpty }
+    private var canKey: Bool {
+        if selected >= Self.modBase { return modifiers.indices.contains((selected - Self.modBase) / Self.modParams) }
+        return selected >= 0 ? params.count >= Self.paramCount + 2 : selected == -2 && free && !path.isEmpty
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -64,7 +80,7 @@ struct VectorPanel: View {
             .onAppear(perform: load).onChange(of: model.status.modelRevision) { _ in load() }
             .onChange(of: model.status.playhead) { _ in load() }
             .onChange(of: id) { _ in selected = -1; load() }
-            .onChange(of: model.vectorGroup) { _ in selected = -1; model.selectedMaskPoint = nil; load() }
+            .onChange(of: model.vectorGroup) { _ in selected = -1; collapsedModifiers.removeAll(); model.selectedMaskPoint = nil; load() }
             .onChange(of: model.vectorPath) { _ in selected = -1; model.selectedMaskPoint = nil; load() }
     }
 
@@ -214,6 +230,7 @@ struct VectorPanel: View {
         title("panel_juntar_caminhos_grupo")
         choices(["panel_nao_juntar", "panel_unir", "panel_subtrair", "panel_intersecao", "panel_excluir_sobreposicao"], value: Int(number("merge"))) { edit(1, [Float($0)]) }
         if paths.count < 2 { hint("panel_juntar_precisa_2_caminhos_grupo_use") }
+        modifiersSection
         VectorToggle("panel_repetir_copias", on: flag("repeatEnabled")) { edit(19, [$0 ? 1 : 0]) }
         if flag("repeatEnabled") {
             param(7, "panel_copias", step: 0.05, range: 0...500, reset: 3)
@@ -221,13 +238,155 @@ struct VectorPanel: View {
             param(10, "panel_distancia_y", step: 0.5, range: -100000...100000, unit: "px", reset: 0)
             param(11, "panel_rotacao", step: 0.5, range: -3600...3600, unit: "°", reset: 0)
             advancedSection {
-                param(12, "panel_escala", step: 0.3, range: -10000...10000, unit: "%", reset: 100)
+                // Escala X/Y do After Effects; ligada = uniforme (o repetidor de sempre).
+                VectorToggle("ae_shapeop_rep_separate", on: !flag("repeatScaleLinked")) { on in
+                    edit(27, [on ? 0 : 1, params.indices.contains(12) ? params[12] : 100])
+                }
+                if flag("repeatScaleLinked") {
+                    param(12, "panel_escala", step: 0.3, range: -10000...10000, unit: "%", reset: 100)
+                } else {
+                    param(12, "ae_shapeop_scale_x", step: 0.3, range: -10000...10000, unit: "%", reset: 100)
+                    param(20, "ae_shapeop_scale_y", step: 0.3, range: -10000...10000, unit: "%", reset: 100)
+                }
                 param(8, "panel_deslocamento", step: 0.05, range: -500...500, decimals: 1, reset: 0)
                 param(13, "panel_opacidade_inicial", step: 0.5, range: 0...100, unit: "%", reset: 100)
                 param(14, "panel_opacidade_final", step: 0.5, range: 0...100, unit: "%", reset: 100)
                 title("panel_ordem_copias"); choices(["panel_copias_embaixo", "panel_copias_cima"], value: flag("repeatAbove") ? 1 : 0) { edit(20, [Float($0)]) }
             }
         }
+    }
+
+    // MARK: Operadores de caminho (AE shape operators)
+
+    /// Lista dos operadores do grupo, em ordem (valem de cima para baixo), e "+ Adicionar operador".
+    /// Cada operador abre e fecha, com o interruptor, os valores (animáveis: o losango do trilho
+    /// age na linha escolhida) e subir / descer / remover. Tudo pelo motor.
+    @ViewBuilder private var modifiersSection: some View {
+        title("ae_shapeop_title")
+        if !modifiers.isEmpty { hint("ae_shapeop_hint") }
+        ForEach(modifiers.indices, id: \.self) { i in modifierBlock(i) }
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                VectorChip(addingModifier ? AureaText.t("panel_fechar") : "+ " + AureaText.t("ae_shapeop_add"), selected: addingModifier) { addingModifier.toggle() }
+            }.padding(.vertical, 4)
+        }
+        if addingModifier {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Self.modifierNames.indices, id: \.self) { t in
+                        VectorChip(AureaText.t(Self.modifierNames[t]), selected: false) {
+                            _ = model.engine.addVectorModifier(id, group: model.vectorGroup, type: UInt32(t)); addingModifier = false; refresh()
+                        }
+                    }
+                }.padding(.vertical, 4)
+            }
+        }
+    }
+    @ViewBuilder private func modifierBlock(_ i: Int) -> some View {
+        let row = modifiers.indices.contains(i) ? modifiers[i] : []
+        let type = row.isEmpty ? 0 : Int(row[0])
+        let on = row.count > 1 && row[1] > 0.5
+        let name = AureaText.t(Self.modifierNames[min(max(type, 0), Self.modifierNames.count - 1)])
+        let open = !collapsedModifiers.contains(i)
+        HStack(spacing: 6) {
+            Button { if open { collapsedModifiers.insert(i) } else { collapsedModifiers.remove(i) } } label: {
+                HStack(spacing: 8) {
+                    CupertinoGlyph.text(open ? CupertinoGlyph.ChevronUp : CupertinoGlyph.ChevronDown, size: 12, color: AureaColors.muted)
+                    Text("\(i + 1). \(name)").font(.aurea(size: 14, weight: .semibold)).foregroundStyle(on ? AureaColors.text : AureaColors.muted).lineLimit(1)
+                    Spacer(minLength: 8)
+                }.frame(height: 48).contentShape(Rectangle())
+            }.buttonStyle(.plain).accessibilityLabel(AureaText.t(open ? "ae_shapeop_collapse" : "ae_shapeop_expand", name))
+            AureaToggle(checked: on) { value in
+                _ = model.engine.setVectorModifierEnabled(id, group: model.vectorGroup, index: UInt32(i), enabled: value); refresh()
+            }.accessibilityLabel(AureaText.t("ae_shapeop_enabled") + " · " + name)
+        }.padding(.top, 4)
+        if open {
+            modifierParams(i, type: type)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    if i > 0 { VectorChip("↑ " + AureaText.t("ae_shapeop_move_up"), selected: false) { moveModifier(i, to: i - 1) } }
+                    if i + 1 < modifiers.count { VectorChip("↓ " + AureaText.t("ae_shapeop_move_down"), selected: false) { moveModifier(i, to: i + 1) } }
+                    VectorChip(AureaText.t("ae_shapeop_remove"), selected: false) {
+                        _ = model.engine.removeVectorModifier(id, group: model.vectorGroup, index: UInt32(i)); collapsedModifiers.removeAll(); refresh()
+                    }
+                }.padding(.vertical, 4)
+            }
+        }
+    }
+    /// Valores do operador `i` (índices por tipo: VectorData.hpp, kVecMod*).
+    @ViewBuilder private func modifierParams(_ i: Int, type: Int) -> some View {
+        switch type {
+        case 0:
+            modParam(i, 0, "ae_shapeop_amount", step: 0.3, range: -10000...10000, unit: "px", decimals: 1, reset: 10)
+            title("ae_shapeop_line_join")
+            choices(["ae_shapeop_join_miter", "ae_shapeop_join_round", "ae_shapeop_join_bevel"], value: Int(modValue(i, 1))) { setModifier(i, 1, Float($0)) }
+            if Int(modValue(i, 1)) == 0 { modParam(i, 2, "ae_shapeop_miter_limit", step: 0.05, range: 1...100, decimals: 1, reset: 4) }
+            modParam(i, 3, "ae_shapeop_copies", step: 0.05, range: 1...100, reset: 1)
+            modParam(i, 4, "ae_shapeop_copy_offset", step: 0.02, range: -100...100, decimals: 2, reset: 0)
+        case 1:
+            modParam(i, 0, "ae_shapeop_amount", step: 0.3, range: -100...100, unit: "%", reset: 30)
+        case 2, 3:
+            modParam(i, 0, "ae_shapeop_size", step: 0.2, range: 0...10000, unit: "px", decimals: 1, reset: 10)
+            modParam(i, 1, "ae_shapeop_detail", step: 0.05, range: 0...100, reset: 3)
+            title("ae_shapeop_points")
+            choices(["ae_shapeop_points_corner", "ae_shapeop_points_smooth"], value: Int(modValue(i, 2))) { setModifier(i, 2, Float($0)) }
+            modParam(i, 3, "ae_shapeop_frequency", step: 0.02, range: 0...100, decimals: 1, reset: type == 3 ? 2 : 0)
+            modParam(i, 4, "ae_shapeop_correlation", step: 0.3, range: 0...100, unit: "%", reset: 50)
+            modParam(i, 5, "ae_shapeop_temporal_phase", step: 0.5, range: -36000...36000, unit: "°", reset: 0)
+            modParam(i, 6, "ae_shapeop_spatial_phase", step: 0.5, range: -36000...36000, unit: "°", reset: 0)
+            modParam(i, Self.modSeed, "ae_shapeop_seed", step: 0.05, range: 0...100000, reset: 0)
+        case 4:
+            modParam(i, 0, "ae_shapeop_radius", step: 0.3, range: 0...10000, unit: "px", decimals: 1, reset: 10)
+        case 5:
+            modParam(i, 0, "ae_shapeop_angle", step: 0.5, range: -36000...36000, unit: "°", reset: 45)
+            modParam(i, 1, "ae_shapeop_center_x", step: 0.5, range: -100000...100000, unit: "px", reset: 0)
+            modParam(i, 2, "ae_shapeop_center_y", step: 0.5, range: -100000...100000, unit: "px", reset: 0)
+        case 6:
+            modParam(i, 0, "ae_shapeop_size", step: 0.2, range: -10000...10000, unit: "px", decimals: 1, reset: 10)
+            modParam(i, 1, "ae_shapeop_ridges", step: 0.05, range: 0...100, reset: 5)
+            title("ae_shapeop_points")
+            choices(["ae_shapeop_points_corner", "ae_shapeop_points_smooth"], value: Int(modValue(i, 2))) { setModifier(i, 2, Float($0)) }
+        case 7:
+            modParam(i, 0, "ae_shapeop_anchor_x", step: 0.5, range: -100000...100000, unit: "px", reset: 0)
+            modParam(i, 1, "ae_shapeop_anchor_y", step: 0.5, range: -100000...100000, unit: "px", reset: 0)
+            modParam(i, 2, "ae_shapeop_position_x", step: 0.5, range: -100000...100000, unit: "px", reset: 20)
+            modParam(i, 3, "ae_shapeop_position_y", step: 0.5, range: -100000...100000, unit: "px", reset: 20)
+            modParam(i, 4, "ae_shapeop_scale_x", step: 0.3, range: -1000...1000, unit: "%", reset: 0)
+            modParam(i, 5, "ae_shapeop_scale_y", step: 0.3, range: -1000...1000, unit: "%", reset: 0)
+            modParam(i, 6, "ae_shapeop_rotation", step: 0.5, range: -36000...36000, unit: "°", reset: 0)
+            modParam(i, 7, "ae_shapeop_frequency", step: 0.02, range: 0...100, decimals: 1, reset: 2)
+            modParam(i, 8, "ae_shapeop_correlation", step: 0.3, range: 0...100, unit: "%", reset: 50)
+            modParam(i, 9, "ae_shapeop_temporal_phase", step: 0.5, range: -36000...36000, unit: "°", reset: 0)
+            modParam(i, 10, "ae_shapeop_spatial_phase", step: 0.5, range: -36000...36000, unit: "°", reset: 0)
+            modParam(i, Self.modSeed, "ae_shapeop_seed", step: 0.05, range: 0...100000, reset: 0)
+        default:
+            EmptyView()
+        }
+    }
+    private func modParam(_ i: Int, _ slot: Int, _ label: String, step: Float, range: ClosedRange<Float>, unit: String = "", decimals: Int = 0, reset: Float) -> some View {
+        let pid = Self.modBase + i * Self.modParams + slot
+        let row = modifiers.indices.contains(i) ? modifiers[i] : []
+        return VectorHumanRow(label: AureaText.t(label), value: row.indices.contains(4 + slot) ? row[4 + slot] : reset, step: step, range: range, unit: unit,
+                              decimals: decimals, reset: reset, selected: selected == pid, look: modLook(pid), select: { selected = pid }) {
+            setModifier(i, slot, $0)
+        }
+    }
+    private func modValue(_ i: Int, _ slot: Int) -> Float {
+        let row = modifiers.indices.contains(i) ? modifiers[i] : []
+        return row.indices.contains(4 + slot) ? row[4 + slot] : 0
+    }
+    private func setModifier(_ i: Int, _ slot: Int, _ value: Float) {
+        _ = model.engine.setVectorParam(id, group: model.vectorGroup, param: UInt32(Self.modBase + i * Self.modParams + slot), value: value); refresh()
+    }
+    private func moveModifier(_ i: Int, to: Int) {
+        _ = model.engine.moveVectorModifier(id, group: model.vectorGroup, from: UInt32(i), to: UInt32(to)); collapsedModifiers.removeAll(); refresh()
+    }
+    /// Losango de um parâmetro de operador (bits da linha dele).
+    private func modLook(_ pid: Int) -> KeyframeLook {
+        let i = (pid - Self.modBase) / Self.modParams, slot = (pid - Self.modBase) % Self.modParams
+        guard pid >= Self.modBase, modifiers.indices.contains(i), modifiers[i].count >= 4 else { return .none }
+        let bit = 1 << slot
+        return Int(modifiers[i][3]) & bit != 0 ? .keyHere : Int(modifiers[i][2]) & bit != 0 ? .animated : .none
     }
 
     @ViewBuilder private func paintEditor(_ key: String, field: UInt32, what: String) -> some View {
@@ -325,8 +484,8 @@ struct VectorPanel: View {
     private func flag(_ key: String) -> Bool { (group[key] as? NSNumber)?.boolValue ?? false }
     private func number(_ key: String) -> Float { (group[key] as? NSNumber)?.floatValue ?? 0 }
     private func look(_ n: Int) -> KeyframeLook {
-        guard params.count >= 22 else { return .none }
-        return Int(params[21]) & (1 << n) != 0 ? .keyHere : Int(params[20]) & (1 << n) != 0 ? .animated : .none
+        guard params.count >= Self.paramCount + 2, n >= 0, n < Self.paramCount else { return .none }
+        return Int(params[Self.paramCount + 1]) & (1 << n) != 0 ? .keyHere : Int(params[Self.paramCount]) & (1 << n) != 0 ? .animated : .none
     }
     private func load() {
         groups = model.engine.vectorGroups(id)

@@ -125,7 +125,14 @@ i64 chain_preroll(const std::vector<FxStage>& chain) noexcept {
                 break;
             case FxKind::HighLowPass:
             case FxKind::ParametricEq:
+            case FxKind::BassTreble:
+            case FxKind::Distortion:
                 need = static_cast<i64>(kRate / 4);
+                break;
+            case FxKind::Gate:
+                // O ganho do portão depende do passado: ataque + retenção + soltura.
+                need = static_cast<i64>(std::ceil(static_cast<f64>(max_of(s, fxp::kGateAttack) + max_of(s, fxp::kGateHold)
+                                                                    + 5.0f * max_of(s, fxp::kGateRelease)) * kRate / 1000.0)) + 64;
                 break;
             case FxKind::Reverb: {
                 const f64 scale = reverb_scale(max_of(s, fxp::kReverbTime));
@@ -180,6 +187,52 @@ Biquad pass_filter(bool highPass, f64 hz) noexcept {
     b.a1 = -2.0 * c / a0;
     b.a2 = (1.0 - alpha) / a0;
     return b;
+}
+
+Biquad shelf_filter(bool high, f64 hz, f64 gainDb) noexcept {
+    // RBJ (Audio EQ Cookbook), inclinação S = 1.
+    Biquad b;
+    const f64 f = std::clamp(hz, 10.0, kRate * 0.49);
+    const f64 A = std::pow(10.0, std::clamp(gainDb, -60.0, 60.0) / 40.0);
+    const f64 w0 = 2.0 * kPi * f / kRate;
+    const f64 c = std::cos(w0);
+    const f64 alpha = std::sin(w0) / 2.0 * std::sqrt(2.0);
+    const f64 sq = 2.0 * std::sqrt(A) * alpha;
+    f64 b0, b1, b2, a0, a1, a2;
+    if (!high) {
+        b0 = A * ((A + 1) - (A - 1) * c + sq);
+        b1 = 2 * A * ((A - 1) - (A + 1) * c);
+        b2 = A * ((A + 1) - (A - 1) * c - sq);
+        a0 = (A + 1) + (A - 1) * c + sq;
+        a1 = -2 * ((A - 1) + (A + 1) * c);
+        a2 = (A + 1) + (A - 1) * c - sq;
+    } else {
+        b0 = A * ((A + 1) + (A - 1) * c + sq);
+        b1 = -2 * A * ((A - 1) + (A + 1) * c);
+        b2 = A * ((A + 1) + (A - 1) * c - sq);
+        a0 = (A + 1) - (A - 1) * c + sq;
+        a1 = 2 * ((A - 1) - (A + 1) * c);
+        a2 = (A + 1) - (A - 1) * c - sq;
+    }
+    b.b0 = b0 / a0; b.b1 = b1 / a0; b.b2 = b2 / a0; b.a1 = a1 / a0; b.a2 = a2 / a0;
+    return b;
+}
+
+f32 distortion_curve(u32 type, f32 x) noexcept {
+    if (!std::isfinite(x)) return 0.0f;
+    const f32 a = std::fabs(x), sg = x < 0.0f ? -1.0f : 1.0f;
+    switch (type) {
+        case 1: return std::clamp(x, -1.0f, 1.0f);                                    // corte duro
+        case 2: return x / (1.0f + a);                                                // saturação 1 (suave, longa)
+        case 3: return sg * (1.0f - std::exp(-a));                                    // saturação 2 (exponencial)
+        case 4: {                                                                     // válvula: assimétrica
+            constexpr f32 kBias = 0.25f;
+            const f32 y = std::tanh(x + kBias) - std::tanh(kBias);
+            return std::clamp(y / (1.0f - std::tanh(kBias)), -1.0f, 1.0f);
+        }
+        case 5: return sg * (1.0f - std::exp(-4.0f * a));                             // fuzz: quase quadrada
+        default: return std::tanh(x);                                                 // corte suave
+    }
 }
 
 f64 biquad_response_db(const Biquad& b, f64 hz) noexcept {
@@ -344,6 +397,11 @@ struct StageState {
     f32 combLp[16]{};
     std::vector<f32> ap[8];
     u32 apPos[8]{};
+    // Distorção (AE 2026): a amostra segurada pelo redutor de amostragem.
+    f32 heldL = 0.0f, heldR = 0.0f;
+    // Portão (AE 2026): ganho atual e amostras de retenção que faltam.
+    f32 gateGain = 0.0f;
+    i64 gateHold = 0;
 };
 
 f64 polyblep(f64 t, f64 dt) noexcept {
@@ -585,12 +643,15 @@ void process_block(const AudioClip& c, MixState::Stream& st, BlockSource& blocks
                 const f32 amount = s.at(fxp::kDelayAmount, q) / 100.0f;
                 const f32 fb = std::clamp(s.at(fxp::kDelayFeedback, q) / 100.0f, 0.0f, 1.0f);
                 const f32 dry = s.at(fxp::kDelayDry, q) / 100.0f, wet = s.at(fxp::kDelayWet, q) / 100.0f;
+                // Pan do eco (AE 2026): −100 = só à esquerda, 100 = só à direita; 0 = como antes.
+                const f32 pan = std::clamp(s.at(fxp::kDelayPan, q) / 100.0f, -1.0f, 1.0f);
+                const f32 panL = pan > 0.0f ? 1.0f - pan : 1.0f, panR = pan < 0.0f ? 1.0f + pan : 1.0f;
                 for (i64 i = 0; i < n; ++i) {
                     f32 dl, dr;
                     ss.line.read(D, dl, dr);
                     ss.line.push(L[i] + fb * dl, R[i] + fb * dr);
-                    L[i] = dry * L[i] + wet * amount * dl;
-                    R[i] = dry * R[i] + wet * amount * dr;
+                    L[i] = dry * L[i] + wet * amount * dl * panL;
+                    R[i] = dry * R[i] + wet * amount * dr * panR;
                 }
                 break;
             }
@@ -747,8 +808,19 @@ void process_block(const AudioClip& c, MixState::Stream& st, BlockSource& blocks
                 break;
             }
             case FxKind::Tone: {
-                const u32 shape = std::min<u32>(3u, static_cast<u32>(std::max(0.0f, s.at(fxp::kWaveform, q)) + 0.5f));
+                const u32 shape = std::min<u32>(4u, static_cast<u32>(std::max(0.0f, s.at(fxp::kWaveform, q)) + 0.5f));
                 const f32 level = std::max(0.0f, s.at(fxp::kToneLevel, q)) / 100.0f;
+                if (shape == 4) {
+                    // Ruído branco (AE 2026): um sorteio por amostra ABSOLUTA da raiz —
+                    // o mesmo som no preview e no export, de onde quer que o play comece.
+                    for (i64 i = 0; i < n; ++i) {
+                        u64 h = static_cast<u64>(a + i) * 0x9E3779B97F4A7C15ull + 0x2545F4914F6CDD1Dull;
+                        h ^= h >> 31; h *= 0xBF58476D1CE4E5B9ull; h ^= h >> 29;
+                        const f32 v = static_cast<f32>(h >> 40) / 8388608.0f - 1.0f;   // −1..1
+                        L[i] = R[i] = v * 0.5f * level;
+                    }
+                    break;
+                }
                 f64 dt[5];
                 for (u32 k = 0; k < 5; ++k) dt[k] = std::max(0.0, static_cast<f64>(s.at(fxp::kFreq1 + k, q))) / kRate;
                 for (i64 i = 0; i < n; ++i) {
@@ -759,6 +831,76 @@ void process_block(const AudioClip& c, MixState::Stream& st, BlockSource& blocks
                     }
                     // O Tom GERA: o que vinha antes na cadeia é substituído.
                     L[i] = R[i] = static_cast<f32>(y) * level;
+                }
+                break;
+            }
+            case FxKind::Distortion: {
+                // Drive → curva → ganho → redutor de bits/amostragem → mistura → volume.
+                const u32 type = std::min<u32>(5u, static_cast<u32>(std::max(0.0f, s.at(fxp::kDistType, q)) + 0.5f));
+                const f32 drive = std::pow(10.0f, std::clamp(s.at(fxp::kDistDrive, q), -24.0f, 48.0f) / 20.0f);
+                const f32 gain = std::pow(10.0f, std::clamp(s.at(fxp::kDistGain, q), -48.0f, 24.0f) / 20.0f);
+                const f32 mixW = std::clamp(s.at(fxp::kDistMix, q) / 100.0f, 0.0f, 1.0f);
+                const f32 vol = std::pow(10.0f, std::clamp(s.at(fxp::kDistVolume, q), -48.0f, 24.0f) / 20.0f);
+                const f32 bits = std::clamp(s.at(fxp::kDistBits, q), 1.0f, 24.0f);
+                const f32 step = bits < 23.5f ? 2.0f / std::exp2(std::round(bits)) : 0.0f;
+                const i64 down = std::clamp<i64>(std::llround(s.at(fxp::kDistDownsample, q)), 1, 64);
+                for (i64 i = 0; i < n; ++i) {
+                    f32 yl = distortion_curve(type, L[i] * drive) * gain;
+                    f32 yr = distortion_curve(type, R[i] * drive) * gain;
+                    if (step > 0.0f) {
+                        yl = std::round(yl / step) * step;
+                        yr = std::round(yr / step) * step;
+                    }
+                    if (down > 1) {
+                        // Segura a amostra no múltiplo ABSOLUTO de `down` (o mesmo
+                        // som de onde quer que o play comece).
+                        if (floor_div(a + i, down) * down == a + i) { ss.heldL = yl; ss.heldR = yr; }
+                        yl = ss.heldL;
+                        yr = ss.heldR;
+                    }
+                    // Seco·(1 − m) + molhado·m: com 100 % sai o molhado EXATO.
+                    L[i] = (L[i] * (1.0f - mixW) + yl * mixW) * vol;
+                    R[i] = (R[i] * (1.0f - mixW) + yr * mixW) * vol;
+                }
+                break;
+            }
+            case FxKind::Gate: {
+                // Portão de ruído com os dois canais ligados: abaixo do limiar (e
+                // depois da retenção) o ganho cai na soltura; acima, sobe no ataque.
+                const f32 thr = std::pow(10.0f, std::clamp(s.at(fxp::kGateThreshold, q), -100.0f, 0.0f) / 20.0f);
+                const f64 attack = std::max(0.01, static_cast<f64>(s.at(fxp::kGateAttack, q))) * kRate / 1000.0;
+                const i64 hold = std::max<i64>(0, std::llround(static_cast<f64>(s.at(fxp::kGateHold, q)) * kRate / 1000.0));
+                const f64 release = std::max(0.01, static_cast<f64>(s.at(fxp::kGateRelease, q))) * kRate / 1000.0;
+                const f32 up = static_cast<f32>(1.0 - std::exp(-1.0 / attack));
+                const f32 down = static_cast<f32>(1.0 - std::exp(-1.0 / release));
+                for (i64 i = 0; i < n; ++i) {
+                    const f32 level = std::max(std::fabs(L[i]), std::fabs(R[i]));
+                    f32 target = 0.0f;
+                    if (level >= thr) { ss.gateHold = hold; target = 1.0f; }
+                    else if (ss.gateHold > 0) { --ss.gateHold; target = 1.0f; }
+                    ss.gateGain += (target - ss.gateGain) * (target > ss.gateGain ? up : down);
+                    L[i] *= ss.gateGain;
+                    R[i] *= ss.gateGain;
+                }
+                break;
+            }
+            case FxKind::BassTreble: {
+                // Duas prateleiras (graves 200 Hz, agudos 4 kHz); 0 dB = passa direto.
+                const f32 bass = std::clamp(s.at(fxp::kBass, q), -48.0f, 48.0f);
+                const f32 treble = std::clamp(s.at(fxp::kTreble, q), -48.0f, 48.0f);
+                const f32 gains[2] = {bass, treble};
+                for (u32 band = 0; band < 2; ++band) {
+                    if (std::fabs(gains[band]) < 1e-3f) continue;
+                    BiquadState& f = ss.bq[band];
+                    if (f.key[0] != gains[band] || f.key[1] != 1.0f) {
+                        f.c = shelf_filter(band == 1, band == 1 ? 4000.0 : 200.0, gains[band]);
+                        f.key[0] = gains[band];
+                        f.key[1] = 1.0f;
+                    }
+                    for (i64 i = 0; i < n; ++i) {
+                        L[i] = f.run(0, L[i]);
+                        R[i] = f.run(1, R[i]);
+                    }
                 }
                 break;
             }

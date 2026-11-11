@@ -181,3 +181,43 @@ AUREA_TEST(GroundPlacement, PlanesDoNotMoveTheFloorAwayFromAModel) {
     AUREA_CHECK_EQ(withPlane.center, alone.center);
     AUREA_CHECK_EQ(withPlane.radius, alone.radius);
 }
+
+// Regressão 0.5.2 (Estação na chuva): X Bot do Mixamo em FBX — a malha com skin
+// está em centímetros e a escala 0,01 vem das juntas. A caixa de bind × camada
+// ficava ~100× maior; o balanço de 2,5° da camada no giro inclinava os cantos
+// dela centenas de px abaixo dos pés e o chão descia até sumir. O chão fica sob
+// os vértices na pose do quadro, e o raio é o do corpo, não o da caixa gigante.
+AUREA_TEST(GroundPlacement, SkinnedFloorFollowsThePosedVerticesNotTheBindBox) {
+    auto asset = std::make_shared<SceneAsset>();
+    asset->nodes.resize(1); asset->nodes[0].mesh = 0; asset->nodes[0].skin = 0;
+    asset->meshes.resize(1);
+    Primitive p;
+    p.positions = {{-20, 0, -5}, {20, 0, 5}, {0, -18000, 0}, {-8000, -14000, 0}, {8000, -14000, 0}};
+    for (const auto& v : p.positions) p.bounds.add(v);
+    p.joints.assign(4 * p.positions.size(), u16{0});
+    p.weights.assign(p.positions.size(), Vec4{1, 0, 0, 0});
+    asset->bounds = p.bounds;
+    asset->meshes[0].primitives.push_back(std::move(p));
+    SceneFrame frame; SceneInstance instance; instance.asset = asset;
+    instance.jointMatrices = {Mat4::scale({.01f, .01f, .01f})};
+    instance.skinJointOffset = {0};
+    frame.instances.push_back(instance);
+    GpuModel gpuModel; gpuModel.drawableNodes = {0}; const GpuModel* models[] = {&gpuModel};
+    for (f32 deg : {0.f, 2.5f, -2.5f}) {
+        const f32 r = deg * 3.14159265f / 180.f;
+        Mat4 tilt = Mat4::identity();
+        tilt.col[0] = Vec4{std::cos(r), std::sin(r), 0, 0};
+        tilt.col[1] = Vec4{-std::sin(r), std::cos(r), 0, 0};
+        const Mat4 world = Mat4::translation({960, 900, 0}) * tilt;
+        frame.instances[0].world = world;
+        const auto gp = ground_placement(frame, models);
+        AUREA_CHECK(gp.valid);
+        f32 feet = -1e30f;
+        for (const auto& v : asset->meshes[0].primitives[0].positions)
+            feet = std::max(feet, world.transform_point(Vec3{v.x * .01f, v.y * .01f, v.z * .01f}).y);
+        AUREA_CHECK(std::fabs(gp.center.y - feet) < 1e-2f);
+        AUREA_CHECK(gp.center.y < 902.f);          // a caixa de bind dava ~1249 com 2,5°
+        AUREA_CHECK(gp.radius < 150.f);            // e ~9000 de raio
+        AUREA_CHECK_EQ(gp.verticesVisited, u64{5});
+    }
+}

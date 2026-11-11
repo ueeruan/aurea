@@ -10,12 +10,14 @@
 #include "aurea/scene3d/PartEffects.hpp"
 #include "aurea/text/LocalWhisper.hpp"
 #include "aurea/audio/Beats.hpp"
+#include "aurea/effects/Headbop.hpp"
 #include "aurea/tracking/PointTracker.hpp"
 #include "aurea/render/MaskRaster.hpp"
 #include "aurea/tracking/CameraTracker.hpp"
 #include "aurea/tracking/CameraTrackData.hpp"
 #include "aurea/tracking/TrackingValidation.hpp"
 #include "../tracking/AnalysisDecode.hpp"
+#include "EngineAeAnimation.hpp"   // AE animation: texto-fonte
 
 #include "aurea/text/Text.hpp"
 #include "aurea/text/TextAnimator.hpp"
@@ -223,14 +225,15 @@ Status path_key_command(Layer& layer, const Command& command, FrameIndex playhea
 
 const Track* read_command_track(const Layer& l, const TrackRef& ref) noexcept {
     if (ref.property == TrackProperty::MeshWarp || ref.property == TrackProperty::VectorPath
-        || ref.property == TrackProperty::MaskPath) return nullptr;
+        || ref.property == TrackProperty::MaskPath || ref.property == TrackProperty::TextSource) return nullptr;
     if (ref.property == TrackProperty::TimeRemap || is_remap_time_alias(l, ref)) return &l.timeRemap;
     if (ref.property == TrackProperty::Speed) return l.tracks.find(ref.property);
     return l.tracks.find(ref.property, ref.effectIndex, ref.effectParamIndex);
 }
 
 Track* command_track(Layer& l, const TrackRef& ref, bool create) noexcept {
-    if (ref.property == TrackProperty::MeshWarp || ref.property == TrackProperty::VectorPath) return nullptr;
+    if (ref.property == TrackProperty::MeshWarp || ref.property == TrackProperty::VectorPath
+        || ref.property == TrackProperty::TextSource) return nullptr;
     if (ref.property == TrackProperty::MaskParam && (ref.effectParamIndex > 2 ||
         std::none_of(l.masks.begin(), l.masks.end(), [&](const Mask& m) { return m.id == ref.effectIndex; }))) return nullptr;
     if (ref.property == TrackProperty::TimeRemap || is_remap_time_alias(l, ref)) {
@@ -821,6 +824,9 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
     waveforms_ = std::make_unique<audio::WaveformCache>(config_.mediaFactory);
     // Picos guardados em disco: reabrir o projeto não decodifica o áudio de novo (8D).
     if (!config_.cacheDirectory.empty()) waveforms_->set_disk_directory(config_.cacheDirectory + "/waveform");
+    // Headbop: a trilha do rig no cache (regenerável); sem desfoque de movimento no aparelho fraco.
+    headbop::RigStore::shared().set_directory(config_.cacheDirectory.empty() ? std::string{} : config_.cacheDirectory + "/headbop");
+    headbop::set_low_end_device(caps_.tier() == DeviceTier::Low);
     waveforms_->attach(&memory_);
     thumbs_.set_factory(config_.mediaFactory);
     thumbs_.attach(&memory_);
@@ -2724,6 +2730,8 @@ bool Engine::query_text(u64 layerId, TextData& out) noexcept {
     const Layer* l = comp->layer(LayerId::unpack(layerId));
     if (!l || l->kind != LayerKind::Text) return false;
     out = l->text;
+    // AE animation: com keys do texto-fonte, o que aparece no cabeçote.
+    (void)text::apply_source_text(l->text, l->local_time(playback_.current()).value, out);
     return true;
 }
 
@@ -2983,16 +2991,21 @@ Status Engine::set_material_param(u64 layer, u32 material, u32 param, f32 value)
 }
 
 Result<u64> Engine::add_light(u32 kind) noexcept {
-    if (kind > 3) return Status{Errc::InvalidArgument};
+    // 0 direcional, 1 pontual, 2 spot, 3 ambiente (LightKind), kAddLightFlare =
+    // Flare 3D. Antes o 3 era o Flare e a luz ambiente não podia ser criada
+    // (bug B9). O Flare sempre gravou LightKind::Point no arquivo: nada a migrar.
+    if (kind > kAddLightFlare) return Status{Errc::InvalidArgument};
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return Status{Errc::InvalidState};
-    const bool flare = kind == 3;
+    const bool flare = kind == kAddLightFlare;
+    const bool ambient = kind == static_cast<u32>(LightKind::Ambient);
     const auto* flareParams = flare ? effectRegistry_.params(effect_type_id(effect_keys::kSceneFlare)) : nullptr;
     if (flare && !flareParams) return Status{Errc::NotSupported};
     history_.before_mutation(*comp, project_->timeline().current(), "adicionar luz 3D");
-    const LayerId id = comp->add_layer(LayerKind::Light, flare ? "Flare 3D" : kind == 0 ? "Directional light" : kind == 1 ? "Point light" : "Spot light");
+    const LayerId id = comp->add_layer(LayerKind::Light, flare ? "Flare 3D" : kind == 0 ? "Directional light" : kind == 1 ? "Point light"
+                                                       : ambient ? "Ambient light" : "Spot light");
     Layer* layer = comp->layer(id);
     if (!layer) return Status{Errc::OutOfMemory};
     layer->threeD = true;
@@ -3011,7 +3024,8 @@ Result<u64> Engine::add_light(u32 kind) noexcept {
     // Moving a point/spot from one frame height to a quarter height multiplies
     // inverse-square irradiance by 16. Keep the default illumination comparable
     // instead of saturating the plane. Existing authored lights keep their value.
-    layer->light.intensity = kind == 0 ? 3.0f : flare ? 8.0f : .5f;
+    // Ambiente: luz sem direção somada por igual; 0,2 clareia as sombras sem lavar.
+    layer->light.intensity = kind == 0 ? 3.0f : flare ? 8.0f : ambient ? .2f : .5f;
     layer->light.range = comp->height() * 5.0f;
     layer->light.castShadows = kind == 0;
     if (flare) {
@@ -3961,7 +3975,7 @@ bool Engine::set_mask_props(u64 layerId, u32 maskId, u32 op, bool inverted, f32 
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     Mask* m = l ? mask_by_id(*l, maskId) : nullptr;
-    if (!m || op > static_cast<u32>(MaskOperation::None)) return false;
+    if (!m || op > static_cast<u32>(kLastMaskOperation)) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "ajustar mascara");
     bump_model_revision_locked();
     m->operation = static_cast<MaskOperation>(op);
@@ -4139,7 +4153,7 @@ u32 Engine::query_masks(u64 layerId, f32* out, u32 capacity) noexcept {
         h[8] = static_cast<f32>(m.pathKeys.size());
         h[9] = path_key_at(m, local) >= 0 ? 1.0f : 0.0f;
         h[10] = mask::active(m) ? 1.0f : 0.0f;
-        h[11] = 0.0f;
+        h[11] = m.featherFalloff == 1 ? 1.0f : 0.0f;   // queda do feather: 0 suave, 1 linear
         o += kMaskHeaderFloats;
         for (const MaskPoint& p : pts) {
             out[o++] = p.position.x; out[o++] = p.position.y;
@@ -4268,6 +4282,19 @@ bool Engine::set_track_matte(u64 layerId, u64 matteLayerId, u32 mode) noexcept {
     if (!l || mode > static_cast<u32>(MatteMode::LumaInverted)) return false;
     const bool clear = mode == 0 || matteLayerId == 0;
     if (!clear && (matteLayerId == layerId || !comp->layer(LayerId::unpack(matteLayerId)))) return false;
+    if (!clear) {
+        // Bug B1: A→B com B→…→A fecharia um ciclo — todas viram matte, nenhuma
+        // desenha, e as camadas somem sem aviso. Segue a cadeia de mattes a
+        // partir da escolhida; chegar nesta camada recusa.
+        const LayerId self = LayerId::unpack(layerId);
+        LayerId at = LayerId::unpack(matteLayerId);
+        for (u32 steps = 0; at.valid() && steps <= comp->order().size(); ++steps) {
+            if (at == self) return false;
+            const Layer* next = comp->layer(at);
+            if (!next || next->matteMode == MatteMode::None) break;
+            at = next->matteSource;
+        }
+    }
     history_.before_mutation(*comp, project_->timeline().current(), "track matte");
     bump_model_revision_locked();
     l->matteSource = clear ? LayerId{} : LayerId::unpack(matteLayerId);
@@ -6850,6 +6877,8 @@ u32 Engine::query_scene_guides(f32* lines, u32 capacity) noexcept {
 
 bool Engine::query_gizmo(u64 layerId, f32 length, f32* out, bool localSpace) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    // 0.5.2: camada presa a um osso — a alça fica no osso (pose do modelo pai).
+    const BoneAttachScope bones(&Engine::model_lookup, this);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || !out || !lives_in_3d(*l)) return false;
@@ -6881,7 +6910,7 @@ bool Engine::query_gizmo(u64 layerId, f32 length, f32* out, bool localSpace) noe
         && proj(o + axis(2), out + 6);
 }
 
-namespace { Rect vector_content_box(const Layer& l, FrameIndex local); }
+namespace { Rect vector_content_box(const Layer& l, FrameIndex local, f64 fps); }
 
 // Seleção na Cena 3D pelo MESMO mundo/câmera do render: o raio da câmera
 // de navegação (ou da ativa) contra o corpo de cada camada 3D visível —
@@ -6917,7 +6946,7 @@ u64 Engine::scene_pick(f32 compX, f32 compY, f32 radius) noexcept {
             if (fill_layer_detail_locked(id.pack(), pod) && pod.sourceWidth > 0 && pod.sourceHeight > 0) {
                 Vec2 o{0.0f, 0.0f};
                 if (l->kind == LayerKind::Shape && l->shape.shapeType == kShapeVector) {
-                    const Rect b = vector_content_box(*l, l->local_time(now));
+                    const Rect b = vector_content_box(*l, l->local_time(now), comp->fps());
                     o = Vec2{b.x, b.y};
                 } else if (l->kind == LayerKind::Shape) {
                     bool centered = false;
@@ -6990,8 +7019,25 @@ bool Engine::query_preview_gesture_basis(u64 layerId, f32* out) noexcept {
     return true;
 }
 
+namespace {
+/// 0.5.2 "Prender a um osso": o giro/posição do osso no instante, no mundo
+/// (mundo com osso × mundo sem osso⁻¹). Chamar com o modelo travado e um
+/// BoneAttachScope aberto; a troca de `parentBone` é só durante a conta.
+Mat4 bone_world_delta(const Composition& comp, const Layer& l, FrameIndex now) noexcept {
+    Layer& m = const_cast<Layer&>(l);
+    const Mat4 with = layer_world_3d(comp, l, now);
+    const i32 bone = m.parentBone;
+    m.parentBone = -1;
+    const Mat4 without = layer_world_3d(comp, l, now);
+    m.parentBone = bone;
+    return with * inverse4(without);
+}
+} // namespace
+
 bool Engine::gizmo_move_local(u64 layerId, u32 axis, f32 amount, f32* out) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    // 0.5.2: camada presa a um osso — eixos e espaço do pai com o osso (como a alça).
+    const BoneAttachScope bones(&Engine::model_lookup, this);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || !out || axis > 5 || !std::isfinite(amount)) return false;
@@ -7013,7 +7059,8 @@ bool Engine::gizmo_move_local(u64 layerId, u32 axis, f32 amount, f32* out) noexc
     // Com pai, o passo no mundo vira passo no espaço do pai (só a parte linear).
     const Layer* p = l->parent.valid() ? comp->layer(l->parent) : nullptr;
     if (p || l->hasParentBasis) {
-        const Mat4 pw = (p ? layer_world_3d(*comp, *p, now) : Mat4::identity()) * l->parentBasis;
+        Mat4 pw = (p ? layer_world_3d(*comp, *p, now) : Mat4::identity()) * l->parentBasis;
+        if (p && l->parentBone >= 0 && p->kind == LayerKind::Model3D) pw = bone_world_delta(*comp, *l, now) * pw;
         const Mat4 inv = inverse4(pw);
         const Vec4 v = inv * Vec4{d.x, d.y, d.z, 0};
         d = Vec3{v.x, v.y, v.z};
@@ -7294,6 +7341,32 @@ bool Engine::set_scene_floor(u32 mode, f32 r, f32 g, f32 b, f32 roughness, f32 r
     bump_model_revision_locked();
     project_->mark_dirty();
     request_render();
+    return true;
+}
+
+bool Engine::set_scene_floor_wetness(f32 wetness, f32 puddleSize) noexcept {
+    if (!std::isfinite(wetness) || !std::isfinite(puddleSize)) return false;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return false;
+    FloorSettings& fl = comp->floor();
+    const f32 w = std::clamp(wetness, 0.0f, 1.0f), s = std::clamp(puddleSize, 20.0f, 4000.0f);
+    if (fl.wetness == w && fl.puddleSize == s) return true;
+    history_.before_mutation(*comp, project_->timeline().current(), "chao molhado");
+    fl.wetness = w;
+    fl.puddleSize = s;
+    bump_model_revision_locked();
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::query_scene_floor_wetness(f32* out) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp || !out) return false;
+    out[0] = comp->floor().wetness;
+    out[1] = comp->floor().puddleSize;
     return true;
 }
 
@@ -7992,6 +8065,7 @@ void Engine::capture_clipboard_media_locked(ClipboardMedia& bundle, const std::v
         retain(layer.source.pack()); retain(layer.model.scene.pack());
         retain(layer.environmentAsset); retain(layer.particles.textureAsset);
         for (const MaterialOverride& material : layer.model.materials) retain(material.textureImage);
+        if (layer.kind == LayerKind::Text) retain(layer.text.texture.image);
         for (const auto& effect : layer.effects) {
             if (const auto* specs = effectRegistry_.params(effect.type)) {
                 for (u32 p = 0; p < std::min(specs->count(), static_cast<u32>(effect.params.size())); ++p)
@@ -8035,6 +8109,10 @@ void Engine::restore_clipboard_media_locked(const ClipboardMedia& bundle, std::v
         layer.particles.textureAsset = remapAsset(layer.particles.textureAsset).pack();
         for (MaterialOverride& material : layer.model.materials)
             if (material.textureImage) material.textureImage = remapAsset(material.textureImage).pack();
+        if (layer.kind == LayerKind::Text && layer.text.texture.image) {
+            layer.text.texture.image = remapAsset(layer.text.texture.image).pack();
+            if (!layer.text.texture.image && layer.text.texture.kind == kTextTextureImage) layer.text.texture.kind = 0;
+        }
         for (auto& effect : layer.effects) {
             if (const auto* specs = effectRegistry_.params(effect.type))
                 for (u32 p = 0; p < std::min(specs->count(), static_cast<u32>(effect.params.size())); ++p)
@@ -8598,6 +8676,20 @@ u32 Engine::copy_keyframe_selection(u64 layerId, const i64* refs, u32 count) noe
 }
 
 u32 Engine::edit_keyframe_selection(u64 layerId, const i64* refs, u32 count, i64 delta, bool remove) noexcept {
+    return retime_keyframe_selection(layerId, refs, count, delta, remove, 0, 1.0);
+}
+
+// Timeline do AE: o mesmo corpo move (delta) ou escala no tempo em volta de
+// `anchor` (factor ≠ 1) — scale_keyframe_selection em EngineAeTimeline.cpp.
+u32 Engine::retime_keyframe_selection(u64 layerId, const i64* refs, u32 count, i64 delta, bool remove,
+                                      i64 anchor, f64 factor) noexcept {
+    const bool scaling = !remove && factor != 1.0;
+    if (scaling && (!std::isfinite(factor) || factor <= 0.0 || factor > 1000.0)) return 0;
+    const auto retimed = [&](i64 t) -> i64 {
+        if (!scaling) return t + delta;
+        const f64 v = static_cast<f64>(anchor) + std::round(static_cast<f64>(t - anchor) * factor);
+        return v < static_cast<f64>(INT32_MIN) || v > static_cast<f64>(INT32_MAX) ? i64{INT64_MAX} : static_cast<i64>(v) + delta;
+    };
     std::lock_guard<std::mutex> lock(modelMutex_);
     // Chamada direta, fora da fila: o `beginUndoGroup` que o gesto acabou de
     // enfileirar precisa valer ANTES desta mutação, senão o 1º passo do
@@ -8606,7 +8698,7 @@ u32 Engine::edit_keyframe_selection(u64 layerId, const i64* refs, u32 count, i64
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     std::vector<SelectedTrackKey> selected;
-    if (!layer || layer->locked || (!remove && delta == 0) || delta < INT32_MIN || delta > INT32_MAX
+    if (!layer || layer->locked || (!remove && delta == 0 && !scaling) || delta < INT32_MIN || delta > INT32_MAX
         || !resolve_selected_keys(*layer, refs, count, selected)) return 0;
     std::vector<std::pair<u32, Track>> changed;
     for (u32 slot = 0; slot <= layer->tracks.size(); ++slot) {
@@ -8622,7 +8714,7 @@ u32 Engine::edit_keyframe_selection(u64 layerId, const i64* refs, u32 count, i64
             if (picked && remove) continue;
             Keyframe key = original.keys[k];
             if (picked) {
-                const i64 target = key.time.value + delta;
+                const i64 target = retimed(key.time.value);
                 if (target < INT32_MIN || target > INT32_MAX) return 0;
                 key.time.value = target;
             }
@@ -8646,7 +8738,7 @@ u32 Engine::edit_keyframe_selection(u64 layerId, const i64* refs, u32 count, i64
             if (picked && remove) continue;
             MeshWarpKey key = original.keys[k];
             if (picked) {
-                const i64 target = key.frame + delta;
+                const i64 target = retimed(key.frame);
                 if (target < INT32_MIN || target > INT32_MAX) return 0;
                 key.frame = target;
             }
@@ -8675,7 +8767,7 @@ u32 Engine::edit_keyframe_selection(u64 layerId, const i64* refs, u32 count, i64
             if (picked && remove) continue;
             PathKey key = original.keys[k];
             if (picked) {
-                const i64 target = key.frame + delta;
+                const i64 target = retimed(key.frame);
                 if (target < INT32_MIN || target > INT32_MAX) return 0;
                 key.frame = target;
             }
@@ -8688,7 +8780,8 @@ u32 Engine::edit_keyframe_selection(u64 layerId, const i64* refs, u32 count, i64
             next.path = vector::path_at(original, static_cast<f64>(layer->local_time(playback_.current()).value));
         changedPaths.push_back({item.track, item.pathIndex, std::move(next)});
     }
-    history_.before_mutation(*comp, project_->timeline().current(), remove ? "remover keyframes" : "mover keyframes");
+    history_.before_mutation(*comp, project_->timeline().current(),
+                            remove ? "remover keyframes" : scaling ? "escalar keyframes" : "mover keyframes");
     for (auto& entry : changed) {
         Track& original = selected_track(*layer, entry.first);
         if (remove && entry.second.keys.empty()) freeze_last_shape_key(*layer, original, layer->local_time(playback_.current()));
@@ -9561,6 +9654,77 @@ bool Engine::trim_composition(i64 frame) noexcept {
     return true;
 }
 
+namespace {
+/// Timeline do AE ("exportar só a área de trabalho"): a composição do editor
+/// é aparada só enquanto o projeto é congelado e volta no fim do escopo.
+struct WorkAreaFreeze {
+    Composition* comp = nullptr;
+    std::unique_ptr<Composition> keep;
+    WorkAreaFreeze() = default;
+    WorkAreaFreeze(const WorkAreaFreeze&) = delete;
+    WorkAreaFreeze& operator=(const WorkAreaFreeze&) = delete;
+    ~WorkAreaFreeze() { if (comp && keep) comp->restore_from(*keep); }
+};
+} // namespace
+
+// Timeline do AE: "Aparar composição à área de trabalho". Mora aqui porque
+// usa o mesmo aparar de clipe (trim_clip_copy) das alças da timeline.
+bool Engine::trim_to_work_area_locked(Composition& comp, bool closeMedia) noexcept {
+    if (!project_ || !comp.has_work_area()) return false;
+    const i64 in = comp.work_in(), out = comp.work_out();
+    ClipChainEdit clipChains(&comp);
+    std::vector<LayerId> gone;
+    comp.layers().for_each([&](LayerId id, Layer& l) {
+        if (l.end.value <= in || l.start.value >= out) { gone.push_back(id); return; }
+        const i64 s = std::max(l.start.value, in), e = std::min(l.end.value, out);
+        if (s != l.start.value || e != l.end.value) trim_clip_copy(l, s, e, clip_source_limit(*project_, comp, l));
+        // Só o começo anda: o quadro local (keyframes, marcas da camada) fica igual.
+        l.start.value -= in;
+        l.end.value -= in;
+    });
+    for (LayerId id : gone) {
+        if (closeMedia) media_.close_layer(id);
+        comp.remove_layer(id);
+    }
+    std::vector<Marker> kept;
+    for (const Marker& m : comp.markers()) {
+        if (m.frame.value < in || m.frame.value >= out) continue;
+        Marker moved = m;
+        moved.frame = FrameIndex{m.frame.value - in};
+        moved.duration = std::min(moved.duration, out - m.frame.value);
+        kept.push_back(std::move(moved));
+    }
+    while (!comp.markers().empty()) (void)comp.remove_marker_at(comp.markers().front().frame);
+    for (Marker& m : kept) comp.put_marker(std::move(m));
+    const auto inside = [&](i64 f) { return f >= in && f <= out ? f - in : i64{-1}; };
+    comp.set_marks(comp.mark_in() >= 0 ? inside(comp.mark_in()) : -1, comp.mark_out() >= 0 ? inside(comp.mark_out()) : -1);
+    EnvironmentSettings& env = comp.environment();
+    env.backgroundStart = FrameIndex{std::max<i64>(0, env.backgroundStart.value - in)};
+    if (env.backgroundEnd.value >= 0) env.backgroundEnd = FrameIndex{std::max(env.backgroundStart.value, env.backgroundEnd.value - in)};
+    comp.set_duration(FrameIndex{out - in});
+    comp.set_work_area(-1, -1);
+    comp.rebuild_draw_order();
+    comp.touch();
+    return true;
+}
+
+bool Engine::trim_composition_to_work_area() noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp || !comp->has_work_area()) return false;
+    const i64 in = comp->work_in(), out = comp->work_out();
+    history_.before_mutation(*comp, project_->timeline().current(), "aparar a area de trabalho");
+    bump_model_revision_locked();
+    if (!trim_to_work_area_locked(*comp, true)) return false;
+    configure_playback_locked(comp);
+    const i64 now = playback_.current().value;
+    playback_.seek(FrameIndex{std::clamp<i64>(now - in, 0, out - in - 1)}, monotonic_ns());
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
 void Engine::bump_revision_without_audio_locked() noexcept {
     const u32 before = bump_model_revision_locked();
     if (audioRevision_ == before) audioRevision_ = before + 1;
@@ -9654,9 +9818,12 @@ bool Engine::edit_marker(i64 from, i64 to, u32 color, const std::string& label) 
     color |= 0xFF000000u;
     if (source != markers.end() && from == to && source->color == color && source->label == label) return true;
     const u32 kind = source == markers.end() ? kMarkerManual : source->kind;
+    // v67: a duração e o comentário (timeline do AE) continuam os da marca.
+    Marker edited{FrameIndex{to}, color, kind, label};
+    if (source != markers.end()) { edited.duration = source->duration; edited.comment = source->comment; }
     history_.before_mutation(*comp, project_->timeline().current(), from < 0 ? "adicionar marca" : "editar marca");
     if (from >= 0) comp->remove_marker_at(FrameIndex{from});
-    comp->put_marker(Marker{FrameIndex{to}, color, kind, label});
+    comp->put_marker(std::move(edited));
     bump_revision_without_audio_locked();
     project_->mark_dirty();
     request_render();
@@ -10415,11 +10582,13 @@ bool Engine::set_text_font(u64 layerId, const std::string& family, u32 weight, b
     if (!l || l->kind != LayerKind::Text) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "fonte do texto");
     bump_model_revision_locked();
+    ae_anim::begin_text_edit(*l, playback_.current());
     l->text.fontFamily = family;
     l->text.fontWeight = static_cast<u16>(std::clamp<u32>(weight, 100, 1000));
     l->text.fontItalic = italic;
     // Importada: o arquivo vai relativo ao projeto (abre em outro aparelho).
     l->text.fontPath = path.empty() ? std::string{} : store_asset_path(path);
+    ae_anim::end_text_edit(*l, playback_.current());
     recenter_text(*l);
     project_->mark_dirty();
     request_render();
@@ -10627,6 +10796,7 @@ bool Engine::set_text_span(u64 layerId, u32 start, u32 end, bool hasColor, Vec4 
     if (!l || l->kind != LayerKind::Text || end <= start) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "estilo do trecho");
     bump_model_revision_locked();
+    ae_anim::begin_text_edit(*l, playback_.current());
     // O mesmo trecho de novo: junta (cor + negrito + tamanho), não substitui.
     for (const TextSpan& old : l->text.spans) {
         if (old.start != start || old.end != end) continue;
@@ -10643,6 +10813,7 @@ bool Engine::set_text_span(u64 layerId, u32 start, u32 end, bool hasColor, Vec4 
     sp.weight = static_cast<u16>(std::min<u32>(weight, 1000));
     sp.scale = std::clamp(scale, 0.1f, 10.0f);
     l->text.spans.push_back(sp);
+    ae_anim::end_text_edit(*l, playback_.current());
     project_->mark_dirty();
     request_render();
     return true;
@@ -10655,7 +10826,9 @@ bool Engine::clear_text_spans(u64 layerId, u32 start, u32 end) noexcept {
     if (!l || l->kind != LayerKind::Text) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "limpar estilo do trecho");
     bump_model_revision_locked();
+    ae_anim::begin_text_edit(*l, playback_.current());
     cut_spans(l->text.spans, start, end);
+    ae_anim::end_text_edit(*l, playback_.current());
     project_->mark_dirty();
     request_render();
     return true;
@@ -10987,7 +11160,8 @@ namespace {
 Track* expression_track(Layer& l, u32 property, u32 effectIndex, u32 paramIndex, bool create) noexcept {
     if (property >= static_cast<u32>(TrackProperty::_Count)) return nullptr;
     const auto p = static_cast<TrackProperty>(property);
-    if (p == TrackProperty::MeshWarp || p == TrackProperty::VectorPath || p == TrackProperty::MaskPath) return nullptr;
+    if (p == TrackProperty::MeshWarp || p == TrackProperty::VectorPath || p == TrackProperty::MaskPath
+        || p == TrackProperty::TextSource) return nullptr;
     if (p == TrackProperty::TimeRemap) return &l.timeRemap;
     if (p == TrackProperty::EffectParam && !l.find_effect(EffectId{effectIndex, 0})) return nullptr;
     if (p == TrackProperty::TextAnimParam && effectIndex >= l.text.animators.size()) return nullptr;
@@ -11027,7 +11201,7 @@ Status Engine::set_expressions(u64 layerId, const u32* keys3, u32 count, const c
     bool anyChange = false;
     for (u32 i = 0; i < count; ++i) {
         const u32* k = keys3 + i * 3;
-        if (k[0] == static_cast<u32>(TrackProperty::MaskPath)) return Errc::NotSupported;
+        if (k[0] == static_cast<u32>(TrackProperty::MaskPath) || k[0] == static_cast<u32>(TrackProperty::TextSource)) return Errc::NotSupported;
         if (k[0] == static_cast<u32>(TrackProperty::MeshWarp) || k[0] == static_cast<u32>(TrackProperty::VectorPath)) return Errc::NotSupported;
         Track* t = expression_track(*l, k[0], k[1], k[2], false);
         if (!t && !remove) {
@@ -14186,6 +14360,8 @@ u32 Engine::query_layers(bridge::LayerRow* out, u32 capacity, char* outNameBlob,
         if (l->magneticTrack) flags |= bridge::kLayerRowFlagMagnetic;
         if (l->clipToBelow) flags |= bridge::kLayerRowFlagClipToBelow;
         if (can_create_clip(*comp, n - 1 - i)) flags |= bridge::kLayerRowFlagClipCandidate;
+        if (l->shy) flags |= bridge::kLayerRowFlagShy;
+        if (l->preserveTransparency) flags |= bridge::kLayerRowFlagPreserveTransparency;
         flags |= (static_cast<u32>(l->label) << bridge::kLayerRowLabelShift) & bridge::kLayerRowLabelMask;
         row.flags = flags;
         row.parentIndex = kInvalidIndex;
@@ -14294,6 +14470,23 @@ u32 write_keyframe_rows(const Layer& l, bridge::KeyframeRow* out, u32 capacity) 
             out[written++] = row;
         }
     }
+    // AE animation (v68): keys do texto-fonte (trilha virtual, sempre congelados).
+    if (l.kind == LayerKind::Text) {
+        for (const TextKey& key : l.text.sourceKeys) {
+            if (written >= capacity) break;
+            bridge::KeyframeRow row{};
+            row.property = static_cast<u32>(TrackProperty::TextSource);
+            row.effectIndex = 0;
+            row.paramIndex = 0;
+            row.time = static_cast<i32>(key.frame);
+            row.value = 0;
+            row.interpolation = static_cast<u32>(Interpolation::Hold);
+            const i64 timelineFrame = key.frame + l.start.value - l.offset.value;
+            if (timelineFrame < l.start.value || timelineFrame > l.end.value)
+                row.timelineFlags |= bridge::kKeyframeTimelineHidden;
+            out[written++] = row;
+        }
+    }
     return written;
 }
 } // namespace
@@ -14355,6 +14548,9 @@ bool Engine::query_keyframe_navigation(u64 layerId, u32 property, u32 effectInde
         const Mask* m = mask_by_id(*layer, ref.effectIndex);
         if (!m) return false;
         for (const MaskPathKey& key : m->pathKeys) visible(key.frame);
+    } else if (ref.property == TrackProperty::TextSource) {
+        if (layer->kind != LayerKind::Text) return false;
+        for (const TextKey& key : layer->text.sourceKeys) visible(key.frame);
     } else if (const Track* track = read_command_track(*layer, ref)) {
         for (const auto& key : track->keys) visible(key.time.value);
     }
@@ -14393,6 +14589,8 @@ bool Engine::query_timeline_navigation(u64 layerId, i64 compositionFrame, i32 di
             for (const auto& key : data->keys) visibleKey(key.frame);
     for (const auto& mask : layer->masks)
         for (const auto& key : mask.pathKeys) visibleKey(key.frame);
+    if (layer->kind == LayerKind::Text)
+        for (const TextKey& key : layer->text.sourceKeys) visibleKey(key.frame);
     if (layer->kind == LayerKind::Shape && layer->shape.shapeType == kShapeVector)
         for (const VectorGroup& g : layer->shape.vector.groups)
             for (const VectorPath& p : g.paths) for (const PathKey& key : p.keys) visibleKey(key.frame);
@@ -14584,11 +14782,11 @@ void Engine::composition_size_cap(u32& longSide, u32& shortSide) const noexcept 
 namespace {
 /// Caixa do conteúdo da camada vetorial no instante (px da camada). Sem
 /// conteúdo desenhável, a tela da camada (para o palco ainda mostrar e tocar).
-Rect vector_content_box(const Layer& l, FrameIndex local) {
+Rect vector_content_box(const Layer& l, FrameIndex local, f64 fps) {
     std::vector<VectorGroup> ev;
     ev.reserve(l.shape.vector.groups.size());
     for (u32 gi = 0; gi < l.shape.vector.groups.size(); ++gi)
-        ev.push_back(vector::evaluate_group(l.shape.vector.groups[gi], l.tracks, gi, static_cast<f64>(local.value)));
+        ev.push_back(vector::evaluate_group(l.shape.vector.groups[gi], l.tracks, gi, static_cast<f64>(local.value), fps));
     Vec2 mn, mx;
     if (vector::bounds_of(ev, static_cast<f64>(local.value), mn, mx) && mx.x - mn.x >= 1.0f && mx.y - mn.y >= 1.0f)
         return Rect{mn.x, mn.y, mx.x - mn.x, mx.y - mn.y};
@@ -14599,6 +14797,8 @@ Rect vector_content_box(const Layer& l, FrameIndex local) {
 bool Engine::query_layer_detail(u64 layerId, bridge::LayerDetailPOD& out) noexcept {
     out = bridge::LayerDetailPOD{};
     std::lock_guard<std::mutex> lock(modelMutex_);
+    // 0.5.2: camada presa a um osso — o contorno no palco segue o osso.
+    const BoneAttachScope bones(&Engine::model_lookup, this);
     if (!fill_layer_detail_locked(layerId, out)) return false;
     // Geometria no palco: cantos e pai, pelo MESMO cálculo do renderer.
     const Composition* comp = current_composition();
@@ -14621,11 +14821,28 @@ bool Engine::query_layer_detail(u64 layerId, bridge::LayerDetailPOD& out) noexce
         // a UI usa para tocar e arrastar o objeto com o dedo) seguem ela.
         if (persp && sceneEditor_.enabled)
             m = scene_editor_projection(comp->width(), comp->height(), sceneEditor_) * layer_world_3d(*comp, *l, now);
-        const f32 w = static_cast<f32>(out.sourceWidth), h = static_cast<f32>(out.sourceHeight);
+        f32 w = static_cast<f32>(out.sourceWidth), h = static_cast<f32>(out.sourceHeight);
         // Vetor: a caixa do conteúdo pode começar fora da origem da camada.
         Vec2 o{0.0f, 0.0f};
-        if (l->kind == LayerKind::Shape && l->shape.shapeType == kShapeVector) {
-            const Rect b = vector_content_box(*l, l->local_time(now));
+        TextData keyed;
+        if (l->kind == LayerKind::Text && l->captions.empty()
+            && text::apply_source_text(l->text, l->local_time(now).value, keyed)) {
+            // AE animation: com key do texto-fonte, a caixa é a do texto que aparece,
+            // posta como o render a põe (alinhamento e margem do texto de base).
+            const auto fk = text::FontManager::instance().font_for(keyed);
+            const auto fb = text::FontManager::instance().font_for(l->text);
+            if (fk && fb) {
+                const text::TextExtent ek = text::measure(*fk, keyed), eb = text::measure(*fb, l->text);
+                const f32 padK = keyed.strokeWidth > 0.0f ? keyed.strokeWidth + 2.0f : 2.0f;
+                const f32 padB = l->text.strokeWidth > 0.0f ? l->text.strokeWidth + 2.0f : 2.0f;
+                auto at = [](u32 align, f32 width) { return align == 1 ? width * 0.5f : align == 2 ? width : 0.0f; };
+                const f32 dx = keyed.boxMode == 0 ? at(l->text.alignment, eb.width) - at(keyed.alignment, ek.width) : 0.0f;
+                o = Vec2{padB - padK + dx, padB - padK};
+                w = std::ceil(ek.width + 2.0f * padK);
+                h = std::ceil(ek.height + 2.0f * padK);
+            }
+        } else if (l->kind == LayerKind::Shape && l->shape.shapeType == kShapeVector) {
+            const Rect b = vector_content_box(*l, l->local_time(now), comp->fps());
             o = Vec2{b.x, b.y};
         } else if (l->kind == LayerKind::Shape) {
             bool centered = false;
@@ -14706,6 +14923,8 @@ bool Engine::fill_layer_detail_locked(u64 layerId, bridge::LayerDetailPOD& out) 
               | (l->captions.empty() ? 0u : bridge::kLayerRowFlagCaptions)
               | (l->magneticTrack ? bridge::kLayerRowFlagMagnetic : 0u)
               | (l->clipToBelow ? bridge::kLayerRowFlagClipToBelow : 0u)
+              | (l->shy ? bridge::kLayerRowFlagShy : 0u)
+              | (l->preserveTransparency ? bridge::kLayerRowFlagPreserveTransparency : 0u)
               | ((static_cast<u32>(l->label) << bridge::kLayerRowLabelShift) & bridge::kLayerRowLabelMask);
     if (const i32 zi = comp->z_index_of(LayerId::unpack(layerId)); zi >= 0 && can_create_clip(*comp, static_cast<u32>(zi)))
         out.flags |= bridge::kLayerRowFlagClipCandidate;
@@ -14791,7 +15010,7 @@ bool Engine::fill_layer_detail_locked(u64 layerId, bridge::LayerDetailPOD& out) 
         out.sourceWidth = static_cast<u32>(std::max(1.0f, sh.bounds.w));
         out.sourceHeight = static_cast<u32>(std::max(1.0f, sh.bounds.h));
         if (sh.shapeType == kShapeVector) {
-            const Rect b = vector_content_box(*l, local);
+            const Rect b = vector_content_box(*l, local, comp->fps());
             out.sourceWidth = static_cast<u32>(std::max(1.0f, std::ceil(b.w)));
             out.sourceHeight = static_cast<u32>(std::max(1.0f, std::ceil(b.h)));
         }
@@ -15409,6 +15628,15 @@ void Engine::configure_playback_locked(const Composition* comp, i64 rawDuration)
     playback_.set_navigation_end(FrameIndex{bounded ? navigationEnd : -1});
     playback_.configure(comp->fps(), FrameIndex{rawDuration >= 0 ? rawDuration
         : bounded ? std::max<i64>(1, end) : comp->duration().value});
+    // Timeline do AE: a prévia toca e repete dentro da área de trabalho
+    // (presa no que a reprodução alcança; nada além do fim configurado).
+    if (comp->has_work_area()) {
+        const i64 limit = playback_.duration().value;
+        const i64 in = std::min(comp->work_in(), limit - 1), out = std::min(comp->work_out(), limit);
+        playback_.set_play_range(FrameIndex{in}, FrameIndex{out > in ? out : -1});
+    } else {
+        playback_.set_play_range(FrameIndex{-1}, FrameIndex{-1});
+    }
 }
 
 void Engine::set_content_bounded_playback(bool on) noexcept {
@@ -15440,6 +15668,11 @@ i64 Engine::query_export_duration(bool trimToContent) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
     const Composition* comp = current_composition();
+    // Timeline do AE: "só a área de trabalho" mede a cópia aparada.
+    if (comp && exportWorkAreaOnly_.load(std::memory_order_relaxed) && comp->has_work_area()) {
+        const std::unique_ptr<Composition> trimmed = comp->clone();
+        if (trim_to_work_area_locked(*trimmed, false)) return trimmed->export_duration(trimToContent).value;
+    }
     return comp ? comp->export_duration(trimToContent).value : 0;
 }
 
@@ -15676,6 +15909,14 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
         // historical file formats are never rewritten by export.
         const u64 room = source_asset_room_locked();
         ctx->diagnostic_stage(ExportDiagnostics::Lane::Session, ExportDiagnostics::Stage::Snapshot);
+        // Timeline do AE: "só a área de trabalho" congela a cópia aparada (o
+        // documento congelado já sai com ela; o editor volta no fim do escopo).
+        WorkAreaFreeze workArea;
+        if (exportWorkAreaOnly_.load(std::memory_order_relaxed) && comp->has_work_area()) {
+            workArea.keep = comp->clone();
+            workArea.comp = comp;
+            (void)trim_to_work_area_locked(*comp, false);
+        }
         SaveOptions save; save.writeThumbnail = false;
         if (const Status saved = ProjectSerializer::encode(*project_, save, frozenBytes); !saved.ok()) return saved;
         frozenComposition = project_->timeline().current();
@@ -17799,6 +18040,14 @@ Engine::ExportResumeCandidate Engine::export_resume_candidate(const ExportSettin
         std::lock_guard<std::mutex> lock(modelMutex_);
         if (!project_) return out;
         drain_commands_locked();
+        // A mesma cópia aparada da partida (a chave do pedido tem de bater).
+        WorkAreaFreeze workArea;
+        if (Composition* comp = current_composition();
+            comp && exportWorkAreaOnly_.load(std::memory_order_relaxed) && comp->has_work_area()) {
+            workArea.keep = comp->clone();
+            workArea.comp = comp;
+            (void)trim_to_work_area_locked(*comp, false);
+        }
         SaveOptions save; save.writeThumbnail = false;
         if (!ProjectSerializer::encode(*project_, save, bytes).ok()) return out;
         composition = project_->timeline().current();
@@ -17940,8 +18189,15 @@ ImageExportPlan Engine::query_image_export_plan(const ImageExportSettings& setti
     drain_commands_locked();
     const Composition* comp = current_composition();
     if (!comp) return ImageExportPlan{};
+    i64 span = comp->export_duration(settings.trimToContent).value;
+    // Timeline do AE: o trecho "só da área de trabalho" mede a cópia aparada.
+    if (settings.format != ImageExportFormat::Png && exportWorkAreaOnly_.load(std::memory_order_relaxed)
+        && comp->has_work_area()) {
+        const std::unique_ptr<Composition> trimmed = comp->clone();
+        if (trim_to_work_area_locked(*trimmed, false)) span = trimmed->export_duration(settings.trimToContent).value;
+    }
     return plan_image_export(settings, comp->width(), comp->height(), comp->fps(),
-                             comp->export_duration(settings.trimToContent).value, comp->transparent_background());
+                             span, comp->transparent_background());
 }
 
 bool Engine::cancel_prerender_for_export() noexcept {
@@ -18171,6 +18427,14 @@ Status Engine::start_image_export_internal(const ImageExportSettings& settings, 
         drain_commands_locked();
         Composition* comp = current_composition();
         if (!comp) return Errc::NotFound;
+        // Timeline do AE: sequência PNG e GIF "só da área de trabalho".
+        WorkAreaFreeze workArea;
+        if (!ctx->preRenderMode && settings.format != ImageExportFormat::Png
+            && exportWorkAreaOnly_.load(std::memory_order_relaxed) && comp->has_work_area()) {
+            workArea.keep = comp->clone();
+            workArea.comp = comp;
+            (void)trim_to_work_area_locked(*comp, false);
+        }
         // 0.2.4 (C4): o PreRender ia ate a duracao da composicao, que pode ter
         // inflado a horas; agora para no fim da ultima camada.
         const i64 span = ctx->preRenderMode
@@ -18741,7 +19005,7 @@ bool command_valid(const Command& c) noexcept {
                 && finite_all({k.bx1, k.by1, k.bx2, k.by2});
         }
         case CommandType::MaskSetOperation:
-            return static_cast<u8>(c.mask_op.op) <= static_cast<u8>(MaskOperation::None);
+            return static_cast<u8>(c.mask_op.op) <= static_cast<u8>(kLastMaskOperation);
         case CommandType::MaskSetFeather:
         case CommandType::MaskSetExpansion:
         case CommandType::MaskSetOpacity:
@@ -18763,7 +19027,7 @@ bool command_valid(const Command& c) noexcept {
         case CommandType::LayerSetLightParam: {
             const u32 p = c.shape_param.param;
             const f32 v = c.shape_param.value;
-            const f32 maximum = p == 0 ? 2.f : (p >= 2 && p <= 4) || p == 7 || p == 10 ? 1.f
+            const f32 maximum = p == 0 ? 3.f : (p >= 2 && p <= 4) || p == 7 || p == 10 ? 1.f   // 3 = ambiente (B9)
                               : p == 6 ? 179.f : p == 9 ? .1f : 1000000.f;
             return p <= 10 && finite(v) && v >= 0 && v <= maximum;
         }
@@ -19132,6 +19396,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             // antigo para o do novo; os valores parados viram "M × local" e os
             // keyframes animados passam pela MESMA M (a animação continua igual
             // na tela). Modelo 3D, câmera e luz: tudo pelo mundo 3D.
+            // Outro pai (ou nenhum): o osso do pai antigo não vale mais.
+            if (parent != l->parent) l->parentBone = -1;
             if (!comp) { l->parent = parent; return OkStatus; }
             const FrameIndex now = playback_.current();
             const LayerId oldParent = l->parent;
@@ -19340,7 +19606,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                 l->light.shadowStrength = v;
                 return OkStatus;
             }
-            if (p == 0) { if (v < 0 || v > 2) return Errc::InvalidArgument; l->light.kind = static_cast<LightKind>(static_cast<u32>(v)); return OkStatus; }
+            // 3 = ambiente (bug B9: antes só 0..2, e a luz ambiente importada não voltava).
+            if (p == 0) { if (v < 0 || v > 3) return Errc::InvalidArgument; l->light.kind = static_cast<LightKind>(static_cast<u32>(v)); return OkStatus; }
             if (p == 8) { l->light.castShadows = v >= .5f; return OkStatus; }
             f32* field = p == 1 ? &l->light.intensity : p == 2 ? &l->light.color.x : p == 3 ? &l->light.color.y : p == 4 ? &l->light.color.z
                        : p == 5 ? &l->light.range : p == 6 ? &l->light.coneAngle : p == 7 ? &l->light.penumbra : &l->light.shadowBias;
@@ -19511,6 +19778,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                 return path_key_command(*l, cmd, playback_.current());
             if (cmd.keyframe.track.property == TrackProperty::MaskPath)
                 return mask_key_command(*l, cmd, playback_.current());
+            if (cmd.keyframe.track.property == TrackProperty::TextSource)
+                return ae_anim::text_source_key_command(*l, cmd, playback_.current());
             // Gesto de transform (kAutoKey*): o tempo é o do quadro na tela e,
             // sem keyframe na trilha, o valor parado muda — a mesma regra nas
             // duas UIs, com o estado vivo do motor. Antes a UI decidia pelo
@@ -19560,6 +19829,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                 return path_key_command(*l, cmd, playback_.current());
             if (cmd.keyframe.track.property == TrackProperty::MaskPath)
                 return mask_key_command(*l, cmd, playback_.current());
+            if (cmd.keyframe.track.property == TrackProperty::TextSource)
+                return ae_anim::text_source_key_command(*l, cmd, playback_.current());
             Track* track = command_track(*l, cmd.keyframe.track, false);
             if (!track || track->find_exact(cmd.keyframe.time) == kInvalidIndex) return Errc::NotFound;
             if (track->keys.size() == 1) freeze_last_shape_key(*l, *track, l->local_time(playback_.current()));
@@ -19575,6 +19846,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                 return path_key_command(*l, cmd, playback_.current());
             if (cmd.keyframe_move.track.property == TrackProperty::MaskPath)
                 return mask_key_command(*l, cmd, playback_.current());
+            if (cmd.keyframe_move.track.property == TrackProperty::TextSource)
+                return ae_anim::text_source_key_command(*l, cmd, playback_.current());
             Track* track = command_track(*l, cmd.keyframe_move.track, false);
             if (!track) return Errc::NotFound;
             if (track->move(cmd.keyframe_move.fromTime, cmd.keyframe_move.toTime) == kInvalidIndex) return Errc::NotFound;
@@ -19589,6 +19862,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                 return path_key_command(*l, cmd, playback_.current());
             if (cmd.keyframe.track.property == TrackProperty::MaskPath)
                 return mask_key_command(*l, cmd, playback_.current());
+            if (cmd.keyframe.track.property == TrackProperty::TextSource)
+                return ae_anim::text_source_key_command(*l, cmd, playback_.current());
             Track* track = command_track(*l, cmd.keyframe.track, false);
             if (!track) return Errc::NotFound;
             const u32 idx = track->find_exact(cmd.keyframe.time);
@@ -19609,6 +19884,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                 return path_key_command(*l, cmd, playback_.current());
             if (cmd.keyframe_interp.track.property == TrackProperty::MaskPath)
                 return mask_key_command(*l, cmd, playback_.current());
+            if (cmd.keyframe_interp.track.property == TrackProperty::TextSource)
+                return ae_anim::text_source_key_command(*l, cmd, playback_.current());
             const KeyframeInterpPayload& k = cmd.keyframe_interp;
             Track* track = command_track(*l, k.track, false);
             if (!track) return Errc::NotFound;
@@ -20064,7 +20341,9 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         case CommandType::TextSetContent: {
             Layer* l = need_layer(cmd.layer_ref.layer);
             if (!l) return Errc::NotFound;
+            ae_anim::begin_text_edit(*l, playback_.current());
             if (stringData) l->text.content = stringData;
+            ae_anim::end_text_edit(*l, playback_.current());
             recenter_text(*l);
             return OkStatus;
         }
@@ -20073,28 +20352,36 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         case CommandType::TextSetSize: {
             Layer* l = need_layer(cmd.text_size.layer);
             if (!l) return Errc::NotFound;
+            ae_anim::begin_text_edit(*l, playback_.current());
             l->text.size = std::clamp(cmd.text_size.size, 1.0f, 2000.0f);
+            ae_anim::end_text_edit(*l, playback_.current());
             recenter_text(*l);
             return OkStatus;
         }
         case CommandType::TextSetColor: {
             Layer* l = need_layer(cmd.text_color.layer);
             if (!l) return Errc::NotFound;
+            ae_anim::begin_text_edit(*l, playback_.current());
             l->text.color = Vec4{cmd.text_color.r, cmd.text_color.g, cmd.text_color.b, cmd.text_color.a};
+            ae_anim::end_text_edit(*l, playback_.current());
             return OkStatus;
         }
         case CommandType::TextSetAlignment: {
             Layer* l = need_layer(cmd.text_align.layer);
             if (!l) return Errc::NotFound;
+            ae_anim::begin_text_edit(*l, playback_.current());
             l->text.alignment = std::min(cmd.text_align.alignment, 2u);
+            ae_anim::end_text_edit(*l, playback_.current());
             recenter_text(*l);
             return OkStatus;
         }
         case CommandType::TextSetStrokeWidth: {
             Layer* l = need_layer(cmd.text_stroke_width.layer);
             if (!l) return Errc::NotFound;
+            ae_anim::begin_text_edit(*l, playback_.current());
             const f32 previousPadding = std::max(0.0f, l->text.strokeWidth);
             l->text.strokeWidth = std::clamp(cmd.text_stroke_width.width, 0.0f, 200.0f);
+            ae_anim::end_text_edit(*l, playback_.current());
             // A stroke expands the source margin, not the authored pivot. Move
             // anchor coordinates by that margin delta so a manual anchor or an
             // anchor animation keeps the same position relative to the glyphs.
@@ -20114,7 +20401,9 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         case CommandType::TextSetStrokeColor: {
             Layer* l = need_layer(cmd.text_color.layer);
             if (!l) return Errc::NotFound;
+            ae_anim::begin_text_edit(*l, playback_.current());
             l->text.strokeColor = Vec4{cmd.text_color.r, cmd.text_color.g, cmd.text_color.b, cmd.text_color.a};
+            ae_anim::end_text_edit(*l, playback_.current());
             return OkStatus;
         }
 

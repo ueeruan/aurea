@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: pacote "Mar" (SeaEffects.cpp): nomes e textos dos efeitos de mar. -->
+<resources>
+    <string name="sea_name_ocean">Samudra</string>
+    <string name="sea_name_underwater">Bawah air</string>
+    <string name="sea_name_caustics">Kaustik</string>
+    <string name="sea_name_shore_wave">Ombak pantai</string>
+    <string name="fxl_sea_wave_height">Tinggi ombak</string>
+    <string name="fxl_sea_wavelength">Panjang ombak</string>
+    <string name="fxl_sea_wind_direction">Arah angin</string>
+    <string name="fxl_sea_choppiness">Gejolak</string>
+    <string name="fxl_sea_shallow_color">Warna air dangkal</string>
+    <string name="fxl_sea_deep_color">Warna air dalam</string>
+    <string name="fxl_sea_sky">Langit</string>
+    <string name="fxl_sea_sky_color">Warna langit</string>
+    <string name="fxl_sea_sky_layer">Lapisan langit</string>
+    <string name="fxl_sea_foam">Buih</string>
+    <string name="fxl_sea_sun_glitter">Kilau matahari</string>
+    <string name="fxl_sea_sun_direction">Arah matahari</string>
+    <string name="fxl_sea_sun_height">Ketinggian matahari</string>
+    <string name="fxl_sea_camera_angle">Sudut kamera</string>
+    <string name="fxl_sea_haze">Kabut</string>
+    <string name="fxl_sea_stylize">Bergaya</string>
+    <string name="fxl_sea_clip_layer">Potong sesuai lapisan</string>
+    <string name="fxl_sea_wave_size">Ukuran ombak</string>
+    <string name="fxl_sea_caustics">Kaustik</string>
+    <string name="fxl_sea_caustics_scale">Skala kaustik</string>
+    <string name="fxl_sea_depth">Kedalaman</string>
+    <string name="fxl_sea_light_rays">Sinar cahaya</string>
+    <string name="fxl_sea_particles">Partikel</string>
+    <string name="fxl_sea_particle_size">Ukuran partikel</string>
+    <string name="fxl_sea_sharpness">Ketajaman</string>
+    <string name="fxl_sea_refraction">Refraksi</string>
+    <string name="fxl_sea_edge_wave">Gelombang tepi</string>
+    <string name="fxl_sea_edge_size">Ukuran gelombang tepi</string>
+    <string name="fxl_sea_foam_width">Lebar buih</string>
+    <string name="fxl_sea_foam_color">Warna buih</string>
+    <string name="fxl_sea_water_width">Lebar air</string>
+    <string name="fxl_sea_water_distortion">Distorsi air</string>
+    <string name="fxo_sea_sky_color">Warna</string>
+    <string name="fxo_sea_layer_image">Gambar lapisan</string>
+    <string name="fxo_sea_other_layer">Lapisan lain</string>
+    <string name="fxo_sea_caustics_only">Hanya kaustik</string>
+    <string name="fxl_sea_tip_sky">Gambar lapisan: langit dan pantulannya berasal dari lapisan ini. Lapisan lain: pilih lapisan langit (tampil di atas cakrawala).</string>
+    <string name="fxl_sea_tip_ripple_speed">Gelombang per detik, dari dalam ke luar. 0 = fase yang mengatur.</string>
+</resources>

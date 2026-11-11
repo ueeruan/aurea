@@ -81,7 +81,7 @@
          heap padrão de 192–256 MB estouram ao abrir projeto com muitas imagens. -->
     <application
         android:name=".AureaApplication"
-        android:label="Aurea Beta"
+        android:label="${aureaAppLabel}"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"
         android:usesCleartextTraffic="false"

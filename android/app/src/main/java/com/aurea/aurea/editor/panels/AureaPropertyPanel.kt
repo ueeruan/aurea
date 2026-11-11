@@ -210,5 +210,6 @@ private fun optionLabel(id: String, fallback: String): String = when (id) {
     "directional" -> stringResource(R.string.scene_light_directional)
     "point" -> stringResource(R.string.scene_light_point)
     "spot" -> stringResource(R.string.scene_light_spot)
+    "ambient" -> stringResource(R.string.scene_light_ambient)
     else -> fallback
 }

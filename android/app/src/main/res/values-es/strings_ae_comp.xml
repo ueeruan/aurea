@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE compositing (2026-11-10): modos de mesclagem e de máscara do After Effects, queda do feather, tímidas, preservar transparência e luz ambiente. -->
+<resources>
+    <string name="ae_blend_stencil_luma">Estarcido de luma</string>
+    <string name="ae_blend_silhouette_luma">Silueta de luma</string>
+    <string name="ae_blend_dissolve">Disolver</string>
+    <string name="ae_blend_dancing_dissolve">Disolver dinámico</string>
+    <string name="ae_blend_hard_mix">Mezcla definida</string>
+    <string name="ae_blend_classic_color_burn">Subexponer color clásico</string>
+    <string name="ae_blend_classic_color_dodge">Sobreexponer color clásico</string>
+    <string name="ae_blend_classic_difference">Diferencia clásica</string>
+    <string name="ae_blend_alpha_add">Suma de alfa</string>
+    <string name="ae_blend_luminescent_premul">Premultiplicado luminiscente</string>
+    <string name="ae_blend_cat_utility">Utilidad</string>
+    <string name="ae_blend_cat_dissolve">Disolución</string>
+    <string name="ae_mask_lighten">Aclarar</string>
+    <string name="ae_mask_darken">Oscurecer</string>
+    <string name="ae_mask_falloff_smooth">Caída suave</string>
+    <string name="ae_mask_falloff_linear">Caída lineal</string>
+    <string name="ae_layer_shy">Tímida</string>
+    <string name="ae_layer_shy_hint">Sale de la línea de tiempo cuando las tímidas están ocultas</string>
+    <string name="ae_comp_hide_shy">Ocultar capas tímidas</string>
+    <string name="ae_comp_hide_shy_hint">Vale para toda la composición; el video no cambia</string>
+    <string name="ae_layer_preserve_transparency">Conservar transparencia</string>
+    <string name="ae_layer_preserve_transparency_hint">Pinta solo donde las capas de abajo ya tienen imagen</string>
+    <string name="scene_light_ambient">Luz ambiental</string>
+</resources>

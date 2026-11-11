@@ -371,6 +371,8 @@ struct SceneFloor {
     f32  reflectivity = 0.5f;         ///< 0 = sem passe de reflexo planar
     f32  contactShadow = 0.8f;
     f32  fade = 6.0f;                 ///< raio do desbotamento (× raio dos modelos)
+    f32  wetness = 0.0f;              ///< 0.5.2 chão molhado: quanto vira poça (0..1)
+    f32  puddleSize = 260.0f;         ///< tamanho típico das poças (px do mundo)
 };
 
 struct SceneFrame {
@@ -379,6 +381,10 @@ struct SceneFrame {
     ScenePost post;
     SceneFloor floor;
     std::vector<SceneLight> lights;
+    /// 0.5.2: soma das luzes AMBIENTES da composição (cor × intensidade, linear).
+    /// Ilumina por igual o difuso dos modelos PBR e o chão; com alguma luz
+    /// ambiente na cena não entra a luz-chave padrão. Zero = sem luz ambiente.
+    Vec3 ambientLight{0, 0, 0};
     /// Luzes das camadas 2D desta cena (sem a luz-chave padrão dos modelos):
     /// o modelo do bloco; cada plano copia e põe o próprio mundo.
     PlaneLightBlock planeLight{};

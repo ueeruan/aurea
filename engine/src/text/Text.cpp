@@ -1219,4 +1219,59 @@ bool rasterize(const Font& font, const TextData& t, f32 scale, TextRaster& out) 
     return true;
 }
 
+// =============================================================================
+// AE animation (v68): keys do texto-fonte (sempre congelados).
+// =============================================================================
+i32 source_key_index(const TextData& t, i64 localFrame) noexcept {
+    const auto& keys = t.sourceKeys;
+    if (keys.empty()) return -1;
+    const auto it = std::upper_bound(keys.begin(), keys.end(), localFrame,
+                                     [](i64 f, const TextKey& k) { return f < k.frame; });
+    return it == keys.begin() ? 0 : static_cast<i32>(it - keys.begin()) - 1;
+}
+
+bool apply_source_text(const TextData& t, i64 localFrame, TextData& out) {
+    const i32 at = source_key_index(t, localFrame);
+    if (at < 0) return false;
+    const TextKey& k = t.sourceKeys[static_cast<usize>(at)];
+    if (&out != &t) out = t;
+    out.content = k.content;
+    out.spans = k.spans;
+    out.size = k.size;
+    out.color = k.color;
+    out.strokeWidth = k.strokeWidth;
+    out.strokeColor = k.strokeColor;
+    out.fontFamily = k.fontFamily;
+    out.fontWeight = k.fontWeight;
+    out.fontItalic = k.fontItalic;
+    out.fontPath = k.fontPath;
+    out.alignment = k.alignment;
+    return true;
+}
+
+void capture_source_key(const TextData& t, TextKey& key) {
+    key.content = t.content;
+    key.spans = t.spans;
+    key.size = t.size;
+    key.color = t.color;
+    key.strokeWidth = t.strokeWidth;
+    key.strokeColor = t.strokeColor;
+    key.fontFamily = t.fontFamily;
+    key.fontWeight = t.fontWeight;
+    key.fontItalic = t.fontItalic;
+    key.fontPath = t.fontPath;
+    key.alignment = t.alignment;
+}
+
+u32 upsert_source_key(TextData& t, TextKey key) {
+    auto& keys = t.sourceKeys;
+    const auto it = std::lower_bound(keys.begin(), keys.end(), key.frame,
+                                     [](const TextKey& k, i64 f) { return k.frame < f; });
+    if (it != keys.end() && it->frame == key.frame) {
+        *it = std::move(key);
+        return static_cast<u32>(it - keys.begin());
+    }
+    return static_cast<u32>(keys.insert(it, std::move(key)) - keys.begin());
+}
+
 } // namespace aurea::text

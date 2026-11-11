@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Timeline do AE (2026-11-11): marcas de camada, duração/comentário das marcas, área de trabalho, Easy Ease, escalar keyframes e escalonar. -->
+<resources>
+    <string name="aet_marker_duration">Durasi (frame)</string>
+    <string name="aet_marker_comment">Komentar</string>
+    <string name="aet_marker_comment_hint">Catatan penanda (ekspresi membacanya dengan .comment)</string>
+    <string name="aet_layer_marker_edit">Penanda lapisan</string>
+    <string name="aet_layer_marker_hint">Penanda ikut bergerak bersama lapisan. Di ekspresi: thisLayer.marker.</string>
+    <string name="aet_layer_marker_here">Penanda lapisan di sini</string>
+    <string name="aet_stagger">Bertahap</string>
+    <string name="aet_stagger_step_value">Jarak %1$d frame</string>
+    <string name="aet_stagger_less">Kurangi satu frame</string>
+    <string name="aet_stagger_more">Tambah satu frame</string>
+    <string name="aet_stagger_keys_only">Hanya keyframe</string>
+    <string name="aet_stagger_apply">Buat bertahap</string>
+    <string name="aet_on">Aktif</string>
+    <string name="aet_off">Nonaktif</string>
+    <string name="aet_export_work_area">Hanya area kerja</string>
+    <string name="aet_export_work_area_range">%1$s – %2$s</string>
+    <string name="aet_easy_ease">Easy Ease</string>
+    <string name="aet_easy_ease_in">Easy Ease masuk</string>
+    <string name="aet_easy_ease_out">Easy Ease keluar</string>
+    <string name="aet_ease_nothing">Tidak ada segmen untuk diperhalus pada keyframe terpilih</string>
+    <string name="aet_keys_scale">Skala waktu</string>
+    <string name="aet_keys_scale_to">Waktu jadi %1$s</string>
+    <string name="aet_keys_scale_refused">Tidak bisa diskalakan: dua keyframe akan jatuh di frame yang sama</string>
+    <string name="aet_work_area_start_here">Awal area kerja di sini</string>
+    <string name="aet_work_area_end_here">Akhir area kerja di sini</string>
+    <string name="aet_work_area_clear">Hapus area kerja</string>
+    <string name="aet_trim_to_work_area">Pangkas komposisi ke area kerja</string>
+    <string name="aet_trimmed_to_work_area">Komposisi dipangkas ke area kerja</string>
+</resources>

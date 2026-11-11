@@ -91,6 +91,7 @@ import kotlin.math.sign
 @Composable
 internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) {
     com.aurea.aurea.editor.timeline.MarkerEditor(store)
+    com.aurea.aurea.editor.timeline.LayerMarkerEditor(store)   // timeline do AE: marca da camada
     val mapper = remember { StageMapper() }
     val haptic = LocalHapticFeedback.current
     val insetPx = 0f

@@ -165,6 +165,24 @@ class EffectPickerLogicTest {
     }
 
     @Test
+    fun nameHitsBeatTagAndDescriptionPoints() {
+        // AE 2026: "warp" achava primeiro quem tinha a ETIQUETA "warp" (etiqueta ×7)
+        // e só depois "Warp (Styles)". Nome igual/começando com o texto vem antes.
+        val styles = fx("t.styles", "Deformar (estilos)", "Distorcer")
+        val tagged = fx("t.tagged", "Ondular", "Distorcer")
+        val d = mapOf(
+            styles.typeId to effectSearchDoc(listOf("Deformar (estilos)", "Warp (Styles)"), emptyList()),
+            tagged.typeId to effectSearchDoc(listOf("Ondular", "Wave"), listOf("warp")),
+        )
+        val fields = mapOf(
+            styles.typeId to EffectScoreFields(emptyList(), "Deformar (estilos)", "Warp (Styles)", ""),
+            tagged.typeId to EffectScoreFields(listOf("warp"), "Ondular", "Wave", "warp"),
+        )
+        assertEquals(listOf(styles, tagged), searchEffects(listOf(tagged, styles), d, "warp", fields))
+        assertEquals(listOf(styles, tagged), searchEffects(listOf(tagged, styles), d, "WARP", fields))
+    }
+
+    @Test
     fun everyTermMustMatchAndBlankFindsNothing() {
         assertTrue(searchEffects(searchable, docs, "vhs brilho").isEmpty())
         assertTrue(searchEffects(searchable, docs, "   ").isEmpty())

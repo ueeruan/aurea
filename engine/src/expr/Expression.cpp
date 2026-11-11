@@ -21,6 +21,10 @@
 #include "aurea/text/TextAnimator.hpp"
 #include "aurea/timeline/LayerAnimator.hpp"
 #include "aurea/timeline/Timeline.hpp"
+#include "aurea/timeline/LayerWorld.hpp"   // AE animation: toComp/fromComp/toWorld/fromWorld
+#include "aurea/text/FontManager.hpp"
+#include "aurea/text/Text.hpp"
+#include "aurea/vector/Vector.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -87,6 +91,20 @@ enum GlobalId : u32 {
     MPropSpeedAtTime, MPropNearestKey, MMarkerKey, MMarkerNearestKey,
 };
 
+// AE animation (2026-11-11): espaço da camada, mira, caixa do conteúdo e outras
+// composições. Números próprios (longe do fim das listas acima) para não
+// colidir com o que outros acrescentam lá.
+enum AeAnimId : u32 {
+    // toComp, fromComp, toWorld, fromWorld e as versões *Vec (direção, sem a
+    // translação), na MESMA ordem dos métodos MLayerSpace + k.
+    FToComp = 180, FFromComp, FToWorld, FFromWorld, FToCompVec, FFromCompVec, FToWorldVec, FFromWorldVec,
+    FLookAt, FComp, FSourceRect,
+    MLayerSpace = 260,          ///< + 0..7: thisLayer.toComp(...) …
+    MLayerSourceRect = 270,     ///< thisLayer.sourceRectAtTime(...)
+};
+constexpr const char* kSpaceNames[8] = {"toComp", "fromComp", "toWorld", "fromWorld",
+                                        "toCompVec", "fromCompVec", "toWorldVec", "fromWorldVec"};
+
 struct NameEntry { const char* name; u32 id; };
 
 constexpr NameEntry kGlobals[] = {
@@ -116,6 +134,10 @@ constexpr NameEntry kGlobals[] = {
     {"shake", FShake}, {"temporalWiggle", FTemporalWiggle}, {"speedAtTime", FSpeedAtTime},
     {"timeSinceMarker", FTimeSinceMarker}, {"posterizeTime", FPosterizeTime}, {"smooth", FSmooth},
     {"nearestKey", FNearestKey},
+    // AE animation: no corpo da expressão valem para a própria camada.
+    {"toComp", FToComp}, {"fromComp", FFromComp}, {"toWorld", FToWorld}, {"fromWorld", FFromWorld},
+    {"toCompVec", FToCompVec}, {"fromCompVec", FFromCompVec}, {"toWorldVec", FToWorldVec},
+    {"fromWorldVec", FFromWorldVec}, {"lookAt", FLookAt}, {"comp", FComp}, {"sourceRectAtTime", FSourceRect},
 };
 
 u32 find_global(std::string_view s) noexcept {
@@ -778,7 +800,10 @@ std::shared_ptr<const Program> compile_program(std::string_view source, Diagnost
 // =============================================================================
 /// Markers = as marcas da composição da camada (`marker`, `thisComp.marker`);
 /// MarkerKey = uma delas (`a` = índice na lista, em ordem de tempo).
-enum class K : u8 { Undef, Num, Vec, Str, Fn, Method, Layer, Comp, Transform, Effect, Prop, Key, Math, Markers, MarkerKey };
+/// Rect = a caixa de `sourceRectAtTime` (v = top, left, width, height). Comp e
+/// Layer guardam em v[3] de qual composição são (0 = a da expressão; k = a
+/// k-ésima da timeline, ver Ctx::comp_of).
+enum class K : u8 { Undef, Num, Vec, Str, Fn, Method, Layer, Comp, Transform, Effect, Prop, Key, Math, Markers, MarkerKey, Rect };
 
 struct Val {
     K   k = K::Undef;
@@ -1000,6 +1025,9 @@ f64 static_base(const PropDesc& d, u32 c) noexcept {
         case TP::TextPathLastMargin: return l->text.pathLastMargin;
         case TP::AudioVolume: return tr ? tr->staticValue : 1.0;
         case TP::Speed: return l->speed;
+        case TP::CameraPoiX: return l->camera.poi.x;   // AE animation: Ponto de Interesse
+        case TP::CameraPoiY: return l->camera.poi.y;
+        case TP::CameraPoiZ: return l->camera.poi.z;
         default: return tr ? tr->staticValue : 0.0;
     }
 }
@@ -1030,6 +1058,10 @@ PropDesc desc_for_track(const Layer* l, LayerId id, const Track& t, f64 fps, u32
         case TP::PositionX: case TP::PositionY: case TP::PositionZ: group3(TP::PositionX); break;
         case TP::ScaleX: case TP::ScaleY: case TP::ScaleZ: group3(TP::ScaleX); d.scale = 100.0; break;
         case TP::AnchorX: case TP::AnchorY: case TP::AnchorZ: group3(TP::AnchorX); break;
+        case TP::CameraPoiX: case TP::CameraPoiY: case TP::CameraPoiZ:   // AE animation: [x, y, z]
+            group3(TP::CameraPoiX);
+            d.count = 3;
+            break;
         case TP::LightColorR: case TP::LightColorG: case TP::LightColorB:
             d.prop = TP::LightColorR;
             outComponent = p - static_cast<u16>(TP::LightColorR);
@@ -1220,6 +1252,7 @@ struct Env {
     Val                value;           ///< valor pré-expressão (unidade da interface)
     u32                seedBase = 1;    ///< camada + grupo da propriedade
     const f32*         fallback = nullptr;
+    const Timeline*    tl = nullptr;        ///< AE animation: comp("Nome") e camadas de outras composições
 };
 
 f64 layer_local_from_comp(const Layer* l, f64 compF) noexcept {
@@ -1323,9 +1356,25 @@ struct Ctx {
         return r;
     }
     const Layer* layer_of(const Val& v) const {
-        if (!env->comp) return nullptr;
-        return env->comp->layer(LayerId{v.a, v.b});
+        const Composition* c = comp_of(v);
+        if (!c) return nullptr;
+        return c->layer(LayerId{v.a, v.b});
     }
+    /// AE animation: a composição de um Comp/Layer/Transform/Effect (v[3]: 0 =
+    /// a da expressão; k = a k-ésima da timeline, a ordem de `comp("Nome")`).
+    const Composition* comp_of(const Val& v) const {
+        const u32 tag = v.v[3] > 0.0 ? static_cast<u32>(v.v[3]) : 0u;
+        if (tag == 0) return env->comp;
+        if (!env->tl) return nullptr;
+        const Composition* found = nullptr;
+        u32 i = 0;
+        env->tl->for_each_composition([&](CompositionId, const Composition& c) { if (++i == tag) found = &c; });
+        return found;
+    }
+    Val layer_space(u32 which, const Val& layerVal, const Val* args, u32 argc, u32 pos);
+    Val look_at(const Val* args, u32 argc, u32 pos);
+    Val comp_fn(const Val* args, u32 argc, u32 pos);
+    Val source_rect(const Val& layerVal, const Val* args, u32 argc, u32 pos);
 
     // --- leitura de propriedade ----------------------------------------------
     /// Componente `c` da propriedade no quadro local fracionário `localF`, na
@@ -1467,7 +1516,18 @@ struct Ctx {
     Val lerp_fn(u32 id, const Val* args, u32 argc, u32 pos);
     Val key_of(const PropDesc& d, u32 propIndex, f64 idx, u32 pos);
     Val nearest_key(const PropDesc& d, u32 propIndex, f64 compF, u32 pos);
-    Val marker_key(const Val* args, u32 argc, bool nearest, u32 pos);
+    Val marker_key(const Val& obj, const Val* args, u32 argc, bool nearest, u32 pos);
+    /// Timeline do AE: a lista de um Markers/MarkerKey — `n` 1 = marcas da
+    /// camada `a`/`b` (tempo local), senão as da composição — e quanto somar
+    /// ao quadro dela para chegar ao quadro da composição.
+    const std::vector<Marker>* marker_list(const Val& v, i64& shift) const {
+        shift = 0;
+        if (v.n != 1) return env->comp ? &env->comp->markers() : nullptr;
+        const Layer* l = layer_of(v);
+        if (!l) return nullptr;
+        shift = l->start.value - l->offset.value;
+        return &l->markers;
+    }
     Val shake(const Val* args, u32 argc, u32 pos);
     Val time_since_marker(const Val* args, u32 argc, u32 pos);
 
@@ -1756,7 +1816,8 @@ Val Ctx::member(const Val& obj, std::string_view name, u32 pos) {
             return fail(pos, "Math." + std::string(name) + " não existe");
         }
         case K::Comp: {
-            const Composition* c = env->comp;
+            const Composition* c = comp_of(obj);
+            if (!c) return fail(pos, "a composição não existe mais");
             if (name == "layer") return make_method(MCompLayer, obj);
             if (name == "width") return Val::num(c->width());
             if (name == "height") return Val::num(c->height());
@@ -1768,20 +1829,27 @@ Val Ctx::member(const Val& obj, std::string_view name, u32 pos) {
             return fail(pos, "thisComp." + std::string(name) + " não existe");
         }
         case K::Markers: {
-            if (name == "numKeys") return Val::num(static_cast<f64>(env->comp->markers().size()));
+            i64 shift = 0;
+            const std::vector<Marker>* list = marker_list(obj, shift);
+            if (!list) return fail(pos, "a camada não existe mais");
+            if (name == "numKeys") return Val::num(static_cast<f64>(list->size()));
             if (name == "key") return make_method(MMarkerKey, obj);
             if (name == "nearestKey") return make_method(MMarkerNearestKey, obj);
             return fail(pos, "marker." + std::string(name) + " não existe (use key, nearestKey ou numKeys)");
         }
         case K::MarkerKey: {
-            const std::vector<Marker>& ms = env->comp->markers();
-            if (obj.a >= ms.size()) return fail(pos, "a marca não existe mais");
-            const Marker& m = ms[obj.a];
-            if (name == "time") return Val::num(static_cast<f64>(m.frame.value) / env->fps);
-            if (name == "index") return Val::num(obj.a + 1.0);
-            if (name == "frame") return Val::num(static_cast<f64>(m.frame.value));
-            if (name == "name" || name == "comment") return make_str(m.label);
-            if (name == "duration") return Val::num(0.0);
+            i64 shift = 0;
+            const std::vector<Marker>* list = marker_list(obj, shift);
+            if (!list || obj.id >= list->size()) return fail(pos, "a marca não existe mais");
+            const Marker& m = (*list)[obj.id];
+            // Tempo da COMPOSIÇÃO também na marca da camada (como no AE).
+            if (name == "time") return Val::num(static_cast<f64>(m.frame.value + shift) / env->fps);
+            if (name == "index") return Val::num(obj.id + 1.0);
+            if (name == "frame") return Val::num(static_cast<f64>(m.frame.value + shift));
+            if (name == "name") return make_str(m.label);
+            // Sem comentário (marca de antes da v67), o nome responde, como antes.
+            if (name == "comment") return make_str(m.comment.empty() ? m.label : m.comment);
+            if (name == "duration") return Val::num(static_cast<f64>(m.duration) / env->fps);
             return fail(pos, "a marca não tem '" + std::string(name) + "'");
         }
         case K::Layer: {
@@ -1790,10 +1858,14 @@ Val Ctx::member(const Val& obj, std::string_view name, u32 pos) {
             const LayerId id{obj.a, obj.b};
             if (name == "transform") { Val r = obj; r.k = K::Transform; return r; }
             if (name == "effect") return make_method(MLayerEffect, obj);
+            // AE animation: espaço da camada e a caixa do conteúdo.
+            for (u32 k = 0; k < 8; ++k) if (name == kSpaceNames[k]) return make_method(MLayerSpace + k, obj);
+            if (name == "sourceRectAtTime") return make_method(MLayerSourceRect, obj);
+            const Composition* lc = comp_of(obj);
             if (name == "name") return make_str(l->name);
             if (name == "index") {
-                const i32 z = env->comp->z_index_of(id);
-                return Val::num(z < 0 ? 0.0 : static_cast<f64>(env->comp->order().size() - static_cast<u32>(z)));
+                const i32 z = lc->z_index_of(id);
+                return Val::num(z < 0 ? 0.0 : static_cast<f64>(lc->order().size() - static_cast<u32>(z)));
             }
             if (name == "inPoint") return Val::num(static_cast<f64>(l->start.value) / env->fps);
             if (name == "outPoint") return Val::num(static_cast<f64>(l->end.value) / env->fps);
@@ -1802,13 +1874,16 @@ Val Ctx::member(const Val& obj, std::string_view name, u32 pos) {
                 const bool w = name == "width";
                 if (l->kind == LayerKind::Shape) return Val::num(w ? l->shape.bounds.w : l->shape.bounds.h);
                 if (l->kind == LayerKind::Null) return Val::num(100.0);
-                return Val::num(w ? env->comp->width() : env->comp->height());
+                return Val::num(w ? lc->width() : lc->height());
             }
+            if (name == "marker") { Val r = obj; r.k = K::Markers; r.n = 1; return r; }   // thisLayer.marker
             if (name == "hasParent") return Val::num(l->parent.valid() ? 1.0 : 0.0);
             if (name == "parent") {
-                const Layer* p2 = l->parent.valid() ? env->comp->layer(l->parent) : nullptr;
+                const Layer* p2 = l->parent.valid() ? lc->layer(l->parent) : nullptr;
                 if (!p2) return fail(pos, "a camada não tem pai");
-                return make_layer(p2, l->parent);
+                Val r = make_layer(p2, l->parent);
+                r.v[3] = obj.v[3];   // o pai mora na mesma composição
+                return r;
             }
             // layer.position etc. (atalho do transform, como no After Effects).
             Val t = obj;
@@ -1877,6 +1952,14 @@ Val Ctx::member(const Val& obj, std::string_view name, u32 pos) {
             if (name == "value") return prop_value(d, compF, false, pos);
             return fail(pos, "keyframe não tem '" + std::string(name) + "'");
         }
+        case K::Rect: {
+            // sourceRectAtTime(): {top, left, width, height}, px da camada.
+            if (name == "top") return Val::num(obj.v[0]);
+            if (name == "left") return Val::num(obj.v[1]);
+            if (name == "width") return Val::num(obj.v[2]);
+            if (name == "height") return Val::num(obj.v[3]);
+            return fail(pos, "a caixa tem top, left, width e height (não '" + std::string(name) + "')");
+        }
         case K::Num:
         case K::Vec:
             if (name == "length") return Val::num(obj.n);
@@ -1922,36 +2005,41 @@ Val Ctx::nearest_key(const PropDesc& d, u32 propIndex, f64 compF, u32 pos) {
 
 /// `marker.key(índice | "nome")` e `marker.nearestKey(t)`. O nome compara
 /// sem diferenciar maiúsculas (a pessoa digita "Drop", a marca é "drop").
-Val Ctx::marker_key(const Val* args, u32 argc, bool nearest, u32 pos) {
-    const std::vector<Marker>& ms = env->comp->markers();
+Val Ctx::marker_key(const Val& obj, const Val* args, u32 argc, bool nearest, u32 pos) {
+    i64 shift = 0;
+    const std::vector<Marker>* list = marker_list(obj, shift);
+    if (!list) return fail(pos, "a camada não existe mais");
+    const std::vector<Marker>& ms = *list;
     if (argc != 1) return fail(pos, nearest ? "uso: marker.nearestKey(t)" : "uso: marker.key(índice ou \"nome\")");
-    if (ms.empty()) return fail(pos, "a composição não tem marcas");
-    Val r;
+    if (ms.empty()) return fail(pos, obj.n == 1 ? "a camada não tem marcas" : "a composição não tem marcas");
+    Val r = obj;   // `n`/`a`/`b` dizem de quem é a lista
     r.k = K::MarkerKey;
     if (nearest) {
         f64 t = 0;
         if (!want_num(args[0], t, pos, "tempo")) return Val{};
-        const f64 f = t * env->fps;
+        const f64 f = t * env->fps - static_cast<f64>(shift);
         u32 best = 0;
         for (u32 i = 1; i < ms.size(); ++i) {
             if (std::fabs(static_cast<f64>(ms[i].frame.value) - f) < std::fabs(static_cast<f64>(ms[best].frame.value) - f)) best = i;
         }
-        r.a = best;
+        r.id = best;
         return r;
     }
     if (args[0].k == K::Str) {
+        // O nome (rótulo) e, como no AE, também o comentário.
         const std::string_view nm = str(args[0]);
-        for (u32 i = 0; i < ms.size(); ++i) if (ms[i].label == nm) { r.a = i; return r; }
-        for (u32 i = 0; i < ms.size(); ++i) if (name_eq(ms[i].label, nm)) { r.a = i; return r; }
+        for (u32 i = 0; i < ms.size(); ++i) if (ms[i].label == nm || ms[i].comment == nm) { r.id = i; return r; }
+        for (u32 i = 0; i < ms.size(); ++i) if (name_eq(ms[i].label, nm) || name_eq(ms[i].comment, nm)) { r.id = i; return r; }
         return fail(pos, "marca \"" + std::string(nm) + "\" não existe");
     }
     f64 idx = 0;
     if (!want_num(args[0], idx, pos, "índice da marca")) return Val{};
     const i64 k = static_cast<i64>(std::floor(idx + 0.5));
     if (k < 1 || k > static_cast<i64>(ms.size())) {
-        return fail(pos, "marker.key(" + std::to_string(k) + "): a composição tem " + std::to_string(ms.size()) + " marca(s)");
+        return fail(pos, "marker.key(" + std::to_string(k) + "): " + (obj.n == 1 ? "a camada" : "a composição")
+                         + " tem " + std::to_string(ms.size()) + " marca(s)");
     }
-    r.a = static_cast<u32>(k - 1);
+    r.id = static_cast<u32>(k - 1);
     return r;
 }
 
@@ -2026,20 +2114,29 @@ Val Ctx::call_method(u32 id, const Val& obj, const Val* args, u32 argc, u32 pos)
     switch (id) {
         case MCompLayer:
         case FLayer: {
-            if (!env->comp) return fail(pos, "sem composição");
+            // AE animation: comp("Nome").layer(...) procura na OUTRA composição.
+            const Composition* cc = id == MCompLayer ? comp_of(obj) : env->comp;
+            const f64 tag = id == MCompLayer ? obj.v[3] : 0.0;
+            if (!cc) return fail(pos, "sem composição");
             if (argc != 1) return fail(pos, "layer() recebe um nome ou um índice");
-            const OrderedIds<LayerId>& order = env->comp->order();
+            const OrderedIds<LayerId>& order = cc->order();
             if (args[0].k == K::Num) {
                 const i64 i = static_cast<i64>(std::floor(args[0].v[0] + 0.5));
                 if (i < 1 || i > static_cast<i64>(order.size())) return fail(pos, "layer(" + std::to_string(i) + "): não existe");
                 const LayerId lid = order.at(order.size() - static_cast<u32>(i));
-                return make_layer(env->comp->layer(lid), lid);
+                Val r = make_layer(cc->layer(lid), lid);
+                r.v[3] = tag;
+                return r;
             }
             if (args[0].k != K::Str) return fail(pos, "layer() recebe um nome ou um índice");
             const std::string_view nm = str(args[0]);
             for (u32 i = order.size(); i-- > 0;) {   // do topo (índice 1) para baixo
-                const Layer* l = env->comp->layer(order.at(i));
-                if (l && l->name == nm) return make_layer(l, order.at(i));
+                const Layer* l = cc->layer(order.at(i));
+                if (l && l->name == nm) {
+                    Val r = make_layer(l, order.at(i));
+                    r.v[3] = tag;
+                    return r;
+                }
             }
             return fail(pos, "camada \"" + std::string(nm) + "\" não existe");
         }
@@ -2087,6 +2184,7 @@ Val Ctx::call_method(u32 id, const Val& obj, const Val* args, u32 argc, u32 pos)
             r.a = lid.index;
             r.b = lid.generation;
             r.id = found;
+            r.v[3] = id == FEffect ? 0.0 : obj.v[3];   // AE animation: camada de outra composição
             return r;
         }
         case MEffectParam: {
@@ -2138,13 +2236,17 @@ Val Ctx::call_method(u32 id, const Val& obj, const Val* args, u32 argc, u32 pos)
             if (argc != 1 || !want_num(args[0], t, pos, "tempo")) return Val{};
             return nearest_key(props[obj.a], obj.a, t * env->fps, pos);
         }
-        case MMarkerKey: return marker_key(args, argc, false, pos);
-        case MMarkerNearestKey: return marker_key(args, argc, true, pos);
+        case MMarkerKey: return marker_key(obj, args, argc, false, pos);
+        case MMarkerNearestKey: return marker_key(obj, args, argc, true, pos);
         case MPropKey: {
             f64 i = 0;
             if (argc != 1 || !want_num(args[0], i, pos, "índice do keyframe")) return Val{};
             return key_of(props[obj.a], obj.a, i, pos);
         }
+        case MLayerSpace + 0: case MLayerSpace + 1: case MLayerSpace + 2: case MLayerSpace + 3:
+        case MLayerSpace + 4: case MLayerSpace + 5: case MLayerSpace + 6: case MLayerSpace + 7:
+            return layer_space(id - MLayerSpace, obj, args, argc, pos);
+        case MLayerSourceRect: return source_rect(obj, args, argc, pos);
         default: return fail(pos, "método desconhecido");
     }
 }
@@ -2509,8 +2611,205 @@ Val Ctx::call_fn(u32 id, const Val* args, u32 argc, u32 pos) {
         }
         case FLayer: return call_method(FLayer, Val{}, args, argc, pos);
         case FEffect: return call_method(FEffect, Val{}, args, argc, pos);
+        // AE animation: sem camada na frente, valem para a própria camada.
+        case FToComp: case FFromComp: case FToWorld: case FFromWorld:
+        case FToCompVec: case FFromCompVec: case FToWorldVec: case FFromWorldVec:
+            if (!e.layer) return fail(pos, "sem camada (expressão fora de uma camada)");
+            return layer_space(id - FToComp, make_layer(e.layer, e.layerId), args, argc, pos);
+        case FSourceRect:
+            if (!e.layer) return fail(pos, "sem camada (expressão fora de uma camada)");
+            return source_rect(make_layer(e.layer, e.layerId), args, argc, pos);
+        case FLookAt: return look_at(args, argc, pos);
+        case FComp: return comp_fn(args, argc, pos);
         default: return fail(pos, "função desconhecida");
     }
+}
+
+// =============================================================================
+// AE animation (2026-11-11): espaço da camada, mira, caixa e outras composições.
+// As matrizes são as do render (timeline/LayerWorld): a expressão vê a camada
+// exatamente onde ela é desenhada.
+// =============================================================================
+namespace {
+Vec3 mul_point(const Mat4& m, Vec3 p, f32 w) noexcept {
+    const Vec4 r = m * Vec4{p.x, p.y, p.z, w};
+    return Vec3{r.x, r.y, r.z};
+}
+} // namespace
+
+/// toComp/fromComp/toWorld/fromWorld (+ *Vec): (ponto[, t]). Mundo = o espaço
+/// 3D da cena (no 2D, igual à composição). Na camada 3D, toComp projeta pela
+/// câmera ativa e fromComp acha o ponto do PLANO da camada sob o pixel.
+Val Ctx::layer_space(u32 which, const Val& layerVal, const Val* args, u32 argc, u32 pos) {
+    const char* name = kSpaceNames[which & 7u];
+    const Layer* l = layer_of(layerVal);
+    const Composition* c = comp_of(layerVal);
+    if (!l || !c) return fail(pos, "a camada não existe mais");
+    if (argc < 1 || argc > 2) return fail(pos, std::string("uso: ") + name + "(ponto[, t])");
+    if (args[0].k != K::Vec || args[0].n < 2) return fail(pos, std::string(name) + ": o ponto precisa ser [x, y] ou [x, y, z]");
+    f64 t = nowF / env->fps;
+    if (argc == 2 && !want_num(args[1], t, pos, "t")) return Val{};
+    const f64 cf = c->fps() > 0.0 ? c->fps() : 30.0;
+    const f64 frame = t * cf;
+    if (!std::isfinite(frame) || std::fabs(frame) > 1.0e12) return fail(pos, std::string(name) + ": tempo inválido");
+    const bool threeD = world::wants_3d(*c, *l, FrameIndex{static_cast<i64>(std::floor(frame))});
+    const Mat4 m = threeD ? world::world_3d_frac(*c, *l, frame) : world::world_2d_frac(*c, *l, frame);
+    if (g_tls.cycle) return fail(pos, g_tls.cycleMsg.empty() ? "dependência circular" : g_tls.cycleMsg);
+    const u32 n = args[0].n;
+    const Vec3 p{static_cast<f32>(args[0].v[0]), static_cast<f32>(args[0].v[1]), n > 2 ? static_cast<f32>(args[0].v[2]) : 0.0f};
+    Mat4 inv;
+    const bool invertible = world::invert(m, inv);
+    const Mat4 a = threeD ? world::comp_from_world(*c, frame) * m : m;   // composição ← camada
+    auto toComp = [&](Vec3 q) -> Vec3 {
+        if (!threeD) return mul_point(m, q, 1.0f);
+        const Vec4 h = a * Vec4{q.x, q.y, q.z, 1.0f};
+        const f32 w = std::fabs(h.w) > 1e-9f ? h.w : 1e-9f;
+        return Vec3{h.x / w, h.y / w, 0.0f};
+    };
+    auto fromComp = [&](Vec3 q) -> Vec3 {
+        if (!threeD) return mul_point(inv, q, 1.0f);
+        // Plano da camada (z = 0): a(x, y, 0, 1) projeta em q. Duas equações lineares.
+        const f64 cx = q.x, cy = q.y;
+        const f64 a00 = a.col[0].x - cx * a.col[0].w, a01 = a.col[1].x - cx * a.col[1].w, b0 = cx * a.col[3].w - a.col[3].x;
+        const f64 a10 = a.col[0].y - cy * a.col[0].w, a11 = a.col[1].y - cy * a.col[1].w, b1 = cy * a.col[3].w - a.col[3].y;
+        const f64 det = a00 * a11 - a01 * a10;
+        if (std::fabs(det) < 1e-12) return Vec3{0, 0, 0};
+        return Vec3{static_cast<f32>((b0 * a11 - a01 * b1) / det), static_cast<f32>((a00 * b1 - b0 * a10) / det), 0.0f};
+    };
+    if ((which == 1 || which == 3 || which == 5 || which == 7) && !invertible && !threeD)
+        return fail(pos, std::string(name) + ": a camada está achatada (escala zero)");
+    Vec3 r;
+    switch (which) {
+        case 0: r = toComp(p); break;
+        case 1: r = fromComp(p); break;
+        case 2: r = mul_point(m, p, 1.0f); break;
+        case 3: r = mul_point(inv, p, 1.0f); break;
+        case 4: r = toComp(p) - toComp(Vec3{0, 0, 0}); break;
+        case 5: r = fromComp(p) - fromComp(Vec3{0, 0, 0}); break;
+        case 6: r = mul_point(m, p, 0.0f); break;
+        default: r = mul_point(inv, p, 0.0f); break;
+    }
+    if (!std::isfinite(r.x) || !std::isfinite(r.y) || !std::isfinite(r.z)) return fail(pos, std::string(name) + ": resultado inválido");
+    const f64 out[3] = {r.x, r.y, r.z};
+    return Val::vec(out, std::min<u32>(n, 3u));
+}
+
+/// lookAt(de, para): a orientação [x, y, 0] (graus) que aponta o eixo Z da
+/// camada de `de` para `para` — para usar na rotação X/Y de uma camada 3D.
+Val Ctx::look_at(const Val* args, u32 argc, u32 pos) {
+    if (argc != 2 || args[0].k != K::Vec || args[1].k != K::Vec)
+        return fail(pos, "uso: lookAt(de, para) com pontos [x, y, z]");
+    const f64 dx = args[1].v[0] - args[0].v[0], dy = args[1].v[1] - args[0].v[1];
+    const f64 dz = (args[1].n > 2 ? args[1].v[2] : 0.0) - (args[0].n > 2 ? args[0].v[2] : 0.0);
+    const f64 flat = std::sqrt(dx * dx + dz * dz);
+    const f64 out[3] = {flat + std::fabs(dy) < 1e-12 ? 0.0 : std::atan2(-dy, flat) * 180.0 / 3.14159265358979323846,
+                        flat < 1e-12 ? 0.0 : std::atan2(dx, dz) * 180.0 / 3.14159265358979323846, 0.0};
+    return Val::vec(out, 3);
+}
+
+/// comp("Nome"): outra composição do projeto (nome exato; senão sem caixa).
+Val Ctx::comp_fn(const Val* args, u32 argc, u32 pos) {
+    if (argc != 1 || args[0].k != K::Str) return fail(pos, "uso: comp(\"Nome\")");
+    if (!env->tl) return fail(pos, "sem projeto (expressão fora de uma camada)");
+    const std::string_view nm = str(args[0]);
+    u32 i = 0, exact = 0, loose = 0;
+    const Composition* exactComp = nullptr;
+    const Composition* looseComp = nullptr;
+    env->tl->for_each_composition([&](CompositionId, const Composition& c) {
+        ++i;
+        if (!exact && c.name() == nm) { exact = i; exactComp = &c; }
+        else if (!loose && name_eq(c.name(), nm)) { loose = i; looseComp = &c; }
+    });
+    const u32 tag = exact ? exact : loose;
+    const Composition* found = exact ? exactComp : looseComp;
+    if (!tag) return fail(pos, "composição \"" + std::string(nm) + "\" não existe");
+    Val r;
+    r.k = K::Comp;
+    r.v[3] = found == env->comp ? 0.0 : static_cast<f64>(tag);
+    return r;
+}
+
+/// sourceRectAtTime([t[, includeExtents]]): a caixa do conteúdo no instante,
+/// em px da camada — texto (com o key do texto-fonte), forma, vetor,
+/// pré-composição; o resto, a caixa da camada.
+Val Ctx::source_rect(const Val& layerVal, const Val* args, u32 argc, u32 pos) {
+    const Layer* l = layer_of(layerVal);
+    const Composition* c = comp_of(layerVal);
+    if (!l || !c) return fail(pos, "a camada não existe mais");
+    if (argc > 2) return fail(pos, "uso: sourceRectAtTime([t[, incluirExtensões]])");
+    f64 t = nowF / env->fps;
+    if (argc >= 1 && !want_num(args[0], t, pos, "t")) return Val{};
+    const bool extents = argc >= 2 && truthy(args[1]);
+    const f64 cf = c->fps() > 0.0 ? c->fps() : 30.0;
+    const f64 local = layer_local_from_comp(l, t * cf);
+    if (!std::isfinite(local)) return fail(pos, "sourceRectAtTime: tempo inválido");
+    f64 top = 0, left = 0, width = 0, height = 0;
+    switch (l->kind) {
+        case LayerKind::Text: {
+            TextData shown = l->text;
+            const bool keyed = text::apply_source_text(l->text, static_cast<i64>(std::floor(local)), shown);
+            if (const Track* tr = l->tracks.find(TrackProperty::TextTracking); tr && tr->driven())
+                shown.tracking = std::clamp(tr->value_or_f(local, shown.tracking), -1000.0f, 1000.0f);
+            const auto font = text::FontManager::instance().font_for(shown);
+            if (!font) return fail(pos, "sourceRectAtTime: sem fonte para o texto");
+            const text::TextExtent ext = text::measure(*font, shown);
+            const TextData& base = l->text;
+            // A mesma origem do render: a margem do texto de base e, com key, o
+            // ponto de alinhamento do key sobre o do texto de base.
+            const f64 pad = base.strokeWidth > 0.0f ? base.strokeWidth + 2.0f : 2.0f;
+            left = top = pad;
+            if (keyed && shown.boxMode == 0) {
+                const auto baseFont = text::FontManager::instance().font_for(base);
+                const f64 wb = baseFont ? text::measure(*baseFont, base).width : 0.0;
+                auto at = [](u32 align, f64 w) { return align == 1 ? w * 0.5 : align == 2 ? w : 0.0; };
+                left += at(base.alignment, wb) - at(shown.alignment, ext.width);
+            }
+            width = ext.width;
+            height = ext.height;
+            if (extents && shown.strokeWidth > 0.0f) {
+                left -= shown.strokeWidth; top -= shown.strokeWidth;
+                width += 2.0 * shown.strokeWidth; height += 2.0 * shown.strokeWidth;
+            }
+            break;
+        }
+        case LayerKind::Shape: {
+            if (l->shape.shapeType == kShapeVector) {
+                std::vector<VectorGroup> ev;
+                ev.reserve(l->shape.vector.groups.size());
+                for (u32 gi = 0; gi < l->shape.vector.groups.size(); ++gi)
+                    ev.push_back(vector::evaluate_group(l->shape.vector.groups[gi], l->tracks, gi, local, cf));
+                Vec2 mn, mx;
+                if (vector::bounds_of(ev, local, mn, mx)) { left = mn.x; top = mn.y; width = mx.x - mn.x; height = mx.y - mn.y; }
+                break;
+            }
+            const Rect& b = l->shape.bounds;
+            auto param = [&](u32 p, f32 fallback) {
+                const Track* tr = l->tracks.find(TrackProperty::ShapeParam, 0, p);
+                return tr && !tr->keys.empty() ? static_cast<f64>(tr->value_or_f(local, fallback)) : static_cast<f64>(fallback);
+            };
+            left = b.x; top = b.y;
+            width = std::max(0.0, param(5, b.w));
+            height = std::max(0.0, param(6, b.h));
+            if (extents && l->shape.strokeWidth > 0.0f) {
+                const f64 s = l->shape.strokeWidth * 0.5;
+                left -= s; top -= s; width += 2.0 * s; height += 2.0 * s;
+            }
+            break;
+        }
+        case LayerKind::Null: width = height = 100.0; break;
+        case LayerKind::Composition: {
+            const Composition* child = env->tl ? env->tl->composition(l->nested.composition) : nullptr;
+            width = child ? child->width() : c->width();
+            height = child ? child->height() : c->height();
+            break;
+        }
+        default: width = c->width(); height = c->height(); break;
+    }
+    Val r;
+    r.k = K::Rect;
+    r.n = 4;
+    r.v[0] = top; r.v[1] = left; r.v[2] = width; r.v[3] = height;
+    return r;
 }
 
 /// Executa o programa. `out` recebe o valor final (já sem propriedade).
@@ -2740,6 +3039,7 @@ f32 evaluate_track_f(const Track& track, f64 t, const f32* fallback) noexcept {
     env.track = &track;
     env.fallback = fallback;
     env.fps = fps;
+    env.tl = sd ? sd->tl : nullptr;
     env.self = desc_for_track(owner.layer, owner.id, track, fps, env.component);
     env.localF = t;
     env.compF = env.localF + static_cast<f64>(owner.layer->start.value) - static_cast<f64>(owner.layer->offset.value);

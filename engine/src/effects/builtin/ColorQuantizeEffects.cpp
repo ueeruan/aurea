@@ -42,7 +42,10 @@ public:
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32, LayerImage& out) const override {
         TwoColorUniforms u{};
         u.base = base_uniforms(input);
-        u.base.p0 = {std::clamp(e.f(kLimit) * .01f, 0.f, 1.f), std::clamp(e.f(kSoftness) * .01f, 0.f, 1.f), 0, 0};
+        // NaN (expressão) não passa: std::clamp de NaN devolve NaN.
+        const f32 limit = std::isfinite(e.f(kLimit)) ? e.f(kLimit) : 50.0f;
+        const f32 soft = std::isfinite(e.f(kSoftness)) ? e.f(kSoftness) : 0.0f;
+        u.base.p0 = {std::clamp(limit * .01f, 0.f, 1.f), std::clamp(soft * .01f, 0.f, 1.f), 0, 0};
         u.base.color = e.color(kDark); u.second = e.color(kLight);
         return passthrough_pass(ctx, "threshold", ShaderId::effects_color_threshold_frag, input, out, &u, sizeof(u),
                                 {PassTexture{input.texture}});
@@ -70,7 +73,9 @@ public:
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32, LayerImage& out) const override {
         EffectUniforms u = base_uniforms(input);
         // Níveis inteiros (keyframes passam de um nível ao outro sem meio-termo).
-        u.p0 = {std::round(std::clamp(e.f(kLevels), 2.f, 32.f)), std::clamp(e.f(kGamma), 0.1f, 4.f), e.b(kLumaOnly) ? 1.f : 0.f, 0};
+        const f32 levels = std::isfinite(e.f(kLevels)) ? e.f(kLevels) : 6.0f;
+        const f32 gamma = std::isfinite(e.f(kGamma)) ? e.f(kGamma) : 1.0f;
+        u.p0 = {std::round(std::clamp(levels, 2.f, 32.f)), std::clamp(gamma, 0.1f, 4.f), e.b(kLumaOnly) ? 1.f : 0.f, 0};
         return passthrough_pass(ctx, "posterize", ShaderId::effects_color_posterize_frag, input, out, &u, sizeof(u),
                                 {PassTexture{input.texture}});
     }

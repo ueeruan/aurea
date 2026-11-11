@@ -75,9 +75,8 @@ std::vector<f32> onset_envelope(const f32* x, usize n) {
     return out;
 }
 
-} // namespace
-
-BeatResult detect_beats(const f32* mono, usize count) {
+/// Núcleo compartilhado. `strengthOut` (opcional) recebe o envelope nas batidas.
+BeatResult detect_impl(const f32* mono, usize count, std::vector<f32>* strengthOut) {
     BeatResult r;
     if (!mono || count < 48000 * 3) return r;
     const std::vector<f32> o = onset_envelope(mono, count);
@@ -157,7 +156,59 @@ BeatResult detect_beats(const f32* mono, usize count) {
     r.beats.reserve(idx.size());
     for (usize t : idx) r.beats.push_back(static_cast<f64>(t) / kFrameRate + offset);
     r.bpm = 60.0 * kFrameRate / period;
+    if (strengthOut) {
+        // Pico do envelope em ±20 ms da batida (o máximo da DP pode cair um
+        // quadro antes/depois do pico do ataque).
+        strengthOut->clear();
+        strengthOut->reserve(idx.size());
+        for (usize t : idx) {
+            f32 peak = 0.0f;
+            for (usize k = t > 2 ? t - 2 : 0; k <= std::min(n - 1, t + 2); ++k) peak = std::max(peak, o[k]);
+            strengthOut->push_back(peak);
+        }
+    }
     return r;
+}
+
+} // namespace
+
+BeatResult detect_beats(const f32* mono, usize count) {
+    return detect_impl(mono, count, nullptr);
+}
+
+BeatAnalysis detect_beats_ex(const f32* mono, usize count) {
+    BeatAnalysis a;
+    std::vector<f32> raw;
+    BeatResult r = detect_impl(mono, count, &raw);
+    a.bpm = r.bpm;
+    a.beats = std::move(r.beats);
+    if (a.beats.empty() || a.bpm <= 0.0) { a.beats.clear(); a.bpm = 0.0; return a; }
+    // Força relativa: mediana = 1, faixa [0.25, 2].
+    std::vector<f32> sorted = raw;
+    std::nth_element(sorted.begin(), sorted.begin() + static_cast<std::ptrdiff_t>(sorted.size() / 2), sorted.end());
+    const f32 median = sorted[sorted.size() / 2];
+    a.strength.reserve(raw.size());
+    for (f32 v : raw) a.strength.push_back(median > 1e-9f ? std::clamp(v / median, 0.25f, 2.0f) : 1.0f);
+    // Fase: reta t = fase + k·P por mínimos quadrados sobre as batidas (k pelo
+    // período detectado; buracos pulam índices). O P ajustado é mais preciso que
+    // o da autocorrelação, então a fase não escorrega ao longo da música.
+    const f64 period = 60.0 / a.bpm;
+    f64 sk = 0, st = 0, skk = 0, skt = 0;
+    const f64 nb = static_cast<f64>(a.beats.size());
+    for (f64 b : a.beats) {
+        const f64 k = std::round((b - a.beats.front()) / period);
+        sk += k; st += b; skk += k * k; skt += k * b;
+    }
+    const f64 den = nb * skk - sk * sk;
+    f64 fitP = period, fitPhase = a.beats.front();
+    if (a.beats.size() >= 2 && std::fabs(den) > 1e-12) {
+        const f64 pf = (nb * skt - sk * st) / den;
+        if (pf > 0.5 * period && pf < 2.0 * period) { fitP = pf; fitPhase = (st - pf * sk) / nb; }
+    }
+    f64 ph = std::fmod(fitPhase, fitP);
+    if (ph < 0.0) ph += fitP;
+    a.phaseSec = ph;
+    return a;
 }
 
 } // namespace aurea::audio

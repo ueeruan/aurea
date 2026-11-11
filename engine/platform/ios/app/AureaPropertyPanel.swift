@@ -288,7 +288,8 @@ struct AureaPropertyPanel: View {
         }.frame(minHeight: 44)
     }
     private func optionLabel(_ option: AureaBuiltinPropertySchema.Option) -> String {
-        let key = ["directional": "scene_light_directional", "point": "scene_light_point", "spot": "scene_light_spot"][option.id]
+        let key = ["directional": "scene_light_directional", "point": "scene_light_point", "spot": "scene_light_spot",
+                   "ambient": "scene_light_ambient"][option.id]
         return key.map { AureaText.t($0) } ?? option.label
     }
     private func color(_ p: AureaBuiltinPropertySchema.Property) -> some View {

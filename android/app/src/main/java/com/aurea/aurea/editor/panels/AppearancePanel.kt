@@ -93,9 +93,22 @@ private class BlendCategory(val key: String, @StringRes val name: Int, val modes
  * Hue 14, Saturation 15, Color 16, Luminosity 17, Divide 18, VividLight 19,
  * LinearDodge 20, LinearBurn 21, Mask 22, Exclude 23, DarkerColor 24, LighterColor 25,
  * LinearLight 26, PinLight 27, SoftOverlay 28. "Adicionar" (1) é extra do AUREA, no fim de Clarear.
+ * AE compositing (2026-11-10), nos grupos do After Effects: StencilLuma 29,
+ * SilhouetteLuma 30, Dissolve 31, DancingDissolve 32, HardMix 33,
+ * ClassicColorBurn 34, ClassicColorDodge 35, ClassicDifference 36, AlphaAdd 37,
+ * LuminescentPremul 38.
  */
 private val BlendCategories = listOf(
     BlendCategory("normal", R.string.panel_normal, listOf(BlendChoice(R.string.panel_normal, 0, BlendMode.SrcOver)), direct = 0),
+    // AE: Dissolver e Dissolver dançante moram com o Normal (aqui numa categoria
+    // própria, porque tocar em "Normal" aplica direto).
+    BlendCategory(
+        "dissolve", R.string.ae_blend_cat_dissolve,
+        listOf(
+            BlendChoice(R.string.ae_blend_dissolve, 31, BlendMode.SrcOver),
+            BlendChoice(R.string.ae_blend_dancing_dissolve, 32, BlendMode.SrcOver),
+        ),
+    ),
     BlendCategory(
         "darken", R.string.pn_blend_darken,
         listOf(
@@ -103,6 +116,7 @@ private val BlendCategories = listOf(
             BlendChoice(R.string.pn_blend_darken, 6, BlendMode.Darken),
             BlendChoice(R.string.om_ap_blend_darker_color, 24, BlendMode.Darken),
             BlendChoice(R.string.pn_blend_color_burn, 9, BlendMode.ColorBurn),
+            BlendChoice(R.string.ae_blend_classic_color_burn, 34, BlendMode.ColorBurn),
             BlendChoice(R.string.pn_blend_linear_burn, 21, BlendMode.Multiply),
         ),
     ),
@@ -113,6 +127,7 @@ private val BlendCategories = listOf(
             BlendChoice(R.string.pn_blend_lighten, 7, BlendMode.Lighten),
             BlendChoice(R.string.om_ap_blend_lighter_color, 25, BlendMode.Lighten),
             BlendChoice(R.string.pn_blend_color_dodge, 8, BlendMode.ColorDodge),
+            BlendChoice(R.string.ae_blend_classic_color_dodge, 35, BlendMode.ColorDodge),
             BlendChoice(R.string.pn_blend_linear_dodge, 20, BlendMode.Plus),
             BlendChoice(R.string.pn_blend_add, 1, BlendMode.Plus),
         ),
@@ -127,12 +142,14 @@ private val BlendCategories = listOf(
             BlendChoice(R.string.pn_blend_vivid_light, 19, BlendMode.ColorDodge),
             BlendChoice(R.string.om_ap_blend_linear_light, 26, BlendMode.Hardlight),
             BlendChoice(R.string.om_ap_blend_pin_light, 27, BlendMode.Overlay),
+            BlendChoice(R.string.ae_blend_hard_mix, 33, BlendMode.Hardlight),
         ),
     ),
     BlendCategory(
         "difference", R.string.pn_blend_difference,
         listOf(
             BlendChoice(R.string.pn_blend_difference, 12, BlendMode.Difference),
+            BlendChoice(R.string.ae_blend_classic_difference, 36, BlendMode.Difference),
             BlendChoice(R.string.pn_blend_exclusion, 13, BlendMode.Exclusion),
             BlendChoice(R.string.pn_blend_subtract, 2, BlendMode.Difference),
             BlendChoice(R.string.pn_blend_divide, 18, BlendMode.ColorDodge),
@@ -152,13 +169,23 @@ private val BlendCategories = listOf(
         "mask", R.string.pn_blend_cat_mask,
         listOf(
             BlendChoice(R.string.pn_blend_mask, 22, BlendMode.DstIn, cut = 1),
+            BlendChoice(R.string.ae_blend_stencil_luma, 29, BlendMode.DstIn, cut = 1),
             BlendChoice(R.string.pn_blend_exclude, 23, BlendMode.DstOut, cut = 2),
+            BlendChoice(R.string.ae_blend_silhouette_luma, 30, BlendMode.DstOut, cut = 2),
+        ),
+    ),
+    // AE "Utilitário": Adição de alfa (emenda mattes que se encostam) e Luminescente pré-multiplicado.
+    BlendCategory(
+        "utility", R.string.ae_blend_cat_utility,
+        listOf(
+            BlendChoice(R.string.ae_blend_alpha_add, 37, BlendMode.Plus),
+            BlendChoice(R.string.ae_blend_luminescent_premul, 38, BlendMode.SrcOver),
         ),
     ),
 )
 
-/** Os modos que o renderer desenha (todos os de `aurea::BlendMode`, até kLastBlendMode = 28). */
-private val RenderedBlendModes = (0..28).toSet()
+/** Os modos que o renderer desenha (todos os de `aurea::BlendMode`, até kLastBlendMode = 38). */
+private val RenderedBlendModes = (0..38).toSet()
 
 /**
  * MESCLAGEM E OPACIDADE: moldura de 200 dp (PanelFrame, sem abas). O ◆, a curva

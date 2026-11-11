@@ -99,7 +99,8 @@ func fxSearchDoc(names: [String], extra: [String]) -> FxSearchDoc {
     return FxSearchDoc(names: n, text: all.joined(separator: " "))
 }
 
-/// Todo termo tem de aparecer; a ordem é por PONTOS e, no empate, a do
+/// Todo termo tem de aparecer; primeiro os nomes iguais ao texto, depois os
+/// que começam com ele; dentro de cada faixa, PONTOS e, no empate, a do
 /// catálogo. Pontos = os da busca do AUREA em 7 idiomas (4 nome igual · 3 nome
 /// começa · 2 palavra do nome começa · 1 todos os termos no nome · 0 achado no
 /// resto) SOMADOS aos da referência (`fxEffectSearchScore` com `fields`).
@@ -108,7 +109,7 @@ func fxSearchEffects(_ sorted: [EffectCatalogItem], _ docs: [UInt32: FxSearchDoc
     let q = fxNormalizeSearch(query).split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
     guard !q.isEmpty else { return [] }
     let terms = q.split(separator: " ").map(String.init)
-    var ranked: [(points: Int, order: Int, entry: EffectCatalogItem)] = []
+    var ranked: [(tier: Int, points: Int, order: Int, entry: EffectCatalogItem)] = []
     for (order, entry) in sorted.enumerated() {
         guard let doc = docs[entry.typeId], terms.allSatisfy({ doc.text.contains($0) }) else { continue }
         let rank: Int
@@ -117,9 +118,16 @@ func fxSearchEffects(_ sorted: [EffectCatalogItem], _ docs: [UInt32: FxSearchDoc
         else if doc.names.contains(where: { name in name.split(separator: " ").contains { word in word.hasPrefix(q) } }) { rank = 2 }
         else if doc.names.contains(where: { name in terms.allSatisfy { name.contains($0) } }) { rank = 3 }
         else { rank = 4 }
-        ranked.append(((4 - rank) + fxEffectSearchScore(fields[entry.typeId], q), order, entry))
+        // Nome igual / nome que começa com o texto vêm SEMPRE antes (AE 2026:
+        // "warp" achava etiquetas e categorias antes de "Warp (Styles)"); dentro
+        // de cada faixa, os pontos e depois a ordem do catálogo. Par do Android.
+        let tier = rank == 0 ? 2 : rank == 1 ? 1 : 0
+        ranked.append((tier, (4 - rank) + fxEffectSearchScore(fields[entry.typeId], q), order, entry))
     }
-    return ranked.sorted { $0.points != $1.points ? $0.points > $1.points : $0.order < $1.order }.map(\.entry)
+    return ranked.sorted {
+        if $0.tier != $1.tier { return $0.tier > $1.tier }
+        return $0.points != $1.points ? $0.points > $1.points : $0.order < $1.order
+    }.map(\.entry)
 }
 
 /// Sinônimos por CATEGORIA, em vários idiomas (os mesmos do Android).
@@ -1237,6 +1245,7 @@ private struct FxRecommendedItem: View {
                     .background(AureaColors.fxPanel)
                     .clipShape(RoundedRectangle(cornerRadius: 5))
                     .overlay(alignment: .topLeading) { if entry.isNew { FxNewBadge().padding(5) } }
+                    .overlay(alignment: .bottomLeading) { if fxEffectFuturePaid(entry.typeId) { FxFreeForNowBadge().padding(5) } }
                     .overlay(alignment: .topTrailing) { FxEffectBadge(entry: entry).offset(x: 5, y: -5) }
                     .padding(.top, 8)
                 Text(name).font(.aurea(size: 10)).foregroundStyle(AureaColors.text)
@@ -1503,6 +1512,7 @@ private struct FxGridCard: View {
                     .background(AureaColors.fxPanel)
                     .clipShape(RoundedRectangle(cornerRadius: 5))
                     .overlay(alignment: .topLeading) { if entry.isNew { FxNewBadge().padding(4) } }
+                    .overlay(alignment: .bottomLeading) { if fxEffectFuturePaid(entry.typeId) { FxFreeForNowBadge().padding(4) } }
                     .overlay(alignment: .topTrailing) { FxEffectBadge(entry: entry).offset(x: 4, y: -4) }
                     .padding(.top, 8)
                 Text(name).font(.aurea(size: 10)).foregroundStyle(AureaColors.text)
@@ -1537,6 +1547,16 @@ private struct FxEffectBadge: View {
                 .frame(width: 23, height: 23).background(AureaColors.onImage, in: Circle())
                 .accessibilityLabel(AureaText.t("fx_browser_heavy"))
         }
+    }
+}
+
+/// Selo "Grátis por enquanto" (efeito que será pago numa versão futura): o desenho do "Novo".
+private struct FxFreeForNowBadge: View {
+    var body: some View {
+        Text(AureaText.t("headbop_free_for_now")).font(.aurea(size: 9, weight: .bold)).foregroundStyle(AureaColors.onAccent)
+            .lineLimit(1).padding(.horizontal, 4).padding(.vertical, 1)
+            .background(AureaColors.accent, in: RoundedRectangle(cornerRadius: 4))
+            .accessibilityIdentifier("effects.badge.free_for_now")
     }
 }
 
@@ -1803,6 +1823,7 @@ private struct FxResultRow: View {
                     .background(AureaColors.fxPanel)
                     .clipShape(RoundedRectangle(cornerRadius: 5))
                     .overlay(alignment: .topLeading) { if entry.isNew { FxNewBadge().padding(4) } }
+                    .overlay(alignment: .bottomLeading) { if fxEffectFuturePaid(entry.typeId) { FxFreeForNowBadge().padding(4) } }
                     .overlay(alignment: .topTrailing) { FxEffectBadge(entry: entry).offset(x: 4, y: -4) }
                 VStack(alignment: .leading, spacing: 1) {
                     Text(name).font(.aurea(size: 17)).lineLimit(1)

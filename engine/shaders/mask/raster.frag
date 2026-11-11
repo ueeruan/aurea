@@ -12,6 +12,9 @@
 //  expansão soma na distância (dilata/erode com cantos redondos). Fora da
 //  caixa da máscara (mais a margem do feather) nem entra no laço de arestas.
 //  A matemática é a mesma de mask::coverage_at (C++), que os testes comparam.
+//  h1.w = 1: queda LINEAR do feather (rampa reta de largura 4σ, com o texel);
+//  0 = a gaussiana de sempre. Modos 5 Clarear = max(acc, cov) e 6 Escurecer =
+//  min(acc, cov) (AE compositing, 2026-11-10).
 // =============================================================================
 #include "../common/bindings.glsl"
 
@@ -71,7 +74,10 @@ void main() {
             }
             float dist = sqrt(d2);
             float sd = (wind != 0 ? dist : -dist) + expand;
-            if (sigma > 0.0) {
+            if (sigma > 0.0 && h1.w > 0.5) {
+                float w = sqrt(16.0 * sigma * sigma + 1.0 / (k * k));
+                cov = clamp(sd / w + 0.5, 0.0, 1.0);
+            } else if (sigma > 0.0) {
                 float s = sqrt(sigma * sigma + 1.0 / (12.0 * k * k));
                 cov = 0.5 * (1.0 + erf_approx(sd / (s * 1.41421356)));
             } else {
@@ -84,6 +90,8 @@ void main() {
         else if (op == 1) acc = acc * (1.0 - cov);                // Subtract
         else if (op == 2) acc = acc * cov;                        // Intersect
         else if (op == 3) acc = acc + cov - 2.0 * acc * cov;      // Difference
+        else if (op == 5) acc = max(acc, cov);                    // Lighten (Clarear)
+        else if (op == 6) acc = min(acc, cov);                    // Darken (Escurecer)
     }
     o_color = vec4(clamp(acc, 0.0, 1.0), 0.0, 0.0, 1.0);
 }

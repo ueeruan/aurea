@@ -478,6 +478,21 @@ struct ExportView: View {
                       selected: model.exportOptions.trimToContent ? "content" : "full", tag: "export.settings.range") {
                 model.exportOptions.trimToContent = $0 == "content"
             }
+            // Timeline do AE: só a área de trabalho (com a composição tendo uma).
+            if model.workArea.count == 2 {
+                let fps = Float(model.compositionFps)
+                Toggle(isOn: Binding(get: { model.exportWorkAreaOnly }, set: { model.changeExportWorkAreaOnly($0) })) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(AureaText.t("aet_export_work_area")).font(.system(size: 14))
+                        Text(AureaText.t("aet_export_work_area_range",
+                                         NSString(string: Timecode.format(Int32(clamping: model.workArea[0]), fps)),
+                                         NSString(string: Timecode.format(Int32(clamping: model.workArea[1]), fps))))
+                            .font(.system(size: 12)).foregroundColor(.secondary)
+                    }
+                }
+                .padding(.top, 10)
+                .accessibilityIdentifier("export.workAreaOnly")
+            }
         }
     }
 

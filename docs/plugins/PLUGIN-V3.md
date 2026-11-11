@@ -1,146 +1,42 @@
-# Plugin V3 — guia para criadores
+# Plugin V3 (formato 3) do AUREA
 
-O formato 3 deixa um plugin do AUREA ir bem além de um shader com sliders: ele
-recebe curvas, degradês e outras camadas, lembra o quadro anterior, ouve o som,
-muda os próprios parâmetros a cada quadro e monta uma interface com abas e
-seções, que pode até substituir painéis do editor.
+> Extraído da seção 15 de [README.md](README.md), que tem a referência completa dos formatos 1 e 2.
 
-Tudo continua **declarado** no `plugin.json`. Quem desenha a interface são os
-componentes do próprio AUREA, iguais no Android e no iOS. O pacote não traz
-binário nem HTML. Plugins dos formatos 1 e 2 continuam funcionando sem mudança.
+Com `"aureaPlugin": 3` um plugin ganha parâmetros de curva, degradê e camada,
+histórico de quadros, som, script por quadro, interface em árvore, tela cheia e a
+possibilidade de substituir painéis do editor. Tudo continua **declarado**: quem
+desenha são os componentes do AUREA, nas duas plataformas. Não há binário
+baixado nem HTML. Os formatos 1 e 2 seguem valendo sem mudança.
 
-Este guia é o caminho rápido. A referência completa (cabeçalho do shader,
-limites, API inteira de script) está no [README](README.md), seções 1 a 15.
+O exemplo [`examples/v3-showcase/`](examples/v3-showcase/) usa quase tudo isto.
 
----
+## 1 Parâmetros novos
 
-## 1. Primeiro plugin V3 em 5 minutos
+Só em plugins `"kind": "shader"` ou `"shader3d"` com formato 3.
 
-Uma pasta com três arquivos:
-
-```
-meu-plugin/
-├── plugin.json
-├── efeito.frag
-└── frame.js
-```
-
-**plugin.json**
-
-```json
-{
-  "aureaPlugin": 3,
-  "id": "com.seunome.pulso",
-  "version": "1.0.0",
-  "author": "Seu nome",
-  "name": { "pt-BR": "Pulso", "en": "Pulse" },
-  "kind": "shader",
-  "params": [
-    { "id": "amount", "type": "float", "label": { "pt-BR": "Força", "en": "Strength" },
-      "default": 0.5, "min": 0, "max": 1 },
-    { "id": "paint", "type": "gradient", "label": { "pt-BR": "Cores", "en": "Colors" } }
-  ],
-  "uses": ["audio"],
-  "frameScript": "frame.js",
-  "passes": [ { "shader": "efeito.frag" } ]
-}
-```
-
-**efeito.frag**
-
-```glsl
-vec4 aurea_main(vec2 uv) {
-    vec4 c = aurea_unpremultiply(texture(aurea_source, uv));
-    vec3 cor = paint(aurea_luma(c.rgb)).rgb;
-    float batida = aurea_audio(0.1) * AUREA_AUDIO_PEAK;
-    vec3 rgb = mix(c.rgb, cor, amount) * (1.0 + batida);
-    return vec4(rgb * c.a, c.a);
-}
-```
-
-**frame.js**
-
-```js
-function onFrame(f) {
-  return { amount: 0.5 + 0.5 * Math.sin(f.time * 2) };
-}
-```
-
-Empacote e instale:
-
-```
-python docs/plugins/tools/pack_plugin.py meu-plugin
-```
-
-Copie o `meu-plugin.aureaplugin` para o aparelho e abra
-**Efeitos → Plugins: instalar e gerenciar → Instalar plugin**.
-
----
-
-## 2. O que muda do formato 2 para o 3
-
-| Recurso | Formato 2 | Formato 3 |
+| `type` | No painel | No shader |
 | --- | --- | --- |
-| Tipos de parâmetro | float, int, bool, enum, color, point, angle, layer | + `curve`, `gradient`, `layerImage` |
-| Quadro anterior | — | `uses: ["history"]` |
-| Som | — | `uses: ["audio"]` |
-| Parâmetros animados por código | só keyframe e expressão | `frameScript` a cada quadro |
-| Interface | lista de controles | árvore: `row`, `column`, `section`, `tabs` |
-| Onde aparece | painel do editor, menus | + tela cheia, item no Adicionar, substituir painéis |
-| Script | painéis, ações, API | + expressões, ease, texto, máscaras |
+| `curve` | editor de curva (mestra, R, G, B) | `float id(float t)`; ocupa 16 posições |
+| `gradient` | editor de degradê (até 16 cores) | `vec4 id(float t)`, RGBA linear; ocupa 32 posições |
+| `layerImage` | escolher camada | `sampler2D id` e `bool id_connected`; ocupa 1 sampler |
 
-Para migrar, troque `"aureaPlugin": 2` por `3`. O resto do manifesto continua
-válido.
+`layerImage` chega no tamanho da composição, já com efeitos e transformações da
+camada escolhida. Sem camada, `id_connected` é falso e o sampler devolve a
+própria entrada. As posições somam no limite de parâmetros (252 em `shader`, 189
+em `shader3d`), e os samplers somam no limite de entradas.
 
----
-
-## 3. Parâmetros novos
-
-Valem em plugins `"kind": "shader"` e `"shader3d"`.
-
-| `type` | No painel | No shader | Custo |
-| --- | --- | --- | --- |
-| `curve` | editor de curva (mestra, R, G, B) | `float id(float t)` | 16 posições |
-| `gradient` | editor de degradê, até 16 cores | `vec4 id(float t)`, RGBA linear | 32 posições |
-| `layerImage` | escolher uma camada | `sampler2D id` e `bool id_connected` | 1 sampler |
-
-- **`curve`:** chame como função. `tone(0.5)` devolve a curva no meio.
-- **`gradient`:** `paint(t)` devolve a cor em `t` de 0 a 1, já em luz linear.
-- **`layerImage`:** a camada escolhida chega no tamanho da composição, com os
-  efeitos e a transformação dela. Sem camada, `id_connected` é `false` e o
-  sampler devolve a própria entrada; sempre teste antes de usar.
-
-As posições contam no limite de parâmetros (252 em `shader`, 189 em
-`shader3d`), e os samplers contam no limite de entradas por passe.
-
----
-
-## 4. Quadro anterior e som (`uses`)
+## 2 `uses`: histórico e som
 
 ```json
 "uses": ["history", "audio"]
 ```
 
-**`history`** dá ao shader `sampler2D aurea_history`, o resultado do quadro
-anterior, e o macro `AUREA_HISTORY`. Serve para rastro, eco e feedback:
-
-```glsl
-vec4 antes = aurea_unpremultiply(texture(aurea_history, uv));
-rgb = mix(rgb, antes.rgb, rastro * antes.a);
-```
-
-**`audio`** dá:
-
-| Símbolo | O que é |
+| Pedido | O que o shader ganha |
 | --- | --- |
-| `float aurea_audio(float banda)` | energia da banda, de 0 (graves) a 1 (agudos) |
-| `float AUREA_AUDIO_PEAK` | pico do quadro |
-| `sampler2D aurea_audio_spectrum` | o espectro inteiro |
-| `AUREA_AUDIO` | macro, para `#ifdef` |
+| `history` | `sampler2D aurea_history` (o resultado do quadro anterior) e o macro `AUREA_HISTORY` |
+| `audio` | `sampler2D aurea_audio_spectrum`, `float aurea_audio(float banda)` (banda de 0 a 1), `float AUREA_AUDIO_PEAK` e o macro `AUREA_AUDIO` |
 
----
-
-## 5. Script por quadro (`frameScript`)
+## 3 Script por quadro (`frameScript`)
 
 ```json
 "frameScript": "frame.js"
@@ -148,22 +44,19 @@ rgb = mix(rgb, antes.rgb, rastro * antes.a);
 
 ```js
 function onFrame(f) {
-  // f.time (segundos), f.frame, f.fps, f.progress (0 a 1 no clipe), f.params
+  // f.time (s), f.frame, f.fps, f.progress (0..1 no clipe), f.params
   return { amount: 0.5 + 0.5 * Math.sin(f.time * 3) };
 }
 ```
 
-- Devolva só os ids que quer mudar: número, ou lista para cor e ponto. O que
-  ficar de fora mantém o valor do painel.
-- O script não acessa o projeto. `Math.random` repete o mesmo valor no mesmo
-  quadro, então a prévia e a exportação saem iguais.
-- **Limites por quadro:** 500.000 passos, 8 ms e 8 MB. Três falhas seguidas
-  desligam o script até o app reabrir, e o efeito segue com os valores do
-  painel.
+Devolva um objeto com os ids que quer mudar: número, ou lista para cor e ponto.
+O que ficar de fora mantém o valor do painel. O script não tem acesso ao projeto
+e `Math.random` é repetível por quadro, então prévia e exportação batem.
 
----
+Limites por quadro: 500.000 passos, 8 ms e 8 MB. Três falhas seguidas desligam o
+script até reabrir o app; o efeito continua com os valores do painel.
 
-## 6. Interface em árvore
+## 4 Interface em árvore
 
 Quatro controles guardam outros em `children`, até 6 níveis:
 
@@ -172,131 +65,94 @@ Quatro controles guardam outros em `children`, até 6 níveis:
 | `row` | lado a lado, dividindo a largura |
 | `column` | um embaixo do outro |
 | `section` | título que abre e fecha; `"collapsed": true` começa fechada |
-| `tabs` | abas; cada filho precisa ser uma `section` |
+| `tabs` | abas; os filhos precisam ser `section` |
 
-```json
-"controls": [
-  { "id": "abas", "type": "tabs", "children": [
-    { "id": "basico", "type": "section", "label": { "pt-BR": "Básico", "en": "Basic" }, "children": [
-      { "id": "linha", "type": "row", "children": [
-        { "id": "ola", "type": "button", "label": { "pt-BR": "Olá", "en": "Hello" }, "onClick": "dizerOla" },
-        { "id": "zerar", "type": "button", "label": { "pt-BR": "Zerar", "en": "Reset" }, "style": "secondary", "onClick": "zerar" }
-      ]}
-    ]},
-    { "id": "ajuste", "type": "section", "label": { "pt-BR": "Ajuste", "en": "Adjust" }, "children": [
-      { "id": "forca", "type": "slider", "label": { "pt-BR": "Força", "en": "Strength" },
-        "min": 0, "max": 100, "default": 50, "unit": "%" }
-    ]}
-  ]}
-]
-```
+Os ids valem na árvore toda, e um id repetido recusa o plugin. `ui.setVisible` e
+`ui.setEnabled` no container valem para tudo que estiver dentro.
 
-- Os ids valem na árvore toda. Um id repetido faz o app recusar o plugin.
-- `ui.setVisible(id, …)` e `ui.setEnabled(id, …)` num container valem para tudo
-  que está dentro dele.
+## 5 Lugares novos e substituir painéis
 
----
-
-## 7. Onde o plugin aparece
-
-| Onde | Como declarar |
+| Onde | Campo |
 | --- | --- |
-| Painel em tela cheia | painel com `"placement": "editor.fullscreen"` |
-| Grade Elemento do Adicionar | ação com `"placement": "add.menu"` e `"panel"` |
-| No lugar de um painel do editor | painel com `"placement": "editor.panel"` e `"replaces"` |
+| Tela cheia no editor | painel com `"placement": "editor.fullscreen"` (o botão de fechar é do app) |
+| Grade Elemento do Adicionar | ação com `"placement": "add.menu"` |
+| Substituir um painel | painel com `"replaces"` e `"placement": "editor.panel"` |
 
-`replaces` aceita `transform`, `effects`, `blend`, `presets` e `material`.
+`replaces` aceita `transform`, `effects`, `blend`, `presets` e `material`. O app
+**sempre** mostra "Voltar ao original" acima do painel do plugin, fora do controle
+dele. A escolha fica guardada por painel, e o gerenciador de plugins tem a chave
+para usar o painel do plugin de novo.
 
-Regras que o app garante, independentemente do plugin:
+## 6 Script: expressões, ease, texto e máscaras
 
-- O botão de fechar da tela cheia é sempre do app.
-- Acima de um painel substituído aparece sempre **Voltar ao original**. A
-  escolha fica guardada por painel, e o gerenciador de plugins tem a chave para
-  usar o painel do plugin de novo.
-
----
-
-## 8. Script: expressões, ease, texto e máscaras
-
-Cada chamada inteira vira um único passo de desfazer.
+Tudo entra no desfazer da chamada.
 
 ```js
-// Expressões
 var o = layer.opacity;
-o.expression = "wiggle(2, 10)";     // "" remove
+o.expression = "wiggle(2, 10)";        // "" remove
 o.expressionEnabled = false;
-o.expressionError;                  // texto do erro, "" se está certo
+o.expressionError;                     // texto do erro, "" se está certo
 
-// Ease nas chaves
 o.setTemporalEaseAtKey(2, [new KeyframeEase(0, 33)], [new KeyframeEase(0, 66)]);
-o.keyInTemporalEase(2);             // [{speed, influence}]
+o.keyInTemporalEase(2);                // [{speed, influence}]
+o.keyOutTemporalEase(2);
 
-// Texto
-var doc = texto.sourceText.value;   // {text, font, fontSize, fillColor}
+var doc = texto.sourceText.value;      // {text, font, fontSize, fillColor}
 doc.text = "Novo";
 doc.fontSize = 80;
 texto.property("Source Text").setValue(doc);
 
-// Máscaras
-var m = layer.addMask({ vertices: [[0, 0], [100, 0], [100, 100]], closed: true });
+var m = layer.addMask({vertices: [[0, 0], [100, 0], [100, 100]], closed: true});
 m.feather = 8;
-m.opacity = 50;                     // 0 a 100
-m.mode = "subtract";                // add, subtract, intersect, difference, none
+m.expansion = 2;
+m.opacity = 50;                        // 0 a 100
+m.inverted = true;
+m.mode = "subtract";                   // add, subtract, intersect, difference, none
+m.path = {vertices: [...], inTangents: [...], outTangents: [...], closed: true};
+layer.masks;                           // lista
 m.remove();
 ```
 
-`font` é só leitura. Escrever `mask.path` numa máscara com caminho animado grava
-uma chave no cabeçote.
+`mask.path` lê a forma guardada; em máscara com caminho animado, escrever grava
+uma chave no cabeçote. `font` é só leitura.
 
----
+## 7 Modo seguro
 
-## 9. Modo seguro
+Se o app abrir e cair duas vezes seguidas, a abertura seguinte desliga os plugins
+e o gerenciador explica o motivo. Dá para ligar e desligar pela chave **Modo
+seguro** no gerenciador. Os plugins continuam listados, e os projetos que usam
+efeitos deles guardam os efeitos para quando o modo seguro sair.
 
-Se o app abrir e cair duas vezes seguidas, a próxima abertura desliga todos os
-plugins e o gerenciador explica o motivo. A chave **Modo seguro** no
-gerenciador liga e desliga isso à mão.
+Motor: `plugins_safe_mode()`, `plugins_safe_mode_automatic()`,
+`set_plugins_safe_mode(on)` e `mark_plugins_healthy()`. O app marca a abertura
+como boa ao ir para o fundo ou depois de 15 s no editor. O degradê do painel
+usa `query_effect_gradient` e `set_effect_gradient`.
 
-Com o modo seguro ligado, os plugins continuam listados, e os projetos guardam
-os efeitos deles para quando o modo seguro sair. Se alguém relatar que o seu
-plugin "sumiu", peça para conferir essa chave.
+## 8 O que o formato 3 não faz
 
----
+- **Assinatura de pacote:** não existe; a instalação é por conta e risco de quem
+  instala. Exige chave e serviço da loja.
+- **Tempo de GPU por quadro:** não é medido em celular. Há o teste de renderização
+  na instalação e o orçamento do `frameScript`.
 
-## 10. Limites
+## 9 Tipos de luz em `layers.addLight(tipo)`
 
-| Limite | Valor |
-| --- | --- |
-| Parâmetros | 252 em `shader`, 189 em `shader3d`, 256 em `stack` e painéis |
-| Passes | 32 |
-| Entradas + texturas por passe | 11 + a fonte |
-| Imagens do pacote | 8, até 64 MB e 8192 px cada |
-| Níveis da interface | 6 |
-| `frameScript` | 500.000 passos, 8 ms e 8 MB por quadro |
-| Quadro de teste na instalação | 1 s em 256×256 |
+O número passado a `addLight` (scripts de plugin e o Assistente) escolhe o tipo
+da camada de luz. É o mesmo contrato de `Engine::add_light` (`LightKind` em
+`engine/include/aurea/timeline/Layer.hpp`):
 
-O quadro de teste roda **no aparelho de quem instala**. Um plugin aceito num
-celular rápido pode ser recusado num de entrada, então projete para o mais
-fraco. Laço em shader precisa ter fim fixo.
+| Número | Luz criada |
+|---:|---|
+| `0` (padrão) | direcional (paralela, como a "Parallel" do AE) |
+| `1` | pontual |
+| `2` | spot |
+| `3` | ambiente (ilumina tudo por igual, sem direção) |
+| `4` | Flare 3D: uma luz pontual com o efeito Flare de cena |
 
----
+Fora de 0..4 o número é preso na faixa. Até a 0.5.1 o `3` criava o Flare 3D e
+não havia como criar a luz ambiente; projetos e plugins antigos que pediam `3`
+para o flare agora recebem a luz ambiente (use `4`).
 
-## 11. O que o formato 3 ainda não faz
-
-- **Tipos de camada, ferramentas e modos próprios:** ainda não existem.
-- **Assinatura de pacote:** não há; instalar é por conta e risco de quem
-  instala.
-- **Tempo de GPU por quadro:** não é medido no celular durante o uso. Há o
-  quadro de teste na instalação e o limite do `frameScript`.
-
----
-
-## 12. Checklist antes de publicar
-
-- [ ] `python docs/plugins/tools/pack_plugin.py --check minha-pasta` sem erros
-- [ ] Textos em `pt-BR` e `en` no mínimo
-- [ ] Testado numa camada com transparência e numa camada pequena em quadro grande
-- [ ] Prévia e exportação iguais (com `frameScript`, confira um quadro dos dois)
-- [ ] `layerImage` testado com e sem camada escolhida
-- [ ] Rodou num celular de entrada, além do seu
-
-O exemplo completo está em [`examples/v3-showcase/`](examples/v3-showcase/).
+Nos scripts `.jsx` no estilo do AE (importação), `comp.layers.addLight(nome)`
+cria a luz padrão; as constantes `LightType.PARALLEL`, `SPOT`, `POINT` e
+`AMBIENT` existem para o script rodar, mas `lightType` ainda não é lido.

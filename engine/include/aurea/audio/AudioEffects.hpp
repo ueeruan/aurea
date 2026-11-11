@@ -43,6 +43,11 @@ namespace fx_keys {
     inline constexpr const char* kParametricEq = "aurea.audio.parametric_eq";
     inline constexpr const char* kReverb       = "aurea.audio.room_reverb";
     inline constexpr const char* kTone         = "aurea.audio.tone";
+    /// Lote "AE 2026" (AeEffects2026Generate.cpp): duas prateleiras de EQ.
+    inline constexpr const char* kBassTreble   = "aurea.audio.bass_treble";
+    /// Lote "AE 2026", segunda leva (AeEffects2026Extra.cpp): distorção e portão de ruído.
+    inline constexpr const char* kDistortion   = "aurea.audio.distortion";
+    inline constexpr const char* kGate         = "aurea.audio.gate";
 }
 
 /// Tipos de estágio da cadeia. `Envelope` é interno: o volume, os fades e o
@@ -59,13 +64,17 @@ enum class FxKind : u8 {
     ParametricEq,
     Reverb,
     Tone,
+    BassTreble,   ///< lote "AE 2026": prateleira de graves (200 Hz) e de agudos (4 kHz)
+    Distortion,   ///< lote "AE 2026" (segunda leva): modelos de saturação + redutor de bits
+    Gate,         ///< lote "AE 2026" (segunda leva): portão de ruído (limiar, ataque, retenção, soltura)
 };
 
 // Índices dos parâmetros — o MESMO contrato da declaração do efeito
 // (effects/builtin/AudioEffects.cpp) e do DSP.
 namespace fxp {
     enum Backwards : u32 { kSwapChannels = 0, kBackwardsCount };
-    enum Delay : u32 { kDelayTime = 0, kDelayAmount, kDelayFeedback, kDelayDry, kDelayWet, kDelayCount };
+    /// `kDelayPan` (AE 2026): acrescentado no fim — projetos antigos leem o padrão 0 (centro).
+    enum Delay : u32 { kDelayTime = 0, kDelayAmount, kDelayFeedback, kDelayDry, kDelayWet, kDelayPan, kDelayCount };
     enum FlangeChorus : u32 { kVoiceSeparation = 0, kVoices, kFlangeRate, kFlangeDepth, kVoicePhase, kFlangeInvert,
                               kStereoVoices, kFlangeDry, kFlangeWet, kFlangeCount };
     enum HighLow : u32 { kFilterType = 0, kCutoff, kFilterDry, kFilterWet, kFilterCount };
@@ -74,8 +83,18 @@ namespace fxp {
     /// EQ: banda b (0..2) começa em `b * kEqBandStride`.
     enum ParametricEq : u32 { kEqEnable = 0, kEqFrequency, kEqBandwidth, kEqGain, kEqBandStride, kEqCount = 12 };
     enum Reverb : u32 { kReverbTime = 0, kDiffusion, kDecay, kBrightness, kReverbDry, kReverbWet, kReverbCount };
+    /// Forma 4 = ruído branco (AE 2026, opção acrescentada no fim do enum).
     enum Tone : u32 { kWaveform = 0, kFreq1, kFreq2, kFreq3, kFreq4, kFreq5, kToneLevel, kToneCount };
+    enum BassTreble : u32 { kBass = 0, kTreble, kBassTrebleCount };
+    enum Distortion : u32 { kDistType = 0, kDistDrive, kDistGain, kDistMix, kDistVolume, kDistBits, kDistDownsample,
+                            kDistortionCount };
+    enum Gate : u32 { kGateThreshold = 0, kGateAttack, kGateHold, kGateRelease, kGateCount };
 }
+
+/// Um modelo de distorção (lote "AE 2026"): a curva de `type` (0 corte suave,
+/// 1 corte duro, 2 saturação 1, 3 saturação 2, 4 válvula, 5 fuzz) aplicada a
+/// `x` já com o drive. Ímpar em todos menos a válvula (assimétrica). |saída| ≤ 1.
+[[nodiscard]] f32 distortion_curve(u32 type, f32 x) noexcept;
 
 /// Um parâmetro de estágio: constante, ou um valor por quadro da composição
 /// da camada dona (a partir de `FxStage::frame0`), interpolado linearmente.
@@ -125,6 +144,8 @@ struct Biquad {
 [[nodiscard]] Biquad eq_band(f64 hz, f64 bandwidthPercent, f64 gainDb) noexcept;
 /// Passa-alta (`highPass`) ou passa-baixa de 2ª ordem (Butterworth) em `hz`.
 [[nodiscard]] Biquad pass_filter(bool highPass, f64 hz) noexcept;
+/// Prateleira (RBJ, inclinação 1) de graves (`high` falso) ou agudos em `hz`, ganho em dB.
+[[nodiscard]] Biquad shelf_filter(bool high, f64 hz, f64 gainDb) noexcept;
 /// |H| em dB do filtro na frequência `hz`.
 [[nodiscard]] f64 biquad_response_db(const Biquad& b, f64 hz) noexcept;
 

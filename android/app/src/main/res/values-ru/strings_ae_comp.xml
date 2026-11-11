@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE compositing (2026-11-10): modos de mesclagem e de máscara do After Effects, queda do feather, tímidas, preservar transparência e luz ambiente. -->
+<resources>
+    <string name="ae_blend_stencil_luma">Трафарет по яркости</string>
+    <string name="ae_blend_silhouette_luma">Силуэт по яркости</string>
+    <string name="ae_blend_dissolve">Растворение</string>
+    <string name="ae_blend_dancing_dissolve">Динамическое растворение</string>
+    <string name="ae_blend_hard_mix">Жёсткое смешение</string>
+    <string name="ae_blend_classic_color_burn">Классическое затемнение основы</string>
+    <string name="ae_blend_classic_color_dodge">Классическое осветление основы</string>
+    <string name="ae_blend_classic_difference">Классическая разница</string>
+    <string name="ae_blend_alpha_add">Сложение альфы</string>
+    <string name="ae_blend_luminescent_premul">Светящееся premultiplied</string>
+    <string name="ae_blend_cat_utility">Служебные</string>
+    <string name="ae_blend_cat_dissolve">Режимы растворения</string>
+    <string name="ae_mask_lighten">Замена светлым</string>
+    <string name="ae_mask_darken">Замена тёмным</string>
+    <string name="ae_mask_falloff_smooth">Мягкий спад</string>
+    <string name="ae_mask_falloff_linear">Линейный спад</string>
+    <string name="ae_layer_shy">Скрываемый</string>
+    <string name="ae_layer_shy_hint">Пропадает с таймлайна, когда скрываемые слои спрятаны</string>
+    <string name="ae_comp_hide_shy">Прятать скрываемые слои</string>
+    <string name="ae_comp_hide_shy_hint">Для всей композиции; видео не меняется</string>
+    <string name="ae_layer_preserve_transparency">Сохранять прозрачность</string>
+    <string name="ae_layer_preserve_transparency_hint">Рисует только там, где у слоёв ниже уже есть изображение</string>
+    <string name="scene_light_ambient">Рассеянный свет</string>
+</resources>

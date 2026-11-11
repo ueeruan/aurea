@@ -29,4 +29,14 @@ struct BeatResult {
 /// Allocations propagate to the importing/analysis boundary, which reports OOM.
 [[nodiscard]] BeatResult detect_beats(const f32* mono, usize count);
 
+/// Mesma detecção de `detect_beats` (mesmas batidas e BPM), mais a força de
+/// ataque de cada batida e a fase da grade.
+struct BeatAnalysis {
+    f64 bpm = 0.0;
+    f64 phaseSec = 0.0;        ///< fase da grade em [0, 60/bpm): média circular das batidas
+    std::vector<f64> beats;    ///< idêntico a BeatResult::beats
+    std::vector<f32> strength; ///< por batida: pico do envelope de ataques / mediana, em [0.25, 2]
+};
+[[nodiscard]] BeatAnalysis detect_beats_ex(const f32* mono, usize count);
+
 } // namespace aurea::audio

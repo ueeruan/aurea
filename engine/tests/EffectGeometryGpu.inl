@@ -74,8 +74,9 @@ AUREA_TEST(EffectGeometryGpu, WaveAngleIsContinuousPeriodicAndKeepsPreviousDirec
     Scene scene(160, 90);
     const auto id = scene.image(reference_image(160, 90), 80, 45);
     auto& wave = scene.add_effect(id, effect_keys::kWaveWarp);
-    AUREA_CHECK_EQ(wave.params.size(), 10u);
-    if (wave.params.size() != 10) return;
+    // Os 10 de antes nos mesmos índices (o "Tipo de onda" do AE 2026 entrou no fim).
+    AUREA_CHECK(wave.params.size() >= 10u);
+    if (wave.params.size() < 10) return;
     wave.params[0].constant.v[0] = 11;
     wave.params[1].constant.v[0] = 43;
     wave.params[3].constant.v[0] = 28;

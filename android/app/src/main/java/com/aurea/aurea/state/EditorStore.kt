@@ -616,7 +616,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var curveGraphMode by mutableIntStateOf(0)
     var scaleAxesLinked by mutableStateOf(true)
     var timelineKeyDragActive by mutableStateOf(false)
-    fun exportDuration(trimToContent: Boolean): Long = engine.exportDuration(trimToContent)
+    fun exportDuration(trimToContent: Boolean): Long {
+        // Lidos para o Compose remedir quando "só a área de trabalho" (timeline do AE) muda.
+        exportWorkAreaOnly; workArea
+        return engine.exportDuration(trimToContent)
+    }
 
     var timelineFocus by mutableStateOf<List<com.aurea.aurea.engine.TrackKey>?>(null)
     var transformAnimatorFocus by mutableStateOf<Pair<Long, TrackKey>?>(null)
@@ -1641,7 +1645,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (!LayerRow.sameRows(layers, fresh)) layers = fresh
         captionTracks = com.aurea.aurea.captions.parseCaptionTracks(engine.captionTracks())
         refreshMarkers()
+        refreshAeTimeline()   // timeline do AE: marcas de camada e área de trabalho
         editMode = engine.editMode()
+        hideShy = engine.hideShy()
         uiMode = engine.projectUiMode()
         mainTrackAnchor = engine.mainTrackAnchor()
         editTimeline = if (uiMode != UI_MODE_COMPOSITION) com.aurea.aurea.editor.EditTimelineData.parse(engine.queryEditTimeline()) else null
@@ -1816,10 +1822,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             textStyle = same(textStyle, if (engine.queryTextStyle(id, st)) st else null)
             val dyn = engine.queryTextDynamic(id)
             if (dyn == null || textDynamic == null || !dyn.contentEquals(textDynamic)) textDynamic = dyn
+            val tex = engine.queryTextTexture(id)
+            if (tex == null || textTexture == null || !tex.contentEquals(textTexture)) textTexture = tex
         } else {
             textFont = null
             textStyle = null
             textDynamic = null
+            textTexture = null
         }
         val anim = if (id != null && (detail?.kind == com.aurea.aurea.ui.theme.LayerType.Text.kind || text3d != null)) {
             engine.queryTextAnimators(id)?.let { a -> List(a.size / 40) { i -> a.copyOfRange(i * 40, i * 40 + 40) } } ?: emptyList()
@@ -1897,6 +1906,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Valores animáveis do grupo no cabeçote + bits animados + bits com keyframe. */
     var vectorParams by mutableStateOf<FloatArray?>(null)
         private set
+    /** Operadores de caminho do grupo no cabeçote (VParam.MOD_FLOATS por operador). */
+    var vectorModifiers by mutableStateOf<FloatArray?>(null)
+        private set
     /** Ponto escolhido no modo de pontos (−1 = nenhum). */
     var vectorPoint by mutableIntStateOf(-1)
     /** Texto no caminho da camada de texto: [guia, bits da margem, perpendicular, invertido]. */
@@ -1914,6 +1926,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             vectorDoc = null
             vectorPathAt = null
             vectorParams = null
+            vectorModifiers = null
             if (vectorTool == 1) vectorTool = 0
             return
         }
@@ -1927,6 +1940,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val n = vectorPathAt?.path?.v?.size ?: 0
         if (vectorPoint >= n) vectorPoint = -1
         vectorParams = if (groups > 0) engine.queryVectorParams(id, vectorGroup) else null
+        vectorModifiers = if (groups > 0) engine.queryVectorModifiers(id, vectorGroup) else null
     }
 
     /** "Desenho vetorial" (preset 0, entra no modo de pontos) e formas paramétricas (1..4). */
@@ -2011,6 +2025,32 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun toggleVectorParamKey(param: Int) {
         val id = primary ?: return
         engine.toggleVectorParamKey(id, vectorGroup, param)
+        refreshNow()
+    }
+
+    /** Operador de caminho novo (VModType) no fim da lista do grupo. Índice ou −1. */
+    fun addVectorModifier(type: Int): Int {
+        val id = primary ?: return -1
+        val m = engine.addVectorModifier(id, vectorGroup, type)
+        refreshNow()
+        return m
+    }
+
+    fun removeVectorModifier(index: Int) {
+        val id = primary ?: return
+        engine.removeVectorModifier(id, vectorGroup, index)
+        refreshNow()
+    }
+
+    fun moveVectorModifier(from: Int, to: Int) {
+        val id = primary ?: return
+        engine.moveVectorModifier(id, vectorGroup, from, to)
+        refreshNow()
+    }
+
+    fun setVectorModifierEnabled(index: Int, enabled: Boolean) {
+        val id = primary ?: return
+        engine.setVectorModifierEnabled(id, vectorGroup, index, enabled)
         refreshNow()
     }
 
@@ -3934,6 +3974,61 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (engine.setLayerLabel(layer, label)) refreshNow()
     }
 
+    // AE compositing: a regra mora no motor (EngineAeCompositing.cpp); aqui só pede e relê.
+    /** Preservar transparência (o T do AE): a camada só pinta onde a pilha abaixo tem alfa. */
+    fun setLayerPreserveTransparency(layer: Long, on: Boolean) {
+        if (engine.setLayerPreserveTransparency(layer, on)) refreshNow()
+    }
+
+    /** Tímida (o Shy do AE): com "Ocultar camadas tímidas" ligado, some da timeline. */
+    fun setLayerShy(layer: Long, on: Boolean) {
+        if (engine.setLayerShy(layer, on)) refreshNow()
+    }
+
+    /** "Ocultar camadas tímidas" da composição atual. */
+    fun changeHideShy(on: Boolean) {
+        if (engine.setHideShy(on)) refreshNow()
+    }
+
+    // --- AE animation (EngineAeAnimation.cpp): texto-fonte, auto-orientar, dois nós ---
+    /** Muda a cada edição daqui: os painéis releem o auto-orientar e o POI do motor. */
+    var aeAnimRevision by mutableIntStateOf(0)
+        private set
+
+    /** Quadros LOCAIS dos keys do texto-fonte da camada escolhida. */
+    fun textSourceKeyFrames(): LongArray = primary?.let { engine.textSourceKeys(it) } ?: LongArray(0)
+
+    /** "Keyframe do texto aqui": cria o key no cabeçote com o texto que aparece; havendo um ali, apaga. */
+    fun toggleTextSourceKey() {
+        val id = primary ?: return
+        val local = detail?.localPlayhead ?: return
+        val here = engine.textSourceKeys(id).any { it == local.toLong() }
+        val ok = if (here) engine.deleteTextSourceKey(id, local.toLong()) else engine.addTextSourceKey(id) >= 0
+        if (ok) { aeAnimRevision++; refreshNow() }
+    }
+
+    /** Auto-orientar da camada escolhida: 0 desligado, 1 ao longo do caminho, 2 para a câmera. */
+    fun layerAutoOrient(): Int = primary?.let { engine.layerAutoOrient(it) }?.coerceAtLeast(0) ?: 0
+
+    fun setLayerAutoOrient(mode: Int) {
+        val id = primary ?: return
+        if (engine.setLayerAutoOrient(id, mode)) { aeAnimRevision++; refreshNow() }
+    }
+
+    /** {dois nós (0/1), x, y, z} da câmera escolhida no cabeçote; nulo = não é câmera. */
+    fun cameraPoi(): FloatArray? = primary?.let { engine.cameraPoi(it) }
+
+    fun setCameraTwoNode(on: Boolean) {
+        val id = primary ?: return
+        if (engine.setCameraTwoNode(id, on)) { aeAnimRevision++; refreshNow() }
+    }
+
+    /** Ponto de Interesse; [undo] falso = continuação de um arrasto (o 1º passo abriu o desfazer). */
+    fun setCameraPoi(x: Float, y: Float, z: Float, undo: Boolean = true) {
+        val id = primary ?: return
+        if (engine.setCameraPoi(id, x, y, z, undo)) { aeAnimRevision++; refreshNow() }
+    }
+
     /**
      * Máscara de recorte ("Criar/Liberar máscara de recorte"): a regra mora no
      * motor (elegibilidade e cadeias); aqui só pede e relê.
@@ -4358,6 +4453,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         TrackProperty.TEXT_TRACKING -> textStyle?.getOrNull(19) ?: 0f
         TrackProperty.TEXT_PATH_FIRST_MARGIN -> textPathState?.firstMargin ?: 0f
         TrackProperty.TEXT_PATH_LAST_MARGIN -> textPathState?.lastMargin ?: 0f
+        // AE animation: o Ponto de Interesse da câmera de dois nós ({dois nós, x, y, z}).
+        TrackProperty.CAMERA_POI_X -> cameraPoi()?.getOrNull(1) ?: 0f
+        TrackProperty.CAMERA_POI_Y -> cameraPoi()?.getOrNull(2) ?: 0f
+        TrackProperty.CAMERA_POI_Z -> cameraPoi()?.getOrNull(3) ?: 0f
         else -> 0f
     }
 
@@ -4482,6 +4581,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (ids.isEmpty()) return
         // 0.3.2: efeito Hyper só com o acesso (a folha de efeitos já abre a tela bloqueada).
         if (com.aurea.aurea.effects.HyperEffectGate.locked(typeId)) { showToast(appText(R.string.hyper_effect_locked)); return }
+        // Efeito que será pago numa versão futura: grátis agora, só o aviso (nada é bloqueado).
+        if (com.aurea.aurea.editor.panels.effectFuturePaid(typeId)) showToast(appText(R.string.effect_future_paid_notice))
         if (typeId == com.aurea.aurea.editor.panels.effectTypeId("aurea.key.rotobrush")) {
             if (busyMessage != null) return
             val targets = ids.toList()
@@ -5997,7 +6098,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     // --- Máscaras (roto) e track matte ----------------------------------------------------------
     /**
      * Uma máscara no cabeçote: modo (0 somar, 1 subtrair, 2 intersectar, 3
-     * diferença, 4 nenhum), ajustes e os pontos (6 floats cada: x, y, entrada
+     * diferença, 4 nenhum, 5 clarear, 6 escurecer), ajustes e os pontos (6 floats cada: x, y, entrada
      * x/y, saída x/y — px da camada; tangentes relativas ao ponto).
      */
     class MaskPath(
@@ -6012,6 +6113,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val keyHere: Boolean,
         val active: Boolean,
         val points: FloatArray,
+        /** Queda do feather: 0 suave (gaussiana), 1 linear (float 11 do cabeçalho). */
+        val falloff: Int = 0,
     ) {
         val count: Int get() = points.size / 6
     }
@@ -6097,6 +6200,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                     id = b[o].toInt(), op = b[o + 1].toInt(), inverted = b[o + 2] > 0.5f, feather = b[o + 3],
                     expansion = b[o + 4], opacity = b[o + 5], closed = b[o + 6] > 0.5f, keyCount = b[o + 8].toInt(),
                     keyHere = b[o + 9] > 0.5f, active = b[o + 10] > 0.5f, points = pts,
+                    falloff = if (b[o + 11] > 0.5f) 1 else 0,
                 )
                 o += MASK_HEADER + pc * 6
             }
@@ -6195,6 +6299,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         setMaskPoints(mid, m.points, true, true)
         maskDrawing = false
         refreshNow()
+    }
+
+    /** Queda do feather da máscara: 0 suave (gaussiana), 1 linear. */
+    fun setMaskFalloff(mask: Int, falloff: Int) {
+        val id = primary ?: return
+        if (engine.setMaskFalloff(id, mask, falloff)) refreshMasks()
     }
 
     fun setMaskProps(mask: Int, op: Int, inverted: Boolean, feather: Float, expansion: Float, opacity: Float) {
@@ -6813,6 +6923,20 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var textDynamic by mutableStateOf<DoubleArray?>(null)
         private set
 
+    /** 0.5.2: preenchimento com textura do texto (`set_text_texture`: 17 valores + há imagem). */
+    var textTexture by mutableStateOf<FloatArray?>(null)
+        private set
+
+    /** Troca valores do preenchimento com textura (índice → valor) num passo só. */
+    fun setTextTextureValues(changes: Map<Int, Float>) {
+        val id = primary ?: return
+        val v = (textTexture ?: return).copyOf()
+        for ((k, x) in changes) if (k in 0 until 17) v[k] = x
+        textTexture = v
+        engine.setTextTexture(id, v.copyOf(17))
+        refreshDetail()
+    }
+
     fun setTextDynamicValue(index: Int, value: Double) {
         val id = primary ?: return
         val v = (textDynamic ?: return).copyOf()
@@ -7234,6 +7358,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun effectPresets(typeId: Int): List<Pair<String, String>> = effectPresetCache.getOrPut(typeId) { engine.effectPresets(typeId) }
 
     /** Aplica o preset [preset] ao efeito: todos os valores num passo de desfazer. */
+    /** Headbop (0.5.2): o motor gravou a análise/tap/keyframes (um passo de desfazer); relê o cartão. */
+    fun headbopEdited() {
+        refreshNow()
+        refreshDetail()
+    }
+
     fun applyEffectPreset(effectId: Int, preset: Int) {
         val id = primary ?: return
         if (engine.applyEffectPreset(id, effectId, preset)) {
@@ -7951,6 +8081,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var editMode by mutableStateOf(false)
         private set
 
+    /** AE "Ocultar camadas tímidas" da composição atual (a timeline filtra as tímidas). */
+    var hideShy by mutableStateOf(false)
+        private set
+
     /**
      * INTERFACE do projeto (0.2.5): [UI_MODE_COMPOSITION] (a principal, padrão)
      * ou [UI_MODE_EDIT] (trilha principal, cortes em sequência). Vem do motor:
@@ -8158,6 +8292,220 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun deleteMarker(frame: Int) {
         engine.deleteMarker(frame.toLong())
         refreshNow()
+    }
+
+    // =========================================================================
+    // Timeline do AE (EngineAeTimeline.cpp): marcas com duração e comentário,
+    // marcas de camada, área de trabalho, escalar/Easy Ease da seleção de
+    // keyframes e alinhar/distribuir no motor. O mesmo contrato no iOS
+    // (AureaModel.swift, bloco "Timeline do AE").
+    // =========================================================================
+    /** Marcas de camada da composição atual, em quadros da COMPOSIÇÃO. */
+    class LayerMarkers(val layers: LongArray, val frames: IntArray, val durations: IntArray, val colors: IntArray) {
+        val size: Int get() = frames.size
+        /** A marca de [layer] mais perto de [frame] a até [tolerance] quadros, ou null. */
+        fun near(layer: Long, frame: Int, tolerance: Int): Int? {
+            var best: Int? = null
+            var bestDistance = Int.MAX_VALUE
+            for (i in 0 until size) {
+                if (layers[i] != layer) continue
+                val d = kotlin.math.abs(frames[i] - frame)
+                if (d <= tolerance && d < bestDistance) { best = frames[i]; bestDistance = d }
+            }
+            return best
+        }
+        fun has(layer: Long, frame: Int): Boolean = (0 until size).any { layers[it] == layer && frames[it] == frame }
+    }
+    var layerMarkers by mutableStateOf(LayerMarkers(LongArray(0), IntArray(0), IntArray(0), IntArray(0)))
+        private set
+    private var layerMarkerBuf = LongArray(4 * 64)
+    /** Área de trabalho [início, fim) em quadros; null = a composição inteira. */
+    var workArea by mutableStateOf<Pair<Int, Int>?>(null)
+        private set
+    private val workAreaBuf = LongArray(2)
+    /** Exportar só a área de trabalho (opção da sessão; o motor guarda a mesma). */
+    var exportWorkAreaOnly by mutableStateOf(false)
+        private set
+    /** Editor da marca de camada aberto: (camada, quadro da composição). */
+    var layerMarkerEditing by mutableStateOf<Pair<Long, Int>?>(null)
+        private set
+    /** A marca do editor ainda não existe: só nasce no Salvar. */
+    var layerMarkerEditingIsNew by mutableStateOf(false)
+        private set
+
+    private fun refreshAeTimeline() {
+        var total = engine.queryAllLayerMarkers(layerMarkerBuf)
+        if (total * 4 > layerMarkerBuf.size) {
+            layerMarkerBuf = LongArray(total * 4)
+            total = engine.queryAllLayerMarkers(layerMarkerBuf)
+        }
+        val n = minOf(total, layerMarkerBuf.size / 4)
+        val ids = LongArray(n) { layerMarkerBuf[it * 4] }
+        val f = IntArray(n) { layerMarkerBuf[it * 4 + 1].toInt() }
+        val d = IntArray(n) { layerMarkerBuf[it * 4 + 2].toInt() }
+        val c = IntArray(n) { layerMarkerBuf[it * 4 + 3].toInt() }
+        val cur = layerMarkers
+        if (!(ids.contentEquals(cur.layers) && f.contentEquals(cur.frames) && d.contentEquals(cur.durations) && c.contentEquals(cur.colors))) {
+            layerMarkers = LayerMarkers(ids, f, d, c)
+        }
+        val area = if (engine.queryWorkArea(workAreaBuf)) workAreaBuf[0].toInt() to workAreaBuf[1].toInt() else null
+        if (area != workArea) workArea = area
+    }
+
+    /** Duração (quadros) e comentário da marca da composição; null = não há marca. */
+    fun markerDetails(frame: Int): Pair<Int, String>? =
+        engine.markerDetails(frame.toLong())?.let { it.first.toInt() to it.second }
+
+    /** Marca da composição com tudo (um passo de desfazer); from < 0 cria. */
+    fun editMarkerFull(from: Int, to: Int, color: Int, label: String, duration: Int, comment: String): Boolean {
+        val ok = engine.editMarkerEx(from.toLong(), to.toLong(), color, label, duration.toLong(), comment)
+        if (ok) refreshNow()
+        return ok
+    }
+
+    /** Editor da marca da camada em [frame]; sem marca ali, um rascunho que só nasce no Salvar. */
+    fun openLayerMarkerEditor(layer: Long, frame: Int) {
+        layerMarkerEditingIsNew = !layerMarkers.has(layer, frame)
+        layerMarkerEditing = layer to frame.coerceAtLeast(0)
+    }
+
+    fun closeLayerMarkerEditor() {
+        layerMarkerEditing = null
+        layerMarkerEditingIsNew = false
+    }
+
+    /** Nome e comentário da marca da camada; null = não há. */
+    fun layerMarkerText(layer: Long, frame: Int): Pair<String, String>? = engine.layerMarkerText(layer, frame.toLong())
+
+    fun layerMarkerDuration(layer: Long, frame: Int): Int =
+        (0 until layerMarkers.size).firstOrNull { layerMarkers.layers[it] == layer && layerMarkers.frames[it] == frame }
+            ?.let { layerMarkers.durations[it] } ?: 0
+
+    fun layerMarkerColor(layer: Long, frame: Int): Int =
+        (0 until layerMarkers.size).firstOrNull { layerMarkers.layers[it] == layer && layerMarkers.frames[it] == frame }
+            ?.let { layerMarkers.colors[it] } ?: com.aurea.aurea.editor.timeline.MarkerColors.ENGINE_DEFAULT
+
+    fun editLayerMarker(layer: Long, from: Int, to: Int, color: Int, label: String, duration: Int, comment: String): Boolean {
+        val ok = engine.editLayerMarker(layer, from.toLong(), to.toLong(), color, label, duration.toLong(), comment)
+        if (ok) refreshNow()
+        return ok
+    }
+
+    fun moveLayerMarker(layer: Long, from: Int, to: Int): Boolean {
+        val ok = engine.moveLayerMarker(layer, from.toLong(), to.toLong())
+        if (ok) refreshNow()
+        return ok
+    }
+
+    fun deleteLayerMarker(layer: Long, frame: Int) {
+        if (engine.deleteLayerMarker(layer, frame.toLong())) refreshNow()
+    }
+
+    /** Área de trabalho [start, end); start < 0 apaga. Um passo de desfazer. */
+    fun setWorkArea(start: Int, end: Int): Boolean {
+        val ok = engine.setWorkArea(start.toLong(), end.toLong())
+        if (ok) refreshNow()
+        return ok
+    }
+
+    /** O "B" do AE: a área começa no cabeçote (o fim fica, ou vai ao fim da composição). */
+    fun setWorkAreaStartAtPlayhead() {
+        val end = workArea?.second?.takeIf { it > playhead } ?: project.durationFrames
+        setWorkArea(playhead, end)
+    }
+
+    /** O "N" do AE: a área termina no quadro do cabeçote (inclusive). */
+    fun setWorkAreaEndAtPlayhead() {
+        val start = workArea?.first?.takeIf { it <= playhead } ?: 0
+        setWorkArea(start, playhead + 1)
+    }
+
+    fun clearWorkArea() { setWorkArea(-1, -1) }
+
+    /** "Aparar composição à área de trabalho" (um passo de desfazer). */
+    fun trimToWorkArea(): Boolean {
+        if (playing) pause()
+        val ok = engine.trimToWorkArea()
+        if (ok) {
+            refreshNow()
+            showToast(appText(R.string.aet_trimmed_to_work_area))
+        }
+        return ok
+    }
+
+    fun changeExportWorkAreaOnly(on: Boolean) {
+        exportWorkAreaOnly = on
+        engine.setExportWorkAreaOnly(on)
+    }
+
+    /**
+     * Escala no tempo a seleção de keyframes em volta do PRIMEIRO escolhido
+     * (o Alt+arrastar do AE): ×2 estica, ×0,5 encolhe. Várias camadas = um
+     * passo de desfazer; se uma recusar (dois keys no mesmo quadro), tudo volta.
+     */
+    fun scaleTimelineKeys(factor: Double): Boolean {
+        val sel = keySelection ?: return false
+        if (sel.isEmpty() || !(factor > 0.0) || factor == 1.0) return false
+        val clipOf = sel.layers().associateWith { id -> layers.firstOrNull { it.id == id } }
+        var anchorComp = Int.MAX_VALUE
+        for (id in sel.layers()) {
+            val row = clipOf[id] ?: return false
+            anchorComp = minOf(anchorComp, sel.on(id).minOf { it.time } + row.startFrame - row.offsetFrames)
+        }
+        if (playing) pause()
+        beginGesture("escalar keyframes")
+        var ok = true
+        var any = false
+        for (id in sel.layers()) {
+            val row = clipOf[id]!!
+            val anchor = anchorComp - row.startFrame + row.offsetFrames
+            if (engine.scaleKeyframeSelection(id, sel.references(id), anchor.toLong(), factor) > 0) any = true
+            else { ok = false; break }
+        }
+        endGesture()
+        if (!ok) {
+            if (any) undo()
+            showToast(appText(R.string.aet_keys_scale_refused))
+            return false
+        }
+        fun mapped(id: Long, refs: Set<KeyRef>): Set<KeyRef> {
+            val row = clipOf[id]!!
+            val anchor = anchorComp - row.startFrame + row.offsetFrames
+            return refs.mapTo(LinkedHashSet()) { it.copy(time = (anchor + Math.round((it.time - anchor) * factor)).toInt()) }
+        }
+        keySelection = sel.copy(keys = mapped(sel.layer, sel.keys), others = sel.others.mapValues { (id, refs) -> mapped(id, refs) })
+        selectedKeyframe = null
+        refreshNow()
+        return true
+    }
+
+    /** Easy Ease (0), Easy Ease In (1) ou Out (2) nos keyframes escolhidos; um passo de desfazer. */
+    fun easeTimelineKeys(mode: Int): Boolean {
+        val sel = keySelection ?: return false
+        if (sel.isEmpty()) return false
+        val many = sel.crossLayer
+        if (many) beginGesture("easy ease")
+        var changed = 0
+        for (id in sel.layers()) changed += maxOf(0, engine.easeKeyframeSelection(id, sel.references(id), mode))
+        if (many) endGesture()
+        if (changed <= 0) {
+            showToast(appText(R.string.aet_ease_nothing))
+            return false
+        }
+        refreshNow()
+        return true
+    }
+
+    /**
+     * Alinhar (0 esquerda, 1 centro H, 2 direita, 3 topo, 4 centro V, 5 base)
+     * ou distribuir (6 horizontal, 7 vertical): a conta é do motor (B6), um
+     * passo de desfazer. As travadas ficam.
+     */
+    fun alignLayers(ids: Collection<Long>, mode: Int) {
+        val free = layers.filter { it.id in ids && !it.locked }.map { it.id }.toLongArray()
+        if (free.isEmpty()) return
+        if (playing) pause()
+        if (engine.alignLayers(free, mode) > 0) refreshNow()
     }
 
     /** Cabeçote na próxima marca (volta à primeira depois da última). */
@@ -8508,6 +8856,23 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun setParent(layer: Long, parent: Long) {
         send { setLayerParent(layer, parent) }
         refreshNow()
+    }
+
+    // --- Prender a um osso (0.5.2) ----------------------------------------------
+    fun modelAttachBones(model: Long): IntArray = engine.modelAttachBones(model)
+    fun boneName(model: Long, node: Int): String = engine.modelNodeName(model, node)
+    fun layerParentBone(layer: Long): Int = engine.layerParentBone(layer)
+
+    /** Prende [layer] ao osso [node] do modelo [model] (−1 = solta); [label] vai no aviso. */
+    fun setLayerParentBone(layer: Long, model: Long, node: Int, label: String = "") {
+        if (playing) pause()
+        val ok = engine.setLayerParentBone(layer, model, node)
+        refreshNow()
+        when {
+            !ok -> showToast(appText(R.string.bone_attach_failed))
+            node >= 0 -> showToast(appText(R.string.bone_attach_done, label))
+            else -> showToast(appText(R.string.bone_attach_released))
+        }
     }
 
     /** Vários filhos para o mesmo pai (0 = soltar), num passo de desfazer. */
@@ -10119,6 +10484,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     companion object {
         const val THUMB_MAX = 512
+        /** `addLight`: 0 direcional, 1 pontual, 2 spot, 3 ambiente, 4 Flare 3D (Engine::kAddLightFlare). */
+        const val LIGHT_FLARE = 4
         /** Quadros parados antes de o laço de status ficar ocioso (~0,5 s a 60 Hz). */
         const val QUIET_FRAMES = 30
         const val IDLE_POLL_MS = 250L

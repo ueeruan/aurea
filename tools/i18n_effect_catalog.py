@@ -97,22 +97,50 @@ def main():
     hand = hand_labels()
 
     by_pt = {}
+    # O mesmo texto pt pode servir a recursos com inglês diferente ("Quantidade"
+    # = "Amount" ou "Count"): guarda todos, na ordem de preferência, e o id do
+    # parâmetro desempata (ver `pick`).
+    cands = {}
     for key in sorted(pt, key=lambda k: (not k.startswith(("fxl_", "fxo_")), len(k), k)):
         if (key.startswith(REUSE_PREFIXES) or key in REUSE_KEYS) and key in en:
             by_pt.setdefault(pt[key].strip(), key)
+            cands.setdefault(pt[key].strip(), []).append(key)
 
     rows, new, todo = [], {}, []
 
-    def resource(text, prefix):
+    def pick(text, pid):
+        """O recurso cujo INGLÊS mais se parece com o id do parâmetro (amount →
+        "Amount", count → "Count"); empate fica com o preferido de sempre."""
+        options = cands.get(text, [])
+        if not pid or len(options) < 2:
+            return by_pt[text]
+        want = set(t for t in re.split(r"[^a-z0-9]+", pid.lower()) if t)
+
+        def score(k):
+            return len(want & set(slug(en.get(k, "")).split("_")))
+
+        best = by_pt[text]
+        for k in options:
+            if score(k) > score(best):
+                best = k
+        return best
+
+    def resource(text, prefix, pid=None):
         text = text.strip()
         if text in by_pt:
-            return by_pt[text]
+            return pick(text, pid)
         tr = texts.get(text)
         if not tr or not tr.get("en"):
             todo.append(text)
             return None
         # Texto do motor em inglês pode ter um pt próprio ("Seed" → "Semente").
         want = tr.get("pt", text)
+        # Recurso que já existe com o MESMO pt e o MESMO inglês (escrito à mão,
+        # com outro nome): reaproveita em vez de duplicar.
+        for key, value in pt.items():
+            if key.startswith(prefix) and value.strip() == want and en.get(key, "").strip() == tr["en"]:
+                by_pt[text] = key
+                return key
         base = prefix + slug(tr["en"])
         name, n = base, 2
         while (name in pt and pt[name].strip() != want) or (name in new and new[name].get("pt", pt.get(name)) != want):
@@ -132,7 +160,7 @@ def main():
                 continue
             res = hand.get(e["key"], {}).get(p["index"])
             if res is None or res not in en:
-                res = resource(p["label"], "fxl_")
+                res = resource(p["label"], "fxl_", p["id"])
             rows.append((e["key"], p["index"], p["id"], -1, res))
             for k, opt in enumerate(p["enum"]):
                 rows.append((e["key"], p["index"], p["id"], k, resource(opt, "fxo_")))

@@ -66,6 +66,10 @@ inline const char* box_sized(const char* key) {
         "aurea.distort.lens_distortion_match",
         // 0.4.5: as linhas da Caneta esferográfica dividem a caixa da camada.
         "aurea.transition.ballpoint",
+        // AE 2026: o Limpar com luz cresce até o canto mais longe do plano dela.
+        "aurea.transition.light_wipe",
+        // 0.5.2 (pacote "Mar"): a Onda na praia atravessa a caixa da camada.
+        "aurea.transition.shore_wave",
     };
     for (const char* k : kBox) if (std::strcmp(k, key) == 0) return k;
     return nullptr;

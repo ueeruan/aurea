@@ -52,7 +52,13 @@ internal class EffectHuman(
     val keywords: String = "",
     val principal: List<Int>? = null,
     val params: Map<Int, ParamHuman> = emptyMap(),
+    /** Efeito que será PAGO numa versão futura (grátis nesta): selo "Grátis por enquanto" no
+     *  navegador e o aviso ao adicionar. A troca para pago é só aqui (sem cobrança agora). */
+    val futurePaid: Boolean = false,
 )
+
+/** O efeito será pago numa versão futura (hoje grátis)? Um lugar só: [EffectHuman.futurePaid]. */
+internal fun effectFuturePaid(typeId: Int): Boolean = Table[typeId]?.futurePaid == true
 
 /** Regra padrão: até 6 parâmetros visíveis mostra tudo; acima, os 5 primeiros. */
 private const val DEFAULT_PRINCIPAL = 5
@@ -109,6 +115,9 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         keywords = "mesh warp malha deformacao grade bezier entortar", principal = listOf(0, 1, 2)))
     put("aurea.distort.puppet", EffectHuman(name = R.string.fx_name_puppet,
         keywords = "puppet fantoche pino pin marionete rig personagem deformar arap", principal = listOf(0, 1, 2)))
+    put("aurea.distort.headbop", EffectHuman(name = R.string.fx_name_headbop,
+        keywords = "headbop head bop cabeça balançar batida musica ritmo danca dancar pessoa beat nod groove", principal = listOf(0, 1, 2, 3, 13),
+        futurePaid = true))
     put("aurea.move.path", EffectHuman(name = R.string.beta_move_path,
         keywords = "move along path caminho vetor trajetória percurso orientar", principal = listOf(0, 1, 2, 3, 4, 5)))
     put("aurea.distort.liquid_glass", EffectHuman(name = R.string.fx_name_liquid_glass,
@@ -1815,6 +1824,23 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         keywords = "reflexo na agua water reflection espelho mirror lago lake rio river mar sea oceano ocean ondas waves ondulacao ripple poca puddle superficie surface horizonte horizon",
         principal = listOf(0, 2, 4, 5, 6, 7, 3, 11),
     ))
+    // 0.5.2: pacote "Mar" (SeaEffects.cpp) + a Ondulação radial com velocidade e
+    // brilho. Mesmos principais no iOS (EffectsHuman.swift).
+    put("aurea.generate.ocean", EffectHuman(name = R.string.sea_name_ocean,
+        keywords = "oceano ocean mar sea agua water onda ondas wave waves praia beach horizonte horizon gerstner espuma foam sol sun ceu sky fundo background oceano realista desenho",
+        principal = listOf(0, 1, 2, 3, 10, 11, 5, 6, 14, 15, 7)))
+    put("aurea.distort.underwater", EffectHuman(name = R.string.sea_name_underwater,
+        keywords = "embaixo dagua debaixo dagua underwater submerso mar sea oceano ocean agua water onda wave fundo do mar caustica caustics raios de luz god rays particulas mergulho dive piscina pool",
+        principal = listOf(0, 3, 6, 7, 8, 5, 2)))
+    put("aurea.light.caustics", EffectHuman(name = R.string.sea_name_caustics,
+        keywords = "causticas caustics luz na agua water light mar sea oceano ocean piscina pool fundo onda wave reflexo",
+        principal = listOf(1, 3, 2, 4, 5, 0, 6)))
+    put("aurea.transition.shore_wave", EffectHuman(name = R.string.sea_name_shore_wave,
+        keywords = "onda na praia shore wave wave wipe transicao transition mar sea oceano ocean praia beach espuma foam agua water onda ondas",
+        principal = listOf(0, 1, 2, 3, 6, 8, 4, 9)))
+    put("aurea.distort.ripple", EffectHuman(
+        keywords = "ondulacao radial ripple onda wave anel rings agua water gota drop lago lake mar sea poca puddle",
+        principal = listOf(0, 1, 2, 3, 6, 7, 5, 4)))
     put("aurea.light.light_wrap", EffectHuman(
         name = R.string.fx045_name_light_wrap,
         keywords = "light wrap envolver com luz luz de borda edge light envoltorio wrap composicao compositing recorte keying chroma fundo background integrar blend",
@@ -1890,6 +1916,135 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         keywords = "lightning raio relampago eletrico eletricidade descarga", principal = listOf(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)))
     put("aurea.generate.voronoi_cells", EffectHuman(name = R.string.fx046_name_voronoi,
         keywords = "voronoi cells celulas vitral mosaico bolhas", principal = listOf(0, 1, 2, 3, 4, 5, 6)))
+    // Lote "AE 2026" (AeEffects2026*.cpp): os efeitos do AE que faltavam. Nomes em
+    // inglês (R.string.aefx_name_*); a busca acha pelos nomes nos 7 idiomas e pelas
+    // palavras abaixo. Mesma lista no iOS (EffectsHuman.swift).
+    put("aurea.key.unmult", EffectHuman(name = R.string.aefx_name_unmult,
+        keywords = "unmult unmultiply remover preto fundo preto tirar preto luz fogo logo transparencia add screen knock out black", principal = listOf(0, 1, 2, 3)))
+    put("aurea.color.leave_color", EffectHuman(name = R.string.aefx_name_leave_color,
+        keywords = "leave color manter cor so uma cor cor seletiva sin city pb parcial isolar cor descolorir", principal = listOf(0, 1, 2, 3, 4)))
+    put("aurea.color.change_color", EffectHuman(name = R.string.aefx_name_change_color,
+        keywords = "change color mudar cor trocar cor substituir cor matiz hue recolorir", principal = listOf(1, 2, 3, 4, 5, 6, 7)))
+    put("aurea.color.change_to_color", EffectHuman(name = R.string.aefx_name_change_to_color,
+        keywords = "change to color mudar para cor trocar cor de para substituir recolorir", principal = listOf(0, 1, 2, 3, 4, 7)))
+    put("aurea.color.photo_filter", EffectHuman(name = R.string.aefx_name_photo_filter,
+        keywords = "photo filter filtro de foto quente frio aquecimento resfriamento warming cooling sepia lente", principal = listOf(0, 1, 2, 3)))
+    put("aurea.color.black_white", EffectHuman(name = R.string.aefx_name_black_white,
+        keywords = "black white preto e branco pb monocromatico cinza tons de cinza bw grayscale", principal = listOf(0, 1, 2, 3, 4, 5, 6, 7)))
+    put("aurea.color.selective_color", EffectHuman(name = R.string.aefx_name_selective_color,
+        keywords = "selective color cor seletiva cmyk ciano magenta amarelo preto correcao", principal = listOf(0, 1, 2, 3, 4)))
+    put("aurea.color.alpha_levels", EffectHuman(name = R.string.aefx_name_alpha_levels,
+        keywords = "alpha levels niveis do alfa transparencia opacidade canal alfa"))
+    put("aurea.color.remove_color_matting", EffectHuman(name = R.string.aefx_name_remove_color_matting,
+        keywords = "remove color matting remover fosco de cor borda halo premultiplicado unpremultiply"))
+    put("aurea.color.arithmetic", EffectHuman(name = R.string.aefx_name_arithmetic,
+        keywords = "arithmetic aritmetica canal somar subtrair multiplicar diferenca bits"))
+    put("aurea.key.color_range", EffectHuman(name = R.string.aefx_name_color_range,
+        keywords = "color range faixa de cor chave key keying recorte lab yuv rgb tela verde", principal = listOf(0, 1, 2, 3, 4, 5, 6, 7)))
+    put("aurea.stylize.strobe_light", EffectHuman(name = R.string.aefx_name_strobe_light,
+        keywords = "strobe light luz estroboscopica flash piscar balada pisca", principal = listOf(0, 1, 2, 3, 4, 5, 6)))
+    put("aurea.stylize.noise_hls", EffectHuman(name = R.string.aefx_name_noise_hls,
+        keywords = "noise hls ruido hls matiz luminosidade saturacao granulado grao"))
+    put("aurea.stylize.noise_hls_auto", EffectHuman(name = R.string.aefx_name_noise_hls_auto,
+        keywords = "noise hls auto ruido hls automatico animado matiz luminosidade saturacao grao"))
+    put("aurea.stylize.noise_alpha", EffectHuman(name = R.string.aefx_name_noise_alpha,
+        keywords = "noise alpha ruido alfa transparencia granulado dissolver", principal = listOf(0, 1, 2, 3, 4, 5)))
+    put("aurea.color.blend_layers", EffectHuman(name = R.string.aefx_name_blend_layers,
+        keywords = "blend mesclar misturar camadas crossfade transicao cruzada so cor clarear escurecer"))
+    put("aurea.key.difference_matte", EffectHuman(name = R.string.aefx_name_difference_matte,
+        keywords = "difference matte fosco por diferenca chave recorte fundo limpo plate"))
+    put("aurea.distort.warp_styles", EffectHuman(name = R.string.aefx_name_warp_styles,
+        keywords = "warp styles deformar estilos arco bandeira onda peixe bojo torcer inflar espremer olho de peixe texto"))
+    put("aurea.stylize.emboss", EffectHuman(name = R.string.aefx_name_emboss,
+        keywords = "emboss relevo gravado alto relevo cinza"))
+    put("aurea.stylize.color_emboss", EffectHuman(name = R.string.aefx_name_color_emboss,
+        keywords = "color emboss relevo colorido gravado alto relevo"))
+    put("aurea.stylize.radial_shadow", EffectHuman(name = R.string.aefx_name_radial_shadow,
+        keywords = "radial shadow sombra radial luz pontual projetada", principal = listOf(0, 1, 2, 3, 4, 5, 6, 7)))
+    put("aurea.stylize.inner_shadow", EffectHuman(name = R.string.aefx_name_inner_shadow,
+        keywords = "inner shadow sombra interna photoshop estilo de camada"))
+    put("aurea.stylize.bevel_edges", EffectHuman(name = R.string.aefx_name_bevel_edges,
+        keywords = "bevel edges bisel das bordas chanfro moldura botao 3d"))
+    put("aurea.stylize.brush_strokes", EffectHuman(name = R.string.aefx_name_brush_strokes,
+        keywords = "brush strokes pinceladas pintura pintado oleo aquarela artistico pincel"))
+    put("aurea.key.simple_wire_removal", EffectHuman(name = R.string.aefx_name_simple_wire_removal,
+        keywords = "simple wire removal remocao de fio cabo apagar fio retoque limpar"))
+    put("aurea.stylize.texturize", EffectHuman(name = R.string.aefx_name_texturize,
+        keywords = "texturize texturizar textura relevo lona tela papel"))
+    // 0.5.2: Textura (TextureOverlayEffect.cpp) — folha procedural por cima da camada.
+    put("aurea.stylize.texture_overlay", EffectHuman(name = R.string.tex_section,
+        keywords = "textura texture overlay sobreposicao papel paper papel amassado crumpled grao de filme film grain poeira dust arranhoes scratches concreto concrete lona canvas tecido fabric grunge meio-tom halftone ruido noise vidro fosco frosted glass pedra stone madeira wood metal escovado brushed couro leather imagem galeria foto vintage", principal = listOf(0, 1, 2, 3, 4, 5, 6, 7)))
+    put("aurea.stylize.plastic", EffectHuman(name = R.string.aefx_name_plastic,
+        keywords = "plastic plastico relevo brilho especular metal 3d luz", principal = listOf(1, 2, 3, 6, 9, 10, 13, 14)))
+    put("aurea.blur.bilateral", EffectHuman(name = R.string.aefx_name_bilateral_blur,
+        keywords = "bilateral blur desfoque bilateral suavizar pele beauty preservar bordas"))
+    put("aurea.blur.smart", EffectHuman(name = R.string.aefx_name_smart_blur,
+        keywords = "smart blur desfoque inteligente suavizar bordas cartoon"))
+    put("aurea.blur.cross", EffectHuman(name = R.string.aefx_name_cross_blur,
+        keywords = "cross blur desfoque em cruz horizontal vertical estrela"))
+    put("aurea.generate.circle", EffectHuman(name = R.string.aefx_name_circle,
+        keywords = "circle circulo anel aro forma disco gerar", principal = listOf(0, 1, 2, 3, 7, 8, 9)))
+    put("aurea.generate.ellipse", EffectHuman(name = R.string.aefx_name_ellipse,
+        keywords = "ellipse elipse anel oval aro brilho forma gerar"))
+    put("aurea.generate.fractal", EffectHuman(name = R.string.aefx_name_fractal,
+        keywords = "fractal mandelbrot julia psicodelico gerar zoom infinito", principal = listOf(0, 1, 2, 3, 4, 5, 8, 13)))
+    put("aurea.generate.eyedropper_fill", EffectHuman(name = R.string.aefx_name_eyedropper_fill,
+        keywords = "eyedropper fill preencher conta gotas amostra cor media chapada"))
+    put("aurea.transition.grid_wipe", EffectHuman(name = R.string.aefx_name_grid_wipe,
+        keywords = "grid wipe limpar em grade transicao ladrilhos quadrados portas"))
+    put("aurea.transition.light_wipe", EffectHuman(name = R.string.aefx_name_light_wipe,
+        keywords = "light wipe limpar com luz transicao brilho clarao"))
+    put("aurea.transition.line_sweep", EffectHuman(name = R.string.aefx_name_line_sweep,
+        keywords = "line sweep varredura em linhas transicao listras faixas escada"))
+    put("aurea.generate.rain", EffectHuman(name = R.string.aefx_name_rain,
+        keywords = "rain chuva gotas tempestade clima gerar"))
+    put("aurea.generate.snow", EffectHuman(name = R.string.aefx_name_snow,
+        keywords = "snow neve flocos inverno clima natal gerar"))
+    put("aurea.ai.depth_matte", EffectHuman(name = R.string.aefx_name_depth_matte,
+        keywords = "depth matte fosco por profundidade ia ai recorte frente fundo distancia"))
+    put("aurea.ai.fog_3d", EffectHuman(name = R.string.aefx_name_fog_3d,
+        keywords = "fog 3d neblina nevoa ia ai profundidade atmosfera bruma"))
+    put("aurea.audio.bass_treble", EffectHuman(name = R.string.aefx_name_bass_treble,
+        keywords = "bass treble graves agudos equalizador eq tom audio som"))
+    put("aurea.audio.reverb", EffectHuman(name = R.string.aefx_name_reverb_legacy,
+        keywords = "reverb antigo envio eco sala"))
+    // Lote "AE 2026", segunda leva (AeEffects2026Extra.cpp).
+    put("aurea.color.channel_combiner", EffectHuman(name = R.string.aefx_name_channel_combiner,
+        keywords = "channel combiner combinador de canais canal hls yuv luminosidade matiz trocar canais"))
+    put("aurea.color.broadcast_colors", EffectHuman(name = R.string.aefx_name_broadcast_colors,
+        keywords = "broadcast colors cores de transmissao ntsc pal ire seguro tv legal"))
+    put("aurea.color.video_limiter", EffectHuman(name = R.string.aefx_name_video_limiter,
+        keywords = "video limiter limitador de video luma croma legal broadcast faixa"))
+    put("aurea.color.color_neutralizer", EffectHuman(name = R.string.aefx_name_color_neutralizer,
+        keywords = "color neutralizer neutralizador de cor dominante balanco de branco cast corrigir"))
+    put("aurea.color.overbrights", EffectHuman(name = R.string.aefx_name_overbrights,
+        keywords = "overbrights excessos de brilho hdr estourado acima de 1 clipping"))
+    put("aurea.stylize.threads", EffectHuman(name = R.string.aefx_name_threads,
+        keywords = "threads fios tecido trama costura pano tafeta"))
+    put("aurea.distort.vr_rotate_sphere", EffectHuman(name = R.string.aefx_name_vr_rotate_sphere,
+        keywords = "vr rotate sphere girar esfera 360 equiretangular panoramica"))
+    put("aurea.distort.vr_sphere_to_plane", EffectHuman(name = R.string.aefx_name_vr_sphere_to_plane,
+        keywords = "vr sphere to plane esfera para plano 360 reframe enquadrar"))
+    put("aurea.distort.vr_plane_to_sphere", EffectHuman(name = R.string.aefx_name_vr_plane_to_sphere,
+        keywords = "vr plane to sphere plano para esfera 360 equiretangular"))
+    put("aurea.distort.vr_converter", EffectHuman(name = R.string.aefx_name_vr_converter,
+        keywords = "vr converter conversor 360 cubo cubemap olho de peixe equiretangular"))
+    put("aurea.color.compound_arithmetic", EffectHuman(name = R.string.aefx_name_compound_arithmetic,
+        keywords = "compound arithmetic aritmetica composta camadas somar subtrair multiplicar diferenca"))
+    put("aurea.color.calculations", EffectHuman(name = R.string.aefx_name_calculations,
+        keywords = "calculations calculos canais mesclar camada cinza alfa"))
+    put("aurea.stylize.glasses_3d", EffectHuman(name = R.string.aefx_name_glasses_3d,
+        keywords = "3d glasses oculos 3d anaglifo estereo vermelho azul"))
+    put("aurea.transition.glass_wipe", EffectHuman(name = R.string.aefx_name_glass_wipe,
+        keywords = "glass wipe limpar com vidro transicao refracao gradiente"))
+    put("aurea.transition.warpomatic", EffectHuman(name = R.string.aefx_name_warpomatic,
+        keywords = "warpomatic transicao deformar morph reator"))
+    put("aurea.stylize.environment", EffectHuman(name = R.string.aefx_name_environment,
+        keywords = "environment ambiente reflexo espelho cromado mapa de ambiente"))
+    put("aurea.audio.distortion", EffectHuman(name = R.string.aefx_name_distortion,
+        keywords = "distortion distorcao saturacao overdrive fuzz valvula bitcrusher audio som"))
+    put("aurea.audio.gate", EffectHuman(name = R.string.aefx_name_gate,
+        keywords = "gate portao de ruido noise gate limiar silencio audio som"))
 }
 
 /**

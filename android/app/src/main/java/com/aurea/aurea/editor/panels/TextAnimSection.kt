@@ -77,6 +77,8 @@ private const val PROP_TRACKING = 1 shl 4
 private const val PROP_BLUR = 1 shl 5
 private const val PROP_SKEW = 1 shl 6
 private const val PROP_STROKE_WIDTH = 1 shl 7
+/** B5 (AE animation): Deslocamento de caractere (TextAnimProp kTextPropCharOffset). */
+private const val PROP_CHAR_OFFSET = 1 shl 8
 private const val PROP_FILL = 1 shl 9
 private const val PROP_STROKE = 1 shl 10
 private const val PROP_ANCHOR = 1 shl 11
@@ -249,8 +251,12 @@ private fun AnimatorEditor(env: PanelEnv, index: Int, v: FloatArray, onClose: ()
                     Triple(PROP_SKEW, R.string.edt_prop_skew, KeyParam(21, R.string.edt_prop_skew, "°", 0.5f, -80f, 80f)),
                     Triple(PROP_STROKE_WIDTH, R.string.panel_contorno, KeyParam(22, R.string.panel_contorno, "px", 0.1f, -50f, 50f)),
                     Triple(PROP_LINE_SPACING, R.string.fxl_line_spacing, KeyParam(45, R.string.fxl_line_spacing, "px", 1f, -20000f, 20000f)),
+                    // B5: Character Offset do AE (troca cada letra pela N-ésima seguinte).
+                    Triple(PROP_CHAR_OFFSET, R.string.ae_anim_char_offset, KeyParam(23, R.string.ae_anim_char_offset, "", 0.05f, -1000f, 1000f)),
                 )
                 extras.forEach { (bit, _, param) -> if (props and bit != 0) KeyRow(env, index, param) }
+                // B5: o eixo da inclinação (Skew Axis do AE) junto da inclinação.
+                if (props and PROP_SKEW != 0) KeyRow(env, index, KeyParam(26, R.string.ae_anim_skew_axis, "°", 1f, -3600f, 3600f))
                 if (props and PROP_ANCHOR != 0) {
                     KeyRow(env, index, KeyParam(42, R.string.fxl_anchor, "px", 1f, -20000f, 20000f))
                     KeyRow(env, index, KeyParam(43, R.string.fxl_anchor, "px", 1f, -20000f, 20000f))
@@ -323,6 +329,8 @@ private fun SelectorsSection(env: PanelEnv, index: Int, fields: FloatArray, tag:
                 ChipRow(stringResource(R.string.fxl_mode), modes.map { stringResource(it) }, fields[selectorField(s, SEL_MODE)].toInt()) { setField(selectorField(s, SEL_MODE), it.toFloat()) }
                 when (type) {
                     TYPE_WIGGLY -> {
+                        // B7: a base (letra/palavra/linha) vale em cada seletor.
+                        SelectorBasedOn(env, index, fields, s)
                         KeyRow(env, index, KeyParam(block + 34, R.string.fxl_max_amount, "%", 0.5f, -100f, 100f))
                         KeyRow(env, index, KeyParam(block + 33, R.string.fxl_min_amount, "%", 0.5f, -100f, 100f))
                         KeyRow(env, index, KeyParam(block + 25, R.string.fxl_wiggles_second, "/s", 0.05f, 0f, 60f))
@@ -338,6 +346,7 @@ private fun SelectorsSection(env: PanelEnv, index: Int, fields: FloatArray, tag:
                     else -> {
                         rangeKeys(block).forEach { KeyRow(env, index, it) }
                         KeyRow(env, index, KeyParam(block + 3, R.string.panel_intensidade, "%", 0.5f, -100f, 100f))
+                        RangeSelectorShape(env, index, fields, s, "$tag.sel.$s")
                     }
                 }
                 PanelItemRow(CupertinoGlyph.Trash, stringResource(R.string.panel_remover), "$tag.sel.$s.delete", danger = true) { store.removeTextSelector(index, s) }
@@ -349,6 +358,46 @@ private fun SelectorsSection(env: PanelEnv, index: Int, fields: FloatArray, tag:
             PanelItem(CupertinoGlyph.Waveform, stringResource(R.string.ui_wiggly), "$tag.add.wiggly") { store.addTextSelector(index, TYPE_WIGGLY) },
             PanelItem(CupertinoGlyph.Textformat, stringResource(R.string.panel_expressao), "$tag.add.expression") { store.addTextSelector(index, TYPE_EXPRESSION) },
         ), columns = 3)
+    }
+}
+
+/** B7 (AE animation): a base do seletor `s` (letra, palavra, linha, letra sem espaço). */
+@Composable
+private fun SelectorBasedOn(env: PanelEnv, index: Int, fields: FloatArray, s: Int) {
+    ChipRow(stringResource(R.string.panel_anima_cada),
+        listOf(stringResource(R.string.panel_letra), stringResource(R.string.panel_palavra), stringResource(R.string.panel_linha), stringResource(R.string.ui_char_no_spaces)),
+        fields[selectorField(s, SEL_BASED_ON)].toInt()) { env.store.setTextAnimatorField(index, selectorField(s, SEL_BASED_ON), it.toFloat()) }
+}
+
+/**
+ * B7 (AE animation): forma, suavidade, ease alto/baixo, unidades, base e ordem
+ * aleatória do seletor de faixa `s` — antes só o 1º seletor tinha estes controles.
+ */
+@Composable
+private fun RangeSelectorShape(env: PanelEnv, index: Int, fields: FloatArray, s: Int, tag: String) {
+    val store = env.store
+    val block = KEY_BLOCK * s
+    val setField = { field: Int, value: Float -> store.setTextAnimatorField(index, field, value) }
+    SelectorBasedOn(env, index, fields, s)
+    ChipRow(stringResource(R.string.fxl_units), listOf(stringResource(R.string.fxo_percentage), stringResource(R.string.fxo_index)),
+        fields[selectorField(s, SEL_UNITS)].toInt()) { setField(selectorField(s, SEL_UNITS), it.toFloat()) }
+    val shapes = listOf(R.string.fxo_square_2, R.string.panel_sobe, R.string.panel_desce, R.string.fxo_triangle, R.string.panel_redondo, R.string.fxo_smooth)
+    ChipRow(stringResource(R.string.fxl_shape), shapes.map { stringResource(it) }, fields[selectorField(s, SEL_SHAPE)].toInt()) {
+        setField(selectorField(s, SEL_SHAPE), it.toFloat())
+    }
+    KeyRow(env, index, KeyParam(block + 32, R.string.fx_suavidade, "%", 0.5f, 0f, 100f))
+    KeyRow(env, index, KeyParam(block + 4, R.string.fxl_ease_high, "%", 0.5f, -100f, 100f))
+    KeyRow(env, index, KeyParam(block + 5, R.string.fxl_ease_low, "%", 0.5f, -100f, 100f))
+    ToggleLine(stringResource(R.string.fxl_random_order), fields[selectorField(s, SEL_RANDOM)] > 0.5f) {
+        setField(selectorField(s, SEL_RANDOM), if (it) 1f else 0f)
+    }
+    if (fields[selectorField(s, SEL_RANDOM)] > 0.5f) {
+        Row(Modifier.fillMaxWidth().height(44.dp).testTag("$tag.seed"), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.fxl_seed), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+            ValueBox("${fields[selectorField(s, SEL_SEED)].toLong()}", onTap = null)
+            Spacer(Modifier.width(8.dp))
+            AnimChip(stringResource(R.string.la_reroll), false) { setField(selectorField(s, SEL_SEED), (1..999_999).random().toFloat()) }
+        }
     }
 }
 

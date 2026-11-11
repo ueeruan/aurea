@@ -54,6 +54,15 @@ float levels1(float e, float inB, float inW, float gammaV, float outB, float out
     return mix(outB, outW, t);
 }
 
+/// Níveis com os recortes da saída opcionais: sem recorte, abaixo do preto de
+/// entrada (ou acima do branco) a reta continua — sem gama, que não tem sentido ali.
+float levels_ex(float e, float inB, float inW, float gammaV, float outB, float outW, int unclip) {
+    float t = (e - inB) / max(inW - inB, 1e-5);
+    if (t < 0.0) return (unclip & 1) != 0 ? outB + (outW - outB) * t : outB;
+    if (t > 1.0) return (unclip & 2) != 0 ? outB + (outW - outB) * t : outW;
+    return mix(outB, outW, pow(t, 1.0 / max(gammaV, 1e-3)));
+}
+
 vec3 curves_lut(vec3 e) {
     // 256 amostras; o centro do texel i representa o código i/255.
     vec3 t = clamp(e, 0.0, 1.0) * (255.0 / 256.0) + 0.5 / 256.0;
@@ -111,7 +120,19 @@ void main() {
         if (op == OP_EXPOSURE) {
             // Linear: 1 stop = 2x a luz. Offset e gamma seguem a convenção de
             // um "exposure" de pós-produção (offset nas sombras, gamma no meio).
-            if (b.x > 0.5) {
+            if (b.y > 0.5) {
+                // AE 2026, canais individuais: exposição (b.zw, d.x), deslocamento
+                // (d.yzw) e gama (e4.xyz) por canal, no mesmo espaço escolhido.
+                const vec3 ex = exp2(vec3(b.z, b.w, d.x));
+                const vec3 off = d.yzw;
+                const vec3 ig = vec3(1.0) / max(e4.xyz, vec3(1e-3));
+                if (b.x > 0.5) {
+                    vec3 v = clamp(linear_to_srgb(max(c, vec3(0.0))), 0.0, 1.0) * ex + off;
+                    c = srgb_to_linear(clamp(pow(max(v, vec3(0.0)), ig), 0.0, 1.0));
+                } else {
+                    c = pow(max(c * ex + off, vec3(0.0)), ig);
+                }
+            } else if (b.x > 0.5) {
                 // Valor codificado (o do app antigo): a conta sobre o que se
                 // vê, entrada e saída presas em 0..1.
                 vec3 v = clamp(linear_to_srgb(max(c, vec3(0.0))), 0.0, 1.0) * exp2(a.y) + a.z;
@@ -145,11 +166,25 @@ void main() {
             c = vec3(dot(m0, c), dot(m1, c), dot(m2, c)) + off;
             c = max(c, vec3(0.0));
         } else if (op == OP_LEVELS) {
-            vec3 enc = linear_to_srgb(c);
-            enc = vec3(levels1(enc.r, a.y, a.z, a.w, b.x, b.y),
-                       levels1(enc.g, a.y, a.z, a.w, b.x, b.y),
-                       levels1(enc.b, a.y, a.z, a.w, b.x, b.y));
-            c = srgb_to_linear(enc);
+            // AE 2026: b.z = canal (0 RGB, 1 R, 2 G, 3 B, 4 alfa), b.w = recortes desligados
+            // (bit 0 preto, bit 1 branco). Padrões (0, 0) = a conta de sempre.
+            const int channel = int(b.z + 0.5);
+            const int unclip = int(b.w + 0.5);
+            if (channel == 0 && unclip == 0) {
+                vec3 enc = linear_to_srgb(c);
+                enc = vec3(levels1(enc.r, a.y, a.z, a.w, b.x, b.y),
+                           levels1(enc.g, a.y, a.z, a.w, b.x, b.y),
+                           levels1(enc.b, a.y, a.z, a.w, b.x, b.y));
+                c = srgb_to_linear(enc);
+            } else if (channel == 4) {
+                alpha = clamp(levels_ex(alpha, a.y, a.z, a.w, b.x, b.y, unclip), 0.0, 1.0);
+            } else {
+                vec3 enc = linear_to_srgb(c);
+                for (int k = 0; k < 3; ++k) {
+                    if (channel == 0 || channel == k + 1) enc[k] = levels_ex(enc[k], a.y, a.z, a.w, b.x, b.y, unclip);
+                }
+                c = srgb_to_linear(max(enc, vec3(0.0)));
+            }
         } else if (op == OP_CURVES) {
             c = srgb_to_linear(curves_lut(linear_to_srgb(c)));
         } else if (op == OP_LUMA_KEY) {
@@ -164,9 +199,42 @@ void main() {
             // a.y = 1 inverte as três cores; a.z = 1 inverte o alfa.
             // A cor é invertida no valor CODIFICADO (é o "negativo" que se
             // espera de um filme), não em linear.
+            // AE 2026: a.w = canal (0 RGB = o de sempre), b.x = misturar com o original.
+            const int channel = int(a.w + 0.5);
+            const vec3 c0 = c;
+            const float alpha0 = alpha;
             vec3 enc = linear_to_srgb(c);
-            c = srgb_to_linear(a.y > 0.5 ? vec3(1.0) - enc : enc);
+            if (channel == 0 || a.y < 0.5) {
+                c = srgb_to_linear(a.y > 0.5 ? vec3(1.0) - enc : enc);
+            } else if (channel <= 3) {
+                enc[channel - 1] = 1.0 - enc[channel - 1];
+                c = srgb_to_linear(enc);
+            } else if (channel <= 7) {
+                vec3 hsl = rgb_to_hsl(clamp(enc, 0.0, 1.0));
+                if (channel == 4) hsl = vec3(fract(hsl.x + 0.5), 1.0 - hsl.y, 1.0 - hsl.z);
+                else if (channel == 5) hsl.x = fract(hsl.x + 0.5);
+                else if (channel == 6) hsl.z = 1.0 - hsl.z;
+                else hsl.y = 1.0 - hsl.y;
+                c = srgb_to_linear(max(hsl_to_rgb(hsl), vec3(0.0)));
+            } else if (channel <= 11) {
+                // YIQ (NTSC): Y luminância, I e Q croma.
+                vec3 yiq = vec3(dot(enc, vec3(0.299, 0.587, 0.114)), dot(enc, vec3(0.596, -0.274, -0.322)),
+                                dot(enc, vec3(0.211, -0.523, 0.312)));
+                if (channel == 8) yiq = vec3(1.0 - yiq.x, -yiq.y, -yiq.z);
+                else if (channel == 9) yiq.x = 1.0 - yiq.x;
+                else if (channel == 10) yiq.y = -yiq.y;
+                else yiq.z = -yiq.z;
+                enc = vec3(yiq.x + 0.956 * yiq.y + 0.621 * yiq.z, yiq.x - 0.272 * yiq.y - 0.647 * yiq.z,
+                           yiq.x - 1.106 * yiq.y + 1.703 * yiq.z);
+                c = srgb_to_linear(clamp(enc, 0.0, 1.0));
+            } else {
+                alpha = 1.0 - alpha;   // canal Alfa
+            }
             if (a.z > 0.5) alpha = 1.0 - alpha;
+            if (b.x > 0.0) {
+                c = mix(c, c0, b.x);
+                alpha = mix(alpha, alpha0, b.x);
+            }
         } else if (op == OP_CHROMA_KEY) {
             // a.yzw cor-chave codificada, b.x tolerância, b.y suavidade, b.z derramamento.
             vec3 enc = linear_to_srgb(c);

@@ -11,6 +11,7 @@
 #include "aurea/ai/BackgroundRemoval.hpp"
 #include <bit>
 #include "aurea/timeline/GridLayout.hpp"
+#include "aurea/timeline/LayerWorld.hpp"
 #include "aurea/render/MaskRaster.hpp"
 #include "aurea/audio/Audio.hpp"
 #include "aurea/audio/Spectrum.hpp"
@@ -211,75 +212,19 @@ Mat4 layer_matrix(const Layer& l, FrameIndex local) noexcept {
          * Mat4::scale(scale) * Mat4::translation(-anchor);
 }
 
-/// Curves, holds and expressions all evaluate at the actual exposure time.
-f32 sample_frac(const Track& tr, f64 t, f32 fallback) noexcept {
-    return tr.value_or_f(t, fallback);
-}
-
-/// `layer_matrix` num tempo local fracionário. Os animadores de camada (entrada,
-/// saída, wiggle) somam por cima do transform — é por aqui que preview e export
-/// os veem iguais.
-Mat4 layer_matrix_frac(const Layer& l, f64 local, f64 fps) noexcept {
-    const TrackSet& t = l.tracks;
-    auto s = [&](TrackProperty p, f32 fallback) noexcept {
-        const Track* tr = t.find(p);
-        return tr ? sample_frac(*tr, local, fallback) : fallback;
-    };
-    const layeranim::Offset an = layeranim::whole_offset(l, local, fps);
-    Vec3 pos{s(TrackProperty::PositionX, l.transform.position.x) + an.translate.x,
-             s(TrackProperty::PositionY, l.transform.position.y) + an.translate.y, 0.0f};
-    if (Vec3 sp; spatial_position(t, l.positionTangents, l.transform.position, local, sp)) {
-        pos.x = sp.x + an.translate.x; pos.y = sp.y + an.translate.y;
-    }
-    const Vec3 scale{s(TrackProperty::ScaleX, l.transform.scale.x) * an.scale.x,
-                     s(TrackProperty::ScaleY, l.transform.scale.y) * an.scale.y, 1.0f};
-    const f32 rot = (s(TrackProperty::RotationZ, l.transform.rotation.z) + an.rotation.z) * kDeg2Rad;
-    const Vec3 anchor{s(TrackProperty::AnchorX, l.transform.anchor.x),
-                      s(TrackProperty::AnchorY, l.transform.anchor.y), 0.0f};
-    // Omega aparência (P0-6): inclinação entre a escala e a âncora (LayerSkew.hpp).
-    const f32 kx = s(TrackProperty::SkewX, l.transform.skewX), ky = s(TrackProperty::SkewY, l.transform.skewY);
-    if (has_skew(kx, ky))
-        return Mat4::translation(pos) * Mat4::from_quat(Quat::from_axis_angle(Vec3{0, 0, 1}, rot))
-             * Mat4::scale(scale) * skew_matrix(kx, ky) * Mat4::translation(-anchor);
-    return Mat4::translation(pos) * Mat4::from_quat(Quat::from_axis_angle(Vec3{0, 0, 1}, rot))
-         * Mat4::scale(scale) * Mat4::translation(-anchor);
-}
-
-/// Transform 3D completo da layer (posição/rotação/escala/âncora em XYZ),
-/// num tempo local fracionário (inteiro = o próprio quadro).
-Mat4 layer_matrix_3d_frac(const Layer& l, f64 local, f64 fps) noexcept {
-    const TrackSet& t = l.tracks;
-    auto s = [&](TrackProperty p, f32 fallback) noexcept {
-        const Track* tr = t.find(p);
-        return tr ? sample_frac(*tr, local, fallback) : fallback;
-    };
-    const layeranim::Offset an = layeranim::whole_offset(l, local, fps);
-    Vec3 pos{s(TrackProperty::PositionX, l.transform.position.x) + an.translate.x,
-             s(TrackProperty::PositionY, l.transform.position.y) + an.translate.y,
-             s(TrackProperty::PositionZ, l.transform.position.z)};
-    if (Vec3 sp; spatial_position(t, l.positionTangents, l.transform.position, local, sp)) {
-        pos = Vec3{sp.x + an.translate.x, sp.y + an.translate.y, sp.z};
-    }
-    Vec3 scale{s(TrackProperty::ScaleX, l.transform.scale.x) * an.scale.x, s(TrackProperty::ScaleY, l.transform.scale.y) * an.scale.y,
-               s(TrackProperty::ScaleZ, l.transform.scale.z)};
-    // A profundidade acompanha a largura (Z multiplica X) em tudo que não é
-    // câmera/luz: os controles de escala da UI mexem só em X/Y. Sem isto,
-    // escalar um modelo — ou o NULO pai dele — o achataria em profundidade
-    // (perfil e sombreamento esticam em vez de dar zoom).
-    if (l.kind != LayerKind::Camera && l.kind != LayerKind::Light) scale.z *= scale.x;
-    const Vec3 rot{(s(TrackProperty::RotationX, l.transform.rotation.x) + an.rotation.x) * kDeg2Rad,
-                   (s(TrackProperty::RotationY, l.transform.rotation.y) + an.rotation.y) * kDeg2Rad,
-                   (s(TrackProperty::RotationZ, l.transform.rotation.z) + an.rotation.z) * kDeg2Rad};
-    const Vec3 anchor{s(TrackProperty::AnchorX, l.transform.anchor.x), s(TrackProperty::AnchorY, l.transform.anchor.y),
-                      s(TrackProperty::AnchorZ, l.transform.anchor.z)};
-    // Omega aparência (P0-6): a mesma inclinação no 3D (no plano XY da camada).
-    const f32 kx = s(TrackProperty::SkewX, l.transform.skewX), ky = s(TrackProperty::SkewY, l.transform.skewY);
-    if (has_skew(kx, ky))
-        return Mat4::translation(pos) * Mat4::from_quat(Quat::from_euler_zyx(rot.x, rot.y, rot.z)) * Mat4::scale(scale)
-             * skew_matrix(kx, ky) * Mat4::translation(-anchor);
-    return Mat4::translation(pos) * Mat4::from_quat(Quat::from_euler_zyx(rot.x, rot.y, rot.z)) * Mat4::scale(scale)
-         * Mat4::translation(-anchor);
-}
+// AE animation (2026-11-11): as matrizes da camada, a cadeia de pais, o
+// cache do quadro e a regra do 3D moraram aqui; agora estão em
+// timeline/LayerWorld.cpp (as mesmas contas para render, expressões e UI).
+using world::sample_frac;
+using world::layer_matrix_frac;
+using world::layer_matrix_3d_frac;
+using world::under_layering_camera;
+using world::wants_3d;
+using world::parenting_basis;
+using world::WorldMatrixCacheScope;
+using world::world_chain_frac;
+using world::world_2d_frac;
+using world::world_3d_frac;
 
 f32 layer_opacity(const Layer& l, FrameIndex local, f64 fps) noexcept {
     const Track* tr = l.tracks.find(TrackProperty::Opacity);
@@ -324,246 +269,65 @@ Mat4 comp_from_clip(f32 w, f32 h) noexcept {
     return m;
 }
 
-/// A camada (ou algum pai) vive no espaço 3D? Marcada como 3D, ou com rotação
-/// em X/Y ou profundidade no instante — aí a perspectiva é a da câmera da
-/// cena, não um "achatado" 2D (rotação X/Y num 2D não mudava nada na tela).
-bool under_layering_camera(const Composition& comp, const Layer& l, FrameIndex time) noexcept {
-    switch (l.kind) {
-        case LayerKind::Video: case LayerKind::Image: case LayerKind::Text:
-        case LayerKind::Shape: case LayerKind::Composition: break;
-        default: return false;
-    }
-    const auto& order = comp.order();
-    for (u32 n = order.size(); n-- > 0;) {
-        const Layer* camera = comp.layer(order.at(n));
-        if (!camera) continue;
-        if (camera == &l) return false;
-        if (camera->kind == LayerKind::Camera && camera->camera.active && camera->camera.affectsLayersBelow
-            && camera->visible && camera->contains_time(time)) return true;
-    }
-    return false;
-}
-
-bool wants_3d(const Composition& comp, const Layer& l, FrameIndex time) noexcept {
-    if (under_layering_camera(comp, l, time)) return true;
-    const Layer* p = &l;
-    // Omega grid: a cadeia de pais não tem teto; o limite só corta um ciclo.
-    const u32 chainLimit = std::max(comp.layers().count(), comp.order().size()) + 1;
-    for (u32 depth = 0; p && depth <= chainLimit; ++depth) {
-        if (p->threeD) return true;
-        const FrameIndex local = p->local_time(time);
-        auto s = [&](TrackProperty prop, f32 fallback) noexcept {
-            const Track* tr = p->tracks.find(prop);
-            return tr ? tr->value_or(local, fallback) : fallback;
-        };
-        if (s(TrackProperty::RotationX, p->transform.rotation.x) != 0.0f
-            || s(TrackProperty::RotationY, p->transform.rotation.y) != 0.0f
-            || s(TrackProperty::PositionZ, p->transform.position.z) != 0.0f) {
-            return true;
-        }
-        // Animador de camada girando em X/Y (entrada "de pé", "virando"): 3D.
-        if (layeranim::has_whole(*p)) {
-            const layeranim::Offset an = layeranim::whole_offset(*p, static_cast<f64>(local.value), comp.fps() > 0.0 ? comp.fps() : 30.0);
-            if (an.rotation.x != 0.0f || an.rotation.y != 0.0f) return true;
-        }
-        p = p->parent.valid() ? comp.layer(p->parent) : nullptr;
-    }
-    return false;
-}
-
-// Parenting Helper changes the inherited basis, while the child's anchor
-// keeps following the parent's full transform (e.g. a Ferris-wheel gondola).
-Mat4 parenting_basis(const Layer& child, Mat4 parent, f64 local, f32* continuousZ) noexcept {
-    static const ParameterRegistry parameters = [] {
-        ParameterRegistry p;
-        p.add_float("rotation", "Inherit Rotation", 100.f, -200.f, 200.f);
-        p.add_float("scale", "Inherit Scale", 100.f, 0.f, 200.f);
-        return p;
-    }();
-    for (const EffectInstance& effect : child.effects) {
-        if (!effect.enabled || effect.type != effect_type_id(effect_keys::kParentingHelper)) continue;
-        auto value = [&](u32 i) {
-            return evaluate_param_f(child.tracks, effect, i, parameters.at(i), local).as_float() * .01f;
-        };
-        const f32 rotation = value(0), scale = value(1);
-        if (rotation == 1.f && scale == 1.f) continue;
-        // QR keeps shear and signed scale when only rotation is changed.
-        auto xyz = [](Vec4 v) { return Vec3{v.x, v.y, v.z}; };
-        const Vec3 a = xyz(parent.col[0]), b = xyz(parent.col[1]), c = xyz(parent.col[2]);
-        const f32 sx = a.length();
-        const Vec3 x = sx > 1e-6f ? a * (1.f / sx) : Vec3{1, 0, 0};
-        const f32 xy = x.dot(b);
-        const Vec3 perpendicular = b - x * xy;
-        const f32 sy = perpendicular.length();
-        const Vec3 fallback = std::abs(x.y) < .9f ? Vec3{0, 1, 0} : Vec3{0, 0, 1};
-        const Vec3 y = sy > 1e-6f ? perpendicular * (1.f / sy) : (fallback - x * x.dot(fallback)).normalized();
-        const Vec3 z = x.cross(y).normalized();
-        const f32 sz = z.dot(c), xz = x.dot(c), yz = y.dot(c);
-        const f32 ry = std::asin(std::clamp(-x.z, -1.f, 1.f));
-        const bool pole = std::abs(std::cos(ry)) < 1e-5f;
-        const f32 rx = pole ? 0.f : std::atan2(y.z, z.z);
-        f32 rz = pole ? std::atan2(-y.x, y.y) : std::atan2(x.y, x.x);
-        // A 2D parent can turn past 180 degrees or make several revolutions.
-        // Matrix decomposition alone loses those turns and makes 50% weights jump.
-        if (continuousZ) {
-            rz += std::round((*continuousZ - rz) / (2.f * kPi)) * (2.f * kPi);
-            *continuousZ = rz * rotation;
-        }
-        const Mat4 r = Mat4::from_quat(Quat::from_euler_zyx(rx * rotation, ry * rotation, rz * rotation));
-        Mat4 stretch;
-        stretch.col[0] = {lerpf(1.f, sx, scale), 0, 0, 0};
-        stretch.col[1] = {xy * scale, lerpf(1.f, sy, scale), 0, 0};
-        stretch.col[2] = {xz * scale, yz * scale, lerpf(1.f, sz, scale), 0};
-        const Vec4 translation = parent.col[3];
-        parent = r * stretch;
-        parent.col[3] = translation;
-    }
-    return parent;
-}
-
-// Omega grid (0.3.5): cache do mundo dos PAIS durante um quadro.
-// A cadeia de pais não tem mais teto (nulo → nulo → …, grade dentro de grade):
-// sem cache, N camadas sob uma cadeia de profundidade D custariam N × D
-// matrizes por quadro. Com o `WorldMatrixCacheScope` aberto (Renderer::prepare,
-// preview e export), o mundo de cada pai é calculado uma vez por (composição,
-// camada, instante, 2D/3D) e o quadro custa N + D. Fora do escopo (edições,
-// consultas da UI, testes) não há cache: o modelo pode mudar entre chamadas.
-// Só os pais vão para o cache (ponteiros da composição, nunca cópias) e só
-// cadeias sem "Parenting Helper" abaixo da raiz (a conta simples).
-struct WorldCacheKey {
-    const Composition* comp;
-    const Layer* layer;
-    f64 time;
-    bool threeD;
-    bool operator==(const WorldCacheKey& o) const noexcept {
-        return comp == o.comp && layer == o.layer && time == o.time && threeD == o.threeD;
-    }
+// 0.5.2 "Prender a um osso": a cadeia de pais é uma função solta, sem os
+// modelos. Durante o quadro (Renderer::prepare, prévia e export) o renderer
+// abre o mesmo acesso aos modelos do desenho; fora dele (consultas da UI) a
+// camada segue o modelo inteiro. O osso de cada (modelo, junta, instante) é
+// calculado uma vez por quadro.
+struct BoneLookup {
+    std::shared_ptr<const scene3d::SceneAsset> (*fn)(void* ctx, AssetId id) = nullptr;
+    void* ctx = nullptr;
+    struct Entry { const Layer* layer; i32 node; f64 time; Mat4 frame; };
+    std::vector<Entry> frames;
 };
-struct WorldCacheHash {
-    usize operator()(const WorldCacheKey& k) const noexcept {
-        usize h = std::hash<const void*>{}(k.comp);
-        auto mix = [&h](usize v) { h ^= v + static_cast<usize>(0x9e3779b9u) + (h << 6) + (h >> 2); };
-        mix(std::hash<const void*>{}(k.layer));
-        mix(std::hash<f64>{}(k.time));
-        mix(k.threeD ? 1u : 0u);
-        return h;
-    }
-};
-struct WorldCache {
-    std::unordered_map<WorldCacheKey, Mat4, WorldCacheHash> worlds;
-};
-thread_local WorldCache* tWorldCache = nullptr;
+thread_local BoneLookup* tBoneLookup = nullptr;
 
-/// Abre o cache do quadro na thread (aninhável: o de fora vale para os de dentro).
-class WorldMatrixCacheScope {
-public:
-    WorldMatrixCacheScope() noexcept {
-        if (tWorldCache) return;
-        owned_ = new (std::nothrow) WorldCache;
-        tWorldCache = owned_;
-    }
-    ~WorldMatrixCacheScope() {
-        if (!owned_) return;
-        tWorldCache = nullptr;
-        delete owned_;
-    }
-    WorldMatrixCacheScope(const WorldMatrixCacheScope&) = delete;
-    WorldMatrixCacheScope& operator=(const WorldMatrixCacheScope&) = delete;
-private:
-    WorldCache* owned_ = nullptr;
-};
-
-/// A cadeia (camada, pai, avô, …) sem teto: 24 no lugar, o resto no heap.
-struct LayerChain {
-    const Layer* inl[24]{};
-    std::vector<const Layer*> more;
-    u32 n = 0;
-    void push(const Layer* p) { if (n < 24) inl[n] = p; else more.push_back(p); ++n; }
-    const Layer* operator[](u32 i) const noexcept { return i < 24 ? inl[i] : more[i - 24]; }
-    bool contains(const Layer* p) const noexcept { for (u32 i = 0; i < n; ++i) if ((*this)[i] == p) return true; return false; }
-    void clear() noexcept { n = 0; more.clear(); }
-};
-
-Mat4 world_chain_frac(const Composition& comp, const Layer& l, f64 time, bool threeD, f64 parentTime) noexcept {
-    auto parentOf = [&](const Layer* p) -> const Layer* { return p->parent.valid() ? comp.layer(p->parent) : nullptr; };
-    auto ownMatrix = [&](const Layer& node) {
-        const f64 local = (&node == &l ? time : parentTime) - static_cast<f64>(node.start.value) + static_cast<f64>(node.offset.value);
+/// A pose do modelo no instante (o mesmo caminho de `place_model`: clipe,
+/// rig do usuário e o layout das formas/textos 3D, que movem os nós).
+void evaluate_model_pose(const Composition& comp, const Layer& l, const scene3d::SceneAsset& asset, f64 time,
+                         scene3d::Pose& pose, scene3d::PoseWorkspace* workspace) {
+    const f64 materialTime = time - static_cast<f64>(l.start.value) + static_cast<f64>(l.offset.value);
+    // Prévia do Motion Capture: a captura parte da T-pose (sem o clipe do arquivo).
+    const i32 clip = rig::active_preview(l.model.mocapPreview) ? -1 : l.model.animationClip;
+    f32 t = 0.0f;
+    if (clip >= 0 && clip < static_cast<i32>(asset.animations.size())) {
         const f64 fps = comp.fps() > 0.0 ? comp.fps() : 30.0;
-        const Mat4 own = threeD ? layer_matrix_3d_frac(node, local, fps) : layer_matrix_frac(node, local, fps);
-        const Mat4 bound = node.hasParentBasis ? node.parentBasis * own : own;
-        return grid::evaluate(comp,node,&node == &l ? time : parentTime).matrix * bound;
-    };
-    auto hasHelper = [](const Layer& node) {
-        for (const auto& effect : node.effects)
-            if (effect.enabled && effect.type == effect_type_id(effect_keys::kParentingHelper)) return true;
-        return false;
-    };
-    // Projects normally reject cycles on edit/load; retain a finite fallback
-    // (the chain stops at the first repeated layer). Without a cycle the chain
-    // has at most as many layers as the composition.
-    auto collectAll = [&](LayerChain& chain) {
-        chain.clear();
-        for (const Layer* p = &l; p && !chain.contains(p); p = parentOf(p)) chain.push(p);
-    };
-    WorldCache* cache = tWorldCache;
-    const u32 limit = std::max(comp.layers().count(), comp.order().size()) + 1;
-    LayerChain chain;
-    const Mat4* top = nullptr;   // mundo já pronto do primeiro pai fora de `chain`
-    bool cyclic = false;
-    for (const Layer* p = &l; p; p = parentOf(p)) {
-        if (chain.n > limit) { cyclic = true; break; }
-        if (cache && chain.n > 0) {
-            const auto it = cache->worlds.find(WorldCacheKey{&comp, p, parentTime, threeD});
-            if (it != cache->worlds.end()) { top = &it->second; break; }
-        }
-        chain.push(p);
+        t = scene3d::clip_time(asset.animations[static_cast<usize>(clip)], materialTime / fps * l.model.timeScale);
     }
-    if (cyclic) { collectAll(chain); top = nullptr; cache = nullptr; }
-    // Parenting Helper em qualquer nó abaixo da raiz muda a conta. Um pai do
-    // cache só entrou lá sem Helper dele até abaixo da raiz.
-    bool helper = false;
-    const u32 checked = top ? chain.n : (chain.n ? chain.n - 1 : 0);
-    for (u32 i = 0; i < checked; ++i) helper |= hasHelper(*chain[i]);
-    if (!helper) {
-        Mat4 world = top ? *top : Mat4::identity();
-        for (u32 i = chain.n; i-- > 1;) {   // os pais, da raiz para baixo
-            world = world * ownMatrix(*chain[i]);
-            if (cache) cache->worlds.emplace(WorldCacheKey{&comp, chain[i], parentTime, threeD}, world);
-        }
-        return world * ownMatrix(l);
-    }
-    if (top) collectAll(chain);   // a conta do Helper precisa da cadeia inteira
-    Mat4 world;
-    f32 continuousZ = 0.f;
-    u32 count = chain.n;
-    while (count) {
-        const Layer& node = *chain[--count];
-        const f64 local = (&node == &l ? time : parentTime) - static_cast<f64>(node.start.value) + static_cast<f64>(node.offset.value);
-        const Mat4 own = ownMatrix(node);
-        const Mat4 basis = parenting_basis(node, world, local, threeD ? nullptr : &continuousZ);
-        auto anchor = [&](TrackProperty property, f32 fallback) {
-            const Track* track = node.tracks.find(property);
-            return track ? sample_frac(*track, local, fallback) : fallback;
-        };
-        const Vec4 pivot{anchor(TrackProperty::AnchorX, node.transform.anchor.x),
-                         anchor(TrackProperty::AnchorY, node.transform.anchor.y),
-                         threeD ? anchor(TrackProperty::AnchorZ, node.transform.anchor.z) : 0.f, 1.f};
-        const Vec4 wanted = world * (own * pivot);
-        world = basis * own;
-        const Vec4 actual = world * pivot;
-        world.col[3].x += wanted.x - actual.x;
-        world.col[3].y += wanted.y - actual.y;
-        world.col[3].z += wanted.z - actual.z;
-        if (!threeD) continuousZ += anchor(TrackProperty::RotationZ, node.transform.rotation.z) * kDeg2Rad;
-    }
-    return world;
+    // Rig posado pelo usuário (trilhas BonePose: rotação, translação e IK de
+    // dois ossos — 0.3.6): entra antes das juntas, igual na prévia e no export.
+    scene3d::evaluate_rig_pose(asset, l, clip, t, materialTime, pose, workspace);
+    scene3d::apply_text3d_layout(asset, l, materialTime, pose.nodeWorld);
+    // Formas 3D: o layout das partes (Shape 3D Layout) antes das trilhas de cada parte.
+    scene3d::apply_shape3d_layout(asset, l, materialTime, pose.nodeWorld);
+    // Formas 3D: cada parte com o transform das trilhas dela (mesmo caminho no export).
+    scene3d::apply_shape3d_parts(asset, l, materialTime, pose.nodeWorld);
 }
 
-Mat4 world_2d_frac(const Composition& comp, const Layer& l, f64 time) noexcept {
-    return world_chain_frac(comp, l, time, false, time);
-}
-Mat4 world_3d_frac(const Composition& comp, const Layer& l, f64 time) noexcept {
-    return world_chain_frac(comp, l, time, true, time);
+/// A junta `node` do modelo `parent` no espaço da camada dele (px), sem escala:
+/// posição e giro do osso. Identidade sem o acesso aos modelos ou sem a junta.
+Mat4 bone_frame(const Composition& comp, const Layer& parent, i32 node, f64 time) noexcept {
+    BoneLookup* lookup = tBoneLookup;
+    if (!lookup || parent.kind != LayerKind::Model3D || node < 0) return Mat4::identity();
+    for (const auto& e : lookup->frames)
+        if (e.layer == &parent && e.node == node && e.time == time) return e.frame;
+    {
+        const std::shared_ptr<const scene3d::SceneAsset> asset = lookup->fn(lookup->ctx, parent.model.scene);
+        if (!asset || static_cast<usize>(node) >= asset->nodes.size()) return Mat4::identity();
+        scene3d::Pose pose;
+        evaluate_model_pose(comp, parent, *asset, time, pose, nullptr);
+        if (static_cast<usize>(node) >= pose.nodeWorld.size()) return Mat4::identity();
+        Mat4 m = layer_from_model(parent.model) * pose.nodeWorld[static_cast<usize>(node)];
+        // Só posição e giro: a escala do arquivo (cm do Mixamo, ×100 da camada)
+        // não pode encolher o que vai preso no osso.
+        for (u32 c = 0; c < 3; ++c) {
+            const Vec3 v{m.col[c].x, m.col[c].y, m.col[c].z};
+            const f32 len = v.length();
+            if (len > 1e-8f && std::isfinite(len)) m.col[c] = Vec4{v.x / len, v.y / len, v.z / len, 0};
+        }
+        if (lookup->frames.size() < 64) lookup->frames.push_back(BoneLookup::Entry{&parent, node, time, m});
+        return m;
+    }
 }
 
 /// Mundo 3D da camada com a cadeia de pais (cada pai no próprio tempo).
@@ -594,22 +358,7 @@ void place_model(const Composition& comp, const Layer& l, const scene3d::SceneAs
         target->mask |= 1u << track.effectParamIndex;
     }
     scene3d::Pose pose;
-    // Prévia do Motion Capture: a captura parte da T-pose (sem o clipe do arquivo).
-    const i32 clip = rig::active_preview(l.model.mocapPreview) ? -1 : l.model.animationClip;
-    f32 t = 0.0f;
-    if (clip >= 0 && clip < static_cast<i32>(asset.animations.size())) {
-        const f64 fps = comp.fps() > 0.0 ? comp.fps() : 30.0;
-        const f64 local = time - static_cast<f64>(l.start.value) + static_cast<f64>(l.offset.value);
-        t = scene3d::clip_time(asset.animations[static_cast<usize>(clip)], local / fps * l.model.timeScale);
-    }
-    // Rig posado pelo usuário (trilhas BonePose: rotação, translação e IK de
-    // dois ossos — 0.3.6): entra antes das juntas, igual na prévia e no export.
-    scene3d::evaluate_rig_pose(asset, l, clip, t, materialTime, pose, workspace);
-    scene3d::apply_text3d_layout(asset, l, materialTime, pose.nodeWorld);
-    // Formas 3D: o layout das partes (Shape 3D Layout) antes das trilhas de cada parte.
-    scene3d::apply_shape3d_layout(asset, l, materialTime, pose.nodeWorld);
-    // Formas 3D: cada parte com o transform das trilhas dela (mesmo caminho no export).
-    scene3d::apply_shape3d_parts(asset, l, materialTime, pose.nodeWorld);
+    evaluate_model_pose(comp, l, asset, time, pose, workspace);
     // Animação de texto 3D (animadores por letra/palavra/linha): mesmo caminho no export.
     scene3d::apply_text3d_animators(asset, l, materialTime, comp.fps(), pose.nodeWorld, inst.nodeOpacity, &inst.nodeFill);
     // Animar parte 3D / Esconder partes 3D: por último (os animadores refazem a opacidade).
@@ -832,6 +581,16 @@ Mat4 comp_view_projection_frac(const Composition& comp, f64 time, u32 w, u32 h) 
     return comp_from_clip(static_cast<f32>(w), static_cast<f32>(h))
          * cam.imageTransform * scene3d::camera_projection(cam, static_cast<f32>(w) / static_cast<f32>(std::max(1u, h))) * cam.view;
 }
+
+/// Gancho das expressões (toComp/fromComp numa camada 3D): a MESMA projeção do desenho.
+Mat4 expression_comp_projection(const Composition& comp, f64 time) noexcept {
+    return comp_view_projection_frac(comp, time, std::max(1u, comp.width()), std::max(1u, comp.height()));
+}
+[[maybe_unused]] const bool kLayerWorldHooks = [] {
+    world::set_bone_frame_provider(&bone_frame);
+    world::set_comp_projection_provider(&expression_comp_projection);
+    return true;
+}();
 
 } // namespace
 
@@ -2442,6 +2201,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     if (previewGraph_.active) return;
     // Omega grid: o mundo de cada pai uma vez por quadro (cadeias sem teto).
     const WorldMatrixCacheScope worldCacheScope;
+    // 0.5.2: camadas presas a um osso leem a pose do modelo pai.
+    const BoneAttachScope boneScope(modelLookup_, modelCtx_);
     frameNumber_ = frameNumber;
     // O espectro de áudio (EffectResources) precisa saber DE QUE composição,
     // projeto e instante o planejamento é — dentro de uma pré-composição, os
@@ -2830,6 +2591,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         Vec2 srcShift{0.0f, 0.0f};
         rl.id = rid;
         rl.blend = l->blendMode;
+        rl.preserveAlpha = l->preserveTransparency;
         rl.opacity = layer_opacity(*l, local, fps);
         // Omega chrome (área 02): "camada escolhida a 50 %" (prévia): 0,5 fixo.
         if (settings.viewSelection == 2 && omegaChosen) rl.opacity = 0.5f;
@@ -3197,7 +2959,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     const f64 lf = static_cast<f64>(local.value);
                     std::vector<VectorGroup> ev;
                     ev.reserve(sh.vector.groups.size());
-                    for (u32 gi = 0; gi < sh.vector.groups.size(); ++gi) ev.push_back(vector::evaluate_group(sh.vector.groups[gi], l->tracks, gi, lf));
+                    for (u32 gi = 0; gi < sh.vector.groups.size(); ++gi) ev.push_back(vector::evaluate_group(sh.vector.groups[gi], l->tracks, gi, lf, comp.fps()));
                     // Progresso do desenho: o efeito corta os contornos aqui, na malha.
                     const vector::DrawProgress draw = vector_draw_progress(*l, effects_, lf, copyBgAt);
                     const u64 key = vector::content_hash(ev, lf, draw) ^ (static_cast<u64>(dens * 64.0f) * 0x9E3779B97F4A7C15ull);
@@ -3415,6 +3177,11 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     }
                     textData = &captionText; textTracks = &captionTracks;
                 }
+                // AE animation (v68): o key do texto-fonte congelado no instante
+                // (conteúdo, trechos e estilo). Prévia e export passam por aqui.
+                TextData sourceText;
+                const bool sourceKeyed = l->captions.empty() && text::apply_source_text(*textData, local.value, sourceText);
+                if (sourceKeyed) textData = &sourceText;
                 TextData evaluatedTracking;
                 if (const Track* tracking = textTracks->find(TrackProperty::TextTracking); tracking && tracking->driven()) {
                     evaluatedTracking = *textData;
@@ -3495,10 +3262,63 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 {
                     const f32 s = pad - (T.strokeWidth > 0.0f ? T.strokeWidth + 2.0f : 2.0f);   // a mesma margem de recenter_text
                     srcShift = l->captions.empty() ? Vec2{s, s} : Vec2{L.width * .5f - l->transform.anchor.x, L.height * .5f - l->transform.anchor.y};
+                    // Texto-fonte com key: a âncora é a do texto de base. O ponto
+                    // de alinhamento do texto do key cai no do texto de base
+                    // (centralizado cresce pelos dois lados, como no AE) e a
+                    // margem do contorno do key não empurra as letras.
+                    if (sourceKeyed) {
+                        const TextData& base = l->text;
+                        const f32 strokeDelta = (T.strokeWidth > 0.0f ? T.strokeWidth + 2.0f : 2.0f)
+                                              - (base.strokeWidth > 0.0f ? base.strokeWidth + 2.0f : 2.0f);
+                        srcShift = srcShift + Vec2{strokeDelta, strokeDelta};
+                        if (T.boxMode == 0) {
+                            const auto baseFont = text::FontManager::instance().font_for(base);
+                            const f32 wb = baseFont ? text::measure(*baseFont, base).width : 0.0f;
+                            const f32 wk = text::measure(*font, T).width;
+                            auto at = [](u32 align, f32 w) { return align == 1 ? w * 0.5f : align == 2 ? w : 0.0f; };
+                            srcShift.x -= at(base.alignment, wb) - at(T.alignment, wk);
+                        }
+                    }
                 }
                 rl.source.kind = LayerSource::Kind::Text;
                 rl.source.width = static_cast<u32>(std::ceil(L.width));
                 rl.source.height = static_cast<u32>(std::ceil(L.height));
+                // 0.5.2 PREENCHIMENTO COM TEXTURA: os parâmetros num registro do
+                // mesmo buffer, ANTES dos glifos da camada (fora do intervalo
+                // desenhado); cada glifo do preenchimento aponta para ele
+                // (extra.z = 1, extra.y = distância até o registro). Imagem que
+                // não carregou: a cor lisa (nenhum registro).
+                i64 textureRecord = -1;
+                if (T.texture.active()) {
+                    const TextTexture tt = sanitized(T.texture);
+                    TextureHandle fillImage{};
+                    f32 aspect = 1.0f;
+                    if (tt.kind == kTextTextureImage) {
+                        const ImagePixels* px = imageLookup ? imageLookup(imageCtx, AssetId::unpack(tt.image)) : nullptr;
+                        if (px && px->width && px->height) {
+                            fillImage = scene_image_texture(tt.image, px, frameNumber);
+                            aspect = static_cast<f32>(px->width) / static_cast<f32>(px->height);
+                        }
+                    }
+                    if (tt.kind != kTextTextureImage || fillImage.valid()) {
+                        GlyphInstance rec;
+                        rec.rect = Vec4{tt.kind == kTextTextureImage ? 0.0f : static_cast<f32>(tt.kind), tt.scale,
+                                        tt.rotation * kDeg2Rad, static_cast<f32>(tt.mapping)};
+                        rec.uv = Vec4{tt.offset.x, tt.offset.y, tt.contrast, tt.brightness};
+                        rec.fill = tt.tint;
+                        rec.stroke = Vec4{text_texture_phase(tt, static_cast<f64>(local.value) / fps), tt.relief,
+                                          tt.lightAngle * kDeg2Rad, static_cast<f32>(tt.seed)};
+                        rec.xform.col[0] = Vec4{L.pad + L.contentWidth * 0.5f, L.pad + L.contentHeight * 0.5f,
+                                                std::max(1.0f, T.size), fillImage.valid() ? 1.0f : 0.0f};
+                        rec.xform.col[1] = Vec4{tt.stroke ? 1.0f : 0.0f, aspect, std::max(1.0f, L.contentWidth),
+                                                std::max(1.0f, L.contentHeight)};
+                        rec.xform.col[2] = Vec4{0, 0, 0, 0};
+                        rec.xform.col[3] = Vec4{0, 0, 0, 0};
+                        textureRecord = static_cast<i64>(out.glyphs.size());
+                        out.glyphs.push_back(rec);
+                        rl.source.textFillImage = fillImage;
+                    }
+                }
                 rl.source.glyphFirst = static_cast<u32>(out.glyphs.size());
                 // Perspectiva do 3D por caractere: a distância da câmera padrão.
                 rl.source.textPersp = Vec4{L.width * 0.5f, L.height * 0.5f, static_cast<f32>(std::max(1u, comp.height())) * 1.2f, 0};
@@ -3817,7 +3637,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         gi.stroke = sc;
                         gi.xform = pathM(g) * (textEffect ? textTransforms[g] : Mat4::identity()) * glyphMatrix(q, a);
                         gi.misc = Vec4{strokeKnockout, 0, q.k, glyphStroke(q, a)};
-                        gi.extra = Vec4{a.blur, 0, 0, 0};
+                        gi.extra = Vec4{a.blur, 0, textureRecord >= 0 ? 1.0f : 0.0f, 0};
                         out.glyphs.push_back(gi);
                     }
                     if (outlinePass) {
@@ -3834,6 +3654,10 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         }
                     }
                     if (si == 0) rl.source.glyphCount = static_cast<u32>(out.glyphs.size()) - rl.source.glyphFirst;
+                }
+                if (textureRecord >= 0) {
+                    for (usize gi = rl.source.glyphFirst; gi < out.glyphs.size(); ++gi)
+                        if (out.glyphs[gi].extra.z > 0.5f) out.glyphs[gi].extra.y = static_cast<f32>(textureRecord - static_cast<i64>(gi));
                 }
                 rl.source.glyphSets = sets;
                 if (!onPath.empty() || animated) {
@@ -4198,6 +4022,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         // keyframes) manda; sem ele, os campos antigos da camada.
         u32 echoCount = l->echoCount;
         f32 echoDelay = l->echoDelay, echoDecay = l->echoDecay, rgbDelay = l->rgbDelay;
+        f32 echoStart = 1.0f;   // AE 2026: intensidade inicial (1 = como antes)
+        u8 echoOp = 0;          // AE 2026: operador do eco (0 = somar, como antes)
         if (effects_) {
             const EffectTypeId echoType = echoType_;
             const ParameterRegistry* ep = effects_->params(echoType);
@@ -4208,6 +4034,12 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 echoDelay = evaluate_param(l->tracks, inst, 1, ep->at(1), local).v[0];
                 echoDecay = evaluate_param(l->tracks, inst, 2, ep->at(2), local).v[0];
                 rgbDelay = evaluate_param(l->tracks, inst, 3, ep->at(3), local).v[0];
+                if (ep->count() > 4) {
+                    const f32 s = evaluate_param(l->tracks, inst, 4, ep->at(4), local).v[0];
+                    echoStart = std::isfinite(s) ? std::clamp(s / 100.0f, 0.0f, 1.0f) : 1.0f;
+                }
+                // AE 2026: operador do eco (0 somar = o de sempre).
+                if (ep->count() > 5) echoOp = static_cast<u8>(std::min<u32>(evaluate_param(l->tracks, inst, 5, ep->at(5), local).as_enum(), 6u));
                 break;
             }
         }
@@ -4216,17 +4048,17 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             rl.blurMatrices.clear();
             if (rgbDelay > 0.0f) {
                 const f64 d = std::clamp(static_cast<f64>(rgbDelay), 0.0, 60.0);
-                rl.temporal.push_back({world_2d_frac(comp, *l, t0), 1.0f, Vec3{1, 0, 0}, t0});
-                rl.temporal.push_back({world_2d_frac(comp, *l, t0 - d), 1.0f, Vec3{0, 1, 0}, t0 - d});
-                rl.temporal.push_back({world_2d_frac(comp, *l, t0 - 2.0 * d), 1.0f, Vec3{0, 0, 1}, t0 - 2.0 * d});
+                rl.temporal.push_back({world_2d_frac(comp, *l, t0), echoStart, Vec3{1, 0, 0}, t0});
+                rl.temporal.push_back({world_2d_frac(comp, *l, t0 - d), echoStart, Vec3{0, 1, 0}, t0 - d});
+                rl.temporal.push_back({world_2d_frac(comp, *l, t0 - 2.0 * d), echoStart, Vec3{0, 0, 1}, t0 - 2.0 * d});
             } else {
-                rl.temporal.push_back({m, 1.0f, Vec3{0, 0, 0}, t0});
+                rl.temporal.push_back({m, echoStart, Vec3{0, 0, 0}, t0});
             }
             if (shifted && rgbDelay > 0.0f) for (auto& t : rl.temporal) t.m = t.m * shiftM;
             if (echoCount > 0) {
                 const u32 n = std::min<u32>(echoCount, 16u);
                 const f64 d = std::clamp(static_cast<f64>(echoDelay), 0.25, 120.0);
-                f32 w = 1.0f;
+                f32 w = echoStart;
                 for (u32 i = 1; i <= n; ++i) {
                     w *= std::clamp(echoDecay, 0.0f, 1.0f);
                     if (w < 0.01f) break;
@@ -4234,6 +4066,10 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                                            t0 - static_cast<f64>(i) * d});
                 }
             }
+            // AE 2026: o operador vale para as cópias do eco; com o RGB no
+            // tempo (canais em amostras separadas) elas continuam somando.
+            if (echoOp != 0 && echoCount > 0 && !(rgbDelay > 0.0f))
+                for (auto& t : rl.temporal) t.echoOp = echoOp;
         }
 
         // RGB NO TEMPO (Fase 7.3 §25): cada canal de cor vem de um INSTANTE
@@ -5732,7 +5568,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 auto& sf = f.blurFrames[s];
                 sf.subFrame = shutter.offset(s);
                 sf.camera = cameraAt(sf.subFrame);
-                sf.lights = f.lights; sf.environment = f.environment; sf.post = f.post;
+                sf.lights = f.lights; sf.ambientLight = f.ambientLight; sf.environment = f.environment; sf.post = f.post;
                 sf.shadow = f.shadow; sf.floor = f.floor;
                 sf.instances.reserve(f.instances.size());
                 for (usize i = 0; i < f.instances.size(); ++i) {
@@ -5787,6 +5623,7 @@ void Renderer::fill_scene_context(const Composition& comp, FrameIndex time, Fram
     // luz = plano sem iluminação, como no 2D.
     scene3d::PlaneLightBlock planeLight;
     bool planeLit = false;
+    bool hasAmbient = false;   // 0.5.2: luz ambiente também nos modelos 3D (e sem a luz-chave padrão)
     u32 planeCount = 0;
     const OrderedIds<LayerId>& order = comp.order();
     for (u32 i = 0; i < order.size(); ++i) {
@@ -5800,6 +5637,7 @@ void Renderer::fill_scene_context(const Composition& comp, FrameIndex time, Fram
                 l->tracks.sample_or(TrackProperty::LightColorB, local, l->light.color.z)};
             const f32 intensity = std::max(0.0f, l->tracks.sample_or(TrackProperty::LightIntensity, local, l->light.intensity));
             if (l->light.kind == LightKind::Ambient) {
+                hasAmbient = true;
                 planeLight.ambient = Vec4{planeLight.ambient.x + color.x * intensity, planeLight.ambient.y + color.y * intensity,
                                           planeLight.ambient.z + color.z * intensity, 0.0f};
             } else if (planeCount < scene3d::kPlaneMaxLights) {
@@ -5847,7 +5685,9 @@ void Renderer::fill_scene_context(const Composition& comp, FrameIndex time, Fram
             lights.push_back(s);
         }
     }
-    if (lights.empty()) {
+    // 0.5.2: uma luz ambiente é iluminação escolhida — com ela (e sem outra
+    // luz) a cena fica só com a ambiente e o ambiente do grupo, como no AE.
+    if (lights.empty() && !hasAmbient) {
         // Sem luz no projeto: uma luz-chave suave do alto à esquerda, na
         // frente. IMPORTOU → APARECE, sem montar iluminação.
         scene3d::SceneLight key;
@@ -5883,6 +5723,8 @@ void Renderer::fill_scene_context(const Composition& comp, FrameIndex time, Fram
         sceneFloor.roughness = fl.roughness;
         sceneFloor.reflectivity = fl.reflectivity;
         sceneFloor.contactShadow = fl.contactShadow;
+        sceneFloor.wetness = fl.wetness;
+        sceneFloor.puddleSize = fl.puddleSize;
         sceneFloor.fade = fl.fade;
     }
     // Pós do grupo (v31): exposição, tone map, bloom e o nível de qualidade.
@@ -5920,6 +5762,8 @@ void Renderer::fill_scene_context(const Composition& comp, FrameIndex time, Fram
     for (scene3d::SceneFrame& f : out.scenes) {
         f.camera = cam;
         f.lights = lights;
+        f.ambientLight = Vec3{planeLight.ambient.x, planeLight.ambient.y, planeLight.ambient.z};
+        for (scene3d::SceneFrame& b : f.blurFrames) b.ambientLight = f.ambientLight;
         f.planeLight = planeLight;
         f.shadow = shadow;
         for (scene3d::SceneFrame& b : f.blurFrames) b.shadow = shadow;
@@ -7019,17 +6863,22 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                                                                 BlendMode::Normal));
             if (!pipe.ok()) return false;
             const u32 sets = glyphSet == kInvalidIndex ? std::max(1u, layer.source.glyphSets) : 1u;
-            struct Cap { PipelineHandle p; TextureHandle atlas; u64 sampler; BufferHandle buf; Mat4 clip; Vec4 params; u32 count; };
+            struct Cap { PipelineHandle p; TextureHandle atlas; u64 sampler; BufferHandle buf; Mat4 clip; Vec4 params; u32 count;
+                         TextureHandle fill; u64 fillSampler; };
             const Mat4 clip = clip_from_comp(out.region.w, out.region.h)
                 * Mat4::translation(Vec3{-out.region.x, -out.region.y, 0});
             const Vec4 persp = layer.source.textPersp;
+            // 0.5.2: a imagem do preenchimento com textura (repete além da borda).
+            const bool hasFillImage = layer.source.textFillImage.valid();
             auto drawSet = [&](FGTexture target, u32 set) {
                 Cap cap{*pipe, glyphAtlas_, shaders_.sampler(CommonSampler::LinearClamp).id, glyphFrameBuf_, clip,
                         Vec4{static_cast<f32>(currentSnap_->glyphBase + layer.source.glyphFirst + set * layer.source.glyphCount), persp.x, persp.y, persp.z},
-                        layer.source.glyphCount};
+                        layer.source.glyphCount, hasFillImage ? layer.source.textFillImage : glyphAtlas_,
+                        shaders_.sampler(hasFillImage ? CommonSampler::LinearRepeat : CommonSampler::LinearClamp).id};
                 graph_.add_raster_pass("texto", PassStage::Decode, target, LoadOp::Clear, Vec4{0, 0, 0, 0}, [cap](PassContext& pc) {
                     pc.cmds.bind_pipeline(cap.p);
                     pc.cmds.bind_texture(0, cap.atlas, SamplerHandle{cap.sampler});
+                    pc.cmds.bind_texture(1, cap.fill, SamplerHandle{cap.fillSampler});
                     pc.cmds.bind_storage_buffer(cap.buf);
                     struct { Mat4 m; Vec4 params; } push{cap.clip, cap.params};
                     pc.cmds.push_constants(&push, sizeof(push));
@@ -8220,8 +8069,16 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
             // Acumula as amostras no tempo (pré-multiplicadas, com peso, soma
             // aditiva) num alvo do tamanho da composição: desfoque = média
             // (peso 1/K); eco = soma com queda; RGB = um canal por amostra.
+            // AE 2026: o operador do eco troca a mistura FIXA das amostras —
+            // máximo/mínimo (Lighten/Darken = operação max/min do hardware),
+            // tela, "sobre" (compor atrás/na frente) ou média. Somar (0) é o de
+            // sempre: mesmo pipeline, mesma ordem, mesmos pesos.
+            const u8 echoOp = !layer.temporal.empty() && !layer.per_sample_content() ? layer.temporal.front().echoOp : u8{0};
+            const BlendMode accBlend = echoOp == 1 ? BlendMode::Lighten : echoOp == 2 ? BlendMode::Darken
+                                     : echoOp == 3 ? BlendMode::Screen : (echoOp == 4 || echoOp == 5) ? BlendMode::Normal
+                                     : BlendMode::Add;
             auto pAdd = shaders_.pipeline(PipelineKey::graphics(
-                ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Add));
+                ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, accBlend));
             if (pAdd.ok()) {
                 const bool temporal = !layer.temporal.empty();
                 const u32 k = static_cast<u32>(temporal ? layer.temporal.size() : layer.blurMatrices.size());
@@ -8259,17 +8116,32 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
                         perSample[s] = sampleFin.texture;
                     }
                 }
+                // Eco "mesclar": a média ponderada (pesos somam 1). Eco "mínimo":
+                // o alvo começa no alto e cada amostra zera o que NÃO cobre (faixas
+                // de opacidade 0 em volta), para o vazio de uma cópia contar como
+                // 0, como nos outros operadores.
+                f32 echoNorm = 1.0f;
+                if (echoOp == 6) {
+                    f32 sum = 0.0f;
+                    for (const auto& t : layer.temporal) sum += t.weight;
+                    echoNorm = sum > 1e-6f ? 1.0f / sum : 1.0f;
+                }
+                const bool echoMin = echoOp == 2;
                 struct Cap {
                     const RenderLayer* layer; Mat4 fold; u32 k; PipelineHandle p; FGTexture src; u64 sampler; Rect region;
-                    Rect bounds; const FGTexture* perSample;
-                } cap{&layer, fold, k, *pAdd, draw.texture, draw.sampler, draw.region, bounds.region, perSample};
+                    Rect bounds; const FGTexture* perSample; f32 norm; bool reverse; bool cover;
+                } cap{&layer, fold, k, *pAdd, draw.texture, draw.sampler, draw.region, bounds.region, perSample,
+                      echoNorm, echoOp == 4, echoMin};
                 const u32 pass = graph_.add_raster_pass("desfoque de movimento", PassStage::Composite, acc, LoadOp::Clear,
-                                                        Vec4{0, 0, 0, 0}, [cap](PassContext& pc) {
+                                                        echoMin ? Vec4{60000.0f, 60000.0f, 60000.0f, 60000.0f} : Vec4{0, 0, 0, 0},
+                                                        [cap](PassContext& pc) {
                     const Mat4 clip = clip_from_comp(cap.bounds.w, cap.bounds.h)
                         * Mat4::translation(Vec3{-cap.bounds.x, -cap.bounds.y, 0});
                     pc.cmds.bind_pipeline(cap.p);
                     pc.cmds.bind_texture(0, pc.texture(cap.src), SamplerHandle{cap.sampler});
-                    for (u32 s = 0; s < cap.k; ++s) {
+                    for (u32 j = 0; j < cap.k; ++j) {
+                        // Compor atrás: a mais velha primeiro, a de agora por cima.
+                        const u32 s = cap.reverse ? cap.k - 1 - j : j;
                         if (cap.perSample) pc.cmds.bind_texture(0, pc.texture(cap.perSample[s]), SamplerHandle{cap.sampler});
                         LayerPush push;
                         // The snapshot stays alive through graph execution. Use
@@ -8277,13 +8149,35 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
                         if (!cap.layer->temporal.empty()) {
                             const auto& sample = cap.layer->temporal[s];
                             push.clipFromLayer = clip * (sample.m * cap.fold);
-                            push.params = Vec4{sample.weight, sample.mask.x, sample.mask.y, sample.mask.z};
+                            push.params = Vec4{sample.weight * cap.norm, sample.mask.x, sample.mask.y, sample.mask.z};
                         } else {
                             push.clipFromLayer = clip * (cap.layer->blurMatrices[s] * cap.fold);
                             push.params = Vec4{1.0f / static_cast<f32>(cap.k), 0, 0, 0};
                         }
                         push.region = Vec4{cap.region.x, cap.region.y, cap.region.w, cap.region.h};
                         push.uvRect = Vec4{0.0f, 0.0f, 1.0f, 1.0f};
+                        if (cap.cover) {
+                            // Fora da caixa da cópia: quatro faixas com opacidade 0 (o
+                            // shader devolve 0) que, no mínimo, zeram o que ela não
+                            // cobre. 64 caixas de cada lado cobrem o quadro em qualquer
+                            // escala usual. A caixa em si vai abaixo, com o amostrador
+                            // de sempre (texturas pequenas esticadas não esmaecem).
+                            constexpr f32 kE = 64.0f;
+                            const Rect r = cap.region;
+                            const Vec4 strips[4] = {
+                                Vec4{r.x - r.w * kE, r.y - r.h * kE, r.w * kE, r.h * (2.0f * kE + 1.0f)},
+                                Vec4{r.x + r.w, r.y - r.h * kE, r.w * kE, r.h * (2.0f * kE + 1.0f)},
+                                Vec4{r.x, r.y - r.h * kE, r.w, r.h * kE},
+                                Vec4{r.x, r.y + r.h, r.w, r.h * kE},
+                            };
+                            LayerPush zero = push;
+                            zero.params = Vec4{0.0f, 0.0f, 0.0f, 0.0f};
+                            for (const Vec4& strip : strips) {
+                                zero.region = strip;
+                                pc.cmds.push_constants(&zero, sizeof(zero));
+                                pc.cmds.draw(6);
+                            }
+                        }
                         pc.cmds.push_constants(&push, sizeof(push));
                         pc.cmds.draw(6);
                     }
@@ -8427,7 +8321,8 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
     // keep the complete stack until their existing compositor runs.
     const bool streamNormal = snap.layers.size() >= 8
         && std::none_of(snap.layers.begin(), snap.layers.end(), [](const RenderLayer& layer) {
-            return layer.source.kind == LayerSource::Kind::Adjustment || layer.blend != BlendMode::Normal;
+            return layer.source.kind == LayerSource::Kind::Adjustment || layer.blend != BlendMode::Normal
+                || layer.preserveAlpha;   // lê a pilha abaixo (source-atop)
         });
     u32 streamedDraws = 0;
     auto push_draw = [&](const CompositeDraw& d) {
@@ -8466,6 +8361,7 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
         g.compFromLayer = Mat4::identity();
         g.opacity = clipBaseDraw.opacity;
         g.blend = clipBaseDraw.blend;
+        g.preserveAlpha = clipBaseDraw.preserveAlpha;
         g.sampler = shaders_.sampler(CommonSampler::LinearClamp).id;
         g.layer = clipBaseDraw.layer;
         push_draw(g);
@@ -8600,6 +8496,7 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
             continue;
         }
         draw.layer = layer.id.pack();
+        draw.preserveAlpha = layer.preserveAlpha;
         if (layer.clipBase) {
             // A base não desenhou neste quadro (escondida, fora da tela, matte):
             // a recortada some com ela.
@@ -8614,6 +8511,7 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
             CompositeDraw inner = draw;   // dentro do grupo: a base inteira, sem a mistura dela
             inner.opacity = 1.0f;
             inner.blend = BlendMode::Normal;
+            inner.preserveAlpha = false;   // vale no grupo inteiro, na cena (close_clip)
             clipDraws.assign(1, inner);
             continue;
         }
@@ -8650,7 +8548,8 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
     const u32 count = static_cast<u32>(draws.size());
     auto hardware = [](const CompositeDraw& d) noexcept {
         // Recortada: source-atop lê o alfa do destino (passe com blend.frag).
-        return d.adjustPlan == kInvalidIndex && d.blend == BlendMode::Normal && !d.clipAtop;
+        // Preservar transparência: o mesmo source-atop, sobre a pilha abaixo.
+        return d.adjustPlan == kInvalidIndex && d.blend == BlendMode::Normal && !d.clipAtop && !d.preserveAlpha;
     };
     u32 lastRead = kInvalidIndex;   // último desenho que lê o fundo
     for (u32 i = firstDraw; i < count; ++i) if (!hardware(draws[i])) lastRead = i;
@@ -8667,7 +8566,9 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
     // num último passe (fundo + resultado "sobre" ele).
     const bool bgUnder = !isolated && readsBackdrop && pNormal.ok() && firstDraw == 0 && snap.background.w > 0.0f
         && std::any_of(draws.begin() + firstDraw, draws.end(), [](const CompositeDraw& d) {
-               return d.adjustPlan == kInvalidIndex && (d.blend == BlendMode::Mask || d.blend == BlendMode::Exclude);
+               // + Estêncil/Silhueta luma. Preservar transparência também: a cor de
+               // fundo da composição não é "imagem abaixo" (o AE não pinta sobre ela).
+               return d.adjustPlan == kInvalidIndex && (blend_is_stencil(d.blend) || d.preserveAlpha);
            });
     // Grupo de recorte: isolado sobre transparente (o fundo entra com a cena).
     const Vec4 stackClear = bgUnder || isolated ? Vec4{0.0f, 0.0f, 0.0f, 0.0f} : snap.background;
@@ -8701,9 +8602,9 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
                 // Os modos que leem o fundo só chegam aqui se o pipeline deles
                 // ainda não existe: Add cai na soma de hardware, o resto no Normal.
                 // Máscara/Excluir sem o pipeline: não pinta (a camada nunca aparece).
-                if (d.blend == BlendMode::Mask || d.blend == BlendMode::Exclude) continue;
+                if (blend_is_stencil(d.blend)) continue;
                 // Recortada sem o pipeline: não pinta (por cima sairia sem recorte).
-                if (d.clipAtop) continue;
+                if (d.clipAtop || d.preserveAlpha) continue;
                 const PipelineHandle p = d.blend == BlendMode::Add && cap.add.valid() ? cap.add : cap.normal;
                 if (!p.valid()) continue;
                 if (!(p == bound)) { pc.cmds.bind_pipeline(p); bound = p; }
@@ -8863,8 +8764,16 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
             rc->mode = static_cast<f32>(static_cast<u16>(d.blend));
             // Máscara (referência): só sobra o fundo sob o alfa da camada — o que
             // está fora do quad dela some, então o fundo não é copiado.
-            rc->copyBackdrop = d.blend != BlendMode::Mask;
-            rc->atop = d.clipAtop ? 1.0f : 0.0f;
+            rc->copyBackdrop = !blend_keeps_inside_only(d.blend);   // Mask e Estêncil luma
+            rc->atop = d.clipAtop || d.preserveAlpha ? 1.0f : 0.0f;
+            if (d.blend == BlendMode::Dissolve || d.blend == BlendMode::DancingDissolve) {
+                // Semente do ruído (params.z): fixa por camada; o dançante
+                // soma o quadro. Inteiro < 2^20, exato em f32.
+                u64 seed = (d.layer ^ (d.layer >> 29)) * 0x9E3779B97F4A7C15ull;
+                if (d.blend == BlendMode::DancingDissolve)
+                    seed += static_cast<u64>(snap.time.value) * 0xBF58476D1CE4E5B9ull;
+                rc->masked = static_cast<f32>((seed >> 40) & 0xFFFFFu);
+            }
         }
         const FGTexture next = i == lastRead && !bgUnder ? comp : graph_.create_texture("composicao-mistura", pingDesc);
         const u32 pass = graph_.add_raster_pass("mistura", PassStage::Composite, next, LoadOp::Clear, Vec4{0, 0, 0, 0},
@@ -10562,6 +10471,22 @@ void Renderer::read_timings(RenderTimings& t) noexcept {
             if (starts("glow")) t.gpuGlowMs += g.ms;
         }
     }
+}
+
+BoneAttachScope::BoneAttachScope(Lookup fn, void* ctx) noexcept {
+    if (tBoneLookup || !fn) return;
+    auto* lookup = new (std::nothrow) BoneLookup;
+    if (!lookup) return;
+    lookup->fn = fn;
+    lookup->ctx = ctx;
+    tBoneLookup = lookup;
+    state_ = lookup;
+}
+
+BoneAttachScope::~BoneAttachScope() {
+    if (!state_) return;
+    tBoneLookup = nullptr;
+    delete static_cast<BoneLookup*>(state_);
 }
 
 } // namespace aurea

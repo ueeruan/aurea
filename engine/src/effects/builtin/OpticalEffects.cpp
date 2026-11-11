@@ -172,6 +172,13 @@ public:
             p.add_angle("phase", "Fase", 0.f);
             p.add_float("decay", "Atenuação", 0.f, 0.f, 10.f);
             p.typed_range(0.f, 100.f);
+            // 0.5.2 (pacote "Mar"), no fim: os anéis andam sozinhos e brilham
+            // nas cristas como água. Padrão 0 = o desenho de antes, bit a bit.
+            p.add_float("speed", "Velocidade", 0.f, -10.f, 10.f, kParamAnimatable);
+            p.typed_range(-100.f, 100.f);
+            p.add_float("highlight", "Brilho", 0.f, 0.f, 200.f, kParamAnimatable | kParamPercent, "%");
+            p.typed_range(0.f, 1000.f);
+            p.set_tip(6, "Ondas por segundo, de dentro para fora. 0 = a fase manda.");
         } else {
             // Campo de visão NÃO alarga: 180° é o limite físico (tan 90° = ∞).
             p.add_float("fov", "Campo de visão", 60.f, 0.f, 160.f, kParamAnimatable, "°");
@@ -262,6 +269,15 @@ public:
         u.p1 = {static_cast<f32>(mode_), mode_ == 2 ? 0.f : e.f(4), mode_ == 1 ? e.f(5) : 0.f, 0.f};
         u.p2 = {input.region.x, input.region.y, input.region.w, input.region.h};
         u.p3 = {w, h, 0.f, 0.f};
+        if (mode_ == 1 && e.count > 7) {
+            // Velocidade: a fase anda `velocidade` voltas por segundo (função do
+            // tempo do quadro: prévia = export). Brilho: especular nas cristas.
+            const f64 fps = e.framesPerSecond > 0.0 ? e.framesPerSecond : 30.0;
+            const f64 secs = e.time_frames() / fps;
+            const f32 speed = std::isfinite(e.f(6)) ? std::clamp(e.f(6), -100.f, 100.f) : 0.f;
+            if (speed != 0.f && std::isfinite(secs)) u.p1.y += static_cast<f32>(std::fmod(secs * speed, 1000.0) * 360.0);
+            u.p1.w = std::isfinite(e.f(7)) ? std::clamp(e.f(7), 0.f, 1000.f) / 100.f : 0.f;
+        }
         if (mode_ == 0 || mode_ == 3) u.color = e.color(5);
         if (mode_ == 3 && e.placement) {
             u.p0.x = e.placement->flarePosition.x;

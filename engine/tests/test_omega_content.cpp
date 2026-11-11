@@ -238,7 +238,7 @@ AUREA_TEST(OmegaContent, DocumentV3KeepsNewFieldsAndV2StillOpens) {
     std::vector<f32> s;
     std::string names;
     encode_document(d, s, names);
-    AUREA_CHECK_NEAR(s[0], 5.0, 1e-6);   // kDocVersion (VectorDocument.cpp)
+    AUREA_CHECK_NEAR(s[0], 6.0, 1e-6);   // kDocVersion (VectorDocument.cpp)
     VectorData back;
     AUREA_CHECK(decode_document(s.data(), s.size(), names, back));
     AUREA_CHECK(back == d);

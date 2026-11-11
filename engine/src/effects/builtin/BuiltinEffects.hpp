@@ -127,6 +127,17 @@ void register_time_displacement_effect(EffectRegistry& r);
 void register_water_wrap_ballpoint_effects(EffectRegistry& r);
 void register_dust_transition(EffectRegistry& r);
 void register_color_looks_effect(EffectRegistry& r);
+/// Lote "AE 2026" (AeEffects2026Color/Stylize/Generate.cpp): os efeitos do AE
+/// que faltavam, especificados pelo comportamento. Sempre no FIM.
+void register_ae_effects_2026(EffectRegistry& r);
+/// Headbop (HeadbopEffect.cpp, 0.5.2): a pessoa balança na batida. No fim.
+void register_headbop_effect(EffectRegistry& r);
+/// Pacote "Mar" (SeaEffects.cpp, 0.5.2): Oceano, Embaixo d'água, Cáusticas e
+/// Onda na praia. No fim.
+void register_sea_effects(EffectRegistry& r);
+/// Textura (TextureOverlayEffect.cpp, 0.5.2): papel, grão, poeira, concreto,
+/// lona, grunge, meio-tom... por cima da camada. No fim.
+void register_texture_overlay_effect(EffectRegistry& r);
 
 /// O bloco de uniforms dos efeitos novos, num layout só.
 ///
@@ -209,6 +220,19 @@ struct OctaveGlow {
     f32  chromatic = 0.0f;
     bool addMode = false;    ///< soma limitada em vez de tela + mapa de tom
     bool glowOnly = false;
+    // AE 2026 (Brilho): padrões = o desenho de sempre (o Brilho profundo não muda).
+    bool basedOnAlpha = false;   ///< o brilho nasce do alfa, não da cor
+    u32  composite = 0;          ///< 0 na frente (tela), 1 atrás da camada, 2 nenhum (só o brilho)
+    bool abColors = false;       ///< cores A e B pelo brilho, em vez da cor única
+    Vec4 colorA{1, 1, 1, 1};
+    Vec4 colorB{0, 0, 0, 1};
+    u32  looping = 2;            ///< 0 dente A-B, 1 dente B-A, 2 triângulo A-B-A, 3 triângulo B-A-B
+    f32  loops = 1.0f;
+    f32  phase = 0.0f;           ///< voltas
+    f32  midpoint = 0.5f;
+    /// AE 2026 (Glow Dimensions): 0 horizontal e vertical (o de sempre),
+    /// 1 só horizontal, 2 só vertical — a pirâmide só reduz/espalha naquele eixo.
+    u32  dimensions = 0;
 };
 /// Margem (px da layer) que o brilho ocupa além da entrada.
 [[nodiscard]] f32 octave_glow_reach(f32 radius) noexcept;

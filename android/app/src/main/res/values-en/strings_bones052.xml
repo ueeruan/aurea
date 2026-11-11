@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: "Prender a um osso" (camada segue uma junta de um modelo 3D) e chão molhado da Cena 3D. -->
+<resources>
+    <string name="bone_attach_title">Attach to a bone</string>
+    <string name="bone_attach_hint">The layer follows the chosen bone\'s position and rotation, in the preview and the export.</string>
+    <string name="bone_attach_menu_hint">Follow the hand, the head or another bone of a 3D model</string>
+    <string name="bone_attach_current">Attached to: %1$s</string>
+    <string name="bone_attach_no_rig">No rigged 3D model in this composition.</string>
+    <string name="bone_attach_release">Release from bone</string>
+    <string name="bone_attach_done">Layer attached to %1$s</string>
+    <string name="bone_attach_released">Layer released from the bone</string>
+    <string name="bone_attach_failed">Couldn\'t attach the layer to that bone</string>
+    <string name="scene052_floor_wet">Wet floor</string>
+    <string name="scene052_puddle_size">Puddle size</string>
+</resources>

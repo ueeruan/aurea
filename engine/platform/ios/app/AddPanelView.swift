@@ -416,7 +416,7 @@ private struct ElementGridView: View {
                     close(); model.addAurora()
                 },
                 ObjectCell(label: AureaText.t("editor_camada_ajuste"), tag: "add.element.adjust", glyph: CupertinoGlyph.WandStars) { close(); model.addAdjustmentLayer() },
-                ObjectCell(label: AureaText.t("scene_flare3d"), tag: "add.element.flare", glyph: CupertinoGlyph.Sparkles, tint: ShellColors.text3D) { model.addLight(3); close() },
+                ObjectCell(label: AureaText.t("scene_flare3d"), tag: "add.element.flare", glyph: CupertinoGlyph.Sparkles, tint: ShellColors.text3D) { model.addLight(AureaModel.lightFlare); close() },
                 ObjectCell(label: AureaText.t("grid_builder"), tag: "add.element.grid", glyph: CupertinoGlyph.SquareGrid2x2) { model.createGrid(); close() },
                 ObjectCell(label: AureaText.t("sh_add_group_selection"), tag: "add.element.group", glyph: CupertinoGlyph.FolderFill) {
                     if model.selection.isEmpty { model.toast = AureaText.t("sh_add_pick_layers_to_group") }

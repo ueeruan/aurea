@@ -423,6 +423,10 @@ void main() {
     // O verniz reflete por cima e tira da base o que ele mesmo reflete.
     colorD += diffAmb * (1.0 - ccFv) * u.envParams.x;
     colorS += (specAmb * (1.0 - ccFv) + ccAmb) * u.envParams.x;
+    // 0.5.2: luz ambiente das camadas (a "Ambiente" do AE): ilumina o difuso por
+    // igual, de todo lado, sem sombra e sem brilho especular; a oclusão escurece.
+    // Sem luz ambiente é zero e nada muda.
+    colorD += diffuseColor * u.lightCount.yzw * (ao * (1.0 - ccFv));
 
     // --- Emissiva ----------------------------------------------------------------
     vec3 emissive = u.emissive.rgb;

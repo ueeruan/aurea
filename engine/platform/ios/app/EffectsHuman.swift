@@ -57,6 +57,9 @@ struct FxEffectHuman {
     var keywords: String = ""
     var principal: [Int]? = nil
     var params: [Int: FxParamHuman] = [:]
+    /// Efeito que será PAGO numa versão futura (grátis nesta): selo "Grátis por enquanto" e o
+    /// aviso ao adicionar. A troca para pago é só aqui (sem cobrança agora). Par do Android.
+    var futurePaid: Bool = false
 }
 
 private let FX_DEFAULT_PRINCIPAL = 5
@@ -96,6 +99,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.distort.page_turn", FxEffectHuman(name: "fx_name_page_turn", keywords: "page turn pagina papel cc", principal: [0, 1, 2, 3, 8])),
     ("aurea.distort.mesh_warp", FxEffectHuman(name: "fx_name_mesh_warp", keywords: "mesh warp malha deformacao grade bezier entortar", principal: [0, 1, 2])),
     ("aurea.distort.puppet", FxEffectHuman(name: "fx_name_puppet", keywords: "puppet fantoche pino pin marionete rig personagem deformar arap", principal: [0, 1, 2])),
+    ("aurea.distort.headbop", FxEffectHuman(name: "fx_name_headbop", keywords: "headbop head bop cabeça balançar batida musica ritmo danca dancar pessoa beat nod groove", principal: [0, 1, 2, 3, 13], futurePaid: true)),
     ("aurea.distort.liquid_glass", FxEffectHuman(name: "fx_name_liquid_glass", keywords: "liquid glass vidro liquido lente refracao glassmorphism", principal: [0, 1, 2, 3, 5])),
     ("aurea.transition.noise_dissolve", FxEffectHuman(name: "fx_name_noise_dissolve", keywords: "dissolve dissolver ruido queimar desintegrar", principal: [0, 1, 3, 8, 10])),
     ("aurea.stylize.eight_bit", FxEffectHuman(name: "fx_name_eight_bit", keywords: "8 bit 8bit pixel retro dither pontilhado game", principal: [0, 1, 2, 3])),
@@ -1575,6 +1579,23 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         name: "fx045_name_water_reflection",
         keywords: "reflexo na agua water reflection espelho mirror lago lake rio river mar sea oceano ocean ondas waves ondulacao ripple poca puddle superficie surface horizonte horizon",
         principal: [0, 2, 4, 5, 6, 7, 3, 11])),
+    // 0.5.2: pacote "Mar" (SeaEffects.cpp) + a Ondulação radial com velocidade e
+    // brilho. Mesmos principais do Android (EffectsHuman.kt).
+    ("aurea.generate.ocean", FxEffectHuman(name: "sea_name_ocean",
+        keywords: "oceano ocean mar sea agua water onda ondas wave waves praia beach horizonte horizon gerstner espuma foam sol sun ceu sky fundo background oceano realista desenho",
+        principal: [0, 1, 2, 3, 10, 11, 5, 6, 14, 15, 7])),
+    ("aurea.distort.underwater", FxEffectHuman(name: "sea_name_underwater",
+        keywords: "embaixo dagua debaixo dagua underwater submerso mar sea oceano ocean agua water onda wave fundo do mar caustica caustics raios de luz god rays particulas mergulho dive piscina pool",
+        principal: [0, 3, 6, 7, 8, 5, 2])),
+    ("aurea.light.caustics", FxEffectHuman(name: "sea_name_caustics",
+        keywords: "causticas caustics luz na agua water light mar sea oceano ocean piscina pool fundo onda wave reflexo",
+        principal: [1, 3, 2, 4, 5, 0, 6])),
+    ("aurea.transition.shore_wave", FxEffectHuman(name: "sea_name_shore_wave",
+        keywords: "onda na praia shore wave wave wipe transicao transition mar sea oceano ocean praia beach espuma foam agua water onda ondas",
+        principal: [0, 1, 2, 3, 6, 8, 4, 9])),
+    ("aurea.distort.ripple", FxEffectHuman(
+        keywords: "ondulacao radial ripple onda wave anel rings agua water gota drop lago lake mar sea poca puddle",
+        principal: [0, 1, 2, 3, 6, 7, 5, 4])),
     ("aurea.light.light_wrap", FxEffectHuman(
         name: "fx045_name_light_wrap",
         keywords: "light wrap envolver com luz luz de borda edge light envoltorio wrap composicao compositing recorte keying chroma fundo background integrar blend",
@@ -1632,10 +1653,78 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.light.inner_glow", FxEffectHuman(name: "fx046_name_inner_glow", keywords: "inner glow brilho interno luz borda dentro", principal: [0, 1, 2, 3, 4])),
     ("aurea.generate.lightning", FxEffectHuman(name: "fx046_name_lightning", keywords: "lightning raio relampago eletrico eletricidade descarga", principal: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9])),
     ("aurea.generate.voronoi_cells", FxEffectHuman(name: "fx046_name_voronoi", keywords: "voronoi cells celulas vitral mosaico bolhas", principal: [0, 1, 2, 3, 4, 5, 6])),
+    // Lote "AE 2026" (AeEffects2026*.cpp). Mesmas fichas do Android (EffectsHuman.kt).
+    ("aurea.key.unmult", FxEffectHuman(name: "aefx_name_unmult", keywords: "unmult unmultiply remover preto fundo preto tirar preto luz fogo logo transparencia add screen knock out black", principal: [0, 1, 2, 3])),
+    ("aurea.color.leave_color", FxEffectHuman(name: "aefx_name_leave_color", keywords: "leave color manter cor so uma cor cor seletiva sin city pb parcial isolar cor descolorir", principal: [0, 1, 2, 3, 4])),
+    ("aurea.color.change_color", FxEffectHuman(name: "aefx_name_change_color", keywords: "change color mudar cor trocar cor substituir cor matiz hue recolorir", principal: [1, 2, 3, 4, 5, 6, 7])),
+    ("aurea.color.change_to_color", FxEffectHuman(name: "aefx_name_change_to_color", keywords: "change to color mudar para cor trocar cor de para substituir recolorir", principal: [0, 1, 2, 3, 4, 7])),
+    ("aurea.color.photo_filter", FxEffectHuman(name: "aefx_name_photo_filter", keywords: "photo filter filtro de foto quente frio aquecimento resfriamento warming cooling sepia lente", principal: [0, 1, 2, 3])),
+    ("aurea.color.black_white", FxEffectHuman(name: "aefx_name_black_white", keywords: "black white preto e branco pb monocromatico cinza tons de cinza bw grayscale", principal: [0, 1, 2, 3, 4, 5, 6, 7])),
+    ("aurea.color.selective_color", FxEffectHuman(name: "aefx_name_selective_color", keywords: "selective color cor seletiva cmyk ciano magenta amarelo preto correcao", principal: [0, 1, 2, 3, 4])),
+    ("aurea.color.alpha_levels", FxEffectHuman(name: "aefx_name_alpha_levels", keywords: "alpha levels niveis do alfa transparencia opacidade canal alfa")),
+    ("aurea.color.remove_color_matting", FxEffectHuman(name: "aefx_name_remove_color_matting", keywords: "remove color matting remover fosco de cor borda halo premultiplicado unpremultiply")),
+    ("aurea.color.arithmetic", FxEffectHuman(name: "aefx_name_arithmetic", keywords: "arithmetic aritmetica canal somar subtrair multiplicar diferenca bits")),
+    ("aurea.key.color_range", FxEffectHuman(name: "aefx_name_color_range", keywords: "color range faixa de cor chave key keying recorte lab yuv rgb tela verde", principal: [0, 1, 2, 3, 4, 5, 6, 7])),
+    ("aurea.stylize.strobe_light", FxEffectHuman(name: "aefx_name_strobe_light", keywords: "strobe light luz estroboscopica flash piscar balada pisca", principal: [0, 1, 2, 3, 4, 5, 6])),
+    ("aurea.stylize.noise_hls", FxEffectHuman(name: "aefx_name_noise_hls", keywords: "noise hls ruido hls matiz luminosidade saturacao granulado grao")),
+    ("aurea.stylize.noise_hls_auto", FxEffectHuman(name: "aefx_name_noise_hls_auto", keywords: "noise hls auto ruido hls automatico animado matiz luminosidade saturacao grao")),
+    ("aurea.stylize.noise_alpha", FxEffectHuman(name: "aefx_name_noise_alpha", keywords: "noise alpha ruido alfa transparencia granulado dissolver", principal: [0, 1, 2, 3, 4, 5])),
+    ("aurea.color.blend_layers", FxEffectHuman(name: "aefx_name_blend_layers", keywords: "blend mesclar misturar camadas crossfade transicao cruzada so cor clarear escurecer")),
+    ("aurea.key.difference_matte", FxEffectHuman(name: "aefx_name_difference_matte", keywords: "difference matte fosco por diferenca chave recorte fundo limpo plate")),
+    ("aurea.distort.warp_styles", FxEffectHuman(name: "aefx_name_warp_styles", keywords: "warp styles deformar estilos arco bandeira onda peixe bojo torcer inflar espremer olho de peixe texto")),
+    ("aurea.stylize.emboss", FxEffectHuman(name: "aefx_name_emboss", keywords: "emboss relevo gravado alto relevo cinza")),
+    ("aurea.stylize.color_emboss", FxEffectHuman(name: "aefx_name_color_emboss", keywords: "color emboss relevo colorido gravado alto relevo")),
+    ("aurea.stylize.radial_shadow", FxEffectHuman(name: "aefx_name_radial_shadow", keywords: "radial shadow sombra radial luz pontual projetada", principal: [0, 1, 2, 3, 4, 5, 6, 7])),
+    ("aurea.stylize.inner_shadow", FxEffectHuman(name: "aefx_name_inner_shadow", keywords: "inner shadow sombra interna photoshop estilo de camada")),
+    ("aurea.stylize.bevel_edges", FxEffectHuman(name: "aefx_name_bevel_edges", keywords: "bevel edges bisel das bordas chanfro moldura botao 3d")),
+    ("aurea.stylize.brush_strokes", FxEffectHuman(name: "aefx_name_brush_strokes", keywords: "brush strokes pinceladas pintura pintado oleo aquarela artistico pincel")),
+    ("aurea.key.simple_wire_removal", FxEffectHuman(name: "aefx_name_simple_wire_removal", keywords: "simple wire removal remocao de fio cabo apagar fio retoque limpar")),
+    ("aurea.stylize.texturize", FxEffectHuman(name: "aefx_name_texturize", keywords: "texturize texturizar textura relevo lona tela papel")),
+    // 0.5.2: Textura (TextureOverlayEffect.cpp) — folha procedural por cima da camada.
+    ("aurea.stylize.texture_overlay", FxEffectHuman(name: "tex_section", keywords: "textura texture overlay sobreposicao papel paper papel amassado crumpled grao de filme film grain poeira dust arranhoes scratches concreto concrete lona canvas tecido fabric grunge meio-tom halftone ruido noise vidro fosco frosted glass pedra stone madeira wood metal escovado brushed couro leather imagem galeria foto vintage", principal: [0, 1, 2, 3, 4, 5, 6, 7])),
+    ("aurea.stylize.plastic", FxEffectHuman(name: "aefx_name_plastic", keywords: "plastic plastico relevo brilho especular metal 3d luz", principal: [1, 2, 3, 6, 9, 10, 13, 14])),
+    ("aurea.blur.bilateral", FxEffectHuman(name: "aefx_name_bilateral_blur", keywords: "bilateral blur desfoque bilateral suavizar pele beauty preservar bordas")),
+    ("aurea.blur.smart", FxEffectHuman(name: "aefx_name_smart_blur", keywords: "smart blur desfoque inteligente suavizar bordas cartoon")),
+    ("aurea.blur.cross", FxEffectHuman(name: "aefx_name_cross_blur", keywords: "cross blur desfoque em cruz horizontal vertical estrela")),
+    ("aurea.generate.circle", FxEffectHuman(name: "aefx_name_circle", keywords: "circle circulo anel aro forma disco gerar", principal: [0, 1, 2, 3, 7, 8, 9])),
+    ("aurea.generate.ellipse", FxEffectHuman(name: "aefx_name_ellipse", keywords: "ellipse elipse anel oval aro brilho forma gerar")),
+    ("aurea.generate.fractal", FxEffectHuman(name: "aefx_name_fractal", keywords: "fractal mandelbrot julia psicodelico gerar zoom infinito", principal: [0, 1, 2, 3, 4, 5, 8, 13])),
+    ("aurea.generate.eyedropper_fill", FxEffectHuman(name: "aefx_name_eyedropper_fill", keywords: "eyedropper fill preencher conta gotas amostra cor media chapada")),
+    ("aurea.transition.grid_wipe", FxEffectHuman(name: "aefx_name_grid_wipe", keywords: "grid wipe limpar em grade transicao ladrilhos quadrados portas")),
+    ("aurea.transition.light_wipe", FxEffectHuman(name: "aefx_name_light_wipe", keywords: "light wipe limpar com luz transicao brilho clarao")),
+    ("aurea.transition.line_sweep", FxEffectHuman(name: "aefx_name_line_sweep", keywords: "line sweep varredura em linhas transicao listras faixas escada")),
+    ("aurea.generate.rain", FxEffectHuman(name: "aefx_name_rain", keywords: "rain chuva gotas tempestade clima gerar")),
+    ("aurea.generate.snow", FxEffectHuman(name: "aefx_name_snow", keywords: "snow neve flocos inverno clima natal gerar")),
+    ("aurea.ai.depth_matte", FxEffectHuman(name: "aefx_name_depth_matte", keywords: "depth matte fosco por profundidade ia ai recorte frente fundo distancia")),
+    ("aurea.ai.fog_3d", FxEffectHuman(name: "aefx_name_fog_3d", keywords: "fog 3d neblina nevoa ia ai profundidade atmosfera bruma")),
+    ("aurea.audio.bass_treble", FxEffectHuman(name: "aefx_name_bass_treble", keywords: "bass treble graves agudos equalizador eq tom audio som")),
+    ("aurea.audio.reverb", FxEffectHuman(name: "aefx_name_reverb_legacy", keywords: "reverb antigo envio eco sala")),
+    // Lote "AE 2026", segunda leva (AeEffects2026Extra.cpp). Mesmas fichas do Android.
+    ("aurea.color.channel_combiner", FxEffectHuman(name: "aefx_name_channel_combiner", keywords: "channel combiner combinador de canais canal hls yuv luminosidade matiz trocar canais")),
+    ("aurea.color.broadcast_colors", FxEffectHuman(name: "aefx_name_broadcast_colors", keywords: "broadcast colors cores de transmissao ntsc pal ire seguro tv legal")),
+    ("aurea.color.video_limiter", FxEffectHuman(name: "aefx_name_video_limiter", keywords: "video limiter limitador de video luma croma legal broadcast faixa")),
+    ("aurea.color.color_neutralizer", FxEffectHuman(name: "aefx_name_color_neutralizer", keywords: "color neutralizer neutralizador de cor dominante balanco de branco cast corrigir")),
+    ("aurea.color.overbrights", FxEffectHuman(name: "aefx_name_overbrights", keywords: "overbrights excessos de brilho hdr estourado acima de 1 clipping")),
+    ("aurea.stylize.threads", FxEffectHuman(name: "aefx_name_threads", keywords: "threads fios tecido trama costura pano tafeta")),
+    ("aurea.distort.vr_rotate_sphere", FxEffectHuman(name: "aefx_name_vr_rotate_sphere", keywords: "vr rotate sphere girar esfera 360 equiretangular panoramica")),
+    ("aurea.distort.vr_sphere_to_plane", FxEffectHuman(name: "aefx_name_vr_sphere_to_plane", keywords: "vr sphere to plane esfera para plano 360 reframe enquadrar")),
+    ("aurea.distort.vr_plane_to_sphere", FxEffectHuman(name: "aefx_name_vr_plane_to_sphere", keywords: "vr plane to sphere plano para esfera 360 equiretangular")),
+    ("aurea.distort.vr_converter", FxEffectHuman(name: "aefx_name_vr_converter", keywords: "vr converter conversor 360 cubo cubemap olho de peixe equiretangular")),
+    ("aurea.color.compound_arithmetic", FxEffectHuman(name: "aefx_name_compound_arithmetic", keywords: "compound arithmetic aritmetica composta camadas somar subtrair multiplicar diferenca")),
+    ("aurea.color.calculations", FxEffectHuman(name: "aefx_name_calculations", keywords: "calculations calculos canais mesclar camada cinza alfa")),
+    ("aurea.stylize.glasses_3d", FxEffectHuman(name: "aefx_name_glasses_3d", keywords: "3d glasses oculos 3d anaglifo estereo vermelho azul")),
+    ("aurea.transition.glass_wipe", FxEffectHuman(name: "aefx_name_glass_wipe", keywords: "glass wipe limpar com vidro transicao refracao gradiente")),
+    ("aurea.transition.warpomatic", FxEffectHuman(name: "aefx_name_warpomatic", keywords: "warpomatic transicao deformar morph reator")),
+    ("aurea.stylize.environment", FxEffectHuman(name: "aefx_name_environment", keywords: "environment ambiente reflexo espelho cromado mapa de ambiente")),
+    ("aurea.audio.distortion", FxEffectHuman(name: "aefx_name_distortion", keywords: "distortion distorcao saturacao overdrive fuzz valvula bitcrusher audio som")),
+    ("aurea.audio.gate", FxEffectHuman(name: "aefx_name_gate", keywords: "gate portao de ruido noise gate limiar silencio audio som")),
 ]
 
 /// A tabela indexada pelo `typeId`, e a posição declarada (para ordenar sem
 /// depender do idioma).
+/// O efeito será pago numa versão futura (hoje grátis)? Um lugar só: `FxEffectHuman.futurePaid`.
+func fxEffectFuturePaid(_ typeId: UInt32) -> Bool { FxTableById[typeId]?.futurePaid == true }
+
 private let FxTableById: [UInt32: FxEffectHuman] = {
     var out: [UInt32: FxEffectHuman] = [:]
     for entry in FxTable { out[fxEffectTypeId(entry.key)] = entry.effect }

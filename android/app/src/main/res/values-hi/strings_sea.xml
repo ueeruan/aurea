@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: pacote "Mar" (SeaEffects.cpp): nomes e textos dos efeitos de mar. -->
+<resources>
+    <string name="sea_name_ocean">महासागर</string>
+    <string name="sea_name_underwater">पानी के नीचे</string>
+    <string name="sea_name_caustics">कॉस्टिक्स</string>
+    <string name="sea_name_shore_wave">किनारे की लहर</string>
+    <string name="fxl_sea_wave_height">लहरों की ऊँचाई</string>
+    <string name="fxl_sea_wavelength">लहरों की लंबाई</string>
+    <string name="fxl_sea_wind_direction">हवा की दिशा</string>
+    <string name="fxl_sea_choppiness">उथल-पुथल</string>
+    <string name="fxl_sea_shallow_color">उथले पानी का रंग</string>
+    <string name="fxl_sea_deep_color">गहरे पानी का रंग</string>
+    <string name="fxl_sea_sky">आसमान</string>
+    <string name="fxl_sea_sky_color">आसमान का रंग</string>
+    <string name="fxl_sea_sky_layer">आसमान की लेयर</string>
+    <string name="fxl_sea_foam">झाग</string>
+    <string name="fxl_sea_sun_glitter">सूरज की चमक</string>
+    <string name="fxl_sea_sun_direction">सूरज की दिशा</string>
+    <string name="fxl_sea_sun_height">सूरज की ऊँचाई</string>
+    <string name="fxl_sea_camera_angle">कैमरा कोण</string>
+    <string name="fxl_sea_haze">धुंध</string>
+    <string name="fxl_sea_stylize">शैलीकृत</string>
+    <string name="fxl_sea_clip_layer">लेयर तक काटें</string>
+    <string name="fxl_sea_wave_size">लहरों का आकार</string>
+    <string name="fxl_sea_caustics">कॉस्टिक्स</string>
+    <string name="fxl_sea_caustics_scale">कॉस्टिक्स का पैमाना</string>
+    <string name="fxl_sea_depth">गहराई</string>
+    <string name="fxl_sea_light_rays">प्रकाश किरणें</string>
+    <string name="fxl_sea_particles">कण</string>
+    <string name="fxl_sea_particle_size">कणों का आकार</string>
+    <string name="fxl_sea_sharpness">तीक्ष्णता</string>
+    <string name="fxl_sea_refraction">अपवर्तन</string>
+    <string name="fxl_sea_edge_wave">किनारे की लहर</string>
+    <string name="fxl_sea_edge_size">किनारे की लहरों का आकार</string>
+    <string name="fxl_sea_foam_width">झाग की चौड़ाई</string>
+    <string name="fxl_sea_foam_color">झाग का रंग</string>
+    <string name="fxl_sea_water_width">पानी की चौड़ाई</string>
+    <string name="fxl_sea_water_distortion">पानी का विरूपण</string>
+    <string name="fxo_sea_sky_color">रंग</string>
+    <string name="fxo_sea_layer_image">लेयर की छवि</string>
+    <string name="fxo_sea_other_layer">दूसरी लेयर</string>
+    <string name="fxo_sea_caustics_only">केवल कॉस्टिक्स</string>
+    <string name="fxl_sea_tip_sky">लेयर की छवि: आसमान और उसका प्रतिबिंब इसी लेयर से आते हैं। दूसरी लेयर: आसमान की लेयर चुनें (वह क्षितिज के ऊपर दिखती है)।</string>
+    <string name="fxl_sea_tip_ripple_speed">प्रति सेकंड लहरें, अंदर से बाहर। 0 = फ़ेज़ नियंत्रित करता है।</string>
+</resources>

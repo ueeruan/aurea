@@ -507,3 +507,108 @@ struct ColorFillPanel: View {
         model.endGesture()
     }
 }
+
+// =============================================================================
+// 0.5.2: PREENCHIMENTO COM TEXTURA do texto (TextTextureSection.kt). Ligado, as
+// letras levam uma textura procedural do motor em vez da cor lisa
+// (Engine::set_text_texture). Mesma ordem, textos e acessibilidade do Android.
+// =============================================================================
+let textTextureNames = ["tex_preset_gold", "tex_preset_silver", "tex_preset_brushed", "tex_preset_wood", "tex_preset_marble",
+                        "tex_preset_stone", "tex_preset_concrete", "tex_preset_glitter", "tex_preset_holo", "tex_preset_neon",
+                        "tex_preset_fire", "tex_preset_water", "tex_preset_galaxy", "tex_preset_paper", "tex_preset_denim",
+                        "tex_preset_leather", "tex_preset_rust", "tex_preset_ice"]
+/// Duas cores de amostra por textura (claro → escuro), na ordem de `textTextureNames`.
+private let textTextureSwatch: [(UInt32, UInt32)] = [
+    (0xFFEFA8, 0x8A5A10), (0xF4F6FA, 0x3A3D44), (0xC9CCD2, 0x6E7178), (0xC8915A, 0x6B3E1C), (0xF2F1EE, 0x8C8D92),
+    (0x9C978E, 0x4E4A44), (0xB3B0AA, 0x6F6D69), (0xF1E3F5, 0x8E8A99), (0x9FE6FF, 0xE9A2FF), (0xFF3DCB, 0x2CE6FF),
+    (0xFFE07A, 0xB31A00), (0x8FE3F0, 0x0B4C7A), (0xB25BE0, 0x0A0420), (0xF7F3EA, 0xD9D3C5), (0x5D7BA6, 0x16264A),
+    (0x9C6236, 0x4A2610), (0xD58A3E, 0x4A1C0A), (0xE8F7FF, 0x6DB3DD),
+]
+
+struct NativeTextTextureSection: View {
+    @EnvironmentObject private var model: AureaModel
+    @State private var values: [Float] = []
+    private var id: Int64 { model.primarySelection ?? 0 }
+    private func load() { values = model.engine.textTexture(id).map(\.floatValue) }
+    private func set(_ changes: [Int: Float]) {
+        guard values.count >= 17 else { return }
+        var next = values
+        for (k, v) in changes where k < 17 { next[k] = v }
+        _ = model.engine.setTextTexture(id, values: next.prefix(17).map { NSNumber(value: $0) })
+        model.refreshModel(force: true); load()
+    }
+    private var kind: Int { values.isEmpty ? 0 : Int(values[0].rounded()) }
+    private var isOn: Binding<Bool> {
+        Binding(get: { (1...18).contains(kind) }, set: { set([0: $0 ? 1 : 0]) })
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if values.count >= 17 {
+                PanelSection(title: AureaText.t("tex_section"), glyph: CupertinoGlyph.Paintbrush, tag: "text.sec.texture", isOn: isOn) {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 3), spacing: 6) {
+                        ForEach(0..<textTextureNames.count, id: \.self) { n in presetCell(n) }
+                    }.padding(.top, 6)
+                    if (1...18).contains(kind) { controls }
+                }
+            }
+        }.onAppear { load() }.onChange(of: id) { _ in load() }
+            .onChange(of: model.status.modelRevision) { _ in load() }
+    }
+    private func presetCell(_ n: Int) -> some View {
+        let label = AureaText.t(textTextureNames[n])
+        let selected = kind == n + 1
+        let (a, b) = textTextureSwatch[n]
+        return Button { set([0: Float(n + 1)]) } label: {
+            VStack(spacing: 3) {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(LinearGradient(colors: [Color(hex: a), Color(hex: b)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(height: 34)
+                Text(label).font(.aurea(size: 11)).lineLimit(1)
+                    .foregroundStyle(selected ? AureaColors.accent : AureaColors.text)
+            }
+            .padding(4)
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(selected ? AureaColors.accent : .clear, lineWidth: 1.5))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(AureaText.t("tex_preset_desc", label))
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityIdentifier("text.texture.\(n + 1)")
+    }
+    private var controls: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(AureaText.t("tex_mapping")).font(.aurea(size: 13)).padding(.top, 8)
+            PanelItemGrid(items: [("tex_map_block", CupertinoGlyph.Square), ("tex_map_letter", CupertinoGlyph.Textformat)].enumerated().map { n, entry in
+                PanelItem(glyph: entry.1, label: AureaText.t(entry.0), tag: "text.texture.map.\(n)", on: Int(values[1].rounded()) == n) { set([1: Float(n)]) }
+            }).padding(.top, 6)
+            HStack {
+                Text(AureaText.t("tex_stroke_too")).font(.aurea(size: 14, weight: .semibold)).frame(maxWidth: .infinity, alignment: .leading)
+                AureaToggle(checked: values[2] > 0.5, onCheckedChange: { set([2: $0 ? 1 : 0]) })
+            }.frame(height: 48)
+            NativePanelRuler(label: AureaText.t("tex_scale"), value: values[3] * 100, step: 1, range: 5...2000, unit: "%", keypad: true) { set([3: $0 / 100]) }
+            NativePanelRuler(label: AureaText.t("tex_rotation"), value: values[4], step: 0.5, range: -360...360, unit: "°", keypad: true) { set([4: $0]) }
+            NativePanelRuler(label: AureaText.t("tex_offset_x"), value: values[5] * 100, step: 1, range: -1000...1000, unit: "%", keypad: true) { set([5: $0 / 100]) }
+            NativePanelRuler(label: AureaText.t("tex_offset_y"), value: values[6] * 100, step: 1, range: -1000...1000, unit: "%", keypad: true) { set([6: $0 / 100]) }
+            NativePanelRuler(label: AureaText.t("tex_contrast"), value: values[7] * 100, step: 0.5, range: -100...100, unit: "%", keypad: true) { set([7: $0 / 100]) }
+            NativePanelRuler(label: AureaText.t("tex_brightness"), value: values[8] * 100, step: 0.5, range: -100...100, unit: "%", keypad: true) { set([8: $0 / 100]) }
+            HStack(spacing: 10) {
+                Text(AureaText.t("tex_tint")).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
+                NativePanelColorWell(values: [values[9], values[10], values[11], 1]) {
+                    let layer = id
+                    model.beginGesture(AureaText.t("tex_tint"))
+                    model.colorSheet = ColorSheetRequest(title: AureaText.t("tex_tint"), initial: [values[9], values[10], values[11], 1], onChange: { r, g, b, _ in
+                        var current = model.engine.textTexture(layer).map(\.floatValue)
+                        guard current.count >= 17 else { return }
+                        current[9] = r; current[10] = g; current[11] = b; current[12] = 1
+                        _ = model.engine.setTextTexture(layer, values: current.prefix(17).map { NSNumber(value: $0) })
+                        model.refreshModel(force: true); load()
+                    }, onDone: { model.endGesture() })
+                }
+            }.frame(height: 44)
+            NativePanelRuler(label: AureaText.t("tex_speed"), value: values[13] * 100, step: 1, range: 0...1000, unit: "%", keypad: true) { set([13: $0 / 100]) }
+            NativePanelRuler(label: AureaText.t("tex_relief"), value: values[14] * 100, step: 0.5, range: 0...100, unit: "%", keypad: true) { set([14: $0 / 100]) }
+            NativePanelRuler(label: AureaText.t("tex_light_angle"), value: values[15], step: 0.5, range: -360...360, unit: "°", keypad: true) { set([15: $0]) }
+            NativePanelRuler(label: AureaText.t("tex_variation"), value: values[16], step: 0.1, range: 0...9999, keypad: true) { set([16: $0.rounded()]) }
+        }
+    }
+}

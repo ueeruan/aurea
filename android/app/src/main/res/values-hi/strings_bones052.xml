@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: "Prender a um osso" (camada segue uma junta de um modelo 3D) e chão molhado da Cena 3D. -->
+<resources>
+    <string name="bone_attach_title">हड्डी से जोड़ें</string>
+    <string name="bone_attach_hint">लेयर चुनी गई हड्डी की स्थिति और घुमाव के साथ चलती है, प्रीव्यू और एक्सपोर्ट दोनों में।</string>
+    <string name="bone_attach_menu_hint">3D मॉडल के हाथ, सिर या किसी और हड्डी के साथ चलें</string>
+    <string name="bone_attach_current">जुड़ी है: %1$s</string>
+    <string name="bone_attach_no_rig">इस कंपोज़िशन में रिग वाला कोई 3D मॉडल नहीं है।</string>
+    <string name="bone_attach_release">हड्डी से अलग करें</string>
+    <string name="bone_attach_done">लेयर %1$s से जुड़ गई</string>
+    <string name="bone_attach_released">लेयर हड्डी से अलग हो गई</string>
+    <string name="bone_attach_failed">लेयर को उस हड्डी से नहीं जोड़ा जा सका</string>
+    <string name="scene052_floor_wet">गीला फ़र्श</string>
+    <string name="scene052_puddle_size">पोखरों का आकार</string>
+</resources>

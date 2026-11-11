@@ -1345,6 +1345,82 @@ bool aurea_vision_person_segment(void*, uint32_t model, const uint8_t* rgb, uint
     return e && e->set_layer_clip_to_below(static_cast<aurea::u64>(layerId), on != NO);
 }
 
+// AE compositing: preservar transparência, tímida e "ocultar tímidas".
+- (BOOL)setLayer:(long long)layerId preserveTransparency:(BOOL)on {
+    auto* e = self.engine;
+    return e && e->set_layer_preserve_transparency(static_cast<aurea::u64>(layerId), on != NO);
+}
+
+- (BOOL)setLayer:(long long)layerId shy:(BOOL)on {
+    auto* e = self.engine;
+    return e && e->set_layer_shy(static_cast<aurea::u64>(layerId), on != NO);
+}
+
+- (BOOL)setHideShy:(BOOL)on {
+    auto* e = self.engine;
+    return e && e->set_hide_shy(on != NO);
+}
+
+- (BOOL)hideShy {
+    auto* e = self.engine;
+    return e && e->hide_shy();
+}
+
+// AE animation: texto-fonte, auto-orientar e câmera de dois nós.
+- (long long)addTextSourceKey:(long long)layerId {
+    auto* e = self.engine;
+    return e ? static_cast<long long>(e->add_text_source_key(static_cast<aurea::u64>(layerId))) : -1;
+}
+
+- (BOOL)setTextSourceKey:(long long)layerId frame:(long long)frame content:(NSString*)content {
+    auto* e = self.engine;
+    if (!e || !content) return NO;
+    return e->set_text_source_key(static_cast<aurea::u64>(layerId), static_cast<aurea::i64>(frame),
+                                  std::string(content.UTF8String ?: "")) ? YES : NO;
+}
+
+- (BOOL)deleteTextSourceKey:(long long)layerId frame:(long long)frame {
+    auto* e = self.engine;
+    return e && e->delete_text_source_key(static_cast<aurea::u64>(layerId), static_cast<aurea::i64>(frame));
+}
+
+- (NSArray<NSNumber*>*)textSourceKeys:(long long)layerId {
+    auto* e = self.engine;
+    NSMutableArray<NSNumber*>* out = [NSMutableArray array];
+    if (!e) return out;
+    std::vector<aurea::i64> frames(256);
+    const aurea::u32 n = std::min<aurea::u32>(e->query_text_source_keys(static_cast<aurea::u64>(layerId), frames.data(), 256), 256u);
+    for (aurea::u32 i = 0; i < n; ++i) [out addObject:@(static_cast<long long>(frames[i]))];
+    return out;
+}
+
+- (BOOL)setLayerAutoOrient:(long long)layerId mode:(int32_t)mode {
+    auto* e = self.engine;
+    return e && mode >= 0 && e->set_layer_auto_orient(static_cast<aurea::u64>(layerId), static_cast<aurea::u32>(mode));
+}
+
+- (int32_t)layerAutoOrient:(long long)layerId {
+    auto* e = self.engine;
+    return e ? e->query_layer_auto_orient(static_cast<aurea::u64>(layerId)) : -1;
+}
+
+- (BOOL)setCameraTwoNode:(long long)layerId on:(BOOL)on {
+    auto* e = self.engine;
+    return e && e->set_camera_two_node(static_cast<aurea::u64>(layerId), on != NO);
+}
+
+- (BOOL)setCameraPoi:(long long)layerId x:(float)x y:(float)y z:(float)z undo:(BOOL)undo {
+    auto* e = self.engine;
+    return e && e->set_camera_poi(static_cast<aurea::u64>(layerId), x, y, z, undo != NO);
+}
+
+- (NSArray<NSNumber*>* _Nullable)cameraPoi:(long long)layerId {
+    auto* e = self.engine;
+    aurea::f32 v[4]{};
+    if (!e || !e->query_camera_poi(static_cast<aurea::u64>(layerId), v)) return nil;
+    return @[@(v[0]), @(v[1]), @(v[2]), @(v[3])];
+}
+
 - (void)setLayer:(long long)layerId adjustment:(BOOL)on {
     if (auto* e = self.engine) (void)e->set_layer_adjustment(static_cast<aurea::u64>(layerId), on != NO);
 }
@@ -2339,11 +2415,12 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     float post[6]{}, floor[8]{}, fog[6]{};
     e->query_scene3d_post(post); e->query_scene_floor(floor); e->query_scene3d_fog(fog);
     float ao[3]{}; e->query_scene3d_ao(ao);   // [15..17] (0.5.1): oclusão ambiente
+    float wet[2]{0.f, 260.f}; e->query_scene_floor_wetness(wet);   // [18..19] (0.5.2): chão molhado
     // [8] (0.4.1): 1 = o chão é o "Reflective Floor". [9..14] (0.4.6): névoa
     // (ligada, densidade, raios, cor RGB). Par do Android (nativeSceneSettings).
     return @[@(e->studio_environment()), @(floor[0]), @(post[0]), @(post[1]), @(post[2]), @(post[3]), @(post[4]), @(post[5]),
              @(aurea::Engine::is_reflective_floor(floor) ? 1.f : 0.f),
-             @(fog[0]), @(fog[1]), @(fog[2]), @(fog[3]), @(fog[4]), @(fog[5]), @(ao[0]), @(ao[1]), @(ao[2])];
+             @(fog[0]), @(fog[1]), @(fog[2]), @(fog[3]), @(fog[4]), @(fog[5]), @(ao[0]), @(ao[1]), @(ao[2]), @(wet[0]), @(wet[1])];
 }
 - (BOOL)setSceneSetting:(uint32_t)parameter value:(float)value {
     if (!self.engine || !std::isfinite(value)) return NO;
@@ -2390,6 +2467,11 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     case 13: case 14: case 15: {
         float ao[3]{}; e.query_scene3d_ao(ao);
         return e.set_scene3d_ao(parameter == 13 ? value > 0 : ao[0] > 0, parameter == 14 ? value : ao[1], parameter == 15 ? value : ao[2]) ? YES : NO;
+    }
+    // 0.5.2: chão molhado — molhado 0..1 (16) e tamanho das poças em px (17). Par do Android.
+    case 16: case 17: {
+        float wet[2]{0.f, 260.f}; e.query_scene_floor_wetness(wet);
+        return e.set_scene_floor_wetness(parameter == 16 ? value : wet[0], parameter == 17 ? value : wet[1]) ? YES : NO;
     }
     default: return false;
     }
@@ -4390,6 +4472,21 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
     const std::string s = e->model_node_name(static_cast<aurea::u64>(layerId), node);
     return [NSString stringWithUTF8String:s.c_str()] ?: @"";
 }
+- (NSArray<NSNumber*>*)modelAttachBones:(long long)modelId {
+    auto* e = self.engine; if (!e) return @[];
+    const std::vector<aurea::i32> bones = e->model_attach_bones(static_cast<aurea::u64>(modelId));
+    NSMutableArray<NSNumber*>* out = [NSMutableArray arrayWithCapacity:bones.size()];
+    for (aurea::i32 b : bones) [out addObject:@(b)];
+    return out;
+}
+- (BOOL)setLayerParentBone:(long long)layerId model:(long long)modelId node:(int32_t)node {
+    auto* e = self.engine;
+    return e && e->set_layer_parent_bone(static_cast<aurea::u64>(layerId), static_cast<aurea::u64>(modelId), node).ok();
+}
+- (int32_t)layerParentBone:(long long)layerId {
+    auto* e = self.engine;
+    return e ? e->layer_parent_bone(static_cast<aurea::u64>(layerId)) : -1;
+}
 - (BOOL)dragBoneTranslate:(long long)layerId node:(int32_t)node dx:(float)dx dy:(float)dy continuing:(BOOL)continuing {
     auto* e = self.engine;
     return e && node >= 0 && e->drag_bone_translate(static_cast<aurea::u64>(layerId), static_cast<aurea::u32>(node), dx, dy, continuing);
@@ -4474,10 +4571,18 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
         NSMutableArray* pathExclude = [NSMutableArray array];
         for (const auto& p : g.paths) [pathExclude addObject:@(p.exclude)];
         for (const auto& p : g.paths) [paths addObject:@[@(static_cast<u32>(p.kind)), @(p.reversed), @(p.center.x), @(p.center.y), @(p.size.x), @(p.size.y), @(p.roundness), @(p.points), @(p.outerRadius), @(p.innerRadius), @(p.outerRoundness), @(p.innerRoundness), @(p.rotation)]];
+        // Operadores de caminho no cabeçote (Engine::query_vector_modifiers).
+        NSMutableArray* modifiers = [NSMutableArray array];
+        {
+            constexpr u32 k = aurea::Engine::kVectorModifierFloats;
+            std::vector<float> rows(std::max<usize>(1, g.modifiers.size()) * k);
+            const u32 n = e->query_vector_modifiers(layerId, index, rows.data(), static_cast<u32>(rows.size()));
+            for (u32 m = 0; m < n; ++m) [modifiers addObject:floats_to_array(rows.data() + m * k, k)];
+        }
         [groups addObject:@{@"id": @(index), @"name": to_ns(g.name), @"visible": @(g.visible), @"merge": @(g.merge), @"params": floats_to_array(params, aurea::Engine::kVectorParamFloats), @"pathKeyCounts": pathKeyCounts, @"pathExclude": pathExclude,
             @"fillEnabled": @(g.fill.enabled), @"fillRule": @(g.fill.rule), @"fill": paint(g.fill.paint),
             @"strokeEnabled": @(g.stroke.enabled), @"stroke": paint(g.stroke.paint), @"cap": @(g.stroke.cap), @"join": @(g.stroke.join), @"miter": @(g.stroke.miterLimit), @"taperStart": @(g.stroke.taperStart), @"taperEnd": @(g.stroke.taperEnd), @"taperEase": @(g.stroke.taperEase), @"dashes": floats_to_array(g.stroke.dashes.data(), static_cast<u32>(g.stroke.dashes.size())),
-            @"trimEnabled": @(g.trim.enabled), @"trimMode": @(g.trim.mode), @"repeatEnabled": @(g.repeater.enabled), @"repeatAbove": @(g.repeater.above), @"repeatAnchor": @[@(g.repeater.anchor.x), @(g.repeater.anchor.y)], @"anchor": @[@(g.anchor.x), @(g.anchor.y)], @"paths": paths}];
+            @"trimEnabled": @(g.trim.enabled), @"trimMode": @(g.trim.mode), @"repeatEnabled": @(g.repeater.enabled), @"repeatAbove": @(g.repeater.above), @"repeatAnchor": @[@(g.repeater.anchor.x), @(g.repeater.anchor.y)], @"repeatScaleLinked": @(g.repeater.scaleLinked != 0), @"modifiers": modifiers, @"anchor": @[@(g.anchor.x), @(g.anchor.y)], @"paths": paths}];
     }
     return groups;
 }
@@ -4523,6 +4628,11 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
         case 24: g.stroke.taperStart = std::clamp(v[0], 0.f, 100.f); break;
         case 25: g.stroke.taperEnd = std::clamp(v[0], 0.f, 100.f); break;
         case 26: g.stroke.taperEase = std::clamp(v[0], 0.f, 100.f); break;
+        // Repetidor: escala X/Y separadas (v6). [ligada, escala Y inicial ao separar]
+        case 27:
+            g.repeater.scaleLinked = v[0] > .5f ? 1 : 0;
+            if (!g.repeater.scaleLinked && v.size() > 1) g.repeater.scaleY = v[1];
+            break;
         default: return NO;
     }
     aurea::vector::encode_document(doc, data, names);
@@ -4569,6 +4679,10 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
 - (BOOL)setVectorParam:(long long)layerId group:(uint32_t)group param:(uint32_t)param value:(float)value { auto* e = self.engine; return e && e->set_vector_param(layerId, group, param, value, false); }
 - (BOOL)keyVectorParam:(long long)layerId group:(uint32_t)group param:(uint32_t)param { auto* e = self.engine; return e && e->ensure_vector_param_key(layerId, group, param); }
 - (BOOL)toggleVectorParamKey:(long long)layerId group:(uint32_t)group param:(uint32_t)param { auto* e = self.engine; return e && e->toggle_vector_param_key(layerId, group, param); }
+- (int32_t)addVectorModifier:(long long)layerId group:(uint32_t)group type:(uint32_t)type { auto* e = self.engine; return e ? e->add_vector_modifier(layerId, group, type) : -1; }
+- (BOOL)removeVectorModifier:(long long)layerId group:(uint32_t)group index:(uint32_t)index { auto* e = self.engine; return e && e->remove_vector_modifier(layerId, group, index); }
+- (BOOL)moveVectorModifier:(long long)layerId group:(uint32_t)group from:(uint32_t)from to:(uint32_t)to { auto* e = self.engine; return e && e->move_vector_modifier(layerId, group, from, to); }
+- (BOOL)setVectorModifierEnabled:(long long)layerId group:(uint32_t)group index:(uint32_t)index enabled:(BOOL)enabled { auto* e = self.engine; return e && e->set_vector_modifier_enabled(layerId, group, index, enabled == YES); }
 - (long long)addFreehand:(long long)layerId points:(NSArray<NSNumber*>*)points error:(float)error {
     auto* e = self.engine; if (!e || points.count % 2) return -1; std::vector<float> v; for (NSNumber* n in points) v.push_back(n.floatValue);
     const auto result = e->add_freehand_path(layerId, v.data(), v.size(), error); return result.ok() ? static_cast<long long>(*result) : -1;
@@ -4728,6 +4842,9 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
 }
 - (BOOL)setMaskProps:(long long)layerId mask:(uint32_t)mask operation:(uint32_t)operation inverted:(BOOL)inverted feather:(float)feather expansion:(float)expansion opacity:(float)opacity {
     auto* e = self.engine; return e && e->set_mask_props(layerId, mask, operation, inverted, feather, expansion, opacity);
+}
+- (BOOL)setMaskFalloff:(long long)layerId mask:(uint32_t)mask falloff:(uint32_t)falloff {
+    auto* e = self.engine; return e && e->set_mask_falloff(layerId, mask, falloff);
 }
 - (BOOL)keyMask:(long long)layerId mask:(uint32_t)mask {
     auto* e = self.engine; return e && e->ensure_mask_path_key(layerId, mask);
@@ -5086,6 +5203,49 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
     return @[@(v[0]), @(v[1]), @(v[2]), @(v[3]), @(v[4]), @(v[5]), @(v[6]), @(v[7]), @(v[8])];
 }
 
+// --- Headbop (0.5.2) ---------------------------------------------------------
+- (BOOL)headbopBeginEffect:(uint32_t)effectId layer:(long long)layerId {
+    if (auto* e = self.engine) return e->headbop_begin(static_cast<aurea::u64>(layerId), effectId) ? YES : NO;
+    return NO;
+}
+- (BOOL)headbopPushFrames:(NSData *)data frames:(int32_t)frames aspect:(float)aspect {
+    auto* e = self.engine;
+    if (!e || !data || frames <= 0) return NO;
+    const NSUInteger fit = data.length / (sizeof(float) * (2 + 33 * 4));
+    const auto count = static_cast<aurea::u32>(std::min<NSUInteger>(fit, static_cast<NSUInteger>(frames)));
+    return count > 0 && e->headbop_push_frames(static_cast<const float*>(data.bytes), count, aspect);
+}
+- (BOOL)headbopAnalyze {
+    if (auto* e = self.engine) return e->headbop_analyze() ? YES : NO;
+    return NO;
+}
+- (void)headbopCancel {
+    if (auto* e = self.engine) e->headbop_cancel();
+}
+- (NSArray<NSNumber *> *)headbopStatusForEffect:(uint32_t)effectId layer:(long long)layerId {
+    long long v[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+    if (auto* e = self.engine) {
+        aurea::i64 st[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+        if (e->headbop_status(static_cast<aurea::u64>(layerId), effectId, st)) {
+            for (int i = 0; i < 8; ++i) v[i] = st[i];
+            v[8] = 1;
+        }
+    }
+    return @[@(v[0]), @(v[1]), @(v[2]), @(v[3]), @(v[4]), @(v[5]), @(v[6]), @(v[7]), @(v[8])];
+}
+- (BOOL)headbopSetTaps:(NSArray<NSNumber *> *)times effect:(uint32_t)effectId layer:(long long)layerId {
+    auto* e = self.engine;
+    if (!e || times.count < 2) return NO;
+    std::vector<double> t;
+    t.reserve(times.count);
+    for (NSNumber* n in times) t.push_back(n.doubleValue);
+    return e->headbop_set_taps(static_cast<aurea::u64>(layerId), effectId, t.data(), static_cast<aurea::u32>(t.size())) ? YES : NO;
+}
+- (int32_t)headbopBakeEffect:(uint32_t)effectId layer:(long long)layerId {
+    if (auto* e = self.engine) return e->headbop_bake(static_cast<aurea::u64>(layerId), effectId);
+    return -1;
+}
+
 - (BOOL)bgRemoveNativeAvailable {
     return aurea::Engine::bg_remove_native_available() ? YES : NO;
 }
@@ -5226,6 +5386,25 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
     double raw[6]{};
     for (NSUInteger i = 0; i < 6; ++i) raw[i] = values[i].doubleValue;
     return e->set_text_dynamic(layerId, raw);
+}
+- (NSArray<NSNumber*>*)textTexture:(long long)layerId {
+    auto* e = self.engine;
+    float v[aurea::kTextTextureValues + 1]{};
+    if (!e || !e->query_text_texture(layerId, v, aurea::kTextTextureValues + 1)) return @[];
+    NSMutableArray<NSNumber*>* out = [NSMutableArray arrayWithCapacity:aurea::kTextTextureValues + 1];
+    for (float x : v) [out addObject:@(x)];
+    return out;
+}
+- (BOOL)setTextTexture:(long long)layerId values:(NSArray<NSNumber*>*)values {
+    auto* e = self.engine;
+    if (!e || values.count < aurea::kTextTextureValues) return NO;
+    float raw[aurea::kTextTextureValues]{};
+    for (NSUInteger i = 0; i < aurea::kTextTextureValues; ++i) raw[i] = values[i].floatValue;
+    return e->set_text_texture(layerId, raw, aurea::kTextTextureValues);
+}
+- (BOOL)setTextTextureImage:(long long)layerId path:(NSString*)path {
+    auto* e = self.engine;
+    return e && path.length && e->set_text_texture_image(layerId, path.UTF8String).ok();
 }
 
 - (void)setLayer:(long long)layerId fadeIn:(int32_t)frames {
@@ -5431,6 +5610,108 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
 - (NSString*)markerLabel:(int64_t)frame {
     if (auto* e = self.engine) return to_ns(e->marker_label(frame));
     return @"";
+}
+
+// --- Timeline do AE (EngineAeTimeline.cpp) ------------------------------------
+- (BOOL)editMarkerEx:(int64_t)from to:(int64_t)to color:(uint32_t)color label:(NSString*)label
+            duration:(int64_t)duration comment:(NSString*)comment {
+    if (auto* e = self.engine) return e->edit_marker_ex(from, to, color, to_std(label), duration, to_std(comment));
+    return NO;
+}
+
+- (NSDictionary<NSString*, id>*)markerDetails:(int64_t)frame {
+    auto* e = self.engine;
+    i64 duration = 0;
+    std::string comment;
+    if (!e || !e->marker_details(frame, duration, comment)) return nil;
+    return @{@"duration": @(duration), @"comment": to_ns(comment)};
+}
+
+- (BOOL)editLayerMarker:(long long)layerId from:(int64_t)from to:(int64_t)to color:(uint32_t)color label:(NSString*)label
+               duration:(int64_t)duration comment:(NSString*)comment {
+    if (auto* e = self.engine)
+        return e->edit_layer_marker(static_cast<u64>(layerId), from, to, color, to_std(label), duration, to_std(comment));
+    return NO;
+}
+
+- (BOOL)moveLayerMarker:(long long)layerId from:(int64_t)from to:(int64_t)to {
+    if (auto* e = self.engine) return e->move_layer_marker(static_cast<u64>(layerId), from, to);
+    return NO;
+}
+
+- (BOOL)deleteLayerMarker:(long long)layerId frame:(int64_t)frame {
+    if (auto* e = self.engine) return e->delete_layer_marker(static_cast<u64>(layerId), frame);
+    return NO;
+}
+
+- (NSArray<NSNumber*>*)allLayerMarkers {
+    auto* e = self.engine;
+    if (!e) return @[];
+    std::vector<i64> raw(4 * 32);
+    u32 total = e->query_all_layer_markers(raw.data(), 32);
+    if (total > 32) {
+        raw.assign(static_cast<usize>(total) * 4, 0);
+        total = e->query_all_layer_markers(raw.data(), total);
+    }
+    NSMutableArray<NSNumber*>* out = [NSMutableArray arrayWithCapacity:static_cast<NSUInteger>(total) * 4];
+    for (u32 i = 0; i < total * 4 && i < raw.size(); ++i) [out addObject:@(raw[i])];
+    return out;
+}
+
+- (NSArray<NSString*>*)layerMarkerText:(long long)layerId frame:(int64_t)frame {
+    auto* e = self.engine;
+    std::string label, comment;
+    if (!e || !e->layer_marker_text(static_cast<u64>(layerId), frame, label, comment)) return nil;
+    return @[to_ns(label), to_ns(comment)];
+}
+
+- (uint32_t)scaleKeyframeSelection:(long long)layerId references:(NSArray<NSNumber*>*)references anchor:(int64_t)anchor
+                            factor:(double)factor {
+    auto* e = self.engine;
+    if (!e || references.count == 0 || references.count % 4 != 0 || references.count > 16384 * 4) return 0;
+    std::vector<i64> refs;
+    refs.reserve(references.count);
+    for (NSNumber* value in references) refs.push_back(value.longLongValue);
+    return e->scale_keyframe_selection(static_cast<u64>(layerId), refs.data(), static_cast<u32>(refs.size() / 4), anchor, factor);
+}
+
+- (uint32_t)easeKeyframeSelection:(long long)layerId references:(NSArray<NSNumber*>*)references mode:(uint32_t)mode {
+    auto* e = self.engine;
+    if (!e || references.count == 0 || references.count % 4 != 0 || references.count > 16384 * 4) return 0;
+    std::vector<i64> refs;
+    refs.reserve(references.count);
+    for (NSNumber* value in references) refs.push_back(value.longLongValue);
+    return e->ease_keyframe_selection(static_cast<u64>(layerId), refs.data(), static_cast<u32>(refs.size() / 4), mode);
+}
+
+- (BOOL)setWorkAreaStart:(int64_t)start end:(int64_t)end {
+    if (auto* e = self.engine) return e->set_work_area(start, end);
+    return NO;
+}
+
+- (NSArray<NSNumber*>*)workArea {
+    auto* e = self.engine;
+    i64 in = 0, out = 0;
+    if (!e || !e->query_work_area(in, out)) return nil;
+    return @[@(in), @(out)];
+}
+
+- (BOOL)trimToWorkArea {
+    if (auto* e = self.engine) return e->trim_composition_to_work_area();
+    return NO;
+}
+
+- (void)setExportWorkAreaOnly:(BOOL)on {
+    if (auto* e = self.engine) e->set_export_work_area_only(on == YES);
+}
+
+- (uint32_t)alignLayers:(NSArray<NSNumber*>*)layerIds mode:(uint32_t)mode {
+    auto* e = self.engine;
+    if (!e || layerIds.count == 0) return 0;
+    std::vector<u64> ids;
+    ids.reserve(layerIds.count);
+    for (NSNumber* n in layerIds) ids.push_back(static_cast<u64>(n.longLongValue));
+    return e->align_layers(ids.data(), static_cast<u32>(ids.size()), mode);
 }
 
 // =============================================================================

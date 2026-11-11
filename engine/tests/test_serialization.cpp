@@ -1760,3 +1760,7 @@ AUREA_TEST(Serialization, ParametricEasingsSurviveProjectReload) {
     AUREA_CHECK(outside);   // as curvas que passam do ponto passam mesmo depois de relidas
     std::remove(path.c_str());
 }
+
+// 0.5.2: preenchimento com textura do texto (v69) e o efeito Textura.
+#include <algorithm>
+#include "TextTextureTests.inl"

@@ -63,9 +63,15 @@ void Backend::Impl::bind_pipeline(PipelineHandle h) noexcept {
     glUseProgram(pipeline->id);
     for (u32 slot = 0; slot < binding::kTextureSlots; ++slot) update_border(slot);
     if (p.isCompute) return;
-    if (p.blendEnabled) { glEnable(GL_BLEND); glBlendEquationSeparate(GL_FUNC_ADD, GL_FUNC_ADD);
-        glBlendFuncSeparate(GL_ONE, p.blend == BlendMode::Add ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA,
-                           GL_ONE, p.blend == BlendMode::Add ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA); }
+    if (p.blendEnabled) { glEnable(GL_BLEND);
+        // Operador do Eco (AE 2026): Lighten/Darken = máximo/mínimo por canal,
+        // Screen = tela pré-multiplicada. Par do Vulkan e do Metal.
+        const bool minMax = p.blend == BlendMode::Lighten || p.blend == BlendMode::Darken;
+        const GLenum eq = minMax ? (p.blend == BlendMode::Lighten ? GL_MAX : GL_MIN) : GL_FUNC_ADD;
+        glBlendEquationSeparate(eq, eq);
+        const bool add = p.blend == BlendMode::Add || minMax;
+        glBlendFuncSeparate(GL_ONE, add ? GL_ONE : p.blend == BlendMode::Screen ? GL_ONE_MINUS_SRC_COLOR : GL_ONE_MINUS_SRC_ALPHA,
+                           GL_ONE, add ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA); }
     else glDisable(GL_BLEND);
     if (p.depth.test) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
     constexpr GLenum comparisons[] = {GL_NEVER, GL_LESS, GL_EQUAL, GL_LEQUAL, GL_GREATER, GL_NOTEQUAL, GL_GEQUAL, GL_ALWAYS};

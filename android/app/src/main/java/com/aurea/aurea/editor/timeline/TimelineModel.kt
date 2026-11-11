@@ -56,6 +56,8 @@ internal class RowModel(
     val dimInstants: IntArray = NO_INSTANTS,
     /** Máscara de recorte: recortada pela camada abaixo (indicador na pílula). */
     val clipToBelow: Boolean = false,
+    /** Tímida (o Shy do AE): sai da lista com "Ocultar camadas tímidas" ([withoutShy]). */
+    val shy: Boolean = false,
 ) {
     /** Tem losango à vista, forte ou esmaecido (o trilho e o nome sobem). */
     val hasKeys: Boolean get() = instants.isNotEmpty() || dimInstants.isNotEmpty()
@@ -110,7 +112,7 @@ internal fun buildFocusedRow(l: LayerRow, all: List<KeyframeRow>, focus: List<Tr
         id = strong.id, type = strong.type, start = strong.start, end = strong.end, offset = strong.offset,
         visible = strong.visible, locked = strong.locked, magnetic = strong.magnetic, animated = strong.animated,
         name = strong.name, label = strong.label, instants = strong.instants, keysAt = strong.keysAt,
-        line = strong.line, dimInstants = dim,
+        line = strong.line, dimInstants = dim, clipToBelow = strong.clipToBelow, shy = strong.shy,
     )
 }
 
@@ -211,8 +213,17 @@ internal fun buildRow(l: LayerRow, all: List<KeyframeRow>, name: String = l.name
         keysAt = groups.toTypedArray(),
         line = l.trackId,
         clipToBelow = l.clipToBelow,
+        shy = l.shy,
     )
 }
+
+/**
+ * AE "Ocultar camadas tímidas": com a chave da composição ligada, as fileiras
+ * tímidas saem da timeline (o quadro não muda). Sem tímida, a MESMA lista volta
+ * (quem a observa não é invalidado). Par do `timelineWithoutShy` do iOS.
+ */
+internal fun withoutShy(rows: List<RowModel>, hide: Boolean): List<RowModel> =
+    if (!hide || rows.none { it.shy }) rows else rows.filter { !it.shy }
 
 /**
  * Fileiras por LINHA (`trackId`): trechos da mesma linha dividem UMA fileira,
@@ -297,7 +308,7 @@ private fun sharedRow(line: Int, segs: Array<RowModel>): RowModel {
         id = head.id, type = head.type, start = start, end = end, offset = 0,
         visible = visible, locked = locked, magnetic = magnetic, animated = animated,
         name = head.name, label = head.label, instants = IntArray(0), keysAt = emptyArray(),
-        line = line, shared = segs, clipToBelow = head.clipToBelow,
+        line = line, shared = segs, clipToBelow = head.clipToBelow, shy = head.shy,
     )
 }
 
@@ -505,6 +516,8 @@ internal object LaneNames {
         R.string.tl_alpha to "Alpha", R.string.tl_metallic to "Metallic", R.string.tl_roughness to "Roughness",
         R.string.tl_transform to "Transform", R.string.tl_3d to "3D · %1\$d",
         R.string.om_pts_contour_n to "Contour %1\$d",
+        R.string.ae_shapeop_lane to "Operator %1\$d · %2\$d",
+        R.string.ae_anim_source_text to "Source Text", R.string.ae_anim_poi_axis to "Point of Interest %1\$s",
     )
     fun get(@StringRes id: Int, vararg args: Any): String {
         val context = app
@@ -588,7 +601,11 @@ private fun trackName(track: TimelineTrack, effects: List<Pair<Int, String>>): S
         43 -> LaneNames.get(R.string.tl_mask, track.effect + 1,
             listOf(R.string.tl_feather, R.string.tl_expansion, R.string.tl_opacity).getOrNull(track.param)?.let { LaneNames.get(it) } ?: track.param.toString())
         49 -> LaneNames.get(R.string.tl_mask, track.effect + 1, LaneNames.get(R.string.panel_caminho))
-        34 -> LaneNames.get(R.string.tl_vector, track.param + 1)
+        // Operadores de caminho (AE shape operators): "Operador 1 · 3" (operador, parâmetro).
+        34 -> if (com.aurea.aurea.engine.VParam.isMod(track.param)) {
+            val k = track.param - com.aurea.aurea.engine.VParam.MOD_BASE
+            LaneNames.get(R.string.ae_shapeop_lane, k / com.aurea.aurea.engine.VParam.MOD_PARAMS + 1, k % com.aurea.aurea.engine.VParam.MOD_PARAMS + 1)
+        } else LaneNames.get(R.string.tl_vector, track.param + 1)
         35 -> LaneNames.get(R.string.tl_shape, track.param + 1)
         36 -> LaneNames.get(R.string.tl_particles, track.param + 1)
         39 -> LaneNames.get(R.string.tl_speed)
@@ -604,6 +621,9 @@ private fun trackName(track: TimelineTrack, effects: List<Pair<Int, String>>): S
         46 -> LaneNames.get(R.string.panel_margem_inicial)
         47 -> LaneNames.get(R.string.text027_path_last_margin)
         48 -> LaneNames.get(R.string.om_pts_contour_n, track.param + 1)
+        // AE animation: texto-fonte e o Ponto de Interesse da câmera de dois nós.
+        50 -> LaneNames.get(R.string.ae_anim_source_text)
+        51, 52, 53 -> LaneNames.get(R.string.ae_anim_poi_axis, listOf("X", "Y", "Z")[track.property - 51])
         else -> LaneNames.get(R.string.tl_3d, track.property)
     }
 }

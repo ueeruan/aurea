@@ -829,8 +829,15 @@ f32* param_ref(VectorGroup& g, u32 p) noexcept {
         case kVecRotation: return &g.rotation;
         case kVecScale: return &g.scale.x;
         case kVecOpacity: return &g.opacity;
-        default: return nullptr;
+        case kVecRepScaleY: return &g.repeater.scaleY;
+        default: break;
     }
+    // Operadores de caminho: um bloco de kVecModParams ids por operador.
+    if (is_vector_modifier_param(p)) {
+        const u32 m = (p - kVecModParamBase) / kVecModParams, k = (p - kVecModParamBase) % kVecModParams;
+        if (m < g.modifiers.size()) return &g.modifiers[m].params[k];
+    }
+    return nullptr;
 }
 
 f32 clamp_param(u32 p, f32 v) noexcept {
@@ -841,21 +848,39 @@ f32 clamp_param(u32 p, f32 v) noexcept {
         case kVecFillOpacity: case kVecStrokeOpacity: case kVecOpacity:
         case kVecRepStartOpacity: case kVecRepEndOpacity: return std::clamp(v, 0.0f, 100.0f);
         case kVecRepCopies: return std::clamp(v, 0.0f, 500.0f);
-        case kVecRepScale: case kVecScale: return std::clamp(v, -10000.0f, 10000.0f);
+        case kVecRepScale: case kVecRepScaleY: case kVecScale: return std::clamp(v, -10000.0f, 10000.0f);
         default: return std::clamp(v, -100000.0f, 100000.0f);
     }
 }
 
-VectorGroup evaluate_group(const VectorGroup& g, const TrackSet& tracks, u32 gi, f64 frame) {
+VectorGroup evaluate_group(const VectorGroup& g, const TrackSet& tracks, u32 gi, f64 frame, f64 fps) {
     VectorGroup r = g;
     const f64 f = std::floor(frame);
     const f32 k = static_cast<f32>(frame - f);
+    auto sample = [&](const Track& tr) {
+        f32 v = tr.sample(FrameIndex{static_cast<i64>(f)});
+        if (k > 0.0f) v += (tr.sample(FrameIndex{static_cast<i64>(f) + 1}) - v) * k;
+        return v;
+    };
     for (u32 p = 0; p < kVecParamCount; ++p) {
         const Track* tr = tracks.find(TrackProperty::VectorParam, gi, p);
         if (!tr || tr->keys.empty()) continue;
-        f32 v = tr->sample(FrameIndex{static_cast<i64>(f)});
-        if (k > 0.0f) v += (tr->sample(FrameIndex{static_cast<i64>(f) + 1}) - v) * k;
-        if (f32* ref = param_ref(r, p)) *ref = clamp_param(p, v);
+        if (f32* ref = param_ref(r, p)) *ref = clamp_param(p, sample(*tr));
+    }
+    // Operadores de caminho: as trilhas deles (ids depois dos comuns) e o tempo
+    // em segundos dos animados.
+    if (!r.modifiers.empty()) {
+        for (u32 t = 0; t < tracks.size(); ++t) {
+            const Track& tr = tracks.at(t);
+            if (tr.property != TrackProperty::VectorParam || tr.effectIndex != gi || tr.keys.empty()) continue;
+            if (!is_vector_modifier_param(tr.effectParamIndex)) continue;
+            const u32 m = (tr.effectParamIndex - kVecModParamBase) / kVecModParams;
+            if (m >= r.modifiers.size()) continue;
+            const u32 slot = (tr.effectParamIndex - kVecModParamBase) % kVecModParams;
+            r.modifiers[m].params[slot] = clamp_modifier_param(r.modifiers[m].type, slot, sample(tr));
+        }
+        const f64 rate = std::isfinite(fps) && fps > 0.0 ? fps : 30.0;
+        for (VectorModifier& m : r.modifiers) m.time = frame / rate;
     }
     // Escala do grupo: um valor animável (uniforme) — Y acompanha X.
     if (tracks.find(TrackProperty::VectorParam, gi, kVecScale)) r.scale.y = r.scale.x * (g.scale.x != 0.0f ? g.scale.y / g.scale.x : 1.0f);
@@ -867,9 +892,15 @@ Affine2 group_matrix(const VectorGroup& g) noexcept {
 }
 
 Affine2 repeater_matrix(const VectorRepeater& r, f32 k) noexcept {
-    const f32 s = std::pow(std::max(1e-4f, std::fabs(r.scale) * 0.01f), k) * (r.scale < 0.0f && std::fmod(std::fabs(k), 2.0f) >= 1.0f ? -1.0f : 1.0f);
+    // Escala por cópia (acumula); negativa espelha nas cópias ímpares. v6:
+    // X e Y separados quando `scaleLinked` está desligado.
+    auto per_copy = [k](f32 sc) {
+        return std::pow(std::max(1e-4f, std::fabs(sc) * 0.01f), k) * (sc < 0.0f && std::fmod(std::fabs(k), 2.0f) >= 1.0f ? -1.0f : 1.0f);
+    };
+    const f32 sx = per_copy(r.scale);
+    const f32 sy = r.scaleLinked ? sx : per_copy(r.scaleY);
     return Affine2::translate(r.position * k) * Affine2::translate(r.anchor) * Affine2::rotate(r.rotation * k)
-         * Affine2::scale(Vec2{s, s}) * Affine2::translate(-r.anchor);
+         * Affine2::scale(Vec2{sx, sy}) * Affine2::translate(-r.anchor);
 }
 
 // =============================================================================
@@ -889,13 +920,24 @@ void group_lines(const VectorGroup& g, f64 frame, f32 tol, std::vector<Contour>&
     lines.clear();
     if (holes) holes->clear();
     std::vector<std::vector<Contour>> sets;
+    // Caminhos do quadro (com a marca de furo) e os operadores de caminho, em ordem.
+    std::vector<BezierPath> beziers;
+    std::vector<u8> hole;
+    beziers.reserve(g.paths.size());
     for (const VectorPath& vp : g.paths) {
-        const BezierPath b = path_at(vp, frame);
+        BezierPath b = path_at(vp, frame);
+        if (b.v.empty()) continue;
+        beziers.push_back(std::move(b));
+        hole.push_back(vp.exclude && holes ? 1 : 0);
+    }
+    if (!g.modifiers.empty()) apply_modifiers(g.modifiers, beziers, tol, &hole);
+    for (usize bi = 0; bi < beziers.size(); ++bi) {
+        const BezierPath& b = beziers[bi];
         if (b.v.empty()) continue;
         Contour c;
         flatten(b, tol, c);
         if (c.pts.empty()) continue;
-        if (vp.exclude && holes) {
+        if (hole[bi]) {
             holes->push_back(std::move(c));
             continue;
         }
@@ -1204,7 +1246,7 @@ void build_mesh(const std::vector<VectorGroup>& groups, f64 frame, f32 density, 
         if (g.repeater.enabled) {
             p.copies = copy_count(g.repeater, p.lastAlpha);
             if (p.copies == 0) continue;
-            const f32 s = std::fabs(g.repeater.scale) * 0.01f;
+            const f32 s = std::max(std::fabs(g.repeater.scale), g.repeater.scaleLinked ? 0.0f : std::fabs(g.repeater.scaleY)) * 0.01f;
             repScale = std::max(1.0f, std::pow(std::max(s, 1e-3f), std::max(0.0f, static_cast<f32>(p.copies) - 1.0f + std::fabs(g.repeater.offset))));
             repScale = std::min(repScale, 64.0f);
         }
@@ -1336,8 +1378,12 @@ bool bounds_of(const std::vector<VectorGroup>& groups, f64 frame, Vec2& mn, Vec2
         f32 lastAlpha = 1.0f;
         const u32 copies = g.repeater.enabled ? copy_count(g.repeater, lastAlpha) : 1u;
         const f32 grow = g.stroke.enabled ? g.stroke.width * 0.5f * (g.stroke.join == 0 ? std::max(1.0f, g.stroke.miterLimit) : 1.5f) : 0.0f;
-        for (const VectorPath& vp : g.paths) {
-            const BezierPath b = path_at(vp, frame);
+        // Com operadores de caminho a caixa é a dos caminhos já modificados.
+        std::vector<BezierPath> beziers;
+        beziers.reserve(g.paths.size());
+        for (const VectorPath& vp : g.paths) beziers.push_back(path_at(vp, frame));
+        if (!g.modifiers.empty()) apply_modifiers(g.modifiers, beziers, 0.5f);
+        for (const BezierPath& b : beziers) {
             for (u32 k = 0; k < copies; ++k) {
                 const Affine2 M = g.repeater.enabled ? G * repeater_matrix(g.repeater, static_cast<f32>(k) + g.repeater.offset) : G;
                 const f32 gs = grow * M.max_scale();
@@ -1428,6 +1474,19 @@ u64 content_hash(const std::vector<VectorGroup>& groups, f64 frame, const DrawPr
         const VectorRepeater& r = g.repeater;
         H.u(r.enabled); H.f(r.copies); H.f(r.offset); H.v2(r.anchor); H.v2(r.position); H.f(r.scale); H.f(r.rotation);
         H.f(r.startOpacity); H.f(r.endOpacity); H.u(r.above);
+        H.u(r.scaleLinked);
+        if (!r.scaleLinked) H.f(r.scaleY);
+        // Operadores de caminho: o tempo só entra nos animados (os parados não
+        // retriangulam a cada quadro).
+        if (!g.modifiers.empty()) {
+            H.u(0x4D4F4453ull);   // "MODS"
+            H.u(g.modifiers.size());
+            for (const VectorModifier& m : g.modifiers) {
+                H.u(static_cast<u64>(m.type)); H.u(m.enabled);
+                for (f32 v : m.params) H.f(v);
+                if (modifier_animated(m)) H.bytes(&m.time, sizeof(m.time));
+            }
+        }
         H.v2(g.position); H.v2(g.anchor); H.v2(g.scale); H.f(g.rotation); H.f(g.opacity);
     }
     // Só o trecho ENTRE o primeiro e o último key muda a forma: fora dele o

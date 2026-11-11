@@ -95,6 +95,9 @@ void collect_layer_assets(const Layer& l, std::vector<AssetId>& used) {
     // 0.3.6: a imagem que cobre um material do objeto 3D (textura do material).
     for (const MaterialOverride& material : l.model.materials)
         if (material.textureImage != 0) used.push_back(AssetId::unpack(material.textureImage));
+    // 0.5.2: a imagem da galeria do preenchimento com textura do texto.
+    if (l.kind == LayerKind::Text && l.text.texture.kind == kTextTextureImage && l.text.texture.image != 0)
+        used.push_back(AssetId::unpack(l.text.texture.image));
     for (const auto& effect : l.effects) {
         if (effect.type == effect_type_id("aurea.color.cube_lut") && !effect.params.empty()) {
             const auto id = AssetId::unpack(effect.params[0].constant.ref);

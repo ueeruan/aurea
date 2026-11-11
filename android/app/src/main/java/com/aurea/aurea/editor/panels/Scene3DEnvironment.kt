@@ -166,6 +166,17 @@ internal fun Environment3DTab(env: PanelEnv) {
                     if (!reflective) change(8, 1f)
                 }
             }
+            // 0.5.2: chão molhado — poças que espelham as luzes (par do Panel3DView.swift).
+            if (floor >= 1 && settings.size > 19) {
+                EnvValueRow(env, stringResource(R.string.scene052_floor_wet), settings[18] * 100f, 1f, 0f, 100f, "%", 0f, "chao molhado") {
+                    change(16, it / 100f)
+                }
+                if (settings[18] > 0f) {
+                    EnvValueRow(env, stringResource(R.string.scene052_puddle_size), settings[19], 10f, 20f, 2000f, "px", 260f, "chao molhado") {
+                        change(17, it)
+                    }
+                }
+            }
         }
     }
     Spacer(Modifier.height(16.dp))

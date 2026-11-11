@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: preenchimento com textura do texto (TextTextureSection.kt). -->
+<resources>
+    <string name="tex_section">टेक्सचर</string>
+    <string name="tex_preset_gold">सोना</string>
+    <string name="tex_preset_silver">चाँदी/क्रोम</string>
+    <string name="tex_preset_brushed">ब्रश्ड मेटल</string>
+    <string name="tex_preset_wood">लकड़ी</string>
+    <string name="tex_preset_marble">संगमरमर</string>
+    <string name="tex_preset_stone">पत्थर</string>
+    <string name="tex_preset_concrete">कंक्रीट</string>
+    <string name="tex_preset_glitter">ग्लिटर</string>
+    <string name="tex_preset_holo">होलोग्राफ़िक</string>
+    <string name="tex_preset_neon">नियॉन</string>
+    <string name="tex_preset_fire">आग</string>
+    <string name="tex_preset_water">पानी</string>
+    <string name="tex_preset_galaxy">आकाशगंगा</string>
+    <string name="tex_preset_paper">कागज़</string>
+    <string name="tex_preset_denim">डेनिम</string>
+    <string name="tex_preset_leather">चमड़ा</string>
+    <string name="tex_preset_rust">जंग</string>
+    <string name="tex_preset_ice">बर्फ़</string>
+    <string name="tex_preset_desc">%1$s टेक्सचर</string>
+    <string name="tex_mapping">मैपिंग</string>
+    <string name="tex_map_block">पूरा ब्लॉक</string>
+    <string name="tex_map_letter">हर अक्षर</string>
+    <string name="tex_stroke_too">आउटलाइन भी</string>
+    <string name="tex_scale">स्केल</string>
+    <string name="tex_rotation">घुमाव</string>
+    <string name="tex_offset_x">ऑफ़सेट X</string>
+    <string name="tex_offset_y">ऑफ़सेट Y</string>
+    <string name="tex_contrast">कंट्रास्ट</string>
+    <string name="tex_brightness">चमक</string>
+    <string name="tex_tint">टिंट रंग</string>
+    <string name="tex_speed">एनिमेट (गति)</string>
+    <string name="tex_relief">उभार</string>
+    <string name="tex_light_angle">रोशनी का कोण</string>
+    <string name="tex_variation">विविधता</string>
+</resources>

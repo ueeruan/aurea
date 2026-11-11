@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Timeline do AE (2026-11-11): marcas de camada, duração/comentário das marcas, área de trabalho, Easy Ease, escalar keyframes e escalonar. -->
+<resources>
+    <string name="aet_marker_duration">Duración (fotogramas)</string>
+    <string name="aet_marker_comment">Comentario</string>
+    <string name="aet_marker_comment_hint">Nota de la marca (las expresiones la leen con .comment)</string>
+    <string name="aet_layer_marker_edit">Marca de capa</string>
+    <string name="aet_layer_marker_hint">La marca se mueve con la capa. En expresiones: thisLayer.marker.</string>
+    <string name="aet_layer_marker_here">Marca de capa aquí</string>
+    <string name="aet_stagger">Escalonar</string>
+    <string name="aet_stagger_step_value">Paso de %1$d fotogramas</string>
+    <string name="aet_stagger_less">Un fotograma menos por paso</string>
+    <string name="aet_stagger_more">Un fotograma más por paso</string>
+    <string name="aet_stagger_keys_only">Solo fotogramas clave</string>
+    <string name="aet_stagger_apply">Escalonar</string>
+    <string name="aet_on">Activado</string>
+    <string name="aet_off">Desactivado</string>
+    <string name="aet_export_work_area">Solo el área de trabajo</string>
+    <string name="aet_export_work_area_range">%1$s – %2$s</string>
+    <string name="aet_easy_ease">Easy Ease</string>
+    <string name="aet_easy_ease_in">Suavizar entrada</string>
+    <string name="aet_easy_ease_out">Suavizar salida</string>
+    <string name="aet_ease_nothing">No hay tramos para suavizar en los fotogramas clave elegidos</string>
+    <string name="aet_keys_scale">Escalar tiempo</string>
+    <string name="aet_keys_scale_to">Tiempo al %1$s</string>
+    <string name="aet_keys_scale_refused">No se puede escalar: dos fotogramas clave caerían en el mismo fotograma</string>
+    <string name="aet_work_area_start_here">Inicio del área de trabajo aquí</string>
+    <string name="aet_work_area_end_here">Fin del área de trabajo aquí</string>
+    <string name="aet_work_area_clear">Quitar área de trabajo</string>
+    <string name="aet_trim_to_work_area">Recortar composición al área de trabajo</string>
+    <string name="aet_trimmed_to_work_area">Composición recortada al área de trabajo</string>
+</resources>

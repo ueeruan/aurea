@@ -1230,6 +1230,22 @@ struct TransformView: View {
                 accelerate.toggle()
             })
         }
+        // AE animation: Auto-Orientar (TransformPanel.kt). Ao longo do caminho, o X da
+        // camada (o olhar, na câmera) segue o caminho; para a câmera, a camada 3D a encara.
+        if tab == 0 || tab == 2 || tab == 3 {
+            let orient = model.layerAutoOrient()
+            let cameraOrLight = [8, 9].contains(model.selectedLayer?.kind ?? 0)
+            entries.append(.divider)
+            entries.append(.header(AureaText.t("ae_anim_auto_orient"), tag: "transform.autoorient"))
+            entries.append(.item(AureaText.t("ae_anim_auto_orient_off"), checked: orient == 0, enabled: !locked,
+                                 tag: "transform.autoorient.0") { model.setLayerAutoOrient(0) })
+            entries.append(.item(AureaText.t("ae_anim_auto_orient_path"), checked: orient == 1, enabled: !locked,
+                                 tag: "transform.autoorient.1") { model.setLayerAutoOrient(1) })
+            if threeD && !cameraOrLight {
+                entries.append(.item(AureaText.t("ae_anim_auto_orient_camera"), checked: orient == 2, enabled: !locked,
+                                     tag: "transform.autoorient.2") { model.setLayerAutoOrient(2) })
+            }
+        }
         // Mais do AUREA: as faces extras e, na câmera, o painel das opções da lente.
         entries.append(.divider)
         entries.append(.item(AureaText.t("panel_desfoque_movimento"), glyph: CupertinoGlyph.MotionBlur, selected: tab == 5,

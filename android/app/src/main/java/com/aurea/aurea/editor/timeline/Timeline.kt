@@ -21,6 +21,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -305,7 +306,29 @@ private fun KeyActionBar(store: EditorStore, compact: Boolean, modifier: Modifie
         KeyAction(stringResource(R.string.common_paste), "timeline.keys.paste", enabled = (store.clipboard and 8) != 0) { store.pasteTimelineKeys() }
         KeyAction(stringResource(R.string.common_duplicate), "timeline.keys.duplicate", enabled = count > 0 && !sel.crossLayer) { store.duplicateTimelineKeys() }
         KeyAction(stringResource(R.string.common_delete), "timeline.keys.delete", enabled = count > 0, danger = true) { store.deleteTimelineKeys() }
+        // Timeline do AE: Easy Ease (F9), só entrada, só saída e escalar no tempo.
+        KeyAction(stringResource(R.string.aet_easy_ease), "timeline.keys.easyEase", enabled = count > 0) { store.easeTimelineKeys(0) }
+        KeyAction(stringResource(R.string.aet_easy_ease_in), "timeline.keys.easyEaseIn", enabled = count > 0) { store.easeTimelineKeys(1) }
+        KeyAction(stringResource(R.string.aet_easy_ease_out), "timeline.keys.easyEaseOut", enabled = count > 0) { store.easeTimelineKeys(2) }
+        KeyScaleAction(store, enabled = count > 1)
         KeyAction(stringResource(R.string.editor_concluir), "timeline.keys.done") { store.clearKeySelection() }
+    }
+}
+
+/** Timeline do AE: "Escalar tempo" da seleção (em volta do primeiro key): ×½, ×¾, ×1½, ×2. */
+@Composable
+private fun KeyScaleAction(store: EditorStore, enabled: Boolean) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        KeyAction(stringResource(R.string.aet_keys_scale), "timeline.keys.scale", enabled = enabled) { open = true }
+        if (open) {
+            val entries = listOf(0.5 to "50%", 0.75 to "75%", 1.5 to "150%", 2.0 to "200%").map { (factor, label) ->
+                MenuEntry.Item(stringResource(R.string.aet_keys_scale_to, label), tag = "timeline.keys.scale.$label") {
+                    store.scaleTimelineKeys(factor)
+                }
+            }
+            AnchoredMenu(expanded = true, onDismiss = { open = false }, entries = entries, tag = "timeline.keys.scale.menu")
+        }
     }
 }
 
@@ -355,6 +378,26 @@ private fun OmegaTimeMenu(store: EditorStore, onDismiss: () -> Unit) {
         if (marked) {
             add(MenuEntry.Item(stringResource(R.string.common_delete), glyph = CupertinoGlyph.Trash, destructive = true,
                 tag = "timeline.currentTime.menu.delete") { store.deleteMarker(frame) })
+        }
+        // Timeline do AE: marca na camada escolhida e a área de trabalho no cabeçote.
+        val layer = store.primary?.takeIf { id -> store.layers.any { it.id == id && !it.locked } }
+        if (layer != null) {
+            add(MenuEntry.Item(stringResource(R.string.aet_layer_marker_here), glyph = CupertinoGlyph.Bookmark,
+                tag = "timeline.currentTime.menu.layerMarker") { store.openLayerMarkerEditor(layer, frame) })
+        }
+        add(MenuEntry.Item(stringResource(R.string.aet_work_area_start_here), tag = "timeline.currentTime.menu.workIn") {
+            store.setWorkAreaStartAtPlayhead()
+        })
+        add(MenuEntry.Item(stringResource(R.string.aet_work_area_end_here), tag = "timeline.currentTime.menu.workOut") {
+            store.setWorkAreaEndAtPlayhead()
+        })
+        if (store.workArea != null) {
+            add(MenuEntry.Item(stringResource(R.string.aet_trim_to_work_area), tag = "timeline.currentTime.menu.trimWork") {
+                store.trimToWorkArea()
+            })
+            add(MenuEntry.Item(stringResource(R.string.aet_work_area_clear), tag = "timeline.currentTime.menu.clearWork") {
+                store.clearWorkArea()
+            })
         }
     }
     AnchoredMenu(expanded = true, onDismiss = onDismiss, entries = entries, tag = "timeline.currentTime.menu")
@@ -448,6 +491,10 @@ private fun OmegaRulerSemantics(store: EditorStore, modifier: Modifier) {
     val current = stringResource(R.string.om_tl_current_time)
     val mark = stringResource(R.string.editor_marcar_ou_desmarcar_este_instante)
     val options = stringResource(R.string.om_tl_time_options)
+    // Timeline do AE: a área de trabalho também pelo leitor de tela.
+    val workIn = stringResource(R.string.aet_work_area_start_here)
+    val workOut = stringResource(R.string.aet_work_area_end_here)
+    val workClear = stringResource(R.string.aet_work_area_clear)
     val context = androidx.compose.ui.platform.LocalContext.current
     val reading = remember(context) {
         (context.getSystemService(android.content.Context.ACCESSIBILITY_SERVICE) as? android.view.accessibility.AccessibilityManager)
@@ -471,7 +518,11 @@ private fun OmegaRulerSemantics(store: EditorStore, modifier: Modifier) {
                     store.toggleMarker()
                     true
                 }
-                customActions = listOf(CustomAccessibilityAction(options) { store.openMarkerEditor(store.playhead); true })
+                customActions = listOf(
+                    CustomAccessibilityAction(options) { store.openMarkerEditor(store.playhead); true },
+                    CustomAccessibilityAction(workIn) { store.setWorkAreaStartAtPlayhead(); true },
+                    CustomAccessibilityAction(workOut) { store.setWorkAreaEndAtPlayhead(); true },
+                ) + if (store.workArea != null) listOf(CustomAccessibilityAction(workClear) { store.clearWorkArea(); true }) else emptyList()
             },
         )
     }

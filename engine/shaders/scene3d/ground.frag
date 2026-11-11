@@ -10,7 +10,10 @@
 //    - o reflexo PLANAR (a cena espelhada no plano, desfocada pela
 //      rugosidade), com Fresnel; onde não há objeto refletido, o reflexo do
 //      ambiente (especular pré-filtrado);
-//    - desbotamento radial até o horizonte: o chão some no fundo sem borda.
+//    - desbotamento radial até o horizonte: o chão some no fundo sem borda;
+//    - 0.5.2 chão molhado: poças (ruído de valor em 3 oitavas no plano) que
+//      viram espelho escuro — as luzes aparecem refletidas nelas — e o resto
+//      do chão só úmido (mais escuro, um pouco menos áspero).
 //
 //  Modo 1 (visível): a superfície inteira, alfa = desbotamento.
 //  Modo 2 (shadow catcher): transparente — só a sombra (preto com alfa) e o
@@ -68,6 +71,26 @@ float V_SmithGGXCorrelated(float NdotV, float NdotL, float a) {
     return 0.5 / max(gv + gl, 1e-5);
 }
 
+// 0.5.2 chão molhado: 1 na poça, 0 no seco.
+float hash2(vec2 p) {
+    p = fract(p * vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x * p.y);
+}
+float value_noise(vec2 p) {
+    vec2 i = floor(p), f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash2(i), hash2(i + vec2(1.0, 0.0)), u.x), mix(hash2(i + vec2(0.0, 1.0)), hash2(i + vec2(1.0, 1.0)), u.x), u.y);
+}
+float puddle_mask(vec2 xz) {
+    float wet = g.contactParams.z;
+    if (wet <= 0.0) return 0.0;
+    vec2 p = xz / max(g.contactParams.w, 1.0);
+    float n = 0.55 * value_noise(p) + 0.30 * value_noise(p * 2.13 + 7.1) + 0.15 * value_noise(p * 4.7 + 3.3);
+    float t = 1.0 - wet;   // alagado (1): tudo poça
+    return smoothstep(t - 0.05, t + 0.05, n);
+}
+
 // 1 = livre, 0 = ocluído pelo que está logo acima do chão.
 float contact_visibility() {
     if (g.contactParams.x < 0.5) return 1.0;
@@ -85,8 +108,16 @@ void main() {
     if (dot(N, V) <= 0.0) discard;
     float NdotV = clamp(dot(N, V), 1e-4, 1.0);
     float roughness = clamp(g.params.x, 0.02, 1.0);
-    float a = roughness * roughness;
     float reflectivity = clamp(g.params.y, 0.0, 1.0);
+    // Chão molhado: a poça espelha (rugosidade mínima, refletividade alta);
+    // o seco em volta fica úmido. O reflexo planar já vem nítido (Ground.cpp).
+    float wet = clamp(g.contactParams.z, 0.0, 1.0);
+    float puddle = puddle_mask(v_world.xz);
+    if (wet > 0.0) {
+        roughness = mix(mix(roughness, roughness * 0.7, wet), 0.03, puddle);
+        reflectivity = mix(reflectivity * mix(1.0, 0.35, wet), 0.95, puddle);
+    }
+    float a = roughness * roughness;
     int mode = int(g.color.w + 0.5);
 
     // Desbotamento radial (até o horizonte): alfa 1 perto dos modelos, 0 no raio final.
@@ -99,7 +130,7 @@ void main() {
     int shadowLight = int(g.shadowParams.w + 0.5);
 
     // --- Luz direta ---------------------------------------------------------------
-    vec3 albedo = g.color.rgb;
+    vec3 albedo = g.color.rgb * (wet > 0.0 ? mix(1.0 - 0.3 * wet, 0.22, puddle) : 1.0);
     // F0 do dielétrico: 4% (verniz/piso polido) — a "refletividade" escala o
     // quanto do lobo especular existe (0 = chão fosco, sem reflexo).
     const float F0 = 0.04;
@@ -201,7 +232,8 @@ void main() {
     }
 
     vec3 reflection = planar.rgb + envSpec * contact * (1.0 - planar.a);
-    vec3 diffuse = (irradiance * albedo * contact) * (1.0 - specW) + direct * mix(1.0, contact, 0.5);
+    // 0.5.2: a luz ambiente das camadas entra junto com o ambiente (zero sem ela).
+    vec3 diffuse = ((irradiance + g.lightCount.yzw) * albedo * contact) * (1.0 - specW) + direct * mix(1.0, contact, 0.5);
     vec3 color = diffuse + reflection * specW + directSpec;
     color *= g.cameraPos.w * fade;   // pré-multiplicado pelo desbotamento
     o_color = vec4(planarDisplay * specW * fade * g.cameraPos.w, fade);

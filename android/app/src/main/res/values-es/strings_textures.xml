@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: preenchimento com textura do texto (TextTextureSection.kt). -->
+<resources>
+    <string name="tex_section">Textura</string>
+    <string name="tex_preset_gold">Oro</string>
+    <string name="tex_preset_silver">Plata/Cromo</string>
+    <string name="tex_preset_brushed">Metal cepillado</string>
+    <string name="tex_preset_wood">Madera</string>
+    <string name="tex_preset_marble">Mármol</string>
+    <string name="tex_preset_stone">Piedra</string>
+    <string name="tex_preset_concrete">Hormigón</string>
+    <string name="tex_preset_glitter">Purpurina</string>
+    <string name="tex_preset_holo">Holográfico</string>
+    <string name="tex_preset_neon">Neón</string>
+    <string name="tex_preset_fire">Fuego</string>
+    <string name="tex_preset_water">Agua</string>
+    <string name="tex_preset_galaxy">Galaxia</string>
+    <string name="tex_preset_paper">Papel</string>
+    <string name="tex_preset_denim">Mezclilla</string>
+    <string name="tex_preset_leather">Cuero</string>
+    <string name="tex_preset_rust">Óxido</string>
+    <string name="tex_preset_ice">Hielo</string>
+    <string name="tex_preset_desc">Textura %1$s</string>
+    <string name="tex_mapping">Mapeo</string>
+    <string name="tex_map_block">Bloque entero</string>
+    <string name="tex_map_letter">Por letra</string>
+    <string name="tex_stroke_too">También el contorno</string>
+    <string name="tex_scale">Escala</string>
+    <string name="tex_rotation">Rotación</string>
+    <string name="tex_offset_x">Desplazamiento X</string>
+    <string name="tex_offset_y">Desplazamiento Y</string>
+    <string name="tex_contrast">Contraste</string>
+    <string name="tex_brightness">Brillo</string>
+    <string name="tex_tint">Color de tinte</string>
+    <string name="tex_speed">Animar (velocidad)</string>
+    <string name="tex_relief">Relieve</string>
+    <string name="tex_light_angle">Ángulo de la luz</string>
+    <string name="tex_variation">Variación</string>
+</resources>

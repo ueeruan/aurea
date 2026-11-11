@@ -76,6 +76,19 @@ data class VPath(
     fun copyDeep() = copy(path = path.copyDeep(), keys = keys.map { it.copy(path = it.path.copyDeep()) }.toMutableList())
 }
 
+/**
+ * v6: operador de caminho do grupo (AE shape operators: Deslocar, Franzir e inflar, Aspereza,
+ * Ondular, Arredondar cantos, Torcer, Zigue-zague, Ondular transform). `type` = [VModType];
+ * `params` = os [VParam.MOD_PARAMS] valores parados (índices por tipo, ver VectorData.hpp).
+ * O painel só repassa: adicionar/remover/ordem/ligar vão pelo motor (que remapeia as trilhas).
+ */
+data class VModifier(var type: Int = 0, var enabled: Boolean = true, val params: FloatArray = FloatArray(VParam.MOD_PARAMS)) {
+    fun copyDeep() = VModifier(type, enabled, params.copyOf())
+    override fun equals(other: Any?): Boolean =
+        other is VModifier && other.type == type && other.enabled == enabled && other.params.contentEquals(params)
+    override fun hashCode(): Int = (type * 31 + enabled.hashCode()) * 31 + params.contentHashCode()
+}
+
 data class VGroup(
     var name: String = "Grupo",
     var visible: Boolean = true,
@@ -93,15 +106,20 @@ data class VGroup(
     var repAx: Float = 0f, var repAy: Float = 0f, var repPx: Float = 120f, var repPy: Float = 0f,
     var repScale: Float = 100f, var repRotation: Float = 0f, var repStartOpacity: Float = 100f, var repEndOpacity: Float = 100f,
     var repAbove: Int = 0,
+    /** v6: escala Y do repetidor e "Y acompanha X" (projetos antigos: ligada). */
+    var repScaleY: Float = 100f, var repScaleLinked: Boolean = true,
     val paths: MutableList<VPath> = mutableListOf(),
     /** Omega conteúdo (v3): perfil de largura do pincel (0..1 ao longo do traço; vazio = constante). */
     val widthProfile: MutableList<Float> = mutableListOf(),
     /** Omega conteúdo (v3): 0 normal, 1 apagar (borracha do desenho). */
     var composite: Int = 0,
+    /** v6: operadores de caminho, em ordem. */
+    val modifiers: MutableList<VModifier> = mutableListOf(),
 ) {
     fun copyDeep() = copy(
         fill = fill.copyDeep(), stroke = stroke.copyDeep(), dashes = dashes.toMutableList(),
         paths = paths.map { it.copyDeep() }.toMutableList(), widthProfile = widthProfile.toMutableList(),
+        modifiers = modifiers.map { it.copyDeep() }.toMutableList(),
     )
 }
 
@@ -137,6 +155,7 @@ data class VectorDoc(
             o += if (g.trimOn) 1f else 0f; o += g.trimStart; o += g.trimEnd; o += g.trimOffset; o += g.trimMode.toFloat()
             o += if (g.repOn) 1f else 0f; o += g.repCopies; o += g.repOffset; o += g.repAx; o += g.repAy; o += g.repPx; o += g.repPy
             o += g.repScale; o += g.repRotation; o += g.repStartOpacity; o += g.repEndOpacity; o += g.repAbove.toFloat()
+            o += g.repScaleY; o += if (g.repScaleLinked) 1f else 0f   // v6
             o += g.paths.size.toFloat()
             for (p in g.paths) {
                 o += p.kind.toFloat(); o += if (p.reversed) 1f else 0f; o += p.cx; o += p.cy; o += p.w; o += p.h; o += p.roundness
@@ -150,6 +169,8 @@ data class VectorDoc(
                     o += k.points.size.toFloat(); k.points.forEach { o += it.toFloat() }   // v5
                 }
             }
+            o += g.modifiers.size.toFloat()   // v6
+            for (m in g.modifiers) { o += m.type.toFloat(); o += if (m.enabled) 1f else 0f; m.params.forEach { o += it } }
         }
         o += if (drawing) 1f else 0f
         return o.toFloatArray()
@@ -158,8 +179,8 @@ data class VectorDoc(
     fun names(): String = groups.joinToString("\n") { it.name.replace('\n', ' ') }
 
     companion object {
-        /** Versão do fluxo (vector/VectorDocument.cpp): 2 = afinar do contorno; 3 = perfil, apagar, furo, desenho (Omega); 5 = keyframe por ponto; 4 = curva dos keys de forma. */
-        const val DOC_VERSION = 5f
+        /** Versão do fluxo (vector/VectorDocument.cpp): 2 = afinar do contorno; 3 = perfil, apagar, furo, desenho (Omega); 4 = curva dos keys de forma; 5 = keyframe por ponto; 6 = operadores de caminho e escala X/Y do repetidor. */
+        const val DOC_VERSION = 6f
 
         private fun putPaint(p: VPaint, o: MutableList<Float>) {
             o += p.type.toFloat(); o += p.r; o += p.g; o += p.b; o += p.a; o += p.sx; o += p.sy; o += p.ex; o += p.ey; o += p.opacity
@@ -179,7 +200,7 @@ data class VectorDoc(
             return try {
                 val r = VReader(d)
                 val version = r.f()
-                if (version != 1f && version != 2f && version != 3f && version != 4f && version != DOC_VERSION) return null
+                if (version != 1f && version != 2f && version != 3f && version != 4f && version != 5f && version != DOC_VERSION) return null
                 val nm = names?.split('\n') ?: emptyList()
                 val n = r.i()
                 val doc = VectorDoc()
@@ -196,6 +217,7 @@ data class VectorDoc(
                     g.trimOn = r.b(); g.trimStart = r.f(); g.trimEnd = r.f(); g.trimOffset = r.f(); g.trimMode = r.i()
                     g.repOn = r.b(); g.repCopies = r.f(); g.repOffset = r.f(); g.repAx = r.f(); g.repAy = r.f(); g.repPx = r.f(); g.repPy = r.f()
                     g.repScale = r.f(); g.repRotation = r.f(); g.repStartOpacity = r.f(); g.repEndOpacity = r.f(); g.repAbove = r.i()
+                    if (version >= 6f) { g.repScaleY = r.f(); g.repScaleLinked = r.b() } else g.repScaleY = g.repScale
                     repeat(r.i()) {
                         val p = VPath(
                             r.i(), r.b(), r.f(), r.f(), r.f(), r.f(), r.f(), r.f(), r.f(), r.f(), r.f(), r.f(), r.f(),
@@ -211,6 +233,11 @@ data class VectorDoc(
                             p.keys += k
                         }
                         g.paths += p
+                    }
+                    if (version >= 6f) repeat(r.i()) {
+                        val m = VModifier(r.i(), r.b())
+                        for (k in 0 until VParam.MOD_PARAMS) m.params[k] = r.f()
+                        g.modifiers += m
                     }
                     doc.groups += g
                 }
@@ -245,7 +272,31 @@ object VParam {
     const val ROTATION = 17
     const val SCALE = 18
     const val OPACITY = 19
-    const val COUNT = 20
+    /** v6: escala Y do repetidor (só com a escala separada). */
+    const val REP_SCALE_Y = 20
+    const val COUNT = 21
+
+    /** Operadores de caminho: id do parâmetro `param` do operador `modifier` (vector_modifier_param). */
+    const val MOD_BASE = 0x10000
+    const val MOD_PARAMS = 16
+    /** Floats por operador em queryVectorModifiers: tipo, ligado, bits animados, bits com keyframe, valores. */
+    const val MOD_FLOATS = 4 + MOD_PARAMS
+    const val MOD_SEED = 15
+    fun mod(modifier: Int, param: Int): Int = MOD_BASE + modifier * MOD_PARAMS + param
+    fun isMod(id: Int): Boolean = id >= MOD_BASE
+}
+
+/** Tipos de operador de caminho (VectorModifierType do motor, mesma numeração). */
+object VModType {
+    const val OFFSET = 0
+    const val PUCKER_BLOAT = 1
+    const val ROUGHEN = 2
+    const val WIGGLE_PATHS = 3
+    const val ROUND_CORNERS = 4
+    const val TWIST = 5
+    const val ZIGZAG = 6
+    const val WIGGLE_TRANSFORM = 7
+    const val COUNT = 8
 }
 
 /** Caminho no cabeçote: afim grupo → composição, flags e o bezier. */

@@ -164,60 +164,21 @@ internal object LayerOps {
 
     /**
      * Alinhar à COMPOSIÇÃO (padrão do `alignSelection` da A.01). Cada camada
-     * anda o que falta para a borda da caixa dela encostar na borda pedida;
-     * tudo num passo só de desfazer.
+     * anda o que falta para a borda da caixa dela encostar na borda pedida.
+     * Timeline do AE (B6): a conta e a escrita moram no motor
+     * (`Engine::align_layers`), as duas telas só chamam; um passo de desfazer.
      */
     fun align(store: EditorStore, ids: Collection<Long>, edge: Edge) {
-        val cw = store.project.width.toFloat()
-        val ch = store.project.height.toFloat()
-        if (cw <= 0f || ch <= 0f) return
-        val scratch = FloatArray(8)
-        val box = FloatArray(4)
-        val moves = ids.mapNotNull { id ->
-            val d = store.queryDetail(id) ?: return@mapNotNull null
-            if (!LayerGeometry.bounds(d, scratch, box)) return@mapNotNull null
-            val dx = when (edge) {
-                Edge.Left -> -box[0]
-                Edge.CenterH -> cw / 2 - (box[0] + box[2]) / 2
-                Edge.Right -> cw - box[2]
-                else -> 0f
-            }
-            val dy = when (edge) {
-                Edge.Top -> -box[1]
-                Edge.CenterV -> ch / 2 - (box[1] + box[3]) / 2
-                Edge.Bottom -> ch - box[3]
-                else -> 0f
-            }
-            Triple(id, d.position[0] + dx, d.position[1] + dy)
-        }
-        applyPositions(store, moves, "alinhar")
+        store.alignLayers(ids, edge.ordinal)
     }
 
     /**
      * Distribuir com vãos iguais (≥ 3 camadas): as das pontas ficam, as do
      * meio se espalham para que o espaço entre caixas vizinhas seja o mesmo.
+     * No motor, como o alinhar (modos 6 e 7).
      */
     fun distribute(store: EditorStore, ids: Collection<Long>, horizontal: Boolean) {
-        val scratch = FloatArray(8)
-        data class Item(val id: Long, val x: Float, val y: Float, val lo: Float, val hi: Float)
-        val items = ids.mapNotNull { id ->
-            val d = store.queryDetail(id) ?: return@mapNotNull null
-            val box = FloatArray(4)
-            if (!LayerGeometry.bounds(d, scratch, box)) return@mapNotNull null
-            if (horizontal) Item(id, d.position[0], d.position[1], box[0], box[2])
-            else Item(id, d.position[0], d.position[1], box[1], box[3])
-        }.sortedBy { it.lo }
-        if (items.size < 3) return
-        val span = items.last().hi - items.first().lo
-        val sizes = items.sumOf { (it.hi - it.lo).toDouble() }.toFloat()
-        val gap = (span - sizes) / (items.size - 1)
-        var cursor = items.first().lo
-        val moves = items.map { it ->
-            val delta = cursor - it.lo
-            cursor += (it.hi - it.lo) + gap
-            if (horizontal) Triple(it.id, it.x + delta, it.y) else Triple(it.id, it.x, it.y + delta)
-        }
-        applyPositions(store, moves, "distribuir")
+        store.alignLayers(ids, if (horizontal) 6 else 7)
     }
 
     // --- Ajustar / preencher / tamanho da composição / âncora (app antigo) ----------
@@ -323,15 +284,6 @@ internal object LayerOps {
             floatArrayOf(d.position[0] + dx * c - dy * s, d.position[1] + dx * s + dy * c, d.position[2]),
             id,
         )
-        store.endGesture()
-    }
-
-    private fun applyPositions(store: EditorStore, moves: List<Triple<Long, Float, Float>>, label: String) {
-        if (moves.isEmpty()) return
-        store.beginGesture(label)
-        moves.forEach { (id, x, y) ->
-            store.setTransform2(TrackProperty.POSITION_X, x, TrackProperty.POSITION_Y, y, id)
-        }
         store.endGesture()
     }
 }

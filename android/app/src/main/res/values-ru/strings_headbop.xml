@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Headbop (0.5.2): nome, descrição e o cartão (HeadbopPanel.kt). Par do iOS: AureaStrings.swift // Headbop. -->
+<resources>
+    <string name="fx_name_headbop">Хэдбоп</string>
+    <string name="fx_desc_headbop">Человек на фото или видео качает головой и телом в такт музыке</string>
+    <string name="headbop_note">Проанализируйте слой, чтобы найти голову и плечи. Без человека качается весь кадр.</string>
+    <string name="headbop_analyze">Анализ</string>
+    <string name="headbop_reanalyze">Повторить анализ</string>
+    <string name="headbop_analyzing">Анализ человека и ритма…</string>
+    <string name="headbop_cancel">Отмена</string>
+    <string name="headbop_people_found">Найдено людей: %1$d</string>
+    <string name="headbop_no_person">Человек не найден: качается весь кадр</string>
+    <string name="headbop_not_analyzed">Ещё не проанализировано</string>
+    <string name="headbop_failed">Не удалось проанализировать</string>
+    <string name="headbop_bpm_value">%1$d BPM</string>
+    <string name="headbop_tap">Тап</string>
+    <string name="headbop_bake">Преобразовать в ключевые кадры</string>
+    <string name="headbop_free_for_now">Пока бесплатно</string>
+    <string name="effect_future_paid_notice">Вы используете эффект, который станет платным. Пользуйтесь!</string>
+</resources>

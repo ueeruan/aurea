@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.2: preenchimento com textura do texto (TextTextureSection.kt). -->
+<resources>
+    <string name="tex_section">Текстура</string>
+    <string name="tex_preset_gold">Золото</string>
+    <string name="tex_preset_silver">Серебро/хром</string>
+    <string name="tex_preset_brushed">Шлифованный металл</string>
+    <string name="tex_preset_wood">Дерево</string>
+    <string name="tex_preset_marble">Мрамор</string>
+    <string name="tex_preset_stone">Камень</string>
+    <string name="tex_preset_concrete">Бетон</string>
+    <string name="tex_preset_glitter">Блёстки</string>
+    <string name="tex_preset_holo">Голограмма</string>
+    <string name="tex_preset_neon">Неон</string>
+    <string name="tex_preset_fire">Огонь</string>
+    <string name="tex_preset_water">Вода</string>
+    <string name="tex_preset_galaxy">Галактика</string>
+    <string name="tex_preset_paper">Бумага</string>
+    <string name="tex_preset_denim">Джинса</string>
+    <string name="tex_preset_leather">Кожа</string>
+    <string name="tex_preset_rust">Ржавчина</string>
+    <string name="tex_preset_ice">Лёд</string>
+    <string name="tex_preset_desc">Текстура: %1$s</string>
+    <string name="tex_mapping">Наложение</string>
+    <string name="tex_map_block">Весь блок</string>
+    <string name="tex_map_letter">По буквам</string>
+    <string name="tex_stroke_too">И обводка</string>
+    <string name="tex_scale">Масштаб</string>
+    <string name="tex_rotation">Поворот</string>
+    <string name="tex_offset_x">Смещение X</string>
+    <string name="tex_offset_y">Смещение Y</string>
+    <string name="tex_contrast">Контраст</string>
+    <string name="tex_brightness">Яркость</string>
+    <string name="tex_tint">Цвет оттенка</string>
+    <string name="tex_speed">Анимация (скорость)</string>
+    <string name="tex_relief">Рельеф</string>
+    <string name="tex_light_angle">Угол света</string>
+    <string name="tex_variation">Вариант</string>
+</resources>

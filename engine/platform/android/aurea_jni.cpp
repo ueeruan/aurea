@@ -2585,6 +2585,91 @@ AUREA_JNI jboolean AUREA_FN(nativeSetLayerClipToBelow)(JNIEnv*, jclass, jlong ha
     return c && c->engine.set_layer_clip_to_below(static_cast<u64>(layer), on == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
 }
 
+// AE compositing: preservar transparência, tímida, "ocultar tímidas" e a queda do feather.
+AUREA_JNI jboolean AUREA_FN(nativeSetLayerPreserveTransparency)(JNIEnv*, jclass, jlong handle, jlong layer, jboolean on) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_layer_preserve_transparency(static_cast<u64>(layer), on == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetLayerShy)(JNIEnv*, jclass, jlong handle, jlong layer, jboolean on) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_layer_shy(static_cast<u64>(layer), on == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetHideShy)(JNIEnv*, jclass, jlong handle, jboolean on) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_hide_shy(on == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeHideShy)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.hide_shy() ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetMaskFalloff)(JNIEnv*, jclass, jlong handle, jlong layer, jint mask, jint falloff) {
+    NativeContext* c = ctx_of(handle);
+    return c && mask >= 0 && falloff >= 0
+               && c->engine.set_mask_falloff(static_cast<u64>(layer), static_cast<u32>(mask), static_cast<u32>(falloff)) ? JNI_TRUE : JNI_FALSE;
+}
+
+// AE animation (EngineAeAnimation.cpp): texto-fonte, auto-orientar e câmera de dois nós.
+AUREA_JNI jlong AUREA_FN(nativeAddTextSourceKey)(JNIEnv*, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jlong>(c->engine.add_text_source_key(static_cast<u64>(layer))) : -1;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetTextSourceKey)(JNIEnv* env, jclass, jlong handle, jlong layer, jlong frame, jstring content) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !content) return JNI_FALSE;
+    return c->engine.set_text_source_key(static_cast<u64>(layer), frame, to_string(env, content)) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeDeleteTextSourceKey)(JNIEnv*, jclass, jlong handle, jlong layer, jlong frame) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.delete_text_source_key(static_cast<u64>(layer), frame) ? JNI_TRUE : JNI_FALSE;
+}
+
+/// Quadros LOCAIS dos keys do texto-fonte (nunca nulo).
+AUREA_JNI jlongArray AUREA_FN(nativeTextSourceKeys)(JNIEnv* env, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    std::vector<i64> frames(256);
+    const u32 n = c ? c->engine.query_text_source_keys(static_cast<u64>(layer), frames.data(), 256) : 0u;
+    const jsize count = static_cast<jsize>(std::min<u32>(n, 256u));
+    jlongArray out = env->NewLongArray(count);
+    if (out && count > 0) env->SetLongArrayRegion(out, 0, count, reinterpret_cast<const jlong*>(frames.data()));
+    return out;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetLayerAutoOrient)(JNIEnv*, jclass, jlong handle, jlong layer, jint mode) {
+    NativeContext* c = ctx_of(handle);
+    return c && mode >= 0 && c->engine.set_layer_auto_orient(static_cast<u64>(layer), static_cast<u32>(mode)) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jint AUREA_FN(nativeLayerAutoOrient)(JNIEnv*, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    return c ? c->engine.query_layer_auto_orient(static_cast<u64>(layer)) : -1;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetCameraTwoNode)(JNIEnv*, jclass, jlong handle, jlong layer, jboolean on) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_camera_two_node(static_cast<u64>(layer), on == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetCameraPoi)(JNIEnv*, jclass, jlong handle, jlong layer, jfloat x, jfloat y, jfloat z, jboolean undo) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_camera_poi(static_cast<u64>(layer), x, y, z, undo == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
+/// {dois nós (0/1), x, y, z} no cabeçote; nulo = não é câmera.
+AUREA_JNI jfloatArray AUREA_FN(nativeCameraPoi)(JNIEnv* env, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    f32 v[4]{};
+    if (!c || !c->engine.query_camera_poi(static_cast<u64>(layer), v)) return nullptr;
+    jfloatArray out = env->NewFloatArray(4);
+    if (out) env->SetFloatArrayRegion(out, 0, 4, v);
+    return out;
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeSetLayerSolo)(JNIEnv*, jclass, jlong handle, jlong layer, jboolean on) {
     NativeContext* c = ctx_of(handle);
     return c && c->engine.set_layer_solo(static_cast<u64>(layer), on == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
@@ -2832,6 +2917,35 @@ AUREA_JNI jfloatArray AUREA_FN(nativeQueryPositionPath)(JNIEnv* env, jclass, jlo
 AUREA_JNI jboolean AUREA_FN(nativeSetLayerMediaLoop)(JNIEnv*, jclass, jlong handle, jlong layer, jboolean on) {
     NativeContext* c = ctx_of(handle);
     return c && c->engine.set_layer_media_loop(static_cast<u64>(layer), on == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
+// 0.5.2: preenchimento com textura do texto (Engine::set_text_texture, 17 valores;
+// a consulta devolve 18: o último = há imagem da galeria).
+AUREA_JNI jboolean AUREA_FN(nativeSetTextTexture)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray in) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !in || env->GetArrayLength(in) < static_cast<jsize>(kTextTextureValues)) return JNI_FALSE;
+    f32 v[kTextTextureValues]{};
+    env->GetFloatArrayRegion(in, 0, kTextTextureValues, v);
+    return c->engine.set_text_texture(static_cast<u64>(layer), v, kTextTextureValues) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jfloatArray AUREA_FN(nativeQueryTextTexture)(JNIEnv* env, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    f32 v[kTextTextureValues + 1]{};
+    if (!c || !c->engine.query_text_texture(static_cast<u64>(layer), v, kTextTextureValues + 1)) return nullptr;
+    jfloatArray out = env->NewFloatArray(kTextTextureValues + 1);
+    if (out) env->SetFloatArrayRegion(out, 0, kTextTextureValues + 1, v);
+    return out;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetTextTextureImage)(JNIEnv* env, jclass, jlong handle, jlong layer, jstring path) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !path) return JNI_FALSE;
+    const char* p = env->GetStringUTFChars(path, nullptr);
+    if (!p) return JNI_FALSE;
+    const bool ok = c->engine.set_text_texture_image(static_cast<u64>(layer), p).ok();
+    env->ReleaseStringUTFChars(path, p);
+    return ok ? JNI_TRUE : JNI_FALSE;
 }
 
 // 0.4.6: texto dinâmico — {ligado, de, até, casas, separador, curva}.
@@ -3576,6 +3690,58 @@ AUREA_JNI jlongArray AUREA_FN(nativeBgRemoveStatus)(JNIEnv* env, jclass, jlong h
 }
 AUREA_JNI jboolean AUREA_FN(nativeBgRemoveNativeAvailable)(JNIEnv*, jclass) {
     return Engine::bg_remove_native_available() ? JNI_TRUE : JNI_FALSE;
+}
+
+// --- Headbop (EngineHeadbop.cpp, 0.5.2) -----------------------------------------
+AUREA_JNI jboolean AUREA_FN(nativeHeadbopBegin)(JNIEnv*, jclass, jlong handle, jlong layer, jint effectId) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.headbop_begin(static_cast<u64>(layer), static_cast<u32>(effectId)) ? JNI_TRUE : JNI_FALSE;
+}
+/// Quadros no formato do Motion Capture: [tempo s, pessoa, 33 × (x, y, z, confiança)].
+AUREA_JNI jboolean AUREA_FN(nativeHeadbopPushFrames)(JNIEnv* env, jclass, jlong handle, jfloatArray data, jint frames, jfloat aspect) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !data || frames <= 0) return JNI_FALSE;
+    const jsize n = env->GetArrayLength(data);
+    const u32 count = std::min<u32>(static_cast<u32>(frames), static_cast<u32>(n) / (2u + 33u * 4u));
+    if (count == 0) return JNI_FALSE;
+    std::vector<f32> v(static_cast<usize>(count) * (2u + 33u * 4u));
+    env->GetFloatArrayRegion(data, 0, static_cast<jsize>(v.size()), v.data());
+    return c->engine.headbop_push_frames(v.data(), count, aspect) ? JNI_TRUE : JNI_FALSE;
+}
+AUREA_JNI jboolean AUREA_FN(nativeHeadbopAnalyze)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.headbop_analyze() ? JNI_TRUE : JNI_FALSE;
+}
+AUREA_JNI void AUREA_FN(nativeHeadbopCancel)(JNIEnv*, jclass, jlong handle) {
+    if (NativeContext* c = ctx_of(handle)) c->engine.headbop_cancel();
+}
+/// [estado, progresso ×1000, pessoas, BPM ×100, quadros, rig, BPM em uso ×100, fonte da pose, válido].
+AUREA_JNI jlongArray AUREA_FN(nativeHeadbopStatus)(JNIEnv* env, jclass, jlong handle, jlong layer, jint effectId) {
+    NativeContext* c = ctx_of(handle);
+    jlong v[9]{};
+    if (c) {
+        i64 st[8]{};
+        if (c->engine.headbop_status(static_cast<u64>(layer), static_cast<u32>(effectId), st)) {
+            for (u32 i = 0; i < 8; ++i) v[i] = st[i];
+            v[8] = 1;
+        }
+    }
+    jlongArray out = env->NewLongArray(9);
+    if (out) env->SetLongArrayRegion(out, 0, 9, v);
+    return out;
+}
+AUREA_JNI jboolean AUREA_FN(nativeHeadbopSetTaps)(JNIEnv* env, jclass, jlong handle, jlong layer, jint effectId, jdoubleArray times) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !times) return JNI_FALSE;
+    const jsize n = env->GetArrayLength(times);
+    if (n < 2) return JNI_FALSE;
+    std::vector<f64> v(static_cast<usize>(n));
+    env->GetDoubleArrayRegion(times, 0, n, v.data());
+    return c->engine.headbop_set_taps(static_cast<u64>(layer), static_cast<u32>(effectId), v.data(), static_cast<u32>(n)) ? JNI_TRUE : JNI_FALSE;
+}
+AUREA_JNI jint AUREA_FN(nativeHeadbopBake)(JNIEnv*, jclass, jlong handle, jlong layer, jint effectId) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jint>(c->engine.headbop_bake(static_cast<u64>(layer), static_cast<u32>(effectId))) : -1;
 }
 
 AUREA_JNI jboolean AUREA_FN(nativeSetLayerMotionBlurLength)(JNIEnv*, jclass, jlong handle, jlong layer, jfloat factor) {
@@ -4337,6 +4503,25 @@ AUREA_JNI jstring AUREA_FN(nativeModelNodeName)(JNIEnv* env, jclass, jlong handl
     return env->NewStringUTF(s.c_str());
 }
 
+// 0.5.2 "Prender a um osso".
+AUREA_JNI jintArray AUREA_FN(nativeModelAttachBones)(JNIEnv* env, jclass, jlong handle, jlong model) {
+    NativeContext* c = ctx_of(handle);
+    const std::vector<i32> bones = c ? c->engine.model_attach_bones(static_cast<u64>(model)) : std::vector<i32>{};
+    jintArray out = env->NewIntArray(static_cast<jsize>(bones.size()));
+    if (out && !bones.empty()) env->SetIntArrayRegion(out, 0, static_cast<jsize>(bones.size()), reinterpret_cast<const jint*>(bones.data()));
+    return out;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetLayerParentBone)(JNIEnv*, jclass, jlong handle, jlong layer, jlong model, jint node) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_layer_parent_bone(static_cast<u64>(layer), static_cast<u64>(model), node).ok() ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jint AUREA_FN(nativeLayerParentBone)(JNIEnv*, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    return c ? c->engine.layer_parent_bone(static_cast<u64>(layer)) : -1;
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeDragBoneTranslate)(JNIEnv*, jclass, jlong handle, jlong layer, jint node, jfloat dx, jfloat dy,
                                                     jboolean continuing) {
     NativeContext* c = ctx_of(handle);
@@ -4729,6 +4914,143 @@ AUREA_JNI jbyteArray AUREA_FN(nativeMarkerLabel)(JNIEnv* env, jclass, jlong hand
     jbyteArray result = env->NewByteArray(static_cast<jsize>(text.size()));
     if (result && !text.empty()) env->SetByteArrayRegion(result, 0, static_cast<jsize>(text.size()), reinterpret_cast<const jbyte*>(text.data()));
     return result;
+}
+
+// --- Timeline do AE (EngineAeTimeline.cpp): marcas com duração/comentário,
+// marcas de camada, escalar/easy ease, área de trabalho, alinhar --------------
+namespace {
+/// UTF-8 da tela; null ou grande demais = false.
+bool ae_text(JNIEnv* env, jbyteArray bytes, std::string& out) {
+    out.clear();
+    if (!bytes) return true;
+    const jsize size = env->GetArrayLength(bytes);
+    if (size < 0 || static_cast<usize>(size) > kMaxMarkerText) return false;
+    out.resize(static_cast<usize>(size));
+    if (size) env->GetByteArrayRegion(bytes, 0, size, reinterpret_cast<jbyte*>(out.data()));
+    return true;
+}
+jbyteArray ae_bytes(JNIEnv* env, const std::string& text) {
+    jbyteArray result = env->NewByteArray(static_cast<jsize>(text.size()));
+    if (result && !text.empty()) env->SetByteArrayRegion(result, 0, static_cast<jsize>(text.size()), reinterpret_cast<const jbyte*>(text.data()));
+    return result;
+}
+std::vector<i64> ae_refs(JNIEnv* env, jlongArray references) {
+    if (!references) return {};
+    const jsize length = env->GetArrayLength(references);
+    if (length <= 0 || length % 4 != 0 || length > 16384 * 4) return {};
+    std::vector<jlong> packed(static_cast<usize>(length));
+    env->GetLongArrayRegion(references, 0, length, packed.data());
+    return std::vector<i64>(packed.begin(), packed.end());
+}
+} // namespace
+
+AUREA_JNI jboolean AUREA_FN(nativeEditMarkerEx)(JNIEnv* env, jclass, jlong handle, jlong from, jlong to, jint color,
+                                               jbyteArray label, jlong duration, jbyteArray comment) {
+    NativeContext* c = ctx_of(handle);
+    std::string l, m;
+    if (!c || !ae_text(env, label, l) || !ae_text(env, comment, m)) return JNI_FALSE;
+    return c->engine.edit_marker_ex(from, to, static_cast<u32>(color), l, duration, m) ? JNI_TRUE : JNI_FALSE;
+}
+
+/// Comentário da marca da composição (null = não há marca); `durationOut[0]` = duração.
+AUREA_JNI jbyteArray AUREA_FN(nativeMarkerDetails)(JNIEnv* env, jclass, jlong handle, jlong frame, jlongArray durationOut) {
+    NativeContext* c = ctx_of(handle);
+    i64 duration = 0;
+    std::string comment;
+    if (!c || !c->engine.marker_details(frame, duration, comment)) return nullptr;
+    if (durationOut && env->GetArrayLength(durationOut) > 0) {
+        const jlong d = duration;
+        env->SetLongArrayRegion(durationOut, 0, 1, &d);
+    }
+    return ae_bytes(env, comment);
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeEditLayerMarker)(JNIEnv* env, jclass, jlong handle, jlong layer, jlong from, jlong to,
+                                                  jint color, jbyteArray label, jlong duration, jbyteArray comment) {
+    NativeContext* c = ctx_of(handle);
+    std::string l, m;
+    if (!c || !ae_text(env, label, l) || !ae_text(env, comment, m)) return JNI_FALSE;
+    return c->engine.edit_layer_marker(static_cast<u64>(layer), from, to, static_cast<u32>(color), l, duration, m)
+        ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeMoveLayerMarker)(JNIEnv*, jclass, jlong handle, jlong layer, jlong from, jlong to) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.move_layer_marker(static_cast<u64>(layer), from, to) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeDeleteLayerMarker)(JNIEnv*, jclass, jlong handle, jlong layer, jlong frame) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.delete_layer_marker(static_cast<u64>(layer), frame) ? JNI_TRUE : JNI_FALSE;
+}
+
+/// Todas as marcas de camada: id, quadro, duração, cor (4 por marca). Devolve o total.
+AUREA_JNI jint AUREA_FN(nativeQueryAllLayerMarkers)(JNIEnv* env, jclass, jlong handle, jlongArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out) return 0;
+    const jsize len = env->GetArrayLength(out);
+    std::vector<i64> tmp(static_cast<usize>(len));
+    const u32 total = c->engine.query_all_layer_markers(tmp.data(), static_cast<u32>(len / 4));
+    const jsize copy = std::min<jsize>(len, static_cast<jsize>(std::min<u32>(total, static_cast<u32>(len / 4)) * 4));
+    if (copy > 0) env->SetLongArrayRegion(out, 0, copy, reinterpret_cast<const jlong*>(tmp.data()));
+    return static_cast<jint>(total);
+}
+
+/// Nome e comentário da marca da camada separados por um byte 0 (null = não há).
+AUREA_JNI jbyteArray AUREA_FN(nativeLayerMarkerText)(JNIEnv* env, jclass, jlong handle, jlong layer, jlong frame) {
+    NativeContext* c = ctx_of(handle);
+    std::string label, comment;
+    if (!c || !c->engine.layer_marker_text(static_cast<u64>(layer), frame, label, comment)) return nullptr;
+    return ae_bytes(env, label + std::string(1, '\0') + comment);
+}
+
+AUREA_JNI jint AUREA_FN(nativeScaleKeyframeSelection)(JNIEnv* env, jclass, jlong handle, jlong layer, jlongArray references,
+                                                     jlong anchor, jdouble factor) {
+    NativeContext* c = ctx_of(handle);
+    const std::vector<i64> refs = ae_refs(env, references);
+    if (!c || refs.empty()) return 0;
+    return static_cast<jint>(c->engine.scale_keyframe_selection(static_cast<u64>(layer), refs.data(),
+                                                                static_cast<u32>(refs.size() / 4), anchor, factor));
+}
+
+AUREA_JNI jint AUREA_FN(nativeEaseKeyframeSelection)(JNIEnv* env, jclass, jlong handle, jlong layer, jlongArray references, jint mode) {
+    NativeContext* c = ctx_of(handle);
+    const std::vector<i64> refs = ae_refs(env, references);
+    if (!c || refs.empty() || mode < 0) return 0;
+    return static_cast<jint>(c->engine.ease_keyframe_selection(static_cast<u64>(layer), refs.data(),
+                                                               static_cast<u32>(refs.size() / 4), static_cast<u32>(mode)));
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetWorkArea)(JNIEnv*, jclass, jlong handle, jlong in, jlong out) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_work_area(in, out) ? JNI_TRUE : JNI_FALSE;
+}
+
+/// `out` = [início, fim) efetivos; true = há uma área menor que a composição.
+AUREA_JNI jboolean AUREA_FN(nativeQueryWorkArea)(JNIEnv* env, jclass, jlong handle, jlongArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out || env->GetArrayLength(out) < 2) return JNI_FALSE;
+    i64 in = 0, end = 0;
+    const bool has = c->engine.query_work_area(in, end);
+    const jlong v[2] = {in, end};
+    env->SetLongArrayRegion(out, 0, 2, v);
+    return has ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeTrimToWorkArea)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.trim_composition_to_work_area() ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI void AUREA_FN(nativeSetExportWorkAreaOnly)(JNIEnv*, jclass, jlong handle, jboolean on) {
+    if (NativeContext* c = ctx_of(handle)) c->engine.set_export_work_area_only(on == JNI_TRUE);
+}
+
+AUREA_JNI jint AUREA_FN(nativeAlignLayers)(JNIEnv* env, jclass, jlong handle, jlongArray ids, jint mode) {
+    NativeContext* c = ctx_of(handle);
+    const auto v = jlongs(env, ids);
+    if (!c || v.empty() || mode < 0) return 0;
+    return static_cast<jint>(c->engine.align_layers(v.data(), static_cast<u32>(v.size()), static_cast<u32>(mode)));
 }
 
 AUREA_JNI jlong AUREA_FN(nativeDetectBeats)(JNIEnv* env, jclass, jlong handle, jlong layerId, jdoubleArray bpmOut) {
@@ -5787,6 +6109,42 @@ AUREA_JNI jboolean AUREA_FN(nativeToggleVectorParamKey)(JNIEnv*, jclass, jlong h
                ? JNI_TRUE : JNI_FALSE;
 }
 
+// Operadores de caminho do grupo (AE shape operators). Os valores vão por
+// nativeSetVectorParam / nativeToggleVectorParamKey com o id do operador.
+AUREA_JNI jfloatArray AUREA_FN(nativeQueryVectorModifiers)(JNIEnv* env, jclass, jlong handle, jlong layer, jint group) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || group < 0) return nullptr;
+    std::vector<f32> v(static_cast<usize>(kVecMaxModifiers) * Engine::kVectorModifierFloats);
+    const u32 n = c->engine.query_vector_modifiers(static_cast<u64>(layer), static_cast<u32>(group), v.data(), static_cast<u32>(v.size()));
+    v.resize(static_cast<usize>(n) * Engine::kVectorModifierFloats);
+    return to_float_array(env, v);
+}
+
+AUREA_JNI jint AUREA_FN(nativeAddVectorModifier)(JNIEnv*, jclass, jlong handle, jlong layer, jint group, jint type) {
+    NativeContext* c = ctx_of(handle);
+    return c && group >= 0 && type >= 0 ? c->engine.add_vector_modifier(static_cast<u64>(layer), static_cast<u32>(group), static_cast<u32>(type)) : -1;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeRemoveVectorModifier)(JNIEnv*, jclass, jlong handle, jlong layer, jint group, jint index) {
+    NativeContext* c = ctx_of(handle);
+    return c && group >= 0 && index >= 0 && c->engine.remove_vector_modifier(static_cast<u64>(layer), static_cast<u32>(group), static_cast<u32>(index))
+               ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeMoveVectorModifier)(JNIEnv*, jclass, jlong handle, jlong layer, jint group, jint from, jint to) {
+    NativeContext* c = ctx_of(handle);
+    return c && group >= 0 && from >= 0 && to >= 0
+                   && c->engine.move_vector_modifier(static_cast<u64>(layer), static_cast<u32>(group), static_cast<u32>(from), static_cast<u32>(to))
+               ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetVectorModifierEnabled)(JNIEnv*, jclass, jlong handle, jlong layer, jint group, jint index, jboolean enabled) {
+    NativeContext* c = ctx_of(handle);
+    return c && group >= 0 && index >= 0
+                   && c->engine.set_vector_modifier_enabled(static_cast<u64>(layer), static_cast<u32>(group), static_cast<u32>(index), enabled == JNI_TRUE)
+               ? JNI_TRUE : JNI_FALSE;
+}
+
 AUREA_JNI jfloatArray AUREA_FN(nativeQueryShapeParams)(JNIEnv* env, jclass, jlong handle, jlong layer) {
     NativeContext* c = ctx_of(handle);
     if (!c) return nullptr;
@@ -6116,9 +6474,12 @@ AUREA_JNI jfloatArray AUREA_FN(nativeSceneSettings)(JNIEnv* env, jclass, jlong h
     // [8] (0.4.1): 1 = o chão é o "Reflective Floor".
     // [9..14] (0.4.6): neblina volumétrica {ligada, densidade, raios, r, g, b}.
     float ao[3]{}; c->engine.query_scene3d_ao(ao);
-    float values[18]{static_cast<float>(c->engine.studio_environment()), floor[0], post[0], post[1], post[2], post[3], post[4], post[5],
-                     aurea::Engine::is_reflective_floor(floor) ? 1.f : 0.f, fog[0], fog[1], fog[2], fog[3], fog[4], fog[5], ao[0], ao[1], ao[2]};
-    auto out = env->NewFloatArray(18); if (out) env->SetFloatArrayRegion(out, 0, 18, values); return out;
+    // [18..19] (0.5.2): chão molhado {molhado 0..1, tamanho das poças px}.
+    float wet[2]{0.f, 260.f}; c->engine.query_scene_floor_wetness(wet);
+    float values[20]{static_cast<float>(c->engine.studio_environment()), floor[0], post[0], post[1], post[2], post[3], post[4], post[5],
+                     aurea::Engine::is_reflective_floor(floor) ? 1.f : 0.f, fog[0], fog[1], fog[2], fog[3], fog[4], fog[5], ao[0], ao[1], ao[2],
+                     wet[0], wet[1]};
+    auto out = env->NewFloatArray(20); if (out) env->SetFloatArrayRegion(out, 0, 20, values); return out;
 }
 AUREA_JNI jboolean AUREA_FN(nativeSetSceneSetting)(JNIEnv*, jclass, jlong handle, jint parameter, jfloat value) {
     auto* c = ctx_of(handle); if (!c || !std::isfinite(value)) return false;
@@ -6166,6 +6527,11 @@ AUREA_JNI jboolean AUREA_FN(nativeSetSceneSetting)(JNIEnv*, jclass, jlong handle
     case 13: case 14: case 15: {
         float ao[3]{}; e.query_scene3d_ao(ao);
         return e.set_scene3d_ao(parameter == 13 ? value > 0 : ao[0] > 0, parameter == 14 ? value : ao[1], parameter == 15 ? value : ao[2]);
+    }
+    // 0.5.2: chão molhado — molhado 0..1 (16) e tamanho das poças em px (17).
+    case 16: case 17: {
+        float wet[2]{0.f, 260.f}; e.query_scene_floor_wetness(wet);
+        return e.set_scene_floor_wetness(parameter == 16 ? value : wet[0], parameter == 17 ? value : wet[1]);
     }
     default: return false;
     }

@@ -131,7 +131,13 @@ enum AureaEngineText { static func sentence(_ message: String?, code: Int = 0) -
 enum ProblemReport {
     static func beginExportDiagnostics(previous: String) {}
     static func recordExportDiagnostics(_ raw: String) {}
+    // 0.5.2: o resumo da partida presa / falha vai para o "Relatar um problema".
+    static func noteExport(_ summary: String) {}
 }
+// 0.5.2: o teto dos caches depois de cada export (StorageView.swift) e a versão
+// do sistema no resumo: fronteiras independentes, substituídas aqui.
+enum AureaStorage { static func trimCaches(atLaunch: Bool) {} }
+struct UIDevice { static let current = UIDevice(); let systemVersion = "harness" }
 let AureaExportFailure = "failure"
 // A regra do motor (export/ExportAttempts.hpp) no que este harness exercita:
 // nada ajuda (cancelado/sem espaço/mídia ausente/acima de 3 h), ocupado
@@ -248,6 +254,7 @@ final class Native: @unchecked Sendable {
     LADDER
     WATCH
     FAILURE
+    DIAGSTAGE
     POLL
     // Deterministic read of the real timer closure, without a run-loop timing
     // assumption. Its Task still resumes on the main actor.
@@ -396,6 +403,8 @@ final class Native: @unchecked Sendable {
             block("static func exportFailureReason("),
             block("nonisolated static func exportAfterLadder("),
         ]),
+        # 0.5.2: a etapa do diagnóstico no resumo do "Relatar um problema".
+        "DIAGSTAGE": block("nonisolated static func exportDiagnosticStage("),
         "POLL": poll.replace("private func", "func", 1),
     }
     harness = re.sub(r"\b(" + "|".join(values) + r")\b", lambda match: values[match.group(0)], harness)

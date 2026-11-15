@@ -13,8 +13,10 @@ import java.io.File
 //  limpa. Projetos (`filesDir/projetos/*.aurea`), presets, fontes e modelos
 //  importados NUNCA entram aqui — são do usuário.
 //
-//  Limpeza automática: ao abrir o app e ao fim de cada export, cada tipo acima
-//  do teto perde os arquivos mais antigos (LRU pela data de modificação).
+//  Limpeza automática: ao abrir o app (EditorStore, fora da main), cada tipo
+//  acima do teto perde os arquivos mais antigos (LRU pela data de modificação).
+//  0.5.3: não há limpeza "ao fim de cada export" — cada tentativa apaga o
+//  próprio temporário (Exporter.runEngineJob).
 //
 //  0.5.2: o PreRender (`motor/pre-render`) é do MOTOR — a limpeza por idade
 //  apagava quadros de dentro de uma pasta viva; agora o motor apaga as pastas
@@ -25,7 +27,9 @@ import java.io.File
 //  Temporários com dono e ciclo de vida (§52):
 //   - export: `cacheDir/export/` — sucesso copia para a galeria e apaga;
 //     falha e cancelamento apagam na hora; crash/force kill = sobra que a
-//     limpeza da próxima abertura apaga (teto 0 fora de um export);
+//     limpeza da próxima abertura apaga (teto 0 fora de um export), MENOS o
+//     checkpoint do export retomável (0.5.3, [exportLeftovers]): esse é do
+//     motor, que o continua ou o apaga quando envelhece (sweep_stale);
 //   - legendas: `cacheDir/legendas/` — o áudio extraído é apagado no `finally`
 //     da transcrição; sobra de crash, idem (teto 0).
 // =============================================================================
@@ -120,7 +124,8 @@ class CacheStorage(private val context: Context) {
         // A mídia otimizada seguia o teto do motor inteiro (64 MB) por estar dentro
         // dele: o mesmo teto, agora só dela. O PreRender nunca é aparado aqui.
         freed += trimToLimit(listFiles(proxies), PROXY_LIMIT)
-        if (!exporting) freed += trimToLimit(listFiles(export), 0L)
+        // 0.5.3 (P0-1): o checkpoint do export retomável fica (ver exportLeftovers).
+        if (!exporting) freed += trimToLimit(exportLeftovers(export), 0L)
         freed += trimToLimit(listFiles(captions), 0L)
         freed += orphanProjectThumbs().sumOf { f -> f.length().also { f.delete() } }
         val known = setOf(motor.name, export.name, captions.name)
@@ -187,5 +192,30 @@ class CacheStorage(private val context: Context) {
         const val PREVIEW_LIMIT = 64L shl 20
         const val PROXY_LIMIT = 64L shl 20
         const val OTHER_LIMIT = 32L shl 20
+
+        // Nomes do checkpoint (engine/src/export/ExportCheckpoint.cpp: kPrefix,
+        // kLogExtension, manifest_path). O `.pcm` (spill_path) não é retomado.
+        private const val CHECKPOINT_PREFIX = "aurea-ckpt-"
+        private const val CHECKPOINT_LOG = ".aurea-pkt"
+        private const val CHECKPOINT_MANIFEST = ".ckpt"
+
+        /**
+         * 0.5.3 (P0-1): registro de pacotes ou manifesto do export retomável. A
+         * limpeza da abertura apagava `cacheDir/export` inteiro — justamente o que
+         * a retomada precisava depois de o sistema matar o app no meio do export.
+         */
+        fun isExportCheckpoint(name: String): Boolean =
+            name.startsWith(CHECKPOINT_PREFIX) &&
+                (name.endsWith(CHECKPOINT_LOG) || name.endsWith(CHECKPOINT_LOG + CHECKPOINT_MANIFEST))
+
+        /**
+         * O que a limpeza da abertura apaga na pasta do export: tudo (MP4 parcial,
+         * temporário do mux, `.pcm`), menos o checkpoint na raiz dela. Sem idade
+         * aqui: o motor apaga o checkpoint que ninguém vai continuar.
+         */
+        fun exportLeftovers(dir: File): List<File> =
+            if (!dir.exists()) emptyList()
+            else if (dir.isFile) listOf(dir)
+            else dir.walkBottomUp().filter { it.isFile && !(it.parentFile == dir && isExportCheckpoint(it.name)) }.toList()
     }
 }

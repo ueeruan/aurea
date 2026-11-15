@@ -761,14 +761,10 @@ struct EffectsView: View {
 
     // --- Ferramentas-efeito na lista (máscaras, rastreio de câmera, legendas) ---
     /// As ferramentas que a camada usa, na ordem das linhas.
-    private var tools: [FxEffectTool] {
-        guard tabbed else { return [] }
-        var out: [FxEffectTool] = []
-        if maskTool { out.append(.mask) }
-        if cameraTracked { out.append(.cameraTrack) }
-        if captionCount > 0 { out.append(.captions) }
-        return out
-    }
+    /// Funções (F8, 13/11/2026): a lista de Efeitos mostra SÓ efeitos (par do EffectsPanel.kt).
+    /// Máscara, legendas e rastreio de câmera têm porta própria (botão Máscara / Editar da
+    /// grade, navegador de Efeitos, Funções do Aurea › Rastreio).
+    private var tools: [FxEffectTool] { [] }
     /// A Máscara posta pelo catálogo fica na lista mesmo vazia (o painel fechou
     /// sem caminho): a linha é a volta para desenhar. Sai só pelo 🗑 dela.
     private var maskTool: Bool {
@@ -797,6 +793,7 @@ struct EffectsView: View {
                 : hasMatte ? AureaText.t("panel_recorte_outra_camada") : AureaText.t("fxui_tool_mask_empty")
         case .captions: subtitle = AureaText.t("fxui_tool_captions_n", captionCount)
         case .cameraTrack: subtitle = AureaText.t("fxui_tool_camera_ready")
+        default: subtitle = ""   // funções do AUREA não ficam na lista de efeitos
         }
         return HStack(spacing: 0) {
             HStack(spacing: 0) {
@@ -859,7 +856,8 @@ struct EffectsView: View {
             model.selectedMask = nil; model.selectedMaskPoint = nil; model.maskDrawing = false
         case .captions:
             model.engine.removeCaptions(id)
-        case .cameraTrack:
+        default:
+            // Rastreio de câmera e as funções do AUREA não entram na pilha: nada a tirar.
             return
         }
         model.refreshModel(force: true); refreshTools()
@@ -1011,6 +1009,8 @@ struct EffectsView: View {
                                     FxEqResponseGraph(values: (0..<12).map { i in model.effectParams.first { $0.index == UInt32(i) }?.scalar ?? 0 })
                                 }
                                 ForEach(bodyLayout.main) { param in parameter(param, effect: id, disabledBy: nil) }
+                                ForEach(bodyLayout.sections) { section in sectionView(section, effect: effect) }
+                                // Funções (F8): "Avançado" é a ÚLTIMA seção, no mesmo nível das outras.
                                 if !bodyLayout.advanced.isEmpty {
                                     FxSectionHeader(title: AureaText.t("om_fx_advanced"), open: advancedIsOpen,
                                                     count: bodyLayout.advanced.count, identifier: "effects.section.\(id).advanced",
@@ -1021,7 +1021,6 @@ struct EffectsView: View {
                                         ForEach(bodyLayout.advanced) { param in parameter(param, effect: id, disabledBy: nil) }
                                     }
                                 }
-                                ForEach(bodyLayout.sections) { section in sectionView(section, effect: effect) }
                             }
                         }
                     }

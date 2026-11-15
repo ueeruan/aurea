@@ -366,6 +366,12 @@ struct TimelineRow {
     var clipToBelow: Bool = false
     /// Tímida (o Shy do AE): sai da lista com "Ocultar camadas tímidas" (`timelineWithoutShy`).
     var shy: Bool = false
+    /// 0.5.3 (grupo aberto na timeline): != 0 = camada de DENTRO desse grupo da
+    /// composição aberta, recuada embaixo dele. O `id` só vale junto com o grupo.
+    var group: Int64 = 0
+    /// Linha de dentro que dá para mover/aparar no lugar (o grupo anda 1:1).
+    var inlineEditable: Bool = true
+    var inner: Bool { group != 0 }
 
     /// Os trechos desenhados e tocados nesta fileira: os da linha, ou só ela.
     var segments: [TimelineRow] { shared ?? [self] }
@@ -414,6 +420,37 @@ func buildTimelineRow(_ l: LayerItem, _ all: [KeyframeItem]) -> TimelineRow {
                        line: l.trackId,
                        clipToBelow: l.clipToBelow,
                        shy: l.shy)
+}
+
+/// 0.5.3 ("Please let us expand group, seeing all contents of it without
+/// ungrouping!!"): as camadas de dentro de cada grupo aberto entram logo depois
+/// da linha do grupo (e das trilhas abertas dele). Par do `withInlineGroups` do Android.
+func timelineWithInlineGroups(_ rows: [TimelineRow], inner: [Int64: [TimelineRow]]) -> [TimelineRow] {
+    guard !inner.isEmpty else { return rows }
+    var out: [TimelineRow] = []
+    out.reserveCapacity(rows.count + inner.values.reduce(0) { $0 + $1.count })
+    var i = 0
+    while i < rows.count {
+        let r = rows[i]
+        out.append(r)
+        i += 1
+        guard r.track == nil, !r.inner, r.type == .group else { continue }
+        while i < rows.count, rows[i].track != nil, rows[i].id == r.id { out.append(rows[i]); i += 1 }
+        if let list = inner[r.id] { out.append(contentsOf: list) }
+    }
+    return out
+}
+
+/// A linha recuada de uma camada de dentro de um grupo (sem losangos).
+func innerGroupTimelineRow(_ g: GroupInnerRow) -> TimelineRow {
+    let l = g.layer
+    var row = TimelineRow(id: l.id, type: TimelineLayerType.of(l.kind), start: l.startFrame, end: l.endFrame,
+                          offset: l.offsetFrames, visible: l.visible, locked: l.locked, magnetic: false,
+                          animated: l.animated, name: l.name, label: l.label, instants: [], keysAt: [])
+    row.shy = l.shy
+    row.group = g.group
+    row.inlineEditable = g.editable
+    return row
 }
 
 /// AE "Ocultar camadas tímidas": com a chave da composição ligada, as fileiras
@@ -698,6 +735,17 @@ enum TimelineRowOrder {
  * da timeline): mover ou aparar o clipe não troca a chave, então a tira não
  * pisca nem pede de novo ao motor. LRU limitado.
  */
+/// 0.5.3: chave de mídia (miniatura/onda) de uma camada de DENTRO de um grupo aberto
+/// na timeline: o grupo misturado ao id (as tabelas de ids das composições se repetem).
+func timelineInnerMediaKey(_ group: Int64, _ layer: Int64) -> Int64 {
+    layer ^ (group &* -0x61c8864680b583eb) ^ Int64.min
+}
+
+/// A chave de mídia da linha: o id na composição aberta; a mistura com o grupo nas de dentro.
+func timelineMediaKey(_ row: TimelineRow) -> Int64 {
+    row.inner ? timelineInnerMediaKey(row.group, row.id) : row.id
+}
+
 @MainActor final class TimelineThumbStrip {
     private struct Key: Hashable {
         let layer: Int64
@@ -712,7 +760,9 @@ enum TimelineRowOrder {
 
     /// Largura/altura da miniatura da camada (16:9 até a primeira chegar). Pela
     /// DONA (`AureaModel.thumbOwner`): o pedaço de um corte usa a medida do original.
-    func aspect(_ model: AureaModel, _ layer: Int64) -> CGFloat { aspects[model.thumbOwner(layer)] ?? 16.0 / 9.0 }
+    func aspect(_ model: AureaModel, _ layer: Int64, group: Int64 = 0) -> CGFloat {
+        aspects[group == 0 ? model.thumbOwner(layer) : timelineInnerMediaKey(group, layer)] ?? 16.0 / 9.0
+    }
 
     /**
      * Perguntas ao motor que ainda cabem neste quadro. A que acerta cria uma
@@ -727,17 +777,21 @@ enum TimelineRowOrder {
         starved = false
     }
 
-    func get(_ model: AureaModel, layer: Int64, bucket: Int32, timelineFrame: Int32, heightPx: Int, generation: UInt32) -> UIImage? {
+    func get(_ model: AureaModel, layer: Int64, bucket: Int32, timelineFrame: Int32, heightPx: Int, generation: UInt32, group: Int64 = 0) -> UIImage? {
         guard model.thumbnailWorkAllowed else { starved = true; return nil }
         // Os dois lados de um corte dividem a chave (mesma mídia, mesma origem).
-        let owner = model.thumbOwner(layer)
+        // 0.5.3: camada de dentro de um grupo aberto — o grupo entra na chave (ids se repetem).
+        let owner = group == 0 ? model.thumbOwner(layer) : timelineInnerMediaKey(group, layer)
         let key = Key(layer: owner, bucket: bucket, height: heightPx)
         if let hit = hits[key] { return hit }
         if let missed = misses[key], missed == Int(generation) { return nil }
         if budget <= 0 { starved = true; return nil }
         budget -= 1
         var w: UInt32 = 0
-        guard let data = model.engine.thumbnail(forLayer: layer, frame: timelineFrame, height: UInt32(max(1, heightPx)), outWidth: &w),
+        let fetched: Data? = group == 0
+            ? model.engine.thumbnail(forLayer: layer, frame: timelineFrame, height: UInt32(max(1, heightPx)), outWidth: &w)
+            : model.engine.thumbnail(forGroup: group, layer: layer, frame: timelineFrame, height: UInt32(max(1, heightPx)), outWidth: &w)
+        guard let data = fetched,
               w > 0, heightPx > 0,
               let image = UIImage.fromRGBA(data, width: Int(w), height: heightPx) else {
             if misses.count > 512 { misses.removeAll() }
@@ -793,18 +847,21 @@ enum TimelineRowOrder {
     /// A entrada da camada com `[first, last]` coberto, pedindo ao motor só se preciso; nil = sem som.
     func get(
         _ model: AureaModel, layer: Int64, generation: UInt32,
-        fpb: Double, first: Int64, last: Int64
+        fpb: Double, first: Int64, last: Int64, group: Int64 = 0
     ) -> Entry? {
         guard last >= first, last - first + 1 <= Int64(capacity) else { return nil }
-        if let e = entries[layer], e.generation == generation, e.fpb == fpb, first >= e.w0, last < e.w1 {
+        // 0.5.3: camada de dentro de um grupo aberto — chave própria (ids se repetem).
+        let slot = group == 0 ? layer : timelineInnerMediaKey(group, layer)
+        if let e = entries[slot], e.generation == generation, e.fpb == fpb, first >= e.w0, last < e.w1 {
             return e.count > 0 ? e : nil
         }
         let win = WaveGrid.window(first: first, last: last, max: capacity)
         let n = Int(win.1 - win.0)
         queries += 1
-        let got = model.engine.waveform(forLayer: layer, startFrame: Double(win.0) * fpb,
-                                        framesPerBucket: fpb, count: UInt32(max(0, n)))
-        var e = entries[layer] ?? Entry(data: [UInt8](repeating: 0, count: capacity))
+        let got: Data? = group == 0
+            ? model.engine.waveform(forLayer: layer, startFrame: Double(win.0) * fpb, framesPerBucket: fpb, count: UInt32(max(0, n)))
+            : model.engine.waveform(forGroup: group, layer: layer, startFrame: Double(win.0) * fpb, framesPerBucket: fpb, count: UInt32(max(0, n)))
+        var e = entries[slot] ?? Entry(data: [UInt8](repeating: 0, count: capacity))
         e.generation = generation
         e.fpb = fpb
         e.w0 = win.0
@@ -812,14 +869,14 @@ enum TimelineRowOrder {
         let bytes = got.map { [UInt8]($0.prefix(capacity)) } ?? []
         e.count = min(bytes.count, n)
         if e.count > 0 { e.data.replaceSubrange(0..<e.count, with: bytes[0..<e.count]) }
-        if entries[layer] == nil {
+        if entries[slot] == nil {
             if order.count >= 32, let oldest = order.first {
                 order.removeFirst()
                 entries.removeValue(forKey: oldest)
             }
-            order.append(layer)
+            order.append(slot)
         }
-        entries[layer] = e
+        entries[slot] = e
         return e.count > 0 ? e : nil
     }
 }
@@ -898,6 +955,9 @@ private func timelineTrackName(_ track: TimelineTrack, _ effects: [EffectItem]) 
     // AE animation: texto-fonte e o Ponto de Interesse da câmera de dois nós.
     case 50: return AureaText.t("ae_anim_source_text")
     case 51, 52, 53: return AureaText.t("ae_anim_poi_axis", ["X", "Y", "Z"][track.property - 51])
+    // Painel 3D › Animação: a Evolução do clipe do modelo (v75).
+    case 54: return AureaText.t("m3d_anim_progress")
+    case 55: return AureaText.t("m3d_anim_speed")
     case 32: return AureaText.t("tl_audio", param + 1)
     case 33:
         let names: [Int: String] = [0: "panel_inicio", 1: "panel_fim", 2: "ios_anim_delay_between", 3: "panel_intensidade", 10: "panel_posicao_x",

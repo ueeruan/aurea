@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Painel do modelo 3D (13/11/2026): Material (visuais do modelo inteiro), Textura e Animação (Evolução com keyframe). -->
+<resources>
+    <string name="m3d_title">نموذج ثلاثي الأبعاد</string>
+    <string name="m3d_tab_shadow">الظل</string>
+    <string name="m3d_look">المظهر</string>
+    <string name="m3d_look_hint">المس كرة لمنح النموذج كله مظهرًا.</string>
+    <string name="m3d_look_original">الأصلي</string>
+    <string name="m3d_look_plastic">بلاستيك</string>
+    <string name="m3d_look_matte">مطفأ</string>
+    <string name="m3d_look_metal">معدن</string>
+    <string name="m3d_look_chrome">كروم</string>
+    <string name="m3d_look_gold">ذهب</string>
+    <string name="m3d_look_glass">زجاج</string>
+    <string name="m3d_look_custom">معدّل يدويًا</string>
+    <string name="m3d_adjust">ضبط</string>
+    <string name="m3d_whole_model">النموذج كله</string>
+    <string name="m3d_material_n">المادة %1$d</string>
+    <string name="m3d_no_materials">لا يحتوي هذا النموذج على مواد للضبط.</string>
+    <string name="m3d_apply_to">تطبيق على</string>
+    <string name="m3d_one_part">جزء واحد</string>
+    <string name="m3d_texture_pick">صورة النسيج</string>
+    <string name="m3d_texture_hint">تغطي الصورة النموذج كله باستخدام إحداثيات النسيج الخاصة بالملف.</string>
+    <string name="m3d_texture_original">العودة إلى النسيج الأصلي</string>
+    <string name="m3d_texture_no_parts">لا يحتوي هذا النموذج على أجزاء تقبل نسيجًا.</string>
+    <string name="m3d_texture_material_hint">يمكن أن يأتي نسيج هذه المادة من ملف أو من طبقة في الخط الزمني.</string>
+    <string name="m3d_part_hint">المس جزءًا لتغيير نسيجه أو إخفائه.</string>
+    <string name="m3d_part_own_texture">نسيج خاص</string>
+    <string name="m3d_part_hidden">مخفي</string>
+    <string name="m3d_anim_progress">التقدّم</string>
+    <string name="m3d_anim_progress_hint">ضع ◆ في نقطتين على الخط الزمني للتحكم في رسوم الملف المتحركة بالإطارات الرئيسية. بدون ◆ تعمل وحدها.</string>
+    <string name="m3d_anim_auto">تشغيل تلقائي</string>
+    <string name="m3d_anim_auto_hint">يزيل القيمة الثابتة و◆ التقدّم: يعود المقطع للتشغيل مع الوقت.</string>
+    <string name="m3d_anim_loop">تكرار</string>
+    <string name="m3d_anim_speed">السرعة</string>
+    <string name="m3d_anim_duration">مدة المقطع: %1$s ث</string>
+    <string name="m3d_anim_pick_clip">اختر مقطعًا لتحريك النموذج.</string>
+    <string name="m3d_anim_playing">يعمل وحده</string>
+    <!-- 14/11/2026 (3D opções extras, v76): Luz e sombra, Posição, Brilho, textura que anda e animação. -->
+    <string name="m3d_tab_light_shadow">الضوء والظل</string>
+    <string name="m3d_place">الموضع</string>
+    <string name="m3d_place_ground">ضعه على الأرض</string>
+    <string name="m3d_place_center">توسيط</string>
+    <string name="m3d_place_fit">ملاءمة الشاشة</string>
+    <string name="m3d_place_hint">كل نقرة خطوة تراجع واحدة. مع الإطارات الرئيسية للموضع، تتحرك كلها معًا.</string>
+    <string name="m3d_look_neon">نيون</string>
+    <string name="m3d_glow">توهّج</string>
+    <string name="m3d_glow_color">لون التوهّج</string>
+    <string name="m3d_glow_strength">شدة التوهّج</string>
+    <string name="m3d_glow_hint">ضوء المادة الخاص. مع Bloom المشهد (المشهد ثلاثي الأبعاد › العرض) ينتشر التوهّج حوله.</string>
+    <string name="m3d_tex_transform">موضع النسيج</string>
+    <string name="m3d_tex_offset_x">إزاحة X</string>
+    <string name="m3d_tex_offset_y">إزاحة Y</string>
+    <string name="m3d_tex_rotation">تدوير</string>
+    <string name="m3d_tex_scroll">تمرير مع الوقت</string>
+    <string name="m3d_tex_scroll_x">تمرير X</string>
+    <string name="m3d_tex_scroll_y">تمرير Y</string>
+    <string name="m3d_tex_scroll_hint" formatted="false">بنسبة % من الصورة في الثانية: يتحرك النسيج وحده (حزام، ماء، شاشة).</string>
+    <string name="m3d_anim_start">البدء عند</string>
+    <string name="m3d_anim_reverse">بالعكس</string>
+    <string name="m3d_anim_pingpong">ذهابًا وإيابًا</string>
+    <string name="m3d_anim_speed_hint">انقر على السرعة وضع ◆ في العمود الأيسر لتسريع الحركة أو إبطائها مع الوقت.</string>
+    <string name="m3d_obj_light">إضاءة الكائن</string>
+    <string name="m3d_obj_light_hint">يضيء هذا الكائن وحده ويعكس عليه استوديو أو صورة HDR خاصة به. بقية المشهد لا تتغير.</string>
+    <string name="m3d_obj_light_scene">من المشهد</string>
+    <string name="m3d_obj_light_intensity">الضوء والانعكاس</string>
+</resources>

@@ -50,4 +50,6 @@
     <string name="ae_shapeop_collapse">Sembunyikan pengaturan %1$s</string>
     <string name="ae_shapeop_lane">Operator %1$d · %2$d</string>
     <string name="ae_shapeop_rep_separate">Skala X dan Y terpisah</string>
+    <string name="ae_shapeop_dash_add">Pasangan garis putus</string>
+    <string name="ae_shapeop_dash_remove">Hapus pasangan garis putus</string>
 </resources>

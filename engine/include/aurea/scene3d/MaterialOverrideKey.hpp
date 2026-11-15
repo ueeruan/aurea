@@ -12,20 +12,23 @@ namespace aurea::scene3d {
 // Only these fields are editable per instance. The original GpuMaterial's
 // identity fixes all other factors, texture transforms, textures and samplers.
 struct MaterialOverrideValues {
-    std::array<f32, 6> factors{}; // RGBA, metallic, roughness
+    std::array<f32, 10> factors{}; // RGBA, metallic, roughness, emissive RGB, emissive strength (v76)
     AlphaMode alphaMode = AlphaMode::Opaque;
     bool doubleSided = false;
     bool unlit = false;
 
     static MaterialOverrideValues from(const Material& material) noexcept {
         return {{material.baseColor.x, material.baseColor.y, material.baseColor.z,
-                 material.baseColor.w, material.metallic, material.roughness},
+                 material.baseColor.w, material.metallic, material.roughness,
+                 material.emissive.x, material.emissive.y, material.emissive.z, material.emissiveStrength},
                 material.alphaMode, material.doubleSided, material.unlit};
     }
     void apply(Material& material) const noexcept {
         material.baseColor = Vec4{factors[0], factors[1], factors[2], factors[3]};
         material.metallic = factors[4];
         material.roughness = factors[5];
+        material.emissive = Vec3{factors[6], factors[7], factors[8]};
+        material.emissiveStrength = factors[9];
         material.alphaMode = alphaMode;
         material.doubleSided = doubleSided;
         material.unlit = unlit;
@@ -34,7 +37,7 @@ struct MaterialOverrideValues {
 
 struct MaterialOverrideKey {
     const void* source = nullptr;
-    std::array<u32, 6> factors{};
+    std::array<u32, 10> factors{};
     AlphaMode alphaMode = AlphaMode::Opaque;
     bool doubleSided = false;
     bool unlit = false;

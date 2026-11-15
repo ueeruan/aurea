@@ -166,8 +166,9 @@ struct CommandSearchView: View {
         }
         // Os presets saíram da busca (o navegador de presets não tem mais entrada);
         // máscara, legendas e rastreio de câmera chegam como FERRAMENTAS-EFEITO
-        // (EffectsBrowser.swift): o toque abre a ferramenta.
-        hits += FxEffectTool.allCases.map { tool in
+        // (EffectsBrowser.swift): o toque abre a ferramenta. Funções (13/11/2026): só as
+        // que valem para a camada escolhida (as funções do AUREA entram aqui também).
+        hits += fxToolsForSelection(model).map { tool in
             CommandHit(id: "tool:" + tool.key, title: tool.label,
                        detail: AureaText.t("edt_cmd_add_effect", fxEffectGroupOf(fxToolCatalogItem(tool)).label),
                        search: fxNormalizeSearch(tool.label + " " + tool.keywords), category: "Efeitos", requires: "selection")
@@ -219,7 +220,7 @@ struct CommandSearchView: View {
         case "tracking": model.openPanel(.tracking)
         case "environment": model.openPanel(.layer3D)
         case "particles": model.openPanel(.particles)
-        case "vector": model.openPanel(.vector)
+        case "vector": model.vectorFace = .paths; model.openPanel(.vector)
         case "precompose": model.groupSelection()
         case "enter_precomp": if let layer { model.openGroup(layer) }
         case "marker": model.toggleMarker()

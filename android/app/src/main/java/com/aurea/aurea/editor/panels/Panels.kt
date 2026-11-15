@@ -68,6 +68,13 @@ enum class EditorPanel {
     // Omega aparência (área 05).
     BorderShadow,  // Borda e sombra: traço, bordas (decorações) e sombra
     Camera,        // Opções da câmera: visão, desfoque de foco, névoa
+    // Funções do AUREA (13/11/2026): abertos pelo navegador de Efeitos (no fim: o ordinal fica salvo).
+    LayerOptions,  // chaves da camada: ajuste, guia, preservar transparência, linha magnética, tímida
+    Layer3D,       // 3D da camada: camada 3D, virar objeto 3D, prender a osso, câmera do grupo, luzes
+    TextLayout,    // F4: Layout do texto (espaçamento, caixa, caminho, dinâmico)
+    Animation,     // F3: Animação (camada · texto · prontas · explodir)
+    VectorFill,    // Vetor redesenhado: Cor e preenchimento do vetor (VectorPanel, face Fill)
+    VectorPaths,   // Vetor redesenhado: Caminhos e operadores (Forma · Caminho · Operadores · Grupo)
 }
 
 /**
@@ -121,7 +128,11 @@ fun PanelContent(
             },
             openColor = { color = it },
             returnTo = { returnTo },
-            onOpenAnimators = { transformTab = TransformTab.Animadores; open(EditorPanel.Transform) },
+            // Funções (F3): os animadores têm painel próprio (Animação); no texto, a aba Texto.
+            onOpenAnimators = {
+                if (store.detail?.kind == com.aurea.aurea.ui.theme.LayerType.Text.kind || store.text3d != null) AnimationRequest.tab = AnimationTab.Text
+                open(EditorPanel.Animation)
+            },
         )
     }
     // Só a existência da camada importa aqui — não o detalhe que muda a cada quadro.
@@ -190,7 +201,8 @@ fun PanelContent(
                     EditorPanel.Captions -> CaptionsPanel(env)
                     EditorPanel.Presets -> com.aurea.aurea.effects.PluginPanelOr("presets") { PresetsPanel(env) }
                     EditorPanel.Mask -> MaskPanel(env)
-                    EditorPanel.Vector -> VectorPanel(env)
+                    EditorPanel.Vector, EditorPanel.VectorPaths -> VectorPanel(env, VectorFace.Paths)
+                    EditorPanel.VectorFill -> VectorPanel(env, VectorFace.Fill)
                     EditorPanel.ShapeEdit -> ShapeEditPanel(env)
                     EditorPanel.Filters -> FiltersPanel(env)
                     EditorPanel.Adjust -> AdjustPanel(env)
@@ -200,6 +212,11 @@ fun PanelContent(
                     // Omega aparência (área 05).
                     EditorPanel.BorderShadow -> BorderShadowPanel(env)
                     EditorPanel.Camera -> CameraOptionsPanel(env)
+                    // Funções do AUREA (13/11/2026).
+                    EditorPanel.LayerOptions -> LayerOptionsPanel(env)
+                    EditorPanel.Layer3D -> Layer3DPanel(env)
+                    EditorPanel.TextLayout -> TextPanel(env, layout = true)
+                    EditorPanel.Animation -> AnimationPanel(env)
                 }
             }
         }
@@ -274,15 +291,25 @@ internal fun panelSectionTitle(store: EditorStore, panel: EditorPanel): String =
     EditorPanel.ClipEdit -> stringResource(R.string.i18n_clip_modes)
     EditorPanel.Audio -> stringResource(R.string.panel_som)
     EditorPanel.Shape -> stringResource(R.string.panel_cor_preenchimento)
-    EditorPanel.Text -> stringResource(R.string.text_options)
+    EditorPanel.Text -> stringResource(R.string.sh_dock_edit_text)
     EditorPanel.Font -> stringResource(R.string.panel_fonte)
     EditorPanel.Particles -> stringResource(R.string.panel_particulas)
     EditorPanel.Tracking -> stringResource(R.string.panel_rastreio)
-    EditorPanel.Element3D -> stringResource(if (store.text3d != null) R.string.text_options else R.string.panel_material_ambiente)
+    EditorPanel.Element3D -> when (Element3DRequest.face) {
+        // 13/11/2026: o modelo importado abre o painel do modelo (Material · Textura · Animação · Sombra).
+        Face3D.Material, Face3D.Object -> if (store.detail?.kind == com.aurea.aurea.ui.theme.LayerType.Model3D.kind &&
+            store.shape3d == null && store.text3d == null && store.image3d == null) stringResource(R.string.m3d_title)
+            else stringResource(if (Element3DRequest.face == Face3D.Material) R.string.ui3d_tab_material else R.string.fn_3d_object)
+        // F6: o título diz o assunto aberto.
+        Face3D.Rig -> stringResource(R.string.rig3d_tab)
+        Face3D.Scene -> stringResource(R.string.fn_3d_scene)
+        Face3D.All -> stringResource(if (store.text3d != null) R.string.text_options else R.string.panel_material_ambiente)
+    }
     EditorPanel.Captions -> stringResource(R.string.panel_legendas)
     EditorPanel.Presets -> stringResource(R.string.panel_presets)
     EditorPanel.Mask -> stringResource(R.string.panel_mascara_recorte)
-    EditorPanel.Vector -> stringResource(R.string.panel_vetor)
+    EditorPanel.Vector, EditorPanel.VectorPaths -> stringResource(R.string.fn_vec_paths_title)
+    EditorPanel.VectorFill -> stringResource(R.string.panel_cor_preenchimento)
     EditorPanel.ShapeEdit -> stringResource(R.string.panel_editar_forma)
     EditorPanel.AiVideo -> stringResource(R.string.panel_ai_video)
     EditorPanel.Filters -> stringResource(R.string.grade_title_filters)
@@ -293,4 +320,9 @@ internal fun panelSectionTitle(store: EditorStore, panel: EditorPanel): String =
     // Omega aparência (área 05).
     EditorPanel.BorderShadow -> stringResource(R.string.om_ap_bs_title)
     EditorPanel.Camera -> stringResource(R.string.om_ap_cam_title)
+    // Funções do AUREA (13/11/2026).
+    EditorPanel.LayerOptions -> stringResource(R.string.fn_tool_layer_options)
+    EditorPanel.Layer3D -> stringResource(R.string.fn_tool_layer3d)
+    EditorPanel.TextLayout -> stringResource(R.string.fn_text_layout)
+    EditorPanel.Animation -> stringResource(R.string.panel_animacao)
 }

@@ -13,6 +13,9 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -30,6 +33,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -98,6 +103,9 @@ internal object Grade {
     const val SHARPEN = 64; const val VIGNETTE = 65; const val GRAIN = 68
     const val LUT = 70; const val LUT_INTENSITY = 71; const val MIX = 76; const val ROLE = 77; const val LOOK = 78
     const val ROLE_FILTER = 1; const val ROLE_ADJUST = 2
+    const val ROLE_NODE = 3
+    const val WINDOW = 79; const val WINDOW_CENTER = 80; const val WINDOW_SIZE = 81
+    const val WINDOW_ROTATION = 82; const val WINDOW_SOFTNESS = 83; const val WINDOW_INVERT = 84; const val WINDOW_SHOW = 85
 }
 
 /** Os looks na ordem dos presets do motor (ColorGrade::presets). */
@@ -235,33 +243,107 @@ private val Bands = listOf(
 @Composable
 internal fun AdjustPanel(env: PanelEnv) {
     val store = env.store
-    val effectId = rememberGradeEffect(env, Grade.ROLE_ADJUST) ?: return
+    var selectedNode by remember(store.primary) { mutableStateOf<Int?>(null) }
+    val nodes = store.effects.filter { it.typeId == effectTypeId(Grade.KEY) }
+    LaunchedEffect(store.primary, nodes.isEmpty()) {
+        if (selectedNode == null || nodes.isEmpty()) {
+            selectedNode = store.colorGradeFor(Grade.ROLE_ADJUST) ?: nodes.lastOrNull()?.effectId
+        }
+    }
+    if (selectedNode == null) return
+    val adjustment = nodes.firstOrNull { (store.effectParams[it.effectId]?.at(Grade.ROLE)?.value?.firstOrNull() ?: 0f) == 2f }
+    val effectId = selectedNode?.takeIf { id -> nodes.any { it.effectId == id } }
+        ?: adjustment?.effectId ?: nodes.lastOrNull()?.effectId ?: return
     val params = store.effectParams[effectId].orEmpty()
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var scopes by rememberSaveable { mutableStateOf(false) }
+    var nodeMenu by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
+        LazyRow(Modifier.fillMaxWidth().testTag("grade.nodes"), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            itemsIndexed(nodes, key = { _, node -> node.effectId }) { index, node ->
+                if (index > 0) Text("→", color = AureaColors.Muted)
+                FilterChip(node.effectId == effectId, { selectedNode = node.effectId },
+                    label = { Text(stringResource(R.string.grade_node_number, index + 1)) },
+                    modifier = Modifier.testTag("grade.node.${node.effectId}"))
+            }
+            item {
+                TextButton({ store.colorGradeFor(Grade.ROLE_NODE)?.let { selectedNode = it } },
+                    Modifier.testTag("grade.node.add")) { Text(stringResource(R.string.grade_add_node)) }
+            }
+        }
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             FilterChip(scopes, { scopes = !scopes }, label = { Text(stringResource(R.string.grade_scopes)) },
                 modifier = Modifier.heightIn(min = 40.dp).testTag("grade.scopes"))
             Spacer(Modifier.weight(1f))
+            val node = nodes.firstOrNull { it.effectId == effectId }
+            val enabledLabel = stringResource(R.string.grade_node_enabled)
+            Switch(node?.enabled == true, { store.setEffectEnabled(effectId, it) },
+                modifier = Modifier.testTag("grade.node.enabled").semantics { contentDescription = enabledLabel })
+            Box {
+                val actionsLabel = stringResource(R.string.grade_node_actions)
+                TextButton({ nodeMenu = true }, Modifier.testTag("grade.node.menu")
+                    .semantics { contentDescription = actionsLabel }) { Text("⋯") }
+                DropdownMenu(nodeMenu, { nodeMenu = false }) {
+                    DropdownMenuItem(text = { Text(stringResource(R.string.grade_node_previous)) },
+                        onClick = { nodeMenu = false; store.moveColorNode(effectId, -1) })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.grade_node_next)) },
+                        onClick = { nodeMenu = false; store.moveColorNode(effectId, 1) })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.common_delete)) },
+                        onClick = { nodeMenu = false; store.removeEffect(effectId) }, modifier = Modifier.testTag("grade.node.delete"))
+                }
+            }
             TextButton({ store.resetColorGrade(effectId) }, Modifier.heightIn(min = 44.dp).testTag("grade.reset")) {
                 Text(stringResource(R.string.grade_reset))
             }
         }
         if (scopes) ScopesView(env)
-        ParamTabs(
-            labels = listOf(stringResource(R.string.grade_tab_basic), stringResource(R.string.grade_tab_hsl),
-                stringResource(R.string.grade_tab_curves), stringResource(R.string.grade_tab_wheels), stringResource(R.string.grade_tab_more)),
-            selected = tab,
-            onSelect = { tab = it },
-        )
+        LazyRow(Modifier.fillMaxWidth().testTag("grade.tabs"), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            itemsIndexed(listOf(R.string.grade_tab_basic, R.string.grade_tab_hsl, R.string.grade_tab_curves,
+                R.string.grade_tab_wheels, R.string.grade_tab_more, R.string.grade_window)) { index, label ->
+                FilterChip(index == tab, { tab = index }, label = { Text(stringResource(label)) },
+                    modifier = Modifier.heightIn(min = 44.dp).testTag("grade.tab.$index"))
+            }
+        }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (tab) {
                 0 -> BasicTab(env, effectId, params)
                 1 -> HslTab(env, effectId, params)
                 2 -> CurvesTab(env, effectId)
                 3 -> WheelsTab(env, effectId, params)
+                5 -> GradeWindowTab(env, effectId, params)
                 else -> MoreTab(env, effectId, params)
+            }
+        }
+    }
+}
+
+@Composable
+private fun GradeWindowTab(env: PanelEnv, effectId: Int, params: List<EffectParam>) {
+    val shape = params.at(Grade.WINDOW) ?: return
+    val selected = shape.value.firstOrNull()?.roundToInt() ?: 0
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(R.string.grade_none, R.string.grade_window_rectangle, R.string.grade_window_ellipse).forEachIndexed { index, label ->
+                FilterChip(index == selected, { env.store.setEffectParam(effectId, shape, index.toFloat()) },
+                    label = { Text(stringResource(label)) }, modifier = Modifier.testTag("grade.window.$index"))
+            }
+        }
+        if (selected > 0) {
+            GradeSlider(env, effectId, params, Grade.WINDOW_CENTER, "X", 0f, 1f, component = 0)
+            GradeSlider(env, effectId, params, Grade.WINDOW_CENTER, "Y", 0f, 1f, component = 1)
+            GradeSlider(env, effectId, params, Grade.WINDOW_SIZE, stringResource(R.string.grade_window_width), .01f, 2f, component = 0)
+            GradeSlider(env, effectId, params, Grade.WINDOW_SIZE, stringResource(R.string.grade_window_height), .01f, 2f, component = 1)
+            GradeSlider(env, effectId, params, Grade.WINDOW_ROTATION, stringResource(R.string.grade_window_rotation), -180f, 180f)
+            GradeSlider(env, effectId, params, Grade.WINDOW_SOFTNESS, stringResource(R.string.grade_q_softness), 0f, 100f)
+            for ((index, label) in listOf(Grade.WINDOW_INVERT to R.string.grade_q_invert, Grade.WINDOW_SHOW to R.string.grade_q_show)) {
+                val param = params.at(index) ?: continue
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(label), color = AureaColors.Text, modifier = Modifier.weight(1f))
+                    Switch((param.value.firstOrNull() ?: 0f) > .5f,
+                        { env.store.setEffectParam(effectId, param, if (it) 1f else 0f) },
+                        modifier = Modifier.testTag("grade.window.toggle.$index"))
+                }
             }
         }
     }
@@ -339,34 +421,32 @@ private val Wheels = listOf(
     Wheel(Grade.SHADOW_TINT, null, R.string.grade_shadow_tint), Wheel(Grade.HIGHLIGHT_TINT, null, R.string.grade_highlight_tint),
 )
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun WheelsTab(env: PanelEnv, effectId: Int, params: List<EffectParam>) {
     val store = env.store
-    var which by rememberSaveable { mutableIntStateOf(0) }
-    val w = Wheels[which.coerceIn(0, Wheels.lastIndex)]
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally) {
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Wheels.forEachIndexed { i, item ->
-                FilterChip(i == which, { which = i }, label = { Text(stringResource(item.label), fontSize = 12.sp) },
-                    modifier = Modifier.heightIn(min = 40.dp).testTag("grade.wheel.tab.$i"))
+    BoxWithConstraints(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(8.dp)) {
+        val columns = if (maxWidth >= 660.dp) 4 else 2
+        val width = (maxWidth - 8.dp * (columns - 1)) / columns
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Wheels.forEach { wheel ->
+                val param = params.at(wheel.point) ?: return@forEach
+                val label = stringResource(wheel.label)
+                Column(Modifier.width(width), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(label, color = AureaColors.Text, fontSize = 12.sp)
+                    ColorWheel(
+                        x = param.value.getOrElse(0) { 0f }, y = param.value.getOrElse(1) { 0f }, label = label,
+                        onBegin = { store.beginGesture(label) },
+                        onChange = { x, y -> store.setEffectPoint(effectId, param, x, y) },
+                        onEnd = { store.endGesture() },
+                        modifier = Modifier.padding(vertical = 6.dp).size(140.dp).testTag("grade.wheel.${wheel.point}"),
+                    )
+                    wheel.luma?.let { GradeSlider(env, effectId, params, it, stringResource(R.string.grade_luminance), -100f, 100f) }
+                    if (wheel.point == Grade.SHADOW_TINT || wheel.point == Grade.HIGHLIGHT_TINT)
+                        GradeSlider(env, effectId, params, Grade.TINT_BALANCE, stringResource(R.string.grade_tint_balance), -100f, 100f)
+                }
             }
         }
-        val param = params.at(w.point)
-        if (param != null) {
-            val label = stringResource(w.label)
-            ColorWheel(
-                x = param.value.getOrElse(0) { 0f }, y = param.value.getOrElse(1) { 0f }, label = label,
-                onBegin = { store.beginGesture(label) },
-                onChange = { x, y -> store.setEffectPoint(effectId, param, x, y) },
-                onEnd = { store.endGesture() },
-                modifier = Modifier.padding(vertical = 8.dp).testTag("grade.wheel.${w.point}"),
-            )
-            Text(stringResource(R.string.grade_wheel_hint), color = AureaColors.Muted, fontSize = 11.sp)
-        }
-        w.luma?.let { GradeSlider(env, effectId, params, it, stringResource(R.string.grade_luminance), -100f, 100f) }
-        if (w.point == Grade.SHADOW_TINT || w.point == Grade.HIGHLIGHT_TINT)
-            GradeSlider(env, effectId, params, Grade.TINT_BALANCE, stringResource(R.string.grade_tint_balance), -100f, 100f)
     }
 }
 

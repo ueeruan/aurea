@@ -145,15 +145,17 @@ u32 Engine::query_layer_panel(u64 layerId, i64 frame) noexcept {
     const bool keyedTime = (layer->timeRemapEnabled && !layer->timeRemap.keys.empty()) || layer->speed_track() != nullptr;
     if (!keyedTime) bits |= kLayerPanelSpeedBakeable;
     // Mídia ausente: o arquivo da fonte não está mais onde o projeto aponta.
-    // URI de conteúdo (sem caminho de arquivo) não dá para conferir: fica.
+    // URI de conteúdo (sem caminho de arquivo) não dá para conferir: fica. O
+    // `file:` do PC já sai daqui como caminho (resolve_asset_path).
     if (layer->kind == LayerKind::Video || layer->kind == LayerKind::Image || layer->kind == LayerKind::Audio) {
         const Asset* asset = project_->asset(layer->source);
         if (!asset) {
             bits |= kLayerPanelMissingMedia;
-        } else if (!asset->sourcePath.empty() && asset->sourcePath.find("://") == std::string::npos) {
+        } else if (!asset->sourcePath.empty()) {
             std::error_code ec;
             const std::string resolved = resolve_asset_path(asset->sourcePath);
-            if (!resolved.empty() && !std::filesystem::exists(std::filesystem::u8path(resolved), ec) && !ec)
+            if (!resolved.empty() && resolved.find("://") == std::string::npos
+                && !std::filesystem::exists(std::filesystem::u8path(resolved), ec) && !ec)
                 bits |= kLayerPanelMissingMedia;
         }
     }

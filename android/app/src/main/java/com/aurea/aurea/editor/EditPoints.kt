@@ -40,6 +40,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.input.pointer.isAltPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalDensity
@@ -327,13 +328,13 @@ private fun selectPathCurve(store: EditorStore): Boolean {
  * fechar ou abrir, tipo do ponto e ± ponto. Com uma alça escolhida, as travas.
  */
 @Composable
-internal fun MaskPointsColumn(env: PanelEnv, m: EditorStore.MaskPath, look: KeyframeLook) {
+internal fun MaskPointsColumn(env: PanelEnv, m: EditorStore.MaskPath, look: KeyframeLook, onBack: () -> Unit = env.onClose) {
     val store = env.store
     val path = EditPointsState.at(store)?.path
     val kind = EditPointsState.kind
     val i = store.maskPoint
     Column(Modifier.width(60.dp).fillMaxHeight().testTag("mask.points.column")) {
-        PointsCell("mask.points.back", stringResource(R.string.panel_voltar_ferramentas), true, onClick = env.onClose) {
+        PointsCell("mask.points.back", stringResource(R.string.panel_voltar_ferramentas), true, onClick = onBack) {
             CupertinoIcon(CupertinoGlyph.ChevronLeft, 22.dp, it)
         }
         PointsCell("mask.points.key", stringResource(if (look == KeyframeLook.KeyHere) R.string.panel_tirar_keyframe_daqui else R.string.panel_marcar_keyframe_aqui),
@@ -1100,3 +1101,170 @@ private suspend fun AwaitPointerEventScope.drag(down: PointerInputChange, onMove
 }
 
 private suspend fun AwaitPointerEventScope.drain(down: PointerInputChange) = drag(down) { }
+
+// =============================================================================
+// Lote M — só no Aurea PC (PlatformFeatures.desktopAe): a ferramenta de FEATHER
+// de largura variável da máscara no palco (a Mask Feather Tool do After
+// Effects). O celular nunca liga [MaskFeatherTool.active]; a tela dele não muda.
+//
+// Com a ferramenta ligada (menu da máscara na timeline do PC):
+//   · clicar na borda da máscara cria um ponto de feather; arrastar para fora
+//     ou para dentro define o raio (fora = feather externo, dentro = interno);
+//   · arrastar a alça de um ponto muda o raio dele;
+//   · Alt + clique numa alça apaga o ponto.
+// A conta do feather é do motor (render/MaskRaster.cpp); aqui só a edição.
+// =============================================================================
+internal object MaskFeatherTool {
+    var active by mutableStateOf(false)
+    /** Ponto de feather escolhido (índice); −1 = nenhum. */
+    var selected by mutableIntStateOf(-1)
+    const val FLOATS = 5
+}
+
+private val FeatherInk = Color(0xFF7BE0C3)
+
+/** Ponto (x, y) e normal para FORA (nx, ny) do trecho [seg] em [t] da máscara, em px da camada. */
+private fun maskEdgeFrame(mask: EditorStore.MaskPath, seg: Int, t: Float, out: FloatArray): Boolean {
+    val n = mask.count
+    if (n < 2) return false
+    val p = mask.points
+    val s = seg.coerceIn(0, n - 1)
+    val a = s * 6
+    val b = ((s + 1) % n) * 6
+    val x0 = p[a]; val y0 = p[a + 1]
+    val x1 = x0 + p[a + 4]; val y1 = y0 + p[a + 5]
+    val x3 = p[b]; val y3 = p[b + 1]
+    val x2 = x3 + p[b + 2]; val y2 = y3 + p[b + 3]
+    val u = t.coerceIn(0f, 1f)
+    out[0] = cubicAt(x0, x1, x2, x3, u)
+    out[1] = cubicAt(y0, y1, y2, y3, u)
+    // Tangente: derivada da cúbica; trecho reto ou alça nula cai na corda.
+    val w = 1f - u
+    var tx = 3f * w * w * (x1 - x0) + 6f * w * u * (x2 - x1) + 3f * u * u * (x3 - x2)
+    var ty = 3f * w * w * (y1 - y0) + 6f * w * u * (y2 - y1) + 3f * u * u * (y3 - y2)
+    if (hypot(tx, ty) < 1e-4f) { tx = x3 - x0; ty = y3 - y0 }
+    val len = hypot(tx, ty)
+    if (len < 1e-6f) return false
+    // Área com sinal dos vértices: decide de que lado fica o "fora".
+    var area = 0f
+    for (i in 0 until n) {
+        val c = i * 6
+        val d = ((i + 1) % n) * 6
+        area += p[c] * p[d + 1] - p[d] * p[c + 1]
+    }
+    val k = if (area >= 0f) 1f else -1f
+    out[2] = k * ty / len
+    out[3] = -k * tx / len
+    return true
+}
+
+/** As alças dos pontos de feather da máscara em edição (só com a ferramenta ligada ou pontos existentes). */
+internal fun DrawScope.drawMaskFeatherOverlay(store: EditorStore, m: StageMapper) {
+    val ms = store.masks ?: return
+    val mask = ms.find(store.maskEdit) ?: return
+    val fp = mask.featherPoints
+    if (fp.isEmpty() && !MaskFeatherTool.active) return
+    val f = FloatArray(4)
+    fun scr(x: Float, y: Float) = Offset(m.sx(ms.toCompX(x, y)), m.sy(ms.toCompY(x, y)))
+    val count = fp.size / MaskFeatherTool.FLOATS
+    for (i in 0 until count) {
+        val o = i * MaskFeatherTool.FLOATS
+        if (!maskEdgeFrame(mask, fp[o].toInt(), fp[o + 1], f)) continue
+        val r = fp[o + 2]
+        val base = scr(f[0], f[1])
+        val tip = scr(f[0] + f[2] * r, f[1] + f[3] * r)
+        val chosen = i == MaskFeatherTool.selected
+        drawLine(ShellColors.OutlineUnder, base, tip, 3.dp.toPx())
+        drawLine(FeatherInk, base, tip, 1.25.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(5f, 4f)))
+        drawCircle(ShellColors.OutlineUnder, 3.5.dp.toPx(), base)
+        drawCircle(FeatherInk, 2.25.dp.toPx(), base)
+        drawCircle(ShellColors.OutlineUnder, 6.dp.toPx(), tip)
+        drawCircle(if (chosen) AureaColors.Accent else FeatherInk, 4.5.dp.toPx(), tip)
+        if (fp[o + 4] > 0.5f) drawCircle(ShellColors.OutlineUnder, 1.75.dp.toPx(), tip)   // "segurar": miolo escuro
+    }
+}
+
+/**
+ * Um gesto da ferramenta de feather no palco. Alça existente > borda da máscara
+ * (cria um ponto) > vazio (solta a escolha). Um arrasto = um passo de desfazer.
+ */
+internal suspend fun AwaitPointerEventScope.maskFeatherGesture(
+    store: EditorStore, m: StageMapper, ms: EditorStore.MaskState, maskId: Int, down: PointerInputChange,
+) {
+    val mask = ms.find(maskId)
+    if (mask == null || mask.locked || mask.count < 2) { drain(down); return }
+    val reach = 14.dp.toPx()
+    val f = FloatArray(4)
+    fun scr(x: Float, y: Float) = Offset(m.sx(ms.toCompX(x, y)), m.sy(ms.toCompY(x, y)))
+    var pts = mask.featherPoints.copyOf()
+    val dp = down.position
+    // 1) Alça de um ponto existente.
+    var hit = -1
+    var best = reach
+    for (i in 0 until pts.size / MaskFeatherTool.FLOATS) {
+        val o = i * MaskFeatherTool.FLOATS
+        if (!maskEdgeFrame(mask, pts[o].toInt(), pts[o + 1], f)) continue
+        val tip = scr(f[0] + f[2] * pts[o + 2], f[1] + f[3] * pts[o + 2])
+        val d = hypot(tip.x - dp.x, tip.y - dp.y)
+        if (d < best) { best = d; hit = i }
+    }
+    if (hit >= 0 && currentEvent.keyboardModifiers.isAltPressed) {
+        // Alt + clique: apaga o ponto.
+        val o = hit * MaskFeatherTool.FLOATS
+        val kept = FloatArray(pts.size - MaskFeatherTool.FLOATS)
+        pts.copyInto(kept, 0, 0, o)
+        pts.copyInto(kept, o, o + MaskFeatherTool.FLOATS, pts.size)
+        store.setMaskFeatherPoints(maskId, kept, false)
+        MaskFeatherTool.selected = -1
+        drain(down)
+        store.maskGestureEnd()
+        return
+    }
+    var sent = false
+    if (hit < 0) {
+        // 2) Borda: o ponto mais perto da linha vira um ponto de feather novo (raio 0 até arrastar).
+        var seg = -1
+        var at = 0f
+        best = reach
+        val n = mask.count
+        val segs = if (mask.closed) n else n - 1
+        for (i in 0 until segs) {
+            for (k in 0..48) {
+                val t = k / 48f
+                if (!maskEdgeFrame(mask, i, t, f)) continue
+                val c = scr(f[0], f[1])
+                val d = hypot(c.x - dp.x, c.y - dp.y)
+                if (d < best) { best = d; seg = i; at = t }
+            }
+        }
+        if (seg < 0) {
+            MaskFeatherTool.selected = -1
+            drain(down)
+            return
+        }
+        pts = pts.copyOf(pts.size + MaskFeatherTool.FLOATS)
+        hit = pts.size / MaskFeatherTool.FLOATS - 1
+        val o = hit * MaskFeatherTool.FLOATS
+        pts[o] = seg.toFloat(); pts[o + 1] = at; pts[o + 2] = 0f; pts[o + 3] = 0f; pts[o + 4] = 0f
+        if (!store.setMaskFeatherPoints(maskId, pts, false)) { drain(down); return }
+        sent = true
+    }
+    MaskFeatherTool.selected = hit
+    val o = hit * MaskFeatherTool.FLOATS
+    if (!maskEdgeFrame(mask, pts[o].toInt(), pts[o + 1], f)) { drain(down); return }
+    val px = f[0]; val py = f[1]; val nx = f[2]; val ny = f[3]
+    val slop = 4.dp.toPx()
+    var moved = false
+    drag(down) { pos ->
+        if (!moved && hypot(pos.x - dp.x, pos.y - dp.y) < slop) return@drag
+        moved = true
+        val lp = ms.toLayer(m.cx(pos.x), m.cy(pos.y)) ?: return@drag
+        // O raio é a distância do cursor à borda ao longo da normal: fora positivo, dentro negativo.
+        val r = ((lp[0] - px) * nx + (lp[1] - py) * ny).coerceIn(-2000f, 2000f)
+        pts = pts.copyOf()
+        pts[o + 2] = if (abs(r) < 0.5f) 0f else r
+        store.setMaskFeatherPoints(maskId, pts, sent)
+        sent = true
+    }
+    store.maskGestureEnd()
+}

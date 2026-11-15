@@ -520,12 +520,6 @@ bool Engine::convert_shape_to_outline(u64 layerId) noexcept {
     g.stroke.paint.color = stroke ? sh.strokeColor : Vec4{1.0f, 1.0f, 1.0f, 1.0f};
     g.stroke.join = 1;
     g.stroke.cap = 1;
-    if (sh.trimEnabled) {
-        g.trim.enabled = true;
-        g.trim.start = std::clamp(sh.trimStart, 0.0f, 1.0f) * 100.0f;
-        g.trim.end = std::clamp(sh.trimEnd, 0.0f, 1.0f) * 100.0f;
-        g.trim.offset = sh.trimOffset * 100.0f;
-    }
 
     history_.before_mutation(*comp, project_->timeline().current(), "converter em contorno");
     bump_model_revision_locked();

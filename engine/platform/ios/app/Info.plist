@@ -78,6 +78,17 @@
                 <string>$(AUREA_FIREBASE_REVERSED_CLIENT_ID)</string>
             </array>
         </dict>
+        <!-- AureaMCP: "Abrir no Aurea" da página de autorização do agente (aurea://mcp/pair?code=…). -->
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.aurea.mcp</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>aurea</string>
+            </array>
+        </dict>
     </array>
     <key>UIAppFonts</key>
     <array>

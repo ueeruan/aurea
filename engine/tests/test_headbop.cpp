@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <limits>
 #include <vector>
 
 using namespace aurea;
@@ -114,6 +115,77 @@ AUREA_TEST(Headbop, RigFromSyntheticPoseFindsHeadNeckAndShoulders) {
     noShoulders[11 * 4 + 3] = noShoulders[12 * 4 + 3] = 0.0f;
     AUREA_CHECK(hb::face_from_landmarks(noShoulders.data(), 1.0f, f));
     AUREA_CHECK(f.shoulderA.y > f.neck.y && f.shoulderB.x > f.shoulderA.x);
+}
+
+AUREA_TEST(Headbop, ProfileWithOneVisibleEyeKeepsAnIsolatedHeadRig) {
+    for (const u32 hiddenEye : {2u, 5u}) {
+        auto points = frontal_pose();
+        points[hiddenEye * 4 + 3] = 0.0f;
+        const u32 hiddenEar = hiddenEye == 2u ? 7u : 8u;
+        points[hiddenEar * 4 + 3] = 0.0f;
+        hb::RigFace face;
+        AUREA_CHECK(hb::face_from_landmarks(points.data(), 0.5625f, face));
+        AUREA_CHECK(face.axes.x > 0.0f && face.axes.y > 0.0f);
+        AUREA_CHECK(face.confidence >= 0.35f);
+        points[0 * 4 + 3] = 0.0f;
+        AUREA_CHECK(!hb::face_from_landmarks(points.data(), 0.5625f, face));
+    }
+    auto invalid = frontal_pose();
+    invalid[2 * 4] = std::numeric_limits<f32>::quiet_NaN();
+    invalid[5 * 4] = std::numeric_limits<f32>::quiet_NaN();
+    hb::RigFace face;
+    AUREA_CHECK(!hb::face_from_landmarks(invalid.data(), 1.0f, face));
+}
+
+AUREA_TEST(Headbop, BodyRigKeepsJointsBoneLengthsAndPlantedFeet) {
+    auto points = frontal_pose(.5f, .16f, .06f);
+    const auto put = [&](u32 index, f32 x, f32 y) {
+        points[index * 4] = x; points[index * 4 + 1] = y; points[index * 4 + 3] = .95f;
+    };
+    put(11, .35f, .32f); put(12, .65f, .32f);
+    put(13, .22f, .46f); put(14, .78f, .46f);
+    put(15, .18f, .60f); put(16, .82f, .60f);
+    put(17, .15f, .63f); put(18, .85f, .63f);
+    put(19, .18f, .65f); put(20, .82f, .65f);
+    put(21, .20f, .62f); put(22, .80f, .62f);
+    put(23, .42f, .55f); put(24, .58f, .55f);
+    put(25, .40f, .72f); put(26, .60f, .72f);
+    put(27, .38f, .90f); put(28, .62f, .90f);
+    put(29, .37f, .92f); put(30, .63f, .92f);
+    put(31, .32f, .94f); put(32, .68f, .94f);
+    hb::BuildInput input;
+    input.width = input.height = 1000;
+    input.mask = true; input.plate = true;
+    input.rig.count = 1;
+    AUREA_CHECK(hb::face_from_landmarks(points.data(), 1.f, input.rig.faces[0]));
+    for (const Vec4 joint : input.rig.faces[0].joints) AUREA_CHECK_NEAR(joint.w, .95f, 1e-6f);
+    input.pose[0].torsoDx = .015f;
+    input.pose[0].torsoDy = .01f;
+    input.pose[0].torsoRoll = 4.f;
+    input.prevPose = input.pose;
+    hb::Uniforms uniforms;
+    hb::fill_uniforms(input, uniforms);
+    const auto point = [&](u32 index) { return Vec2{points[index * 4] * 1000.f, points[index * 4 + 1] * 1000.f}; };
+    const Vec2 shoulder = hb::deform_point(uniforms, point(11));
+    const Vec2 elbow = hb::deform_point(uniforms, point(13));
+    const Vec2 wrist = hb::deform_point(uniforms, point(15));
+    AUREA_CHECK(dist(wrist, point(15)) > 1.f);
+    AUREA_CHECK_NEAR(dist(shoulder, elbow), dist(point(11), point(13)), .1f);
+    AUREA_CHECK_NEAR(dist(elbow, wrist), dist(point(13), point(15)), .1f);
+    AUREA_CHECK(dist(hb::deform_point(uniforms, point(27)), point(27)) < .1f);
+    AUREA_CHECK(dist(hb::deform_point(uniforms, point(31)), point(31)) < .1f);
+    hb::StoreEntry entry;
+    entry.track.frames.push_back(input.rig);
+    const std::string encoded = hb::serialize_entry(entry);
+    hb::StoreEntry restored;
+    AUREA_CHECK(hb::deserialize_entry(encoded, restored));
+    AUREA_CHECK_NEAR(restored.track.frames[0].faces[0].joints[16].y, .9f, 1e-6f);
+    std::string legacy = encoded;
+    legacy.erase(88, hb::kBodyJoints * sizeof(Vec4));
+    const u32 version = 1;
+    std::memcpy(legacy.data() + 4, &version, sizeof(version));
+    AUREA_CHECK(hb::deserialize_entry(legacy, restored));
+    AUREA_CHECK_EQ(restored.track.frames[0].faces[0].joints[16].w, 0.f);
 }
 
 AUREA_TEST(Headbop, WeightsAndDeformationAreContinuousAcrossTheNeck) {

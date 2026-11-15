@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <vector>
 #include <limits>
@@ -374,6 +375,94 @@ AUREA_TEST(Text, RichTextSpansColorBoldAndSize) {
     AUREA_CHECK(green == 5 && white == 11);
     AUREA_CHECK(hRich > hPlain * 1.3f);
     AUREA_CHECK(rich.contentWidth > plain.contentWidth);
+}
+
+namespace aurea::text { u64 layout_cache_hits() noexcept; }   // só para o teste (Text.cpp)
+
+AUREA_TEST(Text, RepeatedLayoutComesFromTheCacheAndIsIdentical) {
+    // 0.5.3 (P1-4): o mesmo texto no quadro seguinte não refaz o shaping. O
+    // resultado tem de ser o mesmo, campo por campo; mudar o texto refaz.
+    auto f = text::default_font();
+    if (!f) return;
+    TextData t;
+    t.content = "Legenda de exemplo com acentuação e várias palavras para o layout";
+    t.size = 54;
+    t.tracking = 3;
+    t.alignment = 1;
+    text::TextLayout first, again, other;
+    AUREA_CHECK(text::layout_quads(*f, t, 4.0f, first));   // glifos no atlas
+    // Refeito: textos diferentes a cada volta (só os dígitos mudam; glifos já no atlas).
+    constexpr int kMisses = 50;
+    const auto t0 = std::chrono::steady_clock::now();
+    for (int i = 0; i < kMisses; ++i) {
+        TextData v = t;
+        v.content += " " + std::to_string(1000 + i);
+        AUREA_CHECK(text::layout_quads(*f, v, 4.0f, other));
+    }
+    const f64 missMs = std::chrono::duration<f64, std::milli>(std::chrono::steady_clock::now() - t0).count() / kMisses;
+    const u64 hitsBefore = text::layout_cache_hits();
+    const auto t1 = std::chrono::steady_clock::now();
+    constexpr int kRepeats = 200;
+    for (int i = 0; i < kRepeats; ++i) AUREA_CHECK(text::layout_quads(*f, t, 4.0f, again));
+    const f64 hitMs = std::chrono::duration<f64, std::milli>(std::chrono::steady_clock::now() - t1).count() / kRepeats;
+    AUREA_CHECK_EQ(text::layout_cache_hits() - hitsBefore, static_cast<u64>(kRepeats));
+    AUREA_CHECK_EQ(again.quads.size(), first.quads.size());
+    bool same = again.width == first.width && again.height == first.height && again.lines == first.lines
+        && again.chars == first.chars && again.words == first.words && again.capHeight == first.capHeight;
+    for (usize i = 0; same && i < first.quads.size(); ++i)
+        same = std::memcmp(&again.quads[i], &first.quads[i], sizeof(text::GlyphQuad)) == 0;
+    AUREA_CHECK(same);
+    // Outro conteúdo, outra margem: nada vem do cache errado.
+    TextData changed = t;
+    changed.content += "!";
+    AUREA_CHECK(text::layout_quads(*f, changed, 4.0f, other));
+    AUREA_CHECK(other.quads.size() != first.quads.size() || other.contentWidth != first.contentWidth);
+    AUREA_CHECK(text::layout_quads(*f, t, 6.0f, other));
+    AUREA_CHECK(other.width != first.width);
+    std::printf("    layout de %zu glifos: refeito %.3f ms, do cache %.4f ms\n", first.quads.size(), missMs, hitMs);
+}
+
+AUREA_TEST(Text, WeightSpanWithoutFamilyCostsALayoutNotEverySystemFont) {
+    // 0.5.3 (P0-2): o trecho com peso próprio num texto SEM família passava por
+    // default_family(), que abria todas as fontes do sistema (e devolvia "" mesmo
+    // assim). Aqui: o layout de agora e, ao lado, o custo do laço que saiu (abrir
+    // cada fonte da lista, como ele fazia), medido na mesma máquina.
+    auto f = text::default_font();
+    if (!f) return;
+    TextData t;
+    t.content = "trecho em NEGRITO sem familia";
+    t.size = 48;
+    TextSpan sp;
+    sp.start = 10;
+    sp.end = 17;
+    sp.weight = 700;
+    t.spans.push_back(sp);
+    text::TextLayout plain, rich;
+    TextData base = t;
+    base.spans.clear();
+    AUREA_CHECK(text::layout_quads(*f, base, 2, plain));
+    const auto t0 = std::chrono::steady_clock::now();
+    AUREA_CHECK(text::layout_quads(*f, t, 2, rich));
+    const f64 layoutMs = std::chrono::duration<f64, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    // Sem família o trecho continua na fonte padrão: mesmos glifos, mesma largura.
+    AUREA_CHECK_EQ(rich.quads.size(), plain.quads.size());
+    AUREA_CHECK_NEAR(rich.contentWidth, plain.contentWidth, 0.01f);
+
+    const auto fonts = text::FontManager::instance().list();
+    std::error_code ec;
+    u64 bytes = 0;
+    usize opened = 0;
+    const auto t1 = std::chrono::steady_clock::now();
+    for (const auto& e : fonts) {
+        if (auto font = text::Font::load(e.path)) {
+            ++opened;
+            const auto size = std::filesystem::file_size(e.path, ec);
+            if (!ec) bytes += size;
+        }
+    }
+    const f64 loopMs = std::chrono::duration<f64, std::milli>(std::chrono::steady_clock::now() - t1).count();
+    std::printf("    trecho com peso, sem familia: layout %.2f ms; o laco removido abria %zu fontes (%.1f MB) em %.1f ms\n",
+                layoutMs, opened, static_cast<f64>(bytes) / (1024.0 * 1024.0), loopMs);
 }
 
 namespace {

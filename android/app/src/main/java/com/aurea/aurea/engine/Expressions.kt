@@ -35,18 +35,21 @@ data class ExpressionInfo(
     val error: ExpressionDiag,
     val value: Float,
     val source: String,
+    /** v70: o texto que a expressão do texto-fonte dá no playhead (vazio nas outras). */
+    val text: String = "",
 ) {
     companion object {
         fun decode(bytes: ByteArray?): ExpressionInfo? {
             bytes ?: return null
-            val f = String(bytes, Charsets.UTF_8).split(SEP, limit = 8)
-            if (f.size < 8) return null
+            val f = String(bytes, Charsets.UTF_8).split(SEP, limit = 9)
+            if (f.size < 9) return null
             return ExpressionInfo(
                 exists = f[0] == "1",
                 enabled = f[1] == "1",
                 error = ExpressionDiag.parse(f, 2),
                 value = f[6].toFloatOrNull() ?: 0f,
-                source = f[7],
+                text = f[7],
+                source = f[8],
             )
         }
     }

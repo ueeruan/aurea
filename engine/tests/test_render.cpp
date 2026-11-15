@@ -1475,6 +1475,22 @@ AUREA_TEST(MotionTile, ADownstreamBlurMarginUsesTheTransformInputCoordinates) {
     AUREA_CHECK_NEAR(plan.stages[2].margin, 0.0f, 1e-5f);
 }
 
+AUREA_TEST(EffectGraph, PerspectiveViewportBoundsPreserveTheVisiblePlane) {
+    LayerPlacement plane = placement(160, 90);
+    plane.inScene3d = true;
+    plane.compFromLayer.col[0].w = .002f;
+    const Rect bounds = visible_layer_rect(plane);
+    AUREA_CHECK_NEAR(bounds.x, 0.f, 1e-5f);
+    AUREA_CHECK_NEAR(bounds.y, 0.f, 1e-5f);
+    AUREA_CHECK_NEAR(bounds.w, 160.f / .68f, 1e-3f);
+    AUREA_CHECK_NEAR(bounds.h, 90.f / .68f, 1e-3f);
+    plane.preserveFullExtent = true;
+    AUREA_CHECK_EQ(visible_layer_rect(plane).w, 0.f);
+    plane.preserveFullExtent = false;
+    plane.compFromLayer.col[0].w = .01f;
+    AUREA_CHECK_EQ(visible_layer_rect(plane).w, 0.f);
+}
+
 AUREA_TEST(MotionTile, EarlierEffectsKeepPixelsThatTheTileMayReadOffscreen) {
     EffectRegistry reg;
     register_builtin_effects(reg);
@@ -3557,3 +3573,102 @@ AUREA_TEST(MotionBlur, SamplesPerFrameDrivesThePreviewToo) {
 #include "FrameGraphSegments.inl"
 #include "FrameGraphLease.inl"
 #include "FrameGraphMemoryOrder.inl"
+
+// =============================================================================
+//  0.5.4 — "Coloquei uns 3 vídeos e alguns não apareciam" (iPhone): o palco
+//  mostrava só o xadrez no lugar de uma camada de vídeo cujo decoder tinha sido
+//  recusado/derrubado, mesmo ela já tendo mostrado o quadro antes. Agora a
+//  camada fica com o último quadro (aproximado) na PRÉVIA enquanto o decoder
+//  volta; o export (finalQuality) continua esperando o quadro exato.
+// =============================================================================
+namespace {
+class RefusingFactory final : public VideoSourceFactory {
+public:
+    explicit RefusingFactory(const aurea::test::SyntheticConfig& c) : inner_(c) {}
+    bool probe(const char* path, MediaProbe& out) override { return inner_.probe(path, out); }
+    std::unique_ptr<VideoDecoderBackend> open_video(const Asset& asset, MediaPriority priority) override {
+        if (refuse.load()) { ++refused; return nullptr; }
+        return inner_.open_video(asset, priority);
+    }
+    std::atomic<bool> refuse{false};
+    std::atomic<u32> refused{0};
+private:
+    aurea::test::SyntheticFactory inner_;
+};
+} // namespace
+
+AUREA_TEST(Renderer, Fix054VideoLayerKeepsItsLastFrameWhileItsDecoderIsRefused) {
+    RenderFixture f;
+    aurea::test::SyntheticConfig config;
+    RefusingFactory factory(config);
+    MediaManager media;
+    media.set_factory(&factory);
+    media.set_persistent_retry(true);
+    Asset asset;
+    asset.kind = AssetKind::Video;
+    asset.video.width = config.width; asset.video.height = config.height; asset.video.fps = config.fps;
+    const AssetId aid = f.project.add_asset(std::move(asset));
+    LayerId ids[3];
+    for (u32 i = 0; i < 3; ++i) {
+        ids[i] = f.comp->add_layer(LayerKind::Video, "video");
+        Layer* layer = f.comp->layer(ids[i]);
+        layer->source = aid; layer->end = FrameIndex{300};
+        // Sobrepostas, como as 3 do relato.
+        layer->transform.position = Vec3{760.0f + 200.0f * static_cast<f32>(i), 540, 0};
+    }
+    RenderSettings preview;
+    FrameSnapshot snapshot;
+    u64 frame = 1;
+    bool ready = false;
+    const auto start = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() - start < std::chrono::seconds(3)) {
+        f.renderer.prepare(*f.comp, f.project, FrameIndex{30}, &media, nullptr, nullptr, preview, ++frame, 0,
+                           DecodeMode::Still, 1, snapshot);
+        ready = snapshot.layers.size() == 3 && snapshot.missingVideoFrames == 0 && snapshot.staleVideoFrames == 0;
+        if (ready) break;
+        snapshot.release_video_frames();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    AUREA_CHECK(ready);
+    if (!ready) { media.close_all(); return; }
+    snapshot.release_video_frames();
+    // O aparelho tira o decoder da camada do meio (fechado para o proxy, para
+    // a exportação, por pressão de memória) e recusa o próximo.
+    factory.refuse = true;
+    media.close_layer(ids[1]);
+    for (u32 k = 0; k < 4; ++k) {
+        f.renderer.prepare(*f.comp, f.project, FrameIndex{30}, &media, nullptr, nullptr, preview, ++frame, 0,
+                           DecodeMode::Still, 1, snapshot);
+        AUREA_CHECK_EQ(snapshot.layers.size(), 3u);         // nenhuma camada some do palco
+        AUREA_CHECK_EQ(snapshot.missingVideoFrames, 0u);
+        AUREA_CHECK_EQ(snapshot.staleVideoFrames, 1u);      // a do meio, aproximada (a prévia segue tentando)
+        bool middle = false;
+        for (const auto& rl : snapshot.layers)
+            if (rl.id.pack() == ids[1].pack()) middle = rl.source.frame && !rl.source.frameExact;
+        AUREA_CHECK(middle);
+        snapshot.release_video_frames();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    // O export não usa o quadro guardado: espera o exato.
+    RenderSettings exact; exact.finalQuality = true;
+    f.renderer.prepare(*f.comp, f.project, FrameIndex{30}, &media, nullptr, nullptr, exact, ++frame, 0,
+                       DecodeMode::Still, 1, snapshot);
+    AUREA_CHECK_EQ(snapshot.missingVideoFrames, 1u);
+    AUREA_CHECK_EQ(snapshot.layers.size(), 2u);
+    snapshot.release_video_frames();
+    // O decoder volta: a camada recupera o quadro exato sem ninguém mexer.
+    factory.refuse = false;
+    ready = false;
+    const auto again = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() - again < std::chrono::seconds(4)) {
+        f.renderer.prepare(*f.comp, f.project, FrameIndex{30}, &media, nullptr, nullptr, preview, ++frame, 0,
+                           DecodeMode::Still, 1, snapshot);
+        ready = snapshot.layers.size() == 3 && snapshot.missingVideoFrames == 0 && snapshot.staleVideoFrames == 0;
+        snapshot.release_video_frames();
+        if (ready) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    AUREA_CHECK(ready);
+    AUREA_CHECK(factory.refused.load() >= 1u);
+    media.close_all();
+}

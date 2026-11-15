@@ -33,6 +33,8 @@ import UIKit
 /// Os tipos da barra (ids `fill.tab.<rawValue>`; textos `om_ap_fill_<rawValue>`).
 enum ColorFillTab: String {
     case none, color, gradient, media, original
+    /// Funções (F4): a textura do texto (rótulo `tex_section`).
+    case texture
 
     var glyph: Character {
         switch self {
@@ -41,10 +43,11 @@ enum ColorFillTab: String {
         case .gradient: return CupertinoGlyph.CircleLefthalfFill
         case .media: return CupertinoGlyph.Photo
         case .original: return CupertinoGlyph.Paintbrush
+        case .texture: return CupertinoGlyph.SquareGrid2x2
         }
     }
 
-    var key: String { "om_ap_fill_" + rawValue }
+    var key: String { self == .texture ? "tex_section" : "om_ap_fill_" + rawValue }
 }
 
 /// Medidas do painel (as da referência).
@@ -81,6 +84,8 @@ struct ColorFillPanel: View {
     @State private var textColor: [Float] = [1, 1, 1, 1]
     @State private var startFrame: CGRect = .zero
     @State private var endFrame: CGRect = .zero
+    /// Texto: Cor ou Textura (escolha da tela; a textura tem o próprio interruptor).
+    @State private var textTab: ColorFillTab?
 
     /// O que a camada escolhida mostra aqui.
     private enum Target { case shape, text, original, other }
@@ -112,7 +117,7 @@ struct ColorFillPanel: View {
     private var tabs: [ColorFillTab] {
         switch target {
         case .shape: return [.none, .color, .gradient]
-        case .text: return [.color]
+        case .text: return [.color, .texture]
         case .original: return [.original]
         case .other: return []
         }
@@ -121,7 +126,7 @@ struct ColorFillPanel: View {
     private var currentTab: ColorFillTab {
         switch target {
         case .shape: return fillMode == 0 ? .none : fillMode == 2 ? .gradient : .color
-        case .text: return .color
+        case .text: return textTab ?? ((model.engine.textTexture(id).first?.floatValue ?? 0) >= 0.5 ? .texture : .color)
         case .original, .other: return .original
         }
     }
@@ -182,7 +187,7 @@ struct ColorFillPanel: View {
         }
         .foregroundStyle(AureaColors.text)
         .onAppear { loadText(); syncStage(); focusTimeline() }
-        .onChange(of: id) { _ in loadText(); focusTimeline() }
+        .onChange(of: id) { _ in textTab = nil; loadText(); focusTimeline() }
         .onChange(of: model.status.modelRevision) { _ in loadText() }
         .onChange(of: model.status.playhead) { _ in loadText() }
         .onChange(of: gradientOn) { _ in syncStage() }
@@ -224,12 +229,13 @@ struct ColorFillPanel: View {
 
     /// Trocar o tipo grava um passo (motor); ignorado com o conta-gotas ligado.
     private func select(_ tab: ColorFillTab) {
+        if target == .text { textTab = tab; return }
         guard target == .shape, model.eyedropper == nil, tab != currentTab else { return }
         switch tab {
         case .none: model.setShapeFillMode(0)
         case .color: model.setShapeFillMode(1)
         case .gradient: model.setShapeFillMode(2)
-        case .media, .original: break
+        case .media, .original, .texture: break
         }
     }
 
@@ -246,7 +252,11 @@ struct ColorFillPanel: View {
                 shapeColorPicker
             }
         case .text:
-            textColorPicker
+            if currentTab == .texture {
+                ScrollView { NativeTextTextureSection() }
+            } else {
+                textColorPicker
+            }
         case .original:
             originalBody
         case .other:
@@ -365,7 +375,7 @@ struct ColorFillPanel: View {
     }
 
     private func openOriginal(group: Bool) {
-        if group { model.openGroup(id) } else { model.openPanel(.vector) }
+        if group { model.openGroup(id) } else { model.vectorFace = .fill; model.openPanel(.vector) }
     }
 
     // MARK: Degradê (P1-4)

@@ -226,6 +226,31 @@ AUREA_TEST(Tracking, InvalidTracksAndCancelledSolveDoNotEnterNumericalSolver) {
     AUREA_CHECK(cancelled.poses.empty());
 }
 
+AUREA_TEST(Tracking, LowContrastCornersRemainDetectable) {
+    Gray gray;
+    gray.width = 160; gray.height = 120;
+    gray.px.resize(static_cast<usize>(gray.width) * gray.height);
+    for (u32 y = 0; y < gray.height; ++y)
+        for (u32 x = 0; x < gray.width; ++x)
+            gray.px[static_cast<usize>(y) * gray.width + x] = 0.45f + (((x / 12) + (y / 12)) % 2 ? 0.004f : 0.0f);
+    FeatureTracker tracker;
+    tracker.add_frame(gray);
+    AUREA_CHECK(tracker.tracks().pos.size() >= 20);
+    tracker.add_frame(gray);
+    u32 persistent = 0;
+    for (const auto& track : tracker.tracks().pos)
+        if (Tracks2D::present(track[0]) && Tracks2D::present(track[1])) ++persistent;
+    AUREA_CHECK(persistent >= 20);
+    for (auto& value : gray.px) value = value * .65f + .2f;
+    tracker.add_frame(gray);
+    u32 exposureStable = 0;
+    for (const auto& track : tracker.tracks().pos) {
+        if (!Tracks2D::present(track[0]) || !Tracks2D::present(track[2])) continue;
+        if (std::hypot(track[2].x - track[0].x, track[2].y - track[0].y) < .1f) ++exposureStable;
+    }
+    AUREA_CHECK(exposureStable >= 20);
+}
+
 AUREA_TEST(Tracking, FeatureTrackerFollowsRenderedPoints) {
     // Quadros desenhados (manchas gaussianas de brilho variado sobre textura
     // suave) com a câmera verdadeira: os rastros batem com a projeção.

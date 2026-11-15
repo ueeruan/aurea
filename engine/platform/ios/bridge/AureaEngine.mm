@@ -35,6 +35,7 @@
 #include "aurea/DefaultNames.hpp"
 
 #include "aurea/core/Log.hpp"
+#include "aurea/core/SafeAlloc.hpp"
 #include "aurea/core/GestureMath.hpp"
 // Omega aparência: ímã dos gestos e código de cor (contas puras).
 #include "aurea/core/ColorCode.hpp"
@@ -117,6 +118,7 @@ NSString* const AureaLayerAnimated      = @"animated";
 NSString* const AureaLayerThreeD        = @"threeD";
 NSString* const AureaLayerLabel         = @"label";
 NSString* const AureaLayerTrackId       = @"trackId";
+NSString* const AureaLayerInlineEditable = @"inlineEditable";
 
 NSString* const AureaKeyframeProperty      = @"property";
 NSString* const AureaKeyframeEffectIndex   = @"effectIndex";
@@ -604,6 +606,12 @@ bool aurea_vision_person_segment(void*, uint32_t model, const uint8_t* rgb, uint
     if (auto* e = self.engine) e->cancel_prerender();
 }
 
+- (int32_t)startGroupPreRender:(int64_t)layer direction:(int32_t)direction {
+    auto* e = self.engine;
+    return e ? e->start_prerender(direction < 0 ? -1 : 1, static_cast<aurea::u64>(layer)).raw()
+             : static_cast<int32_t>(aurea::Errc::InvalidState);
+}
+
 - (NSArray<NSNumber*>*)preRenderProgress {
     auto* e = self.engine;
     if (!e) return @[];
@@ -676,6 +684,12 @@ bool aurea_vision_person_segment(void*, uint32_t model, const uint8_t* rgb, uint
 
 - (void)setThermalLevel:(uint32_t)level throttling:(BOOL)throttling {
     if (auto* e = self.engine) e->set_thermal(level, throttling != NO);
+}
+
+// 0.5.3: o degrau do orçamento de memória do export (o app o guarda entre
+// execuções; ver AureaModel.ExportMemoryStep). Só repassa ao motor.
+- (void)setExportMemoryStep:(uint32_t)step {
+    if (auto* e = self.engine) e->set_export_memory_step(step);
 }
 
 - (NSString*)deviceSummary {
@@ -2100,6 +2114,63 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     if (!e || !e->text3d_preset_preview(preset, size, rgba) || rgba.empty()) return nil;
     return [NSData dataWithBytes:rgba.data() length:rgba.size()];
 }
+// --- Painel do modelo 3D (EngineModelPanel.cpp, EngineAeLayers.cpp) ---------------
+- (NSArray<NSString*>*)modelAnimationClips:(long long)layerId {
+    auto* e = self.engine;
+    if (!e) return @[];
+    const auto names = e->model_animation_clips(static_cast<u64>(layerId));
+    NSMutableArray<NSString*>* out = [NSMutableArray arrayWithCapacity:names.size()];
+    for (const auto& n : names) [out addObject:[NSString stringWithUTF8String:n.c_str()] ?: @""];
+    return out;
+}
+- (int32_t)modelAnimationClip:(long long)layerId {
+    auto* e = self.engine; return e ? e->model_animation_clip(static_cast<u64>(layerId)) : -1;
+}
+- (BOOL)setModelAnimationClip:(long long)layerId clip:(int32_t)clip {
+    auto* e = self.engine; return e && e->set_model_animation_clip(static_cast<u64>(layerId), clip);
+}
+- (BOOL)setModelAnimationParam:(long long)layerId param:(uint32_t)param value:(float)value {
+    auto* e = self.engine; return e && e->set_model_animation_param(static_cast<u64>(layerId), param, value);
+}
+- (BOOL)toggleModelAnimationKey:(long long)layerId {
+    auto* e = self.engine; return e && e->toggle_model_animation_key(static_cast<u64>(layerId));
+}
+- (BOOL)toggleModelAnimationParamKey:(long long)layerId param:(uint32_t)param {
+    auto* e = self.engine; return e && e->toggle_model_animation_param_key(static_cast<u64>(layerId), param);
+}
+- (NSArray<NSNumber*>*)modelAnimation:(long long)layerId {
+    auto* e = self.engine;
+    // v76: os 14 valores (Começar em, De trás para frente, Ida e volta, Velocidade com ◆).
+    f32 values[aurea::Engine::kModelAnimationValuesV76]{};
+    if (!e || !e->query_model_animation(static_cast<u64>(layerId), values, aurea::Engine::kModelAnimationValuesV76)) return @[];
+    NSMutableArray<NSNumber*>* out = [NSMutableArray arrayWithCapacity:aurea::Engine::kModelAnimationValuesV76];
+    for (u32 i = 0; i < aurea::Engine::kModelAnimationValuesV76; ++i) [out addObject:@(values[i])];
+    return out;
+}
+- (BOOL)placeModelLayer:(long long)layerId mode:(uint32_t)mode {
+    auto* e = self.engine; return e && e->place_model_layer(static_cast<u64>(layerId), mode);
+}
+- (NSArray<NSNumber*>*)materialEmission:(long long)layerId material:(uint32_t)material {
+    auto* e = self.engine;
+    f32 values[4]{};
+    if (!e || !e->query_material_emission(static_cast<u64>(layerId), material, values, 4)) return @[];
+    return @[@(values[0]), @(values[1]), @(values[2]), @(values[3])];
+}
+- (BOOL)applyModelMaterialPreset:(long long)layerId preset:(uint32_t)preset {
+    auto* e = self.engine; return e && e->apply_model_material_preset(static_cast<u64>(layerId), preset);
+}
+- (int32_t)modelMaterialPreset:(long long)layerId {
+    auto* e = self.engine; return e ? e->model_material_preset(static_cast<u64>(layerId)) : -1;
+}
+- (NSData*)modelMaterialPresetPreview:(long long)layerId preset:(uint32_t)preset size:(uint32_t)size {
+    auto* e = self.engine;
+    std::vector<u8> rgba;
+    if (!e || !e->model_material_preset_preview(static_cast<u64>(layerId), preset, size, rgba) || rgba.empty()) return nil;
+    return [NSData dataWithBytes:rgba.data() length:rgba.size()];
+}
+- (BOOL)toggleMaterialKeys:(long long)layerId material:(uint32_t)material paramMask:(uint32_t)paramMask {
+    auto* e = self.engine; return e && e->toggle_material_keys(static_cast<u64>(layerId), material, paramMask);
+}
 - (BOOL)setMaterialTextureImage:(long long)layerId material:(uint32_t)material path:(NSString*)path {
     auto* e = self.engine;
     return e && path && e->set_material_texture_image(static_cast<aurea::u64>(layerId), material, path.UTF8String).ok();
@@ -3136,6 +3207,78 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     return out;
 }
 
+// 0.5.3: o grupo aberto NA timeline (EngineGroupInline.cpp) — sem entrar nele.
+- (NSArray<NSDictionary<NSString*, id>*>*)groupLayers:(long long)groupId {
+    auto* e = self.engine;
+    if (!e || groupId == 0) return @[];
+    u32 capacity = 64;
+    const u32 blobCapacity = 32 * 1024;
+    std::vector<aurea::bridge::LayerRow> rows(capacity);
+    std::vector<char> blob(blobCapacity);
+    u32 written = e->query_group_layers(static_cast<aurea::u64>(groupId), rows.data(), capacity, blob.data(), blobCapacity);
+    while (written == capacity && capacity < 65536) {
+        capacity *= 4;
+        rows.assign(capacity, {});
+        written = e->query_group_layers(static_cast<aurea::u64>(groupId), rows.data(), capacity, blob.data(), blobCapacity);
+    }
+    NSMutableArray<NSDictionary<NSString*, id>*>* out = [NSMutableArray arrayWithCapacity:written];
+    for (u32 i = 0; i < written; ++i) {
+        NSMutableDictionary<NSString*, id>* row = [layer_row_dict(rows[i], slice(blob, rows[i].nameOffset, rows[i].nameLength)) mutableCopy];
+        row[AureaLayerInlineEditable] = @((rows[i].reserved0 & aurea::Engine::kGroupRowEditable) != 0);
+        [out addObject:row];
+    }
+    return out;
+}
+
+- (BOOL)setGroupLayerRanges:(long long)groupId layers:(NSArray<NSNumber*>*)layerIds
+                     starts:(NSArray<NSNumber*>*)starts ends:(NSArray<NSNumber*>*)ends {
+    auto* e = self.engine;
+    const NSUInteger n = layerIds.count;
+    if (!e || n == 0 || n > 4096 || starts.count != n || ends.count != n) return NO;
+    std::vector<aurea::u64> ids(n);
+    std::vector<aurea::i64> s0(n), s1(n);
+    for (NSUInteger i = 0; i < n; ++i) {
+        ids[i] = static_cast<aurea::u64>(layerIds[i].longLongValue);
+        s0[i] = starts[i].longLongValue;
+        s1[i] = ends[i].longLongValue;
+    }
+    return e->set_group_layer_ranges(static_cast<aurea::u64>(groupId), ids.data(), s0.data(), s1.data(), static_cast<u32>(n)).ok();
+}
+
+- (BOOL)editGroupClipTime:(long long)groupId layer:(long long)layerId operation:(uint32_t)operation frame:(int64_t)frame {
+    auto* e = self.engine;
+    return e && e->edit_group_clip_time(static_cast<aurea::u64>(groupId), static_cast<aurea::u64>(layerId), operation, frame);
+}
+
+- (NSData*)thumbnailForGroup:(long long)groupId layer:(long long)layerId frame:(int32_t)frame
+                      height:(uint32_t)height outWidth:(uint32_t*)outWidth {
+    auto* e = self.engine;
+    if (!e || groupId == 0 || height == 0 || height > 512) return nil;
+    // Como a de fora: a tira segue a largura da mídia, até 64 MB e sem lançar.
+    const usize capacity = static_cast<usize>(height) * 4096u * 4u;
+    std::vector<u8> pixels;
+    if (!aurea::try_resize_bytes(pixels, capacity)) return nil;
+    u32 width = 0;
+    const u32 bytes = e->query_group_thumbnail(static_cast<aurea::u64>(groupId), static_cast<aurea::u64>(layerId), frame, height,
+                                               pixels.data(), static_cast<u32>(capacity), &width);
+    if (bytes == 0) return nil;
+    if (outWidth) *outWidth = width;
+    return [NSData dataWithBytes:pixels.data() length:bytes];
+}
+
+- (NSData*)waveformForGroup:(long long)groupId layer:(long long)layerId startFrame:(double)startFrame
+            framesPerBucket:(double)framesPerBucket count:(uint32_t)count {
+    auto* e = self.engine;
+    if (!e || groupId == 0 || count == 0 || count > 1u << 20) return nil;
+    NSMutableData* data = [NSMutableData dataWithLength:count];
+    if (!data) return nil;
+    const u32 n = e->query_group_waveform(static_cast<aurea::u64>(groupId), static_cast<aurea::u64>(layerId), startFrame,
+                                          framesPerBucket, count, static_cast<u8*>(data.mutableBytes));
+    if (n == 0) return nil;
+    data.length = n;
+    return data;
+}
+
 - (NSArray<NSDictionary<NSString*, id>*>*)keyframesForLayer:(long long)layerId {
     auto* e = self.engine;
     if (!e) return @[];
@@ -3218,6 +3361,8 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
         AureaDetailCorners:        floats_to_array(d.corners, 8),
         AureaDetailParentAffine:   floats_to_array(d.parentAffine, 6),
         AureaDetailGeomFlags:      @(d.geomFlags),
+        // Transições da camada (+252): tipo de entrada bits 0..3, de saída 4..7,
+        // quadros de entrada 8..19, de saída 20..31.
     };
 }
 
@@ -4256,6 +4401,8 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
 - (NSString*)saveCaptionBundle:(long long)layer name:(NSString*)name { auto* e = self.engine; return e ? to_ns(e->save_caption_bundle(layer,to_std(name))) : @""; }
 - (BOOL)applyCaptionBundle:(long long)layer data:(NSString*)data { auto* e = self.engine; return e && e->apply_caption_bundle(layer,to_std(data)); }
 - (BOOL)editCaptionTrack:(long long)layer command:(NSString*)command { auto* e = self.engine; return e && e->edit_caption_track(layer, to_std(command)); }
+- (long long)captionWordFrame:(long long)layer seconds:(double)seconds { auto* e = self.engine; return e ? e->caption_word_frame(layer, seconds) : -1; }
+- (NSString*)captionExport:(long long)layer vtt:(BOOL)vtt { auto* e = self.engine; return e ? to_ns(e->caption_export(static_cast<aurea::u64>(layer), vtt)) : @""; }
 // 0.4.6: opções da legenda em JSON (presets::caption_options_json), com a aparência própria.
 - (NSString*)createCaptions:(long long)layerId words:(NSArray<NSDictionary<NSString*, id>*>*)words optionsJSON:(NSString*)json {
     auto* e = self.engine; if (!e) return @"Motor indisponível";
@@ -4326,7 +4473,8 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
 - (NSDictionary<NSString*, id>*)expression:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param {
     auto* e = self.engine; aurea::Engine::ExpressionInfo info;
     if (!e || !e->query_expression(layerId, property, effect, param, info)) return @{};
-    return @{@"exists": @(info.exists), @"enabled": @(info.enabled), @"source": to_ns(info.source), @"error": to_ns(info.error.message), @"line": @(info.error.line), @"column": @(info.error.column), @"value": @(info.value)};
+    return @{@"exists": @(info.exists), @"enabled": @(info.enabled), @"source": to_ns(info.source), @"error": to_ns(info.error.message), @"line": @(info.error.line), @"column": @(info.error.column), @"value": @(info.value),
+             @"text": to_ns(info.text)};   // v70: texto-fonte
 }
 - (NSString*)setExpression:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param source:(NSString*)source {
     auto* e = self.engine; if (!e) return @"Motor indisponível";
@@ -5340,14 +5488,15 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
 }
 - (NSArray<NSNumber*>*)textStyle:(long long)layerId {
     auto* e = self.engine;
-    float values[20]{};
-    if (!e || !e->query_text_style(layerId, values, 20)) return @[];
-    return floats_to_array(values, 20);
+    // 21: ordem preenchimento/contorno (v70); 22: mistura entre caracteres.
+    float values[22]{};
+    if (!e || !e->query_text_style(layerId, values, 22)) return @[];
+    return floats_to_array(values, 22);
 }
 - (BOOL)setTextStyle:(long long)layerId values:(NSArray<NSNumber*>*)values {
     auto* e = self.engine;
-    if (!e || (values.count != 18 && values.count != 20)) return NO;
-    float raw[20]{};
+    if (!e || (values.count != 18 && values.count != 20 && values.count != 21 && values.count != 22)) return NO;
+    float raw[22]{};
     for (NSUInteger i = 0; i < values.count; ++i) raw[i] = values[i].floatValue;
     return e->set_text_style(layerId, raw, static_cast<u32>(values.count));
 }
@@ -5728,7 +5877,9 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
     const auto widthHint = std::max<usize>(1, static_cast<usize>(std::ceil(static_cast<double>(height) * detail.sourceWidth / detail.sourceHeight)));
     const usize capacity = widthHint * height * 4;
     if (capacity > 64 * 1024 * 1024) return nil;
-    std::vector<u8> pixels(capacity);
+    // 0.5.3: sem lançar (este arquivo é -fno-exceptions): sem memória, sem miniatura.
+    std::vector<u8> pixels;
+    if (!aurea::try_resize_bytes(pixels, capacity)) return nil;
     u32 width = 0;
     const u32 bytes = e->query_thumbnail(static_cast<aurea::u64>(layerId), frame, height,
                                          pixels.data(), static_cast<u32>(capacity), &width);
@@ -5843,6 +5994,17 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
     (void)aurea::last_export_encoder_path(text, sizeof(text));
     NSString* path = [NSString stringWithUTF8String:text];
     return path ? path : @"";
+}
+
++ (void)configureExportRungMemory:(NSString*)path identity:(NSString*)identity {
+    aurea::configure_export_rung_memory(path ? path.UTF8String : "", identity ? identity.UTF8String : "");
+}
+
++ (NSString*)exportRungMemory {
+    char text[2048] = {};
+    (void)aurea::export_rung_memory_text(text, sizeof(text));
+    NSString* memory = [NSString stringWithUTF8String:text];
+    return memory ? memory : @"";
 }
 
 + (uint32_t)exportNextAttempt:(uint32_t)attempt code:(int32_t)code failure:(uint32_t)failure stalled:(BOOL)stalled

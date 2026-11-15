@@ -15,6 +15,11 @@
 //  h1.w = 1: queda LINEAR do feather (rampa reta de largura 4σ, com o texel);
 //  0 = a gaussiana de sempre. Modos 5 Clarear = max(acc, cov) e 6 Escurecer =
 //  min(acc, cov) (AE compositing, 2026-11-10).
+//  Lote M: h1.w += 2 = bloco ESTENDIDO. Depois das arestas vem 1 vec4 (σ do
+//  feather Y, tem raio variável, maior |raio|, 0) e, com raio variável, 1 vec4
+//  por aresta (raio no começo, raio no fim). O raio (px, + para fora) desloca
+//  o meio da rampa e soma na largura; o feather X/Y vale pela normal da borda.
+//  Máscara sem nada disso roda as mesmas contas de antes.
 // =============================================================================
 #include "../common/bindings.glsl"
 
@@ -53,18 +58,34 @@ void main() {
         float expand = h1.x;
         int e0 = first + int(h1.y + 0.5);
         int ne = int(h1.z + 0.5);
-        float margin = abs(expand) + 4.0 * sigma + 2.0 / k;
+        int flags = int(h1.w + 0.5);
+        bool linear = (flags == 1 || flags == 3);
+        bool extended = flags >= 2;
+        float sigmaY = sigma;
+        float maxRadius = 0.0;
+        bool variable = false;
+        if (extended) {
+            vec4 x0 = md.d[e0 + ne];
+            sigmaY = x0.x;
+            variable = x0.y > 0.5;
+            maxRadius = x0.z;
+        }
+        float margin = abs(expand) + 4.0 * max(sigma, sigmaY) + maxRadius + 2.0 / k;
         float cov = 0.0;
         if (!(pos.x < h2.x - margin || pos.y < h2.y - margin || pos.x > h2.z + margin || pos.y > h2.w + margin)) {
             float d2 = 1e30;
             int wind = 0;
+            float bestT = 0.0;
+            vec2 bestQ = vec2(0.0);
+            int bestI = 0;
             for (int i = 0; i < ne; ++i) {
                 vec4 e = md.d[e0 + i];
                 vec2 ab = e.zw - e.xy;
                 vec2 ap = pos - e.xy;
                 float t = clamp(dot(ap, ab) / max(dot(ab, ab), 1e-12), 0.0, 1.0);
                 vec2 q = ap - ab * t;
-                d2 = min(d2, dot(q, q));
+                float dq = dot(q, q);
+                if (dq < d2) { d2 = dq; bestT = t; bestQ = q; bestI = i; }
                 float cr = ab.x * ap.y - ab.y * ap.x;
                 if (e.y <= pos.y) {
                     if (e.w > pos.y && cr > 0.0) wind += 1;
@@ -74,7 +95,26 @@ void main() {
             }
             float dist = sqrt(d2);
             float sd = (wind != 0 ? dist : -dist) + expand;
-            if (sigma > 0.0 && h1.w > 0.5) {
+            if (extended) {
+                float radius = 0.0;
+                if (variable) {
+                    vec4 rr = md.d[e0 + ne + 1 + bestI];
+                    radius = rr.x + (rr.y - rr.x) * bestT;
+                }
+                vec2 nrm = dist > 1e-6 ? bestQ / dist : vec2(1.0, 0.0);
+                float su2 = sigma * sigma * nrm.x * nrm.x + sigmaY * sigmaY * nrm.y * nrm.y;
+                float sr = 0.25 * abs(radius);
+                float sdv = sd + 0.5 * radius;
+                if (su2 <= 0.0 && sr <= 0.0) {
+                    cov = clamp(sd * k + 0.5, 0.0, 1.0);
+                } else if (linear) {
+                    float w = sqrt(16.0 * (su2 + sr * sr) + 1.0 / (k * k));
+                    cov = clamp(sdv / w + 0.5, 0.0, 1.0);
+                } else {
+                    float s = sqrt(su2 + sr * sr + 1.0 / (12.0 * k * k));
+                    cov = 0.5 * (1.0 + erf_approx(sdv / (s * 1.41421356)));
+                }
+            } else if (sigma > 0.0 && linear) {
                 float w = sqrt(16.0 * sigma * sigma + 1.0 / (k * k));
                 cov = clamp(sd / w + 0.5, 0.0, 1.0);
             } else if (sigma > 0.0) {

@@ -64,6 +64,11 @@ RigFrame static_rig(const EffectEval& e) noexcept {
         f.shoulderA = e.p2(b + 5);
         f.shoulderB = e.p2(b + 6);
         f.confidence = 1.0f;
+        for (u32 joint = 0; joint < kBodyJoints; ++joint) {
+            const u32 index = kBodyRigFirst + (i * kBodyJoints + joint) * 2;
+            const Vec2 position = e.p2(index), quality = e.p2(index + 1);
+            f.joints[joint] = Vec4{position.x, position.y, quality.x, quality.y};
+        }
     }
     return r;
 }
@@ -137,6 +142,14 @@ public:
         p.add_float("physics", "Física", 100, 0, 200, kParamAnimatable | kParamPercent, "%");                 // 72
         for (u32 c = 12; c < kPoseChannels; ++c)
             p.add_float(kChannels[c], "Pose", 0, -100, 100, kParamAnimatable | kParamHidden);                  // 73..83
+        static char bodyIds[kMaxFaces][kBodyJoints][2][32];
+        for (u32 person = 0; person < kMaxFaces; ++person)
+            for (u32 joint = 0; joint < kBodyJoints; ++joint)
+                for (u32 field = 0; field < 2; ++field) {
+                    std::snprintf(bodyIds[person][joint][field], sizeof(bodyIds[person][joint][field]),
+                                  "body%u_joint%u_%u", person, joint, field);
+                    p.add_point2(bodyIds[person][joint][field], "Rig", Vec2{}, -1000.f, 1000.f, kParamHidden);
+                }
         // Habilitação cruzada (o motor só lê o que vale na fonte escolhida).
         p.set_enabled_by(kBpm, kBeatSource, 1u << static_cast<u32>(BeatSource::Manual));
         p.set_enabled_by(kAudioLayer, kBeatSource, 1u << static_cast<u32>(BeatSource::Automatic));

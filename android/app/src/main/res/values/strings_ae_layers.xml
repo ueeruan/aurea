@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE layers (2026-11-12): qualidade da camada, clipe do modelo 3D, transições por camada, guias da prévia e velocidade negativa. -->
+<resources>
+    <string name="ae_layer_quality">Qualidade</string>
+    <string name="ae_quality_best">Melhor</string>
+    <string name="ae_quality_draft">Rascunho</string>
+    <string name="ae_quality_wireframe">Arame</string>
+    <string name="ae_quality_hint">Rascunho e Arame valem só na prévia; o vídeo exportado sai em Melhor</string>
+    <string name="ae_layer_sampling">Amostragem</string>
+    <string name="ae_sampling_bilinear">Bilinear</string>
+    <string name="ae_sampling_bicubic">Bicúbica</string>
+    <string name="ae_sampling_hint">Bicúbica deixa a imagem ampliada mais nítida (vale em Melhor)</string>
+    <string name="ae_model_clip">Animação do modelo</string>
+    <string name="ae_model_clip_none">Parado</string>
+    <string name="ae_model_clip_n">Clipe %1$d</string>
+    <string name="ae_model_clip_empty">Este modelo não tem animação</string>
+    <string name="ae_transitions">Transições</string>
+    <string name="ae_transition_in">Entrada</string>
+    <string name="ae_transition_out">Saída</string>
+    <string name="ae_transition_none">Nenhuma</string>
+    <string name="ae_transition_dissolve">Dissolver</string>
+    <string name="ae_transition_slide_up">Deslizar para cima</string>
+    <string name="ae_transition_slide_left">Deslizar da esquerda</string>
+    <string name="ae_transition_zoom">Zoom</string>
+    <string name="ae_transition_spin">Girar</string>
+    <string name="ae_transition_duration">Duração</string>
+    <string name="ae_transition_hint">Entram e saem nas bordas do trecho; não viram keyframes</string>
+    <string name="ae_guides_safe">Margens seguras</string>
+    <string name="ae_guides_rulers">Réguas</string>
+    <string name="ae_speed_reverse_point">Inverter sentido</string>
+    <string name="ae_speed_reverse_hint">Velocidade negativa toca a fonte para trás dentro da rampa (até o quadro 0)</string>
+</resources>

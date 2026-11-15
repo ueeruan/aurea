@@ -13,7 +13,9 @@
 #include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/expr/Expression.hpp"
 #include "aurea/project/AeImport.hpp"
+#include "aurea/text/Text.hpp"
 #include "aurea/text/TextAnimator.hpp"
+#include "aurea/vector/Vector.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -1596,4 +1598,337 @@ cc.property("To").setValue(12);
     AUREA_CHECK_NEAR(l->effects[1].params[dims].constant.v[0], 2.0, 1e-6);   // AE 3 (Vertical) → 2
     AUREA_CHECK_NEAR(l->effects[2].params[from].constant.v[0], 1.0, 1e-6);   // AE 13 (Lightness) → 1
     AUREA_CHECK_NEAR(l->effects[2].params[to].constant.v[0], 2.0, 1e-6);     // AE 12 (Blue only) → 2
+}
+
+// =============================================================================
+// .ffx sintético: conteúdo de camada de forma (ADBE Root Vectors Group) com os
+// operadores de caminho, traços 1..3, Aparar, Mesclar, Repetidor X/Y e um
+// grupo aninhado (achatado, com a tinta herdada do grupo de fora)
+// =============================================================================
+
+namespace {
+std::string vgroup_ffx(const std::string& name, const std::string& body) {
+    return list("tdgp", tdsb(1) + tdsn(name) + body + tdmn("ADBE Group End"));
+}
+std::string vp(const char* match, u32 dims, const std::vector<f64>& v, u32 ts, bool spatial = false) {
+    return tdmn(match) + prop("", dims, v, ts, 1, spatial);
+}
+} // namespace
+
+AUREA_TEST(AeImport, SyntheticFfxShapeContentsWithPathOperators) {
+    const u32 ts = 24000;
+    const std::string rect = vgroup_ffx("Retangulo 1",
+        vp("ADBE Vector Shape Direction", 1, {1.0}, ts) + vp("ADBE Vector Rect Size", 2, {200.0, 100.0}, ts) +
+        vp("ADBE Vector Rect Position", 2, {0.0, 0.0}, ts, true) + vp("ADBE Vector Rect Roundness", 1, {0.0}, ts));
+    const std::string fill = vgroup_ffx("Preenchimento 1",
+        vp("ADBE Vector Blend Mode", 1, {1.0}, ts) + vp("ADBE Vector Fill Rule", 1, {2.0}, ts) +
+        vp("ADBE Vector Fill Color", 4, {255.0, 255.0, 0.0, 0.0}, ts) +   // ARGB: vermelho
+        vp("ADBE Vector Fill Opacity", 1, {100.0}, ts));
+    const std::string dashes = vgroup_ffx("Tracos",
+        vp("ADBE Vector Stroke Dash 1", 1, {10.0}, ts) +
+        tdmn("ADBE Vector Stroke Gap 1") + prop_keys("", 1, {FKey{0, {5.0}}, FKey{24000, {15.0}}}, ts) +
+        vp("ADBE Vector Stroke Dash 2", 1, {20.0}, ts) + vp("ADBE Vector Stroke Offset", 1, {3.0}, ts));
+    const std::string stroke = vgroup_ffx("Tracado 1",
+        vp("ADBE Vector Blend Mode", 1, {1.0}, ts) + vp("ADBE Vector Stroke Color", 4, {255.0, 0.0, 0.0, 255.0}, ts) +
+        vp("ADBE Vector Stroke Opacity", 1, {100.0}, ts) + vp("ADBE Vector Stroke Width", 1, {4.0}, ts) +
+        vp("ADBE Vector Stroke Line Cap", 1, {2.0}, ts) + vp("ADBE Vector Stroke Line Join", 1, {3.0}, ts) +
+        vp("ADBE Vector Stroke Miter Limit", 1, {4.0}, ts) + tdmn("ADBE Vector Stroke Dashes") + dashes);
+    const std::string rc = vgroup_ffx("Arredondar cantos 1", vp("ADBE Vector RoundCorner Radius", 1, {12.0}, ts));
+    const std::string offset = vgroup_ffx("Deslocar caminhos 1",
+        tdmn("ADBE Vector Offset Amount") + prop_keys("", 1, {FKey{0, {0.0}}, FKey{24000, {8.0}}}, ts) +
+        vp("ADBE Vector Offset Line Join", 1, {2.0}, ts) + vp("ADBE Vector Offset Miter Limit", 1, {4.0}, ts) +
+        vp("ADBE Vector Offset Copies", 1, {1.0}, ts) + vp("ADBE Vector Offset Copy Offset", 1, {0.0}, ts));
+    const std::string zig = vgroup_ffx("Zigue-zague 1",
+        vp("ADBE Vector Zigzag Size", 1, {5.0}, ts) + vp("ADBE Vector Zigzag Detail", 1, {3.0}, ts) +
+        vp("ADBE Vector Zigzag Points", 1, {2.0}, ts));
+    const std::string wiggle = vgroup_ffx("Ondular caminhos 1",
+        vp("ADBE Vector Roughen Size", 1, {6.0}, ts) + vp("ADBE Vector Roughen Detail", 1, {2.0}, ts) +
+        vp("ADBE Vector Roughen Points", 1, {1.0}, ts) + vp("ADBE Vector Temporal Freq", 1, {3.0}, ts) +
+        vp("ADBE Vector Correlation", 1, {40.0}, ts) + vp("ADBE Vector Temporal Phase", 1, {0.0}, ts) +
+        vp("ADBE Vector Spatial Phase", 1, {0.0}, ts) + vp("ADBE Vector Random Seed", 1, {9.0}, ts));
+    const std::string twist = vgroup_ffx("Torcer 1",
+        vp("ADBE Vector Twist Angle", 1, {30.0}, ts) + vp("ADBE Vector Twist Center", 2, {5.0, -5.0}, ts, true));
+    const std::string wigXf = vgroup_ffx("Transform",
+        vp("ADBE Vector Wiggler Anchor", 2, {0.0, 0.0}, ts, true) + vp("ADBE Vector Wiggler Position", 2, {15.0, 25.0}, ts, true) +
+        vp("ADBE Vector Wiggler Scale", 2, {10.0, 20.0}, ts) + vp("ADBE Vector Wiggler Rotation", 1, {5.0}, ts));
+    const std::string wiggler = vgroup_ffx("Ondular transform 1",
+        vp("ADBE Vector Xform Temporal Freq", 1, {2.0}, ts) + vp("ADBE Vector Correlation", 1, {50.0}, ts) +
+        vp("ADBE Vector Temporal Phase", 1, {0.0}, ts) + vp("ADBE Vector Spatial Phase", 1, {0.0}, ts) +
+        vp("ADBE Vector Random Seed", 1, {4.0}, ts) + tdmn("ADBE Vector Wiggler Transform") + wigXf);
+    const std::string pb = vgroup_ffx("Franzir e inflar 1", vp("ADBE Vector PuckerBloat Amount", 1, {-20.0}, ts));
+    const std::string repXf = vgroup_ffx("Transform",
+        vp("ADBE Vector Repeater Anchor", 2, {0.0, 0.0}, ts, true) + vp("ADBE Vector Repeater Position", 2, {50.0, 0.0}, ts, true) +
+        vp("ADBE Vector Repeater Scale", 2, {90.0, 110.0}, ts) + vp("ADBE Vector Repeater Rotation", 1, {10.0}, ts) +
+        vp("ADBE Vector Repeater Opacity 1", 1, {100.0}, ts) + vp("ADBE Vector Repeater Opacity 2", 1, {40.0}, ts));
+    const std::string repeater = vgroup_ffx("Repetidor 1",
+        vp("ADBE Vector Repeater Copies", 1, {3.0}, ts) + vp("ADBE Vector Repeater Offset", 1, {0.0}, ts) +
+        vp("ADBE Vector Repeater Order", 1, {2.0}, ts) + tdmn("ADBE Vector Repeater Transform") + repXf);
+    const std::string trim = vgroup_ffx("Aparar caminhos 1",
+        vp("ADBE Vector Trim Start", 1, {0.0}, ts) +
+        tdmn("ADBE Vector Trim End") + prop_keys("", 1, {FKey{0, {0.0}}, FKey{48000, {100.0}}}, ts) +
+        vp("ADBE Vector Trim Offset", 1, {90.0}, ts) + vp("ADBE Vector Trim Type", 1, {2.0}, ts));
+    const std::string merge = vgroup_ffx("Mesclar caminhos 1", vp("ADBE Vector Merge Type", 1, {3.0}, ts));
+    const std::string contentsA = vgroup_ffx("",
+        tdmn("ADBE Vector Shape - Rect") + rect + tdmn("ADBE Vector Graphic - Fill") + fill +
+        tdmn("ADBE Vector Graphic - Stroke") + stroke + tdmn("ADBE Vector Filter - RC") + rc +
+        tdmn("ADBE Vector Filter - Offset") + offset + tdmn("ADBE Vector Filter - Zigzag") + zig +
+        tdmn("ADBE Vector Filter - Roughen") + wiggle + tdmn("ADBE Vector Filter - Twist") + twist +
+        tdmn("ADBE Vector Filter - Wiggler") + wiggler + tdmn("ADBE Vector Filter - PB") + pb +
+        tdmn("ADBE Vector Filter - Repeater") + repeater + tdmn("ADBE Vector Filter - Trim") + trim +
+        tdmn("ADBE Vector Filter - Merge") + merge);
+    const std::string xfA = vgroup_ffx("Transformar",
+        vp("ADBE Vector Anchor", 2, {0.0, 0.0}, ts, true) + vp("ADBE Vector Position", 2, {10.0, 20.0}, ts, true) +
+        vp("ADBE Vector Scale", 2, {100.0, 100.0}, ts) + vp("ADBE Vector Skew", 1, {0.0}, ts) +
+        vp("ADBE Vector Rotation", 1, {15.0}, ts) + vp("ADBE Vector Group Opacity", 1, {50.0}, ts));
+    const std::string groupA = vgroup_ffx("Estrela",
+        tdmn("ADBE Vectors Group") + contentsA + tdmn("ADBE Vector Transform Group") + xfA);
+    // Grupo aninhado: "Fora" (posição 100,0, escala 200 %) com o subgrupo
+    // "Dentro" (uma elipse) e um preenchimento ABAIXO dele (herdado).
+    const std::string ellipse = vgroup_ffx("Elipse 1",
+        vp("ADBE Vector Ellipse Size", 2, {40.0, 40.0}, ts) + vp("ADBE Vector Ellipse Position", 2, {0.0, 0.0}, ts, true));
+    const std::string xfIn = vgroup_ffx("Transformar", vp("ADBE Vector Position", 2, {5.0, 5.0}, ts, true));
+    const std::string inner = vgroup_ffx("Dentro",
+        tdmn("ADBE Vectors Group") + vgroup_ffx("", tdmn("ADBE Vector Shape - Ellipse") + ellipse) +
+        tdmn("ADBE Vector Transform Group") + xfIn);
+    const std::string outerFill = vgroup_ffx("Preenchimento 1", vp("ADBE Vector Fill Color", 4, {255.0, 0.0, 0.0, 255.0}, ts));   // azul
+    const std::string xfOut = vgroup_ffx("Transformar",
+        vp("ADBE Vector Position", 2, {100.0, 0.0}, ts, true) + vp("ADBE Vector Scale", 2, {200.0, 200.0}, ts));
+    const std::string groupB = vgroup_ffx("Fora",
+        tdmn("ADBE Vectors Group") + vgroup_ffx("", tdmn("ADBE Vector Group") + inner + tdmn("ADBE Vector Graphic - Fill") + outerFill) +
+        tdmn("ADBE Vector Transform Group") + xfOut);
+    const std::string root = vgroup_ffx("Conteudo", tdmn("ADBE Vector Group") + groupA + tdmn("ADBE Vector Group") + groupB);
+    const std::string file = ffx(ts, {{{{"ADBE Root Vectors Group", -1}}, "Conteudo"}}, {root});
+
+    AeRig rig;
+    rig.seek(0);
+    const usize before = rig.comp()->order().size();
+    // Sem camada escolhida: o Aurea cria uma camada VETORIAL para o conteúdo.
+    const ae::ImportReport r = rig.e.import_ae_data(file, "formas.ffx", 0);
+    if (!r.ok || !r.skipped.empty()) dump(r);
+    AUREA_CHECK(r.ok);
+    AUREA_CHECK(r.skipped.empty());
+    AUREA_CHECK_EQ(rig.comp()->order().size(), before + 1);
+    const Layer* l = nullptr;
+    rig.comp()->layers().for_each([&](LayerId, const Layer& x) {
+        if (x.kind == LayerKind::Shape && x.shape.shapeType == kShapeVector) l = &x;
+    });
+    AUREA_CHECK(l != nullptr);
+    if (!l) return;
+    const VectorData& d = l->shape.vector;
+    AUREA_CHECK_EQ(d.groups.size(), static_cast<usize>(2));
+    if (d.groups.size() != 2) return;
+    const Vec2 o{l->transform.anchor.x, l->transform.anchor.y};
+
+    // O primeiro item do AE fica por cima: "Estrela" é o último grupo.
+    const VectorGroup& a = d.groups[1];
+    AUREA_CHECK_EQ(a.name, std::string("Estrela"));
+    AUREA_CHECK(a.paths.size() == 1 && a.paths[0].kind == VectorPathKind::Rect);
+    if (a.paths.empty()) return;
+    AUREA_CHECK_NEAR(a.paths[0].size.x, 200.0f, 1e-4f);
+    AUREA_CHECK_NEAR(a.paths[0].size.y, 100.0f, 1e-4f);
+    AUREA_CHECK(a.fill.enabled && a.fill.rule == 1);
+    AUREA_CHECK_NEAR(a.fill.paint.color.x, 1.0f, 1e-5f);
+    AUREA_CHECK_NEAR(a.fill.paint.color.y, 0.0f, 1e-5f);
+    AUREA_CHECK(a.stroke.enabled);
+    AUREA_CHECK_NEAR(a.stroke.width, 4.0f, 1e-5f);
+    AUREA_CHECK_EQ(a.stroke.cap, u8{1});
+    AUREA_CHECK_EQ(a.stroke.join, u8{2});
+    AUREA_CHECK(a.stroke.dashes == (std::vector<f32>{10.0f, 5.0f, 20.0f, 20.0f}));   // vão 2 ausente = traço 2
+    AUREA_CHECK_NEAR(a.stroke.dashOffset, 3.0f, 1e-5f);
+    const Track* gap1 = l->tracks.find(TrackProperty::VectorParam, 1, kVecGap1);
+    AUREA_CHECK(gap1 && gap1->keys.size() == 2);
+    if (gap1 && gap1->keys.size() == 2) AUREA_CHECK_NEAR(gap1->keys[1].value, 15.0f, 1e-5f);
+    AUREA_CHECK_NEAR(a.position.x, o.x + 10.0f, 1e-4f);
+    AUREA_CHECK_NEAR(a.position.y, o.y + 20.0f, 1e-4f);
+    AUREA_CHECK_NEAR(a.rotation, 15.0f, 1e-5f);
+    AUREA_CHECK_NEAR(a.opacity, 50.0f, 1e-5f);
+    AUREA_CHECK_EQ(a.merge, u8{2});                      // AE 3 (subtrair) → 2
+    AUREA_CHECK(a.trim.enabled && a.trim.mode == 1);
+    AUREA_CHECK_NEAR(a.trim.offset, 25.0f, 1e-4f);       // 90° = um quarto do comprimento
+    const Track* trimEnd = l->tracks.find(TrackProperty::VectorParam, 1, kVecTrimEnd);
+    AUREA_CHECK(trimEnd && trimEnd->keys.size() == 2 && trimEnd->keys[1].time.value == 60);
+    AUREA_CHECK(a.repeater.enabled && a.repeater.above == 1 && a.repeater.scaleLinked == 0);
+    AUREA_CHECK_NEAR(a.repeater.copies, 3.0f, 1e-5f);
+    AUREA_CHECK_NEAR(a.repeater.scale, 90.0f, 1e-4f);
+    AUREA_CHECK_NEAR(a.repeater.scaleY, 110.0f, 1e-4f);
+    AUREA_CHECK_NEAR(a.repeater.position.x, 50.0f, 1e-4f);
+    AUREA_CHECK_NEAR(a.repeater.rotation, 10.0f, 1e-5f);
+    AUREA_CHECK_NEAR(a.repeater.endOpacity, 40.0f, 1e-5f);
+
+    // Operadores, na ordem do AE.
+    const VectorModifierType want[] = {VectorModifierType::RoundCorners, VectorModifierType::OffsetPaths, VectorModifierType::ZigZag,
+                                       VectorModifierType::WigglePaths, VectorModifierType::Twist, VectorModifierType::WiggleTransform,
+                                       VectorModifierType::PuckerBloat};
+    AUREA_CHECK_EQ(a.modifiers.size(), std::size(want));
+    if (a.modifiers.size() != std::size(want)) return;
+    for (usize i = 0; i < std::size(want); ++i) AUREA_CHECK(a.modifiers[i].type == want[i] && a.modifiers[i].enabled);
+    AUREA_CHECK_NEAR(a.modifiers[0].params[kVecModRoundRadius], 12.0f, 1e-5f);
+    AUREA_CHECK_NEAR(a.modifiers[1].params[kVecModOffsetJoin], 1.0f, 1e-5f);    // AE 2 (redonda) → 1
+    const Track* amount = l->tracks.find(TrackProperty::VectorParam, 1, vector_modifier_param(1, kVecModOffsetAmount));
+    AUREA_CHECK(amount && amount->keys.size() == 2);
+    if (amount && amount->keys.size() == 2) {
+        AUREA_CHECK_EQ(amount->keys[1].time.value, 30);
+        AUREA_CHECK_NEAR(amount->keys[1].value, 8.0f, 1e-5f);
+    }
+    AUREA_CHECK_NEAR(a.modifiers[2].params[kVecModZigSize], 5.0f, 1e-5f);
+    AUREA_CHECK_NEAR(a.modifiers[2].params[kVecModZigRidges], 3.0f, 1e-5f);
+    AUREA_CHECK_NEAR(a.modifiers[2].params[kVecModZigPoints], 1.0f, 1e-5f);     // AE 2 (suave) → 1
+    AUREA_CHECK_NEAR(a.modifiers[3].params[kVecModRoughSize], 6.0f, 1e-5f);
+    AUREA_CHECK_NEAR(a.modifiers[3].params[kVecModRoughPoints], 0.0f, 1e-5f);   // AE 1 (canto) → 0
+    AUREA_CHECK_NEAR(a.modifiers[3].params[kVecModRoughFreq], 3.0f, 1e-5f);
+    AUREA_CHECK_NEAR(a.modifiers[3].params[kVecModRoughCorrelation], 40.0f, 1e-5f);
+    AUREA_CHECK_NEAR(a.modifiers[3].params[kVecModSeed], 9.0f, 1e-5f);
+    AUREA_CHECK_NEAR(a.modifiers[4].params[kVecModTwistAngle], 30.0f, 1e-5f);
+    AUREA_CHECK_NEAR(a.modifiers[4].params[kVecModTwistCenterX], 5.0f, 1e-5f);
+    AUREA_CHECK_NEAR(a.modifiers[4].params[kVecModTwistCenterY], -5.0f, 1e-5f);
+    AUREA_CHECK_NEAR(a.modifiers[5].params[kVecModWigPosX], 15.0f, 1e-5f);
+    AUREA_CHECK_NEAR(a.modifiers[5].params[kVecModWigPosY], 25.0f, 1e-5f);
+    AUREA_CHECK_NEAR(a.modifiers[5].params[kVecModWigScaleX], 10.0f, 1e-5f);
+    AUREA_CHECK_NEAR(a.modifiers[5].params[kVecModWigScaleY], 20.0f, 1e-5f);
+    AUREA_CHECK_NEAR(a.modifiers[5].params[kVecModWigRotation], 5.0f, 1e-5f);
+    AUREA_CHECK_NEAR(a.modifiers[5].params[kVecModWigFreq], 2.0f, 1e-5f);
+    AUREA_CHECK_NEAR(a.modifiers[5].params[kVecModSeed], 4.0f, 1e-5f);
+    AUREA_CHECK_NEAR(a.modifiers[6].params[kVecModPuckerAmount], -20.0f, 1e-5f);
+
+    // Grupo aninhado achatado: o transform de fora composto e a tinta herdada.
+    const VectorGroup& b = d.groups[0];
+    AUREA_CHECK_EQ(b.name, std::string("Dentro"));
+    AUREA_CHECK(b.paths.size() == 1 && b.paths[0].kind == VectorPathKind::Ellipse);
+    AUREA_CHECK(b.fill.enabled && !b.stroke.enabled);
+    AUREA_CHECK_NEAR(b.fill.paint.color.z, 1.0f, 1e-5f);
+    AUREA_CHECK_NEAR(b.position.x, o.x + 100.0f + 2.0f * 5.0f, 1e-3f);
+    AUREA_CHECK_NEAR(b.position.y, o.y + 2.0f * 5.0f, 1e-3f);
+    AUREA_CHECK_NEAR(b.scale.x, 200.0f, 1e-3f);
+
+    // Desenha (quadro 15): o grupo de dentro inteiro; o "Estrela" com os três
+    // primeiros operadores e só o preenchimento — a pilha inteira dos sete
+    // gera milhares de vértices e o contorno disso é lento demais para um teste.
+    {
+        vector::GroupGeometry geo;
+        vector::group_geometry(vector::evaluate_group(d.groups[0], l->tracks, 0, 15.0, 30.0), 15.0, 0.25f, geo);
+        AUREA_CHECK(!geo.fill.empty());
+        VectorGroup light = vector::evaluate_group(d.groups[1], l->tracks, 1, 15.0, 30.0);
+        light.modifiers.resize(3);
+        light.stroke.enabled = false;
+        light.repeater.enabled = false;
+        vector::group_geometry(light, 15.0, 0.25f, geo);
+        AUREA_CHECK(!geo.fill.empty());
+    }
+    // Um passo de desfazer tira tudo (a camada criada inclusive).
+    AUREA_CHECK(rig.undo());
+    AUREA_CHECK_EQ(rig.comp()->order().size(), before);
+}
+
+AUREA_TEST(AeImport, SyntheticFfxShapeContentsNeedAVectorLayer) {
+    const u32 ts = 24000;
+    const std::string rect = vgroup_ffx("Retangulo 1", vp("ADBE Vector Rect Size", 2, {100.0, 100.0}, ts));
+    const std::string group = vgroup_ffx("Grupo 1",
+        tdmn("ADBE Vectors Group") + vgroup_ffx("", tdmn("ADBE Vector Shape - Rect") + rect));
+    const std::string root = vgroup_ffx("Conteudo", tdmn("ADBE Vector Group") + group);
+    const std::string file = ffx(ts, {{{{"ADBE Root Vectors Group", -1}}, "Conteudo"}}, {root});
+    AeRig rig;
+    const u64 solid = rig.shape();
+    const ae::ImportReport r = rig.e.import_ae_data(file, "formas.ffx", solid);
+    AUREA_CHECK(!r.ok);
+    AUREA_CHECK(has_item(r.skipped, "camada vetorial"));
+    // Numa camada vetorial, o grupo entra por cima dos que já existem.
+    const auto made = rig.e.add_vector_layer(1);
+    AUREA_CHECK(made.ok());
+    if (!made.ok()) return;
+    const ae::ImportReport ok = rig.e.import_ae_data(file, "formas.ffx", *made);
+    if (!ok.ok) dump(ok);
+    AUREA_CHECK(ok.ok);
+    const Layer* l = rig.L(*made);
+    AUREA_CHECK(l && l->shape.vector.groups.size() == 2);
+    if (l && l->shape.vector.groups.size() == 2) {
+        AUREA_CHECK_EQ(l->shape.vector.groups[1].name, std::string("Grupo 1"));
+        // Sem tinta no AE: o grupo não aparece (nem no Aurea).
+        AUREA_CHECK(!l->shape.vector.groups[1].fill.enabled && !l->shape.vector.groups[1].stroke.enabled);
+    }
+}
+
+// v72: Character Alignment (ADBE Text Character Change Type), Inter-Character
+// Blending e Fill & Stroke de "More Options", e os keys do texto-fonte pelo .jsx.
+AUREA_TEST(AeImport, JsxCharacterAlignmentInterCharacterBlendingAndSourceTextKeys) {
+    const char* src = R"JS(var comp = app.project.activeItem;
+var t = comp.layers.addText("UM");
+t.name = "Troca";
+var anim = t.property("ADBE Text Properties").property("ADBE Text Animators").addProperty("ADBE Text Animator");
+anim.property("ADBE Text Selectors").addProperty("ADBE Text Selector");
+var props = anim.property("ADBE Text Animator Properties");
+props.addProperty("ADBE Text Character Offset").setValue(3);
+props.addProperty("ADBE Text Character Change Type").setValue(2);
+var more = t.property("ADBE Text Properties").property("ADBE Text More Options");
+more.property("ADBE Text Character Blend Mode").setValue(5);
+more.property("ADBE Text Render Order").setValue(3);
+t.property("Source Text").setValueAtTime(0, "UM");
+t.property("Source Text").setValueAtTime(1, "DOIS");
+)JS";
+    AeRig rig;
+    const ae::ImportReport r = rig.e.import_ae_data(src, "troca.jsx", 0);
+    if (!r.ok || !r.skipped.empty()) dump(r);
+    AUREA_CHECK(r.skipped.empty());
+    AUREA_CHECK(r.ok);
+    Layer* l = layer_named(rig, "Troca");
+    AUREA_CHECK(l != nullptr);
+    if (!l) return;
+    AUREA_CHECK(l->text.animators.size() == 1u);
+    if (!l->text.animators.empty()) {
+        AUREA_CHECK((l->text.animators[0].props & kTextPropCharOffset) != 0);
+        AUREA_CHECK_EQ(static_cast<u32>(l->text.animators[0].charAlign), 1u);   // 2 = Center
+    }
+    // Menu do AE com os separadores contando: 5 = Multiply.
+    AUREA_CHECK_EQ(static_cast<u32>(l->text.interCharBlend), static_cast<u32>(BlendMode::Multiply));
+    AUREA_CHECK_EQ(static_cast<u32>(l->text.renderOrder), 2u);   // 3 = All Strokes Over All Fills
+    // Dois keys congelados do texto-fonte, nos quadros 0 e 30.
+    AUREA_CHECK_EQ(l->text.sourceKeys.size(), 2u);
+    if (l->text.sourceKeys.size() == 2u) {
+        AUREA_CHECK_EQ(l->text.sourceKeys[0].frame, i64{0});
+        AUREA_CHECK_EQ(l->text.sourceKeys[0].content, std::string("UM"));
+        AUREA_CHECK_EQ(l->text.sourceKeys[1].frame, i64{30});
+        AUREA_CHECK_EQ(l->text.sourceKeys[1].content, std::string("DOIS"));
+        TextData shown;
+        AUREA_CHECK(text::apply_source_text(l->text, 29, shown) && shown.content == "UM");
+        AUREA_CHECK(text::apply_source_text(l->text, 30, shown) && shown.content == "DOIS");
+    }
+}
+
+// =============================================================================
+// AE expressions (lote E): Dropdown Menu, Layer e 3D Point Control pelo match name
+// =============================================================================
+AUREA_TEST(AeImport, DropdownLayerAnd3DPointControlsMapToAureaControls) {
+    const u32 ts = 24000;
+    const std::string menu = effect("ADBE Dropdown Control", "Qualidade", {{"Menu", 7}}, {{1, prop("Menu", 1, {3.0}, ts)}});
+    const std::string p3 = effect("ADBE Point3D Control", "Alvo", {{"3D Point", 18}},
+                                  {{1, prop("3D Point", 3, {10.0, 20.0, 30.0}, ts)}});
+    const std::string lay = effect("ADBE Layer Control", "Guia", {{"Layer", 0}}, {});
+    const std::string file = ffx(ts,
+        {{{{"ADBE Effect Parade", -1}, {"ADBE Dropdown Control", 0}}, "Qualidade"},
+         {{{"ADBE Effect Parade", -1}, {"ADBE Point3D Control", 1}}, "Alvo"},
+         {{{"ADBE Effect Parade", -1}, {"ADBE Layer Control", 2}}, "Guia"}},
+        {menu, p3, lay});
+    AeRig rig;
+    const u64 layer = rig.shape();
+    const ae::ImportReport r = rig.e.import_ae_data(file, "controles.ffx", layer);
+    if (!r.ok) dump(r);
+    AUREA_CHECK(r.ok);
+    Layer* l = rig.L(layer);
+    if (!l || l->effects.size() != 3) { dump(r); AUREA_CHECK(false); return; }
+    AUREA_CHECK(l->effects[0].type == effect_type_id("aurea.control.dropdown"));
+    AUREA_CHECK(l->effects[1].type == effect_type_id("aurea.control.point3d"));
+    AUREA_CHECK(l->effects[2].type == effect_type_id("aurea.control.layer"));
+    // Menu do AE em 1..: o Aurea guarda o índice (item 3 → 2) e a expressão volta a ler 3.
+    AUREA_CHECK_NEAR(l->effects[0].params[0].constant.v[0], 2.0, 1e-4);
+    AUREA_CHECK_NEAR(l->effects[1].params[0].constant.v[0], 10.0, 1e-3);
+    AUREA_CHECK_NEAR(l->effects[1].params[0].constant.v[1], 20.0, 1e-3);
+    AUREA_CHECK_NEAR(l->effects[1].params[0].constant.v[2], 30.0, 1e-3);
+    expr::Diagnostic diag;
+    const u32 rot = static_cast<u32>(TrackProperty::RotationZ);
+    AUREA_CHECK(rig.e.set_expression(layer, rot, kInvalidIndex, 0,
+        "effect(\"Dropdown Menu Control\")(\"Menu\") * 10 + effect(\"3D Point Control\")(\"3D Point\")[2]", &diag).ok() && diag.ok);
+    Engine::ExpressionInfo info;
+    AUREA_CHECK(rig.e.query_expression(layer, rot, kInvalidIndex, 0, info) && info.exists);
+    if (!info.error.ok) std::printf("\n      %s", info.error.message.c_str());
+    AUREA_CHECK(info.error.ok);
+    AUREA_CHECK_NEAR(info.value, 60.0, 1e-3);
 }

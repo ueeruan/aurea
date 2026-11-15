@@ -43,7 +43,8 @@ void current_pose(const Composition& comp, const Layer& l, const scene3d::SceneA
     const f64 local = static_cast<f64>(l.local_time(now).value);
     const i32 clip = l.model.animationClip >= 0 && l.model.animationClip < static_cast<i32>(asset.animations.size())
         ? l.model.animationClip : -1;
-    const f32 t = clip >= 0 ? scene3d::clip_time(asset.animations[static_cast<usize>(clip)], local / fps * l.model.timeScale) : 0.0f;
+    // v75: Evolução / Repetir do painel 3D (model_clip_seconds, Layer.hpp).
+    const f32 t = clip >= 0 ? model_clip_seconds(l, asset.animations[static_cast<usize>(clip)].duration, local, fps) : 0.0f;
     // 0.3.6: o mesmo caminho do renderer (rotação, translação e IK).
     scene3d::evaluate_rig_pose(asset, l, clip, t, local, pose);
 }

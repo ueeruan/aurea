@@ -64,9 +64,9 @@ import com.aurea.aurea.ui.theme.tocavel
 // =============================================================================
 
 /**
- * O menu da camada, ancorado no ⋮ da barra da camada (o layout pai). Só o
- * RECIPIENTE mudou (folha → popup da referência): itens e ordem continuam os do
- * painel da camada. Alternâncias (travar, ocultar, solo, ajuste, guia, 3D)
+ * O menu da camada, ancorado no ⋮ da barra da camada (o layout pai), só com
+ * ações sobre a camada (Funções, 13/11/2026: [layerMenuActions]). Alternâncias
+ * (travar, ocultar, solo)
  * redesenham no lugar sem fechar. O seletor de "Substituir mídia" e o diálogo
  * de "Informações da mídia" moram aqui, vivos enquanto a camada está escolhida.
  */
@@ -77,8 +77,6 @@ internal fun LayerMenu(store: EditorStore, ui: EditorUi, id: Long, expanded: Boo
     }
     var showInfo by remember(id) { mutableStateOf(false) }
     if (showInfo) MediaInfoDialog(store, id) { showInfo = false }
-    var showBones by remember(id) { mutableStateOf(false) }
-    if (showBones) BoneAttachSheet(store, id) { showBones = false }
     if (!expanded) return
     val index = store.layers.indexOfFirst { it.id == id }
     val row = store.layers.getOrNull(index)
@@ -90,12 +88,16 @@ internal fun LayerMenu(store: EditorStore, ui: EditorUi, id: Long, expanded: Boo
         store, ui, row, index,
         onReplace = { replacePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) },
         onInfo = { showInfo = true },
-        onBones = { showBones = true },
     ) + com.aurea.aurea.effects.pluginLayerMenuEntries(store)   // 0.3.4 plugins: ações "layer.menu"
     AnchoredMenu(expanded = true, onDismiss = onDismiss, entries = entries, alignEnd = true, tag = "layer.menu.popup")
 }
 
-/** As linhas do ⋮ da camada (as mesmas da antiga folha, na mesma ordem, + "Camada 3D"). */
+/**
+ * As linhas do ⋮ da camada: só AÇÕES SOBRE A CAMADA, no máximo [LAYER_MENU_MAX]
+ * (Funções do AUREA, 13/11/2026). Quais linhas e em que ordem é a conta pura
+ * [layerMenuActions]; aqui cada uma vira a linha do menu. O que saiu do ⋮ está
+ * listado em LayerMenuSpec.kt, com o lugar novo.
+ */
 @Composable
 private fun layerMenuEntries(
     store: EditorStore,
@@ -104,234 +106,98 @@ private fun layerMenuEntries(
     index: Int,
     onReplace: () -> Unit,
     onInfo: () -> Unit,
-    onBones: () -> Unit,
 ): List<MenuEntry> {
     val id = row.id
     val type = LayerType.of(row.kind)
-    val visual = type != LayerType.Audio
-    val media = type == LayerType.Video || type == LayerType.Image
-    val t = store.playhead
-    val inside = t > row.startFrame && t < row.endFrame
-    val out = mutableListOf<MenuEntry>()
     val convertFailed = stringResource(R.string.om_convert_outline_failed_035)   // bugs 0.3.4 (bug 11)
-    out += MenuEntry.Header(stringResource(R.string.editor_camada))
-    if (type == LayerType.Video || type == LayerType.Audio) {
-        out += MenuEntry.Item(stringResource(R.string.editor_velocidade), glyph = CupertinoGlyph.Speedometer) {
-            openPanel(store, ui, EditorPanel.Speed)
-        }
-    }
-    // 0.3.3 recursos: entradas da doca da 0.3.2 que ficaram sem lugar no painel da camada.
-    // Opções de texto (espaçamentos, caixa, fundo, caminho, sombra e trechos ricos).
-    if (type == LayerType.Text) {
-        out += MenuEntry.Item(stringResource(R.string.text_options), glyph = ShellGlyph.SliderHorizontalBelowRectangle,
-            tag = "layer.menu.textOptions") { openPanel(store, ui, EditorPanel.Text) }
-    }
-    // Fantoche (o "Rig" da doca da imagem): o cartão do efeito já no modo de pinos.
-    if (type == LayerType.Image) {
-        out += MenuEntry.Item(stringResource(R.string.fx_name_puppet), glyph = CupertinoGlyph.PersonCropCircle,
-            enabled = !row.locked, tag = "layer.menu.puppet") {
-            store.select(id)
-            openPuppetTool(store, ui)
-        }
-    }
-    // Alternâncias: o rótulo troca na hora (o menu fica aberto).
-    out += MenuEntry.Item(
-        stringResource(if (row.locked) R.string.editor_desbloquear_camada else R.string.editor_bloquear_camada),
-        glyph = if (row.locked) ShellGlyph.LockOpenFill else CupertinoGlyph.LockFill,
-        sublabel = stringResource(if (row.locked) R.string.editor_volta_aceitar_movimento_edicao else R.string.editor_nao_aceita_movimento_corte_nem_edicao),
-        keepOpen = true,
-    ) { store.setLayerLocked(id, !row.locked) }
-    out += MenuEntry.Item(
-        stringResource(if (row.visible) R.string.editor_ocultar_camada else R.string.editor_mostrar_camada),
-        glyph = if (row.visible) CupertinoGlyph.EyeSlash else CupertinoGlyph.Eye,
-        keepOpen = true,
-    ) { store.setLayerVisible(id, !row.visible) }
-    // Omega timeline (área 03, D-1): as trilhas de keyframes da camada (antes pela pílula).
-    out += MenuEntry.Item(
-        stringResource(if (id in store.timelineExpandedLayers) R.string.om_tl_hide_tracks else R.string.om_tl_show_tracks),
-        glyph = CupertinoGlyph.Rhombus,
-    ) { store.toggleTimelineTracks(id) }
-    out += MenuEntry.Item(
-        stringResource(R.string.editor_solo),
-        glyph = CupertinoGlyph.Speaker2,
-        sublabel = stringResource(R.string.editor_alguma_camada_solo_previa_som_so),
-        checked = row.solo,
-        keepOpen = true,
-    ) { store.setLayerSolo(id, !row.solo) }
-    // AE compositing: Tímida (Shy) da camada e "Ocultar camadas tímidas" da composição.
-    out += MenuEntry.Item(
-        stringResource(R.string.ae_layer_shy),
-        glyph = CupertinoGlyph.PersonCropCircle,
-        sublabel = stringResource(R.string.ae_layer_shy_hint),
-        checked = row.shy,
-        keepOpen = true,
-        tag = "layer.menu.shy",
-    ) { store.setLayerShy(id, !row.shy) }
-    out += MenuEntry.Item(
-        stringResource(R.string.ae_comp_hide_shy),
-        glyph = CupertinoGlyph.EyeSlash,
-        sublabel = stringResource(R.string.ae_comp_hide_shy_hint),
-        checked = store.hideShy,
-        keepOpen = true,
-        tag = "layer.menu.hideShy",
-    ) { store.changeHideShy(!store.hideShy) }
-    // Omega chrome (área 02, P0-3): "Camada 3D" saiu da barra da camada e mora aqui.
-    if (visual) {
-        val intrinsic = row.kind in 8..10
-        val threeD = row.isThreeD || intrinsic
-        out += MenuEntry.Item(
-            stringResource(R.string.sh_add_tab_3d),
-            glyph = CupertinoGlyph.Cube,
-            checked = threeD,
-            enabled = !row.locked && !intrinsic,
-            keepOpen = true,
-            tag = "layer.menu.threeD",
-        ) { store.changeLayer3D(!threeD) }
-        // 0.5.2: "Prender a um osso" — com algum modelo 3D com rig na composição.
-        // Áudio não tem lugar na cena (par do ToolbarView.swift: kind 3 e 10 ficam de fora).
-        if (row.kind != LayerType.Model3D.kind && row.kind != LayerType.Audio.kind &&
-            store.layers.any { it.kind == LayerType.Model3D.kind && it.id != id }) {
-            val bone = store.layerParentBone(id)
-            val parentModel = store.layers.getOrNull(row.parentIndex)?.takeIf { it.kind == LayerType.Model3D.kind }
-            out += MenuEntry.Item(
-                stringResource(R.string.bone_attach_title),
-                glyph = CupertinoGlyph.Link,
-                sublabel = if (bone >= 0 && parentModel != null)
-                    stringResource(R.string.bone_attach_current, boneLabel(store.boneName(parentModel.id, bone), bone))
-                else stringResource(R.string.bone_attach_menu_hint),
-                enabled = !row.locked,
-                tag = "layer.menu.boneAttach",
-            ) { onBones() }
-        }
-        if (row.kind == LayerType.Image.kind || row.kind == LayerType.Video.kind) {
-            out += MenuEntry.Item(
-                stringResource(R.string.layer_to_3d_object),
-                glyph = CupertinoGlyph.Cube,
-                sublabel = stringResource(R.string.layer_to_3d_object_hint),
-                enabled = !row.locked,
-                tag = "layer.menu.to3dObject",
-            ) { store.layerTo3DObject(id, row.name) }
-        }
-    }
-    // Linha Magnética: só em trecho com FONTE (vídeo, áudio ou pré-composição).
-    if (media || type == LayerType.Audio || type == LayerType.Group) {
-        out += MenuEntry.Item(
-            stringResource(R.string.editor_linha_magnetica),
-            glyph = CupertinoGlyph.Link,
-            sublabel = stringResource(R.string.editor_linha_magnetica_detalhe),
-            checked = row.magnetic,
-            keepOpen = true,
-        ) { store.setLayerMagneticTrack(id, !row.magnetic) }
-    }
-    if (visual) {
-        out += MenuEntry.Item(
-            stringResource(R.string.editor_camada_ajuste),
-            glyph = CupertinoGlyph.SliderHorizontal3,
-            sublabel = stringResource(R.string.editor_efeitos_desta_camada_valem_todas_baixo),
-            checked = row.adjustment,
-            keepOpen = true,
-        ) { store.setLayerAdjustment(id, !row.adjustment) }
-        if (row.adjustment) {
-            // Camadas afetadas: todas abaixo → só a logo abaixo → só as escolhidas.
-            val scope = store.adjustmentScope
-            out += MenuEntry.Item(
-                stringResource(R.string.la_affected) + " · " + stringResource(
-                    when (scope) {
-                        1 -> R.string.la_affected_below
-                        2 -> R.string.la_affected_chosen
-                        else -> R.string.la_affected_all
-                    },
-                ),
-                glyph = CupertinoGlyph.SliderHorizontal3,
-                sublabel = stringResource(if (scope == 2) R.string.la_affected_chosen_hint else R.string.la_affected_hint),
-                keepOpen = true,
-            ) { store.changeAdjustmentScope((scope + 1) % 3) }
-            if (scope == 2) {
-                val below = store.layers.drop(index + 1).filter { LayerType.of(it.kind) != LayerType.Audio }
-                if (below.isEmpty()) {
-                    out += MenuEntry.Item(stringResource(R.string.la_affected_none_below), glyph = CupertinoGlyph.SliderHorizontal3, enabled = false)
-                }
-                below.forEach { b ->
-                    out += MenuEntry.Item(b.name, glyph = CupertinoGlyph.SliderHorizontal3, checked = b.id in store.adjustmentTargets, keepOpen = true) {
-                        store.toggleAdjustmentTarget(b.id)
-                    }
-                }
-            }
-        }
-        out += MenuEntry.Item(
-            stringResource(R.string.editor_guia_nao_exporta),
-            glyph = CupertinoGlyph.Grid,
-            sublabel = stringResource(R.string.editor_aparece_aqui_editor_fica_fora_video),
-            checked = row.guide,
-            keepOpen = true,
-        ) { store.setLayerGuide(id, !row.guide) }
-        // AE compositing: Preservar transparência (o T do AE).
-        out += MenuEntry.Item(
-            stringResource(R.string.ae_layer_preserve_transparency),
-            glyph = CupertinoGlyph.SquareStack3dUp,
-            sublabel = stringResource(R.string.ae_layer_preserve_transparency_hint),
-            checked = row.preserveTransparency,
-            enabled = !row.locked,
-            keepOpen = true,
-            tag = "layer.menu.preserveTransparency",
-        ) { store.setLayerPreserveTransparency(id, !row.preserveTransparency) }
-    }
-    out += MenuEntry.Item(stringResource(R.string.editor_duplicar), glyph = CupertinoGlyph.PlusSquareOnSquare) { store.duplicateLayers(listOf(id)) }
-    out += MenuEntry.Item(stringResource(R.string.editor_puxar_cabecote), glyph = CupertinoGlyph.ArrowDownToLine, enabled = !row.locked) {
-        if (store.playing) store.pause()
-        store.moveToPlayhead(id)
-    }
-    out += MenuEntry.Item(stringResource(R.string.editor_copiar_camada), glyph = CupertinoGlyph.DocOnDoc) { store.copyLayers(listOf(id)) }
-    out += MenuEntry.Item(stringResource(R.string.editor_colar_camada_cabecote), glyph = CupertinoGlyph.DocOnClipboard, enabled = store.clipboard and 1 != 0) {
-        store.pasteLayers()
-    }
-    out += MenuEntry.Item(stringResource(R.string.editor_copiar_estilo), glyph = CupertinoGlyph.Paintbrush) {
-        store.select(id)
-        store.copyStyle()
-    }
-    out += MenuEntry.Item(stringResource(R.string.editor_colar_estilo), glyph = ShellGlyph.PaintbrushFill, enabled = store.clipboard and 2 != 0) {
-        store.pasteStyle(listOf(id))
-    }
-    out += MenuEntry.Item(stringResource(R.string.editor_trazer_frente), glyph = CupertinoGlyph.ArrowUpToLine, enabled = index > 0) {
-        store.reorderLayer(id, index - 1)
-    }
-    out += MenuEntry.Item(stringResource(R.string.editor_enviar_tras), glyph = CupertinoGlyph.ArrowDownToLine, enabled = index < store.layers.size - 1) {
-        store.reorderLayer(id, index + 1)
-    }
-
-    // Etiqueta: "sem" e as doze cores, numa fileira de ícones.
-    out += MenuEntry.Header(stringResource(R.string.editor_etiqueta))
+    val actions = layerMenuActions(LayerMenuInput(
+        kind = row.kind,
+        clipMask = row.clipToBelow || row.clipCandidate,
+        canConvertOutline = type == LayerType.Shape && store.canConvertToOutline(id),
+    ))
     val labelName = stringResource(R.string.editor_etiqueta)
     val none = stringResource(R.string.editor_nenhum)
-    out += MenuEntry.IconRow(
-        cells = listOf(MenuIconCell(none, glyph = ShellGlyph.Nosign) { store.setLayerLabel(id, 0) }) +
-            ShellColors.LabelPalette.mapIndexed { i, color ->
-                MenuIconCell("$labelName ${i + 1}", swatch = color) { store.setLayerLabel(id, i + 1) }
-            },
-        selectedIndex = row.label,
-        keepOpen = true,
-        tag = "layer.menu.labels",
-    )
-
-    if (visual) {
-        // 0.4.6: espelhar (como o "Flip" da referência): a escala do eixo troca de sinal.
-        out += MenuEntry.Item(stringResource(R.string.layer_flip_horizontal), glyph = CupertinoGlyph.ArrowLeftRight,
-            tag = "layer.flip.h") { store.flipLayer(id, vertical = false) }
-        out += MenuEntry.Item(stringResource(R.string.layer_flip_vertical), glyph = CupertinoGlyph.ArrowUpArrowDown,
-            tag = "layer.flip.v") { store.flipLayer(id, vertical = true) }
-        out += MenuEntry.Header(stringResource(R.string.editor_grupo))
-        if (row.clipToBelow || row.clipCandidate) {
-            out += MenuEntry.Item(
+    val flipH = stringResource(R.string.layer_flip_horizontal)
+    val flipV = stringResource(R.string.layer_flip_vertical)
+    val groupHeader = stringResource(R.string.editor_grupo)
+    val convertToGroup = stringResource(R.string.editor_converter_grupo)
+    val addToGroup = stringResource(R.string.la_add_to_group)
+    val removeFromGroup = stringResource(R.string.la_remove_from_group)
+    val mediaHeader = stringResource(R.string.sh_menu_media)
+    val out = mutableListOf<MenuEntry>()
+    out += MenuEntry.Header(stringResource(R.string.editor_camada))
+    for (action in actions) {
+        when (action) {
+            // Alternâncias: o rótulo troca na hora (o menu fica aberto).
+            LayerMenuAction.Lock -> out += MenuEntry.Item(
+                stringResource(if (row.locked) R.string.editor_desbloquear_camada else R.string.editor_bloquear_camada),
+                glyph = if (row.locked) ShellGlyph.LockOpenFill else CupertinoGlyph.LockFill,
+                sublabel = stringResource(if (row.locked) R.string.editor_volta_aceitar_movimento_edicao else R.string.editor_nao_aceita_movimento_corte_nem_edicao),
+                keepOpen = true,
+            ) { store.setLayerLocked(id, !row.locked) }
+            LayerMenuAction.Hide -> out += MenuEntry.Item(
+                stringResource(if (row.visible) R.string.editor_ocultar_camada else R.string.editor_mostrar_camada),
+                glyph = if (row.visible) CupertinoGlyph.EyeSlash else CupertinoGlyph.Eye,
+                keepOpen = true,
+            ) { store.setLayerVisible(id, !row.visible) }
+            LayerMenuAction.Solo -> out += MenuEntry.Item(
+                stringResource(R.string.editor_solo),
+                glyph = CupertinoGlyph.Speaker2,
+                sublabel = stringResource(R.string.editor_alguma_camada_solo_previa_som_so),
+                checked = row.solo,
+                keepOpen = true,
+            ) { store.setLayerSolo(id, !row.solo) }
+            // Omega timeline (área 03, D-1): as trilhas de keyframes da camada (antes pela pílula).
+            LayerMenuAction.KeyframeTracks -> out += MenuEntry.Item(
+                stringResource(if (id in store.timelineExpandedLayers) R.string.om_tl_hide_tracks else R.string.om_tl_show_tracks),
+                glyph = CupertinoGlyph.Rhombus,
+            ) { store.toggleTimelineTracks(id) }
+            LayerMenuAction.Duplicate -> out += MenuEntry.Item(stringResource(R.string.editor_duplicar), glyph = CupertinoGlyph.PlusSquareOnSquare) {
+                store.duplicateLayers(listOf(id))
+            }
+            LayerMenuAction.PullToPlayhead -> out += MenuEntry.Item(stringResource(R.string.editor_puxar_cabecote), glyph = CupertinoGlyph.ArrowDownToLine, enabled = !row.locked) {
+                if (store.playing) store.pause()
+                store.moveToPlayhead(id)
+            }
+            LayerMenuAction.BringForward -> out += MenuEntry.Item(stringResource(R.string.editor_trazer_frente), glyph = CupertinoGlyph.ArrowUpToLine, enabled = index > 0) {
+                store.reorderLayer(id, index - 1)
+            }
+            LayerMenuAction.SendBackward -> out += MenuEntry.Item(stringResource(R.string.editor_enviar_tras), glyph = CupertinoGlyph.ArrowDownToLine, enabled = index < store.layers.size - 1) {
+                store.reorderLayer(id, index + 1)
+            }
+            // Etiqueta: "sem" e as doze cores, numa fileira de ícones.
+            LayerMenuAction.Labels -> {
+                out += MenuEntry.Header(labelName)
+                out += MenuEntry.IconRow(
+                    cells = listOf(MenuIconCell(none, glyph = ShellGlyph.Nosign) { store.setLayerLabel(id, 0) }) +
+                        ShellColors.LabelPalette.mapIndexed { i, color ->
+                            MenuIconCell("$labelName ${i + 1}", swatch = color) { store.setLayerLabel(id, i + 1) }
+                        },
+                    selectedIndex = row.label,
+                    keepOpen = true,
+                    tag = "layer.menu.labels",
+                )
+            }
+            // 0.4.6: espelhar (o "Flip" da referência); H e V numa fileira só.
+            LayerMenuAction.Flip -> {
+                out += MenuEntry.Header(groupHeader)
+                out += MenuEntry.IconRow(
+                    cells = listOf(
+                        MenuIconCell(flipH, glyph = CupertinoGlyph.ArrowLeftRight, tag = "layer.flip.h") { store.flipLayer(id, vertical = false) },
+                        MenuIconCell(flipV, glyph = CupertinoGlyph.ArrowUpArrowDown, tag = "layer.flip.v") { store.flipLayer(id, vertical = true) },
+                    ),
+                    tag = "layer.menu.flip",
+                )
+            }
+            LayerMenuAction.ClipMask -> out += MenuEntry.Item(
                 stringResource(if (row.clipToBelow) R.string.editor_liberar_mascara_recorte else R.string.editor_criar_mascara_recorte),
                 glyph = CupertinoGlyph.ArrowDownRightSquare,
                 sublabel = stringResource(R.string.editor_mascara_recorte_detalhe),
                 tag = "layer.clipMask",
             ) { store.setLayerClipToBelow(id, !row.clipToBelow) }
-        }
-        // Bugs 0.3.4 (bug 11): "Converter em contorno" — a forma viva vira vetor
-        // (mesma silhueta, cor e traço) e abre o Editar pontos.
-        if (type == LayerType.Shape && store.canConvertToOutline(id)) {
-            out += MenuEntry.Item(
+            // Bugs 0.3.4 (bug 11): "Converter em contorno" — a forma viva vira vetor
+            // (mesma silhueta, cor e traço) e abre o Editar pontos.
+            LayerMenuAction.ConvertOutline -> out += MenuEntry.Item(
                 stringResource(R.string.om_convert_outline_035),
                 glyph = CupertinoGlyph.PencilOutline,
                 sublabel = stringResource(R.string.om_convert_outline_detail_035),
@@ -342,123 +208,62 @@ private fun layerMenuEntries(
                 if (store.convertShapeToOutline(id)) openPanel(store, ui, EditorPanel.EditPoints)
                 else store.showToast(convertFailed)
             }
-        }
-        if (type != LayerType.Group) {
-            out += MenuEntry.Item(stringResource(R.string.editor_converter_grupo), glyph = CupertinoGlyph.RectangleStack) { store.precompose(listOf(id)) }
-        } else {
-            out += MenuEntry.Item(stringResource(R.string.editor_entrar_grupo), glyph = CupertinoGlyph.ArrowDownRightSquare) { store.openPrecomp(id) }
-            out += MenuEntry.Item(stringResource(R.string.editor_desagrupar), glyph = ShellGlyph.SquareSplit2x2) { store.ungroupPrecomp(id) }
-            out += MenuEntry.Item(
-                stringResource(R.string.la_group_camera),
-                glyph = CupertinoGlyph.Camera,
-                sublabel = stringResource(R.string.la_group_camera_hint),
-                checked = store.groupCameraPassThrough == 1,
-                keepOpen = true,
-            ) { store.changeGroupCameraPassThrough(store.groupCameraPassThrough != 1) }
-        }
-        if (store.layerAcceptsLights >= 0) {
-            out += MenuEntry.Item(
-                stringResource(R.string.la_accepts_lights),
-                glyph = CupertinoGlyph.Lightbulb,
-                sublabel = stringResource(R.string.la_accepts_lights_hint),
-                checked = store.layerAcceptsLights == 1,
-                keepOpen = true,
-            ) { store.changeLayerAcceptsLights(store.layerAcceptsLights != 1) }
-        }
-        val addToGroup = stringResource(R.string.la_add_to_group)
-        store.layers.filter { it.id != id && LayerType.of(it.kind) == LayerType.Group }.forEach { g ->
-            out += MenuEntry.Item("$addToGroup · ${g.name}", glyph = CupertinoGlyph.RectangleStack) { store.addToGroup(g.id, listOf(id)) }
-        }
-        if (store.precompDepth > 0) {
-            out += MenuEntry.Item(stringResource(R.string.la_remove_from_group), glyph = CupertinoGlyph.ArrowUturnLeft) { store.removeFromGroup(id) }
-        }
-    }
-    if (media || type == LayerType.Audio) {
-        out += MenuEntry.Header(stringResource(R.string.sh_menu_media))
-        if (media) {
-            out += MenuEntry.Item(
-                stringResource(R.string.layer_replace_media),
-                glyph = CupertinoGlyph.Arrow2Squarepath,
-                sublabel = stringResource(R.string.layer_replace_media_detail),
-                enabled = !row.locked,
-            ) { onReplace() }
+            LayerMenuAction.EnterGroup -> {
+                out += MenuEntry.Item(stringResource(R.string.editor_entrar_grupo), glyph = CupertinoGlyph.ArrowDownRightSquare) {
+                    store.openPrecomp(id)
+                }
+                out += MenuEntry.Item(stringResource(R.string.prerender_group), glyph = CupertinoGlyph.Play,
+                    tag = "layer.menu.group.prerender") { store.startPreRender(1, groupLayer = id) }
+            }
+            LayerMenuAction.Ungroup -> out += MenuEntry.Item(stringResource(R.string.editor_desagrupar), glyph = ShellGlyph.SquareSplit2x2) {
+                store.ungroupPrecomp(id)
+            }
+            // "Grupo ›": converter, pôr num grupo que já existe aqui, tirar do grupo aberto.
+            LayerMenuAction.GroupMenu -> {
+                val sub = buildList<MenuEntry> {
+                    if (type != LayerType.Group) add(MenuEntry.Item(convertToGroup, glyph = CupertinoGlyph.RectangleStack, tag = "layer.menu.group.convert") {
+                        store.precompose(listOf(id))
+                    })
+                    store.layers.filter { it.id != id && LayerType.of(it.kind) == LayerType.Group }.forEach { g ->
+                        add(MenuEntry.Item("$addToGroup · ${g.name}", glyph = CupertinoGlyph.RectangleStack) { store.addToGroup(g.id, listOf(id)) })
+                    }
+                    if (store.precompDepth > 0) add(MenuEntry.Item(removeFromGroup, glyph = CupertinoGlyph.ArrowUturnLeft, tag = "layer.menu.group.remove") {
+                        store.removeFromGroup(id)
+                    })
+                }
+                if (sub.isNotEmpty()) out += MenuEntry.Item(
+                    if (type == LayerType.Group) addToGroup else convertToGroup,
+                    glyph = CupertinoGlyph.RectangleStack,
+                    submenu = sub,
+                    tag = "layer.menu.group",
+                )
+            }
+            LayerMenuAction.ReplaceMedia -> {
+                out += MenuEntry.Header(mediaHeader)
+                out += MenuEntry.Item(
+                    stringResource(R.string.layer_replace_media),
+                    glyph = CupertinoGlyph.Arrow2Squarepath,
+                    sublabel = stringResource(R.string.layer_replace_media_detail),
+                    enabled = !row.locked,
+                ) { onReplace() }
+            }
             // 0.4.5: Remover fundo — o efeito na camada e, no vídeo, a análise do clipe.
-            out += MenuEntry.Item(
+            LayerMenuAction.RemoveBackground -> out += MenuEntry.Item(
                 stringResource(R.string.bg_remove_action),
                 glyph = CupertinoGlyph.PersonCropCircle,
                 sublabel = stringResource(R.string.bg_remove_action_detail),
                 enabled = !row.locked,
                 tag = "layer.menu.bgRemove",
             ) { if (store.removeBackground(id)) openPanel(store, ui, EditorPanel.Effects) }
-        }
-        out += MenuEntry.Item(stringResource(R.string.media_info_title), glyph = CupertinoGlyph.InfoCircle, tag = "layer.menu.mediaInfo") { onInfo() }
-        if (type == LayerType.Video) {
-            out += MenuEntry.Item(
+            LayerMenuAction.MediaInfo -> {
+                if (type == LayerType.Audio) out += MenuEntry.Header(mediaHeader)
+                out += MenuEntry.Item(stringResource(R.string.media_info_title), glyph = CupertinoGlyph.InfoCircle, tag = "layer.menu.mediaInfo") { onInfo() }
+            }
+            LayerMenuAction.ExtractAudio -> out += MenuEntry.Item(
                 stringResource(R.string.editor_extrair_audio),
                 glyph = CupertinoGlyph.MusicNote2,
                 sublabel = stringResource(R.string.editor_som_vira_camada_propria_video_fica),
             ) { store.extractAudio(id) }
-        }
-    }
-
-    out += MenuEntry.Header(stringResource(R.string.editor_movimento))
-    out += MenuEntry.Item(
-        stringResource(R.string.editor_desfoque_movimento),
-        glyph = CupertinoGlyph.MotionBlur,
-        sublabel = stringResource(R.string.editor_borra_direcao_movimento_obturador_nas_configuracoes),
-        checked = store.detail?.motionBlur == true,
-        tag = "layer.menu.motionBlur",
-    ) { store.setLayerMotionBlur(id, !(store.detail?.motionBlur ?: false)) }
-    if (type == LayerType.Video) {
-        out += MenuEntry.Item(
-            stringResource(R.string.editor_desfoque_movimento_video),
-            glyph = CupertinoGlyph.MotionBlur,
-            sublabel = stringResource(R.string.editor_borra_mexe_dentro_video_pelos_vetores),
-            checked = store.detail?.vectorBlur == true,
-        ) { store.setVectorBlur(id, !(store.detail?.vectorBlur ?: false)) }
-    }
-    // 0.3.1: preset .ffx nesta camada / script .jsx com ela em comp.selectedLayers.
-    out += MenuEntry.Item(
-        stringResource(R.string.ae_import_menu),
-        glyph = CupertinoGlyph.SquareStack3dUp,
-        sublabel = stringResource(R.string.ae_import_layer_detail),
-        enabled = !row.locked,
-        tag = "layer.aeImport",
-    ) { store.requestAeImport() }
-
-    if (type == LayerType.Video || type == LayerType.Audio) {
-        out += MenuEntry.Header(stringResource(R.string.editor_tempo))
-        out += MenuEntry.Item(stringResource(R.string.i18n_clip_modes), glyph = CupertinoGlyph.Scissors) { openPanel(store, ui, EditorPanel.ClipEdit) }
-    }
-    if (type == LayerType.Video) {
-        out += MenuEntry.Item(stringResource(R.string.sh_menu_freeze_frame), glyph = ShellGlyph.Snow, enabled = inside) { store.freezeFrame(id) }
-        out += MenuEntry.Header(stringResource(R.string.editor_rastreio))
-        out += MenuEntry.Item(
-            stringResource(R.string.dock2_tracking_tools),
-            glyph = ShellGlyph.Viewfinder,
-            sublabel = stringResource(R.string.dock2_tracking_tools_detail),
-        ) {
-            store.select(id)
-            store.cameraTrackerVisible = false
-            openPanel(store, ui, EditorPanel.Tracking)
-        }
-        out += MenuEntry.Item(
-            stringResource(R.string.editor_rastrear_ponto),
-            glyph = ShellGlyph.Viewfinder,
-            sublabel = stringResource(R.string.editor_cria_nulo_segue_ponto_ligue_outras),
-        ) {
-            store.select(id)
-            openPanel(store, ui, EditorPanel.Tracking)
-            store.beginPointPick(false)
-        }
-        out += MenuEntry.Item(
-            stringResource(R.string.editor_estabilizar_pelo_ponto),
-            glyph = ShellGlyph.Viewfinder,
-            sublabel = stringResource(R.string.editor_move_video_ponto_ficar_parado_tela),
-        ) {
-            store.select(id)
-            openPanel(store, ui, EditorPanel.Tracking)
-            store.beginPointPick(true)
         }
     }
     return out

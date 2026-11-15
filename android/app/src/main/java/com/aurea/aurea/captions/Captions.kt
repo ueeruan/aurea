@@ -28,6 +28,7 @@ class KeyVault(context: Context) {
     private fun secret(): SecretKey {
         val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         (ks.getEntry(ALIAS, null) as? KeyStore.SecretKeyEntry)?.let { return it.secretKey }
+        synchronized(opened) { opened.clear() }   // chave nova: o que foi aberto com a antiga não vale
         val gen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
         gen.init(
             KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
@@ -44,26 +45,41 @@ class KeyVault(context: Context) {
         val c = Cipher.getInstance("AES/GCM/NoPadding")
         c.init(Cipher.ENCRYPT_MODE, secret())
         val data = c.iv + c.doFinal(value.toByteArray(Charsets.UTF_8))
+        synchronized(opened) { opened.remove(name) }
         prefs.edit().putString(name, Base64.encodeToString(data, Base64.NO_WRAP)).apply()
     }
 
     fun get(name: String): String? {
         val b64 = prefs.getString(name, null) ?: return null
+        // 0.5.3: o mesmo texto cifrado já aberto neste processo não volta ao
+        // Keystore. A abertura lia a sessão ~9 vezes na thread principal, e cada
+        // leitura carregava o Keystore e decifrava de novo (várias idas ao serviço
+        // do sistema). Só em memória, e só enquanto o cifrado guardado for o mesmo.
+        synchronized(opened) { opened[name]?.let { if (it.first == b64) return it.second } }
         return try {
             val data = Base64.decode(b64, Base64.NO_WRAP)
             val c = Cipher.getInstance("AES/GCM/NoPadding")
             c.init(Cipher.DECRYPT_MODE, secret(), GCMParameterSpec(128, data, 0, 12))
-            String(c.doFinal(data, 12, data.size - 12), Charsets.UTF_8)
+            String(c.doFinal(data, 12, data.size - 12), Charsets.UTF_8).also { plain ->
+                // A chave de API que a pessoa digitou não fica guardada aqui: ela é
+                // lida só na hora de transcrever, fora do caminho da abertura.
+                if (name != GROQ) synchronized(opened) { opened[name] = b64 to plain }
+            }
         } catch (_: Exception) {
             null   // chave do Keystore trocada (restauração): pede de novo
         }
     }
 
-    fun remove(name: String) = prefs.edit().remove(name).apply()
+    fun remove(name: String) {
+        synchronized(opened) { opened.remove(name) }
+        prefs.edit().remove(name).apply()
+    }
 
     companion object {
         private const val ALIAS = "aurea_cofre_v1"
         const val GROQ = "groq_api_key"
+        /** nome → (texto cifrado guardado, texto aberto). Só na memória do processo. */
+        private val opened = HashMap<String, Pair<String, String>>()
     }
 }
 

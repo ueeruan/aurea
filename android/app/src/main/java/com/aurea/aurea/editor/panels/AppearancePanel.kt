@@ -229,6 +229,8 @@ internal fun AppearancePanel(env: PanelEnv) {
         scrollContent = false,
     ) {
         OpacityLine(env)
+        // AE layers: transições de entrada/saída da camada (o motor já as desenhava). Só no Aurea PC.
+        if (com.aurea.aurea.ui.platform.PlatformFeatures.desktopAe) LayerTransitionRows(store)
         BlendAccordion(env, Modifier.weight(1f).fillMaxWidth())
     }
     if (showAbout) {

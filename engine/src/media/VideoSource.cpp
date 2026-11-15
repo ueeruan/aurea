@@ -226,10 +226,41 @@ void VideoSource::schedule_retry(u64 generation, bool backpressure) noexcept {
     // Two delayed retries recover transient decoder/seek failures even when
     // playback is paused and no further UI request arrives. Corrupt media
     // cannot spin forever. A different request gets its own attempt budget.
-    if (running_ && requestGen_ == generation && (backpressure || retryAttempts_ < 2)) {
+    if (!running_ || requestGen_ != generation) return;
+    if (backpressure || retryAttempts_ < 2) {
         retryBackpressure_ = backpressure;
         retryAfterNs_ = monotonic_ns() + (backpressure ? 16'000'000ull : 100'000'000ull * (retryAttempts_ + 1));
+    } else if (persistentRetry_.load(std::memory_order_relaxed)) {
+        // 0.5.4: a prévia não desiste. O decoder recusado (aparelho com as
+        // sessões tomadas pelo proxy, pela miniatura ou por outras camadas;
+        // "decoder ocupado" do AVFoundation) volta quando outro fecha: 400 ms,
+        // 800 ms, 1,6 s e depois a cada 2 s — um arquivo que nunca decodifica
+        // custa uma tentativa a cada 2 s, não uma thread girando.
+        const u32 step = std::min<u32>(retryAttempts_ - 2, 3);
+        retryBackpressure_ = false;
+        retryAfterNs_ = monotonic_ns() + std::min<u64>(2'000'000'000ull, 400'000'000ull << step);
     }
+}
+
+void VideoSource::note_failure() noexcept {
+    {
+        std::lock_guard<std::mutex> s(statsMutex_);
+        ++stats_.consecutiveFailures;
+        ++stats_.failures;
+    }
+    if (!persistentRetry_.load(std::memory_order_relaxed)) return;
+    // Acorda o render mesmo parado: é ele quem chama o MediaManager, que troca
+    // um decoder que só falha (MediaManager::source_for) — e a camada que já
+    // mostrou um quadro continua com ele na tela enquanto isso (Renderer).
+    void (*fn)(void*) = nullptr;
+    void* ctx = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!running_ || suspended_) return;
+        fn = readyFn_;
+        ctx = readyCtx_;
+    }
+    if (fn) fn(ctx);
 }
 
 void VideoSource::thread_main() noexcept {
@@ -389,9 +420,10 @@ void VideoSource::thread_main() noexcept {
         if (!reachable_forward(need)) {
             showKeyframe = req.mode == DecodeMode::Scrub;
             if (const Status s = backend_->seek_to_keyframe(need); !s.ok()) {
-                AUREA_LOG_ERROR("seek falhou em %lld us", static_cast<long long>(need));
+                AUREA_LOG_ERROR("seek falhou em %lld us: %s", static_cast<long long>(need), s.message().data());
                 decoderValid_ = false;
                 schedule_retry(gen);
+                note_failure();
                 continue;
             }
             decoderValid_ = true;
@@ -475,6 +507,7 @@ void VideoSource::thread_main() noexcept {
                 // Sem esta pausa, um arquivo corrompido faria a thread girar
                 // em seek+erro sem parar, queimando CPU que o render precisa.
                 schedule_retry(gen);
+                note_failure();
                 break;
             }
             decoderPosUs_ = pts;
@@ -483,6 +516,7 @@ void VideoSource::thread_main() noexcept {
             {
                 std::lock_guard<std::mutex> st(statsMutex_);
                 stats_.decodeMsAvg = stats_.decodeMsAvg == 0.0f ? ms : stats_.decodeMsAvg * 0.9f + ms * 0.1f;
+                stats_.consecutiveFailures = 0;   // o decoder voltou a andar
                 if (frame) ++stats_.framesDelivered;
                 else ++stats_.framesDiscarded;
                 if (frame && std::llabs(pts - need) <= half && requestNs) {

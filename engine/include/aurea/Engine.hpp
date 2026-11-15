@@ -681,6 +681,30 @@ public:
     /// branco — pronta para o modo de pontos), 1 retângulo, 2 elipse,
     /// 3 polígono, 4 estrela. Do cabeçote até o fim.
     [[nodiscard]] Result<u64> add_vector_layer(u32 preset) noexcept;
+    // --- Lote X: árvore de formas do After Effects (EngineVectorTree.cpp) --------
+    /// As linhas da árvore do conteúdo da camada vetorial (o painel do Aurea PC):
+    /// [versão do fluxo (1), nº de linhas] e, por linha, [profundidade, tipo
+    /// (VectorItemKind), n-ésimo do tipo no grupo dono, posição na ordem do grupo
+    /// dono, ligado, nº de valores, valores…] (campos por tipo em
+    /// vector/VectorTree.hpp). `names` = o nome de cada linha de GRUPO, um por linha.
+    bool vector_tree(u64 layerId, std::vector<f32>& out, std::string& names) noexcept;
+    /// Operações de `vector_tree_edit`. `path`/`depth` = o grupo dono: índices do
+    /// primeiro nível até ele ([2] = o 3º grupo; [2, 0] = o 1º grupo de dentro dele).
+    static constexpr u32 kVectorTreeAdd = 0;          ///< a = tipo, b = posição na ordem, c = variante (tipo do caminho/operador), name = nome do grupo
+    static constexpr u32 kVectorTreeRemove = 1;       ///< a = posição
+    static constexpr u32 kVectorTreeMove = 2;         ///< a = de, b = para (posições na ordem)
+    static constexpr u32 kVectorTreeEnable = 3;       ///< a = posição, b = 0/1
+    static constexpr u32 kVectorTreeValues = 4;       ///< a = posição, values = campos do item
+    static constexpr u32 kVectorTreeRename = 5;       ///< name = nome novo do grupo do caminho
+    static constexpr u32 kVectorTreeGroupValues = 6;  ///< values = transform do grupo do caminho (10 campos, com inclinação e eixo)
+    static constexpr u32 kVectorTreeFreeOrder = 7;    ///< a = 1 passa o grupo para a ordem livre (o desenho não muda); 0 volta, se puder
+    static constexpr u32 kVectorTreeAddGroup = 8;     ///< grupo novo (vazio) no primeiro nível; name = nome
+    /// Edita o conteúdo de um grupo na ordem do After Effects (um operador vale
+    /// para o que está ACIMA dele; quem está em cima é desenhado por cima). Um
+    /// passo de desfazer (`continuing` junta um arrasto). As trilhas dos caminhos
+    /// e operadores do primeiro nível acompanham os itens. Falso = recusado.
+    bool vector_tree_edit(u64 layerId, const u32* path, u32 depth, u32 op, u32 a, u32 b, u32 c,
+                          const f32* values, u32 count, const char* name, bool continuing) noexcept;
     /// Documento inteiro (vector::encode_document) e nomes dos grupos.
     bool vector_document(u64 layerId, std::vector<f32>& out, std::string& names) noexcept;
     /// Substitui o documento. Mesmo nº de grupos (a estrutura muda pelas
@@ -710,8 +734,9 @@ public:
     /// Paramétrico → caminho livre editável (mesma forma).
     bool make_vector_path_editable(u64 layerId, u32 group, u32 path) noexcept;
     /// Valores animáveis do grupo no cabeçote (kVecParamCount floats) + bits
-    /// animados + bits com keyframe no cabeçote. Devolve quantos floats.
-    static constexpr u32 kVectorParamFloats = kVecParamCount + 2;
+    /// animados + bits com keyframe no cabeçote (ids 0..23) + bits animados +
+    /// bits com keyframe dos ids 24.. (bit 0 = id 24). Devolve quantos floats.
+    static constexpr u32 kVectorParamFloats = kVecParamCount + 4;
     u32 query_vector_params(u64 layerId, u32 group, f32* out, u32 capacity) noexcept;
     /// Valor (VectorParam): com keyframes, grava no cabeçote.
     bool set_vector_param(u64 layerId, u32 group, u32 param, f32 value, bool continuing) noexcept;
@@ -1047,7 +1072,10 @@ public:
     /// Fonte da camada de texto: família/peso/itálico e, se importada, o arquivo.
     bool set_text_font(u64 layerId, const std::string& family, u32 weight, bool italic, const std::string& path) noexcept;
     /// Estilo de parágrafo (18 floats): modo da caixa, largura, altura, fundo
-    /// (liga, rgba, margem, raio), sombra (liga, rgba, dx, dy, desfoque).
+    /// (liga, rgba, margem, raio), sombra (liga, rgba, dx, dy, desfoque); com 20,
+    /// entrelinha e tracking; com 21, a ordem preenchimento/traço (v70: 0
+    /// preenchimentos por cima, 1 por caractere, 2 traços por cima); com 22, a
+    /// mistura entre caracteres (v72: valor do BlendMode; os de recorte viram Normal).
     bool set_text_style(u64 layerId, const f32* values, u32 count = 18) noexcept;
     bool query_text_style(u64 layerId, f32* values, u32 capacity = 18) noexcept;
     /// 0.4.6: texto dinâmico (TextData::dynamic). v = {ligado, de, até, casas
@@ -1157,6 +1185,14 @@ public:
     /// linha (2), cada uma só com o próprio texto e no mesmo lugar. Sem
     /// `keepOriginal` a original sai. Um desfazer. Devolve quantas criou.
     Result<u32> explode_text(u64 layerId, u32 mode, bool keepOriginal) noexcept;
+    /// Lote X (AE: Create Shapes from Text / Create Masks from Text). Os contornos
+    /// dos glifos do texto, no lugar em que aparecem no quadro atual (layout,
+    /// animadores e a transformação da camada), viram uma camada nova logo acima:
+    /// `asMasks` false = camada vetorial com um grupo por glifo (preenchimento e
+    /// traço copiados do estilo do texto); true = um sólido da cor do texto com
+    /// uma máscara por contorno. O texto fica escondido, não sai (como no AE). Um
+    /// passo de desfazer. Devolve o id da camada criada.
+    [[nodiscard]] Result<u64> text_to_vector(u64 layerId, bool asMasks) noexcept;
 
     // --- Animadores de CAMADA (qualquer tipo; timeline/LayerAnimator.hpp) -------
     /// Cada animador = 32 floats (kLayerAnimFloats): 0 ativo, 1 unidade (0
@@ -1330,11 +1366,18 @@ public:
         std::string      source;
         expr::Diagnostic error;       ///< sintaxe ou execução (avaliada no playhead agora)
         f32              value = 0;   ///< valor resultante no playhead (unidade guardada)
+        std::string      text;        ///< v70: texto-fonte (TrackProperty::TextSource) — o texto no playhead
     };
     bool query_expression(u64 layerId, u32 property, u32 effectIndex, u32 paramIndex, ExpressionInfo& out) noexcept;
     /// Trilhas com expressão na camada: 4 u32 por linha (property, effectIndex,
     /// paramIndex, flags: 1 ligada, 2 com erro). Devolve o número de linhas.
     u32 query_expressions(u64 layerId, u32* out, u32 capacityRows) noexcept;
+    /// AE expressions (lote E): os itens do Menu suspenso (`aurea.control.dropdown`,
+    /// o Dropdown Menu Control do AE) do efeito `effectId` da camada. O valor do
+    /// menu continua sendo o índice; a expressão lê 1..N. Vazio em `items` volta
+    /// ao padrão ("Item 1".."Item 3"). Um passo de desfazer.
+    bool set_effect_menu_items(u64 layerId, u32 effectId, const std::vector<std::string>& items) noexcept;
+    [[nodiscard]] std::vector<std::string> effect_menu_items(u64 layerId, u32 effectId) noexcept;
 
     /// Arquivo de mídia da camada de vídeo/áudio (caminho ou content://), para
     /// o provedor de transcrição ler o áudio. Vazio = não tem mídia.
@@ -1347,12 +1390,17 @@ public:
     std::atomic<int> captionProgress{0};
     std::atomic<bool> captionCancelled{false};
     [[nodiscard]] std::string caption_tracks() noexcept;
+    /// Nearest timeline frame for a source-media word, including speed/remap.
+    [[nodiscard]] i64 caption_word_frame(u64 sourceLayer, f64 seconds) noexcept;
     [[nodiscard]] bool edit_caption_track(u64 layerId, const std::string& command) noexcept;
     [[nodiscard]] std::string save_caption_bundle(u64 layerId, const std::string& name) noexcept;
     [[nodiscard]] bool apply_caption_bundle(u64 layerId, const std::string& data) noexcept;
     /// 0.4.6: opções da faixa de legendas (`layerId` = a faixa ou a camada da
     /// fala) em JSON (presets::caption_options_json). Vazio = não tem faixa.
     [[nodiscard]] std::string caption_options(u64 layerId) noexcept;
+    /// 0.5.3: as legendas da faixa (da camada ou feita da fala dela) como SRT ou
+    /// WebVTT, nos tempos da timeline. Vazio = não tem faixa.
+    [[nodiscard]] std::string caption_export(u64 layerId, bool vtt) noexcept;
     /// 0.4.6: troca as opções de uma faixa pronta, num passo de desfazer:
     /// estilo, aparência, tamanho e altura aparecem na hora; agrupamento só
     /// vale ao refazer (os blocos e os tempos ficam).
@@ -1453,6 +1501,48 @@ public:
     /// Mãozinha da Cena 3D: arrasta a vista em pixels da composição; a cena segue o dedo.
     void pan_scene_view(f32 dx, f32 dy) noexcept;
     void reset_scene_pan() noexcept;
+    /// Aurea PC (Cena 3D no jeito do Blender): órbita ortográfica (Numpad 5) e o
+    /// limite do pitch (80° por padrão; até 89,5° para as vistas Topo/Base). Só a
+    /// vista de navegação: nada do projeto nem do export muda.
+    void set_scene_view_options(bool orthographic, f32 pitchLimit) noexcept;
+    /// Leva o alvo da órbita ao centro das camadas dadas (Numpad . = enquadrar a
+    /// seleção; a órbita passa a girar em volta delas). Falso = nenhuma vive no 3D.
+    bool focus_scene_view(const u64* layers, u32 count) noexcept;
+    /// {yaw, pitch, distância, ortográfica 0/1, alvoX, alvoY, alvoZ, limite do pitch}.
+    void query_scene_view(f32 out[8]) noexcept;
+    // --- Aurea PC, Cena 3D fase 1 (caixas, pivôs, cursor 3D, câmera). Consultas e vista: nada
+    // do projeto muda, fora `align_camera_to_scene_view` (um passo de desfazer). -------------
+    static constexpr u32 kLayerBoundsFloats = 26;
+    /// Caixa da camada 3D no instante: [0..2] mínimo e [3..5] máximo no mundo (AABB),
+    /// [6..8] dimensões nos eixos locais (px do mundo), [9..24] os 8 cantos da caixa
+    /// ORIENTADA projetados (x, y em px da composição, pela vista de navegação ou pela
+    /// câmera ativa), [25] 1 se todos os cantos estão na frente da câmera. Modelo: a caixa
+    /// do arquivo em repouso; plano: o retângulo da fonte; câmera, luz e nulo: um ponto.
+    bool query_layer_bounds(u64 layerId, f32* out, u32 capacity) noexcept;
+    /// AABB no mundo ([0..2] mín, [3..5] máx) das camadas dadas (`count` 0 = todas as 3D visíveis).
+    bool query_scene_bounds(const u64* layers, u32 count, f32 out[6]) noexcept;
+    /// Home / Numpad . : alvo no centro da caixa e distância para ela caber (`margin` ≥ 1).
+    bool frame_scene_view(const u64* layers, u32 count, f32 margin) noexcept;
+    /// Origem da camada no mundo (a mesma do gizmo).
+    bool query_layer_world_origin(u64 layerId, f32 out[3]) noexcept;
+    /// Um deslocamento do MUNDO no espaço do pai da camada (o que a Posição dela soma).
+    bool scene_world_delta_to_parent(u64 layerId, const f32 worldDelta[3], f32 out[3]) noexcept;
+    /// Gira a camada `degrees` em volta do eixo (0..2 X/Y/Z do mundo, 3..5 X/Y/Z dela, 6 = o
+    /// olhar da vista) que passa por `pivotWorld` (nulo = a própria origem), partindo de
+    /// `basePos`/`baseRot` (espaço do pai, valores do começo do gesto). Composição de rotações
+    /// de verdade (quaternions), não soma de Euler. `followPointer`: o sentido acompanha o
+    /// ponteiro (eixo apontando para quem olha inverte). Só conta: devolve Posição e Rotação.
+    bool scene_rotate_about(u64 layerId, u32 axis, f32 degrees, bool followPointer, const f32* pivotWorld,
+                            const f32 basePos[3], const f32 baseRot[3], f32 outPos[3], f32 outRot[3]) noexcept;
+    /// Ponto do mundo sob o ponteiro (px da composição): a superfície de um modelo, se
+    /// `surfaces` e houver; senão o plano de frente para a vista que passa por `planePoint`
+    /// (nulo = o alvo da órbita). É o Shift+botão direito do cursor 3D.
+    bool scene_point_at(f32 compX, f32 compY, const f32* planePoint, bool surfaces, f32 out[3]) noexcept;
+    /// Pontos do mundo → px da composição pela vista atual (NaN = atrás da câmera). Devolve quantos projetou.
+    u32 project_scene_points(const f32* xyz, u32 count, f32* outXY) noexcept;
+    /// Ctrl+Alt+Numpad 0: a câmera vai para o olho da vista de navegação, olhando o alvo
+    /// (dois nós, rotação zerada). UM passo de desfazer; trilhas com keyframe ganham key no cabeçote.
+    bool align_camera_to_scene_view(u64 cameraLayer) noexcept;
     /// 0.4.6: vista do palco como no After Effects (só a prévia; a exportação
     /// usa sempre a câmera ativa). Modos (kViewMode*): 0 Câmera ativa,
     /// 1 Câmera padrão, 2 Frente, 3 Trás, 4 Esquerda, 5 Direita, 6 Topo,
@@ -1561,6 +1651,70 @@ public:
     /// Queda do feather (Mask::featherFalloff): 0 suave (gaussiana), 1 linear.
     /// Um passo de desfazer. O valor atual vem em `query_masks` (float 11).
     bool set_mask_falloff(u64 layerId, u32 maskId, u32 falloff) noexcept;
+    // --- Lote M: máscaras e rig do AE (EngineAeMasks.cpp) ---------------------------
+    /// Chaves da máscara: 1 travada (os comandos de edição do caminho recusam),
+    /// 2 oculta (o contorno some do palco; o recorte continua), 4 RotoBezier
+    /// (tangentes automáticas pelos vizinhos). `change` = quais bits trocar.
+    static constexpr u32 kMaskLocked = 1, kMaskHidden = 2, kMaskRotoBezier = 4;
+    bool set_mask_flags(u64 layerId, u32 maskId, u32 flags, u32 change) noexcept;
+    /// Tensão do RotoBezier (0 canto .. 1 curva cheia) do vértice `point`;
+    /// kInvalidIndex = todos os vértices.
+    bool set_mask_roto_tension(u64 layerId, u32 maskId, u32 point, f32 tension, bool continuing) noexcept;
+    /// Feather X e Y separados (px da camada). `y` < 0 = o Y acompanha o X.
+    bool set_mask_feather_xy(u64 layerId, u32 maskId, f32 x, f32 y, bool continuing) noexcept;
+    /// Pontos de feather de largura variável: 5 floats por ponto (trecho, t
+    /// 0..1, raio em px com sinal, tensão 0..1, segurar 0/1). `count` 0 tira todos.
+    static constexpr u32 kFeatherPointFloats = 5;
+    bool set_mask_feather_points(u64 layerId, u32 maskId, const f32* pts5, u32 count, bool continuing) noexcept;
+    /// O que `query_masks` não traz: [0] chaves (kMask*), [1] feather Y (−1 =
+    /// igual ao X), [2] nº de pontos de feather, [3] nº de vértices ligados a
+    /// nulos, [4] nº de tensões; depois 5 floats por ponto de feather e as
+    /// tensões. Devolve os floats necessários; só escreve se couber.
+    static constexpr u32 kMaskExtraHeaderFloats = 5;
+    u32 query_mask_extras(u64 layerId, u32 maskId, f32* out, u32 capacity) noexcept;
+    /// Free Transform Points: aplica o afim `m6` (a b c d tx ty, px da camada)
+    /// aos pontos `indices` (0 índices = todos) da máscara; as tangentes levam a
+    /// parte linear. Caminho animado: grava o key do cabeçote.
+    bool transform_mask_points(u64 layerId, u32 maskId, const u32* indices, u32 count, const f32* m6,
+                               bool continuing) noexcept;
+    /// Create Nulls from Paths (o painel de script do AE). `pathKind` 0 =
+    /// máscara (`a` = id), 1 = caminho vetorial (`a` grupo, `b` caminho).
+    ///  - PointsFollowNulls: um nulo por vértice; o vértice segue o nulo;
+    ///  - NullsFollowPoints: um nulo por vértice; o nulo segue o vértice;
+    ///  - TracePath: um nulo que anda pelo caminho, com o Progresso 0..100 % num
+    ///    "Controle deslizante" dele (keys 0 → 100 em 1 s) e `loop` opcional.
+    /// Um passo de desfazer. Devolve quantos nulos criou (`created` = os ids).
+    enum class NullsFromPath : u32 { PointsFollowNulls = 0, NullsFollowPoints = 1, TracePath = 2 };
+    [[nodiscard]] Result<u32> create_nulls_from_path(u64 layerId, u32 pathKind, u32 a, u32 b, NullsFromPath mode,
+                                                     bool loop, std::vector<u64>* created = nullptr) noexcept;
+    /// Solta as ligações: os vértices do caminho deixam de seguir nulos
+    /// (`pathKind`/`a`/`b` como acima) ou, com `follower`, a camada deixa de
+    /// seguir um caminho (fica onde está no cabeçote).
+    bool clear_path_drivers(u64 layerId, u32 pathKind, u32 a, u32 b) noexcept;
+    bool clear_path_follow(u64 layerId) noexcept;
+    /// Ligação da camada: [0] modo (0 nenhum, 1 vértice, 2 traçar), [1] tipo
+    /// do caminho, [2] a, [3] b, [4] vértice, [5] progresso %, [6] laço,
+    /// [7] id do efeito do progresso (−1 = nenhum), [8] nº de vértices
+    /// vetoriais desta camada ligados a nulos. Devolve 9.
+    u32 query_path_rig(u64 layerId, f32* out, u32 capacity) noexcept;
+    /// Auto-trace (Layer > Auto-trace): máscaras a partir de um canal da
+    /// camada. Imagem: os pixels da fonte. Vídeo: o quadro decodificado (sem
+    /// alfa). `workArea` = um key de caminho por quadro da área de trabalho
+    /// (ou da camada inteira sem área); senão só o quadro do cabeçote.
+    /// `newLayer` = as máscaras vão para um sólido branco novo, filho da
+    /// camada. Síncrono (decodifica): fora da thread de UI. Devolve o nº de
+    /// máscaras criadas; `outLayer` = a camada que as recebeu.
+    struct AutoTraceOptions {
+        u32  channel = 0;              ///< 0 alfa, 1 luminância, 2 R, 3 G, 4 B
+        f32  threshold = 0.5f;         ///< 0..1
+        f32  tolerance = 1.0f;         ///< px da camada
+        f32  minArea = 10.0f;          ///< px² da camada
+        f32  cornerRoundness = 50.0f;  ///< 0..100 %
+        bool workArea = false;
+        bool newLayer = false;
+        bool invert = false;
+    };
+    [[nodiscard]] Result<u32> auto_trace(u64 layerId, const AutoTraceOptions& options, u64* outLayer = nullptr) noexcept;
     bool set_mask_param(u64 layerId, u32 maskId, u32 param, f32 value) noexcept;
     bool toggle_mask_param_key(u64 layerId, u32 maskId, u32 param) noexcept;
     /// Liga/desliga o key do caminho no cabeçote (`keyed` = ficou com key).
@@ -1720,6 +1874,88 @@ public:
     bool set_layer_shy(u64 layerId, bool on) noexcept;
     bool set_hide_shy(bool on) noexcept;
     [[nodiscard]] bool hide_shy() noexcept;
+    /// AE layers (EngineAeLayers.cpp). QUALIDADE da camada (o Quality switch do
+    /// AE): 0 Melhor, 1 Rascunho, 2 Arame — só a prévia muda, o export sai em
+    /// Melhor. `sampling`: 0 bilinear, 1 bicúbica (vale em Melhor). Os bits
+    /// voltam em LayerRow/LayerInfo (`kLayerRowQualityShift`, `kLayerRowFlagBicubic`).
+    bool set_layer_quality(u64 layerId, u32 quality, u32 sampling) noexcept;
+    /// Clipe de animação do modelo 3D (Model3DData::animationClip): −1 = pose
+    /// parada; senão o índice em `model_animation_clips`. Um passo de desfazer.
+    bool set_model_animation_clip(u64 layerId, i32 clip) noexcept;
+    [[nodiscard]] i32 model_animation_clip(u64 layerId) noexcept;
+    /// Nomes dos clipes do arquivo do modelo (vazio = sem animação ou modelo
+    /// ainda não carregado). Nome vazio no arquivo volta vazio (a UI numera).
+    [[nodiscard]] std::vector<std::string> model_animation_clips(u64 layerId) noexcept;
+    /// PAINEL 3D › ANIMAÇÃO do modelo importado (v75; EngineModelPanel.cpp).
+    /// `param`: 0 EVOLUÇÃO (0..1 do clipe; negativo = volta a tocar sozinho e
+    /// apaga os keyframes dela) — com keyframe na trilha
+    /// TrackProperty::ModelAnimProgress, o valor vira (ou troca) o keyframe no
+    /// cabeçote; sem, é o valor parado (a pose fica naquele ponto do clipe);
+    /// 1 REPETIR (0/1); 2 VELOCIDADE (Model3DData::timeScale, 0,05..16; com
+    /// keyframe na trilha TrackProperty::ModelAnimSpeed, vira o keyframe no
+    /// cabeçote); v76: 3 COMEÇAR EM (0..1 do clipe), 4 DE TRÁS PARA FRENTE
+    /// (0/1), 5 IDA E VOLTA (0/1) — os três só valem tocando sozinho.
+    /// Um passo de desfazer (dentro de um gesto aberto, o do gesto).
+    bool set_model_animation_param(u64 layerId, u32 param, f32 value) noexcept;
+    /// ◆ de um parâmetro da Animação no cabeçote (v76): 0 Evolução (o mesmo
+    /// de toggle_model_animation_key), 2 Velocidade (o keyframe novo leva a
+    /// velocidade do instante; tirar o último deixa a velocidade parada nele).
+    /// Um passo de desfazer; os outros parâmetros não têm keyframe.
+    bool toggle_model_animation_param_key(u64 layerId, u32 param) noexcept;
+    /// Liga/desliga o keyframe da Evolução no cabeçote (o valor do keyframe
+    /// novo = a evolução que a prévia mostra ali). Um passo de desfazer.
+    bool toggle_model_animation_key(u64 layerId) noexcept;
+    /// Estado da Animação no cabeçote (kModelAnimationValues valores): [0] clipe
+    /// (−1 parado), [1] duração do clipe (s), [2] evolução parada (−1 =
+    /// sozinho), [3] evolução no cabeçote (0..1, a que a prévia mostra), [4]
+    /// repetir, [5] velocidade, [6] trilha com keyframe, [7] keyframe no
+    /// cabeçote. Falso = não é modelo 3D. Com capacidade ≥
+    /// kModelAnimationValuesV76 vêm também: [8] começar em (0..1), [9] de trás
+    /// para frente, [10] ida e volta, [11] velocidade com keyframe, [12]
+    /// keyframe de velocidade no cabeçote, [13] velocidade no cabeçote.
+    static constexpr u32 kModelAnimationValues = 8;
+    static constexpr u32 kModelAnimationValuesV76 = 14;
+    bool query_model_animation(u64 layerId, f32* out, u32 capacity) noexcept;
+    /// POSIÇÃO DO MODELO (v76; painel 3D): 0 ASSENTAR NO CHÃO (a base da caixa
+    /// do modelo no chão dos outros modelos 3D da composição; sem outro, a 90 %
+    /// da altura da composição), 1 CENTRALIZAR (o centro da caixa no centro da
+    /// composição, profundidade 0), 2 AJUSTAR À TELA (a escala do arquivo faz
+    /// a caixa ocupar 80 % do quadro, e centraliza). Posição com keyframe anda
+    /// inteira (todos os keyframes juntos). Um passo de desfazer.
+    bool place_model_layer(u64 layerId, u32 mode) noexcept;
+
+    /// PAINEL 3D › MATERIAL do modelo importado (EngineModelPanel.cpp): um
+    /// visual para o modelo INTEIRO sobre o caminho de ajuste de material
+    /// (MaterialOverride: cor, opacidade, metal, rugosidade). 0 Original (os
+    /// materiais do arquivo: tira os ajustes), 1 Plástico, 2 Fosco, 3 Metal,
+    /// 4 Cromo, 5 Ouro, 6 Vidro, 7 Neon (v76: corpo escuro e emissão ciano).
+    /// Valor com keyframe vira o keyframe no cabeçote (a regra dos
+    /// deslizantes); as texturas trocadas ficam. Um passo de desfazer.
+    static constexpr u32 kModelMaterialPresets = 8;
+    bool apply_model_material_preset(u64 layerId, u32 preset) noexcept;
+    /// O visual que o modelo mostra agora (todos os materiais batem com ele),
+    /// ou −1 (ajustado à mão / não é modelo importado).
+    [[nodiscard]] i32 model_material_preset(u64 layerId) noexcept;
+    /// A bola do visual `preset` NESTE modelo (o 1º material, com a textura
+    /// dele). Como material_preview: pode ser chamada fora da thread principal.
+    bool model_material_preset_preview(u64 layerId, u32 preset, u32 size, std::vector<u8>& outRgba) noexcept;
+    /// Material "todos" de set_material_param e toggle_material_keys.
+    static constexpr u32 kAllMaterials = 0xFFFFFFFFu;
+    /// Liga/desliga, num passo de desfazer, os keyframes no cabeçote dos
+    /// parâmetros `paramMask` (bits 0..5 = R, G, B, opacidade, metal,
+    /// rugosidade; v76: 6..8 cor da emissão, 9 força da emissão) do material
+    /// `material` (ou kAllMaterials). Algum keyframe ali → tira todos;
+    /// nenhum → põe com os valores do instante.
+    bool toggle_material_keys(u64 layerId, u32 material, u32 paramMask) noexcept;
+    /// EMISSÃO do material no cabeçote (v76): {R, G, B lineares, força}
+    /// (arquivo → ajuste → keyframe). kAllMaterials = o 1º material.
+    bool query_material_emission(u64 layerId, u32 material, f32* out, u32 capacity) noexcept;
+
+    /// Guias da prévia (o Grid/Safe/Rulers do visor do AE), só na tela: bit 0
+    /// grade, bit 1 margens de ação/título, bit 2 réguas. `gridSpacing` em px
+    /// da composição (≤ 0 = 100). Não é gravado no projeto.
+    void set_preview_guides(u32 flags, f32 gridSpacing) noexcept;
+    [[nodiscard]] u32 preview_guides() noexcept;
     /// Solo: com alguma camada em solo, o preview (e o áudio) só tocam as em solo.
     bool set_layer_solo(u64 layerId, bool on) noexcept;
     /// Camadas da composição atual cujo nome ou texto contém `query` (sem
@@ -2053,6 +2289,46 @@ public:
     [[nodiscard]] u32 precomp_depth() noexcept;
     /// Nome da composição aberta.
     [[nodiscard]] std::string current_composition_name() noexcept;
+
+    // --- Grupo aberto NA timeline (0.5.3: "expandir o grupo sem desagrupar") -----
+    // O grupo continua grupo e a composição aberta não muda: a timeline mostra as
+    // camadas de dentro em linhas recuadas e edita no lugar. `groupLayerId` é uma
+    // camada de composição (grupo/pré-composição) da composição ABERTA; os ids de
+    // dentro só valem junto com ele (cada composição tem os seus). Os quadros
+    // destas chamadas estão no tempo da composição aberta: de dentro para fora,
+    // `fora = dentro + início do grupo − offset do grupo`.
+    /// Bit de `LayerRow::reserved0` em query_group_layers: o grupo anda 1:1 com o
+    /// tempo de dentro (sem curva de tempo/velocidade com keyframes, velocidade 1,
+    /// sem reverso, mesmo fps) e a linha pode ser movida/aparada no lugar.
+    static constexpr u32 kGroupRowEditable = 1u;
+    /// Camadas de dentro do grupo, da frente para trás (como query_layers), com
+    /// início/fim/offset já no tempo de fora. 0 = não é grupo / vazio.
+    u32 query_group_layers(u64 groupLayerId, bridge::LayerRow* out, u32 capacity,
+                           char* outNameBlob, u32 nameBlobCapacity) noexcept;
+    /// Move/estica camadas de dentro (início/fim no tempo de fora), num passo de
+    /// desfazer da composição de dentro. Só grupo editável no lugar.
+    Status set_group_layer_ranges(u64 groupLayerId, const u64* layerIds, const i64* starts,
+                                  const i64* ends, u32 count) noexcept;
+    /// `edit_clip_time` (0 aparar início, 1 aparar fim, 6 mover) numa camada de
+    /// dentro; `frame` no tempo de fora. A regra (ímã, fonte, travadas) é a mesma.
+    bool edit_group_clip_time(u64 groupLayerId, u64 layerId, u32 operation, i64 frame) noexcept;
+    /// Miniatura de uma camada de dentro (`timelineFrame` no tempo de fora).
+    u32 query_group_thumbnail(u64 groupLayerId, u64 layerId, i32 timelineFrame, u32 height,
+                              u8* out, u32 capacity, u32* outWidth) noexcept;
+    /// Onda de uma camada de dentro (`startFrame` no tempo de fora).
+    u32 query_group_waveform(u64 groupLayerId, u64 layerId, f64 startFrame, f64 framesPerBucket,
+                             u32 count, u8* out) noexcept;
+private:
+    /// A composição de dentro do grupo da composição aberta (nullptr se não for
+    /// grupo), o deslocamento `fora − dentro` e se o grupo anda 1:1.
+    Composition* group_inner_locked(u64 groupLayerId, i64* delta, bool* linear) noexcept;
+    bool edit_clip_time_locked(u64 layerId, u32 operation, i64 amount, u64 previous, u64 next,
+                               bool atPlayhead, bool extendOnly, bool edgeToFrame) noexcept;
+    u32 query_thumbnail_scoped(u64 groupLayerId, u64 layerId, i32 timelineFrame, u32 height,
+                               u8* out, u32 capacity, u32* outWidth) noexcept;
+    u32 query_waveform_scoped(u64 groupLayerId, u64 layerId, f64 startFrame, f64 framesPerBucket,
+                              u32 count, u8* out) noexcept;
+public:
 
     // --- Copiar e colar -----------------------------------------------------------
     /// Session clipboard; pasting into another project imports its media and
@@ -2448,6 +2724,45 @@ public:
     u32 ease_keyframe_selection(u64 layerId, const i64* references, u32 count, u32 mode) noexcept;
     static constexpr u32 kEasyEaseBoth = 0, kEasyEaseIn = 1, kEasyEaseOut = 2;
 
+    // --- Lote K (AE): assistentes de keyframe (EngineAeKeys.cpp) ----------------
+    // As mesmas referências de `edit_keyframe_selection` (4 i64 por key:
+    // propriedade, efeito, parâmetro, quadro LOCAL). Caminhos (máscara, forma,
+    // malha) ficam de fora. Cada comando é UM passo de desfazer e devolve
+    // quantas trilhas (ou keys) mudaram; 0 = nada a fazer.
+    /// "Time-Reverse Keyframes": inverte no tempo os escolhidos (2+ por trilha)
+    /// dentro do próprio intervalo; as alças de entrada e saída trocam de lado.
+    u32 time_reverse_keyframe_selection(u64 layerId, const i64* references, u32 count) noexcept;
+    /// "Exponential Scale": entre o 1º e o último key escolhido de cada trilha
+    /// de ESCALA, um key por quadro na curva exponencial (zoom com velocidade
+    /// visual constante). As pontas precisam ter o mesmo sinal.
+    u32 exponential_scale_keyframe_selection(u64 layerId, const i64* references, u32 count) noexcept;
+    /// "Smoother": reajuste por mínimos quadrados entre o 1º e o último key
+    /// escolhido (3+ por trilha); `tolerance` = fração da amplitude de cada
+    /// trilha (0.01 = 1 %, como em optimize_keyframes).
+    u32 smooth_keyframe_selection(u64 layerId, const i64* references, u32 count, f32 tolerance) noexcept;
+    /// "Convert Expression to Keyframes": um key por quadro do trecho visível da
+    /// camada (entrada/saída) com o valor da expressão; a expressão fica
+    /// desligada. `references` escolhe as trilhas (o quadro é ignorado); nulo
+    /// ou count 0 = todas as trilhas com expressão ligada. Devolve quantas trilhas.
+    u32 bake_expression_keyframes(u64 layerId, const i64* references, u32 count) noexcept;
+    /// Bits temporais dos escolhidos: 0 = tira automática/contínua (as alças
+    /// ficam), 1 = bézier automática, 2 = bézier contínua, 3 = vagante (só
+    /// posição; os do meio; re-tempo pelo comprimento do caminho), 4 = tira o
+    /// vagante. Devolve quantos keys mudaram.
+    u32 set_keyframe_temporal_mode(u64 layerId, const i64* references, u32 count, u32 mode) noexcept;
+    static constexpr u32 kKeyModeBezier = 0, kKeyModeAuto = 1, kKeyModeContinuous = 2,
+                         kKeyModeRoveOn = 3, kKeyModeRoveOff = 4;
+    /// Bits dos escolhidos: E (todos têm) nos 8 de baixo, OU (algum tem) nos 8
+    /// seguintes (kKeyAutoBezier, kKeyContinuous, kKeyRoving de Curve.hpp).
+    u32 query_keyframe_flags(u64 layerId, const i64* references, u32 count) noexcept;
+    /// Motion Sketch: grava keys de POSIÇÃO (X e Y, espaço do pai) a partir de
+    /// amostras (quadro da composição, x, y) — 3 f64 cada, gravadas enquanto a
+    /// prévia toca. `captureSpeed` 1 = tempo real (2 = toca na metade da
+    /// velocidade gravada, como o "Capture speed at 200%" do AE); `smoothing`
+    /// em px (0 = um key por quadro; acima disso o Suavizador tira keys).
+    /// Troca os keys de posição do trecho. Um passo; devolve quantos quadros.
+    u32 set_position_keys(u64 layerId, const f64* samples, u32 count, f64 captureSpeed, f32 smoothing) noexcept;
+
     /// Área de trabalho [in, out) em quadros da composição. in < 0 ou
     /// out <= in apaga (volta a composição inteira). Um passo de desfazer.
     bool set_work_area(i64 in, i64 out) noexcept;
@@ -2457,6 +2772,13 @@ public:
     /// e a duração vira o tamanho dela (camadas fora somem, as que cruzam são
     /// aparadas, marcas acompanham). Um passo de desfazer.
     bool trim_composition_to_work_area() noexcept;
+    /// Lote K: "Lift Work Area" (extract = false) tira o trecho da área de
+    /// trabalho de todas as camadas desbloqueadas e deixa o buraco; "Extract
+    /// Work Area" (extract = true) tira e fecha o buraco (o que vem depois anda
+    /// para trás). Camadas que cruzam a borda são divididas nela; a duração da
+    /// composição e as marcas da régua ficam. Um passo de desfazer; devolve
+    /// quantas camadas mudaram.
+    u32 lift_work_area(bool extract) noexcept;
     /// Opção da sessão (não vai para o projeto): a próxima exportação sai só
     /// com a área de trabalho da composição (se houver uma).
     void set_export_work_area_only(bool on) noexcept;
@@ -2473,6 +2795,14 @@ public:
     /// do trecho dela. Síncrono (decodifica o áudio): chamar fora da thread de
     /// UI. Devolve o número de batidas; `bpm` recebe o tempo.
     [[nodiscard]] Result<u32> detect_beats(u64 layerId, f64* bpm = nullptr) noexcept;
+    /// Lote X (AE: Convert Audio to Keyframes). Cria o nulo "Amplitude de áudio"
+    /// (ou `name`) com três Controles deslizantes, nesta ordem: canal esquerdo,
+    /// canal direito e os dois; um keyframe por quadro da área de trabalho (ou da
+    /// composição inteira), valor = RMS do quadro × 100. `layerId` 0 = o som da
+    /// composição como ela toca (mudo, solo, volume, pré-composições); senão só
+    /// o som dessa camada. Síncrono (decodifica e mixa o áudio): chamar fora da
+    /// thread de UI. Um passo de desfazer. Devolve o id do nulo.
+    [[nodiscard]] Result<u64> audio_to_keyframes(u64 layerId, const char* name = nullptr) noexcept;
     /// Dados de texto da camada (para a UI editar). false = não é texto.
     bool query_text(u64 layerId, TextData& out) noexcept;
     /// Imagem já decodificada pela plataforma (RGBA8 sRGB, alfa reto).
@@ -2647,6 +2977,10 @@ public:
     /// Estado térmico do aparelho (PowerManager no Android): o preview reduz
     /// as operações caras sob calor; o export não muda.
     void set_thermal(u32 level, bool throttling) noexcept;
+    /// 0.5.3 (P0-7): degrau de memória do export, 0..kExportMemoryStepMax
+    /// (export/ExportMemory.hpp). As telas sobem um degrau a cada export que
+    /// o sistema matou e voltam a 0 no primeiro que termina. Vale na próxima partida.
+    void set_export_memory_step(u32 step) noexcept;
     /// Fração de custo do preview (1 = completo): o menor entre o piso
     /// térmico do instante e o degrau de reduções do AUTO 2.0.
     [[nodiscard]] f32 preview_heavy_scale() const noexcept;
@@ -2699,6 +3033,7 @@ public:
     /// A "Correção de cor" da camada com o papel `role` (1 Filtro, 2 Ajustar):
     /// a que existe ou uma nova (o Filtro antes do Ajustar). Devolve o id do
     /// efeito; kInvalidIndex = falhou (camada travada, cheia, papel inválido).
+    /// Role 3 appends a distinct serial correction node in the existing stack.
     u32 ensure_color_grade(u64 layerId, u32 role) noexcept;
     /// O look `look` (índice dos presets da Correção de cor; −1 = nenhum) na
     /// instância `effectId`: parâmetros e chaves voltam ao padrão (menos papel
@@ -3080,7 +3415,7 @@ public:
 
     /// Whole current composition at540p in either timeline direction. The
     /// private cache preserves alpha and expires on any content revision.
-    [[nodiscard]] Status start_prerender(i32 direction) noexcept;
+    [[nodiscard]] Status start_prerender(i32 direction, u64 groupLayer = 0) noexcept;
     void cancel_prerender() noexcept;
     [[nodiscard]] PreRenderProgress query_prerender_progress() noexcept;
 
@@ -3200,6 +3535,9 @@ private:
     /// Orçamento do processo: o configurado, senão o medido, preso pelo teto
     /// do aparelho (`memoryBudgetCapBytes`) e pelo espaço de endereços.
     [[nodiscard]] u64 process_budget_bytes() const noexcept;
+    /// 0.5.3 (P0-7): orçamento do EXPORT — o do processo, no teto do aparelho
+    /// (memória total, 32 bits) e no degrau de memória (export/ExportMemory.hpp).
+    [[nodiscard]] u64 export_budget_bytes() const noexcept;
     /// Maior lado de textura aceito ao importar modelo 3D — e o MESMO ao
     /// reabrir, senão o quadro muda entre importar e reabrir o projeto.
     [[nodiscard]] u32 model_texture_cap() const noexcept;
@@ -3364,6 +3702,8 @@ private:
     // Omega chrome (área 02): modos de visão da prévia (EngineOmegaChrome.cpp; sob modelMutex_).
     u32 omegaViewMode_ = 0;              ///< 0 normal, 1 só as escolhidas, 2 escolhidas a 50 %
     bool omegaPixelPreview_ = false;
+    u32 previewGuides_ = 0;              ///< set_preview_guides (EngineAeLayers.cpp)
+    f32 previewGridSpacing_ = 100.0f;
     std::vector<u64> omegaViewIds_;      ///< ids empacotados, ordenados
     void apply_omega_view_locked(RenderSettings& rs) const noexcept;
     std::unordered_map<u64, std::shared_ptr<const scene3d::HdriPixels>> hdris_;
@@ -3453,6 +3793,10 @@ private:
     /// 0.4.6: a vista pedida pela cena 3D (set_scene_editor) vence a do palco;
     /// sem ela, vale o modo de vista do AE (`viewMode_`, com a órbita de cada um).
     SceneEditorView workspaceView_{};
+    f32 scenePitchLimit_ = 80.0f;   ///< set_scene_view_options (Aurea PC); 80 = o de sempre
+    /// Caixa local da camada e a matriz que a leva ao mundo (query_layer_bounds). Com o modelo travado.
+    bool scene_layer_box_locked(u64 layerId, Mat4& toWorld, Vec3& lo, Vec3& hi) noexcept;
+    bool scene_bounds_locked(const u64* layers, u32 count, Vec3& lo, Vec3& hi) noexcept;
     u32 viewMode_ = 0;
     struct ViewOrbit { f32 yaw, pitch, distance; };
     ViewOrbit viewOrbits_[11]{};
@@ -3669,6 +4013,7 @@ private:
     std::condition_variable exportWakeCv_;
     /// Calor (set_thermal): o export reduz quadros em voo, nunca a qualidade.
     std::atomic<bool> thermalDegrade_{false};
+    std::atomic<u32> exportMemoryStep_{0};   ///< 0.5.3: set_export_memory_step
     void export_thread_main() noexcept;
     void export_encoder_main() noexcept;
     /// Reclaims returned workers and bounds retained native sessions before
@@ -3676,7 +4021,7 @@ private:
     [[nodiscard]] Status retire_abandoned_export_locked(bool admitNewSession = true) noexcept;
     void image_export_thread_main() noexcept;
     [[nodiscard]] Status start_image_export_internal(const ImageExportSettings& settings, const char* outputPath,
-                                                     i32 preRenderDirection) noexcept;
+                                                     i32 preRenderDirection, u64 preRenderGroupLayer = 0) noexcept;
     /// `error` is published as the progress error (Cancelled for edits/cancel;
     /// the real cause when the producer itself failed).
     void invalidate_prerender(i32 error = static_cast<i32>(Errc::Cancelled)) noexcept;
@@ -3698,6 +4043,11 @@ private:
     mutable std::mutex preRenderStateMutex_;
     PreRenderProgress preRenderProgress_{};
     PreRenderCache::Key preRenderKey_{};
+    bool preRenderGroup_ = false; // preRenderStateMutex_
+    [[nodiscard]] Result<i32> prerender_texture_locked(u64 token, i64 frame, const u16*& pixels) noexcept;
+    /// Lote K: quadro da composição do 1º quadro do PreRender (o começo da área
+    /// de trabalho, ou 0). O cache guarda quadros a partir dele.
+    std::atomic<i64> preRenderFirstFrame_{0};
     std::atomic<u64> preRenderToken_{0};
     std::atomic<bool> preRenderCancel_{false}, preRenderActive_{false};
     struct PreRenderGpuSlot {

@@ -27,7 +27,6 @@ struct TransformView: View {
     /// Mover: modo Z (o trackpad ajusta a profundidade) × modo XY.
     @State private var zPicked = false
     @State private var fineMove = false
-    @State private var blurAdvanced = false
     @State private var gestureOpen = false
     @State private var gestureProject: UUID?
     @State private var gestureLayer: Int64?
@@ -994,9 +993,11 @@ struct TransformView: View {
     // Extras do AUREA: desfoque de movimento e animadores
     // =========================================================================
 
+    /// DESFOQUE DE MOVIMENTO DA CAMADA (F10): só o que é desta camada — liga (e o do
+    /// projeto, se estava desligado), o comprimento do rastro e o desfoque do vídeo.
+    /// Obturador, fase e amostras são da composição: Ajustes do projeto › Prévia e render.
     private var motionBlurFace: some View {
-        let settings = model.motionBlurControls
-        let on = timeFlags & 2 != 0 && settings.enabled
+        let on = timeFlags & 2 != 0 && model.compMotionBlur
         return ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 blurToggle("panel_desfoque_movimento", hint: "panel_borra_camada_direcao_ela_move", checked: on) { enabled in
@@ -1005,18 +1006,6 @@ struct TransformView: View {
                     model.engine.setMotionBlur(enabled, forLayer: id); model.refreshModel(force: true); endGesture()
                 }
                 if on {
-                    motionBlurRow("mb_shutter_angle", value: settings.angle, lower: 0, upper: 720,
-                                  unit: "°", decimals: 1, identifier: "motionblur.shutter", onValue: model.changeShutterAngle)
-                    Text(AureaText.t("mb_comp_settings_hint")).font(.caption)
-                        .foregroundStyle(AureaColors.muted).padding(.top, 4).padding(.leading, 4)
-                    DisclosureGroup(isExpanded: $blurAdvanced) {
-                        motionBlurAdvanced(settings)
-                    } label: {
-                        Text(AureaText.t("mb_advanced")).font(.subheadline.weight(.semibold)).frame(minHeight: 44)
-                            // Scope the identifier to the header; on the group
-                            // SwiftUI also assigns it to every expanded control.
-                            .accessibilityIdentifier("motionblur.advanced")
-                    }.tint(AureaColors.accent).padding(.vertical, 4)
                     // Comprimento do rastro SÓ desta camada (× o obturador do projeto).
                     let length = model.engine.layerMotionBlurLength(id) * 100
                     scalarRow(AureaText.t("la_motion_blur_length"), amount: length, speed: 0.5, limit: 400,
@@ -1024,7 +1013,7 @@ struct TransformView: View {
                         keypad(AureaText.t("la_motion_blur_length"), length, unit: "%", min: 0, max: 400, decimals: 0) {
                             model.engine.setLayerMotionBlurLength($0 / 100, forLayer: id); model.refreshModel(force: true)
                         }
-                    })
+                    }).accessibilityIdentifier("motionblur.length")
                     Text(AureaText.t("la_motion_blur_length_hint")).font(.aurea(size: 11.5))
                         .foregroundStyle(AureaColors.muted).padding(.top, 4).padding(.leading, 4)
                 }
@@ -1033,64 +1022,26 @@ struct TransformView: View {
                         model.engine.setVectorBlur(forLayer: id, amount: enabled ? 1 : 0); model.refreshModel(force: true)
                     }.padding(.top, 8)
                 }
+                // O obturador da composição (ângulo, fase, amostras) mora nos Ajustes do projeto.
+                Button {
+                    model.projectSettingsTab = "render"; model.showProjectSettings = true
+                } label: {
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(AureaText.t("fn_mb_comp_link")).font(.aurea(size: 14, weight: .semibold))
+                            Text(AureaText.t("fn_mb_comp_link_desc")).font(.aurea(size: 11.5)).foregroundStyle(AureaColors.muted)
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                        CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 14, color: AureaColors.muted).mirrorsInRtl()
+                    }.padding(.vertical, 6).padding(.leading, 4).frame(minHeight: 48).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).padding(.top, 6)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(AureaText.t("fn_mb_comp_link"))
+                .accessibilityHint(AureaText.t("fn_mb_comp_link_desc"))
+                .accessibilityAddTraits(.isButton)
+                .accessibilityIdentifier("motionblur.compSettings")
             }.padding(.leading, 8).padding(.trailing, 12).padding(.top, 6).padding(.bottom, 12)
         }
-    }
-
-    private func motionBlurAdvanced(_ settings: MotionBlurControls) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            motionBlurRow("mb_shutter_phase", value: settings.phase, lower: -360, upper: 360,
-                          unit: "°", decimals: 1, identifier: "motionblur.phase", onValue: model.changeShutterPhase)
-            Button(AureaText.t("mb_center_exposure")) { model.centerMotionBlurExposure() }
-                .font(.subheadline).frame(minHeight: 44).accessibilityIdentifier("motionblur.center")
-            Text(AureaText.t("mb_phase_hint")).font(.caption).foregroundStyle(AureaColors.muted)
-            motionBlurRow("mb_samples_per_frame", value: Float(settings.samples), lower: 2,
-                          upper: Float(min(64, settings.adaptiveLimit)), identifier: "motionblur.samples",
-                          onValue: model.changeMotionBlurSamples)
-            motionBlurRow("mb_adaptive_limit", value: Float(settings.adaptiveLimit), lower: Float(settings.samples),
-                          upper: 256, identifier: "motionblur.adaptive", onValue: model.changeMotionBlurAdaptiveLimit)
-            Text(AureaText.t("mb_quality_hint")).font(.caption).foregroundStyle(AureaColors.muted)
-            // 0.3.2: motion blur 3D rápido (vetores) × alta qualidade (amostras).
-            blurToggle("mb_vector_3d", hint: "mb_vector_3d_hint", checked: settings.vectorBlur) { model.setMotionBlurVector($0) }
-                .frame(minHeight: 48)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(AureaText.t("mb_vector_3d"))
-                .accessibilityHint(AureaText.t("mb_vector_3d_hint"))
-                .accessibilityValue(AureaText.t(settings.vectorBlur ? "common_on" : "common_off"))
-                .accessibilityAddTraits(.isButton)
-                .accessibilityAction { model.setMotionBlurVector(!settings.vectorBlur) }
-                .accessibilityIdentifier("motionblur.vector3d")
-        }.padding(.vertical, 4)
-    }
-
-    private func motionBlurRow(_ key: String, value: Float, lower: Float, upper: Float,
-                               unit: String = "", decimals: Int = 0, identifier: String,
-                               onValue: @escaping (Float) -> Void) -> some View {
-        let label = AureaText.t(key)
-        let shown = number(value, decimals: decimals) + unit
-        let edit = { keypad(label, value, unit: unit, min: lower, max: upper, decimals: decimals, onValue: onValue) }
-        return VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(.caption.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 8) {
-                TickRuler(value: { value }, unitsPerDp: decimals == 0 ? 0.1 : 0.5, active: true, height: 44)
-                    .frame(maxWidth: .infinity)
-                    .valueDrag(enabled: true, start: { value }, unitsPerDp: { decimals == 0 ? 0.1 : 0.5 }, min: lower, max: upper,
-                               onStart: beginGesture, onValue: { onValue(decimals == 0 ? $0.rounded() : $0) }, onEnd: endGesture)
-                Button(action: edit) { ValueBox(shown, width: 76).frame(minHeight: 44).contentShape(Rectangle()) }
-                    .buttonStyle(.plain)
-            }
-        }.frame(minHeight: 48).padding(.vertical, 4)
-            .accessibilityElement(children: .ignore).accessibilityLabel(label).accessibilityValue(shown)
-            .accessibilityIdentifier(identifier).accessibilityAction { edit() }
-            .accessibilityAdjustableAction { direction in
-                let next: Float
-                switch direction {
-                case .increment: next = min(upper, value + 1)
-                case .decrement: next = max(lower, value - 1)
-                @unknown default: return
-                }
-                beginGesture(); onValue(next); endGesture()
-            }
     }
 
     private var animatorsFace: some View {
@@ -1246,17 +1197,9 @@ struct TransformView: View {
                                      tag: "transform.autoorient.2") { model.setLayerAutoOrient(2) })
             }
         }
-        // Mais do AUREA: as faces extras e, na câmera, o painel das opções da lente.
-        entries.append(.divider)
-        entries.append(.item(AureaText.t("panel_desfoque_movimento"), glyph: CupertinoGlyph.MotionBlur, selected: tab == 5,
-                             tag: "transform.tab.motionblur") { endGesture(); tab = 5 })
-        entries.append(.item(AureaText.t("la_animators"), glyph: CupertinoGlyph.Sparkles, selected: tab == 6,
-                             tag: "transform.tab.animators") { endGesture(); tab = 6 })
-        if isCamera {
-            entries.append(.item(AureaText.t("om_ap_cam_title"), glyph: CupertinoGlyph.CameraViewfinder, tag: "transform.camera") {
-                endGesture(); model.panel = .camera
-            })
-        }
+        // Funções (13/11/2026): o ⋯ de Transformar fica só com o que é de Transformar.
+        // Desfoque de movimento abre pelo botão da barra da camada; Animadores, pelo
+        // navegador de Efeitos (Funções do Aurea); Opções da câmera, pelo Editar da câmera.
         return entries
     }
 

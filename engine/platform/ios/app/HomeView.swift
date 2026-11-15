@@ -1272,6 +1272,7 @@ struct OmegaPresetRow: View {
 
 @MainActor
 struct HomeCommunityPresets: View {
+    var onUse: ((String) -> Void)? = nil
     @State private var entries: [HomeCommunityEntry] = []
     @State private var offline = false
     @State private var query = ""
@@ -1311,14 +1312,15 @@ struct HomeCommunityPresets: View {
                         Text(entry.name).font(OmegaHomeType.rowTitle).foregroundStyle(AureaColors.lightText)
                         Text(entry.author).font(OmegaHomeType.meta).foregroundStyle(AureaColors.lightTextMuted)
                         if offline { Text(AureaText.t("home_downloaded")).font(.caption) }
-                        else {
-                            Button(AureaText.t(downloading == entry.id ? "home_downloading" : "home_download")) {
+                        if !offline || onUse != nil {
+                            Button(AureaText.t(downloading == entry.id ? "home_downloading" : onUse != nil ? "common_apply" : "home_download")) {
                                 downloading = entry.id
                                 downloadTask = Task {
                                     defer { downloading = nil }
                                     do {
-                                        try await HomeCommunityAPI.download(entry)
+                                        let bundle = try await HomeCommunityAPI.download(entry, cached: offline)
                                         try Task.checkCancellation()
+                                        onUse?(bundle)
                                         failed = false; message = AureaText.t("home_preset_parts_saved")
                                     } catch is CancellationError {} catch {
                                         failed = true; message = AureaText.t("home_community_unavailable")
@@ -1386,7 +1388,17 @@ private enum HomeCommunityAPI {
         let result = try await request("/presets?" + (components.percentEncodedQuery ?? ""))
         return (result["items"] as? [[String: Any]] ?? []).compactMap(HomeCommunityEntry.init)
     }
-    static func download(_ entry: HomeCommunityEntry) async throws {
+    @discardableResult
+    static func download(_ entry: HomeCommunityEntry, cached: Bool = false) async throws -> String {
+        if cached {
+            let url = root.appendingPathComponent(entry.id + ".json")
+            let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+            guard size > 0 && size <= 132 * 1024 else { throw URLError(.dataLengthExceedsMaximum) }
+            let data = try Data(contentsOf: url)
+            guard let entry = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let preset = entry["preset"] as? [String: Any] else { throw URLError(.cannotParseResponse) }
+            return String(decoding: try JSONSerialization.data(withJSONObject: preset), as: UTF8.self)
+        }
         let session = try await request("/session", post: true)
         guard let token = session["token"] as? String else { throw URLError(.userAuthenticationRequired) }
         let received = try await request("/presets/\(entry.id)/download", post: true, token: token)
@@ -1413,6 +1425,7 @@ private enum HomeCommunityAPI {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let stored: [String: Any] = ["id": entry.id, "name": entry.name, "author": entry.author, "preset": preset]
         try JSONSerialization.data(withJSONObject: stored).write(to: root.appendingPathComponent(entry.id + ".json"), options: .atomic)
+        return String(decoding: bytes, as: UTF8.self)
     }
 }
 

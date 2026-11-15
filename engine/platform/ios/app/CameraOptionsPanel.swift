@@ -157,7 +157,13 @@ struct CameraOptionsPanel: View {
             onKeyframe: canKey ? { toggleKeys() } : nil,
             onDeleteAllKeyframes: canKey ? { deleteAllKeys(tracks) } : nil,
             onCurve: canKey ? { openCurve(tracks) } : nil,
-            curveReady: tracks.contains { keys($0).count >= 2 })
+            curveReady: tracks.contains { keys($0).count >= 2 },
+            // F6 (D3): a Cena 3D (ambiente, render) da composição a partir da câmera (par do Android).
+            moreEntries: {
+                [.item(AureaText.t("fn_3d_scene"), glyph: CupertinoGlyph.Lightbulb, tag: "camera.more.scene3d") {
+                    model.face3D = .scene; model.openPanel(.layer3D)
+                }]
+            })
     }
 
     private func updateTimelineFocus() {

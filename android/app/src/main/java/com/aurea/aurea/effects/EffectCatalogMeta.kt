@@ -221,6 +221,10 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     put("aurea.control.checkbox", EffectMeta(R.string.fx_desc_control_checkbox, AllTargets))
     put("aurea.control.color", EffectMeta(R.string.fx_desc_control_color, AllTargets))
     put("aurea.control.point", EffectMeta(R.string.fx_desc_control_point, AllTargets))
+    // AE expressions (lote E).
+    put("aurea.control.dropdown", EffectMeta(R.string.fx_desc_control_dropdown, AllTargets))
+    put("aurea.control.layer", EffectMeta(R.string.fx_desc_control_layer, AllTargets))
+    put("aurea.control.point3d", EffectMeta(R.string.fx_desc_control_point3d, AllTargets))
     // --- Pacote de paridade: movimento, transições por forma e acabamento ---
     put("aurea.motion.oscillate.cycles", EffectMeta(R.string.fx_desc_oscillate_cycles, AllTargets))
     put("aurea.motion.oscillate", EffectMeta(R.string.fx_desc_motion_oscillate, AllTargets))
@@ -438,6 +442,25 @@ private val Table: Map<Int, EffectMeta> = buildMap {
         "rastreio rastrear camera tracking track 3d cena match move seguimiento трекинг ट्रैकिंग تتبع pelacakan"))
     put(EffectTool.Mask.key, EffectMeta(R.string.fxui_tool_mask_desc, AllTargets,
         "mascara mask roto recorte desenhar forma esconder mostrar mascara маска मास्क قناع masker"))
+    // Funções do AUREA (13/11/2026): as funções da camada que abrem pelo navegador.
+    put(EffectTool.Animation.key, EffectMeta(R.string.fn_tool_animation_desc, AllTargets,
+        "animacao animadores animators animator entrada saida in out wiggle texto letras text animation анимация एनिमेशन تحريك animasi"))
+    put(EffectTool.Tracking.key, EffectMeta(R.string.fn_tool_tracking_desc, listOf(EffectTarget.Video),
+        "rastreio rastrear tracking track ponto point planar cantos corner pin estabilizar stabilize stabilizer трекинг ट्रैकिंग تتبع pelacakan"))
+    put(EffectTool.PreciseCut.key, EffectMeta(R.string.fn_tool_precise_cut_desc, listOf(EffectTarget.Video, EffectTarget.Audio),
+        "corte preciso slip roll slide deslizar rolar escorregar congelar quadro freeze frame quadro a quadro trim обрезка कट قص potong"))
+    put(EffectTool.Puppet.key, EffectMeta(R.string.fn_tool_puppet_desc, listOf(EffectTarget.Imagem),
+        "fantoche marionete puppet pinos pins deformar warp boneco марионетка कठपुतली دمية boneka"))
+    put(EffectTool.RigMocap.key, EffectMeta(R.string.fn_tool_rig_desc, listOf(EffectTarget.Cena3D),
+        "rig esqueleto ossos bones skeleton ik mocap motion capture captura de movimento auto rig скелет कंकाल هيكل kerangka"))
+    put(EffectTool.ShapeOperators.key, EffectMeta(R.string.fn_tool_operators_desc, listOf(EffectTarget.Vetor),
+        "operadores operators juntar merge modificadores modifiers repetidor repeater offset pucker roughen wiggle twist zigzag оператор ऑपरेटर عوامل operator"))
+    put(EffectTool.Layer3D.key, EffectMeta(R.string.fn_tool_layer3d_desc, AllTargets,
+        "3d camada 3d layer 3d profundidade depth osso bone objeto 3d object luzes lights camera grupo 3д त्रिविम ثلاثي"))
+    put(EffectTool.TextLayout.key, EffectMeta(R.string.fn_text_layout_desc, listOf(EffectTarget.Texto),
+        "layout texto text espacamento spacing entrelinha leading letras tracking caixa box paragrafo caminho path dinamico dynamic contador counter макет लेआउट تخطيط tata letak"))
+    put(EffectTool.LayerOptions.key, EffectMeta(R.string.fn_tool_layer_options_desc, AllTargets,
+        "camada layer ajuste adjustment guia guide transparencia transparency shy timida linha magnetica magnetic qualidade quality слой परत طبقة lapisan"))
     // --- IA: a rede lê a FONTE da camada (foto ou vídeo) ---
     put("aurea.ai.depth_map", EffectMeta(R.string.fx_desc_ai_depth_map, listOf(EffectTarget.Imagem, EffectTarget.Video),
         "profundidade depth mapa ia ai midas distancia perto longe z matte fundo"))
@@ -546,6 +569,7 @@ fun effectCategoryLabel(category: String): String = when (normalizeSearch(catego
     "texto" -> stringResource(R.string.panel_texto)
     "rastreio" -> stringResource(R.string.panel_rastreio)
     "mascara" -> stringResource(R.string.sh_dock_mask)
+    "ferramentas" -> stringResource(R.string.fn_group_aurea_tools)   // funções do AUREA (13/11/2026)
     // Efeitos mais novos publicam a categoria em inglês: traduz igual.
     "distort" -> stringResource(R.string.cat_distort)
     "light" -> stringResource(R.string.cat_light)
@@ -684,6 +708,15 @@ fun toolLabelRes(tool: EffectTool): Int = when (tool) {
     EffectTool.Captions -> R.string.fxui_tool_captions
     EffectTool.CameraTrack -> R.string.fxui_tool_camera_track
     EffectTool.Mask -> R.string.fxui_tool_mask
+    EffectTool.Animation -> R.string.la_animators
+    EffectTool.Tracking -> R.string.panel_rastreio
+    EffectTool.PreciseCut -> R.string.fn_tool_precise_cut
+    EffectTool.Puppet -> R.string.fx_name_puppet
+    EffectTool.RigMocap -> R.string.fn_tool_rig
+    EffectTool.ShapeOperators -> R.string.edt_vec_operators
+    EffectTool.Layer3D -> R.string.fn_tool_layer3d
+    EffectTool.LayerOptions -> R.string.fn_tool_layer_options
+    EffectTool.TextLayout -> R.string.fn_text_layout
 }
 
 /** O desenho da ferramenta no cartão (ela não tem prévia renderizada). */
@@ -691,6 +724,15 @@ fun toolGlyph(tool: EffectTool): Char = when (tool) {
     EffectTool.Captions -> CupertinoGlyph.CaptionsBubble
     EffectTool.CameraTrack -> com.aurea.aurea.editor.ShellGlyph.Viewfinder
     EffectTool.Mask -> CupertinoGlyph.PencilOutline
+    EffectTool.Animation -> CupertinoGlyph.Sparkles
+    EffectTool.Tracking -> com.aurea.aurea.editor.ShellGlyph.Viewfinder
+    EffectTool.PreciseCut -> CupertinoGlyph.Scissors
+    EffectTool.Puppet -> CupertinoGlyph.PersonCropCircle
+    EffectTool.RigMocap -> CupertinoGlyph.Person3
+    EffectTool.ShapeOperators -> CupertinoGlyph.Scribble
+    EffectTool.Layer3D -> CupertinoGlyph.Cube
+    EffectTool.LayerOptions -> CupertinoGlyph.SliderHorizontal3
+    EffectTool.TextLayout -> CupertinoGlyph.DocText
 }
 
 /** O nome que o cartão mostra: o da ferramenta traduzido, ou o do efeito. */
@@ -701,6 +743,7 @@ fun pickerEntryName(entry: EffectCatalogEntry): String =
 /** O rótulo do ladrilho de um grupo. */
 @StringRes
 fun effectGroupLabelRes(group: EffectGroup): Int = when (group) {
+    EffectGroup.AureaTools -> R.string.fn_group_aurea_tools
     EffectGroup.ColorLight -> R.string.fxui_group_color_light
     EffectGroup.Blur -> R.string.fxui_group_blur
     EffectGroup.Distort -> R.string.fxui_group_distort
@@ -876,6 +919,7 @@ fun effectTags(entry: EffectCatalogEntry): List<String> {
 
 /** O glifo do ladrilho quando o grupo não tem prévia (Texto, 3D, Áudio). */
 fun effectGroupGlyph(group: EffectGroup): Char = when (group) {
+    EffectGroup.AureaTools -> CupertinoGlyph.Wrench
     EffectGroup.ColorLight -> CupertinoGlyph.Sparkles
     EffectGroup.Blur -> CupertinoGlyph.DropFill
     EffectGroup.Distort, EffectGroup.Motion -> CupertinoGlyph.Move

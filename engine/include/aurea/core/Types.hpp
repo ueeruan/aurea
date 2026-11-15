@@ -289,6 +289,16 @@ enum class TrackProperty : u16 {
     TextSource,
     /// Câmera de dois nós: o Ponto de Interesse (px do espaço do pai), animável.
     CameraPoiX, CameraPoiY, CameraPoiZ,
+    /// EVOLUÇÃO do clipe de animação do modelo 3D importado (v75): 0..1 do
+    /// clipe escolhido (Model3DData::animProgress é o valor parado; negativo =
+    /// o clipe toca sozinho com o tempo da camada). effectIndex = kInvalidIndex,
+    /// paramIndex = 0. Ver model_clip_seconds (Layer.hpp).
+    ModelAnimProgress,
+    /// VELOCIDADE do clipe do modelo 3D com keyframe (v76; painel 3D ›
+    /// Animação): 1 = 100 %. O valor parado é Model3DData::timeScale; com
+    /// keyframes, o tempo do clipe é a integral dela (Layer::speed_integral),
+    /// como a Velocidade do conteúdo. effectIndex = kInvalidIndex, paramIndex = 0.
+    ModelAnimSpeed,
     _Count,
 };
 static_assert(static_cast<u16>(TrackProperty::MeshWarp) == 44);
@@ -297,6 +307,8 @@ static_assert(static_cast<u16>(TrackProperty::TextPathLastMargin) == 47);
 static_assert(static_cast<u16>(TrackProperty::VectorPath) == 48);
 static_assert(static_cast<u16>(TrackProperty::MaskPath) == 49);
 static_assert(static_cast<u16>(TrackProperty::TextSource) == 50 && static_cast<u16>(TrackProperty::CameraPoiZ) == 53);
+static_assert(static_cast<u16>(TrackProperty::ModelAnimProgress) == 54);
+static_assert(static_cast<u16>(TrackProperty::ModelAnimSpeed) == 55);
 
 enum class ExportCodec : u16 {
     H264 = 0, HEVC, AV1, ProRes,

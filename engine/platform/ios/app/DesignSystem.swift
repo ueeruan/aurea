@@ -1139,59 +1139,12 @@ struct LeftRail: View {
         self.onBack = onBack
     }
 
+    // F11 (13/11/2026): a coluna é a MESMA da moldura comum (`PanelFrame`): ‹ · ◆ · curva · = · ⋯
+    // nos mesmos lugares e no mesmo tamanho em todo painel de função (par do LeftRail.kt).
     var body: some View {
-        VStack(spacing: LeftRailLayout.gap) {
-            // 0.3.4 painéis: ícones da coluna em `PanelMetrics.railIcon` (26).
-            cell(label: AureaText.t("panel_voltar_ferramentas"), action: onBack) {
-                MaterialGlyph("rounded.ChevronLeft", size: PanelMetrics.railIcon).mirrorsInRtl()
-            }
-            cell(label: keyframeLook == .keyHere
-                    ? AureaText.t("panel_tirar_keyframe_daqui")
-                    : AureaText.t("panel_marcar_keyframe_aqui"),
-                 action: onKeyframe) {
-                KeyframeDiamondIcon(look: keyframeLook, enabled: onKeyframe != nil)
-                    .scaleEffect(PanelMetrics.railIcon / AureaDims.diamondIcon)
-            }
-            cell(label: AureaText.t("panel_editar_curva_propriedade"), action: onCurve) {
-                CurveRailIcon(enabled: onCurve != nil, animated: curveAnimated)
-                    .scaleEffect(PanelMetrics.railIcon / AureaDims.curveIcon)
-            }
-            if let onExpression {
-                cell(label: AureaText.t("panel_adicionar_expressao"), action: onExpression) {
-                    Text("=").font(.aurea(size: PanelMetrics.railExpression, weight: .bold))
-                        .foregroundStyle(expression == .none ? AureaColors.text : AureaColors.accent)
-                }
-            }
-            Spacer(minLength: 0)
-            if let onMore {
-                RailMoreButton(active: false, onClick: onMore)
-                    .frame(width: LeftRailLayout.cell, height: LeftRailLayout.cell)
-            }
-        }
-        .padding(.top, LeftRailLayout.padTop)
-        .padding(.bottom, LeftRailLayout.padBottom)
-        .frame(width: LeftRailLayout.width)
-        .frame(maxHeight: .infinity)
-        .overlay(alignment: .trailing) {
-            Rectangle()
-                .fill(ParamRowColors.railLine)
-                .frame(width: 1)
-        }
-    }
-
-    @ViewBuilder
-    private func cell<Content: View>(label: String, action: (() -> Void)?,
-                                     @ViewBuilder content: () -> Content) -> some View {
-        let target = content()
-            .frame(width: LeftRailLayout.cell, height: LeftRailLayout.cell)
-            .contentShape(Rectangle())
-        if let action {
-            Button(action: action) { target }
-                .buttonStyle(AureaPressStyle(shrink: 1))
-                .accessibilityLabel(label)
-        } else {
-            target
-        }
+        PanelFrame(railOnly: PanelRail(onBack: onBack, keyframeLook: keyframeLook, onKeyframe: onKeyframe,
+                                       onCurve: onCurve, curveReady: curveAnimated || onCurve != nil,
+                                       expression: expression, onExpression: onExpression, onMore: onMore))
     }
 }
 
@@ -1775,12 +1728,28 @@ struct PanelTab {
     let label: String
     var glyph: Character? = nil
     var icon: String? = nil
+    /// Id de teste próprio da aba (nil = `panel.tab.<n>`); os painéis antigos guardam os deles (F11).
+    var tag: String? = nil
     private let altBox: [PanelTab]
     var alt: PanelTab? { altBox.first }
 
-    init(id: String, label: String, glyph: Character? = nil, icon: String? = nil, alt: PanelTab? = nil) {
-        self.id = id; self.label = label; self.glyph = glyph; self.icon = icon
+    init(id: String, label: String, glyph: Character? = nil, icon: String? = nil, alt: PanelTab? = nil, tag: String? = nil) {
+        self.id = id; self.label = label; self.glyph = glyph; self.icon = icon; self.tag = tag
         self.altBox = alt.map { [$0] } ?? []
+    }
+}
+
+/// F11 (13/11/2026): as peças da moldura comum usadas sozinhas, para que TODO painel de função
+/// tenha a mesma coluna esquerda e a mesma coluna de abas (par do `LeftRail`/`PanelIconTabs`
+/// do Android, que agora desenham `FrameLeftRail`/`FrameRightRail`).
+extension PanelFrame where Content == EmptyView {
+    init(railOnly rail: PanelRail) {
+        self.init(rail: rail) { EmptyView() }
+        self.only = 1
+    }
+    init(tabsOnly tabs: [PanelTab], selectedTab: String?, onTab: @escaping (String) -> Void) {
+        self.init(rail: PanelRail(onBack: {}), tabs: tabs, selectedTab: selectedTab, onTab: onTab) { EmptyView() }
+        self.only = 2
     }
 }
 
@@ -1816,21 +1785,37 @@ struct PanelFrame<Content: View>: View {
     private let selectedTab: String?
     private let onTab: (String) -> Void
     private let scrollContent: Bool
+    /// Coluna esquerda própria de um editor de modo (a coluna do Editar pontos, na aba
+    /// Forma da máscara). Nula = o trilho comum ‹ ◆ curva ⋯ de `rail` (par do PanelChrome.kt).
+    private let leftColumn: AnyView?
+    /// Faixa entre o conteúdo e as abas (a faixa de pontos do Editar pontos).
+    private let trailing: AnyView?
     private let content: () -> Content
+    /// F11: 0 = a moldura inteira; 1 = só a coluna esquerda (`LeftRail`); 2 = só as abas (`PanelIconTabs`).
+    private var only = 0
     @State private var moreOpen = false
 
     /// - `tabs`: no máximo 4; com 0 ou 1 a coluna direita não existe.
     /// - `selectedTab`: o `PanelTab.id` ativo (ou o id da `alt` dele).
     /// - `scrollContent`: o conteúdo rola por dentro (padrão); falso para listas próprias.
     init(rail: PanelRail, tabs: [PanelTab] = [], selectedTab: String? = nil, onTab: @escaping (String) -> Void = { _ in },
-         scrollContent: Bool = true, @ViewBuilder content: @escaping () -> Content) {
+         scrollContent: Bool = true, leftColumn: AnyView? = nil, trailing: AnyView? = nil,
+         @ViewBuilder content: @escaping () -> Content) {
         self.rail = rail; self.tabs = tabs; self.selectedTab = selectedTab; self.onTab = onTab
-        self.scrollContent = scrollContent; self.content = content
+        self.scrollContent = scrollContent; self.leftColumn = leftColumn; self.trailing = trailing; self.content = content
     }
 
     var body: some View {
+        switch only {
+        case 1: leftRail.background(AureaColors.panelFrameBackground)
+        case 2: rightRail.background(AureaColors.panelFrameBackground)
+        default: fullFrame
+        }
+    }
+
+    private var fullFrame: some View {
         HStack(spacing: 0) {
-            leftRail
+            if let leftColumn { leftColumn } else { leftRail }
             divider
             Group {
                 if scrollContent {
@@ -1843,6 +1828,10 @@ struct PanelFrame<Content: View>: View {
             .background(AureaColors.panelFrameContent)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("panel.content")
+            if let trailing {
+                divider
+                trailing
+            }
             if tabs.count >= 2 {
                 divider
                 rightRail
@@ -1962,7 +1951,7 @@ struct PanelFrame<Content: View>: View {
                 .buttonStyle(AureaPressStyle(shrink: 1))
                 .accessibilityLabel(shown.label)
                 .accessibilityAddTraits(on ? .isSelected : [])
-                .accessibilityIdentifier("panel.tab.\(index)")
+                .accessibilityIdentifier(tab.tag ?? "panel.tab.\(index)")
             }
         }
         .frame(width: PanelFrameMetrics.railWidth)
@@ -2661,30 +2650,12 @@ struct PanelIconTabs: View {
     let group: String
     let onSelect: (Int) -> Void
 
+    // F11: é a MESMA coluna de abas da moldura comum, com os ids de cada painel (`panel3d.tab.*`…).
     var body: some View {
-        VStack(spacing: 0) {
-            ForEach(Array(tabs.enumerated()), id: \.offset) { index, item in
-                let on = index == selected
-                let ink = on ? AureaColors.accent : AureaColors.text
-                Button { onSelect(index) } label: {
-                    VStack(spacing: 3) {
-                        CupertinoGlyph.text(item.glyph, size: 20, color: ink)
-                        Text(item.label).font(.aurea(size: 9.5, weight: on ? .bold : .regular)).foregroundStyle(ink)
-                            .lineLimit(1).minimumScaleFactor(0.8)
-                    }
-                    .frame(maxWidth: .infinity).frame(height: 56)
-                    .background(on ? AureaColors.accentDim : Color.clear, in: RoundedRectangle(cornerRadius: 5))
-                    .padding(3)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(AureaPressStyle(shrink: 1))
-                .accessibilityIdentifier(item.id)
-                .accessibilityAddTraits(on ? [.isSelected] : [])
-            }
-            Spacer(minLength: 0)
-        }
-        .frame(width: 60)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(group)
+        PanelFrame(tabsOnly: tabs.map { PanelTab(id: $0.id, label: $0.label, glyph: $0.glyph, tag: $0.id) },
+                   selectedTab: tabs.indices.contains(selected) ? tabs[selected].id : nil,
+                   onTab: { id in if let index = tabs.firstIndex(where: { $0.id == id }) { onSelect(index) } })
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(group)
     }
 }

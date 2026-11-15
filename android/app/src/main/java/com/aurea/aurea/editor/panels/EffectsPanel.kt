@@ -364,12 +364,11 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
     val hasCameraTrack by remember(store) {
         derivedStateOf { store.detail?.kind == LayerType.Video.kind && store.cameraTrack?.state == 2 }
     }
-    val tools = buildList {
-        if (!tabbed) return@buildList
-        if (maskTool) add(EffectTool.Mask)
-        if (hasCameraTrack) add(EffectTool.CameraTrack)
-        if (captionCount > 0) add(EffectTool.Captions)
-    }
+    // Funções (F8, 13/11/2026): a lista de Efeitos mostra SÓ efeitos. Máscara, legendas e
+    // rastreio de câmera têm porta própria (botão Máscara / Editar da grade, navegador de
+    // Efeitos, Funções do Aurea › Rastreio); as linhas de ferramenta saíram daqui.
+    val tools = emptyList<EffectTool>()
+    @Suppress("UNUSED_VARIABLE") val toolState = Triple(maskTool, hasCameraTrack, captionCount)
     var adding by remember(layerId) { mutableStateOf(false) }
     var toolToRemove by remember { mutableStateOf<EffectTool?>(null) }
     val hasAudio by remember(store) { derivedStateOf { store.detail?.hasAudio == true } }
@@ -702,7 +701,7 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
                             count = when (tool) {
                                 EffectTool.Mask -> maskCount
                                 EffectTool.Captions -> captionCount
-                                EffectTool.CameraTrack -> 0
+                                else -> 0
                             },
                             onOpen = { openEffectTool(env, tool) },
                             onRemove = if (tool == EffectTool.CameraTrack) null else ({ toolToRemove = tool }),
@@ -1108,7 +1107,8 @@ private fun removeEffectTool(store: EditorStore, tool: EffectTool) {
             store.captions.open(layer)
             store.captions.removeAll()
         }
-        EffectTool.CameraTrack -> Unit
+        // Rastreio de câmera e as funções do AUREA não entram na pilha: não há o que tirar.
+        else -> Unit
     }
 }
 
@@ -1426,8 +1426,8 @@ private const val SPECIAL_HEADBOP = 52
 
 /**
  * O CORPO, na ordem do P0-3: 1) ferramentas do efeito especial; 2) "Variação"
- * (≥ 2 presets); 3) linhas soltas; 4) "Avançado" desenhado como seção (recolhida);
- * 5) seções do motor. Seção recolhida não lista os membros.
+ * (≥ 2 presets); 3) linhas soltas; 4) seções do motor; 5) "Avançado" desenhado como
+ * seção (recolhida), sempre a última (F8). Seção recolhida não lista os membros.
  */
 private fun fxBodyItems(store: EditorStore, effectId: Int, typeId: Int, visible: List<ParamSlot>, advancedOpen: Boolean): List<FxBody> = buildList {
     if (typeId == effectTypeId("aurea.key.rotobrush")) add(FxBody.Special(SPECIAL_ROTO))
@@ -1451,13 +1451,14 @@ private fun fxBodyItems(store: EditorStore, effectId: Int, typeId: Int, visible:
     if (typeId == effectTypeId("aurea.audio.parametric_eq")) add(FxBody.Special(SPECIAL_EQ))
     val layout = effectLayout(typeId, visible)
     layout.main.forEach { add(FxBody.Param(it, null)) }
-    if (layout.advanced.isNotEmpty()) {
-        add(FxBody.Section(FxSection(0, "advanced", "", null, advancedOpen, layout.advanced), advanced = true))
-        if (advancedOpen) layout.advanced.forEach { add(FxBody.Param(it, null)) }
-    }
     layout.sections.forEach { sec ->
         add(FxBody.Section(sec, advanced = false))
         if (sec.open) sec.params.forEach { add(FxBody.Param(it, sec.toggle?.label ?: sec.label)) }
+    }
+    // Funções (F8): "Avançado" é a ÚLTIMA seção, no mesmo nível das outras (antes vinha no meio).
+    if (layout.advanced.isNotEmpty()) {
+        add(FxBody.Section(FxSection(0, "advanced", "", null, advancedOpen, layout.advanced), advanced = true))
+        if (advancedOpen) layout.advanced.forEach { add(FxBody.Param(it, null)) }
     }
 }
 

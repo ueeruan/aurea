@@ -55,6 +55,7 @@ import com.aurea.aurea.editor.ShellColors
 import com.aurea.aurea.editor.ChromeButton
 import com.aurea.aurea.editor.ShellGlyph
 import com.aurea.aurea.ui.theme.CupertinoGlyph
+import com.aurea.aurea.engine.AureaEngine
 import com.aurea.aurea.engine.KeyframeRow
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.theme.AureaColors
@@ -107,7 +108,16 @@ fun Timeline(
     val view = androidx.compose.ui.platform.LocalView.current
     val scope = rememberCoroutineScope()
     val state = remember { TimelineState() }
+    // Zoom pedido de fora (atalhos do Aurea PC); o cabeçote fica onde está.
     val controller = remember(store) { TimelineController(store, state, scope) }
+    // Zoom pedido de fora (atalhos do Aurea PC). No modo AE o cabeçote fica no lugar da tela.
+    androidx.compose.runtime.LaunchedEffect(state) {
+        TimelineZoomRequests.flow.collect { f -> if (TimelinePlatform.anchorAtStart) controller.aeZoom(f) else state.pps = Zoom.clamp(state.pps * f) }
+    }
+    // Modo AE: tocando, a vista vira a página quando o cabeçote sai dela.
+    if (TimelinePlatform.anchorAtStart) androidx.compose.runtime.LaunchedEffect(controller) {
+        androidx.compose.runtime.snapshotFlow { store.playhead }.collect { controller.aeFollow() }
+    }
     val painter = remember(metrics, measurer) { TimelinePainter(metrics, measurer) }
     val cachedFrames by remember(store) { derivedStateOf { store.previewBufferRanges.sumOf { it.endFrame - it.startFrame }.toInt() } }
     // Trilhas abertas de uma camada que ainda existe (só o booleano recompõe).
@@ -172,6 +182,7 @@ fun Timeline(
                     state.height = it.height
                 }
                 .pointerInput(controller) { with(controller) { handleGestures() } }
+                .pointerInput(controller) { with(controller) { handleWheel() } }
                 .drawBehind { painter.draw(this, controller) },
         )
         // Máscara de recorte: a pílula desenha o "↳"; o leitor de tela ouve
@@ -311,6 +322,8 @@ private fun KeyActionBar(store: EditorStore, compact: Boolean, modifier: Modifie
         KeyAction(stringResource(R.string.aet_easy_ease_in), "timeline.keys.easyEaseIn", enabled = count > 0) { store.easeTimelineKeys(1) }
         KeyAction(stringResource(R.string.aet_easy_ease_out), "timeline.keys.easyEaseOut", enabled = count > 0) { store.easeTimelineKeys(2) }
         KeyScaleAction(store, enabled = count > 1)
+        // Lote K (AE): os assistentes de keyframe num menu só — só no Aurea PC.
+        if (com.aurea.aurea.ui.platform.PlatformFeatures.desktopAe) KeyAssistAction(store, count)
         KeyAction(stringResource(R.string.editor_concluir), "timeline.keys.done") { store.clearKeySelection() }
     }
 }
@@ -328,6 +341,59 @@ private fun KeyScaleAction(store: EditorStore, enabled: Boolean) {
                 }
             }
             AnchoredMenu(expanded = true, onDismiss = { open = false }, entries = entries, tag = "timeline.keys.scale.menu")
+        }
+    }
+}
+
+/**
+ * Lote K (AE): "Assistentes" da seleção de keyframes — inverter no tempo,
+ * escala exponencial, suavizador, bézier automática/contínua, vagar no tempo,
+ * expressão em keyframes e o Motion Sketch. Cada item é um passo de desfazer;
+ * a regra mora no motor.
+ */
+@Composable
+private fun KeyAssistAction(store: EditorStore, count: Int) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        KeyAction(stringResource(R.string.aek_tools), "timeline.keys.assist") { open = true }
+        if (open) {
+            // Bits que TODOS os escolhidos têm, lidos quando o menu abre.
+            val flags = remember { store.timelineKeyFlags() }
+            val auto = (flags and AureaEngine.KEY_FLAG_AUTO) != 0
+            val continuous = (flags and AureaEngine.KEY_FLAG_CONTINUOUS) != 0
+            val roving = (flags and AureaEngine.KEY_FLAG_ROVING) != 0
+            val levels = listOf(0.01f to "1%", 0.03f to "3%", 0.08f to "8%")
+            val entries = listOf(
+                MenuEntry.Item(stringResource(R.string.aek_time_reverse), enabled = count > 1, tag = "timeline.keys.assist.reverse") {
+                    store.timeReverseTimelineKeys()
+                },
+                MenuEntry.Item(stringResource(R.string.aek_exponential_scale), enabled = count > 1, tag = "timeline.keys.assist.expScale") {
+                    store.exponentialScaleTimelineKeys()
+                },
+                MenuEntry.Item(stringResource(R.string.aek_smoother), enabled = count > 2, tag = "timeline.keys.assist.smoother",
+                    submenu = levels.map { (tolerance, label) ->
+                        MenuEntry.Item(stringResource(R.string.aek_smoother_level, label), tag = "timeline.keys.assist.smoother.$label") {
+                            store.smoothTimelineKeys(tolerance)
+                        }
+                    }),
+                MenuEntry.Divider,
+                MenuEntry.Item(stringResource(R.string.aek_auto_bezier), checked = auto, enabled = count > 0, tag = "timeline.keys.assist.auto") {
+                    store.setTimelineKeyMode(if (auto) AureaEngine.KEY_MODE_BEZIER else AureaEngine.KEY_MODE_AUTO)
+                },
+                MenuEntry.Item(stringResource(R.string.aek_continuous_bezier), checked = continuous, enabled = count > 0, tag = "timeline.keys.assist.continuous") {
+                    store.setTimelineKeyMode(if (continuous) AureaEngine.KEY_MODE_BEZIER else AureaEngine.KEY_MODE_CONTINUOUS)
+                },
+                MenuEntry.Item(stringResource(R.string.aek_rove), checked = roving, enabled = count > 0, tag = "timeline.keys.assist.rove") {
+                    store.setTimelineKeyMode(if (roving) AureaEngine.KEY_MODE_ROVE_OFF else AureaEngine.KEY_MODE_ROVE_ON)
+                },
+                MenuEntry.Divider,
+                MenuEntry.Item(stringResource(R.string.aek_bake_expression), tag = "timeline.keys.assist.bake") { store.bakeExpressionKeys() },
+                MenuEntry.Item(
+                    stringResource(if (store.motionSketch) R.string.aek_motion_sketch_stop else R.string.aek_motion_sketch),
+                    checked = store.motionSketch, tag = "timeline.keys.assist.motionSketch",
+                ) { store.changeMotionSketch(!store.motionSketch) },
+            )
+            AnchoredMenu(expanded = true, onDismiss = { open = false }, entries = entries, tag = "timeline.keys.assist.menu")
         }
     }
 }
@@ -384,6 +450,12 @@ private fun OmegaTimeMenu(store: EditorStore, onDismiss: () -> Unit) {
         if (layer != null) {
             add(MenuEntry.Item(stringResource(R.string.aet_layer_marker_here), glyph = CupertinoGlyph.Bookmark,
                 tag = "timeline.currentTime.menu.layerMarker") { store.openLayerMarkerEditor(layer, frame) })
+            // Lote K: Motion Sketch também sem keys escolhidos (o arrasto no palco
+            // grava a posição). Só no Aurea PC.
+            if (com.aurea.aurea.ui.platform.PlatformFeatures.desktopAe) add(MenuEntry.Item(
+                stringResource(if (store.motionSketch) R.string.aek_motion_sketch_stop else R.string.aek_motion_sketch),
+                checked = store.motionSketch, tag = "timeline.currentTime.menu.motionSketch",
+            ) { store.changeMotionSketch(!store.motionSketch) })
         }
         add(MenuEntry.Item(stringResource(R.string.aet_work_area_start_here), tag = "timeline.currentTime.menu.workIn") {
             store.setWorkAreaStartAtPlayhead()
@@ -395,6 +467,16 @@ private fun OmegaTimeMenu(store: EditorStore, onDismiss: () -> Unit) {
             add(MenuEntry.Item(stringResource(R.string.aet_trim_to_work_area), tag = "timeline.currentTime.menu.trimWork") {
                 store.trimToWorkArea()
             })
+            // Lote K (AE): tirar o trecho da área de todas as camadas (com ou sem
+            // fechar o buraco). Só no Aurea PC; o celular fica como estava.
+            if (com.aurea.aurea.ui.platform.PlatformFeatures.desktopAe) {
+                add(MenuEntry.Item(stringResource(R.string.aek_lift_work_area), tag = "timeline.currentTime.menu.liftWork") {
+                    store.liftWorkArea(extract = false)
+                })
+                add(MenuEntry.Item(stringResource(R.string.aek_extract_work_area), tag = "timeline.currentTime.menu.extractWork") {
+                    store.liftWorkArea(extract = true)
+                })
+            }
             add(MenuEntry.Item(stringResource(R.string.aet_work_area_clear), tag = "timeline.currentTime.menu.clearWork") {
                 store.clearWorkArea()
             })

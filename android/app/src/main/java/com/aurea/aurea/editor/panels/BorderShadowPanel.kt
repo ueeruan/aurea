@@ -133,6 +133,8 @@ import kotlin.math.roundToInt
 private const val TAB_STROKE = "stroke"
 private const val TAB_BORDERS = "borders"
 private const val TAB_SHADOW = "shadow"
+/** Funções (F4): o fundo do texto. */
+private const val TAB_BACKDROP = "backdrop"
 
 /** Parâmetros reaproveitados (EffectRegistry): borda = `aurea.stylize.stroke_outline`, sombra = `aurea.stylize.drop_shadow`. */
 private object BsParam {
@@ -200,6 +202,11 @@ private class BsCoords {
     val items = HashMap<Int, LayoutCoordinates>()
 }
 
+/** Pedido de aba ao abrir Borda e sombra (`stroke`, `borders` ou `shadow`); lido e limpo pelo painel. */
+internal object BorderShadowRequest {
+    var tab by mutableStateOf<String?>(null)
+}
+
 @Composable
 internal fun BorderShadowPanel(env: PanelEnv) {
     val store = env.store
@@ -209,9 +216,19 @@ internal fun BorderShadowPanel(env: PanelEnv) {
     val vector by remember(store) { derivedStateOf { store.isVectorLayer } }
     val isText = kind == LayerType.Text.kind
     val isShape = kind == LayerType.Shape.kind && !vector
-    val hasStroke = isText || isShape
+    // Redesenho do vetor (13/11/2026): o traço do vetor mora em Borda e sombra › Traço, como na referência.
+    val hasStroke = isText || isShape || vector
     var tab by rememberSaveable(layerId) { mutableStateOf(if (hasStroke) TAB_STROKE else TAB_BORDERS) }
-    val currentTab = if (tab == TAB_STROKE && !hasStroke) TAB_BORDERS else tab
+    // Funções (13/11/2026): quem abre o painel pode pedir uma aba (o atalho "Sombra" do texto).
+    androidx.compose.runtime.LaunchedEffect(BorderShadowRequest.tab) {
+        BorderShadowRequest.tab?.let { tab = it }
+        BorderShadowRequest.tab = null
+    }
+    val currentTab = when {
+        tab == TAB_STROKE && !hasStroke -> TAB_BORDERS
+        tab == TAB_BACKDROP && !isText -> TAB_BORDERS
+        else -> tab
+    }
     var focus by remember(layerId) { mutableStateOf<BsFocus?>(null) }
     var openBorder by remember(layerId) { mutableStateOf<Int?>(null) }
     val shadowId = store.decorations.firstOrNull { it.role == LayerEffect.ROLE_SHADOW }?.effectId
@@ -219,6 +236,7 @@ internal fun BorderShadowPanel(env: PanelEnv) {
     // O parâmetro em foco do trilho, pela aba.
     val railFocus: BsFocus? = when (currentTab) {
         TAB_STROKE -> if (isShape) BsFocus.StrokeWidth else null
+        TAB_BACKDROP -> null
         TAB_BORDERS -> openBorder?.let { id -> (focus as? BsFocus.Param)?.takeIf { it.effectId == id } ?: BsFocus.Param(id, BsParam.BORDER_WIDTH) }
         else -> shadowId?.let { id ->
             focus?.takeIf { (it is BsFocus.Param && it.effectId == id) || (it is BsFocus.ShadowOffset && it.effectId == id) }
@@ -238,6 +256,17 @@ internal fun BorderShadowPanel(env: PanelEnv) {
         if (hasStroke) add(PanelTab(TAB_STROKE, stringResource(R.string.om_ap_bs_stroke), glyph = CupertinoGlyph.Scribble))
         add(PanelTab(TAB_BORDERS, stringResource(R.string.om_ap_bs_borders), glyph = CupertinoGlyph.Square))
         add(PanelTab(TAB_SHADOW, stringResource(R.string.om_ap_bs_shadow), glyph = CupertinoGlyph.SquareStack3dDownRight))
+        // Funções (F4): o FUNDO do texto (a caixa atrás das letras) saiu das Opções de texto.
+        if (isText) add(PanelTab(TAB_BACKDROP, stringResource(R.string.panel_fundo), glyph = CupertinoGlyph.Square))
+    }
+    if (vector && currentTab == TAB_STROKE) {
+        // O Traço do vetor: largura, tinta, pontas, cantos e tracejado do caminho escolhido,
+        // com o trilho do vetor (◆ na linha escolhida) e as abas daqui.
+        VectorPanel(env, VectorFace.Stroke, VectorHostTabs(tabs, currentTab) { id ->
+            tab = id
+            if (id != TAB_BORDERS) openBorder = null
+        })
+        return
     }
     PanelFrame(
         rail = PanelRail(
@@ -263,6 +292,9 @@ internal fun BorderShadowPanel(env: PanelEnv) {
                 onOpen = { openBorder = it },
                 onFocus = { focus = it },
             )
+            TAB_BACKDROP -> androidx.compose.foundation.layout.Column(
+                Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 8.dp, top = 6.dp, end = 12.dp, bottom = 10.dp),
+            ) { TextBackdropRows(env) }
             else -> ShadowTab(env, locked, railFocus, onFocus = { focus = it })
         }
     }

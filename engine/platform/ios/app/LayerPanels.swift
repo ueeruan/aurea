@@ -9,7 +9,9 @@ import UniformTypeIdentifiers
 // TextPanel.kt / TextPathSection.kt. Controls are expanded in the Android order.
 struct TextAppearanceControls: View {
     @EnvironmentObject private var model: AureaModel
-    /// −1 tudo; 0 Texto, 1 Estilo, 2 Layout (as abas das opções de texto).
+    /// Funções (F4): 0 Editar texto (conteúdo, tamanho, cor, alinhamento); Layout do texto:
+    /// 3 Espaçamento, 4 Caixa, 5 Caminho, 6 Dinâmico; 7 Fundo (aba de Borda e sombra).
+    /// −1 tudo e 1/2 (Estilo/Layout antigos) ficam por compatibilidade.
     var page = -1
     @State private var text: [String: Any] = [:]
     @State private var style: [Float] = []
@@ -45,10 +47,13 @@ struct TextAppearanceControls: View {
             if style.count >= 20 {
                 if page == -1 || page == 2 { layoutSections }
                 if page == -1 || page == 1 { backdropSections }
+                if page == 3 { spacingRows }
+                if page == 7 { backdropRows }
             }
-            if page <= 0 { NativeTextDynamicSection() }
-            if page == -1 || page == 2 { NativeTextPathSection() }
-            if page == -1 { NativePanelChip(AureaText.t("la_animators")) { model.transformTab = 6; model.openPanel(.transform) } }
+            if page == 4 && style.count >= 3 { boxRows }
+            if page == -1 || page == 6 { NativeTextDynamicSection() }
+            if page == -1 || page == 2 || page == 5 { NativeTextPathSection() }
+            if page == -1 { NativePanelChip(AureaText.t("la_animators")) { AnimationPanelRequest.tab = .text; model.openPanel(.animation) } }
         }.foregroundStyle(AureaColors.text).onAppear { load() }.onChange(of: id) { _ in load() }
             .onChange(of: model.status.modelRevision) { _ in load() }
     }
@@ -69,6 +74,36 @@ struct TextAppearanceControls: View {
             }
         }
     }
+    /// F4: aba Espaçamento do Layout do texto (sem seção em volta).
+    private var spacingRows: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            NativePanelRuler(label: AureaText.t("text_line_spacing"), value: style[18] * 100, step: 0.5, range: 10...1000, unit: "%", keypad: true) { set(18, $0 / 100) }
+            trackingRow
+        }.accessibilityIdentifier("text.sec.spacing")
+    }
+    /// F4: aba Caixa do Layout do texto.
+    private var boxRows: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            PanelItemGrid(items: [("panel_livre", CupertinoGlyph.Move), ("panel_paragrafo", CupertinoGlyph.LineHorizontal3), ("panel_tamanho_fixo", CupertinoGlyph.Square), ("panel_encolher_caber", CupertinoGlyph.FullscreenExit)].enumerated().map { n, entry in
+                PanelItem(glyph: entry.1, label: AureaText.t(entry.0), tag: "text.box.\(n)", on: Int(style[0]) == n) { set(0, Float(n)) }
+            })
+            if style[0] >= 1 {
+                styleRow("panel_largura_caixa", 1, 2, 10...20000)
+                if style[0] >= 2 { styleRow("panel_altura_caixa", 2, 2, 10...20000) }
+            }
+        }.accessibilityIdentifier("text.sec.box")
+    }
+    /// F4: o FUNDO do texto, a aba Fundo de Borda e sombra (par do `TextBackdropRows`).
+    private var backdropRows: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Toggle(AureaText.t("panel_fundo"), isOn: styleBinding(3)).font(.aurea(size: 13)).tint(AureaColors.accent).padding(.vertical, 6)
+            if style[3] > 0.5 {
+                styleColor("panel_cor", color: 4)
+                styleRow("panel_margem_fundo", 8, 0.2, 0...500)
+                styleRow("panel_cantos_arredondados", 9, 0.2, 0...500)
+            }
+        }.accessibilityIdentifier("text.sec.backdrop")
+    }
     private var backdropSections: some View {
         VStack(alignment: .leading, spacing: 0) {
             PanelSection(title: AureaText.t("panel_fundo"), glyph: CupertinoGlyph.Square, tag: "text.sec.backdrop", isOn: styleBinding(3)) {
@@ -76,12 +111,26 @@ struct TextAppearanceControls: View {
                 styleRow("panel_margem_fundo", 8, 0.2, 0...500)
                 styleRow("panel_cantos_arredondados", 9, 0.2, 0...500)
             }
-            PanelSection(title: AureaText.t("panel_sombra"), glyph: CupertinoGlyph.CircleLefthalfFill, tag: "text.sec.shadow", isOn: styleBinding(10)) {
-                styleColor("panel_cor", color: 11)
-                styleRow("panel_distancia_x", 15, 0.2, -500...500)
-                styleRow("panel_distancia_y", 16, 0.2, -500...500)
-                styleRow("panel_desfoque", 17, 0.1, 0...200)
+            // D2 (13/11/2026): o texto tinha duas sombras; fica só a de Borda e sombra (a mais
+            // nova, 0.3.2). A do estilo do texto saiu daqui; o motor converte a dos projetos
+            // antigos na decoração ao abrir (TextShadowMigration.hpp). Par do TextPanel.kt.
+            Button {
+                BorderShadowPanel.requestedTab = "shadow"
+                model.openPanel(.borderShadow)
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(AureaText.t("panel_sombra")).font(.aurea(size: 14, weight: .semibold)).foregroundStyle(AureaColors.text)
+                    Text(AureaText.t("fn_text_shadow_moved")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14).padding(.vertical, 10).frame(minHeight: 44)
+                .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 12))
+                .contentShape(Rectangle())
             }
+            .buttonStyle(AureaPressStyle())
+            .accessibilityIdentifier("text.shadow.link")
+            .padding(.horizontal, 8).padding(.vertical, 4)
         }
     }
     private func styleBinding(_ slot: Int) -> Binding<Bool> {
@@ -94,8 +143,17 @@ struct TextAppearanceControls: View {
         let track = TimelineTrack(property: 50, effect: 0, param: 0)
         let keys = (model.keyframes[id] ?? []).filter { $0.property == 50 }
         let here = keys.contains { $0.time == model.localPlayhead }
-        return PropertyCustomRow(AureaText.t("ae_anim_source_text"), selected: model.timelineFocus == [track],
-            onSelect: { model.timelineFocus = [track] }, keyframe: here ? .keyHere : keys.isEmpty ? .none : .animated) {
+        // v70: expressão no texto-fonte (o "=" abre a folha, como nas outras propriedades).
+        let info = model.engine.expression(id, property: 50, effect: 0, param: 0)
+        let expression: ExpressionLook = (info["exists"] as? NSNumber)?.boolValue != true ? .none
+            : !((info["enabled"] as? NSNumber)?.boolValue ?? true) ? .off
+            : (info["error"] as? String ?? "").isEmpty ? .ok : .error
+        let label = AureaText.t("ae_anim_source_text")
+        return PropertyCustomRow(label, selected: model.timelineFocus == [track],
+            onSelect: { model.timelineFocus = [track] }, keyframe: here ? .keyHere : keys.isEmpty ? .none : .animated,
+            expression: expression, onExpression: {
+                model.expressionSheet = ExpressionRequest(layer: id, label: label, tracks: [ExpressionTrack(property: 50, effect: 0, param: 0)])
+            }) {
             PanelItemRow(glyph: CupertinoGlyph.SuitDiamond,
                          title: AureaText.t(here ? "ae_anim_source_key_remove" : "ae_anim_source_key_add"),
                          tag: "text.source.key",
@@ -314,7 +372,7 @@ private struct NativePanelAction: View {
         }.buttonStyle(AureaPressStyle())
     }
 }
-private struct NativePanelToggle: View {
+struct NativePanelToggle: View {
     let title: String
     let checked: Bool
     var fontSize: CGFloat = 14
@@ -1449,6 +1507,18 @@ struct ClipEditPanel: View {
                         Text(AureaText.t("ios_clip_range_frames", "\(row.startFrame)", "\(row.endFrame)", "\(row.duration)")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
                         Button(AureaText.t("beta_extend_clip")) { model.editClipTime(7, amount: 0) }
                             .frame(maxWidth: .infinity, minHeight: 48).disabled(row.locked)
+                        // Funções (13/11/2026): Congelar quadro saiu do ⋮ e mora no Corte preciso
+                        // (só vídeo, com o cabeçote dentro do clipe). Par do ClipEditPanel do Android.
+                        if row.kind == 1 {
+                            let inside = model.status.playhead > Int64(row.startFrame) && model.status.playhead < Int64(row.endFrame)
+                            Button(AureaText.t("sh_menu_freeze_frame")) {
+                                let created = model.engine.freezeFrame(forLayer: row.id, frame: Int32(clamping: model.status.playhead), hold: Int32(max(1, model.compositionFps * 3)))
+                                model.refreshModel(force: true)
+                                if created >= 0 { model.select(layerId: created) }
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 48).disabled(row.locked || !inside)
+                            .accessibilityIdentifier("clipEdit.freeze")
+                        }
                     }
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())]) {
                         ForEach(2..<6) { value in
@@ -2146,16 +2216,27 @@ private struct PanelFlowLayout: Layout {
     }
 }
 
+/// MÁSCARA (redesenho de 13/11/2026, `VECTOR_MASK_AM.md` §3.1; par do MaskPanel.kt): o jeito
+/// de trabalhar da referência, com a cara do AUREA, na moldura comum.
+/// - Lista (nada aberto): abas Máscaras · Recorte por camada; "+ Adicionar máscara" no fim.
+/// - Máscara aberta: abas Forma (o editor de pontos) · Modo · Borda · Seguir (vídeo). Na Borda o
+///   ◆ e a Curva do trilho agem na linha escolhida (sem ◆ por linha). O ‹ volta à lista.
 struct MaskPanel: View {
     @EnvironmentObject private var model: AureaModel
     @ObservedObject private var pen = EditPointsState.shared
-    /// 0 Pontos (o modo de caneta, com o desenho do Editar pontos), 1 Máscaras, 2 Recorte.
-    @State private var tab = 1
+    @State private var listTab = "list"
+    @State private var openTab = "shape"
+    @State private var edgeParam: UInt32 = 0
+    @State private var adding = false
     @State private var matte: Int64 = 0
     @State private var mode = 0
     private var id: Int64 { model.primarySelection ?? 0 }
     private var mask: MaskItem? { model.editingMask }
-    private var canKey: Bool { tab == 1 && mask?.closed == true && !model.maskDrawing }
+    private var isVideo: Bool { model.selectedLayer?.kind == 1 }
+    private var tab: String {
+        guard mask != nil else { return listTab }
+        return openTab == "follow" && !isVideo ? "shape" : openTab
+    }
     private var look: KeyframeLook { mask?.keyed == true ? .keyHere : (mask?.keyCount ?? 0) > 0 ? .animated : .none }
     private var candidates: [LayerItem] { model.layers.filter { $0.id != id && ![3, 8, 9].contains($0.kind) } }
     private func load() {
@@ -2165,127 +2246,214 @@ struct MaskPanel: View {
     private func write(_ target: Int64, _ value: Int) {
         model.engine.setTrackMatteForLayer(id, matte: target, mode: UInt32(value)); model.refreshModel(force: true); load()
     }
-    /// O modo de caneta usa o Editar pontos sobre o caminho desta máscara.
+    /// A aba Forma usa o Editar pontos sobre o caminho desta máscara.
     private func syncPen() {
-        let id = tab == 0 ? mask?.id : nil
+        let id = tab == "shape" ? mask?.id : nil
         guard pen.mask != id else { return }
         pen.mask = id
         pen.reset()
         if id != nil, let point = model.selectedMaskPoint { pen.choosePoint(point) }
     }
+    private func backToList() {
+        model.selectedMask = nil; model.selectedMaskPoint = nil; model.maskDrawing = false
+    }
+    private func open(_ item: MaskItem) {
+        model.selectedMask = item.id; model.selectedMaskPoint = nil; model.maskDrawing = !item.closed
+        openTab = "shape"
+    }
+
     var body: some View {
-        let editing = tab == 0 ? mask : nil
-        let path = editing == nil ? nil : EPPath.mask(model)
-        VStack(spacing: 0) {
-            PanelHeader(title: AureaText.t("panel_mascara_recorte")) { model.panel = .none }
-            HStack(spacing: 0) {
-                if let editing {
-                    MaskPointsColumn(mask: editing, path: path, look: look, onKey: toggleKey).frame(width: 60)
-                    AureaColors.contentStrongLine.frame(width: 0.7)
-                } else {
-                    LeftRail(keyframeLook: look, onKeyframe: canKey ? toggleKey : nil,
-                             onCurve: curveKeys.count >= 2 && tab == 1 ? { openCurve() } : nil, onBack: { model.panel = .none })
-                }
-                VStack(spacing: 0) {
-                    // Na tela, como no Motion: primeiro a lista do que existe.
-                    ParamTabs([AureaText.t("panel_mascaras"), AureaText.t("pn_mask_points"), AureaText.t("ui_mask_tab_matte")], selected: tab == 1 ? 0 : tab == 0 ? 1 : 2) { tab = $0 == 0 ? 1 : $0 == 1 ? 0 : 2 }
-                    if editing != nil {
-                        if model.masks.count > 1 { maskChips.padding(.horizontal, 6) }
-                        PointsTrackpad(path: path).padding(6)
-                    } else {
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 0) {
-                                if tab == 2 { matteBody } else { masksBody }
-                            }.padding(.leading, 4).padding(.trailing, 10).padding(.bottom, 16)
-                        }.accessibilityIdentifier("mask.scroll")
-                    }
-                }
-                if editing != nil {
-                    AureaColors.contentStrongLine.frame(width: 0.7)
-                    PointsStrip(path: path).frame(width: 60)
-                }
-            }
-        }.foregroundStyle(AureaColors.text).onAppear { load(); syncPen() }
-            .onChange(of: tab) { _ in syncPen() }
-            .onChange(of: model.selectedMask) { _ in syncPen() }
-            // A escolha da faixa vale no palco, e a do palco vale na faixa.
-            .onChange(of: pen.index) { i in if pen.mask != nil { model.selectedMaskPoint = i >= 0 ? i : nil } }
-            .onChange(of: model.selectedMaskPoint) { point in
-                if pen.mask != nil, (point ?? -1) != pen.index { pen.choosePoint(point ?? -1) }
-            }
-            .onDisappear { pen.mask = nil; pen.reset() }
-            .onChange(of: id) { _ in load() }
-            .onChange(of: model.status.modelRevision) { _ in load() }
-            .onChange(of: model.timelineFocus) { focus in
-                if focus?.contains(where: { ($0.property == 43 || $0.property == 49) && $0.effect == mask?.id }) == true, tab == 2 { tab = 1 }
-            }
-            // Os keyframes do caminho aparecem na camada enquanto a máscara está aberta aqui.
-            .onAppear { focusPath() }
-            .onChange(of: model.selectedMask) { _ in focusPath() }
-            .onChange(of: tab) { _ in focusPath() }
-            .onDisappear { model.timelineFocus = nil }
+        Group {
+            if let mask { openBody(mask) } else { listBody }
+        }
+        .foregroundStyle(AureaColors.text).onAppear { load(); syncPen() }
+        .onChange(of: openTab) { _ in syncPen(); focusTimeline() }
+        .onChange(of: model.selectedMask) { _ in syncPen(); focusTimeline() }
+        .onChange(of: edgeParam) { _ in focusTimeline() }
+        // A escolha da faixa vale no palco, e a do palco vale na faixa.
+        .onChange(of: pen.index) { i in if pen.mask != nil { model.selectedMaskPoint = i >= 0 ? i : nil } }
+        .onChange(of: model.selectedMaskPoint) { point in
+            if pen.mask != nil, (point ?? -1) != pen.index { pen.choosePoint(point ?? -1) }
+        }
+        .onDisappear { pen.mask = nil; pen.reset() }
+        .onChange(of: id) { _ in load() }
+        .onChange(of: model.status.modelRevision) { _ in load() }
+        // Os keyframes do que está em foco aparecem na camada: o caminho, ou o parâmetro da Borda.
+        .onAppear { focusTimeline() }
+        .onDisappear { model.timelineFocus = nil }
     }
-    private func focusPath() {
-        if model.timelineFocus?.contains(where: { $0.property == 43 && $0.effect == mask?.id }) == true { return }
-        model.timelineFocus = tab != 2 ? mask.map { [TimelineTrack(property: 49, effect: $0.id)] } : nil
+
+    private func focusTimeline() {
+        guard let mask else { model.timelineFocus = nil; return }
+        model.timelineFocus = tab == "edge" ? [TimelineTrack(property: 43, effect: mask.id, param: edgeParam)]
+            : [TimelineTrack(property: 49, effect: mask.id)]
     }
-    private var curveKeys: [KeyframeItem] {
-        guard let mask else { return [] }
-        return (model.keyframes[id] ?? []).filter { Int($0.property) == 49 && $0.effectIndex == mask.id }.sorted { $0.time < $1.time }
+
+    // ---- Lista -----------------------------------------------------------------------
+    private var listBody: some View {
+        PanelFrame(rail: PanelRail(onBack: { model.panel = .none }),
+                   tabs: [PanelTab(id: "list", label: AureaText.t("panel_mascaras"), glyph: CupertinoGlyph.RectangleStack),
+                          PanelTab(id: "matte", label: AureaText.t("ui_mask_tab_matte"), glyph: CupertinoGlyph.Crop)],
+                   selectedTab: tab, onTab: { listTab = $0 }) {
+            VStack(alignment: .leading, spacing: 0) {
+                if tab == "matte" { matteBody } else { masksList }
+            }.padding(.leading, 4).padding(.trailing, 10).padding(.bottom, 16)
+                .accessibilityElement(children: .contain).accessibilityIdentifier("mask.scroll")
+        }
     }
-    private func openCurve() {
-        guard let first = curveKeys.first else { return }
-        let segment = curveKeys.dropLast().last { $0.time <= model.localPlayhead } ?? curveKeys[0]
-        model.openCurve(property: first.property, effect: first.effectIndex, param: first.paramIndex, time: segment.time)
-    }
-    @ViewBuilder private var masksBody: some View {
+
+    @ViewBuilder private var masksList: some View {
         Color.clear.frame(height: 6)
-        // Os três jeitos de criar uma máscara: sempre à vista, um toque cada.
-        HStack(spacing: 6) {
-            MaskShapeTool(kind: 0, label: AureaText.t("panel_desenhar_mao"), selected: model.maskDrawing && mask?.closed == false) { model.addMask(2); tab = 0 }
-                .accessibilityIdentifier("mask.add.draw")
-            MaskShapeTool(kind: 1, label: AureaText.t("panel_retangulo"), selected: false) { model.addMask(0); tab = 0 }
-                .accessibilityIdentifier("mask.add.rect")
-            MaskShapeTool(kind: 2, label: AureaText.t("panel_elipse"), selected: false) { model.addMask(1); tab = 0 }
-                .accessibilityIdentifier("mask.add.ellipse")
+        ForEach(Array(model.masks.enumerated()), id: \.element.id) { entry in
+            maskRow(entry.offset, entry.element)
+                .background(AureaColors.fxLowSurface, in: RoundedRectangle(cornerRadius: 5))
+                .padding(.vertical, 2)
+        }
+        if !model.masks.isEmpty {
+            Button { adding.toggle() } label: {
+                HStack(spacing: 8) {
+                    CupertinoGlyph.text(adding ? CupertinoGlyph.Minus : CupertinoGlyph.Plus, size: 16, color: AureaColors.accent)
+                    Text(AureaText.t("fn_mask_add")).font(.aurea(size: 13, weight: .semibold)).foregroundStyle(AureaColors.accent)
+                    Spacer(minLength: 0)
+                }.padding(.horizontal, 8).frame(height: 40).contentShape(Rectangle())
+            }.buttonStyle(AureaPressStyle(shrink: 1))
+                .accessibilityLabel(AureaText.t("fn_mask_add"))
+                .accessibilityIdentifier("mask.add")
+        }
+        if adding || model.masks.isEmpty {
+            // As três formas de criar (como as formas prontas e o desenho vetorial da referência).
+            HStack(spacing: 6) {
+                MaskShapeTool(kind: 0, label: AureaText.t("panel_desenhar_mao"), selected: false) { adding = false; model.addMask(2); openTab = "shape" }
+                    .accessibilityIdentifier("mask.add.draw")
+                MaskShapeTool(kind: 1, label: AureaText.t("panel_retangulo"), selected: false) { adding = false; model.addMask(0); openTab = "shape" }
+                    .accessibilityIdentifier("mask.add.rect")
+                MaskShapeTool(kind: 2, label: AureaText.t("panel_elipse"), selected: false) { adding = false; model.addMask(1); openTab = "shape" }
+                    .accessibilityIdentifier("mask.add.ellipse")
+            }.padding(.top, 4)
         }
         if model.masks.isEmpty {
             Color.clear.frame(height: 10)
             hint("panel_mascara_mostra_so_parte_camada_escolha")
-        } else {
-            PanelSection(title: AureaText.t("panel_mascaras"), glyph: CupertinoGlyph.RectangleStack, tag: "mask.sec.list", count: model.masks.count) {
-                ForEach(Array(model.masks.enumerated()), id: \.element.id) { entry in
-                    let open = tab == 1 && mask?.id == entry.element.id
-                    VStack(alignment: .leading, spacing: 0) {
-                        maskRow(entry.offset, entry.element, open: open)
-                        if open, let mask { VStack(alignment: .leading, spacing: 0) { maskEditor(mask) }.padding(.horizontal, 8).padding(.bottom, 8).environment(\.panelItemSurface, AureaColors.fxListSurface).environment(\.toggleOffTrack, nil) }
-                    }
-                    .background(AureaColors.fxLowSurface, in: RoundedRectangle(cornerRadius: 5))
-                    .padding(.vertical, 3)
-                }
-            }
         }
     }
-    /// A linha da máscara: seta, ícone, nome e o modo em que ela está.
-    private func maskRow(_ index: Int, _ item: MaskItem, open: Bool) -> some View {
-        Button {
-            model.selectedMask = open ? nil : item.id
-            model.selectedMaskPoint = nil
-            model.maskDrawing = !open && !item.closed
-        } label: {
+
+    /// A linha da máscara: ícone, nome, o modo em que ela está e ›.
+    private func maskRow(_ index: Int, _ item: MaskItem) -> some View {
+        Button { open(item) } label: {
             HStack(spacing: 8) {
-                CupertinoGlyph.text(open ? CupertinoGlyph.ChevronDown : CupertinoGlyph.ChevronRight, size: 14, color: AureaColors.text.opacity(open ? 0.9 : 0.3))
                 CupertinoGlyph.text(CupertinoGlyph.SquareOnSquare, size: 18, color: AureaColors.text)
-                Text(AureaText.t(item.closed ? "pn_mask_n" : "pn_mask_n_open", index + 1)).font(.aurea(size: 13, weight: open ? .bold : .semibold))
+                Text(AureaText.t(item.closed ? "pn_mask_n" : "pn_mask_n_open", index + 1)).font(.aurea(size: 13, weight: .semibold))
                     .foregroundStyle(AureaColors.text).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
                 if let mode = maskModes.first(where: { $0.op == item.operation }) {
                     Text(AureaText.t(mode.key)).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).lineLimit(1)
                 }
+                CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 14, color: AureaColors.muted).mirrorsInRtl()
             }.padding(.horizontal, 8).frame(height: 37).contentShape(Rectangle())
         }
         .buttonStyle(AureaPressStyle(shrink: 1))
         .accessibilityIdentifier("mask.item.\(index)")
     }
+
+    // ---- Máscara aberta ----------------------------------------------------------------
+    private func openTabs() -> [PanelTab] {
+        var tabs = [PanelTab(id: "shape", label: AureaText.t("fn_mask_tab_shape"), glyph: CupertinoGlyph.Pencil),
+                    PanelTab(id: "mode", label: AureaText.t("panel_mask_mode"), glyph: CupertinoGlyph.SquareStack3dUp),
+                    PanelTab(id: "edge", label: AureaText.t("panel_mask_edge"), glyph: CupertinoGlyph.Drop)]
+        if isVideo { tabs.append(PanelTab(id: "follow", label: AureaText.t("panel_mask_follow"), glyph: CupertinoGlyph.CameraViewfinder)) }
+        return tabs
+    }
+
+    private func railKeys(_ m: MaskItem) -> [KeyframeItem] {
+        let all = model.keyframes[id] ?? []
+        return (tab == "edge"
+            ? all.filter { $0.property == 43 && $0.effectIndex == m.id && $0.paramIndex == edgeParam }
+            : all.filter { Int($0.property) == 49 && $0.effectIndex == m.id }).sorted { $0.time < $1.time }
+    }
+
+    private func openRail(_ m: MaskItem) -> PanelRail {
+        let keys = railKeys(m)
+        let edge = tab == "edge"
+        let railLook: KeyframeLook = !edge ? look
+            : keys.contains { $0.time == model.localPlayhead } ? .keyHere : keys.isEmpty ? .none : .animated
+        let canKey = edge || (m.closed && !model.maskDrawing)
+        return PanelRail(
+            onBack: backToList, keyframeLook: railLook,
+            onKeyframe: canKey ? { edge ? toggleEdgeKey(m) : toggleKey() } : nil,
+            onCurve: keys.count >= 2 ? { openCurve(keys) } : nil,
+            curveReady: keys.count >= 2,
+            moreEntries: {
+                [.item(AureaText.t("panel_apagar_mascara"), glyph: CupertinoGlyph.Trash, destructive: true, tag: "mask.more.delete") { deleteMask(m) }]
+            })
+    }
+
+    @ViewBuilder private func openBody(_ m: MaskItem) -> some View {
+        let pen = tab == "shape"
+        let path = pen ? EPPath.mask(model) : nil
+        PanelFrame(rail: openRail(m), tabs: openTabs(), selectedTab: tab, onTab: { openTab = $0 }, scrollContent: !pen,
+                   leftColumn: pen ? AnyView(MaskPointsColumn(mask: m, path: path, look: look, onKey: toggleKey, onBack: backToList).frame(width: 60)) : nil,
+                   trailing: pen ? AnyView(PointsStrip(path: path).frame(width: 60)) : nil) {
+            if pen {
+                VStack(spacing: 0) {
+                    if model.masks.count > 1 { maskChips.padding(.horizontal, 6) }
+                    PointsTrackpad(path: path).padding(6)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    openHeader(m)
+                    switch tab {
+                    case "mode": modeTab(m)
+                    case "edge": edgeTab(m)
+                    default: followTab(m)
+                    }
+                }.padding(.leading, 4).padding(.trailing, 10).padding(.bottom, 16)
+                    .environment(\.panelItemSurface, AureaColors.fxListSurface).environment(\.toggleOffTrack, nil)
+                    .accessibilityElement(children: .contain).accessibilityIdentifier("mask.scroll")
+            }
+        }
+    }
+
+    /// Nome e quantos pontos, acima do conteúdo da aba; com 2+ máscaras, os chips.
+    @ViewBuilder private func openHeader(_ m: MaskItem) -> some View {
+        let index = model.masks.firstIndex { $0.id == m.id } ?? 0
+        HStack(spacing: 6) {
+            Text(AureaText.t(m.closed ? "pn_mask_n" : "pn_mask_n_open", index + 1)).font(.aurea(size: 13, weight: .bold))
+                .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+            Text(AureaText.plural("pn_mask_points_so_far", m.points.count / 6)).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).lineLimit(1)
+        }.padding(.leading, 6).frame(height: 36).accessibilityIdentifier("mask.open.header")
+        if model.masks.count > 1 { maskChips }
+    }
+
+    @ViewBuilder private func modeTab(_ m: MaskItem) -> some View {
+        PanelItemGrid(items: maskModes.map { mode in
+            PanelItem(glyph: mode.glyph, label: AureaText.t(mode.key), tag: "mask.mode.\(mode.op)", on: mode.op == m.operation) { update(m, operation: mode.op) }
+        }, columns: 3)
+        NativePanelToggle(AureaText.t("panel_inverter_mostrar_lado_fora"), checked: m.inverted) { update(m, inverted: $0) }
+        Color.clear.frame(height: 6)
+        deleteAction(m)
+    }
+
+    @ViewBuilder private func edgeTab(_ m: MaskItem) -> some View {
+        maskRuler(m, param: 0, label: "panel_suavizar", value: m.feather, range: 0...500, unit: "px", reset: 0)
+        // AE compositing: queda do feather (Mask Feather Falloff), suave ou linear (par do MaskPanel.kt).
+        PanelItemGrid(items: [
+            PanelItem(glyph: CupertinoGlyph.Drop, label: AureaText.t("ae_mask_falloff_smooth"), tag: "mask.falloff.0", on: m.falloff == 0) { setFalloff(m, 0) },
+            PanelItem(glyph: CupertinoGlyph.Minus, label: AureaText.t("ae_mask_falloff_linear"), tag: "mask.falloff.1", on: m.falloff == 1) { setFalloff(m, 1) },
+        ], columns: 2)
+        maskRuler(m, param: 1, label: "panel_expandir", value: m.expansion, range: -500...500, unit: "px", reset: 0)
+        maskRuler(m, param: 2, label: "panel_opacidade", value: m.opacity * 100, range: 0...100, unit: "%", reset: 100)
+        hint("fn_mask_edge_hint")
+    }
+
+    @ViewBuilder private func followTab(_ m: MaskItem) -> some View {
+        if model.importingMedia { hint("panel_rastreando") }
+        else {
+            hint("panel_mascara_segue_esta_embaixo_dela_cabecote")
+            Color.clear.frame(height: 6)
+            PanelItemRow(glyph: CupertinoGlyph.Move, title: AureaText.t("panel_seguir_posicao"), tag: "mask.follow.0") { track(m.id, mode: 0) }
+            PanelItemRow(glyph: CupertinoGlyph.ArrowCounterclockwise, title: AureaText.t("panel_seguir_posicao_tamanho_giro"), tag: "mask.follow.1") { track(m.id, mode: 1) }
+        }
+    }
+
     private var maskModes: [(op: UInt32, key: String, glyph: Character)] { [
         (0, "panel_somar", CupertinoGlyph.Plus), (1, "panel_subtrair", CupertinoGlyph.Minus), (2, "panel_intersecao", CupertinoGlyph.SquareOnSquare),
         // AE compositing: Clarear (o maior valor) e Escurecer (o menor), na ordem do AE (par do MaskPanel.kt).
@@ -2303,78 +2471,37 @@ struct MaskPanel: View {
         }.frame(height: 44)
     }
     }
-    /// A máscara aberta na lista, separada em Pontos, Modo, Borda e Seguir objeto.
-    @ViewBuilder private func maskEditor(_ m: MaskItem) -> some View {
-        let pointsLabel = AureaText.plural("pn_mask_points_so_far", m.points.count / 6)
-        if model.maskDrawing {
-            hint("panel_toque_palco_pontos_arraste_curvar_toque")
-            Color.clear.frame(height: 6)
-            PanelItemRow(glyph: CupertinoGlyph.CheckmarkCircle, title: AureaText.t("panel_fechar_caminho"), tag: "mask.close", detail: pointsLabel) {
-                if m.points.count >= 18 { model.setMaskPoints(m.points, closed: true); model.maskDrawing = false }
-                else { model.toast = AureaText.t("msg_ponha_pelo_menos_3_pontos") }
-            }
-            // Sem caminho fechado ainda não há modo/borda para ajustar.
-            deleteAction(m)
-        } else {
-            PanelItemRow(glyph: CupertinoGlyph.Pencil, title: AureaText.t("ui_edit_points"), tag: "mask.edit.points", detail: pointsLabel, chevron: true) { tab = 0 }
-            VStack(alignment: .leading, spacing: 4) {
-                PropertyLabelChip(AureaText.t("panel_caminho"), expression: .none, keyframe: look, onTap: { toggleKey() })
-                Text(m.keyCount == 0 ? AureaText.t("panel_parado_toque_trilho_animar") : AureaText.plural("pn_keyframes_edit_at_playhead", Int(m.keyCount)))
-                    .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).frame(maxWidth: .infinity, alignment: .leading)
-            }.padding(.vertical, 3).aureaSelectedProperty(AureaText.t("panel_caminho"))
-            PanelSection(title: AureaText.t("panel_mask_mode"), glyph: CupertinoGlyph.SquareStack3dUp, tag: "mask.sec.mode", flat: true) {
-                PanelItemGrid(items: maskModes.map { mode in
-                    PanelItem(glyph: mode.glyph, label: AureaText.t(mode.key), tag: "mask.mode.\(mode.op)", on: mode.op == m.operation) { update(m, operation: mode.op) }
-                }, columns: 3)
-                NativePanelToggle(AureaText.t("panel_inverter_mostrar_lado_fora"), checked: m.inverted) { update(m, inverted: $0) }
-            }
-            PanelSection(title: AureaText.t("panel_mask_edge"), glyph: CupertinoGlyph.Drop, tag: "mask.sec.edge", flat: true) {
-                maskRuler(m, param: 0, label: "panel_suavizar", value: m.feather, range: 0...500, unit: "px", reset: 0)
-                // AE compositing: queda do feather (Mask Feather Falloff), suave ou linear (par do MaskPanel.kt).
-                PanelItemGrid(items: [
-                    PanelItem(glyph: CupertinoGlyph.Drop, label: AureaText.t("ae_mask_falloff_smooth"), tag: "mask.falloff.0", on: m.falloff == 0) { setFalloff(m, 0) },
-                    PanelItem(glyph: CupertinoGlyph.Minus, label: AureaText.t("ae_mask_falloff_linear"), tag: "mask.falloff.1", on: m.falloff == 1) { setFalloff(m, 1) },
-                ], columns: 2)
-                maskRuler(m, param: 1, label: "panel_expandir", value: m.expansion, range: -500...500, unit: "px", reset: 0)
-                maskRuler(m, param: 2, label: "panel_opacidade", value: m.opacity * 100, range: 0...100, unit: "%", reset: 100)
-            }
-            if model.selectedLayer?.kind == 1 {
-                PanelSection(title: AureaText.t("panel_mask_follow"), glyph: CupertinoGlyph.CameraViewfinder, tag: "mask.sec.follow", startOpen: false, flat: true) {
-                    if model.importingMedia { hint("panel_rastreando") }
-                    else {
-                        hint("panel_mascara_segue_esta_embaixo_dela_cabecote")
-                        Color.clear.frame(height: 6)
-                        PanelItemRow(glyph: CupertinoGlyph.Move, title: AureaText.t("panel_seguir_posicao"), tag: "mask.follow.0") { track(m.id, mode: 0) }
-                        PanelItemRow(glyph: CupertinoGlyph.ArrowCounterclockwise, title: AureaText.t("panel_seguir_posicao_tamanho_giro"), tag: "mask.follow.1") { track(m.id, mode: 1) }
-                    }
-                }
-            }
-            deleteAction(m)
-        }
+    private func deleteMask(_ m: MaskItem) {
+        guard model.engine.removeMask(id, mask: m.id) else { return }
+        if model.timelineFocus?.contains(where: { $0.property == 43 && $0.effect == m.id }) == true { model.timelineFocus = nil }
+        if model.curveProperty == 43 && model.curveEffect == m.id { model.curveSelectedTime = nil }
+        model.selectedMask = nil; model.selectedMaskPoint = nil; model.maskDrawing = false; model.refreshModel(force: true)
     }
     private func deleteAction(_ m: MaskItem) -> some View {
-        PanelItemRow(glyph: CupertinoGlyph.Trash, title: AureaText.t("panel_apagar_mascara"), tag: "mask.delete", danger: true) {
-            guard model.engine.removeMask(id, mask: m.id) else { return }
-            if model.timelineFocus?.contains(where: { $0.property == 43 && $0.effect == m.id }) == true { model.timelineFocus = nil }
-            if model.curveProperty == 43 && model.curveEffect == m.id { model.curveSelectedTime = nil }
-            model.selectedMask = nil; model.selectedMaskPoint = nil; model.maskDrawing = false; model.refreshModel(force: true)
-        }
+        PanelItemRow(glyph: CupertinoGlyph.Trash, title: AureaText.t("panel_apagar_mascara"), tag: "mask.delete", danger: true) { deleteMask(m) }
     }
+    /// Suavizar / Expandir / Opacidade. Tocar no rótulo escolhe a linha (o ◆ e a Curva do
+    /// trilho agem nela); o losango pequeno do rótulo só mostra o estado.
     private func maskRuler(_ mask: MaskItem, param: UInt32, label: String, value: Float, range: ClosedRange<Float>, unit: String, reset: Float) -> some View {
-        let track = TimelineTrack(property: 43, effect: mask.id, param: param)
         let keys = (model.keyframes[id] ?? []).filter { $0.property == 43 && $0.effectIndex == mask.id && $0.paramIndex == param }
         let look: KeyframeLook = keys.contains { $0.time == model.localPlayhead } ? .keyHere : keys.isEmpty ? .none : .animated
-        let selected = model.timelineFocus == [track]
-        return VStack(spacing: 0) {
-            NativePanelRuler(label: AureaText.t(label), value: value, step: 0.5, range: range, unit: unit, decimals: 1, reset: reset, keypad: true, look: look, toggleKey: {
-                model.timelineFocus = [track]
-                _ = model.engine.toggleMaskParamKey(id, mask: mask.id, param: param); model.refreshModel(force: true)
-            }, selected: selected, onSelect: { model.timelineFocus = [track] }) {
-                model.timelineFocus = [track]
-                _ = model.engine.setMaskParam(id, mask: mask.id, param: param, value: param == 2 ? $0 / 100 : $0); model.refreshModel(force: true)
-            }.accessibilityIdentifier("mask.\(mask.id).param.\(param)")
-            if selected { NativeAnimationTrackActions(track: track, curveTag: "mask.\(mask.id).curve.\(param)") }
+        let selected = edgeParam == param
+        return NativePanelRuler(label: AureaText.t(label), value: value, step: 0.5, range: range, unit: unit, decimals: 1, reset: reset, keypad: true, look: look,
+                                toggleKey: nil, selected: selected, onSelect: { edgeParam = param }) {
+            edgeParam = param
+            _ = model.engine.setMaskParam(id, mask: mask.id, param: param, value: param == 2 ? $0 / 100 : $0); model.refreshModel(force: true)
         }
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityIdentifier("mask.\(mask.id).param.\(param)")
+    }
+    private func toggleEdgeKey(_ m: MaskItem) {
+        model.timelineFocus = [TimelineTrack(property: 43, effect: m.id, param: edgeParam)]
+        _ = model.engine.toggleMaskParamKey(id, mask: m.id, param: edgeParam); model.refreshModel(force: true)
+    }
+    private func openCurve(_ keys: [KeyframeItem]) {
+        guard let first = keys.first else { return }
+        let segment = keys.dropLast().last { $0.time <= model.localPlayhead } ?? keys[0]
+        model.openCurve(property: first.property, effect: first.effectIndex, param: first.paramIndex, time: segment.time)
     }
     private var matteBody: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -2520,6 +2647,9 @@ struct TextAnimationPanel: View {
 /// animador troca a lista pelo editor, na largura toda, com as seções recolhidas do Transformar
 /// texto do Motion. Par do TextAnimSection.kt.
 struct TextAnimationSection: View {
+    /// Funções (F3): que partes mostrar — 1 lista de animadores, 2 prontas, 4 explodir
+    /// (cada aba de Animação mostra uma; par do `parts` do TextAnimSection.kt).
+    var parts = 7
     var showAnimatorEffect = true
     var beforeAnimation: () -> Void = {}
     var onEditing: (Bool) -> Void = { _ in }
@@ -2550,9 +2680,10 @@ struct TextAnimationSection: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if open {
+            if open && parts & 1 != 0 {
                 TextAnimatorEditor(index: editing, values: animators[editing], reload: refresh) { editing = -1 }
             } else {
+                if parts & 1 != 0 {
                 PanelSection(title: AureaText.t("ui_text_animators"), glyph: CupertinoGlyph.Sparkles, tag: "text.sec.animators", count: animators.count) {
                     ForEach(animators.indices, id: \.self) { row($0) }
                     PanelAddRow(label: AureaText.t("la_add"), tag: "anim.add") {
@@ -2562,6 +2693,8 @@ struct TextAnimationSection: View {
                         if created >= 0 { editing = created }
                     }
                 }
+                }
+                if parts & 2 != 0 {
                 PanelSection(title: AureaText.t("ui_ready_anims"), glyph: CupertinoGlyph.WandStars, tag: "text.sec.presets") {
                     PanelItemGrid(items: presets.enumerated().map { n, preset in
                         PanelItem(glyph: preset.glyph, label: AureaText.t(preset.key), tag: "text.motion.preset.\(n)") {
@@ -2571,8 +2704,9 @@ struct TextAnimationSection: View {
                         }
                     })
                 }
+                }
                 // 0.4.4 Explodir texto (só camada de texto 2D): cada pedaço vira uma camada.
-                if model.selectedLayer?.kind == 4 {
+                if parts & 4 != 0 && model.selectedLayer?.kind == 4 {
                     PanelSection(title: AureaText.t("tx044_explode"), glyph: CupertinoGlyph.Scissors, tag: "text.sec.explode", startOpen: false) {
                         Text(AureaText.t("tx044_explode_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).fixedSize(horizontal: false, vertical: true).padding(.bottom, 6)
                         PanelItemGrid(items: [(CupertinoGlyph.Textformat, "tx044_explode_chars"), (CupertinoGlyph.DocText, "tx044_explode_words"), (CupertinoGlyph.LineHorizontal3, "tx044_explode_lines")].enumerated().map { mode, entry in
@@ -2642,6 +2776,9 @@ private struct TextAnimatorEditor: View {
     let onClose: () -> Void
     private var id: Int64 { model.primarySelection ?? 0 }
     private var fields: [Float] { model.engine.textAnimatorFields(id, index: UInt32(index)).map(\.floatValue) }
+    /// Estilo do texto (22 valores: 20 = ordem preenchimento/contorno, v70; 21 = mistura entre
+    /// caracteres). Vazio fora do texto 2D.
+    private var renderOrderStyle: [Float] { model.engine.textStyle(id).map(\.floatValue) }
     private func selectorField(_ s: Int, _ f: Int) -> Int { 16 * (s + 1) + f }
     private func setField(_ field: Int, _ value: Float) {
         _ = model.engine.setTextAnimatorField(id, index: UInt32(index), field: UInt32(field), value: value)
@@ -2737,6 +2874,42 @@ private struct TextAnimatorEditor: View {
                     if props & (1 << 13) != 0 {
                         row(param(46, "fx_matiz", "°", 1, -3600...3600)); row(param(47, "fx_saturacao", "%", 0.5, -100...100)); row(param(48, "fx_brilho", "%", 0.5, -100...100))
                     }
+                    toggle("ae_anim_fill_opacity", props & (1 << 14) != 0) { _ in toggleProp(1 << 14) }
+                    if props & (1 << 14) != 0 { row(param(49, "ae_anim_fill_opacity", "%", 0.5, 0...100)) }
+                    // v70: matiz, saturação, brilho e opacidade do contorno, como no After Effects.
+                    toggle("ae_anim_stroke_hsb", props & (1 << 18) != 0) { _ in toggleProp(1 << 18) }
+                    if props & (1 << 18) != 0 {
+                        row(param(58, "fx_matiz", "°", 1, -3600...3600)); row(param(59, "fx_saturacao", "%", 0.5, -100...100)); row(param(60, "fx_brilho", "%", 0.5, -100...100))
+                    }
+                    toggle("ae_anim_stroke_opacity", props & (1 << 19) != 0) { _ in toggleProp(1 << 19) }
+                    if props & (1 << 19) != 0 { row(param(61, "ae_anim_stroke_opacity", "%", 0.5, 0...100)) }
+                }
+            }
+            // v70: "Mais opções" do After Effects. A ordem preenchimento/contorno é do texto inteiro.
+            if !rig, renderOrderStyle.count > 20 {
+                PanelSection(title: AureaText.t("ae_anim_more_options"), glyph: CupertinoGlyph.SliderHorizontal3, tag: "\(tag).sec.more", startOpen: false, stacked: false) {
+                    // Ordem do motor: 0 preenchimentos por cima, 1 por caractere, 2 contornos por cima.
+                    let shown = [1: 0, 2: 2][Int(renderOrderStyle[20])] ?? 1
+                    PanelChoiceRow(label: AureaText.t("ae_anim_fill_stroke"),
+                                   options: ["ae_anim_fill_stroke_char", "ae_anim_fill_stroke_fills", "ae_anim_fill_stroke_strokes"].map { AureaText.t($0) },
+                                   isOn: { $0 == shown }) { i in
+                        var next = renderOrderStyle
+                        next[20] = i == 0 ? 1 : i == 2 ? 2 : 0
+                        _ = model.engine.setTextStyle(id, values: next.map { NSNumber(value: $0) })
+                        reload()
+                    }
+                    // Inter-Character Blending do AE: como as letras do texto se misturam onde se sobrepõem.
+                    if renderOrderStyle.count > 21 {
+                        let blend = Int(renderOrderStyle[21])
+                        PanelChoiceRow(label: AureaText.t("ae_anim_inter_char_blend"),
+                                       options: Self.interCharBlends.map { AureaText.t($0.0) },
+                                       isOn: { Self.interCharBlends[$0].1 == blend }) { i in
+                            var next = renderOrderStyle
+                            next[21] = Float(Self.interCharBlends[i].1)
+                            _ = model.engine.setTextStyle(id, values: next.map { NSNumber(value: $0) })
+                            reload()
+                        }
+                    }
                 }
             }
             PanelSection(title: AureaText.t("fxs_interp_ease"), glyph: CupertinoGlyph.ArrowUpArrowDown, tag: "\(tag).sec.ease", startOpen: false, stacked: false) {
@@ -2778,13 +2951,37 @@ private struct TextAnimatorEditor: View {
             if props & (1 << 7) != 0 { row(param(22, "panel_contorno", "px", 0.1, -50...50)) }
             // B5: Character Offset do AE (troca cada letra pela N-ésima seguinte).
             if props & (1 << 8) != 0 { row(param(23, "ae_anim_char_offset", "", 0.05, -1000...1000)) }
+            // v70: Valor de caractere (o código Unicode que troca a letra) e a âncora da linha do tracking.
+            if props & (1 << 20) != 0 { row(param(62, "ae_anim_char_value", "", 1, 0...1114111)) }
+            if props & (1 << 21) != 0 { row(param(63, "ae_anim_line_anchor", "%", 0.5, -1000...1000)) }
             if props & (1 << 12) != 0 { row(param(45, "fxl_line_spacing", "px", 1, -20000...20000)) }
             if props & (1 << 11) != 0 { row(param(42, "fxl_anchor", "px", 1, -20000...20000)); row(param(43, "fxl_anchor", "px", 1, -20000...20000)) }
-            let extras = [(1 << 5, "panel_desfoque"), (1 << 4, "edt_prop_spacing"), (1 << 6, "edt_prop_skew"), (1 << 7, "panel_contorno"), (1 << 12, "fxl_line_spacing"), (1 << 8, "ae_anim_char_offset"), (1 << 11, "fxl_anchor")]
+            if props & (1 << 4) != 0 {
+                choice("ae_anim_tracking_type", ["ae_anim_tracking_both", "ae_anim_tracking_before", "ae_anim_tracking_after"], field: 11, current: Int(f[11]))
+            }
+            if props & ((1 << 8) | (1 << 20)) != 0 {
+                choice("ae_anim_char_range", ["ae_anim_char_range_case", "ae_anim_char_range_unicode"], field: 10, current: Int(f[10]))
+                // Character Alignment do AE: onde a letra nova fica na vaga da antiga (ou o kerning refeito).
+                choice("ae_anim_char_align", ["ae_anim_char_align_left", "ae_anim_char_align_center", "ae_anim_char_align_right", "ae_anim_char_align_kerning"],
+                       field: 12, current: Int(f[12]))
+            }
+            let extras = [(1 << 5, "panel_desfoque"), (1 << 4, "edt_prop_spacing"), (1 << 6, "edt_prop_skew"), (1 << 7, "panel_contorno"), (1 << 12, "fxl_line_spacing"), (1 << 8, "ae_anim_char_offset"),
+                          (1 << 20, "ae_anim_char_value"), (1 << 21, "ae_anim_line_anchor"), (1 << 11, "fxl_anchor")]
             PanelChoiceRow(label: AureaText.t("panel_propriedades"), options: extras.map { AureaText.t($0.1) }, isOn: { props & extras[$0].0 != 0 }) { toggleProp(extras[$0].0) }
         }
     }
     private static let modes = ["panel_somar", "panel_subtrair", "panel_intersecao", "fxo_min", "fxo_maximum", "panel_diferenca"]
+    /// Inter-Character Blending do AE, na ordem do menu dele: o rótulo e o valor do BlendMode
+    /// do motor (core/Types.hpp). Par de `InterCharBlends` no TextAnimSection.kt.
+    private static let interCharBlends: [(String, Int)] = [
+        ("panel_normal", 0), ("ae_blend_dissolve", 31),
+        ("pn_blend_darken", 6), ("pn_blend_multiply", 3), ("pn_blend_linear_burn", 21), ("pn_blend_color_burn", 9),
+        ("pn_blend_add", 1), ("pn_blend_lighten", 7), ("pn_blend_screen", 4), ("pn_blend_linear_dodge", 20), ("pn_blend_color_dodge", 8),
+        ("pn_blend_overlay", 5), ("pn_blend_soft_light", 11), ("pn_blend_hard_light", 10), ("om_ap_blend_linear_light", 26),
+        ("pn_blend_vivid_light", 19), ("om_ap_blend_pin_light", 27), ("ae_blend_hard_mix", 33),
+        ("pn_blend_difference", 12), ("pn_blend_exclusion", 13),
+        ("pn_blend_hue", 14), ("pn_blend_saturation", 15), ("pn_blend_color", 16), ("pn_blend_luminosity", 17),
+    ]
     private func selectors(_ f: [Float], tag: String) -> some View {
         let count = Int(f[15])
         return PanelSection(title: AureaText.t("ui_selectors"), glyph: CupertinoGlyph.SliderHorizontal3, tag: "\(tag).sec.selectors", startOpen: false, count: count, stacked: false) {
@@ -2796,7 +2993,8 @@ private struct TextAnimatorEditor: View {
                 PanelItem(glyph: CupertinoGlyph.ArrowLeftRight, label: AureaText.t("fxs_range"), tag: "\(tag).add.range") { addSelector(2) },
                 PanelItem(glyph: CupertinoGlyph.Waveform, label: AureaText.t("ui_wiggly"), tag: "\(tag).add.wiggly") { addSelector(5) },
                 PanelItem(glyph: CupertinoGlyph.Textformat, label: AureaText.t("panel_expressao"), tag: "\(tag).add.expression") { addSelector(3) },
-            ], columns: 3).padding(.top, 4)
+                PanelItem(glyph: CupertinoGlyph.Arrow2Squarepath, label: AureaText.t("ae_anim_sweep"), tag: "\(tag).add.sweep") { addSelector(4) },
+            ], columns: 4).padding(.top, 4)
         }
     }
     private func addSelector(_ type: UInt32) {
@@ -2805,8 +3003,9 @@ private struct TextAnimatorEditor: View {
     }
     private func selectorBody(_ s: Int, _ f: [Float], tag: String) -> some View {
         let type = Int(f[selectorField(s, 1)]), block = 64 * s
-        let title = AureaText.t(type == 5 ? "ui_wiggly" : type == 3 ? "panel_expressao" : "fxs_range")
-        let glyph = type == 5 ? CupertinoGlyph.Waveform : type == 3 ? CupertinoGlyph.Textformat : CupertinoGlyph.ArrowLeftRight
+        let title = AureaText.t(type == 5 ? "ui_wiggly" : type == 3 ? "panel_expressao" : type == 4 ? "ae_anim_sweep" : "fxs_range")
+        let glyph = type == 5 ? CupertinoGlyph.Waveform : type == 3 ? CupertinoGlyph.Textformat
+            : type == 4 ? CupertinoGlyph.Arrow2Squarepath : CupertinoGlyph.ArrowLeftRight
         return PanelSection(title: "\(title) \(s + 1)", glyph: glyph, tag: "\(tag).sel.\(s).\(type)", flat: true, stacked: false) {
             choice("fxl_mode", Self.modes, field: selectorField(s, 4), current: Int(f[selectorField(s, 4)]))
             if type == 5 {
@@ -2819,6 +3018,8 @@ private struct TextAnimatorEditor: View {
             } else if type == 3 {
                 Text(AureaText.t("ui_expr_selector_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).fixedSize(horizontal: false, vertical: true)
                 row(param(block + 38, "panel_intensidade", "%", 1, -1000...1000))
+            } else if type == 4 {
+                sweepBody(s, f, tag: tag)
             } else {
                 row(param(block, "panel_inicio", "%", 0.5, -1000...1000)); row(param(block + 1, "panel_fim", "%", 0.5, -1000...1000)); row(param(block + 2, "fxl_offset", "%", 0.5, -1000...1000))
                 row(param(block + 3, "panel_intensidade", "%", 0.5, -100...100))
@@ -2842,6 +3043,29 @@ private struct TextAnimatorEditor: View {
                 _ = model.engine.removeTextSelector(id, index: UInt32(index), selector: UInt32(s))
                 reload()
             }
+        }
+    }
+}
+
+private extension TextAnimatorEditor {
+    /// Varredura (kTextSelectorSweep): a janela do Transformar texto do Motion, própria do AUREA.
+    /// Par de `SweepSelector` no TextAnimSection.kt.
+    @ViewBuilder func sweepBody(_ s: Int, _ f: [Float], tag: String) -> some View {
+        let block = 64 * s
+        Text(AureaText.t("ae_anim_sweep_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).fixedSize(horizontal: false, vertical: true)
+        row(param(block, "panel_inicio", "%", 0.5, -1000...1000)); row(param(block + 1, "panel_fim", "%", 0.5, -1000...1000)); row(param(block + 2, "fxl_offset", "%", 0.5, -1000...1000))
+        row(param(block + 41, "fxl_overlap", "%", 0.5, 0...1000))
+        row(param(block + 3, "panel_intensidade", "%", 0.5, -100...100))
+        choice("panel_anima_cada", ["panel_letra", "panel_palavra", "panel_linha", "ui_char_no_spaces"], field: selectorField(s, 2), current: Int(f[selectorField(s, 2)]))
+        choice("fxl_shape", ["fxo_square_2", "fxo_smooth", "fxo_triangle"], field: selectorField(s, 5), current: min(2, Int(f[selectorField(s, 5)])))
+        row(param(block + 4, "fxl_ease_in", "%", 0.5, -100...100)); row(param(block + 5, "fxl_ease_out", "%", 0.5, -100...100))
+        toggle("fxl_random_order", f[selectorField(s, 6)] > 0.5) { setField(selectorField(s, 6), $0 ? 1 : 0) }
+        if f[selectorField(s, 6)] > 0.5 {
+            HStack(spacing: 8) {
+                Text(AureaText.t("fxl_seed")).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
+                Text("\(Int(f[selectorField(s, 7)]))").font(.aurea(size: 13)).foregroundStyle(AureaColors.muted)
+                NativePanelChip(AureaText.t("la_reroll")) { setField(selectorField(s, 7), Float(Int.random(in: 1...999_999))) }
+            }.frame(height: 44).accessibilityIdentifier("\(tag).sel.\(s).seed")
         }
     }
 }
@@ -3103,5 +3327,313 @@ private struct NativeLayerAnimatorCard: View {
             }.accessibilityIdentifier("layer.anim.\(index).param.\(param.id)")
         if selected { NativeAnimationTrackActions(track: track, curveTag: "layer.anim.\(index).curve.\(param.id)") }
         }
+    }
+}
+
+
+// =============================================================================
+// Funções do AUREA (13/11/2026, decisão 1 do dono): as chaves da camada e o 3D
+// da camada saíram do ⋮ e ganharam painel próprio, aberto pelo navegador de
+// Efeitos (grupo "Funções do Aurea"). Mesma moldura dos outros painéis
+// (PanelFrame, ‹ na coluna esquerda); cada linha é título + dica + chave.
+// Par do LayerFunctionPanels.kt (mesmos ids e textos). Os comandos são os mesmos
+// que o ⋮ usava (ToolbarView.swift, antes de 13/11/2026).
+// =============================================================================
+
+/// Linha título + dica + chave (par do `BlurToggleRow` do Android).
+private struct FunctionToggleRow: View {
+    let title: String
+    let hint: String
+    let isOn: Bool
+    var enabled = true
+    let tag: String
+    let onChange: (Bool) -> Void
+    var body: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.aurea(size: 13, weight: .semibold)).foregroundStyle(AureaColors.text)
+                if !hint.isEmpty {
+                    Text(hint).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Toggle("", isOn: Binding(get: { isOn }, set: { onChange($0) }))
+                .labelsHidden().tint(AureaColors.accent).disabled(!enabled)
+        }
+        .padding(.vertical, 6).padding(.leading, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(tag)
+    }
+}
+
+/// Linha de ação (título + dica), toda tocável.
+private struct FunctionActionRow: View {
+    let title: String
+    let hint: String
+    var enabled = true
+    let tag: String
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.aurea(size: 13)).foregroundStyle(enabled ? AureaColors.accent : AureaColors.muted)
+                if !hint.isEmpty {
+                    Text(hint).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .padding(.leading, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(AureaPressStyle(shrink: 1))
+        .disabled(!enabled)
+        .accessibilityIdentifier(tag)
+    }
+}
+
+/// OPÇÕES DA CAMADA: camada de ajuste (com "afeta"), guia, preservar
+/// transparência, linha magnética e tímida. Uma lista de linhas, sem seções.
+struct LayerOptionsPanel: View {
+    @EnvironmentObject private var model: AureaModel
+    private var refresh: () -> Void { { model.refreshModel(force: true) } }
+    var body: some View {
+        PanelFrame(rail: PanelRail(onBack: { model.panel = .none }, supportsAnimation: false)) {
+            if let row = model.selectedLayer {
+                let index = model.layers.firstIndex(where: { $0.id == row.id }) ?? 0
+                VStack(alignment: .leading, spacing: 0) {
+                    if row.kind != 3 {
+                        FunctionToggleRow(title: AureaText.t("editor_camada_ajuste"), hint: AureaText.t("editor_efeitos_desta_camada_valem_todas_baixo"),
+                                          isOn: row.adjustment, tag: "layerOptions.adjustment") { on in
+                            model.mutate { $0.setLayer(row.id, adjustment: on) }; refresh()
+                        }
+                        if row.adjustment { adjustmentScope(row, index: index) }
+                        FunctionToggleRow(title: AureaText.t("editor_guia_nao_exporta"), hint: AureaText.t("editor_aparece_aqui_editor_fica_fora_video"),
+                                          isOn: row.guide, tag: "layerOptions.guide") { on in
+                            model.mutate { $0.setLayer(row.id, guide: on) }; refresh()
+                        }
+                        FunctionToggleRow(title: AureaText.t("ae_layer_preserve_transparency"), hint: AureaText.t("ae_layer_preserve_transparency_hint"),
+                                          isOn: row.preserveTransparency, enabled: !row.locked, tag: "layerOptions.preserveTransparency") { on in
+                            model.setLayerPreserveTransparency(row.id, on)
+                        }
+                    }
+                    // Linha Magnética: só em trecho com FONTE (vídeo, imagem, áudio ou pré-composição).
+                    if [1, 2, 3, 12].contains(row.kind) {
+                        FunctionToggleRow(title: AureaText.t("editor_linha_magnetica"), hint: AureaText.t("editor_linha_magnetica_detalhe"),
+                                          isOn: row.magnetic, tag: "layerOptions.magnetic") { on in
+                            model.setLayerMagneticTrack(row.id, on)
+                        }
+                    }
+                    FunctionToggleRow(title: AureaText.t("ae_layer_shy"), hint: AureaText.t("ae_layer_shy_hint"),
+                                      isOn: row.shy, tag: "layerOptions.shy") { on in model.setLayerShy(row.id, on) }
+                }
+                .padding(.leading, 8).padding(.trailing, 12).padding(.top, 6).padding(.bottom, 10)
+            }
+        }
+    }
+
+    /// "Afeta": todas abaixo → só a logo abaixo → só as escolhidas (com a lista delas).
+    @ViewBuilder
+    private func adjustmentScope(_ row: LayerItem, index: Int) -> some View {
+        let scope = model.engine.adjustmentScope(row.id)
+        FunctionActionRow(title: AureaText.t("la_affected") + " · " + AureaText.t(scope == 1 ? "la_affected_below" : scope == 2 ? "la_affected_chosen" : "la_affected_all"),
+                          hint: AureaText.t(scope == 2 ? "la_affected_chosen_hint" : "la_affected_hint"), tag: "layerOptions.affected") {
+            model.engine.setAdjustmentScope((scope + 1) % 3, forLayer: row.id); refresh()
+        }
+        if scope == 2 {
+            let below = Array(model.layers.dropFirst(index + 1)).filter { $0.kind != 3 }
+            let chosen = Set(model.engine.adjustmentTargets(row.id).map(\.int64Value))
+            if below.isEmpty {
+                Text(AureaText.t("la_affected_none_below")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).padding(.leading, 16)
+            }
+            ForEach(below, id: \.id) { b in
+                FunctionToggleRow(title: b.name, hint: "", isOn: chosen.contains(b.id), tag: "layerOptions.target.\(b.id)") { on in
+                    model.engine.setAdjustmentTarget(b.id, on: on, forLayer: row.id); refresh()
+                }
+                .padding(.leading, 12)
+            }
+        }
+    }
+}
+
+/// 3D DA CAMADA: camada 3D (o atalho da barra continua), virar objeto 3D (imagem
+/// e vídeo), prender a um osso (com um modelo 3D com esqueleto na composição),
+/// câmera do grupo e aceitar luzes.
+struct Layer3DFunctionsPanel: View {
+    @EnvironmentObject private var model: AureaModel
+    @State private var boneTarget: LayerRef?
+    private var refresh: () -> Void { { model.refreshModel(force: true) } }
+    var body: some View {
+        PanelFrame(rail: PanelRail(onBack: { model.panel = .none }, supportsAnimation: false)) {
+            if let row = model.selectedLayer {
+                let intrinsic = [8, 9, 10].contains(row.kind)
+                let threeD = row.threeD || intrinsic
+                VStack(alignment: .leading, spacing: 0) {
+                    FunctionToggleRow(title: AureaText.t("sh_add_tab_3d"), hint: AureaText.t(intrinsic ? "fn_layer3d_intrinsic" : "fn_layer3d_hint"),
+                                      isOn: threeD, enabled: !row.locked && !intrinsic, tag: "layer3d.threeD") { on in
+                        _ = model.engine.setLayer3D(on, forLayer: row.id); refresh()
+                    }
+                    if row.kind == 1 || row.kind == 2 {
+                        FunctionActionRow(title: AureaText.t("layer_to_3d_object"), hint: AureaText.t("layer_to_3d_object_hint"),
+                                          enabled: !row.locked, tag: "layer3d.toObject") {
+                            model.layerTo3DObject(row.id, kind: row.kind, name: row.name) { made in
+                                if made < 0 { model.toast = AureaText.t("layer_to_3d_failed") }
+                                else { refresh(); model.select(layerId: made, additive: false) }
+                            }
+                        }
+                    }
+                    if row.kind != 3 && row.kind != 10 && model.layers.contains(where: { $0.kind == 10 && $0.id != row.id }) {
+                        let bone = model.layerParentBone(row.id)
+                        let parentModel: LayerItem? = row.parentIndex >= 0 && Int(row.parentIndex) < model.layers.count
+                            && model.layers[Int(row.parentIndex)].kind == 10 ? model.layers[Int(row.parentIndex)] : nil
+                        FunctionActionRow(title: AureaText.t("bone_attach_title"),
+                                          hint: bone >= 0 && parentModel != nil
+                                            ? AureaText.t("bone_attach_current", boneLabel(model.boneName(parentModel!.id, bone), bone))
+                                            : AureaText.t("bone_attach_menu_hint"),
+                                          enabled: !row.locked, tag: "layer3d.boneAttach") { boneTarget = LayerRef(id: row.id) }
+                    }
+                    if row.kind == 12 {
+                        let through = model.engine.groupCameraPassThrough(row.id) == 1
+                        FunctionToggleRow(title: AureaText.t("la_group_camera"), hint: AureaText.t("la_group_camera_hint"),
+                                          isOn: through, tag: "layer3d.groupCamera") { on in
+                            if model.engine.setGroupCameraPassThrough(on, forLayer: row.id) {
+                                model.toast = AureaText.t(on ? "app_group_camera_reaches" : "app_group_camera_sealed")
+                            }
+                            refresh()
+                        }
+                    }
+                    let acceptsLights = model.engine.layerAcceptsLights(row.id)
+                    if acceptsLights >= 0 {
+                        FunctionToggleRow(title: AureaText.t("la_accepts_lights"), hint: AureaText.t("la_accepts_lights_hint"),
+                                          isOn: acceptsLights == 1, tag: "layer3d.acceptsLights") { on in
+                            _ = model.engine.setLayerAcceptsLights(on, forLayer: row.id); refresh()
+                        }
+                    }
+                }
+                .padding(.leading, 8).padding(.trailing, 12).padding(.top, 6).padding(.bottom, 10)
+            }
+        }
+        // 0.5.2: "Prender a um osso" (par do BoneAttachSheet.kt); saiu do ⋮ e mora aqui.
+        .sheet(item: $boneTarget) { target in
+            BoneAttachSheet(layerId: target.id) { boneTarget = nil }
+                .environmentObject(model)
+                .presentationDetents([.medium, .large])
+        }
+    }
+}
+
+
+// =============================================================================
+// Funções do AUREA, fase F3 (13/11/2026): ANIMAÇÃO, painel próprio na moldura
+// comum (par do AnimationPanel.kt). Abas: Camada (animadores da camada) · Texto
+// (animadores de texto) · Prontas · Explodir (só texto 2D). O ◆ e a curva miram o
+// parâmetro em foco. Entradas: navegador de Efeitos › Funções do Aurea ›
+// Animadores, o atalho do Editar texto e a aba Anim do texto 3D.
+// =============================================================================
+
+enum AnimationTab: String, CaseIterable { case layer, text, ready, explode }
+
+/// As abas que valem para a camada (gêmea de `animationTabs` do Android).
+func animationTabs(kind: UInt32, text3D: Bool) -> [AnimationTab] {
+    var out: [AnimationTab] = [.layer]
+    if kind == 4 || text3D { out.append(contentsOf: [.text, .ready]) }
+    if kind == 4 { out.append(.explode) }
+    return out
+}
+
+/// Pedido de aba ao abrir Animação (o atalho do texto pede Texto); lido e limpo ao aparecer.
+enum AnimationPanelRequest { @MainActor static var tab: AnimationTab? }
+
+struct AnimationPanelView: View {
+    @EnvironmentObject private var model: AureaModel
+    @State private var chosen: AnimationTab = .layer
+    private var id: Int64 { model.primarySelection ?? 0 }
+    private var text3D: Bool { model.engine.text3D(forLayer: id) != nil }
+    private var tabs: [AnimationTab] { animationTabs(kind: model.selectedLayer?.kind ?? 0, text3D: text3D) }
+    private var tab: AnimationTab { tabs.contains(chosen) ? chosen : .layer }
+    private var locked: Bool { model.selectedLayer?.locked == true }
+
+    /// O parâmetro do trilho: animador da camada (Camada) ou de texto (Texto).
+    private var track: TimelineTrack? {
+        switch tab {
+        case .layer: return model.animatorRailTrack()
+        case .text:
+            guard let focus = model.timelineFocus, focus.count == 1, focus[0].property == 33 else { return nil }
+            return focus[0]
+        default: return nil
+        }
+    }
+    private var keys: [KeyframeItem] {
+        guard let t = track else { return [] }
+        return (model.keyframes[id] ?? []).filter { Int($0.property) == t.property && $0.effectIndex == t.effect && $0.paramIndex == t.param }
+            .sorted { $0.time < $1.time }
+    }
+    private var look: KeyframeLook {
+        let k = keys
+        if k.contains(where: { $0.time == model.localPlayhead }) { return .keyHere }
+        return k.isEmpty ? .none : .animated
+    }
+    private func toggleKey() {
+        guard let t = track, !locked else { return }
+        if t.property == 33 { model.engine.toggleTextAnimKey(id, index: t.effect, param: t.param) }
+        else { model.engine.toggleLayerAnimKey(id, index: t.effect, param: t.param) }
+        model.refreshModel(force: true)
+    }
+    private func deleteAllKeys() {
+        guard !locked else { return }
+        let k = keys, layer = id
+        guard !k.isEmpty else { return }
+        model.beginGesture("apagar keyframes")
+        model.mutate { core in for key in k { core.deleteKeyframe(forLayer: layer, property: key.property, time: key.time) } }
+        model.endGesture()
+    }
+    private func openCurve() {
+        let k = keys
+        guard let first = k.first else { return }
+        let segment = k.dropLast().last { $0.time <= model.localPlayhead } ?? first
+        model.openCurve(property: first.property, effect: first.effectIndex, param: first.paramIndex, time: segment.time)
+    }
+    private func label(_ t: AnimationTab) -> String {
+        switch t {
+        case .layer: return AureaText.t("editor_camada")
+        case .text: return AureaText.t("ui_text_animators")
+        case .ready: return AureaText.t("ui_ready_anims")
+        case .explode: return AureaText.t("tx044_explode")
+        }
+    }
+    private func glyph(_ t: AnimationTab) -> Character {
+        switch t {
+        case .layer: return CupertinoGlyph.Move
+        case .text: return CupertinoGlyph.Textformat
+        case .ready: return CupertinoGlyph.WandStars
+        case .explode: return CupertinoGlyph.Scissors
+        }
+    }
+    var body: some View {
+        let hasTrack = track != nil
+        PanelFrame(rail: PanelRail(onBack: { model.panel = .none }, keyframeLook: look,
+                                   onKeyframe: hasTrack ? { toggleKey() } : nil,
+                                   onDeleteAllKeyframes: hasTrack ? { deleteAllKeys() } : nil,
+                                   onCurve: hasTrack ? { openCurve() } : nil,
+                                   curveReady: keys.count >= 2),
+                   tabs: tabs.count > 1 ? tabs.map { PanelTab(id: $0.rawValue, label: label($0), glyph: glyph($0)) } : [],
+                   selectedTab: tab.rawValue,
+                   onTab: { raw in chosen = AnimationTab(rawValue: raw) ?? .layer; model.timelineFocus = nil }) {
+            VStack(alignment: .leading, spacing: 0) {
+                switch tab {
+                case .layer: LayerAnimatorSection()
+                case .text: TextAnimationSection(parts: 1, showAnimatorEffect: false)
+                case .ready: TextAnimationSection(parts: 2, showAnimatorEffect: false)
+                case .explode: TextAnimationSection(parts: 4, showAnimatorEffect: false)
+                }
+            }
+            .padding(.leading, 8).padding(.trailing, 12).padding(.top, 6).padding(.bottom, 10)
+            .accessibilityIdentifier("animation.panel")
+        }
+        .onAppear {
+            if let requested = AnimationPanelRequest.tab { chosen = requested; AnimationPanelRequest.tab = nil }
+            if tab == .layer, let t = model.animatorRailTrack() { model.focusLayerAnimator(t) }
+        }
+        .onChange(of: model.primarySelection) { _ in chosen = .layer }
+        .onDisappear { model.timelineFocus = nil }
     }
 }

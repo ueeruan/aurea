@@ -27,7 +27,7 @@ enum MocapDetector {
 
     /// Analisa o vídeo e manda os quadros para `sink` (Data de floats, quantos,
     /// largura/altura). `progress` 0..1. Cancelável (Task). Devolve os quadros analisados.
-    static func run(url: URL, reduced: Bool, progress: @escaping (Float) -> Void,
+    static func run(url: URL, reduced: Bool, imageSpace: Bool = false, progress: @escaping (Float) -> Void,
                     sink: @escaping (Data, Int, Float) -> Void) async throws -> Int {
         let asset = AVURLAsset(url: url)
         guard let track = try await asset.loadTracks(withMediaType: .video).first else { throw Failure() }
@@ -57,7 +57,7 @@ enum MocapDetector {
         var analyzed = 0
         // Um modo por vídeo (o motor não mistura metros com a imagem): decide no
         // primeiro quadro com gente — 3D se o Vision 3D (iOS 17+) também a achou.
-        var mode = 0   // 0 indeciso · 1 3D · 2 2D
+        var mode = imageSpace ? 2 : 0   // 0 indeciso · 1 3D · 2 2D
 
         while let sample = output.copyNextSampleBuffer() {
             try Task.checkCancellation()
@@ -101,7 +101,7 @@ enum MocapDetector {
     }
 
     /// Vision 2D (19 pontos) → ordem de 33; y para baixo; sem profundidade.
-    private static func fill2D(_ body: VNHumanBodyPoseObservation, into buffer: inout [Float], at base: Int) {
+    static func fill2D(_ body: VNHumanBodyPoseObservation, into buffer: inout [Float], at base: Int) {
         guard let points = try? body.recognizedPoints(.all) else { return }
         let map: [(VNHumanBodyPoseObservation.JointName, Int)] = [
             (.nose, 0), (.leftEye, 2), (.rightEye, 5), (.leftEar, 7), (.rightEar, 8),

@@ -249,23 +249,42 @@ bool lk_track(const std::vector<Gray>& prev, const std::vector<Gray>& cur, Vec2 
         const f64 det = gxx * gyy - gxy * gxy;
         const f64 tr = gxx + gyy;
         const f64 lmin = 0.5 * (tr - std::sqrt(std::max(0.0, tr * tr - 4 * det)));
-        if (lmin < 1e-4 || det < 1e-12) {
+        if (lmin < 1e-6 || det < 1e-12) {
             if (L == 0) return false;
             // A real corner can disappear at the coarsest level. Continue at
             // finer resolution instead of throwing away its persistent id.
             d.x *= 2.0f; d.y *= 2.0f;
             continue;
         }
+        const int sampleCount = k;
+        f64 referenceMean = 0, referenceVariance = 0;
+        for (int index = 0; index < sampleCount; ++index) referenceMean += a[index];
+        referenceMean /= sampleCount;
+        for (int index = 0; index < sampleCount; ++index) {
+            const f64 delta = a[index] - referenceMean;
+            referenceVariance += delta * delta;
+        }
         for (int it = 0; it < 20; ++it) {
             f64 bx = 0, by = 0;
+            f32 current[samples];
+            f64 currentMean = 0, currentSquared = 0;
             k = 0;
             for (int wy = -radius; wy <= radius; ++wy)
                 for (int wx = -radius; wx <= radius; ++wx, ++k) {
                     const f32 x = q.x + d.x + static_cast<f32>(wx), y = q.y + d.y + static_cast<f32>(wy);
-                    const f32 dt = sample(B, x, y) - a[k];
-                    bx += ix[k] * dt;
-                    by += iy[k] * dt;
+                    current[k] = sample(B, x, y);
+                    currentMean += current[k];
+                    currentSquared += static_cast<f64>(current[k]) * current[k];
                 }
+            const f64 currentVariance = currentSquared - currentMean * currentMean / sampleCount;
+            if (!(currentVariance > 1e-12)) return false;
+            currentMean /= sampleCount;
+            const f64 gain = std::sqrt(referenceVariance / currentVariance);
+            for (int index = 0; index < sampleCount; ++index) {
+                const f64 residual = (current[index] - currentMean) * gain + referenceMean - a[index];
+                bx += ix[index] * residual;
+                by += iy[index] * residual;
+            }
             const f64 ux = -(gyy * bx - gxy * by) / det, uy = -(-gxy * bx + gxx * by) / det;
             d.x += static_cast<f32>(ux);
             d.y += static_cast<f32>(uy);
@@ -320,7 +339,7 @@ void FeatureTracker::detect(const Gray& g) {
     if (best <= 1e-6f) return;
     struct Cand { f32 s; u32 x, y; };
     std::vector<Cand> cands;
-    const f32 thr = std::max(best * 0.02f, 2e-4f);
+    const f32 thr = std::max(best * 0.02f, 1e-6f);
     for (u32 y = border; y + border < h; ++y)
         for (u32 x = border; x + border < w; ++x) {
             const f32 s = score[static_cast<usize>(y) * w + x];
@@ -385,7 +404,9 @@ void FeatureTracker::add_frame(const Gray& g) {
         }
         active_.swap(kept);
     }
-    detect(g);
+    // Refill after meaningful attrition. Recomputing three integral images
+    // for one lost corner on every frame dominated analysis on mobile CPUs.
+    if (active_.size() < maxFeatures_ * 3u / 4u || frame % 12u == 0u) detect(g);
     prev_ = std::move(cur);
 }
 

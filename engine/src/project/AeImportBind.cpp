@@ -19,6 +19,7 @@
 #include "aurea/expr/Expression.hpp"
 #include "aurea/project/Presets.hpp"
 #include "aurea/text/TextAnimator.hpp"
+#include "aurea/vector/Vector.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -250,6 +251,8 @@ f32* home_ptr(Layer& l, const Channel& c) noexcept {
         case TrackProperty::MaskParam:
             if (Mask* m = mask_of(l, c.ei)) return c.pi == 0 ? &m->feather : c.pi == 1 ? &m->expansion : &m->opacity;
             return nullptr;
+        case TrackProperty::VectorParam:   // grupo da camada vetorial (conteúdo de camada de forma do AE)
+            return c.ei < l.shape.vector.groups.size() ? vector::param_ref(l.shape.vector.groups[c.ei], c.pi) : nullptr;
         default:
             return transform_field(l, c.prop);
     }
@@ -310,6 +313,11 @@ void set_field(WriteCtx& w, Layer& l, const Channel& c, f32 v) {
         case Field::PathForceAlign: l.text.pathForceAlign = v > 0.5f; l.text.pathLegacyLayout = false; break;
         case Field::PathMask: w.pendingPathMask = static_cast<i32>(std::lround(v)); break;
         case Field::Grouping: w.pendingGrouping = static_cast<i32>(std::lround(v)); break;
+        case Field::TrackType: if (a) a->trackingType = static_cast<u8>(std::clamp(v, 0.0f, 2.0f)); break;
+        case Field::CharRange: if (a) a->charRange = v > 0.5f ? 1 : 0; break;
+        case Field::CharAlign: if (a) a->charAlign = static_cast<u8>(std::clamp(v, 0.0f, 3.0f)); break;
+        case Field::RenderOrder: l.text.renderOrder = static_cast<u8>(std::clamp(v, 0.0f, 2.0f)); break;
+        case Field::CharBlend: l.text.interCharBlend = static_cast<u16>(std::clamp(v, 0.0f, static_cast<f32>(kLastBlendMode))); break;
         case Field::None: break;
     }
 }
@@ -338,6 +346,11 @@ f32 home_value(const Layer& l, const Channel& c) noexcept {
             case Field::PathReverse: return l.text.pathReverse ? 1.0f : 0.0f;
             case Field::PathPerpendicular: return l.text.pathPerpendicular ? 1.0f : 0.0f;
             case Field::PathForceAlign: return l.text.pathForceAlign ? 1.0f : 0.0f;
+            case Field::TrackType: return a ? a->trackingType : 2.0f;
+            case Field::CharRange: return a ? a->charRange : 0.0f;
+            case Field::CharAlign: return a ? a->charAlign : 3.0f;
+            case Field::RenderOrder: return l.text.renderOrder;
+            case Field::CharBlend: return l.text.interCharBlend;
             default: return 0.0f;
         }
     }
@@ -466,6 +479,14 @@ u32 write_keys(WriteCtx& w, const Binding& b, const std::vector<Key>& keys, bool
                 kf.easePower = 1;
             }
             ++written;
+        }
+        // Lote K: bézier automática/contínua e vagante do AE. Marcadas DEPOIS de
+        // gravar todos os keys: as alças do arquivo valem como vieram (a
+        // resolução automática só roda na próxima edição).
+        for (const Key& k : keys) {
+            if (!k.temporal) continue;
+            const u32 at = t.find_exact(FrameIndex{w.local_frame(k.time)});
+            if (at != kInvalidIndex) t.keys[at].flags = static_cast<u8>(k.temporal & kKeyFlagMask);
         }
         // O campo parado acompanha o primeiro keyframe (se a pessoa tirar os
         // keyframes depois, fica um valor que o arquivo tinha).
@@ -615,6 +636,21 @@ constexpr i8 kBasedOnMap[] = {-1, 0, 0, 1, 2};
 constexpr i8 kShapeMap[] = {-1, 0, 1, 2, 3, 4, 5};
 /// Agrupamento da âncora (1 letra, 2 palavra, 3 linha, 4 tudo).
 constexpr i8 kGroupingMap[] = {-1, 0, 1, 2, -1};
+/// Tipo de tracking do AE (1 antes e depois, 2 antes, 3 depois) → Aurea (0..2).
+constexpr i8 kTrackTypeMap[] = {-1, 0, 1, 2};
+/// Intervalo de caracteres do AE (1 maiúsculas e dígitos, 2 Unicode completo).
+constexpr i8 kCharRangeMap[] = {-1, 0, 1};
+/// Alinhamento de caractere do AE ("ADBE Text Character Change Type": 1 esquerda
+/// ou topo, 2 centro, 3 direita ou base, 4 ajustar kerning) → Aurea (0..3). O
+/// nome vem da ordem do grupo (Tracking, Change Type, Range, Replace, Offset é a
+/// ordem da interface: Alinhamento, Intervalo, Valor, Deslocamento de caractere).
+constexpr i8 kCharAlignMap[] = {-1, 0, 1, 2, 3};
+/// Preenchimento e traço do AE (1 paleta por caractere, 2 preenchimentos sobre os
+/// traços, 3 traços sobre os preenchimentos) → TextData::renderOrder (1, 0, 2).
+constexpr i8 kRenderOrderMap[] = {-1, 1, 0, 2};
+/// Mistura entre caracteres do AE (menu com os separadores "(-" contando posição,
+/// como nos menus de efeito do AE; inferido, não medido) → BlendMode do Aurea.
+constexpr i8 kCharBlendMap[] = {-1, 0, 31, -1, 6, 3, 21, 9, -1, 1, 7, 4, 20, 8, -1, 5, 11, 10, 26, 19, 27, 33, -1, 12, 13, -1, 14, 15, 16, 17};
 
 } // namespace
 
@@ -721,20 +757,49 @@ Binding bind_text_property(const Layer& l, u32 a, std::string_view m) {
     } else if (m == "ADBE Text Character Offset") {
         b.ch = {text_ch(a, kCharOffset, 0)};
         b.textProps = kTextPropCharOffset;
-    } else if (m == "ADBE Text Track Type" || m == "ADBE Text Character Range" || m.substr(0, 11) == "ADBE 3DText") {
+    } else if (m == "ADBE Text Character Replace" || m == "ADBE Text Character Value") {
+        // v70: Valor de caractere (o código Unicode que troca a letra).
+        Channel c = text_ch(a, kAnimCharValue, 0);
+        c.lo = 0.0; c.hi = 1114111.0;
+        b.ch = {c};
+        b.textProps = kTextPropCharValue;
+    } else if (m == "ADBE Text Track Type") {
+        b.ch = {field_ch(Field::TrackType, a, 0, Conv::Enum)};
+        b.ch[0].map = kTrackTypeMap; b.ch[0].mapN = 4;
+    } else if (m == "ADBE Text Character Range") {
+        b.ch = {field_ch(Field::CharRange, a, 0, Conv::Enum)};
+        b.ch[0].map = kCharRangeMap; b.ch[0].mapN = 3;
+    } else if (m.substr(0, 11) == "ADBE 3DText") {
         b.unsupported = "~";
     } else if (m == "ADBE Text Anchor Point 3D" || m == "ADBE Text Anchor Point") {
         b.unsupported = "ponto de âncora por caractere do animador";
     } else if (m == "ADBE Text Fill Opacity" || m == "ADBE Text Stroke Opacity") {
-        b.unsupported = "opacidade do preenchimento/contorno do animador";
-    } else if (m.find("Hue") != std::string_view::npos || m.find("Saturation") != std::string_view::npos ||
-               m.find("Brightness") != std::string_view::npos) {
-        b.unsupported = "matiz/saturação/brilho do animador";
-    } else if (m == "ADBE Text Line Spacing" || m == "ADBE Text Line Anchor") {
-        b.unsupported = "espaçamento/âncora de linha do animador";
-    } else if (m == "ADBE Text Character Change Type" || m == "ADBE Text Character Replace" ||
-               m == "ADBE Text Character Value") {
-        b.unsupported = "troca de caractere do animador (o Aurea só desloca)";
+        const bool fill = m == "ADBE Text Fill Opacity";
+        Channel c = text_ch(a, fill ? kAnimFillOpacity : kAnimStrokeOpacity, 0);
+        c.lo = 0.0; c.hi = 100.0;
+        b.ch = {c};
+        b.textProps = fill ? kTextPropFillOpacity : kTextPropStrokeOpacity;
+    } else if (m == "ADBE Text Fill Hue" || m == "ADBE Text Fill Saturation" || m == "ADBE Text Fill Brightness" ||
+               m == "ADBE Text Stroke Hue" || m == "ADBE Text Stroke Saturation" || m == "ADBE Text Stroke Brightness") {
+        // Matiz em graus; saturação e brilho em −100..100 %, como no Aurea.
+        const bool fill = m.substr(0, 14) == "ADBE Text Fill";
+        const bool hue = m.find("Hue") != std::string_view::npos, sat = m.find("Saturation") != std::string_view::npos;
+        Channel c = text_ch(a, fill ? (hue ? kAnimFillHue : sat ? kAnimFillSaturation : kAnimFillBrightness)
+                                    : (hue ? kAnimStrokeHue : sat ? kAnimStrokeSaturation : kAnimStrokeBrightness), 0);
+        if (!hue) { c.lo = -100.0; c.hi = 100.0; }
+        b.ch = {c};
+        b.textProps = fill ? kTextPropFillHsb : kTextPropStrokeHsb;
+    } else if (m == "ADBE Text Line Spacing") {
+        b.dims = 2;
+        b.ch = {text_ch(a, kAnimLineSpacingX, 0), text_ch(a, kAnimLineSpacingY, 1)};
+        b.textProps = kTextPropLineSpacing;
+    } else if (m == "ADBE Text Line Anchor") {
+        b.ch = {text_ch(a, kAnimLineAnchor, 0)};
+        b.textProps = kTextPropLineAnchor;
+    } else if (m == "ADBE Text Character Change Type") {
+        // v72: Character Alignment (a letra trocada na vaga da original ou o kerning refeito).
+        b.ch = {field_ch(Field::CharAlign, a, 0, Conv::Enum)};
+        b.ch[0].map = kCharAlignMap; b.ch[0].mapN = 5;
     } else {
         b.unsupported = "propriedade de animador de texto sem equivalente";
     }
@@ -945,8 +1010,15 @@ Binding bind_text_more(const Layer& l, std::string_view m) {
     } else if (m == "ADBE Text Anchor Point Align") {
         b.dims = 2;
         b.unsupported = "alinhamento do agrupamento (Grouping Alignment)";
-    } else if (m == "ADBE Text Render Order" || m == "ADBE Text Character Blend Mode") {
-        b.unsupported = "~";
+    } else if (m == "ADBE Text Render Order") {
+        Channel c = field_ch(Field::RenderOrder, kInvalidIndex, 0, Conv::Enum);
+        c.map = kRenderOrderMap; c.mapN = 4;
+        b.ch = {c};
+    } else if (m == "ADBE Text Character Blend Mode") {
+        // v72: Inter-Character Blending.
+        Channel c = field_ch(Field::CharBlend, kInvalidIndex, 0, Conv::Enum);
+        c.map = kCharBlendMap; c.mapN = static_cast<u8>(sizeof(kCharBlendMap));
+        b.ch = {c};
     } else {
         b.unsupported = "opção de texto sem equivalente";
     }

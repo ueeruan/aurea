@@ -173,7 +173,11 @@ internal fun Rig3DTab(env: PanelEnv) {
     if (assigning >= 0) AssignBoneDialog(env, assigning) { assigning = -1 }
     // Motion Capture (BETA) logo abaixo, no mesmo painel (MocapSection.kt).
     // Também com esqueleto do arquivo não humanoide (status 1): a seção pede o mapeamento em "Corrigir esqueleto".
-    if (status >= 1) MocapSection(env)
+    if (status >= 1) {
+        // Aurea PC (Cena 3D): o cartão de Motion Capture dela entra no lugar. No celular é nulo.
+        val pcHost = MocapSectionHost.override
+        if (pcHost != null) pcHost(env) else MocapSection(env)
+    }
 }
 
 /** Escolher a junta do arquivo para o osso canônico [bone] (rig importado). */

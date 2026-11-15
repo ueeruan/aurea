@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lote K (AE): assistentes de keyframe, bézier automática/contínua, vagante, Lift/Extract e Motion Sketch. -->
+<resources>
+    <string name="aek_tools">असिस्टेंट</string>
+    <string name="aek_time_reverse">समय में उलटें</string>
+    <string name="aek_exponential_scale">एक्सपोनेंशियल स्केल</string>
+    <string name="aek_smoother">स्मूदर</string>
+    <string name="aek_smoother_level">टॉलरेंस %1$s</string>
+    <string name="aek_bake_expression">एक्सप्रेशन को कीफ़्रेम में बदलें</string>
+    <string name="aek_auto_bezier">ऑटो बेज़ियर</string>
+    <string name="aek_continuous_bezier">कंटीन्यूअस बेज़ियर</string>
+    <string name="aek_rove">समय में घूमना (रोव)</string>
+    <string name="aek_lift_work_area">वर्क एरिया उठाएँ</string>
+    <string name="aek_extract_work_area">वर्क एरिया निकालें</string>
+    <string name="aek_lifted">वर्क एरिया हटाया गया (खाली जगह बनी रही)</string>
+    <string name="aek_extracted">वर्क एरिया हटाया गया और खाली जगह बंद हुई</string>
+    <string name="aek_reverse_nothing">उलट नहीं सका: एक ट्रैक पर 2 कीफ़्रेम चुनें जो किसी दूसरे पर न पड़ें</string>
+    <string name="aek_exp_scale_nothing">एक्सपोनेंशियल स्केल के लिए एक ही चिह्न वाले 2 स्केल कीफ़्रेम चाहिए</string>
+    <string name="aek_smoother_nothing">स्मूदर को एक ट्रैक पर 3 या ज़्यादा कीफ़्रेम चाहिए</string>
+    <string name="aek_bake_nothing">बदलने के लिए कोई चालू एक्सप्रेशन नहीं है</string>
+    <string name="aek_flags_nothing">चुने गए कीफ़्रेम में बदलने को कुछ नहीं</string>
+    <string name="aek_motion_sketch">मोशन स्केच</string>
+    <string name="aek_motion_sketch_stop">मोशन स्केच रोकें</string>
+    <string name="aek_motion_sketch_hint">चुनी गई लेयर को स्टेज पर खींचें: प्रीव्यू चलता है और रास्ता पोज़िशन कीफ़्रेम बन जाता है</string>
+    <string name="aek_motion_sketch_done">%1$d पोज़िशन फ़्रेम रिकॉर्ड हुए</string>
+    <string name="aek_motion_sketch_nothing">रिकॉर्ड करने के लिए एक लेयर चुनें और स्टेज पर खींचें</string>
+</resources>

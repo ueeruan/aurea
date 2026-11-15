@@ -26,7 +26,7 @@ bool keeps_on_reset(u32 param) noexcept { return param == kGradeRole || param ==
 } // namespace
 
 u32 Engine::ensure_color_grade(u64 layerId, u32 role) noexcept {
-    if (role < 1 || role > 2) return kInvalidIndex;
+    if (role < 1 || role > 3) return kInvalidIndex;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
@@ -35,7 +35,7 @@ u32 Engine::ensure_color_grade(u64 layerId, u32 role) noexcept {
     const ParameterRegistry* params = effectRegistry_.params(type);
     if (!l || l->locked || !params || params->count() <= kGradeLook) return kInvalidIndex;
     for (const EffectInstance& e : l->effects) {
-        if (e.type == type && e.params.size() > kGradeRole
+        if (role != 3 && e.type == type && e.params.size() > kGradeRole
             && std::lround(e.params[kGradeRole].constant.v[0]) == static_cast<long>(role))
             return e.id;
     }

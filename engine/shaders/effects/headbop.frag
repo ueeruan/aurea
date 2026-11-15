@@ -20,7 +20,7 @@ layout(set = 0, binding = AUREA_TEX1) uniform sampler2D u_tex1;   // máscara da
 layout(set = 0, binding = AUREA_TEX2) uniform sampler2D u_tex2;   // fundo preenchido (rgb·peso, peso)
 layout(set = 0, binding = AUREA_TEX3) uniform sampler2D u_tex3;   // alfa do fundo preenchido (alfa·peso, -, -, peso)
 
-struct Face { vec4 a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, q; };
+struct Face { vec4 a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, q; vec4 joints[22]; };
 layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 region;
     vec4 inputRegion;

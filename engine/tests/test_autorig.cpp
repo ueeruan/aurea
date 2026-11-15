@@ -307,6 +307,39 @@ AUREA_TEST(AutoRig, MapsMixamoAndBipedRigsByName) {
         {"thigh_l", 0}, {"calf_l", 11}, {"foot_l", 12}, {"thigh_r", 0}, {"calf_r", 14}, {"foot_r", 15},
     });
     AUREA_CHECK(rig::map_by_names(ue).usable());
+
+    // Nomes pela articulação (L_Shoulder = braço, L_Elbow = antebraço, L_Hip = coxa,
+    // L_Knee = canela), com clavícula e ossos de torção no meio: o braço vem da hierarquia.
+    const scene3d::SceneAsset joints = build({
+        {"Root", -1}, {"Pelvis", 0}, {"Spine1", 1}, {"Spine2", 2}, {"Neck", 3}, {"Head", 4},
+        {"L_Clavicle", 3}, {"L_Shoulder", 6}, {"L_Shoulder_Twst1", 7}, {"L_Elbow", 8}, {"L_Hand", 9},
+        {"R_Clavicle", 3}, {"R_Shoulder", 11}, {"R_Elbow", 12}, {"R_Hand", 13},
+        {"L_Hip", 1}, {"L_Knee", 15}, {"L_Foot", 16}, {"R_Hip", 1}, {"R_Knee", 18}, {"R_Foot", 19},
+    });
+    const rig::HumanoidMap j = rig::map_by_names(joints);
+    AUREA_CHECK(j.usable());
+    AUREA_CHECK_EQ(j[HumanoidBone::Hips], 1);
+    AUREA_CHECK_EQ(j[HumanoidBone::LeftUpperArm], 7);    // L_Shoulder, não a clavícula nem a torção
+    AUREA_CHECK_EQ(j[HumanoidBone::LeftLowerArm], 9);
+    AUREA_CHECK_EQ(j[HumanoidBone::RightUpperArm], 12);
+    AUREA_CHECK_EQ(j[HumanoidBone::LeftUpperLeg], 15);
+    AUREA_CHECK_EQ(j[HumanoidBone::RightLowerLeg], 19);
+    // Rig dividido: Splitter → Pelvis (pernas) e Splitter → Spine1 (tronco). O quadril vira o Splitter.
+    const scene3d::SceneAsset split = build({
+        {"Root", -1}, {"Splitter", 0}, {"Pelvis", 1}, {"Spine1", 1}, {"Spine2", 3}, {"Neck", 4}, {"Head", 5},
+        {"L_Clavicle", 4}, {"L_Shoulder", 7}, {"L_Elbow", 8}, {"L_Hand", 9},
+        {"R_Clavicle", 4}, {"R_Shoulder", 11}, {"R_Elbow", 12}, {"R_Hand", 13},
+        {"L_Hip", 2}, {"L_Knee", 15}, {"L_Foot", 16}, {"R_Hip", 2}, {"R_Knee", 18}, {"R_Foot", 19},
+    });
+    const rig::HumanoidMap sp = rig::map_by_names(split);
+    AUREA_CHECK(sp.usable());
+    AUREA_CHECK_EQ(sp[HumanoidBone::Hips], 1);
+    AUREA_CHECK_EQ(sp[HumanoidBone::Head], 6);
+    AUREA_CHECK_EQ(sp[HumanoidBone::LeftUpperArm], 8);
+    AUREA_CHECK_EQ(sp[HumanoidBone::LeftUpperLeg], 15);
+    // Mixamo continua com o braço em LeftArm (LeftShoulder é a clavícula).
+    AUREA_CHECK_EQ(m[HumanoidBone::LeftUpperArm], rig::map_by_names(mixamo)[HumanoidBone::LeftUpperArm]);
+
     // Esqueleto que não é humanoide: não é "compatível".
     const scene3d::SceneAsset tail = build({{"root", -1}, {"tail1", 0}, {"tail2", 1}});
     AUREA_CHECK(!rig::map_by_names(tail).usable());

@@ -48,6 +48,8 @@ struct ParticlesPanel: View {
     @State private var values: [Float] = []
     @State private var curves: [[Float]] = [[], [], []]
     @State private var selected: Int?
+    /// Funções (F9): a aba dos controles.
+    @State private var tab = 0
 
     private var id: Int64 { model.primarySelection ?? 0 }
 
@@ -82,13 +84,29 @@ struct ParticlesPanel: View {
                          onCurve: railTrack.count >= 2 ? { openCurveAtPlayhead() } : nil,
                          onMore: nil,
                          onBack: { model.panel = .none })
+                // Funções (F9): um grupo por aba — Presets · Emissor · Física · Partícula
+                // (par do ParticlesPanel.kt). Sem os controles (camada antiga) só Presets.
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
-                        presetRow
-                        Spacer(minLength: 10)
-                        parameterGroups
+                        if shownTab == 0 {
+                            presetRow
+                            Spacer(minLength: 10)
+                            PanelNotice(AureaText.t("particular_convert_note"))
+                        } else {
+                            parameterGroups
+                        }
                     }
                     .padding(.init(top: 12, leading: 18, bottom: 24, trailing: 18))
+                }
+                .id(shownTab)
+                if tabbed {
+                    AureaColors.contentStrongLine.frame(width: 0.7)
+                    PanelIconTabs(tabs: [
+                        PanelIconTab(glyph: CupertinoGlyph.WandStars, label: AureaText.t("panel_presets"), id: "particles.tab.presets"),
+                        PanelIconTab(glyph: CupertinoGlyph.Sparkles, label: AureaText.t("particular_group_emitter"), id: "particles.tab.emitter"),
+                        PanelIconTab(glyph: CupertinoGlyph.ArrowDown, label: AureaText.t("particular_group_physics"), id: "particles.tab.physics"),
+                        PanelIconTab(glyph: CupertinoGlyph.Circle, label: AureaText.t("particular_group_particle"), id: "particles.tab.particle"),
+                    ], selected: shownTab, group: AureaText.t("panel_particulas")) { tab = $0; selected = nil }
                 }
             }
         }
@@ -99,10 +117,11 @@ struct ParticlesPanel: View {
     }
 
     // =========================================================================
+    /// F9: a aba escolhida (0 Presets, 1 Emissor, 2 Física, 3 Partícula).
+    private var tabbed: Bool { value(PPP.emitterType) >= 10 }
+    private var shownTab: Int { tabbed ? min(max(tab, 0), 3) : 0 }
     @ViewBuilder private var parameterGroups: some View {
-        PanelNotice(AureaText.t("particular_convert_note"))
-        if value(PPP.emitterType) >= 10 {
-        group(AureaText.t("particular_group_emitter"))
+        if tabbed && shownTab == 1 {
         if value(PPP.emitterType) >= 13 {
             dim(AureaText.t("particular_width"), PPP.emitterWidth, 10, 0, 8000, " px")
             dim(AureaText.t("particular_height"), PPP.emitterHeight, 10, 0, 8000, " px")
@@ -113,11 +132,13 @@ struct ParticlesPanel: View {
         }
         dim(AureaText.t("panel_particulas_segundo"), PPP.rate, 5, 0, 6000, "/s")
         dim(AureaText.t("panel_duracao_cada"), PPP.lifetime, 0.02, 0.05, 10, " s", decimals: 2)
-        group(AureaText.t("particular_group_physics"))
+        }
+        if tabbed && shownTab == 2 {
         dim(AureaText.t("panel_velocidade"), PPP.speed, 2, 0, 4000, " px/s")
         dim(AureaText.t("panel_gravidade"), PPP.gravityY, 4, -4000, 4000, " px/s²", negate: true)
         dim(AureaText.t("world_resistance"), PPP.drag, 0.02, 0, 10, "", decimals: 2)
-        group(AureaText.t("particular_group_particle"))
+        }
+        if tabbed && shownTab == 3 {
         choice(AureaText.t("particular_shape"), PPP.particleType,
                ["particular_shape_circle", "particular_shape_square", "particular_shape_streak", "particular_shape_soft", "world_purple_crystals"])
         dim(AureaText.t("panel_tamanho_inicial"), PPP.startSize, 0.25, 0.1, 120, " px", decimals: 1)

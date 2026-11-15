@@ -40,6 +40,9 @@ enum class Home : u8 {
 enum class Field : u8 {
     None, SelBasedOn, SelShape, SelRandom, SelSeed, PathReverse, PathPerpendicular, PathForceAlign,
     PathMask, Grouping,
+    TrackType, CharRange,   ///< v70: tipo de tracking e intervalo de caracteres do animador
+    CharAlign,              ///< v72: alinhamento de caractere do animador (Character Change Type)
+    RenderOrder, CharBlend, ///< v72: "Mais opções" do texto: preenchimento e traço, mistura entre caracteres
 };
 
 enum class Conv : u8 {

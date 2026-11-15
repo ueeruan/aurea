@@ -810,10 +810,17 @@ std::shared_ptr<PreviewProxy> PreviewProxyService::generate(const Request& reque
             // lets a costly 4K resample consume a core continuously (iOS CPU
             // exception); allow at most 25% wall-time duty for this worker.
             const auto work = std::chrono::steady_clock::now() - started;
+            const u32 pacing = pacingMs_.load();
             const auto floor = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                std::chrono::milliseconds(std::max(1u, pacingMs_.load())));
+                std::chrono::milliseconds(std::max(1u, pacing)));
+            // 0.5.3: aparelho FRIO (política térmica sem pausa de fundo, pacing 0):
+            // até 50% do tempo. O proxy é o que deixa o aparelho fraco tocar o clipe
+            // (na classe LOW, todo vídeo acima de 720p espera por ele), e a 25% ele
+            // levava 4× o tempo do trabalho. Morno, quente ou crítico: os 25% de antes.
+            // A geração continua parada enquanto toca (holding_, logo abaixo).
+            const auto rest = pacing == 0 ? work : work * 3;
             std::unique_lock<std::mutex> lock(mutex_);
-            wake_.wait_for(lock, std::max(work * 3, floor), [&] { return cancelled(request.generation); });
+            wake_.wait_for(lock, std::max(rest, floor), [&] { return cancelled(request.generation); });
             // Reprodução: segura aqui, com decoder, encoder e progresso, até pausar.
             wake_.wait(lock, [&] { return cancelled(request.generation) || !holding_.load(); });
         };

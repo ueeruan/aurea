@@ -45,6 +45,9 @@ struct ContentView: View {
             }
             }
 
+            // AureaMCP: conexão com os agentes de IA e as confirmações que eles pedem (Home e editor).
+            AureaMcpRoot()
+
             if model.importingMedia {
                 Color(hex: 0x17191D).opacity(221.0 / 255.0).ignoresSafeArea().contentShape(Rectangle()).onTapGesture {}
                 VStack(spacing: 12) {

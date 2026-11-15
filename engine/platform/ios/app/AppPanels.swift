@@ -130,7 +130,6 @@ struct ProjectSettingsPanel: View {
     private let resolutions: [(Int, String)] = [(480, "480p (SD)"), (720, "720p (HD)"), (1080, "1080p (FHD)"), (1440, "1440p (QHD)"), (2160, "2160p (4K)")]
     /// Atalhos; qualquer outra taxa (1–240, 23,976, 29,97…) vem de "Personalizado…".
     private let frameRates = [24, 25, 30, 50, 60, 90, 120, 144, 240]
-    private let shutterOptions: [Float] = [90, 180, 270, 360]
     private var group: Bool { model.engine.precompDepth > 0 }
     private var id: UInt64 { (model.composition["id"] as? NSNumber)?.uint64Value ?? 0 }
     private var width: Int { Int(model.compositionWidth) }
@@ -174,51 +173,15 @@ struct ProjectSettingsPanel: View {
                             CupertinoGlyph.text(CupertinoGlyph.Xmark, size: 18).frame(width: 40, height: 44).contentShape(Rectangle())
                         }.buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_fechar")).accessibilityIdentifier("projectSettings.close")
                     }.padding(.leading, 18).padding(.trailing, 6).padding(.top, 6)
+                    settingsTabs
                     ScrollView {
                         VStack(spacing: 0) {
-                            if !group { aspectRow }
-                            if free || group {
-                                settingLine(group ? "om_gs_size" : "editor_tamanho") {
-                                    HStack(spacing: 0) {
-                                        sizeBox(width, title: "editor_largura", tag: group ? "groupSettings.size.w" : "projectSettings.size.w") { setSize(Int($0.rounded()), height) }
-                                        Text("×").font(.aurea(size: 15)).foregroundStyle(AureaColors.muted).padding(.horizontal, 8)
-                                        sizeBox(height, title: "editor_altura", tag: group ? "groupSettings.size.h" : "projectSettings.size.h") { setSize(width, Int($0.rounded())) }
-                                    }.frame(width: 200).keepLtr()   // largura × altura: a ordem do dado, em qualquer idioma
-                                }
+                            switch model.projectSettingsTab {
+                            case "render": renderTab
+                            case "editing": editingTab
+                            case "import": importTab
+                            default: formatTab
                             }
-                            if !group {
-                                settingLine("editor_resolucao") {
-                                    dropdown(resolutions.first { $0.0 == shortest }?.1 ?? "\(shortest)p", key: "res",
-                                             tag: "projectSettings.resolution", label: "editor_resolucao")
-                                }
-                                settingLine("editor_quadros_segundo") {
-                                    dropdown(homeFormatFps(model.compositionFps).replacingOccurrences(of: ".", with: ",") + " fps", key: "fps",
-                                             tag: "projectSettings.fps", label: "editor_quadros_segundo")
-                                }
-                                // Extra do AUREA (sem par na referência): a duração da composição.
-                                settingLine("editor_duracao") {
-                                    Button {
-                                        model.numericKeypad = KeypadRequest(title: AureaText.t("editor_duracao"),
-                                            value: Float(Double(model.compositionDuration) / model.compositionFps), unit: "s",
-                                            min: Float(1 / model.compositionFps), max: 86400, decimals: 3, onValue: { seconds in
-                                                let frames = max(1, Int64((Double(seconds) * model.compositionFps).rounded()))
-                                                model.mutate { $0.setComposition(id, duration: frames) }
-                                                model.refreshModel(force: true)
-                                            })
-                                    } label: {
-                                        Text(String(format: "%.3f s", Double(model.compositionDuration) / model.compositionFps))
-                                            .font(.aurea(size: 15, weight: .semibold).monospacedDigit()).foregroundStyle(AureaColors.lightText)
-                                            .frame(width: 180, height: 40)
-                                            .background(AureaColors.lightSurface, in: RoundedRectangle(cornerRadius: 8))
-                                    }.buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_duracao")).accessibilityIdentifier("projectSettings.duration")
-                                }
-                            }
-                            settingLine("editor_plano_fundo") {
-                                dropdown(backgroundName, key: "bg", tag: group ? "groupSettings.background" : "projectSettings.background", label: "editor_plano_fundo",
-                                         swatch: backgroundTransparent ? Color.clear
-                                         : Color(.sRGB, red: Double(background[0]), green: Double(background[1]), blue: Double(background[2]), opacity: 1))
-                            }
-                            moreInAurea
                             Spacer().frame(height: 16)
                         }.padding(.bottom, 12)
                     }
@@ -240,40 +203,188 @@ struct ProjectSettingsPanel: View {
                 // Entra subindo em 200 ms (depois de medir).
                 withAnimation(.easeOut(duration: 0.2)) { enter = 0 }
             }
-            .onDisappear { finishColor() }
+            .onDisappear {
+                finishColor()
+                // Cada abertura começa no Formato (par do Android), salvo pedido de fora.
+                model.projectSettingsTab = "format"
+            }
     }
 
-    // --- Mais do AUREA -----------------------------------------------------------
-    @ViewBuilder private var moreInAurea: some View {
-        AureaColors.border.frame(height: 1).padding(.top, 12)
-        Text(AureaText.t("om_settings_more")).font(.aurea(size: 13, weight: .bold)).frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 2).accessibilityIdentifier("projectSettings.more")
-        // Interface do projeto (0.2.5): Composição ou Edição, trocável a qualquer momento.
-        VStack(alignment: .leading, spacing: 8) {
-            Text(AureaText.t("ui_mode_label")).font(.aurea(size: 12, weight: .semibold)).foregroundStyle(AureaColors.muted)
-            UiModeChoice(selected: model.uiMode) { model.setUiMode($0) }
-        }.padding(.horizontal, 18).padding(.top, 4).padding(.bottom, 4)
+    // --- Abas (F10): Formato · Prévia e render · Edição · Importar ----------------
+    private static let tabs: [(id: String, key: String, glyph: Character)] = [
+        ("format", "fn_ps_tab_format", CupertinoGlyph.Crop),
+        ("render", "fn_ps_tab_render", CupertinoGlyph.PlayRectangle),
+        ("editing", "om_settings_editing", CupertinoGlyph.SliderHorizontal3),
+        ("import", "om_settings_import", CupertinoGlyph.ArrowDownToLine),
+    ]
 
+    /// Ícone + nome, aceso no destaque. Ids `projectSettings.tab.<id>`.
+    private var settingsTabs: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 4) {
+                ForEach(Self.tabs, id: \.id) { tab in
+                    let on = model.projectSettingsTab == tab.id
+                    let ink = on ? AureaColors.accent : AureaColors.muted
+                    Button { model.projectSettingsTab = tab.id } label: {
+                        VStack(spacing: 3) {
+                            CupertinoGlyph.text(tab.glyph, size: 18, color: ink)
+                            Text(AureaText.t(tab.key)).font(.aurea(size: 11, weight: on ? .semibold : .regular))
+                                .foregroundStyle(ink).lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 52)
+                        .background(on ? AureaColors.accentDim : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(AureaText.t(tab.key))
+                    .accessibilityAddTraits(on ? [.isSelected, .isButton] : .isButton)
+                    .accessibilityIdentifier("projectSettings.tab.\(tab.id)")
+                }
+            }.padding(.horizontal, 10).padding(.vertical, 4).accessibilityIdentifier("projectSettings.tabs")
+            AureaColors.border.frame(height: 1)
+        }
+    }
+
+    /// Aba Formato: proporção, tamanho, resolução, fps, duração e fundo (no grupo: tamanho e fundo).
+    @ViewBuilder private var formatTab: some View {
+        if !group { aspectRow }
+        if free || group {
+            settingLine(group ? "om_gs_size" : "editor_tamanho") {
+                HStack(spacing: 0) {
+                    sizeBox(width, title: "editor_largura", tag: group ? "groupSettings.size.w" : "projectSettings.size.w") { setSize(Int($0.rounded()), height) }
+                    Text("×").font(.aurea(size: 15)).foregroundStyle(AureaColors.muted).padding(.horizontal, 8)
+                    sizeBox(height, title: "editor_altura", tag: group ? "groupSettings.size.h" : "projectSettings.size.h") { setSize(width, Int($0.rounded())) }
+                }.frame(width: 200).keepLtr()   // largura × altura: a ordem do dado, em qualquer idioma
+            }
+        }
+        if !group {
+            settingLine("editor_resolucao") {
+                dropdown(resolutions.first { $0.0 == shortest }?.1 ?? "\(shortest)p", key: "res",
+                         tag: "projectSettings.resolution", label: "editor_resolucao")
+            }
+            settingLine("editor_quadros_segundo") {
+                dropdown(homeFormatFps(model.compositionFps).replacingOccurrences(of: ".", with: ",") + " fps", key: "fps",
+                         tag: "projectSettings.fps", label: "editor_quadros_segundo")
+            }
+            // Extra do AUREA (sem par na referência): a duração da composição.
+            settingLine("editor_duracao") {
+                Button {
+                    model.numericKeypad = KeypadRequest(title: AureaText.t("editor_duracao"),
+                        value: Float(Double(model.compositionDuration) / model.compositionFps), unit: "s",
+                        min: Float(1 / model.compositionFps), max: 86400, decimals: 3, onValue: { seconds in
+                            let frames = max(1, Int64((Double(seconds) * model.compositionFps).rounded()))
+                            model.mutate { $0.setComposition(id, duration: frames) }
+                            model.refreshModel(force: true)
+                        })
+                } label: {
+                    Text(String(format: "%.3f s", Double(model.compositionDuration) / model.compositionFps))
+                        .font(.aurea(size: 15, weight: .semibold).monospacedDigit()).foregroundStyle(AureaColors.lightText)
+                        .frame(width: 180, height: 40)
+                        .background(AureaColors.lightSurface, in: RoundedRectangle(cornerRadius: 8))
+                }.buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_duracao")).accessibilityIdentifier("projectSettings.duration")
+            }
+        }
+        settingLine("editor_plano_fundo") {
+            dropdown(backgroundName, key: "bg", tag: group ? "groupSettings.background" : "projectSettings.background", label: "editor_plano_fundo",
+                     swatch: backgroundTransparent ? Color.clear
+                     : Color(.sRGB, red: Double(background[0]), green: Double(background[1]), blue: Double(background[2]), opacity: 1))
+        }
+    }
+
+    // --- Aba Prévia e render --------------------------------------------------------
+    /// Qualidade, repetição, tela cheia, diagnóstico e o DESFOQUE DE MOVIMENTO DA
+    /// COMPOSIÇÃO (F10: saiu do painel da camada; a camada só liga o dela).
+    @ViewBuilder private var renderTab: some View {
         subheader("om_settings_preview")
         settingLine("om_settings_preview_quality") { previewQuality }
         toggleRow("editor_reproducao_loop", on: model.looping, tag: "projectSettings.more.loop") { model.setLooping(!model.looping) }
         actionRow(model.fullscreen ? "editor_sair_tela_cheia" : "editor_tela_cheia", tag: "projectSettings.more.fullscreen") {
             close(); model.fullscreen.toggle()
         }
-        toggleRow("editor_desfoque_movimento_composicao", on: model.compMotionBlur, tag: "projectSettings.more.motionBlur",
-                  detail: "editor_camadas_desfoque_movimento_so_borram_isto") { model.setCompositionMotionBlur(!model.compMotionBlur) }
-        if model.compMotionBlur {
-            let shutter = Int(model.shutterAngle)
-            HStack(spacing: 0) {
-                Text(AureaText.t("sh_menu_shutter", String(shutter))).font(.aurea(size: 15)).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
-                AureaDropdown(value: "\(shutter)°", tag: "projectSettings.more.shutter", accessibilityLabel: AureaText.t("sh_menu_shutter", String(shutter))) {
-                    shutterOptions.map { angle in .item("\(Int(angle))°", selected: Int(angle) == shutter) { model.changeShutterAngle(angle) } }
-                }
-            }.padding(.horizontal, 18).padding(.vertical, 5)
-        }
         toggleRow("editor_diagnostico_tela", on: model.hudVisible, tag: "projectSettings.more.hud",
                   detail: "editor_quadros_segundo_tempos_gpu_memoria_decodificador") { model.toggleHud() }
         actionRow("ios_perf_test_a11y", tag: "projectSettings.more.perfTest") { close(); OmegaChromeRequests.shared.performanceTest = true }
+
+        subheader("panel_desfoque_movimento")
+        toggleRow("editor_desfoque_movimento_composicao", on: model.compMotionBlur, tag: "projectSettings.more.motionBlur",
+                  detail: "editor_camadas_desfoque_movimento_so_borram_isto") { model.setCompositionMotionBlur(!model.compMotionBlur) }
+        if model.compMotionBlur { compositionMotionBlur }
+    }
+
+    /// O desfoque da composição numa lista só (sem "Avançado"): ângulo e fase em graus,
+    /// centralizar, amostras, limite adaptativo e vetores 3D. Ids `motionblur.*`.
+    private var compositionMotionBlur: some View {
+        let settings = model.motionBlurControls
+        return VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(AureaText.t("mb_comp_settings_hint")).font(.aurea(size: 11)).foregroundStyle(AureaColors.muted)
+                    .padding(.leading, 4).padding(.bottom, 2)
+                motionBlurRow("mb_shutter_angle", value: settings.angle, lower: 0, upper: 720,
+                              unit: "°", decimals: 1, identifier: "motionblur.shutter", onValue: model.changeShutterAngle)
+                motionBlurRow("mb_shutter_phase", value: settings.phase, lower: -360, upper: 360,
+                              unit: "°", decimals: 1, identifier: "motionblur.phase", onValue: model.changeShutterPhase)
+                Button(AureaText.t("mb_center_exposure")) { model.centerMotionBlurExposure() }
+                    .font(.aurea(size: 14)).frame(minHeight: 44).accessibilityIdentifier("motionblur.center")
+                Text(AureaText.t("mb_phase_hint")).font(.aurea(size: 11)).foregroundStyle(AureaColors.muted).padding(.leading, 4)
+                motionBlurRow("mb_samples_per_frame", value: Float(settings.samples), lower: 2,
+                              upper: Float(min(64, settings.adaptiveLimit)), identifier: "motionblur.samples",
+                              onValue: model.changeMotionBlurSamples)
+                motionBlurRow("mb_adaptive_limit", value: Float(settings.adaptiveLimit), lower: Float(settings.samples),
+                              upper: 256, identifier: "motionblur.adaptive", onValue: model.changeMotionBlurAdaptiveLimit)
+                Text(AureaText.t("mb_quality_hint")).font(.aurea(size: 11)).foregroundStyle(AureaColors.muted).padding(.leading, 4)
+            }.padding(.horizontal, 14)
+            // 0.3.2: motion blur 3D rápido (vetores) × alta qualidade (amostras).
+            toggleRow("mb_vector_3d", on: settings.vectorBlur, tag: "motionblur.vector3d", detail: "mb_vector_3d_hint") {
+                model.setMotionBlurVector(!settings.vectorBlur)
+            }
+        }
+    }
+
+    /// O controle numérico dos Ajustes: a régua do AUREA (arrastar = um passo de desfazer)
+    /// e a caixa de valor (tocar = teclado com mínimo e máximo). VoiceOver: valor,
+    /// ajuste ±1 e ação que abre o teclado.
+    private func motionBlurRow(_ key: String, value: Float, lower: Float, upper: Float,
+                               unit: String = "", decimals: Int = 0, identifier: String,
+                               onValue: @escaping (Float) -> Void) -> some View {
+        let label = AureaText.t(key)
+        let shown = numeroPtBr(value, casas: decimals) + unit
+        let edit = {
+            model.numericKeypad = KeypadRequest(title: label, value: value, unit: unit, min: lower, max: upper,
+                                                decimals: decimals, onValue: onValue)
+        }
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(.aurea(size: 12, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                TickRuler(value: { value }, unitsPerDp: decimals == 0 ? 0.1 : 0.5, active: true, height: 44)
+                    .frame(maxWidth: .infinity)
+                    .valueDrag(enabled: true, start: { value }, unitsPerDp: { decimals == 0 ? 0.1 : 0.5 }, min: lower, max: upper,
+                               onStart: { model.beginGesture(label) }, onValue: { onValue(decimals == 0 ? $0.rounded() : $0) },
+                               onEnd: { model.endGesture() })
+                Button(action: edit) { ValueBox(shown, width: 76).frame(minHeight: 44).contentShape(Rectangle()) }
+                    .buttonStyle(.plain)
+            }
+        }.frame(minHeight: 48).padding(.vertical, 4)
+            .accessibilityElement(children: .ignore).accessibilityLabel(label).accessibilityValue(shown)
+            .accessibilityIdentifier(identifier).accessibilityAction { edit() }
+            .accessibilityAdjustableAction { direction in
+                let next: Float
+                switch direction {
+                case .increment: next = min(upper, value + 1)
+                case .decrement: next = max(lower, value - 1)
+                @unknown default: return
+                }
+                model.beginGesture(label); onValue(next); model.endGesture()
+            }
+    }
+
+    // --- Aba Edição -------------------------------------------------------------------
+    /// Interface do projeto, ímã, keyframes, timeline magnética, tímidas, vãos, aparar e marcas.
+    @ViewBuilder private var editingTab: some View {
+        // Interface do projeto (0.2.5): Composição ou Edição, trocável a qualquer momento.
+        VStack(alignment: .leading, spacing: 8) {
+            Text(AureaText.t("ui_mode_label")).font(.aurea(size: 12, weight: .semibold)).foregroundStyle(AureaColors.muted)
+            UiModeChoice(selected: model.uiMode) { model.setUiMode($0) }
+        }.padding(.horizontal, 18).padding(.top, 10).padding(.bottom, 4)
 
         subheader("om_settings_editing")
         toggleRow("i18n_snapping", on: model.snapping, tag: "projectSettings.more.snapping") { model.snapping.toggle() }
@@ -281,6 +392,9 @@ struct ProjectSettingsPanel: View {
                   detail: "editor_keyframes_todas_camadas_detalhe") { model.showAllKeyframes.toggle() }
         toggleRow("editor_timeline_magnetica_modo_edicao", on: model.editMode, tag: "projectSettings.more.magnetic",
                   detail: "editor_aparar_empurra_camadas_seguintes_excluir_fecha") { model.toggleEditMode() }
+        // Funções (13/11/2026): "Ocultar camadas tímidas" é da composição; saiu do ⋮ da camada.
+        toggleRow("ae_comp_hide_shy", on: model.hideShy, tag: "projectSettings.more.hideShy",
+                  detail: "ae_comp_hide_shy_hint") { model.changeHideShy(!model.hideShy) }
         actionRow("editor_remover_espacos_vazios", tag: "projectSettings.more.removeGaps") { close(); model.removeGaps() }
         actionRow("editor_aparar_projeto_cabecote", tag: "projectSettings.more.trimProject", enabled: model.status.playhead > 0) {
             close(); model.trimProjectAtPlayhead()
@@ -293,14 +407,16 @@ struct ProjectSettingsPanel: View {
         actionRow("editor_ir_proxima_marca", tag: "projectSettings.more.nextMarker", enabled: !model.markerFrames.isEmpty) {
             close(); model.seekToNextMarker()
         }
+    }
 
+    // --- Aba Importar -----------------------------------------------------------------
+    @ViewBuilder private var importTab: some View {
         subheader("om_settings_import")
         actionRow("ae_import_menu", tag: "menu.ae_import",
                   detail: model.primarySelection != nil ? "ae_import_layer_detail" : "ae_import_new_layer_detail") {
             close(); OmegaChromeRequests.shared.aeImport = true
         }
     }
-
     /// Qualidade da prévia (D3): não muda a exportação.
     private var previewQuality: some View {
         let label: String = model.rawPlayback ? "RAW" : model.status.previewAuto != 0 ? "Auto"

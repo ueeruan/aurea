@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lote K (AE): assistentes de keyframe, bézier automática/contínua, vagante, Lift/Extract e Motion Sketch. -->
+<resources>
+    <string name="aek_tools">Asisten</string>
+    <string name="aek_time_reverse">Balik waktu keyframe</string>
+    <string name="aek_exponential_scale">Skala eksponensial</string>
+    <string name="aek_smoother">Penghalus</string>
+    <string name="aek_smoother_level">Toleransi %1$s</string>
+    <string name="aek_bake_expression">Ekspresi jadi keyframe</string>
+    <string name="aek_auto_bezier">Bezier otomatis</string>
+    <string name="aek_continuous_bezier">Bezier kontinu</string>
+    <string name="aek_rove">Jelajah waktu</string>
+    <string name="aek_lift_work_area">Angkat area kerja</string>
+    <string name="aek_extract_work_area">Ekstrak area kerja</string>
+    <string name="aek_lifted">Area kerja dihapus (celahnya tetap)</string>
+    <string name="aek_extracted">Area kerja dihapus dan celahnya ditutup</string>
+    <string name="aek_reverse_nothing">Tidak bisa membalik: pilih 2 keyframe di satu trek tanpa menimpa yang lain</string>
+    <string name="aek_exp_scale_nothing">Skala eksponensial butuh 2 keyframe Skala dengan tanda nilai yang sama</string>
+    <string name="aek_smoother_nothing">Penghalus butuh 3 keyframe atau lebih di satu trek</string>
+    <string name="aek_bake_nothing">Tidak ada ekspresi aktif untuk diubah</string>
+    <string name="aek_flags_nothing">Tidak ada yang diubah pada keyframe terpilih</string>
+    <string name="aek_motion_sketch">Motion Sketch</string>
+    <string name="aek_motion_sketch_stop">Hentikan Motion Sketch</string>
+    <string name="aek_motion_sketch_hint">Seret layer terpilih di panggung: pratinjau diputar dan jalurnya jadi keyframe posisi</string>
+    <string name="aek_motion_sketch_done">%1$d frame posisi direkam</string>
+    <string name="aek_motion_sketch_nothing">Pilih layer lalu seret di panggung untuk merekam</string>
+</resources>

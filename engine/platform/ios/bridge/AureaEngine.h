@@ -107,6 +107,8 @@ extern NSString* const AureaLayerLabel;
 /// A LINHA da timeline (`LayerRow::trackId`): mesma linha = mesma fileira.
 /// 0 = projeto antigo sem linha (a camada é a linha dela).
 extern NSString* const AureaLayerTrackId;
+/// 0.5.3 (`-groupLayers:`): a linha de dentro pode ser movida/aparada no lugar.
+extern NSString* const AureaLayerInlineEditable;
 
 /// Chaves de um keyframe (`-keyframesForLayer:` / `-allKeyframes`).
 extern NSString* const AureaKeyframeProperty;
@@ -318,6 +320,11 @@ NS_SWIFT_NAME(AureaEngine)
 - (uint64_t)availableMemoryBytes;
 /// Estado térmico (0 nominal … 4 crítico) vindo de NSProcessInfo.
 - (void)setThermalLevel:(uint32_t)level throttling:(BOOL)throttling;
+/// 0.5.3: degrau do orçamento de memória do export (0 = o normal … 3 = o mais
+/// contido). O app sobe um degrau quando o processo anterior morreu no meio de
+/// um export de vídeo e volta a 0 quando um export termina; chamado antes de
+/// cada partida de vídeo (vale para o próximo start).
+- (void)setExportMemoryStep:(uint32_t)step;
 
 @property (nonatomic, readonly) BOOL running;
 /// Nome da GPU + versão do driver, para os Ajustes.
@@ -416,6 +423,23 @@ NS_SWIFT_NAME(AureaEngine)
 @property (nonatomic, readonly) uint32_t precompDepth;
 - (BOOL)openPrecomp:(long long)layerId;
 - (BOOL)closePrecomp;
+// --- 0.5.3: o grupo aberto NA timeline (EngineGroupInline.cpp) -----------------
+// Sem entrar no grupo: as camadas de dentro de `groupId` (camada de grupo da
+// composição aberta). Os ids de dentro só valem junto com o grupo; os quadros
+// estão no tempo de fora (dentro + início do grupo − offset do grupo).
+/// Linhas de dentro (as chaves de `-layers`, mais `AureaLayerInlineEditable`).
+- (NSArray<NSDictionary<NSString*, id>*>*)groupLayers:(long long)groupId;
+/// Move/estica camadas de dentro (tempo de fora), um passo de desfazer.
+- (BOOL)setGroupLayerRanges:(long long)groupId layers:(NSArray<NSNumber*>*)layerIds
+                     starts:(NSArray<NSNumber*>*)starts ends:(NSArray<NSNumber*>*)ends;
+/// Aparar início (0) / fim (1) ou mover (6) uma camada de dentro; `frame` no tempo de fora.
+- (BOOL)editGroupClipTime:(long long)groupId layer:(long long)layerId operation:(uint32_t)operation frame:(int64_t)frame;
+/// Miniatura de uma camada de dentro (`frame` no tempo de fora).
+- (nullable NSData*)thumbnailForGroup:(long long)groupId layer:(long long)layerId frame:(int32_t)frame
+                               height:(uint32_t)height outWidth:(nullable uint32_t*)outWidth;
+/// Onda de uma camada de dentro (`startFrame` no tempo de fora).
+- (nullable NSData*)waveformForGroup:(long long)groupId layer:(long long)layerId startFrame:(double)startFrame
+                     framesPerBucket:(double)framesPerBucket count:(uint32_t)count;
 /// Bits do que a última abertura precisou fazer (Engine::LoadNotice).
 @property (nonatomic, readonly) uint32_t lastLoadNotice;
 @property (nonatomic, readonly) uint32_t lastLoadMissingAssets;
@@ -438,6 +462,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)togglePlayback;
 /// Startup runs on the lifecycle queue; progress is a no-I/O snapshot.
 - (int32_t)startPreRender:(int32_t)direction NS_SWIFT_NAME(startPreRender(direction:));
+- (int32_t)startGroupPreRender:(int64_t)layer direction:(int32_t)direction NS_SWIFT_NAME(startGroupPreRender(_:direction:));
 - (void)cancelPreRender NS_SWIFT_NAME(cancelPreRender());
 /// running, complete, framesDone, framesTotal, width, height, direction, error, diskBytes, residentBytes.
 - (NSArray<NSNumber*>*)preRenderProgress NS_SWIFT_NAME(preRenderProgress());
@@ -1179,6 +1204,9 @@ NS_SWIFT_NAME(AureaEngine)
 - (NSString*)saveCaptionBundle:(long long)layer name:(NSString*)name;
 - (BOOL)applyCaptionBundle:(long long)layer data:(NSString*)data;
 - (BOOL)editCaptionTrack:(long long)layer command:(NSString*)command;
+- (long long)captionWordFrame:(long long)layer seconds:(double)seconds;
+/// 0.5.3: as legendas da faixa como SRT (ou WebVTT), nos tempos da timeline; vazio = sem faixa.
+- (NSString*)captionExport:(long long)layer vtt:(BOOL)vtt;
 /// 0.4.6: opções da legenda em JSON (o bloco "caption" do preset), com fonte,
 /// cores, contorno, fundo e sombra próprios. Vazio = gerou; senão, o erro.
 - (NSString*)createCaptions:(long long)layerId words:(NSArray<NSDictionary<NSString*, id>*>*)words optionsJSON:(NSString*)json;
@@ -1373,6 +1401,37 @@ NS_SWIFT_NAME(AureaEngine)
 - (nullable NSData*)materialPreview:(long long)layerId material:(uint32_t)material size:(uint32_t)size;
 /// A bola de um material pronto do texto 3D (0..6), no mesmo formato.
 - (nullable NSData*)text3DPresetPreview:(uint32_t)preset size:(uint32_t)size;
+/// PAINEL DO MODELO 3D (EngineModelPanel.cpp; par do AureaEngine.kt). Clipe de animação
+/// do arquivo: −1 = pose parada; nomes vazios = a UI numera.
+- (NSArray<NSString*>*)modelAnimationClips:(long long)layerId;
+- (int32_t)modelAnimationClip:(long long)layerId;
+- (BOOL)setModelAnimationClip:(long long)layerId clip:(int32_t)clip;
+/// Animação: `param` 0 Evolução (0..1; negativo = toca sozinho), 1 Repetir (0/1), 2 Velocidade
+/// (com ◆, vira o keyframe no cabeçote); v76: 3 Começar em (0..1), 4 De trás para frente, 5 Ida e volta.
+- (BOOL)setModelAnimationParam:(long long)layerId param:(uint32_t)param value:(float)value;
+/// ◆ da Evolução no cabeçote (liga/desliga), um passo de desfazer.
+- (BOOL)toggleModelAnimationKey:(long long)layerId;
+/// v76: ◆ de um parâmetro da Animação (0 Evolução, 2 Velocidade), um passo de desfazer.
+- (BOOL)toggleModelAnimationParamKey:(long long)layerId param:(uint32_t)param;
+/// [clipe, duração s, evolução parada (−1), evolução no cabeçote, repetir, velocidade,
+/// tem keyframe, keyframe aqui, (v76) começar em, de trás para frente, ida e volta,
+/// velocidade tem keyframe, keyframe de velocidade aqui, velocidade no cabeçote];
+/// vazio = não é modelo 3D.
+- (NSArray<NSNumber*>*)modelAnimation:(long long)layerId;
+/// v76: posição do modelo — 0 assentar no chão, 1 centralizar, 2 ajustar à tela (um passo de desfazer).
+- (BOOL)placeModelLayer:(long long)layerId mode:(uint32_t)mode;
+/// v76: emissão do material no cabeçote {R, G, B lineares, força}; `UInt32.max` = o modelo inteiro.
+- (NSArray<NSNumber*>*)materialEmission:(long long)layerId material:(uint32_t)material;
+/// Visual do modelo inteiro: 0 Original, 1 Plástico, 2 Fosco, 3 Metal, 4 Cromo, 5 Ouro, 6 Vidro, 7 Neon (v76).
+- (BOOL)applyModelMaterialPreset:(long long)layerId preset:(uint32_t)preset;
+/// O visual que o modelo mostra (−1 = ajustado à mão).
+- (int32_t)modelMaterialPreset:(long long)layerId;
+/// A bola do visual `preset` neste modelo (RGBA8 sRGB, alfa reto). Fora da main thread.
+- (nullable NSData*)modelMaterialPresetPreview:(long long)layerId preset:(uint32_t)preset size:(uint32_t)size;
+/// ◆ dos canais `paramMask` (bits R, G, B, opacidade, metal, rugosidade; v76: 6..8 cor da emissão,
+/// 9 força da emissão) do material
+/// (`UInt32.max` = o modelo inteiro), num passo de desfazer.
+- (BOOL)toggleMaterialKeys:(long long)layerId material:(uint32_t)material paramMask:(uint32_t)paramMask;
 /// 0.3.6 Textura do material (EngineMedia.cpp): cobre o material com uma imagem
 /// (arquivo) ou com uma camada da composição; cada troca é um passo de desfazer.
 - (BOOL)setMaterialTextureImage:(long long)layerId material:(uint32_t)material path:(NSString*)path;
@@ -1655,6 +1714,13 @@ NS_SWIFT_NAME(AureaEngine)
 /// com os que falharam antes), para o log e o diagnóstico do relato de bug.
 /// Vazio = nenhum export neste processo. Mesmo texto do Android.
 + (NSString*)lastExportEncoderPath;
+/// 0.5.3 (P2-1): a memória da escada de encoders entre aberturas do app
+/// (FFmpegExportSink.hpp): o degrau que falhou duas vezes é pulado, o encoder
+/// que descartou quadros vai em taxa constante. `identity` = aparelho + iOS +
+/// build do app; outra identidade começa do zero. Mesma regra do Android.
++ (void)configureExportRungMemory:(NSString*)path identity:(NSString*)identity;
+/// O que essa memória guarda, uma nota por linha (relato local).
++ (NSString*)exportRungMemory;
 /// A escada de tentativas do export (export/ExportAttempts.hpp): o próximo
 /// degrau depois de uma falha. 0 = nada mais ajuda; bit 0x100 = esperar e
 /// refazer o mesmo degrau. A mesma regra do Android.

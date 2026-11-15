@@ -964,3 +964,299 @@ AUREA_TEST(Captions, BlockLookSurvivesSaveAndReopen) {
     AUREA_CHECK(rig.track()->captions[1].look.has_value());
     std::remove(path.c_str());
 }
+
+// -----------------------------------------------------------------------------
+// 0.5.3: legendas no jeito do Premiere (lista, transcrição, criar, arquivos)
+// -----------------------------------------------------------------------------
+
+namespace {
+std::string id_list(const Layer* l, std::initializer_list<usize> at) {
+    std::string out = "[";
+    for (usize i : at) out += (out.size() > 1 ? "," : "") + std::to_string(l->captions[i].id);
+    return out + "]";
+}
+} // namespace
+
+AUREA_TEST(Captions, DefaultsOfTheNewOptionsDrawExactlyLikeBefore) {
+    // Projeto antigo: as opções novas nascem nos padrões e o texto sai igual ao de antes.
+    text::CaptionOptions o;
+    o.style = 1;
+    o.look = text::kCaptionLookBox | text::kCaptionLookShadow;
+    o.box = true; o.shadow = true;
+    TextData t; TrackSet tracks;
+    text::apply_caption_style(o, 1000, t, tracks, {}, 0);
+    const f32 size = t.size;
+    AUREA_CHECK(std::fabs(t.backgroundPadding - size * 0.3f) < 1e-4f);
+    AUREA_CHECK(std::fabs(t.backgroundRadius - size * 0.25f) < 1e-4f);
+    AUREA_CHECK(std::fabs(t.shadowBlur - size * 0.12f) < 1e-4f);
+    AUREA_CHECK(near_color(t.shadowColor, Vec4{0, 0, 0, 0.6f}));
+    AUREA_CHECK_EQ(t.alignment, 1u);
+    AUREA_CHECK(std::fabs(t.lineHeight - 1.15f) < 1e-6f);
+    // Grupos iguais com a duração mínima padrão (0,8 s) e sem fim de frase forçado.
+    std::vector<text::CaptionWord> words;
+    for (u32 i = 0; i < 12; ++i) words.push_back({i % 4 == 3 ? "fim." : "palavra", 1.0 + i * 0.4, 1.3 + i * 0.4});
+    text::CaptionOptions a, b;
+    b.minDurationSec = 0.8f;
+    const auto ga = text::group_captions(words, a), gb = text::group_captions(words, b);
+    AUREA_CHECK_EQ(ga.size(), gb.size());
+    for (usize i = 0; i < ga.size() && i < gb.size(); ++i) AUREA_CHECK(ga[i].start == gb[i].start && ga[i].end == gb[i].end && ga[i].text == gb[i].text);
+}
+
+AUREA_TEST(Captions, LayoutBoxAndShadowOptionsReachTheText) {
+    text::CaptionOptions o;
+    o.look = text::kCaptionLookLayout | text::kCaptionLookBox | text::kCaptionLookShadow;
+    o.align = 0; o.lineSpacing = 1.6f; o.box = true; o.boxPadding = 0.5f; o.boxRadius = 0.0f;
+    o.shadow = true; o.shadowColor = Vec4{1, 0, 0, 1}; o.shadowBlur = 0.3f;
+    TextData t; TrackSet tracks;
+    text::apply_caption_style(o, 1000, t, tracks, {}, 0);
+    AUREA_CHECK_EQ(t.alignment, 0u);
+    AUREA_CHECK(std::fabs(t.lineHeight - 1.6f) < 1e-6f);
+    AUREA_CHECK(std::fabs(t.backgroundPadding - t.size * 0.5f) < 1e-4f);
+    AUREA_CHECK(t.backgroundRadius == 0.0f);
+    AUREA_CHECK(near_color(t.shadowColor, Vec4{1, 0, 0, 1}));
+    AUREA_CHECK(std::fabs(t.shadowBlur - t.size * 0.3f) < 1e-4f);
+    // Na faixa pronta: trocar só o alinhamento mexe só no alinhamento (um passo).
+    CaptionRig rig(6, o);
+    text::CaptionOptions next = o; next.align = 2;
+    AUREA_CHECK(rig.engine.set_caption_options(rig.trackId, next));
+    const Layer* l = rig.track();
+    AUREA_CHECK(l != nullptr); if (!l) return;
+    AUREA_CHECK_EQ(l->text.alignment, 2u);
+    AUREA_CHECK(std::fabs(l->text.lineHeight - 1.6f) < 1e-6f);
+    AUREA_CHECK(undo_once(rig.engine));
+    AUREA_CHECK_EQ(rig.track()->text.alignment, 0u);
+}
+
+AUREA_TEST(Captions, MinimumDurationGapAndSentenceBreakShapeTheBlocks) {
+    std::vector<text::CaptionWord> words = {{"Oi.", 1.0, 1.2}, {"Tudo", 1.3, 1.5}, {"bem?", 1.6, 1.8}, {"Sim", 1.9, 2.1}};
+    text::CaptionOptions o;
+    o.maxWords = 4; o.maxChars = 40;
+    o.breakOnSentence = true;
+    const auto g = text::group_captions(words, o);
+    // Fim de frase fecha a legenda: "Oi." | "Tudo bem?" | "Sim".
+    AUREA_CHECK_EQ(g.size(), 3u);
+    if (g.size() == 3) { AUREA_CHECK_EQ(g[0].text, std::string("Oi.")); AUREA_CHECK_EQ(g[1].text, std::string("Tudo bem?")); }
+    // Duração mínima de 2 s: o bloco fica até o seguinte (sem invadir).
+    text::CaptionOptions slow;
+    slow.mode = 1; slow.minDurationSec = 2.0f;
+    const auto s = text::group_captions(words, slow);
+    for (usize i = 0; i + 1 < s.size(); ++i) AUREA_CHECK(std::fabs(s[i].end - s[i + 1].start) < 1e-9);
+    AUREA_CHECK(s.back().end - s.back().start >= 2.0 - 1e-9);
+    // Intervalo de 4 quadros entre os blocos gerados.
+    text::CaptionOptions gap;
+    gap.maxWords = 1; gap.gapFrames = 4;
+    CaptionRig rig(6, gap);
+    const Layer* l = rig.track();
+    AUREA_CHECK(l != nullptr); if (!l) return;
+    AUREA_CHECK(l->captions.size() >= 2);
+    for (usize i = 0; i + 1 < l->captions.size(); ++i) {
+        const auto& a = l->captions[i];
+        AUREA_CHECK(l->captions[i + 1].start - a.end >= 4 || a.end - a.start == 1);
+    }
+    AUREA_CHECK(text::valid_caption_track(l->captions));
+}
+
+AUREA_TEST(Captions, InsertNudgeAndSplitAtTheTextCursorAreUndoableSteps) {
+    CaptionRig rig(6);
+    const Layer* l = rig.track();
+    AUREA_CHECK(l != nullptr); if (!l) return;
+    const usize was = l->captions.size();
+    // Inserir na agulha depois do último bloco: até 2 s, sem invadir nada.
+    const i64 after = l->captions.back().end + 10;
+    AUREA_CHECK(rig.edit("{\"op\":\"insert\",\"playhead\":" + std::to_string(after) + ",\"text\":\"nova legenda\"}"));
+    l = rig.track();
+    AUREA_CHECK_EQ(l->captions.size(), was + 1);
+    AUREA_CHECK_EQ(l->captions.back().start, after);
+    AUREA_CHECK_EQ(l->captions.back().end, after + 60);
+    AUREA_CHECK_EQ(l->captions.back().words.size(), 2u);
+    AUREA_CHECK(text::valid_caption_track(l->captions));
+    // Inserir dentro de um bloco cai depois dele (e dos que encostam nele), sem invadir nenhum.
+    const i64 inside = l->captions[0].start + 1;
+    const i64 firstEnd = l->captions[0].end;
+    if (rig.edit("{\"op\":\"insert\",\"playhead\":" + std::to_string(inside) + ",\"text\":\"x\"}")) {
+        AUREA_CHECK(text::valid_caption_track(rig.track()->captions));
+        bool after = false;
+        for (const auto& s : rig.track()->captions) after = after || (s.text == "x" && s.start >= firstEnd);
+        AUREA_CHECK(after);
+        AUREA_CHECK(undo_once(rig.engine));
+    }
+    AUREA_CHECK(undo_once(rig.engine));
+    AUREA_CHECK_EQ(rig.blocks(), was);
+    // Entrada/saída de um quadro presas no vizinho.
+    l = rig.track();
+    if (l->captions.size() >= 2) {
+        const i64 neighbour = l->captions[1].start;
+        AUREA_CHECK(rig.edit("{\"op\":\"nudge\",\"ids\":" + id_list(l, {0}) + ",\"out\":100000}"));
+        l = rig.track();
+        AUREA_CHECK_EQ(l->captions[0].end, neighbour);
+        const i64 start = l->captions[0].start;
+        AUREA_CHECK(rig.edit("{\"op\":\"nudge\",\"ids\":" + id_list(l, {0}) + ",\"in\":1}"));
+        AUREA_CHECK_EQ(rig.track()->captions[0].start, start + 1);
+        for (const auto& w : rig.track()->captions[0].words) AUREA_CHECK(w.start >= start + 1);
+        AUREA_CHECK(undo_once(rig.engine) && undo_once(rig.engine));
+    }
+    // Dividir no cursor do texto: as 2 primeiras palavras ficam.
+    l = rig.track();
+    const auto first = l->captions[0];
+    AUREA_CHECK(first.words.size() >= 3);
+    AUREA_CHECK(rig.edit("{\"op\":\"split_word\",\"ids\":" + id_list(l, {0}) + ",\"words\":2}"));
+    l = rig.track();
+    AUREA_CHECK_EQ(l->captions.size(), was + 1);
+    AUREA_CHECK_EQ(l->captions[0].words.size(), 2u);
+    AUREA_CHECK_EQ(l->captions[1].start, first.words[2].start);
+    AUREA_CHECK_EQ(l->captions[1].words.front().text, first.words[2].text);
+    AUREA_CHECK(!rig.edit("{\"op\":\"split_word\",\"ids\":" + id_list(l, {0}) + ",\"words\":2}"));   // nada à direita
+    AUREA_CHECK(undo_once(rig.engine));
+    AUREA_CHECK_EQ(rig.blocks(), was);
+}
+
+AUREA_TEST(Captions, ReplaceKeepsTheTimingAndRefusesWhenNothingMatches) {
+    CaptionRig rig(6);
+    const Layer* l = rig.track();
+    AUREA_CHECK(l != nullptr); if (!l) return;
+    const auto before = l->captions;
+    AUREA_CHECK(!rig.edit("{\"op\":\"replace\",\"find\":\"inexistente\",\"replace\":\"x\"}"));
+    // "UM" acha "um" sem diferenciar maiúsculas; a palavra trocada fica no lugar dela.
+    AUREA_CHECK(rig.edit("{\"op\":\"replace\",\"find\":\"UM\",\"replace\":\"Olá\"}"));
+    l = rig.track();
+    AUREA_CHECK(l->captions[0].text.find("Olá") != std::string::npos);
+    AUREA_CHECK_EQ(l->captions[0].words.size(), before[0].words.size());
+    for (usize w = 1; w < before[0].words.size(); ++w) AUREA_CHECK_EQ(l->captions[0].words[w].start, before[0].words[w].start);
+    AUREA_CHECK(!rig.edit("{\"op\":\"replace\",\"find\":\"olá\",\"replace\":\"y\",\"matchCase\":true}"));
+    AUREA_CHECK(undo_once(rig.engine));
+    AUREA_CHECK_EQ(rig.track()->captions[0].text, before[0].text);
+    std::string t = "Ação AÇÃO ação";
+    AUREA_CHECK_EQ(text::replace_caption_text(t, "ação", "x", false), 3u);
+    AUREA_CHECK_EQ(t, std::string("x x x"));
+}
+
+AUREA_TEST(Captions, ExportSrtAndVttInTimelineTimeAndReadBack) {
+    CaptionRig rig(6);
+    const Layer* l = rig.track();
+    AUREA_CHECK(l != nullptr); if (!l) return;
+    const std::string srt = rig.engine.caption_export(rig.video, false);
+    const std::string vtt = rig.engine.caption_export(rig.trackId, true);
+    AUREA_CHECK(srt.rfind("1\n00:00:", 0) == 0);
+    AUREA_CHECK(srt.find(" --> ") != std::string::npos && srt.find(',') != std::string::npos);
+    AUREA_CHECK(vtt.rfind("WEBVTT\n\n1\n", 0) == 0);
+    // Lido de volta: as mesmas palavras, na mesma ordem.
+    auto words = [](const std::vector<text::CaptionWord>& v) { std::string s; for (const auto& w : v) s += w.text + " "; return s; };
+    std::string expected;
+    for (const auto& s : l->captions) { std::string t = s.text; std::replace(t.begin(), t.end(), '\n', ' '); expected += t + " "; }
+    auto squash = [](std::string s) { std::string o; for (char c : s) if (c != ' ') o += c; return o; };
+    AUREA_CHECK_EQ(squash(words(text::parse_srt(srt))), squash(expected));
+    AUREA_CHECK_EQ(squash(words(text::parse_srt(vtt))), squash(expected));
+    // Sem hora no WebVTT ("mm:ss.mmm") também lê.
+    const auto shortVtt = text::parse_srt("WEBVTT\n\n00:01.000 --> 00:02.500\nolá mundo\n");
+    AUREA_CHECK_EQ(shortVtt.size(), 2u);
+    if (shortVtt.size() == 2) AUREA_CHECK(std::fabs(shortVtt[0].start - 1.0) < 1e-9 && std::fabs(shortVtt[1].end - 2.5) < 1e-9);
+    AUREA_CHECK(rig.engine.caption_export(0, false).empty());
+}
+
+AUREA_TEST(Captions, FromWordsRebuildsOnlyTheRangeTheSelectionCovers) {
+    CaptionRig rig(12);
+    const Layer* l = rig.track();
+    AUREA_CHECK(l != nullptr); if (!l) return;
+    const auto before = l->captions;
+    AUREA_CHECK(before.size() >= 3);
+    // Trecho da transcrição sobre o segundo bloco (segundos da mídia, como a transcrição guarda).
+    const f64 fps = 30.0;
+    const auto& mid = before[1];
+    std::string words = "[";
+    for (usize w = 0; w < mid.words.size(); ++w) {
+        if (w) words += ",";
+        words += "{\"text\":\"novo" + std::to_string(w) + "\",\"start\":" + std::to_string(mid.words[w].start / fps + 0.001) +
+                 ",\"end\":" + std::to_string(mid.words[w].end / fps - 0.001) + "}";
+    }
+    words += "]";
+    AUREA_CHECK(rig.edit("{\"op\":\"from_words\",\"words\":" + words + "}"));
+    l = rig.track();
+    AUREA_CHECK(text::valid_caption_track(l->captions));
+    AUREA_CHECK_EQ(l->captions.front().text, before.front().text);   // o de antes fica
+    AUREA_CHECK_EQ(l->captions.back().text, before.back().text);     // o de depois também
+    bool rebuilt = false;
+    for (const auto& s : l->captions) rebuilt = rebuilt || s.text.find("novo0") != std::string::npos;
+    AUREA_CHECK(rebuilt);
+    AUREA_CHECK(undo_once(rig.engine));
+    AUREA_CHECK_EQ(rig.track()->captions[1].text, mid.text);
+    AUREA_CHECK(!rig.edit("{\"op\":\"from_words\",\"words\":[]}"));
+}
+
+AUREA_TEST(Captions, NewOptionsAndBlockLookSurviveSaveAndReopen) {
+    text::CaptionOptions o;
+    o.minDurationSec = 1.5f; o.gapFrames = 3; o.breakOnSentence = true;
+    o.look = text::kCaptionLookLayout | text::kCaptionLookBox | text::kCaptionLookShadow;
+    o.align = 2; o.lineSpacing = 1.4f; o.box = true; o.boxPadding = 0.6f; o.boxRadius = 0.1f;
+    o.shadow = true; o.shadowColor = Vec4{0.2f, 0.3f, 0.4f, 0.5f}; o.shadowBlur = 0.2f;
+    CaptionRig rig(6, o);
+    text::CaptionOptions own;
+    own.look = text::kCaptionLookLayout; own.align = 0; own.lineSpacing = 2.0f;
+    AUREA_CHECK(rig.edit(look_command(rig.one_of(0), own)));
+    const std::string path = caption_path("premiere");
+    AUREA_CHECK(rig.engine.save_project(path.c_str()).ok());
+    AUREA_CHECK(rig.engine.load_project(path.c_str()).ok());
+    const Layer* l = rig.track();
+    AUREA_CHECK(l != nullptr); if (!l) { std::remove(path.c_str()); return; }
+    const auto& c = l->captionOptions;
+    AUREA_CHECK(std::fabs(c.minDurationSec - 1.5f) < 1e-6f);
+    AUREA_CHECK_EQ(c.gapFrames, 3u);
+    AUREA_CHECK(c.breakOnSentence);
+    AUREA_CHECK_EQ(c.align, 2u);
+    AUREA_CHECK(std::fabs(c.lineSpacing - 1.4f) < 1e-6f);
+    AUREA_CHECK(std::fabs(c.boxPadding - 0.6f) < 1e-6f && std::fabs(c.boxRadius - 0.1f) < 1e-6f);
+    AUREA_CHECK(near_color(c.shadowColor, o.shadowColor));
+    AUREA_CHECK(std::fabs(c.shadowBlur - 0.2f) < 1e-6f);
+    AUREA_CHECK(l->captions[0].look.has_value());
+    if (l->captions[0].look) {
+        AUREA_CHECK_EQ(l->captions[0].look->align, 0u);
+        AUREA_CHECK(std::fabs(l->captions[0].look->lineSpacing - 2.0f) < 1e-6f);
+    }
+    // O JSON das opções leva e traz tudo; preset antigo (sem as chaves) fica nos padrões.
+    text::CaptionOptions back; bool rf = true;
+    AUREA_CHECK(presets::parse_caption_options(presets::caption_options_json(c, true), back, rf));
+    AUREA_CHECK_EQ(back.gapFrames, 3u);
+    AUREA_CHECK_EQ(back.align, 2u);
+    text::CaptionOptions old; rf = true;
+    AUREA_CHECK(presets::parse_caption_options("{\"style\":1}", old, rf));
+    AUREA_CHECK(std::fabs(old.minDurationSec - 0.8f) < 1e-6f && old.gapFrames == 0 && old.align == 1 && !old.breakOnSentence);
+    std::remove(path.c_str());
+}
+
+AUREA_TEST(Captions, TemplatesKeepTheUsersLayoutUnlessTheyBringTheirOwn) {
+    text::CaptionOptions mine;
+    mine.look = text::kCaptionLookLayout; mine.align = 2; mine.lineSpacing = 1.8f;
+    const text::CaptionTemplate* news = nullptr;
+    const text::CaptionTemplate* classic = nullptr;
+    for (const auto& t : text::caption_templates()) {
+        if (std::string(t.id) == "news") news = &t;
+        if (std::string(t.id) == "classic") classic = &t;
+    }
+    AUREA_CHECK(news && classic); if (!news || !classic) return;
+    text::CaptionOptions a = mine;
+    text::apply_caption_template(*classic, a);
+    AUREA_CHECK((a.look & text::kCaptionLookLayout) && a.align == 2);
+    text::CaptionOptions b = mine;
+    text::apply_caption_template(*news, b);
+    AUREA_CHECK((b.look & text::kCaptionLookLayout) && b.align == 0);
+}
+
+AUREA_TEST(Captions, TranscriptSeekUsesSpeedReverseAndRemapping) {
+    CaptionRig rig(4);
+    auto* source = rig.comp()->layer(LayerId::unpack(rig.video));
+    AUREA_CHECK(source != nullptr); if (!source) return;
+    source->start = FrameIndex{30}; source->end = FrameIndex{150};
+    source->offset = FrameIndex{12}; source->speed = 2.f;
+    AUREA_CHECK_EQ(rig.engine.caption_word_frame(rig.video, 1.0), 39ll);
+    source->reversed = true;
+    AUREA_CHECK_EQ(rig.engine.caption_word_frame(rig.video, 1.0), 140ll);
+    source->timeRemapEnabled = true;
+    source->timeRemap.set(FrameIndex{12}, 0.f);
+    source->timeRemap.set(FrameIndex{131}, 119.f);
+    const i64 mapped = rig.engine.caption_word_frame(rig.video, 2.0);
+    AUREA_CHECK(mapped >= 30 && mapped < 150);
+    const f64 error = std::abs(source->source_frame(FrameIndex{mapped}) - 60.0);
+    for (i64 f = 30; f < 150; ++f)
+        AUREA_CHECK(error <= std::abs(source->source_frame(FrameIndex{f}) - 60.0));
+    AUREA_CHECK_EQ(rig.engine.caption_word_frame(rig.video, -1), -1ll);
+    AUREA_CHECK_EQ(rig.engine.caption_word_frame(rig.video, std::numeric_limits<f64>::quiet_NaN()), -1ll);
+}

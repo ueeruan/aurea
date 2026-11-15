@@ -97,6 +97,12 @@ constexpr PRule kAngle[] = {P(1, "Angle", "angle")};
 constexpr PRule kCheckbox[] = {P(1, "Checkbox", "checkbox", PConv::Bool)};
 constexpr PRule kColor[] = {P(1, "Color", "color", PConv::Color)};
 constexpr PRule kPoint[] = {P(1, "Point", "point", PConv::PointPx)};
+// AE expressions (lote E): Dropdown Menu (o valor do AE é 1..; o Aurea guarda
+// o índice 0.. e a expressão volta a ler 1..), Layer (a camada escolhida não
+// vem no preset: fica para escolher aqui) e 3D Point Control.
+constexpr PRule kDropdown[] = {E(1, "Menu", "menu", kMinus1Long)};
+constexpr PRule kLayerControl[] = {U(1, "Layer", 0)};
+constexpr PRule kPoint3D[] = {P(1, "3D Point", "point3d")};
 
 constexpr PRule kGeometry2[] = {
     P(1, "Anchor Point", "anchor", PConv::PointRel),
@@ -1127,6 +1133,9 @@ const ERule kRules[] = {
     RULE("ADBE Checkbox Control", "Checkbox Control", effect_keys::kCheckboxControl, kCheckbox),
     RULE("ADBE Color Control", "Color Control", effect_keys::kColorControl, kColor),
     RULE("ADBE Point Control", "Point Control", effect_keys::kPointControl, kPoint),
+    RULE("ADBE Dropdown Control", "Dropdown Menu Control", effect_keys::kDropdownControl, kDropdown),
+    RULE("ADBE Layer Control", "Layer Control", effect_keys::kLayerControl, kLayerControl),
+    RULE("ADBE Point3D Control", "3D Point Control", effect_keys::kPoint3DControl, kPoint3D),
     // Transformar e geradores
     RULEX("ADBE Geometry2", "Transform", effect_keys::kTransform, kGeometry2, nullptr, nullptr, 0, post_geometry2),
     RULEX("ADBE Fractal Noise", "Fractal Noise", effect_keys::kFractalNoise, kFractalNoise,

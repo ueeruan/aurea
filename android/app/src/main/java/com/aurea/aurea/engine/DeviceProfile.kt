@@ -59,8 +59,23 @@ object DeviceProfile {
      * 2: instâncias simultâneas de cada codec (antes iam 0, e o motor limitava
      * o decode paralelo a 1 em todo aparelho).
      * 3: + encoder de software reconhecido pelo nome antes do Android 10 (8F).
+     * 4: (0.5.3) tamanho máximo do ENCODER pela combinação aceita (largestSize).
      */
-    private const val SCHEMA = 3
+    private const val SCHEMA = 4
+
+    /** Tamanhos de export comuns, do maior para o menor (paisagem). */
+    private val STANDARD_SIZES = listOf(3840 to 2160, 2560 to 1440, 1920 to 1080, 1280 to 720, 854 to 480, 640 to 360)
+
+    /**
+     * 0.5.3 (P1-2): o maior tamanho que o encoder ACEITA, não os máximos de
+     * largura e altura separados. A combinação anunciada, se aceita; senão o
+     * maior tamanho comum dentro dela que ele aceita; nenhum = a anunciada (como antes).
+     */
+    internal fun largestSize(upperWidth: Int, upperHeight: Int, supported: (Int, Int) -> Boolean): Pair<Int, Int> {
+        if (supported(upperWidth, upperHeight)) return upperWidth to upperHeight
+        for ((w, h) in STANDARD_SIZES) if (w <= upperWidth && h <= upperHeight && supported(w, h)) return w to h
+        return upperWidth to upperHeight
+    }
 
     /**
      * A sondagem para passar ao motor: memória viva + codecs (guardados).
@@ -164,12 +179,21 @@ object DeviceProfile {
                     // hardware — e o export 4K por software passava por hardware).
                     val hw = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) info.isHardwareAccelerated
                              else !softwareName(info.name)
+                    // 0.5.3 (P1-2): o encoder anuncia a largura e a altura máximas
+                    // SEPARADAS (ex.: 1920 e 1920), mas não a combinação: o motor
+                    // oferecia um tamanho que o encoder recusa e o export ia para o
+                    // software. Agora o maior tamanho que ele aceita de verdade.
+                    val size = if (info.isEncoder)
+                        largestSize(video.supportedWidths.upper, video.supportedHeights.upper) { w, h ->
+                            runCatching { video.isSizeSupported(w, h) }.getOrDefault(false)
+                        }
+                    else video.supportedWidths.upper to video.supportedHeights.upper
                     val line = intArrayOf(
                         tag,
                         if (info.isEncoder) 1 else 0,
                         if (hw) 1 else 0,
-                        video.supportedWidths.upper,
-                        video.supportedHeights.upper,
+                        size.first,
+                        size.second,
                         maxBitDepth(tag, caps),
                         // Quantas sessões simultâneas o codec aceita: é o que
                         // limita quantos vídeos decodificam em paralelo.

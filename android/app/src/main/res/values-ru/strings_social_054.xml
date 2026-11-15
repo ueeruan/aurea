@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.4: tela "siga" com os perfis do criador e do Aurea. -->
+<resources>
+    <string name="social_body_054">Подпишитесь на автора и на Aurea: откройте все четыре профиля, чтобы разблокировать приложение. Мы не проверяем подписку.</string>
+    <string name="social_body_054_store">Подпишитесь на автора и на Aurea, чтобы следить за новостями и поддержать приложение.</string>
+    <string name="social_continue">Продолжить</string>
+</resources>

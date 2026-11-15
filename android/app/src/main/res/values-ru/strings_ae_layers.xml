@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE layers (2026-11-12): qualidade da camada, clipe do modelo 3D, transições por camada, guias da prévia e velocidade negativa. -->
+<resources>
+    <string name="ae_layer_quality">Качество</string>
+    <string name="ae_quality_best">Наилучшее</string>
+    <string name="ae_quality_draft">Черновое</string>
+    <string name="ae_quality_wireframe">Каркас</string>
+    <string name="ae_quality_hint">Черновое и Каркас действуют только в предпросмотре; экспорт всегда в наилучшем качестве</string>
+    <string name="ae_layer_sampling">Интерполяция</string>
+    <string name="ae_sampling_bilinear">Билинейная</string>
+    <string name="ae_sampling_bicubic">Бикубическая</string>
+    <string name="ae_sampling_hint">Бикубическая сохраняет резкость при увеличении (в наилучшем качестве)</string>
+    <string name="ae_model_clip">Анимация модели</string>
+    <string name="ae_model_clip_none">Без анимации</string>
+    <string name="ae_model_clip_n">Клип %1$d</string>
+    <string name="ae_model_clip_empty">У этой модели нет анимации</string>
+    <string name="ae_transitions">Переходы</string>
+    <string name="ae_transition_in">Вход</string>
+    <string name="ae_transition_out">Выход</string>
+    <string name="ae_transition_none">Нет</string>
+    <string name="ae_transition_dissolve">Растворение</string>
+    <string name="ae_transition_slide_up">Сдвиг вверх</string>
+    <string name="ae_transition_slide_left">Сдвиг слева</string>
+    <string name="ae_transition_zoom">Масштаб</string>
+    <string name="ae_transition_spin">Вращение</string>
+    <string name="ae_transition_duration">Длительность</string>
+    <string name="ae_transition_hint">Действуют на краях клипа; ключевые кадры не создаются</string>
+    <string name="ae_guides_safe">Безопасные зоны</string>
+    <string name="ae_guides_rulers">Линейки</string>
+    <string name="ae_speed_reverse_point">Обратить направление</string>
+    <string name="ae_speed_reverse_hint">Отрицательная скорость проигрывает источник назад внутри рампы (до кадра 0)</string>
+</resources>

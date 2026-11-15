@@ -201,12 +201,27 @@ private enum FxSearchIndexCache {
 
 enum FxEffectTool: CaseIterable {
     case captions, cameraTrack, mask
+    // Funções do AUREA (13/11/2026, decisão 1 do dono: sem página 2 na grade). Abrem
+    // pelo navegador de Efeitos, no grupo "Funções do Aurea"; nada entra na pilha.
+    // Par do EffectTool do Android (mesmas chaves, mesma ordem).
+    case animation, tracking, preciseCut, puppet, rigMocap, shapeOperators, layer3D, layerOptions
+    /// F4: espaçamento, caixa, texto no caminho e texto dinâmico (só texto).
+    case textLayout
     /// Chave falsa e estável: o `typeId` é o FNV dela, como o de um efeito.
     var key: String {
         switch self {
         case .captions: return "aurea.tool.auto_captions"
         case .cameraTrack: return "aurea.tool.camera_track"
         case .mask: return "aurea.tool.mask"
+        case .animation: return "aurea.tool.animation"
+        case .tracking: return "aurea.tool.tracking"
+        case .preciseCut: return "aurea.tool.precise_cut"
+        case .puppet: return "aurea.tool.puppet"
+        case .rigMocap: return "aurea.tool.rig_mocap"
+        case .shapeOperators: return "aurea.tool.shape_operators"
+        case .layer3D: return "aurea.tool.layer_3d"
+        case .layerOptions: return "aurea.tool.layer_options"
+        case .textLayout: return "aurea.tool.text_layout"
         }
     }
     /// A categoria que manda a entrada para o grupo certo.
@@ -215,6 +230,7 @@ enum FxEffectTool: CaseIterable {
         case .captions: return "Texto"
         case .cameraTrack: return "Rastreio"
         case .mask: return "Máscara"
+        default: return "Ferramentas"
         }
     }
     var typeId: UInt32 { fxEffectTypeId(key) }
@@ -224,6 +240,15 @@ enum FxEffectTool: CaseIterable {
         case .captions: return "legenda legendas automaticas captions subtitles subtitulos transcrever transcribe fala voz speech субтитры कैप्शन ترجمة teks"
         case .cameraTrack: return "rastreio rastrear camera tracking track 3d cena match move seguimiento трекинг ट्रैकिंग تتبع pelacakan"
         case .mask: return "mascara mask roto recorte desenhar forma esconder mostrar mascara маска मास्क قناع masker"
+        case .animation: return "animacao animadores animators animator entrada saida in out wiggle texto letras text animation анимация एनिमेशन تحريك animasi"
+        case .tracking: return "rastreio rastrear tracking track ponto point planar cantos corner pin estabilizar stabilize stabilizer трекинг ट्रैकिंग تتبع pelacakan"
+        case .preciseCut: return "corte preciso slip roll slide deslizar rolar escorregar congelar quadro freeze frame quadro a quadro trim обрезка कट قص potong"
+        case .puppet: return "fantoche marionete puppet pinos pins deformar warp boneco марионетка कठपुतली دمية boneka"
+        case .rigMocap: return "rig esqueleto ossos bones skeleton ik mocap motion capture captura de movimento auto rig скелет कंकाल هيكل kerangka"
+        case .shapeOperators: return "operadores operators juntar merge modificadores modifiers repetidor repeater offset pucker roughen wiggle twist zigzag оператор ऑपरेटर عوامل operator"
+        case .layer3D: return "3d camada 3d layer 3d profundidade depth osso bone objeto 3d object luzes lights camera grupo 3д त्रिविम ثلاثي"
+        case .layerOptions: return "camada layer ajuste adjustment guia guide transparencia transparency shy timida linha magnetica magnetic qualidade quality слой परत طبقة lapisan"
+        case .textLayout: return "layout texto text espacamento spacing entrelinha leading letras tracking caixa box paragrafo caminho path dinamico dynamic contador counter макет लेआउट تخطيط tata letak"
         }
     }
     /// A chave do rótulo (o mesmo `R.string` do Android).
@@ -232,22 +257,47 @@ enum FxEffectTool: CaseIterable {
         case .captions: return "fxui_tool_captions"
         case .cameraTrack: return "fxui_tool_camera_track"
         case .mask: return "fxui_tool_mask"
+        case .animation: return "la_animators"
+        case .tracking: return "panel_rastreio"
+        case .preciseCut: return "fn_tool_precise_cut"
+        case .puppet: return "fx_name_puppet"
+        case .rigMocap: return "fn_tool_rig"
+        case .shapeOperators: return "edt_vec_operators"
+        case .layer3D: return "fn_tool_layer3d"
+        case .layerOptions: return "fn_tool_layer_options"
+        case .textLayout: return "fn_text_layout"
         }
     }
     var label: String { AureaText.t(labelKey) }
     var glyph: Character {
         switch self {
         case .captions: return CupertinoGlyph.CaptionsBubble
-        case .cameraTrack: return ShellGlyph.Viewfinder
+        case .cameraTrack, .tracking: return ShellGlyph.Viewfinder
         case .mask: return CupertinoGlyph.PencilOutline
+        case .animation: return CupertinoGlyph.Sparkles
+        case .preciseCut: return CupertinoGlyph.Scissors
+        case .puppet: return CupertinoGlyph.PersonCropCircle
+        case .rigMocap: return CupertinoGlyph.Person3
+        case .shapeOperators: return CupertinoGlyph.Scribble
+        case .layer3D: return CupertinoGlyph.Cube
+        case .layerOptions: return CupertinoGlyph.SliderHorizontal3
+        case .textLayout: return CupertinoGlyph.DocText
         }
     }
     /// O painel de sempre de cada ferramenta.
     var panel: AureaModel.PanelKind {
         switch self {
         case .captions: return .captions
-        case .cameraTrack: return .tracking
+        case .cameraTrack, .tracking: return .tracking
         case .mask: return .mask
+        case .animation: return .animation          // F3: painel próprio (camada, texto, prontas, explodir)
+        case .preciseCut: return .clipEdit          // slip/roll/slide e congelar quadro
+        case .puppet: return .effects               // o cartão do Fantoche no modo de pinos
+        case .rigMocap: return .layer3D             // a aba Esqueleto do painel 3D
+        case .shapeOperators: return .vector        // a aba Operadores
+        case .layer3D: return .layer3DFunctions
+        case .layerOptions: return .layerOptions
+        case .textLayout: return .textLayout
         }
     }
 }
@@ -255,9 +305,33 @@ enum FxEffectTool: CaseIterable {
 /// A ferramenta por trás de um `typeId` do catálogo (nil = efeito de verdade).
 func fxEffectToolOf(_ typeId: UInt32) -> FxEffectTool? { FxEffectTool.allCases.first { $0.typeId == typeId } }
 
-/// Rastreio de câmera só tem o que analisar num VÍDEO (tipo 1).
-func fxPickableTools(layerKind: UInt32) -> [FxEffectTool] {
-    FxEffectTool.allCases.filter { $0 != .cameraTrack || layerKind == 1 }
+/// As ferramentas que valem para a camada (gêmea de `pickableTools` do Android).
+/// Tipos: 1 vídeo, 2 imagem, 3 áudio, 5 forma, 10 objeto 3D. `vector`: forma
+/// vetorial; `importedModel`: objeto 3D vindo de arquivo (o que tem esqueleto).
+func fxPickableTools(layerKind: UInt32, vector: Bool = false, importedModel: Bool = false) -> [FxEffectTool] {
+    FxEffectTool.allCases.filter { tool in
+        switch tool {
+        case .captions, .mask, .layerOptions: return true
+        case .cameraTrack, .tracking: return layerKind == 1
+        case .preciseCut: return layerKind == 1 || layerKind == 3
+        case .puppet: return layerKind == 2
+        case .rigMocap: return layerKind == 10 && importedModel
+        case .shapeOperators: return layerKind == 5 && vector
+        case .animation, .layer3D: return layerKind != 3 && layerKind != 0
+        case .textLayout: return layerKind == 4
+        }
+    }
+}
+
+/// As ferramentas que valem para a camada escolhida (o catálogo e a busca de
+/// comandos mostram só estas). Par do `toolsForSelection` do Android.
+@MainActor
+func fxToolsForSelection(_ model: AureaModel) -> [FxEffectTool] {
+    let kind = model.selectedLayer?.kind ?? 0
+    let id = model.primarySelection ?? 0
+    let imported = kind == 10 && model.engine.shape3D(id).isEmpty && (model.engine.text3D(forLayer: id) ?? [:]).isEmpty
+        && (model.engine.image3D(forLayer: id) ?? []).isEmpty
+    return fxPickableTools(layerKind: kind, vector: model.isVectorLayer, importedModel: imported)
 }
 
 func fxToolCatalogItem(_ tool: FxEffectTool) -> EffectCatalogItem {
@@ -282,8 +356,15 @@ func fxPickerEntryEnglishName(_ entry: EffectCatalogItem) -> String {
 /// na pilha da camada desde aqui, mesmo que o painel feche sem caminho nenhum.
 @MainActor
 func fxOpenEffectTool(_ tool: FxEffectTool, in model: AureaModel) {
-    if tool == .mask { model.addMaskTool() }
-    if tool == .cameraTrack { model.cameraTrackerVisible = true }
+    switch tool {
+    case .mask: model.addMaskTool()
+    case .cameraTrack: model.cameraTrackerVisible = true
+    case .tracking: model.cameraTrackerVisible = false
+    case .puppet: model.openPuppetTool(); return     // põe o Fantoche e abre Efeitos
+    case .rigMocap: model.face3D = .rig; Panel3DRequest.tab = .rig
+    case .shapeOperators: VectorPanelRequest.tab = VectorPanelRequest.operators; model.vectorFace = .paths
+    default: break
+    }
     model.openPanel(tool.panel)
 }
 
@@ -298,6 +379,8 @@ func fxOpenEffectTool(_ tool: FxEffectTool, in model: AureaModel) {
 
 enum FxEffectGroup: String, CaseIterable {
     // A ordem dos casos é a ordem dos ladrilhos (igual à do EffectGroup do Android).
+    // Funções (13/11/2026): "Funções do Aurea" é o primeiro ladrilho.
+    case aureaTools = "aurea_tools"
     case colorLight = "color_light", drawEdge = "draw_edge", blur, distort, procedural, threeD = "3d"
     // `repeat` é palavra reservada do Swift: o caso se chama repeatTiles, o id continua "repeat".
     case motion, repeatTiles = "repeat", matte, visibility, text, stylize, glitch, time
@@ -305,6 +388,7 @@ enum FxEffectGroup: String, CaseIterable {
     var id: String { rawValue }
     var label: String {
         switch self {
+        case .aureaTools: return AureaText.t("fn_group_aurea_tools")
         case .colorLight: return AureaText.t("fxui_group_color_light")
         case .blur: return AureaText.t("fxui_group_blur")
         case .distort: return AureaText.t("fxui_group_distort")
@@ -327,6 +411,7 @@ enum FxEffectGroup: String, CaseIterable {
     }
     var glyph: Character {
         switch self {
+        case .aureaTools: return CupertinoGlyph.Wrench
         case .colorLight: return CupertinoGlyph.Sparkles
         case .blur: return CupertinoGlyph.DropFill
         case .distort, .motion: return CupertinoGlyph.Move
@@ -363,6 +448,7 @@ private let fxGroupByCategory: [String: FxEffectGroup] = {
     for c in ["texto", "text"] { map[c] = .text }
     map["3d"] = .threeD
     map["plugins"] = .plugins
+    for c in ["ferramentas", "tools", "funcoes do aurea", "aurea tools"] { map[c] = .aureaTools }
     for c in ["audio", "som", "sound"] { map[c] = .audio }
     for c in ["utilitario", "utility", "controles de expressao", "expression controls"] { map[c] = .utility }
     return map
@@ -538,7 +624,7 @@ func fxPickerEntries(_ model: AureaModel, layerHasAudio: Bool) -> [EffectCatalog
         (textLayer || text3D || $0.typeId != fxEffectTypeId("aurea.text.animator")) &&
         (textLayer || $0.typeId != fxEffectTypeId("aurea.text.animator_pro"))   // 0.4.6: só texto 2D
     }
-    let all = effects + fxPickableTools(layerKind: model.selectedLayer?.kind ?? 0).map(fxToolCatalogItem)
+    let all = effects + fxToolsForSelection(model).map(fxToolCatalogItem)
     return fxArrangeCatalog(all, fxEffectCategories(all))
 }
 

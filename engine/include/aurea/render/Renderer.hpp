@@ -254,6 +254,11 @@ struct LayerSource {
     u32      glyphFirst = 0;
     u32      glyphCount = 0;
     u32      glyphSets = 1;
+    /// v72, mistura entre caracteres (TextData::interCharBlend): 0 = Normal (um
+    /// desenho só). Senão cada glifo de [glyphBlendFrom, glyphCount) do conjunto
+    /// entra sobre os anteriores com este BlendMode (fundo e sombra vêm antes, normais).
+    u16      glyphBlend = 0;
+    u32      glyphBlendFrom = 0;
     Vec4     textPersp{0, 0, 0, 0};   ///< cx, cy da layer, distância focal (px) para o 3D por caractere
     /// 0.5.2: a imagem da galeria do preenchimento com textura (u_texfill do
     /// glyph.frag); nula = textura procedural ou cor lisa.
@@ -314,6 +319,9 @@ struct RenderLayer {
     /// Preservar transparência (Layer::preserveTransparency): entra como
     /// source-atop sobre tudo o que já foi composto abaixo.
     bool        preserveAlpha = false;
+    /// AE layers: filtro da camada na composição (0 bilinear, 1 vizinho mais
+    /// próximo = Rascunho na prévia, 2 bicúbica = amostragem bicúbica em Melhor).
+    u8          sampleFilter = 0;
     f32         texelScale = 1.0f;
     /// Desfoque de movimento: composição ← camada em cada amostra do
     /// obturador. Vazio = sem desfoque (ou camada parada no intervalo).
@@ -456,7 +464,13 @@ struct RenderLayer {
     ParticleSpace particle;
 };
 
+struct CachedCompositionFrame {
+    TextureHandle texture{};
+    const u16* pixels = nullptr;
+};
+
 struct FrameSnapshot {
+    CachedCompositionFrame cachedComposition{};
     struct VideoSourceWait {
         LayerId layer{};
         AssetId asset{};
@@ -539,6 +553,8 @@ struct SceneEditorView {
     SceneViewKind kind = SceneViewKind::Orbit;
     /// O ponto que a vista olha, somado ao centro da composição (a mãozinha da Cena 3D).
     f32 targetX = 0.0f, targetY = 0.0f, targetZ = 0.0f;
+    /// Aurea PC (Cena 3D, Numpad 5): a órbita sem perspectiva. Falso = como sempre.
+    bool orthographic = false;
 };
 [[nodiscard]] scene3d::SceneCamera scene_editor_camera(u32 width, u32 height, const SceneEditorView& view) noexcept;
 [[nodiscard]] Mat4 scene_editor_projection(u32 width, u32 height, const SceneEditorView& view) noexcept;
@@ -560,6 +576,9 @@ struct RenderSettings {
     /// unchanged; presentation still applies the normal zoom/color/checkerboard.
     TextureHandle cachedComposition{};
     const u16* cachedCompositionPixels = nullptr; // one-frame upload, copied during begin_frame
+    // Preview-only child composition lookup. A miss follows ordinary preparation.
+    CachedCompositionFrame (*nestedCacheLookup)(void*, CompositionId, FrameIndex) = nullptr;
+    void* nestedCacheContext = nullptr;
     u64 mediaGeneration = 0;
     SceneEditorView sceneEditor{}; ///< transient preview observer; ignored by finalQuality/export
 
@@ -583,6 +602,10 @@ struct RenderSettings {
     u32  viewSelectionCount = 0;
     u64  viewSelectionIds[64]{};     ///< ids empacotados (Engine::kOmegaViewMaxIds)
     bool pixelPreview = false;       ///< saída por vizinho mais próximo (pixels reais)
+    /// AE layers (B10): guias desenhadas só na saída da tela (output.frag):
+    /// bit 0 grade, bit 1 margens de ação/título, bit 2 réguas. 0 no export.
+    u32  previewGuides = 0;
+    f32  guideGridSpacing = 100.0f;  ///< px da composição entre as linhas da grade
     /// Export: amostras de desfoque de movimento da qualidade final
     /// (`MotionBlurSettings::samples`); a prévia também, reduzida pela folga do aparelho.
     bool finalQuality = false;
@@ -918,6 +941,11 @@ public:
     /// Orçamento do cache do optical flow (padrão 48 MB; o gerenciador de
     /// memória pode baixar sob pressão). Acima dele sai a camada mais antiga.
     void set_flow_cache_budget(u64 bytes) noexcept { flowCacheBudget_ = bytes; }
+    /// 0.5.3: teto das faixas guardadas do TimeSlice (padrão 384 MB). O export
+    /// passa uma parte do orçamento dele; os instantes de um quadro que não
+    /// cabem perdem densidade em vez de esgotar a GPU (mínimo 16 MB).
+    void set_slice_cache_budget(u64 bytes) noexcept { sliceCacheBudget_ = bytes > (16ull << 20) ? bytes : (16ull << 20); }
+    [[nodiscard]] u64 slice_cache_budget() const noexcept { return sliceCacheBudget_; }
     void set_transient_cache_budget(u64 bytes) noexcept { pool_.set_budget(bytes); }
     void set_transient_allocation_limit(u64 bytes) noexcept { pool_.set_allocation_limit(bytes); }
     void set_tracked_resource_budget(u64 bytes, TransientTexturePool::KnownResourceUse knownUse = nullptr, void* context = nullptr) noexcept {
@@ -1049,6 +1077,8 @@ private:
         /// Preservar transparência: o mesmo source-atop, com o fundo = a pilha
         /// já composta abaixo (o alfa dela não muda).
         bool      preserveAlpha = false;
+        /// AE layers: 2 = amostra bicúbica no layer.frag (RenderLayer::sampleFilter).
+        u8        filter = 0;
     };
     /// Os desenhos da pilha → alvo: lotes de blend de hardware (Normal, Add)
     /// no mesmo alvo; modo que lê o fundo ou camada de ajuste = ping-pong.
@@ -1134,6 +1164,7 @@ private:
     /// pré-composições entram antes, cada uma no seu alvo (recursivo).
     void compose_layers(FrameSnapshot& snap, FGTexture comp, const TextureDesc& compDesc, u64 frameNumber,
                         std::vector<CompositeDraw>& draws, u32 depth) noexcept;
+    [[nodiscard]] bool compose_nested_target(const FrameSnapshot& parent, u32 index, u64 frameNumber) noexcept;
     [[nodiscard]] bool build_source(const RenderLayer& layer, u32 layerIndex, bool hasEffects,
                                     LayerImage& out, std::vector<FrameRef>& framesUsed,
                                     u64 frameNumber, u32 glyphSet = kInvalidIndex) noexcept;
@@ -1216,6 +1247,7 @@ private:
     mutable std::mutex sliceMutex_;
     u64 sliceGraphFrame_ = ~0ull;   ///< quadro do grafo que gravou as faixas mais novas
     u64 sliceSalt_ = 0;             ///< planos de CPU próprios para a conversão de uma faixa
+    u64 sliceCacheBudget_ = 384ull << 20;   ///< teto das faixas guardadas (set_slice_cache_budget)
     bool sliceApprox_ = false;      ///< este quadro desenhou faixa aproximada (o instante ainda não chegou)
     [[nodiscard]] bool has_slice_texture(u64 layer, i64 us) const noexcept;
     void release_slice_cache(bool destroy) noexcept;
@@ -1274,6 +1306,20 @@ private:
     /// listas reaproveitadas — eram 6 alocações por quadro (Fase 8C).
     std::vector<FrameSnapshot*> snapAll_, snapStack_;
     std::unordered_map<u64, PlanarTextures> planar_;   ///< por LayerId empacotado
+    /// 0.5.4: o último quadro de vídeo que cada camada mostrou na PRÉVIA (por
+    /// LayerId de render empacotado). Quando o decoder dela some ou ainda não
+    /// entregou nada (recusado, reabrindo, trocando para o proxy), a camada
+    /// continua com ele em vez de virar transparência. Quase sempre é o mesmo
+    /// FrameRef que o cache da fonte já segura (sem memória extra); sai depois
+    /// de 240 preparos sem uso, no trim e ao trocar de projeto.
+    struct HeldVideoFrame {
+        FrameRef frame;
+        VideoStreamInfo info{};
+        i64 frameUs = 0;
+        u64 asset = 0;
+        u64 lastFrame = 0;
+    };
+    std::unordered_map<u64, HeldVideoFrame> heldVideo_;
     // Texto na GPU: atlas de glifos (R8) e o buffer de glifos do quadro (anel).
     TextureHandle glyphAtlas_{};
     u64 glyphAtlasGen_ = 0;
@@ -1539,6 +1585,7 @@ private:
     std::span<const TextureHandle> boundedSceneTextures_{};
     std::span<const StagedSceneTarget> stagedSceneTargets_{};
     const FrameSnapshot* currentSnap_ = nullptr;   ///< dono das pré-composições da composição em curso
+    u32 compositionDepth_ = 0;
     u32 prepareDepth_ = 0;                          ///< aninhamento do prepare (guarda de recursão)
     u64 exposureBytesRemaining_ = 0;                ///< one frame budget shared by text, 3D and nested prepares
     u32 nestSalt_ = 0;                              ///< ≠ 0 dentro de uma pré-composição (ids únicos)

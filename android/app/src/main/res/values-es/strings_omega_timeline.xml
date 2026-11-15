@@ -27,4 +27,8 @@
     <string name="om_tl_current_time">Tiempo actual</string>
     <string name="om_tl_hidden">Oculta</string>
     <string name="om_tl_visible">Visible</string>
+    <!-- 0.5.3: grupo aberto na timeline (o conteúdo recuado embaixo dele). -->
+    <string name="om_tl_group_contents_shown">Contenido del grupo visible</string>
+    <string name="om_tl_group_contents_hidden">Contenido del grupo contraído</string>
+    <string name="om_tl_group_inline_locked_time">El tiempo de este grupo está alterado (velocidad, curva de tiempo o reversa): abre el grupo para editar esta capa</string>
 </resources>

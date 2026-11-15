@@ -12,19 +12,18 @@ struct NativeCaptionBlock: Codable, Equatable, Identifiable {
 }
 struct NativeCaptionTrack: Codable, Equatable {
     var layer: Int64; var source: Int64; var segments: [NativeCaptionBlock]
+    /// 0.5.3: quadro local do bloco + shift = quadro da timeline.
+    var shift: Int32? = nil
 }
 
+/// 0.5.3: estilo próprio só das legendas escolhidas na aba Legendas (aba Estilo,
+/// "Aplicar em: Escolhidas"). Os mesmos controles da faixa, mandados ao motor (op "look").
 @MainActor
-struct CaptionBlockEditor: View {
+struct CaptionBlockStyleView: View {
     @EnvironmentObject private var model: AureaModel
     let track: NativeCaptionTrack
-    @State private var selected: Set<Int64> = []
-    @State private var text = ""
-    @State private var start = ""
-    @State private var end = ""
+    let selected: Set<Int64>
     @State private var error: String?
-    /// 0.4.6: "Estilo" dos blocos marcados — o mesmo modelo/aparência da faixa, só neles.
-    @State private var styling = false
     @State private var blockStyle = 2
     @State private var blockHighlight = true
     @State private var blockUppercase = false
@@ -32,57 +31,15 @@ struct CaptionBlockEditor: View {
     @State private var blockTemplate: String?
     @State private var fontsOpen = false
     private func edit(_ op: String, _ fields: [String: Any] = [:]) {
-        var value = fields; value["op"] = op; value["ids"] = Array(selected)
-        guard let data = try? JSONSerialization.data(withJSONObject: value), let command = String(data: data, encoding: .utf8) else { return }
-        if model.engine.editCaptionTrack(track.layer, command: command) { error = nil; model.refreshModel(force: true) }
-        else { error = AureaText.t("ios_caption_edit_invalid") }
+        error = captionEdit(model, layer: track.layer, op: op, ids: Array(selected), fields: fields) ? nil : AureaText.t("ios_caption_edit_invalid")
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(AureaText.t("ios_caption_track_hint")).frame(maxWidth: .infinity, alignment: .leading)
-                // 0.4.6: escolher todos os blocos de uma vez (para apagar ou mover juntos).
-                let all = !track.segments.isEmpty && selected.count == track.segments.count
-                Button(AureaText.t(all ? "editor_limpar_selecao" : "home_select_all")) {
-                    selected = all ? [] : Set(track.segments.map(\.id))
-                }
-            }
-            ScrollView(.horizontal) {
-                HStack {
-                    ForEach(track.segments) { block in
-                        Button { if selected.contains(block.id) { selected.remove(block.id) } else { selected.insert(block.id) }; text = block.text; start = String(block.start); end = String(block.end) } label: {
-                            HStack(alignment: .top, spacing: 4) {
-                                // Bloco com estilo próprio: um ponto na cor de destaque.
-                                if block.look != nil { Circle().fill(AureaColors.accent).frame(width: 8, height: 8).padding(.top, 4) }
-                                Text("\(ltrIsolado("\(block.start)–\(block.end)"))\n\(block.text)").lineLimit(2)
-                            }.padding(8).background(selected.contains(block.id) ? AureaColors.accent.opacity(0.5) : AureaColors.muted.opacity(0.15)).clipShape(RoundedRectangle(cornerRadius: 8))
-                        }.buttonStyle(.plain)
-                        .accessibilityValue(block.look != nil ? AureaText.t("cap046_block_own_style") : "")
-                    }
-                }
-            }
-            if !selected.isEmpty {
-                HStack {
-                    Button(AureaText.t("edt_cap_back_frame")) { edit("move", ["delta": -1]) }
-                    Button(AureaText.t("edt_cap_fwd_frame")) { edit("move", ["delta": 1]) }
-                    Button(AureaText.t("dock_short_split")) { edit("split", ["frame": model.status.playhead]) }.disabled(selected.count != 1)
-                    Button(AureaText.t("panel_unir")) { edit("merge"); selected.removeAll() }.disabled(selected.count < 2)
-                    Button(AureaText.t("common_delete")) { edit("delete"); selected.removeAll() }
-                    Button(AureaText.t("panel_estilo") + (styling ? "  ▴" : "  ▾")) { styling.toggle(); if styling { loadBlockStyle() } }
-                        .accessibilityAddTraits(styling ? .isSelected : [])
-                }
-                if styling { blockStyleControls }
-                if selected.count == 1 {
-                    TextField(AureaText.t("panel_texto"), text: $text).textFieldStyle(.roundedBorder)
-                    Button(AureaText.t("ios_caption_apply_text")) { edit("text", ["text": text]) }
-                    HStack { TextField(AureaText.t("ios_caption_start_frame"), text: $start); TextField(AureaText.t("ios_caption_end_frame"), text: $end) }.textFieldStyle(.roundedBorder).keyboardType(.numberPad)
-                    Button(AureaText.t("ios_caption_adjust_duration")) { if let a = Int(start), let b = Int(end) { edit("trim", ["start": a, "end": b]) } }
-                }
-                Button(AureaText.t("editor_limpar_selecao")) { selected.removeAll() }
-            }
-            if let error { Text(error).foregroundStyle(.red) }
-        }.padding(.vertical, 10)
-        .onChange(of: selected) { _ in if styling { loadBlockStyle() } }
+            blockStyleControls
+            if let error { Text(error).font(.aurea(size: 13)).foregroundStyle(AureaColors.danger) }
+        }.padding(.vertical, 6)
+        .onAppear { loadBlockStyle() }
+        .onChange(of: selected) { _ in loadBlockStyle() }
         .fullScreenCover(isPresented: $fontsOpen) {
             FontBrowserView(onPick: { f in
                 let path = (f.imported || f.path.hasPrefix(AureaPaths.documents.path)) ? f.path : ""
@@ -102,8 +59,10 @@ struct CaptionBlockEditor: View {
             blockToggle("pn_caption_highlight_word", blockHighlight) { blockHighlight = $0; pushBlockStyle() }
             blockToggle("pn_caption_uppercase", blockUppercase) { blockUppercase = $0; pushBlockStyle() }
             CaptionCustomizeView(look: $blockLook, highlight: blockHighlight, preview: CaptionPreview(json: model.engine.captionPreview(blockOptionsJSON)),
-                                 openFonts: { fontsOpen = true }, onChange: blockCustomized)
-            Button(AureaText.t("cap046_block_use_track")) { edit("clear_look"); loadBlockStyle() }.disabled(!own).frame(minHeight: 44)
+                                 openFonts: { fontsOpen = true }, onChange: blockCustomized, startOpen: true)
+            Text(AureaText.t("cap053_text_box")).font(.aurea(size: 15, weight: .bold)).padding(.top, 10).accessibilityAddTraits(.isHeader)
+            CaptionTextBoxView(look: $blockLook, onChange: blockCustomized)
+            CaptionAction(label: AureaText.t("cap046_block_use_track"), enabled: own) { edit("clear_look"); loadBlockStyle() }
         }
     }
     private func blockToggle(_ key: String, _ value: Bool, _ set: @escaping (Bool) -> Void) -> some View {
@@ -182,7 +141,24 @@ struct TrackingPanel: View {
             .onDisappear { model.cameraFeatures = []; model.cameraSelection = nil }
     }
     @ViewBuilder private var cameraSection: some View {
-        Text(AureaText.t(state == 2 ? "cam_step_place" : "cam_step_analyze")).font(.aurea(size: 17, weight: .bold))
+        if state == 2 {
+            // Funções (F9): os passos à vista — "2. Posicionar na cena" e "3. Refazer a análise".
+            HStack(spacing: 8) {
+                ForEach([false, true], id: \.self) { redo in
+                    Button { advanced = redo } label: {
+                        Text(AureaText.t(redo ? "fn_cam_step_redo" : "cam_step_place")).font(.aurea(size: 13, weight: advanced == redo ? .semibold : .regular))
+                            .foregroundStyle(advanced == redo ? AureaColors.accent : AureaColors.muted)
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                            .background(advanced == redo ? AureaColors.accentDim : AureaColors.background, in: RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(AureaPressStyle(shrink: 1))
+                    .accessibilityAddTraits(advanced == redo ? .isSelected : [])
+                    .accessibilityIdentifier(redo ? "cam.step.redo" : "cam.step.place")
+                }
+            }
+        } else {
+            Text(AureaText.t("cam_step_analyze")).font(.aurea(size: 17, weight: .bold))
+        }
         Spacer().frame(height: 6)
         if state != 1 && state != 2 {
             qualityPicker
@@ -191,6 +167,8 @@ struct TrackingPanel: View {
         Spacer().frame(height: 8)
         if state == 1 {
             let progress = number("progress").clamped(to: 0...1)
+            Text(AureaText.t(progress < 0.5 ? "cam_stage_features" : "cam_stage_solve"))
+                .font(.aurea(size: 14, weight: .semibold))
             Text(AureaText.t("ios_analyzing_motion_pct", Int(progress * 100))).font(.aurea(size: 13))
             Spacer().frame(height: 6)
             GeometryReader { geometry in
@@ -211,6 +189,7 @@ struct TrackingPanel: View {
             // 0.3.0: o erro médio em px da fonte (o "Average Error" do AE), a faixa do zoom e a lente.
             note(solveSummary).accessibilityIdentifier("cam.average_error")
             Spacer().frame(height: 8)
+            if !advanced {
             action("panel_criar_camera", "cam_create_camera_desc") { model.createTrackedObject(0); reload() }
             if flag("lensSolved") {
                 Spacer().frame(height: 6)
@@ -251,9 +230,11 @@ struct TrackingPanel: View {
                 }
                 }.padding(.vertical, 12)
             }
-            Button(AureaText.t(advanced ? "cam_hide_advanced" : "panel_avancado")) { advanced.toggle() }.padding(.vertical, 12)
-            if advanced { note(AureaText.t("cam_stats_short", Int(number("solved")), Int(number("frames")), String(format: "%.2f", number("error")), Int(number("fovDeg").rounded()))) }
+            }
+            // Funções (F9): "3. Refazer a análise" é um passo à vista (escolhido no topo), não um
+            // "Avançado" escondido. Par do TrackingPanel.kt.
             if advanced {
+                note(AureaText.t("cam_stats_short", Int(number("solved")), Int(number("frames")), String(format: "%.2f", number("error")), Int(number("fovDeg").rounded())))
                 qualityPicker
                 solveOptions
                 action("cam_resolve", "cam_resolve_desc") {
@@ -366,16 +347,27 @@ private struct MotionTrackingSection: View {
     @State private var smooth: Float = 0.5
     @State private var zoom: Float = 1.15
     @State private var crop: UInt32 = 1
+    @State private var tool = 0
     private let timer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
     private func n(_ key: String) -> Double { (model.motionStatus[key] as? NSNumber)?.doubleValue ?? 0 }
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(AureaText.t("trk_title")).font(.aurea(size: 14, weight: .bold))
             if n("state") != 1 && model.pointPick == nil {
-                ForEach(Array(["trk_tool_point", "trk_tool_two_points", "trk_tool_planar", "trk_tool_corner_pin", "trk_tool_stabilizer"].map { AureaText.t($0) }.enumerated()), id: \.offset) { i, name in
-                    button(name) { model.beginMotionPick(UInt32(i)) }
+                let tools = ["trk_tool_point", "trk_tool_two_points", "trk_tool_planar", "trk_tool_corner_pin", "trk_tool_stabilizer"]
+                Picker(AureaText.t("trk_title"), selection: $tool) {
+                    ForEach(tools.indices, id: \.self) { i in Text(AureaText.t(tools[i])).tag(i) }
+                }.pickerStyle(.menu)
+                button(AureaText.t(tools[tool])) { model.beginMotionPick(UInt32(tool)) }
+                if tool == 0 {
+                    button(AureaText.t("editor_estabilizar_pelo_ponto")) { model.beginPointPick(stabilize: true) }
                 }
-                Toggle(AureaText.t("trk_backward"), isOn: $model.motionBackward)
+                Text(AureaText.t(tool == 4 ? "edt_track_global_motion" : "edt_track_pick_points"))
+                    .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                Picker(AureaText.t("trk_backward"), selection: $model.motionBackward) {
+                    Text(AureaText.t("trk_direction_forward")).tag(false)
+                    Text(AureaText.t("trk_direction_backward")).tag(true)
+                }
                 Picker(AureaText.t("trk_motion"), selection: $model.motionModel) {
                     Text(AureaText.t("trk_auto")).tag(UInt32(0)); Text(AureaText.t("trk_motion_position")).tag(UInt32(1))
                     Text(AureaText.t("trk_motion_prs")).tag(UInt32(2)); Text(AureaText.t("trk_motion_perspective")).tag(UInt32(3))
@@ -673,7 +665,15 @@ enum CaptionTranscriber {
 
 @MainActor
 struct CaptionsPanel: View {
+    @State private var communityOpen = false
     @EnvironmentObject private var model: AureaModel
+    /// 0.5.3: a aba — 0 Criar, 1 Transcrição, 2 Legendas, 3 Estilo (par do CaptionsPanel.kt).
+    @State private var capTab = 0
+    /// Estilo: faixa toda (falso) ou só as legendas escolhidas na aba Legendas.
+    @State private var styleOnChosen = false
+    @State private var minDurationSec: Float = 0.8
+    @State private var gapFrames = 0
+    @State private var breakOnSentence = false
     @State private var words: [CaptionWord] = []
     @State private var sourcePath = ""
     @State private var transcriptSource: String?
@@ -718,6 +718,7 @@ struct CaptionsPanel: View {
     var body: some View {
         VStack(spacing: 0) {
             PanelHeader(title: AureaText.t("panel_legendas"), onBack: { model.panel = .none })
+            HStack(spacing: 0) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if model.primarySelection == nil || (![1, 3].contains(model.selectedLayer?.kind ?? 0) && captionTrack == nil) {
@@ -729,20 +730,38 @@ struct CaptionsPanel: View {
                             }
                         }
                     } else { controls }
-                    // 0.4.1: a lista de palavras só com "Mais opções" aberto.
-                    if moreOptions {
-                        ForEach(0..<((words.count + 23) / 24), id: \.self) { chunk in
-                            transcriptChunk(chunk)
-                        }
-                    }
                     Spacer().frame(height: 24)
                 }.padding(.horizontal, 18).padding(.vertical, 10)
             }
+            AureaColors.contentStrongLine.frame(width: 0.7)
+            PanelIconTabs(tabs: [
+                PanelIconTab(glyph: CupertinoGlyph.Waveform, label: AureaText.t("fn_cap_tab_create"), id: "captions.tab.create"),
+                PanelIconTab(glyph: CupertinoGlyph.DocText, label: AureaText.t("fn_cap_tab_transcript"), id: "captions.tab.transcript"),
+                PanelIconTab(glyph: CupertinoGlyph.CaptionsBubble, label: AureaText.t("fn_cap_tab_list"), id: "captions.tab.list"),
+                PanelIconTab(glyph: CupertinoGlyph.Paintbrush, label: AureaText.t("tx_tab_style"), id: "captions.tab.style"),
+            ], selected: capTab, group: AureaText.t("panel_legendas")) { capTab = $0 }
+            }
         }.foregroundStyle(AureaColors.text).background(AureaColors.editorPanel)
-        .onAppear { loadOptions() }
+        // Com a faixa pronta o painel abre na lista (o centro do trabalho); sem ela, em Criar.
+        .onAppear { loadOptions(); if captionTrack != nil && captionTrack?.layer == model.primarySelection { capTab = 2 } }
         // 0.3.5: `.task(id:)` roda ao aparecer e a cada troca de camada com a view NOVA;
         // o `onChange(of: id) { _ in open() }` lia o `id`/`path` antigos (legendas da camada anterior).
-        .task(id: id) { open(); loadTrackOptions() }
+        .task(id: id) { communityOpen = false; open(); loadTrackOptions() }
+        .sheet(isPresented: $communityOpen) {
+            let project = model.projectGeneration
+            let target = captionTrack?.layer
+            NavigationStack {
+                HomeCommunityPresets(onUse: { bundle in
+                    guard model.projectGeneration == project, target == captionTrack?.layer, let target else { return }
+                    if model.engine.applyCaptionBundle(target, data: bundle) {
+                        model.refreshModel(force: true); loadTrackOptions(); communityOpen = false
+                    } else { error = AureaText.t("app_caption_preset_incompatible"); communityOpen = false }
+                })
+                .toolbar { ToolbarItem(placement: .cancellationAction) {
+                    Button(AureaText.t("common_close")) { communityOpen = false }
+                } }
+            }
+        }
         .fullScreenCover(isPresented: $fontsOpen) {
             FontBrowserView(onPick: { f in
                 let path = (f.imported || f.path.hasPrefix(AureaPaths.documents.path)) ? f.path : ""
@@ -761,87 +780,137 @@ struct CaptionsPanel: View {
             importSRT(.success(url))
         }
     }
+    /// Funções (F9, 13/11/2026): um assunto por aba — Gerar · Estilo · Posição · Blocos
+    /// (antes ≈ 22 assuntos numa rolagem, com um "Mais opções" que repetia o SRT).
     private var controls: some View {
-        // 0.4.1: tela simplificada — estilo, idioma (um chip) e UM botão; depois de gerar,
-        // só posição, tamanho e dois interruptores. O resto fica em "Mais opções".
         let idle = busy == nil
         return VStack(alignment: .leading, spacing: 0) {
-            if let captionTrack { CaptionBlockEditor(track: captionTrack) }
-            // 0.4.6: modelos prontos antes de gerar (e trocáveis depois, na hora).
-            label("cap046_templates")
-            CaptionTemplateRow(selected: templateId, enabled: idle) { applyTemplate($0) }
-            languageControls
+            // Estado do trabalho (vale em qualquer aba).
             if let busy {
                 note(busy, color: AureaColors.accent)
                 CaptionAction(label: AureaText.t("common_cancel")) { _ = model.engine.captionProgress(true); job?.cancel() }
             }
             if let error { note(error, color: AureaColors.danger) }
             if let notice { note(notice, color: AureaColors.muted) }
-            // O botão principal: gera (transcreve e cria) ou refaz.
+            switch capTab {
+            case 0: createTab
+            case 1:
+                CaptionTranscriptView(words: words, fillers: fillers, struckOn: removeFillers, source: transcriptSource, busy: !idle,
+                                      onSeek: seek(to:), onEdit: { edit($0, text: $1) }, onReplace: replaceInTranscript, onCreate: createFromWords)
+            case 2:
+                if let captionTrack {
+                    CaptionListView(track: captionTrack, onOwnStyle: { styleOnChosen = true; capTab = 3 })
+                } else {
+                    note(AureaText.t("cap053_no_captions"), color: AureaColors.muted)
+                }
+            default: styleTab
+            }
+        }
+    }
+    /// CRIAR: transcrever e a janela "Criar legendas" (valem ao criar ou refazer).
+    private var createTab: some View {
+        let idle = busy == nil
+        return VStack(alignment: .leading, spacing: 0) {
+            sectionTitle("cap053_transcribe_title")
+            languageControls
+            captionToggle("beta_translate_english", value: $translateEnglish).disabled(!idle)
             HStack(spacing: 8) {
-                CaptionAction(label: AureaText.t(captionCount > 0 ? "panel_transcrever_novo" : "panel_gerar_legendas"), primary: true, enabled: idle, action: transcribe)
-                if captionCount > 0 {
+                CaptionAction(label: AureaText.t(words.isEmpty ? "panel_gerar_legendas" : "panel_transcrever_novo"), primary: words.isEmpty, enabled: idle, action: transcribe)
+                CaptionAction(label: AureaText.t("cap053_import"), enabled: idle, action: pickSRT)
+            }.padding(.vertical, 8)
+            label("cap041_offline_model")
+            qualityControls
+            sectionTitle("cap053_create_title")
+            label("cap046_templates")
+            CaptionTemplateRow(selected: templateId, enabled: idle) { applyTemplate($0) }
+            label("pn_caption")
+            CaptionChips(options: [AureaText.t("pn_caption_grouped"), AureaText.t("pn_caption_one_per_word")], selected: mode) { mode = $0 }
+            if mode == 0 { groupingControls }
+            label("cap053_min_duration")
+            let mins: [Float] = [0.5, 0.8, 1.2, 2]
+            CaptionChips(options: mins.map { AureaText.t("cap053_seconds", numeroPtBr($0, casas: 1)) },
+                         selected: mins.firstIndex { abs($0 - minDurationSec) < 0.01 } ?? -1) { minDurationSec = mins[$0] }
+            label("cap053_gap")
+            let gaps = [0, 2, 4, 8]
+            CaptionChips(options: gaps.map(String.init), selected: gaps.firstIndex(of: gapFrames) ?? -1) { gapFrames = gaps[$0] }
+            captionToggle("cap053_break_sentence", value: $breakOnSentence)
+            captionToggle("pn_caption_break_pauses", value: $breakOnPause)
+            captionToggle("pn_caption_uppercase", value: live($uppercase))
+            captionToggle("pn_caption_remove_fillers", value: $removeFillers)
+            note(AureaText.t("cap053_create_note"), color: AureaColors.muted)
+            HStack(spacing: 8) {
+                if captionCount == 0 {
+                    CaptionAction(label: AureaText.t("pn_caption_create"), primary: true, enabled: !words.isEmpty && idle, action: apply)
+                } else {
+                    CaptionAction(label: AureaText.t("pn_caption_redo"), primary: true, enabled: !words.isEmpty && idle, action: apply)
                     CaptionAction(label: AureaText.t("pn_caption_remove_n", captionCount), enabled: idle) {
                         model.engine.removeCaptions(id); model.refreshModel(force: true)
-                        captionCount = Int(model.engine.captionCount(id))
+                        captionCount = Int(model.engine.captionCount(id)); model.captionSelection = []
                     }
                 }
             }.padding(.vertical, 8)
-            if captionCount == 0 && words.isEmpty {
-                Button(action: pickSRT) {
-                    Text(AureaText.t("panel_importar_legenda_srt")).font(.aurea(size: 13)).foregroundStyle(AureaColors.accent)
-                }.buttonStyle(AureaPressStyle()).disabled(!idle).padding(.vertical, 4)
+        }
+    }
+    /// ESTILO: faixa toda ou só as escolhidas; modelos, aparência, texto e caixa, posição.
+    private var styleTab: some View {
+        let chosen = model.captionSelection
+        let onChosen = styleOnChosen && !chosen.isEmpty && captionTrack != nil
+        let idle = busy == nil
+        return VStack(alignment: .leading, spacing: 0) {
+            if captionTrack != nil {
+                label("cap053_apply_to")
+                CaptionChips(options: [AureaText.t("cap053_scope_track"), AureaText.t("cap053_scope_selected", chosen.count)],
+                             selected: onChosen ? 1 : 0, enabled: { $0 == 0 || !chosen.isEmpty }) { styleOnChosen = $0 == 1 }
+                if chosen.isEmpty { note(AureaText.t("cap053_scope_hint"), color: AureaColors.muted) }
             }
-            // 0.4.6: posição, tamanho e aparência também antes de gerar; com a faixa pronta, na hora.
-            Group {
+            if onChosen, let captionTrack {
+                CaptionBlockStyleView(track: captionTrack, selected: chosen)
+            } else {
+                label("cap046_templates")
+                CaptionTemplateRow(selected: templateId, enabled: idle) { applyTemplate($0) }
+                CaptionAction(label: AureaText.t("home_community_title"), enabled: idle && captionTrack != nil) { communityOpen = true }
+                captionToggle("pn_caption_highlight_word", value: live($highlight))
+                captionToggle("pn_caption_uppercase", value: live($uppercase))
+                CaptionCustomizeView(look: $look, highlight: highlight, preview: preview, openFonts: { fontsOpen = true }, onChange: customized, startOpen: true)
+                sectionTitle("cap053_text_box")
+                CaptionTextBoxView(look: $look, onChange: customized)
+                sectionTitle("cap053_position")
                 label("pn_caption_screen_height")
                 CaptionChips(options: ["pn_caption_pos_top", "pn_caption_pos_middle", "pn_caption_pos_bottom"].map { AureaText.t($0) },
                     selected: [Float(0.2), 0.5, 0.78].firstIndex(where: { abs($0 - posY) < 0.01 }) ?? -1) { posY = [0.2, 0.5, 0.78][$0]; pushLive() }
                 label("panel_tamanho")
                 CaptionChips(options: ["pn_size_small_short", "pn_size_medium_short", "pn_size_large_short"].map { AureaText.t($0) },
                     selected: [Float(0.045), 0.065, 0.09].firstIndex(where: { abs($0 - size) < 0.001 }) ?? -1) { size = [0.045, 0.065, 0.09][$0]; pushLive() }
-                captionToggle("pn_caption_highlight_word", value: live($highlight))
-                captionToggle("pn_caption_uppercase", value: live($uppercase))
-                CaptionCustomizeView(look: $look, highlight: highlight, preview: preview, openFonts: { fontsOpen = true }, onChange: customized)
-                if !words.isEmpty && captionCount == 0 {
-                    CaptionAction(label: AureaText.t("pn_caption_create"), primary: true, enabled: idle, action: apply).padding(.vertical, 6)
-                }
-            }
-            // Mais opções (fechado): agrupamento, quebras, vícios, tradução, modelo do aparelho.
-            Button { moreOptions.toggle() } label: {
-                HStack {
-                    Text(AureaText.t("cap041_more_options")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    Text(moreOptions ? "▴" : "▾").font(.aurea(size: 13)).foregroundStyle(AureaColors.muted)
-                }.frame(minHeight: 48).contentShape(Rectangle())
-            }.buttonStyle(AureaPressStyle())
-            .accessibilityAddTraits(moreOptions ? .isSelected : [])
-            if moreOptions {
-                label("pn_caption")
-                CaptionChips(options: [AureaText.t("pn_caption_grouped"), AureaText.t("pn_caption_one_per_word")], selected: mode) { mode = $0 }
-                if mode == 0 { groupingControls }
-                captionToggle("pn_caption_break_pauses", value: $breakOnPause)
-                captionToggle("pn_caption_remove_fillers", value: $removeFillers)
-                Toggle(AureaText.t("beta_translate_english"), isOn: $translateEnglish)
-                    .frame(minHeight: 44).disabled(!idle)
-                label("cap041_offline_model")
-                qualityControls
-                if captionCount > 0 {
-                    CaptionAction(label: AureaText.t("pn_caption_redo"), enabled: !words.isEmpty && idle, action: apply).padding(.vertical, 6)
-                }
-                if captionCount == 0 && !words.isEmpty {
-                    CaptionAction(label: AureaText.t("panel_importar_legenda_srt"), enabled: idle, action: pickSRT).padding(.vertical, 6)
-                }
-                if !words.isEmpty {
-                    Text(transcriptSource.map { AureaText.plural("pn_caption_transcript_source", words.count, $0, words.count) }
-                        ?? AureaText.plural("pn_caption_transcript", words.count, words.count))
-                        .font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted).padding(.top, 8)
-                }
             }
         }
     }
+    private func sectionTitle(_ key: String) -> some View {
+        Text(AureaText.t(key)).font(.aurea(size: 15, weight: .bold)).foregroundStyle(AureaColors.text).padding(.top, 10).accessibilityAddTraits(.isHeader)
+    }
+    /// O motor resolve o tempo da mídia com velocidade, reverso e remapeamento.
+    private func seek(to word: CaptionWord) {
+        let frame = model.engine.captionWordFrame(id, seconds: word.start)
+        if frame >= 0 { model.seek(toFrame: frame) }
+    }
+    /// Buscar e substituir na transcrição (o tempo das palavras fica).
+    private func replaceInTranscript(_ find: String, _ with: String, _ exact: Bool) -> Int {
+        let (next, n) = CaptionWorkspace.replaceWords(words, find: find, replacement: with, matchCase: exact)
+        guard n > 0 else { return 0 }
+        setWords(next, from: transcriptSource); persist()
+        return n
+    }
+    /// Legendas só do trecho: com a faixa pronta, o motor refaz os blocos que ele cobre; sem faixa, ela nasce com o trecho.
+    private func createFromWords(_ range: ClosedRange<Int>) {
+        guard busy == nil, !words.isEmpty else { return }
+        let r = max(0, range.lowerBound)...min(words.count - 1, range.upperBound)
+        let part = Array(words[r]).filter { !(removeFillers && fillers.contains($0.id)) }
+        guard !part.isEmpty else { return }
+        guard let track = captionTrack else { apply(only: part); return }
+        let list: [[String: Any]] = part.map { ["text": $0.word, "start": $0.start, "end": $0.end] }
+        error = captionEdit(model, layer: track.layer, op: "from_words", ids: [], fields: ["words": list]) ? nil : AureaText.t("cap053_selection_failed")
+    }
     private func pickSRT() {
-        DocumentImportPicker.present(types: [UTType(filenameExtension: "srt") ?? .plainText, .plainText, .data]) { urls in srtPick = urls?.first }
+        DocumentImportPicker.present(types: [UTType(filenameExtension: "srt") ?? .plainText, UTType(filenameExtension: "vtt") ?? .plainText, .plainText, .data]) { urls in srtPick = urls?.first }
     }
     /// 0.4.1: idioma da fala num chip só; tocar abre a lista.
     private var languageControls: some View {
@@ -893,12 +962,12 @@ struct CaptionsPanel: View {
     }
     private var groupingControls: some View {
         VStack(alignment: .leading, spacing: 0) {
-            label("pn_caption_words_per_caption")
-            CaptionChips(options: (1...6).map(String.init), selected: maxWords - 1) { maxWords = $0 + 1 }
-            label("pn_caption_chars_per_line")
-            CaptionChips(options: ["12", "18", "24", "32"], selected: [12, 18, 24, 32].firstIndex(of: maxChars) ?? -1) { maxChars = [12, 18, 24, 32][$0] }
             label("pn_caption_lines")
-            CaptionChips(options: ["1", "2", "3"], selected: maxLines - 1) { maxLines = $0 + 1 }
+            CaptionChips(options: ["1", "2"], selected: maxLines - 1) { maxLines = $0 + 1 }
+            label("pn_caption_chars_per_line")
+            CaptionChips(options: ["12", "18", "24", "32", "42"], selected: [12, 18, 24, 32, 42].firstIndex(of: maxChars) ?? -1) { maxChars = [12, 18, 24, 32, 42][$0] }
+            label("pn_caption_words_per_caption")
+            CaptionChips(options: (1...8).map(String.init), selected: maxWords - 1) { maxWords = $0 + 1 }
         }
     }
     private func label(_ key: String) -> some View {
@@ -913,26 +982,8 @@ struct CaptionsPanel: View {
             AureaToggle(checked: value.wrappedValue, onCheckedChange: { value.wrappedValue = $0 })
         }.frame(height: 44)
     }
-    private func transcriptChunk(_ chunk: Int) -> some View {
-        let lower = chunk * 24, upper = min(words.count, lower + 24)
-        let items = Array(words[lower..<upper])
-        return VStack(alignment: .leading, spacing: 0) {
-            AureaFlowLayout(hGap: 6, vGap: 6) {
-                ForEach(items) { word in
-                    let struck = removeFillers && fillers.contains(word.id)
-                    Button { editing = word.id } label: {
-                        Text(word.word).font(.aurea(size: 13)).strikethrough(struck)
-                            .foregroundStyle(struck ? AureaColors.muted : AureaColors.text)
-                            .padding(.horizontal, 8).padding(.vertical, 4)
-                            .background(editing == word.id ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 6))
-                    }.buttonStyle(AureaPressStyle())
-                }
-            }.padding(.bottom, 6)
-            if let editing, let word = items.first(where: { $0.id == editing }) {
-                CaptionWordEditor(word: word) { edit(word.id, text: $0) }.id(word.id).padding(.bottom, 8)
-            }
-        }
-    }
+>>>>
+
     private func open() {
         jobRevision = UUID()
         loading?.cancel(); job?.cancel(); busy = nil; error = nil; editing = nil
@@ -1092,13 +1143,16 @@ struct CaptionsPanel: View {
             }
         }
     }
-    private func apply() {
-        guard busy == nil, !words.isEmpty else { return }
-        guard words.allSatisfy({ $0.start.isFinite && $0.end.isFinite && $0.start >= 0 && $0.end > $0.start && !$0.word.isEmpty }) else {
+    private func apply() { apply(only: nil) }
+    /// Cria (ou refaz) a faixa; `only` = só um trecho da transcrição (a faixa nasce com ele).
+    private func apply(only: [CaptionWord]?) {
+        let source = only ?? words
+        guard busy == nil, !source.isEmpty else { return }
+        guard source.allSatisfy({ $0.start.isFinite && $0.end.isFinite && $0.start >= 0 && $0.end > $0.start && !$0.word.isEmpty }) else {
             error = AureaText.t("ios_check_word_times"); return
         }
-        persist(); model.captionOptions = options; busy = AureaText.t("ios_creating_captions"); error = nil
-        let sourceId = id, engine = model.engine, snapshot = words.map(\.native), settings = optionsJSON, project = model.projectGeneration
+        persist(); model.captionOptions = options; busy = AureaText.t("ios_creating_captions"); error = nil; model.captionSelection = []
+        let sourceId = id, engine = model.engine, snapshot = source.map(\.native), settings = optionsJSON, project = model.projectGeneration
         let operation = model.beginProjectOperation()
         let revision = UUID(); jobRevision = revision
         job = Task {
@@ -1139,7 +1193,8 @@ struct CaptionsPanel: View {
     private var optionsJSON: String {
         var dict: [String: Any] = ["mode": mode, "style": style, "maxWords": maxWords, "maxChars": maxChars, "maxLines": maxLines,
             "highlight": highlight, "uppercase": uppercase, "breakOnPause": breakOnPause, "removeFillers": removeFillers,
-            "pauseSec": Double(model.captionOptions["pauseSec"]?.floatValue ?? 0.6), "posY": Double(posY), "sizeFrac": Double(size)]
+            "pauseSec": Double(model.captionOptions["pauseSec"]?.floatValue ?? 0.6), "posY": Double(posY), "sizeFrac": Double(size),
+            "minDurationSec": Double(minDurationSec), "gapFrames": gapFrames, "breakOnSentence": breakOnSentence]
         dict.merge(look.dictionary) { _, fresh in fresh }
         guard let data = try? JSONSerialization.data(withJSONObject: dict), let text = String(data: data, encoding: .utf8) else { return "{}" }
         return text
@@ -1154,6 +1209,9 @@ struct CaptionsPanel: View {
         highlight = bool("highlight", highlight); uppercase = bool("uppercase", uppercase); breakOnPause = bool("breakOnPause", breakOnPause)
         posY = ((v["posY"] as? NSNumber)?.floatValue ?? posY).clamped(to: 0.1...0.9)
         size = ((v["sizeFrac"] as? NSNumber)?.floatValue ?? size).clamped(to: 0.02...0.15)
+        minDurationSec = ((v["minDurationSec"] as? NSNumber)?.floatValue ?? minDurationSec).clamped(to: 0.1...10)
+        gapFrames = int("gapFrames", gapFrames).clamped(to: 0...600)
+        breakOnSentence = bool("breakOnSentence", breakOnSentence)
         look = CaptionLook(dictionary: v, fallback: look)
     }
     /// Amostra da aparência atual (estilo + personalização).
@@ -1187,6 +1245,14 @@ struct CaptionsPanel: View {
 /// 0.4.6: aparência própria da legenda (espelha text::CaptionOptions; bits iguais a kCaptionLook*).
 struct CaptionLook: Equatable {
     static let font = 1, fill = 2, stroke = 4, box = 8, shadow = 16
+    /// 0.5.3: alinhamento e entrelinha (text::kCaptionLookLayout).
+    static let layout = 32
+    var align = 1
+    var lineSpacing: Float = 1.15
+    var boxPadding: Float = 0.3
+    var boxRadius: Float = 0.25
+    var shadowColor: [Float] = [0, 0, 0, 0.6]
+    var shadowBlur: Float = 0.12
     /// Última aparência usada (o painel volta com ela).
     @MainActor static var draft: String?
     var bits = 0
@@ -1207,7 +1273,9 @@ struct CaptionLook: Equatable {
         func c(_ v: [Float]) -> [Double] { (0..<4).map { Double(v.indices.contains($0) ? v[$0] : 1).clamped(to: 0...1) } }
         return ["look": bits, "fontFamily": fontFamily, "fontWeight": fontWeight, "fontItalic": fontItalic, "fontPath": fontPath,
                 "fill": c(fillColor), "stroke": c(strokeColor), "strokeFrac": Double(strokeFrac), "box": boxOn, "boxColor": c(boxColor),
-                "shadow": shadowOn, "highlightColor": c(highlightColor)]
+                "shadow": shadowOn, "highlightColor": c(highlightColor),
+                "align": align, "lineSpacing": Double(lineSpacing), "boxPadding": Double(boxPadding), "boxRadius": Double(boxRadius),
+                "shadowColor": c(shadowColor), "shadowBlur": Double(shadowBlur)]
     }
     init() {}
     init(dictionary v: [String: Any], fallback: CaptionLook) {
@@ -1226,6 +1294,12 @@ struct CaptionLook: Equatable {
         boxOn = (v["box"] as? NSNumber)?.boolValue ?? boxOn; boxColor = color("boxColor", boxColor)
         shadowOn = (v["shadow"] as? NSNumber)?.boolValue ?? shadowOn
         highlightColor = color("highlightColor", highlightColor)
+        align = ((v["align"] as? NSNumber)?.intValue ?? align).clamped(to: 0...2)
+        lineSpacing = (v["lineSpacing"] as? NSNumber)?.floatValue ?? lineSpacing
+        boxPadding = (v["boxPadding"] as? NSNumber)?.floatValue ?? boxPadding
+        boxRadius = (v["boxRadius"] as? NSNumber)?.floatValue ?? boxRadius
+        shadowColor = color("shadowColor", shadowColor)
+        shadowBlur = (v["shadowBlur"] as? NSNumber)?.floatValue ?? shadowBlur
     }
 }
 
@@ -1354,7 +1428,10 @@ struct CaptionCustomizeView: View {
     let preview: CaptionPreview?
     let openFonts: () -> Void
     let onChange: () -> Void
-    @State private var open = false
+    /// 0.5.3: a aba Estilo abre já aberto (tudo editável à vista).
+    var startOpen = false
+    @State private var opened: Bool?
+    private var open: Bool { opened ?? startOpen }
     private static let swatches: [(UInt32, String)] = [
         (0xFFFFFF, "cap046_color_white"), (0x000000, "cap046_color_black"), (0xFFE34D, "cap046_color_yellow"),
         (0xFFC23D, "cap046_color_gold"), (0xFF8A00, "cap046_color_orange"), (0xE5252A, "cap046_color_red"),
@@ -1368,7 +1445,7 @@ struct CaptionCustomizeView: View {
     var body: some View {
         let fromStyle = AureaText.t("cap046_from_style")
         VStack(alignment: .leading, spacing: 0) {
-            Button { open.toggle() } label: {
+            Button { opened = !open } label: {
                 HStack {
                     Text(AureaText.t("cap046_customize")).font(.aurea(size: 13, weight: .semibold)).frame(maxWidth: .infinity, alignment: .leading)
                     Text(open ? "▴" : "▾").font(.aurea(size: 13)).foregroundStyle(AureaColors.muted)
@@ -1458,7 +1535,7 @@ struct CaptionCustomizeView: View {
     }
 }
 
-private struct CaptionChips: View {
+struct CaptionChips: View {
     let options: [String]
     let selected: Int
     /// Rótulo para o VoiceOver (nome do idioma no idioma do app, motivo de estar desligada).
@@ -1490,7 +1567,7 @@ private struct CaptionChips: View {
     }
 }
 
-private struct CaptionAction: View {
+struct CaptionAction: View {
     let label: String
     var primary = false
     var enabled = true
@@ -1505,18 +1582,25 @@ private struct CaptionAction: View {
     }
 }
 
-private struct CaptionWordEditor: View {
+/// A palavra escolhida na Transcrição: corrigir (o tempo fica), tirar, ou começar um trecho a partir dela.
+struct CaptionWordEditor: View {
     let word: CaptionWord
     let onDone: (String) -> Void
+    var onExtend: (() -> Void)? = nil
     @State private var text = ""
     var body: some View {
-        HStack(spacing: 8) {
-            Text(numeroPtBr(Float(word.start), casas: 2) + " s").font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
-            TextField("", text: $text).font(.aurea(size: 14)).foregroundStyle(AureaColors.text)
-                .tint(AureaColors.accent).padding(10).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
-                .submitLabel(.done).onSubmit { onDone(text) }
-            CaptionAction(label: AureaText.t("pn_ok"), primary: true) { onDone(text) }
-            CaptionAction(label: AureaText.t("pn_caption_delete_word")) { onDone("") }
-        }.padding(.top, 10).onAppear { text = word.word }
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text(ltrIsolado(numeroPtBr(Float(word.start), casas: 2) + " s")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                TextField("", text: $text).font(.aurea(size: 14)).foregroundStyle(AureaColors.text)
+                    .tint(AureaColors.accent).padding(10).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
+                    .submitLabel(.done).onSubmit { onDone(text) }
+            }
+            HStack(spacing: 6) {
+                CaptionAction(label: AureaText.t("pn_ok"), primary: true) { onDone(text) }
+                CaptionAction(label: AureaText.t("pn_caption_delete_word")) { onDone("") }
+                if let onExtend { CaptionAction(label: AureaText.t("cap053_select_from_here"), action: onExtend) }
+            }
+        }.padding(.top, 8).onAppear { text = word.word }
     }
 }

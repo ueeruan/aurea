@@ -11,7 +11,11 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[4]
 IOS = ROOT / "engine/platform/ios"
 model = (IOS / "app/AureaModel.swift").read_text(encoding="utf-8")
-view = (IOS / "app/TransformView.swift").read_text(encoding="utf-8")
+# F10 (13/11/2026): the composition shutter lives in Project settings › Preview & render
+# (AppPanels.swift); the layer function (TransformView motionBlurFace) only keeps
+# the layer switch, trail length, video blur and a link to those settings.
+view = (IOS / "app/AppPanels.swift").read_text(encoding="utf-8")
+layer_view = (IOS / "app/TransformView.swift").read_text(encoding="utf-8")
 bridge = (IOS / "bridge/AureaEngine.mm").read_text(encoding="utf-8")
 
 
@@ -35,22 +39,28 @@ assert old_setter.count("set_motion_blur_settings(") == 1
 assert "set_composition_motion_blur(" not in old_setter and "set_shutter_angle(" not in old_setter
 setter = block(bridge, "- (BOOL)setMotionBlurSettings:")
 assert "set_motion_blur_settings(enabled, shutter, phase, samples, adaptiveLimit)" in setter
-face = block(view, "private var motionBlurFace:")
-assert "/ 3.6" not in face and "DisclosureGroup" in face
-assert "layerMotionBlurLength" in face and "setVectorBlur" in face
-disclosure_label = block(face, '} label:')
-assert '.accessibilityIdentifier("motionblur.advanced")' in disclosure_label
-assert face.count('.accessibilityIdentifier("motionblur.advanced")') == 1
-# Android already scopes its test tag to AdvancedToggle, separate from children.
-android_view = (ROOT / "android/app/src/main/java/com/aurea/aurea/editor/panels/TransformPanel.kt").read_text(encoding="utf-8")
-for identifier in ("advanced", "center"):
-    assert android_view.count('.testTag("motionblur.' + identifier + '")') == 1
-for identifier in ("shutter", "phase", "samples", "adaptive", "center"):
-    assert '"motionblur.' + identifier + '"' in view
+face = block(view, "private var compositionMotionBlur:")
+assert "/ 3.6" not in face and "DisclosureGroup" not in face, "composition blur is one flat list"
+assert "motionblur.advanced" not in view + layer_view, "no hidden Advanced group any more"
+render = block(view, "@ViewBuilder private var renderTab:")
+assert "compositionMotionBlur" in render and "projectSettings.more.motionBlur" in render
+layer_face = block(layer_view, "private var motionBlurFace:")
+assert "layerMotionBlurLength" in layer_face and "setVectorBlur" in layer_face
+assert '"motionblur.compSettings"' in layer_face and 'projectSettingsTab = "render"' in layer_face
+for identifier in ("shutter", "phase", "samples", "adaptive"):
+    assert '"motionblur.' + identifier + '"' not in layer_view, identifier + " left the layer panel"
+# Android twin: same ids in ProjectSettingsSheet.kt, once each; the layer face links there.
+android_settings = (ROOT / "android/app/src/main/java/com/aurea/aurea/editor/ProjectSettingsSheet.kt").read_text(encoding="utf-8")
+android_layer = (ROOT / "android/app/src/main/java/com/aurea/aurea/editor/panels/TransformPanel.kt").read_text(encoding="utf-8")
+for identifier in ("shutter", "phase", "samples", "adaptive", "center", "vector3d"):
+    assert view.count('"motionblur.' + identifier + '"') == 1, identifier
+    assert android_settings.count('"motionblur.' + identifier + '"') == 1, identifier
+    assert '"motionblur.' + identifier + '"' not in android_layer, identifier
+assert '"motionblur.compSettings"' in android_layer and "ProjectSettingsTab.Render" in android_layer
 row = block(view, "private func motionBlurRow(")
 assert "accessibilityAdjustableAction" in row and "accessibilityValue(shown)" in row
-assert "minHeight: 44" in row and "keypad(label" in row
-print("PASS: atomic six-field bridge, degree controls, advanced bounds and accessibility source contracts")
+assert "minHeight: 44" in row and "KeypadRequest(title: label" in row
+print("PASS: atomic six-field bridge, composition controls in Project settings, layer face links there, accessibility source contracts")
 
 swiftc = shutil.which("swiftc")
 if not swiftc:

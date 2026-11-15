@@ -46,7 +46,8 @@ void clip_at(const Composition& comp, const Layer& l, const scene3d::SceneAsset&
     const f64 fps = comp.fps() > 0.0 ? comp.fps() : 30.0;
     local = static_cast<f64>(l.local_time(now).value);
     clip = l.model.animationClip >= 0 && l.model.animationClip < static_cast<i32>(asset.animations.size()) ? l.model.animationClip : -1;
-    t = clip >= 0 ? scene3d::clip_time(asset.animations[static_cast<usize>(clip)], local / fps * l.model.timeScale) : 0.0f;
+    // v75: Evolução / Repetir do painel 3D (model_clip_seconds, Layer.hpp).
+    t = clip >= 0 ? model_clip_seconds(l, asset.animations[static_cast<usize>(clip)].duration, local, fps) : 0.0f;
 }
 
 /// Pose que a prévia mostra (clipe + pose do usuário + IK).

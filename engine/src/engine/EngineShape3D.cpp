@@ -735,6 +735,23 @@ bool Engine::material_preview(u64 layerId, u32 material, u32 size, std::vector<u
         if ((mask & 8u) && ball.alphaMode == scene3d::AlphaMode::Opaque && ball.baseColor.w < 1.0f)
             ball.alphaMode = scene3d::AlphaMode::Blend;
         if (mask & 48u) ball.unlit = false;
+        // v76: a EMISSÃO ajustada (cor e força) também acende a bola.
+        const scene3d::Material& src = asset->materials[material];
+        f32 glow[4]{src.emissive.x, src.emissive.y, src.emissive.z, src.emissiveStrength};
+        bool glowEdited = false;
+        for (const MaterialOverride& over : layer->model.materials) {
+            if (over.materialIndex != material) continue;
+            for (u32 p = 6; p < kMaterialParamCount; ++p)
+                if (over.mask & (1u << p)) { glow[p - 6] = material_override_field(over, p); glowEdited = true; }
+            break;
+        }
+        for (u32 p = 6; p < kMaterialParamCount; ++p)
+            if (const Track* track = layer->tracks.find(TrackProperty::MaterialParam, material, p)) {
+                glow[p - 6] = track->value_or(local, glow[p - 6]);
+                glowEdited = true;
+            }
+        if (glowEdited)
+            ball.emissive = Vec3{glow[0], glow[1], glow[2]} * std::clamp(glow[3], 0.0f, kMaterialEmissionMax);
     }
     out = scene3d::material_ball_cached(ball, size);
     return !out.empty();

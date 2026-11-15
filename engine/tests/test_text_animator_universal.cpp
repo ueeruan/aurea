@@ -4,7 +4,9 @@
 
 #include "aurea/Engine.hpp"
 #include "aurea/expr/Expression.hpp"
+#include "aurea/text/Text.hpp"
 #include "aurea/text/TextAnimator.hpp"
+#include "aurea/text/TextTransform.hpp"
 #include "aurea/timeline/Layer.hpp"
 
 #include <filesystem>
@@ -195,4 +197,266 @@ AUREA_TEST(TextAnimatorUniversal, NewFormatSurvivesProjectRoundTrip) {
     AUREA_CHECK_NEAR(a.moreSelectors[0].correlation, 25.0f, 1e-4f);
     AUREA_CHECK_NEAR(a.lineSpacing.y, 14.0f, 1e-4f);
     AUREA_CHECK_EQ(static_cast<u32>(a.anchorGrouping), 3u);
+}
+
+// v70 · o restante do animador do After Effects: HSB e opacidade do traço.
+AUREA_TEST(TextAnimatorUniversal, StrokeHueSaturationBrightnessAndOpacity) {
+    TextData t;
+    t.strokeColor = Vec4{1, 0, 0, 1};   // vermelho
+    TextAnimator a;
+    a.selector.type = kTextSelectorRange;
+    a.props = kTextPropStrokeHsb | kTextPropStrokeOpacity;
+    a.strokeHue = 120.0f;               // vermelho + 120° = verde
+    a.strokeOpacity = 40.0f;
+    t.animators.push_back(a);
+    std::vector<GlyphAnim> out;
+    evaluate_text_animators(t, TrackSet{}, 0, 30, kUnits, 4, 1, 1, out);
+    AUREA_CHECK_EQ(out.size(), usize{4});
+    for (const GlyphAnim& g : out) {
+        AUREA_CHECK_NEAR(g.stroke.x, 0.0f, 1e-4f);
+        AUREA_CHECK_NEAR(g.stroke.y, 1.0f, 1e-4f);
+        AUREA_CHECK_NEAR(g.stroke.z, 0.0f, 1e-4f);
+        AUREA_CHECK_NEAR(g.stroke.w, 1.0f, 1e-4f);
+        AUREA_CHECK_NEAR(g.strokeOpacity, 0.4f, 1e-4f);
+    }
+    // Brilho −100 apaga a cor; sem a propriedade de opacidade o traço fica inteiro.
+    t.animators[0].strokeBrightness = -100.0f;
+    t.animators[0].props = kTextPropStrokeHsb;
+    evaluate_text_animators(t, TrackSet{}, 0, 30, kUnits, 4, 1, 1, out);
+    AUREA_CHECK_NEAR(out[0].stroke.y, 0.0f, 1e-4f);
+    AUREA_CHECK_NEAR(out[0].strokeOpacity, 1.0f, 1e-6f);
+}
+
+// Tipo de tracking (antes e depois, antes, depois) e âncora da linha.
+AUREA_TEST(TextAnimatorUniversal, TrackingTypeAndLineAnchor) {
+    TextData t;
+    TextAnimator a;
+    a.selector.type = kTextSelectorRange;
+    a.props = kTextPropTracking;
+    a.tracking = 10.0f;
+    t.animators.push_back(a);
+    auto shifts = [&]() {
+        std::vector<GlyphAnim> out;
+        evaluate_text_animators(t, TrackSet{}, 0, 30, kUnits, 4, 1, 1, out);
+        std::vector<f32> s;
+        for (const GlyphAnim& g : out) s.push_back(g.trackingShift);
+        return s;
+    };
+    auto expect = [](const std::vector<f32>& got, std::initializer_list<f32> want) {
+        AUREA_CHECK_EQ(got.size(), want.size());
+        usize i = 0;
+        for (f32 w : want) { if (i < got.size()) AUREA_CHECK_NEAR(got[i], w, 1e-4f); ++i; }
+    };
+    expect(shifts(), {0, 10, 20, 30});          // depois: o padrão de sempre do Aurea
+    t.animators[0].trackingType = 1;
+    expect(shifts(), {10, 20, 30, 40});         // antes: a própria letra também anda
+    t.animators[0].trackingType = 0;
+    expect(shifts(), {5, 15, 25, 35});          // antes e depois: metade de cada lado
+    t.animators[0].trackingType = 2;
+    t.animators[0].props |= kTextPropLineAnchor;
+    t.animators[0].lineAnchor = 50.0f;          // o meio da linha fica parado
+    expect(shifts(), {-20, -10, 0, 10});
+}
+
+// Valor de caractere e o intervalo (maiúsculas e dígitos, ou Unicode completo).
+AUREA_TEST(TextAnimatorUniversal, CharacterValueAndCharacterRange) {
+    TextData t;
+    t.content = "Az9!";
+    TextAnimator a;
+    a.selector.type = kTextSelectorRange;
+    a.props = kTextPropCharOffset;
+    a.charOffset = 1.0f;
+    t.animators.push_back(a);
+    AUREA_CHECK_EQ(apply_char_offset(t, TrackSet{}, 0, 30), std::string("Ba0!"));   // como sempre foi
+    t.animators[0].charRange = 1;
+    AUREA_CHECK_EQ(apply_char_offset(t, TrackSet{}, 0, 30), std::string("B{:\""));  // Unicode completo
+    t.animators[0].props = kTextPropCharValue;
+    t.animators[0].charValue = 0x41;   // "A"
+    AUREA_CHECK_EQ(apply_char_offset(t, TrackSet{}, 0, 30), std::string("AAAA"));
+    // Valor e deslocamento juntos: troca e depois anda; só a metade selecionada.
+    t.animators[0].props = kTextPropCharValue | kTextPropCharOffset;
+    t.animators[0].charRange = 0;
+    t.animators[0].selector.end = 50.0f;
+    AUREA_CHECK_EQ(apply_char_offset(t, TrackSet{}, 0, 30), std::string("BB9!"));
+    t.animators[0].charValue = 0;      // 0 deixa a letra
+    t.animators[0].props = kTextPropCharValue;
+    AUREA_CHECK_EQ(apply_char_offset(t, TrackSet{}, 0, 30), std::string("Az9!"));
+}
+
+AUREA_TEST(TextAnimatorUniversal, AfterEffectsRemainderSurvivesProjectRoundTrip) {
+    Rig r;
+    if (!r.id) return;
+    AUREA_CHECK_EQ(r.e.add_text_animator(r.id, kTextPropStrokeHsb | kTextPropStrokeOpacity | kTextPropCharValue | kTextPropLineAnchor |
+                                                kTextPropTracking), 0);
+    AUREA_CHECK(r.e.set_text_anim_param(r.id, 0, kAnimStrokeHue, 90));
+    AUREA_CHECK(r.e.set_text_anim_param(r.id, 0, kAnimStrokeSaturation, -30));
+    AUREA_CHECK(r.e.set_text_anim_param(r.id, 0, kAnimStrokeBrightness, 20));
+    AUREA_CHECK(r.e.set_text_anim_param(r.id, 0, kAnimStrokeOpacity, 55));
+    AUREA_CHECK(r.e.set_text_anim_param(r.id, 0, kAnimCharValue, 66.4f));
+    AUREA_CHECK(r.e.set_text_anim_param(r.id, 0, kAnimLineAnchor, 75));
+    AUREA_CHECK(r.e.set_text_animator_field(r.id, 0, 10, 1));
+    AUREA_CHECK(r.e.set_text_animator_field(r.id, 0, 11, 0));
+    f32 style[21] = {};
+    AUREA_CHECK(r.e.query_text_style(r.id, style, 21));
+    AUREA_CHECK_NEAR(style[20], 0.0f, 1e-6f);
+    style[20] = 2;
+    AUREA_CHECK(r.e.set_text_style(r.id, style, 21));
+    std::filesystem::create_directories("build/reference/text-universal");
+    const char* path = "build/reference/text-universal/ae-remainder.aurea";
+    AUREA_CHECK(r.e.save_project(path).ok());
+    AUREA_CHECK(r.e.load_project(path).ok());
+    const Layer* l = r.layer();
+    AUREA_CHECK(l != nullptr);
+    if (!l || l->text.animators.empty()) return;
+    const TextAnimator& a = l->text.animators[0];
+    AUREA_CHECK((a.props & (kTextPropStrokeHsb | kTextPropStrokeOpacity | kTextPropCharValue | kTextPropLineAnchor)) ==
+                (kTextPropStrokeHsb | kTextPropStrokeOpacity | kTextPropCharValue | kTextPropLineAnchor));
+    AUREA_CHECK_NEAR(a.strokeHue, 90.0f, 1e-4f);
+    AUREA_CHECK_NEAR(a.strokeSaturation, -30.0f, 1e-4f);
+    AUREA_CHECK_NEAR(a.strokeBrightness, 20.0f, 1e-4f);
+    AUREA_CHECK_NEAR(a.strokeOpacity, 55.0f, 1e-4f);
+    AUREA_CHECK_NEAR(a.charValue, 66.0f, 1e-4f);    // código inteiro
+    AUREA_CHECK_NEAR(a.lineAnchor, 75.0f, 1e-4f);
+    AUREA_CHECK_EQ(static_cast<u32>(a.charRange), 1u);
+    AUREA_CHECK_EQ(static_cast<u32>(a.trackingType), 0u);
+    AUREA_CHECK_EQ(static_cast<u32>(l->text.renderOrder), 2u);
+    f32 fields[kTextAnimatorFieldCount] = {};
+    AUREA_CHECK(r.e.query_text_animator_fields(r.id, 0, fields, kTextAnimatorFieldCount) > 0);
+    AUREA_CHECK_NEAR(fields[10], 1.0f, 1e-6f);
+    AUREA_CHECK_NEAR(fields[11], 0.0f, 1e-6f);
+}
+
+// v72, Character Alignment do AE: a letra trocada fica na vaga da original
+// (esquerda, centro, direita) ou o layout é refeito com o avanço novo (kerning).
+AUREA_TEST(TextAnimatorUniversal, CharacterAlignmentKeepsTheSlotOfTheOriginalLetter) {
+    const auto font = default_font();
+    AUREA_CHECK(font != nullptr);
+    if (!font) return;
+    TextData t;
+    t.content = "iiii";
+    t.size = 100.0f;
+    TextAnimator a;
+    a.selector.type = kTextSelectorRange;
+    a.selector.end = 25.0f;              // só a primeira letra
+    a.props = kTextPropCharValue;
+    a.charValue = 0x57;                  // "W", bem mais largo que "i"
+    t.animators.push_back(a);
+    TextLayout plain;
+    AUREA_CHECK(layout_quads(*font, t, 0.0f, plain));
+    AUREA_CHECK_EQ(plain.quads.size(), 4u);
+    if (plain.quads.size() != 4u) return;
+    const f32 slot = plain.quads[0].advance;
+    auto shaped = [&](u8 align, TextLayout& L) {
+        t.animators[0].charAlign = align;
+        TextData out = t;
+        apply_text_content(t, TrackSet{}, 0, 30, out);
+        AUREA_CHECK_EQ(out.content, std::string("Wiii"));
+        AUREA_CHECK_EQ(out.charSlots.empty(), align == 3);
+        AUREA_CHECK(layout_quads(*font, out, 0.0f, L));
+        return out;
+    };
+    TextLayout kern, left, center, right;
+    (void)shaped(3, kern);
+    (void)shaped(0, left);
+    const TextData centered = shaped(1, center);
+    (void)shaped(2, right);
+    if (kern.quads.size() != 4u || left.quads.size() != 4u || center.quads.size() != 4u || right.quads.size() != 4u) return;
+    const f32 wide = kern.quads[0].advance;
+    std::printf("vaga do i %.2f px, W %.2f px; ", slot, wide);
+    AUREA_CHECK(wide > slot + 10.0f);
+    // Ajustar kerning (o de sempre): as letras seguintes andam.
+    AUREA_CHECK(kern.quads[1].penX > plain.quads[1].penX + 10.0f);
+    // Na vaga: as seguintes ficam onde estavam e a vaga mantém a largura da original.
+    for (const TextLayout* L : {&left, &center, &right}) {
+        AUREA_CHECK_NEAR(L->quads[1].penX, plain.quads[1].penX, 0.05f);
+        AUREA_CHECK_NEAR(L->quads[3].penX, plain.quads[3].penX, 0.05f);
+        AUREA_CHECK_NEAR(L->quads[0].advance, slot, 0.05f);
+    }
+    // O W dentro da vaga: à esquerda no começo, no centro meio excesso antes, à direita o excesso todo.
+    const f32 excess = wide - slot;
+    AUREA_CHECK_NEAR((center.quads[0].x0 - center.quads[1].penX) - (left.quads[0].x0 - left.quads[1].penX), -excess * 0.5f, 0.6f);
+    AUREA_CHECK_NEAR((right.quads[0].x0 - right.quads[1].penX) - (left.quads[0].x0 - left.quads[1].penX), -excess, 0.6f);
+    // A vaga entra na chave do cache do raster (o mesmo texto com outro alinhamento muda os pixels).
+    TextData kerned = centered;
+    kerned.charSlots.clear();
+    AUREA_CHECK(raster_key(centered, 1.0f) != raster_key(kerned, 1.0f));
+    // Campo 12 do animador: lido, escrito e preso em 0..3.
+    f32 fields[kTextAnimatorFieldCount] = {};
+    read_animator_fields(t.animators[0], fields);
+    AUREA_CHECK_NEAR(fields[12], 2.0f, 1e-6f);
+    AUREA_CHECK(write_animator_field(t.animators[0], 12, 9.0f));
+    AUREA_CHECK_EQ(static_cast<u32>(t.animators[0].charAlign), 3u);
+    AUREA_CHECK_EQ(static_cast<u32>(TextAnimator{}.charAlign), 3u);   // projeto antigo: o layout de sempre
+}
+
+// v72: a varredura (janela do Transformar texto do Motion) como seletor do animador comum.
+AUREA_TEST(TextAnimatorUniversal, SweepSelectorFollowsTheMotionWindow) {
+    TextData t;
+    TextAnimator a = position_animator();
+    a.selector = make_text_selector(kTextSelectorSweep);
+    a.selector.start = 0.0f;
+    a.selector.end = 50.0f;
+    a.selector.overlap = 100.0f;
+    t.animators.push_back(a);
+    const std::vector<f32> x = moved(t);
+    AUREA_CHECK_EQ(x.size(), 4u);
+    bool some = false, none = false;
+    for (u32 i = 0; i < x.size() && i < 4; ++i) {
+        const f32 w = transform_influence(0.0f, 0.5f, 0.0f, 1.0f, 0, 0.0f, 0.0f, i, 4);
+        AUREA_CHECK_NEAR(x[i], 100.0f * w, 1e-3f);
+        some |= w > 0.01f;
+        none |= w < 0.99f;
+    }
+    AUREA_CHECK(some && none);   // a janela pega parte do texto, não tudo nem nada
+    // Somada a uma faixa por cima: entra como seletor seguinte também.
+    t.animators[0].selector = make_text_selector(kTextSelectorRange);
+    t.animators[0].selector.end = 0.0f;   // a faixa não pega nada
+    TextSelector sweep = make_text_selector(kTextSelectorSweep);
+    sweep.start = 0.0f; sweep.end = 50.0f; sweep.overlap = 100.0f;
+    t.animators[0].moreSelectors.push_back(sweep);
+    const std::vector<f32> y = moved(t);
+    for (u32 i = 0; i < y.size() && i < x.size(); ++i) AUREA_CHECK_NEAR(y[i], x[i], 1e-3f);
+    // A interface acrescenta a varredura pela API.
+    Rig r;
+    if (!r.id) return;
+    AUREA_CHECK_EQ(r.e.add_text_animator(r.id, kTextPropPosition), 0);
+    AUREA_CHECK_EQ(r.e.add_text_selector(r.id, 0, kTextSelectorSweep), 1);
+    f32 fields[kTextAnimatorFieldCount] = {};
+    AUREA_CHECK(r.e.query_text_animator_fields(r.id, 0, fields, kTextAnimatorFieldCount) > 0);
+    AUREA_CHECK_NEAR(fields[15], 2.0f, 1e-6f);
+    AUREA_CHECK_NEAR(fields[16 * 2 + 1], static_cast<f32>(kTextSelectorSweep), 1e-6f);
+}
+
+// v72: mistura entre caracteres e alinhamento de caractere saem e voltam do projeto.
+AUREA_TEST(TextAnimatorUniversal, InterCharacterBlendAndCharacterAlignmentSurviveRoundTrip) {
+    Rig r;
+    if (!r.id) return;
+    AUREA_CHECK_EQ(r.e.add_text_animator(r.id, kTextPropCharOffset), 0);
+    AUREA_CHECK(r.e.set_text_animator_field(r.id, 0, 12, 1));
+    f32 style[22] = {};
+    AUREA_CHECK(r.e.query_text_style(r.id, style, 22));
+    AUREA_CHECK_NEAR(style[21], 0.0f, 1e-6f);   // Normal
+    style[21] = static_cast<f32>(BlendMode::Multiply);
+    AUREA_CHECK(r.e.set_text_style(r.id, style, 22));
+    std::filesystem::create_directories("build/reference/text-universal");
+    const char* path = "build/reference/text-universal/inter-char-blend.aurea";
+    AUREA_CHECK(r.e.save_project(path).ok());
+    AUREA_CHECK(r.e.load_project(path).ok());
+    const Layer* l = r.layer();
+    AUREA_CHECK(l != nullptr && l->text.animators.size() == 1u);
+    if (!l || l->text.animators.size() != 1u) return;
+    AUREA_CHECK_EQ(static_cast<u32>(l->text.interCharBlend), static_cast<u32>(BlendMode::Multiply));
+    AUREA_CHECK_EQ(static_cast<u32>(l->text.animators[0].charAlign), 1u);
+    f32 back[22] = {};
+    AUREA_CHECK(r.e.query_text_style(r.id, back, 22));
+    AUREA_CHECK_NEAR(back[21], static_cast<f32>(BlendMode::Multiply), 1e-6f);
+    // Os modos de recorte não pintam cor entre letras: viram Normal.
+    back[21] = static_cast<f32>(BlendMode::Mask);
+    AUREA_CHECK(r.e.set_text_style(r.id, back, 22));
+    AUREA_CHECK_EQ(static_cast<u32>(r.layer()->text.interCharBlend), 0u);
+    // Com 21 valores (interface antiga) a mistura não muda.
+    back[21] = 0;
+    AUREA_CHECK(r.e.set_text_style(r.id, style, 22));
+    AUREA_CHECK(r.e.set_text_style(r.id, back, 21));
+    AUREA_CHECK_EQ(static_cast<u32>(r.layer()->text.interCharBlend), static_cast<u32>(BlendMode::Multiply));
 }

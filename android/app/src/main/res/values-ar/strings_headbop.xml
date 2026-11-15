@@ -3,7 +3,7 @@
 <resources>
     <string name="fx_name_headbop">هيدبوب</string>
     <string name="fx_desc_headbop">يهزّ الشخص في الصورة أو الفيديو رأسه وجسمه على إيقاع الموسيقى</string>
-    <string name="headbop_note">حلّل الطبقة للعثور على الرأس والكتفين. بدون شخص يهتز الإطار كله.</string>
+    <string name="headbop_note">حلّل الشخص لتحديد المفاصل الظاهرة. يتحرك الجسم مع الإيقاع بذراعين مفصلتين مع تثبيت القدمين.</string>
     <string name="headbop_analyze">تحليل</string>
     <string name="headbop_reanalyze">إعادة التحليل</string>
     <string name="headbop_analyzing">جارٍ تحليل الشخص والإيقاع…</string>

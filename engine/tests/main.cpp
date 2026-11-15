@@ -50,7 +50,7 @@ int main(int argc, char** argv) {
 #if defined(_WIN32)
     SetUnhandledExceptionFilter(report_native_crash);
 #endif
-    for (const char* dir : {"build/prompt03", "build/prompt04", "build/effects-packages"}) {
+    for (const char* dir : {"build/prompt03", "build/prompt04", "build/effects-packages", "tests/build/prompt03"}) {
         std::error_code ec;
         std::filesystem::create_directories(dir, ec);
     }

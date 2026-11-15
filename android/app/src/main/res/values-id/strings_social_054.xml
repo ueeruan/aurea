@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.4: tela "siga" com os perfis do criador e do Aurea. -->
+<resources>
+    <string name="social_body_054">Ikuti kreator dan Aurea: buka keempat profil untuk membuka aplikasi. Kami tidak memeriksa apakah kamu mengikuti.</string>
+    <string name="social_body_054_store">Ikuti kreator dan Aurea untuk mengikuti kabar terbaru dan mendukung aplikasi.</string>
+    <string name="social_continue">Lanjutkan</string>
+</resources>

@@ -5,6 +5,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -80,6 +82,10 @@ import com.aurea.aurea.ui.theme.tocavel
 
 /** Os níveis do Dock. [Root] = nada escolhido; os `*Clip` seguem o tipo do corte. */
 internal enum class EditDockLevel { Root, Audio, Text, VideoClip, TextClip, AudioClip, OtherClip }
+internal enum class EditWorkspace(val label: Int) {
+    Media(R.string.edit_workspace_media), Edit(R.string.edit_workspace_edit),
+    Color(R.string.edit_workspace_color), Audio(R.string.edit_workspace_audio), Text(R.string.edit_workspace_text),
+}
 
 /** Um botão do Dock: ícone, rótulo e o que ele faz. [id] vira `edit.dock.<id>`. */
 internal class EditDockItem(val id: String, val glyph: Char, val label: Int, val action: () -> Unit)
@@ -87,6 +93,7 @@ internal class EditDockItem(val id: String, val glyph: Char, val label: Int, val
 @Composable
 internal fun EditModeEditor(store: EditorStore, ui: EditorUi, stage: @Composable (Modifier) -> Unit) {
     var level by remember { mutableStateOf(EditDockLevel.Root) }
+    var workspace by remember { mutableStateOf(EditWorkspace.Edit) }
     // O corte cujas transições estão abertas (saída, entrada).
     var cut by remember { mutableStateOf<Pair<Long, Long>?>(null) }
     val primary by remember { derivedStateOf { store.primary } }
@@ -110,38 +117,68 @@ internal fun EditModeEditor(store: EditorStore, ui: EditorUi, stage: @Composable
     }
     BoxWithConstraints(Modifier.fillMaxSize().background(EditColors.Canvas)) {
         val total = maxHeight
+        val wide = maxWidth >= 720.dp && maxWidth > maxHeight && !ui.fullscreen && store.textEditLayer == null
+        val texting = store.textEditLayer != null && !ui.fullscreen
+        val panel = ui.panel
+        val inspector: @Composable () -> Unit = {
+            if (panel != null) {
+                PanelContent(store, panel, onClose = { ui.panel = null }, onOpenPanel = { openPanel(store, ui, it) },
+                    onOpenEffectsBrowser = { ui.effectsBrowser = true }, alwaysHeader = true)
+            } else {
+                Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Bottom) {
+                    EditDock(level, actions.itemsFor(level, selected)) {
+                        if (level in ClipLevels) store.clearSelection()
+                        level = EditDockLevel.Root
+                    }
+                }
+            }
+        }
         Column(Modifier.fillMaxSize()) {
-            // Omega conteúdo (área 06, P2-15): o modo de texto também na Edição —
-            // a barra de estilo no topo e o painel grande embaixo do palco.
-            val texting = store.textEditLayer != null && !ui.fullscreen
             if (texting) Box(Modifier.fillMaxWidth().height(52.dp).zIndex(2f)) { TextStyleBar(store) }
             else if (!ui.fullscreen) EditTopBar(store, ui)
-            // 0.4.0: com painel aberto o palco cede espaço (30 %) e a linha do tempo fica
-            // com 72 no mínimo: em tela baixa (aparelho de 2017) as abas eram uma faixa
-            // de ~150 dp onde nada dava para mexer.
-            val panelOpen = ui.panel != null && store.textEditLayer == null
-            val previewH = if (ui.fullscreen) total - 52.dp
-                else if (panelOpen) (total * 0.30f).coerceIn(140.dp, 420.dp)
-                else (total * 0.40f).coerceIn(160.dp, 560.dp)
-            KeepLtr { stage(Modifier.fillMaxWidth().height(previewH).background(EditColors.Preview)) }
+            if (!ui.fullscreen && !texting) EditWorkspaceBar(workspace) { next ->
+                workspace = next
+                when (next) {
+                    EditWorkspace.Media -> { ui.panel = null; actions.addMedia() }
+                    EditWorkspace.Edit -> { ui.panel = null }
+                    EditWorkspace.Color -> {
+                        if (store.primary == null) store.addAdjustmentLayer()
+                        openPanel(store, ui, EditorPanel.Adjust)
+                    }
+                    EditWorkspace.Audio -> { ui.panel = null; level = EditDockLevel.Audio }
+                    EditWorkspace.Text -> { ui.panel = null; level = EditDockLevel.Text }
+                }
+            }
+            if (wide) {
+                Row(Modifier.fillMaxWidth().weight(1f).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(10.dp)).background(EditColors.Preview)) {
+                        KeepLtr { stage(Modifier.fillMaxWidth().weight(1f).testTag("edit.preview")) }
+                        EditPlayBar(store, ui)
+                    }
+                    BoxWithConstraints(Modifier.width(360.dp).fillMaxHeight().testTag("edit.inspector").clip(RoundedCornerShape(10.dp)).background(AureaColors.EditorPanel)) {
+                        val inspectorHeight = maxHeight.coerceAtLeast(360.dp)
+                        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                            Box(Modifier.fillMaxWidth().height(inspectorHeight)) { inspector() }
+                        }
+                    }
+                }
+                KeepLtr { EditTimeline(store, Modifier.fillMaxWidth().height((total * .30f).coerceIn(114.dp, 260.dp)),
+                    compact = false, onAddMedia = actions.addMedia, onTransition = { a, b -> cut = a to b }) }
+            } else {
+            // Panel selection keeps the native preview surface at one size.
+            val previewH = if (ui.fullscreen) total - 48.dp else (total * .32f).coerceIn(128.dp, 400.dp)
+            KeepLtr { stage(Modifier.fillMaxWidth().height(previewH).background(EditColors.Preview).testTag("edit.preview")) }
             if (texting) {
                 TextEditPanel(store, Modifier.fillMaxWidth().weight(1f))
             } else {
             EditPlayBar(store, ui)
             if (!ui.fullscreen) {
-                val panel = ui.panel
                 if (panel != null) {
-                    // Painel aberto: a linha do tempo encolhe e o painel da Composição sobe.
-                    // 0.3.6: o painel vai até o teto (EditorLayout.panelMax); numa tela alta o
-                    // que passa dele fica com a linha do tempo (112 no mínimo), não com o painel.
                     val fontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale
-                    val panelH = (total - 52.dp - previewH - 48.dp - 72.dp).coerceIn(0.dp, EditorLayout.panelMax(fontScale).dp)
+                    val panelH = (total - 100.dp - previewH - 48.dp - 112.dp).coerceIn(0.dp, EditorLayout.panelMax(fontScale).dp)
                     KeepLtr { EditTimeline(store, Modifier.fillMaxWidth().weight(1f), compact = true, onAddMedia = actions.addMedia, onTransition = { a, b -> cut = a to b }) }
                     Box(Modifier.fillMaxWidth().height(panelH).background(AureaColors.EditorPanel)) {
-                        // Na Edição a barra de cima não mostra o título da seção: o painel
-                        // traz o próprio cabeçalho "‹ Título" (o ✕ de cima fecha o projeto).
-                        PanelContent(store, panel, onClose = { ui.panel = null }, onOpenPanel = { openPanel(store, ui, it) },
-                            onOpenEffectsBrowser = { ui.effectsBrowser = true }, alwaysHeader = true)
+                        inspector()
                     }
                 } else {
                     KeepLtr { EditTimeline(store, Modifier.fillMaxWidth().weight(1f), compact = false, onAddMedia = actions.addMedia, onTransition = { a, b -> cut = a to b }) }
@@ -150,6 +187,7 @@ internal fun EditModeEditor(store: EditorStore, ui: EditorUi, stage: @Composable
                         level = EditDockLevel.Root
                     }
                 }
+            }
             }
             }
         }
@@ -162,6 +200,25 @@ internal fun EditModeEditor(store: EditorStore, ui: EditorUi, stage: @Composable
             FontPrefs.recordUse(f)
             FontBrowserRequest.open = false
         }, onDismiss = { FontBrowserRequest.open = false })
+    }
+}
+
+@Composable
+private fun EditWorkspaceBar(current: EditWorkspace, onSelect: (EditWorkspace) -> Unit) {
+    Row(Modifier.fillMaxWidth().height(48.dp).background(EditColors.Bar).padding(horizontal = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+        EditWorkspace.entries.forEach { workspace ->
+            val active = current == workspace
+            val label = stringResource(workspace.label)
+            Box(Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(6.dp))
+                .background(if (active) AureaColors.AccentDim else EditColors.Bar)
+                .testTag("edit.workspace.${workspace.name.lowercase()}")
+                .semantics { contentDescription = label; selected = active; role = Role.Tab }
+                .tocavel(shrink = 1f) { onSelect(workspace) }, contentAlignment = Alignment.Center) {
+                Text(label, style = AureaType.of(12f, if (active) FontWeight.W700 else FontWeight.W500,
+                    color = if (active) AureaColors.Accent else AureaColors.Muted), maxLines = 1)
+            }
+        }
     }
 }
 
@@ -207,10 +264,10 @@ private val ClipLevels = setOf(EditDockLevel.VideoClip, EditDockLevel.TextClip, 
 
 /** Cores próprias da Edição: fundo preto como nos editores de vídeo, Dock um tom acima. */
 internal object EditColors {
-    val Canvas = androidx.compose.ui.graphics.Color(0xFF000000)
+    val Canvas = androidx.compose.ui.graphics.Color(0xFF101114)
     val Preview = androidx.compose.ui.graphics.Color(0xFF0B0B0D)
-    val Bar = androidx.compose.ui.graphics.Color(0xFF121214)
-    val DockLevel = androidx.compose.ui.graphics.Color(0xFF1B1B1F)
+    val Bar = androidx.compose.ui.graphics.Color(0xFF181A20)
+    val DockLevel = androidx.compose.ui.graphics.Color(0xFF22252C)
     val Ruler = androidx.compose.ui.graphics.Color(0xFF8A8A92)
 }
 
@@ -232,7 +289,8 @@ private fun EditTopBar(store: EditorStore, ui: EditorUi) {
                 .tocavel(shrink = 1f) { store.closeProject() },
             contentAlignment = Alignment.Center,
         ) { CupertinoIcon(CupertinoGlyph.Xmark, 22.dp, AureaColors.Text) }
-        Spacer(Modifier.weight(1f))
+        Text(store.project.title, style = AureaType.of(13f, FontWeight.W600), maxLines = 1,
+            overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
         // A resolução do projeto (o lado menor + "P"), que abre os ajustes do projeto.
         val p = store.project
         val short = minOf(p.width, p.height)

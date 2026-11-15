@@ -64,8 +64,13 @@ AUREA_TEST(PropertyCoverage, NativeCatalogInventoryHasCompleteStableMetadata) {
                         std::isfinite(row.hardMin) && std::isfinite(row.hardMax));
             AUREA_CHECK(row.hardMin <= row.minValue && row.minValue <= row.maxValue && row.maxValue <= row.hardMax);
             for (f32 value : row.defaultValue) AUREA_CHECK(std::isfinite(value));
-            if (row.type == static_cast<u32>(ParamType::Enum))
-                AUREA_CHECK(row.enumCount > 0 && row.enumLength > 0);
+            if (row.type == static_cast<u32>(ParamType::Enum)) {
+                if (effect.typeId == effect_type_id("aurea.control.dropdown") && id == "menu") {
+                    // Authored labels live in the effect instance, not its catalog.
+                    AUREA_CHECK_EQ(row.enumCount, 0u);
+                    AUREA_CHECK(row.maxValue > row.minValue);
+                } else AUREA_CHECK(row.enumCount > 0 && row.enumLength > 0);
+            }
             ++parameterCount;
             if (!(row.flags & kParamHidden)) ++visibleCount;
             if (row.type < 12) ++typeCounts[row.type];

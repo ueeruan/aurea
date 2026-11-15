@@ -488,3 +488,6 @@ AUREA_TEST(ExportAttempts, StartRefusedAsBusyOnTwoRungsStopsTheLadder) {
     AUREA_CHECK_EQ(export_next_attempt_with_history(1, ExportRetryKind::Encoder, r, h), 0u);
     AUREA_CHECK(h.lastStop == ExportLadderStop::Deterministic);
 }
+
+// 0.5.3 (Fase B): orçamento de memória, tempo do pacote e memória da escada.
+#include "Export053Pure.inl"

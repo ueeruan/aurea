@@ -7,6 +7,7 @@
 #include "aurea/project/AeImport.hpp"
 #include "aurea/project/Presets.hpp"
 #include "../project/AeImportBind.hpp"
+#include "EngineMcpTools.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -88,6 +89,88 @@ constexpr Tool kTools[] = {
      "Open an editor screen for the user. Use it for what scripts cannot do: importing media, exporting the video, "
      "auto captions (transcription), the effects browser, text options, audio, the 3D scene. Then tell the user what to tap.",
      R"({"type":"object","properties":{"panel":{"type":"string","enum":["media","export","captions","effects","text","audio","scene3d"]}},"required":["panel"],"additionalProperties":false})"},
+
+    // --- AureaMCP fase C (EngineMcpTools.cpp): ler e escrever com precisão -----------
+    // Unidades: segundos da composição, escala em fração (1 = 100%), opacidade 0..1,
+    // rotação em graus, px, cores [r,g,b(,a)] 0..1. "layer" = id (texto) ou índice do AE.
+    {"get_layer_details",
+     "Read one layer in full at the playhead (or at seconds): name, kind, timing, parent, blend, 3D, transform "
+     "(value of position/scale/rotation/anchor/opacity/skew and how many keyframes each has), the effect stack "
+     "(effect id, key, name, enabled) and kind-specific data (text content/font/size/colors/alignment/tracking, "
+     "shape fill/stroke, camera lens, light, audio volume). Units: seconds, px, scale 1 = 100%, opacity 0..1, degrees.",
+     R"({"type":"object","properties":{"layer":{"type":["string","integer"],"description":"Layer id from get_project_state, or the AE index (1 = top)."},"seconds":{"type":"number","minimum":0}},"required":["layer"],"additionalProperties":false})"},
+    {"get_keyframes",
+     "List the keyframes of a property (each channel: seconds in composition time, value, interpolation, bezier "
+     "[x1,y1,x2,y2] of the segment that LEAVES the key, power). Omit property to list every animated channel of the layer. "
+     "Property: position, position.x, scale, rotation, anchor, opacity, skew.x, audio.volume, text.tracking, "
+     "effect.<effectId>.<param index or id>[.x|.y|.z|.r|.g|.b|.a].",
+     R"({"type":"object","properties":{"layer":{"type":["string","integer"]},"property":{"type":"string"}},"required":["layer"],"additionalProperties":false})"},
+    {"set_property",
+     "Set a property value. With seconds, or when the property already has keyframes, it writes a keyframe at that "
+     "time (playhead by default), like After Effects; otherwise it changes the static value. One undo step. "
+     "value: number or array ([x,y] / [x,y,z] / [r,g,b,a]); rotation as a number = Z; scale as a number = uniform; "
+     "a layer-reference effect parameter takes a layer id string. Property syntax as in get_keyframes.",
+     R"({"type":"object","properties":{"layer":{"type":["string","integer"]},"property":{"type":"string"},"value":{"type":["number","array","string"],"items":{"type":"number"}},"seconds":{"type":"number","minimum":0}},"required":["layer","property","value"],"additionalProperties":false})"},
+    {"add_keyframes",
+     "Add (or overwrite) several keyframes on one property in one undo step. Each key: seconds (composition time), "
+     "value (number or array) and optional easing for the segment that starts at that key: interpolation "
+     "(hold, linear, bezier, ease_in, ease_out, ease_in_out, bounce, elastic, overshoot, steps, repeat, ping_pong, wave, random), "
+     "bezier [x1,y1,x2,y2] (x 0..1) and power 1..3 (stronger ease).",
+     R"({"type":"object","properties":{"layer":{"type":["string","integer"]},"property":{"type":"string"},"keys":{"type":"array","minItems":1,"maxItems":500,"items":{"type":"object","properties":{"seconds":{"type":"number","minimum":0},"value":{"type":["number","array"],"items":{"type":"number"}},"interpolation":{"type":"string"},"bezier":{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4},"power":{"type":"integer","minimum":1,"maximum":3}},"required":["seconds","value"]}}},"required":["layer","property","keys"],"additionalProperties":false})"},
+    {"delete_keyframes",
+     "Delete keyframes of a property at the given times (seconds: number or list), or all of them with all: true. One undo step.",
+     R"({"type":"object","properties":{"layer":{"type":["string","integer"]},"property":{"type":"string"},"seconds":{"type":["number","array"],"items":{"type":"number"}},"all":{"type":"boolean"}},"required":["layer","property"],"additionalProperties":false})"},
+    {"move_keyframe",
+     "Move the keyframe of a property (every channel that has one) from one time to another. One undo step.",
+     R"({"type":"object","properties":{"layer":{"type":["string","integer"]},"property":{"type":"string"},"fromSeconds":{"type":"number","minimum":0},"toSeconds":{"type":"number","minimum":0}},"required":["layer","property","fromSeconds","toSeconds"],"additionalProperties":false})"},
+    {"set_keyframe_easing",
+     "Set the easing of the segment that leaves each keyframe (all keys of the property, or only those at seconds). "
+     "interpolation and/or bezier [x1,y1,x2,y2] (x 0..1, e.g. [0.33,0,0.67,1] = easy ease), power 1..3. One undo step.",
+     R"({"type":"object","properties":{"layer":{"type":["string","integer"]},"property":{"type":"string"},"seconds":{"type":["number","array"],"items":{"type":"number"}},"interpolation":{"type":"string"},"bezier":{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4},"power":{"type":"integer","minimum":1,"maximum":3}},"required":["layer","property"],"additionalProperties":false})"},
+    {"list_effect_types",
+     "Search the effects Aurea can add (key, name, category, parameter count and the After Effects matchName when there is one).",
+     R"({"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":300}},"additionalProperties":false})"},
+    {"get_effect",
+     "Read one effect of a layer: every parameter with index, id, label, type, value at the playhead (or seconds), default, "
+     "range, unit, options and keyframe count. Change them with set_property effect.<effectId>.<index or id>.",
+     R"({"type":"object","properties":{"layer":{"type":["string","integer"]},"effect":{"type":"integer","minimum":0},"seconds":{"type":"number","minimum":0}},"required":["layer","effect"],"additionalProperties":false})"},
+    {"add_effect",
+     "Add an effect to a layer by key (from list_effect_types), name or AE matchName. index = position in the stack "
+     "(0 = first; omit for the end). Returns the new effect id. One undo step.",
+     R"({"type":"object","properties":{"layer":{"type":["string","integer"]},"type":{"type":"string"},"index":{"type":"integer","minimum":0}},"required":["layer","type"],"additionalProperties":false})"},
+    {"remove_effect", "Remove an effect (id from get_layer_details) and its keyframes. One undo step.",
+     R"({"type":"object","properties":{"layer":{"type":["string","integer"]},"effect":{"type":"integer","minimum":0}},"required":["layer","effect"],"additionalProperties":false})"},
+    {"move_effect", "Move an effect in the layer's stack (index 0 = first, applied first). One undo step.",
+     R"({"type":"object","properties":{"layer":{"type":["string","integer"]},"effect":{"type":"integer","minimum":0},"index":{"type":"integer","minimum":0}},"required":["layer","effect","index"],"additionalProperties":false})"},
+    {"set_effect_enabled", "Turn an effect on or off without removing it. One undo step.",
+     R"({"type":"object","properties":{"layer":{"type":["string","integer"]},"effect":{"type":"integer","minimum":0},"enabled":{"type":"boolean"}},"required":["layer","effect","enabled"],"additionalProperties":false})"},
+    {"list_presets",
+     "List presets: kind text = the text animation presets (id, name) for text layers; kind effect = the presets of one "
+     "effect on a layer (needs layer and effect).",
+     R"({"type":"object","properties":{"kind":{"type":"string","enum":["text","effect"]},"layer":{"type":["string","integer"]},"effect":{"type":"integer","minimum":0}},"additionalProperties":false})"},
+    {"apply_preset",
+     "Apply a preset to a layer (one undo step): kind text (preset id or name from list_presets; replaces the text animation), "
+     "kind effect (preset of the effect id), or kind json (an Aurea preset JSON with aurea_preset 1: effects, text style, "
+     "animation; durationSeconds stretches an animation preset).",
+     R"({"type":"object","properties":{"layer":{"type":["string","integer"]},"kind":{"type":"string","enum":["text","effect","json"]},"preset":{"type":["integer","string"]},"effect":{"type":"integer","minimum":0},"json":{"type":"string"},"durationSeconds":{"type":"number","minimum":0}},"required":["layer","kind"],"additionalProperties":false})"},
+    {"list_fonts", "List the font families on the device (and imported ones) with their styles, weights and italics.",
+     R"({"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":400}},"additionalProperties":false})"},
+    {"set_text_style",
+     "Change a text layer in one undo step: text (content), font (family from list_fonts), weight 100..900, italic, size px, "
+     "color [r,g,b(,a)], strokeWidth px, strokeColor, alignment (left/center/right), tracking (thousandths of an em), lineHeight.",
+     R"({"type":"object","properties":{"layer":{"type":["string","integer"]},"text":{"type":"string"},"font":{"type":"string"},"weight":{"type":"integer","minimum":100,"maximum":1000},"italic":{"type":"boolean"},"size":{"type":"number","minimum":1,"maximum":2000},"color":{"type":"array","items":{"type":"number"},"minItems":3,"maxItems":4},"strokeWidth":{"type":"number","minimum":0,"maximum":200},"strokeColor":{"type":"array","items":{"type":"number"},"minItems":3,"maxItems":4},"alignment":{"type":"string","enum":["left","center","right"]},"tracking":{"type":"number"},"lineHeight":{"type":"number","minimum":0.1,"maximum":10}},"required":["layer"],"additionalProperties":false})"},
+    {"get_markers", "Read the composition markers (and a layer's markers when layer is given): seconds, label, comment, duration, color.",
+     R"({"type":"object","properties":{"layer":{"type":["string","integer"]}},"additionalProperties":false})"},
+    {"set_marker",
+     "Create or update the marker at seconds (composition, or on a layer when layer is given): label, comment, "
+     "durationSeconds, color #RRGGBB. Fields you omit keep their value. One undo step.",
+     R"({"type":"object","properties":{"seconds":{"type":"number","minimum":0},"layer":{"type":["string","integer"]},"label":{"type":"string"},"comment":{"type":"string"},"durationSeconds":{"type":"number","minimum":0},"color":{"type":"string","pattern":"^#?[0-9A-Fa-f]{6}$"}},"required":["seconds"],"additionalProperties":false})"},
+    {"delete_marker", "Delete the marker at seconds (composition, or the layer's). One undo step.",
+     R"({"type":"object","properties":{"seconds":{"type":"number","minimum":0},"layer":{"type":["string","integer"]}},"required":["seconds"],"additionalProperties":false})"},
+    {"get_work_area", "Read the work area (start/end seconds; active = smaller than the composition).",
+     R"({"type":"object","properties":{},"additionalProperties":false})"},
+    {"set_work_area", "Set the work area (startSeconds < endSeconds) or clear it with clear: true. Preview loops inside it. One undo step.",
+     R"({"type":"object","properties":{"startSeconds":{"type":"number","minimum":0},"endSeconds":{"type":"number","minimum":0},"clear":{"type":"boolean"}},"additionalProperties":false})"},
 };
 
 std::string lower(std::string_view s) {
@@ -324,6 +407,8 @@ std::string Engine::assistant_call(const std::string& name, const std::string& a
             w.begin_object().key("ok").value(true).key("ui").value(assistant::kUiOpenPanel).key("panel").value(panel).end_object();
             return w.str();
         }
+        // AureaMCP fase C: as ferramentas de leitura/escrita precisas (EngineMcpTools.cpp).
+        if (std::string out; mcp_tools::call(*this, modelMutex_, name, args, out)) return out;
         return assistant::error("unknown tool: " + name);
     }
 }

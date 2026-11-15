@@ -179,6 +179,15 @@ internal fun MocapSection(env: PanelEnv, onAutoRig: () -> Unit = { env.store.sta
     KitHint(stringResource(R.string.mocap_limits))
 }
 
+/**
+ * Ponto de troca do Aurea PC (padrão nulo = celular igual): na Cena 3D do PC o
+ * Motion Capture mora num cartão flutuante, e o painel do rig mostra só o
+ * botão que o abre (desktop/src/main/kotlin/replace/PcMocapCard.kt).
+ */
+internal object MocapSectionHost {
+    var override: (@Composable (PanelEnv) -> Unit)? by mutableStateOf(null)
+}
+
 /** Uma régua do mocap: ao soltar (ou digitar), o motor resolve de novo e a prévia acompanha. */
 @Composable
 private fun MocapSlider(

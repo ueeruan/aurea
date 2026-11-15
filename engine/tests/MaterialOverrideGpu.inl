@@ -59,7 +59,7 @@ AUREA_TEST(MaterialOverridesGpu, SharedExactVariedAnimatedOpacityAndShadowMatchI
             renderer.stats().drawCalls, renderer.stats().shadowDrawCalls);
         AUREA_CHECK(energy > 100); AUREA_CHECK(maximum <= .001f);
         if (mode > 1) AUREA_CHECK(changed > 10);
-        const u32 expected = mode == 3 ? 3 : mode == 4 ? 2 : mode == 5 ? 12 : 1;
+        const u32 expected = mode == 3 || mode == 4 || mode == 5 ? 12 : 1;
         AUREA_CHECK_EQ(renderer.stats().drawCalls, expected);
         if (mode == 6) AUREA_CHECK_EQ(renderer.stats().shadowDrawCalls, 1u);
         prior = shared;

@@ -65,6 +65,7 @@ set(AUREA_CORE_SOURCES
     src/core/Time.cpp
     src/core/MiniXml.cpp
     src/core/Thread.cpp
+    src/core/SafeAlloc.cpp
     src/ui/BuiltinPropertySchema.cpp
     src/memory/MemoryManager.cpp
     src/jobs/JobSystem.cpp
@@ -73,12 +74,14 @@ set(AUREA_CORE_SOURCES
     src/animation/Curve.cpp
     src/animation/Track.cpp
     src/animation/KeyframeOptimize.cpp
+    src/animation/KeyframeAssist.cpp      # lote K: inverter, escala exponencial, suavizador
     src/timeline/Composition.cpp
     src/timeline/LayerAnimator.cpp
     src/timeline/Timeline.cpp
     src/timeline/Rig.cpp
     src/timeline/ShapeGeometry.cpp
     src/timeline/LayerWorld.cpp   # AE animation: matrizes da camada + Auto-Orientar + câmera de dois nós
+    src/timeline/PathRig.cpp      # lote M: RotoBezier, Points Follow Nulls, Nulls Follow Points, Trace Path
     src/project/Project.cpp
     src/project/Serialization.cpp
     src/project/FileIO.cpp
@@ -263,6 +266,7 @@ set(AUREA_CORE_SOURCES
     src/engine/EngineUiMode.cpp
     src/engine/EngineCaptionPresets.cpp
     src/engine/EngineAssistant.cpp
+    src/engine/EngineMcpTools.cpp
     src/vector/Vector.cpp
     src/vector/ContourTrace.cpp
     src/vector/Clipper.cpp
@@ -286,6 +290,7 @@ set(AUREA_CORE_SOURCES
     src/rig/Ik.cpp               # 0.3.6 IK de dois ossos
     src/engine/EngineMedia.cpp
     src/engine/EngineOmegaTimeline.cpp
+    src/engine/EngineGroupInline.cpp
     src/engine/EngineOmegaLayer.cpp
     src/engine/EngineOmegaEffects.cpp
     src/engine/EngineOmegaContent.cpp
@@ -295,7 +300,16 @@ set(AUREA_CORE_SOURCES
     src/engine/EngineOmegaOutline.cpp   # bugs 0.3.4: converter em contorno
     src/engine/EngineAeCompositing.cpp  # AE compositing: tímidas, preservar transparência, queda do feather
     src/engine/EngineAeTimeline.cpp     # timeline do AE: marcas de camada, área de trabalho, escalar/easy ease, alinhar
+    src/engine/EngineAeKeys.cpp         # lote K: assistentes de keyframe do AE, bézier automática/contínua, vagante, Motion Sketch
     src/engine/EngineAeAnimation.cpp    # AE animation: texto-fonte, auto-orientar, câmera de dois nós
+    src/engine/EngineAeLayers.cpp       # AE layers: qualidade, clipe do modelo 3D, guias da prévia
+    src/engine/EngineModelPanel.cpp     # painel do modelo 3D: visuais do material, Evolução/Repetir/Velocidade do clipe
+    src/engine/EngineAeAssist.cpp       # lote X: Convert Audio to Keyframes
+    src/engine/EngineAeTextOutline.cpp  # lote X: Create Shapes / Masks from Text
+    src/engine/EngineVectorTree.cpp     # lote X: árvore de formas do AE (listar e editar pela ponte)
+    src/vector/VectorTree.cpp           # lote X: grupo vetorial em ordem livre, itens a mais, grupos de dentro
+    src/vector/VectorTreeDocument.cpp   # lote X: o fluxo da árvore (seção VectorTree do projeto)
+    src/engine/EngineAeMasks.cpp        # lote M: nulos de caminhos, auto-trace, feather variável, RotoBezier, travar/ocultar máscara
     src/engine/EnginePluginsV2.cpp   # 0.3.4 plugins
     src/engine/EngineImageSequence.cpp
     src/engine/EngineStorage.cpp   # 0.5.2 armazenamento (apagar projeto, tela, PreRender)
@@ -439,11 +453,14 @@ target_compile_options(aurea_core PRIVATE ${AUREA_WARNINGS})
 # Status. Their allocating dependencies need unwind cleanup too, so a failed
 # staging allocation releases local vectors and project snapshots on mobile.
 set(AUREA_IMPORT_BOUNDARIES
+    # 0.5.3: buffers de foto sem lançar (core/SafeAlloc.hpp).
+    src/core/SafeAlloc.cpp
     src/audio/Beats.cpp
     src/audio/AudioBlockCache.cpp
     src/engine/Engine.cpp
     src/engine/EngineMedia.cpp
     src/engine/EngineOmegaTimeline.cpp
+    src/engine/EngineGroupInline.cpp
     src/engine/EngineOmegaLayer.cpp
     src/engine/EngineOmegaEffects.cpp
     src/engine/EngineOmegaContent.cpp
@@ -704,5 +721,12 @@ if(WIN32 AND NOT AUREA_PLATFORM_ANDROID)
     option(AUREA_BUILD_DESKTOP "Build the Windows desktop editor" OFF)
     if(AUREA_BUILD_DESKTOP)
         add_subdirectory(platform/windows)
+    endif()
+    # Aurea PC: a MESMA ponte JNI do Android (platform/android/aurea_jni.cpp)
+    # numa aurea.dll que a interface Compose Desktop (JVM) carrega. A prévia
+    # vai para imagens do motor lidas pela UI (apresentação no host).
+    option(AUREA_BUILD_DESKTOP_JNI "Build aurea.dll (JNI bridge) for the Compose Desktop UI" OFF)
+    if(AUREA_BUILD_DESKTOP_JNI)
+        add_subdirectory(platform/desktop)
     endif()
 endif()

@@ -184,7 +184,7 @@ AUREA_TEST(SceneEnvironmentJobs, OwnLightingProfilesKeepDistinctUniformsAndBatch
     second.environment.ground = {.4f, .5f, .6f};
     frame.instances.push_back(second);
     first.world = Mat4::translation({130, 130, 0});
-    frame.instances.push_back(first); // equal profile remains eligible for instancing
+    frame.instances.push_back(first); // A/B/A must preserve the authored depth ties.
     std::promise<EnvironmentMaps> pending;
     SceneEnvironmentJobTestAccess::install(scene, pending.get_future(), 0, 16);
     struct UniformPrefix {
@@ -231,7 +231,9 @@ AUREA_TEST(SceneEnvironmentJobs, OwnLightingProfilesKeepDistinctUniformsAndBatch
             }
         }
         AUREA_CHECK(sawFirst && sawSecond);
-        AUREA_CHECK(scene.stats().instancedDraws > 0);
+        AUREA_CHECK(scene.stats().visiblePrimitives >= 3u);
+        AUREA_CHECK_EQ(scene.stats().drawCalls, scene.stats().visiblePrimitives);
+        AUREA_CHECK_EQ(scene.stats().instancedDraws, 0u);
         AUREA_CHECK_EQ(scene.incomplete(), number == 1);
         graph.release(pool);
         pool.end_frame();

@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Painel do modelo 3D (13/11/2026): Material (visuais do modelo inteiro), Textura e Animação (Evolução com keyframe). -->
+<resources>
+    <string name="m3d_title">3D model</string>
+    <string name="m3d_tab_shadow">Shadow</string>
+    <string name="m3d_look">Look</string>
+    <string name="m3d_look_hint">Tap a ball to give the whole model a look.</string>
+    <string name="m3d_look_original">Original</string>
+    <string name="m3d_look_plastic">Plastic</string>
+    <string name="m3d_look_matte">Matte</string>
+    <string name="m3d_look_metal">Metal</string>
+    <string name="m3d_look_chrome">Chrome</string>
+    <string name="m3d_look_gold">Gold</string>
+    <string name="m3d_look_glass">Glass</string>
+    <string name="m3d_look_custom">Adjusted by hand</string>
+    <string name="m3d_adjust">Adjust</string>
+    <string name="m3d_whole_model">Whole model</string>
+    <string name="m3d_material_n">Material %1$d</string>
+    <string name="m3d_no_materials">This model has no materials to adjust.</string>
+    <string name="m3d_apply_to">Apply to</string>
+    <string name="m3d_one_part">One part</string>
+    <string name="m3d_texture_pick">Texture image</string>
+    <string name="m3d_texture_hint">The image covers the whole model, using the file\'s own texture coordinates.</string>
+    <string name="m3d_texture_original">Back to the original texture</string>
+    <string name="m3d_texture_no_parts">This model has no parts to take a texture.</string>
+    <string name="m3d_texture_material_hint">This material\'s texture can come from a file or from a timeline layer.</string>
+    <string name="m3d_part_hint">Tap a part to change its texture or hide it.</string>
+    <string name="m3d_part_own_texture">Own texture</string>
+    <string name="m3d_part_hidden">Hidden</string>
+    <string name="m3d_anim_progress">Progress</string>
+    <string name="m3d_anim_progress_hint">Set ◆ at two points on the timeline to drive the file\'s animation with keyframes. Without ◆, it plays by itself.</string>
+    <string name="m3d_anim_auto">Play by itself</string>
+    <string name="m3d_anim_auto_hint">Removes the fixed value and the Progress ◆: the clip plays with time again.</string>
+    <string name="m3d_anim_loop">Loop</string>
+    <string name="m3d_anim_speed">Speed</string>
+    <string name="m3d_anim_duration">Clip length: %1$s s</string>
+    <string name="m3d_anim_pick_clip">Choose a clip to animate the model.</string>
+    <string name="m3d_anim_playing">Playing by itself</string>
+    <!-- 14/11/2026 (3D opções extras, v76): Luz e sombra, Posição, Brilho, textura que anda e animação. -->
+    <string name="m3d_tab_light_shadow">Light &amp; shadow</string>
+    <string name="m3d_place">Position</string>
+    <string name="m3d_place_ground">Sit on the floor</string>
+    <string name="m3d_place_center">Center</string>
+    <string name="m3d_place_fit">Fit to screen</string>
+    <string name="m3d_place_hint">Each tap is one undo step. With position keyframes, they all move together.</string>
+    <string name="m3d_look_neon">Neon</string>
+    <string name="m3d_glow">Glow</string>
+    <string name="m3d_glow_color">Glow color</string>
+    <string name="m3d_glow_strength">Glow intensity</string>
+    <string name="m3d_glow_hint">The material\'s own light. With the scene\'s Bloom (3D Scene › Render), the glow spreads around it.</string>
+    <string name="m3d_tex_transform">Texture position</string>
+    <string name="m3d_tex_offset_x">Shift X</string>
+    <string name="m3d_tex_offset_y">Shift Y</string>
+    <string name="m3d_tex_rotation">Rotate</string>
+    <string name="m3d_tex_scroll">Scroll over time</string>
+    <string name="m3d_tex_scroll_x">Scroll X</string>
+    <string name="m3d_tex_scroll_y">Scroll Y</string>
+    <string name="m3d_tex_scroll_hint" formatted="false">In % of the image per second: the texture moves by itself (conveyor, water, screen).</string>
+    <string name="m3d_anim_start">Start at</string>
+    <string name="m3d_anim_reverse">Reverse</string>
+    <string name="m3d_anim_pingpong">Back and forth</string>
+    <string name="m3d_anim_speed_hint">Tap Speed and set ◆ in the left column to speed up or slow down the animation over time.</string>
+    <string name="m3d_obj_light">Object light</string>
+    <string name="m3d_obj_light_hint">Lights and reflects only this object with a studio or its own HDR image. The rest of the scene stays the same.</string>
+    <string name="m3d_obj_light_scene">From the scene</string>
+    <string name="m3d_obj_light_intensity">Light &amp; reflection</string>
+</resources>

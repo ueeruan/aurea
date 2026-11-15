@@ -174,6 +174,21 @@ HumanoidMap map_by_names(const scene3d::SceneAsset& asset) {
         if (any_of(p.core, {"head", "head1", "head01"})) { offer(B::Head, node); continue; }
         if (spine_like(p.core)) spines.push_back(node);
     }
+    // Rig "dividido" (Unreal/jogos: Root → Splitter → {Pelvis → pernas, Spine1 → tronco}):
+    // a bacia não é pai do tronco. O quadril passa a ser o nó comum, que leva o corpo todo.
+    if (map[B::Hips] >= 0) {
+        i32 upper = map[B::Neck] >= 0 ? map[B::Neck] : map[B::Head];
+        if (upper < 0) for (const i32 s : spines) { upper = s; break; }
+        if (upper >= 0 && !is_ancestor(asset, map[B::Hips], upper)) {
+            i32 a = asset.nodes[static_cast<usize>(map[B::Hips])].parent;
+            for (i32 guard = 0; a >= 0 && guard < 16; ++guard, a = asset.nodes[static_cast<usize>(a)].parent) {
+                if (is_ancestor(asset, a, upper)) {
+                    if (joint[static_cast<usize>(a)]) map.joint[static_cast<usize>(B::Hips)] = a;
+                    break;
+                }
+            }
+        }
+    }
     // Coluna e peito: os "spine" entre o quadril e o pescoço (ou os braços).
     const i32 hips = map[B::Hips];
     i32 top = map[B::Neck] >= 0 ? map[B::Neck] : map[B::LeftUpperArm] >= 0 ? map[B::LeftUpperArm] : map[B::Head];
@@ -183,6 +198,25 @@ HumanoidMap map_by_names(const scene3d::SceneAsset& asset) {
     std::sort(chain.begin(), chain.end(), [&](i32 a, i32 b) { return depth_of(asset, a) < depth_of(asset, b); });
     if (!chain.empty()) map.joint[static_cast<usize>(B::Spine)] = chain.front();
     if (chain.size() >= 2) map.joint[static_cast<usize>(B::Chest)] = chain.back();
+    // Braço ou coxa sem nome conhecido: o osso de cima do antebraço/canela. Rigs que
+    // nomeiam pela articulação (L_Shoulder → L_Elbow → L_Hand, L_Hip → L_Knee) chamam o
+    // braço de "shoulder", que em outros (Mixamo) é a clavícula; por isso só pela hierarquia.
+    auto upper_from_lower = [&](B upper, B lower, Side side) {
+        if (map[upper] >= 0 || map[lower] < 0) return;
+        i32 p = asset.nodes[static_cast<usize>(map[lower])].parent;
+        for (i32 guard = 0; p >= 0 && guard < 8; ++guard, p = asset.nodes[static_cast<usize>(p)].parent) {
+            const Parsed q = parse_name(asset.nodes[static_cast<usize>(p)].name);
+            if (q.core.find("twist") != std::string::npos || q.core.find("twst") != std::string::npos
+                || q.core.find("roll") != std::string::npos || q.core.find("helper") != std::string::npos) continue;
+            if (joint[static_cast<usize>(p)] && q.side == side && !any_of(q.core, {"clavicle", "collar", "collarbone", "clav"}))
+                map.joint[static_cast<usize>(upper)] = p;
+            return;
+        }
+    };
+    upper_from_lower(B::LeftUpperArm, B::LeftLowerArm, Side::Left);
+    upper_from_lower(B::RightUpperArm, B::RightLowerArm, Side::Right);
+    upper_from_lower(B::LeftUpperLeg, B::LeftLowerLeg, Side::Left);
+    upper_from_lower(B::RightUpperLeg, B::RightLowerLeg, Side::Right);
     // O quadril sem nome conhecido: o pai comum das coxas.
     if (map[B::Hips] < 0 && map[B::LeftUpperLeg] >= 0) {
         const i32 p = asset.nodes[static_cast<usize>(map[B::LeftUpperLeg])].parent;

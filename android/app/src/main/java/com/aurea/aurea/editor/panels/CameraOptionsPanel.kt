@@ -152,6 +152,12 @@ internal fun CameraOptionsPanel(env: PanelEnv) {
                 onDeleteAllKeyframes = onDeleteAll,
                 onCurve = onCurve,
                 curveReady = store.curveStart(curveKeys) != null,
+                // F6 (D3): a Cena 3D (ambiente, render) da composição a partir da câmera.
+                moreEntries = listOf(com.aurea.aurea.ui.ds.MenuEntry.Item(stringResource(R.string.fn_3d_scene),
+                    glyph = com.aurea.aurea.ui.theme.CupertinoGlyph.Lightbulb, tag = "camera.more.scene3d") {
+                    Element3DRequest.face = Face3D.Scene
+                    env.onOpenPanel(EditorPanel.Element3D)
+                }),
             ),
             tabs = tabs,
             selectedTab = tab,

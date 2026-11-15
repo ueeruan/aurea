@@ -165,11 +165,16 @@ private const val ERRC_IO = 10
 private const val ERRC_STORAGE_FULL = 28
 
 private const val TAG = "AureaStore"
+/** Chave de um estúdio pronto no lugar do HDRI do objeto (motor: scene3d::studio_environment_key). */
+internal const val OBJECT_STUDIO_KEY = 0x5354554400000000L
 
 /** O Application, para o texto do catálogo fora do Compose (mensagens do motor). */
 private lateinit var storeApp: Application
 
 /** Texto do catálogo no idioma do app (AppText respeita a escolha em Ajustes). */
+/** Lote M: vetor vazio compartilhado (máscara sem pontos de feather). */
+private val NO_FLOATS = FloatArray(0)
+
 private fun appText(@StringRes id: Int, vararg args: Any): String =
     if (args.isEmpty()) AppText.get(storeApp, id) else AppText.get(storeApp, id, *args)
 
@@ -255,6 +260,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** 0.4.6: o assistente de IA (a conversa sobrevive a fechar e abrir o chat). */
     val assistant by lazy {
         com.aurea.aurea.assistant.AssistantChat(app, engine, viewModelScope,
+            onUi = { assistantPanel = it }, onModelChanged = { refreshNow() })
+    }
+    /** AureaMCP (docs/aureamcp/DESIGN.md): agentes de IA da pessoa controlam o app pelo relay do Worker. */
+    val mcp by lazy {
+        com.aurea.aurea.mcp.AureaMcp(app, viewModelScope,
+            engineTools = { engine.assistantTools() },
+            engineCall = { name, args -> engine.assistantCall(name, args) },
+            host = com.aurea.aurea.mcp.McpStoreHost(this, app.cacheDir),
             onUi = { assistantPanel = it }, onModelChanged = { refreshNow() })
     }
 
@@ -423,7 +436,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var engineReady by mutableStateOf(false)
         private set
     var errorMessage by mutableStateOf<String?>(null)
-        private set
+        internal set
     var busyMessage by mutableStateOf<String?>(null)
         private set
     var projects by mutableStateOf<List<ProjectEntry>>(emptyList())
@@ -935,43 +948,25 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 val dirs = directories()
                 // Runs on the lifecycle worker, before native text setup.
                 // A bundled face makes fallback independent of OEM font paths.
+                // 0.5.3: só copia quando falta ou a instalação mudou (installBundledFont).
+                val fontStamp = installStamp()
                 runCatching {
-                    val font = File(dirs.cache, "Roboto-Regular.ttf")
-                    val pending = File(dirs.cache, "Roboto-Regular.ttf.tmp")
-                    app.assets.open("Roboto-Regular.ttf").use { input ->
-                        pending.outputStream().use { output -> input.copyTo(output) }
-                    }
-                    check(pending.renameTo(font)) { "Could not install default font" }
+                    installBundledFont(dirs.cache, "Roboto-Regular.ttf", fontStamp)
                 }.onFailure { android.util.Log.w("AureaFonts", "Bundled fallback unavailable; using system fonts", it) }
                 // Reserva árabe embarcada (Noto Naskh Arabic, OFL): o motor a
                 // procura ao lado da fonte padrão. Sem ela, um título em árabe
                 // dependeria da fonte árabe que cada fabricante põe no sistema.
                 runCatching {
-                    val arabic = File(dirs.cache, "NotoNaskhArabic-Regular.ttf")
-                    val pending = File(dirs.cache, "NotoNaskhArabic-Regular.ttf.tmp")
-                    app.assets.open("NotoNaskhArabic-Regular.ttf").use { input ->
-                        pending.outputStream().use { output -> input.copyTo(output) }
-                    }
-                    check(pending.renameTo(arabic)) { "Could not install Arabic fallback font" }
+                    installBundledFont(dirs.cache, "NotoNaskhArabic-Regular.ttf", fontStamp)
                 }.onFailure { android.util.Log.w("AureaFonts", "Bundled Arabic fallback unavailable; using system fonts", it) }
                 // Mesma fonte de reserva japonesa do bundle iOS; carga de glifos
                 // continua sob demanda no motor, sem depender das fontes do OEM.
                 runCatching {
-                    val japanese = File(dirs.cache, "NotoSansJP-Regular.otf")
-                    val pending = File(dirs.cache, "NotoSansJP-Regular.otf.tmp")
-                    app.assets.open("NotoSansJP-Regular.otf").use { input ->
-                        pending.outputStream().use { output -> input.copyTo(output) }
-                    }
-                    check(pending.renameTo(japanese)) { "Could not install Japanese fallback font" }
+                    installBundledFont(dirs.cache, "NotoSansJP-Regular.otf", fontStamp)
                 }.onFailure { android.util.Log.w("AureaFonts", "Bundled Japanese fallback unavailable; using system fonts", it) }
                 // Hangul: a fonte CJK do Android 15 é CFF2, que o motor não lê.
                 runCatching {
-                    val korean = File(dirs.cache, "NotoSansKR-Hangul.otf")
-                    val pending = File(dirs.cache, "NotoSansKR-Hangul.otf.tmp")
-                    app.assets.open("NotoSansKR-Hangul.otf").use { input ->
-                        pending.outputStream().use { output -> input.copyTo(output) }
-                    }
-                    check(pending.renameTo(korean)) { "Could not install Korean fallback font" }
+                    installBundledFont(dirs.cache, "NotoSansKR-Hangul.otf", fontStamp)
                 }.onFailure { android.util.Log.w("AureaFonts", "Bundled Korean fallback unavailable; using system fonts", it) }
                 val debug = (app.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
                 // Sondagem do aparelho: medida UMA vez (primeira abertura ou SO
@@ -1064,6 +1059,35 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val app = getApplication<Application>()
         return runCatching { app.packageManager.getPackageInfo(app.packageName, 0).lastUpdateTime.toString(16) }
             .getOrDefault("0")
+    }
+
+    /**
+     * 0.5.3: copia a fonte embarcada dos assets para o cache só quando precisa. Antes
+     * os quatro arquivos (~8,8 MB) eram reescritos a cada abertura fria, antes de o
+     * motor iniciar. O carimbo ao lado guarda a instalação (muda a cada atualização
+     * do app) e o tamanho gravado: arquivo ausente (o sistema limpou o cache), de
+     * outro tamanho ou de outra instalação é copiado de novo. Carimbo "0"
+     * (instalação desconhecida; no PC é sempre) copia sempre, como antes.
+     */
+    private fun installBundledFont(cacheDir: File, name: String, stamp: String) {
+        val font = File(cacheDir, name)
+        val mark = File(cacheDir, "$name.stamp")
+        if (stamp != "0" && font.isFile && font.length() > 0L &&
+            runCatching { mark.readText() }.getOrNull() == "$stamp:${font.length()}") {
+            // A limpeza automática do cache (CacheStorage.enforceLimits) apaga os
+            // arquivos MAIS ANTIGOS de `motor/` primeiro. A cópia a cada abertura
+            // renovava a data; sem ela a fonte viraria a primeira a sair. Só a data.
+            val now = System.currentTimeMillis()
+            font.setLastModified(now)
+            mark.setLastModified(now)
+            return
+        }
+        val pending = File(cacheDir, "$name.tmp")
+        getApplication<Application>().assets.open(name).use { input ->
+            pending.outputStream().use { output -> input.copyTo(output) }
+        }
+        check(pending.renameTo(font)) { "Could not install $name" }
+        runCatching { mark.writeText("$stamp:${font.length()}") }
     }
 
     /** O que o motor decidiu para ESTE aparelho (mostrado nos Ajustes). */
@@ -1206,6 +1230,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             return code
         }
         if (code == AureaEngine.SAVE_CLEAN && !homeCardStale && !forceCard) return 0
+        // 0.5.3 (P1-11): com export em curso a capa (um render na GPU) não disputa
+        // com ele; o projeto já foi gravado acima e a capa sai na próxima saída.
+        if (exporter.busy) { homeCardStale = true; return 0 }
         return writeHomeCard(path, withThumbnail = true)
     }
 
@@ -1575,13 +1602,39 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 // can remain at the previous frame indefinitely after seeking.
                 lastDetailPlayhead = status.playhead.toInt()
                 lastDetailNs = now
+                detailPending = false
                 refreshDetail()
                 refreshEffectParams()
+            } else if (detailPending) {
+                detailPending = false
+                refreshDetail()
             }
+        } else if (detailPending) {
+            // 0.5.3: um setter de controle contínuo pediu o detalhe (refreshDetailSoon).
+            detailPending = false
+            refreshDetail()
         }
         autosaveIfIdle()
     }
     private var lastDetailNs = 0L
+
+    /**
+     * 0.5.3: releitura do detalhe pedida por um setter de controle contínuo (slider,
+     * cor, digitação). Com o laço de status rodando, sai UMA vez no próximo quadro
+     * do laço em vez de a cada evento de toque: eram ~20 consultas ao motor na
+     * thread principal por evento, cada uma no lock que o render segura no preparo
+     * do quadro, e o comando recém-enviado só é aplicado no quadro do motor, então
+     * a leitura imediata devolvia o valor antigo. Sem laço, lê na hora como antes.
+     */
+    private var detailPending = false
+    private fun refreshDetailSoon() {
+        if (statusLoop?.isRunning == true) {
+            detailPending = true
+            wakeStatusLoop()
+            return
+        }
+        refreshDetail()
+    }
 
     // --- Autosave -------------------------------------------------------------
     //
@@ -1640,7 +1693,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** Relê tudo o que depende do modelo. Barato: dezenas de linhas POD. */
     private fun refreshModel() {
+        detailPending = false   // o refreshDetail() do fim desta função já cobre o pedido
         curveRevision++
+        // Normalize legacy/unassigned tracks before reading the layer rows
+        // that the timeline joins to those tracks. The iOS model reads in
+        // the same order.
+        uiMode = engine.projectUiMode()
+        editTimeline = if (uiMode != UI_MODE_COMPOSITION) com.aurea.aurea.editor.EditTimelineData.parse(engine.queryEditTimeline()) else null
         val fresh = readLayers()
         if (!LayerRow.sameRows(layers, fresh)) layers = fresh
         captionTracks = com.aurea.aurea.captions.parseCaptionTracks(engine.captionTracks())
@@ -1648,9 +1707,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshAeTimeline()   // timeline do AE: marcas de camada e área de trabalho
         editMode = engine.editMode()
         hideShy = engine.hideShy()
-        uiMode = engine.projectUiMode()
         mainTrackAnchor = engine.mainTrackAnchor()
-        editTimeline = if (uiMode != UI_MODE_COMPOSITION) com.aurea.aurea.editor.EditTimelineData.parse(engine.queryEditTimeline()) else null
         // Bug #6: a composição mudou por fora do abrir/fechar (desfazer com o grupo
         // aberto, "Tirar do grupo"): os ids de camada da outra composição não
         // valem aqui — a seleção, as trilhas abertas e as miniaturas recomeçam.
@@ -1688,6 +1745,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         // Uma consulta para todas as camadas; o mapa só troca se algum keyframe mudou.
         if (readAllKeyframes()) keyframes = keySnapshot.map
         validateKeySelection()
+        refreshGroupRows()
         refreshComposition()
         refreshDetail()
         refreshEffects()
@@ -1818,7 +1876,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         }
         if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Text.kind) {
             refreshTextFont()
-            val st = FloatArray(20)
+            // 21: ordem preenchimento/contorno (v70); 22: mistura entre caracteres ("Mais opções" do animador).
+            val st = FloatArray(22)
             textStyle = same(textStyle, if (engine.queryTextStyle(id, st)) st else null)
             val dyn = engine.queryTextDynamic(id)
             if (dyn == null || textDynamic == null || !dyn.contentEquals(textDynamic)) textDynamic = dyn
@@ -1982,6 +2041,28 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         change(doc)
         engine.setVectorDocument(id, doc.encode(), doc.names(), continuing)
         refreshVector()
+    }
+
+    // --- Lote X do AE: árvore de formas (só o painel do Aurea PC chama) -----------
+    /** Muda a cada edição da árvore: o painel do PC relê as linhas. */
+    var vectorTreeRevision by mutableStateOf(0)
+        private set
+
+    /** As linhas da árvore da camada escolhida (Engine::vector_tree) e os nomes dos grupos, na ordem das linhas de grupo. */
+    fun vectorTreeRows(): Pair<FloatArray, List<String>>? {
+        val id = primary ?: return null
+        val rows = engine.vectorTree(id) ?: return null
+        return rows to (engine.vectorTreeNames(id)?.split('\n') ?: emptyList())
+    }
+
+    /** Edita a árvore (Engine::vector_tree_edit). `path` = o grupo dono, do primeiro nível até ele. */
+    fun editVectorTree(path: IntArray, op: Int, a: Int = 0, b: Int = 0, c: Int = 0, values: FloatArray? = null,
+        name: String? = null, continuing: Boolean = false): Boolean {
+        val id = primary ?: return false
+        val ok = engine.vectorTreeEdit(id, path, op, a, b, c, values, name, continuing)
+        refreshVector()
+        vectorTreeRevision++
+        return ok
     }
 
     /** Edita o grupo escolhido. */
@@ -3786,6 +3867,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun select(layer: Long, additive: Boolean = false, openOptions: Boolean = true) {
         // A seleção de keyframes é de UMA camada: trocar a principal a descarta.
         if (keySelection != null && (additive || keySelection?.layer != layer)) clearKeySelection()
+        groupInnerSelection = null   // 0.5.3: camada de fora escolhida = a de dentro sai
         selection = if (additive) {
             if (layer in selection) selection - layer else LinkedHashSet(selection).apply { add(layer) }
         } else {
@@ -3826,6 +3908,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     fun clearSelection() {
+        groupInnerSelection = null
         timelineOnlySelection = emptySet()
         clearKeySelection()
         if (selection.isEmpty()) return
@@ -3988,6 +4071,120 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** "Ocultar camadas tímidas" da composição atual. */
     fun changeHideShy(on: Boolean) {
         if (engine.setHideShy(on)) refreshNow()
+    }
+
+    // --- AE layers (EngineAeLayers.cpp): a regra mora no motor; aqui só pede e relê ---
+    /** Qualidade (o Quality do AE): 0 Melhor, 1 Rascunho, 2 Arame (só a prévia); sampling 0 bilinear, 1 bicúbica. */
+    fun setLayerQuality(layer: Long, quality: Int, sampling: Int) {
+        if (engine.setLayerQuality(layer, quality, sampling)) refreshNow()
+    }
+
+    /** Muda a cada troca de clipe: o seletor do modelo 3D relê o motor. */
+    var modelClipRevision by mutableIntStateOf(0)
+        private set
+
+    /** Nomes dos clipes de animação do modelo (nome vazio = a UI numera). */
+    fun modelAnimationClips(layer: Long): List<String> = engine.modelAnimationClips(layer).toList()
+
+    /** Clipe tocando no modelo: -1 = pose parada. */
+    fun modelAnimationClip(layer: Long): Int = engine.modelAnimationClip(layer)
+
+    fun setModelAnimationClip(layer: Long, clip: Int) {
+        if (engine.setModelAnimationClip(layer, clip)) {
+            modelClipRevision++
+            refreshNow()
+        }
+    }
+
+    // --- Painel do modelo 3D (EngineModelPanel.cpp): a regra mora no motor ---------
+    /**
+     * Animação do modelo no cabeçote: [clipe (−1 parado), duração s, evolução parada (−1 =
+     * toca sozinho), evolução no cabeçote 0..1, repetir, velocidade, tem keyframe, keyframe aqui].
+     */
+    fun modelAnimation(layer: Long): FloatArray? = engine.queryModelAnimation(layer)
+
+    /** 0 Evolução (0..1; negativo = volta a tocar sozinho), 1 Repetir, 2 Velocidade. */
+    fun setModelAnimationParam(layer: Long, param: Int, value: Float) {
+        if (detail?.locked == true) return
+        if (engine.setModelAnimationParam(layer, param, value)) {
+            modelClipRevision++
+            refreshNow()
+        }
+    }
+
+    /** ◆ da Evolução no cabeçote. */
+    fun toggleModelAnimationKey(layer: Long) {
+        if (detail?.locked == true) return
+        if (engine.toggleModelAnimationKey(layer)) {
+            modelClipRevision++
+            refreshNow()
+        }
+    }
+
+    /** Visual do modelo inteiro (0 Original … 6 Vidro), um passo de desfazer. */
+    fun applyModelMaterialPreset(layer: Long, preset: Int) {
+        if (detail?.locked == true) return
+        if (engine.applyModelMaterialPreset(layer, preset)) {
+            modelClipRevision++
+            refreshNow()
+        }
+    }
+
+    /** O visual que o modelo mostra (−1 = ajustado à mão). */
+    fun modelMaterialPreset(layer: Long): Int = engine.modelMaterialPreset(layer)
+
+    /** A bola do visual [preset] neste modelo. Fora da thread principal. */
+    fun renderModelLookThumb(layer: Long, preset: Int, size: Int): ImageBitmap? =
+        engine.modelMaterialPresetPreview(layer, preset, size)?.let { argb -> argbBitmap(argb, size) }
+
+    /** ◆ dos canais [paramMask] do material [material] (−1 = o modelo inteiro), num passo. */
+    fun toggleModelMaterialKeys(material: Int, paramMask: Int) {
+        val id = primary ?: return
+        if (detail?.locked == true) return
+        if (engine.toggleMaterialKeys(id, material, paramMask)) {
+            modelClipRevision++
+            refreshNow()
+        }
+    }
+
+    /** v76: ◆ de um parâmetro da Animação no cabeçote (0 Evolução, 2 Velocidade). */
+    fun toggleModelAnimationParamKey(layer: Long, param: Int) {
+        if (detail?.locked == true) return
+        if (engine.toggleModelAnimationParamKey(layer, param)) {
+            modelClipRevision++
+            refreshNow()
+        }
+    }
+
+    /** v76: emissão do material no cabeçote {R, G, B lineares, força}; −1 = o modelo inteiro. */
+    fun modelMaterialEmission(layer: Long, material: Int): FloatArray? = engine.queryMaterialEmission(layer, material)
+
+    /** v76: posição do modelo — 0 assentar no chão, 1 centralizar, 2 ajustar à tela (um passo de desfazer). */
+    fun placeModel(layer: Long, mode: Int) {
+        if (detail?.locked == true) return
+        if (engine.placeModelLayer(layer, mode)) {
+            modelClipRevision++
+            refreshNow()
+        }
+    }
+
+    /**
+     * Transição de entrada (`out` falso) ou saída da camada: tipo 0 nenhuma, 1 dissolver,
+     * 2 deslizar para cima, 3 deslizar da esquerda, 4 zoom, 5 girar. O motor prende os
+     * quadros em [1, metade do trecho]. O estado atual vem em `LayerDetail.transitions`.
+     */
+    fun setLayerTransition(layer: Long, out: Boolean, type: Int, frames: Int) {
+        if (engine.setTransition(layer, out, type, frames)) refreshNow()
+    }
+
+    /** Guias da prévia (só na tela, nunca no projeto): bit 0 grade, bit 1 margens seguras, bit 2 réguas. */
+    var previewGuides by mutableIntStateOf(0)
+        private set
+
+    fun setPreviewGuides(flags: Int, gridSpacing: Float) {
+        if (!ready) return
+        previewGuides = flags and 7
+        engine.setPreviewGuides(flags and 7, gridSpacing)
     }
 
     // --- AE animation (EngineAeAnimation.cpp): texto-fonte, auto-orientar, dois nós ---
@@ -4253,6 +4450,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     private fun detailOf(layer: Long): LayerDetail? =
         if (engine.queryLayerDetail(layer, detailBuffer)) LayerDetail.read(detailBuffer) else null
+
+    /** O detalhe de qualquer camada no playhead (a timeline estilo AE do Aurea PC mostra o Transformar de cada uma). */
+    internal fun layerDetailOf(layer: Long): LayerDetail? = if (layer == primary) detail ?: detailOf(layer) else detailOf(layer)
 
     /**
      * Detalhe de QUALQUER camada no playhead (transform avaliado, tamanho da
@@ -4738,7 +4938,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun togglePlayback() { pendingPlayhead = null; send { togglePlayback() } }
 
     /** Pause immediately; the native snapshot/startup stays off the UI thread. */
-    fun startPreRender(direction: Int) {
+    fun startPreRender(direction: Int, groupLayer: Long = 0) {
         if (destroyed || !ready || screen != Screen.Editor || projectWork || exporter.busy || preRenderPreparing || preRenderProgress.running) return
         pause()
         playing = false
@@ -4756,7 +4956,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 // Fora do lifecycleLock: preparar o PreRender espera o render e
                 // a main não pode ficar presa atrás disso (ANR vivo 1938).
                 if (ready && !request.get()) {
-                    code = engine.startPreRender(normalized)
+                    code = engine.startPreRender(normalized, groupLayer)
                     if (request.get()) engine.cancelPreRender()
                 }
             } catch (failure: Exception) {
@@ -5036,6 +5236,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                     catch (failure: Exception) {
                         Log.w(TAG, "batch media item failed", failure)
                         errorMessage = appText(R.string.msg_nao_consegui_ler_esse_arquivo)
+                    } catch (failure: OutOfMemoryError) {
+                        // 0.5.3: a foto que não coube não derruba o lote; as que já
+                        // entraram continuam no lugar e escolhidas.
+                        Log.w(TAG, "batch media item exceeded memory", failure)
+                        errorMessage = appText(R.string.msg_memoria_insuficiente_feche_outros_apps_e)
                     }
                 }
                 // "Camada" da Edição: cada mídia numa linha própria, no cabeçote.
@@ -5115,6 +5320,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                     catch (failure: Exception) {
                         Log.w(TAG, "omega media item failed", failure)
                         errorMessage = appText(R.string.msg_nao_consegui_ler_esse_arquivo)
+                    } catch (failure: OutOfMemoryError) {
+                        Log.w(TAG, "omega media item exceeded memory", failure)
+                        errorMessage = appText(R.string.msg_memoria_insuficiente_feche_outros_apps_e)
                     }
                 }
             } finally {
@@ -5444,19 +5652,19 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         typingHandler.removeCallbacks(closeTyping)
         typingHandler.postDelayed(closeTyping, 1000)
         send { setTextContent(id, content) }
-        refreshDetail()
+        refreshDetailSoon()
     }
 
     fun setTextSize(size: Float) {
         val id = primary ?: return
         send { setTextSize(id, size.coerceIn(1f, 2000f)) }
-        refreshDetail()
+        refreshDetailSoon()
     }
 
     fun setTextColor(r: Float, g: Float, b: Float, a: Float) {
         val id = primary ?: return
         send { setTextColor(id, r, g, b, a) }
-        refreshDetail()
+        refreshDetailSoon()
     }
 
     fun setTextAlignment(alignment: Int) {
@@ -5468,13 +5676,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun setTextStrokeWidth(width: Float) {
         val id = primary ?: return
         send { setTextStrokeWidth(id, width.coerceIn(0f, 200f)) }
-        refreshDetail()
+        refreshDetailSoon()
     }
 
     fun setTextStrokeColor(r: Float, g: Float, b: Float, a: Float) {
         val id = primary ?: return
         send { setTextStrokeColor(id, r, g, b, a) }
-        refreshDetail()
+        refreshDetailSoon()
     }
 
     var sceneEditor by mutableStateOf(false)
@@ -5505,11 +5713,101 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun updateSceneView(yaw: Float, pitch: Float, distance: Float) {
         // Os mesmos limites do motor: a vista nunca "vira" nem atravessa o centro.
         sceneYaw = ((yaw + 180f).mod(360f)) - 180f
-        scenePitch = pitch.coerceIn(-80f, 80f)
-        sceneDistance = distance.coerceIn(0.25f, 10f)
+        scenePitch = pitch.coerceIn(-scenePitchLimit, scenePitchLimit)
+        sceneDistance = distance.coerceIn(0.25f, sceneDistanceLimit)
         sceneCameraView = false     // orbitar sai da vista da câmera, como no Blender
         engine.setSceneEditor(sceneEditor, sceneYaw, scenePitch, sceneDistance)
         refreshNow()
+    }
+
+    // --- Aurea PC: Cena 3D no jeito do Blender (desktop/.../replace/PcScene3D*.kt). ---------
+    // O celular e o tablet não chamam nada daqui: os limites ficam em 80° e 10×, como sempre.
+    /** Limite do pitch da órbita (80 no celular; o PC sobe para 89,5 nas vistas Topo/Base). */
+    var scenePitchLimit = 80f
+        private set
+    /** Limite do afastamento da órbita (10 no celular; o PC usa o do motor, 30). */
+    var sceneDistanceLimit = 10f
+        private set
+    /** Órbita sem perspectiva (Numpad 5 do Blender). */
+    var sceneOrtho by mutableStateOf(false)
+        private set
+
+    /**
+     * Projeção e limites da vista de navegação (só a prévia). Falso = a biblioteca do motor
+     * carregada ainda não tem a função (DLL antiga): a vista continua em perspectiva e ±80°.
+     */
+    fun setSceneViewOptions(orthographic: Boolean, pitchLimit: Float): Boolean {
+        val limit = pitchLimit.coerceIn(10f, 89.5f)
+        val ok = try { engine.setSceneViewOptions(orthographic, limit); true } catch (e: UnsatisfiedLinkError) { false }
+        if (ok) { sceneOrtho = orthographic; scenePitchLimit = limit; sceneDistanceLimit = 30f }
+        scenePanTick++
+        refreshNow()
+        return ok
+    }
+
+    /** Numpad . do Blender: a órbita passa a girar em volta destas camadas. Falso = sem a função ou nada 3D. */
+    fun focusSceneView(ids: Collection<Long>): Boolean {
+        if (ids.isEmpty()) return false
+        val ok = try { engine.focusSceneView(ids.toLongArray()) } catch (e: UnsatisfiedLinkError) { false }
+        scenePanTick++
+        refreshNow()
+        return ok
+    }
+
+    /** {yaw, pitch, distância, ortográfica, alvoX, alvoY, alvoZ, limite do pitch} ou nulo (DLL antiga). */
+    fun querySceneView(): FloatArray? = try { engine.querySceneView() } catch (e: UnsatisfiedLinkError) { null }
+
+    /**
+     * Porta das consultas da Cena 3D do PC (Engine: caixa da camada/cena, enquadrar, origem no mundo,
+     * mundo → pai, girar em volta de um pivô, ponto sob o ponteiro, projetar, alinhar a câmera).
+     * Falso = recusado ou a biblioteca do motor carregada ainda não tem a função.
+     */
+    fun sceneOp(op: Int, layer: Long = 0L, layers: LongArray? = null, input: FloatArray? = null, output: FloatArray? = null): Boolean {
+        if (sceneOpMissing) return false
+        return try { engine.sceneOp(op, layer, layers, input, output) } catch (e: UnsatisfiedLinkError) { sceneOpMissing = true; false }
+    }
+    /** A biblioteca carregada não tem `nativeSceneOp`: não tenta de novo a cada quadro. */
+    private var sceneOpMissing = false
+
+    /** O motor mudou a vista de navegação por conta própria (enquadrar): a órbita daqui acompanha. */
+    fun syncSceneViewFromEngine() {
+        querySceneView()?.let { v -> sceneYaw = v[0]; scenePitch = v[1]; sceneDistance = v[2] }
+        scenePanTick++
+        refreshNow()
+    }
+
+    /** Muda quando a vista de navegação anda (órbita, mãozinha, enquadrar): quem desenha por cima relê. */
+    val sceneViewTick: Int get() = scenePanTick + sceneYaw.toRawBits() + scenePitch.toRawBits() + sceneDistance.toRawBits() + (if (sceneOrtho) 1 else 0)
+
+    /** O projeto mudou por um comando direto do motor (alinhar a câmera à vista): relê tudo. */
+    fun sceneProjectChanged() {
+        aeAnimRevision++
+        refreshNow()
+    }
+
+    /** Setas (origem + pontas X, Y, Z em px da composição) de QUALQUER camada 3D, não só da principal. */
+    fun sceneGizmoOf(id: Long, local: Boolean = gizmoLocalSpace): FloatArray? =
+        FloatArray(8).takeIf { engine.queryGizmo(id, GIZMO_LENGTH, it, local) && it.all { v -> v.isFinite() } }
+
+    /** Posição (espaço do pai) da camada depois de andar [amount] unidades no eixo (0..2 mundo, 3..5 local). Só conta. */
+    fun sceneAxisMove(id: Long, axis: Int, amount: Float): FloatArray? =
+        FloatArray(3).takeIf { engine.gizmoMoveLocal(id, axis, amount, it) && it.all { v -> v.isFinite() } }
+
+    /**
+     * Posição, Escala ou Rotação XYZ ([base]) de QUALQUER camada pelo caminho do gizmo (chave
+     * automática inclusa), com valores absolutos desde o começo do gesto. [previous] = o que o
+     * chamador gravou por último (o detalhe pode estar um quadro atrasado).
+     */
+    fun sceneSetComponents(id: Long, base: Int, values: FloatArray, previous: FloatArray? = null) {
+        val d = (if (id == primary) detail else detailOf(id)) ?: return
+        if (d.locked) return
+        val current = previous?.toList() ?: when (base) {
+            TrackProperty.POSITION_X -> d.position
+            TrackProperty.SCALE_X -> d.scale
+            TrackProperty.ROTATION_X -> d.rotation
+            else -> return
+        }
+        applyGizmoComponents(id, d, base, current, values)
     }
 
     /** Toque duplo no vazio da cena: a vista volta ao ângulo inicial. */
@@ -5813,10 +6111,21 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var objectEnvironment by mutableStateOf<FloatArray?>(null)
         private set
 
+    /** O asset (ou a chave do estúdio) do ambiente do objeto, exato: o [1] em float perde bits. */
+    var objectEnvironmentAsset by mutableStateOf(0L)
+        private set
+
     fun refreshObjectEnvironment() {
         val id = primary
         val out = FloatArray(5)
         objectEnvironment = if (id != null && engine.queryObjectEnvironment(id, out)) out else null
+        objectEnvironmentAsset = if (id != null && objectEnvironment != null) engine.objectEnvironmentAsset(id) else 0L
+    }
+
+    /** v76 (Luz e sombra): um estúdio pronto só para este objeto (1 escuro … 4 cromado; motor StudioEnvironment.hpp). */
+    fun setObjectStudio(preset: Int) {
+        if (preset !in 1..4) return
+        setObjectEnvironment(1, hdri = OBJECT_STUDIO_KEY or preset.toLong())
     }
 
     /** HDRI só para o objeto escolhido: o mesmo arquivo, o mesmo asset (a GPU
@@ -5852,7 +6161,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val cur = objectEnvironment
         engine.setObjectEnvironment(
             id, source,
-            hdri ?: (cur?.get(1)?.toLong() ?: 0L),
+            hdri ?: objectEnvironmentAsset,
             intensity ?: (cur?.get(2) ?: 1f),
             rotation ?: (cur?.get(3) ?: 0f),
             exposure ?: (cur?.get(4) ?: 1f),
@@ -5952,6 +6261,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         timelineOnlySelection = emptySet()
         clearKeySelection()
         timelineExpandedLayers = emptySet()
+        // 0.5.3: grupos abertos na timeline são da composição que saiu.
+        timelineInlineGroups = emptySet()
+        groupInnerRows = emptyMap()
+        groupInnerSelection = null
         // 0.3.0: os ids de camada se repetem entre grupos (cada composição tem a
         // sua tabela) e as miniaturas da timeline são guardadas pelo id: sem
         // limpar, a imagem de um grupo "pulava" para a camada de outro.
@@ -6115,8 +6428,19 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val points: FloatArray,
         /** Queda do feather: 0 suave (gaussiana), 1 linear (float 11 do cabeçalho). */
         val falloff: Int = 0,
+        /** Lote M (só lido no Aurea PC): chaves 1 travada, 2 oculta, 4 RotoBezier. */
+        val flags: Int = 0,
+        /** Lote M: feather Y próprio (px); < 0 = acompanha o X. */
+        val featherY: Float = -1f,
+        /** Lote M: pontos de feather, 5 floats cada (trecho, t, raio, tensão, segurar). */
+        val featherPoints: FloatArray = NO_FLOATS,
+        /** Lote M: vértices ligados a nulos ("Points Follow Nulls"). */
+        val drivers: Int = 0,
     ) {
         val count: Int get() = points.size / 6
+        val locked: Boolean get() = flags and 1 != 0
+        val hidden: Boolean get() = flags and 2 != 0
+        val rotoBezier: Boolean get() = flags and 4 != 0
     }
 
     /** Máscaras da camada principal; [m] = composição ← camada (a b c d tx ty). */
@@ -6196,11 +6520,17 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             repeat(n) {
                 val pc = b[o + 7].toInt()
                 val pts = b.copyOfRange(o + MASK_HEADER, o + MASK_HEADER + pc * 6)
+                // Lote M: as chaves e o feather variável só interessam ao Aurea PC (o celular não consulta).
+                val extra = if (com.aurea.aurea.ui.platform.PlatformFeatures.desktopAe) maskExtrasOf(id, b[o].toInt()) else null
                 list += MaskPath(
                     id = b[o].toInt(), op = b[o + 1].toInt(), inverted = b[o + 2] > 0.5f, feather = b[o + 3],
                     expansion = b[o + 4], opacity = b[o + 5], closed = b[o + 6] > 0.5f, keyCount = b[o + 8].toInt(),
                     keyHere = b[o + 9] > 0.5f, active = b[o + 10] > 0.5f, points = pts,
                     falloff = if (b[o + 11] > 0.5f) 1 else 0,
+                    flags = extra?.get(0)?.toInt() ?: 0,
+                    featherY = extra?.get(1) ?: -1f,
+                    featherPoints = extra?.let { e -> e.copyOfRange(5, 5 + e[2].toInt() * 5) } ?: NO_FLOATS,
+                    drivers = extra?.get(3)?.toInt() ?: 0,
                 )
                 o += MASK_HEADER + pc * 6
             }
@@ -6299,6 +6629,125 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         setMaskPoints(mid, m.points, true, true)
         maskDrawing = false
         refreshNow()
+    }
+
+    // --- Lote M: máscaras e rig do AE (só o Aurea PC tem tela; o celular não chama) ----------
+    private var maskExtraBuf = FloatArray(64)
+    /** Engine::query_mask_extras: [0] chaves, [1] feather Y, [2] nº de pontos de feather, [3] vértices ligados, [4] nº de tensões, pontos (5 cada), tensões. */
+    private fun maskExtrasOf(layer: Long, mask: Int): FloatArray? {
+        var need = engine.queryMaskExtras(layer, mask, maskExtraBuf)
+        if (need > maskExtraBuf.size) {
+            maskExtraBuf = FloatArray(need + 32)
+            need = engine.queryMaskExtras(layer, mask, maskExtraBuf)
+        }
+        return if (need >= 5) maskExtraBuf.copyOf(need) else null
+    }
+
+    /** Chaves da máscara: 1 travada, 2 oculta, 4 RotoBezier; [change] = quais bits trocar. */
+    fun setMaskFlags(mask: Int, flags: Int, change: Int): Boolean {
+        val id = primary ?: return false
+        val ok = engine.setMaskFlags(id, mask, flags, change)
+        if (ok) {
+            if (change and 1 != 0 && flags and 1 != 0 && maskEdit == mask) { maskEdit = null; maskDrawing = false; maskPoint = -1 }
+            refreshNow()
+        }
+        return ok
+    }
+
+    /** Tensão do RotoBezier (0..1); [point] < 0 = todos os vértices. */
+    fun setMaskRotoTension(mask: Int, point: Int, tension: Float, continuing: Boolean) {
+        val id = primary ?: return
+        if (engine.setMaskRotoTension(id, mask, point, tension, continuing)) refreshMasks()
+    }
+
+    /** Feather X e Y separados (px da camada); [y] < 0 = o Y acompanha o X. */
+    fun setMaskFeatherXY(mask: Int, x: Float, y: Float, continuing: Boolean) {
+        val id = primary ?: return
+        if (engine.setMaskFeatherXY(id, mask, x, y, continuing)) refreshMasks()
+    }
+
+    /** Pontos de feather de largura variável: 5 floats por ponto (trecho, t, raio, tensão, segurar). */
+    fun setMaskFeatherPoints(mask: Int, points: FloatArray, continuing: Boolean): Boolean {
+        val id = primary ?: return false
+        val ok = engine.setMaskFeatherPoints(id, mask, points, continuing)
+        if (ok) refreshMasks()
+        return ok
+    }
+
+    /** Free Transform Points: afim [m6] (a b c d tx ty, px da camada) nos pontos [indices] (vazio = todos). */
+    fun transformMaskPoints(mask: Int, indices: IntArray, m6: FloatArray, continuing: Boolean): Boolean {
+        val id = primary ?: return false
+        val ok = engine.transformMaskPoints(id, mask, indices, m6, continuing)
+        if (ok) { if (continuing) refreshMasks() else refreshNow() }
+        return ok
+    }
+
+    /**
+     * Create Nulls from Paths. [pathKind] 0 = máscara ([a] = id), 1 = caminho vetorial ([a] grupo, [b] caminho);
+     * [mode] 0 pontos seguem nulos, 1 nulos seguem pontos, 2 traçar caminho. Nulos criados, ou −Errc.
+     */
+    fun createNullsFromPath(layer: Long, pathKind: Int, a: Int, b: Int, mode: Int, loop: Boolean): Int {
+        if (!ready || destroyed) return -1
+        if (playing) pause()
+        val made = engine.createNullsFromPath(layer, pathKind, a, b, mode, loop)
+        if (made > 0) { refreshNow(); refreshDetail() }
+        return made
+    }
+
+    fun clearPathDrivers(layer: Long, pathKind: Int, a: Int, b: Int): Boolean {
+        val ok = engine.clearPathDrivers(layer, pathKind, a, b)
+        if (ok) refreshNow()
+        return ok
+    }
+
+    fun clearPathFollow(layer: Long): Boolean {
+        val ok = engine.clearPathFollow(layer)
+        if (ok) { refreshNow(); refreshDetail() }
+        return ok
+    }
+
+    /** Engine::query_path_rig (9 floats: modo, tipo, a, b, vértice, progresso, laço, efeito, vértices vetoriais ligados). */
+    fun pathRig(layer: Long): FloatArray? {
+        val out = FloatArray(9)
+        return if (engine.queryPathRig(layer, out) == 9) out else null
+    }
+
+    var autoTracing by mutableStateOf(false)
+        private set
+
+    /**
+     * Auto-trace (Layer > Auto-trace): máscaras de um canal da camada. Decodifica fora da UI;
+     * [done] recebe na UI o nº de máscaras (> 0) ou −Errc. A camada que as recebeu fica selecionada.
+     */
+    fun autoTrace(
+        layer: Long, channel: Int, threshold: Float, tolerance: Float, minArea: Float, cornerRoundness: Float,
+        workArea: Boolean, newLayer: Boolean, invert: Boolean, done: (Int) -> Unit,
+    ) {
+        if (!ready || destroyed || autoTracing) return
+        if (playing) pause()
+        val session = projectGeneration
+        autoTracing = true
+        enqueueLifecycle {
+            var result = -1
+            val target = LongArray(1)
+            try {
+                result = if (ready) engine.autoTrace(layer, channel, threshold, tolerance, minArea, cornerRoundness, workArea, newLayer, invert, target) else -1
+            } catch (failure: Exception) {
+                Log.w(TAG, "auto-trace failed", failure)
+            } catch (failure: OutOfMemoryError) {
+                result = -8 // aurea::Errc::OutOfMemory
+            } finally {
+                val made = result
+                trackHandler.post {
+                    if (destroyed) return@post
+                    autoTracing = false
+                    if (!ready || projectGeneration != session) return@post
+                    refreshNow()
+                    if (made > 0 && target[0] > 0L) { select(target[0]); refreshDetail() }
+                    done(made)
+                }
+            }
+        }
     }
 
     /** Queda do feather da máscara: 0 suave (gaussiana), 1 linear. */
@@ -6518,7 +6967,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun setMaterialParameter(material: Int, param: Int, value: Float) {
         val id = primary ?: return
         if (!value.isFinite()) return
-        engine.setMaterialParam(id, material, param, value.coerceIn(0f, 1f))
+        // v76: a força da emissão (9) passa de 1 (até kMaterialEmissionMax = 20).
+        engine.setMaterialParam(id, material, param, value.coerceIn(0f, if (param == 9) 20f else 1f))
         refreshNow()
     }
 
@@ -6934,7 +7384,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         for ((k, x) in changes) if (k in 0 until 17) v[k] = x
         textTexture = v
         engine.setTextTexture(id, v.copyOf(17))
-        refreshDetail()
+        refreshDetailSoon()
     }
 
     fun setTextDynamicValue(index: Int, value: Double) {
@@ -6943,7 +7393,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         v[index] = value
         textDynamic = v
         engine.setTextDynamic(id, v)
-        refreshDetail()
+        refreshDetailSoon()
     }
 
     /** Põe a marca (`{#}`, `{tc}`, `{t}`, `{f}`) no fim do texto e liga o modo dinâmico. */
@@ -6961,7 +7411,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         v[index] = value
         textStyle = v
         engine.setTextStyle(id, v)
-        refreshDetail()
+        refreshDetailSoon()
     }
 
     /** Animadores da camada de texto (40 floats cada; ver `query_text_animators`). */
@@ -7433,6 +7883,16 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         return effectId
     }
 
+    fun moveColorNode(effectId: Int, direction: Int) {
+        val layer = primary ?: return
+        val count = engine.queryLayerEffects(layer, rowBuffer, 64, textBlob)
+        val all = List(max(0, count)) { LayerEffect.read(rowBuffer, it, textBlob) }
+        val nodes = all.filter { it.typeId == com.aurea.aurea.editor.panels.effectTypeId("aurea.color.grade") }
+        val current = nodes.indexOfFirst { it.effectId == effectId }
+        val target = nodes.getOrNull(current + direction) ?: return
+        if (current >= 0) reorderEffect(effectId, all.indexOfFirst { it.effectId == target.effectId })
+    }
+
     /** O look [look] (−1 = nenhum) no Filtro [effectId]: um passo de desfazer. */
     fun applyColorLook(effectId: Int, look: Int) {
         val id = primary ?: return
@@ -7667,7 +8127,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         values.forEach { (k, x) -> v[k] = x }
         textStyle = v
         engine.setTextStyle(id, v)
-        refreshDetail()
+        refreshDetailSoon()
     }
 
     /** Trecho [start, end) do texto (índices do Kotlin, UTF-16) → caracteres do motor. */
@@ -8496,6 +8956,158 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         return true
     }
 
+    // Lote K (AE): assistentes de keyframe, Lift/Extract e Motion Sketch ----------
+
+    /** "Lift Work Area" ([extract] falso: deixa o buraco) / "Extract Work Area" (fecha). Um passo de desfazer. */
+    fun liftWorkArea(extract: Boolean): Boolean {
+        if (workArea == null) return false
+        if (playing) pause()
+        val changed = engine.liftWorkArea(extract)
+        if (changed <= 0) return false
+        refreshNow()
+        showToast(appText(if (extract) R.string.aek_extracted else R.string.aek_lifted))
+        return true
+    }
+
+    /** Roda [run] nos keys escolhidos de cada camada (várias camadas = um passo de desfazer). */
+    private fun keyAssist(label: String, nothing: Int, run: (Long, LongArray) -> Int): Boolean {
+        val sel = keySelection ?: return false
+        if (sel.isEmpty()) { showToast(appText(nothing)); return false }
+        if (playing) pause()
+        val many = sel.crossLayer
+        if (many) beginGesture(label)
+        var changed = 0
+        for (id in sel.layers()) changed += maxOf(0, run(id, sel.references(id)))
+        if (many) endGesture()
+        if (changed <= 0) {
+            showToast(appText(nothing))
+            return false
+        }
+        selectedKeyframe = null
+        refreshNow()
+        return true
+    }
+
+    /** "Time-Reverse Keyframes": a seleção acompanha (t' = primeiro + último − t em cada trilha). */
+    fun timeReverseTimelineKeys(): Boolean {
+        val sel = keySelection ?: return false
+        val ok = keyAssist("inverter keyframes", R.string.aek_reverse_nothing) { id, refs -> engine.timeReverseKeys(id, refs) }
+        if (!ok) return false
+        fun mirrored(refs: Set<KeyRef>): Set<KeyRef> = refs.groupBy { Triple(it.property, it.effect, it.param) }.values
+            .flatMap { group ->
+                if (group.size < 2) group
+                else {
+                    val lo = group.minOf { it.time }
+                    val hi = group.maxOf { it.time }
+                    group.map { it.copy(time = lo + hi - it.time) }
+                }
+            }.toCollection(LinkedHashSet())
+        keySelection = sel.copy(keys = mirrored(sel.keys), others = sel.others.mapValues { (_, refs) -> mirrored(refs) })
+        return true
+    }
+
+    /** "Exponential Scale" entre o 1º e o último key de Escala escolhido. */
+    fun exponentialScaleTimelineKeys(): Boolean =
+        keyAssist("escala exponencial", R.string.aek_exp_scale_nothing) { id, refs -> engine.exponentialScaleKeys(id, refs) }
+
+    /** Suavizador; [tolerance] = fração da amplitude de cada trilha (0,01 = 1 %). */
+    fun smoothTimelineKeys(tolerance: Float): Boolean =
+        keyAssist("suavizar keyframes", R.string.aek_smoother_nothing) { id, refs -> engine.smoothKeys(id, refs, tolerance) }
+
+    /** Bézier automática / contínua / comum e vagante ([AureaEngine.KEY_MODE_BEZIER]…). */
+    fun setTimelineKeyMode(mode: Int): Boolean =
+        keyAssist("modo dos keyframes", R.string.aek_flags_nothing) { id, refs -> engine.setKeyTemporalMode(id, refs, mode) }
+
+    /** Bits que TODOS os escolhidos têm ([AureaEngine.KEY_FLAG_AUTO]…); 0 sem seleção. */
+    fun timelineKeyFlags(): Int {
+        val sel = keySelection ?: return 0
+        if (sel.isEmpty()) return 0
+        var all = 0xFF
+        for (id in sel.layers()) all = all and (engine.queryKeyFlags(id, sel.references(id)) and 0xFF)
+        return all
+    }
+
+    /**
+     * "Convert Expression to Keyframes": as trilhas dos keys escolhidos que têm
+     * expressão; sem nenhuma, todas as expressões da camada (sem seleção, a
+     * camada principal). Um key por quadro; a expressão fica desligada.
+     */
+    fun bakeExpressionKeys(): Boolean {
+        val sel = keySelection?.takeIf { !it.isEmpty() }
+        val ids = sel?.layers() ?: listOfNotNull(primary)
+        if (ids.isEmpty()) return false
+        if (playing) pause()
+        if (ids.size > 1) beginGesture("converter expressao")
+        var changed = 0
+        for (id in ids) {
+            val refs = sel?.references(id) ?: LongArray(0)
+            var n = if (refs.isNotEmpty()) engine.bakeExpressionKeys(id, refs) else 0
+            if (n <= 0) n = engine.bakeExpressionKeys(id, LongArray(0))
+            changed += maxOf(0, n)
+        }
+        if (ids.size > 1) endGesture()
+        if (changed <= 0) {
+            showToast(appText(R.string.aek_bake_nothing))
+            return false
+        }
+        refreshModel()
+        refreshNow()
+        return true
+    }
+
+    /** Motion Sketch ligado: arrastar a camada escolhida no palco grava a posição enquanto a prévia toca. */
+    var motionSketch by mutableStateOf(false)
+        private set
+    private var sketchLayer = 0L
+    private var sketchSamples = ArrayList<Double>()
+    /** Posição da camada e ponto do palco (composição) no toque. */
+    private var sketchOrigin: FloatArray? = null
+
+    fun changeMotionSketch(on: Boolean) {
+        if (motionSketch == on) return
+        motionSketch = on
+        if (!on && sketchOrigin != null) motionSketchEnd()
+        if (on) showToast(appText(R.string.aek_motion_sketch_hint))
+    }
+
+    /** Começo do arrasto ([compX], [compY] em pixels da composição): a prévia começa a tocar. */
+    fun motionSketchBegin(layer: Long, compX: Float, compY: Float): Boolean {
+        val d = queryDetail(layer) ?: return false
+        if (d.locked || d.position.size < 2) return false
+        sketchLayer = layer
+        sketchSamples = ArrayList()
+        sketchOrigin = floatArrayOf(d.position[0], d.position[1], compX, compY)
+        motionSketchSample(compX, compY)
+        if (!playing) play()
+        return true
+    }
+
+    /** Uma amostra do dedo no instante que a prévia mostra (quadro fracionário tocando). */
+    fun motionSketchSample(compX: Float, compY: Float) {
+        val o = sketchOrigin ?: return
+        val frame = playheadSmooth.takeIf { !it.isNaN() } ?: playhead.toDouble()
+        sketchSamples.add(frame)
+        sketchSamples.add((o[0] + compX - o[2]).toDouble())
+        sketchSamples.add((o[1] + compY - o[3]).toDouble())
+    }
+
+    /** Soltou: a prévia para e as amostras viram keys de posição (um passo de desfazer). Como no AE, uma captura por vez. */
+    fun motionSketchEnd() {
+        if (sketchOrigin == null) return
+        sketchOrigin = null
+        motionSketch = false
+        if (playing) pause()
+        val samples = sketchSamples.toDoubleArray()
+        sketchSamples = ArrayList()
+        val frames = if (samples.size >= 6) engine.setPositionKeys(sketchLayer, samples, 1.0, 0.5f) else 0
+        if (frames > 0) {
+            refreshNow()
+            showToast(appText(R.string.aek_motion_sketch_done, frames))
+        } else {
+            showToast(appText(R.string.aek_motion_sketch_nothing))
+        }
+    }
+
     /**
      * Alinhar (0 esquerda, 1 centro H, 2 direita, 3 topo, 4 centro V, 5 base)
      * ou distribuir (6 horizontal, 7 vertical): a conta é do motor (B6), um
@@ -8541,6 +9153,104 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val open = timelineExpandedLayers
         timelineExpandedLayers = if (layer in open) open - layer else open + layer
     }
+
+    // =========================================================================
+    // 0.5.3 — "Please let us expand group, seeing all contents of it without
+    // ungrouping!!": o grupo abre NA timeline. As camadas de dentro aparecem
+    // recuadas embaixo dele (miniatura e onda como as outras) e dá para
+    // escolher, mover e aparar no lugar. O grupo continua grupo e a composição
+    // aberta não muda; a regra (tempo de fora <-> de dentro, passo de desfazer)
+    // é do motor (EngineGroupInline.cpp), a mesma do iOS.
+    // =========================================================================
+    /** Grupos (ids da composição aberta) com o conteúdo à vista na timeline. */
+    var timelineInlineGroups by mutableStateOf<Set<Long>>(emptySet())
+        private set
+    /** As linhas de dentro de cada grupo aberto, relidas a cada revisão do modelo. */
+    var groupInnerRows by mutableStateOf<Map<Long, List<GroupInnerRow>>>(emptyMap())
+        private set
+    /** A camada de dentro escolhida na timeline: (grupo, camada). Null = nenhuma. */
+    var groupInnerSelection by mutableStateOf<Pair<Long, Long>?>(null)
+        private set
+    private var groupRowBuffer = directBuffer(64 * PodLayout.LAYER_ROW_BYTES)
+    private var groupNameBlob = directBuffer(8 * 1024)
+
+    fun isInlineGroupOpen(group: Long) = group in timelineInlineGroups
+
+    /** O chevron do grupo: abre/fecha o conteúdo dele na timeline (não entra no grupo). */
+    fun toggleInlineGroup(group: Long) {
+        val open = timelineInlineGroups
+        timelineInlineGroups = if (group in open) open - group else open + group
+        if (group !in timelineInlineGroups && groupInnerSelection?.first == group) groupInnerSelection = null
+        refreshGroupRows()
+    }
+
+    /** Escolhe uma camada de dentro (a seleção da composição aberta sai: são ids de outra tabela). */
+    fun selectGroupInner(group: Long, layer: Long) {
+        clearSelection()
+        groupInnerSelection = group to layer
+    }
+
+    fun clearGroupInnerSelection() { groupInnerSelection = null }
+
+    private fun refreshGroupRows() {
+        val open = timelineInlineGroups
+        if (open.isEmpty()) {
+            if (groupInnerRows.isNotEmpty()) groupInnerRows = emptyMap()
+            if (groupInnerSelection != null) groupInnerSelection = null
+            return
+        }
+        // Grupo apagado/desagrupado (ou desfeito): sai da lista de abertos.
+        val groups = layers.filter { it.kind == LAYER_KIND_GROUP && it.id in open }.map { it.id }
+        if (groups.size != open.size) timelineInlineGroups = groups.toSet()
+        val next = HashMap<Long, List<GroupInnerRow>>(groups.size * 2)
+        for (g in groups) next[g] = readGroupRows(g)
+        if (next != groupInnerRows) groupInnerRows = next
+        groupInnerSelection?.let { (g, id) -> if (next[g]?.any { it.row.id == id } != true) groupInnerSelection = null }
+    }
+
+    private fun readGroupRows(group: Long): List<GroupInnerRow> {
+        var capacity = groupRowBuffer.capacity() / PodLayout.LAYER_ROW_BYTES
+        while (true) {
+            val n = max(0, engine.queryGroupLayers(group, groupRowBuffer, capacity, groupNameBlob))
+            var used = 0
+            for (i in 0 until n) {
+                val b = i * PodLayout.LAYER_ROW_BYTES
+                used = max(used, groupRowBuffer.getInt(b + PodLayout.LAYER_OFF_NAME_OFFSET) + groupRowBuffer.getInt(b + PodLayout.LAYER_OFF_NAME_LENGTH))
+            }
+            val full = n >= capacity
+            val namesFull = used > groupNameBlob.capacity() * 3 / 4
+            if (!full && !namesFull) return List(n) {
+                GroupInnerRow(group, LayerRow.read(groupRowBuffer, it, groupNameBlob),
+                    groupRowBuffer.getInt(it * PodLayout.LAYER_ROW_BYTES + PodLayout.LAYER_OFF_RESERVED0) and 1 != 0)
+            }
+            if (full) {
+                capacity *= 2
+                groupRowBuffer = directBuffer(capacity * PodLayout.LAYER_ROW_BYTES)
+            }
+            if (namesFull || full) groupNameBlob = directBuffer(groupNameBlob.capacity() * 2)
+        }
+    }
+
+    /** Mover/esticar camadas de dentro (tempo de fora). false = o grupo não anda 1:1 ou a borda passou do começo. */
+    fun setGroupLayerRanges(group: Long, ids: LongArray, starts: IntArray, ends: IntArray): Boolean {
+        if (ids.isEmpty()) return false
+        if (playing) pause()
+        val code = engine.setGroupLayerRanges(group, ids, LongArray(ids.size) { starts[it].toLong() },
+            LongArray(ids.size) { ends[it].toLong() })
+        refreshNow()
+        return code == 0
+    }
+
+    /** Aparar o início (0) ou o fim (1) de uma camada de dentro; `frame` no tempo de fora. */
+    fun trimGroupClip(group: Long, layer: Long, operation: Int, frame: Int): Boolean {
+        if (playing) pause()
+        val changed = engine.editGroupClipTime(group, layer, operation, frame.toLong())
+        refreshNow()
+        return changed
+    }
+
+    fun queryGroupWaveform(group: Long, layer: Long, startFrame: Double, framesPerBucket: Double, count: Int, out: java.nio.ByteBuffer): Int =
+        if (engineReady) engine.queryGroupWaveform(group, layer, startFrame, framesPerBucket, count, out) else 0
 
     /**
      * Barra de informação do gesto da timeline (mover, aparar, arrastar
@@ -8640,6 +9350,53 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 }
             }
         }
+    }
+
+    // --- Lote X do AE (só o Aurea PC chama; os textos ficam em desktop/) ----------
+    var convertingAudio by mutableStateOf(false)
+        private set
+
+    /**
+     * Convert Audio to Keyframes: nulo `name` com três controles deslizantes
+     * (esquerdo, direito, ambos). `layer` nulo = o som da composição. Decodifica
+     * fora da UI; `done` recebe na UI o id do nulo (> 0, já selecionado) ou −Errc.
+     */
+    fun audioToKeyframes(layer: Long?, name: String, done: (Long) -> Unit) {
+        if (!ready || destroyed || projectWork || exporter.busy || convertingAudio) return
+        val session = projectGeneration
+        val compositionId = composition?.id
+        convertingAudio = true
+        enqueueLifecycle {
+            var result = -ERRC_IO.toLong()
+            try {
+                result = if (ready) engine.audioToKeyframes(layer ?: 0L, name) else -1L
+            } catch (failure: Exception) {
+                Log.w(TAG, "audio to keyframes failed", failure)
+            } catch (failure: OutOfMemoryError) {
+                result = -8L // aurea::Errc::OutOfMemory
+            } finally {
+                val made = result
+                beatHandler.post {
+                    if (destroyed) return@post
+                    convertingAudio = false
+                    if (!ready || projectGeneration != session || composition?.id != compositionId) return@post
+                    refreshNow()
+                    if (made > 0) select(made)
+                    done(made)
+                }
+            }
+        }
+    }
+
+    /** Create Shapes from Text (`asMasks` falso) ou Create Masks from Text. Id da camada criada (selecionada) ou −Errc. */
+    fun textToVector(layer: Long, asMasks: Boolean): Long {
+        if (!ready || destroyed) return -1L
+        val made = engine.textToVector(layer, asMasks)
+        if (made <= 0) return made
+        refreshNow()
+        select(made)
+        refreshDetail()
+        return made
     }
 
     // --- Nulo e parentesco --------------------------------------------------------
@@ -8954,13 +9711,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun setShapeFill(r: Float, g: Float, b: Float, a: Float) {
         val id = primary ?: return
         send { setShapeFill(id, r, g, b, a) }
-        refreshDetail()
+        refreshDetailSoon()
     }
 
     fun setShapeStroke(r: Float, g: Float, b: Float, a: Float) {
         val id = primary ?: return
         send { setShapeStroke(id, r, g, b, a) }
-        refreshDetail()
+        refreshDetailSoon()
     }
 
     /**
@@ -9179,7 +9936,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         } else {
             send { setAudioVolume(id, v) }
         }
-        refreshDetail()
+        refreshDetailSoon()
     }
 
     /** Liga/desliga keyframe de volume no playhead. */
@@ -9199,20 +9956,20 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun setAudioGain(gain: Float) {
         val id = primary ?: return
         send { setAudioGain(id, gain.coerceIn(0f, 4f)) }
-        refreshDetail()
+        refreshDetailSoon()
     }
 
     fun setAudioPan(pan: Float) {
         val id = primary ?: return
         send { setAudioPan(id, pan.coerceIn(-1f, 1f)) }
-        refreshDetail()
+        refreshDetailSoon()
     }
 
     fun setAudioFade(fadeIn: Boolean, frames: Int) {
         val id = primary ?: return
         val f = max(0, frames)
         send { if (fadeIn) setAudioFadeIn(id, f) else setAudioFadeOut(id, f) }
-        refreshDetail()
+        refreshDetailSoon()
     }
 
     private val MODEL_EXTS = setOf("glb", "gltf", "fbx", "obj")
@@ -10537,13 +11294,25 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
  * que as decodifica em baixa prioridade. `get` devolve null enquanto a
  * miniatura não chegou; a UI redesenha quando `thumbnailGeneration` muda.
  */
+/** `LayerKind::Composition` (grupo / pré-composição). */
+internal const val LAYER_KIND_GROUP = 12
+
+/** 0.5.3: uma camada de DENTRO de um grupo aberto na timeline (o id só vale com [group]). */
+class GroupInnerRow(val group: Long, val row: LayerRow, val editable: Boolean) {
+    override fun equals(other: Any?): Boolean = other is GroupInnerRow && other.group == group &&
+        other.editable == editable && LayerRow.sameRows(listOf(row), listOf(other.row))
+    override fun hashCode(): Int = (group * 31 + row.id).hashCode()
+}
+
 class ThumbnailCache(private val engine: AureaEngine) {
     internal var epoch = 0L
         private set
     // Chave composta: o id da camada é `geração << 32 | índice`, e o antigo
     // `layer * 31 + frame` colidia entre camadas vizinhas (camada 0 no frame 31
     // = camada 1 no frame 0 → miniatura de outra camada).
-    private data class Key(val layer: Long, val frame: Int, val height: Int)
+    // 0.5.3: `group` != 0 = camada de dentro de um grupo aberto na timeline (os
+    // ids se repetem entre composições; o grupo faz parte da chave).
+    private data class Key(val layer: Long, val frame: Int, val height: Int, val group: Long = 0L)
 
     // Por BYTES (Fase 8B §12): 400 miniaturas de 96 px de altura em 16:9 já
     // passavam de 25 MB. Teto: 1/16 do heap do app, entre 8 e 24 MB.
@@ -10576,11 +11345,12 @@ class ThumbnailCache(private val engine: AureaEngine) {
     fun unalias(layer: Long) { owners.remove(layer) }
 
     /** Quem chama arredonda o frame para a grade de 250 ms do motor (a timeline pede um frame por balde). */
-    fun get(layer: Long, timelineFrame: Int, heightPx: Int): Bitmap? {
-        val key = Key(ownerOf(layer), timelineFrame, heightPx)
+    fun get(layer: Long, timelineFrame: Int, heightPx: Int, group: Long = 0L): Bitmap? {
+        val key = if (group == 0L) Key(ownerOf(layer), timelineFrame, heightPx) else Key(layer, timelineFrame, heightPx, group)
         cache.get(key)?.let { return it }
         buffer.clear()
-        val bytes = engine.queryThumbnail(layer, timelineFrame, heightPx, buffer, width)
+        val bytes = if (group == 0L) engine.queryThumbnail(layer, timelineFrame, heightPx, buffer, width)
+            else engine.queryGroupThumbnail(group, layer, timelineFrame, heightPx, buffer, width)
         if (bytes <= 0 || width[0] <= 0) return null
         buffer.rewind()
         return try {

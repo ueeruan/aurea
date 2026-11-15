@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.4: tela "siga" com os perfis do criador e do Aurea. -->
+<resources>
+    <string name="social_body_054">Sigue al creador y a Aurea: abre los cuatro perfiles para desbloquear la app. No verificamos si los seguiste.</string>
+    <string name="social_body_054_store">Sigue al creador y a Aurea para conocer las novedades y apoyar la app.</string>
+    <string name="social_continue">Continuar</string>
+</resources>

@@ -21,6 +21,11 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <!-- 0.5.3 (P1-5): só DECLARADA. Sem ela, no Android 13+ a notificação de
+         progresso do export nunca podia aparecer, nem com a pessoa ligando as
+         notificações do app nos ajustes do sistema. O app não pede a permissão
+         (nenhum diálogo novo); o serviço roda igual sem ela. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
     <!-- Leitura de mídia para a GALERIA do editor (Adicionar → mídia), pedida
          só quando ela abre; o seletor de fotos do sistema (PickVisualMedia)
@@ -165,6 +170,16 @@
                 <category android:name="android.intent.category.DEFAULT"/>
                 <data android:mimeType="application/octet-stream"/>
                 <data android:mimeType="application/x-aurea-project"/>
+            </intent-filter>
+            <!-- AureaMCP: a página de autorização do agente (Claude.ai, ChatGPT…)
+                 tem "Abrir no Aurea" = aurea://mcp/pair?code=ABCD-2345; o app abre
+                 o AureaMCP com o código preenchido (AureaMcp.openPairLink). Só
+                 este caminho: qualquer outro aurea:// é ignorado. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="aurea" android:host="mcp" android:path="/pair"/>
             </intent-filter>
             <!-- "Compartilhar" para o AUREA (a URI vem em EXTRA_STREAM, sem dado). -->
             <intent-filter>

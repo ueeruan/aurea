@@ -204,7 +204,7 @@ AUREA_TEST(LightGlowGoldenGpu, NewInstancesUseOldAppLookAndBehave) {
         const ParameterRegistry* specs = rig.e.effects().params(fx->type);
         const u32 algo = specs->find("algorithm");
         AUREA_CHECK(algo != kInvalidIndex);
-        AUREA_CHECK_NEAR(fx->params[algo].constant.v[0], 1.0f, 1e-6f);
+        AUREA_CHECK_NEAR(fx->params[algo].constant.v[0], std::string(key) == effect_keys::kDeepGlow ? 2.0f : 1.0f, 1e-6f);
         AUREA_CHECK((specs->at(algo).flags & kParamHidden) != 0);
         seek_frame(rig.e, 0);
         const Image8 lit = rig.capture(320);
@@ -234,6 +234,7 @@ AUREA_TEST(LightGlowGoldenGpu, NewInstancesUseOldAppLookAndBehave) {
             brighter += lp > lb + 3; darker += lp + 6 < lb;
         }
         AUREA_CHECK(brighter > 50u);
+        std::printf("    %s source brighter=%u darker=%u\n", key, brighter, darker);
         AUREA_CHECK_EQ(darker, 0u);
 
         // Intensidade 0 = identidade.
@@ -264,7 +265,7 @@ AUREA_TEST(LightGlowGoldenGpu, MissingAlgorithmSlotMeansLegacy) {
         EffectInstance fx;
         initialize_instance(fx, *specs);
         TrackSet tracks;
-        AUREA_CHECK_NEAR(evaluate_param_f(tracks, fx, a, specs->at(a), 0.0, nullptr).v[0], 1.0f, 1e-6f);
+        AUREA_CHECK_NEAR(evaluate_param_f(tracks, fx, a, specs->at(a), 0.0, nullptr).v[0], std::string(key) == effect_keys::kDeepGlow ? 2.0f : 1.0f, 1e-6f);
         AUREA_CHECK((specs->at(a).flags & kParamHidden) != 0);
         fx.params.resize(a);
         AUREA_CHECK_NEAR(evaluate_param_f(tracks, fx, a, specs->at(a), 0.0, nullptr).v[0], 0.0f, 1e-6f);

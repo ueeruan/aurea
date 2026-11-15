@@ -47,6 +47,7 @@ EngineConfig headless_config() {
 #include "PropertyCoverageTests.inl"
 #include "ShapePuppetControls.inl"
 #include "PhotoImport.inl"
+#include "GroupInline.inl"
 
 AUREA_TEST(TextOutline, NonTextTargetPreservesAnchorAnimationAndProjectState) {
     Engine e;
@@ -357,6 +358,76 @@ AUREA_TEST(PreviewBuffer, UiRangesInvalidateBeforeRenderingAndNeverWaitForTheRen
     mock->beforeBeginFrame = {};
     e.shutdown();
     AUREA_CHECK_EQ(e.copy_preview_buffer_ranges(ranges, 30), 0u);
+}
+
+AUREA_TEST(PreviewBuffer, LockAndRenameKeepTheCachedPreviewUnlessAnExpressionCanReadNames) {
+    // 0.5.3: travar e renomear (sem expressão) não mudam pixel: a prévia guardada,
+    // a linha azul e o PreRender ficam. A revisão do modelo continua subindo (a UI
+    // relê a lista). Com uma expressão no projeto, renomear ainda descarta.
+    auto* mock = new aurea::test::MockBackend();
+    Engine e; auto cfg = headless_config(); cfg.backend = mock;
+    AUREA_CHECK(e.initialize(cfg).ok());
+    AUREA_CHECK(e.new_project(64, 64, 30., "neutro").ok());
+    int window = 0;
+    AUREA_CHECK(e.attach_surface(&window, 64, 64).ok());
+    const auto shape = e.add_shape(0);
+    AUREA_CHECK(shape.ok());
+    AUREA_CHECK(e.render_frame().ok());
+    i64 ranges[60]{};
+    AUREA_CHECK_EQ(e.copy_preview_buffer_ranges(ranges, 30), 1u);
+    const LayerId id = LayerId::unpack(*shape);
+
+    // A revisão que as UIs leem (fill_status → EngineStatusPOD) continua subindo.
+    bridge::EngineStatusPOD pod;
+    e.fill_status(pod);
+    const u32 rev0 = pod.modelRevision;
+    Command lock; lock.type = CommandType::LayerSetLocked; lock.layer_locked = {id, true};
+    AUREA_CHECK(e.apply_command(lock).ok());
+    e.fill_status(pod);
+    AUREA_CHECK(pod.modelRevision != rev0);                          // a UI ainda vê a mudança
+    AUREA_CHECK_EQ(e.copy_preview_buffer_ranges(ranges, 30), 1u);    // a prévia guardada fica
+    Command rename; rename.type = CommandType::LayerSetName; rename.layer_ref.layer = id;
+    AUREA_CHECK(e.apply_command(rename, "novo nome").ok());
+    AUREA_CHECK_EQ(e.copy_preview_buffer_ranges(ranges, 30), 1u);
+    AUREA_CHECK(e.render_frame().ok());
+    AUREA_CHECK_EQ(e.copy_preview_buffer_ranges(ranges, 30), 1u);
+
+    // Uma expressão em qualquer lugar do projeto: renomear volta a descartar.
+    Command add; add.type = CommandType::EffectAdd;
+    add.effect_add = {id, e.effects().find_key(effect_keys::kGaussianBlur), kInvalidIndex};
+    lock.layer_locked = {id, false};
+    AUREA_CHECK(e.apply_command(lock).ok());
+    AUREA_CHECK(e.apply_command(add).ok());
+    AUREA_CHECK(e.render_frame().ok());
+    AUREA_CHECK_EQ(e.copy_preview_buffer_ranges(ranges, 30), 1u);
+    auto* comp = e.project()->timeline().composition(e.project()->timeline().current());
+    AUREA_CHECK(comp && !comp->layer(id)->effects.empty() && !comp->layer(id)->effects[0].params.empty());
+    if (comp && !comp->layer(id)->effects.empty() && !comp->layer(id)->effects[0].params.empty())
+        comp->layer(id)->effects[0].params[0].source = ParamSource::Expression;
+    AUREA_CHECK(e.apply_command(rename, "outro nome").ok());
+    AUREA_CHECK_EQ(e.copy_preview_buffer_ranges(ranges, 30), 0u);
+    e.shutdown();
+}
+
+AUREA_TEST(Thermal, HotThermalPolicyFloorsTheAutomaticPreviewAtHalf) {
+    // 0.5.3: o piso de resolução da política térmica (QUENTE = 1/2) chega ao AUTO.
+    // Antes `set_quality_floor` não tinha quem chamasse e o QUENTE não mudava a escala.
+    auto* mock = new aurea::test::MockBackend();
+    Engine e; auto cfg = headless_config(); cfg.backend = mock;
+    AUREA_CHECK(e.initialize(cfg).ok());
+    AUREA_CHECK(e.new_project(64, 64, 30., "quente").ok());
+    int window = 0;
+    AUREA_CHECK(e.attach_surface(&window, 64, 64).ok());
+    AUREA_CHECK(e.add_shape(0).ok());
+    AUREA_CHECK(e.render_frame().ok());
+    AUREA_CHECK_EQ(e.read_status().previewDenominator, 1u);
+    const ThermalState hot = thermal_state_from_android(3);   // SEVERE do Android = QUENTE
+    e.set_thermal(static_cast<u32>(hot.level), hot.throttling);
+    AUREA_CHECK_EQ(e.caps().thermal_tier(), ThermalTier::Hot);
+    for (int i = 0; i < 3; ++i) { e.request_render(); (void)e.render_frame(); }
+    AUREA_CHECK(e.read_status().previewDenominator >= 2u);
+    e.set_thermal(0, false);
+    e.shutdown();
 }
 
 AUREA_TEST(Engine, DuplicateSelectsOnlyCopiesAndMovingThemPreservesOriginals) {

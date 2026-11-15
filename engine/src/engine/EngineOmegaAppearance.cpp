@@ -17,6 +17,7 @@
 #include "aurea/timeline/Composition.hpp"
 #include "aurea/timeline/Layer.hpp"
 #include "aurea/timeline/ShapeFill.hpp"
+#include "TextShadowMigration.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -435,6 +436,58 @@ u32 Engine::query_snap_targets(u64 layerId, u32 axis, f32* values, f32* guides, 
     std::copy(v.begin(), v.begin() + written, values);
     if (guides) std::copy(g.begin(), g.begin() + written, guides);
     return written;
+}
+
+// =============================================================================
+// D2 (13/11/2026): a sombra antiga do texto vira a decoração Sombra
+// (TextShadowMigration.hpp). Conta: deslocamento (dx, dy) → direção atan2 e
+// distância; a cor do texto é sRGB e a do efeito é linear; o alfa da cor vira a
+// opacidade do efeito; o borrão do texto (raio ≈ metade do valor) vira a
+// suavidade, que espalha meia suavidade de cada lado.
+// =============================================================================
+bool migrate_text_shadow_to_decoration(Layer& l, const EffectRegistry& registry) noexcept {
+    if (l.kind != LayerKind::Text || !l.text.shadow || !l.captions.empty()) return false;
+    TextData& t = l.text;
+    const Vec4 c = t.shadowColor;
+    if (!(c.w > 0.0f) || !std::isfinite(c.w)) {
+        t.shadow = false;   // invisível: não há visual a levar
+        return true;
+    }
+    const EffectTypeId type = registry.find_key(effect_keys::kDropShadow);
+    const ParameterRegistry* params = registry.params(type);
+    // Sem o efeito ou com a pilha cheia, a sombra antiga continua desenhando.
+    if (!params || params->count() <= kShadowSoftness || l.effects.size() >= kMaxEffectCount) return false;
+    bool hasDecoration = false;
+    for (const EffectInstance& e : l.effects) hasDecoration |= e.role == kEffectRoleShadow;
+    EffectInstance e;
+    e.id = l.alloc_effect_id();
+    e.type = type;
+    e.role = static_cast<u8>(hasDecoration ? kEffectRoleNone : kEffectRoleShadow);
+    e.expanded = false;
+    initialize_instance(e, *params);
+    auto set = [&](u32 index, ParamValue v) { if (index < e.params.size()) e.params[index].constant = v; };
+    auto lin = [](f32 x) { return Color::srgb_to_linear(std::clamp(std::isfinite(x) ? x : 0.0f, 0.0f, 1.0f)); };
+    set(kShadowColor, ParamValue::color(lin(c.x), lin(c.y), lin(c.z), 1.0f));
+    set(kShadowOpacity, ParamValue::scalar(std::clamp(c.w, 0.0f, 1.0f) * 100.0f));
+    const f32 dx = std::isfinite(t.shadowOffset.x) ? t.shadowOffset.x : 0.0f;
+    const f32 dy = std::isfinite(t.shadowOffset.y) ? t.shadowOffset.y : 0.0f;
+    const f32 distance = std::min(std::hypot(dx, dy), 5000.0f);
+    // Sem deslocamento (o brilho dos presets de legenda) a direção não importa.
+    set(kShadowDirection, ParamValue::scalar(distance > 1e-4f ? std::atan2(dy, dx) * kRad2Deg : 45.0f));
+    set(kShadowDistance, ParamValue::scalar(distance));
+    set(kShadowSoftness, ParamValue::scalar(std::clamp(std::isfinite(t.shadowBlur) ? t.shadowBlur : 0.0f, 0.0f, 5000.0f)));
+    if (hasDecoration) {
+        // A camada já tem a sombra nova: a antiga entra como efeito comum no
+        // INÍCIO da pilha (era desenhada junto com as letras, antes dos efeitos).
+        l.effects.insert(l.effects.begin(), std::move(e));
+    } else {
+        u32 begin = 0, end = 0;
+        role_span(l, kEffectRoleShadow, begin, end);
+        l.effects.insert(l.effects.begin() + end, std::move(e));
+    }
+    l.modelEffects = true;
+    t.shadow = false;
+    return true;
 }
 
 } // namespace aurea

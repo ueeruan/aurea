@@ -153,6 +153,10 @@ struct SceneNodeTexture {
     u32 node = 0;
     TextureHandle texture{};
     f32 repeat = 1.0f;
+    /// v76: deslocamento (em repetições da imagem, com o rolar do instante já
+    /// somado) e giro (radianos) da textura — KHR_texture_transform.
+    Vec2 offset{0.0f, 0.0f};
+    f32 rotation = 0.0f;
 };
 
 /// TEXTURA DO MATERIAL (0.3.6, MaterialOverride::textureImage/textureLayer):

@@ -22,6 +22,32 @@
 #include <cmath>
 
 namespace aurea {
+namespace {
+// 0.5.3: o cache de LUTs do motor (as tabelas já lidas do .cube) era apagado INTEIRO
+// ao chegar a 8 entradas. Com mais de 8 LUTs no projeto, cada uma voltava a ser lida
+// e interpretada do disco (até 32 MB de texto) pelo render, no preparo do quadro, com
+// o modelo travado. Agora só sai o necessário para caber num teto em bytes; primeiro
+// as tabelas que mais ninguém segura (use_count 1), depois as outras. O pior caso de
+// memória é o de antes (8 tabelas de 65^3 = 35 MB); o caso comum (33^3, 575 KB cada)
+// deixa de despejar.
+constexpr usize kCubeLutCacheBytes = 32u << 20;
+constexpr usize kCubeLutCacheEntries = 256;
+void make_cube_lut_room(std::unordered_map<u64, std::shared_ptr<const CubeLut>>& cache, const std::shared_ptr<const CubeLut>& incoming) {
+    const auto bytes_of = [](const std::shared_ptr<const CubeLut>& c) {
+        return c ? c->values.size() * sizeof(Vec4) : usize{0};
+    };
+    usize total = bytes_of(incoming);
+    for (const auto& entry : cache) total += bytes_of(entry.second);
+    for (int pass = 0; pass < 2; ++pass) {
+        for (auto it = cache.begin(); it != cache.end() && (total > kCubeLutCacheBytes || cache.size() >= kCubeLutCacheEntries);) {
+            if (pass == 0 && it->second && it->second.use_count() > 1) { ++it; continue; }
+            total -= std::min(total, bytes_of(it->second));
+            it = cache.erase(it);
+        }
+    }
+}
+} // namespace
+
 std::shared_ptr<const CubeLut> Engine::cube_lookup(void* context, AssetId id) {
     auto& engine = *static_cast<Engine*>(context);
     if (auto it = engine.cubeLuts_.find(id.pack()); it != engine.cubeLuts_.end()) return it->second;
@@ -29,7 +55,7 @@ std::shared_ptr<const CubeLut> Engine::cube_lookup(void* context, AssetId id) {
     if (!asset || asset->kind != AssetKind::Lut) return {};
     auto parsed = read_color_table(engine.resolve_asset_path(asset->sourcePath));
     auto data = parsed.ok() ? std::make_shared<const CubeLut>(std::move(*parsed)) : nullptr;
-    if (engine.cubeLuts_.size() >= 8) engine.cubeLuts_.clear();
+    make_cube_lut_room(engine.cubeLuts_, data);
     engine.cubeLuts_[id.pack()] = data;
     return data;
 }
@@ -65,8 +91,11 @@ Status Engine::import_color_lut(u64 layerId, u32 effectId, const char* path) noe
         // Palettize: [0] paleta (5 = importada), [1] o arquivo.
         effect->params[1].constant.ref = id.pack();
         effect->params[0].constant = ParamValue::scalar(5.0f);
-        if (cubeLuts_.size() >= 8) cubeLuts_.clear();
-        cubeLuts_[id.pack()] = std::make_shared<const CubeLut>(std::move(*parsed));
+        {
+            auto table = std::make_shared<const CubeLut>(std::move(*parsed));
+            make_cube_lut_room(cubeLuts_, table);
+            cubeLuts_[id.pack()] = std::move(table);
+        }
         bump_model_revision_locked();
         project_->mark_dirty(); request_render(); return OkStatus;
     }
@@ -76,8 +105,11 @@ Status Engine::import_color_lut(u64 layerId, u32 effectId, const char* path) noe
     const Vec3 lo = parsed->domainMin, hi = parsed->domainMax;
     effect->params[base + 4].constant = ParamValue::vec3(lo.x, lo.y, lo.z);
     effect->params[base + 5].constant = ParamValue::vec3(hi.x, hi.y, hi.z);
-    if (cubeLuts_.size() >= 8) cubeLuts_.clear();
-    cubeLuts_[id.pack()] = std::make_shared<const CubeLut>(std::move(*parsed));
+    {
+        auto table = std::make_shared<const CubeLut>(std::move(*parsed));
+        make_cube_lut_room(cubeLuts_, table);
+        cubeLuts_[id.pack()] = std::move(table);
+    }
     bump_model_revision_locked();
     project_->mark_dirty(); request_render(); return OkStatus;
 }

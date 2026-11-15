@@ -46,11 +46,12 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.nativeCanvas
+import com.aurea.aurea.ui.platform.platformCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
@@ -62,6 +63,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.aurea.aurea.R
@@ -198,6 +200,12 @@ internal class EditLaneLayout(val tops: FloatArray, val heights: FloatArray, val
 
         /** O teto da rolagem: a última faixa encosta embaixo (nunca negativo). */
         fun maxScroll(bottom: Float, viewport: Float): Float = if (viewport <= 0f) 0f else max(0f, bottom - viewport)
+
+        fun clampHorizontal(offset: Float, duration: Int, viewport: Float, pxPerFrame: Float): Float {
+            if (!offset.isFinite() || !viewport.isFinite() || !pxPerFrame.isFinite() || viewport <= 0f || pxPerFrame <= 0f) return 0f
+            val lastOffset = max(0f, duration.toFloat() - viewport / pxPerFrame)
+            return offset.coerceIn(0f, lastOffset)
+        }
     }
 }
 
@@ -230,7 +238,7 @@ private class ClipDrag(val kind: Int, val clip: LayerRow, val neighbour: LayerRo
 @Stable
 private class EditView(pxPerFrame: Float) {
     var pxPerFrame by mutableFloatStateOf(pxPerFrame)
-    var scrollFrames by mutableFloatStateOf(-8f)
+    var scrollFrames by mutableFloatStateOf(0f)
     var scrollY by mutableFloatStateOf(0f)
     var drag by mutableStateOf<ClipDrag?>(null)
 }
@@ -396,11 +404,17 @@ private fun EditLanes(
     val currentSnap by rememberUpdatedState(snap)
     val currentLayout by rememberUpdatedState(layout)
     val currentHeight by rememberUpdatedState(height)
+    val currentDuration by rememberUpdatedState(store.project.durationFrames)
     val currentTransition by rememberUpdatedState(onTransition)
 
     fun xOf(frame: Float) = headW + (frame - view.scrollFrames) * view.pxPerFrame
     fun frameAt(x: Float) = view.scrollFrames + (x - headW) / view.pxPerFrame
     fun clampScrollY() { view.scrollY = view.scrollY.coerceIn(0f, EditLaneLayout.maxScroll(currentLayout.bottom, currentHeight)) }
+    fun clampScrollX() {
+        view.scrollFrames = EditLaneLayout.clampHorizontal(view.scrollFrames, currentDuration, width - headW, view.pxPerFrame)
+    }
+
+    LaunchedEffect(width, store.project.durationFrames, view.pxPerFrame) { clampScrollX() }
 
     // Tocando, o cabeçote nunca sai da tela: a vista vira a página, como no Premiere.
     LaunchedEffect(view, width) {
@@ -408,6 +422,7 @@ private fun EditLanes(
             if (view.drag != null) return@collect
             val visible = (width - headW) / view.pxPerFrame
             if (frame < view.scrollFrames || frame > view.scrollFrames + visible * 0.92f) view.scrollFrames = frame - visible * 0.08f
+            clampScrollX()
         }
     }
     // O clipe escolhido rola para dentro da vista (com painel aberto a área encolhe).
@@ -614,6 +629,7 @@ private fun EditLanes(
                                 }
                                 val pan = event.calculatePan()
                                 view.scrollFrames -= pan.x / view.pxPerFrame
+                                clampScrollX()
                             }
                             event.changes.forEach { if (it.positionChanged()) it.consume() }
                             continue
@@ -623,6 +639,7 @@ private fun EditLanes(
                         if (current != null) updateDrag(current, start, change.position)
                         else {
                             view.scrollFrames -= (change.position.x - last.x) / view.pxPerFrame
+                            clampScrollX()
                             view.scrollY -= change.position.y - last.y
                             clampScrollY()
                         }
@@ -651,7 +668,7 @@ private fun EditLanes(
     }
     laneClips.forEachIndexed { i, lane ->
         lane.forEach { clip ->
-            if (!clip.virtual) ClipTarget(store, clip.row, view, layout.tops[i], layout.heights[i], headW, rulerH)
+            if (!clip.virtual) ClipTarget(store, clip.row, view, layout.tops[i], layout.heights[i], headW, rulerH, width)
         }
     }
     // O canto da régua diz qual ferramenta está ativa: a barra é só de ícones.
@@ -709,14 +726,20 @@ private fun HeadLetter(letter: String, on: Boolean, label: String, tag: String, 
 
 /** O alvo de acessibilidade de um clipe: não intercepta toque, só dá nome e ação ao leitor de tela. */
 @Composable
-private fun ClipTarget(store: EditorStore, clip: LayerRow, view: EditView, top: Float, heightPx: Float, headW: Float, rulerH: Float) {
-    val density = LocalDensity.current
+private fun ClipTarget(store: EditorStore, clip: LayerRow, view: EditView, top: Float, heightPx: Float, headW: Float, rulerH: Float, viewportWidth: Float) {
     val selected = clip.id in store.selection
     val description = if (selected) stringResource(R.string.edit_clip_selected, clip.name) else clip.name
     Box(
         Modifier
-            .offset { IntOffset((headW + (clip.startFrame - view.scrollFrames) * view.pxPerFrame).roundToInt(), (top - view.scrollY).roundToInt().coerceAtLeast(rulerH.roundToInt())) }
-            .size(with(density) { ((clip.endFrame - clip.startFrame) * view.pxPerFrame).coerceAtLeast(1f).toDp() }, with(density) { heightPx.toDp() })
+            .offset { IntOffset(max(headW, headW + (clip.startFrame - view.scrollFrames) * view.pxPerFrame).roundToInt(),
+                (top - view.scrollY).roundToInt().coerceAtLeast(rulerH.roundToInt())) }
+            .layout { measurable, _ ->
+                val left = max(headW, headW + (clip.startFrame - view.scrollFrames) * view.pxPerFrame)
+                val right = min(viewportWidth, headW + (clip.endFrame - view.scrollFrames) * view.pxPerFrame)
+                val visibleWidth = max(0f, right - left).roundToInt()
+                val placeable = measurable.measure(Constraints.fixed(visibleWidth, heightPx.roundToInt()))
+                layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+            }
             .testTag("edit.clip.${clip.id}")
             .semantics { contentDescription = description; this.selected = selected; role = Role.Button },
     )
@@ -732,7 +755,7 @@ private fun DrawScope.label(text: String, x: Float, y: Float, sizePx: Float, col
         if (n <= 0) return
         text.substring(0, n)
     }
-    drawContext.canvas.nativeCanvas.drawText(shown, x, y, TextPaint)
+    platformCanvas.drawText(shown, x, y, TextPaint)
 }
 
 private fun rulerStepFrames(pxPerFrame: Float, fps: Float, minGap: Float): Int {
@@ -901,7 +924,7 @@ private fun DrawScope.drawClip(
         // Miniatura no começo do clipe, como no Premiere.
         if ((kind == 1 || kind == 2 || kind == 12) && w > 44f * dp && left >= headW - 44f * dp) {
             val heightPx = (laneH - stripH - 2 * pad).roundToInt().coerceIn(16, 128)
-            val thumb = store.thumbnails.get(row.id, row.startFrame, heightPx)
+            val thumb = waves.thumbnail(store, row.id, row.startFrame, heightPx, generation)
             if (thumb != null) {
                 val image = thumb.asImageBitmap()
                 val scale = heightPx.toFloat() / image.height
@@ -992,5 +1015,26 @@ internal class EditWaveCache {
         return wave
     }
 
-    private companion object { const val MAX = 4096 }
+    // 0.5.3: miniatura que o motor ainda não tinha → geração em que foi pedida. Sem
+    // isto, cada clipe visível ainda sem miniatura fazia uma consulta bloqueante ao
+    // motor (no lock do modelo que o render segura) a CADA desenho da timeline,
+    // inclusive a cada quadro tocando. Só repergunta quando a geração de miniaturas
+    // muda, como a timeline principal (ThumbStrip).
+    private data class ThumbKey(val layer: Long, val frame: Int, val height: Int)
+    private val thumbMisses = HashMap<ThumbKey, Int>()
+
+    fun thumbnail(store: EditorStore, layer: Long, frame: Int, heightPx: Int, generation: Int) =
+        ThumbKey(layer, frame, heightPx).let { key ->
+            if (thumbMisses[key] == generation) null
+            else store.thumbnails.get(layer, frame, heightPx).also { bmp ->
+                if (bmp == null) {
+                    if (thumbMisses.size > MAX_THUMB_MISSES) thumbMisses.clear()
+                    thumbMisses[key] = generation
+                } else {
+                    thumbMisses.remove(key)
+                }
+            }
+        }
+
+    private companion object { const val MAX = 4096; const val MAX_THUMB_MISSES = 512 }
 }

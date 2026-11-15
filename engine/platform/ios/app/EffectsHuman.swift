@@ -2082,6 +2082,7 @@ func fxEffectCategoryLabel(_ category: String) -> String {
     case "texto": return AureaText.t("panel_texto")
     case "rastreio": return AureaText.t("panel_rastreio")
     case "mascara": return AureaText.t("sh_dock_mask")
+    case "ferramentas": return AureaText.t("fn_group_aurea_tools")   // funções do AUREA (13/11/2026)
     // Efeitos mais novos publicam a categoria em inglês: traduz igual.
     case "distort": return AureaText.t("cat_distort")
     case "light": return AureaText.t("cat_light")
@@ -2329,6 +2330,16 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
         "boligrafo garabato шариковая ручка बॉलपॉइंट पेन قلم حبر جاف pulpen coretan")
     put("aurea.transition.dust", "fx045_desc_dust", [.imagem, .video, .texto, .vetor, .forma, .preComposicao, .cena3D],
         "polvo viento пыль ветер धूल हवा غبار رياح debu angin")
+    // Funções do AUREA (13/11/2026): as funções da camada que abrem pelo navegador.
+    put(FxEffectTool.animation.key, "fn_tool_animation_desc", FxAllTargets, FxEffectTool.animation.keywords)
+    put(FxEffectTool.tracking.key, "fn_tool_tracking_desc", [.video], FxEffectTool.tracking.keywords)
+    put(FxEffectTool.preciseCut.key, "fn_tool_precise_cut_desc", [.video], FxEffectTool.preciseCut.keywords)
+    put(FxEffectTool.puppet.key, "fn_tool_puppet_desc", [.imagem], FxEffectTool.puppet.keywords)
+    put(FxEffectTool.rigMocap.key, "fn_tool_rig_desc", [.cena3D], FxEffectTool.rigMocap.keywords)
+    put(FxEffectTool.shapeOperators.key, "fn_tool_operators_desc", [.vetor], FxEffectTool.shapeOperators.keywords)
+    put(FxEffectTool.layer3D.key, "fn_tool_layer3d_desc", FxAllTargets, FxEffectTool.layer3D.keywords)
+    put(FxEffectTool.layerOptions.key, "fn_tool_layer_options_desc", FxAllTargets, FxEffectTool.layerOptions.keywords)
+    put(FxEffectTool.textLayout.key, "fn_text_layout_desc", [.texto], FxEffectTool.textLayout.keywords)
     return out
 }()
 

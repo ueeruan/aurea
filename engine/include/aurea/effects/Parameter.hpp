@@ -24,6 +24,7 @@
 #include <cmath>
 #include <initializer_list>
 #include <limits>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -423,6 +424,10 @@ struct EffectInstance {
     MaskId       mask{};
     /// Malha de deformação (só aurea.distort.mesh_warp; vazio nos outros).
     std::vector<MeshWarpData> meshes;
+    /// Itens do Menu suspenso (só aurea.control.dropdown, o Dropdown Menu
+    /// Control do AE; vazio nos outros e = "Item 1..3" nele). Gravado na seção
+    /// Expressions do projeto, fora da Timeline.
+    std::vector<std::string> menuItems;
 };
 
 // Omega aparência (P0-4): papéis de `EffectInstance::role`. A ordem numérica é

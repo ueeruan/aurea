@@ -26,13 +26,16 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
 } p;
 
 // Quadro de origem (o "atual") e o de destino, conforme o sentido.
-float src_luma(vec2 uv) { const vec2 c = texture(u_level, uv).rg; return p.flags.z > 0.5 ? c.g : c.r; }
+float src_luma(vec2 uv) { const vec2 c = textureLod(u_level, uv, 0.0).rg; return p.flags.z > 0.5 ? c.g : c.r; }
 float dst_luma(vec2 uv) { const vec2 c = textureLod(u_level, uv, 0.0).rg; return p.flags.z > 0.5 ? c.r : c.g; }
 
 void main() {
-    vec2 flow = p.flags.x > 0.5 ? texture(u_coarse, v_uv).xy * 2.0 : vec2(0.0);
+    const vec2 coarseScale = p.texel.zw / max(vec2(textureSize(u_coarse, 0)), vec2(1.0));
+    vec2 flow = p.flags.x > 0.5 ? textureLod(u_coarse, v_uv, 0.0).xy * coarseScale : vec2(0.0);
     float ix[25], iy[25], av[25];
     float gxx = 0.0, gxy = 0.0, gyy = 0.0;
+    float meanA = 0.0, squareA = 0.0, meanIx = 0.0, meanIy = 0.0;
+    float gradientXA = 0.0, gradientYA = 0.0;
     for (int k = 0; k < 25; ++k) {
         vec2 uv = v_uv + vec2(float(k % 5 - 2), float(k / 5 - 2)) * p.texel.xy;
         float gx = 0.5 * (src_luma(uv + vec2(p.texel.x, 0.0)) - src_luma(uv - vec2(p.texel.x, 0.0)));
@@ -40,9 +43,32 @@ void main() {
         ix[k] = gx;
         iy[k] = gy;
         av[k] = src_luma(uv);
+        meanA += av[k];
+        squareA += av[k] * av[k];
+        meanIx += gx;
+        meanIy += gy;
+        gradientXA += gx * av[k];
+        gradientYA += gy * av[k];
         gxx += gx * gx;
         gxy += gx * gy;
         gyy += gy * gy;
+    }
+    meanA /= 25.0;
+    const float varianceA = max(squareA / 25.0 - meanA * meanA, 0.0);
+    meanIx /= 25.0;
+    meanIy /= 25.0;
+    const float originalEnergy = gxx + gyy;
+    // Eliminate the patch's additive brightness degree of freedom from
+    // the normal equations. Exposure changes must not become displacement.
+    const float projectX = (gradientXA - 25.0 * meanIx * meanA) / max(25.0 * varianceA, 1e-8);
+    const float projectY = (gradientYA - 25.0 * meanIy * meanA) / max(25.0 * varianceA, 1e-8);
+    gxx = 0.0; gxy = 0.0; gyy = 0.0;
+    for (int k = 0; k < 25; ++k) {
+        ix[k] -= meanIx + projectX * (av[k] - meanA);
+        iy[k] -= meanIy + projectY * (av[k] - meanA);
+        gxx += ix[k] * ix[k];
+        gxy += ix[k] * iy[k];
+        gyy += iy[k] * iy[k];
     }
     // Perto de um contorno, o vetor interpolado do nível de cima é a mistura do
     // objeto com o fundo. Antes de iterar, parte do vizinho que melhor explica
@@ -52,7 +78,7 @@ void main() {
         float spread = 0.0;
         for (int c = 0; c < 8; ++c) {
             const float angle = float(c) * 0.7853981634;
-            cands[c] = textureLod(u_coarse, v_uv + vec2(cos(angle), sin(angle)) * 3.0 * p.texel.xy, 0.0).xy * 2.0;
+            cands[c] = textureLod(u_coarse, v_uv + vec2(cos(angle), sin(angle)) * 3.0 * p.texel.xy, 0.0).xy * coarseScale;
             spread = max(spread, length(cands[c] - flow));
         }
         if (spread > 0.5) {
@@ -75,24 +101,35 @@ void main() {
     // Amortecimento: em região lisa ou com ruído a matriz quase não tem
     // inversa e o passo explodia em vetor aleatório; assim ele fica pequeno e
     // o pixel mantém o movimento que veio do nível de cima.
-    gxx += p.flags.w;
-    gyy += p.flags.w;
+    const float damping = p.flags.w * clamp((gxx + gyy) / max(originalEnergy, 1e-8), 0.05, 1.0);
+    gxx += damping;
+    gyy += damping;
     float det = gxx * gyy - gxy * gxy;
     // Menor autovalor: confiança do rastreio (canto > borda > liso).
     float tr = gxx + gyy;
-    float lmin = max(0.5 * (tr - sqrt(max(tr * tr - 4.0 * det, 0.0))) - p.flags.w, 0.0);
-    if (det > 1e-9) {
+    float lmin = max(0.5 * (tr - sqrt(max(tr * tr - 4.0 * det, 0.0))) - damping, 0.0);
+    if (det > 1e-12) {
         int iters = int(p.flags.y);
         for (int it = 0; it < 8; ++it) {
             if (it >= iters) break;
             float bx = 0.0, by = 0.0;
+            float samples[25];
+            float meanB = 0.0, squareB = 0.0;
             for (int k = 0; k < 25; ++k) {
                 vec2 uv = v_uv + (vec2(float(k % 5 - 2), float(k / 5 - 2)) + flow) * p.texel.xy;
                 // Each pyramid level is a separate single-mip texture. This
                 // branch/iteration count varies per pixel: implicit texture
                 // derivatives are undefined here, so keep the same bilinear
                 // sampling with an explicit base level on Vulkan and Metal.
-                float dt = dst_luma(uv) - av[k];
+                samples[k] = dst_luma(uv);
+                meanB += samples[k];
+                squareB += samples[k] * samples[k];
+            }
+            meanB /= 25.0;
+            const float varianceB = max(squareB / 25.0 - meanB * meanB, 0.0);
+            const float gain = clamp(sqrt(varianceA / max(varianceB, 1e-8)), 0.25, 4.0);
+            for (int k = 0; k < 25; ++k) {
+                const float dt = gain * (samples[k] - meanB) - (av[k] - meanA);
                 bx += ix[k] * dt;
                 by += iy[k] * dt;
             }

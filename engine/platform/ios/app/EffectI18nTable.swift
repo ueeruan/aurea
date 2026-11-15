@@ -128,6 +128,9 @@ enum EffectI18nTable {
     aurea.control.checkbox|0|checkbox|fxl_on|
     aurea.control.color|0|color|fxl_color|
     aurea.control.point|0|point|fxl_point|
+    aurea.control.dropdown|0|menu|fxl_ae_menu|
+    aurea.control.layer|0|layer|fxo_layer|
+    aurea.control.point3d|0|point3d|fxl_ae_point_3d|
     aurea.time.echo|0|copies|fxl_copies|
     aurea.time.echo|1|delay|fx_intervalo|
     aurea.time.echo|2|decay|fx_desvanecer|
@@ -1851,6 +1854,11 @@ enum EffectI18nTable {
     aurea.3d.part_texture|1|image|fxl_image|
     aurea.3d.part_texture|2|all_parts|fxl_all_parts|
     aurea.3d.part_texture|3|repeat|fxo_repeat|
+    aurea.3d.part_texture|4|offset_x|fxl_shift_x|
+    aurea.3d.part_texture|5|offset_y|fxl_shift_y|
+    aurea.3d.part_texture|6|rotation|fxl_rotate|
+    aurea.3d.part_texture|7|scroll_x|fxl_scroll_x|
+    aurea.3d.part_texture|8|scroll_y|fxl_scroll_y|
     aurea.3d.shatter|0|progress|fxl_explosion|
     aurea.3d.shatter|1|shape|fxl_pieces|fxo_squares,fxl_triangles,fxo_glass
     aurea.3d.shatter|2|pieces|fxl_number_of_pieces|
@@ -2255,6 +2263,13 @@ enum EffectI18nTable {
     aurea.color.grade|70|lut|fxl_creative_lut_cube|
     aurea.color.grade|71|lut_intensity|fxl_lut_intensity|
     aurea.color.grade|76|mix|grade_intensity|
+    aurea.color.grade|79|window_type|fxl_window|fxo_none,fxo_rectangle,fxo_ellipse
+    aurea.color.grade|80|window_center|fxl_window_center|
+    aurea.color.grade|81|window_size|fxl_window_size|
+    aurea.color.grade|82|window_rotation|fxl_window_rotation|
+    aurea.color.grade|83|window_softness|fxl_window_softness|
+    aurea.color.grade|84|window_invert|fxl_invert_window|
+    aurea.color.grade|85|window_show|fxl_show_window|
     aurea.generate.constellation|0|source|fx030c_source|fxo_cloud,fxo_sphere,fx_grade,fxo_ring,fxo_plane,fxo_layer_path
     aurea.generate.constellation|1|count|fx030c_count|
     aurea.generate.constellation|2|seed|fxl_seed|

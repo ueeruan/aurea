@@ -5,6 +5,7 @@
 
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Thread.hpp"
+#include "aurea/core/SafeAlloc.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -337,8 +338,11 @@ bool ThumbnailService::image(u64 assetKey, const u8* rgba, u32 width, u32 height
     ++misses_;
     Image img;
     img.height = thumbHeight;
-    img.width = std::max<u32>(1, static_cast<u32>(std::lround(static_cast<f64>(thumbHeight) * width / height)));
-    img.rgba.resize(static_cast<usize>(img.width) * img.height * 4);
+    // 0.5.3: panorama extremo (8192×16) pedia uma tira de centenas de MB; a
+    // miniatura da timeline nunca passa de 4096 de largura. A alocação não lança
+    // (arquivo -fno-exceptions no celular): sem memória, sem miniatura.
+    img.width = std::clamp<u32>(static_cast<u32>(std::min<f64>(4096.0, std::lround(static_cast<f64>(thumbHeight) * width / height))), 1u, 4096u);
+    if (!try_resize_bytes(img.rgba, static_cast<usize>(img.width) * img.height * 4)) return false;
     // 0.3.0 (PNG transparente do Ibis Paint "com linhas"): média da ÁREA de
     // cada pixel da miniatura ponderada pelo alfa, sobre o xadrez (como a do
     // vídeo/sequência). Antes era um ponto por pixel e o alfa ia fora: a cor

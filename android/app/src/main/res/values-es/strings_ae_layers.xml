@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE layers (2026-11-12): qualidade da camada, clipe do modelo 3D, transições por camada, guias da prévia e velocidade negativa. -->
+<resources>
+    <string name="ae_layer_quality">Calidad</string>
+    <string name="ae_quality_best">Óptima</string>
+    <string name="ae_quality_draft">Borrador</string>
+    <string name="ae_quality_wireframe">Estructura alámbrica</string>
+    <string name="ae_quality_hint">Borrador y Estructura alámbrica solo afectan a la vista previa; la exportación usa Óptima</string>
+    <string name="ae_layer_sampling">Muestreo</string>
+    <string name="ae_sampling_bilinear">Bilineal</string>
+    <string name="ae_sampling_bicubic">Bicúbico</string>
+    <string name="ae_sampling_hint">Bicúbico mantiene más nítida la imagen ampliada (en Óptima)</string>
+    <string name="ae_model_clip">Animación del modelo</string>
+    <string name="ae_model_clip_none">Quieto</string>
+    <string name="ae_model_clip_n">Clip %1$d</string>
+    <string name="ae_model_clip_empty">Este modelo no tiene animación</string>
+    <string name="ae_transitions">Transiciones</string>
+    <string name="ae_transition_in">Entrada</string>
+    <string name="ae_transition_out">Salida</string>
+    <string name="ae_transition_none">Ninguna</string>
+    <string name="ae_transition_dissolve">Disolver</string>
+    <string name="ae_transition_slide_up">Deslizar arriba</string>
+    <string name="ae_transition_slide_left">Deslizar desde la izquierda</string>
+    <string name="ae_transition_zoom">Zoom</string>
+    <string name="ae_transition_spin">Girar</string>
+    <string name="ae_transition_duration">Duración</string>
+    <string name="ae_transition_hint">Se aplican en los bordes del clip; no crean fotogramas clave</string>
+    <string name="ae_guides_safe">Márgenes seguros</string>
+    <string name="ae_guides_rulers">Reglas</string>
+    <string name="ae_speed_reverse_point">Invertir sentido</string>
+    <string name="ae_speed_reverse_hint">La velocidad negativa reproduce la fuente hacia atrás dentro de la rampa (hasta el fotograma 0)</string>
+</resources>

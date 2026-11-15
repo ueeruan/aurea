@@ -89,6 +89,10 @@ void Backend::shutdown() noexcept {
     recoveryFence_ = VK_NULL_HANDLE;
     if (device_) collect_immediate(true);
 
+#if defined(AUREA_VK_HOST_PRESENT)
+    // Antes da fila adiada: as imagens do anel saem por ela.
+    detach_host_present();
+#endif
     for (u32 i = 0; i < 3; ++i) run_deferred(frames_[i]);
     destroy_swapchain();
     if (surface_) {
@@ -323,11 +327,39 @@ Status Backend::create_device() noexcept {
         instanceFunctions_.vkGetPhysicalDeviceFeatures(physical_, &features2.features);
     }
     hasYcbcr_ = ycbcr.samplerYcbcrConversion == VK_TRUE;
+#if !defined(__ANDROID__)
+    // PC: float16 em shader (VK_KHR_shader_float16_int8; a instância fica no
+    // 1.1, então é a extensão e não o núcleo 1.2) e armazenamento de 16 bits.
+    // Sem consultar, toda placa de mesa saía "fp16 nao" e caía para MID. O
+    // Android segue como estava (recurso desligado e caps falsas).
+    fp16Shader_ = storage16_ = false;
+    VkPhysicalDeviceShaderFloat16Int8FeaturesKHR f16{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES_KHR};
+    VkPhysicalDevice16BitStorageFeatures s16{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES};
+    if (apiVersion_ >= VK_API_VERSION_1_1 && instanceFunctions_.vkGetPhysicalDeviceFeatures2) {
+        const bool hasF16 = has_extension(exts, VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME);
+        VkPhysicalDeviceFeatures2 q{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+        q.pNext = &s16;
+        if (hasF16) s16.pNext = &f16;
+        instanceFunctions_.vkGetPhysicalDeviceFeatures2(physical_, &q);
+        s16.pNext = nullptr;
+        fp16Shader_ = hasF16 && f16.shaderFloat16 == VK_TRUE;
+        storage16_ = s16.storageBuffer16BitAccess == VK_TRUE;
+        if (fp16Shader_) enabled.push_back(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME);
+    }
+#endif
 
     VkPhysicalDeviceSamplerYcbcrConversionFeatures ycbcrEnable{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES};
     ycbcrEnable.samplerYcbcrConversion = hasYcbcr_ ? VK_TRUE : VK_FALSE;
     VkPhysicalDeviceFeatures2 enable{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
     enable.pNext = &ycbcrEnable;
+#if !defined(__ANDROID__)
+    VkPhysicalDeviceShaderFloat16Int8FeaturesKHR f16Enable{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES_KHR};
+    VkPhysicalDevice16BitStorageFeatures s16Enable{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES};
+    f16Enable.shaderFloat16 = fp16Shader_ ? VK_TRUE : VK_FALSE;
+    s16Enable.storageBuffer16BitAccess = storage16_ ? VK_TRUE : VK_FALSE;
+    if (storage16_) { s16Enable.pNext = enable.pNext; enable.pNext = &s16Enable; }
+    if (fp16Shader_) { f16Enable.pNext = enable.pNext; enable.pNext = &f16Enable; }
+#endif
     // Só o que o motor usa. Ligar recurso "por via das dúvidas" custa em alguns
     // drivers móveis (e alguns recusam o dispositivo inteiro).
     enable.features.samplerAnisotropy = features2.features.samplerAnisotropy;
@@ -364,6 +396,13 @@ Status Backend::create_device() noexcept {
                 || std::strcmp(e, "VK_EXT_queue_family_foreign") == 0;
         }), enabled.end());
         hasAhb_ = hasForeignQueue_ = hasYcbcr_ = false;
+#if !defined(__ANDROID__)
+        // Sem a cadeia de recursos: fp16 também não fica ligado.
+        enabled.erase(std::remove_if(enabled.begin(), enabled.end(), [](const char* e) {
+            return std::strcmp(e, VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME) == 0;
+        }), enabled.end());
+        fp16Shader_ = storage16_ = false;
+#endif
         info.pNext = nullptr;
         info.pEnabledFeatures = &enable.features;
         info.enabledExtensionCount = static_cast<u32>(enabled.size());
@@ -427,9 +466,15 @@ void Backend::fill_capabilities() noexcept {
         case VK_PHYSICAL_DEVICE_TYPE_CPU:            caps_.deviceType = GpuDeviceType::Cpu; break;
         default: break;
     }
+#if !defined(__ANDROID__)
+    // PC: o que ficou ligado no dispositivo (create_device).
+    caps_.fp16Arithmetic = fp16Shader_;
+    caps_.fp16Storage = storage16_;
+#else
     caps_.fp16Arithmetic = false; // shaderFloat16 não foi habilitado no dispositivo
-    caps_.int16Arithmetic = f.shaderInt16 == VK_TRUE;
     caps_.fp16Storage = s16.storageBuffer16BitAccess == VK_TRUE;
+#endif
+    caps_.int16Arithmetic = f.shaderInt16 == VK_TRUE;
 
     const VkPhysicalDeviceLimits& l = p.limits;
     caps_.maxTexture2D = l.maxImageDimension2D;

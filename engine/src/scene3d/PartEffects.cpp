@@ -140,29 +140,53 @@ void apply_part_effects(const SceneAsset& asset, const Layer& layer, f64 localTi
     }
 }
 
-void collect_part_textures(const SceneAsset& asset, const Layer& layer, f64 localTime, std::vector<PartTexture>& out) {
+f32 part_texture_offset(f32 offsetPct, f32 scrollPctPerSecond, f64 localFrames, f64 fps) noexcept {
+    const f64 rate = fps > 0.0 && std::isfinite(fps) ? fps : 30.0;
+    f64 v = std::isfinite(offsetPct) ? static_cast<f64>(offsetPct) * 0.01 : 0.0;
+    if (std::isfinite(scrollPctPerSecond) && scrollPctPerSecond != 0.0f && std::isfinite(localFrames))
+        v += static_cast<f64>(scrollPctPerSecond) * 0.01 * (localFrames / rate);
+    // A imagem repete: só a fração conta (e a precisão não se perde com o tempo).
+    v -= std::floor(v);
+    if (!std::isfinite(v) || v >= 1.0) v = 0.0;
+    return static_cast<f32>(v);
+}
+
+void collect_part_textures(const SceneAsset& asset, const Layer& layer, f64 localTime, std::vector<PartTexture>& out,
+                           f64 fps) {
     out.clear();
     if (!has_part_textures(layer)) return;
     std::vector<u32> parts;
     part_nodes(asset, parts);
     if (parts.empty()) return;
     const EffectTypeId swap = effect_type_id(effect_keys::kPart3DTexture);
-    auto put = [&](u32 node, u64 image, f32 repeat) {
-        for (PartTexture& t : out) if (t.node == node) { t.image = image; t.repeat = repeat; return; }
-        out.push_back(PartTexture{node, image, repeat});
+    auto put = [&](const PartTexture& value) {
+        for (PartTexture& t : out) if (t.node == value.node) { t = value; return; }
+        out.push_back(value);
     };
     for (const auto& effect : layer.effects) {
         if (!effect.enabled || effect.type != swap || effect.params.size() < 2) continue;
         const u64 image = effect.params[1].constant.ref;
         if (image == 0) continue;
-        const f32 repeat = std::clamp(param_at(layer, effect, 3, localTime, 100.0f, false), 1.0f, 100000.0f) * 0.01f;
+        PartTexture t;
+        t.image = image;
+        t.repeat = std::clamp(param_at(layer, effect, 3, localTime, 100.0f, false), 1.0f, 100000.0f) * 0.01f;
+        // v76: deslocamento, giro e rolar (efeito antigo sem esses parâmetros: zeros).
+        const f32 ox = param_at(layer, effect, kPartTextureOffsetX, localTime, 0.0f, false);
+        const f32 oy = param_at(layer, effect, kPartTextureOffsetY, localTime, 0.0f, false);
+        const f32 sx = param_at(layer, effect, kPartTextureScrollX, localTime, 0.0f, false);
+        const f32 sy = param_at(layer, effect, kPartTextureScrollY, localTime, 0.0f, false);
+        if (ox != 0.0f || sx != 0.0f) t.offset.x = part_texture_offset(ox, sx, localTime, fps);
+        if (oy != 0.0f || sy != 0.0f) t.offset.y = part_texture_offset(oy, sy, localTime, fps);
+        const f32 degrees = param_at(layer, effect, kPartTextureRotation, localTime, 0.0f, false);
+        if (std::isfinite(degrees) && degrees != 0.0f) t.rotation = std::fmod(degrees, 360.0f) * kDeg2Rad;
         if (param_at(layer, effect, 2, localTime, 0.0f, true) >= 0.5f) {
-            for (const u32 node : parts) put(node, image, repeat);
+            for (const u32 node : parts) { t.node = node; put(t); }
             continue;
         }
         const i32 p = part_index(param_at(layer, effect, 0, localTime, 1.0f, true), parts.size());
-        if (p >= 0) put(parts[static_cast<usize>(p)], image, repeat);
+        if (p >= 0) { t.node = parts[static_cast<usize>(p)]; put(t); }
     }
 }
+
 
 } // namespace aurea::scene3d

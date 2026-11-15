@@ -1136,6 +1136,31 @@ AUREA_TEST(Gpu, DeepGlowOpticalHaloSurvivesTransparencyAndExposure) {
 
 // Brilho profundo em cor forte: pela luminância um vermelho puro (0,21) não
 // passava do limite padrão (55%) e só as cores claras brilhavam.
+AUREA_TEST(Gpu, NewDeepGlowUsesLinearOpticalFalloffAndHdrThreshold) {
+    AUREA_REQUIRE_GPU();
+    Scene scene(256, 256);
+    scene.comp->set_background(Color{0, 0, 0, 0});
+    const LayerId layer = scene.image(uniform_image(16, 16, 255, 255, 255), 128, 128);
+    auto& effect = scene.add_effect(layer, effect_keys::kDeepGlow);
+    AUREA_CHECK_EQ(effect.params[15].constant.v[0], 2.f);
+    effect.params[0].constant = ParamValue::scalar(0.f);
+    effect.params[2].constant = ParamValue::scalar(80.f);
+    effect.params[10].constant = ParamValue::boolean(true);
+    effect.params[16].constant = ParamValue::scalar(1.f);
+    effect.params[20].constant = ParamValue::boolean(true);
+    const FloatImage first = scene.render();
+    const f32 near = first.v(140, 128).x, far = first.v(154, 128).x;
+    AUREA_CHECK(near > far && far > .00001f);
+    AUREA_CHECK_NEAR(first.v(115, 128).x, near, .003f);
+    effect.params[16].constant = ParamValue::scalar(2.f);
+    const FloatImage twice = scene.render();
+    AUREA_CHECK_NEAR(twice.v(140, 128).x, near * 2.f, .003f);
+    effect.params[0].constant = ParamValue::scalar(150.f);
+    effect.params[14].constant = ParamValue::scalar(0.f);
+    const FloatImage hdrThreshold = scene.render();
+    AUREA_CHECK_NEAR(hdrThreshold.mean().x, 0.f, .00001f);
+}
+
 AUREA_TEST(Gpu, DeepGlowLightsSaturatedColorsLikeLightOnes) {
     AUREA_REQUIRE_GPU();
     auto glowOf = [](u8 r, u8 g, u8 b) {
@@ -9006,6 +9031,42 @@ AUREA_TEST(Gpu, TimeSliceDensityChangeResamplesStoredSlices) {
     AUREA_CHECK(max_abs_diff(fine.img, exported.img) < 0.01f);
 }
 
+// 0.5.3 ("Timeslice cannot render export at 1080p"): os instantes de um quadro
+// cabem no teto das faixas guardadas. Acima dele a faixa perde densidade (a
+// GPU do aparelho não esgota) e o quadro continua com TODAS as faixas exatas.
+AUREA_TEST(Gpu, TimeSliceExportFitsTheSliceBudgetByLoweringDensity) {
+    AUREA_REQUIRE_GPU();
+    Scene s(1920, 1080, 30.0);
+    SyntheticConfig cfg;
+    cfg.width = 1920;
+    cfg.height = 1080;
+    cfg.frameCount = 120;
+    cfg.gop = 30;
+    cfg.pattern = SyntheticPattern::FrameGray;
+    const LayerId id = s.video(cfg, 960.0f, 540.0f);
+    EffectInstance& e = s.add_effect(id, effect_keys::kTimeSlice);
+    e.params[0].constant = ParamValue::scalar(0.0f);    // faixas ao longo de x
+    e.params[1].constant = ParamValue::scalar(32.0f);   // o máximo
+    e.params[3].constant = ParamValue::scalar(1.0f);    // interpolar: 64 amostras
+    Renderer& r = gpu().renderer;
+    const u64 before = r.slice_cache_budget();
+    r.release_project_resources();
+    r.set_slice_cache_budget(96ull << 20);   // 33 instantes de 1080p pediriam 520 MB
+    r.reset_heavy_stats();
+    SliceFrame exported;
+    AUREA_CHECK_MSG(time_slice_settle(s, FrameIndex{45}, exported, true), "o export do TimeSlice 1080p nunca fechou as faixas");
+    const HeavyStats hs = r.heavy_stats();
+    std::printf("\n    faixas %ux%u, %llu MB guardados", hs.lastSliceWidth, hs.lastSliceHeight,
+                static_cast<unsigned long long>(hs.sliceCacheBytes >> 20));
+    AUREA_CHECK(hs.sliceCacheBytes <= (96ull << 20));
+    AUREA_CHECK(hs.lastSliceWidth >= 16 && hs.lastSliceWidth < 1920);
+    AUREA_CHECK_NEAR(static_cast<f64>(hs.lastSliceWidth) / hs.lastSliceHeight, 16.0 / 9.0, 0.05);
+    const f32 left = exported.img.at(8, 540)[0], right = exported.img.at(1910, 540)[0];
+    AUREA_CHECK_MSG(std::fabs(left - right) > 0.02f, "com densidade menor, as pontas ainda são instantes diferentes");
+    r.release_project_resources();
+    r.set_slice_cache_budget(before);
+}
+
 // -----------------------------------------------------------------------------
 // Tempo amplo (CC Wide Time, 0.3.0): a média de pesos iguais dos quadros de
 // t − trás a t + frente. No vídeo, cada amostra é o quadro DAQUELE instante
@@ -9439,6 +9500,12 @@ AUREA_TEST(Gpu, EveryCatalogEffectChangesTheProjectFrame) {
                 pixels.rgba[(static_cast<usize>(y) * size + x) * 4 + 3] = 0;
         }
         const LayerId id = s.image(std::move(pixels), 48, 48);
+        if (fx.type_id() == effect_type_id(effect_keys::kRasterExtrude)) {
+            // EffectAdd enables 3D in production. Direct fixture insertion
+            // must also expose a side face for depth to affect the picture.
+            s.comp->layer(id)->threeD = true;
+            s.comp->layer(id)->transform.rotation.y = 30.f;
+        }
         if (parenting) {
             const LayerId parent = s.comp->add_layer(LayerKind::Null, "rotated parent");
             s.comp->layer(parent)->transform.position = {48, 48, 0};
@@ -10053,7 +10120,7 @@ AUREA_TEST(Gpu, Scene3DMorphShadowsMatchDeformedGeometry) {
         layer->model.castShadows = shadows;
         layer->model.unitScale = 60;
         layer->model.pivot = Vec3{0, 0, 0};
-        if (large) {
+        {
             // Caster leaves the camera/frustum's rest bounds, but its nearly
             // vertical light still projects a visible shadow onto the floor.
             auto* comp = current_comp(rig.e);
@@ -10063,7 +10130,7 @@ AUREA_TEST(Gpu, Scene3DMorphShadowsMatchDeformedGeometry) {
             l->light.kind = LightKind::Directional;
             l->light.intensity = 3;
             l->light.castShadows = true;
-            l->transform.rotation.y = 2.862405f;
+            l->transform.rotation.y = large ? 2.862405f : 25.f;
         }
         seek_frame(rig.e, 15); // Morph is 0.5 * delta X=0.6, matching reference X=0.3.
         return rig.capture(320);
@@ -14498,6 +14565,7 @@ AUREA_TEST(MotionBlurGpu, FloorReflectionKeepsPerInstanceCamera) {
 #include "MeshWarpGpu.inl"
 #include "PaperStationaryGpu.inl"
 #include "LightRaysTextGpu.inl"
+#include "InterCharBlendGpu.inl"
 #include "LightGlowGoldenGpu.inl"
 #include "TurbulenceTypesGpu.inl"
 #include "Shapes2DGpu.inl"
@@ -14666,6 +14734,8 @@ AUREA_TEST(Gpu, Scene3DTexturedModelsKeepTexturesOnPhoneBudget) {
 #include "AmbientOcclusionGpu.inl"
 #include "Scene3D052Gpu.inl"   // 0.5.2: luz ambiente nos modelos PBR e chão molhado
 #include "Image3DGpu.inl"
+// Aurea PC, Cena 3D: render padrão igual ao de antes + vista, contorno, AE 3D.
+#include "Scene3DViewportGpu.inl"
 
 // Correção de cor (0.3.0).
 #include "ColorGradeTests.inl"
@@ -14770,3 +14840,6 @@ AUREA_TEST(Gpu, BorderOnOpaqueImageUsesTheChosenColor) {
 
 // 0.5.2: preenchimento com textura do texto e o efeito Textura.
 #include "TextTextureGpu.inl"
+
+// AE layers (2026-11-12): qualidade da camada (Arame/Rascunho) e amostragem bicúbica nos pixels.
+#include "AeLayersGpu.inl"

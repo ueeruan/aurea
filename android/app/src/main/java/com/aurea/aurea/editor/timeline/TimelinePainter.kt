@@ -21,7 +21,7 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.drawscope.withTransform
-import androidx.compose.ui.graphics.nativeCanvas
+import com.aurea.aurea.ui.platform.platformCanvas
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextMeasurer
@@ -76,6 +76,13 @@ internal class TimelinePainter(
     private val waveLines = FloatArray(WAVE_MAX * 4)
     private val wavePaint = Paint().apply { isAntiAlias = false; strokeCap = Paint.Cap.BUTT }
     private var waveStore: com.aurea.aurea.state.EditorStore? = null
+    // 0.5.3: as ondas das linhas de dentro de um grupo aberto (tira própria: os ids se repetem).
+    private val innerWaves = WaveStrip(WAVE_MAX)
+    private var innerWaveGroup = 0L
+    private var innerWaveLayer = 0L
+    private val innerWaveSource = WaveSource { _, start, fpb, count, out ->
+        waveStore?.queryGroupWaveform(innerWaveGroup, innerWaveLayer, start, fpb, count, out) ?: 0
+    }
     private val waveSource = WaveSource { layer, start, fpb, count, out ->
         waveStore?.queryWaveform(layer, start, fpb, count, out) ?: 0
     }
@@ -455,6 +462,14 @@ internal class TimelinePainter(
                 if (end <= x) continue
                 val tone = AureaTimeline.tone(r.type)
                 drawRoundRect(if (selected) tone.stripe.copy(alpha = .7f) else tone.body, Offset(x, top), Size(end - x, m.bar), CornerRadius(m.barRadius))
+                // 0.5.3: o bloco escolhido na aba Legendas ganha o contorno de destaque (o desenho da faixa não muda).
+                if (waveStore?.captions?.selectedBlocks?.contains(block.id) == true) {
+                    drawRoundRect(AureaColors.Accent, Offset(x + 1f, top + 1f), Size(end - x - 2f, m.bar - 2f), CornerRadius(m.barRadius), style = Stroke(2f * m.density))
+                    if (end - x > 16f * m.density) {
+                        for (edge in listOf(x + 4f * m.density, end - 4f * m.density))
+                            drawLine(AureaColors.Accent, Offset(edge, top + m.bar * .25f), Offset(edge, top + m.bar * .75f), 2f * m.density)
+                    }
+                }
                 if (end - x > 20f) {
                     val layout = measurer.measure(block.text, nameStyle, overflow = TextOverflow.Ellipsis, maxLines = 1, constraints = Constraints(maxWidth = (end - x - 10f).toInt().coerceAtLeast(1)))
                     clipRect(x, top, end, top + m.bar) { drawText(layout, color = tone.text, topLeft = Offset(x + 5f, top + 5f)) }
@@ -476,7 +491,7 @@ internal class TimelinePainter(
             val right = min(x1, w + m.barRadius * 2f)
             val bodyLeft = min(max(x0, left), right)
             val bottom = top + m.bar
-            val canvas = drawContext.canvas.nativeCanvas
+            val canvas = platformCanvas
             rectF.set(left, top, right, bottom)
             barClip.reset()
             // Fileira compacta, clipe escolhido: ponta esquerda bem redonda (raio 14).
@@ -717,7 +732,7 @@ internal class TimelinePainter(
         dividers: Boolean = true,
     ): Boolean {
         val heightPx = m.bar.roundToInt().coerceIn(1, THUMB_MAX_PX)
-        val tile = heightPx * thumbs.aspect(cache, r.id)
+        val tile = heightPx * thumbs.aspect(cache, r.id, r.group)
         val origin = TimeAxis.xOf((r.start - r.offset).toDouble(), view, ppf, cx)
         val visL = max(x0, 0f)
         val visR = min(x1, w)
@@ -729,7 +744,7 @@ internal class TimelinePainter(
         while (i <= iEnd) {
             val bucket = if (image) -1 else Thumbs.bucketOf(i * tile / ppf.toDouble(), fps)
             val frame = if (image) r.start else Keyframes.toTimeline(Thumbs.requestLocalFrame(bucket, fps), r.start, r.offset)
-            val bmp = thumbs.get(cache, r.id, bucket, frame, heightPx, generation)
+            val bmp = thumbs.get(cache, r.id, bucket, frame, heightPx, generation, r.group)
             if (bmp != null) {
                 val l = origin + i * tile
                 rectF.set(l, top, l + tile, top + m.bar)
@@ -763,7 +778,12 @@ internal class TimelinePainter(
         val fpb = WaveGrid.framesPerBucket(max(1f, m.density * 1.5f), ppf)
         val first = WaveGrid.bucketAt(TimeAxis.frameAt(visL, view, ppf, cx), fpb)
         val last = WaveGrid.bucketAt(TimeAxis.frameAt(visR, view, ppf, cx), fpb)
-        val e = waves.get(waveSource, r.id, store.layers, store.thumbnailGeneration, fpb, first, last) ?: return
+        val e = if (r.inner) {
+            innerWaveGroup = r.group
+            innerWaveLayer = r.id
+            innerWaves.get(innerWaveSource, r.id xor (r.group * 31L), store.groupInnerRows, store.thumbnailGeneration, fpb, first, last)
+        } else waves.get(waveSource, r.id, store.layers, store.thumbnailGeneration, fpb, first, last)
+        if (e == null) return
         val step = (fpb * ppf).toFloat()
         val audio = r.type == LayerType.Audio
         // Faixa de baixo da barra (abaixo do nome): no áudio, mais alta.
@@ -1063,7 +1083,7 @@ internal class TimelinePainter(
         val side = min(bw, bh)
         glyphSrc.set((bw - side) / 2, (bh - side) / 2, (bw + side) / 2, (bh + side) / 2)
         rectF.set(left, top, left + box, top + box)
-        val canvas = drawContext.canvas.nativeCanvas
+        val canvas = platformCanvas
         barClip.reset()
         barClip.addRoundRect(rectF, m.glyphBoxRadius, m.glyphBoxRadius, android.graphics.Path.Direction.CW)
         canvas.save()
@@ -1433,7 +1453,7 @@ internal class TimelinePainter(
         // 1) Fundo da linha da câmera principal (vermelho 10 %).
         if (camera != TimelineController.NO_ID) for (i in indices) {
             val r = c.rowAt(rows, i) ?: continue
-            if (r.track != null || r.id != camera) continue
+            if (r.track != null || r.inner || r.id != camera) continue
             val top = topOf(i)
             val rh = c.rowHeight(r)
             if (top + rh < m.rowsTop || top > h) continue
@@ -1468,8 +1488,8 @@ internal class TimelinePainter(
             if (track != null) {
                 drawLaneGutter(r, track, top, rh, c.openGroups.value)
             } else {
-                val activated = !compact && multi && c.isSelected(r.id)
-                omegaHeader(c, r, top, activated, hideEyes && !compact, fps)
+                val activated = !compact && multi && !r.inner && c.isSelected(r.id)
+                omegaHeader(c, r, top, activated, (hideEyes && !compact) || r.inner, fps)
                 if (!compact) omegaGrip(top, rh, w)
             }
             if (fade < 1f) drawContext.canvas.restore()
@@ -1521,9 +1541,9 @@ internal class TimelinePainter(
         val st = c.state
         val store = c.store
         val top = rowTop + m.barTop
-        val selected = c.isSelected(r.id)
+        val selected = c.isRowSelected(r)
         // Legenda (só do AUREA): os blocos dela, como antes.
-        if (store.captionTracks.any { it.layer == r.id }) {
+        if (!r.inner && store.captionTracks.any { it.layer == r.id }) {
             drawRow(r, top, w, view, ppf, cx, fps, compact, selected, false, false, Snap.NONE, Snap.NONE, cache, generation, null, keysShown = false)
             return
         }
@@ -1539,7 +1559,7 @@ internal class TimelinePainter(
             val right = min(x1, w + pad)
             val bottom = top + m.bar
             val radius = ClipGeometry.cornerRadius(right - left, m.bar, m.barRadius)
-            val moving = st.isMoving(r.id)
+            val moving = !r.inner && st.isMoving(r.id)
             val pulse = if (moving) LiftPulse.scale((frameNanos - st.liftStartNanos) / 1_000_000L) else 1f
             // Sombra: leve sempre; mais forte e espalhada com o clipe levantado.
             if (moving) {
@@ -1552,7 +1572,7 @@ internal class TimelinePainter(
                 drawRoundRect(AureaTimeline.ClipShadow, Offset(left, top + m.omegaShadow), Size(right - left, m.bar), CornerRadius(radius))
             }
             withTransform({ scale(pulse, pulse, Offset((left + right) / 2f, top + m.bar / 2f)) }) {
-                val canvas = drawContext.canvas.nativeCanvas
+                val canvas = platformCanvas
                 rectF.set(left, top, right, bottom)
                 barClip.reset()
                 barClip.addRoundRect(rectF, radius, radius, android.graphics.Path.Direction.CW)
@@ -1587,8 +1607,8 @@ internal class TimelinePainter(
                 }
                 // 6. Rótulo de 11 sp na borda do clipe (14 dp para dentro), reticências no meio.
                 omegaLabel(r, top, x0, x1)
-                // 7. Timeline do AE: as marcas da CAMADA (andam com o clipe).
-                drawLayerMarkers(store.layerMarkers, r.id, top, left, right, view, ppf, cx)
+                // 7. Timeline do AE: as marcas da CAMADA (andam com o clipe). As de dentro de um grupo não vêm.
+                if (!r.inner) drawLayerMarkers(store.layerMarkers, r.id, top, left, right, view, ppf, cx)
                 canvas.restore()
             }
             // Escolhida na visão geral: o contorno branco de 2 dp do AUREA.
@@ -1609,10 +1629,12 @@ internal class TimelinePainter(
                 }
             }
             // Alças do foco (P1-7; com o painel Velocidade, as de velocidade, P1-8).
-            if (compact && selected && c.selectionSize() == 1 && !r.locked) omegaHandles(st, x0, x1, top, w)
+            if (compact && selected && c.selectionSize() == 1 && !r.locked && !r.inner) omegaHandles(st, x0, x1, top, w)
+            // 0.5.3: a camada de dentro escolhida (grupo aberto) tem alças na visão geral.
+            if (!compact && selected && r.inner && r.inlineEditable && !r.locked) omegaHandles(st, x0, x1, top, w)
         }
         // Losangos (P0-6): em edição na camada escolhida; os outros, pequenos e a 160/255.
-        if (KeyframeVisibility.visible(store.showAllKeyframes, false, selected)) {
+        if (!r.inner && KeyframeVisibility.visible(store.showAllKeyframes, false, selected)) {
             val editing = KeyframeVisibility.editable(selected, store.keySelectMode) && c.selectionSize() < 2
             omegaKeys(c, r, top + m.bar / 2f, w, view, ppf, cx, fps, editing, m.omegaKeyEdit, m.omegaKeyAlt)
         }
@@ -1648,7 +1670,12 @@ internal class TimelinePainter(
         val fpb = WaveGrid.framesPerBucket(max(1f, m.density * 1.5f), ppf)
         val first = WaveGrid.bucketAt(TimeAxis.frameAt(visL, view, ppf, cx), fpb)
         val last = WaveGrid.bucketAt(TimeAxis.frameAt(visR, view, ppf, cx), fpb)
-        val e = waves.get(waveSource, r.id, store.layers, store.thumbnailGeneration, fpb, first, last) ?: return
+        val e = if (r.inner) {
+            innerWaveGroup = r.group
+            innerWaveLayer = r.id
+            innerWaves.get(innerWaveSource, r.id xor (r.group * 31L), store.groupInnerRows, store.thumbnailGeneration, fpb, first, last)
+        } else waves.get(waveSource, r.id, store.layers, store.thumbnailGeneration, fpb, first, last)
+        if (e == null) return
         val audio = r.type == LayerType.Audio
         val areaTop = if (audio) top else top + m.bar * 0.6f
         val areaBottom = top + m.bar
@@ -1904,7 +1931,20 @@ internal class TimelinePainter(
         val bh = m.omegaThumbHeight * scale
         val bcx = m.omegaThumbLeft + m.omegaThumbWidth / 2f - (if (clipped) m.omegaClipShift else 0f)
         val tinted = ink.copy(alpha = ink.alpha * alpha)
+        // 0.5.3 (grupo aberto na timeline): a linha de dentro mostra o recuo — o
+        // fio do grupo na borda e o "↳" no lugar do olho (o olho é do grupo).
+        if (r.inner) {
+            drawRect(AureaColors.Accent.copy(alpha = 0.55f), Offset(0f, rowTop), Size(m.omegaTagWidth, c.rowHeight(r)))
+            val layout = glyphClip ?: measurer.measure("↳", clipGlyphStyle).also { glyphClip = it }
+            drawText(layout, color = ink, alpha = 0.8f, topLeft = Offset(m.gutterEyeCx - layout.size.width / 2f, cy - layout.size.height / 2f))
+        }
         when (r.type) {
+            // 0.5.3: o grupo troca a pasta pelo chevron que abre o conteúdo dele na timeline.
+            LayerType.Group -> if (!r.inner) {
+                val open = c.store.isInlineGroupOpen(r.id)
+                drawGlyph(if (open) CupertinoGlyph.ChevronDown else CupertinoGlyph.ChevronRight, m.glyphIcon,
+                    if (open) AureaColors.Accent else tinted, bcx, cy)
+            } else drawGlyph(r.type.glyph, m.glyphIcon, tinted, bcx, cy)
             LayerType.Video, LayerType.Image -> if (!omegaThumb(c, r, bcx - bw / 2f, cy - bh / 2f, bw, bh, fps, alpha)) {
                 drawGlyph(r.type.glyph, m.glyphIcon, tinted, bcx, cy)
             }
@@ -1932,14 +1972,14 @@ internal class TimelinePainter(
         val image = r.type == LayerType.Image
         val bucket = if (image) -1 else Thumbs.bucketOf(r.offset.toDouble(), fps)
         val frame = if (image) r.start else Keyframes.toTimeline(Thumbs.requestLocalFrame(bucket, fps), r.start, r.offset)
-        val bmp = thumbs.get(c.store.thumbnails, r.id, bucket, frame, heightPx, c.store.thumbnailGeneration) ?: return false
+        val bmp = thumbs.get(c.store.thumbnails, r.id, bucket, frame, heightPx, c.store.thumbnailGeneration, r.group) ?: return false
         if (bmp.width <= 0 || bmp.height <= 0) return false
         val s = min(bw / bmp.width, bh / bmp.height)
         val dw = bmp.width * s
         val dh = bmp.height * s
         rectF.set(left + (bw - dw) / 2f, top + (bh - dh) / 2f, left + (bw + dw) / 2f, top + (bh + dh) / 2f)
         bitmapPaint.alpha = (alpha * 255f).roundToInt()
-        drawContext.canvas.nativeCanvas.drawBitmap(bmp, null, rectF, bitmapPaint)
+        platformCanvas.drawBitmap(bmp, null, rectF, bitmapPaint)
         return true
     }
 

@@ -149,6 +149,13 @@ object HyperEntitlements {
 
     val unlocked: Boolean get() = access == HyperAccess.Unlocked
 
+    /**
+     * Liberado pela plataforma, sem conta nem config remota: o Aurea PC liga
+     * (pedido do dono em 11/11/2026). No celular fica falso e nada muda.
+     */
+    @Volatile var platformUnlocked: Boolean = false
+        set(value) { field = value; recompute() }
+
     /** Testes e, no futuro, a loja: troca quem responde. */
     fun useProvider(p: EntitlementProvider) { provider = p }
 
@@ -197,7 +204,8 @@ object HyperEntitlements {
         entitlementAccess = EntitlementRules.access(cache, email, PRODUCT, System.currentTimeMillis(), inFlight > 0)
         // A config remota manda: "free" libera, "entitled" usa o portão acima, "off" bloqueia.
         val store = com.aurea.aurea.config.AppConfigStore
-        access = com.aurea.aurea.config.AppConfigPolicy.hyperAccess(store.config, entitlementAccess, store.now(), store.fetching)
+        access = if (platformUnlocked) HyperAccess.Unlocked
+            else com.aurea.aurea.config.AppConfigPolicy.hyperAccess(store.config, entitlementAccess, store.now(), store.fetching)
     }
 
     /** A config remota mudou (ou o relógio passou do prazo): recalcula. */

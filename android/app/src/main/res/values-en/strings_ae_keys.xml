@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lote K (AE): assistentes de keyframe, bézier automática/contínua, vagante, Lift/Extract e Motion Sketch. -->
+<resources>
+    <string name="aek_tools">Keyframe Assistant</string>
+    <string name="aek_time_reverse">Time-Reverse Keyframes</string>
+    <string name="aek_exponential_scale">Exponential Scale</string>
+    <string name="aek_smoother">Smoother</string>
+    <string name="aek_smoother_level">Tolerance %1$s</string>
+    <string name="aek_bake_expression">Convert Expression to Keyframes</string>
+    <string name="aek_auto_bezier">Auto Bezier</string>
+    <string name="aek_continuous_bezier">Continuous Bezier</string>
+    <string name="aek_rove">Rove Across Time</string>
+    <string name="aek_lift_work_area">Lift Work Area</string>
+    <string name="aek_extract_work_area">Extract Work Area</string>
+    <string name="aek_lifted">Work area removed (the gap stays)</string>
+    <string name="aek_extracted">Work area removed and the gap closed</string>
+    <string name="aek_reverse_nothing">Could not reverse: pick 2 keyframes on a track without landing on another one</string>
+    <string name="aek_exp_scale_nothing">Exponential Scale needs 2 Scale keyframes with values of the same sign</string>
+    <string name="aek_smoother_nothing">The Smoother needs 3 or more keyframes on a track</string>
+    <string name="aek_bake_nothing">No enabled expression to convert</string>
+    <string name="aek_flags_nothing">Nothing to change in the selected keyframes</string>
+    <string name="aek_motion_sketch">Motion Sketch</string>
+    <string name="aek_motion_sketch_stop">Stop Motion Sketch</string>
+    <string name="aek_motion_sketch_hint">Drag the selected layer on the stage: the preview plays and the path becomes position keyframes</string>
+    <string name="aek_motion_sketch_done">%1$d position frames recorded</string>
+    <string name="aek_motion_sketch_nothing">Pick a layer and drag it on the stage to record</string>
+</resources>

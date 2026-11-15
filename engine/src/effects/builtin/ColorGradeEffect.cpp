@@ -31,9 +31,9 @@ f32 finite_or(f32 v, f32 fallback) noexcept { return std::isfinite(v) ? v : fall
 
 struct GradeUniforms {
     EffectUniforms base{};
-    Vec4 g[20]{};
+    Vec4 g[23]{};
 };
-static_assert(sizeof(GradeUniforms) == 112 + 20 * 16, "layout std140 da correção de cor");
+static_assert(sizeof(GradeUniforms) == 112 + 23 * 16, "layout std140 da correção de cor");
 static_assert(sizeof(GradeUniforms) <= binding::kMaxUniformBytes);
 
 class ColorGrade final : public Effect {
@@ -54,6 +54,7 @@ public:
         // Escondidos: o papel da instância (0 livre, 1 Filtro, 2 Ajustar — os
         // painéis do modo de edição acham "a sua") e o look aplicado (−1 nenhum).
         kRole, kLook,
+        kWindowType, kWindowCenter, kWindowSize, kWindowRotation, kWindowSoftness, kWindowInvert, kWindowShow,
         kCount,
     };
     static_assert(kLut == 70 && kRole == 77 && kLook == 78, "índices usados pelo motor e pelas interfaces");
@@ -137,8 +138,16 @@ public:
         domain.id = "lut_min"; domain.label = "LUT min"; domain.defaultValue = ParamValue::vec3(0, 0, 0); p.add(domain);
         domain.id = "lut_max"; domain.label = "LUT max"; domain.defaultValue = ParamValue::vec3(1, 1, 1); p.add(domain);
         p.add_float("mix", "Intensidade", 100.0f, 0.0f, 100.0f, kAnimPct, "%");
-        p.add_float("role", "Papel", 0.0f, 0.0f, 2.0f, kParamHidden);
+        p.add_float("role", "Papel", 0.0f, 0.0f, 3.0f, kParamHidden);
         p.add_float("look", "Look", -1.0f, -1.0f, 64.0f, kParamHidden);
+        static const char* const windows[] = {"Nenhuma", "Retângulo", "Elipse"};
+        p.add_enum("window_type", "Janela", windows, 3, 0);
+        p.add_point2("window_center", "Centro da janela", Vec2{.5f, .5f}, -2.f, 3.f, kParamAnimatable);
+        p.add_point2("window_size", "Tamanho da janela", Vec2{.5f, .5f}, .001f, 6.f, kParamAnimatable);
+        p.add_float("window_rotation", "Rotação da janela", 0.f, -180.f, 180.f, kParamAnimatable, "°");
+        p.add_float("window_softness", "Suavidade da janela", 20.f, 0.f, 100.f, kAnimPct, "%");
+        p.add_bool("window_invert", "Inverter janela", false);
+        p.add_bool("window_show", "Mostrar janela", false);
 
         p.add_section_range("basic", "Básico", kTemperature, kVibrance);
         p.add_section_range("wheels", "Rodas de cor", kLift, kOffsetLuma);
@@ -147,6 +156,7 @@ public:
         p.add_section_range("secondary", "Correção secundária", kQHue, kQExposure, kQualifier, false);
         p.add_section_range("creative", "Criativo", kFade, kGrainSize);
         p.add_section_range("lut", "LUT", kLut, kLutIntensity);
+        p.add_section_range("window", "Janela de correção", kWindowType, kWindowShow);
     }
 
     /// Os looks dos Filtros (modo de edição): só valores parados, um passo de
@@ -199,7 +209,8 @@ public:
     }
 
     bool is_identity(const EffectEval& e) const noexcept override {
-        if (e.count < kCount || finite_or(e.f(kMix), 100.0f) <= 0.01f) return true;
+        if (e.count < kLook + 1 || finite_or(e.f(kMix), 100.0f) <= 0.01f) return true;
+        if (e.count > kWindowShow && e.e(kWindowType) > 0 && e.b(kWindowShow)) return false;
         if (e.e(kLog) != 0) return false;
         for (u32 i : {kTemperature, kTint, kExposure, kContrast, kHighlights, kShadows, kWhites, kBlacks, kBrightness, kVibrance,
                       kLiftLuma, kGammaLuma, kGainLuma, kOffsetLuma, kFade, kTintBalance, kSharpen, kVignette, kGrain})
@@ -222,7 +233,7 @@ public:
     f32 input_margin(const EffectEval& e) const noexcept override { return zero(e, kSharpen) ? 0.0f : 1.0f; }
 
     void resolve_resources(EffectEval& e) const noexcept override {
-        if (!e.resources || e.count < kCount) return;
+        if (!e.resources || e.count < kLook + 1) return;
         if (const CurveData* c = e.curve(kCurves); c && !c->is_identity()) e.aux = e.resources->curve_lut(*c);
         if (const CurveData* h = e.curve(kHueCurves); h && !h->is_identity()) {
             Vec4 texels[256];
@@ -286,6 +297,17 @@ public:
         const f32 lw = e.placement && e.placement->layerWidth ? static_cast<f32>(e.placement->layerWidth) : input.region.w;
         const f32 lh = e.placement && e.placement->layerHeight ? static_cast<f32>(e.placement->layerHeight) : input.region.h;
         u.g[19] = Vec4{lw, lh, input.texel_scale_x(), 0};
+        if (e.count > kWindowShow) {
+            const Vec2 center = e.p2(kWindowCenter), size = e.p2(kWindowSize);
+            u.g[20] = Vec4{static_cast<f32>(std::clamp(e.e(kWindowType), 0u, 2u)),
+                std::clamp(finite_or(center.x, .5f), -2.f, 3.f), std::clamp(finite_or(center.y, .5f), -2.f, 3.f),
+                finite_or(e.f(kWindowRotation), 0.f) * kDeg2Rad};
+            u.g[21] = Vec4{std::clamp(finite_or(size.x, .5f), .001f, 6.f),
+                std::clamp(finite_or(size.y, .5f), .001f, 6.f),
+                std::clamp(finite_or(e.f(kWindowSoftness), 20.f) * .01f, .0001f, 1.f),
+                e.b(kWindowInvert) ? 1.f : 0.f};
+            u.g[22].x = e.b(kWindowShow) ? 1.f : 0.f;
+        }
 
         out = input;
         out.texture = ctx.texture("correcao-de-cor", input.width, input.height);

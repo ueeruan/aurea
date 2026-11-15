@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lote K (AE): assistentes de keyframe, bézier automática/contínua, vagante, Lift/Extract e Motion Sketch. -->
+<resources>
+    <string name="aek_tools">Ассистенты</string>
+    <string name="aek_time_reverse">Обратить во времени</string>
+    <string name="aek_exponential_scale">Экспоненциальный масштаб</string>
+    <string name="aek_smoother">Сглаживание</string>
+    <string name="aek_smoother_level">Допуск %1$s</string>
+    <string name="aek_bake_expression">Выражение в ключи</string>
+    <string name="aek_auto_bezier">Авто-Безье</string>
+    <string name="aek_continuous_bezier">Непрерывный Безье</string>
+    <string name="aek_rove">Блуждание во времени</string>
+    <string name="aek_lift_work_area">Поднять рабочую область</string>
+    <string name="aek_extract_work_area">Извлечь рабочую область</string>
+    <string name="aek_lifted">Рабочая область удалена (промежуток остался)</string>
+    <string name="aek_extracted">Рабочая область удалена, промежуток закрыт</string>
+    <string name="aek_reverse_nothing">Не удалось обратить: выберите 2 ключа на дорожке так, чтобы они не попали на другой</string>
+    <string name="aek_exp_scale_nothing">Для экспоненциального масштаба нужны 2 ключа масштаба с одним знаком</string>
+    <string name="aek_smoother_nothing">Сглаживанию нужно 3 ключа или больше на дорожке</string>
+    <string name="aek_bake_nothing">Нет включённого выражения для преобразования</string>
+    <string name="aek_flags_nothing">В выбранных ключах нечего менять</string>
+    <string name="aek_motion_sketch">Motion Sketch</string>
+    <string name="aek_motion_sketch_stop">Остановить Motion Sketch</string>
+    <string name="aek_motion_sketch_hint">Перетащите выбранный слой на сцене: превью играет, а путь становится ключами позиции</string>
+    <string name="aek_motion_sketch_done">Записано кадров позиции: %1$d</string>
+    <string name="aek_motion_sketch_nothing">Выберите слой и перетащите его на сцене для записи</string>
+</resources>

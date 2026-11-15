@@ -635,8 +635,9 @@ private fun onSlot(store: EditorStore, ui: EditorUi, l: PanelLayer, slot: LayerS
         // Omega aparência (área 05): Cor e preenchimento (forma e texto) e Borda e
         // sombra (todas as camadas visuais) têm painel próprio.
         LayerSlot.ColorFill -> openPanel(store, ui, when {
-            type == LayerType.Model3D -> EditorPanel.Element3D
-            l.vector -> EditorPanel.Vector
+            // F6: no 3D, Cor e preenchimento = Material (Editar = Objeto 3D; acabou a duplicata).
+            type == LayerType.Model3D -> EditorPanel.Element3D.also { com.aurea.aurea.editor.panels.Element3DRequest.face = com.aurea.aurea.editor.panels.Face3D.Material }
+            l.vector -> EditorPanel.VectorFill
             else -> EditorPanel.Shape
         })
         LayerSlot.BorderShadow -> openPanel(store, ui, EditorPanel.BorderShadow)
@@ -653,7 +654,12 @@ private fun onSlot(store: EditorStore, ui: EditorUi, l: PanelLayer, slot: LayerS
             LayerEdit.MediaShape -> openPanel(store, ui, EditorPanel.Mask)
             // Omega aparência (P1-6): a lente saiu de Transformar para Opções da câmera.
             LayerEdit.Camera -> openPanel(store, ui, EditorPanel.Camera)
-            LayerEdit.Light, LayerEdit.Material -> openPanel(store, ui, EditorPanel.Element3D)
+            // F6: Editar do objeto 3D = Objeto 3D (forma, partes, animação); Opções da luz = Cena 3D.
+            LayerEdit.Light, LayerEdit.Material -> {
+                com.aurea.aurea.editor.panels.Element3DRequest.face =
+                    if (edit == LayerEdit.Light) com.aurea.aurea.editor.panels.Face3D.Scene else com.aurea.aurea.editor.panels.Face3D.Object
+                openPanel(store, ui, EditorPanel.Element3D)
+            }
             LayerEdit.Particles -> openPanel(store, ui, EditorPanel.Particles)
             null -> Unit
         }

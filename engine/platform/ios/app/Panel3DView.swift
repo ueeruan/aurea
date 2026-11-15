@@ -11,18 +11,54 @@ import UniformTypeIdentifiers
 /// 0.4.6: pedido de aba ao abrir o painel 3D (par do Element3DRequest do Android).
 enum Panel3DRequest { @MainActor static var tab: Panel3DTab? }
 
+/// F6 (13/11/2026; par do `Face3D` do Android): os quatro assuntos do 3D, um botão cada —
+/// Cor e preenchimento → Material; Editar → Objeto 3D; Opções da luz e a Cena 3D da câmera →
+/// Cena 3D; Rig e mocap → Rig. `.all` = todas as abas (volta a ele quando o painel fecha).
+enum Face3D {
+    case all, material, object, rig, scene
+    var tabs: Set<Panel3DTab>? {
+        switch self {
+        case .all: return nil
+        case .material: return [.material, .texture, .shadow]
+        case .object: return [.shape, .parts, .anim]
+        case .rig: return [.rig]
+        case .scene: return [.light, .render]
+        }
+    }
+    /// 13/11/2026: no MODELO IMPORTADO, Material e Objeto 3D são o mesmo painel simples do
+    /// modelo (Material · Textura · Animação · Sombra); os outros assuntos não mudam.
+    static let modelTabs: Set<Panel3DTab> = [.material, .texture, .anim, .shadow]
+    func tabs(importedModel: Bool) -> Set<Panel3DTab>? {
+        importedModel && (self == .material || self == .object) ? Face3D.modelTabs : tabs
+    }
+    var titleKey: String? {
+        switch self {
+        case .all: return nil
+        case .material: return "ui3d_tab_material"
+        case .object: return "fn_3d_object"
+        case .rig: return "rig3d_tab"
+        case .scene: return "fn_3d_scene"
+        }
+    }
+}
+
 enum Panel3DTab: Int, CaseIterable {
-    case material, shape, light, anim, parts, rig, render
-    var key: String { ["ui3d_tab_material", "ui3d_tab_shape", "sh_dock_environment", "ui3d_tab_anim", "shape3d_parts", "rig3d_tab", "env3d_tab_render"][rawValue] }
-    var id: String { ["material", "shape", "light", "anim", "parts", "rig", "render"][rawValue] }
+    // texture e shadow (13/11/2026): as abas do modelo importado (par do Tab3D do Android).
+    case material, shape, light, anim, parts, rig, render, texture, shadow
+    var key: String { ["ui3d_tab_material", "ui3d_tab_shape", "sh_dock_environment", "ui3d_tab_anim", "shape3d_parts", "rig3d_tab",
+                       "env3d_tab_render", "fn_part_texture", "m3d_tab_light_shadow"][rawValue] }
+    var id: String { ["material", "shape", "light", "anim", "parts", "rig", "render", "texture", "shadow"][rawValue] }
     var glyph: Character {
         [CupertinoGlyph.CubeFill, CupertinoGlyph.Textformat, CupertinoGlyph.Lightbulb, CupertinoGlyph.Sparkles,
-         CupertinoGlyph.SquareOnSquare, CupertinoGlyph.PersonCropCircle, CupertinoGlyph.Camera][rawValue]
+         CupertinoGlyph.SquareOnSquare, CupertinoGlyph.PersonCropCircle, CupertinoGlyph.Camera,
+         CupertinoGlyph.Photo, CupertinoGlyph.CircleLefthalfFill][rawValue]
     }
 }
 
 struct Panel3DView: View {
     @EnvironmentObject private var model: AureaModel
+    /// A linha escolhida no Material/Animação do modelo importado (o ◆ do trilho marca nela).
+    @ObservedObject private var keyTarget = Model3DKeyTarget.shared
     @State private var sceneSettings: [Float] = []
     @State private var text3D: [String: Any] = [:]
     /// Receita da Imagem 3D (scene3d::image3d_to_fields); vazia = não é Imagem 3D.
@@ -75,30 +111,56 @@ struct Panel3DView: View {
     private var isShape: Bool { !isCamera && !model.engine.shape3D(layerId).isEmpty }
     private var isText: Bool { !isCamera && !text3D.isEmpty }
     private var isImage: Bool { !isCamera && !image3D.isEmpty }
+    /// 13/11/2026 (conceito do dono): o MODELO IMPORTADO é uma camada com um painel simples —
+    /// Material · Textura · Animação · Sombra (Model3DMaterialView e vizinhos, no fim do arquivo).
+    private var isImported: Bool { !isCamera && !isShape && !isText && !isImage && model.selectedLayer?.kind == 10 }
+    /// Material, Textura e Animação do modelo importado: o ◆ da coluna esquerda marca a linha escolhida.
+    private var modelKeyed: Bool { isImported && (currentTab == .material || currentTab == .texture || currentTab == .anim) }
+    /// F6: só as abas do assunto aberto (`model.face3D`); vazio = todas.
     private var tabs: [Panel3DTab] {
+        let all = allTabs
+        guard let face = model.face3D.tabs(importedModel: isImported) else { return all }
+        let shown = all.filter { face.contains($0) }
+        return shown.isEmpty ? all : shown
+    }
+    private var allTabs: [Panel3DTab] {
         if isCamera { return [.light, .render] }
         if isImage { return [.material, .shape, .light, .render] }
         if isText { return [.material, .shape, .light, .anim, .render] }
         // 0.3.6: modelo importado ganha a aba Esqueleto (AutoRig 3D, ossos, IK, Motion Capture).
-        if !isShape && model.selectedLayer?.kind == 10 { return [.light, .material, .parts, .rig, .render] }
+        if isImported { return [.material, .texture, .anim, .shadow, .rig, .light, .render] }
         return [.light, .material, .parts, .render]
     }
-    private var currentTab: Panel3DTab { tab.flatMap { tabs.contains($0) ? $0 : nil } ?? tabs[0] }
+    /// Editar do modelo importado abre na Animação; Cor e preenchimento, no Material.
+    private var currentTab: Panel3DTab {
+        if let tab, tabs.contains(tab) { return tab }
+        if isImported && model.face3D == .object && tabs.contains(.anim) { return .anim }
+        return tabs[0]
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            PanelHeader(title: AureaText.t(text3D.isEmpty ? "panel_material_ambiente" : "text_options"), onBack: {
+            PanelHeader(title: AureaText.t(isImported ? "m3d_title" : text3D.isEmpty ? "panel_material_ambiente" : "text_options"), onBack: {
                 finishEditing(); model.panel = .none
             })
             // O desenho dos painéis de propriedade: a coluna fixa à esquerda, o conteúdo
             // em seções no centro e as abas em ícones à direita.
             HStack(spacing: 0) {
-              LeftRail(keyframeLook: .none, onBack: { finishEditing(); model.panel = .none })
+              LeftRail(keyframeLook: modelKeyed ? keyTarget.look : .none,
+                       onKeyframe: modelKeyed ? { keyTarget.toggle?() } : nil,
+                       onBack: { finishEditing(); model.panel = .none })
               AureaColors.contentStrongLine.frame(width: 0.7)
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     switch currentTab {
                     case .material:
+                        if isImported {
+                            Model3DMaterialView(layerId: layerId) { material in
+                                let values = importedMaterials.first(where: { UInt32($0[0]) == material }) ?? [Float](repeating: 1, count: 8)
+                                return AnyView(materialTextureRow(material, thumb: layerMaterialThumb(material, values: values),
+                                                                  fallback: AureaColorSpace.color([values[2], values[3], values[4], 1])))
+                            }
+                        } else {
                         if isImage { imageMaterialTab }
                         else if isText { textMaterialTab }
                         else if isShape {
@@ -116,6 +178,15 @@ struct Panel3DView: View {
                         // 0.3.6: Objeto — projeta/recebe sombra (saíram do Ambiente) e o interior.
                         objectShadowSection
                         interiorToggle.padding(.horizontal, 10)
+                        }
+                    case .texture:
+                        Model3DTextureView(layerId: layerId)
+                    case .shadow:
+                        // LUZ E SOMBRA do modelo (v76): projeta/recebe, o interior (dupla face) e a
+                        // luz só deste objeto (estúdio ou HDRI próprio, intensidade, giro e exposição).
+                        objectShadowSection
+                        interiorToggle.padding(.horizontal, 10)
+                        objectLightSection
                     case .shape:
                         if isImage { imageShapeTab }
                         else if isText { textShapeTab }
@@ -124,7 +195,8 @@ struct Panel3DView: View {
                     case .render:
                         renderTab
                     case .anim:
-                        if isText { NativePanelChip(AureaText.t("la_animators")) { finishEditing(); model.transformTab = 6; model.openPanel(.transform) } }
+                        if isImported { Model3DAnimationView(layerId: layerId) }
+                        else if isText { NativePanelChip(AureaText.t("la_animators")) { finishEditing(); AnimationPanelRequest.tab = .text; model.openPanel(.animation) } }
                     case .parts:
                         partsTab.padding(.horizontal, 10)
                     case .rig:
@@ -136,6 +208,7 @@ struct Panel3DView: View {
             }
             // Cada aba começa no topo (antes herdava a rolagem da anterior).
             .id(currentTab)
+            .onChange(of: currentTab) { _ in keyTarget.clear() }
             .accessibilityIdentifier("text3d.materialScroll")
               if tabs.count > 1 {
                   AureaColors.contentStrongLine.frame(width: 0.7)
@@ -146,6 +219,9 @@ struct Panel3DView: View {
         }
         .id("panel3d:\(model.projectGeneration):\(model.composition[AureaCompositionId] ?? ""):\(layerId)")
         .background(AureaColors.background)
+        // 13/11/2026 (pedido do dono: deslizantes do 3D compactos): no 3D o rótulo fica em cima e
+        // a régua ocupa a largura toda (par do Element3DPanel.kt, LocalParamRowStacked).
+        .environment(\.paramRowStacked, true)
         .sheet(isPresented: $pickingTextTexture) {
             ShellMediaPicker(selectionLimit: 1, filter: .images) { items in
                 pickingTextTexture = false
@@ -166,7 +242,12 @@ struct Panel3DView: View {
         .onAppear {
             load()
             // 0.4.6: a Cena 3D abre o painel direto numa aba (Motion Capture → Esqueleto).
-            if let requested = Panel3DRequest.tab { if tabs.contains(requested) { tab = requested }; Panel3DRequest.tab = nil }
+            if let requested = Panel3DRequest.tab {
+                // Aba pedida fora do assunto atual: mostra tudo (nada fica inalcançável).
+                if model.face3D.tabs(importedModel: isImported)?.contains(requested) == false { model.face3D = .all }
+                if allTabs.contains(requested) { tab = requested }
+                Panel3DRequest.tab = nil
+            }
         }
         .onChange(of: model.status.modelRevision) { _ in load() }
         .onChange(of: model.localPlayhead) { _ in loadMaterials() }
@@ -176,6 +257,7 @@ struct Panel3DView: View {
         .onDisappear {
             finishEditing()
             model.text3DFontSheet = nil
+            model.face3D = .all
         }
     }
 
@@ -565,6 +647,42 @@ struct Panel3DView: View {
         }
     }
 
+    /// LUZ DO OBJETO (v76, aba Luz e sombra do modelo 3D; par do Android `ObjectLightSection`):
+    /// o ambiente que ilumina e REFLETE só este objeto — o da cena, um estúdio pronto ou uma
+    /// imagem HDR própria — com a intensidade (luz e reflexo), o giro e a exposição. O motor
+    /// já tinha (`setObjectEnvironment`); faltava o lugar no painel.
+    @ViewBuilder private var objectLightSection: some View {
+        if !isCamera && objectEnvironment.count >= 5 {
+            let own = objectNumber(0) >= 0.5
+            let asset = UInt64(bitPattern: objectEnvironment[1].int64Value)
+            // Estúdio pronto: a chave "STUD" + o número do estúdio (1..4) no lugar do asset.
+            let studio = own && (asset & 0xFFFF_FFFF_0000_0000) == objectStudioKey ? Int(asset & 0xFFFF_FFFF) : 0
+            let hdr = own && studio == 0 && asset != 0
+            envSection("m3d_obj_light", hint: "m3d_obj_light_hint", id: "env3d.objectLight") {
+                AureaFlowLayout(hGap: 4, vGap: 0) {
+                    envChoice(AureaText.t("m3d_obj_light_scene"), on: !own, id: "panel3d.objlight.scene") {
+                        if own { finishEditing(); setObjectEnvironment(0) }
+                    }
+                    ForEach(1..<studioLightKeys.count, id: \.self) { i in
+                        envChoice(AureaText.t(studioLightKeys[i]), on: studio == i, id: "panel3d.objlight.\(i)") {
+                            if studio != i { finishEditing(); setObjectStudio(i) }
+                        }
+                    }
+                    // Acesa, toca de novo para trocar a imagem.
+                    envChoice(AureaText.t("scene031_light_hdr"), on: hdr, id: "panel3d.objlight.hdr") { pickHdri(object: true) }
+                }
+                if own {
+                    sceneRow("m3d_obj_light_intensity", value: objectNumber(2) * 100, range: 0...2000, unit: "%", reset: 100,
+                             gesture: "luz do objeto") { setObjectEnvironment(1, intensity: $0 / 100) }
+                    sceneRow("pn_env_rotate_light", value: objectNumber(3), range: -360...360, unit: "°", reset: 0,
+                             gesture: "luz do objeto") { setObjectEnvironment(1, rotation: $0) }
+                    sceneRow("scene_exposure", value: objectNumber(4) * 100, range: 5...400, unit: "%", reset: 100,
+                             gesture: "luz do objeto") { setObjectEnvironment(1, exposure: $0 / 100) }
+                }
+            }
+        }
+    }
+
     /// TEXTURA do material `material` (0.3.6; par do Android: `MaterialTextureRow`):
     /// a bola do motor (com a textura nova) e o que cobre o material agora — o
     /// mapa do modelo, uma imagem ou uma camada da timeline — com Arquivo ·
@@ -712,16 +830,13 @@ struct Panel3DView: View {
     @ViewBuilder private var partsTab: some View {
         let names = isShape ? [] : model.engine.modelPartNames(layerId)
         VStack(alignment: .leading, spacing: 0) {
+            if !isShape && !names.isEmpty {
+                // O modelo importado tem as abas Textura e Animação; isto sobra para um objeto 3D
+                // sem forma pronta que não é modelo importado (par do Android).
+                Parts3DEditor(layerId: layerId, names: names)
+            } else {
             if isShape {
                 Shape3DPanelSection(layerId: layerId, page: .shape)
-            } else if !names.isEmpty {
-                section("shape3d_parts")
-                horizontal {
-                    ForEach(Array(names.enumerated()), id: \.offset) { i, name in
-                        T3DChip(label: name.isEmpty ? AureaText.t("fx3d_part_n", i + 1) : name, on: modelPart == i) { modelPart = i }
-                            .accessibilityIdentifier("panel3d.part.\(i)")
-                    }
-                }
             }
             gap(6)
             note("fx3d_parts_hint")
@@ -729,6 +844,7 @@ struct Panel3DView: View {
             partEffectCard("aurea.3d.part_transform", name: "fx3d_name_part_transform", detail: "fx3d_desc_part_transform")
             partEffectCard("aurea.3d.part_hide", name: "fx3d_name_part_hide", detail: "fx3d_desc_part_hide")
             partEffectCard("aurea.3d.part_texture", name: "fx3d_name_part_texture", detail: "fx3d_desc_part_texture")
+            }
             if isShape {
                 shapeLayoutButton
                 // Animações prontas por parte (entrada/saída/loop).
@@ -983,6 +1099,14 @@ struct Panel3DView: View {
                                                exposure: exposure ?? objectNumber(4))
         refresh()
     }
+    /// v76: um estúdio pronto só para este objeto (1 escuro … 4 cromado; motor StudioEnvironment.hpp).
+    private func setObjectStudio(_ preset: Int) {
+        guard (1...4).contains(preset) else { return }
+        _ = model.engine.setObjectEnvironment(forLayer: layerId, source: 1,
+                                               hdri: Int64(bitPattern: objectStudioKey | UInt64(preset)),
+                                               intensity: objectNumber(2), rotation: objectNumber(3), exposure: objectNumber(4))
+        refresh()
+    }
     private func pickHdri(object: Bool) {
         finishEditing(); hdriTarget = object ? layerId : nil
         let target = hdriTarget, model = self.model
@@ -1116,11 +1240,13 @@ private struct T3DRow: View {
     @State private var live: Float = 0
     private var shown: Float { dragging ? live : value }
     private var resetVisible: Bool { abs(shown - reset) > 0.001 * max(1, abs(reset)) }
+    // 13/11/2026 (pedido do dono: "os deslizantes tão muito compactos"): o rótulo fica EM CIMA
+    // e a régua (52) ocupa a largura toda, como a linha empilhada do AUREA (par do Android).
     var body: some View {
-        HStack(spacing: 0) {
+        VStack(alignment: .leading, spacing: 2) {
             PropertyLabelChip(label, expression: .none, keyframe: .none, onTap: onSelect).aureaSelectedProperty(selected ? label : nil)
                 .contextMenu { Button(AureaText.t("panel_voltar_padrao")) { onCommit(reset) }.disabled(!resetVisible) }
-            Color.clear.frame(width: 6)
+        HStack(spacing: 0) {
             TickRuler(value: { shown }, unitsPerDp: step, active: selected || dragging, height: ParamRowDims.labelH, verticalPadding: 4)
                 .frame(maxWidth: .infinity).padding(.vertical, 4)
                 .valueDrag(enabled: true, start: { value }, unitsPerDp: { step }, min: range.lowerBound, max: range.upperBound,
@@ -1146,7 +1272,8 @@ private struct T3DRow: View {
                     onCommit($0.clamped(to: range))
                 }
             })
-        }.frame(height: ParamRowDims.row).onDisappear(perform: finish)
+        }.frame(height: ParamRowDims.row)
+        }.padding(.vertical, 3).environment(\.paramRowStacked, true).onDisappear(perform: finish)
     }
     private func finish() { if dragging { dragging = false; onEnd() } }
 }
@@ -1301,12 +1428,26 @@ private struct Text3DAnimSection: View {
         .onChange(of: model.status.modelRevision) { _ in load() }
     }
 
+    /// 13/11/2026: a régua do AUREA no lugar do Slider de sistema (par do `AnimSlider` do
+    /// Android): rótulo em cima, régua de 52 em toda a largura e o valor; aplica ao soltar.
     private func slider(_ key: String, value: Binding<Float>, range: ClosedRange<Float>, shown: String) -> some View {
-        HStack(spacing: 8) {
-            Text(AureaText.t(key)).font(.aurea(size: 12)).foregroundStyle(AureaColors.text).frame(width: 118, alignment: .leading)
-            Slider(value: value, in: range, onEditingChanged: { editing in if !editing { reapply() } })
-            Text(shown).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).frame(width: 52, alignment: .trailing)
-        }.frame(height: 44)
+        let step = (range.upperBound - range.lowerBound) / 180
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(AureaText.t(key)).font(.aurea(size: 12, weight: .semibold)).foregroundStyle(AureaColors.text)
+            HStack(spacing: 6) {
+                TickRuler(value: { value.wrappedValue }, unitsPerDp: step, active: true, height: ParamRowDims.labelH, verticalPadding: 4)
+                    .frame(maxWidth: .infinity)
+                    .valueDrag(enabled: true, start: { value.wrappedValue }, unitsPerDp: { step }, min: range.lowerBound, max: range.upperBound,
+                               onStart: {}, onValue: { value.wrappedValue = $0 }, onEnd: { reapply() })
+                ParamValueBox(shown, onTap: nil)
+            }
+        }.padding(.vertical, 3)
+            .accessibilityElement(children: .ignore).accessibilityLabel(AureaText.t(key)).accessibilityValue(shown)
+            .accessibilityAdjustableAction { direction in
+                let delta = step * 10 * (direction == .increment ? 1 : direction == .decrement ? -1 : 0)
+                guard delta != 0 else { return }
+                value.wrappedValue = (value.wrappedValue + delta).clamped(to: range); reapply()
+            }
     }
     private func load() {
         anim = model.engine.text3DAnim(layerId).map(\.floatValue)
@@ -1426,5 +1567,676 @@ struct SceneFogControls: View {
         }
         .accessibilityIdentifier("env3d.fog")
         .onAppear { load() }.onChange(of: model.status.modelRevision) { _ in load() }
+    }
+}
+
+// =============================================================================
+// PAINEL DO MODELO 3D (13/11/2026, conceito aprovado pelo dono; par do Model3DPanel.kt
+// e do Parts3DEditor.kt do Android). Um modelo 3D é UMA camada; o painel tem poucas
+// telas, um assunto por tela e controles grandes:
+//   Material — bolas dos visuais do modelo inteiro (Original, Plástico, Fosco, Metal,
+//              Cromo, Ouro, Vidro) e Cor · Metal · Rugosidade · Opacidade com ◆;
+//              "Ajustar" = o modelo inteiro (padrão) ou um material.
+//   Textura  — Aplicar em: modelo inteiro / uma parte › (textura e Esconder da parte).
+//   Animação — clipe do arquivo, EVOLUÇÃO (0–100 %, com ◆), Repetir e Velocidade.
+//   Sombra   — projeta/recebe sombra e o interior (no Panel3DView).
+// A aba Mover por parte SAIU (o palco e a timeline já movem o modelo). A regra mora no
+// motor (EngineModelPanel.cpp).
+// =============================================================================
+
+extension AureaModel {
+    /// A camada escolhida é um MODELO IMPORTADO (não forma, texto ou imagem 3D).
+    var importedModelSelected: Bool {
+        guard let id = primarySelection, selectedLayer?.kind == 10 else { return false }
+        return engine.shape3D(id).isEmpty && engine.text3D(forLayer: id) == nil && engine.image3D(forLayer: id) == nil
+    }
+}
+
+/// Bits dos canais do material no motor: R, G, B, opacidade, metal, rugosidade; v76: brilho R, G, B
+/// (6..8) e a força do brilho (9).
+private let model3DColorMask: UInt32 = 7
+private let model3DGlowMask: UInt32 = 0x1C0
+/// Chave de um estúdio pronto no lugar do HDRI do objeto (motor: scene3d::studio_environment_key).
+private let objectStudioKey: UInt64 = 0x5354_5544_0000_0000
+
+/// 14/11/2026 (pedido do dono: "não é só tocar e marcar no normal?"): sem ◆ em cada linha.
+/// Toca-se na linha (ou se mexe nela) para escolhê-la; o ◆ da coluna da esquerda marca nela.
+@MainActor
+final class Model3DKeyTarget: ObservableObject {
+    static let shared = Model3DKeyTarget()
+    @Published var tag: String? = nil
+    @Published var look: KeyframeLook = .none
+    var toggle: (() -> Void)? = nil
+    func clear() { tag = nil; look = .none; toggle = nil }
+    func claim(_ tag: String, look: KeyframeLook, toggle: @escaping () -> Void) {
+        self.tag = tag; self.look = look; self.toggle = toggle
+    }
+    /// Mantém o ◆ do trilho em dia com a linha escolhida (o estado muda com o cabeçote).
+    func sync(_ tag: String, look: KeyframeLook, toggle: @escaping () -> Void) {
+        guard self.tag == tag else { return }
+        if self.look != look { self.look = look }
+        self.toggle = toggle
+    }
+}
+
+@MainActor
+struct Model3DMaterialView: View {
+    let layerId: Int64
+    /// A linha de textura de UM material (`Panel3DView.materialTextureRow`).
+    let textureRow: (UInt32) -> AnyView
+    @EnvironmentObject private var model: AureaModel
+    @ObservedObject private var thumbs = MaterialThumbStore.shared
+    @State private var materials: [[Float]] = []
+    /// v76: o BRILHO (emissão) do alvo no cabeçote — {R, G, B lineares, força}.
+    @State private var glow: [Float] = []
+    @State private var look: Int32 = -1
+    /// −1 = o modelo inteiro; senão o material do arquivo.
+    @State private var target = -1
+    private static let lookKeys = ["m3d_look_original", "m3d_look_plastic", "m3d_look_matte", "m3d_look_metal",
+                                   "m3d_look_chrome", "m3d_look_gold", "m3d_look_glass", "m3d_look_neon"]
+    private static let swatches: [[Float]] = [[0.73, 0.74, 0.78, 1], [0.89, 0.89, 0.9, 1], [0.61, 0.61, 0.62, 1], [0.56, 0.58, 0.62, 1],
+                                              [0.95, 0.96, 0.98, 1], [1, 0.77, 0.34, 1], [0.78, 0.92, 1, 0.6], [0.08, 0.85, 1, 1]]
+    private var engineTarget: UInt32 { target < 0 ? UInt32.max : UInt32(target) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // POSIÇÃO (v76): assentar no chão, centralizar e ajustar à tela — um passo de desfazer cada.
+            title("m3d_place")
+            HStack(spacing: 8) {
+                placeTile(CupertinoGlyph.ArrowDownToLine, "m3d_place_ground", id: "panel3d.place.ground", mode: 0)
+                placeTile(CupertinoGlyph.SmallcircleCircle, "m3d_place_center", id: "panel3d.place.center", mode: 1)
+                placeTile(CupertinoGlyph.Fullscreen, "m3d_place_fit", id: "panel3d.place.fit", mode: 2)
+            }
+            .padding(.vertical, 6)
+            .accessibilityElement(children: .contain)
+            note("m3d_place_hint")
+            Color.clear.frame(height: 8)
+            if materials.isEmpty {
+                note("m3d_no_materials").padding(.top, 10)
+            } else {
+                title("m3d_look")
+                note(look < 0 ? "m3d_look_custom" : "m3d_look_hint")
+                AureaFlowLayout(hGap: 8, vGap: 10) {
+                    ForEach(0..<Self.lookKeys.count, id: \.self) { i in lookBall(i) }
+                }.padding(.vertical, 10)
+                title("m3d_adjust")
+                if materials.count > 1 {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            NativePanelChip(AureaText.t("m3d_whole_model"), selected: target < 0, horizontal: 12, height: 36, radius: 9, fontSize: 12.5) { target = -1 }
+                                .frame(minHeight: 44).accessibilityIdentifier("panel3d.adjust.all")
+                            ForEach(materials.indices, id: \.self) { row in
+                                let id = Int(materials[row][0])
+                                NativePanelChip(AureaText.t("m3d_material_n", id + 1), selected: target == id, horizontal: 12, height: 36, radius: 9, fontSize: 12.5) { target = id }
+                                    .frame(minHeight: 44).accessibilityIdentifier("panel3d.adjust.\(id)")
+                            }
+                        }
+                    }
+                }
+                let values = materials.first(where: { Int($0[0]) == target }) ?? materials[0]
+                colorRow("panel_cor", linear: [values[2], values[3], values[4]], firstParam: 0, mask: model3DColorMask,
+                         tag: "panel3d.mat.color", gesture: "cor do modelo 3D")
+                slider("pn_t3d_metallic", values[6], param: 4, id: "panel3d.mat.metal")
+                slider("pn_t3d_roughness", values[7], param: 5, id: "panel3d.mat.rough")
+                slider("panel_opacidade", values[5], param: 3, id: "panel3d.mat.opacity")
+                // BRILHO (v76): a luz própria do material (emissão) — cor e intensidade, cada uma com ◆.
+                if glow.count >= 4 {
+                    title("m3d_glow").padding(.top, 6)
+                    colorRow("m3d_glow_color", linear: [glow[0], glow[1], glow[2]], firstParam: 6, mask: model3DGlowMask,
+                             tag: "panel3d.mat.glow.color", gesture: "brilho do modelo 3D")
+                    slider("m3d_glow_strength", glow[3], param: 9, id: "panel3d.mat.glow.strength", maxPct: 2000)
+                    note("m3d_glow_hint")
+                }
+                if target >= 0 {
+                    note("m3d_texture_material_hint").padding(.top, 4)
+                    // A textura DESTE material (arquivo ou camada da timeline): a linha do Panel3DView,
+                    // que tem o seletor de imagem e a folha de camadas.
+                    textureRow(UInt32(target))
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("panel3d.modelMaterial")
+        .onAppear(perform: load)
+        .onChange(of: model.status.modelRevision) { _ in load() }
+        .onChange(of: model.localPlayhead) { _ in load() }
+        .onChange(of: layerId) { _ in target = -1; load() }
+        .onChange(of: target) { _ in load() }
+    }
+
+    private func load() {
+        let flat = model.engine.materials(forLayer: layerId).map(\.floatValue)
+        materials = stride(from: 0, to: flat.count - flat.count % 8, by: 8).map { Array(flat[$0..<($0 + 8)]) }
+        look = model.engine.modelMaterialPreset(layerId)
+        if target >= 0 && !materials.contains(where: { Int($0[0]) == target }) { target = -1 }
+        glow = model.engine.materialEmission(layerId, material: engineTarget).map(\.floatValue)
+    }
+    /// Um botão grande da Posição (ícone em cima, nome embaixo); um passo de desfazer.
+    private func placeTile(_ glyph: Character, _ key: String, id: String, mode: UInt32) -> some View {
+        let locked = model.selectedLayer?.locked == true
+        return Button {
+            guard !locked else { return }
+            model.commitPendingCommands()
+            if model.engine.placeModelLayer(layerId, mode: mode) { refresh() }
+        } label: {
+            VStack(spacing: 6) {
+                CupertinoGlyph.text(glyph, size: 22, color: locked ? AureaColors.muted : AureaColors.text)
+                Text(AureaText.t(key)).font(.aurea(size: 12.5, weight: .semibold))
+                    .foregroundStyle(locked ? AureaColors.muted : AureaColors.text)
+                    .multilineTextAlignment(.center).lineLimit(2)
+            }
+            .padding(.horizontal, 6)
+            .frame(maxWidth: .infinity, minHeight: 68)
+            .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 12))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(AureaPressStyle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(AureaText.t(key))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier(id)
+    }
+    private func refresh() { model.refreshModel(force: true); load() }
+    private func title(_ key: String) -> some View {
+        Text(AureaText.t(key)).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted)
+            .padding(.top, 8).padding(.bottom, 4).accessibilityAddTraits(.isHeader)
+    }
+    private func note(_ key: String) -> some View {
+        Text(AureaText.t(key)).font(.aurea(size: 12)).lineSpacing(2).foregroundStyle(AureaColors.muted)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+    private func lookThumb(_ i: Int) -> UIImage? {
+        let key = "l:\(layerId):\(i)"
+        let engine = model.engine, target = layerId
+        thumbs.request(key, revision: 0) { engine.modelMaterialPresetPreview(target, preset: UInt32(i), size: materialThumbSide) }
+        return thumbs.image(key)
+    }
+    /// Uma bola grande (64 pt) com o nome embaixo; a escolhida tem o anel de destaque.
+    private func lookBall(_ i: Int) -> some View {
+        let on = look == Int32(i)
+        return Button {
+            guard !on, model.selectedLayer?.locked != true else { return }
+            if model.engine.applyModelMaterialPreset(layerId, preset: UInt32(i)) { refresh() }
+        } label: {
+            VStack(spacing: 5) {
+                MaterialBallView(image: lookThumb(i), fallback: AureaColorSpace.color(Self.swatches[i]), size: 56)
+                    .padding(4)
+                    .overlay(Circle().stroke(on ? AureaColors.accent : AureaColors.border, lineWidth: on ? 2.5 : 1))
+                    .frame(width: 64, height: 64)
+                Text(AureaText.t(Self.lookKeys[i])).font(.aurea(size: 12.5, weight: on ? .bold : .medium))
+                    .foregroundStyle(on ? AureaColors.accent : AureaColors.text).lineLimit(1)
+            }.frame(width: 70).contentShape(Rectangle())
+        }
+        .buttonStyle(AureaPressStyle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(AureaText.t(Self.lookKeys[i]))
+        .accessibilityAddTraits(on ? [.isButton, .isSelected] : [.isButton])
+        .accessibilityIdentifier("panel3d.look.\(i)")
+    }
+    private func lookOf(_ mask: UInt32) -> KeyframeLook {
+        let targets: Set<UInt32> = target < 0 ? Set(materials.map { UInt32($0[0]) }) : [UInt32(target)]
+        let keys = (model.keyframes[layerId] ?? []).filter {
+            $0.property == 37 && targets.contains($0.effectIndex) && (mask >> $0.paramIndex) & 1 == 1
+        }
+        return keys.contains { $0.time == model.localPlayhead } ? .keyHere : keys.isEmpty ? .none : .animated
+    }
+    private func toggleKeys(_ mask: UInt32) {
+        guard model.selectedLayer?.locked != true else { return }
+        model.commitPendingCommands()
+        if model.engine.toggleMaterialKeys(layerId, material: engineTarget, paramMask: mask) { refresh() }
+    }
+    private func write(_ param: UInt32, _ value: Float) {
+        guard value.isFinite else { return }
+        // v76: a força do brilho (9) passa de 1 (até kMaterialEmissionMax = 20).
+        _ = model.engine.setMaterial(forLayer: layerId, index: engineTarget, param: param,
+                                     value: value.clamped(to: param == 9 ? 0...20 : 0...1))
+        refresh()
+    }
+    /// Uma cor do material (a do modelo, ou a do BRILHO na v76): amostra grande; tocar escolhe a
+    /// linha (o ◆ da esquerda marca R, G e B juntos — `mask`). `linear` = os três canais a partir de `firstParam`.
+    private func colorRow(_ key: String, linear: [Float], firstParam: UInt32, mask: UInt32, tag: String, gesture: String) -> some View {
+        let display = AureaColorSpace.engineToDisplay([linear[0], linear[1], linear[2], 1])
+        let look = lookOf(mask)
+        let keys = Model3DKeyTarget.shared
+        let toggle = { toggleKeys(mask) }
+        DispatchQueue.main.async { keys.sync(tag, look: look, toggle: toggle) }
+        return HStack(spacing: 4) {
+            Text(AureaText.t(key)).font(.aurea(size: 14, weight: .semibold))
+                .foregroundStyle(look == .none ? AureaColors.text : AureaColors.accent)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .onTapGesture { keys.claim(tag, look: look, toggle: toggle) }
+            Button {
+                guard model.selectedLayer?.locked != true else { return }
+                keys.claim(tag, look: look, toggle: toggle)
+                model.beginGesture(gesture)
+                let target = layerId, index = engineTarget
+                model.colorSheet = ColorSheetRequest(title: AureaText.t(key), initial: display, withAlpha: false, onChange: { r, g, b, _ in
+                    guard model.primarySelection == target else { return }
+                    let next = AureaColorSpace.displayToEngine(r, g, b, 1)
+                    for c in 0..<3 { _ = model.engine.setMaterial(forLayer: target, index: index, param: firstParam + UInt32(c), value: next[c]) }
+                    refresh()
+                }, onDone: { model.endGesture() })
+            } label: {
+                AureaColorSwatch(color: AureaColorSpace.color(display)).frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(AureaPressStyle()).accessibilityLabel(AureaText.t(key)).accessibilityIdentifier("\(tag).picker")
+        }
+        .frame(minHeight: 60)
+        .padding(.horizontal, 6)
+        .background(RoundedRectangle(cornerRadius: 10).fill(keys.tag == tag ? AureaColors.accent.opacity(0.12) : Color.clear))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(tag)
+    }
+    /// Régua grande de um canal (0–100 %; a força do brilho vai a `maxPct`), com o ◆ dela.
+    private func slider(_ key: String, _ value01: Float, param: UInt32, id: String, maxPct: Float = 100) -> some View {
+        let look = lookOf(1 << param)
+        let keys = Model3DKeyTarget.shared
+        let toggle = { toggleKeys(1 << param) }
+        DispatchQueue.main.async { keys.sync(id, look: look, toggle: toggle) }
+        return NativePanelRuler(label: AureaText.t(key), value: value01 * 100, step: maxPct > 100 ? 5 : 0.5, range: 0...maxPct, unit: "%", decimals: 0, keypad: true,
+                                look: look, selected: keys.tag == id, onSelect: { keys.claim(id, look: look, toggle: toggle) },
+                                identifier: id) { keys.claim(id, look: look, toggle: toggle); write(param, $0 / 100) }
+    }
+}
+
+@MainActor
+struct Model3DTextureView: View {
+    let layerId: Int64
+    @EnvironmentObject private var model: AureaModel
+    @State private var onePart = false
+    var body: some View {
+        let names = model.engine.modelPartNames(layerId)
+        VStack(alignment: .leading, spacing: 0) {
+            if names.isEmpty {
+                Text(AureaText.t("m3d_texture_no_parts")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                    .fixedSize(horizontal: false, vertical: true).padding(.top, 10)
+            } else {
+                Text(AureaText.t("m3d_apply_to")).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted)
+                    .padding(.top, 8).padding(.bottom, 4).accessibilityAddTraits(.isHeader)
+                HStack(spacing: 8) {
+                    NativePanelChip(AureaText.t("m3d_whole_model"), selected: !onePart, horizontal: 12, height: 36, radius: 9, fontSize: 12.5) { onePart = false }
+                        .frame(minHeight: 44).accessibilityIdentifier("panel3d.texture.whole")
+                    NativePanelChip(AureaText.t("m3d_one_part") + " ›", selected: onePart, horizontal: 12, height: 36, radius: 9, fontSize: 12.5) { onePart = true }
+                        .frame(minHeight: 44).accessibilityIdentifier("panel3d.texture.part")
+                }
+                .accessibilityElement(children: .contain)
+                Color.clear.frame(height: 6)
+                Parts3DEditor(layerId: layerId, names: names, wholeModel: !onePart)
+            }
+        }
+        .padding(.horizontal, 12)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("panel3d.modelTexture")
+        .onChange(of: layerId) { _ in onePart = false }
+    }
+}
+
+@MainActor
+struct Model3DAnimationView: View {
+    let layerId: Int64
+    @EnvironmentObject private var model: AureaModel
+    @State private var clips: [String] = []
+    @State private var anim: [Float] = []
+    private var locked: Bool { model.selectedLayer?.locked == true }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            title("ae_model_clip")
+            if clips.isEmpty {
+                note("ae_model_clip_empty")
+            } else if anim.count >= 8 {
+                let clip = Int(anim[0])
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        clipChip(AureaText.t("ae_model_clip_none"), on: clip < 0, id: "model3d.clip.none") { setClip(-1) }
+                        ForEach(clips.indices, id: \.self) { i in
+                            clipChip(clips[i].isEmpty ? AureaText.t("ae_model_clip_n", i + 1) : clips[i], on: clip == i, id: "model3d.clip.\(i)") { setClip(Int32(i)) }
+                        }
+                    }
+                }
+                if clip < 0 {
+                    note("m3d_anim_pick_clip").padding(.top, 6)
+                } else {
+                    note2(AureaText.t("m3d_anim_duration", numeroPtBr(anim[1], casas: 2)))
+                    Color.clear.frame(height: 10)
+                    // EVOLUÇÃO: onde o clipe está (0–100 %), com ◆ — a animação do arquivo por keyframes.
+                    let keyed = anim[6] > 0.5
+                    let look: KeyframeLook = anim[7] > 0.5 ? .keyHere : keyed ? .animated : .none
+                    let keys = Model3DKeyTarget.shared
+                    // A Evolução vem escolhida (v76: a Velocidade também tem ◆; tocar nela a escolhe).
+                    let _ = DispatchQueue.main.async {
+                        if keys.tag?.hasPrefix("panel3d.anim.") != true { keys.claim("panel3d.anim.progress", look: look, toggle: { toggleKey() }) }
+                        else { keys.sync("panel3d.anim.progress", look: look, toggle: { toggleKey() }) }
+                    }
+                    NativePanelRuler(label: AureaText.t("m3d_anim_progress"), value: anim[3] * 100, step: 0.25, range: 0...100, unit: "%", decimals: 1,
+                                     keypad: true, look: look, selected: keys.tag == "panel3d.anim.progress",
+                                     onSelect: { keys.claim("panel3d.anim.progress", look: look, toggle: { toggleKey() }) },
+                                     identifier: "panel3d.anim.progress") {
+                        keys.claim("panel3d.anim.progress", look: look, toggle: { toggleKey() }); set(0, $0 / 100)
+                    }
+                    note("m3d_anim_progress_hint")
+                    Color.clear.frame(height: 10)
+                    if anim[2] >= 0 || keyed {
+                        PanelItemRow(glyph: CupertinoGlyph.PlayFill, title: AureaText.t("m3d_anim_auto"), tag: "panel3d.anim.auto") { set(0, -1) }
+                        note("m3d_anim_auto_hint")
+                    } else {
+                        // Tocando sozinho: Repetir, Velocidade (com ◆), Começar em, De trás para frente e
+                        // Ida e volta (com a Evolução marcada, quem manda é ela).
+                        NativePanelToggle(AureaText.t("m3d_anim_loop"), checked: anim[4] > 0.5) { set(1, $0 ? 1 : 0) }
+                            .accessibilityIdentifier("panel3d.anim.loop")
+                        playingAloneExtras(keys)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("panel3d.modelAnim")
+        .onAppear(perform: load)
+        .onChange(of: model.status.modelRevision) { _ in load() }
+        .onChange(of: model.localPlayhead) { _ in load() }
+        .onChange(of: layerId) { _ in load() }
+    }
+
+    /// Velocidade com ◆ e, na v76, Começar em (segundos do clipe), De trás para frente e Ida e volta.
+    @ViewBuilder private func playingAloneExtras(_ keys: Model3DKeyTarget) -> some View {
+        let extras = anim.count >= 14
+        let speedTag = "panel3d.anim.speed"
+        let speedLook: KeyframeLook = extras && anim[12] > 0.5 ? .keyHere : extras && anim[11] > 0.5 ? .animated : .none
+        let _ = DispatchQueue.main.async { keys.sync(speedTag, look: speedLook, toggle: { toggleSpeedKey() }) }
+        NativePanelRuler(label: AureaText.t("m3d_anim_speed"), value: (extras ? anim[13] : anim[5]) * 100, step: 1, range: 5...400, unit: "%", decimals: 0,
+                         reset: 100, keypad: true, look: speedLook, selected: keys.tag == speedTag,
+                         onSelect: { keys.claim(speedTag, look: speedLook, toggle: { toggleSpeedKey() }) },
+                         identifier: speedTag) {
+            keys.claim(speedTag, look: speedLook, toggle: { toggleSpeedKey() }); set(2, $0 / 100)
+        }
+        note("m3d_anim_speed_hint")
+        if extras {
+            let duration = max(anim[1], 0.01)
+            NativePanelRuler(label: AureaText.t("m3d_anim_start"), value: anim[8] * duration, step: 0.01, range: 0...duration, unit: "s",
+                             decimals: 2, reset: 0, keypad: true, identifier: "panel3d.anim.start") { set(3, $0 / duration) }
+            NativePanelToggle(AureaText.t("m3d_anim_reverse"), checked: anim[9] > 0.5) { set(4, $0 ? 1 : 0) }
+                .accessibilityIdentifier("panel3d.anim.reverse")
+            NativePanelToggle(AureaText.t("m3d_anim_pingpong"), checked: anim[10] > 0.5) { set(5, $0 ? 1 : 0) }
+                .accessibilityIdentifier("panel3d.anim.pingpong")
+        }
+    }
+
+    private func load() {
+        clips = model.engine.modelAnimationClips(layerId)
+        anim = model.engine.modelAnimation(layerId).map(\.floatValue)
+    }
+    private func toggleSpeedKey() {
+        guard !locked else { return }
+        model.commitPendingCommands()
+        if model.engine.toggleModelAnimationParamKey(layerId, param: 2) { refresh() }
+    }
+    private func refresh() { model.refreshModel(force: true); load() }
+    private func set(_ param: UInt32, _ value: Float) {
+        guard !locked, value.isFinite else { return }
+        if model.engine.setModelAnimationParam(layerId, param: param, value: value) { refresh() }
+    }
+    private func toggleKey() {
+        guard !locked else { return }
+        model.commitPendingCommands()
+        if model.engine.toggleModelAnimationKey(layerId) { refresh() }
+    }
+    private func setClip(_ clip: Int32) {
+        guard !locked else { return }
+        model.commitPendingCommands()
+        if model.engine.setModelAnimationClip(layerId, clip: clip) { refresh() }
+    }
+    private func clipChip(_ label: String, on: Bool, id: String, action: @escaping () -> Void) -> some View {
+        NativePanelChip(label, selected: on, horizontal: 12, height: 36, radius: 9, fontSize: 12.5, action: action)
+            .frame(minHeight: 44).accessibilityAddTraits(on ? [.isSelected] : []).accessibilityIdentifier(id)
+    }
+    private func title(_ key: String) -> some View {
+        Text(AureaText.t(key)).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted)
+            .padding(.top, 8).padding(.bottom, 4).accessibilityAddTraits(.isHeader)
+    }
+    private func note(_ key: String) -> some View { note2(AureaText.t(key)) }
+    private func note2(_ text: String) -> some View {
+        Text(text).font(.aurea(size: 12)).lineSpacing(2).foregroundStyle(AureaColors.muted).fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+// =============================================================================
+// TEXTURA POR PARTE (par do Parts3DEditor.kt): com `wholeModel`, a imagem do modelo
+// inteiro (Trocar textura 3D com "todas as partes"), Repetir e Voltar à textura
+// original; senão a lista de partes → parte aberta com a textura DELA (vale por cima
+// da do modelo inteiro) e Esconder esta parte. Por baixo, os mesmos efeitos do motor
+// (`aurea.3d.part_texture`, `part_hide`): o 1º ajuste cria o efeito.
+// =============================================================================
+
+@MainActor
+struct Parts3DEditor: View {
+    let layerId: Int64
+    let names: [String]
+    var wholeModel = false
+    @EnvironmentObject private var model: AureaModel
+    @State private var open: Int?
+    @State private var picking = false
+    private static let textureKey = "aurea.3d.part_texture"
+    private static let hideKey = "aurea.3d.part_hide"
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if wholeModel { wholeBody }
+            else if let part = open, names.indices.contains(part) { openBody(part) } else { listBody }
+        }
+        .onChange(of: layerId) { _ in open = nil }
+        .sheet(isPresented: $picking) {
+            ShellMediaPicker(selectionLimit: 1, filter: .images) { items in
+                picking = false
+                guard let (url, _) = items.first else { return }
+                let fx = wholeModel ? ensureWhole() : open.flatMap { ensure(Self.textureKey, part: $0) }
+                guard let fx else { return }
+                model.setEffectImage(layerId, effect: fx, url: url)
+            }
+        }
+    }
+
+    // ---- Leitura dos efeitos ----------------------------------------------------------
+    private func params(_ effect: UInt32) -> [[String: Any]] { model.engine.effectParamsForLayer(layerId, effectId: effect) }
+    private func number(_ p: [String: Any]?, _ key: String, _ fallback: Float) -> Float { (p?[key] as? NSNumber)?.floatValue ?? fallback }
+    private func value(_ p: [String: Any]?, _ fallback: Float) -> Float {
+        ((p?[AureaParamValue] as? [NSNumber])?.first?.floatValue) ?? fallback
+    }
+    /// "Todas as partes" (parâmetro 2) ligado: é a textura do modelo inteiro.
+    private func coversAll(_ e: EffectItem) -> Bool {
+        let ps = params(e.effectId)
+        return value(ps.count > 2 ? ps[2] : nil, 0) >= 0.5
+    }
+    private func effect(_ key: String, part: Int) -> EffectItem? {
+        let type = fxEffectTypeId(key)
+        return model.effects.first { e in
+            guard e.typeId == type else { return false }
+            let ps = params(e.effectId)
+            let first = Int(value(ps.first, 0).rounded())
+            if key == Self.hideKey { return first == part + 1 && Int(value(ps.count > 1 ? ps[1] : nil, 0).rounded()) == part + 1 }
+            return first == part + 1 && !coversAll(e)
+        }
+    }
+    private func ensure(_ key: String, part: Int) -> UInt32? {
+        if let fx = effect(key, part: part) { return fx.effectId }
+        guard model.addPartEffect(key, part: part) else { return nil }
+        return effect(key, part: part)?.effectId
+    }
+    private var whole: EffectItem? {
+        let type = fxEffectTypeId(Self.textureKey)
+        return model.effects.first { $0.typeId == type && coversAll($0) }
+    }
+    /// Cria a textura do modelo inteiro ANTES das de parte (no motor, a de baixo vence):
+    /// a imagem de uma parte continua valendo por cima.
+    private func ensureWhole() -> UInt32? {
+        if let fx = whole { return fx.effectId }
+        let type = fxEffectTypeId(Self.textureKey)
+        let before = Set(model.effects.map(\.effectId))
+        guard model.addPartEffect(Self.textureKey, part: 0),
+              let fx = model.effects.first(where: { $0.typeId == type && !before.contains($0.effectId) }) else { return nil }
+        model.engine.setEffect(fx.effectId, forLayer: layerId, paramIndex: 2, value: 1)
+        if let first = model.effects.firstIndex(where: { $0.typeId == type }),
+           let at = model.effects.firstIndex(where: { $0.effectId == fx.effectId }), at > first {
+            model.engine.moveEffect(fx.effectId, inLayer: layerId, toIndex: UInt32(first))
+        }
+        model.commitPendingCommands(); model.refreshModel(force: true)
+        return fx.effectId
+    }
+    /// Animado = keyframe no cabeçote; senão o valor parado (o contrato do EffectsView).
+    private func write(_ fx: UInt32, index: UInt32, _ v: Float) {
+        guard v.isFinite else { return }
+        let ps = params(fx)
+        let p = ps.indices.contains(Int(index)) ? ps[Int(index)] : nil
+        if (p?[AureaParamAnimated] as? NSNumber)?.boolValue == true {
+            model.engine.keyParameter(layerId, property: 31, effect: fx, param: index * 4, time: model.localPlayhead, value: v)
+        } else {
+            model.engine.setEffect(fx, forLayer: layerId, paramIndex: index, value: v)
+        }
+        model.commitPendingCommands(); model.refreshModel(force: true)
+    }
+
+    // ---- Modelo inteiro --------------------------------------------------------------
+    @ViewBuilder private var wholeBody: some View {
+        Text(AureaText.t("m3d_texture_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+            .fixedSize(horizontal: false, vertical: true).padding(.bottom, 6)
+        textureRows(whole, tag: "panel3d.texture.whole")
+    }
+
+    /// As linhas comuns: escolher a imagem, Repetir e voltar à textura do arquivo.
+    @ViewBuilder private func textureRows(_ fx: EffectItem?, tag: String) -> some View {
+        let filename = fx.map { model.engine.effectImageName($0.effectId, forLayer: layerId) } ?? ""
+        PanelItemRow(glyph: CupertinoGlyph.Photo, title: AureaText.t(filename.isEmpty ? "m3d_texture_pick" : "shape3d_image_change"), tag: "\(tag).pick",
+                     detail: filename.isEmpty ? AureaText.t("fn_part_texture_none") : filename, chevron: true) { picking = true }
+        if let fx {
+            let ps = params(fx.effectId)
+            // 14/11/2026 (v76): Repetir, Deslocar X/Y e Girar com ◆ (toca na linha, marca no ◆ da
+            // esquerda); ROLAR X/Y faz a textura andar sozinha com o tempo (esteira, água, tela).
+            textureRuler(fx.effectId, ps, index: 3, key: "fxo_repeat", unit: "%", step: 0.5, decimals: 0, reset: 100,
+                         id: "\(tag).repeat", keyable: true)
+            if ps.count > 8 {
+                sectionTitle("m3d_tex_transform")
+                textureRuler(fx.effectId, ps, index: 4, key: "m3d_tex_offset_x", unit: "%", step: 0.5, decimals: 1, reset: 0,
+                             id: "\(tag).offsetX", keyable: true)
+                textureRuler(fx.effectId, ps, index: 5, key: "m3d_tex_offset_y", unit: "%", step: 0.5, decimals: 1, reset: 0,
+                             id: "\(tag).offsetY", keyable: true)
+                textureRuler(fx.effectId, ps, index: 6, key: "m3d_tex_rotation", unit: "°", step: 1, decimals: 0, reset: 0,
+                             id: "\(tag).rotation", keyable: true)
+                sectionTitle("m3d_tex_scroll")
+                textureRuler(fx.effectId, ps, index: 7, key: "m3d_tex_scroll_x", unit: "%/s", step: 1, decimals: 0, reset: 0,
+                             id: "\(tag).scrollX", keyable: false)
+                textureRuler(fx.effectId, ps, index: 8, key: "m3d_tex_scroll_y", unit: "%/s", step: 1, decimals: 0, reset: 0,
+                             id: "\(tag).scrollY", keyable: false)
+                Text(AureaText.t("m3d_tex_scroll_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            PanelItemRow(glyph: CupertinoGlyph.ArrowCounterclockwise, title: AureaText.t("m3d_texture_original"), tag: "\(tag).remove") {
+                model.engine.removeEffect(fx.effectId, fromLayer: layerId); model.refreshModel(force: true)
+            }
+        }
+    }
+
+    private func sectionTitle(_ key: String) -> some View {
+        Text(AureaText.t(key)).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted)
+            .padding(.top, 8).padding(.bottom, 4).accessibilityAddTraits(.isHeader)
+    }
+    /// Uma régua da textura (parâmetro `index` do efeito). `keyable`: tocar/arrastar escolhe a
+    /// linha e o ◆ da coluna da esquerda marca o keyframe dela (Model3DKeyTarget, como no Material).
+    @ViewBuilder private func textureRuler(_ fx: UInt32, _ ps: [[String: Any]], index: Int, key: String, unit: String, step: Float,
+                                           decimals: Int, reset: Float, id: String, keyable: Bool) -> some View {
+        if ps.indices.contains(index) {
+            let p = ps[index]
+            let keys = Model3DKeyTarget.shared
+            let look: KeyframeLook = keyable ? effectLook(fx, UInt32(index)) : .none
+            let toggle = { toggleEffectKey(fx, UInt32(index)) }
+            let _ = { if keyable { DispatchQueue.main.async { keys.sync(id, look: look, toggle: toggle) } } }()
+            NativePanelRuler(label: AureaText.t(key), value: value(p, reset), step: step,
+                             range: number(p, AureaParamMin, -100)...number(p, AureaParamMax, 100), unit: unit, decimals: decimals,
+                             reset: reset, keypad: true, look: look, selected: keyable && keys.tag == id,
+                             onSelect: keyable ? ({ keys.claim(id, look: look, toggle: toggle) } as () -> Void) : nil,
+                             identifier: id) {
+                if keyable { keys.claim(id, look: look, toggle: toggle) }
+                write(fx, index: UInt32(index), $0)
+            }
+        }
+    }
+    private func effectLook(_ fx: UInt32, _ index: UInt32) -> KeyframeLook {
+        let keys = (model.keyframes[layerId] ?? []).filter { $0.property == 31 && $0.effectIndex == fx && $0.paramIndex / 4 == index }
+        return keys.contains { $0.time == model.localPlayhead } ? .keyHere : keys.isEmpty ? .none : .animated
+    }
+    /// ◆ do parâmetro no cabeçote (o mesmo caminho da lista de efeitos), num passo de desfazer.
+    private func toggleEffectKey(_ fx: UInt32, _ index: UInt32) {
+        guard model.selectedLayer?.locked != true else { return }
+        let time = model.localPlayhead
+        let here = (model.keyframes[layerId] ?? []).filter {
+            $0.property == 31 && $0.effectIndex == fx && $0.paramIndex / 4 == index && $0.time == time
+        }
+        model.beginGesture("keyframe da textura 3D")
+        if here.isEmpty {
+            let ps = params(fx)
+            let v = value(ps.indices.contains(Int(index)) ? ps[Int(index)] : nil, 0)
+            model.engine.keyParameter(layerId, property: 31, effect: fx, param: index * 4, time: time, value: v)
+        } else {
+            for key in here {
+                model.engine.editTrackKey(layerId, property: key.property, effect: key.effectIndex, param: key.paramIndex, time: key.time,
+                                          action: 1, value: key.value, targetTime: key.time, interpolation: key.interpolation, handles: [])
+            }
+        }
+        model.commitPendingCommands()
+        model.endGesture()
+        model.refreshModel(force: true)
+    }
+
+    // ---- Lista -------------------------------------------------------------------
+
+    @ViewBuilder private var listBody: some View {
+        Text(AureaText.t("fn_part_list_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+            .fixedSize(horizontal: false, vertical: true).padding(.bottom, 4)
+        ForEach(Array(names.enumerated()), id: \.offset) { i, n in
+            let name = n.isEmpty ? AureaText.t("fx3d_part_n", i + 1) : n
+            let textured = effect(Self.textureKey, part: i) != nil
+            let hidden = effect(Self.hideKey, part: i)?.enabled == true
+            let state = [textured ? AureaText.t("m3d_part_own_texture") : nil, hidden ? AureaText.t("m3d_part_hidden") : nil]
+                .compactMap { $0 }.joined(separator: " · ")
+            Button { open = i } label: {
+                HStack(spacing: 10) {
+                    CupertinoGlyph.text(CupertinoGlyph.CubeBox, size: 18, color: hidden ? AureaColors.muted : AureaColors.text)
+                    Text(name).font(.aurea(size: 14, weight: .semibold)).foregroundStyle(AureaColors.text).lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if !state.isEmpty { Text(state).font(.aurea(size: 12)).foregroundStyle(AureaColors.accent).lineLimit(1) }
+                    CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 14, color: AureaColors.muted).mirrorsInRtl()
+                }.padding(.horizontal, 12).frame(minHeight: 48).contentShape(Rectangle())
+                    .background(AureaColors.fxLowSurface, in: RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(AureaPressStyle(shrink: 1)).padding(.vertical, 2)
+            .accessibilityLabel(name)
+            .accessibilityValue(state)
+            .accessibilityIdentifier("panel3d.part.\(i)")
+        }
+    }
+
+    // ---- Parte aberta ------------------------------------------------------------------
+    @ViewBuilder private func openBody(_ part: Int) -> some View {
+        let name = names[part].isEmpty ? AureaText.t("fx3d_part_n", part + 1) : names[part]
+        HStack(spacing: 0) {
+            Button { open = nil } label: {
+                CupertinoGlyph.text(CupertinoGlyph.ChevronLeft, size: 18, color: AureaColors.text).mirrorsInRtl()
+                    .frame(width: 48, height: 48).contentShape(Rectangle())
+            }.buttonStyle(.plain).accessibilityLabel(AureaText.t("fn_part_back")).accessibilityIdentifier("panel3d.part.back")
+            Text(name).font(.aurea(size: 15, weight: .bold)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+        }.accessibilityElement(children: .contain).accessibilityIdentifier("panel3d.part.open")
+        textureRows(effect(Self.textureKey, part: part), tag: "panel3d.part.texture")
+        let hide = effect(Self.hideKey, part: part)
+        NativePanelToggle(AureaText.t("fn_part_hide"), checked: hide?.enabled == true) { on in
+            if on, hide == nil {
+                if let fx = ensure(Self.hideKey, part: part) {
+                    model.engine.setEffect(fx, forLayer: layerId, paramIndex: 1, value: Float(part + 1))
+                    model.commitPendingCommands(); model.refreshModel(force: true)
+                }
+            } else if let hide {
+                model.engine.setEffect(hide.effectId, forLayer: layerId, enabled: on); model.refreshModel(force: true)
+            }
+        }.padding(.top, 6).accessibilityIdentifier("panel3d.part.hide")
     }
 }

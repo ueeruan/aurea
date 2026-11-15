@@ -46,6 +46,12 @@ struct CodecInfo {
     /// 0.4.5: teto de VideoCapabilities.getBitrateRange (bps; 0 = desconhecido).
     /// O configure leva no máximo isto (export_encoder_bitrate_bps).
     u32 maxBitrateBps = 0;
+    /// 0.5.3: perfil de QUALIDADE anunciado (H.264 High = 8; HEVC fica no padrão
+    /// do encoder) e o maior nível dele (0 = não anunciado: o encoder escolhe, como antes).
+    i32 qualityProfile = 0;
+    i32 qualityLevel = 0;
+    /// 0.5.3: VideoCapabilities.getWidthAlignment/getHeightAlignment (diagnóstico).
+    i32 widthAlignment = 0, heightAlignment = 0;
     std::vector<i32> colorFormats;
 };
 
@@ -57,6 +63,15 @@ struct Request {
     u32 rateMode = 1;            ///< 0 CBR, 1 VBR (só se o encoder anunciar)
     u32 keyframeFrames = 0;      ///< 0 = 2 s
     bool baseline = false;       ///< modo de segurança: Baseline se anunciado
+    /// 0.5.3: fora do modo de segurança, o perfil de qualidade anunciado
+    /// (CodecInfo::qualityProfile). Recusado no configure = sem perfil, como antes.
+    bool qualityProfile = false;
+    /// 0.5.3 (P0-6): `operating-rate`/`priority` (trabalho offline). false = sem
+    /// as dicas desde o início (o sink aprendeu que este encoder não anda com elas).
+    bool offlineHints = true;
+    /// 0.5.3 (P0-5): taxa constante no lugar da variável (o sink aprendeu que o
+    /// VBR deste encoder descarta quadros).
+    bool forceCbr = false;
     ExportColorTags color{};
     Input input = Input::Surface;
     /// Teste no aparelho (propriedade debug.aurea.enc.fail): o encoder abre mas
@@ -83,6 +98,11 @@ struct Packet {
 /// pedida (API 29: isHardwareAccelerated / isSoftwareOnly) que aceita o
 /// tamanho e a taxa. false = nenhum, sem JVM ou API < 29.
 [[nodiscard]] bool find_encoder(bool hevc, u32 width, u32 height, f64 fps, bool hardware, CodecInfo& out) noexcept;
+/// 0.5.3: TODOS os encoders da classificação pedida que aceitam o tamanho (e a
+/// taxa, se algum aceitar), na ordem da lista do aparelho, até `capacity`.
+/// A escada do sink tenta cada encoder de hardware antes do software.
+[[nodiscard]] usize find_encoders(bool hevc, u32 width, u32 height, f64 fps, bool hardware, CodecInfo* out,
+                                  usize capacity) noexcept;
 
 class Encoder {
 public:
@@ -111,6 +131,10 @@ public:
     [[nodiscard]] u32 max_in_flight() const noexcept;
     /// "surface:c2.x.avc.encoder" / "buffer:c2.x.avc.encoder:0x15".
     [[nodiscard]] const char* describe() const noexcept;
+    /// 0.5.3: o encoder aberto ficou com as dicas offline (operating-rate/priority).
+    [[nodiscard]] bool offline_hints() const noexcept;
+    /// 0.5.3: o encoder aberto ficou em taxa constante (CBR).
+    [[nodiscard]] bool constant_rate() const noexcept;
     /// surface-direct: o AHardwareBuffer do PRÓXIMO send (o alimentador faz o
     /// próprio acquire e o segura até fechar).
     void set_direct_buffer(void* buffer) noexcept;
@@ -143,12 +167,15 @@ public:
     [[nodiscard]] const std::vector<u8>& codec_config() const noexcept { return empty_; }
     [[nodiscard]] u32 max_in_flight() const noexcept { return 0; }
     [[nodiscard]] const char* describe() const noexcept { return ""; }
+    [[nodiscard]] bool offline_hints() const noexcept { return false; }
+    [[nodiscard]] bool constant_rate() const noexcept { return false; }
     void set_direct_buffer(void*) noexcept {}
     void close() noexcept {}
 private:
     std::vector<u8> empty_;
 };
 [[nodiscard]] inline bool find_encoder(bool, u32, u32, f64, bool, CodecInfo& out) noexcept { out = CodecInfo{}; return false; }
+[[nodiscard]] inline usize find_encoders(bool, u32, u32, f64, bool, CodecInfo*, usize) noexcept { return 0; }
 [[nodiscard]] inline bool debug_flag(const char*, const char*) noexcept { return false; }
 #endif
 

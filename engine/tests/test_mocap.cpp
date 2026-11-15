@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <vector>
 
 using namespace aurea;
@@ -478,4 +479,170 @@ AUREA_TEST(Mocap, UnpackSkipsBrokenFrames) {
     AUREA_CHECK_EQ(out.size(), static_cast<usize>(1));
     AUREA_CHECK(out[0].has_world);
     AUREA_CHECK_NEAR(out[0].pts[32].confidence, 0.5f, 1e-6f);
+}
+
+// ---- PC: pontos de mundo do BlazePose junto dos de imagem (quadro companheiro) ----------
+
+namespace {
+
+/// Imagem + mundo do mesmo corpo (o que o Aurea PC manda).
+std::vector<PoseFrame> walk_hybrid(u32 frames, f32 sideways) {
+    std::vector<PoseFrame> out;
+    for (u32 i = 0; i < frames; ++i) {
+        const Body b = walk_pose(i / 30.0f, sideways);
+        PoseFrame f = to_frame(b, i / 30.0, false);
+        // Mundo: origem no meio do quadril em todo quadro (como o BlazePose GHUM 3D).
+        Body centred = b;
+        const Vec3 mid = (b.p[lm::LeftHip] + b.p[lm::RightHip]) * 0.5f;
+        for (Vec3& p : centred.p) p = p - mid + Vec3{0, 0, 0};
+        const PoseFrame w = to_frame(centred, i / 30.0, true);
+        f.has_aux_world = true;
+        for (u32 j = 0; j < kPoseLandmarks; ++j) f.world[j] = w.pts[j];
+        out.push_back(f);
+    }
+    return out;
+}
+
+} // namespace
+
+AUREA_TEST(Mocap, WorldCompanionFramesAttachToTheImageFrame) {
+    // [imagem t=0][mundo t=0][companheiro solto t=5][imagem t=1 (celular, sem mundo)]
+    std::vector<f32> data(kMocapFrameFloats * 4, 0.25f);
+    auto frame = [&](u32 k) { return data.data() + static_cast<usize>(k) * kMocapFrameFloats; };
+    frame(0)[0] = 0.0f; frame(0)[1] = 0.0f;
+    frame(1)[0] = 0.0f; frame(1)[1] = kMocapWorldFlag;
+    frame(1)[2 + lm::LeftWrist * 4] = 0.4f;     // x de mundo
+    frame(1)[2 + lm::LeftWrist * 4 + 3] = 0.2f; // visibilidade
+    frame(2)[0] = 5.0f; frame(2)[1] = kMocapWorldFlag;
+    frame(3)[0] = 1.0f; frame(3)[1] = 0.0f;
+    std::vector<PoseFrame> out;
+    unpack_frames(data.data(), 4, out);
+    AUREA_CHECK_EQ(out.size(), static_cast<usize>(2));
+    if (out.size() != 2) return;
+    AUREA_CHECK(out[0].has_aux_world);
+    AUREA_CHECK(!out[0].has_world);
+    AUREA_CHECK_NEAR(out[0].world[lm::LeftWrist].x, 0.4f, 1e-6f);
+    AUREA_CHECK_NEAR(out[0].world[lm::LeftWrist].confidence, 0.2f, 1e-6f);
+    AUREA_CHECK_NEAR(out[0].pts[lm::LeftWrist].x, 0.25f, 1e-6f);   // a imagem fica como veio
+    AUREA_CHECK(!out[1].has_aux_world);                             // quadro do celular: igual a antes
+    // Companheiro sem quadro de imagem antes: descartado (não vira quadro).
+    std::vector<PoseFrame> lone;
+    unpack_frames(frame(1), 1, lone);
+    AUREA_CHECK(lone.empty());
+}
+
+AUREA_TEST(Mocap, HybridWorldGivesTheCaptured3DAndImageRootMotion) {
+    const std::vector<PoseFrame> frames = walk_hybrid(120, 0.3f);
+    MocapParams p;
+    p.smoothing = 0.15f;
+    p.imageAspect = 9.0f / 16.0f;
+    p.footLock = false;
+    p.footIk = false;
+    p.handIk = false;
+    const HumanoidRest rest = tpose();
+    MocapResult res;
+    AUREA_CHECK(solve(frames, rest, p, res));
+    AUREA_CHECK(res.report.auxWorld);
+    AUREA_CHECK(!res.report.hasWorld);
+    std::printf("    camera inclinada %.1f graus\n", res.report.cameraPitchDeg);
+    AUREA_CHECK(std::fabs(res.report.cameraPitchDeg) < 1.0f);   // a câmera do teste está nivelada
+    AUREA_CHECK_EQ(res.world.size(), frames.size());
+    if (res.world.size() != frames.size()) return;
+    const Vec3 restThigh = rest.position[ix(HB::LeftLowerLeg)] - rest.position[ix(HB::LeftUpperLeg)];
+    const Vec3 restShin = rest.position[ix(HB::LeftFoot)] - rest.position[ix(HB::LeftLowerLeg)];
+    const Vec3 restArm = rest.position[ix(HB::RightLowerArm)] - rest.position[ix(HB::RightUpperArm)];
+    f32 worstThigh = 0, worstShin = 0, worstArm = 0;
+    for (usize f = 5; f + 5 < frames.size(); ++f) {
+        const Body b = walk_pose(f / 30.0f, 0.3f);
+        const auto& d = res.world[f];
+        worstThigh = std::max(worstThigh, angle_between(rotate(d[ix(HB::LeftUpperLeg)], restThigh), b.p[lm::LeftKnee] - b.p[lm::LeftHip]));
+        worstShin = std::max(worstShin, angle_between(rotate(d[ix(HB::LeftLowerLeg)], restShin), b.p[lm::LeftAnkle] - b.p[lm::LeftKnee]));
+        worstArm = std::max(worstArm, angle_between(rotate(d[ix(HB::RightUpperArm)], restArm), b.p[lm::RightElbow] - b.p[lm::RightShoulder]));
+    }
+    // As direções vêm do 3D (a tolerância do caminho de mundo, não a do 2D).
+    AUREA_CHECK_MSG(worstThigh < 6.0f * kRad, "coxa (hibrido)");
+    AUREA_CHECK_MSG(worstShin < 6.0f * kRad, "canela (hibrido)");
+    AUREA_CHECK_MSG(worstArm < 6.0f * kRad, "braco (hibrido)");
+    // A translação vem da IMAGEM (o mundo tem o quadril sempre na origem):
+    // 0,3 m/s para a esquerda da pessoa, nas proporções do modelo, sem profundidade.
+    const usize last = frames.size() - 1;
+    const Vec3 moved = res.hipsLocal[last] - res.hipsLocal[0];
+    const f32 expect = 0.3f * static_cast<f32>(last) / 30.0f * res.legLength / 0.9f;
+    std::printf("    quadril andou (%.3f, %.3f, %.3f), esperado x ~ %.3f\n", moved.x, moved.y, moved.z, expect);
+    AUREA_CHECK(std::fabs(moved.x - expect) < 0.15f * expect);
+    AUREA_CHECK(std::fabs(moved.z) < 0.05f * expect);
+}
+
+AUREA_TEST(Mocap, HybridMatchesWorldOnlyWhenTheBodyStaysInPlace) {
+    // Parado no lugar, o híbrido e o só-mundo dão as mesmas rotações.
+    const std::vector<PoseFrame> hybrid = walk_hybrid(90, 0.0f);
+    std::vector<PoseFrame> world;
+    for (const PoseFrame& f : hybrid) {
+        PoseFrame w = f;
+        w.has_aux_world = false;
+        w.has_world = true;
+        w.pts = f.world;
+        world.push_back(w);
+    }
+    MocapParams p;
+    p.imageAspect = 9.0f / 16.0f;
+    p.footLock = false;
+    MocapResult a, b;
+    AUREA_CHECK(solve(hybrid, tpose(), p, a));
+    AUREA_CHECK(solve(world, tpose(), p, b));
+    if (a.world.size() != b.world.size() || a.world.empty()) { AUREA_CHECK(false); return; }
+    f32 worst = 0.0f;
+    for (usize f = 0; f < a.world.size(); ++f)
+        for (const HB bone : {HB::LeftUpperLeg, HB::LeftLowerLeg, HB::RightUpperArm, HB::Chest, HB::Head}) {
+            const Quat qa = a.world[f][ix(bone)], qb = b.world[f][ix(bone)];
+            const f32 dot = std::fabs(qa.x * qb.x + qa.y * qb.y + qa.z * qb.z + qa.w * qb.w);
+            worst = std::max(worst, 2.0f * std::acos(std::min(1.0f, dot)));
+        }
+    std::printf("    maior diferenca hibrido x mundo: %.2f graus\n", worst / kRad);
+    AUREA_CHECK(worst < 3.0f * kRad);
+}
+
+AUREA_TEST(Mocap, HybridLevelsATiltedCameraSoTheCharacterStandsUpright) {
+    // Pessoa parada em pé (pernas retas); a câmera olha 10° de cima: no 3D do
+    // BlazePose o corpo aparece inclinado 10° — o personagem não pode ficar torto.
+    std::vector<PoseFrame> frames;
+    const f32 tilt = 10.0f * kRad;
+    for (u32 i = 0; i < 60; ++i) {
+        Body b = squat_pose(0.0f);
+        for (u32 s = 0; s < 2; ++s) {
+            const Vec3 hip = b.p[s ? lm::RightHip : lm::LeftHip];
+            const Vec3 ankle = hip - Vec3{0, 0.9f, 0};
+            b.p[s ? lm::RightKnee : lm::LeftKnee] = hip - Vec3{0, 0.45f, 0.0f};
+            b.p[s ? lm::RightAnkle : lm::LeftAnkle] = ankle;
+            b.p[s ? lm::RightHeel : lm::LeftHeel] = ankle + Vec3{0, -0.05f, -0.05f};
+            b.p[s ? lm::RightFootIndex : lm::LeftFootIndex] = ankle + Vec3{0, -0.07f, 0.15f};
+        }
+        PoseFrame f = to_frame(b, i / 30.0, false);
+        const Vec3 mid = (b.p[lm::LeftHip] + b.p[lm::RightHip]) * 0.5f;
+        Body w = b;
+        // Câmera de cima: o corpo gira em volta do eixo x (o topo vem para a câmera).
+        for (Vec3& p : w.p) {
+            const Vec3 q = p - mid;
+            p = Vec3{q.x, q.y * std::cos(tilt) - q.z * std::sin(tilt), q.y * std::sin(tilt) + q.z * std::cos(tilt)};
+        }
+        const PoseFrame wf = to_frame(w, i / 30.0, true);
+        f.has_aux_world = true;
+        for (u32 j = 0; j < kPoseLandmarks; ++j) f.world[j] = wf.pts[j];
+        frames.push_back(f);
+    }
+    MocapParams p;
+    p.imageAspect = 9.0f / 16.0f;
+    const HumanoidRest rest = tpose();
+    MocapResult res;
+    AUREA_CHECK(solve(frames, rest, p, res));
+    std::printf("    camera inclinada %.1f graus (feita com 10)\n", res.report.cameraPitchDeg);
+    AUREA_CHECK_NEAR(std::fabs(res.report.cameraPitchDeg), 10.0f, 1.0f);
+    if (res.world.empty()) return;
+    const Vec3 restThigh = rest.position[ix(HB::LeftLowerLeg)] - rest.position[ix(HB::LeftUpperLeg)];
+    const Vec3 thigh = rotate(res.world[30][ix(HB::LeftUpperLeg)], restThigh);
+    const Vec3 spine = rotate(res.world[30][ix(HB::Chest)], Vec3{0, 1, 0});
+    std::printf("    coxa a %.1f graus da vertical, peito a %.1f\n", angle_between(thigh, Vec3{0, -1, 0}) / kRad,
+                angle_between(spine, Vec3{0, 1, 0}) / kRad);
+    AUREA_CHECK(angle_between(thigh, Vec3{0, -1, 0}) < 2.0f * kRad);
+    AUREA_CHECK(angle_between(spine, Vec3{0, 1, 0}) < 2.0f * kRad);
 }

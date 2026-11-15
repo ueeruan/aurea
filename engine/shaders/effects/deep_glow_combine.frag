@@ -44,7 +44,12 @@ void main() {
     const vec4 original = texture(u_tex0, v_uv * p.uvMap.xy + p.uvMap.zw);
     const vec4 src = unpremultiply(original);
     const vec3 core = max(texture(u_tex1, v_uv).rgb, vec3(0.0));
-    const vec3 halo = max(texture(u_tex2, v_uv).rgb, vec3(0.0));
+    vec3 halo = max(texture(u_tex2, v_uv).rgb, vec3(0.0));
+    if (p.p2.x > 0.0) {
+        const vec2 delta = v_uv - p.p2.yz;
+        halo.r = max(texture(u_tex2, p.p2.yz + delta * (1.0 + p.p2.x)).r, 0.0);
+        halo.b = max(texture(u_tex2, p.p2.yz + delta * (1.0 - p.p2.x)).b, 0.0);
+    }
 
     const vec3 tint = max(p.color.rgb, vec3(0.0));
     // Tingir por PESO: multiplica a cor do halo mas mantém o que ele já tinha.
@@ -52,7 +57,11 @@ void main() {
     const vec3 haloC = p.p1.z > 0.5 ? halo * tint : halo;
 
     // Tela: 1-(1-a)(1-b) — o ambiente PREENCHE sem estourar o que já é claro.
-    const vec3 screened = 1.0 - (1.0 - src.rgb) * (1.0 - haloC * p.p0.y);
+    vec3 screened = 1.0 - (1.0 - src.rgb) * (1.0 - haloC * p.p0.y);
+    if (p.p2.w > 0.5) {
+        const vec3 light = haloC * p.p0.y;
+        screened = src.rgb + light - min(src.rgb, vec3(1.0)) * min(light, vec3(1.0));
+    }
     const vec3 halved = mix(src.rgb + haloC * p.p0.y, screened, p.p1.x);
 
     vec3 outc = halved + coreC * p.p0.x;
@@ -76,5 +85,6 @@ void main() {
     float glowAlpha = clamp(max(emitted.r,max(emitted.g,emitted.b)),0.0,1.0);
     float alpha = p.p1.w > .5 ? glowAlpha : src.a + glowAlpha*(1.0-src.a);
     vec3 rgb = p.p1.w > .5 ? emitted : mix(emitted,outc,src.a);
+    if (p.p2.w > 0.5) rgb = min(rgb, vec3(65504.0));
     o_color = vec4(max(rgb,vec3(0)),alpha);
 }

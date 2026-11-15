@@ -51,12 +51,26 @@ void apply_part_effects(const SceneAsset& asset, const Layer& layer, f64 localTi
 
 /// "Trocar textura 3D" no instante: a imagem (asset de imagem empacotado) que
 /// cobre cada nó e quantas vezes ela se repete. O último efeito da pilha vence.
+/// v76 (parâmetros 4..8 do efeito, acrescentados no fim): deslocamento X/Y
+/// (% de uma repetição), giro (°) e ROLAR X/Y (% por segundo — o deslocamento
+/// anda com o tempo da camada). `offset` já soma o rolar (preso em 0..1: a
+/// imagem repete) e `rotation` sai em radianos. Efeito antigo (4 parâmetros):
+/// zeros, a textura de sempre.
 struct PartTexture {
     u32 node = 0;
     u64 image = 0;
     f32 repeat = 1.0f;
+    Vec2 offset{0.0f, 0.0f};
+    f32 rotation = 0.0f;
 };
-void collect_part_textures(const SceneAsset& asset, const Layer& layer, f64 localTime, std::vector<PartTexture>& out);
+/// Índices dos parâmetros do "Trocar textura 3D" (contrato de arquivo).
+inline constexpr u32 kPartTextureOffsetX = 4, kPartTextureOffsetY = 5, kPartTextureRotation = 6,
+                     kPartTextureScrollX = 7, kPartTextureScrollY = 8;
+/// O deslocamento (em repetições, 0..1) de um eixo no instante: o valor
+/// parado + rolar × segundos. Puro (testes e renderer).
+[[nodiscard]] f32 part_texture_offset(f32 offsetPct, f32 scrollPctPerSecond, f64 localFrames, f64 fps) noexcept;
+void collect_part_textures(const SceneAsset& asset, const Layer& layer, f64 localTime, std::vector<PartTexture>& out,
+                           f64 fps = 30.0);
 
 /// Nome de cada parte (o nome do nó; vazio quando o arquivo não deu nome),
 /// na ordem de `part_nodes`.

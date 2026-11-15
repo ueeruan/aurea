@@ -85,6 +85,7 @@ internal fun SpeedGraph(
     val muted = AureaColors.Muted
     val grid = AureaColors.Chip
     val head = AureaColors.Playhead
+    val reverse = AureaColors.Warning
     val labelStyle = TextStyle(fontSize = 9.sp, color = muted)
     Box(
         Modifier.fillMaxWidth().height(176.dp).clip(RoundedCornerShape(10.dp)).semantics { contentDescription = description }
@@ -120,9 +121,11 @@ internal fun SpeedGraph(
                             if (!moving && delta.getDistance() < 4.dp.toPx()) continue
                             if (!moving) { moving = true; readMoveStart() }
                             val t = if (abs(delta.x) > slop) timeAt(xOf(origT) + delta.x) else origT
+                            // B8: o arrasto muda o MÓDULO; o sinal (negativa = para trás) fica.
                             val v = if (abs(delta.y) > slop) {
                                 val log = log2(origV) - delta.y / h() * (SPEED_LOG_MAX - SPEED_LOG_MIN)
-                                snapGraphSpeed(2f.pow(log)).coerceIn(SPEED_MIN, SPEED_MAX)
+                                val mag = snapGraphSpeed(2f.pow(log)).coerceIn(SPEED_MIN, SPEED_MAX)
+                                if (origV < 0f) -mag else mag
                             } else origV
                             readMove(hit, t, v)
                         } else {
@@ -159,11 +162,22 @@ internal fun SpeedGraph(
                     fill.close()
                     drawPath(fill, accent.copy(alpha = 0.14f))
                     drawPath(line, accent, style = Stroke(width = 2.dp.toPx()))
+                    // B8: trechos com velocidade negativa (a fonte anda para trás)
+                    // na mesma escala do módulo, em outra cor.
+                    val back = Path()
+                    var open = false
+                    for (i in 0 until samples) {
+                        val v = data[8 + i]
+                        val t = lo + (hi - lo) * (i.toFloat() / (samples - 1))
+                        val p = Offset(xOf(t), yOf(v).coerceIn(pad, pad + h))
+                        if (v < 0f) { if (open) back.lineTo(p.x, p.y) else back.moveTo(p.x, p.y); open = true } else open = false
+                    }
+                    drawPath(back, reverse, style = Stroke(width = 2.5.dp.toPx()))
                 }
                 keys.forEachIndexed { i, (t, v) ->
                     val c = Offset(xOf(t.toFloat()), yOf(v).coerceIn(pad, pad + h))
                     val on = i == selected
-                    drawCircle(if (on) accent else text, radius = if (on) 7.dp.toPx() else 5.5.dp.toPx(), center = c)
+                    drawCircle(if (v < 0f) reverse else if (on) accent else text, radius = if (on) 7.dp.toPx() else 5.5.dp.toPx(), center = c)
                     drawCircle(AureaColors.Surface, radius = if (on) 3.dp.toPx() else 2.5.dp.toPx(), center = c)
                 }
                 val px = xOf(playhead.coerceIn(lo, hi).toFloat())
@@ -172,7 +186,8 @@ internal fun SpeedGraph(
     )
 }
 
-private fun log2(v: Float): Float = ln(v.coerceIn(0.01f, 64f)) / ln(2f)
+/** log2 do MÓDULO (B8: a velocidade negativa aparece na altura do módulo, em outra cor). */
+private fun log2(v: Float): Float = ln(abs(v).coerceIn(0.01f, 64f)) / ln(2f)
 
 /** Encosta nos valores redondos do gráfico quando passa perto. */
 private fun snapGraphSpeed(s: Float): Float {

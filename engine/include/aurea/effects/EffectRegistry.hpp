@@ -179,6 +179,10 @@ namespace effect_keys {
     inline constexpr const char* kCheckboxControl    = "aurea.control.checkbox";
     inline constexpr const char* kColorControl       = "aurea.control.color";
     inline constexpr const char* kPointControl       = "aurea.control.point";
+    // AE expressions (lote E): Dropdown Menu, Layer e 3D Point Control.
+    inline constexpr const char* kDropdownControl    = "aurea.control.dropdown";
+    inline constexpr const char* kLayerControl       = "aurea.control.layer";
+    inline constexpr const char* kPoint3DControl     = "aurea.control.point3d";
 
     // --- Pacote de paridade: o que faltava para editar movimento e acabamento ---
     // Comportamentos de movimento (função pura do tempo; ver MotionBehaviorEffects.cpp)

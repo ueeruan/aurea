@@ -27,4 +27,8 @@
     <string name="om_tl_current_time">Current time</string>
     <string name="om_tl_hidden">Hidden</string>
     <string name="om_tl_visible">Visible</string>
+    <!-- 0.5.3: grupo aberto na timeline (o conteúdo recuado embaixo dele). -->
+    <string name="om_tl_group_contents_shown">Group contents shown</string>
+    <string name="om_tl_group_contents_hidden">Group contents hidden</string>
+    <string name="om_tl_group_inline_locked_time">This group\'s timing is changed (speed, time remap or reverse): open the group to edit this layer</string>
 </resources>

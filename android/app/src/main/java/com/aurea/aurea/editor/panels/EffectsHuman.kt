@@ -1109,6 +1109,10 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put("aurea.control.checkbox", EffectHuman(name = R.string.fx_name_checkbox_control, keywords = "expressao caixa controle"))
     put("aurea.control.color", EffectHuman(name = R.string.fx_name_color_control, keywords = "expressao cor controle"))
     put("aurea.control.point", EffectHuman(name = R.string.fx_name_point_control, keywords = "expressao ponto controle"))
+    // AE expressions (lote E).
+    put("aurea.control.dropdown", EffectHuman(name = R.string.fx_name_dropdown_control, keywords = "expressao menu suspenso lista dropdown controle"))
+    put("aurea.control.layer", EffectHuman(name = R.string.fx_name_layer_control, keywords = "expressao camada layer controle"))
+    put("aurea.control.point3d", EffectHuman(name = R.string.fx_name_point3d_control, keywords = "expressao ponto 3d controle"))
     // --- Pacote de paridade: movimento, transições por forma e acabamento ---
     put("aurea.motion.oscillate.cycles", EffectHuman(
         name = R.string.fx_name_oscillate, keywords = "oscilar oscillate seno triangulo fase orbita",

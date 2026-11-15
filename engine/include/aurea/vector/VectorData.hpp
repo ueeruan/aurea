@@ -205,6 +205,21 @@ struct VectorModifier {
     friend bool operator==(const VectorModifier&, const VectorModifier&) noexcept = default;
 };
 
+/// Lote X (árvore de formas do After Effects, vector/VectorTree.hpp): o tipo
+/// de cada item do conteúdo de um grupo. Os números estão gravados em
+/// projetos (seção VectorTree): novos entram no fim.
+enum class VectorItemKind : u8 {
+    Path = 0,        ///< caminho (VectorGroup::paths)
+    Fill,            ///< preencher (o do grupo e os de `moreFills`)
+    Stroke,          ///< contorno
+    Trim,            ///< aparar
+    Repeater,        ///< repetidor
+    Merge,           ///< mesclar (booleana)
+    Modifier,        ///< operador de caminho (VectorGroup::modifiers)
+    Group,           ///< grupo de dentro (VectorGroup::children)
+    Count
+};
+
 /// Mesclar: 0 nenhum (os caminhos juntos pela regra do preenchimento),
 /// 1 unir, 2 subtrair (o primeiro menos os outros), 3 interseção, 4 excluir.
 struct VectorGroup {
@@ -229,6 +244,26 @@ struct VectorGroup {
     /// Aspereza, Ondular, Arredondar cantos, Torcer, Zigue-zague, Ondular
     /// transform), em ordem, entre os caminhos e o Mesclar/Aparar.
     std::vector<VectorModifier> modifiers;
+    // --- Lote X: árvore de formas do After Effects (vector/VectorTree.hpp) -----
+    // Tudo aqui é gravado À PARTE (seção VectorTree do projeto): o documento de
+    // sempre não muda, e um grupo sem nada disto é desenhado pelo caminho antigo.
+    /// Inclinação do grupo e o eixo dela (graus), como no transform de grupo do
+    /// AE: T(posição)·R(giro)·K(inclinação, eixo)·S(escala)·T(−âncora).
+    f32  skew = 0.0f, skewAxis = 0.0f;
+    /// Itens A MAIS de cada tipo (o primeiro é o de sempre: `fill`, `stroke`,
+    /// `trim`, `repeater`, `merge` — o que as trilhas animam e o celular edita).
+    std::vector<VectorFill>     moreFills;
+    std::vector<VectorStroke>   moreStrokes;
+    std::vector<VectorTrim>     moreTrims;
+    std::vector<VectorRepeater> moreRepeaters;
+    std::vector<u8>             moreMerges;
+    /// Grupos de dentro (cada um com o próprio transform e conteúdo).
+    std::vector<VectorGroup> children;
+    /// Ordem livre: `order` é a sequência de TIPOS do conteúdo, de CIMA para
+    /// baixo como no painel do AE; a n-ésima entrada de um tipo é o n-ésimo
+    /// item daquele tipo. Desligada = a ordem fixa de sempre.
+    bool freeOrder = false;
+    std::vector<VectorItemKind> order;
     friend bool operator==(const VectorGroup&, const VectorGroup&) noexcept = default;
 };
 
@@ -254,8 +289,20 @@ enum VectorParam : u32 {
     kVecRepStartOpacity, kVecRepEndOpacity,
     kVecPosX, kVecPosY, kVecRotation, kVecScale, kVecOpacity,
     kVecRepScaleY,       ///< v6: escala Y do repetidor (só com scaleLinked == 0)
+    /// Traços animáveis (Dash 1..3 / Gap 1..3 do After Effects): stroke.dashes[0..5].
+    /// Sem o par no documento a trilha não vale (o tracejado continua como está).
+    kVecDash1, kVecGap1, kVecDash2, kVecGap2, kVecDash3, kVecGap3,
     kVecParamCount
 };
+
+/// Máximo de pares traço/vão que a interface edita (o motor aceita N).
+inline constexpr u32 kVecMaxDashPairs = 3;
+
+/// Bits de VectorParam por float na consulta (Engine::query_vector_params):
+/// um float só guarda inteiros exatos até 2^24, então os bits 0..23 vêm num
+/// float e os 24.. em outro.
+inline constexpr u32 kVecParamBitsPerFloat = 24;
+static_assert(kVecParamCount <= 2 * kVecParamBitsPerFloat, "query_vector_params: aumente os blocos de bits");
 
 /// Parâmetros dos operadores de caminho na trilha VectorParam: um bloco de
 /// kVecModParams ids por operador, depois de todos os VectorParam comuns

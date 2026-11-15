@@ -2,6 +2,7 @@
 #include "aurea/project/Project.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -43,6 +44,10 @@ Status OfflineFrameRenderer::initialize(GPUBackend& gpu, const EffectRegistry& e
     renderer_.set_transient_cache_budget(budget);
     renderer_.set_preview_cache_budget(0);
     renderer_.set_flow_cache_budget(16ull << 20);
+    // 0.5.3: as faixas do TimeSlice dividem o orçamento do export (metade dele,
+    // até os 384 MB da prévia); antes ficavam fora de toda conta e esgotavam a
+    // GPU do aparelho em 1080p.
+    renderer_.set_slice_cache_budget(std::min<u64>(384ull << 20, budget / 2));
     // 0.5.2 (E4): a abertura do renderizador do export não pré-aquece a lista
     // base (compila no 1o quadro, com o vigia do render) e todo
     // pré-aquecimento dele para no cancelar do export.

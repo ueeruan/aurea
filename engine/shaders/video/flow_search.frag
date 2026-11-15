@@ -11,7 +11,7 @@
 //  se repete o vetor continua ambíguo; isso a busca não resolve.
 //
 //  Entrada: nível (R = atual, G = seguinte) e o fluxo do nível de cima.
-//  Saída: RG = melhor vetor em px do nível de CIMA (o flow_lk multiplica por 2).
+//  Saída: RG = melhor vetor em pixels DESTE nível, na sua própria grade.
 // =============================================================================
 #include "../common/bindings.glsl"
 
@@ -40,7 +40,8 @@ float dst_luma(vec2 uv) { const vec2 c = textureLod(u_level, uv, 0.0).rg; return
 void main() {
     float src[kPatch];
     for (int k = 0; k < kPatch; ++k) src[k] = src_luma(v_uv + patch_offset(k) * p.texel.xy);
-    const vec2 fromAbove = textureLod(u_coarse, v_uv, 0.0).xy * 2.0;
+    const vec2 coarseScale = p.texel.zw / max(vec2(textureSize(u_coarse, 0)), vec2(1.0));
+    const vec2 fromAbove = textureLod(u_coarse, v_uv, 0.0).xy * coarseScale;
     vec2 best = fromAbove;
     float bestCost = 1e9;
     for (int j = -5; j <= 5; ++j) {
@@ -56,5 +57,5 @@ void main() {
             if (cost < bestCost) { bestCost = cost; best = v; }
         }
     }
-    o_color = vec4(best * 0.5, 0.0, 1.0);
+    o_color = vec4(best, 0.0, 1.0);
 }

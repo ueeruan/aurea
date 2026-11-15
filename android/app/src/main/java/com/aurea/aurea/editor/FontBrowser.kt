@@ -245,14 +245,22 @@ internal object FontBrowserRequest {
 /** Prévia de cada face na PRÓPRIA fonte (um Typeface por arquivo, guardado). */
 private val faceCache = HashMap<String, FontFamily?>()
 
+/** 0.5.3: quantas faces à frente da última célula visível são abertas em segundo plano. */
+private const val FONT_FACE_AHEAD = 16
+
+// 0.5.3: o mapa passa a ser usado também pela thread de IO que abre as faces das
+// próximas linhas (FontBrowserDialog). A leitura do arquivo fica FORA do lock: a
+// thread principal nunca espera a de IO, no máximo abre a mesma face duas vezes.
 internal fun fontFamilyOf(path: String?): FontFamily? {
     if (path.isNullOrEmpty()) return null
-    return faceCache.getOrPut(path) {
-        try {
-            if (File(path).exists()) FontFamily(Typeface.createFromFile(path)) else null
-        } catch (_: Exception) {
-            null
-        }
+    synchronized(faceCache) { if (faceCache.containsKey(path)) return faceCache[path] }
+    val face = try {
+        if (File(path).exists()) FontFamily(Typeface.createFromFile(path)) else null
+    } catch (_: Exception) {
+        null
+    }
+    return synchronized(faceCache) {
+        if (faceCache.containsKey(path)) faceCache[path] else face.also { faceCache[path] = it }
     }
 }
 
@@ -336,8 +344,26 @@ internal fun FontBrowserDialog(store: EditorStore, onPick: (EditorStore.FontItem
                         Text(stringResource(R.string.om_fb_empty), style = AureaType.of(13f, color = AureaColors.Muted))
                     }
                 } else {
+                    // 0.5.3: as faces das próximas células são abertas em IO antes de
+                    // entrarem na tela. Antes, cada célula que aparecia abria o arquivo
+                    // da fonte (File.exists + Typeface.createFromFile) na composição, na
+                    // thread principal: engasgo ao rolar. Quem chega antes do
+                    // adiantamento abre na hora, como antes: nada muda na tela.
+                    val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+                    LaunchedEffect(visible) {
+                        androidx.compose.runtime.snapshotFlow { gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
+                            .collect { last ->
+                                val from = (last + 1).coerceAtMost(visible.size)
+                                val to = (from + FONT_FACE_AHEAD).coerceAtMost(visible.size)
+                                if (from < to) {
+                                    val paths = visible.subList(from, to).map { it.path }
+                                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { paths.forEach { fontFamilyOf(it) } }
+                                }
+                            }
+                    }
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(2),
+                        state = gridState,
                         modifier = Modifier.fillMaxSize().testTag("font.browser.grid"),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp),

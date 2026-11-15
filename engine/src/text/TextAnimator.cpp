@@ -2,6 +2,7 @@
 //  Aurea / text / TextAnimator.cpp
 // =============================================================================
 #include "aurea/text/TextAnimator.hpp"
+#include "aurea/text/TextTransform.hpp"
 
 #include "aurea/timeline/Layer.hpp"
 #include "aurea/expr/Expression.hpp"
@@ -106,7 +107,8 @@ bool has_rig_animators(const TextData& t) noexcept {
 }
 
 bool has_content_animators(const TextData& t) noexcept {
-    for (const TextAnimator& a : t.animators) if (a.enabled && (a.props & (kTextPropCharOffset | kTextPropReveal | kTextPropRandomize | kTextPropSpacing))) return true;
+    for (const TextAnimator& a : t.animators)
+        if (a.enabled && (a.props & (kTextPropCharOffset | kTextPropCharValue | kTextPropReveal | kTextPropRandomize | kTextPropSpacing))) return true;
     return false;
 }
 
@@ -215,6 +217,16 @@ void selector_weights(const TextAnimator& a, u32 ai, const TrackSet& tracks, f64
                         (&value.x)[d] = pro_wiggle(s.seed, unit, s.lockDimensions ? 0u : d, timeSec, rate, corr, tp, sp, lo, hi);
                     break;
                 }
+                case kTextSelectorSweep: {
+                    // v72: a janela do Transformar texto do Motion como seletor do
+                    // animador comum (antes só valia como seletor do rig).
+                    const f32 w = transform_influence(P(kSelStart, s.start) * .01f, P(kSelEnd, s.end) * .01f, P(kSelOffset, s.offset) * .01f,
+                                                      P(kAnimOverlap, s.overlap) * .01f, std::min<u32>(s.shape, 2u),
+                                                      P(kSelEaseHigh, s.easeHigh) * .01f, P(kSelEaseLow, s.easeLow) * .01f, unit, count)
+                                * P(kSelAmount, s.amount) / 100.0f;
+                    value = Vec3{w, w, w};
+                    break;
+                }
                 case kTextSelectorExpression: {
                     // textIndex é da unidade na ordem do texto; selectorValue, o resultado de cima em %.
                     const Vec3 selected{above.x * 100.0f, above.y * 100.0f, above.z * 100.0f};
@@ -288,6 +300,9 @@ void evaluate_text_animators(const TextData& t, const TrackSet& tracks, f64 loca
         const Vec2 groupAlign{P(kAnimGroupAlignX, a.groupAlign.x) / 100.0f, P(kAnimGroupAlignY, a.groupAlign.y) / 100.0f};
         const f32 hue = P(kAnimFillHue, a.fillHue), sat = P(kAnimFillSaturation, a.fillSaturation) / 100.0f, bri = P(kAnimFillBrightness, a.fillBrightness) / 100.0f;
         const f32 fillOpacity = P(kAnimFillOpacity, a.fillOpacity) / 100.0f;
+        const f32 strokeHue = P(kAnimStrokeHue, a.strokeHue), strokeSat = P(kAnimStrokeSaturation, a.strokeSaturation) / 100.0f;
+        const f32 strokeBri = P(kAnimStrokeBrightness, a.strokeBrightness) / 100.0f;
+        const f32 strokeOpacity = P(kAnimStrokeOpacity, a.strokeOpacity) / 100.0f;
         for (usize g = 0; g < units.size(); ++g) {
             const Vec3 w3 = weights[g];
             const f32 w = w3.x;
@@ -329,15 +344,43 @@ void evaluate_text_animators(const TextData& t, const TrackSet& tracks, f64 loca
                 o.fill = Vec4{c.x, c.y, c.z, mixW};
             }
             if ((a.props & kTextPropFillOpacity) && fillOpacity < 1.0f) o.fillOpacity *= std::clamp(1.0f + mixW * (fillOpacity - 1.0f), 0.0f, 1.0f);
-            if (a.props & kTextPropStroke) o.stroke = Vec4{stroke.x, stroke.y, stroke.z, mixW};
+            if (a.props & (kTextPropStroke | kTextPropStrokeHsb)) {
+                // Matiz/saturação/brilho do traço: sobre a cor do traço deste
+                // animador, ou a do texto (como o preenchimento).
+                Vec3 c = a.props & kTextPropStroke ? stroke : Vec3{t.strokeColor.x, t.strokeColor.y, t.strokeColor.z};
+                if (a.props & kTextPropStrokeHsb) {
+                    Vec3 h = anim_rgb_to_hsv(c);
+                    h.x += strokeHue / 360.0f;
+                    h.y = std::clamp(h.y + strokeSat, 0.0f, 1.0f);
+                    h.z = std::clamp(h.z + strokeBri, 0.0f, 1.0f);
+                    c = anim_hsv_to_rgb(h);
+                }
+                o.stroke = Vec4{c.x, c.y, c.z, mixW};
+            }
+            if ((a.props & kTextPropStrokeOpacity) && strokeOpacity < 1.0f)
+                o.strokeOpacity *= std::clamp(1.0f + mixW * (strokeOpacity - 1.0f), 0.0f, 1.0f);
         }
         if (a.props & kTextPropTracking) {
-            // Tracking empurra os glifos seguintes da mesma linha (ordem visual).
-            std::vector<f32> acc(std::max<u32>(1, lines) + 1, 0.0f);
+            // Tracking na mesma linha (ordem visual). Tipo do AE: "depois" empurra
+            // só as letras seguintes; "antes" empurra também a própria letra;
+            // "antes e depois" divide o espaço dos dois lados dela.
+            const u32 lineSlots = std::max<u32>(1, lines) + 1;
+            std::vector<f32> acc(lineSlots, 0.0f);
+            const f32 own = a.trackingType == 1 ? 1.0f : a.trackingType == 0 ? 0.5f : 0.0f;
             for (usize g = 0; g < units.size(); ++g) {
-                const u32 li = std::min<u32>(units[g].lineIndex, static_cast<u32>(acc.size() - 1));
-                out[g].trackingShift += acc[li];
-                acc[li] += weights[g].x * trk;
+                const u32 li = std::min<u32>(units[g].lineIndex, lineSlots - 1);
+                const f32 add = weights[g].x * trk;
+                out[g].trackingShift += acc[li] + add * own;
+                acc[li] += add;
+            }
+            // Âncora da linha: a fração da linha que fica parada. 0 % segura o
+            // começo (o texto cresce para a direita), 50 % o meio, 100 % o fim.
+            if (a.props & kTextPropLineAnchor) {
+                const f32 anchor = P(kAnimLineAnchor, a.lineAnchor) / 100.0f;
+                for (usize g = 0; g < units.size(); ++g) {
+                    const u32 li = std::min<u32>(units[g].lineIndex, lineSlots - 1);
+                    out[g].trackingShift -= acc[li] * anchor;
+                }
             }
         }
     }
@@ -405,6 +448,12 @@ f32* animator_param_ref(TextAnimator& a, u32 key) noexcept {
         case kAnimFillSaturation: return &a.fillSaturation;
         case kAnimFillBrightness: return &a.fillBrightness;
         case kAnimFillOpacity: return &a.fillOpacity;
+        case kAnimStrokeHue: return &a.strokeHue;
+        case kAnimStrokeSaturation: return &a.strokeSaturation;
+        case kAnimStrokeBrightness: return &a.strokeBrightness;
+        case kAnimStrokeOpacity: return &a.strokeOpacity;
+        case kAnimCharValue: return &a.charValue;
+        case kAnimLineAnchor: return &a.lineAnchor;
         case kAnimRandAmount: return &a.randAmount;
         case kAnimRandEvolution: return &a.randEvolution;
         case kAnimRandSeed: return &a.randSeed;
@@ -420,6 +469,7 @@ void read_animator_fields(const TextAnimator& a, f32* v) noexcept {
     std::fill(v, v + kTextAnimatorFieldCount, 0.0f);
     v[0] = static_cast<f32>(a.props); v[1] = a.rig; v[2] = a.rigAnchor; v[3] = a.anchorGrouping; v[4] = a.cursor;
     v[5] = a.cursorBlink ? 1.f : 0.f; v[6] = a.charset; v[7] = a.preserveSpace ? 1.f : 0.f; v[8] = a.groupAlign.x; v[9] = a.groupAlign.y;
+    v[10] = a.charRange; v[11] = a.trackingType; v[12] = a.charAlign;
     const u32 extra = std::min<u32>(static_cast<u32>(a.moreSelectors.size()), kMaxTextSelectors - 1u);
     v[15] = static_cast<f32>(1u + extra);
     for (u32 si = 0; si <= extra; ++si) {
@@ -434,7 +484,7 @@ bool write_animator_field(TextAnimator& a, u32 field, f32 value) noexcept {
     if (!std::isfinite(value)) return false;
     if (field < 16) {
         switch (field) {
-            case 0: a.props = static_cast<u32>(std::max(0.f, value)) & 0x3FFFFu; return true;
+            case 0: a.props = static_cast<u32>(std::max(0.f, value)) & kTextPropMask; return true;
             case 2: a.rigAnchor = value > .5f ? 1 : 0; return true;
             case 3: a.anchorGrouping = static_cast<u8>(std::clamp(value, 0.f, 3.f)); return true;
             case 4: a.cursor = static_cast<u8>(std::clamp(value, 0.f, 8.f)); return true;
@@ -443,6 +493,9 @@ bool write_animator_field(TextAnimator& a, u32 field, f32 value) noexcept {
             case 7: a.preserveSpace = value > .5f; return true;
             case 8: a.groupAlign.x = std::clamp(value, -100.f, 100.f); return true;
             case 9: a.groupAlign.y = std::clamp(value, -100.f, 100.f); return true;
+            case 10: a.charRange = value > .5f ? 1 : 0; return true;
+            case 11: a.trackingType = static_cast<u8>(std::clamp(value, 0.f, 2.f)); return true;
+            case 12: a.charAlign = static_cast<u8>(std::clamp(value, 0.f, 3.f)); return true;
             default: return false;
         }
     }
@@ -474,6 +527,9 @@ f32 clamp_animator_param(const TextAnimator& a, u32 key, f32 v) noexcept {
         case kSelAmount: case kSelEaseHigh: case kSelEaseLow: case kAnimWigglyMin: case kAnimWigglyMax:
         case kAnimGroupAlignX: case kAnimGroupAlignY: return std::clamp(v, -100.0f, 100.0f);
         case kAnimSmoothness: case kAnimCorrelation: case kAnimFillOpacity: return std::clamp(v, 0.0f, 100.0f);
+        case kAnimStrokeOpacity: return block == 0 ? std::clamp(v, 0.0f, 100.0f) : v;
+        case kAnimStrokeSaturation: case kAnimStrokeBrightness: return block == 0 ? std::clamp(v, -100.0f, 100.0f) : v;
+        case kAnimCharValue: return block == 0 ? std::clamp(std::round(v), 0.0f, 1114111.0f) : v;
         case kWiggleRate: return std::clamp(v, 0.0f, 60.0f);
         case kOpacity: return a.rig ? std::clamp(v, -100.0f, 100.0f) : std::clamp(v, 0.0f, 100.0f);
         case kScaleX: case kScaleY: return std::clamp(v, -2000.0f, 2000.0f);
@@ -553,8 +609,13 @@ std::string expand_dynamic(const TextData& t, f64 local, f64 duration, f64 compF
 }
 
 std::string apply_char_offset(const TextData& t, const TrackSet& tracks, f64 local, f64 fps) {
+    return apply_char_offset(t, tracks, local, fps, nullptr);
+}
+
+std::string apply_char_offset(const TextData& t, const TrackSet& tracks, f64 local, f64 fps, std::vector<u32>* slots) {
+    if (slots) slots->clear();
     bool any = false;
-    for (const TextAnimator& a : t.animators) any |= a.enabled && (a.props & kTextPropCharOffset);
+    for (const TextAnimator& a : t.animators) any |= a.enabled && (a.props & (kTextPropCharOffset | kTextPropCharValue));
     if (!any) return t.content;
     // Unidades lógicas direto do texto (o deslocamento vem antes do layout).
     std::vector<u32> cps;
@@ -586,29 +647,66 @@ std::string apply_char_offset(const TextData& t, const TrackSet& tracks, f64 loc
         units[i] = GlyphUnits{static_cast<u32>(i), word, line};
     }
     const f64 timeSec = local / (fps > 0.0 ? fps : 30.0);
+    // Os animadores entram na ordem. O deslocamento acumula (fracionário, para
+    // a soma de vários dar o mesmo arredondamento de sempre) e só vira letra
+    // quando um Valor de caractere troca a letra, quando o intervalo muda ou no fim.
+    auto roll = [](u32 cp, i32 d, u32 lo, u32 n) { return lo + static_cast<u32>(((static_cast<i32>(cp - lo) + d) % static_cast<i32>(n) + static_cast<i32>(n)) % static_cast<i32>(n)); };
     std::vector<f32> shift(cps.size(), 0.0f);
+    std::vector<u8> shiftRange(cps.size(), 0);
+    // Character Alignment: o código de antes e o alinhamento do último animador
+    // que mexeu na letra (3 = ajustar kerning, sem vaga).
+    const std::vector<u32> original = cps;
+    std::vector<u8> align(cps.size(), 3);
+    const auto flush = [&](usize i) {
+        const i32 d = static_cast<i32>(std::lround(shift[i]));
+        shift[i] = 0.0f;
+        if (d == 0) return;
+        u32& cp = cps[i];
+        if (shiftRange[i] == 1) {
+            // Unicode completo: anda no código, fora de controles, quebra de linha
+            // e substitutos (um código inválido deixa a letra como estava).
+            const i64 next = static_cast<i64>(cp) + d;
+            if (cp >= 0x20 && next >= 0x20 && next <= 0x10FFFF && !(next >= 0xD800 && next <= 0xDFFF)) cp = static_cast<u32>(next);
+        } else if (cp >= 'A' && cp <= 'Z') cp = roll(cp, d, 'A', 26);
+        else if (cp >= 'a' && cp <= 'z') cp = roll(cp, d, 'a', 26);
+        else if (cp >= '0' && cp <= '9') cp = roll(cp, d, '0', 10);
+    };
     for (u32 ai = 0; ai < t.animators.size(); ++ai) {
         const TextAnimator& a = t.animators[ai];
-        if (!a.enabled || !(a.props & kTextPropCharOffset)) continue;
-        const f32 amt = anim_param(tracks, ai, kCharOffset, local, a.charOffset);
+        if (!a.enabled || !(a.props & (kTextPropCharOffset | kTextPropCharValue))) continue;
+        const f32 amt = a.props & kTextPropCharOffset ? anim_param(tracks, ai, kCharOffset, local, a.charOffset) : 0.0f;
+        const f32 value = a.props & kTextPropCharValue ? std::round(anim_param(tracks, ai, kAnimCharValue, local, a.charValue)) : 0.0f;
         const u32 count = a.selector.basedOn == 1 ? word + 1 : a.selector.basedOn == 2 ? line + 1 : static_cast<u32>(cps.size());
         const auto perm = a.selector.randomOrder ? shuffled(std::max<u32>(1, count), a.selector.seed) : std::vector<u32>{};
         for (usize i = 0; i < cps.size(); ++i) {
             u32 unit = unit_of(a.selector, units[i]);
             if (unit < perm.size()) unit = perm[unit];
-            shift[i] += amt * selector_weight(a, ai, tracks, local, timeSec, unit, count);
+            const f32 w = selector_weight(a, ai, tracks, local, timeSec, unit, count);
+            // Valor de caractere: a letra selecionada (metade ou mais) vira o
+            // código pedido; 0 deixa como está. Quebra de linha nunca muda.
+            if (value >= 1.0f && value <= 1114111.0f && std::fabs(w) >= 0.5f && cps[i] != '\n'
+                && !(value >= 0xD800 && value <= 0xDFFF)) {
+                flush(i);
+                cps[i] = static_cast<u32>(value);
+                align[i] = a.charAlign;
+            }
+            if (amt != 0.0f) {
+                if (shift[i] != 0.0f && shiftRange[i] != a.charRange) flush(i);
+                shiftRange[i] = a.charRange;
+                shift[i] += amt * w;
+                if (amt * w != 0.0f) align[i] = a.charAlign;
+            }
         }
     }
-    auto roll = [](u32 cp, i32 d, u32 lo, u32 n) { return lo + static_cast<u32>(((static_cast<i32>(cp - lo) + d) % static_cast<i32>(n) + static_cast<i32>(n)) % static_cast<i32>(n)); };
     std::string out;
+    bool slotted = false;
     for (usize i = 0; i < cps.size(); ++i) {
-        u32 cp = cps[i];
-        const i32 d = static_cast<i32>(std::lround(shift[i]));
-        if (d != 0) {
-            if (cp >= 'A' && cp <= 'Z') cp = roll(cp, d, 'A', 26);
-            else if (cp >= 'a' && cp <= 'z') cp = roll(cp, d, 'a', 26);
-            else if (cp >= '0' && cp <= '9') cp = roll(cp, d, '0', 10);
+        flush(i);
+        if (slots && cps[i] != original[i] && align[i] < 3) {
+            if (!slotted) { slots->assign(cps.size(), 0u); slotted = true; }
+            (*slots)[i] = (original[i] & 0x1FFFFFu) | (static_cast<u32>(align[i]) + 1u) << 24;
         }
+        u32 cp = cps[i];
         if (cp < 0x80) out += static_cast<char>(cp);
         else if (cp < 0x800) { out += static_cast<char>(0xC0 | (cp >> 6)); out += static_cast<char>(0x80 | (cp & 0x3F)); }
         else if (cp < 0x10000) { out += static_cast<char>(0xE0 | (cp >> 12)); out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F)); out += static_cast<char>(0x80 | (cp & 0x3F)); }

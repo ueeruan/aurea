@@ -3,7 +3,7 @@
 <resources>
     <string name="fx_name_headbop">Headbop</string>
     <string name="fx_desc_headbop">A pessoa da foto ou do vídeo balança a cabeça e o corpo na batida da música</string>
-    <string name="headbop_note">Analise a camada para achar a cabeça e os ombros. Sem pessoa, o quadro inteiro balança.</string>
+    <string name="headbop_note">Analise a pessoa para mapear as articulações visíveis. O corpo acompanha a batida com braços articulados e apoio dos pés.</string>
     <string name="headbop_analyze">Analisar</string>
     <string name="headbop_reanalyze">Reanalisar</string>
     <string name="headbop_analyzing">Analisando a pessoa e a batida…</string>

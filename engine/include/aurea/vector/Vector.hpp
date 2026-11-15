@@ -108,6 +108,36 @@ void resolve_fill(const std::vector<Contour>& in, FillRule rule, std::vector<Con
 /// excluir valem para todos; subtrair = o primeiro menos os demais.
 void boolean_op(const std::vector<std::vector<Contour>>& sets, FillRule rule, BoolOp op, std::vector<Contour>& out);
 
+/// O recorte é EXATO (arranjo planar) até um orçamento de custo medido — as
+/// arestas de entrada e os cruzamentos próprios, cada um contado uma vez. Uma
+/// entrada que passa disso sai por AMOSTRAGEM (cobertura numa grade fina +
+/// contorno de nível), em tempo limitado. Contadores desde o início do
+/// processo, para diagnóstico e para os testes provarem que o conteúdo comum
+/// fica no caminho exato.
+struct ClipStats {
+    u64 exact = 0;           ///< recortes resolvidos pelo arranjo exato
+    u64 sampled = 0;         ///< recortes que passaram do orçamento (amostragem)
+    u64 lastEdges = 0;       ///< arestas de entrada do último recorte
+    u64 lastCrossings = 0;   ///< cruzamentos próprios do último (parcial quando passou do orçamento)
+};
+[[nodiscard]] ClipStats clip_stats() noexcept;
+/// Só para testes e medição: multiplica o orçamento do arranjo exato
+/// (1 = o padrão; um valor enorme tira o teto).
+void clip_set_budget_scale(f64 scale) noexcept;
+/// Enquanto viver, diz ao recorte desta thread a tolerância de quem chama (px
+/// do espaço da geometria — a mesma do achatamento, já com a escala na tela):
+/// é o passo da grade quando o recorte sai por amostragem. Sem ela o passo é
+/// 1/16 px do espaço da geometria.
+class ClipToleranceScope {
+public:
+    explicit ClipToleranceScope(f32 tolerance) noexcept;
+    ~ClipToleranceScope();
+    ClipToleranceScope(const ClipToleranceScope&) = delete;
+    ClipToleranceScope& operator=(const ClipToleranceScope&) = delete;
+private:
+    f32 previous_ = 0.0f;
+};
+
 // --- Operadores --------------------------------------------------------------
 
 /// Aparar: fatia [start, end] (0..1) do comprimento, girada por `offset`

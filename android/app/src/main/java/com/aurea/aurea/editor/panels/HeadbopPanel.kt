@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.PointF
+import android.graphics.Matrix
 import android.media.FaceDetector
 import android.net.Uri
 import androidx.compose.foundation.background
@@ -42,6 +43,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aurea.aurea.R
+import com.aurea.aurea.engine.AureaEngine
 import com.aurea.aurea.mocap.MocapDetector
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.theme.AureaColors
@@ -99,7 +101,24 @@ private suspend fun detectPhoto(context: Context, path: String): Pair<FloatArray
     var sample = 1
     while (max(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 768) sample *= 2
     val opts = BitmapFactory.Options().apply { inSampleSize = sample; inPreferredConfig = Bitmap.Config.RGB_565 }
-    val bmp = context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) } ?: return@withContext null
+    val decoded = context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) } ?: return@withContext null
+    val orientation = AureaEngine.exifOrientation(context, uri)
+    val matrix = Matrix().apply {
+        when (orientation) {
+            2 -> setScale(-1f, 1f)
+            3 -> setRotate(180f)
+            4 -> setScale(1f, -1f)
+            5 -> { setRotate(90f); postScale(-1f, 1f) }
+            6 -> setRotate(90f)
+            7 -> { setRotate(90f); postScale(1f, -1f) }
+            8 -> setRotate(270f)
+        }
+    }
+    val bmp = try {
+        if (matrix.isIdentity) decoded else Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
+    } finally {
+        if (!matrix.isIdentity) decoded.recycle()
+    }
     try {
         val w = bmp.width.toFloat()
         val h = bmp.height.toFloat()

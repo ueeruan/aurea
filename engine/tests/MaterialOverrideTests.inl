@@ -36,13 +36,15 @@ AUREA_TEST(MaterialOverrides, NonFiniteValuesAreNeverCacheKeysAndApplyPreservesO
         AUREA_CHECK(!material_override_key(&material, next, key));
     }
     AUREA_CHECK(!material_override_key(nullptr, values, key));
-    values.factors = {.2f, .3f, .4f, .5f, .6f, .7f}; values.alphaMode = AlphaMode::Blend;
+    // v76: a emissão (cor e força) também é canal do ajuste por instância.
+    values.factors = {.2f, .3f, .4f, .5f, .6f, .7f, .1f, .2f, .3f, 4.f}; values.alphaMode = AlphaMode::Blend;
     values.doubleSided = true; values.unlit = true; values.apply(material);
     AUREA_CHECK_EQ(material.baseColor.w, .5f); AUREA_CHECK_EQ(material.metallic, .6f);
     AUREA_CHECK_EQ(material.roughness, .7f); AUREA_CHECK(material.alphaMode == AlphaMode::Blend);
     AUREA_CHECK(material.doubleSided && material.unlit); AUREA_CHECK_EQ(material.name, std::string{"origin"});
     AUREA_CHECK_EQ(material.baseColorTex.image, 3); AUREA_CHECK_EQ(material.alphaCutoff, .25f);
     AUREA_CHECK_EQ(material.clearcoat, .7f); AUREA_CHECK_EQ(material.emissiveStrength, 4.f);
+    AUREA_CHECK_EQ(material.emissive.x, .1f); AUREA_CHECK_EQ(material.emissive.z, .3f);
 }
 
 AUREA_TEST(MaterialOverrides, IdenticalRigidOverridesShareBatchesButVariedAndTransparentValuesStaySeparate) {
@@ -62,9 +64,11 @@ AUREA_TEST(MaterialOverrides, IdenticalRigidOverridesShareBatchesButVariedAndTra
         graph.set_output(output, ResourceState::ShaderRead); pool.begin_frame(fixture.backend, number++);
         AUREA_CHECK(graph.compile(pool).ok()); graph.execute(*begin.commands, false);
         AUREA_CHECK_EQ(renderer.stats().visiblePrimitives, 12u);
-        const u32 expected = mode == 3 ? 3 : mode == 4 ? 2 : mode == 5 ? 12 : 1;
+        // Alternating materials preserve authored depth ties (A/B/A cannot
+        // merge across B). Equal adjacent overrides still batch in modes 1/2/6.
+        const u32 expected = mode == 3 || mode == 4 || mode == 5 ? 12 : 1;
         AUREA_CHECK_EQ(renderer.stats().drawCalls, expected);
-        AUREA_CHECK_EQ(renderer.stats().instancedDraws, mode == 5 ? 0u : expected);
+        AUREA_CHECK_EQ(renderer.stats().instancedDraws, expected == 12 ? 0u : expected);
         if (mode == 6) AUREA_CHECK_EQ(renderer.stats().shadowDrawCalls, 1u);
         graph.release(pool); pool.end_frame(); AUREA_CHECK(fixture.backend.end_frame().ok());
     }

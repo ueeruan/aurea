@@ -20,13 +20,13 @@ FloatImage sample_optical_flow_level(u32 mode) {
     auto signal = [](f32 x, f32 y) { return .5f + .15f * std::sin(.35f * x) + .15f * std::cos(.35f * y); };
     for (u32 y = 0; y < height; ++y) for (u32 x = 0; x < width; ++x) {
         const bool flat = mode == 0 || (mode == 2 && x < 28);
-        const bool moving = mode == 2 && !flat && y >= 24;
+        const bool moving = (mode == 2 && !flat && y >= 24) || mode == 3;
         const f32 current = flat ? .5f : signal(static_cast<f32>(x), static_cast<f32>(y));
         const f32 next = flat ? .5f : signal(static_cast<f32>(x) - (moving ? .5f : 0.f),
                                              static_cast<f32>(y) + (moving ? .25f : 0.f));
         const usize offset = (static_cast<usize>(y) * width + x) * 4;
         pixels[offset] = scene3d::float_to_half(current);
-        pixels[offset + 1] = scene3d::float_to_half(next);
+        pixels[offset + 1] = scene3d::float_to_half(mode == 3 ? next * .65f + .17f : next);
         pixels[offset + 2] = 0;
         pixels[offset + 3] = scene3d::float_to_half(1.f);
     }
@@ -65,6 +65,30 @@ FloatImage sample_optical_flow_level(u32 mode) {
     g.backend.destroy_texture(*output);
     return result;
 }
+}
+
+AUREA_TEST(OpticalFlowSamplingGpu, ExposureChangesPreserveSubpixelMotion) {
+    AUREA_REQUIRE_GPU();
+    const auto image = sample_optical_flow_level(3);
+    AUREA_CHECK_EQ(image.width, 80u);
+    if (image.width != 80) return;
+    Vec2 mean{};
+    f32 squaredError = 0;
+    u32 count = 0;
+    for (u32 y = 8; y < 40; ++y) for (u32 x = 8; x < 72; ++x) {
+        const Vec4 value = image.v(x, y);
+        mean = mean + Vec2{value.x, value.y};
+        squaredError += (value.x - .5f) * (value.x - .5f) + (value.y + .25f) * (value.y + .25f);
+        ++count;
+    }
+    mean = mean * (1.f / count);
+    const f32 rms = std::sqrt(squaredError / count);
+    std::printf("    exposure/contrast motion %.5f, %.5f; RMS %.5f px\n", mean.x, mean.y, rms);
+    AUREA_CHECK_NEAR(mean.x, .5f, .04f);
+    AUREA_CHECK_NEAR(mean.y, -.25f, .04f);
+    // Bilinear resampling and half-float luminance retain subpixel precision
+    // across the texture's phases under the affine exposure change.
+    AUREA_CHECK(rms < .15f);
 }
 
 AUREA_TEST(OpticalFlowSamplingGpu, FlatAndStationaryLevelsKeepZeroMotion) {

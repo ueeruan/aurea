@@ -431,10 +431,19 @@ func bgRemoveFailedKey(_ reason: Int64) -> String {
         else { return nil }
         let w = Float(image.width), h = Float(image.height)
         let request = VNDetectFaceLandmarksRequest()
-        try? VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
+        let bodies = VNDetectHumanBodyPoseRequest()
+        try? VNImageRequestHandler(cgImage: image, options: [:]).perform([request, bodies])
         var rows: [Float] = []
         var person = 0
+        for body in (bodies.results ?? []).prefix(4) {
+            var frame = [Float](repeating: 0, count: frameFloats)
+            MocapDetector.fill2D(body, into: &frame, at: 0)
+            frame[1] = Float(person)
+            rows += frame
+            person += 1
+        }
         for face in (request.results ?? []).prefix(4) {
+            if person >= 4 { break }
             guard let lm = face.landmarks else { continue }
             let box = face.boundingBox
             func point(_ region: VNFaceLandmarkRegion2D?) -> (Float, Float)? {
@@ -474,7 +483,7 @@ func bgRemoveFailedKey(_ reason: Int64) -> String {
                 detecting = 0
                 if kind == 1 {
                     if let url = path.contains("://") ? URL(string: path) : URL(fileURLWithPath: path) {
-                        _ = try? await MocapDetector.run(url: url, reduced: false, progress: { p in
+                        _ = try? await MocapDetector.run(url: url, reduced: false, imageSpace: true, progress: { p in
                             Task { @MainActor in detecting = p }
                         }, sink: { data, n, aspect in _ = engine.headbopPushFrames(data, frames: Int32(n), aspect: aspect) })
                     }

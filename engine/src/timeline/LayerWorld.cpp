@@ -20,6 +20,7 @@
 #include <atomic>
 #include <cmath>
 #include <new>
+#include <memory_resource>
 #include <unordered_map>
 #include <vector>
 
@@ -123,9 +124,13 @@ Mat4 layer_matrix_frac(const Layer& l, f64 local, f64 fps) noexcept {
     if (Vec3 sp; spatial_position(t, l.positionTangents, l.transform.position, local, sp)) {
         pos.x = sp.x + an.translate.x; pos.y = sp.y + an.translate.y;
     }
+    // Lote M: a posição vem de um caminho de outra camada ("Nulls Follow
+    // Points" / "Trace Path", timeline/PathRig.hpp). Sem ligação nada muda.
+    f32 followAngle = 0.0f;
+    if (l.pathFollow.mode != PathFollow::kNone) (void)pathrig::follow_position(l, local, pos, &followAngle);
     const Vec3 scale{s(TrackProperty::ScaleX, l.transform.scale.x) * an.scale.x,
                      s(TrackProperty::ScaleY, l.transform.scale.y) * an.scale.y, 1.0f};
-    f32 rot = (s(TrackProperty::RotationZ, l.transform.rotation.z) + an.rotation.z) * kDeg2Rad;
+    f32 rot = (s(TrackProperty::RotationZ, l.transform.rotation.z) + an.rotation.z) * kDeg2Rad + followAngle;
     // AE animation (v68): Auto-Orientar ao longo do caminho — o X da camada
     // segue a tangente do caminho de movimento (somado à rotação).
     if (l.autoOrient == 1) {
@@ -157,6 +162,9 @@ Mat4 layer_matrix_3d_frac(const Layer& l, f64 local, f64 fps, const Vec3* camera
     if (Vec3 sp; spatial_position(t, l.positionTangents, l.transform.position, local, sp)) {
         pos = Vec3{sp.x + an.translate.x, sp.y + an.translate.y, sp.z};
     }
+    // Lote M: posição vinda de um caminho (o mesmo do 2D).
+    f32 followAngle = 0.0f;
+    if (l.pathFollow.mode != PathFollow::kNone) (void)pathrig::follow_position(l, local, pos, &followAngle);
     Vec3 scale{s(TrackProperty::ScaleX, l.transform.scale.x) * an.scale.x, s(TrackProperty::ScaleY, l.transform.scale.y) * an.scale.y,
                s(TrackProperty::ScaleZ, l.transform.scale.z)};
     // A profundidade acompanha a largura (Z multiplica X) em tudo que não é
@@ -170,6 +178,7 @@ Mat4 layer_matrix_3d_frac(const Layer& l, f64 local, f64 fps, const Vec3* camera
     const Vec3 anchor{s(TrackProperty::AnchorX, l.transform.anchor.x), s(TrackProperty::AnchorY, l.transform.anchor.y),
                       s(TrackProperty::AnchorZ, l.transform.anchor.z)};
     Mat4 orientation = Mat4::from_quat(Quat::from_euler_zyx(rot.x, rot.y, rot.z));
+    if (followAngle != 0.0f) orientation = Mat4::from_quat(Quat::from_axis_angle(Vec3{0, 0, 1}, followAngle)) * orientation;
     // AE animation (v68): a orientação automática vem ANTES da rotação da
     // camada (a rotação gira por cima, como a Orientation + Rotation do AE).
     if (l.kind == LayerKind::Camera && l.camera.twoNode) {
@@ -322,9 +331,11 @@ struct WorldCacheHash {
     }
 };
 struct WorldCache {
-    std::unordered_map<WorldCacheKey, Mat4, WorldCacheHash> worlds;
+    std::pmr::unsynchronized_pool_resource storage;
+    std::pmr::unordered_map<WorldCacheKey, Mat4, WorldCacheHash> worlds{&storage};
 };
 thread_local WorldCache* tWorldCache = nullptr;
+thread_local WorldCache tWorldCacheStorage;
 
 /// A cadeia (camada, pai, avô, …) sem teto: 24 no lugar, o resto no heap.
 struct LayerChain {
@@ -348,7 +359,9 @@ bool camera_in_parent(const Composition& comp, f64 time, const Mat4& parentWorld
 
 WorldMatrixCacheScope::WorldMatrixCacheScope() noexcept {
     if (tWorldCache) return;
-    auto* cache = new (std::nothrow) WorldCache;
+    // Reuse buckets and node storage on this render thread. Entries are
+    // cleared at every outer scope, so edits cannot reuse earlier matrices.
+    auto* cache = &tWorldCacheStorage;
     tWorldCache = cache;
     owned_ = cache;
 }
@@ -356,7 +369,7 @@ WorldMatrixCacheScope::WorldMatrixCacheScope() noexcept {
 WorldMatrixCacheScope::~WorldMatrixCacheScope() {
     if (!owned_) return;
     tWorldCache = nullptr;
-    delete static_cast<WorldCache*>(owned_);
+    static_cast<WorldCache*>(owned_)->worlds.clear();
 }
 
 Mat4 world_chain_frac(const Composition& comp, const Layer& l, f64 time, bool threeD, f64 parentTime) noexcept {
@@ -459,9 +472,7 @@ Vec3 active_camera_position(const Composition& comp, f64 time) noexcept {
     // A mesma escolha do render (Renderer: camera_for_frac_own): a câmera
     // visível mais de CIMA no instante, com um quadro de folga nas bordas.
     auto containsFrac = [](const Layer& l, f64 timeF) {
-        const i64 t = static_cast<i64>(std::floor(timeF));
-        if (l.contains_time(FrameIndex{t})) return true;
-        return l.end.value > l.start.value && (t == l.start.value - 1 || t == l.end.value);
+        return l.contains_time(FrameIndex{static_cast<i64>(std::floor(timeF + 0.5))});
     };
     const auto& order = comp.order();
     for (u32 i = order.size(); i-- > 0;) {

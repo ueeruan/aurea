@@ -167,15 +167,21 @@ internal fun omegaAddPrefs(context: Context) = context.getSharedPreferences("ome
  * botão aceso, no palco, no Voltar ou adicionar algo fecha.
  */
 @Composable
-internal fun AddLayerPanel(store: EditorStore, ui: EditorUi, modifier: Modifier = Modifier.fillMaxSize()) {
+internal fun AddLayerPanel(
+    store: EditorStore,
+    ui: EditorUi,
+    modifier: Modifier = Modifier.fillMaxSize(),
+    /** A gaveta flutuante com o ✕ (tablet/celular). O Aurea PC passa `false`: painel fixo da biblioteca. */
+    chrome: Boolean = true,
+) {
     val close = { ui.adding = false }
     val closeLabel = stringResource(R.string.editor_fechar_adicionar)
     // 0.4.1 (mockup "interface 03"): a gaveta é um cartão flutuante — margem de 8, cantos
     // de 24, vidro escuro (#121214 a 96 %) e fio de 14 %.
     val card = RoundedCornerShape(24.dp)
     Box(
-        modifier.padding(horizontal = 8.dp, vertical = 4.dp).clip(card)
-            .background(Color(0xF5121214)).border(1.dp, Color.White.copy(alpha = 0.14f), card)
+        (if (chrome) modifier.padding(horizontal = 8.dp, vertical = 4.dp).clip(card)
+            .background(Color(0xF5121214)).border(1.dp, Color.White.copy(alpha = 0.14f), card) else modifier)
             .testTag("add.panel"),
     ) {
         Box(Modifier.fillMaxSize().testTag("editor.addPanel")) {
@@ -201,7 +207,7 @@ internal fun AddLayerPanel(store: EditorStore, ui: EditorUi, modifier: Modifier 
                 AddTab.Vector -> VectorGrid(store, ui)
             }
         }
-        Box(
+        if (chrome) Box(
             Modifier
                 .align(Alignment.TopEnd)
                 .size(48.dp)
@@ -814,7 +820,9 @@ private fun VectorGrid(store: EditorStore, ui: EditorUi) {
         }
     }
     fun start(preset: Int) {
-        if (store.addVectorLayer(preset) >= 0) openPanel(store, ui, EditorPanel.Vector)
+        // Como o desenho vetorial da referência: o caminho livre abre o Editar pontos;
+        // as formas prontas abrem Caminhos e operadores (aba Forma).
+        if (store.addVectorLayer(preset) >= 0) openPanel(store, ui, if (preset == 0) EditorPanel.EditPoints else EditorPanel.VectorPaths)
     }
     ObjectGrid(
         listOf(

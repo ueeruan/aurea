@@ -121,6 +121,29 @@ public:
     /// em 32 bits, teto de decoders vivos e prazo de ocioso menor. O build
     /// decide; o teste do host passa 32 para exercitar o ramo do aparelho.
     void set_pointer_bits(u32 bits) noexcept;
+    /// 0.5.3: teto de decoders vivos também em 64 bits (0 = sem teto, o padrão).
+    /// Mesma regra do teto de 32 bits: acima dele, a fonte OCIOSA há mais tempo
+    /// cede o lugar; layers visíveis juntas nunca. Só a prévia do motor define:
+    /// o export (OfflineFrameRenderer) tem o próprio MediaManager, sem teto.
+    void set_source_cap(u32 cap) noexcept;
+    /// 0.5.4 ("coloquei 3 vídeos e alguns não apareciam", iPhone): a prévia
+    /// nunca desiste de uma camada visível. Com isto ligado (só o motor liga):
+    ///  - open recusado (aparelho sem sessão de decoder livre: proxy, miniatura
+    ///    e as outras camadas abrindo juntas) tenta de novo pelo RELÓGIO, não só
+    ///    por quadros — parado não há quadro novo —, com espera crescente até
+    ///    2 s e sem limite de tentativas; e na hora em que outro decoder fecha;
+    ///  - a fonte cujo decoder só falha (VideoSource::Stats::consecutiveFailures)
+    ///    é trocada por uma nova (no iOS: AVAsset novo depois de "media services
+    ///    reset"/decoder ocupado; no Android: codec novo, que cai no de software
+    ///    quando o de hardware é recusado);
+    ///  - depois de algumas falhas a fonte original pede o proxy de edição
+    ///    (decode menor e, no Android, pelo decoder de software).
+    /// O export mantém as regras antigas (o prazo dele decide).
+    void set_persistent_retry(bool on) noexcept;
+    /// Quando a próxima nova tentativa de uma camada sem decoder vence (relógio
+    /// monotônico, ns); 0 = nenhuma pendente. O motor parado agenda um quadro
+    /// para essa hora (Engine::render_frame), senão ninguém chamaria source_for.
+    [[nodiscard]] u64 next_retry_ns() const;
     /// Fontes (abertas ou abrindo, sem as que falharam) ainda na lista.
     [[nodiscard]] u32 live_sources() const;
 
@@ -198,6 +221,8 @@ private:
         bool failed = false;
         u64 failedFrame = 0;   ///< quando o open falhou (nova tentativa depois de um intervalo)
         u32 failures = 0;      ///< tentativas de open que falharam nesta camada
+        u64 retryAtNs = 0;     ///< 0.5.4: nova tentativa pelo relógio (set_persistent_retry)
+        u64 freeGen = 0;       ///< capacityGen_ quando o open começou: outro decoder fechou desde então?
         /// 0.3.6: a fonte original acompanha o tempo real? (PreviewProxy.hpp)
         DecodeSpeedMonitor speed;
     };
@@ -212,6 +237,11 @@ private:
     std::atomic<u64> decodeWork_{0};   ///< decode_work(); as fontes incrementam
     bool suspended_ = false;
     u32 pointerBits_ = kPointerBits;   ///< guarded by mutex_; AddressSpace.hpp
+    u32 sourceCap_ = 0;                ///< guarded by mutex_; set_source_cap (0 = sem teto)
+    bool persistentRetry_ = false;     ///< guarded by mutex_; set_persistent_retry
+    /// +1 a cada fonte retirada que terminou de fechar: uma sessão de decoder
+    /// voltou ao sistema e o open recusado pode tentar já.
+    std::atomic<u64> capacityGen_{0};
     PreviewProxyService proxies_;
     u32 originalSourceLeases_ = 0; // guarded by mutex_; never cleared by project teardown
     void release_original_sources() noexcept;

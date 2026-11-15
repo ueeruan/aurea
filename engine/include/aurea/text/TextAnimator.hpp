@@ -92,6 +92,9 @@ enum TextAnimParam : u32 {
     kAnimFillHue = 46, kAnimFillSaturation, kAnimFillBrightness, kAnimFillOpacity,
     kAnimRandAmount = 50, kAnimRandEvolution, kAnimRandSeed, kAnimLetterSpacing, kAnimLineSpacingEm, kAnimFillA,
     kAnimGroupAlignX = 56, kAnimGroupAlignY,
+    // v70: o restante do animador do After Effects (o bloco 0 acaba no 63).
+    kAnimStrokeHue = 58, kAnimStrokeSaturation, kAnimStrokeBrightness, kAnimStrokeOpacity,
+    kAnimCharValue = 62, kAnimLineAnchor = 63,
 };
 /// Trilha de um parâmetro de seletor: o seletor 0 usa as chaves de sempre; os
 /// seguintes ficam em blocos de 64.
@@ -123,6 +126,7 @@ struct GlyphAnim {
     Vec4 fill{0, 0, 0, 0};    ///< a = peso da mistura com a cor do animador (sRGB)
     f32 fillOpacity = 1.0f;   ///< alpha da cor de preenchimento, separado do peso da mistura
     Vec4 stroke{0, 0, 0, 0};
+    f32 strokeOpacity = 1.0f; ///< alpha do traço (Opacidade do traço do AE), separado do peso da mistura
 };
 
 /// Valor de um parâmetro no instante (fracionário: sub-quadro do desfoque).
@@ -142,6 +146,9 @@ void evaluate_text_animators(const TextData& t, const TrackSet& tracks, f64 loca
 /// Deslocamento de caractere (A→B→C…): o texto com as letras trocadas no
 /// instante, ou o próprio texto se nenhum animador desloca.
 [[nodiscard]] std::string apply_char_offset(const TextData& t, const TrackSet& tracks, f64 local, f64 fps);
+/// O mesmo, e `slots` recebe a vaga de cada código trocado (TextData::charSlots;
+/// vazio = nenhum animador pede alinhamento na vaga).
+[[nodiscard]] std::string apply_char_offset(const TextData& t, const TrackSet& tracks, f64 local, f64 fps, std::vector<u32>* slots);
 
 /// Algum animador ativo?
 [[nodiscard]] bool has_animators(const TextData& t) noexcept;
@@ -157,7 +164,9 @@ void apply_text_content(const TextData& t, const TrackSet& tracks, f64 local, f6
 [[nodiscard]] const f32* animator_param_ref(const TextAnimator& a, u32 key) noexcept;
 /// Campos que não animam. Animador: 0 propriedades, 1 rig, 2 âncora do rig, 3 agrupamento,
 /// 4 cursor, 5 piscar, 6 caracteres, 7 manter espaços, 8 alinhamento X, 9 alinhamento Y,
-/// 15 número de seletores. Seletor s: 16·(s+1) + 0 ligado, 1 tipo, 2 base, 3 unidades, 4 modo,
+/// 10 intervalo de caracteres (0 maiúsculas e dígitos, 1 Unicode), 11 tipo de tracking
+/// (0 antes e depois, 1 antes, 2 depois), 12 alinhamento de caractere (0 esquerda, 1 centro,
+/// 2 direita, 3 ajustar kerning), 15 número de seletores. Seletor s: 16·(s+1) + 0 ligado, 1 tipo, 2 base, 3 unidades, 4 modo,
 /// 5 forma, 6 ordem aleatória, 7 semente, 8 travar dimensões.
 inline constexpr u32 kTextAnimatorFieldCount = 16u * (kMaxTextSelectors + 1u);
 void read_animator_fields(const TextAnimator& a, f32* out) noexcept;

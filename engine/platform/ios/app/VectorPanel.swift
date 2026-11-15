@@ -2,18 +2,38 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// Pedido de aba ao abrir o painel Vetor (par do `VectorRequest` do Android); lido e limpo ao aparecer.
+enum VectorPanelRequest {
+    /// A aba Operadores (a 6ª).
+    static let operators = 5
+    @MainActor static var tab: Int?
+}
+
+/// Redesenho de 13/11/2026 (`VECTOR_MASK_AM.md` §3.2; par do VectorPanel.kt): o painel Vetor de 7
+/// abas de texto foi dividido como na referência, um assunto por tela, na moldura comum:
+/// `.fill` = Cor e preenchimento do vetor; `.stroke` = Borda e sombra › Traço do vetor (o
+/// BorderShadowPanel hospeda, com as abas dele); `.paths` = Caminhos e operadores, com as abas de
+/// ícone Forma · Caminho · Operadores · Grupo. Os pontos se editam no Editar pontos.
+enum VectorFace { case fill, stroke, paths }
+
 struct VectorPanel: View {
     @EnvironmentObject private var model: AureaModel
+    var face: VectorFace = .paths
+    /// As abas de quem hospeda (Borda e sombra › Traço do vetor).
+    var hostTabs: [PanelTab]? = nil
+    var hostSelected: String? = nil
+    var onHostTab: ((String) -> Void)? = nil
     @State private var groups: [[String: Any]] = []
-    @State private var tab = 0
+    @State private var tab = "shape"
     @State private var selected = -1
     @State private var adding = false
     @State private var advanced = Set<Int>()
     @State private var pathFlags = 0
     @State private var addingModifier = false
     @State private var collapsedModifiers = Set<Int>()
-    /// VectorParam: 21 valores (o 20 é a escala Y do repetidor, v6) + bits animados + bits com keyframe.
-    private static let paramCount = 21
+    /// VectorParam do motor: 27 valores (o 20 é a escala Y do repetidor, v6; 21..26 = traço/vão 1..3,
+    /// que este painel não mostra) + bits animados + bits com keyframe (ids 0..23).
+    private static let paramCount = 27
     /// Operadores de caminho: id = modBase + operador × modParams + parâmetro (vector_modifier_param do motor).
     private static let modBase = 0x10000
     private static let modParams = 16
@@ -21,7 +41,13 @@ struct VectorPanel: View {
     private static let modifierNames = ["ae_shapeop_offset", "ae_shapeop_pucker", "ae_shapeop_roughen", "ae_shapeop_wiggle_paths",
                                         "ae_shapeop_round_corners", "ae_shapeop_twist", "ae_shapeop_zigzag", "ae_shapeop_wiggle_transform"]
     private var pathKinds: [String] { ["ios_vector_free_path", "panel_retangulo", "panel_elipse", "editor_poligono", "editor_estrela"].map { AureaText.t($0) } }
-    private var tabs: [String] { ["target_shape", "panel_preenchimento", "panel_borda", "panel_caminho", "panel_transformar", "ios_vector_operators", "panel_efeitos"].map { AureaText.t($0) } }
+    private var ownTabs: [PanelTab] {
+        guard face == .paths else { return [] }
+        return [PanelTab(id: "shape", label: AureaText.t("target_shape"), glyph: CupertinoGlyph.Pencil),
+                PanelTab(id: "path", label: AureaText.t("panel_caminho"), glyph: CupertinoGlyph.Scribble),
+                PanelTab(id: "operators", label: AureaText.t("ios_vector_operators"), glyph: CupertinoGlyph.Wrench),
+                PanelTab(id: "group", label: AureaText.t("panel_transformar"), glyph: CupertinoGlyph.Move)]
+    }
     private var id: Int64 { model.primarySelection ?? 0 }
     private var group: [String: Any] { groups.indices.contains(Int(model.vectorGroup)) ? groups[Int(model.vectorGroup)] : [:] }
     private var params: [Float] { floats(group["params"]) }
@@ -44,47 +70,55 @@ struct VectorPanel: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            PanelHeader(title: AureaText.t("panel_vetor")) { model.panel = .none }
-            HStack(spacing: 0) {
-                LeftRail(keyframeLook: railLook, onKeyframe: canKey ? toggleKey : nil, onBack: { model.panel = .none })
-                VStack(spacing: 0) {
-                    pathPicker
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 6) {
-                            ForEach(tabs.indices, id: \.self) { n in
-                                VectorChip(tabs[n], selected: tab == n, bold: true, horizontal: 14) { tab = n; selected = -1 }
-                            }
-                        }.padding(.horizontal, 6).padding(.vertical, 6)
-                    }.frame(height: 48)
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 0) {
-                            if group.isEmpty { hint("panel_esta_camada_ainda_nao_tem_grupos") }
-                            else {
-                                switch tab {
-                                case 0: shapeTab
-                                case 1: fillTab
-                                case 2: strokeTab
-                                case 3: pathTab
-                                case 4: transformTab
-                                case 5: operatorsTab
-                                default:
-                                    VectorAction("panel_abrir_efeitos_camada", detail: "panel_desfoque_brilho_cor_outros_efeitos_aplicados") { model.openPanel(.effects) }.padding(.top, 8)
-                                }
-                            }
-                        }.padding(.leading, 4).padding(.trailing, 10).padding(.bottom, 16)
+        PanelFrame(rail: PanelRail(onBack: { model.panel = .none }, keyframeLook: railLook, onKeyframe: canKey ? toggleKey : nil),
+                   tabs: hostTabs ?? ownTabs, selectedTab: hostSelected ?? tab,
+                   onTab: { id in if let onHostTab { onHostTab(id) } else { tab = id; selected = -1 } }) {
+            VStack(alignment: .leading, spacing: 0) {
+                pathPicker
+                if group.isEmpty { hint("panel_esta_camada_ainda_nao_tem_grupos") }
+                else {
+                    switch face {
+                    case .fill: fillTab
+                    case .stroke: strokeTab
+                    case .paths:
+                        switch tab {
+                        case "path": pathTab
+                        case "operators": operatorsTab
+                        case "group": transformTab
+                        default: shapeTab
+                        }
                     }
                 }
+            }.padding(.leading, 4).padding(.trailing, 10).padding(.bottom, 16)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier(face == .fill ? "vector.fill" : face == .stroke ? "vector.stroke" : "vector.paths")
+        }.foregroundStyle(AureaColors.text)
+            .onAppear {
+                // Pedido de aba (índices antigos: 0 Forma, 3 Caminho, 4 Transformar, 5 Operadores).
+                if let requested = VectorPanelRequest.tab {
+                    switch requested {
+                    case 3: tab = "path"
+                    case 4: tab = "group"
+                    case VectorPanelRequest.operators: tab = "operators"
+                    default: tab = "shape"
+                    }
+                    selected = -1; VectorPanelRequest.tab = nil
+                }
+                load()
             }
-        }.foregroundStyle(AureaColors.text).background(AureaColors.editorPanel)
-            .onAppear(perform: load).onChange(of: model.status.modelRevision) { _ in load() }
+            .onChange(of: model.status.modelRevision) { _ in load() }
             .onChange(of: model.status.playhead) { _ in load() }
             .onChange(of: id) { _ in selected = -1; load() }
             .onChange(of: model.vectorGroup) { _ in selected = -1; collapsedModifiers.removeAll(); model.selectedMaskPoint = nil; load() }
             .onChange(of: model.vectorPath) { _ in selected = -1; model.selectedMaskPoint = nil; load() }
     }
 
-    private var pathPicker: some View {
+    /// Os chips de caminho. Preenchimento e Traço: só com 2+ caminhos e sem "+"; o "+" (formas de
+    /// caminho) fica em Caminhos e operadores.
+    @ViewBuilder private var pathPicker: some View {
+        if face == .paths || groups.reduce(0, { $0 + (($1["paths"] as? [[NSNumber]])?.count ?? 0) }) >= 2 { pathChips }
+    }
+    private var pathChips: some View {
         VStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
@@ -99,7 +133,9 @@ struct VectorPanel: View {
                             }
                         }
                     }
-                    VectorChip(AureaText.t(adding ? "panel_fechar" : "panel_adicionar"), selected: adding) { adding.toggle() }
+                    if face == .paths {
+                        VectorChip(AureaText.t(adding ? "panel_fechar" : "panel_adicionar"), selected: adding) { adding.toggle() }
+                    }
                 }.padding(.vertical, 4)
             }
             if adding {

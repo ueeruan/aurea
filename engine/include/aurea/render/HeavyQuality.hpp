@@ -167,6 +167,9 @@ struct HeavyStats {
     u32 flowCacheHits = 0;
     u32 flowCacheEvictions = 0;
     u64 flowCacheBytes = 0;       ///< residente agora
+    // TimeSlice (0.5.3): faixas guardadas e o tamanho da última faixa desenhada.
+    u64 sliceCacheBytes = 0;
+    u32 lastSliceWidth = 0, lastSliceHeight = 0;
     // Partículas (último quadro).
     u32 lastParticleSlots = 0;    ///< instâncias desenhadas
     u32 lastParticleLayers = 0;

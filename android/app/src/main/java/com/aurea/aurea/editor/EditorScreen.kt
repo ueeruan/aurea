@@ -107,8 +107,8 @@ internal class EditorUi {
     /** Painel "Gravar voz" aberto (VoiceRecorder.kt). */
     var voice by mutableStateOf(false)
     var fullscreen by mutableStateOf(false)
-    /** Grade de terços sobre o quadro (só na prévia, nunca no export). */
-    var showGrid by mutableStateOf(false)
+    // (B10) O `showGrid` morto saiu: as guias da prévia são do motor
+    // (ViewModes.grid/safe/rulers → EditorStore.setPreviewGuides).
     var effectsBrowser by mutableStateOf(false)
     var exporting by mutableStateOf(false)
     /** 0.4.6: o chat do assistente de IA aberto. */
@@ -152,6 +152,10 @@ internal class EditorUi {
 /** Abrir painel pausa a reprodução e fecha o adicionar. */
 internal fun openPanel(store: EditorStore, ui: EditorUi, panel: EditorPanel) {
     if (store.playing) store.pause()
+    // A plataforma pode abrir a curva noutro lugar (Aurea PC: a janelinha de Curvas).
+    if (panel == EditorPanel.Curve) PanelRouting.curveHost?.let { host -> if (ui.panel == EditorPanel.Curve) ui.panel = null; host(); return }
+    // Os outros painéis também (Aurea PC: Efeitos no cartão da direita). Nulo no celular e no tablet.
+    if (PanelRouting.panelHost?.invoke(panel) == true) { ui.adding = false; return }
     ui.adding = false
     ui.panel = panel
 }
@@ -225,6 +229,10 @@ fun EditorScreen(store: EditorStore) {
         if (store.engineReady) store.setContentBoundedPlayback(EditorTimelineRefresh.enabled)
     }
     val ui = rememberSaveable(saver = EditorUi.Saver) { EditorUi() }
+    // 0.5.3 (P1-4): a Activity foi recriada (escala da fonte, idioma) com um export
+    // do editor em curso. Ele continua no ViewModel, mas `exporting` não é salvo:
+    // ficava sem progresso nem Cancelar na tela. A tela Exportar volta a aparecer.
+    LaunchedEffect(store) { if (store.exporter.editorExportBusy) ui.exporting = true }
     StagePrefs.load(androidx.compose.ui.platform.LocalContext.current)
     // Omega conteúdo (área 06): preferências do aparelho dos editores (forma, desenho).
     ContentPrefs.load(androidx.compose.ui.platform.LocalContext.current)
@@ -248,6 +256,14 @@ fun EditorScreen(store: EditorStore) {
             EditorStore.ContentEditorRequest.Drawing -> EditorPanel.Drawing
             EditorStore.ContentEditorRequest.EditPoints -> EditorPanel.EditPoints
         })
+    }
+    // Funções F10: um painel pede os Ajustes do projeto numa aba (ex.: o Desfoque de
+    // movimento da camada leva ao obturador da composição em Prévia e render).
+    val settingsRequest = ProjectSettingsRequest.open
+    LaunchedEffect(settingsRequest) {
+        if (!settingsRequest) return@LaunchedEffect
+        ProjectSettingsRequest.open = false
+        openSheet(store, ui, ShellSheet.ProjectSettings)
     }
     LaunchedEffect(store.primary, selectionSize) {
         val editing = store.textEditLayer
@@ -301,7 +317,7 @@ fun EditorScreen(store: EditorStore) {
         selectionSize == 1 -> SheetContent.Dock
         else -> SheetContent.AddBar
     }
-    // Keep the native surface across normal narrow/wide/fullscreen layouts.
+    // Keep the native surface across fullscreen and panel changes (same parent).
     // A workspace transition must dispose its whole layout instead: moving the
     // AndroidView out of the removed scene Column leaves its trailing controls
     // attached to the Compose owner (including live, focusable numeric fields).
@@ -309,9 +325,14 @@ fun EditorScreen(store: EditorStore) {
     // inteiro: movido da coluna da Edição, o palco deixava um nó vazio de meia
     // tela acima dele, e o "+" da Composição empurrava timeline e barra para
     // fora da tela.
-    val stage = remember(store, ui, store.sceneEditor, store.uiMode) {
-        movableContentOf { modifier: Modifier -> PreviewStage(store, ui, modifier) }
-    }
+    // 0.5.3: a troca entre o layout estreito e o largo (girar o aparelho, tela
+    // cheia ou a curva em paisagem) também é troca de pai: o palco movido do
+    // WideEditor para o NarrowEditor deixava o mesmo nó vazio de meia tela, e o
+    // primeiro toque que mudava o conteúdo de baixo (Elemento, Mídia…) jogava o
+    // palco para o pé da tela e a timeline e a barra para fora (vídeo do relato,
+    // reproduzido no emulador girando a tela). O palco agora é um por família de
+    // layout (a chave `wide`, dentro do BoxWithConstraints abaixo); dentro da
+    // mesma família ele continua móvel.
 
     // 0.3.3 recursos: a divisa palco/timeline volta. A altura do palco que a
     // pessoa escolheu arrastando o transporte (0 = automática: zona de 280),
@@ -333,6 +354,11 @@ fun EditorScreen(store: EditorStore) {
                 val w = maxWidth.value
                 val h = maxHeight.value
                 val wide = !ui.fullscreen && ui.panel != EditorPanel.Curve && EditorLayout.isWide(w, h)
+                // Um palco por pai (ver o comentário acima): mudou o layout, o palco é
+                // recriado no lugar novo em vez de movido (o nó movido deixava o vazio).
+                val stage = remember(store, ui, store.sceneEditor, store.uiMode, wide) {
+                    movableContentOf { modifier: Modifier -> PreviewStage(store, ui, modifier) }
+                }
                 val sheetWidth = EditorLayout.wideSheetWidth(w)
                 val aspect = if (store.project.width > 0 && store.project.height > 0) store.project.width.toFloat() / store.project.height else 0f
                 // Omega chrome (área 02, P0-4): com a seleção múltipla a timeline fica com a
@@ -342,12 +368,14 @@ fun EditorScreen(store: EditorStore) {
                     dockRows = if (content == SheetContent.Dock) dockTileRowCount(store) else 2,
                     fontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale)
                 if (store.sceneEditor) {
-                    SceneLayoutWorkspace(store, ui, stage)
+                    // Aurea PC: a Cena 3D do PC (SceneWorkspaceHost); nulo no celular = a de sempre.
+                    val platformScene = SceneWorkspaceHost.workspace
+                    if (platformScene != null) platformScene(store, ui, stage) else SceneLayoutWorkspace(store, ui, stage)
                 } else if (store.uiMode == com.aurea.aurea.state.UI_MODE_EDIT) {
                     // A interface de Edição (0.2.5): trilha principal e Dock em níveis.
                     EditModeEditor(store, ui, stage)
                 } else if (wide) {
-                    WideEditor(store, ui, content, h, sheetWidth, stage)
+                    PlatformWideEditor(store, ui, content, h, sheetWidth, stage)
                 } else {
                     // 0.3.3 recursos: a divisa (arrastar o transporte; toque duplo = automática).
                     NarrowEditor(store, ui, content, m, stage, EditorLayout.maxPreview(h),
@@ -412,7 +440,11 @@ fun EditorScreen(store: EditorStore) {
     // Omega adicionar (área 08, P2-4): o "Fundo" das sub-páginas leva aos ajustes do projeto.
     if (ui.exporting) ExportScreen(store, onOpenProjectSettings = { ui.exporting = false; openSheet(store, ui, ShellSheet.ProjectSettings) }) { ui.exporting = false }
     // 0.4.6: o assistente de IA; o painel que ele pede fecha o chat e abre no editor.
-    if (ui.assistant) com.aurea.aurea.assistant.AssistantSheet(store.assistant) { ui.assistant = false }
+    // AureaMCP substitui o chat de IA (0.4.6); o chat antigo volta com AureaMcpFlags.legacyChat.
+    if (ui.assistant) {
+        if (com.aurea.aurea.mcp.AureaMcpFlags.legacyChat) com.aurea.aurea.assistant.AssistantSheet(store.assistant) { ui.assistant = false }
+        else com.aurea.aurea.mcp.AureaMcpScreen(store.mcp) { ui.assistant = false }
+    }
     val assistantPanel = store.assistantPanel
     LaunchedEffect(assistantPanel) {
         val panel = assistantPanel ?: return@LaunchedEffect
@@ -585,7 +617,7 @@ private fun NarrowEditor(
 }
 
 @Composable
-private fun WideEditor(
+internal fun WideEditor(
     store: EditorStore,
     ui: EditorUi,
     content: SheetContent,
@@ -633,7 +665,7 @@ private fun WideEditor(
 
 /** Topo: lote, camada ou projeto — segue a seleção. */
 @Composable
-private fun TopBarHost(store: EditorStore, ui: EditorUi) {
+internal fun TopBarHost(store: EditorStore, ui: EditorUi) {
     val size by remember { derivedStateOf { store.selection.size } }
     val primary by remember { derivedStateOf { store.primary } }
     val id = primary
@@ -661,7 +693,7 @@ private const val PREVIEW_PREFS = "aurea.editor.layout"
 private const val PREVIEW_HEIGHT_KEY = "preview_height_dp"
 
 @Composable
-private fun TimelineHost(store: EditorStore, ui: EditorUi, modifier: Modifier, compactDock: Boolean = false, obscuredBottom: Float = 0f) {
+internal fun TimelineHost(store: EditorStore, ui: EditorUi, modifier: Modifier, compactDock: Boolean = false, obscuredBottom: Float = 0f) {
     // Modo "Selecionar keyframes": o painel fecha para a timeline voltar alta,
     // com as trilhas abertas e a barra de ações inteira.
     val selectingKeys = store.keySelectMode
@@ -760,7 +792,11 @@ private fun onKeyframeTapped(store: EditorStore, ui: EditorUi, layer: Long, key:
  * painel desenha o cabeçalho "‹ Título" dentro da área.
  */
 @Composable
-private fun ContextArea(store: EditorStore, ui: EditorUi, content: SheetContent, modifier: Modifier) {
+/**
+ * [chrome] = a folha do tablet/celular (cantos, fio e puxador). O Aurea PC passa
+ * `false`: lá o inspetor é um painel fixo, e a moldura é do layout dele.
+ */
+internal fun ContextArea(store: EditorStore, ui: EditorUi, content: SheetContent, modifier: Modifier, chrome: Boolean = true) {
     // Omega adicionar (área 08, P0-1): adicionando, a barra continua no lugar.
     if (content == SheetContent.AddBar || content == SheetContent.Adding) {
         AddBar(store, ui, modifier)
@@ -772,11 +808,12 @@ private fun ContextArea(store: EditorStore, ui: EditorUi, content: SheetContent,
     val sheetShape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
     Box(modifier) {
     Column(
-        Modifier.fillMaxSize()
+        if (chrome) Modifier.fillMaxSize()
             .clip(sheetShape)
             .background(AureaColors.EditorPanel)
             .border(1.dp, androidx.compose.ui.graphics.Color.White.copy(alpha = 0.16f), sheetShape)
-            .padding(top = 8.dp),
+            .padding(top = 8.dp)
+        else Modifier.fillMaxSize(),
     ) {
         // Real Camera ligada: os controles saem da prévia e ficam aqui.
         if (realCameraShowing(store)) {
@@ -811,7 +848,7 @@ private fun ContextArea(store: EditorStore, ui: EditorUi, content: SheetContent,
                 )
             } else if (!panelPage) {
                 Column(Modifier.fillMaxSize()) {
-                    if (!EditorTimelineRefresh.enabled) Spacer(Modifier.height(ShellDims.SheetHandle))
+                    if (chrome && !EditorTimelineRefresh.enabled) Spacer(Modifier.height(ShellDims.SheetHandle))
                     SheetBody {
                         when (content) {
                             SheetContent.Adding -> AddLayerPanel(store, ui)
@@ -828,7 +865,7 @@ private fun ContextArea(store: EditorStore, ui: EditorUi, content: SheetContent,
             }
         }
     }
-    Box(
+    if (chrome) Box(
         Modifier.align(Alignment.TopCenter).padding(top = 3.dp).size(34.dp, 4.dp)
             .clip(androidx.compose.foundation.shape.RoundedCornerShape(2.dp))
             .background(androidx.compose.ui.graphics.Color.White.copy(alpha = 0.22f)),

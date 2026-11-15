@@ -252,6 +252,9 @@ class ContaViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     companion object {
+        /** AureaMCP: o token da sessão guardada (o mesmo cofre), sem precisar do ViewModel. */
+        fun tokenGuardado(context: Context): String? = runCatching { KeyVault(context.applicationContext).get(KEY_TOKEN) }.getOrNull()
+
         private const val PREFS = "aurea_conta"
         private const val KEY_USUARIOS = "usuarios"
         private const val KEY_TOKEN = "conta_token"

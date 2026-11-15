@@ -27,4 +27,8 @@
     <string name="om_tl_current_time">الوقت الحالي</string>
     <string name="om_tl_hidden">مخفية</string>
     <string name="om_tl_visible">ظاهرة</string>
+    <!-- 0.5.3: grupo aberto na timeline (o conteúdo recuado embaixo dele). -->
+    <string name="om_tl_group_contents_shown">محتوى المجموعة ظاهر</string>
+    <string name="om_tl_group_contents_hidden">محتوى المجموعة مطوي</string>
+    <string name="om_tl_group_inline_locked_time">تم تعديل زمن هذه المجموعة (السرعة أو منحنى الزمن أو العكس): افتح المجموعة لتعديل هذه الطبقة</string>
 </resources>

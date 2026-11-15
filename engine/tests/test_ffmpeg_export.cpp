@@ -650,4 +650,7 @@ AUREA_TEST(FFmpegExport, BoundedValidationSkipsPayloadOfUndecodedGopButSeesDecod
         warned.c_str());
     AUREA_CHECK(!seen.ok() || !warned.empty());
 }
+
+// 0.5.3 (P0-5): encoder que rearredonda o tempo ou descarta quadros.
+#include "Export053Sink.inl"
 #endif

@@ -29,6 +29,8 @@ internal class TimelineState {
      * playhead do motor (um só "agora"; spec §8.3-1).
      */
     var heldView by mutableDoubleStateOf(Double.NaN)
+    /** Modo AE ([TimelinePlatform.anchorAtStart]): o quadro na borda esquerda das trilhas. */
+    var aeOrigin by mutableDoubleStateOf(0.0)
     var compact by mutableStateOf(false)
     /** Compacta só por causa da doca: tocar no ícone do tipo abre as trilhas em vez de sair. */
     var compactByDock by mutableStateOf(false)
@@ -155,12 +157,14 @@ internal class ThumbStrip : com.aurea.aurea.engine.TrimmableImageCache {
      * DONA ([ThumbnailCache.ownerOf]): o pedaço de um corte usa a medida do
      * original, senão os ladrilhos dele teriam outra largura e outros baldes.
      */
-    fun aspect(cache: ThumbnailCache, layer: Long): Float = aspects.get(cache.ownerOf(layer)) ?: DEFAULT_ASPECT
+    fun aspect(cache: ThumbnailCache, layer: Long, group: Long = 0L): Float =
+        aspects.get(if (group == 0L) cache.ownerOf(layer) else innerKey(group, layer)) ?: DEFAULT_ASPECT
 
-    fun get(cache: ThumbnailCache, layer: Long, bucket: Int, timelineFrame: Int, heightPx: Int, generation: Int): Bitmap? {
+    fun get(cache: ThumbnailCache, layer: Long, bucket: Int, timelineFrame: Int, heightPx: Int, generation: Int, group: Long = 0L): Bitmap? {
         if (cacheEpoch != cache.epoch) { releaseImages(); cacheEpoch = cache.epoch }
         // Os dois lados de um corte dividem a chave (mesma mídia, mesma origem).
-        val owner = cache.ownerOf(layer)
+        // 0.5.3: camada de dentro de um grupo aberto — o grupo entra na chave (ids se repetem).
+        val owner = if (group == 0L) cache.ownerOf(layer) else innerKey(group, layer)
         probe.set(owner, bucket, heightPx)
         hits[probe]?.get()?.let { return it }
         val missed = misses[probe]
@@ -170,7 +174,7 @@ internal class ThumbStrip : com.aurea.aurea.engine.TrimmableImageCache {
             return null
         }
         budget--
-        val bmp = cache.get(layer, timelineFrame, heightPx)
+        val bmp = cache.get(layer, timelineFrame, heightPx, group)
         val key = probe.copy()
         if (bmp == null) {
             if (misses.size > MAX_MISSES) misses.clear()
@@ -186,6 +190,8 @@ internal class ThumbStrip : com.aurea.aurea.engine.TrimmableImageCache {
     }
 
     private companion object {
+        /** Chave da tira de uma camada de dentro: o grupo misturado ao id (as duas tabelas de ids se repetem). */
+        fun innerKey(group: Long, layer: Long): Long = layer xor (group * -0x61c8864680b583ebL) xor Long.MIN_VALUE
         const val MAX_HITS = 240
         const val MAX_MISSES = 512
         const val DEFAULT_ASPECT = 16f / 9f

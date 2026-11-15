@@ -96,6 +96,116 @@ std::vector<u16> frame(const fs::path& directory, u64 index, u32 width, u32 heig
 }
 }
 
+AUREA_TEST(PreRenderIntegration, GroupCacheIsUsedInsideItsLiveParentAndEditsInvalidateIt) {
+    using namespace prerender_integration;
+    Rig rig(true);
+    const u64 source = rig.shape(.5f);
+    const auto group = rig.engine.precompose(&source, 1, "cached child");
+    AUREA_CHECK(group.ok());
+    if (!group.ok()) return;
+    const CompositionId parent = rig.engine.project()->timeline().current();
+    rig.shape(.25f);
+    AUREA_CHECK(rig.engine.start_prerender(1, *group).ok());
+    const auto done = rig.wait();
+    AUREA_CHECK(done.complete && done.error == 0);
+    AUREA_CHECK(rig.engine.project()->timeline().current() == parent);
+    std::atomic<u32> uploads{0};
+    u64 cachedTexture = 0;
+    rig.mock->beforeTextureUpload = [&](TextureHandle texture, const void*, u32) {
+        if (is_cache_texture(rig.mock->texture_desc(texture))) { ++uploads; cachedTexture = texture.id; }
+        return OkStatus;
+    };
+    int window = 0;
+    AUREA_CHECK(rig.engine.attach_surface(&window, 32, 32).ok());
+    for (u32 tick = 0; tick < 200 && !uploads.load(); ++tick) {
+        rig.mock->events.clear();
+        AUREA_CHECK(rig.engine.render_frame(false).ok());
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    AUREA_CHECK(uploads.load() > 0);
+    AUREA_CHECK(std::any_of(rig.mock->events.begin(), rig.mock->events.end(), [&](const auto& event) {
+        return event.kind == test::MockBackend::Event::BindTexture && event.texture == cachedTexture;
+    }));
+    const auto draws = std::count_if(rig.mock->events.begin(), rig.mock->events.end(), [](const auto& event) {
+        return event.kind == test::MockBackend::Event::Draw;
+    });
+    AUREA_CHECK(draws >= 3); // cached child, live sibling and normal output
+    AUREA_CHECK(rig.engine.query_prerender_progress().complete);
+    AUREA_CHECK(rig.engine.add_shape(0).ok());
+    AUREA_CHECK(!rig.engine.query_prerender_progress().complete);
+}
+
+AUREA_TEST(PreRenderIntegration, CachedGroupKeepsParentTransformsMasksAndEffectsOnGpu) {
+    AUREA_REQUIRE_GPU();
+    Scene scene(64, 48);
+    scene.comp->set_transparent_background(true);
+    auto& timeline = scene.project.timeline();
+    const CompositionId childId = timeline.create_composition("red cached group", 32, 24, 30);
+    timeline.composition(childId)->set_background(Color{1, 0, 0, 1});
+    scene.solid(18, 16, Vec4{0, 1, 0, 1}, 18, 19);
+    const LayerId groupId = scene.comp->add_layer(LayerKind::Composition, "live group transform");
+    Layer* group = scene.comp->layer(groupId);
+    group->nested.composition = childId;
+    group->transform.anchor = Vec3{16, 12, 0};
+    group->transform.position = Vec3{38, 28, 0};
+    group->transform.rotation.z = 23;
+    group->transform.opacity = .7f;
+    group->masks.push_back(rect_mask(1, 4, 2, 28, 22));
+    scene.add_effect(groupId, effect_keys::kGlow);
+    auto& device = gpu().backend;
+    auto& renderer = gpu().renderer;
+    TextureDesc desc;
+    desc.width = 8; desc.height = 6; desc.format = SurfaceFormat::RGBA16F;
+    desc.sampled = true; desc.transferDst = true;
+    const auto texture = device.create_texture(desc);
+    AUREA_CHECK(texture.ok());
+    if (!texture.ok()) return;
+    struct Lookup {
+        CompositionId composition;
+        TextureHandle texture;
+        std::vector<u16> pixels;
+        u32 calls = 0;
+    } cache{childId, *texture, std::vector<u16>(8 * 6 * 4)};
+    for (usize pixel = 0; pixel < cache.pixels.size(); pixel += 4) {
+        cache.pixels[pixel] = cache.pixels[pixel + 3] = 0x3c00;
+    }
+    const FloatImage expected = scene.render();
+    RenderSettings settings;
+    settings.dither = false;
+    settings.nestedCacheContext = &cache;
+    settings.nestedCacheLookup = [](void* context, CompositionId composition, FrameIndex) -> CachedCompositionFrame {
+        auto& lookup = *static_cast<Lookup*>(context);
+        if (composition != lookup.composition) return {};
+        ++lookup.calls;
+        return {lookup.texture, lookup.pixels.data()};
+    };
+    FrameSnapshot snapshot;
+    renderer.prepare(*scene.comp, scene.project, FrameIndex{0}, nullptr, nullptr, nullptr,
+        settings, 1, 1, DecodeMode::Still, 1, snapshot);
+    AUREA_CHECK_EQ(cache.calls, 1u);
+    AUREA_CHECK_EQ(snapshot.nested.size(), 1u);
+    AUREA_CHECK(snapshot.nested[0]->layers.empty());
+    OffscreenTarget target{gpu().target(64, 48), 64, 48};
+    FrameStats stats;
+    RenderTimings timings;
+    AUREA_CHECK(renderer.render(snapshot, settings, &target, stats, timings).ok());
+    device.wait_idle();
+    std::vector<u16> actual(64 * 48 * 4);
+    AUREA_CHECK(device.read_texture(target.texture, actual.data(), 64 * 8).ok());
+    f32 maximum = 0;
+    for (usize channel = 0; channel < actual.size(); ++channel)
+        maximum = std::max(maximum, std::fabs(half_to_float(actual[channel]) - expected.px[channel]));
+    std::printf("    cached child 8x6 in live parent 64x48 maxDelta=%.6f\n", maximum);
+    AUREA_CHECK(maximum < .005f);
+    // Final captures always evaluate the authored child at output quality.
+    settings.finalQuality = true;
+    cache.calls = 0;
+    renderer.prepare(*scene.comp, scene.project, FrameIndex{0}, nullptr, nullptr, nullptr,
+        settings, 2, 1, DecodeMode::Still, 1, snapshot);
+    AUREA_CHECK_EQ(cache.calls, 0u);
+    device.destroy_texture(*texture);
+}
+
 AUREA_TEST(PreRenderIntegration, NoSurfacePreparationCannotPublishAReadyUnuploadedSlot) {
     using namespace prerender_integration;
     Rig rig(true); rig.shape(.5f); std::atomic<u32> created{0},uploaded{0};
@@ -507,5 +617,41 @@ AUREA_TEST(PreRenderIntegration, InflatedDurationIsNotInheritedAndExportAboveThr
                 static_cast<int>(refused.message().size()), refused.message().data());
     AUREA_CHECK_EQ(refused.code(), Errc::NotSupported);
     AUREA_CHECK(refused.message().find("3 h") != std::string_view::npos || refused.detail().find("3 h") != std::string_view::npos);
+}
+
+// Lote K (gap_system item 8): com área de trabalho, o PreRender cobre só ela
+// e a prévia lê o cache pelo quadro da composição (índice = quadro − começo).
+AUREA_TEST(PreRenderIntegration, WorkAreaLimitsPreRenderAndPreviewReadsItByCompositionFrame) {
+    using namespace prerender_integration;
+    Rig rig(true, 32, 32, 12); rig.shape(.5f);
+    AUREA_CHECK(rig.engine.set_work_area(4, 9));
+    AUREA_CHECK(rig.start(1).ok()); const auto done = rig.wait();
+    AUREA_CHECK(done.complete && done.error == 0);
+    AUREA_CHECK_EQ(done.framesTotal, 5ull); AUREA_CHECK_EQ(done.framesDone, 5ull);
+    const auto directory = rig.cache(); AUREA_CHECK(!directory.empty());
+    u32 count = 0;
+    if (!directory.empty())
+        for (const auto& path : fs::directory_iterator(directory)) if (path.path().filename().string().starts_with("frame-")) ++count;
+    AUREA_CHECK_EQ(count, 5u);
+    std::atomic<u32> uploads{0};
+    rig.mock->beforeTextureUpload = [&](TextureHandle texture, const void*, u32) {
+        if (is_cache_texture(rig.mock->texture_desc(texture))) ++uploads; return OkStatus; };
+    int window = 0; AUREA_CHECK(rig.engine.attach_surface(&window, 32, 32).ok());
+    const auto seek_to = [&](i64 f) {
+        Command c; c.type = CommandType::PlaybackSeek; c.seek.time = tick_at(FrameIndex{f}, 30);
+        AUREA_CHECK(rig.engine.apply_command(c).ok());
+    };
+    // Fora da área (quadro 2): ao vivo, nenhum quadro do cache sobe.
+    seek_to(2);
+    for (u32 tick = 0; tick < 40; ++tick) { (void)rig.engine.render_frame(false); std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
+    AUREA_CHECK_EQ(rig.engine.read_status().playhead.value, 2);
+    AUREA_CHECK_EQ(uploads.load(), 0u);
+    // Dentro (quadro 6 = índice 2 do cache): o quadro sobe do cache.
+    seek_to(6);
+    for (u32 tick = 0; tick < 200 && !uploads.load(); ++tick) { (void)rig.engine.render_frame(false); std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
+    AUREA_CHECK(uploads.load() > 0);
+    AUREA_CHECK(rig.engine.query_prerender_progress().complete);
+    std::printf("    PreRender da área [4,9): %llu quadros no cache, quadro 2 ao vivo, quadro 6 do cache\n",
+                static_cast<unsigned long long>(done.framesTotal));
 }
 #endif

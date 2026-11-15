@@ -236,6 +236,8 @@ class Exporter internal constructor(
     @Volatile private var cancelPending = false
 
     val busy: Boolean get() = sessionActive || state.phase == ExportPhase.Running || state.phase == ExportPhase.Publishing
+    /** 0.5.3 (P1-4): há um export do EDITOR em curso (o job do AureaHyper tem a tela dele, na Home). */
+    val editorExportBusy: Boolean get() = busy && !hyperJob
 
     /**
      * A taxa de vídeo (Mbps) que o motor vai usar — a MESMA regra do encoder
@@ -357,7 +359,7 @@ class Exporter internal constructor(
         poll = scope.launch {
             // Galaxy A32 "fecha em 70%": o marcador diz no próximo crash que foi
             // no export, e em que quadro (atualizado a cada 1% abaixo).
-            guardedExport(guarded) {
+            guardedExport(guarded, video = true) {
                 runExport(dir, file, options, mbps)
             }
         }
@@ -385,10 +387,14 @@ class Exporter internal constructor(
     }
 
     /** A failed IO/JNI call is a recoverable export error, never an uncaught UI coroutine. */
-    private suspend fun guardedExport(guarded: String?, job: suspend () -> Unit) {
+    private suspend fun guardedExport(guarded: String?, video: Boolean = false, job: suspend () -> Unit) {
         try {
             // 0.3.2: o export continua fora do app (serviço em primeiro plano).
             ExportForegroundService.start(app)
+            // 0.5.3 (P0-1): marca "export de vídeo em curso" no disco. Se o processo
+            // morrer no meio ela fica, e o próximo export sabe — em qualquer Android,
+            // seja qual for o motivo da morte. Só o vídeo do editor: o Hyper não marca.
+            previousExportKilled = video && withContext(Dispatchers.IO) { ExportKillMemory.begin(app) }
             if (guarded != null) withContext(Dispatchers.IO) { ProjectGuard.begin(app, ProjectGuard.Stage.EXPORT_VIDEO, guarded) }
             job()
         } catch (cancelled: CancellationException) {
@@ -403,6 +409,13 @@ class Exporter internal constructor(
             ExportForegroundService.stop(app)
             onSessionEnded()
             try {
+                // 0.5.3 (P0-1, R-12): o app viu o fim deste export — a marca "em curso"
+                // sai; e o job SEM projeto (Hyper) desfaz a etapa de export que marcou
+                // quadro a quadro (com projeto, é o ProjectGuard.end abaixo que desfaz).
+                withContext(NonCancellable + Dispatchers.IO) {
+                    if (video) ExportKillMemory.end(app)
+                    if (guarded == null) runCatching { ProjectGuard.resetExitMark(app) }
+                }
                 if (guarded != null) withContext(NonCancellable + Dispatchers.IO) {
                     runCatching { ProjectGuard.end(app, ProjectGuard.Stage.EXPORT_VIDEO) }
                         .onFailure { android.util.Log.w("AureaExport", "Export marker cleanup failed", it) }
@@ -424,7 +437,19 @@ class Exporter internal constructor(
      * (cancelado, sem espaço, mídia que sumiu, acima de 3 h) ou a escada acaba.
      */
     private suspend fun runExport(dir: File, file: File, options: ExportOptions, mbps: Int) {
-        diagnosticTicket = withContext(Dispatchers.IO) { ExportDiagnosticReport.begin(app, engine.exportDiagnostics()) }
+        // 0.5.3 (P2-1): a memória da escada de encoders deste aparelho (o degrau que
+        // falhou duas vezes é pulado, o encoder que descarta quadros vai em CBR).
+        // Fica em noBackupFilesDir (não vai para backup nem é limpa com o cache);
+        // aparelho, sistema ou versão do app diferentes começam do zero.
+        withContext(Dispatchers.IO) {
+            runCatching {
+                AureaEngine.nativeConfigureExportRungMemory(File(app.noBackupFilesDir, RUNG_MEMORY_FILE).absolutePath,
+                    "${Build.FINGERPRINT}|${com.aurea.aurea.BuildConfig.VERSION_CODE}")
+            }.onFailure { android.util.Log.w("AureaExport", "Encoder ladder memory unavailable: ${it.javaClass.simpleName}") }
+        }
+        diagnosticTicket = withContext(Dispatchers.IO) {
+            ExportDiagnosticReport.begin(app, engine.exportDiagnostics(), runCatching { engine.deviceSummary() }.getOrDefault(""))
+        }
         // Codificador escolhido no Avançado: a escada começa nesse degrau.
         var attempt = options.encoder.coerceIn(0, ENCODER_SOFTWARE)
         lighterAfterClose = false
@@ -434,11 +459,29 @@ class Exporter internal constructor(
         // continuações), o export CONTINUA de onde parou, no mesmo degrau que o
         // gravou. Sem checkpoint, no Automático, começa no degrau que a escada
         // usaria para falta de memória, e a tela diz por quê.
-        val died = attempt == 0 && withContext(Dispatchers.IO) { ExitDiagnostics.consumeExportDeath(app) }
-        val checkpoint = if (died) withContext(Dispatchers.IO) { resumeCandidate(options, mbps) } else null
+        // 0.5.3 (P0-1): a morte vem da marca própria (qualquer Android, qualquer
+        // motivo) OU do histórico de saídas do sistema (Android 11+, quatro motivos).
+        // O histórico é sempre consumido: senão a mesma morte contaria de novo.
+        val auto = attempt == 0
+        val killed = withContext(Dispatchers.IO) {
+            val seen = ExitDiagnostics.consumeExportDeath(app)
+            previousExportKilled || seen
+        }
+        // Cada morte seguida aperta um degrau o orçamento de memória do motor
+        // (até 3); o primeiro export que termina o devolve a zero.
+        memoryStep = withContext(Dispatchers.IO) {
+            ExportKillMemory.stepForStart(app, killed).also {
+                ExportDiagnosticReport.note(diagnosticTicket, "step", it)
+                if (killed) ExportDiagnosticReport.note(diagnosticTicket, "killed", true)
+            }
+        }
+        val died = auto && killed
+        // O checkpoint é procurado SEMPRE no Automático, não só quando a morte foi
+        // vista: o motor só o devolve se for deste projeto com estas opções.
+        val checkpoint = if (auto) withContext(Dispatchers.IO) { resumeCandidate(options, mbps) } else null
         if (checkpoint != null) {
-            android.util.Log.w("AureaExport", "Previous process died while exporting; continuing attempt ${checkpoint.safeMode} " +
-                "from frame ${checkpoint.resumeFrame}/${checkpoint.totalFrames}")
+            android.util.Log.w("AureaExport", "Resumable checkpoint found (previous process died=$killed, memory step $memoryStep); " +
+                "continuing attempt ${checkpoint.safeMode} from frame ${checkpoint.resumeFrame}/${checkpoint.totalFrames}")
             attempt = checkpoint.safeMode.coerceIn(0, AureaEngine.EXPORT_ATTEMPT_MAX)
             state = state.copy(notice = text(R.string.app_export_resumed))
         } else if (died) {
@@ -461,10 +504,18 @@ class Exporter internal constructor(
             exportedBlurCap = if (level > 0 && usesBlur) AureaEngine.nativeExportAttemptBlurCap(level) else 0
             exportedQualityFlags = 0
             val suggested = runEngineJob(dir, file, options, level) {
+                // 0.5.3 (P0-1): o degrau de memória vale para toda partida do vídeo,
+                // inclusive a que continua um checkpoint. Motor sem o símbolo = cheio.
+                runCatching { engine.setExportMemoryStep(memoryStep) }
+                    .onFailure { android.util.Log.w("AureaExport", "Export memory step unavailable: ${it.javaClass.simpleName}") }
                 engine.startExport(file.absolutePath, options.shortSide, options.fps, if (options.hevc) 1 else 0, mbps, options.aiUpscale,
                     options.trimToContent, options.quality.coerceIn(0, QUALITY_MAX), rateModeFor(options.hevc && level == 0), level)
             }
-            if (suggested == 0) return
+            if (suggested == 0) {
+                // 0.5.3: terminou com o arquivo pronto — o próximo volta ao orçamento cheio.
+                if (state.phase == ExportPhase.Done) withContext(Dispatchers.IO) { ExportKillMemory.done(app) }
+                return
+            }
             if (suggested == RETRY_SAME_ATTEMPT) {
                 // O motor guardou um checkpoint desta tentativa (o encoder caiu
                 // no meio, sessão retomável): a MESMA tentativa continua de lá.
@@ -521,6 +572,10 @@ class Exporter internal constructor(
     private var exportedQualityFlags = 0
     /** 0.3.2: esta tentativa continuou um checkpoint a partir deste percentual (−1 = começou do zero). */
     private var resumedFromPercent = -1
+    /** 0.5.3 (P0-1): a marca "em curso" do export de vídeo anterior ficou (o processo morreu no meio). */
+    private var previousExportKilled = false
+    /** 0.5.3 (P0-1): degrau de memória deste export, 0..3 (ExportKillMemory). */
+    private var memoryStep = 0
 
     /**
      * O checkpoint que o motor guardou para este pedido (o processo morreu no
@@ -557,6 +612,10 @@ class Exporter internal constructor(
         resumedFromPercent = -1
         val diagnostic = if (options.format == ExportFormat.Video) scope.launch(Dispatchers.IO) {
             while (isActive) {
+                // 0.5.3 (P1-3): o estado do serviço em primeiro plano (aceito, recusado,
+                // tempo esgotado) entra no relato local. (P2) A leitura segue a 1 Hz; o
+                // arquivo só é regravado quando algo muda ou a cada 10 s (record).
+                ExportDiagnosticReport.note(ticket, "fgs", ExportForegroundService.diagnosticState())
                 ExportDiagnosticReport.record(app, ticket, engine.exportDiagnostics())
                 delay(1000)
             }
@@ -596,6 +655,7 @@ class Exporter internal constructor(
                 // cancelado (awaitStart). A etapa vai para o próximo relato.
                 val stage = withContext(Dispatchers.IO) { diagnosticStage(engine.exportDiagnostics()) }
                 android.util.Log.e("AureaExport", "Export start did not return ($stage); releasing the screen")
+                noteAttempt(safeMode, started.code, "start-hung", started = false)
                 if (cancelPending) {
                     state = state.copy(phase = ExportPhase.Cancelled, message = text(R.string.app_export_cancelled))
                 } else {
@@ -610,10 +670,12 @@ class Exporter internal constructor(
             if (code != 0) {
                 var freshFailure = false
                 if (code == CANCELLED && cancelPending) {
+                    noteAttempt(safeMode, code, "start-user", started = false)
                     state = state.copy(phase = ExportPhase.Cancelled, message = text(R.string.app_export_cancelled))
                     return 0
                 }
                 if (code == CANCELLED && started.stalled) {
+                    noteAttempt(safeMode, code, "start-stall", started = false)
                     // O vigia da partida cancelou (nada mudou por minutos): é falha, com o motivo.
                     val stage = withContext(Dispatchers.IO) { diagnosticStage(engine.exportDiagnostics()) }
                     state = state.copy(phase = ExportPhase.Failed,
@@ -628,6 +690,7 @@ class Exporter internal constructor(
                         freshFailure = ExportStartupFailure.isFresh(previousProgress, progress, code,
                             previousToken, diagnosticSessionToken(engine.exportDiagnostics()))
                     }
+                    noteAttempt(safeMode, code, "start", failure = if (freshFailure) progress.failure else 0, started = false)
                     val retry = if (hyperJob) 0 else AureaEngine.nativeExportNextAttempt(safeMode, code, if (freshFailure) progress.failure else 0, false,
                         code == NOT_SUPPORTED && plannedSeconds > com.aurea.aurea.editor.EXPORT_MAX_SECONDS,
                         options.shortSide, options.fps, options.hevc, options.aiUpscale > 0)
@@ -645,9 +708,12 @@ class Exporter internal constructor(
                         "lado=${options.shortSide} hevc=${options.hevc} $stage motor=\"${if (freshFailure) progress.message else ""}\"")
                 return 0
             }
-            if (cancelPending) engine.cancelExport()
+            if (cancelPending) withContext(Dispatchers.IO) { runCatching { engine.cancelExport() } }
             var markedPercent = -1
-            val watchdog = ExportStallWatchdog()
+            // 0.5.3 (P0-8): quando a tela viu o Cancelar da pessoa (−1 = ainda não).
+            var userCancelAt = -1L
+            // 0.5.3 (P0-3): o tempo em que ninguém leu o progresso não conta como travamento.
+            val watchdog = ExportStallWatchdog(observeGapMs = ExportStallWatchdog.OBSERVE_GAP_MS)
             while (true) {
                 delay(100)
                 check(engine.exportProgress(progressBuffer)) { "Export engine unavailable" }
@@ -655,7 +721,21 @@ class Exporter internal constructor(
                 if (!progress.finished) {
                     // A última rede (ExportStallWatchdog): nada muda há minutos
                     // → cancela; nem assim conclui → a tela desiste e se libera.
-                    when (watchdog.observe(SystemClock.elapsedRealtime(), progress.framesDone, progress.message)) {
+                    val now = SystemClock.elapsedRealtime()
+                    // 0.5.3 (P0-8): o Cancelar da pessoa tem prazo. Antes só a partida
+                    // desistia; aqui a tela esperava o motor concluir e, se ele não
+                    // concluísse, caía no vigia (180 s + 15 s) e terminava como "travou".
+                    if (cancelPending) {
+                        if (userCancelAt < 0L) userCancelAt = now
+                        else if (ExportStallWatchdog.userCancelExpired(userCancelAt, now)) {
+                            android.util.Log.e("AureaExport", "Export engine did not conclude after the user cancel; releasing the screen")
+                            engineMayWrite = true
+                            noteAttempt(safeMode, CANCELLED, "cancel-hung")
+                            state = state.copy(phase = ExportPhase.Cancelled, message = text(R.string.app_export_cancelled))
+                            return 0
+                        }
+                    }
+                    when (watchdog.observe(now, progress.framesDone, progress.message)) {
                         ExportStallWatchdog.Verdict.Cancel -> {
                             android.util.Log.w("AureaExport", "No export progress for ${ExportStallWatchdog.STALL_MS / 1000} s " +
                                 "at frame ${progress.framesDone}/${progress.framesTotal}; cancelling")
@@ -664,6 +744,7 @@ class Exporter internal constructor(
                         ExportStallWatchdog.Verdict.GiveUp -> {
                             android.util.Log.e("AureaExport", "Export engine did not conclude after the stall cancel; releasing the screen")
                             engineMayWrite = true
+                            noteAttempt(safeMode, CANCELLED, "stuck")
                             if (options.format == ExportFormat.Video && !cancelPending && !hyperJob) {
                                 val retry = AureaEngine.nativeExportNextAttempt(safeMode, CANCELLED, 0, true, false,
                                     options.shortSide, options.fps, options.hevc, options.aiUpscale > 0)
@@ -700,6 +781,14 @@ class Exporter internal constructor(
                     notice = if (options.aiUpscale > 0 && progress.message.startsWith("IA:")) EngineText.aiProgress(app, progress.message) else noticeFor(progress, options),
                 )
                 if (!progress.finished) continue
+                // 0.5.3 (P1-3): como esta tentativa acabou, para o relato local.
+                noteAttempt(safeMode, progress.result, when {
+                    progress.result == 0 -> "done"
+                    watchdog.cancelled -> "stall"
+                    cancelPending -> "user"
+                    progress.resumable -> "resumable"
+                    else -> "failed"
+                })
                 // 0.3.2: parou com checkpoint (o encoder caiu no meio): a MESMA
                 // tentativa continua do último GOP íntegro, sem descer a escada.
                 if (options.format == ExportFormat.Video && progress.result != 0 && !cancelPending &&
@@ -721,7 +810,8 @@ class Exporter internal constructor(
                     return retry
                 }
                 when (progress.result) {
-                    0 -> if (hyperJob) { finishHyper(file); keepFile = hyperOutput == file } else publish(file, options.format)
+                    // 0.5.3 (P0-2): `publish` diz quando o temporário é a única cópia e fica.
+                    0 -> if (hyperJob) { finishHyper(file); keepFile = hyperOutput == file } else keepFile = publish(file, options.format)
                     // Cancelado pela própria tela (sem progresso por minutos), não
                     // pelo usuário: é falha, com o motivo.
                     CANCELLED -> state = if (watchdog.cancelled && !cancelPending) {
@@ -760,8 +850,41 @@ class Exporter internal constructor(
             withContext(NonCancellable + Dispatchers.IO) {
                 if (!keepFile && !engineMayWrite) file.delete()
                 diagnostic?.cancelAndJoin()
-                if (options.format == ExportFormat.Video) ExportDiagnosticReport.record(app, ticket, engine.exportDiagnostics())
+                if (options.format == ExportFormat.Video) {
+                    // 0.5.3 (P1-3): o caminho de encoder que o motor tomou (e os que
+                    // falharam antes) e o estado final do serviço; a última gravação
+                    // de cada tentativa sai sempre.
+                    ExportDiagnosticReport.note(ticket, "fgs", ExportForegroundService.diagnosticState())
+                    runCatching { AureaEngine.nativeLastExportEncoderPath() }.getOrNull()?.takeIf { it.isNotBlank() }
+                        ?.let { ExportDiagnosticReport.note(ticket, "enc", it) }
+                    // 0.5.3 (P2-1): o que a escada já sabe deste aparelho (degraus pulados, CBR aprendido).
+                    runCatching { AureaEngine.nativeExportRungMemory() }.getOrNull()?.takeIf { it.isNotBlank() }
+                        ?.let { ExportDiagnosticReport.note(ticket, "rungs", it.trim().replace('\n', ';')) }
+                    ExportDiagnosticReport.record(app, ticket, engine.exportDiagnostics(), force = true)
+                }
             }
+        }
+    }
+
+    /**
+     * 0.5.3 (P1-3): o fim de uma tentativa no relato local — degrau, código,
+     * motivo, o quadro em que parou e os bits do progresso; mais os avisos do
+     * motor que não tinham leitor (verificação tolerante, decode compatível).
+     * [started] falso = a sessão nem abriu (o progresso lido é de outra).
+     */
+    private suspend fun noteAttempt(level: Int, code: Int, why: String, failure: Int = progress.failure, started: Boolean = true) {
+        val ticket = diagnosticTicket
+        val done = if (started) progress.framesDone else 0
+        val total = if (started) progress.framesTotal else 0
+        val flags = if (started) progress.flags else 0
+        val verify = started && progress.verifyWarnings
+        val softwareDecode = started && progress.softwareDecode
+        val retryDecode = started && progress.retrySoftwareDecode
+        withContext(NonCancellable + Dispatchers.IO) {
+            ExportDiagnosticReport.noteAttempt(ticket, level, code, failure, done, total, flags, why)
+            if (verify) ExportDiagnosticReport.note(ticket, "vw", true)
+            if (softwareDecode) ExportDiagnosticReport.note(ticket, "sd", true)
+            if (retryDecode) ExportDiagnosticReport.note(ticket, "rsd", true)
         }
     }
 
@@ -787,7 +910,7 @@ class Exporter internal constructor(
             if (abandoned.get() && code == 0) runCatching { engine.cancelExport() }
             code
         }
-        val watchdog = ExportStallWatchdog()
+        val watchdog = ExportStallWatchdog(observeGapMs = ExportStallWatchdog.OBSERVE_GAP_MS)
         val watchBuffer = directBuffer(128)
         val watchProgress = ExportProgress()
         var cancelledAt = 0L
@@ -855,7 +978,9 @@ class Exporter internal constructor(
         // Ainda abrindo: o motor ouve o cancelar também na partida (0.5.2) e,
         // se a chamada não voltar, awaitStart libera a tela.
         cancelPending = true
-        engine.cancelExport()
+        // 0.5.3 (P0-8): fora da main — o cancelar do motor pode esperar um lock do
+        // export, e o toque em Cancelar virava "Aurea não está respondendo".
+        scope.launch(Dispatchers.IO) { runCatching { engine.cancelExport() } }
     }
 
     /** Volta ao estado inicial (tela reaberta ou fechada). */
@@ -888,16 +1013,41 @@ class Exporter internal constructor(
         }
     }
 
-    private suspend fun publish(file: File, format: ExportFormat) {
+    /** Publica o arquivo pronto. true = o temporário NÃO pode ser apagado (é a única cópia que existe). */
+    private suspend fun publish(file: File, format: ExportFormat): Boolean {
         state = state.copy(phase = ExportPhase.Publishing)
+        // 0.5.3 (P0-12): a cópia cabe no armazenamento compartilhado? Sem espaço ela
+        // morria no meio (depois de encher o aparelho) e a reserva também; o vídeo
+        // vai direto para a pasta privada do app, sem cópia (o mesmo resultado de
+        // "ficou na pasta do app" de sempre).
+        val room = withContext(Dispatchers.IO) { GalleryPublish.sharedRoom(app) }
+        val fits = GalleryPublish.copyFits(file.length(), room)
+        if (!fits) android.util.Log.w("AureaExport", "Shared storage has $room bytes for a ${file.length()}-byte export; keeping it privately")
         // Complete or roll back the MediaStore transaction even if the view model is cleared.
-        val result = withContext(NonCancellable + Dispatchers.IO) {
+        val result = if (!fits) Result.failure(java.io.IOException("no room for the gallery copy"))
+        else withContext(NonCancellable + Dispatchers.IO) {
             runCatching { if (format == ExportFormat.Video) copyToGallery(file) else copyImageOut(file, format) }
         }
         // Omega adicionar (área 08, P0-11): a galeria recusou — guarda uma cópia na
         // pasta do app antes de apagar o temporário (o resultado continua abrível).
-        fallbackCopy = if (result.isFailure) withContext(NonCancellable + Dispatchers.IO) { keepInAppFolder(file, format) } else null
-        withContext(NonCancellable + Dispatchers.IO) { file.delete() }
+        fallbackCopy = if (result.isFailure && fits) withContext(NonCancellable + Dispatchers.IO) { keepInAppFolder(file, format) } else null
+        // 0.5.3 (P0-2): o temporário só sai com uma cópia confirmada. Galeria E
+        // reserva falharam (as duas escrevem no armazenamento compartilhado: disco
+        // cheio derruba as duas): antes o vídeo renderizado era apagado aqui. Agora
+        // ele é movido para a pasta privada do app (rename, sem copiar) e o
+        // resultado é o mesmo "ficou na pasta do app" da reserva.
+        var tempKept = false
+        withContext(NonCancellable + Dispatchers.IO) {
+            when (GalleryPublish.tempFate(galleryOk = result.isSuccess, fallbackOk = fallbackCopy != null)) {
+                GalleryPublish.TempFate.Delete -> file.delete()
+                GalleryPublish.TempFate.Rescue -> {
+                    fallbackCopy = rescueTemp(file)
+                    tempKept = fallbackCopy == null
+                    android.util.Log.w("AureaExport", "Gallery and app-folder copies failed; rendered file " +
+                        if (tempKept) "left in the export cache" else "moved to private storage")
+                }
+            }
+        }
         result.fold(
             onSuccess = { (uri, label) ->
                 val video = format == ExportFormat.Video
@@ -928,6 +1078,19 @@ class Exporter internal constructor(
                     else state.copy(phase = ExportPhase.Failed, message = text(R.string.app_export_gallery_failed))
             },
         )
+        return tempKept
+    }
+
+    /**
+     * 0.5.3 (P0-2): o temporário vai para `filesDir/exports` (a pasta do export em
+     * `cacheDir` é apagada na abertura do app) e fica compartilhável pelo mesmo
+     * FileProvider (res/xml/export_paths.xml). null = não deu para mover.
+     */
+    private fun rescueTemp(file: File): Pair<File, Uri>? {
+        val moved = GalleryPublish.rescue(file, File(app.filesDir, RESCUED_DIR)) ?: return null
+        val uri = runCatching { FileProvider.getUriForFile(app, "${app.packageName}.exports", moved) }
+            .getOrElse { Uri.fromFile(moved) }
+        return moved to uri
     }
 
     // --- Omega adicionar (área 08, P0-11): "Salvar" e "Salvar em…" do resultado ---
@@ -1016,8 +1179,9 @@ class Exporter internal constructor(
         }
         val uri = resolver.insert(collection, values) ?: error("MediaStore refused the insert")
         try {
+            // 0.5.3 (P2): cópia pelo kernel no Android 10+ (GalleryPublish.copyFile).
             checkNotNull(resolver.openOutputStream(uri)) { "MediaStore output unavailable" }
-                .use { out -> file.inputStream().use { it.copyTo(out, 1 shl 20) } }
+                .use { out -> GalleryPublish.copyFile(file, out) }
             val publish = ContentValues().apply {
                 GalleryPublish.publishColumns(System.currentTimeMillis()).forEach { (k, v) ->
                     when (v) { is Int -> put(k, v); is Long -> put(k, v); else -> put(k, v.toString()) }
@@ -1212,6 +1376,10 @@ class Exporter internal constructor(
         const val BUSY_WAIT_MS = 1500L
         /** awaitStart: de quanto em quanto a partida é vigiada. */
         const val START_POLL_MS = 500L
+        /** 0.5.3 (P0-2): pasta privada (em filesDir) do vídeo que nem a galeria nem a reserva aceitaram. */
+        const val RESCUED_DIR = "exports"
+        /** 0.5.3 (P2-1): a memória da escada de encoders (em noBackupFilesDir). */
+        const val RUNG_MEMORY_FILE = "export-rungs.txt"
         /** AAC do export (kExportAudioKbps no motor). */
         const val AUDIO_BPS = 192_000.0
     }

@@ -209,4 +209,24 @@
     <string name="perf_badge">टेस्ट · %1$d से.</string>
     <string name="perf_badge_stall">यहाँ अटका</string>
     <string name="perf_badge_stop">रोकें</string>
+    <string name="cam_stage_features">बिंदुओं का पता लगाना और ट्रैक करना</string>
+    <string name="cam_stage_solve">3D कैमरा हल करना</string>
+    <string name="prerender_group">समूह प्री-रेंडर करें</string>
+    <string name="edit_workspace_media">मीडिया</string>
+    <string name="edit_workspace_edit">संपादन</string>
+    <string name="edit_workspace_color">रंग</string>
+    <string name="edit_workspace_audio">ऑडियो</string>
+    <string name="edit_workspace_text">टेक्स्ट</string>
+    <string name="grade_node_number">नोड %1$d</string>
+    <string name="grade_add_node">नोड जोड़ें</string>
+    <string name="grade_node_enabled">रंग सुधार चालू</string>
+    <string name="grade_node_previous">नोड पहले रखें</string>
+    <string name="grade_node_next">नोड बाद में रखें</string>
+    <string name="grade_window">विंडो</string>
+    <string name="grade_window_rectangle">आयत</string>
+    <string name="grade_window_ellipse">अंडाकार</string>
+    <string name="grade_window_width">चौड़ाई</string>
+    <string name="grade_window_height">ऊँचाई</string>
+    <string name="grade_window_rotation">घुमाव</string>
+    <string name="grade_node_actions">नोड क्रियाएँ</string>
 </resources>

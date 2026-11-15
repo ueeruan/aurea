@@ -115,6 +115,10 @@ fun AureaApp(store: EditorStore, conta: com.aurea.aurea.conta.ContaViewModel? = 
             }
             // "Otimizar modelo": o modelo pesado demais para o aparelho como está.
             store.modelOptimize?.let { req -> ModelOptimizeDialog(store, req) }
+            // AureaMCP: conexão com os agentes de IA e as confirmações que eles pedem (Home e editor).
+            com.aurea.aurea.mcp.AureaMcpRoot(store)
+            // O link aurea://mcp/pair?code=… (página de autorização do Claude.ai/ChatGPT) abre o AureaMCP com o código.
+            com.aurea.aurea.mcp.AureaMcpDeepLinkHost(store)
             // 0.3.0: o que a sondagem da sequência de imagens achou, antes de entrar na timeline.
             store.sequenceDraft?.let { draft -> com.aurea.aurea.editor.ImageSequenceSheet(store, draft) }
             // 0.3.1: o seletor do After Effects (.ffx/.jsx) fica aqui, fora das folhas: os

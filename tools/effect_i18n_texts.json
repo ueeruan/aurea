@@ -1,4 +1,31 @@
 {
+ "Janela": {
+  "en": "Window", "es": "Ventana", "ru": "Окно", "hi": "विंडो", "id": "Jendela", "ar": "نافذة"
+ },
+ "Retângulo": {
+  "en": "Rectangle", "es": "Rectángulo", "ru": "Прямоугольник", "hi": "आयत", "id": "Persegi panjang", "ar": "مستطيل"
+ },
+ "Elipse": {
+  "en": "Ellipse", "es": "Elipse", "ru": "Эллипс", "hi": "दीर्घवृत्त", "id": "Elips", "ar": "قطع ناقص"
+ },
+ "Centro da janela": {
+  "en": "Window center", "es": "Centro de la ventana", "ru": "Центр окна", "hi": "विंडो का केंद्र", "id": "Pusat jendela", "ar": "مركز النافذة"
+ },
+ "Tamanho da janela": {
+  "en": "Window size", "es": "Tamaño de la ventana", "ru": "Размер окна", "hi": "विंडो का आकार", "id": "Ukuran jendela", "ar": "حجم النافذة"
+ },
+ "Rotação da janela": {
+  "en": "Window rotation", "es": "Rotación de la ventana", "ru": "Поворот окна", "hi": "विंडो का घुमाव", "id": "Rotasi jendela", "ar": "دوران النافذة"
+ },
+ "Suavidade da janela": {
+  "en": "Window softness", "es": "Suavidad de la ventana", "ru": "Растушёвка окна", "hi": "विंडो की नरमी", "id": "Kelembutan jendela", "ar": "نعومة النافذة"
+ },
+ "Inverter janela": {
+  "en": "Invert window", "es": "Invertir ventana", "ru": "Инвертировать окно", "hi": "विंडो उलटें", "id": "Balikkan jendela", "ar": "عكس النافذة"
+ },
+ "Mostrar janela": {
+  "en": "Show window", "es": "Mostrar ventana", "ru": "Показать окно", "hi": "विंडो दिखाएं", "id": "Tampilkan jendela", "ar": "إظهار النافذة"
+ },
  "4 cores": {
   "en": "4 colors"
  },
@@ -10803,5 +10830,45 @@
   "hi": "कपड़े",
   "id": "Pakaian",
   "ar": "الملابس"
+ },
+ "Deslocar X": {
+  "en": "Shift X",
+  "es": "Desplazar X",
+  "ru": "Сдвиг X",
+  "hi": "X खिसकाएँ",
+  "id": "Geser X",
+  "ar": "إزاحة X"
+ },
+ "Deslocar Y": {
+  "en": "Shift Y",
+  "es": "Desplazar Y",
+  "ru": "Сдвиг Y",
+  "hi": "Y खिसकाएँ",
+  "id": "Geser Y",
+  "ar": "إزاحة Y"
+ },
+ "Girar": {
+  "en": "Rotate",
+  "es": "Girar",
+  "ru": "Поворот",
+  "hi": "घुमाएँ",
+  "id": "Putar",
+  "ar": "تدوير"
+ },
+ "Rolar X": {
+  "en": "Scroll X",
+  "es": "Desplazar X",
+  "ru": "Прокрутка X",
+  "hi": "X स्क्रॉल",
+  "id": "Gulir X",
+  "ar": "تمرير X"
+ },
+ "Rolar Y": {
+  "en": "Scroll Y",
+  "es": "Desplazar Y",
+  "ru": "Прокрутка Y",
+  "hi": "Y स्क्रॉल",
+  "id": "Gulir Y",
+  "ar": "تمرير Y"
  }
 }

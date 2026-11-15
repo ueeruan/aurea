@@ -600,7 +600,9 @@ fun PropertyRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .height(if (stacked) 44.dp else ParamRowDims.Row),
+            // 13/11/2026 (pedido do dono: deslizantes do 3D compactos): a régua empilhada tem a
+            // altura da régua normal (52), par do iOS (`NativePanelRuler` empilhada).
+            .height(if (stacked) ParamRowDims.LabelH else ParamRowDims.Row),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (!stacked) {
@@ -614,7 +616,7 @@ fun PropertyRow(
             verticalPadding = 2.dp,
             modifier = Modifier
                 .weight(1f)
-                .height(if (stacked) 44.dp else ParamRowDims.LabelH)
+                .height(ParamRowDims.LabelH)
                 .valueDrag(
                     enabled = enabled,
                     start = { current },

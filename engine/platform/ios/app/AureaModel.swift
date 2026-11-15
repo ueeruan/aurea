@@ -116,6 +116,54 @@ struct LayerItem: Identifiable, Equatable {
     var preserveTransparency: Bool = false
 
     var duration: Int32 { max(0, endFrame - startFrame) }
+
+    /// Uma linha de `-layers` / `-groupLayers:` do motor (bridge::LayerRow).
+    static func from(row: [String: Any]) -> LayerItem {
+        let flags: UInt32 = (row["flags"] as? NSNumber)?.uint32Value ?? 0
+        return LayerItem(id: (row["id"] as? NSNumber)?.int64Value ?? 0,
+                  kind: (row["kind"] as? NSNumber)?.uint32Value ?? 0,
+                  name: row["name"] as? String ?? "",
+                  startFrame: (row["startFrame"] as? NSNumber)?.int32Value ?? 0,
+                  endFrame: (row["endFrame"] as? NSNumber)?.int32Value ?? 0,
+                  offsetFrames: (row["offsetFrames"] as? NSNumber)?.int32Value ?? 0,
+                  parentIndex: (row["parentIndex"] as? NSNumber)?.int32Value ?? -1,
+                  opacity: (row["opacity"] as? NSNumber)?.floatValue ?? 1,
+                  effectCount: (row["effectCount"] as? NSNumber)?.uint32Value ?? 0,
+                  maskCount: (row["maskCount"] as? NSNumber)?.uint32Value ?? 0,
+                  keyframeCount: (row["keyframeCount"] as? NSNumber)?.uint32Value ?? 0,
+                  blendMode: (row["blendMode"] as? NSNumber)?.uint32Value ?? 0,
+                  selected: row["selected"] as? Bool ?? false,
+                  visible: row["visible"] as? Bool ?? true,
+                  locked: row["locked"] as? Bool ?? false,
+                  solo: row["solo"] as? Bool ?? false,
+                  animated: row["animated"] as? Bool ?? false,
+                  threeD: row["threeD"] as? Bool ?? false,
+                  label: (row["label"] as? NSNumber)?.uint32Value ?? 0,
+                  adjustment: flags & (1 << 6) != 0,
+                  guide: flags & (1 << 7) != 0,
+                  magnetic: flags & (1 << 13) != 0,
+                  trackId: (row["trackId"] as? NSNumber)?.uint32Value ?? 0,
+                  clipToBelow: flags & (1 << 14) != 0,
+                  clipCandidate: flags & (1 << 15) != 0,
+                  shy: flags & (1 << 16) != 0,
+                  preserveTransparency: flags & (1 << 17) != 0)
+    }
+}
+
+/// 0.5.3 (grupo aberto na timeline): uma camada de DENTRO de um grupo da
+/// composição aberta. O id só vale junto com `group` (cada composição tem os
+/// seus ids); início/fim já no tempo de fora. Par do `GroupInnerRow` do Android.
+struct GroupInnerRow: Equatable {
+    let group: Int64
+    let layer: LayerItem
+    /// O grupo anda 1:1 com o tempo de dentro: dá para mover/aparar no lugar.
+    let editable: Bool
+}
+
+/// A camada de dentro escolhida na timeline (grupo, camada).
+struct GroupInnerKey: Equatable, Hashable {
+    let group: Int64
+    let layer: Int64
 }
 
 struct KeyframeItem: Identifiable, Equatable {
@@ -463,6 +511,7 @@ final class AureaModel: ObservableObject {
         exportProgress = [:]; exportMessage = nil; exportCancelled = false; exportSavedToPhotos = false
         exportStalled = false
         exportWatch = ExportStallWatch()
+        exportReportLog = ExportReportLog()
         exportLighterAfterClose = false
         exportPausedForBackground = false
         var options = ExportOptions()
@@ -488,6 +537,14 @@ final class AureaModel: ObservableObject {
     /// editor (EditorView): de dentro do painel o fullScreenCover não abria.
     @Published var effectSearch: EffectSearchRequest?
     @Published var showProjectSettings = false
+    /// Funções F10: a aba aberta dos Ajustes do projeto ("format" · "render" · "editing" ·
+    /// "import"). O Desfoque de movimento da camada abre direto em "render".
+    @Published var projectSettingsTab = "format"
+    /// Redesenho do vetor: qual tela o painel `.vector` mostra (Cor e preenchimento ou Caminhos e
+    /// operadores). Quem abre o painel escolhe (par do EditorPanel.VectorFill/VectorPaths).
+    @Published var vectorFace: VectorFace = .paths
+    /// F6: o assunto do painel 3D (Material · Objeto 3D · Rig · Cena 3D); quem abre escolhe.
+    @Published var face3D: Face3D = .all
     @Published var showSettings = false
     @Published var donationPromptPending = true
     /// A folha de geração atual (a doca de painéis, o painel aberto ou o
@@ -909,6 +966,8 @@ final class AureaModel: ObservableObject {
     // --- Modelo em memória (o que a timeline e os painéis desenham) ---------
     @Published private(set) var layers: [LayerItem] = []
     @Published private(set) var captionTracks: [NativeCaptionTrack] = []
+    /// 0.5.3: os blocos escolhidos na aba Legendas (a aba Estilo aplica neles e a timeline os marca).
+    @Published var captionSelection: Set<Int64> = []
     @Published private(set) var keyframes: [Int64: [KeyframeItem]] = [:]
     @Published private(set) var selection: Set<Int64> = []
     @Published private(set) var composition: [String: Any] = [:]
@@ -990,14 +1049,27 @@ final class AureaModel: ObservableObject {
     nonisolated static let exportFlagResumable: UInt32 = AureaExportFlag.resumable.rawValue
     private var exportDeathChecked = false
     nonisolated static let exportInFlightKey = "aurea.export.inFlight"
+    /// 0.5.3 (P1-6 / R-33): o valor da marca enquanto o export está PAUSADO
+    /// pela ida ao segundo plano (rodando = o `true` de sempre, lido como 1).
+    /// O iOS recolher o app suspenso com o export pausado não é a morte por
+    /// memória que faz o próximo export começar mais leve.
+    nonisolated static let exportInFlightPaused = 2
+    /// A marca que o processo anterior deixou (0 = nenhuma). Lida e apagada uma
+    /// vez por execução.
+    nonisolated private static let previousExportMark: Int = {
+        let mark = UserDefaults.standard.integer(forKey: exportInFlightKey)
+        UserDefaults.standard.removeObject(forKey: exportInFlightKey)
+        return mark
+    }()
     /// 0.3.0: o processo anterior morreu no meio de um export de vídeo (iPhone
     /// 11/XR com Roto Brush, BCC Glitch, Ball Action: o iOS mata o app por
-    /// memória e a escada nunca sabia). Lido e apagado uma vez por execução.
-    private static let previousExportDied: Bool = {
-        let died = UserDefaults.standard.bool(forKey: exportInFlightKey)
-        UserDefaults.standard.removeObject(forKey: exportInFlightKey)
-        return died
-    }()
+    /// memória e a escada nunca sabia). 0.5.3: só com o export rodando — a
+    /// marca "pausado" não conta como morte.
+    private static let previousExportDied: Bool = previousExportMark != 0 && previousExportMark != exportInFlightPaused
+    /// 0.5.3: o processo anterior acabou com o export pausado em segundo plano.
+    /// Não é morte por memória (nada de começar mais leve), mas o checkpoint da
+    /// pausa pode estar lá: a partida ainda pergunta por ele.
+    private static let previousExportPaused: Bool = previousExportMark == exportInFlightPaused
     @Published private(set) var exportPreparing = false
     @Published private(set) var exportedURL: URL?
     @Published private(set) var exportMessage: String?
@@ -1025,6 +1097,8 @@ final class AureaModel: ObservableObject {
     /// A última rede contra o export parado (ExportStallWatch) e o modo de
     /// segurança do vídeo em andamento (export/ExportWatchdog.hpp).
     private var exportWatch = ExportStallWatch()
+    /// 0.5.3 (diagnóstico local): degraus que falharam e pausas deste export.
+    private var exportReportLog = ExportReportLog()
     /// O degrau da escada de tentativas em uso (export/ExportAttempts.hpp; 0 = o pedido).
     private var exportSafeMode: UInt32 = 0
     /// 0.4.5: o degrau em que o último export de vídeo parou (só leitura, para a
@@ -1073,7 +1147,14 @@ final class AureaModel: ObservableObject {
         // Omega aparência (área 05): Borda e sombra e Opções da câmera.
         borderShadow, camera,
         // Omega conteúdo (área 06): o editor de desenho e o Editar pontos.
-        drawing, editPoints }
+        drawing, editPoints,
+        // Funções do AUREA (13/11/2026): chaves da camada e 3D da camada, abertos pelo
+        // navegador de Efeitos (par de EditorPanel.LayerOptions / .Layer3D do Android).
+        layerOptions, layer3DFunctions,
+        // F4: Layout do texto (espaçamento, caixa, caminho, dinâmico).
+        textLayout,
+        // F3: Animação (camada · texto · prontas · explodir).
+        animation }
     @Published var curveProperty: UInt32 = 0
     @Published var timelineFocus: [TimelineTrack]? = nil
     /// Keyframes escolhidos na timeline (várias trilhas de UMA camada; ações em
@@ -1415,7 +1496,8 @@ final class AureaModel: ObservableObject {
                             engine.run { $0.setMotionBlur(true, forLayer: id) }
                             _ = engine.setMotionBlurSettings(true, shutter: 181, phase: 45, samples: 16, adaptiveLimit: 128)
                             engine.setLayerMotionBlurLength(1.25, forLayer: id)
-                            refreshModel(force: true); transformTab = 5; panel = .transform
+                            // F10: o obturador da composição mora em Ajustes do projeto › Prévia e render.
+                            refreshModel(force: true); clearSelection(); projectSettingsTab = "render"; showProjectSettings = true
                         }
                     case "motion-blur-export", "simple-text-export", "multiple-text-exports":
                         let id = engine.addText("AUREA MOTION BLUR")
@@ -1792,6 +1874,19 @@ final class AureaModel: ObservableObject {
             suspendPreparingExport()
             return
         }
+        // 0.5.3 (P0-9 / R-30): o export de vídeo em render é PAUSADO antes de
+        // gravar o projeto. O `saveOnLeave` abaixo roda na main e, até o
+        // `suspend` do fim, o export seguia mandando trabalho de Metal com o app
+        // já saindo de cena; um erro de GPU nessa janela virava falha de render
+        // (degrau de memória) em vez de pausa. `pauseExport` não espera: marca
+        // a suspensão e acorda o export; quem aguarda ele parar é o `suspend`.
+        if exporting && !exportCancelled && !exportPublishing && exportedKind == .video && pendingExportURL != nil {
+            if !exportPausedForBackground { exportReportLog.paused() }
+            exportPausedForBackground = true
+            engine.pauseExport()
+            // 0.5.3 (P1-6 / R-33): pausado não é "morreu exportando".
+            markExportInFlight(paused: true)
+        }
         // Grava ANTES de suspender (o motor ainda renderiza a capa) e dentro de
         // uma tarefa de segundo plano: o iOS pode congelar o app logo depois do
         // `.background`, e quem arrasta o app para fora do seletor mata o
@@ -1870,9 +1965,24 @@ final class AureaModel: ObservableObject {
         return true
     }
 
+    /// 0.5.3 (P1-6 / R-33): troca o valor da marca do export em andamento
+    /// (exportInFlightPaused). Só mexe numa marca que existe: quem a cria é o
+    /// startExport de vídeo e quem a apaga é o fim do export (`exporting`).
+    private func markExportInFlight(paused: Bool) {
+        // A marca que o processo anterior deixou é lida (e apagada) antes: a
+        // que muda aqui é sempre a do export desta execução.
+        _ = Self.previousExportMark
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: Self.exportInFlightKey) != nil else { return }
+        if paused { defaults.set(Self.exportInFlightPaused, forKey: Self.exportInFlightKey) }
+        else { defaults.set(true, forKey: Self.exportInFlightKey) }
+    }
+
     func enterForeground() {
         guard started else { return }
         appInBackground = false
+        // 0.5.3 (P1-6 / R-33): na frente de novo, morrer no meio volta a contar.
+        markExportInFlight(paused: false)
         checkMemoryPressure(force: true)
         let lifecycleEngine = engine
         lifecycleQueue.async { [weak self] in
@@ -1911,6 +2021,7 @@ final class AureaModel: ObservableObject {
         exportStalled = false
         exportWatch = ExportStallWatch()
         NSLog("AureaExport: app returned to the foreground; continuing the paused export (attempt %u)", exportSafeMode)
+        exportReportLog.resumed()
         try? FileManager.default.removeItem(at: url)
         prepareExport(url, options: options, safeMode: exportSafeMode)
     }
@@ -2203,6 +2314,10 @@ final class AureaModel: ObservableObject {
             resetGroupThumbnails()
             clearTimelineKeySelection()
             if !timelineExpandedLayers.isEmpty { timelineExpandedLayers = [] }
+            // 0.5.3: grupos abertos na timeline são da composição que saiu.
+            if !timelineInlineGroups.isEmpty { timelineInlineGroups = [] }
+            if !groupInnerRows.isEmpty { groupInnerRows = [:] }
+            if groupInnerSelection != nil { groupInnerSelection = nil }
         }
         // Desfazer/refazer, abrir projeto e ripple também mexem nas marcas: a
         // lista local não pode ficar velha (a âncora acendia numa marca extinta).
@@ -2212,36 +2327,9 @@ final class AureaModel: ObservableObject {
         // Cada atribuição a um @Published redesenha TODA tela que observa o
         // modelo (a timeline inteira, o preview por cima): só publica o que
         // mudou de verdade. Era o grosso da timeline lenta no iOS.
-        let nextLayers = rows.map { row in
-            LayerItem(id: (row["id"] as? NSNumber)?.int64Value ?? 0,
-                      kind: (row["kind"] as? NSNumber)?.uint32Value ?? 0,
-                      name: row["name"] as? String ?? "",
-                      startFrame: (row["startFrame"] as? NSNumber)?.int32Value ?? 0,
-                      endFrame: (row["endFrame"] as? NSNumber)?.int32Value ?? 0,
-                      offsetFrames: (row["offsetFrames"] as? NSNumber)?.int32Value ?? 0,
-                      parentIndex: (row["parentIndex"] as? NSNumber)?.int32Value ?? -1,
-                      opacity: (row["opacity"] as? NSNumber)?.floatValue ?? 1,
-                      effectCount: (row["effectCount"] as? NSNumber)?.uint32Value ?? 0,
-                      maskCount: (row["maskCount"] as? NSNumber)?.uint32Value ?? 0,
-                      keyframeCount: (row["keyframeCount"] as? NSNumber)?.uint32Value ?? 0,
-                      blendMode: (row["blendMode"] as? NSNumber)?.uint32Value ?? 0,
-                      selected: row["selected"] as? Bool ?? false,
-                      visible: row["visible"] as? Bool ?? true,
-                      locked: row["locked"] as? Bool ?? false,
-                      solo: row["solo"] as? Bool ?? false,
-                      animated: row["animated"] as? Bool ?? false,
-                      threeD: row["threeD"] as? Bool ?? false,
-                      label: (row["label"] as? NSNumber)?.uint32Value ?? 0,
-                      adjustment: ((row["flags"] as? NSNumber)?.uint32Value ?? 0) & (1 << 6) != 0,
-                      guide: ((row["flags"] as? NSNumber)?.uint32Value ?? 0) & (1 << 7) != 0,
-                      magnetic: ((row["flags"] as? NSNumber)?.uint32Value ?? 0) & (1 << 13) != 0,
-                      trackId: (row["trackId"] as? NSNumber)?.uint32Value ?? 0,
-                      clipToBelow: ((row["flags"] as? NSNumber)?.uint32Value ?? 0) & (1 << 14) != 0,
-                      clipCandidate: ((row["flags"] as? NSNumber)?.uint32Value ?? 0) & (1 << 15) != 0,
-                      shy: ((row["flags"] as? NSNumber)?.uint32Value ?? 0) & (1 << 16) != 0,
-                      preserveTransparency: ((row["flags"] as? NSNumber)?.uint32Value ?? 0) & (1 << 17) != 0)
-        }
+        let nextLayers = rows.map { LayerItem.from(row: $0) }
         if nextLayers != layers { layers = nextLayers }
+        refreshGroupRows()
         resolvePendingSplit()
         if let data = engine.captionTracks().data(using: .utf8), let tracks = try? JSONDecoder().decode([NativeCaptionTrack].self, from: data), tracks != captionTracks { captionTracks = tracks }
         let nextSelection = Set(layers.filter(\.selected).map(\.id))
@@ -2505,7 +2593,7 @@ final class AureaModel: ObservableObject {
         followPlayback(false)
     }
 
-    func startPreRender(_ direction: Int) {
+    func startPreRender(_ direction: Int, groupLayer: Int64 = 0) {
         guard started, screen == .editor, !exporting, !exportPreparing, !openingProject, !importingMedia,
               !preRenderPreparing, !preRenderProgress.running else { return }
         pause()
@@ -2516,7 +2604,10 @@ final class AureaModel: ObservableObject {
         preRenderPreparing = true
         preRenderProgress = PreRenderState()
         lifecycleQueue.async { [weak self] in
-            let code: Int32 = request.isCancelled ? 25 : native.startPreRender(direction: Int32(normalized))
+            let code: Int32
+            if request.isCancelled { code = 25 }
+            else if groupLayer == 0 { code = native.startPreRender(direction: Int32(normalized)) }
+            else { code = native.startGroupPreRender(groupLayer, direction: Int32(normalized)) }
             if request.isCancelled { native.cancelPreRender() }
             DispatchQueue.main.async {
                 guard let self, self.preRenderStartup === request else { return }
@@ -2622,6 +2713,9 @@ final class AureaModel: ObservableObject {
         engine.run { $0.scrub(toFrame: frame) }
         if playheadClock.frame != frame { playheadClock.frame = frame }
     }
+    /// 0.5.3 (par do Android, `DETAIL_PLAYBACK_NS`): última releitura do inspetor
+    /// pedida pelo arrasto da régua.
+    private var lastOptimisticDetail: TimeInterval = 0
     func optimisticPlayhead(_ requested: Int64) {
         let frame = min(max(0, requested), navigationEnd)
         pendingPlayhead = frame
@@ -2629,7 +2723,18 @@ final class AureaModel: ObservableObject {
         guard status.playhead != frame else { return }
         status.playhead = frame
         playheadClock.frame = frame
-        if primarySelection != nil { refreshSelectedLayer() }
+        // 0.5.3: o inspetor era relido INTEIRO a cada passo do arrasto (até 60 por
+        // segundo): efeitos, detalhe, lente, forma, ossos, máscaras e parâmetros, cada
+        // consulta no lock do modelo que o render segura no preparo do quadro. Como no
+        // Android, 10 leituras por segundo bastam enquanto o dedo anda, e sem a pilha
+        // de efeitos (não depende do cabeçote). O valor final vem do `refreshStatus`,
+        // quando o motor confirma o cabeçote (`playheadChanged`).
+        guard primarySelection != nil else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        if now - lastOptimisticDetail >= 0.1 {
+            lastOptimisticDetail = now
+            refreshSelectedLayer(refreshEffectStack: false)
+        }
     }
     /// Redesenha e reapresenta mesmo sem mudança no modelo: a janela voltou a
     /// aparecer, ou o palco mudou de tamanho (tela cheia).
@@ -2717,6 +2822,7 @@ final class AureaModel: ObservableObject {
     @Published private(set) var timelineOnlySelection: Set<Int64> = []
 
     func select(layerId: Int64, additive: Bool = false, openOptions: Bool = true) {
+        if groupInnerSelection != nil { groupInnerSelection = nil }   // 0.5.3: a de dentro sai
         let previousPrimary = primarySelection
         // A seleção de keyframes é de UMA camada: trocar a principal a descarta.
         if let keys = timelineKeySelection, additive || keys.layer != layerId { clearTimelineKeySelection() }
@@ -2740,6 +2846,7 @@ final class AureaModel: ObservableObject {
     }
 
     func clearSelection() {
+        if groupInnerSelection != nil { groupInnerSelection = nil }
         timelineOnlySelection = []
         clearTimelineKeySelection()
         selectedMask = nil; selectedMaskPoint = nil; maskDrawing = false; masks = []
@@ -3152,9 +3259,18 @@ final class AureaModel: ObservableObject {
         return frame
     }
 
-    private func uniqueProjectURL(_ name: String) -> URL {
+    /// 0.5.3 (P0-10 / R-31): o nome de arquivo seguro em Documents — barra,
+    /// barra invertida, dois-pontos e caracteres de controle viram "-". É a
+    /// regra de sempre do arquivo do projeto; o export montava o destino com o
+    /// título cru, e uma barra apontava para uma pasta que não existe (o render
+    /// inteiro terminava e a montagem falhava com erro de E/S).
+    nonisolated private static func safeFileName(_ name: String) -> String {
         let invalid = CharacterSet(charactersIn: "/\\:").union(.controlCharacters)
-        let safe = name.components(separatedBy: invalid).joined(separator: "-")
+        return name.components(separatedBy: invalid).joined(separator: "-")
+    }
+
+    private func uniqueProjectURL(_ name: String) -> URL {
+        let safe = Self.safeFileName(name)
         var url = AureaPaths.documents.appendingPathComponent(safe + ".aurea")
         var counter = 1
         while FileManager.default.fileExists(atPath: url.path) {
@@ -4744,6 +4860,7 @@ final class AureaModel: ObservableObject {
             syncAfterEdit(); vectorGroup = 0; vectorPath = 0; EditPointsState.shared.reset(); openPanel(.editPoints)
             return
         }
+        vectorFace = .paths
         syncAfterEdit(); openPanel(.vector); maskDrawing = preset == 0; vectorFreehand = freehand
     }
 
@@ -5292,6 +5409,7 @@ final class AureaModel: ObservableObject {
         exportProgress = [:]; exportMessage = nil; exportCancelled = false; exportSavedToPhotos = false
         exportStalled = false
         exportWatch = ExportStallWatch()
+        exportReportLog = ExportReportLog()
         let options = exportOptions
         // Codificador escolhido no Avançado: a escada começa nesse degrau. No
         // Automático, se o app fechou no meio do export anterior, começa no
@@ -5305,7 +5423,14 @@ final class AureaModel: ObservableObject {
         var probeCheckpoint = false
         if !exportDeathChecked {
             exportDeathChecked = true
-            probeCheckpoint = Self.previousExportDied && startAttempt == 0 && options.kind == .video
+            // 0.5.3 (decisão do dono): o processo anterior morreu exportando →
+            // o orçamento de memória do motor desce um degrau (até 3) e fica
+            // assim até um export de vídeo terminar (ExportMemoryStep).
+            if Self.previousExportDied { ExportMemoryStep.store(ExportMemoryStep.current() + 1) }
+            // 0.5.3 (P1-6 / R-33): o app recolhido com o export PAUSADO em
+            // segundo plano também pergunta pelo checkpoint, mas não é morte
+            // por memória: sem achar, começa no degrau pedido.
+            probeCheckpoint = (Self.previousExportDied || Self.previousExportPaused) && startAttempt == 0 && options.kind == .video
             if Self.previousExportDied && startAttempt == 0 && options.kind == .video {
                 let lighter = Self.nextExportAttempt(0, code: 8, failure: 0, stalled: false, tooLong: false, options: options)
                 if lighter > 0 && lighter <= 6 {
@@ -5322,7 +5447,10 @@ final class AureaModel: ObservableObject {
         exportedKind = options.kind
         // Omega exportação (bug 1 da 0.3.4): o tipo pedido fica no log do app.
         NSLog("AureaExport: start kind=%ld engineCode=%u", options.kind.rawValue, options.kind.engineCode)
-        let base = projectName.isEmpty ? "Aurea" : projectName
+        // 0.5.3 (P0-10 / R-31): o título passa pela regra do arquivo do projeto
+        // (safeFileName) antes de virar o nome do arquivo exportado.
+        let safeName = Self.safeFileName(projectName)
+        let base = safeName.isEmpty ? "Aurea" : safeName
         var url = AureaPaths.documents.appendingPathComponent("\(base).\(options.kind.fileExtension)")
         var counter = 1
         while FileManager.default.fileExists(atPath: url.path) {
@@ -5354,6 +5482,11 @@ final class AureaModel: ObservableObject {
         // também para um projeto a 120 exportado "do projeto".
         let requestedFps = options.fps > 0 ? options.fps : compositionFps
         let plannedTooLong = plannedExportSeconds(options) > Self.exportMaxSeconds
+        // 0.5.3: o degrau do orçamento de memória (sobe quando o processo
+        // anterior morreu exportando) vai ao motor antes de cada partida de vídeo.
+        let memoryStep = ExportMemoryStep.current()
+        // 0.5.3 (P2-1): a memória da escada de encoders deste aparelho.
+        configureExportRungMemory()
         mediaQueue.async { [weak self] in
             var ok = false, level = safeMode
             var busyLeft = Self.exportBusyRetries
@@ -5386,6 +5519,7 @@ final class AureaModel: ObservableObject {
                 while !request.isCancelled {
                     let previous = native.exportProgress()
                     let previousDiagnostics = native.exportDiagnostics()
+                    native.setExportMemoryStep(memoryStep)
                     let code = native.startExportChecked(to: url.path, codec: options.codec,
                         height: options.shortSide, fps: options.fps, bitrateMbps: options.bitrateMbps,
                         audioBitrateKbps: options.audioBitrateKbps, aiUpscale: options.aiUpscale,
@@ -5404,6 +5538,12 @@ final class AureaModel: ObservableObject {
                         previousDiagnostics: previousDiagnostics, diagnostics: diagnostics)
                     // A escada de tentativas (export/ExportAttempts.hpp, a mesma regra do Android).
                     let failure = (progress[AureaExportFailure] as? NSNumber)?.uint32Value ?? 0
+                    // 0.5.3 (diagnóstico local): o degrau que não partiu, com código e motivo.
+                    let failedLevel = level
+                    DispatchQueue.main.async {
+                        guard let self, self.exportStartup === request else { return }
+                        self.exportReportLog.attempt(level: failedLevel, code: code, failure: failure)
+                    }
                     var next = Self.nextExportAttempt(level, code: code, failure: failure, stalled: false,
                                                       tooLong: code == 6 && plannedTooLong, options: options)
                     if next & Self.exportAttemptWait != 0 {
@@ -5468,7 +5608,8 @@ final class AureaModel: ObservableObject {
                     // etapa da partida; antes o iOS nunca gravava o último export.
                     ProblemReport.noteExport("iOS \(UIDevice.current.systemVersion): nao iniciou codigo=\(code) seguranca=\(usedSafeMode) " +
                         "formato=\(options.kind) lado=\(options.shortSide) hevc=\(options.codec == .hevc) " +
-                        "\(Self.exportDiagnosticStage(self.engine.exportDiagnostics())) motor=\"\(message)\"")
+                        "\(Self.exportDiagnosticStage(self.engine.exportDiagnostics())) motor=\"\(message)\"",
+                        context: self.exportReportContext())
                     self.exportMessage = code == 0 ? AureaText.t("ios_export_could_not_start")
                         : code == 6 && self.plannedExportSeconds(options) > Self.exportMaxSeconds
                         ? AureaText.t("exp_too_long_3h")
@@ -5636,7 +5777,8 @@ final class AureaModel: ObservableObject {
         // em que parou (a mesma linha do Android: "partida presa").
         if !exportCancelled {
             ProblemReport.noteExport("iOS \(UIDevice.current.systemVersion): partida presa " +
-                "\(Self.exportDiagnosticStage(engine.exportDiagnostics())) seguranca=\(exportSafeMode) formato=\(exportedKind)")
+                "\(Self.exportDiagnosticStage(engine.exportDiagnostics())) seguranca=\(exportSafeMode) formato=\(exportedKind)",
+                context: exportReportContext())
         }
         stopPreparingWatch()
         exportStartup?.cancel()
@@ -5658,8 +5800,11 @@ final class AureaModel: ObservableObject {
             // ser usada em segundo plano) e guarda o checkpoint; ao voltar, o
             // mesmo export é refeito (resumePausedExport).
             request.pause()
+            if !exportPausedForBackground { exportReportLog.paused() }
             exportPausedForBackground = true
             engine.pauseExport()
+            // 0.5.3 (P1-6 / R-33): pausado não é "morreu exportando".
+            markExportInFlight(paused: true)
         } else {
             cancelExport()
         }
@@ -5695,7 +5840,47 @@ final class AureaModel: ObservableObject {
     private var exportDiagnosticsTimer: Timer?
     private func recordExportDiagnostics() {
         guard started, exportedKind == .video else { return }
+        // 0.5.3 (diagnóstico local): o estado do aparelho e deste export entra
+        // em cada amostra — é o registro que sobra quando o iOS mata o app.
+        ProblemReport.exportState = exportReportState()
         ProblemReport.recordExportDiagnostics(engine.exportDiagnostics())
+    }
+
+    /// 0.5.3 (diagnóstico local, sem envio automático): memória, calor, degrau
+    /// de memória, escada e pausas deste export para o registro do diagnóstico.
+    /// Só números e códigos (nenhum nome de projeto, mídia ou caminho); barato
+    /// o bastante para o timer de 1 s.
+    private func exportReportState() -> [String: Any] {
+        let info = ProcessInfo.processInfo
+        let megabyte: UInt64 = 1024 * 1024
+        return ["ramMB": Int(info.physicalMemory / megabyte),
+                "availMB": Int(engine.availableMemoryBytes() / megabyte),
+                "thermal": info.thermalState.rawValue,
+                "lowPower": info.isLowPowerModeEnabled,
+                "memStep": Int(ExportMemoryStep.current()),
+                "ladder": exportReportLog.ladder,
+                "pauses": exportReportLog.pauses,
+                "resumes": exportReportLog.resumes]
+    }
+
+    /// 0.5.3 (diagnóstico local): o mesmo estado em texto, para a linha do
+    /// último export com problema (ProblemReport.noteExport) — aparelho, RAM,
+    /// calor, economia de energia e espaço livre (ProblemReport.deviceState),
+    /// memória livre do processo, degrau de memória, escada e pausas, e por
+    /// último o caminho do encoder (é o que o limite da linha corta primeiro).
+    /// 0.5.3 (P2-1): a memória da escada de encoders deste aparelho (FFmpegExportSink:
+    /// o degrau que falhou duas vezes é pulado; o encoder que descartou quadros vai
+    /// em CBR). Em Caches; aparelho, iOS ou build do app diferentes começam do zero.
+    /// A mesma regra do Android (Exporter.runExport).
+    private func configureExportRungMemory() {
+        AureaEngine.configureExportRungMemory(AureaPaths.caches.appendingPathComponent("export-rungs.txt").path,
+            identity: "\(ProblemReport.deviceModel())|\(UIDevice.current.systemVersion)|\(ProblemReport.appBuild)")
+    }
+    private func exportReportContext() -> String {
+        let free = engine.availableMemoryBytes() / (1024 * 1024)
+        let encoder = String(AureaEngine.lastExportEncoderPath().prefix(160))
+        return "\(ProblemReport.deviceState()) livre=\(free)MB passo=\(ExportMemoryStep.current()) \(exportReportLog.text)"
+            + (encoder.isEmpty ? "" : " enc=\(encoder)")
     }
     private func startExportDiagnosticsTimer() {
         exportDiagnosticsTimer?.invalidate()
@@ -5721,6 +5906,10 @@ final class AureaModel: ObservableObject {
         enum Verdict { case running, cancel, giveUp }
         static let stallSeconds: TimeInterval = 180
         static let giveUpSeconds: TimeInterval = 15
+        /// 0.5.3 (P0-3): intervalo entre duas leituras acima disto = ninguém
+        /// estava olhando (app suspenso, main presa). A mesma regra do
+        /// ExportStallWatchdog.kt.
+        static let observeGapSeconds: TimeInterval = 5
         /// kExportSafeModeMax e kExportRetryShift (ExportWatchdog.hpp).
         static let safeModeMax: UInt32 = 2
         static let retryShift: UInt32 = 16
@@ -5729,9 +5918,21 @@ final class AureaModel: ObservableObject {
         private var lastMessage = ""
         private var lastChange: TimeInterval = 0
         private var cancelAt: TimeInterval = 0
+        private var lastObserved: TimeInterval = 0
         private(set) var cancelled = false
 
         mutating func observe(now: TimeInterval, framesDone: Int, message: String) -> Verdict {
+            // 0.5.3 (P0-3): o tempo em que ninguém observou não conta como
+            // export parado. Voltar de minutos suspenso cancelava um export
+            // vivo (ou já desistia dele): as marcas andam junto com o intervalo.
+            if started {
+                let gap = now - lastObserved
+                if gap > Self.observeGapSeconds {
+                    lastChange += gap
+                    if cancelled { cancelAt += gap }
+                }
+            }
+            lastObserved = now
             if !started || framesDone != lastDone || message != lastMessage {
                 started = true
                 lastDone = framesDone
@@ -5753,6 +5954,54 @@ final class AureaModel: ObservableObject {
         static func nextSafeMode(current: UInt32, suggested: UInt32) -> UInt32 {
             suggested > current && suggested <= safeModeMax ? suggested : 0
         }
+    }
+
+    /// 0.5.3 (decisão do dono): o degrau do orçamento de memória do export,
+    /// guardado entre execuções. Sobe um (até 3) quando o processo anterior
+    /// morreu no meio de um export de vídeo e volta a 0 quando um export de
+    /// vídeo termina; o motor o recebe antes de cada partida de vídeo
+    /// (setExportMemoryStep → Engine::set_export_memory_step).
+    enum ExportMemoryStep {
+        static let key = "aurea.export.memoryStep"
+        static let maximum = 3
+        static func current() -> UInt32 {
+            UInt32(min(max(UserDefaults.standard.integer(forKey: key), 0), maximum))
+        }
+        static func store(_ step: UInt32) {
+            UserDefaults.standard.set(Int(min(step, UInt32(maximum))), forKey: key)
+        }
+    }
+
+    /// 0.5.3 (diagnóstico local, sem envio automático): o que este export já
+    /// tentou, para o relato — cada degrau da escada que falhou (degrau, código
+    /// Errc, motivo ExportFailure, "t" = travou) e quantas vezes o segundo
+    /// plano pausou e retomou. Só números; sem barras, que o relato trata como
+    /// caminho de arquivo.
+    struct ExportReportLog {
+        static let attemptsMax = 12
+        private(set) var attempts: [String] = []
+        private(set) var dropped = 0
+        private(set) var pauses = 0
+        private(set) var resumes = 0
+
+        mutating func attempt(level: UInt32, code: Int32, failure: UInt32, stalled: Bool = false) {
+            let mark = stalled ? "t" : ""
+            attempts.append("\(level & 0xFF)>c\(code)m\(failure)\(mark)")
+            // O limite tira as mais antigas e conta quantas saíram.
+            if attempts.count > Self.attemptsMax {
+                attempts.removeFirst()
+                dropped += 1
+            }
+        }
+        mutating func paused() { pauses += 1 }
+        mutating func resumed() { resumes += 1 }
+
+        /// "0>c15m1,1>c8m4t" ("-" = nenhum degrau falhou; "+N," = N mais antigos cortados).
+        var ladder: String {
+            let more = dropped > 0 ? "+\(dropped)," : ""
+            return more + (attempts.isEmpty ? "-" : attempts.joined(separator: ","))
+        }
+        var text: String { "escada=\(ladder) pausas=\(pauses) voltas=\(resumes)" }
     }
 
     /// Texto do motivo da falha (aurea::ExportFailure, export/ExportRules.hpp)
@@ -5815,6 +6064,10 @@ final class AureaModel: ObservableObject {
                     case .giveUp:
                         self.exportTimer?.invalidate()
                         self.exportTimer = nil
+                        // 0.5.3 (diagnóstico local): o degrau que travou sem concluir.
+                        if !self.exportCancelled {
+                            self.exportReportLog.attempt(level: self.exportSafeMode, code: 25, failure: 0, stalled: true)
+                        }
                         if self.exportedKind == .video, !self.exportCancelled,
                            let url = self.pendingExportURL, let options = self.pendingExportOptions, options.hyperJob == nil {
                             let next = Self.nextExportAttempt(self.exportSafeMode, code: 25, failure: 0, stalled: true,
@@ -5845,6 +6098,13 @@ final class AureaModel: ObservableObject {
                     // Pausado pela ida ao segundo plano (a suspensão parou o
                     // motor): não é falha — o export continua ao voltar.
                     if result == 25, self.exportPausedForBackground { self.resumePausedExport(); return }
+                    // 0.5.3 (diagnóstico local): o degrau que falhou no meio, com
+                    // código e motivo, antes de a escada decidir o próximo.
+                    if result != 0, !self.exportCancelled {
+                        self.exportReportLog.attempt(level: self.exportSafeMode, code: Int32(result),
+                            failure: (self.exportProgress[AureaExportFailure] as? NSNumber)?.uint32Value ?? 0,
+                            stalled: self.exportWatch.cancelled)
+                    }
                     // O motor guardou um checkpoint desta tentativa (o encoder
                     // caiu no meio): a MESMA tentativa continua de lá, sem descer
                     // a escada. O motor limita as repetições e exige progresso.
@@ -5886,6 +6146,9 @@ final class AureaModel: ObservableObject {
                     DispatchQueue.global(qos: .utility).async { AureaStorage.trimCaches(atLaunch: false) }
                     if let url = self.exportedURL {
                         self.exportCancelled = false
+                        // 0.5.3: um export de vídeo que terminou devolve o orçamento
+                        // de memória ao normal (o Hyper não usa esse degrau).
+                        if self.exportedKind == .video && !hyperJob { ExportMemoryStep.store(0) }
                         // AureaHyper: o arquivo vira projeto (HyperFlow.finishIfDone), não vai para Fotos.
                         if hyperJob { self.exporting = false } else { self.publishExportToPhotos(url) }
                     } else {
@@ -5903,7 +6166,8 @@ final class AureaModel: ObservableObject {
                             if result != 25 || self.exportStalled {
                                 ProblemReport.noteExport("iOS \(UIDevice.current.systemVersion): falhou: motivo=\(failure) codigo=\(result) " +
                                     "quadro=\(done)/\(total) seguranca=\(self.exportSafeMode) travou=\(self.exportStalled) " +
-                                    "formato=\(self.exportedKind) \(Self.exportDiagnosticStage(self.engine.exportDiagnostics())) motor=\"\(message)\"")
+                                    "formato=\(self.exportedKind) \(Self.exportDiagnosticStage(self.engine.exportDiagnostics())) motor=\"\(message)\"",
+                                    context: self.exportReportContext())
                             }
                             // O motivo (código estável do motor) vira texto do
                             // catálogo; a frase crua do motor (português) não
@@ -7016,6 +7280,84 @@ final class AureaModel: ObservableObject {
     }
 
     // --- Grupo ---------------------------------------------------------------
+    // =========================================================================
+    // 0.5.3 — "Please let us expand group, seeing all contents of it without
+    // ungrouping!!": o grupo abre NA timeline. As camadas de dentro aparecem
+    // recuadas embaixo dele (miniatura e onda como as outras) e dá para
+    // escolher, mover e aparar no lugar. O grupo continua grupo e a composição
+    // aberta não muda; a regra é do motor (EngineGroupInline.cpp), a mesma do
+    // Android (EditorStore.toggleInlineGroup).
+    // =========================================================================
+    /// Grupos (ids da composição aberta) com o conteúdo à vista na timeline.
+    @Published private(set) var timelineInlineGroups: Set<Int64> = []
+    /// As linhas de dentro de cada grupo aberto, relidas a cada revisão do modelo.
+    @Published private(set) var groupInnerRows: [Int64: [GroupInnerRow]] = [:]
+    /// A camada de dentro escolhida na timeline. nil = nenhuma.
+    @Published private(set) var groupInnerSelection: GroupInnerKey?
+
+    func isInlineGroupOpen(_ group: Int64) -> Bool { timelineInlineGroups.contains(group) }
+
+    /// O chevron do grupo: abre/fecha o conteúdo dele na timeline (não entra no grupo).
+    func toggleInlineGroup(_ group: Int64) {
+        if timelineInlineGroups.contains(group) {
+            timelineInlineGroups.remove(group)
+            if groupInnerSelection?.group == group { groupInnerSelection = nil }
+        } else {
+            timelineInlineGroups.insert(group)
+        }
+        refreshGroupRows()
+    }
+
+    /// Escolhe uma camada de dentro (a seleção da composição aberta sai: são ids de outra tabela).
+    func selectGroupInner(group: Int64, layer: Int64) {
+        clearSelection()
+        groupInnerSelection = GroupInnerKey(group: group, layer: layer)
+    }
+
+    func clearGroupInnerSelection() { if groupInnerSelection != nil { groupInnerSelection = nil } }
+
+    private func refreshGroupRows() {
+        guard !timelineInlineGroups.isEmpty else {
+            if !groupInnerRows.isEmpty { groupInnerRows = [:] }
+            if groupInnerSelection != nil { groupInnerSelection = nil }
+            return
+        }
+        // Grupo apagado/desagrupado (ou desfeito): sai da lista de abertos.
+        let groups = layers.filter { $0.kind == UInt32(TimelineLayerType.group.kind) && timelineInlineGroups.contains($0.id) }.map(\.id)
+        if groups.count != timelineInlineGroups.count { timelineInlineGroups = Set(groups) }
+        var next: [Int64: [GroupInnerRow]] = [:]
+        for g in groups {
+            next[g] = engine.groupLayers(g).map { row in
+                GroupInnerRow(group: g, layer: LayerItem.from(row: row), editable: (row["inlineEditable"] as? Bool) ?? false)
+            }
+        }
+        if next != groupInnerRows { groupInnerRows = next }
+        if let key = groupInnerSelection, next[key.group]?.contains(where: { $0.layer.id == key.layer }) != true {
+            groupInnerSelection = nil
+        }
+    }
+
+    /// Mover/esticar camadas de dentro (tempo de fora). false = o grupo não anda 1:1 ou passou do começo.
+    @discardableResult
+    func setGroupLayerRanges(group: Int64, layers ids: [Int64], starts: [Int32], ends: [Int32]) -> Bool {
+        guard !ids.isEmpty, ids.count == starts.count, ids.count == ends.count else { return false }
+        pause()
+        let ok = engine.setGroupLayerRanges(group, layers: ids.map { NSNumber(value: $0) },
+                                            starts: starts.map { NSNumber(value: Int64($0)) },
+                                            ends: ends.map { NSNumber(value: Int64($0)) })
+        refreshModel(force: true)
+        return ok
+    }
+
+    /// Aparar o início (0) ou o fim (1) de uma camada de dentro; `frame` no tempo de fora.
+    @discardableResult
+    func trimGroupClip(group: Int64, layer: Int64, operation: UInt32, frame: Int32) -> Bool {
+        pause()
+        let ok = engine.editGroupClipTime(group, layer: layer, operation: operation, frame: Int64(frame))
+        refreshModel(force: true)
+        return ok
+    }
+
     func openGroup(_ layerId: Int64) {
         guard engine.openPrecomp(layerId) else { return }
         selection = []

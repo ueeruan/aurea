@@ -12,6 +12,7 @@
 
 #include "aurea/timeline/ShapeGeometry.hpp"
 #include "aurea/vector/Vector.hpp"
+#include "aurea/vector/VectorTree.hpp"
 
 #include <cstdio>
 
@@ -161,6 +162,9 @@ bool Engine::set_vector_document(u64 layerId, const f32* data, usize count, cons
             for (usize pi = 0; pi < d.groups[gi].paths.size(); ++pi) d.groups[gi].paths[pi].exclude = cur.groups[gi].paths[pi].exclude;
         }
     }
+    // Lote X: o documento de sempre não carrega a árvore (ordem livre, itens a
+    // mais, grupos de dentro, inclinação do grupo): fica a da camada.
+    for (usize gi = 0; gi < d.groups.size(); ++gi) vector::keep_tree(l->shape.vector.groups[gi], d.groups[gi]);
     if (d == l->shape.vector) return true;
     if (!continuing) history_.before_mutation(*comp, project_->timeline().current(), "camada vetorial");
     bump_model_revision_locked();
@@ -417,8 +421,13 @@ u32 Engine::query_vector_params(u64 layerId, u32 group, f32* out, u32 capacity) 
         anim |= 1u << p;
         if (tr->find_exact(local) != kInvalidIndex) keys |= 1u << p;
     }
-    out[kVecParamCount] = static_cast<f32>(anim);
-    out[kVecParamCount + 1] = static_cast<f32>(keys);
+    // Bits 0..23 nos dois floats de sempre; 24.. (traços animáveis) nos dois
+    // seguintes — um float só guarda inteiros exatos até 2^24.
+    constexpr u32 lo = (1u << kVecParamBitsPerFloat) - 1u;
+    out[kVecParamCount] = static_cast<f32>(anim & lo);
+    out[kVecParamCount + 1] = static_cast<f32>(keys & lo);
+    out[kVecParamCount + 2] = static_cast<f32>(anim >> kVecParamBitsPerFloat);
+    out[kVecParamCount + 3] = static_cast<f32>(keys >> kVecParamBitsPerFloat);
     return kVectorParamFloats;
 }
 

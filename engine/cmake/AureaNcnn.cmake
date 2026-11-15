@@ -172,6 +172,13 @@ endif()
 target_sources(aurea_core PRIVATE src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp src/ai/RotoClick.cpp
                "${ai_model_cpp}" "${ai_depth_cpp}" "${ai_foreground_cpp}" "${ai_click_cpp}")
 target_link_libraries(aurea_core PRIVATE ncnn)
+# Motion Capture do Aurea PC (BlazePose do MediaPipe em ncnn, modelos lidos de
+# engine/assets/mocap em tempo de execução). SÓ no Windows: no celular a pose
+# vem do sistema (ML Kit / Vision) e este arquivo nem compila.
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    target_sources(aurea_core PRIVATE src/ai/PoseEstimator.cpp)
+    set_source_files_properties(src/ai/PoseEstimator.cpp PROPERTIES COMPILE_OPTIONS /EHsc)
+endif()
 include(${CMAKE_CURRENT_LIST_DIR}/AureaHyperNeural.cmake)
 # Model/vector allocation failures are translated to Status at this boundary.
 # The rest of the shared core retains its existing no-exceptions contract.

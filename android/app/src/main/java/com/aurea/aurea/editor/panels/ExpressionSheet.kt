@@ -81,6 +81,104 @@ private val Snippets = listOf(
     "comp(\"Comp 1\").layer(1).transform.position",
 )
 
+/**
+ * AE expressions (lote E), só no Aurea PC (PlatformFeatures.desktopAe): atalhos
+ * com nome para o que entrou nas expressões — conversão de cor, seguir um
+ * caminho, trocar de valor por um Menu suspenso e função própria. Como os
+ * bounces, cada um troca o texto inteiro.
+ */
+internal const val AeSnipColor = """c = hexToRgb("FF8800");
+hsl = rgbToHsl(c);
+hslToRgb([(hsl[0] + time * 0.1) % 1, hsl[1], hsl[2], 1]);"""
+
+internal const val AeSnipPathFollow = """L = thisComp.layer(1);
+p = L.mask(1).maskPath;
+t = (time * 0.25) % 1;
+L.toComp(p.pointOnPath(t));"""
+
+internal const val AeSnipDropdown = """m = effect("Dropdown Menu Control")("Menu").value;
+switch (m) {
+  case 1: value; break;
+  case 2: value * 1.5; break;
+  default: value * 2;
+}"""
+
+internal const val AeSnipFunction = """function pulse(t, freq, amount) {
+  return 1 + Math.sin(t * freq * 2 * Math.PI) * amount;
+}
+value * pulse(time, 2, 0.1);"""
+
+/** Para a expressão do CAMINHO de uma máscara (o painel Máscara do Aurea PC abre a folha nela). */
+internal const val AeSnipCreatePath = """p = thisProperty.points();
+s = 1 + Math.sin(time * 2) * 0.1;
+createPath(p.map(q => q * s), thisProperty.inTangents(), thisProperty.outTangents(), thisProperty.isClosed());"""
+
+/**
+ * v70: os bounces do After Effects, inteiros, com nome no atalho (o código é
+ * longo demais para o botão). Funcionam em qualquer propriedade com keyframes.
+ */
+internal const val BounceInertia = """amp = .06;
+freq = 2.5;
+decay = 5.0;
+n = 0;
+if (numKeys > 0) {
+  n = nearestKey(time).index;
+  if (key(n).time > time) n--;
+}
+t = n == 0 ? 0 : time - key(n).time;
+if (n > 0 && t < 1) {
+  v = velocityAtTime(key(n).time - thisComp.frameDuration / 10);
+  value + v * amp * Math.sin(freq * t * 2 * Math.PI) / Math.exp(decay * t);
+} else {
+  value;
+}"""
+
+internal const val BounceDrop = """e = .7;
+g = 5000;
+nMax = 9;
+n = 0;
+if (numKeys > 0) {
+  n = nearestKey(time).index;
+  if (key(n).time > time) n--;
+}
+if (n > 0) {
+  t = time - key(n).time;
+  v = -velocityAtTime(key(n).time - .001) * e;
+  vl = length(v);
+  vu = vl > 0 ? v / vl : v * 0;
+  tCur = 0;
+  segDur = 2 * vl / g;
+  tNext = segDur;
+  nb = 1;
+  while (tNext < t && nb <= nMax) {
+    vl *= e;
+    segDur *= e;
+    tCur = tNext;
+    tNext += segDur;
+    nb++;
+  }
+  if (nb <= nMax) {
+    delta = t - tCur;
+    value + vu * delta * (vl - g * delta / 2);
+  } else {
+    value;
+  }
+} else {
+  value;
+}"""
+
+/** v70: atalhos da expressão do texto-fonte (o resultado vira o texto). */
+private val TextSnippets = listOf(
+    "value.substr(0, Math.floor(time * 12))",
+    "Math.round(linear(time, 0, 2, 0, 1000))",
+    "timeToTimecode()",
+    "value.toUpperCase()",
+    "\"Pontos: \" + Math.floor(time * 10)",
+    "time.toFixed(1) + \"s\"",
+    "thisComp.layer(1).name",
+    "value + \" \" + Math.floor(time)",
+)
+
 private val Mono = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 14.sp, lineHeight = 20.sp)
 
 /**
@@ -114,6 +212,8 @@ internal fun ExpressionSheet(store: EditorStore, target: EditorStore.ExpressionT
 
     val applied = info?.exists == true
     val dirty = field.text != (info?.source ?: "")
+    // v70: no texto-fonte o resultado é texto (e os atalhos são de texto).
+    val textSource = target.tracks.firstOrNull()?.property == com.aurea.aurea.engine.TrackProperty.TEXT_SOURCE
     // Erro mostrado: sintaxe do texto em edição; sem edição pendente, o do motor (execução).
     val shownError: ExpressionDiag? = when {
         !syntax.ok -> syntax
@@ -153,13 +253,29 @@ internal fun ExpressionSheet(store: EditorStore, target: EditorStore.ExpressionT
                 }
                 dirty -> (if (field.text.isBlank()) stringResource(R.string.panel_aplicar_sem_texto_remove_expressao) else stringResource(R.string.panel_sintaxe_ok_toque_aplicar)) to AureaColors.Muted
                 applied && info?.enabled == false -> stringResource(R.string.panel_desligada_propriedade_usa_keyframes) to AureaColors.Muted
+                applied && textSource -> stringResource(R.string.panel_resultado_agora) + "\u201C" + (info?.text ?: "") + "\u201D" to AureaColors.Keyframe
                 applied -> stringResource(R.string.panel_resultado_agora) + values.joinToString(" · ") { numeroPtBr(it, 2) + target.unit } to AureaColors.Keyframe
                 else -> stringResource(R.string.panel_escreva_expressao_ou_toque_num_atalho) to AureaColors.Muted
             }
             Text(status.first, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = status.second)))
             Spacer(Modifier.height(10.dp))
+            // Atalho: o rótulo (nulo = o próprio código) e o código que entra no cursor.
+            val bounceInertia = stringResource(R.string.expr_snip_bounce)
+            val bounceDrop = stringResource(R.string.expr_snip_bounce_drop)
+            // AE expressions (lote E): só no Aurea PC; no celular a lista fica como estava.
+            val aeShortcuts: List<Pair<String?, String>> =
+                if (com.aurea.aurea.ui.platform.PlatformFeatures.desktopAe) listOf(
+                    stringResource(R.string.expr_snip_ae_color) to AeSnipColor,
+                    stringResource(R.string.expr_snip_ae_path) to AeSnipPathFollow,
+                    stringResource(R.string.expr_snip_ae_dropdown) to AeSnipDropdown,
+                    stringResource(R.string.expr_snip_ae_function) to AeSnipFunction,
+                    stringResource(R.string.expr_snip_ae_create_path) to AeSnipCreatePath,
+                ) else emptyList()
+            val shortcuts: List<Pair<String?, String>> =
+                if (textSource) TextSnippets.map { null to it }
+                else listOf(bounceInertia to BounceInertia, bounceDrop to BounceDrop) + aeShortcuts + Snippets.map { null to it }
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Snippets.forEach { snip ->
+                shortcuts.forEach { (name, snip) ->
                     Box(
                         Modifier
                             .clip(RoundedCornerShape(8.dp))
@@ -168,12 +284,18 @@ internal fun ExpressionSheet(store: EditorStore, target: EditorStore.ExpressionT
                                 val t = field.text
                                 val a = field.selection.min.coerceIn(0, t.length)
                                 val b = field.selection.max.coerceIn(0, t.length)
-                                val nt = t.substring(0, a) + snip + t.substring(b)
-                                field = TextFieldValue(nt, TextRange(a + snip.length))
+                                // Um bounce inteiro troca o texto todo (ele já usa `value`).
+                                val whole = name != null
+                                val nt = if (whole) snip else t.substring(0, a) + snip + t.substring(b)
+                                field = TextFieldValue(nt, TextRange(if (whole) nt.length else a + snip.length))
                             }
                             .padding(horizontal = 10.dp, vertical = 7.dp),
                     ) {
-                        Text(snip, style = Mono.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Keyframe)))
+                        if (name != null) {
+                            Text(name, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, fontWeight = FontWeight.W600, color = AureaColors.Keyframe)))
+                        } else {
+                            Text(snip, style = Mono.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Keyframe)))
+                        }
                     }
                 }
             }

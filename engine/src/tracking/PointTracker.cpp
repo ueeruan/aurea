@@ -232,7 +232,45 @@ f32 weighted_ncc(const std::vector<f32>& t, const std::vector<f32>& w, i32 half,
 /// refino subpixel pela parábola dos vizinhos.
 TrackStep weighted_search(const std::vector<f32>& t, const std::vector<f32>& w, i32 half, const Gray& g, Vec2 center, i32 radius) {
     TrackStep best;
+    best.pos = center;
     best.score = -2.0f;
+    if (!g.width || !g.height || !std::isfinite(center.x) || !std::isfinite(center.y)) return best;
+    // The template and its weights stay fixed throughout the search window.
+    // Cache their moments once, then read each candidate pixel once.
+    f64 weightSum = 0, templateMean = 0;
+    for (usize k = 0; k < t.size(); ++k) {
+        weightSum += w[k];
+        templateMean += static_cast<f64>(w[k]) * t[k];
+    }
+    if (!(weightSum > 0)) return best;
+    templateMean /= weightSum;
+    std::vector<f64> centered(t.size());
+    f64 templateVariance = 0, centeredSum = 0;
+    for (usize k = 0; k < t.size(); ++k) {
+        const f64 delta = t[k] - templateMean;
+        centered[k] = w[k] * delta;
+        templateVariance += centered[k] * delta;
+        centeredSum += centered[k];
+    }
+    if (!(templateVariance > 1e-10 * weightSum)) return best;
+    const auto correlation = [&](i32 px, i32 py) {
+        f64 sum = 0, squared = 0, cross = 0;
+        usize k = 0;
+        for (i32 y = -half; y <= half; ++y) {
+            const i32 row = std::clamp(py + y, 0, static_cast<i32>(g.height) - 1);
+            const f32* pixels = g.px.data() + static_cast<usize>(row) * g.width;
+            for (i32 x = -half; x <= half; ++x, ++k) {
+                const f64 value = pixels[std::clamp(px + x, 0, static_cast<i32>(g.width) - 1)];
+                const f64 weighted = w[k] * value;
+                sum += weighted;
+                squared += weighted * value;
+                cross += centered[k] * value;
+            }
+        }
+        const f64 variance = squared - sum * sum / weightSum;
+        if (!(variance > 1e-10 * weightSum)) return -1.0f;
+        return static_cast<f32>((cross - centeredSum * sum / weightSum) / std::sqrt(templateVariance * variance));
+    };
     const i32 cx = static_cast<i32>(std::lround(std::clamp(center.x, 0.f, static_cast<f32>(g.width - 1))));
     const i32 cy = static_cast<i32>(std::lround(std::clamp(center.y, 0.f, static_cast<f32>(g.height - 1))));
     const i32 side = 2 * radius + 1;
@@ -240,7 +278,7 @@ TrackStep weighted_search(const std::vector<f32>& t, const std::vector<f32>& w, 
     i32 bx = 0, by = 0;
     for (i32 dy = -radius; dy <= radius; ++dy)
         for (i32 dx = -radius; dx <= radius; ++dx) {
-            const f32 s = weighted_ncc(t, w, half, g, cx + dx, cy + dy);
+            const f32 s = correlation(cx + dx, cy + dy);
             score[static_cast<usize>((dy + radius) * side + (dx + radius))] = s;
             if (s > best.score) { best.score = s; bx = dx; by = dy; }
         }

@@ -68,6 +68,7 @@ import com.aurea.aurea.ui.ds.numeroPtBr
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
+import com.aurea.aurea.ui.theme.CupertinoIcon
 import com.aurea.aurea.ui.theme.LayerType
 import com.aurea.aurea.ui.theme.tocavel
 import kotlin.math.abs
@@ -79,7 +80,9 @@ import kotlin.math.roundToLong
 /**
  * As faces de Transformar (Omega 0.3.2, área 05, P0-2). Na tela: **Mover ⇄ Pivô**
  * (a mesma aba; o 2º toque troca), **Girar**, **Escala** e **Inclinar** (não na
- * câmera). Desfoque de movimento e Animadores (extras do AUREA) abrem pelo ⋯.
+ * câmera). Desfoque de movimento (botão da barra da camada) e Animadores
+ * (navegador de Efeitos › Funções do Aurea) são extras do AUREA: abrem esta
+ * moldura já na face deles (Funções, 13/11/2026; antes, pelo ⋯).
  * [Opacidade] saiu (fica em Mesclagem e opacidade) e [Lente] saiu para Opções da
  * câmera; os dois continuam aqui por compatibilidade (testes, pedidos antigos) e
  * a tela devolve para Mover se alguém pedir.
@@ -359,9 +362,6 @@ private fun transformMoreEntries(
     val compSize = stringResource(R.string.panel_tamanho_composicao)
     val snap = stringResource(R.string.om_ap_tf_snap)
     val accelerate = stringResource(R.string.om_ap_tf_accelerate)
-    val motionBlur = stringResource(R.string.panel_desfoque_movimento)
-    val animators = stringResource(R.string.la_animators)
-    val cameraOptions = stringResource(R.string.om_ap_cam_title)
     // AE animation: Auto-Orientar (lido do motor; a revisão relê depois de cada troca).
     val autoOrientTitle = stringResource(R.string.ae_anim_auto_orient)
     val orientOff = stringResource(R.string.ae_anim_auto_orient_off)
@@ -433,15 +433,9 @@ private fun transformMoreEntries(
             if (show3D && !isCameraOrLight(detail))
                 add(MenuEntry.Item(orientCamera, checked = orient == 2, tag = "transform.autoorient.2") { store.setLayerAutoOrient(2) })
         }
-        // Mais do AUREA: as faces extras e, na câmera, o painel das opções da lente.
-        add(MenuEntry.Divider)
-        add(MenuEntry.Item(motionBlur, glyph = CupertinoGlyph.MotionBlur, selected = face == TransformTab.Desfoque,
-            tag = "transform.tab.motionblur") { onTab(TransformTab.Desfoque) })
-        add(MenuEntry.Item(animators, glyph = CupertinoGlyph.Sparkles, selected = face == TransformTab.Animadores,
-            tag = "transform.tab.animators") { onTab(TransformTab.Animadores) })
-        if (isCamera) add(MenuEntry.Item(cameraOptions, glyph = CupertinoGlyph.CameraViewfinder, tag = "transform.camera") {
-            env.onOpenPanel(EditorPanel.Camera)
-        })
+        // Funções (13/11/2026): o ⋯ de Transformar fica só com o que é de Transformar.
+        // Desfoque de movimento abre pelo botão da barra da camada; Animadores, pelo
+        // navegador de Efeitos (Funções do Aurea); Opções da câmera, pelo Editar da câmera.
     }
 }
 
@@ -672,19 +666,19 @@ private fun ColumnScope.AnimatorsFace(env: PanelEnv) {
 }
 
 /**
- * DESFOQUE DE MOVIMENTO: liga na camada (e no projeto, se estava desligado lá —
- * o motor só borra com os dois ligados). A composição controla ângulo e fase
- * em graus, além das amostras. O rastro local e o fluxo óptico do vídeo são
- * controles separados.
+ * DESFOQUE DE MOVIMENTO DA CAMADA (F10): só o que é desta camada — liga (e liga o
+ * do projeto, se estava desligado: o motor só borra com os dois ligados), o
+ * comprimento do rastro e o desfoque dentro do vídeo. O obturador, a fase e as
+ * amostras são da composição e moram em Ajustes do projeto › Prévia e render
+ * (o link no fim abre lá).
  */
 @Composable
 private fun ColumnScope.MotionBlurFace(env: PanelEnv) {
     val store = env.store
     val d = store.detail ?: return
     val on = d.motionBlur && store.compMotionBlur
-    var advanced by rememberSaveable { mutableStateOf(false) }
     Column(
-        Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 8.dp, top = 6.dp, end = 12.dp, bottom = 10.dp),
+        Modifier.weight(1f).fillMaxWidth().testTag("motionblur.panel").verticalScroll(rememberScrollState()).padding(start = 8.dp, top = 6.dp, end = 12.dp, bottom = 10.dp),
     ) {
         BlurToggleRow(stringResource(R.string.panel_desfoque_movimento), stringResource(R.string.panel_borra_camada_direcao_ela_move), on) { v ->
             if (v) {
@@ -695,13 +689,6 @@ private fun ColumnScope.MotionBlurFace(env: PanelEnv) {
             }
         }
         if (on) {
-            MotionBlurSetting(env, stringResource(R.string.mb_shutter_angle), store.shutterAngle,
-                "°", 0f, 720f, 1, "motionblur.shutter", store::changeShutterAngle)
-            Text(
-                stringResource(R.string.mb_comp_settings_hint),
-                modifier = Modifier.padding(top = 4.dp, start = 4.dp),
-                style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Note, lineHeight = 16.sp, color = AureaColors.Muted)),
-            )
             // Comprimento do rastro SÓ desta camada (× o obturador do projeto).
             val lengthLabel = stringResource(R.string.la_motion_blur_length)
             val length = store.layerMotionBlurLength * 100f
@@ -714,6 +701,7 @@ private fun ColumnScope.MotionBlurFace(env: PanelEnv) {
                 format = { "${numeroPtBr(it, 0)}%" },
                 selected = false,
                 onSelect = {},
+                modifier = Modifier.testTag("motionblur.length"),
                 onGestureStart = { store.beginGesture("comprimento do desfoque") },
                 onValue = { store.changeLayerMotionBlurLength(it.coerceIn(0f, 400f) / 100f) },
                 onGestureEnd = { store.endGesture() },
@@ -726,73 +714,30 @@ private fun ColumnScope.MotionBlurFace(env: PanelEnv) {
                 modifier = Modifier.padding(top = 4.dp, start = 4.dp),
                 style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Note, lineHeight = 16.sp, color = AureaColors.Muted)),
             )
-            val advancedLabel = stringResource(R.string.mb_advanced)
-            com.aurea.aurea.ui.ds.AdvancedToggle(advanced, 3, { advanced = !advanced },
-                Modifier.heightIn(min = 48.dp).testTag("motionblur.advanced").semantics {
-                    contentDescription = advancedLabel
-                    if (advanced) collapse { advanced = false; true }
-                    else expand { advanced = true; true }
-                })
-            if (advanced) {
-                MotionBlurSetting(env, stringResource(R.string.mb_shutter_phase), store.shutterPhase,
-                    "°", -360f, 360f, 1, "motionblur.phase", store::changeShutterPhase)
-                androidx.compose.material3.TextButton(onClick = store::centerMotionBlurExposure,
-                    modifier = Modifier.heightIn(min = 48.dp).testTag("motionblur.center")) {
-                    Text(stringResource(R.string.mb_center_exposure))
-                }
-                Text(stringResource(R.string.mb_phase_hint), style = AureaType.BodySmall, color = AureaColors.Muted)
-                MotionBlurSetting(env, stringResource(R.string.mb_samples_per_frame), store.motionBlurSamples.toFloat(),
-                    "", 2f, minOf(64, store.motionBlurAdaptiveLimit).toFloat(), 0, "motionblur.samples") {
-                    store.changeMotionBlurSamples(it.roundToInt())
-                }
-                MotionBlurSetting(env, stringResource(R.string.mb_adaptive_limit), store.motionBlurAdaptiveLimit.toFloat(),
-                    "", maxOf(2, store.motionBlurSamples).toFloat(), 256f, 0, "motionblur.adaptive") {
-                    store.changeMotionBlurAdaptiveLimit(it.roundToInt())
-                }
-                Text(stringResource(R.string.mb_quality_hint), style = AureaType.BodySmall, color = AureaColors.Muted)
-                // 0.3.2: motion blur 3D rápido (vetores) × alta qualidade (amostras).
-                val vectorLabel = stringResource(R.string.mb_vector_3d)
-                val vectorHint = stringResource(R.string.mb_vector_3d_hint)
-                Row(
-                    Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(vertical = 6.dp).padding(start = 4.dp)
-                        .testTag("motionblur.vector3d")
-                        .toggleable(value = store.motionBlurVector, role = androidx.compose.ui.semantics.Role.Switch,
-                            onValueChange = store::changeMotionBlurVector)
-                        .semantics(mergeDescendants = true) { contentDescription = "$vectorLabel. $vectorHint" },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(vectorLabel, style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.ChipText, fontWeight = FontWeight.W600, color = AureaColors.Text)))
-                        Text(vectorHint, style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Note, lineHeight = 16.sp, color = AureaColors.Muted)))
-                    }
-                    Spacer(Modifier.width(10.dp))
-                    com.aurea.aurea.ui.ds.AureaToggle(checked = store.motionBlurVector, onCheckedChange = store::changeMotionBlurVector)
-                }
-            }
         }
         if (d.kind == LayerType.Video.kind) {
             Spacer(Modifier.height(8.dp))
             BlurToggleRow(stringResource(R.string.panel_desfoque_movimento_video), stringResource(R.string.panel_borra_mexe_dentro_video), d.vectorBlur) { store.setVectorBlur(d.id, it) }
         }
+        // O obturador da composição (ângulo, fase, amostras): Ajustes do projeto.
+        Spacer(Modifier.height(6.dp))
+        val linkTitle = stringResource(R.string.fn_mb_comp_link)
+        val linkHint = stringResource(R.string.fn_mb_comp_link_desc)
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("motionblur.compSettings")
+                .semantics(mergeDescendants = true) { contentDescription = "$linkTitle. $linkHint" }
+                .tocavel(shrink = 1f) { com.aurea.aurea.editor.ProjectSettingsRequest.openAt(com.aurea.aurea.editor.ProjectSettingsTab.Render) }
+                .padding(vertical = 6.dp).padding(start = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(linkTitle, style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.ChipText, fontWeight = FontWeight.W600, color = AureaColors.Text)))
+                Text(linkHint, style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Note, lineHeight = 16.sp, color = AureaColors.Muted)))
+            }
+            Spacer(Modifier.width(10.dp))
+            CupertinoIcon(CupertinoGlyph.ChevronRight, 14.dp, AureaColors.Muted)
+        }
     }
-}
-
-@Composable
-private fun MotionBlurSetting(env: PanelEnv, label: String, value: Float, unit: String,
-                              min: Float, max: Float, decimals: Int, tag: String, onValue: (Float) -> Unit) {
-    val edit = { env.openKeypad(KeypadRequest(label, value, unit, min, max, decimals, onConfirm = onValue)) }
-    com.aurea.aurea.ui.ds.PropertyRow(
-        label = label, value = value, unitsPerDp = if (decimals == 0) .1f else .5f,
-        min = min, max = max, format = { "${numeroPtBr(it, decimals)}$unit" },
-        selected = false, onSelect = {}, modifier = Modifier.testTag(tag).semantics(mergeDescendants = true) {
-            contentDescription = label
-            stateDescription = "${numeroPtBr(value, decimals)}$unit"
-            onClick { edit(); true }
-        },
-        onGestureStart = { env.store.beginGesture(label) }, onValue = onValue,
-        onGestureEnd = { env.store.endGesture() },
-        onTapValue = edit,
-    )
 }
 
 /** Linha com título, dica e interruptor (desfoque de movimento e opções da câmera). */

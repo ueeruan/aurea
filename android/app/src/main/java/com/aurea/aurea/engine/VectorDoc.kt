@@ -274,7 +274,18 @@ object VParam {
     const val OPACITY = 19
     /** v6: escala Y do repetidor (só com a escala separada). */
     const val REP_SCALE_Y = 20
-    const val COUNT = 21
+    /** Traços animáveis (Dash/Gap 1..3 do After Effects): dashes[0..5]; sem o par, não valem. */
+    const val DASH_1 = 21
+    const val GAP_1 = 22
+    const val DASH_2 = 23
+    const val GAP_2 = 24
+    const val DASH_3 = 25
+    const val GAP_3 = 26
+    const val COUNT = 27
+    /** Pares traço/vão que o painel edita. */
+    const val MAX_DASH_PAIRS = 3
+    /** queryVectorParams: bits 0..23 em [COUNT]/[COUNT+1], 24.. em [COUNT+2]/[COUNT+3] (float exato até 2^24). */
+    const val BITS_PER_FLOAT = 24
 
     /** Operadores de caminho: id do parâmetro `param` do operador `modifier` (vector_modifier_param). */
     const val MOD_BASE = 0x10000

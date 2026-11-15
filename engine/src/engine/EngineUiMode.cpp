@@ -178,6 +178,9 @@ void Engine::place_on_audio_line_locked(Composition& comp, LayerId id) noexcept 
         if (std::find(busy.begin(), busy.end(), t) == busy.end()) { track = t; break; }
     layer->trackId = track ? track : maxTrack + 1;
     layer->magneticTrack = false;
+    // Publish the final track identity with the import. The next timeline
+    // query must not move the clip after an interface has read its layer row.
+    (void)comp.arrange_edit_tracks();
 }
 
 bool Engine::set_cut_transition(u64 outgoing, u64 incoming, u32 type, u32 frames) noexcept {

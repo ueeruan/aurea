@@ -954,7 +954,7 @@ private fun styled(make: () -> TextStyle): ReadOnlyProperty<Any?, TextStyle> = T
 object AureaType {
     /** A base de tudo (15 sp, −0,1, altura 1,35). */
     val Base by styled { TextStyle(
-        fontFamily = FontFamily.Default,
+        fontFamily = com.aurea.aurea.ui.platform.PlatformFeatures.uiFontFamily ?: FontFamily.Default,
         fontSize = 15.sp,
         fontWeight = FontWeight.Normal,
         letterSpacing = aureaTracking(-0.1f),

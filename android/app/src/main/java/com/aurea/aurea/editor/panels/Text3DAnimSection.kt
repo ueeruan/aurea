@@ -1,5 +1,10 @@
 package com.aurea.aurea.editor.panels
 
+import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -107,12 +112,23 @@ internal fun Text3DAnimSection(env: PanelEnv, parts: Boolean = false) {
         onChange = { stagger = it }, onDone = reapply)
 }
 
+/**
+ * 13/11/2026 (pedido do dono: deslizantes do 3D compactos): a régua do AUREA no lugar do
+ * Slider de sistema — rótulo, régua de 52 dp em toda a largura e o valor; o arrasto aplica
+ * ao soltar ([onDone]), como antes.
+ */
 @Composable
 private fun AnimSlider(label: String, value: Float, range: ClosedFloatingPointRange<Float>, shown: String, onChange: (Float) -> Unit, onDone: () -> Unit) {
-    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, modifier = Modifier.width(118.dp), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp)))
-        Slider(value = value, onValueChange = onChange, valueRange = range, onValueChangeFinished = onDone, modifier = Modifier.weight(1f))
-        Spacer(Modifier.width(8.dp))
-        Text(shown, modifier = Modifier.width(52.dp), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
-    }
+    com.aurea.aurea.ui.ds.PropertyRow(
+        label = label, value = value, unitsPerDp = (range.endInclusive - range.start) / 180f,
+        min = range.start, max = range.endInclusive, format = { shown },
+        selected = false, onSelect = {}, onGestureStart = {}, onValue = onChange, onGestureEnd = onDone,
+        onTapValue = {},
+        modifier = Modifier.semantics {
+            contentDescription = label
+            stateDescription = shown
+            progressBarRangeInfo = androidx.compose.ui.semantics.ProgressBarRangeInfo(value.coerceIn(range), range)
+            setProgress { onChange(it.coerceIn(range)); onDone(); true }
+        },
+    )
 }

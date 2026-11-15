@@ -10,6 +10,7 @@
 #include "aurea/text/TextAnimator.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <string>
 
@@ -282,7 +283,20 @@ AUREA_TEST(Presets, TextStylePresetReproducesFieldsAndAnimators) {
     AUREA_CHECK(d.boxMode == s.boxMode && d.box.w == s.box.w && d.box.h == s.box.h && d.autoSize == s.autoSize);
     AUREA_CHECK(d.background == s.background && d.backgroundColor == s.backgroundColor);
     AUREA_CHECK(d.backgroundPadding == s.backgroundPadding && d.backgroundRadius == s.backgroundRadius);
-    AUREA_CHECK(d.shadow == s.shadow && d.shadowColor == s.shadowColor && d.shadowOffset == s.shadowOffset && d.shadowBlur == s.shadowBlur);
+    // D2 (13/11/2026): a sombra antiga do estilo chega como a decoração Sombra
+    // (Borda e sombra): mesma opacidade, deslocamento e suavidade.
+    AUREA_CHECK(s.shadow && !d.shadow);
+    {
+        const EffectInstance* deco = nullptr;
+        for (const EffectInstance& e : lb->effects) if (e.role == kEffectRoleShadow) deco = &e;
+        AUREA_CHECK(deco != nullptr);
+        if (deco && deco->params.size() > 4) {
+            AUREA_CHECK(deco->type == r.e.effects().find_key("aurea.stylize.drop_shadow"));
+            AUREA_CHECK_NEAR(deco->params[1].constant.v[0], 50.0f, 1e-3f);                 // alfa 0,5 → 50 %
+            AUREA_CHECK_NEAR(deco->params[3].constant.v[0], std::hypot(3.0f, 8.0f), 1e-3f);  // distância
+            AUREA_CHECK_NEAR(deco->params[4].constant.v[0], 9.0f, 1e-3f);                  // suavidade
+        }
+    }
     AUREA_CHECK_EQ(d.animators.size(), s.animators.size());
     for (usize i = 0; i < s.animators.size() && i < d.animators.size(); ++i) {
         const TextAnimator& x = s.animators[i];

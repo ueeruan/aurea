@@ -7,6 +7,8 @@
 #include "aurea/Engine.hpp"
 
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 
 using namespace aurea;
 
@@ -220,4 +222,36 @@ AUREA_TEST(OmegaLayerPanel, AudioButtonFollowsHasAnyAudio) {
     gain.set(FrameIndex{0}, 1.0f);
     gain.set(FrameIndex{10}, 0.5f);
     AUREA_CHECK(r.e.query_layer_panel(r.b, 220) & Engine::kLayerPanelGainKeys);
+}
+
+// Regressão do Aurea PC (11/11): a mídia entra como o Java escreve o arquivo,
+// `file:/C:/.../Valorant%202026.mp4` (uma barra só). O vídeo tocava, mas o
+// painel avisava "Mídia não encontrada": o motor procurava um arquivo chamado
+// literalmente "file:/C:/…%20…". O `file:///` e o caminho comum também valem.
+AUREA_TEST(OmegaLayerPanel, FileUriMediaIsFoundAndOnlyMissingWhenTheFileIsGone) {
+    PanelRig r;
+    r.make_video(r.a);
+    const std::filesystem::path file = std::filesystem::temp_directory_path() / "aurea midia uri 50%.mp4";
+    { std::ofstream(file, std::ios::binary) << "x"; }
+    const std::string generic = file.generic_string();
+    std::string encoded;
+    for (char c : generic) {
+        if (c == ' ') encoded += "%20";
+        else if (c == '%') encoded += "%25";
+        else encoded += c;
+    }
+    const std::string lead = generic.front() == '/' ? "" : "/";
+    Asset* asset = r.e.project()->asset(r.L(r.a)->source);
+    AUREA_CHECK(asset != nullptr);
+    for (const std::string& stored : {"file:" + lead + encoded, "file://" + lead + encoded, generic}) {
+        asset->sourcePath = stored;
+        AUREA_CHECK(std::filesystem::equivalent(std::filesystem::u8path(r.e.layer_media_path(r.a)), file));
+        AUREA_CHECK(!(r.e.query_layer_panel(r.a, 60) & Engine::kLayerPanelMissingMedia));
+    }
+    asset->sourcePath = "file:" + lead + encoded;
+    std::filesystem::remove(file);
+    AUREA_CHECK(r.e.query_layer_panel(r.a, 60) & Engine::kLayerPanelMissingMedia);
+    // URI de conteúdo continua sem conferência (não há caminho para olhar).
+    asset->sourcePath = "content://media/external/video/42";
+    AUREA_CHECK(!(r.e.query_layer_panel(r.a, 60) & Engine::kLayerPanelMissingMedia));
 }

@@ -43,6 +43,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -64,6 +65,7 @@ import com.aurea.aurea.ui.ds.ColorPickerFull
 import com.aurea.aurea.ui.ds.KeypadRequest
 import com.aurea.aurea.ui.ds.MenuEntry
 import com.aurea.aurea.ui.ds.NumericKeypadSheet
+import com.aurea.aurea.ui.ds.numeroPtBr
 import com.aurea.aurea.ui.i18n.AppText
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
@@ -95,8 +97,36 @@ private val FpsOptions = listOf(24, 25, 30, 50, 60, 90, 120, 144, 240)
 /** Cores de fundo de um toque; "Outra cor…" abre o seletor. */
 private val Backgrounds = listOf(R.string.sh_bg_black to floatArrayOf(0f, 0f, 0f), R.string.sh_bg_white to floatArrayOf(1f, 1f, 1f))
 
-/** Ângulos do obturador do desfoque de movimento da composição. */
-private val ShutterOptions = listOf(90, 180, 270, 360)
+/**
+ * Funções F10 (13/11/2026): os Ajustes do projeto em abas, um assunto por aba.
+ * Formato (proporção, tamanho, resolução, fps, duração, fundo) · Prévia e render
+ * (qualidade, repetição, tela cheia, diagnóstico e o DESFOQUE DE MOVIMENTO DA
+ * COMPOSIÇÃO: obturador, fase, amostras, limite, vetores 3D) · Edição (interface,
+ * ímã, keyframes, timeline magnética, tímidas, vãos, aparar, marcas) · Importar.
+ */
+internal enum class ProjectSettingsTab(val id: String, val label: Int, val glyph: Char) {
+    Format("format", R.string.fn_ps_tab_format, CupertinoGlyph.Crop),
+    Render("render", R.string.fn_ps_tab_render, CupertinoGlyph.PlayRectangle),
+    Editing("editing", R.string.om_settings_editing, CupertinoGlyph.SliderHorizontal3),
+    Import("import", R.string.om_settings_import, CupertinoGlyph.ArrowDownToLine),
+}
+
+/**
+ * Pedido de fora para abrir os Ajustes numa aba (ex.: o Desfoque de movimento da
+ * camada leva ao obturador da composição em Prévia e render). O EditorScreen
+ * observa [open]; a folha lê e limpa [tab] ao abrir.
+ */
+internal object ProjectSettingsRequest {
+    var open by mutableStateOf(false)
+    var tab by mutableStateOf<ProjectSettingsTab?>(null)
+
+    fun openAt(target: ProjectSettingsTab) {
+        tab = target
+        open = true
+    }
+
+    fun takeTab(): ProjectSettingsTab? = tab?.also { tab = null }
+}
 
 /**
  * O painel de ajustes. Fora de grupo (⚙ da barra do projeto): proporção,
@@ -130,6 +160,10 @@ internal fun ProjectSettingsSheet(store: EditorStore, ui: EditorUi, onDismiss: (
 
     var keypad by remember { mutableStateOf<KeypadRequest?>(null) }
     var pickingBackground by remember { mutableStateOf(false) }
+    var tab by remember { mutableStateOf(ProjectSettingsRequest.takeTab() ?: ProjectSettingsTab.Format) }
+    // Pedido com a folha já aberta (ex.: o link do desfoque da camada): troca de aba.
+    val requested = ProjectSettingsRequest.tab
+    LaunchedEffect(requested) { ProjectSettingsRequest.takeTab()?.let { tab = it } }
 
     // 0.4.5: o conta-gotas da cor de fundo recolhe a tela cheia; o painel também sai da
     // frente da prévia até a cor voltar (o estado dele fica aqui fora do Dialog).
@@ -177,126 +211,132 @@ internal fun ProjectSettingsSheet(store: EditorStore, ui: EditorUi, onDismiss: (
                         onClick = onDismiss, modifier = Modifier.testTag("projectSettings.close"), size = 18.dp,
                     )
                 }
+                SettingsTabs(tab) { tab = it }
                 Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-                    if (!group) {
-                        // Proporção: no formato de cada uma; ✎ = tamanho livre. Os vãos também tocam.
-                        Row(
-                            Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 30.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Aspects.forEach { (label, ratio) ->
-                                AspectBox(label, ratio, on = !free && preset == label) {
-                                    free = false
-                                    if (comp != null && preset != label) applyAspect(store, comp, ratio, shortSide)
-                                }
-                            }
-                            val freeLabel = stringResource(R.string.editor_tamanho_livre)
-                            Box(
-                                Modifier
-                                    .size(40.dp)
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .border(1.5.dp, if (free) AureaColors.Accent else AureaColors.Text, RoundedCornerShape(6.dp))
-                                    .testTag("projectSettings.aspect.free")
-                                    .semantics {
-                                        contentDescription = freeLabel
-                                        selected = free
+                    when (tab) {
+                        ProjectSettingsTab.Render -> RenderTab(store, ui, onDismiss) { keypad = it }
+                        ProjectSettingsTab.Editing -> EditingTab(store, onDismiss)
+                        ProjectSettingsTab.Import -> ImportTab(store, onDismiss)
+                        ProjectSettingsTab.Format -> {
+                            if (!group) {
+                                // Proporção: no formato de cada uma; ✎ = tamanho livre. Os vãos também tocam.
+                                Row(
+                                    Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 30.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Aspects.forEach { (label, ratio) ->
+                                        AspectBox(label, ratio, on = !free && preset == label) {
+                                            free = false
+                                            if (comp != null && preset != label) applyAspect(store, comp, ratio, shortSide)
+                                        }
                                     }
-                                    .tocavel(haptic = true) { free = true },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                CupertinoIcon(CupertinoGlyph.Pencil, 18.dp, if (free) AureaColors.Accent else AureaColors.Text)
-                            }
-                        }
-                    }
-
-                    if ((free || group) && comp != null) {
-                        SettingLine(stringResource(if (group) R.string.om_gs_size else R.string.editor_tamanho)) {
-                            Row(Modifier.width(200.dp), verticalAlignment = Alignment.CenterVertically) {
-                                SizeBox("$w", Modifier.weight(1f).testTag(if (group) "groupSettings.size.w" else "projectSettings.size.w")) {
-                                    keypad = KeypadRequest(widthLabel, w.toFloat(), "px", 16f, 8192f, 0) { v ->
-                                        setSize(store, comp, v.roundToInt(), h)
-                                    }
-                                }
-                                Text("×", modifier = Modifier.padding(horizontal = 8.dp), style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Muted)))
-                                SizeBox("$h", Modifier.weight(1f).testTag(if (group) "groupSettings.size.h" else "projectSettings.size.h")) {
-                                    keypad = KeypadRequest(heightLabel, h.toFloat(), "px", 16f, 8192f, 0) { v ->
-                                        setSize(store, comp, w, v.roundToInt())
+                                    val freeLabel = stringResource(R.string.editor_tamanho_livre)
+                                    Box(
+                                        Modifier
+                                            .size(40.dp)
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .border(1.5.dp, if (free) AureaColors.Accent else AureaColors.Text, RoundedCornerShape(6.dp))
+                                            .testTag("projectSettings.aspect.free")
+                                            .semantics {
+                                                contentDescription = freeLabel
+                                                selected = free
+                                            }
+                                            .tocavel(haptic = true) { free = true },
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        CupertinoIcon(CupertinoGlyph.Pencil, 18.dp, if (free) AureaColors.Accent else AureaColors.Text)
                                     }
                                 }
                             }
-                        }
-                    }
 
-                    if (!group) {
-                        SettingLine(stringResource(R.string.editor_resolucao)) {
-                            AureaDropdown(
-                                Resolutions.firstOrNull { it.first == shortSide }?.second ?: "${shortSide}p",
-                                tag = "projectSettings.resolution",
-                                contentDescription = stringResource(R.string.editor_resolucao),
-                                entries = Resolutions.map { (short, label) ->
-                                    // Bug 6b (0.3.5): ids das opções (= iOS), para o teste de interface.
-                                    MenuEntry.Item(label, selected = short == shortSide, tag = "projectSettings.resolution.$short") {
-                                        val c = comp ?: return@Item
-                                        val (nw, nh) = sizeFor(short, if (aspect > 0f) aspect else 16f / 9f)
-                                        if (c.fits(nw, nh)) store.setCompositionSize(nw, nh)
-                                        else store.showToast(capMessage(store, c))
+                            if ((free || group) && comp != null) {
+                                SettingLine(stringResource(if (group) R.string.om_gs_size else R.string.editor_tamanho)) {
+                                    Row(Modifier.width(200.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        SizeBox("$w", Modifier.weight(1f).testTag(if (group) "groupSettings.size.w" else "projectSettings.size.w")) {
+                                            keypad = KeypadRequest(widthLabel, w.toFloat(), "px", 16f, 8192f, 0) { v ->
+                                                setSize(store, comp, v.roundToInt(), h)
+                                            }
+                                        }
+                                        Text("×", modifier = Modifier.padding(horizontal = 8.dp), style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Muted)))
+                                        SizeBox("$h", Modifier.weight(1f).testTag(if (group) "groupSettings.size.h" else "projectSettings.size.h")) {
+                                            keypad = KeypadRequest(heightLabel, h.toFloat(), "px", 16f, 8192f, 0) { v ->
+                                                setSize(store, comp, w, v.roundToInt())
+                                            }
+                                        }
                                     }
-                                },
-                            )
-                        }
-
-                        SettingLine(stringResource(R.string.editor_quadros_segundo)) {
-                            val rounded = fpsValue.roundToInt()
-                            val label = if (abs(fpsValue - rounded) < 0.01) "$rounded fps"
-                            else String.format(Locale.ROOT, stringResource(R.string.editor_2f_fps), fpsValue).replace('.', ',')
-                            AureaDropdown(
-                                label,
-                                tag = "projectSettings.fps",
-                                contentDescription = stringResource(R.string.editor_quadros_segundo),
-                                entries = FpsOptions.map { f ->
-                                    // Omega 0.3.4: ids das opções (= iOS), para o teste de interface.
-                                    MenuEntry.Item("$f fps", selected = abs(fpsValue - f) < 0.01, tag = "projectSettings.fps.$f") { store.setCompositionFps(f.toDouble()) }
-                                } + MenuEntry.Item(customFpsLabel, selected = FpsOptions.none { abs(fpsValue - it) < 0.01 }, tag = "projectSettings.fps.custom") {
-                                    // fps livre: o teclado limita a 1–240 e aceita decimais (29,97).
-                                    keypad = KeypadRequest(customFpsTitle, fpsValue.toFloat(), "fps", 1f, 240f, 3) { v ->
-                                        store.setCompositionFps(v.toDouble())
-                                    }
-                                },
-                            )
-                        }
-
-                        // Extra do AUREA (sem par na referência): a duração da composição.
-                        SettingLine(durationLabel) {
-                            val seconds = (comp?.durationFrames ?: p.durationFrames) / fpsValue
-                            SizeBox(String.format(Locale.getDefault(), "%.3f s", seconds), Modifier.width(180.dp).testTag("projectSettings.duration")) {
-                                keypad = KeypadRequest(durationLabel, seconds.toFloat(), "s", (1.0 / fpsValue).toFloat(), 86400f, 3) { value ->
-                                    store.setCompositionDuration(max(1, (value * fpsValue).roundToInt()))
                                 }
+                            }
+
+                            if (!group) {
+                                SettingLine(stringResource(R.string.editor_resolucao)) {
+                                    AureaDropdown(
+                                        Resolutions.firstOrNull { it.first == shortSide }?.second ?: "${shortSide}p",
+                                        tag = "projectSettings.resolution",
+                                        contentDescription = stringResource(R.string.editor_resolucao),
+                                        entries = Resolutions.map { (short, label) ->
+                                            // Bug 6b (0.3.5): ids das opções (= iOS), para o teste de interface.
+                                            MenuEntry.Item(label, selected = short == shortSide, tag = "projectSettings.resolution.$short") {
+                                                val c = comp ?: return@Item
+                                                val (nw, nh) = sizeFor(short, if (aspect > 0f) aspect else 16f / 9f)
+                                                if (c.fits(nw, nh)) store.setCompositionSize(nw, nh)
+                                                else store.showToast(capMessage(store, c))
+                                            }
+                                        },
+                                    )
+                                }
+
+                                SettingLine(stringResource(R.string.editor_quadros_segundo)) {
+                                    val rounded = fpsValue.roundToInt()
+                                    val label = if (abs(fpsValue - rounded) < 0.01) "$rounded fps"
+                                    else String.format(Locale.ROOT, stringResource(R.string.editor_2f_fps), fpsValue).replace('.', ',')
+                                    AureaDropdown(
+                                        label,
+                                        tag = "projectSettings.fps",
+                                        contentDescription = stringResource(R.string.editor_quadros_segundo),
+                                        entries = FpsOptions.map { f ->
+                                            // Omega 0.3.4: ids das opções (= iOS), para o teste de interface.
+                                            MenuEntry.Item("$f fps", selected = abs(fpsValue - f) < 0.01, tag = "projectSettings.fps.$f") { store.setCompositionFps(f.toDouble()) }
+                                        } + MenuEntry.Item(customFpsLabel, selected = FpsOptions.none { abs(fpsValue - it) < 0.01 }, tag = "projectSettings.fps.custom") {
+                                            // fps livre: o teclado limita a 1–240 e aceita decimais (29,97).
+                                            keypad = KeypadRequest(customFpsTitle, fpsValue.toFloat(), "fps", 1f, 240f, 3) { v ->
+                                                store.setCompositionFps(v.toDouble())
+                                            }
+                                        },
+                                    )
+                                }
+
+                                // Extra do AUREA (sem par na referência): a duração da composição.
+                                SettingLine(durationLabel) {
+                                    val seconds = (comp?.durationFrames ?: p.durationFrames) / fpsValue
+                                    SizeBox(String.format(Locale.getDefault(), "%.3f s", seconds), Modifier.width(180.dp).testTag("projectSettings.duration")) {
+                                        keypad = KeypadRequest(durationLabel, seconds.toFloat(), "s", (1.0 / fpsValue).toFloat(), 86400f, 3) { value ->
+                                            store.setCompositionDuration(max(1, (value * fpsValue).roundToInt()))
+                                        }
+                                    }
+                                }
+                            }
+
+                            SettingLine(stringResource(R.string.editor_plano_fundo)) {
+                                AureaDropdown(
+                                    bgName,
+                                    tag = if (group) "groupSettings.background" else "projectSettings.background",
+                                    contentDescription = stringResource(R.string.editor_plano_fundo),
+                                    swatch = if (bgTransparent) Color.Transparent else Color(bg[0], bg[1], bg[2]),
+                                    checkerSwatch = bgTransparent,
+                                    entries = Backgrounds.map { (res, c) ->
+                                        val name = stringResource(res)
+                                        MenuEntry.Item(name, selected = name == bgName) { store.setCompositionBackground(c[0], c[1], c[2], 1f) }
+                                    } + MenuEntry.Item(stringResource(R.string.sh_bg_transparent), selected = bgTransparent) {
+                                        // Sem fundo: o motor guarda a cor e exporta PNG/GIF com alfa.
+                                        store.setCompositionBackground(bg[0], bg[1], bg[2], 0f)
+                                    } + MenuEntry.Item(stringResource(R.string.editor_outra_cor), selected = bgName == stringResource(R.string.editor_personalizada)) {
+                                        if (comp != null) pickingBackground = true
+                                    },
+                                )
                             }
                         }
                     }
-
-                    SettingLine(stringResource(R.string.editor_plano_fundo)) {
-                        AureaDropdown(
-                            bgName,
-                            tag = if (group) "groupSettings.background" else "projectSettings.background",
-                            contentDescription = stringResource(R.string.editor_plano_fundo),
-                            swatch = if (bgTransparent) Color.Transparent else Color(bg[0], bg[1], bg[2]),
-                            checkerSwatch = bgTransparent,
-                            entries = Backgrounds.map { (res, c) ->
-                                val name = stringResource(res)
-                                MenuEntry.Item(name, selected = name == bgName) { store.setCompositionBackground(c[0], c[1], c[2], 1f) }
-                            } + MenuEntry.Item(stringResource(R.string.sh_bg_transparent), selected = bgTransparent) {
-                                // Sem fundo: o motor guarda a cor e exporta PNG/GIF com alfa.
-                                store.setCompositionBackground(bg[0], bg[1], bg[2], 0f)
-                            } + MenuEntry.Item(stringResource(R.string.editor_outra_cor), selected = bgName == stringResource(R.string.editor_personalizada)) {
-                                if (comp != null) pickingBackground = true
-                            },
-                        )
-                    }
-
-                    MoreInAurea(store, ui, onDismiss)
                     Spacer(Modifier.height(16.dp))
                 }
             }
@@ -326,28 +366,57 @@ internal fun ProjectSettingsSheet(store: EditorStore, ui: EditorUi, onDismiss: (
 }
 
 /**
- * "Mais do AUREA": o que o menu da engrenagem tinha e a referência não tem,
- * em linhas compactas de 40 dp — interface, prévia (qualidade, repetição, tela
- * cheia, desfoque da composição, diagnóstico), edição (ímã, keyframes de todas
- * as camadas, timeline magnética, remover vãos, aparar no cabeçote), marcas e
- * importar do After Effects.
+ * A fileira de abas dos Ajustes (ícone + nome, aceso no destaque). Ids
+ * `projectSettings.tab.<id>`.
  */
 @Composable
-private fun MoreInAurea(store: EditorStore, ui: EditorUi, onDismiss: () -> Unit) {
-    fun act(block: () -> Unit): () -> Unit = {
-        onDismiss()
-        block()
+private fun SettingsTabs(selected: ProjectSettingsTab, onSelect: (ProjectSettingsTab) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp).testTag("projectSettings.tabs"),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        ProjectSettingsTab.entries.forEach { t ->
+            val on = t == selected
+            val ink = if (on) AureaColors.Accent else AureaColors.Muted
+            val name = stringResource(t.label)
+            Column(
+                Modifier
+                    .weight(1f)
+                    .heightIn(min = 52.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (on) AureaColors.AccentDim else Color.Transparent)
+                    .testTag("projectSettings.tab.${t.id}")
+                    .semantics {
+                        role = Role.Tab
+                        this.selected = on
+                        contentDescription = name
+                    }
+                    .tocavel(shrink = 1f, haptic = true) { onSelect(t) }
+                    .padding(vertical = 6.dp, horizontal = 2.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                CupertinoIcon(t.glyph, 18.dp, ink)
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    name,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, fontWeight = if (on) FontWeight.W600 else FontWeight.W400, color = ink)),
+                )
+            }
+        }
     }
-    Box(Modifier.padding(top = 12.dp).fillMaxWidth().height(1.dp).background(AureaColors.Border))
-    MoreHeader(stringResource(R.string.om_settings_more), tag = "projectSettings.more")
+    Box(Modifier.fillMaxWidth().height(1.dp).background(AureaColors.Border))
+}
 
-    // Interface do projeto (0.2.5): Composição ou Edição, trocável a qualquer momento.
-    Column(Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 4.dp, bottom = 4.dp)) {
-        Text(stringResource(R.string.ui_mode_label), style = AureaType.of(12f, FontWeight.W600, color = AureaColors.Muted))
-        Spacer(Modifier.height(8.dp))
-        com.aurea.aurea.home.UiModeChoice(store.uiMode) { store.setUiMode(it) }
-    }
-
+/**
+ * Aba Prévia e render: qualidade da prévia, repetição, tela cheia, diagnóstico e
+ * o desfoque de movimento DA COMPOSIÇÃO (F10: saiu do painel da camada; a camada
+ * só liga o dela, com o rastro e o desfoque do vídeo).
+ */
+@Composable
+private fun RenderTab(store: EditorStore, ui: EditorUi, onDismiss: () -> Unit, openKeypad: (KeypadRequest) -> Unit) {
     MoreSubheader(stringResource(R.string.om_settings_preview))
     // Qualidade da prévia (D3): não muda a exportação.
     PreviewQualityLine(store)
@@ -355,27 +424,90 @@ private fun MoreInAurea(store: EditorStore, ui: EditorUi, onDismiss: () -> Unit)
     MoreAction(
         stringResource(if (ui.fullscreen) R.string.editor_sair_tela_cheia else R.string.editor_tela_cheia),
         "projectSettings.more.fullscreen",
-        act { ui.fullscreen = !ui.fullscreen },
+        { onDismiss(); ui.fullscreen = !ui.fullscreen },
     )
-    MoreToggle(
-        stringResource(R.string.editor_desfoque_movimento_composicao), store.compMotionBlur, "projectSettings.more.motionBlur",
-        detail = stringResource(R.string.editor_camadas_desfoque_movimento_so_borram_isto),
-    ) { store.setCompositionMotionBlur(!store.compMotionBlur) }
-    if (store.compMotionBlur) {
-        val shutter = store.shutterAngle.roundToInt()
-        SettingLine(stringResource(R.string.sh_menu_shutter, shutter)) {
-            AureaDropdown(
-                "$shutter°",
-                tag = "projectSettings.more.shutter",
-                contentDescription = stringResource(R.string.sh_menu_shutter, shutter),
-                entries = ShutterOptions.map { a -> MenuEntry.Item("$a°", selected = a == shutter) { store.changeShutterAngle(a.toFloat()) } },
-            )
-        }
-    }
     MoreToggle(
         stringResource(R.string.editor_diagnostico_tela), store.hudVisible, "projectSettings.more.hud",
         detail = stringResource(R.string.editor_quadros_segundo_tempos_gpu_memoria_decodificador),
     ) { store.toggleHud() }
+
+    MoreSubheader(stringResource(R.string.panel_desfoque_movimento))
+    MoreToggle(
+        stringResource(R.string.editor_desfoque_movimento_composicao), store.compMotionBlur, "projectSettings.more.motionBlur",
+        detail = stringResource(R.string.editor_camadas_desfoque_movimento_so_borram_isto),
+    ) { store.setCompositionMotionBlur(!store.compMotionBlur) }
+    if (store.compMotionBlur) CompositionMotionBlur(store, openKeypad)
+}
+
+/**
+ * O desfoque de movimento da composição, numa lista só (sem "Avançado"): ângulo e
+ * fase do obturador em graus, centralizar a exposição, amostras por quadro, limite
+ * adaptativo e o desfoque 3D por vetores. Ids `motionblur.*` (os de antes).
+ */
+@Composable
+private fun CompositionMotionBlur(store: EditorStore, openKeypad: (KeypadRequest) -> Unit) {
+    val muted = AureaType.Base.merge(TextStyle(fontSize = 11.sp, lineHeight = 15.sp, color = AureaColors.Muted))
+    Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
+        Text(stringResource(R.string.mb_comp_settings_hint), style = muted, modifier = Modifier.padding(start = 4.dp, bottom = 2.dp))
+        SettingNumber(store, stringResource(R.string.mb_shutter_angle), store.shutterAngle, "°", 0f, 720f, 1, "motionblur.shutter", openKeypad, store::changeShutterAngle)
+        SettingNumber(store, stringResource(R.string.mb_shutter_phase), store.shutterPhase, "°", -360f, 360f, 1, "motionblur.phase", openKeypad, store::changeShutterPhase)
+        androidx.compose.material3.TextButton(
+            onClick = store::centerMotionBlurExposure,
+            modifier = Modifier.heightIn(min = 48.dp).testTag("motionblur.center"),
+        ) { Text(stringResource(R.string.mb_center_exposure)) }
+        Text(stringResource(R.string.mb_phase_hint), style = muted, modifier = Modifier.padding(start = 4.dp))
+        SettingNumber(store, stringResource(R.string.mb_samples_per_frame), store.motionBlurSamples.toFloat(), "", 2f,
+            minOf(64, store.motionBlurAdaptiveLimit).toFloat(), 0, "motionblur.samples", openKeypad) { store.changeMotionBlurSamples(it.roundToInt()) }
+        SettingNumber(store, stringResource(R.string.mb_adaptive_limit), store.motionBlurAdaptiveLimit.toFloat(), "",
+            maxOf(2, store.motionBlurSamples).toFloat(), 256f, 0, "motionblur.adaptive", openKeypad) { store.changeMotionBlurAdaptiveLimit(it.roundToInt()) }
+        Text(stringResource(R.string.mb_quality_hint), style = muted, modifier = Modifier.padding(start = 4.dp))
+    }
+    // 0.3.2: motion blur 3D rápido (vetores) × alta qualidade (amostras).
+    MoreToggle(
+        stringResource(R.string.mb_vector_3d), store.motionBlurVector, "motionblur.vector3d",
+        detail = stringResource(R.string.mb_vector_3d_hint),
+    ) { store.changeMotionBlurVector(!store.motionBlurVector) }
+}
+
+/**
+ * O controle numérico dos Ajustes: a régua do AUREA (arrastar = um passo de
+ * desfazer) e a caixa de valor (tocar = teclado com mínimo e máximo). O leitor de
+ * tela lê o valor e o toque duplo abre o teclado.
+ */
+@Composable
+private fun SettingNumber(
+    store: EditorStore, label: String, value: Float, unit: String, min: Float, max: Float, decimals: Int,
+    tag: String, openKeypad: (KeypadRequest) -> Unit, onValue: (Float) -> Unit,
+) {
+    val edit = { openKeypad(KeypadRequest(label, value, unit, min, max, decimals, onConfirm = onValue)) }
+    com.aurea.aurea.ui.ds.PropertyRow(
+        label = label, value = value, unitsPerDp = if (decimals == 0) .1f else .5f,
+        min = min, max = max, format = { "${numeroPtBr(it, decimals)}$unit" },
+        selected = false, onSelect = {}, modifier = Modifier.testTag(tag).semantics(mergeDescendants = true) {
+            contentDescription = label
+            stateDescription = "${numeroPtBr(value, decimals)}$unit"
+            onClick { edit(); true }
+        },
+        onGestureStart = { store.beginGesture(label) },
+        onValue = { onValue(if (decimals == 0) it.roundToInt().toFloat() else it) },
+        onGestureEnd = { store.endGesture() },
+        onTapValue = edit,
+    )
+}
+
+/** Aba Edição: interface do projeto, ímã, keyframes, timeline magnética, tímidas, vãos, aparar e as marcas. */
+@Composable
+private fun EditingTab(store: EditorStore, onDismiss: () -> Unit) {
+    fun act(block: () -> Unit): () -> Unit = {
+        onDismiss()
+        block()
+    }
+    // Interface do projeto (0.2.5): Composição ou Edição, trocável a qualquer momento.
+    Column(Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 10.dp, bottom = 4.dp)) {
+        Text(stringResource(R.string.ui_mode_label), style = AureaType.of(12f, FontWeight.W600, color = AureaColors.Muted))
+        Spacer(Modifier.height(8.dp))
+        com.aurea.aurea.home.UiModeChoice(store.uiMode) { store.setUiMode(it) }
+    }
 
     MoreSubheader(stringResource(R.string.om_settings_editing))
     MoreToggle(stringResource(R.string.i18n_snapping), store.snapping, "projectSettings.more.snapping") { store.snapping = !store.snapping }
@@ -387,6 +519,11 @@ private fun MoreInAurea(store: EditorStore, ui: EditorUi, onDismiss: () -> Unit)
         stringResource(R.string.editor_timeline_magnetica_modo_edicao), store.editMode, "projectSettings.more.magnetic",
         detail = stringResource(R.string.editor_aparar_empurra_camadas_seguintes_excluir_fecha),
     ) { store.toggleEditMode() }
+    // Funções (13/11/2026): "Ocultar camadas tímidas" é da composição; saiu do ⋮ da camada.
+    MoreToggle(
+        stringResource(R.string.ae_comp_hide_shy), store.hideShy, "projectSettings.more.hideShy",
+        detail = stringResource(R.string.ae_comp_hide_shy_hint),
+    ) { store.changeHideShy(!store.hideShy) }
     MoreAction(stringResource(R.string.editor_remover_espacos_vazios), "projectSettings.more.removeGaps", act { store.removeGaps() })
     MoreAction(
         stringResource(R.string.editor_aparar_projeto_cabecote), "projectSettings.more.trimProject",
@@ -399,15 +536,18 @@ private fun MoreInAurea(store: EditorStore, ui: EditorUi, onDismiss: () -> Unit)
     MoreToggle(stringResource(R.string.editor_marcar_ou_desmarcar_este_instante), marked, "projectSettings.more.marker") { store.toggleMarker() }
     MoreAction(stringResource(R.string.marker_edit), "projectSettings.more.editMarker", if (marked) act { store.editMarkerAtPlayhead() } else null)
     MoreAction(stringResource(R.string.editor_ir_proxima_marca), "projectSettings.more.nextMarker", if (store.markers.size > 0) act { store.seekToNextMarker() } else null)
+}
 
+/** Aba Importar: o projeto do After Effects (como camada nova ou na camada escolhida). */
+@Composable
+private fun ImportTab(store: EditorStore, onDismiss: () -> Unit) {
     MoreSubheader(stringResource(R.string.om_settings_import))
     MoreAction(
         stringResource(R.string.ae_import_menu), "menu.aeImport",
-        act { store.requestAeImport() },
+        { onDismiss(); store.requestAeImport() },
         detail = stringResource(if (store.primary != null) R.string.ae_import_layer_detail else R.string.ae_import_new_layer_detail),
     )
 }
-
 /** Qualidade da prévia (Auto · Cheia · 1/2 · 1/4 · 1/8); segurar não precisa: o HUD tem linha própria. */
 @Composable
 private fun PreviewQualityLine(store: EditorStore) {
@@ -440,15 +580,6 @@ private fun PreviewQualityLine(store: EditorStore) {
             ),
         )
     }
-}
-
-@Composable
-private fun MoreHeader(title: String, tag: String) {
-    Text(
-        title,
-        style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Text)),
-        modifier = Modifier.testTag(tag).padding(start = 18.dp, end = 18.dp, top = 12.dp, bottom = 2.dp),
-    )
 }
 
 @Composable

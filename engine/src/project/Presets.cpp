@@ -432,6 +432,15 @@ void write_animators(json::Writer& w, const Preset& p) {
         w.key("fillSaturation").value(a.fillSaturation);
         w.key("fillBrightness").value(a.fillBrightness);
         w.key("fillOpacity").value(a.fillOpacity);
+        w.key("strokeHue").value(a.strokeHue);
+        w.key("strokeSaturation").value(a.strokeSaturation);
+        w.key("strokeBrightness").value(a.strokeBrightness);
+        w.key("strokeOpacity").value(a.strokeOpacity);
+        w.key("charValue").value(a.charValue);
+        w.key("charRange").value(static_cast<u32>(a.charRange));
+        w.key("trackingType").value(static_cast<u32>(a.trackingType));
+        w.key("charAlign").value(static_cast<u32>(a.charAlign));
+        w.key("lineAnchor").value(a.lineAnchor);
         w.key("cursor").value(static_cast<u32>(a.cursor));
         w.key("cursorBlink").value(a.cursorBlink);
         w.key("charset").value(static_cast<u32>(a.charset));
@@ -572,6 +581,16 @@ void write_caption_body(json::Writer& w, const text::CaptionOptions& o, bool rem
     w.key("box").value(o.box);
     write_vec4(w, "boxColor", o.boxColor);
     w.key("shadow").value(o.shadow);
+    // 0.5.3: a janela "Criar legendas" e a aparência nova (texto e caixa).
+    w.key("minDurationSec").value(o.minDurationSec);
+    w.key("gapFrames").value(o.gapFrames);
+    w.key("breakOnSentence").value(o.breakOnSentence);
+    w.key("align").value(o.align);
+    w.key("lineSpacing").value(o.lineSpacing);
+    w.key("boxPadding").value(o.boxPadding);
+    w.key("boxRadius").value(o.boxRadius);
+    write_vec4(w, "shadowColor", o.shadowColor);
+    w.key("shadowBlur").value(o.shadowBlur);
     w.end_object();
 }
 
@@ -750,7 +769,7 @@ bool read_animators(Reader& r, const json::Value& root, Preset& p) {
                 a.moreSelectors.push_back(std::move(s));
             }
         }
-        a.props = r.u(ao, "props", 0, 0x3FFFF);
+        a.props = r.u(ao, "props", 0, kTextPropMask);
         a.position = r.vec3(ao, "position", a.position);
         a.scale = r.vec2(ao, "scale", a.scale);
         a.rotation = r.vec3(ao, "rotation", a.rotation);
@@ -773,6 +792,15 @@ bool read_animators(Reader& r, const json::Value& root, Preset& p) {
         a.fillSaturation = r.f(ao, "fillSaturation", 0.0f);
         a.fillBrightness = r.f(ao, "fillBrightness", 0.0f);
         a.fillOpacity = r.f(ao, "fillOpacity", 100.0f, 0.0, 100.0);
+        a.strokeHue = r.f(ao, "strokeHue", 0.0f);
+        a.strokeSaturation = r.f(ao, "strokeSaturation", 0.0f, -100.0, 100.0);
+        a.strokeBrightness = r.f(ao, "strokeBrightness", 0.0f, -100.0, 100.0);
+        a.strokeOpacity = r.f(ao, "strokeOpacity", 100.0f, 0.0, 100.0);
+        a.charValue = std::round(r.f(ao, "charValue", 0.0f, 0.0, 1114111.0));
+        a.charRange = static_cast<u8>(r.u(ao, "charRange", 0, 1));
+        a.trackingType = static_cast<u8>(r.u(ao, "trackingType", 2, 2));
+        a.charAlign = static_cast<u8>(r.u(ao, "charAlign", 3, 3));
+        a.lineAnchor = r.f(ao, "lineAnchor", 0.0f, -1000.0, 1000.0);
         a.cursor = static_cast<u8>(r.u(ao, "cursor", 0, 255));
         a.cursorBlink = r.b(ao, "cursorBlink", false);
         a.charset = static_cast<u8>(r.u(ao, "charset", 0, 255));
@@ -1022,6 +1050,16 @@ bool read_caption_body(Reader& r, const json::Value* c, text::CaptionOptions& ou
     o.box = r.b(*c, "box", false);
     o.boxColor = r.vec4(*c, "boxColor", o.boxColor, 0.0, 1.0);
     o.shadow = r.b(*c, "shadow", false);
+    // 0.5.3: ausentes num preset antigo = os padrões (o que o motor fazia).
+    o.minDurationSec = r.f(*c, "minDurationSec", o.minDurationSec, 0.1, 10.0);
+    o.gapFrames = r.u(*c, "gapFrames", o.gapFrames, 600);
+    o.breakOnSentence = r.b(*c, "breakOnSentence", o.breakOnSentence);
+    o.align = r.u(*c, "align", o.align, 2);
+    o.lineSpacing = r.f(*c, "lineSpacing", o.lineSpacing, 0.6, 3.0);
+    o.boxPadding = r.f(*c, "boxPadding", o.boxPadding, 0.0, 2.0);
+    o.boxRadius = r.f(*c, "boxRadius", o.boxRadius, 0.0, 2.0);
+    o.shadowColor = r.vec4(*c, "shadowColor", o.shadowColor, 0.0, 1.0);
+    o.shadowBlur = r.f(*c, "shadowBlur", o.shadowBlur, 0.0, 1.0);
     if (!r.ok()) return false;
     out = o;
     removeFillers = rf;

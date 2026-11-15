@@ -3,7 +3,7 @@
 <resources>
     <string name="fx_name_headbop">Headbop</string>
     <string name="fx_desc_headbop">The person in the photo or video bobs their head and body to the beat</string>
-    <string name="headbop_note">Analyze the layer to find the head and shoulders. With no person, the whole frame bobs.</string>
+    <string name="headbop_note">Analyze the person to map visible joints. The body follows the beat with articulated arms and planted feet.</string>
     <string name="headbop_analyze">Analyze</string>
     <string name="headbop_reanalyze">Reanalyze</string>
     <string name="headbop_analyzing">Analyzing the person and the beat…</string>

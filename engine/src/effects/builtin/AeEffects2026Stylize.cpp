@@ -240,7 +240,10 @@ public:
     }
     static f32 scale_of(const EffectEval& e) noexcept { return 1.0f + clampf(e.f(kDistance), 0.0f, 1000.0f, 10.0f) / 50.0f; }
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin, LayerImage& out) const override {
-        const Vec2 L = layer_point(e, input, kLight);
+        const Vec2 size = layer_size(e, input);
+        const Vec2 relative = e.p2(kLight);
+        const Vec2 L{clampf(relative.x, -10.f, 10.f, .3f) * size.x,
+                     clampf(relative.y, -10.f, 10.f, .2f) * size.y};
         const f32 k = scale_of(e);
         const f32 soft = clampf(e.f(kSoftness), 0.0f, 500.0f, 0.0f);
         Rect region = input.region;

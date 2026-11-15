@@ -1,5 +1,10 @@
 package com.aurea.aurea.editor
 
+import com.aurea.aurea.editor.panels.EditorPanel
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import com.aurea.aurea.editor.panels.TransformTab
+import com.aurea.aurea.editor.panels.PanelRequests
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutLinearInEasing
@@ -123,9 +128,9 @@ private fun parentOf(rows: List<LayerRow>, row: LayerRow): Long = rows.getOrNull
 /**
  * Fundo da barra da camada (A9). ‹ desseleciona; o nome edita ali mesmo (com ✕
  * de apagar); o vínculo de pai some em camada de áudio; a lixeira apaga sem
- * perguntar (um desfazer); o ⋮ abre o menu da camada ancorado nele. 3D e
- * desfoque de movimento ficam na barra (0.3.3) e também no ⋮; duplicar, no
- * Copiar e colar.
+ * perguntar (um desfazer); o ⋮ abre o menu da camada ancorado nele (só ações
+ * da camada, Funções 13/11/2026). 3D (alterna) e desfoque de movimento (abre a
+ * função; segurar alterna) ficam na barra.
  */
 @Composable
 internal fun LayerTopBar(store: EditorStore, ui: EditorUi, layerId: Long) {
@@ -183,10 +188,21 @@ internal fun LayerTopBar(store: EditorStore, ui: EditorUi, layerId: Long) {
                 size = 20.dp, height = ShellDims.TopBar,
                 tint = if (threeD) AureaColors.Accent else if (h.locked) AureaColors.Disabled else AureaColors.Text,
             )
+            // Funções (13/11/2026, decisão 1 do dono): o Desfoque de movimento é um botão
+            // daqui de cima. Tocar abre a função (liga, rastro, vídeo); segurar alterna
+            // direto, como o atalho de antes. Aceso em destaque quando ligado.
+            val toggleLabel = stringResource(R.string.fn_motion_blur_toggle)
             ChromeButton(
                 CupertinoGlyph.MotionBlur, stringResource(R.string.editor_desfoque_movimento),
-                onClick = if (!h.locked) ({ store.setLayerMotionBlur(h.id, !motionBlur) }) else null,
-                modifier = Modifier.testTag("trial.layer.motionBlur").semantics { stateDescription = if (motionBlur) onLabel else offLabel },
+                onClick = if (!h.locked) ({
+                    PanelRequests.transformTab = TransformTab.Desfoque
+                    openPanel(store, ui, EditorPanel.Transform)
+                }) else null,
+                onLongClick = if (!h.locked) ({ store.setLayerMotionBlur(h.id, !motionBlur) }) else null,
+                modifier = Modifier.testTag("trial.layer.motionBlur").semantics {
+                    stateDescription = if (motionBlur) onLabel else offLabel
+                    customActions = listOf(CustomAccessibilityAction(toggleLabel) { store.setLayerMotionBlur(h.id, !motionBlur); true })
+                },
                 size = 20.dp, height = ShellDims.TopBar,
                 tint = if (motionBlur) AureaColors.Accent else if (h.locked) AureaColors.Disabled else AureaColors.Text,
             )
@@ -465,9 +481,9 @@ internal fun ProjectTopBar(store: EditorStore, ui: EditorUi) {
                     onRename = { store.renameProject(it) },
                 )
             }
-            // 0.4.6: o assistente de IA (OpenRouter, modelos gratuitos) que age no projeto.
+            // AureaMCP (antes: o assistente de IA 0.4.6, que volta com AureaMcpFlags.legacyChat).
             ChromeButton(
-                CupertinoGlyph.Sparkles, stringResource(R.string.ai_open),
+                CupertinoGlyph.Sparkles, stringResource(if (com.aurea.aurea.mcp.AureaMcpFlags.legacyChat) R.string.ai_open else R.string.mcp_title),
                 onClick = { if (store.playing) store.pause(); ui.assistant = true },
                 modifier = Modifier.testTag("editor.topbar.assistant"), size = 20.dp, height = ShellDims.TopBar,
             )

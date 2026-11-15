@@ -57,6 +57,8 @@ internal object PodLayout {
     const val LAYER_OFF_OFFSET = 60       // i32 deslocamento do conteúdo
     /** u32 A LINHA da timeline (`Layer::trackId`): mesma linha = mesma fileira. */
     const val LAYER_OFF_TRACK_ID = 64
+    /** u32 `reserved0`; nas linhas de dentro de um grupo (queryGroupLayers) o bit 0 = editável no lugar. */
+    const val LAYER_OFF_RESERVED0 = 68
 
     /** Bits de `LayerRow::flags`, na ordem definida em BridgePods.hpp. */
     const val FLAG_VISIBLE = 1 shl 0
@@ -81,6 +83,11 @@ internal object PodLayout {
     const val FLAG_SHY = 1 shl 16
     /** Preservar transparência (o T do AE): pinta só onde a pilha abaixo tem alfa. */
     const val FLAG_PRESERVE_TRANSPARENCY = 1 shl 17
+    /** Qualidade (o Quality do AE) nos bits 18..19: 0 Melhor, 1 Rascunho, 2 Arame (`kLayerRowQualityShift`). */
+    const val QUALITY_SHIFT = 18
+    const val QUALITY_MASK = 0x3
+    /** Amostragem bicúbica (`kLayerRowFlagBicubic`). */
+    const val FLAG_BICUBIC = 1 shl 20
     /** Etiqueta de cor (0 = nenhuma) nos bits 8..11 (`kLayerRowLabelShift`). */
     const val LABEL_SHIFT = 8
     const val LABEL_MASK = 0xF
@@ -235,6 +242,10 @@ class LayerRow internal constructor(
     val shy: Boolean get() = (flags and PodLayout.FLAG_SHY) != 0
     /** Preservar transparência (source-atop sobre a pilha abaixo). */
     val preserveTransparency: Boolean get() = (flags and PodLayout.FLAG_PRESERVE_TRANSPARENCY) != 0
+    /** Qualidade da camada (só a prévia): 0 Melhor, 1 Rascunho, 2 Arame. */
+    val quality: Int get() = (flags ushr PodLayout.QUALITY_SHIFT) and PodLayout.QUALITY_MASK
+    /** Amostragem bicúbica (vale em Melhor). */
+    val bicubic: Boolean get() = (flags and PodLayout.FLAG_BICUBIC) != 0
     /** Etiqueta de cor: 0 = nenhuma, 1..12 = `ShellColors.LabelPalette[label - 1]`. */
     val label: Int get() = (flags ushr PodLayout.LABEL_SHIFT) and PodLayout.LABEL_MASK
 
@@ -1042,6 +1053,10 @@ object TrackProperty {
     const val CAMERA_POI_X = 51
     const val CAMERA_POI_Y = 52
     const val CAMERA_POI_Z = 53
+    /** Painel 3D › Animação: Evolução do clipe do modelo (0..1), animável (v75). */
+    const val MODEL_ANIM_PROGRESS = 54
+    /** Painel 3D › Animação: Velocidade do clipe do modelo com keyframe (1 = 100 %; v76). */
+    const val MODEL_ANIM_SPEED = 55
     const val VECTOR_PARAM = 34
     const val SHAPE_PARAM = 35
     const val PARTICLE_PARAM = 36
@@ -1170,6 +1185,8 @@ data class LayerDetail(
     val clipCandidate: Boolean get() = (flags and PodLayout.FLAG_CLIP_CANDIDATE) != 0
     val shy: Boolean get() = (flags and PodLayout.FLAG_SHY) != 0
     val preserveTransparency: Boolean get() = (flags and PodLayout.FLAG_PRESERVE_TRANSPARENCY) != 0
+    val quality: Int get() = (flags ushr PodLayout.QUALITY_SHIFT) and PodLayout.QUALITY_MASK
+    val bicubic: Boolean get() = (flags and PodLayout.FLAG_BICUBIC) != 0
     val label: Int get() = (flags ushr PodLayout.LABEL_SHIFT) and PodLayout.LABEL_MASK
 
     companion object {

@@ -14,7 +14,7 @@ AUREA_TEST(EffectCompatibility, WaveDirectionAppendPreservesSavedEnumsAndAnimati
     add.effect_add.index = kInvalidIndex;
     AUREA_CHECK(engine.apply_command(add).ok());
     auto& effect = layer()->effects.back();
-    AUREA_CHECK_EQ(effect.params.size(), 10u);
+    AUREA_CHECK_EQ(effect.params.size(), 11u);
     effect.params.resize(9); // The complete previous layout, not a malformed effect.
     effect.params[4].constant = ParamValue::scalar(2); // Diagonal remains enum 2.
     effect.params[3].constant = ParamValue::scalar(73);
@@ -25,9 +25,10 @@ AUREA_TEST(EffectCompatibility, WaveDirectionAppendPreservesSavedEnumsAndAnimati
     AUREA_CHECK(engine.save_project(path).ok());
     AUREA_CHECK(engine.load_project(path).ok());
     auto& reopened = layer()->effects.back();
-    AUREA_CHECK_EQ(reopened.params.size(), 10u);
+    AUREA_CHECK_EQ(reopened.params.size(), 11u);
     AUREA_CHECK_NEAR(reopened.params[4].constant.v[0], 2, 0);
     AUREA_CHECK_NEAR(reopened.params[9].constant.v[0], 0, 0);
+    AUREA_CHECK_NEAR(reopened.params[10].constant.v[0], 0, 0); // Legacy sine/square mode.
     const Track* phase = layer()->tracks.find(TrackProperty::EffectParam, effectId, param_track_key(3, 0));
     AUREA_CHECK(phase && phase->keys.size() == 1 && phase->keys[0].value == 145);
     // The new mode and its independent track survive a second save/reopen.

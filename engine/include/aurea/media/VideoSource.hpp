@@ -111,6 +111,10 @@ public:
         f32 lastSeekMs = 0.0f;      ///< do pedido até o frame pronto
         DecodedFrameCache::Stats cache{};
         bool endOfStream = false;
+        /// 0.5.4: seeks/decodes that failed since the decoder last produced a
+        /// frame (decoder refused or busy, reader failed). Zero once it decodes.
+        u32 consecutiveFailures = 0;
+        u64 failures = 0;           ///< total desde a criação
     };
 
     VideoSource(std::unique_ptr<VideoDecoderBackend> backend, MediaPriority priority);
@@ -149,6 +153,15 @@ public:
     /// start(); o contador vive mais que a fonte.
     void set_work_counter(std::atomic<u64>* counter) noexcept { workCounter_ = counter; }
 
+    /// 0.5.4 (prévia: "coloquei 3 vídeos e alguns não apareciam"): um decode que
+    /// falha não desiste depois de duas tentativas. O mesmo pedido volta com
+    /// espera crescente (até 2 s) enquanto a fonte viver, e cada falha acorda o
+    /// render (o callback de pronto) para o MediaManager poder trocar o decoder.
+    /// Parado, ninguém manda pedido novo: sem isto a camada ficava vazia para
+    /// sempre depois de o aparelho recusar o decoder por um instante. Antes do
+    /// start(). Só a prévia liga; export e miniaturas mantêm o limite antigo.
+    void set_persistent_retry(bool on) noexcept { persistentRetry_.store(on, std::memory_order_relaxed); }
+
     /// Espera (teste/export) até o frame exato estar no cache ou o tempo
     /// acabar. Nunca chamado no preview.
     [[nodiscard]] bool wait_for(i64 targetUs, u32 timeoutMs) noexcept;
@@ -169,6 +182,7 @@ private:
     [[nodiscard]] bool reachable_forward(i64 needUs) const noexcept;
     void deliver(FrameRef frame, u64 epoch) noexcept;
     void schedule_retry(u64 generation, bool backpressure = false) noexcept;
+    void note_failure() noexcept;
     void publish_info() noexcept;
 
     std::unique_ptr<VideoDecoderBackend> backend_;
@@ -193,6 +207,7 @@ private:
     u64 retryAfterNs_ = 0;
     u32 retryAttempts_ = 0;
     bool retryBackpressure_ = false;
+    std::atomic<bool> persistentRetry_{false};   ///< set_persistent_retry
     bool running_ = false;
     bool workerActive_ = false; ///< mutex_: includes selected work before codec calls
     bool suspended_ = false;

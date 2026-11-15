@@ -209,4 +209,24 @@
     <string name="perf_badge">Test · %1$ds</string>
     <string name="perf_badge_stall">Froze here</string>
     <string name="perf_badge_stop">Stop</string>
+    <string name="cam_stage_features">Detecting and tracking features</string>
+    <string name="cam_stage_solve">Solving 3D camera</string>
+    <string name="prerender_group">Pre-render group</string>
+    <string name="edit_workspace_media">Media</string>
+    <string name="edit_workspace_edit">Edit</string>
+    <string name="edit_workspace_color">Color</string>
+    <string name="edit_workspace_audio">Audio</string>
+    <string name="edit_workspace_text">Text</string>
+    <string name="grade_node_number">Node %1$d</string>
+    <string name="grade_add_node">Add node</string>
+    <string name="grade_node_enabled">Correction enabled</string>
+    <string name="grade_node_previous">Move node earlier</string>
+    <string name="grade_node_next">Move node later</string>
+    <string name="grade_window">Windows</string>
+    <string name="grade_window_rectangle">Rectangle</string>
+    <string name="grade_window_ellipse">Ellipse</string>
+    <string name="grade_window_width">Width</string>
+    <string name="grade_window_height">Height</string>
+    <string name="grade_window_rotation">Rotation</string>
+    <string name="grade_node_actions">Node actions</string>
 </resources>

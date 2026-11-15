@@ -228,8 +228,9 @@ AUREA_TEST(AeAnimation, SourceTextEngineCommandsAreUndoable) {
     AUREA_CHECK_EQ(r.e.query_text_source_keys(id, frames, 8), 1u);
     r.undo();
     AUREA_CHECK_EQ(r.e.query_text_source_keys(id, frames, 8), 2u);
-    // A trilha não aceita expressão nem cria Track de verdade.
-    AUREA_CHECK(!r.e.set_expression(id, static_cast<u32>(TrackProperty::TextSource), 0, 0, "1").ok());
+    // v70: a expressão do texto-fonte mora no TextData (não cria Track de verdade).
+    AUREA_CHECK(r.e.set_expression(id, static_cast<u32>(TrackProperty::TextSource), 0, 0, "1").ok());
+    AUREA_CHECK(r.L(id)->text.sourceExpression != nullptr);
     AUREA_CHECK(r.L(id)->tracks.find(TrackProperty::TextSource) == nullptr);
     std::printf("keys: auto-key ao editar, mover/trocar/apagar com desfazer, trilha congelada na timeline; ");
 }

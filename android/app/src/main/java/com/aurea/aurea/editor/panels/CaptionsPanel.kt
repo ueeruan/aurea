@@ -6,20 +6,21 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -29,200 +30,168 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.pluralStringResource
-import androidx.compose.ui.res.stringResource
-import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.aurea.aurea.R
 import com.aurea.aurea.captions.CaptionSettings
 import com.aurea.aurea.captions.CaptionsState
 import com.aurea.aurea.captions.SpeechLanguages
 import com.aurea.aurea.captions.WhisperQuality
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.disabled
-import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.semantics
 import com.aurea.aurea.ui.ds.AureaToggle
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
-import androidx.compose.foundation.clickable
+import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.tocavel
 
-// O índice é o `style` salvo nas opções da legenda; o rótulo sai do idioma do app.
-private val CaptionStyles = listOf(
-    R.string.pn_caption_style_classic, R.string.panel_caixa, R.string.pn_caption_style_highlight,
-    R.string.pn_caption_style_neon, R.string.pn_karaoke, R.string.pn_pop, R.string.pack_text_4, R.string.pack_text_5,
-)
 /**
- * LEGENDAS da camada de vídeo/áudio: gerar (Whisper no aparelho, com idioma
- * e qualidade) ou importar SRT; estilo, agrupamento, destaque; a transcrição
- * palavra a palavra para corrigir; criar/refazer/remover as camadas (desfazer
- * volta tudo).
+ * LEGENDAS (0.5.3, no jeito do Premiere, com a cara do AUREA): quatro abas de
+ * ícone na moldura comum — um assunto por aba (FUNCTIONS_IA.md §3.1).
+ *
+ *  - **Criar**: transcrever (nuvem e depois o modelo do aparelho) e a janela de
+ *    opções de criação (modelo, linhas, caracteres, duração mínima, intervalo…);
+ *  - **Transcrição**: a fala em parágrafos, corrigir palavra, buscar/substituir,
+ *    criar legendas de um trecho;
+ *  - **Legendas**: a lista de blocos (entrada–saída e texto), o centro do
+ *    trabalho: editar, ‹ › de quadro, dividir, unir, inserir, apagar, exportar;
+ *  - **Estilo**: faixa toda ou só as escolhidas — modelos, aparência, texto e
+ *    caixa, posição.
+ *
+ * As regras de edição moram no motor (`edit_caption_track`); a tela só manda.
+ * Desenho e comportamento: build/reference/am-ui-20261113/CAPTIONS_PREMIERE.md.
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun CaptionsPanel(env: PanelEnv) {
     val store = env.store
     val cap = store.captions
     val sourceLayers = store.layers.filter { it.kind == 1 || it.kind == 3 }
-    val selectedCaption = remember(store.primary, store.curveRevision) {
-        cap.isCaption(store.primary)
-    }
+    val selectedCaption = remember(store.primary, store.curveRevision) { cap.isCaption(store.primary) }
     if (store.primary == null || (store.detail?.kind != 1 && store.detail?.kind != 3 && !selectedCaption)) {
         LazyColumn(Modifier.fillMaxSize().padding(18.dp)) {
             item { Text(stringResource(R.string.sh_add_captions_need_speech)) }
-            sourceLayers.forEach { layer -> item { Action(layer.name) { store.select(layer.id) } } }
+            sourceLayers.forEach { layer -> item { CapAction(layer.name) { store.select(layer.id) } } }
         }
         return
     }
     val layerId = store.primary ?: return
     LaunchedEffect(layerId, store.curveRevision) { cap.open(layerId) }
-    var editing by remember { mutableStateOf<Int?>(null) }
-    var translateEnglish by remember { mutableStateOf(false) }
-    val srt = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { cap.importSrt(it) } }
-    val s = cap.settings
-    // 0.4.6: com a faixa pronta, a troca aparece na hora (um passo de desfazer).
-    fun set(f: (CaptionSettings) -> CaptionSettings) = cap.update(custom = false, f = f)
-
-    // Fase 8D: LazyColumn. A transcrição de um vídeo longo tem 2000–5000
-    // palavras; num FlowRow dentro de um Column rolável TODAS eram compostas e
-    // medidas ao abrir o painel (e todas recompostas ao tocar numa). Agora a
-    // fala vai em pedaços de [WORDS_PER_ITEM] palavras e só os pedaços na tela
-    // existem; o editor da palavra aparece logo abaixo do pedaço dela.
-    val words = cap.words
-    val fillers = cap.fillers
-    // 0.4.1: tela simplificada — estilo, idioma (um chip) e UM botão; depois de gerar,
-    // só posição, tamanho e dois interruptores. O resto fica em "Mais opções".
-    var more by remember { mutableStateOf(false) }
-    var languages by remember { mutableStateOf(false) }
-    val idle = cap.busy == null
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp)) {
-        item(key = "opcoes", contentType = "opcoes") {
-            Column {
-                cap.track?.let { CaptionBlockEditor(cap, store) }
-                // 0.4.6: modelos prontos antes de gerar (e trocáveis depois).
-                CaptionTemplateRow(cap)
-                CaptionPresetBrowser(cap)
-
-                // Idioma da fala num chip só; tocar abre a lista.
-                val auto = stringResource(R.string.cap025_lang_auto)
-                val langName = cap.speechLanguage?.let(SpeechLanguages::endonym) ?: auto
-                Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(stringResource(R.string.panel_idioma_fala), Modifier.weight(1f), style = AureaType.BodySmall)
-                    Chip("$langName  ▾", on = languages, enabled = idle, description = stringResource(R.string.panel_idioma_fala)) { languages = !languages }
-                }
-                if (languages) LanguageChips(cap) { languages = false }
-
-                cap.busy?.let {
-                    Note(it, AureaColors.Accent)
-                    Action(stringResource(R.string.common_cancel)) { cap.cancelTranscription() }
-                }
-                cap.error?.let { Note(it, AureaColors.Danger) }
-                cap.notice?.let { Note(it, AureaColors.Muted) }
-
-                // O botão principal: gera (transcreve e cria) ou refaz.
-                Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Action(
-                        if (cap.captionCount > 0) stringResource(R.string.panel_transcrever_novo) else stringResource(R.string.panel_gerar_legendas),
-                        primary = true, enabled = idle,
-                    ) { cap.transcribe(cap.speechLanguage, translateEnglish = translateEnglish) }
-                    if (cap.captionCount > 0) Action(stringResource(R.string.pn_caption_remove_n, cap.captionCount), enabled = idle) { cap.removeAll() }
-                }
-                if (cap.captionCount == 0 && words.isEmpty()) {
-                    Text(
-                        stringResource(R.string.panel_importar_legenda_srt),
-                        style = AureaType.BodySmall.copy(color = AureaColors.Accent),
-                        modifier = Modifier.padding(vertical = 4.dp).clickable(enabled = idle) {
-                            srt.launch(arrayOf("application/x-subrip", "text/*", "application/octet-stream"))
-                        },
-                    )
-                }
-
-                // 0.4.6: posição, tamanho e aparência também antes de gerar.
-                run {
-                    Label(stringResource(R.string.pn_caption_screen_height))
-                    val ys = listOf(0.2f, 0.5f, 0.78f)
-                    Chips(listOf(stringResource(R.string.pn_caption_pos_top), stringResource(R.string.pn_caption_pos_middle), stringResource(R.string.pn_caption_pos_bottom)), ys.indexOfFirst { kotlin.math.abs(it - s.posY) < 0.01f }) { i -> set { it.copy(posY = ys[i]) } }
-                    Label(stringResource(R.string.panel_tamanho))
-                    val sizes = listOf(0.045f, 0.065f, 0.09f)
-                    Chips(listOf(stringResource(R.string.pn_size_small_short), stringResource(R.string.pn_size_medium_short), stringResource(R.string.pn_size_large_short)), sizes.indexOfFirst { kotlin.math.abs(it - s.sizeFrac) < 0.001f }) { i -> set { it.copy(sizeFrac = sizes[i]) } }
-                    Toggle(stringResource(R.string.pn_caption_highlight_word), s.highlight) { v -> set { it.copy(highlight = v) } }
-                    Toggle(stringResource(R.string.pn_caption_uppercase), s.uppercase) { v -> set { it.copy(uppercase = v) } }
-                    CaptionCustomize(cap, store)
-                    if (words.isNotEmpty() && cap.captionCount == 0) {
-                        Action(stringResource(R.string.pn_caption_create), primary = true, enabled = idle) { cap.generate() }
-                    }
-                }
-
-                // Mais opções (fechado): agrupamento, quebras, vícios, tradução, modelo do aparelho.
-                Row(
-                    Modifier.fillMaxWidth().height(48.dp).clickable { more = !more },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(stringResource(R.string.cap041_more_options), Modifier.weight(1f), style = AureaType.BodySmall.copy(color = AureaColors.Muted))
-                    Text(if (more) "▴" else "▾", style = AureaType.BodySmall.copy(color = AureaColors.Muted))
-                }
-                if (more) {
-                    Label(stringResource(R.string.pn_caption))
-                    Chips(listOf(stringResource(R.string.pn_caption_grouped), stringResource(R.string.pn_caption_one_per_word)), s.mode) { i -> set { it.copy(mode = i) } }
-                    if (s.mode == 0) {
-                        Label(stringResource(R.string.pn_caption_words_per_caption))
-                        Chips((1..6).map { "$it" }, s.maxWords - 1) { i -> set { it.copy(maxWords = i + 1) } }
-                        Label(stringResource(R.string.pn_caption_chars_per_line))
-                        Chips(listOf("12", "18", "24", "32"), listOf(12, 18, 24, 32).indexOf(s.maxChars)) { i -> set { it.copy(maxChars = listOf(12, 18, 24, 32)[i]) } }
-                        Label(stringResource(R.string.pn_caption_lines))
-                        Chips(listOf("1", "2", "3"), s.maxLines - 1) { i -> set { it.copy(maxLines = i + 1) } }
-                    }
-                    Toggle(stringResource(R.string.pn_caption_break_pauses), s.breakOnPause) { v -> set { it.copy(breakOnPause = v) } }
-                    Toggle(stringResource(R.string.pn_caption_remove_fillers), s.removeFillers) { v -> set { it.copy(removeFillers = v) } }
-                    Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(stringResource(R.string.beta_translate_english), Modifier.weight(1f))
-                        AureaToggle(checked = translateEnglish, onCheckedChange = { translateEnglish = it })
-                    }
-                    Label(stringResource(R.string.cap041_offline_model))
-                    SpeechControls(cap)
-                    if (cap.captionCount > 0) Action(stringResource(R.string.pn_caption_redo), enabled = words.isNotEmpty() && idle) { cap.generate() }
-                    if (cap.captionCount == 0 && words.isNotEmpty()) {
-                        Action(stringResource(R.string.panel_importar_legenda_srt), enabled = idle) { srt.launch(arrayOf("application/x-subrip", "text/*", "application/octet-stream")) }
-                    }
-                    if (words.isNotEmpty()) {
-                        val src = cap.source
-                        Label(
-                            if (src != null) pluralStringResource(R.plurals.pn_caption_transcript_source, words.size, src, words.size)
-                            else pluralStringResource(R.plurals.pn_caption_transcript, words.size, words.size),
-                        )
-                    }
-                }
+    // Com a faixa pronta, o painel abre na lista (o centro do trabalho); sem ela, em Criar.
+    var tab by androidx.compose.runtime.saveable.rememberSaveable(layerId) {
+        androidx.compose.runtime.mutableIntStateOf(if (selectedCaption) 2 else 0)
+    }
+    Row(Modifier.fillMaxSize()) {
+        Box(Modifier.weight(1f).fillMaxHeight()) {
+            when (tab) {
+                0 -> CaptionCreateTab(cap)
+                1 -> CaptionTranscriptTab(cap, store)
+                2 -> CaptionListTab(cap, store, onOwnStyle = { tab = 3 })
+                else -> CaptionStyleTab(cap, store)
             }
         }
+        Box(Modifier.width(0.7.dp).fillMaxHeight().background(AureaColors.ContentStrongLine))
+        PanelIconTabs(listOf(
+            PanelIconTab(CupertinoGlyph.Waveform, stringResource(R.string.fn_cap_tab_create), "captions.tab.create"),
+            PanelIconTab(CupertinoGlyph.DocText, stringResource(R.string.fn_cap_tab_transcript), "captions.tab.transcript"),
+            PanelIconTab(CupertinoGlyph.CaptionsBubble, stringResource(R.string.fn_cap_tab_list), "captions.tab.list"),
+            PanelIconTab(CupertinoGlyph.Paintbrush, stringResource(R.string.tx_tab_style), "captions.tab.style"),
+        ), tab, stringResource(R.string.panel_legendas)) { tab = it }
+    }
+}
 
-        if (more && words.isNotEmpty()) {
-            val chunks = (words.size + WORDS_PER_ITEM - 1) / WORDS_PER_ITEM
-            items(chunks, contentType = { "fala" }) { c ->
-                val from = c * WORDS_PER_ITEM
-                val to = minOf(words.size, from + WORDS_PER_ITEM)
-                FlowRow(
-                    Modifier.padding(bottom = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    for (i in from until to) {
-                        val struck = s.removeFillers && i in fillers
-                        WordChip(words[i].text, selected = editing == i, struck = struck) { editing = i }
+/** Estado do trabalho (andamento, erro, aviso, cancelar): o mesmo em todas as abas. */
+@Composable
+internal fun CaptionJobStatus(cap: CaptionsState) {
+    Column {
+        cap.busy?.let {
+            CapNote(it, AureaColors.Accent)
+            CapAction(stringResource(R.string.common_cancel)) { cap.cancelTranscription() }
+        }
+        cap.error?.let { CapNote(it, AureaColors.Danger) }
+        cap.notice?.let { CapNote(it, AureaColors.Muted) }
+    }
+}
+
+/**
+ * CRIAR: transcrever e a janela "Criar legendas" (as opções valem ao criar ou
+ * refazer; estilo e posição mudam na hora pela aba Estilo).
+ */
+@Composable
+private fun CaptionCreateTab(cap: CaptionsState) {
+    val s = cap.settings
+    val idle = cap.busy == null
+    var languages by remember { mutableStateOf(false) }
+    var translateEnglish by remember { mutableStateOf(false) }
+    val srt = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { cap.importSrt(it) } }
+    fun set(f: (CaptionSettings) -> CaptionSettings) = cap.update(custom = false, f = f)
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp)) {
+        item(key = "status") { CaptionJobStatus(cap) }
+        item(key = "transcrever") {
+            Column {
+                CapSection(stringResource(R.string.cap053_transcribe_title))
+                val auto = stringResource(R.string.cap025_lang_auto)
+                val langName = cap.speechLanguage?.let(SpeechLanguages::endonym) ?: auto
+                Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.panel_idioma_fala), Modifier.weight(1f), style = AureaType.BodySmall)
+                    CapChip("$langName  ▾", on = languages, enabled = idle, description = stringResource(R.string.panel_idioma_fala)) { languages = !languages }
+                }
+                if (languages) LanguageChips(cap) { languages = false }
+                CapToggle(stringResource(R.string.beta_translate_english), translateEnglish) { translateEnglish = it }
+                Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CapAction(
+                        if (cap.words.isNotEmpty()) stringResource(R.string.panel_transcrever_novo) else stringResource(R.string.panel_gerar_legendas),
+                        primary = cap.words.isEmpty(), enabled = idle,
+                    ) { cap.transcribe(cap.speechLanguage, translateEnglish = translateEnglish) }
+                    CapAction(stringResource(R.string.cap053_import), enabled = idle) {
+                        srt.launch(arrayOf("application/x-subrip", "text/vtt", "text/*", "application/octet-stream"))
                     }
                 }
-                val e = editing
-                if (e != null && e in from until to) {
-                    words.getOrNull(e)?.let { w ->
-                        WordEditor(w.text, "${com.aurea.aurea.ui.ds.numeroPtBr(w.start.toFloat(), 2)} s", onDone = { t -> cap.editWord(e, t); editing = null })
-                        Spacer(Modifier.height(8.dp))
+                CapLabel(stringResource(R.string.cap041_offline_model))
+                SpeechControls(cap)
+            }
+        }
+        item(key = "criar") {
+            Column {
+                CapSection(stringResource(R.string.cap053_create_title))
+                CaptionTemplateRow(cap)
+                CapLabel(stringResource(R.string.pn_caption))
+                CapChips(listOf(stringResource(R.string.pn_caption_grouped), stringResource(R.string.pn_caption_one_per_word)), s.mode) { i -> set { it.copy(mode = i) } }
+                if (s.mode == 0) {
+                    CapLabel(stringResource(R.string.pn_caption_lines))
+                    CapChips(listOf("1", "2"), s.maxLines - 1) { i -> set { it.copy(maxLines = i + 1) } }
+                    CapLabel(stringResource(R.string.pn_caption_chars_per_line))
+                    val chars = listOf(12, 18, 24, 32, 42)
+                    CapChips(chars.map { "$it" }, chars.indexOf(s.maxChars)) { i -> set { it.copy(maxChars = chars[i]) } }
+                    CapLabel(stringResource(R.string.pn_caption_words_per_caption))
+                    CapChips((1..8).map { "$it" }, s.maxWords - 1) { i -> set { it.copy(maxWords = i + 1) } }
+                }
+                CapLabel(stringResource(R.string.cap053_min_duration))
+                val mins = listOf(0.5f, 0.8f, 1.2f, 2f)
+                CapChips(mins.map { stringResource(R.string.cap053_seconds, com.aurea.aurea.ui.ds.numeroPtBr(it, 1)) },
+                    mins.indexOfFirst { kotlin.math.abs(it - s.minDurationSec) < 0.01f }) { i -> set { it.copy(minDurationSec = mins[i]) } }
+                CapLabel(stringResource(R.string.cap053_gap))
+                val gaps = listOf(0, 2, 4, 8)
+                CapChips(gaps.map { "$it" }, gaps.indexOf(s.gapFrames)) { i -> set { it.copy(gapFrames = gaps[i]) } }
+                CapToggle(stringResource(R.string.cap053_break_sentence), s.breakOnSentence) { v -> set { it.copy(breakOnSentence = v) } }
+                CapToggle(stringResource(R.string.pn_caption_break_pauses), s.breakOnPause) { v -> set { it.copy(breakOnPause = v) } }
+                CapToggle(stringResource(R.string.pn_caption_uppercase), s.uppercase) { v -> set { it.copy(uppercase = v) } }
+                CapToggle(stringResource(R.string.pn_caption_remove_fillers), s.removeFillers) { v -> set { it.copy(removeFillers = v) } }
+                CapNote(stringResource(R.string.cap053_create_note), AureaColors.Muted)
+                Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (cap.captionCount == 0) {
+                        CapAction(stringResource(R.string.pn_caption_create), primary = true, enabled = cap.words.isNotEmpty() && idle) { cap.generate() }
+                    } else {
+                        CapAction(stringResource(R.string.pn_caption_redo), primary = true, enabled = cap.words.isNotEmpty() && idle) { cap.generate() }
+                        CapAction(stringResource(R.string.pn_caption_remove_n, cap.captionCount), enabled = idle) { cap.removeAll() }
                     }
                 }
             }
@@ -232,9 +201,7 @@ internal fun CaptionsPanel(env: PanelEnv) {
 }
 
 /**
- * Idioma da fala (os sete do app mais os comuns; nome no próprio idioma) e
- * qualidade do Whisper. Qualidade que não cabe na memória livre aparece
- * desligada, com o motivo para o leitor de tela.
+ * Idioma da fala (os sete do app mais os comuns; nome no próprio idioma).
  */
 @Composable
 private fun LanguageChips(cap: CaptionsState, onPicked: () -> Unit) {
@@ -243,7 +210,7 @@ private fun LanguageChips(cap: CaptionsState, onPicked: () -> Unit) {
     val codes = listOf<String?>(null) + SpeechLanguages.codes
     val auto = stringResource(R.string.cap025_lang_auto)
     val spoken = remember(context) { SpeechLanguages.codes.associateWith { SpeechLanguages.spoken(context, it) } }
-    WrapChips(
+    CapWrapChips(
         options = codes.map { it?.let(SpeechLanguages::endonym) ?: auto },
         selected = codes.indexOf(cap.speechLanguage),
         descriptions = codes.map { code -> code?.let { spoken[it] } ?: auto },
@@ -255,14 +222,14 @@ private fun LanguageChips(cap: CaptionsState, onPicked: () -> Unit) {
 @Composable
 private fun SpeechControls(cap: CaptionsState) {
     val idle = cap.busy == null
-    Label(stringResource(R.string.cap025_quality))
+    CapLabel(stringResource(R.string.cap025_quality))
     // Memória e arquivo baixado mudam entre uma transcrição e outra, não a cada quadro.
     val fits = remember(cap.busy) { WhisperQuality.entries.map { cap.qualityFits(it) } }
     val ready = remember(cap.busy) { WhisperQuality.entries.map { cap.qualityDownloaded(it) } }
     val unavailable = stringResource(R.string.cap025_quality_unavailable)
     val labels = WhisperQuality.entries.map { stringResource(it.label) }
     val hints = WhisperQuality.entries.map { stringResource(it.hint) }
-    Chips(
+    CapChips(
         options = labels,
         selected = cap.quality.ordinal,
         descriptions = WhisperQuality.entries.map { q ->
@@ -271,60 +238,37 @@ private fun SpeechControls(cap: CaptionsState) {
         enabled = { idle && fits[it] },
     ) { cap.chooseQuality(WhisperQuality.entries[it]) }
     val q = cap.quality
-    Note(hints[q.ordinal], AureaColors.Muted)
+    CapNote(hints[q.ordinal], AureaColors.Muted)
     when {
-        !fits[q.ordinal] -> Note(unavailable, AureaColors.Danger)
-        ready[q.ordinal] -> Note(stringResource(R.string.cap025_quality_ready), AureaColors.Muted)
-        else -> Note(stringResource(R.string.cap025_quality_needs_download, q.megabytes), AureaColors.Muted)
+        !fits[q.ordinal] -> CapNote(unavailable, AureaColors.Danger)
+        ready[q.ordinal] -> CapNote(stringResource(R.string.cap025_quality_ready), AureaColors.Muted)
+        else -> CapNote(stringResource(R.string.cap025_quality_needs_download, q.megabytes), AureaColors.Muted)
     }
 }
 
-/** Palavras por item da lista preguiçosa (um parágrafo curto). */
-private const val WORDS_PER_ITEM = 24
-
-private val WordStyle = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Text))
-private val WordStruckStyle = AureaType.Base.merge(
-    TextStyle(fontSize = 13.sp, color = AureaColors.Muted, textDecoration = TextDecoration.LineThrough),
-)
+// ---- peças comuns das abas de legenda (cara do AUREA) ----
 
 @Composable
-private fun WordChip(text: String, selected: Boolean, struck: Boolean, onClick: () -> Unit) {
-    Box(
-        Modifier.clip(RoundedCornerShape(6.dp)).background(if (selected) AureaColors.AccentDim else AureaColors.Chip)
-            .tocavel(onClick = onClick).padding(horizontal = 8.dp, vertical = 4.dp),
-    ) {
-        Text(text, style = if (struck) WordStruckStyle else WordStyle)
-    }
-}
-
-@Composable
-private fun WordEditor(initial: String, time: String, onDone: (String) -> Unit) {
-    var text by remember(initial) { mutableStateOf(initial) }
-    Spacer(Modifier.height(10.dp))
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(time, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
-        Box(Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(AureaColors.Chip).padding(10.dp)) {
-            BasicTextField(text, onValueChange = { text = it }, singleLine = true, cursorBrush = SolidColor(AureaColors.Accent),
-                textStyle = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = AureaColors.Text)), modifier = Modifier.fillMaxWidth())
-        }
-        Action(stringResource(R.string.pn_ok), primary = true) { onDone(text) }
-        Action(stringResource(R.string.pn_caption_delete_word)) { onDone("") }
-    }
-}
-
-@Composable
-private fun Note(text: String, color: androidx.compose.ui.graphics.Color) {
+internal fun CapNote(text: String, color: androidx.compose.ui.graphics.Color) {
     Text(text, modifier = Modifier.padding(vertical = 6.dp), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = color)))
 }
 
 @Composable
-private fun Label(text: String) {
+internal fun CapLabel(text: String) {
     Spacer(Modifier.height(8.dp))
     Text(text, style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted)))
 }
 
+/** Título de seção da aba (um degrau acima de [CapLabel]). */
 @Composable
-private fun Chips(
+internal fun CapSection(text: String) {
+    Spacer(Modifier.height(10.dp))
+    Text(text, Modifier.semantics { this.heading() },
+        style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W700, color = AureaColors.Text)))
+}
+
+@Composable
+internal fun CapChips(
     options: List<String>,
     selected: Int,
     descriptions: List<String>? = null,
@@ -336,14 +280,14 @@ private fun Chips(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        options.forEachIndexed { i, o -> Chip(o, i == selected, enabled(i), descriptions?.getOrNull(i)) { onPick(i) } }
+        options.forEachIndexed { i, o -> CapChip(o, i == selected, enabled(i), descriptions?.getOrNull(i)) { onPick(i) } }
     }
 }
 
-/** Como [Chips], mas quebra em linhas: a lista de idiomas inteira à vista. */
+/** Como [CapChips], mas quebra em linhas: a lista de idiomas inteira à vista. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun WrapChips(
+internal fun CapWrapChips(
     options: List<String>,
     selected: Int,
     descriptions: List<String>? = null,
@@ -355,13 +299,13 @@ private fun WrapChips(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        options.forEachIndexed { i, o -> Chip(o, i == selected, enabled(i), descriptions?.getOrNull(i)) { onPick(i) } }
+        options.forEachIndexed { i, o -> CapChip(o, i == selected, enabled(i), descriptions?.getOrNull(i)) { onPick(i) } }
     }
 }
 
 /** Escolha única: o leitor de tela ouve o nome, "selecionado" e se está desligada. */
 @Composable
-private fun Chip(label: String, on: Boolean, enabled: Boolean, description: String?, onClick: () -> Unit) {
+internal fun CapChip(label: String, on: Boolean, enabled: Boolean = true, description: String? = null, onClick: () -> Unit) {
     Box(
         Modifier.clip(RoundedCornerShape(8.dp))
             .background(if (on) AureaColors.AccentDim else if (enabled) AureaColors.Chip else AureaColors.Chip.copy(alpha = 0.4f))
@@ -379,7 +323,7 @@ private fun Chip(label: String, on: Boolean, enabled: Boolean, description: Stri
 }
 
 @Composable
-private fun Toggle(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+internal fun CapToggle(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
         AureaToggle(checked = checked, onCheckedChange = onChange)
@@ -387,11 +331,16 @@ private fun Toggle(label: String, checked: Boolean, onChange: (Boolean) -> Unit)
 }
 
 @Composable
-private fun Action(label: String, primary: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
+internal fun CapAction(label: String, primary: Boolean = false, enabled: Boolean = true, description: String? = null, onClick: () -> Unit) {
     Box(
         Modifier.clip(RoundedCornerShape(10.dp))
             .background(if (!enabled) AureaColors.Chip.copy(alpha = 0.4f) else if (primary) AureaColors.AccentDim else AureaColors.Chip)
-            .tocavel(onClick = { if (enabled) onClick() }).padding(horizontal = 14.dp, vertical = 10.dp),
+            .tocavel(enabled = enabled, role = Role.Button, onClick = { if (enabled) onClick() })
+            .semantics {
+                if (description != null) contentDescription = description
+                if (!enabled) disabled()
+            }
+            .padding(horizontal = 14.dp, vertical = 10.dp),
     ) {
         Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W600,
             color = if (!enabled) AureaColors.Muted else if (primary) AureaColors.Accent else AureaColors.Text)))

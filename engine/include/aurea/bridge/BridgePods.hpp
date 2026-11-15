@@ -104,6 +104,11 @@ inline constexpr u32 kLayerRowFlagClipCandidate = 1u << 15;
 inline constexpr u32 kLayerRowFlagShy = 1u << 16;
 /// Preservar transparência (o T do AE): pinta só onde a pilha abaixo tem alfa.
 inline constexpr u32 kLayerRowFlagPreserveTransparency = 1u << 17;
+/// Qualidade (o Quality switch do AE, Layer::quality) nos bits 18..19:
+/// 0 Melhor, 1 Rascunho, 2 Arame. Bit 20: amostragem bicúbica (Layer::sampling).
+inline constexpr u32 kLayerRowQualityShift = 18;
+inline constexpr u32 kLayerRowQualityMask  = 0x3u << kLayerRowQualityShift;
+inline constexpr u32 kLayerRowFlagBicubic  = 1u << 20;
 /// Etiqueta de cor (0 = nenhuma) nos bits 8..11.
 inline constexpr u32 kLayerRowLabelShift   = 8;
 inline constexpr u32 kLayerRowLabelMask    = 0xFu << kLayerRowLabelShift;

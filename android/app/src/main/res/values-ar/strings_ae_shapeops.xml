@@ -50,4 +50,6 @@
     <string name="ae_shapeop_collapse">إخفاء إعدادات %1$s</string>
     <string name="ae_shapeop_lane">المعامل %1$d · %2$d</string>
     <string name="ae_shapeop_rep_separate">مقياس X وY منفصلان</string>
+    <string name="ae_shapeop_dash_add">زوج شرطة وفراغ</string>
+    <string name="ae_shapeop_dash_remove">إزالة زوج الشرطة</string>
 </resources>

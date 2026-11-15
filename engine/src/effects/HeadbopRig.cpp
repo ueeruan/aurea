@@ -70,7 +70,9 @@ bool face_from_landmarks(const f32* pts, f32 aspect, RigFace& out, f32 minConf) 
     // Espaço isotrópico: unidade = altura da imagem.
     auto P = [&](u32 i) { return Vec2{fin(pts[i * 4]) * aspect, fin(pts[i * 4 + 1])}; };
     auto C = [&](u32 i) { const f32 c = pts[i * 4 + 3]; return std::isfinite(c) ? c : 0.0f; };
-    auto ok = [&](u32 i) { return C(i) >= minConf; };
+    auto ok = [&](u32 i) {
+        return C(i) >= minConf && std::isfinite(pts[i * 4]) && std::isfinite(pts[i * 4 + 1]);
+    };
     // Olhos: o centro; sem ele, a média dos cantos.
     auto eye = [&](u32 mid, u32 inner, u32 outer, Vec2& e, f32& c) {
         if (ok(mid)) { e = P(mid); c = C(mid); return true; }
@@ -79,7 +81,22 @@ bool face_from_landmarks(const f32* pts, f32 aspect, RigFace& out, f32 minConf) 
     };
     Vec2 a, b;
     f32 ca = 0, cb = 0;
-    if (!eye(2, 1, 3, a, ca) || !eye(5, 4, 6, b, cb)) return false;
+    const bool leftEye = eye(2, 1, 3, a, ca);
+    const bool rightEye = eye(5, 4, 6, b, cb);
+    if (!leftEye || !rightEye) {
+        // A profile hides the far eye. Estimate its projected span from the
+        // visible eye and ear, keeping the measured eye, nose and ear mandatory.
+        if (leftEye == rightEye || !ok(0)) return false;
+        const u32 ear = leftEye ? 7u : 8u;
+        if (!ok(ear)) return false;
+        const Vec2 visible = leftEye ? a : b;
+        const Vec2 earToEye = visible - P(ear);
+        const f32 span = len(earToEye);
+        if (!(span > 1e-4f)) return false;
+        const Vec2 projected = visible - earToEye * 0.7f;
+        if (leftEye) { b = projected; cb = std::min(ca, std::min(C(ear), C(0))); }
+        else { a = projected; ca = std::min(cb, std::min(C(ear), C(0))); }
+    }
     if (a.x > b.x) std::swap(a, b);
     const f32 d = len(b - a);
     if (!(d > 1e-4f)) return false;
@@ -145,6 +162,12 @@ bool face_from_landmarks(const f32* pts, f32 aspect, RigFace& out, f32 minConf) 
     out.shoulderA = frac(sa);
     out.shoulderB = frac(sb);
     out.confidence = std::min(ca, cb);
+    for (u32 joint = 0; joint < kBodyJoints; ++joint) {
+        const u32 source = joint + 11;
+        if (!ok(source)) continue;
+        out.joints[joint] = Vec4{pts[source * 4], pts[source * 4 + 1], fin(pts[source * 4 + 2]),
+                                 std::clamp(C(source), 0.f, 1.f)};
+    }
     return std::isfinite(out.center.x) && std::isfinite(out.center.y) && out.axes.x > 0.0f && out.axes.y > 0.0f;
 }
 
@@ -207,6 +230,11 @@ RigFrame sample_track(const RigTrack& track, f64 seconds) noexcept {
         face_to(b.faces[i], vb);
         for (u32 k = 0; k < kFaceFloats; ++k) vo[k] = va[k] + (vb[k] - va[k]) * t;
         out.faces[i] = face_from(vo);
+        for (u32 joint = 0; joint < kBodyJoints; ++joint) {
+            const Vec4 first = a.faces[i].joints[joint], second = b.faces[i].joints[joint];
+            out.faces[i].joints[joint] = first.w >= .35f && second.w >= .35f
+                ? first + (second - first) * t : (t < .5f ? first : second);
+        }
     }
     return out;
 }
@@ -235,6 +263,22 @@ RigFrame median_frame(const RigTrack& track) noexcept {
             res[k] = col[col.size() / 2];
         }
         out.faces[i] = face_from(res);
+        for (u32 joint = 0; joint < kBodyJoints; ++joint) {
+            f32 coordinates[4]{};
+            for (u32 component = 0; component < 4; ++component) {
+                col.clear();
+                for (const RigFrame& frame : track.frames) {
+                    if (frame.count != best || frame.faces[i].joints[joint].w < .35f) continue;
+                    const Vec4 point = frame.faces[i].joints[joint];
+                    const f32 values[4] = {point.x, point.y, point.z, point.w};
+                    col.push_back(values[component]);
+                }
+                if (col.empty()) continue;
+                std::nth_element(col.begin(), col.begin() + col.size() / 2, col.end());
+                coordinates[component] = col[col.size() / 2];
+            }
+            out.faces[i].joints[joint] = Vec4{coordinates[0], coordinates[1], coordinates[2], coordinates[3]};
+        }
     }
     return out;
 }
@@ -242,18 +286,23 @@ RigFrame median_frame(const RigTrack& track) noexcept {
 void smooth_track(RigTrack& track) noexcept {
     auto& fr = track.frames;
     if (fr.size() < 3) return;
-    const std::vector<RigFrame> src = fr;
+    std::array<RigFrame, 5> source;
+    for (usize i = 0; i < std::min<usize>(2, fr.size()); ++i) source[i] = fr[i];
     constexpr i32 kHalf = 2;
     constexpr f32 kW[5] = {1, 2, 3, 2, 1};
-    for (usize i = 0; i < src.size(); ++i) {
-        for (u32 f = 0; f < src[i].count; ++f) {
+    for (usize i = 0; i < fr.size(); ++i) {
+        if (i + kHalf < fr.size()) source[(i + kHalf) % source.size()] = fr[i + kHalf];
+        const u32 people = source[i % source.size()].count;
+        for (u32 f = 0; f < people; ++f) {
             f32 acc[kFaceFloats]{};
             f32 total = 0.0f;
             for (i32 o = -kHalf; o <= kHalf; ++o) {
                 const i64 j = static_cast<i64>(i) + o;
-                if (j < 0 || j >= static_cast<i64>(src.size()) || src[j].count != src[i].count) continue;
+                if (j < 0 || j >= static_cast<i64>(fr.size())) continue;
+                const RigFrame& original = source[static_cast<usize>(j) % source.size()];
+                if (original.count != people) continue;
                 f32 v[kFaceFloats];
-                face_to(src[j].faces[f], v);
+                face_to(original.faces[f], v);
                 const f32 w = kW[o + kHalf];
                 for (u32 k = 0; k < kFaceFloats; ++k) acc[k] += v[k] * w;
                 total += w;
@@ -261,6 +310,22 @@ void smooth_track(RigTrack& track) noexcept {
             if (total <= 0.0f) continue;
             for (f32& v : acc) v /= total;
             fr[i].faces[f] = face_from(acc);
+            for (u32 joint = 0; joint < kBodyJoints; ++joint) {
+                Vec4 position{};
+                f32 weight = 0.f;
+                for (i32 offset = -kHalf; offset <= kHalf; ++offset) {
+                    const i64 index = static_cast<i64>(i) + offset;
+                    if (index < 0 || index >= static_cast<i64>(fr.size())) continue;
+                    const RigFrame& original = source[static_cast<usize>(index) % source.size()];
+                    if (original.count != people) continue;
+                    const Vec4 point = original.faces[f].joints[joint];
+                    if (point.w < .35f) continue;
+                    const f32 contribution = kW[offset + kHalf] * point.w;
+                    position = position + point * contribution;
+                    weight += contribution;
+                }
+                if (weight > 0.f) fr[i].faces[f].joints[joint] = position * (1.f / weight);
+            }
         }
     }
 }
@@ -337,6 +402,83 @@ Looseness looseness(const Uniforms& u, u32 fi, Vec2 p, f32 mask) noexcept {
     return l;
 }
 
+namespace {
+struct BodyWarp { Vec2 offset{}; f32 coverage = 0.f; };
+
+BodyWarp body_warp(const Uniforms& u, const GpuFace& face, Vec2 point, bool previous, f32 mask) noexcept {
+    BodyWarp result;
+    if (!(mask > 0.f) || std::max({face.joints[2].w, face.joints[3].w, face.joints[14].w, face.joints[15].w}) < .35f) return result;
+    const Vec4 torso = previous ? face.prevTorso : face.torso;
+    if (!std::isfinite(torso.x) || !std::isfinite(torso.y)
+        || std::max(std::fabs(torso.x), std::fabs(torso.y)) > 2.f * std::max(u.layer.x, u.layer.y)) return result;
+    const Vec2 hip = face.body.w > 0.f ? Vec2{face.body.z, face.body.w} : Vec2{face.neck.z, face.neck.w + face.body.y};
+    const auto rest = [&](u32 index) { return Vec2{face.joints[index].x, face.joints[index].y}; };
+    const auto moved = [&](Vec2 position) { return hip + rot(position - hip, torso.z) + Vec2{torso.x, torso.y}; };
+    f32 total = 0.f;
+    const auto segment = [&](u32 first, u32 second, Vec2 targetFirst, Vec2 targetSecond, f32 radius) {
+        const f32 confidence = std::min(face.joints[first].w, face.joints[second].w);
+        if (confidence < .35f) return;
+        const Vec2 start = rest(first), vector = rest(second) - start;
+        const f32 lengthSquared = dot(vector, vector);
+        if (!(lengthSquared > 1.f)) return;
+        const f32 along = std::clamp(dot(point - start, vector) / lengthSquared, 0.f, 1.f);
+        const f32 distance = len(point - (start + vector * along));
+        const f32 weight = (1.f - smooth(radius * .6f, radius * 1.4f, distance)) * confidence;
+        if (!(weight > 0.f)) return;
+        const Vec2 targetVector = targetSecond - targetFirst;
+        const f32 angle = std::atan2(targetVector.y, targetVector.x) - std::atan2(vector.y, vector.x);
+        result.offset += (targetFirst + rot(point - start, angle) - point) * weight;
+        total += weight;
+    };
+    const f32 armRadius = std::max(2.f, face.head.z * .4f), legRadius = std::max(2.f, face.head.z * .6f);
+    const f32 armAngle = torso.z * .35f + (previous ? face.prevClothT.z : face.clothT.z) * .3f;
+    for (u32 side = 0; side < 2; ++side) {
+        const u32 shoulder = side, elbow = 2 + side, wrist = 4 + side;
+        if (face.joints[shoulder].w >= .35f && face.joints[elbow].w >= .35f) {
+            const Vec2 root = moved(rest(shoulder));
+            const Vec2 middle = root + rot(rest(elbow) - rest(shoulder), armAngle);
+            const Vec2 end = middle + rot(rest(wrist) - rest(elbow), armAngle * .6f);
+            segment(shoulder, elbow, root, middle, armRadius);
+            segment(elbow, wrist, middle, end, armRadius * .8f);
+            for (u32 finger : {6u + side, 8u + side, 10u + side})
+                segment(wrist, finger, end, end + rot(rest(finger) - rest(wrist), armAngle * .6f), armRadius * .7f);
+        }
+        const u32 pelvis = 12 + side, knee = 14 + side, ankle = 16 + side;
+        if (face.joints[pelvis].w < .35f || face.joints[knee].w < .35f) continue;
+        const Vec2 root = moved(rest(pelvis));
+        Vec2 middle = moved(rest(knee)), end = moved(rest(ankle));
+        if (face.joints[ankle].w >= .35f) {
+            const f32 upper = len(rest(knee) - rest(pelvis)), lower = len(rest(ankle) - rest(knee));
+            const Vec2 direction = rest(ankle) - root;
+            const f32 distance = len(direction);
+            if (upper > 1.f && lower > 1.f && distance > 1e-4f) {
+                const Vec2 axis = direction / distance;
+                const f32 reach = std::clamp(distance, std::fabs(upper - lower) + .0001f, upper + lower);
+                const f32 along = (upper * upper - lower * lower + reach * reach) / (2.f * reach);
+                const f32 bend = std::sqrt(std::max(0.f, upper * upper - along * along));
+                const Vec2 original = rest(ankle) - rest(pelvis), kneeOffset = rest(knee) - rest(pelvis);
+                const f32 sign = original.x * kneeOffset.y - original.y * kneeOffset.x >= 0.f ? 1.f : -1.f;
+                middle = root + axis * along + Vec2{-axis.y, axis.x} * (bend * sign);
+                end = root + axis * reach;
+            }
+        }
+        segment(pelvis, knee, root, middle, legRadius);
+        segment(knee, ankle, middle, end, legRadius * .7f);
+        for (u32 foot : {18u + side, 20u + side})
+            segment(ankle, foot, end, end + rest(foot) - rest(ankle), legRadius * .55f);
+    }
+    if (total > 0.f) {
+        result.offset = result.offset / total;
+        const f32 margin = u.window.w;
+        const f32 edge = std::min({point.x + margin, u.layer.x + margin - point.x,
+                                   point.y + margin, u.layer.y + margin - point.y});
+        result.coverage = std::min(total, 1.f) * std::clamp(mask, 0.f, 1.f)
+            * (u.window.x > 0.f ? smooth(0.f, u.window.x, edge) : 1.f);
+    }
+    return result;
+}
+} // namespace
+
 Vec2 deform_point(const Uniforms& u, Vec2 p, bool previous, f32 mask) noexcept {
     Vec2 sum = p;
     const bool whole = u.mode.y > 0.5f;
@@ -346,9 +488,10 @@ Vec2 deform_point(const Uniforms& u, Vec2 p, bool previous, f32 mask) noexcept {
         const Weights w = weights(u, fi, p);
         const Looseness l = looseness(u, fi, p, mask);
         const f32 wh = std::max(w.head, l.hairRegion);
-        if (w.torso <= 0.0f && wh <= 0.0f && l.cloth <= 0.0f) continue;
+        const BodyWarp body = whole ? BodyWarp{} : body_warp(u, F, p, previous, mask);
+        if (w.torso <= 0.0f && wh <= 0.0f && l.cloth <= 0.0f && body.coverage <= 0.f) continue;
         const Vec4 T = previous ? F.prevTorso : F.torso;
-        const Vec2 hip{F.neck.z, F.neck.w + F.body.y};
+        const Vec2 hip = F.body.w > 0.f ? Vec2{F.body.z, F.body.w} : Vec2{F.neck.z, F.neck.w + F.body.y};
         auto torsoOf = [&](Vec2 x, const Vec4& t) { return hip + rot(x - hip, t.z) + Vec2{t.x, t.y}; };
         auto torso = [&](Vec2 x) { return torsoOf(x, T); };
         const Vec2 tp = torso(p);
@@ -403,6 +546,7 @@ Vec2 deform_point(const Uniforms& u, Vec2 p, bool previous, f32 mask) noexcept {
             }
             q2 = q1 + (h - q1) * wh;
         }
+        q2 = q2 + (p + body.offset - q2) * body.coverage;
         sum += q2 - p;
     }
     return sum;
@@ -552,6 +696,18 @@ void fill_uniforms(const BuildInput& in, Uniforms& u) noexcept {
         const f32 half = std::max(rx * 1.2f, 0.5f * len(sb - sa));
         F.neck = {neck.x, neck.y, smid.x, std::max(smid.y, neck.y + 1.0f)};
         F.body = {half, 3.0f * half, 0.0f, 0.0f};
+        for (u32 joint = 0; joint < kBodyJoints; ++joint) {
+            const Vec4 point = r.joints[joint];
+            if (!std::isfinite(point.w) || point.w < .35f || !std::isfinite(point.x) || !std::isfinite(point.y)) continue;
+            F.joints[joint] = Vec4{std::clamp(point.x, -2.f, 3.f) * W, std::clamp(point.y, -2.f, 3.f) * H,
+                                   std::clamp(fin(point.z), -4.f, 4.f) * W, std::clamp(point.w, 0.f, 1.f)};
+        }
+        if (F.joints[12].w >= .35f && F.joints[13].w >= .35f) {
+            const Vec4 hips = (F.joints[12] + F.joints[13]) * .5f;
+            F.body.y = std::max(half * .5f, hips.y - smid.y);
+            F.body.z = hips.x;
+            F.body.w = hips.y;
+        }
         // Amplitudes da pose (fração da largura) na escala da pessoa: a pose foi
         // afinada para uma cabeça de ~25 % da largura do quadro.
         const f32 scale = std::clamp(2.0f * rx / (0.25f * W), 0.35f, 2.0f);
@@ -565,7 +721,27 @@ void fill_uniforms(const BuildInput& in, Uniforms& u) noexcept {
         };
         // Giro 3D limitado a ±15° (o elipsoide aproximado não aguenta mais).
         auto headR = [&](const Pose& p) { return Vec4{std::clamp(fin(p.headYaw), -15.0f, 15.0f) * kDeg, 0, 0, 0}; };
-        F.torso = torso(in.pose[i]); F.prevTorso = torso(in.prevPose[i]);
+        const auto plantedTorso = [&](Vec4 motion) {
+            if (!(F.body.w > 0.f)) return motion;
+            const Vec2 hip{F.body.z, F.body.w};
+            // Project the pelvis translation into both legs' reachable disks.
+            // This preserves limb lengths while the observed feet stay planted.
+            for (u32 iteration = 0; iteration < 8; ++iteration)
+                for (u32 side = 0; side < 2; ++side) {
+                    const Vec4 pelvis = F.joints[12 + side], knee = F.joints[14 + side], ankle = F.joints[16 + side];
+                    if (std::min({pelvis.w, knee.w, ankle.w}) < .35f) continue;
+                    const Vec2 restHip{pelvis.x, pelvis.y}, restKnee{knee.x, knee.y}, foot{ankle.x, ankle.y};
+                    const f32 reach = len(restKnee - restHip) + len(foot - restKnee);
+                    const Vec2 root = hip + rot(restHip - hip, motion.z) + Vec2{motion.x, motion.y};
+                    const Vec2 difference = foot - root;
+                    const f32 distance = len(difference);
+                    if (!std::isfinite(distance) || !(distance > reach) || !(reach > 1.f)) continue;
+                    const Vec2 correction = difference * (1.f - reach / distance);
+                    motion.x += correction.x; motion.y += correction.y;
+                }
+            return motion;
+        };
+        F.torso = plantedTorso(torso(in.pose[i])); F.prevTorso = plantedTorso(torso(in.prevPose[i]));
         F.headT = headT(in.pose[i]); F.prevHeadT = headT(in.prevPose[i]);
         F.headR = headR(in.pose[i]); F.prevHeadR = headR(in.prevPose[i]);
         if (loose) {
@@ -642,7 +818,7 @@ std::string entry_path(const std::string& dir, u32 token) {
 
 std::string serialize_entry(const StoreEntry& e) {
     std::string s = "HBR1";
-    put_raw(s, u32{1});
+    put_raw(s, u32{2});
     put_raw(s, static_cast<u32>(e.track.frames.size()));
     for (const RigFrame& f : e.track.frames) {
         put_raw(s, f.time);
@@ -651,6 +827,7 @@ std::string serialize_entry(const StoreEntry& e) {
             f32 v[kFaceFloats];
             face_to(f.faces[i], v);
             s.append(reinterpret_cast<const char*>(v), sizeof v);
+            for (const Vec4& joint : f.faces[i].joints) put_raw(s, joint);
         }
     }
     const std::string grid = serialize(e.grid);
@@ -663,8 +840,8 @@ bool deserialize_entry(const std::string& blob, StoreEntry& out) {
     if (blob.size() < 12 || blob.compare(0, 4, "HBR1") != 0) return false;
     usize at = 4;
     u32 version = 0, frames = 0;
-    if (!get_raw(blob, at, version) || version != 1 || !get_raw(blob, at, frames)) return false;
-    if (frames > 1u << 20) return false;
+    if (!get_raw(blob, at, version) || (version != 1 && version != 2) || !get_raw(blob, at, frames)) return false;
+    if (frames > 1u << 20 || frames > blob.size() / 12) return false;
     StoreEntry e;
     e.track.frames.reserve(frames);
     for (u32 i = 0; i < frames; ++i) {
@@ -676,6 +853,9 @@ bool deserialize_entry(const std::string& blob, StoreEntry& out) {
             std::memcpy(v, blob.data() + at, sizeof v);
             at += sizeof v;
             f.faces[k] = face_from(v);
+            if (version >= 2)
+                for (Vec4& joint : f.faces[k].joints)
+                    if (!get_raw(blob, at, joint)) return false;
         }
         e.track.frames.push_back(f);
     }

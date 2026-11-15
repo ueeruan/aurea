@@ -182,7 +182,12 @@ struct EditorView: View {
         .fullScreenCover(isPresented: $model.showExport) { ExportView() }
         // 0.4.6: o assistente de IA em tela cheia (AssistantView.swift).
         .background(Color.clear.fullScreenCover(isPresented: $model.assistantOpen) {
-            AssistantView(close: { model.assistantOpen = false }).environmentObject(model)
+            // AureaMCP substitui o chat de IA; o chat antigo volta com AureaMcpFlags.legacyChat.
+            if AureaMcpFlags.legacyChat {
+                AssistantView(close: { model.assistantOpen = false }).environmentObject(model)
+            } else {
+                AureaMcpView(close: { model.assistantOpen = false }).environmentObject(model)
+            }
         })
         .fullScreenCover(item: $model.effectSearch) { request in
             // A tela "Adicionar efeito" (ou só a busca): EffectsBrowser.swift.
@@ -1049,7 +1054,7 @@ struct ContextSheet: View {
             case .captions:
                 CaptionsPanel()
             case .vector:
-                VectorPanel()
+                VectorPanel(face: model.vectorFace)
             case .aiVideo:
                 AiVideoPanel()
             case .filters:
@@ -1066,6 +1071,15 @@ struct ContextSheet: View {
                 DrawingPanelView()
             case .editPoints:
                 EditPointsPanelView()
+            // Funções do AUREA (13/11/2026).
+            case .layerOptions:
+                LayerOptionsPanel()
+            case .layer3DFunctions:
+                Layer3DFunctionsPanel()
+            case .textLayout:
+                TextPanelView(layout: true)
+            case .animation:
+                AnimationPanelView()
             }
             }
             .modifier(PanelEntrance(panel: model.panel, onAppear: false))
@@ -1213,6 +1227,9 @@ private struct BatchToolsView: View {
 // TextPanel.kt: live content, selection spans, and the in-panel font browser.
 private struct TextPanelView: View {
     @EnvironmentObject private var model: AureaModel
+    /// Funções (F4): falso = EDITAR TEXTO (um assunto, sem abas); verdadeiro = LAYOUT DO
+    /// TEXTO (Espaçamento · Caixa · Caminho · Dinâmico). Par do `TextPanel(env, layout)`.
+    var layout = false
     @State private var content = ""
     @State private var selection = NSRange(location: 0, length: 0)
     @State private var editing = false
@@ -1273,7 +1290,7 @@ private struct TextPanelView: View {
     private var selectedStyles: [[String: Any]] { fonts.filter { $0["family"] as? String == currentFont } }
     var body: some View {
         VStack(spacing: 0) {
-            PanelHeader(title: AureaText.t(showingFonts ? "panel_fonte" : "text_options")) { dismissEditing(); model.panel = .none }
+            PanelHeader(title: AureaText.t(showingFonts ? "panel_fonte" : layout ? "fn_text_layout" : "sh_dock_edit_text")) { dismissEditing(); model.panel = .none }
             if showingFonts { fontPanel }
             else {
                 // O desenho dos painéis de propriedade: a coluna fixa à esquerda, o conteúdo no
@@ -1285,7 +1302,9 @@ private struct TextPanelView: View {
                     VStack(spacing: 0) {
                         ScrollView {
                             VStack(alignment: .leading, spacing: 0) {
-                                if tab == 0 {
+                                if layout {
+                                    TextAppearanceControls(page: 3 + tab)
+                                } else {
                         ZStack(alignment: .topLeading) {
                             if content.isEmpty { Text(AureaText.t("panel_digite_texto")).font(.aurea(size: 15)).foregroundStyle(AureaColors.muted).padding(.horizontal, 12).padding(.vertical, 10).allowsHitTesting(false) }
                             NativeTextInput(text: $content, selection: $selection, editing: $editing, editable: false,
@@ -1313,28 +1332,26 @@ private struct TextPanelView: View {
                             }.frame(height: 48).contentShape(RoundedRectangle(cornerRadius: 10))
                         }.buttonStyle(AureaPressStyle(shrink: 1)).padding(.top, 10)
                                     TextAppearanceControls(page: 0)
-                                } else if tab == 1 {
-                                    TextAppearanceControls(page: 1)
-                                } else if tab == 2 {
-                                    TextAppearanceControls(page: 2)
-                                } else {
-                                    TextAnimationSection(onEditing: { animatorOpen = $0 })
-                                    if !animatorOpen {
-                                        PanelItemRow(glyph: CupertinoGlyph.Move, title: AureaText.t("la_animators"), tag: "text.layer.animators", chevron: true) { model.transformTab = 6; model.openPanel(.transform) }.padding(.top, 6)
+                                    // F4: o resto do texto mora noutras funções; os atalhos levam até elas.
+                                    PanelItemRow(glyph: CupertinoGlyph.DocText, title: AureaText.t("fn_text_layout"), tag: "text.layout.link", chevron: true) {
+                                        dismissEditing(); model.openPanel(.textLayout)
+                                    }.padding(.top, 8)
+                                    PanelItemRow(glyph: CupertinoGlyph.Sparkles, title: AureaText.t("la_animators"), tag: "text.layer.animators", chevron: true) {
+                                        dismissEditing(); AnimationPanelRequest.tab = .text; model.openPanel(.animation)
                                     }
                                 }
                             }.padding(.horizontal, 8).padding(.top, 8).padding(.bottom, 24)
                         }
                         .scrollDismissesKeyboard(.interactively)
                     }
-                    if !(tab == 3 && animatorOpen) {
+                    if layout {
                         AureaColors.contentStrongLine.frame(width: 0.7)
                         PanelIconTabs(tabs: [
-                            PanelIconTab(glyph: CupertinoGlyph.Textformat, label: AureaText.t("panel_texto"), id: "text.tab.text"),
-                            PanelIconTab(glyph: CupertinoGlyph.Paintbrush, label: AureaText.t("tx_tab_style"), id: "text.tab.style"),
-                            PanelIconTab(glyph: CupertinoGlyph.DocText, label: AureaText.t("tx_tab_layout"), id: "text.tab.layout"),
-                            PanelIconTab(glyph: CupertinoGlyph.Sparkles, label: AureaText.t("tx_tab_animator"), id: "text.tab.animator"),
-                        ], selected: tab, group: AureaText.t("text_options")) { tab = $0; model.timelineFocus = nil }
+                            PanelIconTab(glyph: CupertinoGlyph.ArrowLeftRight, label: AureaText.t("edt_prop_spacing"), id: "textLayout.tab.spacing"),
+                            PanelIconTab(glyph: CupertinoGlyph.Square, label: AureaText.t("panel_caixa"), id: "textLayout.tab.box"),
+                            PanelIconTab(glyph: CupertinoGlyph.Scribble, label: AureaText.t("panel_caminho"), id: "textLayout.tab.path"),
+                            PanelIconTab(glyph: CupertinoGlyph.Timer, label: AureaText.t("text_dynamic"), id: "textLayout.tab.dynamic"),
+                        ], selected: tab, group: AureaText.t("fn_text_layout")) { tab = $0; model.timelineFocus = nil }
                     }
                 }
             }

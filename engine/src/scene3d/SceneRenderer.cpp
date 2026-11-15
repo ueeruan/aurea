@@ -1639,6 +1639,12 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             }
             if (over.mask & 16) values.factors[4] = over.metallic;
             if (over.mask & 32) values.factors[5] = over.roughness;
+            // v76: EMISSÃO do material (cor linear e força). Sem os bits, a do
+            // arquivo: o projeto antigo desenha bit a bit igual.
+            if (over.mask & 64) values.factors[6] = over.emissive.x;
+            if (over.mask & 128) values.factors[7] = over.emissive.y;
+            if (over.mask & 256) values.factors[8] = over.emissive.z;
+            if (over.mask & 512) values.factors[9] = std::max(0.0f, over.emissiveStrength);
             if (over.mask & 48) values.unlit = false; // An explicit PBR edit opts this instance into lighting.
             hasOverride = true;
             break;
@@ -1686,16 +1692,27 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         if (!swap.texture.valid()) return source;
         u32 repeatBits = 0;
         std::memcpy(&repeatBits, &swap.repeat, sizeof repeatBits);
-        const auto cacheKey = std::make_pair(source, swap.texture.id * 1099511628211ull ^ repeatBits);
+        u64 key = swap.texture.id * 1099511628211ull ^ repeatBits;
+        // v76: deslocamento e giro da textura (o rolar já vem somado ao
+        // deslocamento). Zeros = a chave de antes: a mesma cópia de sempre.
+        const f32 transform[3]{swap.offset.x, swap.offset.y, swap.rotation};
+        for (const f32 v : transform) {
+            u32 bits = 0;
+            std::memcpy(&bits, &v, sizeof bits);
+            if (bits) key = (key ^ (static_cast<u64>(bits) + 0x9e3779b97f4a7c15ull + (key << 6) + (key >> 2))) * 0xbf58476d1ce4e5b9ull;
+        }
+        const auto cacheKey = std::make_pair(source, key);
         if (auto found = texturedCopies.find(cacheKey)) return *found;
         auto& mat = copy_material(source);
         mat.tex[0] = swap.texture;
         mat.graphBase = FGTexture{};   // a troca por parte vence a textura do material
         mat.samp[0] = swapSampler_;
         const f32 repeat = std::isfinite(swap.repeat) && swap.repeat > 0.0f ? swap.repeat : 1.0f;
-        mat.factors.baseColorTex.offset = Vec2{0.0f, 0.0f};
+        mat.factors.baseColorTex.offset = Vec2{std::isfinite(swap.offset.x) ? swap.offset.x : 0.0f,
+                                               std::isfinite(swap.offset.y) ? swap.offset.y : 0.0f};
         mat.factors.baseColorTex.scale = Vec2{repeat, repeat};
-        mat.factors.baseColorTex.rotation = 0.0f;
+        mat.factors.baseColorTex.rotation = std::isfinite(swap.rotation) ? swap.rotation : 0.0f;
+
         mat.factors.baseColorTex.texCoord = 0;
         mat.factors.baseColor.x = mat.factors.baseColor.y = mat.factors.baseColor.z = 1.0f;
         texturedCopies.emplace(cacheKey, &mat);

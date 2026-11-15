@@ -21,7 +21,7 @@ bool Engine::continue_preview_graph_locked(u64 frameStart, Status& result) noexc
         const bool changed = !project_ || !surfaceAttached_ || pendingSurfaceSize_.load(std::memory_order_acquire)
             || state() != EngineState::Ready || gpuGeneration_ != livePreviewGraphGpuGeneration_
             || projectSession_ != livePreviewGraphKey_.session
-            || modelRevision_.load(std::memory_order_acquire) != livePreviewGraphKey_.revision
+            || modelRevision_.load(std::memory_order_acquire) != lastRenderedRevision_
             || project_->timeline().current().pack() != livePreviewGraphKey_.composition
             || playback_.generation() != livePreviewGraphPlaybackGeneration_
             || playback_.media_epoch() != livePreviewGraphKey_.mediaEpoch
@@ -85,7 +85,6 @@ bool Engine::continue_preview_graph_locked(u64 frameStart, Status& result) noexc
         return true;
     }
     lastRenderedFrame_ = livePreviewGraphKey_.playhead;
-    lastRenderedRevision_ = static_cast<u32>(livePreviewGraphKey_.revision);
     lastIncomplete_ = renderer_.take_incomplete() || snapshot_.missingVideoFrames || snapshot_.staleVideoFrames;
     lastSkipped_ = false;
     incompleteRetries_ = 0;
@@ -108,7 +107,7 @@ bool Engine::continue_preview_graph_locked(u64 frameStart, Status& result) noexc
     refinePending_ = false;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
-        const PreviewIdleKey current{projectSession_, modelRevision_.load(std::memory_order_acquire),
+        const PreviewIdleKey current{projectSession_, preview_cache_revision(),
             project_ ? project_->timeline().current().pack() : 0, playback_.media_epoch(), playback_.current().value};
         const bool eligible = !playing && !lastIncomplete_ && !previewBuffering_
             && playback_.mode() == PlaybackMode::Paused && !rawPlaybackLayer_.valid()

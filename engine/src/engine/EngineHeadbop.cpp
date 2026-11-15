@@ -57,7 +57,7 @@ EffectInstance* headbop_instance(Composition* comp, u64 layerId, u32 effectId, L
     layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer) return nullptr;
     EffectInstance* e = layer->find_effect(EffectId{effectId, 0});
-    if (!e || e->type != effect_type_id(headbop::kHeadbopKey) || e->params.size() < headbop::kParamCount) return nullptr;
+    if (!e || e->type != effect_type_id(headbop::kHeadbopKey) || e->params.size() < headbop::kBodyRigFirst) return nullptr;
     return e;
 }
 
@@ -331,6 +331,12 @@ bool Engine::headbop_analyze() noexcept {
             if (!e || l->source.pack() != revisionKey) return fail(3);
             history_.before_mutation(*comp, project_->timeline().current(), "headbop: analisar");
             bump_model_revision_locked();
+            const usize previousCount = e->params.size();
+            if (previousCount < kParamCount) {
+                e->params.resize(kParamCount);
+                for (usize index = previousCount; index < e->params.size(); ++index)
+                    e->params[index].constant = ParamValue::vec2(0.f, 0.f);
+            }
             set_const(*e, kRigToken, static_cast<f32>(token));
             set_const(*e, kRigState, static_cast<f32>(still.count ? 1 + still.count : 1));
             for (u32 i = 0; i < kMaxFaces; ++i) {
@@ -343,6 +349,12 @@ bool Engine::headbop_analyze() noexcept {
                 set_const(*e, b + 4, f.neck.x, f.neck.y);
                 set_const(*e, b + 5, f.shoulderA.x, f.shoulderA.y);
                 set_const(*e, b + 6, f.shoulderB.x, f.shoulderB.y);
+                for (u32 joint = 0; joint < kBodyJoints; ++joint) {
+                    const u32 index = kBodyRigFirst + (i * kBodyJoints + joint) * 2;
+                    const Vec4 point = f.joints[joint];
+                    set_const(*e, index, point.x, point.y);
+                    set_const(*e, index + 1, point.z, point.w);
+                }
             }
             if (grid.bpm > 0.0) {
                 set_const(*e, kAutoBpm, static_cast<f32>(grid.bpm));

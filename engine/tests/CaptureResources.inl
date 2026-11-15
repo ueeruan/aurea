@@ -216,11 +216,13 @@ AUREA_TEST(CaptureResources, ExactCaptureReleasesAndDrainsUnusedDisplayFramesBef
     AUREA_CHECK_EQ(displays.size(), usize{3});
     const u32 submitted = mock->framesSubmitted;
     bool drainedBeforeCapture = false, displaySeenInAdmission = false; u32 admissionQueries = 0;
-    mock->beforeWaitIdle = [&] {
+    mock->beforeWaitFrame = [&](u64 frame, u64) {
         if (mock->framesSubmitted == submitted) {
             drainedBeforeCapture = engine.renderer().preview_cached_count() == 0;
             for (const usize index : displays) drainedBeforeCapture &= !mock->textureAlive[index];
         }
+        AUREA_CHECK(frame <= mock->last_submitted_frame());
+        return OkStatus;
     };
     mock->queryMemoryStats = [&] {
         GpuMemoryStats stats;
@@ -242,7 +244,7 @@ AUREA_TEST(CaptureResources, ExactCaptureReleasesAndDrainsUnusedDisplayFramesBef
     AUREA_CHECK_EQ(mock->framesSubmitted, submitted + 1);
     AUREA_CHECK(drainedBeforeCapture); AUREA_CHECK(admissionQueries > 0);
     AUREA_CHECK(!displaySeenInAdmission); AUREA_CHECK_EQ(engine.renderer().preview_cached_count(), 0u);
-    mock->beforeWaitIdle = {}; mock->queryMemoryStats = {};
+    mock->beforeWaitFrame = {}; mock->queryMemoryStats = {};
     AUREA_CHECK(engine.render_frame().ok());
     AUREA_CHECK_EQ(engine.renderer().preview_cached_count(), 1u); // preview regenerates normally
     engine.shutdown();
@@ -392,20 +394,27 @@ AUREA_TEST(CaptureResources, FailedGraphUsesABoundedFenceAndPreservesItsOriginal
     TextureDesc desc; desc.width = 320; desc.height = 180; desc.renderTarget = desc.sampled = true;
     desc.format = SurfaceFormat::RGBA16F;
     const auto target = mock->create_texture(desc); AUREA_CHECK(target.ok()); if (!target) return;
-    engine.renderer().set_transient_allocation_limit(4ull << 20);
+    // Deny even the first segment's backing. A later blocked segment would
+    // exercise the capture inactivity deadline instead of failed admission.
+    engine.renderer().set_transient_allocation_limit(0);
     const u32 idleBefore = mock->idleWaits.load();
     u32 fenceCalls = 0;
     mock->beforeWaitFrame = [&](u64, u64 timeout) {
         ++fenceCalls; AUREA_CHECK(timeout <= 100'000'000);
+        // Recovery first retires the failed whole graph before admitting a
+        // segment. Block only the submission that actually fails admission.
+        if (fenceCalls == 1) return OkStatus;
         std::this_thread::sleep_for(std::chrono::nanoseconds(timeout));
         return Status{Errc::Timeout};
     };
     const auto begin = std::chrono::steady_clock::now();
     const Status failed = engine.render_offscreen(*target, 320, 180);
     const auto elapsed = std::chrono::steady_clock::now() - begin;
+    std::printf("\n    failed graph status=%d elapsed_ms=%.2f fence_calls=%u\n", failed.raw(),
+        std::chrono::duration<double, std::milli>(elapsed).count(), fenceCalls);
     AUREA_CHECK_EQ(failed.code(), Errc::OutOfDeviceMemory); // A fence timeout does not replace the real failure.
     AUREA_CHECK(elapsed >= std::chrono::milliseconds(90) && elapsed < std::chrono::seconds(1));
-    AUREA_CHECK_EQ(fenceCalls, 1u); AUREA_CHECK_EQ(mock->idleWaits.load(), idleBefore);
+    AUREA_CHECK_EQ(fenceCalls, 2u); AUREA_CHECK_EQ(mock->idleWaits.load(), idleBefore);
     const u32 submitted = mock->framesSubmitted, created = mock->texturesCreated;
     AUREA_CHECK_EQ(engine.render_offscreen(*target, 320, 180).code(), Errc::Timeout);
     AUREA_CHECK_EQ(mock->framesSubmitted, submitted); AUREA_CHECK_EQ(mock->texturesCreated, created);
@@ -413,7 +422,7 @@ AUREA_TEST(CaptureResources, FailedGraphUsesABoundedFenceAndPreservesItsOriginal
     mock->beforeWaitFrame = {};
     engine.renderer().set_transient_allocation_limit(~u64{0});
     AUREA_CHECK(engine.render_offscreen(*target, 320, 180).ok());
-    AUREA_CHECK(mock->idleWaits.load() > idleBefore); // Successful capture retains its established readback wait.
+    AUREA_CHECK_EQ(mock->idleWaits.load(), idleBefore); // Completion uses the submitted fence, without draining unrelated work.
     AUREA_CHECK(mock->textureAlive[target->id - 1]);
     mock->destroy_texture(*target); engine.shutdown();
 }

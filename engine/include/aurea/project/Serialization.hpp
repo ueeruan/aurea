@@ -55,6 +55,9 @@ enum class SectionKind : u16 {
     Thumbnails  = 9,
     Rig3D       = 10,   ///< 0.3.6: receita do AutoRig/mapa humanoide por asset
     Plugins     = 11,   ///< Plugin V3: id e versão dos plugins que o projeto usa
+    Expressions = 12,   ///< AE expressions: itens do Menu suspenso e expressão do caminho da máscara
+    MaskRig     = 13,   ///< lote M: chaves/feather variável/RotoBezier das máscaras e as ligações de caminho (nulos)
+    VectorTree  = 15,   ///< lote X: árvore de formas do AE (ordem livre, itens a mais, grupos de dentro, inclinação) de cada camada vetorial
     _Count,
 };
 
@@ -95,7 +98,30 @@ struct SectionHeader {
 /// v68: AE animation — auto-orientar de cada camada, câmera de dois nós com o
 /// Ponto de Interesse e os keys do texto-fonte (Source Text).
 /// v69 (0.5.2): preenchimento com textura do texto (TextData::texture).
-constexpr u32 kTimelineSectionVersion = 69;
+/// v70: o restante do animador de texto do AE (HSB/opacidade do traço, valor e
+/// intervalo de caractere, tipo de tracking, âncora da linha) e a ordem
+/// preenchimento/traço do texto.
+/// v71: a expressão do texto-fonte de cada texto (no fim do bloco da v70).
+/// v72: mistura entre caracteres do texto e o alinhamento de caractere de cada
+/// animador (no fim do bloco da v70, depois da expressão).
+/// v73: lote K — bits de cada keyframe (bézier automática/contínua, vagante),
+/// um byte depois da força da bézier.
+/// v74: AE layers — qualidade (Melhor/Rascunho/Arame) e amostragem bicúbica de
+/// cada camada (no fim da seção, só as que fogem do padrão).
+/// v75: painel 3D › Animação — Evolução parada (Model3DData::animProgress) e
+/// Repetir (animLoop) do clipe de cada modelo 3D (no fim da seção, depois da
+/// v74, só os que fogem do padrão). A trilha TrackProperty::ModelAnimProgress
+/// vai com as outras trilhas.
+/// v76: painel 3D (opções extras) — Começar em, De trás para frente e Ida e
+/// volta do clipe (Model3DData::animStart/animReverse/animPingPong) e a
+/// EMISSÃO de cada material (MaterialOverride bits 6..9), no fim da seção,
+/// depois da v75, só os modelos que fogem do padrão. A trilha
+/// TrackProperty::ModelAnimSpeed e os keyframes da emissão vão com as outras.
+/// v77: legendas no jeito do Premiere — no fim do registro de cada faixa de
+/// legendas: duração mínima, intervalo entre legendas, quebrar no fim da frase,
+/// alinhamento, entrelinha, margem/raio do fundo, cor/desfoque da sombra, e as
+/// mesmas partes de aparência no estilo próprio de cada bloco.
+constexpr u32 kTimelineSectionVersion = 77;
 
 /// Cabeçalho do arquivo.
 struct FileHeader {

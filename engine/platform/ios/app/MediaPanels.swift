@@ -982,8 +982,6 @@ struct CaptionsPanel: View {
             AureaToggle(checked: value.wrappedValue, onCheckedChange: { value.wrappedValue = $0 })
         }.frame(height: 44)
     }
->>>>
-
     private func open() {
         jobRevision = UUID()
         loading?.cancel(); job?.cancel(); busy = nil; error = nil; editing = nil

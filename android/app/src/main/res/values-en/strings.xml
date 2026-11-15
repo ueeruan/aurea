@@ -1777,7 +1777,7 @@ to edit the curve.</string>
     <string name="am_import_failed">Couldn\'t import: %1$s</string>
     <string name="am_import_nothing">no effect with an Aurea equivalent</string>
     <string name="release_notes_title">Aurea updates</string>
-    <string name="release_notes_body">Aurea Beta 0.5.4 (2219) — 14/11/2026\n\n• Edit mode with Media, Edit, Color, Audio and Text workspaces, a stable preview and orientation-aware panels.\n• Timeline with pinned track headers and scrolling bounded by the sequence start and end, including when zooming.\n• Color tools with independent serial nodes, rectangular and elliptical windows, wheels, curves, HSL, qualifier, LUTs and scopes.\n• HeadBop with 22 body joints, arm, hand and leg motion, and secondary hair and clothing motion.\n• DeepGlow with six-scale optical falloff, HDR thresholding, linear light, Add/Screen and chromatic offset.\n• Optical flow with scale and exposure corrections, slow motion and duplicate-frame reconstruction.\n• Motion tracking, stabilization and 3D Camera Tracker with low-contrast improvements and reorganized panels.\n• Lossless composition and group pre-render, a 540p cache and on-demand precomposition preparation.\n• Fixes for adjustment layers, effect margins, video recovery, memory use and export diagnostics.\n• Captions with an editable transcript, timing and text controls, styles, timeline dragging and SRT/VTT import and export.\n• Reorganized function, vector and mask panels. 3D objects include part, material, texture, lighting and animation controls.\n• AureaMCP connects AI agents to editor tools with undo history. AureaOS purchases are blocked during closed testing.</string>
+    <string name="release_notes_body">Aurea 1.0.0 (2220) — 15/11/2026\n\n• Redesigned mobile editing interface, larger preview, tool dock and pinned timeline headers.\n• Edit expanded group layers through the inspector.\n• 3D Parts tab with joints, adjustable pivots and animated transforms.\n• V3 audio plugins with delay, filters, EQ, compressor, limiter and convolution. Up to 1024 audio and stack parameters.\n• AureaHYPER with optimized motion search, adaptive preview and temporal reconstruction for compatible 3D scenes.\n• Export recovery preserves requested quality.\n• Color nodes, curves, wheels, windows and scopes. Full-body HeadBop, DeepGlow and tracking and optical flow improvements.\n• Editable captions, group pre-render and AureaMCP integration.\n• AureaOS purchases remain blocked during closed testing.</string>
     <string name="am_import_lossless_required">This preset contains effects, parameters or layers that cannot be preserved during conversion. Nothing was saved or applied.</string>
     <string name="am_import_read_failed">The file could not be read (64 MB limit), or the selected layer changed. Please try again.</string>
     <string name="world_explosive">Explosive</string>
@@ -5019,7 +5019,7 @@ to edit the curve.</string>
     <string name="fn_mask_tab_shape">Shape</string>
     <string name="fn_mask_edge_hint">Tap a row\'s name to pick it: the ◆ and the curve on the left column act on it.</string>
     <string name="fn_vec_paths_title">Paths and operators</string>
-    <string name="fn_part_list_hint">Tap a part to change its texture or hide it.</string>
+    <string name="fn_part_list_hint">Choose a part to animate, adjust its pivot or edit its appearance.</string>
     <string name="fn_part_animated">Animated</string>
     <string name="fn_part_back">Back to parts</string>
     <string name="fn_part_texture">Texture</string>
@@ -5043,4 +5043,9 @@ to edit the curve.</string>
     <string name="fxl_window_softness">Window softness</string>
     <string name="fxl_invert_window">Invert window</string>
     <string name="fxl_show_window">Show window</string>
+    <string name="plug_kind_audio">Audio processor</string>
+    <string name="part_position_axis">Position %1$s</string>
+    <string name="part_scale_axis">Scale %1$s</string>
+    <string name="part_pivot_axis">Pivot %1$s</string>
+    <string name="plug_audio_ms">DSP · %1$s ms per 4,096 audio frames</string>
 </resources>

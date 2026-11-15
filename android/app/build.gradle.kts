@@ -117,7 +117,7 @@ android {
         // Afinidade da MainActivity (AndroidManifest): o pacote de cada distribuição,
         // para o app da Play e o de sideload não dividirem a mesma tarefa.
         manifestPlaceholders["aureaTaskAffinity"] = aureaApplicationId
-        manifestPlaceholders["aureaAppLabel"] = "Aurea Beta"
+        manifestPlaceholders["aureaAppLabel"] = "Aurea"
 
         // 26 (Android 8.0) é o piso: abaixo disso não há AHardwareBuffer nem
         // Vulkan de forma confiável, e o pipeline zero-copy do motor não roda.
@@ -126,8 +126,8 @@ android {
         minSdk = 26
         targetSdk = 36
         // Deve superar os builds 2181–2191 já distribuídos; nunca reduzir o código.
-        versionCode = 2217
-        versionName = "0.5.2-beta"
+        versionCode = 2220
+        versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

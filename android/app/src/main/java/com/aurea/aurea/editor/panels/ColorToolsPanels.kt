@@ -183,7 +183,7 @@ internal fun FiltersPanel(env: PanelEnv) {
         value = got
     }
     val names = listOf(R.string.grade_none) + LookNames
-    val adjustment = store.layers.firstOrNull { it.id == store.primary }?.adjustment == true
+    val adjustment = store.editingLayers.firstOrNull { it.id == store.primary }?.adjustment == true
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 8.dp)) {
         LazyRow(Modifier.fillMaxWidth().testTag("grade.filters"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             itemsIndexed(names) { i, name ->

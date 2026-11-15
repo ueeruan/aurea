@@ -29,6 +29,7 @@ u32 Engine::ensure_color_grade(u64 layerId, u32 role) noexcept {
     if (role < 1 || role > 3) return kInvalidIndex;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     const EffectTypeId type = effect_type_id(effect_keys::kColorGrade);
@@ -88,6 +89,7 @@ void reset_grade_locked(Layer& l, EffectInstance& e, const ParameterRegistry& pa
 bool Engine::apply_color_look(u64 layerId, u32 effectId, i32 look) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     EffectInstance* e = l ? l->find_effect(EffectId{effectId, 0}) : nullptr;
@@ -121,6 +123,7 @@ bool Engine::apply_color_look(u64 layerId, u32 effectId, i32 look) noexcept {
 bool Engine::reset_color_grade(u64 layerId, u32 effectId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     EffectInstance* e = l ? l->find_effect(EffectId{effectId, 0}) : nullptr;

@@ -27,9 +27,14 @@ enum Face3D {
     }
     /// 13/11/2026: no MODELO IMPORTADO, Material e Objeto 3D são o mesmo painel simples do
     /// modelo (Material · Textura · Animação · Sombra); os outros assuntos não mudam.
-    static let modelTabs: Set<Panel3DTab> = [.material, .texture, .anim, .shadow]
+    static let modelTabs: Set<Panel3DTab> = [.material, .parts, .texture, .anim, .shadow]
     func tabs(importedModel: Bool) -> Set<Panel3DTab>? {
-        importedModel && (self == .material || self == .object) ? Face3D.modelTabs : tabs
+        guard importedModel else { return tabs }
+        switch self {
+        case .material: return [.material, .texture, .shadow]
+        case .object: return [.parts, .anim]
+        default: return tabs
+        }
     }
     var titleKey: String? {
         switch self {
@@ -115,7 +120,7 @@ struct Panel3DView: View {
     /// Material · Textura · Animação · Sombra (Model3DMaterialView e vizinhos, no fim do arquivo).
     private var isImported: Bool { !isCamera && !isShape && !isText && !isImage && model.selectedLayer?.kind == 10 }
     /// Material, Textura e Animação do modelo importado: o ◆ da coluna esquerda marca a linha escolhida.
-    private var modelKeyed: Bool { isImported && (currentTab == .material || currentTab == .texture || currentTab == .anim) }
+    private var modelKeyed: Bool { isImported && (currentTab == .material || currentTab == .texture || currentTab == .parts || currentTab == .anim) }
     /// F6: só as abas do assunto aberto (`model.face3D`); vazio = todas.
     private var tabs: [Panel3DTab] {
         let all = allTabs
@@ -128,13 +133,13 @@ struct Panel3DView: View {
         if isImage { return [.material, .shape, .light, .render] }
         if isText { return [.material, .shape, .light, .anim, .render] }
         // 0.3.6: modelo importado ganha a aba Esqueleto (AutoRig 3D, ossos, IK, Motion Capture).
-        if isImported { return [.material, .texture, .anim, .shadow, .rig, .light, .render] }
+        if isImported { return [.material, .parts, .texture, .anim, .shadow, .rig, .light, .render] }
         return [.light, .material, .parts, .render]
     }
     /// Editar do modelo importado abre na Animação; Cor e preenchimento, no Material.
     private var currentTab: Panel3DTab {
         if let tab, tabs.contains(tab) { return tab }
-        if isImported && model.face3D == .object && tabs.contains(.anim) { return .anim }
+        if isImported && model.face3D == .object && tabs.contains(.parts) { return .parts }
         return tabs[0]
     }
 
@@ -739,7 +744,7 @@ struct Panel3DView: View {
         finishEditing()
         let target = layerId
         let ids = model.engine.materialTextureLayers(target).map(\.int64Value)
-        let names = Dictionary(model.layers.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+        let names = Dictionary(model.editingLayers.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
         let actions = ids.map { id in
             SheetAction(names[id].flatMap { $0.isEmpty ? nil : $0 } ?? AureaText.t("env3d_layer_unnamed")) {
                 guard model.primarySelection == target else { return }
@@ -828,12 +833,12 @@ struct Panel3DView: View {
     /// PARTES do objeto 3D (Element3DPanel.kt `PartsTab`): escolher a parte e
     /// pôr um efeito nela. Os ajustes e keyframes ficam no painel de Efeitos.
     @ViewBuilder private var partsTab: some View {
-        let names = isShape ? [] : model.engine.modelPartNames(layerId)
+        let names = isShape ? [] : model.engine.modelPartNames(layerId, includeJoints: true)
         VStack(alignment: .leading, spacing: 0) {
             if !isShape && !names.isEmpty {
                 // O modelo importado tem as abas Textura e Animação; isto sobra para um objeto 3D
                 // sem forma pronta que não é modelo importado (par do Android).
-                Parts3DEditor(layerId: layerId, names: names)
+                Parts3DEditor(layerId: layerId, names: names, animationOnly: true)
             } else {
             if isShape {
                 Shape3DPanelSection(layerId: layerId, page: .shape)
@@ -1776,7 +1781,7 @@ struct Model3DMaterialView: View {
     }
     private func lookOf(_ mask: UInt32) -> KeyframeLook {
         let targets: Set<UInt32> = target < 0 ? Set(materials.map { UInt32($0[0]) }) : [UInt32(target)]
-        let keys = (model.keyframes[layerId] ?? []).filter {
+        let keys = (model.keysForLayer(layerId) ?? []).filter {
             $0.property == 37 && targets.contains($0.effectIndex) && (mask >> $0.paramIndex) & 1 == 1
         }
         return keys.contains { $0.time == model.localPlayhead } ? .keyHere : keys.isEmpty ? .none : .animated
@@ -2015,6 +2020,7 @@ struct Parts3DEditor: View {
     let layerId: Int64
     let names: [String]
     var wholeModel = false
+    var animationOnly = false
     @EnvironmentObject private var model: AureaModel
     @State private var open: Int?
     @State private var picking = false
@@ -2056,7 +2062,7 @@ struct Parts3DEditor: View {
             let ps = params(e.effectId)
             let first = Int(value(ps.first, 0).rounded())
             if key == Self.hideKey { return first == part + 1 && Int(value(ps.count > 1 ? ps[1] : nil, 0).rounded()) == part + 1 }
-            return first == part + 1 && !coversAll(e)
+            return first == part + 1 && (key != Self.textureKey || !coversAll(e))
         }
     }
     private func ensure(_ key: String, part: Int) -> UInt32? {
@@ -2162,14 +2168,14 @@ struct Parts3DEditor: View {
         }
     }
     private func effectLook(_ fx: UInt32, _ index: UInt32) -> KeyframeLook {
-        let keys = (model.keyframes[layerId] ?? []).filter { $0.property == 31 && $0.effectIndex == fx && $0.paramIndex / 4 == index }
+        let keys = (model.keysForLayer(layerId) ?? []).filter { $0.property == 31 && $0.effectIndex == fx && $0.paramIndex / 4 == index }
         return keys.contains { $0.time == model.localPlayhead } ? .keyHere : keys.isEmpty ? .none : .animated
     }
     /// ◆ do parâmetro no cabeçote (o mesmo caminho da lista de efeitos), num passo de desfazer.
     private func toggleEffectKey(_ fx: UInt32, _ index: UInt32) {
         guard model.selectedLayer?.locked != true else { return }
         let time = model.localPlayhead
-        let here = (model.keyframes[layerId] ?? []).filter {
+        let here = (model.keysForLayer(layerId) ?? []).filter {
             $0.property == 31 && $0.effectIndex == fx && $0.paramIndex / 4 == index && $0.time == time
         }
         model.beginGesture("keyframe da textura 3D")
@@ -2226,6 +2232,19 @@ struct Parts3DEditor: View {
             }.buttonStyle(.plain).accessibilityLabel(AureaText.t("fn_part_back")).accessibilityIdentifier("panel3d.part.back")
             Text(name).font(.aurea(size: 15, weight: .bold)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
         }.accessibilityElement(children: .contain).accessibilityIdentifier("panel3d.part.open")
+        let transformKey = "aurea.3d.part_transform"
+        if let transform = effect(transformKey, part: part) {
+            let ps = params(transform.effectId)
+            sectionTitle("fx3d_name_part_transform")
+            ForEach(Array(ps.indices.dropFirst()), id: \.self) { index in
+                let parameter = ps[index]
+                partTransformRuler(transform.effectId, parameter, index: index)
+            }
+        } else {
+            Button(AureaText.t("fx3d_name_part_transform")) { _ = ensure(transformKey, part: part) }
+                .frame(minHeight: 48).accessibilityIdentifier("panel3d.part.animate")
+        }
+        if !animationOnly {
         textureRows(effect(Self.textureKey, part: part), tag: "panel3d.part.texture")
         let hide = effect(Self.hideKey, part: part)
         NativePanelToggle(AureaText.t("fn_part_hide"), checked: hide?.enabled == true) { on in
@@ -2238,5 +2257,32 @@ struct Parts3DEditor: View {
                 model.engine.setEffect(hide.effectId, forLayer: layerId, enabled: on); model.refreshModel(force: true)
             }
         }.padding(.top, 6).accessibilityIdentifier("panel3d.part.hide")
+        }
+    }
+
+    private func partTransformRuler(_ effect: UInt32, _ parameter: [String: Any], index: Int) -> some View {
+        let id = "panel3d.part.transform.\(index)"
+        let look = effectLook(effect, UInt32(index))
+        let toggle = { toggleEffectKey(effect, UInt32(index)) }
+        let keys = Model3DKeyTarget.shared
+        let _ = DispatchQueue.main.async { keys.sync(id, look: look, toggle: toggle) }
+        let axes = ["X", "Y", "Z"]
+        let label: String
+        switch index {
+        case 1...3: label = AureaText.t("part_position_axis", axes[index - 1])
+        case 4...6: label = AureaText.t("edt_rotation_axis", axes[index - 4])
+        case 7: label = AureaText.t("fxl_scale")
+        case 8...10: label = AureaText.t("part_pivot_axis", axes[index - 8])
+        default: label = AureaText.t("part_scale_axis", axes[index - 11])
+        }
+        return NativePanelRuler(label: label, value: value(parameter, 0),
+            step: (4...6).contains(index) ? 1 : 0.5,
+            range: number(parameter, AureaParamMin, -300)...number(parameter, AureaParamMax, 400),
+            unit: (4...6).contains(index) ? "°" : "%", decimals: 1,
+            reset: (index == 7 || index >= 11) ? 100 : 0, keypad: true, look: look,
+            selected: keys.tag == id, onSelect: { keys.claim(id, look: look, toggle: toggle) }, identifier: id) {
+                keys.claim(id, look: look, toggle: toggle)
+                write(effect, index: UInt32(index), $0)
+            }
     }
 }

@@ -256,7 +256,7 @@ private enum class LayerPopout { None, Speed, Volume }
 /** A camada como o painel a vê (ou nula, se ela sumiu). */
 private fun panelLayerOf(store: EditorStore, layerId: Long): PanelLayer? {
     val d = store.detail?.takeIf { it.id == layerId }
-    return store.layers.firstOrNull { it.id == layerId }?.let {
+    return store.editingLayers.firstOrNull { it.id == layerId }?.let {
         PanelLayer(
             id = it.id,
             kind = it.kind,

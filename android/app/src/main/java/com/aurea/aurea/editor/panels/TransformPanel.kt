@@ -493,7 +493,7 @@ private fun resetRotation(store: EditorStore, d: LayerDetail, show3D: Boolean) {
 }
 
 private fun resetScale(store: EditorStore) {
-    if (store.layers.firstOrNull { it.id == store.primary }?.isThreeD == true) store.setScale3(floatArrayOf(1f, 1f, 1f))
+    if (store.editingLayers.firstOrNull { it.id == store.primary }?.isThreeD == true) store.setScale3(floatArrayOf(1f, 1f, 1f))
     else store.setTransform2(TrackProperty.SCALE_X, 1f, TrackProperty.SCALE_Y, 1f)
 }
 

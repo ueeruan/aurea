@@ -74,7 +74,7 @@ import com.aurea.aurea.ui.theme.tocavel
 internal fun CaptionsPanel(env: PanelEnv) {
     val store = env.store
     val cap = store.captions
-    val sourceLayers = store.layers.filter { it.kind == 1 || it.kind == 3 }
+    val sourceLayers = store.editingLayers.filter { it.kind == 1 || it.kind == 3 }
     val selectedCaption = remember(store.primary, store.curveRevision) { cap.isCaption(store.primary) }
     if (store.primary == null || (store.detail?.kind != 1 && store.detail?.kind != 3 && !selectedCaption)) {
         LazyColumn(Modifier.fillMaxSize().padding(18.dp)) {

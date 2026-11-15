@@ -558,14 +558,14 @@ final class AureaModel: ObservableObject {
         // camada só "na mão" da timeline (segurada/arrastada sem abrir as
         // opções): a geometria não muda no meio do gesto. Escolhendo keyframes, a
         // timeline fica alta (sem barra). Igual ao EditorScreen.kt.
-        let timelineOnly = !selection.isEmpty && selection == timelineOnlySelection
+        let timelineOnly = groupInnerSelection == nil && !editingSelection.isEmpty && editingSelection == timelineOnlySelection
         // Omega adicionar (área 08, P0-1): o conteúdo embutido acima da barra (.adding).
-        if showAddLayer { return selection.isEmpty || (timelineOnly && !timelineKeySelectMode) ? .adding : .none }
+        if showAddLayer { return editingSelection.isEmpty || (timelineOnly && !timelineKeySelectMode) ? .adding : .none }
         // O painel da Aurea AI CRIA a camada: abre sem nada selecionado (igual ao Android).
         if panel == .aiVideo || panel == .captions { return .panel }
-        if selection.isEmpty { return .addBar }
+        if editingSelection.isEmpty { return .addBar }
         if timelineOnly && (panel == .none || panel == .dock) { return timelineKeySelectMode ? .none : .addBar }
-        if selection.count > 1 { return .batch }
+        if editingSelection.count > 1 { return .batch }
         if panel == .curve { return .curve }
         return panel == .none || panel == .dock ? .dock : .panel
     }
@@ -612,7 +612,7 @@ final class AureaModel: ObservableObject {
         let linked2DScale = scaleAxesLinked && (3...4).contains(key.property)
         guard threeD || linked2DScale else { return [key] }
         let base = key.property / 3 * 3
-        let peers = (keyframes[layer] ?? []).filter {
+        let peers = (keysForLayer(layer) ?? []).filter {
             $0.effectIndex == UInt32.max && $0.property >= base && $0.property < base + (threeD ? 3 : 2) && $0.time == key.time
         }
         return peers.isEmpty ? [key] : peers
@@ -2120,6 +2120,7 @@ final class AureaModel: ObservableObject {
         // sobe de 128/64 MB para 192/96 MB, como no Android.
         let reserve: UInt64 = DeviceMemoryClass.low ? 192 * 1024 * 1024 : 128 * 1024 * 1024
         let critical: UInt64 = DeviceMemoryClass.low ? 96 * 1024 * 1024 : 64 * 1024 * 1024
+        engine.reportMemoryHeadroom(available, critical: critical, lowMemory: available < critical)
         // For an app, zero can also mean its allocation limit is already exceeded.
         if available < reserve {
             let level: Int32 = available < critical ? 15 : 10
@@ -2370,7 +2371,27 @@ final class AureaModel: ObservableObject {
     }
 
     /// O que depende da camada escolhida: efeitos, parâmetros e o inspetor.
+    @Published private var inlineKeys: [KeyframeItem] = []
+    func keysForLayer(_ layer: Int64) -> [KeyframeItem]? {
+        groupInnerSelection?.layer == layer ? inlineKeys : keyframes[layer]
+    }
+
+    private func refreshInlineKeys() {
+        guard let target = groupInnerSelection else { if !inlineKeys.isEmpty { inlineKeys = [] }; return }
+        let fresh = engine.keyframesForLayer(target.layer).map { key in
+            KeyframeItem(property: (key["property"] as? NSNumber)?.uint32Value ?? 0,
+                paramIndex: (key["paramIndex"] as? NSNumber)?.uint32Value ?? 0,
+                effectIndex: (key["effectIndex"] as? NSNumber)?.uint32Value ?? 0,
+                time: (key["time"] as? NSNumber)?.int32Value ?? 0,
+                value: (key["value"] as? NSNumber)?.floatValue ?? 0,
+                interpolation: (key["interpolation"] as? NSNumber)?.uint32Value ?? 0,
+                timelineVisible: (key["timelineVisible"] as? NSNumber)?.boolValue ?? true)
+        }
+        if fresh != inlineKeys { inlineKeys = fresh }
+    }
+
     func refreshSelectedLayer(refreshEffectStack: Bool = true) {
+        refreshInlineKeys()
         guard !preRenderPreparing else { return }
         guard let layerId = primarySelection, started else {
             if !effects.isEmpty { effects = [] }
@@ -2534,11 +2555,20 @@ final class AureaModel: ObservableObject {
         openPanel(.effects)
     }
 
-    var primarySelection: Int64? { selection.first }
+    var primarySelection: Int64? { groupInnerSelection?.layer ?? selection.first }
+    var editingSelection: Set<Int64> { groupInnerSelection.map { Set([$0.layer]) } ?? selection }
+    var editingLayers: [LayerItem] {
+        if let target = groupInnerSelection { return (groupInnerRows[target.group] ?? []).map(\.layer) }
+        return layers
+    }
+
 
     /// A camada escolhida, para os painéis.
     var selectedLayer: LayerItem? {
         guard let id = primarySelection else { return nil }
+        if let inner = groupInnerSelection {
+            return groupInnerRows[inner.group]?.first { $0.layer.id == inner.layer }?.layer
+        }
         return layers.first { $0.id == id }
     }
 
@@ -2961,6 +2991,10 @@ final class AureaModel: ObservableObject {
     }
 
     func localFrame(for id: Int64?) -> Int32 {
+        if let inner = groupInnerSelection, id == inner.layer,
+           let detail = engine.layerDetail(inner.layer), let frame = detail["localPlayhead"] as? NSNumber {
+            return frame.int32Value
+        }
         guard let layer = layers.first(where: { $0.id == id }) else { return Int32(clamping: status.playhead) }
         return Int32(clamping: status.playhead - Int64(layer.startFrame) + Int64(layer.offsetFrames))
     }
@@ -5199,7 +5233,7 @@ final class AureaModel: ObservableObject {
         default: value = cameraLens[5]
         }
         let local: Int32 = localPlayhead
-        let here: Bool = (keyframes[id] ?? []).contains { $0.property == property && $0.effectIndex == UInt32.max && $0.time == local }
+        let here: Bool = (keysForLayer(id) ?? []).contains { $0.property == property && $0.effectIndex == UInt32.max && $0.time == local }
         mutate { core in
             core.beginUndoGroup()
             if here { core.deleteKeyframe(forLayer: id, property: property, time: local) }
@@ -6882,7 +6916,7 @@ final class AureaModel: ObservableObject {
         guard let id = primarySelection, let poi = cameraPoi() else { return }
         let local = localPlayhead
         let props: [UInt32] = [51, 52, 53]   // TrackProperty::CameraPoiX/Y/Z
-        let here = (keyframes[id] ?? []).contains { props.contains($0.property) && $0.time == local }
+        let here = (keysForLayer(id) ?? []).contains { props.contains($0.property) && $0.time == local }
         mutate { engine in
             for (i, p) in props.enumerated() {
                 if here { engine.deleteKeyframe(forLayer: id, property: p, time: local) }
@@ -6922,7 +6956,7 @@ final class AureaModel: ObservableObject {
     }
 
     func deleteSelectedLayers(ripple: Bool? = nil) {
-        let targets = layers.filter { selection.contains($0.id) && !$0.locked }
+        let targets = editingLayers.filter { editingSelection.contains($0.id) && !$0.locked }
         guard !targets.isEmpty else { toast = AureaText.t("editor_camada_bloqueada_desbloqueie_editar"); return }
         if status.playing != 0 { playPause() }
         let ids = targets.map { NSNumber(value: $0.id) }
@@ -6932,6 +6966,19 @@ final class AureaModel: ObservableObject {
         else { engine.deleteLayers(ids) }
         clearSelection()
         refreshModel(force: true)
+    }
+
+    func duplicateSelectedLayers(_ requested: [Int64]? = nil) {
+        let ids = requested ?? editingLayers.filter { editingSelection.contains($0.id) }.map(\.id)
+        guard !ids.isEmpty else { return }
+        let group = groupInnerSelection?.group
+        let before = Set(group.flatMap { groupInnerRows[$0] }?.map { $0.layer.id } ?? [])
+        engine.duplicateLayers(ids.map { NSNumber(value: $0) })
+        commitPendingCommands()
+        refreshModel(force: true)
+        if let group, let created = groupInnerRows[group]?.first(where: { !before.contains($0.layer.id) }) {
+            selectGroupInner(group: group, layer: created.layer.id)
+        }
     }
 
     // --- Camadas: leitura e tempo -------------------------------------------
@@ -6963,7 +7010,7 @@ final class AureaModel: ObservableObject {
         guard let id = primarySelection, let d = engine.layerDetail(id),
               let start = (d["startFrame"] as? NSNumber)?.int64Value,
               let offset = (d["offsetFrames"] as? NSNumber)?.int64Value else { return false }
-        let times = Set((keyframes[id] ?? []).filter { $0.timelineVisible }.map { Int64($0.time) + start - offset }).sorted()
+        let times = Set((keysForLayer(id) ?? []).filter { $0.timelineVisible }.map { Int64($0.time) + start - offset }).sorted()
         let now = status.playhead
         let target = direction > 0 ? times.first { $0 > now } : times.last { $0 < now }
         guard let target else { return false }
@@ -7037,11 +7084,14 @@ final class AureaModel: ObservableObject {
         // decidir quem o cabeçote cobre. Parado, o quadro explícito de sempre.
         let live = playheadIsStale
         let slack: Int64 = live ? Self.liveSplitSlack : 0
-        let targets = layers.filter {
+        let targets = editingLayers.filter {
             ids.contains($0.id) && Int64(frame) + slack > Int64($0.startFrame) && Int64(frame) < Int64($0.endFrame) + slack
         }
         guard !targets.isEmpty, started else { return }
-        pendingSplit = (Set(layers.map(\.id)), targets, frame)
+        if let group = groupInnerSelection?.group {
+            inlineCreatedAfter = (group, Set((groupInnerRows[group] ?? []).map { $0.layer.id }))
+            pendingSplit = nil
+        } else { pendingSplit = (Set(layers.map(\.id)), targets, frame) }
         mutate { engine in
             if live { engine.pause() }
             for row in targets {
@@ -7155,7 +7205,7 @@ final class AureaModel: ObservableObject {
 
     /// ◆ segurado (P1-9): apaga TODAS as chaves da trilha, num passo de desfazer.
     func deleteAllKeyframes(_ layerId: Int64, property: UInt32) {
-        let keys = (keyframes[layerId] ?? []).filter { $0.property == property && $0.effectIndex == .max }
+        let keys = (keysForLayer(layerId) ?? []).filter { $0.property == property && $0.effectIndex == .max }
         guard !keys.isEmpty else { return }
         beginGesture("apagar keyframes")
         mutate { core in for key in keys { core.deleteKeyframe(forLayer: layerId, property: property, time: key.time) } }
@@ -7292,8 +7342,15 @@ final class AureaModel: ObservableObject {
     @Published private(set) var timelineInlineGroups: Set<Int64> = []
     /// As linhas de dentro de cada grupo aberto, relidas a cada revisão do modelo.
     @Published private(set) var groupInnerRows: [Int64: [GroupInnerRow]] = [:]
+    private var inlineCreatedAfter: (group: Int64, before: Set<Int64>)?
     /// A camada de dentro escolhida na timeline. nil = nenhuma.
-    @Published private(set) var groupInnerSelection: GroupInnerKey?
+    @Published private(set) var groupInnerSelection: GroupInnerKey? {
+        didSet {
+            if oldValue != groupInnerSelection {
+                _ = engine.setInlineEditTarget(groupInnerSelection?.group ?? 0, layer: groupInnerSelection?.layer ?? 0)
+            }
+        }
+    }
 
     func isInlineGroupOpen(_ group: Int64) -> Bool { timelineInlineGroups.contains(group) }
 
@@ -7311,7 +7368,9 @@ final class AureaModel: ObservableObject {
     /// Escolhe uma camada de dentro (a seleção da composição aberta sai: são ids de outra tabela).
     func selectGroupInner(group: Int64, layer: Int64) {
         clearSelection()
+        guard engine.setInlineEditTarget(group, layer: layer) else { return }
         groupInnerSelection = GroupInnerKey(group: group, layer: layer)
+        refreshSelectedLayer()
     }
 
     func clearGroupInnerSelection() { if groupInnerSelection != nil { groupInnerSelection = nil } }
@@ -7332,6 +7391,11 @@ final class AureaModel: ObservableObject {
             }
         }
         if next != groupInnerRows { groupInnerRows = next }
+        if let pending = inlineCreatedAfter,
+           let created = next[pending.group]?.first(where: { !pending.before.contains($0.layer.id) }) {
+            inlineCreatedAfter = nil
+            groupInnerSelection = GroupInnerKey(group: pending.group, layer: created.layer.id)
+        }
         if let key = groupInnerSelection, next[key.group]?.contains(where: { $0.layer.id == key.layer }) != true {
             groupInnerSelection = nil
         }
@@ -7652,7 +7716,7 @@ extension AureaModel {
             timelineKeySelection = current.toggledGroup(on: layer, group)
             return
         }
-        if primarySelection != layer || selection.count != 1 {
+        if primarySelection != layer || editingSelection.count != 1 {
             select(layerId: layer, additive: false, openOptions: false)
         }
         timelineKeySelectMode = mode
@@ -7663,7 +7727,7 @@ extension AureaModel {
 
     func selectAllTimelineKeys() {
         guard let layer = timelineKeySelection?.layer ?? primarySelection else { return }
-        let keys: [KeyframeItem] = keyframes[layer] ?? []
+        let keys: [KeyframeItem] = keysForLayer(layer) ?? []
         // As outras camadas já escolhidas continuam na seleção.
         var next = TimelineKeySelection.all(layer, keys, focus: timelineFocus)
         if let current = timelineKeySelection, current.layer == layer { next.others = current.others }
@@ -8537,13 +8601,13 @@ extension AureaModel {
 
     /// Barra inferior da seleção múltipla: 0 cortes, 1 todas depois do cabeçote, 2 todas antes.
     var multiTimeVariant: UInt32 {
-        guard !selection.isEmpty else { return 0 }
-        return engine.multiTimeActions(selection.map { NSNumber(value: $0) }, frame: status.playhead)
+        guard !editingSelection.isEmpty else { return 0 }
+        return engine.multiTimeActions(editingSelection.map { NSNumber(value: $0) }, frame: status.playhead)
     }
 
     /// Estende o início (ou o fim) das escolhidas destravadas até o cabeçote, num passo de desfazer.
     func extendSelectionToPlayhead(start: Bool) {
-        let targets = layers.filter { selection.contains($0.id) && !$0.locked }.map(\.id)
+        let targets = editingLayers.filter { editingSelection.contains($0.id) && !$0.locked }.map(\.id)
         guard !targets.isEmpty else { return }
         if status.playing != 0 { playPause() }
         beginGesture(start ? "estender inicio" : "estender fim")
@@ -8554,7 +8618,7 @@ extension AureaModel {
 
     /// "Copiar camada (com estilo)": com UMA escolhida, o estilo dela também vai para colar estilo.
     func copyLayersWithStyle() {
-        let ids = layers.filter { selection.contains($0.id) }.map { NSNumber(value: $0.id) }
+        let ids = editingLayers.filter { editingSelection.contains($0.id) }.map { NSNumber(value: $0.id) }
         guard !ids.isEmpty else { return }
         if ids.count == 1 { engine.copyStyle(ids[0].int64Value) }
         engine.copyLayers(ids)
@@ -8564,9 +8628,18 @@ extension AureaModel {
     /// As partes do estilo copiado (bits de `Engine::Style*`; 0 = nada).
     var copiedStyleParts: UInt32 { engine.copiedStyleParts() }
 
+    func pasteCopiedLayers() {
+        if let group = groupInnerSelection?.group {
+            inlineCreatedAfter = (group, Set((groupInnerRows[group] ?? []).map { $0.layer.id }))
+        }
+        let count = engine.pasteLayers(status.playhead)
+        if count == 0 { inlineCreatedAfter = nil }
+        refreshModel(force: true)
+    }
+
     /// Cola só as partes pedidas do estilo copiado (um passo de desfazer).
     func pasteStyleParts(_ parts: UInt32) {
-        let ids = layers.filter { selection.contains($0.id) }.map { NSNumber(value: $0.id) }
+        let ids = editingLayers.filter { editingSelection.contains($0.id) }.map { NSNumber(value: $0.id) }
         guard !ids.isEmpty, parts != 0 else { return }
         if status.playing != 0 { playPause() }
         let n = engine.pasteStyleParts(ids, parts: parts)

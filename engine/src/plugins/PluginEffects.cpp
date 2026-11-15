@@ -830,4 +830,27 @@ std::unique_ptr<Effect> make_stack_effect(const Manifest& m, std::vector<Compile
     return std::make_unique<PluginStackEffect>(m, std::move(steps));
 }
 
+class PluginAudioEffect final : public Effect {
+public:
+    PluginAudioEffect(const Manifest& manifest, std::shared_ptr<const AudioProgram> program)
+        : manifest_(manifest), program_(std::move(program)), key_(effect_key(manifest.id)),
+          name_(localized(manifest.name, "pt-BR")), strings_(make_strings(manifest_)) {
+        info_ = EffectInfo{key_.c_str(), name_.c_str(), "Áudio", EffectClass::PerPixel};
+    }
+    const EffectInfo& info() const noexcept override { return info_; }
+    void declare_parameters(ParameterRegistry& params) const override { declare_from_manifest(manifest_, strings_, params); }
+    bool is_identity(const EffectEval&) const noexcept override { return true; }
+    std::shared_ptr<const AudioProgram> audio_program() const noexcept override { return program_; }
+private:
+    Manifest manifest_;
+    std::shared_ptr<const AudioProgram> program_;
+    std::string key_, name_;
+    std::vector<ParamStrings> strings_;
+    EffectInfo info_{};
+};
+
+std::unique_ptr<Effect> make_audio_effect(const Manifest& manifest, std::shared_ptr<const AudioProgram> program) {
+    return std::make_unique<PluginAudioEffect>(manifest, std::move(program));
+}
+
 } // namespace aurea::plugins

@@ -141,7 +141,7 @@ struct TextAppearanceControls: View {
     /// instante cria/troca o key dele. Sempre congelados; na timeline, "Texto-fonte".
     private var sourceTextRow: some View {
         let track = TimelineTrack(property: 50, effect: 0, param: 0)
-        let keys = (model.keyframes[id] ?? []).filter { $0.property == 50 }
+        let keys = (model.keysForLayer(id) ?? []).filter { $0.property == 50 }
         let here = keys.contains { $0.time == model.localPlayhead }
         // v70: expressão no texto-fonte (o "=" abre a folha, como nas outras propriedades).
         let info = model.engine.expression(id, property: 50, effect: 0, param: 0)
@@ -168,7 +168,7 @@ struct TextAppearanceControls: View {
     /// O losango fica no rótulo, como no Alight: tocar nele escolhe a propriedade e o ◆ da coluna marca.
     private var trackingRow: some View {
         let track = TimelineTrack(property: 29)
-        let keys = (model.keyframes[id] ?? []).filter { $0.property == 29 && $0.effectIndex == UInt32.max }
+        let keys = (model.keysForLayer(id) ?? []).filter { $0.property == 29 && $0.effectIndex == UInt32.max }
         let here = keys.contains { $0.time == model.localPlayhead }
         return NativePanelRuler(label: AureaText.t("text_letter_spacing"), value: style[19], step: 0.25,
             range: -1000...1000, unit: "‰ em", keypad: true, look: here ? .keyHere : keys.isEmpty ? .none : .animated,
@@ -264,7 +264,7 @@ private struct NativeTextPathSection: View {
     @State private var ownMasks: [UInt32] = []
     private var id: Int64 { model.primarySelection ?? 0 }
     private var onPath: Bool { target != 0 || mask >= 0 }
-    private var candidates: [LayerItem] { model.layers.filter { $0.id != id && $0.kind == 5 && ((model.engine.layerDetail($0.id)?["shapeTypePoints"] as? NSNumber)?.uint32Value ?? 0) & 0xFFFF == 11 } }
+    private var candidates: [LayerItem] { model.editingLayers.filter { $0.id != id && $0.kind == 5 && ((model.engine.layerDetail($0.id)?["shapeTypePoints"] as? NSNumber)?.uint32Value ?? 0) & 0xFFFF == 11 } }
     /// Máscaras da camada de texto (cabeçalho de 12 valores por máscara em `maskData`, como `refreshMasks`).
     private func loadMasks() {
         let data = model.engine.maskData(id).map(\.floatValue)
@@ -295,7 +295,7 @@ private struct NativeTextPathSection: View {
     /// Margens animáveis (TrackProperty.TEXT_PATH_FIRST_MARGIN = 46, LAST = 47), o losango do Android.
     private func marginRow(_ key: String, property: UInt32, value: Float, identifier: String, set: @escaping (Float) -> Void) -> some View {
         let track = TimelineTrack(property: Int(property))
-        let keys = (model.keyframes[id] ?? []).filter { $0.property == property && $0.effectIndex == UInt32.max }
+        let keys = (model.keysForLayer(id) ?? []).filter { $0.property == property && $0.effectIndex == UInt32.max }
         let here = keys.contains { $0.time == model.localPlayhead }
         return NativePanelRuler(label: AureaText.t(key), value: value, step: 1, range: -20000...20000, unit: "px", keypad: true,
             look: here ? .keyHere : keys.isEmpty ? .none : .animated,
@@ -845,7 +845,7 @@ struct PresetsPanel: View {
         UserDefaults.standard.set(Array(favorites), forKey: "presetFavorites")
     }
     private var curveKey: KeyframeItem? {
-        let keys = (model.keyframes[layerId] ?? []).filter { $0.property == model.curveProperty && $0.effectIndex == model.curveEffect && $0.paramIndex == model.curveParam }.sorted { $0.time < $1.time }
+        let keys = (model.keysForLayer(layerId) ?? []).filter { $0.property == model.curveProperty && $0.effectIndex == model.curveEffect && $0.paramIndex == model.curveParam }.sorted { $0.time < $1.time }
         guard let time = model.curveSelectedTime, keys.count >= 2, let index = keys.firstIndex(where: { $0.time == time }) else { return nil }
         return keys[min(index, keys.count - 2)]
     }
@@ -855,7 +855,7 @@ struct PresetsPanel: View {
             guard let source = entry.source, let ease = presetCurve(model.engine.parseCurvePreset(source)) else { model.toast = AureaText.t("ios_curve_invalid_preset"); return }
             guard let key = curveKey else { model.toast = AureaText.t("ios_curve_need_two_keys"); return }
             model.beginGesture("preset de curva")
-            for sibling in model.keyframes[layerId] ?? [] where sibling.time == key.time && curveSameTrack(sibling, key) {
+            for sibling in model.keysForLayer(layerId) ?? [] where sibling.time == key.time && curveSameTrack(sibling, key) {
                 model.engine.editTrackKey(layerId, property: sibling.property, effect: sibling.effectIndex, param: sibling.paramIndex,
                                           time: sibling.time, action: 3, value: sibling.value, targetTime: sibling.time,
                                           interpolation: ease.interpolation, handles: [ease.x1, ease.y1, ease.x2, ease.y2, Float(ease.power), 1].map { NSNumber(value: $0) })
@@ -1250,7 +1250,7 @@ struct AppearancePanel: View {
     private var opacity: Float { (model.detail["opacity"] as? NSNumber)?.floatValue ?? 1 }
     private var mode: UInt32 { model.selectedLayer?.blendMode ?? 0 }
     private var locked: Bool { model.selectedLayer?.locked == true }
-    private var keys: [KeyframeItem] { (model.keyframes[id] ?? []).filter { $0.property == 12 && $0.effectIndex == .max && $0.paramIndex == 0 }.sorted { $0.time < $1.time } }
+    private var keys: [KeyframeItem] { (model.keysForLayer(id) ?? []).filter { $0.property == 12 && $0.effectIndex == .max && $0.paramIndex == 0 }.sorted { $0.time < $1.time } }
     private var look: KeyframeLook { keys.contains { $0.time == model.localPlayhead } ? .keyHere : keys.isEmpty ? .none : .animated }
     private var expr: ExpressionLook {
         let info = model.engine.expression(id, property: 12, effect: .max, param: 0)
@@ -1485,11 +1485,11 @@ struct ClipEditPanel: View {
     @State private var next: Int64 = 0
     private var before: [LayerItem] {
         guard let row = model.selectedLayer else { return [] }
-        return model.layers.filter { $0.id != row.id && !$0.locked && $0.endFrame == row.startFrame }
+        return model.editingLayers.filter { $0.id != row.id && !$0.locked && $0.endFrame == row.startFrame }
     }
     private var after: [LayerItem] {
         guard let row = model.selectedLayer else { return [] }
-        return model.layers.filter { $0.id != row.id && !$0.locked && $0.startFrame == row.endFrame }
+        return model.editingLayers.filter { $0.id != row.id && !$0.locked && $0.startFrame == row.endFrame }
     }
     private var left: Int64 { before.contains { $0.id == previous } ? previous : before.count == 1 ? before[0].id : 0 }
     private var right: Int64 { after.contains { $0.id == next } ? next : after.count == 1 ? after[0].id : 0 }
@@ -1579,7 +1579,7 @@ struct ShapePanel: View {
     private let types = [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]
     private var track: [KeyframeItem] {
         preferredCurveTrack(([selected] + ([5, 6, 1, 2, 3, 4] + Array(7...14)).filter { $0 != selected }).map { param in
-            (model.keyframes[id] ?? []).filter { $0.property == 35 && $0.paramIndex == UInt32(param) }.sorted { $0.time < $1.time }
+            (model.keysForLayer(id) ?? []).filter { $0.property == 35 && $0.paramIndex == UInt32(param) }.sorted { $0.time < $1.time }
         })
     }
     /// Bits de animado e de keyframe aqui: os dois últimos números de `shapeParams`
@@ -2238,7 +2238,7 @@ struct MaskPanel: View {
         return openTab == "follow" && !isVideo ? "shape" : openTab
     }
     private var look: KeyframeLook { mask?.keyed == true ? .keyHere : (mask?.keyCount ?? 0) > 0 ? .animated : .none }
-    private var candidates: [LayerItem] { model.layers.filter { $0.id != id && ![3, 8, 9].contains($0.kind) } }
+    private var candidates: [LayerItem] { model.editingLayers.filter { $0.id != id && ![3, 8, 9].contains($0.kind) } }
     private func load() {
         let state = model.engine.trackMatte(id)
         matte = state.first?.int64Value ?? 0; mode = state.count > 1 ? state[1].intValue : 0
@@ -2364,7 +2364,7 @@ struct MaskPanel: View {
     }
 
     private func railKeys(_ m: MaskItem) -> [KeyframeItem] {
-        let all = model.keyframes[id] ?? []
+        let all = model.keysForLayer(id) ?? []
         return (tab == "edge"
             ? all.filter { $0.property == 43 && $0.effectIndex == m.id && $0.paramIndex == edgeParam }
             : all.filter { Int($0.property) == 49 && $0.effectIndex == m.id }).sorted { $0.time < $1.time }
@@ -2483,7 +2483,7 @@ struct MaskPanel: View {
     /// Suavizar / Expandir / Opacidade. Tocar no rótulo escolhe a linha (o ◆ e a Curva do
     /// trilho agem nela); o losango pequeno do rótulo só mostra o estado.
     private func maskRuler(_ mask: MaskItem, param: UInt32, label: String, value: Float, range: ClosedRange<Float>, unit: String, reset: Float) -> some View {
-        let keys = (model.keyframes[id] ?? []).filter { $0.property == 43 && $0.effectIndex == mask.id && $0.paramIndex == param }
+        let keys = (model.keysForLayer(id) ?? []).filter { $0.property == 43 && $0.effectIndex == mask.id && $0.paramIndex == param }
         let look: KeyframeLook = keys.contains { $0.time == model.localPlayhead } ? .keyHere : keys.isEmpty ? .none : .animated
         let selected = edgeParam == param
         return NativePanelRuler(label: AureaText.t(label), value: value, step: 0.5, range: range, unit: unit, decimals: 1, reset: reset, keypad: true, look: look,
@@ -2506,7 +2506,7 @@ struct MaskPanel: View {
     private var matteBody: some View {
         VStack(alignment: .leading, spacing: 0) {
             PanelSection(title: AureaText.t("panel_1_recortar_pelo"), glyph: CupertinoGlyph.Crop, tag: "matte.sec.mode") {
-                Text(AureaText.t("pn_mask_target", model.layers.first { $0.id == id }?.name ?? ""))
+                Text(AureaText.t("pn_mask_target", model.editingLayers.first { $0.id == id }?.name ?? ""))
                     .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
                 if mode != 0, let source = candidates.first(where: { $0.id == matte }) {
                     Text(AureaText.t("pn_mask_source", source.name))
@@ -2550,8 +2550,8 @@ struct MaskPanel: View {
         // Sem camada escolhida: a logo ABAIXO na pilha (a lista vem com a
         // frente primeiro, `Engine::query_layers`). O motor usa a camada que
         // a UI passar; os textos do painel dizem "abaixo" (par do Android, P1-7).
-        let own = model.layers.firstIndex { $0.id == id } ?? 0
-        let below = model.layers.dropFirst(own + 1).first { item in candidates.contains { $0.id == item.id } }
+        let own = model.editingLayers.firstIndex { $0.id == id } ?? 0
+        let below = model.editingLayers.dropFirst(own + 1).first { item in candidates.contains { $0.id == item.id } }
         let target = matte != 0 ? matte : (below?.id ?? 0)
         if target == 0 { model.toast = AureaText.t("pn_mask_pick_layer_below") } else { write(target, value) }
     }
@@ -3154,7 +3154,7 @@ struct LayerAnimatorSection: View {
                 }
                 PanelItemGrid(items: (animators.isEmpty ? [] : [PanelItem(glyph: CupertinoGlyph.DocOnDoc, label: AureaText.t("la_copy"), tag: "layer.anim.copy") { _ = model.engine.copyLayerAnimators(id) }]) + [
                     PanelItem(glyph: CupertinoGlyph.DocOnClipboard, label: AureaText.t("la_paste"), tag: "layer.anim.paste") {
-                        let ids = model.selection.isEmpty ? [id] : Array(model.selection)
+                        let ids = model.editingSelection.isEmpty ? [id] : Array(model.editingSelection)
                         _ = model.engine.pasteLayerAnimators(ids.map { NSNumber(value: $0) }); refresh()
                     },
                 ])
@@ -3420,7 +3420,7 @@ struct LayerOptionsPanel: View {
     var body: some View {
         PanelFrame(rail: PanelRail(onBack: { model.panel = .none }, supportsAnimation: false)) {
             if let row = model.selectedLayer {
-                let index = model.layers.firstIndex(where: { $0.id == row.id }) ?? 0
+                let index = model.editingLayers.firstIndex(where: { $0.id == row.id }) ?? 0
                 VStack(alignment: .leading, spacing: 0) {
                     if row.kind != 3 {
                         FunctionToggleRow(title: AureaText.t("editor_camada_ajuste"), hint: AureaText.t("editor_efeitos_desta_camada_valem_todas_baixo"),
@@ -3461,7 +3461,7 @@ struct LayerOptionsPanel: View {
             model.engine.setAdjustmentScope((scope + 1) % 3, forLayer: row.id); refresh()
         }
         if scope == 2 {
-            let below = Array(model.layers.dropFirst(index + 1)).filter { $0.kind != 3 }
+            let below = Array(model.editingLayers.dropFirst(index + 1)).filter { $0.kind != 3 }
             let chosen = Set(model.engine.adjustmentTargets(row.id).map(\.int64Value))
             if below.isEmpty {
                 Text(AureaText.t("la_affected_none_below")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).padding(.leading, 16)
@@ -3502,10 +3502,10 @@ struct Layer3DFunctionsPanel: View {
                             }
                         }
                     }
-                    if row.kind != 3 && row.kind != 10 && model.layers.contains(where: { $0.kind == 10 && $0.id != row.id }) {
+                    if row.kind != 3 && row.kind != 10 && model.editingLayers.contains(where: { $0.kind == 10 && $0.id != row.id }) {
                         let bone = model.layerParentBone(row.id)
-                        let parentModel: LayerItem? = row.parentIndex >= 0 && Int(row.parentIndex) < model.layers.count
-                            && model.layers[Int(row.parentIndex)].kind == 10 ? model.layers[Int(row.parentIndex)] : nil
+                        let parentModel: LayerItem? = row.parentIndex >= 0 && Int(row.parentIndex) < model.editingLayers.count
+                            && model.editingLayers[Int(row.parentIndex)].kind == 10 ? model.editingLayers[Int(row.parentIndex)] : nil
                         FunctionActionRow(title: AureaText.t("bone_attach_title"),
                                           hint: bone >= 0 && parentModel != nil
                                             ? AureaText.t("bone_attach_current", boneLabel(model.boneName(parentModel!.id, bone), bone))
@@ -3585,7 +3585,7 @@ struct AnimationPanelView: View {
     }
     private var keys: [KeyframeItem] {
         guard let t = track else { return [] }
-        return (model.keyframes[id] ?? []).filter { Int($0.property) == t.property && $0.effectIndex == t.effect && $0.paramIndex == t.param }
+        return (model.keysForLayer(id) ?? []).filter { Int($0.property) == t.property && $0.effectIndex == t.effect && $0.paramIndex == t.param }
             .sorted { $0.time < $1.time }
     }
     private var look: KeyframeLook {

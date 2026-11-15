@@ -85,6 +85,12 @@ public:
         p.add_angle("rotation_z", "Rotação Z", 0.0f);
         p.add_float("scale", "Escala", 100.0f, 0.0f, 400.0f, kAnimPct, "%");
         p.typed_range(0.0f, 10000.0f);
+        p.add_float("pivot_x", "Pivô X", 0.f, -300.f, 300.f, kAnimPct, "%");
+        p.add_float("pivot_y", "Pivô Y", 0.f, -300.f, 300.f, kAnimPct, "%");
+        p.add_float("pivot_z", "Pivô Z", 0.f, -300.f, 300.f, kAnimPct, "%");
+        p.add_float("scale_x", "Escala X", 100.f, 0.f, 400.f, kAnimPct, "%");
+        p.add_float("scale_y", "Escala Y", 100.f, 0.f, 400.f, kAnimPct, "%");
+        p.add_float("scale_z", "Escala Z", 100.f, 0.f, 400.f, kAnimPct, "%");
     }
     bool is_identity(const EffectEval&) const noexcept override { return true; }
 };

@@ -57,6 +57,7 @@ void Renderer::release_preview_graph_scope() noexcept {
 void Renderer::cancel_preview_graph() noexcept {
     auto& pending = previewGraph_;
     if (!pending.active) return;
+    temporalPreview_.complete(false);
     graph_.release(pool_);
     pool_.end_frame();
     if (backend_ && pending.waitingFrame) failedGraphFrame_ = pending.waitingFrame;

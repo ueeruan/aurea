@@ -1809,7 +1809,7 @@
     <string name="am_import_failed">Não deu para importar: %1$s</string>
     <string name="am_import_nothing">nenhum efeito com equivalente no Aurea</string>
     <string name="release_notes_title">Novidades do Aurea</string>
-    <string name="release_notes_body">Aurea Beta 0.5.4 (2219) — 14/11/2026\n\n• Modo Edição com áreas de Mídia, Editar, Cor, Áudio e Texto, prévia estável e painéis adaptados à orientação da tela.\n• Timeline com cabeçalhos fixos e rolagem limitada ao início e ao fim da sequência, inclusive ao usar zoom.\n• Cor com nós seriais independentes, janelas retangulares e elípticas, rodas, curvas, HSL, qualificador, LUT e scopes.\n• HeadBop com 22 articulações corporais, movimento de braços, mãos e pernas e movimento secundário de cabelo e roupa.\n• DeepGlow com queda óptica em seis escalas, limiar HDR, luz linear, Add/Screen e deslocamento cromático.\n• Optical flow com correções de escala e exposição, câmera lenta e reconstrução de quadros duplicados.\n• Rastreio de movimento, estabilização e Camera Tracker 3D com melhorias para baixo contraste e painéis reorganizados.\n• Pré-render lossless por composição e grupo, cache a 540p e preparação de pré-composições sob demanda.\n• Correções em camadas de ajuste, margens de efeitos, recuperação de vídeo, memória e diagnóstico da exportação.\n• Legendas com transcrição editável, edição de tempo e texto, estilos, arrasto na timeline e importação/exportação SRT e VTT.\n• Painéis de funções, vetor e máscaras reorganizados. Objetos 3D com controles de partes, materiais, texturas, luz e animação.\n• AureaMCP conecta agentes de IA às ferramentas do editor, com histórico de desfazer. Compras do AureaOS bloqueadas durante o teste fechado.</string>
+    <string name="release_notes_body">Aurea 1.0.0 (2220) — 15/11/2026\n\n• Nova interface mobile de edição, prévia maior, doca de ferramentas e timeline com cabeçalhos fixos.\n• Edite camadas de grupos expandidos pelo inspetor.\n• Aba Partes 3D com juntas, pivô ajustável e transformação animada.\n• Plugins V3 de áudio com delay, filtros, EQ, compressor, limiter e convolução. Até 1024 parâmetros em áudio e pilhas.\n• AureaHYPER com busca de movimento otimizada, preview adaptativo e reconstrução temporal em cenas 3D compatíveis.\n• Recuperação de exportação preserva a qualidade solicitada.\n• Cor com nós, curvas, rodas, janelas e scopes. HeadBop corporal, DeepGlow e melhorias de tracking e optical flow.\n• Legendas editáveis, pré-render de grupos e integração AureaMCP.\n• Compras do AureaOS bloqueadas durante o teste fechado.</string>
     <string name="am_import_lossless_required">Este preset tem efeitos, parâmetros ou camadas que não podem ser preservados na conversão. Nada foi salvo nem aplicado.</string>
     <string name="am_import_read_failed">Não foi possível ler o arquivo (limite de 64 MB), ou a camada selecionada mudou. Tente novamente.</string>
     <string name="world_explosive">Explosivo</string>
@@ -5051,7 +5051,7 @@
     <string name="fn_mask_tab_shape">Forma</string>
     <string name="fn_mask_edge_hint">Toque no nome de uma linha para escolhê-la: o ◆ e a curva da coluna esquerda agem nela.</string>
     <string name="fn_vec_paths_title">Caminhos e operadores</string>
-    <string name="fn_part_list_hint">Toque numa parte para trocar a textura dela ou escondê-la.</string>
+    <string name="fn_part_list_hint">Escolha uma parte para animar, ajustar o pivô ou editar sua aparência.</string>
     <string name="fn_part_animated">Animada</string>
     <string name="fn_part_back">Voltar às partes</string>
     <string name="fn_part_texture">Textura</string>
@@ -5075,4 +5075,9 @@
     <string name="fxl_window_softness">Suavidade da janela</string>
     <string name="fxl_invert_window">Inverter janela</string>
     <string name="fxl_show_window">Mostrar janela</string>
+    <string name="plug_kind_audio">Processamento de áudio</string>
+    <string name="part_position_axis">Posição %1$s</string>
+    <string name="part_scale_axis">Escala %1$s</string>
+    <string name="part_pivot_axis">Pivô %1$s</string>
+    <string name="plug_audio_ms">DSP · %1$s ms por 4.096 quadros de áudio</string>
 </resources>

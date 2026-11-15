@@ -136,7 +136,7 @@ private fun parentOf(rows: List<LayerRow>, row: LayerRow): Long = rows.getOrNull
 internal fun LayerTopBar(store: EditorStore, ui: EditorUi, layerId: Long) {
     val header by remember(layerId) {
         derivedStateOf {
-            val rows = store.layers
+            val rows = store.editingLayers
             rows.firstOrNull { it.id == layerId }?.let { LayerHeader(it.id, it.name, it.kind, it.locked, parentOf(rows, it)) }
         }
     }
@@ -175,7 +175,7 @@ internal fun LayerTopBar(store: EditorStore, ui: EditorUi, layerId: Long) {
         // (como na 0.3.2: aceso em destaque quando ligado, apagado se travada).
         // Continuam também no ⋮.
         if (h.kind != LayerType.Audio.kind) {
-            val row = store.layers.firstOrNull { it.id == h.id }
+            val row = store.editingLayers.firstOrNull { it.id == h.id }
             val intrinsic = h.kind in 8..10
             val threeD = row?.isThreeD == true || intrinsic
             val motionBlur = store.detail?.takeIf { it.id == h.id }?.motionBlur == true
@@ -265,7 +265,7 @@ internal fun LinkMenu(store: EditorStore, ids: List<Long>, onDismiss: () -> Unit
         with(density) { AnchorPopupPosition(AnchoredMenuDefaults.ScreenMargin.roundToPx(), AnchoredMenuDefaults.AnchorGap.roundToPx()) }
     }
     val colors = MenuColors.of(AureaSurfaceTone.Light)
-    val rows = store.layers
+    val rows = store.editingLayers
     val candidates = remember(rows, ids) { store.parentCandidatesForAll(ids).map { it.id }.toSet() }
     val visual = remember(rows) { rows.filter { it.kind != LayerType.Audio.kind } }
     // Pai em comum (0 = todas soltas; −1 = pais diferentes: nada marcado).
@@ -666,10 +666,10 @@ private fun InlineName(
  */
 @Composable
 internal fun BatchTopBar(store: EditorStore, ui: EditorUi) {
-    val count by remember { derivedStateOf { store.selection.size } }
-    val canMask by remember { derivedStateOf { store.selection.size >= 2 && store.canGroupAndMask(store.selection.toList()) } }
+    val count by remember { derivedStateOf { store.editingSelection.size } }
+    val canMask by remember { derivedStateOf { store.editingSelection.size >= 2 && store.canGroupAndMask(store.editingSelection.toList()) } }
     val groups by remember {
-        derivedStateOf { store.layers.filter { it.id in store.selection && it.kind == LayerType.Group.kind }.map { it.id } }
+        derivedStateOf { store.editingLayers.filter { it.id in store.editingSelection && it.kind == LayerType.Group.kind }.map { it.id } }
     }
     var aligning by remember { mutableStateOf(false) }
     val ink = AureaColors.OnAccent
@@ -738,10 +738,10 @@ internal fun BatchTopBar(store: EditorStore, ui: EditorUi) {
                             if (store.playing) store.pause()
                             linking = true
                         }, Modifier.testTag("batch.link"), size = 19.dp, height = ShellDims.TopBar, tint = ink)
-                        if (linking) LinkMenu(store, store.selection.toList()) { linking = false }
+                        if (linking) LinkMenu(store, store.editingSelection.toList()) { linking = false }
                     }
                     ChromeButton(CupertinoGlyph.Trash, stringResource(R.string.editor_excluir_selecao), onClick = {
-                        LayerOps.delete(store, store.selection)
+                        LayerOps.delete(store, store.editingSelection)
                         finish()
                     }, Modifier.testTag("batch.delete"), size = 19.dp, height = ShellDims.TopBar, tint = ink)
                     ChromeButton(CupertinoGlyph.ChevronRight, stringResource(R.string.om_sel_align), onClick = { aligning = true },
@@ -752,30 +752,30 @@ internal fun BatchTopBar(store: EditorStore, ui: EditorUi) {
                     val three = count >= 3
                     AlignCell(CupertinoGlyph.ChevronLeft, stringResource(R.string.batch_group_actions), "batch.align.back", ink, 17.dp) { aligning = false }
                     AlignCell(CupertinoGlyph.ArrowLeftToLine, stringResource(R.string.editor_alinhar_esquerda_tela), "batch.align.left", ink) {
-                        LayerOps.align(store, store.selection, LayerOps.Edge.Left)
+                        LayerOps.align(store, store.editingSelection, LayerOps.Edge.Left)
                     }
                     AlignCell(CupertinoGlyph.ArrowLeftRight, stringResource(R.string.editor_centralizar_horizontal), "batch.align.hcenter", ink) {
-                        LayerOps.align(store, store.selection, LayerOps.Edge.CenterH)
+                        LayerOps.align(store, store.editingSelection, LayerOps.Edge.CenterH)
                     }
                     AlignCell(CupertinoGlyph.ArrowRightToLine, stringResource(R.string.editor_alinhar_direita_tela), "batch.align.right", ink) {
-                        LayerOps.align(store, store.selection, LayerOps.Edge.Right)
+                        LayerOps.align(store, store.editingSelection, LayerOps.Edge.Right)
                     }
                     AlignCell(CupertinoGlyph.ArrowUpToLine, stringResource(R.string.editor_alinhar_topo_tela), "batch.align.top", ink) {
-                        LayerOps.align(store, store.selection, LayerOps.Edge.Top)
+                        LayerOps.align(store, store.editingSelection, LayerOps.Edge.Top)
                     }
                     AlignCell(CupertinoGlyph.ArrowUpArrowDown, stringResource(R.string.editor_centralizar_vertical), "batch.align.vcenter", ink) {
-                        LayerOps.align(store, store.selection, LayerOps.Edge.CenterV)
+                        LayerOps.align(store, store.editingSelection, LayerOps.Edge.CenterV)
                     }
                     AlignCell(CupertinoGlyph.ArrowDownToLine, stringResource(R.string.editor_alinhar_base_tela), "batch.align.bottom", ink) {
-                        LayerOps.align(store, store.selection, LayerOps.Edge.Bottom)
+                        LayerOps.align(store, store.editingSelection, LayerOps.Edge.Bottom)
                     }
                     AlignCell(CupertinoGlyph.ArrowUpDownSquare, stringResource(R.string.editor_distribuir_vertical_vaos_iguais), "batch.align.distV",
                         if (three) ink else dim) {
-                        if (three) LayerOps.distribute(store, store.selection, horizontal = false) else store.showToast(needThree)
+                        if (three) LayerOps.distribute(store, store.editingSelection, horizontal = false) else store.showToast(needThree)
                     }
                     AlignCell(CupertinoGlyph.ArrowLeftRightSquare, stringResource(R.string.editor_distribuir_horizontal_vaos_iguais), "batch.align.distH",
                         if (three) ink else dim) {
-                        if (three) LayerOps.distribute(store, store.selection, horizontal = true) else store.showToast(needThree)
+                        if (three) LayerOps.distribute(store, store.editingSelection, horizontal = true) else store.showToast(needThree)
                     }
                 }
             }
@@ -803,8 +803,8 @@ private fun RowScope.AlignCell(glyph: Char, description: String, tag: String, ti
  */
 @Composable
 internal fun MultiSelectBottomBar(store: EditorStore, modifier: Modifier) {
-    val selection = store.selection
-    val layers = store.layers
+    val selection = store.editingSelection
+    val layers = store.editingLayers
     // Cabeçote lido no derivedStateOf: tocando, a barra só recompõe quando a variante muda.
     val variant by remember(selection, layers) { androidx.compose.runtime.derivedStateOf { store.playhead; store.multiTimeVariant() } }
     val intoLayers = stringResource(R.string.editor_leve_cabecote_dentro_camadas)
@@ -843,7 +843,7 @@ internal fun MultiSelectBottomBar(store: EditorStore, modifier: Modifier) {
                     }
                     BottomCell(CupertinoGlyph.Scissors, stringResource(R.string.editor_dividir_cabecote), "batch.bottom.split") {
                         val t = store.playhead
-                        val targets = store.layers.filter { it.id in store.selection && !it.locked && t > it.startFrame && t < it.endFrame }.map { it.id }
+                        val targets = store.editingLayers.filter { it.id in store.editingSelection && !it.locked && t > it.startFrame && t < it.endFrame }.map { it.id }
                         if (targets.isEmpty()) store.showToast(intoLayers)
                         else {
                             if (store.playing) store.pause()
@@ -882,7 +882,7 @@ private fun BottomVectorCell(icon: ImageVector, description: String, tag: String
 /** Aparar as escolhidas que cobrem o cabeçote (as travadas ficam), num passo só. */
 private fun batchTrim(store: EditorStore, start: Boolean, intoLayers: String, lockedText: String) {
     val t = store.playhead
-    val rows = store.layers.filter { it.id in store.selection }
+    val rows = store.editingLayers.filter { it.id in store.editingSelection }
     val targets = rows.filter { !it.locked && t > it.startFrame && t < it.endFrame }
     if (targets.isEmpty()) {
         store.showToast(if (rows.isNotEmpty() && rows.all { it.locked }) lockedText else intoLayers)

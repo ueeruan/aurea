@@ -235,7 +235,7 @@ struct EngineConfig {
     u64 exportFrameQueueBudgetBytes = 0;
     ExportExecutionProfile exportExecutionProfile = ExportExecutionProfile::Balanced;
     /// Staged bounded 3D exposure path, retaining the original route.
-    bool enableBoundedSceneExposure = false;
+    bool enableBoundedSceneExposure = true;
     /// Admit transient targets against tracked GPU residency and known cache
     /// backing within the existing device budget, instead of a fixed half share.
     /// Other platforms retain the legacy policy until device validation.
@@ -420,6 +420,8 @@ public:
     /// entram. Qualquer thread. Devolve o relatório (bytes por estágio; os de
     /// GPU medidos no backend).
     MemoryManager::TrimReport trim_memory(i32 osLevel) noexcept;
+    /// Platform samples are supplied at most once per second. Any thread.
+    void report_memory_headroom(u64 availableBytes, u64 criticalBytes, bool lowMemory) noexcept;
     /// Classe de memória LOW (RAM total até ~4 GB): prévia guardada até 32 MiB,
     /// sombra do preview até 2048, cache do Roto Brush pela metade.
     [[nodiscard]] bool low_memory_device() const noexcept;
@@ -920,7 +922,7 @@ public:
     [[nodiscard]] std::string effect_image_name(u64 layer, u32 effect) const noexcept;
     /// As PARTES da camada 3D na ordem dos efeitos de parte (Parte 1, 2...):
     /// o nome de cada uma (vazio = o arquivo não deu nome). Vazio = não é 3D.
-    [[nodiscard]] std::vector<std::string> model_part_names(u64 layer) noexcept;
+    [[nodiscard]] std::vector<std::string> model_part_names(u64 layer, bool includeJoints = false) noexcept;
     /// Câmeras do arquivo do modelo (glTF/FBX) — 0.1.8. A importação já as põe
     /// na timeline (camadas de câmera filhas do modelo, com a animação do
     /// arquivo em keyframes); `add_model_cameras` põe de novo (um passo de
@@ -2322,6 +2324,32 @@ private:
     /// A composição de dentro do grupo da composição aberta (nullptr se não for
     /// grupo), o deslocamento `fora − dentro` e se o grupo anda 1:1.
     Composition* group_inner_locked(u64 groupLayerId, i64* delta, bool* linear) noexcept;
+public:
+    [[nodiscard]] bool set_inline_edit_target(u64 groupLayerId, u64 childLayerId) noexcept;
+private:
+    class InlineEditScope {
+    public:
+        InlineEditScope(Engine& engine, u64 layerId, bool mutation = false) noexcept;
+        InlineEditScope(Engine& engine, u64 outerId, u64 groupId, bool mutation, u64 expectedInner = 0) noexcept;
+        ~InlineEditScope();
+        bool active() const noexcept { return active_; }
+        [[nodiscard]] i64 map_frame(i64 outerFrame) const noexcept;
+    private:
+        void enter(u64 outerId, u64 groupId, u64 expectedInner) noexcept;
+        Engine& engine_;
+        CompositionId outer_{};
+        FrameIndex previousTime_{};
+        FrameIndex outerTime_{};
+        const Layer* timeLayer_ = nullptr;
+        f64 timeRatio_ = 1.0;
+        std::vector<u64> previousSelection_;
+        bool previousActive_ = false, previousRejected_ = false, active_ = false, mutation_ = false, restore_ = false;
+    };
+    [[nodiscard]] FrameIndex editing_frame_locked() const noexcept;
+    std::atomic<u64> inlineEditOuter_{0}, inlineEditGroup_{0}, inlineEditLayer_{0}, inlineEditInner_{0};
+    FrameIndex inlineSampleTime_{};
+    bool inlineSampleActive_ = false;
+    bool inlineAccessRejected_ = false;
     bool edit_clip_time_locked(u64 layerId, u32 operation, i64 amount, u64 previous, u64 next,
                                bool atPlayhead, bool extendOnly, bool edgeToFrame) noexcept;
     u32 query_thumbnail_scoped(u64 groupLayerId, u64 layerId, i32 timelineFrame, u32 height,
@@ -3565,6 +3593,7 @@ private:
     bool repair_comp_stack_locked() noexcept;
     void drain_commands_locked() noexcept;
     [[nodiscard]] Composition* current_composition() noexcept;
+    [[nodiscard]] const Composition* current_composition() const noexcept;
     [[nodiscard]] Status recover_device_locked() noexcept;
     [[nodiscard]] Status ensure_gpu_healthy_locked() noexcept;
     // renderMutex_: a failed export may leave a real submission in flight.
@@ -3864,6 +3893,8 @@ private:
     void cancel_preview_graph_locked() noexcept;
     [[nodiscard]] bool continue_preview_graph_locked(u64 frameStart, Status& result) noexcept;
     std::atomic<u64> previewPressureUntilNs_{0}; ///< trim_memory(>= RUNNING_LOW): prévia guardada pausada até aqui
+    std::atomic<f32> platformMemoryPressure_{0.0f};
+    std::atomic<u64> platformAvailableMemory_{~0ull};
     /// 0.4.6: só o aviso do SISTEMA (trim_memory). O preparo do export também pausa a
     /// prévia (previewPressureUntilNs_), mas isso não é falta de memória: o
     /// scheduler do export lia aquela pausa como aviso e rodava os primeiros 20 s

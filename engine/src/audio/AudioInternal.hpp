@@ -49,6 +49,6 @@ inline void keep_pitch_at(const AudioClip& c, i64 t, Read&& read, f32& l, f32& r
 /// O trecho [s0, s1) de um clipe COM cadeia de efeitos, somado em `out`
 /// (quadro 0 de `out` = amostra `start`). `missing` conta blocos que faltaram.
 void mix_fx_clip(const AudioClip& c, i64 s0, i64 s1, i64 start, BlockSource& blocks, f32* out, MixState* state,
-                 u64 epoch, u32& missing) noexcept;
+                 u64 epoch, u32& missing, Errc& dspError) noexcept;
 
 } // namespace aurea::audio::detail

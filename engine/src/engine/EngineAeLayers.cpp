@@ -26,6 +26,7 @@ bool Engine::set_layer_quality(u64 layerId, u32 quality, u32 sampling) noexcept 
     if (quality > 2 || sampling > 1) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return false;
@@ -46,6 +47,7 @@ bool Engine::set_layer_quality(u64 layerId, u32 quality, u32 sampling) noexcept 
 bool Engine::set_model_animation_clip(u64 layerId, i32 clip) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Model3D || l->locked) return false;
@@ -67,6 +69,7 @@ bool Engine::set_model_animation_clip(u64 layerId, i32 clip) noexcept {
 
 i32 Engine::model_animation_clip(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     const Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     return l && l->kind == LayerKind::Model3D ? l->model.animationClip : -1;
@@ -74,6 +77,7 @@ i32 Engine::model_animation_clip(u64 layerId) noexcept {
 
 std::vector<std::string> Engine::model_animation_clips(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     const Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     std::vector<std::string> names;

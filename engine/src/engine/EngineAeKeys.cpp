@@ -201,6 +201,7 @@ bool rove_position(Layer& l) noexcept {
 u32 Engine::time_reverse_keyframe_selection(u64 layerId, const i64* refs, u32 count) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     std::vector<Picked> picked;
@@ -225,6 +226,7 @@ u32 Engine::time_reverse_keyframe_selection(u64 layerId, const i64* refs, u32 co
 u32 Engine::exponential_scale_keyframe_selection(u64 layerId, const i64* refs, u32 count) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     std::vector<Picked> picked;
@@ -249,6 +251,7 @@ u32 Engine::smooth_keyframe_selection(u64 layerId, const i64* refs, u32 count, f
     if (!std::isfinite(tolerance) || tolerance < 0.0f) return 0;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     std::vector<Picked> picked;
@@ -278,6 +281,7 @@ u32 Engine::bake_expression_keyframes(u64 layerId, const i64* refs, u32 count) n
     if (count > kMaxRefs || (count > 0 && !refs)) return 0;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer || layer->locked) return 0;
@@ -335,6 +339,7 @@ u32 Engine::set_keyframe_temporal_mode(u64 layerId, const i64* refs, u32 count, 
     if (mode > kKeyModeRoveOff) return 0;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     std::vector<Picked> picked;
@@ -402,6 +407,7 @@ u32 Engine::set_keyframe_temporal_mode(u64 layerId, const i64* refs, u32 count, 
 
 u32 Engine::query_keyframe_flags(u64 layerId, const i64* refs, u32 count) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     std::vector<Picked> picked;
@@ -456,6 +462,7 @@ u32 Engine::set_position_keys(u64 layerId, const f64* samples, u32 count, f64 ca
     }
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer || layer->locked) return 0;

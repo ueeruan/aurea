@@ -45,6 +45,7 @@
 #include <vector>
 
 namespace aurea {
+class EffectRegistry;
 
 struct Asset;
 class VideoSourceFactory;
@@ -348,6 +349,7 @@ struct AudioClip {
 class MixState;
 
 struct AudioMixSnapshot {
+    Errc dspError = Errc::Ok;
     std::vector<AudioClip> clips;
     i64 endSample = 0;      ///< fim da composição
     u64 revision = 0;
@@ -367,13 +369,15 @@ struct ExportNestedAudioSource {
 [[nodiscard]] std::shared_ptr<AudioMixSnapshot> build_snapshot(const Composition& comp, const Project& project,
                                                                AudioBlockCache* cache, AssetPathResolver resolve,
                                                                void* resolveCtx,
-                                                               const ExportNestedAudioSource* exportNested = nullptr);
+                                                               const ExportNestedAudioSource* exportNested = nullptr,
+                                                               const EffectRegistry* registry = nullptr);
 /// O som de UMA camada de `comp` (com os efeitos de áudio dela e, se for
 /// pré-composição, o que há dentro): o que a Forma de onda e o Espectro de
 /// áudio analisam. Ignora mudo/solo — a camada escolhida é a fonte.
 [[nodiscard]] std::shared_ptr<AudioMixSnapshot> build_layer_snapshot(const Composition& comp, const Project& project,
                                                                      u64 layerId, AudioBlockCache* cache,
-                                                                     AssetPathResolver resolve, void* resolveCtx);
+                                                                     AssetPathResolver resolve, void* resolveCtx,
+                                                                     const EffectRegistry* registry = nullptr);
 
 
 
@@ -386,6 +390,7 @@ public:
 };
 
 struct MixStats {
+    Errc dspError = Errc::Ok;
     u32 missingBlocks = 0;
     f32 peak = 0.0f;
 };

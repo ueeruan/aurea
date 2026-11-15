@@ -68,7 +68,7 @@ internal object MotionPathCache {
     fun refresh(store: EditorStore): Boolean {
         val d = store.detail ?: return false
         if (d.perspective) return false
-        val keys = store.keyframes[d.id] ?: return false
+        val keys = store.keysForLayer(d.id) ?: return false
         if (layer == d.id && this.keys === keys && detail === d && revision == store.motionPathRevision) return count >= 2
         layer = d.id; this.keys = keys; detail = d; revision = store.motionPathRevision
         count = 0; keyCount = 0

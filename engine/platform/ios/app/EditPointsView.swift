@@ -319,7 +319,7 @@ private struct PointsColumn: View {
     private func openPathCurve() -> Bool {
         guard let layer = model.primarySelection else { return false }
         let group = model.vectorGroup, contour = model.vectorPath
-        let keys = (model.keyframes[layer] ?? []).filter {
+        let keys = (model.keysForLayer(layer) ?? []).filter {
             $0.property == 48 && $0.effectIndex == group && $0.paramIndex == contour
         }.sorted { $0.time < $1.time }
         guard keys.count >= 2 else { return false }

@@ -352,7 +352,7 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
     var captionCount by remember(layerId) {
         mutableIntStateOf(if (tabbed && layerId != null) store.engineForStress.captionCount(layerId) else 0)
     }
-    LaunchedEffect(layerId, store.layers) {
+    LaunchedEffect(layerId, store.editingLayers) {
         captionCount = if (tabbed && layerId != null) store.engineForStress.captionCount(layerId) else 0
     }
     LaunchedEffect(layerId, kind) {

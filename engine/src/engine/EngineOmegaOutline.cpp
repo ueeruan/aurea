@@ -434,12 +434,13 @@ void translate(BezierPath& p, Vec2 by) noexcept {
 
 bool Engine::convert_shape_to_outline(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || l->kind != LayerKind::Shape || l->shape.shapeType == kShapeVector) return false;
     const u32 type = l->shape.shapeType;
     if (type > shape::kLastSdfType || type == 11u) return false;
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     bool centered = false;
     const ShapeData sh = shape_now(*l, local, centered);
     const f32 w = std::max(1.0f, sh.bounds.w), h = std::max(1.0f, sh.bounds.h);

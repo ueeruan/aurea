@@ -164,6 +164,7 @@ bool gizmo_basis(const Mat4& clipFromModel, f32 unitPx, const Mat4& nodeWorld, f
 u32 Engine::query_bone_gizmo(u64 layerId, i32 node, f32 radiusPx, f32* out, u32 capacity) noexcept {
     if (!std::isfinite(radiusPx) || radiusPx <= 0.0f) return 0;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = skeleton_layer(comp, layerId);
     if (!l || node < 0) return 0;
@@ -172,7 +173,7 @@ u32 Engine::query_bone_gizmo(u64 layerId, i32 node, f32 radiusPx, f32* out, u32 
     const scene3d::SceneAsset& asset = *it->second;
     if (!is_pose_bone(scene3d::pose_bones(asset), node)) return 0;
     if (!out || capacity < kBoneGizmoFloats) return kBoneGizmoFloats;
-    const FrameIndex now = playback_.current();
+    const FrameIndex now = editing_frame_locked();
     scene3d::Pose pose;
     user_pose(*comp, *l, asset, now, pose);
     if (static_cast<usize>(node) >= pose.nodeWorld.size()) return 0;
@@ -199,13 +200,14 @@ u32 Engine::query_bone_gizmo(u64 layerId, i32 node, f32 radiusPx, f32* out, u32 
 bool Engine::rotate_bone_axis(u64 layerId, u32 node, u32 axis, f32 deg, bool continuing) noexcept {
     if (axis > 2 || !std::isfinite(deg)) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = skeleton_layer(comp, layerId);
     if (!l || l->locked) return false;
     const auto it = models_.find(l->model.scene.pack());
     if (it == models_.end() || !it->second || node >= it->second->nodes.size()) return false;
     if (!is_pose_bone(scene3d::pose_bones(*it->second), static_cast<i32>(node))) return false;
-    const FrameIndex now = playback_.current();
+    const FrameIndex now = editing_frame_locked();
     const FrameIndex local = l->local_time(now);
     if (!writable(*l, node, 0, l->contains_time(now))) return false;
     // Girar no eixo LOCAL do osso, na articulação: q' = q · R(eixo, θ).
@@ -242,13 +244,14 @@ bool Engine::drag_bone_ring(u64 layerId, u32 node, u32 axis, f32 x0, f32 y0, f32
 bool Engine::set_bone_rotations(u64 layerId, const f32* nodeXyz, u32 count, bool continuing) noexcept {
     if (!nodeXyz || count == 0) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = skeleton_layer(comp, layerId);
     if (!l || l->locked) return false;
     const auto it = models_.find(l->model.scene.pack());
     if (it == models_.end() || !it->second) return false;
     const std::vector<i32> bones = scene3d::pose_bones(*it->second);
-    const FrameIndex now = playback_.current();
+    const FrameIndex now = editing_frame_locked();
     const bool inside = l->contains_time(now);
     for (u32 i = 0; i < count; ++i) {
         const f32* r = nodeXyz + static_cast<usize>(i) * 4;
@@ -270,6 +273,7 @@ bool Engine::set_bone_rotations(u64 layerId, const f32* nodeXyz, u32 count, bool
 
 i32 Engine::bone_mirror_partner(u64 layerId, i32 node) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = skeleton_layer(comp, layerId);
     if (!l) return -1;
@@ -281,6 +285,7 @@ i32 Engine::bone_mirror_partner(u64 layerId, i32 node) noexcept {
 
 bool Engine::mirror_bone_pose(u64 layerId, i32 node) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = skeleton_layer(comp, layerId);
     if (!l || l->locked) return false;
@@ -289,7 +294,7 @@ bool Engine::mirror_bone_pose(u64 layerId, i32 node) noexcept {
     const scene3d::SceneAsset& asset = *it->second;
     const std::vector<i32> bones = scene3d::pose_bones(asset);
     if (bones.empty() || (node >= 0 && !is_pose_bone(bones, node))) return false;
-    const FrameIndex now = playback_.current();
+    const FrameIndex now = editing_frame_locked();
     const FrameIndex local = l->local_time(now);
     const bool inside = l->contains_time(now);
     scene3d::Pose rest;
@@ -358,6 +363,7 @@ bool Engine::mirror_bone_pose(u64 layerId, i32 node) noexcept {
 bool Engine::drag_bone_ik(u64 layerId, u32 node, f32 dxPx, f32 dyPx, bool continuing) noexcept {
     if (!std::isfinite(dxPx) || !std::isfinite(dyPx)) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = skeleton_layer(comp, layerId);
     if (!l || l->locked) return false;
@@ -369,7 +375,7 @@ bool Engine::drag_bone_ik(u64 layerId, u32 node, f32 dxPx, f32 dyPx, bool contin
     if (!is_pose_bone(bones, static_cast<i32>(node)) || !scene3d::ik_chain(asset, static_cast<i32>(node), mid, root)
         || !is_pose_bone(bones, mid) || !is_pose_bone(bones, root))
         return false;
-    const FrameIndex now = playback_.current();
+    const FrameIndex now = editing_frame_locked();
     const FrameIndex local = l->local_time(now);
     const bool inside = l->contains_time(now);
     if (!writable(*l, static_cast<u32>(root), 0, inside) || !writable(*l, static_cast<u32>(mid), 0, inside)) return false;

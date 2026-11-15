@@ -157,7 +157,7 @@ private fun MotionTrackSection(env: PanelEnv) {
                 // painel de Rastreio (é do vídeo), então "a camada selecionada"
                 // era sempre o próprio vídeo e o motor recusava.
                 val source = store.primary
-                val targets = store.layers.filter {
+                val targets = store.editingLayers.filter {
                     it.id != source && !it.isThreeD && !it.hasParent && !it.adjustment &&
                         it.kind in listOf(LayerType.Video.kind, LayerType.Image.kind, LayerType.Text.kind, LayerType.Shape.kind,
                             LayerType.Null.kind, LayerType.Particles.kind, LayerType.Group.kind)
@@ -304,7 +304,7 @@ private fun CameraTrackSection(env: PanelEnv) {
                     androidx.compose.material3.OutlinedTextField(value = distanceText, onValueChange = { distanceText = it }, label = { Text(stringResource(R.string.cam_distance)) }, singleLine = true)
                     androidx.compose.material3.TextButton(onClick = { distanceText.replace(',', '.').toFloatOrNull()?.let { store.calibrateCamera(2, it) } }) { Text(stringResource(R.string.cam_set_scale)) }
                 }
-                store.layers.filter { it.kind == 10 }.forEach { layer ->
+                store.editingLayers.filter { it.kind == 10 }.forEach { layer ->
                     androidx.compose.material3.TextButton(onClick = { store.placeTrackedModel(layer.id) }) { Text(stringResource(R.string.cam_place_3d, layer.name)) }
                 }
                 }

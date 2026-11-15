@@ -678,6 +678,10 @@ bool aurea_vision_person_segment(void*, uint32_t model, const uint8_t* rgb, uint
     return e ? static_cast<int64_t>(e->trim_memory(level).total) : 0;
 }
 
+- (void)reportMemoryHeadroom:(uint64_t)available critical:(uint64_t)critical lowMemory:(BOOL)lowMemory {
+    if (auto* e = self.engine) e->report_memory_headroom(available, critical, lowMemory != NO);
+}
+
 - (uint64_t)availableMemoryBytes {
     return aurea::ios::process_memory_headroom();
 }
@@ -2442,10 +2446,13 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
 }
 
 - (NSArray<NSString *> *)modelPartNames:(long long)layerId {
+    return [self modelPartNames:layerId includeJoints:NO];
+}
+- (NSArray<NSString *> *)modelPartNames:(long long)layerId includeJoints:(BOOL)includeJoints {
     auto* e = self.engine;
     NSMutableArray<NSString *>* out = [NSMutableArray array];
     if (!e) return out;
-    for (const auto& name : e->model_part_names(static_cast<aurea::u64>(layerId)))
+    for (const auto& name : e->model_part_names(static_cast<aurea::u64>(layerId), includeJoints))
         [out addObject:[NSString stringWithUTF8String:name.c_str()] ?: @""];
     return out;
 }
@@ -3245,6 +3252,12 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     return e->set_group_layer_ranges(static_cast<aurea::u64>(groupId), ids.data(), s0.data(), s1.data(), static_cast<u32>(n)).ok();
 }
 
+- (BOOL)setInlineEditTarget:(long long)groupId layer:(long long)layerId {
+    [self flush];
+    auto* e = self.engine;
+    return e && e->set_inline_edit_target(static_cast<aurea::u64>(groupId), static_cast<aurea::u64>(layerId));
+}
+
 - (BOOL)editGroupClipTime:(long long)groupId layer:(long long)layerId operation:(uint32_t)operation frame:(int64_t)frame {
     auto* e = self.engine;
     return e && e->edit_group_clip_time(static_cast<aurea::u64>(groupId), static_cast<aurea::u64>(layerId), operation, frame);
@@ -3446,11 +3459,28 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     u32 written = e->query_effect_params(static_cast<aurea::u64>(layerId), effectId, rows.data(),
                                          static_cast<u32>(rows.size()), blob.data(),
                                          static_cast<u32>(blob.size()));
-    if (written == static_cast<u32>(rows.size())) {
+    while (written == static_cast<u32>(rows.size()) && rows.size() < 1024) {
         rows.assign(written * 2, {});
         written = e->query_effect_params(static_cast<aurea::u64>(layerId), effectId, rows.data(),
                                          static_cast<u32>(rows.size()), blob.data(),
                                          static_cast<u32>(blob.size()));
+    }
+    const auto textTruncated = [&] {
+        for (u32 i = 0; i < written; ++i) {
+            const auto& row = rows[i];
+            if (!row.idLength) return true;
+            if (row.enumCount) {
+                u32 options = row.enumLength ? 1u : 0u;
+                for (u32 k = 0; k < row.enumLength; ++k) if (blob[row.enumOffset + k] == '|') ++options;
+                if (options < row.enumCount) return true;
+            }
+        }
+        return false;
+    };
+    while (blob.size() < (4u << 20) && textTruncated()) {
+        blob.resize(blob.size() * 2);
+        written = e->query_effect_params(static_cast<aurea::u64>(layerId), effectId, rows.data(),
+            static_cast<u32>(rows.size()), blob.data(), static_cast<u32>(blob.size()));
     }
     NSMutableArray<NSDictionary<NSString*, id>*>* out = [NSMutableArray arrayWithCapacity:written];
     for (u32 i = 0; i < written; ++i) [out addObject:param_row_dict(rows[i], blob)];

@@ -77,6 +77,7 @@ fun pickableEffects(catalog: List<EffectCatalogEntry>, layerHasAudio: Boolean, l
     catalog.filter {
         it.typeId !in setOf(effectTypeId("aurea.motion.oscillate"), effectTypeId("aurea.layout.grid_builder"), effectTypeId("aurea.layout.grid_item"), effectTypeId("aurea.light.scene_flare")) &&
             (layerHasAudio || !isAudioCategory(it.category) || makesSound(it)) &&
+            (layerKind != 12 || !PluginTexts.isAudio(it.typeId)) &&
             (com.aurea.aurea.ui.platform.PlatformFeatures.desktopAe || it.typeId !in AeDesktopOnlyEffects) &&
             (it.typeId != effectTypeId("aurea.generate.raster_extrude") || layerKind in setOf(1, 2, 4, 5, 12))
     }

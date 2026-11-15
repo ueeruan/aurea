@@ -225,7 +225,7 @@ struct TrackingPanel: View {
                     TextField(AureaText.t("cam_distance"), text: $distanceText).keyboardType(.decimalPad).textFieldStyle(.roundedBorder)
                     Button(AureaText.t("cam_set_scale")) { if let value = Float(distanceText.replacingOccurrences(of: ",", with: ".")) { model.calibrateCamera(2, distance: value) } }.padding(.vertical, 12)
                 }
-                ForEach(model.layers.filter { $0.kind == 10 }) { layer in
+                ForEach(model.editingLayers.filter { $0.kind == 10 }) { layer in
                     Button(AureaText.t("cam_place_3d", layer.name)) { model.placeTrackedModel(layer.id) }.padding(.vertical, 12)
                 }
                 }.padding(.vertical, 12)
@@ -405,7 +405,7 @@ private struct MotionTrackingSection: View {
                         button(AureaText.t("trk_create_null")) { model.applyMotion(0) }
                         // Alvo escolhido aqui: a camada que recebe o rastreio não tem
                         // este painel (é do vídeo), então "a selecionada" era o próprio vídeo.
-                        let targets = model.layers.filter { $0.id != model.primarySelection && !$0.threeD && $0.parentIndex < 0 && !$0.adjustment && [1, 2, 4, 5, 6, 11, 12].contains($0.kind) }
+                        let targets = model.editingLayers.filter { $0.id != model.primarySelection && !$0.threeD && $0.parentIndex < 0 && !$0.adjustment && [1, 2, 4, 5, 6, 11, 12].contains($0.kind) }
                         if targets.isEmpty { Text(AureaText.t("track_no_target")).foregroundStyle(AureaColors.muted) }
                         ForEach(targets) { layer in
                             Button(AureaText.t("track_apply_to", layer.name)) { model.applyMotion(1, target: layer.id) }.padding(.vertical, 6)
@@ -723,7 +723,7 @@ struct CaptionsPanel: View {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if model.primarySelection == nil || (![1, 3].contains(model.selectedLayer?.kind ?? 0) && captionTrack == nil) {
                         Text(AureaText.t("sh_add_captions_need_speech")).font(.aurea(size: 13))
-                        ForEach(model.layers.filter { $0.kind == 1 || $0.kind == 3 }) { layer in
+                        ForEach(model.editingLayers.filter { $0.kind == 1 || $0.kind == 3 }) { layer in
                             CaptionAction(label: layer.name) {
                                 model.select(layerId: layer.id)
                                 model.panel = .captions

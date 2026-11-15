@@ -123,7 +123,7 @@ void Engine::puppet_layer_size(const Layer& l, f32& w, f32& h) const noexcept {
         h = l.shape.bounds.h;
     }
     if (!(w > 0.0f) || !(h > 0.0f)) {
-        const Composition* comp = project_ ? project_->timeline().composition(project_->timeline().current()) : nullptr;
+        const Composition* comp = project_ ? current_composition() : nullptr;
         w = comp ? static_cast<f32>(comp->width()) : 1.0f;
         h = comp ? static_cast<f32>(comp->height()) : 1.0f;
     }
@@ -175,6 +175,7 @@ bool Engine::puppet_capture_outline(const Composition& comp, const Layer& l, Fra
 u32 Engine::query_puppet_mesh(u64 layerId, u32 effectId, f32* out, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     const EffectInstance* e = puppet_effect(l, effectId);
@@ -183,7 +184,7 @@ u32 Engine::query_puppet_mesh(u64 layerId, u32 effectId, f32* out, u32 capacity)
     puppet_layer_size(*l, w, h);
     puppet::Mesh mesh;
     std::vector<Vec2> def;
-    mesh_at(*l, *e, l->local_time(playback_.current()), w, h, mesh, def);
+    mesh_at(*l, *e, l->local_time(editing_frame_locked()), w, h, mesh, def);
     const u32 need = static_cast<u32>(mesh.tris.size()) * 2;
     if (!out || capacity < need) return need;
     for (usize i = 0; i < mesh.tris.size(); ++i) {
@@ -196,6 +197,7 @@ u32 Engine::query_puppet_mesh(u64 layerId, u32 effectId, f32* out, u32 capacity)
 u32 Engine::query_puppet(u64 layerId, u32 effectId, f32* out, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     const EffectInstance* e = puppet_effect(l, effectId);
@@ -204,7 +206,7 @@ u32 Engine::query_puppet(u64 layerId, u32 effectId, f32* out, u32 capacity) noex
     for (u32 i = 0; i < puppet::kMaxPins; ++i) n += pin_on(*e, i) ? 1u : 0u;
     const u32 need = n * kPuppetPinFloats;
     if (!out || capacity < need) return need;
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     u32 k = 0;
     for (u32 i = 0; i < puppet::kMaxPins; ++i) {
         if (!pin_on(*e, i)) continue;
@@ -223,6 +225,7 @@ u32 Engine::query_puppet(u64 layerId, u32 effectId, f32* out, u32 capacity) noex
 i32 Engine::puppet_add_pin(u64 layerId, u32 effectId, f32 u, f32 v) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     EffectInstance* e = puppet_effect(l, effectId);
@@ -230,7 +233,7 @@ i32 Engine::puppet_add_pin(u64 layerId, u32 effectId, f32 u, f32 v) noexcept {
     i32 slot = -1;
     for (u32 i = 0; i < puppet::kMaxPins && slot < 0; ++i) if (!pin_on(*e, i)) slot = static_cast<i32>(i);
     if (slot < 0) return -1;
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     // O repouso é o ponto da IMAGEM sob o dedo: com a camada já deformada,
     // a malha atual leva o toque de volta (malha em fração — as baricêntricas
     // não dependem da escala de cada eixo).
@@ -271,13 +274,14 @@ i32 Engine::puppet_add_pin(u64 layerId, u32 effectId, f32 u, f32 v) noexcept {
 bool Engine::puppet_move_pin(u64 layerId, u32 effectId, u32 pin, f32 u, f32 v, bool autoKey, bool continuing) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     EffectInstance* e = puppet_effect(l, effectId);
     if (!e || pin >= puppet::kMaxPins || !pin_on(*e, pin) || !std::isfinite(u) || !std::isfinite(v)) return false;
     if (!continuing) history_.before_mutation(*comp, project_->timeline().current(), "mover pino");
     bump_model_revision_locked();
-    write_pin_pos(*l, *e, pin, Vec2{u, v}, l->local_time(playback_.current()), autoKey);
+    write_pin_pos(*l, *e, pin, Vec2{u, v}, l->local_time(editing_frame_locked()), autoKey);
     project_->mark_dirty();
     request_render();
     return true;
@@ -288,6 +292,7 @@ bool Engine::puppet_rotate_pins(u64 layerId, u32 effectId, u32 pivot, u32 mask, 
     if (!std::isfinite(u0) || !std::isfinite(v0) || !std::isfinite(u1) || !std::isfinite(v1)) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     EffectInstance* e = puppet_effect(l, effectId);
@@ -300,7 +305,7 @@ bool Engine::puppet_rotate_pins(u64 layerId, u32 effectId, u32 pivot, u32 mask, 
     // Ângulo varrido em volta do pivô em px da camada (fração achataria o giro).
     f32 w, h;
     puppet_layer_size(*l, w, h);
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     const Vec2 pv = pin_value(*l, *e, puppet::pin_pos(pivot), local);
     const Vec2 c{pv.x * w, pv.y * h};
     const Vec2 a = Vec2{u0 * w, v0 * h} - c, b = Vec2{u1 * w, v1 * h} - c;
@@ -328,6 +333,7 @@ bool Engine::puppet_rotate_pins(u64 layerId, u32 effectId, u32 pivot, u32 mask, 
 bool Engine::puppet_remove_pin(u64 layerId, u32 effectId, u32 pin) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     EffectInstance* e = puppet_effect(l, effectId);

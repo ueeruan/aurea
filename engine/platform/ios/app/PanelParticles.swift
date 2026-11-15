@@ -158,7 +158,7 @@ struct ParticlesPanel: View {
 
     private var railTrack: [KeyframeItem] {
         guard let param = selected else { return [] }
-        return (model.keyframes[id] ?? [])
+        return (model.keysForLayer(id) ?? [])
             .filter { $0.property == particleProperty && $0.paramIndex == UInt32(param) }
             .sorted { $0.time < $1.time }
     }
@@ -176,7 +176,7 @@ struct ParticlesPanel: View {
 
     private func look(_ param: Int) -> KeyframeLook {
         var animated = false
-        for key in model.keyframes[id] ?? [] where key.property == particleProperty && key.paramIndex == UInt32(param) {
+        for key in model.keysForLayer(id) ?? [] where key.property == particleProperty && key.paramIndex == UInt32(param) {
             if key.time == model.localPlayhead { return .keyHere }
             animated = true
         }
@@ -184,12 +184,12 @@ struct ParticlesPanel: View {
     }
 
     private func keyed(_ param: Int) -> Bool {
-        (model.keyframes[id] ?? []).contains { $0.property == particleProperty && $0.paramIndex == UInt32(param) }
+        (model.keysForLayer(id) ?? []).contains { $0.property == particleProperty && $0.paramIndex == UInt32(param) }
     }
 
     /// Losango de keyframe de um parâmetro: no cabeçote apaga, fora dele grava.
     private func toggleKey(_ param: Int) {
-        let here = (model.keyframes[id] ?? []).filter {
+        let here = (model.keysForLayer(id) ?? []).filter {
             $0.property == particleProperty && $0.paramIndex == UInt32(param) && $0.time == model.localPlayhead
         }
         model.mutate { engine in

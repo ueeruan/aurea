@@ -199,7 +199,7 @@ struct CommandSearchView: View {
         let layer = model.primarySelection
         switch hit.id {
         case "split": model.splitAtPlayhead(Array(model.selection))
-        case "duplicate": model.engine.duplicateLayers(model.selection.map { NSNumber(value: $0) }); model.refreshModel(force: true)
+        case "duplicate": model.duplicateSelectedLayers()
         case "ripple_delete": model.deleteSelectedLayers(ripple: true)
         case "trim_start": if let layer { model.trimStartToPlayhead(layer, at: model.status.playhead) }
         case "trim_end": if let layer { model.trimEnd(layer, at: model.status.playhead) }

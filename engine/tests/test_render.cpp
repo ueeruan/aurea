@@ -5,6 +5,7 @@
 // =============================================================================
 #include "TestFramework.hpp"
 #include "aurea/render/PreviewCachePolicy.hpp"
+#include "aurea/render/TemporalReconstruction.hpp"
 #include "aurea/render/ShutterPlan.hpp"
 #include "aurea/render/MotionBlurBounds.hpp"
 #include <limits>
@@ -336,6 +337,50 @@ AUREA_TEST(FrameGraph, PassWithoutReaderIsCulled) {
     AUREA_CHECK_EQ(f.graph.stats().passesExecuted, static_cast<u32>(1));
     // Recurso de passe podado não aloca textura.
     AUREA_CHECK_EQ(f.graph.stats().transientTextures, static_cast<u32>(1));
+}
+
+AUREA_TEST(FrameGraph, PassMetricsCountUniqueTrafficAndDiscardedDepth) {
+    GraphFixture f;
+    const TextureDesc colorDesc = rt(32, 16);
+    TextureDesc depthDesc = colorDesc;
+    depthDesc.format = SurfaceFormat::Depth32F;
+    const FGTexture source = f.graph.import_texture("source", TextureHandle{99}, colorDesc);
+    const FGTexture output = f.graph.create_texture("output", colorDesc);
+    const FGTexture depth = f.graph.create_texture("depth", depthDesc);
+    const u32 pass = f.graph.add_raster_pass_depth("profile", PassStage::Scene3D, output,
+        LoadOp::Clear, {}, depth, LoadOp::Clear, false, 0.0f, [](PassContext&) {});
+    f.graph.read(pass, source);
+    f.graph.read(pass, source);
+    f.graph.set_output(output, ResourceState::ShaderRead);
+    FrameBegin frame;
+    AUREA_CHECK(f.backend.begin_frame(frame).ok());
+    f.pool.begin_frame(f.backend, frame.frameNumber);
+    AUREA_CHECK(f.graph.compile(f.pool).ok());
+    f.graph.execute(*frame.commands, true);
+    const auto metrics = f.graph.pass_metrics(pass);
+    AUREA_CHECK(metrics.cpuMeasured);
+    AUREA_CHECK_EQ(metrics.estimatedReadBytes, colorDesc.estimated_bytes());
+    AUREA_CHECK_EQ(metrics.estimatedWriteBytes, colorDesc.estimated_bytes());
+    AUREA_CHECK_EQ(metrics.workingSetBytes, 2 * colorDesc.estimated_bytes() + depthDesc.estimated_bytes());
+    AUREA_CHECK(!f.graph.pass_metrics(kInvalidIndex).cpuMeasured);
+    f.graph.release(f.pool);
+    f.pool.end_frame();
+    AUREA_CHECK(f.backend.end_frame().ok());
+}
+
+AUREA_TEST(FrameGraph, PassMetricsKeepUnprofiledAndCulledPassesUnmeasured) {
+    GraphFixture f;
+    const FGTexture output = f.graph.create_texture("output", rt());
+    const FGTexture unused = f.graph.create_texture("unused", rt());
+    const u32 pass = f.graph.add_raster_pass("output", PassStage::Output, output,
+        LoadOp::Clear, {}, [](PassContext&) {});
+    const u32 culled = f.graph.add_raster_pass("unused", PassStage::Effects, unused,
+        LoadOp::Clear, {}, [](PassContext&) {});
+    f.graph.set_output(output, ResourceState::ShaderRead);
+    AUREA_CHECK(f.run().ok());
+    AUREA_CHECK(!f.graph.pass_metrics(pass).cpuMeasured);
+    AUREA_CHECK_EQ(f.graph.pass_metrics(pass).cpuRecordNs, 0ull);
+    AUREA_CHECK_EQ(f.graph.pass_metrics(culled).estimatedWriteBytes, 0ull);
 }
 
 AUREA_TEST(FrameGraph, RecordingFailureStopsLaterPassesAndOutputTransitions) {
@@ -3671,4 +3716,38 @@ AUREA_TEST(Renderer, Fix054VideoLayerKeepsItsLastFrameWhileItsDecoderIsRefused) 
     AUREA_CHECK(ready);
     AUREA_CHECK(factory.refused.load() >= 1u);
     media.close_all();
+}
+
+AUREA_TEST(HyperAdaptive, TemporalAdmissionUsesRealCapabilitiesAndRetiresPartialAllocations) {
+    MockBackend backend;
+    ShaderLibrary shaders;
+    AUREA_CHECK(shaders.initialize(backend).ok());
+    TemporalReconstruction temporal;
+    AUREA_CHECK(!temporal.admit(backend, shaders, 64, 32, 1ull << 20));
+    backend.caps.rgba16fRenderable = backend.caps.rgba16fFilterable = backend.caps.depth32fSampled = true;
+    constexpr u64 bytes = 64ull * 32 * 24;
+    AUREA_CHECK(!temporal.admit(backend, shaders, 64, 32, bytes - 1));
+    AUREA_CHECK_EQ(temporal.bytes(), 0ull);
+    u32 creates = 0;
+    backend.beforeCreateTexture = [&](const TextureDesc&) {
+        return ++creates == 3 ? Status{Errc::OutOfDeviceMemory} : OkStatus;
+    };
+    const u32 destroyed = backend.texturesDestroyed;
+    AUREA_CHECK(!temporal.admit(backend, shaders, 64, 32, bytes));
+    AUREA_CHECK_EQ(temporal.bytes(), 0ull);
+    AUREA_CHECK_EQ(backend.texturesDestroyed - destroyed, 2u);
+    backend.beforeCreateTexture = {};
+    AUREA_CHECK(temporal.admit(backend, shaders, 64, 32, bytes));
+    AUREA_CHECK_EQ(temporal.bytes(), bytes);
+    const u32 allocated = backend.texturesCreated;
+    AUREA_CHECK(temporal.admit(backend, shaders, 64, 32, bytes));
+    AUREA_CHECK_EQ(backend.texturesCreated, allocated);
+    temporal.clear(&backend);
+    AUREA_CHECK_EQ(temporal.bytes(), 0ull);
+    for (i64 frame : {std::numeric_limits<i64>::min(), -1ll, 0ll, 1ll, std::numeric_limits<i64>::max()}) {
+        const auto jitter = TemporalReconstruction::jitter(frame);
+        AUREA_CHECK(std::isfinite(jitter.x) && std::isfinite(jitter.y));
+        AUREA_CHECK(std::fabs(jitter.x) < .5f && std::fabs(jitter.y) < .5f);
+    }
+    shaders.shutdown();
 }

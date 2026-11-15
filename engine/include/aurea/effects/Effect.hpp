@@ -38,6 +38,7 @@
 #include <vector>
 
 namespace aurea::vector { struct DrawProgress; }
+namespace aurea::plugins { struct AudioProgram; }
 
 namespace aurea {
 
@@ -374,6 +375,9 @@ public:
     /// Fração das amostras que os efeitos caros usam neste quadro (0,25..1).
     /// Preview adaptativo/calor < 1; export e prévia do catálogo = 1 sempre.
     [[nodiscard]] virtual f32 effect_quality() const noexcept { return 1.0f; }
+    /// Motion analysis density for adaptive preview. Final-quality renderers
+    /// expose 1, independently of the device's current preview decision.
+    [[nodiscard]] virtual f32 motion_analysis_scale() const noexcept { return 1.0f; }
     /// Espectro do som que uma camada toca NESTE quadro: textura `bands`×1
     /// (R = magnitude 0..1 da faixa, dos graves aos agudos; G = nível geral
     /// do quadro). Calculado do áudio decodificado, sem estado entre quadros:
@@ -602,6 +606,7 @@ public:
     /// Sampling may move source pixels outside the visible viewport back into
     /// view. Earlier effects must preserve their full output for this reader.
     [[nodiscard]] virtual bool needs_full_input() const noexcept { return false; }
+    [[nodiscard]] virtual std::shared_ptr<const plugins::AudioProgram> audio_program() const noexcept { return {}; }
 
     /// VALORES DE DEMONSTRAÇÃO — os que a PRÉVIA do catálogo usa (Fase 7.3
     /// §13). O vetor chega preenchido com os padrões da declaração; o efeito

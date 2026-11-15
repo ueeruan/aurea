@@ -302,13 +302,14 @@ bool outline_text_layer(const Composition& comp, const Layer& l, FrameIndex time
 Result<u64> Engine::text_to_vector(u64 layerId, bool asMasks) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return Status{Errc::InvalidState, "nenhum projeto aberto"};
     const LayerId source = LayerId::unpack(layerId);
     Layer* l = comp->layer(source);
     if (!l || l->kind != LayerKind::Text) return Status{Errc::InvalidArgument, "a camada nao e um texto"};
     if (!l->captions.empty()) return Status{Errc::NotSupported, "legendas nao viram contornos"};
-    const FrameIndex time = playback_.current();
+    const FrameIndex time = editing_frame_locked();
     std::vector<OutlinedGlyph> glyphs;
     if (!outline_text_layer(*comp, *l, time, glyphs)) return Status{Errc::InvalidArgument, "texto sem contornos"};
     usize contours = 0;

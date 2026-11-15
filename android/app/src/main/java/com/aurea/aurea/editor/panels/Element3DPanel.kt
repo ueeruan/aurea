@@ -104,7 +104,7 @@ internal fun Element3DPanel(env: PanelEnv) {
         image != null -> listOf(Tab3D.Material, Tab3D.Shape, Tab3D.Light, Tab3D.Render)
         text != null -> listOf(Tab3D.Material, Tab3D.Shape, Tab3D.Light, Tab3D.Anim, Tab3D.Render)
         // 0.3.6: modelo importado ganha a aba Esqueleto (AutoRig 3D, ossos, IK, Motion Capture).
-        imported -> listOf(Tab3D.Material, Tab3D.Texture, Tab3D.Anim, Tab3D.Shadow, Tab3D.Rig, Tab3D.Light, Tab3D.Render)
+        imported -> listOf(Tab3D.Material, Tab3D.Parts, Tab3D.Texture, Tab3D.Anim, Tab3D.Shadow, Tab3D.Rig, Tab3D.Light, Tab3D.Render)
         else -> listOf(Tab3D.Light, Tab3D.Material, Tab3D.Parts, Tab3D.Render)
     }
     var chosen by rememberSaveable { mutableIntStateOf(-1) }
@@ -125,21 +125,21 @@ internal fun Element3DPanel(env: PanelEnv) {
     val tabs = allTabs.filter { faceTabs == null || it in faceTabs }.ifEmpty { allTabs }
     // Aurea PC (Cena 3D): o editor de propriedades de lá pede UMA aba, sem trilho nem coluna de abas.
     // (As Partes do modelo importado passaram para a Textura.)
-    val only = LocalElement3DOnly.current?.let { if (imported && it == Tab3D.Parts) Tab3D.Texture else it }
+    val only = LocalElement3DOnly.current
     // Editar do modelo importado abre na Animação; Cor e preenchimento, no Material.
-    val opening = if (imported && face == Face3D.Object) Tab3D.Anim.takeIf { it in tabs } else null
+    val opening = if (imported && face == Face3D.Object) Tab3D.Parts.takeIf { it in tabs } else null
     val tab = only?.takeIf { it in tabs } ?: tabs.firstOrNull { it.ordinal == chosen } ?: opening ?: tabs.first()
     // O desenho dos painéis de propriedade: a coluna fixa à esquerda, o conteúdo em
     // seções no centro e as abas em ícones à direita.
     Row(Modifier.fillMaxSize().testTag("panel3d")) {
       if (only == null) {
       // Modelo importado: o ◆ da coluna marca a linha escolhida no Material/Textura/Animação (sem ◆ por linha).
-      val keyed = imported && (tab == Tab3D.Material || tab == Tab3D.Texture || tab == Tab3D.Anim)
+      val keyed = imported && (tab == Tab3D.Material || tab == Tab3D.Texture || tab == Tab3D.Parts || tab == Tab3D.Anim)
       androidx.compose.runtime.LaunchedEffect(tab, store.primary) {
           val target = Model3DKeys.target
           val mine = when (tab) {
               Tab3D.Material -> target?.startsWith("panel3d.mat.") == true
-              Tab3D.Texture -> target?.startsWith("panel3d.texture.") == true || target?.startsWith("panel3d.part.") == true
+              Tab3D.Texture, Tab3D.Parts -> target?.startsWith("panel3d.texture.") == true || target?.startsWith("panel3d.part.") == true
               Tab3D.Anim -> target?.startsWith("panel3d.anim.") == true
               else -> false
           }
@@ -251,11 +251,15 @@ internal enum class Face3D(val tabs: Set<Tab3D>?) {
      * não mudam.
      */
     fun tabsFor(importedModel: Boolean): Set<Tab3D>? =
-        if (importedModel && (this == Material || this == Object)) ModelTabs else tabs
+        if (importedModel) when (this) {
+            Material -> setOf(Tab3D.Material, Tab3D.Texture, Tab3D.Shadow)
+            Object -> setOf(Tab3D.Parts, Tab3D.Anim)
+            else -> tabs
+        } else tabs
 
     companion object {
         /** As abas do painel do modelo importado (Model3DPanel.kt). */
-        val ModelTabs: Set<Tab3D> = setOf(Tab3D.Material, Tab3D.Texture, Tab3D.Anim, Tab3D.Shadow)
+        val ModelTabs: Set<Tab3D> = setOf(Tab3D.Material, Tab3D.Parts, Tab3D.Texture, Tab3D.Anim, Tab3D.Shadow)
     }
 }
 
@@ -288,9 +292,9 @@ private fun PartsTab(env: PanelEnv, shape: com.aurea.aurea.state.Shape3DInfo?) {
     } else {
         // O modelo importado tem as abas Textura (Parts3DEditor.kt) e Animação (Model3DPanel.kt);
         // isto sobra para um objeto 3D sem forma pronta que não é modelo importado.
-        val names = remember(store.primary, store.curveRevision) { store.modelPartNames() }
+        val names = remember(store.primary, store.curveRevision) { store.modelPartNames(includeJoints = true) }
         if (names.isNotEmpty()) {
-            Parts3DEditor(env, names)
+            Parts3DEditor(env, names, animationOnly = true)
             return
         }
     }

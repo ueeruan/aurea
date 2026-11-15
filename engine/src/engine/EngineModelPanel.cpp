@@ -130,6 +130,7 @@ bool Engine::set_model_animation_param(u64 layerId, u32 param, f32 value) noexce
     if (param > 5 || !std::isfinite(value)) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Model3D || l->locked) return false;
@@ -149,7 +150,7 @@ bool Engine::set_model_animation_param(u64 layerId, u32 param, f32 value) noexce
             const f32 v = std::clamp(value, 0.0f, 1.0f);
             history_.before_mutation(*comp, current, "evolução da animação");
             if (track && !track->keys.empty()) {
-                const FrameIndex local = l->local_time(playback_.current());
+                const FrameIndex local = l->local_time(editing_frame_locked());
                 if (const u32 at = track->find_exact(local); at != kInvalidIndex) track->keys[at].value = v;
                 else (void)track->set(local, v, Interpolation::Linear);
             } else {
@@ -171,7 +172,7 @@ bool Engine::set_model_animation_param(u64 layerId, u32 param, f32 value) noexce
             if (speed && speed->has_expression()) return false;
             if (speed && !speed->keys.empty()) {
                 // Velocidade com keyframe (v76): o valor vira (ou troca) o keyframe no cabeçote.
-                const FrameIndex local = l->local_time(playback_.current());
+                const FrameIndex local = l->local_time(editing_frame_locked());
                 history_.before_mutation(*comp, current, "velocidade da animação");
                 if (const u32 at = speed->find_exact(local); at != kInvalidIndex) speed->keys[at].value = v;
                 else (void)speed->set(local, v, Interpolation::Linear);
@@ -218,12 +219,13 @@ bool Engine::toggle_model_animation_param_key(u64 layerId, u32 param) noexcept {
     if (param != 2) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Model3D || l->locked) return false;
     Track* track = l->tracks.find(TrackProperty::ModelAnimSpeed);
     if (track && track->has_expression()) return false;
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     if (track && track->find_exact(local) != kInvalidIndex) {
         history_.before_mutation(*comp, project_->timeline().current(), "tirar keyframe da velocidade");
         // O último keyframe que sai deixa a velocidade parada nele (como as outras propriedades).
@@ -249,12 +251,13 @@ bool Engine::toggle_model_animation_param_key(u64 layerId, u32 param) noexcept {
 bool Engine::toggle_model_animation_key(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Model3D || l->locked) return false;
     Track* track = l->tracks.find(TrackProperty::ModelAnimProgress);
     if (track && track->has_expression()) return false;
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     const auto found = models_.find(l->model.scene.pack());
     const scene3d::SceneAsset* asset = found != models_.end() ? found->second.get() : nullptr;
     const f64 fps = comp->fps() > 0.0 ? comp->fps() : 30.0;
@@ -281,6 +284,7 @@ bool Engine::toggle_model_animation_key(u64 layerId) noexcept {
 bool Engine::query_model_animation(u64 layerId, f32* out, u32 capacity) noexcept {
     if (!out || capacity < kModelAnimationValues) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     const Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Model3D) return false;
@@ -288,7 +292,7 @@ bool Engine::query_model_animation(u64 layerId, f32* out, u32 capacity) noexcept
     const scene3d::SceneAsset* asset = found != models_.end() ? found->second.get() : nullptr;
     const i32 clip = l->model.animationClip;
     const bool valid = asset && clip >= 0 && clip < static_cast<i32>(asset->animations.size());
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     const Track* track = l->tracks.find(TrackProperty::ModelAnimProgress);
     const f64 fps = comp->fps() > 0.0 ? comp->fps() : 30.0;
     out[0] = valid ? static_cast<f32>(clip) : -1.0f;
@@ -315,6 +319,7 @@ bool Engine::query_model_animation(u64 layerId, f32* out, u32 capacity) noexcept
 bool Engine::query_material_emission(u64 layerId, u32 material, f32* out, u32 capacity) noexcept {
     if (!out || capacity < 4) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     const Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Model3D) return false;
@@ -324,7 +329,7 @@ bool Engine::query_material_emission(u64 layerId, u32 material, f32* out, u32 ca
     // "Modelo inteiro": o 1º material (o mesmo que o painel mostra nas réguas).
     const u32 m = material == kAllMaterials ? 0u : material;
     if (m >= materials.size()) return false;
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     for (u32 p = 6; p < kMaterialParamCount; ++p) out[p - 6] = material_value(*l, materials[m], m, p, local);
     return true;
 }
@@ -338,6 +343,7 @@ bool Engine::apply_model_material_preset(u64 layerId, u32 preset) noexcept {
     if (preset >= kModelMaterialPresets) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Model3D || l->locked) return false;
@@ -355,7 +361,7 @@ bool Engine::apply_model_material_preset(u64 layerId, u32 preset) noexcept {
         l->tracks.remove_if([](const Track& t) { return t.property == TrackProperty::MaterialParam; });
     } else {
         const ModelLook& look = kLooks[preset];
-        const FrameIndex local = l->local_time(playback_.current());
+        const FrameIndex local = l->local_time(editing_frame_locked());
         for (u32 i = 0; i < count; ++i)
             for (u32 p = 0; p < kMaterialParamCount; ++p)
                 if (look.mask & (1u << p)) write_material(*l, asset.materials[i], i, p, look.v[p], local);
@@ -372,6 +378,7 @@ bool Engine::apply_model_material_preset(u64 layerId, u32 preset) noexcept {
 
 i32 Engine::model_material_preset(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     const Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Model3D) return -1;
@@ -406,6 +413,7 @@ bool Engine::model_material_preset_preview(u64 layerId, u32 preset, u32 size, st
     std::shared_ptr<const scene3d::SceneAsset> asset;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
+        InlineEditScope inlineScope(*this, layerId);
         const Composition* comp = project_ ? current_composition() : nullptr;
         const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
         if (!l || l->kind != LayerKind::Model3D) return false;
@@ -445,6 +453,7 @@ bool Engine::toggle_material_keys(u64 layerId, u32 material, u32 paramMask) noex
     if (!paramMask) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Model3D || l->locked) return false;
@@ -455,7 +464,7 @@ bool Engine::toggle_material_keys(u64 layerId, u32 material, u32 paramMask) noex
     if (material != kAllMaterials && material >= count) return false;
     const u32 first = material == kAllMaterials ? 0u : material;
     const u32 last = material == kAllMaterials ? count : material + 1u;
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     bool here = false;
     for (u32 i = first; i < last && !here; ++i)
         for (u32 p = 0; p < kMaterialParamCount; ++p) {

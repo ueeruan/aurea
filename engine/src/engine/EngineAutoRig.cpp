@@ -141,6 +141,7 @@ bool to_screen(const Mat4& clipFromModel, Vec3 p, f32& sx, f32& sy) noexcept {
 
 i32 Engine::humanoid_status(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = rig_layer(comp, layerId);
     if (!l) return 0;
@@ -154,6 +155,7 @@ i32 Engine::humanoid_status(u64 layerId) noexcept {
 
 bool Engine::query_humanoid(u64 layerId, rig::HumanoidRig& out) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = rig_layer(comp, layerId);
     if (!l) return false;
@@ -169,6 +171,7 @@ bool Engine::query_humanoid(u64 layerId, rig::HumanoidRig& out) noexcept {
 
 std::string Engine::model_node_name(u64 layerId, i32 node) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = rig_layer(comp, layerId);
     if (!l || node < 0) return {};
@@ -225,6 +228,7 @@ bool Engine::start_autorig_job(u64 layerId, const rig::AutoRigJoints* edit) noex
     CompositionId composition{};
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
+        InlineEditScope inlineScope(*this, layerId, true);
         Composition* comp = project_ ? current_composition() : nullptr;
         const Layer* l = rig_layer(comp, layerId);
         if (!l || l->locked) return fail(rig::AutoRigError::Failed);
@@ -298,6 +302,7 @@ bool Engine::start_autorig_job(u64 layerId, const rig::AutoRigJoints* edit) noex
 u32 Engine::query_humanoid_joints(u64 layerId, f32* out, u32 capacity) noexcept {
     constexpr u32 need = static_cast<u32>(rig::kHumanoidBoneCount) * kHumanoidJointFloats;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = rig_layer(comp, layerId);
     if (!l) return 0;
@@ -308,7 +313,7 @@ u32 Engine::query_humanoid_joints(u64 layerId, f32* out, u32 capacity) noexcept 
     const scene3d::SceneAsset& asset = *it->second;
     const rig::HumanoidMap map = rig::humanoid_map(asset, a->model.rig);
     const rig::HumanoidRest rest = rig::rest_pose(asset, map);
-    const FrameIndex now = playback_.current();
+    const FrameIndex now = editing_frame_locked();
     scene3d::Pose pose;
     posed(*comp, *l, asset, now, pose);
     const Mat4 world = layer_world_3d(*comp, *l, now) * file_to_layer(l->model);
@@ -334,6 +339,7 @@ bool Engine::humanoid_move_joint(u64 layerId, u32 bone, f32 compX, f32 compY) no
     rig::AutoRigJoints joints;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
+        InlineEditScope inlineScope(*this, layerId, true);
         Composition* comp = project_ ? current_composition() : nullptr;
         const Layer* l = rig_layer(comp, layerId);
         if (!l || l->locked) return false;
@@ -347,7 +353,7 @@ bool Engine::humanoid_move_joint(u64 layerId, u32 bone, f32 compX, f32 compY) no
         const rig::HumanoidMap map = rig::humanoid_map(asset, a->model.rig);
         const i32 node = map.joint[bone];
         if (node < 0) return false;
-        const FrameIndex now = playback_.current();
+        const FrameIndex now = editing_frame_locked();
         scene3d::Pose pose;
         posed(*comp, *l, asset, now, pose);
         if (static_cast<usize>(node) >= pose.nodeWorld.size()) return false;
@@ -380,6 +386,7 @@ bool Engine::humanoid_move_joint(u64 layerId, u32 bone, f32 compX, f32 compY) no
 bool Engine::humanoid_assign_bone(u64 layerId, u32 bone, i32 node) noexcept {
     if (bone >= rig::kHumanoidBoneCount) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = rig_layer(comp, layerId);
     if (!l || l->locked) return false;
@@ -416,6 +423,7 @@ Status Engine::set_bone_keys(u64 layerId, const rig::BoneKey* keys, usize count,
                              i64 clearFrom, i64 clearTo) noexcept {
     if (!keys && count) return Status{Errc::InvalidArgument};
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = rig_layer(comp, layerId);
     if (!l) return Status{Errc::InvalidArgument, "selecione um modelo 3D"};
@@ -460,13 +468,14 @@ Status Engine::set_bone_keys(u64 layerId, const rig::BoneKey* keys, usize count,
 bool Engine::drag_bone_translate(u64 layerId, u32 node, f32 dxPx, f32 dyPx, bool continuing) noexcept {
     if (!std::isfinite(dxPx) || !std::isfinite(dyPx)) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = rig_layer(comp, layerId);
     if (!l || l->locked) return false;
     const auto it = models_.find(l->model.scene.pack());
     if (it == models_.end() || !it->second || node >= it->second->nodes.size()) return false;
     const scene3d::SceneAsset& asset = *it->second;
-    const FrameIndex now = playback_.current();
+    const FrameIndex now = editing_frame_locked();
     const FrameIndex local = l->local_time(now);
     for (u32 c = 3; c < 6; ++c) {
         const Track* t = l->tracks.find(TrackProperty::BonePose, node, c);
@@ -509,6 +518,7 @@ bool Engine::humanoid_set_ik(u64 layerId, u32 limb, bool on) noexcept {
     HumanoidBone endBone, midBone;
     if (!limb_end(limb, endBone, midBone)) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = rig_layer(comp, layerId);
     if (!l || l->locked) return false;
@@ -530,7 +540,7 @@ bool Engine::humanoid_set_ik(u64 layerId, u32 limb, bool on) noexcept {
     if (!on) {
         l->tracks.remove_if([&](const Track& t) { return t.property == TrackProperty::BonePose && t.effectIndex == effect; });
     } else {
-        const FrameIndex now = playback_.current();
+        const FrameIndex now = editing_frame_locked();
         scene3d::Pose pose;
         posed(*comp, *l, asset, now, pose);
         const Vec3 pa = rig::matrix_position(pose.nodeWorld[static_cast<usize>(root)]);
@@ -560,6 +570,7 @@ bool Engine::humanoid_set_ik(u64 layerId, u32 limb, bool on) noexcept {
 u32 Engine::query_humanoid_ik(u64 layerId, f32* out, u32 capacity) noexcept {
     constexpr u32 need = 4 * kHumanoidIkFloats;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = rig_layer(comp, layerId);
     if (!l) return 0;
@@ -568,7 +579,7 @@ u32 Engine::query_humanoid_ik(u64 layerId, f32* out, u32 capacity) noexcept {
     if (it == models_.end() || !it->second || !a || it->second->skins.empty()) return 0;
     if (!out || capacity < need) return need;
     const rig::HumanoidMap map = rig::humanoid_map(*it->second, a->model.rig);
-    const FrameIndex now = playback_.current();
+    const FrameIndex now = editing_frame_locked();
     const FrameIndex local = l->local_time(now);
     const Mat4 world = layer_world_3d(*comp, *l, now) * file_to_layer(l->model);
     const Mat4 vp = sceneEditor_.enabled ? scene_editor_projection(comp->width(), comp->height(), sceneEditor_)
@@ -601,6 +612,7 @@ bool Engine::drag_humanoid_ik(u64 layerId, u32 limb, bool pole, f32 dxPx, f32 dy
     HumanoidBone endBone, midBone;
     if (!limb_end(limb, endBone, midBone) || !std::isfinite(dxPx) || !std::isfinite(dyPx)) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = rig_layer(comp, layerId);
     if (!l || l->locked) return false;
@@ -611,7 +623,7 @@ bool Engine::drag_humanoid_ik(u64 layerId, u32 limb, bool pole, f32 dxPx, f32 dy
     if (end < 0) return false;
     const u32 effect = rig::kBoneIkBase + static_cast<u32>(end);
     if (!l->tracks.find(TrackProperty::BonePose, effect, rig::kIkParamWeight)) return false;
-    const FrameIndex now = playback_.current();
+    const FrameIndex now = editing_frame_locked();
     const FrameIndex local = l->local_time(now);
     const u32 first = pole ? rig::kIkParamPoleX : rig::kIkParamTargetX;
     for (u32 c = first; c < first + 3; ++c) {
@@ -639,6 +651,7 @@ i32 Engine::toggle_humanoid_ik_key(u64 layerId, u32 limb) noexcept {
     HumanoidBone endBone, midBone;
     if (!limb_end(limb, endBone, midBone)) return -1;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = rig_layer(comp, layerId);
     if (!l || l->locked) return -1;
@@ -649,7 +662,7 @@ i32 Engine::toggle_humanoid_ik_key(u64 layerId, u32 limb) noexcept {
     if (end < 0) return -1;
     const u32 effect = rig::kBoneIkBase + static_cast<u32>(end);
     if (!l->tracks.find(TrackProperty::BonePose, effect, rig::kIkParamWeight)) return -1;
-    const FrameIndex now = playback_.current();
+    const FrameIndex now = editing_frame_locked();
     if (!l->contains_time(now)) return -1;
     const FrameIndex local = l->local_time(now);
     bool any = false;

@@ -63,6 +63,30 @@ jobs:
           sudo xcode-select -s "$XC/Contents/Developer"
           xcodebuild -version
           echo "build=$(xcodebuild -version | awk '/Build version/ {print $3}')" >> "$GITHUB_OUTPUT"
+      - name: Reserve disk space before restoring Xcode intermediates
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          import subprocess
+          selected = Path(subprocess.check_output(['xcode-select', '-p'], text=True).strip()).parents[1].resolve()
+          applications = Path('/Applications')
+          before = shutil.disk_usage('/').free
+          for candidate in applications.glob('Xcode_*.app'):
+              if candidate.resolve() == selected:
+                  continue
+              assert candidate.parent == applications and candidate.name.startswith('Xcode_')
+              if candidate.is_symlink():
+                  candidate.unlink()
+              else:
+                  shutil.rmtree(candidate)
+          # This job packages for physical iOS. Android tooling is unused here.
+          sdk = Path.home() / 'Library/Android/sdk'
+          if sdk.is_dir() and not sdk.is_symlink():
+              shutil.rmtree(sdk)
+          print('Disk free before/after cleanup', before, shutil.disk_usage('/').free)
+          PY
+          df -h /
       # 0.4.6: build INCREMENTAL. O DerivedData do Xcode (com os pacotes Swift ja
       # baixados) e a pasta do CMake do motor voltam da rodada anterior; o
       # ci_mtimes devolve a data antiga aos arquivos que nao mudaram (o checkout

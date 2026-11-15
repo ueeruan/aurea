@@ -63,6 +63,7 @@ func fxPickableEffects(_ catalog: [EffectCatalogItem], layerHasAudio: Bool, laye
     catalog.filter {
         !["aurea.motion.oscillate", "aurea.layout.grid_builder", "aurea.layout.grid_item", "aurea.light.scene_flare"].map(fxEffectTypeId).contains($0.typeId) &&
         (layerHasAudio || !fxIsAudioCategory($0.category) || fxMakesSound($0)) &&
+        (layerKind != 12 || !FxPluginTexts.isAudio($0.typeId)) &&
         ($0.typeId != fxEffectTypeId("aurea.generate.raster_extrude") || [1, 2, 4, 5, 12].contains(layerKind))
     }
 }
@@ -2456,14 +2457,14 @@ struct PluginManagerView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(FxPluginTexts.pick(p.names, tag) ?? p.id).font(.aurea(size: 14, weight: .semibold))
                 Text(AureaText.t("plug_by", p.author.isEmpty ? p.id : p.author, p.version) + " · "
-                     + AureaText.t(p.kind == "stack" ? "plug_kind_stack" : p.kind == "panel" ? "pv2_kind_panel" : (p.scene3d ? "plug_kind_shader3d" : "plug_kind_shader")))
+                     + AureaText.t(p.kind == "audio" ? "plug_kind_audio" : p.kind == "stack" ? "plug_kind_stack" : p.kind == "panel" ? "pv2_kind_panel" : (p.scene3d ? "plug_kind_shader3d" : "plug_kind_shader")))
                     .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
                 if let d = FxPluginTexts.pick(p.descriptions, tag), !d.isEmpty { Text(d).font(.aurea(size: 12)) }
                 // No modo seguro o aviso do topo já explica: o plugin não está com defeito.
                 if !p.ok && !PluginRuntime.shared.safeMode {
                     Text(AureaText.t("plug_error", p.error)).font(.aurea(size: 12)).foregroundStyle(AureaColors.warning)
                 } else if p.ok && p.testRenderMs > 0 {
-                    Text(AureaText.t("plug_render_ms", String(format: "%.1f", p.testRenderMs))).font(.aurea(size: 11)).foregroundStyle(AureaColors.muted)
+                    Text(AureaText.t(p.kind == "audio" ? "plug_audio_ms" : "plug_render_ms", String(format: "%.1f", p.testRenderMs))).font(.aurea(size: 11)).foregroundStyle(AureaColors.muted)
                 }
                 PluginV2Controls(pluginId: p.id)   // 0.3.4 plugins: ligar, permissões, painéis, console
             }.frame(maxWidth: .infinity, alignment: .leading)

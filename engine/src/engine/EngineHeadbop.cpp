@@ -128,6 +128,7 @@ headbop::RigTrack build_track(const std::vector<f32>& data, f32 aspect, bool vid
 bool Engine::headbop_begin(u64 layerId, u32 effectId) noexcept {
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
+        InlineEditScope inlineScope(*this, layerId, true);
         Composition* comp = project_ ? current_composition() : nullptr;
         Layer* l = nullptr;
         if (!headbop_instance(comp, layerId, effectId, l)) return false;
@@ -386,6 +387,7 @@ bool Engine::headbop_status(u64 layerId, u32 effectId, i64* out8) noexcept {
         out8[4] = s->status.frames.load();
     }
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = nullptr;
     const EffectInstance* e = headbop_instance(comp, layerId, effectId, l);
@@ -404,6 +406,7 @@ bool Engine::headbop_set_taps(u64 layerId, u32 effectId, const f64* times, u32 c
     if (!times || count < 2) return false;
     std::vector<f64> taps(times, times + count);
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = nullptr;
     EffectInstance* e = headbop_instance(comp, layerId, effectId, l);
@@ -424,6 +427,7 @@ bool Engine::headbop_set_taps(u64 layerId, u32 effectId, const f64* times, u32 c
 i32 Engine::headbop_bake(u64 layerId, u32 effectId) noexcept {
     using namespace headbop;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = nullptr;
     EffectInstance* e = headbop_instance(comp, layerId, effectId, l);

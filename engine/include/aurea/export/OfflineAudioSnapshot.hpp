@@ -14,7 +14,8 @@ public:
         const Composition& root, const Project& project, audio::AudioBlockCache* cache,
         audio::AssetPathResolver resolver, void* resolverUser,
         u64 blockBudget = kDefaultBlockBudget,
-        const std::atomic<bool>* cancel = nullptr) noexcept;
+        const std::atomic<bool>* cancel = nullptr,
+        const EffectRegistry* registry = nullptr) noexcept;
     ~OfflineAudioSnapshot();
     OfflineAudioSnapshot(const OfflineAudioSnapshot&) = delete;
     OfflineAudioSnapshot& operator=(const OfflineAudioSnapshot&) = delete;

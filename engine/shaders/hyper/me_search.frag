@@ -102,10 +102,22 @@ void main() {
         pred[2] = texelFetch(u_prev, clamp(blk + ivec2(1, 0), ivec2(0), fsz - 1), 0).rg / s;
         pred[3] = texelFetch(u_prev, clamp(blk + ivec2(0, -1), ivec2(0), fsz - 1), 0).rg / s;
         pred[4] = texelFetch(u_prev, clamp(blk + ivec2(0, 1), ivec2(0), fsz - 1), 0).rg / s;
+        ivec2 bases[5];
+        for (int k = 0; k < 5; ++k) bases[k] = ivec2(floor(pred[k] + 0.5));
         for (int k = 0; k < 5; ++k) {
-            const vec2 base = floor(pred[k] + 0.5);
             for (int y = -R; y <= R; ++y)
-                for (int x = -R; x <= R; ++x) consider(base + vec2(float(x), float(y)), best, bestCost);
+                for (int x = -R; x <= R; ++x) {
+                    const ivec2 candidate = bases[k] + ivec2(x, y);
+                    bool visited = false;
+                    for (int previous = 0; previous < k; ++previous) {
+                        const ivec2 distance = abs(candidate - bases[previous]);
+                        visited = visited || all(lessThanEqual(distance, ivec2(R)));
+                    }
+                    // Keep the first evaluation and its strict-less tie order.
+                    // Overlapping predictors frequently searched the same 25
+                    // source samples five times for an identical candidate.
+                    if (!visited) consider(vec2(candidate), best, bestCost);
+                }
         }
         const vec2 c = best;
         for (int y = -1; y <= 1; ++y)

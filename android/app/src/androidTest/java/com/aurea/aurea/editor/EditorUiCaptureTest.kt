@@ -147,9 +147,10 @@ class EditorUiCaptureTest {
         compose.runOnIdle { store.setTextAnimParam(0, 6, 0.8f); store.setMaskParam(mask, 0, 40f); store.setMaskParam(mask, 2, 0.6f) }
         seek(0)
         capture("editor")
-        compose.onNodeWithTag("layer.panel.colorFill").performClick()
+        // Funções (F4): os animadores de texto moram em Animadores (atalho no Editar texto).
+        compose.onNodeWithTag("layer.panel.edit").performClick()
         settle()
-        compose.onNodeWithTag("text.tab.animator").performClick()
+        compose.onNodeWithTag("text.layer.animators").performScrollTo().performClick()
         compose.onNodeWithTag("text.transform.add").performScrollTo().performClick()
         capture("text-stack")
         back()

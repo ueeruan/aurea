@@ -30,6 +30,7 @@
 #include "aurea/text/TextAnimator.hpp"
 #include "aurea/timeline/LayerAnimator.hpp"
 #include "aurea/timeline/Rig.hpp"
+#include "aurea/rig/Ik.hpp"
 #include "aurea/timeline/ShapeGeometry.hpp"
 #include "aurea/tracking/MotionGeometry.hpp"
 #include "aurea/vector/Vector.hpp"
@@ -370,6 +371,7 @@ void place_model(const Composition& comp, const Layer& l, const scene3d::SceneAs
     scene3d::apply_text3d_animators(asset, l, materialTime, comp.fps(), pose.nodeWorld, inst.nodeOpacity, &inst.nodeFill);
     // Animar parte 3D / Esconder partes 3D: por último (os animadores refazem a opacidade).
     scene3d::apply_part_effects(asset, l, materialTime, pose.nodeWorld, inst.nodeOpacity);
+    if (!asset.skins.empty() && scene3d::has_part_effects(l)) scene3d::rebuild_skin_matrices(asset, pose);
     inst.nodeWorld = std::move(pose.nodeWorld);
     inst.jointMatrices = std::move(pose.jointMatrices);
     inst.skinJointOffset = std::move(pose.skinJointOffset);
@@ -1037,6 +1039,10 @@ void Renderer::scan_for_warmup(const Project& project) noexcept {
 }
 
 void Renderer::warm_scene_pipelines(const FrameSnapshot& snapshot) noexcept {
+    if (snapshot.temporalStaticScene && !heavyQ_.exportFrame) {
+        warmPending_.push_back(PipelineKey::fullscreen(ShaderId::scene3d_post_temporal_frag, kWorkFormat));
+        warmPending_.push_back(PipelineKey::fullscreen(ShaderId::scene3d_post_temporal_depth_frag, SurfaceFormat::R32F));
+    }
     // The project scan runs before render quality has been resolved. Keep its
     // composition qualities, then derive the SAME sample count as the draw.
     // Actual snapshots also cover a direct play/quality change before a paused
@@ -1129,6 +1135,7 @@ void Renderer::shutdown_impl(bool gpuDone) noexcept {
 
 void Renderer::forget_device() noexcept {
     cancel_preview_graph();
+    temporalPreview_.clear(nullptr);
     staticPoses_.clear(); staticPoseBytes_ = 0; poseWorkspace_ = {};
     previewFrames_.clear();
     previewCacheKey_ = 0;
@@ -1237,6 +1244,7 @@ void Renderer::release_project_resources_impl(bool gpuDone) noexcept {
 
 void Renderer::clear_preview_cache() noexcept {
     cancel_preview_graph();
+    temporalPreview_.clear(backend_);
     previewCacheRevision_ = previewCacheComposition_ = 0;
     // Withdraw the UI snapshot before releasing any GPU resources.
     publish_preview_buffer_ranges();
@@ -1301,6 +1309,7 @@ u32 Renderer::configure_preview_cache(u32 width, u32 height, const RenderSetting
     number(heavy.particles); number(heavy.flow); number(heavy.lodBias); number(heavy.effects);
     add(heavy.flowBlurSamples); add(heavy.shadowMapSize); add(heavy.shadowFilter);
     add(heavy.msaaSamples); add(heavy.fxaa); add(heavy.bloomStartDiv); add(heavy.bloomLevels);
+    add(heavy.screenEffectDiv); add(heavy.reflectionSteps); add(heavy.volumetricSteps);
     if (key != previewCacheKey_) { clear_preview_cache(); previewCacheKey_ = key; }
     previewCacheRevision_ = s.previewCacheRevision;
     previewCacheComposition_ = s.previewCacheComposition;
@@ -2370,6 +2379,10 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     }
     out.target = FGTexture{};
     out.cachedComposition = {};
+    out.temporalStaticScene = false;
+    out.temporalComposition = comp.id().pack();
+    out.temporalRevision = settings.previewCacheRevision;
+    out.temporalContentKey = 0;
     out.compWidth = comp.width();
     out.compHeight = comp.height();
     // O alvo é pré-multiplicado: fundo transparente limpa em (0,0,0,0). Limpar
@@ -3446,7 +3459,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     const MotionBlurSettings& mb = comp.motion_blur();
                     textShutter = shutter_window(mb, l->transform.motionBlurAmount);
                     if (textShutter.duration > 0)
-                        sets = capped_shutter_samples(mb, settings.finalQuality, effective_quality(settings).motionBlurSamples, 0, true);
+                        sets = shutter_sample_count(mb, settings.finalQuality, effective_quality(settings).motionBlurSamples, 0, true);
                 }
                 // Texto no caminho: cada letra vai para o seu ponto do caminho-guia
                 // (pelo centro do avanço), girada pela tangente. O animador age
@@ -3655,7 +3668,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                             }
                         }
                     }
-                    sets = capped_shutter_samples(comp.motion_blur(), settings.finalQuality,
+                    sets = shutter_sample_count(comp.motion_blur(), settings.finalQuality,
                         effective_quality(settings).motionBlurSamples, travel, glyphsChange);
                     // With effects each instant covers the whole animator canvas
                     // (no crop) and may run the chain again: unbounded here, it
@@ -3668,12 +3681,11 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 const u64 bytesPerSet = (static_cast<u64>(L.quads.size()) * (1u + (T.shadow ? 1u : 0u) + (outlinePass ? 1u : 0u)) + 1u) * sizeof(GlyphInstance);
                 const u32 admitted = static_cast<u32>(std::min<u64>(ShutterPlan::kHardLimit,
                     exposureBytesRemaining_ / std::max<u64>(1, bytesPerSet)));
-                // O orçamento do quadro é FIXO: recusar aqui deixava o quadro
-                // incompleto para sempre e o export morria em 30 s. Usa as
-                // amostras que cabem (no mínimo o texto sem desfoque).
                 if (sets > admitted) {
-                    if (settings.finalQuality && sets > 1 && admitted < sets) reductions_ |= kReducedMotionBlur;
-                    sets = std::max(1u, admitted);
+                    if (settings.finalQuality) {
+                        mark_incomplete_memory(__FILE__, __LINE__);
+                        sets = 0;
+                    } else sets = std::max(1u, admitted);
                 }
                 exposureBytesRemaining_ -= std::min(exposureBytesRemaining_, bytesPerSet * sets);
                 textShutter.count = sets;
@@ -4172,7 +4184,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             const f64 travel = shutter_projected_path(layerShutter, static_cast<f32>(rl.source.width),
                 static_cast<f32>(rl.source.height), shutterMatrix, previewFactor);
             const u32 k = rl.source.glyphSets > 1 ? rl.source.glyphSets
-                : capped_shutter_samples(mb, settings.finalQuality, effective_quality(settings).motionBlurSamples, travel);
+                : shutter_sample_count(mb, settings.finalQuality, effective_quality(settings).motionBlurSamples, travel);
             layerShutter.count = k;
             // Animated text on a still layer: the glyph instants integrate in
             // the source and the effects run once, as on any other layer.
@@ -4643,7 +4655,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 const f64 travel = shutter_projected_path(layerShutter, static_cast<f32>(rl.source.width),
                     static_cast<f32>(rl.source.height), matrixAt, previewFactor);
                 layerShutter.count = rl.source.glyphSets > 1 ? rl.source.glyphSets
-                    : capped_shutter_samples(comp.motion_blur(), settings.finalQuality,
+                    : shutter_sample_count(comp.motion_blur(), settings.finalQuality,
                         effective_quality(settings).motionBlurSamples, travel);
                 if (layerShutter.count > 1) {
                     rl.blurMatrices.resize(layerShutter.count);
@@ -5683,52 +5695,22 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             const bool batchEligible = settings.boundedSceneExposure && settings.finalQuality
                 && prepareDepth_ == 0 && out.nested.empty() && f.planeLayers.empty() && f.particleLayers.empty()
                 && !scene3d::scene_uses_layer_textures(f);   // 0.3.6: a camada precisa do mesmo grafo
-            const u32 desired = capped_shutter_samples(mb, settings.finalQuality,
+            const u32 desired = shutter_sample_count(mb, settings.finalQuality,
                 effective_quality(settings).motionBlurSamples, travel, changing, ShutterPlan::kHardLimit);
             const u64 batchBudget = std::min(stateBudget, settings.sceneExposureBatchBudgetBytes);
             const bool batchExposure = batchEligible && desired > 1
                 && bytesPerSample > batchBudget / desired;
             const u64 admittedBytes = batchExposure ? poseBytesPerSample : bytesPerSample;
             const u32 admitted = static_cast<u32>(std::min<u64>(ShutterPlan::kHardLimit, stateBudget / std::max<u64>(1, admittedBytes)));
-            // Orçamento de estado do quadro é FIXO (mesmo em toda tentativa):
-            // recusar deixava a cena 3D pesada com motion blur incompleta para
-            // sempre e o export desistia em 30 s ("recurso de composicao
-            // indisponivel"). Agora a cena usa as amostras que CABEM; sem
-            // espaço nem para 2, sai sem desfoque neste grupo — mas sai.
-            const bool moving = changing || travel >= .01;
-            if (admitted < 2 && minimum <= 1) {
-                if (settings.finalQuality && moving) {
-                    reductions_ |= kReducedMotionBlur;
-                    AUREA_LOG_WARN("motion blur 3D sem orcamento neste quadro: grupo sem desfoque (%llu bytes por amostra)",
-                                   static_cast<unsigned long long>(admittedBytes));
-                }
+            const u32 required = std::max(minimum, desired);
+            if (settings.finalQuality && required > 1 && admitted < required) {
+                // An incomplete export must not silently discard authored blur.
+                mark_incomplete_memory(__FILE__, __LINE__);
                 continue;
             }
-            // 0.2.7: sem orçamento nem para 2 amostras, o grupo sai sem desfoque
-            // neste quadro (os planos 2D da cena ficam com o desfoque deles).
-            // Marcar incompleto fazia o export refazer o quadro por 30 s e desistir.
-            if (admitted < 2) {
-                if (settings.finalQuality) {
-                    if (moving) reductions_ |= kReducedMotionBlur;
-                    AUREA_LOG_WARN("motion blur 3D sem orcamento neste quadro (%llu bytes por amostra)",
-                                   static_cast<unsigned long long>(admittedBytes));
-                }
-                continue;
-            }
-            if (settings.finalQuality && admitted < std::clamp(mb.samples, 2u, 64u) && (changing || travel >= .01))
-                AUREA_LOG_WARN("motion blur 3D reduzido a %u amostras pelo orcamento do quadro (pedido %u)", admitted, mb.samples);
-            // Cada amostra é a CENA INTEIRA de novo (sombra, MSAA): no export, o
-            // teto da cena (fixo por aparelho) vale mesmo abaixo do piso da
-            // prévia — senão 128 cenas por quadro passavam do prazo da GPU em
-            // todo degrau da escada (0.2.7). 0.3.2: sem teto que muda com o
-            // tempo do quadro; o que for cortado vira aviso no fim do export.
-            u32 sceneLimit = admitted;
-            if (settings.finalQuality && exportSceneBlurCap_ >= 1) sceneLimit = std::min(sceneLimit, exportSceneBlurCap_);
-            shutter.count = std::min(sceneLimit, std::max(minimum, capped_shutter_samples(mb, settings.finalQuality,
+            const u32 sceneLimit = settings.finalQuality ? required : admitted;
+            shutter.count = std::min(sceneLimit, std::max(minimum, shutter_sample_count(mb, settings.finalQuality,
                 effective_quality(settings).motionBlurSamples, travel, changing, sceneLimit)));
-            if (settings.finalQuality && moving
-                && shutter.count < shutter_sample_count(mb, true, 1.f, travel, changing, ShutterPlan::kHardLimit))
-                reductions_ |= kReducedMotionBlur;
             if (shutter.count <= 1) continue;
             stateBudget -= admittedBytes * shutter.count;
             if (batchExposure) out.sceneExposureBatches.push_back(FrameSnapshot::SceneExposureBatch{
@@ -5833,6 +5815,35 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             budget / std::max<u64>(1, batch.renderBytesPerSample)));
         // Sem espaço para um lote: uma amostra por envio (mais lento, completo).
         if (!batch.samplesPerBatch) batch.samplesPerBatch = 1;
+    }
+    if (!settings.finalQuality && settings.previewPlaying && settings.previewCacheRevision
+        && prepareDepth_ == 0 && out.scenes.size() == 1 && out.nested.empty()) {
+        const auto& scene = out.scenes.front();
+        bool eligible = !scene.instances.empty() && scene.blurFrames.empty() && !scene.velocity.enabled
+            && !scene.camera.dof && !scene.environment.showBackground && scene.planeLayers.empty()
+            && scene.particleLayers.empty() && !scene3d::scene_uses_layer_textures(scene);
+        u64 content = 1469598103934665603ull;
+        const auto add = [&](u64 value) { content = (content ^ value) * 1099511628211ull; };
+        for (const auto& instance : scene.instances) {
+            const auto* layer = comp.layer(LayerId::unpack(instance.layerKey));
+            eligible &= layer && instance.asset && !instance.holdout && !instance.cameraOverride;
+            if (!eligible) break;
+            eligible &= !layer->animated() && can_share_static_pose(*layer, *instance.asset)
+                && instance.nodeTextures.empty() && instance.materialTextures.empty();
+            for (const auto& material : instance.asset->materials)
+                eligible &= material.alphaMode == scene3d::AlphaMode::Opaque;
+            for (f32 opacity : instance.pose().nodeOpacity) eligible &= opacity == 1.f;
+            add(instance.layerKey); add(instance.assetKey);
+            add(reinterpret_cast<uintptr_t>(instance.asset.get()));
+            add(reinterpret_cast<uintptr_t>(instance.sharedPose.get()));
+            for (const auto& column : instance.world.col)
+                for (f32 value : {column.x, column.y, column.z, column.w}) add(std::bit_cast<u32>(value));
+        }
+        comp.layers().for_each([&](LayerId, const Layer& layer) {
+            if (layer.kind != LayerKind::Camera && layer.animated()) eligible = false;
+        });
+        out.temporalStaticScene = eligible;
+        out.temporalContentKey = content;
     }
 }
 
@@ -6675,7 +6686,34 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
         scene3d::SceneParticleDraw* parts = nullptr;
         if (group.blurFrames.empty()) {
             const u32 np = scene_particle_draws(group, group, parts);
-            if (!scene3d_.build(graph_, arena_, group, compTargetW_, compTargetH_, frameNumber, tex, planes, parts, np)) return false;
+            const auto& caps = backend_->capabilities();
+            bool temporal = !heavyQ_.exportFrame && compositionDepth_ == 0 && currentSnap_
+                && currentSnap_->temporalStaticScene && compTargetW_ < currentSnap_->compWidth
+                && (scene3d_.pass_samples() == 1 || caps.depthResolveSampleZero)
+                && temporalPreview_.admit(*backend_, shaders_, compTargetW_, compTargetH_,
+                    lowMemoryDevice_ ? std::min<u64>(temporalBudget_, 16ull << 20) : temporalBudget_);
+            TemporalReconstruction::Frame history;
+            Vec2 jitter{};
+            if (temporal) {
+                history.composition = currentSnap_->temporalComposition;
+                history.revision = currentSnap_->temporalRevision;
+                history.quality = currentSnap_->temporalContentKey ^ previewCacheKey_;
+                history.time = currentSnap_->time.value;
+                history.viewProjection = group.camera.imageTransform * scene3d::camera_projection(group.camera,
+                    static_cast<f32>(compTargetW_) / compTargetH_) * group.camera.view;
+                if (temporalPreview_.can_reuse(history)) jitter = TemporalReconstruction::jitter(history.time);
+                const Mat4 jittered = Mat4::translation(Vec3{2.f * jitter.x / compTargetW_,
+                    2.f * jitter.y / compTargetH_, 0.f}) * history.viewProjection;
+                if (!rig::inverse(jittered, history.inverseJitteredViewProjection)) {
+                    temporal = false;
+                    jitter = {};
+                }
+                history.jitterPixels = jitter;
+            }
+            FGTexture depth;
+            if (!scene3d_.build(graph_, arena_, group, compTargetW_, compTargetH_, frameNumber, tex,
+                    planes, parts, np, temporal ? &depth : nullptr, nullptr, jitter)) return false;
+            if (temporal && depth.valid()) tex = temporalPreview_.build(graph_, shaders_, tex, depth, history);
         } else {
             // Desfoque: K cenas no obturador, média aditiva (peso 1/K, cor
             // pré-multiplicada) num alvo do tamanho da composição.
@@ -6902,7 +6940,8 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                 // em 8 quadros seguidos), e o quadro do meio com oclusão.
                 if (layer.source.blendMode == 3 && layer.source.blendT > 0.0f && layer.source.vectorBlur <= 0.0f) {
                     u32 fw = 0, fh = 0;
-                    hyper::fx::field_size(w, h, fw, fh);
+                    const u32 blockSize = hyper::fx::motion_block_size(ctx);
+                    hyper::fx::field_size(w, h, fw, fh, blockSize);
                     TextureDesc fd;
                     fd.width = fw;
                     fd.height = fh;
@@ -6914,6 +6953,7 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                              ^ (static_cast<u64>(w) << 40) ^ (static_cast<u64>(h) << 52) ^ 0x48595045524d4f54ull;
                     for (const DecodedFrame* source : {layer.source.frame.get(), layer.source.frameB.get()})
                         pair ^= source->content_id() + 0x9e3779b97f4a7c15ull + (pair << 6) + (pair >> 2);
+                    pair ^= static_cast<u64>(blockSize) * 0x9e3779b97f4a7c15ull;
                     const u64 cacheLayer = layer.id.pack() ^ 0x4859504552000000ull;
                     FlowCache& fc = flowCache_[cacheLayer];
                     fc.lastFrame = frameNumber;
@@ -6931,6 +6971,7 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                     FGTexture field{};
                     for (u32 i = 0; i < 2 && flowCacheEnabled_; ++i)
                         if (fc.tex[i].valid() && fc.key[i] == pair) field = graph_.import_texture("hyper-campo-cache", fc.tex[i], fd);
+                    if (field.valid()) ++heavyStats_.flowCacheHits;
                     if (!field.valid()) {
                         const u32 slot = fc.next;
                         fc.next ^= 1u;
@@ -6947,6 +6988,7 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                             if (hyper::fx::bidirectional_field(ctx, out.texture, b, w, h, target, PassStage::Decode)) {
                                 fc.key[slot] = pair;
                                 field = target;
+                                ++heavyStats_.flowComputed;
                             }
                         }
                     }
@@ -9340,6 +9382,8 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         ~EnvironmentTraceScope() { (void)scene.set_environment_trace(previous); }
     } environmentTrace(scene3d_, capturePhases.enabled);
     if (previewGraph_.active) return Status{Errc::Busy, "preview graph continuation active"};
+    if (!settings.previewPlaying || settings.finalQuality || !snap.temporalStaticScene)
+        temporalPreview_.clear(backend_);
     if (settings.cancelFlag && settings.cancelFlag->load(std::memory_order_acquire)) {
         snap.release_video_frames(); return Errc::Cancelled;
     }
@@ -9931,6 +9975,8 @@ Status Renderer::finish_render(FrameSnapshot& snap, const RenderSettings& settin
     }
     incomplete_ = incomplete_ || scene3d_.incomplete()
         || EffectGraph::bypassed_total() != completion.effectsBefore;
+    temporalPreview_.complete(result.ok() && endStatus.ok() && !incomplete_ && !unavailable_
+        && !snap.missingVideoFrames && !snap.staleVideoFrames && !environment_pending());
     // 0.5.2 (E1): o que o 3D nunca vai ter (modelo que falhou ao subir) não
     // segura o quadro: ele sai como a prévia mostra e o export avisa.
     if (scene3d_.unavailable()) mark_unavailable(scene3d_.unavailable_file(), scene3d_.unavailable_line());

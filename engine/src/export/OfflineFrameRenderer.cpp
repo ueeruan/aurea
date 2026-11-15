@@ -185,6 +185,8 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
                 continue;
             }
             if (!rendered.ok()) return rendered;
+            if (renderer_.take_memory_short())
+                return Status{Errc::BudgetExceeded, "final frame exceeds its resource budget"};
             // 0.5.2 (E1): o quadro deixou de fora algo que nunca chega (modelo que
             // falhou ao subir): ele vale como está, como a prévia mostra; avisa.
             if (renderer_.take_unavailable()) {

@@ -35,7 +35,7 @@ class ModelImportDeviceTest {
         }
         compose.waitUntil(30000) { ready && store.engineReady }
         compose.runOnIdle { store.newProject(320, 240, 30f, "Model import regressions") }
-        compose.waitUntil(15000) { store.project.title == "Model import regressions" }
+        compose.waitUntil(15000) { store.project.title == "Model import regressions" && !store.projectOperationBusy }
         val folder = File(context.filesDir, "model-import-regressions").apply { mkdirs() }
         fun copyAsset(asset: String, name: String) = File(folder, name).also { file ->
             instrumentation.context.assets.open(asset).use { input -> file.outputStream().use { input.copyTo(it) } }

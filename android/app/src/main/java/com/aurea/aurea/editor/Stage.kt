@@ -187,9 +187,9 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
         // rótulo "NN%" no canto sup-esq (o chip "250 %" saiu: o 100 % mora no
         // número da coluna de modos).
         // Na Cena 3D a vista mora na coluna da direita (Scene3DViewport.kt).
-        if (!store.rawPlayback && !ui.fullscreen && !store.sceneEditor) CanvasZoomMode(store, Modifier.align(Alignment.TopStart))
+        if (!store.rawPlayback && !ui.fullscreen && !store.sceneEditor && store.uiMode != com.aurea.aurea.state.UI_MODE_EDIT) CanvasZoomMode(store, Modifier.align(Alignment.TopStart))
         // 0.4.1 (mockup "interface 03"): grade, modos de visão e zoom flutuando no canto sup-dir.
-        if (!store.rawPlayback && !ui.fullscreen && !store.sceneEditor) StageFloatPills(store, Modifier.align(Alignment.TopEnd))
+        if (!store.rawPlayback && !ui.fullscreen && !store.sceneEditor && store.uiMode != com.aurea.aurea.state.UI_MODE_EDIT) StageFloatPills(store, Modifier.align(Alignment.TopEnd))
         // 0.4.6: o nome da vista do AE escolhida (Frente, Topo, Vista personalizada 1…).
         if (!store.rawPlayback) StageViewLabel(store, Modifier.align(Alignment.BottomEnd).padding(end = 6.dp))
         // Na Cena 3D as ferramentas ficam na barra da esquerda (Scene3DViewport.kt).

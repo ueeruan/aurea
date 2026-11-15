@@ -28,6 +28,88 @@
 
 namespace aurea {
 
+bool Engine::set_inline_edit_target(u64 groupLayerId, u64 childLayerId) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    std::lock_guard<std::mutex> submitLock(commandSubmitMutex_);
+    // Drain before changing inspector focus. Published commands retain their
+    // own scope, including when the finger selects another row immediately.
+    drain_commands_locked();
+    inlineEditGroup_.store(0, std::memory_order_release);
+    inlineEditLayer_.store(0, std::memory_order_release);
+    inlineEditOuter_.store(0, std::memory_order_release);
+    inlineEditInner_.store(0, std::memory_order_release);
+    if (!groupLayerId && !childLayerId) return true;
+    Composition* inner = group_inner_locked(groupLayerId, nullptr, nullptr);
+    const Composition* outer = current_composition();
+    const Layer* group = outer ? outer->layer(LayerId::unpack(groupLayerId)) : nullptr;
+    const Layer* child = inner ? inner->layer(LayerId::unpack(childLayerId)) : nullptr;
+    if (!group || !child) return false;
+    inlineEditOuter_.store(project_->timeline().current().pack(), std::memory_order_relaxed);
+    inlineEditLayer_.store(childLayerId, std::memory_order_relaxed);
+    inlineEditInner_.store(group->nested.composition.pack(), std::memory_order_relaxed);
+    inlineEditGroup_.store(groupLayerId, std::memory_order_release);
+    return true;
+}
+
+Engine::InlineEditScope::InlineEditScope(Engine& engine, u64 layerId, bool mutation) noexcept : engine_(engine), mutation_(mutation) {
+    if (engine.inlineSampleActive_ || engine.inlineAccessRejected_) return;
+    if (layerId && layerId == engine.inlineEditLayer_.load(std::memory_order_relaxed))
+        enter(engine.inlineEditOuter_.load(std::memory_order_relaxed), engine.inlineEditGroup_.load(std::memory_order_acquire),
+            engine.inlineEditInner_.load(std::memory_order_relaxed));
+}
+Engine::InlineEditScope::InlineEditScope(Engine& engine, u64 outer, u64 group, bool mutation, u64 expectedInner) noexcept
+    : engine_(engine), mutation_(mutation) { enter(outer, group, expectedInner); }
+
+void Engine::InlineEditScope::enter(u64 outerId, u64 groupId, u64 expectedInner) noexcept {
+    if (!groupId || !outerId || !engine_.project_) return;
+    auto& timeline = engine_.project_->timeline();
+    outer_ = timeline.current(); outerTime_ = engine_.playback_.current(); previousTime_ = engine_.inlineSampleTime_;
+    previousActive_ = engine_.inlineSampleActive_;
+    previousRejected_ = engine_.inlineAccessRejected_;
+    restore_ = true;
+    const auto reject = [&] { engine_.inlineAccessRejected_ = true; };
+    if (timeline.current().pack() != outerId) { reject(); return; }
+    const Composition* outer = timeline.composition(timeline.current());
+    const Layer* group = outer ? outer->layer(LayerId::unpack(groupId)) : nullptr;
+    Composition* inner = engine_.group_inner_locked(groupId, nullptr, nullptr);
+    if (!inner || !group || (expectedInner && group->nested.composition.pack() != expectedInner)) { reject(); return; }
+    const f64 source = group->source_frame(engine_.playback_.current()) * inner->fps() / outer->fps();
+    if (!std::isfinite(source) || std::fabs(source) >= f64(i64{1} << 40)) { reject(); return; }
+    engine_.inlineSampleTime_ = FrameIndex{static_cast<i64>(std::floor(source + 1e-6))};
+    engine_.inlineSampleActive_ = true;
+    engine_.inlineAccessRejected_ = false;
+    timeLayer_ = group;
+    timeRatio_ = inner->fps() / outer->fps();
+    if (mutation_) previousSelection_ = engine_.selection_;
+    timeline.set_current(group->nested.composition);
+    active_ = true;
+}
+
+Engine::InlineEditScope::~InlineEditScope() {
+    if (!restore_ || !engine_.project_) return;
+    auto& timeline = engine_.project_->timeline();
+    timeline.set_current(outer_);
+    engine_.inlineSampleTime_ = previousTime_;
+    engine_.inlineSampleActive_ = previousActive_;
+    engine_.inlineAccessRejected_ = previousRejected_;
+    if (mutation_ && active_) {
+        engine_.selection_ = std::move(previousSelection_);
+        engine_.configure_playback_locked(timeline.composition(outer_));
+        if (engine_.playback_.current() != outerTime_) engine_.playback_.seek(outerTime_, monotonic_ns());
+        timeline.set_playhead(engine_.playback_.current());
+    }
+}
+
+i64 Engine::InlineEditScope::map_frame(i64 outerFrame) const noexcept {
+    if (!active_ || !timeLayer_) return outerFrame;
+    const f64 value = timeLayer_->source_frame(FrameIndex{outerFrame}) * timeRatio_;
+    return std::isfinite(value) ? static_cast<i64>(std::floor(std::clamp(value, -f64(i64{1} << 40), f64(i64{1} << 40)) + 1e-6)) : 0;
+}
+
+FrameIndex Engine::editing_frame_locked() const noexcept {
+    return inlineSampleActive_ ? inlineSampleTime_ : playback_.current();
+}
+
 Composition* Engine::group_inner_locked(u64 groupLayerId, i64* delta, bool* linear) noexcept {
     if (!project_ || groupLayerId == 0) return nullptr;
     Timeline& tl = project_->timeline();

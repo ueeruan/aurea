@@ -35,7 +35,7 @@ struct SceneAsset;
 inline constexpr u32 kPartEffectMaxParts = 512;
 
 /// Os nós que contam como parte, na ordem (nó com malha dentro da cena).
-void part_nodes(const SceneAsset& asset, std::vector<u32>& out);
+void part_nodes(const SceneAsset& asset, std::vector<u32>& out, bool includeJoints = false);
 
 /// A camada usa "Animar parte 3D" ou "Esconder partes 3D" ligados (a pose
 /// deixa de ser compartilhável e o desfoque de movimento reavalia a pose).
@@ -74,6 +74,6 @@ void collect_part_textures(const SceneAsset& asset, const Layer& layer, f64 loca
 
 /// Nome de cada parte (o nome do nó; vazio quando o arquivo não deu nome),
 /// na ordem de `part_nodes`.
-void part_names(const SceneAsset& asset, std::vector<std::string>& out);
+void part_names(const SceneAsset& asset, std::vector<std::string>& out, bool includeJoints = false);
 
 } // namespace aurea::scene3d

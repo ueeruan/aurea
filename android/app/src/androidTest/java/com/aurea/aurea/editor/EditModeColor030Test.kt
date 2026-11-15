@@ -1,6 +1,8 @@
 package com.aurea.aurea.editor
 
 import android.app.Application
+import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
@@ -11,11 +13,14 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
+import androidx.test.runner.lifecycle.Stage
 import com.aurea.aurea.R
 import com.aurea.aurea.editor.panels.Grade
 import com.aurea.aurea.editor.panels.effectTypeId
@@ -73,6 +78,75 @@ class EditModeColor030Test {
         return store.effectParams[fx.effectId]?.firstOrNull { it.index == index }?.value?.getOrNull(0)
     }
 
+    @Test fun serialNodesAndWindowsKeepTheEditingPreviewStable() {
+        val landscape = InstrumentationRegistry.getArguments().getString("edit.orientation") == "landscape"
+        if (landscape) {
+            instrumentation.runOnMainSync {
+                ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).single()
+                    .requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            }
+            compose.waitUntil(10000) { context.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE }
+        }
+        compose.setContent {
+            store = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))
+            AureaTheme { EditorScreen(store) }
+        }
+        compose.waitUntil(30000) { ::store.isInitialized && store.engineReady }
+        compose.runOnIdle { store.newProject(720, 1280, 30.0, "Professional color", null, UI_MODE_EDIT) }
+        compose.waitUntil(15000) { store.project.title == "Professional color" && !store.projectOperationBusy }
+        compose.runOnIdle { assertTrue(importSolid("Color source", 160, 100, 70) >= 0) }
+        compose.waitUntil(10000) { store.layers.size == 1 && store.mainTrackAnchor != 0L }
+        compose.runOnIdle { store.select(store.layers.single().id) }
+        val before = compose.onNodeWithTag("edit.preview").fetchSemanticsNode().boundsInRoot
+        capture("edit-workspace")
+        compose.onNodeWithTag("edit.workspace.color").performClick()
+        compose.waitUntil(8000) { compose.onAllNodesWithTag("grade.nodes").fetchSemanticsNodes().isNotEmpty() }
+        val after = compose.onNodeWithTag("edit.preview").fetchSemanticsNode().boundsInRoot
+        assertEquals(before, after)
+        if (landscape) {
+            compose.onNodeWithTag("edit.inspector").assertIsDisplayed()
+            val inspector = compose.onNodeWithTag("edit.inspector").fetchSemanticsNode().boundsInRoot
+            assertTrue(after.right <= inspector.left)
+            assertTrue(after.height > 0f)
+            compose.onNodeWithTag("edit.timeline").assertIsDisplayed()
+            capture("edit-landscape-color")
+            return
+        }
+        val grade = effectTypeId(Grade.KEY)
+        val initial = store.effects.filter { it.typeId == grade }.map { it.effectId }.toSet()
+        compose.onNodeWithTag("grade.node.add").performClick()
+        compose.waitUntil(8000) { store.effects.count { it.typeId == grade } == initial.size + 1 }
+        val node = store.effects.single { it.typeId == grade && it.effectId !in initial }.effectId
+        compose.waitUntil(5000) { store.effectParams[node]?.isNotEmpty() == true }
+        compose.onNodeWithTag("grade.node.enabled").performClick()
+        compose.waitUntil(5000) { store.effects.any { it.effectId == node && !it.enabled } }
+        compose.onNodeWithTag("grade.node.enabled").performClick()
+        compose.onNodeWithTag("grade.tabs").performScrollToNode(hasTestTag("grade.tab.5"))
+        compose.onNodeWithTag("grade.tab.5").performClick()
+        compose.onNodeWithTag("grade.window.2").performClick()
+        compose.waitUntil(5000) { store.effectParams[node]?.firstOrNull { it.index == 79 }?.value?.firstOrNull() == 2f }
+        compose.onNodeWithTag("grade.window.toggle.85").performScrollTo().performClick()
+        compose.waitUntil(5000) { store.effectParams[node]?.firstOrNull { it.index == 85 }?.value?.firstOrNull() == 1f }
+        capture("color-node-window")
+        compose.onNodeWithTag("grade.node.menu").performClick()
+        compose.onNodeWithText(context.getString(R.string.grade_node_previous)).performClick()
+        compose.waitUntil(5000) { store.effects.first { it.typeId == grade }.effectId == node }
+        compose.onNodeWithTag("grade.node.menu").performClick()
+        compose.onNodeWithText(context.getString(R.string.grade_node_next)).performClick()
+        compose.waitUntil(5000) { store.effects.last { it.typeId == grade }.effectId == node }
+        compose.onNodeWithTag("grade.node.menu").performClick()
+        compose.onNodeWithTag("grade.node.delete").performClick()
+        compose.waitUntil(5000) { store.effects.none { it.effectId == node } }
+        compose.runOnIdle { store.undo() }
+        compose.waitUntil(5000) {
+            store.effects.any { it.effectId == node } &&
+                store.effectParams[node]?.firstOrNull { it.index == 85 }?.value?.firstOrNull() == 1f
+        }
+        compose.onNodeWithTag("edit.workspace.edit").performClick()
+        compose.onNodeWithTag("edit.timeline").assertIsDisplayed()
+        assertEquals(before, compose.onNodeWithTag("edit.preview").fetchSemanticsNode().boundsInRoot)
+    }
+
     @Test fun filtersAndAdjustHaveTheirOwnScreensForTheProjectAndTheClip() {
         compose.setContent {
             store = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))
@@ -116,7 +190,8 @@ class EditModeColor030Test {
         // As abas: HSL, Rodas e scopes abrem.
         compose.onNodeWithText(context.getString(R.string.grade_tab_hsl)).performClick()
         compose.waitUntil(5000) { compose.onAllNodesWithTag("grade.band.0").fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithText(context.getString(R.string.grade_tab_wheels)).performClick()
+        compose.onNodeWithTag("grade.tabs").performScrollToNode(hasTestTag("grade.tab.3"))
+        compose.onNodeWithTag("grade.tab.3").performClick()
         compose.waitUntil(5000) { compose.onAllNodesWithTag("grade.wheel.${Grade.LIFT}").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithTag("grade.scopes").performClick()
         compose.waitUntil(5000) { compose.onAllNodesWithTag("grade.scope.view").fetchSemanticsNodes().isNotEmpty() }

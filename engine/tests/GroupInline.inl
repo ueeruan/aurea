@@ -164,3 +164,136 @@ AUREA_TEST(GroupInline, ThumbnailsOfInnerPhotosUseTheOuterTime) {
     // O mesmo id fora do grupo não é a foto (cada composição tem os seus ids).
     AUREA_CHECK_EQ(e.query_group_thumbnail(0, rows[0].id, 0, 8, thumb.data(), static_cast<u32>(thumb.size()), &w), 0u);
 }
+
+AUREA_TEST(GroupInline, InspectorCommandsEditChildWithoutChangingOuterOrCollidingIds) {
+    GroupInlineRig r;
+    AUREA_CHECK(r.ok); if (!r.ok) return;
+    r.place_group(100, 20);
+    Command seek; seek.type = CommandType::PlaybackSeek; seek.seek.time = tick_at(FrameIndex{115}, 30.0);
+    AUREA_CHECK(r.e.apply_command(seek).ok());
+    const auto outerId = r.e.project()->timeline().current();
+    const f32 outerOpacity = r.group_layer()->transform.opacity;
+    AUREA_CHECK(r.e.set_inline_edit_target(r.group, r.innerB));
+    bridge::LayerDetailPOD detail;
+    AUREA_CHECK(r.e.query_layer_detail(r.innerB, detail));
+    AUREA_CHECK_EQ(detail.localPlayhead, 5);
+    Command opacity; opacity.type = CommandType::LayerSetOpacity;
+    opacity.opacity.layer = LayerId::unpack(r.innerB); opacity.opacity.opacity = .37f;
+    const u32 before = r.e.history().depth();
+    AUREA_CHECK(r.e.apply_command(opacity).ok());
+    AUREA_CHECK_NEAR(r.inner(r.innerB)->transform.opacity, .37, 1e-6);
+    AUREA_CHECK_NEAR(r.group_layer()->transform.opacity, outerOpacity, 1e-6);
+    AUREA_CHECK(r.e.project()->timeline().current() == outerId);
+    AUREA_CHECK_EQ(r.e.precomp_depth(), 0u);
+    AUREA_CHECK_EQ(r.e.read_status().playhead.value, 115ll);
+    AUREA_CHECK_EQ(r.e.history().depth(), before + 1);
+    Command undo; undo.type = CommandType::Undo;
+    AUREA_CHECK(r.e.apply_command(undo).ok());
+    AUREA_CHECK_NEAR(r.inner(r.innerB)->transform.opacity, 1, 1e-6);
+    AUREA_CHECK(r.e.project()->timeline().current() == outerId);
+    undo.type = CommandType::Redo;
+    AUREA_CHECK(r.e.apply_command(undo).ok());
+    AUREA_CHECK_NEAR(r.inner(r.innerB)->transform.opacity, .37, 1e-6);
+    AUREA_CHECK(r.e.project()->timeline().current() == outerId);
+    // A queued gesture retains its scope when focus moves to another child.
+    opacity.opacity.opacity = .64f;
+    AUREA_CHECK_EQ(r.e.submit_commands(&opacity, 1), 1u);
+    AUREA_CHECK(r.e.set_inline_edit_target(r.group, r.innerA));
+    AUREA_CHECK_NEAR(r.inner(r.innerB)->transform.opacity, .64, 1e-6);
+    AUREA_CHECK_NEAR(r.inner(r.innerA)->transform.opacity, 1, 1e-6);
+    AUREA_CHECK(r.e.project()->timeline().current() == outerId);
+    AUREA_CHECK(r.e.set_inline_edit_target(0, 0));
+}
+
+AUREA_TEST(GroupInline, InspectorUsesActualSpeedAndFpsForKeyframeSampling) {
+    GroupInlineRig r;
+    AUREA_CHECK(r.ok); if (!r.ok) return;
+    r.place_group(100, 10); r.group_layer()->speed = 2;
+    auto* inner = r.e.project()->timeline().composition(r.group_layer()->nested.composition);
+    inner->set_fps(60);
+    Command seek; seek.type = CommandType::PlaybackSeek; seek.seek.time = tick_at(FrameIndex{110}, 30.0);
+    AUREA_CHECK(r.e.apply_command(seek).ok());
+    AUREA_CHECK(r.e.set_inline_edit_target(r.group, r.innerA));
+    bridge::LayerDetailPOD detail;
+    AUREA_CHECK(r.e.query_layer_detail(r.innerA, detail));
+    const i64 expected = static_cast<i64>(std::floor(r.group_layer()->source_frame(FrameIndex{110}) * 2 + 1e-6));
+    AUREA_CHECK_EQ(detail.localPlayhead, expected);
+    AUREA_CHECK(r.e.project()->timeline().current() == r.e.project()->timeline().root());
+    AUREA_CHECK(r.e.set_inline_edit_target(0, 0));
+    AUREA_CHECK(!r.e.set_inline_edit_target(0, r.innerA));
+}
+
+AUREA_TEST(GroupInline, TrimSplitAndGlobalCompositionCommandsUseTheirOwnClocks) {
+    GroupInlineRig r;
+    AUREA_CHECK(r.ok); if (!r.ok) return;
+    r.place_group(100, 20);
+    const auto root = r.e.project()->timeline().root();
+    AUREA_CHECK(r.e.set_inline_edit_target(r.group, r.innerB));
+    AUREA_CHECK(r.e.query_clip_time_actions(r.innerB, 115) & 1u);
+    AUREA_CHECK(r.e.edit_clip_time(r.innerB, 1, 130));
+    AUREA_CHECK_EQ(r.inner(r.innerB)->end.value, 50ll);
+    Command undo; undo.type = CommandType::Undo;
+    AUREA_CHECK(r.e.apply_command(undo).ok());
+    AUREA_CHECK(r.e.set_inline_edit_target(r.group, r.innerA));
+    const auto* child = r.e.project()->timeline().composition(r.group_layer()->nested.composition);
+    const u32 count = child->order().size();
+    Command split; split.type = CommandType::LayerSplit;
+    split.layer_split.layer = LayerId::unpack(r.innerA); split.layer_split.at = FrameIndex{110};
+    AUREA_CHECK(r.e.apply_command(split).ok());
+    AUREA_CHECK_EQ(r.inner(r.innerA)->end.value, 30ll);
+    AUREA_CHECK_EQ(child->order().size(), count + 1);
+    AUREA_CHECK(r.e.project()->timeline().current() == root);
+    Command resize; resize.type = CommandType::CompositionSetSize;
+    resize.comp_size.comp = root; resize.comp_size.width = 800; resize.comp_size.height = 450;
+    AUREA_CHECK(r.e.apply_command(resize).ok());
+    AUREA_CHECK_EQ(r.root()->width(), 800u);
+    AUREA_CHECK_EQ(child->width(), 640u);
+    AUREA_CHECK(r.e.apply_command(undo).ok());
+    AUREA_CHECK_EQ(r.root()->width(), 640u);
+    AUREA_CHECK(r.e.project()->timeline().current() == root);
+}
+
+AUREA_TEST(GroupInline, StaleFocusNeverFallsBackToAnOuterLayer) {
+    GroupInlineRig r;
+    AUREA_CHECK(r.ok); if (!r.ok) return;
+    AUREA_CHECK(r.e.set_inline_edit_target(r.group, r.innerA));
+    Command opacity; opacity.type = CommandType::LayerSetOpacity;
+    opacity.opacity.layer = LayerId::unpack(r.innerA); opacity.opacity.opacity = .25f;
+    AUREA_CHECK_EQ(r.e.submit_commands(&opacity, 1), 1u);
+    const auto innerId = r.group_layer()->nested.composition;
+    r.group_layer()->nested.composition = CompositionId{};
+    bridge::LayerDetailPOD detail;
+    AUREA_CHECK(!r.e.query_layer_detail(r.innerA, detail));
+    AUREA_CHECK(!r.e.apply_command(opacity).ok());
+    AUREA_CHECK(r.e.set_inline_edit_target(0, 0));
+    r.group_layer()->nested.composition = innerId;
+    AUREA_CHECK_NEAR(r.inner(r.innerA)->transform.opacity, 1, 1e-6);
+    AUREA_CHECK_NEAR(r.group_layer()->transform.opacity, 1, 1e-6);
+    AUREA_CHECK(r.e.project()->timeline().current() == r.e.project()->timeline().root());
+}
+
+AUREA_TEST(GroupInline, ClipboardAndTimeActionsUseTheMappedCompositionClock) {
+    GroupInlineRig r;
+    AUREA_CHECK(r.ok); if (!r.ok) return;
+    r.place_group(100, 10);
+    r.group_layer()->speed = 2;
+    auto* child = r.e.project()->timeline().composition(r.group_layer()->nested.composition);
+    child->set_fps(60);
+    AUREA_CHECK(r.e.set_inline_edit_target(r.group, r.innerA));
+    AUREA_CHECK_EQ(r.e.query_multi_time_actions(&r.innerA, 1, 105), 0u);
+    AUREA_CHECK_EQ(r.e.copy_layers(&r.innerA, 1), 1u);
+    const u32 before = child->order().size();
+    AUREA_CHECK_EQ(r.e.paste_layers(110), 1u);
+    AUREA_CHECK_EQ(child->order().size(), before + 1);
+    bool found = false;
+    child->layers().for_each([&](LayerId id, const Layer& layer) {
+        if (id.pack() != r.innerA && id.pack() != r.innerB) {
+            found = true;
+            AUREA_CHECK_EQ(layer.start.value, 60ll);
+        }
+    });
+    AUREA_CHECK(found);
+    AUREA_CHECK_EQ(r.root()->order().size(), 1u);
+    AUREA_CHECK(r.e.project()->timeline().current() == r.e.project()->timeline().root());
+    AUREA_CHECK_EQ(r.e.precomp_depth(), 0u);
+}

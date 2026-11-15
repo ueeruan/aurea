@@ -36,6 +36,7 @@ namespace aurea::ai { class RotoService; struct RotoStroke; class BgRemoveServic
 #include "aurea/render/ParticleScene.hpp"
 #include "aurea/render/RenderScheduler.hpp"
 #include "aurea/render/ShaderLibrary.hpp"
+#include "aurea/render/TemporalReconstruction.hpp"
 #include "aurea/scene3d/SceneRenderer.hpp"
 #include "aurea/scene3d/Animation.hpp"
 #include "aurea/timeline/Composition.hpp"
@@ -470,6 +471,8 @@ struct CachedCompositionFrame {
 };
 
 struct FrameSnapshot {
+    bool temporalStaticScene = false;
+    u64 temporalComposition = 0, temporalRevision = 0, temporalContentKey = 0;
     CachedCompositionFrame cachedComposition{};
     struct VideoSourceWait {
         LayerId layer{};
@@ -893,19 +896,6 @@ public:
     [[nodiscard]] bool take_memory_short() noexcept { const bool b = memoryShort_; memoryShort_ = false; return b; }
     /// Onde o último quadro incompleto foi marcado (arquivo:linha do motor), para
     /// o motivo do export dizer QUAL recurso faltou. Nulo = nenhum ainda.
-    /// Degrau de custo 3D do export (0 = qualidade final cheia). Cada degrau
-    /// corta sombra/MSAA para o passe 3D caber no prazo do driver móvel (~2 s
-    /// por envio). 0.3.2: vem do DEGRAU DA ESCADA (ExportAttempts.hpp), fixo do
-    /// primeiro ao último quadro — antes subia no meio do export quando um
-    /// quadro demorava, e o vídeo dependia da carga do aparelho.
-    [[nodiscard]] u32 export_gpu_step() const noexcept { return exportGpuStep_; }
-    void set_export_gpu_step(u32 step) noexcept { exportGpuStep_ = std::min(step, 4u); }
-    /// Teto rígido do degrau da escada (ExportAttempts.hpp): 0 = nenhum, 1 = sem desfoque.
-    void set_export_blur_hard_cap(u32 cap) noexcept { exportBlurHardCap_ = cap; }
-    /// Teto das amostras de cena 3D no export: cada amostra é a cena inteira
-    /// (sombra, MSAA), então o custo cresce sem limite com o rastro (0.2.7).
-    /// Fixo por aparelho; quando corta, o quadro registra a redução.
-    void set_export_scene_blur_cap(u32 cap) noexcept { exportSceneBlurCap_ = cap; }
     /// 0.3.2: o que a qualidade final teve de reduzir nos quadros desde a
     /// última leitura (bits de RenderReduction). O export avisa a pessoa em vez
     /// de só registrar no log.
@@ -950,8 +940,10 @@ public:
     void set_transient_allocation_limit(u64 bytes) noexcept { pool_.set_allocation_limit(bytes); }
     void set_tracked_resource_budget(u64 bytes, TransientTexturePool::KnownResourceUse knownUse = nullptr, void* context = nullptr) noexcept {
         pool_.set_tracked_resource_budget(bytes, knownUse, context);
+        temporalBudget_ = bytes ? std::min<u64>(bytes / 8, 64ull << 20) : 32ull << 20;
     }
     [[nodiscard]] f32 effect_quality() const noexcept override { return heavyQ_.effects; }
+    [[nodiscard]] f32 motion_analysis_scale() const noexcept override { return heavyQ_.flow; }
 
     // --- EffectResources -----------------------------------------------------
     [[nodiscard]] TextureHandle curve_lut(const CurveData& curve) noexcept override;
@@ -1024,6 +1016,7 @@ public:
 
     // --- Consultas -------------------------------------------------------------
     [[nodiscard]] const FrameGraph::Stats& graph_stats() const noexcept { return graph_.stats(); }
+    [[nodiscard]] const FrameGraph& frame_graph() const noexcept { return graph_; }
     [[nodiscard]] const TransientTexturePool::Stats& pool_stats() const noexcept { return pool_.stats(); }
     /// Tempos de GPU por passe lidos no último `render` com `gpuTimers`
     /// (rótulos estáticos; os de um quadro já concluído pela GPU).
@@ -1549,18 +1542,7 @@ private:
     bool memoryShort_ = false;  ///< take_memory_short
     const char* unavailableFile_ = nullptr;
     u32 unavailableLine_ = 0;
-    u32 exportGpuStep_ = 0;
-    u32 exportBlurHardCap_ = 0;
     u32 reductions_ = 0;          ///< RenderReduction (take_reductions)   ///< degrau da escada (0 = nenhum; 1 = sem desfoque)
-    u32 exportSceneBlurCap_ = 0;  ///< amostras de CENA 3D no export (0 = nenhum)
-    /// shutter_sample_count com o teto de amostras do export em GPU fraca.
-    [[nodiscard]] u32 capped_shutter_samples(const MotionBlurSettings& settings, bool finalQuality, f32 quality,
-            f64 pathPixels, bool changing = false, u32 resourceLimit = ShutterPlan::kHardLimit) const noexcept {
-        // Degrau da escada (0.2.7): teto RÍGIDO, acima do piso da prévia e das
-        // amostras escolhidas — é a última chance de o export sair.
-        if (finalQuality && exportBlurHardCap_ >= 1) resourceLimit = std::min(resourceLimit, exportBlurHardCap_);
-        return shutter_sample_count(settings, finalQuality, quality, pathPixels, changing, resourceLimit);
-    }
     void mark_incomplete(const char* file, u32 line) noexcept { incomplete_ = true; incompleteFile_ = file; incompleteLine_ = line; }
     void mark_unavailable(const char* file, u32 line) noexcept { unavailable_ = true; unavailableFile_ = file; unavailableLine_ = line; }
     void mark_incomplete_memory(const char* file, u32 line) noexcept { mark_incomplete(file, line); memoryShort_ = true; }
@@ -1569,6 +1551,8 @@ private:
     std::vector<PreviewFrame> previewFrames_;
     u64 previewCacheBudget_ = 0, previewCacheKey_ = 0, previewCacheUse_ = 0;
     bool lowMemoryDevice_ = false;   ///< set_low_memory_device
+    TemporalReconstruction temporalPreview_;
+    u64 temporalBudget_ = 32ull << 20;
     u64 previewCacheRevision_ = 0, previewCacheComposition_ = 0;
     u64 warmupScanRevision_ = 0;
     u32 previewCacheCapacity_ = 0;

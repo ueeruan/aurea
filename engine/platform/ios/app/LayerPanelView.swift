@@ -692,7 +692,7 @@ struct SpeedPanel: View {
     private var keyed: Bool { media || kind == 12 }
     private var remap: Bool { flags & 4 != 0 }
     private var animated: Bool { flags & 64 != 0 }
-    private var speedKeys: [KeyframeItem] { (model.keyframes[id] ?? []).filter { $0.property == 39 && $0.effectIndex == .max } }
+    private var speedKeys: [KeyframeItem] { (model.keysForLayer(id) ?? []).filter { $0.property == 39 && $0.effectIndex == .max } }
     private var look: KeyframeLook {
         guard keyed else { return .none }
         return speedKeys.contains { $0.time == model.localPlayhead } ? .keyHere : animated ? .animated : .none
@@ -742,7 +742,7 @@ struct SpeedPanel: View {
 
     /// 0.4.1: chaves do remapeamento (TrackProperty::TimeRemap = 30), em ordem.
     private var remapKeys: [KeyframeItem] {
-        (model.keyframes[id] ?? []).filter { $0.property == 30 }.sorted { $0.time < $1.time }
+        (model.keysForLayer(id) ?? []).filter { $0.property == 30 }.sorted { $0.time < $1.time }
     }
 
     /// 0.4.1: ◆ do remapeamento — mesmas chamadas do ◇ da linha (a curva mantém 2 chaves).
@@ -1094,7 +1094,7 @@ struct VolumeFrame: View {
     private func scalar(_ key: String, _ fallback: Float = 0) -> Float { (model.detail[key] as? NSNumber)?.floatValue ?? fallback }
     private var flags: UInt32 { (model.detail["audioFlags"] as? NSNumber)?.uint32Value ?? 0 }
     private var fps: Float { Float(max(1, model.compositionFps)) }
-    private var volumeKeys: [KeyframeItem] { (model.keyframes[id] ?? []).filter { $0.property == 32 && $0.effectIndex == .max && $0.paramIndex == 0 } }
+    private var volumeKeys: [KeyframeItem] { (model.keysForLayer(id) ?? []).filter { $0.property == 32 && $0.effectIndex == .max && $0.paramIndex == 0 } }
     private var keyLook: KeyframeLook { volumeKeys.contains { $0.time == model.localPlayhead } ? .keyHere : flags & 8 != 0 ? .animated : .none }
     private var expressionLook: ExpressionLook {
         let info = model.engine.expression(id, property: 32, effect: .max, param: 0)

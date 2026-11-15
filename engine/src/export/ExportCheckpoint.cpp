@@ -343,7 +343,7 @@ u64 request_key(u64 projectKey, CompositionId composition, const ExportSettings&
     if (!projectKey) return 0;
     // Campo a campo (nunca os bytes da struct: o preenchimento não é definido).
     const u64 fields[] = {
-        2u /* versão desta regra */, projectKey, composition.pack(), s.width, s.height, std::bit_cast<u64>(s.fps),
+        3u /* quality-preserving retry and shutter policy */, projectKey, composition.pack(), s.width, s.height, std::bit_cast<u64>(s.fps),
         static_cast<u64>(s.videoCodec), s.videoBitrateMbps, s.rateMode, s.keyframeIntervalFrames,
         static_cast<u64>(s.audioCodec), s.audioBitrateKbps, s.audioSampleRate, s.audioChannels, s.container,
         static_cast<u64>(s.outputColorSpace), s.toneMapToSdr ? 1u : 0u, s.parallelSegments, s.motionBlurSamples,

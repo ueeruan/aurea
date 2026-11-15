@@ -85,6 +85,7 @@ bool Engine::set_mask_flags(u64 layerId, u32 maskId, u32 flags, u32 change) noex
     if (change == 0) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked) return false;
@@ -111,13 +112,14 @@ bool Engine::set_mask_roto_tension(u64 layerId, u32 maskId, u32 point, f32 tensi
     tension = std::clamp(tension, 0.0f, 1.0f);
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked) return false;
     Mask* m = find_mask(*l, maskId);
     if (!m || m->locked) return false;
     std::vector<MaskPoint> pts;
-    mask::evaluate_path_keys(*m, static_cast<f64>(l->local_time(playback_.current()).value), pts);
+    mask::evaluate_path_keys(*m, static_cast<f64>(l->local_time(editing_frame_locked()).value), pts);
     if (pts.empty() || (point != kInvalidIndex && point >= pts.size())) return false;
     if (!continuing) history_.before_mutation(*comp, project_->timeline().current(), "tensao do RotoBezier");
     bump_model_revision_locked();
@@ -134,6 +136,7 @@ bool Engine::set_mask_feather_xy(u64 layerId, u32 maskId, f32 x, f32 y, bool con
     if (!std::isfinite(x) || !std::isfinite(y)) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked) return false;
@@ -166,6 +169,7 @@ bool Engine::set_mask_feather_points(u64 layerId, u32 maskId, const f32* pts5, u
     }
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked) return false;
@@ -183,6 +187,7 @@ bool Engine::set_mask_feather_points(u64 layerId, u32 maskId, const f32* pts5, u
 
 u32 Engine::query_mask_extras(u64 layerId, u32 maskId, f32* out, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     const Mask* m = l ? find_mask(*l, maskId) : nullptr;
@@ -213,12 +218,13 @@ bool Engine::transform_mask_points(u64 layerId, u32 maskId, const u32* indices, 
     for (u32 i = 0; i < 6; ++i) if (!std::isfinite(m6[i])) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked) return false;
     Mask* m = find_mask(*l, maskId);
     if (!m || m->locked) return false;
-    const i64 local = l->local_time(playback_.current()).value;
+    const i64 local = l->local_time(editing_frame_locked()).value;
     std::vector<MaskPoint> pts;
     mask::evaluate_path_keys(*m, static_cast<f64>(local), pts);
     if (pts.empty()) return false;
@@ -253,6 +259,7 @@ Result<u32> Engine::create_nulls_from_path(u64 layerId, u32 pathKind, u32 a, u32
     std::lock_guard<std::mutex> lock(modelMutex_);
     if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = current_composition();
     if (!comp) return Status{Errc::InvalidState, "projeto sem composicao"};
     const LayerId sourceId = LayerId::unpack(layerId);
@@ -261,7 +268,7 @@ Result<u32> Engine::create_nulls_from_path(u64 layerId, u32 pathKind, u32 a, u32
     if (source->locked) return Status{Errc::InvalidState, "camada travada"};
     if (pathKind == PathFollow::kVector && source->kind != LayerKind::Shape)
         return Status{Errc::InvalidArgument, "a camada nao tem caminho vetorial"};
-    const f64 now = static_cast<f64>(playback_.current().value);
+    const f64 now = static_cast<f64>(editing_frame_locked().value);
     BezierPath path;
     if (!pathrig::comp_path(*comp, *source, static_cast<u8>(pathKind), a, b, now, path) || path.v.empty())
         return Status{Errc::NotFound, "caminho nao existe"};
@@ -375,10 +382,11 @@ Result<u32> Engine::create_nulls_from_path(u64 layerId, u32 pathKind, u32 a, u32
 bool Engine::clear_path_drivers(u64 layerId, u32 pathKind, u32 a, u32 b) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked) return false;
-    const i64 local = l->local_time(playback_.current()).value;
+    const i64 local = l->local_time(editing_frame_locked()).value;
     if (pathKind == PathFollow::kMask) {
         Mask* m = find_mask(*l, a);
         if (!m || m->drivers.empty()) return false;
@@ -411,12 +419,13 @@ bool Engine::clear_path_drivers(u64 layerId, u32 pathKind, u32 a, u32 b) noexcep
 bool Engine::clear_path_follow(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || l->pathFollow.mode == PathFollow::kNone) return false;
     // A camada fica onde o caminho a deixou no cabeçote (sem keys de posição).
     Vec3 pos = l->transform.position;
-    const bool followed = pathrig::follow_position(*l, static_cast<f64>(l->local_time(playback_.current()).value), pos);
+    const bool followed = pathrig::follow_position(*l, static_cast<f64>(l->local_time(editing_frame_locked()).value), pos);
     history_.before_mutation(*comp, project_->timeline().current(), "soltar do caminho");
     bump_model_revision_locked();
     l->pathFollow = PathFollow{};
@@ -432,6 +441,7 @@ bool Engine::clear_path_follow(u64 layerId) noexcept {
 u32 Engine::query_path_rig(u64 layerId, f32* out, u32 capacity) noexcept {
     constexpr u32 need = 9;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return 0;
@@ -467,6 +477,7 @@ Result<u32> Engine::auto_trace(u64 layerId, const AutoTraceOptions& options, u64
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         drain_commands_locked();
+        InlineEditScope inlineScope(*this, layerId, true);
         Composition* comp = project_ ? current_composition() : nullptr;
         const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
         if (!l) return Status{Errc::NotFound, "camada nao existe"};
@@ -492,7 +503,7 @@ Result<u32> Engine::auto_trace(u64 layerId, const AutoTraceOptions& options, u64
             return Status{Errc::NotSupported, "auto-trace precisa de camada de imagem ou de video"};
         }
         const i64 last = std::max<i64>(l->start.value, l->end.value - 1);
-        i64 from = std::clamp<i64>(playback_.current().value, l->start.value, last), to = from + 1;
+        i64 from = std::clamp<i64>(editing_frame_locked().value, l->start.value, last), to = from + 1;
         // Imagem parada: o contorno é o mesmo em todo quadro (um traço só).
         if (options.workArea && kind == LayerKind::Video) {
             from = std::max<i64>(l->start.value, comp->work_in());

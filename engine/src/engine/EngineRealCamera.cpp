@@ -96,7 +96,7 @@ Status Engine::real_camera_commit_locked() noexcept {
         if (playback_.playing()) realCameraPlaybackStarted_ = true;
         else if (realCameraPlaybackStarted_ && !previewBuffering_) real_camera_end_locked(false);
     }
-    const FrameIndex frame = playback_.current();
+    const FrameIndex frame = editing_frame_locked();
     const FrameIndex local = layer->local_time(frame);
     const Vec3 rotation = realCameraPose_.rotation(), position = realCameraPose_.position();
     if (realCameraState_.recording) {

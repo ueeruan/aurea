@@ -1,7 +1,6 @@
 package com.aurea.aurea.editor
 
 import android.app.Application
-import android.media.MediaMetadataRetriever
 import android.os.SystemClock
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.lifecycle.ViewModelProvider
@@ -20,12 +19,7 @@ import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
-/**
- * 0.2.6: exportar não termina em "erro N" quando outro jeito funciona.
- * Resolução acima do que o aparelho exporta sai no MAIOR tamanho que cabe
- * (antes: "resolução acima do que este aparelho exporta", erro 6), e a escada
- * de tentativas do motor responde igual pela ponte do Android.
- */
+/** Quality-preserving export retries through the Android native bridge. */
 class ExportLadderDeviceTest {
     @get:Rule val compose = createComposeRule()
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
@@ -45,7 +39,7 @@ class ExportLadderDeviceTest {
         return progress
     }
 
-    @Test fun aboveTheDeviceLimitExportsAtTheLargestSizeThatFits() {
+    @Test fun aboveTheDeviceLimitFailsWithoutReducingTheRequestedFrame() {
         var ready = false
         compose.setContent {
             store = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))
@@ -65,27 +59,15 @@ class ExportLadderDeviceTest {
         // Lado menor 8640 (16K em retrato): acima de qualquer encoder e textura.
         val output = File(context.filesDir, "export-ladder-above-device.mp4")
         output.delete()
-        assertEquals(0, store.engineForStress.startExport(output.absolutePath, 8640, 30.0, 0, 8))
-        val progress = waitResult()
-        assertEquals(progress.message, 0, progress.result)
-        assertEquals(15, progress.framesDone)
-        val retriever = MediaMetadataRetriever()
-        try {
-            retriever.setDataSource(output.absolutePath)
-            val w = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)!!.toInt()
-            val h = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)!!.toInt()
-            File(context.filesDir, "export-ladder-above-device.txt").writeText("${w}x$h")
-            // Retrato 9:16, no maior tamanho que o aparelho aceita: nunca o pedido.
-            assertTrue("$w x $h", w in 16 until 8640 && h > w)
-            assertEquals(16.0 / 9.0, h.toDouble() / w, 0.03)
-        } finally {
-            retriever.release()
+        val started = store.engineForStress.startExport(output.absolutePath, 8640, 30.0, 0, 8)
+        if (started == 0) {
+            val progress = waitResult()
+            assertTrue("Unsupported output must fail explicitly", progress.result != 0)
         }
-
-        // A escada pela ponte: memória → menos pixels; sem espaço → nada ajuda.
-        assertEquals(3, AureaEngine.nativeExportNextAttempt(0, 8, 0, false, false, 1080, 30.0, false, false))
+        assertTrue("A lower-resolution replacement must never be published", !output.exists() || output.length() == 0L)
+        assertEquals(2, AureaEngine.nativeExportNextAttempt(0, 8, 0, false, false, 1080, 30.0, false, false))
         assertEquals(0, AureaEngine.nativeExportNextAttempt(0, 28, 0, false, false, 1080, 30.0, false, false))
         assertEquals(AureaEngine.EXPORT_ATTEMPT_WAIT, AureaEngine.nativeExportNextAttempt(0, 5, 0, false, false, 1080, 30.0, false, false))
-        assertEquals(720, AureaEngine.nativeExportAttemptShortSide(3, 1080))
+        assertEquals(1080, AureaEngine.nativeExportAttemptShortSide(3, 1080))
     }
 }

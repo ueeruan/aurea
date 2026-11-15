@@ -84,6 +84,7 @@ bool transform_driven(const Layer& l) {
 Result<u32> Engine::explode_text(u64 layerId, u32 mode, bool keepOriginal) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return Status{Errc::InvalidState, "nenhum projeto aberto"};
     const LayerId sourceId = LayerId::unpack(layerId);

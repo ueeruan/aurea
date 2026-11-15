@@ -9,6 +9,18 @@ import org.junit.Test
 
 /** 0.3.6 (editor): Edição, transporte, tamanho do texto e o ícone de corte. */
 class Bugs036EditorTest {
+    @Test fun horizontalScrollStopsAtTheSequenceAndReclampsAfterZoomOrResize() {
+        assertEquals(0f, EditLaneLayout.clampHorizontal(-450f, 300, 160f, 2f), 0f)
+        assertEquals(150f, EditLaneLayout.clampHorizontal(150f, 300, 160f, 2f), 0f)
+        assertEquals(220f, EditLaneLayout.clampHorizontal(450f, 300, 160f, 2f), 0f)
+        assertEquals(50f, EditLaneLayout.clampHorizontal(220f, 300, 500f, 2f), 0f)
+        assertEquals(0f, EditLaneLayout.clampHorizontal(220f, 60, 160f, 2f), 0f)
+        assertEquals(0f, EditLaneLayout.clampHorizontal(220f, 300, 160f, .5f), 0f)
+        assertEquals(0f, EditLaneLayout.clampHorizontal(10f, 300, 0f, 2f), 0f)
+        assertEquals(0f, EditLaneLayout.clampHorizontal(10f, -1, 160f, 2f), 0f)
+        assertEquals(0f, EditLaneLayout.clampHorizontal(Float.NaN, 300, 160f, 2f), 0f)
+    }
+
     // Os mesmos números do desenho da Edição em 1× (régua 26 + 8, principal 56, linha 34, folga 6, base 12).
     @Test fun laneLayoutStopsWhenTheLastTrackReachesTheBottom() {
         val l = EditLaneLayout.compute(6, rulerH = 26f, laneH = 44f, gap = 1f)

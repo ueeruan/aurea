@@ -26,6 +26,8 @@
 //                  quadrada com PolyBLEP) com fase = ∫ frequência.
 // =============================================================================
 #include "AudioInternal.hpp"
+#include "aurea/plugins/AudioDsp.hpp"
+#include "aurea/audio/Fft.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -114,6 +116,7 @@ i64 chain_preroll(const std::vector<FxStage>& chain) noexcept {
     for (const FxStage& s : chain) {
         i64 need = 0;
         switch (s.kind) {
+            case FxKind::Plugin: need = s.plugin ? s.plugin->prerollFrames : 0; break;
             case FxKind::Delay: {
                 const f64 period = std::max(1.0, static_cast<f64>(max_of(s, fxp::kDelayTime)) * kRate / 1000.0);
                 need = feedback_tail(period, max_of(s, fxp::kDelayFeedback) / 100.0);
@@ -248,27 +251,6 @@ f64 biquad_response_db(const Biquad& b, f64 hz) noexcept {
 // Análise para os efeitos visuais
 // =============================================================================
 namespace {
-void fft(std::complex<f32>* a, u32 n) noexcept {
-    for (u32 i = 1, j = 0; i < n; ++i) {
-        u32 bit = n >> 1;
-        for (; j & bit; bit >>= 1) j ^= bit;
-        j ^= bit;
-        if (i < j) std::swap(a[i], a[j]);
-    }
-    for (u32 len = 2; len <= n; len <<= 1) {
-        const f64 ang = -2.0 * kPi / static_cast<f64>(len);
-        const std::complex<f32> wl(static_cast<f32>(std::cos(ang)), static_cast<f32>(std::sin(ang)));
-        for (u32 i = 0; i < n; i += len) {
-            std::complex<f32> w(1.0f, 0.0f);
-            for (u32 k = 0; k < len / 2; ++k) {
-                const std::complex<f32> u = a[i + k], v = a[i + k + len / 2] * w;
-                a[i + k] = u + v;
-                a[i + k + len / 2] = u - v;
-                w *= wl;
-            }
-        }
-    }
-}
 
 /// Amplitudes por bin (seno em escala cheia ≈ 1) de `count` amostras com
 /// janela de Hann, completadas com zero até `n`.
@@ -280,7 +262,7 @@ void window_magnitudes(const f32* x, u32 count, u32 n, std::vector<std::complex<
         wsum += w;
         buf[i] = {static_cast<f32>(x[i] * w), 0.0f};
     }
-    fft(buf.data(), n);
+    fft_complex(buf.data(), n);
     const f32 norm = wsum > 0.0 ? static_cast<f32>(2.0 / wsum) : 0.0f;
     mag.resize(n / 2 + 1);
     for (u32 k = 0; k <= n / 2; ++k) mag[k] = std::abs(buf[k]) * norm;
@@ -389,6 +371,8 @@ struct BiquadState {
 };
 
 struct StageState {
+    std::unique_ptr<plugins::AudioProcessor> plugin;
+    std::vector<f32> parameters;
     Ring line;
     BiquadState bq[3];
     // Reverb
@@ -423,6 +407,8 @@ f64 oscillator(u32 shape, f64 phase, f64 dt) noexcept {
 } // namespace
 
 struct MixState::Stream {
+    Errc dspError = Errc::Ok;
+    u64 pluginBytes = 0;
     u64 fxHash = 0;
     u64 lastEpoch = 0;
     bool valid = false;
@@ -444,9 +430,10 @@ MixState::~MixState() = default;
 void MixState::clear() noexcept { streams_.clear(); }
 
 void MixState::sweep(u64 epoch) noexcept {
-    if (streams_.size() <= 32) return;
+    const bool manyStreams = streams_.size() > 32;
     for (auto it = streams_.begin(); it != streams_.end();) {
-        if (!it->second || it->second->lastEpoch + 1000 < epoch) it = streams_.erase(it);
+        if (!it->second || (it->second->pluginBytes && it->second->lastEpoch != epoch)
+            || (manyStreams && it->second->lastEpoch + 1000 < epoch)) it = streams_.erase(it);
         else ++it;
     }
 }
@@ -563,6 +550,8 @@ void dry_at(const AudioClip& c, MixState::Stream& st, BlockSource& blocks, i64 t
 
 void reset_stream(const AudioClip& c, MixState::Stream& st) {
     st.valid = true;
+    st.dspError = Errc::Ok;
+    st.pluginBytes = 0;
     st.fxHash = c.fxHash;
     st.ring.assign(static_cast<usize>(kRingFrames) * 2, 0.0f);
     st.blockIndex[0] = st.blockIndex[1] = -1;
@@ -588,6 +577,14 @@ void reset_stream(const AudioClip& c, MixState::Stream& st) {
         const FxStage& s = c.chain[i];
         StageState& ss = st.stages[i];
         switch (s.kind) {
+            case FxKind::Plugin: {
+                ss.plugin = std::make_unique<plugins::AudioProcessor>();
+                const auto status = ss.plugin->prepare(s.plugin, kSub);
+                if (!status.ok()) st.dspError = status.code();
+                st.pluginBytes += ss.plugin->state_bytes();
+                ss.parameters.resize(s.params.size());
+                break;
+            }
             case FxKind::Delay:
                 ss.line.init(static_cast<u32>(std::ceil(std::max(1.0f, s.maxDelayMs) * kRate / 1000.0)) + 4);
                 break;
@@ -626,6 +623,17 @@ void process_block(const AudioClip& c, MixState::Stream& st, BlockSource& blocks
         const FxStage& s = c.chain[si];
         StageState& ss = st.stages[si];
         switch (s.kind) {
+            case FxKind::Plugin: {
+                if (st.dspError != Errc::Ok || !ss.plugin) return;
+                f32 samples[kSub * 2];
+                for (i64 i = 0; i < n; ++i) { samples[i * 2] = L[i]; samples[i * 2 + 1] = R[i]; }
+                for (u32 i = 0; i < s.params.size(); ++i) ss.parameters[i] = s.at(i, q);
+                const auto status = ss.plugin->process_block(samples, samples, static_cast<u32>(n),
+                    kMixRate, kMixChannels, ss.parameters);
+                if (!status.ok()) { st.dspError = status.code(); return; }
+                for (i64 i = 0; i < n; ++i) { L[i] = samples[i * 2]; R[i] = samples[i * 2 + 1]; }
+                break;
+            }
             case FxKind::Envelope:
                 for (i64 i = 0; i < n; ++i) {
                     const f32 g = clip_envelope(c, a + i);
@@ -957,12 +965,12 @@ void advance(const AudioClip& c, MixState::Stream& st, BlockSource& blocks, i64 
 } // namespace
 
 void mix_fx_clip(const AudioClip& c, i64 s0, i64 s1, i64 start, BlockSource& blocks, f32* out, MixState* state,
-                 u64 epoch, u32& missing) noexcept {
+                 u64 epoch, u32& missing, Errc& dspError) noexcept {
     if (s0 >= s1) return;
     // Pedido maior que o anel: em pedaços (o fluxo continua de um para o outro).
     if (s1 - s0 > kMaxRequest) {
         for (i64 a = s0; a < s1; a += kMaxRequest) {
-            mix_fx_clip(c, a, std::min(s1, a + kMaxRequest), start, blocks, out, state, epoch, missing);
+            mix_fx_clip(c, a, std::min(s1, a + kMaxRequest), start, blocks, out, state, epoch, missing, dspError);
         }
         return;
     }
@@ -993,8 +1001,10 @@ void mix_fx_clip(const AudioClip& c, i64 s0, i64 s1, i64 start, BlockSource& blo
         if (!continues) st.valid = false;
         return;
     }
+    if (st.dspError != Errc::Ok) { dspError = st.dspError; return; }
     const u32 before = missing;
     advance(c, st, blocks, s1, missing);
+    if (st.dspError != Errc::Ok) { dspError = st.dspError; return; }
     for (i64 t = s0; t < s1; ++t) {
         const u32 slot = static_cast<u32>(t & (kRingFrames - 1));
         f32* o = out + static_cast<usize>(t - start) * 2;

@@ -292,6 +292,19 @@ public:
     [[nodiscard]] bool pass_culled(u32 p) const noexcept { return passes_[p].culled; }
     [[nodiscard]] u32 resource_count() const noexcept { return static_cast<u32>(resources_.size()); }
 
+    struct PassMetrics {
+        u64 cpuRecordNs = 0;
+        u64 estimatedReadBytes = 0;
+        u64 estimatedWriteBytes = 0;
+        u64 workingSetBytes = 0;
+        bool cpuMeasured = false;
+    };
+    /// Recording CPU time is sampled only when execute(timers=true).
+    /// Traffic estimates count each declared resource once per direction,
+    /// excluding discarded attachments. They describe full-resource traffic,
+    /// without shader tap counts, compression or hardware cache measurements.
+    [[nodiscard]] PassMetrics pass_metrics(u32 pass) const noexcept;
+
     /// Índice da física usada por uma textura lógica (para testes de
     /// aliasing). kInvalidIndex se importada ou podada.
     [[nodiscard]] u32 physical_slot(FGTexture t) const noexcept;
@@ -353,6 +366,8 @@ private:
         u32         accessCount = 0;
         u32         barrierBegin = 0;  ///< faixa em barriers_
         u32         barrierCount = 0;
+        u64         cpuRecordNs = 0;
+        bool        cpuMeasured = false;
     };
 
     /// Uma textura física deste frame. Várias lógicas podem apontar para ela.

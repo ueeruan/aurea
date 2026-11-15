@@ -203,7 +203,7 @@ internal fun shellBack(store: EditorStore, ui: EditorUi) {
         ui.adding -> ui.adding = false
         ui.fullscreen -> ui.fullscreen = false
         ui.panel != null -> ui.panel = null
-        store.selection.isNotEmpty() -> store.clearSelection()
+        store.editingSelection.isNotEmpty() -> store.clearSelection()
         store.precompDepth > 0 -> store.closePrecomp()
         else -> store.closeProject()
     }
@@ -236,7 +236,7 @@ fun EditorScreen(store: EditorStore) {
     StagePrefs.load(androidx.compose.ui.platform.LocalContext.current)
     // Omega conteúdo (área 06): preferências do aparelho dos editores (forma, desenho).
     ContentPrefs.load(androidx.compose.ui.platform.LocalContext.current)
-    val selectionSize by remember { derivedStateOf { store.selection.size } }
+    val selectionSize by remember { derivedStateOf { store.editingSelection.size } }
     val hasLayers by remember { derivedStateOf { store.layers.isNotEmpty() } }
 
     // Seleção vazia ou lote fecha o painel. Trocar de UMA camada para outra
@@ -300,7 +300,7 @@ fun EditorScreen(store: EditorStore) {
     // camada só "na mão" da timeline (segurada/arrastada sem abrir as opções):
     // a geometria não muda no meio do gesto. Escolhendo keyframes, a timeline
     // fica alta (sem barra).
-    val timelineOnly = store.selection.isNotEmpty() && store.selection == store.timelineOnlySelection
+    val timelineOnly = store.groupInnerSelection == null && store.editingSelection.isNotEmpty() && store.selection == store.timelineOnlySelection
     val addBarState = selectionSize == 0 || (timelineOnly && !store.keySelectMode)
     val content = when {
         // Omega adicionar (área 08, P0-1): o conteúdo embutido acima da barra.
@@ -666,7 +666,7 @@ internal fun WideEditor(
 /** Topo: lote, camada ou projeto — segue a seleção. */
 @Composable
 internal fun TopBarHost(store: EditorStore, ui: EditorUi) {
-    val size by remember { derivedStateOf { store.selection.size } }
+    val size by remember { derivedStateOf { store.editingSelection.size } }
     val primary by remember { derivedStateOf { store.primary } }
     val id = primary
     val section = ui.panel
@@ -709,7 +709,7 @@ internal fun TimelineHost(store: EditorStore, ui: EditorUi, modifier: Modifier, 
         compactDock = compactDock,
         // Redesenho 2026-09-29 (Efeitos.dc.html): uma camada escolhida = relógio
         // em caixa (e cabeçote em destaque); sem seleção, o sublinhado.
-        timecodeStyle = if (store.selection.size == 1) TimecodeStyle.Box else TimecodeStyle.Underline,
+        timecodeStyle = if (store.editingSelection.size == 1) TimecodeStyle.Box else TimecodeStyle.Underline,
         // Omega timeline (área 03, P1-8): com o painel Velocidade, as alças do foco esticam a velocidade.
         speedHandles = ui.panel == EditorPanel.Speed ||
             // Omega painel: (área 04) a velocidade embutida do grupo também mostra as alças.
@@ -764,7 +764,7 @@ internal fun TimelineHost(store: EditorStore, ui: EditorUi, modifier: Modifier, 
  * Com outro painel aberto só navega (A.01).
  */
 private fun onKeyframeTapped(store: EditorStore, ui: EditorUi, layer: Long, key: KeyframeRow) {
-    if (store.primary != layer || store.selection.size != 1) store.select(layer)
+    if (store.primary != layer || store.editingSelection.size != 1) store.select(layer)
     val current = ui.panel
     // 0.3.1: keyframe de parâmetro de efeito abre o editor de curva (valor e
     // velocidade), como no iOS; só a malha (Mesh Warp) vai para Efeitos. Com o
@@ -920,7 +920,7 @@ private fun ShellSheets(store: EditorStore, ui: EditorUi) {
         }
         ShellSheet.RenameLayer -> {
             val id = store.primary
-            val name = store.layers.firstOrNull { it.id == id }?.name.orEmpty()
+            val name = store.editingLayers.firstOrNull { it.id == id }?.name.orEmpty()
             if (id == null) {
                 LaunchedEffect(Unit) { ui.sheet = null }
             } else {

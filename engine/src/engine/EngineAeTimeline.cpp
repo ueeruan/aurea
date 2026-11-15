@@ -103,6 +103,7 @@ bool Engine::edit_layer_marker(u64 layerId, i64 fromFrame, i64 toFrame, u32 colo
         || duration < 0 || duration > kMaxMarkerDuration || !marker_text_ok(label, comment)) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || l->markers.size() >= 100000u) return false;
@@ -133,6 +134,7 @@ bool Engine::move_layer_marker(u64 layerId, i64 fromFrame, i64 toFrame) noexcept
     if (fromFrame < 0 || toFrame < 0 || fromFrame >= kMarkerFrameLimit || toFrame >= kMarkerFrameLimit) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked) return false;
@@ -156,6 +158,7 @@ bool Engine::delete_layer_marker(u64 layerId, i64 frame) noexcept {
     if (frame < 0 || frame >= kMarkerFrameLimit) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked) return false;
@@ -171,6 +174,7 @@ bool Engine::delete_layer_marker(u64 layerId, i64 frame) noexcept {
 
 u32 Engine::query_layer_markers(u64 layerId, i64* out, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     const Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return 0;
@@ -208,6 +212,7 @@ u32 Engine::query_all_layer_markers(i64* out, u32 capacity) noexcept {
 
 bool Engine::layer_marker_text(u64 layerId, i64 frame, std::string& label, std::string& comment) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     const Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return false;
@@ -235,6 +240,7 @@ u32 Engine::ease_keyframe_selection(u64 layerId, const i64* refs, u32 count, u32
     if (!refs || count == 0 || count > 16384 || mode > kEasyEaseOut) return 0;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer || layer->locked) return 0;
@@ -349,6 +355,7 @@ u32 Engine::align_layers(const u64* layerIds, u32 count, u32 mode) noexcept {
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         drain_commands_locked();
+        InlineEditScope inlineScope(*this, (count == 1 && layerIds ? layerIds[0] : 0), true);
         const Composition* comp = project_ ? current_composition() : nullptr;
         if (!comp) return 0;
         cw = static_cast<f32>(comp->width());

@@ -109,7 +109,7 @@ struct AureaPropertyPanel: View {
         model.projectGeneration == projectGeneration && model.primarySelection == layerId
             && (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value == compositionId
     }
-    private var locked: Bool { !currentOwner || (model.layers.first { $0.id == layerId }?.locked ?? true) }
+    private var locked: Bool { !currentOwner || (model.editingLayers.first { $0.id == layerId }?.locked ?? true) }
     private var prefix: String { "property.\(domain).\(layerId).\(materialIndex)" }
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -175,7 +175,7 @@ struct AureaPropertyPanel: View {
                              param: domain == "material" ? UInt32(p.bindingParams[component]) : 0)
     }
     private func keys(_ track: TimelineTrack) -> [KeyframeItem] {
-        (model.keyframes[layerId] ?? []).filter {
+        (model.keysForLayer(layerId) ?? []).filter {
             Int($0.property) == track.property && $0.effectIndex == track.effect && $0.paramIndex == track.param
         }
     }

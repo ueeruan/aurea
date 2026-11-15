@@ -233,6 +233,8 @@ Writer& Writer::key(std::string_view k) {
     afterKey_ = true;
     return *this;
 }
+Writer& Writer::null() { comma(); out_ += "null"; return *this; }
+
 Writer& Writer::value(std::string_view s) {
     comma();
     out_ += '"';
@@ -862,12 +864,12 @@ bool read_effects(Reader& r, const json::Value& root, const EffectRegistry* reg,
                     if (k != kInvalidIndex) return k;
                 }
             }
-            const u32 idx = r.u(o, "index", kInvalidIndex, 255);
+            const u32 idx = r.u(o, "index", kInvalidIndex, 1023);
             if (specs && idx != kInvalidIndex && idx >= specs->count()) return kInvalidIndex;
             return idx;
         };
 
-        if (const json::Value* ps = r.arr(ev, "params", 256)) {
+        if (const json::Value* ps = r.arr(ev, "params", 1024)) {
             for (const json::Value& pv : ps->array) {
                 if (!pv.is_object()) return r.fail("parametro invalido");
                 const u32 idx = param_index(pv, "id");

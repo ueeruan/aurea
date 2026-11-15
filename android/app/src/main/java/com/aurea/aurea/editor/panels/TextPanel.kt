@@ -378,7 +378,7 @@ internal fun TextBackdropRows(env: PanelEnv) {
 private fun TextSourceKeysRow(env: PanelEnv) {
     val store = env.store
     val id = store.primary ?: return
-    val keys = store.keyframes[id].orEmpty().filter { it.property == com.aurea.aurea.engine.TrackProperty.TEXT_SOURCE }
+    val keys = store.keysForLayer(id).orEmpty().filter { it.property == com.aurea.aurea.engine.TrackProperty.TEXT_SOURCE }
     val local = store.detail?.localPlayhead
     val here = keys.any { it.time == local }
     val track = com.aurea.aurea.engine.TrackKey(com.aurea.aurea.engine.TrackProperty.TEXT_SOURCE, 0, 0)
@@ -433,9 +433,9 @@ internal fun TextRuler(
     // coluna marca o keyframe.
     val track = keyProperty?.let { com.aurea.aurea.engine.TrackKey(it) }
     val id = store.primary
-    val row = store.layers.firstOrNull { it.id == id }
+    val row = store.editingLayers.firstOrNull { it.id == id }
     val local = store.playhead - (row?.startFrame ?: 0) + (row?.offsetFrames ?: 0)
-    val keys = if (keyProperty != null) store.keyframes[id].orEmpty().filter { it.property == keyProperty } else emptyList()
+    val keys = if (keyProperty != null) store.keysForLayer(id).orEmpty().filter { it.property == keyProperty } else emptyList()
     val look = when {
         keys.any { it.time == local } -> com.aurea.aurea.ui.ds.KeyframeLook.KeyHere
         keys.isNotEmpty() -> com.aurea.aurea.ui.ds.KeyframeLook.Animated

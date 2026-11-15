@@ -97,7 +97,7 @@ internal fun EditModeEditor(store: EditorStore, ui: EditorUi, stage: @Composable
     // O corte cujas transições estão abertas (saída, entrada).
     var cut by remember { mutableStateOf<Pair<Long, Long>?>(null) }
     val primary by remember { derivedStateOf { store.primary } }
-    val selected = store.layers.firstOrNull { it.id == primary }
+    val selected = store.editingLayers.firstOrNull { it.id == primary }
     // O corte escolhido manda no Dock; sem corte, volta ao nível de cima (ou
     // fica no submenu que a pessoa abriu, como Áudio ou Texto).
     LaunchedEffect(primary, selected?.kind) {
@@ -112,7 +112,7 @@ internal fun EditModeEditor(store: EditorStore, ui: EditorUi, stage: @Composable
     val actions = rememberEditActions(store, ui) { level = it }
     // Voltar do sistema num submenu do Dock (Áudio, Texto) volta ao nível de cima;
     // painel, seleção e o resto seguem a ordem da casca (`shellBack`).
-    androidx.activity.compose.BackHandler(enabled = level != EditDockLevel.Root && ui.panel == null && store.selection.isEmpty()) {
+    androidx.activity.compose.BackHandler(enabled = level != EditDockLevel.Root && ui.panel == null && store.editingSelection.isEmpty()) {
         level = EditDockLevel.Root
     }
     BoxWithConstraints(Modifier.fillMaxSize().background(EditColors.Canvas)) {
@@ -136,7 +136,7 @@ internal fun EditModeEditor(store: EditorStore, ui: EditorUi, stage: @Composable
         Column(Modifier.fillMaxSize()) {
             if (texting) Box(Modifier.fillMaxWidth().height(52.dp).zIndex(2f)) { TextStyleBar(store) }
             else if (!ui.fullscreen) EditTopBar(store, ui)
-            if (!ui.fullscreen && !texting) EditWorkspaceBar(workspace) { next ->
+            if (wide && total >= 500.dp && !ui.fullscreen && !texting) EditWorkspaceBar(workspace) { next ->
                 workspace = next
                 when (next) {
                     EditWorkspace.Media -> { ui.panel = null; actions.addMedia() }
@@ -156,17 +156,21 @@ internal fun EditModeEditor(store: EditorStore, ui: EditorUi, stage: @Composable
                         EditPlayBar(store, ui)
                     }
                     BoxWithConstraints(Modifier.width(360.dp).fillMaxHeight().testTag("edit.inspector").clip(RoundedCornerShape(10.dp)).background(AureaColors.EditorPanel)) {
-                        val inspectorHeight = maxHeight.coerceAtLeast(360.dp)
-                        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-                            Box(Modifier.fillMaxWidth().height(inspectorHeight)) { inspector() }
+                        if (panel != null) {
+                            val inspectorHeight = maxHeight.coerceAtLeast(360.dp)
+                            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                                Box(Modifier.fillMaxWidth().height(inspectorHeight)) { inspector() }
+                            }
+                        } else {
+                            inspector()
                         }
                     }
                 }
                 KeepLtr { EditTimeline(store, Modifier.fillMaxWidth().height((total * .30f).coerceIn(114.dp, 260.dp)),
                     compact = false, onAddMedia = actions.addMedia, onTransition = { a, b -> cut = a to b }) }
             } else {
-            // Panel selection keeps the native preview surface at one size.
-            val previewH = if (ui.fullscreen) total - 48.dp else (total * .32f).coerceIn(128.dp, 400.dp)
+            val previewRatio = if (panel != null || texting) .32f else .52f
+            val previewH = if (ui.fullscreen) total - 48.dp else (total * previewRatio).coerceIn(160.dp, 600.dp)
             KeepLtr { stage(Modifier.fillMaxWidth().height(previewH).background(EditColors.Preview).testTag("edit.preview")) }
             if (texting) {
                 TextEditPanel(store, Modifier.fillMaxWidth().weight(1f))
@@ -175,7 +179,7 @@ internal fun EditModeEditor(store: EditorStore, ui: EditorUi, stage: @Composable
             if (!ui.fullscreen) {
                 if (panel != null) {
                     val fontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale
-                    val panelH = (total - 100.dp - previewH - 48.dp - 112.dp).coerceIn(0.dp, EditorLayout.panelMax(fontScale).dp)
+                    val panelH = (total - 48.dp - previewH - 48.dp - 112.dp).coerceIn(0.dp, EditorLayout.panelMax(fontScale).dp)
                     KeepLtr { EditTimeline(store, Modifier.fillMaxWidth().weight(1f), compact = true, onAddMedia = actions.addMedia, onTransition = { a, b -> cut = a to b }) }
                     Box(Modifier.fillMaxWidth().height(panelH).background(AureaColors.EditorPanel)) {
                         inspector()
@@ -264,10 +268,10 @@ private val ClipLevels = setOf(EditDockLevel.VideoClip, EditDockLevel.TextClip, 
 
 /** Cores próprias da Edição: fundo preto como nos editores de vídeo, Dock um tom acima. */
 internal object EditColors {
-    val Canvas = androidx.compose.ui.graphics.Color(0xFF101114)
-    val Preview = androidx.compose.ui.graphics.Color(0xFF0B0B0D)
-    val Bar = androidx.compose.ui.graphics.Color(0xFF181A20)
-    val DockLevel = androidx.compose.ui.graphics.Color(0xFF22252C)
+    val Canvas = androidx.compose.ui.graphics.Color(0xFF08090B)
+    val Preview = androidx.compose.ui.graphics.Color.Black
+    val Bar = androidx.compose.ui.graphics.Color(0xFF101115)
+    val DockLevel = androidx.compose.ui.graphics.Color(0xFF17191E)
     val Ruler = androidx.compose.ui.graphics.Color(0xFF8A8A92)
 }
 
@@ -280,8 +284,9 @@ private fun EditTopBar(store: EditorStore, ui: EditorUi) {
     var menu by remember { mutableStateOf(false) }
     val close = stringResource(R.string.common_close)
     val more = stringResource(R.string.edit_more)
+    val export = stringResource(R.string.edit_export)
     Row(
-        Modifier.fillMaxWidth().height(52.dp).background(EditColors.Canvas).padding(horizontal = 6.dp),
+        Modifier.fillMaxWidth().height(48.dp).background(EditColors.Canvas).padding(horizontal = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
@@ -310,6 +315,11 @@ private fun EditTopBar(store: EditorStore, ui: EditorUi) {
             ) { CupertinoIcon(CupertinoGlyph.Ellipsis, 20.dp, AureaColors.Text) }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 DropdownMenuItem(
+                    text = { Text(stringResource(R.string.fxl_view)) },
+                    onClick = { menu = false; ViewModes.columnOpen = !ViewModes.columnOpen },
+                    modifier = Modifier.testTag("edit.previewControls"),
+                )
+                DropdownMenuItem(
                     text = { Text(stringResource(R.string.ui_mode_switch_to_composition)) },
                     onClick = { menu = false; store.setUiMode(UI_MODE_COMPOSITION) },
                     modifier = Modifier.testTag("edit.toComposition"),
@@ -332,14 +342,12 @@ private fun EditTopBar(store: EditorStore, ui: EditorUi) {
             }
         }
         Spacer(Modifier.width(4.dp))
-        Text(
-            stringResource(R.string.edit_export),
-            style = AureaType.of(14f, FontWeight.W700, color = AureaColors.Background),
-            modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(AureaColors.Accent)
-                .testTag("edit.export").semantics { role = Role.Button }
-                .tocavel(shrink = 0.96f) { if (store.playing) store.pause(); ui.exporting = true }
-                .padding(horizontal = 14.dp, vertical = 8.dp),
-        )
+        Box(
+            Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(EditColors.DockLevel)
+                .testTag("edit.export").semantics { contentDescription = export; role = Role.Button }
+                .tocavel(shrink = 0.96f) { if (store.playing) store.pause(); ui.exporting = true },
+            contentAlignment = Alignment.Center,
+        ) { CupertinoIcon(CupertinoGlyph.SquareArrowUp, 22.dp, AureaColors.Text) }
     }
 }
 

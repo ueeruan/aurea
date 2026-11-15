@@ -29,6 +29,8 @@ class MotionBlurSettingsTest {
     @get:Rule val compose = createComposeRule()
     private lateinit var store: EditorStore
 
+    private val showSettings = androidx.compose.runtime.mutableStateOf(false)
+
     private fun openProject() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         check(context.packageName.endsWith(".uitest"))
@@ -40,6 +42,8 @@ class MotionBlurSettingsTest {
                     PreviewStage(store, ui, Modifier.fillMaxWidth().weight(1f))
                     PanelContent(store, EditorPanel.Transform, {}, {}, {}, Modifier.height(500.dp))
                 }
+                // F10: o obturador da composição mora em Ajustes do projeto › Prévia e render.
+                if (showSettings.value) ProjectSettingsSheet(store, ui) { showSettings.value = false }
             }
         }
         compose.waitUntil(30000) { ::store.isInitialized && store.engineReady }
@@ -89,8 +93,15 @@ class MotionBlurSettingsTest {
         compose.waitUntil(5000) { store.detail != null }
         compose.runOnIdle { store.setCompositionMotionBlur(true); store.setLayerMotionBlur(store.primary!!, true) }
         compose.waitUntil(5000) { store.compMotionBlur && store.detail!!.motionBlur }
-        compose.onNodeWithContentDescription(context.getString(R.string.panel_desfoque_movimento)).performClick()
-        compose.onNodeWithTag("motionblur.shutter").assertExists().performTouchInput {
+        // O botão da barra da camada abre Transformar na face Desfoque (mesmo pedido).
+        compose.runOnIdle { com.aurea.aurea.editor.panels.PanelRequests.transformTab = com.aurea.aurea.editor.panels.TransformTab.Desfoque }
+        // A função da camada só tem o que é dela; o link leva aos Ajustes na aba certa.
+        compose.onNodeWithTag("motionblur.panel").assertExists()
+        compose.onNodeWithTag("motionblur.shutter").assertDoesNotExist()
+        compose.onNodeWithTag("motionblur.compSettings").performScrollTo().performClick()
+        compose.runOnIdle { assertTrue(ProjectSettingsRequest.open); ProjectSettingsRequest.open = false; showSettings.value = true }
+        compose.onNodeWithTag("projectSettings.tab.render").assertIsSelected()
+        compose.onNodeWithTag("motionblur.shutter").performScrollTo().assertExists().performTouchInput {
             down(Offset(width * .6f, height / 2f))
             moveBy(Offset(50f, 0f), 150)
             up()
@@ -100,7 +111,7 @@ class MotionBlurSettingsTest {
         compose.runOnIdle { store.undo() }
         compose.waitUntil(5000) { store.shutterAngle == 180f }
         compose.runOnIdle { store.changeShutterAngle(181f); store.changeShutterPhase(30f) }
-        compose.onNodeWithTag("motionblur.advanced").performScrollTo().performClick()
+        compose.onNodeWithTag("motionblur.advanced").assertDoesNotExist()
         compose.onNodeWithTag("motionblur.center").performScrollTo().performClick()
         compose.waitUntil(5000) { store.shutterPhase == -90.5f }
         compose.onNodeWithTag("motionblur.samples").performScrollTo().assertExists()

@@ -503,9 +503,11 @@ private struct ModelOptimizePrompt: ViewModifier {
             // "NN%" no canto sup-esq (o chip "250 %" saiu: o 100 % mora no número da
             // coluna de modos) e a coluna de modos presa à direita (P0-5).
             if !model.rawPlayback && !model.fullscreen && !model.sceneEditor {
-                CanvasZoomMode().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                if model.uiMode != AureaUiMode.edit {
+                    CanvasZoomMode().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 // 0.4.1 (mockup "interface 03"): grade, modos de visão e zoom flutuando no canto sup-dir.
                 StageFloatPills().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                }
                 ViewModeColumn(width: ViewModeState.columnWidth(UIScreen.main.bounds.width))
             }
             // 0.4.6: o nome da vista do AE escolhida (Frente, Topo, Vista personalizada 1…).
@@ -1162,7 +1164,7 @@ private struct BatchToolsView: View {
                     }
                     tool(CupertinoGlyph.DocOnDoc, "editor_copiar_camada") { model.engine.copyLayers(selected.map { NSNumber(value: $0.id) }) }
                     tool(CupertinoGlyph.PlusSquareOnSquare, "editor_duplicar_camada") {
-                        model.engine.duplicateLayers(selected.map { NSNumber(value: $0.id) }); model.refreshModel(force: true)
+                        model.duplicateSelectedLayers(selected.map(\.id))
                     }
                 } else {
                 vectorTool("automirrored.rounded.FormatAlignLeft", "editor_alinhar_inicios") { model.arrangeLayerTimes(0) }
@@ -1250,7 +1252,7 @@ private struct TextPanelView: View {
     }
     private var railKeys: [KeyframeItem] {
         guard let t = railTrack else { return [] }
-        return (model.keyframes[layerId] ?? []).filter { Int($0.property) == t.property && $0.effectIndex == t.effect && $0.paramIndex == t.param }
+        return (model.keysForLayer(layerId) ?? []).filter { Int($0.property) == t.property && $0.effectIndex == t.effect && $0.paramIndex == t.param }
             .sorted { $0.time < $1.time }
     }
     private var railLook: KeyframeLook {
@@ -2319,7 +2321,7 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
         let selected = model.selectedLayer
         Button(AureaText.t("s3d_insert_key_desc")) { model.toggleSceneKey() }.disabled(selected == nil)
         Button(AureaText.t("s3d_duplicate")) {
-            model.engine.duplicateLayers(model.selection.map { NSNumber(value: $0) }); model.refreshModel(force: true)
+            model.duplicateSelectedLayers()
         }.disabled(selected == nil)
         if isModel || (selected?.kind == 4 && selected?.threeD == true) {
             Divider()
@@ -2736,7 +2738,7 @@ private struct Scene3DLane: Hashable {
     private var objects: [LayerItem] { model.layers.filter { $0.threeD } }
     private func transformKeyed(_ k: KeyframeItem) -> Bool { k.effectIndex == UInt32.max && k.property <= 12 && k.timelineVisible }
     private func laneKeys(_ lane: Scene3DLane) -> [KeyframeItem] {
-        let all = model.keyframes[lane.layer] ?? []
+        let all = model.keysForLayer(lane.layer) ?? []
         guard lane.node >= 0 else { return all.filter(transformKeyed) }
         let node = UInt32(lane.node)
         return all.filter { $0.property == 45 && $0.effectIndex == node && $0.timelineVisible }
@@ -3165,7 +3167,7 @@ private struct Scene3DLane: Hashable {
             VStack(alignment: .leading, spacing: 0) {
                 row(depth: 0, glyph: CupertinoGlyph.CubeFill, name: AureaText.t("s3d_scene"), on: false, keyed: false, delete: nil) {}
                 ForEach(objects) { o in
-                    let keyed = (model.keyframes[o.id] ?? []).contains(where: transformKeyed)
+                    let keyed = (model.keysForLayer(o.id) ?? []).contains(where: transformKeyed)
                     row(depth: 1, glyph: o.kind == 9 ? CupertinoGlyph.Lightbulb : CupertinoGlyph.CubeFill, name: o.name,
                         on: o.id == model.primarySelection, keyed: keyed, delete: {
                             model.select(layerId: o.id, additive: false, openOptions: false); model.deleteSelectedLayers()

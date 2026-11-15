@@ -55,17 +55,25 @@ bool is_part3d_effect(u32 effectType) noexcept {
         || effectType == effect_type_id(effect_keys::kPart3DTexture);
 }
 
-void part_nodes(const SceneAsset& asset, std::vector<u32>& out) {
+void part_nodes(const SceneAsset& asset, std::vector<u32>& out, bool includeJoints) {
     out.clear();
     for (u32 i = 0; i < asset.nodes.size(); ++i) {
         const Node& node = asset.nodes[i];
         if (node.inScene && node.mesh >= 0 && static_cast<usize>(node.mesh) < asset.meshes.size()) out.push_back(i);
     }
+    if (!includeJoints) return;
+    // Existing mesh indices stay stable in saved projects. Append animation
+    // joints so a single skinned avatar exposes its articulated parts too.
+    for (const Skin& skin : asset.skins) for (i32 joint : skin.joints) {
+        if (joint < 0 || static_cast<usize>(joint) >= asset.nodes.size()) continue;
+        const u32 node = static_cast<u32>(joint);
+        if (asset.nodes[node].inScene && std::find(out.begin(), out.end(), node) == out.end()) out.push_back(node);
+    }
 }
 
-void part_names(const SceneAsset& asset, std::vector<std::string>& out) {
+void part_names(const SceneAsset& asset, std::vector<std::string>& out, bool includeJoints) {
     std::vector<u32> parts;
-    part_nodes(asset, parts);
+    part_nodes(asset, parts, includeJoints);
     out.clear();
     out.reserve(parts.size());
     for (const u32 n : parts) {
@@ -94,7 +102,7 @@ void apply_part_effects(const SceneAsset& asset, const Layer& layer, f64 localTi
                         std::vector<Mat4>& nodeWorld, std::vector<f32>& nodeOpacity) {
     if (!has_part_effects(layer)) return;
     std::vector<u32> parts;
-    part_nodes(asset, parts);
+    part_nodes(asset, parts, true);
     if (parts.empty()) return;
     const EffectTypeId move = effect_type_id(effect_keys::kPart3DTransform);
     const EffectTypeId hide = effect_type_id(effect_keys::kPart3DHide);
@@ -114,12 +122,20 @@ void apply_part_effects(const SceneAsset& asset, const Layer& layer, f64 localTi
                 c[3 + axis] = std::clamp(param_at(layer, effect, 4 + axis, localTime, 0.0f, false), -360000.0f, 360000.0f);
             }
             const f32 scale = std::clamp(param_at(layer, effect, 7, localTime, 100.0f, false), 0.0f, 100000.0f) * 0.01f;
-            c[6] = c[7] = c[8] = scale;
-            bool neutral = std::fabs(scale - 1.0f) < 1e-7f;
+            for (u32 axis = 0; axis < 3; ++axis)
+                c[6 + axis] = scale * std::clamp(param_at(layer, effect, 11 + axis, localTime, 100.f, false), 0.f, 100000.f) * .01f;
+            bool neutral = true;
+            for (u32 axis = 0; axis < 3; ++axis) neutral = neutral && std::fabs(c[6 + axis] - 1.f) < 1e-7f;
             for (u32 k = 0; k < 6; ++k) neutral = neutral && std::fabs(c[k]) < 1e-7f;
             if (neutral) continue;
             const i32 mesh = asset.nodes[node].mesh;
-            const Vec3 pivot = nodeWorld[node].transform_point(asset.meshes[static_cast<usize>(mesh)].bounds.center());
+            Vec3 center{};
+            if (mesh >= 0 && static_cast<usize>(mesh) < asset.meshes.size()) center = asset.meshes[static_cast<usize>(mesh)].bounds.center();
+            const Vec3 offset{
+                std::clamp(param_at(layer, effect, 8, localTime, 0.f, false), -100000.f, 100000.f) * .01f * size,
+                std::clamp(param_at(layer, effect, 9, localTime, 0.f, false), -100000.f, 100000.f) * .01f * size,
+                std::clamp(param_at(layer, effect, 10, localTime, 0.f, false), -100000.f, 100000.f) * .01f * size};
+            const Vec3 pivot = nodeWorld[node].transform_point(center) + offset;
             move_subtree(asset, node, shape3d_part_matrix(c, pivot), nodeWorld);
         } else if (effect.type == hide) {
             const f32 amount = std::clamp(param_at(layer, effect, 2, localTime, 100.0f, false) * 0.01f, 0.0f, 1.0f);
@@ -130,6 +146,7 @@ void apply_part_effects(const SceneAsset& asset, const Layer& layer, f64 localTi
             const bool invert = param_at(layer, effect, 3, localTime, 0.0f, true) >= 0.5f;
             if (nodeOpacity.size() < asset.nodes.size()) nodeOpacity.resize(asset.nodes.size(), 1.0f);
             for (usize i = 0; i < parts.size(); ++i) {
+                if (asset.nodes[parts[i]].mesh < 0) continue;
                 const i64 oneBased = static_cast<i64>(i) + 1;
                 const bool inRange = oneBased >= first && oneBased <= last;
                 if (inRange == invert) continue;

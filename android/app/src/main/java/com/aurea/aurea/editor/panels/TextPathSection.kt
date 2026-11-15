@@ -51,7 +51,7 @@ internal fun TextPathSection(env: PanelEnv) {
     val store = env.store
     val tp = store.textPathState ?: return
     // Camadas vetoriais da composição (candidatas a guia).
-    val candidates = store.layers.filter { row ->
+    val candidates = store.editingLayers.filter { row ->
         row.kind == LayerType.Shape.kind && row.id != store.primary &&
             store.queryDetail(row.id)?.let { (it.shapeTypePoints and 0xFFFF) == VECTOR_SHAPE_TYPE } == true
     }

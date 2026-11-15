@@ -51,9 +51,8 @@ import com.aurea.aurea.ui.theme.tocavel
 //   Uma parte ›     — lista de partes → parte aberta: a imagem DELA (vale por cima da
 //                     do modelo inteiro), Repetir e Esconder esta parte.
 //
-// A aba Mover por parte (posição/giro/escala) SAIU: o dono recusou — o palco e a
-// timeline do editor já movem o modelo. Projetos antigos com "Animar parte 3D"
-// continuam iguais e o efeito segue na lista de Efeitos (nada se perde).
+// A aba Partes também usa este editor com animationOnly: posição, rotação,
+// escala e pivô de malhas e juntas. A aba Textura mantém os índices de malha.
 //
 // Por baixo, os mesmos efeitos do motor (`aurea.3d.part_texture`, `part_hide`,
 // parâmetros fixos em Object3DEffects.cpp): o primeiro ajuste cria o efeito.
@@ -62,6 +61,7 @@ import com.aurea.aurea.ui.theme.tocavel
 
 private const val PART_TEXTURE = "aurea.3d.part_texture"
 private const val PART_HIDE = "aurea.3d.part_hide"
+private const val PART_TRANSFORM = "aurea.3d.part_transform"
 
 /** "Todas as partes" (parâmetro 2) ligado: é a textura do modelo inteiro. */
 private fun EditorStore.coversAll(e: LayerEffect): Boolean =
@@ -196,7 +196,7 @@ private fun TextureParamRow(
 
 
 @Composable
-internal fun Parts3DEditor(env: PanelEnv, names: List<String>) {
+internal fun Parts3DEditor(env: PanelEnv, names: List<String>, animationOnly: Boolean = false) {
     val store = env.store
     var open by rememberSaveable(store.primary) { mutableStateOf<Int?>(null) }
     val part = open
@@ -204,7 +204,7 @@ internal fun Parts3DEditor(env: PanelEnv, names: List<String>) {
         PartsList(store, names) { open = it }
         return
     }
-    PartOpen(env, part, names[part].ifBlank { stringResource(R.string.fx3d_part_n, part + 1) }) { open = null }
+    PartOpen(env, part, names[part].ifBlank { stringResource(R.string.fx3d_part_n, part + 1) }, animationOnly) { open = null }
 }
 
 /** A lista: uma linha de 48 dp por parte, com o que a parte tem (textura própria, escondida). */
@@ -241,7 +241,7 @@ private fun PartsList(store: EditorStore, names: List<String>, onOpen: (Int) -> 
 
 /** A parte aberta: ‹ nome; a textura dela e Esconder esta parte. */
 @Composable
-private fun PartOpen(env: PanelEnv, part: Int, name: String, onBack: () -> Unit) {
+private fun PartOpen(env: PanelEnv, part: Int, name: String, animationOnly: Boolean, onBack: () -> Unit) {
     val store = env.store
     val backLabel = stringResource(R.string.fn_part_back)
     Row(Modifier.fillMaxWidth().height(48.dp).testTag("panel3d.part.open"), verticalAlignment = Alignment.CenterVertically) {
@@ -250,6 +250,28 @@ private fun PartOpen(env: PanelEnv, part: Int, name: String, onBack: () -> Unit)
         Text(name, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
             style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W700, color = AureaColors.Text)))
     }
+    val transform = store.partEffect(PART_TRANSFORM, part)
+    if (transform == null) {
+        PanelItemRow(CupertinoGlyph.CubeBox, stringResource(R.string.fx3d_name_part_transform), "panel3d.part.animate") {
+            store.ensurePartEffect(PART_TRANSFORM, part)
+        }
+    } else {
+        KitTitle(stringResource(R.string.fx3d_name_part_transform))
+        store.effectParams[transform.effectId].orEmpty().drop(1).forEach { parameter ->
+            val axis = "XYZ"[(parameter.index - 1).mod(3)].toString()
+            val label = when (parameter.index) {
+                in 1..3 -> stringResource(R.string.part_position_axis, axis)
+                in 4..6 -> stringResource(R.string.edt_rotation_axis, axis)
+                7 -> stringResource(R.string.fxl_scale)
+                in 8..10 -> stringResource(R.string.part_pivot_axis, "XYZ"[parameter.index - 8].toString())
+                else -> stringResource(R.string.part_scale_axis, "XYZ"[parameter.index - 11].toString())
+            }
+            TextureParamRow(env, transform, parameter, label, parameter.unit,
+                if (parameter.index in 4..6) 1f else .5f, 1,
+                parameter.defaultValue.getOrElse(0) { 0f }, "panel3d.part.transform.${parameter.index}", true, "animar parte 3D")
+        }
+    }
+    if (animationOnly) return
     val fx = store.partEffect(PART_TEXTURE, part)
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) store.ensurePartEffect(PART_TEXTURE, part)?.let { store.setEffectImage(uri, it) }

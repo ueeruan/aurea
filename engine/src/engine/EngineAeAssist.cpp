@@ -85,6 +85,7 @@ Result<u64> Engine::audio_to_keyframes(u64 layerId, const char* name) noexcept {
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         drain_commands_locked();
+        InlineEditScope inlineScope(*this, layerId, true);
         const Composition* comp = project_ ? current_composition() : nullptr;
         if (!comp) return Status{Errc::InvalidState, "nenhum projeto aberto"};
         fps = comp->fps();
@@ -102,7 +103,7 @@ Result<u64> Engine::audio_to_keyframes(u64 layerId, const char* name) noexcept {
         if (last - first > kMaxAudioKeyFrames)
             return Status{Errc::OutOfMemory, "trecho grande demais para converter o audio em keyframes; reduza a area de trabalho"};
         if (layerId != 0) {
-            single = audio::build_layer_snapshot(*comp, *project_, layerId, &blocks, &Engine::audio_path_resolver, this);
+            single = audio::build_layer_snapshot(*comp, *project_, layerId, &blocks, &Engine::audio_path_resolver, this, &effectRegistry_);
             if (!single) return Status{Errc::OutOfMemory, "retrato do audio"};
             if (!single->audible()) return Status{Errc::InvalidArgument, "camada sem som"};
         } else {

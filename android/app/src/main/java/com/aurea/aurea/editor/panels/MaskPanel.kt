@@ -93,7 +93,7 @@ internal fun MaskPanel(env: PanelEnv) {
     var openTab by rememberSaveable { mutableStateOf(MT_SHAPE) }
     var edgeParam by rememberSaveable(editId) { mutableIntStateOf(0) }
     val m = st?.find(editId)
-    val isVideo = store.layers.firstOrNull { it.id == store.primary }?.kind == LayerType.Video.kind
+    val isVideo = store.editingLayers.firstOrNull { it.id == store.primary }?.kind == LayerType.Video.kind
     val tab = when {
         m == null -> listTab
         openTab == MT_FOLLOW && !isVideo -> MT_SHAPE
@@ -162,7 +162,7 @@ internal fun MaskPanel(env: PanelEnv) {
         add(PanelTab(MT_EDGE, stringResource(R.string.panel_mask_edge), glyph = CupertinoGlyph.Drop))
         if (isVideo) add(PanelTab(MT_FOLLOW, stringResource(R.string.panel_mask_follow), glyph = CupertinoGlyph.CameraViewfinder))
     }
-    val pathKeys = store.primary?.let { id -> store.keyframes[id].orEmpty().filter { it.property == TrackProperty.MASK_PATH && it.effectIndex == m.id } }.orEmpty()
+    val pathKeys = store.primary?.let { id -> store.keysForLayer(id).orEmpty().filter { it.property == TrackProperty.MASK_PATH && it.effectIndex == m.id } }.orEmpty()
     val edgeKeys = store.primaryKeys().filter { it.property == TrackProperty.MASK_PARAM && it.effectIndex == m.id && it.paramIndex == edgeParam }
     val local = store.detail?.localPlayhead
     val edge = tab == MT_EDGE
@@ -462,7 +462,7 @@ private fun TrackMatteTab(store: EditorStore) {
     val self = store.primary ?: return
     val matte = tm?.getOrNull(0) ?: 0L
     val mode = (tm?.getOrNull(1) ?: 0L).toInt()
-    val rows = store.layers
+    val rows = store.editingLayers
     val me = rows.firstOrNull { it.id == self }
     val candidates = rows.filter { it.id != self && it.kind != LayerType.Audio.kind && it.kind != LayerType.Camera.kind && it.kind != LayerType.Light.kind }
     PanelSection(stringResource(R.string.panel_1_recortar_pelo), CupertinoGlyph.Crop, "matte.sec.mode") {

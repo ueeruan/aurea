@@ -6,6 +6,7 @@ namespace aurea {
 Result<u64> Engine::create_grid(const u64* ids,u32 count) noexcept {
     if(!ids||!count||count>512)return Status{Errc::InvalidArgument};
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, (count == 1 && ids ? ids[0] : 0), true);
     auto* comp=project_?current_composition():nullptr;if(!comp)return Status{Errc::InvalidState};
     if(comp->layers().count()>=kMaxLayerCount)return Status{Errc::OutOfRange};
     std::vector<LayerId> members;
@@ -19,7 +20,7 @@ Result<u64> Engine::create_grid(const u64* ids,u32 count) noexcept {
     root->transform.position={comp->width()*.5f,comp->height()*.5f,0};root->threeD=true;
     EffectInstance fx;fx.id=root->alloc_effect_id();fx.type=effect_type_id(grid::kController);
     initialize_instance(fx,*effectRegistry_.params(fx.type));root->effects.push_back(std::move(fx));
-    const auto now=playback_.current();
+    const auto now=editing_frame_locked();
     for(u32 i=0;i<members.size();++i){
         auto* l=comp->layer(members[i]);
         const auto world=layer_world_matrix(*comp,*l,now);
@@ -51,6 +52,7 @@ Layer* grid_controller_layer(Composition* comp,u64 gridId) noexcept {
 
 bool Engine::is_grid_controller(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     return project_&&grid_controller_layer(current_composition(),layerId)!=nullptr;
 }
 

@@ -84,6 +84,7 @@ u32 Engine::decoration_add(u64 layerId, u32 role) noexcept {
     if (role != kEffectRoleBorder && role != kEffectRoleShadow) return kInvalidIndex;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked) return kInvalidIndex;
@@ -152,6 +153,7 @@ u32 Engine::decoration_add(u64 layerId, u32 role) noexcept {
 bool Engine::decoration_move(u64 layerId, u32 effectId, u32 slot) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked) return false;
@@ -176,13 +178,14 @@ bool Engine::decoration_set_shadow_offset(u64 layerId, u32 effectId, f32 dx, f32
     if (!std::isfinite(dx) || !std::isfinite(dy)) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked) return false;
     EffectInstance* e = nullptr;
     for (EffectInstance& item : l->effects) if (item.id == effectId) e = &item;
     if (!e || e->type != effect_type_id(effect_keys::kDropShadow)) return false;
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     const f32 distance = std::min(std::hypot(dx, dy), 5000.0f);
     history_.before_mutation(*comp, project_->timeline().current(), "posição da sombra");
     // Sem deslocamento a direção fica a de antes (girar para 0° mudaria o
@@ -199,6 +202,7 @@ bool Engine::decoration_shadow_offset(u64 layerId, u32 effectId, f32& dx, f32& d
     dx = dy = 0.0f;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return false;
@@ -207,7 +211,7 @@ bool Engine::decoration_shadow_offset(u64 layerId, u32 effectId, f32& dx, f32& d
     if (!e || e->type != effect_type_id(effect_keys::kDropShadow)) return false;
     const ParameterRegistry* params = effectRegistry_.params(e->type);
     if (!params || params->count() <= kShadowDistance) return false;
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     const f32 dir = evaluate_param(l->tracks, *e, kShadowDirection, params->at(kShadowDirection), local).v[0] * kDeg2Rad;
     const f32 dist = evaluate_param(l->tracks, *e, kShadowDistance, params->at(kShadowDistance), local).v[0];
     if (!std::isfinite(dir) || !std::isfinite(dist)) return false;
@@ -223,11 +227,12 @@ u32 Engine::query_shape_fill(u64 layerId, f32* out, u32 capacity) noexcept {
     if (!out || capacity < kShapeFillFloats) return 0;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return 0;
     std::fill(out, out + kShapeFillFloats, 0.0f);
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     const shape_fill::Eval e = shape_fill::evaluate(*l, static_cast<f64>(local.value));
     out[0] = e.kind;
     out[1] = e.type;
@@ -249,6 +254,7 @@ bool Engine::set_shape_fill_mode(u64 layerId, u32 mode) noexcept {
     if (mode > 2) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!is_sdf_shape(l) || l->locked) return false;
@@ -260,7 +266,7 @@ bool Engine::set_shape_fill_mode(u64 layerId, u32 mode) noexcept {
     if (mode == 2 && s.fillKind != 1) {
         // Degradê novo parte da cor atual: início = a cor; fim = preto ou
         // branco (o que contrasta), com o mesmo alfa.
-        const FrameIndex local = l->local_time(playback_.current());
+        const FrameIndex local = l->local_time(editing_frame_locked());
         const Vec4 c = shape_fill::evaluate(*l, static_cast<f64>(local.value)).color;
         const bool light = 0.2126f * c.x + 0.7152f * c.y + 0.0722f * c.z > 0.5f;
         s.gradColor0 = c;
@@ -278,6 +284,7 @@ bool Engine::set_shape_gradient_type(u64 layerId, u32 type) noexcept {
     if (type > 2) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!is_sdf_shape(l) || l->locked) return false;
@@ -307,11 +314,12 @@ bool Engine::set_shape_fill_value(u64 layerId, u32 group, const f32* values, u32
     for (u32 i = 0; i < count; ++i) if (!std::isfinite(values[i])) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!is_sdf_shape(l) || l->locked) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "cor do preenchimento");
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     const u32 first = shape_fill::group_first(group);
     for (u32 i = 0; i < count; ++i) put_fill_component(*l, first + i, values[i], local);
     bump_model_revision_locked();
@@ -324,10 +332,11 @@ bool Engine::toggle_shape_fill_key(u64 layerId, u32 group) noexcept {
     if (group >= shape_fill::kGroupCount) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!is_sdf_shape(l) || l->locked) return false;
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     const u32 first = shape_fill::group_first(group), n = shape_fill::group_size(group);
     bool keyed = false;
     for (u32 p = first; p < first + n; ++p) {
@@ -364,9 +373,10 @@ u32 Engine::query_snap_targets(u64 layerId, u32 axis, f32* values, f32* guides, 
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         drain_commands_locked();
+        InlineEditScope inlineScope(*this, layerId);
         Composition* comp = project_ ? current_composition() : nullptr;
         if (!comp || !comp->layer(LayerId::unpack(layerId))) return 0;
-        const FrameIndex now = playback_.current();
+        const FrameIndex now = editing_frame_locked();
         compW = static_cast<f32>(comp->width());
         compH = static_cast<f32>(comp->height());
         const OrderedIds<LayerId>& order = comp->order();

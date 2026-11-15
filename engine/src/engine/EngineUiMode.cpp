@@ -217,6 +217,7 @@ bool Engine::move_clip_to_overlay(u64 layerId, i64 atFrame) noexcept {
     if (atFrame >= limit) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return false;
     const LayerId id = LayerId::unpack(layerId);
@@ -264,6 +265,7 @@ bool Engine::move_clip_to_overlay(u64 layerId, i64 atFrame) noexcept {
 bool Engine::move_clip_to_main_track(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return false;
     const LayerId id = LayerId::unpack(layerId);

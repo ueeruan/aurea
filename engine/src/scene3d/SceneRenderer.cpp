@@ -1317,7 +1317,8 @@ void SceneRenderer::collect_pipelines(std::vector<PipelineKey>& out) const {
 
 bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& frame, u32 width, u32 height,
                           u64 frameNumber, FGTexture& outColor, const std::vector<ScenePlane>* planes,
-                          const SceneParticleDraw* particles, u32 particleCount, FGTexture* outDepth, FGTexture* outExposureHdr) noexcept {
+                          const SceneParticleDraw* particles, u32 particleCount, FGTexture* outDepth, FGTexture* outExposureHdr,
+                          Vec2 previewJitterPixels) noexcept {
     if (outDepth) *outDepth = FGTexture{};
     if (outExposureHdr) *outExposureHdr = FGTexture{};
     if (frameNumber != statsFrame_) {
@@ -1407,7 +1408,10 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     }
 
     const f32 aspect = static_cast<f32>(width) / static_cast<f32>(height);
-    const Mat4 proj = frame.camera.imageTransform * camera_projection(frame.camera, aspect);
+    Mat4 proj = frame.camera.imageTransform * camera_projection(frame.camera, aspect);
+    if (previewJitterPixels.x != 0.f || previewJitterPixels.y != 0.f)
+        proj = Mat4::translation(Vec3{2.f * previewJitterPixels.x / width,
+            2.f * previewJitterPixels.y / height, 0.f}) * proj;
     const Mat4 viewProj = proj * frame.camera.view;
 
     // --- Cabeçalho comum a todos os desenhos do frame ---------------------------
@@ -2552,7 +2556,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     f32 farthest = 0.0f;
     for (const Draw& d : depthPrepass) farthest = std::max(farthest, std::fabs(d.viewDepth));
     if ((aoOn || fogOn || ssrOn) && !depthPrepass.empty()) {
-        const u32 aw = std::max(1u, width / 2), ah = std::max(1u, height / 2);
+        const u32 divisor = lodHysteresis_ ? screenEffectDiv_ : 2u;
+        const u32 aw = std::max(1u, width / divisor), ah = std::max(1u, height / divisor);
         auto depthStatic = shaders_->pipeline(ao_depth_key(false));
         auto depthSkinned = shaders_->pipeline(ao_depth_key(true));
         if (ssrOn) {
@@ -3113,14 +3118,15 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         if (!ssrPipe.ok() || !ssrApply.ok() || !rig::inverse(proj, invProj)) {
             mark_incomplete(__FILE__, __LINE__);
         } else {
-            const u32 sw = std::max(1u, width / 2), sh = std::max(1u, height / 2);
             const bool exportQuality = !lodHysteresis_;
+            const u32 divisor = exportQuality ? 2u : screenEffectDiv_;
+            const u32 sw = std::max(1u, width / divisor), sh = std::max(1u, height / divisor);
             struct SsrParams { Mat4 proj, invProj; Vec4 texel, cfg, holdout; } sp{};
             sp.proj = proj;
             sp.invProj = invProj;
             sp.texel = Vec4{1.0f / static_cast<f32>(sw), 1.0f / static_cast<f32>(sh), static_cast<f32>(sw), static_cast<f32>(sh)};
             // Passos; espessura 3% da profundidade; alcance 1,5× a profundidade; força.
-            sp.cfg = Vec4{exportQuality ? 48.0f : 24.0f, 0.03f, 1.5f, 1.0f};
+            sp.cfg = Vec4{exportQuality ? 48.0f : static_cast<f32>(reflectionSteps_), 0.03f, 1.5f, 1.0f};
             TextureDesc sd;
             sd.width = sw;
             sd.height = sh;
@@ -3236,8 +3242,9 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         if (!volPipe.ok() || !applyPipe.ok() || !rig::inverse(viewProj, worldFromClip)) {
             mark_incomplete(__FILE__, __LINE__);
         } else {
-            const u32 vw = std::max(1u, width / 2), vh = std::max(1u, height / 2);
             const bool exportQuality = !lodHysteresis_;
+            const u32 divisor = exportQuality ? 2u : screenEffectDiv_;
+            const u32 vw = std::max(1u, width / divisor), vh = std::max(1u, height / divisor);
             // O sol: a direcional com sombra (os feixes); sem ela, a primeira direcional.
             i32 sunIndex = shadowLight;
             for (u32 i = 0; sunIndex < 0 && i < frame.lights.size() && i < 4; ++i)
@@ -3253,7 +3260,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 vp.sunColor = Vec4{sl.color * sl.intensity, frame.post.fogRays};
             }
             vp.fog = Vec4{frame.post.fogColor * std::max(frame.environment.intensity, 0.0f), frame.post.fogDensity};
-            vp.cfg = Vec4{0.6f, shadowBiasDepth + 1e-4f, 1.0f / static_cast<f32>(mapSize), exportQuality ? 40.0f : 20.0f};
+            vp.cfg = Vec4{0.6f, shadowBiasDepth + 1e-4f, 1.0f / static_cast<f32>(mapSize),
+                         exportQuality ? 40.0f : static_cast<f32>(volumetricSteps_)};
             TextureDesc vd;
             vd.width = vw;
             vd.height = vh;

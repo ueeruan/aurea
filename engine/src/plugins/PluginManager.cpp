@@ -60,6 +60,7 @@ struct Prepared {
     std::vector<CompiledStackStep> stack;
     PluginImages images;   ///< 0.4.6: as "textures" decodificadas, na ordem do manifesto
     std::string frameSource;   ///< formato 3: o texto do frameScript
+    std::shared_ptr<const AudioProgram> audioProgram;
 };
 
 u64 fnv64(const void* data, usize n, u64 h = 1469598103934665603ull) noexcept {
@@ -163,6 +164,13 @@ bool prepare(const fs::path& root, const EffectRegistry& registry, Prepared& out
             }
             out.images.push_back(std::move(img));
         }
+    } else if (m.kind == Kind::Audio) {
+        auto program = prepare_audio_program(m.audioGraph, utf8(root));
+        if (!program.ok()) {
+            fail = {program.code(), "audio", "audio graph or impulse exceeds its admission limits"};
+            return false;
+        }
+        out.audioProgram = std::move(*program);
     } else if (m.kind == Kind::Stack) {
         if (!compile_stack(m, registry, out.stack, error)) {
             fail = {Errc::InvalidArgument, "stack", error};
@@ -252,6 +260,7 @@ PluginInfo info_of(const Manifest& m, const fs::path& dir) {
 /// O efeito do plugin (os ids de shader já registrados, se for "shader").
 std::unique_ptr<Effect> make_effect(const Prepared& p, const std::vector<ShaderId>& shaders) {
     if (p.manifest.kind == Kind::Shader) return make_shader_effect(p.manifest, shaders, p.images, p.frameSource);
+    if (p.manifest.kind == Kind::Audio) return make_audio_effect(p.manifest, p.audioProgram);
     return make_stack_effect(p.manifest, p.stack);
 }
 
@@ -612,7 +621,31 @@ Result<std::string> PluginManager::install(const std::string& path, const Instal
 
     // Quadro de teste: o efeito sozinho, com os padrões, em 256x256.
     f32 testMs = -1.0f;
-    if (hooks.testRender && m.kind != Kind::Panel) {
+    if (m.kind == Kind::Audio) {
+        AudioProcessor processor;
+        const auto status = processor.prepare(prepared.audioProgram);
+        if (!status.ok()) { dropShaders(); return reject(status.code(), "audio state admission failed"); }
+        std::vector<f32> input(kAudioMaxBlockFrames * kAudioChannels, .01f), output(input.size());
+        u32 warmFrames = 0;
+        for (const auto& impulse : prepared.audioProgram->impulses) warmFrames = std::max(warmFrames, impulse->frames);
+        for (u32 frame = 0; frame < warmFrames; frame += kAudioMaxBlockFrames) {
+            const auto warmed = processor.process_block(input.data(), output.data(), kAudioMaxBlockFrames,
+                kAudioSampleRate, kAudioChannels, prepared.audioProgram->graph->defaults);
+            if (!warmed.ok()) { dropShaders(); return reject(warmed.code(), "audio graph warmup failed"); }
+        }
+        u64 elapsed = 0;
+        for (u32 block = 0; block < 8; ++block) {
+            const u64 start = monotonic_ns();
+            const auto processed = processor.process_block(input.data(), output.data(), kAudioMaxBlockFrames,
+                kAudioSampleRate, kAudioChannels, prepared.audioProgram->graph->defaults);
+            elapsed += monotonic_ns() - start;
+            if (!processed.ok()) { dropShaders(); return reject(processed.code(), "audio graph failed its PCM admission test"); }
+        }
+        testMs = static_cast<f32>(elapsed / 8e6);
+        constexpr f32 budgetMs = 1000.f * kAudioMaxBlockFrames / kAudioSampleRate * .5f;
+        if (testMs > budgetMs) { dropShaders(); return reject(Errc::BudgetExceeded, "audio CPU admission exceeds 50 percent of real time"); }
+    }
+    if (hooks.testRender && m.kind != Kind::Panel && m.kind != Kind::Audio) {
         EffectRegistry probe;
         if (!probe.add(make_effect(prepared, shaders)).ok()) { dropShaders(); return reject(Errc::InvalidState, "efeito de teste nao registrou"); }
         std::string error;

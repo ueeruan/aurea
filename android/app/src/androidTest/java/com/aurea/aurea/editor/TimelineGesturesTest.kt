@@ -52,20 +52,22 @@ class TimelineGesturesTest {
         val id = store.layers.single().id
         val end = store.layers.single().endFrame
         compose.runOnIdle { store.select(id) }
-        // Omega chrome (área 02, P0-3): 3D e desfoque de movimento saíram da barra
-        // da camada e moram no ⋮ (menu ancorado). O 3D alterna sem fechar o menu.
-        compose.onNodeWithTag("layer.menu").performClick()
-        compose.onNodeWithTag("layer.menu.threeD").performScrollTo().performClick()
+        // Funções (13/11/2026): o ⋮ ficou só com ações da camada. 3D e desfoque de
+        // movimento são botões da barra da camada: o 3D alterna no toque; o desfoque
+        // abre o painel dele no toque e alterna direto ao segurar.
+        compose.onNodeWithTag("trial.layer.3d").performClick()
         compose.waitUntil(5000) { (store.detail?.flags?.and(com.aurea.aurea.engine.PodLayout.FLAG_THREE_D) ?: 0) != 0 }
-        compose.onNodeWithTag("layer.menu.threeD").performScrollTo().performClick()
+        compose.onNodeWithTag("trial.layer.3d").performClick()
         compose.waitUntil(5000) { store.detail?.flags?.and(com.aurea.aurea.engine.PodLayout.FLAG_THREE_D) == 0 }
-        compose.onNodeWithTag("layer.menu.motionBlur").performScrollTo().performClick()
+        compose.onNodeWithTag("trial.layer.motionBlur").performTouchInput { longClick() }
         compose.waitUntil(5000) { store.detail?.motionBlur == true && store.compMotionBlur }
-        compose.onNodeWithTag("layer.menu").performClick()
-        compose.onNodeWithTag("layer.menu.motionBlur").performScrollTo().performClick()
+        compose.onNodeWithTag("trial.layer.motionBlur").performTouchInput { longClick() }
         compose.waitUntil(5000) { store.detail?.motionBlur == false }
         // Omega painel: a máscara mora em Efeitos; o painel da camada mostra a grade da forma.
         compose.onNodeWithTag("layer.panel.effects").assertExists()
+        // O toque no desfoque da barra abre o painel do desfoque (o resto do teste usa o store).
+        compose.onNodeWithTag("trial.layer.motionBlur").performClick()
+        compose.onNodeWithTag("motionblur.panel").assertExists()
         compose.runOnIdle { store.seek(end + 9000); assertEquals(end, store.playhead) }
         compose.waitUntil(5000) { store.playhead == end }
         compose.runOnIdle { store.scrubStart(end + 90); assertEquals(end, store.playhead); store.scrubTo(-10); assertEquals(0, store.playhead); store.scrubEnd() }

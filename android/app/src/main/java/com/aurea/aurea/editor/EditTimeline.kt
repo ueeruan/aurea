@@ -2,6 +2,7 @@ package com.aurea.aurea.editor
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
@@ -21,6 +22,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
@@ -97,16 +100,16 @@ import kotlin.math.roundToInt
 
 private val ToolH = 44.dp
 private val RulerH = 26.dp
-private val HeadW = 98.dp
-private val LaneH = 44.dp
+private val HeadW = 44.dp
+private val LaneH = 56.dp
 private val CompactLaneH = 34.dp
-private val LaneGap = 1.dp
+private val LaneGap = 6.dp
 private val EdgeW = 13.dp
 
 private object EditPalette {
-    val Lane = Color(0xFF17191E)
-    val Head = Color(0xFF20232A)
-    val RulerBg = Color(0xFF101114)
+    val Lane = Color(0xFF0D0F12)
+    val Head = Color(0xFF08090B)
+    val RulerBg = Color(0xFF08090B)
     val Tick = Color(0xFF5B606B)
     val Separator = Color(0xFF3A3E47)
     val Video = Color(0xFF1F6F8B)
@@ -119,7 +122,7 @@ private object EditPalette {
     val AudioWave = Color(0xFF9FE08A)
     val LinkedAudio = Color(0xFF17465A)
     val LinkedWave = Color(0xFF67C4F2)
-    val Playhead = Color(0xFF4EA8F2)
+    val Playhead = Color(0xFFF4F5F7)
     val Selected = Color.White
     val Range = Color(0x334EA8F2)
     val Snap = Color(0xFFFFD54A)
@@ -257,7 +260,15 @@ internal fun EditTimeline(
     var tool by remember { mutableStateOf(EditTool.Select) }
     var snap by remember { mutableStateOf(true) }
     val timelineLabel = stringResource(R.string.edit_timeline)
-    val data = store.editTimeline
+    val rawData = store.editTimeline
+    val data = remember(rawData, store.layers) {
+        rawData?.let { raw ->
+            val used = store.layers.mapTo(HashSet()) { it.trackId }
+            used.addAll(raw.linkedAudio.values)
+            val visible = raw.tracks.filter { it.id in used || it.target || it.locked || it.muted || it.solo }
+            EditTimelineData(visible, raw.linkedAudio, raw.markIn, raw.markOut)
+        }
+    }
 
     Column(modifier.background(EditColors.Canvas).testTag("edit.timeline").semantics { contentDescription = timelineLabel }) {
         EditToolStrip(store, tool, { tool = it }, snap, { snap = it }, onAddMedia)
@@ -673,7 +684,7 @@ private fun EditLanes(
     }
     // O canto da régua diz qual ferramenta está ativa: a barra é só de ícones.
     Box(Modifier.width(HeadW).height(RulerH).background(EditPalette.RulerBg), contentAlignment = Alignment.Center) {
-        Text(stringResource(tool.label), style = AureaType.of(11f, FontWeight.W600, color = AureaColors.Accent), maxLines = 1)
+        EditToolIcon(tool.icon, AureaColors.Muted, 16.dp)
     }
     if (store.layers.isEmpty()) {
         Text(
@@ -685,46 +696,38 @@ private fun EditLanes(
 
 @Composable
 private fun TrackHead(store: EditorStore, lane: EditTrackInfo) {
+    var menu by remember(lane.id) { mutableStateOf(false) }
     val targetLabel = stringResource(R.string.edit_track_target, lane.label)
-    Row(Modifier.fillMaxSize().padding(horizontal = 3.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-        Box(
-            Modifier.size(24.dp).clip(RoundedCornerShape(5.dp)).background(if (lane.target) Color(0xFF3B6EA8) else EditColors.DockLevel)
-                .testTag("edit.track.${lane.label}.target").semantics { contentDescription = targetLabel; role = Role.Switch; selected = lane.target }
-                .tocavel(shrink = 0.92f) { store.setEditTrackFlag(lane.id, 3, !lane.target) },
-            contentAlignment = Alignment.Center,
-        ) { Text(lane.label, style = AureaType.of(10f, FontWeight.W700, color = Color.White), maxLines = 1) }
-        HeadIcon(if (lane.locked) CupertinoGlyph.LockFill else CupertinoGlyph.LockOpen, lane.locked, stringResource(R.string.edit_track_lock), "edit.track.${lane.label}.lock") {
-            store.setEditTrackFlag(lane.id, 0, !lane.locked)
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(
+            Modifier.fillMaxSize().testTag("edit.track.${lane.label}.target")
+                .semantics { contentDescription = targetLabel; role = Role.Switch; selected = lane.target }
+                .combinedClickable(onClick = { store.setEditTrackFlag(lane.id, 3, !lane.target) }, onLongClick = { menu = true }),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(lane.label, style = AureaType.of(10f, FontWeight.W600,
+                color = if (lane.target) AureaColors.Accent else AureaColors.Muted))
+            if (lane.locked) CupertinoIcon(CupertinoGlyph.LockFill, 11.dp, AureaColors.Muted)
+            else if (lane.muted || lane.solo) Text(if (lane.solo) "S" else "M",
+                style = AureaType.of(9f, FontWeight.W600, color = AureaColors.Accent))
         }
-        if (lane.audio) {
-            HeadLetter("M", lane.muted, stringResource(R.string.edit_track_mute), "edit.track.${lane.label}.mute") { store.setEditTrackFlag(lane.id, 1, !lane.muted) }
-            HeadLetter("S", lane.solo, stringResource(R.string.edit_track_solo), "edit.track.${lane.label}.solo") { store.setEditTrackFlag(lane.id, 2, !lane.solo) }
-        } else {
-            HeadIcon(if (lane.muted) CupertinoGlyph.EyeSlash else CupertinoGlyph.Eye, lane.muted, stringResource(R.string.edit_track_visible), "edit.track.${lane.label}.visible") {
-                store.setEditTrackFlag(lane.id, 1, !lane.muted)
-            }
+        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            DropdownMenuItem(text = { Text(stringResource(R.string.edit_track_target, lane.label)) },
+                onClick = { menu = false; store.setEditTrackFlag(lane.id, 3, !lane.target) })
+            DropdownMenuItem(text = { Text(stringResource(R.string.edit_track_lock)) },
+                onClick = { menu = false; store.setEditTrackFlag(lane.id, 0, !lane.locked) },
+                modifier = Modifier.testTag("edit.track.${lane.label}.lock"))
+            DropdownMenuItem(text = { Text(stringResource(if (lane.audio) R.string.edit_track_mute else R.string.edit_track_visible)) },
+                onClick = { menu = false; store.setEditTrackFlag(lane.id, 1, !lane.muted) },
+                modifier = Modifier.testTag("edit.track.${lane.label}.${if (lane.audio) "mute" else "visible"}"))
+            if (lane.audio) DropdownMenuItem(text = { Text(stringResource(R.string.edit_track_solo)) },
+                onClick = { menu = false; store.setEditTrackFlag(lane.id, 2, !lane.solo) },
+                modifier = Modifier.testTag("edit.track.${lane.label}.solo"))
         }
     }
 }
 
-@Composable
-private fun HeadIcon(glyph: Char, on: Boolean, label: String, tag: String, onClick: () -> Unit) {
-    Box(
-        Modifier.size(22.dp).testTag(tag).semantics { contentDescription = label; role = Role.Switch; selected = on }.tocavel(shrink = 0.9f, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) { CupertinoIcon(glyph, 13.dp, if (on) AureaColors.Accent else AureaColors.Muted) }
-}
-
-@Composable
-private fun HeadLetter(letter: String, on: Boolean, label: String, tag: String, onClick: () -> Unit) {
-    Box(
-        Modifier.size(22.dp).clip(RoundedCornerShape(4.dp)).background(if (on) Color(0xFFB9472F) else Color.Transparent)
-            .testTag(tag).semantics { contentDescription = label; role = Role.Switch; selected = on }.tocavel(shrink = 0.9f, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) { Text(letter, style = AureaType.of(11f, FontWeight.W700, color = if (on) Color.White else AureaColors.Muted)) }
-}
-
-/** O alvo de acessibilidade de um clipe: não intercepta toque, só dá nome e ação ao leitor de tela. */
 @Composable
 private fun ClipTarget(store: EditorStore, clip: LayerRow, view: EditView, top: Float, heightPx: Float, headW: Float, rulerH: Float, viewportWidth: Float) {
     val selected = clip.id in store.selection

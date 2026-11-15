@@ -117,6 +117,8 @@ Engine::OmegaLayerState& Engine::omega_layer_state() noexcept {
 u32 Engine::query_layer_panel(u64 layerId, i64 frame) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId);
+    frame = inlineScope.map_frame(frame);
     const Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer || frame < 0 || frame >= kFrameLimit) return 0;
@@ -168,6 +170,9 @@ bool Engine::move_layer_to_playhead(u64 layerId, i64 frame, bool alignEnd) noexc
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         drain_commands_locked();
+        InlineEditScope inlineScope(*this, layerId, true);
+        frame = inlineScope.map_frame(frame);
+        target = frame;
         const Composition* comp = project_ ? current_composition() : nullptr;
         const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
         if (!layer || layer->locked) return false;
@@ -177,9 +182,8 @@ bool Engine::move_layer_to_playhead(u64 layerId, i64 frame, bool alignEnd) noexc
         // conta do "Fins no cabeçote" e do aparar fim do AUREA.
         if (alignEnd) target = std::max<i64>(0, frame - length);
         if (target == layer->start.value) return false;
+        return edit_clip_time_locked(layerId, 6, target, 0, 0, false, false, false);
     }
-    // Mover preserva duração, fonte e keyframes; o histórico é o da op 6.
-    return edit_clip_time(layerId, 6, target);
 }
 
 bool Engine::retime_layer_to_playhead(u64 layerId, u32 edge, i64 frame) noexcept {
@@ -188,6 +192,8 @@ bool Engine::retime_layer_to_playhead(u64 layerId, u32 edge, i64 frame) noexcept
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         drain_commands_locked();
+        InlineEditScope inlineScope(*this, layerId, true);
+        frame = inlineScope.map_frame(frame);
         const Composition* comp = project_ ? current_composition() : nullptr;
         const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
         if (!layer || layer->locked) return false;
@@ -210,6 +216,7 @@ bool Engine::set_layer_speed_baked(u64 layerId, f32 speed) noexcept {
     const f32 s = std::clamp(speed, kMinSpeed, kMaxSpeed);
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer || layer->locked) return false;

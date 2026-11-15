@@ -135,7 +135,7 @@ struct BorderShadowPanel: View {
     }
     private var borders: [EffectItem] { model.decorations.filter { $0.role == EffectItem.roleBorder } }
     private var shadow: EffectItem? { model.decorations.first { $0.role == EffectItem.roleShadow } }
-    private var layerKeys: [KeyframeItem] { model.keyframes[layerId] ?? [] }
+    private var layerKeys: [KeyframeItem] { model.keysForLayer(layerId) ?? [] }
 
     private func param(_ effect: UInt32, _ index: UInt32) -> EffectParamItem? { params[effect]?.first { $0.index == index } }
     private func scalar(_ effect: UInt32, _ index: UInt32, _ fallback: Float = 0) -> Float {

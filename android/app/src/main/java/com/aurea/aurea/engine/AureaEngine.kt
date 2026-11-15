@@ -478,6 +478,9 @@ class AureaEngine private constructor() {
      * bytes liberados.
      */
     fun trimMemory(level: Int): Long = nativeWork.run(0L) { if (nativeHandle != 0L) nativeTrimMemory(nativeHandle, level) else 0L }
+    fun reportMemoryHeadroom(available: Long, critical: Long, lowMemory: Boolean) = nativeWork.run(Unit) {
+        if (nativeHandle != 0L) nativeReportMemoryHeadroom(nativeHandle, available, critical, lowMemory)
+    }
 
     /**
      * Uso e orçamento de memória do motor por categoria (MemoryClass):
@@ -821,6 +824,12 @@ class AureaEngine private constructor() {
     // 0.5.3: o grupo aberto NA timeline (EngineGroupInline.cpp) — sem entrar nele.
     // Os ids de dentro só valem junto com o grupo; os quadros estão no tempo de fora.
     /** Linhas de dentro do grupo (mesmo formato de [queryLayers]; `reserved0` bit 0 = editável no lugar). */
+    fun setInlineEditTarget(group: Long, layer: Long): Boolean {
+        submitCommands()
+        return nativeSetInlineEditTarget(nativeHandle, group, layer)
+    }
+    private external fun nativeSetInlineEditTarget(handle: Long, group: Long, layer: Long): Boolean
+
     fun queryGroupLayers(group: Long, outBuffer: ByteBuffer, capacity: Int, nameBlob: ByteBuffer): Int =
         nativeQueryGroupLayers(nativeHandle, group, outBuffer, capacity, nameBlob, nameBlob.capacity())
     /** Move/estica camadas de dentro (tempo de fora), um passo de desfazer. 0 ou −Errc. */
@@ -1167,7 +1176,7 @@ class AureaEngine private constructor() {
     fun setEffectImage(layer: Long, effect: Int, path: String): Boolean = nativeWork.run(false) { nativeSetEffectImage(nativeHandle, layer, effect, path) }
     fun effectImageName(layer: Long, effect: Int): String = nativeEffectImageName(nativeHandle, layer, effect)
     /** Nome de cada parte da camada 3D (vazio = sem nome no arquivo). */
-    fun modelPartNames(layer: Long): Array<String> = nativeModelPartNames(nativeHandle, layer) ?: emptyArray()
+    fun modelPartNames(layer: Long, includeJoints: Boolean = false): Array<String> = nativeModelPartNames(nativeHandle, layer, includeJoints) ?: emptyArray()
     fun setTextFont(layer: Long, family: String, weight: Int, italic: Boolean, path: String): Boolean =
         nativeSetTextFont(nativeHandle, layer, family, weight, italic, path)
     fun textFont(layer: Long): String? = nativeTextFont(nativeHandle, layer)
@@ -2114,6 +2123,7 @@ class AureaEngine private constructor() {
     private external fun nativeSuspend(handle: Long)
     private external fun nativeResume(handle: Long)
     private external fun nativeTrimMemory(handle: Long, level: Int): Long
+    private external fun nativeReportMemoryHeadroom(handle: Long, available: Long, critical: Long, lowMemory: Boolean)
     private external fun nativeMemoryReport(handle: Long, out: LongArray): Int
     private external fun nativeInvalidate(handle: Long)
     private external fun nativeAttachSurface(handle: Long, surface: Surface, width: Int, height: Int): Boolean
@@ -2275,7 +2285,7 @@ class AureaEngine private constructor() {
     private external fun nativeAddPartEffect(handle: Long, layer: Long, type: Int, part: Int): Int
     private external fun nativeSetEffectImage(handle: Long, layer: Long, effect: Int, path: String): Boolean
     private external fun nativeEffectImageName(handle: Long, layer: Long, effect: Int): String
-    private external fun nativeModelPartNames(handle: Long, layer: Long): Array<String>?
+    private external fun nativeModelPartNames(handle: Long, layer: Long, includeJoints: Boolean): Array<String>?
     private external fun nativeSetTextFont(handle: Long, layer: Long, family: String, weight: Int, italic: Boolean, path: String): Boolean
     private external fun nativeSetTextStyle(handle: Long, layer: Long, v: FloatArray): Boolean
     private external fun nativeSetTextDynamic(handle: Long, layer: Long, v: DoubleArray): Boolean

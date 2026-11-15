@@ -57,6 +57,7 @@ bool Engine::stretch_layer_span(u64 layerId, i64 newStart, i64 newEnd) noexcept 
     if (newStart < 0 || newEnd <= 0 || newStart >= limit || newEnd >= limit) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer || layer->locked) return false;

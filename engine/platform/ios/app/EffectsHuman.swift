@@ -2586,6 +2586,7 @@ struct FxPluginInfo: Identifiable {
 }
 
 enum FxPluginTexts {
+    static func isAudio(_ type: UInt32) -> Bool { byType[type]?.kind == "audio" }
     private(set) static var plugins: [FxPluginInfo] = []
     private static var byType: [UInt32: FxPluginInfo] = [:]
     /// O idioma do app, na etiqueta do plugin.json ("pt-BR", "en", …).

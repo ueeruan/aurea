@@ -684,3 +684,30 @@ AUREA_TEST(HyperTurbo, CpuFsrIsSharperThanBilinearAndStaysInRange) {
     AUREA_CHECK_EQ(fsr[(8 * W * 2 + 4) * 3], 40);
     AUREA_CHECK_EQ(fsr[(8 * W * 2 + 60) * 3], 200);
 }
+
+AUREA_TEST(HyperAdaptive, CachedBenchmarkTimingsUseLiveMemoryAndThermalAdmission) {
+    DeviceProfile profile;
+    profile.measured = profile.abi64 = profile.vulkanFp16 = true;
+    profile.liteMsPerTile = 50.f; profile.turboMsPerFrame = 2.f;
+    refresh_profile_limits(profile, 4ull << 30, 0.f, false);
+    AUREA_CHECK(profile.defaultPath == Path::Max);
+    AUREA_CHECK_EQ(profile.tile, 128u);
+    refresh_profile_limits(profile, 1400ull << 20, 0.f, false);
+    AUREA_CHECK(profile.defaultPath == Path::Lite);
+    AUREA_CHECK_EQ(profile.tile, 96u);
+    refresh_profile_limits(profile, 300ull << 20, 1.f, false);
+    AUREA_CHECK(profile.defaultPath == Path::Turbo);
+    AUREA_CHECK_EQ(profile.tile, 64u);
+    AUREA_CHECK_EQ(profile.tileMargin, 12u);
+    AUREA_CHECK_EQ(profile.freeRamBytes, 300ull << 20);
+    refresh_profile_limits(profile, 4ull << 30, 0.f, true);
+    AUREA_CHECK(profile.defaultPath == Path::Turbo);
+    AUREA_CHECK_EQ(profile.liteMsPerTile, 50.f);
+    AUREA_CHECK_EQ(profile.turboMsPerFrame, 2.f);
+    Recipe explicitRecipe; explicitRecipe.path = Path::Max;
+    AUREA_CHECK(effective_path(explicitRecipe, profile) == Path::Max);
+    profile.abi64 = false;
+    refresh_profile_limits(profile, 4ull << 30, 0.f, false);
+    AUREA_CHECK_EQ(profile.tile, 64u);
+    AUREA_CHECK_EQ(profile.tileMargin, 8u);
+}

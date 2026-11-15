@@ -333,7 +333,7 @@ void read_effect(ByteReader& r, EffectInstance& e) {
     }
     const u32 paramCount = r.u32v();
     // The full-body Headbop rig stores 260 bounded parameter slots.
-    if (paramCount > 512) { r.skip_to_end(); return; }
+    if (paramCount > 1024) { r.skip_to_end(); return; }
     e.params.resize(paramCount);
     for (ParamSlot& s : e.params) {
         for (f32& f : s.constant.v) f = r.f32v();
@@ -346,7 +346,8 @@ void read_effect(ByteReader& r, EffectInstance& e) {
     // v76: o "Trocar textura 3D" ganhou deslocamento, giro e rolar NO FIM
     // (Object3DEffects.cpp). A instância de um projeto antigo recebe os
     // padrões (zeros): desenha igual e o painel 3D mostra as réguas novas.
-    if (e.type == effect_type_id(effect_keys::kPart3DTexture) && e.params.size() >= 4) {
+    if ((e.type == effect_type_id(effect_keys::kPart3DTexture) && e.params.size() >= 4)
+        || (e.type == effect_type_id(effect_keys::kPart3DTransform) && e.params.size() >= 8)) {
         if (const ParameterRegistry* specs = expr::builtin_effects().params(e.type); specs && e.params.size() < specs->count()) {
             EffectInstance defaults;
             initialize_instance(defaults, *specs);

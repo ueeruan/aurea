@@ -147,7 +147,7 @@ struct ColorFillPanel: View {
 
     /// As trilhas da cor de preenchimento (ShapeParam 32..35).
     private var colorTracks: [[KeyframeItem]] {
-        let keys = model.keyframes[id] ?? []
+        let keys = model.keysForLayer(id) ?? []
         return (UInt32(32)...UInt32(35)).map { param in
             keys.filter { $0.property == 35 && $0.paramIndex == param }.sorted { $0.time < $1.time }
         }
@@ -506,7 +506,7 @@ struct ColorFillPanel: View {
 
     /// Segurar ◆: apaga as chaves da cor (ShapeParam 32..35) num passo de desfazer.
     private func deleteColorKeys() {
-        let keys = (model.keyframes[id] ?? []).filter { $0.property == 35 && (UInt32(32)...UInt32(35)).contains($0.paramIndex) }
+        let keys = (model.keysForLayer(id) ?? []).filter { $0.property == 35 && (UInt32(32)...UInt32(35)).contains($0.paramIndex) }
         guard !keys.isEmpty, model.selectedLayer?.locked != true else { return }
         let references: [NSNumber] = keys.flatMap { key -> [NSNumber] in
             [NSNumber(value: key.property), NSNumber(value: key.effectIndex), NSNumber(value: key.paramIndex),

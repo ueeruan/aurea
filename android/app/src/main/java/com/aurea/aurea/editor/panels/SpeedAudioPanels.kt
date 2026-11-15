@@ -97,13 +97,13 @@ import kotlin.math.roundToInt
 @Composable
 internal fun ClipEditPanel(env: PanelEnv) {
     val store = env.store
-    val row = store.layers.firstOrNull { it.id == store.primary } ?: return
+    val row = store.editingLayers.firstOrNull { it.id == store.primary } ?: return
     var mode by remember(row.id) { mutableStateOf(2) }
     var step by remember(row.id) { mutableStateOf("1") }
     var previous by remember(row.id) { mutableStateOf(0L) }
     var next by remember(row.id) { mutableStateOf(0L) }
-    val before = store.layers.filter { it.id != row.id && !it.locked && it.endFrame == row.startFrame }
-    val after = store.layers.filter { it.id != row.id && !it.locked && it.startFrame == row.endFrame }
+    val before = store.editingLayers.filter { it.id != row.id && !it.locked && it.endFrame == row.startFrame }
+    val after = store.editingLayers.filter { it.id != row.id && !it.locked && it.startFrame == row.endFrame }
     val left = before.firstOrNull { it.id == previous }?.id ?: before.singleOrNull()?.id ?: 0L
     val right = after.firstOrNull { it.id == next }?.id ?: after.singleOrNull()?.id ?: 0L
     val needsLeft = mode == 3 || mode == 5
@@ -192,7 +192,7 @@ internal fun SpeedPanel(env: PanelEnv) {
     val group = kind == LayerType.Group.kind
     val keyed = media || group
     var tab by rememberSaveable(detail.id) { mutableStateOf("speed") }
-    val speedKeys = store.keyframes[detail.id].orEmpty().filter { it.property == TrackProperty.SPEED }
+    val speedKeys = store.keysForLayer(detail.id).orEmpty().filter { it.property == TrackProperty.SPEED }
     val keyHere = speedKeys.any { it.time == detail.localPlayhead }
     val look = when {
         !keyed -> KeyframeLook.None
@@ -204,7 +204,7 @@ internal fun SpeedPanel(env: PanelEnv) {
     // 0.4.1: com o Remapear ligado, o ◆ e a Curva da coluna esquerda passam a ser os do
     // remapeamento (antes a curva tinha um botão próprio na linha do tempo da fonte).
     val remap = keyed && detail.timeRemap
-    val remapKeys = if (remap) store.keyframes[detail.id].orEmpty().filter { it.property == TrackProperty.TIME_REMAP }.sortedBy { it.time } else emptyList()
+    val remapKeys = if (remap) store.keysForLayer(detail.id).orEmpty().filter { it.property == TrackProperty.TIME_REMAP }.sortedBy { it.time } else emptyList()
     val remapHere = remapKeys.indexOfFirst { it.time == detail.localPlayhead }
     val rail = PanelRail(
         onBack = env.onClose,
@@ -245,7 +245,7 @@ private fun SpeedMainTab(env: PanelEnv, keyed: Boolean) {
     val store = env.store
     val detail = store.detail ?: return
     val id = detail.id
-    val row = store.layers.firstOrNull { it.id == id }
+    val row = store.editingLayers.firstOrNull { it.id == id }
     // O cabeçote é lido dentro do derivedStateOf: só recompõe quando os bits mudam.
     val bits by remember(id, row?.startFrame, row?.endFrame, row?.locked, detail.speed, detail.timeFlags) {
         derivedStateOf { store.layerPanelBits(id) }
@@ -357,7 +357,7 @@ internal fun openTrackCurve(env: PanelEnv, property: Int) = openTrackCurve(env.s
 internal fun openTrackCurve(store: EditorStore, property: Int, open: () -> Unit) {
     val layer = store.primary ?: return
     val local = store.detail?.localPlayhead ?: 0
-    val keys = store.keyframes[layer].orEmpty().filter { it.property == property }.sortedBy { it.time }
+    val keys = store.keysForLayer(layer).orEmpty().filter { it.property == property }.sortedBy { it.time }
     if (keys.size < 2) return
     val key = keys.lastOrNull { it.time <= local }?.takeIf { it != keys.last() }
         ?: keys[keys.size - 2].takeIf { local >= keys.last().time }
@@ -754,15 +754,15 @@ private fun VolumeFrame(
 ) {
     val d by remember(store) { derivedStateOf { store.detail } }
     val detail = d ?: return
-    val row = store.layers.firstOrNull { it.id == detail.id }
-    val bits = remember(detail.id, row?.startFrame, row?.endFrame, row?.locked, store.keyframes[detail.id]?.size, detail.audioFlags) {
+    val row = store.editingLayers.firstOrNull { it.id == detail.id }
+    val bits = remember(detail.id, row?.startFrame, row?.endFrame, row?.locked, store.keysForLayer(detail.id)?.size, detail.audioFlags) {
         store.layerPanelBits(detail.id)
     }
     // O que a referência chama de `hasAnyAudio` (todo vídeo, áudio, grupo com som) + o som real do vídeo.
     val hasAudio = detail.hasAudio || layerAudioEnabled(bits)
     var tab by rememberSaveable(detail.id) { mutableStateOf("volume") }
     val volumeKeys = listOf(TrackKey(TrackProperty.AUDIO_VOLUME))
-    val keys = store.keyframes[detail.id].orEmpty().filter { it.property == TrackProperty.AUDIO_VOLUME }
+    val keys = store.keysForLayer(detail.id).orEmpty().filter { it.property == TrackProperty.AUDIO_VOLUME }
     val look = when {
         keys.any { it.time == detail.localPlayhead } -> KeyframeLook.KeyHere
         detail.volumeAnimated -> KeyframeLook.Animated
@@ -1134,7 +1134,7 @@ internal fun timecode(frames: Int, fps: Float): String {
 private fun openRemapCurve(env: PanelEnv, local: Int) {
     val store = env.store
     val layer = store.primary ?: return
-    val keys = store.keyframes[layer].orEmpty().filter { it.property == TrackProperty.TIME_REMAP }.sortedBy { it.time }
+    val keys = store.keysForLayer(layer).orEmpty().filter { it.property == TrackProperty.TIME_REMAP }.sortedBy { it.time }
     if (keys.size < 2) return
     val chosen = store.selectedKeyframe?.takeIf { it.first == layer && it.second.property == TrackProperty.TIME_REMAP }?.second
     val key = chosen?.let { c -> keys.firstOrNull { it.time == c.time } }

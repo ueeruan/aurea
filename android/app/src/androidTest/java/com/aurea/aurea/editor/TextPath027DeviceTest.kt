@@ -59,8 +59,10 @@ class TextPath027DeviceTest {
         compose.waitUntil(5000) { store.masks?.masks?.isNotEmpty() == true }
         val maskId = store.masks!!.masks.first().id
         // …até virar o caminho dele, pela tela.
-        compose.onNodeWithTag("layer.panel.colorFill").performClick()
-        compose.onNodeWithTag("text.tab.layout").performClick()
+        // Funções (F4): o caminho mora em Layout do texto › Caminho.
+        compose.onNodeWithTag("layer.panel.edit").performClick()
+        compose.onNodeWithTag("text.layout.link").performScrollTo().performClick()
+        compose.onNodeWithTag("textLayout.tab.path").performClick()
         // A fileira de chips rola na horizontal: primeiro o painel desce até ela.
         compose.onNodeWithTag("text.path.sources").performScrollTo()
         compose.onNodeWithTag("text.path.mask.0").performClick()

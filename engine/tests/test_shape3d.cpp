@@ -12,6 +12,7 @@
 #include "aurea/Engine.hpp"
 #include "aurea/scene3d/Shape3D.hpp"
 #include "aurea/scene3d/PartEffects.hpp"
+#include "aurea/scene3d/Animation.hpp"
 #include "aurea/scene3d/MaterialPreview.hpp"
 #include "aurea/scene3d/Text3D.hpp"
 #include "aurea/effects/EffectRegistry.hpp"
@@ -1487,4 +1488,48 @@ AUREA_TEST(Part3DEffects, TextureOffsetRotationAndScrollAreAppendedParameters) {
     collect_part_textures(a, s.layer, 60.0, swaps, 30.0);
     AUREA_CHECK_EQ(swaps.size(), usize{6});
     for (const PartTexture& t : swaps) AUREA_CHECK(t.offset.x == 0.0f && t.offset.y == 0.0f && t.rotation == 0.0f);
+}
+
+AUREA_TEST(Part3DEffects, JointPartsUseAuthoredPivotAndRefreshSkinning) {
+    SceneAsset asset;
+    asset.bounds.add(Vec3{-1,-1,-1}); asset.bounds.add(Vec3{1,1,1});
+    asset.meshes.resize(1); asset.meshes[0].bounds = asset.bounds;
+    asset.nodes.resize(3); asset.nodes[0].mesh = 0;
+    asset.nodes[0].name = "Avatar";
+    asset.nodes[1].name = "Shoulder"; asset.nodes[1].children = {2};
+    asset.nodes[2].name = "Hand"; asset.nodes[2].parent = 1; asset.nodes[2].translation = Vec3{0,2,0};
+    asset.roots = {0,1}; asset.skins.resize(1); asset.skins[0].joints = {1,2};
+    asset.skins[0].inverseBind = {Mat4::identity(), Mat4::translation(Vec3{0,-2,0})};
+    std::vector<u32> parts; part_nodes(asset, parts, true);
+    AUREA_CHECK_EQ(parts.size(), 3u); AUREA_CHECK_EQ(parts[0], 0u); AUREA_CHECK_EQ(parts[1], 1u);
+    Layer layer; layer.effects.push_back(part_effect(effect_keys::kPart3DTransform, 1));
+    auto& effect = layer.effects[0];
+    AUREA_CHECK_EQ(effect.params.size(), 14u);
+    effect.params[0].constant = ParamValue::scalar(2);
+    effect.params[6].constant = ParamValue::scalar(90);
+    effect.params[8].constant = ParamValue::scalar(50);
+    Pose pose; evaluate_pose(asset, -1, 0, pose);
+    std::vector<f32> opacity;
+    apply_part_effects(asset, layer, 0, pose.nodeWorld, opacity);
+    rebuild_skin_matrices(asset, pose);
+    const Vec3 shoulder = pose.nodeWorld[1].transform_point(Vec3{});
+    AUREA_CHECK_NEAR(shoulder.x, 1, 1e-5); AUREA_CHECK_NEAR(shoulder.y, -1, 1e-5);
+    const Vec3 hand = pose.nodeWorld[2].transform_point(Vec3{});
+    AUREA_CHECK_NEAR(hand.x, -1, 1e-5); AUREA_CHECK_NEAR(hand.y, -1, 1e-5);
+    const Vec3 skinned = pose.jointMatrices[0].transform_point(Vec3{});
+    AUREA_CHECK((skinned - shoulder).length() < 1e-5);
+    // FBX unit conversion on the joint must not multiply the authored pivot offset.
+    asset.nodes[1].scale = Vec3{.01f,.01f,.01f};
+    evaluate_pose(asset, -1, 0, pose); apply_part_effects(asset, layer, 0, pose.nodeWorld, opacity);
+    AUREA_CHECK_NEAR(pose.nodeWorld[1].col[3].x, 1, 1e-5);
+    AUREA_CHECK_NEAR(pose.nodeWorld[1].col[3].y, -1, 1e-5);
+    asset.nodes[1].scale = Vec3{1,1,1};
+    // Changing the pivot changes the rotation centre, including descendants.
+    effect.params[8].constant = ParamValue::scalar(0);
+    evaluate_pose(asset, -1, 0, pose); apply_part_effects(asset, layer, 0, pose.nodeWorld, opacity);
+    AUREA_CHECK(pose.nodeWorld[1].transform_point(Vec3{}).length() < 1e-5);
+    // The eight original slots retain their defaults in older projects.
+    effect.params.resize(8); effect.params[6].constant = ParamValue::scalar(0);
+    evaluate_pose(asset, -1, 0, pose); apply_part_effects(asset, layer, 0, pose.nodeWorld, opacity);
+    AUREA_CHECK_NEAR(pose.nodeWorld[2].col[3].y, 2, 1e-5);
 }

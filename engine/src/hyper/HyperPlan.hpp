@@ -84,6 +84,10 @@ struct JobPlan {
 
 /// O caminho efetivo pedido (Auto = o do perfil).
 [[nodiscard]] Path effective_path(const Recipe& r, const DeviceProfile& p) noexcept;
+// Benchmark timings may persist. OS headroom and thermal constraints are live
+// admission inputs and must be refreshed before selecting an automatic path.
+void refresh_profile_limits(DeviceProfile& profile, u64 availableBytes,
+                            f32 memoryPressure, bool thermalConstrained) noexcept;
 
 /// Saída limitada pelo aparelho (proporção mantida, pares). A mesma regra do
 /// export (start_export_checked): lado maior × lado menor e textura.

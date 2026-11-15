@@ -1611,6 +1611,7 @@ AUREA_TEST(MotionBlurGpu, CroppedAccumulatorMatchesEveryFullFramePixel) {
 
 #include "BoundedSceneExposureGpu.inl"
 #include "VelocityMotionBlurGpu.inl"
+#include "TemporalReconstructionGpu.inl"
 
 AUREA_TEST(Gpu, SteadyPlaybackCreatesNoTexturesAndMeasuresGpu) {
     AUREA_REQUIRE_GPU();

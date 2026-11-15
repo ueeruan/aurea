@@ -24,10 +24,10 @@ private struct EditDockItem: Identifiable {
 
 /// Cores próprias da Edição: fundo preto como nos editores de vídeo, Dock um tom acima.
 private enum EditColors {
-    static let canvas = Color(hex: 0xFF101114)
-    static let preview = Color(red: 0.043, green: 0.043, blue: 0.051)
-    static let bar = Color(hex: 0xFF181A20)
-    static let dockLevel = Color(hex: 0xFF22252C)
+    static let canvas = Color(hex: 0xFF08090B)
+    static let preview = Color.black
+    static let bar = Color(hex: 0xFF101115)
+    static let dockLevel = Color(hex: 0xFF17191E)
     static let ruler = Color(red: 0.54, green: 0.54, blue: 0.57)
 }
 
@@ -44,7 +44,8 @@ struct EditModeView: View {
     var body: some View {
         // 0.4.0: com painel aberto o palco cede espaço (30 %) e a linha do tempo fica com
         // 72 no mínimo: em tela baixa as abas eram uma faixa onde nada dava para mexer.
-        let previewH = model.fullscreen ? max(0, height - 48) : min(max(height * 0.32, 128), 400)
+        let inspecting = model.textModeActive || (model.panel != .none && model.panel != .dock)
+        let previewH = model.fullscreen ? max(0, height - 48) : min(max(height * (inspecting ? 0.32 : 0.52), 160), 600)
         // Omega conteúdo (área 06, P2-15): o modo de texto também na Edição — a barra de
         // estilo no topo (52) e o painel grande embaixo do palco.
         let texting = model.textModeActive && !model.fullscreen
@@ -53,7 +54,7 @@ struct EditModeView: View {
         VStack(spacing: 0) {
             if texting { TextStyleBar().frame(height: 52).zIndex(2) }
             else if !model.fullscreen { topBar }
-            if !model.fullscreen && !texting { workspaceBar }
+            if wide && height >= 500 && !model.fullscreen && !texting { workspaceBar }
             if wide {
                 wideWorkspace
             } else {
@@ -69,7 +70,7 @@ struct EditModeView: View {
                     // Painel aberto: a linha do tempo encolhe e o painel da Composição sobe.
                     // 0.3.6: o painel vai até o teto (`EditorLayout.panelMax`); numa tela alta o
                     // que passa dele fica com a linha do tempo (112 no mínimo). Par do Android.
-                    let panelH = min(max(0, height - 100 - previewH - 48 - 112),
+                    let panelH = min(max(0, height - 48 - previewH - 48 - 112),
                                      EditorLayout.panelMax(fontScale: UIFont.preferredFont(forTextStyle: .body).pointSize / 17))
                     EditTimelineView(compact: true, onAddMedia: addMedia, onTransition: { cut = EditCut(outgoing: $0, incoming: $1) })
                         .frame(minHeight: 112, maxHeight: .infinity)
@@ -132,8 +133,9 @@ struct EditModeView: View {
 
     private var wideWorkspace: some View {
         let timelineHeight = min(max(height * 0.30, 114), 260)
-        let viewerHeight = max(0, height - 100 - timelineHeight - 48 - 16)
-        let inspectorHeight = max(0, height - 100 - timelineHeight - 16)
+        let workspaceHeight: CGFloat = height >= 500 ? 48 : 0
+        let viewerHeight = max(0, height - 48 - workspaceHeight - timelineHeight - 48 - 16)
+        let inspectorHeight = max(0, height - 48 - workspaceHeight - timelineHeight - 16)
         return VStack(spacing: 0) {
             HStack(spacing: 8) {
                 VStack(spacing: 0) {
@@ -188,6 +190,8 @@ struct EditModeView: View {
                     .background(EditColors.dockLevel, in: RoundedRectangle(cornerRadius: 8))
             }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityIdentifier("edit.resolution")
             Menu {
+                Button(AureaText.t("fxl_view")) { ViewModeState.shared.columnOpen.toggle() }
+                    .accessibilityIdentifier("edit.previewControls")
                 Button(AureaText.t("ui_mode_switch_to_composition")) { model.setUiMode(AureaUiMode.composition) }
                 Button(AureaText.t(model.editMode ? "edit_magnet_on" : "edit_magnet_off")) { model.toggleEditMode() }
                 Button(AureaText.t("editor_plano_fundo")) { model.showProjectSettings = true }
@@ -201,12 +205,13 @@ struct EditModeView: View {
                 CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: 20).frame(width: 44, height: 44).contentShape(Rectangle())
             }.accessibilityLabel(AureaText.t("edit_more")).accessibilityIdentifier("edit.more")
             Button { if model.status.playing != 0 { model.pause() }; model.openExport() /* Omega adicionar (área 08, P1-12): limpa o resultado anterior */ } label: {
-                Text(AureaText.t("edit_export")).font(.aurea(size: 14, weight: .bold)).foregroundStyle(AureaColors.background)
-                    .padding(.horizontal, 14).padding(.vertical, 8)
-                    .background(AureaColors.accent, in: RoundedRectangle(cornerRadius: 8))
-            }.buttonStyle(AureaPressStyle(shrink: 0.96)).accessibilityIdentifier("edit.export").padding(.leading, 4)
+                CupertinoGlyph.text(CupertinoGlyph.SquareArrowUp, size: 22)
+                    .frame(width: 44, height: 44)
+                    .background(EditColors.dockLevel, in: RoundedRectangle(cornerRadius: 12))
+            }.buttonStyle(AureaPressStyle(shrink: 0.96)).accessibilityIdentifier("edit.export")
+                .accessibilityLabel(AureaText.t("edit_export")).padding(.leading, 4)
         }
-        .padding(.horizontal, 6).frame(height: 52).foregroundStyle(AureaColors.text)
+        .padding(.horizontal, 6).frame(height: 48).foregroundStyle(AureaColors.text)
     }
 
     // --- Barra de reprodução: tempo · ▶ · desfazer · refazer · tela cheia ------
@@ -326,10 +331,10 @@ struct EditModeView: View {
     }
 
     private func items(for level: EditDockLevel) -> [EditDockItem] {
-        let ids = model.layers.filter { model.selection.contains($0.id) }.map(\.id)
+        let ids = model.editingLayers.filter { model.editingSelection.contains($0.id) }.map(\.id)
         let split = item("split", CupertinoGlyph.Scissors, "edit_clip_split") { model.splitAtPlayhead(ids) }
         let duplicate = item("duplicate", CupertinoGlyph.PlusSquareOnSquare, "edit_clip_duplicate") {
-            model.engine.duplicateLayers(ids.map { NSNumber(value: $0) }); model.refreshModel(force: true)
+            model.duplicateSelectedLayers(ids)
         }
         let delete = item("delete", CupertinoGlyph.Trash, "edit_clip_delete") { model.deleteSelectedLayers() }
         let effects = item("effects", CupertinoGlyph.Sparkles, "edit_clip_effects") { panel(.effects) }
@@ -643,10 +648,10 @@ private enum EditPalette {
     static func hex(_ value: UInt32) -> Color {
         Color(red: Double((value >> 16) & 255) / 255, green: Double((value >> 8) & 255) / 255, blue: Double(value & 255) / 255)
     }
-    static let lane = hex(0x17191E), head = hex(0x20232A), rulerBg = hex(0x101114), tick = hex(0x5B606B), separator = hex(0x3A3E47)
+    static let lane = hex(0x0D0F12), head = hex(0x08090B), rulerBg = hex(0x08090B), tick = hex(0x5B606B), separator = hex(0x3A3E47)
     static let video = hex(0x1F6F8B), videoTop = hex(0x17566C), overlay = hex(0x7A2FA8), overlayTop = hex(0x5E2482)
     static let adjustment = hex(0xD016C4), adjustmentTop = hex(0xA30F99), audio = hex(0x2F6A23), audioWave = hex(0x9FE08A)
-    static let linked = hex(0x17465A), linkedWave = hex(0x67C4F2), playhead = hex(0x4EA8F2), snap = hex(0xFFD54A), cut = hex(0xE8EDF5)
+    static let linked = hex(0x17465A), linkedWave = hex(0x67C4F2), playhead = hex(0xF4F5F7), snap = hex(0xFFD54A), cut = hex(0xE8EDF5)
 }
 
 private struct LaneClip {
@@ -689,7 +694,10 @@ private struct EditTimelineView: View {
     var body: some View {
         VStack(spacing: 0) {
             toolStrip
-            if let data = model.editTimeline {
+            if let raw = model.editTimeline {
+                let used = Set(model.layers.map(\.trackId)).union(raw.linkedAudio.values)
+                let tracks = raw.tracks.filter { used.contains($0.id) || $0.target || $0.locked || $0.muted || $0.solo }
+                let data = EditTimelineData(tracks: tracks, linkedAudio: raw.linkedAudio, markIn: raw.markIn, markOut: raw.markOut)
                 EditTimelineBody(clock: model.playheadClock, data: data, tool: tool, snap: snap, compact: compact, onTransition: onTransition)
             } else {
                 Spacer(minLength: 0)
@@ -808,8 +816,8 @@ private struct EditTimelineBody: View {
     @State private var thumbs = TimelineThumbStrip()
     @State private var waves = EditWaveCache()
 
-    private let headW: CGFloat = 98, rulerH: CGFloat = 26, gap: CGFloat = 1, edge: CGFloat = 13, slop: CGFloat = 6
-    private var laneH: CGFloat { compact ? 34 : 44 }
+    private let headW: CGFloat = 44, rulerH: CGFloat = 26, gap: CGFloat = 6, edge: CGFloat = 13, slop: CGFloat = 6
+    private var laneH: CGFloat { compact ? 34 : 56 }
     private var fps: Double { max(model.compositionFps, 1) }
     private var pxPerFrame: CGFloat { pxPerSecond / CGFloat(fps) }
     private var lanes: [EditTrackInfo] { data.lanes }
@@ -854,7 +862,7 @@ private struct EditTimelineBody: View {
                         .opacity(laneTop(index) - scrollY + laneH <= rulerH ? 0 : 1)
                 }
                 // O canto da régua diz qual ferramenta está ativa: a barra é só de ícones.
-                Text(AureaText.t(tool.key)).font(.aurea(size: 11, weight: .semibold)).lineLimit(1).foregroundStyle(AureaColors.accent)
+                EditToolIcon(icon: tool.icon, color: AureaColors.muted, size: 16)
                     .frame(width: headW, height: rulerH).background(EditPalette.rulerBg)
 
                 // Alvos do leitor de tela: não interceptam toque, só dão nome e ação ao clipe.
@@ -1132,48 +1140,32 @@ private struct EditTimelineBody: View {
     }
 
     private func trackHead(_ lane: EditTrackInfo) -> some View {
-        HStack(spacing: 2) {
-            Button { model.setEditTrackFlag(lane.id, flag: 3, on: !lane.target) } label: {
-                Text(lane.label).font(.aurea(size: 10, weight: .bold)).foregroundStyle(.white)
-                    .frame(width: 24, height: 24)
-                    .background(lane.target ? EditPalette.hex(0x3B6EA8) : EditColors.dockLevel, in: RoundedRectangle(cornerRadius: 5))
-            }.buttonStyle(AureaPressStyle(shrink: 0.92))
-                .accessibilityLabel(AureaText.t("edit_track_target", lane.label))
-                .accessibilityAddTraits(lane.target ? [.isButton, .isSelected] : .isButton)
-                .accessibilityIdentifier("edit.track.\(lane.label).target")
-            headIcon(lane.locked ? CupertinoGlyph.LockFill : CupertinoGlyph.LockOpen, on: lane.locked, key: "edit_track_lock", id: "edit.track.\(lane.label).lock") {
-                model.setEditTrackFlag(lane.id, flag: 0, on: !lane.locked)
-            }
-            if lane.audio {
-                headLetter("M", on: lane.muted, key: "edit_track_mute", id: "edit.track.\(lane.label).mute") { model.setEditTrackFlag(lane.id, flag: 1, on: !lane.muted) }
-                headLetter("S", on: lane.solo, key: "edit_track_solo", id: "edit.track.\(lane.label).solo") { model.setEditTrackFlag(lane.id, flag: 2, on: !lane.solo) }
-            } else {
-                headIcon(lane.muted ? CupertinoGlyph.EyeSlash : CupertinoGlyph.Eye, on: lane.muted, key: "edit_track_visible", id: "edit.track.\(lane.label).visible") {
-                    model.setEditTrackFlag(lane.id, flag: 1, on: !lane.muted)
+        Button { model.setEditTrackFlag(lane.id, flag: 3, on: !lane.target) } label: {
+            VStack(spacing: 3) {
+                Text(lane.label).font(.aurea(size: 10, weight: .semibold))
+                    .foregroundStyle(lane.target ? AureaColors.accent : AureaColors.muted)
+                if lane.locked { CupertinoGlyph.text(CupertinoGlyph.LockFill, size: 11, color: AureaColors.muted) }
+                else if lane.muted || lane.solo {
+                    Text(lane.solo ? "S" : "M").font(.aurea(size: 9, weight: .semibold)).foregroundStyle(AureaColors.accent)
+                }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
+        }.buttonStyle(.plain)
+            .accessibilityLabel(AureaText.t("edit_track_target", lane.label))
+            .accessibilityAddTraits(lane.target ? [.isButton, .isSelected] : .isButton)
+            .accessibilityIdentifier("edit.track.\(lane.label).target")
+            .contextMenu {
+                Button(AureaText.t("edit_track_target", lane.label)) { model.setEditTrackFlag(lane.id, flag: 3, on: !lane.target) }
+                Button(AureaText.t("edit_track_lock")) { model.setEditTrackFlag(lane.id, flag: 0, on: !lane.locked) }
+                    .accessibilityIdentifier("edit.track.\(lane.label).lock")
+                Button(AureaText.t(lane.audio ? "edit_track_mute" : "edit_track_visible")) { model.setEditTrackFlag(lane.id, flag: 1, on: !lane.muted) }
+                    .accessibilityIdentifier("edit.track.\(lane.label).\(lane.audio ? "mute" : "visible")")
+                if lane.audio {
+                    Button(AureaText.t("edit_track_solo")) { model.setEditTrackFlag(lane.id, flag: 2, on: !lane.solo) }
+                        .accessibilityIdentifier("edit.track.\(lane.label).solo")
                 }
             }
-            Spacer(minLength: 0)
-        }.padding(.horizontal, 3)
     }
 
-    private func headIcon(_ glyph: Character, on: Bool, key: String, id: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            CupertinoGlyph.text(glyph, size: 13, color: on ? AureaColors.accent : AureaColors.muted).frame(width: 22, height: 22).contentShape(Rectangle())
-        }.buttonStyle(AureaPressStyle(shrink: 0.9))
-            .accessibilityLabel(AureaText.t(key))
-            .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
-            .accessibilityIdentifier(id)
-    }
-
-    private func headLetter(_ letter: String, on: Bool, key: String, id: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(letter).font(.aurea(size: 11, weight: .bold)).foregroundStyle(on ? Color.white : AureaColors.muted)
-                .frame(width: 22, height: 22).background(on ? EditPalette.hex(0xB9472F) : Color.clear, in: RoundedRectangle(cornerRadius: 4))
-        }.buttonStyle(AureaPressStyle(shrink: 0.9))
-            .accessibilityLabel(AureaText.t(key))
-            .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
-            .accessibilityIdentifier(id)
-    }
 }
 
 /// O desenho das faixas. Só esta view observa o relógio: tocar um vídeo redesenha o

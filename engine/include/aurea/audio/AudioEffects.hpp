@@ -30,6 +30,8 @@
 #include <unordered_map>
 #include <vector>
 
+namespace aurea::plugins { struct AudioProgram; }
+
 namespace aurea::audio {
 
 /// Chaves estáveis dos efeitos de áudio (o id no projeto é o hash delas).
@@ -67,6 +69,7 @@ enum class FxKind : u8 {
     BassTreble,   ///< lote "AE 2026": prateleira de graves (200 Hz) e de agudos (4 kHz)
     Distortion,   ///< lote "AE 2026" (segunda leva): modelos de saturação + redutor de bits
     Gate,         ///< lote "AE 2026" (segunda leva): portão de ruído (limiar, ataque, retenção, soltura)
+    Plugin,
 };
 
 // Índices dos parâmetros — o MESMO contrato da declaração do efeito
@@ -109,6 +112,7 @@ struct FxParam {
 struct FxStage {
     FxKind kind = FxKind::Envelope;
     std::vector<FxParam> params;
+    std::shared_ptr<const plugins::AudioProgram> plugin;
     /// Régua do tempo dos parâmetros: amostra da raiz − envShift = amostra da
     /// composição da camada dona; quadro = amostra × fps / 48000.
     i64 envShift = 0;

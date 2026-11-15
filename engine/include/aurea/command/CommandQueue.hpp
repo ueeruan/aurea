@@ -25,6 +25,7 @@
 #include "aurea/core/Types.hpp"
 
 #include <atomic>
+#include <type_traits>
 
 namespace aurea {
 
@@ -59,7 +60,7 @@ public:
     /// Escreve um comando. Devolve o índice dele, ou kInvalidIndex se a fila
     /// encheu. Fila cheia NÃO bloqueia: a UI decide (no caso real, ela para de
     /// emitir porque o dedo parou antes disso).
-    [[nodiscard]] u32 push(const Command& cmd) noexcept {
+    [[nodiscard]] u32 push(const Command& cmd, u64 scopeOuter = 0, u64 scopeGroup = 0, u64 scopeInner = 0) noexcept {
         const u32 tail = tail_.load(std::memory_order_relaxed);
         const u32 head = head_.load(std::memory_order_acquire);
         if (tail - head >= kCapacity) {
@@ -67,6 +68,9 @@ public:
             return kInvalidIndex;
         }
         slots_[tail & kMask].cmd = cmd;
+        slots_[tail & kMask].scopeOuter = scopeOuter;
+        slots_[tail & kMask].scopeGroup = scopeGroup;
+        slots_[tail & kMask].scopeInner = scopeInner;
         tail_.store(tail + 1, std::memory_order_release);
         return tail & kMask;
     }
@@ -116,10 +120,13 @@ public:
         return tail_.load(std::memory_order_acquire) - head_.load(std::memory_order_relaxed);
     }
 
-    [[nodiscard]] bool pop(Command& out) noexcept {
+    [[nodiscard]] bool pop(Command& out, u64* scopeOuter = nullptr, u64* scopeGroup = nullptr, u64* scopeInner = nullptr) noexcept {
         const u32 head = head_.load(std::memory_order_relaxed);
         if (head == tail_.load(std::memory_order_acquire)) return false;
         out = slots_[head & kMask].cmd;
+        if (scopeOuter) *scopeOuter = slots_[head & kMask].scopeOuter;
+        if (scopeGroup) *scopeGroup = slots_[head & kMask].scopeGroup;
+        if (scopeInner) *scopeInner = slots_[head & kMask].scopeInner;
         head_.store(head + 1, std::memory_order_release);
         return true;
     }
@@ -130,8 +137,10 @@ public:
     u32 drain(Sink&& sink, u32 maxCount = kCapacity) noexcept {
         u32 n = 0;
         Command c;
-        while (n < maxCount && pop(c)) {
-            sink(c);
+        u64 outer = 0, group = 0, inner = 0;
+        while (n < maxCount && pop(c, &outer, &group, &inner)) {
+            if constexpr (std::is_invocable_v<Sink, const Command&, u64, u64, u64>) sink(c, outer, group, inner);
+            else sink(c);
             ++n;
         }
         return n;
@@ -156,6 +165,7 @@ private:
     // tamanho múltiplo de 64 (ver static_assert abaixo).
     struct alignas(64) Slot {
         Command cmd{};
+        u64 scopeOuter = 0, scopeGroup = 0, scopeInner = 0;
     };
 
     Slot slots_[kCapacity]{};

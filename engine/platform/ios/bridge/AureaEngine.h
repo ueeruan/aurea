@@ -315,6 +315,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)invalidate;
 /// Pressão de memória: `level` no mesmo espírito do TRIM_MEMORY_* do Android.
 - (int64_t)trimMemory:(int32_t)level;
+- (void)reportMemoryHeadroom:(uint64_t)available critical:(uint64_t)critical lowMemory:(BOOL)lowMemory;
 /// Process allocation headroom reported by iOS; zero can mean the app exceeded its limit.
 /// Simulator without an app limit uses a measured host-RAM/residency budget.
 - (uint64_t)availableMemoryBytes;
@@ -429,6 +430,7 @@ NS_SWIFT_NAME(AureaEngine)
 // estão no tempo de fora (dentro + início do grupo − offset do grupo).
 /// Linhas de dentro (as chaves de `-layers`, mais `AureaLayerInlineEditable`).
 - (NSArray<NSDictionary<NSString*, id>*>*)groupLayers:(long long)groupId;
+- (BOOL)setInlineEditTarget:(long long)groupId layer:(long long)layerId;
 /// Move/estica camadas de dentro (tempo de fora), um passo de desfazer.
 - (BOOL)setGroupLayerRanges:(long long)groupId layers:(NSArray<NSNumber*>*)layerIds
                      starts:(NSArray<NSNumber*>*)starts ends:(NSArray<NSNumber*>*)ends;
@@ -757,6 +759,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (NSString *)effectImageName:(uint32_t)effect forLayer:(long long)layerId;
 /// Nome de cada parte da camada 3D (vazio = sem nome no arquivo).
 - (NSArray<NSString *> *)modelPartNames:(long long)layerId;
+- (NSArray<NSString *> *)modelPartNames:(long long)layerId includeJoints:(BOOL)includeJoints;
 - (void)setModelTransformInScene:(uint64_t)scene modelIndex:(uint32_t)modelIndex
                           x:(float)x y:(float)y z:(float)z
                          sx:(float)sx sy:(float)sy sz:(float)sz

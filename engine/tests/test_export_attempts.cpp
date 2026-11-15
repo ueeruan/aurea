@@ -30,27 +30,20 @@ u32 why(ExportFailure f) { return static_cast<u32>(f); }
 
 } // namespace
 
-AUREA_TEST(ExportAttempts, PlansGoFromTheRequestToSoftwareAt480) {
+AUREA_TEST(ExportAttempts, PlansPreserveEveryRequestedQualitySetting) {
+    for (u32 attempt : {0u, 1u, 2u, 3u, 4u, 5u, 6u, 99u}) {
+        const auto plan = export_attempt_plan(attempt);
+        AUREA_CHECK(!plan.forceH264 && !plan.noUpscale && !plan.align16);
+        AUREA_CHECK_EQ(plan.shortSideCap, 0u);
+        AUREA_CHECK_EQ(plan.fpsCap, 0.0);
+        AUREA_CHECK_EQ(plan.blurCap, 0u);
+        AUREA_CHECK_EQ(plan.gpuStep, 0u);
+        AUREA_CHECK_EQ(export_attempt_short_side(attempt, 2160), 2160u);
+        AUREA_CHECK_EQ(export_attempt_short_side(attempt, 0), 0u);
+    }
     AUREA_CHECK_EQ(export_attempt_plan(0).safeMode, 0u);
-    AUREA_CHECK(!export_attempt_plan(0).forceH264);
     AUREA_CHECK_EQ(export_attempt_plan(1).safeMode, 1u);
-    AUREA_CHECK(export_attempt_plan(1).forceH264);
     AUREA_CHECK_EQ(export_attempt_plan(2).safeMode, 2u);
-    AUREA_CHECK_EQ(export_attempt_plan(3).shortSideCap, 720u);
-    AUREA_CHECK_EQ(export_attempt_plan(4).safeMode, 2u);
-    AUREA_CHECK_EQ(export_attempt_plan(5).shortSideCap, 480u);
-    AUREA_CHECK(export_attempt_plan(5).noUpscale);
-    AUREA_CHECK_EQ(export_attempt_plan(99).shortSideCap, 480u);   // além do fim: o último
-    // 0.2.7: teto de motion blur por degrau; o último sai sem desfoque.
-    AUREA_CHECK_EQ(export_attempt_plan(0).blurCap, 0u);
-    AUREA_CHECK_EQ(export_attempt_plan(1).blurCap, 32u);
-    AUREA_CHECK_EQ(export_attempt_plan(3).blurCap, 16u);
-    AUREA_CHECK_EQ(export_attempt_plan(5).blurCap, 4u);
-    AUREA_CHECK_EQ(export_attempt_plan(6).blurCap, 1u);
-    AUREA_CHECK_EQ(export_attempt_plan(6).shortSideCap, 480u);
-    AUREA_CHECK_EQ(export_attempt_short_side(3, 1080), 720u);
-    AUREA_CHECK_EQ(export_attempt_short_side(3, 480), 480u);      // nunca amplia
-    AUREA_CHECK_EQ(export_attempt_short_side(1, 1080), 1080u);
 }
 
 // 0.3.6 ("erro de codec"): composição de lado ímpar não recusa mais, e todo
@@ -60,7 +53,7 @@ AUREA_TEST(ExportAttempts, PlansGoFromTheRequestToSoftwareAt480) {
 // 2 software → 3/4 720p 30 qps → 5 480p.
 AUREA_TEST(ExportAttempts, OddAndCompatibilitySizesAreAlignedForTheEncoder) {
     AUREA_CHECK(!export_attempt_plan(0).align16);
-    for (u32 a = 1; a <= kExportAttemptMax; ++a) AUREA_CHECK(export_attempt_plan(a).align16);
+    for (u32 a = 1; a <= kExportAttemptMax; ++a) AUREA_CHECK(!export_attempt_plan(a).align16);
     // Degrau 0: nativo exato quando par.
     auto s = export_attempt_frame_size(1920, 1080, 0, false);
     AUREA_CHECK_EQ(s.width, 1920u); AUREA_CHECK_EQ(s.height, 1080u);
@@ -90,7 +83,7 @@ AUREA_TEST(ExportAttempts, OddAndCompatibilitySizesAreAlignedForTheEncoder) {
     // Encoder que recusa a partida: a escada toda, em ordem, até o software menor.
     const ExportRequestShape r = shape(1080, 60.0, true);
     AUREA_CHECK_EQ(export_next_attempt(0, export_retry_kind(code(Errc::EncoderUnavailable), why(ExportFailure::Encoder), false, false), r), 1u);
-    AUREA_CHECK(export_attempt_plan(1).forceH264 && export_attempt_plan(1).safeMode == 1 && export_attempt_plan(1).fpsCap == 60.0);
+    AUREA_CHECK(!export_attempt_plan(1).forceH264 && export_attempt_plan(1).safeMode == 1 && export_attempt_plan(1).fpsCap == 0.0);
     AUREA_CHECK_EQ(export_next_attempt(1, ExportRetryKind::Encoder, r), 2u);
     AUREA_CHECK_EQ(export_attempt_plan(2).safeMode, 2u);   // encoder de software
 }
@@ -140,31 +133,22 @@ AUREA_TEST(ExportAttempts, EncoderFailuresClimbEveryRungThenStop) {
         if (steps > kExportAttemptMax) break;
     }
     std::printf("\n");
-    AUREA_CHECK_EQ(steps, kExportAttemptMax - 1);   // 1, 2, 3, 4, 5 (o 6 só tira o motion blur)
+    AUREA_CHECK_EQ(steps, 2u);   // 1, 2, 3, 4, 5 (o 6 só tira o motion blur)
 }
 
-AUREA_TEST(ExportAttempts, MemoryFailuresAlwaysTakeFewerPixels) {
-    const ExportRequestShape r = shape(1080, 60.0);
-    AUREA_CHECK_EQ(export_next_attempt(0, ExportRetryKind::Memory, r), 3u);   // 1080 → 720 (hardware)
-    AUREA_CHECK_EQ(export_next_attempt(3, ExportRetryKind::Memory, r), 5u);   // 720 → 480
-    AUREA_CHECK_EQ(export_next_attempt(5, ExportRetryKind::Memory, r), 6u);   // sem pixels a tirar: sem motion blur
-    AUREA_CHECK_EQ(export_next_attempt(6, ExportRetryKind::Memory, r), 0u);   // acabou
-    AUREA_CHECK_EQ(export_next_attempt(1, ExportRetryKind::Memory, r), 3u);
-    // Pedido já pequeno: o primeiro degrau que ainda tira pixels.
-    AUREA_CHECK_EQ(export_next_attempt(0, ExportRetryKind::Memory, shape(720, 30.0)), 5u);
-    // Upscale ligado: tirar o upscale já é menos memória.
-    AUREA_CHECK_EQ(export_next_attempt(0, ExportRetryKind::Memory, shape(480, 30.0, false, true)), 3u);
-    // Lado desconhecido (0 = o da composição): o teto pode ajudar.
-    AUREA_CHECK_EQ(export_next_attempt(0, ExportRetryKind::Memory, shape(0, 0.0)), 3u);
+AUREA_TEST(ExportAttempts, MemoryFailuresTryCompatibleDecodingWithoutReducingPixels) {
+    for (const auto& request : {shape(2160, 120.0), shape(1080, 60.0), shape(480, 30.0, true, true), shape(0, 0.0)}) {
+        AUREA_CHECK_EQ(export_next_attempt(0, ExportRetryKind::Memory, request), 2u);
+        AUREA_CHECK_EQ(export_next_attempt(1, ExportRetryKind::Memory, request), 2u);
+        AUREA_CHECK_EQ(export_next_attempt(2, ExportRetryKind::Memory, request), 0u);
+    }
 }
 
-AUREA_TEST(ExportAttempts, StallsGoToSoftwareThenSmaller) {
-    const ExportRequestShape r = shape(1080, 30.0);
-    AUREA_CHECK_EQ(export_next_attempt(0, ExportRetryKind::Stall, r), 2u);
-    AUREA_CHECK_EQ(export_next_attempt(2, ExportRetryKind::Stall, r), 4u);
-    AUREA_CHECK_EQ(export_next_attempt(4, ExportRetryKind::Stall, r), 5u);
-    AUREA_CHECK_EQ(export_next_attempt(5, ExportRetryKind::Stall, r), 6u);
-    AUREA_CHECK_EQ(export_next_attempt(6, ExportRetryKind::Stall, r), 0u);
+AUREA_TEST(ExportAttempts, StallsTrySoftwareWithoutChangingTheTimeline) {
+    const auto request = shape(2160, 120.0, true, true);
+    AUREA_CHECK_EQ(export_next_attempt(0, ExportRetryKind::Stall, request), 2u);
+    for (u32 attempt = 2; attempt <= kExportAttemptMax; ++attempt)
+        AUREA_CHECK_EQ(export_next_attempt(attempt, ExportRetryKind::Stall, request), 0u);
 }
 
 AUREA_TEST(ExportAttempts, SoftwareStepsAlsoDecodeMediaInSoftware) {
@@ -172,8 +156,8 @@ AUREA_TEST(ExportAttempts, SoftwareStepsAlsoDecodeMediaInSoftware) {
     // decoder do aparelho não entrega falhava igual em todo degrau, porque a
     // escada só trocava encoder/tamanho. O primeiro degrau de uma falha de
     // mídia (Stall) já troca o decoder.
-    for (u32 a : {0u, 1u, 3u}) AUREA_CHECK(!export_attempt_plan(a).softwareDecode);
-    for (u32 a : {2u, 4u, 5u, 6u}) AUREA_CHECK(export_attempt_plan(a).softwareDecode);
+    for (u32 a : {0u, 1u}) AUREA_CHECK(!export_attempt_plan(a).softwareDecode);
+    for (u32 a : {2u, 3u, 4u, 5u, 6u}) AUREA_CHECK(export_attempt_plan(a).softwareDecode);
     const ExportRequestShape r = shape(1080, 30.0);
     const u32 next = export_next_attempt(0, export_retry_kind(static_cast<i32>(Errc::DecodeFailed),
         static_cast<u32>(ExportFailure::Media), false, false), r);
@@ -181,60 +165,32 @@ AUREA_TEST(ExportAttempts, SoftwareStepsAlsoDecodeMediaInSoftware) {
     AUREA_CHECK_EQ(export_attempt_short_side(next, 1080), 1080u);   // sem perder resolução
 }
 
-AUREA_TEST(ExportAttempts, GpuTimeoutsDropMotionBlurSamplesBeforePixels) {
-    // 0.2.7 (3D com motion blur não exportava): o quadro passa do prazo da
-    // GPU; menos amostras mantêm a resolução, e só depois vêm menos pixels.
-    const ExportRequestShape r = shape(1080, 60.0);
-    AUREA_CHECK_EQ(export_next_attempt(0, ExportRetryKind::GpuTime, r), 1u);   // 32 amostras, 1080
-    AUREA_CHECK_EQ(export_next_attempt(1, ExportRetryKind::GpuTime, r), 2u);   // 16
-    AUREA_CHECK_EQ(export_next_attempt(2, ExportRetryKind::GpuTime, r), 3u);   // 720p
-    AUREA_CHECK_EQ(export_next_attempt(3, ExportRetryKind::GpuTime, r), 4u);   // 8
-    AUREA_CHECK_EQ(export_next_attempt(4, ExportRetryKind::GpuTime, r), 5u);   // 480p, 4
-    AUREA_CHECK_EQ(export_next_attempt(5, ExportRetryKind::GpuTime, r), 6u);   // sem desfoque
-    AUREA_CHECK_EQ(export_next_attempt(6, ExportRetryKind::GpuTime, r), 0u);
+AUREA_TEST(ExportAttempts, GpuTimeoutsNeverReduceAuthoredSamples) {
+    const auto request = shape(2160, 120.0, true, true);
+    for (u32 attempt = 0; attempt <= kExportAttemptMax; ++attempt)
+        AUREA_CHECK_EQ(export_next_attempt(attempt, ExportRetryKind::GpuTime, request), 0u);
 }
 
-AUREA_TEST(ExportAttempts, GpuCostStepIsFixedPerRungAndOnlyClimbs) {
-    // 0.3.2: o corte de sombra/MSAA (degrau de custo 3D) vem da escada e vale
-    // do primeiro ao último quadro da tentativa (antes subia no meio do export
-    // quando um quadro demorava). Cada degrau nunca é mais pesado que o de cima.
-    u32 previous = 0;
+AUREA_TEST(ExportAttempts, EveryRetryKeepsFullGpuQuality) {
     for (u32 attempt = 0; attempt <= kExportAttemptMax; ++attempt) {
-        const u32 step = export_attempt_plan(attempt).gpuStep;
-        AUREA_CHECK(step >= previous);
-        AUREA_CHECK(step <= 4u);
-        previous = step;
+        AUREA_CHECK_EQ(export_attempt_plan(attempt).gpuStep, 0u);
+        AUREA_CHECK_EQ(export_attempt_plan(attempt).blurCap, 0u);
     }
-    AUREA_CHECK_EQ(export_attempt_plan(0).gpuStep, 0u);
-    AUREA_CHECK_EQ(export_attempt_plan(1).gpuStep, 0u);   // só o encoder muda
-    AUREA_CHECK_EQ(export_attempt_plan(kExportAttemptMax).gpuStep, 4u);
-    // Um degrau que só fica mais leve no custo 3D também conta como "menos GPU".
-    const ExportRequestShape r = shape(1080, 30.0);
-    ExportAttemptEffect a = export_attempt_effect(2, r), b = a;
-    b.gpuStep = a.gpuStep + 1;
-    AUREA_CHECK(b.less_blur_than(a));
-    AUREA_CHECK(!a.less_blur_than(b));
-    AUREA_CHECK(!a.same_as(b));
-    AUREA_CHECK(a.same_as(b, false));   // falha de encoder: o custo 3D não importa
 }
 
 // 0.3.0: a 200 qps nenhum encoder de hardware se anuncia; o 1o degrau que
 // baixava a taxa era o 3 (junto com 720p). Agora 1 e 2 já ficam em 60 qps,
 // sem mexer no tamanho, e pedidos até 60 seguem iguais.
-AUREA_TEST(ExportAttempts, HighFrameRatesDropTo60BeforeAnyPixel) {
-    const ExportRequestShape r = shape(1080, 200.0);
-    AUREA_CHECK_EQ(export_next_attempt(0, ExportRetryKind::Encoder, r), 1u);
-    AUREA_CHECK_NEAR(export_attempt_effect(1, r).fps, 60.0, 1e-9);
-    AUREA_CHECK_EQ(export_attempt_effect(1, r).shortSide, 1080u);
-    AUREA_CHECK_NEAR(export_attempt_effect(2, r).fps, 60.0, 1e-9);
-    AUREA_CHECK_NEAR(export_attempt_effect(3, r).fps, 30.0, 1e-9);
-    // Travou a 200 (software lento): software a 60, ainda em 1080.
-    AUREA_CHECK_EQ(export_next_attempt(0, ExportRetryKind::Stall, r), 2u);
-    // Até 60 qps nada muda nos degraus 1 e 2.
-    AUREA_CHECK_NEAR(export_attempt_effect(1, shape(1080, 60.0)).fps, 60.0, 1e-9);
-    AUREA_CHECK_NEAR(export_attempt_effect(2, shape(1080, 30.0)).fps, 30.0, 1e-9);
-    AUREA_CHECK_NEAR(export_attempt_plan(1).fpsCap, 60.0, 1e-9);
-    AUREA_CHECK_NEAR(export_attempt_plan(0).fpsCap, 0.0, 1e-9);
+AUREA_TEST(ExportAttempts, HighFrameRatesArePreservedAcrossRetries) {
+    for (f64 fps : {23.976, 30.0, 60.0, 120.0, 200.0}) {
+        const auto request = shape(2160, fps, true, true);
+        for (u32 attempt = 0; attempt <= kExportAttemptMax; ++attempt) {
+            const auto effect = export_attempt_effect(attempt, request);
+            AUREA_CHECK_NEAR(effect.fps, fps, 1e-9);
+            AUREA_CHECK_EQ(effect.shortSide, 2160u);
+            AUREA_CHECK(effect.hevc && effect.upscale);
+        }
+    }
 }
 
 AUREA_TEST(ExportAttempts, BusyRepeatsTheSameRungAndNothingRepeatsAnIdenticalOne) {
@@ -245,7 +201,7 @@ AUREA_TEST(ExportAttempts, BusyRepeatsTheSameRungAndNothingRepeatsAnIdenticalOne
     // 720p H.264 a 30 qps: o degrau 3 é igual ao 1 e o 4 igual ao 2 — pulados.
     AUREA_CHECK_EQ(export_next_attempt(0, ExportRetryKind::Encoder, r), 1u);
     AUREA_CHECK_EQ(export_next_attempt(1, ExportRetryKind::Encoder, r), 2u);
-    AUREA_CHECK_EQ(export_next_attempt(2, ExportRetryKind::Encoder, r), 5u);
+    AUREA_CHECK_EQ(export_next_attempt(2, ExportRetryKind::Encoder, r), 0u);
 }
 
 AUREA_TEST(ExportAttempts, NarrowAddressSpaceKeepsTheExportSmall) {
@@ -319,19 +275,13 @@ AUREA_TEST(ExportAttempts, OddRequestedSideAlignsAndOnlyAbsurdValuesAreRejected)
 // 0.4.5: o sink recusou o codec/formato ao abrir (ExportFailure::Unsupported):
 // a escada tenta H.264 e o software NO MESMO TAMANHO antes de tirar pixels.
 // Antes era tratado como memória e um HEVC 1080p ia direto para 720p.
-AUREA_TEST(ExportAttempts, UnsupportedCodecTriesH264AndSoftwareBeforeFewerPixels) {
-    const ExportRequestShape r = shape(1080, 30.0, true);
-    const ExportRetryKind kind = export_retry_kind(code(Errc::UnsupportedCodec), why(ExportFailure::Unsupported), false, false);
+AUREA_TEST(ExportAttempts, UnsupportedCodecTriesCompatibleRoutesAtTheRequestedCodec) {
+    const auto request = shape(2160, 120.0, true, true);
+    const auto kind = export_retry_kind(code(Errc::NotSupported), why(ExportFailure::Unsupported), false, false);
     AUREA_CHECK(kind == ExportRetryKind::Encoder);
-    AUREA_CHECK(export_retry_kind(code(Errc::NotSupported), why(ExportFailure::Unsupported), false, false) == ExportRetryKind::Encoder);
-    AUREA_CHECK_EQ(export_next_attempt(0, kind, r), 1u);   // H.264, 1080
-    AUREA_CHECK(export_attempt_plan(1).forceH264 && export_attempt_plan(1).shortSideCap == 0u);
-    AUREA_CHECK_EQ(export_next_attempt(1, kind, r), 2u);   // software, 1080
-    AUREA_CHECK_EQ(export_next_attempt(2, kind, r), 3u);   // só agora 720p
-    // Falha de memória/GPU continua indo direto para menos pixels.
-    AUREA_CHECK(export_retry_kind(code(Errc::OutOfMemory), why(ExportFailure::GpuMemory), false, false) == ExportRetryKind::Memory);
-    // Sem motivo do motor (falha antes do sink), NotSupported continua sendo tamanho.
-    AUREA_CHECK(export_retry_kind(code(Errc::NotSupported), 0, false, false) == ExportRetryKind::Memory);
+    AUREA_CHECK_EQ(export_next_attempt(0, kind, request), 1u);
+    AUREA_CHECK_EQ(export_next_attempt(1, kind, request), 2u);
+    AUREA_CHECK_EQ(export_next_attempt(2, kind, request), 0u);
 }
 
 // 0.4.5: a taxa enviada ao encoder de hardware respeita o teto que ele anuncia
@@ -364,37 +314,19 @@ ExportAttemptRecord ran(u32 attempt, f64 failedAt, u32 frames, f64 fps = 30.0, u
 }
 } // namespace
 
-AUREA_TEST(ExportAttempts, SameFailureAtTheSamePointStopsTheLadder) {
-    const ExportRequestShape r = shape(1080, 30.0);
-    ExportAttemptHistory h;
-    h.record(ran(0, 19.0 / 30.0, 18));
-    AUREA_CHECK_EQ(export_next_attempt_with_history(0, ExportRetryKind::Memory, r, h), 3u);   // 1a falha: a escada de sempre
-    h.record(ran(3, 19.0 / 30.0, 18));
-    AUREA_CHECK_EQ(export_next_attempt_with_history(3, ExportRetryKind::Memory, r, h), 0u);   // mesmo quadro: para
-    AUREA_CHECK(h.lastStop == ExportLadderStop::Deterministic);
-    // Até 3 quadros de diferença ainda é o mesmo ponto (a fila do encoder).
-    ExportAttemptHistory near;
-    near.record(ran(0, 1.00, 29));
-    (void)export_next_attempt_with_history(0, ExportRetryKind::Memory, r, near);
-    near.record(ran(3, 1.00 + 2.0 / 30.0, 31));
-    AUREA_CHECK_EQ(export_next_attempt_with_history(3, ExportRetryKind::Memory, r, near), 0u);
-    // Em outro ponto não é determinístico: segue.
-    ExportAttemptHistory moved;
-    moved.record(ran(0, 1.0, 29));
-    (void)export_next_attempt_with_history(0, ExportRetryKind::Memory, r, moved);
-    moved.record(ran(3, 4.0, 119));
-    AUREA_CHECK_EQ(export_next_attempt_with_history(3, ExportRetryKind::Memory, r, moved), 5u);
-    AUREA_CHECK(moved.lastStop == ExportLadderStop::None);
+AUREA_TEST(ExportAttempts, RepeatedMemoryFailureStopsAfterCompatibleDecoding) {
+    const auto request = shape(1080, 30.0);
+    ExportAttemptHistory history;
+    history.record(ran(0, 19.0 / 30.0, 18));
+    AUREA_CHECK_EQ(export_next_attempt_with_history(0, ExportRetryKind::Memory, request, history), 2u);
+    history.record(ran(2, 19.0 / 30.0, 18));
+    AUREA_CHECK_EQ(export_next_attempt_with_history(2, ExportRetryKind::Memory, request, history), 0u);
 }
 
-AUREA_TEST(ExportAttempts, SamePointIsMeasuredInSecondsAcrossFpsCaps) {
-    // 60 qps no degrau 0, 30 qps no 3: o quadro 120 e o 60 são o mesmo instante.
-    const ExportRequestShape r = shape(1080, 60.0);
-    ExportAttemptHistory h;
-    h.record(ran(0, 2.0, 119, 60.0));
-    AUREA_CHECK_EQ(export_next_attempt_with_history(0, ExportRetryKind::Memory, r, h), 3u);
-    h.record(ran(3, 2.0, 59, 30.0));
-    AUREA_CHECK_EQ(export_next_attempt_with_history(3, ExportRetryKind::Memory, r, h), 0u);
+AUREA_TEST(ExportAttempts, SamePointIsMeasuredInTimelineSeconds) {
+    const auto a = ran(0, 2.0, 119, 60.0);
+    const auto b = ran(2, 2.0, 59, 30.0);
+    AUREA_CHECK(export_attempt_same_point(a, b));
 }
 
 AUREA_TEST(ExportAttempts, DeterministicEncoderOrDecoderStopTriesSoftwareOnce) {
@@ -408,7 +340,6 @@ AUREA_TEST(ExportAttempts, DeterministicEncoderOrDecoderStopTriesSoftwareOnce) {
     AUREA_CHECK_EQ(export_next_attempt_with_history(1, ExportRetryKind::Encoder, r, h), 2u);
     h.record(ran(2, 5.0, 149));
     AUREA_CHECK_EQ(export_next_attempt_with_history(2, ExportRetryKind::Encoder, r, h), 0u);
-    AUREA_CHECK(h.lastStop == ExportLadderStop::Deterministic);
     // Decoder parado: o 1o degrau já é o de software; o mesmo ponto depois dele para.
     ExportAttemptHistory s;
     s.record(ran(0, 3.0, 89));
@@ -417,39 +348,26 @@ AUREA_TEST(ExportAttempts, DeterministicEncoderOrDecoderStopTriesSoftwareOnce) {
     AUREA_CHECK_EQ(export_next_attempt_with_history(2, ExportRetryKind::Stall, r, s), 0u);
 }
 
-AUREA_TEST(ExportAttempts, GpuTimeAndStartFailuresKeepTheOldLadder) {
-    const ExportRequestShape r = shape(1080, 30.0);
-    // GpuTime: o quadro mais pesado é sempre o mesmo; cada degrau tira custo dele.
-    ExportAttemptHistory g;
-    g.record(ran(0, 2.0, 59));
-    AUREA_CHECK_EQ(export_next_attempt_with_history(0, ExportRetryKind::GpuTime, r, g), 1u);
-    g.record(ran(1, 2.0, 59));
-    AUREA_CHECK_EQ(export_next_attempt_with_history(1, ExportRetryKind::GpuTime, r, g), 2u);
-    // Falha ao abrir (sem render): troca de encoder, como sempre.
-    ExportAttemptHistory o;
-    ExportAttemptRecord open; open.attempt = 0; open.request = 7; open.code = static_cast<i32>(Errc::EncoderUnavailable);
-    o.record(open);
-    AUREA_CHECK_EQ(export_next_attempt_with_history(0, ExportRetryKind::Encoder, r, o), 1u);
-    open.attempt = 1; o.record(open);
-    AUREA_CHECK_EQ(export_next_attempt_with_history(1, ExportRetryKind::Encoder, r, o), 2u);
-    // Sem registro (o app morreu no export anterior): a escada de sempre.
-    ExportAttemptHistory none;
-    AUREA_CHECK_EQ(export_next_attempt_with_history(0, ExportRetryKind::Memory, r, none), 3u);
+AUREA_TEST(ExportAttempts, GpuTimeStopsWhileEncoderStartupStillHasCompatibleRoutes) {
+    const auto request = shape(1080, 30.0);
+    ExportAttemptHistory history;
+    history.record(ran(0, 2.0, 59));
+    AUREA_CHECK_EQ(export_next_attempt_with_history(0, ExportRetryKind::GpuTime, request, history), 0u);
+    ExportAttemptHistory opening;
+    ExportAttemptRecord record; record.request = 7; record.code = code(Errc::EncoderUnavailable);
+    opening.record(record);
+    AUREA_CHECK_EQ(export_next_attempt_with_history(0, ExportRetryKind::Encoder, request, opening), 1u);
+    record.attempt = 1; opening.record(record);
+    AUREA_CHECK_EQ(export_next_attempt_with_history(1, ExportRetryKind::Encoder, request, opening), 2u);
 }
 
-AUREA_TEST(ExportAttempts, AttemptsThatRenderedFramesAreCapped) {
-    const ExportRequestShape r = shape(1080, 30.0);
-    ExportAttemptHistory h;
-    u32 attempt = 0, renderedAttempts = 0;
-    // Cada tentativa para num ponto diferente (nada determinístico): o teto para.
-    for (u32 i = 0; attempt != 0 || i == 0; ++i) {
-        h.record(ran(attempt, 1.0 + i, 30 + 30 * i));
-        ++renderedAttempts;
-        attempt = export_next_attempt_with_history(attempt, ExportRetryKind::Stall, r, h);
-        if (i > 10) break;
-    }
-    AUREA_CHECK_EQ(renderedAttempts, kExportRenderedAttemptsMax);
-    AUREA_CHECK(h.lastStop == ExportLadderStop::RenderedCap);
+AUREA_TEST(ExportAttempts, EquivalentSoftwareRoutesAreNotRenderedAgain) {
+    const auto request = shape(1080, 30.0);
+    ExportAttemptHistory history;
+    history.record(ran(0, 1.0, 29));
+    AUREA_CHECK_EQ(export_next_attempt_with_history(0, ExportRetryKind::Stall, request, history), 2u);
+    history.record(ran(2, 4.0, 119));
+    AUREA_CHECK_EQ(export_next_attempt_with_history(2, ExportRetryKind::Stall, request, history), 0u);
 }
 
 AUREA_TEST(ExportAttempts, HistoryStartsOverForANewRequest) {
@@ -462,7 +380,7 @@ AUREA_TEST(ExportAttempts, HistoryStartsOverForANewRequest) {
     // Outro arquivo de saída = outro pedido: começa do zero.
     h.record(ran(0, 1.0, 29, 30.0, 2));
     AUREA_CHECK_EQ(h.count, 1u);
-    AUREA_CHECK_EQ(export_next_attempt_with_history(0, ExportRetryKind::Memory, r, h), 3u);
+    AUREA_CHECK_EQ(export_next_attempt_with_history(0, ExportRetryKind::Memory, r, h), 2u);
     // O mesmo pedido de novo no degrau 0 (a pessoa tocou Exportar outra vez).
     h.record(ran(3, 1.0, 29, 30.0, 2));
     h.record(ran(0, 1.0, 29, 30.0, 2));

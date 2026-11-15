@@ -123,6 +123,7 @@ set(AUREA_CORE_SOURCES
     src/render/GPUCapabilities.cpp
     src/render/FrameGraph.cpp
     src/render/ShaderLibrary.cpp
+    src/render/TemporalReconstruction.cpp
     src/render/RuntimeShaders.cpp
     src/render/RenderScheduler.cpp
     src/render/Renderer.cpp
@@ -218,6 +219,8 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/TimeDisplacementEffect.cpp  # 0.4.5: Time Displacement
     src/expr/Expression.cpp
     src/plugins/PluginExpr.cpp
+    src/plugins/AudioGraph.cpp
+    src/plugins/AudioDsp.cpp
     src/plugins/PluginManifest.cpp
     src/plugins/PluginIsf.cpp
     src/plugins/PluginShader.cpp
@@ -243,6 +246,8 @@ set(AUREA_CORE_SOURCES
     src/ai/BackgroundRemoval.cpp
     src/ai/RotoRefine.cpp
     src/audio/AudioCore.cpp
+    src/audio/Fft.cpp
+    src/audio/PartitionedConvolution.cpp
     src/audio/AudioBlockCache.cpp
     src/audio/AudioMixer.cpp
     src/audio/AudioFx.cpp

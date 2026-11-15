@@ -3,6 +3,7 @@
 // =============================================================================
 #include "aurea/audio/Audio.hpp"
 #include "AudioInternal.hpp"
+#include "aurea/plugins/AudioDsp.hpp"
 
 #include "aurea/expr/Expression.hpp"
 #include "aurea/effects/EffectRegistry.hpp"
@@ -75,19 +76,24 @@ bool has_tone(const Layer& l) noexcept {
 /// Os estágios dos efeitos de áudio de `l` (em ordem), com os parâmetros
 /// resolvidos: constantes, ou um valor por quadro da camada quando animados.
 /// `reverse` inverte a cada Reverso ligado.
-void layer_stages(const Layer& l, f64 fps, i64 shift, std::vector<FxStage>& out, bool& reverse) {
-    const EffectRegistry& registry = expr::builtin_effects();
+void layer_stages(const Layer& l, f64 fps, i64 shift, std::vector<FxStage>& out, bool& reverse, const EffectRegistry* customRegistry) {
+    const EffectRegistry& registry = customRegistry ? *customRegistry : expr::builtin_effects();
     const i64 ls = frame_to_sample(l.start.value, fps);
     const i64 frames = std::max<i64>(1, l.end.value - l.start.value + 1);
     for (const EffectInstance& e : l.effects) {
         FxKind kind{};
-        if (!e.enabled || !fx_kind_of(e.type, kind)) continue;
+        if (!e.enabled) continue;
+        const Effect* effect = registry.find(e.type);
+        auto program = effect ? effect->audio_program() : nullptr;
+        if (program) kind = FxKind::Plugin;
+        else if (!fx_kind_of(e.type, kind)) continue;
         const ParameterRegistry* reg = registry.params(e.type);
         // Parâmetro acrescentado depois (Pan do Atraso...) que um projeto antigo
         // não tem: evaluate_param devolve o padrão da declaração.
         if (!reg) continue;
         FxStage s;
         s.kind = kind;
+        s.plugin = std::move(program);
         s.envShift = shift;
         s.fps = fps;
         s.frame0 = l.start.value;
@@ -152,6 +158,7 @@ void layer_stages(const Layer& l, f64 fps, i64 shift, std::vector<FxStage>& out,
 
 u64 stage_hash(u64 h, const FxStage& s) noexcept {
     h = hmix(h, static_cast<u64>(s.kind));
+    if (s.plugin) h = hmix(h, s.plugin->fingerprint);
     h = hmix(h, static_cast<u64>(s.envShift));
     h = hmix(h, static_cast<u64>(s.frame0));
     h = hmix(h, hbits(s.fps));
@@ -199,6 +206,7 @@ struct Flatten {
     /// Só esta camada (análise visual): ignora mudo e solo na raiz.
     u64 only = 0;
     const ExportNestedAudioSource* exportNested = nullptr;
+    const EffectRegistry* registry = nullptr;
 
     /// Acrescenta os sons de `comp`. `shift`: amostra da raiz − amostra de
     /// `comp`. [lo, hi): janela visível na raiz (a pré-comp corta o que passa
@@ -229,7 +237,7 @@ struct Flatten {
             const u64 key = hmix(path, id.pack());
             std::vector<FxStage> own;
             bool reverse = false;
-            layer_stages(l, fps, shift, own, reverse);
+            layer_stages(l, fps, shift, own, reverse, registry);
             u64 nestedAsset = 0;
             i64 nestedLength = 0;
             if (l.kind == LayerKind::Composition && !tone) {
@@ -383,27 +391,34 @@ inline f32 soft_limit(f32 x) noexcept {
 
 std::shared_ptr<AudioMixSnapshot> build_snapshot(const Composition& comp, const Project& project, AudioBlockCache* cache,
                                                  AssetPathResolver resolve, void* resolveCtx,
-                                                 const ExportNestedAudioSource* exportNested) {
+                                                 const ExportNestedAudioSource* exportNested, const EffectRegistry* registry) {
     auto snap = std::make_shared<AudioMixSnapshot>();
     const f64 fps = comp.fps() > 0.0 ? comp.fps() : 30.0;
     snap->endSample = frame_to_sample(comp.duration().value, fps);
     Flatten f{project, cache, resolve, resolveCtx, snap->clips};
     f.exportNested = exportNested;
+    f.registry = registry;
     // Volume com expressão: avaliado quadro a quadro aqui (sob o lock do modelo).
     const expr::Scope exprScope(project.timeline());
     f.add(comp, 0, 0, snap->endSample, 1.0f, 0, {}, 0);
+    u64 pluginBytes = 0;
+    for (const auto& clip : snap->clips) for (const auto& stage : clip.chain) if (stage.plugin) {
+        pluginBytes += stage.plugin->stateBytes + stage.plugin->immutableBytes;
+        if (pluginBytes > (128ull << 20)) snap->dspError = Errc::BudgetExceeded;
+    }
     return snap;
 }
 
 std::shared_ptr<AudioMixSnapshot> build_layer_snapshot(const Composition& comp, const Project& project, u64 layerId,
                                                        AudioBlockCache* cache, AssetPathResolver resolve,
-                                                       void* resolveCtx) {
+                                                       void* resolveCtx, const EffectRegistry* registry) {
     auto snap = std::make_shared<AudioMixSnapshot>();
     const f64 fps = comp.fps() > 0.0 ? comp.fps() : 30.0;
     snap->endSample = frame_to_sample(comp.duration().value, fps);
     if (layerId == 0) return snap;
     Flatten f{project, cache, resolve, resolveCtx, snap->clips};
     f.only = layerId;
+    f.registry = registry;
     const expr::Scope exprScope(project.timeline());
     f.add(comp, 0, 0, snap->endSample, 1.0f, 0, {}, 0x5157);
     return snap;
@@ -432,8 +447,10 @@ f64 clip_source_pos(const AudioClip& c, i64 t) noexcept { return clip_pos(c, t);
 void mix(const AudioMixSnapshot& snap, i64 start, u32 frames, BlockSource& blocks, f32* out, MixStats* stats,
          MixState* state, bool limitOutput) noexcept {
     std::fill(out, out + static_cast<usize>(frames) * kMixChannels, 0.0f);
+    if (snap.dspError != Errc::Ok) { if (stats) stats->dspError = snap.dspError; return; }
     const i64 stop = start + frames;
     u32 missing = 0;
+    Errc dspError = Errc::Ok;
     const u64 epoch = state ? state->next_epoch() : 0;
     for (const AudioClip& c : snap.clips) {
         const i64 s0 = std::max(start, c.start);
@@ -441,7 +458,7 @@ void mix(const AudioMixSnapshot& snap, i64 start, u32 frames, BlockSource& block
         if (s0 >= s1) continue;
         if (!c.chain.empty()) {
             // Efeitos de áudio: o fluxo do clipe (estado entre chamadas).
-            detail::mix_fx_clip(c, s0, s1, start, blocks, out, state, epoch, missing);
+            detail::mix_fx_clip(c, s0, s1, start, blocks, out, state, epoch, missing, dspError);
             continue;
         }
         // Balanço (a fonte já é estéreo): o lado oposto desce, o próprio fica.
@@ -594,12 +611,14 @@ void mix(const AudioMixSnapshot& snap, i64 start, u32 frames, BlockSource& block
             o[1] += blk->pcm[off + 1] * g * balR;
         }
     }
+    if (dspError != Errc::Ok) std::fill(out, out + static_cast<usize>(frames) * kMixChannels, 0.f);
     f32 peak = 0.0f;
     for (usize i = 0; i < static_cast<usize>(frames) * kMixChannels; ++i) {
         if (limitOutput) out[i] = soft_limit(out[i]);
         peak = std::max(peak, std::fabs(out[i]));
     }
     if (stats) {
+        if (dspError != Errc::Ok) stats->dspError = dspError;
         stats->missingBlocks += missing;
         stats->peak = std::max(stats->peak, peak);
     }

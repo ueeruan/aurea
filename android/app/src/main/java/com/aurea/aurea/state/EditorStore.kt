@@ -157,7 +157,7 @@ data class PreviewState(
 /** `aurea::Errc::UnsupportedFormat` (core/Result.hpp). */
 private const val ERRC_UNSUPPORTED_FORMAT = 17L
 /** Linhas de parâmetro lidas por efeito (o iOS dobra o buffer quando enche; aqui cabe o maior efeito). */
-private const val MAX_EFFECT_PARAM_ROWS = 256
+private const val MAX_EFFECT_PARAM_ROWS = 1024
 /** Quadros que o leitor de sequência do motor abre (media/ImageSequence.hpp). */
 private val SEQUENCE_FRAME_EXTENSIONS = setOf("png", "exr", "tga", "jpg", "jpeg", "bmp")
 /** `aurea::Errc::IoError` / `StorageFull` (TEMP_STORAGE_FULL). */
@@ -616,7 +616,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     val appStorage by lazy { AppStorage(getApplication(), engine) { quarantinedPaths } }
 
     /** Camada principal da seleção. */
-    val primary: Long? get() = selection.firstOrNull()
+    val primary: Long? get() = groupInnerSelection?.second ?: selection.firstOrNull()
+    val editingSelection: Set<Long> get() = groupInnerSelection?.second?.let { setOf(it) } ?: selection
+    val editingLayers: List<LayerRow> get() = groupInnerSelection?.let { groupInnerRows[it.first]?.map { child -> child.row } } ?: layers
+
 
     /**
      * Keyframe escolhido (losango tocado na timeline). Estado de APRESENTAÇÃO
@@ -737,7 +740,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             ?: return
         keySelection = sel
         keySelectMode = true
-        if (primary == sel.layer && selection.size == 1) timelineOnlySelection = selection.toSet()
+        if (primary == sel.layer && editingSelection.size == 1) {
+            if (groupInnerSelection == null) timelineOnlySelection = selection.toSet()
+        }
         else select(sel.layer, openOptions = false)
     }
 
@@ -757,7 +762,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             return
         }
         // Outra camada: ela vira a escolhida (só na timeline, sem doca) e a seleção recomeça nela.
-        if (primary != layer || selection.size != 1) select(layer, openOptions = false)
+        if (primary != layer || editingSelection.size != 1) select(layer, openOptions = false)
         keySelectMode = mode
         val base = keySelection?.takeIf { it.layer == layer } ?: KeySelection(layer)
         val next = base.toggleGroupOn(layer, group)
@@ -776,7 +781,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun selectAllTimelineKeys() {
         val layer = keySelection?.layer ?: selectedKeyframe?.first ?: primary ?: return
         // As outras camadas já escolhidas continuam na seleção.
-        keySelection = KeySelection.all(layer, keyframes[layer].orEmpty(), timelineFocus)
+        keySelection = KeySelection.all(layer, keysForLayer(layer).orEmpty(), timelineFocus)
             .copy(others = keySelection?.takeIf { it.layer == layer }?.others.orEmpty())
     }
 
@@ -788,7 +793,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun prepareTimelineKeyDrag(): KeySelection? {
         val original = keySelection ?: return null
         val expanded = original.plusAll(original.layers().associateWith { layer ->
-            keyframes[layer].orEmpty().filter { key -> original.on(layer).any { it.matches(key) } }
+            keysForLayer(layer).orEmpty().filter { key -> original.on(layer).any { it.matches(key) } }
                 .flatMap { graphKeyGroup(layer, it) }
         })
         keySelection = expanded
@@ -875,7 +880,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** A seleção some se a camada sumiu ou algum keyframe referido deixou de existir. */
     private fun validateKeySelection() {
         val sel = keySelection ?: return
-        if (layers.none { it.id == sel.layer } || sel.validatedAll { id -> if (layers.any { it.id == id }) keyframes[id].orEmpty() else null } == null) clearKeySelection()
+        if (layers.none { it.id == sel.layer } || sel.validatedAll { id -> if (layers.any { it.id == id }) keysForLayer(id).orEmpty() else null } == null) clearKeySelection()
     }
 
     // =========================================================================
@@ -898,7 +903,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     // 0.3.0: a Correção de cor tem 79 parâmetros e a Constelação 65; com 64 linhas
     // o papel, o look e a intensidade (77, 78, 76) não chegavam à interface.
     private val rowBuffer = directBuffer(MAX_EFFECT_PARAM_ROWS * EffectParam.ROW_BYTES)
-    private val textBlob = directBuffer(64 * 1024)
+    private var textBlob = directBuffer(64 * 1024)
     private val status = EngineStatus()
 
     // =========================================================================
@@ -1291,6 +1296,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 val level = withContext(Dispatchers.Default) {
                     val am = getApplication<Application>().getSystemService(android.content.Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
                     am?.getMemoryInfo(pressureInfo)
+                    if (am != null) engine.reportMemoryHeadroom(
+                        pressureInfo.availMem, pressureInfo.threshold, pressureInfo.lowMemory)
                     val runtime = Runtime.getRuntime()
                     memoryPressurePolicy.nextTrim(now, pressureInfo.lowMemory,
                         runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory()), runtime.maxMemory(),
@@ -1790,11 +1797,30 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private var inlineKeys by mutableStateOf<List<KeyframeRow>>(emptyList())
+    fun keysForLayer(layer: Long?): List<KeyframeRow>? = when {
+        layer == null -> null
+        groupInnerSelection?.second == layer -> inlineKeys
+        else -> keyframes[layer]
+    }
+
+    private fun refreshInlineKeys() {
+        val target = groupInnerSelection
+        if (target == null) { if (inlineKeys.isNotEmpty()) inlineKeys = emptyList(); return }
+        val count = groupInnerRows[target.first]?.firstOrNull { it.row.id == target.second }?.row?.keyframeCount ?: 0
+        val capacity = maxOf(1, count)
+        val buffer = directBuffer(capacity * PodLayout.KEYFRAME_ROW_BYTES)
+        val written = engine.queryKeyframes(target.second, buffer, capacity)
+        val fresh = List(written) { KeyframeRow.read(buffer, it) }
+        if (fresh != inlineKeys) inlineKeys = fresh
+    }
+
     private fun refreshDetail() {
         val id = primary
+        refreshInlineKeys()
         detail = if (id != null && engine.queryLayerDetail(id, detailBuffer)) readDetailIfChanged() else null
         expressions = if (id != null) engine.queryExpressions(id) else emptyList()
-        gizmo = same(gizmo, if (id != null) {
+        gizmo = same(gizmo, if (id != null && groupInnerSelection == null) {
             val out = FloatArray(8)
             // Girar/escala editam os eixos da PRÓPRIA camada: o gizmo mostra os locais.
             val localAxes = gizmoLocalSpace || gizmoTool != GIZMO_MOVE
@@ -3351,7 +3377,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     // --- Efeitos de parte 3D (beta 12/10/2026; Object3DEffects.cpp) -------------
     /** Nome de cada parte da camada 3D escolhida (vazio = o arquivo não deu nome). */
-    fun modelPartNames(): List<String> = primary?.let { engine.modelPartNames(it).toList() } ?: emptyList()
+    fun modelPartNames(includeJoints: Boolean = false): List<String> = primary?.let { engine.modelPartNames(it, includeJoints).toList() } ?: emptyList()
 
     /**
      * Põe "Animar parte 3D", "Esconder partes 3D" ou "Trocar textura 3D" já
@@ -3769,8 +3795,20 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = primary ?: return
         val res = AppText.resources(getApplication())
         effectParams = (effects + decorations).associate { e ->
-            val n = engine.queryEffectParams(id, e.effectId, rowBuffer, MAX_EFFECT_PARAM_ROWS, textBlob)
-            e.effectId to localizeEffectParams(res, e.typeId, List(max(0, n)) { EffectParam.read(rowBuffer, it, textBlob) })
+            e.effectId to localizeEffectParams(res, e.typeId, readEffectParams(id, e.effectId))
+        }
+    }
+
+    private fun readEffectParams(layer: Long, effect: Int): List<EffectParam> {
+        while (true) {
+            val count = engine.queryEffectParams(layer, effect, rowBuffer, MAX_EFFECT_PARAM_ROWS, textBlob).coerceAtLeast(0)
+            val params = List(count) { EffectParam.read(rowBuffer, it, textBlob) }
+            val truncated = params.indices.any { index ->
+                val offset = index * EffectParam.ROW_BYTES
+                rowBuffer.getInt(offset + 88) == 0 || rowBuffer.getInt(offset + 12) > params[index].enumLabels.size
+            }
+            if (!truncated || textBlob.capacity() >= 4 * 1024 * 1024) return params
+            textBlob = directBuffer(textBlob.capacity() * 2)
         }
     }
 
@@ -3899,6 +3937,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     fun selectAll() {
+        groupInnerSelection = null
         timelineOnlySelection = emptySet()
         clearKeySelection()
         selection = layers.map { it.id }.toCollection(LinkedHashSet())
@@ -3908,10 +3947,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     fun clearSelection() {
+        val hadInlineSelection = groupInnerSelection != null
         groupInnerSelection = null
         timelineOnlySelection = emptySet()
         clearKeySelection()
-        if (selection.isEmpty()) return
+        if (selection.isEmpty()) {
+            if (hadInlineSelection) { detail = null; gizmo = null; effects = emptyList(); effectParams = emptyMap() }
+            return
+        }
         selection = emptySet()
         engine.clearSelection()
         detail = null
@@ -3929,14 +3972,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     // --- Camadas ------------------------------------------------------------
-    fun deleteLayers(ids: Collection<Long> = selection, ripple: Boolean? = null) {
-        val targets = layers.filter { it.id in ids && !it.locked }.map { it.id }
+    fun deleteLayers(ids: Collection<Long> = editingSelection, ripple: Boolean? = null) {
+        val targets = editingLayers.filter { it.id in ids && !it.locked }.map { it.id }
         if (targets.isEmpty()) return
         if (playing) pause()
         // A LINHA MAGNÉTICA manda: apagar um trecho dela fecha o buraco mesmo
         // no modo Composição. Sem nenhum trecho magnético na seleção, vale o
         // modo Edição de sempre.
-        val closes = ripple ?: (editMode || layers.any { it.id in ids && it.magnetic })
+        val closes = ripple ?: (editMode || editingLayers.any { it.id in ids && it.magnetic })
         if (closes) {
             // Modo Edição: some e o buraco fecha (um passo de desfazer).
             engine.rippleDelete(targets.toLongArray())
@@ -3947,9 +3990,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         clearSelection()
     }
 
-    fun duplicateLayers(ids: Collection<Long> = selection) {
+    fun duplicateLayers(ids: Collection<Long> = editingSelection) {
         if (ids.isEmpty()) return
-        selectCreatedAfter = layers.map { it.id }.toSet()
+        if (groupInnerSelection != null) {
+            val groupId = groupInnerSelection!!.first
+            inlineCreatedAfter = groupId to groupInnerRows[groupId].orEmpty().map { it.row.id }.toSet()
+        } else selectCreatedAfter = layers.map { it.id }.toSet()
         group("duplicar") { ids.forEach { duplicateLayer(it) } }
     }
 
@@ -3961,6 +4007,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * apagava o ORIGINAL.
      */
     private var selectCreatedAfter: Set<Long>? = null
+    private var inlineCreatedAfter: Pair<Long, Set<Long>>? = null
 
     fun renameLayer(layer: Long, name: String) {
         send { setLayerName(layer, name) }
@@ -4256,7 +4303,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (query.isBlank()) emptyList() else engine.searchLayers(query.trim()).toList()
 
     /** Divide as camadas escolhidas no playhead (as que o cobrem). */
-    fun splitAtPlayhead(ids: Collection<Long> = selection) {
+    fun splitAtPlayhead(ids: Collection<Long> = editingSelection) {
         val t = playhead
         // 0.3.6 (keys, item 4): TOCANDO, `playhead` vem quadros atrás do motor: o
         // corte caía à esquerda de onde o cabeçote parava e, logo depois do começo
@@ -4266,9 +4313,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         // Parado, segue o quadro explícito de sempre.
         val live = playing
         val slack = if (live) LIVE_SPLIT_SLACK else 0
-        val targets = layers.filter { it.id in ids && t + slack > it.startFrame && t < it.endFrame + slack }
+        val targets = editingLayers.filter { it.id in ids && t + slack > it.startFrame && t < it.endFrame + slack }
         if (targets.isEmpty() || destroyed || !ready) return
-        pendingSplit = PendingSplit(layers.mapTo(HashSet()) { it.id }, targets, t)
+        groupInnerSelection?.first?.let { group ->
+            inlineCreatedAfter = group to groupInnerRows[group].orEmpty().map { it.row.id }.toSet()
+        }
+        pendingSplit = if (groupInnerSelection == null) PendingSplit(layers.mapTo(HashSet()) { it.id }, targets, t) else null
         // Sem a releitura imediata do `group`: o corte só vale no próximo quadro do
         // motor, e ela relia o modelo VELHO (dezenas de consultas JNI no lock que o
         // preview segura, logo quando o corte invalida o cache dele) — e relia de
@@ -4405,7 +4455,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun toggleTrackKeyAtPlayhead(layer: Long, track: com.aurea.aurea.engine.TrackKey, value: Float) {
         val d = detail?.takeIf { it.id == layer } ?: return
         val t = d.localFrame(playhead)
-        val here = keyframes[layer].orEmpty().any {
+        val here = keysForLayer(layer).orEmpty().any {
             it.property == track.property && it.effectIndex == track.effectIndex && it.paramIndex == track.paramIndex && it.time == t
         }
         if (here) send { deleteKeyframe(layer, track.property, track.effectIndex, track.paramIndex, t) }
@@ -4415,7 +4465,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** ◆ segurado (P1-9): apaga TODAS as chaves das trilhas, num passo de desfazer. */
     fun deleteAllKeyframes(layer: Long, tracks: List<com.aurea.aurea.engine.TrackKey>) {
-        val keys = keyframes[layer].orEmpty().filter { k ->
+        val keys = keysForLayer(layer).orEmpty().filter { k ->
             // Trilha da camada (sem efeito): basta a propriedade; de efeito/animador, o TrackRef inteiro.
             tracks.any {
                 it.property == k.property && if (it.effectIndex < 0) k.effectIndex < 0
@@ -4622,7 +4672,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val d = (if (id == primary) detail else detailOf(id)) ?: return
         val row = layers.firstOrNull { it.id == id } ?: return
         val local = playhead - row.startFrame + row.offsetFrames
-        val keyedHere = properties.count { p -> keyframes[id].orEmpty().any {
+        val keyedHere = properties.count { p -> keysForLayer(id).orEmpty().any {
             it.property == p && it.effectIndex == NO_EFFECT && it.time == local
         } }
         val anyHere = if (properties.size == 3) keyedHere == 3 else keyedHere > 0
@@ -4747,7 +4797,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val linked2DScale = scaleAxesLinked && key.property in 3..4
         if ((!threeD && !linked2DScale) || key.effectIndex != NO_EFFECT || key.property !in 0..11) return listOf(key)
         val base = key.property / 3 * 3
-        return keyframes[layer].orEmpty().filter { it.effectIndex == NO_EFFECT && it.property in base..base + (if (threeD) 2 else 1) && it.time == key.time }.ifEmpty { listOf(key) }
+        return keysForLayer(layer).orEmpty().filter { it.effectIndex == NO_EFFECT && it.property in base..base + (if (threeD) 2 else 1) && it.time == key.time }.ifEmpty { listOf(key) }
     }
 
     /**
@@ -4777,7 +4827,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     // --- Efeitos -------------------------------------------------------------
     /** Adiciona o efeito em TODAS as camadas escolhidas. */
-    fun addEffect(typeId: Int, ids: Collection<Long> = selection) {
+    fun addEffect(typeId: Int, ids: Collection<Long> = editingSelection) {
         if (ids.isEmpty()) return
         // 0.3.2: efeito Hyper só com o acesso (a folha de efeitos já abre a tela bloqueada).
         if (com.aurea.aurea.effects.HyperEffectGate.locked(typeId)) { showToast(appText(R.string.hyper_effect_locked)); return }
@@ -4903,7 +4953,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         // The visible playhead moves before the asynchronous detail query catches up.
         val local = d.localFrame(playhead)
         val comps = max(1, ParamType.componentCount(param.type))
-        val here = (keyframes[id] ?: emptyList()).filter {
+        val here = (keysForLayer(id) ?: emptyList()).filter {
             it.property == TrackProperty.EFFECT_PARAM && it.effectIndex == effectId &&
                 it.paramIndex / 4 == param.index && it.time == local
         }
@@ -5038,7 +5088,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun stepToKeyframe(direction: Int): Boolean {
         val id = primary ?: return false
         val d = detail ?: return false
-        val times = (keyframes[id] ?: emptyList()).filter { it.timelineVisible }
+        val times = (keysForLayer(id) ?: emptyList()).filter { it.timelineVisible }
             .map { d.timelineFrame(it.time) }.distinct().sorted()
         val target = if (direction > 0) times.firstOrNull { it > playhead } else times.lastOrNull { it < playhead }
         target ?: return false
@@ -6178,7 +6228,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         private set
 
     /** "Agrupar": as camadas viram uma pré-composição (mesmo visual, tempos iguais). */
-    fun precompose(ids: Collection<Long> = selection) {
+    fun precompose(ids: Collection<Long> = editingSelection) {
         if (ids.isEmpty()) return
         val id = engine.precompose(ids.toLongArray())
         if (id < 0) {
@@ -6195,11 +6245,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * destravadas), sem mudar nada. Sem a biblioteca nativa (testes JVM), a
      * contagem.
      */
-    fun canGroupAndMask(ids: Collection<Long> = selection): Boolean =
+    fun canGroupAndMask(ids: Collection<Long> = editingSelection): Boolean =
         runCatching { engine.canGroupAndMask(ids.toLongArray()) }.getOrElse { ids.size >= 2 }
 
     /** The engine chooses the top selected visual layer and commits one undo step. */
-    fun groupAndMask(exclude: Boolean, ids: Collection<Long> = selection) {
+    fun groupAndMask(exclude: Boolean, ids: Collection<Long> = editingSelection) {
         if (playing) pause()
         val id = engine.groupAndMask(ids.toLongArray(), exclude, appText(R.string.editor_grupo))
         if (id < 0) {
@@ -6219,7 +6269,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     fun keyframeNavigation(layer: Long, target: com.aurea.aurea.engine.TrackKey,
                            compositionFrame: Int = playhead): com.aurea.aurea.engine.KeyframeNavigation? {
-        keyframes[layer] ?: return null // Observe the engine's published anchor snapshot.
+        keysForLayer(layer) ?: return null // Observe the engine's published anchor snapshot.
         return engine.queryKeyframeNavigation(layer, target.property, target.effectIndex, target.paramIndex, compositionFrame)
     }
 
@@ -6931,7 +6981,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun toggleParticleKeyframe(param: Int) {
         val id = primary ?: return
         val d = detail ?: return
-        val here = (keyframes[id] ?: emptyList()).filter {
+        val here = (keysForLayer(id) ?: emptyList()).filter {
             it.property == TrackProperty.PARTICLE_PARAM && it.paramIndex == param && it.time == d.localFrame(playhead)
         }
         group(if (here.isNotEmpty()) "remover keyframe" else "adicionar keyframe") {
@@ -6948,14 +6998,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun particleKeyHere(param: Int): Boolean {
         val id = primary ?: return false
         val d = detail ?: return false
-        return (keyframes[id] ?: emptyList()).any {
+        return (keysForLayer(id) ?: emptyList()).any {
             it.property == TrackProperty.PARTICLE_PARAM && it.paramIndex == param && it.time == d.localFrame(playhead)
         }
     }
 
     /** A trilha do parâmetro existe (animado em algum lugar da timeline). */
     fun particleKeyed(id: Long, param: Int): Boolean =
-        (keyframes[id] ?: emptyList()).any {
+        (keysForLayer(id) ?: emptyList()).any {
             it.property == TrackProperty.PARTICLE_PARAM && it.paramIndex == param
         }
 
@@ -6975,7 +7025,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun toggleMaterialKeyframe(material: Int, param: Int, value: Float) {
         val id = primary ?: return
         val d = detail ?: return
-        val here = (keyframes[id] ?: emptyList()).filter {
+        val here = (keysForLayer(id) ?: emptyList()).filter {
             it.property == TrackProperty.MATERIAL_PARAM && it.effectIndex == material && it.paramIndex == param && it.time == d.localFrame(playhead)
         }
         group("keyframe de material") {
@@ -7028,7 +7078,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = primary ?: return
         val d = detail ?: return
         seek(d.timelineFrame(localFrame))
-        keyframes[id].orEmpty().firstOrNull { it.property == TrackProperty.TIME_REMAP && it.time == localFrame }
+        keysForLayer(id).orEmpty().firstOrNull { it.property == TrackProperty.TIME_REMAP && it.time == localFrame }
             ?.let { selectKeyframe(id, it) }
     }
 
@@ -7967,7 +8017,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     /** Alternar grupo: um grupo escolhido desagrupa; senão as escolhidas viram grupo. */
-    fun toggleGroup(ids: Collection<Long> = selection) {
+    fun toggleGroup(ids: Collection<Long> = editingSelection) {
         val only = ids.singleOrNull()
         if (only != null && layers.firstOrNull { it.id == only }?.let { com.aurea.aurea.ui.theme.LayerType.of(it.kind) } == com.aurea.aurea.ui.theme.LayerType.Group) ungroupPrecomp(only)
         else precompose(ids)
@@ -8319,7 +8369,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     private fun afterClipboard() { clipboard = engine.clipboardState() }
 
-    fun copyLayers(ids: Collection<Long> = selection) {
+    fun copyLayers(ids: Collection<Long> = editingSelection) {
         if (ids.isEmpty()) return
         val n = engine.copyLayers(ids.toLongArray())
         afterClipboard()
@@ -8328,9 +8378,15 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     fun pasteLayers() {
         // As coladas ficam escolhidas (o mesmo caminho do duplicar).
-        selectCreatedAfter = layers.map { it.id }.toSet()
+        val inlineGroup = groupInnerSelection?.first
+        if (inlineGroup != null) {
+            inlineCreatedAfter = inlineGroup to groupInnerRows[inlineGroup].orEmpty().map { it.row.id }.toSet()
+        } else selectCreatedAfter = layers.map { it.id }.toSet()
         val n = engine.pasteLayers(playhead.toLong())
-        if (n <= 0) selectCreatedAfter = null
+        if (n <= 0) {
+            selectCreatedAfter = null
+            inlineCreatedAfter = null
+        }
         refreshNow()
         showToast(
             when {
@@ -8353,14 +8409,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         afterClipboard()
     }
 
-    fun pasteTransform(ids: Collection<Long> = selection) {
+    fun pasteTransform(ids: Collection<Long> = editingSelection) {
         if (ids.isEmpty()) return
         val count = engine.pasteTransform(ids.toLongArray())
         refreshNow()
         if (count > 0) showToast(appText(R.string.transform_pasted))
     }
 
-    fun pasteStyle(ids: Collection<Long> = selection) {
+    fun pasteStyle(ids: Collection<Long> = editingSelection) {
         if (ids.isEmpty()) return
         val n = engine.pasteStyle(ids.toLongArray())
         refreshNow()
@@ -8374,7 +8430,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         showToast(if (n > 0) appText(R.string.msg_efeito_s_copiado_s, n) else appText(R.string.msg_esta_camada_nao_tem_efeitos))
     }
 
-    fun pasteEffects(ids: Collection<Long> = selection) {
+    fun pasteEffects(ids: Collection<Long> = editingSelection) {
         if (ids.isEmpty()) return
         val n = engine.pasteEffects(ids.toLongArray())
         refreshNow()
@@ -8413,7 +8469,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         showToast(if (n > 0) appText(R.string.msg_keyframe_s_copiado_s, n) else appText(R.string.msg_nenhum_keyframe_no_cabecote))
     }
 
-    fun pasteKeyframes(ids: Collection<Long> = selection) {
+    fun pasteKeyframes(ids: Collection<Long> = editingSelection) {
         if (ids.isEmpty()) return
         val n = engine.pasteKeyframes(ids.toLongArray(), playhead.toLong())
         refreshNow()
@@ -8462,7 +8518,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * [keysOnly] só a animação anda; senão as camadas inteiras. O motor faz
      * tudo num passo de desfazer e pula as bloqueadas.
      */
-    fun staggerSelection(stepFrames: Int, keysOnly: Boolean, ids: Collection<Long> = selection) {
+    fun staggerSelection(stepFrames: Int, keysOnly: Boolean, ids: Collection<Long> = editingSelection) {
         val ordered = layers.filter { it.id in ids && !it.locked }.map { it.id }
         if (ordered.size < 2) {
             showToast(appText(R.string.sh_pick_two_unlocked_layers))
@@ -8500,11 +8556,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** Barra inferior da seleção múltipla: 0 cortes, 1 todas depois do cabeçote, 2 todas antes. */
     fun multiTimeVariant(): Int =
-        if (!ready || selection.isEmpty()) 0 else engine.queryMultiTimeActions(selection.toLongArray(), playhead)
+        if (!ready || editingSelection.isEmpty()) 0 else engine.queryMultiTimeActions(editingSelection.toLongArray(), playhead)
 
     /** Estende o início (ou o fim) das escolhidas destravadas até o cabeçote, num passo de desfazer. */
     fun extendSelectionToPlayhead(start: Boolean) {
-        val targets = layers.filter { it.id in selection && !it.locked }.map { it.id }
+        val targets = editingLayers.filter { it.id in editingSelection && !it.locked }.map { it.id }
         if (targets.isEmpty() || !ready) return
         if (playing) pause()
         beginGesture(if (start) "estender inicio" else "estender fim")
@@ -8514,7 +8570,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** "Copiar camada (com estilo)": com UMA escolhida, o estilo dela também vai para colar estilo. */
     fun copyLayersWithStyle() {
-        val ids = selection.toList()
+        val ids = editingSelection.toList()
         if (ids.isEmpty() || !ready) return
         if (ids.size == 1) engine.copyStyle(ids[0])
         copyLayers(ids)
@@ -8524,7 +8580,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun copiedStyleParts(): Int = if (ready) engine.copiedStyleParts() else 0
 
     /** Cola só as partes pedidas do estilo copiado (um passo de desfazer). */
-    fun pasteStyleParts(parts: Int, ids: Collection<Long> = selection) {
+    fun pasteStyleParts(parts: Int, ids: Collection<Long> = editingSelection) {
         if (ids.isEmpty() || parts == 0 || !ready) return
         if (playing) pause()
         val n = engine.pasteStyleParts(ids.toLongArray(), parts)
@@ -9169,8 +9225,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var groupInnerRows by mutableStateOf<Map<Long, List<GroupInnerRow>>>(emptyMap())
         private set
     /** A camada de dentro escolhida na timeline: (grupo, camada). Null = nenhuma. */
-    var groupInnerSelection by mutableStateOf<Pair<Long, Long>?>(null)
-        private set
+    private var inlineSelection by mutableStateOf<Pair<Long, Long>?>(null)
+    var groupInnerSelection: Pair<Long, Long>?
+        get() = inlineSelection
+        private set(value) {
+            if (inlineSelection == value) return
+            val accepted = engine.setInlineEditTarget(value?.first ?: 0L, value?.second ?: 0L)
+            inlineSelection = value.takeIf { accepted }
+        }
     private var groupRowBuffer = directBuffer(64 * PodLayout.LAYER_ROW_BYTES)
     private var groupNameBlob = directBuffer(8 * 1024)
 
@@ -9188,6 +9250,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun selectGroupInner(group: Long, layer: Long) {
         clearSelection()
         groupInnerSelection = group to layer
+        refreshDetail()
+        refreshEffects()
     }
 
     fun clearGroupInnerSelection() { groupInnerSelection = null }
@@ -9205,6 +9269,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val next = HashMap<Long, List<GroupInnerRow>>(groups.size * 2)
         for (g in groups) next[g] = readGroupRows(g)
         if (next != groupInnerRows) groupInnerRows = next
+        inlineCreatedAfter?.let { (group, before) ->
+            next[group]?.firstOrNull { it.row.id !in before }?.let { child ->
+                inlineCreatedAfter = null
+                groupInnerSelection = group to child.row.id
+            }
+        }
         groupInnerSelection?.let { (g, id) -> if (next[g]?.any { it.row.id == id } != true) groupInnerSelection = null }
     }
 
@@ -9420,7 +9490,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val components = component?.let { listOf(it) } ?: (0 until spec.components).toList()
         val tracks = components.mapNotNull { c -> spec.track(domain, material, c)?.let { c to it } }
         if (tracks.isEmpty()) return
-        val here = keyframes[id].orEmpty().filter { key ->
+        val here = keysForLayer(id).orEmpty().filter { key ->
             key.time == time && tracks.any { (_, track) ->
                 key.property == track.property && key.effectIndex == track.effectIndex && key.paramIndex == track.paramIndex
             }
@@ -9441,7 +9511,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val d = detail ?: return
         val property = when (param) { in 1..4 -> 20 + param; 6 -> 25; 7 -> 26; else -> return }
         send {
-            if (keyframes[id].orEmpty().any { it.property == property && it.effectIndex == NO_EFFECT && it.time == d.localFrame(playhead) }) deleteKeyframe(id, property, NO_EFFECT, 0, d.localFrame(playhead))
+            if (keysForLayer(id).orEmpty().any { it.property == property && it.effectIndex == NO_EFFECT && it.time == d.localFrame(playhead) }) deleteKeyframe(id, property, NO_EFFECT, 0, d.localFrame(playhead))
             else insertKeyframe(id, property, NO_EFFECT, 0, d.localFrame(playhead), value)
         }
         refreshNow()
@@ -9490,7 +9560,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             CAMERA_LENS_APERTURE -> lens[4]
             else -> lens[5]
         }
-        val here = keyframes[id].orEmpty().any { it.property == property && it.effectIndex == NO_EFFECT && it.time == d.localFrame(playhead) }
+        val here = keysForLayer(id).orEmpty().any { it.property == property && it.effectIndex == NO_EFFECT && it.time == d.localFrame(playhead) }
         group(if (here) "remover keyframe" else "adicionar keyframe") {
             if (here) deleteKeyframe(id, property, NO_EFFECT, 0, d.localFrame(playhead))
             else insertKeyframe(id, property, NO_EFFECT, 0, d.localFrame(playhead), value)
@@ -9652,7 +9722,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * alguma é 3D) e faz dele o pai de todas — nada sai do lugar na tela. Um
      * passo de desfazer; o nulo novo fica selecionado.
      */
-    fun parentSelectionToNewNull(ids: Collection<Long> = selection) {
+    fun parentSelectionToNewNull(ids: Collection<Long> = editingSelection) {
         if (ids.isEmpty()) return
         val id = engine.parentToNewNull(ids.toLongArray())
         if (id < 0) {
@@ -9862,7 +9932,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun toggleSpeedKeyframe() {
         val id = primary ?: return
         val d = detail ?: return
-        val at = keyframes[id].orEmpty().any { it.property == TrackProperty.SPEED && it.time == d.localFrame(playhead) }
+        val at = keysForLayer(id).orEmpty().any { it.property == TrackProperty.SPEED && it.time == d.localFrame(playhead) }
         if (at) send { deleteKeyframe(id, TrackProperty.SPEED, -1, 0, d.localFrame(playhead)) }
         else send { insertKeyframe(id, TrackProperty.SPEED, -1, 0, d.localFrame(playhead), d.speed.coerceIn(0.05f, 16f)) }
         refreshNow()
@@ -9943,7 +10013,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun toggleVolumeKeyframe() {
         val id = primary ?: return
         val d = detail ?: return
-        val at = keyframes[id].orEmpty().any { it.property == TrackProperty.AUDIO_VOLUME && it.time == d.localFrame(playhead) }
+        val at = keysForLayer(id).orEmpty().any { it.property == TrackProperty.AUDIO_VOLUME && it.time == d.localFrame(playhead) }
         if (at) {
             send { deleteKeyframe(id, TrackProperty.AUDIO_VOLUME, -1, 0, d.localFrame(playhead)) }
         } else {

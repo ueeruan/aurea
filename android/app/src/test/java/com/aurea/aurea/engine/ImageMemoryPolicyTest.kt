@@ -26,6 +26,38 @@ class ImageMemoryPolicyTest {
         assertNull(ImageMemoryPolicy.sampleSize(-1, 100, 4096, 100))
         assertEquals(1, ImageMemoryPolicy.sampleSize(1920, 1080, 4096, 4096L * 4096))
     }
+    /**
+     * 0.5.3 ("duas fotos e fechou"): duas fotos num lote — a segunda chega com a
+     * cópia direta da primeira (4000×3000×4) ainda no heap. Ela só é recusada se a
+     * memória continuar ocupada DEPOIS de uma coleta; dimensão impossível nem coleta.
+     */
+    @Test fun secondPhotoOfABatchRetriesAfterReclaimingThePreviousCopy() {
+        val heap = 256L shl 20
+        var used = 60L shl 20
+        val firstCopy = 4000L * 3000 * 4
+        var reclaims = 0
+        val available = { ImageMemoryPolicy.pixelBudget(heap - used) }
+        val reclaim = { reclaims++; used -= firstCopy; Unit }
+        // 1ª foto: cabe direto, sem coleta.
+        assertEquals(1, ImageMemoryPolicy.decodeSample(4000, 3000, 4096, available, reclaim))
+        assertEquals(0, reclaims)
+        used += firstCopy
+        // 2ª foto (retrato com EXIF 6 chega com as dimensões cruas): só cabe depois da coleta.
+        assertEquals(1, ImageMemoryPolicy.decodeSample(3000, 4000, 4096, available, reclaim))
+        assertEquals(1, reclaims)
+        // Memória ocupada de verdade: recusa depois de UMA coleta (nunca laço).
+        used = heap
+        assertNull(ImageMemoryPolicy.decodeSample(3000, 4000, 4096, available, { reclaims++; Unit }))
+        assertEquals(2, reclaims)
+        // Foto ilegível (bounds −1) ou vazia: nem coleta.
+        assertNull(ImageMemoryPolicy.decodeSample(-1, -1, 4096, available, { reclaims++; Unit }))
+        assertNull(ImageMemoryPolicy.decodeSample(0, 4000, 4096, available, { reclaims++; Unit }))
+        assertEquals(2, reclaims)
+        // Foto enorme (12000×9000): a amostra reduz à grade de 4096 com memória livre.
+        used = 0
+        assertEquals(4, ImageMemoryPolicy.decodeSample(12_000, 9000, 4096, available, reclaim))
+    }
+
     @Test fun pressureEscalatesImmediatelyButDoesNotRepeatedlyPurgeEveryFrame() {
         val policy = MemoryPressurePolicy()
         val maximum = 256L shl 20

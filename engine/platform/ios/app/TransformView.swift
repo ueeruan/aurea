@@ -103,16 +103,16 @@ struct TransformView: View {
     }
     private var curveKeys: [KeyframeItem] {
         if let track = animatorTrack {
-            return (model.keyframes[id] ?? []).filter {
+            return (model.keysForLayer(id) ?? []).filter {
                 Int($0.property) == track.property && $0.effectIndex == track.effect && $0.paramIndex == track.param
             }.sorted { $0.time < $1.time }
         }
         if cameraScale, let property = model.cameraLensTrack(AureaModel.cameraLensFocal) {
-            return (model.keyframes[id] ?? []).filter { $0.property == property && $0.effectIndex == UInt32.max }.sorted { $0.time < $1.time }
+            return (model.keysForLayer(id) ?? []).filter { $0.property == property && $0.effectIndex == UInt32.max }.sorted { $0.time < $1.time }
         }
         let candidates = props + keyProps.filter { !props.contains($0) }
         return preferredCurveTrack(candidates.map { property in
-            (model.keyframes[id] ?? []).filter { $0.property == property && $0.effectIndex == UInt32.max }.sorted { $0.time < $1.time }
+            (model.keysForLayer(id) ?? []).filter { $0.property == property && $0.effectIndex == UInt32.max }.sorted { $0.time < $1.time }
         })
     }
     private var expressionLook: ExpressionLook {
@@ -1240,7 +1240,7 @@ struct TransformView: View {
 
     private func lensLook(_ param: UInt32) -> KeyframeLook {
         guard let property = model.cameraLensTrack(param) else { return .none }
-        let own: [KeyframeItem] = (model.keyframes[id] ?? []).filter { $0.property == property && $0.effectIndex == UInt32.max }
+        let own: [KeyframeItem] = (model.keysForLayer(id) ?? []).filter { $0.property == property && $0.effectIndex == UInt32.max }
         if own.contains(where: { $0.time == model.localPlayhead }) { return .keyHere }
         return own.isEmpty ? .none : .animated
     }
@@ -1273,7 +1273,7 @@ struct TransformView: View {
         if cameraScale { guard !locked else { return }; model.toggleCameraLensKey(AureaModel.cameraLensFocal); return }
         guard !locked, !keyProps.isEmpty else { return }
         let present = keyProps.filter { property in
-            (model.keyframes[id] ?? []).contains { $0.property == property && $0.effectIndex == UInt32.max && $0.time == model.localPlayhead }
+            (model.keysForLayer(id) ?? []).contains { $0.property == property && $0.effectIndex == UInt32.max && $0.time == model.localPlayhead }
         }.count
         let remove = keyProps.count == 3 ? present == 3 : present > 0
         let snapshot = keyProps.map { ($0, value($0)) }, local = model.localPlayhead
@@ -1292,7 +1292,7 @@ struct TransformView: View {
         guard !locked else { return }
         let properties: [UInt32]
         if cameraScale, let lens = model.cameraLensTrack(AureaModel.cameraLensFocal) { properties = [lens] } else { properties = keyProps }
-        let keys = (model.keyframes[id] ?? []).filter { properties.contains($0.property) && $0.effectIndex == UInt32.max }
+        let keys = (model.keysForLayer(id) ?? []).filter { properties.contains($0.property) && $0.effectIndex == UInt32.max }
         guard !keys.isEmpty else { return }
         let layer = id
         model.beginGesture("apagar keyframes")

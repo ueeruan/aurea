@@ -1280,7 +1280,7 @@ private struct CopyPasteButton: View {
                          sublabel: count == 1 ? AureaText.t("om_cp_with_style") : nil, enabled: count > 0,
                          tag: "copyPaste.copy") { model.copyLayersWithStyle() })
         out.append(.item(AureaText.plural("om_cp_paste", 1), glyph: CupertinoGlyph.DocOnClipboard, enabled: clip & 1 != 0,
-                         tag: "copyPaste.paste") { model.engine.pasteLayers(model.status.playhead); refresh() })
+                         tag: "copyPaste.paste") { model.pasteCopiedLayers(); refresh() })
         out.append(.item(AureaText.t("om_cp_paste_style_more"), glyph: ShellGlyph.PaintbrushFill, chevron: true,
                          enabled: count > 0 && clip & 2 != 0, tag: "copyPaste.pasteStyle") { presentPasteStyle() })
         // Mais do AUREA (o que a referência não tem), depois de um fio.

@@ -862,6 +862,13 @@ AUREA_JNI jlong AUREA_FN(nativeTrimMemory)(JNIEnv*, jclass, jlong handle, jint l
     return static_cast<jlong>(c->engine.trim_memory(static_cast<i32>(level)).total);
 }
 
+AUREA_JNI void AUREA_FN(nativeReportMemoryHeadroom)(JNIEnv*, jclass, jlong handle,
+    jlong available, jlong critical, jboolean lowMemory) {
+    if (NativeContext* c = ctx_of(handle)) c->engine.report_memory_headroom(
+        available > 0 ? static_cast<u64>(available) : 0,
+        critical > 0 ? static_cast<u64>(critical) : 0, lowMemory == JNI_TRUE);
+}
+
 // Fase 8B §12/§15: uso e orçamento por categoria de memória do motor, para a
 // tela Ajustes › Armazenamento. `out`: [usado, orçamento] × categoria
 // (MemoryClass, na ordem do enum). Devolve o número de categorias escritas.
@@ -1875,6 +1882,11 @@ AUREA_JNI jboolean AUREA_FN(nativeOpenPrecomp)(JNIEnv*, jclass, jlong handle, jl
 }
 
 // 0.5.3: o grupo aberto NA timeline (EngineGroupInline.cpp) — sem entrar nele.
+AUREA_JNI jboolean AUREA_FN(nativeSetInlineEditTarget)(JNIEnv*, jclass, jlong handle, jlong group, jlong layer) {
+    NativeContext* context = ctx_of(handle);
+    return context && context->engine.set_inline_edit_target(static_cast<u64>(group), static_cast<u64>(layer)) ? JNI_TRUE : JNI_FALSE;
+}
+
 AUREA_JNI jint AUREA_FN(nativeQueryGroupLayers)(JNIEnv* env, jclass, jlong handle, jlong group, jobject rows,
                                                 jint capacity, jobject blob, jint blobCapacity) {
     NativeContext* c = ctx_of(handle);
@@ -3285,9 +3297,9 @@ AUREA_JNI jstring AUREA_FN(nativeEffectImageName)(JNIEnv* env, jclass, jlong han
     const auto name = c ? c->engine.effect_image_name(static_cast<u64>(layer), static_cast<u32>(effect)) : std::string{};
     return env->NewStringUTF(name.c_str());
 }
-AUREA_JNI jobjectArray AUREA_FN(nativeModelPartNames)(JNIEnv* env, jclass, jlong handle, jlong layer) {
+AUREA_JNI jobjectArray AUREA_FN(nativeModelPartNames)(JNIEnv* env, jclass, jlong handle, jlong layer, jboolean includeJoints) {
     NativeContext* c = ctx_of(handle);
-    const auto names = c ? c->engine.model_part_names(static_cast<u64>(layer)) : std::vector<std::string>{};
+    const auto names = c ? c->engine.model_part_names(static_cast<u64>(layer), includeJoints == JNI_TRUE) : std::vector<std::string>{};
     jclass stringClass = env->FindClass("java/lang/String");
     jobjectArray out = env->NewObjectArray(static_cast<jsize>(names.size()), stringClass, nullptr);
     if (!out) return nullptr;

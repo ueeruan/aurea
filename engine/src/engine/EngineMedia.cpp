@@ -70,6 +70,7 @@ Status Engine::import_color_lut(u64 layerId, u32 effectId, const char* path) noe
     const u32 gradeType = effect_type_id(effect_keys::kColorGrade);
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer || layer->locked) return Errc::InvalidState;
@@ -206,6 +207,7 @@ Status Engine::set_effect_image(u64 layerId, u32 effectId, const char* path) noe
     std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer || layer->locked) return Errc::InvalidState;
@@ -236,6 +238,12 @@ Status Engine::set_effect_image(u64 layerId, u32 effectId, const char* path) noe
 std::string Engine::effect_image_name(u64 layerId, u32 effectId) const noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     const Composition* comp = project_ ? project_->timeline().composition(project_->timeline().current()) : nullptr;
+    if (comp && inlineEditLayer_.load() == layerId) {
+        const Layer* group = comp->layer(LayerId::unpack(inlineEditGroup_.load()));
+        comp = group && group->kind == LayerKind::Composition
+            && group->nested.composition.pack() == inlineEditInner_.load()
+            ? project_->timeline().composition(group->nested.composition) : nullptr;
+    }
     const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer) return {};
     for (const auto& e : layer->effects) {
@@ -246,15 +254,16 @@ std::string Engine::effect_image_name(u64 layerId, u32 effectId) const noexcept 
     return {};
 }
 
-std::vector<std::string> Engine::model_part_names(u64 layerId) noexcept {
+std::vector<std::string> Engine::model_part_names(u64 layerId, bool includeJoints) noexcept {
     std::vector<std::string> names;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     const Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer || layer->kind != LayerKind::Model3D) return names;
     const auto it = models_.find(layer->model.scene.pack());
     if (it == models_.end() || !it->second) return names;
-    scene3d::part_names(*it->second, names);
+    scene3d::part_names(*it->second, names, includeJoints);
     return names;
 }
 
@@ -270,6 +279,7 @@ Status Engine::set_material_texture_image(u64 layerId, u32 material, const char*
     std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* layer = textured_model(comp, layerId, material, models_);
     if (!layer) return Errc::NotFound;
@@ -300,6 +310,7 @@ Status Engine::set_material_texture_layer(u64 layerId, u32 material, u64 sourceL
     if (!sourceLayer) return Errc::InvalidArgument;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* layer = textured_model(comp, layerId, material, models_);
     if (!layer) return Errc::NotFound;
@@ -324,6 +335,7 @@ Status Engine::set_material_texture_layer(u64 layerId, u32 material, u64 sourceL
 Status Engine::clear_material_texture(u64 layerId, u32 material) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* layer = textured_model(comp, layerId, material, models_);
     if (!layer) return Errc::NotFound;
@@ -345,6 +357,7 @@ u32 Engine::query_material_texture(u64 layerId, u32 material, u64* outRef, std::
     if (outRef) *outRef = 0;
     if (outName) outName->clear();
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     const Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer || layer->kind != LayerKind::Model3D) return 0;
@@ -367,6 +380,7 @@ u32 Engine::query_material_texture(u64 layerId, u32 material, u64* outRef, std::
 std::vector<u64> Engine::material_texture_layers(u64 layerId) noexcept {
     std::vector<u64> out;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     const Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer || layer->kind != LayerKind::Model3D) return out;
@@ -384,6 +398,7 @@ u32 add_model_camera_layers(Composition& comp, LayerId modelId, const scene3d::S
 
 u32 Engine::model_camera_count(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     const Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer || layer->kind != LayerKind::Model3D) return 0;
@@ -398,6 +413,7 @@ u32 Engine::model_camera_count(u64 layerId) noexcept {
 u32 Engine::add_model_cameras(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer || layer->kind != LayerKind::Model3D) return 0;
@@ -421,6 +437,7 @@ Result<u32> Engine::add_part_effect(u64 layerId, u32 effectType, u32 part) noexc
     add.effect_add.index = kInvalidIndex;
     if (const Status s = apply_command(add); !s.ok()) return s;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer || layer->effects.empty() || layer->effects.back().type != effectType) return Status{Errc::InvalidState, "efeito nao entrou"};
@@ -437,7 +454,7 @@ Result<u32> Engine::add_part_effect(u64 layerId, u32 effectType, u32 part) noexc
 
 std::string Engine::color_lut_name(u64 layerId, u32 effectId) const noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
-    const Composition* comp = project_ ? project_->timeline().composition(project_->timeline().current()) : nullptr;
+    const Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer) return {};
     const u32 palettize = effect_type_id("aurea.color.palettize");
@@ -539,6 +556,7 @@ Result<u64> Engine::replace_layer_video(u64 layerId, const VideoImport& request)
     if (dispW == 0 || dispH == 0) return Status{Errc::AssetCorrupted, "video sem dimensoes"};
 
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
     Composition* comp = current_composition();
     if (!comp) return Status{Errc::InvalidState, "projeto sem composicao"};
@@ -608,6 +626,7 @@ Result<u64> Engine::replace_layer_image(u64 layerId, const u8* rgba, u32 width, 
     if (width > 65536 || height > 65536) return Status{Errc::BudgetExceeded, "imagem grande demais"};
     std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
     Composition* comp = current_composition();
     if (!comp) return Status{Errc::InvalidState, "projeto sem composicao"};
@@ -656,6 +675,7 @@ Result<u64> Engine::replace_layer_image(u64 layerId, const u8* rgba, u32 width, 
 
 std::string Engine::layer_source_path(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || (l->kind != LayerKind::Video && l->kind != LayerKind::Audio && l->kind != LayerKind::Image)) return {};
@@ -704,6 +724,7 @@ bool Engine::set_text_texture(u64 layerId, const f32* v, u32 count) noexcept {
     for (u32 i = 0; i < kTextTextureValues; ++i) if (!std::isfinite(v[i])) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || l->kind != LayerKind::Text) return false;
@@ -735,6 +756,7 @@ bool Engine::query_text_texture(u64 layerId, f32* out, u32 capacity) noexcept {
     if (!out || capacity < kTextTextureValues) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId);
     const Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Text) return false;
@@ -756,6 +778,7 @@ Status Engine::set_text_texture_image(u64 layerId, const char* path) noexcept {
     std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer || layer->kind != LayerKind::Text) return Errc::NotFound;

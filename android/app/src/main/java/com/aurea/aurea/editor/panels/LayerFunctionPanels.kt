@@ -37,8 +37,8 @@ import com.aurea.aurea.ui.theme.tocavel
 /** A camada escolhida como a lista de camadas a vê (as chaves moram em [LayerRow]). */
 private fun primaryRow(store: EditorStore): Pair<Int, LayerRow>? {
     val id = store.primary ?: return null
-    val index = store.layers.indexOfFirst { it.id == id }
-    return store.layers.getOrNull(index)?.let { index to it }
+    val index = store.editingLayers.indexOfFirst { it.id == id }
+    return store.editingLayers.getOrNull(index)?.let { index to it }
 }
 
 /**
@@ -126,7 +126,7 @@ private fun AdjustmentScopeRows(store: EditorStore, index: Int) {
         "layerOptions.affected",
     ) { store.changeAdjustmentScope((scope + 1) % 3) }
     if (scope == 2) {
-        val below = store.layers.drop(index + 1).filter { LayerType.of(it.kind) != LayerType.Audio }
+        val below = store.editingLayers.drop(index + 1).filter { LayerType.of(it.kind) != LayerType.Audio }
         if (below.isEmpty()) FunctionNote(stringResource(R.string.la_affected_none_below))
         below.forEach { b ->
             BlurToggleRow(b.name, "", b.id in store.adjustmentTargets, Modifier.padding(start = 12.dp)) {
@@ -164,9 +164,9 @@ internal fun Layer3DPanel(env: PanelEnv) {
                 ) { store.layerTo3DObject(row.id, row.name) }
             }
             if (row.kind != LayerType.Model3D.kind && row.kind != LayerType.Audio.kind &&
-                store.layers.any { it.kind == LayerType.Model3D.kind && it.id != row.id }) {
+                store.editingLayers.any { it.kind == LayerType.Model3D.kind && it.id != row.id }) {
                 val bone = store.layerParentBone(row.id)
-                val parentModel = store.layers.getOrNull(row.parentIndex)?.takeIf { it.kind == LayerType.Model3D.kind }
+                val parentModel = store.editingLayers.getOrNull(row.parentIndex)?.takeIf { it.kind == LayerType.Model3D.kind }
                 FunctionAction(
                     stringResource(R.string.bone_attach_title),
                     if (bone >= 0 && parentModel != null)

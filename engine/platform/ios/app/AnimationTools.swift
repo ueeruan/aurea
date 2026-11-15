@@ -865,7 +865,7 @@ struct NativeCurvePanel: View {
     }
     private var layer: Int64 { model.primarySelection ?? 0 }
     private var track: [KeyframeItem] {
-        (model.keyframes[layer] ?? []).filter {
+        (model.keysForLayer(layer) ?? []).filter {
             $0.timelineVisible && $0.property == model.curveProperty && (model.curveProperty < 31 ||
                 ($0.effectIndex == model.curveEffect && $0.paramIndex == model.curveParam))
         }.sorted { $0.time < $1.time }
@@ -996,7 +996,7 @@ struct NativeCurvePanel: View {
         }
         let like = KeyframeItem(property: model.curveProperty, paramIndex: model.curveParam, effectIndex: model.curveEffect,
                                 time: 0, value: 0, interpolation: 1)
-        let next = graphTrackFor((model.keyframes[layer] ?? []).filter { $0.timelineVisible }, like: like)
+        let next = graphTrackFor((model.keysForLayer(layer) ?? []).filter { $0.timelineVisible }, like: like)
         guard let head = next.first else { model.curveSelectedTime = nil; return }
         model.curveProperty = head.property; model.curveEffect = head.effectIndex; model.curveParam = head.paramIndex
         let query = navigation(at: model.status.playhead)
@@ -1025,7 +1025,7 @@ struct NativeCurvePanel: View {
         }
         let like = KeyframeItem(property: model.curveProperty, paramIndex: model.curveParam, effectIndex: model.curveEffect,
                                 time: 0, value: 0, interpolation: 1)
-        let next = graphTrackFor((model.keyframes[layer] ?? []).filter { $0.timelineVisible }, like: like)
+        let next = graphTrackFor((model.keysForLayer(layer) ?? []).filter { $0.timelineVisible }, like: like)
         guard next.count >= 2, let head = next.first else { return false }
         model.curveProperty = head.property; model.curveEffect = head.effectIndex; model.curveParam = head.paramIndex
         model.curveSelectedTime = head.time
@@ -1194,7 +1194,7 @@ struct NativeCurvePanel: View {
 
     /// Todos os trechos da propriedade (e dos eixos do grupo): um desfazer.
     private func applyToProperty(_ value: CurveEase) {
-        let starts = curvePropertySegmentStarts(model.keyframes[layer] ?? [], track)
+        let starts = curvePropertySegmentStarts(model.keysForLayer(layer) ?? [], track)
         guard !starts.isEmpty else { model.toast = AureaText.t("pn_curve_need_two_keys"); return }
         model.beginGesture("curva na propriedade")
         for key in starts { apply(value, to: key) }
@@ -2509,7 +2509,7 @@ private struct NativeTrackGraph: View {
     /// O grupo inteiro (X/Y/Z, componentes) com a trilha escolhida por último.
     private var group: [[KeyframeItem]] {
         guard let first = keys.first else { return [] }
-        let all = graphGroup(model.keyframes[layer] ?? [], keys)
+        let all = graphGroup(model.keysForLayer(layer) ?? [], keys)
         return all.filter { !curveSameTrack($0[0], first) } + all.filter { curveSameTrack($0[0], first) }
     }
     private func ease(_ key: KeyframeItem) -> CurveEase {
@@ -2740,7 +2740,7 @@ private struct NativeTrackGraph: View {
             if let nearest {
                 let peers = model.graphKeyGroup(layer, nearest)
                 drag?.originalPeers = peers
-                let tracks = (model.keyframes[layer] ?? []).filter { candidate in peers.contains { curveSameTrack($0, candidate) } }
+                let tracks = (model.keysForLayer(layer) ?? []).filter { candidate in peers.contains { curveSameTrack($0, candidate) } }
                 drag?.previous = tracks.filter { $0.time < nearest.time }.map(\.time).max()
                 drag?.next = tracks.filter { $0.time > nearest.time }.map(\.time).min()
             }

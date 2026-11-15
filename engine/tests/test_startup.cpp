@@ -19,6 +19,7 @@
 #include "aurea/Engine.hpp"
 #include "aurea/effects/Effect.hpp"
 #include "aurea/render/Renderer.hpp"
+#include "aurea/project/FileIO.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -390,6 +391,39 @@ AUREA_TEST(Startup, EffectBrowserPreviewCostIsMeasured) {
     e.shutdown();
     std::error_code ec;
     fs::remove_all(fs::path(dir), ec);
+}
+
+AUREA_TEST(Startup, IncrementalPipelineCacheTracksNewPipelinesEvenWhenBlobSizeIsStable) {
+    const std::string directory = startup_dir("incremental-pipelines");
+    Engine engine;
+    const auto opened = open_engine(directory, engine);
+    AUREA_CHECK(opened.ok);
+    if (!opened.ok) return;
+    engine.gpu()->save_pipeline_cache();
+    const auto before = engine.gpu()->pipeline_cache_info();
+    auto& shaders = engine.renderer().shaders();
+    const auto key = PipelineKey::fullscreen(ShaderId::scene3d_post_temporal_frag, SurfaceFormat::RGBA16F);
+    AUREA_CHECK(!shaders.has_pipeline(key));
+    AUREA_CHECK(shaders.pipeline(key).ok());
+    fileio::FaultInjection fault;
+    fault.kind = fileio::Fault::RenameFails;
+    fault.pathContains = directory;
+    fileio::set_fault_injection(fault);
+    engine.gpu()->save_pipeline_cache();
+    AUREA_CHECK_EQ(fileio::injected_failures(), 1u);
+    AUREA_CHECK_EQ(engine.gpu()->pipeline_cache_info().saves, before.saves);
+    fileio::clear_fault_injection();
+    engine.gpu()->save_pipeline_cache();
+    const auto after = engine.gpu()->pipeline_cache_info();
+    AUREA_CHECK_EQ(after.saves, before.saves + 1u);
+    AUREA_CHECK(after.savedBytes > 0);
+    engine.gpu()->save_pipeline_cache();
+    AUREA_CHECK_EQ(engine.gpu()->pipeline_cache_info().saves, after.saves);
+    std::printf("    incremental pipeline cache: %llu -> %llu bytes, saves %u -> %u\n",
+        static_cast<unsigned long long>(before.savedBytes), static_cast<unsigned long long>(after.savedBytes), before.saves, after.saves);
+    engine.shutdown();
+    std::error_code error;
+    fs::remove_all(fs::path(directory), error);
 }
 
 #endif // AUREA_TEST_VULKAN

@@ -79,6 +79,7 @@ bool Engine::vector_tree(u64 layerId, std::vector<f32>& out, std::string& names)
     out.clear();
     names.clear();
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     const Layer* l = tree_layer(project_ ? current_composition() : nullptr, layerId);
     if (!l) return false;
     std::vector<vector::TreeRow> rows;
@@ -109,6 +110,7 @@ bool Engine::vector_tree_edit(u64 layerId, const u32* path, u32 depth, u32 op, u
                               const f32* values, u32 count, const char* name, bool continuing) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = tree_layer(comp, layerId);
     if (!l || l->locked || count > 64 || (count > 0 && !values)) return false;

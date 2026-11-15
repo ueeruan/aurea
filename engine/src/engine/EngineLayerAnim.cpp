@@ -93,10 +93,11 @@ bool has_units(const Project& p, const Layer& l) noexcept {
 
 u32 Engine::query_layer_animators(u64 layerId, f32* out, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return 0;
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     const u32 n = static_cast<u32>(l->layerAnimators.size());
     for (u32 i = 0; i < n && out && (i + 1) * kLayerAnimFloats <= capacity; ++i) {
         const LayerAnimator& a = l->layerAnimators[i];
@@ -139,6 +140,7 @@ u32 Engine::query_layer_animators(u64 layerId, f32* out, u32 capacity) noexcept 
 
 i32 Engine::add_layer_animator(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || l->layerAnimators.size() >= kMaxLayerAnimators || l->kind == LayerKind::Camera || l->kind == LayerKind::Light)
@@ -165,6 +167,7 @@ i32 Engine::add_layer_animator(u64 layerId) noexcept {
 
 bool Engine::remove_layer_animator(u64 layerId, u32 index) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || index >= l->layerAnimators.size()) return false;
@@ -184,6 +187,7 @@ bool Engine::remove_layer_animator(u64 layerId, u32 index) noexcept {
 bool Engine::set_layer_animator(u64 layerId, u32 index, const f32* v) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || !v || index >= l->layerAnimators.size()) return false;
@@ -192,7 +196,7 @@ bool Engine::set_layer_animator(u64 layerId, u32 index, const f32* v) noexcept {
     bump_model_revision_locked();
     LayerAnimator& a = l->layerAnimators[index];
     const f32 duration = progress_duration_ms(*l, index, comp->fps());
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     const f32 delay = layeranim::param_at(l->tracks, index, layeranim::kDelay, local.value, a.delayMs);
     const f32 overlap = std::clamp(100.f * (1.f - delay / duration), 0.f, 100.f);
     if (v[30] == 2146 && std::isfinite(v[28]) && std::fabs(v[28] - overlap) > .001f) {
@@ -219,6 +223,7 @@ bool Engine::set_layer_animator(u64 layerId, u32 index, const f32* v) noexcept {
 bool Engine::set_layer_anim_param(u64 layerId, u32 index, u32 param, f32 value) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || index >= l->layerAnimators.size() || !std::isfinite(value)) return false;
@@ -230,7 +235,7 @@ bool Engine::set_layer_anim_param(u64 layerId, u32 index, u32 param, f32 value) 
     Track* tr = l->tracks.find(TrackProperty::LayerAnimParam, index, param);
     if (tr && !tr->keys.empty()) {
         // Animado: o valor vira keyframe no playhead (como nas outras propriedades).
-        const FrameIndex local = l->local_time(playback_.current());
+        const FrameIndex local = l->local_time(editing_frame_locked());
         const u32 k = tr->find_exact(local);
         if (k != kInvalidIndex) tr->keys[k].value = value;
         else (void)tr->set(local, value, param == layeranim::kProgress ? Interpolation::Linear : Interpolation::Bezier);
@@ -245,6 +250,7 @@ bool Engine::set_layer_anim_param(u64 layerId, u32 index, u32 param, f32 value) 
 bool Engine::toggle_layer_anim_key(u64 layerId, u32 index, u32 param) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || index >= l->layerAnimators.size()) return false;
@@ -252,7 +258,7 @@ bool Engine::toggle_layer_anim_key(u64 layerId, u32 index, u32 param) noexcept {
     if (!r) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "keyframe do animador");
     bump_model_revision_locked();
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     Track& tr = l->tracks.get_or_create(TrackProperty::LayerAnimParam, index, param);
     const u32 k = tr.find_exact(local);
     if (k != kInvalidIndex) {
@@ -270,6 +276,7 @@ bool Engine::toggle_layer_anim_key(u64 layerId, u32 index, u32 param) noexcept {
 
 u32 Engine::copy_layer_animators(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->layerAnimators.empty()) return 0;
@@ -295,6 +302,7 @@ u32 Engine::layer_animator_clipboard() noexcept {
 
 u32 Engine::paste_layer_animators(const u64* ids, u32 count) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, (count == 1 && ids ? ids[0] : 0), true);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp || !ids || count == 0 || clipboard_.layerAnimators.empty()) return 0;
     bool captured = false;
@@ -460,6 +468,7 @@ bool build_motion_text_preset(MotionTextRecipe& r, u32 preset) {
 bool Engine::apply_motion_text_preset(u64 layerId, u32 preset) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || l->kind != LayerKind::Text || preset >= kMotionTextPresetCount) return false;
@@ -495,6 +504,7 @@ bool Engine::apply_motion_text_preset(u64 layerId, u32 preset) noexcept {
 
 bool Engine::query_text3d_anim(u64 layerId, f32* out) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || !out || !has_node_units(*project_, *l)) return false;
@@ -527,6 +537,7 @@ bool Engine::query_text3d_anim(u64 layerId, f32* out) noexcept {
 
 bool Engine::apply_text3d_anim(u64 layerId, i32 preset, u32 mode, u32 unit, f32 durationSec, f32 staggerMs) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || !has_node_units(*project_, *l) || mode >= scene3d::kText3DAnimModeCount
@@ -554,6 +565,7 @@ bool Engine::apply_text3d_anim(u64 layerId, i32 preset, u32 mode, u32 unit, f32 
 
 bool Engine::set_layer_motion_blur_length(u64 layerId, f32 factor) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || !std::isfinite(factor)) return false;
@@ -569,6 +581,7 @@ bool Engine::set_layer_motion_blur_length(u64 layerId, f32 factor) noexcept {
 
 f32 Engine::query_layer_motion_blur_length(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     return l ? l->transform.motionBlurAmount : 1.0f;
@@ -580,6 +593,7 @@ f32 Engine::query_layer_motion_blur_length(u64 layerId) noexcept {
 
 bool Engine::set_adjustment_scope(u64 layerId, u32 scope) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || scope > 2) return false;
@@ -594,6 +608,7 @@ bool Engine::set_adjustment_scope(u64 layerId, u32 scope) noexcept {
 
 u32 Engine::query_adjustment_scope(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     return l ? l->adjustmentScope : 0u;
@@ -601,6 +616,7 @@ u32 Engine::query_adjustment_scope(u64 layerId) noexcept {
 
 bool Engine::set_adjustment_target(u64 layerId, u64 targetId, bool on) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     const LayerId id = LayerId::unpack(layerId), target = LayerId::unpack(targetId);
     Layer* l = comp ? comp->layer(id) : nullptr;
@@ -621,6 +637,7 @@ bool Engine::set_adjustment_target(u64 layerId, u64 targetId, bool on) noexcept 
 
 u32 Engine::query_adjustment_targets(u64 layerId, u64* out, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return 0;
@@ -647,6 +664,7 @@ std::vector<std::pair<std::string, std::string>> Engine::effect_presets(u32 type
 
 bool Engine::apply_effect_preset(u64 layerId, u32 effectId, u32 preset) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     EffectInstance* e = l ? l->find_effect(EffectId{effectId, 0}) : nullptr;
@@ -674,6 +692,7 @@ bool Engine::apply_effect_preset(u64 layerId, u32 effectId, u32 preset) noexcept
 
 bool Engine::set_group_camera_pass_through(u64 layerId, bool on) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Composition) return false;
@@ -688,6 +707,7 @@ bool Engine::set_group_camera_pass_through(u64 layerId, bool on) noexcept {
 
 i32 Engine::query_group_camera_pass_through(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Composition) return -1;
@@ -709,6 +729,7 @@ bool accepts_lights_applies(const Layer& l) noexcept {
 
 bool Engine::set_layer_accepts_lights(u64 layerId, bool on) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || !accepts_lights_applies(*l)) return false;
@@ -729,6 +750,7 @@ bool Engine::set_layer_3d(u64 layerId, bool on) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     if (!project_) return false;
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = current_composition();
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || l->kind == LayerKind::Audio) return false;
@@ -745,6 +767,7 @@ bool Engine::set_layer_3d(u64 layerId, bool on) noexcept {
 
 i32 Engine::query_layer_accepts_lights(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || !accepts_lights_applies(*l)) return -1;
@@ -759,6 +782,7 @@ Result<u32> Engine::add_layers_to_group(const u64* ids, u32 count, u64 groupLaye
     };
     // Bug #6: comandos na fila entram antes (ordem do desfazer, ids certos).
     if (project_) drain_commands_locked();
+    InlineEditScope inlineScope(*this, (count == 1 && ids ? ids[0] : 0), true);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp || !ids || count == 0) return refuse(Errc::InvalidArgument, "nada para agrupar");
     Timeline& tl = project_->timeline();
@@ -889,6 +913,7 @@ Result<u64> Engine::remove_layer_from_group(u64 layerId, std::string* why) noexc
     if (!project_ || compStack_.empty()) return refuse(Errc::InvalidArgument, "nao esta dentro de um grupo");
     // Bug #6: o que está na fila é de dentro do grupo: aplica antes de sair dele.
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     if (compStack_.empty()) return refuse(Errc::InvalidArgument, "nao esta dentro de um grupo");
     Timeline& tl = project_->timeline();
     const CompositionId childId = tl.current();
@@ -955,7 +980,7 @@ Result<u64> Engine::remove_layer_from_group(u64 layerId, std::string* why) noexc
     (void)P->reorder_layer(out, at);
     P->rebuild_draw_order();
     // A timeline volta para fora, com a camada escolhida no lugar novo.
-    const i64 outer = playback_.current().value + shift;
+    const i64 outer = editing_frame_locked().value + shift;
     compStack_.pop_back();
     tl.set_current(parentId);
     playback_.configure(P->fps(), P->duration());

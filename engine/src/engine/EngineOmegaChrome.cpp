@@ -153,6 +153,7 @@ bool Engine::query_transport_navigation(u64 layerId, i64 compositionFrame, i32 d
     const bool hasBase = query_timeline_navigation(layerId, compositionFrame, direction, base);
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId);
     const Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return false;
     const i64 last = std::max<i64>(std::max<i64>(0, comp->duration().value - 1), navigation_end_locked(comp));
@@ -182,6 +183,8 @@ u32 Engine::query_multi_time_actions(const u64* ids, u32 count, i64 frame) noexc
     if (!ids || count == 0 || count > 4096) return 0;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, (count == 1 && ids ? ids[0] : 0));
+    frame = inlineScope.map_frame(frame);
     const Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return 0;
     i64 earliest = std::numeric_limits<i64>::max();
@@ -223,6 +226,7 @@ u32 Engine::copied_style_parts() noexcept {
 u32 Engine::paste_style_parts(const u64* ids, u32 count, u32 parts) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, (count == 1 && ids ? ids[0] : 0), true);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp || !ids || count == 0 || count > 4096 || !clipboard_.hasStyle || parts == 0) return 0;
     std::vector<LayerId> targets;

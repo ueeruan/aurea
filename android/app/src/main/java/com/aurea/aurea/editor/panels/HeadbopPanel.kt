@@ -178,7 +178,7 @@ private suspend fun detectPhoto(context: Context, path: String): Pair<FloatArray
 @Composable
 internal fun HeadbopCardTools(store: EditorStore, effectId: Int) {
     val layer = store.primary ?: return
-    val kind = store.layers.firstOrNull { it.id == layer }?.let { LayerType.of(it.kind) }
+    val kind = store.editingLayers.firstOrNull { it.id == layer }?.let { LayerType.of(it.kind) }
     val video = kind == LayerType.Video
     val media = video || kind == LayerType.Image
     val context = LocalContext.current

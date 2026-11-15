@@ -2933,29 +2933,11 @@ private struct TextAnimatorEditor: View {
         choice("panel_anima_cada", ["panel_letra", "panel_palavra", "panel_linha", "ui_char_no_spaces"], field: selectorField(0, 2), current: Int(f[selectorField(0, 2)]))
         if rig {
             choice("fxl_anchor", ["fxo_layer", "fxl_component"], field: 2, current: Int(f[2]))
-            row(param(10, "panel_posicao_x", "px", 1, -20000...20000)); row(param(11, "panel_posicao_y", "px", 1, -20000...20000))
-            row(param(17, "fxl_angle", "°", 1, -1800...1800)); row(param(13, "panel_escala", "%", 1, -100...1000))
-            row(param(14, "fxl_stretch", "%", 1, -100...1000)); row(param(18, "panel_opacidade", "%", 0.5, -100...100))
-        } else {
-            row(param(10, "panel_posicao_x", "px", 1, -20000...20000)); row(param(11, "panel_posicao_y", "px", 1, -20000...20000)); row(param(12, "fxl_position_z", "px", 1, -20000...20000))
-            row(param(13, "fx_escala_x", "%", 1, -2000...2000)); row(param(14, "fx_escala_y", "%", 1, -2000...2000))
-            row(param(17, "panel_rotacao", "°", 1, -3600...3600)); row(param(15, "edt_rotation_x", "°", 1, -3600...3600)); row(param(16, "edt_rotation_y", "°", 1, -3600...3600))
-            row(param(18, "panel_opacidade", "%", 0.5, 0...100))
-            if props & (1 << 5) != 0 { row(param(20, "panel_desfoque", "px", 0.2, 0...200)) }
-            if props & (1 << 4) != 0 { row(param(19, "edt_prop_spacing", "px", 0.5, -500...500)) }
-            if props & (1 << 6) != 0 {
-                row(param(21, "edt_prop_skew", "°", 0.5, -80...80))
-                // B5 (AE animation): o eixo da inclinação (Skew Axis do AE) junto da inclinação.
-                row(param(26, "ae_anim_skew_axis", "°", 1, -3600...3600))
-            }
-            if props & (1 << 7) != 0 { row(param(22, "panel_contorno", "px", 0.1, -50...50)) }
-            // B5: Character Offset do AE (troca cada letra pela N-ésima seguinte).
-            if props & (1 << 8) != 0 { row(param(23, "ae_anim_char_offset", "", 0.05, -1000...1000)) }
-            // v70: Valor de caractere (o código Unicode que troca a letra) e a âncora da linha do tracking.
-            if props & (1 << 20) != 0 { row(param(62, "ae_anim_char_value", "", 1, 0...1114111)) }
-            if props & (1 << 21) != 0 { row(param(63, "ae_anim_line_anchor", "%", 0.5, -1000...1000)) }
-            if props & (1 << 12) != 0 { row(param(45, "fxl_line_spacing", "px", 1, -20000...20000)) }
-            if props & (1 << 11) != 0 { row(param(42, "fxl_anchor", "px", 1, -20000...20000)); row(param(43, "fxl_anchor", "px", 1, -20000...20000)) }
+        }
+        ForEach(transformParameters(props: props, rig: rig), id: \.key) { parameter in
+            row(parameter)
+        }
+        if !rig {
             if props & (1 << 4) != 0 {
                 choice("ae_anim_tracking_type", ["ae_anim_tracking_both", "ae_anim_tracking_before", "ae_anim_tracking_after"], field: 11, current: Int(f[11]))
             }
@@ -2965,10 +2947,49 @@ private struct TextAnimatorEditor: View {
                 choice("ae_anim_char_align", ["ae_anim_char_align_left", "ae_anim_char_align_center", "ae_anim_char_align_right", "ae_anim_char_align_kerning"],
                        field: 12, current: Int(f[12]))
             }
-            let extras = [(1 << 5, "panel_desfoque"), (1 << 4, "edt_prop_spacing"), (1 << 6, "edt_prop_skew"), (1 << 7, "panel_contorno"), (1 << 12, "fxl_line_spacing"), (1 << 8, "ae_anim_char_offset"),
+            let extras: [(Int, String)] = [(1 << 5, "panel_desfoque"), (1 << 4, "edt_prop_spacing"), (1 << 6, "edt_prop_skew"), (1 << 7, "panel_contorno"), (1 << 12, "fxl_line_spacing"), (1 << 8, "ae_anim_char_offset"),
                           (1 << 20, "ae_anim_char_value"), (1 << 21, "ae_anim_line_anchor"), (1 << 11, "fxl_anchor")]
             PanelChoiceRow(label: AureaText.t("panel_propriedades"), options: extras.map { AureaText.t($0.1) }, isOn: { props & extras[$0].0 != 0 }) { toggleProp(extras[$0].0) }
         }
+    }
+    private func transformParameters(props: Int, rig: Bool) -> [TextKeyParam] {
+        if rig {
+            return [
+                param(10, "panel_posicao_x", "px", 1, -20000...20000),
+                param(11, "panel_posicao_y", "px", 1, -20000...20000),
+                param(17, "fxl_angle", "°", 1, -1800...1800),
+                param(13, "panel_escala", "%", 1, -100...1000),
+                param(14, "fxl_stretch", "%", 1, -100...1000),
+                param(18, "panel_opacidade", "%", 0.5, -100...100)
+            ]
+        }
+        var parameters: [TextKeyParam] = [
+            param(10, "panel_posicao_x", "px", 1, -20000...20000),
+            param(11, "panel_posicao_y", "px", 1, -20000...20000),
+            param(12, "fxl_position_z", "px", 1, -20000...20000),
+            param(13, "fx_escala_x", "%", 1, -2000...2000),
+            param(14, "fx_escala_y", "%", 1, -2000...2000),
+            param(17, "panel_rotacao", "°", 1, -3600...3600),
+            param(15, "edt_rotation_x", "°", 1, -3600...3600),
+            param(16, "edt_rotation_y", "°", 1, -3600...3600),
+            param(18, "panel_opacidade", "%", 0.5, 0...100)
+        ]
+        if props & (1 << 5) != 0 { parameters.append(param(20, "panel_desfoque", "px", 0.2, 0...200)) }
+        if props & (1 << 4) != 0 { parameters.append(param(19, "edt_prop_spacing", "px", 0.5, -500...500)) }
+        if props & (1 << 6) != 0 {
+            parameters.append(param(21, "edt_prop_skew", "°", 0.5, -80...80))
+            parameters.append(param(26, "ae_anim_skew_axis", "°", 1, -3600...3600))
+        }
+        if props & (1 << 7) != 0 { parameters.append(param(22, "panel_contorno", "px", 0.1, -50...50)) }
+        if props & (1 << 8) != 0 { parameters.append(param(23, "ae_anim_char_offset", "", 0.05, -1000...1000)) }
+        if props & (1 << 20) != 0 { parameters.append(param(62, "ae_anim_char_value", "", 1, 0...1114111)) }
+        if props & (1 << 21) != 0 { parameters.append(param(63, "ae_anim_line_anchor", "%", 0.5, -1000...1000)) }
+        if props & (1 << 12) != 0 { parameters.append(param(45, "fxl_line_spacing", "px", 1, -20000...20000)) }
+        if props & (1 << 11) != 0 {
+            parameters.append(param(42, "fxl_anchor", "px", 1, -20000...20000))
+            parameters.append(param(43, "fxl_anchor", "px", 1, -20000...20000))
+        }
+        return parameters
     }
     private static let modes = ["panel_somar", "panel_subtrair", "panel_intersecao", "fxo_min", "fxo_maximum", "panel_diferenca"]
     /// Inter-Character Blending do AE, na ordem do menu dele: o rótulo e o valor do BlendMode

@@ -365,7 +365,11 @@ final class AureaMcpClient: ObservableObject {
             if case .verified(let t) = result, t.productID == Self.aureaosProductId, t.revocationDate == nil { owned = t; break }
         }
         if owned == nil, !restore {
-            guard let product = aureaosProduct ?? (try? await Product.products(for: [Self.aureaosProductId]).first) else { aureaosNotice = "mcp_aureaos_unavailable"; return }
+            var availableProduct = aureaosProduct
+            if availableProduct == nil {
+                availableProduct = try? await Product.products(for: [Self.aureaosProductId]).first
+            }
+            guard let product = availableProduct else { aureaosNotice = "mcp_aureaos_unavailable"; return }
             switch try? await product.purchase() {
             case .success(let result): if case .verified(let t) = result { owned = t }
             case .pending: aureaosNotice = "mcp_aureaos_pending"; return

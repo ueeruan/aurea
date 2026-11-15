@@ -27,7 +27,7 @@ struct VectorPanel: View {
     @State private var tab = "shape"
     @State private var selected = -1
     @State private var adding = false
-    @State private var advanced = Set<Int>()
+    @State private var advanced = Set<String>()
     @State private var pathFlags = 0
     @State private var addingModifier = false
     @State private var collapsedModifiers = Set<Int>()

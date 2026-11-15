@@ -2039,7 +2039,7 @@ struct Parts3DEditor: View {
     }
 
     // ---- Leitura dos efeitos ----------------------------------------------------------
-    private func params(_ effect: UInt32) -> [[String: Any]] { model.engine.effectParamsForLayer(layerId, effectId: effect) }
+    private func params(_ effect: UInt32) -> [[String: Any]] { model.engine.effectParams(forLayer: layerId, effectId: effect) }
     private func number(_ p: [String: Any]?, _ key: String, _ fallback: Float) -> Float { (p?[key] as? NSNumber)?.floatValue ?? fallback }
     private func value(_ p: [String: Any]?, _ fallback: Float) -> Float {
         ((p?[AureaParamValue] as? [NSNumber])?.first?.floatValue) ?? fallback
@@ -2079,7 +2079,7 @@ struct Parts3DEditor: View {
         model.engine.setEffect(fx.effectId, forLayer: layerId, paramIndex: 2, value: 1)
         if let first = model.effects.firstIndex(where: { $0.typeId == type }),
            let at = model.effects.firstIndex(where: { $0.effectId == fx.effectId }), at > first {
-            model.engine.moveEffect(fx.effectId, inLayer: layerId, toIndex: UInt32(first))
+            model.engine.moveEffect(fx.effectId, inLayer: layerId, to: UInt32(first))
         }
         model.commitPendingCommands(); model.refreshModel(force: true)
         return fx.effectId

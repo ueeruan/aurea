@@ -216,12 +216,12 @@ private struct CreatorWelcome<Content: View>: View {
     static var currentSocial: Int { 54 }
     @AppStorage("socialVersion") private var socialVersion = 0
     @AppStorage("socialOpened54") private var opened = 0
-    private static let profiles: [(String, String)] = [
+    private static var profiles: [(String, String)] { [
         ("TikTok @ruanzitwo", "https://www.tiktok.com/@ruanzitwo"),
         ("Instagram @ofruanzitwo", "https://www.instagram.com/ofruanzitwo/"),
         ("Instagram @aureaediting", "https://www.instagram.com/aureaediting/"),
         ("TikTok @aurea.video", "https://www.tiktok.com/@aurea.video"),
-    ]
+    ] }
     private var allOpened: Int { (1 << Self.profiles.count) - 1 }
     @Environment(\.openURL) private var openURL
     @State private var failed = false

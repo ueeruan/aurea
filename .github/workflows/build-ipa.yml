@@ -1,4 +1,4 @@
-name: Build native IPA (unsigned)
+name: Build native IPA
 on:
   workflow_dispatch:
     inputs:
@@ -32,6 +32,16 @@ on:
         required: false
         default: false
         type: boolean
+      upload_testflight:
+        description: 'With the Apple secrets set, also send the signed IPA to App Store Connect (TestFlight)'
+        required: false
+        default: false
+        type: boolean
+      bundle_id:
+        description: 'Optional bundle identifier registered in App Store Connect (empty keeps com.aurea.aurea)'
+        required: false
+        default: ''
+        type: string
   push:
     branches: ['codex/native-beta2-ipa', 'claude/release-2194', 'claude/omega-0.3.2']
     paths: ['engine/**', '.github/workflows/build-ipa.yml']
@@ -51,8 +61,33 @@ jobs:
     env:
       CCACHE_DIR: ${{ github.workspace }}/build/ccache
       CCACHE_BASEDIR: ${{ github.workspace }}
+      # 1.0.1: com os 4 segredos da chave de API do App Store Connect o build
+      # arquiva com assinatura automatica e exporta um IPA assinado para a loja.
+      # Sem eles, segue o IPA sem assinatura de sempre.
+      APPLE_SIGNING: ${{ secrets.APPLE_API_KEY_P8 != '' && secrets.APPLE_API_KEY_ID != '' && secrets.APPLE_API_ISSUER_ID != '' && secrets.APPLE_TEAM_ID != '' }}
     steps:
       - uses: actions/checkout@v4
+      - name: Use the bundle identifier registered in App Store Connect
+        if: github.event_name == 'workflow_dispatch' && inputs.bundle_id != ''
+        env:
+          BUNDLE_ID: ${{ inputs.bundle_id }}
+        run: |
+          case "$BUNDLE_ID" in *[!A-Za-z0-9.-]*) echo "::error::bundle_id invalido"; exit 1;; esac
+          sed -i '' "s/PRODUCT_BUNDLE_IDENTIFIER = com\.aurea\.aurea;/PRODUCT_BUNDLE_IDENTIFIER = $BUNDLE_ID;/" engine/platform/ios/Aurea.xcodeproj/project.pbxproj
+          sed -i '' "s/'com\.aurea\.aurea'/'$BUNDLE_ID'/" engine/platform/ios/verify/check_ipa.py
+          sed -i '' "s/\"com\.aurea\.aurea\"/\"$BUNDLE_ID\"/" engine/platform/ios/verify/check_bundle.swift
+          grep -n "PRODUCT_BUNDLE_IDENTIFIER = $BUNDLE_ID;" engine/platform/ios/Aurea.xcodeproj/project.pbxproj
+      - name: Prepare App Store Connect API key
+        if: env.APPLE_SIGNING == 'true'
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+        run: |
+          key="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
+          printf '%s\n' "$APPLE_API_KEY_P8" | tr -d '\r' > "$key"
+          chmod 600 "$key"
+          grep -q 'BEGIN PRIVATE KEY' "$key" || { echo "::error::APPLE_API_KEY_P8 nao parece um .p8"; exit 1; }
+          echo "APPLE_KEY_PATH=$key" >> "$GITHUB_ENV"
       # O IronSource (LevelPlay 9.6.0) vem compilado com Swift 6.2: so linka com o
       # Xcode 26 (no 16.4 faltam isIsolatingCurrentContext e swift_coroFrameAlloc).
       - name: Select Xcode 26
@@ -187,13 +222,37 @@ jobs:
         run: |
           set -o pipefail
           ccache -z || true
-          xcodebuild -project engine/platform/ios/Aurea.xcodeproj -scheme Aurea \
-            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
-            -derivedDataPath build/ios CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
-            SWIFT_COMPILATION_MODE=singlefile COMPILER_INDEX_STORE_ENABLE=NO -IDEBuildingContinueBuildingAfterErrors=YES \
-            COMPILATION_CACHE_ENABLE_CACHING=YES -skipPackagePluginValidation -skipMacroValidation \
-            build 2>&1 | tee build-ios.log
+          if [ "$APPLE_SIGNING" = "true" ]; then
+            # Arquivo assinado (assinatura automatica pela chave de API; o Xcode
+            # cria certificado e perfil). O .app e o dSYM vao para o caminho de
+            # sempre, para as conferencias abaixo nao mudarem.
+            xcodebuild -project engine/platform/ios/Aurea.xcodeproj -scheme Aurea \
+              -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+              -derivedDataPath build/ios -archivePath build/Aurea.xcarchive \
+              CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+              -allowProvisioningUpdates -authenticationKeyPath "$APPLE_KEY_PATH" \
+              -authenticationKeyID "$APPLE_API_KEY_ID" -authenticationKeyIssuerID "$APPLE_API_ISSUER_ID" \
+              SWIFT_COMPILATION_MODE=singlefile COMPILER_INDEX_STORE_ENABLE=NO -IDEBuildingContinueBuildingAfterErrors=YES \
+              COMPILATION_CACHE_ENABLE_CACHING=YES -skipPackagePluginValidation -skipMacroValidation \
+              archive 2>&1 | tee build-ios.log
+            products=build/ios/Build/Products/Release-iphoneos
+            mkdir -p "$products"
+            rm -rf "$products/Aurea.app" "$products/Aurea.app.dSYM"
+            cp -R build/Aurea.xcarchive/Products/Applications/Aurea.app "$products/"
+            cp -R build/Aurea.xcarchive/dSYMs/Aurea.app.dSYM "$products/"
+          else
+            xcodebuild -project engine/platform/ios/Aurea.xcodeproj -scheme Aurea \
+              -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+              -derivedDataPath build/ios CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+              SWIFT_COMPILATION_MODE=singlefile COMPILER_INDEX_STORE_ENABLE=NO -IDEBuildingContinueBuildingAfterErrors=YES \
+              COMPILATION_CACHE_ENABLE_CACHING=YES -skipPackagePluginValidation -skipMacroValidation \
+              build 2>&1 | tee build-ios.log
+          fi
           ccache -s || true
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
       # 0.4.7: os logs do Actions pedem login; as anotações não. Com isto o erro de
       # compilação aparece na página da rodada e na API, sem baixar nada.
       - name: Publish compile errors as annotations
@@ -278,6 +337,49 @@ jobs:
           name: aurea-ipa
           path: build/ipa/*.ipa
           if-no-files-found: error
+      - name: Export signed IPA for the App Store
+        id: export-signed
+        if: env.APPLE_SIGNING == 'true'
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          UPLOAD: ${{ github.event_name == 'workflow_dispatch' && inputs.upload_testflight }}
+          UNSIGNED: ${{ steps.package-ipa.outputs.filename }}
+        run: |
+          set -o pipefail
+          destination=export
+          if [ "$UPLOAD" = "true" ]; then destination=upload; fi
+          python3 - "$destination" "$APPLE_TEAM_ID" <<'PY'
+          import plistlib, sys
+          plistlib.dump({
+              'method': 'app-store-connect',
+              'destination': sys.argv[1],
+              'teamID': sys.argv[2],
+              'signingStyle': 'automatic',
+              'uploadSymbols': True,
+              'manageAppVersionAndBuildNumber': False,
+          }, open('build/ExportOptions.plist', 'wb'))
+          PY
+          xcodebuild -exportArchive -archivePath build/Aurea.xcarchive \
+            -exportPath build/ipa-signed -exportOptionsPlist build/ExportOptions.plist \
+            -allowProvisioningUpdates -authenticationKeyPath "$APPLE_KEY_PATH" \
+            -authenticationKeyID "$APPLE_API_KEY_ID" -authenticationKeyIssuerID "$APPLE_API_ISSUER_ID" \
+            2>&1 | tee build-export.log
+          if [ "$destination" = "export" ]; then
+            ipa=$(ls build/ipa-signed/*.ipa | head -n 1)
+            mv "$ipa" "build/ipa-signed/${UNSIGNED%-unsigned.ipa}.ipa"
+            ls -la build/ipa-signed
+          fi
+      - uses: actions/upload-artifact@v4
+        if: env.APPLE_SIGNING == 'true' && steps.export-signed.outcome == 'success'
+        with:
+          name: aurea-ipa-signed
+          path: build/ipa-signed/*.ipa
+          if-no-files-found: ignore
+      - name: Remove App Store Connect API key
+        if: always() && env.APPLE_KEY_PATH != ''
+        run: rm -f "$APPLE_KEY_PATH"
       - name: Save build diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -285,6 +387,7 @@ jobs:
           name: ios-build-diagnostics
           path: |
             build-ios.log
+            build-export.log
             build-metal.log
             build-ffmpeg-ios.log
             build/ffmpeg/ios/arm64/aurea-ffmpeg-build.json

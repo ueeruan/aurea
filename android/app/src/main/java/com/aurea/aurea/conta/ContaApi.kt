@@ -49,7 +49,12 @@ object ContaApi {
         chamar("GET", "/api/app-config?platform=$platform&version=$versionCode", null, null)
 
     /** O que esta conta comprou (discovery/entitlements.js): `{products: [...], checkedAt}`. */
-    fun entitlements(token: String): Resposta = chamar("GET", "/api/entitlements", null, token)
+    fun entitlements(token: String): Resposta = chamar("GET", "/api/entitlements?platform=google", null, token)   // `purchasable` da Play
+
+    /** Assinatura confirmada na loja (discovery/entitlements.js, POST /api/entitlements/purchase). */
+    fun purchase(token: String, product: String, purchaseToken: String): Resposta =
+        chamar("POST", "/api/entitlements/purchase", JSONObject().put("platform", "google").put("product", product)
+            .put("token", purchaseToken), token)
 
     /** "Relatar um problema" (discovery/relato.js). Sessão opcional: dá o e-mail da conta ao relato. */
     fun relatar(corpo: JSONObject, token: String?): Resposta = chamar("POST", "/api/report", corpo, token)

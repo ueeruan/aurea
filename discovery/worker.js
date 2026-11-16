@@ -14,7 +14,8 @@
 //
 //  As demais rotas moram nos módulos importados abaixo; cada um lista as suas
 //  no cabeçalho. Direitos pagos (entitlements.js):
-//    GET  /api/entitlements        Bearer <sessão>             → {products, checkedAt}
+//    GET  /api/entitlements        Bearer <sessão>             → {products, checkedAt, purchasable, expires}
+//    POST /api/entitlements/purchase  Bearer <sessão>          → compra/assinatura conferida na loja
 //    POST /api/admin/entitlements  Bearer <AUREA_ADMIN_SECRET> → concede/revoga por e-mail
 //    GET  /api/app-config?platform= android|ios                → {payload, signature} (assinada, appconfig.js)
 //    POST /api/admin/app-config    Bearer <AUREA_ADMIN_SECRET> → versão mínima, modo do Hyper, aviso

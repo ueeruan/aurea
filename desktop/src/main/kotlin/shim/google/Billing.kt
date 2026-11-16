@@ -33,7 +33,15 @@ class Purchase private constructor() {
 class ProductDetails private constructor() {
     val productId: String get() = ""
     val oneTimePurchaseOfferDetails: OneTimePurchaseOfferDetails? get() = null
+    val subscriptionOfferDetails: List<SubscriptionOfferDetails>? get() = null
     class OneTimePurchaseOfferDetails private constructor() { val formattedPrice: String get() = "" }
+    class SubscriptionOfferDetails private constructor() {
+        val offerId: String? get() = null
+        val offerToken: String get() = ""
+        val pricingPhases: PricingPhases get() = PricingPhases()
+    }
+    class PricingPhases internal constructor() { val pricingPhaseList: List<PricingPhase> get() = emptyList() }
+    class PricingPhase private constructor() { val formattedPrice: String get() = "" }
 }
 
 class ProductDetailsResult(val billingResult: BillingResult, val productDetailsList: List<ProductDetails>?)
@@ -51,6 +59,11 @@ class QueryProductDetailsParams private constructor() {
 
 class QueryPurchasesParams private constructor() {
     class Builder { fun setProductType(t: String) = this; fun build() = QueryPurchasesParams() }
+    companion object { @JvmStatic fun newBuilder() = Builder() }
+}
+
+class AcknowledgePurchaseParams private constructor() {
+    class Builder { fun setPurchaseToken(t: String) = this; fun build() = AcknowledgePurchaseParams() }
     companion object { @JvmStatic fun newBuilder() = Builder() }
 }
 
@@ -83,3 +96,4 @@ class BillingClient private constructor() {
 suspend fun BillingClient.queryProductDetails(params: QueryProductDetailsParams) = ProductDetailsResult(BillingResult(), null)
 suspend fun BillingClient.queryPurchasesAsync(params: QueryPurchasesParams) = PurchasesResult(BillingResult(), emptyList())
 suspend fun BillingClient.consumePurchase(params: ConsumeParams) = ConsumeResult(BillingResult(), null)
+suspend fun BillingClient.acknowledgePurchase(params: AcknowledgePurchaseParams) = BillingResult()

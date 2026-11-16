@@ -437,8 +437,9 @@ fun EditorScreen(store: EditorStore) {
     LayerPresetsEmptyDialog(store, ui)
     if (ui.effectsBrowser) EffectsBrowserSheet(store, onOpenPanel = { openPanel(store, ui, it) }) { ui.effectsBrowser = false }
     store.expressionTarget?.let { com.aurea.aurea.editor.panels.ExpressionSheet(store, it) }
-    // 0.5.4: texto 3D pedido sem o acesso (Text3DGate em EditorStore.addText3D): a tela bloqueada do Hyper.
-    if (store.hyperLockedPrompt) com.aurea.aurea.hyper.HyperLockedDialog { store.hyperLockedPrompt = false }
+    // 0.5.4: texto 3D pedido sem o acesso (Text3DGate em EditorStore.addText3D): o paywall (assinatura do
+    // Texto 3D ou AureaHyper; 16/11/2026).
+    if (store.hyperLockedPrompt) com.aurea.aurea.hyper.PaywallDialog(com.aurea.aurea.hyper.PaidItem.text3d(), null) { store.hyperLockedPrompt = false }
     // Omega adicionar (área 08, P2-4): o "Fundo" das sub-páginas leva aos ajustes do projeto.
     if (ui.exporting) ExportScreen(store, onOpenProjectSettings = { ui.exporting = false; openSheet(store, ui, ShellSheet.ProjectSettings) }) { ui.exporting = false }
     // 0.4.6: o assistente de IA; o painel que ele pede fecha o chat e abre no editor.

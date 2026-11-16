@@ -17,39 +17,94 @@ f32 unit(f32 v, f32 fallback) noexcept { return std::isfinite(v) ? std::clamp(v,
 u8 byte_of(f32 v) noexcept { return static_cast<u8>(std::clamp(std::lround(v), 0l, 255l)); }
 } // namespace
 
-bool effect_requires_access(u32 effectTypeId) noexcept {
-    static constexpr u32 paidEffects[] = {
-        effect_type_id(effect_keys::kHyperUpscale),
-        effect_type_id(effect_keys::kHyperMotion),
-        effect_type_id(effect_keys::kHyperClean),
-        effect_type_id("aurea.motion.cartoon_moblur"),
-        effect_type_id("aurea.motion.twitch_reference"),
-        effect_type_id("aurea.glitch.signal_reference"),
-        effect_type_id("aurea.blur.sharpen_reference"),
-        effect_type_id("aurea.blur.fast_blur_reference"),
-        effect_type_id("aurea.stylize.find_edges_reference"),
-        effect_type_id("aurea.distort.wave_warp_reference"),
-        effect_type_id("aurea.transition.block_dissolve_reference"),
-        effect_type_id("aurea.transition.radial_wipe_reference"),
-        effect_type_id("aurea.distort.turbulent_displace_reference"),
-        effect_type_id("aurea.stylize.drop_shadow_reference"),
-        // Radial Blur, Radial Shadow, Posterize Time and Time Displacement
-        // (AE reference batches A/A2) are NOT here: their legacy versions were
-        // free, and an AE-faithful replacement of a free effect stays free.
-        effect_type_id("aurea.generate.extrude_reference"),
-        effect_type_id("aurea.glitch.glitchify_reference"),
-        effect_type_id(aurea::effect_keys::kTwitch),
-        effect_type_id(aurea::effect_keys::kGlitchify),
-        effect_type_id(aurea::effect_keys::kSignal),
-        effect_type_id(aurea::effect_keys::kRasterExtrude),
-    };
-    return std::find(std::begin(paidEffects), std::end(paidEffects), effectTypeId) != std::end(paidEffects);
+namespace {
+/// Um efeito pago e a assinatura avulsa que o libera (nullptr = só o AureaHyper).
+struct PaidEffect {
+    u32 typeId;
+    const char* product;
+};
+
+// 16/11/2026 (decisão do dono): cada efeito pago é uma assinatura de R$ 5,00/mês;
+// o AureaHyper (R$ 59,50/mês) libera todos. docs/release/assinaturas.md.
+constexpr PaidEffect kPaidEffects[] = {
+    // As 3 ferramentas Hyper: só no AureaHyper (sem assinatura avulsa).
+    {effect_type_id(effect_keys::kHyperUpscale), nullptr},
+    {effect_type_id(effect_keys::kHyperMotion), nullptr},
+    {effect_type_id(effect_keys::kHyperClean), nullptr},
+    {effect_type_id("aurea.motion.cartoon_moblur"), "aurea_fx_cartoon_moblur"},
+    {effect_type_id("aurea.motion.twitch_reference"), "aurea_fx_twitch"},
+    {effect_type_id(aurea::effect_keys::kTwitch), "aurea_fx_twitch"},
+    {effect_type_id("aurea.glitch.signal_reference"), "aurea_fx_signal"},
+    {effect_type_id(aurea::effect_keys::kSignal), "aurea_fx_signal"},
+    {effect_type_id("aurea.glitch.glitchify_reference"), "aurea_fx_glitchify"},
+    {effect_type_id(aurea::effect_keys::kGlitchify), "aurea_fx_glitchify"},
+    {effect_type_id("aurea.generate.extrude_reference"), "aurea_fx_extrude"},
+    {effect_type_id(aurea::effect_keys::kRasterExtrude), "aurea_fx_extrude"},
+    {effect_type_id("aurea.blur.sharpen_reference"), "aurea_fx_sharpen"},
+    {effect_type_id("aurea.stylize.find_edges_reference"), "aurea_fx_find_edges"},
+    {effect_type_id("aurea.distort.wave_warp_reference"), "aurea_fx_wave_warp"},
+    {effect_type_id("aurea.transition.block_dissolve_reference"), "aurea_fx_block_dissolve"},
+    {effect_type_id("aurea.transition.radial_wipe_reference"), "aurea_fx_radial_wipe"},
+    // Fast Blur, Turbulent Displace and Drop Shadow: free by the owner (16/11).
+    // Radial Blur, Radial Shadow, Posterize Time and Time Displacement
+    // (AE reference batches A/A2) are NOT here: their legacy versions were
+    // free, and an AE-faithful replacement of a free effect stays free.
+};
+
+const PaidEffect* find_paid(u32 effectTypeId) noexcept {
+    for (const PaidEffect& e : kPaidEffects)
+        if (e.typeId == effectTypeId) return &e;
+    return nullptr;
 }
+
+bool owns(const std::vector<std::string>& owned, std::string_view product) noexcept {
+    if (product.empty()) return false;
+    for (const std::string& p : owned)
+        if (p == product) return true;
+    return false;
+}
+} // namespace
+
+bool effect_requires_access(u32 effectTypeId) noexcept { return find_paid(effectTypeId) != nullptr; }
 
 bool text3d_requires_access() noexcept { return true; }
 
 bool model_source_requires_access(const std::string& sourcePath) noexcept {
     return text3d_requires_access() && sourcePath.rfind(scene3d::kText3DScheme, 0) == 0;
+}
+
+const char* effect_product_id(u32 effectTypeId) noexcept {
+    const PaidEffect* e = find_paid(effectTypeId);
+    return e ? e->product : nullptr;
+}
+
+const char* text3d_product_id() noexcept { return kText3DProductId; }
+
+bool product_unlocks_everything(std::string_view productId) noexcept {
+    return productId == kHyperSubscriptionId || productId == kProductId;
+}
+
+std::vector<std::string> subscription_product_ids() {
+    std::vector<std::string> ids{kHyperSubscriptionId};
+    for (const PaidEffect& e : kPaidEffects)
+        if (e.product && std::find(ids.begin(), ids.end(), e.product) == ids.end()) ids.emplace_back(e.product);
+    ids.emplace_back(kText3DProductId);
+    return ids;
+}
+
+bool has_access(const std::vector<std::string>& owned, const char* itemProduct) noexcept {
+    for (const std::string& p : owned)
+        if (product_unlocks_everything(p)) return true;
+    return itemProduct && owns(owned, itemProduct);
+}
+
+bool has_effect_access(const std::vector<std::string>& owned, u32 effectTypeId) noexcept {
+    const PaidEffect* e = find_paid(effectTypeId);
+    return !e || has_access(owned, e->product);
+}
+
+bool has_text3d_access(const std::vector<std::string>& owned) noexcept {
+    return !text3d_requires_access() || has_access(owned, text3d_product_id());
 }
 
 Recipe sanitize(const Recipe& in) noexcept {

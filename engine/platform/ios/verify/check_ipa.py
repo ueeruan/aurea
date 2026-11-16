@@ -17,7 +17,7 @@ def validate(path):
         prefix = 'Payload/Aurea.app/'
         assert not any(n.startswith(prefix + 'Resources/') or n == prefix + 'Resources' for n in names), 'Forbidden iOS app root Resources directory'
         info = plistlib.loads(archive.read(prefix + 'Info.plist'))
-        assert info['CFBundleIdentifier'] == 'com.aurea.aurea', 'Incorrect bundle ID'
+        assert info['CFBundleIdentifier'] == 'com.aurea.aurea.3ATTUN44P8', 'Incorrect bundle ID'
         assert info['CFBundlePackageType'] == 'APPL', 'Not an app bundle'
         declarations = info.get('UTImportedTypeDeclarations', [])
         for ext in ('fbx', 'obj', 'glb', 'gltf', 'mtl'):

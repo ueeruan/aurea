@@ -32,8 +32,15 @@ import com.aurea.aurea.ui.theme.CupertinoIcon
 internal object HyperEffectGate {
     fun isHyper(typeId: Int): Boolean = AureaEngine.nativeEffectRequiresHyper(typeId)
 
-    /** Lê o estado do portão (Compose recompõe quando muda). */
-    fun locked(typeId: Int): Boolean = PaidGate.locked(isHyper(typeId), HyperEntitlements.access)
+    /**
+     * Lê o estado do portão (Compose recompõe quando muda). 16/11/2026: cada efeito
+     * pago tem a sua assinatura (hyper::effect_product_id) e o AureaHyper libera
+     * todos; a regra é do motor (HyperEntitlements.accessFor → hyper::has_access).
+     */
+    fun locked(typeId: Int): Boolean {
+        if (!isHyper(typeId)) return false
+        return PaidGate.locked(true, HyperEntitlements.accessFor(AureaEngine.nativeEffectProductId(typeId)))
+    }
 }
 
 /**
@@ -50,18 +57,21 @@ internal object PaidGate {
 }
 
 /**
- * 0.5.4 (pedido do dono, 15/11/2026): o TEXTO 3D é do mesmo produto pago. Todas
+ * 0.5.4 (pedido do dono, 15/11/2026): o TEXTO 3D é pago (16/11/2026: assinatura própria ou AureaHyper). Todas
  * as entradas que CRIAM texto 3D (+ › Texto 3D, o dock da cena 3D, os presets de
  * texto 3D) passam por [EditorStore.addText3D], que confere [locked]; bloqueado,
- * o editor abre a tela bloqueada do Hyper (HyperLockedDialog) e as células levam
+ * o editor abre o paywall (PaywallDialog, hyper/Paywall.kt) e as células levam
  * o [HyperLockBadge]. Texto 3D que já está no projeto segue como um efeito pago
  * já aplicado (ver [PaidGate]). O par do iOS: Text3DGate (HyperModel.swift).
  */
 internal object Text3DGate {
     fun isPaid(): Boolean = AureaEngine.nativeText3dRequiresHyper()
 
-    /** Lê o estado do portão (Compose recompõe quando muda). */
-    fun locked(): Boolean = PaidGate.locked(isPaid(), HyperEntitlements.access)
+    /** Lê o estado do portão (Compose recompõe quando muda): assinatura do Texto 3D ou AureaHyper. */
+    fun locked(): Boolean {
+        if (!isPaid()) return false
+        return PaidGate.locked(true, HyperEntitlements.accessFor(AureaEngine.nativeText3dProductId()))
+    }
 }
 
 /** O cadeado no canto da miniatura de um efeito Hyper bloqueado. */

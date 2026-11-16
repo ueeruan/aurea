@@ -252,15 +252,20 @@ struct HyperJobRequest: Equatable {
 
 // MARK: - Portão pago (compra única `aureahyper_lifetime`)
 //
-// Sem cobrança por enquanto: o acesso é concedido por conta Aurea no servidor
-// (discovery/entitlements.js, GET /api/entitlements) e o app só confere. A
-// StoreKit 2 entra depois como outro EntitlementProvider (Transaction.
-// currentEntitlements + verificação no servidor), sem mudar a tela nem o editor.
+// 16/11/2026 (decisão do dono): ASSINATURAS mensais. O AureaHyper
+// (`aurea_hyper_mensal`) libera tudo; cada efeito pago e o Texto 3D têm a sua
+// assinatura avulsa; o legado `aureahyper_lifetime` segue liberando tudo. A
+// StoreKit 2 cobra (AureaSubscriptions.swift), o servidor confere com a App Store
+// e diz o que a conta tem AGORA (GET /api/entitlements: produtos + vencimento).
+// QUAL produto libera QUAL item é regra do motor (hyper::has_access, via
+// AureaEngine.hasPaidAccess): o app só guarda o conjunto de produtos da conta.
 // Regras (as do Android, EntitlementRules): nunca libera sem uma confirmação
-// do servidor para esta conta; vale 30 dias offline; sair/excluir/401 apaga.
+// do servidor para esta conta; vale 30 dias offline (assinatura vencida não vale
+// nem offline); sair/excluir/401 apaga.
 
 enum EntitlementCheck: Equatable {
-    case granted(Set<String>, Int)
+    /// Produtos, checkedAt (s), vencimento de cada assinatura (s Unix) e o que o servidor vende agora.
+    case granted(Set<String>, Int, expires: [String: Int64] = [:], purchasable: Set<String> = [])
     case unauthorized
     case unreachable
 }
@@ -271,20 +276,39 @@ protocol EntitlementProvider {
 
 struct ServerEntitlementProvider: EntitlementProvider {
     func fetch(sessionToken: String) async -> EntitlementCheck {
-        let r = await ContaAPI.chamar("/api/entitlements", metodo: "GET", corpo: nil, token: sessionToken)
+        let r = await ContaAPI.chamar("/api/entitlements?platform=apple", metodo: "GET", corpo: nil, token: sessionToken)
         return Self.interpret(status: r.status, body: r.corpo)
     }
     static func interpret(status: Int, body: [String: Any]) -> EntitlementCheck {
         if status == 401 { return .unauthorized }
         guard (200...299).contains(status), let list = body["products"] as? [Any] else { return .unreachable }
-        return .granted(Set(list.compactMap { $0 as? String }.filter { !$0.isEmpty }), (body["checkedAt"] as? NSNumber)?.intValue ?? 0)
+        return .granted(stringSet(list), (body["checkedAt"] as? NSNumber)?.intValue ?? 0,
+                        expires: expiresOf(body), purchasable: stringSet(body["purchasable"] as? [Any] ?? []))
     }
+    /// {"expires": {"aurea_fx_twitch": 1800000000}} → produto → segundos Unix (valores inválidos ficam de fora).
+    static func expiresOf(_ body: [String: Any]) -> [String: Int64] {
+        guard let o = body["expires"] as? [String: Any] else { return [:] }
+        var out: [String: Int64] = [:]
+        for (k, v) in o { if let n = (v as? NSNumber)?.int64Value, n > 0 { out[k] = n } }
+        return out
+    }
+    static func stringSet(_ list: [Any]) -> Set<String> { Set(list.compactMap { $0 as? String }.filter { !$0.isEmpty }) }
 }
 
 struct EntitlementCache: Codable, Equatable {
     var account: String
     var products: [String]
     var checkedAtMillis: Int64
+    /// Vencimento de cada assinatura (ms); o resto não vence. Opcional: o cache antigo não tem.
+    var expiresMillis: [String: Int64]? = nil
+
+    /// Os produtos que valem em `nowMillis`: assinatura vencida (com a folga) não conta, mesmo offline.
+    func owned(nowMillis: Int64) -> Set<String> {
+        Set(products.filter { p in
+            guard let end = expiresMillis?[p] else { return true }
+            return end + EntitlementRules.subscriptionSlackMillis > nowMillis
+        })
+    }
 }
 
 /// `needsConfig`/`off` vêm da config remota assinada (AppConfig.swift); o resto, do portão por conta.
@@ -293,6 +317,8 @@ enum HyperAccess { case checking, unlocked, locked, signedOut, needsCheck, expir
 enum EntitlementRules {
     static let graceMillis: Int64 = 30 * 24 * 3600 * 1000
     static let clockSkewMillis: Int64 = 24 * 3600 * 1000
+    /// A assinatura vale até 1 dia depois do vencimento guardado (a renovação é no vencimento; o app pergunta ao abrir).
+    static let subscriptionSlackMillis: Int64 = 24 * 3600 * 1000
 
     /// A conta como chave do cache (o mesmo hash do Android: SHA-256, 16 bytes em hex).
     static func accountKey(_ email: String) -> String {
@@ -301,21 +327,38 @@ enum EntitlementRules {
     }
 
     static func access(cache: EntitlementCache?, email: String?, product: String, nowMillis: Int64, checking: Bool) -> HyperAccess {
+        access(cache: cache, email: email, nowMillis: nowMillis, checking: checking) { $0.contains(product) }
+    }
+
+    /// O acesso a um item pago: `granted` recebe os produtos que valem agora e diz se liberam o item (hyper::has_access).
+    static func access(cache: EntitlementCache?, email: String?, nowMillis: Int64, checking: Bool,
+                       granted: (Set<String>) -> Bool) -> HyperAccess {
         guard let email else { return .signedOut }
         guard let mine = cache, mine.account == accountKey(email) else { return checking ? .checking : .needsCheck }
         let age = nowMillis - mine.checkedAtMillis
         if age < -clockSkewMillis || age > graceMillis { return checking ? .checking : .expired }
-        return mine.products.contains(product) ? .unlocked : .locked
+        return granted(mine.owned(nowMillis: nowMillis)) ? .unlocked : .locked
     }
 }
 
 @MainActor
 final class HyperEntitlements: ObservableObject {
     static let shared = HyperEntitlements()
+    /// O legado vitalício (hyper::kProductId), concedido pelo dono; libera tudo como o AureaHyper mensal.
     static let product = "aureahyper_lifetime"   // hyper::kProductId
     private static let keychainKey = "hyper_entitlements"
 
+    /// A regra do motor: os produtos liberam o item cuja assinatura avulsa é `item` (nil = só o AureaHyper)?
+    static func engineRule(_ owned: Set<String>, _ item: String?) -> Bool {
+        AureaEngine.hasPaidAccess(Array(owned), item: item)
+    }
+
+    /// O acesso ao AureaHyper (as 3 ferramentas Hyper, a tela da Home): o que libera TUDO.
     @Published private(set) var access: HyperAccess = .needsConfig
+    /// O que o servidor aceita vender agora (GET /api/entitlements: `purchasable`).
+    @Published private(set) var purchasable: Set<String> = []
+    /// Muda a cada recálculo: quem lê `accessFor(_:)` numa tela é redesenhado junto.
+    @Published private(set) var revision = 0
     /// Só o portão por conta (o que vale no modo "entitled" da config remota).
     @Published private(set) var entitlementAccess: HyperAccess = .signedOut
     var unlocked: Bool { access == .unlocked }
@@ -345,9 +388,10 @@ final class HyperEntitlements: ObservableObject {
             inFlight = max(0, inFlight - 1)
             guard email == accountEmail else { recompute(); return }
             switch result {
-            case .granted(let products, _):
+            case .granted(let products, _, let expires, let forSale):
+                purchasable = forSale
                 store(EntitlementCache(account: EntitlementRules.accountKey(accountEmail), products: products.sorted(),
-                                       checkedAtMillis: Self.nowMillis()))
+                                       checkedAtMillis: Self.nowMillis(), expiresMillis: expires.mapValues { $0 * 1000 }))
             case .unauthorized: store(nil)
             case .unreachable: break
             }
@@ -355,8 +399,32 @@ final class HyperEntitlements: ObservableObject {
         }
     }
 
+    /// A loja confirmou uma compra e o servidor respondeu com os produtos da conta: vale na hora.
+    func acceptServerProducts(_ products: Set<String>, expires: [String: Int64]) {
+        guard let email else { return }
+        store(EntitlementCache(account: EntitlementRules.accountKey(email), products: products.sorted(),
+                               checkedAtMillis: Self.nowMillis(), expiresMillis: expires.mapValues { $0 * 1000 }))
+        recompute()
+    }
+
+    /// Os produtos da conta que valem agora (vazio sem confirmação do servidor).
+    func ownedProducts() -> Set<String> {
+        guard let email, let mine = cache, mine.account == EntitlementRules.accountKey(email) else { return [] }
+        return mine.owned(nowMillis: Self.nowMillis())
+    }
+
+    /// O acesso a um item pago cuja assinatura avulsa é `item` (nil = só o AureaHyper).
+    func accessFor(_ item: String?) -> HyperAccess {
+        let entitlement = EntitlementRules.access(cache: cache, email: email, nowMillis: Self.nowMillis(), checking: inFlight > 0) {
+            Self.engineRule($0, item)
+        }
+        let store = AppConfigStore.shared
+        return AppConfigPolicy.hyperAccess(store.config, entitlement: entitlement, now: AppConfigStore.now(), fetching: store.fetching)
+    }
+
     func clear() {
         email = nil
+        purchasable = []
         store(nil)
         recompute()
     }
@@ -371,8 +439,11 @@ final class HyperEntitlements: ObservableObject {
     }
 
     private func recompute() {
-        entitlementAccess = EntitlementRules.access(cache: cache, email: email, product: Self.product, nowMillis: Self.nowMillis(),
-                                                    checking: inFlight > 0)
+        // O AureaHyper (o que libera tudo): a regra do motor com item nulo.
+        entitlementAccess = EntitlementRules.access(cache: cache, email: email, nowMillis: Self.nowMillis(), checking: inFlight > 0) {
+            Self.engineRule($0, nil)
+        }
+        revision &+= 1
         // A config remota manda: "free" libera, "entitled" usa o portão acima, "off" bloqueia.
         let store = AppConfigStore.shared
         access = AppConfigPolicy.hyperAccess(store.config, entitlement: entitlementAccess, now: AppConfigStore.now(),
@@ -389,7 +460,11 @@ final class HyperEntitlements: ObservableObject {
 /// aparecem com o cadeado e abrem a tela bloqueada (EffectsBrowser.swift).
 enum HyperEffectGate {
     static func isHyper(typeId: UInt32) -> Bool { AureaEngine.effectRequiresHyper(typeId) }
-    @MainActor static func locked(typeId: UInt32) -> Bool { PaidGate.locked(paid: isHyper(typeId: typeId), access: HyperEntitlements.shared.access) }
+    /// 16/11/2026: cada efeito pago tem a sua assinatura (hyper::effect_product_id) e o AureaHyper libera todos.
+    @MainActor static func locked(typeId: UInt32) -> Bool {
+        guard isHyper(typeId: typeId) else { return false }
+        return PaidGate.locked(paid: true, access: HyperEntitlements.shared.accessFor(AureaEngine.effectProductId(typeId)))
+    }
 }
 
 /// A regra do portão, sem ponte nem estado (par de PaidGate em HyperEffectGate.kt): um
@@ -401,12 +476,16 @@ enum PaidGate {
     static func locked(paid: Bool, access: HyperAccess) -> Bool { paid && access != .unlocked }
 }
 
-/// 0.5.4 (pedido do dono, 15/11/2026): o TEXTO 3D é do mesmo produto pago. Toda entrada
+/// 0.5.4 (pedido do dono, 15/11/2026): o TEXTO 3D é pago (16/11/2026: assinatura própria ou AureaHyper). Toda entrada
 /// que CRIA texto 3D (+ › Texto 3D, o dock/menu da cena 3D, os presets de texto 3D) passa
 /// por AureaModel.addText3D, que confere `locked()`; as células levam o cadeado.
 enum Text3DGate {
     static func isPaid() -> Bool { AureaEngine.text3DRequiresHyper() }
-    @MainActor static func locked() -> Bool { PaidGate.locked(paid: isPaid(), access: HyperEntitlements.shared.access) }
+    /// Assinatura do Texto 3D ou AureaHyper (16/11/2026).
+    @MainActor static func locked() -> Bool {
+        guard isPaid() else { return false }
+        return PaidGate.locked(paid: true, access: HyperEntitlements.shared.accessFor(AureaEngine.text3DProductId()))
+    }
 }
 
 // MARK: - Plataforma: rostos (Vision), Neural Engine, pasta dos modelos

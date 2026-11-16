@@ -16,13 +16,16 @@ import org.json.JSONObject
 import java.security.MessageDigest
 
 // =============================================================================
-//  O PORTÃO do AureaHyper (compra única `aureahyper_lifetime`).
+//  O PORTÃO do conteúdo pago (AureaHyper, efeitos pagos, Texto 3D).
 //
-//  Hoje não há cobrança: o acesso é concedido por conta Aurea no servidor
-//  (discovery/entitlements.js, GET /api/entitlements) e o app só confere. A
-//  loja entra depois como outro [EntitlementProvider] (Play Billing:
-//  BillingClient.queryPurchasesAsync + verificação no servidor), sem mudar a
-//  tela nem o editor — eles só leem [HyperEntitlements.access].
+//  16/11/2026 (decisão do dono): ASSINATURAS mensais. O AureaHyper
+//  (`aurea_hyper_mensal`) libera tudo; cada efeito pago e o Texto 3D têm a sua
+//  assinatura avulsa; o legado `aureahyper_lifetime` (concedido pelo dono)
+//  segue liberando tudo. A Play cobra (hyper/Subscriptions.kt), o servidor
+//  confere com a loja e diz o que a conta tem AGORA (GET /api/entitlements:
+//  produtos + vencimento de cada assinatura). QUAL produto libera QUAL item é
+//  regra do motor (hyper::has_access, via AureaEngine.nativeHasPaidAccess): o
+//  app só guarda o conjunto de produtos da conta e pergunta.
 //
 //  Regras (EntitlementRules, testadas em EntitlementRulesTest):
 //    · nunca libera sem pelo menos UMA confirmação do servidor para esta conta;
@@ -34,7 +37,14 @@ import java.security.MessageDigest
 
 /** O resultado de uma consulta. A consulta nunca lança. */
 sealed interface EntitlementCheck {
-    data class Granted(val products: Set<String>, val checkedAtSeconds: Long) : EntitlementCheck
+    /**
+     * [expiresSeconds]: vencimento (segundos Unix) de cada assinatura; produto
+     * fora do mapa não vence. [purchasable]: o que o servidor aceita vender agora
+     * (vazio no beta fechado ou sem as chaves da loja).
+     */
+    data class Granted(val products: Set<String>, val checkedAtSeconds: Long,
+                       val expiresSeconds: Map<String, Long> = emptyMap(),
+                       val purchasable: Set<String> = emptySet()) : EntitlementCheck
     /** A sessão não vale mais (401). */
     data object Unauthorized : EntitlementCheck
     /** Sem rede, servidor fora (5xx) ou resposta ilegível: nada muda. */
@@ -60,23 +70,44 @@ class ServerEntitlementProvider : EntitlementProvider {
                 val list = body.optJSONArray("products")
                 if (list == null) EntitlementCheck.Unreachable
                 else EntitlementCheck.Granted((0 until list.length()).mapNotNull { list.optString(it).ifBlank { null } }.toSet(),
-                    body.optLong("checkedAt", 0L))
+                    body.optLong("checkedAt", 0L), expiresOf(body), stringSet(body.optJSONArray("purchasable")))
             }
             else -> EntitlementCheck.Unreachable
         }
+
+        /** {"expires": {"aurea_fx_twitch": 1800000000}} → produto → segundos Unix (valores inválidos ficam de fora). */
+        fun expiresOf(body: JSONObject): Map<String, Long> {
+            val o = body.optJSONObject("expires") ?: return emptyMap()
+            return o.keys().asSequence().mapNotNull { k -> o.optLong(k, -1L).takeIf { it > 0 }?.let { k to it } }.toMap()
+        }
+
+        fun stringSet(a: JSONArray?): Set<String> =
+            if (a == null) emptySet() else (0 until a.length()).mapNotNull { a.optString(it).ifBlank { null } }.toSet()
     }
 }
 
-/** O que ficou da última confirmação do servidor (cifrado no KeyVault). */
-data class EntitlementCache(val account: String, val products: Set<String>, val checkedAtMillis: Long) {
+/**
+ * O que ficou da última confirmação do servidor (cifrado no KeyVault).
+ * [expiresMillis]: vencimento de cada assinatura (o resto não vence).
+ */
+data class EntitlementCache(val account: String, val products: Set<String>, val checkedAtMillis: Long,
+                            val expiresMillis: Map<String, Long> = emptyMap()) {
+    /** Os produtos que valem em [nowMillis]: uma assinatura vencida (com a folga) não conta, mesmo offline. */
+    fun owned(nowMillis: Long): Set<String> =
+        products.filterTo(mutableSetOf()) { p -> expiresMillis[p]?.let { it + EntitlementRules.SUBSCRIPTION_SLACK_MS > nowMillis } ?: true }
+
     fun toJson(): String = JSONObject().put("account", account).put("products", JSONArray(products.sorted()))
-        .put("checkedAt", checkedAtMillis).toString()
+        .put("checkedAt", checkedAtMillis)
+        .apply { if (expiresMillis.isNotEmpty()) put("expires", JSONObject(expiresMillis.toSortedMap() as Map<*, *>)) }
+        .toString()
 
     companion object {
         fun parse(raw: String?): EntitlementCache? = runCatching {
             val o = JSONObject(raw ?: return null)
             val list = o.getJSONArray("products")
-            EntitlementCache(o.getString("account"), (0 until list.length()).map { list.getString(it) }.toSet(), o.getLong("checkedAt"))
+            val exp = o.optJSONObject("expires")
+            EntitlementCache(o.getString("account"), (0 until list.length()).map { list.getString(it) }.toSet(), o.getLong("checkedAt"),
+                exp?.keys()?.asSequence()?.associateWith { exp.getLong(it) } ?: emptyMap())
         }.getOrNull()
     }
 }
@@ -104,6 +135,11 @@ object EntitlementRules {
     const val GRACE_MS = 30L * 24 * 3600 * 1000
     /** Relógio atrasado mais que isto em relação à confirmação = não confia. */
     const val CLOCK_SKEW_MS = 24L * 3600 * 1000
+    /**
+     * Uma assinatura continua valendo até 1 dia depois do vencimento guardado: a
+     * renovação da loja acontece no vencimento e o app só pergunta ao abrir/entrar.
+     */
+    const val SUBSCRIPTION_SLACK_MS = 24L * 3600 * 1000
 
     /** A conta como chave do cache (o e-mail não fica em claro no cache). */
     fun accountKey(email: String): String {
@@ -115,13 +151,21 @@ object EntitlementRules {
      * O acesso a [product] para a conta [email] agora. `checking` = há uma
      * consulta em voo (só muda o caso "nunca confirmado").
      */
-    fun access(cache: EntitlementCache?, email: String?, product: String, nowMillis: Long, checking: Boolean): HyperAccess {
+    fun access(cache: EntitlementCache?, email: String?, product: String, nowMillis: Long, checking: Boolean): HyperAccess =
+        access(cache, email, nowMillis, checking) { product in it }
+
+    /**
+     * O acesso a um item pago: [granted] recebe os produtos que valem agora e diz
+     * se eles liberam o item (a regra do motor, hyper::has_access).
+     */
+    fun access(cache: EntitlementCache?, email: String?, nowMillis: Long, checking: Boolean,
+               granted: (Set<String>) -> Boolean): HyperAccess {
         if (email == null) return HyperAccess.SignedOut
         val mine = cache?.takeIf { it.account == accountKey(email) }
             ?: return if (checking) HyperAccess.Checking else HyperAccess.NeedsCheck
         val age = nowMillis - mine.checkedAtMillis
         if (age < -CLOCK_SKEW_MS || age > GRACE_MS) return if (checking) HyperAccess.Checking else HyperAccess.Expired
-        return if (product in mine.products) HyperAccess.Unlocked else HyperAccess.Locked
+        return if (granted(mine.owned(nowMillis))) HyperAccess.Unlocked else HyperAccess.Locked
     }
 }
 
@@ -131,8 +175,17 @@ object EntitlementRules {
  * [clear] ao sair/excluir.
  */
 object HyperEntitlements {
+    /** O legado vitalício (hyper::kProductId), concedido pelo dono; libera tudo como o AureaHyper mensal. */
     const val PRODUCT = "aureahyper_lifetime"   // hyper::kProductId
     private const val KEY_CACHE = "hyper_entitlements"
+
+    /**
+     * A regra do motor: os produtos da conta liberam o item cuja assinatura avulsa
+     * é `itemProduct` (null = só o AureaHyper)? Os testes da JVM trocam por outra.
+     */
+    var accessRule: (Set<String>, String?) -> Boolean = { owned, item ->
+        com.aurea.aurea.engine.AureaEngine.nativeHasPaidAccess(owned.toTypedArray(), item)
+    }
 
     private var vault: KeyVault? = null
     private var provider: EntitlementProvider = ServerEntitlementProvider()
@@ -141,8 +194,14 @@ object HyperEntitlements {
     private var email: String? = null
     private var inFlight = 0
 
+    /** O acesso ao AureaHyper (as 3 ferramentas Hyper, a tela da Home): o que libera TUDO. */
     var access by mutableStateOf(HyperAccess.NeedsConfig)
         private set
+    /** O que o servidor aceita vender agora (GET /api/entitlements: `purchasable`). */
+    var purchasable by mutableStateOf<Set<String>>(emptySet())
+        private set
+    /** Muda a cada recálculo: quem lê [accessFor] numa composição recompõe junto. */
+    private var revision by mutableStateOf(0)
     /** Só o portão por conta (o que vale no modo "entitled" da config remota). */
     var entitlementAccess by mutableStateOf(HyperAccess.SignedOut)
         private set
@@ -179,8 +238,11 @@ object HyperEntitlements {
             inFlight = (inFlight - 1).coerceAtLeast(0)
             if (email != accountEmail) { recompute(); return@launch }   // trocou de conta no meio
             when (result) {
-                is EntitlementCheck.Granted -> store(EntitlementCache(EntitlementRules.accountKey(accountEmail), result.products,
-                    System.currentTimeMillis()))
+                is EntitlementCheck.Granted -> {
+                    purchasable = result.purchasable
+                    store(EntitlementCache(EntitlementRules.accountKey(accountEmail), result.products,
+                        System.currentTimeMillis(), result.expiresSeconds.mapValues { it.value * 1000 }))
+                }
                 EntitlementCheck.Unauthorized -> store(null)
                 EntitlementCheck.Unreachable -> Unit
             }
@@ -188,9 +250,43 @@ object HyperEntitlements {
         }
     }
 
+    /**
+     * A loja confirmou uma compra e o servidor respondeu com os produtos da conta
+     * (POST /api/entitlements/purchase): vale na hora, sem esperar outra consulta.
+     */
+    fun acceptServerProducts(products: Set<String>, expiresSeconds: Map<String, Long>) {
+        val who = email ?: return
+        store(EntitlementCache(EntitlementRules.accountKey(who), products, System.currentTimeMillis(),
+            expiresSeconds.mapValues { it.value * 1000 }))
+        recompute()
+    }
+
+    /** Os produtos da conta que valem agora (vazio sem confirmação do servidor). */
+    fun ownedProducts(): Set<String> {
+        revision
+        val who = email ?: return emptySet()
+        val mine = cache?.takeIf { it.account == EntitlementRules.accountKey(who) } ?: return emptySet()
+        return mine.owned(System.currentTimeMillis())
+    }
+
+    /**
+     * O acesso a um item pago cuja assinatura avulsa é [itemProduct] (null = só o
+     * AureaHyper). Lê estado do Compose: a tela recompõe quando o acesso muda.
+     */
+    fun accessFor(itemProduct: String?): HyperAccess {
+        revision
+        if (platformUnlocked) return HyperAccess.Unlocked
+        val entitlement = EntitlementRules.access(cache, email, System.currentTimeMillis(), inFlight > 0) { owned ->
+            runCatching { accessRule(owned, itemProduct) }.getOrDefault(false)
+        }
+        val store = com.aurea.aurea.config.AppConfigStore
+        return com.aurea.aurea.config.AppConfigPolicy.hyperAccess(store.config, entitlement, store.now(), store.fetching)
+    }
+
     /** Saiu ou excluiu a conta. */
     fun clear() {
         email = null
+        purchasable = emptySet()
         store(null)
         recompute()
     }
@@ -201,7 +297,11 @@ object HyperEntitlements {
     }
 
     private fun recompute() {
-        entitlementAccess = EntitlementRules.access(cache, email, PRODUCT, System.currentTimeMillis(), inFlight > 0)
+        // O AureaHyper (o que libera tudo): a regra do motor com item nulo.
+        entitlementAccess = EntitlementRules.access(cache, email, System.currentTimeMillis(), inFlight > 0) { owned ->
+            runCatching { accessRule(owned, null) }.getOrDefault(false)
+        }
+        revision++
         // A config remota manda: "free" libera, "entitled" usa o portão acima, "off" bloqueia.
         val store = com.aurea.aurea.config.AppConfigStore
         access = if (platformUnlocked) HyperAccess.Unlocked

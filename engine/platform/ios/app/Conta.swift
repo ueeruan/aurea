@@ -242,6 +242,8 @@ final class ContaModel: ObservableObject {
     func atualizarAcessos() {
         let guardada: ContaSessao? = sessao()
         HyperEntitlements.shared.refresh(token: guardada?.token, email: guardada?.email)
+        // Assinaturas da App Store ainda não entregues ao servidor (o app caiu, outro aparelho): restaura em silêncio.
+        if guardada != nil { Task { await AureaSubscriptions.shared.restore(silent: true) } }
     }
 
     func atualizarUsuarios() async {

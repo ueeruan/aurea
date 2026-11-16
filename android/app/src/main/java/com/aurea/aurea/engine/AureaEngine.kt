@@ -101,6 +101,16 @@ class AureaEngine private constructor() {
         @JvmStatic external fun nativeEffectRequiresHyper(typeId: Int): Boolean
         /** 0.5.4: criar texto 3D pede o mesmo acesso do AureaHyper (hyper::text3d_requires_access). */
         @JvmStatic external fun nativeText3dRequiresHyper(): Boolean
+        /** 16/11/2026: a assinatura avulsa que libera o efeito pago (null = grátis ou só AureaHyper). */
+        @JvmStatic external fun nativeEffectProductId(typeId: Int): String?
+        /** A assinatura avulsa do Texto 3D (hyper::text3d_product_id). */
+        @JvmStatic external fun nativeText3dProductId(): String
+        /** A assinatura que libera tudo (hyper::kHyperSubscriptionId). */
+        @JvmStatic external fun nativeHyperSubscriptionId(): String
+        /** O que as lojas vendem: AureaHyper primeiro, depois cada avulso (hyper::subscription_product_ids). */
+        @JvmStatic external fun nativeSubscriptionProductIds(): Array<String>?
+        /** A regra única de acesso (hyper::has_access); [itemProduct] null = item só do AureaHyper. */
+        @JvmStatic external fun nativeHasPaidAccess(owned: Array<String>, itemProduct: String?): Boolean
         /** [detector de rostos registrado, modelo de rostos (gfpgan-v1.4) presente]. */
         @JvmStatic external fun nativeHyperFaceStatus(): BooleanArray?
 

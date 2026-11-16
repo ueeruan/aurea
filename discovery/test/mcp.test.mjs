@@ -537,9 +537,9 @@ test("AureaOS na loja: a Play confere, reconhece a compra e a mesma compra não 
     return token in purchases ? new Response(JSON.stringify(purchases[token])) : new Response("{}", { status: 404 });
   };
   try {
-    assert.deepEqual((await chamar(env, "/api/entitlements", { token: a.sessao })).corpo.purchasable, ["aurea_aureaos"]);
+    assert.ok((await chamar(env, "/api/entitlements", { token: a.sessao })).corpo.purchasable.includes("aurea_aureaos"));
     assert.deepEqual((await chamar(env, "/api/entitlements?platform=apple", { token: a.sessao })).corpo.purchasable, []);
-    assert.deepEqual((await chamar(env, "/api/entitlements?platform=google", { token: a.sessao })).corpo.purchasable, ["aurea_aureaos"]);
+    assert.ok((await chamar(env, "/api/entitlements?platform=google", { token: a.sessao })).corpo.purchasable.includes("aurea_aureaos"));
     assert.equal((await buy("tok-1", a.sessao, { product: "aureahyper_lifetime" })).status, 400, "só produtos da loja");
     assert.equal((await buy("nao-existe", a.sessao)).status, 402);
     assert.equal((await buy("tok-2", a.sessao)).status, 402, "não pago");

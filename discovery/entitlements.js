@@ -2,8 +2,11 @@
 //  Direitos pagos (entitlements) — o servidor diz o que cada conta pode usar.
 //
 //  Rotas (JSON, cache-control: no-store):
-//    GET  /api/entitlements        Bearer <token da sessão>
-//         → 200 {products: ["aureahyper_lifetime", ...], checkedAt: <s Unix>}
+//    GET  /api/entitlements        Bearer <token da sessão>   [?platform=google|apple]
+//         → 200 {products: ["aureahyper_lifetime", ...], checkedAt: <s Unix>,
+//                purchasable: [...], expires: {<assinatura>: <s Unix>}}
+//           `products` só traz o que vale AGORA: assinatura vencida não sai (e,
+//           vencida há pouco, é conferida de novo na loja: renovação).
 //         → 401 {error: "nao_autorizado"}  (sem sessão, inválida ou vencida)
 //    POST /api/admin/entitlements  Bearer <AUREA_ADMIN_SECRET>
 //         {email, product, action: "grant"|"revoke", note?: ≤200 caracteres}
@@ -21,14 +24,33 @@
 // =============================================================================
 
 import { json, lerJson, lerSessao, normalizarEmail, dentroDoLimite, sha256hex } from "./contas.js";
-import { verifyGooglePurchase, verifyApplePurchase, googleReady, appleReady } from "./store_verify.js";
+import { verifyGooglePurchase, verifyApplePurchase, verifyGoogleSubscription, verifyAppleSubscription,
+  renewSubscription, googleReady, appleReady } from "./store_verify.js";
 
 /** Os produtos que o servidor conhece. Outro valor é recusado (400). */
 /** AureaOS no AureaMCP: compra ÚNICA (não consumível, vale para sempre na conta). */
 export const AUREAOS_PRODUCT = "aurea_aureaos";
-export const PRODUTOS = Object.freeze(["aureahyper_lifetime", AUREAOS_PRODUCT]);
+/**
+ * ASSINATURAS mensais (16/11/2026, decisão do dono; docs/release/assinaturas.md).
+ * O AureaHyper libera tudo o que é pago; cada efeito pago e o Texto 3D têm a sua.
+ * Quem decide o que cada produto libera é o motor (hyper::has_access, Hyper.cpp):
+ * esta lista só diz o que o servidor aceita vender. Mesma lista de
+ * hyper::subscription_product_ids (test_hyper.cpp confere a contagem: 12).
+ */
+export const HYPER_SUBSCRIPTION = "aurea_hyper_mensal";
+export const ASSINATURAS = Object.freeze([
+  HYPER_SUBSCRIPTION,
+  "aurea_fx_cartoon_moblur", "aurea_fx_twitch", "aurea_fx_signal", "aurea_fx_glitchify", "aurea_fx_extrude",
+  "aurea_fx_sharpen", "aurea_fx_find_edges", "aurea_fx_wave_warp", "aurea_fx_block_dissolve",
+  "aurea_fx_radial_wipe", "aurea_texto3d",
+]);
+export const PRODUTOS = Object.freeze(["aureahyper_lifetime", AUREAOS_PRODUCT, ...ASSINATURAS]);
 /** Os que se compram na loja (POST /api/entitlements/purchase confere com a Play/App Store). */
-export const PRODUTOS_DA_LOJA = Object.freeze([AUREAOS_PRODUCT]);
+export const PRODUTOS_DA_LOJA = Object.freeze([AUREAOS_PRODUCT, ...ASSINATURAS]);
+/** Assinatura vencida há mais que isto não é mais conferida sozinha (o app manda a compra nova). */
+export const RENOVACAO_JANELA_S = 35 * 24 * 3600;
+/** Uma assinatura vencida é conferida na loja no máximo uma vez por hora. */
+export const RENOVACAO_INTERVALO_S = 3600;
 
 const CORPO_ADMIN_MAX = 1024;
 const NOTA_MAX = 200;
@@ -48,18 +70,73 @@ function segredoConfere(recebido, esperado) {
   return dif === 0;
 }
 
+/** As linhas da conta. Sem a migração 0012 (colunas de vencimento), lê como antes: nada vence. */
+async function linhasDe(env, uid) {
+  try {
+    const r = await env.AUREA_DB.prepare(
+      "SELECT product, source, expires_at, store_ref, store_checked_at FROM entitlements WHERE user_id = ? ORDER BY product")
+      .bind(uid).all();
+    return r?.results ?? [];
+  } catch (e) {
+    if (!/no such column/i.test(String(e?.message ?? e))) throw e;
+    const r = await env.AUREA_DB.prepare("SELECT product FROM entitlements WHERE user_id = ? ORDER BY product").bind(uid).all();
+    return (r?.results ?? []).map((x) => ({ product: x.product, expires_at: null }));
+  }
+}
+
+/**
+ * O que a conta tem AGORA: {products, expires}. `renovar` = uma assinatura que
+ * venceu há pouco é conferida de novo na loja (renovação automática); a loja fora
+ * do ar não libera nada e não apaga nada (fica para a próxima consulta).
+ */
+async function direitosDe(env, uid, { renovar = false } = {}) {
+  const now = agoraS();
+  const products = new Set();
+  const expires = {};
+  for (const row of await linhasDe(env, uid)) {
+    if (!PRODUTOS.includes(row.product)) continue;
+    let fim = row.expires_at ?? null;
+    if (fim !== null && fim <= now && renovar && row.store_ref && (row.source === "google" || row.source === "apple")
+      && now - fim < RENOVACAO_JANELA_S && (row.store_checked_at == null || now - row.store_checked_at >= RENOVACAO_INTERVALO_S)) {
+      fim = await renovarAssinatura(env, uid, row, now);
+    }
+    if (fim !== null && fim <= now) continue;
+    products.add(row.product);
+    if (fim !== null) expires[row.product] = fim;
+  }
+  return { products: [...products].sort(), expires };
+}
+
+/** Pergunta à loja se a assinatura renovou. Devolve o novo vencimento (ou o antigo). */
+async function renovarAssinatura(env, uid, row, now) {
+  let checked;
+  try {
+    checked = await renewSubscription(env, row.source, row.store_ref, row.product);
+  } catch {
+    return row.expires_at;   // loja fora: tenta de novo na próxima consulta
+  }
+  // payments_unavailable (sem as chaves) não conta como conferência.
+  if (checked.error === "payments_unavailable") return row.expires_at;
+  const fim = !checked.error && checked.expiresAt > row.expires_at ? checked.expiresAt : row.expires_at;
+  try {
+    await env.AUREA_DB.prepare("UPDATE entitlements SET expires_at = ?, store_checked_at = ? WHERE user_id = ? AND product = ? AND store_ref = ?")
+      .bind(fim, now, uid, row.product, row.store_ref).run();
+  } catch {
+    console.error("entitlements: renovação não gravou no D1");
+  }
+  return fim;
+}
+
 async function produtosDe(env, uid) {
-  const r = await env.AUREA_DB.prepare("SELECT product FROM entitlements WHERE user_id = ? ORDER BY product")
-    .bind(uid).all();
-  return (r?.results ?? []).map((x) => x.product).filter((p) => PRODUTOS.includes(p)).sort();
+  return (await direitosDe(env, uid)).products;
 }
 
 async function meusProdutos(req, env) {
   const s = await lerSessao(env, req);
   if (!s) return json({ error: "nao_autorizado" }, 401);
-  let products;
+  let direitos;
   try {
-    products = await produtosDe(env, s.uid);
+    direitos = await direitosDe(env, s.uid, { renovar: true });
   } catch {
     // Sem a migração 0007 (ou D1 fora): o app não pode entender isso como "não tem".
     console.error("entitlements: leitura falhou no D1");
@@ -71,7 +148,7 @@ async function meusProdutos(req, env) {
   const ready = env.AUREAOS_PURCHASES_ENABLED === "true" && (platform === "google" ? googleReady(env) : platform === "apple" ? appleReady(env)
     : googleReady(env) || appleReady(env));
   const purchasable = ready ? [...PRODUTOS_DA_LOJA] : [];
-  return json({ products, checkedAt: agoraS(), purchasable });
+  return json({ products: direitos.products, checkedAt: agoraS(), purchasable, expires: direitos.expires });
 }
 
 /** A conta tem o produto? true/false; null = não deu para ler (D1 fora): quem chama não libera. */
@@ -92,6 +169,11 @@ export const LIMITE_COMPRA = { max: 20, janela: 3600 };
  * A loja confere; a compra vira a linha de entitlements (source = a loja; a
  * nota guarda o hash da compra). Repetir (restaurar) devolve 200; a mesma
  * compra em OUTRA conta = 409.
+ * ASSINATURAS: a linha guarda também o vencimento (expires_at) e o que se manda
+ * à loja para conferir a renovação (store_ref); assinatura já vencida = 402
+ * purchase_expired. Uma concessão do admin (sem vencimento) nunca é rebaixada
+ * para assinatura. A mesma chave AUREAOS_PURCHASES_ENABLED (beta fechado) trava
+ * todas as compras.
  */
 async function comprar(req, env) {
   const s = await lerSessao(env, req);
@@ -108,9 +190,12 @@ async function comprar(req, env) {
   if (typeof product !== "string" || !PRODUTOS_DA_LOJA.includes(product)) return json({ error: "produto_desconhecido" }, 400);
   if (!token || token.length > 4096) return json({ error: "purchase_invalid" }, 400);
   if (env.AUREAOS_PURCHASES_ENABLED !== "true") return json({ error: "payments_unavailable" }, 503);
+  const assinatura = ASSINATURAS.includes(product);
   let checked;
   try {
-    checked = platform === "google" ? await verifyGooglePurchase(env, token, product) : await verifyApplePurchase(env, token, product);
+    checked = assinatura
+      ? (platform === "google" ? await verifyGoogleSubscription(env, token, product) : await verifyAppleSubscription(env, token, product))
+      : (platform === "google" ? await verifyGooglePurchase(env, token, product) : await verifyApplePurchase(env, token, product));
   } catch {
     return json({ error: "payments_unavailable" }, 503);
   }
@@ -121,19 +206,24 @@ async function comprar(req, env) {
   try {
     // Claim and grant run in one transaction. Two accounts restoring the same
     // receipt concurrently cannot both obtain the entitlement.
-    await db.batch([
-      db.prepare("INSERT OR IGNORE INTO entitlement_purchases (product, purchase_hash, user_id, created_at) VALUES (?, ?, ?, ?)")
-        .bind(product, purchaseHash, s.uid, agoraS()),
-      db.prepare("INSERT INTO entitlements (user_id, product, granted_at, source, note) SELECT ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM entitlement_purchases WHERE product = ? AND purchase_hash = ? AND user_id = ?) ON CONFLICT(user_id, product) DO UPDATE SET granted_at = excluded.granted_at, source = excluded.source, note = excluded.note")
-        .bind(s.uid, product, agoraS(), platform, marca, product, purchaseHash, s.uid),
-    ]);
+    const claim = db.prepare("INSERT OR IGNORE INTO entitlement_purchases (product, purchase_hash, user_id, created_at) VALUES (?, ?, ?, ?)")
+      .bind(product, purchaseHash, s.uid, agoraS());
+    const grant = assinatura
+      // Assinatura: vencimento + referência da loja. Uma linha sem vencimento
+      // (concessão do admin) fica como está.
+      ? db.prepare("INSERT INTO entitlements (user_id, product, granted_at, source, note, expires_at, store_ref, store_checked_at) SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM entitlement_purchases WHERE product = ? AND purchase_hash = ? AND user_id = ?) ON CONFLICT(user_id, product) DO UPDATE SET granted_at = excluded.granted_at, source = excluded.source, note = excluded.note, expires_at = excluded.expires_at, store_ref = excluded.store_ref, store_checked_at = excluded.store_checked_at WHERE entitlements.expires_at IS NOT NULL")
+        .bind(s.uid, product, agoraS(), platform, marca, checked.expiresAt, checked.ref, agoraS(), product, purchaseHash, s.uid)
+      : db.prepare("INSERT INTO entitlements (user_id, product, granted_at, source, note) SELECT ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM entitlement_purchases WHERE product = ? AND purchase_hash = ? AND user_id = ?) ON CONFLICT(user_id, product) DO UPDATE SET granted_at = excluded.granted_at, source = excluded.source, note = excluded.note")
+        .bind(s.uid, product, agoraS(), platform, marca, product, purchaseHash, s.uid);
+    await db.batch([claim, grant]);
     const owner = await db.prepare("SELECT user_id FROM entitlement_purchases WHERE product = ? AND purchase_hash = ?")
       .bind(product, purchaseHash).first();
     if (!owner || owner.user_id !== s.uid) return json({ error: "purchase_in_use" }, 409);
   } catch {
     return json({ error: "payments_unavailable" }, 503);
   }
-  return json({ ok: true, product, products: await produtosDe(env, s.uid) });
+  const direitos = await direitosDe(env, s.uid);
+  return json({ ok: true, product, products: direitos.products, expires: direitos.expires });
 }
 
 async function administrar(req, env) {

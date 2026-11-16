@@ -56,6 +56,8 @@ class ContaViewModel(app: Application) : AndroidViewModel(app) {
     fun atualizarAcessos() {
         val s = sessao()
         com.aurea.aurea.hyper.HyperEntitlements.refresh(s?.token, s?.email)
+        // Assinaturas da Play ainda não entregues ao servidor (o app caiu, outro aparelho): restaura em silêncio.
+        if (s != null) com.aurea.aurea.hyper.AureaSubscriptions.restore(getApplication<Application>(), silent = true)
     }
 
     /** A sessão guardada, ou null. Lê o cofre (rápido; o Keystore já está de pé). */

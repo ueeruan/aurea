@@ -97,7 +97,8 @@ import kotlin.math.roundToInt
 //  AureaHyper — a tela da Home (substitui o "Upscale com IA"). Quatro passos,
 //  no mesmo visual do antigo Upscale; o estado é o de [HyperFlow]. Sem o
 //  acesso (portão por conta, Entitlements.kt) a tela mostra o que o recurso
-//  faz e que ele é pago, ainda sem venda — nenhum botão de compra.
+//  faz e que ele é pago e, com a conta sem o AureaHyper, a assinatura mensal
+//  (SubscriptionOptions, hyper/Paywall.kt; 16/11/2026).
 //
 //  Test tags (os mesmos accessibilityIdentifier do iOS, HyperView.swift):
 //    hyper.voltar · hyper.passo.indicador
@@ -231,6 +232,11 @@ fun HyperLockedPanel(access: HyperAccess, onSignIn: () -> Unit, onRetry: () -> U
             else HyperButton(stringResource(button), "hyper.bloqueado.verificar", primary = false) {
                 if (access == HyperAccess.NeedsConfig) com.aurea.aurea.config.AppConfigStore.refresh(force = true) else onRetry()
             }
+        }
+        // 16/11/2026: o AureaHyper é uma assinatura mensal (libera tudo o que é pago).
+        if (access == HyperAccess.Locked) {
+            Spacer(Modifier.height(18.dp))
+            SubscriptionOptions(PaidItem.hyperTools)
         }
     }
 }

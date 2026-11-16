@@ -299,11 +299,11 @@ private fun EffectBrowserBody(
     val applied = store.effects.map { it.typeId }
     val recommended = remember(sorted, kind, applied, layerHasAudio) { recommendedEffects(sorted, kind, applied, 6, layerHasAudio) }
     var managingPlugins by remember { mutableStateOf(false) }
-    // 0.3.2: efeito Hyper sem o acesso abre a tela bloqueada (HyperEffectGate).
-    var hyperLocked by remember { mutableStateOf(false) }
+    // 0.3.2: efeito pago sem o acesso abre o paywall das assinaturas (HyperEffectGate).
+    var hyperLocked by remember { mutableStateOf<EffectCatalogEntry?>(null) }
     val add: (EffectCatalogEntry, Int) -> Unit = { e, preset ->
         if (HyperEffectGate.locked(e.typeId)) {
-            hyperLocked = true
+            hyperLocked = e
         } else {
             val tool = effectToolOf(e.typeId)
             val variant = if (tool != null) -1 else preset
@@ -388,7 +388,9 @@ private fun EffectBrowserBody(
             }
         }
     }
-    if (hyperLocked) com.aurea.aurea.hyper.HyperLockedDialog { hyperLocked = false }
+    hyperLocked?.let { locked ->
+        com.aurea.aurea.hyper.PaywallDialog(com.aurea.aurea.hyper.PaidItem.effect(locked.typeId), pickerEntryName(locked)) { hyperLocked = null }
+    }
     // 0.3.0: plugins de efeito (instalar, ver, remover); o catálogo relido entra nos grupos acima.
     if (managingPlugins) PluginManagerSheet(store) { managingPlugins = false }
 }

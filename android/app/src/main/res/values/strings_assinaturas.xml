@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 16/11/2026: assinaturas mensais (hyper/Paywall.kt, AureaSubscriptions.swift; docs/release/assinaturas.md). -->
+    <!-- Preço padrão enquanto a loja não responde (a loja mostra o preço localizado). -->
+    <string name="assinatura_preco_avulso" translatable="false">R$ 5,00</string>
+    <string name="assinatura_preco_hyper" translatable="false">R$ 59,90</string>
+    <string name="assinatura_badge">Recurso pago</string>
+    <string name="assinatura_intro_efeito">Assine só este efeito ou assine o AureaHyper, que libera todos os efeitos pagos, o Texto 3D e as ferramentas Hyper.</string>
+    <string name="assinatura_intro_texto3d">Assine só o Texto 3D ou assine o AureaHyper, que libera também todos os efeitos pagos e as ferramentas Hyper.</string>
+    <string name="assinatura_intro_hyper">O AureaHyper libera todos os efeitos pagos, o Texto 3D e as ferramentas Hyper.</string>
+    <string name="assinatura_so_efeito">Assinar só este efeito</string>
+    <string name="assinatura_so_texto3d">Assinar só o Texto 3D</string>
+    <string name="assinatura_por_mes">%1$s/mês</string>
+    <string name="assinatura_libera_tudo">libera tudo</string>
+    <string name="assinatura_restaurar">Restaurar compras</string>
+    <string name="assinatura_renovacao">Renova automaticamente todo mês até você cancelar. Cancele quando quiser em %1$s.</string>
+    <string name="assinatura_entrar">Entre na sua conta Aurea para assinar. A assinatura fica ligada à conta.</string>
+    <string name="assinatura_em_breve">As assinaturas ainda não estão disponíveis. Nada é cobrado aqui.</string>
+    <string name="assinatura_obrigado">Assinatura ativa. Já pode usar.</string>
+    <string name="assinatura_restaurada">Assinaturas restauradas.</string>
+    <string name="assinatura_pendente">Pagamento pendente. Libera quando a loja confirmar.</string>
+    <string name="assinatura_outra_conta">Esta assinatura já está ligada a outra conta Aurea.</string>
+    <string name="assinatura_invalida">A loja não confirmou esta assinatura.</string>
+    <string name="assinatura_vencida">Esta assinatura venceu. Assine de novo para continuar.</string>
+    <string name="assinatura_indisponivel">A assinatura não está disponível agora. Tente mais tarde.</string>
+    <string name="assinatura_nada_restaurar">Nenhuma assinatura ativa nesta conta da loja.</string>
+    <string name="assinatura_processando">Processando…</string>
+</resources>

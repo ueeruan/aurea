@@ -1,8 +1,8 @@
 // AureaHyper — a tela da Home (substitui o "Upscale com IA"; par do Android:
 // hyper/HyperScreen.kt). Quatro passos no visual do antigo Upscale; o estado é
 // o do HyperFlow (HyperModel.swift). Sem o acesso (portão por conta,
-// HyperEntitlements) mostra o que o recurso faz e que é pago — sem botão de
-// compra (a venda ainda não existe).
+// HyperEntitlements) mostra o que o recurso faz e que é pago e, com a conta sem o
+// AureaHyper, a assinatura mensal (SubscriptionOptions, AureaSubscriptions.swift).
 //
 // accessibilityIdentifier (os mesmos testTag do Android):
 //   hyper.voltar · hyper.passo.indicador
@@ -141,6 +141,11 @@ struct HyperLockedPanel: View {
             } else if access != .checking && access != .unlocked && access != .off {
                 Spacer().frame(height: 14)
                 HyperButton(title: AureaText.t("hyper_locked_check_again"), id: "hyper.bloqueado.verificar", primary: false, action: onRetry)
+            }
+            // 16/11/2026: o AureaHyper é uma assinatura mensal (libera tudo o que é pago).
+            if access == .locked {
+                Spacer().frame(height: 18)
+                SubscriptionOptions(item: .hyperTools)
             }
         }
         .accessibilityElement(children: .contain)

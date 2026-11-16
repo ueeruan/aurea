@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 16/11/2026: assinaturas mensais (hyper/Paywall.kt, AureaSubscriptions.swift; docs/release/assinaturas.md). -->
+    <string name="assinatura_badge">Paid feature</string>
+    <string name="assinatura_intro_efeito">Subscribe to this effect only, or subscribe to AureaHyper, which unlocks every paid effect, 3D Text and the Hyper tools.</string>
+    <string name="assinatura_intro_texto3d">Subscribe to 3D Text only, or subscribe to AureaHyper, which also unlocks every paid effect and the Hyper tools.</string>
+    <string name="assinatura_intro_hyper">AureaHyper unlocks every paid effect, 3D Text and the Hyper tools.</string>
+    <string name="assinatura_so_efeito">Subscribe to this effect only</string>
+    <string name="assinatura_so_texto3d">Subscribe to 3D Text only</string>
+    <string name="assinatura_por_mes">%1$s/month</string>
+    <string name="assinatura_libera_tudo">unlocks everything</string>
+    <string name="assinatura_restaurar">Restore purchases</string>
+    <string name="assinatura_renovacao">Renews automatically every month until you cancel. Cancel anytime in %1$s.</string>
+    <string name="assinatura_entrar">Sign in to your Aurea account to subscribe. The subscription is tied to the account.</string>
+    <string name="assinatura_em_breve">Subscriptions are not available yet. Nothing is charged here.</string>
+    <string name="assinatura_obrigado">Subscription active. You can use it now.</string>
+    <string name="assinatura_restaurada">Subscriptions restored.</string>
+    <string name="assinatura_pendente">Payment pending. It unlocks when the store confirms.</string>
+    <string name="assinatura_outra_conta">This subscription is already linked to another Aurea account.</string>
+    <string name="assinatura_invalida">The store did not confirm this subscription.</string>
+    <string name="assinatura_vencida">This subscription has expired. Subscribe again to continue.</string>
+    <string name="assinatura_indisponivel">Subscribing is not available right now. Try again later.</string>
+    <string name="assinatura_nada_restaurar">No active subscription on this store account.</string>
+    <string name="assinatura_processando">Processing…</string>
+</resources>

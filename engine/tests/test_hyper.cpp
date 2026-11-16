@@ -30,10 +30,9 @@ AUREA_TEST(Hyper, ReferenceEffectsShareAccessClassification) {
              "aurea.hyper.upscale", "aurea.hyper.motion", "aurea.hyper.clean",
              "aurea.motion.cartoon_moblur", "aurea.motion.twitch_reference",
              "aurea.glitch.signal_reference", "aurea.blur.sharpen_reference",
-             "aurea.blur.fast_blur_reference", "aurea.transition.radial_wipe_reference",
+             "aurea.transition.radial_wipe_reference",
              "aurea.stylize.find_edges_reference", "aurea.distort.wave_warp_reference",
-             "aurea.transition.block_dissolve_reference", "aurea.distort.turbulent_displace_reference",
-             "aurea.stylize.drop_shadow_reference", "aurea.generate.extrude_reference",
+             "aurea.transition.block_dissolve_reference", "aurea.generate.extrude_reference",
              "aurea.glitch.glitchify_reference","aurea.motion.twitch",
              "aurea.glitch.glitchify", "aurea.glitch.signal", "aurea.generate.raster_extrude"}) {
         AUREA_CHECK(effect_requires_access(effect_type_id(key)));
@@ -45,7 +44,10 @@ AUREA_TEST(Hyper, ReferenceEffectsShareAccessClassification) {
     for (const char* key : {"aurea.blur.radial", "aurea.blur.radial_blur_reference",
                             "aurea.stylize.radial_shadow", "aurea.stylize.radial_shadow_reference",
                             "aurea.time.posterize", "aurea.time.posterize_reference",
-                            "aurea.time.time_displacement", "aurea.time.time_displacement_reference"}) {
+                            "aurea.time.time_displacement", "aurea.time.time_displacement_reference",
+                            // Free by the owner's decision (16/11/2026).
+                            "aurea.blur.fast_blur_reference", "aurea.distort.turbulent_displace_reference",
+                            "aurea.stylize.drop_shadow_reference"}) {
         AUREA_CHECK_MSG(!effect_requires_access(effect_type_id(key)), key);
     }
     AUREA_CHECK(!effect_requires_access(0));
@@ -64,6 +66,94 @@ AUREA_TEST(Hyper, Text3DRequiresAccess) {
     AUREA_CHECK(!model_source_requires_access("C:/models/robot.glb"));
     AUREA_CHECK(!model_source_requires_access(""));
     AUREA_CHECK(!model_source_requires_access("x-aurea-text3d:"));
+}
+
+// 16/11/2026: assinaturas mensais. AureaHyper libera tudo; cada efeito pago e o
+// Texto 3D tem a sua assinatura avulsa; o legado vitalício segue liberando tudo.
+AUREA_TEST(Hyper, SubscriptionProductForEachPaidEffect) {
+    const struct { const char* key; const char* product; } table[] = {
+        {"aurea.motion.cartoon_moblur", "aurea_fx_cartoon_moblur"},
+        {"aurea.motion.twitch_reference", "aurea_fx_twitch"},
+        {"aurea.motion.twitch", "aurea_fx_twitch"},
+        {"aurea.glitch.signal_reference", "aurea_fx_signal"},
+        {"aurea.glitch.signal", "aurea_fx_signal"},
+        {"aurea.glitch.glitchify_reference", "aurea_fx_glitchify"},
+        {"aurea.glitch.glitchify", "aurea_fx_glitchify"},
+        {"aurea.generate.extrude_reference", "aurea_fx_extrude"},
+        {"aurea.generate.raster_extrude", "aurea_fx_extrude"},
+        {"aurea.blur.sharpen_reference", "aurea_fx_sharpen"},
+        {"aurea.stylize.find_edges_reference", "aurea_fx_find_edges"},
+        {"aurea.distort.wave_warp_reference", "aurea_fx_wave_warp"},
+        {"aurea.transition.block_dissolve_reference", "aurea_fx_block_dissolve"},
+        {"aurea.transition.radial_wipe_reference", "aurea_fx_radial_wipe"},
+    };
+    for (const auto& row : table) {
+        const char* product = effect_product_id(effect_type_id(row.key));
+        AUREA_CHECK_MSG(product && std::strcmp(product, row.product) == 0, row.key);
+    }
+    // As 3 ferramentas Hyper: só no AureaHyper. Efeito grátis: nenhum produto.
+    for (const char* key : {"aurea.hyper.upscale", "aurea.hyper.motion", "aurea.hyper.clean",
+                            "aurea.blur.gaussian", "aurea.blur.fast_blur_reference"}) {
+        AUREA_CHECK_MSG(effect_product_id(effect_type_id(key)) == nullptr, key);
+    }
+    AUREA_CHECK(std::strcmp(text3d_product_id(), "aurea_texto3d") == 0);
+
+    // Todo efeito pago tem assinatura avulsa, exceto as 3 ferramentas Hyper.
+    const auto ids = subscription_product_ids();
+    AUREA_CHECK(ids.size() == 12);
+    AUREA_CHECK(!ids.empty() && ids.front() == "aurea_hyper_mensal");
+    AUREA_CHECK(std::find(ids.begin(), ids.end(), "aurea_texto3d") != ids.end());
+    AUREA_CHECK(std::find(ids.begin(), ids.end(), "aureahyper_lifetime") == ids.end());
+    for (const auto& row : table) AUREA_CHECK_MSG(std::find(ids.begin(), ids.end(), row.product) != ids.end(), row.product);
+    for (usize i = 0; i < ids.size(); ++i)
+        for (usize j = i + 1; j < ids.size(); ++j) AUREA_CHECK(ids[i] != ids[j]);
+}
+
+AUREA_TEST(Hyper, SubscriptionAccessRule) {
+    const u32 twitch = effect_type_id("aurea.motion.twitch_reference");
+    const u32 twitchLegacy = effect_type_id("aurea.motion.twitch");
+    const u32 signal = effect_type_id("aurea.glitch.signal_reference");
+    const u32 upscale = effect_type_id("aurea.hyper.upscale");
+    const u32 freeFx = effect_type_id("aurea.blur.gaussian");
+    const std::vector<std::string> none;
+    const std::vector<std::string> onlyTwitch{"aurea_fx_twitch"};
+    const std::vector<std::string> onlyText3D{"aurea_texto3d"};
+    const std::vector<std::string> monthly{"aurea_hyper_mensal"};
+    const std::vector<std::string> lifetime{"aureahyper_lifetime"};
+    const std::vector<std::string> unrelated{"aurea_aureaos", "", "aurea_fx_twitch_x"};
+
+    // Grátis: sempre.
+    AUREA_CHECK(has_effect_access(none, freeFx));
+    AUREA_CHECK(has_effect_access(none, 0));
+    // Nada comprado: nenhum pago.
+    AUREA_CHECK(!has_effect_access(none, twitch));
+    AUREA_CHECK(!has_effect_access(none, upscale));
+    AUREA_CHECK(!has_text3d_access(none));
+    AUREA_CHECK(!has_access(none, nullptr));
+    // A assinatura avulsa libera o próprio efeito (e a versão legada), nada mais.
+    AUREA_CHECK(has_effect_access(onlyTwitch, twitch));
+    AUREA_CHECK(has_effect_access(onlyTwitch, twitchLegacy));
+    AUREA_CHECK(!has_effect_access(onlyTwitch, signal));
+    AUREA_CHECK(!has_effect_access(onlyTwitch, upscale));
+    AUREA_CHECK(!has_text3d_access(onlyTwitch));
+    AUREA_CHECK(has_text3d_access(onlyText3D));
+    AUREA_CHECK(!has_effect_access(onlyText3D, twitch));
+    // AureaHyper mensal e o legado vitalício: tudo.
+    for (const auto* all : {&monthly, &lifetime}) {
+        AUREA_CHECK(has_effect_access(*all, twitch));
+        AUREA_CHECK(has_effect_access(*all, signal));
+        AUREA_CHECK(has_effect_access(*all, upscale));
+        AUREA_CHECK(has_text3d_access(*all));
+        AUREA_CHECK(has_access(*all, nullptr));
+    }
+    AUREA_CHECK(product_unlocks_everything("aurea_hyper_mensal"));
+    AUREA_CHECK(product_unlocks_everything("aureahyper_lifetime"));
+    AUREA_CHECK(!product_unlocks_everything("aurea_fx_twitch"));
+    AUREA_CHECK(!product_unlocks_everything("aurea_aureaos"));
+    // Produtos sem relação (AureaOS, vazio, parecido) não liberam nada.
+    AUREA_CHECK(!has_effect_access(unrelated, twitch));
+    AUREA_CHECK(!has_text3d_access(unrelated));
+    AUREA_CHECK(!has_access(unrelated, ""));
 }
 
 namespace {

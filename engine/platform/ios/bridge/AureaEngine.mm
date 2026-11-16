@@ -6390,6 +6390,34 @@ static aurea::ImageExportSettings AureaImageSettings(uint32_t format, uint32_t s
     return aurea::hyper::text3d_requires_access() ? YES : NO;
 }
 
++ (nullable NSString*)effectProductId:(uint32_t)typeId {
+    const char* product = aurea::hyper::effect_product_id(typeId);
+    return product ? [NSString stringWithUTF8String:product] : nil;
+}
+
++ (NSString*)text3DProductId {
+    return [NSString stringWithUTF8String:aurea::hyper::text3d_product_id()];
+}
+
++ (NSString*)hyperSubscriptionId {
+    return [NSString stringWithUTF8String:aurea::hyper::kHyperSubscriptionId];
+}
+
++ (NSArray<NSString*>*)subscriptionProductIds {
+    NSMutableArray<NSString*>* out = [NSMutableArray array];
+    for (const std::string& id : aurea::hyper::subscription_product_ids()) [out addObject:[NSString stringWithUTF8String:id.c_str()]];
+    return out;
+}
+
++ (BOOL)hasPaidAccess:(NSArray<NSString*>*)owned item:(nullable NSString*)item {
+    std::vector<std::string> products;
+    products.reserve(owned.count);
+    for (NSString* p in owned) products.emplace_back(p.UTF8String ? p.UTF8String : "");
+    if (!item) return aurea::hyper::has_access(products, nullptr) ? YES : NO;
+    const std::string itemProduct = item.UTF8String ? item.UTF8String : "";
+    return aurea::hyper::has_access(products, itemProduct.c_str()) ? YES : NO;
+}
+
 + (void)setHyperFaceDetector:(nullable NSArray<NSNumber*>* _Nullable (^)(NSData*, uint32_t, uint32_t, uint32_t, uint32_t))detector {
     {
         std::lock_guard<std::mutex> lock(g_hyperFaceMutex);

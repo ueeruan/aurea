@@ -189,8 +189,9 @@ struct EditorView: View {
                 AureaMcpView(close: { model.assistantOpen = false }).environmentObject(model)
             }
         })
-        // 0.5.4: texto 3D pedido sem o acesso (Text3DGate em AureaModel.addText3D): a folha bloqueada do Hyper.
-        .background(Color.clear.sheet(isPresented: $model.hyperLockedPrompt) { HyperLockedSheet { model.hyperLockedPrompt = false } })
+        // 0.5.4: texto 3D pedido sem o acesso (Text3DGate em AureaModel.addText3D): o paywall (assinatura do
+        // Texto 3D ou AureaHyper; 16/11/2026).
+        .background(Color.clear.sheet(isPresented: $model.hyperLockedPrompt) { PaywallSheet(item: .text3D()) { model.hyperLockedPrompt = false } })
         .fullScreenCover(item: $model.effectSearch) { request in
             // A tela "Adicionar efeito" (ou só a busca): EffectsBrowser.swift.
             EffectAddSheet(request: request, close: { model.effectSearch = nil })

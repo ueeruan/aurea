@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 16/11/2026: assinaturas mensais (hyper/Paywall.kt, AureaSubscriptions.swift; docs/release/assinaturas.md). -->
+    <string name="assinatura_badge">Платная функция</string>
+    <string name="assinatura_intro_efeito">Оформите подписку только на этот эффект или на AureaHyper — он открывает все платные эффекты, 3D-текст и инструменты Hyper.</string>
+    <string name="assinatura_intro_texto3d">Оформите подписку только на 3D-текст или на AureaHyper — он открывает ещё и все платные эффекты и инструменты Hyper.</string>
+    <string name="assinatura_intro_hyper">AureaHyper открывает все платные эффекты, 3D-текст и инструменты Hyper.</string>
+    <string name="assinatura_so_efeito">Подписка только на этот эффект</string>
+    <string name="assinatura_so_texto3d">Подписка только на 3D-текст</string>
+    <string name="assinatura_por_mes">%1$s/мес.</string>
+    <string name="assinatura_libera_tudo">открывает всё</string>
+    <string name="assinatura_restaurar">Восстановить покупки</string>
+    <string name="assinatura_renovacao">Продлевается автоматически каждый месяц, пока вы не отмените. Отменить можно в любой момент в %1$s.</string>
+    <string name="assinatura_entrar">Войдите в аккаунт Aurea, чтобы оформить подписку. Подписка привязывается к аккаунту.</string>
+    <string name="assinatura_em_breve">Подписки пока недоступны. Здесь ничего не списывается.</string>
+    <string name="assinatura_obrigado">Подписка активна. Можно пользоваться.</string>
+    <string name="assinatura_restaurada">Подписки восстановлены.</string>
+    <string name="assinatura_pendente">Платёж ожидает подтверждения. Доступ откроется, когда магазин его подтвердит.</string>
+    <string name="assinatura_outra_conta">Эта подписка уже привязана к другому аккаунту Aurea.</string>
+    <string name="assinatura_invalida">Магазин не подтвердил эту подписку.</string>
+    <string name="assinatura_vencida">Срок подписки истёк. Оформите её снова, чтобы продолжить.</string>
+    <string name="assinatura_indisponivel">Подписка сейчас недоступна. Попробуйте позже.</string>
+    <string name="assinatura_nada_restaurar">В этом аккаунте магазина нет активных подписок.</string>
+    <string name="assinatura_processando">Обработка…</string>
+</resources>

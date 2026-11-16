@@ -1797,6 +1797,17 @@ NS_SWIFT_NAME(AureaEngine)
 + (BOOL)effectRequiresHyper:(uint32_t)typeId NS_SWIFT_NAME(effectRequiresHyper(_:));
 /// 0.5.4: criar texto 3D pede o mesmo acesso (hyper::text3d_requires_access).
 + (BOOL)text3DRequiresHyper NS_SWIFT_NAME(text3DRequiresHyper());
+/// 16/11/2026: assinaturas mensais. A assinatura avulsa que libera o efeito pago
+/// (hyper::effect_product_id); nil = grátis ou só no AureaHyper.
++ (nullable NSString*)effectProductId:(uint32_t)typeId NS_SWIFT_NAME(effectProductId(_:));
+/// A assinatura avulsa do Texto 3D (hyper::text3d_product_id).
++ (NSString*)text3DProductId NS_SWIFT_NAME(text3DProductId());
+/// A assinatura que libera tudo (hyper::kHyperSubscriptionId).
++ (NSString*)hyperSubscriptionId NS_SWIFT_NAME(hyperSubscriptionId());
+/// O que as lojas vendem: AureaHyper primeiro, depois cada avulso (hyper::subscription_product_ids).
++ (NSArray<NSString*>*)subscriptionProductIds NS_SWIFT_NAME(subscriptionProductIds());
+/// A regra única de acesso (hyper::has_access); `item` nil = item só do AureaHyper.
++ (BOOL)hasPaidAccess:(NSArray<NSString*>*)owned item:(nullable NSString*)item NS_SWIFT_NAME(hasPaidAccess(_:item:));
 /// O detector de rostos da plataforma (Vision, HyperPlatform.swift) para a
 /// etapa Face. O bloco roda na thread do grafo com um quadro R'G'B' 8 bits
 /// (`rgb` vale só durante a chamada) e devolve 17 números por rosto: x, y,

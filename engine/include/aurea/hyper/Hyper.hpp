@@ -28,6 +28,8 @@
 
 #include <array>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace aurea::hyper {
 
@@ -130,9 +132,21 @@ inline constexpr const char* kHyperMotion  = "aurea.hyper.motion";
 inline constexpr const char* kHyperClean   = "aurea.hyper.clean";
 } // namespace effect_keys
 
-/// Identificador do produto pago (compra única). O portão vive nas telas; o
-/// motor não decide quem pagou.
+/// Identificador do produto pago LEGADO (compra única, concedido por conta pelo
+/// dono no servidor). Continua liberando TUDO o que é pago. O portão vive nas
+/// telas; o motor não decide quem pagou.
 inline constexpr const char* kProductId = "aureahyper_lifetime";
+
+/// 16/11/2026 (decisão do dono): o conteúdo pago vira ASSINATURA MENSAL.
+///   · AureaHyper (kHyperSubscriptionId, R$ 59,50/mês) libera TUDO o que é pago
+///     (cada efeito pago, o Texto 3D e as 3 ferramentas Hyper);
+///   · cada efeito pago e o Texto 3D são uma assinatura própria (R$ 5,00/mês).
+/// Os preços vivem nas lojas; os ids abaixo são os mesmos na Play e na App Store
+/// (docs/release/assinaturas.md). As telas perguntam ao motor qual produto
+/// libera um item e se o conjunto de produtos da conta dá acesso a ele — a
+/// tabela não se repete no Kotlin/Swift.
+inline constexpr const char* kHyperSubscriptionId = "aurea_hyper_mensal";
+inline constexpr const char* kText3DProductId = "aurea_texto3d";
 
 /// Classificação comum do catálogo. As plataformas continuam verificando a
 /// compra da conta antes de adicionar um efeito desse produto.
@@ -148,5 +162,28 @@ inline constexpr const char* kProductId = "aureahyper_lifetime";
 /// O asset de modelo com esta origem é um texto 3D pago (receita
 /// "aurea-text3d:")? Formas 3D e imagem para 3D continuam livres.
 [[nodiscard]] bool model_source_requires_access(const std::string& sourcePath) noexcept;
+
+/// A assinatura AVULSA que libera este efeito pago (ex. "aurea_fx_twitch"), ou
+/// nullptr: efeito grátis, ou só no AureaHyper (as 3 ferramentas Hyper). As
+/// versões legadas (kTwitch, kSignal, kGlitchify, kRasterExtrude) apontam para
+/// a mesma assinatura da referência AE.
+[[nodiscard]] const char* effect_product_id(u32 effectTypeId) noexcept;
+/// A assinatura avulsa do Texto 3D (kText3DProductId).
+[[nodiscard]] const char* text3d_product_id() noexcept;
+/// Este produto libera TUDO o que é pago? (AureaHyper mensal e o legado vitalício.)
+[[nodiscard]] bool product_unlocks_everything(std::string_view productId) noexcept;
+/// Os produtos que as lojas vendem: AureaHyper primeiro, depois cada avulso
+/// (ordem estável, sem repetição). As telas usam para pedir preços e restaurar.
+[[nodiscard]] std::vector<std::string> subscription_product_ids();
+
+/// A REGRA de acesso (uma só, para as duas plataformas): a conta que tem
+/// `owned` pode usar o item pago cuja assinatura avulsa é `itemProduct`
+/// (nullptr/"" = item só do AureaHyper) quando tem o AureaHyper mensal, o
+/// legado vitalício ou a assinatura do próprio item.
+[[nodiscard]] bool has_access(const std::vector<std::string>& owned, const char* itemProduct) noexcept;
+/// A regra aplicada a um efeito: grátis passa sempre; pago segue `has_access`.
+[[nodiscard]] bool has_effect_access(const std::vector<std::string>& owned, u32 effectTypeId) noexcept;
+/// A regra aplicada a CRIAR texto 3D.
+[[nodiscard]] bool has_text3d_access(const std::vector<std::string>& owned) noexcept;
 
 } // namespace aurea::hyper

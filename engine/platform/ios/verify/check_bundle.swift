@@ -16,7 +16,7 @@ let url = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
 let fm = FileManager.default
 require(!fm.fileExists(atPath: url.appendingPathComponent("Resources").path), "iOS app bundles cannot contain a custom root Resources directory")
 guard let bundle = Bundle(url: url) else { require(false, "Foundation cannot open the app bundle"); exit(1) }
-require(bundle.bundleIdentifier == "com.aurea.aurea", "Foundation did not resolve the Aurea bundle identifier")
+require(bundle.bundleIdentifier == "com.aurea.aurea.3ATTUN44P8", "Foundation did not resolve the Aurea bundle identifier")
 require(bundle.object(forInfoDictionaryKey: "CFBundlePackageType") as? String == "APPL", "Bundle is not an application")
 require(bundle.executableURL.map { fm.isExecutableFile(atPath: $0.path) } == true, "Foundation could not resolve an executable app binary")
 let modelDeclarations = bundle.object(forInfoDictionaryKey: "UTImportedTypeDeclarations") as? [[String: Any]] ?? []

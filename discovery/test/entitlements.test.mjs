@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 
 import worker from "../worker.js";
 import { esquecerMemo } from "../contas.js";
-import { PRODUTOS, LIMITE_ADMIN } from "../entitlements.js";
+import { PRODUTOS, ASSINATURAS, LIMITE_ADMIN } from "../entitlements.js";
 import { kvFalso, d1Falso, pedido } from "./falsos.mjs";
 
 const SEGREDO = "segredo-do-admin-de-teste-0123456789";
@@ -27,7 +27,8 @@ const admin = (env, corpo, token = SEGREDO, ip) =>
   chamar(env, "/api/admin/entitlements", { metodo: "POST", corpo, token, ip });
 
 test("entitlements: lista de produtos conhecidos", () => {
-  assert.deepEqual([...PRODUTOS], [HYPER, "aurea_aureaos"]);
+  assert.deepEqual([...PRODUTOS], [HYPER, "aurea_aureaos", ...ASSINATURAS]);
+  assert.equal(ASSINATURAS.length, 12, "a mesma contagem de hyper::subscription_product_ids");
   assert.ok(Object.isFrozen(PRODUTOS));
 });
 

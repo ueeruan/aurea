@@ -1050,8 +1050,8 @@ struct EffectAddSheet: View {
     @State private var gridScrolled = false
     /// 0.3.0: plugins de efeito (instalar, ver, remover) — PluginManagerSheet.kt.
     @State private var managingPlugins = false
-    /// 0.3.2: efeito Hyper sem o acesso abre a tela bloqueada (HyperEffectGate).
-    @State private var hyperLocked = false
+    /// 0.3.2: efeito pago sem o acesso abre o paywall das assinaturas (HyperEffectGate; 16/11/2026).
+    @State private var hyperLocked: PaidItem?
     @ObservedObject private var entitlements = HyperEntitlements.shared
 
     init(request: EffectSearchRequest, close: @escaping () -> Void) {
@@ -1076,7 +1076,7 @@ struct EffectAddSheet: View {
                     .id(current.id)
             }
         }
-        .sheet(isPresented: $hyperLocked) { HyperLockedSheet { hyperLocked = false } }
+        .sheet(item: $hyperLocked) { item in PaywallSheet(item: item) { hyperLocked = nil } }
     }
 
     private func openDetail(_ entries: [EffectCatalogItem], _ index: Int) {
@@ -1092,7 +1092,7 @@ struct EffectAddSheet: View {
     /// Adicionar (do detalhe ou de Recentes/Favoritos): grava nos recentes, fecha
     /// e adiciona — com a variação — ou abre a ferramenta.
     private func add(_ entry: EffectCatalogItem, _ preset: Int) {
-        if HyperEffectGate.locked(typeId: entry.typeId) { hyperLocked = true; return }
+        if HyperEffectGate.locked(typeId: entry.typeId) { hyperLocked = .effect(entry.typeId, name: fxPickerEntryName(entry)); return }
         let tool = fxEffectToolOf(entry.typeId)
         let variant = tool == nil ? preset : -1
         prefs.addRecent(FxEffectRef(entry.typeId, preset: variant))

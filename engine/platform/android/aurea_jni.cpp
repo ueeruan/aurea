@@ -6583,6 +6583,43 @@ AUREA_JNI jboolean AUREA_FN(nativeText3dRequiresHyper)(JNIEnv*, jclass) {
     return hyper::text3d_requires_access() ? JNI_TRUE : JNI_FALSE;
 }
 
+// 16/11/2026: assinaturas mensais. A tabela "efeito -> assinatura" e a regra de
+// acesso vivem no motor (hyper::effect_product_id / has_access); o Kotlin só
+// passa os produtos da conta.
+AUREA_JNI jstring AUREA_FN(nativeEffectProductId)(JNIEnv* env, jclass, jint typeId) {
+    const char* product = hyper::effect_product_id(static_cast<u32>(typeId));
+    return product ? env->NewStringUTF(product) : nullptr;
+}
+
+AUREA_JNI jstring AUREA_FN(nativeText3dProductId)(JNIEnv* env, jclass) {
+    return env->NewStringUTF(hyper::text3d_product_id());
+}
+
+AUREA_JNI jstring AUREA_FN(nativeHyperSubscriptionId)(JNIEnv* env, jclass) {
+    return env->NewStringUTF(hyper::kHyperSubscriptionId);
+}
+
+AUREA_JNI jobjectArray AUREA_FN(nativeSubscriptionProductIds)(JNIEnv* env, jclass) {
+    const auto ids = hyper::subscription_product_ids();
+    jclass stringClass = env->FindClass("java/lang/String");
+    jobjectArray out = env->NewObjectArray(static_cast<jsize>(ids.size()), stringClass, nullptr);
+    if (!out) return nullptr;
+    for (jsize i = 0; i < static_cast<jsize>(ids.size()); ++i) {
+        jstring s = env->NewStringUTF(ids[static_cast<usize>(i)].c_str());
+        env->SetObjectArrayElement(out, i, s);
+        env->DeleteLocalRef(s);
+    }
+    return out;
+}
+
+/// `itemProduct` null = item só do AureaHyper (as 3 ferramentas Hyper).
+AUREA_JNI jboolean AUREA_FN(nativeHasPaidAccess)(JNIEnv* env, jclass, jobjectArray owned, jstring itemProduct) {
+    const std::vector<std::string> products = jni_string_list(env, owned);
+    if (!itemProduct) return hyper::has_access(products, nullptr) ? JNI_TRUE : JNI_FALSE;
+    const std::string item = to_string(env, itemProduct);
+    return hyper::has_access(products, item.c_str()) ? JNI_TRUE : JNI_FALSE;
+}
+
 /// A pasta dos modelos sob demanda (GFPGAN; hyper/HyperNeural.hpp).
 AUREA_JNI void AUREA_FN(nativeHyperSetModelDirectory)(JNIEnv* env, jclass, jstring path) {
     hyper::set_model_directory(to_string(env, path));

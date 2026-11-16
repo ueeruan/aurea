@@ -1,0 +1,289 @@
+package com.aurea.aurea.hyper
+
+import android.app.Activity
+import android.content.Context
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import com.android.billingclient.api.AcknowledgePurchaseParams
+import com.android.billingclient.api.BillingClient
+import com.android.billingclient.api.BillingClientStateListener
+import com.android.billingclient.api.BillingFlowParams
+import com.android.billingclient.api.BillingResult
+import com.android.billingclient.api.PendingPurchasesParams
+import com.android.billingclient.api.ProductDetails
+import com.android.billingclient.api.Purchase
+import com.android.billingclient.api.PurchasesUpdatedListener
+import com.android.billingclient.api.QueryProductDetailsParams
+import com.android.billingclient.api.QueryPurchasesParams
+import com.android.billingclient.api.acknowledgePurchase
+import com.android.billingclient.api.queryProductDetails
+import com.android.billingclient.api.queryPurchasesAsync
+import com.aurea.aurea.R
+import com.aurea.aurea.conta.ContaApi
+import com.aurea.aurea.conta.ContaViewModel
+import com.aurea.aurea.engine.AureaEngine
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import kotlin.coroutines.resume
+
+// =============================================================================
+//  ASSINATURAS (16/11/2026, decisão do dono; docs/release/assinaturas.md).
+//
+//  AureaHyper (R$ 59,90/mês) libera tudo o que é pago; cada efeito pago e o
+//  Texto 3D são uma assinatura avulsa (R$ 5,00/mês). Os preços vivem na Play:
+//  a tela mostra o preço localizado da loja (ProductDetails) e, sem ele, o texto
+//  padrão. Os ids vêm do motor (hyper::subscription_product_ids).
+//
+//  Compra: Play Billing SUBS (oferta do plano base) → o token vai ao Worker
+//  (POST /api/entitlements/purchase, que confere na Play) → só depois do OK do
+//  servidor o app reconhece (acknowledge) a compra. Restaurar: queryPurchasesAsync
+//  (SUBS) ao abrir o app/entrar na conta e no botão "Restaurar compras".
+//  O par do iOS: AureaSubscriptions.swift (StoreKit 2).
+// =============================================================================
+
+/** O item pago que o paywall vende. [product] = assinatura avulsa (null = só o AureaHyper). */
+data class PaidItem(val product: String?, val kind: Kind) {
+    enum class Kind { Effect, Text3D, HyperTools }
+
+    companion object {
+        fun effect(typeId: Int): PaidItem =
+            PaidItem(runCatching { AureaEngine.nativeEffectProductId(typeId) }.getOrNull(), Kind.Effect)
+        fun text3d(): PaidItem = PaidItem(runCatching { AureaEngine.nativeText3dProductId() }.getOrNull(), Kind.Text3D)
+        val hyperTools = PaidItem(null, Kind.HyperTools)
+    }
+}
+
+object AureaSubscriptions {
+    /** O intervalo mínimo entre duas restaurações silenciosas (abrir o app/entrar). */
+    private const val SILENT_RESTORE_MS = 10L * 60 * 1000
+
+    private val scope by lazy { CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate) }
+    private var lastSilentRestore = 0L
+    private var pricesLoading = false
+
+    /** Preço localizado da Play por produto (só a fase recorrente do plano base). */
+    var prices by mutableStateOf<Map<String, String>>(emptyMap())
+        private set
+    /** O produto em compra, ou [RESTORING]; null = nada em andamento. */
+    var busy by mutableStateOf<String?>(null)
+        private set
+    /** O resultado do último passo (texto em R.string). */
+    var notice by mutableStateOf<Int?>(null)
+        private set
+
+    const val RESTORING = "restore"
+
+    /** A assinatura que libera tudo (hyper::kHyperSubscriptionId). */
+    fun hyperProduct(): String? = runCatching { AureaEngine.nativeHyperSubscriptionId() }.getOrNull()
+
+    /** Tudo o que se vende (hyper::subscription_product_ids). */
+    fun productIds(): List<String> = runCatching { AureaEngine.nativeSubscriptionProductIds()?.toList() }.getOrNull().orEmpty()
+
+    fun clearNotice() { notice = null }
+
+    /** Pede à Play os preços (uma vez por processo; repete se a primeira falhou). */
+    fun loadPrices(context: Context) {
+        if (pricesLoading || prices.isNotEmpty()) return
+        val ids = productIds()
+        if (ids.isEmpty()) return
+        pricesLoading = true
+        scope.launch {
+            val billing = SubscriptionBilling(context)
+            try {
+                val found = billing.details(ids).mapNotNull { d -> SubscriptionBilling.recurringPrice(d)?.let { d.productId to it } }.toMap()
+                if (found.isNotEmpty()) prices = found
+            } finally {
+                billing.close()
+                pricesLoading = false
+            }
+        }
+    }
+
+    /** Assina [product] pela Play e entrega ao servidor. */
+    fun buy(activity: Activity, product: String) {
+        if (busy != null) return
+        val session = ContaViewModel.tokenGuardado(activity) ?: run { notice = R.string.assinatura_entrar; return }
+        busy = product
+        notice = null
+        scope.launch {
+            val billing = SubscriptionBilling(activity)
+            try {
+                // Já assinada nesta conta da loja (o app caiu antes de entregar): só entrega.
+                val owned = billing.owned().firstOrNull { product in it.products }
+                val purchase = owned ?: run {
+                    val details = billing.details(listOf(product)).firstOrNull()
+                    val offer = details?.let { SubscriptionBilling.baseOffer(it) }
+                    if (details == null || offer == null) { notice = R.string.assinatura_indisponivel; return@launch }
+                    when (val outcome = billing.buy(activity, details, offer.offerToken)) {
+                        is BillingOutcome.Bought -> outcome.purchase
+                        BillingOutcome.AlreadyOwned -> billing.owned().firstOrNull { product in it.products }
+                        BillingOutcome.Cancelled -> return@launch
+                        BillingOutcome.Failed -> { notice = R.string.assinatura_indisponivel; return@launch }
+                    }
+                }
+                notice = when {
+                    purchase == null -> R.string.assinatura_indisponivel
+                    purchase.purchaseState != Purchase.PurchaseState.PURCHASED -> R.string.assinatura_pendente
+                    else -> deliver(billing, session, purchase)
+                }
+            } finally {
+                billing.close()
+                busy = null
+            }
+        }
+    }
+
+    /**
+     * Restaura as assinaturas desta conta da loja. [silent] = abertura do app ou
+     * login: no máximo a cada 10 min, só manda ao servidor o que ainda não foi
+     * reconhecido ou que a conta ainda não tem, e não mostra aviso.
+     */
+    fun restore(context: Context, silent: Boolean) {
+        if (busy != null) return
+        val session = ContaViewModel.tokenGuardado(context) ?: run { if (!silent) notice = R.string.assinatura_entrar; return }
+        val now = System.currentTimeMillis()
+        if (silent && now - lastSilentRestore < SILENT_RESTORE_MS) return
+        if (silent) lastSilentRestore = now
+        val ours = productIds().toSet()
+        if (ours.isEmpty()) return
+        if (!silent) { busy = RESTORING; notice = null }
+        scope.launch {
+            val billing = SubscriptionBilling(context)
+            try {
+                val have = HyperEntitlements.ownedProducts()
+                val purchases = billing.owned().filter { p -> p.products.any { it in ours } }
+                    .filter { p -> !silent || !p.isAcknowledged || p.products.none { it in have } }
+                var result: Int? = if (purchases.isEmpty()) R.string.assinatura_nada_restaurar else null
+                for (p in purchases) {
+                    val r = deliver(billing, session, p)
+                    // O pior resultado fica (uma falha não some atrás de um sucesso).
+                    if (result == null || result == R.string.assinatura_obrigado) result = r
+                }
+                if (!silent) notice = if (result == R.string.assinatura_obrigado) R.string.assinatura_restaurada else result
+            } finally {
+                billing.close()
+                if (!silent) busy = null
+            }
+        }
+    }
+
+    /** Entrega ao servidor; com o OK, reconhece na Play. Devolve o aviso para a tela. */
+    private suspend fun deliver(billing: SubscriptionBilling, session: String, purchase: Purchase): Int {
+        val product = purchase.products.firstOrNull { it in productIds() } ?: return R.string.assinatura_invalida
+        val r = withContext(Dispatchers.IO) { ContaApi.purchase(session, product, purchase.purchaseToken) }
+        return when (r.status) {
+            200 -> {
+                applyServerAnswer(r.corpo)
+                if (!purchase.isAcknowledged) runCatching { billing.acknowledge(purchase) }
+                R.string.assinatura_obrigado
+            }
+            409 -> R.string.assinatura_outra_conta
+            402 -> when (r.corpo.optString("error")) {
+                "purchase_pending" -> R.string.assinatura_pendente
+                "purchase_expired" -> R.string.assinatura_vencida
+                else -> R.string.assinatura_invalida
+            }
+            401 -> R.string.assinatura_entrar
+            else -> R.string.assinatura_indisponivel
+        }
+    }
+
+    private fun applyServerAnswer(body: JSONObject) {
+        val products = ServerEntitlementProvider.stringSet(body.optJSONArray("products"))
+        HyperEntitlements.acceptServerProducts(products, ServerEntitlementProvider.expiresOf(body))
+    }
+}
+
+/** O fim de um fluxo de compra da Play. */
+internal sealed interface BillingOutcome {
+    data class Bought(val purchase: Purchase?) : BillingOutcome
+    data object AlreadyOwned : BillingOutcome
+    data object Cancelled : BillingOutcome
+    data object Failed : BillingOutcome
+}
+
+/** Um cliente da Play para assinaturas (SUBS), aberto por operação (como MuralBilling). */
+internal class SubscriptionBilling(context: Context) : PurchasesUpdatedListener {
+    private var waiting: CompletableDeferred<BillingOutcome>? = null
+    private val client = BillingClient.newBuilder(context.applicationContext).setListener(this)
+        .enablePendingPurchases(PendingPurchasesParams.newBuilder().enableOneTimeProducts().build()).build()
+
+    override fun onPurchasesUpdated(result: BillingResult, purchases: MutableList<Purchase>?) {
+        val done = waiting ?: return
+        waiting = null
+        done.complete(when (result.responseCode) {
+            BillingClient.BillingResponseCode.OK -> BillingOutcome.Bought(purchases?.firstOrNull())
+            BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED -> BillingOutcome.AlreadyOwned
+            BillingClient.BillingResponseCode.USER_CANCELED -> BillingOutcome.Cancelled
+            else -> BillingOutcome.Failed
+        })
+    }
+
+    private suspend fun ready(): Boolean {
+        if (client.isReady) return true
+        return suspendCancellableCoroutine { go ->
+            client.startConnection(object : BillingClientStateListener {
+                override fun onBillingSetupFinished(result: BillingResult) {
+                    if (go.isActive) go.resume(result.responseCode == BillingClient.BillingResponseCode.OK)
+                }
+                override fun onBillingServiceDisconnected() {}
+            })
+        }
+    }
+
+    suspend fun details(ids: List<String>): List<ProductDetails> {
+        if (ids.isEmpty() || !runCatching { ready() }.getOrDefault(false)) return emptyList()
+        val products = ids.map {
+            QueryProductDetailsParams.Product.newBuilder().setProductId(it).setProductType(BillingClient.ProductType.SUBS).build()
+        }
+        val params = QueryProductDetailsParams.newBuilder().setProductList(products).build()
+        return runCatching { client.queryProductDetails(params).productDetailsList }.getOrNull().orEmpty()
+    }
+
+    /** Assinaturas pagas desta conta da loja (inclui as ainda não reconhecidas). */
+    suspend fun owned(): List<Purchase> {
+        if (!runCatching { ready() }.getOrDefault(false)) return emptyList()
+        val params = QueryPurchasesParams.newBuilder().setProductType(BillingClient.ProductType.SUBS).build()
+        return runCatching { client.queryPurchasesAsync(params).purchasesList }.getOrNull().orEmpty()
+            .filter { it.purchaseState == Purchase.PurchaseState.PURCHASED }
+    }
+
+    suspend fun buy(activity: Activity, details: ProductDetails, offerToken: String): BillingOutcome {
+        if (!runCatching { ready() }.getOrDefault(false)) return BillingOutcome.Failed
+        val done = CompletableDeferred<BillingOutcome>()
+        waiting = done
+        val item = BillingFlowParams.ProductDetailsParams.newBuilder().setProductDetails(details).setOfferToken(offerToken).build()
+        val started = client.launchBillingFlow(activity, BillingFlowParams.newBuilder().setProductDetailsParamsList(listOf(item)).build())
+        if (started.responseCode != BillingClient.BillingResponseCode.OK) {
+            waiting = null
+            return if (started.responseCode == BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED) BillingOutcome.AlreadyOwned
+            else BillingOutcome.Failed
+        }
+        return done.await()
+    }
+
+    suspend fun acknowledge(purchase: Purchase) {
+        client.acknowledgePurchase(AcknowledgePurchaseParams.newBuilder().setPurchaseToken(purchase.purchaseToken).build())
+    }
+
+    fun close() = client.endConnection()
+
+    companion object {
+        /** A oferta do plano base mensal (sem oferta promocional); senão a primeira. */
+        fun baseOffer(details: ProductDetails): ProductDetails.SubscriptionOfferDetails? {
+            val offers = details.subscriptionOfferDetails.orEmpty()
+            return offers.firstOrNull { it.offerId == null } ?: offers.firstOrNull()
+        }
+
+        /** O preço que se repete todo mês (a última fase do plano base), já localizado pela Play. */
+        fun recurringPrice(details: ProductDetails): String? =
+            baseOffer(details)?.pricingPhases?.pricingPhaseList?.lastOrNull()?.formattedPrice?.ifBlank { null }
+    }
+}

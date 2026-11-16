@@ -89,6 +89,7 @@
 		AE0000000000000000036E01 /* AssistantView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000036E00 /* AssistantView.swift */; };
 		AE0000000000000000036F01 /* AureaMcp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000036F00 /* AureaMcp.swift */; };
 		AE0000000000000000037001 /* AureaMcpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000037000 /* AureaMcpView.swift */; };
+		AE0000000000000000037101 /* AureaSubscriptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000037100 /* AureaSubscriptions.swift */; };
 		AE000000000000000000008B /* AnimationTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE000000000000000000008A /* AnimationTools.swift */; };
 		AE000000000000000000008D /* VectorPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE000000000000000000008C /* VectorPanel.swift */; };
 		AE000000000000000000008F /* AppPanels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE000000000000000000008E /* AppPanels.swift */; };
@@ -239,6 +240,7 @@
 		AE0000000000000000036E00 /* AssistantView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantView.swift; sourceTree = "<group>"; };
 		AE0000000000000000036F00 /* AureaMcp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AureaMcp.swift; sourceTree = "<group>"; };
 		AE0000000000000000037000 /* AureaMcpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AureaMcpView.swift; sourceTree = "<group>"; };
+		AE0000000000000000037100 /* AureaSubscriptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AureaSubscriptions.swift; sourceTree = "<group>"; };
 		AE000000000000000000008A /* AnimationTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnimationTools.swift; sourceTree = "<group>"; };
 		AE000000000000000000008C /* VectorPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VectorPanel.swift; sourceTree = "<group>"; };
 		AE000000000000000000008E /* AppPanels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPanels.swift; sourceTree = "<group>"; };
@@ -375,6 +377,7 @@
 				AE0000000000000000036E00 /* AssistantView.swift */,
 				AE0000000000000000036F00 /* AureaMcp.swift */,
 				AE0000000000000000037000 /* AureaMcpView.swift */,
+				AE0000000000000000037100 /* AureaSubscriptions.swift */,
 				AE000000000000000000008A /* AnimationTools.swift */,
 				AE000000000000000000008C /* VectorPanel.swift */,
 				AE000000000000000000008E /* AppPanels.swift */,
@@ -706,6 +709,7 @@
 				AE0000000000000000036E01 /* AssistantView.swift in Sources */,
 				AE0000000000000000036F01 /* AureaMcp.swift in Sources */,
 				AE0000000000000000037001 /* AureaMcpView.swift in Sources */,
+				AE0000000000000000037101 /* AureaSubscriptions.swift in Sources */,
 				AE000000000000000000008B /* AnimationTools.swift in Sources */,
 				AE000000000000000000008D /* VectorPanel.swift in Sources */,
 				AE000000000000000000008F /* AppPanels.swift in Sources */,
@@ -968,16 +972,16 @@
 					"-lc++",
 				);
 				AUREA_FIREBASE_API_KEY = "AIzaSyDXVjS5vLuADdVI0C64R9gsx7NMuUq_tBE";
-				AUREA_FIREBASE_APP_ID = "1:3607796908:ios:214d4807d790a0c6c61309";
-				AUREA_FIREBASE_CLIENT_ID = "3607796908-6eg4hj9vq9on08qb0jj9ch2f23ci0h4b.apps.googleusercontent.com";
+				AUREA_FIREBASE_APP_ID = "1:3607796908:ios:a5cf0cd8aef3d45ec61309";
+				AUREA_FIREBASE_CLIENT_ID = "3607796908-js15dnfa46f6ikfgrlucfu1370q48qgi.apps.googleusercontent.com";
 				AUREA_FIREBASE_PROJECT_ID = "aurea-8e5f1";
-				AUREA_FIREBASE_REVERSED_CLIENT_ID = "com.googleusercontent.apps.3607796908-6eg4hj9vq9on08qb0jj9ch2f23ci0h4b";
+				AUREA_FIREBASE_REVERSED_CLIENT_ID = "com.googleusercontent.apps.3607796908-js15dnfa46f6ikfgrlucfu1370q48qgi";
 				AUREA_FIREBASE_SENDER_ID = "3607796908";
-				PRODUCT_BUNDLE_IDENTIFIER = com.aurea.aurea;
+				PRODUCT_BUNDLE_IDENTIFIER = com.aurea.aurea.3ATTUN44P8;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "app/Aurea-Bridging-Header.h";
 				SWIFT_EMIT_LOC_STRINGS = NO;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
 		};

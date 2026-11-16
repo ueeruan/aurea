@@ -48,6 +48,8 @@ struct AureaApp: App {
                     model.start()
                     // 0.3.2: config remota assinada (atualização obrigatória, política do AureaHyper, aviso).
                     AppConfigStore.shared.refresh(force: true)
+                    // Assinaturas (16/11/2026): renovações e compras de fora do app chegam por Transaction.updates.
+                    AureaSubscriptions.shared.startListening()
                     // Número de cadastrados + revalidação (com rede; offline, segue dentro).
                     conta.aoAbrir()
                     // Relatórios de crash só saem com conta: o cadastro avisa do envio antes.

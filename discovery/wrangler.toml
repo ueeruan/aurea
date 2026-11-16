@@ -50,8 +50,8 @@ binding = "AI"
 FIREBASE_PROJECT_ID = "aurea-8e5f1"
 # AureaMCP: "false" desliga /mcp, o OAuth e o relay (503) sem deploy de código.
 AUREAMCP_ENABLED = "true"
-# Purchases stay disabled during the closed beta (owner, 14 November 2026).
-AUREAOS_PURCHASES_ENABLED = "false"
+# Purchases on for the App Store launch (owner, 16 November 2026).
+AUREAOS_PURCHASES_ENABLED = "true"
 # Kill switch: "false" = nenhuma chamada paga chega à 8Scale.
 AI_VIDEO_ENABLED = "true"
 # Teto de gasto do dia (UTC). Atingido, nenhuma geração nova entra.

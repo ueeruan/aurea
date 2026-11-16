@@ -337,6 +337,18 @@ jobs:
           name: aurea-ipa
           path: build/ipa/*.ipa
           if-no-files-found: error
+      # O arquivo assinado fica guardado: se a exportação ou o envio falhar,
+      # dá para repetir sem compilar de novo.
+      - name: Keep the signed archive
+        if: env.APPLE_SIGNING == 'true'
+        run: ditto -c -k --keepParent build/Aurea.xcarchive build/Aurea.xcarchive.zip
+      - uses: actions/upload-artifact@v4
+        if: env.APPLE_SIGNING == 'true'
+        with:
+          name: aurea-xcarchive
+          path: build/Aurea.xcarchive.zip
+          retention-days: 7
+          if-no-files-found: ignore
       - name: Export signed IPA for the App Store
         id: export-signed
         if: env.APPLE_SIGNING == 'true'
@@ -348,8 +360,9 @@ jobs:
           UNSIGNED: ${{ steps.package-ipa.outputs.filename }}
         run: |
           set -o pipefail
+          # 1.0.1: o destino "upload" do exportArchive falha com chave de API
+          # ("No Accounts with App Store Connect Access"); exporta e envia com altool.
           destination=export
-          if [ "$UPLOAD" = "true" ]; then destination=upload; fi
           python3 - "$destination" "$APPLE_TEAM_ID" <<'PY'
           import plistlib, sys
           plistlib.dump({
@@ -366,10 +379,14 @@ jobs:
             -allowProvisioningUpdates -authenticationKeyPath "$APPLE_KEY_PATH" \
             -authenticationKeyID "$APPLE_API_KEY_ID" -authenticationKeyIssuerID "$APPLE_API_ISSUER_ID" \
             2>&1 | tee build-export.log
-          if [ "$destination" = "export" ]; then
-            ipa=$(ls build/ipa-signed/*.ipa | head -n 1)
-            mv "$ipa" "build/ipa-signed/${UNSIGNED%-unsigned.ipa}.ipa"
-            ls -la build/ipa-signed
+          ipa=$(ls build/ipa-signed/*.ipa | head -n 1)
+          mv "$ipa" "build/ipa-signed/${UNSIGNED%-unsigned.ipa}.ipa"
+          ls -la build/ipa-signed
+          if [ "$UPLOAD" = "true" ]; then
+            mkdir -p ~/.appstoreconnect/private_keys
+            cp "$APPLE_KEY_PATH" ~/.appstoreconnect/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8
+            xcrun altool --upload-app -f "build/ipa-signed/${UNSIGNED%-unsigned.ipa}.ipa" -t ios               --apiKey "$APPLE_API_KEY_ID" --apiIssuer "$APPLE_API_ISSUER_ID" --output-format normal 2>&1 | tee build-upload.log
+            rm -f ~/.appstoreconnect/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8
           fi
       - uses: actions/upload-artifact@v4
         if: env.APPLE_SIGNING == 'true' && steps.export-signed.outcome == 'success'
@@ -388,6 +405,7 @@ jobs:
           path: |
             build-ios.log
             build-export.log
+            build-upload.log
             build-metal.log
             build-ffmpeg-ios.log
             build/ffmpeg/ios/arm64/aurea-ffmpeg-build.json

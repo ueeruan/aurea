@@ -354,7 +354,9 @@ class EffectPickerLogicTest {
     @Test
     fun groupOrderIsTheReferenceThenAureaExtrasThenOther() {
         assertEquals(
+            // Funções do AUREA (13/11/2026): "Funções do Aurea" é o primeiro ladrilho.
             listOf(
+                "aurea_tools",
                 "color_light", "draw_edge", "blur", "distort", "procedural", "3d", "motion", "repeat", "matte",
                 "visibility", "text", "stylize", "glitch", "time", "audio", "utility", "plugins", "other",
             ),

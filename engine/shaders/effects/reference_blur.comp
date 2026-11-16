@@ -1,0 +1,95 @@
+#version 450
+#include "../common/bindings.glsl"
+#define AUREA_REFERENCE_BLUR_COMPUTE
+#include "reference_blur.glsl"
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+layout(set = 0, binding = AUREA_TEX0) uniform sampler2D source;
+layout(set = 0, binding = AUREA_TEX1) uniform sampler2D firstMoment;
+layout(set = 0, binding = AUREA_TEX2) uniform sampler2D original;
+layout(set = 0, binding = AUREA_IMG0, rgba32f) coherent uniform image2D target;
+layout(set = 0, binding = AUREA_IMG1, rgba32f) coherent uniform image2D auxiliary;
+
+void compensatedAdd(inout vec4 sum, inout vec4 correction, vec4 value) {
+    vec4 adjusted = value - correction;
+    vec4 next = sum + adjusted;
+    correction = (next - sum) - adjusted;
+    sum = next;
+}
+void rolling(int line) {
+    int length = blurAxisLength();
+    int count = int(p.settings.x < .5 ? p.sizes.z : p.sizes.w);
+    int first = int(p.settings.x < .5 ? p.geometry.z - p.geometry.x : p.geometry.w - p.geometry.y);
+    int whole = int(floor(p.settings.y));
+    float fraction = p.settings.y - float(whole);
+    bool repeatEdges = p.settings.z > .5;
+    int low = first - whole, high = first + whole;
+    vec4 sum = vec4(0), correction = vec4(0);
+    // Initialization visits source pixels once. Radii beyond the source use
+    // analytic constant-edge counts, so work never grows with the radius.
+    for (int i = max(low, 0); i <= min(high, length - 1); ++i)
+        compensatedAdd(sum, correction, blurFetch(source, i, line, false));
+    if (repeatEdges) {
+        compensatedAdd(sum, correction,
+                       float(max(0, min(high, -1) - low + 1)) * blurFetch(source, 0, line, true));
+        compensatedAdd(sum, correction,
+                       float(max(0, high - max(low, length) + 1)) *
+                           blurFetch(source, length - 1, line, true));
+    }
+    for (int i = 0; i < count; ++i) {
+        int position = first + i;
+        vec4 endpoints = blurFetch(source, position - whole - 1, line, repeatEdges) +
+                         blurFetch(source, position + whole + 1, line, repeatEdges);
+        imageStore(target, blurPoint(i, line), (sum + fraction * endpoints) / (2.0 * p.settings.y + 1.0));
+        compensatedAdd(sum, correction, -blurFetch(source, position - whole, line, repeatEdges));
+        compensatedAdd(sum, correction, blurFetch(source, position + whole + 1, line, repeatEdges));
+    }
+}
+void moments(int line, int stage) {
+    int power = int(p.control.x);
+    bool activeLine = line < blurCrossLength();
+    for (int level = power / 2; level >= 1; level /= 2) {
+        if (activeLine) {
+            for (int node = level; node < 2 * level; ++node) {
+                vec4 l0, l1, l2, r0, r1, r2;
+                int left = 2 * node, right = left + 1;
+                if (left >= power) {
+                    l0 = blurFetch(original, left - power, line, false);
+                    r0 = blurFetch(original, right - power, line, false);
+                    l1 = r1 = l2 = r2 = vec4(0);
+                } else if (stage == BLUR_ZERO_FIRST_MOMENTS) {
+                    l0 = imageLoad(target, blurPoint(left - 1, line));
+                    r0 = imageLoad(target, blurPoint(right - 1, line));
+                    l1 = imageLoad(auxiliary, blurPoint(left - 1, line));
+                    r1 = imageLoad(auxiliary, blurPoint(right - 1, line));
+                    l2 = r2 = vec4(0);
+                } else {
+                    l0 = texelFetch(source, blurPoint(left - 1, line), 0);
+                    r0 = texelFetch(source, blurPoint(right - 1, line), 0);
+                    l1 = texelFetch(firstMoment, blurPoint(left - 1, line), 0);
+                    r1 = texelFetch(firstMoment, blurPoint(right - 1, line), 0);
+                    l2 = imageLoad(target, blurPoint(left - 1, line));
+                    r2 = imageLoad(target, blurPoint(right - 1, line));
+                }
+                if (stage == BLUR_ZERO_FIRST_MOMENTS) {
+                    imageStore(target, blurPoint(node - 1, line), l0 + r0);
+                    imageStore(auxiliary, blurPoint(node - 1, line), .5 * (l1 + r0 + r1));
+                } else {
+                    imageStore(target, blurPoint(node - 1, line), .25 * (l2 + r0 + 2.0 * r1 + r2));
+                }
+            }
+        }
+        // Each invocation owns one line. All workgroup lanes reach this fence,
+        // including the padded lanes. MSL 2.1 uses a workgroup barrier here.
+        memoryBarrierImage();
+    }
+}
+void main() {
+    int line = int(gl_GlobalInvocationID.x);
+    int stage = int(p.settings.w + .5);
+    if (stage == BLUR_ROLLING) {
+        if (line < blurCrossLength())
+            rolling(line);
+    } else {
+        moments(line, stage);
+    }
+}

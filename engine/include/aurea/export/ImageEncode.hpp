@@ -90,6 +90,8 @@ void linear_half_to_srgb8(const u16* half, usize pixels, u8* outRgba) noexcept;
 [[nodiscard]] Status encode_png(const u8* rgba, u32 width, u32 height, bool withAlpha, std::vector<u8>& out) noexcept;
 /// zlib (RFC 1950) com o deflate do motor. Exposto para os testes.
 void zlib_compress(const u8* data, usize size, std::vector<u8>& out) noexcept;
+/// Bounded match search for temporary frame caches. Same lossless zlib format.
+void zlib_compress_fast(const u8* data, usize size, std::vector<u8>& out) noexcept;
 [[nodiscard]] u32 crc32_update(u32 crc, const u8* data, usize size) noexcept;   ///< crc inicial 0
 
 // --- GIF ----------------------------------------------------------------------

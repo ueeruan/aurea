@@ -83,6 +83,21 @@ struct Text3DSpec {
     Text3DMaterial side;
     Text3DMaterial bevelMat;              ///< `bevelMat` porque `bevel` já é o interruptor
 
+    // --- estilo (0.5.4) -------------------------------------------------------
+    // 0 = Padrão (o PBR acima). 1 = CARTOON: cor chapada (cel, 2 faixas, sem
+    // reflexo), frente na `color`, lateral num tom mais escuro dela (ou na
+    // `toonSideColor`), faixa de brilho no chanfro de cima e CONTORNO escuro na
+    // silhueta e nos vincos frente/lateral (casco invertido + linhas de vinco,
+    // largura em px da composição — a mesma em qualquer resolução, com keyframe
+    // na trilha TrackProperty::Text3DOutline). A receita só grava estes campos
+    // com o estilo ligado: projeto antigo = os mesmos bytes e o mesmo desenho.
+    u32  style = 0;
+    bool toonSideAuto = true;             ///< lateral = tom mais escuro da frente
+    Vec4 toonSideColor{0.62f, 0.2f, 0.3f, 1.0f};   ///< sRGB; vale com toonSideAuto falso
+    f32  toonHighlight = 0.45f;           ///< 0..1: força da faixa clara (0 = sem)
+    Vec4 outlineColor{0.106f, 0.098f, 0.176f, 1.0f}; ///< sRGB
+    f32  outlineWidth = 8.0f;             ///< px da composição; 0 = sem contorno
+
     [[nodiscard]] Text3DMaterial front_material() const noexcept {
         Text3DMaterial m;
         m.color = color;
@@ -98,6 +113,37 @@ struct Text3DSpec {
 
 /// Prefixo do caminho de origem de um asset de texto 3D.
 inline constexpr const char* kText3DScheme = "aurea-text3d:";
+
+/// Text3DSpec::style.
+inline constexpr u32 kText3DStyleStandard = 0;
+inline constexpr u32 kText3DStyleCartoon = 1;
+/// Material pronto que liga o estilo Cartoon (apply_text3d_material_preset).
+inline constexpr u32 kText3DPresetCartoon = 14;
+inline constexpr u32 kText3DMaterialPresetCount = 15;
+/// Teto da largura do contorno (px da composição).
+inline constexpr f32 kText3DOutlineMaxWidth = 64.0f;
+/// Índice do material do CONTORNO no asset de um texto Cartoon (frente,
+/// lateral, chanfro, contorno).
+inline constexpr u32 kText3DOutlineMaterial = 3;
+
+/// A lateral automática do Cartoon: o mesmo matiz da frente, mais escuro e
+/// mais saturado (sRGB entra e sai).
+[[nodiscard]] Vec4 text3d_cartoon_side_color(Vec4 front) noexcept;
+/// A lateral que o Cartoon desenha (automática ou a escolhida).
+[[nodiscard]] inline Vec4 text3d_cartoon_side(const Text3DSpec& s) noexcept {
+    return s.toonSideAuto ? text3d_cartoon_side_color(s.color) : s.toonSideColor;
+}
+
+/// Contorno do Cartoon (TOON OUTLINE) sobre as primitivas já prontas de uma
+/// malha fechada: acrescenta UMA primitiva com o material `material`, feita de
+///  · CASCO: os triângulos com a ordem invertida e a normal suavizada por
+///    posição (o vértice do shader empurra para fora, em px de tela);
+///  · VINCOS: um quadrilátero por aresta cujo ângulo entre as faces passa de
+///    `creaseDegrees` (frente/lateral, cantos vivos das laterais, fundo): a
+///    posição é uma ponta, a "normal" guarda a OUTRA ponta e uv1 = (lado, 1);
+///    o shader abre o quadrilátero em px de tela (casco: uv1.y = 0).
+/// Falso se a malha não tem triângulo útil. Exposta para os testes do motor.
+bool append_toon_outline(std::vector<Primitive>& primitives, i32 material, f32 creaseDegrees = 35.0f);
 
 [[nodiscard]] std::string encode_text3d(const Text3DSpec& spec);
 [[nodiscard]] bool decode_text3d(const std::string& source, Text3DSpec& out);

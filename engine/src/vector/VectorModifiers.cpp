@@ -338,6 +338,7 @@ void offset_paths(std::vector<BezierPath>& paths, f32 amount, u8 join, f32 miter
                   f32 tolerance, std::vector<u8>* tags) {
     const u32 n = static_cast<u32>(std::clamp(std::lround(copies), 1l, 100l));
     const f32 tol = std::max(tolerance, 0.01f);
+    const ClipToleranceScope scale(tol);   // o passo do recorte por amostragem, se passar do orçamento
     std::vector<BezierPath> out;
     std::vector<u8> outTags;
     for (usize pi = 0; pi < paths.size(); ++pi) {

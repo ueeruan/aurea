@@ -209,4 +209,24 @@
     <string name="perf_badge">Тест · %1$d с</string>
     <string name="perf_badge_stall">Зависло здесь</string>
     <string name="perf_badge_stop">Стоп</string>
+    <string name="cam_stage_features">Обнаружение и отслеживание точек</string>
+    <string name="cam_stage_solve">Расчёт 3D-камеры</string>
+    <string name="prerender_group">Предварительно отрендерить группу</string>
+    <string name="edit_workspace_media">Медиа</string>
+    <string name="edit_workspace_edit">Монтаж</string>
+    <string name="edit_workspace_color">Цвет</string>
+    <string name="edit_workspace_audio">Звук</string>
+    <string name="edit_workspace_text">Текст</string>
+    <string name="grade_node_number">Узел %1$d</string>
+    <string name="grade_add_node">Добавить узел</string>
+    <string name="grade_node_enabled">Коррекция включена</string>
+    <string name="grade_node_previous">Переместить узел раньше</string>
+    <string name="grade_node_next">Переместить узел позже</string>
+    <string name="grade_window">Окна</string>
+    <string name="grade_window_rectangle">Прямоугольник</string>
+    <string name="grade_window_ellipse">Эллипс</string>
+    <string name="grade_window_width">Ширина</string>
+    <string name="grade_window_height">Высота</string>
+    <string name="grade_window_rotation">Поворот</string>
+    <string name="grade_node_actions">Действия узла</string>
 </resources>

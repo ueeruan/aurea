@@ -46,12 +46,13 @@ Plane plane_of(const Composition& comp, const Layer& l, FrameIndex t) noexcept {
 
 u32 Engine::query_rig(u64 layerId, bool bind, f32* out, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = rig_layer(comp, layerId);
     if (!l) return 0;
     const u32 need = static_cast<u32>(l->rig.joints.size()) * kRigJointFloats;
     if (!out || capacity < need) return need;
-    const FrameIndex t = playback_.current();
+    const FrameIndex t = editing_frame_locked();
     const FrameIndex local = l->local_time(t);
     std::vector<f32> deg;
     std::vector<rig::Affine> bones;
@@ -76,13 +77,14 @@ u32 Engine::query_rig(u64 layerId, bool bind, f32* out, u32 capacity) noexcept {
 
 i32 Engine::rig_add_joint(u64 layerId, i32 parentId, f32 compX, f32 compY) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = rig_layer(comp, layerId);
     if (!l || l->rig.joints.size() >= rig::kMaxJoints) return -1;
     const bool hasParent = parentId >= 0 && rig::index_of(l->rig, static_cast<u32>(parentId)) >= 0;
     if (parentId >= 0 && !hasParent) return -1;
     Vec2 p;
-    if (!plane_of(*comp, *l, playback_.current()).to_layer(Vec2{compX, compY}, p)) return -1;
+    if (!plane_of(*comp, *l, editing_frame_locked()).to_layer(Vec2{compX, compY}, p)) return -1;
     history_.before_mutation(*comp, project_->timeline().current(), "junta do rig");
     bump_model_revision_locked();
     RigJoint j;
@@ -97,12 +99,13 @@ i32 Engine::rig_add_joint(u64 layerId, i32 parentId, f32 compX, f32 compY) noexc
 
 bool Engine::rig_move_joint(u64 layerId, u32 jointId, f32 compX, f32 compY, bool continuing) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = rig_layer(comp, layerId);
     const i32 i = l ? rig::index_of(l->rig, jointId) : -1;
     if (i < 0) return false;
     Vec2 p;
-    if (!plane_of(*comp, *l, playback_.current()).to_layer(Vec2{compX, compY}, p)) return false;
+    if (!plane_of(*comp, *l, editing_frame_locked()).to_layer(Vec2{compX, compY}, p)) return false;
     if (!continuing) history_.before_mutation(*comp, project_->timeline().current(), "mover junta");
     bump_model_revision_locked();
     l->rig.joints[static_cast<u32>(i)].pos = p;
@@ -113,6 +116,7 @@ bool Engine::rig_move_joint(u64 layerId, u32 jointId, f32 compX, f32 compY, bool
 
 bool Engine::rig_remove_joint(u64 layerId, u32 jointId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = rig_layer(comp, layerId);
     const i32 i = l ? rig::index_of(l->rig, jointId) : -1;
@@ -131,6 +135,7 @@ bool Engine::rig_remove_joint(u64 layerId, u32 jointId) noexcept {
 
 bool Engine::rig_clear(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = rig_layer(comp, layerId);
     if (!l || l->rig.joints.empty()) return false;
@@ -145,6 +150,7 @@ bool Engine::rig_clear(u64 layerId) noexcept {
 
 u32 Engine::rig_auto_humanoid(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = rig_layer(comp, layerId);
     if (!l) return 0;
@@ -208,12 +214,13 @@ u32 Engine::rig_auto_humanoid(u64 layerId) noexcept {
 
 bool Engine::rig_pose_joint(u64 layerId, u32 jointId, f32 compX, f32 compY, bool continuing) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = rig_layer(comp, layerId);
     const i32 idx = l ? rig::index_of(l->rig, jointId) : -1;
     if (idx < 0) return false;
     const u32 i = static_cast<u32>(idx);
-    const FrameIndex t = playback_.current();
+    const FrameIndex t = editing_frame_locked();
     if (!l->contains_time(t)) return false;
     Vec2 target;
     if (!plane_of(*comp, *l, t).to_layer(Vec2{compX, compY}, target)) return false;

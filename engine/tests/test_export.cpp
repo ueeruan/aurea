@@ -2867,6 +2867,7 @@ AUREA_TEST(Regression2135Gpu, SharedTextTransformAndPresetReach3DExportAndSurviv
 #include "CutFrameGpu.inl"
 #include "ExportWatchdog.inl"
 #include "ExportSlowMedia.inl"
+#include "ExportFrameMeasurements.inl"
 #include "ExportSourceStartup.inl"
 #include "ExportStartPhase.inl"
 #include "OriginalModelExport.inl"
@@ -2876,6 +2877,9 @@ AUREA_TEST(Regression2135Gpu, SharedTextTransformAndPresetReach3DExportAndSurviv
 #include "HyperExport.inl"
 // 0.5.2: camada presa a um osso no export (igual à prévia).
 #include "ExportBoneAttach.inl"
+// 0.5.3 (Fase B): degrau de memória e pasta de saída.
+#include "Export053Engine.inl"
+#include "ExportTimeSlice.inl"
 
 #endif // AUREA_TEST_VULKAN
 

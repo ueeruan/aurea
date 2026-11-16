@@ -2,6 +2,7 @@
 //  Aurea / text / Text.cpp
 // =============================================================================
 #include "aurea/text/Text.hpp"
+#include "aurea/text/TextOutline.hpp"
 
 #include "aurea/core/Log.hpp"
 #include "aurea/timeline/Layer.hpp"
@@ -583,6 +584,28 @@ Line shape_span(const Font::Impl& primary, const std::vector<u32>& cps, usize a,
     return L;
 }
 
+/// v72, Character Alignment do AE: a letra trocada pelo deslocamento/valor de
+/// caractere fica na VAGA da original (o avanço da original, medido na fonte do
+/// glifo), alinhada à esquerda, ao centro ou à direita dela; as letras seguintes
+/// andam como se a original estivesse lá. `slots` = TextData::charSlots.
+void place_in_slots(const std::vector<u32>& slots, f32 trackingPx, Line& L) {
+    f32 shift = 0.0f;
+    for (Glyph& g : L.glyphs) {
+        g.x += shift;
+        const u32 slot = g.cluster < slots.size() ? slots[g.cluster] : 0u;
+        if (!slot || g.advance == 0.0f || !g.font) continue;
+        hb_codepoint_t gid = 0;
+        if (!hb_font_get_nominal_glyph(g.font->hb, slot & 0x1FFFFFu, &gid)) continue;
+        const f32 was = static_cast<f32>(hb_font_get_glyph_h_advance(g.font->hb, gid)) * g.fs + trackingPx;
+        const f32 delta = was - g.advance;
+        const u32 align = (slot >> 24) - 1u;   // 0 esquerda, 1 centro, 2 direita
+        g.x += align == 1 ? delta * 0.5f : align == 2 ? delta : 0.0f;
+        g.advance = was;
+        shift += delta;
+    }
+    L.width = std::max(0.0f, L.width + shift);
+}
+
 /// Texto posicionado (escala pedida): glifos com x/y finais na caixa (linha
 /// de base), largura/altura da caixa sem margem.
 struct Placed {
@@ -665,6 +688,7 @@ void place_once(const Font::Impl& f, const TextData& t, f32 pxScale, f32 factor,
         auto shapeRange = [&](usize a, usize b) {
             Line L = shape_span(f, cps, a, b, 0, at, para, pxSize, trackingPx, buf);
             for (Glyph& g : L.glyphs) g.cluster = g.cluster < gidx.size() ? gidx[g.cluster] : static_cast<u32>(i);
+            if (!t.charSlots.empty()) place_in_slots(t.charSlots, trackingPx, L);
             return L;
         };
         if (cps.empty()) { lines.emplace_back(); p0 = i + 1; continue; }
@@ -806,20 +830,17 @@ std::shared_ptr<const Font> default_font() {
 }
 
 namespace {
-std::string default_family() {
-    static std::mutex m;
-    static std::string fam;
-    static bool tried = false;
-    std::lock_guard<std::mutex> lock(m);
-    if (!tried) {
-        tried = true;
-        for (const auto& e : FontManager::instance().list()) {
-            auto d = default_font();
-            if (d && FontManager::instance().load(e.path) == d) { fam = e.family; break; }
-        }
-    }
-    return fam;
-}
+// 0.5.3: a família da fonte padrão para um trecho com peso próprio (TextSpan::weight)
+// num texto sem família. A versão anterior percorria TODAS as fontes do sistema e
+// comparava `FontManager::load(e.path)` com `default_font()` pelo ponteiro; como a
+// fonte padrão é criada por `Font::load` direto (fora do cache do gerenciador), os
+// ponteiros nunca coincidiam: o laço lia, calculava o hash e montava a face de cada
+// arquivo de fonte, guardava todas na memória e devolvia "" de qualquer jeito. Isso
+// acontecia na primeira vez, dentro do preparo do quadro, com o modelo travado.
+// O resultado é o mesmo de antes ("" → `font_for` cai na fonte padrão), sem a carga.
+// Achar a família de verdade faria o negrito do trecho trocar de fonte e mudaria o
+// vídeo exportado: decisão do dono, fica como está.
+std::string default_family() { return {}; }
 } // namespace
 
 TextExtent measure(const Font& font, const TextData& t) {
@@ -898,6 +919,62 @@ bool outline(const Font& font, const TextData& t, std::vector<std::vector<Vec2>>
         if (contourGlyphs) contourGlyphs->erase(contourGlyphs->begin() + static_cast<std::ptrdiff_t>(i));
     }
     return !contours.empty();
+}
+
+// Lote X (Create Shapes / Masks from Text): os mesmos contornos, sem achatar.
+bool outline_bezier(const Font& font, const TextData& t, std::vector<GlyphOutline>& out) {
+    Placed p;
+    place(font.impl(), t, 1.0f, p);
+    out.clear();
+    for (const Glyph& gl : p.glyphs) {
+        stbtt_vertex* v = nullptr;
+        const int n = stbtt_GetGlyphShape(&gl.font->info, gl.id, &v);
+        const f32 fs = gl.fs;
+        auto P = [&](f32 fx, f32 fy) { return Vec2{gl.x + fx * fs, gl.y - fy * fs}; };
+        GlyphOutline g;
+        g.cluster = gl.cluster;
+        g.line = gl.line;
+        g.penX = gl.x;
+        g.baseline = gl.y;
+        g.advance = gl.advance;
+        Vec2 cur{0, 0};
+        for (int k = 0; k < n; ++k) {
+            const stbtt_vertex& e = v[k];
+            const Vec2 to = P(e.x, e.y);
+            if (e.type == STBTT_vmove) {
+                g.contours.emplace_back();
+                g.contours.back().closed = true;
+                g.contours.back().v.push_back(BezierVertex{to, {}, {}});
+            } else if (!g.contours.empty()) {
+                std::vector<BezierVertex>& c = g.contours.back().v;
+                if (e.type == STBTT_vline) {
+                    c.push_back(BezierVertex{to, {}, {}});
+                } else if (e.type == STBTT_vcurve) {
+                    // Quadrática (cur, q, to) → cúbica exata: alças a 2/3 do controle.
+                    const Vec2 q = P(e.cx, e.cy);
+                    c.back().out = Vec2{(q.x - cur.x) * (2.0f / 3.0f), (q.y - cur.y) * (2.0f / 3.0f)};
+                    c.push_back(BezierVertex{to, Vec2{(q.x - to.x) * (2.0f / 3.0f), (q.y - to.y) * (2.0f / 3.0f)}, {}});
+                } else if (e.type == STBTT_vcubic) {
+                    const Vec2 q0 = P(e.cx, e.cy), q1 = P(e.cx1, e.cy1);
+                    c.back().out = Vec2{q0.x - cur.x, q0.y - cur.y};
+                    c.push_back(BezierVertex{to, Vec2{q1.x - to.x, q1.y - to.y}, {}});
+                }
+            }
+            cur = to;
+        }
+        if (v) stbtt_FreeShape(&gl.font->info, v);
+        // O contorno da fonte volta ao primeiro ponto: o vértice repetido sai e
+        // a alça de chegada dele passa para o primeiro.
+        for (BezierPath& c : g.contours) {
+            if (c.v.size() > 1 && std::fabs(c.v.back().p.x - c.v.front().p.x) < 1e-4f && std::fabs(c.v.back().p.y - c.v.front().p.y) < 1e-4f) {
+                c.v.front().in = c.v.back().in;
+                c.v.pop_back();
+            }
+        }
+        g.contours.erase(std::remove_if(g.contours.begin(), g.contours.end(), [](const BezierPath& c) { return c.v.size() < 2; }), g.contours.end());
+        if (!g.contours.empty()) out.push_back(std::move(g));
+    }
+    return !out.empty();
 }
 
 // =============================================================================
@@ -1000,8 +1077,61 @@ void glyph_atlas_clean() noexcept {
     A.dirty = false;
 }
 
+namespace {
+// 0.5.3: o layout de uma camada de texto (shaping do HarfBuzz + quads do atlas) era
+// refeito a cada quadro, dentro do preparo, com o modelo travado: ~15 vetores por
+// camada e o HarfBuzz inteiro, mesmo com o texto parado. Aqui fica o resultado
+// das últimas chamadas. A chave cobre tudo o que `place` e o laço abaixo leem
+// (raster_key: conteúdo, fonte, tamanho, caixa, alinhamento, entrelinha,
+// espaçamento, trechos, cor, vagas) mais a fonte, a margem e o nível dos glifos
+// grandes. Os quads apontam para posições do atlas, que só mudam quando ele é
+// refeito: a entrada vale para UMA geração do atlas. Igual à conta refeita, bit a
+// bit (os quads saem dos mesmos glifos já no atlas). Guardado pela trava do atlas.
+struct LayoutCacheEntry {
+    u64 key = 0, generation = 0, lastUse = 0;
+    bool ok = false;
+    TextLayout layout;
+};
+struct LayoutCache {
+    std::vector<LayoutCacheEntry> entries;
+    u64 tick = 0;
+    u64 hits = 0, misses = 0;
+};
+constexpr usize kLayoutCacheEntries = 64;
+constexpr usize kLayoutCacheMaxQuads = 4096;   ///< texto enorme (legenda colada inteira): sem cache
+LayoutCache& layout_cache() {
+    static LayoutCache c;
+    return c;
+}
+u64 layout_cache_key(const Font& font, const TextData& t, f32 pad, bool large) noexcept {
+    u64 h = raster_key(t, 1.0f);
+    auto mix = [&](u64 v) { h ^= v + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2); };
+    u32 padBits = 0;
+    std::memcpy(&padBits, &pad, sizeof(padBits));
+    mix(font.content_id());
+    mix(padBits);
+    mix(large ? 1u : 2u);
+    return h;
+}
+} // namespace
+
 bool layout_quads(const Font& font, const TextData& t, f32 pad, TextLayout& out, f32 shownPx) {
     const Font::Impl& f = font.impl();
+    const bool wantLargeKey = shownPx >= kGlyphLargeFromPx;
+    const u64 cacheKey = layout_cache_key(font, t, pad, wantLargeKey);
+    {
+        Atlas& A = atlas();
+        std::lock_guard<std::mutex> lock(A.mutex);
+        LayoutCache& cache = layout_cache();
+        for (LayoutCacheEntry& e : cache.entries) {
+            if (e.key != cacheKey || e.generation != A.generation) continue;
+            e.lastUse = ++cache.tick;
+            ++cache.hits;
+            out = e.layout;
+            return e.ok;
+        }
+        ++cache.misses;
+    }
     Placed p;
     place(f, t, 1.0f, p);
     out = TextLayout{};
@@ -1075,7 +1205,31 @@ bool layout_quads(const Font& font, const TextData& t, f32 pad, TextLayout& out,
         A.dirty = true;
         ++A.revision;
     }
-    return !out.quads.empty();
+    const bool ok = !out.quads.empty();
+    if (out.quads.size() <= kLayoutCacheMaxQuads) {
+        LayoutCache& cache = layout_cache();
+        // Entradas de outra geração do atlas não valem mais: saem primeiro.
+        LayoutCacheEntry* slot = nullptr;
+        for (LayoutCacheEntry& e : cache.entries) {
+            if (e.key == cacheKey || e.generation != A.generation) { slot = &e; break; }
+        }
+        if (!slot && cache.entries.size() < kLayoutCacheEntries) slot = &cache.entries.emplace_back();
+        if (!slot) {
+            slot = &cache.entries.front();
+            for (LayoutCacheEntry& e : cache.entries) if (e.lastUse < slot->lastUse) slot = &e;
+        }
+        slot->key = cacheKey;
+        slot->generation = A.generation;
+        slot->lastUse = ++cache.tick;
+        slot->ok = ok;
+        slot->layout = out;
+    }
+    return ok;
+}
+
+u64 layout_cache_hits() noexcept {
+    std::lock_guard<std::mutex> lock(atlas().mutex);
+    return layout_cache().hits;
 }
 
 u32 shaped_glyphs(const Font& font, const TextData& t, std::vector<ShapedGlyph>& out) {
@@ -1120,6 +1274,7 @@ u64 raster_key(const TextData& t, f32 scale) noexcept {
     mix(&t.alignment, sizeof(t.alignment));
     mix(&t.lineHeight, sizeof(t.lineHeight));
     mix(&t.tracking, sizeof(t.tracking));
+    if (!t.charSlots.empty()) mix(t.charSlots.data(), t.charSlots.size() * sizeof(u32));   // v72: vagas do Character Alignment
     mix(&scale, sizeof(scale));
     return h;
 }

@@ -474,7 +474,7 @@ internal fun easeOf(store: EditorStore, layer: Long, k: KeyframeRow): Ease {
  * continuam independentes (o motor não os liga).
  */
 internal fun applyEase(store: EditorStore, layer: Long, start: KeyframeRow, e: Ease) {
-    val keys = store.keyframes[layer] ?: return
+    val keys = store.keysForLayer(layer) ?: return
     keys.filter { it.time == start.time && it.sameTrack(start) }.forEach { k ->
         store.setKeyframeEasing(layer, k, e.interp, e.x1, e.y1, e.x2, e.y2, e.power, linkAxes = true)
     }
@@ -485,7 +485,7 @@ internal fun applyEase(store: EditorStore, layer: Long, start: KeyframeRow, e: E
  * num passo de desfazer. Falso = menos de 2 keyframes (nada a aplicar).
  */
 internal fun applyEaseToProperty(store: EditorStore, layer: Long, start: KeyframeRow, e: Ease): Boolean {
-    val keys = store.keyframes[layer] ?: return false
+    val keys = store.keysForLayer(layer) ?: return false
     val starts = propertySegmentStarts(keys, keys.track(start))
     if (starts.isEmpty()) return false
     store.setKeyframesEasing(layer, starts, e.interp, e.x1, e.y1, e.x2, e.y2, e.power, linkAxes = true)
@@ -550,7 +550,7 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
     val segment by remember(store) {
         derivedStateOf {
             val (layer, sel) = store.selectedKeyframe ?: return@derivedStateOf null
-            val keys = store.keyframes[layer] ?: return@derivedStateOf null
+            val keys = store.keysForLayer(layer) ?: return@derivedStateOf null
             val track = keys.track(sel)
             val detail = store.queryDetail(layer) ?: return@derivedStateOf null
             val target = com.aurea.aurea.engine.TrackKey(sel.property, sel.effectIndex, sel.paramIndex)
@@ -637,7 +637,7 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
             edge
         }
         val segment = store.keyframeNavigation(layer, target, frame)?.takeIf { it.hasSegment } ?: return
-        val a = store.keyframes[layer].orEmpty().track(start).firstOrNull { it.time == segment.segmentStart } ?: return
+        val a = store.keysForLayer(layer).orEmpty().track(start).firstOrNull { it.time == segment.segmentStart } ?: return
         store.selectKeyframe(layer, a)
         store.pause()
         store.seek(frame)
@@ -650,7 +650,7 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
     // Velocidade: só o grupo Curvas (as outras curvas não se dividem; `disableNonSplittableEasing`).
     val onlyBezier = start.property == com.aurea.aurea.engine.TrackProperty.SPEED
     val category = curveCategoryOf(ease)
-    val track = store.keyframes[layer].orEmpty().track(start)
+    val track = store.keysForLayer(layer).orEmpty().track(start)
     val local = store.detail?.takeIf { it.id == layer }?.localPlayhead
     val keyHere = local != null && track.any { it.time == local }
     // ◆±: marca ou tira a chave da trilha do trecho no cabeçote (o valor que a curva dá ali).
@@ -1295,7 +1295,7 @@ private fun DrawScope.drawGrid(inset: Float, w: Float, h: Float, yTop: Float, yB
 
 /** Instante LOCAL do cabeçote na camada [layer] (o tempo das marcas dela). */
 private fun localPlayhead(store: EditorStore, layer: Long): Int? {
-    val row = store.layers.firstOrNull { it.id == layer } ?: return null
+    val row = store.editingLayers.firstOrNull { it.id == layer } ?: return null
     return store.playhead - row.startFrame + row.offsetFrames
 }
 
@@ -1304,7 +1304,7 @@ private fun followGraphLayer(store: EditorStore) {
     val layer = store.primary ?: return
     val current = store.selectedKeyframe
     if (current?.first == layer) return
-    val track = graphTrackFor(store.keyframes[layer].orEmpty(), current?.second)
+    val track = graphTrackFor(store.keysForLayer(layer).orEmpty(), current?.second)
     if (track.isEmpty()) { if (current != null) store.clearSelectedKeyframe(); return }
     val i = localPlayhead(store, layer)?.let { segmentIndexAt(track, it) } ?: 0
     store.selectKeyframe(layer, track[i.coerceAtLeast(0)])
@@ -1317,7 +1317,7 @@ private fun followGraphLayer(store: EditorStore) {
  * nenhuma para mostrar (aí o editor avisa e volta, como sempre).
  */
 private fun recoverCurveSegment(store: EditorStore, layer: Long, sel: KeyframeRow): Boolean {
-    val keys = store.keyframes[layer].orEmpty()
+    val keys = store.keysForLayer(layer).orEmpty()
     val detail = store.queryDetail(layer) ?: return false
     fun startOf(track: List<KeyframeRow>): KeyframeRow? {
         if (track.size < 2) return null
@@ -1341,7 +1341,7 @@ private fun followGraphPlayhead(store: EditorStore) {
     if (store.timelineKeyDragActive) return
     val (layer, sel) = store.selectedKeyframe ?: return
     if (layer != store.primary) return
-    val track = store.keyframes[layer].orEmpty().track(sel)
+    val track = store.keysForLayer(layer).orEmpty().track(sel)
     val target = com.aurea.aurea.engine.TrackKey(sel.property, sel.effectIndex, sel.paramIndex)
     val navigation = store.keyframeNavigation(layer, target)?.takeIf { it.hasSegment } ?: return
     val start = track.firstOrNull { it.time == navigation.segmentStart } ?: return

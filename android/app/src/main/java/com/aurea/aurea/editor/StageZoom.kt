@@ -286,6 +286,9 @@ internal object ViewModes {
     var columnOpen by mutableStateOf(false)
     var pixel by mutableStateOf(false)
     var grid by mutableStateOf(false)
+    /** AE layers (B10): margens de ação/título + cruz do centro e réguas (desenhadas pelo motor). */
+    var safe by mutableStateOf(false)
+    var rulers by mutableStateOf(false)
     /** 0.4.1 (mockup "interface 03", o "olho" do palco): esconde contorno, alças e gizmo da seleção. */
     var hideOverlay by mutableStateOf(false)
     var gridSpacing by mutableIntStateOf(GRID_MARK)
@@ -428,6 +431,25 @@ internal fun ViewModeColumn(store: EditorStore, width: Dp, modifier: Modifier) {
                     GridSpacingSpinner(ViewModes.gridSpacing) { ViewModes.changeGridSpacing(it) }
                 }
             }
+        }
+        // AE layers (B10): margens seguras (ação 90 %, título 80 %) e réguas. Só no Aurea PC.
+        if (com.aurea.aurea.ui.platform.PlatformFeatures.desktopAe) {
+        ViewModeCell(
+            glyph = CupertinoGlyph.Square,
+            description = stringResource(R.string.ae_guides_safe),
+            state = if (ViewModes.safe) onLabel else offLabel,
+            on = ViewModes.safe,
+            tag = "viewmode.safe",
+            modifier = Modifier.weight(1f),
+        ) { ViewModes.safe = !ViewModes.safe }
+        ViewModeCell(
+            glyph = CupertinoGlyph.SliderHorizontal3,
+            description = stringResource(R.string.ae_guides_rulers),
+            state = if (ViewModes.rulers) onLabel else offLabel,
+            on = ViewModes.rulers,
+            tag = "viewmode.rulers",
+            modifier = Modifier.weight(1f),
+        ) { ViewModes.rulers = !ViewModes.rulers }
         }
         val soloState = when (ViewModes.solo) {
             1 -> stringResource(R.string.om_vm_solo_only)

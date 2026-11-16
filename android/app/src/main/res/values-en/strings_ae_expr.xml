@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE expressions (lote E, 2026-11-12): controles Menu suspenso / Camada / Ponto 3D e os atalhos de expressão do Aurea PC. -->
+<resources>
+    <string name="fxl_ae_menu">Menu</string>
+    <string name="fxl_ae_layer">Layer</string>
+    <string name="fxl_ae_point_3d">3D Point</string>
+    <string name="fx_name_dropdown_control">Dropdown Menu Control</string>
+    <string name="fx_name_layer_control">Layer Control</string>
+    <string name="fx_name_point3d_control">3D Point Control</string>
+    <string name="fx_desc_control_dropdown">A list of options; another parameter\'s expression reads the number of the chosen item (1, 2, 3…).</string>
+    <string name="fx_desc_control_layer">Picks a layer that another parameter\'s expression uses (position, space, name).</string>
+    <string name="fx_desc_control_point3d">An X/Y/Z point you wire into another parameter\'s expression.</string>
+    <string name="expr_snip_ae_color">Cycling color</string>
+    <string name="expr_snip_ae_path">Follow path</string>
+    <string name="expr_snip_ae_dropdown">Switch by menu</string>
+    <string name="expr_snip_ae_create_path">Pulsing path</string>
+    <string name="expr_mask_path_title">Path expression</string>
+    <string name="expr_mask_path_unit">points</string>
+    <string name="expr_snip_ae_function">Own function</string>
+</resources>

@@ -41,11 +41,11 @@ import com.aurea.aurea.ui.theme.CupertinoGlyph
 @Composable
 internal fun GridControlRow(store: EditorStore) {
     val grid = store.primary ?: return
-    val rows = store.layers
+    val rows = store.editingLayers
     val choices = remember(rows, grid) {
         gridControlChoices(rows.map { GridNode(it.id, it.kind, it.name, it.parentIndex) }, grid)
     }
-    val locked = store.layers.firstOrNull { it.id == grid }?.locked == true
+    val locked = store.editingLayers.firstOrNull { it.id == grid }?.locked == true
     val label = stringResource(R.string.om_grid_controlled_by)
     val none = stringResource(R.string.om_grid_controlled_none)
     val header = stringResource(R.string.om_grid_nulls_header)

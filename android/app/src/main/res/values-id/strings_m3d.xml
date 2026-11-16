@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Painel do modelo 3D (13/11/2026): Material (visuais do modelo inteiro), Textura e Animação (Evolução com keyframe). -->
+<resources>
+    <string name="m3d_title">Model 3D</string>
+    <string name="m3d_tab_shadow">Bayangan</string>
+    <string name="m3d_look">Tampilan</string>
+    <string name="m3d_look_hint">Ketuk bola untuk memberi tampilan pada seluruh model.</string>
+    <string name="m3d_look_original">Asli</string>
+    <string name="m3d_look_plastic">Plastik</string>
+    <string name="m3d_look_matte">Doff</string>
+    <string name="m3d_look_metal">Logam</string>
+    <string name="m3d_look_chrome">Krom</string>
+    <string name="m3d_look_gold">Emas</string>
+    <string name="m3d_look_glass">Kaca</string>
+    <string name="m3d_look_custom">Diatur manual</string>
+    <string name="m3d_adjust">Atur</string>
+    <string name="m3d_whole_model">Seluruh model</string>
+    <string name="m3d_material_n">Material %1$d</string>
+    <string name="m3d_no_materials">Model ini tidak punya material untuk diatur.</string>
+    <string name="m3d_apply_to">Terapkan ke</string>
+    <string name="m3d_one_part">Satu bagian</string>
+    <string name="m3d_texture_pick">Gambar tekstur</string>
+    <string name="m3d_texture_hint">Gambar menutupi seluruh model, memakai koordinat tekstur dari file itu sendiri.</string>
+    <string name="m3d_texture_original">Kembali ke tekstur asli</string>
+    <string name="m3d_texture_no_parts">Model ini tidak punya bagian yang bisa diberi tekstur.</string>
+    <string name="m3d_texture_material_hint">Tekstur material ini bisa berasal dari file atau dari lapisan di timeline.</string>
+    <string name="m3d_part_hint">Ketuk bagian untuk mengganti teksturnya atau menyembunyikannya.</string>
+    <string name="m3d_part_own_texture">Tekstur sendiri</string>
+    <string name="m3d_part_hidden">Disembunyikan</string>
+    <string name="m3d_anim_progress">Progres</string>
+    <string name="m3d_anim_progress_hint">Pasang ◆ di dua titik timeline untuk mengendalikan animasi file dengan keyframe. Tanpa ◆, animasi berjalan sendiri.</string>
+    <string name="m3d_anim_auto">Putar sendiri</string>
+    <string name="m3d_anim_auto_hint">Menghapus nilai tetap dan ◆ Progres: klip kembali berjalan mengikuti waktu.</string>
+    <string name="m3d_anim_loop">Ulangi</string>
+    <string name="m3d_anim_speed">Kecepatan</string>
+    <string name="m3d_anim_duration">Durasi klip: %1$s dtk</string>
+    <string name="m3d_anim_pick_clip">Pilih klip untuk menganimasikan model.</string>
+    <string name="m3d_anim_playing">Berjalan sendiri</string>
+    <!-- 14/11/2026 (3D opções extras, v76): Luz e sombra, Posição, Brilho, textura que anda e animação. -->
+    <string name="m3d_tab_light_shadow">Cahaya &amp; bayangan</string>
+    <string name="m3d_place">Posisi</string>
+    <string name="m3d_place_ground">Letakkan di lantai</string>
+    <string name="m3d_place_center">Ke tengah</string>
+    <string name="m3d_place_fit">Pas ke layar</string>
+    <string name="m3d_place_hint">Setiap ketukan satu langkah urung. Dengan keyframe posisi, semuanya ikut bergeser.</string>
+    <string name="m3d_look_neon">Neon</string>
+    <string name="m3d_glow">Cahaya</string>
+    <string name="m3d_glow_color">Warna cahaya</string>
+    <string name="m3d_glow_strength">Intensitas cahaya</string>
+    <string name="m3d_glow_hint">Cahaya milik material sendiri. Dengan Bloom adegan (Adegan 3D › Render), cahaya menyebar di sekitarnya.</string>
+    <string name="m3d_tex_transform">Posisi tekstur</string>
+    <string name="m3d_tex_offset_x">Geser X</string>
+    <string name="m3d_tex_offset_y">Geser Y</string>
+    <string name="m3d_tex_rotation">Putar</string>
+    <string name="m3d_tex_scroll">Gulir seiring waktu</string>
+    <string name="m3d_tex_scroll_x">Gulir X</string>
+    <string name="m3d_tex_scroll_y">Gulir Y</string>
+    <string name="m3d_tex_scroll_hint" formatted="false">Dalam % gambar per detik: tekstur bergerak sendiri (ban berjalan, air, layar).</string>
+    <string name="m3d_anim_start">Mulai di</string>
+    <string name="m3d_anim_reverse">Mundur</string>
+    <string name="m3d_anim_pingpong">Bolak-balik</string>
+    <string name="m3d_anim_speed_hint">Ketuk Kecepatan dan pasang ◆ di kolom kiri untuk mempercepat atau memperlambat animasi seiring waktu.</string>
+    <string name="m3d_obj_light">Cahaya objek</string>
+    <string name="m3d_obj_light_hint">Menerangi dan memantulkan hanya objek ini dengan studio atau gambar HDR sendiri. Bagian lain adegan tetap sama.</string>
+    <string name="m3d_obj_light_scene">Dari adegan</string>
+    <string name="m3d_obj_light_intensity">Cahaya &amp; pantulan</string>
+</resources>

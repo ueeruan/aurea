@@ -133,6 +133,8 @@ struct ObjectCell: Identifiable {
     var glyph: Character? = nil
     var tint: Color? = nil
     var icon: AnyView? = nil
+    /// 0.5.4: recurso pago sem o acesso (Texto 3D): o cadeado do Hyper no fim da célula.
+    var locked = false
     let action: () -> Void
 }
 
@@ -181,6 +183,7 @@ private struct ObjectCellView: View {
                 Text(cell.label).font(.aurea(size: 11, weight: .medium)).foregroundStyle(AureaColors.text)
                     .lineLimit(1).truncationMode(.tail)
                 Spacer(minLength: 0)
+                if cell.locked { HyperLockBadge() }
             }
             .padding(.horizontal, 10)
             .frame(maxWidth: .infinity, minHeight: 40, maxHeight: 40)
@@ -548,7 +551,8 @@ private struct Model3DGridView: View {
                 ObjectCell(label: AureaText.t("sh_add_model_3d"), tag: "add.model3d.file", glyph: CupertinoGlyph.Cube, tint: AureaColors.accent) {
                     omegaRequestPicker(model, shell, .model)
                 },
-                ObjectCell(label: AureaText.t("sh_add_text_3d"), tag: "add.model3d.text", glyph: ShellGlyph.TextformatAlt, tint: ShellColors.text3D) {
+                ObjectCell(label: AureaText.t("sh_add_text_3d"), tag: "add.model3d.text", glyph: ShellGlyph.TextformatAlt, tint: ShellColors.text3D,
+                           locked: Text3DGate.locked()) {
                     _ = model.addText3D(content: AureaText.t("panel_texto"), depth: 0.25); close()
                 },
                 // 0.4.1: Reflective Floor — o chão polido que espelha tudo o que é 3D, num toque. Par do Android.

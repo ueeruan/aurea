@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="fx_ref_radial_wipe_name">Sapuan radial</string>
+    <string name="fx_ref_radial_wipe_desc">Menampilkan atau menyembunyikan gambar searah jarum jam, berlawanan arah atau kedua arah dengan tepi halus.</string>
+    <string name="fx_ref_clockwise">Searah jarum jam</string>
+    <string name="fx_ref_counterclockwise">Berlawanan arah jarum jam</string>
+    <string name="fx_ref_block_name">Pelarutan blok</string>
+    <string name="fx_ref_block_desc">Menghapus blok gambar dengan kontrol ukuran, pelembutan dan tepi halus.</string>
+    <string name="fx_ref_soft_edges">Tepi halus</string>
+    <string name="fx_ref_left_locked">Kiri terkunci</string>
+    <string name="fx_ref_right_locked">Kanan terkunci</string>
+    <string name="fx_ref_top_locked">Atas terkunci</string>
+    <string name="fx_ref_bottom_locked">Bawah terkunci</string>
+    <string name="fx_ref_fast_blur_name">Buram cepat</string>
+</resources>

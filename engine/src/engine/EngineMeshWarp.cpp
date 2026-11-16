@@ -139,6 +139,7 @@ Status key_command(Layer& layer, const Command& command, FrameIndex playhead) no
 
 u32 Engine::query_mesh_warp(u64 layerId, u32 effectId, f32* out, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     const EffectInstance* e = mesh_effect(l, effectId);
@@ -147,7 +148,7 @@ u32 Engine::query_mesh_warp(u64 layerId, u32 effectId, f32* out, u32 capacity) n
     grid_of(*e, rows, cols);
     const u32 need = kMeshWarpHeaderFloats + mesh_warp::value_count(rows, cols);
     if (!out || capacity < need) return need;
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     const MeshWarpData* d = e->meshes.empty() ? nullptr : &e->meshes.front();
     std::vector<f32> v;
     (void)mesh_warp::evaluate(d, rows, cols, static_cast<f64>(local.value), v);
@@ -164,6 +165,7 @@ bool Engine::mesh_warp_drag(u64 layerId, u32 effectId, u32 vertex, u32 handle, f
                             bool continuing) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     EffectInstance* e = mesh_effect(l, effectId);
@@ -171,7 +173,7 @@ bool Engine::mesh_warp_drag(u64 layerId, u32 effectId, u32 vertex, u32 handle, f
     u32 rows, cols;
     grid_of(*e, rows, cols);
     if (vertex >= mesh_warp::vertex_count(rows, cols) || !std::isfinite(u) || !std::isfinite(v)) return false;
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     // A malha que a pessoa VÊ agora é a base do arrasto.
     const MeshWarpData* old = e->meshes.empty() ? nullptr : &e->meshes.front();
     std::vector<f32> values;
@@ -213,6 +215,7 @@ bool Engine::mesh_warp_drag(u64 layerId, u32 effectId, u32 vertex, u32 handle, f
 bool Engine::mesh_warp_reset(u64 layerId, u32 effectId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     EffectInstance* e = mesh_effect(l, effectId);
@@ -229,11 +232,12 @@ bool Engine::mesh_warp_reset(u64 layerId, u32 effectId) noexcept {
 bool Engine::mesh_warp_toggle_key(u64 layerId, u32 effectId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     EffectInstance* effect = mesh_effect(layer, effectId);
     if (!effect || layer->locked) return false;
-    const FrameIndex local = layer->local_time(playback_.current());
+    const FrameIndex local = layer->local_time(editing_frame_locked());
     const MeshWarpData* data = mesh_warp::animation(*effect);
     const bool remove = data && mesh_warp::key_at(*data, local.value) >= 0;
     if (!remove && data && data->keys.size() >= kMeshWarpMaxKeys) return false;
@@ -242,7 +246,7 @@ bool Engine::mesh_warp_toggle_key(u64 layerId, u32 effectId) noexcept {
     command.type = remove ? CommandType::KeyframeDelete : CommandType::KeyframeInsert;
     command.keyframe.track = TrackRef{LayerId::unpack(layerId), TrackProperty::MeshWarp, effectId, 0};
     command.keyframe.time = local;
-    if (!mesh_warp::key_command(*layer, command, playback_.current()).ok()) return false;
+    if (!mesh_warp::key_command(*layer, command, editing_frame_locked()).ok()) return false;
     bump_model_revision_locked();
     project_->mark_dirty();
     request_render();

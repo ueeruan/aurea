@@ -176,6 +176,123 @@ f32 point_conf(const PoseFrame& f, u32 j) noexcept {
     return f.pts[j].confidence;
 }
 
+/// Modo híbrido (PC): os pontos de mundo do BlazePose estão no referencial da
+/// CÂMERA — câmera um pouco de cima deixa a pessoa em pé inclinada (medido no
+/// vídeo do dono: pernas retas a 12,7°), e o personagem ficaria torto o vídeo
+/// todo. Nos quadros de pé com as pernas retas (joelho acima de 145°: o 3D do
+/// BlazePose dá 150–156° a uma perna reta) e paralelas, a linha tornozelos → quadril é a
+/// vertical: a mediana da inclinação (só em volta do eixo x, o "pitch" da
+/// câmera) é desfeita em todos os pontos. Sem 15 quadros assim, nada muda.
+f32 level_camera_pitch(const std::vector<PoseFrame>& frames, std::vector<CapturePose>& raw) {
+    std::vector<f32> pitches;
+    for (usize f = 0; f < frames.size(); ++f) {
+        const PoseFrame& fr = frames[f];
+        bool ok = true;
+        for (const u32 j : {lm::LeftHip, lm::RightHip, lm::LeftKnee, lm::RightKnee, lm::LeftAnkle, lm::RightAnkle})
+            ok = ok && fr.pts[j].confidence >= 0.5f;
+        if (!ok) continue;
+        const CapturePose& r = raw[f];
+        auto straight = [&](u32 h, u32 k, u32 a) {
+            const Vec3 u = r[h] - r[k], v = r[a] - r[k];
+            const f32 d = u.length() * v.length();
+            return d > 1e-8f && u.dot(v) / d < std::cos(145.0f * kDeg2Rad);
+        };
+        if (!straight(lm::LeftHip, lm::LeftKnee, lm::LeftAnkle) || !straight(lm::RightHip, lm::RightKnee, lm::RightAnkle)) continue;
+        // Pernas paralelas (de pé, não no meio de um passo: lá a média das duas pende para um lado).
+        const Vec3 legL = r[lm::LeftHip] - r[lm::LeftAnkle], legR = r[lm::RightHip] - r[lm::RightAnkle];
+        const f32 dl = legL.length() * legR.length();
+        if (!(dl > 1e-8f) || legL.dot(legR) / dl < std::cos(12.0f * kDeg2Rad)) continue;
+        const Vec3 v = (r[lm::LeftHip] + r[lm::RightHip]) * 0.5f - (r[lm::LeftAnkle] + r[lm::RightAnkle]) * 0.5f;
+        if (v.y <= 1e-4f) continue;
+        const f32 roll = std::atan2(v.x, v.y), pitch = std::atan2(v.z, v.y);
+        if (std::fabs(roll) > 20.0f * kDeg2Rad || std::fabs(pitch) > 35.0f * kDeg2Rad) continue;
+        pitches.push_back(pitch);
+    }
+    if (pitches.size() < 15) return 0.0f;
+    std::nth_element(pitches.begin(), pitches.begin() + static_cast<std::ptrdiff_t>(pitches.size() / 2), pitches.end());
+    const f32 theta = pitches[pitches.size() / 2];
+    const f32 c = std::cos(-theta), s = std::sin(-theta);
+    for (CapturePose& r : raw)
+        for (Vec3& p : r) p = Vec3{p.x, p.y * c - p.z * s, p.y * s + p.z * c};
+    return theta;
+}
+
+/// Modo híbrido (PC): os pontos de mundo têm origem no meio do quadril em
+/// todo quadro; a POSIÇÃO do corpo vem da imagem. Por quadro, a escala da
+/// projeção (altura da imagem por metro) sai do encaixe das juntas de mundo
+/// (x, y) nas da imagem — o 3D já explica o encurtamento dos membros, então a
+/// escala só muda com a distância da câmera. Quadril na imagem ÷ escala =
+/// metros de lado e de altura; a profundidade sai da própria escala (câmera
+/// de ~65° no lado maior), bem suavizada.
+void place_hybrid_root(const std::vector<PoseFrame>& frames, const MocapParams& p, const std::vector<CapturePose>& raw,
+                       std::vector<CapturePose>& out) {
+    const usize n = frames.size();
+    constexpr u32 kFit[] = {lm::Nose, lm::LeftShoulder, lm::RightShoulder, lm::LeftElbow, lm::RightElbow, lm::LeftWrist,
+                            lm::RightWrist, lm::LeftHip, lm::RightHip, lm::LeftKnee, lm::RightKnee, lm::LeftAnkle, lm::RightAnkle};
+    std::vector<f32> scale(n, 0.0f);
+    std::vector<Vec3> hip(n);
+    for (usize f = 0; f < n; ++f) {
+        const PoseFrame& fr = frames[f];
+        const Vec3 ih = (capture_point(fr.pts[lm::LeftHip], false, p.imageAspect) + capture_point(fr.pts[lm::RightHip], false, p.imageAspect)) * 0.5f;
+        hip[f] = ih;
+        const Vec3 wh = raw[f][kMidHip];
+        f32 num = 0.0f, den = 0.0f;
+        u32 used = 0;
+        for (const u32 j : kFit) {
+            if (fr.pts[j].confidence < p.minConfidence * 0.5f) continue;
+            const Vec3 i = capture_point(fr.pts[j], false, p.imageAspect) - ih;
+            const Vec3 w = raw[f][j] - wh;
+            num += i.x * w.x + i.y * w.y;
+            den += w.x * w.x + w.y * w.y;
+            ++used;
+        }
+        if (used >= 6 && den > 1e-6f && num > 0.0f) scale[f] = num / den;
+    }
+    // Sem escala no quadro: a do vizinho válido mais perto.
+    usize firstValid = n;
+    for (usize f = 0; f < n; ++f) if (scale[f] > 0.0f) { firstValid = f; break; }
+    if (firstValid == n) return;
+    for (usize f = 0; f < firstValid; ++f) scale[f] = scale[firstValid];
+    for (usize f = firstValid + 1; f < n; ++f) if (!(scale[f] > 0.0f)) scale[f] = scale[f - 1];
+    // Mediana de 9 quadros (tira os saltos) e média exponencial ida e volta (~0,15 s).
+    std::vector<f32> med(n), win;
+    for (usize f = 0; f < n; ++f) {
+        win.clear();
+        for (usize g = f >= 4 ? f - 4 : 0; g <= std::min(n - 1, f + 4); ++g) win.push_back(scale[g]);
+        std::nth_element(win.begin(), win.begin() + static_cast<std::ptrdiff_t>(win.size() / 2), win.end());
+        med[f] = win[win.size() / 2];
+    }
+    auto smooth = [&](std::vector<f32>& v) {
+        std::vector<f32> fwd(n), back(n);
+        for (usize f = 0; f < n; ++f) {
+            const f64 dt = f ? frames[f].time_s - frames[f - 1].time_s : 1.0 / 30.0;
+            const f32 a = static_cast<f32>(1.0 - std::exp(-std::max(dt, 1e-4) / 0.15));
+            fwd[f] = f ? fwd[f - 1] + a * (v[f] - fwd[f - 1]) : v[f];
+        }
+        for (usize k = n; k-- > 0;) {
+            const f64 dt = k + 1 < n ? frames[k + 1].time_s - frames[k].time_s : 1.0 / 30.0;
+            const f32 a = static_cast<f32>(1.0 - std::exp(-std::max(dt, 1e-4) / 0.15));
+            back[k] = k + 1 < n ? back[k + 1] + a * (v[k] - back[k + 1]) : v[k];
+        }
+        for (usize f = 0; f < n; ++f) v[f] = 0.5f * (fwd[f] + back[f]);
+    };
+    smooth(med);
+    // Distância focal em alturas de imagem (câmera de ~65° no lado maior).
+    const f32 longSide = std::max(p.imageAspect, 1.0f);
+    const f32 focal = 0.5f * longSide / std::tan(0.5f * 65.0f * kDeg2Rad);
+    std::vector<f32> depth(n);
+    for (usize f = 0; f < n; ++f) depth[f] = focal / std::max(med[f], 1e-4f);
+    std::vector<f32> sorted = depth;
+    std::nth_element(sorted.begin(), sorted.begin() + static_cast<std::ptrdiff_t>(n / 2), sorted.end());
+    const f32 zRef = sorted[n / 2];
+    for (usize f = 0; f < n; ++f) {
+        const f32 k = 1.0f / std::max(med[f], 1e-4f);
+        const Vec3 off{hip[f].x * k, hip[f].y * k, -(depth[f] - zRef)};
+        if (!finite3(off)) continue;
+        for (Vec3& v : out[f]) v += off - raw[f][kMidHip];
+    }
+}
+
 } // namespace
 
 // ---- Utilidades ------------------------------------------------------------------------
@@ -186,6 +303,18 @@ void unpack_frames(const f32* data, u32 count, std::vector<PoseFrame>& out) {
     for (u32 i = 0; i < count; ++i) {
         const f32* f = data + static_cast<usize>(i) * kMocapFrameFloats;
         if (!std::isfinite(f[0])) continue;
+        if (std::isfinite(f[1]) && f[1] > 1.5f) {
+            // Companheiro de mundo (só o PC): vai para o quadro anterior do mesmo tempo.
+            if (f[1] > 2.5f || out.empty() || std::fabs(out.back().time_s - static_cast<f64>(f[0])) > 1e-4) continue;
+            PoseFrame& p = out.back();
+            p.has_aux_world = true;
+            for (u32 j = 0; j < kPoseLandmarks; ++j) {
+                const f32* q = f + 2 + j * 4;
+                const bool ok = std::isfinite(q[0]) && std::isfinite(q[1]) && std::isfinite(q[2]) && std::isfinite(q[3]);
+                p.world[j] = ok ? PoseLandmark{q[0], q[1], q[2], std::clamp(q[3], 0.0f, 1.0f)} : PoseLandmark{};
+            }
+            continue;
+        }
         PoseFrame p;
         p.time_s = f[0];
         p.has_world = f[1] > 0.5f;
@@ -256,10 +385,20 @@ bool clean_frames(const std::vector<PoseFrame>& in, const MocapParams& params, s
     }
     report.frames = static_cast<u32>(n);
     report.duration = out.back().time_s;
-    usize world = 0;
-    for (const PoseFrame& f : out) world += f.has_world ? 1u : 0u;
+    usize world = 0, aux = 0;
+    for (const PoseFrame& f : out) {
+        world += f.has_world ? 1u : 0u;
+        aux += f.has_aux_world ? 1u : 0u;
+    }
     report.hasWorld = world * 2 > n;
     for (PoseFrame& f : out) f.has_world = report.hasWorld && f.has_world;
+    // Mundo junto da imagem (PC): vale quando a maioria dos quadros tem.
+    report.auxWorld = !report.hasWorld && aux * 2 > n;
+    std::vector<u8> hadAux(n, 0);
+    for (usize f = 0; f < n; ++f) {
+        hadAux[f] = out[f].has_aux_world ? 1 : 0;
+        out[f].has_aux_world = report.auxWorld;
+    }
     // Membros incertos (pela confiança crua).
     std::array<u32, kLimbCount> low{};
     for (const PoseFrame& f : out)
@@ -269,8 +408,39 @@ bool clean_frames(const std::vector<PoseFrame>& in, const MocapParams& params, s
             if (c < p.minConfidence) ++low[m];
         }
     // Lacunas: curtas viram interpolação; longas seguram o vizinho (confiança 0).
-    std::array<u8, kPoseLandmarks> missing{};
+    // `at(f)` = o ponto no quadro f (imagem ou mundo); `valid[f]` já preenchido.
     std::vector<u8> valid(n);
+    auto fill_gaps = [&](auto&& at, usize first) {
+        usize filledHere = 0;
+        auto hold = [&](usize dst, usize src) {
+            PoseLandmark l = at(src);
+            l.confidence = 0.0f;
+            at(dst) = l;
+        };
+        for (usize f = 0; f < first; ++f) hold(f, first);
+        usize last = first;
+        for (usize f = first + 1; f < n; ++f) {
+            if (!valid[f]) continue;
+            if (f - last > 1) {
+                const f64 span = out[f].time_s - out[last].time_s;
+                const PoseLandmark a = at(last), b = at(f);
+                for (usize g = last + 1; g < f; ++g) {
+                    if (span <= p.maxGapSeconds) {
+                        const f32 s = static_cast<f32>((out[g].time_s - out[last].time_s) / std::max(span, 1e-9));
+                        at(g) = PoseLandmark{lerpf(a.x, b.x, s), lerpf(a.y, b.y, s), lerpf(a.z, b.z, s),
+                                             0.5f * std::min(a.confidence, b.confidence)};
+                        ++filledHere;
+                    } else {
+                        hold(g, g - last <= f - g ? last : f);
+                    }
+                }
+            }
+            last = f;
+        }
+        for (usize f = last + 1; f < n; ++f) hold(f, last);
+        return filledHere;
+    };
+    std::array<u8, kPoseLandmarks> missing{};
     usize filled = 0;
     for (u32 j = 0; j < kPoseLandmarks; ++j) {
         if (control.cancelled()) return false;
@@ -282,39 +452,30 @@ bool clean_frames(const std::vector<PoseFrame>& in, const MocapParams& params, s
         }
         if (first == n) {
             missing[j] = 1;
-            for (PoseFrame& f : out) f.pts[j].confidence = 0.0f;
+            for (PoseFrame& f : out) { f.pts[j].confidence = 0.0f; f.world[j].confidence = 0.0f; }
             continue;
         }
-        auto hold = [&](usize dst, usize src) {
-            PoseLandmark l = out[src].pts[j];
-            l.confidence = 0.0f;
-            out[dst].pts[j] = l;
-        };
-        for (usize f = 0; f < first; ++f) hold(f, first);
-        usize last = first;
-        for (usize f = first + 1; f < n; ++f) {
-            if (!valid[f]) continue;
-            if (f - last > 1) {
-                const f64 span = out[f].time_s - out[last].time_s;
-                const PoseLandmark a = out[last].pts[j], b = out[f].pts[j];
-                for (usize g = last + 1; g < f; ++g) {
-                    if (span <= p.maxGapSeconds) {
-                        const f32 s = static_cast<f32>((out[g].time_s - out[last].time_s) / std::max(span, 1e-9));
-                        out[g].pts[j] = PoseLandmark{lerpf(a.x, b.x, s), lerpf(a.y, b.y, s), lerpf(a.z, b.z, s),
-                                                      0.5f * std::min(a.confidence, b.confidence)};
-                        ++filled;
-                    } else {
-                        hold(g, g - last <= f - g ? last : f);
-                    }
-                }
+        filled += fill_gaps([&](usize f) -> PoseLandmark& { return out[f].pts[j]; }, first);
+        if (report.auxWorld) {
+            // O mundo segue a imagem: o mesmo quadro vale ou não vale nos dois.
+            usize wfirst = n;
+            for (usize f = 0; f < n; ++f) {
+                const PoseLandmark& l = out[f].world[j];
+                valid[f] = valid[f] && hadAux[f] && std::isfinite(l.x) && std::isfinite(l.y) && std::isfinite(l.z);
+                if (valid[f] && wfirst == n) wfirst = f;
             }
-            last = f;
+            if (wfirst == n) {
+                for (PoseFrame& f : out) f.world[j] = PoseLandmark{};
+            } else {
+                (void)fill_gaps([&](usize f) -> PoseLandmark& { return out[f].world[j]; }, wfirst);
+            }
         }
-        for (usize f = last + 1; f < n; ++f) hold(f, last);
         control.report(0.5f * static_cast<f32>(j + 1) / static_cast<f32>(kPoseLandmarks));
     }
     report.interpolatedFraction = static_cast<f32>(filled) / static_cast<f32>(n * kPoseLandmarks);
-    // One Euro para frente e para trás (média = sem atraso de fase).
+    // One Euro para frente e para trás (média = sem atraso de fase). Ponto
+    // incerto (confiança; no PC também a VISIBILIDADE: encoberto) filtra mais:
+    // fica parado/interpolado em vez de pular.
     const f32 s = p.smoothing;
     if (s > 1e-3f && n > 2) {
         const f64 minCutoff = lerpf(3.0f, 0.3f, s);
@@ -323,17 +484,25 @@ bool clean_frames(const std::vector<PoseFrame>& in, const MocapParams& params, s
         for (u32 j = 0; j < kPoseLandmarks; ++j) {
             if (missing[j]) continue;
             if (control.cancelled()) return false;
-            for (u32 c = 0; c < 3; ++c) {
-                auto value = [&](usize f) -> f32& { PoseLandmark& l = out[f].pts[j]; return c == 0 ? l.x : c == 1 ? l.y : l.z; };
-                auto scale = [&](usize f) { return 0.3 + 0.7 * static_cast<f64>(std::clamp(out[f].pts[j].confidence, 0.0f, 1.0f)); };
+            auto weight = [&](usize f) {
+                f32 w = out[f].pts[j].confidence;
+                if (report.auxWorld) w = std::min(w, out[f].world[j].confidence);
+                return 0.3 + 0.7 * static_cast<f64>(std::clamp(w, 0.0f, 1.0f));
+            };
+            for (u32 c = 0; c < (report.auxWorld ? 6u : 3u); ++c) {
+                auto value = [&](usize f) -> f32& {
+                    PoseLandmark& l = c < 3 ? out[f].pts[j] : out[f].world[j];
+                    const u32 axis = c % 3;
+                    return axis == 0 ? l.x : axis == 1 ? l.y : l.z;
+                };
                 OneEuro a(minCutoff, beta), b(minCutoff, beta);
                 for (usize f = 0; f < n; ++f) {
                     const f64 dt = f ? out[f].time_s - out[f - 1].time_s : 1.0 / 30.0;
-                    fwd[f] = a.filter(value(f), dt, scale(f));
+                    fwd[f] = a.filter(value(f), dt, weight(f));
                 }
                 for (usize k = n; k-- > 0;) {
                     const f64 dt = k + 1 < n ? out[k + 1].time_s - out[k].time_s : 1.0 / 30.0;
-                    const f64 back = b.filter(value(k), dt, scale(k));
+                    const f64 back = b.filter(value(k), dt, weight(k));
                     value(k) = static_cast<f32>(0.5 * (fwd[k] + back));
                 }
             }
@@ -354,18 +523,20 @@ bool clean_frames(const std::vector<PoseFrame>& in, const MocapParams& params, s
 // ---- 2. 3D com comprimentos constantes --------------------------------------------------------
 
 f32 lift_frames(const std::vector<PoseFrame>& frames, const MocapParams& params, std::vector<CapturePose>& out,
-                const MocapControl& control) {
+                const MocapControl& control, f32* pitchOut) {
     const MocapParams p = params.sanitized();
     const usize n = frames.size();
     out.assign(n, CapturePose{});
     if (n == 0) return 0.0f;
-    const bool world = frames.front().has_world;
+    // PC: o 3D do BlazePose dá as direções dos ossos; a imagem, a translação.
+    const bool hybrid = !frames.front().has_world && frames.front().has_aux_world;
+    const bool world = frames.front().has_world || hybrid;
     std::vector<CapturePose> raw(n);
     std::array<u8, kCapturePoints> seen{};
     for (usize f = 0; f < n; ++f) {
         CapturePose& r = raw[f];
         for (u32 j = 0; j < kPoseLandmarks; ++j) {
-            r[j] = capture_point(frames[f].pts[j], world, p.imageAspect);
+            r[j] = capture_point(hybrid ? frames[f].world[j] : frames[f].pts[j], world, p.imageAspect);
             if (frames[f].pts[j].confidence > 0.0f) seen[j] = 1;
         }
         r[kMidHip] = (r[lm::LeftHip] + r[lm::RightHip]) * 0.5f;
@@ -373,6 +544,8 @@ f32 lift_frames(const std::vector<PoseFrame>& frames, const MocapParams& params,
     }
     seen[kMidHip] = seen[lm::LeftHip] && seen[lm::RightHip];
     seen[kMidShoulder] = seen[lm::LeftShoulder] && seen[lm::RightShoulder];
+    const f32 pitch = hybrid ? level_camera_pitch(frames, raw) : 0.0f;
+    if (pitchOut) *pitchOut = pitch * kRad2Deg;
     // Comprimento de cada osso: no 2D, o maior visto (percentil 95: a projeção
     // nunca é maior que o osso); no mundo, a mediana. Lados iguais.
     std::array<f32, kSegments.size()> length{};
@@ -446,6 +619,7 @@ f32 lift_frames(const std::vector<PoseFrame>& frames, const MocapParams& params,
         for (Vec3& v : q)
             if (!finite3(v)) v = Vec3{0, 0, 0};
     }
+    if (hybrid) place_hybrid_root(frames, p, raw, out);
     const f32 left = length[kLeftThigh] + length[kLeftShin], right = length[kRightThigh] + length[kRightShin];
     control.report(1.0f);
     return std::max(0.5f * (left + right), 1e-4f);
@@ -490,6 +664,9 @@ struct Solver {
     const HumanoidRest& rest;
     MocapParams p;
     ModelBasis B;
+    /// PC (mundo do BlazePose junto da imagem): a profundidade é medida, não
+    /// adivinhada — a direção da dobra do joelho vale mesmo contra a do pé.
+    bool measured3d = false;
     std::array<HB, N> anchor{};
     // Repouso (direções de modelo).
     Quat restHips, restChest, restHead;
@@ -579,7 +756,8 @@ struct Solver {
                 const f32 phi = std::clamp(signed_angle(armDir, cl, axis), 0.0f, 150.0f * kDeg2Rad);
                 const Vec3 hinged = rotate(Quat::from_axis_angle(axis, phi), armDir);
                 const f32 w = smoothstep(5.0f * kDeg2Rad, 20.0f * kDeg2Rad, bend);
-                const Vec3 lowerDir = (cl.normalized() * (1.0f - w) + hinged * w);
+                // 3D medido: o antebraço vai para onde foi visto (a dobradiça é para o 2D adivinhado).
+                const Vec3 lowerDir = measured3d ? cl.normalized() : (cl.normalized() * (1.0f - w) + hinged * w);
                 lower = (swing_between(rotate(upper, restLower[s]), lowerDir) * upper).normalized();
                 hand = lower;
                 if (ok({pk[s], id[s]})) {
@@ -618,7 +796,8 @@ struct Solver {
                 f32 w = smoothstep(8.0f * kDeg2Rad, 25.0f * kDeg2Rad, bend);
                 const Vec3 kneeFwd = bendDir.length_sq() > 1e-12f ? -bendDir.normalized() : Vec3{0, 0, 0};
                 // Joelho contra a ponta do pé = dobra impossível: confia no pé.
-                if (hasFoot && footDir.length_sq() > 1e-12f && kneeFwd.dot(footDir.normalized()) < -0.2f) w = 0.0f;
+                // (Com o 3D medido a dobra é confiável: a regra só vale para o 2D levantado.)
+                if (!measured3d && hasFoot && footDir.length_sq() > 1e-12f && kneeFwd.dot(footDir.normalized()) < -0.2f) w = 0.0f;
                 Vec3 sec = kneeFwd * w + (footDir.length_sq() > 1e-12f ? footDir.normalized() : Vec3{0, 0, 0}) * (1.0f - w);
                 thigh = aim(hips, restThigh[s], B.forward, ct, sec, sec.length_sq() > 1e-8f ? 1.0f : 0.0f);
                 const Vec3 axis = rotate(thigh, B.left);
@@ -670,10 +849,11 @@ bool solve(const std::vector<PoseFrame>& frames, const HumanoidRest& rest, const
     std::vector<CapturePose> cap;
     stage.base = control.base + control.span * 0.5f;
     stage.span = control.span * 0.15f;
-    const f32 capLeg = lift_frames(clean, p, cap, stage);
+    const f32 capLeg = lift_frames(clean, p, cap, stage, &out.report.cameraPitchDeg);
     if (control.cancelled() || cap.size() != n) return false;
 
-    const Solver S(rest, p);
+    Solver S(rest, p);
+    S.measured3d = out.report.auxWorld;
     out.times.resize(n);
     out.world.resize(n);
     out.local.resize(n);

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE layers (2026-11-12): qualidade da camada, clipe do modelo 3D, transições por camada, guias da prévia e velocidade negativa. -->
+<resources>
+    <string name="ae_layer_quality">Kualitas</string>
+    <string name="ae_quality_best">Terbaik</string>
+    <string name="ae_quality_draft">Draf</string>
+    <string name="ae_quality_wireframe">Rangka kawat</string>
+    <string name="ae_quality_hint">Draf dan Rangka kawat hanya untuk pratinjau; ekspor selalu Terbaik</string>
+    <string name="ae_layer_sampling">Sampling</string>
+    <string name="ae_sampling_bilinear">Bilinear</string>
+    <string name="ae_sampling_bicubic">Bikubik</string>
+    <string name="ae_sampling_hint">Bikubik menjaga gambar yang diperbesar tetap tajam (di Terbaik)</string>
+    <string name="ae_model_clip">Animasi model</string>
+    <string name="ae_model_clip_none">Diam</string>
+    <string name="ae_model_clip_n">Klip %1$d</string>
+    <string name="ae_model_clip_empty">Model ini tidak memiliki animasi</string>
+    <string name="ae_transitions">Transisi</string>
+    <string name="ae_transition_in">Masuk</string>
+    <string name="ae_transition_out">Keluar</string>
+    <string name="ae_transition_none">Tidak ada</string>
+    <string name="ae_transition_dissolve">Larut</string>
+    <string name="ae_transition_slide_up">Geser ke atas</string>
+    <string name="ae_transition_slide_left">Geser dari kiri</string>
+    <string name="ae_transition_zoom">Zoom</string>
+    <string name="ae_transition_spin">Putar</string>
+    <string name="ae_transition_duration">Durasi</string>
+    <string name="ae_transition_hint">Berlaku di tepi klip; tidak membuat keyframe</string>
+    <string name="ae_guides_safe">Area aman</string>
+    <string name="ae_guides_rulers">Penggaris</string>
+    <string name="ae_speed_reverse_point">Balik arah</string>
+    <string name="ae_speed_reverse_hint">Kecepatan negatif memutar sumber mundur di dalam ramp (hingga frame 0)</string>
+</resources>

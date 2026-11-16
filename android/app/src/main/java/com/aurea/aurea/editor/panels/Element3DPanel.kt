@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -77,6 +78,9 @@ import com.aurea.aurea.ui.theme.tocavel
  *    Animar parte 3D, Esconder partes 3D, Trocar textura 3D — como o Text 3D
  *    Layout faz no texto. Os ajustes e keyframes ficam no painel de Efeitos.
  *  - Forma e Animação (texto 3D): fonte, profundidade, chanfro; animação por letra.
+ *  - MODELO IMPORTADO (13/11/2026, conceito do dono): Material (bolas dos visuais do
+ *    modelo inteiro + Cor/Metal/Rugosidade/Opacidade com ◆) · Textura (modelo inteiro
+ *    ou uma parte) · Animação (clipe + Evolução com ◆) · Sombra — Model3DPanel.kt.
  *
  * Toda linha de valor é a mesma [HumanRow] (rótulo, régua, valor, ↺ ao
  * padrão); interruptores são [ToggleLine]; cores, [ColorLine]. Nada mudou no
@@ -91,30 +95,72 @@ internal fun Element3DPanel(env: PanelEnv) {
     val shape = if (camera) null else store.shape3d
     val text = if (camera) null else t3
     val image = if (camera) null else store.image3d
-    val tabs = when {
+    // 13/11/2026 (conceito do dono): o MODELO IMPORTADO é uma camada com um painel simples —
+    // Material · Textura · Animação · Sombra (Model3DPanel.kt); o Esqueleto e a Cena 3D ficam
+    // onde a F6 pôs.
+    val imported = !camera && shape == null && text == null && image == null &&
+        store.detail?.kind == com.aurea.aurea.ui.theme.LayerType.Model3D.kind
+    val allTabs = when {
         camera -> listOf(Tab3D.Light, Tab3D.Render)
         image != null -> listOf(Tab3D.Material, Tab3D.Shape, Tab3D.Light, Tab3D.Render)
         text != null -> listOf(Tab3D.Material, Tab3D.Shape, Tab3D.Light, Tab3D.Anim, Tab3D.Render)
         // 0.3.6: modelo importado ganha a aba Esqueleto (AutoRig 3D, ossos, IK, Motion Capture).
-        shape == null && store.detail?.kind == com.aurea.aurea.ui.theme.LayerType.Model3D.kind ->
-            listOf(Tab3D.Light, Tab3D.Material, Tab3D.Parts, Tab3D.Rig, Tab3D.Render)
+        imported -> listOf(Tab3D.Material, Tab3D.Parts, Tab3D.Texture, Tab3D.Anim, Tab3D.Shadow, Tab3D.Rig, Tab3D.Light, Tab3D.Render)
         else -> listOf(Tab3D.Light, Tab3D.Material, Tab3D.Parts, Tab3D.Render)
     }
     var chosen by rememberSaveable { mutableIntStateOf(-1) }
     // 0.4.6: a Cena 3D abre o painel direto numa aba (Motion Capture → Esqueleto).
     androidx.compose.runtime.LaunchedEffect(Element3DRequest.tab) {
-        Element3DRequest.tab?.let { if (it in tabs) chosen = it.ordinal }
+        Element3DRequest.tab?.let {
+            if (it in allTabs) chosen = it.ordinal
+            // Aba pedida fora do assunto atual: mostra tudo (nada fica inalcançável).
+            if (Element3DRequest.face.tabsFor(imported)?.contains(it) == false) Element3DRequest.face = Face3D.All
+        }
         Element3DRequest.tab = null
     }
-    val tab = tabs.firstOrNull { it.ordinal == chosen } ?: tabs.first()
+    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { Element3DRequest.face = Face3D.All } }
+    // F6: só as abas do assunto pedido (Material · Objeto 3D · Rig · Cena 3D); vazio = todas.
+    // Modelo importado: Cor e preenchimento e Editar abrem o painel do modelo (as quatro abas).
+    val face = Element3DRequest.face
+    val faceTabs = face.tabsFor(imported)
+    val tabs = allTabs.filter { faceTabs == null || it in faceTabs }.ifEmpty { allTabs }
+    // Aurea PC (Cena 3D): o editor de propriedades de lá pede UMA aba, sem trilho nem coluna de abas.
+    // (As Partes do modelo importado passaram para a Textura.)
+    val only = LocalElement3DOnly.current
+    // Editar do modelo importado abre na Animação; Cor e preenchimento, no Material.
+    val opening = if (imported && face == Face3D.Object) Tab3D.Parts.takeIf { it in tabs } else null
+    val tab = only?.takeIf { it in tabs } ?: tabs.firstOrNull { it.ordinal == chosen } ?: opening ?: tabs.first()
     // O desenho dos painéis de propriedade: a coluna fixa à esquerda, o conteúdo em
     // seções no centro e as abas em ícones à direita.
     Row(Modifier.fillMaxSize().testTag("panel3d")) {
-      LeftRail(onBack = env.onClose, keyframeLook = com.aurea.aurea.ui.ds.KeyframeLook.None, onKeyframe = null, curveAnimated = false, onCurve = null)
+      if (only == null) {
+      // Modelo importado: o ◆ da coluna marca a linha escolhida no Material/Textura/Animação (sem ◆ por linha).
+      val keyed = imported && (tab == Tab3D.Material || tab == Tab3D.Texture || tab == Tab3D.Parts || tab == Tab3D.Anim)
+      androidx.compose.runtime.LaunchedEffect(tab, store.primary) {
+          val target = Model3DKeys.target
+          val mine = when (tab) {
+              Tab3D.Material -> target?.startsWith("panel3d.mat.") == true
+              Tab3D.Texture, Tab3D.Parts -> target?.startsWith("panel3d.texture.") == true || target?.startsWith("panel3d.part.") == true
+              Tab3D.Anim -> target?.startsWith("panel3d.anim.") == true
+              else -> false
+          }
+          if (!keyed || !mine) Model3DKeys.clear()
+      }
+      LeftRail(onBack = env.onClose,
+          keyframeLook = if (keyed) Model3DKeys.look else com.aurea.aurea.ui.ds.KeyframeLook.None,
+          onKeyframe = if (keyed) Model3DKeys.toggle else null,
+          curveAnimated = false, onCurve = null)
       Box(Modifier.width(0.7.dp).fillMaxHeight().background(AureaColors.ContentStrongLine))
+      }
+        // 13/11/2026 (pedido do dono: "os deslizantes tão muito compactos"): no 3D o rótulo fica
+        // EM CIMA e a régua ocupa a largura toda, com a altura da régua normal do AUREA.
+        androidx.compose.runtime.CompositionLocalProvider(com.aurea.aurea.ui.ds.LocalParamRowStacked provides true) {
         Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(remember(tab) { ScrollState(0) }).padding(bottom = 24.dp)) {
+            // 0.5.4: texto 3D é pago. O que já está no projeto segue como um efeito pago já
+            // aplicado (abre, edita, prévia e export iguais); sem o acesso, só o cadeado (Text3DGate).
+            if (text != null && com.aurea.aurea.effects.Text3DGate.locked()) Text3DLockedNotice { store.hyperLockedPrompt = true }
             when (tab) {
-                Tab3D.Material -> {
+                Tab3D.Material -> if (imported) ModelMaterialTab(env) else {
                     when {
                         image != null -> Image3DMaterialTab(env, image)
                         text != null -> Text3DMaterialTab(env, text)
@@ -137,12 +183,22 @@ internal fun Element3DPanel(env: PanelEnv) {
                 Tab3D.Shape -> if (image != null) Image3DShapeTab(env, image) else if (text != null) Text3DShapeTab(env, text)
                 Tab3D.Light -> Environment3DTab(env)
                 Tab3D.Render -> Render3DTab(env)
-                Tab3D.Anim -> if (text != null) Box(Modifier.padding(10.dp)) { AnimChip(stringResource(R.string.la_animators), false) { env.onOpenAnimators() } }
+                Tab3D.Anim -> if (imported) ModelAnimationTab(env)
+                    else if (text != null) Box(Modifier.padding(10.dp)) { AnimChip(stringResource(R.string.la_animators), false) { env.onOpenAnimators() } }
+                Tab3D.Texture -> if (imported) ModelTextureTab(env)
+                // LUZ E SOMBRA do modelo (v76): projeta/recebe, o interior (dupla face) e a luz só
+                // deste objeto (estúdio ou HDRI próprio, intensidade, giro e exposição).
+                Tab3D.Shadow -> {
+                    ObjectShadowSection(store)
+                    Column(Modifier.padding(horizontal = 10.dp)) { InteriorToggle(store) }
+                    ObjectLightSection(env)
+                }
                 Tab3D.Parts -> Column(Modifier.padding(horizontal = 10.dp)) { PartsTab(env, shape) }
                 Tab3D.Rig -> Column(Modifier.padding(horizontal = 10.dp)) { Rig3DTab(env) }
             }
         }
-      if (tabs.size > 1) {
+        }
+      if (tabs.size > 1 && only == null) {
           Box(Modifier.width(0.7.dp).fillMaxHeight().background(AureaColors.ContentStrongLine))
           PanelIconTabs(tabs.map { PanelIconTab(it.glyph, stringResource(it.label), "panel3d.tab.${it.name.lowercase()}") }, tabs.indexOf(tab),
               stringResource(R.string.ui3d_tabs)) { chosen = tabs[it].ordinal }
@@ -150,36 +206,79 @@ internal fun Element3DPanel(env: PanelEnv) {
     }
 }
 
+/** 0.5.4: o aviso do texto 3D sem o acesso (o par do selo da linha de um efeito pago já aplicado). */
+@Composable
+private fun Text3DLockedNotice(onOpen: () -> Unit) {
+    val label = stringResource(R.string.text3d_locked_existing)
+    Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp).clip(RoundedCornerShape(10.dp))
+        .background(AureaColors.SurfaceHigh).tocavel(onClick = onOpen).padding(10.dp)
+        .testTag("text3d.locked").semantics(mergeDescendants = true) { contentDescription = label },
+        verticalAlignment = Alignment.CenterVertically) {
+        com.aurea.aurea.effects.HyperLockBadge()
+        Spacer(Modifier.width(8.dp))
+        Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
+    }
+}
+
+/**
+ * Aurea PC (Cena 3D): mostra só esta aba do painel 3D, sem o trilho da esquerda nem a
+ * coluna de abas. Nulo (celular, tablet e o resto do PC): o painel de sempre.
+ */
+internal val LocalElement3DOnly = androidx.compose.runtime.compositionLocalOf<Tab3D?> { null }
+
 /** Uma aba da coluna da direita. */
 internal class PanelIconTab(val glyph: Char, val label: String, val tag: String)
 
-/** As abas em ícones, na coluna da direita (60 dp), como nos painéis de propriedade do Alight. */
+/**
+ * As abas em ícones, na coluna da direita. F11: é a MESMA coluna da moldura comum
+ * (`FrameRightRail`), com os ids de teste de cada painel (`panel3d.tab.*`, `particles.tab.*`…).
+ */
 @Composable
 internal fun PanelIconTabs(tabs: List<PanelIconTab>, selected: Int, group: String, onSelect: (Int) -> Unit) {
-    Column(Modifier.width(60.dp).fillMaxHeight().semantics { contentDescription = group }) {
-        tabs.forEachIndexed { i, t ->
-            val on = i == selected
-            val ink = if (on) AureaColors.Accent else AureaColors.Text
-            Column(
-                Modifier.fillMaxWidth().height(62.dp).padding(3.dp).clip(RoundedCornerShape(5.dp)).background(if (on) AureaColors.AccentDim else Color.Transparent)
-                    .semantics(mergeDescendants = true) { role = Role.Tab; this.selected = on }
-                    .testTag(t.tag)
-                    .tocavel(shrink = 1f) { onSelect(i) },
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                com.aurea.aurea.ui.theme.CupertinoIcon(t.glyph, 20.dp, ink)
-                Spacer(Modifier.height(3.dp))
-                Text(t.label, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    style = AureaType.Base.merge(TextStyle(fontSize = 9.5.sp, fontWeight = if (on) FontWeight.W700 else FontWeight.W400, color = ink)))
-            }
-        }
+    Box(Modifier.fillMaxHeight().semantics { contentDescription = group }) {
+        FrameRightRail(
+            tabs.map { PanelTab(it.tag, it.label, glyph = it.glyph, tag = it.tag) },
+            tabs.getOrNull(selected)?.tag,
+        ) { id -> tabs.indexOfFirst { it.tag == id }.takeIf { it >= 0 }?.let(onSelect) }
     }
 }
 
 /** 0.4.6: pedido de aba ao abrir o painel 3D (a Cena 3D pede o Esqueleto). */
 internal object Element3DRequest {
     var tab by androidx.compose.runtime.mutableStateOf<Tab3D?>(null)
+    /**
+     * F6 (13/11/2026): qual assunto o painel 3D mostra — quem abre escolhe (Cor e
+     * preenchimento → Material; Editar → Objeto 3D; Opções da luz e Cena 3D da câmera →
+     * Cena 3D; Rig e mocap → Rig). Volta a [Face3D.All] quando o painel fecha.
+     */
+    var face by androidx.compose.runtime.mutableStateOf(Face3D.All)
+}
+
+/** F6: os quatro assuntos do 3D (um botão cada), em vez de 7 abas num painel só. */
+internal enum class Face3D(val tabs: Set<Tab3D>?) {
+    All(null),
+    Material(setOf(Tab3D.Material, Tab3D.Texture, Tab3D.Shadow)),
+    Object(setOf(Tab3D.Shape, Tab3D.Parts, Tab3D.Anim)),
+    Rig(setOf(Tab3D.Rig)),
+    Scene(setOf(Tab3D.Light, Tab3D.Render)),
+    ;
+
+    /**
+     * 13/11/2026: no MODELO IMPORTADO, Material e Objeto 3D são o mesmo painel simples do
+     * modelo (Material · Textura · Animação · Sombra, no máximo 4 abas); os outros assuntos
+     * não mudam.
+     */
+    fun tabsFor(importedModel: Boolean): Set<Tab3D>? =
+        if (importedModel) when (this) {
+            Material -> setOf(Tab3D.Material, Tab3D.Texture, Tab3D.Shadow)
+            Object -> setOf(Tab3D.Parts, Tab3D.Anim)
+            else -> tabs
+        } else tabs
+
+    companion object {
+        /** As abas do painel do modelo importado (Model3DPanel.kt). */
+        val ModelTabs: Set<Tab3D> = setOf(Tab3D.Material, Tab3D.Parts, Tab3D.Texture, Tab3D.Anim, Tab3D.Shadow)
+    }
 }
 
 /** As abas do painel 3D (a ordem é a da tela). */
@@ -191,6 +290,10 @@ internal enum class Tab3D(val label: Int, val glyph: Char) {
     Parts(R.string.shape3d_parts, com.aurea.aurea.ui.theme.CupertinoGlyph.SquareOnSquare),
     Rig(R.string.rig3d_tab, com.aurea.aurea.ui.theme.CupertinoGlyph.PersonCropCircle),
     Render(R.string.env3d_tab_render, com.aurea.aurea.ui.theme.CupertinoGlyph.Camera),
+    /** Modelo importado (13/11/2026): a imagem do modelo inteiro ou de uma parte. */
+    Texture(R.string.fn_part_texture, com.aurea.aurea.ui.theme.CupertinoGlyph.Photo),
+    /** Modelo importado: LUZ E SOMBRA (v76) — projeta/recebe sombra, o interior e a luz do objeto. */
+    Shadow(R.string.m3d_tab_light_shadow, com.aurea.aurea.ui.theme.CupertinoGlyph.CircleLefthalfFill),
 }
 
 /**
@@ -205,16 +308,12 @@ private fun PartsTab(env: PanelEnv, shape: com.aurea.aurea.state.Shape3DInfo?) {
     if (shape != null) {
         Shape3DSection(env, shape, Shape3DPage.Shape)
     } else {
-        val names = remember(store.primary, store.curveRevision) { store.modelPartNames() }
+        // O modelo importado tem as abas Textura (Parts3DEditor.kt) e Animação (Model3DPanel.kt);
+        // isto sobra para um objeto 3D sem forma pronta que não é modelo importado.
+        val names = remember(store.primary, store.curveRevision) { store.modelPartNames(includeJoints = true) }
         if (names.isNotEmpty()) {
-            KitTitle(stringResource(R.string.shape3d_parts))
-            ChipRow {
-                names.forEachIndexed { i, n ->
-                    Box(Modifier.testTag("panel3d.part.$i")) {
-                        KitChip(n.ifBlank { stringResource(R.string.fx3d_part_n, i + 1) }, on = modelPart == i) { modelPart = i }
-                    }
-                }
-            }
+            Parts3DEditor(env, names, animationOnly = true)
+            return
         }
     }
     val part = if (shape != null) store.shapePartOf(store.primary).coerceAtLeast(0) else modelPart
@@ -264,6 +363,7 @@ private val PresetSwatch = mapOf(
     Text3DPreset.Ice to Color(0xFFC7EBFF),
     Text3DPreset.Stone to Color(0xFF8C8780),
     Text3DPreset.RoseGold to Color(0xFFFAAD99),
+    Text3DPreset.Cartoon to Color(0xFFF57391),
 )
 
 private val FinishLabels = listOf(
@@ -289,6 +389,11 @@ private fun Text3DMaterialTab(env: PanelEnv, info: Text3DInfo) {
             }
         }
     }
+    }
+    // 0.5.4 Cartoon: cel chapado + contorno — os controles PBR não valem nele.
+    if (info.cartoon) {
+        Text3DCartoonSection(env, info)
+        return
     }
     EnvSection(stringResource(R.string.panel_material), null) {
     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -346,6 +451,89 @@ private fun Text3DMaterialTab(env: PanelEnv, info: Text3DInfo) {
             T3DRow(env, stringResource(R.string.pn_t3d_metallic) + " · " + stringResource(R.string.pn_t3d_region_bevel), info.bevelMetallic, 1f, 0f,
                 "metalico do chanfro") { t, v -> t.copy(bevelMetallic = v) }
         }
+    }
+}
+
+/**
+ * 0.5.4 CARTOON: frente, lateral (automática = tom mais escuro da frente),
+ * brilho e o contorno (cor e largura em px da composição, com ◆ — trilha
+ * TrackProperty::Text3DOutline). A regra mora no motor (Text3D.cpp).
+ */
+@Composable
+private fun Text3DCartoonSection(env: PanelEnv, info: Text3DInfo) {
+    val store = env.store
+    val playhead = store.playhead
+    val outline = remember(store.primary, store.detail, store.curveRevision, playhead, info) { store.queryText3DOutline() }
+    fun look(v: Float) = when {
+        v >= 1.5f -> com.aurea.aurea.ui.ds.KeyframeLook.KeyHere
+        v >= 0.5f -> com.aurea.aurea.ui.ds.KeyframeLook.Animated
+        else -> com.aurea.aurea.ui.ds.KeyframeLook.None
+    }
+    val widthLook = look(outline?.getOrNull(4) ?: 0f)
+    val colorLook = look(outline?.getOrNull(5) ?: 0f)
+    val width = outline?.getOrNull(0) ?: info.outlineWidth
+    val ink = if (outline != null) floatArrayOf(outline[1], outline[2], outline[3], 1f) else info.outlineColor
+    EnvSection(stringResource(R.string.pn_t3d_preset_cartoon), null) {
+        ColorLine(stringResource(R.string.panel_cor), Color(info.color[0], info.color[1], info.color[2])) {
+            store.beginGesture("cor do texto 3D")
+            env.openColor(ColorRequest(info.color.copyOf(), onChange = { r, g, b, _ ->
+                store.text3d?.let { store.setText3D(it.copy(color = floatArrayOf(r, g, b, 1f)), lazy = true) }
+            }, onDone = { store.endGesture() }))
+        }
+        Box(Modifier.testTag("text3d.cartoon.sideAuto")) {
+            ToggleLine(stringResource(R.string.t3d_cartoon_side_auto), info.toonSideAuto) { on ->
+                store.text3d?.let { store.setText3D(it.copy(toonSideAuto = on)) }
+            }
+        }
+        if (!info.toonSideAuto) {
+            ColorLine(stringResource(R.string.t3d_cartoon_side), Color(info.toonSideColor[0], info.toonSideColor[1], info.toonSideColor[2])) {
+                store.beginGesture("lateral do cartoon")
+                env.openColor(ColorRequest(info.toonSideColor.copyOf(), onChange = { r, g, b, _ ->
+                    store.text3d?.let { store.setText3D(it.copy(toonSideColor = floatArrayOf(r, g, b, 1f)), lazy = true) }
+                }, onDone = { store.endGesture() }))
+            }
+        }
+        Box(Modifier.testTag("text3d.cartoon.highlight")) {
+            T3DRow(env, stringResource(R.string.t3d_cartoon_highlight), info.toonHighlight, 1f, 0.45f, "brilho do cartoon") { t, v ->
+                t.copy(toonHighlight = v)
+            }
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f).testTag("text3d.cartoon.outlineColor")) {
+                ColorLine(stringResource(R.string.t3d_cartoon_outline_color), Color(ink[0], ink[1], ink[2])) {
+                    store.beginGesture("cor do contorno")
+                    env.openColor(ColorRequest(ink.copyOf(), onChange = { r, g, b, _ ->
+                        store.setText3DOutlineColor(r, g, b, keyed = colorLook != com.aurea.aurea.ui.ds.KeyframeLook.None)
+                    }, onDone = { store.endGesture() }))
+                }
+            }
+            val colorLabel = stringResource(R.string.t3d_cartoon_outline_color)
+            val action = stringResource(if (colorLook == com.aurea.aurea.ui.ds.KeyframeLook.KeyHere) R.string.panel_tirar_keyframe_daqui else R.string.panel_marcar_keyframe_aqui)
+            Box(
+                Modifier.size(44.dp, 52.dp).testTag("text3d.cartoon.outlineColor.key")
+                    .semantics { contentDescription = "$action · $colorLabel" }
+                    .tocavel(onClick = { store.toggleText3DOutlineKey(1) }),
+                contentAlignment = Alignment.Center,
+            ) { com.aurea.aurea.ui.ds.KeyframeDiamondIcon(colorLook, enabled = true) }
+        }
+        val widthGesture = "largura do contorno"
+        Box(Modifier.testTag("text3d.cartoon.outlineWidth")) {
+            HumanRow(
+                env, stringResource(R.string.t3d_cartoon_outline_width), width, 0.5f, 0f, 64f, "px", 1, 8f,
+                onStart = { store.beginGesture(widthGesture) },
+                onValue = { store.setText3DOutlineWidth(it, keyed = widthLook != com.aurea.aurea.ui.ds.KeyframeLook.None, lazy = true) },
+                onEnd = { store.endGesture() },
+                onCommit = { v ->
+                    store.beginGesture(widthGesture)
+                    store.setText3DOutlineWidth(v, keyed = widthLook != com.aurea.aurea.ui.ds.KeyframeLook.None)
+                    store.endGesture()
+                },
+                keyframe = widthLook,
+                onKeyframe = { store.toggleText3DOutlineKey(0) },
+                keyTag = "text3d.cartoon.outlineWidth.key",
+            )
+        }
+        KitHint(stringResource(R.string.t3d_cartoon_hint))
     }
 }
 
@@ -426,7 +614,8 @@ private fun Image3DMaterialTab(env: PanelEnv, f: FloatArray) {
     val store = env.store
     EnvSection(stringResource(R.string.ui3d_ready_materials), null) {
         ChipRow {
-            (listOf(Text3DPreset.CinematicMetal) + Text3DPreset.values().filter { it != Text3DPreset.CinematicMetal }).forEach { preset ->
+            // O Cartoon é só do texto 3D (o motor recusa na Imagem 3D).
+            (listOf(Text3DPreset.CinematicMetal) + Text3DPreset.values().filter { it != Text3DPreset.CinematicMetal && it != Text3DPreset.Cartoon }).forEach { preset ->
                 val thumb = rememberPresetThumb(store, preset.ordinal)
                 SwatchChip(stringResource(preset.labelRes), PresetSwatch[preset] ?: Color.White, thumb,
                     Modifier.testTag("image3d.materialPreset.${preset.ordinal}")) {

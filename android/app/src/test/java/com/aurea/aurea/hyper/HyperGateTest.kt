@@ -1,5 +1,6 @@
 package com.aurea.aurea.hyper
 
+import com.aurea.aurea.effects.PaidGate
 import com.aurea.aurea.home.licenseGroup
 import com.aurea.aurea.home.licenseTitle
 import org.json.JSONObject
@@ -50,6 +51,26 @@ class HyperGateTest {
 
     @Test fun confirmedWithoutTheProductIsLocked() {
         assertEquals(HyperAccess.Locked, EntitlementRules.access(cache(emptySet()), email, product, now, false))
+    }
+
+    // 0.5.4: o texto 3D (e os efeitos Hyper) só passam com o acesso confirmado.
+    @Test fun paidFeatureNeedsConfirmedAccess() {
+        for (access in HyperAccess.entries) {
+            assertEquals("pago com $access", access != HyperAccess.Unlocked, PaidGate.locked(true, access))
+            assertFalse("grátis com $access", PaidGate.locked(false, access))
+        }
+    }
+
+    // Texto 3D sem conta, sem rede, expirado ou com a config desligada: criar continua bloqueado.
+    @Test fun text3dCreationFollowsTheAccountGate() {
+        val signedOut = EntitlementRules.access(cache(setOf(product)), null, product, now, false)
+        val locked = EntitlementRules.access(cache(emptySet()), email, product, now, false)
+        val unlocked = EntitlementRules.access(cache(setOf(product)), email, product, now, false)
+        val expired = EntitlementRules.access(cache(setOf(product)), email, product, now + EntitlementRules.GRACE_MS + 1, false)
+        assertTrue(PaidGate.locked(true, signedOut))
+        assertTrue(PaidGate.locked(true, locked))
+        assertTrue(PaidGate.locked(true, expired))
+        assertFalse(PaidGate.locked(true, unlocked))
     }
 
     @Test fun serverResponsesMapToChecks() {

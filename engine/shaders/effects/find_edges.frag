@@ -29,6 +29,11 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
 
 vec3 encoded(vec2 uv) {
     const vec4 s = texture(u_tex0, uv);
+    if (p.p1.x > 0.5) {
+        // The measured native 32-bpc profile differentiates premultiplied
+        // linear RGB directly, retaining fractional gradients and HDR input.
+        return s.rgb;
+    }
     // Pré-multiplicado codificado: a borda com o transparente também conta.
     return aurea_linear_to_srgb(max(s.rgb, vec3(0.0)));
 }
@@ -46,6 +51,13 @@ void main() {
     const vec3 br = encoded(v_uv + vec2( 1.0,  1.0) * st);
     const vec3 gx = (tr + 2.0 * mr + br) - (tl + 2.0 * ml + bl);
     const vec3 gy = (bl + 2.0 * bc + br) - (tl + 2.0 * tc + tr);
+    if (p.p1.x > 0.5) {
+        float alpha = clamp(source.a, 0.0, 1.0);
+        vec3 edge = min(sqrt(gx * gx + gy * gy), vec3(alpha));
+        if (p.p0.z > 0.5) edge = vec3(alpha) - edge;
+        o_color = vec4(mix(source.rgb, edge, clamp(p.p0.w, 0.0, 1.0)), alpha);
+        return;
+    }
     vec3 edge = clamp(sqrt(gx * gx + gy * gy) * 0.25 * max(p.p0.x, 0.0), 0.0, 1.0);
     if (p.p0.z > 0.5) edge = vec3(1.0) - edge;
 

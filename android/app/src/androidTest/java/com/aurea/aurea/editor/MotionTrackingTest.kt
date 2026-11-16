@@ -8,6 +8,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.test.platform.app.InstrumentationRegistry
 import com.aurea.aurea.R
+import com.aurea.aurea.effects.EffectTool
+import com.aurea.aurea.effects.effectCardId
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.theme.AureaTheme
 import org.junit.Assert.*
@@ -37,10 +39,16 @@ class MotionTrackingTest {
         compose.waitUntil(30000) { store.busyMessage == null }
         compose.runOnIdle { assertNull(store.errorMessage) }
         compose.waitUntil(10000) { store.detail != null && store.layers.isNotEmpty() }
-        // O rastreio saiu da doca: o painel abre pelo ⋯ do topo da camada.
-        compose.onNodeWithContentDescription(context.getString(R.string.editor_mais_acoes_camada)).performClick()
-        compose.onNodeWithText(context.getString(R.string.dock2_tracking_tools)).performScrollTo().performClick()
+        compose.onNodeWithTag("layer.panel.effects").performClick()
+        compose.onNodeWithTag("aurea.effects.add").performScrollTo().performClick()
+        compose.onNodeWithTag("effects.search").performClick()
+        compose.onNodeWithTag("effects.search.field").performTextInput(context.getString(R.string.panel_rastreio))
+        val tracking = effectCardId(EffectTool.Tracking.typeId)
+        compose.onNodeWithTag("effects.search.results").performScrollToNode(hasTestTag("effects.result.$tracking"))
+        compose.onNodeWithTag("effects.result.$tracking").performClick()
+        compose.onNodeWithTag("effects.detail.variant.$tracking").performScrollTo().performClick()
         compose.onNodeWithText(context.getString(R.string.trk_tool_stabilizer)).performScrollTo().performClick()
+        compose.onAllNodesWithText(context.getString(R.string.trk_tool_stabilizer)).onLast().performScrollTo().performClick()
         compose.waitUntil(90000) { store.motionStatus[0].toInt() != 1 }
         compose.runOnIdle {
             assertEquals(store.motionMessage, 2, store.motionStatus[0].toInt())

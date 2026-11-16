@@ -1,0 +1,91 @@
+#version 450
+#include "../common/bindings.glsl"
+#include "common.glsl"
+#include "signal_reference.glsl"
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+layout(set = 0, binding = AUREA_TEX0) uniform sampler2D u_source;
+layout(set = 0, binding = AUREA_IMG0, rgba32f) writeonly uniform image2D u_target;
+
+void main() {
+    int row = int(gl_GlobalInvocationID.x);
+    ivec2 size = imageSize(u_target);
+    if (row >= size.y) return;
+    int stage = int(p.raster.w + 0.5);
+    vec3 first = vec3(0.0), second = vec3(0.0), third = vec3(0.0);
+    if (stage == 3) first.x = second.x = third.x = 16.0;
+    float rfLowPass = 16.0, lumaLowPass = 16.0;
+    float modulationState = 0.0, modulationSecond = 0.0, modulationThird = 0.0;
+    float previousNoise = 0.0, lumaWalk = 0.0, chromaWalk = 0.0;
+    float hue = (signalRandom(ivec2(0, row), 201u) * 2.0 - 1.0) * setting(6) * signalPi / 180.0;
+    float lumaCutoff = signalLumaCutoff(), chromaCutoff = signalChromaCutoff();
+    vec3 coefficient = vec3(1.0);
+    if (stage == 3) coefficient = vec3(signalPole(lumaCutoff), signalPole(chromaCutoff), signalPole(chromaCutoff));
+    if (stage == 9 || stage == 5) {
+        coefficient.yz = stage == 5 && setting(28) < 1.5
+            ? vec2(signalPole(2600000.0)) : vec2(signalPole(1300000.0), signalPole(600000.0));
+    }
+    if (stage == 13) coefficient.x = signalPole(lumaCutoff * 4.0);
+    float modulationPole = signalPole(chromaCutoff);
+    float rfPole = signalPole(315000000.0 / max(setting(3), 1.0));
+    float lumaPole = signalPole(floor(lumaCutoff / 3.0));
+    for (int x = 0; x < size.x; ++x) {
+        ivec2 pixel = ivec2(x, row);
+        vec4 source = texelFetch(u_source, pixel, 0);
+        if (stage == 1) {
+            vec2 carrier = signalCarrierBasis(pixel);
+            float value = source.x + trunc(dot(source.yz, carrier) * float(max(int(setting(1)), 1)) / 50.0);
+            if (p.context.y < 0.5) {
+                rfLowPass = rfLowPass * (1.0 - rfPole) + rfPole * value;
+                value = trunc(value + (value - rfLowPass) * setting(2));
+                float lumaNoise = max(setting(4), setting(11) > 0.5 ? 30.0 : 0.0);
+                float chromaNoise = max(setting(5), setting(11) > 0.5 ? 30.0 : 0.0);
+                lumaWalk += (signalRandom(pixel, 401u) * 2.0 - 1.0) * lumaNoise * 0.0038 * 65280.0;
+                chromaWalk += (signalRandom(pixel, 501u) * 2.0 - 1.0) * chromaNoise * 0.0114 * 65280.0;
+                value += lumaWalk + chromaWalk * carrier.x;
+            }
+            imageStore(u_target, pixel, vec4(clamp(trunc(value), -2000000000.0, 2000000000.0), 0.0, 0.0, source.a));
+            continue;
+        }
+        vec3 sampleValue = source.rgb;
+        if (stage == 3) {
+            // The deterministic transmission/filter stages follow the native
+            // ordering. The independent noise field remains a separate fidelity
+            // gap until its PRNG and modulation oracle are reconstructed.
+            if (setting(12) > 0.5) {
+                float value = signalSmoothNoise(vec2(float(x) * setting(13) * 0.02,
+                    float(row) * 0.05 + p.raster.z * setting(14)), 601u);
+                float levels = floor(setting(16));
+                if (levels > 0.0) value = floor((value + 1.0) * 0.5 * levels) / levels * 2.0 - 1.0;
+                float modulation = abs(value - previousNoise);
+                previousNoise = value;
+                float start = min(setting(18), setting(19)), end = max(setting(18), setting(19));
+                float y = (float(row) + 0.5) / float(size.y);
+                if (setting(17) > 0.5 && y >= start && y <= end
+                    && signalRandom(ivec2(0, row), 701u) < setting(20)) {
+                    float progress = (y - start) / max(end - start, 1e-6);
+                    float fade = pow(clamp(progress, 0.0, 1.0), setting(22));
+                    modulation += fade * setting(21) * signalRandom(pixel, 801u);
+                }
+                modulationState += modulationPole * (modulation - modulationState);
+                modulationSecond += modulationPole * (modulationState - modulationSecond);
+                modulationThird += modulationPole * (modulationSecond - modulationThird);
+                sampleValue.x += modulationThird * setting(15) * 65280.0;
+            }
+            sampleValue.yz = trunc(mat2(cos(hue), sin(hue), -sin(hue), cos(hue)) * sampleValue.yz);
+        }
+        first = first * (vec3(1.0) - coefficient) + coefficient * sampleValue;
+        second = second * (vec3(1.0) - coefficient) + coefficient * first;
+        third = third * (vec3(1.0) - coefficient) + coefficient * second;
+        vec3 result;
+        if (stage == 3) {
+            lumaLowPass = lumaLowPass * (1.0 - lumaPole) + lumaPole * third.x;
+            result = vec3(third.x + 1.6 * (third.x - lumaLowPass), third.yz);
+        } else if (stage == 13) {
+            result = vec3(source.x + 2.0 * setting(8) * (source.x - third.x), source.yz);
+        } else {
+            result = vec3(source.x, third.yz);
+        }
+        imageStore(u_target, pixel, vec4(clamp(trunc(result), vec3(-2000000000.0), vec3(2000000000.0)), source.a));
+    }
+}

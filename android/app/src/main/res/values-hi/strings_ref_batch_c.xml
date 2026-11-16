@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE reference batch C: Extrude, Depth Field, Smear. -->
+<resources>
+    <string name="refc_extrude_name">एक्सट्रूड (वेक्टर)</string>
+    <string name="refc_extrude_desc">टेक्स्ट, आकृतियों और मास्क का वेक्टर एक्सट्रूज़न: दिशात्मक, वैनिशिंग पॉइंट या 3D कैमरा, स्ट्रोक और किनारों पर ग्रेडिएंट के साथ।</string>
+    <string name="refc_depth_field_name">डेप्थ ऑफ़ फ़ील्ड</string>
+    <string name="refc_depth_field_desc">गहराई के अनुसार लेयर को धुंधला करता है: फ़ोकल प्लेन, मोटाई और अधिकतम त्रिज्या, AI से अनुमानित गहराई के साथ।</string>
+    <string name="refc_smear_name">स्मियर (मास्क)</string>
+    <string name="refc_smear_desc">स्रोत मास्क वाले हिस्से को नई जगह ले जाता है और सीमा मास्क के अंदर आसपास की छवि को खींचता है।</string>
+</resources>

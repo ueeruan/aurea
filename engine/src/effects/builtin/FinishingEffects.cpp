@@ -9,6 +9,7 @@
 //  resolução cheia: a prévia reduzida e o export cortam/centram no mesmo lugar.
 // =============================================================================
 #include "BuiltinEffects.hpp"
+#include "aurea/effects/FastBlurReference.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -317,13 +318,20 @@ public:
 // -----------------------------------------------------------------------------
 class FindEdges final : public Effect {
 public:
+    explicit FindEdges(bool reference = false) : reference_(reference) {}
     enum : u32 { kIntensity = 0, kWidth, kInvert, kMix };
 
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kFindEdges, "Detectar bordas", "Estilizar", EffectClass::Neighborhood};
-        return i;
+        static const EffectInfo reference{effect_keys::kFindEdgesReference, "Find Edges", "Estilizar", EffectClass::Neighborhood};
+        return reference_ ? reference : i;
     }
     void declare_parameters(ParameterRegistry& p) const override {
+        if (reference_) {
+            p.add_bool("invert", "Inverter", false);
+            p.add_float("blend_original", "Mesclar com original", 0.0f, 0.0f, 1.0f);
+            return;
+        }
         p.add_float("intensity", "Intensidade", 100.0f, 0.0f, 400.0f, kParamAnimatable | kParamPercent, "%");
         p.typed_range(0.0f, 4000.0f);
         p.add_float("width", "Largura", 1.0f, 0.5f, 10.0f, kParamAnimatable | kParamPixels, "px");
@@ -332,9 +340,11 @@ public:
         p.add_float("mix", "Mistura", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
     }
     bool is_identity(const EffectEval& e) const noexcept override {
+        if (reference_) return e.f(1) >= 1.0f;
         return !(finite_or(e.f(kMix), 0.0f) > 0.01f);
     }
     f32 input_margin(const EffectEval& e) const noexcept override {
+        if (reference_) return 1.0f;
         return std::clamp(finite_or(e.f(kWidth), 1.0f), 0.25f, 100.0f);
     }
     void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
@@ -343,6 +353,11 @@ public:
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
                  LayerImage& out) const override {
         EffectUniforms u = base_uniforms(input);
+        if (reference_) {
+            u.p0 = {1.0f, 1.0f, e.b(0) ? 0.0f : 1.0f, 1.0f - std::clamp(e.f(1), 0.0f, 1.0f)};
+            u.p1.x = 1.0f;
+            return single_pass(ctx, ShaderId::effects_find_edges_frag, input, u, "find-edges", out);
+        }
         // A largura é em px da camada: vira texels pela densidade da entrada.
         u.p0 = Vec4{std::clamp(finite_or(e.f(kIntensity), 100.0f) / 100.0f, 0.0f, 40.0f),
                     std::clamp(finite_or(e.f(kWidth), 1.0f), 0.25f, 100.0f) * input.texel_scale_x(),
@@ -350,6 +365,8 @@ public:
                     std::clamp(finite_or(e.f(kMix), 100.0f) / 100.0f, 0.0f, 1.0f)};
         return single_pass(ctx, ShaderId::effects_find_edges_frag, input, u, "detectar-bordas", out);
     }
+private:
+    bool reference_;
 };
 
 // -----------------------------------------------------------------------------
@@ -420,28 +437,31 @@ public:
 // -----------------------------------------------------------------------------
 class DropShadow final : public Effect {
 public:
+    explicit DropShadow(bool reference = false) : reference_(reference) {}
     enum : u32 { kShadowColor = 0, kOpacity, kDirection, kDistance, kSoftness, kShadowOnly };
 
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kDropShadow, "Sombra projetada", "Estilizar",
                                   EffectClass::Neighborhood};
-        return i;
+        static const EffectInfo reference{"aurea.stylize.drop_shadow_reference", "Drop Shadow", "Estilizar",
+                                          EffectClass::Neighborhood};
+        return reference_ ? reference : i;
     }
     void declare_parameters(ParameterRegistry& p) const override {
         p.add_color("shadow_color", "Cor da sombra", Vec4{0.0f, 0.0f, 0.0f, 1.0f});
-        p.add_float("opacity", "Opacidade", 70.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("opacity", "Opacidade", reference_ ? 50.0f : 70.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_angle("direction", "Direção", 135.0f);
-        p.add_float("distance", "Distância", 18.0f, 0.0f, 500.0f, kParamAnimatable | kParamPixels, "px");
-        p.typed_range(0.0f, 5000.0f);
-        p.add_float("softness", "Suavidade", 12.0f, 0.0f, 500.0f, kParamAnimatable | kParamPixels, "px");
-        p.typed_range(0.0f, 5000.0f);
+        p.add_float("distance", "Distância", reference_ ? 5.0f : 18.0f, 0.0f, 500.0f, kParamAnimatable | kParamPixels, "px");
+        p.typed_range(0.0f, reference_ ? 4000.0f : 5000.0f);
+        p.add_float("softness", "Suavidade", reference_ ? 0.0f : 12.0f, 0.0f, 500.0f, kParamAnimatable | kParamPixels, "px");
+        p.typed_range(0.0f, reference_ ? 30000.0f : 5000.0f);
         // Append only: saved parameters and their keyframe addresses stay stable.
         p.add_bool("shadow_only", "Só a sombra", false);
     }
     bool is_identity(const EffectEval& e) const noexcept override {
         // A zero-opacity isolated shadow is transparent, not the original clip.
         if (e.count > kShadowOnly && e.b(kShadowOnly)) return false;
-        return !(e.color(kShadowColor).w > 0.0f) || !(e.f(kOpacity) > 0.01f);
+        return !(e.color(kShadowColor).w > 0.0f) || !(e.f(kOpacity) > (reference_ ? 0.0f : 0.01f));
     }
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
         v[kShadowColor] = ParamValue::color(0.0f, 0.0f, 0.0f, 1.0f);
@@ -451,15 +471,26 @@ public:
         return true;
     }
     f32 input_margin(const EffectEval& e) const noexcept override {
-        return std::clamp(finite_or(e.f(kDistance), 0.0f), 0.0f, 5000.0f) +
-               std::clamp(finite_or(e.f(kSoftness), 0.0f), 0.0f, 5000.0f);
+        const f32 distance = std::clamp(finite_or(e.f(kDistance), 0.0f), 0.0f, reference_ ? 4000.0f : 5000.0f);
+        const f32 softness = std::clamp(finite_or(e.f(kSoftness), 0.0f), 0.0f, reference_ ? 30000.0f : 5000.0f);
+        if (!reference_) return distance + softness;
+        const f32 density = std::max(finite_or(e.texelScale, 1.0f), 1e-6f);
+        const f32 support = static_cast<f32>(3.0 * std::ceil(softness * .5 * density / 2.71) / density);
+        return distance + std::max(softness, support);
     }
+    bool needs_full_input() const noexcept override { return reference_; }
     void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        if (reference_) {
+            fast_blur_reference::pipelines(out, work);
+            out.push_back(PipelineKey::fullscreen(ShaderId::effects_drop_shadow_combine_frag, work));
+            return;
+        }
         out.push_back(PipelineKey::fullscreen(ShaderId::effects_drop_shadow_blur_frag, work));
         out.push_back(PipelineKey::fullscreen(ShaderId::effects_drop_shadow_combine_frag, work));
     }
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
                  LayerImage& out) const override {
+        if (reference_) return build_reference(ctx, e, input, margin, out);
         const f32 distance = std::clamp(finite_or(e.f(kDistance), 0.0f), 0.0f, 5000.0f);
         const f32 softness = std::clamp(finite_or(e.f(kSoftness), 0.0f), 0.0f, 5000.0f);
         const f32 reach = distance + softness;
@@ -472,7 +503,8 @@ public:
         // Direção em graus. Os passos vão em PIXELS DA CAMADA e o shader os
         // converte para uv com a densidade do que ele amostra — é o que faz a
         // mesma distância deslocar o mesmo tanto na horizontal e na vertical.
-        const f32 ang = finite_or(e.f(kDirection), 135.0f) * kDeg2Rad;
+        const f32 direction = finite_or(e.f(kDirection), 135.0f);
+        const f32 ang = direction * kDeg2Rad;
         const f32 dx = std::cos(ang), dy = std::sin(ang);
         const f32 perStep = softness / (2.0f * 8.0f);
 
@@ -487,7 +519,8 @@ public:
         // 1. Silhueta deslocada e borrada pela direção. A amostra é a textura
         // da entrada, então a densidade é a da região DELA.
         u.p0 = Vec4{dx * perStep, dy * perStep, 0.0f, 0.0f};
-        u.p1 = Vec4{dx * distance, dy * distance, 0.0f, 0.0f};
+        const Vec2 displacement{dx * distance, dy * distance};
+        u.p1 = Vec4{displacement.x, displacement.y, 0.0f, 0.0f};
         u.p3 = Vec4{std::max(input.region.w, 1e-4f), std::max(input.region.h, 1e-4f), 0.0f, 0.0f};
         const FGTexture alpha = ctx.texture("sombra-alfa", w, h);
         if (ctx.fullscreen_pass("sombra-alfa", PassStage::Effects, alpha,
@@ -501,7 +534,8 @@ public:
         // A perpendicular é a direção girada 90°: (-dy, dx). Agora a amostra é
         // a silhueta, que já está na região do efeito — a densidade é a dela e
         // o mapa é identidade.
-        u.p0 = Vec4{-dy * perStep, dx * perStep, e.count > kShadowOnly && e.b(kShadowOnly) ? 1.0f : 0.0f,
+        u.p0 = Vec4{-dy * perStep, dx * perStep,
+                    e.count > kShadowOnly && e.b(kShadowOnly) ? 1.0f : 0.0f,
                     std::clamp(finite_or(e.f(kOpacity), 0.0f) / 100.0f, 0.0f, 1.0f)};
         u.p1 = Vec4{0.0f, 0.0f, 0.0f, 0.0f};
         u.p2 = toInput;                 // só a camada usa este mapa
@@ -520,6 +554,55 @@ public:
         out = LayerImage{result, region, w, h};
         return OkStatus;
     }
+private:
+    Status build_reference(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input,
+                           f32 margin, LayerImage& out) const {
+        const f32 distance = std::clamp(finite_or(e.f(kDistance), 0.0f), 0.0f, 4000.0f);
+        const f32 softness = std::clamp(finite_or(e.f(kSoftness), 0.0f), 0.0f, 30000.0f);
+        const f64 angle = static_cast<f64>((90.0f - finite_or(e.f(kDirection), 135.0f)) * kDeg2Rad);
+        const Vec2 displacement{
+            static_cast<f32>(std::trunc(std::round(std::cos(angle) * distance * 65536.0) / 65536.0)),
+            static_cast<f32>(std::trunc(-std::round(std::sin(angle) * distance * 65536.0) / 65536.0))};
+        const f32 density = std::max(e.texelScale, input.texel_scale_x());
+        const f32 support = static_cast<f32>(3.0 * std::ceil(softness * .5 * density / 2.71) / density);
+        const f32 reach = distance + std::max(softness, support);
+        const LayerPlacement* clipPlacement = e.placement && e.placement->preserveFullExtent ? nullptr : e.placement;
+        const Rect region = spread_region(input.region, reach, reach, clipPlacement, margin);
+        const f64 width = std::ceil(static_cast<f64>(region.w) * density - .001);
+        const f64 height = std::ceil(static_cast<f64>(region.h) * density - .001);
+        if (!(width > 0) || !(height > 0) || width > ctx.max_texture_size() || height > ctx.max_texture_size())
+            return Status{Errc::BudgetExceeded, "Drop Shadow output exceeds the device texture limit"};
+
+        // Filter the complete source before displacement. Cropping the source
+        // to the visible shadow would discard contributions outside the frame.
+        const Rect shadowRegion{region.x - displacement.x, region.y - displacement.y, region.w, region.h};
+        fast_blur_reference::Request request;
+        request.radiusX = request.radiusY = softness * .5f;
+        request.repeatEdges = false;
+        request.forceBox = true;
+        request.density = density;
+        request.outRegion = shadowRegion;
+        LayerImage blurred;
+        if (const Status status = fast_blur_reference::build(ctx, input, request, blurred); !status.ok()) return status;
+
+        EffectUniforms uniforms;
+        uniforms.uvMap = EffectBuildContext::uv_map(shadowRegion, blurred.region);
+        uniforms.p0 = {0, 0, e.b(kShadowOnly) ? 1.0f : 0.0f,
+                       std::clamp(finite_or(e.f(kOpacity), 0.0f) * .01f, 0.0f, 1.0f)};
+        uniforms.p1.z = 1;
+        uniforms.p2 = EffectBuildContext::uv_map(region, input.region);
+        uniforms.p3 = {blurred.region.w, blurred.region.h, 0, 0};
+        uniforms.color = e.color(kShadowColor);
+        out = {ctx.texture("drop-shadow-reference", static_cast<u32>(width), static_cast<u32>(height)),
+               region, static_cast<u32>(width), static_cast<u32>(height)};
+        const u32 pass = ctx.fullscreen_pass("drop-shadow-reference", PassStage::Effects, out.texture,
+            ShaderId::effects_drop_shadow_combine_frag,
+            {{blurred.texture, {}, CommonSampler::LinearBorder}, {input.texture, {}, CommonSampler::LinearBorder}},
+            &uniforms, sizeof(uniforms));
+        return pass == kInvalidIndex ? Status{Errc::PipelineCompileFailed} : OkStatus;
+    }
+
+    bool reference_ = false;
 };
 
 // -----------------------------------------------------------------------------
@@ -628,9 +711,11 @@ void register_finishing_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<Vignette>());
     (void)r.add(std::make_unique<Mosaic>());
     (void)r.add(std::make_unique<FindEdges>());
+    (void)r.add(std::make_unique<FindEdges>(true));
     (void)r.add(std::make_unique<HueSaturation>());
     (void)r.add(std::make_unique<DropShadow>());
     (void)r.add(std::make_unique<Border>());
+    (void)r.add(std::make_unique<DropShadow>(true));
 }
 
 } // namespace aurea::builtin

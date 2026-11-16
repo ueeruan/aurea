@@ -9,6 +9,10 @@
 
 #include "aurea/hyper/Hyper.hpp"
 #include "aurea/hyper/HyperStage.hpp"
+#include "aurea/effects/Parameter.hpp"
+#include "aurea/scene3d/Image3D.hpp"
+#include "aurea/scene3d/Shape3D.hpp"
+#include "aurea/scene3d/Text3D.hpp"
 #include "hyper/HyperAnalysis.hpp"
 #include "hyper/HyperGraph.hpp"
 #include "hyper/HyperPlan.hpp"
@@ -20,6 +24,47 @@
 
 using namespace aurea;
 using namespace aurea::hyper;
+
+AUREA_TEST(Hyper, ReferenceEffectsShareAccessClassification) {
+    for (const char* key : {
+             "aurea.hyper.upscale", "aurea.hyper.motion", "aurea.hyper.clean",
+             "aurea.motion.cartoon_moblur", "aurea.motion.twitch_reference",
+             "aurea.glitch.signal_reference", "aurea.blur.sharpen_reference",
+             "aurea.blur.fast_blur_reference", "aurea.transition.radial_wipe_reference",
+             "aurea.stylize.find_edges_reference", "aurea.distort.wave_warp_reference",
+             "aurea.transition.block_dissolve_reference", "aurea.distort.turbulent_displace_reference",
+             "aurea.stylize.drop_shadow_reference", "aurea.generate.extrude_reference",
+             "aurea.glitch.glitchify_reference","aurea.motion.twitch",
+             "aurea.glitch.glitchify", "aurea.glitch.signal", "aurea.generate.raster_extrude"}) {
+        AUREA_CHECK(effect_requires_access(effect_type_id(key)));
+    }
+    AUREA_CHECK(!effect_requires_access(effect_type_id("aurea.light.deep_glow")));
+    AUREA_CHECK(!effect_requires_access(effect_type_id("aurea.light.deep_glow_2")));
+    AUREA_CHECK(!effect_requires_access(effect_type_id("aurea.blur.gaussian")));
+    // A free legacy effect stays free in its AE-faithful form (batches A/A2).
+    for (const char* key : {"aurea.blur.radial", "aurea.blur.radial_blur_reference",
+                            "aurea.stylize.radial_shadow", "aurea.stylize.radial_shadow_reference",
+                            "aurea.time.posterize", "aurea.time.posterize_reference",
+                            "aurea.time.time_displacement", "aurea.time.time_displacement_reference"}) {
+        AUREA_CHECK_MSG(!effect_requires_access(effect_type_id(key)), key);
+    }
+    AUREA_CHECK(!effect_requires_access(0));
+}
+
+// 0.5.4: o texto 3D e do mesmo produto pago. So a receita de texto 3D conta;
+// formas 3D, imagem para 3D e modelos importados continuam livres.
+AUREA_TEST(Hyper, Text3DRequiresAccess) {
+    AUREA_CHECK(text3d_requires_access());
+    scene3d::Text3DSpec spec;
+    spec.content = "AUREA";
+    AUREA_CHECK(model_source_requires_access(scene3d::encode_text3d(spec)));
+    AUREA_CHECK(model_source_requires_access("aurea-text3d:v2;d=0.2500;t=old"));
+    AUREA_CHECK(!model_source_requires_access(scene3d::encode_shape3d(scene3d::default_shape3d(scene3d::Shape3DKind::Cube))));
+    AUREA_CHECK(!model_source_requires_access(std::string(scene3d::kImage3DScheme) + "x"));
+    AUREA_CHECK(!model_source_requires_access("C:/models/robot.glb"));
+    AUREA_CHECK(!model_source_requires_access(""));
+    AUREA_CHECK(!model_source_requires_access("x-aurea-text3d:"));
+}
 
 namespace {
 
@@ -683,4 +728,31 @@ AUREA_TEST(HyperTurbo, CpuFsrIsSharperThanBilinearAndStaysInRange) {
     AUREA_CHECK(lo >= 28 && hi <= 212);
     AUREA_CHECK_EQ(fsr[(8 * W * 2 + 4) * 3], 40);
     AUREA_CHECK_EQ(fsr[(8 * W * 2 + 60) * 3], 200);
+}
+
+AUREA_TEST(HyperAdaptive, CachedBenchmarkTimingsUseLiveMemoryAndThermalAdmission) {
+    DeviceProfile profile;
+    profile.measured = profile.abi64 = profile.vulkanFp16 = true;
+    profile.liteMsPerTile = 50.f; profile.turboMsPerFrame = 2.f;
+    refresh_profile_limits(profile, 4ull << 30, 0.f, false);
+    AUREA_CHECK(profile.defaultPath == Path::Max);
+    AUREA_CHECK_EQ(profile.tile, 128u);
+    refresh_profile_limits(profile, 1400ull << 20, 0.f, false);
+    AUREA_CHECK(profile.defaultPath == Path::Lite);
+    AUREA_CHECK_EQ(profile.tile, 96u);
+    refresh_profile_limits(profile, 300ull << 20, 1.f, false);
+    AUREA_CHECK(profile.defaultPath == Path::Turbo);
+    AUREA_CHECK_EQ(profile.tile, 64u);
+    AUREA_CHECK_EQ(profile.tileMargin, 12u);
+    AUREA_CHECK_EQ(profile.freeRamBytes, 300ull << 20);
+    refresh_profile_limits(profile, 4ull << 30, 0.f, true);
+    AUREA_CHECK(profile.defaultPath == Path::Turbo);
+    AUREA_CHECK_EQ(profile.liteMsPerTile, 50.f);
+    AUREA_CHECK_EQ(profile.turboMsPerFrame, 2.f);
+    Recipe explicitRecipe; explicitRecipe.path = Path::Max;
+    AUREA_CHECK(effective_path(explicitRecipe, profile) == Path::Max);
+    profile.abi64 = false;
+    refresh_profile_limits(profile, 4ull << 30, 0.f, false);
+    AUREA_CHECK_EQ(profile.tile, 64u);
+    AUREA_CHECK_EQ(profile.tileMargin, 8u);
 }

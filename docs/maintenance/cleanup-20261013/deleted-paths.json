@@ -1,0 +1,590 @@
+[
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\engine\\build",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\build\\android",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\android\\app\\.cxx",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\.claude\\worktrees\\agent-a29d0154df0988e64\\engine\\build",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\.claude\\worktrees\\agent-a486e05843be197f3\\engine\\build",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\android\\.gradle",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\android\\.kotlin",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\android\\build",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\build\\astra-ffmpeg\\objects",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\build\\prompt03\\emulator-recovery",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\build\\reference\\alight-motion-5.0.280\\Aurea_AM_Ref.avd",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\build\\reference\\alight-motion-5.0.280\\avd-registry",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\build\\reference\\keyflow-ui-trial-20261009\\Keyflow_Play_API35.avd",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\output\\iphone17-motion-15s\\movie.rgba",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\output\\hera-motion-aurea\\render.rgba",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\build\\reference\\alight-motion-5.0.280\\aurea-validation\\aurea-uitest-x86_64.apk",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\build\\reference\\alight-motion-5.0.280\\aurea-validation\\aurea-instrumentation.apk",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\build\\reference\\alight-motion-5.0.280\\aurea-validation\\aurea-instrumentation-final.apk",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-015\\build\\android",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-015",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-015\\android\\app\\.cxx",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-015",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-015\\android\\.gradle",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-015",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-015\\android\\.kotlin",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-015",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-015\\android\\build",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-015",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-015\\engine\\build",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-015",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-astra\\build\\android",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-astra",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-astra\\android\\app\\.cxx",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-astra",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-astra\\android\\.gradle",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-astra",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-astra\\android\\.kotlin",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-astra",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-astra\\android\\build",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-astra",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-astra\\engine\\build",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-astra",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2adj\\build\\android",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2adj",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2adj\\android\\app\\.cxx",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2adj",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "already-absent",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2adj\\android\\.gradle",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2adj",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2adj\\android\\.kotlin",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2adj",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2adj\\android\\build",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2adj",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2adj\\engine\\build",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2adj",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2export\\build\\android",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2export",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2export\\android\\app\\.cxx",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2export",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "already-absent",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2export\\android\\.gradle",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2export",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2export\\android\\.kotlin",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2export",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2export\\android\\build",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2export",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2export\\engine\\build",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2export",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2fx\\build\\android",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2fx",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2fx\\android\\app\\.cxx",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2fx",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "already-absent",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2fx\\android\\.gradle",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2fx",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2fx\\android\\.kotlin",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2fx",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2fx\\android\\build",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2fx",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "already-absent",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2fx\\engine\\build",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2fx",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2surf\\build\\android",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2surf",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2surf\\android\\app\\.cxx",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2surf",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2surf\\android\\.gradle",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2surf",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2surf\\android\\.kotlin",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2surf",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2surf\\android\\build",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2surf",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "already-absent",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2surf\\engine\\build",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2surf",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-base017\\build\\android",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-base017",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "already-absent",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-base017\\android\\app\\.cxx",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-base017",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "already-absent",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-base017\\android\\.gradle",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-base017",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "already-absent",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-base017\\android\\.kotlin",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-base017",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "already-absent",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-base017\\android\\build",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-base017",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "already-absent",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-base017\\engine\\build",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-base017",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-cc\\build\\android",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-cc",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-cc\\android\\app\\.cxx",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-cc",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "already-absent",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-cc\\android\\.gradle",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-cc",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-cc\\android\\.kotlin",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-cc",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-cc\\android\\build",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-cc",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "already-absent",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-cc\\engine\\build",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-cc",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-rel\\build\\android",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-rel",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-rel\\android\\app\\.cxx",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-rel",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-rel\\android\\.gradle",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-rel",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-rel\\android\\.kotlin",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-rel",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-rel\\android\\build",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-rel",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "already-absent",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-rel\\engine\\build",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-rel",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-voz\\build\\android",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-voz",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-voz\\android\\app\\.cxx",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-voz",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "already-absent",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-voz\\android\\.gradle",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-voz",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-voz\\android\\.kotlin",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-voz",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-voz\\android\\build",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-voz",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "already-absent",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-voz\\engine\\build",
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-voz",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "already-absent",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\.codex\\worktrees\\astra-015-current-base\\Aureabeta\\build\\android",
+    "Root": "C:\\Users\\Ruan\\.codex\\worktrees\\astra-015-current-base\\Aureabeta",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\.codex\\worktrees\\astra-015-current-base\\Aureabeta\\android\\app\\.cxx",
+    "Root": "C:\\Users\\Ruan\\.codex\\worktrees\\astra-015-current-base\\Aureabeta",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\.codex\\worktrees\\astra-015-current-base\\Aureabeta\\android\\.gradle",
+    "Root": "C:\\Users\\Ruan\\.codex\\worktrees\\astra-015-current-base\\Aureabeta",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\.codex\\worktrees\\astra-015-current-base\\Aureabeta\\android\\.kotlin",
+    "Root": "C:\\Users\\Ruan\\.codex\\worktrees\\astra-015-current-base\\Aureabeta",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\.codex\\worktrees\\astra-015-current-base\\Aureabeta\\android\\build",
+    "Root": "C:\\Users\\Ruan\\.codex\\worktrees\\astra-015-current-base\\Aureabeta",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  },
+  {
+    "Path": "C:\\Users\\Ruan\\.codex\\worktrees\\astra-015-current-base\\Aureabeta\\engine\\build",
+    "Root": "C:\\Users\\Ruan\\.codex\\worktrees\\astra-015-current-base\\Aureabeta",
+    "Reason": "Regenerable build/cache, stopped reference emulator, or raw render intermediate",
+    "State": "deleted",
+    "Error": null
+  }
+]

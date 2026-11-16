@@ -1,0 +1,26 @@
+Motion Capture do Aurea PC — modelos de pose BlazePose GHUM 3D
+
+Este diretório contém uma conversão para o formato ncnn de dois modelos
+publicados pelo Google no projeto MediaPipe:
+
+  pose_detection.tflite       (detector de pessoa)
+  pose_landmark_full.tflite   (BlazePose GHUM 3D, 33 pontos do corpo, "full")
+
+Copyright 2021 The MediaPipe Authors (Google LLC).
+Autores do modelo (cartão do modelo, 16/04/2021): Valentin Bazarevsky,
+Ivan Grishchenko, Eduard Gabriel Bazavan.
+
+Licenciados sob a Apache License, Version 2.0 (texto completo em
+LICENSE-MediaPipe-BlazePose.txt). Você só pode usar estes arquivos de acordo
+com essa licença. Distribuídos "COMO ESTÃO", sem garantias ou condições de
+qualquer tipo.
+
+Modificações feitas pelo Aurea: o grafo TFLite foi convertido para ncnn
+(tools/mocap_pose_convert.py); a máscara de segmentação e o heatmap do modelo
+de pontos e os Reshape/Concat de saída do detector foram retirados (não são
+usados); os pesos fp16 foram copiados sem alteração; os pesos esparsos do
+detector foram expandidos para a forma densa.
+
+Origem: https://storage.googleapis.com/mediapipe-assets/pose_detection.tflite
+        https://storage.googleapis.com/mediapipe-assets/pose_landmark_full.tflite
+Cartão do modelo: https://storage.googleapis.com/mediapipe-assets/Model%20Card%20BlazePose%20GHUM%203D.pdf

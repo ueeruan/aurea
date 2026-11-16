@@ -37,6 +37,9 @@ import { rotaDePaginas } from "./paginas.js";
 import { rotaDeTranscricao } from "./transcribe.js";
 
 export { CofreDeVideo } from "./cofre.js";
+// AureaMCP (docs/aureamcp/DESIGN.md): agentes de IA controlam o app da conta.
+import { rotaDoMcp } from "./mcp.js";
+export { AureaMcpRelay } from "./mcp_relay.js";
 
 const CHAVE = "atual";
 
@@ -88,6 +91,9 @@ async function handle(req, env, ctx, url) {
     // Política de privacidade e exclusão de conta (URLs públicas da Play/App Store).
     const pagina = rotaDePaginas(req, url);
     if (pagina) return pagina;
+    // AureaMCP: /mcp, /mcp/oauth/*, /.well-known/oauth-*, /api/mcp/*.
+    const mcp = await rotaDoMcp(req, env, ctx, url);
+    if (mcp) return mcp;
     const captions = await captionRoute(req, env, url);
     if (captions) return captions;
     const contas = await rotaDeContas(req, env, ctx, url);

@@ -106,6 +106,9 @@ struct Key {
     KeyInterp in = KeyInterp::Linear;
     KeyInterp out = KeyInterp::Linear;
     u16 flags = 0;                     ///< bit 3 = contínuo (observado)
+    /// Lote K: bits temporais do Aurea (Curve.hpp: kKeyAutoBezier,
+    /// kKeyContinuous, kKeyRoving) que o arquivo/script declarou.
+    u8 temporal = 0;
     std::vector<Ease> inEase, outEase; ///< 1 (espacial) ou um por componente
     std::vector<f64> inTangent, outTangent;   ///< espacial (vazio nos outros)
 };

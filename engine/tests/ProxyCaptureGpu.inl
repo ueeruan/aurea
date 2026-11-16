@@ -29,9 +29,11 @@ struct CaptureProxyFactory final : VideoSourceFactory {
         if (asset.sourcePath == "capture-proxy-original") {
             ++originalOpens; return std::make_unique<CaptureGatedDecoder>(config, gate);
         }
-        ++proxyOpens;
+        if (priority != MediaPriority::ExportSoftwareDecode) ++proxyOpens;
         auto proxy = config; proxy.width = asset.video.width; proxy.height = asset.video.height;
-        proxy.pattern = SyntheticPattern::Quadrants;
+        // Verification sees the encoded source pattern. The preview decoder
+        // deliberately exposes different pixels to detect capture substitution.
+        proxy.pattern = priority == MediaPriority::ExportSoftwareDecode ? SyntheticPattern::FrameGray : SyntheticPattern::Quadrants;
         return std::make_unique<SyntheticDecoder>(proxy);
     }
 };

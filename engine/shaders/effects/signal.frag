@@ -33,8 +33,9 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
 } p;
 
 void main() {
-    const vec2 uvPerLayer = max(vec2(p.texel.x * p.texel.z, p.texel.y * p.texel.w), vec2(1e-9));
+    const vec2 uvPerLayer = max(p.texel.xy, vec2(1e-9));
     const vec2 inUv = v_uv * p.uvMap.xy + p.uvMap.zw;
+    const vec2 layerPx = inUv / uvPerLayer + p.texel.zw;
     const vec4 src = unpremultiply(texture(u_tex0, inUv));
 
     const float step = floor(p.p3.x / max(p.p1.z, 1.0));
@@ -44,8 +45,8 @@ void main() {
     float shift = p.p0.z * p.p3.x;
 
     // Bandas: uma faixa de `altura` pixels que perdeu o sinal.
-    const float bandH = max(p.p0.w * p.texel.y, 1e-6);
-    const float bandIndex = floor(inUv.y / bandH);
+    const float bandH = max(p.p0.w, 1e-6);
+    const float bandIndex = floor(layerPx.y / bandH);
     const float rb = aurea_hash(uvec2(uint(int(bandIndex)), salt));
     if (rb < p.p0.x * 0.4) {
         shift += (aurea_hash(uvec2(uint(int(bandIndex)) + 3u, salt)) * 2.0 - 1.0) * p.p0.y;
@@ -59,7 +60,7 @@ void main() {
     }
     shift += frameShift;
 
-    // Separação de croma, só nas bandas: a cor é o primeiro a se perder.
+    // Separação de croma amplificada nas bandas.
     const float sep = p.p2.y * (rb < p.p0.x * 0.4 ? 1.0 : 0.15) * uvPerLayer.x;
     const vec2 o = vec2(shift * uvPerLayer.x, 0.0);
     vec4 c;
@@ -70,7 +71,7 @@ void main() {
 
     // Ruído de sinal: granulado fino, mais forte onde a imagem é escura.
     if (p.p1.x > 0.0) {
-        const vec2 px = inUv / uvPerLayer + vec2(shift, 0.0);
+        const vec2 px = layerPx + vec2(shift, 0.0);
         const float n = aurea_hash3(px * 1.5, salt) * 2.0 - 1.0;
         const float dark = 1.0 - clamp(aurea_luma(c.rgb), 0.0, 1.0) * 0.55;
         c.rgb += vec3(n) * p.p1.x * 0.25 * dark;

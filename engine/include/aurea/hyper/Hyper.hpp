@@ -134,4 +134,19 @@ inline constexpr const char* kHyperClean   = "aurea.hyper.clean";
 /// motor não decide quem pagou.
 inline constexpr const char* kProductId = "aureahyper_lifetime";
 
+/// Classificação comum do catálogo. As plataformas continuam verificando a
+/// compra da conta antes de adicionar um efeito desse produto.
+[[nodiscard]] bool effect_requires_access(u32 effectTypeId) noexcept;
+
+/// 0.5.4 (pedido do dono, 15/11/2026): o TEXTO 3D é do mesmo produto pago.
+/// CRIAR texto 3D (+ › Texto 3D, presets de texto 3D, o dock da cena) pede o
+/// acesso nas telas, como adicionar um efeito pago. Um texto 3D que JÁ está no
+/// projeto se comporta como um efeito pago já aplicado sem o acesso: abre,
+/// edita, desenha na prévia e exporta igual (sem marca d'água), só leva o
+/// cadeado. O motor não decide quem pagou (ver kProductId).
+[[nodiscard]] bool text3d_requires_access() noexcept;
+/// O asset de modelo com esta origem é um texto 3D pago (receita
+/// "aurea-text3d:")? Formas 3D e imagem para 3D continuam livres.
+[[nodiscard]] bool model_source_requires_access(const std::string& sourcePath) noexcept;
+
 } // namespace aurea::hyper

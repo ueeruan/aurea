@@ -22,6 +22,7 @@
     <string name="aefx_name_emboss">نقش بارز</string>
     <string name="aefx_name_color_emboss">نقش بارز ملون</string>
     <string name="aefx_name_radial_shadow">ظل شعاعي</string>
+    <string name="aefx_name_upscale">تكبير مع الحفاظ على التفاصيل</string>
     <string name="aefx_name_inner_shadow">ظل داخلي</string>
     <string name="aefx_name_bevel_edges">حواف مشطوفة</string>
     <string name="aefx_name_brush_strokes">ضربات الفرشاة</string>

@@ -34,6 +34,7 @@
 #include "aurea/core/Math.hpp"
 #include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/expr/Expression.hpp"
+#include "aurea/text/Text.hpp"
 #include "aurea/text/TextAnimator.hpp"
 #include "aurea/timeline/Composition.hpp"
 
@@ -978,6 +979,18 @@ public:
         ++in.report().changes;
     }
 
+    /// v72: sourceText.setValueAtTime → key do texto-fonte no quadro local.
+    void source_text_key(Interp& in, LayerId lid, f64 time, const Value& v) {
+        Layer* l = layer(lid);
+        if (!l || l->kind != LayerKind::Text) return;
+        apply_text_document(in, lid, v);
+        TextKey key;
+        key.frame = local_frame(l, time);
+        text::capture_source_key(l->text, key);
+        (void)text::upsert_source_key(l->text, std::move(key));
+        ++keyCount;
+    }
+
     // --- máscara (Shape) ---------------------------------------------------------------
     void apply_shape(Interp& in, PRef& r, const Value& v, f64 timeOrNan) {
         Layer* l = layer(r.layer);
@@ -1723,12 +1736,25 @@ public:
         auto t_of = [&](usize i) { return clamp_time(i < a.size() ? in.to_num(a[i]) : time_); };
         if (r.leaf == LK::SourceText) {
             if (m == "setValue" && !a.empty()) { apply_text_document(in, r.layer, a[0]); return Value::undef(); }
-            if (m == "setValueAtTime" && a.size() >= 2) {
-                in.approx("sourceText.setValueAtTime", "o texto de origem não anima no Aurea: valeu o último texto");
-                apply_text_document(in, r.layer, a[1]);
+            // v72: keys do texto-fonte (sempre congelados, como no AE): o documento
+            // vira um TextKey no quadro; o texto parado da camada fica com o último.
+            if (m == "setValueAtTime" && a.size() >= 2) { source_text_key(in, r.layer, t_of(0), a[1]); return Value::undef(); }
+            if (m == "setValuesAtTimes" && a.size() >= 2 && a[0].is_obj() && a[1].is_obj()) {
+                const auto ts = in.o(a[0]).elems, vs = in.o(a[1]).elems;
+                for (usize i = 0; i < ts.size() && i < vs.size(); ++i) source_text_key(in, r.layer, clamp_time(in.to_num(ts[i])), vs[i]);
                 return Value::undef();
             }
-            if (m == "valueAtTime") { Layer* l = layer(r.layer); return l ? text_document_from(in, *l) : Value::null(); }
+            if (m == "valueAtTime") {
+                Layer* l = layer(r.layer);
+                if (!l) return Value::null();
+                TextData shown;
+                if (text::apply_source_text(l->text, local_frame(l, t_of(0)), shown)) {
+                    Layer copy;
+                    copy.text = std::move(shown);
+                    return text_document_from(in, copy);
+                }
+                return text_document_from(in, *l);
+            }
             in.unsupported("sourceText." + m + "()", "animação do texto de origem não existe no Aurea");
             return Value::undef();
         }
@@ -1818,16 +1844,33 @@ public:
             return ease_array(in, m == "keyInTemporalEase" ? k->inEase : k->outEase, b.spatial ? 1 : dims_of(r, b));
         }
         if (m == "valueAtTime") return vec_value(in, current(in, r, t_of(0)));
-        if (m == "setTemporalContinuousAtKey" || m == "setTemporalAutoBezierAtKey" || m == "setSpatialContinuousAtKey" ||
-            m == "setSpatialAutoBezierAtKey" || m == "setRovingAtKey" || m == "setSelectedAtKey" || m == "setLabelAtKey") {
+        // Lote K: bézier automática/contínua temporal e vagante viram bits do key
+        // (Keyframe::flags). A automática do AE também é contínua.
+        if (m == "setTemporalContinuousAtKey" || m == "setTemporalAutoBezierAtKey" || m == "setRovingAtKey") {
+            Key* k = key_at(in, r, a.empty() ? Value::num(0) : a[0]);
+            if (!k) return Value::undef();
+            const bool on = a.size() > 1 && in.truthy(a[1]);
+            const u8 bit = m == "setRovingAtKey" ? kKeyRoving : m == "setTemporalAutoBezierAtKey" ? kKeyAutoBezier : kKeyContinuous;
+            if (on) k->temporal = static_cast<u8>(k->temporal | bit);
+            else k->temporal = static_cast<u8>(k->temporal & ~(bit == kKeyContinuous ? (kKeyContinuous | kKeyAutoBezier) : bit));
+            flush_keys(in, ri);
+            return Value::undef();
+        }
+        if (m == "setSpatialContinuousAtKey" || m == "setSpatialAutoBezierAtKey" || m == "setSelectedAtKey" || m == "setLabelAtKey") {
             return Value::undef();
         }
         if (m == "setSpatialTangentsAtKey") {
             in.approx("setSpatialTangentsAtKey", "caminho curvo de movimento vira trajeto reto entre os keyframes");
             return Value::undef();
         }
-        if (m == "keyTemporalContinuous" || m == "keyTemporalAutoBezier" || m == "keySpatialContinuous" || m == "keySpatialAutoBezier" ||
-            m == "keyRoving" || m == "keySelected")
+        if (m == "keyTemporalContinuous" || m == "keyTemporalAutoBezier" || m == "keyRoving") {
+            const Key* k = key_at(in, r, a.empty() ? Value::num(0) : a[0]);
+            if (!k) return Value::undef();
+            const u8 bits = m == "keyRoving" ? kKeyRoving : m == "keyTemporalAutoBezier" ? kKeyAutoBezier
+                                                         : static_cast<u8>(kKeyContinuous | kKeyAutoBezier);
+            return Value::boolean((k->temporal & bits) != 0);
+        }
+        if (m == "keySpatialContinuous" || m == "keySpatialAutoBezier" || m == "keySelected")
             return Value::boolean(false);
         if (m == "getSeparationFollower") {
             const i64 dim = a.empty() ? 0 : std::llround(in.to_num(a[0]));

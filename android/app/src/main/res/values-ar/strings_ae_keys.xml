@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lote K (AE): assistentes de keyframe, bézier automática/contínua, vagante, Lift/Extract e Motion Sketch. -->
+<resources>
+    <string name="aek_tools">المساعدات</string>
+    <string name="aek_time_reverse">عكس في الزمن</string>
+    <string name="aek_exponential_scale">تحجيم أُسّي</string>
+    <string name="aek_smoother">المُنعِّم</string>
+    <string name="aek_smoother_level">تسامح %1$s</string>
+    <string name="aek_bake_expression">تحويل التعبير إلى إطارات مفتاحية</string>
+    <string name="aek_auto_bezier">بيزيه تلقائي</string>
+    <string name="aek_continuous_bezier">بيزيه متصل</string>
+    <string name="aek_rove">التجوال عبر الزمن</string>
+    <string name="aek_lift_work_area">رفع منطقة العمل</string>
+    <string name="aek_extract_work_area">استخراج منطقة العمل</string>
+    <string name="aek_lifted">أُزيلت منطقة العمل (بقيت الفجوة)</string>
+    <string name="aek_extracted">أُزيلت منطقة العمل وأُغلقت الفجوة</string>
+    <string name="aek_reverse_nothing">تعذّر العكس: اختر إطارين مفتاحيين في مسار دون أن يقع أحدهما على آخر</string>
+    <string name="aek_exp_scale_nothing">يحتاج التحجيم الأُسّي إلى إطارين مفتاحيين للمقياس بقيم من الإشارة نفسها</string>
+    <string name="aek_smoother_nothing">يحتاج المُنعِّم إلى 3 إطارات مفتاحية أو أكثر في المسار</string>
+    <string name="aek_bake_nothing">لا يوجد تعبير مفعّل للتحويل</string>
+    <string name="aek_flags_nothing">لا شيء لتغييره في الإطارات المختارة</string>
+    <string name="aek_motion_sketch">Motion Sketch</string>
+    <string name="aek_motion_sketch_stop">إيقاف Motion Sketch</string>
+    <string name="aek_motion_sketch_hint">اسحب الطبقة المختارة على المسرح: تعمل المعاينة ويتحول المسار إلى إطارات موضع</string>
+    <string name="aek_motion_sketch_done">تم تسجيل %1$d إطار موضع</string>
+    <string name="aek_motion_sketch_nothing">اختر طبقة واسحبها على المسرح للتسجيل</string>
+</resources>

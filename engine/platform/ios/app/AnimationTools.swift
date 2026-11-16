@@ -865,7 +865,7 @@ struct NativeCurvePanel: View {
     }
     private var layer: Int64 { model.primarySelection ?? 0 }
     private var track: [KeyframeItem] {
-        (model.keyframes[layer] ?? []).filter {
+        (model.keysForLayer(layer) ?? []).filter {
             $0.timelineVisible && $0.property == model.curveProperty && (model.curveProperty < 31 ||
                 ($0.effectIndex == model.curveEffect && $0.paramIndex == model.curveParam))
         }.sorted { $0.time < $1.time }
@@ -996,7 +996,7 @@ struct NativeCurvePanel: View {
         }
         let like = KeyframeItem(property: model.curveProperty, paramIndex: model.curveParam, effectIndex: model.curveEffect,
                                 time: 0, value: 0, interpolation: 1)
-        let next = graphTrackFor((model.keyframes[layer] ?? []).filter { $0.timelineVisible }, like: like)
+        let next = graphTrackFor((model.keysForLayer(layer) ?? []).filter { $0.timelineVisible }, like: like)
         guard let head = next.first else { model.curveSelectedTime = nil; return }
         model.curveProperty = head.property; model.curveEffect = head.effectIndex; model.curveParam = head.paramIndex
         let query = navigation(at: model.status.playhead)
@@ -1025,7 +1025,7 @@ struct NativeCurvePanel: View {
         }
         let like = KeyframeItem(property: model.curveProperty, paramIndex: model.curveParam, effectIndex: model.curveEffect,
                                 time: 0, value: 0, interpolation: 1)
-        let next = graphTrackFor((model.keyframes[layer] ?? []).filter { $0.timelineVisible }, like: like)
+        let next = graphTrackFor((model.keysForLayer(layer) ?? []).filter { $0.timelineVisible }, like: like)
         guard next.count >= 2, let head = next.first else { return false }
         model.curveProperty = head.property; model.curveEffect = head.effectIndex; model.curveParam = head.paramIndex
         model.curveSelectedTime = head.time
@@ -1194,7 +1194,7 @@ struct NativeCurvePanel: View {
 
     /// Todos os trechos da propriedade (e dos eixos do grupo): um desfazer.
     private func applyToProperty(_ value: CurveEase) {
-        let starts = curvePropertySegmentStarts(model.keyframes[layer] ?? [], track)
+        let starts = curvePropertySegmentStarts(model.keysForLayer(layer) ?? [], track)
         guard !starts.isEmpty else { model.toast = AureaText.t("pn_curve_need_two_keys"); return }
         model.beginGesture("curva na propriedade")
         for key in starts { apply(value, to: key) }
@@ -1924,6 +1924,61 @@ struct ExpressionTrack: Equatable {
         self.property = property; self.effect = effect; self.param = param
     }
 }
+/// v70: os bounces do After Effects inteiros (ExpressionSheet.kt `BounceInertia`/`BounceDrop`).
+enum ExpressionCode {
+    static let bounceInertia = """
+    amp = .06;
+    freq = 2.5;
+    decay = 5.0;
+    n = 0;
+    if (numKeys > 0) {
+      n = nearestKey(time).index;
+      if (key(n).time > time) n--;
+    }
+    t = n == 0 ? 0 : time - key(n).time;
+    if (n > 0 && t < 1) {
+      v = velocityAtTime(key(n).time - thisComp.frameDuration / 10);
+      value + v * amp * Math.sin(freq * t * 2 * Math.PI) / Math.exp(decay * t);
+    } else {
+      value;
+    }
+    """
+    static let bounceDrop = """
+    e = .7;
+    g = 5000;
+    nMax = 9;
+    n = 0;
+    if (numKeys > 0) {
+      n = nearestKey(time).index;
+      if (key(n).time > time) n--;
+    }
+    if (n > 0) {
+      t = time - key(n).time;
+      v = -velocityAtTime(key(n).time - .001) * e;
+      vl = length(v);
+      vu = vl > 0 ? v / vl : v * 0;
+      tCur = 0;
+      segDur = 2 * vl / g;
+      tNext = segDur;
+      nb = 1;
+      while (tNext < t && nb <= nMax) {
+        vl *= e;
+        segDur *= e;
+        tCur = tNext;
+        tNext += segDur;
+        nb++;
+      }
+      if (nb <= nMax) {
+        delta = t - tCur;
+        value + vu * delta * (vl - g * delta / 2);
+      } else {
+        value;
+      }
+    } else {
+      value;
+    }
+    """
+}
 struct ExpressionRequest: Identifiable {
     let id = UUID()
     let layer: Int64
@@ -1969,6 +2024,18 @@ struct ExpressionSheet: View {
         "thisComp.layer(1).toWorld(thisComp.layer(1).anchorPoint)", "lookAt(position, thisComp.layer(1).position)",
         "var r = thisLayer.sourceRectAtTime(); [r.left + r.width / 2, r.top + r.height / 2]",
         "comp(\"Comp 1\").layer(1).transform.position"]
+    /// v70: atalhos do texto-fonte (o resultado vira o texto) — ExpressionSheet.kt `TextSnippets`.
+    private let textSnippets = ["value.substr(0, Math.floor(time * 12))", "Math.round(linear(time, 0, 2, 0, 1000))", "timeToTimecode()",
+        "value.toUpperCase()", "\"Pontos: \" + Math.floor(time * 10)", "time.toFixed(1) + \"s\"", "thisComp.layer(1).name",
+        "value + \" \" + Math.floor(time)"]
+    /// v70: no texto-fonte o resultado é texto.
+    private var textSource: Bool { request.tracks.first?.property == 50 }
+    /// Atalho: o rótulo (nil = o próprio código) e o código. Os bounces trocam o texto todo.
+    private var shortcuts: [(String?, String)] {
+        textSource ? textSnippets.map { (nil, $0) }
+            : [(AureaText.t("expr_snip_bounce"), ExpressionCode.bounceInertia), (AureaText.t("expr_snip_bounce_drop"), ExpressionCode.bounceDrop)]
+                + snippets.map { (nil, $0) }
+    }
     private var applied: Bool { (info["exists"] as? NSNumber)?.boolValue == true }
     private var enabled: Bool { (info["enabled"] as? NSNumber)?.boolValue == true }
     private var dirty: Bool { source != (info["source"] as? String ?? "") }
@@ -1990,6 +2057,7 @@ struct ExpressionSheet: View {
         }
         if dirty { return (AureaText.t(source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "panel_aplicar_sem_texto_remove_expressao" : "panel_sintaxe_ok_toque_aplicar"), AureaColors.muted) }
         if applied && !enabled { return (AureaText.t("panel_desligada_propriedade_usa_keyframes"), AureaColors.muted) }
+        if applied && textSource { return (AureaText.t("panel_resultado_agora") + "\u{201C}" + (info["text"] as? String ?? "") + "\u{201D}", AureaColors.keyframe) }
         if applied { return (AureaText.t("panel_resultado_agora") + values.map { numeroPtBr($0, casas: 2) + request.unit }.joined(separator: " · "), AureaColors.keyframe) }
         return (AureaText.t("panel_escreva_expressao_ou_toque_num_atalho"), AureaColors.muted)
     }
@@ -2019,9 +2087,16 @@ struct ExpressionSheet: View {
                 Text(status.0).font(.aurea(size: 12)).foregroundStyle(status.1).fixedSize(horizontal: false, vertical: true).padding(.top, 8)
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
-                        ForEach(snippets, id: \.self) { snippet in
-                            Button { insert(snippet) } label: {
-                                Text(snippet).font(.aurea(size: 12, design: .monospaced)).foregroundStyle(AureaColors.keyframe)
+                        ForEach(Array(shortcuts.enumerated()), id: \.offset) { _, item in
+                            Button {
+                                if item.0 != nil {
+                                    source = item.1; selection = NSRange(location: (item.1 as NSString).length, length: 0)
+                                } else { insert(item.1) }
+                            } label: {
+                                Group {
+                                    if let name = item.0 { Text(name).font(.aurea(size: 12, weight: .semibold)) }
+                                    else { Text(item.1).font(.aurea(size: 12, design: .monospaced)) }
+                                }.foregroundStyle(AureaColors.keyframe)
                                     .padding(.horizontal, 10).padding(.vertical, 7).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
                             }.buttonStyle(AureaPressStyle())
                         }
@@ -2434,7 +2509,7 @@ private struct NativeTrackGraph: View {
     /// O grupo inteiro (X/Y/Z, componentes) com a trilha escolhida por último.
     private var group: [[KeyframeItem]] {
         guard let first = keys.first else { return [] }
-        let all = graphGroup(model.keyframes[layer] ?? [], keys)
+        let all = graphGroup(model.keysForLayer(layer) ?? [], keys)
         return all.filter { !curveSameTrack($0[0], first) } + all.filter { curveSameTrack($0[0], first) }
     }
     private func ease(_ key: KeyframeItem) -> CurveEase {
@@ -2665,7 +2740,7 @@ private struct NativeTrackGraph: View {
             if let nearest {
                 let peers = model.graphKeyGroup(layer, nearest)
                 drag?.originalPeers = peers
-                let tracks = (model.keyframes[layer] ?? []).filter { candidate in peers.contains { curveSameTrack($0, candidate) } }
+                let tracks = (model.keysForLayer(layer) ?? []).filter { candidate in peers.contains { curveSameTrack($0, candidate) } }
                 drag?.previous = tracks.filter { $0.time < nearest.time }.map(\.time).max()
                 drag?.next = tracks.filter { $0.time > nearest.time }.map(\.time).min()
             }

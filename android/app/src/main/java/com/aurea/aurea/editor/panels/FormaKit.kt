@@ -102,7 +102,8 @@ internal fun HumanRow(
     fun currentOwner() = env.store.primary == owner && env.store.projectGeneration == generation && env.store.composition?.id == composition
     androidx.compose.runtime.key(generation, composition, owner, label, keyTag) {
     var menu by remember { mutableStateOf(false) }
-    Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+    // heightIn: com o rótulo em cima (painéis 3D, seções) a linha cresce em vez de cortar.
+    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
         com.aurea.aurea.ui.ds.PropertyRow(label, value, step, min, max,
             { comUnidade(numeroPtBr(it, decimals), unit) }, selected, { onSelect?.invoke() },
             onStart, { if (currentOwner()) onValue(it) }, onEnd, onTapValue = {

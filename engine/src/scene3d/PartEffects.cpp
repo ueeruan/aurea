@@ -55,17 +55,25 @@ bool is_part3d_effect(u32 effectType) noexcept {
         || effectType == effect_type_id(effect_keys::kPart3DTexture);
 }
 
-void part_nodes(const SceneAsset& asset, std::vector<u32>& out) {
+void part_nodes(const SceneAsset& asset, std::vector<u32>& out, bool includeJoints) {
     out.clear();
     for (u32 i = 0; i < asset.nodes.size(); ++i) {
         const Node& node = asset.nodes[i];
         if (node.inScene && node.mesh >= 0 && static_cast<usize>(node.mesh) < asset.meshes.size()) out.push_back(i);
     }
+    if (!includeJoints) return;
+    // Existing mesh indices stay stable in saved projects. Append animation
+    // joints so a single skinned avatar exposes its articulated parts too.
+    for (const Skin& skin : asset.skins) for (i32 joint : skin.joints) {
+        if (joint < 0 || static_cast<usize>(joint) >= asset.nodes.size()) continue;
+        const u32 node = static_cast<u32>(joint);
+        if (asset.nodes[node].inScene && std::find(out.begin(), out.end(), node) == out.end()) out.push_back(node);
+    }
 }
 
-void part_names(const SceneAsset& asset, std::vector<std::string>& out) {
+void part_names(const SceneAsset& asset, std::vector<std::string>& out, bool includeJoints) {
     std::vector<u32> parts;
-    part_nodes(asset, parts);
+    part_nodes(asset, parts, includeJoints);
     out.clear();
     out.reserve(parts.size());
     for (const u32 n : parts) {
@@ -94,7 +102,7 @@ void apply_part_effects(const SceneAsset& asset, const Layer& layer, f64 localTi
                         std::vector<Mat4>& nodeWorld, std::vector<f32>& nodeOpacity) {
     if (!has_part_effects(layer)) return;
     std::vector<u32> parts;
-    part_nodes(asset, parts);
+    part_nodes(asset, parts, true);
     if (parts.empty()) return;
     const EffectTypeId move = effect_type_id(effect_keys::kPart3DTransform);
     const EffectTypeId hide = effect_type_id(effect_keys::kPart3DHide);
@@ -114,12 +122,20 @@ void apply_part_effects(const SceneAsset& asset, const Layer& layer, f64 localTi
                 c[3 + axis] = std::clamp(param_at(layer, effect, 4 + axis, localTime, 0.0f, false), -360000.0f, 360000.0f);
             }
             const f32 scale = std::clamp(param_at(layer, effect, 7, localTime, 100.0f, false), 0.0f, 100000.0f) * 0.01f;
-            c[6] = c[7] = c[8] = scale;
-            bool neutral = std::fabs(scale - 1.0f) < 1e-7f;
+            for (u32 axis = 0; axis < 3; ++axis)
+                c[6 + axis] = scale * std::clamp(param_at(layer, effect, 11 + axis, localTime, 100.f, false), 0.f, 100000.f) * .01f;
+            bool neutral = true;
+            for (u32 axis = 0; axis < 3; ++axis) neutral = neutral && std::fabs(c[6 + axis] - 1.f) < 1e-7f;
             for (u32 k = 0; k < 6; ++k) neutral = neutral && std::fabs(c[k]) < 1e-7f;
             if (neutral) continue;
             const i32 mesh = asset.nodes[node].mesh;
-            const Vec3 pivot = nodeWorld[node].transform_point(asset.meshes[static_cast<usize>(mesh)].bounds.center());
+            Vec3 center{};
+            if (mesh >= 0 && static_cast<usize>(mesh) < asset.meshes.size()) center = asset.meshes[static_cast<usize>(mesh)].bounds.center();
+            const Vec3 offset{
+                std::clamp(param_at(layer, effect, 8, localTime, 0.f, false), -100000.f, 100000.f) * .01f * size,
+                std::clamp(param_at(layer, effect, 9, localTime, 0.f, false), -100000.f, 100000.f) * .01f * size,
+                std::clamp(param_at(layer, effect, 10, localTime, 0.f, false), -100000.f, 100000.f) * .01f * size};
+            const Vec3 pivot = nodeWorld[node].transform_point(center) + offset;
             move_subtree(asset, node, shape3d_part_matrix(c, pivot), nodeWorld);
         } else if (effect.type == hide) {
             const f32 amount = std::clamp(param_at(layer, effect, 2, localTime, 100.0f, false) * 0.01f, 0.0f, 1.0f);
@@ -130,6 +146,7 @@ void apply_part_effects(const SceneAsset& asset, const Layer& layer, f64 localTi
             const bool invert = param_at(layer, effect, 3, localTime, 0.0f, true) >= 0.5f;
             if (nodeOpacity.size() < asset.nodes.size()) nodeOpacity.resize(asset.nodes.size(), 1.0f);
             for (usize i = 0; i < parts.size(); ++i) {
+                if (asset.nodes[parts[i]].mesh < 0) continue;
                 const i64 oneBased = static_cast<i64>(i) + 1;
                 const bool inRange = oneBased >= first && oneBased <= last;
                 if (inRange == invert) continue;
@@ -140,29 +157,53 @@ void apply_part_effects(const SceneAsset& asset, const Layer& layer, f64 localTi
     }
 }
 
-void collect_part_textures(const SceneAsset& asset, const Layer& layer, f64 localTime, std::vector<PartTexture>& out) {
+f32 part_texture_offset(f32 offsetPct, f32 scrollPctPerSecond, f64 localFrames, f64 fps) noexcept {
+    const f64 rate = fps > 0.0 && std::isfinite(fps) ? fps : 30.0;
+    f64 v = std::isfinite(offsetPct) ? static_cast<f64>(offsetPct) * 0.01 : 0.0;
+    if (std::isfinite(scrollPctPerSecond) && scrollPctPerSecond != 0.0f && std::isfinite(localFrames))
+        v += static_cast<f64>(scrollPctPerSecond) * 0.01 * (localFrames / rate);
+    // A imagem repete: só a fração conta (e a precisão não se perde com o tempo).
+    v -= std::floor(v);
+    if (!std::isfinite(v) || v >= 1.0) v = 0.0;
+    return static_cast<f32>(v);
+}
+
+void collect_part_textures(const SceneAsset& asset, const Layer& layer, f64 localTime, std::vector<PartTexture>& out,
+                           f64 fps) {
     out.clear();
     if (!has_part_textures(layer)) return;
     std::vector<u32> parts;
     part_nodes(asset, parts);
     if (parts.empty()) return;
     const EffectTypeId swap = effect_type_id(effect_keys::kPart3DTexture);
-    auto put = [&](u32 node, u64 image, f32 repeat) {
-        for (PartTexture& t : out) if (t.node == node) { t.image = image; t.repeat = repeat; return; }
-        out.push_back(PartTexture{node, image, repeat});
+    auto put = [&](const PartTexture& value) {
+        for (PartTexture& t : out) if (t.node == value.node) { t = value; return; }
+        out.push_back(value);
     };
     for (const auto& effect : layer.effects) {
         if (!effect.enabled || effect.type != swap || effect.params.size() < 2) continue;
         const u64 image = effect.params[1].constant.ref;
         if (image == 0) continue;
-        const f32 repeat = std::clamp(param_at(layer, effect, 3, localTime, 100.0f, false), 1.0f, 100000.0f) * 0.01f;
+        PartTexture t;
+        t.image = image;
+        t.repeat = std::clamp(param_at(layer, effect, 3, localTime, 100.0f, false), 1.0f, 100000.0f) * 0.01f;
+        // v76: deslocamento, giro e rolar (efeito antigo sem esses parâmetros: zeros).
+        const f32 ox = param_at(layer, effect, kPartTextureOffsetX, localTime, 0.0f, false);
+        const f32 oy = param_at(layer, effect, kPartTextureOffsetY, localTime, 0.0f, false);
+        const f32 sx = param_at(layer, effect, kPartTextureScrollX, localTime, 0.0f, false);
+        const f32 sy = param_at(layer, effect, kPartTextureScrollY, localTime, 0.0f, false);
+        if (ox != 0.0f || sx != 0.0f) t.offset.x = part_texture_offset(ox, sx, localTime, fps);
+        if (oy != 0.0f || sy != 0.0f) t.offset.y = part_texture_offset(oy, sy, localTime, fps);
+        const f32 degrees = param_at(layer, effect, kPartTextureRotation, localTime, 0.0f, false);
+        if (std::isfinite(degrees) && degrees != 0.0f) t.rotation = std::fmod(degrees, 360.0f) * kDeg2Rad;
         if (param_at(layer, effect, 2, localTime, 0.0f, true) >= 0.5f) {
-            for (const u32 node : parts) put(node, image, repeat);
+            for (const u32 node : parts) { t.node = node; put(t); }
             continue;
         }
         const i32 p = part_index(param_at(layer, effect, 0, localTime, 1.0f, true), parts.size());
-        if (p >= 0) put(parts[static_cast<usize>(p)], image, repeat);
+        if (p >= 0) { t.node = parts[static_cast<usize>(p)]; put(t); }
     }
 }
+
 
 } // namespace aurea::scene3d

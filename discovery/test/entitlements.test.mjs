@@ -27,7 +27,7 @@ const admin = (env, corpo, token = SEGREDO, ip) =>
   chamar(env, "/api/admin/entitlements", { metodo: "POST", corpo, token, ip });
 
 test("entitlements: lista de produtos conhecidos", () => {
-  assert.deepEqual([...PRODUTOS], [HYPER]);
+  assert.deepEqual([...PRODUTOS], [HYPER, "aurea_aureaos"]);
   assert.ok(Object.isFrozen(PRODUTOS));
 });
 

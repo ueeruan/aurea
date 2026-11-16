@@ -118,7 +118,18 @@ std::string encode_text3d(const Text3DSpec& s) {
     char anim[128];
     std::snprintf(anim, sizeof(anim), ";anim=%u/%.4f/%.4f/%.4f;", s.animation,
         double(s.animationDuration), double(s.animationStagger), double(s.animationAmount));
-    return out + anim + "glyphs=" + (s.separateGlyphs ? "1" : "0") + ";finish=" + std::to_string(std::min(s.surfaceFinish, 4u)) + ";t=" + s.content;
+    // 0.5.4 Cartoon: só com o estilo ligado (a receita Padrão sai byte a byte
+    // igual à de antes). lateral auto / brilho / contorno rrggbb / largura / lateral rrggbb.
+    std::string toon;
+    if (s.style == kText3DStyleCartoon) {
+        char buf[96];
+        std::snprintf(buf, sizeof(buf), ";toon=1/%u/%.3f/%02x%02x%02x/%.3f/%02x%02x%02x", s.toonSideAuto ? 1u : 0u,
+                      static_cast<double>(s.toonHighlight), byte(s.outlineColor.x), byte(s.outlineColor.y),
+                      byte(s.outlineColor.z), static_cast<double>(s.outlineWidth), byte(s.toonSideColor.x),
+                      byte(s.toonSideColor.y), byte(s.toonSideColor.z));
+        toon = buf;
+    }
+    return out + anim + "glyphs=" + (s.separateGlyphs ? "1" : "0") + ";finish=" + std::to_string(std::min(s.surfaceFinish, 4u)) + toon + ";t=" + s.content;
 }
 
 bool decode_text3d(const std::string& src, Text3DSpec& out) {
@@ -150,6 +161,23 @@ bool decode_text3d(const std::string& src, Text3DSpec& out) {
                 s.animationDuration = std::isfinite(duration) ? std::clamp(duration, .2f, 30.f) : 2.f;
                 s.animationStagger = std::isfinite(stagger) ? std::clamp(stagger, 0.f, 1.f) : .12f;
                 s.animationAmount = std::isfinite(amount) ? std::clamp(amount, 0.f, 2.f) : .3f;
+            }
+        } else if (kv.rfind("toon=", 0) == 0) {
+            // 0.5.4 Cartoon: "toon=1/auto/brilho/rrggbb/largura/rrggbb".
+            unsigned on = 0, sideAuto = 1, outline = 0x1b192d, side = 0x9e334c;
+            float highlight = .45f, width = 8.f;
+            const int n = std::sscanf(kv.c_str() + 5, "%u/%u/%f/%6x/%f/%6x", &on, &sideAuto, &highlight, &outline, &width, &side);
+            if (n >= 1 && on == 1) {
+                auto rgb = [](unsigned c) {
+                    return Vec4{static_cast<f32>((c >> 16) & 0xFF) / 255.0f, static_cast<f32>((c >> 8) & 0xFF) / 255.0f,
+                                static_cast<f32>(c & 0xFF) / 255.0f, 1.0f};
+                };
+                s.style = kText3DStyleCartoon;
+                if (n >= 2) s.toonSideAuto = sideAuto != 0;
+                if (n >= 3) s.toonHighlight = highlight;
+                if (n >= 4) s.outlineColor = rgb(outline);
+                if (n >= 5) s.outlineWidth = width;
+                if (n >= 6) s.toonSideColor = rgb(side);
             }
         } else if (kv == "glyphs=1") s.separateGlyphs = true;
         else if (kv.rfind("finish=", 0) == 0) s.surfaceFinish = std::min(4u, static_cast<u32>(std::strtoul(kv.c_str() + 7, nullptr, 10)));
@@ -233,6 +261,40 @@ void sanitize_text3d(Text3DSpec& s) noexcept {
     s.animationStagger = range(s.animationStagger, 0.0f, 1.0f, 0.12f);
     s.animationAmount = range(s.animationAmount, 0.0f, 2.0f, 0.3f);
     s.surfaceFinish = std::min(s.surfaceFinish, 4u);
+    s.style = s.style == kText3DStyleCartoon ? kText3DStyleCartoon : kText3DStyleStandard;
+    s.toonHighlight = unit(s.toonHighlight, 0.45f);
+    s.outlineWidth = range(s.outlineWidth, 0.0f, kText3DOutlineMaxWidth, 8.0f);
+    s.outlineColor = Vec4{unit(s.outlineColor.x, 0.1f), unit(s.outlineColor.y, 0.1f), unit(s.outlineColor.z, 0.18f), 1.0f};
+    s.toonSideColor = Vec4{unit(s.toonSideColor.x, 0.6f), unit(s.toonSideColor.y, 0.2f), unit(s.toonSideColor.z, 0.3f), 1.0f};
+}
+
+Vec4 text3d_cartoon_side_color(Vec4 front) noexcept {
+    // HSV: o mesmo matiz, valor × 0,72 e saturação puxada 40 % para o máximo —
+    // o rosa vira vermelho-rosado, o ciano vira petróleo (a lateral do cartoon).
+    auto clamp01 = [](f32 v) { return std::isfinite(v) ? std::clamp(v, 0.0f, 1.0f) : 0.0f; };
+    const f32 r = clamp01(front.x), g = clamp01(front.y), b = clamp01(front.z);
+    const f32 mx = std::max({r, g, b}), mn = std::min({r, g, b}), d = mx - mn;
+    f32 h = 0.0f;
+    if (d > 1e-6f) {
+        if (mx == r) h = std::fmod((g - b) / d + 6.0f, 6.0f);
+        else if (mx == g) h = (b - r) / d + 2.0f;
+        else h = (r - g) / d + 4.0f;
+    }
+    const f32 s0 = mx > 1e-6f ? d / mx : 0.0f;
+    // Cinza continua cinza (sem matiz para saturar).
+    const f32 s = d > 1e-6f ? s0 + (1.0f - s0) * 0.4f : 0.0f;
+    const f32 v = mx * 0.72f;
+    const f32 c = v * s, x = c * (1.0f - std::fabs(std::fmod(h, 2.0f) - 1.0f)), m = v - c;
+    f32 rr = 0, gg = 0, bb = 0;
+    switch (static_cast<int>(h) % 6) {
+        case 0: rr = c; gg = x; break;
+        case 1: rr = x; gg = c; break;
+        case 2: gg = c; bb = x; break;
+        case 3: gg = x; bb = c; break;
+        case 4: rr = x; bb = c; break;
+        default: rr = c; bb = x; break;
+    }
+    return Vec4{rr + m, gg + m, bb + m, 1.0f};
 }
 
 std::shared_ptr<const text::Font> text3d_font(const Text3DSpec& spec) {
@@ -1156,7 +1218,10 @@ std::string geom_key(const text::Font& font, const Text3DSpec& s) {
                   s.bevel ? 1u : 0u, static_cast<double>(s.bevelWidth), static_cast<double>(s.bevelDepth),
                   s.bevelSegments, static_cast<double>(s.bevelRoundness), s.regionMaterials ? 1u : 0u,
                   s.content.size());
-    return std::string(buf) + (s.separateGlyphs ? "|glyphs|" : "|static|") + s.content;
+    // Cartoon: regiões separadas + a primitiva do contorno (só ele muda a chave;
+    // a do estilo Padrão continua a mesma de antes).
+    const char* glyphs = s.separateGlyphs ? "|glyphs|" : "|static|";
+    return std::string(buf) + (s.style == kText3DStyleCartoon ? "|toon" : "") + glyphs + s.content;
 }
 
 void append_chunk(Primitive& p, const Chunk& c) {
@@ -1223,9 +1288,12 @@ std::shared_ptr<const GeomAsset> build_geom(const text::Font& font, const Text3D
     if (!mesh) return nullptr;
 
     auto asset = std::make_unique<SceneAsset>();
+    // Cartoon: a lateral tem cor própria (frente, lateral e chanfro separados).
+    const bool toon = spec.style == kText3DStyleCartoon;
+    const bool regions = spec.regionMaterials || toon;
     // Materiais de palha: só para o finalizador saber que nenhuma primitiva é
     // alpha-blend (as cores de verdade entram depois, no build_text3d).
-    asset->materials.resize(spec.regionMaterials ? 3u : 1u);
+    asset->materials.resize(regions ? 3u : 1u);
     auto chunk_primitive = [](const Chunk& c, i32 material) {
         Primitive p;
         append_chunk(p, c);
@@ -1235,7 +1303,7 @@ std::shared_ptr<const GeomAsset> build_geom(const text::Font& font, const Text3D
         return p;
     };
     Mesh mesh0;
-    if (spec.regionMaterials) {
+    if (regions) {
         if (!mesh->caps.empty()) mesh0.primitives.push_back(chunk_primitive(mesh->caps, 0));
         if (!mesh->walls.empty()) mesh0.primitives.push_back(chunk_primitive(mesh->walls, 1));
         if (!mesh->bevels.empty()) mesh0.primitives.push_back(chunk_primitive(mesh->bevels, 2));
@@ -1279,6 +1347,23 @@ std::shared_ptr<const GeomAsset> build_geom(const text::Font& font, const Text3D
     geom->primitives = std::move(fin.asset->meshes[0].primitives);
     geom->bounds = fin.asset->meshes[0].bounds;
     geom->assetBounds = fin.asset->bounds;
+    // Contorno do Cartoon: depois do finalizador (ele não pode soldar nem
+    // otimizar os vértices do casco/vincos — a "normal" dos vincos é a outra ponta).
+    if (toon) {
+        // A faixa de brilho do Cartoon (pbr.frag): no chanfro, uv1 = a direção
+        // da normal no plano do texto (Y para cima, presa à letra — girar o
+        // texto não muda onde fica o "em cima"). Frente e lateral: zero.
+        for (Primitive& p : geom->primitives) {
+            p.uv1.assign(p.positions.size(), Vec2{0.0f, 0.0f});
+            if (p.material != 2) continue;
+            for (usize v = 0; v < p.normals.size() && v < p.uv1.size(); ++v) {
+                const Vec2 d{p.normals[v].x, p.normals[v].y};
+                const f32 len = std::sqrt(d.x * d.x + d.y * d.y);
+                if (len > 1e-4f) p.uv1[v] = Vec2{d.x / len, d.y / len};
+            }
+        }
+        (void)append_toon_outline(geom->primitives, static_cast<i32>(kText3DOutlineMaterial));
+    }
 
     return geom;
 }
@@ -1415,11 +1500,141 @@ void apply_surface_finish(SceneAsset& asset, u32 finish) {
 
 std::string text3d_geometry_key(const text::Font& font, const Text3DSpec& spec) { return geom_key(font, spec); }
 
+bool append_toon_outline(std::vector<Primitive>& primitives, i32 material, f32 creaseDegrees) {
+    // --- 1. Soldar por posição: frente, lateral e chanfro repetem o vértice
+    // do vinco com normais diferentes; aqui eles viram um só.
+    struct QKey {
+        i64 x, y, z;
+        bool operator==(const QKey&) const noexcept = default;
+    };
+    struct QHash {
+        usize operator()(const QKey& k) const noexcept {
+            u64 h = static_cast<u64>(k.x) * 0x9E3779B97F4A7C15ull;
+            h ^= static_cast<u64>(k.y) + 0x7F4A7C159E3779B9ull + (h << 6) + (h >> 2);
+            h ^= static_cast<u64>(k.z) + 0x94D049BB133111EBull + (h << 6) + (h >> 2);
+            return static_cast<usize>(h);
+        }
+    };
+    std::unordered_map<QKey, u32, QHash> weld;
+    std::vector<Vec3> pos;
+    std::vector<u32> tri;   // 3 índices soldados por triângulo
+    for (const Primitive& p : primitives) {
+        if (p.material == material) continue;   // nunca o contorno de um contorno
+        std::vector<u32> map(p.positions.size());
+        for (usize v = 0; v < p.positions.size(); ++v) {
+            const Vec3 q = p.positions[v];
+            if (!std::isfinite(q.x) || !std::isfinite(q.y) || !std::isfinite(q.z)) return false;
+            const QKey k{std::llround(static_cast<f64>(q.x) * 1e5), std::llround(static_cast<f64>(q.y) * 1e5),
+                         std::llround(static_cast<f64>(q.z) * 1e5)};
+            const auto [it, added] = weld.try_emplace(k, static_cast<u32>(pos.size()));
+            if (added) pos.push_back(q);
+            map[v] = it->second;
+        }
+        for (usize i = 0; i + 2 < p.indices.size(); i += 3) {
+            if (p.indices[i] >= map.size() || p.indices[i + 1] >= map.size() || p.indices[i + 2] >= map.size()) continue;
+            const u32 a = map[p.indices[i]], b = map[p.indices[i + 1]], c = map[p.indices[i + 2]];
+            if (a == b || b == c || a == c) continue;
+            tri.insert(tri.end(), {a, b, c});
+        }
+    }
+    const usize faces = tri.size() / 3;
+    if (faces == 0 || pos.size() > 0x3FFFFFFFu) return false;
+
+    // --- 2. Normal de cada face e a normal suave (por ângulo) de cada vértice.
+    std::vector<Vec3> faceN(faces);
+    std::vector<Vec3> smooth(pos.size(), Vec3{0, 0, 0});
+    std::vector<u8> faceOk(faces, 0);
+    for (usize f = 0; f < faces; ++f) {
+        const u32* t = &tri[f * 3];
+        const Vec3 n = (pos[t[1]] - pos[t[0]]).cross(pos[t[2]] - pos[t[0]]);
+        const f32 len = n.length();
+        if (!(len > 1e-12f)) continue;
+        faceN[f] = n * (1.0f / len);
+        faceOk[f] = 1;
+        for (u32 k = 0; k < 3; ++k) {
+            const Vec3 e0 = pos[t[(k + 1) % 3]] - pos[t[k]], e1 = pos[t[(k + 2) % 3]] - pos[t[k]];
+            const f32 l0 = e0.length(), l1 = e1.length();
+            if (!(l0 > 1e-12f && l1 > 1e-12f)) continue;
+            const f32 angle = std::acos(std::clamp(e0.dot(e1) / (l0 * l1), -1.0f, 1.0f));
+            smooth[t[k]] += faceN[f] * angle;
+        }
+    }
+
+    // --- 3. Arestas: as que dobram mais que `creaseDegrees` viram vinco.
+    struct EdgeFaces { u32 first = 0; u32 count = 0; bool crease = false; };
+    std::unordered_map<u64, EdgeFaces> edges;
+    edges.reserve(faces * 2);
+    const f32 creaseCos = std::cos(std::clamp(creaseDegrees, 1.0f, 179.0f) * kPi / 180.0f);
+    for (usize f = 0; f < faces; ++f) {
+        if (!faceOk[f]) continue;
+        const u32* t = &tri[f * 3];
+        for (u32 k = 0; k < 3; ++k) {
+            const u32 a = std::min(t[k], t[(k + 1) % 3]), b = std::max(t[k], t[(k + 1) % 3]);
+            EdgeFaces& e = edges[(static_cast<u64>(a) << 32) | b];
+            if (e.count == 0) e.first = static_cast<u32>(f);
+            else if (faceN[e.first].dot(faceN[f]) < creaseCos) e.crease = true;
+            ++e.count;
+        }
+    }
+
+    // --- 4. A primitiva: casco (ordem invertida) + quadrilátero de cada vinco.
+    Primitive out;
+    out.material = material;
+    out.generatedNormals = false;
+    out.generatedTangents = true;
+    // Só vinco de verdade (duas faces dobrando). Aresta de UMA face só aparece
+    // onde a triangulação tem junção em T (o lado comprido de um triângulo
+    // encosta em dois menores): ela é plana e o traço cruzaria a frente da letra.
+    // A silhueta aberta (se houver) fica com o casco.
+    const usize creases = static_cast<usize>(std::count_if(edges.begin(), edges.end(), [](const auto& kv) {
+        return kv.second.crease && kv.second.count >= 2;
+    }));
+    out.positions.reserve(pos.size() + creases * 4);
+    out.normals.reserve(pos.size() + creases * 4);
+    out.uv1.reserve(pos.size() + creases * 4);
+    out.indices.reserve(faces * 3 + creases * 12);
+    for (usize v = 0; v < pos.size(); ++v) {
+        const f32 len = smooth[v].length();
+        out.positions.push_back(pos[v]);
+        out.normals.push_back(len > 1e-12f ? smooth[v] * (1.0f / len) : Vec3{0, 0, 1});
+        out.uv1.push_back(Vec2{0.0f, 0.0f});
+    }
+    for (usize f = 0; f < faces; ++f) {
+        if (!faceOk[f]) continue;
+        const u32* t = &tri[f * 3];
+        out.indices.insert(out.indices.end(), {t[0], t[2], t[1]});
+    }
+    // Vinco A→B: (ponta, outra ponta, lado). Em B o lado vai com o sinal
+    // trocado (a direção para a outra ponta inverte): os quatro cantos ficam
+    // A+, A−, B+, B−. As duas ordens entram (o quadrilátero nunca é recortado
+    // pela face de trás, qualquer que seja o lado da câmera).
+    for (const auto& [key, e] : edges) {
+        if (!(e.crease && e.count >= 2)) continue;
+        const u32 a = static_cast<u32>(key >> 32), b = static_cast<u32>(key & 0xFFFFFFFFu);
+        const u32 base = static_cast<u32>(out.positions.size());
+        const Vec3 A = pos[a], B = pos[b];
+        out.positions.insert(out.positions.end(), {A, A, B, B});
+        out.normals.insert(out.normals.end(), {B, B, A, A});
+        out.uv1.insert(out.uv1.end(), {Vec2{1, 1}, Vec2{-1, 1}, Vec2{-1, 1}, Vec2{1, 1}});
+        // base+0 = A+, base+1 = A−, base+2 = B+ (lado −1 em B), base+3 = B−.
+        out.indices.insert(out.indices.end(), {base, base + 1, base + 2, base + 1, base + 3, base + 2,
+                                               base, base + 2, base + 1, base + 1, base + 2, base + 3});
+    }
+    out.uv0.assign(out.positions.size(), Vec2{0, 0});
+    out.tangents.assign(out.positions.size(), Vec4{1, 0, 0, 1});
+    for (const Vec3& p : pos) out.bounds.add(p);
+    if (out.positions.size() > 0xFFFFFFFFull) return false;
+    primitives.push_back(std::move(out));
+    return true;
+}
+
 bool apply_text3d_material_preset(Text3DSpec& s, u32 preset) noexcept {
-    if (preset > 13) return false;
+    if (preset >= kText3DMaterialPresetCount) return false;
     s.specular = 1; s.emissive = {}; s.emissiveStrength = 1;
     s.surfaceFinish = preset == 2 ? 1u : 0u;
     s.regionMaterials = false;
+    // Os materiais PBR desligam o Cartoon; o Cartoon (14) liga.
+    s.style = preset == kText3DPresetCartoon ? kText3DStyleCartoon : kText3DStyleStandard;
     switch (preset) {
         case 0: s.bevel = true; s.color = {.95f, .96f, .98f, 1}; s.metallic = 1; s.roughness = .05f; break;
         case 1: s.bevel = true; s.color = {1, .77f, .34f, 1}; s.metallic = 1; s.roughness = .18f; break;
@@ -1479,6 +1694,16 @@ bool apply_text3d_material_preset(Text3DSpec& s, u32 preset) noexcept {
             s.bevel = true; s.bevelWidth = .018f; s.bevelDepth = .02f; s.bevelSegments = 4; s.bevelRoundness = 1;
             s.color = {.98f, .68f, .6f, 1}; s.metallic = 1; s.roughness = .16f;
             break;
+        case 14: // Cartoon (0.5.4): cel chapado, lateral mais escura, brilho em
+            // cima e contorno grosso. O chanfro é uma faixa quase plana (recua a
+            // frente sem afundar): é nele que a faixa clara aparece, e o vinco
+            // entre ele e a lateral ganha o traço escuro.
+            s.depth = .26f; s.bevel = true; s.bevelWidth = .035f; s.bevelDepth = .004f;
+            s.bevelSegments = 1; s.bevelRoundness = 0;
+            s.color = {.96f, .45f, .55f, 1}; s.metallic = 0; s.roughness = 1; s.specular = 0;
+            s.toonSideAuto = true; s.toonHighlight = .6f;
+            s.outlineColor = {.106f, .098f, .176f, 1}; s.outlineWidth = 10;
+            break;
     }
     return true;
 }
@@ -1510,14 +1735,40 @@ ImportResult build_text3d(const text::Font& font, const Text3DSpec& spec,
     std::string name = spec.content.substr(0, spec.content.find('\n'));
     if (name.size() > 32) name.resize(32);
     asset->sourceName = name.empty() ? "Texto 3D" : name;
-    if (spec.regionMaterials) {
+    const bool toon = spec.style == kText3DStyleCartoon;
+    if (toon) {
+        // Cartoon: cel chapado. A frente e o chanfro na cor da frente (a faixa
+        // de brilho sai do chanfro de cima, no shader), a lateral no tom escuro,
+        // e o contorno — material 3 — com a largura da receita.
+        Text3DMaterial front = spec.front_material();
+        Text3DMaterial side = front;
+        side.color = text3d_cartoon_side(spec);
+        const f32 highlight = std::clamp(spec.toonHighlight, 0.0f, 1.0f);
+        Material m0 = make_material("frente", front), m1 = make_material("lateral", side), m2 = make_material("chanfro", front);
+        for (Material* m : {&m0, &m1, &m2}) {
+            m->toon = 1;
+            m->metallic = 0.0f; m->roughness = 1.0f; m->specular = 0.0f; m->specularColor = Vec3{0, 0, 0};
+        }
+        m0.toonParam = highlight; m2.toonParam = highlight;
+        Text3DMaterial ink;
+        ink.color = spec.outlineColor;
+        Material m3 = make_material("contorno", ink);
+        m3.toon = 2;
+        m3.toonParam = std::clamp(spec.outlineWidth, 0.0f, kText3DOutlineMaxWidth);
+        m3.metallic = 0.0f; m3.roughness = 1.0f; m3.specular = 0.0f;
+        asset->materials.push_back(std::move(m0));
+        asset->materials.push_back(std::move(m1));
+        asset->materials.push_back(std::move(m2));
+        asset->materials.push_back(std::move(m3));
+    } else if (spec.regionMaterials) {
         asset->materials.push_back(make_material("frente", spec.front_material()));
         asset->materials.push_back(make_material("lateral", spec.side));
         asset->materials.push_back(make_material("chanfro", spec.bevelMat));
     } else {
         asset->materials.push_back(make_material("texto", spec.front_material()));
     }
-    apply_surface_finish(*asset, std::min(spec.surfaceFinish, 4u));
+    // O acabamento é relevo PBR: o Cartoon é chapado e não o usa.
+    if (!toon) apply_surface_finish(*asset, std::min(spec.surfaceFinish, 4u));
     if (!spec.texturePath.empty()) {
         Image image;
         const std::string path = resolvePath ? resolvePath(spec.texturePath) : spec.texturePath;
@@ -1527,6 +1778,7 @@ ImportResult build_text3d(const text::Font& font, const Text3DSpec& spec,
             const i32 index = static_cast<i32>(asset->images.size());
             asset->images.push_back(std::move(image));
             for (auto& material : asset->materials) {
+                if (material.toon == 2) continue;   // o contorno do Cartoon é tinta lisa
                 material.baseColorTex.image = index;
                 material.baseColorTex.scale = {1, 1};
             }
@@ -2127,7 +2379,8 @@ void image3d_from_fields(const f32* v, Image3DSpec& s) noexcept {
 
 bool apply_image3d_material_preset(Image3DSpec& spec, u32 preset) noexcept {
     Text3DSpec look;
-    if (!apply_text3d_material_preset(look, preset)) return false;
+    // O Cartoon é um estilo do TEXTO 3D (cel + contorno); a Imagem 3D não o tem.
+    if (preset == kText3DPresetCartoon || !apply_text3d_material_preset(look, preset)) return false;
     const Text3DMaterial flat = look.front_material();
     spec.side = look.regionMaterials ? look.side : flat;
     spec.bevelMat = look.regionMaterials ? look.bevelMat : flat;

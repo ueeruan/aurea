@@ -27,6 +27,20 @@ internal object ImageMemoryPolicy {
         return sample.takeIf { w * h <= availablePixels }
     }
 
+    /**
+     * 0.5.3 ("duas fotos e fechou"): a amostra da foto, pedindo UMA coleta antes
+     * de recusar. A cópia direta da foto anterior (w×h×4 no heap Java) só sai
+     * na próxima coleta; sem isto, num aparelho com heap menor a segunda foto
+     * de um lote era recusada pela memória que já estava livre de verdade.
+     * Só a memória pode mudar a resposta: dimensão impossível nem tenta.
+     */
+    fun decodeSample(width: Int, height: Int, maxDimension: Int, available: () -> Long, reclaim: () -> Unit): Int? {
+        if (sampleSize(width, height, maxDimension, Long.MAX_VALUE) == null) return null
+        sourceSampleSize(width, height, maxDimension, available())?.let { return it }
+        reclaim()
+        return sourceSampleSize(width, height, maxDimension, available())
+    }
+
     fun availablePixels(): Long {
         val runtime = Runtime.getRuntime()
         return pixelBudget(runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory()))

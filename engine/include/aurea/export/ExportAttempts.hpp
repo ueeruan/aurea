@@ -1,50 +1,6 @@
-// =============================================================================
-//  Aurea / export / ExportAttempts.hpp
-//
-//  A ESCADA DE TENTATIVAS do export de vídeo (0.2.6). Exportar não pode
-//  terminar em "erro N" quando outro jeito de exportar funcionaria: a tela
-//  refaz sozinha, cada vez num degrau mais compatível, e só mostra falha
-//  quando nada ajuda (cancelado, sem espaço, mídia que sumiu, duração acima
-//  do teto) ou quando a escada acabou.
-//
-//    0  o pedido
-//    1  H.264 Baseline no encoder do aparelho (HEVC vira H.264), até 60 qps
-//    2  H.264 no encoder de software, até 60 qps
-//    3  H.264 Baseline no aparelho, lado menor até 720, até 30 qps, sem upscale
-//    4  o mesmo no encoder de software
-//    5  software, lado menor até 480, até 30 qps, sem upscale
-//    6  o mesmo, sem motion blur (0.2.7)
-//
-//  0.3.0: os degraus 1 e 2 também limitam a 60 qps (só muda o pedido acima
-//  disso). A 200 qps nenhum encoder de hardware se anuncia e o pedido ia para o
-//  software; o primeiro degrau que baixava a taxa era o 3, junto com 720p.
-//
-//  0.2.7: cada degrau também tem um TETO DE AMOSTRAS de motion blur (1: 32,
-//  2 e 3: 16, 4: 8, 5: 4, 6: nenhuma). No 3D cada amostra é uma cena inteira
-//  renderizada de novo; sem este teto todos os degraus falhavam igual
-//  (lado menor e codec não mudam o custo de 128 cenas por quadro).
-//
-//  0.3.2: cada degrau também tem um DEGRAU DE CUSTO 3D fixo (sombra/MSAA,
-//  Renderer::set_export_gpu_step; 2: 1, 3: 1, 4: 2, 5: 3, 6: 4). Antes esse
-//  corte subia no meio do export quando um quadro passava de 1,5 s, e o mesmo
-//  projeto saía diferente conforme a carga do aparelho. Agora vale do primeiro
-//  ao último quadro da tentativa, e a tela avisa o degrau.
-//
-//  0.4.6: os degraus de SOFTWARE (2, 4, 5, 6) também decodificam a mídia de
-//  origem no decoder compatível (ExportSettings::softwareDecode: software no
-//  Android, planos na CPU no iOS). A Export BETA 2 fazia isso e a decisão se
-//  perdeu: o campo continuou existindo, mas nada o ligava, e a escada só
-//  trocava encoder, tamanho e taxa. Um vídeo que o decoder do aparelho nunca
-//  entrega (Galaxy A23: projeto de 2 clipes parava sempre em ~50%, na
-//  transição) falhava igual em TODO degrau e o export recomeçava do zero até
-//  a escada acabar.
-//
-//  O degrau viaja no lugar do antigo "modo de segurança" (ExportSettings::
-//  safeMode, JNI e ponte do iOS): 0, 1 e 2 continuam significando o mesmo
-//  encoder de antes. O motor aplica o degrau ao iniciar (Engine.cpp,
-//  start_export_checked); as duas telas só perguntam aqui qual é o próximo.
-//  Funções puras: os testes do host conferem a escada inteira.
-// =============================================================================
+// Export retries preserve the requested image and timeline settings.
+// The legacy 0..6 attempt identifiers remain readable by both native bridges.
+// Attempts select an encoder/decoder route. Quality changes require a new request.
 #pragma once
 
 #include "aurea/core/Result.hpp"
@@ -75,7 +31,7 @@ struct ExportAttemptPlan {
     f64 fpsCap = 0.0;        ///< teto da taxa (0 = a pedida)
     bool noUpscale = false;  ///< sem upscale na GPU
     u32 blurCap = 0;         ///< teto de amostras de motion blur por quadro (0 = o do projeto; 1 = sem desfoque)
-    u32 gpuStep = 0;         ///< degrau de custo 3D (0 = cheio; Renderer::set_export_gpu_step)
+    u32 gpuStep = 0;         ///< reserved legacy field, quality-preserving plans use zero
     /// 0.3.6: tamanho no formato que todo encoder aceita (lado maior múltiplo
     /// de 16, menor par — export_frame_size), em vez do nativo exato.
     bool align16 = false;
@@ -86,12 +42,8 @@ struct ExportAttemptPlan {
 [[nodiscard]] constexpr ExportAttemptPlan export_attempt_plan(u32 attempt) noexcept {
     switch (attempt) {
         case 0: return {0, false, 0, 0.0, false, 0, 0, false, false};
-        case 1: return {1, true, 0, 60.0, false, 32, 0, true, false};
-        case 2: return {2, true, 0, 60.0, false, 16, 1, true, true};
-        case 3: return {1, true, 720, 30.0, true, 16, 1, true, false};
-        case 4: return {2, true, 720, 30.0, true, 8, 2, true, true};
-        case 5: return {2, true, 480, 30.0, true, 4, 3, true, true};
-        default: return {2, true, 480, 30.0, true, 1, 4, true, true};
+        case 1: return {1, false, 0, 0.0, false, 0, 0, false, false};
+        default: return {2, false, 0, 0.0, false, 0, 0, false, true};
     }
 }
 
@@ -260,41 +212,21 @@ struct ExportAttemptEffect {
     if (kind == ExportRetryKind::None) return 0;
     if (kind == ExportRetryKind::Busy) return attempt | kExportAttemptWait;
     if (attempt >= kExportAttemptMax) return 0;
+    // GPU cost and sample counts are handled by bounded rendering. A retry
+    // must never discard requested samples, pixels, frames or upscaling.
+    if (kind == ExportRetryKind::GpuTime) return 0;
     const ExportAttemptEffect now = export_attempt_effect(attempt, r);
-    u32 lessBlur = 0;   // Memory: só amostras a menos, se nenhum degrau tirar pixels
     for (u32 next = attempt + 1; next <= kExportAttemptMax; ++next) {
-        const ExportAttemptEffect e = export_attempt_effect(next, r);
-        // Igual a um degrau de baixo (já tentado, ou mais exigente): pula.
+        const ExportAttemptEffect candidate = export_attempt_effect(next, r);
         bool repeated = false;
-        for (u32 k = 0; k <= attempt && !repeated; ++k)
-            repeated = e.same_as(export_attempt_effect(k, r), kind != ExportRetryKind::Encoder);
+        for (u32 previous = 0; previous <= attempt && !repeated; ++previous)
+            repeated = candidate.same_as(export_attempt_effect(previous, r));
         if (repeated) continue;
-        const bool fewer = e.shortCapped || (now.shortSide == 0 ? e.shortSide != 0 : e.shortSide < now.shortSide) ||
-                           (now.upscale && !e.upscale);
-        switch (kind) {
-            case ExportRetryKind::Encoder:
-                return next;
-            case ExportRetryKind::Memory: {
-                // Menos pixels (ou sem upscale): trocar só o encoder não ajuda.
-                if (fewer) return next;
-                if (!lessBlur && e.less_blur_than(now)) lessBlur = next;
-                break;
-            }
-            case ExportRetryKind::GpuTime:
-                // Menos amostras de motion blur primeiro (mantém a resolução).
-                if (e.less_blur_than(now) || fewer) return next;
-                break;
-            case ExportRetryKind::Stall:
-                // Software (encoder e, 0.4.6, decoder da mídia), e menos
-                // trabalho por quadro.
-                if (e.safeMode >= 2 && ((e.softwareDecode && !now.softwareDecode) || e.shortCapped || e.shortSide != now.shortSide || e.fpsCapped || e.fps != now.fps ||
-                                        now.safeMode < 2 || (now.upscale && !e.upscale) || e.less_blur_than(now)))
-                    return next;
-                break;
-            default: return 0;
-        }
+        if (kind == ExportRetryKind::Encoder) return next;
+        if ((kind == ExportRetryKind::Stall || kind == ExportRetryKind::Memory)
+            && candidate.softwareDecode && !now.softwareDecode) return next;
     }
-    return kind == ExportRetryKind::Memory ? lessBlur : 0;
+    return 0;
 }
 
 // =============================================================================

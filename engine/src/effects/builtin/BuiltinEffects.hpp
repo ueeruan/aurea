@@ -12,6 +12,7 @@ void register_matte_choker(EffectRegistry& r);
 
 void register_color_effects(EffectRegistry& r);
 void register_blur_effects(EffectRegistry& r);
+void register_fast_blur_reference(EffectRegistry& r);
 void register_glow_effect(EffectRegistry& r);
 void register_transform_effect(EffectRegistry& r);
 void register_motion_tile_effect(EffectRegistry& r);
@@ -29,8 +30,20 @@ void register_stylize_effects(EffectRegistry& r);
 void register_light_effects(EffectRegistry& r);
 void register_glitch_effects(EffectRegistry& r);
 void register_temporal_effects(EffectRegistry& r);
+void register_cartoon_motion_effect(EffectRegistry& r);
+void register_twitch_reference_effect(EffectRegistry& r);
 void register_random_edits_effect(EffectRegistry& r);
 void register_transition_effects(EffectRegistry& r);
+void register_radial_wipe_reference(EffectRegistry& r);
+/// AE reference batch A (RadialBlurReferenceEffect.cpp and siblings). At the end.
+void register_reference_batch_a(EffectRegistry& r);
+void register_reference_batch_c(EffectRegistry& r);
+/// AE reference batch B (CardReferenceEffects.cpp, ShatterReferenceEffect.cpp). At the end.
+void register_reference_batch_b(EffectRegistry& r);
+/// AE reference batch A2: Detail-preserving Upscale (UpscaleReferenceEffect.cpp). At the end.
+void register_upscale_reference(EffectRegistry& r);
+void register_radial_blur_reference(EffectRegistry& r);
+void register_radial_shadow_reference(EffectRegistry& r);
 void register_optical_effects(EffectRegistry& r);
 void register_sampled_blur_effects(EffectRegistry& r);
 void register_pattern_effects(EffectRegistry& r);

@@ -32,6 +32,17 @@
 
 namespace aurea {
 
+/// Raw platform headroom relative to its critical reserve. The preview starts
+/// yielding before the OS low-memory threshold is reached. Zero threshold
+/// means that the platform has no valid measurement.
+[[nodiscard]] constexpr f32 memory_headroom_pressure(u64 availableBytes, u64 criticalBytes) noexcept {
+    if (!criticalBytes) return 0.0f;
+    const f64 pressure = 2.0 - static_cast<f64>(availableBytes) / static_cast<f64>(criticalBytes);
+    if (pressure <= 0.0) return 0.0f;
+    if (pressure >= 1.0) return 1.0f;
+    return static_cast<f32>(pressure);
+}
+
 enum class DeviceTier : u8 { Low = 0, Mid = 1, High = 2, Ultra = 3 };
 
 /// Qual eixo segurou a classe. Empate: a ordem abaixo decide (memória

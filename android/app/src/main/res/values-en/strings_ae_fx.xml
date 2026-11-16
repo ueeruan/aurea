@@ -22,6 +22,7 @@
     <string name="aefx_name_emboss">Emboss</string>
     <string name="aefx_name_color_emboss">Color Emboss</string>
     <string name="aefx_name_radial_shadow">Radial Shadow</string>
+    <string name="aefx_name_upscale">Detail-preserving Upscale</string>
     <string name="aefx_name_inner_shadow">Inner Shadow</string>
     <string name="aefx_name_bevel_edges">Bevel Edges</string>
     <string name="aefx_name_brush_strokes">Brush Strokes</string>

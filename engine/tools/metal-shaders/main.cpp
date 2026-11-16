@@ -27,7 +27,12 @@ int main(int argc, char** argv) {
         return 1;
     }
     uint32_t group[3]{};
+    uint32_t resourceFlags = 0;
     std::string source, error;
+    if (!aurea::xlate::spirv_msl_resource_flags(words.data(), words.size(), resourceFlags, error)) {
+        std::cerr << argv[1] << ": " << error << '\n';
+        return 1;
+    }
     if (!aurea::xlate::spirv_to_msl(words.data(), words.size(), aurea::xlate::msl_entry_for(stage), 0xffffffffu,
                                     group, source, error)) {
         std::cerr << argv[1] << ": " << error << '\n';
@@ -36,7 +41,7 @@ int main(int argc, char** argv) {
     // 32-byte AUREAMSL header, followed by UTF-8 MSL; padded to a word.
     std::ofstream output(argv[2], std::ios::binary);
     const char magic[] = "AUREAMSL";
-    const uint32_t header[6] = {1, 0, static_cast<uint32_t>(source.size()), group[0], group[1], group[2]};
+    const uint32_t header[6] = {1, resourceFlags, static_cast<uint32_t>(source.size()), group[0], group[1], group[2]};
     output.write(magic, 8);
     output.write(reinterpret_cast<const char*>(header), sizeof(header));
     output.write(source.data(), static_cast<std::streamsize>(source.size()));

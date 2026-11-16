@@ -43,7 +43,8 @@ void current_pose(const Composition& comp, const Layer& l, const scene3d::SceneA
     const f64 local = static_cast<f64>(l.local_time(now).value);
     const i32 clip = l.model.animationClip >= 0 && l.model.animationClip < static_cast<i32>(asset.animations.size())
         ? l.model.animationClip : -1;
-    const f32 t = clip >= 0 ? scene3d::clip_time(asset.animations[static_cast<usize>(clip)], local / fps * l.model.timeScale) : 0.0f;
+    // v75: Evolução / Repetir do painel 3D (model_clip_seconds, Layer.hpp).
+    const f32 t = clip >= 0 ? model_clip_seconds(l, asset.animations[static_cast<usize>(clip)].duration, local, fps) : 0.0f;
     // 0.3.6: o mesmo caminho do renderer (rotação, translação e IK).
     scene3d::evaluate_rig_pose(asset, l, clip, t, local, pose);
 }
@@ -86,6 +87,7 @@ Status Engine::set_layer_parent_bone(u64 layerId, u64 modelLayerId, i32 node) no
     if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
     // Edições ainda na fila vêm antes: o vínculo mede o estado final.
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = current_composition();
     if (!comp) return Status{Errc::InvalidState, "projeto sem composicao"};
     const LayerId childId = LayerId::unpack(layerId), modelId = LayerId::unpack(modelLayerId);
@@ -124,7 +126,7 @@ Status Engine::set_layer_parent_bone(u64 layerId, u64 modelLayerId, i32 node) no
         // passa a seguir o modelo inteiro. O osso de agora vira a base do
         // vínculo (parentBasis): mundo = pai × osso(agora) × base × camada —
         // a animação da camada continua igual, só sem o osso andando.
-        const FrameIndex now = playback_.current();
+        const FrameIndex now = editing_frame_locked();
         Mat4 withBone, parentWorld;
         {
             const BoneAttachScope bones(&Engine::model_lookup, this);
@@ -172,6 +174,7 @@ Status Engine::set_layer_parent_bone(u64 layerId, u64 modelLayerId, i32 node) no
 
 i32 Engine::layer_parent_bone(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     return l && l->parent.valid() ? l->parentBone : -1;
@@ -179,6 +182,7 @@ i32 Engine::layer_parent_bone(u64 layerId) noexcept {
 
 u32 Engine::query_model_bones(u64 layerId, f32* out, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = model_layer(comp, layerId);
     if (!l) return 0;
@@ -188,7 +192,7 @@ u32 Engine::query_model_bones(u64 layerId, f32* out, u32 capacity) noexcept {
     const std::vector<i32> bones = scene3d::pose_bones(asset);
     const u32 need = static_cast<u32>(bones.size()) * kBoneFloats;
     if (!out || capacity < need || bones.empty()) return need;
-    const FrameIndex now = playback_.current();
+    const FrameIndex now = editing_frame_locked();
     const FrameIndex local = l->local_time(now);
     scene3d::Pose pose;
     current_pose(*comp, *l, asset, now, pose);
@@ -232,6 +236,7 @@ u32 Engine::query_model_bones(u64 layerId, f32* out, u32 capacity) noexcept {
 bool Engine::drag_bone(u64 layerId, u32 node, f32 dxPx, f32 dyPx, f32 twistDeg, bool continuing) noexcept {
     if (!std::isfinite(dxPx) || !std::isfinite(dyPx) || !std::isfinite(twistDeg)) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = model_layer(comp, layerId);
     if (!l || l->locked) return false;
@@ -240,7 +245,7 @@ bool Engine::drag_bone(u64 layerId, u32 node, f32 dxPx, f32 dyPx, f32 twistDeg, 
     const scene3d::SceneAsset& asset = *it->second;
     const std::vector<i32> bones = scene3d::pose_bones(asset);
     if (std::find(bones.begin(), bones.end(), static_cast<i32>(node)) == bones.end()) return false;
-    const FrameIndex now = playback_.current();
+    const FrameIndex now = editing_frame_locked();
     const FrameIndex local = l->local_time(now);
     const bool inside = l->contains_time(now);
     for (u32 c = 0; c < 3; ++c) {
@@ -299,6 +304,7 @@ bool Engine::drag_bone(u64 layerId, u32 node, f32 dxPx, f32 dyPx, f32 twistDeg, 
 
 i32 Engine::toggle_bone_key(u64 layerId, i32 node) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = model_layer(comp, layerId);
     if (!l || l->locked) return -1;
@@ -310,7 +316,7 @@ i32 Engine::toggle_bone_key(u64 layerId, i32 node) noexcept {
         bones = {node};
     }
     if (bones.empty()) return -1;
-    const FrameIndex now = playback_.current();
+    const FrameIndex now = editing_frame_locked();
     if (!l->contains_time(now)) return -1;
     const FrameIndex local = l->local_time(now);
     bool any = false;
@@ -353,6 +359,7 @@ i32 Engine::toggle_bone_key(u64 layerId, i32 node) noexcept {
 
 bool Engine::reset_bone_pose(u64 layerId, i32 node) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = model_layer(comp, layerId);
     if (!l || l->locked) return false;

@@ -40,6 +40,8 @@
     <string name="hyper_continue">Продолжить</string>
     <string name="hyper_creating_project">Создаём проект…</string>
     <string name="hyper_effect_locked">AureaHyper: платная функция, недоступна для этого аккаунта</string>
+    <string name="text3d_locked">3D-текст входит в AureaHyper: откройте доступ, чтобы создавать</string>
+    <string name="text3d_locked_existing">3D-текст (AureaHyper): этот текст остаётся в проекте и экспортируется как обычно; для создания нового нужен доступ</string>
     <string name="hyper_error_project">Видео готово, но проект создать не удалось. Попробуйте снова.</string>
     <string name="hyper_error_result">Видео готово, но его не удалось прочитать. Попробуйте снова.</string>
     <string name="hyper_error_video">Не удалось открыть это видео. Попробуйте другой файл.</string>

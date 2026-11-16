@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE layers (2026-11-12): qualidade da camada, clipe do modelo 3D, transições por camada, guias da prévia e velocidade negativa. -->
+<resources>
+    <string name="ae_layer_quality">الجودة</string>
+    <string name="ae_quality_best">الأفضل</string>
+    <string name="ae_quality_draft">مسودة</string>
+    <string name="ae_quality_wireframe">إطار سلكي</string>
+    <string name="ae_quality_hint">المسودة والإطار السلكي للمعاينة فقط؛ التصدير دائمًا بالجودة الأفضل</string>
+    <string name="ae_layer_sampling">أخذ العينات</string>
+    <string name="ae_sampling_bilinear">ثنائي الخطية</string>
+    <string name="ae_sampling_bicubic">ثنائي التكعيب</string>
+    <string name="ae_sampling_hint">ثنائي التكعيب يُبقي الصورة المكبّرة أوضح (في الأفضل)</string>
+    <string name="ae_model_clip">حركة النموذج</string>
+    <string name="ae_model_clip_none">ثابت</string>
+    <string name="ae_model_clip_n">المقطع %1$d</string>
+    <string name="ae_model_clip_empty">لا يحتوي هذا النموذج على حركة</string>
+    <string name="ae_transitions">الانتقالات</string>
+    <string name="ae_transition_in">الدخول</string>
+    <string name="ae_transition_out">الخروج</string>
+    <string name="ae_transition_none">بلا</string>
+    <string name="ae_transition_dissolve">تلاشٍ</string>
+    <string name="ae_transition_slide_up">انزلاق لأعلى</string>
+    <string name="ae_transition_slide_left">انزلاق من اليسار</string>
+    <string name="ae_transition_zoom">تكبير</string>
+    <string name="ae_transition_spin">دوران</string>
+    <string name="ae_transition_duration">المدة</string>
+    <string name="ae_transition_hint">تعمل عند حافتي المقطع؛ لا تُنشئ إطارات مفتاحية</string>
+    <string name="ae_guides_safe">الهوامش الآمنة</string>
+    <string name="ae_guides_rulers">المساطر</string>
+    <string name="ae_speed_reverse_point">عكس الاتجاه</string>
+    <string name="ae_speed_reverse_hint">السرعة السالبة تشغّل المصدر للخلف داخل المنحدر (حتى الإطار 0)</string>
+</resources>

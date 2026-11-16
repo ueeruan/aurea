@@ -686,6 +686,19 @@ void register_builtin_effects(EffectRegistry& registry) {
     builtin::register_sea_effects(registry);
     // Textura — 0.5.2: textura procedural (ou imagem) por cima da camada. No fim.
     builtin::register_texture_overlay_effect(registry);
+    builtin::register_cartoon_motion_effect(registry);
+    builtin::register_twitch_reference_effect(registry);
+    builtin::register_fast_blur_reference(registry);
+    // AE reference batch A (behaviour reconstructed from AE 2027): Radial
+    // Blur, Radial Shadow, Detail-preserving Upscale, Posterize Time and Time
+    // Displacement. Always appended.
+    builtin::register_reference_batch_a(registry);
+    // AE reference batch C: Extrude, Depth Field, Smear and Glitchify. Always appended.
+    builtin::register_reference_batch_c(registry);
+    // AE reference batch B: Card Wipe, Card Dance (and Shatter). Always appended.
+    builtin::register_reference_batch_b(registry);
+    // AE reference batch A2: Detail-preserving Upscale. Always appended.
+    builtin::register_upscale_reference(registry);
 }
 
 } // namespace aurea

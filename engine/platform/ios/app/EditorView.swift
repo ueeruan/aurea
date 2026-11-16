@@ -182,8 +182,15 @@ struct EditorView: View {
         .fullScreenCover(isPresented: $model.showExport) { ExportView() }
         // 0.4.6: o assistente de IA em tela cheia (AssistantView.swift).
         .background(Color.clear.fullScreenCover(isPresented: $model.assistantOpen) {
-            AssistantView(close: { model.assistantOpen = false }).environmentObject(model)
+            // AureaMCP substitui o chat de IA; o chat antigo volta com AureaMcpFlags.legacyChat.
+            if AureaMcpFlags.legacyChat {
+                AssistantView(close: { model.assistantOpen = false }).environmentObject(model)
+            } else {
+                AureaMcpView(close: { model.assistantOpen = false }).environmentObject(model)
+            }
         })
+        // 0.5.4: texto 3D pedido sem o acesso (Text3DGate em AureaModel.addText3D): a folha bloqueada do Hyper.
+        .background(Color.clear.sheet(isPresented: $model.hyperLockedPrompt) { HyperLockedSheet { model.hyperLockedPrompt = false } })
         .fullScreenCover(item: $model.effectSearch) { request in
             // A tela "Adicionar efeito" (ou só a busca): EffectsBrowser.swift.
             EffectAddSheet(request: request, close: { model.effectSearch = nil })
@@ -441,8 +448,8 @@ private struct ModelOptimizePrompt: ViewModifier {
                     model.vectorFreehand = false; model.vectorEditingPoints = false; model.maskDrawing = false; model.freehandPoints = []
                 }.padding(.bottom, 10).padding(.horizontal, 8).frame(maxHeight: .infinity, alignment: .bottom)
             }
-            // Na Cena 3D as ferramentas ficam na barra da esquerda (Scene3DToolbar).
-            if !model.fullscreen && !model.rawPlayback && !model.sceneEditor, model.selection.count == 1, let id = model.primarySelection {
+            // A Cena 3D mantém as ferramentas no dock contextual.
+            if !model.fullscreen && !model.rawPlayback && !model.sceneEditor && model.uiMode != AureaUiMode.edit, model.selection.count == 1, let id = model.primarySelection {
                 HStack(spacing: 6) {
                     let hasGizmo = !model.engine.gizmo(id, length: ShellStageGeometry.gizmoLength).isEmpty
                     if hasGizmo {
@@ -498,13 +505,17 @@ private struct ModelOptimizePrompt: ViewModifier {
             // "NN%" no canto sup-esq (o chip "250 %" saiu: o 100 % mora no número da
             // coluna de modos) e a coluna de modos presa à direita (P0-5).
             if !model.rawPlayback && !model.fullscreen && !model.sceneEditor {
-                CanvasZoomMode().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                if model.uiMode != AureaUiMode.edit {
+                    CanvasZoomMode().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 // 0.4.1 (mockup "interface 03"): grade, modos de visão e zoom flutuando no canto sup-dir.
                 StageFloatPills().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                ViewModeColumn(width: ViewModeState.columnWidth(UIScreen.main.bounds.width))
+                }
+                if model.uiMode != AureaUiMode.edit {
+                    ViewModeColumn(width: ViewModeState.columnWidth(UIScreen.main.bounds.width))
+                }
             }
             // 0.4.6: o nome da vista do AE escolhida (Frente, Topo, Vista personalizada 1…).
-            if !model.rawPlayback && model.viewMode != 0 && !model.sceneEditor {
+            if !model.rawPlayback && model.viewMode != 0 && !model.sceneEditor && model.uiMode != AureaUiMode.edit {
                 Text(AureaModel.viewModeName(model.viewMode))
                     .font(.aurea(size: 11, weight: .semibold)).foregroundStyle(AureaColors.accent)
                     .padding(.horizontal, 8).padding(.vertical, 4)
@@ -1049,7 +1060,7 @@ struct ContextSheet: View {
             case .captions:
                 CaptionsPanel()
             case .vector:
-                VectorPanel()
+                VectorPanel(face: model.vectorFace)
             case .aiVideo:
                 AiVideoPanel()
             case .filters:
@@ -1066,6 +1077,15 @@ struct ContextSheet: View {
                 DrawingPanelView()
             case .editPoints:
                 EditPointsPanelView()
+            // Funções do AUREA (13/11/2026).
+            case .layerOptions:
+                LayerOptionsPanel()
+            case .layer3DFunctions:
+                Layer3DFunctionsPanel()
+            case .textLayout:
+                TextPanelView(layout: true)
+            case .animation:
+                AnimationPanelView()
             }
             }
             .modifier(PanelEntrance(panel: model.panel, onAppear: false))
@@ -1148,7 +1168,7 @@ private struct BatchToolsView: View {
                     }
                     tool(CupertinoGlyph.DocOnDoc, "editor_copiar_camada") { model.engine.copyLayers(selected.map { NSNumber(value: $0.id) }) }
                     tool(CupertinoGlyph.PlusSquareOnSquare, "editor_duplicar_camada") {
-                        model.engine.duplicateLayers(selected.map { NSNumber(value: $0.id) }); model.refreshModel(force: true)
+                        model.duplicateSelectedLayers(selected.map(\.id))
                     }
                 } else {
                 vectorTool("automirrored.rounded.FormatAlignLeft", "editor_alinhar_inicios") { model.arrangeLayerTimes(0) }
@@ -1213,6 +1233,9 @@ private struct BatchToolsView: View {
 // TextPanel.kt: live content, selection spans, and the in-panel font browser.
 private struct TextPanelView: View {
     @EnvironmentObject private var model: AureaModel
+    /// Funções (F4): falso = EDITAR TEXTO (um assunto, sem abas); verdadeiro = LAYOUT DO
+    /// TEXTO (Espaçamento · Caixa · Caminho · Dinâmico). Par do `TextPanel(env, layout)`.
+    var layout = false
     @State private var content = ""
     @State private var selection = NSRange(location: 0, length: 0)
     @State private var editing = false
@@ -1233,7 +1256,7 @@ private struct TextPanelView: View {
     }
     private var railKeys: [KeyframeItem] {
         guard let t = railTrack else { return [] }
-        return (model.keyframes[layerId] ?? []).filter { Int($0.property) == t.property && $0.effectIndex == t.effect && $0.paramIndex == t.param }
+        return (model.keysForLayer(layerId) ?? []).filter { Int($0.property) == t.property && $0.effectIndex == t.effect && $0.paramIndex == t.param }
             .sorted { $0.time < $1.time }
     }
     private var railLook: KeyframeLook {
@@ -1273,7 +1296,7 @@ private struct TextPanelView: View {
     private var selectedStyles: [[String: Any]] { fonts.filter { $0["family"] as? String == currentFont } }
     var body: some View {
         VStack(spacing: 0) {
-            PanelHeader(title: AureaText.t(showingFonts ? "panel_fonte" : "text_options")) { dismissEditing(); model.panel = .none }
+            PanelHeader(title: AureaText.t(showingFonts ? "panel_fonte" : layout ? "fn_text_layout" : "sh_dock_edit_text")) { dismissEditing(); model.panel = .none }
             if showingFonts { fontPanel }
             else {
                 // O desenho dos painéis de propriedade: a coluna fixa à esquerda, o conteúdo no
@@ -1285,7 +1308,9 @@ private struct TextPanelView: View {
                     VStack(spacing: 0) {
                         ScrollView {
                             VStack(alignment: .leading, spacing: 0) {
-                                if tab == 0 {
+                                if layout {
+                                    TextAppearanceControls(page: 3 + tab)
+                                } else {
                         ZStack(alignment: .topLeading) {
                             if content.isEmpty { Text(AureaText.t("panel_digite_texto")).font(.aurea(size: 15)).foregroundStyle(AureaColors.muted).padding(.horizontal, 12).padding(.vertical, 10).allowsHitTesting(false) }
                             NativeTextInput(text: $content, selection: $selection, editing: $editing, editable: false,
@@ -1313,28 +1338,26 @@ private struct TextPanelView: View {
                             }.frame(height: 48).contentShape(RoundedRectangle(cornerRadius: 10))
                         }.buttonStyle(AureaPressStyle(shrink: 1)).padding(.top, 10)
                                     TextAppearanceControls(page: 0)
-                                } else if tab == 1 {
-                                    TextAppearanceControls(page: 1)
-                                } else if tab == 2 {
-                                    TextAppearanceControls(page: 2)
-                                } else {
-                                    TextAnimationSection(onEditing: { animatorOpen = $0 })
-                                    if !animatorOpen {
-                                        PanelItemRow(glyph: CupertinoGlyph.Move, title: AureaText.t("la_animators"), tag: "text.layer.animators", chevron: true) { model.transformTab = 6; model.openPanel(.transform) }.padding(.top, 6)
+                                    // F4: o resto do texto mora noutras funções; os atalhos levam até elas.
+                                    PanelItemRow(glyph: CupertinoGlyph.DocText, title: AureaText.t("fn_text_layout"), tag: "text.layout.link", chevron: true) {
+                                        dismissEditing(); model.openPanel(.textLayout)
+                                    }.padding(.top, 8)
+                                    PanelItemRow(glyph: CupertinoGlyph.Sparkles, title: AureaText.t("la_animators"), tag: "text.layer.animators", chevron: true) {
+                                        dismissEditing(); AnimationPanelRequest.tab = .text; model.openPanel(.animation)
                                     }
                                 }
                             }.padding(.horizontal, 8).padding(.top, 8).padding(.bottom, 24)
                         }
                         .scrollDismissesKeyboard(.interactively)
                     }
-                    if !(tab == 3 && animatorOpen) {
+                    if layout {
                         AureaColors.contentStrongLine.frame(width: 0.7)
                         PanelIconTabs(tabs: [
-                            PanelIconTab(glyph: CupertinoGlyph.Textformat, label: AureaText.t("panel_texto"), id: "text.tab.text"),
-                            PanelIconTab(glyph: CupertinoGlyph.Paintbrush, label: AureaText.t("tx_tab_style"), id: "text.tab.style"),
-                            PanelIconTab(glyph: CupertinoGlyph.DocText, label: AureaText.t("tx_tab_layout"), id: "text.tab.layout"),
-                            PanelIconTab(glyph: CupertinoGlyph.Sparkles, label: AureaText.t("tx_tab_animator"), id: "text.tab.animator"),
-                        ], selected: tab, group: AureaText.t("text_options")) { tab = $0; model.timelineFocus = nil }
+                            PanelIconTab(glyph: CupertinoGlyph.ArrowLeftRight, label: AureaText.t("edt_prop_spacing"), id: "textLayout.tab.spacing"),
+                            PanelIconTab(glyph: CupertinoGlyph.Square, label: AureaText.t("panel_caixa"), id: "textLayout.tab.box"),
+                            PanelIconTab(glyph: CupertinoGlyph.Scribble, label: AureaText.t("panel_caminho"), id: "textLayout.tab.path"),
+                            PanelIconTab(glyph: CupertinoGlyph.Timer, label: AureaText.t("text_dynamic"), id: "textLayout.tab.dynamic"),
+                        ], selected: tab, group: AureaText.t("fn_text_layout")) { tab = $0; model.timelineFocus = nil }
                     }
                 }
             }
@@ -1793,7 +1816,7 @@ private struct AddLayerSheet: View {
                         cardBody("shape3d_title", action: { shapes3D = true }) { Shape3DGlyph(kind: 0).frame(width: 30, height: 30) }
                         card("scene_workspace", glyph: CupertinoGlyph.Cube, accent: true) { close(); model.enterSceneEditor() }
                         card("sh_add_model_3d", glyph: CupertinoGlyph.Cube, accent: true) { files(.model) }
-                        card("sh_add_text_3d", glyph: ShellGlyph.TextformatAlt, color: ShellColors.text3D) { model.addText3D(content: AureaText.t("panel_texto"), depth: 0.25); close() }
+                        card("sh_add_text_3d", glyph: ShellGlyph.TextformatAlt, color: ShellColors.text3D, locked: Text3DGate.locked()) { model.addText3D(content: AureaText.t("panel_texto"), depth: 0.25); close() }
                         card("scene_floor_reflective", glyph: CupertinoGlyph.Sparkles, color: ShellColors.text3D) { model.addReflectiveFloor(); close() }
                         card("panel_camera_3d", glyph: CupertinoGlyph.CameraFill, accent: true) { model.addCamera(); close() }
                         card("real_camera_title", glyph: CupertinoGlyph.CameraFill, accent: true) { model.startRealCamera(); close() }
@@ -1875,8 +1898,12 @@ private struct AddLayerSheet: View {
             shell.addPicker = kind
         }
     }
-    private func card(_ label: String, glyph: Character, accent: Bool = false, color: Color? = nil, action: @escaping () -> Void) -> some View {
-        cardBody(label, action: action) { CupertinoGlyph.text(glyph, size: 28, color: color ?? (accent ? AureaColors.accent : StageInk.dockTileContent)).mirrorsInRtl(CupertinoGlyph.mirrorsInRtl(glyph)).frame(width: 30, height: 30) }
+    private func card(_ label: String, glyph: Character, accent: Bool = false, color: Color? = nil, locked: Bool = false, action: @escaping () -> Void) -> some View {
+        cardBody(label, action: action) {
+            CupertinoGlyph.text(glyph, size: 28, color: color ?? (accent ? AureaColors.accent : StageInk.dockTileContent)).mirrorsInRtl(CupertinoGlyph.mirrorsInRtl(glyph)).frame(width: 30, height: 30)
+                // 0.5.4: recurso pago sem o acesso (Texto 3D): o cadeado do Hyper.
+                .overlay(alignment: .topTrailing) { if locked { HyperLockBadge().offset(x: 14, y: -6) } }
+        }
     }
     private func drawnCard(_ label: String, kind: Int, action: @escaping () -> Void) -> some View {
         cardBody(label, action: action) {
@@ -2146,110 +2173,257 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
     @State private var curve = false
     @State private var area = 0
     @State private var addOpen = false
+    @State private var hierarchyOpen = false
+    @State private var expanded = false
+    @State private var transformPanel = false
+    @State private var transformOpen = false
+    @ScaledMetric(relativeTo: .caption) private var dockText: CGFloat = 11
     /// A divisão que a pessoa escolheu; sem escolha, segue a tela.
     @State private var fullscreen = false
     private static let skeletonArea = 3
     private var isModel: Bool { model.selectedLayer?.kind == 10 }
-    private var wide: Bool { width >= 600 }
-    private var bottomHeight: CGFloat { wide ? 12 + 40 + (area == 0 ? 116 : 150) : 12 + 80 + 270 }
-    private var viewportsHeight: CGFloat { max(120, height - 36 - (fullscreen ? 6 : bottomHeight)) }
+    private var wide: Bool { width > height && width >= 600 }
+    private var bottomHeight: CGFloat {
+        let wanted = expanded || area != 0 ? min(300, height * 0.42) : min(140, max(90, height * 0.20))
+        return min(wanted, max(44, height - 44 - 40 - dockHeight - 96))
+    }
+    private var dockHeight: CGFloat { max(80, dockText * 2 + 48) }
+    private var viewportsHeight: CGFloat { max(0, height - 44 - (fullscreen ? 0 : bottomHeight + dockHeight + 40)) }
     private func chooseArea(_ i: Int) {
         area = i
+        expanded = i != 0
         model.openSkeletonPanel(i == Self.skeletonArea)
     }
     var body: some View {
         VStack(spacing: 0) {
             header
-            viewports.frame(height: viewportsHeight).padding(.horizontal, 8)
+            viewports.frame(height: viewportsHeight)
             if !fullscreen {
+                mobileTransport
                 Scene3DStudioBottom(area: area, wide: wide, isModel: isModel, onArea: chooseArea, onAdd: { addOpen.toggle() },
                                     openMaterial: openMaterial, openLights: { lights = true }, openCurve: { curve = true },
-                                    more: AnyView(Group { moreMenu; Divider(); selectMenu })).environmentObject(model)
+                                    more: AnyView(Group { moreMenu; Divider(); selectMenu }), showToolbar: false, showGraph: expanded)
                     .frame(height: bottomHeight)
+                mobileDock
             }
         }
         .frame(height: height)
         .background(AureaColors.background)
-        // Deitado a altura é pouca: as barras do sistema saem para dar espaço às viewports.
         .statusBarHidden(wide)
         .persistentSystemOverlays(wide ? .hidden : .automatic)
         .sheet(isPresented: $model.showAddLayer) { AddLayerSheet(tab: 5, inSheet: true).environmentObject(model).environmentObject(shell) }
-        // Material e luz em folha de meia altura (0.3.1): a cena fica à vista em cima.
         .sheet(isPresented: $lights) {
-            SceneLightControls { lights = false }.environmentObject(model)
-                .presentationDetents([.medium, .large])
+            SceneLightControls { lights = false }.environmentObject(model).presentationDetents([.medium, .large])
         }
-        .sheet(isPresented: $materials) {
-            // O cabeçalho do Panel3DView já tem título e ‹ (fecha: panel = .none).
-            Panel3DView().environmentObject(model)
-                .presentationDetents([.medium, .large])
+        .sheet(isPresented: $materials) { Panel3DView().environmentObject(model).presentationDetents([.medium, .large]) }
+        .sheet(isPresented: $transformPanel, onDismiss: { if model.panel == .transform { model.openPanel(.none) } }) {
+            TransformView().environmentObject(model).presentationDetents([.medium, .large])
         }
         .sheet(isPresented: $curve, onDismiss: { if model.panel == .curve { model.openPanel(.none) } }) {
-            CurvePanel().environmentObject(model)
-                .presentationDetents([.large])
+            CurvePanel().environmentObject(model).presentationDetents([.large])
         }
         .onChange(of: model.panel) { panel in if panel == .none { materials = false; curve = false } }
-        // O painel 3D e os menus abrem o Esqueleto: ele vira a área de baixo.
-        .onChange(of: model.skeletonPanel) { on in if on { area = Self.skeletonArea } }
+        .onChange(of: model.skeletonPanel) { on in if on { area = Self.skeletonArea; expanded = true } }
         .onChange(of: isModel) { now in if !now && area == Self.skeletonArea { area = 0 } }
+        .onChange(of: model.primarySelection) { _ in transformOpen = false }
     }
     private func openMaterial() { model.panel = .layer3D; materials = true }
 
     /// Voltar, o título, tela cheia e fechar.
     private var header: some View {
         HStack(spacing: 0) {
-            headerIcon(CupertinoGlyph.ChevronLeft, AureaText.t("editor_voltar_editor")) { model.exitSceneEditor() }
-            CupertinoGlyph.text(CupertinoGlyph.Cube, size: 20, color: AureaColors.text).padding(.leading, 8)
-            Text(AureaText.t("s3d_scene_title")).font(.aurea(size: 16, weight: .semibold)).foregroundStyle(AureaColors.text)
-                .lineLimit(1).padding(.leading, 10)
-            Spacer(minLength: 0)
-            headerIcon(fullscreen ? CupertinoGlyph.FullscreenExit : CupertinoGlyph.Fullscreen, AureaText.t("s3d_fullscreen")) { fullscreen.toggle() }
-            headerIcon(CupertinoGlyph.Xmark, AureaText.t("editor_voltar_editor")) { model.exitSceneEditor() }
-        }.padding(.horizontal, 6).frame(height: 36)
-            .environment(\.layoutDirection, .leftToRight)
+            headerIcon(CupertinoGlyph.House, AureaText.t("editor_voltar_editor")) { model.exitSceneEditor() }
+                .accessibilityIdentifier("scene.home")
+            Spacer()
+            Button { hierarchyOpen.toggle() } label: {
+                Image(systemName: "list.bullet").font(.system(size: 22)).frame(width: 44, height: 44).contentShape(Rectangle())
+            }.buttonStyle(.plain).accessibilityLabel(AureaText.t("s3d_area_outliner"))
+                .accessibilityValue(AureaText.t(hierarchyOpen ? "common_on" : "common_off"))
+                .accessibilityIdentifier("scene.hierarchy")
+            headerIcon(CupertinoGlyph.SquareArrowUp, AureaText.t("edit_export")) { model.pause(); model.openExport() }
+                .accessibilityIdentifier("scene.export")
+        }.padding(.horizontal, 8).frame(height: 44).foregroundStyle(AureaColors.text)
     }
     private func headerIcon(_ glyph: Character, _ label: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            CupertinoGlyph.text(glyph, size: 18).foregroundStyle(AureaColors.text).frame(width: 40, height: 36).contentShape(Rectangle())
+            CupertinoGlyph.text(glyph, size: 22).foregroundStyle(AureaColors.text).frame(width: 44, height: 44).contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityLabel(label)
     }
 
-    // --- As duas viewports ---------------------------------------------------
-    // AnyLayout: trocar a divisão ou esconder a prévia não recria o palco.
     private var viewports: some View {
         GeometryReader { geo in
-            editViewport(width: geo.size.width, height: geo.size.height)
-        }
+            ZStack(alignment: .topLeading) {
+                PreviewStage(height: geo.size.height)
+                Menu { modeMenu; Divider(); viewMenu } label: {
+                    CupertinoGlyph.text(CupertinoGlyph.Cube, size: 20).frame(width: 44, height: 44)
+                        .background(AureaColors.editorCanvas.opacity(0.8), in: RoundedRectangle(cornerRadius: 6))
+                }.padding(8).accessibilityLabel(AureaText.t("s3d_viewport_edit")).accessibilityIdentifier("scene.viewport")
+                if hierarchyOpen {
+                    Scene3DStudioBottom(area: 2, wide: wide, isModel: isModel, onArea: chooseArea, onAdd: { addOpen = true },
+                                        openMaterial: openMaterial, openLights: { lights = true }, openCurve: { curve = true },
+                                        more: AnyView(EmptyView()), showToolbar: false, showGraph: false)
+                        .frame(width: min(280, width * 0.45), height: wide ? max(0, geo.size.height - 8) : min(360, geo.size.height * 0.65))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                        .padding(.top, 8).accessibilityIdentifier("scene.hierarchy.panel")
+                }
+                if transformOpen && model.selectedLayer != nil && !model.rigPoseActive {
+                    transformValues.padding(.horizontal, 16).padding(.bottom, 12)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                }
+                if model.rigFixMode && !model.humanoidJoints.isEmpty {
+                    rigFixBar.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                }
+                if addOpen {
+                    Scene3DStudioAddMenu(onClose: { addOpen = false }).frame(maxHeight: geo.size.height).padding(8)
+                }
+            }.frame(width: geo.size.width, height: geo.size.height).clipped()
+        }.environment(\.layoutDirection, .leftToRight)
     }
-    private func editViewport(width: CGFloat, height: CGFloat) -> some View {
-        ZStack(alignment: .topLeading) {
-            PreviewStage(height: height)
-            Menu {
-                modeMenu
-                Divider()
-                viewMenu
-            } label: {
-                Scene3DPill(label: AureaText.t("s3d_viewport_edit"), glyph: nil)
-            }.padding(6).accessibilityIdentifier("scene.viewport")
-            Scene3DToolbar(height: height - 50).environmentObject(model).padding(.top, 44)
-            if model.rigFixMode && !model.humanoidJoints.isEmpty {
-                rigFixBar.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+
+    private var mobileTransport: some View {
+        ZStack {
+            HStack(spacing: 0) {
+                headerIcon(CupertinoGlyph.ArrowUturnLeft, AureaText.t("editor_desfazer")) { model.undo() }.disabled(model.status.canUndo == 0).accessibilityIdentifier("scene.undo")
+                headerIcon(CupertinoGlyph.ArrowUturnRight, AureaText.t("editor_refazer")) { model.redo() }.disabled(model.status.canRedo == 0).accessibilityIdentifier("scene.redo")
+                Spacer()
+                Button { model.toggleSceneKey() } label: {
+                    CupertinoGlyph.text(model.sceneKeyHere ? CupertinoGlyph.SuitDiamondFill : CupertinoGlyph.SuitDiamond, size: 21)
+                        .frame(width: 44, height: 40).contentShape(Rectangle())
+                }.buttonStyle(.plain).disabled(model.selectedLayer == nil)
+                    .accessibilityLabel(AureaText.t("s3d_insert_key_desc")).accessibilityIdentifier("scene.key")
+                Button { expanded.toggle(); area = 0; model.openSkeletonPanel(false) } label: {
+                    CupertinoGlyph.text(expanded ? CupertinoGlyph.ChevronDown : CupertinoGlyph.ChevronUp, size: 18).frame(width: 44, height: 40)
+                }.buttonStyle(.plain).accessibilityLabel(AureaText.t(expanded ? "s3d_mobile_collapse" : "panel_expandir"))
+                    .accessibilityIdentifier("scene.timeline.expand")
             }
-            if addOpen {
-                Scene3DStudioAddMenu(onClose: { addOpen = false }).environmentObject(model)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            }
-        }
-        .frame(width: width, height: height)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .environment(\.layoutDirection, .leftToRight)   // a cena 3D e os gizmos não espelham
+            Button { model.playPause() } label: {
+                CupertinoGlyph.text(model.status.playing != 0 ? CupertinoGlyph.PauseFill : CupertinoGlyph.PlayFill, size: 24)
+                    .frame(width: 44, height: 40).contentShape(Rectangle())
+            }.buttonStyle(.plain).accessibilityLabel(AureaText.t(model.status.playing != 0 ? "s3d_pause" : "s3d_play"))
+                .accessibilityIdentifier("scene.transport.play")
+        }.frame(height: 40).foregroundStyle(AureaColors.text)
     }
+
+    private var mobileDock: some View {
+        HStack(spacing: 0) {
+            if model.selectedLayer != nil {
+                Button {
+                    if area != 0 { area = 0; expanded = false; model.openSkeletonPanel(false) }
+                    else {
+                        transformOpen = false
+                        model.clearSelection()
+                    }
+                } label: {
+                    CupertinoGlyph.text(CupertinoGlyph.ChevronLeft, size: 22).frame(width: 44, height: 58).contentShape(Rectangle())
+                }.buttonStyle(.plain).accessibilityLabel(AureaText.t("edit_back")).accessibilityIdentifier("scene.dock.back")
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 4) {
+                    if model.selectedLayer == nil {
+                        dockAction(CupertinoGlyph.Cube, "s3d_mobile_models", "scene.add") { addOpen.toggle() }
+                        dockAction(CupertinoGlyph.Videocam, "panel_camera_3d", "scene.add.camera") { model.addCamera() }
+                        dockAction(CupertinoGlyph.Lightbulb, "pn_t3d_lighting", "scene.add.light") { lights = true }
+                        Menu {
+                            // 0.5.4: texto 3D pago; sem o acesso o item leva o cadeado e abre a folha bloqueada.
+                            Button { _ = model.addText3D(content: AureaText.t("panel_texto"), depth: 0.25) } label: {
+                                if Text3DGate.locked() { Label(AureaText.t("sh_add_text_3d"), systemImage: "lock") } else { Text(AureaText.t("sh_add_text_3d")) }
+                            }
+                            Button(AureaText.t("sh_add_tab_media")) { shell.addPicker = .gallery }
+                        } label: { dockLabel(CupertinoGlyph.Photo, "sh_add_tab_media") }
+                            .accessibilityIdentifier("scene.add.media")
+                    } else {
+                        dockAction(CupertinoGlyph.Move, "gizmo_tool_move", "scene.tool.move") {
+                            if model.rigPoseActive { model.choosePoseTool(AureaModel.poseToolMove) } else { model.chooseSceneTool(0) }; transformOpen = true
+                        }
+                        dockAction(CupertinoGlyph.ArrowCounterclockwise, "gizmo_tool_rotate", "scene.tool.rotate") {
+                            if model.rigPoseActive { model.choosePoseTool(AureaModel.poseToolRotate) } else { model.chooseSceneTool(1) }; transformOpen = true
+                        }
+                        if !model.rigPoseActive {
+                            dockAction(CupertinoGlyph.ArrowDownRightSquare, "gizmo_tool_scale", "scene.tool.scale") { model.chooseSceneTool(2); transformOpen = true }
+                        }
+                        dockAction(CupertinoGlyph.CircleLefthalfFill, "scene_material", "scene.material", openMaterial)
+                            .disabled(!isModel && !(model.selectedLayer?.kind == 4 && model.selectedLayer?.threeD == true))
+                        dockAction(CupertinoGlyph.SuitDiamond, "s3d_animation", "scene.animation") { chooseArea(0); expanded = true; transformOpen = false }
+                        if isModel {
+                            dockAction(CupertinoGlyph.SquareOnSquare, "shape3d_parts", "scene.parts") { Panel3DRequest.tab = .parts; model.face3D = .object; openMaterial() }
+                        }
+                        dockAction(CupertinoGlyph.SmallcircleCircle, "om_ap_tf_pivot", "scene.pivot") { model.transformTab = 4; model.openPanel(.transform); transformPanel = true }
+                    }
+                    Menu {
+                        modeMenu; Divider(); viewMenu; Divider(); moreMenu; Divider(); selectMenu
+                        Divider()
+                        Button(AureaText.t("s3d_prev_key")) { _ = model.stepToKeyframe(-1) }
+                        Button(AureaText.t("s3d_next_key")) { _ = model.stepToKeyframe(1) }
+                        Button(AureaText.t(model.autoKeyTransforms ? "s3d_autokey_on" : "s3d_autokey_off")) { model.autoKeyTransforms.toggle() }
+                        Button(AureaText.t("s3d_area_properties")) { chooseArea(1) }
+                        Button(AureaText.t("s3d_fullscreen")) { fullscreen.toggle() }
+                        Button(AureaText.t("panel_adicionar")) { addOpen = true }
+                    } label: { dockLabel(CupertinoGlyph.Ellipsis, "s3d_more") }
+                        .accessibilityIdentifier("scene.more")
+                }.padding(.horizontal, 8)
+            }
+        }.frame(height: dockHeight).background(AureaColors.editorCanvas).foregroundStyle(AureaColors.text)
+    }
+    private func dockLabel(_ glyph: Character, _ key: String) -> some View {
+        VStack(spacing: 6) {
+            CupertinoGlyph.text(glyph, size: 24)
+            Text(AureaText.t(key)).font(.aurea(size: dockText)).lineLimit(2).multilineTextAlignment(.center)
+        }.frame(minWidth: 66, minHeight: 64).padding(.horizontal, 6).contentShape(Rectangle())
+    }
+    private func dockAction(_ glyph: Character, _ key: String, _ id: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) { dockLabel(glyph, key) }.buttonStyle(.plain)
+            .accessibilityElement(children: .ignore).accessibilityLabel(AureaText.t(key)).accessibilityIdentifier(id)
+    }
+    private var transformValues: some View {
+        let tool = model.gizmoTool
+        let property: UInt32 = tool == 1 ? 6 : tool == 2 ? 3 : 0
+        let key = tool == 1 ? "rotation" : tool == 2 ? "scale" : "position"
+        let values = (model.detail[key] as? [NSNumber] ?? []).map(\.floatValue)
+        return HStack(spacing: 2) {
+            ForEach(0..<3, id: \.self) { axis in
+                let value: Float = axis < values.count ? values[axis] : 0
+                Button {
+                    guard let id = model.primarySelection else { return }
+                    let project = model.projectGeneration
+                    let composition = (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value
+                    model.numericKeypad = KeypadRequest(title: ["X", "Y", "Z"][axis], value: value, unit: tool == 1 ? "°" : "",
+                                                       min: -.infinity, max: .infinity, decimals: 3) { amount in
+                        guard model.projectGeneration == project, model.primarySelection == id,
+                              (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value == composition else { return }
+                        model.setTransform(property + UInt32(axis), value: amount, layer: id)
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(["X", "Y", "Z"][axis]).foregroundStyle(AureaColors.muted)
+                        Text(String(format: "%.3f", locale: Locale(identifier: "en_US_POSIX"), value)).lineLimit(1).minimumScaleFactor(0.7)
+                    }.font(.aurea(size: 12)).frame(maxWidth: .infinity).frame(minHeight: 44)
+                }.buttonStyle(.plain).disabled(model.selectedLayer?.locked ?? true)
+                    .accessibilityLabel(AureaText.t(tool == 1 ? "s3d_rotation" : tool == 2 ? "s3d_scale" : "s3d_position") + " " + ["X", "Y", "Z"][axis])
+                    .accessibilityValue(String(format: "%.3f", locale: Locale(identifier: "en_US_POSIX"), value))
+                    .accessibilityIdentifier("scene.transform.\(axis)")
+            }
+        }.padding(.horizontal, 8).foregroundStyle(AureaColors.text)
+            .background(AureaColors.editorCanvas.opacity(0.94), in: Capsule())
+            .accessibilityIdentifier("scene.transform.panel")
+    }
+
     // --- Os menus ------------------------------------------------------------
     @ViewBuilder private var modeMenu: some View {
         let canPose = isModel && !model.poseBones.isEmpty
         checked(AureaText.t("s3d_mode_object"), !model.rigPoseMode) { if model.rigPoseMode { model.setRigPose(false) } }
+            .accessibilityIdentifier("scene.mode.object")
         checked(AureaText.t("s3d_mode_pose") + (canPose ? "" : " — " + AureaText.t("s3d_no_rig")), model.rigPoseMode) { model.setRigPose(true) }
             .disabled(!canPose)
+            .accessibilityIdentifier("scene.mode.pose")
+        Button(AureaText.t("s3d_menu_select")) {
+            if model.rigPoseActive { model.choosePoseTool(AureaModel.poseToolSelect) } else { model.chooseSceneTool(AureaModel.sceneToolSelect) }
+        }.accessibilityIdentifier("scene.tool.select")
+        Button(AureaText.t("s3d_tool_hand")) {
+            if model.rigPoseActive { model.choosePoseTool(AureaModel.poseToolHand) } else { model.chooseSceneTool(AureaModel.sceneToolHand) }
+        }.accessibilityIdentifier("scene.tool.hand")
+        if model.rigPoseActive {
+            Button(AureaText.t("skeleton_ik")) { model.choosePoseTool(AureaModel.poseToolIk) }.accessibilityIdentifier("scene.tool.ik")
+        }
         Button(AureaText.t(model.gizmoLocalSpace ? "s3d_space_local" : "s3d_space_global")) { model.gizmoLocalSpace.toggle() }
     }
     @ViewBuilder private var moreMenu: some View {
@@ -2259,6 +2433,7 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
         Button(action: action) { if on { Label(label, systemImage: "checkmark") } else { Text(label) } }
     }
     @ViewBuilder private var viewMenu: some View {
+        Button(AureaText.t("s3d_fullscreen")) { fullscreen.toggle() }.accessibilityIdentifier("scene.fullscreen")
         Button(AureaText.t("s3d_view_frame")) { Scene3DNav.frameAll(model) }
         checked(AureaText.t("s3d_view_camera"), model.sceneCameraView) { model.toggleSceneCameraView() }
         Divider()
@@ -2302,7 +2477,7 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
         let selected = model.selectedLayer
         Button(AureaText.t("s3d_insert_key_desc")) { model.toggleSceneKey() }.disabled(selected == nil)
         Button(AureaText.t("s3d_duplicate")) {
-            model.engine.duplicateLayers(model.selection.map { NSNumber(value: $0) }); model.refreshModel(force: true)
+            model.duplicateSelectedLayers()
         }.disabled(selected == nil)
         if isModel || (selected?.kind == 4 && selected?.threeD == true) {
             Divider()
@@ -2417,72 +2592,6 @@ extension AureaModel {
     }
 }
 
-/// Barra da esquerda: as ferramentas e os dois modos. Sem altura para todas, abre outra coluna.
-@MainActor private struct Scene3DToolbar: View {
-    @EnvironmentObject private var model: AureaModel
-    let height: CGFloat
-    private var poseTool: Int {
-        if model.sceneHand { return AureaModel.poseToolHand }
-        if model.sceneSelectOnly { return AureaModel.poseToolSelect }
-        if model.poseIk { return AureaModel.poseToolIk }
-        return model.poseMove ? AureaModel.poseToolMove : AureaModel.poseToolRotate
-    }
-    private var objectTool: Int { model.sceneHand ? AureaModel.sceneToolHand : model.sceneSelectOnly ? AureaModel.sceneToolSelect : model.gizmoTool }
-    private static let count = 7
-    var body: some View {
-        let size = Scene3DNav.tool
-        let rows = max(1, min(Self.count, Int((height - 4) / (size + 2))))
-        let columns = (Self.count + rows - 1) / rows
-        LazyHGrid(rows: Array(repeating: GridItem(.fixed(size), spacing: 2), count: rows), spacing: 2) {
-            if model.rigPoseActive {
-                selectTool(poseTool == AureaModel.poseToolSelect) { model.choosePoseTool(AureaModel.poseToolSelect) }
-                tool(CupertinoGlyph.HandRaised, "s3d_tool_hand", "scene.tool.hand", on: poseTool == AureaModel.poseToolHand) { model.choosePoseTool(AureaModel.poseToolHand) }
-                tool(CupertinoGlyph.ArrowCounterclockwise, "gizmo_tool_rotate", "scene.tool.rotate", on: poseTool == AureaModel.poseToolRotate) { model.choosePoseTool(AureaModel.poseToolRotate) }
-                tool(CupertinoGlyph.Move, "rig3d_move", "scene.tool.move", on: poseTool == AureaModel.poseToolMove) { model.choosePoseTool(AureaModel.poseToolMove) }
-                tool(CupertinoGlyph.Link, "skeleton_ik", "scene.tool.ik", on: poseTool == AureaModel.poseToolIk) { model.choosePoseTool(AureaModel.poseToolIk) }
-            } else {
-                selectTool(objectTool == AureaModel.sceneToolSelect) { model.chooseSceneTool(AureaModel.sceneToolSelect) }
-                tool(CupertinoGlyph.HandRaised, "s3d_tool_hand", "scene.tool.hand", on: objectTool == AureaModel.sceneToolHand) { model.chooseSceneTool(AureaModel.sceneToolHand) }
-                tool(CupertinoGlyph.Move, "gizmo_tool_move", "scene.tool.move", on: objectTool == 0) { model.chooseSceneTool(0) }
-                tool(CupertinoGlyph.ArrowCounterclockwise, "gizmo_tool_rotate", "scene.tool.rotate", on: objectTool == 1) { model.chooseSceneTool(1) }
-                tool(CupertinoGlyph.ArrowDownRightSquare, "gizmo_tool_scale", "scene.tool.scale", on: objectTool == 2) { model.chooseSceneTool(2) }
-            }
-            mode(CupertinoGlyph.Cube, "s3d_mode_object", "scene.mode.object", active: !model.rigPoseActive) {
-                if model.rigPoseMode { model.setRigPose(false) }
-            }
-            mode(CupertinoGlyph.PersonCropCircle, "s3d_mode_pose", "scene.mode.pose", active: model.rigPoseActive) {
-                if !model.rigPoseMode && !model.poseBones.isEmpty && model.selectedLayer?.kind == 10 { model.setRigPose(true) }
-            }
-        }
-        .frame(width: CGFloat(columns) * size + CGFloat(columns - 1) * 2, height: CGFloat(rows) * size + CGFloat(rows - 1) * 2)
-        .padding(3).background(Scene3DNav.fill, in: RoundedRectangle(cornerRadius: 10))
-        .padding(.leading, 6)
-    }
-    private func mode(_ glyph: Character, _ key: String, _ id: String, active: Bool, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            CupertinoGlyph.text(glyph, size: 18, color: active ? AureaColors.text : AureaColors.muted)
-                .frame(width: Scene3DNav.tool, height: Scene3DNav.tool).contentShape(Rectangle())
-        }.buttonStyle(.plain).accessibilityLabel(AureaText.t(key)).accessibilityAddTraits(active ? [.isSelected] : []).accessibilityIdentifier(id)
-    }
-    private func tool(_ glyph: Character, _ key: String, _ id: String, on: Bool, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            CupertinoGlyph.text(glyph, size: 18, color: on ? AureaColors.onAction : AureaColors.text)
-                .frame(width: Scene3DNav.tool, height: Scene3DNav.tool)
-                .background(on ? AureaColors.brand : Color.clear, in: RoundedRectangle(cornerRadius: 9)).contentShape(Rectangle())
-        }.buttonStyle(.plain).accessibilityLabel(AureaText.t(key)).accessibilityAddTraits(on ? [.isSelected] : []).accessibilityIdentifier(id)
-    }
-    /// Selecionar: um quadrado tracejado (o conjunto de ícones do app não tem cursor).
-    private func selectTool(_ on: Bool, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Rectangle().stroke(on ? AureaColors.onAction : AureaColors.text, style: StrokeStyle(lineWidth: 1.6, dash: [3, 2.5]))
-                .frame(width: 15, height: 15)
-                .frame(width: Scene3DNav.tool, height: Scene3DNav.tool)
-                .background(on ? AureaColors.brand : Color.clear, in: RoundedRectangle(cornerRadius: 9)).contentShape(Rectangle())
-        }.buttonStyle(.plain).accessibilityLabel(AureaText.t("s3d_menu_select")).accessibilityAddTraits(on ? [.isSelected] : []).accessibilityIdentifier("scene.tool.select")
-    }
-}
-
-/// O rótulo com seta que abre um menu: o título das viewports e do painel.
 private struct Scene3DPill: View {
     let label: String
     let glyph: Character?
@@ -2533,7 +2642,7 @@ private struct Scene3DPill: View {
                     (CupertinoGlyph.CubeFill, AureaText.t(key), { model.addShape3D(kind: kind) })
                 })
                 section("s3d_section_other")
-                grid([
+                grid(locked: Text3DGate.locked() ? AureaText.t("sh_add_text_3d") : nil, [
                     (CupertinoGlyph.Textformat, AureaText.t("sh_add_text_3d"), { _ = model.addText3D(content: AureaText.t("panel_texto"), depth: 0.25) }),
                     (CupertinoGlyph.Lightbulb, AureaText.t("scene_light_point"), { model.addLight(1) }),
                     (CupertinoGlyph.Lightbulb, AureaText.t("scene_light_directional"), { model.addLight(0) }),
@@ -2554,12 +2663,14 @@ private struct Scene3DPill: View {
     private func section(_ key: String) -> some View {
         Text(AureaText.t(key).uppercased()).font(.aurea(size: 11, weight: .semibold)).foregroundStyle(AureaColors.muted)
     }
-    private func grid(_ items: [(Character, String, () -> Void)]) -> some View {
+    /// `locked`: o rótulo do item pago sem o acesso (0.5.4, Texto 3D), que leva o cadeado.
+    private func grid(locked: String? = nil, _ items: [(Character, String, () -> Void)]) -> some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 3), spacing: 6) {
             ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                 Button { onClose(); item.2() } label: {
                     VStack(spacing: 6) {
                         CupertinoGlyph.text(item.0, size: 22)
+                            .overlay(alignment: .topTrailing) { if locked == item.1 { HyperLockBadge().offset(x: 14, y: -6) } }
                         Text(item.1).font(.aurea(size: 12)).lineLimit(1)
                     }.foregroundStyle(AureaColors.text).frame(maxWidth: .infinity).padding(.vertical, 12).padding(.horizontal, 4)
                         .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 12))
@@ -2586,6 +2697,8 @@ private struct Scene3DLane: Hashable {
     let openLights: () -> Void
     let openCurve: () -> Void
     let more: AnyView
+    var showToolbar = true
+    var showGraph = true
     @State private var pickedLane: Scene3DLane?
     @State private var pickedFrame = 0
     @State private var folded = false
@@ -2594,7 +2707,12 @@ private struct Scene3DLane: Hashable {
     @State private var grabbedLane: Scene3DLane?
     @State private var grabbedFrame = 0
     @State private var dragTo: Int?
-    private var labels: CGFloat { wide ? 168 : 140 }
+    @State private var gestureOriginFrame: CGFloat?
+    @State private var compactCenterFrame: CGFloat?
+    private var labels: CGFloat { showGraph ? (wide ? 168 : 140) : (wide ? 120 : 110) }
+    private static let compactPointsPerSecond: CGFloat = 72
+    private var compactPixelsPerFrame: CGFloat { Self.compactPointsPerSecond / max(1, CGFloat(model.compositionFps)) }
+    private var centerFrame: CGFloat { compactCenterFrame ?? CGFloat(model.status.playhead) }
     private static let rowHeight: CGFloat = 26
     private static let ruler: CGFloat = 24
     private static let pad: CGFloat = 10
@@ -2609,7 +2727,7 @@ private struct Scene3DLane: Hashable {
     }
     var body: some View {
         VStack(spacing: 0) {
-            toolbar
+            if showToolbar { toolbar }
             Group {
                 switch area {
                 case 0: animation
@@ -2619,9 +2737,8 @@ private struct Scene3DLane: Hashable {
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(AureaColors.editorCanvas, in: RoundedRectangle(cornerRadius: 12))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .padding(.horizontal, 8).padding(.vertical, 6)
+        .background(AureaColors.editorCanvas)
+        .clipped()
         .environment(\.layoutDirection, .leftToRight)
         .onChange(of: model.primarySelection) { _ in pickedLane = nil; folded = false }
     }
@@ -2719,7 +2836,7 @@ private struct Scene3DLane: Hashable {
     private var objects: [LayerItem] { model.layers.filter { $0.threeD } }
     private func transformKeyed(_ k: KeyframeItem) -> Bool { k.effectIndex == UInt32.max && k.property <= 12 && k.timelineVisible }
     private func laneKeys(_ lane: Scene3DLane) -> [KeyframeItem] {
-        let all = model.keyframes[lane.layer] ?? []
+        let all = model.keysForLayer(lane.layer) ?? []
         guard lane.node >= 0 else { return all.filter(transformKeyed) }
         let node = UInt32(lane.node)
         return all.filter { $0.property == 45 && $0.effectIndex == node && $0.timelineVisible }
@@ -2746,7 +2863,7 @@ private struct Scene3DLane: Hashable {
         var rows: [Scene3DLane] = []
         let layer = model.primarySelection
         let f = AureaModel.boneFloats, bones = model.poseBones
-        for o in objects where o.id == layer || !laneKeys(Scene3DLane(layer: o.id)).isEmpty {
+        for o in objects where !showGraph || o.id == layer || !laneKeys(Scene3DLane(layer: o.id)).isEmpty {
             rows.append(Scene3DLane(layer: o.id))
             if o.id == layer && !folded {
                 for i in 0..<(bones.count / f) { rows.append(Scene3DLane(layer: o.id, node: Int32(bones[i * f]))) }
@@ -2784,12 +2901,12 @@ private struct Scene3DLane: Hashable {
         return VStack(spacing: 0) {
             HStack(spacing: 0) {
                 lanes(rows: rows, keys: frames, end: end)
-                if wide {
+                if wide && showGraph {
                     Rectangle().fill(AureaColors.editorBarLine).frame(width: 1)
                     curveGraph.frame(width: 176)
                 }
             }
-            if !wide {
+            if !wide && showGraph {
                 Rectangle().fill(AureaColors.editorBarLine).frame(height: 1)
                 curveGraph.frame(height: 84)
             }
@@ -2801,7 +2918,7 @@ private struct Scene3DLane: Hashable {
                 ZStack(alignment: .topLeading) {
                     VStack(spacing: 0) {
                         HStack(spacing: 0) {
-                            Color.clear.frame(width: labels + 1, height: Self.ruler)
+                            timelineHeader.frame(width: labels + 1, height: Self.ruler)
                             rulerView(end: end, width: width)
                         }
                         ScrollViewReader { proxy in
@@ -2828,9 +2945,32 @@ private struct Scene3DLane: Hashable {
         }
     }
     private func keyX(_ frame: Int, end: Int, width: CGFloat) -> CGFloat {
-        Self.pad + CGFloat(frame) / CGFloat(end) * (width - Self.pad * 2)
+        if !showGraph { return compactHeadX(width: width) + (CGFloat(frame) - centerFrame) * compactPixelsPerFrame }
+        return Self.pad + CGFloat(frame) / CGFloat(end) * (width - Self.pad * 2)
+    }
+    /// Local key-canvas coordinate of the center of the complete panel,
+    /// including its label column. Drawing and inverse hit testing share it.
+    private func compactHeadX(width: CGFloat) -> CGFloat { (width - labels - 1) / 2 }
+    private var timelineHeader: some View {
+        HStack(spacing: 2) {
+            Text(editClock(Int64(model.status.playhead), model.compositionFps))
+                .font(.aurea(size: 11).monospacedDigit()).lineLimit(1).frame(maxWidth: .infinity)
+            Menu {
+                Button(AureaText.t("s3d_insert_key_desc")) { model.toggleSceneKey() }
+                Button(AureaText.t("s3d_delete_key")) { deleteKey() }.disabled(activeLane == nil)
+                Button(AureaText.t("s3d_curve")) { showCurve() }
+                Button(AureaText.t(model.autoKeyTransforms ? "s3d_autokey_on" : "s3d_autokey_off")) { model.autoKeyTransforms.toggle() }
+            } label: {
+                CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: 18).frame(width: 36, height: Self.ruler)
+                    .contentShape(Rectangle())
+            }.accessibilityLabel(AureaText.t("s3d_more")).accessibilityIdentifier("scene.key.menu")
+        }.foregroundStyle(AureaColors.text)
     }
     private func frameAt(_ x: CGFloat, end: Int, width: CGFloat) -> Int {
+        if !showGraph {
+            let raw = centerFrame + (x - compactHeadX(width: width)) / compactPixelsPerFrame
+            return min(end, max(0, Int(raw.rounded())))
+        }
         let raw = (x - Self.pad) / max(1, width - Self.pad * 2) * CGFloat(end)
         return min(end, max(0, Int(raw.rounded())))
     }
@@ -2895,13 +3035,15 @@ private struct Scene3DLane: Hashable {
     private func rulerView(end: Int, width: CGFloat) -> some View {
         let fps = max(1, model.compositionFps)
         let seconds = Double(end) / fps
-        let usable = Double(width - Self.pad * 2)
-        let step = [0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60].first { $0 / seconds * usable >= 56 } ?? 120
+        let pointsPerSecond = showGraph ? Double(width - Self.pad * 2) / seconds : Double(Self.compactPointsPerSecond)
+        let step = [0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60].first { $0 * pointsPerSecond >= 56 } ?? 120
+        let from = showGraph ? 0 : max(0, Double(centerFrame - compactHeadX(width: width) / compactPixelsPerFrame) / fps)
+        let until = showGraph ? seconds : min(seconds, Double(centerFrame + (width - compactHeadX(width: width)) / compactPixelsPerFrame) / fps)
         let tick = AureaColors.editorBarLine, muted = AureaColors.muted
         return Canvas { ctx, size in
             ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .color(tick.opacity(0.25)))
-            var t = 0.0
-            while t <= seconds + 0.001 {
+            var t = floor(from / step) * step
+            while t <= until + 0.001 {
                 let x = keyX(Int((t * fps).rounded()), end: end, width: width)
                 var line = Path()
                 line.move(to: CGPoint(x: x, y: size.height - 6))
@@ -2917,8 +3059,9 @@ private struct Scene3DLane: Hashable {
         .gesture(DragGesture(minimumDistance: 0).onChanged { g in
             if model.status.playing != 0 { model.pause() }
             pickedLane = nil
-            model.seek(toFrame: Int64(frameAt(g.location.x, end: end, width: width)))
-        })
+            if showGraph { model.seek(toFrame: Int64(frameAt(g.location.x, end: end, width: width))) }
+            else { panCompactTimeline(translation: g.translation.width, end: end) }
+        }.onEnded { _ in gestureOriginFrame = nil; compactCenterFrame = nil })
         .accessibilityLabel(AureaText.t("s3d_area_timeline")).accessibilityValue("\(model.status.playhead)")
     }
     private func rowsView(rows: [Scene3DLane], keys: [Scene3DLane: [Int]], end: Int, width: CGFloat) -> some View {
@@ -2968,6 +3111,10 @@ private struct Scene3DLane: Hashable {
         if !touching {
             touching = true
             grabbedLane = nil
+            if !showGraph {
+                gestureOriginFrame = CGFloat(model.status.playhead)
+                compactCenterFrame = gestureOriginFrame
+            }
             let row = Int(g.startLocation.y / Self.rowHeight)
             if row >= 0 && row < rows.count {
                 let lane = rows[row]
@@ -2987,10 +3134,21 @@ private struct Scene3DLane: Hashable {
         }
         let frame = frameAt(g.location.x, end: end, width: width)
         if grabbedLane != nil {
-            if abs(g.translation.width) > 6 { dragTo = frame }
-        } else {
+            if abs(g.translation.width) > 6 {
+                dragTo = showGraph ? frame : frameAt(keyX(grabbedFrame, end: end, width: width) + g.translation.width, end: end, width: width)
+            }
+        } else if showGraph {
             model.seek(toFrame: Int64(frame))
+        } else {
+            panCompactTimeline(translation: g.translation.width, end: end)
         }
+    }
+    private func panCompactTimeline(translation: CGFloat, end: Int) {
+        if gestureOriginFrame == nil { gestureOriginFrame = CGFloat(model.status.playhead) }
+        let frame = min(CGFloat(end), max(0, (gestureOriginFrame ?? 0) - translation / compactPixelsPerFrame))
+        compactCenterFrame = frame
+        let target = Int64(frame.rounded())
+        if model.status.playhead != target { model.seek(toFrame: target) }
     }
     /// Soltou: as chaves do instante andam juntas, em um passo de desfazer.
     private func timelineRelease() {
@@ -3005,11 +3163,13 @@ private struct Scene3DLane: Hashable {
         }
         grabbedLane = nil
         dragTo = nil
+        gestureOriginFrame = nil
+        compactCenterFrame = nil
     }
     private func playheadView(end: Int, width: CGFloat) -> some View {
         let head = AureaColors.accent
         let frame = min(end, max(0, Int(model.status.playhead)))
-        let x = keyX(frame, end: end, width: width)
+        let x = showGraph ? keyX(frame, end: end, width: width) : compactHeadX(width: width)
         return Canvas { ctx, size in
             var line = Path()
             line.move(to: CGPoint(x: x, y: Self.ruler))
@@ -3148,11 +3308,11 @@ private struct Scene3DLane: Hashable {
             VStack(alignment: .leading, spacing: 0) {
                 row(depth: 0, glyph: CupertinoGlyph.CubeFill, name: AureaText.t("s3d_scene"), on: false, keyed: false, delete: nil) {}
                 ForEach(objects) { o in
-                    let keyed = (model.keyframes[o.id] ?? []).contains(where: transformKeyed)
+                    let keyed = (model.keysForLayer(o.id) ?? []).contains(where: transformKeyed)
                     row(depth: 1, glyph: o.kind == 9 ? CupertinoGlyph.Lightbulb : CupertinoGlyph.CubeFill, name: o.name,
                         on: o.id == model.primarySelection, keyed: keyed, delete: {
                             model.select(layerId: o.id, additive: false, openOptions: false); model.deleteSelectedLayers()
-                        }) { model.select(layerId: o.id, additive: false, openOptions: false) }
+                        }, object: o) { model.select(layerId: o.id, additive: false, openOptions: false) }
                     if model.rigPoseMode && o.id == model.primarySelection && !model.poseBones.isEmpty {
                         let floats = model.poseBones
                         let count = floats.count / 10
@@ -3171,7 +3331,7 @@ private struct Scene3DLane: Hashable {
         while p >= 0 && d < 8 && p * 10 + 1 < b.count { d += 1; p = Int(b[p * 10 + 1]) }
         return d
     }
-    private func row(depth: Int, glyph: Character?, name: String, on: Bool, keyed: Bool, delete: (() -> Void)?, _ action: @escaping () -> Void) -> some View {
+    private func row(depth: Int, glyph: Character?, name: String, on: Bool, keyed: Bool, delete: (() -> Void)?, object: LayerItem? = nil, _ action: @escaping () -> Void) -> some View {
         HStack(spacing: 6) {
             Button(action: action) {
                 HStack(spacing: 6) {
@@ -3181,9 +3341,19 @@ private struct Scene3DLane: Hashable {
                     if keyed { Text("◆").font(.system(size: 10)).foregroundStyle(AureaColors.keyframe) }
                 }.contentShape(Rectangle())
             }.buttonStyle(.plain)
-            if let delete {
-                Button(action: delete) { CupertinoGlyph.text(CupertinoGlyph.Trash, size: 14, color: AureaColors.muted).frame(width: 44, height: 44) }
-                    .buttonStyle(.plain).accessibilityLabel(AureaText.t("s3d_delete_named", name))
+                .accessibilityIdentifier(object.map { "scene.hierarchy.row.\($0.id)" } ?? "scene.hierarchy.bone.\(name)")
+                .contextMenu {
+                    if let delete { Button(AureaText.t("s3d_delete_named", name), role: .destructive, action: delete) }
+                }
+            if let object {
+                Button {
+                    model.mutate { $0.setLayer(object.id, visible: !object.visible) }; model.refreshModel(force: true)
+                } label: {
+                    CupertinoGlyph.text(object.visible ? CupertinoGlyph.Eye : CupertinoGlyph.EyeSlash, size: 18, color: AureaColors.muted)
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                }.buttonStyle(.plain)
+                    .accessibilityLabel(AureaText.t(object.visible ? "editor_ocultar_camada" : "editor_mostrar_camada"))
+                    .accessibilityIdentifier("scene.hierarchy.visible.\(object.id)")
             }
         }.padding(.leading, CGFloat(10 + depth * 14)).padding(.trailing, 6).frame(height: 44)
             .background(on ? AureaColors.accent.opacity(0.35) : Color.clear)

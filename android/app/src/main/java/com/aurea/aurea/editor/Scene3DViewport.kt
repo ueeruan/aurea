@@ -2,6 +2,8 @@ package com.aurea.aurea.editor
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
@@ -41,6 +43,7 @@ import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
 import com.aurea.aurea.ui.theme.tocavel
+import kotlin.math.roundToInt
 
 /**
  * A viewport da Cena 3D, com as cores do AUREA: as ferramentas à esquerda. Câmera,
@@ -49,16 +52,15 @@ import com.aurea.aurea.ui.theme.tocavel
  */
 
 private val ChromeFill = Color(0xE6151C24)
-private val ToolSize = 34.dp
+private val ToolSize = 44.dp
 
-/** Barra da esquerda: as ferramentas e os dois modos. Sem altura para todas, abre outra coluna. */
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+/** Pose tools stay available inside the opened skeleton inspector. */
 @Composable
 internal fun SceneToolbar(store: EditorStore, modifier: Modifier) {
     val pose = rigPoseActive(store)
     val selectLabel = stringResource(R.string.s3d_menu_select)
-    androidx.compose.foundation.layout.FlowColumn(modifier.padding(start = 6.dp, bottom = 6.dp).clip(RoundedCornerShape(10.dp)).background(ChromeFill).padding(3.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+    androidx.compose.foundation.layout.Row(modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp).background(ChromeFill),
+        horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
         if (pose) {
             val tool = when {
                 store.sceneHand -> com.aurea.aurea.state.POSE_TOOL_HAND
@@ -98,19 +100,19 @@ internal fun SceneToolbar(store: EditorStore, modifier: Modifier) {
         }
         // Objeto e pose: os dois modos da cena, como as duas últimas ferramentas.
         val canPose = store.poseBones != null && store.layers.firstOrNull { it.id == store.primary }?.kind == com.aurea.aurea.ui.theme.LayerType.Model3D.kind
-        ToolButton(CupertinoGlyph.Cube, stringResource(R.string.s3d_mode_object), false, "scene.mode.object", tint = if (pose) AureaColors.Muted else AureaColors.Text) {
+        ToolButton(CupertinoGlyph.Cube, stringResource(R.string.s3d_mode_object), !pose, "scene.mode.object", tint = if (pose) AureaColors.Muted else AureaColors.Text) {
             if (store.rigPoseMode) store.setRigPose(false)
         }
-        ToolButton(CupertinoGlyph.PersonCropCircle, stringResource(R.string.s3d_mode_pose), false, "scene.mode.pose",
-            tint = if (pose) AureaColors.Text else AureaColors.Muted) { if (canPose && !store.rigPoseMode) store.setRigPose(true) }
+        ToolButton(CupertinoGlyph.PersonCropCircle, stringResource(R.string.s3d_mode_pose), pose, "scene.mode.pose",
+            tint = if (pose) AureaColors.Text else AureaColors.Muted, enabled = canPose) { if (!store.rigPoseMode) store.setRigPose(true) }
     }
 }
 
 @Composable
-private fun ToolButton(glyph: Char, label: String, on: Boolean, tag: String, tint: Color = AureaColors.Text, onClick: () -> Unit) {
+private fun ToolButton(glyph: Char, label: String, on: Boolean, tag: String, tint: Color = AureaColors.Text, enabled: Boolean = true, onClick: () -> Unit) {
     Box(Modifier.size(ToolSize).clip(RoundedCornerShape(9.dp)).background(if (on) AureaColors.Brand else Color.Transparent)
         .semantics { contentDescription = label; role = Role.RadioButton; selected = on }.testTag(tag)
-        .tocavel(haptic = true, shrink = 1f, onClick = onClick), contentAlignment = Alignment.Center) {
+        .tocavel(enabled = enabled, haptic = true, shrink = 1f, onClick = onClick), contentAlignment = Alignment.Center) {
         CupertinoIcon(glyph, 21.dp, if (on) AureaColors.OnAction else tint)
     }
 }
@@ -134,4 +136,17 @@ private fun ToolSelect(label: String, on: Boolean, onClick: () -> Unit) {
 internal fun sceneFrameAll(store: EditorStore) {
     StageView.reset(store)
     store.resetSceneView()
+}
+
+/** One coordinate map for scene timeline painting, key hits and scrubbing. */
+internal class SceneTimelineGeometry(contentWidth: Float, labelWidth: Float, density: Float,
+                                     fps: Float, end: Int, expanded: Boolean, centerFrame: Float) {
+    private val last = end.coerceAtLeast(1)
+    private val base = if (expanded) 0f else centerFrame
+    private val origin = if (expanded) 10f * density else (contentWidth - labelWidth - density) / 2f
+    val pixelsPerFrame = if (expanded) (contentWidth - 20f * density).coerceAtLeast(1f) / last
+        else 72f * density / fps.coerceAtLeast(1f)
+    fun xOf(frame: Float): Float = origin + (frame - base) * pixelsPerFrame
+    fun frameAt(x: Float): Int = ((x - origin) / pixelsPerFrame + base).roundToInt().coerceIn(0, last)
+    fun pannedFrame(deltaX: Float): Float = (base - deltaX / pixelsPerFrame).coerceIn(0f, last.toFloat())
 }

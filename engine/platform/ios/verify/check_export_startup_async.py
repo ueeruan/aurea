@@ -102,6 +102,22 @@ assert "- (int32_t)startExportCheckedTo:" in header
 checked = bridge[bridge.index("- (int32_t)startExportCheckedTo:"):]
 assert "return e->start_export(settings, out.c_str()).raw();" in checked
 assert "return [self startExportCheckedTo:" in bridge
+# 0.5.3 (endurecimento do export): pausa antes de gravar ao ir para segundo
+# plano, nome de arquivo seguro, intervalo sem observação no vigia, marca de
+# "pausado" e o degrau de memória antes de cada partida de vídeo.
+leaving = block("func enterBackground()")
+assert leaving.index("engine.pauseExport()") < leaving.index("saveOnLeave(forceThumbnail: false)")
+assert leaving.index("markExportInFlight(paused: true)") < leaving.index("saveOnLeave(forceThumbnail: false)")
+assert "markExportInFlight(paused: true)" in background
+assert "markExportInFlight(paused: false)" in block("func enterForeground()")
+assert "Self.safeFileName(projectName)" in start and "Self.safeFileName(name)" in block("private func uniqueProjectURL(")
+assert "gap > Self.observeGapSeconds" in block("struct ExportStallWatch {")
+assert "Self.previousExportDied || Self.previousExportPaused" in start
+assert "previousExportMark != 0 && previousExportMark != exportInFlightPaused" in source
+assert prepare.index("native.setExportMemoryStep(memoryStep)") < prepare.index("native.startExportChecked(")
+assert "ExportMemoryStep.store(ExportMemoryStep.current() + 1)" in start and "ExportMemoryStep.store(0)" in poll
+assert "- (void)setExportMemoryStep:(uint32_t)step;" in header and "e->set_export_memory_step(step)" in bridge
+assert prepare.count("context: self.exportReportContext()") == 1 and poll.count("context: self.exportReportContext()") == 1
 view = (IOS / "app/ExportView.swift").read_text(encoding="utf-8")
 assert "model.exportPreparing" in view and 'AureaText.t("msg_preparando")' in view
 print("PASS: export starts/retries leave main actor; cancel, lifecycle and fresh progress guards are present")
@@ -133,6 +149,8 @@ enum ProblemReport {
     static func recordExportDiagnostics(_ raw: String) {}
     // 0.5.2: o resumo da partida presa / falha vai para o "Relatar um problema".
     static func noteExport(_ summary: String) {}
+    // 0.5.3: o mesmo resumo com o contexto do aparelho e do export.
+    static func noteExport(_ summary: String, context: String) {}
 }
 // 0.5.2: o teto dos caches depois de cada export (StorageView.swift) e a versão
 // do sistema no resumo: fronteiras independentes, substituídas aqui.
@@ -162,12 +180,16 @@ final class Native: @unchecked Sendable {
     private let lock = NSLock()
     private var recorded: [Call] = []
     private var cancellations = 0
+    private var memorySteps = 0
     private var progress: [String: Any] = [:]
     let release = DispatchSemaphore(value: 0)
     var codes: [Int32] = [0]
     var failedProgress: [[String: Any]] = []
     var calls: [Call] { lock.lock(); defer { lock.unlock() }; return recorded }
     var cancelCalls: Int { lock.lock(); defer { lock.unlock() }; return cancellations }
+    // 0.5.3: o degrau do orçamento de memória chega antes de cada partida de vídeo.
+    var memoryStepCalls: Int { lock.lock(); defer { lock.unlock() }; return memorySteps }
+    func setExportMemoryStep(_ step: UInt32) { lock.lock(); memorySteps += 1; lock.unlock() }
     func setProgress(_ value: [String: Any]) { lock.lock(); progress = value; lock.unlock() }
     func exportProgress() -> [String: Any] { lock.lock(); defer { lock.unlock() }; return progress }
     func exportDiagnostics() -> String { "{}" }
@@ -232,6 +254,13 @@ final class Native: @unchecked Sendable {
     func resumePausedExport() { resumedPausedExports += 1 }
     nonisolated static let exportInFlightKey = "aurea.export.inFlight.harness"
     static let previousExportDied = false
+    // 0.5.3: a marca "pausado em segundo plano" e o registro para o relato.
+    static let previousExportPaused = false
+    var exportReportLog = ExportReportLog()
+    func exportReportContext() -> String { "" }
+    // 0.5.3 (P2-1): a memória da escada de encoders (arquivo do motor) fica fora do harness.
+    var rungMemoryConfigured = 0
+    func configureExportRungMemory() { rungMemoryConfigured += 1 }
     var exportTimer: Timer?
     var exportStartup: ExportStartupRequest?
     var exportWatch = ExportStallWatch()
@@ -245,6 +274,9 @@ final class Native: @unchecked Sendable {
     func startExportDiagnosticsTimer() {}
     func recordExportDiagnostics() {}
     func publishExportToPhotos(_ url: URL) { published += 1; exporting = false }
+    EXPORTNAME
+    MEMSTEP
+    REPORTLOG
     START
     PREPARE
     STARTUP_PROGRESS
@@ -279,6 +311,34 @@ final class Native: @unchecked Sendable {
         precondition(Subject.ExportStallWatch.nextSafeMode(current: 0, suggested: 2) == 2)
         precondition(Subject.ExportStallWatch.nextSafeMode(current: 2, suggested: 2) == 0)
         precondition(Subject.ExportStallWatch.nextSafeMode(current: 2, suggested: 3) == 0)
+        // 0.5.3 (P0-3): o tempo em que ninguém observou (app suspenso) não
+        // conta como export parado; parado de verdade ainda cancela e desiste.
+        var watch = Subject.ExportStallWatch()
+        precondition(watch.observe(now: 100, framesDone: 1, message: "") == .running)
+        precondition(watch.observe(now: 101, framesDone: 1, message: "") == .running)
+        precondition(watch.observe(now: 701, framesDone: 1, message: "") == .running)
+        var clock: TimeInterval = 701
+        while clock < 879 {
+            clock += 1
+            precondition(watch.observe(now: clock, framesDone: 1, message: "") == .running)
+        }
+        precondition(watch.observe(now: 880, framesDone: 1, message: "") == .cancel)
+        precondition(watch.cancelled)
+        precondition(watch.observe(now: 881, framesDone: 1, message: "") == .running)
+        precondition(watch.observe(now: 1000, framesDone: 1, message: "") == .running)
+        precondition(watch.observe(now: 1004, framesDone: 1, message: "") == .running)
+        precondition(watch.observe(now: 1008, framesDone: 1, message: "") == .running)
+        precondition(watch.observe(now: 1012, framesDone: 1, message: "") == .running)
+        precondition(watch.observe(now: 1016, framesDone: 1, message: "") == .giveUp)
+        // 0.5.3 (diagnóstico local): o registro dos degraus, com limite que conta o que saiu.
+        var log = Subject.ExportReportLog()
+        precondition(log.text == "escada=- pausas=0 voltas=0")
+        log.attempt(level: 0, code: 15, failure: 1)
+        log.attempt(level: 0x101, code: 25, failure: 0, stalled: true)
+        log.paused(); log.resumed()
+        precondition(log.text == "escada=0>c15m1,1>c25m0t pausas=1 voltas=1")
+        for _ in 0..<Subject.ExportReportLog.attemptsMax { log.attempt(level: 2, code: 8, failure: 4) }
+        precondition(log.attempts.count == Subject.ExportReportLog.attemptsMax && log.ladder.hasPrefix("+2,2>c8m4,"))
         try FileManager.default.createDirectory(at: AureaPaths.documents, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: AureaPaths.documents) }
         let slow = Subject()
@@ -294,6 +354,18 @@ final class Native: @unchecked Sendable {
         slow.tick()
         await wait { !slow.exporting }
         precondition(slow.published == 0 && slow.exportedURL == nil)
+
+        // 0.5.3 (P0-10): barra e dois-pontos no título não saem de Documents.
+        let slashed = Subject()
+        slashed.projectName = "a/b:c"
+        slashed.startExport()
+        precondition(slashed.pendingExportURL?.lastPathComponent == "a-b-c.mp4")
+        await wait { slashed.engine.calls.count == 1 }
+        slashed.cancelExport()
+        slashed.engine.release.signal()
+        await wait { !slashed.exportPreparing }
+        slashed.tick()
+        await wait { !slashed.exporting }
 
         let queued = Subject(), queueGate = DispatchSemaphore(value: 0)
         queued.mediaQueue.async { queueGate.wait() }
@@ -333,6 +405,8 @@ final class Native: @unchecked Sendable {
         retry.engine.release.signal()
         await wait { !retry.exportPreparing }
         precondition(retry.exportSafeMode == 1 && retry.exporting)
+        // 0.5.3: o degrau de memória foi antes de cada partida e a falha entrou no registro.
+        precondition(retry.engine.memoryStepCalls == 2 && retry.exportReportLog.ladder == "0>c15m1")
         retry.cancelExport(); retry.tick()
         await wait { !retry.exporting }
 
@@ -384,6 +458,10 @@ final class Native: @unchecked Sendable {
         "OPTIONS": block("struct ExportOptions:"),
         "KIND": block("enum ExportKind:"),
         "TOKEN": block("private final class ExportStartupRequest:").replace("private final", "final", 1),
+        # 0.5.3: nome de arquivo seguro, degrau de memória e registro do relato.
+        "EXPORTNAME": block("nonisolated private static func safeFileName("),
+        "MEMSTEP": block("enum ExportMemoryStep {"),
+        "REPORTLOG": block("struct ExportReportLog {"),
         "START": start,
         "PREPARE": prepare.replace("private func", "func", 1),
         "STARTUP_PROGRESS": startup_progress.replace("private static", "static", 1),

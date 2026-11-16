@@ -50,4 +50,6 @@
     <string name="ae_shapeop_collapse">Esconder ajustes de %1$s</string>
     <string name="ae_shapeop_lane">Operador %1$d · %2$d</string>
     <string name="ae_shapeop_rep_separate">Escala X e Y separadas</string>
+    <string name="ae_shapeop_dash_add">Par de traço</string>
+    <string name="ae_shapeop_dash_remove">Tirar par de traço</string>
 </resources>

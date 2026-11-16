@@ -288,10 +288,11 @@ AUREA_TEST(HyperGpu, FullHdCostPerModulePrints) {
     Gpu& g = gpu();
     static u64 frame = 1990000;
     std::vector<std::pair<std::string, f32>> breakdown;
-    auto cost = [&](Scene& s, i64 t) {
+    auto cost = [&](Scene& s, i64 t, f32 previewScale = 1.0f, bool finalQuality = true) {
         RenderSettings rs;
         rs.gpuTimers = true;
-        rs.finalQuality = true;
+        rs.finalQuality = finalQuality;
+        rs.heavyScale = previewScale;
         rs.dither = false;
         OffscreenTarget off{g.target(s.comp->width(), s.comp->height()), s.comp->width(), s.comp->height()};
         f32 best = 1e9f;
@@ -361,6 +362,9 @@ AUREA_TEST(HyperGpu, FullHdCostPerModulePrints) {
         hy::set(c, hyper::effect_keys::kHyperClean, "frames", 2.0f);
         const f32 dn5 = cost(s, 20);
         print_breakdown("Clean 5 quadros");
+        const f32 dnPreviewHalf = cost(s, 20, 0.5f, false);
+        const f32 dnPreviewQuarter = cost(s, 20, 0.25f, false);
+        std::printf("\n    Clean 5-frames adaptive preview: density 1/2 %.3f ms, density 1/4 %.3f ms", dnPreviewHalf, dnPreviewQuarter);
         hy::set(c, hyper::effect_keys::kHyperClean, "denoise", 0.0f);
         hy::set(c, hyper::effect_keys::kHyperClean, "deblock", 1.0f);
         const f32 deblock = cost(s, 20);
@@ -374,11 +378,127 @@ AUREA_TEST(HyperGpu, FullHdCostPerModulePrints) {
         g.renderer.set_flow_cache_enabled(false);
         const f32 motion = cost(s, 21);
         print_breakdown("Motion sem cache");
+        const f32 motionPreviewHalf = cost(s, 21, 0.5f, false);
+        const f32 motionPreviewQuarter = cost(s, 21, 0.25f, false);
+        std::printf("\n    Motion adaptive preview without pair cache: density 1/2 %.3f ms, density 1/4 %.3f ms", motionPreviewHalf, motionPreviewQuarter);
         g.renderer.set_flow_cache_enabled(true);
         const f32 motionCached = cost(s, 21);
         std::printf("\n    1080p GPU total: sem %.3f ms; Clean denoise 3 quadros +%.3f ms, 5 quadros +%.3f ms, "
                     "deblock +%.3f ms, deinterlace +%.3f ms; Motion +%.3f ms (par em cache +%.3f ms)\n",
                     none, dn3 - none, dn5 - none, deblock - none, deint - none, motion - none, motionCached - none);
+    }
+}
+
+AUREA_TEST(HyperAdaptive, ExportReferenceFrames) {
+    const char* directory = std::getenv("AUREA_HYPER_FRAME_DIR");
+    if (!directory || !*directory) return;
+    AUREA_REQUIRE_GPU();
+    std::filesystem::create_directories(directory);
+    for (u32 kind = 0; kind < 3; ++kind) {
+        enh::FnFactory video(384, 216, 30, [](u32 x, u32 y, u32 frame) {
+            const f64 value = hy::square_scene(x, y, frame, 25, 7.5, 32, 75);
+            const f64 cut = frame >= 12 ? 24.0 : 0.0;
+            return enh::to_code(value + cut + 5.0 * enh::fast_noise(x, y, frame));
+        });
+        Scene scene(385, 217, kind == 2 ? 60.0 : 30.0);
+        const LayerId id = enh::add_video(scene, scene.comp, video, 384, 216, 30);
+        if (kind == 2) {
+            scene.add_effect(id, hyper::effect_keys::kHyperMotion);
+        } else {
+            auto& effect = scene.add_effect(id, hyper::effect_keys::kHyperClean);
+            hy::set(effect, hyper::effect_keys::kHyperClean, "denoise", 60.0f);
+            hy::set(effect, hyper::effect_keys::kHyperClean, "frames", kind == 0 ? 1.0f : 2.0f);
+            hy::set(effect, hyper::effect_keys::kHyperClean, "deblock", 1.0f);
+        }
+        for (i64 frame : {0, 1, 11, 23}) {
+            const FloatImage image = scene.render(FrameIndex{frame}, 1, true);
+            const auto path = std::filesystem::path(directory)
+                / ("hyper-" + std::to_string(kind) + "-" + std::to_string(frame) + ".rgba32f");
+            std::ofstream output(path, std::ios::binary);
+            output.write(reinterpret_cast<const char*>(image.px.data()),
+                         static_cast<std::streamsize>(image.px.size() * sizeof(f32)));
+            AUREA_CHECK(output.good());
+            std::array<GpuTiming, 512> gpuTimes{};
+            f32 gpuTotal = 0.0f;
+            const u32 measured = gpu().backend.read_gpu_timings(gpuTimes.data(),
+                static_cast<u32>(gpuTimes.size()), &gpuTotal);
+            const auto& graph = gpu().renderer.frame_graph();
+            std::ofstream report(path.string() + ".passes.tsv");
+            const auto memory = gpu().backend.memory_stats();
+            report << "# GPU-total-ms\t" << gpuTotal << "\n# GPU-used-bytes\t" << memory.usedBytes
+                   << "\n# GPU-reserved-bytes\t" << memory.reservedBytes << '\n';
+            report << "pass\tCPU-record-ms\tGPU-ms\tGPU-measured\testimated-read-bytes\testimated-write-bytes\tworking-set-bytes\n";
+            for (u32 position = 0; position < graph.order().size(); ++position) {
+                const u32 pass = graph.order()[position];
+                const auto metrics = graph.pass_metrics(pass);
+                const bool gpuMeasured = position < measured && gpuTimes[position].label
+                    && std::strcmp(gpuTimes[position].label, graph.pass_name(pass)) == 0;
+                report << graph.pass_name(pass) << '\t' << static_cast<f64>(metrics.cpuRecordNs) * 1e-6
+                       << '\t' << (gpuMeasured ? gpuTimes[position].ms : 0.0f) << '\t' << gpuMeasured
+                       << '\t' << metrics.estimatedReadBytes << '\t' << metrics.estimatedWriteBytes
+                       << '\t' << metrics.workingSetBytes << '\n';
+            }
+            AUREA_CHECK(report.good());
+        }
+    }
+}
+
+AUREA_TEST(HyperAdaptive, PreviewMotionDensityChangesWithoutChangingFinalFrames) {
+    AUREA_REQUIRE_GPU();
+    Gpu& g = gpu();
+    constexpr u32 width = 384, height = 216;
+    for (bool motion : {false, true}) {
+        enh::FnFactory video(width, height, 30, [](u32 x, u32 y, u32 frame) {
+            return enh::to_code(hy::square_scene(x, y, frame, 20, 6.0, 32, 75)
+                + 4.0 * enh::fast_noise(x, y, frame));
+        });
+        Scene scene(width, height, motion ? 60.0 : 30.0);
+        const LayerId id = enh::add_video(scene, scene.comp, video, width, height, 30);
+        scene.add_effect(id, motion ? hyper::effect_keys::kHyperMotion : hyper::effect_keys::kHyperClean);
+        std::vector<u16> reference;
+        u32 fullGrid = 0;
+        for (u32 mode = 0; mode < 4; ++mode) {
+            RenderSettings settings;
+            settings.dither = false;
+            settings.gpuTimers = true;
+            settings.finalQuality = mode == 0 || mode == 3;
+            settings.heavyScale = mode == 1 ? 0.5f : 0.25f;
+            settings.heavyExplicit = mode == 3;
+            settings.heavy = HeavyQuality::from_scale(0.25f);
+            FrameSnapshot snapshot;
+            for (u32 attempt = 0; attempt < 1500; ++attempt) {
+                g.renderer.prepare(*scene.comp, scene.project, FrameIndex{motion ? 21 : 11},
+                    &scene.media, &Scene::lookup, &scene, settings, 2'300'000 + mode, 0,
+                    DecodeMode::Still, 1.0f, snapshot);
+                if (!snapshot.missingVideoFrames && !snapshot.staleVideoFrames) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            }
+            OffscreenTarget target{g.target(width, height), width, height};
+            FrameStats stats;
+            RenderTimings timings;
+            AUREA_CHECK(g.renderer.render(snapshot, settings, &target, stats, timings).ok());
+            g.backend.wait_idle();
+            std::vector<u16> pixels(static_cast<usize>(width) * height * 4);
+            AUREA_CHECK(g.backend.read_texture(target.texture, pixels.data(), width * 8).ok());
+            const auto& graph = g.renderer.frame_graph();
+            u32 grid = 0;
+            for (u32 resource = 0; resource < graph.resource_count(); ++resource) {
+                const auto& desc = graph.desc(FGTexture{resource});
+                if (desc.debugName && std::strncmp(desc.debugName, "hyper-campo", 11) == 0)
+                    grid = std::max(grid, desc.width);
+            }
+            AUREA_CHECK(grid > 0);
+            if (mode == 0) {
+                reference = std::move(pixels);
+                fullGrid = grid;
+            } else if (mode == 3) {
+                AUREA_CHECK_EQ(grid, fullGrid);
+                AUREA_CHECK(pixels == reference);
+            } else {
+                AUREA_CHECK(grid <= (fullGrid + 1) / 2);
+                for (u16 pixel : pixels) AUREA_CHECK(std::isfinite(half_to_float(pixel)));
+            }
+        }
     }
 }
 

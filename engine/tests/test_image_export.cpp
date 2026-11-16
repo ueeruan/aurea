@@ -247,6 +247,25 @@ AUREA_TEST(ImageEncode, ZlibRoundTripsThroughAnIndependentInflater) {
     }
 }
 
+AUREA_TEST(ImageEncode, FastCacheCompressionKeepsEveryByte) {
+    for (usize size : {usize(0), usize(1), usize(2), usize(3), usize(65536), usize(375000)}) {
+        std::vector<u8> source(size);
+        u32 random = 12345;
+        for (usize i = 0; i < size; ++i) {
+            random = random * 1664525u + 1013904223u;
+            source[i] = i < size / 2 ? static_cast<u8>(i % 19) : static_cast<u8>(random >> 24);
+        }
+        std::vector<u8> compressed;
+        zlib_compress_fast(source.data(), source.size(), compressed);
+        std::vector<u8> restored(size + 16);
+        const int decoded = stbi_zlib_decode_buffer(reinterpret_cast<char*>(restored.data()),
+            static_cast<int>(restored.size()), reinterpret_cast<const char*>(compressed.data()),
+            static_cast<int>(compressed.size()));
+        AUREA_CHECK_EQ(decoded, static_cast<int>(size));
+        AUREA_CHECK(std::equal(source.begin(), source.end(), restored.begin()));
+    }
+}
+
 AUREA_TEST(ImageEncode, PngRoundTripKeepsEveryPixelAndAlpha) {
     for (bool alpha : {true, false}) {
         const u32 w = 173, h = 61;   // largura ímpar: nenhum filtro depende de alinhamento

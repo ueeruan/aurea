@@ -218,12 +218,13 @@ void scene_at(const EffectPreviewSequence& s, f64 t, std::vector<u8>& out) noexc
 }
 
 enum class TemporalKind : u8 { None, Echo, RgbTime, Posterize, Slice, Remap, Retime, FlowBlur, RandomEdits, WideTime, HyperMotion,
-                               TimeDisplace };
+                               TimeDisplace, TimeDisplaceReference };
 
 TemporalKind temporal_kind(std::string_view key) noexcept {
     if (key == effect_keys::kEchoTrail) return TemporalKind::Echo;
     if (key == effect_keys::kTimeWarpRgb) return TemporalKind::RgbTime;
     if (key == effect_keys::kPosterizeTime) return TemporalKind::Posterize;
+    if (key == "aurea.time.posterize_reference") return TemporalKind::Posterize;
     if (key == effect_keys::kTimeSlice) return TemporalKind::Slice;
     if (key == effect_keys::kTimeRemap) return TemporalKind::Remap;
     if (key == effect_keys::kFlowRetime) return TemporalKind::Retime;
@@ -232,6 +233,7 @@ TemporalKind temporal_kind(std::string_view key) noexcept {
     if (key == effect_keys::kWideTime) return TemporalKind::WideTime;
     if (key == hyper::effect_keys::kHyperMotion) return TemporalKind::HyperMotion;
     if (key == "aurea.time.time_displacement") return TemporalKind::TimeDisplace;
+    if (key == "aurea.time.time_displacement_reference") return TemporalKind::TimeDisplaceReference;
     return TemporalKind::None;
 }
 
@@ -415,6 +417,26 @@ bool compose_temporal(TemporalKind kind, const std::vector<ParamValue>& v, Scene
                     const Linear& b = scene.at(frame_of(hi));
                     for (int c = 0; c < 3; ++c) acc[i * 3 + c] = a.px[i * 3 + c] * (1.0f - wHi) + b.px[i * 3 + c] * wHi;
                 }
+            }
+            break;
+        }
+        case TemporalKind::TimeDisplaceReference: {
+            // Referência do AE (ReferenceBatchA.cpp): sem camada de mapa, o mapa
+            // é a própria cena agora; luma Rec.601 de 8 bits do valor
+            // codificado, t + (L − 127)/128 · máx, para baixo na grade
+            // 1/resolução, e o pixel COPIADO do quadro daquele instante.
+            const f64 maxSec = std::clamp(static_cast<f64>(val(v, 1, 1.0f)), -3600.0, 3600.0);
+            const f64 step = 1.0 / std::clamp(static_cast<f64>(val(v, 2, 60.0f)), 0.01, 3600.0);
+            const Linear now = scene.at(t);
+            for (usize i = 0; i < n; ++i) {
+                i32 q[3];
+                for (int c = 0; c < 3; ++c)
+                    q[c] = static_cast<i32>(linear_to_srgb8(now.px[i * 3 + c]));
+                const i32 level = (q[0] * 9798 + q[1] * 19235 + q[2] * 3735 + 16384) >> 15;
+                const f64 at = std::max(0.0, t / 30.0 + (level - 127) / 128.0 * maxSec);
+                const f64 snapped = at - std::fmod(at, step);
+                const Linear& img = scene.at(std::floor(snapped * 30.0 + 1e-3));
+                for (int c = 0; c < 3; ++c) acc[i * 3 + c] = img.px[i * 3 + c];
             }
             break;
         }

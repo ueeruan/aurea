@@ -931,6 +931,12 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
     // Frame offscreen (prévia de efeito, export): nada de swapchain. A imagem
     // da tela não é nossa, e apresentar daqui seria apresentar o quadro errado.
     if (!withSurface) return OkStatus;
+#if defined(AUREA_VK_HOST_PRESENT)
+    if (host_.active) {
+        host_begin_frame(f, out);
+        return OkStatus;
+    }
+#endif
     if (swapchain_ || swapchainDirty_) {
         // SUBOPTIMAL não é "recrie já": o Android o devolve A CADA apresentação
         // quando a pré-rotação escolhida difere da dica da janela (transform
@@ -1052,6 +1058,13 @@ Status Backend::end_frame_impl(bool present) noexcept {
         // desenhou (layer vazia, erro), a imagem ainda precisa do layout certo.
         transition(f.cmd, *back, ResourceState::Present, back->state == ResourceState::Undefined);
     }
+#if defined(AUREA_VK_HOST_PRESENT)
+    // Quadro descartado não é publicado: a UI continua com o anterior.
+    if (host_.acquired) {
+        if (present) host_record_copy(f);
+        host_.acquired = false;
+    }
+#endif
     if (f.queries && timersEnabled_) {
         deviceFunctions_.vkCmdWriteTimestamp(f.cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, f.queries, 1);
         f.timersWritten = true;
@@ -1104,6 +1117,9 @@ Status Backend::end_frame_impl(bool present) noexcept {
     frameCursor_ = (frameCursor_ + 1) % framesInFlight_;
     f.submitted = true;
     lastSubmitted_ = &f;
+#if defined(AUREA_VK_HOST_PRESENT)
+    host_after_submit();
+#endif
 
     imageAcquireWait_ = false;
     if (imageAcquired_ && !present) {

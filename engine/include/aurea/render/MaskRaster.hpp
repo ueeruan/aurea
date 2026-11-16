@@ -34,8 +34,11 @@ inline constexpr u32 kHeaderVec4 = 3;
 /// O mesmo, na camada: a máscara que o texto usa como caminho não recorta.
 [[nodiscard]] bool active_in(const Layer& l, const Mask& m) noexcept;
 
-/// Caminho no instante LOCAL fracionário da camada (keys interpolados).
+/// Caminho no instante LOCAL fracionário da camada (keys interpolados) e, por
+/// cima, a expressão do caminho (`Mask::pathExpression`, AE expressions).
 void evaluate_path(const Mask& m, f64 localFrame, std::vector<MaskPoint>& out);
+/// Só o caminho gravado (parado ou keys), sem a expressão.
+void evaluate_path_keys(const Mask& m, f64 localFrame, std::vector<MaskPoint>& out);
 
 /// Feather, expansion and opacity, sampled from the same tracks as the graph.
 [[nodiscard]] Vec3 evaluate_props(const Layer& l, const Mask& m, f64 localFrame) noexcept;

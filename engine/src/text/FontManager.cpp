@@ -8,9 +8,12 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <iterator>
+#include <mutex>
 #include <vector>
 
 namespace aurea::text {
@@ -276,13 +279,17 @@ void FontManager::set_path_resolver(std::function<std::string(const std::string&
     resolver_ = std::move(fn);
 }
 
-void FontManager::scan_locked() {
-    if (scanned_) return;
-    scanned_ = true;
-    std::vector<std::string> dirs = dirs_;
+namespace {
+std::vector<std::string> system_font_dirs(std::vector<std::string> dirs) {
     if (dirs.empty()) dirs = {"/system/fonts", "/product/fonts", "C:/Windows/Fonts", "/System/Library/Fonts", "/Library/Fonts"};
+    return dirs;
+}
+
+// Lê o cabeçalho de cada arquivo de fonte das pastas do SISTEMA (centenas de
+// arquivos: a parte cara da varredura). Não toca no gerenciador.
+std::vector<FontEntry> read_system_fonts(const std::vector<std::string>& dirs) {
+    std::vector<FontEntry> found;
     std::error_code ec;
-    usize before = entries_.size();
     for (const std::string& d : dirs) {
         for (std::filesystem::directory_iterator it(d, ec), end; !ec && it != end; it.increment(ec)) {
             if (!it->is_regular_file(ec)) continue;
@@ -290,11 +297,49 @@ void FontManager::scan_locked() {
             std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
             if (ext != ".ttf" && ext != ".otf" && ext != ".ttc") continue;
             FontEntry e;
-            if (read_font_info(it->path().string(), e)) entries_.push_back(std::move(e));
+            if (read_font_info(it->path().string(), e)) found.push_back(std::move(e));
         }
         ec.clear();
     }
-    AUREA_LOG_INFO("fontes do sistema: %zu", entries_.size() - before);
+    return found;
+}
+
+// 0.5.3: as fontes do sistema lidas adiantado (FontManager::prewarm), para as
+// pastas em `dirs`. A varredura de verdade (scan_locked) usa isto em vez de ler
+// os arquivos de novo; se ainda não ficou pronto, ela lê como sempre leu.
+struct PrewarmedSystemFonts {
+    std::mutex mutex;
+    bool ready = false;
+    std::vector<std::string> dirs;
+    std::vector<FontEntry> fonts;
+};
+PrewarmedSystemFonts& prewarmed_system_fonts() {
+    static PrewarmedSystemFonts p;
+    return p;
+}
+} // namespace
+
+void FontManager::scan_locked() {
+    if (scanned_) return;
+    scanned_ = true;
+    const auto started = std::chrono::steady_clock::now();
+    const std::vector<std::string> dirs = system_font_dirs(dirs_);
+    std::error_code ec;
+    usize before = entries_.size();
+    bool adiantado = false;
+    {
+        PrewarmedSystemFonts& p = prewarmed_system_fonts();
+        std::lock_guard<std::mutex> lock(p.mutex);
+        if (p.ready && p.dirs == dirs) {
+            entries_.insert(entries_.end(), p.fonts.begin(), p.fonts.end());
+            adiantado = true;
+        }
+    }
+    if (!adiantado) {
+        std::vector<FontEntry> found = read_system_fonts(dirs);
+        entries_.insert(entries_.end(), std::make_move_iterator(found.begin()), std::make_move_iterator(found.end()));
+    }
+    AUREA_LOG_INFO("fontes do sistema: %zu%s", entries_.size() - before, adiantado ? " (lidas adiantado)" : "");
     // Importadas em sessões anteriores: o arquivo ficou na pasta do app, mas o
     // registro era só em memória — sumiam da lista ao reabrir.
     before = entries_.size();
@@ -315,7 +360,37 @@ void FontManager::scan_locked() {
         }
         ec.clear();
     }
-    AUREA_LOG_INFO("fontes importadas: %zu", entries_.size() - before);
+    AUREA_LOG_INFO("fontes importadas: %zu (varredura inteira em %.1f ms)", entries_.size() - before,
+                   std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count());
+}
+
+// 0.5.3: a varredura das pastas de fonte do sistema acontecia inteira na 1ª busca
+// de fonte por FAMÍLIA (ou na lista de fontes), na thread que perguntou; no editor
+// era a de render, no preparo do quadro, com o modelo travado. O motor chama isto
+// num worker logo depois de abrir: a leitura dos arquivos do sistema roda adiantada
+// e FORA da trava do gerenciador. A lista do gerenciador não muda aqui: quem monta
+// `entries_` continua sendo scan_locked, no mesmo momento e na mesma ordem de antes
+// (a ordem decide o desempate entre fontes de mesma família e peso).
+void FontManager::prewarm() {
+    std::vector<std::string> dirs;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (scanned_) return;
+        dirs = system_font_dirs(dirs_);
+    }
+    PrewarmedSystemFonts& p = prewarmed_system_fonts();
+    {
+        std::lock_guard<std::mutex> lock(p.mutex);
+        if (p.ready && p.dirs == dirs) return;
+    }
+    const auto started = std::chrono::steady_clock::now();
+    std::vector<FontEntry> found = read_system_fonts(dirs);
+    AUREA_LOG_INFO("fontes do sistema lidas adiantado: %zu em %.1f ms", found.size(),
+                   std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count());
+    std::lock_guard<std::mutex> lock(p.mutex);
+    p.dirs = std::move(dirs);
+    p.fonts = std::move(found);
+    p.ready = true;
 }
 
 std::vector<FontEntry> FontManager::list() {

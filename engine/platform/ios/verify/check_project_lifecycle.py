@@ -39,6 +39,7 @@ assert "uint64Value == compositionID" in beats
 assert "bpm.isFinite, bpm >= 0" in beats and "Int32(exactly: bpm.rounded())" in beats
 engine_root = HERE.parents[2]
 cmake = (engine_root / "CMakeLists.txt").read_text(encoding="utf-8")
+cmake = re.sub(r"(?m)^[ \t]*#.*$", "", cmake)
 boundaries = re.search(r"set\(AUREA_IMPORT_BOUNDARIES\s+(.*?)\)", cmake, re.S)
 assert boundaries and "src/audio/Beats.cpp" in boundaries.group(1) and "src/engine/Engine.cpp" in boundaries.group(1)
 assert "${AUREA_IMPORT_BOUNDARIES} PROPERTIES COMPILE_OPTIONS -fexceptions" in cmake

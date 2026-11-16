@@ -49,15 +49,18 @@ class MaskAnimationTest {
         compose.runOnIdle { store.addMaskPreset(0) }
         compose.waitUntil(5000) { store.masks?.masks?.size == 1 }
         val mask = checkNotNull(store.maskEdit)
-        // Tudo numa tela só: a borda está logo abaixo do caminho e do modo.
-        compose.onNodeWithTag("mask.$mask.key.2").performScrollTo().performClick()
+        // Redesenho (13/11/2026): a máscara aberta tem abas Forma · Modo · Borda; na Borda,
+        // tocar no rótulo escolhe a linha e o ◆ do trilho marca o keyframe dela.
+        compose.onNodeWithTag("panel.tab.2").performClick()
+        compose.onNodeWithTag("mask.$mask.param.2").performScrollTo().performTouchInput { click(androidx.compose.ui.geometry.Offset(width * .08f, height / 2f)) }
+        compose.onNodeWithTag("panel.rail.keyframe").performClick()
         compose.waitUntil(5000) { store.primaryKeys().any { it.property == TrackProperty.MASK_PARAM && it.paramIndex == 2 } }
         compose.runOnIdle { store.seek(30) }
         compose.waitUntil(5000) { store.detail?.localPlayhead == 30 }
         compose.runOnIdle { store.setMaskParam(mask, 2, 0.25f) }
         compose.waitUntil(5000) { store.primaryKeys().count { it.property == TrackProperty.MASK_PARAM && it.paramIndex == 2 } == 2 }
         compose.runOnIdle { assertEquals(0.25f, store.masks!!.find(mask)!!.opacity, 0.001f) }
-        compose.onNodeWithTag("mask.$mask.curve.2").performScrollTo().performClick()
+        compose.onNodeWithTag("panel.rail.curve").performClick()
         compose.runOnIdle {
             assertEquals(EditorPanel.Curve, opened)
             assertEquals(TrackProperty.MASK_PARAM, store.selectedKeyframe?.second?.property)

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE expressions (lote E, 2026-11-12): controles Menu suspenso / Camada / Ponto 3D e os atalhos de expressão do Aurea PC. -->
+<resources>
+    <string name="fxl_ae_menu">القائمة</string>
+    <string name="fxl_ae_layer">الطبقة</string>
+    <string name="fxl_ae_point_3d">نقطة ثلاثية الأبعاد</string>
+    <string name="fx_name_dropdown_control">عنصر تحكم القائمة المنسدلة</string>
+    <string name="fx_name_layer_control">عنصر تحكم الطبقة</string>
+    <string name="fx_name_point3d_control">عنصر تحكم النقطة ثلاثية الأبعاد</string>
+    <string name="fx_desc_control_dropdown">قائمة خيارات؛ تعبير معامل آخر يقرأ رقم العنصر المختار (1، 2، 3…).</string>
+    <string name="fx_desc_control_layer">يختار طبقة يستخدمها تعبير معامل آخر (الموضع، الفضاء، الاسم).</string>
+    <string name="fx_desc_control_point3d">نقطة X/Y/Z تربطها بتعبير معامل آخر.</string>
+    <string name="expr_snip_ae_color">لون دوّار</string>
+    <string name="expr_snip_ae_path">اتباع المسار</string>
+    <string name="expr_snip_ae_dropdown">التبديل بالقائمة</string>
+    <string name="expr_snip_ae_create_path">مسار نابض</string>
+    <string name="expr_mask_path_title">تعبير المسار</string>
+    <string name="expr_mask_path_unit">نقاط</string>
+    <string name="expr_snip_ae_function">دالة خاصة</string>
+</resources>

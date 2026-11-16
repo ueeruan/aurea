@@ -1,0 +1,546 @@
+[
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Relative": "engine\\build",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\engine\\build",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": 49136065625
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Relative": "build\\android",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\build\\android",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": 5440664362
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Relative": "android\\app\\.cxx",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\android\\app\\.cxx",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": 6409002575
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Relative": ".claude\\worktrees\\agent-a29d0154df0988e64\\engine\\build",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\.claude\\worktrees\\agent-a29d0154df0988e64\\engine\\build",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": 742733711
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Relative": ".claude\\worktrees\\agent-a486e05843be197f3\\engine\\build",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\.claude\\worktrees\\agent-a486e05843be197f3\\engine\\build",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": 697107383
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Relative": "android\\.gradle",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\android\\.gradle",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": 104709941
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Relative": "android\\.kotlin",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\android\\.kotlin",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": 83999
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Relative": "android\\build",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\android\\build",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": 1202709
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Relative": "build\\astra-ffmpeg\\objects",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\build\\astra-ffmpeg\\objects",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": 796286589
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Relative": "build\\prompt03\\emulator-recovery",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\build\\prompt03\\emulator-recovery",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": 3912237056
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Relative": "build\\reference\\alight-motion-5.0.280\\Aurea_AM_Ref.avd",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\build\\reference\\alight-motion-5.0.280\\Aurea_AM_Ref.avd",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": 10090838699
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Relative": "build\\reference\\alight-motion-5.0.280\\avd-registry",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\build\\reference\\alight-motion-5.0.280\\avd-registry",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": 135
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Relative": "build\\reference\\keyflow-ui-trial-20261009\\Keyflow_Play_API35.avd",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\build\\reference\\keyflow-ui-trial-20261009\\Keyflow_Play_API35.avd",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": 8908916965
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Relative": "output\\iphone17-motion-15s\\movie.rgba",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\output\\iphone17-motion-15s\\movie.rgba",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": 3732480000
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Relative": "output\\hera-motion-aurea\\render.rgba",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\output\\hera-motion-aurea\\render.rgba",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": 1210318848
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Relative": "build\\reference\\alight-motion-5.0.280\\aurea-validation\\aurea-uitest-x86_64.apk",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\build\\reference\\alight-motion-5.0.280\\aurea-validation\\aurea-uitest-x86_64.apk",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": 163693161
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Relative": "build\\reference\\alight-motion-5.0.280\\aurea-validation\\aurea-instrumentation.apk",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\build\\reference\\alight-motion-5.0.280\\aurea-validation\\aurea-instrumentation.apk",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": 2932574
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta",
+    "Relative": "build\\reference\\alight-motion-5.0.280\\aurea-validation\\aurea-instrumentation-final.apk",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta\\build\\reference\\alight-motion-5.0.280\\aurea-validation\\aurea-instrumentation-final.apk",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": 2932411
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-015",
+    "Relative": "build\\android",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-015\\build\\android",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-015",
+    "Relative": "android\\app\\.cxx",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-015\\android\\app\\.cxx",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-015",
+    "Relative": "android\\.gradle",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-015\\android\\.gradle",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-015",
+    "Relative": "android\\.kotlin",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-015\\android\\.kotlin",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-015",
+    "Relative": "android\\build",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-015\\android\\build",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-015",
+    "Relative": "engine\\build",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-015\\engine\\build",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-astra",
+    "Relative": "build\\android",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-astra\\build\\android",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-astra",
+    "Relative": "android\\app\\.cxx",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-astra\\android\\app\\.cxx",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-astra",
+    "Relative": "android\\.gradle",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-astra\\android\\.gradle",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-astra",
+    "Relative": "android\\.kotlin",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-astra\\android\\.kotlin",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-astra",
+    "Relative": "android\\build",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-astra\\android\\build",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-astra",
+    "Relative": "engine\\build",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-astra\\engine\\build",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2adj",
+    "Relative": "build\\android",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2adj\\build\\android",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2adj",
+    "Relative": "android\\.gradle",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2adj\\android\\.gradle",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2adj",
+    "Relative": "android\\.kotlin",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2adj\\android\\.kotlin",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2adj",
+    "Relative": "android\\build",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2adj\\android\\build",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2adj",
+    "Relative": "engine\\build",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2adj\\engine\\build",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2export",
+    "Relative": "build\\android",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2export\\build\\android",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2export",
+    "Relative": "android\\.gradle",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2export\\android\\.gradle",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2export",
+    "Relative": "android\\.kotlin",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2export\\android\\.kotlin",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2export",
+    "Relative": "android\\build",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2export\\android\\build",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2export",
+    "Relative": "engine\\build",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2export\\engine\\build",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2fx",
+    "Relative": "build\\android",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2fx\\build\\android",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2fx",
+    "Relative": "android\\.gradle",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2fx\\android\\.gradle",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2fx",
+    "Relative": "android\\.kotlin",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2fx\\android\\.kotlin",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2fx",
+    "Relative": "engine\\build",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2fx\\engine\\build",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2surf",
+    "Relative": "build\\android",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2surf\\build\\android",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2surf",
+    "Relative": "android\\app\\.cxx",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2surf\\android\\app\\.cxx",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2surf",
+    "Relative": "android\\.gradle",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2surf\\android\\.gradle",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2surf",
+    "Relative": "android\\.kotlin",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2surf\\android\\.kotlin",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2surf",
+    "Relative": "engine\\build",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-b2surf\\engine\\build",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-base017",
+    "Relative": "engine\\build",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-base017\\engine\\build",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-cc",
+    "Relative": "build\\android",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-cc\\build\\android",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-cc",
+    "Relative": "android\\.gradle",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-cc\\android\\.gradle",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-cc",
+    "Relative": "android\\.kotlin",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-cc\\android\\.kotlin",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-cc",
+    "Relative": "engine\\build",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-cc\\engine\\build",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-rel",
+    "Relative": "build\\android",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-rel\\build\\android",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-rel",
+    "Relative": "android\\app\\.cxx",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-rel\\android\\app\\.cxx",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-rel",
+    "Relative": "android\\.gradle",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-rel\\android\\.gradle",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-rel",
+    "Relative": "android\\.kotlin",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-rel\\android\\.kotlin",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-rel",
+    "Relative": "engine\\build",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-rel\\engine\\build",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-voz",
+    "Relative": "build\\android",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-voz\\build\\android",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-voz",
+    "Relative": "android\\.gradle",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-voz\\android\\.gradle",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\Documents\\Aureabeta-voz",
+    "Relative": "android\\.kotlin",
+    "Path": "C:\\Users\\Ruan\\Documents\\Aureabeta-voz\\android\\.kotlin",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\.codex\\worktrees\\astra-015-current-base\\Aureabeta",
+    "Relative": "build\\android",
+    "Path": "C:\\Users\\Ruan\\.codex\\worktrees\\astra-015-current-base\\Aureabeta\\build\\android",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\.codex\\worktrees\\astra-015-current-base\\Aureabeta",
+    "Relative": "android\\app\\.cxx",
+    "Path": "C:\\Users\\Ruan\\.codex\\worktrees\\astra-015-current-base\\Aureabeta\\android\\app\\.cxx",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\.codex\\worktrees\\astra-015-current-base\\Aureabeta",
+    "Relative": "android\\.gradle",
+    "Path": "C:\\Users\\Ruan\\.codex\\worktrees\\astra-015-current-base\\Aureabeta\\android\\.gradle",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\.codex\\worktrees\\astra-015-current-base\\Aureabeta",
+    "Relative": "android\\.kotlin",
+    "Path": "C:\\Users\\Ruan\\.codex\\worktrees\\astra-015-current-base\\Aureabeta\\android\\.kotlin",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\.codex\\worktrees\\astra-015-current-base\\Aureabeta",
+    "Relative": "android\\build",
+    "Path": "C:\\Users\\Ruan\\.codex\\worktrees\\astra-015-current-base\\Aureabeta\\android\\build",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  },
+  {
+    "Root": "C:\\Users\\Ruan\\.codex\\worktrees\\astra-015-current-base\\Aureabeta",
+    "Relative": "engine\\build",
+    "Path": "C:\\Users\\Ruan\\.codex\\worktrees\\astra-015-current-base\\Aureabeta\\engine\\build",
+    "TrackedFiles": 0,
+    "Kind": "Regenerable output/cache or stopped emulator/raw render",
+    "logical_bytes": null
+  }
+]

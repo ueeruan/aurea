@@ -34,6 +34,12 @@ struct MaterialBall {
     AlphaMode alphaMode = AlphaMode::Opaque;
     f32  alphaCutoff = 0.5f;
     bool unlit = false;                       ///< cor de exibição (sem luz, sem tone map)
+    /// 0.5.4 Cartoon do texto 3D: bola em cel (frente/lateral em 2 faixas, o
+    /// brilho em cima) com o anel do contorno. Cores lineares.
+    bool toon = false;
+    Vec3 toonSide{0.0f, 0.0f, 0.0f};
+    Vec3 toonOutline{0.0f, 0.0f, 0.0f};
+    f32  toonHighlight = 0.0f;
     /// Mapa de cor em RGBA8 sRGB (nulo = só a cor). NÃO é copiado: tem de
     /// viver até o fim da chamada (o motor segura o asset dono dos pixels).
     const u8* image = nullptr;
@@ -55,8 +61,9 @@ inline constexpr u32 kMaterialPreviewMaxSize = 256;
 /// tem pixels). Os ponteiros apontam para dentro de `asset`.
 [[nodiscard]] MaterialBall material_ball_of(const SceneAsset& asset, const Material& m) noexcept;
 
-/// A bola de um material pronto do texto 3D (0..6, a ordem de
-/// apply_text3d_material_preset): o material da FRENTE da receita.
+/// A bola de um material pronto do texto 3D (0..14, a ordem de
+/// apply_text3d_material_preset): o material da FRENTE da receita; o Cartoon
+/// (14) sai na bola de cel com contorno.
 [[nodiscard]] bool text3d_preset_ball(u32 preset, MaterialBall& out) noexcept;
 
 } // namespace aurea::scene3d

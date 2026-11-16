@@ -1420,7 +1420,8 @@ AUREA_TEST(Fuzz, EffectParametersWithWildValuesRenderOnGpu) {
             auto added=e.add_text3d(text);AUREA_CHECK(added.ok());if(!added.ok())continue;
             targetLayer=*added;
         }
-        if(reg.at(t).type_id()==effect_type_id(text::kTransformEffect)||reg.at(t).type_id()==effect_type_id(text::kAnimatorEffect)){
+        if(reg.at(t).type_id()==effect_type_id(text::kTransformEffect)||reg.at(t).type_id()==effect_type_id(text::kAnimatorEffect)
+           ||reg.at(t).type_id()==effect_type_id(text::kAnimatorProEffect)){
             // Text Transform / Text Animator só valem em texto: recusados no vídeo, testados numa camada de texto.
             AUREA_CHECK(!e.apply_command(effect_add(*layer,reg.at(t).type_id())).ok());
             auto added=e.add_text("Aurea");AUREA_CHECK(added.ok());if(!added.ok())continue;
@@ -1459,7 +1460,12 @@ AUREA_TEST(Fuzz, EffectParametersWithWildValuesRenderOnGpu) {
             bump.opacity.opacity = it % 2 ? 1.0f : 0.99f;
             AUREA_CHECK(e.apply_command(bump).ok());
             const auto t0 = std::chrono::steady_clock::now();
-            if (!e.render_offscreen(target, 160, 90).ok()) ++failed;
+            const Status rendered = e.render_offscreen(target, 160, 90);
+            if (!rendered.ok()) {
+                ++failed;
+                std::printf("\n      render recusado: %s iteration=%u status=%d %.*s", reg.at(t).info().key, it,
+                    rendered.raw(), static_cast<int>(rendered.message().size()), rendered.message().data());
+            }
             const f64 ms = ms_since(t0);
             worstMs = std::max(worstMs, ms);
             if (ms > 250.0) {

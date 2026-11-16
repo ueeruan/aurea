@@ -3,7 +3,7 @@
 <resources>
     <string name="fx_name_headbop">Headbop</string>
     <string name="fx_desc_headbop">La persona de la foto o del video mueve la cabeza y el cuerpo al ritmo de la música</string>
-    <string name="headbop_note">Analiza la capa para encontrar la cabeza y los hombros. Sin persona, todo el cuadro se mueve.</string>
+    <string name="headbop_note">Analiza a la persona para mapear las articulaciones visibles. El cuerpo sigue el ritmo con brazos articulados y pies apoyados.</string>
     <string name="headbop_analyze">Analizar</string>
     <string name="headbop_reanalyze">Volver a analizar</string>
     <string name="headbop_analyzing">Analizando a la persona y el ritmo…</string>

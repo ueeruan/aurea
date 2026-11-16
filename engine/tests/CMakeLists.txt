@@ -53,11 +53,13 @@ add_executable(aurea_tests
     test_text3d.cpp
     test_text3d_anim.cpp
     test_text3d_shared.cpp
+    test_text3d_cartoon.cpp
     test_hdri.cpp
     test_cube_lut.cpp
     test_transform3d_keys.cpp
     test_scene_pick.cpp
     test_assistant.cpp
+    test_mcp_tools.cpp
     test_beta_heavy.cpp
     test_camera_lens.cpp
     test_scene_param_keys.cpp
@@ -65,6 +67,7 @@ add_executable(aurea_tests
     test_effect3d_sweep.cpp
     test_audio.cpp
     test_audio_fx.cpp
+    test_audio_plugins.cpp
     test_audio_transport.cpp
     test_captions.cpp
     test_captions_quality.cpp
@@ -74,7 +77,14 @@ add_executable(aurea_tests
     test_omega_appearance.cpp
     test_ae_compositing.cpp   # AE compositing: modos, máscaras, tímidas, preservar transparência, B1/B2/B3/B9
     test_ae_timeline.cpp      # timeline do AE: marcas de camada, área de trabalho, escalar/easy ease, alinhar
+    test_ae_keys.cpp          # lote K: assistentes de keyframe, Lift/Extract, bézier automática/contínua, vagante, Motion Sketch
     test_ae_animation.cpp     # AE animation: texto-fonte, toComp/lookAt/sourceRectAtTime/comp(), auto-orientar, câmera de dois nós
+    test_ae_layers.cpp        # AE layers: qualidade, clipe do modelo 3D, transições, B4/B8/B10
+    test_model_panel.cpp      # painel do modelo 3D: visuais do material, Evolução/Repetir/Velocidade (v75)
+    test_ae_assist.cpp        # lote X: áudio em keyframes
+    test_ae_text_outline.cpp  # lote X: formas e máscaras a partir do texto
+    test_vector_tree.cpp      # lote X: grupo vetorial em ordem livre, grupos de dentro, migração exata
+    test_ae_masks.cpp         # lote M: nulos de caminhos, auto-trace, feather variável, RotoBezier, seção MaskRig
     test_omega_chrome.cpp
     test_omega_layer.cpp
     test_omega_effects.cpp
@@ -92,6 +102,7 @@ add_executable(aurea_tests
     test_trackball.cpp
     test_tracking.cpp
     test_motion_geometry.cpp
+    test_cartoon_motion.cpp
     test_motion_extras.cpp
     test_tracking_flow.cpp
     test_text.cpp
@@ -104,6 +115,7 @@ add_executable(aurea_tests
     test_roto.cpp
     test_bgremove.cpp
     test_expr.cpp
+    test_expr_ae.cpp          # AE expressions (lote E): cor, footage, controles, caminhos, sampleImage, funções/vetores/objetos
     test_keyframe_shape.cpp
     test_vector.cpp
     test_vector_gpu.cpp
@@ -152,6 +164,10 @@ target_include_directories(aurea_tests PRIVATE
 )
 
 target_link_libraries(aurea_tests PRIVATE aurea_core)
+# Motion Capture do Aurea PC: o PoseEstimator só existe no Windows (AureaNcnn.cmake).
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    target_sources(aurea_tests PRIVATE test_pose_estimator.cpp)
+endif()
 # Plugins: os testes conferem também a tradução SPIR-V → ESSL/MSL dos shaders
 # de plugin (o mesmo tradutor dos backends GLES e Metal).
 include(${PROJECT_SOURCE_DIR}/cmake/AureaShaderXlate.cmake)

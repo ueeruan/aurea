@@ -50,5 +50,6 @@ struct BoneOffset {
 /// intervalo do clipe).
 void evaluate_pose(const SceneAsset& asset, i32 clip, f32 t, Pose& out, PoseWorkspace* workspace = nullptr,
                    const BoneOffset* offsets = nullptr, usize offsetCount = 0);
+void rebuild_skin_matrices(const SceneAsset& asset, Pose& pose);
 
 } // namespace aurea::scene3d

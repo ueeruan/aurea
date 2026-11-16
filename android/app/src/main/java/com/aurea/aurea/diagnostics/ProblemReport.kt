@@ -74,7 +74,9 @@ object ProblemReport {
 
     fun stepsWithExportDiagnostics(steps: String, lastExport: String?, diagnostic: String?): String {
         if (diagnostic.isNullOrBlank()) return stepsWithExport(steps, lastExport)
-        val evidence = "[export-diagnostic] " + diagnostic.take(3000)
+        // 0.5.3 (P1-3): o relato local cresceu (ficha do aparelho, escada); o corpo
+        // segue no que o Worker aceita — cortado campo a campo, não no meio do JSON.
+        val evidence = "[export-diagnostic] " + ExportDiagnosticReport.fitText(diagnostic, ExportDiagnosticReport.REPORT_LIMIT)
         val failure = if (lastExport.isNullOrBlank()) "" else "[export] " + lastExport.take(600) + "\n"
         val room = (STEPS_MAX - evidence.length - failure.length - 2).coerceAtLeast(0)
         val own = steps.trim().take(room)

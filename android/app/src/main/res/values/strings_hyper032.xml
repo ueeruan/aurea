@@ -40,6 +40,8 @@
     <string name="hyper_continue">Continuar</string>
     <string name="hyper_creating_project">Criando o projeto…</string>
     <string name="hyper_effect_locked">AureaHyper: recurso pago, bloqueado nesta conta</string>
+    <string name="text3d_locked">Texto 3D faz parte do AureaHyper: desbloqueie para criar</string>
+    <string name="text3d_locked_existing">Texto 3D (AureaHyper): este texto continua no projeto e exporta normalmente; criar um novo pede o acesso</string>
     <string name="hyper_error_project">O vídeo ficou pronto, mas não deu para criar o projeto. Tente de novo.</string>
     <string name="hyper_error_result">O vídeo ficou pronto, mas não deu para lê-lo. Tente de novo.</string>
     <string name="hyper_error_video">Não foi possível abrir este vídeo. Tente outro arquivo.</string>

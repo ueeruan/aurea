@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="fx_ref_radial_wipe_name">مسح شعاعي</string>
+    <string name="fx_ref_radial_wipe_desc">يكشف الصورة أو يخفيها باتجاه عقارب الساعة أو عكسها أو في الاتجاهين مع تنعيم الحواف.</string>
+    <string name="fx_ref_clockwise">مع عقارب الساعة</string>
+    <string name="fx_ref_counterclockwise">عكس عقارب الساعة</string>
+    <string name="fx_ref_block_name">تلاشي الكتل</string>
+    <string name="fx_ref_block_desc">يزيل كتل الصورة مع التحكم في الحجم وتنعيم الحواف ونعومتها.</string>
+    <string name="fx_ref_soft_edges">حواف ناعمة</string>
+    <string name="fx_ref_left_locked">اليسار مقفل</string>
+    <string name="fx_ref_right_locked">اليمين مقفل</string>
+    <string name="fx_ref_top_locked">الأعلى مقفل</string>
+    <string name="fx_ref_bottom_locked">الأسفل مقفل</string>
+    <string name="fx_ref_fast_blur_name">تمويه سريع</string>
+</resources>

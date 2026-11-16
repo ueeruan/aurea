@@ -19,6 +19,7 @@ namespace aurea {
 
 bool Engine::set_layer_shy(u64 layerId, bool on) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return false;
@@ -50,6 +51,7 @@ bool Engine::hide_shy() noexcept {
 
 bool Engine::set_layer_preserve_transparency(u64 layerId, bool on) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return false;
@@ -69,6 +71,7 @@ bool Engine::set_mask_falloff(u64 layerId, u32 maskId, u32 falloff) noexcept {
     if (falloff > 1) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked) return false;

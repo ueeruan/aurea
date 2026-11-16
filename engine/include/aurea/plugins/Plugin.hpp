@@ -26,6 +26,7 @@
 #include "aurea/effects/Parameter.hpp"
 #include "aurea/plugins/PluginUi.hpp"
 
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -53,7 +54,7 @@ inline constexpr u64 kFrameScriptMaxSteps = 500000;
 inline constexpr u32 kFrameScriptMaxMs = 8;
 inline constexpr u64 kFrameScriptMaxHeap = 8ull << 20;
 inline constexpr u32 kFrameScriptMaxFailures = 3;
-inline constexpr u32 kMaxParams = 256;          ///< "stack" e "panel" (é o teto de read_effect)
+inline constexpr u32 kMaxParams = 1024;          ///< "stack" e "audio" (é o teto de read_effect)
 /// Shader: o bloco de 4 KB (cabeçalho de 64 bytes + 16 por parâmetro).
 inline constexpr u32 kMaxShaderParams = 252;
 /// "shader3d": o mesmo bloco com os 1008 bytes da cena.
@@ -91,7 +92,9 @@ using LocalizedText = std::vector<std::pair<std::string, std::string>>;
 [[nodiscard]] std::string localized(const LocalizedText& text, std::string_view locale);
 
 /// 0.3.4 plugins: `Panel` = plugin sem efeito (só interface e script).
-enum class Kind : u8 { Shader = 0, Stack, Panel };
+enum class Kind : u8 { Shader = 0, Stack, Panel, Audio };
+struct AudioGraph;
+struct AudioProgram;
 enum class ColorSpace : u8 { Linear = 0, Srgb };
 enum class ParamKind : u8 { Float = 0, Int, Bool, Enum, Color, Point, Angle, Layer, Curve, Gradient, LayerImage };
 
@@ -162,6 +165,7 @@ struct Manifest {
     LocalizedText description;
     std::string category;
     Kind kind = Kind::Shader;
+    std::shared_ptr<const AudioGraph> audioGraph;
     /// 0.3.1, "kind": "shader3d": o shader recebe a câmera da cena e o mundo das
     /// camadas ligadas pelos parâmetros "layer" (docs/plugins/README.md §5).
     bool scene3d = false;

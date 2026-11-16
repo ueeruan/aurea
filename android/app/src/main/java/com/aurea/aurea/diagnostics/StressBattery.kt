@@ -358,7 +358,7 @@ class StressBattery(
         line("--- 3) TEXTO 3D: BRILHO E PISCADA")
         if (!store.newProjectHeadless(1920, 1080, 30f, "Estresse 3D")) { line("nao consegui criar o projeto 3D; parando"); falhas += "newProject 3D falhou"; return }
         delay(200)
-        val id = store.addText3D()
+        val id = store.addText3D(gate = false)
         store.seek(0)
         delay(400)
 
@@ -490,7 +490,7 @@ class StressBattery(
             }
         }
         repeat(2) { val id = store.addText(); if (id > 0) base.add(id); delay(80) }
-        repeat(2) { val id = store.addText3D(); if (id > 0) base.add(id); delay(150) }
+        repeat(2) { val id = store.addText3D(gate = false); if (id > 0) base.add(id); delay(150) }
         var id3d = base.lastOrNull() ?: 0L
         repeat(2) { val id = store.addParticles(10); if (id > 0) base.add(id); delay(120) }
         repeat(2) { store.addShape(1); delay(80) }
@@ -638,7 +638,7 @@ class StressBattery(
         store.addText()
         delay(120)
         for (id in doisEfeitosPesados()) { store.addEffect(id); delay(50) }
-        val id3d = store.addText3D()
+        val id3d = store.addText3D(gate = false)
         delay(250)
 
         step("6/6 modo bruto: play/pause")

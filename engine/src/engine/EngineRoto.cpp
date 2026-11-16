@@ -193,13 +193,14 @@ bool Engine::roto_stroke_info(u64 layerId, u32 effectId, u32* out3) noexcept {
     if (!out3) return false;
     out3[0] = out3[1] = out3[2] = 0;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = nullptr;
     const EffectInstance* e = roto_instance(comp, layerId, effectId, l);
     if (!e) return false;
     ai::RotoStrokes strokes;
     if (!ai::roto_instance_strokes(*e, strokes)) return true;
-    const i64 frame = roto_source_frame(*project_, *comp, *l, playback_.current());
+    const i64 frame = roto_source_frame(*project_, *comp, *l, editing_frame_locked());
     for (const auto& s : strokes) if (s.frame == frame) ++out3[0];
     out3[1] = static_cast<u32>(strokes.size());
     out3[2] = static_cast<u32>(ai::roto_bases(strokes).size());
@@ -210,6 +211,7 @@ bool Engine::roto_propagate(u64 layerId, u32 effectId) noexcept {
     // Ordem dos locks do render (render → modelo): o serviço é do renderer.
     std::lock_guard<std::mutex> rl(renderMutex_);
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = nullptr;
     const EffectInstance* e = roto_instance(comp, layerId, effectId, l);
@@ -236,11 +238,12 @@ bool Engine::roto_status(u64 layerId, u32 effectId, i64* out8) noexcept {
     // Só leitura do modelo e consultas ao cache do serviço (locks próprios):
     // não precisa do renderMutex_ - a UI pergunta a cada 250 ms.
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = nullptr;
     const EffectInstance* e = roto_instance(comp, layerId, effectId, l);
     if (!e) return false;
-    const i64 frame = roto_source_frame(*project_, *comp, *l, playback_.current());
+    const i64 frame = roto_source_frame(*project_, *comp, *l, editing_frame_locked());
     return renderer_.roto_status(*project_, *comp, *l, *e, frame, out8);
 }
 
@@ -252,6 +255,7 @@ void Engine::roto_cancel() noexcept {
 bool Engine::roto_set_view(u64 layerId, u32 effectId, u32 mode) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = nullptr;
     EffectInstance* e = roto_instance(comp, layerId, effectId, l);

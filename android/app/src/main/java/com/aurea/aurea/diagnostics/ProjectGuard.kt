@@ -169,6 +169,17 @@ object ProjectGuard {
         ExitDiagnostics.mark(context, still?.phase ?: ExitDiagnostics.Phase.ENGINE_READY)
     }
 
+    /**
+     * 0.5.3 (R-12): um job SEM projeto (AureaHyper) marca o export quadro a
+     * quadro e ninguém desfazia a marca no fim — um crash sem relação, depois,
+     * parecia "morreu exportando" e o export seguinte começava num degrau mais
+     * leve. O marcador do SO volta à etapa ainda aberta, como em [end].
+     */
+    fun resetExitMark(context: Context) {
+        val still = synchronized(active) { active.lastOrNull() }
+        ExitDiagnostics.mark(context, still?.phase ?: ExitDiagnostics.Phase.ENGINE_READY)
+    }
+
     /** Na abertura, em IO. Nunca lança: um erro aqui não pode virar outro crash de abertura. */
     fun onLaunch(context: Context): List<Quarantined> = runCatching {
         store(context).onLaunch(exits(context), Build.VERSION.SDK_INT)

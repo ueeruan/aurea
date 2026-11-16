@@ -7,6 +7,17 @@ namespace aurea {
 // immutable composition and the existing compositor implementation are shared.
 class OfflineFrameRenderer final {
 public:
+    /// Wall-clock sections of the latest render call, including failed and
+    /// cancelled calls. These are producer-thread measurements, not GPU time
+    /// or decoder-worker CPU time. prepare/record exclude explicit waits;
+    /// record also excludes acquire/exposure waits reported by Renderer.
+    struct Measurements {
+        u64 elapsedNs = 0;
+        u64 prepareNs = 0, recordNs = 0;
+        u64 mediaWaitNs = 0, resourceWaitNs = 0, fenceWaitNs = 0;
+        u32 attempts = 0, recordAttempts = 0;
+    };
+    [[nodiscard]] const Measurements& last_measurements() const noexcept { return measurements_; }
     ~OfflineFrameRenderer() { shutdown(); }
     Status initialize(GPUBackend& gpu, const EffectRegistry& effects,
                       VideoSourceFactory* sources, MemoryManager* memory,
@@ -79,6 +90,7 @@ private:
                     const std::atomic<bool>* additionalCancel = nullptr) noexcept;
     static void source_ready(void* context) noexcept;
     GPUBackend* gpu_ = nullptr;
+    Measurements measurements_{};
     Renderer renderer_;
     MediaManager media_;
     FrameSnapshot snapshot_;

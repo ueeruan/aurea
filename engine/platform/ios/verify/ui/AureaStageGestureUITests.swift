@@ -278,20 +278,21 @@ import UIKit
         XCTAssertEqual(initial.count, 6)
         XCTAssertEqual(initial[1], 181, accuracy: 0.001)
         XCTAssertEqual(initial[2], 45, accuracy: 0.001)
+        // F10: the scene opens Project settings on "Preview & render", where the
+        // composition shutter lives as one flat list (no Advanced group).
+        XCTAssertTrue(element("projectSettings").waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["projectSettings.tab.render"].firstMatch.isSelected)
         let shutter = app.descendants(matching: .any)["motionblur.shutter"].firstMatch
         XCTAssertTrue(shutter.waitForExistence(timeout: 5))
         XCTAssertTrue((shutter.value as? String ?? "").contains("°"))
-        let advanced = app.buttons["motionblur.advanced"].firstMatch
-        XCTAssertTrue(advanced.waitForExistence(timeout: 5)); advanced.tap()
+        XCTAssertFalse(app.buttons["motionblur.advanced"].exists)
         let center = app.buttons["motionblur.center"].firstMatch
         XCTAssertTrue(center.waitForExistence(timeout: 5))
-        // A DisclosureGroup also exposes its label as a StaticText child.
-        // Count actionable controls: expanded buttons must keep distinct IDs.
-        for identifier in ["advanced", "phase", "center", "samples", "adaptive"] {
-            XCTAssertEqual(app.buttons
+        for identifier in ["phase", "samples", "adaptive", "center"] {
+            XCTAssertEqual(app.descendants(matching: .any)
                 .matching(identifier: "motionblur.\(identifier)").count, 1, identifier)
         }
-        if !center.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        if !center.isHittable { try bringIntoView(center, scrolling: element("projectSettings")) }
         center.tap()
         let changed = try awaitSnapshot("Center places the shutter around the frame") {
             ($0.motionBlurSettings?.count ?? 0) == 6 && abs($0.motionBlurSettings![2] + 90.5) < 0.001
@@ -753,19 +754,20 @@ import UIKit
 
     func testMaskOpacityOpensItsOwnAnimatedCurve() throws {
         _ = try launch("mask-animation")
-        let border = app.buttons["3 Border"].firstMatch
+        // Redesenho (13/11/2026): a máscara aberta tem abas Forma · Modo · Borda; na Borda,
+        // tocar no rótulo escolhe a linha e a Curva do trilho abre a curva dela.
+        let border = app.buttons["panel.tab.2"].firstMatch
         XCTAssertTrue(border.waitForExistence(timeout: 5)); border.tap()
         let row = app.descendants(matching: .any).matching(NSPredicate(format: "identifier MATCHES %@", "mask\\.[0-9]+\\.param\\.2")).firstMatch
-        let scroll = app.scrollViews["mask.scroll"].firstMatch
+        let scroll = app.scrollViews.firstMatch
         for _ in 0..<6 {
             if row.exists && row.isHittable { break }
             scroll.swipeUp()
         }
         XCTAssertTrue(row.isHittable)
         row.coordinate(withNormalizedOffset: CGVector(dx: 0.12, dy: 0.5)).tap()
-        let curve = app.buttons.matching(NSPredicate(format: "identifier MATCHES %@", "mask\\.[0-9]+\\.curve\\.2")).firstMatch
+        let curve = app.buttons["panel.rail.curve"].firstMatch
         XCTAssertTrue(curve.waitForExistence(timeout: 5))
-        if !curve.isHittable { scroll.swipeUp() }
         XCTAssertTrue(curve.isEnabled); curve.tap()
         let opened = try awaitSnapshot("Mask opacity has its own editable curve") { $0.curveProperty == 43 && $0.curveParam == 2 }
         XCTAssertEqual(opened.curveKeys.count, 2)

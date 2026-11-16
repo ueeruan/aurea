@@ -57,6 +57,21 @@ struct CaptionOptions {
     bool box = false;                           ///< kCaptionLookBox: fundo ligado
     Vec4 boxColor{0.0f, 0.0f, 0.0f, 0.7f};
     bool shadow = false;                        ///< kCaptionLookShadow: sombra ligada
+
+    /// 0.5.3 (legendas no jeito do Premiere): a janela "Criar legendas".
+    /// Os padrões repetem o que o motor fazia antes (projeto antigo igual).
+    f32  minDurationSec = 0.8f;   ///< tempo mínimo na tela (era kCaptionMinDisplaySec)
+    u32  gapFrames = 0;           ///< quadros vazios entre duas legendas (0 = encostadas)
+    bool breakOnSentence = false; ///< o fim de frase sempre fecha a legenda
+    /// kCaptionLookLayout: alinhamento e entrelinha.
+    u32  align = 1;               ///< 0 esquerda, 1 centro, 2 direita
+    f32  lineSpacing = 1.15f;     ///< altura da linha / tamanho do texto
+    /// kCaptionLookBox: margem e raio do fundo, fração do tamanho do texto.
+    f32  boxPadding = 0.3f;
+    f32  boxRadius = 0.25f;
+    /// kCaptionLookShadow: cor e desfoque (fração do tamanho) da sombra.
+    Vec4 shadowColor{0.0f, 0.0f, 0.0f, 0.6f};
+    f32  shadowBlur = 0.12f;
 };
 
 inline constexpr u32 kCaptionLookFont = 1u << 0;
@@ -64,7 +79,8 @@ inline constexpr u32 kCaptionLookFill = 1u << 1;
 inline constexpr u32 kCaptionLookStroke = 1u << 2;
 inline constexpr u32 kCaptionLookBox = 1u << 3;
 inline constexpr u32 kCaptionLookShadow = 1u << 4;
-inline constexpr u32 kCaptionLookAll = (1u << 5) - 1;
+inline constexpr u32 kCaptionLookLayout = 1u << 5;   ///< 0.5.3: alinhamento e entrelinha
+inline constexpr u32 kCaptionLookAll = (1u << 6) - 1;
 
 // Times are integer frames local to one dedicated caption layer. Stable ids
 // survive text edits, moves and undo; a segment never creates another layer.
@@ -142,7 +158,7 @@ inline constexpr f64 kCaptionGapCloseSec = 0.3;
 /// Tira os vícios de linguagem (a legenda não mostra; o tempo continua).
 [[nodiscard]] std::vector<CaptionWord> remove_filler_words(const std::vector<CaptionWord>& words);
 
-/// SRT → palavras (o tempo de cada bloco é dividido pelo tamanho das palavras).
+/// SRT (ou WebVTT) → palavras (o tempo de cada bloco é dividido pelo tamanho das palavras).
 [[nodiscard]] std::vector<CaptionWord> parse_srt(const std::string& srt);
 
 /// Estilo na camada de texto. `wordFrames` = início de cada palavra da
@@ -172,5 +188,25 @@ struct CaptionTemplate {
 [[nodiscard]] const std::vector<CaptionTemplate>& caption_templates();
 /// Leva estilo e aparência do modelo para `opt` (o resto fica).
 void apply_caption_template(const CaptionTemplate& tpl, CaptionOptions& opt);
+
+// ---- 0.5.3: edição no jeito do Premiere (regras puras, quadros locais da faixa) ----
+
+/// Deixa `gapFrames` quadros vazios entre blocos seguidos: o fim recua, nunca
+/// abaixo de 1 quadro na tela. 0 = nada muda.
+void apply_caption_gap(std::vector<CaptionSegment>& segments, u32 gapFrames);
+/// Divide no cursor do texto: `left` fica com as `leftWords` primeiras palavras e
+/// `right` (mesmo estilo, id a acertar) com o resto, no início da primeira delas.
+[[nodiscard]] bool split_caption_at_word(CaptionSegment& left, CaptionSegment& right, usize leftWords);
+/// Entrada/saída do bloco `index` andam `deltaIn`/`deltaOut` quadros sem invadir os
+/// vizinhos e sem ficar com menos de 1 quadro; as palavras ficam dentro.
+void nudge_caption(std::vector<CaptionSegment>& segments, usize index, i64 deltaIn, i64 deltaOut);
+/// Troca `find` por `replacement` em `text` (sem diferenciar maiúsculas de
+/// ASCII/Latin-1 quando `matchCase` é falso). Devolve quantas trocas fez.
+[[nodiscard]] u32 replace_caption_text(std::string& text, const std::string& find, const std::string& replacement, bool matchCase);
+/// Bloco novo [start, end) com `text`; as palavras repartem o tempo por igual.
+[[nodiscard]] CaptionSegment make_caption_segment(u64 id, i64 start, i64 end, const std::string& text);
+/// O arquivo SRT (ou WebVTT) dos blocos. `shift` leva o quadro local da faixa ao
+/// quadro da timeline; caixa alta como a tela mostra.
+[[nodiscard]] std::string export_captions(const std::vector<CaptionSegment>& segments, f64 fps, i64 shift, bool vtt, bool uppercase);
 
 } // namespace aurea::text

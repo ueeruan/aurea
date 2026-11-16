@@ -1041,6 +1041,7 @@ Result<PipelineHandle> Backend::create_pipeline(const PipelineDesc& desc) noexce
         if (deviceFunctions_.vkCreateComputePipelines(device_, pipelineCache_, 1, &info, nullptr, &p.pipeline) != VK_SUCCESS) {
             return Status{Errc::PipelineCompileFailed, desc.debugName};
         }
+        pipelineCacheDirty_ = true;
         p.bindPoint = VK_PIPELINE_BIND_POINT_COMPUTE;
         set_object_name(VK_OBJECT_TYPE_PIPELINE, reinterpret_cast<u64>(p.pipeline), desc.debugName);
         return PipelineHandle{publish_pipeline(std::move(p), shareable ? &identity : nullptr)};
@@ -1188,6 +1189,7 @@ Result<PipelineHandle> Backend::create_pipeline(const PipelineDesc& desc) noexce
     if (deviceFunctions_.vkCreateGraphicsPipelines(device_, pipelineCache_, 1, &info, nullptr, &p.pipeline) != VK_SUCCESS) {
         return Status{Errc::PipelineCompileFailed, desc.debugName};
     }
+    pipelineCacheDirty_ = true;
     p.bindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     set_object_name(VK_OBJECT_TYPE_PIPELINE, reinterpret_cast<u64>(p.pipeline), desc.debugName);
     return PipelineHandle{publish_pipeline(std::move(p), shareable ? &identity : nullptr)};

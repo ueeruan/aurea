@@ -119,11 +119,37 @@ enum AureaStorage {
         }
     }
 
+    /// 0.5.3 (P1-8 / R-34): o MP4 em montagem do export
+    /// (`<saída>.aurea-ffmpeg-<n>-<n>.tmp`, FFmpegExportSink) só é apagado pelo
+    /// próprio sink. Se o app morre na montagem ou na validação, fica na raiz de
+    /// Documents um arquivo do tamanho do vídeo que a tela de Armazenamento não
+    /// lista. Aqui saem só os arquivos com esse nome exato, mais antigos que
+    /// esta abertura (um export desta execução cria o seu depois dela) e sem
+    /// nenhum export rodando no motor. Fora da main.
+    @discardableResult
+    static func sweepStagedExports(_ engine: AureaEngine, before launch: Date) -> Int {
+        guard (engine.exportProgress()["running"] as? NSNumber)?.boolValue != true else { return 0 }
+        let fm = FileManager.default
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .contentModificationDateKey]
+        var removed = 0
+        for file in (try? fm.contentsOfDirectory(at: AureaPaths.documents, includingPropertiesForKeys: Array(keys))) ?? [] {
+            guard file.lastPathComponent.range(of: #"^.+\.aurea-ffmpeg-[0-9]+-[0-9]+\.tmp$"#, options: .regularExpression) != nil,
+                  let values = try? file.resourceValues(forKeys: keys), values.isRegularFile == true,
+                  let modified = values.contentModificationDate, modified < launch else { continue }
+            if (try? fm.removeItem(at: file)) != nil { removed += 1 }
+        }
+        if removed > 0 { NSLog("AureaStorage: %ld temporario(s) de export removido(s) na abertura", removed) }
+        return removed
+    }
+
     /// A limpeza da abertura, numa fila de fundo.
     static func launchCleanup(_ engine: AureaEngine) {
+        // 0.5.3: só as sobras de export anteriores a esta abertura (sweepStagedExports).
+        let launch = Date()
         DispatchQueue.global(qos: .utility).async {
             AureaStorage.trimCaches(atLaunch: true)
             AureaStorage.sweepTemporaries(engine)
+            AureaStorage.sweepStagedExports(engine, before: launch)
         }
     }
 

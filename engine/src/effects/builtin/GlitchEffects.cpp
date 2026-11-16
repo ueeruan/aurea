@@ -114,7 +114,8 @@ public:
         p.add_float("wiggle_steps", "Passos do tremor", 0, 0, 64, kParamAnimatable);
     }
     bool is_identity(const EffectEval& e) const noexcept override {
-        return e.f(kMix) < .01f || e.f(kAmount) < .01f;
+        return e.f(kMix) <= 0.0f
+            || (e.f(kAmount) <= 0.0f && e.f(kCompletion) <= 0.0f && !e.b(kShowNoise));
     }
     static f32 layer_extent(const EffectEval& e) noexcept {
         return e.placement ? static_cast<f32>(std::max(e.placement->layerWidth, e.placement->layerHeight)) : 2048.0f;
@@ -164,7 +165,7 @@ public:
         uniforms.transform = {e.f(kPosition)*amount, e.f(kScale)*.01f*amount, e.f(kCrop)*.01f*amount, e.f(kDensity)*.01f};
         const auto center = e.p2(kCenter);
         uniforms.channel = {e.f(kSplitY)*channels, e.f(kScaleY)*.01f*channels, center.x, center.y};
-        uniforms.options = {e.f(kCompletion)*.01f*amount, e.f(kTransitionSoftness)*.01f, e.f(kDither)*.01f*amount, e.b(kRepeatEdges) ? 1.f : 0.f};
+        uniforms.options = {e.f(kCompletion)*.01f, e.f(kTransitionSoftness)*.01f, e.f(kDither)*.01f*amount, e.b(kRepeatEdges) ? 1.f : 0.f};
         uniforms.image = {e.b(kVerticalSort) ? 1.f : 0.f, e.f(kStreak)*.01f*image, 0, 0};
         // 0.4.5 (SPEC.md): transição por canal, transformação com velocidade
         // própria, separação de um componente, escala por canal, corrupção do
@@ -353,7 +354,8 @@ public:
     }
     bool is_identity(const EffectEval& e) const noexcept override {
         return e.f(kMix) < 0.01f
-            || (e.f(kBand) < 0.01f && e.f(kNoise) < 0.01f && std::fabs(e.f(kDrift)) < 0.01f);
+            || (e.f(kBand) < 0.01f && e.f(kNoise) < 0.01f && std::fabs(e.f(kDrift)) < 0.01f
+                && e.f(kSplit) < 0.01f && (!e.b(kSyncLoss) || std::fabs(e.f(kDisplace)) < 0.01f));
     }
     f32 input_margin(const EffectEval& e) const noexcept override { return e.f(kDisplace) * 4.0f + e.f(kSplit) * 2.0f; }
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
@@ -372,8 +374,8 @@ public:
 
         EffectUniforms u;
         u.uvMap = EffectBuildContext::uv_map(region, input.region);
-        u.texel = Vec4{region.w > 0.0f ? 1.0f / region.w : 0.0f, region.h > 0.0f ? 1.0f / region.h : 0.0f,
-                       input.texel_scale_x(), input.texel_scale_y()};
+        u.texel = Vec4{input.region.w > 0.0f ? 1.0f / input.region.w : 0.0f,
+                       input.region.h > 0.0f ? 1.0f / input.region.h : 0.0f, input.region.x, input.region.y};
         u.p0 = Vec4{e.f(kBand) / 100.0f, e.f(kDisplace), e.f(kDrift), e.f(kBandHeight)};
         u.p1 = Vec4{e.f(kNoise) / 100.0f, static_cast<f32>(e.e(kSeed)), std::max(1.0f, e.f(kFrequency)),
                     e.f(kMix) / 100.0f};

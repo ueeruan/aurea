@@ -178,6 +178,9 @@ void Engine::place_on_audio_line_locked(Composition& comp, LayerId id) noexcept 
         if (std::find(busy.begin(), busy.end(), t) == busy.end()) { track = t; break; }
     layer->trackId = track ? track : maxTrack + 1;
     layer->magneticTrack = false;
+    // Publish the final track identity with the import. The next timeline
+    // query must not move the clip after an interface has read its layer row.
+    (void)comp.arrange_edit_tracks();
 }
 
 bool Engine::set_cut_transition(u64 outgoing, u64 incoming, u32 type, u32 frames) noexcept {
@@ -214,6 +217,7 @@ bool Engine::move_clip_to_overlay(u64 layerId, i64 atFrame) noexcept {
     if (atFrame >= limit) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return false;
     const LayerId id = LayerId::unpack(layerId);
@@ -261,6 +265,7 @@ bool Engine::move_clip_to_overlay(u64 layerId, i64 atFrame) noexcept {
 bool Engine::move_clip_to_main_track(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return false;
     const LayerId id = LayerId::unpack(layerId);

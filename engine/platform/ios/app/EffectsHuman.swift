@@ -79,6 +79,48 @@ private let FxMatrixLabels = [
 /// idioma — ordenar pelo nome traduzido reordenaria a lista ao trocar de
 /// língua).
 private let FxTable: [(key: String, effect: FxEffectHuman)] = [
+    ("aurea.transition.radial_wipe_reference", FxEffectHuman(name: "fx_ref_radial_wipe_name",
+        keywords: "radial wipe varredura abertura circular horario anti horario both", principal: [0, 1, 2, 3, 4],
+        params: [4: FxParamHuman(scale: 1, suffix: "px", decimals: 1)])),
+    ("aurea.blur.fast_blur_reference", FxEffectHuman(name: "fx_ref_fast_blur_name", keywords: "fast blur desfoque rapido horizontal vertical", principal: [0, 1, 2],
+        params: [0: FxParamHuman(scale: 1, suffix: "px", decimals: 1)])),
+    // AE reference batch A.
+    ("aurea.blur.radial_blur_reference", FxEffectHuman(name: "fx_name_radial_blur",
+        keywords: "desfoque radial radial blur zoom blur spin giro rotacional velocidade after effects", principal: [0, 1, 2, 3, 4],
+        params: [0: FxParamHuman(decimals: 1), 4: FxParamHuman(decimals: 0)])),
+    ("aurea.transition.card_wipe_reference", FxEffectHuman(name: "fx_ref_card_wipe_name",
+        keywords: "card wipe abertura de cartao cartoes cartas virar flip transicao 3d after effects", principal: [0, 1, 4, 5, 7, 9])),
+    ("aurea.3d.card_dance_reference", FxEffectHuman(name: "fx_ref_card_dance_name",
+        keywords: "card dance danca de cartas cartoes gradiente 3d grade mosaico after effects", principal: [1, 2, 4, 6, 7])),
+    ("aurea.time.posterize_reference", FxEffectHuman(name: "fx_name_posterize_time",
+        keywords: "posterize time posterizar tempo taxa quadros stop motion animacao after effects", principal: [0],
+        params: [0: FxParamHuman(label: "fx_quadros_segundo", suffix: "fps", decimals: 2)])),
+    ("aurea.time.time_displacement_reference", FxEffectHuman(name: "fx045d_name_time_displacement",
+        keywords: "time displacement deslocamento no tempo deslocamento temporal slit scan fenda atraso mapa luminancia brilho after effects ae",
+        principal: [0, 1, 2, 3], params: [1: FxParamHuman(decimals: 2), 2: FxParamHuman(decimals: 2)])),
+    ("aurea.stylize.radial_shadow_reference", FxEffectHuman(name: "aefx_name_radial_shadow",
+        keywords: "radial shadow sombra radial luz pontual projetada after effects", principal: [0, 1, 2, 3, 4, 5, 6, 7, 8])),
+    ("aurea.distort.upscale_reference", FxEffectHuman(name: "aefx_name_upscale",
+        keywords: "upscale ampliar ampliacao preservacao detalhes super resolucao escala aumentar resolucao sd hd after effects", principal: [0, 3])),
+    // AE reference batch C.
+    ("aurea.generate.extrude_reference", FxEffectHuman(name: "refc_extrude_name",
+        keywords: "extrude extrusao vetor texto forma mascara 3d ponto de fuga camera plugin everything", principal: [2, 4, 5, 10, 14, 15])),
+    ("aurea.ai.depth_field_reference", FxEffectHuman(name: "refc_depth_field_name",
+        keywords: "depth of field profundidade de campo desfoque foco plano focal ia after effects", principal: [0, 1, 2, 3])),
+    ("aurea.distort.smear_mask_reference", FxEffectHuman(name: "refc_smear_name",
+        keywords: "smear mancha mascara origem limite esticar deformar after effects", principal: [0, 1, 2, 3, 4, 5, 6, 7])),
+    ("aurea.glitch.glitchify_reference", FxEffectHuman(name: "fx_name_glitchify",
+        keywords: "glitchify glitch defeito digital transicao canal corrupcao fatia bloco compressao cinema spice", principal: [0, 1, 2, 3])),
+    ("aurea.stylize.drop_shadow_reference", FxEffectHuman(name: "fx_name_drop_shadow", keywords: "drop shadow sombra projetada distancia suavidade", principal: [0, 1, 2, 3, 4, 5],
+        params: [1: FxParamHuman(scale: 1, suffix: "%", decimals: 0), 2: FxParamHuman(suffix: "°", decimals: 0),
+            3: FxParamHuman(scale: 1, suffix: "px", decimals: 1), 4: FxParamHuman(scale: 1, suffix: "px", decimals: 1)])),
+    ("aurea.blur.sharpen_reference", FxEffectHuman(name: "fx_name_sharpen", keywords: "sharpen nitidez detalhe", principal: [0])),
+    ("aurea.stylize.find_edges_reference", FxEffectHuman(name: "fx_name_find_edges", keywords: "find edges detectar bordas contorno", principal: [0, 1])),
+    ("aurea.transition.block_dissolve_reference", FxEffectHuman(name: "fx_ref_block_name", keywords: "block dissolve dissolver blocos transicao", principal: [0, 1, 2, 3, 4])),
+    ("aurea.distort.wave_warp_reference", FxEffectHuman(name: "fx_name_wave_warp", keywords: "wave warp onda senoide agua", principal: [0, 1, 2, 3, 4, 5, 6, 7],
+        params: [4: FxParamHuman(scale: 1, suffix: "Hz", decimals: 2)])),
+    ("aurea.distort.turbulent_displace_reference", FxEffectHuman(name: "fx_name_turbulence", keywords: "turbulent displace turbulencia ruido calor agua", principal: [0, 1, 2, 3, 4, 5],
+        params: [4: FxParamHuman(scale: 1, suffix: "", decimals: 1)])),
     ("aurea.stylize.pixel_encoder", FxEffectHuman(keywords: "pixel encoder pixel_encoder megakrunch ascii letras grunge", principal: [0, 1, 2, 3, 4])),
     ("aurea.stylize.pix_dither", FxEffectHuman(keywords: "pixdither pix dither pontilhado paleta atkinson bayer", principal: [0, 1, 2])),
     ("aurea.time.low_fps", FxEffectHuman(keywords: "low fps stop motion travado quadros choppy tremido", principal: [0, 1, 3])),
@@ -493,6 +535,12 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             7: FxParamHuman(label: "fx_halo_tela"),
             10: FxParamHuman(label: "fx_so_brilho"),
             11: FxParamHuman(label: "fx_estouro", decimals: 0),
+            22: FxParamHuman(label: "fxl_radius", suffix: "px", decimals: 0),
+            23: FxParamHuman(label: "fxl_exposure", suffix: "x", decimals: 2),
+            24: FxParamHuman(label: "fxl_threshold", suffix: "%", decimals: 0),
+            25: FxParamHuman(label: "fxl_threshold_smoothness", suffix: "%", decimals: 0),
+            47: FxParamHuman(scale: 1, suffix: "x", decimals: 2),
+            56: FxParamHuman(label: "fxl_source_opacity", suffix: "%", decimals: 0),
         ])),
     ("aurea.light.rays", FxEffectHuman(
         name: "fx_name_rays",
@@ -1945,7 +1993,8 @@ func fxParamDisplay(_ typeId: UInt32, _ s: FxParamSlot) -> FxParamDisplay {
 /// Os parâmetros visíveis de um efeito em PRINCIPAIS (na ordem da tabela) e
 /// AVANÇADOS (na ordem do motor).
 func fxSplitPrincipal(_ typeId: UInt32, _ visible: [FxParamSlot]) -> (main: [FxParamSlot], rest: [FxParamSlot]) {
-    guard let wanted = FxTableById[typeId]?.principal else {
+    let referenceGlow = typeId == fxEffectTypeId("aurea.light.deep_glow") && visible.contains { $0.index >= 22 }
+    guard let wanted = referenceGlow ? [22, 23, 24, 25, 56] : FxTableById[typeId]?.principal else {
         if visible.count <= FX_SHOW_ALL_UP_TO { return (visible, []) }
         return (Array(visible.prefix(FX_DEFAULT_PRINCIPAL)), Array(visible.dropFirst(FX_DEFAULT_PRINCIPAL)))
     }
@@ -2082,6 +2131,7 @@ func fxEffectCategoryLabel(_ category: String) -> String {
     case "texto": return AureaText.t("panel_texto")
     case "rastreio": return AureaText.t("panel_rastreio")
     case "mascara": return AureaText.t("sh_dock_mask")
+    case "ferramentas": return AureaText.t("fn_group_aurea_tools")   // funções do AUREA (13/11/2026)
     // Efeitos mais novos publicam a categoria em inglês: traduz igual.
     case "distort": return AureaText.t("cat_distort")
     case "light": return AureaText.t("cat_light")
@@ -2145,6 +2195,7 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
         out[fxEffectTypeId(key)] = (description, targets, keywords)
     }
     put("aurea.transform", "fx_desc_transform")
+    put("aurea.transition.radial_wipe_reference", "fx_ref_radial_wipe_desc", FxVisualTargets)
     put("aurea.color.exposure", "fx_desc_color_exposure")
     put("aurea.color.brightness_contrast", "fx_desc_color_brightness_contrast")
     put("aurea.color.saturation", "fx_desc_color_saturation")
@@ -2159,6 +2210,18 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.color.curves", "fx_desc_color_curves")
     put("aurea.blur.gaussian", "fx_desc_blur_gaussian")
     put("aurea.blur.sharpen", "fx_desc_blur_sharpen")
+    put("aurea.blur.sharpen_reference", "fx_desc_blur_sharpen")
+    put("aurea.blur.fast_blur_reference", "fx_desc_blur_gaussian")
+    put("aurea.stylize.drop_shadow_reference", "fx_desc_stylize_drop_shadow", FxAllTargets, "drop shadow sombra projetada distancia suavidade")
+    // AE reference batch C.
+    put("aurea.generate.extrude_reference", "refc_extrude_desc", [.texto, .forma, .vetor, .imagem, .video, .preComposicao], "extrude extrusao vetor texto forma mascara 3d")
+    put("aurea.ai.depth_field_reference", "refc_depth_field_desc", [.imagem, .video, .preComposicao], "depth of field profundidade de campo desfoque foco")
+    put("aurea.distort.smear_mask_reference", "refc_smear_desc", FxAllTargets, "smear mancha mascara esticar")
+    put("aurea.glitch.glitchify_reference", "fx_desc_glitch_glitchify")
+    put("aurea.stylize.find_edges_reference", "fx_desc_stylize_find_edges")
+    put("aurea.distort.wave_warp_reference", "fx_desc_distort_wave_warp")
+    put("aurea.distort.turbulent_displace_reference", "fx_desc_distort_turbulence")
+    put("aurea.transition.block_dissolve_reference", "fx_ref_block_desc")
     put("aurea.light.glow", "fx_desc_light_glow")
     put("aurea.stylize.motion_tile", "fx_desc_stylize_motion_tile", FxVisualTargets)
     put("aurea.key.luma", "fx_desc_key_luma", FxKeyTargets)
@@ -2193,6 +2256,10 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.glitch.signal", "fx_desc_glitch_signal")
     put("aurea.glitch.cross", "fx_desc_glitch_cross")
     put("aurea.time.posterize", "fx_desc_time_posterize", FxTimeTargets, "stop motion quadros taxa travada")
+    put("aurea.transition.card_wipe_reference", "fx_ref_card_wipe_desc", FxAllTargets, "card wipe cartoes cartas virar flip transicao 3d after effects")
+    put("aurea.3d.card_dance_reference", "fx_ref_card_dance_desc", FxAllTargets, "card dance cartoes cartas gradiente 3d grade after effects")
+    put("aurea.time.posterize_reference", "fx_desc_time_posterize", FxTimeTargets, "stop motion quadros taxa travada after effects")
+    put("aurea.time.time_displacement_reference", "fx045d_desc_time_displacement", [.video, .preComposicao], "time displacement deslocamento no tempo slit scan mapa luminancia after effects")
     put("aurea.time.flow_retime", "fx_desc_time_flow_retime", [.video], "twixtor camera lenta slow motion slowmo optical flow quadros inventados interpolacao duplicados repetidos camara lenta")
     put("aurea.time.flow_motion_blur", "fx_desc_time_flow_motion_blur", [.video], "rsmb reelsmart desfoque de movimento vetores borrao")
     put("aurea.time.warp_rgb", "fx_desc_time_warp_rgb", [.video, .preComposicao, .imagem], "rgb no tempo canais separados atraso de cor")
@@ -2230,6 +2297,7 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.transition.box_wipe", "fx_desc_transition_box_wipe")
     put("aurea.transition.venetian_blinds", "fx_desc_transition_venetian_blinds")
     put("aurea.blur.radial", "fx_desc_blur_radial")
+    put("aurea.blur.radial_blur_reference", "fx_desc_blur_radial")
     put("aurea.distort.mirror", "fx_desc_distort_mirror", FxAllTargets, "espelhar camada mirror layer flip dois eixos sobrepor copia alight motion")
     put("aurea.transform.crop", "fx_desc_transform_crop")
     put("aurea.stylize.vignette", "fx_desc_stylize_vignette")
@@ -2329,6 +2397,16 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
         "boligrafo garabato шариковая ручка बॉलपॉइंट पेन قلم حبر جاف pulpen coretan")
     put("aurea.transition.dust", "fx045_desc_dust", [.imagem, .video, .texto, .vetor, .forma, .preComposicao, .cena3D],
         "polvo viento пыль ветер धूल हवा غبار رياح debu angin")
+    // Funções do AUREA (13/11/2026): as funções da camada que abrem pelo navegador.
+    put(FxEffectTool.animation.key, "fn_tool_animation_desc", FxAllTargets, FxEffectTool.animation.keywords)
+    put(FxEffectTool.tracking.key, "fn_tool_tracking_desc", [.video], FxEffectTool.tracking.keywords)
+    put(FxEffectTool.preciseCut.key, "fn_tool_precise_cut_desc", [.video], FxEffectTool.preciseCut.keywords)
+    put(FxEffectTool.puppet.key, "fn_tool_puppet_desc", [.imagem], FxEffectTool.puppet.keywords)
+    put(FxEffectTool.rigMocap.key, "fn_tool_rig_desc", [.cena3D], FxEffectTool.rigMocap.keywords)
+    put(FxEffectTool.shapeOperators.key, "fn_tool_operators_desc", [.vetor], FxEffectTool.shapeOperators.keywords)
+    put(FxEffectTool.layer3D.key, "fn_tool_layer3d_desc", FxAllTargets, FxEffectTool.layer3D.keywords)
+    put(FxEffectTool.layerOptions.key, "fn_tool_layer_options_desc", FxAllTargets, FxEffectTool.layerOptions.keywords)
+    put(FxEffectTool.textLayout.key, "fn_text_layout_desc", [.texto], FxEffectTool.textLayout.keywords)
     return out
 }()
 
@@ -2575,6 +2653,7 @@ struct FxPluginInfo: Identifiable {
 }
 
 enum FxPluginTexts {
+    static func isAudio(_ type: UInt32) -> Bool { byType[type]?.kind == "audio" }
     private(set) static var plugins: [FxPluginInfo] = []
     private static var byType: [UInt32: FxPluginInfo] = [:]
     /// O idioma do app, na etiqueta do plugin.json ("pt-BR", "en", …).

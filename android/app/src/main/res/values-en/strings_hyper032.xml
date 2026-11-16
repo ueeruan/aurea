@@ -40,6 +40,8 @@
     <string name="hyper_continue">Continue</string>
     <string name="hyper_creating_project">Creating the project…</string>
     <string name="hyper_effect_locked">AureaHyper: paid feature, locked for this account</string>
+    <string name="text3d_locked">3D Text is part of AureaHyper: unlock it to create</string>
+    <string name="text3d_locked_existing">3D Text (AureaHyper): this text stays in the project and exports normally; creating a new one needs access</string>
     <string name="hyper_error_project">The video finished, but the project could not be created. Try again.</string>
     <string name="hyper_error_result">The video finished, but it could not be read. Try again.</string>
     <string name="hyper_error_video">This video could not be opened. Try another file.</string>

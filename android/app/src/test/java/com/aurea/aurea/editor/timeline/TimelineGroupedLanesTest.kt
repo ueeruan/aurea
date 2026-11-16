@@ -150,9 +150,9 @@ class TimelineGroupedLanesTest {
         assertTrue(2 in LaneTouch.order(lane, tops, 1, center - 16f, 16f))
         assertTrue(2 in LaneTouch.order(lane, tops, 3, center + 16f, 16f))
         assertFalse(2 in LaneTouch.order(lane, tops, 1, center - 16.5f, 16f))
-        // Trilha: 16 dp; camada normal fica como estava.
+        // Trilha: LANE_HEIGHT_DP (24 dp desde d9efdcae; o teste ainda dizia 16); camada normal fica como estava.
         val r = row(5)
-        assertEquals(16f * 2f, timelineRowHeight(RowModel(5, LayerType.Video, 0, 1, 0, true, false, false, false, "", 0, IntArray(0), emptyArray(), TimelineTrack(0)), 36f * 2f, 2f), 0f)
+        assertEquals(LANE_HEIGHT_DP * 2f, timelineRowHeight(RowModel(5, LayerType.Video, 0, 1, 0, true, false, false, false, "", 0, IntArray(0), emptyArray(), TimelineTrack(0)), 36f * 2f, 2f), 0f)
         assertEquals(72f, timelineRowHeight(r, 72f, 2f), 0f)
     }
 

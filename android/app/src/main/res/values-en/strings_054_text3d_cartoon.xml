@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.5.4: estilo Cartoon do texto 3D (material pronto 14 do motor). -->
+    <string name="pn_t3d_preset_cartoon">Cartoon</string>
+    <string name="t3d_cartoon_side_auto">Automatic side colour</string>
+    <string name="t3d_cartoon_side">Side colour</string>
+    <string name="t3d_cartoon_highlight">Highlight</string>
+    <string name="t3d_cartoon_outline_color">Outline colour</string>
+    <string name="t3d_cartoon_outline_width">Outline width</string>
+    <string name="t3d_cartoon_hint">Flat cartoon colours with a thick outline. The outline width is in composition pixels, so it looks the same at any export resolution.</string>
+</resources>

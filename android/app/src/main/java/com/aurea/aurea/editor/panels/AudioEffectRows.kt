@@ -66,7 +66,7 @@ internal fun EffectLayerRow(env: PanelEnv, effectId: Int, s: ParamSlot, label: S
     }
     val none = stringResource(R.string.afx_layer_none)
     val self = store.primary
-    val layers = store.layers
+    val layers = store.editingLayers
     val name = if (chosen < 0) none else layers.firstOrNull { layerIndexOf(it.id) == chosen }?.name?.ifEmpty { none } ?: none
     var picking by remember { mutableStateOf(false) }
     PropertyCustomRow(label, selected = false, onSelect = { picking = true }, onExpression = onMenu) {

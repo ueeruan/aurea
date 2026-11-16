@@ -1,0 +1,4 @@
+# Arquivos do app Android trocados no PC por um equivalente em src/main/kotlin
+# (pontos de troca de plataforma). Um caminho por linha, relativo a java/.
+com/aurea/aurea/ui/platform/PlatformCanvas.kt
+com/aurea/aurea/editor/PlatformWideEditor.kt

@@ -22,6 +22,7 @@
     <string name="aefx_name_emboss">Timbul</string>
     <string name="aefx_name_color_emboss">Timbul Berwarna</string>
     <string name="aefx_name_radial_shadow">Bayangan Radial</string>
+    <string name="aefx_name_upscale">Perbesar dengan Detail Terjaga</string>
     <string name="aefx_name_inner_shadow">Bayangan Dalam</string>
     <string name="aefx_name_bevel_edges">Bevel Tepi</string>
     <string name="aefx_name_brush_strokes">Goresan Kuas</string>

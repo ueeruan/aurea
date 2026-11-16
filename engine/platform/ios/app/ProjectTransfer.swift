@@ -170,12 +170,22 @@ enum ProblemReport {
     private static let diagnosticKey = "aurea.export.diagnostic"
     @MainActor private static var diagnosticPreviousToken = ""
     @MainActor private static var diagnosticAttempts: [[String: Any]] = []
+    /// 0.5.3 (diagnóstico local, sem envio automático): o estado do aparelho e
+    /// do export que o AureaModel publica antes de cada amostra — memória livre,
+    /// calor, economia de energia, degrau de memória, escada e pausas. Só
+    /// números e códigos; nada de nome de projeto, mídia ou caminho.
+    @MainActor static var exportState: [String: Any] = [:]
+    /// 0.5.3: o espaço livre (MB) no começo do export, pelos dois números que o
+    /// app usa (freeDiskMB). -1 = não deu para ler.
+    @MainActor private static var diagnosticDisk: (important: Int, fileSystem: Int) = (-1, -1)
 
     // The caller is the main actor's lightweight diagnostics timer. The native
     // getter reads an independent snapshot; it never waits for codecs or GPU.
     @MainActor static func beginExportDiagnostics(previous: String) {
         diagnosticPreviousToken = ((try? JSONSerialization.jsonObject(with: Data(previous.utf8))) as? [String: Any])?["sessionToken"] as? String ?? ""
         diagnosticAttempts.removeAll()
+        exportState = [:]
+        diagnosticDisk = freeDiskMB()
         UserDefaults.standard.removeObject(forKey: diagnosticKey)
     }
     @MainActor static func recordExportDiagnostics(_ raw: String) {
@@ -189,8 +199,16 @@ enum ProblemReport {
         var attempts = diagnosticAttempts
         let device: [String: Any] = ["manufacturer": "Apple", "model": deviceModel(), "osVersion": UIDevice.current.systemVersion,
                                    "socManufacturer": "Apple", "socModel": NSNull(), "process64Bit": true]
+        // 0.5.3: o estado publicado pelo AureaModel + o espaço livre medido no
+        // começo deste export (o número da tela e o do sistema de arquivos).
+        var state = exportState
+        if !state.isEmpty {
+            state["diskMB"] = diagnosticDisk.important
+            state["diskFsMB"] = diagnosticDisk.fileSystem
+        }
         func encode() -> String? {
-            let report: [String: Any] = ["schema": 1, "device": device, "outputColor": "8-bit SDR BT.709 limited", "attempts": attempts]
+            var report: [String: Any] = ["schema": 1, "device": device, "outputColor": "8-bit SDR BT.709 limited", "attempts": attempts]
+            if !state.isEmpty { report["state"] = state }
             guard let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]) else { return nil }
             return String(data: data, encoding: .utf8)
         }
@@ -199,6 +217,14 @@ enum ProblemReport {
             attempts = attempts.enumerated().map { index, value in
                 if index == attempts.count - 1 { return value }
                 return value.filter { ["safeMode", "encoder", "backend", "requestedColor", "elapsedMs", "encoderStage", "result", "firstPacketMs"].contains($0.key) }
+            }
+            text = encode()
+        }
+        if (text?.count ?? 0) > 3000 {
+            // 0.5.3: ainda acima do limite → a última tentativa também fica só
+            // com o essencial. Antes o registro inteiro deixava de ser gravado.
+            attempts = attempts.map { value in
+                value.filter { ["safeMode", "encoder", "backend", "requestedColor", "elapsedMs", "encoderStage", "result", "firstPacketMs"].contains($0.key) }
             }
             text = encode()
         }
@@ -222,6 +248,28 @@ enum ProblemReport {
         }
     }
 
+    /// 0.5.3 (diagnóstico local): o espaço livre em MB pelos dois números que o
+    /// app já usa — o da tela Exportar (volumeAvailableCapacityForImportantUsage,
+    /// conta o que o iOS pode liberar) e o do sistema de arquivos (o que o motor
+    /// confere antes de gravar). -1 = não deu para ler.
+    static func freeDiskMB() -> (important: Int, fileSystem: Int) {
+        let megabyte: Int64 = 1024 * 1024
+        let values = try? AureaPaths.documents.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+        let important: Int64 = values?.volumeAvailableCapacityForImportantUsage ?? -1
+        let fileSystem: Int64 = ((try? FileManager.default.attributesOfFileSystem(forPath: AureaPaths.documents.path))?[.systemFreeSize] as? NSNumber)?.int64Value ?? -1
+        return (important < 0 ? -1 : Int(important / megabyte), fileSystem < 0 ? -1 : Int(fileSystem / megabyte))
+    }
+
+    /// 0.5.3 (diagnóstico local): aparelho, RAM, calor (0 normal … 3 crítico),
+    /// economia de energia e espaço livre, em chaves curtas, para a linha do
+    /// último export com problema. Sem barras: `sanitize` as trata como caminho.
+    static func deviceState() -> String {
+        let info = ProcessInfo.processInfo
+        let disk = freeDiskMB()
+        return "ap=\(deviceModel()) ram=\(info.physicalMemory / (1024 * 1024))MB calor=\(info.thermalState.rawValue) "
+            + "eco=\(info.isLowPowerModeEnabled ? 1 : 0) disco=\(disk.important)MB discofs=\(disk.fileSystem)MB"
+    }
+
     static func installationId() -> String {
         if let id = UserDefaults.standard.string(forKey: installKey) { return id }
         let novo = UUID().uuidString.lowercased()
@@ -243,6 +291,15 @@ enum ProblemReport {
     /// trocado, verificação com avisos) vai junto do próximo relato. Sem caminhos.
     static func noteExport(_ summary: String) {
         UserDefaults.standard.set(String(sanitize(summary).prefix(lastExportMax)), forKey: lastExportKey)
+    }
+    /// 0.5.3 (diagnóstico local): o resumo + o contexto do aparelho e do export
+    /// (AureaModel.exportReportContext). O limite é o mesmo: o contexto fica com
+    /// até metade dele e o resumo é cortado antes — nenhum dos dois some inteiro.
+    static func noteExport(_ summary: String, context: String) {
+        let tail = String(sanitize(context).prefix(lastExportMax / 2))
+        guard !tail.isEmpty else { noteExport(summary); return }
+        let head = String(sanitize(summary).prefix(max(0, lastExportMax - tail.count - 3)))
+        UserDefaults.standard.set(String((head + " | " + tail).prefix(lastExportMax)), forKey: lastExportKey)
     }
     static func lastExport() -> String? { UserDefaults.standard.string(forKey: lastExportKey) }
 

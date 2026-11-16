@@ -12,6 +12,9 @@ import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.test.platform.app.InstrumentationRegistry
@@ -82,7 +85,11 @@ class AstraExportMatrixDeviceTest {
         }
         compose.waitUntil(30000) { ready && store.engineReady }
         var ownVideo: Uri? = null
-        for (case in listOf("simple", "video", "multiple", "effects", "motion-blur", "3d", "legacy44")) {
+        val motionSource = File(context.filesDir, "astra-motion-with-tone.mp4")
+        instrumentation.context.assets.open("video-with-tone.mp4").use { input -> motionSource.outputStream().use { input.copyTo(it) } }
+        val motionDigest = digest(motionSource)
+        for (case in listOf("simple", "video", "multiple", "effects", "motion-blur", "3d", "nested-movement", "adjustment-movement", "optical-flow", "serial-color", "legacy44")) {
+            val frameCount = when { case == "optical-flow" -> 120; case.endsWith("-movement") -> 100; else -> 12 }
             val title = "ASTRA $case ${SystemClock.elapsedRealtime()}"
             if (case == "legacy44") {
                 val legacy = File(context.filesDir, "astra-own-legacy44.aurea")
@@ -98,6 +105,8 @@ class AstraExportMatrixDeviceTest {
                 assertEquals(12, store.project.durationFrames)
             } else if (case == "video") {
                 compose.runOnIdle { store.importVideo(checkNotNull(ownVideo)) }
+            } else if (case == "optical-flow") {
+                compose.runOnIdle { store.importVideo(Uri.fromFile(motionSource)) }
             } else if (case == "3d") {
                 compose.runOnIdle { assertTrue(store.addShape3D(0) > 0) }
             } else {
@@ -105,6 +114,33 @@ class AstraExportMatrixDeviceTest {
             }
             compose.waitUntil(20000) { store.layers.isNotEmpty() && store.busyMessage == null }
             val primary = store.layers.first().id
+            if (case == "optical-flow") {
+                val flow = effectTypeId("aurea.time.flow_retime")
+                compose.runOnIdle { store.select(primary); store.addEffect(flow, listOf(primary)) }
+                compose.waitUntil(10000) { store.effects.any { it.typeId == flow } }
+                val effect = store.effects.single { it.typeId == flow }.effectId
+                compose.runOnIdle {
+                    val engine = store.engineForStress
+                    engine.beginCommandBatch()
+                    CommandBatch(engine).setEffectParam(primary, effect, 0, 37.5f)
+                    assertTrue(engine.submitCommands() > 0)
+                }
+            }
+            if (case == "serial-color") {
+                compose.runOnIdle {
+                    store.select(primary)
+                    val first = checkNotNull(store.colorGradeFor(2))
+                    val second = checkNotNull(store.colorGradeFor(3))
+                    assertNotEquals(first, second)
+                    val engine = store.engineForStress
+                    engine.beginCommandBatch()
+                    val commands = CommandBatch(engine)
+                    commands.setEffectParam(primary, first, 3, .5f)
+                    commands.setEffectParam(primary, second, 79, 2f)
+                    commands.setEffectParam(primary, second, 4, 25f)
+                    assertTrue(engine.submitCommands() > 0)
+                }
+            }
             if (case == "multiple") {
                 compose.runOnIdle { repeat(5) { store.addShape(1) } }
                 compose.waitUntil(10000) { store.layers.size == 6 }
@@ -121,15 +157,41 @@ class AstraExportMatrixDeviceTest {
                     assertTrue(engine.submitCommands() > 0)
                 }
                 val blur = effectTypeId("aurea.blur.gaussian")
-                compose.runOnIdle { store.addEffect(blur, listOf(primary)) }
-                compose.waitUntil(10000) { store.effects.any { it.typeId == blur } && store.effects.any { it.typeId == tile } }
+                val glow = effectTypeId("aurea.light.deep_glow")
+                compose.runOnIdle {
+                    store.addEffect(blur, listOf(primary))
+                    store.addEffect(glow, listOf(primary))
+                }
+                compose.waitUntil(10000) { listOf(blur, tile, glow).all { type -> store.effects.any { it.typeId == type } } }
+                val glowId = store.effects.single { it.typeId == glow }.effectId
+                compose.runOnIdle {
+                    val engine = store.engineForStress
+                    engine.beginCommandBatch()
+                    CommandBatch(engine).setEffectParam(primary, glowId, 0, 0f)
+                    assertTrue(engine.submitCommands() > 0)
+                }
+            }
+            if (case.endsWith("-movement")) {
+                compose.runOnIdle {
+                    if (case == "nested-movement") store.precompose(listOf(primary))
+                    else store.addAdjustmentLayer()
+                }
+                compose.waitUntil(10000) { store.primary != primary && store.detail != null }
+                val target = checkNotNull(store.primary)
+                val tile = effectTypeId("aurea.stylize.motion_tile")
+                val oscillate = effectTypeId("aurea.motion.oscillate")
+                compose.runOnIdle {
+                    store.addEffect(tile, listOf(target))
+                    store.addEffect(oscillate, listOf(target))
+                }
+                compose.waitUntil(10000) { store.effects.any { it.typeId == tile } && store.effects.any { it.typeId == oscillate } }
             }
             compose.runOnIdle {
                 val engine = store.engineForStress
                 if (case != "legacy44") engine.beginCommandBatch()
                 val commands = CommandBatch(engine)
                 if (case != "legacy44") store.layers.forEachIndexed { index, layer ->
-                    commands.setLayerTimeRange(layer.id, 0, 12)
+                    commands.setLayerTimeRange(layer.id, 0, frameCount)
                     if (case != "3d") commands.setPosition(layer.id, 220f + index * 35f, 180f, 0f)
                     if (case == "multiple" && layer.id != primary) commands.setShapeFill(layer.id, .2f, .7f, .3f, 1f)
                 }
@@ -143,15 +205,26 @@ class AstraExportMatrixDeviceTest {
                     assertTrue(engine.setMotionBlurSettings(MotionBlurSettings(true, 180f, -90f, 4, 8, 2)))
                     assertTrue(checkNotNull(engine.queryMotionBlurSettings()).enabled)
                 }
-                if (case != "legacy44") store.setCompositionDuration(12)
+                if (case != "legacy44") store.setCompositionDuration(frameCount)
                 store.pause(); store.seek(0)
             }
-            compose.waitUntil(15000) { store.project.durationFrames == 12 && store.layers.all { it.endFrame == 12 } }
+            compose.waitUntil(15000) { store.project.durationFrames == frameCount && store.layers.all { it.endFrame == frameCount } }
             if (case == "3d") compose.runOnIdle {
                 store.select(primary)
                 assertTrue((checkNotNull(store.detail).flags and PodLayout.FLAG_THREE_D) != 0)
             }
             val layerIds = store.layers.map { it.id }.toSet()
+            if (case == "nested-movement") {
+                compose.onNodeWithTag("layer.menu").performClick()
+                compose.onNodeWithTag("layer.menu.group.prerender").performScrollTo().performClick()
+                compose.waitUntil(90000) {
+                    store.preRenderProgress.complete ||
+                        (!store.preRenderPreparing && !store.preRenderProgress.running && store.preRenderProgress.error != 0)
+                }
+                assertEquals(0, store.preRenderProgress.error)
+                assertTrue(store.preRenderProgress.complete)
+                assertEquals(layerIds, store.layers.map { it.id }.toSet())
+            }
             val started = SystemClock.elapsedRealtime()
             compose.runOnIdle {
                 store.exporter.start(title, 640, 360, 30.0,
@@ -179,25 +252,26 @@ class AstraExportMatrixDeviceTest {
             assertEquals(0, diagnostic.getInt("result"))
             val persistedText = checkNotNull(ExportDiagnosticReport.last(context)) { "Production Exporter must persist export diagnostics" }
             val persisted = JSONObject(persistedText)
-            assertTrue(persistedText.length <= 3000)
+            assertTrue(persistedText.length <= ExportDiagnosticReport.LIMIT)
             assertEquals(Build.MANUFACTURER, persisted.getJSONObject("device").getString("manufacturer"))
             assertEquals(Build.MODEL, persisted.getJSONObject("device").getString("model"))
             val attempts = persisted.getJSONArray("attempts")
             assertEquals(token, attempts.getJSONObject(attempts.length()-1).getString("sessionToken"))
-            assertEquals(12L, attempts.getJSONObject(attempts.length()-1).getLong("submitted"))
+            assertEquals(frameCount.toLong(), attempts.getJSONObject(attempts.length()-1).getLong("submitted"))
             File(artifacts, "$case-persisted-diagnostics.json").writeText(persisted.toString(2))
             report.appendText("case=$case phase=${state.phase} frames=${state.framesDone}/${state.framesTotal} " +
                 "elapsedMs=${SystemClock.elapsedRealtime()-started} message=${state.message}\n")
             assertEquals(state.message, ExportPhase.Done, state.phase)
-            assertEquals(12, state.framesDone)
-            assertEquals(12, state.framesTotal)
-            assertEquals("Only user frames belong to the session diagnostics", 12L, diagnostic.getLong("submitted"))
-            assertEquals(12L, diagnostic.getLong("videoPackets"))
+            assertEquals(frameCount, state.framesDone)
+            assertEquals(frameCount, state.framesTotal)
+            assertEquals("Only user frames belong to the session diagnostics", frameCount.toLong(), diagnostic.getLong("submitted"))
+            assertEquals(frameCount.toLong(), diagnostic.getLong("videoPackets"))
             assertTrue(diagnostic.getLong("firstInputMs") >= 0L)
             assertTrue(diagnostic.getLong("firstPacketMs") >= diagnostic.getLong("firstInputMs"))
             assertTrue("Negotiated color must stay unknown without a provider observation", diagnostic.isNull("negotiatedColor"))
             assertEquals(layerIds, store.layers.map { it.id }.toSet())
             assertArrayEquals(sourceDigest, digest(source))
+            assertArrayEquals(motionDigest, digest(motionSource))
             val uri = checkNotNull(state.outputUri)
             if (case == "simple") ownVideo = uri
             val output = File(artifacts, "$case.mp4")
@@ -210,6 +284,8 @@ class AstraExportMatrixDeviceTest {
                 val format = extractor.getTrackFormat(video)
                 assertEquals(640, format.getInteger(MediaFormat.KEY_WIDTH))
                 assertEquals(360, format.getInteger(MediaFormat.KEY_HEIGHT))
+                assertTrue("Video track duration must preserve the exact frame range",
+                    kotlin.math.abs(format.getLong(MediaFormat.KEY_DURATION) - frameCount * 1_000_000L / 30L) <= 1L)
                 var packets = 0
                 var last = -1L
                 while (extractor.sampleTime >= 0) {
@@ -218,15 +294,24 @@ class AstraExportMatrixDeviceTest {
                     packets++
                     if (!extractor.advance()) break
                 }
-                assertEquals("Every input picture must have a packet", 12, packets)
+                assertEquals("Every input picture must have a packet", frameCount, packets)
                 report.appendText("case=$case packets=$packets lastPtsUs=$last format=$format\n")
             } finally { extractor.release() }
             val decoder = MediaMetadataRetriever()
             try {
                 decoder.setDataSource(output.absolutePath)
                 val duration = checkNotNull(decoder.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)).toLong()
-                assertEquals(400L, duration)
-                for (time in listOf(0L, 11L*1000000L/30L)) {
+                val expectedDuration = frameCount * 1000L / 30L
+                if (case == "optical-flow") {
+                    // Android's retriever includes this fixture's 1024-sample
+                    // AAC priming interval. The video track above is exact.
+                    // Independent ffprobe inspection also checks the MP4 edit
+                    // list and the published audio duration.
+                    assertTrue("AAC metadata duration must stay within one priming frame",
+                        duration in expectedDuration..(expectedDuration + 22L))
+                } else assertEquals(expectedDuration, duration)
+                report.appendText("case=$case retrieverDurationMs=$duration expectedDurationMs=$expectedDuration\n")
+                for (time in listOf(0L, (frameCount - 1L) * 1000000L / 30L)) {
                     val decoded = checkNotNull(decoder.getFrameAtTime(time, MediaMetadataRetriever.OPTION_CLOSEST))
                     try {
                         assertEquals(640, decoded.width); assertEquals(360, decoded.height)

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="fx_ref_radial_wipe_name">Varredura radial</string>
+    <string name="fx_ref_radial_wipe_desc">Revela ou oculta a imagem em sentido horário, anti-horário ou nos dois sentidos, com bordas suavizadas.</string>
+    <string name="fx_ref_clockwise">Horário</string>
+    <string name="fx_ref_counterclockwise">Anti-horário</string>
+    <string name="fx_ref_block_name">Dissolver em blocos</string>
+    <string name="fx_ref_block_desc">Remove blocos da imagem com controle de tamanho, difusão e bordas suaves.</string>
+    <string name="fx_ref_soft_edges">Bordas suaves</string>
+    <string name="fx_ref_left_locked">Esquerda travada</string>
+    <string name="fx_ref_right_locked">Direita travada</string>
+    <string name="fx_ref_top_locked">Acima travada</string>
+    <string name="fx_ref_bottom_locked">Abaixo travada</string>
+    <string name="fx_ref_fast_blur_name">Desfoque rápido</string>
+</resources>

@@ -1,5 +1,7 @@
 # Plugins de efeito do AUREA
 
+Plugins V3 também podem processar áudio com `kind: "audio"`. O grafo DSP, os exemplos e os limites estão no [guia de plugins de áudio](AUDIO_DSP.md).
+
 > English version: [README.en.md](README.en.md)
 
 > **0.3.4:** além de efeitos, um plugin pode trazer **painéis e abas** na
@@ -51,7 +53,7 @@ Exemplos prontos em [`examples/`](examples/):
 **`"kind": "shader"`** — você escreve o efeito em **GLSL 4.50**: uma função
 `vec4 aurea_main(vec2 uv)` que devolve a cor de cada pixel. O plugin pode ter de
 1 a 8 passes (cada um com o próprio shader), texturas intermediárias em
-resolução reduzida e até 252 parâmetros (189 em `shader3d`; 256 em `stack` e `panel`). O AUREA compila o shader **no aparelho**
+resolução reduzida e até 252 parâmetros (189 em `shader3d`; 1024 em `stack` e `audio`). O AUREA compila o shader **no aparelho**
 na instalação: GLSL → SPIR-V (glslang) → a API de GPU do aparelho (Vulkan usa o
 SPIR-V; OpenGL ES recebe ESSL 3.10 e o Metal recebe MSL, traduzidos pelo
 SPIRV-Cross com as mesmas opções dos shaders do próprio app).
@@ -555,7 +557,7 @@ não a criatividade.
 | Limite | Valor | Por quê |
 | --- | --- | --- |
 | Passes | 32 | Cada passe é uma textura e uma ida à memória; em GPU de celular a banda é o gargalo. Use `scale` nos passes intermediários. |
-| Parâmetros | 252 em `shader`, 189 em `shader3d`, 256 em `stack` e painéis | O bloco vai empacotado: só os parâmetros declarados sobem por passe (até 4 KB no motor). |
+| Parâmetros | 252 em `shader`, 189 em `shader3d`, 1024 em `stack` e `audio` | Shaders respeitam o bloco uniforme de 4 KB. Grafos e pilhas usam armazenamento de CPU. |
 | Entradas + texturas por passe | 11 + a fonte | 12 slots de textura por passe no motor. |
 | Imagens do pacote (`textures`) | 8, até 64 MB e 8192 px cada | Ficam decodificadas na RAM e na GPU enquanto o efeito é usado. |
 | Camadas ligadas (`layer`) | 8, só em `shader3d` | O mundo de cada camada vai no bloco de parâmetros. |

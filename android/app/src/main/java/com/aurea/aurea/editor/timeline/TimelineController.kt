@@ -23,6 +23,7 @@ import androidx.compose.ui.input.pointer.PointerEvent
 import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.PointerInputScope
+import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.input.pointer.util.addPointerInputChange
 import androidx.compose.ui.unit.Density
@@ -119,18 +120,34 @@ internal class TimelineController(
         val ids = expandedLayers.value.takeUnless { state.compact }.orEmpty()
         val groups = openGroups.value
         val revision = store.curveRevision
-        if (ids.isEmpty()) base
+        val expanded = if (ids.isEmpty()) base
         else if (expandedBase === base && expandedId == ids && expandedGroups == groups && expandedRevision == revision) expandedResult
         else {
             expandedBase = base; expandedId = ids; expandedGroups = groups; expandedRevision = revision
             expandedRows(base, ids, groups, store.keyframes) { store.timelineEffects(it) }.also { expandedResult = it }
         }
+        // 0.5.3: grupos abertos NA timeline (o conteúdo recuado embaixo de cada um).
+        val innerRows = store.groupInnerRows
+        if (state.compact || innerRows.isEmpty()) expanded
+        else withInlineGroups(expanded, innerModels(innerRows))
+    }
+    private var innerInput: Map<Long, List<com.aurea.aurea.state.GroupInnerRow>>? = null
+    private var innerResult: Map<Long, List<RowModel>> = emptyMap()
+    /** As linhas de dentro viram RowModel uma vez por releitura do motor (não a cada quadro). */
+    private fun innerModels(map: Map<Long, List<com.aurea.aurea.state.GroupInnerRow>>): Map<Long, List<RowModel>> {
+        if (innerInput === map) return innerResult
+        innerInput = map
+        innerResult = map.mapValues { (_, list) -> list.map { innerGroupRow(it) } }
+        return innerResult
     }
     // Seleção como LongArray ordenado: `Set<Long>.contains` encaixotaria o id a cada linha pintada.
     private val selectedIds = derivedStateOf { store.selection.toLongArray().also { it.sort() } }
     private val primaryId = derivedStateOf { store.primary ?: NO_ID }
 
     fun isSelected(id: Long) = Arrays.binarySearch(selectedIds.value, id) >= 0
+    /** 0.5.3: a linha está escolhida — a de dentro de um grupo pela seleção interna (os ids se repetem). */
+    fun isRowSelected(s: RowModel): Boolean =
+        if (s.inner) store.groupInnerSelection.let { it != null && it.first == s.group && it.second == s.id } else isSelected(s.id)
     fun selectionSize() = selectedIds.value.size
     private fun multi() = selectionSize() >= 2
 
@@ -185,7 +202,15 @@ internal class TimelineController(
     /** O trecho [id], esteja ele sozinho na fileira ou dividindo a linha. */
     private fun rowById(id: Long): RowModel? {
         val list = rows.value
-        for (i in list.indices) list[i].segment(id)?.let { return it }
+        // As linhas de dentro de um grupo aberto têm ids de OUTRA composição.
+        for (i in list.indices) if (!list[i].inner) list[i].segment(id)?.let { return it }
+        return null
+    }
+
+    /** 0.5.3: a linha de dentro (grupo, camada) como está agora. */
+    private fun innerRowById(group: Long, id: Long): RowModel? {
+        val list = rows.value
+        for (r in list) if (r.inner && r.group == group && r.id == id) return r
         return null
     }
 
@@ -211,6 +236,8 @@ internal class TimelineController(
     private val fps: Float get() = TimeAxis.safeFps(store.project.fps)
     fun pxPerFrame(): Float = TimeAxis.pxPerFrame(state.pps, metrics.density, fps)
     fun view(): Double {
+        // Modo AE: a vista é a rolagem própria (o 0 à esquerda das trilhas); o cabeçote anda.
+        if (TimelinePlatform.anchorAtStart) return state.aeOrigin + (centerX() - aeLeft()) / pxPerFrame()
         val held = state.heldView
         if (!held.isNaN()) return held
         // Tocando, o cabeçote fracionário: a timeline desliza em vez de pular de quadro
@@ -221,6 +248,27 @@ internal class TimelineController(
     }
 
     private fun centerX() = state.width / 2f
+    /** Modo AE: onde o quadro 0 encosta (logo depois da coluna das camadas). */
+    private fun aeLeft() = metrics.headerColumn + 12f * metrics.density
+
+    /** Modo AE: rola a vista (sem mexer no cabeçote). */
+    fun aePan(deltaFrames: Double) { state.aeOrigin = max(0.0, state.aeOrigin + deltaFrames) }
+
+    /** Modo AE: o zoom mantém o cabeçote no mesmo lugar da tela. */
+    fun aeZoom(factor: Float) {
+        val head = store.playhead.toDouble()
+        val x = TimeAxis.xOf(head, view(), pxPerFrame(), centerX())
+        state.pps = Zoom.clamp(state.pps * factor)
+        state.aeOrigin = max(0.0, head - (x - aeLeft()) / pxPerFrame())
+    }
+
+    /** Modo AE, tocando: o cabeçote saiu da vista → vira a página (como no AE). */
+    fun aeFollow() {
+        if (!TimelinePlatform.anchorAtStart || state.width <= 0) return
+        val x = TimeAxis.xOf(store.playhead.toDouble(), view(), pxPerFrame(), centerX())
+        if (x < aeLeft() || x > state.width - 8f * metrics.density)
+            state.aeOrigin = max(0.0, store.playhead - 0.05 * (state.width - aeLeft()) / pxPerFrame())
+    }
     private val DOUBLE_TAP_MS get() = android.view.ViewConfiguration.getDoubleTapTimeout().toLong()
     private fun frameAt(x: Float) = TimeAxis.frameAt(x, view(), pxPerFrame(), centerX())
     private fun xOf(frame: Int) = TimeAxis.xOf(frame.toDouble(), view(), pxPerFrame(), centerX())
@@ -230,6 +278,11 @@ internal class TimelineController(
 
     /** Leva a vista a `v` pelo scrub do motor (o 1º passo abre o scrub e pausa). */
     private fun holdView(v: Double) {
+        // Modo AE: segurar a vista (arrasto no vazio, inércia, pinça, auto-rolagem) só rola.
+        if (TimelinePlatform.anchorAtStart) {
+            state.aeOrigin = max(0.0, v - (centerX() - aeLeft()) / pxPerFrame())
+            return
+        }
         val c = TimeAxis.clampView(v, store.project.durationFrames).coerceAtMost(store.navigationEnd.toDouble())
         val f = c.toFrame()
         state.heldView = c
@@ -328,8 +381,8 @@ internal class TimelineController(
         val x0 = xOf(s.start)
         val x1 = xOf(s.end)
         return RowHit.hit(
-            m, x, y, state.width.toFloat(), x0, x1, handlesOn(s), state.compact && isSelected(s.id),
-            keysEnabled = !multi() && KeyframeVisibility.visible(store.showAllKeyframes, s.track != null, isSelected(s.id)) &&
+            m, x, y, state.width.toFloat(), x0, x1, handlesOn(s), state.compact && isRowSelected(s),
+            keysEnabled = !s.inner && !multi() && KeyframeVisibility.visible(store.showAllKeyframes, s.track != null, isSelected(s.id)) &&
                 KeyframeVisibility.editable(isSelected(s.id), store.keySelectMode, s.track != null),
             instants = s.instants,
             view = view(), pxPerFrame = pxPerFrame(), centerX = centerX(), out = hitOut,
@@ -337,7 +390,10 @@ internal class TimelineController(
     }
 
     /** Alças de aparar: só no trecho que é a ÚNICA escolha (Omega: só no foco, P1-7). */
-    private fun handlesOn(s: RowModel) = s.track == null && selectionSize() == 1 && isSelected(s.id) && !s.locked &&
+    private fun handlesOn(s: RowModel) = if (s.inner) {
+        // 0.5.3: a camada de dentro escolhida tem as alças na visão geral (o grupo continua fechado).
+        s.inlineEditable && !s.locked && !state.compact && isRowSelected(s)
+    } else s.track == null && selectionSize() == 1 && isSelected(s.id) && !s.locked &&
         (!omega || state.compact)
 
     /**
@@ -486,18 +542,84 @@ internal class TimelineController(
     // =========================================================================
     // Laço de gestos
     // =========================================================================
+    /**
+     * Roda do mouse (só no modo AE do Aurea PC; no toque não há roda): rola as
+     * camadas; Shift rola o tempo. Alt/Ctrl + roda é o zoom (tratado na janela).
+     */
+    suspend fun PointerInputScope.handleWheel() {
+        if (!TimelinePlatform.anchorAtStart) return
+        awaitPointerEventScope {
+            while (true) {
+                val ev = awaitPointerEvent()
+                if (ev.type != androidx.compose.ui.input.pointer.PointerEventType.Scroll) continue
+                if (ev.changes.any { it.isConsumed }) continue
+                val dy = ev.changes.firstOrNull()?.scrollDelta?.y ?: continue
+                if (ev.keyboardModifiers.isShiftPressed) aePan(dy * 40.0 / pxPerFrame())
+                else state.scrollY = clampScroll(state.scrollY + dy * 40f * metrics.density)
+                ev.changes.forEach { it.consume() }
+            }
+        }
+    }
+
     suspend fun PointerInputScope.handleGestures() {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
             down.consume()
+            // Modo AE: a régua leva o cabeçote até o ponteiro e segue o arrasto.
+            if (TimelinePlatform.anchorAtStart && down.position.y < metrics.rowsTop) {
+                fun seekAt(x: Float) = store.seek(frameAt(x).coerceIn(0.0, (store.navigationEnd.coerceAtLeast(1) - 1).toDouble()).toFrame())
+                if (store.playing) store.pause()
+                seekAt(down.position.x)
+                while (true) {
+                    val ev = awaitPointerEvent()
+                    val ch = changeOf(ev, down.id) ?: break
+                    if (!ch.pressed) { ch.consume(); break }
+                    ch.consume()
+                    seekAt(ch.position.x)
+                }
+                return@awaitEachGesture
+            }
             // Um dedo que pousa para a inércia (horizontal e vertical) — e esse toque só para, não escolhe.
             val stoppedFling = stopFlings()
             try {
-                gesture(down, stoppedFling)
+                if (!captionEdgeDrag(down)) gesture(down, stoppedFling)
             } finally {
                 endInteraction()
             }
         }
+    }
+
+    private suspend fun AwaitPointerEventScope.captionEdgeDrag(down: PointerInputChange): Boolean {
+        val hit = rowHitAt(down.position)
+        val row = hit.row ?: return false
+        if (row.inner || row.track != null || row.locked || down.position.x < metrics.headerColumn || store.captions.selectedBlocks.size != 1) return false
+        val track = store.captionTracks.firstOrNull { it.layer == row.id } ?: return false
+        val block = track.segments.firstOrNull { it.id in store.captions.selectedBlocks } ?: return false
+        val shift = row.start - row.offset
+        val left = xOf(block.start + shift)
+        val right = xOf(block.end + shift)
+        val distance = minOf(abs(down.position.x - left), abs(down.position.x - right))
+        if (distance > 16f * metrics.density) return false
+        val trimStart = abs(down.position.x - left) <= abs(down.position.x - right)
+        val index = track.segments.indexOf(block)
+        val lower = track.segments.getOrNull(index - 1)?.end ?: 0
+        val upper = track.segments.getOrNull(index + 1)?.start ?: maxOf(block.end, store.project.durationFrames - shift)
+        val initial = frameAt(down.position.x)
+        var sent = if (trimStart) block.start else block.end
+        store.captions.refreshTrack(track.layer)
+        pauseIfPlaying()
+        dragLoop(down.id, down.position, horizontal = true) { p ->
+            val delta = kotlin.math.round(frameAt(p.x) - initial).toInt()
+            val target = if (trimStart) (block.start + delta).coerceIn(lower, block.end - 1)
+                else (block.end + delta).coerceIn(block.start + 1, upper)
+            if (target != sent) {
+                openUndo(AppText.get(store.getApplication<Application>(), R.string.panel_legendas))
+                val command = org.json.JSONObject().put("op", "trim").put("ids", org.json.JSONArray().put(block.id))
+                    .put("start", if (trimStart) target else block.start).put("end", if (trimStart) block.end else target)
+                if (store.captions.editBlocks(command)) sent = target
+            }
+        }
+        return true
     }
 
     /** SLOW: o prazo do toque longo venceu com o dedo rastejando — segue como arrasto. */
@@ -684,6 +806,17 @@ internal class TimelineController(
 
     private fun onTap(hit: Hit, p: Offset) {
         val r = hit.row
+        if (r != null && !r.inner && r.track == null && p.x >= metrics.headerColumn && hit.kind == HitKind.BODY) {
+            val track = store.captionTracks.firstOrNull { it.layer == r.id }
+            val local = frameAt(p.x) - r.start + r.offset
+            val block = track?.segments?.firstOrNull { local >= it.start && local < it.end }
+            if (block != null) {
+                store.select(r.id, openOptions = false)
+                store.captions.refreshTrack(r.id)
+                store.captions.selectedBlocks = setOf(block.id)
+                return
+            }
+        }
         when (hit.kind) {
             HitKind.RULER -> rulerTap(p.x)
             HitKind.NONE -> {
@@ -963,6 +1096,20 @@ internal class TimelineController(
     private fun omegaTap(hit: Hit, p: Offset) {
         val r = hit.row
         val compact = state.compact
+        // 0.5.3: linha de dentro de um grupo aberto — escolhe no lugar; dois toques entram no grupo.
+        if (r != null && r.inner && !compact && hit.kind != HitKind.RULER && hit.kind != HitKind.CURRENT_TIME) {
+            innerTap(r)
+            return
+        }
+        // 0.5.3: o chevron do grupo (no lugar da miniatura da pílula) abre/fecha o conteúdo.
+        if (r != null && !compact && r.track == null && r.type == com.aurea.aurea.ui.theme.LayerType.Group && groupChevronHit(p)) {
+            tick()
+            store.toggleInlineGroup(r.id)
+            announce?.invoke(AppText.get(store.getApplication<Application>(),
+                if (store.isInlineGroupOpen(r.id)) R.string.om_tl_group_contents_shown else R.string.om_tl_group_contents_hidden))
+            requestRedraw()
+            return
+        }
         when (hit.kind) {
             HitKind.CURRENT_TIME -> {
                 tick()
@@ -1062,6 +1209,35 @@ internal class TimelineController(
         }
     }
 
+    /** 0.5.3: o toque caiu no chevron do grupo (a caixa da miniatura na pílula, com folga de 6 dp)? */
+    private fun groupChevronHit(p: Offset): Boolean {
+        val m = metrics
+        val reach = 6f * m.density
+        return p.x >= max(m.omegaThumbLeft - reach, m.eyeHitRight) && p.x <= m.omegaThumbLeft + m.omegaThumbWidth + reach && p.x < m.headerColumn
+    }
+
+    private var lastInnerTap: Pair<Long, Long>? = null
+    private var lastInnerTapAt = 0L
+
+    /** Linha de dentro: o 1º toque escolhe (o contorno de escolha); dois toques entram no grupo com ela escolhida. */
+    private fun innerTap(r: RowModel) {
+        tick()
+        pauseIfPlaying()
+        val key = r.group to r.id
+        val now = System.currentTimeMillis()
+        if (lastInnerTap == key && now - lastInnerTapAt <= DOUBLE_TAP_MS) {
+            lastInnerTap = null
+            val inner = r.id
+            store.openPrecomp(r.group)
+            store.select(inner)
+            return
+        }
+        lastInnerTap = key
+        lastInnerTapAt = now
+        if (isRowSelected(r)) store.clearGroupInnerSelection() else store.selectGroupInner(r.group, r.id)
+        requestRedraw()
+    }
+
     /**
      * Régua (P1-2): perto de um marcador (21 dp) vai até ele; senão, na metade
      * direita vai ao próximo e na esquerda ao anterior. Não busca o quadro tocado
@@ -1088,6 +1264,9 @@ internal class TimelineController(
         when {
             // Timeline do AE: as alças da área de trabalho na régua.
             workHandle != 0 -> workAreaDrag(down, workHandle)
+            // 0.5.3: alça da camada de dentro escolhida (grupo aberto na timeline).
+            r != null && r.inner && horizontal && (hit.kind == HitKind.TRIM_START || hit.kind == HitKind.TRIM_END) ->
+                innerTrimDrag(r, hit.kind == HitKind.TRIM_START, down)
             r != null && store.layerSelectMode && hit.kind == HitKind.HEADER && r.track == null && !state.compact && !horizontal ->
                 sweepSelect(down.id, slopAt, r)
             // Trilha de propriedade aberta (só do AUREA): o losango anda direto, como antes.
@@ -1159,6 +1338,15 @@ internal class TimelineController(
         val lane = hit.lane
         if (lane != null && omegaReorders(hit, down.position)) return reorderDrag(lane, hit.rowIndex, down, grabbed = null)
         val r = hit.row ?: return awaitSlop(hit, down, tracker)
+        // 0.5.3: linha de dentro de um grupo aberto — aparar pelas alças, mover pelo corpo.
+        if (r.inner && !compact) {
+            when (hit.kind) {
+                HitKind.TRIM_START, HitKind.TRIM_END -> { light(); innerTrimDrag(r, hit.kind == HitKind.TRIM_START, down) }
+                HitKind.BODY -> { heavy(); innerMoveDrag(r, down) }
+                else -> awaitSlop(hit, down, tracker)
+            }
+            return
+        }
         when {
             compact && r.track == null && (hit.kind == HitKind.TRIM_START || hit.kind == HitKind.TRIM_END) -> {
                 light()
@@ -1337,6 +1525,14 @@ internal class TimelineController(
             r != null && edit && hit.kind == HitKind.KEYFRAME -> keyframeDrag(r, hit.keyIndex, down)
             r != null && edit && hit.kind == HitKind.TRIM_START -> trimDrag(r, true, down)
             r != null && edit && hit.kind == HitKind.TRIM_END -> trimDrag(r, false, down)
+            // Mouse no Aurea PC ([TimelinePlatform.mouseDragMovesClips]): arrastar o corpo
+            // do clipe já move (sem segurar antes), como nos editores de computador.
+            r != null && edit && r.track == null && hit.kind == HitKind.BODY && TimelinePlatform.mouseDragMovesClips &&
+                down.type == androidx.compose.ui.input.pointer.PointerType.Mouse -> {
+                pauseIfPlaying()
+                if (!isSelected(r.id)) store.select(r.id, additive = multiActive(), openOptions = false)
+                moveDrag(rowById(r.id) ?: r, down)
+            }
             // Modo "Selecionar": arrastar no VAZIO (ou no fundo de uma trilha) desenha
             // o retângulo e escolhe os losangos dentro; fora do modo, rola/scrub.
             boxStarts(hit) -> boxSelect(down)
@@ -1573,6 +1769,68 @@ internal class TimelineController(
                 }
             }
             setGuide(if (target == out[0]) out[1] else Snap.NONE)
+        }
+    }
+
+    // --- 0.5.3: grupo aberto na timeline (mover/aparar as camadas de dentro) -----------
+    private fun innerRefused(r: RowModel): Boolean {
+        val msg = when {
+            !r.inlineEditable -> R.string.om_tl_group_inline_locked_time
+            r.locked -> R.string.editor_camada_bloqueada_desbloqueie_editar
+            else -> return false
+        }
+        light()
+        store.showToast(AppText.get(store.getApplication<Application>(), msg))
+        return true
+    }
+
+    /** O começo da composição de dentro no tempo de fora (a camada de dentro não passa dele). */
+    private fun innerFloor(r: RowModel): Int {
+        val g = rowById(r.group) ?: return 0
+        return max(0, g.start - g.offset)
+    }
+
+    private suspend fun AwaitPointerEventScope.innerMoveDrag(r: RowModel, down: PointerInputChange) {
+        if (innerRefused(r)) return consumeUntilUp()
+        pauseIfPlaying()
+        if (!isRowSelected(r)) store.selectGroupInner(r.group, r.id)
+        val group = r.group
+        val grab = r.start - frameAt(down.position.x)
+        val floor = innerFloor(r)
+        var sent = 0
+        omegaMoveInfo(r.start, 0)
+        dragLoop(down.id, down.position, horizontal = true) { p ->
+            val target = GestureLimit.clampFrame(max(floor, (frameAt(p.x) + grab).toFrame()), captureGestureLimit())
+            val delta = target - r.start
+            if (delta != sent) {
+                openUndo("mover")
+                if (store.setGroupLayerRanges(group, longArrayOf(r.id), intArrayOf(r.start + delta), intArrayOf(r.end + delta))) sent = delta
+                omegaMoveInfo(r.start + sent, sent)
+            }
+        }
+    }
+
+    private suspend fun AwaitPointerEventScope.innerTrimDrag(r: RowModel, start: Boolean, down: PointerInputChange) {
+        if (innerRefused(r)) return consumeUntilUp()
+        pauseIfPlaying()
+        val group = r.group
+        val id = r.id
+        val grab = (if (start) r.start else r.end) - frameAt(down.position.x)
+        val floor = innerFloor(r)
+        val originalDuration = r.end - r.start
+        state.handleState = 2
+        omegaTrimInfo(r, originalDuration)
+        dragLoop(down.id, down.position, horizontal = true) { p ->
+            val target = GestureLimit.clampFrame(max(floor, (frameAt(p.x) + grab).toFrame()), captureGestureLimit())
+            val cur = innerRowById(group, id) ?: return@dragLoop
+            if (start && target != cur.start) {
+                openUndo("aparar")
+                store.trimGroupClip(group, id, 0, target)
+            } else if (!start && target != cur.end) {
+                openUndo("aparar")
+                store.trimGroupClip(group, id, 1, target)
+            }
+            innerRowById(group, id)?.let { omegaTrimInfo(it, originalDuration) }
         }
     }
 

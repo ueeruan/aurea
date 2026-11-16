@@ -654,6 +654,11 @@ HumanoidMap humanoid_map(const scene3d::SceneAsset& asset, const std::string& sp
     HumanoidMap m;
     if (!spec.empty() && decode_rig_spec(spec, isAuto, j, m) && !isAuto) {
         for (i32& n : m.joint) if (n >= static_cast<i32>(asset.nodes.size())) n = -1;
+        // Associação à mão incompleta: o que a pessoa escolheu vale; o resto vem dos nomes.
+        if (!m.usable()) {
+            const HumanoidMap byName = map_by_names(asset);
+            for (usize i = 0; i < m.joint.size(); ++i) if (m.joint[i] < 0) m.joint[i] = byName.joint[i];
+        }
         return m;
     }
     return map_by_names(asset);

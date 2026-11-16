@@ -64,11 +64,21 @@ private val SoundGeneratorNames = setOf("tom", "tone", "gerador de tom", "tone g
 fun makesSound(entry: EffectCatalogEntry): Boolean =
     entry.typeId in SoundGeneratorIds || normalizeSearch(entry.name) in SoundGeneratorNames
 
+/**
+ * AE expressions (lote E): os controles Menu suspenso, Camada e Ponto 3D só
+ * entram na lista do Aurea PC (PlatformFeatures.desktopAe); o celular fica como estava.
+ */
+private val AeDesktopOnlyEffects = setOf(
+    effectTypeId("aurea.control.dropdown"), effectTypeId("aurea.control.layer"), effectTypeId("aurea.control.point3d"),
+)
+
 /** O que o catálogo oferece para ESTA camada: sem som, some o que só mexe no som. */
 fun pickableEffects(catalog: List<EffectCatalogEntry>, layerHasAudio: Boolean, layerKind: Int = 0): List<EffectCatalogEntry> =
     catalog.filter {
         it.typeId !in setOf(effectTypeId("aurea.motion.oscillate"), effectTypeId("aurea.layout.grid_builder"), effectTypeId("aurea.layout.grid_item"), effectTypeId("aurea.light.scene_flare")) &&
             (layerHasAudio || !isAudioCategory(it.category) || makesSound(it)) &&
+            (layerKind != 12 || !PluginTexts.isAudio(it.typeId)) &&
+            (com.aurea.aurea.ui.platform.PlatformFeatures.desktopAe || it.typeId !in AeDesktopOnlyEffects) &&
             (it.typeId != effectTypeId("aurea.generate.raster_extrude") || layerKind in setOf(1, 2, 4, 5, 12))
     }
 
@@ -88,6 +98,20 @@ enum class EffectTool(val key: String, val category: String) {
     Captions("aurea.tool.auto_captions", "Texto"),
     CameraTrack("aurea.tool.camera_track", "Rastreio"),
     Mask("aurea.tool.mask", "Máscara"),
+    // Funções do AUREA (decisão 1 do dono, 13/11/2026): sem página 2 na grade da
+    // camada; os extras abrem pelo navegador de Efeitos, no grupo "Funções do
+    // Aurea" ([EffectGroup.AureaTools]). O toque abre o painel da função (o de
+    // sempre), nada entra na pilha de efeitos. A ordem aqui é a da tela.
+    Animation("aurea.tool.animation", "Ferramentas"),
+    Tracking("aurea.tool.tracking", "Ferramentas"),
+    PreciseCut("aurea.tool.precise_cut", "Ferramentas"),
+    Puppet("aurea.tool.puppet", "Ferramentas"),
+    RigMocap("aurea.tool.rig_mocap", "Ferramentas"),
+    ShapeOperators("aurea.tool.shape_operators", "Ferramentas"),
+    Layer3D("aurea.tool.layer_3d", "Ferramentas"),
+    LayerOptions("aurea.tool.layer_options", "Ferramentas"),
+    /** F4: espaçamento, caixa, texto no caminho e texto dinâmico (só texto). */
+    TextLayout("aurea.tool.text_layout", "Ferramentas"),
     ;
 
     val typeId: Int get() = effectTypeId(key)
@@ -96,9 +120,27 @@ enum class EffectTool(val key: String, val category: String) {
 /** A ferramenta por trás de um `typeId` do catálogo (nulo = efeito de verdade). */
 fun effectToolOf(typeId: Int): EffectTool? = EffectTool.entries.firstOrNull { it.typeId == typeId }
 
-/** Rastreio de câmera só tem o que analisar num VÍDEO (tipo 1); o resto serve para qualquer camada. */
-fun pickableTools(layerKind: Int): List<EffectTool> =
-    EffectTool.entries.filter { it != EffectTool.CameraTrack || layerKind == 1 }
+/**
+ * As ferramentas que valem para a camada (conta pura, gêmea de `fxPickableTools`
+ * no iOS). Tipos: 1 vídeo, 2 imagem, 3 áudio, 5 forma, 10 objeto 3D.
+ * [vector]: forma vetorial (caminhos editáveis). [importedModel]: objeto 3D vindo
+ * de arquivo (o que tem esqueleto); forma, texto e imagem 3D não têm.
+ * Rastreio de câmera só tem o que analisar num VÍDEO; Máscara e Legendas servem
+ * para qualquer camada.
+ */
+fun pickableTools(layerKind: Int, vector: Boolean = false, importedModel: Boolean = false): List<EffectTool> =
+    EffectTool.entries.filter { tool ->
+        when (tool) {
+            EffectTool.Captions, EffectTool.Mask, EffectTool.LayerOptions -> true
+            EffectTool.CameraTrack, EffectTool.Tracking -> layerKind == 1
+            EffectTool.PreciseCut -> layerKind == 1 || layerKind == 3
+            EffectTool.Puppet -> layerKind == 2
+            EffectTool.RigMocap -> layerKind == 10 && importedModel
+            EffectTool.ShapeOperators -> layerKind == 5 && vector
+            EffectTool.Animation, EffectTool.Layer3D -> layerKind != 3 && layerKind != 0
+            EffectTool.TextLayout -> layerKind == 4
+        }
+    }
 
 /** A ferramenta como entrada do catálogo; [name] é o rótulo no idioma do app. */
 fun toolCatalogEntry(tool: EffectTool, name: String): EffectCatalogEntry =
@@ -116,8 +158,12 @@ fun toolCatalogEntry(tool: EffectTool, name: String): EffectCatalogEntry =
  * Omega efeitos (navegador, P0-6): primeiro os grupos da referência, na ordem
  * dela (Cor e luz … Visibilidade, Texto); depois os extras do AUREA (Estilizar,
  * Glitch, Tempo, Áudio, Utilitário, Plugins); "Outros" sempre por último.
+ * Funções (13/11/2026): "Funções do Aurea" vem ANTES de todos — é onde moram as
+ * funções da camada que não cabem na grade (decisão 1 do dono).
  */
 enum class EffectGroup(val id: String) {
+    /** Funções do AUREA (13/11/2026): animadores, rastreio, corte preciso, fantoche, rig, operadores, 3D, camada. */
+    AureaTools("aurea_tools"),
     ColorLight("color_light"),
     DrawEdge("draw_edge"),
     Blur("blur"),
@@ -156,6 +202,7 @@ private val GroupByCategory: Map<String, EffectGroup> = buildMap {
     listOf("texto", "text").forEach { put(it, EffectGroup.Text) }
     put("3d", EffectGroup.ThreeD)
     put("plugins", EffectGroup.Plugins)
+    listOf("ferramentas", "tools", "funcoes do aurea", "aurea tools").forEach { put(it, EffectGroup.AureaTools) }
     listOf("audio", "som", "sound").forEach { put(it, EffectGroup.Audio) }
     listOf("utilitario", "utility", "controles de expressao", "expression controls").forEach { put(it, EffectGroup.Utility) }
 }
@@ -166,8 +213,8 @@ private val GroupByKey: Map<Int, EffectGroup> by lazy {
         put(effectTypeId("aurea.generate.raster_extrude"), EffectGroup.ThreeD)
         put(effectTypeId("aurea.distort.hollow_box"), EffectGroup.ThreeD)
         listOf(
-            "aurea.stylize.stroke_outline", "aurea.stylize.border", "aurea.stylize.drop_shadow",
-            "aurea.stylize.find_edges", "aurea.stylize.bevel_alpha", "aurea.draw.drawing_progress",
+            "aurea.stylize.stroke_outline", "aurea.stylize.border", "aurea.stylize.drop_shadow", "aurea.stylize.drop_shadow_reference",
+            "aurea.stylize.find_edges", "aurea.stylize.find_edges_reference", "aurea.stylize.bevel_alpha", "aurea.draw.drawing_progress",
         ).forEach { put(effectTypeId(it), EffectGroup.DrawEdge) }
         listOf(
             "aurea.transform", "aurea.motion.oscillate.cycles", "aurea.motion.swing", "aurea.motion.wiggle",
@@ -261,13 +308,13 @@ fun browserHomeRows(hasRecommended: Boolean, hasQuick: Boolean, groups: List<Eff
 /** O efeito cuja prévia (escurecida) vira o fundo do ladrilho do grupo. */
 private val GroupBannerKeys: Map<EffectGroup, String> = mapOf(
     EffectGroup.ColorLight to "aurea.color.colorama",
-    EffectGroup.Blur to "aurea.blur.radial",
-    EffectGroup.Distort to "aurea.distort.wave_warp",
+    EffectGroup.Blur to "aurea.blur.radial_blur_reference",
+    EffectGroup.Distort to "aurea.distort.wave_warp_reference",
     EffectGroup.Motion to "aurea.distort.corner_pin",
     EffectGroup.Repeat to "aurea.stylize.motion_tile",
     EffectGroup.Stylize to "aurea.stylize.halftone",
     EffectGroup.Glitch to "aurea.glitch.glitchify",
-    EffectGroup.DrawEdge to "aurea.stylize.find_edges",
+    EffectGroup.DrawEdge to "aurea.stylize.find_edges_reference",
     EffectGroup.Procedural to "aurea.generate.fractal_noise",
     EffectGroup.Matte to "aurea.key.chroma",
     EffectGroup.Visibility to "aurea.transition.radial_wipe",
@@ -286,7 +333,7 @@ fun groupBannerEntry(group: EffectGroup, entries: List<EffectCatalogEntry>): Eff
 /** A faixa de DESTAQUES: estes, na ordem, os que existirem para esta camada. */
 private val FeaturedKeys = listOf(
     "aurea.draw.drawing_progress", "aurea.key.chroma", "aurea.blur.directional", "aurea.light.deep_glow",
-    "aurea.glitch.vhs", EffectTool.Captions.key, "aurea.stylize.halftone", "aurea.distort.wave_warp",
+    "aurea.glitch.vhs", EffectTool.Captions.key, "aurea.stylize.halftone", "aurea.distort.wave_warp_reference",
     "aurea.light.rays", "aurea.color.colorama", "aurea.stylize.pixel_sort", "aurea.generate.fractal_noise",
 )
 

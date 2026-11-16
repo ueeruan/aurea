@@ -2,12 +2,21 @@
 #include "aurea/project/Project.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
 namespace aurea {
 namespace {
+// Scope accounting survives every return without changing wait/error handling.
+struct ScopedElapsedTime {
+    u64& accumulated;
+    u64 begin = monotonic_ns();
+    ~ScopedElapsedTime() { accumulated += monotonic_ns() - begin; }
+};
+
 /// Só o nome do arquivo do ponto (o caminho de compilação não interessa).
 const char* site_name(const char* file) noexcept {
     if (!file) return "?";
@@ -43,6 +52,10 @@ Status OfflineFrameRenderer::initialize(GPUBackend& gpu, const EffectRegistry& e
     renderer_.set_transient_cache_budget(budget);
     renderer_.set_preview_cache_budget(0);
     renderer_.set_flow_cache_budget(16ull << 20);
+    // 0.5.3: as faixas do TimeSlice dividem o orçamento do export (metade dele,
+    // até os 384 MB da prévia); antes ficavam fora de toda conta e esgotavam a
+    // GPU do aparelho em 1080p.
+    renderer_.set_slice_cache_budget(std::min<u64>(384ull << 20, budget / 2));
     // 0.5.2 (E4): a abertura do renderizador do export não pré-aquece a lista
     // base (compila no 1o quadro, com o vigia do render) e todo
     // pré-aquecimento dele para no cancelar do export.
@@ -57,6 +70,7 @@ Status OfflineFrameRenderer::initialize(GPUBackend& gpu, const EffectRegistry& e
 Status OfflineFrameRenderer::wait_gpu(u64 frame, const std::atomic<bool>* cancel, std::mutex* pollingMutex,
                                       const std::atomic<bool>* additionalCancel) noexcept {
     if (!frame) return OkStatus;
+    ScopedElapsedTime measured{measurements_.fenceWaitNs};
     const u64 begin = monotonic_ns();
     for (;;) {
         if ((cancel && cancel->load(std::memory_order_acquire))
@@ -81,6 +95,8 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
     const ImagePixels* (*images)(void*, AssetId), void* imageContext,
     const RenderSettings& requested, u64& submittedFrame, std::mutex* pollingMutex,
     const std::atomic<bool>* additionalCancel) noexcept {
+    measurements_ = {};
+    ScopedElapsedTime measured{measurements_.elapsedNs};
     submittedFrame = 0;
     if (!gpu_ || !renderer_.ready()) return Errc::InvalidState;
     const auto* comp = project.timeline().composition(composition);
@@ -114,6 +130,7 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
         std::unique_lock<std::mutex> gpuLock;
         if (pollingMutex) gpuLock = std::unique_lock<std::mutex>(*pollingMutex);
         if (cancelled()) return Errc::Cancelled;
+        ++measurements_.attempts;
         const u64 observed = generation_.load(std::memory_order_acquire);
         // O prazo do quadro exato já passou (ver abaixo): a fonte pode
         // oferecer o quadro do mesmo trecho que estiver mais perto.
@@ -124,12 +141,15 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
                 || checkNs - start >= (afterFirst ? deadlines_.approximateTotalAfterNs : deadlines_.approximateTotalNs));
         settings.approximateAhead = late;
         (void)renderer_.take_incomplete();
-        renderer_.prepare(*comp, project, time, &media_, images, imageContext,
-                          settings, ++sequence_, 1, DecodeMode::Playback, 1.0f, snapshot_);
-        comp->layers().for_each([&](LayerId id, const Layer& layer) {
-            if (layer.kind == LayerKind::Video && layer.contains_time(time)) media_.touch(id, sequence_);
-        });
-        media_.collect(sequence_, 2);
+        {
+            ScopedElapsedTime preparation{measurements_.prepareNs};
+            renderer_.prepare(*comp, project, time, &media_, images, imageContext,
+                              settings, ++sequence_, 1, DecodeMode::Playback, 1.0f, snapshot_);
+            comp->layers().for_each([&](LayerId id, const Layer& layer) {
+                if (layer.kind == LayerKind::Video && layer.contains_time(time)) media_.touch(id, sequence_);
+            });
+            media_.collect(sequence_, 2);
+        }
         const bool exact = !snapshot_.missingVideoFrames && !snapshot_.staleVideoFrames;
         // 0.3.0: o quadro exato que NUNCA chega (decoder do aparelho preso num
         // ponto do clipe: "trava sempre no quadro 302", 1080p60 de celular)
@@ -142,7 +162,21 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
         if (exact || approximate) {
             FrameStats stats;
             RenderTimings timings;
-            const Status rendered = renderer_.render(snapshot_, settings, &target, stats, timings);
+            ++measurements_.recordAttempts;
+            u64 recordedNs = 0;
+            Status rendered;
+            {
+                ScopedElapsedTime recording{recordedNs};
+                rendered = renderer_.render(snapshot_, settings, &target, stats, timings);
+            }
+            // Renderer reports wall-clock acquire/exposure waits even when
+            // GPU timestamp queries are unavailable. Clamp float rounding to
+            // the measured enclosing call; never infer GPU execution time.
+            const f64 waitNs = (static_cast<f64>(timings.acquireWaitMs) + timings.sceneExposureWaitMs) * 1e6;
+            const u64 internalWaitNs = std::isfinite(waitNs)
+                ? static_cast<u64>(std::clamp(waitNs, 0.0, static_cast<f64>(recordedNs))) : 0;
+            measurements_.recordNs += recordedNs - internalWaitNs;
+            measurements_.fenceWaitNs += internalWaitNs;
             submittedFrame = gpu_->last_submitted_frame();
             if (rendered.code() == Errc::OutOfDeviceMemory && !reclaimed) {
                 snapshot_.release_video_frames();
@@ -180,6 +214,8 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
                 continue;
             }
             if (!rendered.ok()) return rendered;
+            if (renderer_.take_memory_short())
+                return Status{Errc::BudgetExceeded, "final frame exceeds its resource budget"};
             // 0.5.2 (E1): o quadro deixou de fora algo que nunca chega (modelo que
             // falhou ao subir): ele vale como está, como a prévia mostra; avisa.
             if (renderer_.take_unavailable()) {
@@ -301,9 +337,12 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
         }
         std::unique_lock lock(wakeMutex_);
         const u64 sleepBegin = monotonic_ns();
-        wake_.wait_for(lock, std::chrono::milliseconds(10), [&] {
-            return generation_.load(std::memory_order_acquire) != observed || cancelled();
-        });
+        {
+            ScopedElapsedTime sleeping{exact ? measurements_.resourceWaitNs : measurements_.mediaWaitNs};
+            wake_.wait_for(lock, std::chrono::milliseconds(10), [&] {
+                return generation_.load(std::memory_order_acquire) != observed || cancelled();
+            });
+        }
         idleSinceProgress += monotonic_ns() - sleepBegin;
     }
 }

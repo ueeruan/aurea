@@ -1,0 +1,44 @@
+{
+  "aureaPlugin": 3,
+  "id": "aurea.example.audio-convolution",
+  "version": "1.0.0",
+  "name": "Convolution room",
+  "author": "Aurea",
+  "kind": "audio",
+  "params": [
+    {
+      "id": "mix",
+      "label": "Wet mix",
+      "type": "float",
+      "default": 0.35,
+      "min": 0,
+      "max": 1
+    }
+  ],
+  "audio": {
+    "nodes": [
+      {
+        "id": "source",
+        "type": "input"
+      },
+      {
+        "id": "output",
+        "type": "convolution",
+        "input": "source",
+        "impulse": "room",
+        "mix": {
+          "param": "mix",
+          "scale": 1,
+          "offset": 0
+        }
+      }
+    ],
+    "output": "output",
+    "impulses": [
+      {
+        "id": "room",
+        "file": "room.wav"
+      }
+    ]
+  }
+}

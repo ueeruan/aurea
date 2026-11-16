@@ -119,7 +119,7 @@ internal class PanelEnv(
     val openColor: (ColorRequest) -> Unit,
     /** Painel de onde o editor de curva foi aberto (o ‹ do trilho volta para ele). */
     val returnTo: () -> EditorPanel?,
-    val onOpenAnimators: () -> Unit = { onOpenPanel(EditorPanel.Transform) },
+    val onOpenAnimators: () -> Unit = { onOpenPanel(EditorPanel.Animation) },
 )
 
 /**
@@ -177,48 +177,26 @@ internal fun LeftRail(
     expression: ExpressionLook = ExpressionLook.None,
     onExpression: (() -> Unit)? = null,
 ) {
-    Column(
-        modifier
-            .width(58.dp)
-            .fillMaxHeight()
-            .drawBehind {
-                // A divisa fica do lado do conteúdo: à direita em LTR, à esquerda em RTL.
-                val w = 1.dp.toPx()
-                val x = if (layoutDirection == androidx.compose.ui.unit.LayoutDirection.Rtl) 0f else size.width - w
-                drawRect(ParamRowColors.RailLine, topLeft = Offset(x, 0f), size = Size(w, size.height))
-            }
-            .padding(top = 8.dp, bottom = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        RailCell(onBack, stringResource(R.string.panel_voltar_ferramentas)) {
-            Icon(AureaLineIcons.ChevronLeft, contentDescription = null, tint = AureaColors.Text, modifier = Modifier.size(PanelMetrics.RailIcon).mirrorInRtl())
+    // F11 (13/11/2026): a coluna é a MESMA da moldura comum (`PanelFrame`): ‹ · ◆ · curva · =
+    // nos mesmos lugares e no mesmo tamanho em todo painel de função. [more] não tem mais
+    // chamador (o ⋯ mora no `PanelRail.moreEntries`); fica no pé, como antes, se vier.
+    Column(modifier.fillMaxHeight()) {
+        Box(Modifier.weight(1f)) {
+            FrameLeftRail(
+                PanelRail(
+                    onBack = onBack,
+                    keyframeLook = keyframeLook,
+                    onKeyframe = onKeyframe,
+                    onCurve = onCurve,
+                    curveReady = curveAnimated || onCurve != null,
+                    expression = expression,
+                    onExpression = onExpression,
+                ),
+                onAskDeleteAll = {},
+                onCurveWarning = {},
+            )
         }
-        RailCell(onKeyframe, if (keyframeLook == KeyframeLook.KeyHere) stringResource(R.string.panel_tirar_keyframe_daqui) else stringResource(R.string.panel_marcar_keyframe_aqui)) {
-            KeyframeDiamondIcon(keyframeLook, enabled = onKeyframe != null, modifier = Modifier.size(PanelMetrics.RailIcon))
-        }
-        RailCell(onCurve, stringResource(R.string.panel_editar_curva_propriedade)) {
-            CurveRailIcon(enabled = onCurve != null, animated = curveAnimated, modifier = Modifier.size(PanelMetrics.RailIcon))
-        }
-        if (onExpression != null) {
-            // "=": o editor de expressão da propriedade (acende quando há uma).
-            RailCell(onExpression, if (expression == ExpressionLook.None) stringResource(R.string.panel_adicionar_expressao) else stringResource(R.string.panel_editar_expressao)) {
-                androidx.compose.material3.Text(
-                    "=",
-                    style = com.aurea.aurea.ui.theme.AureaType.Base.merge(
-                        androidx.compose.ui.text.TextStyle(
-                            fontSize = PanelMetrics.RailExpression,
-                            fontWeight = androidx.compose.ui.text.font.FontWeight.W700,
-                            color = if (expression == ExpressionLook.None) AureaColors.Text else expressionColor(expression),
-                        ),
-                    ),
-                )
-            }
-        }
-        if (more != null) {
-            Spacer(Modifier.weight(1f))
-            Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { more() }
-        }
+        if (more != null) Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { more() }
     }
 }
 
@@ -257,42 +235,7 @@ internal fun RailMoreButton(active: Boolean, onClick: () -> Unit) {
     }
 }
 
-/** Um modo do trilho direito: ícone e rótulo de acessibilidade. */
-internal class RailMode(val icon: ImageVector, val label: String)
-
-/**
- * O TRILHO DIREITO [A] (`RailDireito`, 40 dp): os modos empilhados em
- * `spaceEvenly`; o vigente com fundo `#1E222D`, borda 1,5 `destaque` e ícone
- * aceso. O botão encolhe quando a coluna não cabe (cinco modos num painel baixo),
- * em vez de rolar e esconder justamente o último modo.
- */
-@Composable
-internal fun RightRail(modes: List<RailMode>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
-    BoxWithConstraints(modifier.width(48.dp).fillMaxHeight()) {
-        val cell = 44.dp
-        Column(
-            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).heightIn(min = maxHeight),
-            verticalArrangement = Arrangement.SpaceEvenly,
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            modes.forEachIndexed { i, m ->
-                val on = i == selected
-                Box(
-                    Modifier
-                        .padding(vertical = 2.dp).size(cell)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (on) AureaColors.RailModeFill else Color.Transparent)
-                        .then(if (on) Modifier.border(1.5.dp, AureaColors.Accent, RoundedCornerShape(8.dp)) else Modifier)
-                        .semantics { contentDescription = m.label }
-                        .tocavel(shrink = 1f) { onSelect(i) },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(m.icon, contentDescription = null, tint = if (on) AureaColors.Accent else AureaColors.Muted, modifier = Modifier.size(min(24.dp, cell * 0.6f)))
-                }
-            }
-        }
-    }
-}
+/* F11: o RightRail antigo (sem chamador) saiu; as abas moram na coluna da direita da PanelFrame. */
 
 /**
  * AS ABAS DE PARÂMETRO [A] (`AmParamTabs`): 48 de altura; abas que cabem dividem a
@@ -500,6 +443,8 @@ internal class PanelTab(
     val glyph: Char? = null,
     val icon: ImageVector? = null,
     val alt: PanelTab? = null,
+    /** Id de teste próprio da aba (nulo = `panel.tab.<n>`); os painéis antigos guardam os deles. */
+    val tag: String? = null,
 )
 
 /**
@@ -548,6 +493,13 @@ internal fun PanelFrame(
     selectedTab: String? = null,
     onTab: (String) -> Unit = {},
     scrollContent: Boolean = true,
+    /**
+     * Coluna esquerda própria de um editor de modo (a coluna do Editar pontos, na aba
+     * Forma da máscara). Nulo = o trilho comum ‹ ◆ curva ⋯ de [rail].
+     */
+    leftColumn: (@Composable () -> Unit)? = null,
+    /** Faixa entre o conteúdo e as abas (a faixa de pontos do Editar pontos). */
+    trailing: (@Composable () -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     var askDeleteAll by remember { mutableStateOf(false) }
@@ -558,7 +510,8 @@ internal fun PanelFrame(
             .background(AureaColors.PanelFrameBackground)
             .testTag("panel.frame"),
     ) {
-        FrameLeftRail(rail, onAskDeleteAll = { askDeleteAll = true }, onCurveWarning = { curveWarning = true })
+        if (leftColumn != null) leftColumn()
+        else FrameLeftRail(rail, onAskDeleteAll = { askDeleteAll = true }, onCurveWarning = { curveWarning = true })
         FrameDivider()
         Column(
             Modifier
@@ -569,6 +522,10 @@ internal fun PanelFrame(
                 .then(if (scrollContent) Modifier.verticalScroll(rememberScrollState()) else Modifier),
             content = content,
         )
+        if (trailing != null) {
+            FrameDivider()
+            trailing()
+        }
         if (tabs.size >= 2) {
             FrameDivider()
             FrameRightRail(tabs.take(PanelFrameDefaults.MAX_TABS), selectedTab, onTab)
@@ -714,7 +671,7 @@ private fun FrameCellBody(
 }
 
 @Composable
-private fun FrameRightRail(tabs: List<PanelTab>, selectedId: String?, onTab: (String) -> Unit) {
+internal fun FrameRightRail(tabs: List<PanelTab>, selectedId: String?, onTab: (String) -> Unit) {
     Column(Modifier.width(PanelFrameDefaults.RailWidth).fillMaxHeight()) {
         tabs.forEachIndexed { i, tab ->
             val alt = tab.alt
@@ -726,7 +683,7 @@ private fun FrameRightRail(tabs: List<PanelTab>, selectedId: String?, onTab: (St
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .testTag("panel.tab.$i")
+                    .testTag(tab.tag ?: "panel.tab.$i")
                     .semantics {
                         contentDescription = shown.label
                         selected = on

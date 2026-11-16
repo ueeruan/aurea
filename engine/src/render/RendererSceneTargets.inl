@@ -25,7 +25,7 @@ Status Renderer::reclaim_failed_transients(u64 timeoutNs) noexcept {
     // and returned through all held-output RAII. Its uploads may still have
     // been submitted, so neither graph reset nor physical retirement preceded
     // the fence. Quarantined/held pool entries remain inUse and cannot be freed.
-    graph_.reset();
+    graph_.reset(); effectVideoImages_.clear();
     arena_.reset();
     const u64 before = pool_.stats().bytes;
     const auto gpuBefore = backend_->memory_stats();
@@ -133,7 +133,7 @@ Status Renderer::render_staged_scene_targets(const FrameSnapshot& root, const Re
             // principal vem depois) e a 1ª captura saía preta.
             flush_uploads();
             const u64 recorded = monotonic_ns();
-            pool_.begin_frame(*backend_, frame.frameNumber); graph_.reset(); arena_.reset();
+            pool_.begin_frame(*backend_, frame.frameNumber); graph_.reset(); effectVideoImages_.clear(); arena_.reset();
             bool executed = false;
             auto finish = [&](Status status) {
                 graph_.release(pool_); pool_.end_frame();

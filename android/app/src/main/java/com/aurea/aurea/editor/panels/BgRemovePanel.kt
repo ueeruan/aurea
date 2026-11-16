@@ -81,7 +81,7 @@ private fun BgChip(label: String, tag: String, on: Boolean, onClick: () -> Unit)
 @Composable
 internal fun BgRemoveControls(store: EditorStore, effectId: Int) {
     val layer = store.primary ?: return
-    val video = store.layers.firstOrNull { it.id == layer }?.let { LayerType.of(it.kind) == LayerType.Video } == true
+    val video = store.editingLayers.firstOrNull { it.id == layer }?.let { LayerType.of(it.kind) == LayerType.Video } == true
     // [analisados, total, analisando, falhou, quadro pronto, prontos no clipe, quadros do clipe, modelo, válido]
     var status by remember(layer, effectId) { mutableStateOf(LongArray(9)) }
     LaunchedEffect(layer, effectId) {

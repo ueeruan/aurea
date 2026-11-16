@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <string>
 
 using namespace aurea;
@@ -280,8 +281,9 @@ AUREA_TEST(Expr, SyntaxErrorsCarryLineAndColumn) {
     AUREA_CHECK(!r.ok && r.diag.message.find("time") != std::string::npos);
     r = ev("[1, 2, 3, 4, 5]");
     AUREA_CHECK(!r.ok);
-    r = ev("function f() { return 1 }");
-    AUREA_CHECK(!r.ok && r.diag.message.find("function") != std::string::npos);
+    // (function passou a existir no lote E das expressões do AE: test_expr_ae.cpp)
+    r = ev("class A { }");
+    AUREA_CHECK(!r.ok && r.diag.message.find("class") != std::string::npos);
     r = ev("\"abc");
     AUREA_CHECK(!r.ok);
     r = ev("y + 1");                                       // variável sem valor = erro de execução
@@ -764,4 +766,284 @@ AUREA_TEST(Expr, PosterizeTemporalWiggleSmoothSpeedAtTimeNearestKeyAndTimeMs) {
     AUREA_CHECK(lo >= -7.5 - 1e-3 && hi <= 7.5 + 1e-3);                // ±0,25 s = ±7,5 quadros = ±7,5 graus
     AUREA_CHECK(hi - lo > 2.0);
     std::printf("posterizeTime (time/value/random em degraus), timeMs, speedAtTime, smooth, nearestKey, temporalWiggle [%.2f, %.2f] ", lo, hi);
+}
+
+// =============================================================================
+// v70 · Expressão no texto (o Texto-fonte do AE): texto nas expressões.
+// =============================================================================
+namespace {
+struct TextExprRig {
+    Engine e;
+    u64 id = 0;
+    TextExprRig() {
+        EngineConfig config; config.disableAutosave = true; config.workerCount = 1;
+        AUREA_CHECK(e.initialize(config).ok());
+        AUREA_CHECK(e.new_project(320, 180, 30, nullptr).ok());
+        const auto added = e.add_text("Olá mundo");
+        AUREA_CHECK(added.ok());
+        if (added.ok()) id = *added;
+    }
+    ~TextExprRig() { e.shutdown(); }
+    Layer* layer() { auto& t = e.project()->timeline(); return t.composition(t.current())->layer(LayerId::unpack(id)); }
+    /// O texto da expressão no quadro local `frame` (sem mexer no cabeçote).
+    std::string at(const char* source, f64 frame, bool* ok = nullptr) {
+        auto te = expr::compile(source);
+        const Layer* l = layer();
+        if (!l) return {};
+        const expr::Scope scope(e.project()->timeline());
+        expr::TextResult r = expr::evaluate_text(*te, *l, l->text.content, frame);
+        if (ok) *ok = r.ok;
+        return r.text;
+    }
+};
+} // namespace
+
+AUREA_TEST(ExprText, StringsJoinFormatAndSliceLikeAfterEffects) {
+    TextExprRig r;
+    if (!r.id) return;
+    AUREA_CHECK_EQ(r.at("value.toUpperCase()", 0), std::string("OLÁ MUNDO"));
+    AUREA_CHECK_EQ(r.at("\"Pontos: \" + Math.round(time * 10)", 30), std::string("Pontos: 10"));
+    AUREA_CHECK_EQ(r.at("value.substr(0, Math.floor(time * 4))", 30), std::string("Olá "));   // letras, não bytes
+    AUREA_CHECK_EQ(r.at("(12.345).toFixed(1)", 0), std::string("12.3"));
+    AUREA_CHECK_EQ(r.at("timeToTimecode()", 45), std::string("00:00:01:15"));
+    AUREA_CHECK_EQ(r.at("text.sourceText + \"!\"", 0), std::string("Olá mundo!"));
+    AUREA_CHECK_EQ(r.at("value.replace(\"mundo\", \"AE\")", 0), std::string("Olá AE"));
+    AUREA_CHECK_EQ(r.at("value.length", 0), std::string("9"));
+    AUREA_CHECK_EQ(r.at("0.5 + 0.25", 0), std::string("0.75"));
+    AUREA_CHECK_EQ(r.at("[1, 2]", 0), std::string("1,2"));
+    AUREA_CHECK_EQ(r.at("String(7) + 3", 0), std::string("73"));
+    AUREA_CHECK_EQ(r.at("parseInt(\"42px\") + 1", 0), std::string("43"));
+    AUREA_CHECK_EQ(r.at("value.slice(-5).toUpperCase()", 0), std::string("MUNDO"));
+    AUREA_CHECK_EQ(r.at("var s = \"\"; for (var i = 0; i < 3; i++) s += i; s", 0), std::string("012"));
+    AUREA_CHECK_EQ(r.at("thisComp.layer(1).name", 0), r.layer()->name);
+    // Erro: não quebra, vale o texto de antes.
+    bool ok = true;
+    AUREA_CHECK_EQ(r.at("value.naoExiste()", 0, &ok), std::string("Olá mundo"));
+    AUREA_CHECK(!ok);
+}
+
+AUREA_TEST(ExprText, SourceTextExpressionThroughTheApiSurvivesSaveAndUndo) {
+    TextExprRig r;
+    if (!r.id) return;
+    const u32 src = static_cast<u32>(TrackProperty::TextSource);
+    expr::Diagnostic d;
+    AUREA_CHECK(r.e.set_expression(r.id, src, 0, 0, "value.toUpperCase() + \" \" + timeToTimecode()", &d).ok());
+    AUREA_CHECK(d.ok);
+    Engine::ExpressionInfo info;
+    AUREA_CHECK(r.e.query_expression(r.id, src, 0, 0, info));
+    AUREA_CHECK(info.exists && info.enabled && info.error.ok);
+    AUREA_CHECK_EQ(info.text, std::string("OLÁ MUNDO 00:00:00:00"));
+    u32 rows[16] = {};
+    const u32 n = r.e.query_expressions(r.id, rows, 4);
+    AUREA_CHECK(n >= 1);
+    bool listed = false;
+    for (u32 i = 0; i < n; ++i) listed |= rows[i * 4] == src && (rows[i * 4 + 3] & 1u);
+    AUREA_CHECK(listed);
+    // Desligar: o texto volta; religar.
+    AUREA_CHECK(r.e.set_expression_enabled(r.id, src, 0, 0, false));
+    AUREA_CHECK(r.e.query_expression(r.id, src, 0, 0, info));
+    AUREA_CHECK(!info.enabled);
+    AUREA_CHECK(r.e.set_expression_enabled(r.id, src, 0, 0, true));
+    // Sintaxe errada: fica gravada com o erro (a interface mostra a linha).
+    std::filesystem::create_directories("build/reference/text-expression");
+    const char* path = "build/reference/text-expression/project.aurea";
+    AUREA_CHECK(r.e.save_project(path).ok());
+    AUREA_CHECK(r.e.load_project(path).ok());
+    const Layer* l = r.layer();
+    AUREA_CHECK(l && l->text.sourceExpression);
+    if (!l || !l->text.sourceExpression) return;
+    AUREA_CHECK_EQ(l->text.sourceExpression->source, std::string("value.toUpperCase() + \" \" + timeToTimecode()"));
+    AUREA_CHECK(l->text.sourceExpressionEnabled);
+    AUREA_CHECK(r.e.set_expression(r.id, src, 0, 0, "value.(", &d).ok());
+    AUREA_CHECK(!d.ok);
+    AUREA_CHECK(r.e.query_expression(r.id, src, 0, 0, info));
+    AUREA_CHECK(!info.error.ok);
+    AUREA_CHECK_EQ(info.text, std::string("Olá mundo"));
+    Command undo; undo.type = CommandType::Undo;
+    AUREA_CHECK(r.e.apply_command(undo).ok());
+    AUREA_CHECK(r.e.query_expression(r.id, src, 0, 0, info));
+    AUREA_CHECK(info.error.ok);
+    AUREA_CHECK(r.e.set_expression(r.id, src, 0, 0, "", &d).ok());   // vazio remove
+    AUREA_CHECK(r.e.query_expression(r.id, src, 0, 0, info));
+    AUREA_CHECK(!info.exists);
+}
+
+// O bounce clássico do AE (inércia) colado como está numa posição com keys.
+AUREA_TEST(ExprText, ClassicInertialBounceRunsAsPasted) {
+    TextExprRig r;
+    if (!r.id) return;
+    Layer* l = r.layer();
+    if (!l) return;
+    auto& x = l->tracks.get_or_create(TrackProperty::PositionX);
+    x.set(FrameIndex{0}, 0.0f, Interpolation::Linear);
+    x.set(FrameIndex{10}, 100.0f, Interpolation::Linear);
+    const char* bounce =
+        "amp = .1;\n"
+        "freq = 2.0;\n"
+        "decay = 2.0;\n"
+        "n = 0;\n"
+        "if (numKeys > 0){\n"
+        "n = nearestKey(time).index;\n"
+        "if (key(n).time > time){\n"
+        "n--;\n"
+        "}\n"
+        "}\n"
+        "if (n == 0){\n"
+        "t = 0;\n"
+        "}else{\n"
+        "t = time - key(n).time;\n"
+        "}\n"
+        "if (n > 0 && t < 1){\n"
+        "v = velocityAtTime(key(n).time - thisComp.frameDuration/10);\n"
+        "value + v*amp*Math.sin(freq*t*2*Math.PI)/Math.exp(decay*t);\n"
+        "}else{\n"
+        "value;\n"
+        "}";
+    expr::Diagnostic d;
+    AUREA_CHECK(r.e.set_expression(r.id, static_cast<u32>(TrackProperty::PositionX), kInvalidIndex, 0, bounce, &d).ok());
+    AUREA_CHECK(d.ok);
+    const Track* tr = l->tracks.find(TrackProperty::PositionX);
+    AUREA_CHECK(tr && tr->expression);
+    if (!tr || !tr->expression) return;
+    const expr::Scope scope(r.e.project()->timeline());
+    const f32 after = expr::evaluate_track_f(*tr, 13.0, nullptr);   // 0,1 s depois do key: passa do ponto
+    AUREA_CHECK(tr->expression->error().ok);
+    AUREA_CHECK(after > 101.0f);
+    const f32 settled = expr::evaluate_track_f(*tr, 60.0, nullptr);   // 1,6 s depois: parado no valor
+    AUREA_CHECK_NEAR(settled, 100.0f, 1e-3f);
+}
+
+// Os atalhos do texto-fonte da folha de expressão (ExpressionSheet.kt `TextSnippets`,
+// AnimationTools.swift `textSnippets`), exatamente como entram, e a soma de textos.
+AUREA_TEST(ExprText, SourceTextSnippetsFromTheSheetEvaluate) {
+    TextExprRig r;
+    if (!r.id) return;
+    bool ok = false;
+    AUREA_CHECK_EQ(r.at("value.substr(0, Math.floor(time * 12))", 5, &ok), std::string("Ol"));   // 12 letras/s: 0,167 s → 2
+    AUREA_CHECK(ok);
+    AUREA_CHECK_EQ(r.at("Math.round(linear(time, 0, 2, 0, 1000))", 30, &ok), std::string("500"));
+    AUREA_CHECK(ok);
+    AUREA_CHECK_EQ(r.at("timeToTimecode()", 61, &ok), std::string("00:00:02:01"));
+    AUREA_CHECK(ok);
+    AUREA_CHECK_EQ(r.at("value.toUpperCase()", 0, &ok), std::string("OLÁ MUNDO"));
+    AUREA_CHECK(ok);
+    AUREA_CHECK_EQ(r.at("\"Pontos: \" + Math.floor(time * 10)", 45, &ok), std::string("Pontos: 15"));
+    AUREA_CHECK(ok);
+    AUREA_CHECK_EQ(r.at("time.toFixed(1) + \"s\"", 45, &ok), std::string("1.5s"));
+    AUREA_CHECK(ok);
+    AUREA_CHECK_EQ(r.at("thisComp.layer(1).name", 0, &ok), r.layer()->name);
+    AUREA_CHECK(ok);
+    AUREA_CHECK_EQ(r.at("value + \" \" + Math.floor(time)", 75, &ok), std::string("Olá mundo 2"));
+    AUREA_CHECK(ok);
+    // Concatenação com maiúsculas e variáveis sem "var" (globais implícitas do JavaScript).
+    AUREA_CHECK_EQ(r.at("prefixo = \"Oi, \"; prefixo + value.toUpperCase() + \"!\"", 0, &ok), std::string("Oi, OLÁ MUNDO!"));
+    AUREA_CHECK(ok);
+}
+
+namespace {
+/// O texto do atalho "Bounce (inércia)" da folha (ExpressionSheet.kt `BounceInertia`,
+/// AnimationTools.swift `ExpressionCode.bounceInertia`), letra por letra.
+const char* const kSheetBounceInertia = R"(amp = .06;
+freq = 2.5;
+decay = 5.0;
+n = 0;
+if (numKeys > 0) {
+  n = nearestKey(time).index;
+  if (key(n).time > time) n--;
+}
+t = n == 0 ? 0 : time - key(n).time;
+if (n > 0 && t < 1) {
+  v = velocityAtTime(key(n).time - thisComp.frameDuration / 10);
+  value + v * amp * Math.sin(freq * t * 2 * Math.PI) / Math.exp(decay * t);
+} else {
+  value;
+})";
+
+/// "Quique (gravidade)" (ExpressionSheet.kt `BounceDrop`, AnimationTools.swift `ExpressionCode.bounceDrop`).
+const char* const kSheetBounceDrop = R"(e = .7;
+g = 5000;
+nMax = 9;
+n = 0;
+if (numKeys > 0) {
+  n = nearestKey(time).index;
+  if (key(n).time > time) n--;
+}
+if (n > 0) {
+  t = time - key(n).time;
+  v = -velocityAtTime(key(n).time - .001) * e;
+  vl = length(v);
+  vu = vl > 0 ? v / vl : v * 0;
+  tCur = 0;
+  segDur = 2 * vl / g;
+  tNext = segDur;
+  nb = 1;
+  while (tNext < t && nb <= nMax) {
+    vl *= e;
+    segDur *= e;
+    tCur = tNext;
+    tNext += segDur;
+    nb++;
+  }
+  if (nb <= nMax) {
+    delta = t - tCur;
+    value + vu * delta * (vl - g * delta / 2);
+  } else {
+    value;
+  }
+} else {
+  value;
+})";
+
+/// X da camada de texto 0 → 100 px nos quadros 0..10 (300 px/s) e a expressão colada.
+const Track* keyed_x_with(TextExprRig& r, const char* source) {
+    Layer* l = r.layer();
+    if (!l) return nullptr;
+    auto& x = l->tracks.get_or_create(TrackProperty::PositionX);
+    x.set(FrameIndex{0}, 0.0f, Interpolation::Linear);
+    x.set(FrameIndex{10}, 100.0f, Interpolation::Linear);
+    expr::Diagnostic d;
+    AUREA_CHECK(r.e.set_expression(r.id, static_cast<u32>(TrackProperty::PositionX), kInvalidIndex, 0, source, &d).ok());
+    AUREA_CHECK(d.ok);
+    if (!d.ok) std::printf("\n    diagnóstico: linha %u: %s\n", d.line, d.message.c_str());
+    const Track* tr = l->tracks.find(TrackProperty::PositionX);
+    AUREA_CHECK(tr && tr->expression);
+    return tr && tr->expression ? tr : nullptr;
+}
+} // namespace
+
+// O bounce de inércia da folha, como o botão insere (sem "var", ternário, if sem chaves).
+AUREA_TEST(ExprText, SheetInertialBounceSnippetRunsAsInserted) {
+    TextExprRig r;
+    if (!r.id) return;
+    const Track* tr = keyed_x_with(r, kSheetBounceInertia);
+    if (!tr) return;
+    const expr::Scope scope(r.e.project()->timeline());
+    (void)expr::evaluate_track_f(*tr, 5.0, nullptr);   // entre os keys: roda sem erro
+    AUREA_CHECK(tr->expression->error().ok);
+    const f32 after = expr::evaluate_track_f(*tr, 13.0, nullptr);    // 0,1 s depois do key: passa do ponto
+    AUREA_CHECK(tr->expression->error().ok);
+    AUREA_CHECK(after > 100.5f);
+    const f32 settled = expr::evaluate_track_f(*tr, 60.0, nullptr);  // mais de 1 s depois: parado
+    AUREA_CHECK_NEAR(settled, 100.0f, 1e-3f);
+    std::printf("inércia: 13 → %.2f; ", after);
+}
+
+// O quique de gravidade da folha: volta para trás do key e quica até parar.
+AUREA_TEST(ExprText, SheetGravityBounceSnippetRunsAsInserted) {
+    TextExprRig r;
+    if (!r.id) return;
+    const Track* tr = keyed_x_with(r, kSheetBounceDrop);
+    if (!tr) return;
+    const expr::Scope scope(r.e.project()->timeline());
+    (void)expr::evaluate_track_f(*tr, 5.0, nullptr);
+    AUREA_CHECK(tr->expression->error().ok);
+    // v = −300 px/s · 0,7 = −210; o primeiro arco dura 2·210/5000 = 0,084 s.
+    const f32 bounce = expr::evaluate_track_f(*tr, 11.0, nullptr);   // 1/30 s depois do key
+    AUREA_CHECK(tr->expression->error().ok);
+    const f64 delta = 1.0 / 30.0;
+    AUREA_CHECK_NEAR(bounce, static_cast<f32>(100.0 - delta * (210.0 - 5000.0 * delta / 2.0)), 0.05f);
+    const f32 settled = expr::evaluate_track_f(*tr, 60.0, nullptr);
+    AUREA_CHECK(tr->expression->error().ok);
+    AUREA_CHECK_NEAR(settled, 100.0f, 1e-3f);
+    std::printf("gravidade: 11 → %.2f; ", bounce);
 }

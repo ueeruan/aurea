@@ -19,6 +19,14 @@ namespace aurea::vk {
 Status Backend::attach_surface(const SurfaceDesc& desc) noexcept {
     if (!initialized_) return Status{Errc::InvalidState, "backend nao inicializado"};
     if (!desc.nativeWindow) return Status{Errc::InvalidArgument, "janela nula"};
+#if defined(AUREA_VK_HOST_PRESENT)
+    // Aurea PC: sem janela; o quadro vai para buffers que a UI lê.
+    if (desc.nativeWindow == host_present_window()) {
+        detach_surface();
+        surfaceDesc_ = desc;
+        return attach_host_present(desc.width, desc.height);
+    }
+#endif
 #if defined(VK_USE_PLATFORM_ANDROID_KHR) || defined(VK_USE_PLATFORM_WIN32_KHR)
     if (!hasSurfaceExt_) return Status{Errc::UnsupportedFeature, "sem extensao de superficie"};
     detach_surface();
@@ -54,6 +62,9 @@ Status Backend::attach_surface(const SurfaceDesc& desc) noexcept {
 
 void Backend::detach_surface() noexcept {
     if (!device_) return;
+#if defined(AUREA_VK_HOST_PRESENT)
+    detach_host_present();
+#endif
     if (swapchain_ || surface_) {
         // A janela vai ser destruída pelo sistema logo depois desta chamada:
         // nada pode estar usando o swapchain.
@@ -70,6 +81,17 @@ void Backend::detach_surface() noexcept {
 Status Backend::resize_surface(u32 width, u32 height) noexcept {
     surfaceDesc_.width = width;
     surfaceDesc_.height = height;
+#if defined(AUREA_VK_HOST_PRESENT)
+    if (host_.active) {
+        std::lock_guard<std::mutex> lock(host_.mutex);
+        if (width && height && (width != host_.width || height != host_.height)) {
+            host_.width = width;
+            host_.height = height;
+            host_.dirty = true;
+        }
+        return OkStatus;
+    }
+#endif
     if (!surface_) return OkStatus;
     swapchainDirty_ = true;
     return OkStatus;

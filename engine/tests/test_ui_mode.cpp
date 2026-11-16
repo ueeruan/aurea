@@ -346,6 +346,11 @@ AUREA_TEST(UiMode, AudioGoesToAnAudioLineAtThePlayheadOnlyInEditing) {
     AUREA_CHECK(m1->trackId != mainTrack);
     AUREA_CHECK(!m1->magneticTrack);
     AUREA_CHECK_EQ(m1->start.value, 20);
+    const u32 importedTrack = m1->trackId;
+    const EditTrack* audioTrack = comp()->edit_track(importedTrack);
+    AUREA_CHECK(audioTrack && audioTrack->audio);
+    (void)e.query_edit_timeline();
+    AUREA_CHECK_EQ(comp()->layer(LayerId::unpack(*s1))->trackId, importedTrack);
     // A trilha principal não andou: o áudio não entrou na sequência.
     AUREA_CHECK_EQ(comp()->layer(LayerId::unpack(*v2))->end.value, videoEnd);
     std::printf("    musica na linha %u (principal %u), %lld..%lld\n", m1->trackId, mainTrack,

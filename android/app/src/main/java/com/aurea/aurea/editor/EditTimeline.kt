@@ -2,6 +2,9 @@ package com.aurea.aurea.editor
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
@@ -13,14 +16,18 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
@@ -46,11 +53,12 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.nativeCanvas
+import com.aurea.aurea.ui.platform.platformCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
@@ -62,6 +70,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.aurea.aurea.R
@@ -77,10 +86,12 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.floor
 
 // =============================================================================
-//  A LINHA DO TEMPO DA EDIÇÃO: faixas de montagem (V3, V2, V1 em cima; A1, A2,
-//  A3 embaixo), no fluxo de um editor não linear.
+//  A timeline mobile mantém a faixa principal seguida de overlays e áudio.
+//  Faixas vazias e ferramentas avançadas ficam no menu. O conteúdo desliza sob
+//  o cabeçote central, limitado ao início e ao fim da sequência.
 //
 //  Adaptado ao toque: arrastar no vazio rola a linha do tempo, a régua move o
 //  cabeçote e a pinça aproxima. Num dedo só, quem decide o que o arrasto faz é a
@@ -93,20 +104,19 @@ import kotlin.math.roundToInt
 //  no motor (EngineTracks.inl); aqui só se escolhe a operação e o quadro.
 // =============================================================================
 
-private val ToolH = 44.dp
-private val RulerH = 26.dp
-private val HeadW = 98.dp
-private val LaneH = 44.dp
-private val CompactLaneH = 34.dp
-private val LaneGap = 1.dp
+private val RulerH = 20.dp
+private val RowsTop = 50.dp
+private val LaneH = 50.dp
+private val CompactLaneH = 40.dp
+private val LaneGap = 8.dp
 private val EdgeW = 13.dp
 
 private object EditPalette {
-    val Lane = Color(0xFF17191E)
-    val Head = Color(0xFF20232A)
-    val RulerBg = Color(0xFF101114)
-    val Tick = Color(0xFF5B606B)
-    val Separator = Color(0xFF3A3E47)
+    val Lane get() = AureaColors.EditorCanvas
+    val Head = Color(0xFF08090B)
+    val RulerBg get() = AureaColors.EditorCanvas
+    val Tick get() = AureaColors.TickWeak
+    val Separator get() = AureaColors.EditorBarLine
     val Video = Color(0xFF1F6F8B)
     val VideoTop = Color(0xFF17566C)
     val Overlay = Color(0xFF7A2FA8)
@@ -117,8 +127,8 @@ private object EditPalette {
     val AudioWave = Color(0xFF9FE08A)
     val LinkedAudio = Color(0xFF17465A)
     val LinkedWave = Color(0xFF67C4F2)
-    val Playhead = Color(0xFF4EA8F2)
-    val Selected = Color.White
+    val Playhead get() = AureaColors.Accent
+    val Selected get() = AureaColors.Accent
     val Range = Color(0x334EA8F2)
     val Snap = Color(0xFFFFD54A)
     val Cut = Color(0xFFE8EDF5)
@@ -128,9 +138,10 @@ private object EditPalette {
 internal class EditTrackInfo(val id: Int, val audio: Boolean, val locked: Boolean, val muted: Boolean, val solo: Boolean, val target: Boolean, val label: String)
 
 /** O que `Engine::query_edit_timeline` devolve, em fileiras prontas para desenhar. */
-internal class EditTimelineData(val tracks: List<EditTrackInfo>, val linkedAudio: Map<Long, Int>, val markIn: Long, val markOut: Long) {
-    /** De cima para baixo na tela: V3, V2, V1, A1, A2, A3. */
-    val lanes: List<EditTrackInfo> = tracks.filter { !it.audio }.reversed() + tracks.filter { it.audio }
+internal class EditTimelineData(val tracks: List<EditTrackInfo>, val linkedAudio: Map<Long, Int>, val markIn: Long, val markOut: Long, val mainTrackId: Int = 0) {
+    /** A apresentação mobile traz a principal primeiro; a leitura antiga mantém sua ordem. */
+    val lanes: List<EditTrackInfo> = tracks.filter { it.id == mainTrackId } +
+        tracks.filter { !it.audio && it.id != mainTrackId }.reversed() + tracks.filter { it.audio }
 
     companion object {
         fun parse(raw: LongArray): EditTimelineData? {
@@ -198,6 +209,15 @@ internal class EditLaneLayout(val tops: FloatArray, val heights: FloatArray, val
 
         /** O teto da rolagem: a última faixa encosta embaixo (nunca negativo). */
         fun maxScroll(bottom: Float, viewport: Float): Float = if (viewport <= 0f) 0f else max(0f, bottom - viewport)
+
+        fun clampHorizontal(offset: Float, duration: Int, viewport: Float, pxPerFrame: Float): Float {
+            if (!offset.isFinite() || !viewport.isFinite() || !pxPerFrame.isFinite() || viewport <= 0f || pxPerFrame <= 0f) return 0f
+            val lastOffset = max(0f, duration.toFloat() - viewport / pxPerFrame)
+            return offset.coerceIn(0f, lastOffset)
+        }
+
+        fun clampCentered(offset: Float, duration: Int): Float =
+            if (offset.isFinite()) offset.coerceIn(0f, duration.coerceAtLeast(0).toFloat()) else 0f
     }
 }
 
@@ -230,9 +250,11 @@ private class ClipDrag(val kind: Int, val clip: LayerRow, val neighbour: LayerRo
 @Stable
 private class EditView(pxPerFrame: Float) {
     var pxPerFrame by mutableFloatStateOf(pxPerFrame)
-    var scrollFrames by mutableFloatStateOf(-8f)
+    var scrollFrames by mutableFloatStateOf(0f)
     var scrollY by mutableFloatStateOf(0f)
     var drag by mutableStateOf<ClipDrag?>(null)
+    var scrubbing by mutableStateOf(false)
+    var revealedTrack by mutableIntStateOf(0)
 }
 
 @Composable
@@ -242,80 +264,57 @@ internal fun EditTimeline(
     compact: Boolean,
     onAddMedia: () -> Unit,
     onTransition: (Long, Long) -> Unit = { _, _ -> },
+    onAddAudio: (() -> Unit)? = null,
+    onAddText: (() -> Unit)? = null,
 ) {
     val density = LocalDensity.current
     val fps = store.project.fps.takeIf { it > 0f } ?: 30f
     val view = remember(store) { EditView(with(density) { 72.dp.toPx() } / fps) }
     var tool by remember { mutableStateOf(EditTool.Select) }
     var snap by remember { mutableStateOf(true) }
-    val timelineLabel = stringResource(R.string.edit_timeline)
-    val data = store.editTimeline
-
-    Column(modifier.background(EditColors.Canvas).testTag("edit.timeline").semantics { contentDescription = timelineLabel }) {
-        EditToolStrip(store, tool, { tool = it }, snap, { snap = it }, onAddMedia)
-        BoxWithConstraints(Modifier.fillMaxWidth().weight(1f).clipToBounds()) {
-            if (data != null) EditLanes(store, data, view, tool, snap, compact, fps, constraints.maxWidth.toFloat(), constraints.maxHeight.toFloat(), onTransition)
-        }
-    }
-}
-
-/** A linha fixa: mídia, as seis ferramentas num grupo só, encaixe e o resto no "⋯". */
-@Composable
-private fun EditToolStrip(
-    store: EditorStore,
-    tool: EditTool,
-    onTool: (EditTool) -> Unit,
-    snap: Boolean,
-    onSnap: (Boolean) -> Unit,
-    onAddMedia: () -> Unit,
-) {
     var more by remember { mutableStateOf(false) }
-    Row(
-        Modifier.fillMaxWidth().height(ToolH).background(EditColors.Bar).padding(horizontal = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        val addLabel = stringResource(R.string.edit_add_media)
-        Box(
-            Modifier.size(34.dp).clip(RoundedCornerShape(9.dp)).background(if (store.editPlacement != 0) AureaColors.Accent else Color.White).testTag("edit.add")
-                .semantics { contentDescription = addLabel; role = Role.Button }
-                .tocavel(shrink = 0.9f, haptic = true, onClick = onAddMedia),
-            contentAlignment = Alignment.Center,
-        ) { CupertinoIcon(CupertinoGlyph.Plus, 18.dp, Color.Black) }
-        Row(
-            Modifier.padding(start = 8.dp).clip(RoundedCornerShape(10.dp)).background(EditColors.DockLevel).padding(2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            EditTool.values().forEach { t ->
-                ToolButton(t.icon, stringResource(t.label), "edit.tool.${t.tag}", t == tool) { onTool(t) }
-            }
+    val timelineLabel = stringResource(R.string.edit_timeline)
+    val rawData = store.editTimeline
+    val data = remember(rawData, store.layers, store.mainTrackAnchor, view.revealedTrack) {
+        rawData?.let { raw ->
+            val used = store.layers.mapTo(HashSet()) { it.trackId }
+            used.addAll(raw.linkedAudio.values)
+            val main = store.layers.firstOrNull { it.id == store.mainTrackAnchor }?.trackId?.takeIf { it != 0 }
+                ?: raw.tracks.firstOrNull { !it.audio }?.id ?: 0
+            val visible = raw.tracks.filter { it.id in used || it.id == main || it.id == view.revealedTrack }
+            EditTimelineData(visible, raw.linkedAudio, raw.markIn, raw.markOut, main)
         }
-        Box(Modifier.weight(1f))
-        ToolButton(EditIcon.Snap, stringResource(R.string.edit_snap), "edit.snap", snap) { onSnap(!snap) }
-        val moreLabel = stringResource(R.string.edit_more)
-        Box(
-            Modifier.size(36.dp).testTag("edit.tools.more").semantics { contentDescription = moreLabel; role = Role.Button }
-                .tocavel(shrink = 0.92f) { more = true },
-            contentAlignment = Alignment.Center,
-        ) { CupertinoIcon(CupertinoGlyph.Ellipsis, 20.dp, AureaColors.Text) }
     }
-    if (more) EditMoreSheet(store) { more = false }
-}
 
-@Composable
-private fun ToolButton(icon: EditIcon, label: String, tag: String, on: Boolean, onClick: () -> Unit) {
-    Box(
-        Modifier.size(36.dp, 34.dp).clip(RoundedCornerShape(8.dp)).background(if (on) AureaColors.AccentDim else Color.Transparent)
-            .testTag(tag).semantics { contentDescription = label; role = Role.Button; selected = on }
-            .tocavel(shrink = 0.92f, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) { EditToolIcon(icon, if (on) AureaColors.Accent else AureaColors.Text) }
+    BoxWithConstraints(modifier.background(EditPalette.Lane).clipToBounds().testTag("edit.timeline").semantics { contentDescription = timelineLabel }) {
+        if (data != null) EditLanes(store, data, view, tool, snap, compact, fps,
+            constraints.maxWidth.toFloat(), constraints.maxHeight.toFloat(), onTransition, onAddMedia, onAddAudio, onAddText)
+        val moreLabel = stringResource(R.string.edit_more)
+        Box(Modifier.align(Alignment.TopEnd).size(44.dp).background(EditPalette.Lane)
+            .testTag("edit.tools.more").semantics { contentDescription = moreLabel; role = Role.Button }
+            .tocavel { more = true }, contentAlignment = Alignment.Center) {
+            CupertinoIcon(CupertinoGlyph.Ellipsis, 18.dp, AureaColors.Text)
+        }
+    }
+    if (more) EditMoreSheet(store, tool, { tool = it }, snap, { snap = it }, { view.revealedTrack = it }) { more = false }
 }
 
 /** O que não é ferramenta de arrasto, em três grupos. */
 @Composable
-private fun EditMoreSheet(store: EditorStore, onDismiss: () -> Unit) {
+private fun EditMoreSheet(store: EditorStore, tool: EditTool, onTool: (EditTool) -> Unit,
+                          snap: Boolean, onSnap: (Boolean) -> Unit, onRevealTrack: (Int) -> Unit, onDismiss: () -> Unit) {
     com.aurea.aurea.ui.ds.AureaModalSheet(onDismiss = onDismiss) {
-        Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            EditTool.entries.chunked(3).forEach { tools ->
+                Row(Modifier.fillMaxWidth()) {
+                    tools.forEach { item ->
+                        MoreTile(item.icon, stringResource(item.label), "edit.tool.${item.tag}", item == tool) { onTool(item); onDismiss() }
+                    }
+                }
+            }
+            Row(Modifier.fillMaxWidth()) {
+                MoreTile(EditIcon.Snap, stringResource(R.string.edit_snap), "edit.snap", snap) { onSnap(!snap) }
+            }
             MoreSection(stringResource(R.string.edit_section_marks)) {
                 MoreTile(EditIcon.MarkIn, stringResource(R.string.edit_mark_in), "edit.markIn") { store.toggleEditMark(0); onDismiss() }
                 MoreTile(EditIcon.MarkOut, stringResource(R.string.edit_mark_out), "edit.markOut") { store.toggleEditMark(1); onDismiss() }
@@ -324,8 +323,16 @@ private fun EditMoreSheet(store: EditorStore, onDismiss: () -> Unit) {
             }
             MoreSection(stringResource(R.string.edit_section_tracks)) {
                 MoreTile(EditIcon.RazorAll, stringResource(R.string.edit_razor_all), "edit.razorAll") { store.razorAllAtPlayhead(); onDismiss() }
-                MoreTile(EditIcon.AddVideo, stringResource(R.string.edit_add_video_track), "edit.addVideoTrack") { store.addEditTrack(false); onDismiss() }
-                MoreTile(EditIcon.AddAudio, stringResource(R.string.edit_add_audio_track), "edit.addAudio") { store.addEditTrack(true); onDismiss() }
+                MoreTile(EditIcon.AddVideo, stringResource(R.string.edit_add_video_track), "edit.addVideoTrack") {
+                    val track = store.addEditTrack(false)
+                    if (track > 0) onRevealTrack(track)
+                    onDismiss()
+                }
+                MoreTile(EditIcon.AddAudio, stringResource(R.string.edit_add_audio_track), "edit.addAudio") {
+                    val track = store.addEditTrack(true)
+                    if (track > 0) onRevealTrack(track)
+                    onDismiss()
+                }
                 MoreTile(EditIcon.ClearTracks, stringResource(R.string.edit_remove_empty_tracks), "edit.clearTracks") { store.removeEmptyEditTracks(); onDismiss() }
             }
             MoreSection(stringResource(R.string.edit_section_placement)) {
@@ -333,6 +340,9 @@ private fun EditMoreSheet(store: EditorStore, onDismiss: () -> Unit) {
                 MoreTile(EditIcon.PlaceInsert, stringResource(R.string.edit_place_insert), "edit.placement.1", store.editPlacement == 1) { store.editPlacement = 1; onDismiss() }
                 MoreTile(EditIcon.PlaceOverwrite, stringResource(R.string.edit_place_overwrite), "edit.placement.2", store.editPlacement == 2) { store.editPlacement = 2; onDismiss() }
                 Box(Modifier.weight(1f))
+            }
+            store.editTimeline?.tracks?.forEach { lane ->
+                TrackHead(store, lane) { onRevealTrack(lane.id) }
             }
         }
     }
@@ -372,15 +382,20 @@ private fun EditLanes(
     width: Float,
     height: Float,
     onTransition: (Long, Long) -> Unit,
+    onAddMedia: () -> Unit,
+    onAddAudio: (() -> Unit)?,
+    onAddText: (() -> Unit)?,
 ) {
     val density = LocalDensity.current
     val haptics = LocalHapticFeedback.current
-    val headW = with(density) { HeadW.toPx() }
+    val headW = width / 2f
     val rulerH = with(density) { RulerH.toPx() }
-    val laneH = with(density) { (if (compact) CompactLaneH else LaneH).toPx() }
+    val laneH = with(density) { ((if (compact) CompactLaneH else LaneH).value +
+        12f * (fontScale.coerceIn(1f, 2f) - 1f)).dp.toPx() }
     val gap = with(density) { LaneGap.toPx() }
     val edge = with(density) { EdgeW.toPx() }
-    val layout = remember(data.lanes.size, rulerH, laneH, gap) { EditLaneLayout.compute(data.lanes.size, rulerH, laneH, gap) }
+    val rowsTop = with(density) { RowsTop.toPx() }
+    val layout = remember(data.lanes.size, rowsTop, laneH, gap) { EditLaneLayout.compute(data.lanes.size, rowsTop, laneH, gap) }
     val laneClips = remember(store.layers, data) {
         val byTrack = store.layers.groupBy { it.trackId }
         data.lanes.map { lane ->
@@ -396,18 +411,25 @@ private fun EditLanes(
     val currentSnap by rememberUpdatedState(snap)
     val currentLayout by rememberUpdatedState(layout)
     val currentHeight by rememberUpdatedState(height)
+    val currentDuration by rememberUpdatedState(store.project.durationFrames)
     val currentTransition by rememberUpdatedState(onTransition)
 
     fun xOf(frame: Float) = headW + (frame - view.scrollFrames) * view.pxPerFrame
     fun frameAt(x: Float) = view.scrollFrames + (x - headW) / view.pxPerFrame
     fun clampScrollY() { view.scrollY = view.scrollY.coerceIn(0f, EditLaneLayout.maxScroll(currentLayout.bottom, currentHeight)) }
+    fun clampScrollX() {
+        view.scrollFrames = EditLaneLayout.clampCentered(view.scrollFrames, currentDuration)
+    }
 
-    // Tocando, o cabeçote nunca sai da tela: a vista vira a página, como no Premiere.
+    LaunchedEffect(width, store.project.durationFrames, view.pxPerFrame) { clampScrollX() }
+    LaunchedEffect(layout, height) { clampScrollY() }
+
+    // Playback and external seeks keep the same frame beneath the fixed playhead.
     LaunchedEffect(view, width) {
         snapshotFlow { store.playhead }.collect { frame ->
-            if (view.drag != null) return@collect
-            val visible = (width - headW) / view.pxPerFrame
-            if (frame < view.scrollFrames || frame > view.scrollFrames + visible * 0.92f) view.scrollFrames = frame - visible * 0.08f
+            if (view.drag != null || view.scrubbing) return@collect
+            view.scrollFrames = frame.toFloat()
+            clampScrollX()
         }
     }
     // O clipe escolhido rola para dentro da vista (com painel aberto a área encolhe).
@@ -421,6 +443,14 @@ private fun EditLanes(
         else if (top + layout.heights[index] > height) view.scrollY += top + layout.heights[index] - height
         clampScrollY()
     }
+    LaunchedEffect(view.revealedTrack, layout, height) {
+        val index = data.lanes.indexOfFirst { it.id == view.revealedTrack }
+        if (index < 0 || height <= 0f) return@LaunchedEffect
+        val top = layout.tops[index] - view.scrollY
+        if (top < rulerH) view.scrollY -= rulerH - top
+        else if (top + layout.heights[index] > height) view.scrollY += top + layout.heights[index] - height
+        clampScrollY()
+    }
 
     Canvas(
         Modifier.fillMaxSize().pointerInput(store, width, headW) {
@@ -428,7 +458,7 @@ private fun EditLanes(
             val longPressMs = viewConfiguration.longPressTimeoutMillis
 
             fun hitClip(p: Offset): Triple<Int, LaneClip, Int>? {
-                if (p.x < headW || p.y < rulerH) return null
+                if (p.y < rulerH) return null
                 val lane = currentLayout.laneAt(p.y + view.scrollY)
                 if (lane < 0) return null
                 val frame = frameAt(p.x)
@@ -557,19 +587,28 @@ private fun EditLanes(
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
                 val start = down.position
-                if (start.x < headW) return@awaitEachGesture
                 if (start.y < rulerH) {
-                    // Régua: o cabeçote vai para o dedo e segue o arrasto.
                     store.pause()
-                    store.scrubStart(frameAt(start.x).roundToInt().coerceAtLeast(0))
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                        if (!change.pressed) break
-                        store.scrubTo(frameAt(change.position.x).roundToInt().coerceIn(0, store.project.durationFrames.coerceAtLeast(0)))
-                        change.consume()
+                    view.scrubbing = true
+                    view.scrollFrames = frameAt(start.x)
+                    clampScrollX()
+                    store.scrubStart(view.scrollFrames.roundToInt())
+                    var lastX = start.x
+                    try {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!change.pressed) break
+                            view.scrollFrames -= (change.position.x - lastX) / view.pxPerFrame
+                            lastX = change.position.x
+                            clampScrollX()
+                            store.scrubTo(view.scrollFrames.roundToInt())
+                            change.consume()
+                        }
+                    } finally {
+                        store.scrubEnd()
+                        view.scrubbing = false
                     }
-                    store.scrubEnd()
                     return@awaitEachGesture
                 }
                 val hit = hitClip(start)
@@ -594,6 +633,10 @@ private fun EditLanes(
                     drag = beginDrag(hit, longPress = false)
                 }
                 view.drag = drag
+                if (drag == null) {
+                    view.scrubbing = true
+                    store.scrubStart(view.scrollFrames.roundToInt())
+                }
                 var last = start
                 var pinching = phase == 2
                 try {
@@ -614,6 +657,8 @@ private fun EditLanes(
                                 }
                                 val pan = event.calculatePan()
                                 view.scrollFrames -= pan.x / view.pxPerFrame
+                                clampScrollX()
+                                 store.scrubTo(view.scrollFrames.roundToInt())
                             }
                             event.changes.forEach { if (it.positionChanged()) it.consume() }
                             continue
@@ -623,6 +668,8 @@ private fun EditLanes(
                         if (current != null) updateDrag(current, start, change.position)
                         else {
                             view.scrollFrames -= (change.position.x - last.x) / view.pxPerFrame
+                            clampScrollX()
+                             store.scrubTo(view.scrollFrames.roundToInt())
                             view.scrollY -= change.position.y - last.y
                             clampScrollY()
                         }
@@ -631,6 +678,8 @@ private fun EditLanes(
                     }
                     view.drag?.let { commitDrag(it) }
                 } finally {
+                     if (view.scrubbing) store.scrubEnd()
+                     view.scrubbing = false
                     view.drag = null
                 }
             }
@@ -639,84 +688,126 @@ private fun EditLanes(
         drawLanes(store, data, layout, laneClips, view, waves, headW, rulerH, fps, density.density)
     }
 
-    // Colunas de faixa e os alvos de acessibilidade: compostos só quando o modelo muda.
-    data.lanes.forEachIndexed { i, lane ->
-        val top = layout.tops[i]
-        val rowH = with(density) { layout.heights[i].toDp() }
-        Box(
-            Modifier.width(HeadW).height(rowH)
-                .graphicsLayer { translationY = top - view.scrollY; alpha = if (top - view.scrollY + layout.heights[i] <= rulerH) 0f else 1f }
-                .background(EditPalette.Head),
-        ) { TrackHead(store, lane) }
+    data.lanes.forEachIndexed { index, lane ->
+        Box(Modifier.fillMaxWidth().height(with(density) { layout.heights[index].toDp() })
+            .offset { IntOffset(0, (layout.tops[index] - view.scrollY).roundToInt()) }
+            .testTag("edit.lane.${lane.id}").semantics { contentDescription = lane.label })
     }
     laneClips.forEachIndexed { i, lane ->
         lane.forEach { clip ->
-            if (!clip.virtual) ClipTarget(store, clip.row, view, layout.tops[i], layout.heights[i], headW, rulerH)
+            if (!clip.virtual) ClipTarget(store, clip.row, view, layout.tops[i], layout.heights[i], headW, rulerH, width)
         }
     }
-    // O canto da régua diz qual ferramenta está ativa: a barra é só de ícones.
-    Box(Modifier.width(HeadW).height(RulerH).background(EditPalette.RulerBg), contentAlignment = Alignment.Center) {
-        Text(stringResource(tool.label), style = AureaType.of(11f, FontWeight.W600, color = AureaColors.Accent), maxLines = 1)
+    val main = data.lanes.indexOfFirst { it.id == data.mainTrackId }.coerceAtLeast(0)
+    val mainClips = laneClips.getOrNull(main).orEmpty().filter { !it.virtual }
+    val audioClips = remember(store.layers, store.curveRevision, data.mainTrackId) {
+        mainClips.mapNotNull { clip -> store.queryDetail(clip.row.id)?.takeIf { it.hasAudio }?.let { clip.row.id to it.audioMuted } }
     }
-    if (store.layers.isEmpty()) {
-        Text(
-            stringResource(R.string.edit_empty_hint), style = AureaType.of(13f, color = AureaColors.Muted),
-            modifier = Modifier.offset(x = HeadW + 12.dp, y = RulerH + 12.dp),
-        )
-    }
-}
-
-@Composable
-private fun TrackHead(store: EditorStore, lane: EditTrackInfo) {
-    val targetLabel = stringResource(R.string.edit_track_target, lane.label)
-    Row(Modifier.fillMaxSize().padding(horizontal = 3.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-        Box(
-            Modifier.size(24.dp).clip(RoundedCornerShape(5.dp)).background(if (lane.target) Color(0xFF3B6EA8) else EditColors.DockLevel)
-                .testTag("edit.track.${lane.label}.target").semantics { contentDescription = targetLabel; role = Role.Switch; selected = lane.target }
-                .tocavel(shrink = 0.92f) { store.setEditTrackFlag(lane.id, 3, !lane.target) },
-            contentAlignment = Alignment.Center,
-        ) { Text(lane.label, style = AureaType.of(10f, FontWeight.W700, color = Color.White), maxLines = 1) }
-        HeadIcon(if (lane.locked) CupertinoGlyph.LockFill else CupertinoGlyph.LockOpen, lane.locked, stringResource(R.string.edit_track_lock), "edit.track.${lane.label}.lock") {
-            store.setEditTrackFlag(lane.id, 0, !lane.locked)
+    val muted = audioClips.isNotEmpty() && audioClips.all { it.second }
+    val startLabel = stringResource(R.string.panel_inicio)
+    val startDescription = stringResource(R.string.edit_mobile_sequence_start)
+    val muteLabel = stringResource(if (muted) R.string.edit_mobile_main_audio_unmute else R.string.edit_mobile_main_audio_mute)
+    val prefixWidth = if (audioClips.isEmpty()) 58.dp else 98.dp
+    Row(Modifier.offset { IntOffset((xOf(0f) - with(density) { prefixWidth.toPx() }).roundToInt(),
+        ((layout.tops.getOrNull(main) ?: rulerH) - view.scrollY).roundToInt()) }
+        .height(with(density) { laneH.toDp() }), verticalAlignment = Alignment.CenterVertically) {
+        if (audioClips.isNotEmpty()) {
+            Box(Modifier.width(32.dp).fillMaxSize().testTag("edit.mainAudio")
+                .semantics { contentDescription = muteLabel; selected = muted; role = Role.Switch }
+                .tocavel { store.setLayersAudioMuted(audioClips.map { it.first }, !muted) }, contentAlignment = Alignment.Center) {
+                CupertinoIcon(if (muted) CupertinoGlyph.SpeakerSlash else CupertinoGlyph.Speaker2, 22.dp, AureaColors.Text)
+            }
+            Box(Modifier.width(8.dp))
         }
-        if (lane.audio) {
-            HeadLetter("M", lane.muted, stringResource(R.string.edit_track_mute), "edit.track.${lane.label}.mute") { store.setEditTrackFlag(lane.id, 1, !lane.muted) }
-            HeadLetter("S", lane.solo, stringResource(R.string.edit_track_solo), "edit.track.${lane.label}.solo") { store.setEditTrackFlag(lane.id, 2, !lane.solo) }
-        } else {
-            HeadIcon(if (lane.muted) CupertinoGlyph.EyeSlash else CupertinoGlyph.Eye, lane.muted, stringResource(R.string.edit_track_visible), "edit.track.${lane.label}.visible") {
-                store.setEditTrackFlag(lane.id, 1, !lane.muted)
+        Column(Modifier.width(50.dp).fillMaxHeight().testTag("edit.sequenceStart")
+            .semantics { contentDescription = startDescription; role = Role.Button }
+            .tocavel { store.pause(); view.scrollFrames = 0f; store.seek(0) },
+            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+            CupertinoIcon(CupertinoGlyph.BackwardEnd, 18.dp, AureaColors.Text)
+            Text(startLabel, style = AureaType.of(10f, color = AureaColors.Text), maxLines = 1)
+        }
+    }
+    val addLabel = stringResource(R.string.edit_add_media)
+    Box(Modifier.offset { IntOffset((width - with(density) { 48.dp.toPx() }).roundToInt(),
+        (rowsTop + (laneH - with(density) { 44.dp.toPx() }) / 2f).roundToInt()) }
+        .size(44.dp).testTag("edit.add")
+        .semantics { contentDescription = addLabel; role = Role.Button }.tocavel(haptic = true, onClick = onAddMedia),
+        contentAlignment = Alignment.Center) {
+        Box(Modifier.size(36.dp).clip(RoundedCornerShape(12.dp)).background(AureaColors.Accent), contentAlignment = Alignment.Center) {
+            CupertinoIcon(CupertinoGlyph.Plus, 20.dp, AureaColors.OnAction)
+        }
+    }
+    if (!compact) {
+        val hasAudio = data.linkedAudio.isNotEmpty() || store.layers.any { it.kind == 3 }
+        val hasText = store.layers.any { it.kind == 4 }
+        val actions = buildList {
+            if (!hasAudio && onAddAudio != null) add(Triple("audio", R.string.edit_dock_audio, onAddAudio))
+            if (!hasText && onAddText != null) add(Triple("text", R.string.edit_text_add, onAddText))
+        }
+        actions.forEachIndexed { index, (id, labelId, action) ->
+            val label = stringResource(labelId)
+            Row(Modifier.offset { IntOffset(max(8f, xOf(0f)).roundToInt(),
+                (layout.bottom - view.scrollY + with(density) { (index * 44).dp.toPx() }).roundToInt()) }
+                .height(44.dp).widthIn(min = 130.dp).testTag("edit.inline.$id")
+                .semantics { contentDescription = label; role = Role.Button }.tocavel(onClick = action)
+                .padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                CupertinoIcon(CupertinoGlyph.Plus, 14.dp, AureaColors.Muted)
+                Text(label, style = AureaType.of(12f, color = AureaColors.Muted), modifier = Modifier.padding(start = 8.dp), maxLines = 1)
             }
         }
     }
 }
 
 @Composable
-private fun HeadIcon(glyph: Char, on: Boolean, label: String, tag: String, onClick: () -> Unit) {
-    Box(
-        Modifier.size(22.dp).testTag(tag).semantics { contentDescription = label; role = Role.Switch; selected = on }.tocavel(shrink = 0.9f, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) { CupertinoIcon(glyph, 13.dp, if (on) AureaColors.Accent else AureaColors.Muted) }
+private fun TrackHead(store: EditorStore, lane: EditTrackInfo, onTarget: () -> Unit) {
+    val targetLabel = stringResource(R.string.edit_track_target, lane.label)
+    val lockLabel = stringResource(R.string.edit_track_lock)
+    val muteLabel = stringResource(if (lane.audio) R.string.edit_track_mute else R.string.edit_track_visible)
+    val soloLabel = stringResource(R.string.edit_track_solo)
+    Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier.width(64.dp).fillMaxHeight().testTag("edit.track.${lane.label}.target")
+                .semantics { contentDescription = targetLabel; role = Role.Switch; selected = lane.target }
+                .tocavel { store.setEditTrackFlag(lane.id, 3, !lane.target); onTarget() },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(lane.label, style = AureaType.of(12f, FontWeight.W600,
+                color = if (lane.target) AureaColors.Accent else AureaColors.Muted))
+        }
+        Box(Modifier.size(48.dp).testTag("edit.track.${lane.label}.lock")
+            .semantics { contentDescription = lockLabel; role = Role.Switch; selected = lane.locked }
+            .tocavel { store.setEditTrackFlag(lane.id, 0, !lane.locked) }, contentAlignment = Alignment.Center) {
+            CupertinoIcon(if (lane.locked) CupertinoGlyph.LockFill else ShellGlyph.LockOpenFill, 20.dp, AureaColors.Text)
+        }
+        Box(Modifier.size(48.dp).testTag("edit.track.${lane.label}.${if (lane.audio) "mute" else "visible"}")
+            .semantics { contentDescription = muteLabel; role = Role.Switch; selected = lane.muted }
+            .tocavel { store.setEditTrackFlag(lane.id, 1, !lane.muted) }, contentAlignment = Alignment.Center) {
+            CupertinoIcon(if (lane.audio) { if (lane.muted) CupertinoGlyph.SpeakerSlash else CupertinoGlyph.Speaker2 }
+                else if (lane.muted) CupertinoGlyph.EyeSlash else CupertinoGlyph.Eye, 20.dp, AureaColors.Text)
+        }
+        if (lane.audio) Box(Modifier.size(48.dp).testTag("edit.track.${lane.label}.solo")
+            .semantics { contentDescription = soloLabel; role = Role.Switch; selected = lane.solo }
+            .tocavel { store.setEditTrackFlag(lane.id, 2, !lane.solo) }, contentAlignment = Alignment.Center) {
+            Text("S", style = AureaType.of(14f, FontWeight.W700, color = if (lane.solo) AureaColors.Accent else AureaColors.Text))
+        }
+    }
 }
 
 @Composable
-private fun HeadLetter(letter: String, on: Boolean, label: String, tag: String, onClick: () -> Unit) {
-    Box(
-        Modifier.size(22.dp).clip(RoundedCornerShape(4.dp)).background(if (on) Color(0xFFB9472F) else Color.Transparent)
-            .testTag(tag).semantics { contentDescription = label; role = Role.Switch; selected = on }.tocavel(shrink = 0.9f, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) { Text(letter, style = AureaType.of(11f, FontWeight.W700, color = if (on) Color.White else AureaColors.Muted)) }
-}
-
-/** O alvo de acessibilidade de um clipe: não intercepta toque, só dá nome e ação ao leitor de tela. */
-@Composable
-private fun ClipTarget(store: EditorStore, clip: LayerRow, view: EditView, top: Float, heightPx: Float, headW: Float, rulerH: Float) {
-    val density = LocalDensity.current
+private fun ClipTarget(store: EditorStore, clip: LayerRow, view: EditView, top: Float, heightPx: Float, headW: Float, rulerH: Float, viewportWidth: Float) {
     val selected = clip.id in store.selection
     val description = if (selected) stringResource(R.string.edit_clip_selected, clip.name) else clip.name
     Box(
         Modifier
-            .offset { IntOffset((headW + (clip.startFrame - view.scrollFrames) * view.pxPerFrame).roundToInt(), (top - view.scrollY).roundToInt().coerceAtLeast(rulerH.roundToInt())) }
-            .size(with(density) { ((clip.endFrame - clip.startFrame) * view.pxPerFrame).coerceAtLeast(1f).toDp() }, with(density) { heightPx.toDp() })
+            .offset { IntOffset(max(0f, headW + (clip.startFrame - view.scrollFrames) * view.pxPerFrame).roundToInt(),
+                (top - view.scrollY).roundToInt().coerceAtLeast(rulerH.roundToInt())) }
+            .layout { measurable, _ ->
+                val left = max(0f, headW + (clip.startFrame - view.scrollFrames) * view.pxPerFrame)
+                val right = min(viewportWidth, headW + (clip.endFrame - view.scrollFrames) * view.pxPerFrame)
+                val visibleWidth = max(0f, right - left).roundToInt()
+                val placeable = measurable.measure(Constraints.fixed(visibleWidth, heightPx.roundToInt()))
+                layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+            }
             .testTag("edit.clip.${clip.id}")
             .semantics { contentDescription = description; this.selected = selected; role = Role.Button },
     )
@@ -732,7 +823,7 @@ private fun DrawScope.label(text: String, x: Float, y: Float, sizePx: Float, col
         if (n <= 0) return
         text.substring(0, n)
     }
-    drawContext.canvas.nativeCanvas.drawText(shown, x, y, TextPaint)
+    platformCanvas.drawText(shown, x, y, TextPaint)
 }
 
 private fun rulerStepFrames(pxPerFrame: Float, fps: Float, minGap: Float): Int {
@@ -761,12 +852,10 @@ private fun DrawScope.drawLanes(
     val selection = store.selection
     fun xOf(frame: Float) = headW + (frame - scroll) * pxPerFrame
 
-    clipRect(left = headW, top = rulerH, right = width, bottom = size.height) {
-        val firstVideoAudio = data.lanes.indexOfFirst { it.audio }
+    clipRect(left = 0f, top = rulerH, right = width, bottom = size.height) {
         data.lanes.forEachIndexed { i, _ ->
             val top = layout.tops[i] - scrollY
-            drawRect(EditPalette.Lane, Offset(headW, top), Size(width - headW, layout.heights[i]))
-            if (i == firstVideoAudio) drawRect(EditPalette.Separator, Offset(headW, top - 1.5f * dp), Size(width - headW, 1.5f * dp))
+            drawRect(EditPalette.Lane, Offset(0f, top), Size(width, layout.heights[i]))
         }
         lanes.forEachIndexed { i, clips ->
             val top = layout.tops[i] - scrollY
@@ -775,13 +864,13 @@ private fun DrawScope.drawLanes(
             clips.forEach { clip ->
                 // Enquanto arrasta, o clipe levado se desenha no fim, por cima.
                 if (drag != null && drag.clip.id == clip.row.id && !clip.virtual && drag.kind == DRAG_MOVE) return@forEach
-                drawClip(store, clip, top, laneH, drag, data.lanes[i], selection, xOf(0f), pxPerFrame, waves, generation, headW, width, dp)
+                drawClip(store, clip, top, laneH, drag, data.lanes[i], selection, xOf(0f), pxPerFrame, waves, generation, 0f, width, dp)
             }
             // A marca de cada corte encostado.
             if (!data.lanes[i].audio) clips.zipWithNext().forEach { (a, b) ->
                 if (a.row.endFrame == b.row.startFrame) {
                     val cx = xOf(a.row.endFrame.toFloat())
-                    if (cx > headW && cx < width) {
+                    if (cx > 0f && cx < width) {
                         val mid = top + laneH / 2f
                         val s = 3.5f * dp
                         val bow = Path().apply { moveTo(cx - s, mid - s); lineTo(cx + s, mid + s); lineTo(cx + s, mid - s); lineTo(cx - s, mid + s); close() }
@@ -792,45 +881,48 @@ private fun DrawScope.drawLanes(
         }
         if (drag != null && drag.kind == DRAG_MOVE) {
             val index = data.lanes.indexOfFirst { it.id == drag.lane }
-            if (index >= 0) drawClip(store, LaneClip(drag.clip, false), layout.tops[index] - scrollY, layout.heights[index], drag, data.lanes[index], selection, xOf(0f), pxPerFrame, waves, generation, headW, width, dp)
+            if (index >= 0) drawClip(store, LaneClip(drag.clip, false), layout.tops[index] - scrollY, layout.heights[index], drag, data.lanes[index], selection, xOf(0f), pxPerFrame, waves, generation, 0f, width, dp)
         }
         if (drag != null && drag.snapped >= 0) {
             val x = xOf(drag.snapped.toFloat())
             drawLine(EditPalette.Snap, Offset(x, rulerH), Offset(x, size.height), strokeWidth = 1.5f * dp)
         }
         if (data.markIn >= 0 || data.markOut >= 0) {
-            val from = xOf((if (data.markIn >= 0) data.markIn else 0L).toFloat()).coerceAtLeast(headW)
+            val from = xOf((if (data.markIn >= 0) data.markIn else 0L).toFloat()).coerceAtLeast(0f)
             val to = if (data.markOut >= 0) xOf(data.markOut.toFloat()).coerceAtMost(width) else width
             if (to > from) drawRect(EditPalette.Range, Offset(from, rulerH), Size(to - from, size.height - rulerH))
         }
     }
 
     // Régua por cima das faixas.
-    drawRect(EditPalette.RulerBg, Offset(headW, 0f), Size(width - headW, rulerH))
+    drawRect(EditPalette.RulerBg, Offset.Zero, Size(width, rulerH))
     val step = rulerStepFrames(pxPerFrame, fps, 64f * dp)
-    var tick = (scroll / step).toInt().coerceAtLeast(0) * step
+    var tick = floor((scroll - headW / pxPerFrame) / step).toInt().coerceAtLeast(0) * step
     val lastFrame = scroll + (width - headW) / pxPerFrame
     while (tick <= lastFrame) {
         val x = xOf(tick.toFloat())
-        if (x >= headW) {
+        if (x >= 0f) {
             drawLine(EditPalette.Tick, Offset(x, rulerH - 8f * dp), Offset(x, rulerH), strokeWidth = 1f * dp)
             val seconds = (tick / fps).roundToInt()
             label("%02d:%02d".format(java.util.Locale.ROOT, seconds / 60, seconds % 60), x + 3f * dp, 12f * dp, 10f * dp, EditColors.Ruler)
         }
         val half = xOf(tick + step / 2f)
-        if (half >= headW) drawLine(EditPalette.Tick, Offset(half, rulerH - 4f * dp), Offset(half, rulerH), strokeWidth = 1f * dp)
+        if (half >= 0f) drawLine(EditPalette.Tick, Offset(half, rulerH - 4f * dp), Offset(half, rulerH), strokeWidth = 1f * dp)
         tick += step
     }
-    if (data.markIn >= 0) drawMark(xOf(data.markIn.toFloat()), rulerH, headW, dp, true)
-    if (data.markOut >= 0) drawMark(xOf(data.markOut.toFloat()), rulerH, headW, dp, false)
+    if (data.markIn >= 0) drawMark(xOf(data.markIn.toFloat()), rulerH, 0f, dp, true)
+    if (data.markOut >= 0) drawMark(xOf(data.markOut.toFloat()), rulerH, 0f, dp, false)
 
     // Cabeçote: lido aqui, na fase de desenho.
-    val playX = xOf(store.playhead.toFloat())
-    if (playX >= headW && playX <= width) {
-        drawLine(EditPalette.Playhead, Offset(playX, rulerH - 8f * dp), Offset(playX, size.height), strokeWidth = 1.5f * dp)
-        val s = 5f * dp
-        drawPath(Path().apply { moveTo(playX - s, rulerH - 12f * dp); lineTo(playX + s, rulerH - 12f * dp); lineTo(playX, rulerH - 5f * dp); close() }, EditPalette.Playhead)
-    }
+    drawLine(EditPalette.Playhead, Offset(headW, 0f), Offset(headW, size.height), strokeWidth = 1.5f * dp)
+    val marker = 4f * dp
+    drawPath(Path().apply {
+        moveTo(headW, 0f)
+        lineTo(headW + marker, marker)
+        lineTo(headW, marker * 2f)
+        lineTo(headW - marker, marker)
+        close()
+    }, EditPalette.Playhead)
 }
 
 private fun DrawScope.drawMark(x: Float, rulerH: Float, headW: Float, dp: Float, entrance: Boolean) {
@@ -875,14 +967,12 @@ private fun DrawScope.drawClip(
     val kind = row.kind
     val adjustment = row.flags and (1 shl 6) != 0
     val audioKind = kind == 3
-    val body: Color
-    val strip: Color
-    when {
-        clip.virtual -> { body = EditPalette.LinkedAudio; strip = EditPalette.LinkedAudio }
-        audioKind -> { body = EditPalette.Audio; strip = EditPalette.Audio }
-        adjustment -> { body = EditPalette.Adjustment; strip = EditPalette.AdjustmentTop }
-        kind == 1 || kind == 2 || kind == 12 -> { body = EditPalette.Video; strip = EditPalette.VideoTop }
-        else -> { body = EditPalette.Overlay; strip = EditPalette.OverlayTop }
+    val body = when {
+        clip.virtual -> EditPalette.LinkedAudio
+        audioKind -> EditPalette.Audio
+        adjustment -> EditPalette.Adjustment
+        kind == 1 || kind == 2 || kind == 12 -> EditPalette.Video
+        else -> EditPalette.Overlay
     }
     val pad = 1f * dp
     val w = max(right - left, 1f)
@@ -896,20 +986,32 @@ private fun DrawScope.drawClip(
             if (clip.virtual) EditPalette.LinkedWave else EditPalette.AudioWave)
     } else {
         val stripH = min(13f * dp, laneH * 0.34f)
-        drawRect(strip.copy(alpha = alpha), Offset(left, top + pad), Size(w, stripH))
         val textX = visibleLeft + 3f * dp
-        // Miniatura no começo do clipe, como no Premiere.
-        if ((kind == 1 || kind == 2 || kind == 12) && w > 44f * dp && left >= headW - 44f * dp) {
-            val heightPx = (laneH - stripH - 2 * pad).roundToInt().coerceIn(16, 128)
-            val thumb = store.thumbnails.get(row.id, row.startFrame, heightPx)
-            if (thumb != null) {
-                val image = thumb.asImageBitmap()
-                val scale = heightPx.toFloat() / image.height
-                val thumbW = (image.width * scale).roundToInt()
-                drawImage(image, IntOffset.Zero, IntSize(image.width, image.height), IntOffset(left.roundToInt(), (top + pad + stripH).roundToInt()), IntSize(thumbW, heightPx), alpha = alpha)
+        if (kind == 1 || kind == 2 || kind == 12) {
+            val heightPx = (laneH - 2 * pad).roundToInt().coerceIn(16, 192)
+            val tileWidth = max(32f * dp, laneH)
+            var tile = floor((visibleLeft - left) / tileWidth).toInt().coerceAtLeast(0)
+            clipRect(visibleLeft, top + pad, visibleRight, top + laneH - pad) {
+                while (left + tile * tileWidth < visibleRight) {
+                    val tileX = left + tile * tileWidth
+                    val frame = (row.startFrame + tile * tileWidth / pxPerFrame).roundToInt().coerceIn(row.startFrame, max(row.startFrame, row.endFrame - 1))
+                    val thumb = waves.thumbnail(store, row.id, frame, heightPx, generation)
+                    if (thumb != null) {
+                        val image = thumb.asImageBitmap()
+                        val sourceWidth = min(image.width, (image.height * tileWidth / heightPx).roundToInt()).coerceAtLeast(1)
+                        val sourceHeight = min(image.height, (image.width * heightPx / tileWidth).roundToInt()).coerceAtLeast(1)
+                        drawImage(image, IntOffset((image.width - sourceWidth) / 2, (image.height - sourceHeight) / 2),
+                            IntSize(sourceWidth, sourceHeight), IntOffset(tileX.roundToInt(), (top + pad).roundToInt()),
+                            IntSize(tileWidth.roundToInt(), heightPx), alpha = alpha)
+                    }
+                    tile++
+                }
             }
         }
-        if (visibleW > 16f * dp) label(row.name, textX, top + pad + stripH - 3f * dp, 9.5f * dp, Color.White, visibleW - 6f * dp - if (row.effectCount > 0) 16f * dp else 0f)
+        if (visibleW > 16f * dp && (selected || (kind != 1 && kind != 2 && kind != 12))) {
+            drawRect(Color.Black.copy(alpha = .55f), Offset(visibleLeft, top + pad), Size(visibleW, stripH))
+            label(row.name, textX, top + pad + stripH - 3f * dp, 9.5f * dp, Color.White, visibleW - 6f * dp - if (row.effectCount > 0) 16f * dp else 0f)
+        }
         if (row.effectCount > 0 && visibleW > 26f * dp) label("fx", visibleRight - 14f * dp, top + pad + stripH - 3f * dp, 9.5f * dp, Color.White)
     }
     if (selected) drawRoundRect(EditPalette.Selected, Offset(left, top + pad), Size(w, laneH - 2 * pad), CornerRadius(2f * dp), style = Stroke(width = 1.5f * dp))
@@ -992,5 +1094,26 @@ internal class EditWaveCache {
         return wave
     }
 
-    private companion object { const val MAX = 4096 }
+    // 0.5.3: miniatura que o motor ainda não tinha → geração em que foi pedida. Sem
+    // isto, cada clipe visível ainda sem miniatura fazia uma consulta bloqueante ao
+    // motor (no lock do modelo que o render segura) a CADA desenho da timeline,
+    // inclusive a cada quadro tocando. Só repergunta quando a geração de miniaturas
+    // muda, como a timeline principal (ThumbStrip).
+    private data class ThumbKey(val layer: Long, val frame: Int, val height: Int)
+    private val thumbMisses = HashMap<ThumbKey, Int>()
+
+    fun thumbnail(store: EditorStore, layer: Long, frame: Int, heightPx: Int, generation: Int) =
+        ThumbKey(layer, frame, heightPx).let { key ->
+            if (thumbMisses[key] == generation) null
+            else store.thumbnails.get(layer, frame, heightPx).also { bmp ->
+                if (bmp == null) {
+                    if (thumbMisses.size > MAX_THUMB_MISSES) thumbMisses.clear()
+                    thumbMisses[key] = generation
+                } else {
+                    thumbMisses.remove(key)
+                }
+            }
+        }
+
+    private companion object { const val MAX = 4096; const val MAX_THUMB_MISSES = 512 }
 }

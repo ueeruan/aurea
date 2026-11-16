@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE layers (2026-11-12): qualidade da camada, clipe do modelo 3D, transições por camada, guias da prévia e velocidade negativa. -->
+<resources>
+    <string name="ae_layer_quality">गुणवत्ता</string>
+    <string name="ae_quality_best">सर्वश्रेष्ठ</string>
+    <string name="ae_quality_draft">ड्राफ़्ट</string>
+    <string name="ae_quality_wireframe">वायरफ़्रेम</string>
+    <string name="ae_quality_hint">ड्राफ़्ट और वायरफ़्रेम केवल प्रीव्यू पर लागू होते हैं; एक्सपोर्ट हमेशा सर्वश्रेष्ठ में होता है</string>
+    <string name="ae_layer_sampling">सैंपलिंग</string>
+    <string name="ae_sampling_bilinear">बाइलीनियर</string>
+    <string name="ae_sampling_bicubic">बाइक्यूबिक</string>
+    <string name="ae_sampling_hint">बाइक्यूबिक बड़ी की गई इमेज को ज़्यादा शार्प रखता है (सर्वश्रेष्ठ में)</string>
+    <string name="ae_model_clip">मॉडल एनिमेशन</string>
+    <string name="ae_model_clip_none">स्थिर</string>
+    <string name="ae_model_clip_n">क्लिप %1$d</string>
+    <string name="ae_model_clip_empty">इस मॉडल में कोई एनिमेशन नहीं है</string>
+    <string name="ae_transitions">ट्रांज़िशन</string>
+    <string name="ae_transition_in">इन</string>
+    <string name="ae_transition_out">आउट</string>
+    <string name="ae_transition_none">कोई नहीं</string>
+    <string name="ae_transition_dissolve">डिज़ॉल्व</string>
+    <string name="ae_transition_slide_up">ऊपर स्लाइड</string>
+    <string name="ae_transition_slide_left">बाएँ से स्लाइड</string>
+    <string name="ae_transition_zoom">ज़ूम</string>
+    <string name="ae_transition_spin">घुमाएँ</string>
+    <string name="ae_transition_duration">अवधि</string>
+    <string name="ae_transition_hint">क्लिप के किनारों पर चलते हैं; कीफ़्रेम नहीं बनाते</string>
+    <string name="ae_guides_safe">सेफ़ मार्जिन</string>
+    <string name="ae_guides_rulers">रूलर</string>
+    <string name="ae_speed_reverse_point">दिशा उलटें</string>
+    <string name="ae_speed_reverse_hint">नेगेटिव स्पीड रैंप के भीतर सोर्स को पीछे की ओर चलाती है (फ़्रेम 0 तक)</string>
+</resources>

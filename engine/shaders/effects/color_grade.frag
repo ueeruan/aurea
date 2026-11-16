@@ -33,7 +33,7 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 p2;     // x = brancos, y = pretos, z = brilho, w = saturação (1 = neutro)
     vec4 p3;     // x = vibração, y = mistura, z = relógio (s), w = bandeiras
     vec4 color;  // não usado
-    vec4 g[20];
+    vec4 g[23];
 } p;
 
 // Bandeiras (p3.w): 1 curvas RGB, 2 curvas de matiz, 4 LUT, 8 qualificador,
@@ -148,11 +148,30 @@ vec4 straight_at(vec2 uv) {
     return c.a > 1e-6 ? vec4(c.rgb / c.a, c.a) : vec4(0.0);
 }
 
+float correctionWindow() {
+    if (p.g[20].x < 0.5) return 1.0;
+    const vec2 position = (p.g[18].xy + v_uv * p.g[18].zw) / max(p.g[19].xy, vec2(1.0));
+    const vec2 relative = (position - p.g[20].yz) * p.g[19].xy;
+    const float angle = p.g[20].w;
+    const vec2 rotated = vec2(cos(angle) * relative.x + sin(angle) * relative.y,
+                             -sin(angle) * relative.x + cos(angle) * relative.y);
+    const vec2 normalized = abs(rotated) / max(p.g[21].xy * p.g[19].xy * 0.5, vec2(0.0005));
+    const float distance = p.g[20].x > 1.5 ? length(normalized) : max(normalized.x, normalized.y);
+    const float softness = max(p.g[21].z * 0.5, 0.0001);
+    const float amount = 1.0 - smoothstep(1.0 - softness, 1.0 + softness, distance);
+    return p.g[21].w > 0.5 ? 1.0 - amount : amount;
+}
+
 void main() {
     const vec2 uv = v_uv * p.uvMap.xy + p.uvMap.zw;
     const vec4 src = texture(u_src, uv);
     if (src.a <= 1e-6) { o_color = src; return; }
     const vec3 original = src.rgb / src.a;
+    const float window = correctionWindow();
+    if (p.g[20].x > 0.5 && p.g[22].x > 0.5) {
+        o_color = vec4(vec3(dec(window)) * src.a, src.a);
+        return;
+    }
     vec3 lin = original;
 
     // 1. Entrada log: o código é o valor de tela que o decoder entregou.
@@ -260,7 +279,7 @@ void main() {
         float m = clamp(mh * ms * ml, 0.0, 1.0);
         if (flag(32)) m = 1.0 - m;
         if (flag(16)) {
-            const vec3 shown = vec3(dec(m));
+            const vec3 shown = vec3(dec(m * window));
             o_color = vec4(shown * src.a, src.a);
             return;
         }
@@ -306,5 +325,5 @@ void main() {
 
     vec3 graded = dec3(e);
     graded = clamp(graded, vec3(0.0), vec3(65504.0));
-    o_color = vec4(mix(original, graded, clamp(p.p3.y, 0.0, 1.0)) * src.a, src.a);
+    o_color = vec4(mix(original, graded, clamp(p.p3.y, 0.0, 1.0) * window) * src.a, src.a);
 }

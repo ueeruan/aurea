@@ -67,10 +67,9 @@ void gaussian_pairs(f32 sigma, BlurUniforms& u) noexcept {
 Rect spread_region(const Rect& input, f32 extendX, f32 extendY, const LayerPlacement* placement,
                    f32 margin) noexcept {
     Rect r{input.x - extendX, input.y - extendY, input.w + 2.0f * extendX, input.h + 2.0f * extendY};
-    // Camada na cena 3D: a posição dela é o plano no mundo, não a matriz 2D da
-    // composição — cortar por ela encolheria a região para 1x1 e a camada
-    // desapareceria atrás do efeito.
-    if (placement && !placement->inScene3d && placement->compWidth && placement->compHeight) {
+    // Bound the working surface by the viewport preimage, including camera
+    // projection for 3D planes. The downstream sampling margin stays available.
+    if (placement && placement->compWidth && placement->compHeight) {
         Rect vis = visible_layer_rect(*placement);
         if (vis.w > 0.0f && vis.h > 0.0f) {
             vis = Rect{vis.x - margin, vis.y - margin, vis.w + 2.0f * margin, vis.h + 2.0f * margin};
@@ -277,13 +276,19 @@ public:
 // -----------------------------------------------------------------------------
 class Sharpen final : public Effect {
 public:
+    explicit Sharpen(bool reference = false) : reference_(reference) {}
     enum : u32 { kAmount = 0 };
 
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kSharpen, "Nitidez", "Desfoque", EffectClass::Neighborhood};
-        return i;
+        static const EffectInfo reference{effect_keys::kSharpenReference, "Sharpen", "Desfoque", EffectClass::Neighborhood};
+        return reference_ ? reference : i;
     }
     void declare_parameters(ParameterRegistry& p) const override {
+        if (reference_) {
+            p.add_int("amount", "Intensidade da nitidez", 0, 0, 4000);
+            return;
+        }
         p.add_float("amount", "Intensidade", 0.0f, 0.0f, 500.0f, kParamAnimatable | kParamPercent, "%");
         p.typed_range(0.0f, 2000.0f);   // multiplicador de um núcleo 3x3: custo fixo
     }
@@ -310,7 +315,8 @@ public:
         const f32 stepY = std::max(1.0f, input.texel_scale_y());
         u.uvMap = Vec4{1.0f, 1.0f, 0.0f, 0.0f};
         u.texel = Vec4{stepX / static_cast<f32>(input.width), stepY / static_cast<f32>(input.height),
-                       e.f(kAmount) / 100.0f, 0.0f};
+                       reference_ ? std::clamp(std::floor(e.f(kAmount)), 0.0f, 4000.0f) : e.f(kAmount) / 100.0f,
+                       reference_ ? 1.0f : 0.0f};
         out = input;
         out.texture = ctx.texture("nitidez", input.width, input.height);
         if (ctx.fullscreen_pass("nitidez", PassStage::Effects, out.texture, ShaderId::effects_sharpen_frag,
@@ -320,6 +326,8 @@ public:
         }
         return OkStatus;
     }
+private:
+    bool reference_;
 };
 
 // -----------------------------------------------------------------------------
@@ -392,6 +400,7 @@ public:
 void register_blur_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<GaussianBlur>());
     (void)r.add(std::make_unique<Sharpen>());
+    (void)r.add(std::make_unique<Sharpen>(true));
     (void)r.add(std::make_unique<ZoomBlur>());
 }
 

@@ -102,9 +102,216 @@ public:
         return OkStatus;
     }
 };
+
+// The reference contract comes from the selected Signal 1.2.3 artifact.
+// The rendering implementation uses the shared GPU graph and owns every pass.
+class SignalReference final : public Effect {
+public:
+    enum : u32 {
+        kSeed, kStrength, kAmplification, kCutoff, kLumaNoise, kChromaNoise, kHueNoise, kChromaLoss,
+        kSharpen, kConnections, kVhs, kDestruction, kLumaModulation, kFrequency, kPhase, kLightness,
+        kQuantize, kTapeErrors, kTapeStart, kTapeEnd, kTapeProbability, kTapeFade, kTapeGamma,
+        kThickDistortion, kFineDistortion, kDistortionSpeed, kRollSpeed, kLowPassIn, kLowPassOut,
+        kPhaseShift, kPhaseOffset, kSVideo, kChromaVerticalBlend, kSharpenEnabled, kScanlineBlur, kCount
+    };
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo info{effect_keys::kSignalReference, "Signal", "Glitch", EffectClass::Global};
+        return info;
+    }
+
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_int("seed", "Random seed", 1, 1, 1000000);
+        p.add_float("signal_strength", "Signal strength", 40, 1, 200);
+        p.add_float("amplification", "Signal amplification", 1, 0, 100);
+        p.add_float("cutoff", "Cutoff filter", 88, 1, 100000);
+        p.add_float("luma_noise", "Luma noise", 1, 0, 400);
+        p.add_float("chroma_noise", "Chroma noise", 1, 0, 400);
+        p.add_float("hue_noise", "Hue Noise", 15, 0, 200);
+        p.add_float("chroma_loss", "Chroma loss", .24f, 0, 1);
+        p.add_float("sharpen", "Sharpen", 2, 0, 100);
+        p.add_float("connections", "Device-to-device connections", 0, 0, 100);
+        static const char* const vhs[] = {"VHS SP", "VHS LP", "VHS EP"};
+        p.add_enum("vhs", "Emulating VHS", vhs, 3, 0);
+        p.add_bool("destruction", "Destruction button", false);
+        p.add_bool("luma_modulation", "Luma modulation", true);
+        p.add_float("frequency", "Frequency", .62f, .001f, 40);
+        p.add_float("phase", "Phase", 2, .001f, 40);
+        p.add_float("lightness", "Lightness", .62f, 0, 1);
+        p.add_float("quantize", "Quantize", 0, 0, 100);
+        p.add_bool("tape_errors", "Tape Errors", true);
+        p.add_float("tape_start", "TE start", .92f, 0, 1);
+        p.add_float("tape_end", "TE end", 1, 0, 1);
+        p.add_float("tape_probability", "TE probability", .1f, 0, 1);
+        p.add_float("tape_fade", "TE fade", 5, .01f, 5);
+        p.add_float("tape_gamma", "TE gamma", 3, .01f, 14);
+        p.add_float("thick_distortion", "Thick distortion", 0, 0, 100);
+        p.add_float("fine_distortion", "Fine distortion", 0, 0, 10);
+        p.add_float("distortion_speed", "Distortion speed", 0, 0, 200);
+        p.add_float("roll_speed", "Roll speed", 0, 0, 200);
+        p.add_bool("low_pass_in", "Low-Pass filter in", true);
+        static const char* const lowPass[] = {"Off", "Lite", "Strong"};
+        p.add_enum("low_pass_out", "Low-Pass filter out", lowPass, 3, 2);
+        p.add_float("phase_shift", "Phase shift", 0, 0, 360);
+        p.add_float("phase_offset", "Phase shift offset", 0, 0, 360);
+        p.add_bool("s_video", "S-video out", true);
+        p.add_bool("chroma_vertical_blend", "Chroma vertical blend", true);
+        p.add_bool("sharpen_enabled", "Sharpen On/Off", true);
+        p.add_float("scanline_blur", "Scanlines blur", 1.5f, 0, 100);
+        p.add_section_range("luma", "Luma modulation", kFrequency, kTapeGamma, kLumaModulation, false);
+        p.add_section_range("distortion", "TV distortion", kThickDistortion, kRollSpeed, kInvalidIndex, false);
+        p.add_section_range("experimental", "Experimental parameters", kLowPassIn, kScanlineBlur, kInvalidIndex, false);
+    }
+
+    bool needs_full_input() const noexcept override { return true; }
+
+    void pipelines(std::vector<PipelineKey>& pipelines, SurfaceFormat work) const override {
+        pipelines.push_back(PipelineKey::fullscreen(ShaderId::effects_signal_reference_frag, SurfaceFormat::RGBA32F));
+        pipelines.push_back(PipelineKey::fullscreen(ShaderId::effects_signal_reference_frag, work));
+        pipelines.push_back(PipelineKey::compute_shader(ShaderId::effects_signal_reference_comp));
+    }
+
+    struct Uniforms {
+        f32 controls[36]{};
+        Vec4 raster{};
+        Vec4 context{};
+    };
+
+    static FGTexture intermediate(EffectBuildContext& ctx, const char* name, u32 width, u32 height) {
+        TextureDesc desc;
+        desc.width = width;
+        desc.height = height;
+        // Composite samples retain the native integer signal range. Half-float
+        // loses the small chroma residual at low transmission strength.
+        desc.format = SurfaceFormat::RGBA32F;
+        desc.sampled = true;
+        desc.storage = true;
+        desc.renderTarget = true;
+        desc.debugName = name;
+        return ctx.graph().create_texture(name, desc);
+    }
+
+    static Status filter_pass(EffectBuildContext& ctx, Uniforms uniforms, FGTexture source, FGTexture target,
+                              u32 height, u32 stage) {
+        const auto pipeline = ctx.shaders().pipeline(PipelineKey::compute_shader(ShaderId::effects_signal_reference_comp));
+        if (!pipeline.ok()) return pipeline.status();
+        const auto sampler = ctx.shaders().sampler(CommonSampler::NearestClamp);
+        const auto handle = *pipeline;
+        uniforms.raster.w = static_cast<f32>(stage);
+        const u32 pass = ctx.graph().add_compute_pass("signal-row-filter", PassStage::Effects,
+            [uniforms, source, target, sampler, handle, height](PassContext& pc) {
+                pc.cmds.bind_pipeline(handle);
+                pc.cmds.bind_texture(0, pc.texture(source), sampler);
+                pc.cmds.bind_storage_image(0, pc.texture(target));
+                pc.cmds.set_uniforms(&uniforms, sizeof(uniforms));
+                pc.cmds.dispatch((height + 63u) / 64u, 1, 1);
+            });
+        ctx.graph().read(pass, source);
+        ctx.graph().write_storage(pass, target);
+        return OkStatus;
+    }
+
+    static Status raster_pass(EffectBuildContext& ctx, Uniforms uniforms, u32 stage,
+                              FGTexture source, FGTexture reference, u32 width, u32 height,
+                              const char* label, FGTexture& target) {
+        target = intermediate(ctx, label, width, height);
+        uniforms.raster.w = static_cast<f32>(stage);
+        if (ctx.fullscreen_pass(label, PassStage::Effects, target, ShaderId::effects_signal_reference_frag,
+                {{source, {}, CommonSampler::NearestClamp}, {reference, {}, CommonSampler::NearestClamp}},
+                &uniforms, sizeof(uniforms)) == kInvalidIndex) return Errc::PipelineCompileFailed;
+        return OkStatus;
+    }
+
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
+                 LayerImage& out) const override {
+        if (!input.width || !input.height) { out = input; return OkStatus; }
+        u32 width = 0, height = 0;
+        ctx.region_size(input.region, 1, width, height);
+        Uniforms uniforms;
+        for (u32 index = 0; index < kCount; ++index) {
+            uniforms.controls[index] = e.f(index);
+        }
+        uniforms.raster = {static_cast<f32>(width), static_cast<f32>(height),
+                          static_cast<f32>(e.time_frames() / std::max(e.framesPerSecond, 1e-6)), 0};
+        uniforms.context = {static_cast<f32>(e.localTime.value), 0, 0, 0};
+        FGTexture decoded = intermediate(ctx, "signal-source-yiq", width, height);
+        if (ctx.fullscreen_pass("signal-prepare", PassStage::Effects, decoded,
+                ShaderId::effects_signal_reference_frag,
+                {{input.texture, {}, CommonSampler::LinearClamp}, {input.texture, {}, CommonSampler::LinearClamp}},
+                &uniforms, sizeof(uniforms)) == kInvalidIndex) return Errc::PipelineCompileFailed;
+        if (e.b(kLowPassIn)) {
+            const FGTexture filtered = intermediate(ctx, "signal-input-filter", width, height);
+            if (const Status status = filter_pass(ctx, uniforms, decoded, filtered, height, 9); !status.ok()) return status;
+            FGTexture compensated;
+            if (const Status status = raster_pass(ctx, uniforms, 10, filtered, decoded, width, height,
+                    "signal-input-delay", compensated); !status.ok()) return status;
+            decoded = compensated;
+        }
+        const u32 cycles = 1u + static_cast<u32>(std::clamp(e.f(kConnections), 0.0f, 100.0f)) + (e.b(kSVideo) ? 0u : 1u);
+        for (u32 cycle = 0; cycle < cycles; ++cycle) {
+            uniforms.context.y = static_cast<f32>(cycle);
+            const FGTexture encoded = intermediate(ctx, "signal-composite-wave", width, height);
+            if (const Status status = filter_pass(ctx, uniforms, decoded, encoded, height, 1); !status.ok()) return status;
+            uniforms.raster.w = 2;
+            const FGTexture demodulated = intermediate(ctx, "signal-demodulated-yiq", width, height);
+            if (ctx.fullscreen_pass("signal-demodulate", PassStage::Effects, demodulated,
+                    ShaderId::effects_signal_reference_frag,
+                    {{encoded, {}, CommonSampler::NearestClamp}, {input.texture, {}, CommonSampler::LinearClamp}},
+                    &uniforms, sizeof(uniforms)) == kInvalidIndex) return Errc::PipelineCompileFailed;
+            decoded = demodulated;
+            if (cycle == 0) {
+                const FGTexture transmitted = intermediate(ctx, "signal-vhs-filter", width, height);
+                if (const Status status = filter_pass(ctx, uniforms, demodulated, transmitted, height, 3); !status.ok()) return status;
+                if (const Status status = raster_pass(ctx, uniforms, 11, transmitted, demodulated, width, height,
+                        "signal-vhs-delay", decoded); !status.ok()) return status;
+                if (e.b(kChromaVerticalBlend)) {
+                    FGTexture blended;
+                    if (const Status status = raster_pass(ctx, uniforms, 12, decoded, decoded, width, height,
+                            "signal-chroma-blend", blended); !status.ok()) return status;
+                    decoded = blended;
+                }
+                if (e.b(kSharpenEnabled)) {
+                    const FGTexture sharpened = intermediate(ctx, "signal-luma-sharpen", width, height);
+                    if (const Status status = filter_pass(ctx, uniforms, decoded, sharpened, height, 13); !status.ok()) return status;
+                    decoded = sharpened;
+                }
+            }
+        }
+        FGTexture filtered = decoded;
+        if (e.e(kLowPassOut) != 0) {
+            const FGTexture lowPass = intermediate(ctx, "signal-output-filter", width, height);
+            if (const Status status = filter_pass(ctx, uniforms, decoded, lowPass, height, 5); !status.ok()) return status;
+            if (const Status status = raster_pass(ctx, uniforms, 14, lowPass, decoded, width, height,
+                    "signal-output-delay", filtered); !status.ok()) return status;
+        }
+        uniforms.raster.w = 4;
+        out = {ctx.texture("signal", input.width, input.height), input.region, input.width, input.height};
+        const bool blur = e.f(kScanlineBlur) > .001f;
+        const FGTexture composed = blur ? intermediate(ctx, "signal-color", width, height) : out.texture;
+        if (ctx.fullscreen_pass("signal-compose", PassStage::Effects, composed,
+                ShaderId::effects_signal_reference_frag,
+                {{filtered, {}, CommonSampler::LinearClamp}, {input.texture, {}, CommonSampler::LinearClamp}},
+                &uniforms, sizeof(uniforms)) == kInvalidIndex) return Errc::PipelineCompileFailed;
+        if (blur) {
+            uniforms.raster.w = 6;
+            const FGTexture horizontal = intermediate(ctx, "signal-blur-horizontal", width, height);
+            if (ctx.fullscreen_pass("signal-blur-horizontal", PassStage::Effects, horizontal,
+                    ShaderId::effects_signal_reference_frag,
+                    {{composed, {}, CommonSampler::LinearBorder}, {input.texture, {}, CommonSampler::LinearClamp}},
+                    &uniforms, sizeof(uniforms)) == kInvalidIndex) return Errc::PipelineCompileFailed;
+            uniforms.raster.w = 7;
+            if (ctx.fullscreen_pass("signal-blur-vertical", PassStage::Effects, out.texture,
+                    ShaderId::effects_signal_reference_frag,
+                    {{horizontal, {}, CommonSampler::LinearBorder}, {input.texture, {}, CommonSampler::LinearClamp}},
+                    &uniforms, sizeof(uniforms)) == kInvalidIndex) return Errc::PipelineCompileFailed;
+        }
+        return OkStatus;
+    }
+};
 } // namespace
 void register_media_lab_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<JpegGlitch>());
     (void)r.add(std::make_unique<AnalogSignal>());
+    (void)r.add(std::make_unique<SignalReference>());
 }
 } // namespace aurea::builtin

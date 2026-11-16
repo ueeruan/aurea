@@ -144,6 +144,7 @@ public:
     Writer& value(u32 n) { return value(static_cast<i64>(n)); }
     Writer& value(i32 n) { return value(static_cast<i64>(n)); }
     Writer& value(bool b);
+    Writer& null();
     [[nodiscard]] const std::string& str() const noexcept { return out_; }
 
 private:

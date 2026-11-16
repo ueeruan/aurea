@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE reference batch C: Extrude, Depth Field, Smear. -->
+<resources>
+    <string name="refc_extrude_name">Extrude</string>
+    <string name="refc_extrude_desc">Vector extrusion of text, shapes and masks: directional, vanishing point or 3D camera, with stroke and side gradients.</string>
+    <string name="refc_depth_field_name">Depth of Field</string>
+    <string name="refc_depth_field_desc">Blurs the layer by depth: focal plane, thickness and maximum radius, using the AI depth estimate.</string>
+    <string name="refc_smear_name">Mask Smear</string>
+    <string name="refc_smear_desc">Moves the source mask area to a new place and stretches the image around it, inside the boundary mask.</string>
+</resources>

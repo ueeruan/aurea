@@ -167,15 +167,21 @@ internal fun omegaAddPrefs(context: Context) = context.getSharedPreferences("ome
  * botão aceso, no palco, no Voltar ou adicionar algo fecha.
  */
 @Composable
-internal fun AddLayerPanel(store: EditorStore, ui: EditorUi, modifier: Modifier = Modifier.fillMaxSize()) {
+internal fun AddLayerPanel(
+    store: EditorStore,
+    ui: EditorUi,
+    modifier: Modifier = Modifier.fillMaxSize(),
+    /** A gaveta flutuante com o ✕ (tablet/celular). O Aurea PC passa `false`: painel fixo da biblioteca. */
+    chrome: Boolean = true,
+) {
     val close = { ui.adding = false }
     val closeLabel = stringResource(R.string.editor_fechar_adicionar)
     // 0.4.1 (mockup "interface 03"): a gaveta é um cartão flutuante — margem de 8, cantos
     // de 24, vidro escuro (#121214 a 96 %) e fio de 14 %.
     val card = RoundedCornerShape(24.dp)
     Box(
-        modifier.padding(horizontal = 8.dp, vertical = 4.dp).clip(card)
-            .background(Color(0xF5121214)).border(1.dp, Color.White.copy(alpha = 0.14f), card)
+        (if (chrome) modifier.padding(horizontal = 8.dp, vertical = 4.dp).clip(card)
+            .background(Color(0xF5121214)).border(1.dp, Color.White.copy(alpha = 0.14f), card) else modifier)
             .testTag("add.panel"),
     ) {
         Box(Modifier.fillMaxSize().testTag("editor.addPanel")) {
@@ -201,7 +207,7 @@ internal fun AddLayerPanel(store: EditorStore, ui: EditorUi, modifier: Modifier 
                 AddTab.Vector -> VectorGrid(store, ui)
             }
         }
-        Box(
+        if (chrome) Box(
             Modifier
                 .align(Alignment.TopEnd)
                 .size(48.dp)
@@ -231,6 +237,8 @@ internal class ObjectCell(
     val glyph: Char? = null,
     val tint: Color? = null,
     val draw: (DrawScope.() -> Unit)? = null,
+    /** 0.5.4: recurso pago sem o acesso (Texto 3D): o cadeado do Hyper no fim da célula. */
+    val locked: Boolean = false,
     val onClick: () -> Unit,
 )
 
@@ -296,6 +304,10 @@ private fun ObjectCellView(cell: ObjectCell, modifier: Modifier) {
             overflow = TextOverflow.Ellipsis,
             style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, lineHeight = 13.sp, fontWeight = FontWeight.W500, color = AureaColors.Text)),
         )
+        if (cell.locked) {
+            Spacer(Modifier.width(6.dp))
+            com.aurea.aurea.effects.HyperLockBadge()
+        }
     }
 }
 
@@ -775,7 +787,8 @@ private fun Model3DGrid(store: EditorStore, close: () -> Unit) {
                 picker.launch(arrayOf("model/gltf-binary", "model/gltf+json", "model/obj", "model/mtl",
                     "application/x-fbx", "application/zip", "text/plain", "image/*", "application/octet-stream", "*/*"))
             },
-            ObjectCell(stringResource(R.string.sh_add_text_3d), "add.model3d.text", glyph = ShellGlyph.TextformatAlt, tint = ShellColors.Text3D) { store.addText3D(); close() },
+            ObjectCell(stringResource(R.string.sh_add_text_3d), "add.model3d.text", glyph = ShellGlyph.TextformatAlt, tint = ShellColors.Text3D,
+                locked = com.aurea.aurea.effects.Text3DGate.locked()) { store.addText3D(); close() },
             ObjectCell(stringResource(R.string.image3d_add), "add.model3d.image", glyph = CupertinoGlyph.Photo, tint = ShellColors.Text3D) {
                 imagePicker.launch(arrayOf("image/png", "image/webp", "image/*"))
             },
@@ -814,7 +827,9 @@ private fun VectorGrid(store: EditorStore, ui: EditorUi) {
         }
     }
     fun start(preset: Int) {
-        if (store.addVectorLayer(preset) >= 0) openPanel(store, ui, EditorPanel.Vector)
+        // Como o desenho vetorial da referência: o caminho livre abre o Editar pontos;
+        // as formas prontas abrem Caminhos e operadores (aba Forma).
+        if (store.addVectorLayer(preset) >= 0) openPanel(store, ui, if (preset == 0) EditorPanel.EditPoints else EditorPanel.VectorPaths)
     }
     ObjectGrid(
         listOf(

@@ -95,6 +95,49 @@ f32 hb_region_diff(const FloatImage& a, const FloatImage& b, u32 x0, u32 y0, u32
 
 } // namespace headbop_gpu
 
+AUREA_TEST(Gpu, HeadbopBodyRigChangesArmAndLegPixels) {
+    AUREA_REQUIRE_GPU();
+    using namespace headbop_gpu;
+    constexpr u32 width = 128, height = 256;
+    Scene scene(width, height);
+    const LayerId layer = scene.image(reference_image(width, height), width * .5f, height * .5f);
+    auto& effect = scene.add_effect(layer, hb::kHeadbopKey);
+    effect.params[hb::kCutout].constant = ParamValue::boolean(false);
+    set_rig(effect, width, height);
+    set_pose(effect, nod_pose());
+    const FloatImage headOnly = scene.render();
+    const auto joint = [&](u32 source, f32 x, f32 y) {
+        const u32 index = hb::kBodyRigFirst + (source - 11) * 2;
+        effect.params[index].constant = ParamValue::vec2(x, y);
+        effect.params[index + 1].constant = ParamValue::vec2(0.f, .95f);
+    };
+    joint(11, .3f, .45f); joint(12, .7f, .45f);
+    joint(13, .18f, .62f); joint(14, .82f, .62f);
+    joint(15, .12f, .78f); joint(16, .88f, .78f);
+    joint(19, .1f, .83f); joint(20, .9f, .83f);
+    joint(23, .4f, .6f); joint(24, .6f, .6f);
+    joint(25, .4f, .78f); joint(26, .6f, .78f);
+    joint(27, .4f, .94f); joint(28, .6f, .94f);
+    joint(31, .34f, .96f); joint(32, .66f, .96f);
+    const FloatImage body = scene.render();
+    for (f32 value : body.px) AUREA_CHECK(std::isfinite(value));
+    AUREA_CHECK(hb_region_diff(body, headOnly, 8, 140, 120, 250) > .002f);
+    const std::string path = "tests/build/prompt03/headbop-body-rig.aurea";
+    std::string error;
+    AUREA_CHECK(ProjectSerializer::save(scene.project, path, SaveOptions{}, &error).ok());
+    Project restored;
+    AUREA_CHECK(ProjectSerializer::load(restored, path, LoadOptions{}, nullptr, &error).ok());
+    const Composition* composition = restored.timeline().composition(restored.timeline().root());
+    const Layer* restoredLayer = composition ? composition->layer(layer) : nullptr;
+    AUREA_CHECK(restoredLayer && restoredLayer->effects.size() == 1);
+    if (restoredLayer && !restoredLayer->effects.empty()) {
+        const auto& saved = restoredLayer->effects.front();
+        AUREA_CHECK_EQ(saved.params.size(), static_cast<usize>(hb::kParamCount));
+        AUREA_CHECK_NEAR(saved.params[hb::kBodyRigFirst + 16 * 2].constant.v[1], .94f, 1e-6f);
+    }
+    std::remove(path.c_str());
+}
+
 AUREA_TEST(Gpu, HeadbopDeformedFrameGolden) {
     AUREA_REQUIRE_GPU();
     using namespace headbop_gpu;

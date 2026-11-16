@@ -9,6 +9,9 @@
     <!-- 0.3.6 Motion Capture: "Gravar movimento" (câmera do sistema, cache do app). -->
     <cache-path name="mocap_capture" path="mocap-capture/"/>
     <!-- Android 8–9 com permissão: pasta pública (GalleryPublish). -->
+    <!-- 0.5.3 (P0-2): o vídeo pronto que nem a galeria nem a pasta externa do app
+         aceitaram (disco cheio) fica aqui, em filesDir (Exporter.rescueTemp). -->
+    <files-path name="rescued_exports" path="exports/"/>
     <external-path name="public_video" path="Movies/Aurea/"/>
     <external-path name="public_images" path="Pictures/Aurea/"/>
     <external-path name="public_sequences" path="Download/Aurea/"/>

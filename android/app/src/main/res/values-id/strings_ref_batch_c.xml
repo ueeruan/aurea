@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE reference batch C: Extrude, Depth Field, Smear. -->
+<resources>
+    <string name="refc_extrude_name">Ekstrusi (vektor)</string>
+    <string name="refc_extrude_desc">Ekstrusi vektor untuk teks, bentuk, dan mask: arah, titik hilang, atau kamera 3D, dengan garis tepi dan gradien sisi.</string>
+    <string name="refc_depth_field_name">Kedalaman bidang</string>
+    <string name="refc_depth_field_desc">Mengaburkan layer berdasarkan kedalaman: bidang fokus, ketebalan, dan radius maksimum, dengan kedalaman dari AI.</string>
+    <string name="refc_smear_name">Noda (mask)</string>
+    <string name="refc_smear_desc">Memindahkan area mask sumber ke tempat baru dan meregangkan gambar di sekitarnya, di dalam mask batas.</string>
+</resources>

@@ -60,6 +60,7 @@ internal val CaptionTemplateNames = mapOf(
     "pop" to R.string.pn_pop, "soft" to R.string.pack_text_4, "glow" to R.string.pack_text_5,
     "gold" to R.string.cap046_tpl_gold, "bubble" to R.string.cap046_tpl_bubble, "mint" to R.string.cap046_tpl_mint,
     "comic" to R.string.cap046_tpl_comic, "tag" to R.string.cap046_tpl_tag, "minimal" to R.string.cap046_tpl_minimal,
+    "news" to R.string.cap053_tpl_news, "cinema" to R.string.cap053_tpl_cinema,
 )
 
 /** Paleta rápida (sRGB) e o nome de cada cor para o leitor de tela. */
@@ -151,8 +152,8 @@ internal fun CaptionTemplateRow(cap: CaptionLookTarget) {
  * gerar, vale para as legendas que vão nascer.
  */
 @Composable
-internal fun CaptionCustomize(cap: CaptionLookTarget, store: EditorStore) {
-    var open by remember { mutableStateOf(false) }
+internal fun CaptionCustomize(cap: CaptionLookTarget, store: EditorStore, startOpen: Boolean = false) {
+    var open by remember { mutableStateOf(startOpen) }
     var fonts by remember { mutableStateOf(false) }
     val s = cap.settings
     val fromStyle = stringResource(R.string.cap046_from_style)
@@ -275,5 +276,48 @@ private fun SwatchRow(current: FloatArray?, styleLabel: String?, onPick: (Int?) 
             )
         }
     }
+}
+
+/**
+ * 0.5.3 "Texto e caixa": alinhamento, entrelinha, margem e cantos do fundo,
+ * cor e desfoque da sombra. "Do estilo" desliga a parte (vale o do estilo).
+ */
+@Composable
+internal fun CaptionTextBoxControls(cap: CaptionLookTarget) {
+    val s = cap.settings
+    val fromStyle = stringResource(R.string.cap046_from_style)
+    SectionLabel(stringResource(R.string.cap053_align))
+    ChipRow(listOf(fromStyle, stringResource(R.string.cap053_align_left), stringResource(R.string.cap053_align_center),
+        stringResource(R.string.cap053_align_right)), if (!s.has(CaptionLook.LAYOUT)) 0 else s.align.coerceIn(0, 2) + 1) { i ->
+        cap.update { if (i == 0) it.with(CaptionLook.LAYOUT, false) else it.with(CaptionLook.LAYOUT, true).copy(align = i - 1) }
+    }
+    SectionLabel(stringResource(R.string.cap053_line_spacing))
+    val spacings = listOf(1.0f, 1.15f, 1.3f, 1.6f)
+    ChipRow(listOf(fromStyle) + spacings.map { com.aurea.aurea.ui.ds.numeroPtBr(it, 2) },
+        if (!s.has(CaptionLook.LAYOUT)) 0 else spacings.indexOfFirst { kotlin.math.abs(it - s.lineSpacing) < 0.01f } + 1) { i ->
+        cap.update { if (i == 0) it.with(CaptionLook.LAYOUT, false) else it.with(CaptionLook.LAYOUT, true).copy(lineSpacing = spacings[i - 1]) }
+    }
+    if (s.has(CaptionLook.BOX) && s.box) {
+        SectionLabel(stringResource(R.string.cap053_box_padding))
+        val pads = listOf(0.15f, 0.3f, 0.5f)
+        ChipRow(listOf(stringResource(R.string.pn_size_small_short), stringResource(R.string.pn_size_medium_short), stringResource(R.string.pn_size_large_short)),
+            pads.indexOfFirst { kotlin.math.abs(it - s.boxPadding) < 0.01f }) { i -> cap.update { it.copy(boxPadding = pads[i]) } }
+        SectionLabel(stringResource(R.string.cap053_box_radius))
+        val radii = listOf(0f, 0.25f, 0.6f)
+        ChipRow(listOf(stringResource(R.string.cap053_corner_square), stringResource(R.string.cap053_corner_soft), stringResource(R.string.cap053_corner_round)),
+            radii.indexOfFirst { kotlin.math.abs(it - s.boxRadius) < 0.01f }) { i -> cap.update { it.copy(boxRadius = radii[i]) } }
+    } else {
+        Text(stringResource(R.string.cap053_box_hint), Modifier.padding(vertical = 4.dp),
+            style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
+    }
+    if (s.has(CaptionLook.SHADOW) && s.shadow) {
+        SectionLabel(stringResource(R.string.cap053_shadow_color))
+        SwatchRow(s.shadowColor, null) { hex -> hex?.let { h -> cap.update { it.copy(shadowColor = rgba(h, 0.75f)) } } }
+        SectionLabel(stringResource(R.string.cap053_shadow_blur))
+        val blurs = listOf(0.06f, 0.12f, 0.3f)
+        ChipRow(listOf(stringResource(R.string.cap053_soft), stringResource(R.string.cap046_medium), stringResource(R.string.cap053_strong)),
+            blurs.indexOfFirst { kotlin.math.abs(it - s.shadowBlur) < 0.01f }) { i -> cap.update { it.copy(shadowBlur = blurs[i]) } }
+    }
+    Spacer(Modifier.height(6.dp))
 }
 

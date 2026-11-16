@@ -14,7 +14,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.aurea.aurea.R
-import com.aurea.aurea.editor.panels.effectTypeId
+import com.aurea.aurea.engine.AureaEngine
+import com.aurea.aurea.hyper.HyperAccess
 import com.aurea.aurea.hyper.HyperEntitlements
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaShape
@@ -22,20 +23,45 @@ import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
 
 // =============================================================================
-//  Os efeitos de camada do AureaHyper (hyper::effect_keys: Hyper Upscale /
-//  Motion / Clean) aparecem no navegador de efeitos para todo mundo; sem o
+//  Os efeitos do pacote AureaHyper são classificados pelo motor compartilhado
+//  e aparecem no navegador de efeitos para todo mundo; sem o
 //  acesso (HyperEntitlements) eles levam o cadeado e o toque abre a tela
 //  bloqueada em vez de pôr o efeito. O par do iOS: EffectsBrowser.swift.
 // =============================================================================
 
 internal object HyperEffectGate {
-    val Keys = listOf("aurea.hyper.upscale", "aurea.hyper.motion", "aurea.hyper.clean")
-    private val TypeIds: Set<Int> = Keys.map(::effectTypeId).toSet()
-
-    fun isHyper(typeId: Int): Boolean = typeId in TypeIds
+    fun isHyper(typeId: Int): Boolean = AureaEngine.nativeEffectRequiresHyper(typeId)
 
     /** Lê o estado do portão (Compose recompõe quando muda). */
-    fun locked(typeId: Int): Boolean = isHyper(typeId) && !HyperEntitlements.unlocked
+    fun locked(typeId: Int): Boolean = PaidGate.locked(isHyper(typeId), HyperEntitlements.access)
+}
+
+/**
+ * A regra do portão, sem ponte nem estado (HyperGateTest): um recurso pago só
+ * passa com o acesso confirmado; qualquer outro estado (sem conta, conferindo,
+ * expirado, sem config, desligado) bloqueia. O par do iOS: HyperModel.swift.
+ */
+internal object PaidGate {
+    // Um recurso pago que JÁ está no projeto (efeito aplicado, texto 3D criado)
+    // nunca é tirado: abre, edita, aparece na prévia e exporta igual, sem marca
+    // d'água (o motor não conhece o acesso); sem o acesso ele só leva o cadeado
+    // (EffectsPanel.kt: o selo da linha do efeito). Só CRIAR um novo pede o acesso.
+    fun locked(paid: Boolean, access: HyperAccess): Boolean = paid && access != HyperAccess.Unlocked
+}
+
+/**
+ * 0.5.4 (pedido do dono, 15/11/2026): o TEXTO 3D é do mesmo produto pago. Todas
+ * as entradas que CRIAM texto 3D (+ › Texto 3D, o dock da cena 3D, os presets de
+ * texto 3D) passam por [EditorStore.addText3D], que confere [locked]; bloqueado,
+ * o editor abre a tela bloqueada do Hyper (HyperLockedDialog) e as células levam
+ * o [HyperLockBadge]. Texto 3D que já está no projeto segue como um efeito pago
+ * já aplicado (ver [PaidGate]). O par do iOS: Text3DGate (HyperModel.swift).
+ */
+internal object Text3DGate {
+    fun isPaid(): Boolean = AureaEngine.nativeText3dRequiresHyper()
+
+    /** Lê o estado do portão (Compose recompõe quando muda). */
+    fun locked(): Boolean = PaidGate.locked(isPaid(), HyperEntitlements.access)
 }
 
 /** O cadeado no canto da miniatura de um efeito Hyper bloqueado. */

@@ -225,7 +225,7 @@ internal fun ColumnScope.ScaleFace(env: PanelEnv, depth: Boolean) {
         marksW = store.snapTargets(2).map { it.first }.filter { it.isFinite() && it > 0f }.toFloatArray()
         marksH = store.snapTargets(3).map { it.first }.filter { it.isFinite() && it > 0f }.toFloatArray()
     }
-    LaunchedEffect(d.id, store.layers, inPx) { refreshMarks() }
+    LaunchedEffect(d.id, store.editingLayers, inPx) { refreshMarks() }
     val snapW = remember(d.id) { RulerSnap { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) } }
     val snapH = remember(d.id) { RulerSnap { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) } }
     val from = remember(d.id) { FloatArray(3) }

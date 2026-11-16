@@ -319,7 +319,7 @@ private struct PointsColumn: View {
     private func openPathCurve() -> Bool {
         guard let layer = model.primarySelection else { return false }
         let group = model.vectorGroup, contour = model.vectorPath
-        let keys = (model.keyframes[layer] ?? []).filter {
+        let keys = (model.keysForLayer(layer) ?? []).filter {
             $0.property == 48 && $0.effectIndex == group && $0.paramIndex == contour
         }.sorted { $0.time < $1.time }
         guard keys.count >= 2 else { return false }
@@ -453,13 +453,15 @@ struct MaskPointsColumn: View {
     let path: EPPath?
     let look: KeyframeLook
     let onKey: () -> Void
+    /// ‹ da coluna: na máscara aberta volta à lista de máscaras (nulo = fecha o painel).
+    var onBack: (() -> Void)? = nil
 
     var body: some View {
         let kind = state.kind, i = state.index
         let between = kind == EPKind.between
         let canRemove = (path?.v.indices.contains(i) ?? false) && kind != EPKind.between && kind != EPKind.none
         VStack(spacing: 0) {
-            cell("mask.points.back", AureaText.t("panel_voltar_ferramentas"), enabled: true, action: { model.panel = .none }) { tint in
+            cell("mask.points.back", AureaText.t("panel_voltar_ferramentas"), enabled: true, action: { if let onBack { onBack() } else { model.panel = .none } }) { tint in
                 CupertinoGlyph.text(CupertinoGlyph.ChevronLeft, size: 22, color: tint).mirrorsInRtl()
             }
             cell("mask.points.key", AureaText.t(look == .keyHere ? "panel_tirar_keyframe_daqui" : "panel_marcar_keyframe_aqui"), enabled: mask.closed, action: onKey) { _ in

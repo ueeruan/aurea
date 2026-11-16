@@ -127,6 +127,7 @@ struct TopBarView: View {
     @EnvironmentObject private var model: AureaModel
     @EnvironmentObject private var shell: ShellPresentation
     @ObservedObject private var requests = OmegaChromeRequests.shared
+    @ObservedObject private var plugins = PluginRuntime.shared
     private var layer: LayerItem? { model.selectedLayer }
     private var ids: [NSNumber] { model.selection.map { NSNumber(value: $0) } }
     private var count: Int { model.selection.count }
@@ -134,8 +135,8 @@ struct TopBarView: View {
     @State private var aligning = false
     /// Omega chrome (área 02, P1-1): o ⋮ da camada é um menu ancorado; o seletor de "Substituir mídia" mora aqui.
     @State private var layerMenu = false
+    @State private var projectMore = false
     @State private var replaceTarget: LayerRef?
-    @State private var boneTarget: LayerRef?
     /// A barra da camada entra descendo da borda de cima em 100 ms (a `action_bar_show` da referência).
     @State private var layerEnter: CGFloat = 0
     private var parent: Int64 { (model.detail["parentId"] as? NSNumber)?.int64Value ?? 0 }
@@ -157,12 +158,6 @@ struct TopBarView: View {
         // A busca de ferramentas (lupa dos Ajustes ou do Copiar e colar) e o teste de desempenho.
         .sheet(isPresented: $shell.performanceTest) { PerformanceTestPanel() }
         .sheet(isPresented: $shell.commandSearch) { CommandSearchView().environmentObject(model).environmentObject(shell) }
-        // 0.5.2: "Prender a um osso" (par do BoneAttachSheet.kt).
-        .sheet(item: $boneTarget) { target in
-            BoneAttachSheet(layerId: target.id) { boneTarget = nil }
-                .environmentObject(model)
-                .presentationDetents([.medium, .large])
-        }
         .sheet(item: $replaceTarget) { target in
             ShellMediaPicker(selectionLimit: 1, filter: .any(of: [.images, .videos])) { items in
                 replaceTarget = nil
@@ -192,9 +187,12 @@ struct TopBarView: View {
         switch model.panel {
         case .none, .dock, .exportPanel: return nil
         case .transform: return AureaText.t("sh_dock_transform")
-        case .text: return AureaText.t("text_options")
+        case .text: return AureaText.t("sh_dock_edit_text")
         case .effects: return AureaText.t("panel_efeitos")
-        case .layer3D: return AureaText.t("panel_material_ambiente")
+        // 13/11/2026: o modelo importado abre o painel do modelo (Material · Textura · Animação · Sombra).
+        case .layer3D:
+            if (model.face3D == .material || model.face3D == .object) && model.importedModelSelected { return AureaText.t("m3d_title") }
+            return AureaText.t(model.face3D.titleKey ?? "panel_material_ambiente")
         case .appearance: return AureaText.t("panel_mistura_opacidade")
         case .speed: return AureaText.t("panel_tempo_velocidade")
         case .clipEdit: return AureaText.t("i18n_clip_modes")
@@ -208,7 +206,7 @@ struct TopBarView: View {
         case .particles: return AureaText.t("panel_particulas")
         case .tracking: return AureaText.t("panel_rastreio")
         case .captions: return AureaText.t("panel_legendas")
-        case .vector: return AureaText.t("panel_vetor")
+        case .vector: return AureaText.t(model.vectorFace == .fill ? "panel_cor_preenchimento" : "fn_vec_paths_title")
         case .aiVideo: return AureaText.t("panel_ai_video")
         case .filters: return AureaText.t("grade_title_filters")
         case .adjust: return AureaText.t("grade_title_adjust")
@@ -218,6 +216,11 @@ struct TopBarView: View {
         // Omega conteúdo (área 06).
         case .drawing: return AureaText.t("om_draw_title")
         case .editPoints: return AureaText.t("om_pts_title")
+        // Funções do AUREA (13/11/2026).
+        case .layerOptions: return AureaText.t("fn_tool_layer_options")
+        case .layer3DFunctions: return AureaText.t("fn_tool_layer3d")
+        case .textLayout: return AureaText.t("fn_text_layout")
+        case .animation: return AureaText.t("panel_animacao")
         }
     }
 
@@ -256,25 +259,30 @@ struct TopBarView: View {
                     .accessibilityIdentifier("editor.topbar.exit")
                 ShellInlineName(name: model.projectName, placeholder: AureaText.t("edt_untitled"), limit: 320) { model.renameCurrentProject(to: $0) }
                     .accessibilityIdentifier("editor.topbar.title")
-                // 0.4.6: o assistente de IA (OpenRouter, modelos gratuitos) que age no projeto.
-                ShellBarButton(glyph: CupertinoGlyph.Sparkles, description: AureaText.t("ai_open"), size: 20, width: 40, height: EditorLayout.topBar) {
-                    model.pause(); model.assistantOpen = true
+                ShellBarButton(glyph: OmegaGlyph.ellipsisVertical, description: AureaText.t("editor_mais"), size: 20, width: 40, height: EditorLayout.topBar) {
+                    model.pause(); projectMore = true
                 }
-                .accessibilityIdentifier("editor.topbar.assistant")
-                // 0.3.4 plugins: o menu de plugins (painéis e ações "editor.menu"); some sem plugin.
-                PluginEditorMenuButton()
+                .accessibilityIdentifier("editor.topbar.more")
+                .aureaAnchoredMenu(isPresented: $projectMore, alignEnd: true, tag: "editor.topbar.more.menu") {
+                    var entries: [MenuEntry] = [
+                        .item(AureaText.t(AureaMcpFlags.legacyChat ? "ai_open" : "mcp_title"), glyph: CupertinoGlyph.Sparkles,
+                              tag: "editor.topbar.assistant") { model.pause(); model.assistantOpen = true },
+                    ]
+                    let pluginEntries = plugins.editorMenuEntries()
+                    if !pluginEntries.isEmpty {
+                        entries.append(.item(AureaText.t("pv2_menu"), glyph: CupertinoGlyph.Wrench,
+                                             submenu: pluginEntries, tag: "plugin.menu"))
+                    }
+                    return entries
+                }
                 ShellBarButton(glyph: CupertinoGlyph.Gear, description: AureaText.t("editor_ajustes_projeto"), width: 40, height: EditorLayout.topBar) { openSettings() }
                     .accessibilityIdentifier("editor.projectMenu")
-                // 0.4.1 (mockup "interface 03"): exportar = quadrado de 28 com fio de 1,5 no destaque.
                 Button { model.pause(); model.openExport() } label: {
-                    CupertinoGlyph.text(CupertinoGlyph.SquareArrowUp, size: 16, color: AureaColors.accent)
-                        .frame(width: 28, height: 28)
-                        .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(AureaColors.accent, lineWidth: 1.5))
-                        .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    CupertinoGlyph.text(CupertinoGlyph.SquareArrowUp, size: 23, color: AureaColors.accent)
+                        .frame(width: 44, height: EditorLayout.topBar)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(AureaPressStyle())
-                .padding(.leading, 4).padding(.trailing, 10)
-                .frame(height: EditorLayout.topBar)
                 .accessibilityLabel(AureaText.t("om_tb_share"))
                 .accessibilityIdentifier("editor.export")
             }
@@ -343,56 +351,61 @@ struct TopBarView: View {
 
     /// Barra da CAMADA (`fragment_element_actionbar`), fundo A9: ‹ · nome · vínculo ·
     /// 🗑 · ⋮. O vínculo some em camada de áudio; a lixeira apaga sem perguntar (um
-    /// desfazer); o ⋮ abre o menu da camada ancorado nele. 3D e desfoque de
-    /// movimento ficam na barra (0.3.3) e também no ⋮; duplicar, no Copiar e
-    /// colar; a lupa, nos Ajustes.
+    /// desfazer); o ⋮ abre o menu da camada ancorado nele (só ações da camada,
+    /// Funções 13/11/2026). 3D e desfoque de movimento permanecem visíveis;
+    /// os plugins ficam no menu e duplicar continua no Copiar e colar.
     private func layerBar(_ row: LayerItem) -> some View {
         HStack(spacing: 0) {
-            ShellBarButton(glyph: CupertinoGlyph.ChevronLeft, description: AureaText.t("editor_voltar_tirar_selecao"), size: 20, width: 40, height: EditorLayout.topBar) { model.editorBack() }
+            ShellBarButton(glyph: CupertinoGlyph.ChevronLeft, description: AureaText.t("editor_voltar_tirar_selecao"), size: 20, width: 44, height: 44) { model.editorBack() }
                 .accessibilityIdentifier("layer.back")
             ShellInlineName(name: row.name, placeholder: AureaText.t("ios_unnamed_layer"), enabled: !row.locked) { value in
                 model.mutate { $0.setLayer(row.id, name: value) }; model.refreshModel(force: true)
             }
             .id(row.id)
+            .frame(minWidth: 0, maxWidth: .infinity)
+            .layoutPriority(-1)
             .accessibilityIdentifier("layer.name")
-            // 0.3.3 recursos: 3D e desfoque de movimento voltam à barra da camada
-            // (como na 0.3.2: aceso em destaque quando ligado, apagado se travada).
-            // Continuam também no ⋮.
             if row.kind != 3 {
                 let intrinsic = [8, 9, 10].contains(row.kind)
                 let threeD = row.threeD || intrinsic
                 let motion = ((model.detail["timeFlags"] as? NSNumber)?.uint32Value ?? 0) & 2 != 0
-                ShellBarButton(glyph: CupertinoGlyph.Cube, description: AureaText.t("sh_add_tab_3d"), size: 20, width: 40, height: EditorLayout.topBar,
+                ShellBarButton(glyph: CupertinoGlyph.Cube, description: AureaText.t("sh_add_tab_3d"), size: 20, width: 44, height: 44,
                                tint: threeD ? AureaColors.accent : AureaColors.text, enabled: !row.locked && !intrinsic,
                                disabledTint: threeD ? AureaColors.accent : nil) {
                     _ = model.engine.setLayer3D(!threeD, forLayer: row.id); model.refreshModel(force: true)
                 }
                 .accessibilityValue(AureaText.t(threeD ? "common_on" : "common_off"))
+                .accessibilityAddTraits(threeD ? .isSelected : [])
                 .accessibilityIdentifier("trial.layer.3d")
-                ShellBarButton(glyph: CupertinoGlyph.MotionBlur, description: AureaText.t("editor_desfoque_movimento"), size: 20, width: 40, height: EditorLayout.topBar,
-                               tint: motion ? AureaColors.accent : AureaColors.text, enabled: !row.locked) {
-                    model.mutate { $0.setMotionBlur(!motion, forLayer: row.id) }; model.refreshModel(force: true)
+                ShellBarButton(glyph: CupertinoGlyph.MotionBlur, description: AureaText.t("editor_desfoque_movimento"), size: 20, width: 44, height: 44,
+                               tint: motion ? AureaColors.accent : AureaColors.text, enabled: !row.locked,
+                               onLongPress: { model.mutate { $0.setMotionBlur(!motion, forLayer: row.id) }; model.refreshModel(force: true) }) {
+                    model.transformTab = 5
+                    model.openPanel(.transform)
                 }
                 .accessibilityValue(AureaText.t(motion ? "common_on" : "common_off"))
+                .accessibilityAddTraits(motion ? .isSelected : [])
+                .accessibilityAction(named: Text(AureaText.t("fn_motion_blur_toggle"))) {
+                    model.mutate { $0.setMotionBlur(!motion, forLayer: row.id) }; model.refreshModel(force: true)
+                }
                 .accessibilityIdentifier("trial.layer.motionBlur")
             }
             if row.kind != 3 {
-                linkMenuButton(tint: parent != 0 ? AureaColors.accent : AureaColors.text, width: 40)
+                linkMenuButton(tint: parent != 0 ? AureaColors.accent : AureaColors.text, width: 44, height: 44)
             }
-            // 0.3.4 plugins: botões "layer.toolbar" dos plugins ligados.
-            PluginLayerBarButtons()
-            ShellBarButton(glyph: CupertinoGlyph.Trash, description: AureaText.t("editor_excluir_camada"), size: 19, width: 40, height: EditorLayout.topBar,
+            ShellBarButton(glyph: CupertinoGlyph.Trash, description: AureaText.t("editor_excluir_camada"), size: 19, width: 44, height: 44,
                            enabled: !row.locked) { removeSelection() }
                 .accessibilityIdentifier("layer.delete")
-            ShellBarButton(glyph: OmegaGlyph.ellipsisVertical, description: AureaText.t("editor_mais_acoes_camada"), size: 20, width: 40, height: EditorLayout.topBar) {
+            ShellBarButton(glyph: OmegaGlyph.ellipsisVertical, description: AureaText.t("editor_mais_acoes_camada"), size: 20, width: 44, height: 44) {
                 if model.status.playing != 0 { model.playPause() }
                 layerMenu = true
             }
             .accessibilityIdentifier("layer.menu")
             .aureaAnchoredMenu(isPresented: $layerMenu, alignEnd: true, tag: "layer.menu.popup") { [rowId = row.id] in
                 // Lê a camada AGORA: uma alternância redesenha com o estado novo.
-                guard let fresh = model.layers.first(where: { $0.id == rowId }) else { return [] }
-                return layerMenuEntries(fresh) + PluginRuntime.shared.layerMenuEntries()   // 0.3.4 plugins
+                let rootLayer = model.layers.first(where: { $0.id == rowId })
+                guard let fresh = rootLayer ?? model.selectedLayer, fresh.id == rowId else { return [] }
+                return layerMenuEntries(fresh)
             }
         }
         .frame(maxHeight: .infinity)
@@ -404,259 +417,171 @@ struct TopBarView: View {
         }
     }
 
-    /// As linhas do ⋮ da camada: as mesmas da antiga folha, na mesma ordem (o
-    /// conteúdo é do painel da camada), mais "Camada 3D", que saiu da barra.
+    /// As linhas do ⋮ da camada: só AÇÕES SOBRE A CAMADA, no máximo `layerMenuMax`
+    /// (Funções do AUREA, 13/11/2026). Quais linhas e em que ordem é a conta pura
+    /// `layerMenuActions` (gêmea do LayerMenuSpec.kt); aqui cada uma vira a linha.
+    /// O que saiu do ⋮ e onde mora agora está no comentário de `LayerMenuAction`.
     private func layerMenuEntries(_ row: LayerItem) -> [MenuEntry] {
         let ids = [NSNumber(value: row.id)]
-        let index = model.layers.firstIndex(where: { $0.id == row.id }) ?? 0
-        let inside = model.status.playhead > Int64(row.startFrame) && model.status.playhead < Int64(row.endFrame)
+        let rootIndex = model.layers.firstIndex(where: { $0.id == row.id })
+        let index = rootIndex ?? 0
         let refresh: () -> Void = { model.refreshModel(force: true) }
+        let actions = rootIndex != nil
+            ? layerMenuActions(kind: row.kind, clipMask: row.clipToBelow || row.clipCandidate,
+                               canConvertOutline: row.kind == 5 && model.canConvertToOutline(row.id)) : []
         var out: [MenuEntry] = [.header(AureaText.t("editor_camada"))]
-        if row.kind == 1 || row.kind == 3 {
-            out.append(.item(AureaText.t("editor_velocidade"), glyph: CupertinoGlyph.Speedometer) { model.openPanel(.speed) })
-        }
-        // 0.3.3 recursos: entradas da doca da 0.3.2 que ficaram sem lugar no painel da camada.
-        // Opções de texto (espaçamentos, caixa, fundo, caminho, sombra e trechos ricos).
-        if row.kind == 4 {
-            out.append(.item(AureaText.t("text_options"), glyph: ShellGlyph.SliderHorizontalBelowRectangle,
-                             tag: "layer.menu.textOptions") { model.openPanel(.text) })
-        }
-        // Fantoche (o "Rig" da doca da imagem): o cartão do efeito já no modo de pinos.
-        if row.kind == 2 {
-            out.append(.item(AureaText.t("fx_name_puppet"), glyph: CupertinoGlyph.PersonCropCircle, enabled: !row.locked,
-                             tag: "layer.menu.puppet") { model.openPuppetTool() })
-        }
-        out.append(.item(AureaText.t(row.locked ? "editor_desbloquear_camada" : "editor_bloquear_camada"),
-                         glyph: row.locked ? ShellGlyph.LockOpenFill : CupertinoGlyph.LockFill,
-                         sublabel: AureaText.t(row.locked ? "editor_volta_aceitar_movimento_edicao" : "editor_nao_aceita_movimento_corte_nem_edicao"),
-                         keepOpen: true) { model.mutate { $0.setLayer(row.id, locked: !row.locked) }; refresh() })
-        out.append(.item(AureaText.t(row.visible ? "editor_ocultar_camada" : "editor_mostrar_camada"),
-                         glyph: row.visible ? CupertinoGlyph.EyeSlash : CupertinoGlyph.Eye, keepOpen: true) {
-            model.mutate { $0.setLayer(row.id, visible: !row.visible) }; refresh()
-        })
-        // Omega timeline (área 03, D-1): as trilhas de keyframes da camada (antes pela pílula).
-        out.append(.item(AureaText.t(model.timelineExpandedLayers.contains(row.id) ? "om_tl_hide_tracks" : "om_tl_show_tracks"),
-                         glyph: CupertinoGlyph.Rhombus) { model.toggleTimelineTracks(row.id) })
-        out.append(.item(AureaText.t("editor_solo"), glyph: CupertinoGlyph.Speaker2, sublabel: AureaText.t("editor_alguma_camada_solo_previa_som_so"),
-                         checked: row.solo, keepOpen: true) { model.mutate { $0.setLayer(row.id, solo: !row.solo) }; refresh() })
-        // AE compositing: Tímida (Shy) da camada e "Ocultar camadas tímidas" da composição (par do Menus.kt).
-        out.append(.item(AureaText.t("ae_layer_shy"), glyph: CupertinoGlyph.PersonCropCircle, sublabel: AureaText.t("ae_layer_shy_hint"),
-                         checked: row.shy, keepOpen: true, tag: "layer.menu.shy") { model.setLayerShy(row.id, !row.shy) })
-        out.append(.item(AureaText.t("ae_comp_hide_shy"), glyph: CupertinoGlyph.EyeSlash, sublabel: AureaText.t("ae_comp_hide_shy_hint"),
-                         checked: model.hideShy, keepOpen: true, tag: "layer.menu.hideShy") { model.changeHideShy(!model.hideShy) })
-        // 0.5.2: "Prender a um osso" — com algum modelo 3D com rig na composição (par do Menus.kt).
-        if row.kind != 3 && row.kind != 10 && model.layers.contains(where: { $0.kind == 10 && $0.id != row.id }) {
-            let bone = model.layerParentBone(row.id)
-            let parentModel: LayerItem? = row.parentIndex >= 0 && Int(row.parentIndex) < model.layers.count
-                && model.layers[Int(row.parentIndex)].kind == 10 ? model.layers[Int(row.parentIndex)] : nil
-            let sub = bone >= 0 && parentModel != nil
-                ? AureaText.t("bone_attach_current", boneLabel(model.boneName(parentModel!.id, bone), bone))
-                : AureaText.t("bone_attach_menu_hint")
-            out.append(.item(AureaText.t("bone_attach_title"), glyph: CupertinoGlyph.Link, sublabel: sub,
-                             enabled: !row.locked, tag: "layer.menu.boneAttach") { boneTarget = LayerRef(id: row.id) })
-        }
-        // 0.4.7: imagem ou vídeo vira objeto da cena (par do Menus.kt).
-        if row.kind == 1 || row.kind == 2 {
-            out.append(.item(AureaText.t("layer_to_3d_object"), glyph: CupertinoGlyph.Cube, sublabel: AureaText.t("layer_to_3d_object_hint"),
-                             enabled: !row.locked, tag: "layer.menu.to3dObject") {
-                model.layerTo3DObject(row.id, kind: row.kind, name: row.name) { made in
-                    if made < 0 { model.toast = AureaText.t("layer_to_3d_failed") }
-                    else { refresh(); model.select(layerId: made, additive: false) }
-                }
-            })
-        }
-        // Omega chrome (área 02, P0-3): "Camada 3D" saiu da barra da camada e mora aqui.
         if row.kind != 3 {
             let intrinsic = [8, 9, 10].contains(row.kind)
             let threeD = row.threeD || intrinsic
-            out.append(.item(AureaText.t("sh_add_tab_3d"), glyph: CupertinoGlyph.Cube, checked: threeD, enabled: !row.locked && !intrinsic,
-                             keepOpen: true, tag: "layer.menu.threeD") {
+            let motion = ((model.detail["timeFlags"] as? NSNumber)?.uint32Value ?? 0) & 2 != 0
+            out.append(.item(AureaText.t("sh_add_tab_3d"), glyph: CupertinoGlyph.Cube, checked: threeD,
+                             enabled: !row.locked && !intrinsic, keepOpen: true, tag: "layer.menu.3d") {
                 _ = model.engine.setLayer3D(!threeD, forLayer: row.id); refresh()
             })
-        }
-        // Linha Magnética: só em trecho com FONTE (vídeo, imagem, áudio ou pré-composição).
-        if row.kind == 1 || row.kind == 2 || row.kind == 3 || row.kind == 12 {
-            out.append(.item(AureaText.t("editor_linha_magnetica"), glyph: CupertinoGlyph.Link, sublabel: AureaText.t("editor_linha_magnetica_detalhe"),
-                             checked: row.magnetic, keepOpen: true) { model.setLayerMagneticTrack(row.id, !row.magnetic) })
-        }
-        if row.kind != 3 {
-            out.append(.item(AureaText.t("editor_camada_ajuste"), glyph: CupertinoGlyph.SliderHorizontal3,
-                             sublabel: AureaText.t("editor_efeitos_desta_camada_valem_todas_baixo"), checked: row.adjustment, keepOpen: true) {
-                model.mutate { $0.setLayer(row.id, adjustment: !row.adjustment) }; refresh()
+            out.append(.item(AureaText.t("editor_desfoque_movimento"), glyph: CupertinoGlyph.MotionBlur,
+                             enabled: !row.locked, tag: "layer.menu.motionBlur") {
+                model.transformTab = 5
+                model.openPanel(.transform)
             })
-            if row.adjustment {
-                // Camadas afetadas: todas abaixo → só a logo abaixo → só as escolhidas.
-                let scope = model.engine.adjustmentScope(row.id)
-                out.append(.item(AureaText.t("la_affected") + " · " + AureaText.t(scope == 1 ? "la_affected_below" : scope == 2 ? "la_affected_chosen" : "la_affected_all"),
-                                 glyph: CupertinoGlyph.SliderHorizontal3,
-                                 sublabel: AureaText.t(scope == 2 ? "la_affected_chosen_hint" : "la_affected_hint"), keepOpen: true) {
-                    model.engine.setAdjustmentScope((scope + 1) % 3, forLayer: row.id); refresh()
+            out.append(.item(AureaText.t("fn_motion_blur_toggle"), glyph: CupertinoGlyph.MotionBlur, checked: motion,
+                             enabled: !row.locked, keepOpen: true, tag: "trial.layer.motionBlur.toggle") {
+                model.mutate { $0.setMotionBlur(!motion, forLayer: row.id) }; refresh()
+            })
+            out.append(.divider)
+        }
+        for action in actions {
+            switch action {
+            // Alternâncias: o rótulo troca na hora (o menu fica aberto).
+            case .lock:
+                out.append(.item(AureaText.t(row.locked ? "editor_desbloquear_camada" : "editor_bloquear_camada"),
+                                 glyph: row.locked ? ShellGlyph.LockOpenFill : CupertinoGlyph.LockFill,
+                                 sublabel: AureaText.t(row.locked ? "editor_volta_aceitar_movimento_edicao" : "editor_nao_aceita_movimento_corte_nem_edicao"),
+                                 keepOpen: true) { model.mutate { $0.setLayer(row.id, locked: !row.locked) }; refresh() })
+            case .hide:
+                out.append(.item(AureaText.t(row.visible ? "editor_ocultar_camada" : "editor_mostrar_camada"),
+                                 glyph: row.visible ? CupertinoGlyph.EyeSlash : CupertinoGlyph.Eye, keepOpen: true) {
+                    model.mutate { $0.setLayer(row.id, visible: !row.visible) }; refresh()
                 })
-                if scope == 2 {
-                    let below = Array(model.layers.dropFirst(index + 1)).filter { $0.kind != 3 }
-                    let chosen = Set(model.engine.adjustmentTargets(row.id).map(\.int64Value))
-                    if below.isEmpty { out.append(.item(AureaText.t("la_affected_none_below"), glyph: CupertinoGlyph.SliderHorizontal3, enabled: false)) }
-                    for b in below {
-                        out.append(.item(b.name, glyph: CupertinoGlyph.SliderHorizontal3, checked: chosen.contains(b.id), keepOpen: true) {
-                            model.engine.setAdjustmentTarget(b.id, on: !chosen.contains(b.id), forLayer: row.id); refresh()
-                        })
-                    }
+            case .solo:
+                out.append(.item(AureaText.t("editor_solo"), glyph: CupertinoGlyph.Speaker2, sublabel: AureaText.t("editor_alguma_camada_solo_previa_som_so"),
+                                 checked: row.solo, keepOpen: true) { model.mutate { $0.setLayer(row.id, solo: !row.solo) }; refresh() })
+            // Omega timeline (área 03, D-1): as trilhas de keyframes da camada (antes pela pílula).
+            case .keyframeTracks:
+                out.append(.item(AureaText.t(model.timelineExpandedLayers.contains(row.id) ? "om_tl_hide_tracks" : "om_tl_show_tracks"),
+                                 glyph: CupertinoGlyph.Rhombus) { model.toggleTimelineTracks(row.id) })
+            case .duplicate:
+                out.append(.item(AureaText.t("editor_duplicar"), glyph: CupertinoGlyph.PlusSquareOnSquare) { model.engine.duplicateLayers(ids); refresh() })
+            case .pullToPlayhead:
+                out.append(.item(AureaText.t("editor_puxar_cabecote"), glyph: CupertinoGlyph.ArrowDownToLine, enabled: !row.locked) {
+                    if model.status.playing != 0 { model.playPause() }; model.moveToPlayhead(row.id)
+                })
+            case .bringForward:
+                out.append(.item(AureaText.t("editor_trazer_frente"), glyph: CupertinoGlyph.ArrowUpToLine, enabled: index > 0) {
+                    model.reorderLayer(row.id, displayIndex: index - 1)
+                })
+            case .sendBackward:
+                out.append(.item(AureaText.t("editor_enviar_tras"), glyph: CupertinoGlyph.ArrowDownToLine, enabled: index < model.layers.count - 1) {
+                    model.reorderLayer(row.id, displayIndex: index + 1)
+                })
+            // Etiqueta: "sem" e as doze cores, numa fileira de ícones.
+            case .labels:
+                out.append(.header(AureaText.t("editor_etiqueta")))
+                var cells = [MenuIconCell(label: AureaText.t("editor_nenhum"), glyph: ShellGlyph.Nosign) {
+                    model.mutate { $0.setLayer(row.id, label: 0) }; refresh()
+                }]
+                for (i, color) in AureaColors.labelPalette.enumerated() {
+                    cells.append(MenuIconCell(label: AureaText.t("editor_etiqueta") + " \(i + 1)", swatch: color) {
+                        model.mutate { $0.setLayer(row.id, label: UInt32(i + 1)) }; refresh()
+                    })
                 }
-            }
-            out.append(.item(AureaText.t("editor_guia_nao_exporta"), glyph: CupertinoGlyph.Grid, sublabel: AureaText.t("editor_aparece_aqui_editor_fica_fora_video"),
-                             checked: row.guide, keepOpen: true) { model.mutate { $0.setLayer(row.id, guide: !row.guide) }; refresh() })
-            // AE compositing: Preservar transparência (o T do AE; par do Menus.kt).
-            out.append(.item(AureaText.t("ae_layer_preserve_transparency"), glyph: CupertinoGlyph.SquareStack3dUp,
-                             sublabel: AureaText.t("ae_layer_preserve_transparency_hint"), checked: row.preserveTransparency,
-                             enabled: !row.locked, keepOpen: true, tag: "layer.menu.preserveTransparency") {
-                model.setLayerPreserveTransparency(row.id, !row.preserveTransparency)
-            })
-        }
-        out.append(.item(AureaText.t("editor_duplicar"), glyph: CupertinoGlyph.PlusSquareOnSquare) { model.engine.duplicateLayers(ids); refresh() })
-        out.append(.item(AureaText.t("editor_puxar_cabecote"), glyph: CupertinoGlyph.ArrowDownToLine, enabled: !row.locked) {
-            if model.status.playing != 0 { model.playPause() }; model.moveToPlayhead(row.id)
-        })
-        out.append(.item(AureaText.t("editor_copiar_camada"), glyph: CupertinoGlyph.DocOnDoc) { model.engine.copyLayers(ids) })
-        out.append(.item(AureaText.t("editor_colar_camada_cabecote"), glyph: CupertinoGlyph.DocOnClipboard, enabled: model.engine.clipboardState & 1 != 0) {
-            model.engine.pasteLayers(model.status.playhead); refresh()
-        })
-        out.append(.item(AureaText.t("editor_copiar_estilo"), glyph: CupertinoGlyph.Paintbrush) { model.engine.copyStyle(row.id) })
-        out.append(.item(AureaText.t("editor_colar_estilo"), glyph: ShellGlyph.PaintbrushFill, enabled: model.engine.clipboardState & 2 != 0) {
-            model.engine.pasteStyle(ids); refresh()
-        })
-        out.append(.item(AureaText.t("editor_trazer_frente"), glyph: CupertinoGlyph.ArrowUpToLine, enabled: index > 0) {
-            model.reorderLayer(row.id, displayIndex: index - 1)
-        })
-        out.append(.item(AureaText.t("editor_enviar_tras"), glyph: CupertinoGlyph.ArrowDownToLine, enabled: index < model.layers.count - 1) {
-            model.reorderLayer(row.id, displayIndex: index + 1)
-        })
-        // Etiqueta: "sem" e as doze cores, numa fileira de ícones.
-        out.append(.header(AureaText.t("editor_etiqueta")))
-        var cells = [MenuIconCell(label: AureaText.t("editor_nenhum"), glyph: ShellGlyph.Nosign) {
-            model.mutate { $0.setLayer(row.id, label: 0) }; refresh()
-        }]
-        for (i, color) in AureaColors.labelPalette.enumerated() {
-            cells.append(MenuIconCell(label: AureaText.t("editor_etiqueta") + " \(i + 1)", swatch: color) {
-                model.mutate { $0.setLayer(row.id, label: UInt32(i + 1)) }; refresh()
-            })
-        }
-        out.append(.icons(cells, selectedIndex: Int(row.label), keepOpen: true, tag: "layer.menu.labels"))
-        if row.kind != 3 {
-            // 0.4.6: espelhar (par do Menus.kt).
-            out.append(.item(AureaText.t("layer_flip_horizontal"), glyph: CupertinoGlyph.ArrowLeftRight, tag: "layer.flip.h") {
-                model.flipLayer(row.id, vertical: false)
-            })
-            out.append(.item(AureaText.t("layer_flip_vertical"), glyph: CupertinoGlyph.ArrowUpArrowDown, tag: "layer.flip.v") {
-                model.flipLayer(row.id, vertical: true)
-            })
-            out.append(.header(AureaText.t("editor_grupo")))
-            if row.clipToBelow || row.clipCandidate {
+                out.append(.icons(cells, selectedIndex: Int(row.label), keepOpen: true, tag: "layer.menu.labels"))
+            // 0.4.6: espelhar (o "Flip" da referência); H e V numa fileira só (par do Menus.kt).
+            case .flip:
+                out.append(.header(AureaText.t("editor_grupo")))
+                out.append(.icons([
+                    MenuIconCell(label: AureaText.t("layer_flip_horizontal"), glyph: CupertinoGlyph.ArrowLeftRight, tag: "layer.flip.h") {
+                        model.flipLayer(row.id, vertical: false)
+                    },
+                    MenuIconCell(label: AureaText.t("layer_flip_vertical"), glyph: CupertinoGlyph.ArrowUpArrowDown, tag: "layer.flip.v") {
+                        model.flipLayer(row.id, vertical: true)
+                    },
+                ], tag: "layer.menu.flip"))
+            case .clipMask:
                 out.append(.item(AureaText.t(row.clipToBelow ? "editor_liberar_mascara_recorte" : "editor_criar_mascara_recorte"),
                                  glyph: CupertinoGlyph.ArrowDownRightSquare, sublabel: AureaText.t("editor_mascara_recorte_detalhe"), tag: "layer.clipMask") {
                     model.setLayerClipToBelow(row.id, !row.clipToBelow)
                 })
-            }
             // Bugs 0.3.4 (bug 11): "Converter em contorno" — a forma viva vira vetor
             // (mesma silhueta, cor e traço) e abre o Editar pontos (par do Menus.kt).
-            if row.kind == 5 && model.canConvertToOutline(row.id) {
+            case .convertOutline:
                 out.append(.item(AureaText.t("om_convert_outline_035"), glyph: CupertinoGlyph.PencilOutline,
                                  sublabel: AureaText.t("om_convert_outline_detail_035"), enabled: !row.locked,
                                  tag: "layer.menu.convertOutline") {
                     model.convertShapeToOutline(row.id)
                 })
-            }
-            if row.kind == 12 {
+            case .enterGroup:
                 out.append(.item(AureaText.t("editor_entrar_grupo"), glyph: CupertinoGlyph.ArrowDownRightSquare) { model.openGroup(row.id) })
+                out.append(.item(AureaText.t("prerender_group"), glyph: CupertinoGlyph.Play,
+                                 tag: "layer.menu.group.prerender") { model.startPreRender(1, groupLayer: row.id) })
+            case .ungroup:
                 out.append(.item(AureaText.t("editor_desagrupar"), glyph: ShellGlyph.SquareSplit2x2) { model.ungroup(row.id) })
-                let through = model.engine.groupCameraPassThrough(row.id) == 1
-                out.append(.item(AureaText.t("la_group_camera"), glyph: CupertinoGlyph.Camera, sublabel: AureaText.t("la_group_camera_hint"),
-                                 checked: through, keepOpen: true) {
-                    if model.engine.setGroupCameraPassThrough(!through, forLayer: row.id) {
-                        model.toast = AureaText.t(through ? "app_group_camera_sealed" : "app_group_camera_reaches")
-                    }
-                    refresh()
-                })
-            } else {
-                out.append(.item(AureaText.t("editor_converter_grupo"), glyph: CupertinoGlyph.RectangleStack) { model.groupSelection() })
-            }
-            let acceptsLights = model.engine.layerAcceptsLights(row.id)
-            if acceptsLights >= 0 {
-                out.append(.item(AureaText.t("la_accepts_lights"), glyph: CupertinoGlyph.Lightbulb, sublabel: AureaText.t("la_accepts_lights_hint"),
-                                 checked: acceptsLights == 1, keepOpen: true) {
-                    _ = model.engine.setLayerAcceptsLights(acceptsLights != 1, forLayer: row.id); refresh()
-                })
-            }
-            // Pôr esta camada num grupo que já existe aqui / tirar do grupo aberto.
-            for group in model.layers where group.kind == 12 && group.id != row.id {
-                out.append(.item(AureaText.t("la_add_to_group") + " · " + group.name, glyph: CupertinoGlyph.RectangleStack) {
-                    let why = model.engine.addLayers([NSNumber(value: row.id)], toGroup: group.id)
-                    if !why.isEmpty { model.toast = AureaText.t("app_group_add_failed", AureaEngineText.reason(why)) }
-                    refresh()
-                })
-            }
-            if model.engine.precompDepth > 0 {
-                out.append(.item(AureaText.t("la_remove_from_group"), glyph: CupertinoGlyph.ArrowUturnLeft) {
-                    let why = model.engine.removeLayerFromGroup(row.id)
-                    if !why.isEmpty { model.toast = AureaText.t("app_group_remove_failed", AureaEngineText.reason(why)) }
-                    refresh()
-                })
-            }
-        }
-        if row.kind == 1 || row.kind == 2 || row.kind == 3 {
-            out.append(.header(AureaText.t("sh_menu_media")))
-            if row.kind == 1 || row.kind == 2 {
+            // "Grupo ›": converter, pôr num grupo que já existe aqui, tirar do grupo aberto.
+            case .groupMenu:
+                var sub: [MenuEntry] = []
+                if row.kind != 12 {
+                    sub.append(.item(AureaText.t("editor_converter_grupo"), glyph: CupertinoGlyph.RectangleStack, tag: "layer.menu.group.convert") {
+                        model.groupSelection()
+                    })
+                }
+                for group in model.layers where group.kind == 12 && group.id != row.id {
+                    sub.append(.item(AureaText.t("la_add_to_group") + " · " + group.name, glyph: CupertinoGlyph.RectangleStack) {
+                        let why = model.engine.addLayers([NSNumber(value: row.id)], toGroup: group.id)
+                        if !why.isEmpty { model.toast = AureaText.t("app_group_add_failed", AureaEngineText.reason(why)) }
+                        refresh()
+                    })
+                }
+                if model.engine.precompDepth > 0 {
+                    sub.append(.item(AureaText.t("la_remove_from_group"), glyph: CupertinoGlyph.ArrowUturnLeft, tag: "layer.menu.group.remove") {
+                        let why = model.engine.removeLayerFromGroup(row.id)
+                        if !why.isEmpty { model.toast = AureaText.t("app_group_remove_failed", AureaEngineText.reason(why)) }
+                        refresh()
+                    })
+                }
+                if !sub.isEmpty {
+                    out.append(.item(AureaText.t(row.kind == 12 ? "la_add_to_group" : "editor_converter_grupo"),
+                                     glyph: CupertinoGlyph.RectangleStack, submenu: sub, tag: "layer.menu.group"))
+                }
+            case .replaceMedia:
+                out.append(.header(AureaText.t("sh_menu_media")))
                 out.append(.item(AureaText.t("layer_replace_media"), glyph: CupertinoGlyph.Arrow2Squarepath, sublabel: AureaText.t("layer_replace_media_detail"),
                                  enabled: !row.locked) { replaceTarget = LayerRef(id: row.id) })
-                // 0.4.5: Remover fundo — o efeito na camada e, no vídeo, a análise do clipe.
+            // 0.4.5: Remover fundo — o efeito na camada e, no vídeo, a análise do clipe.
+            case .removeBackground:
                 out.append(.item(AureaText.t("bg_remove_action"), glyph: CupertinoGlyph.PersonCropCircle,
                                  sublabel: AureaText.t("bg_remove_action_detail"), enabled: !row.locked,
                                  tag: "layer.menu.bgRemove") { model.removeBackground(row.id) })
-            }
-            let path = model.layerSourcePath(row.id)
-            out.append(.item(AureaText.t("media_info_title"), glyph: CupertinoGlyph.InfoCircle, tag: "layer.menu.mediaInfo") {
-                AureaPopupPresenter.shared.presentDialog { close in MediaInfoDialogView(path: path, onDismiss: close) }
-            })
-            if row.kind == 1 {
+            case .mediaInfo:
+                if row.kind == 3 { out.append(.header(AureaText.t("sh_menu_media"))) }
+                let path = model.layerSourcePath(row.id)
+                out.append(.item(AureaText.t("media_info_title"), glyph: CupertinoGlyph.InfoCircle, tag: "layer.menu.mediaInfo") {
+                    AureaPopupPresenter.shared.presentDialog { close in MediaInfoDialogView(path: path, onDismiss: close) }
+                })
+            case .extractAudio:
                 out.append(.item(AureaText.t("editor_extrair_audio"), glyph: CupertinoGlyph.MusicNote2, sublabel: AureaText.t("editor_som_vira_camada_propria_video_fica")) {
                     _ = model.engine.extractAudio(fromLayer: row.id); refresh()
                 })
             }
         }
-        out.append(.header(AureaText.t("editor_movimento")))
-        let timeFlags = (model.detail["timeFlags"] as? NSNumber)?.uint32Value ?? 0
-        out.append(.item(AureaText.t("editor_desfoque_movimento"), glyph: CupertinoGlyph.MotionBlur,
-                         sublabel: AureaText.t("editor_borra_direcao_movimento_obturador_nas_configuracoes"), checked: timeFlags & 2 != 0,
-                         tag: "layer.menu.motionBlur") {
-            model.mutate { $0.setMotionBlur(timeFlags & 2 == 0, forLayer: row.id) }; refresh()
-        })
-        if row.kind == 1 {
-            out.append(.item(AureaText.t("editor_desfoque_movimento_video"), glyph: CupertinoGlyph.MotionBlur,
-                             sublabel: AureaText.t("editor_borra_mexe_dentro_video_pelos_vetores"), checked: timeFlags & 32 != 0) {
-                model.mutate { $0.setVectorBlur(forLayer: row.id, amount: timeFlags & 32 == 0 ? 1 : 0) }; refresh()
-            })
+        let pluginActions = plugins.active.flatMap { plugin in
+            plugin.actions.filter {
+                $0.placement.contains("layer.toolbar") || (rootIndex != nil && $0.placement.contains("layer.menu"))
+            }.map { (plugin, $0) }
         }
-        // 0.3.1: preset .ffx nesta camada / script .jsx com ela em comp.selectedLayers.
-        out.append(.item(AureaText.t("ae_import_menu"), glyph: CupertinoGlyph.SquareStack3dUp, sublabel: AureaText.t("ae_import_layer_detail"),
-                         enabled: !row.locked, tag: "layer.aeImport") { OmegaChromeRequests.shared.aeImport = true })
-        if row.kind == 1 || row.kind == 3 {
-            out.append(.header(AureaText.t("editor_tempo")))
-            out.append(.item(AureaText.t("i18n_clip_modes"), glyph: CupertinoGlyph.Scissors) { model.openPanel(.clipEdit) })
-        }
-        if row.kind == 1 {
-            out.append(.item(AureaText.t("sh_menu_freeze_frame"), glyph: ShellGlyph.Snow, enabled: inside) {
-                let created = model.engine.freezeFrame(forLayer: row.id, frame: Int32(clamping: model.status.playhead), hold: Int32(max(1, model.compositionFps * 3)))
-                refresh()
-                if created >= 0 { model.select(layerId: created) }
-            })
-            out.append(.header(AureaText.t("editor_rastreio")))
-            out.append(.item(AureaText.t("dock2_tracking_tools"), glyph: ShellGlyph.Viewfinder, sublabel: AureaText.t("dock2_tracking_tools_detail")) {
-                model.select(layerId: row.id); model.cameraTrackerVisible = false; model.openPanel(.tracking)
-            })
-            out.append(.item(AureaText.t("editor_rastrear_ponto"), glyph: ShellGlyph.Viewfinder, sublabel: AureaText.t("editor_cria_nulo_segue_ponto_ligue_outras")) {
-                model.select(layerId: row.id); model.openPanel(.tracking); model.beginPointPick(stabilize: false)
-            })
-            out.append(.item(AureaText.t("editor_estabilizar_pelo_ponto"), glyph: ShellGlyph.Viewfinder, sublabel: AureaText.t("editor_move_video_ponto_ficar_parado_tela")) {
-                model.select(layerId: row.id); model.openPanel(.tracking); model.beginPointPick(stabilize: true)
+        if !pluginActions.isEmpty { out.append(.divider) }
+        for (plugin, action) in pluginActions {
+            out.append(.item(pv2Pick(action.title, plugins.locale), glyph: pv2Glyph(action.icon),
+                             enabled: !plugins.busy.contains(plugin.id), tag: "plugin.action.\(plugin.id).\(action.id)") {
+                plugins.runAction(plugin.id, action)
             })
         }
         return out
@@ -757,15 +682,15 @@ struct TopBarView: View {
             .accessibilityIdentifier(tag)
     }
 
-    private func linkMenuButton(tint: Color, width: CGFloat = 40) -> some View {
+    private func linkMenuButton(tint: Color, width: CGFloat = 40, height: CGFloat = EditorLayout.topBar) -> some View {
         GeometryReader { bounds in
             ShellBarButton(glyph: parent != 0 ? CupertinoGlyph.LinkCircleFill : CupertinoGlyph.Link,
                 description: AureaText.t(parent != 0 ? "editor_vinculada_outra_camada_trocar" : "editor_vincular_outra_camada"), size: 20, width: width,
-                height: EditorLayout.topBar, tint: tint) {
+                height: height, tint: tint) {
                 if model.status.playing != 0 { model.playPause() }
                 shell.linkIds = Array(model.selection); shell.linkAnchor = bounds.frame(in: .global)
             }.accessibilityIdentifier("layer.parent")
-        }.frame(width: width, height: EditorLayout.topBar)
+        }.frame(width: width, height: height)
     }
     private func removeSelection() {
         model.deleteSelectedLayers()
@@ -1392,7 +1317,7 @@ private struct CopyPasteButton: View {
                          sublabel: count == 1 ? AureaText.t("om_cp_with_style") : nil, enabled: count > 0,
                          tag: "copyPaste.copy") { model.copyLayersWithStyle() })
         out.append(.item(AureaText.plural("om_cp_paste", 1), glyph: CupertinoGlyph.DocOnClipboard, enabled: clip & 1 != 0,
-                         tag: "copyPaste.paste") { model.engine.pasteLayers(model.status.playhead); refresh() })
+                         tag: "copyPaste.paste") { model.pasteCopiedLayers(); refresh() })
         out.append(.item(AureaText.t("om_cp_paste_style_more"), glyph: ShellGlyph.PaintbrushFill, chevron: true,
                          enabled: count > 0 && clip & 2 != 0, tag: "copyPaste.pasteStyle") { presentPasteStyle() })
         // Mais do AUREA (o que a referência não tem), depois de um fio.
@@ -2117,4 +2042,51 @@ struct BoneAttachSheet: View {
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
         .accessibilityIdentifier(tag)
     }
+}
+
+
+// =============================================================================
+// Funções do AUREA (13/11/2026, FUNCTIONS_IA.md §3.5, fase F2): o ⋮ da camada só
+// com AÇÕES SOBRE A CAMADA, no máximo `layerMenuMax` linhas (cabeçalhos não
+// contam). Gêmea do LayerMenuSpec.kt (testada na JVM, LayerFunctionsTest).
+//
+// O que saiu do ⋮ e onde mora agora (nada se perde):
+//  · Velocidade → fileira de tempo do painel da camada;
+//  · Opções de texto → Editar texto (grade);
+//  · Fantoche, Rastreio (×3), Modos de corte + Congelar, Animadores, Rig, Operadores,
+//    3D (camada 3D, virar objeto 3D, prender a osso, câmera do grupo, aceitar luzes) e
+//    as chaves da camada (ajuste + "afeta", guia, preservar transparência, linha
+//    magnética, tímida) → navegador de Efeitos, grupo "Funções do Aurea" (FxEffectTool);
+//  · Desfoque de movimento (camada e vídeo) → botão da barra da camada;
+//  · Copiar/colar camada e estilo → Copiar e colar do transporte;
+//  · Ocultar tímidas (composição) e Importar do AE → Ajustes do projeto.
+// =============================================================================
+
+/// Teto de linhas do ⋮ da camada.
+let layerMenuMax = 16
+
+/// Uma linha do ⋮ da camada, na ordem da tela (par do `LayerMenuAction` do Android).
+enum LayerMenuAction: CaseIterable {
+    case lock, hide, solo, keyframeTracks, duplicate, pullToPlayhead, bringForward, sendBackward
+    case labels
+    case flip, clipMask, convertOutline, enterGroup, ungroup, groupMenu
+    case replaceMedia, removeBackground, mediaInfo, extractAudio
+}
+
+/// As linhas do ⋮ para a camada (tipos: 1 vídeo, 2 imagem, 3 áudio, 5 forma, 12 grupo).
+func layerMenuActions(kind: UInt32, clipMask: Bool, canConvertOutline: Bool) -> [LayerMenuAction] {
+    var out: [LayerMenuAction] = [.lock, .hide, .solo, .keyframeTracks, .duplicate, .pullToPlayhead, .bringForward, .sendBackward, .labels]
+    let visual = kind != 3
+    let media = kind == 1 || kind == 2
+    if visual {
+        out.append(.flip)
+        if clipMask { out.append(.clipMask) }
+        if kind == 5 && canConvertOutline { out.append(.convertOutline) }
+        if kind == 12 { out.append(contentsOf: [.enterGroup, .ungroup]) }
+        out.append(.groupMenu)
+    }
+    if media { out.append(contentsOf: [.replaceMedia, .removeBackground]) }
+    if media || kind == 3 { out.append(.mediaInfo) }
+    if kind == 1 { out.append(.extractAudio) }
+    return out
 }

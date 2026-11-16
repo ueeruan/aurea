@@ -155,6 +155,7 @@ Result<u32> Engine::end_import_batch(const u64* ids, u32 count, MediaBatchPlacem
 
 Status Engine::apply_import_timing(u64 layerId, i64 durationFrames, i64 sourceInUs, i64 sourceOutUs) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
     Composition* comp = current_composition();
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;

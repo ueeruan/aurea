@@ -1,7 +1,9 @@
 #include "aurea/media/MediaManager.hpp"
 #include "aurea/media/ImageSequence.hpp"
 #include "aurea/core/Log.hpp"
+#include "aurea/core/Time.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <filesystem>
 #include <chrono>
@@ -11,6 +13,16 @@ namespace aurea {
 namespace {
 constexpr u32 kOpenAttempts = 5;       ///< opens por camada antes de desistir
 constexpr u64 kOpenRetryFrames = 8;    ///< preparos entre uma tentativa e a próxima
+// 0.5.4 (set_persistent_retry): falhas seguidas do decoder de uma fonte pronta
+// antes de trocá-la por outra, e falhas da camada antes de pedir o proxy.
+constexpr u32 kRecycleAfterDecodeFailures = 3;
+constexpr u32 kProxyAfterFailures = 3;
+/// Espera até a próxima tentativa de uma camada sem decoder: 250 ms, 500 ms,
+/// 1 s e depois a cada 2 s, para sempre (a camada continua visível).
+u64 open_retry_delay_ns(u32 failures) noexcept {
+    const u32 step = std::min<u32>(failures ? failures - 1 : 0, 3);
+    return std::min<u64>(2'000'000'000ull, 250'000'000ull << step);
+}
 } // namespace
 
 std::string VideoSourceFactory::cache_identity(const char* sourcePath) {
@@ -63,6 +75,9 @@ void MediaManager::retire_main() {
         }
         // Joins decode/open and releases platform buffers outside both locks.
         closing = Entry{};
+        // Uma sessão de decoder voltou ao sistema: o open recusado de outra
+        // camada pode tentar no próximo quadro (o callback abaixo o acorda).
+        capacityGen_.fetch_add(1, std::memory_order_acq_rel);
         void (*ready)(void*) = nullptr;
         void* context = nullptr;
         {
@@ -162,7 +177,15 @@ VideoSource* MediaManager::source_for(LayerId layer, AssetId assetId, const Asse
             // sem instância livre de decoder (outros clipes ainda fechando).
             // Nova tentativa depois de um intervalo, poucas vezes — um arquivo
             // que o aparelho não decodifica não pode reabrir o codec a cada quadro.
-            if (e.failed && e.failures < kOpenAttempts && frameNumber > e.failedFrame + kOpenRetryFrames && factory_) {
+            // 0.5.4 (set_persistent_retry, a prévia): também pelo relógio — parado
+            // o contador de quadros não anda e a camada ficava vazia para sempre —
+            // sem limite de tentativas (espera de até 2 s), e logo que outro
+            // decoder termina de fechar (a sessão que faltava voltou).
+            const bool retryDue = e.failed && factory_
+                && ((e.failures < kOpenAttempts && frameNumber > e.failedFrame + kOpenRetryFrames)
+                    || (persistentRetry_ && (monotonic_ns() >= e.retryAtNs
+                        || capacityGen_.load(std::memory_order_acquire) != e.freeGen)));
+            if (retryDue) {
                 if (!softwareOnly) {
                     // Mesma regra do open novo (abaixo): nada de codec novo
                     // enquanto outro fecha. A entrada fica — e a contagem com ela.
@@ -181,15 +204,49 @@ VideoSource* MediaManager::source_for(LayerId layer, AssetId assetId, const Asse
                     e.failed = true;
                     e.failedFrame = frameNumber;
                     ++e.failures;
-                    AUREA_LOG_WARN("decoder da camada nao abriu (tentativa %u de %u)", e.failures, kOpenAttempts);
+                    e.retryAtNs = monotonic_ns() + open_retry_delay_ns(e.failures);
+                    if (!persistentRetry_ || e.failures <= kOpenAttempts || e.failures % 10 == 0)
+                        AUREA_LOG_WARN("decoder da camada nao abriu (tentativa %u%s)", e.failures,
+                                       persistentRetry_ ? ", tenta de novo" : " de 5");
                 } else {
                     e.source = std::make_unique<VideoSource>(std::move(backend), MediaPriority::Preview);
                     e.source->cache().attach(memory_);
                     e.source->set_ready_callback(readyFn_, readyCtx_);
                     e.source->set_work_counter(&decodeWork_);
+                    e.source->set_persistent_retry(persistentRetry_);
                     e.source->start();
                     if (suspended_) e.source->suspend();
                 }
+            }
+            // 0.5.4: fonte pronta cujo decoder só falha (seek/decode recusados
+            // seguidos, sem um quadro entre eles): o decoder sai e a camada abre
+            // outro, com a mesma espera do open recusado. No iOS o AVAsset e o
+            // reader de uma sessão que o sistema derrubou (media services reset,
+            // decoder ocupado) não voltam sozinhos; no Android o codec novo cai
+            // no de software se o de hardware continuar recusado.
+            if (persistentRetry_ && e.source && !suspended_
+                && e.source->stats().consecutiveFailures >= kRecycleAfterDecodeFailures) {
+                ++e.failures;
+                AUREA_LOG_WARN("decoder da camada falhando (%u seguidas); abrindo outro (vez %u)",
+                               kRecycleAfterDecodeFailures, e.failures);
+                Entry dead;
+                dead.layer = e.layer; dead.asset = e.asset; dead.path = e.path;
+                dead.source = std::move(e.source);
+                // O fechamento deste decoder também sobe a geração: ele não conta
+                // como "outro decoder fechou" para a nova tentativa desta camada.
+                e.freeGen = capacityGen_.load(std::memory_order_acquire) + 1;
+                retire_locked(std::move(dead));
+                e.failed = true;
+                e.failedFrame = frameNumber;
+                e.retryAtNs = monotonic_ns() + open_retry_delay_ns(e.failures);
+            }
+            // 0.5.4: a fonte original que não abre ou não decodifica neste
+            // aparelho pede o proxy de edição (menor; no Android decodificado
+            // pelo software): quando ficar pronto, o caminho troca sozinho.
+            if (persistentRetry_ && e.failed && e.failures >= kProxyAfterFailures && !proxy && !finalQuality
+                && !originalSourceLeases_ && !softwareOnly && !proxies_.slow_decode(asset)) {
+                AUREA_LOG_WARN("fonte original sem decoder apos %u tentativas: pedindo o proxy de edicao", e.failures);
+                proxies_.mark_slow_decode(asset);
             }
             // 0.3.6: a fonte ORIGINAL da prévia não acompanha o tempo real
             // neste aparelho (decoder lento, sem hardware para o codec): a
@@ -216,7 +273,10 @@ VideoSource* MediaManager::source_for(LayerId layer, AssetId assetId, const Asse
     // lugar; o open novo espera o fechamento dela (logo abaixo), como sempre.
     // Ponteiro devolvido neste quadro tem lastUsedFrame == frameNumber: nunca
     // é a vítima. Capturas exatas em curso seguram tudo. 64 bits: sem teto.
-    if (const u32 cap = address_space::max_video_sources(pointerBits_); cap && originalSourceLeases_ == 0 && !softwareOnly) {
+    // 0.5.3: o teto de 64 bits (set_source_cap) entra na mesma regra; vale o menor.
+    const u32 narrowCap = address_space::max_video_sources(pointerBits_);
+    const u32 sourceCap = narrowCap && sourceCap_ ? std::min(narrowCap, sourceCap_) : (narrowCap ? narrowCap : sourceCap_);
+    if (const u32 cap = sourceCap; cap && originalSourceLeases_ == 0 && !softwareOnly) {
         u32 live = 0;
         usize victim = entries_.size();
         for (usize i = 0; i < entries_.size(); ++i) {
@@ -251,6 +311,7 @@ VideoSource* MediaManager::source_for(LayerId layer, AssetId assetId, const Asse
     e.failures = priorFailures;
     e.path = decodeAsset.sourcePath;
     e.lastUsedFrame = frameNumber;
+    e.freeGen = capacityGen_.load(std::memory_order_acquire);
     e.opening = std::make_unique<Opening>();
     auto* pending = e.opening.get();
     auto* factory = factory_;
@@ -293,6 +354,26 @@ MediaManager::SourceStartup MediaManager::source_startup(LayerId layer, AssetId 
 void MediaManager::set_pointer_bits(u32 bits) noexcept {
     std::lock_guard<std::mutex> lock(mutex_);
     pointerBits_ = bits ? bits : kPointerBits;
+}
+
+void MediaManager::set_source_cap(u32 cap) noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    sourceCap_ = cap;
+}
+
+void MediaManager::set_persistent_retry(bool on) noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    persistentRetry_ = on;
+    for (Entry& e : entries_) if (e.source) e.source->set_persistent_retry(on);
+}
+
+u64 MediaManager::next_retry_ns() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!persistentRetry_ || !factory_) return 0;
+    u64 due = 0;
+    for (const Entry& e : entries_)
+        if (e.failed && e.retryAtNs && (!due || e.retryAtNs < due)) due = e.retryAtNs;
+    return due;
 }
 
 u32 MediaManager::live_sources() const {

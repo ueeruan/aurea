@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.unit.dp
@@ -19,9 +20,63 @@ import com.aurea.aurea.ui.theme.AureaTheme
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
+import java.io.File
+import android.graphics.Bitmap
 
 class GraphRegressionTest {
     @get:Rule val compose = createComposeRule()
+    @Test fun legacyCurveColumnsApplyAnOscillatingPresetAndUndo() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        assertTrue(context.packageName.endsWith(".uitest"))
+        lateinit var store: EditorStore
+        var initialized = false
+        val show = mutableStateOf(false)
+        compose.setContent {
+            store = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))
+            initialized = true
+            AureaTheme { Box {
+                EditorScreen(store)
+                if (show.value) Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(300.dp)) {
+                    PanelContent(store, EditorPanel.Curve, {}, {}, {})
+                }
+            } }
+        }
+        compose.waitUntil(30000) { initialized && store.engineReady }
+        compose.runOnIdle { store.newProject(320, 240, 30f, "Legacy curve columns") }
+        compose.waitUntil(15000) { store.project.title == "Legacy curve columns" }
+        compose.runOnIdle { store.addNull(false) }
+        compose.waitUntil(5000) { store.layers.size == 1 }
+        val id = store.layers.single().id
+        for (frame in listOf(0, 30)) {
+            compose.runOnIdle { store.seek(frame) }
+            compose.waitUntil(5000) { store.playhead == frame }
+            compose.runOnIdle { store.toggleTransformKeyframe(intArrayOf(0, 1)) }
+        }
+        compose.runOnIdle { store.setTransform(0, 260f) }
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().count { it.property == 0 } == 2 }
+        val first = store.keyframes[id]!!.first { it.property == 0 && it.time == 0 }
+        val original = store.queryKeyframeEasing(id, first)!!.toList()
+        compose.runOnIdle {
+            store.selectKeyframe(id, first)
+            store.curveGraphMode = 0
+            show.value = true
+        }
+        compose.onNodeWithTag("curve.easingGraph").assertIsDisplayed()
+        compose.onNodeWithTag("curve.category.curves").assertIsDisplayed()
+        compose.onNodeWithTag("curve.category.steps").assertIsDisplayed()
+        compose.onNodeWithTag("curve.category.bounces").performClick()
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().any { it.property == 0 && it.time == 0 && it.interpolation == 7 } }
+        val bounce = store.queryKeyframeEasing(id, first)!!.toList()
+        compose.onNodeWithTag("curve.slot.3").performClick()
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().any { it.property == 0 && it.time == 0 && it.interpolation == 13 } }
+        val screenshot = File(context.getExternalFilesDir(null), "legacy-curve-panel.png")
+        val bitmap = compose.onNodeWithTag("curve.panel").captureToImage().asAndroidBitmap()
+        screenshot.outputStream().use { assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+        compose.runOnIdle { store.undo() }
+        compose.waitUntil(5000) { store.queryKeyframeEasing(id, first)?.toList() == bounce }
+        compose.runOnIdle { store.undo() }
+        compose.waitUntil(5000) { store.queryKeyframeEasing(id, first)?.toList() == original }
+    }
     @Test fun linked2DScaleCurveChangesBothAxesAndUnlockedCurveStaysIndependent() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assertTrue(context.packageName.endsWith(".uitest"))

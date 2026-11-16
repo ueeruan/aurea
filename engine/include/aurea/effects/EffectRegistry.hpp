@@ -81,6 +81,7 @@ namespace effect_keys {
     inline constexpr const char* kChromaticAberration = "aurea.color.chromatic_aberration";
     inline constexpr const char* kJpegGlitch = "aurea.glitch.jpeg_codec";
     inline constexpr const char* kAnalogSignal = "aurea.glitch.analog_signal";
+    inline constexpr const char* kSignalReference = "aurea.glitch.signal_reference";
     inline constexpr const char* kTracery = "aurea.generate.tracery";
     inline constexpr const char* kDeepGlow2 = "aurea.light.deep_glow_2";
     inline constexpr const char* kShadowStudio3 = "aurea.light.shadow_studio_3";
@@ -120,6 +121,9 @@ namespace effect_keys {
     inline constexpr const char* kColorGrade         = "aurea.color.grade";
     inline constexpr const char* kGaussianBlur       = "aurea.blur.gaussian";
     inline constexpr const char* kSharpen            = "aurea.blur.sharpen";
+    inline constexpr const char* kSharpenReference   = "aurea.blur.sharpen_reference";
+    inline constexpr const char* kFindEdgesReference = "aurea.stylize.find_edges_reference";
+    inline constexpr const char* kWaveWarpReference  = "aurea.distort.wave_warp_reference";
     inline constexpr const char* kGlow               = "aurea.light.glow";
     inline constexpr const char* kMotionTile         = "aurea.stylize.motion_tile";
     inline constexpr const char* kLumaKey            = "aurea.key.luma";
@@ -179,6 +183,10 @@ namespace effect_keys {
     inline constexpr const char* kCheckboxControl    = "aurea.control.checkbox";
     inline constexpr const char* kColorControl       = "aurea.control.color";
     inline constexpr const char* kPointControl       = "aurea.control.point";
+    // AE expressions (lote E): Dropdown Menu, Layer e 3D Point Control.
+    inline constexpr const char* kDropdownControl    = "aurea.control.dropdown";
+    inline constexpr const char* kLayerControl       = "aurea.control.layer";
+    inline constexpr const char* kPoint3DControl     = "aurea.control.point3d";
 
     // --- Pacote de paridade: o que faltava para editar movimento e acabamento ---
     // Comportamentos de movimento (função pura do tempo; ver MotionBehaviorEffects.cpp)

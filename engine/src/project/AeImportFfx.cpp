@@ -33,6 +33,7 @@
 //  profundidade demais param a leitura daquele ramo, nunca o processo.
 // =============================================================================
 #include "aurea/project/AeImport.hpp"
+#include "aurea/animation/Curve.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -180,6 +181,9 @@ void Reader::keys(const Chunk& hd, const Chunk& data, u32 scale, Node& n) {
         key.in = interp(k[4]);
         key.out = interp(k[5]);
         key.flags = be16(k + 6);
+        // Lote K: 0x08 = bézier contínua (INFERIDO dos presets: só aparece em
+        // keys bézier). Automática e vagante: bits não comprovados, ficam de fora.
+        if ((key.flags & 0x08u) && (key.in == KeyInterp::Bezier || key.out == KeyInterp::Bezier)) key.temporal |= kKeyContinuous;
         if (spatial) {
             key.inEase.push_back(Ease{bed(k + 24), bed(k + 32) * 100.0});
             key.outEase.push_back(Ease{bed(k + 40), bed(k + 48) * 100.0});

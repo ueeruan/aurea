@@ -399,7 +399,7 @@ async function apagarSessao(env, s) {
 //    1. os arquivos da comunidade no R2 (avatar, presets, projetos publicados);
 //    2. numa transação do D1: verificações, curtidas, comentários (os dela e os
 //       feitos nas publicações dela), publicações, seguidores, arquivos,
-//       perfil, papéis, direitos pagos (entitlements), TODAS as sessões,
+//       perfil, papéis, direitos pagos (entitlements), tokens do AureaMCP, TODAS as sessões,
 //       relatos de problema com o e-mail da conta e, por fim, o usuário — e
 //       desconta 1 do contador de cadastrados.
 //  Os relatórios de crash no KV não são indexados por conta e expiram sozinhos
@@ -452,6 +452,14 @@ async function excluirConta(req, env) {
     temDireitos = false;
   }
   const direitos = temDireitos ? [q("DELETE FROM entitlements WHERE user_id = ?", s.uid)] : [];
+  // AureaMCP (migração 0010): tokens dos agentes e pareamentos da conta. Sondado igual.
+  let temMcp = true;
+  try {
+    await q("SELECT 1 FROM mcp_tokens LIMIT 1").first();
+  } catch {
+    temMcp = false;
+  }
+  if (temMcp) direitos.push(q("DELETE FROM mcp_tokens WHERE uid = ?", s.uid), q("DELETE FROM mcp_auth_requests WHERE uid = ?", s.uid));
 
   const minhasPublicacoes = "SELECT id FROM community_posts WHERE uid = ?";
   const comunidade = [

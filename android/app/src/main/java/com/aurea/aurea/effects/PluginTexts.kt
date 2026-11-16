@@ -95,6 +95,7 @@ object PluginTexts {
     }
 
     fun isPlugin(typeId: Int): Boolean = byType.containsKey(typeId)
+    fun isAudio(typeId: Int): Boolean = byType[typeId]?.kind == "audio"
 
     fun pick(texts: Map<String, String>, tag: String): String? {
         if (texts.isEmpty()) return null

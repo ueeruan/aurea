@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lote K (AE): assistentes de keyframe, bézier automática/contínua, vagante, Lift/Extract e Motion Sketch. -->
+<resources>
+    <string name="aek_tools">Assistentes</string>
+    <string name="aek_time_reverse">Inverter no tempo</string>
+    <string name="aek_exponential_scale">Escala exponencial</string>
+    <string name="aek_smoother">Suavizador</string>
+    <string name="aek_smoother_level">Tolerância de %1$s</string>
+    <string name="aek_bake_expression">Expressão em keyframes</string>
+    <string name="aek_auto_bezier">Bézier automática</string>
+    <string name="aek_continuous_bezier">Bézier contínua</string>
+    <string name="aek_rove">Vagar no tempo</string>
+    <string name="aek_lift_work_area">Levantar área de trabalho</string>
+    <string name="aek_extract_work_area">Extrair área de trabalho</string>
+    <string name="aek_lifted">Trecho da área de trabalho removido (o buraco ficou)</string>
+    <string name="aek_extracted">Trecho da área de trabalho removido e o buraco fechado</string>
+    <string name="aek_reverse_nothing">Não deu para inverter: escolha 2 keyframes numa trilha sem cair em cima de outro</string>
+    <string name="aek_exp_scale_nothing">A escala exponencial precisa de 2 keyframes de Escala com valores do mesmo sinal</string>
+    <string name="aek_smoother_nothing">O Suavizador precisa de 3 keyframes ou mais numa trilha</string>
+    <string name="aek_bake_nothing">Nenhuma expressão ligada para converter</string>
+    <string name="aek_flags_nothing">Nada a mudar nos keyframes escolhidos</string>
+    <string name="aek_motion_sketch">Motion Sketch</string>
+    <string name="aek_motion_sketch_stop">Parar Motion Sketch</string>
+    <string name="aek_motion_sketch_hint">Arraste a camada escolhida no palco: a prévia toca e o caminho vira keyframes de posição</string>
+    <string name="aek_motion_sketch_done">%1$d quadros de posição gravados</string>
+    <string name="aek_motion_sketch_nothing">Escolha uma camada e arraste no palco para gravar</string>
+</resources>

@@ -209,4 +209,24 @@
     <string name="perf_badge">Teste · %1$ds</string>
     <string name="perf_badge_stall">Travou aqui</string>
     <string name="perf_badge_stop">Parar</string>
+    <string name="cam_stage_features">Detectando e acompanhando pontos</string>
+    <string name="cam_stage_solve">Resolvendo câmera 3D</string>
+    <string name="prerender_group">Pré-renderizar grupo</string>
+    <string name="edit_workspace_media">Mídia</string>
+    <string name="edit_workspace_edit">Editar</string>
+    <string name="edit_workspace_color">Cor</string>
+    <string name="edit_workspace_audio">Áudio</string>
+    <string name="edit_workspace_text">Texto</string>
+    <string name="grade_node_number">Nó %1$d</string>
+    <string name="grade_add_node">Novo nó</string>
+    <string name="grade_node_enabled">Correção ativa</string>
+    <string name="grade_node_previous">Mover nó para antes</string>
+    <string name="grade_node_next">Mover nó para depois</string>
+    <string name="grade_window">Janelas</string>
+    <string name="grade_window_rectangle">Retângulo</string>
+    <string name="grade_window_ellipse">Elipse</string>
+    <string name="grade_window_width">Largura</string>
+    <string name="grade_window_height">Altura</string>
+    <string name="grade_window_rotation">Rotação</string>
+    <string name="grade_node_actions">Ações do nó</string>
 </resources>

@@ -3,7 +3,7 @@
 <resources>
     <string name="fx_name_headbop">Headbop</string>
     <string name="fx_desc_headbop">Orang di foto atau video mengangguk dan menggoyangkan badan mengikuti ketukan musik</string>
-    <string name="headbop_note">Analisis layer untuk menemukan kepala dan bahu. Tanpa orang, seluruh bingkai bergoyang.</string>
+    <string name="headbop_note">Analisis orang untuk memetakan sendi yang terlihat. Tubuh mengikuti irama dengan lengan berartikulasi dan pijakan kaki.</string>
     <string name="headbop_analyze">Analisis</string>
     <string name="headbop_reanalyze">Analisis ulang</string>
     <string name="headbop_analyzing">Menganalisis orang dan ketukan…</string>

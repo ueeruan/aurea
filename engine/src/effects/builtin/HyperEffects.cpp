@@ -33,9 +33,15 @@
 
 namespace aurea::hyper::fx {
 
-void field_size(u32 w, u32 h, u32& fw, u32& fh) noexcept {
-    fw = std::max(1u, (w + kBlock - 1) / kBlock);
-    fh = std::max(1u, (h + kBlock - 1) / kBlock);
+void field_size(u32 w, u32 h, u32& fw, u32& fh, u32 blockSize) noexcept {
+    const u32 block = std::clamp(blockSize, kBlock, kBlock * 4);
+    fw = std::max(1u, w / block + (w % block != 0));
+    fh = std::max(1u, h / block + (h % block != 0));
+}
+
+u32 motion_block_size(EffectBuildContext& ctx) noexcept {
+    const f32 scale = ctx.resources().motion_analysis_scale();
+    return scale <= 0.3f ? kBlock * 4 : scale < 0.75f ? kBlock * 2 : kBlock;
 }
 
 FGTexture luma_pair(EffectBuildContext& ctx, FGTexture a, FGTexture b, u32 w, u32 h, bool aPerc, bool bPerc,
@@ -49,15 +55,24 @@ FGTexture luma_pair(EffectBuildContext& ctx, FGTexture a, FGTexture b, u32 w, u3
     return out;
 }
 
-FGTexture motion_field(EffectBuildContext& ctx, FGTexture luma, u32 w, u32 h, bool backward, PassStage stage) noexcept {
-    if (!luma.valid()) return FGTexture{};
+namespace {
+struct MotionPyramid {
+    FGTexture textures[4]{};
+    u32 widths[4]{}, heights[4]{};
+    u32 levels = 0;
+};
+
+MotionPyramid build_motion_pyramid(EffectBuildContext& ctx, FGTexture luma, u32 w, u32 h, PassStage stage) noexcept {
+    MotionPyramid pyramid;
+    if (!luma.valid()) return pyramid;
     // Pirâmide: 1, 1/2, 1/4, 1/8 (caixa 4x4 de effects/downsample.frag).
-    FGTexture lv[4];
-    u32 lw[4], lh[4];
+    auto& lv = pyramid.textures;
+    auto& lw = pyramid.widths;
+    auto& lh = pyramid.heights;
     lv[0] = luma;
     lw[0] = w;
     lh[0] = h;
-    u32 levels = 1;
+    pyramid.levels = 1;
     for (u32 k = 1; k < 4; ++k) {
         if (std::min(lw[k - 1], lh[k - 1]) < 16) break;
         lw[k] = (lw[k - 1] + 1) / 2;
@@ -66,12 +81,24 @@ FGTexture motion_field(EffectBuildContext& ctx, FGTexture luma, u32 w, u32 h, bo
             Vec4{1.0f / static_cast<f32>(lw[k - 1]), 1.0f / static_cast<f32>(lh[k - 1]), 0, 0}};
         lv[k] = ctx.texture("hyper-piramide", lw[k], lh[k]);
         if (ctx.fullscreen_pass("hyper-piramide", stage, lv[k], ShaderId::effects_downsample_frag,
-                                {PassTexture{lv[k - 1]}}, &dp, sizeof(dp)) == kInvalidIndex)
-            return FGTexture{};
-        ++levels;
+                                {PassTexture{lv[k - 1]}}, &dp, sizeof(dp)) == kInvalidIndex) {
+            pyramid.levels = 0;
+            return pyramid;
+        }
+        ++pyramid.levels;
     }
+    return pyramid;
+}
+
+FGTexture search_motion_pyramid(EffectBuildContext& ctx, const MotionPyramid& pyramid,
+                                bool backward, u32 blockSize, PassStage stage) noexcept {
+    if (!pyramid.levels) return {};
+    const auto& lv = pyramid.textures;
+    const auto& lw = pyramid.widths;
+    const auto& lh = pyramid.heights;
+    const u32 levels = pyramid.levels;
     u32 fw = 0, fh = 0;
-    field_size(w, h, fw, fh);
+    field_size(lw[0], lh[0], fw, fh, blockSize);
     struct MeUniforms { Vec4 level; Vec4 search; Vec4 block; Vec4 sub; };
     FGTexture field{};
     for (u32 k = levels; k-- > 0;) {
@@ -91,7 +118,7 @@ FGTexture motion_field(EffectBuildContext& ctx, FGTexture luma, u32 w, u32 h, bo
         else if (k == 1) { step = 2.0f; }
         else { step = 4.0f; sub = 0.5f; }
         u.search = Vec4{predR, half, step, backward ? 1.0f : 0.0f};
-        u.block = Vec4{static_cast<f32>(kBlock), static_cast<f32>(fw), static_cast<f32>(fh), 0.5f};
+        u.block = Vec4{static_cast<f32>(blockSize), static_cast<f32>(fw), static_cast<f32>(fh), 0.5f};
         u.sub = Vec4{sub, full, 0, 0};
         const FGTexture next = ctx.texture("hyper-campo", fw, fh);
         if (ctx.fullscreen_pass("hyper-busca", stage, next, ShaderId::hyper_me_search_frag,
@@ -115,12 +142,20 @@ FGTexture motion_field(EffectBuildContext& ctx, FGTexture luma, u32 w, u32 h, bo
     }
     return field;
 }
+} // namespace
+
+FGTexture motion_field(EffectBuildContext& ctx, FGTexture luma, u32 w, u32 h, bool backward, PassStage stage) noexcept {
+    return search_motion_pyramid(ctx, build_motion_pyramid(ctx, luma, w, h, stage),
+                                 backward, motion_block_size(ctx), stage);
+}
 
 bool bidirectional_field(EffectBuildContext& ctx, FGTexture a, FGTexture b, u32 w, u32 h, FGTexture target,
                          PassStage stage) noexcept {
     const FGTexture luma = luma_pair(ctx, a, b, w, h, false, false, stage);
-    const FGTexture fwd = motion_field(ctx, luma, w, h, false, stage);
-    const FGTexture bwd = motion_field(ctx, luma, w, h, true, stage);
+    const MotionPyramid pyramid = build_motion_pyramid(ctx, luma, w, h, stage);
+    const u32 blockSize = motion_block_size(ctx);
+    const FGTexture fwd = search_motion_pyramid(ctx, pyramid, false, blockSize, stage);
+    const FGTexture bwd = search_motion_pyramid(ctx, pyramid, true, blockSize, stage);
     if (!fwd.valid() || !bwd.valid()) return false;
     return ctx.fullscreen_pass("hyper-campo-junta", stage, target, ShaderId::hyper_me_pack_frag,
                                {PassTexture{fwd, {}, CommonSampler::NearestClamp}, PassTexture{bwd, {}, CommonSampler::NearestClamp}},
@@ -133,10 +168,11 @@ FGTexture interpolate(EffectBuildContext& ctx, FGTexture a, FGTexture b, FGTextu
     if (!luma.valid()) luma = luma_pair(ctx, a, b, w, h, false, false, stage);
     if (!luma.valid()) return FGTexture{};
     u32 fw = 0, fh = 0;
-    field_size(w, h, fw, fh);
+    const u32 blockSize = motion_block_size(ctx);
+    field_size(w, h, fw, fh, blockSize);
     struct { Vec4 size; Vec4 field; Vec4 tune; } u{
         Vec4{static_cast<f32>(w), static_cast<f32>(h), 1.0f / static_cast<f32>(w), 1.0f / static_cast<f32>(h)},
-        Vec4{static_cast<f32>(kBlock), static_cast<f32>(fw), static_cast<f32>(fh), std::clamp(t, 0.0f, 1.0f)},
+        Vec4{static_cast<f32>(blockSize), static_cast<f32>(fw), static_cast<f32>(fh), std::clamp(t, 0.0f, 1.0f)},
         Vec4{0.06f, 1.5f, 0, 0}};
     const FGTexture out = ctx.texture("hyper-quadro-meio", w, h);
     if (ctx.fullscreen_pass("hyper-interpola", stage, out, ShaderId::hyper_mi_interp_frag,
@@ -413,7 +449,8 @@ public:
             }
             std::stable_sort(order, order + count, [](const auto& a, const auto& b) { return std::abs(a.offset) < std::abs(b.offset); });
             u32 fw = 0, fh = 0;
-            hyper::fx::field_size(W, H, fw, fh);
+            const u32 blockSize = hyper::fx::motion_block_size(ctx);
+            hyper::fx::field_size(W, H, fw, fh, blockSize);
             const f32 h = 0.006f + 0.05f * denoise;
             FGTexture acc = cur;
             f32 accMode = curPerc ? 2.0f : 1.0f;   // 0 acumulado, 1 linear, 2 perceptual
@@ -425,7 +462,7 @@ public:
                 const FGTexture field = hyper::fx::motion_field(ctx, luma, W, H, false, PassStage::Effects);
                 if (!field.valid()) continue;
                 const f32 distance = 1.0f / (1.0f + 0.3f * static_cast<f32>(std::abs(order[n].offset) - 1));
-                const ThreeU u{size_vec(W, H), Vec4{static_cast<f32>(hyper::fx::kBlock), static_cast<f32>(fw), static_cast<f32>(fh), 0},
+                const ThreeU u{size_vec(W, H), Vec4{static_cast<f32>(blockSize), static_cast<f32>(fw), static_cast<f32>(fh), 0},
                                Vec4{h, accMode, distance, nbrPerc ? 1.0f : 0.0f}};
                 const FGTexture next = ctx.texture("hyper-tempo", W, H);
                 if (ctx.fullscreen_pass("hyper-tempo", PassStage::Effects, next, ShaderId::hyper_dn_accum_frag,

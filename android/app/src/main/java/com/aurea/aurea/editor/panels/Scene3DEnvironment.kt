@@ -251,6 +251,51 @@ internal fun SceneFogSection(env: PanelEnv) {
 }
 
 /**
+ * LUZ DO OBJETO (v76, aba Luz e sombra do modelo 3D): o ambiente que ilumina e
+ * REFLETE só este objeto — o da cena, um estúdio pronto ou uma imagem HDR
+ * própria — com a intensidade (luz e reflexo), o giro e a exposição. O motor já
+ * tinha (Layer::environment*, set_object_environment; fill_object_environment
+ * no render); faltava o lugar no painel. Par do iOS: `objectLightSection`.
+ */
+@Composable
+internal fun ObjectLightSection(env: PanelEnv) {
+    val store = env.store
+    androidx.compose.runtime.LaunchedEffect(store.primary) { store.refreshObjectEnvironment() }
+    val e = store.objectEnvironment ?: return
+    if (e.size < 5) return
+    val asset = store.objectEnvironmentAsset
+    val own = e[0] >= 0.5f
+    // Estúdio pronto: a chave "STUD" + o número do estúdio (1..4) no lugar do asset.
+    val studio = if (own && (asset and -0x100000000L) == com.aurea.aurea.state.OBJECT_STUDIO_KEY) (asset and 0xFFFFFFFFL).toInt() else 0
+    val hdr = own && studio == 0 && asset != 0L
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) store.importObjectHdri(uri)
+    }
+    val launchHdr = { pick.launch(arrayOf("image/vnd.radiance", "image/x-exr", "application/zip", "application/octet-stream", "*/*")) }
+    EnvSection(stringResource(R.string.m3d_obj_light), stringResource(R.string.m3d_obj_light_hint), Modifier.testTag("env3d.objectLight")) {
+        EnvChoices {
+            EnvChoice(stringResource(R.string.m3d_obj_light_scene), !own, "panel3d.objlight.scene") { if (own) store.setObjectEnvironment(0) }
+            for (i in 1 until EnvStudios.size) {
+                EnvChoice(stringResource(EnvStudios[i]), studio == i, "panel3d.objlight.$i") { if (studio != i) store.setObjectStudio(i) }
+            }
+            // Acesa, toca de novo para trocar a imagem.
+            EnvChoice(stringResource(R.string.scene031_light_hdr), hdr, "panel3d.objlight.hdr") { launchHdr() }
+        }
+        if (own) {
+            EnvValueRow(env, stringResource(R.string.m3d_obj_light_intensity), e[2] * 100f, 1f, 0f, 2000f, "%", 100f, "luz do objeto") {
+                store.setObjectEnvironment(1, intensity = it / 100f)
+            }
+            EnvValueRow(env, stringResource(R.string.pn_env_rotate_light), e[3], 1f, -360f, 360f, "°", 0f, "luz do objeto") {
+                store.setObjectEnvironment(1, rotation = it)
+            }
+            EnvValueRow(env, stringResource(R.string.scene_exposure), e[4] * 100f, 1f, 5f, 400f, "%", 100f, "luz do objeto") {
+                store.setObjectEnvironment(1, exposure = it / 100f)
+            }
+        }
+    }
+}
+
+/**
  * OBJETO (aba Material): projeta / recebe sombra — eram do ambiente, mas são
  * deste objeto. O "Mostrar interior" continua logo abaixo ([InteriorToggle]).
  */

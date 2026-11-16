@@ -48,9 +48,9 @@ final class EffectPreviewStore {
     init(engine: AureaEngine) {
         self.engine = engine
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
-        // -compare-v3: imagem de amostra nova (0.2.4) e recorte centralizado.
+        // Rebuild thumbnails and animated demos after the reference-effect renderer changes.
         directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("effect-previews/\(version)-compare-v3", isDirectory: true)
+            .appendingPathComponent("effect-previews/\(version)-compare-v4", isDirectory: true)
         // Classe de memória LOW (até ~4 GB): metade, como no Android.
         memory.totalCostLimit = DeviceMemoryClass.low ? 12 * 1024 * 1024 : 24 * 1024 * 1024
         sequences.totalCostLimit = DeviceMemoryClass.low ? 4 * 1024 * 1024 : 9 * 1024 * 1024

@@ -339,18 +339,34 @@ class MainActivity : ComponentActivity() {
         }
 
         // Anúncios: consentimento + SDK fora do caminho do app (nada aqui espera).
-        AureaAds.initialize(this)
+        // 0.5.3: sai de dentro do onCreate. Para quem já deu o consentimento, a
+        // chamada fazia na thread principal, antes do primeiro quadro, a consulta ao
+        // provedor do WebView (IPC), o UMP e o LevelPlay.init. Agora roda logo depois
+        // do primeiro desenho da janela; o caminho do App Open garante a ordem abaixo.
+        window.decorView.post { iniciarAnuncios() }
         if (savedInstanceState == null) {
             // Abertura fria: o App Open só tem chance no instante em que o Aurea
             // termina de carregar. Se o anúncio não estiver pronto nessa hora, a
             // Home segue e ele não aparece depois.
             lifecycleScope.launch {
                 snapshotFlow { store.engineReady }.first { it }
+                // 0.5.3 (medição): o sistema registra "Fully drawn" no logcat com o
+                // tempo da abertura até o motor pronto. Nada muda na tela.
+                runCatching { reportFullyDrawn() }
+                iniciarAnuncios()   // mesma ordem de antes: o SDK começa antes do "app carregou"
                 AureaAdsManager.onAppLoaded(this@MainActivity, trabalhando())
             }
         }
         // Bugs 0.3.4 (importar projeto): aberto por um arquivo do projeto.
-        if (savedInstanceState == null) importProjectFileFrom(intent)
+        if (savedInstanceState == null && !com.aurea.aurea.mcp.AureaMcp.openPairLink(intent?.dataString)) importProjectFileFrom(intent)
+    }
+
+    private var anunciosIniciados = false
+    /** Uma vez por Activity, na thread principal (AureaAds.initialize ignora repetição). */
+    private fun iniciarAnuncios() {
+        if (anunciosIniciados || isDestroyed) return
+        anunciosIniciados = true
+        AureaAds.initialize(this)
     }
 
     // Bugs 0.3.4 (importar projeto): com o app já aberto (singleTask), o
@@ -358,6 +374,8 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        // AureaMCP: aurea://mcp/pair?code=… (página de autorização do agente) preenche o código.
+        if (com.aurea.aurea.mcp.AureaMcp.openPairLink(intent.dataString)) return
         importProjectFileFrom(intent)
     }
 
@@ -479,12 +497,28 @@ private fun MainActivity.LanguageWelcome(content: @Composable () -> Unit) {
 
 /** Versão do texto de privacidade/termos aceito (o build em que mudou). */
 private const val CONSENT_VERSION = 2181
+/**
+ * 0.5.4 (pedido do dono, 14/11/2026): a tela "siga" volta para TODOS, mesmo quem já
+ * seguiu o criador, agora com os perfis do Aurea. Subir este número numa versão nova
+ * faz a tela aparecer de novo uma vez.
+ */
+private const val SOCIAL_VERSION = 54
+/** Perfis da tela "siga": criador e Aurea (TikTok e Instagram de cada um). */
+private val SocialProfiles = listOf(
+    "TikTok @ruanzitwo" to "https://www.tiktok.com/@ruanzitwo",
+    "Instagram @ofruanzitwo" to "https://www.instagram.com/ofruanzitwo/",
+    "Instagram @aureaediting" to "https://www.instagram.com/aureaediting/",
+    "TikTok @aurea.video" to "https://www.tiktok.com/@aurea.video",
+)
 
 @Composable
 private fun MainActivity.CreatorWelcome(content: @Composable () -> Unit) {
     val prefs = remember { getSharedPreferences("creator_welcome", Context.MODE_PRIVATE) }
     var consent by remember { mutableIntStateOf(prefs.getInt("consent_version", 0)) }
-    var opened by remember { mutableIntStateOf(prefs.getInt("opened", 0)) }
+    // Perfis abertos NESTA versão da tela (bits de SocialProfiles); a versão anterior não conta.
+    var socialVersion by remember { mutableIntStateOf(prefs.getInt("social_version", 0)) }
+    var opened by remember { mutableIntStateOf(if (prefs.getInt("social_version", 0) >= SOCIAL_VERSION) prefs.getInt("opened_v", 0) else 0) }
+    val allOpened = (1 shl SocialProfiles.size) - 1
     var error by remember { mutableStateOf(false) }
     // 0.1.7 BETA 3: privacidade + termos com o bonequinho, mostrados uma vez
     // a todos (quem aceitou a versão 2125 vê o texto novo uma vez).
@@ -516,24 +550,32 @@ private fun MainActivity.CreatorWelcome(content: @Composable () -> Unit) {
         }
         return
     }
-    // Google Play: abrir os perfis do criador não pode ser condição para usar o
-    // app (e travaria a revisão). O APK de sideload mantém a tela.
-    if (opened == 3 || BuildConfig.PLAY_STORE) { content(); return }
-    BackHandler { finish() }
+    // Já passou pela tela desta versão: segue para o app.
+    if (socialVersion >= SOCIAL_VERSION) { content(); return }
+    fun done() {
+        prefs.edit().putInt("social_version", SOCIAL_VERSION).putInt("opened_v", opened).apply()
+        socialVersion = SOCIAL_VERSION
+    }
+    // Todos os perfis abertos: libera sozinho.
+    if (opened == allOpened) { androidx.compose.runtime.LaunchedEffect(Unit) { done() } }
+    // Google Play: abrir perfis não pode ser condição para usar o app (política da loja e
+    // revisão). Na loja a tela aparece para todos, mas tem "Continuar". O sideload exige abrir.
+    val canSkip = BuildConfig.PLAY_STORE
+    if (!canSkip) BackHandler { finish() } else BackHandler { done() }
     MaterialTheme(colorScheme = darkColorScheme()) {
         Surface(Modifier.fillMaxSize()) {
             Column(Modifier.safeDrawingPadding().padding(24.dp), verticalArrangement = Arrangement.Center) {
                 Text(stringResource(R.string.social_title), style = MaterialTheme.typography.headlineMedium)
                 Spacer(Modifier.height(16.dp))
-                Text(stringResource(R.string.social_body))
+                Text(stringResource(if (canSkip) R.string.social_body_054_store else R.string.social_body_054))
                 Spacer(Modifier.height(24.dp))
-                listOf("TikTok @ruanzitwo" to "https://www.tiktok.com/@ruanzitwo", "Instagram @ofruanzitwo" to "https://www.instagram.com/ofruanzitwo/").forEachIndexed { i, profile ->
+                SocialProfiles.forEachIndexed { i, profile ->
                     val bit = 1 shl i
                     Button(onClick = {
                         try {
                             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(profile.second)))
                             opened = opened or bit
-                            prefs.edit().putInt("opened", opened).apply()
+                            prefs.edit().putInt("opened_v", opened).apply()
                             error = false
                         } catch (_: android.content.ActivityNotFoundException) { error = true }
                     }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), enabled = opened and bit == 0) {
@@ -542,6 +584,12 @@ private fun MainActivity.CreatorWelcome(content: @Composable () -> Unit) {
                     Spacer(Modifier.height(12.dp))
                 }
                 if (error) Text(stringResource(R.string.social_open_error), color = MaterialTheme.colorScheme.error)
+                if (canSkip) {
+                    Spacer(Modifier.height(4.dp))
+                    androidx.compose.material3.TextButton(onClick = { done() }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                        Text(stringResource(R.string.social_continue))
+                    }
+                }
             }
         }
     }

@@ -37,30 +37,41 @@ class ExportForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
             release()
+            foreground = false
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
             stopSelf()
             return START_NOT_STICKY
         }
-        val type = when {
-            Build.VERSION.SDK_INT >= 35 -> ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING
-            Build.VERSION.SDK_INT >= 29 -> ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-            else -> 0
+        // 0.5.3 (P0-4): os tipos declarados no manifesto, na ordem. O Android 15+
+        // dá a cada tipo um orçamento diário próprio: mediaProcessing esgotado
+        // (ou recusado pelo fabricante) ainda deixa o dataSync.
+        var refusal: Throwable? = null
+        val started = foregroundTypes(Build.VERSION.SDK_INT).any { type ->
+            runCatching {
+                // 0.3.5: a chamada da plataforma, direto. O ServiceCompat desta versão do
+                // androidx não conhece o mediaProcessing (API 35) e mandava o tipo 0, que o
+                // Android 14+ recusa ("FGS with type none"): o export seguia sem o serviço e
+                // o sistema podia matá-lo no meio (bug 12).
+                if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION_ID, notification(this, percent = -1), type)
+                else startForeground(NOTIFICATION_ID, notification(this, percent = -1))
+            }.onFailure { refusal = it; Log.w(TAG, "foreground service type $type refused", it) }.isSuccess
         }
-        val started = runCatching {
-            // 0.3.5: a chamada da plataforma, direto. O ServiceCompat desta versão do
-            // androidx não conhece o mediaProcessing (API 35) e mandava o tipo 0, que o
-            // Android 14+ recusa ("FGS with type none"): o export seguia sem o serviço e
-            // o sistema podia matá-lo no meio (bug 12).
-            if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION_ID, notification(this, percent = -1), type)
-            else startForeground(NOTIFICATION_ID, notification(this, percent = -1))
-        }
-        if (started.isFailure) {
+        if (!started) {
             // Android 12+ recusa começar de segundo plano: o export segue, só
-            // sem a garantia de continuar fora do app.
-            Log.w(TAG, "foreground service refused", started.exceptionOrNull())
+            // sem a garantia de continuar fora do app. 0.5.3: a recusa fica
+            // registrada (o Exporter a põe no relato local), `running` deixa de
+            // mentir e o wake lock de reserva do processo continua segurando a CPU.
+            Log.w(TAG, "foreground service refused", refusal)
+            refused = true
+            running = false
+            foreground = false
             stopSelf()
             return START_NOT_STICKY
         }
+        // Aceito: vale mesmo depois de um onDestroy da instância anterior. Com o
+        // export já encerrado (este comando chegou atrasado), o STOP vem logo atrás.
+        foreground = true
+        if (exportActive) running = true
         if (wakeLock == null) {
             wakeLock = (getSystemService(Context.POWER_SERVICE) as PowerManager)
                 .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "aurea:export").apply {
@@ -68,6 +79,8 @@ class ExportForegroundService : Service() {
                     acquire(MAX_WAKE_MS)
                 }
         }
+        // 0.5.3: o wake lock do serviço assumiu; o de reserva do processo sai.
+        releaseFallbackWake()
         // Morto pelo sistema, não volta sozinho: o motor decide o que retomar.
         return START_NOT_STICKY
     }
@@ -86,6 +99,7 @@ class ExportForegroundService : Service() {
         release()
         runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
         running = false
+        foreground = false
         runCatching {
             (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
                 .notify(TIMEOUT_NOTIFICATION_ID, timeoutNotification(this))
@@ -95,6 +109,14 @@ class ExportForegroundService : Service() {
 
     override fun onDestroy() {
         release()
+        // 0.5.3 (P0-4): sem serviço, `running` não pode continuar verdadeiro (a
+        // notificação de progresso seguiria sendo postada e o stop() mandaria um
+        // comando a um serviço morto). Destruído com o export ainda em curso (o
+        // sistema, ou a corrida de um export que começa quando o anterior acaba):
+        // a CPU fica com o wake lock de reserva.
+        running = false
+        foreground = false
+        if (exportActive && !timedOut) acquireFallbackWake(applicationContext)
         super.onDestroy()
     }
 
@@ -116,12 +138,73 @@ class ExportForegroundService : Service() {
         /** 0.3.6: o sistema esgotou o tempo do serviço neste export (onTimeout). */
         @Volatile var timedOut = false
             private set
+        /** 0.5.3 (P0-4): o Android recusou o serviço em primeiro plano neste export (todos os tipos). */
+        @Volatile var refused = false
+            private set
+        /** 0.5.3: o `startForeground` foi aceito e o serviço segue em primeiro plano. */
+        @Volatile private var foreground = false
+        /** 0.5.3: há um export entre [start] e [stop] (com ou sem serviço). */
+        @Volatile private var exportActive = false
+        /** 0.5.3: wake lock do PROCESSO enquanto o serviço não assume (recusado, nunca começou, destruído). */
+        private var fallbackWake: PowerManager.WakeLock? = null
+
+        /**
+         * 0.5.3 (P0-4): os tipos de serviço em primeiro plano a tentar, na ordem.
+         * Android 15+: mediaProcessing e, recusado, dataSync (os dois estão no
+         * manifesto); Android 10–14: dataSync; antes disso não há tipo (0).
+         */
+        internal fun foregroundTypes(sdk: Int): List<Int> = when {
+            sdk >= 35 -> listOf(ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            sdk >= 29 -> listOf(ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            else -> listOf(0)
+        }
+
+        /** O estado do serviço numa palavra, para o relato local do export. */
+        internal fun stateLabel(timedOut: Boolean, refused: Boolean, foreground: Boolean, running: Boolean): String = when {
+            timedOut -> "timeout"
+            refused -> "refused"
+            foreground -> "started"
+            running -> "starting"
+            else -> "off"
+        }
+
+        /** "started", "refused", "timeout", "starting" (pedido e ainda sem resposta) ou "off"; "+wake" = o wake lock de reserva está segurando a CPU. */
+        fun diagnosticState(): String =
+            stateLabel(timedOut, refused, foreground, running) + if (fallbackHeld()) "+wake" else ""
+
+        @Synchronized private fun fallbackHeld(): Boolean = runCatching { fallbackWake?.isHeld == true }.getOrDefault(false)
+
+        /**
+         * 0.5.3 (P0-4): sem o serviço não havia wake lock nenhum — com a tela
+         * apagada a CPU dormia e o export congelava. Este é do processo, com o
+         * mesmo teto; sai quando o serviço assume e no [stop].
+         */
+        @Synchronized private fun acquireFallbackWake(app: Context) {
+            if (fallbackWake?.isHeld == true) return
+            runCatching {
+                fallbackWake = (app.getSystemService(Context.POWER_SERVICE) as PowerManager)
+                    .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "aurea:export-fallback").apply {
+                        setReferenceCounted(false)
+                        acquire(MAX_WAKE_MS)
+                    }
+            }.onFailure { Log.w(TAG, "fallback wake lock unavailable", it) }
+        }
+
+        @Synchronized private fun releaseFallbackWake() {
+            runCatching { fallbackWake?.let { if (it.isHeld) it.release() } }
+            fallbackWake = null
+        }
 
         /** O export começou (chamado com o app na frente). */
         fun start(context: Context) {
             val app = context.applicationContext
             lastPercent = -2
             timedOut = false
+            refused = false
+            foreground = false
+            exportActive = true
+            // 0.5.3: a CPU fica acordada desde já; o serviço troca pelo dele ao começar.
+            acquireFallbackWake(app)
             runCatching {
                 (app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(TIMEOUT_NOTIFICATION_ID)
             }
@@ -146,6 +229,10 @@ class ExportForegroundService : Service() {
 
         /** O export terminou (ok, falha ou cancelado). */
         fun stop(context: Context) {
+            // 0.5.3: antes do `running` — recusado ou destruído, o serviço não está
+            // "rodando", mas o wake lock de reserva pode estar seguro.
+            exportActive = false
+            releaseFallbackWake()
             if (!running) return
             running = false
             val app = context.applicationContext

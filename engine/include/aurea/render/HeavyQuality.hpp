@@ -58,6 +58,9 @@ struct HeavyQuality {
     bool fxaa = false;
     u32 bloomStartDiv = 2;
     u32 bloomLevels = 6;
+    u32 screenEffectDiv = 2;
+    u32 reflectionSteps = 24;
+    u32 volumetricSteps = 20;
 
     [[nodiscard]] static constexpr HeavyQuality full() noexcept { return HeavyQuality{}; }
 
@@ -70,7 +73,7 @@ struct HeavyQuality {
         HeavyQuality q;
         const f32 s = std::clamp(heavyScale, 0.05f, 1.0f);
         q.particles = s;
-        q.flow = std::clamp(s, 0.25f, 1.0f);
+        q.flow = std::clamp(std::min(s, 2.0f / static_cast<f32>(std::max(1u, previewDen))), 0.25f, 1.0f);
         q.flowBlurSamples = s >= 0.75f ? 32u : (s >= 0.4f ? 16u : 8u);
         u32 shadow = s >= 0.75f ? 2048u : (s >= 0.4f ? 1024u : 512u);
         const u32 den = std::max(1u, previewDen);
@@ -81,6 +84,9 @@ struct HeavyQuality {
         q.aoDirections = s >= 0.4f ? 2u : 1u;
         q.aoSteps = s >= 0.75f ? 4u : 3u;
         q.effects = std::clamp(s, 0.25f, 1.0f);
+        q.screenEffectDiv = s < 0.75f || den >= 2 ? 4u : 2u;
+        q.reflectionSteps = s >= 0.75f ? 24u : s >= 0.4f ? 12u : 8u;
+        q.volumetricSteps = s >= 0.75f ? 20u : s >= 0.4f ? 12u : 8u;
         // 3D: 4× com o preview cheio, 2× no meio; abaixo disso, 1 amostra +
         // FXAA (o custo do MSAA é banda de tile — o que falta quando o AUTO
         // já derrubou a escala) e um bloom mais curto.
@@ -98,7 +104,8 @@ struct HeavyQuality {
 
     [[nodiscard]] bool is_full() const noexcept {
         return particles >= 1.0f && flow >= 1.0f && flowBlurSamples >= 32 && shadowMapSize >= 2048 && shadowFilter >= 2
-            && lodBias >= 1.0f && effects >= 1.0f && msaaSamples >= 4 && bloomLevels >= 6;
+            && lodBias >= 1.0f && effects >= 1.0f && msaaSamples >= 4 && bloomLevels >= 6
+            && screenEffectDiv <= 2 && reflectionSteps >= 24 && volumetricSteps >= 20;
     }
 };
 
@@ -167,6 +174,9 @@ struct HeavyStats {
     u32 flowCacheHits = 0;
     u32 flowCacheEvictions = 0;
     u64 flowCacheBytes = 0;       ///< residente agora
+    // TimeSlice (0.5.3): faixas guardadas e o tamanho da última faixa desenhada.
+    u64 sliceCacheBytes = 0;
+    u32 lastSliceWidth = 0, lastSliceHeight = 0;
     // Partículas (último quadro).
     u32 lastParticleSlots = 0;    ///< instâncias desenhadas
     u32 lastParticleLayers = 0;

@@ -607,14 +607,17 @@ internal fun pluginEditorMenuEntries(store: EditorStore): List<MenuEntry> {
     return out
 }
 
-/** As ações "layer.menu" no ⋮ da camada (Menus.kt). */
+/** As ações da camada no ⋮, incluindo os atalhos da barra quando consolidados. */
 @Composable
-internal fun pluginLayerMenuEntries(store: EditorStore): List<MenuEntry> {
+internal fun pluginLayerMenuEntries(store: EditorStore, includeToolbar: Boolean = false, includeLayerMenu: Boolean = true): List<MenuEntry> {
     val tag = localeTag()
     val out = ArrayList<MenuEntry>()
     store.plugins.filter { it.ok && it.enabled }.forEach { p ->
-        p.actions.filter { "layer.menu" in it.placement }.forEach { a ->
+        p.actions.filter {
+            (includeLayerMenu && "layer.menu" in it.placement) || (includeToolbar && "layer.toolbar" in it.placement)
+        }.forEach { a ->
             out += MenuEntry.Item(PluginTexts.pick(a.title, tag).orEmpty(), glyph = pluginGlyph(a.icon),
+                enabled = PluginRuntime.busy[p.id] != true,
                 tag = "plugin.action.${p.id}.${a.id}") { PluginRuntime.runAction(p.id, a) }
         }
     }

@@ -35,6 +35,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <memory>
 #include <new>
 #include <thread>
@@ -1032,6 +1033,74 @@ AUREA_TEST(Perf8C, AutoMemoryAndThermalFloors) {
         AUREA_CHECK_EQ(c.current_denominator(), 4u);
         AUREA_CHECK_NEAR(c.quality().blurSamples, 0.5f, 1e-6f);
     }
+}
+
+AUREA_TEST(HyperAdaptive, MemoryHeadroomInterruptsTheCooldownAndHandlesInvalidSamples) {
+    AUREA_CHECK_NEAR(memory_headroom_pressure(200, 100), 0.0f, 1e-6f);
+    AUREA_CHECK_NEAR(memory_headroom_pressure(110, 100), 0.9f, 1e-6f);
+    AUREA_CHECK_NEAR(memory_headroom_pressure(0, 100), 1.0f, 1e-6f);
+    AUREA_CHECK_NEAR(memory_headroom_pressure(0, 0), 0.0f, 1e-6f);
+    DeviceCapabilities caps;
+    AdaptiveResolutionController controller(caps);
+    controller.configure(1920, 1080, std::numeric_limits<f32>::quiet_NaN());
+    AUREA_CHECK_NEAR(controller.budget().targetFps, 60.0f, 1e-6f);
+    FrameStats stats;
+    stats.cpuMs = 1.0f;
+    stats.gpuMs = 40.0f;
+    for (u32 frame = 1; frame <= AdaptiveResolutionController::kDownStreak; ++frame) {
+        stats.frameIndex = frame;
+        (void)controller.update(stats, {});
+    }
+    AUREA_CHECK(controller.state().cooldownFrames > 0);
+    const u32 previous = controller.current_denominator();
+    stats.memoryPressure = 0.95f;
+    (void)controller.update(stats, {});
+    AUREA_CHECK(controller.current_denominator() > previous);
+    AUREA_CHECK(controller.state().bottleneck == PreviewBottleneck::Memory);
+    stats.cpuMs = std::numeric_limits<f32>::quiet_NaN();
+    stats.gpuMs = std::numeric_limits<f32>::infinity();
+    stats.decodeMs = -1.0f;
+    stats.memoryPressure = std::numeric_limits<f32>::quiet_NaN();
+    const auto& state = controller.update(stats, {});
+    AUREA_CHECK(std::isfinite(state.averageFrameMs));
+    AUREA_CHECK(std::isfinite(state.averageGpuMs));
+    AUREA_CHECK_EQ(state.memoryPressure, 1.0f);
+}
+
+AUREA_TEST(HyperAdaptive, DecodeDominatedFramesKeepTheirRenderResolution) {
+    DeviceCapabilities caps;
+    AdaptiveResolutionController controller(caps);
+    controller.configure(1920, 1080, 30.0f);
+    FrameStats stats;
+    stats.cpuMs = 40.0f;
+    stats.gpuMs = 5.0f;
+    stats.decodeMs = 45.0f;
+    for (u32 frame = 1; frame <= 120; ++frame) {
+        stats.frameIndex = frame;
+        (void)controller.update(stats, {});
+    }
+    AUREA_CHECK_EQ(controller.current_denominator(), 1u);
+    AUREA_CHECK(controller.state().bottleneck == PreviewBottleneck::Decode);
+}
+
+AUREA_TEST(HyperAdaptive, ExportQualityIgnoresTheAdaptiveScreenEffectBudget) {
+    RenderSettings settings;
+    settings.heavyScale = 0.25f;
+    settings.previewDenominator = 8;
+    const auto preview = resolve_heavy(settings);
+    AUREA_CHECK_EQ(preview.screenEffectDiv, 4u);
+    AUREA_CHECK_EQ(preview.reflectionSteps, 8u);
+    AUREA_CHECK_EQ(preview.volumetricSteps, 8u);
+    AUREA_CHECK_NEAR(preview.flow, 0.25f, 1e-6f);
+    settings.heavyExplicit = true;
+    settings.heavy = preview;
+    settings.finalQuality = true;
+    const auto final = resolve_heavy(settings);
+    AUREA_CHECK(final.exportFrame);
+    AUREA_CHECK_EQ(final.screenEffectDiv, 2u);
+    AUREA_CHECK_EQ(final.reflectionSteps, 24u);
+    AUREA_CHECK_EQ(final.volumetricSteps, 20u);
+    AUREA_CHECK_NEAR(final.flow, 1.0f, 1e-6f);
 }
 
 // =============================================================================

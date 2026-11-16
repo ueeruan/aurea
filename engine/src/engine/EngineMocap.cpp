@@ -63,6 +63,7 @@ std::shared_ptr<Engine::MocapSession> Engine::mocap_session() noexcept {
 
 void Engine::set_mocap_preview(u64 layerId, std::shared_ptr<const rig::MocapPreview> preview) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Model3D) return;
@@ -79,11 +80,12 @@ i32 Engine::mocap_begin(u64 layerId) noexcept {
     f64 fps = 30.0;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
+        InlineEditScope inlineScope(*this, layerId, true);
         Composition* comp = project_ ? current_composition() : nullptr;
         const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
         if (!l || l->kind != LayerKind::Model3D) return -1;
         fps = comp->fps() > 0.0 ? comp->fps() : 30.0;
-        const FrameIndex now = playback_.current();
+        const FrameIndex now = editing_frame_locked();
         // Começa no cabeçote quando ele está dentro da camada; senão no início dela.
         start = l->contains_time(now) ? std::max<i64>(0, static_cast<i64>(l->local_time(now).value)) : 0;
     }
@@ -157,7 +159,7 @@ u32 Engine::mocap_report(f32* out, u32 capacity) noexcept {
     const rig::MocapReport& r = s->result.report;
     out[0] = static_cast<f32>(r.frames);
     out[1] = static_cast<f32>(r.duration);
-    out[2] = r.hasWorld ? 1.0f : 0.0f;
+    out[2] = r.hasWorld || r.auxWorld ? 1.0f : 0.0f;
     out[3] = r.lowConfidence ? 1.0f : 0.0f;
     for (usize m = 0; m < rig::kLimbCount; ++m) out[4 + m] = r.lowFraction[m];
     out[10] = r.footLockedFraction;

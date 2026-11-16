@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE layers (2026-11-12): qualidade da camada, clipe do modelo 3D, transições por camada, guias da prévia e velocidade negativa. -->
+<resources>
+    <string name="ae_layer_quality">Quality</string>
+    <string name="ae_quality_best">Best</string>
+    <string name="ae_quality_draft">Draft</string>
+    <string name="ae_quality_wireframe">Wireframe</string>
+    <string name="ae_quality_hint">Draft and Wireframe affect only the preview; exports always render at Best</string>
+    <string name="ae_layer_sampling">Sampling</string>
+    <string name="ae_sampling_bilinear">Bilinear</string>
+    <string name="ae_sampling_bicubic">Bicubic</string>
+    <string name="ae_sampling_hint">Bicubic keeps scaled-up images sharper (applies at Best)</string>
+    <string name="ae_model_clip">Model animation</string>
+    <string name="ae_model_clip_none">Still</string>
+    <string name="ae_model_clip_n">Clip %1$d</string>
+    <string name="ae_model_clip_empty">This model has no animation</string>
+    <string name="ae_transitions">Transitions</string>
+    <string name="ae_transition_in">In</string>
+    <string name="ae_transition_out">Out</string>
+    <string name="ae_transition_none">None</string>
+    <string name="ae_transition_dissolve">Dissolve</string>
+    <string name="ae_transition_slide_up">Slide up</string>
+    <string name="ae_transition_slide_left">Slide from left</string>
+    <string name="ae_transition_zoom">Zoom</string>
+    <string name="ae_transition_spin">Spin</string>
+    <string name="ae_transition_duration">Duration</string>
+    <string name="ae_transition_hint">Play at the clip edges; they do not create keyframes</string>
+    <string name="ae_guides_safe">Title/action safe</string>
+    <string name="ae_guides_rulers">Rulers</string>
+    <string name="ae_speed_reverse_point">Reverse direction</string>
+    <string name="ae_speed_reverse_hint">Negative speed plays the source backwards within the ramp (down to frame 0)</string>
+</resources>

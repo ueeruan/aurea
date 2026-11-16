@@ -279,7 +279,7 @@ bool is_content_effect(u32 type) noexcept {
 }
 
 void apply_text_content(const TextData& t, const TrackSet& tracks, f64 local, f64 fps, TextData& out) {
-    out.content = apply_char_offset(t, tracks, local, fps);
+    out.content = apply_char_offset(t, tracks, local, fps, &out.charSlots);
     for (u32 ai = 0; ai < t.animators.size(); ++ai) {
         const TextAnimator& a = t.animators[ai];
         if (!a.enabled) continue;
@@ -306,6 +306,12 @@ void apply_text_content(const TextData& t, const TrackSet& tracks, f64 local, f6
             out.tracking += P(kAnimLetterSpacing, a.letterSpacing, local) * 10.f;   // 1 % do em = 10 milésimos
             out.lineHeight *= std::max(0.f, P(kAnimLineSpacingEm, a.lineSpacingEm, local) * .01f);
         }
+    }
+    // Character Alignment: a revelação corta/acrescenta no fim (o cursor), então
+    // as vagas do começo continuam valendo; o resto sai.
+    if (!out.charSlots.empty()) {
+        const usize n = split_code_points(out.content).size();
+        if (out.charSlots.size() != n) out.charSlots.resize(n, 0u);
     }
 }
 

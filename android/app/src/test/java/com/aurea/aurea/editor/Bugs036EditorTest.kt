@@ -9,6 +9,38 @@ import org.junit.Test
 
 /** 0.3.6 (editor): Edição, transporte, tamanho do texto e o ícone de corte. */
 class Bugs036EditorTest {
+    @Test fun centeredNavigationStopsAtTheSequenceEdgesAndHandlesInvalidOffsets() {
+        assertEquals(0f, EditLaneLayout.clampCentered(-450f, 300), 0f)
+        assertEquals(150.5f, EditLaneLayout.clampCentered(150.5f, 300), 0f)
+        assertEquals(300f, EditLaneLayout.clampCentered(450f, 300), 0f)
+        assertEquals(0f, EditLaneLayout.clampCentered(10f, 0), 0f)
+        assertEquals(0f, EditLaneLayout.clampCentered(10f, -1), 0f)
+        assertEquals(0f, EditLaneLayout.clampCentered(Float.NaN, 300), 0f)
+        assertEquals(0f, EditLaneLayout.clampCentered(Float.POSITIVE_INFINITY, 300), 0f)
+    }
+
+    @Test fun mobileTimelinePlacesTheMainTrackBeforeOverlaysAndAudio() {
+        val tracks = listOf(
+            EditTrackInfo(10, false, false, false, false, true, "V1"),
+            EditTrackInfo(11, false, false, false, false, false, "V2"),
+            EditTrackInfo(20, true, false, false, false, false, "A1"),
+        )
+        val data = EditTimelineData(tracks, emptyMap(), -1, -1, mainTrackId = 10)
+        assertEquals(listOf("V1", "V2", "A1"), data.lanes.map { it.label })
+    }
+
+    @Test fun horizontalScrollStopsAtTheSequenceAndReclampsAfterZoomOrResize() {
+        assertEquals(0f, EditLaneLayout.clampHorizontal(-450f, 300, 160f, 2f), 0f)
+        assertEquals(150f, EditLaneLayout.clampHorizontal(150f, 300, 160f, 2f), 0f)
+        assertEquals(220f, EditLaneLayout.clampHorizontal(450f, 300, 160f, 2f), 0f)
+        assertEquals(50f, EditLaneLayout.clampHorizontal(220f, 300, 500f, 2f), 0f)
+        assertEquals(0f, EditLaneLayout.clampHorizontal(220f, 60, 160f, 2f), 0f)
+        assertEquals(0f, EditLaneLayout.clampHorizontal(220f, 300, 160f, .5f), 0f)
+        assertEquals(0f, EditLaneLayout.clampHorizontal(10f, 300, 0f, 2f), 0f)
+        assertEquals(0f, EditLaneLayout.clampHorizontal(10f, -1, 160f, 2f), 0f)
+        assertEquals(0f, EditLaneLayout.clampHorizontal(Float.NaN, 300, 160f, 2f), 0f)
+    }
+
     // Os mesmos números do desenho da Edição em 1× (régua 26 + 8, principal 56, linha 34, folga 6, base 12).
     @Test fun laneLayoutStopsWhenTheLastTrackReachesTheBottom() {
         val l = EditLaneLayout.compute(6, rulerH = 26f, laneH = 44f, gap = 1f)

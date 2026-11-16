@@ -10,6 +10,7 @@
 //  de raio r/k, e o desenho não muda.
 // =============================================================================
 #include "BuiltinEffects.hpp"
+#include "aurea/effects/DeepGlowReference.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -28,10 +29,8 @@ u32 reduction_for(f32 radius, f32 limit) noexcept {
 // -----------------------------------------------------------------------------
 // Brilho profundo
 //
-// Instância nova (algoritmo 1): o brilho em oitavas do Brilho, com exposição
-// mais alta e raio largo de padrão. Instância salva antes (slot "algorithm"
-// ausente = 0): os dois halos abaixo, inalterados; os controles que só o
-// desenho anterior usa ficam ocultos (os valores salvos continuam valendo).
+// New instances use the reference control contract. Saved rendering modes keep
+// their original paths and parameter indices.
 // -----------------------------------------------------------------------------
 class DeepGlow final : public Effect {
 public:
@@ -51,6 +50,7 @@ public:
         // ocultos (kLegacy): animáveis como antes, fora do card.
         constexpr u16 kLegacy = kParamAnimatable | kParamHidden;
         p.add_float("threshold", "Limite", 55.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        p.typed_range(0.f, 1000.f);
         p.add_float("core_radius", "Raio do núcleo", 12.0f, 0.0f, 400.0f, kLegacy | kParamPixels, "px");
         p.add_float("halo_radius", "Raio", 70.0f, 0.0f, 800.0f, kParamAnimatable | kParamPixels, "px");
         p.add_float("core_intensity", "Força do núcleo", 1.4f, 0.0f, 8.0f, kLegacy);
@@ -68,7 +68,7 @@ public:
         p.add_float("threshold_softness", "Suavidade do limite", 50.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         // Algoritmo (oculto): 1 = brilho em oitavas; 0 = os dois halos, que um
         // projeto salvo sem este slot (até a build 2143) mantém.
-        p.add_float("algorithm", "Algoritmo", 1.0f, 0.0f, 1.0f, kParamHidden | kParamLegacyZero);
+        p.add_float("algorithm", "Algoritmo", 2.0f, 0.0f, 2.0f, kParamHidden | kParamLegacyZero);
         p.add_float("glow_intensity", "Intensidade", 2.2f, 0.0f, 10.0f);
         p.typed_range(0.0f, 100.0f);
         // Relato 0.4.4 ("a intensidade do Deep Glow não muda nada"): a faixa
@@ -82,18 +82,25 @@ public:
         p.add_float("falloff", "Decaimento", 15.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_float("tint_amount", "Quantidade da cor", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_float("chromatic", "Aberração cromática", 0.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
-        p.add_bool("add_mode", "Modo somar", false);
+        p.add_bool("add_mode", "Modo somar", true);
         // Seções do painel (só apresentação; índices intactos).
         p.add_section("threshold", "Limite", {kThreshold, kSoftness});
         p.add_section("color", "Cor", {kColor, kTintAmount, kChromatic});
         p.set_tip(kThreshold, "Só o que é mais claro que o limite brilha.");
+        deep_glow_reference::declare_parameters(p);
     }
     static bool octaves(const EffectEval& e) noexcept { return e.f(kAlgorithm) >= 0.5f; }
     bool is_identity(const EffectEval& e) const noexcept override {
+        if (deep_glow_reference::active(e)) return e.f(deep_glow_reference::kRadius) == 0.f;
         if (octaves(e)) return !e.b(kOnlyGlow) && e.f(kGlowIntensity) < 1e-4f;
         return !e.b(kOnlyGlow) && (e.f(kCoreIntensity) < 1e-3f && e.f(kHaloIntensity) < 1e-3f);
     }
     f32 input_margin(const EffectEval& e) const noexcept override {
+        if (deep_glow_reference::active(e)) return deep_glow_reference::input_margin(e);
+        if (e.f(kAlgorithm) >= 1.5f) {
+            const f32 radius = e.f(kHaloRadius);
+            return std::clamp(std::isfinite(radius) ? radius : 70.f, 0.f, 800.f);
+        }
         if (octaves(e)) return octave_glow_reach(e.f(kHaloRadius));
         return std::max(e.f(kCoreRadius), e.f(kHaloRadius));
     }
@@ -103,8 +110,21 @@ public:
         out.push_back(PipelineKey::fullscreen(ShaderId::effects_downsample_frag, work));
         out.push_back(PipelineKey::fullscreen(ShaderId::effects_deep_glow_combine_frag, work));
         octave_glow_pipelines(out, work);
+        deep_glow_reference::pipelines(out, work);
     }
-    bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
+    i32 input_layer_param() const noexcept override {
+        return static_cast<i32>(deep_glow_reference::kMaskLayer);
+    }
+    bool demo_values(EffectInstance& instance, std::vector<ParamValue>& v) const noexcept override {
+        if (v.size() >= deep_glow_reference::kCount && instance.params.size() >= deep_glow_reference::kCount &&
+            v[deep_glow_reference::kMode].as_enum() == 1) {
+            // A thumbnail has its own demonstration radius. Starting its sweep
+            // at zero avoids allocating a 500 px halo around a small catalog tile.
+            instance.params[deep_glow_reference::kRadius].constant = ParamValue::scalar(0.f);
+            v[deep_glow_reference::kRadius] = ParamValue::scalar(32.f);
+            v[deep_glow_reference::kDitherEnabled] = ParamValue::boolean(false);
+            return true;
+        }
         // Calibrado na foto das prévias (clara): limite alto para só as luzes
         // acenderem.
         v[kThreshold] = ParamValue::scalar(85.0f);
@@ -131,8 +151,9 @@ public:
         u32 bw = 0, bh = 0;
         ctx.region_size(region, k / static_cast<f32>(r), bw, bh);
         const FGTexture tex = ctx.texture(label, bw, bh);
-        const f32 t = e.f(kThreshold) / 100.0f;
-        const f32 knee = std::max(1e-4f, t * e.f(kSoftness) / 100.0f);
+        const f32 threshold = e.f(kThreshold), softness = e.f(kSoftness);
+        const f32 t = std::clamp(std::isfinite(threshold) ? threshold : 55.f, 0.f, 1000.f) / 100.f;
+        const f32 knee = std::max(1e-4f, t * std::clamp(std::isfinite(softness) ? softness : 50.f, 0.f, 100.f) / 100.f);
         struct {
             Vec4 uvMap;
             Vec4 texel;
@@ -175,21 +196,24 @@ public:
     // increasing the radius spreads light instead of multiplying its energy.
     // This is an independent optical model, not the proprietary AE algorithm.
     static Status optical_halo(EffectBuildContext& ctx, const LayerImage& source,
-                               const Rect& region, f32 radius, LayerImage& out) {
+                               const Rect& region, f32 radius, LayerImage& out, f32 falloff = 0.f) {
         constexpr u32 levels = 6;
         // Custo (relato beta "trava com deep glow"): 22 passes, o lóbulo de
         // σ ≈ 6 texels sozinho era 1/5 do efeito. Lóbulos largos descem a
         // pirâmide até σ ≈ 2 texels (borrão igual, passes de 1/4 a 1/16 da
         // área); os mais finos que meio texel já SÃO a imagem clara.
         const f32 k = source.texel_scale_x();
+        f32 accumulatedWeight = 0.f;
         for (u32 level = 0; level < levels; ++level) {
             LayerImage lobe;
             const f32 r = radius / static_cast<f32>(1u << level);
             if (r / 3.0f * k < 0.5f) lobe = source;
             else if (const Status s = blur_halo(ctx, source, region, r, lobe, 2.0f); !s.ok()) return s;
-            if (level == 0) { out = lobe; continue; }
+            const f32 weight = std::exp2(static_cast<f32>(level) * 2.f * falloff);
+            if (level == 0) { out = lobe; accumulatedWeight = weight; continue; }
             EffectUniforms u;
-            u.p3 = Vec4{1, static_cast<f32>(level) / (level + 1), 1.0f / (level + 1), 0};
+            u.p3 = Vec4{1, accumulatedWeight / (accumulatedWeight + weight), weight / (accumulatedWeight + weight), 0};
+            accumulatedWeight += weight;
             // Keep broad lobes at their reduced resolution. Upsample only as
             // finer lobes join, rather than allocating six full-size sums.
             const u32 width = std::max(out.width, lobe.width), height = std::max(out.height, lobe.height);
@@ -207,6 +231,52 @@ public:
 
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
                  LayerImage& out) const override {
+        if (deep_glow_reference::active(e)) return deep_glow_reference::build(ctx, e, input, margin, out);
+        if (e.f(kAlgorithm) >= 1.5f) {
+            const auto scalar = [&](u32 parameter, f32 fallback, f32 minimum, f32 maximum) {
+                const f32 value = e.f(parameter);
+                return std::clamp(std::isfinite(value) ? value : fallback, minimum, maximum);
+            };
+            const f32 radius = scalar(kHaloRadius, 70.f, 0.f, 800.f);
+            Rect region = spread_region(input.region, radius, radius, e.placement, margin);
+            const f32 scaleX = input.texel_scale_x(), scaleY = input.texel_scale_y();
+            if (scaleX > 0.f && scaleY > 0.f) {
+                const f32 left = input.region.x + std::floor((region.x - input.region.x) * scaleX + 1e-3f) / scaleX;
+                const f32 top = input.region.y + std::floor((region.y - input.region.y) * scaleY + 1e-3f) / scaleY;
+                const f32 right = input.region.x + std::ceil((region.right() - input.region.x) * scaleX - 1e-3f) / scaleX;
+                const f32 bottom = input.region.y + std::ceil((region.bottom() - input.region.y) * scaleY - 1e-3f) / scaleY;
+                region = Rect{left, top, right - left, bottom - top};
+            }
+            LayerImage source, halo;
+            const u32 reduction = radius * input.texel_scale_x() >= 12.f ? 2u : 1u;
+            if (const Status status = bright(ctx, e, input, region, reduction, "deep-glow-source", source); !status.ok()) return status;
+            if (const Status status = optical_halo(ctx, source, region, radius, halo, scalar(kFalloff, 15.f, 0.f, 100.f) / 100.f); !status.ok()) return status;
+            u32 width = 0, height = 0;
+            ctx.region_size(region, input.texel_scale_x(), width, height);
+            EffectUniforms uniforms;
+            uniforms.uvMap = EffectBuildContext::uv_map(region, input.region);
+            // Six optical lobes contribute to the exposure control.
+            uniforms.p0 = Vec4{0.f, 6.f * scalar(kGlowIntensity, 2.2f, 0.f, 100.f), 65504.f, 0.f};
+            uniforms.p1 = Vec4{e.b(kAddMode) ? 0.f : 1.f, 0.f, 1.f, e.b(kOnlyGlow) ? 1.f : 0.f};
+            uniforms.p2 = Vec4{scalar(kChromatic, 0.f, 0.f, 100.f) / 100.f * .08f,
+                (input.region.x + input.region.w * .5f - region.x) / region.w,
+                (input.region.y + input.region.h * .5f - region.y) / region.h, 1.f};
+            const f32 tint = scalar(kTintAmount, 100.f, 0.f, 100.f) / 100.f;
+            Vec4 color = e.color(kColor);
+            color.x = std::clamp(std::isfinite(color.x) ? color.x : 1.f, 0.f, 1.f);
+            color.y = std::clamp(std::isfinite(color.y) ? color.y : 1.f, 0.f, 1.f);
+            color.z = std::clamp(std::isfinite(color.z) ? color.z : 1.f, 0.f, 1.f);
+            uniforms.color = Vec4{1.f + (color.x - 1.f) * tint, 1.f + (color.y - 1.f) * tint,
+                                  1.f + (color.z - 1.f) * tint, 1.f};
+            out = LayerImage{ctx.texture("deep-glow-optical", width, height), region, width, height};
+            if (ctx.fullscreen_pass("deep-glow-optical", PassStage::Effects, out.texture,
+                    ShaderId::effects_deep_glow_combine_frag,
+                    {PassTexture{input.texture, {}, CommonSampler::LinearBorder},
+                     PassTexture{halo.texture, {}, CommonSampler::LinearBorder},
+                     PassTexture{halo.texture, {}, CommonSampler::LinearBorder}},
+                    &uniforms, sizeof(uniforms)) == kInvalidIndex) return Errc::PipelineCompileFailed;
+            return OkStatus;
+        }
         if (octaves(e)) {
             OctaveGlow g;
             g.threshold = e.f(kThreshold) / 100.0f;

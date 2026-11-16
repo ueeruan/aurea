@@ -122,3 +122,125 @@ AUREA_TEST(PhotoImport, AreaResampleKeepsStraightAlphaEdges) {
     const auto fit = image::fit_to_room(4000, 3000, 20ull << 20, 64);
     AUREA_CHECK(fit.width > 0 && static_cast<u64>(fit.width) * fit.height * 4 + 64 <= (10ull << 20));
 }
+
+// =============================================================================
+//  0.5.3 — relato do Discord: "null bug foto bug app crash for nothing … it's
+//  just two photos and crashed" (sem log). Duas fotos no mesmo projeto pelos
+//  caminhos que copiam a foto inteira: importar (grande com EXIF 6 + uma
+//  pequena + um panorama extremo), desenhar (a textura de cada uma sobe pela
+//  fila de envio), miniaturas da timeline e reabrir o projeto com a plataforma
+//  devolvendo a foto, nada (null) ou o tamanho errado. Nenhum caminho pode
+//  fechar o app; o que faltar vira placeholder.
+// =============================================================================
+#include "aurea/core/SafeAlloc.hpp"
+
+AUREA_TEST(PhotoImport, SafeAllocRefusesImpossibleSizesInsteadOfTerminating) {
+    std::vector<u8> v(16, 7);
+    // Tamanho impossível: o resize lançaria (length_error / bad_alloc) — num
+    // arquivo -fno-exceptions do celular isso era std::terminate.
+    AUREA_CHECK(!try_resize_bytes(v, std::numeric_limits<usize>::max()));
+    AUREA_CHECK_EQ(v.size(), 16u);
+    AUREA_CHECK_EQ(v[0], 7);
+    AUREA_CHECK(try_resize_bytes(v, 64));
+    AUREA_CHECK_EQ(v.size(), 64u);
+    const u8 src[4] = {1, 2, 3, 4};
+    std::vector<u8> copy;
+    AUREA_CHECK(try_assign_bytes(copy, src, 4));
+    AUREA_CHECK_EQ(copy.size(), 4u);
+    AUREA_CHECK_EQ(copy[3], 4);
+    AUREA_CHECK(!try_assign_bytes(copy, nullptr, 4));
+    AUREA_CHECK_EQ(copy.size(), 4u);
+    AUREA_CHECK(try_assign_bytes(copy, nullptr, 0));
+    AUREA_CHECK(copy.empty());
+}
+
+AUREA_TEST(PhotoImport, TwoPhotosImportDrawThumbAndReopenWithoutCrashing) {
+    const auto file = std::filesystem::temp_directory_path() / "aurea-two-photos.aurea";
+    // Foto de celular 12,5 MP em retrato pelo EXIF 6 (pixels crus deitados) e
+    // uma foto pequena (PNG/WebP chegam igual: RGBA8 reto já decodificado).
+    static constexpr u32 kBigW = 4080, kBigH = 3060, kSmallW = 640, kSmallH = 480;
+    u64 bigId = 0, smallId = 0, panoId = 0;
+    {
+        auto* mock = new aurea::test::MockBackend();
+        Engine e; auto cfg = headless_config(); cfg.backend = mock; cfg.memoryBudgetBytes = 768ull << 20;
+        AUREA_CHECK(e.initialize(cfg).ok());
+        AUREA_CHECK(e.new_project(1080, 1920, 30., "duas fotos").ok());
+        int window = 0;
+        AUREA_CHECK(e.attach_surface(&window, 108, 192).ok());
+        const auto big = photo_pixels(kBigW, kBigH);
+        const auto small = photo_pixels(kSmallW, kSmallH);
+        const auto a = e.import_image(big.data(), kBigW, kBigH, "IMG_0001.jpg", "content://media/picker/0/1", 6);
+        AUREA_CHECK(a.ok()); if (!a.ok()) return;
+        AUREA_CHECK(e.render_frame().ok());   // a 1ª textura sobe antes da 2ª foto chegar
+        const auto b = e.import_image(small.data(), kSmallW, kSmallH, "IMG_0002.png", "content://media/picker/0/2", 1);
+        AUREA_CHECK(b.ok()); if (!b.ok()) return;
+        bigId = *a; smallId = *b;
+        // Panorama extremo: a miniatura da timeline pedia uma tira gigante.
+        const auto pano = photo_pixels(8192, 16);
+        const auto c = e.import_image(pano.data(), 8192, 16, "pano.webp", "content://media/picker/0/3", 1);
+        AUREA_CHECK(c.ok()); if (c.ok()) panoId = *c;
+        for (u32 i = 0; i < 4; ++i) AUREA_CHECK(e.render_frame().ok());
+        bridge::LayerDetailPOD d;
+        AUREA_CHECK(e.query_layer_detail(bigId, d));
+        AUREA_CHECK(d.sourceWidth < d.sourceHeight);   // retrato (EXIF aplicado)
+        AUREA_CHECK(e.query_layer_detail(smallId, d));
+        AUREA_CHECK_EQ(d.sourceWidth, kSmallW);
+        std::vector<u8> thumb(1 << 20); u32 tw = 0;
+        AUREA_CHECK(e.query_thumbnail(bigId, 0, 48, thumb.data(), static_cast<u32>(thumb.size()), &tw) > 0);
+        AUREA_CHECK(e.query_thumbnail(smallId, 0, 48, thumb.data(), static_cast<u32>(thumb.size()), &tw) > 0);
+        if (panoId) {
+            tw = 0;
+            const u32 bytes = e.query_thumbnail(panoId, 0, 48, thumb.data(), static_cast<u32>(thumb.size()), &tw);
+            AUREA_CHECK(bytes > 0);
+            AUREA_CHECK(tw <= 4096u);   // a tira nunca passa de 4096 de largura
+        }
+        AUREA_CHECK(e.save_project(file.string().c_str()).ok());
+        e.shutdown();
+    }
+    // Reabrir: a plataforma devolve a 1ª foto crua (com EXIF), nada para a 2ª
+    // ("null": decodeImage falhou) e depois um tamanho que não confere.
+    struct Loader { u32 calls = 0; u32 mode = 0; } loader;
+    auto cfg = headless_config();
+    cfg.memoryBudgetBytes = 768ull << 20;
+    cfg.imageLoaderContext = &loader;
+    cfg.imageLoader = [](const char* src, ImagePixels& out, void* opaque) {
+        auto& l = *static_cast<Loader*>(opaque); ++l.calls;
+        const std::string s = src ? src : "";
+        if (s.find("/1") != std::string::npos) {
+            out.width = kBigW; out.height = kBigH; out.orientation = 6;
+            out.rgba = photo_pixels(kBigW, kBigH);
+            return true;
+        }
+        if (l.mode == 0) return false;               // null
+        out.width = kSmallW; out.height = kSmallH;   // tamanho errado: falta 1 linha
+        out.rgba.assign(static_cast<usize>(kSmallW) * (kSmallH - 1) * 4, 9);
+        return true;
+    };
+    for (u32 mode : {0u, 1u}) {
+        loader.mode = mode; loader.calls = 0;
+        auto* mock = new aurea::test::MockBackend();
+        cfg.backend = mock;
+        Engine r; AUREA_CHECK(r.initialize(cfg).ok());
+        AUREA_CHECK(r.load_project(file.string().c_str()).ok());
+        AUREA_CHECK(loader.calls >= 2u);
+        AUREA_CHECK(r.last_load_missing_assets() >= 1u);   // a 2ª vira placeholder
+        int window = 0;
+        AUREA_CHECK(r.attach_surface(&window, 108, 192).ok());
+        for (u32 i = 0; i < 3; ++i) AUREA_CHECK(r.render_frame().ok());
+        // Os ids podem mudar ao reabrir: acha as camadas pela origem.
+        u64 reBig = 0, reSmall = 0;
+        const auto* comp = r.project()->timeline().composition(r.project()->timeline().root());
+        comp->layers().for_each([&](LayerId lid, const Layer& layer) {
+            const Asset* asset = r.project()->asset(layer.source);
+            if (!asset) return;
+            if (asset->sourcePath == "content://media/picker/0/1") reBig = lid.pack();
+            if (asset->sourcePath == "content://media/picker/0/2") reSmall = lid.pack();
+        });
+        AUREA_CHECK(reBig != 0 && reSmall != 0);
+        std::vector<u8> thumb(1 << 20); u32 tw = 0;
+        AUREA_CHECK(r.query_thumbnail(reBig, 0, 48, thumb.data(), static_cast<u32>(thumb.size()), &tw) > 0);
+        AUREA_CHECK_EQ(r.query_thumbnail(reSmall, 0, 48, thumb.data(), static_cast<u32>(thumb.size()), &tw), 0u);
+        r.shutdown();
+    }
+    std::error_code error; std::filesystem::remove(file, error);
+}

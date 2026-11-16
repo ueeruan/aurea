@@ -7,6 +7,7 @@
 #include "aurea/core/Thread.hpp"
 #include "aurea/core/Time.hpp"
 #include "aurea/export/ExportRules.hpp"
+#include "aurea/export/NV12Copy.hpp"
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -48,6 +49,7 @@ constexpr i32 kColorSemiPlanar = 0x15;
 constexpr i32 kColorPackedSemiPlanar = 0x27;
 constexpr i32 kBitrateVbr = 1, kBitrateCbr = 2;
 constexpr i32 kAvcBaseline = 1, kAvcConstrainedBaseline = 0x10000;
+constexpr i32 kAvcHigh = 8;   // CodecProfileLevel.AVCProfileHigh
 constexpr u32 kFlagKey = 1, kFlagConfig = 2, kFlagEos = 4;
 constexpr u32 kSurfaceInFlight = 3;
 
@@ -164,13 +166,15 @@ bool debug_flag(const char* property, const char* token) noexcept {
     return false;
 }
 
-bool find_encoder(bool hevc, u32 width, u32 height, f64 fps, bool hardware, CodecInfo& out) noexcept {
-    out = CodecInfo{};
+usize find_encoders(bool hevc, u32 width, u32 height, f64 fps, bool hardware, CodecInfo* outs, usize capacity) noexcept {
+    if (!outs || !capacity) return 0;
     JavaVM* vm = nullptr;
     JNIEnv* env = nullptr;
     bool detach = false;
-    if (!jni_enter(vm, env, detach)) return false;
-    bool found = false;
+    if (!jni_enter(vm, env, detach)) return 0;
+    // 0.5.3: TODOS os encoders da classificação (antes só o primeiro): a escada do
+    // sink tenta cada encoder de hardware do aparelho antes do software.
+    usize found = 0;
     do {
         const jclass version = env->FindClass("android/os/Build$VERSION");
         if (!version) break;
@@ -201,6 +205,11 @@ bool find_encoder(bool hevc, u32 width, u32 height, f64 fps, bool hardware, Code
         const auto encCaps = env->GetMethodID(capClass, "getEncoderCapabilities",
             "()Landroid/media/MediaCodecInfo$EncoderCapabilities;");
         const auto supports = env->GetMethodID(videoClass, "areSizeAndRateSupported", "(IID)Z");
+        // 0.5.3: alinhamento que o encoder anuncia (diagnóstico do relato local).
+        const auto widthAlign = env->GetMethodID(videoClass, "getWidthAlignment", "()I");
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        const auto heightAlign = env->GetMethodID(videoClass, "getHeightAlignment", "()I");
+        if (env->ExceptionCheck()) env->ExceptionClear();
         // 0.4.6: o export não é em tempo real. O teto de taxa do encoder
         // (pontos de desempenho: "1080p a 30") não impede codificar um 1080p60
         // mais devagar que o tempo real — e o encoder de hardware, mesmo assim,
@@ -237,8 +246,8 @@ bool find_encoder(bool hevc, u32 width, u32 height, f64 fps, bool hardware, Code
         const jsize count = env->GetArrayLength(array);
         // Passada 0: tamanho E taxa anunciados; passada 1 (só se nenhum
         // passou): só o tamanho — a taxa do export não precisa ser sustentada.
-        for (int pass = 0; pass < (sizeSupported ? 2 : 1) && !found; ++pass)
-        for (jsize i = 0; i < count && !found; ++i) {
+        for (int pass = 0; pass < (sizeSupported ? 2 : 1) && found == 0; ++pass)
+        for (jsize i = 0; i < count && found < capacity; ++i) {
             if (env->PushLocalFrame(32) < 0) { env->ExceptionClear(); break; }
             const jobject info = env->GetObjectArrayElement(array, i);
             const auto softwareByName = [&]() {
@@ -267,6 +276,8 @@ bool find_encoder(bool hevc, u32 width, u32 height, f64 fps, bool hardware, Code
                     ? env->CallBooleanMethod(vc, supports, static_cast<jint>(width), static_cast<jint>(height), fps)
                     : env->CallBooleanMethod(vc, sizeSupported, static_cast<jint>(width), static_cast<jint>(height));
                 if (!fits || env->ExceptionCheck()) break;
+                CodecInfo& out = outs[found];
+                out = CodecInfo{};
                 if (pass == 1) AUREA_LOG_INFO("export: encoder de hardware aceita %ux%u, mas anuncia menos que %.2f fps em tempo real; usado mesmo assim (export nao e tempo real)",
                                               width, height, fps);
                 const auto codecName = static_cast<jstring>(env->CallObjectMethod(info, name));
@@ -299,13 +310,21 @@ bool find_encoder(bool hevc, u32 width, u32 height, f64 fps, bool hardware, Code
                     if (upper) env->DeleteLocalRef(upper);
                     if (range) env->DeleteLocalRef(range);
                 }
-                if (const auto levels = static_cast<jobjectArray>(env->GetObjectField(cap, levelsField)); levels && !hevc) {
+                if (const auto levels = static_cast<jobjectArray>(env->GetObjectField(cap, levelsField)); levels) {
                     for (jsize l = 0; l < env->GetArrayLength(levels); ++l) {
                         const jobject pl = env->GetObjectArrayElement(levels, l);
                         if (!pl) continue;
                         const jint profile = env->GetIntField(pl, profileField);
                         const jint level = env->GetIntField(pl, levelField);
                         env->DeleteLocalRef(pl);
+                        // 0.5.3: o perfil de qualidade do H.264 (High) e o maior nível
+                        // anunciado dele — o que o próprio encoder diz. HEVC fica no
+                        // padrão do encoder (Main em 8 bits; os níveis do HEVC misturam tiers).
+                        if (!hevc && profile == kAvcHigh) {
+                            out.qualityProfile = profile;
+                            out.qualityLevel = std::max<i32>(out.qualityLevel, level);
+                        }
+                        if (hevc) continue;
                         // Baseline "puro" é o que o caminho antigo pedia; o
                         // Constrained Baseline só quando é o único anunciado.
                         if (profile == kAvcBaseline || (profile == kAvcConstrainedBaseline && out.baselineProfile != kAvcBaseline)) {
@@ -315,16 +334,24 @@ bool find_encoder(bool hevc, u32 width, u32 height, f64 fps, bool hardware, Code
                         }
                     }
                 }
-                found = true;
+                if (widthAlign) out.widthAlignment = env->CallIntMethod(vc, widthAlign);
+                if (env->ExceptionCheck()) { env->ExceptionClear(); out.widthAlignment = 0; }
+                if (heightAlign) out.heightAlignment = env->CallIntMethod(vc, heightAlign);
+                if (env->ExceptionCheck()) { env->ExceptionClear(); out.heightAlignment = 0; }
+                ++found;
                 break;
             }
             if (env->ExceptionCheck()) env->ExceptionClear();
             env->PopLocalFrame(nullptr);
         }
     } while (false);
-    if (!found) out = CodecInfo{};
     jni_leave(vm, env, detach);
     return found;
+}
+
+bool find_encoder(bool hevc, u32 width, u32 height, f64 fps, bool hardware, CodecInfo& out) noexcept {
+    out = CodecInfo{};
+    return find_encoders(hevc, width, height, fps, hardware, &out, 1) == 1;
 }
 
 // O lado GLES do degrau Surface vive numa thread própria: todo EGL/GL é
@@ -667,6 +694,9 @@ struct Encoder::Impl {
     AMediaCodec* codec = nullptr;
     Request request{};
     bool started = false, eosSent = false;
+    bool hintsUsed = false, cbrUsed = false;   ///< 0.5.3: como o encoder ficou configurado
+    bool startFailed = false;                  ///< 0.5.3: o configure passou e o start recusou
+    i64 lastPtsUs = 0;                         ///< 0.5.3: o tempo do último quadro (vai no EOS por buffer)
     std::vector<u8> csd;
     char detail[256]{};
     char description[200]{};
@@ -855,7 +885,8 @@ struct Encoder::Impl {
         i32 mode = -1;
         if (r.rateMode == 0) mode = info.cbr ? kBitrateCbr : info.vbr ? kBitrateVbr : -1;
         else mode = info.vbr ? kBitrateVbr : info.cbr ? kBitrateCbr : -1;
-        const bool forcedCbr = android_codec::device_rate_mode(info.name, r.rateMode) != r.rateMode;
+        const bool forcedCbr = android_codec::device_rate_mode(info.name, r.rateMode) != r.rateMode ||
+                               (r.forceCbr && r.rateMode == 1);   // 0.5.3: aprendido (o VBR dele descartou quadros)
         // 0.4.5: no máximo o teto que o encoder anuncia (getBitrateRange):
         // encoder de fabricante que recusava o configure acima dele derrubava
         // o export para o software. Desconhecido (0) = o pedido, como antes.
@@ -873,7 +904,12 @@ struct Encoder::Impl {
         // (API 23+). São só dicas: encoder que recusa o configure com elas é
         // recriado e configurado sem elas UMA vez (configure_offline abaixo) —
         // a recusa nunca condena o encoder nem desce a escada.
-        bool offlineHints = true;
+        bool offlineHints = r.offlineHints;
+        // 0.5.3: o perfil de qualidade do próprio encoder (H.264 High / HEVC Main,
+        // no maior nível anunciado) e a taxa de quadros fracionária são pedidos
+        // primeiro; encoder que recusa o configure por eles volta ao que era.
+        bool qualityProfile = r.qualityProfile && !r.baseline && info.qualityProfile && info.qualityLevel;
+        bool integerFps = false;
         const auto configure = [&](i32 rate) noexcept -> media_status_t {
             AMediaFormat* format = AMediaFormat_new();
             if (!format) return AMEDIA_ERROR_UNKNOWN;
@@ -888,16 +924,20 @@ struct Encoder::Impl {
             AMediaFormat_setInt32(format, "bitrate", static_cast<i32>(std::min<u32>(bitrateBps, 0x7fffffffu)));
             if (rate >= 0) AMediaFormat_setInt32(format, "bitrate-mode", rate);
             const f64 roundedFps = std::round(r.fps);
-            if (std::abs(r.fps - roundedFps) < 1e-6) AMediaFormat_setInt32(format, "frame-rate", static_cast<i32>(roundedFps));
+            if (integerFps || std::abs(r.fps - roundedFps) < 1e-6)
+                AMediaFormat_setInt32(format, "frame-rate", static_cast<i32>(std::max(1.0, roundedFps)));
             else AMediaFormat_setFloat(format, "frame-rate", static_cast<float>(r.fps));
             const f64 gopSeconds = r.keyframeFrames ? static_cast<f64>(r.keyframeFrames) / r.fps : 2.0;
             const f64 roundedGop = std::round(gopSeconds);
-            if (roundedGop >= 1.0 && std::abs(gopSeconds - roundedGop) < 1e-6)
+            if (roundedGop >= 1.0 && (integerFps || std::abs(gopSeconds - roundedGop) < 1e-6))
                 AMediaFormat_setInt32(format, "i-frame-interval", static_cast<i32>(roundedGop));
             else AMediaFormat_setFloat(format, "i-frame-interval", static_cast<float>(std::max(gopSeconds, 0.001)));
             if (r.baseline && !r.hevc && info.baselineProfile) {
                 AMediaFormat_setInt32(format, "profile", info.baselineProfile);
                 if (info.baselineLevel) AMediaFormat_setInt32(format, "level", info.baselineLevel);
+            } else if (qualityProfile) {
+                AMediaFormat_setInt32(format, "profile", info.qualityProfile);
+                AMediaFormat_setInt32(format, "level", info.qualityLevel);
             }
             if (const i32 standard = color_standard(r.color.matrix)) AMediaFormat_setInt32(format, "color-standard", standard);
             AMediaFormat_setInt32(format, "color-range", r.color.fullRange ? 1 : 2);
@@ -917,19 +957,41 @@ struct Encoder::Impl {
             return codec != nullptr;
         };
         const auto configure_offline = [&](i32 rate) noexcept -> media_status_t {
-            const media_status_t done = configure(rate);
-            if (done == AMEDIA_OK || !offlineHints) return done;
-            AUREA_LOG_WARN("export: %s recusou operating-rate/priority (%d); configura sem as dicas offline",
-                           info.name, static_cast<int>(done));
-            offlineHints = false;
-            if (!recreate()) return AMEDIA_ERROR_UNKNOWN;
-            return configure(rate);
+            media_status_t done = configure(rate);
+            if (done == AMEDIA_OK) return done;
+            // 0.5.3: uma coisa de cada vez, o codec recriado a cada recusa: as dicas
+            // offline, o perfil de qualidade, a taxa fracionária. O que sobrar
+            // recusado é o modo pedido (quem chama tenta o outro modo de taxa).
+            if (offlineHints) {
+                AUREA_LOG_WARN("export: %s recusou operating-rate/priority (%d); configura sem as dicas offline",
+                               info.name, static_cast<int>(done));
+                offlineHints = false;
+                if (!recreate()) return AMEDIA_ERROR_UNKNOWN;
+                if ((done = configure(rate)) == AMEDIA_OK) return done;
+            }
+            if (qualityProfile) {
+                AUREA_LOG_WARN("export: %s recusou o perfil %d nivel %d (%d); configura sem perfil",
+                               info.name, info.qualityProfile, info.qualityLevel, static_cast<int>(done));
+                qualityProfile = false;
+                if (!recreate()) return AMEDIA_ERROR_UNKNOWN;
+                if ((done = configure(rate)) == AMEDIA_OK) return done;
+            }
+            if (!integerFps && std::abs(r.fps - std::round(r.fps)) >= 1e-6) {
+                AUREA_LOG_WARN("export: %s recusou %.3f fps fracionario (%d); configura com %d",
+                               info.name, r.fps, static_cast<int>(done), static_cast<int>(std::round(r.fps)));
+                integerFps = true;
+                if (!recreate()) return AMEDIA_ERROR_UNKNOWN;
+                done = configure(rate);
+            }
+            return done;
         };
         media_status_t configured = AMEDIA_ERROR_UNKNOWN;
+        bool cbrConfigured = false;   // 0.5.3: o CBR forçado foi aceito
         if (forcedCbr) {
             // android_codec::vbr_drops_frames: o VBR deste encoder descarta quadros.
             AUREA_LOG_INFO("export: %s descarta quadros em VBR; usando CBR na mesma taxa", info.name);
             configured = configure_offline(kBitrateCbr);
+            cbrConfigured = configured == AMEDIA_OK;
             if (configured != AMEDIA_OK && codec) {
                 AUREA_LOG_WARN("export: %s recusou CBR (%d); abre no modo pedido", info.name, static_cast<int>(configured));
                 if (!recreate()) return fail(Errc::EncoderUnavailable, "MediaCodec nao criou %s", info.name);
@@ -941,8 +1003,22 @@ struct Encoder::Impl {
         if (!codec) return fail(Errc::EncoderUnavailable, "MediaCodec nao criou %s", info.name);
         if (configured != AMEDIA_OK)
             return fail(Errc::EncoderUnavailable, "MediaCodec configure recusou %s (%d)", description, static_cast<int>(configured));
+        // 0.5.3: como ficou (diagnóstico do caminho do encoder e o que o sink aprende).
+        hintsUsed = offlineHints;
+        cbrUsed = cbrConfigured || mode == kBitrateCbr;
+        {
+            const usize used = std::strlen(description);
+            std::snprintf(description + used, sizeof(description) - used, "%s%s%s%s", offlineHints ? "" : ":sem-dicas",
+                          cbrConfigured && r.rateMode != 0 ? ":cbr" : "", qualityProfile ? ":high" : "", integerFps ? ":fps-int" : "");
+        }
+        if (info.widthAlignment > 1 || info.heightAlignment > 1)
+            AUREA_LOG_INFO("export: %s alinha %dx%d; quadro %ux%u", info.name, info.widthAlignment, info.heightAlignment,
+                           r.width, r.height);
         if (const Status s = surfaceInput ? open_surface() : read_buffer_layout(); !s.ok()) return s;
-        if (AMediaCodec_start(codec) != AMEDIA_OK) return fail(Errc::EncoderUnavailable, "MediaCodec nao iniciou %s", description);
+        if (AMediaCodec_start(codec) != AMEDIA_OK) {
+            startFailed = true;
+            return fail(Errc::EncoderUnavailable, "MediaCodec nao iniciou %s", description);
+        }
         started = true;
         return OkStatus;
     }
@@ -969,11 +1045,7 @@ struct Encoder::Impl {
             std::lock_guard lock(feeder->mutex);
             const u32 w = request.width, h = request.height;
             u8* dst = feeder->pixels.data();
-            for (u32 r = 0; r < h; ++r)
-                std::memcpy(dst + static_cast<usize>(r) * w, y + static_cast<usize>(r) * ys, w);
-            dst += static_cast<usize>(w) * h;
-            for (u32 r = 0; r < h / 2; ++r)
-                std::memcpy(dst + static_cast<usize>(r) * w, uv + static_cast<usize>(r) * uvs, w);
+            export_detail::copy_nv12_to_packed(dst, y, ys, uv, uvs, w, h);
             feeder->ptsUs = ptsUs;
         }
         return call(SurfaceFeeder::Job::Frame, timeoutNs);
@@ -1067,7 +1139,20 @@ Status Encoder::open(const Request& request, const CodecInfo& codec) noexcept {
     impl_->close();
     impl_->csd.clear();
     impl_->eosSent = false;
-    const Status opened = impl_->open(request, codec);
+    impl_->startFailed = false;
+    impl_->hintsUsed = impl_->cbrUsed = false;
+    impl_->lastPtsUs = 0;
+    Status opened = impl_->open(request, codec);
+    if (!opened.ok() && impl_->startFailed && impl_->hintsUsed) {
+        // 0.5.3 (P0-6): configure aceito com operating-rate/priority e start
+        // recusado: a mesma abertura, uma vez, sem as dicas (antes o degrau caía).
+        AUREA_LOG_WARN("export: %s nao iniciou com as dicas offline; abre de novo sem elas", codec.name);
+        impl_->close();
+        impl_->startFailed = false;
+        Request plain = request;
+        plain.offlineHints = false;
+        opened = impl_->open(plain, codec);
+    }
     if (opened.ok()) return OkStatus;
     // O motivo vive em impl_->detail; fechar pode reescrevê-lo.
     char saved[sizeof(impl_->detail)];
@@ -1082,8 +1167,10 @@ Status Encoder::send(const u8* y, u32 ys, const u8* uv, u32 uvs, i64 ptsUs, u64 
     if (!y || !uv || ys < impl_->request.width || uvs < impl_->request.width || ptsUs < 0)
         return Status{Errc::InvalidArgument, "quadro invalido para o encoder do aparelho"};
     if (impl_->request.simulateStall) return OkStatus;   // teste: o quadro nunca chega ao encoder
-    return impl_->request.input == Input::Surface ? impl_->send_surface(y, ys, uv, uvs, ptsUs, timeoutNs)
-                                                  : impl_->send_buffer(y, ys, uv, uvs, ptsUs);
+    const Status sent = impl_->request.input == Input::Surface ? impl_->send_surface(y, ys, uv, uvs, ptsUs, timeoutNs)
+                                                               : impl_->send_buffer(y, ys, uv, uvs, ptsUs);
+    if (sent.ok()) impl_->lastPtsUs = ptsUs;
+    return sent;
 }
 
 Status Encoder::end_of_stream() noexcept {
@@ -1096,7 +1183,9 @@ Status Encoder::end_of_stream() noexcept {
         const ssize_t index = AMediaCodec_dequeueInputBuffer(impl_->codec, 2000);
         if (index == AMEDIACODEC_INFO_TRY_AGAIN_LATER) return Errc::Busy;
         if (index < 0) return impl_->fail(Errc::EncodeFailed, "dequeueInputBuffer no EOS falhou (%zd)", index);
-        if (AMediaCodec_queueInputBuffer(impl_->codec, static_cast<size_t>(index), 0, 0, 0,
+        // 0.5.3: o EOS leva o tempo do último quadro (antes 0: tempo voltando ao
+        // começo, que encoder que confere a ordem pode recusar).
+        if (AMediaCodec_queueInputBuffer(impl_->codec, static_cast<size_t>(index), 0, 0, static_cast<u64>(impl_->lastPtsUs),
                                          AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) != AMEDIA_OK)
             return impl_->fail(Errc::EncodeFailed, "EOS recusado pelo encoder");
     }
@@ -1167,6 +1256,10 @@ u32 Encoder::max_in_flight() const noexcept {
 }
 
 const char* Encoder::describe() const noexcept { return impl_ ? impl_->description : ""; }
+
+bool Encoder::offline_hints() const noexcept { return impl_ && impl_->hintsUsed; }
+
+bool Encoder::constant_rate() const noexcept { return impl_ && impl_->cbrUsed; }
 
 void Encoder::set_direct_buffer(void* buffer) noexcept { if (impl_) impl_->directBuffer = buffer; }
 

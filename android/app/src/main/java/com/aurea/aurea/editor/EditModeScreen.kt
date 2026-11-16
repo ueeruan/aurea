@@ -5,6 +5,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -21,7 +24,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
@@ -63,12 +68,12 @@ import com.aurea.aurea.ui.theme.CupertinoIcon
 import com.aurea.aurea.ui.theme.tocavel
 
 // =============================================================================
-//  A INTERFACE DE EDIÇÃO (0.2.5) — a segunda interface do AUREA, escolhida por
+//  A INTERFACE DE EDIÇÃO — a segunda interface do AUREA, escolhida por
 //  projeto (a Composição continua a principal e o padrão).
 //
 //  Montagem de vídeo à moda dos editores de celular (estrutura especificada a
-//  partir de engenharia reversa do CapCut 19.8.0, build/reference/capcut-19.8.0/
-//  SPEC.md — nada do app de referência entra aqui): topo com ✕, resolução e
+//  partir da referência observada via REA em 15/11/2026,
+//  build/reference/capcut-ui-20261115/): topo com ✕, resolução e
 //  Exportar; a prévia; a barra de reprodução; a linha do tempo com o cabeçote
 //  fixo no meio e a TRILHA PRINCIPAL magnética; e o Dock embaixo, em níveis —
 //  o nível de cima tem as ferramentas do projeto e um corte escolhido troca o
@@ -87,10 +92,11 @@ internal class EditDockItem(val id: String, val glyph: Char, val label: Int, val
 @Composable
 internal fun EditModeEditor(store: EditorStore, ui: EditorUi, stage: @Composable (Modifier) -> Unit) {
     var level by remember { mutableStateOf(EditDockLevel.Root) }
+    LaunchedEffect(Unit) { ViewModes.columnOpen = false }
     // O corte cujas transições estão abertas (saída, entrada).
     var cut by remember { mutableStateOf<Pair<Long, Long>?>(null) }
     val primary by remember { derivedStateOf { store.primary } }
-    val selected = store.layers.firstOrNull { it.id == primary }
+    val selected = store.editingLayers.firstOrNull { it.id == primary }
     // O corte escolhido manda no Dock; sem corte, volta ao nível de cima (ou
     // fica no submenu que a pessoa abriu, como Áudio ou Texto).
     LaunchedEffect(primary, selected?.kind) {
@@ -105,51 +111,79 @@ internal fun EditModeEditor(store: EditorStore, ui: EditorUi, stage: @Composable
     val actions = rememberEditActions(store, ui) { level = it }
     // Voltar do sistema num submenu do Dock (Áudio, Texto) volta ao nível de cima;
     // painel, seleção e o resto seguem a ordem da casca (`shellBack`).
-    androidx.activity.compose.BackHandler(enabled = level != EditDockLevel.Root && ui.panel == null && store.selection.isEmpty()) {
+    androidx.activity.compose.BackHandler(enabled = level != EditDockLevel.Root && ui.panel == null && store.editingSelection.isEmpty()) {
         level = EditDockLevel.Root
     }
     BoxWithConstraints(Modifier.fillMaxSize().background(EditColors.Canvas)) {
         val total = maxHeight
-        Column(Modifier.fillMaxSize()) {
-            // Omega conteúdo (área 06, P2-15): o modo de texto também na Edição —
-            // a barra de estilo no topo e o painel grande embaixo do palco.
-            val texting = store.textEditLayer != null && !ui.fullscreen
-            if (texting) Box(Modifier.fillMaxWidth().height(52.dp).zIndex(2f)) { TextStyleBar(store) }
-            else if (!ui.fullscreen) EditTopBar(store, ui)
-            // 0.4.0: com painel aberto o palco cede espaço (30 %) e a linha do tempo fica
-            // com 72 no mínimo: em tela baixa (aparelho de 2017) as abas eram uma faixa
-            // de ~150 dp onde nada dava para mexer.
-            val panelOpen = ui.panel != null && store.textEditLayer == null
-            val previewH = if (ui.fullscreen) total - 52.dp
-                else if (panelOpen) (total * 0.30f).coerceIn(140.dp, 420.dp)
-                else (total * 0.40f).coerceIn(160.dp, 560.dp)
-            KeepLtr { stage(Modifier.fillMaxWidth().height(previewH).background(EditColors.Preview)) }
-            if (texting) {
-                TextEditPanel(store, Modifier.fillMaxWidth().weight(1f))
+        val wide = maxWidth >= 600.dp && maxWidth > maxHeight && !ui.fullscreen && store.textEditLayer == null
+        val texting = store.textEditLayer != null && !ui.fullscreen
+        val panel = ui.panel
+        val inspector: @Composable () -> Unit = {
+            if (panel != null) {
+                PanelContent(store, panel, onClose = { ui.panel = null }, onOpenPanel = { openPanel(store, ui, it) },
+                    onOpenEffectsBrowser = { ui.effectsBrowser = true }, alwaysHeader = true)
             } else {
-            EditPlayBar(store, ui)
-            if (!ui.fullscreen) {
-                val panel = ui.panel
-                if (panel != null) {
-                    // Painel aberto: a linha do tempo encolhe e o painel da Composição sobe.
-                    // 0.3.6: o painel vai até o teto (EditorLayout.panelMax); numa tela alta o
-                    // que passa dele fica com a linha do tempo (112 no mínimo), não com o painel.
-                    val fontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale
-                    val panelH = (total - 52.dp - previewH - 48.dp - 72.dp).coerceIn(0.dp, EditorLayout.panelMax(fontScale).dp)
-                    KeepLtr { EditTimeline(store, Modifier.fillMaxWidth().weight(1f), compact = true, onAddMedia = actions.addMedia, onTransition = { a, b -> cut = a to b }) }
-                    Box(Modifier.fillMaxWidth().height(panelH).background(AureaColors.EditorPanel)) {
-                        // Na Edição a barra de cima não mostra o título da seção: o painel
-                        // traz o próprio cabeçalho "‹ Título" (o ✕ de cima fecha o projeto).
-                        PanelContent(store, panel, onClose = { ui.panel = null }, onOpenPanel = { openPanel(store, ui, it) },
-                            onOpenEffectsBrowser = { ui.effectsBrowser = true }, alwaysHeader = true)
-                    }
-                } else {
-                    KeepLtr { EditTimeline(store, Modifier.fillMaxWidth().weight(1f), compact = false, onAddMedia = actions.addMedia, onTransition = { a, b -> cut = a to b }) }
+                Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Bottom) {
                     EditDock(level, actions.itemsFor(level, selected)) {
                         if (level in ClipLevels) store.clearSelection()
                         level = EditDockLevel.Root
                     }
                 }
+            }
+        }
+        Column(Modifier.fillMaxSize()) {
+            if (texting) Box(Modifier.fillMaxWidth().height(52.dp).zIndex(2f)) { TextStyleBar(store) }
+            else if (!ui.fullscreen) EditTopBar(store, ui)
+            if (wide) {
+                Row(Modifier.fillMaxWidth().weight(1f)) {
+                    Column(Modifier.weight(1f).fillMaxHeight().background(EditColors.Preview)) {
+                        KeepLtr {
+                            Box(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 8.dp)
+                                .clip(RoundedCornerShape(12.dp)).background(EditColors.Preview)) {
+                                stage(Modifier.fillMaxSize().testTag("edit.preview"))
+                            }
+                        }
+                        EditPlayBar(store, ui)
+                    }
+                    Column(Modifier.weight(1f).fillMaxHeight().background(EditColors.Canvas)) {
+                        KeepLtr { EditTimeline(store, Modifier.fillMaxWidth().weight(1f), compact = panel != null,
+                            onAddMedia = actions.addMedia, onTransition = { a, b -> cut = a to b }, onAddAudio = actions.addAudio, onAddText = actions.addText) }
+                        if (panel != null) {
+                            Box(Modifier.fillMaxWidth().height((total * .58f).coerceAtMost(320.dp)).testTag("edit.inspector")) { inspector() }
+                        } else EditDock(level, actions.itemsFor(level, selected)) {
+                            if (level in ClipLevels) store.clearSelection()
+                            level = EditDockLevel.Root
+                        }
+                    }
+                }
+            } else {
+            // The native surface remains in this slot as selection and panels change.
+            KeepLtr {
+                Box(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 8.dp)
+                    .clip(RoundedCornerShape(12.dp)).background(EditColors.Preview)) {
+                    stage(Modifier.fillMaxSize().testTag("edit.preview"))
+                }
+            }
+            if (texting) {
+                TextEditPanel(store, Modifier.fillMaxWidth().weight(1f))
+            } else {
+            EditPlayBar(store, ui)
+            if (!ui.fullscreen) {
+                if (panel != null) {
+                    val panelH = (total * .36f).coerceIn(160.dp, 330.dp)
+                    KeepLtr { EditTimeline(store, Modifier.fillMaxWidth().height(96.dp), compact = true, onAddMedia = actions.addMedia, onTransition = { a, b -> cut = a to b }, onAddAudio = actions.addAudio, onAddText = actions.addText) }
+                    Box(Modifier.fillMaxWidth().height(panelH).background(AureaColors.EditorPanel)) {
+                        inspector()
+                    }
+                } else {
+                    KeepLtr { EditTimeline(store, Modifier.fillMaxWidth().height((total * .30f).coerceIn(134.dp, 260.dp)), compact = false, onAddMedia = actions.addMedia, onTransition = { a, b -> cut = a to b }, onAddAudio = actions.addAudio, onAddText = actions.addText) }
+                    EditDock(level, actions.itemsFor(level, selected)) {
+                        if (level in ClipLevels) store.clearSelection()
+                        level = EditDockLevel.Root
+                    }
+                }
+            }
             }
             }
         }
@@ -205,45 +239,53 @@ private fun CutTransitionSheet(store: EditorStore, outgoing: Long, incoming: Lon
 
 private val ClipLevels = setOf(EditDockLevel.VideoClip, EditDockLevel.TextClip, EditDockLevel.AudioClip, EditDockLevel.OtherClip)
 
-/** Cores próprias da Edição: fundo preto como nos editores de vídeo, Dock um tom acima. */
+/** Editing chrome follows the same live Aurea palette as the rest of the app. */
 internal object EditColors {
-    val Canvas = androidx.compose.ui.graphics.Color(0xFF000000)
-    val Preview = androidx.compose.ui.graphics.Color(0xFF0B0B0D)
-    val Bar = androidx.compose.ui.graphics.Color(0xFF121214)
-    val DockLevel = androidx.compose.ui.graphics.Color(0xFF1B1B1F)
-    val Ruler = androidx.compose.ui.graphics.Color(0xFF8A8A92)
+    val Canvas get() = AureaColors.Background
+    val Preview get() = AureaColors.EditorCanvas
+    val Bar get() = AureaColors.EditorTopBar
+    val DockLevel get() = AureaColors.EditorRowPill
+    val Ruler get() = AureaColors.Muted
 }
 
 // -----------------------------------------------------------------------------
-// Topo: ✕ · (espaço) · resolução · ⋯ · Exportar
+// Aurea project header: back, title, resolution, secondary actions and export.
 // -----------------------------------------------------------------------------
 
 @Composable
 private fun EditTopBar(store: EditorStore, ui: EditorUi) {
     var menu by remember { mutableStateOf(false) }
+    var renaming by remember { mutableStateOf(false) }
+    var name by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue("")) }
     val close = stringResource(R.string.common_close)
     val more = stringResource(R.string.edit_more)
+    val export = stringResource(R.string.edit_export)
     Row(
-        Modifier.fillMaxWidth().height(52.dp).background(EditColors.Canvas).padding(horizontal = 6.dp),
+        Modifier.fillMaxWidth().height(50.dp).background(EditColors.Bar).padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             Modifier.size(44.dp).testTag("edit.close").semantics { contentDescription = close; role = Role.Button }
                 .tocavel(shrink = 1f) { store.closeProject() },
             contentAlignment = Alignment.Center,
-        ) { CupertinoIcon(CupertinoGlyph.Xmark, 22.dp, AureaColors.Text) }
-        Spacer(Modifier.weight(1f))
+        ) { CupertinoIcon(CupertinoGlyph.ChevronBack, 22.dp, AureaColors.Text) }
+        Text(store.project.title, style = AureaType.of(13f, FontWeight.W600, color = AureaColors.Text),
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f).padding(horizontal = 4.dp).testTag("edit.title"))
         // A resolução do projeto (o lado menor + "P"), que abre os ajustes do projeto.
         val p = store.project
         val short = minOf(p.width, p.height)
-        Text(
-            if (short > 0) "${short}P" else "—",
-            style = AureaType.of(13f, FontWeight.W700),
-            modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(EditColors.DockLevel)
+        Box(
+            modifier = Modifier.height(44.dp).widthIn(min = 58.dp)
                 .testTag("edit.resolution")
-                .tocavel(shrink = 1f) { openSheet(store, ui, ShellSheet.ProjectSettings) }
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-        )
+                .semantics { role = Role.Button; contentDescription = "${if (short > 0) "${short}P" else ""} $more" }
+                .tocavel(shrink = 1f) { openSheet(store, ui, ShellSheet.ProjectSettings) },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(if (short > 0) "${short}P" else "—", style = AureaType.of(12f, FontWeight.W600),
+                modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(EditColors.DockLevel)
+                    .padding(horizontal = 8.dp, vertical = 5.dp), maxLines = 1)
+        }
         Box {
             Box(
                 Modifier.size(44.dp).testTag("edit.more").semantics { contentDescription = more; role = Role.Button }
@@ -251,6 +293,20 @@ private fun EditTopBar(store: EditorStore, ui: EditorUi) {
                 contentAlignment = Alignment.Center,
             ) { CupertinoIcon(CupertinoGlyph.Ellipsis, 20.dp, AureaColors.Text) }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.fxl_view)) },
+                    onClick = { menu = false; ViewModes.columnOpen = !ViewModes.columnOpen },
+                    modifier = Modifier.testTag("edit.previewControls"),
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.common_rename)) },
+                    onClick = {
+                        menu = false
+                        name = androidx.compose.ui.text.input.TextFieldValue(store.project.title)
+                        renaming = true
+                    },
+                    modifier = Modifier.testTag("edit.rename"),
+                )
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.ui_mode_switch_to_composition)) },
                     onClick = { menu = false; store.setUiMode(UI_MODE_COMPOSITION) },
@@ -261,8 +317,13 @@ private fun EditTopBar(store: EditorStore, ui: EditorUi) {
                     onClick = { menu = false; store.toggleEditMode() },
                 )
                 DropdownMenuItem(
-                    text = { Text(stringResource(R.string.editor_plano_fundo)) },
+                    text = { Text(stringResource(R.string.editor_ajustes_projeto)) },
                     onClick = { menu = false; openSheet(store, ui, ShellSheet.ProjectSettings) },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(if (store.autoKeyTransforms) R.string.i18n_autokey_on else R.string.i18n_autokey_off)) },
+                    onClick = { menu = false; store.autoKeyTransforms = !store.autoKeyTransforms },
+                    modifier = Modifier.testTag("edit.autokey"),
                 )
                 // 0.3.1: o mesmo "Importar do After Effects" da Composição (o seletor mora
                 // no AureaApp); vale a camada escolhida, ou o preset cria uma.
@@ -271,18 +332,34 @@ private fun EditTopBar(store: EditorStore, ui: EditorUi) {
                     onClick = { menu = false; store.requestAeImport() },
                     modifier = Modifier.testTag("edit.aeImport"),
                 )
+                val pluginEntries = com.aurea.aurea.effects.pluginEditorMenuEntries(store)
+                pluginEntries.filterIsInstance<com.aurea.aurea.ui.ds.MenuEntry.Item>().forEach { entry ->
+                    DropdownMenuItem(
+                        text = { Text(entry.label) },
+                        enabled = entry.enabled,
+                        modifier = entry.tag?.let { Modifier.testTag(it) } ?: Modifier,
+                        onClick = { menu = false; if (store.playing) store.pause(); entry.onClick() },
+                    )
+                }
             }
         }
         Spacer(Modifier.width(4.dp))
-        Text(
-            stringResource(R.string.edit_export),
-            style = AureaType.of(14f, FontWeight.W700, color = AureaColors.Background),
-            modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(AureaColors.Accent)
-                .testTag("edit.export").semantics { role = Role.Button }
-                .tocavel(shrink = 0.96f) { if (store.playing) store.pause(); ui.exporting = true }
-                .padding(horizontal = 14.dp, vertical = 8.dp),
-        )
+        Box(
+            Modifier.size(44.dp)
+                .testTag("edit.export").semantics { contentDescription = export; role = Role.Button }
+                .tocavel(shrink = 0.96f) { if (store.playing) store.pause(); ui.exporting = true },
+            contentAlignment = Alignment.Center,
+        ) { CupertinoIcon(CupertinoGlyph.SquareArrowUp, 23.dp, AureaColors.Accent) }
     }
+    if (renaming) com.aurea.aurea.ui.ds.AureaAlert(
+        title = stringResource(R.string.common_rename),
+        confirmLabel = stringResource(R.string.common_save),
+        onConfirm = { name.text.trim().takeIf { it.isNotEmpty() }?.let(store::renameProject); renaming = false },
+        onDismiss = { renaming = false },
+        extra = {
+            com.aurea.aurea.ui.ds.AureaDialogField(value = name, onValueChange = { name = it }, tag = "edit.rename.field")
+        },
+    )
 }
 
 // -----------------------------------------------------------------------------
@@ -296,20 +373,26 @@ private fun EditPlayBar(store: EditorStore, ui: EditorUi) {
     val undo = stringResource(R.string.common_undo)
     val redo = stringResource(R.string.common_redo)
     val full = stringResource(R.string.editor_tela_cheia)
-    Box(Modifier.fillMaxWidth().height(48.dp).background(EditColors.Canvas).padding(horizontal = 12.dp)) {
+    val fontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale.coerceIn(1f, 2f)
+    Box(Modifier.fillMaxWidth().height((40f + (fontScale - 1f) * 16f).dp).background(AureaColors.EditorBar).padding(horizontal = 8.dp)) {
         KeepLtr {
-            Text(
-                "${editClock(store.playhead, fps)} / ${editClock(store.project.durationFrames, fps)}",
-                style = AureaType.of(12.5f, FontWeight.W500, color = AureaColors.Text),
-                modifier = Modifier.align(Alignment.CenterStart).testTag("edit.clock"),
-            )
+            Box(Modifier.align(Alignment.CenterStart).testTag("edit.clock").clip(RoundedCornerShape(8.dp))
+                .background(AureaColors.EditorRowPill).padding(horizontal = 8.dp, vertical = 4.dp)) {
+                if (fontScale > 1.25f) Column {
+                    Text(editClock(store.playhead, fps), style = AureaType.of(11f, FontWeight.W500, color = AureaColors.Text))
+                    Text("/ ${editClock(store.project.durationFrames, fps)}", style = AureaType.of(9f, color = AureaColors.Muted))
+                } else Text(
+                    "${editClock(store.playhead, fps)} / ${editClock(store.project.durationFrames, fps)}",
+                    style = AureaType.of(11f, FontWeight.W500, color = AureaColors.Text),
+                )
+            }
         }
         Box(
-            Modifier.align(Alignment.Center).size(44.dp).testTag("edit.play")
+            Modifier.align(Alignment.Center).size(40.dp).background(AureaColors.AccentDim, CircleShape).testTag("edit.play")
                 .semantics { contentDescription = play; role = Role.Button }
                 .tocavel(shrink = 0.9f) { store.togglePlayback() },
             contentAlignment = Alignment.Center,
-        ) { CupertinoIcon(if (store.playing) CupertinoGlyph.PauseFill else CupertinoGlyph.PlayFill, 24.dp, AureaColors.Text) }
+        ) { CupertinoIcon(if (store.playing) CupertinoGlyph.PauseFill else CupertinoGlyph.PlayFill, 24.dp, AureaColors.Accent) }
         Row(Modifier.align(Alignment.CenterEnd), verticalAlignment = Alignment.CenterVertically) {
             PlayBarIcon(CupertinoGlyph.ArrowUturnLeft, undo, store.project.canUndo, "edit.undo") { store.undo() }
             PlayBarIcon(CupertinoGlyph.ArrowUturnRight, redo, store.project.canRedo, "edit.redo") { store.redo() }
@@ -323,7 +406,7 @@ private fun EditPlayBar(store: EditorStore, ui: EditorUi) {
 @Composable
 private fun PlayBarIcon(glyph: Char, label: String, enabled: Boolean, tag: String, onClick: () -> Unit) {
     Box(
-        Modifier.size(40.dp).testTag(tag).semantics { contentDescription = label; role = Role.Button }
+        Modifier.size(30.dp, 40.dp).testTag(tag).semantics { contentDescription = label; role = Role.Button }
             .tocavel(enabled = enabled, shrink = 0.9f, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) { CupertinoIcon(glyph, 20.dp, if (enabled) AureaColors.Text else AureaColors.Muted.copy(alpha = 0.4f)) }
@@ -342,16 +425,18 @@ internal fun editClock(frame: Int, fps: Float): String {
 @Composable
 private fun EditDock(level: EditDockLevel, items: List<EditDockItem>, onBack: () -> Unit) {
     val back = stringResource(R.string.edit_back)
+    val scroll = rememberLazyListState()
+    LaunchedEffect(level) { scroll.scrollToItem(0) }
     Row(
-        Modifier.fillMaxWidth().height(76.dp)
-            .background(if (level == EditDockLevel.Root) EditColors.Bar else EditColors.DockLevel)
-            .testTag("edit.dock"),
+        Modifier.fillMaxWidth().height((80f + (androidx.compose.ui.platform.LocalDensity.current.fontScale.coerceIn(1f, 2f) - 1f) * 30f).dp)
+            .testTag("edit.dock").padding(8.dp).clip(RoundedCornerShape(22.dp))
+            .background(AureaColors.EditorRowPill).border(1.dp, AureaColors.EditorBarLine, RoundedCornerShape(22.dp)).padding(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (level != EditDockLevel.Root) {
             Box(
-                Modifier.padding(start = 10.dp).width(32.dp).height(58.dp).clip(RoundedCornerShape(8.dp))
-                    .background(EditColors.Bar).testTag("edit.dock.back")
+                Modifier.padding(start = 10.dp).width(32.dp).height(58.dp)
+                    .testTag("edit.dock.back")
                     .semantics { contentDescription = back; role = Role.Button }
                     .tocavel(shrink = 0.92f, onClick = onBack),
                 contentAlignment = Alignment.Center,
@@ -359,6 +444,7 @@ private fun EditDock(level: EditDockLevel, items: List<EditDockItem>, onBack: ()
         }
         LazyRow(
             Modifier.weight(1f).fillMaxHeight().testTag("edit.dock.items"),
+            state = scroll,
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -371,7 +457,7 @@ private fun EditDock(level: EditDockLevel, items: List<EditDockItem>, onBack: ()
 private fun EditDockButton(item: EditDockItem) {
     val label = stringResource(item.label)
     Column(
-        Modifier.widthIn(min = 64.dp).height(64.dp).testTag("edit.dock." + item.id)
+        Modifier.widthIn(min = 62.dp).fillMaxHeight().testTag("edit.dock." + item.id)
             .semantics(mergeDescendants = true) { contentDescription = label; role = Role.Button }
             .tocavel(shrink = 0.92f, haptic = true, onClick = item.action)
             .padding(horizontal = 6.dp),
@@ -380,7 +466,7 @@ private fun EditDockButton(item: EditDockItem) {
     ) {
         CupertinoIcon(item.glyph, 24.dp, AureaColors.Text)
         Spacer(Modifier.height(6.dp))
-        Text(label, style = AureaType.of(11f, color = AureaColors.Text), maxLines = 1, overflow = TextOverflow.Ellipsis,
+        Text(label, style = AureaType.of(12f, FontWeight.W500, color = AureaColors.Text), maxLines = 1, overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center)
     }
 }
@@ -389,6 +475,8 @@ private fun EditDockButton(item: EditDockItem) {
 internal class EditActions(
     val addMedia: () -> Unit,
     val itemsFor: (EditDockLevel, LayerRow?) -> List<EditDockItem>,
+    val addAudio: (() -> Unit)? = null,
+    val addText: (() -> Unit)? = null,
 )
 
 @Composable
@@ -459,17 +547,18 @@ private fun rememberEditActions(store: EditorStore, ui: EditorUi, setLevel: (Edi
                     },
                     EditDockItem("audio", CupertinoGlyph.MusicNote, R.string.edit_dock_audio) { setLevel(EditDockLevel.Audio) },
                     EditDockItem("text", CupertinoGlyph.Textformat, R.string.edit_dock_text) { setLevel(EditDockLevel.Text) },
-                    EditDockItem("stickers", ShellGlyph.SquareOnCircle, R.string.edit_dock_stickers) { openAdd(store, ui, AddTab.Shape) },
+                    EditDockItem("effects", CupertinoGlyph.Sparkles, R.string.edit_dock_effects) { globalEffect() },
                     EditDockItem("overlay", CupertinoGlyph.SquareOnSquare, R.string.edit_dock_overlay) {
                         if (store.playing) store.pause(); overlay.launch(visual)
                     },
-                    EditDockItem("sequence", CupertinoGlyph.SquareStack3dUp, R.string.seq_dock) { sequence() },
-                    EditDockItem("effects", CupertinoGlyph.Sparkles, R.string.edit_dock_effects) { globalEffect() },
                     EditDockItem("captions", CupertinoGlyph.CaptionsBubble, R.string.edit_dock_captions) { panel(EditorPanel.Captions) },
                     EditDockItem("filters", CupertinoGlyph.ColorFilter, R.string.edit_dock_filters) { globalColor(EditorPanel.Filters) },
                     EditDockItem("adjust", CupertinoGlyph.SliderHorizontal3, R.string.edit_dock_adjust) { globalColor(EditorPanel.Adjust) },
                     EditDockItem("ratio", CupertinoGlyph.Crop, R.string.edit_dock_ratio) { openSheet(store, ui, ShellSheet.ProjectSettings) },
                     EditDockItem("background", CupertinoGlyph.Paintbrush, R.string.edit_dock_background) { openSheet(store, ui, ShellSheet.ProjectSettings) },
+                    EditDockItem("stickers", ShellGlyph.SquareOnCircle, R.string.edit_dock_stickers) { openAdd(store, ui, AddTab.Shape) },
+                    EditDockItem("sequence", CupertinoGlyph.SquareStack3dUp, R.string.seq_dock) { sequence() },
+                    EditDockItem("templates", CupertinoGlyph.WandStars, R.string.edit_text_templates) { openAdd(store, ui, AddTab.TextPresets) },
                 )
                 EditDockLevel.Audio -> listOf(
                     EditDockItem("music", CupertinoGlyph.MusicNote2, R.string.edit_audio_music) {
@@ -493,10 +582,10 @@ private fun rememberEditActions(store: EditorStore, ui: EditorUi, setLevel: (Edi
                     add(EditDockItem("speed", CupertinoGlyph.Speedometer, R.string.edit_clip_speed) { panel(EditorPanel.Speed) })
                     add(EditDockItem("animations", CupertinoGlyph.WandStars, R.string.edit_clip_animations) { panel(EditorPanel.Presets) })
                     add(EditDockItem("effects", CupertinoGlyph.Sparkles, R.string.edit_clip_effects) { effects() })
-                    add(EditDockItem("filters", CupertinoGlyph.ColorFilter, R.string.edit_dock_filters) { clipColor(EditorPanel.Filters) })
-                    add(EditDockItem("adjust", CupertinoGlyph.SliderHorizontal3, R.string.edit_dock_adjust) { clipColor(EditorPanel.Adjust) })
                     add(EditDockItem("delete", CupertinoGlyph.Trash, R.string.edit_clip_delete) { store.deleteLayers() })
                     add(EditDockItem("mask", ShellGlyph.SquareSplit2x2, R.string.edit_clip_mask) { panel(EditorPanel.Mask) })
+                    add(EditDockItem("adjust", CupertinoGlyph.SliderHorizontal3, R.string.edit_dock_adjust) { clipColor(EditorPanel.Adjust) })
+                    add(EditDockItem("filters", CupertinoGlyph.ColorFilter, R.string.edit_dock_filters) { clipColor(EditorPanel.Filters) })
                     if (video) add(EditDockItem("volume", CupertinoGlyph.Speaker2, R.string.edit_clip_volume) { panel(EditorPanel.Audio) })
                     add(EditDockItem("transform", CupertinoGlyph.Move, R.string.edit_clip_transform) { panel(EditorPanel.Transform) })
                     add(EditDockItem("opacity", CupertinoGlyph.CircleLefthalfFill, R.string.edit_clip_opacity) { panel(EditorPanel.Appearance) })
@@ -560,7 +649,7 @@ private fun rememberEditActions(store: EditorStore, ui: EditorUi, setLevel: (Edi
                 }
             }
         }
-        EditActions(addMedia, itemsFor)
+        EditActions(addMedia, itemsFor, { setLevel(EditDockLevel.Audio) }, { openAdd(store, ui, AddTab.Text) })
     }
 }
 

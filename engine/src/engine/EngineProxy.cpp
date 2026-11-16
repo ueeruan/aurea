@@ -38,6 +38,7 @@ u32 Engine::proxy_mode() const noexcept {
 
 ProxyStatus Engine::proxy_status(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     const Asset* a = l && l->kind == LayerKind::Video ? project_->asset(l->source) : nullptr;
@@ -50,6 +51,7 @@ ProxySummary Engine::proxy_summary() noexcept {
 
 bool Engine::regenerate_proxy(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     const Asset* a = l && l->kind == LayerKind::Video ? project_->asset(l->source) : nullptr;
@@ -60,6 +62,7 @@ bool Engine::regenerate_proxy(u64 layerId) noexcept {
 
 bool Engine::cancel_proxy(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     const Asset* a = l && l->kind == LayerKind::Video ? project_->asset(l->source) : nullptr;

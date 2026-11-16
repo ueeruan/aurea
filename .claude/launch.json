@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "aurea-ui-canvas",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["tools/ui_canvas/server.py", "8765"],
+      "port": 8765
+    }
+  ]
+}

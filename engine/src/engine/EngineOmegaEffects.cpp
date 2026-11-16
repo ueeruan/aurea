@@ -288,6 +288,7 @@ u32 Engine::duplicate_effect(u64 layerId, u32 effectId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     // Um ajuste ainda na fila (a régua acabou de soltar) entra na cópia.
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked) return kInvalidIndex;
@@ -326,6 +327,7 @@ u32 Engine::duplicate_effect(u64 layerId, u32 effectId) noexcept {
 bool Engine::paste_effect_settings(u64 layerId, u32 effectId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || clipboard_.effects.size() != 1) return false;

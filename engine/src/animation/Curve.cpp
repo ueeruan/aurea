@@ -150,6 +150,7 @@ u32 Track::set(FrameIndex t, f32 value, Interpolation interp) noexcept {
     const u32 exact = find_exact(t);
     if (exact != kInvalidIndex) {
         keys[exact].value = value;
+        resolve_auto_handles();
         return exact;
     }
 
@@ -178,6 +179,7 @@ u32 Track::set(FrameIndex t, f32 value, Interpolation interp) noexcept {
 
     keys.insert(keys.begin() + lo, k);
     lastIndex = static_cast<u32>(lo);
+    resolve_auto_handles();
     return static_cast<u32>(lo);
 }
 
@@ -216,6 +218,7 @@ u32 Track::move(FrameIndex from, FrameIndex to) noexcept {
     const u32 inserted = static_cast<u32>(lo);
     keys.insert(keys.begin() + inserted, k);
     lastIndex = inserted;
+    resolve_auto_handles();
     return inserted;
 }
 
@@ -225,6 +228,10 @@ void Track::set_interpolation(FrameIndex t, Interpolation in, f32 bx1, f32 by1,
     if (i == kInvalidIndex) return;
     keys[i].interp = in;
     if (power != 0) keys[i].easePower = clamp_ease_power(power);
+    // Alça escolhida à mão (lote K): os dois lados do trecho deixam de ser
+    // automáticos; a bézier contínua continua marcada.
+    keys[i].flags = static_cast<u8>(keys[i].flags & ~kKeyAutoBezier);
+    if (i + 1 < keys.size()) keys[i + 1].flags = static_cast<u8>(keys[i + 1].flags & ~kKeyAutoBezier);
     // Só grava os control points quando a curva é de fato bezier, para não
     // sobrescrever uma curva configurada por um clique acidental em "linear".
     // As curvas com parâmetros (Quique, Elástico, Overshoot) guardam-nos nos
@@ -234,6 +241,102 @@ void Track::set_interpolation(FrameIndex t, Interpolation in, f32 bx1, f32 by1,
         keys[i].by1 = by1;
         keys[i].bx2 = bx2;
         keys[i].by2 = by2;
+    }
+}
+
+// =============================================================================
+// Lote K (AE): bézier automática e contínua no tempo
+// =============================================================================
+namespace {
+/// O trecho que sai de `k` aceita alça escrita (as curvas com forma própria —
+/// Segurar, Quique, Elástico... — ficam como estão).
+bool segment_takes_handles(const Keyframe& k) noexcept {
+    return k.interp == Interpolation::Linear || k.interp == Interpolation::Bezier || k.interp == Interpolation::CustomCurve;
+}
+
+/// Inclinação (valor por quadro) do trecho a→b na saída de `a` (side 0) ou na
+/// chegada em `b` (side 1). Falso = o trecho não é linear/bézier.
+bool segment_slope(const Keyframe& a, const Keyframe& b, int side, f64& out) noexcept {
+    if (!segment_takes_handles(a)) return false;
+    const f64 dt = static_cast<f64>(b.time.value - a.time.value);
+    if (dt <= 0.0) return false;
+    const f64 chord = (static_cast<f64>(b.value) - static_cast<f64>(a.value)) / dt;
+    if (a.interp == Interpolation::Linear) { out = chord; return true; }
+    if (side == 0) out = a.bx1 > 1e-6f ? chord * static_cast<f64>(a.by1) / static_cast<f64>(a.bx1) : chord;
+    else out = a.bx2 < 1.0f - 1e-6f ? chord * (1.0 - static_cast<f64>(a.by2)) / (1.0 - static_cast<f64>(a.bx2)) : chord;
+    return std::isfinite(out);
+}
+
+/// Linear vira bézier equivalente (as alças na reta), para um lado receber alça.
+void make_bezier(Keyframe& a) noexcept {
+    if (a.interp == Interpolation::Linear) {
+        a.interp = Interpolation::Bezier;
+        a.bx1 = 1.0f / 3.0f; a.by1 = 1.0f / 3.0f;
+        a.bx2 = 2.0f / 3.0f; a.by2 = 2.0f / 3.0f;
+    }
+    a.easePower = 1;
+    a.easingPreset = 0;
+}
+
+f32 clamp_handle(f64 v) noexcept {
+    return std::isfinite(v) ? static_cast<f32>(std::clamp(v, -20.0, 21.0)) : 0.0f;
+}
+
+/// Escreve a inclinação `s` na saída de `a` (trecho a→b), influência 1/3.
+void write_out(Keyframe& a, const Keyframe& b, f64 s) noexcept {
+    make_bezier(a);
+    const f64 dt = static_cast<f64>(b.time.value - a.time.value);
+    const f64 dv = static_cast<f64>(b.value) - static_cast<f64>(a.value);
+    a.bx1 = 1.0f / 3.0f;
+    a.by1 = std::fabs(dv) < 1e-9 ? 0.0f : clamp_handle(s * (1.0 / 3.0) * dt / dv);
+}
+
+/// Escreve a inclinação `s` na chegada em `b` (trecho a→b), influência 1/3.
+void write_in(Keyframe& a, const Keyframe& b, f64 s) noexcept {
+    make_bezier(a);
+    const f64 dt = static_cast<f64>(b.time.value - a.time.value);
+    const f64 dv = static_cast<f64>(b.value) - static_cast<f64>(a.value);
+    a.bx2 = 2.0f / 3.0f;
+    a.by2 = std::fabs(dv) < 1e-9 ? 1.0f : clamp_handle(1.0 - s * (1.0 / 3.0) * dt / dv);
+}
+} // namespace
+
+void Track::resolve_auto_handles() noexcept {
+    const usize n = keys.size();
+    if (n < 2 || !has_auto_handles()) return;
+    // Primeiro as automáticas (dependem só dos valores), depois as contínuas
+    // (dependem das alças já resolvidas dos vizinhos).
+    for (int pass = 0; pass < 2; ++pass) {
+        for (usize k = 0; k < n; ++k) {
+            const u8 f = keys[k].flags;
+            const bool autoKey = (f & kKeyAutoBezier) != 0;
+            if (pass == 0 ? !autoKey : (autoKey || (f & kKeyContinuous) == 0)) continue;
+            const bool hasIn = k > 0 && segment_takes_handles(keys[k - 1]) && keys[k].time.value > keys[k - 1].time.value;
+            const bool hasOut = k + 1 < n && segment_takes_handles(keys[k]) && keys[k + 1].time.value > keys[k].time.value;
+            f64 s = 0.0;
+            if (autoKey) {
+                if (k > 0 && k + 1 < n) {
+                    const f64 a = keys[k - 1].value, b = keys[k].value, c = keys[k + 1].value;
+                    const f64 span = static_cast<f64>(keys[k + 1].time.value - keys[k - 1].time.value);
+                    // Pico ou vale: parado no key (sem passar do valor), como no AE.
+                    s = (b - a) * (c - b) <= 0.0 || span <= 0.0 ? 0.0 : (c - a) / span;
+                } else if (k + 1 < n) {
+                    const f64 dt = static_cast<f64>(keys[k + 1].time.value - keys[k].time.value);
+                    s = dt > 0.0 ? (static_cast<f64>(keys[k + 1].value) - keys[k].value) / dt : 0.0;
+                } else {
+                    const f64 dt = static_cast<f64>(keys[k].time.value - keys[k - 1].time.value);
+                    s = dt > 0.0 ? (static_cast<f64>(keys[k].value) - keys[k - 1].value) / dt : 0.0;
+                }
+            } else {
+                f64 si = 0.0, so = 0.0;
+                const bool gi = hasIn && segment_slope(keys[k - 1], keys[k], 1, si);
+                const bool go = hasOut && segment_slope(keys[k], keys[k + 1], 0, so);
+                if (!gi || !go) continue;   // contínua precisa dos dois lados
+                s = 0.5 * (si + so);
+            }
+            if (hasIn) write_in(keys[k - 1], keys[k], s);
+            if (hasOut) write_out(keys[k], keys[k + 1], s);
+        }
     }
 }
 

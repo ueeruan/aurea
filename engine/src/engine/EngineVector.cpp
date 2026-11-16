@@ -12,6 +12,7 @@
 
 #include "aurea/timeline/ShapeGeometry.hpp"
 #include "aurea/vector/Vector.hpp"
+#include "aurea/vector/VectorTree.hpp"
 
 #include <cstdio>
 
@@ -126,6 +127,7 @@ Result<u64> Engine::add_vector_layer(u32 preset) noexcept {
 
 bool Engine::vector_document(u64 layerId, std::vector<f32>& out, std::string& names) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     const Layer* l = vector_layer(project_ ? current_composition() : nullptr, layerId);
     if (!l) return false;
     vector::encode_document(l->shape.vector, out, names);
@@ -134,6 +136,7 @@ bool Engine::vector_document(u64 layerId, std::vector<f32>& out, std::string& na
 
 bool Engine::set_vector_document(u64 layerId, const f32* data, usize count, const std::string& names, bool continuing) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = vector_layer(comp, layerId);
     if (!l) return false;
@@ -161,6 +164,9 @@ bool Engine::set_vector_document(u64 layerId, const f32* data, usize count, cons
             for (usize pi = 0; pi < d.groups[gi].paths.size(); ++pi) d.groups[gi].paths[pi].exclude = cur.groups[gi].paths[pi].exclude;
         }
     }
+    // Lote X: o documento de sempre não carrega a árvore (ordem livre, itens a
+    // mais, grupos de dentro, inclinação do grupo): fica a da camada.
+    for (usize gi = 0; gi < d.groups.size(); ++gi) vector::keep_tree(l->shape.vector.groups[gi], d.groups[gi]);
     if (d == l->shape.vector) return true;
     if (!continuing) history_.before_mutation(*comp, project_->timeline().current(), "camada vetorial");
     bump_model_revision_locked();
@@ -173,10 +179,11 @@ bool Engine::set_vector_document(u64 layerId, const f32* data, usize count, cons
 bool Engine::vector_path_at(u64 layerId, u32 group, u32 path, std::vector<f32>& out) noexcept {
     out.clear();
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = vector_layer(comp, layerId);
     if (!l || group >= l->shape.vector.groups.size() || path >= l->shape.vector.groups[group].paths.size()) return false;
-    const FrameIndex now = playback_.current();
+    const FrameIndex now = editing_frame_locked();
     const f64 local = static_cast<f64>(l->local_time(now).value);
     const VectorGroup g = vector::evaluate_group(l->shape.vector.groups[group], l->tracks, group, local, comp->fps());
     const vector::Affine2 M = affine_of(layer_world_matrix(*comp, *l, now)) * vector::group_matrix(g);
@@ -191,6 +198,7 @@ bool Engine::vector_path_at(u64 layerId, u32 group, u32 path, std::vector<f32>& 
 
 bool Engine::set_vector_path(u64 layerId, u32 group, u32 path, const f32* bez, usize count, bool continuing) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = vector_layer(comp, layerId);
     if (!l || !bez || group >= l->shape.vector.groups.size() || path >= l->shape.vector.groups[group].paths.size()) return false;
@@ -205,7 +213,7 @@ bool Engine::set_vector_path(u64 layerId, u32 group, u32 path, const f32* bez, u
         p.path = std::move(b);
     } else {
         // Forma animada: o que se edita é o keyframe do cabeçote.
-        const i64 local = l->local_time(playback_.current()).value;
+        const i64 local = l->local_time(editing_frame_locked()).value;
         auto it = std::find_if(p.keys.begin(), p.keys.end(), [&](const PathKey& k) { return k.frame == local; });
         if (it != p.keys.end()) {
             it->path = std::move(b);
@@ -223,6 +231,7 @@ bool Engine::set_vector_path(u64 layerId, u32 group, u32 path, const f32* bez, u
 
 bool Engine::ensure_vector_path_key(u64 layerId, u32 group, u32 path) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = vector_layer(comp, layerId);
     if (!l || group >= l->shape.vector.groups.size() || path >= l->shape.vector.groups[group].paths.size()) return false;
@@ -230,7 +239,7 @@ bool Engine::ensure_vector_path_key(u64 layerId, u32 group, u32 path) noexcept {
     bump_model_revision_locked();
     VectorPath& p = l->shape.vector.groups[group].paths[path];
     if (p.kind != VectorPathKind::Free) vector::make_editable(p);
-    const i64 local = l->local_time(playback_.current()).value;
+    const i64 local = l->local_time(editing_frame_locked()).value;
     PathKey nk;
     nk.frame = local;
     nk.path = vector::path_at(p, static_cast<f64>(local));
@@ -249,6 +258,7 @@ bool Engine::ensure_vector_path_key(u64 layerId, u32 group, u32 path) noexcept {
 
 bool Engine::toggle_vector_path_key(u64 layerId, u32 group, u32 path) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = vector_layer(comp, layerId);
     if (!l || group >= l->shape.vector.groups.size() || path >= l->shape.vector.groups[group].paths.size()) return false;
@@ -256,7 +266,7 @@ bool Engine::toggle_vector_path_key(u64 layerId, u32 group, u32 path) noexcept {
     bump_model_revision_locked();
     VectorPath& p = l->shape.vector.groups[group].paths[path];
     if (p.kind != VectorPathKind::Free) vector::make_editable(p);
-    const i64 local = l->local_time(playback_.current()).value;
+    const i64 local = l->local_time(editing_frame_locked()).value;
     auto it = std::find_if(p.keys.begin(), p.keys.end(), [&](const PathKey& k) { return k.frame == local; });
     if (it != p.keys.end()) {
         // Tirar o último keyframe devolve a forma parada (a do instante).
@@ -275,13 +285,14 @@ bool Engine::toggle_vector_path_key(u64 layerId, u32 group, u32 path) noexcept {
 
 bool Engine::toggle_vector_path_points_key(u64 layerId, u32 group, u32 path, const u32* indices, u32 count) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = vector_layer(comp, layerId);
     if (!l || !indices || count == 0 || group >= l->shape.vector.groups.size() || path >= l->shape.vector.groups[group].paths.size()) return false;
     VectorPath& p = l->shape.vector.groups[group].paths[path];
     VectorPath work = p;
     if (work.kind != VectorPathKind::Free) vector::make_editable(work);
-    const i64 local = l->local_time(playback_.current()).value;
+    const i64 local = l->local_time(editing_frame_locked()).value;
     BezierPath now = vector::path_at(work, static_cast<f64>(local));
     const usize n = now.v.size();
     std::vector<u8> chosen(n, 0);
@@ -324,6 +335,7 @@ bool Engine::toggle_vector_path_points_key(u64 layerId, u32 group, u32 path, con
 
 i32 Engine::add_vector_group(u64 layerId, u32 pathKind) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = vector_layer(comp, layerId);
     if (!l || l->shape.vector.groups.size() >= 4096) return -1;
@@ -339,6 +351,7 @@ i32 Engine::add_vector_group(u64 layerId, u32 pathKind) noexcept {
 
 bool Engine::remove_vector_group(u64 layerId, u32 group) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = vector_layer(comp, layerId);
     if (!l || group >= l->shape.vector.groups.size()) return false;
@@ -353,6 +366,7 @@ bool Engine::remove_vector_group(u64 layerId, u32 group) noexcept {
 
 i32 Engine::add_vector_path(u64 layerId, u32 group, u32 pathKind, const f32* bez, usize count) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = vector_layer(comp, layerId);
     if (!l || group >= l->shape.vector.groups.size()) return -1;
@@ -374,6 +388,7 @@ i32 Engine::add_vector_path(u64 layerId, u32 group, u32 pathKind, const f32* bez
 
 bool Engine::remove_vector_path(u64 layerId, u32 group, u32 path) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = vector_layer(comp, layerId);
     if (!l || group >= l->shape.vector.groups.size() || path >= l->shape.vector.groups[group].paths.size()) return false;
@@ -388,6 +403,7 @@ bool Engine::remove_vector_path(u64 layerId, u32 group, u32 path) noexcept {
 
 bool Engine::make_vector_path_editable(u64 layerId, u32 group, u32 path) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = vector_layer(comp, layerId);
     if (!l || group >= l->shape.vector.groups.size() || path >= l->shape.vector.groups[group].paths.size()) return false;
@@ -403,10 +419,11 @@ bool Engine::make_vector_path_editable(u64 layerId, u32 group, u32 path) noexcep
 
 u32 Engine::query_vector_params(u64 layerId, u32 group, f32* out, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = vector_layer(comp, layerId);
     if (!l || !out || capacity < kVectorParamFloats || group >= l->shape.vector.groups.size()) return 0;
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     VectorGroup g = vector::evaluate_group(l->shape.vector.groups[group], l->tracks, group, static_cast<f64>(local.value));
     u32 anim = 0, keys = 0;
     for (u32 p = 0; p < kVecParamCount; ++p) {
@@ -417,13 +434,19 @@ u32 Engine::query_vector_params(u64 layerId, u32 group, f32* out, u32 capacity) 
         anim |= 1u << p;
         if (tr->find_exact(local) != kInvalidIndex) keys |= 1u << p;
     }
-    out[kVecParamCount] = static_cast<f32>(anim);
-    out[kVecParamCount + 1] = static_cast<f32>(keys);
+    // Bits 0..23 nos dois floats de sempre; 24.. (traços animáveis) nos dois
+    // seguintes — um float só guarda inteiros exatos até 2^24.
+    constexpr u32 lo = (1u << kVecParamBitsPerFloat) - 1u;
+    out[kVecParamCount] = static_cast<f32>(anim & lo);
+    out[kVecParamCount + 1] = static_cast<f32>(keys & lo);
+    out[kVecParamCount + 2] = static_cast<f32>(anim >> kVecParamBitsPerFloat);
+    out[kVecParamCount + 3] = static_cast<f32>(keys >> kVecParamBitsPerFloat);
     return kVectorParamFloats;
 }
 
 bool Engine::set_vector_param(u64 layerId, u32 group, u32 param, f32 value, bool continuing) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = vector_layer(comp, layerId);
     if (!l || group >= l->shape.vector.groups.size() || !valid_vector_param(param)) return false;
@@ -435,7 +458,7 @@ bool Engine::set_vector_param(u64 layerId, u32 group, u32 param, f32 value, bool
     value = clamp_group_param(g, param, value);
     Track* tr = l->tracks.find(TrackProperty::VectorParam, group, param);
     if (tr && !tr->keys.empty()) {
-        const FrameIndex local = l->local_time(playback_.current());
+        const FrameIndex local = l->local_time(editing_frame_locked());
         const u32 k = tr->find_exact(local);
         if (k != kInvalidIndex) tr->keys[k].value = value;
         else (void)tr->set(local, value, Interpolation::Bezier);
@@ -451,6 +474,7 @@ bool Engine::set_vector_param(u64 layerId, u32 group, u32 param, f32 value, bool
 
 bool Engine::ensure_vector_param_key(u64 layerId, u32 group, u32 param) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = vector_layer(comp, layerId);
     if (!l || group >= l->shape.vector.groups.size() || !valid_vector_param(param)) return false;
@@ -458,7 +482,7 @@ bool Engine::ensure_vector_param_key(u64 layerId, u32 group, u32 param) noexcept
     if (!r) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "keyframe vetorial");
     bump_model_revision_locked();
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     Track& tr = l->tracks.get_or_create(TrackProperty::VectorParam, group, param);
     const f32 atual = tr.keys.empty() ? *r : tr.sample(local);
     (void)tr.set(local, clamp_group_param(l->shape.vector.groups[group], param, atual), Interpolation::Bezier);
@@ -469,6 +493,7 @@ bool Engine::ensure_vector_param_key(u64 layerId, u32 group, u32 param) noexcept
 
 bool Engine::toggle_vector_param_key(u64 layerId, u32 group, u32 param) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = vector_layer(comp, layerId);
     if (!l || group >= l->shape.vector.groups.size() || !valid_vector_param(param)) return false;
@@ -476,7 +501,7 @@ bool Engine::toggle_vector_param_key(u64 layerId, u32 group, u32 param) noexcept
     if (!r) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "keyframe vetorial");
     bump_model_revision_locked();
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     Track& tr = l->tracks.get_or_create(TrackProperty::VectorParam, group, param);
     const u32 k = tr.find_exact(local);
     if (k != kInvalidIndex) {
@@ -492,10 +517,11 @@ bool Engine::toggle_vector_param_key(u64 layerId, u32 group, u32 param) noexcept
 
 u32 Engine::query_vector_modifiers(u64 layerId, u32 group, f32* out, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = vector_layer(comp, layerId);
     if (!l || !out || group >= l->shape.vector.groups.size()) return 0;
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     const VectorGroup g = vector::evaluate_group(l->shape.vector.groups[group], l->tracks, group, static_cast<f64>(local.value), comp->fps());
     u32 written = 0;
     for (u32 m = 0; m < g.modifiers.size() && (written + 1) * kVectorModifierFloats <= capacity; ++m, ++written) {
@@ -518,6 +544,7 @@ u32 Engine::query_vector_modifiers(u64 layerId, u32 group, f32* out, u32 capacit
 
 i32 Engine::add_vector_modifier(u64 layerId, u32 group, u32 type) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = vector_layer(comp, layerId);
     if (!l || group >= l->shape.vector.groups.size() || type >= static_cast<u32>(VectorModifierType::Count)) return -1;
@@ -533,6 +560,7 @@ i32 Engine::add_vector_modifier(u64 layerId, u32 group, u32 type) noexcept {
 
 bool Engine::remove_vector_modifier(u64 layerId, u32 group, u32 index) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = vector_layer(comp, layerId);
     if (!l || group >= l->shape.vector.groups.size() || index >= l->shape.vector.groups[group].modifiers.size()) return false;
@@ -548,6 +576,7 @@ bool Engine::remove_vector_modifier(u64 layerId, u32 group, u32 index) noexcept 
 
 bool Engine::move_vector_modifier(u64 layerId, u32 group, u32 from, u32 to) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = vector_layer(comp, layerId);
     if (!l || group >= l->shape.vector.groups.size()) return false;
@@ -572,6 +601,7 @@ bool Engine::move_vector_modifier(u64 layerId, u32 group, u32 from, u32 to) noex
 
 bool Engine::set_vector_modifier_enabled(u64 layerId, u32 group, u32 index, bool enabled) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = vector_layer(comp, layerId);
     if (!l || group >= l->shape.vector.groups.size() || index >= l->shape.vector.groups[group].modifiers.size()) return false;
@@ -605,10 +635,11 @@ static_assert(Engine::kShapeParamCount == shape::kParamTotal, "parâmetros da fo
 u32 Engine::query_shape_params(u64 layerId, f32* out, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = sdf_shape_layer(comp, layerId);
     if (!l || !out || capacity < kShapeParamFloats) return 0;
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     ShapeData sh = l->shape;
     u32 anim = 0, keys = 0;
     out[0] = static_cast<f32>(sh.shapeType);
@@ -644,11 +675,12 @@ ShapeData shape_at(const Layer& l, FrameIndex local) noexcept {
 u32 Engine::query_shape_param_handles(u64 layerId, f32* out, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = sdf_shape_layer(comp, layerId);
     if (!l || !out) return 0;
     shape::ParamHandle handles[shape::kMaxParamHandles];
-    const u32 n = shape::param_handles(shape_at(*l, l->local_time(playback_.current())), handles);
+    const u32 n = shape::param_handles(shape_at(*l, l->local_time(editing_frame_locked())), handles);
     u32 written = 0;
     for (u32 i = 0; i < n && (written + 1) * kShapeHandleFloats <= capacity; ++i, ++written) {
         f32* v = out + written * kShapeHandleFloats;
@@ -664,10 +696,11 @@ bool Engine::drag_shape_param_handle(u64 layerId, u32 param, f32 x, f32 y, bool 
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         drain_commands_locked();
+        InlineEditScope inlineScope(*this, layerId, true);
         Composition* comp = project_ ? current_composition() : nullptr;
         Layer* l = sdf_shape_layer(comp, layerId);
         if (!l || l->locked) return false;
-        if (!shape::value_from_handle(shape_at(*l, l->local_time(playback_.current())), param, Vec2{x, y}, value)) return false;
+        if (!shape::value_from_handle(shape_at(*l, l->local_time(editing_frame_locked())), param, Vec2{x, y}, value)) return false;
     }
     return set_shape_param(layerId, param, value, continuing);
 }
@@ -675,6 +708,7 @@ bool Engine::drag_shape_param_handle(u64 layerId, u32 param, f32 x, f32 y, bool 
 bool Engine::set_shape_param(u64 layerId, u32 param, f32 value, bool continuing) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = sdf_shape_layer(comp, layerId);
     if (!l || param == 0 || param >= kShapeParamCount) return false;
@@ -685,7 +719,7 @@ bool Engine::set_shape_param(u64 layerId, u32 param, f32 value, bool continuing)
     value = clamp_shape_param(param, value);
     Track* tr = l->tracks.find(TrackProperty::ShapeParam, 0, param);
     if (tr && !tr->keys.empty()) {
-        const FrameIndex local = l->local_time(playback_.current());
+        const FrameIndex local = l->local_time(editing_frame_locked());
         const u32 k = tr->find_exact(local);
         if (k != kInvalidIndex) tr->keys[k].value = value;
         else (void)tr->set(local, value, Interpolation::Bezier);
@@ -709,6 +743,7 @@ bool Engine::set_shape_param(u64 layerId, u32 param, f32 value, bool continuing)
 bool Engine::ensure_shape_param_key(u64 layerId, u32 param) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = sdf_shape_layer(comp, layerId);
     if (!l || param == 0 || param >= kShapeParamCount) return false;
@@ -716,7 +751,7 @@ bool Engine::ensure_shape_param_key(u64 layerId, u32 param) noexcept {
     if (!r) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "keyframe da forma");
     bump_model_revision_locked();
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     Track& tr = l->tracks.get_or_create(TrackProperty::ShapeParam, 0, param);
     // COM keyframe aqui: regrava o valor AVALIADO (não apaga). É o que o
     // losango do painel faz — "criar keyframe" nunca pode devolver a forma ao
@@ -731,6 +766,7 @@ bool Engine::ensure_shape_param_key(u64 layerId, u32 param) noexcept {
 bool Engine::toggle_shape_param_key(u64 layerId, u32 param) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = sdf_shape_layer(comp, layerId);
     if (!l || param == 0 || param >= kShapeParamCount) return false;
@@ -738,7 +774,7 @@ bool Engine::toggle_shape_param_key(u64 layerId, u32 param) noexcept {
     if (!r) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "keyframe da forma");
     bump_model_revision_locked();
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     Track& tr = l->tracks.get_or_create(TrackProperty::ShapeParam, 0, param);
     const u32 k = tr.find_exact(local);
     if (k != kInvalidIndex) {
@@ -757,6 +793,7 @@ bool Engine::toggle_shape_param_key(u64 layerId, u32 param) noexcept {
 Result<u64> Engine::add_freehand_path(u64 layerId, const f32* xy, usize count, f32 error) noexcept {
     if (!xy || count < 4) return Status{Errc::InvalidArgument, "traço vazio"};
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return Status{Errc::InvalidState, "nenhum projeto aberto"};
     Layer* l = layerId ? vector_layer(comp, layerId) : nullptr;
@@ -772,14 +809,14 @@ Result<u64> Engine::add_freehand_path(u64 layerId, const f32* xy, usize count, f
         if (!l) return Status{Errc::OutOfMemory, "camada nao criada"};
         l->shape.shapeType = kShapeVector;
         l->shape.bounds = Rect{0.0f, 0.0f, w, h};
-        const i64 t = std::clamp<i64>(playback_.current().value, 0, std::max<i64>(0, comp->duration().value - 1));
+        const i64 t = std::clamp<i64>(editing_frame_locked().value, 0, std::max<i64>(0, comp->duration().value - 1));
         l->start = FrameIndex{t};
         l->end = FrameIndex{new_layer_end_locked(comp, l, t)};
         l->transform.anchor = Vec3{w * 0.5f, h * 0.5f, 0.0f};
         l->transform.position = Vec3{w * 0.5f, h * 0.5f, 0.0f};
     }
     // Composição → camada (o traço fica onde o dedo passou, com a camada onde estiver).
-    const vector::Affine2 inv = affine_of(layer_world_matrix(*comp, *l, playback_.current())).inverse();
+    const vector::Affine2 inv = affine_of(layer_world_matrix(*comp, *l, editing_frame_locked())).inverse();
     std::vector<Vec2> pts;
     pts.reserve(count / 2);
     for (usize i = 0; i + 1 < count; i += 2) pts.push_back(inv.apply(Vec2{xy[i], xy[i + 1]}));
@@ -866,7 +903,8 @@ bool Engine::query_text_path(u64 layerId, u64& pathLayer, f32& offset, bool& per
 
 bool Engine::set_text_path_options(u64 layerId, const TextPathOptions& o) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
-    drain_commands_locked();   // o cabeçote dos comandos já enviados (o keyframe vai no quadro mostrado)
+    drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);   // o cabeçote dos comandos já enviados (o keyframe vai no quadro mostrado)
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Text || l->locked) return false;
@@ -877,7 +915,7 @@ bool Engine::set_text_path_options(u64 layerId, const TextPathOptions& o) noexce
     }
     TextData& t = l->text;
     const u64 guide = o.mask != kInvalidIndex ? 0 : o.pathLayer;
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     const f32 first = read_path_margin(*l, TrackProperty::TextPathFirstMargin, t.pathOffset, local);
     const f32 last = read_path_margin(*l, TrackProperty::TextPathLastMargin, t.pathLastMargin, local);
     const bool sourceChanged = t.pathLayer != guide || t.pathMask != o.mask;
@@ -903,11 +941,12 @@ bool Engine::set_text_path_options(u64 layerId, const TextPathOptions& o) noexce
 bool Engine::query_text_path_options(u64 layerId, TextPathOptions& o) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Text) return false;
     const TextData& t = l->text;
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     const bool maskExists = t.pathMask != kInvalidIndex
         && std::any_of(l->masks.begin(), l->masks.end(), [&](const Mask& m) { return m.id == t.pathMask; });
     o.pathLayer = maskExists ? 0 : t.pathLayer;

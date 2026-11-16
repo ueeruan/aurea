@@ -157,7 +157,13 @@ struct CameraOptionsPanel: View {
             onKeyframe: canKey ? { toggleKeys() } : nil,
             onDeleteAllKeyframes: canKey ? { deleteAllKeys(tracks) } : nil,
             onCurve: canKey ? { openCurve(tracks) } : nil,
-            curveReady: tracks.contains { keys($0).count >= 2 })
+            curveReady: tracks.contains { keys($0).count >= 2 },
+            // F6 (D3): a Cena 3D (ambiente, render) da composição a partir da câmera (par do Android).
+            moreEntries: {
+                [.item(AureaText.t("fn_3d_scene"), glyph: CupertinoGlyph.Lightbulb, tag: "camera.more.scene3d") {
+                    model.face3D = .scene; model.openPanel(.layer3D)
+                }]
+            })
     }
 
     private func updateTimelineFocus() {
@@ -476,7 +482,7 @@ struct CameraOptionsPanel: View {
     // =========================================================================
 
     private func keys(_ property: UInt32) -> [KeyframeItem] {
-        (model.keyframes[id] ?? []).filter { $0.property == property && $0.effectIndex == UInt32.max }.sorted { $0.time < $1.time }
+        (model.keysForLayer(id) ?? []).filter { $0.property == property && $0.effectIndex == UInt32.max }.sorted { $0.time < $1.time }
     }
     private func look(_ tracks: [UInt32]) -> KeyframeLook {
         let local = model.localPlayhead
@@ -588,7 +594,7 @@ struct CameraOptionsPanel: View {
             if twoNode {
                 let label = AureaText.t("ae_anim_poi")
                 let props: [UInt32] = [51, 52, 53]   // TrackProperty::CameraPoiX/Y/Z
-                let here = (model.keyframes[id] ?? []).contains { props.contains($0.property) && $0.time == model.localPlayhead }
+                let here = (model.keysForLayer(id) ?? []).contains { props.contains($0.property) && $0.time == model.localPlayhead }
                 HStack(spacing: 4) {
                     Text(label).font(.aurea(size: 13)).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
                     ForEach(0..<3, id: \.self) { i in

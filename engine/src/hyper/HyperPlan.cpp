@@ -278,6 +278,16 @@ Path suggest_path(const DeviceProfile& p) noexcept {
     return Path::Turbo;
 }
 
+void refresh_profile_limits(DeviceProfile& profile, u64 availableBytes,
+    f32 memoryPressure, bool thermalConstrained) noexcept {
+    profile.freeRamBytes = availableBytes;
+    const bool memoryConstrained = !std::isfinite(memoryPressure) || memoryPressure >= .85f;
+    profile.tile = profile.abi64 ? (availableBytes && availableBytes < (2ull << 30) ? 96u : 128u) : 64u;
+    if (memoryConstrained) profile.tile = 64;
+    profile.tileMargin = profile.abi64 ? 12u : 8u;
+    profile.defaultPath = thermalConstrained || memoryConstrained ? Path::Turbo : suggest_path(profile);
+}
+
 std::string profile_to_json(const DeviceProfile& p, const std::string& stamp) {
     std::string note = p.backendNote;
     for (char& c : note) if (c == '"' || c == '\\' || c == '\n' || c == '\r') c = ' ';

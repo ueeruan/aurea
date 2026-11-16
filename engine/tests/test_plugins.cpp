@@ -35,7 +35,9 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -51,6 +53,25 @@ std::string examples() { return AUREA_PLUGIN_EXAMPLES_DIR; }
 std::string read_file(const fs::path& p) {
     std::ifstream f(p, std::ios::binary);
     return std::string((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+}
+
+std::string expand_test_shader_includes(const fs::path& path) {
+    std::istringstream input(read_file(path));
+    std::string result;
+    for (std::string line; std::getline(input, line);) {
+        const auto first = line.find_first_not_of(" \t");
+        if (first != std::string::npos && line.compare(first, 8, "#include") == 0) {
+            const auto quote = line.find('"', first + 8);
+            const auto end = quote == std::string::npos ? quote : line.find('"', quote + 1);
+            if (quote != std::string::npos && end != std::string::npos) {
+                result += expand_test_shader_includes(path.parent_path() / line.substr(quote + 1, end - quote - 1));
+                result += '\n';
+                continue;
+            }
+        }
+        result += line + '\n';
+    }
+    return result;
 }
 
 fs::path fresh_dir(const char* name) {
@@ -673,6 +694,86 @@ AUREA_TEST(Plugins, RuntimeShaderIdsAreDynamicAndLibrariesDropRemovedOnes) {
     const ShaderId again = runtime_shaders::register_shader(ShaderStage::Fragment, spirv, "teste 2");
     AUREA_CHECK(again != id);   // nunca reaproveitado no processo
     runtime_shaders::unregister_shader(again);
+}
+
+AUREA_TEST(ShaderTranslate, MetalReadWriteFormatsDeclareTheirRequiredTier) {
+    if (!runtime_shaders::compiler_available()) {
+        std::printf("(runtime shader compiler unavailable) ");
+        return;
+    }
+    struct FormatCase {
+        const char* format;
+        const char* type;
+        u32 expected;
+    };
+    const FormatCase cases[]{
+        {"r32f", "image2D", xlate::kMslFlagRequiresReadWriteTier1},
+        {"r32ui", "uimage2D", xlate::kMslFlagRequiresReadWriteTier1},
+        {"r32i", "iimage2D", xlate::kMslFlagRequiresReadWriteTier1},
+        {"rgba32f", "image2D", xlate::kMslFlagRequiresReadWriteTier2},
+        {"rgba16f", "image2D", xlate::kMslFlagRequiresReadWriteTier2},
+        {"rgba8", "image2D", xlate::kMslFlagRequiresReadWriteTier2},
+        {"rg32f", "image2D", xlate::kMslFlagUnsupportedReadWriteFormat}
+    };
+    for (const auto& sample : cases) {
+        for (bool separateAccess : {false, true}) {
+            std::string source = "#version 450\nlayout(local_size_x=1) in;\n";
+            const std::string prefix = std::string("layout(set=0,binding=13,") + sample.format + ") ";
+            if (separateAccess) {
+                source += prefix + "readonly uniform " + sample.type + " inputImage;\n";
+                source += std::string("layout(set=0,binding=14,") + sample.format + ") writeonly uniform "
+                    + sample.type + " outputImage;\n";
+                source += "void main(){ imageStore(outputImage,ivec2(0),imageLoad(inputImage,ivec2(0))); }\n";
+            } else {
+                source += prefix + "uniform " + sample.type + " target;\n";
+                source += "void main(){ imageStore(target,ivec2(0),imageLoad(target,ivec2(0))); }\n";
+            }
+            const runtime_shaders::SourcePart parts[]{{"storage-format.comp", source}};
+            std::vector<u32> spirv;
+            std::string error;
+            const bool compiled = runtime_shaders::compile_glsl(ShaderStage::Compute, parts, spirv, error);
+            AUREA_CHECK_MSG(compiled, error.c_str());
+            if (!compiled) continue;
+            u32 flags = 0;
+            AUREA_CHECK_MSG(xlate::spirv_msl_resource_flags(spirv.data(), spirv.size(), flags, error), error.c_str());
+            AUREA_CHECK_EQ(flags, separateAccess ? 0u : sample.expected);
+        }
+    }
+    const u32 emptyModule[]{0x07230203u, 0x00010000u, 0, 1, 0};
+    u32 flags = 0;
+    std::string error;
+    AUREA_CHECK(!xlate::spirv_msl_resource_flags(emptyModule, std::size(emptyModule), flags, error));
+    AUREA_CHECK(!error.empty());
+}
+
+AUREA_TEST(ShaderTranslate, BuiltinReadWriteBlurAndWriteOnlySignalKeepDistinctMetalRequirements) {
+    if (!runtime_shaders::compiler_available()) {
+        std::printf("(runtime shader compiler unavailable) ");
+        return;
+    }
+    const auto directory = fs::path(AUREA_PLUGIN_EXAMPLES_DIR).parent_path().parent_path().parent_path()
+        / "engine/shaders/effects";
+    for (bool readWrite : {true, false}) {
+        const std::string file = readWrite ? "reference_blur.comp" : "signal_reference.comp";
+        const std::string source = expand_test_shader_includes(directory / file);
+        AUREA_CHECK(!source.empty());
+        const runtime_shaders::SourcePart parts[]{{file, source}};
+        std::vector<u32> spirv;
+        std::string error;
+        const bool compiled = runtime_shaders::compile_glsl(ShaderStage::Compute, parts, spirv, error);
+        AUREA_CHECK_MSG(compiled, error.c_str());
+        if (!compiled) continue;
+        u32 flags = 0;
+        AUREA_CHECK_MSG(xlate::spirv_msl_resource_flags(spirv.data(), spirv.size(), flags, error), error.c_str());
+        AUREA_CHECK_EQ(flags, readWrite ? xlate::kMslFlagRequiresReadWriteTier2 : 0u);
+        if (xlate::msl_available()) {
+            std::string msl;
+            u32 group[3]{};
+            AUREA_CHECK_MSG(xlate::spirv_to_msl(spirv.data(), spirv.size(), "cs_main", 0xffffffffu,
+                                               group, msl, error), error.c_str());
+            AUREA_CHECK((msl.find("access::read_write") != std::string::npos) == readWrite);
+        }
+    }
 }
 
 // =============================================================================

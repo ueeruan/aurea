@@ -1,5 +1,10 @@
 package com.aurea.aurea.editor
 
+import com.aurea.aurea.editor.panels.EditorPanel
+import com.aurea.aurea.editor.panels.PanelRequests
+import com.aurea.aurea.editor.panels.TransformTab
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutLinearInEasing
@@ -89,10 +94,12 @@ import com.aurea.aurea.editor.timeline.Keyframes
 import com.aurea.aurea.editor.timeline.Thumbs
 import com.aurea.aurea.engine.LayerRow
 import com.aurea.aurea.state.EditorStore
+import com.aurea.aurea.ui.ds.AnchoredMenu
 import com.aurea.aurea.ui.ds.AnchoredMenuDefaults
 import com.aurea.aurea.ui.ds.AnchoredMenuPosition
 import com.aurea.aurea.ui.ds.AureaSurfaceTone
 import com.aurea.aurea.ui.ds.MenuColors
+import com.aurea.aurea.ui.ds.MenuEntry
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaLineIcons
 import com.aurea.aurea.ui.theme.AureaType
@@ -117,21 +124,21 @@ private val TitleStyle = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWe
 private fun parentOf(rows: List<LayerRow>, row: LayerRow): Long = rows.getOrNull(row.parentIndex)?.id ?: 0L
 
 // =============================================================================
-// Camada escolhida (`fragment_element_actionbar`): ‹ · nome · vínculo · 🗑 · ⋮
+// Camada escolhida: ‹ · nome · 3D · desfoque de movimento · vínculo · 🗑 · ⋮
 // =============================================================================
 
 /**
  * Fundo da barra da camada (A9). ‹ desseleciona; o nome edita ali mesmo (com ✕
  * de apagar); o vínculo de pai some em camada de áudio; a lixeira apaga sem
- * perguntar (um desfazer); o ⋮ abre o menu da camada ancorado nele. 3D e
- * desfoque de movimento ficam na barra (0.3.3) e também no ⋮; duplicar, no
- * Copiar e colar.
+ * perguntar (um desfazer); o ⋮ abre o menu da camada ancorado nele (só ações
+ * da camada). 3D e desfoque de movimento ficam visíveis na barra; as ações
+ * adicionais de plugins continuam no menu.
  */
 @Composable
 internal fun LayerTopBar(store: EditorStore, ui: EditorUi, layerId: Long) {
     val header by remember(layerId) {
         derivedStateOf {
-            val rows = store.layers
+            val rows = store.editingLayers
             rows.firstOrNull { it.id == layerId }?.let { LayerHeader(it.id, it.name, it.kind, it.locked, parentOf(rows, it)) }
         }
     }
@@ -153,7 +160,7 @@ internal fun LayerTopBar(store: EditorStore, ui: EditorUi, layerId: Long) {
     ) {
         ChromeButton(
             CupertinoGlyph.ChevronLeft, stringResource(R.string.editor_voltar_tirar_selecao),
-            onClick = { shellBack(store, ui) }, modifier = Modifier.testTag("layer.back"), size = 20.dp, height = ShellDims.TopBar,
+            onClick = { shellBack(store, ui) }, modifier = Modifier.testTag("layer.back"), size = 20.dp, width = 44.dp, height = ShellDims.TopBar,
         )
         if (h == null) return@Row
         Box(Modifier.weight(1f).testTag("layer.name")) {
@@ -163,14 +170,12 @@ internal fun LayerTopBar(store: EditorStore, ui: EditorUi, layerId: Long) {
                 placeholder = stringResource(R.string.edt_unnamed_layer),
                 maxLength = Int.MAX_VALUE,
                 enabled = !h.locked,
+                verticalPadding = 4.dp,
                 onRename = { store.renameLayer(h.id, it) },
             )
         }
-        // 0.3.3 recursos: 3D e desfoque de movimento voltam à barra da camada
-        // (como na 0.3.2: aceso em destaque quando ligado, apagado se travada).
-        // Continuam também no ⋮.
         if (h.kind != LayerType.Audio.kind) {
-            val row = store.layers.firstOrNull { it.id == h.id }
+            val row = store.editingLayers.firstOrNull { it.id == h.id }
             val intrinsic = h.kind in 8..10
             val threeD = row?.isThreeD == true || intrinsic
             val motionBlur = store.detail?.takeIf { it.id == h.id }?.motionBlur == true
@@ -179,15 +184,30 @@ internal fun LayerTopBar(store: EditorStore, ui: EditorUi, layerId: Long) {
             ChromeButton(
                 CupertinoGlyph.Cube, stringResource(R.string.sh_add_tab_3d),
                 onClick = if (!h.locked && !intrinsic) ({ store.changeLayer3D(!threeD) }) else null,
-                modifier = Modifier.testTag("trial.layer.3d").semantics { stateDescription = if (threeD) onLabel else offLabel },
-                size = 20.dp, height = ShellDims.TopBar,
+                modifier = Modifier.testTag("trial.layer.3d").semantics {
+                    stateDescription = if (threeD) onLabel else offLabel
+                    selected = threeD
+                },
+                size = 20.dp, width = 44.dp, height = ShellDims.TopBar,
                 tint = if (threeD) AureaColors.Accent else if (h.locked) AureaColors.Disabled else AureaColors.Text,
             )
+            val toggleLabel = stringResource(R.string.fn_motion_blur_toggle)
             ChromeButton(
                 CupertinoGlyph.MotionBlur, stringResource(R.string.editor_desfoque_movimento),
-                onClick = if (!h.locked) ({ store.setLayerMotionBlur(h.id, !motionBlur) }) else null,
-                modifier = Modifier.testTag("trial.layer.motionBlur").semantics { stateDescription = if (motionBlur) onLabel else offLabel },
-                size = 20.dp, height = ShellDims.TopBar,
+                onClick = if (!h.locked) ({
+                    PanelRequests.transformTab = TransformTab.Desfoque
+                    openPanel(store, ui, EditorPanel.Transform)
+                }) else null,
+                onLongClick = if (!h.locked) ({ store.setLayerMotionBlur(h.id, !motionBlur) }) else null,
+                modifier = Modifier.testTag("trial.layer.motionBlur").semantics {
+                    stateDescription = if (motionBlur) onLabel else offLabel
+                    selected = motionBlur
+                    if (!h.locked) customActions = listOf(CustomAccessibilityAction(toggleLabel) {
+                        store.setLayerMotionBlur(h.id, !motionBlur)
+                        true
+                    })
+                },
+                size = 20.dp, width = 44.dp, height = ShellDims.TopBar,
                 tint = if (motionBlur) AureaColors.Accent else if (h.locked) AureaColors.Disabled else AureaColors.Text,
             )
         }
@@ -203,18 +223,17 @@ internal fun LayerTopBar(store: EditorStore, ui: EditorUi, layerId: Long) {
                     },
                     modifier = Modifier.testTag("layer.parent"),
                     size = 20.dp,
+                    width = 44.dp,
                     height = ShellDims.TopBar,
                     tint = if (h.parent != 0L) AureaColors.Accent else AureaColors.Text,
                 )
                 if (linking) LinkMenu(store, listOf(h.id)) { linking = false }
             }
         }
-        // 0.3.4 plugins: botões "layer.toolbar" dos plugins ligados.
-        com.aurea.aurea.effects.PluginLayerBarButtons(store, ShellDims.TopBar)
         ChromeButton(
             CupertinoGlyph.Trash, stringResource(R.string.editor_excluir_camada),
             onClick = if (!h.locked) ({ LayerOps.delete(store, listOf(h.id)) }) else null,
-            modifier = Modifier.testTag("layer.delete"), size = 19.dp, height = ShellDims.TopBar,
+            modifier = Modifier.testTag("layer.delete"), size = 19.dp, width = 44.dp, height = ShellDims.TopBar,
         )
         Box {
             ChromeButton(
@@ -223,7 +242,7 @@ internal fun LayerTopBar(store: EditorStore, ui: EditorUi, layerId: Long) {
                     if (store.playing) store.pause()
                     menu = true
                 },
-                modifier = Modifier.testTag("layer.menu"), size = 20.dp, height = ShellDims.TopBar,
+                modifier = Modifier.testTag("layer.menu"), size = 20.dp, width = 44.dp, height = ShellDims.TopBar,
             )
             LayerMenu(store, ui, h.id, expanded = menu) { menu = false }
         }
@@ -249,7 +268,7 @@ internal fun LinkMenu(store: EditorStore, ids: List<Long>, onDismiss: () -> Unit
         with(density) { AnchorPopupPosition(AnchoredMenuDefaults.ScreenMargin.roundToPx(), AnchoredMenuDefaults.AnchorGap.roundToPx()) }
     }
     val colors = MenuColors.of(AureaSurfaceTone.Light)
-    val rows = store.layers
+    val rows = store.editingLayers
     val candidates = remember(rows, ids) { store.parentCandidatesForAll(ids).map { it.id }.toSet() }
     val visual = remember(rows) { rows.filter { it.kind != LayerType.Audio.kind } }
     // Pai em comum (0 = todas soltas; −1 = pais diferentes: nada marcado).
@@ -426,7 +445,7 @@ internal class AnchorPopupPosition(private val margin: Int, private val gap: Int
 // =============================================================================
 
 /**
- * Fora de grupo: [sair][título][⚙][compartilhar], sobre o fundo A10. O ⚙ abre
+ * Fora de grupo: [sair][título][mais][⚙][compartilhar], sobre o fundo A10. O ⚙ abre
  * os Ajustes do projeto DIRETO (o menu da engrenagem saiu; o que era dele mora
  * na seção "Mais do AUREA" dos Ajustes e no Copiar e colar). Dentro de grupo:
  * a trilha de grupos e o ⚙ do grupo — sair, título e compartilhar somem.
@@ -434,6 +453,17 @@ internal class AnchorPopupPosition(private val margin: Int, private val gap: Int
 @Composable
 internal fun ProjectTopBar(store: EditorStore, ui: EditorUi) {
     val depth by remember { derivedStateOf { store.precompDepth } }
+    var secondaryMenu by remember { mutableStateOf(false) }
+    val assistantLabel = stringResource(if (com.aurea.aurea.mcp.AureaMcpFlags.legacyChat) R.string.ai_open else R.string.mcp_title)
+    val pluginEntries = com.aurea.aurea.effects.pluginEditorMenuEntries(store)
+    val secondaryEntries = listOf(MenuEntry.Item(
+        assistantLabel,
+        glyph = CupertinoGlyph.Sparkles,
+        tag = "editor.topbar.assistant",
+    ) { ui.assistant = true }) + if (pluginEntries.isEmpty()) emptyList() else listOf(
+        MenuEntry.Item(stringResource(R.string.pv2_menu), glyph = CupertinoGlyph.Wrench,
+            submenu = pluginEntries, tag = "plugin.menu"),
+    )
     Row(
         Modifier
             .fillMaxWidth()
@@ -465,33 +495,31 @@ internal fun ProjectTopBar(store: EditorStore, ui: EditorUi) {
                     onRename = { store.renameProject(it) },
                 )
             }
-            // 0.4.6: o assistente de IA (OpenRouter, modelos gratuitos) que age no projeto.
-            ChromeButton(
-                CupertinoGlyph.Sparkles, stringResource(R.string.ai_open),
-                onClick = { if (store.playing) store.pause(); ui.assistant = true },
-                modifier = Modifier.testTag("editor.topbar.assistant"), size = 20.dp, height = ShellDims.TopBar,
-            )
-            // 0.3.4 plugins: o menu de plugins (painéis e ações "editor.menu"); some sem plugin.
-            com.aurea.aurea.effects.PluginEditorMenuButton(store, ShellDims.TopBar)
+            Box {
+                ChromeButton(
+                    ShellGlyph.EllipsisVertical, stringResource(R.string.editor_mais),
+                    onClick = { if (store.playing) store.pause(); secondaryMenu = true },
+                    modifier = Modifier.testTag("editor.topbar.more"), size = 20.dp, height = ShellDims.TopBar,
+                )
+                AnchoredMenu(
+                    expanded = secondaryMenu,
+                    onDismiss = { secondaryMenu = false },
+                    entries = secondaryEntries,
+                    alignEnd = true,
+                    tag = "editor.topbar.more.menu",
+                )
+            }
             ChromeButton(
                 CupertinoGlyph.Gear, stringResource(R.string.editor_ajustes_projeto),
                 onClick = { openSheet(store, ui, ShellSheet.ProjectSettings) },
                 modifier = Modifier.testTag("editor.projectMenu"), size = 21.dp, height = ShellDims.TopBar,
             )
-            // 0.4.1 (mockup "interface 03"): exportar = quadrado de 28 com fio de 1,5 no destaque.
-            val shareLabel = stringResource(R.string.om_tb_share)
-            Box(
-                Modifier.padding(start = 4.dp, end = 10.dp).size(28.dp)
-                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(7.dp))
-                    .border(1.5.dp, AureaColors.Accent, androidx.compose.foundation.shape.RoundedCornerShape(7.dp))
-                    .testTag("editor.export")
-                    .semantics { contentDescription = shareLabel; role = androidx.compose.ui.semantics.Role.Button }
-                    .tocavel(haptic = true) {
-                        if (store.playing) store.pause()
-                        ui.exporting = true
-                    },
-                contentAlignment = Alignment.Center,
-            ) { CupertinoIcon(CupertinoGlyph.SquareArrowUp, 16.dp, AureaColors.Accent) }
+            ChromeButton(
+                CupertinoGlyph.SquareArrowUp, stringResource(R.string.om_tb_share),
+                onClick = { if (store.playing) store.pause(); ui.exporting = true },
+                modifier = Modifier.testTag("editor.export").semantics { role = androidx.compose.ui.semantics.Role.Button },
+                size = 23.dp, width = 44.dp, height = ShellDims.TopBar, tint = AureaColors.Accent,
+            )
         }
     }
 }
@@ -576,6 +604,7 @@ private fun InlineName(
     maxLength: Int,
     onRename: (String) -> Unit,
     enabled: Boolean = true,
+    verticalPadding: Dp = 12.dp,
 ) {
     var editing by remember(key) { mutableStateOf(false) }
     if (!editing) {
@@ -588,7 +617,7 @@ private fun InlineName(
             modifier = Modifier
                 .fillMaxWidth()
                 .tocavel(enabled = enabled, shrink = 1f) { editing = true }
-                .padding(vertical = 12.dp, horizontal = 4.dp),
+                .padding(vertical = verticalPadding, horizontal = 4.dp),
         )
         return
     }
@@ -650,10 +679,10 @@ private fun InlineName(
  */
 @Composable
 internal fun BatchTopBar(store: EditorStore, ui: EditorUi) {
-    val count by remember { derivedStateOf { store.selection.size } }
-    val canMask by remember { derivedStateOf { store.selection.size >= 2 && store.canGroupAndMask(store.selection.toList()) } }
+    val count by remember { derivedStateOf { store.editingSelection.size } }
+    val canMask by remember { derivedStateOf { store.editingSelection.size >= 2 && store.canGroupAndMask(store.editingSelection.toList()) } }
     val groups by remember {
-        derivedStateOf { store.layers.filter { it.id in store.selection && it.kind == LayerType.Group.kind }.map { it.id } }
+        derivedStateOf { store.editingLayers.filter { it.id in store.editingSelection && it.kind == LayerType.Group.kind }.map { it.id } }
     }
     var aligning by remember { mutableStateOf(false) }
     val ink = AureaColors.OnAccent
@@ -722,10 +751,10 @@ internal fun BatchTopBar(store: EditorStore, ui: EditorUi) {
                             if (store.playing) store.pause()
                             linking = true
                         }, Modifier.testTag("batch.link"), size = 19.dp, height = ShellDims.TopBar, tint = ink)
-                        if (linking) LinkMenu(store, store.selection.toList()) { linking = false }
+                        if (linking) LinkMenu(store, store.editingSelection.toList()) { linking = false }
                     }
                     ChromeButton(CupertinoGlyph.Trash, stringResource(R.string.editor_excluir_selecao), onClick = {
-                        LayerOps.delete(store, store.selection)
+                        LayerOps.delete(store, store.editingSelection)
                         finish()
                     }, Modifier.testTag("batch.delete"), size = 19.dp, height = ShellDims.TopBar, tint = ink)
                     ChromeButton(CupertinoGlyph.ChevronRight, stringResource(R.string.om_sel_align), onClick = { aligning = true },
@@ -736,30 +765,30 @@ internal fun BatchTopBar(store: EditorStore, ui: EditorUi) {
                     val three = count >= 3
                     AlignCell(CupertinoGlyph.ChevronLeft, stringResource(R.string.batch_group_actions), "batch.align.back", ink, 17.dp) { aligning = false }
                     AlignCell(CupertinoGlyph.ArrowLeftToLine, stringResource(R.string.editor_alinhar_esquerda_tela), "batch.align.left", ink) {
-                        LayerOps.align(store, store.selection, LayerOps.Edge.Left)
+                        LayerOps.align(store, store.editingSelection, LayerOps.Edge.Left)
                     }
                     AlignCell(CupertinoGlyph.ArrowLeftRight, stringResource(R.string.editor_centralizar_horizontal), "batch.align.hcenter", ink) {
-                        LayerOps.align(store, store.selection, LayerOps.Edge.CenterH)
+                        LayerOps.align(store, store.editingSelection, LayerOps.Edge.CenterH)
                     }
                     AlignCell(CupertinoGlyph.ArrowRightToLine, stringResource(R.string.editor_alinhar_direita_tela), "batch.align.right", ink) {
-                        LayerOps.align(store, store.selection, LayerOps.Edge.Right)
+                        LayerOps.align(store, store.editingSelection, LayerOps.Edge.Right)
                     }
                     AlignCell(CupertinoGlyph.ArrowUpToLine, stringResource(R.string.editor_alinhar_topo_tela), "batch.align.top", ink) {
-                        LayerOps.align(store, store.selection, LayerOps.Edge.Top)
+                        LayerOps.align(store, store.editingSelection, LayerOps.Edge.Top)
                     }
                     AlignCell(CupertinoGlyph.ArrowUpArrowDown, stringResource(R.string.editor_centralizar_vertical), "batch.align.vcenter", ink) {
-                        LayerOps.align(store, store.selection, LayerOps.Edge.CenterV)
+                        LayerOps.align(store, store.editingSelection, LayerOps.Edge.CenterV)
                     }
                     AlignCell(CupertinoGlyph.ArrowDownToLine, stringResource(R.string.editor_alinhar_base_tela), "batch.align.bottom", ink) {
-                        LayerOps.align(store, store.selection, LayerOps.Edge.Bottom)
+                        LayerOps.align(store, store.editingSelection, LayerOps.Edge.Bottom)
                     }
                     AlignCell(CupertinoGlyph.ArrowUpDownSquare, stringResource(R.string.editor_distribuir_vertical_vaos_iguais), "batch.align.distV",
                         if (three) ink else dim) {
-                        if (three) LayerOps.distribute(store, store.selection, horizontal = false) else store.showToast(needThree)
+                        if (three) LayerOps.distribute(store, store.editingSelection, horizontal = false) else store.showToast(needThree)
                     }
                     AlignCell(CupertinoGlyph.ArrowLeftRightSquare, stringResource(R.string.editor_distribuir_horizontal_vaos_iguais), "batch.align.distH",
                         if (three) ink else dim) {
-                        if (three) LayerOps.distribute(store, store.selection, horizontal = true) else store.showToast(needThree)
+                        if (three) LayerOps.distribute(store, store.editingSelection, horizontal = true) else store.showToast(needThree)
                     }
                 }
             }
@@ -787,8 +816,8 @@ private fun RowScope.AlignCell(glyph: Char, description: String, tag: String, ti
  */
 @Composable
 internal fun MultiSelectBottomBar(store: EditorStore, modifier: Modifier) {
-    val selection = store.selection
-    val layers = store.layers
+    val selection = store.editingSelection
+    val layers = store.editingLayers
     // Cabeçote lido no derivedStateOf: tocando, a barra só recompõe quando a variante muda.
     val variant by remember(selection, layers) { androidx.compose.runtime.derivedStateOf { store.playhead; store.multiTimeVariant() } }
     val intoLayers = stringResource(R.string.editor_leve_cabecote_dentro_camadas)
@@ -827,7 +856,7 @@ internal fun MultiSelectBottomBar(store: EditorStore, modifier: Modifier) {
                     }
                     BottomCell(CupertinoGlyph.Scissors, stringResource(R.string.editor_dividir_cabecote), "batch.bottom.split") {
                         val t = store.playhead
-                        val targets = store.layers.filter { it.id in store.selection && !it.locked && t > it.startFrame && t < it.endFrame }.map { it.id }
+                        val targets = store.editingLayers.filter { it.id in store.editingSelection && !it.locked && t > it.startFrame && t < it.endFrame }.map { it.id }
                         if (targets.isEmpty()) store.showToast(intoLayers)
                         else {
                             if (store.playing) store.pause()
@@ -866,7 +895,7 @@ private fun BottomVectorCell(icon: ImageVector, description: String, tag: String
 /** Aparar as escolhidas que cobrem o cabeçote (as travadas ficam), num passo só. */
 private fun batchTrim(store: EditorStore, start: Boolean, intoLayers: String, lockedText: String) {
     val t = store.playhead
-    val rows = store.layers.filter { it.id in store.selection }
+    val rows = store.editingLayers.filter { it.id in store.editingSelection }
     val targets = rows.filter { !it.locked && t > it.startFrame && t < it.endFrame }
     if (targets.isEmpty()) {
         store.showToast(if (rows.isNotEmpty() && rows.all { it.locked }) lockedText else intoLayers)

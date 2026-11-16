@@ -38,6 +38,7 @@
 #include <vector>
 
 namespace aurea::vector { struct DrawProgress; }
+namespace aurea::plugins { struct AudioProgram; }
 
 namespace aurea {
 
@@ -97,6 +98,9 @@ struct LayerPlacement {
     u32  compHeight = 0;
     u32  layerWidth = 0;    ///< tamanho natural da layer (resolução cheia)
     u32  layerHeight = 0;
+    /// Original layer/path pixels -> this frame's raster source. Vector
+    /// bounds, animated shape sizes and glyph padding can move that origin.
+    Vec2 sourceShift{};
     /// Copiar fundo: o plano dos efeitos é a caixa da camada com margem, não a
     /// caixa natural. Os pontos relativos (centro...) são gravados na caixa da
     /// camada; `valor * relativeScale + relativeBias` os leva a este plano.
@@ -343,6 +347,7 @@ struct AudioAnalysisResult {
 inline constexpr u32 kEffectAuxImages = 8;
 
 /// Recursos persistentes de efeito (LUTs de curva). Implementado pelo renderer.
+struct EffectMotionState;
 class EffectResources {
 public:
     virtual ~EffectResources() = default;
@@ -363,6 +368,10 @@ public:
         return false;
     }
     /// LUT 256x1 da curva, criada/atualizada só quando a curva muda.
+    virtual void temporal_failure(Status) noexcept {}
+    /// Reports a failed effect while the preview retains its input fallback.
+    virtual void effect_failure(Status failure) noexcept { temporal_failure(failure); }
+    [[nodiscard]] virtual bool motion_state(const Layer*, u64, f64, bool, EffectMotionState&) noexcept { return false; }
     [[nodiscard]] virtual TextureHandle curve_lut(const CurveData& curve) noexcept = 0;
     [[nodiscard]] virtual TextureHandle cube_lut(AssetId) noexcept { return {}; }
     /// Textura RGBA32F `width`×`height` de DADO (lida por texelFetch no vértice:
@@ -374,6 +383,9 @@ public:
     /// Fração das amostras que os efeitos caros usam neste quadro (0,25..1).
     /// Preview adaptativo/calor < 1; export e prévia do catálogo = 1 sempre.
     [[nodiscard]] virtual f32 effect_quality() const noexcept { return 1.0f; }
+    /// Motion analysis density for adaptive preview. Final-quality renderers
+    /// expose 1, independently of the device's current preview decision.
+    [[nodiscard]] virtual f32 motion_analysis_scale() const noexcept { return 1.0f; }
     /// Espectro do som que uma camada toca NESTE quadro: textura `bands`×1
     /// (R = magnitude 0..1 da faixa, dos graves aos agudos; G = nível geral
     /// do quadro). Calculado do áudio decodificado, sem estado entre quadros:
@@ -404,6 +416,26 @@ public:
 ///
 /// `instance` e `resources` só valem durante o PLANEJAMENTO (sob o lock do
 /// modelo). Na montagem dos passes o efeito lê apenas `values`, que são cópias.
+enum class TemporalCoordinates : u8 { Image, Composition };
+struct EffectTemporalSample {
+    f64 time = 0.0;
+    u32 snapshot = kInvalidIndex;
+    // Maps checkout-image pixels (ordinary sources) or composition pixels
+    // (a compositor-integrated source) into original layer coordinates.
+    Mat4 layerFromCoordinates = Mat4::identity();
+    TemporalCoordinates coordinates = TemporalCoordinates::Image;
+};
+[[nodiscard]] inline Mat4 temporal_sample_matrix(const EffectTemporalSample& sample,
+                                                const Mat4& compFromImage, Vec2 sourceShift) noexcept {
+    Mat4 matrix = Mat4::translation(Vec3{sourceShift.x,sourceShift.y,0}) * sample.layerFromCoordinates;
+    if (sample.coordinates == TemporalCoordinates::Composition) matrix = matrix * compFromImage;
+    return matrix;
+}
+struct EffectMotionState {
+    Vec3 position{}, anchor{}, rotation{};
+    Vec3 scale{1,1,1};
+};
+
 struct EffectEval {
     const Effect*         effect = nullptr;
     const EffectInstance* instance = nullptr;
@@ -436,6 +468,7 @@ struct EffectEval {
     f64                   auxTimeFrames = std::numeric_limits<f64>::quiet_NaN();
     i64                   foregroundSourceTimeUs = -1;
     std::shared_ptr<const std::vector<Vec4>> pathSamples;
+    std::shared_ptr<std::vector<EffectTemporalSample>> temporalSamples;
     /// Mapa de profundidade de outra camada (ver DepthMapResult::mapX).
     Vec4 auxMapX{};
     Vec4 auxMapY{};
@@ -472,6 +505,13 @@ public:
         : graph_(graph), shaders_(shaders), arena_(frameArena), resources_(resources),
           workFormat_(workFormat), maxTexture_(maxTextureSize) {}
 
+    using TemporalCheckout = bool (*)(void*, u32, LayerImage&, Mat4&, f32&);
+    void set_temporal_checkout(void* owner, TemporalCheckout checkout) noexcept {
+        temporalOwner_ = owner; temporalCheckout_ = checkout;
+    }
+    [[nodiscard]] bool temporal_checkout(u32 snapshot, LayerImage& image, Mat4& matrix, f32& opacity) noexcept {
+        return temporalCheckout_ && temporalCheckout_(temporalOwner_, snapshot, image, matrix, opacity);
+    }
     [[nodiscard]] FrameGraph& graph() noexcept { return graph_; }
     [[nodiscard]] ShaderLibrary& shaders() noexcept { return shaders_; }
     [[nodiscard]] EffectResources& resources() noexcept { return resources_; }
@@ -556,6 +596,8 @@ private:
     EffectResources& resources_;
     SurfaceFormat    workFormat_;
     u32              maxTexture_;
+    void* temporalOwner_ = nullptr;
+    TemporalCheckout temporalCheckout_ = nullptr;
     LayerImage       history_{};
     std::span<const NeighborImage> neighbors_{};
     std::span<const LayerInput> layerInputs_{};
@@ -602,6 +644,7 @@ public:
     /// Sampling may move source pixels outside the visible viewport back into
     /// view. Earlier effects must preserve their full output for this reader.
     [[nodiscard]] virtual bool needs_full_input() const noexcept { return false; }
+    [[nodiscard]] virtual std::shared_ptr<const plugins::AudioProgram> audio_program() const noexcept { return {}; }
 
     /// VALORES DE DEMONSTRAÇÃO — os que a PRÉVIA do catálogo usa (Fase 7.3
     /// §13). O vetor chega preenchido com os padrões da declaração; o efeito

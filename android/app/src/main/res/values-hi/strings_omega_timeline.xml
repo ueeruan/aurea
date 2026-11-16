@@ -27,4 +27,8 @@
     <string name="om_tl_current_time">वर्तमान समय</string>
     <string name="om_tl_hidden">छिपी हुई</string>
     <string name="om_tl_visible">दिखाई दे रही</string>
+    <!-- 0.5.3: grupo aberto na timeline (o conteúdo recuado embaixo dele). -->
+    <string name="om_tl_group_contents_shown">समूह की सामग्री दिख रही है</string>
+    <string name="om_tl_group_contents_hidden">समूह की सामग्री छिपी है</string>
+    <string name="om_tl_group_inline_locked_time">इस समूह का समय बदला गया है (गति, टाइम रीमैप या उल्टा): इस लेयर को बदलने के लिए समूह खोलें</string>
 </resources>

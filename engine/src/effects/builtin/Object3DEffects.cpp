@@ -85,6 +85,12 @@ public:
         p.add_angle("rotation_z", "Rotação Z", 0.0f);
         p.add_float("scale", "Escala", 100.0f, 0.0f, 400.0f, kAnimPct, "%");
         p.typed_range(0.0f, 10000.0f);
+        p.add_float("pivot_x", "Pivô X", 0.f, -300.f, 300.f, kAnimPct, "%");
+        p.add_float("pivot_y", "Pivô Y", 0.f, -300.f, 300.f, kAnimPct, "%");
+        p.add_float("pivot_z", "Pivô Z", 0.f, -300.f, 300.f, kAnimPct, "%");
+        p.add_float("scale_x", "Escala X", 100.f, 0.f, 400.f, kAnimPct, "%");
+        p.add_float("scale_y", "Escala Y", 100.f, 0.f, 400.f, kAnimPct, "%");
+        p.add_float("scale_z", "Escala Z", 100.f, 0.f, 400.f, kAnimPct, "%");
     }
     bool is_identity(const EffectEval&) const noexcept override { return true; }
 };
@@ -115,6 +121,17 @@ public:
         p.add_texture_ref("image", "Imagem");
         p.add_bool("all_parts", "Todas as partes", false);
         p.add_float("repeat", "Repetir", 100.0f, 10.0f, 1000.0f, kAnimPct, "%");
+        // v76 (painel 3D › Textura): deslocamento, giro e ROLAR da imagem — só
+        // acrescentados no fim (os índices 0..3 ficam; efeito antigo = zeros).
+        p.add_float("offset_x", "Deslocar X", 0.0f, -100.0f, 100.0f, kAnimPct, "%");
+        p.typed_range(-100000.0f, 100000.0f);
+        p.add_float("offset_y", "Deslocar Y", 0.0f, -100.0f, 100.0f, kAnimPct, "%");
+        p.typed_range(-100000.0f, 100000.0f);
+        p.add_angle("rotation", "Girar", 0.0f);
+        p.add_float("scroll_x", "Rolar X", 0.0f, -200.0f, 200.0f, kAnimPct, "%/s");
+        p.typed_range(-10000.0f, 10000.0f);
+        p.add_float("scroll_y", "Rolar Y", 0.0f, -200.0f, 200.0f, kAnimPct, "%/s");
+        p.typed_range(-10000.0f, 10000.0f);
     }
     bool is_identity(const EffectEval&) const noexcept override { return true; }
 };

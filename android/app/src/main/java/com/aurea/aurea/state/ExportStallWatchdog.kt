@@ -16,6 +16,13 @@ package com.aurea.aurea.state
 class ExportStallWatchdog(
     private val stallMs: Long = STALL_MS,
     private val giveUpMs: Long = GIVE_UP_MS,
+    /**
+     * 0.5.3 (P0-3): intervalo entre duas leituras acima do qual o tempo NÃO conta
+     * como travamento — o processo ficou congelado ou o aparelho dormiu, ninguém
+     * estava olhando. 0 = regra desligada (leituras espaçadas contam inteiras).
+     * A tela passa [OBSERVE_GAP_MS].
+     */
+    private val observeGapMs: Long = 0L,
 ) {
     enum class Verdict { Running, Cancel, GiveUp }
 
@@ -24,6 +31,7 @@ class ExportStallWatchdog(
     private var lastMessage = ""
     private var lastChangeMs = 0L
     private var cancelAtMs = 0L
+    private var lastObserveMs = 0L
 
     /** A tela já pediu o cancelamento por falta de progresso. */
     var cancelled: Boolean = false
@@ -31,6 +39,17 @@ class ExportStallWatchdog(
 
     /** Uma leitura do progresso. O [Verdict.Cancel] vem uma vez só. */
     fun observe(nowMs: Long, framesDone: Int, message: String): Verdict {
+        // 0.5.3 (P0-3): o relógio é o do aparelho (elapsedRealtime) e anda com o
+        // processo congelado. A primeira leitura depois de minutos parada via um
+        // salto ≥ stallMs e cancelava um export saudável: o buraco sai da conta.
+        if (started && observeGapMs > 0L) {
+            val gap = nowMs - lastObserveMs
+            if (gap > observeGapMs) {
+                lastChangeMs += gap
+                if (cancelled) cancelAtMs += gap
+            }
+        }
+        lastObserveMs = nowMs
         if (!started || framesDone != lastDone || message != lastMessage) {
             started = true
             lastDone = framesDone
@@ -51,6 +70,16 @@ class ExportStallWatchdog(
         const val STALL_MS = 180_000L
         /** kExportUiGiveUpSeconds (ExportWatchdog.hpp). */
         const val GIVE_UP_MS = 15_000L
+        /** 0.5.3 (P0-3): a tela lê a cada 100–500 ms; acima disto ninguém estava olhando. */
+        const val OBSERVE_GAP_MS = 5_000L
+
+        /**
+         * 0.5.3 (P0-8): o Cancelar da PESSOA tem o mesmo prazo do vigia. Pedido em
+         * [cancelledAtMs] (negativo = ainda não pediu) e o motor não concluiu
+         * [giveUpMs] depois: a tela encerra como cancelado, sem esperar o travamento.
+         */
+        fun userCancelExpired(cancelledAtMs: Long, nowMs: Long, giveUpMs: Long = GIVE_UP_MS): Boolean =
+            cancelledAtMs >= 0L && nowMs - cancelledAtMs >= giveUpMs
         /** kExportSafeModeMax: refazer no modo de segurança no máximo até o nível 2. */
         const val SAFE_MODE_MAX = 2
 

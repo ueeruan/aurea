@@ -292,6 +292,8 @@ internal fun TextPresetPicker(store: EditorStore, onAdded: () -> Unit) {
         ) {
             Chip(stringResource(R.string.sh_add_tab_text), !threeD) { threeD = false }
             Chip(stringResource(R.string.sh_add_text_3d), threeD) { threeD = true }
+            // 0.5.4: texto 3D é pago; o preset cria a camada por EditorStore.addText3D (Text3DGate).
+            if (com.aurea.aurea.effects.Text3DGate.locked()) com.aurea.aurea.effects.HyperLockBadge()
         }
         Text(stringResource(R.string.tp_hint), modifier = Modifier.padding(bottom = 8.dp),
             style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
@@ -332,7 +334,7 @@ private fun apply(store: EditorStore, e: PresetEntry, stretch: Boolean) {
         store.showToast(AppText.get(store.getApplication<Application>(), R.string.edt_curve_invalid))
         return
     }
-    val track = (store.keyframes[layer] ?: emptyList()).track(sel)
+    val track = (store.keysForLayer(layer) ?: emptyList()).track(sel)
     var i = track.indexOfFirst { it.time == sel.time }
     if (i < 0 || track.size < 2) {
         store.showToast(AppText.get(store.getApplication<Application>(), R.string.edt_curve_need_two))
@@ -412,7 +414,7 @@ internal fun curvePresetEase(v: FloatArray): Ease =
 /** JSON da curva do trecho que sai do keyframe escolhido (nulo = sem trecho). */
 private fun curveJson(store: EditorStore, name: String): String? {
     val (layer, sel) = store.selectedKeyframe ?: return null
-    val track = (store.keyframes[layer] ?: emptyList()).track(sel)
+    val track = (store.keysForLayer(layer) ?: emptyList()).track(sel)
     var i = track.indexOfFirst { it.time == sel.time }
     if (i < 0 || track.size < 2) return null
     if (i == track.lastIndex) i--

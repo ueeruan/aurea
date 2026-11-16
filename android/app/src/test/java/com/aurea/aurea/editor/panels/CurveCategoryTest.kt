@@ -24,19 +24,20 @@ class CurveCategoryTest {
         assertEquals(CurveCategory.Steps, curveCategoryOf(Ease(Interp.HOLD, 0f, 0f, 1f, 1f)))
     }
 
-    @Test fun eachGroupHasFourSlotsAndItsFirstSlotIsItsOwn() {
+    @Test fun everyAvailableSlotBelongsToItsGroup() {
         for (c in CurveCategory.entries) {
             val slots = curveSlots(c)
-            assertEquals("slots of $c", 4, slots.size)
+            assertEquals("slots of $c", if (c == CurveCategory.Steps) 5 else 4, slots.size)
             val first = slots.first()
             assertNotNull(first)
             assertEquals(c, curveCategoryOf(first!!.ease))
             // Todas as vagas de um grupo pertencem a ele.
             slots.filterNotNull().forEach { assertEquals(c, curveCategoryOf(it.ease)) }
         }
-        // Oscilar e Degraus elásticos esperam as curvas novas do motor (P2-14).
-        assertNull(curveSlots(CurveCategory.Bounces)[3])
-        assertNull(curveSlots(CurveCategory.Steps)[2])
+        assertEquals(Interp.WAVE, curveSlots(CurveCategory.Bounces)[3]!!.ease.interp)
+        assertEquals(Interp.REPEAT, curveSlots(CurveCategory.Steps)[2]!!.ease.interp)
+        assertEquals(Interp.PING_PONG, curveSlots(CurveCategory.Steps)[3]!!.ease.interp)
+        assertEquals(Interp.RANDOM, curveSlots(CurveCategory.Steps)[4]!!.ease.interp)
     }
 
     @Test fun tappingAGroupAppliesItsFirstSlotOnlyWhenItChanges() {

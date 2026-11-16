@@ -14,12 +14,20 @@
 //  o AE faz ao aplicar o preset). O Aurea tem UM seletor por animador: com
 //  intervalo cheio e parado + oscilador, vale o oscilador (é exato); com mais
 //  de um seletor de verdade, o primeiro vale e os outros são relatados.
+//
+//  Conteúdo de camada de forma (ADBE Root Vectors Group): entra numa camada
+//  VETORIAL como grupos novos — caminhos (retângulo, elipse, estrela, livre),
+//  preenchimento, contorno (traços 1..3), Aparar, Mesclar, Repetidor (escala
+//  X/Y) e os operadores de caminho (ADBE Vector Filter - Offset, PB, RC,
+//  Twist, Zigzag, Roughen = Ondular caminhos, Wiggler = Ondular transform),
+//  com keyframes nas trilhas VectorParam. Grupos aninhados são achatados.
 // =============================================================================
 #include "AeImportBind.hpp"
 
 #include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/text/TextAnimator.hpp"
 #include "aurea/timeline/Composition.hpp"
+#include "aurea/vector/Vector.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -642,6 +650,645 @@ struct Applier {
         }
     }
 
+    // --- conteúdo de camada de forma (ADBE Root Vectors Group) ------------------
+    // A árvore do AE (grupos dentro de grupos; cada operador vale para tudo o
+    // que está ACIMA dele no mesmo grupo) entra achatada nos grupos do Aurea:
+    // cada grupo do AE com caminhos próprios vira um grupo; tintas e
+    // operadores do grupo de fora que estão abaixo de um subgrupo também
+    // valem para ele (herdados); o transform dos grupos de fora é composto no
+    // do grupo (exato com escala uniforme). O primeiro item do AE fica por
+    // cima (o último grupo do Aurea).
+    struct ShapeCtx {
+        Vec2 offset{0.0f, 0.0f};   ///< G(0) do grupo de fora, no espaço da camada do Aurea
+        f32 scale = 1.0f;          ///< escala uniforme acumulada (fração)
+        f32 rotation = 0.0f;       ///< giro acumulado (graus)
+        f32 opacity = 1.0f;        ///< opacidade acumulada (fração)
+        std::vector<const Node*> inherited;   ///< tintas/operadores de fora (em ordem)
+        u32 depth = 0;
+        bool moving = false;       ///< o transform do grupo de fora é animado (entrou parado)
+        bool uneven = false;       ///< escala X ≠ Y no grupo de fora (vale a média)
+    };
+    bool shapeSkipped = false;
+    u32 shapeGroups = 0;
+
+    static bool item_on(const Node& n) noexcept { return n.flags == 0 || (n.flags & 1u) != 0; }
+    static bool is_path_item(std::string_view m) noexcept { return starts(m, "ADBE Vector Shape - "); }
+    static bool is_paint_or_op(std::string_view m) noexcept {
+        return starts(m, "ADBE Vector Graphic - ") || starts(m, "ADBE Vector Filter - ");
+    }
+    static std::string shown_name(const Node& n) { return n.name.empty() ? n.match : n.name; }
+    /// Primeiro valor (o parado ou o do primeiro keyframe), componente `i`.
+    static f64 first(const Node& n, usize i, f64 def) noexcept {
+        if (!n.keys.empty() && i < n.keys.front().value.size()) return n.keys.front().value[i];
+        if (n.hasValue && i < n.value.size()) return n.value[i];
+        return def;
+    }
+    static Vec2 first2(const Node& n, Vec2 def) noexcept {
+        return Vec2{static_cast<f32>(first(n, 0, def.x)), static_cast<f32>(first(n, 1, def.y))};
+    }
+    /// Propriedades em % do conteúdo de forma: o .ffx pode guardar a fração
+    /// (como a opacidade e a escala da camada). Todos os valores em 0..1 com
+    /// algum diferente de zero = fração (não verificado num preset real).
+    static f64 pct_mul(const Node& n) noexcept {
+        bool any = false;
+        auto look = [&](const std::vector<f64>& v) {
+            for (const f64 x : v) {
+                if (std::fabs(x) > 1.0001) return false;
+                any = any || std::fabs(x) > 1e-9;
+            }
+            return true;
+        };
+        if (!look(n.value)) return 1.0;
+        for (const Key& k : n.keys) if (!look(k.value)) return 1.0;
+        return any ? 100.0 : 1.0;
+    }
+    static Channel vch(u32 gi, u32 param, u8 src, f64 mul = 1.0, f64 add = 0.0, f64 lo = -1.0e9, f64 hi = 1.0e9) {
+        Channel c;
+        c.home = Home::Track;
+        c.prop = TrackProperty::VectorParam;
+        c.ei = gi;
+        c.pi = param;
+        c.src = src;
+        c.mul = mul;
+        c.add = add;
+        c.lo = lo;
+        c.hi = hi;
+        return c;
+    }
+    VectorGroup* vgroup(u32 gi) noexcept {
+        refresh();
+        return w.layer && gi < w.layer->shape.vector.groups.size() ? &w.layer->shape.vector.groups[gi] : nullptr;
+    }
+    /// Valor/keys/expressão da propriedade nos canais VectorParam do grupo.
+    void vec_apply(const Node& n, std::vector<Channel> ch, u32 dims = 1) {
+        Binding b;
+        b.label = shown_name(n);
+        b.dims = dims;
+        b.spatial = n.spatial;
+        b.ch = std::move(ch);
+        refresh();
+        apply_prop(b, n, "forma");
+    }
+    /// Propriedade sem trilha no Aurea: vale o valor parado (o primeiro keyframe).
+    void vec_static_note(const Node& n, const char* what) {
+        if (animated(n))
+            rep.note("forma", shown_name(n) + " (" + what + ")",
+                     "animação deste ajuste do conteúdo de forma não existe no Aurea; ficou o primeiro valor");
+    }
+
+    /// Caminho do AE (retângulo, elipse, estrela/polígono, caminho livre).
+    bool shape_path(const Node& item, VectorPath& out) {
+        const std::string_view m = item.match;
+        out = VectorPath{};
+        auto vec2 = [&](std::string_view pm, Vec2 def) {
+            const Node* n = item.child(pm);
+            if (!n) return def;
+            vec_static_note(*n, "caminho");
+            return first2(*n, def);
+        };
+        auto num = [&](std::string_view pm, f64 def) {
+            const Node* n = item.child(pm);
+            if (!n) return static_cast<f32>(def);
+            vec_static_note(*n, "caminho");
+            return static_cast<f32>(first(*n, 0, def));
+        };
+        if (m == "ADBE Vector Shape - Rect") {
+            out.kind = VectorPathKind::Rect;
+            out.size = vec2("ADBE Vector Rect Size", Vec2{100.0f, 100.0f});
+            out.center = vec2("ADBE Vector Rect Position", Vec2{0.0f, 0.0f});
+            out.roundness = std::max(0.0f, num("ADBE Vector Rect Roundness", 0.0));
+        } else if (m == "ADBE Vector Shape - Ellipse") {
+            out.kind = VectorPathKind::Ellipse;
+            out.size = vec2("ADBE Vector Ellipse Size", Vec2{100.0f, 100.0f});
+            out.center = vec2("ADBE Vector Ellipse Position", Vec2{0.0f, 0.0f});
+        } else if (m == "ADBE Vector Shape - Star") {
+            out.kind = num("ADBE Vector Star Type", 1.0) > 1.5f ? VectorPathKind::Polygon : VectorPathKind::Star;
+            out.points = std::max(3.0f, num("ADBE Vector Star Points", 5.0));
+            out.center = vec2("ADBE Vector Star Position", Vec2{0.0f, 0.0f});
+            out.rotation = num("ADBE Vector Star Rotation", 0.0);
+            out.outerRadius = num("ADBE Vector Star Outer Radius", 100.0);
+            out.innerRadius = num("ADBE Vector Star Inner Radius", 50.0);
+            out.outerRoundness = num("ADBE Vector Star Outer Roundess", 0.0);   // sic: o match name do AE
+            out.innerRoundness = num("ADBE Vector Star Inner Roundess", 0.0);
+        } else if (m == "ADBE Vector Shape - Group") {
+            const Node* s = item.child("ADBE Vector Shape");
+            if (!s || !s->hasShape || s->shape.vertices.empty()) {
+                rep.note("forma", shown_name(item), "caminho do conteúdo de forma não lido; ficou de fora");
+                return false;
+            }
+            out.kind = VectorPathKind::Free;
+            out.path.closed = s->shape.closed;
+            for (const ShapeVertex& v : s->shape.vertices) {
+                BezierVertex bv;
+                bv.p = Vec2{v.x, v.y};
+                bv.in = Vec2{v.inX - v.x, v.inY - v.y};
+                bv.out = Vec2{v.outX - v.x, v.outY - v.y};
+                out.path.v.push_back(bv);
+            }
+            if (s->shapeKeyed) rep.note("forma", shown_name(item), "caminho animado: entrou só a primeira forma");
+            if (!s->expression.empty()) rep.skip("expressao", shown_name(item), "expressão no caminho não existe no Aurea");
+        } else {
+            rep.skip("forma", shown_name(item), "caminho do AE sem equivalente");
+            return false;
+        }
+        // Direção: 3 = invertida (1/2 = padrão / sentido horário).
+        if (const Node* d = item.child("ADBE Vector Shape Direction")) out.reversed = std::lround(first(*d, 0, 1.0)) == 3;
+        return true;
+    }
+
+    static Vec4 first_color(const Node& c) noexcept {
+        return Vec4{static_cast<f32>(first(c, 0, 1.0)), static_cast<f32>(first(c, 1, 1.0)), static_cast<f32>(first(c, 2, 1.0)), 1.0f};
+    }
+
+    /// Degradê: tipo e pontos entram; as cores do AE (ADBE Vector Grad Colors,
+    /// um dado próprio) não são lidas — ficam branco → preto.
+    void shape_gradient_prop(u32 gi, const Node& c, bool fill) {
+        VectorGroup* g = vgroup(gi);
+        if (!g) return;
+        VectorPaint& p = fill ? g->fill.paint : g->stroke.paint;
+        if (c.match == "ADBE Vector Grad Type") {
+            p.type = std::lround(first(c, 0, 1.0)) == 2 ? 2 : 1;
+        } else if (c.match == "ADBE Vector Grad Start Pt") {
+            vec_static_note(c, "degradê");
+            p.start = first2(c, Vec2{0.0f, 0.0f});
+        } else if (c.match == "ADBE Vector Grad End Pt") {
+            vec_static_note(c, "degradê");
+            p.end = first2(c, Vec2{100.0f, 0.0f});
+        }
+    }
+    void shape_gradient_done(u32 gi, const Node& n, bool fill) {
+        VectorGroup* g = vgroup(gi);
+        if (!g) return;
+        VectorPaint& p = fill ? g->fill.paint : g->stroke.paint;
+        if (p.type == 0) p.type = 1;
+        p.stops = {VectorStop{0.0f, Vec4{1, 1, 1, 1}}, VectorStop{1.0f, Vec4{0, 0, 0, 1}}};
+        rep.note("forma", shown_name(n), "cores do degradê do AE não lidas: ficou branco → preto (tipo e pontos entraram)");
+    }
+
+    void shape_fill(u32 gi, const Node& n, bool gradient) {
+        if (VectorGroup* g = vgroup(gi)) {
+            g->fill.enabled = true;
+            g->fill.paint.type = 0;
+        }
+        for (const Node& c : n.children) {
+            if (c.kind != Node::Kind::Property) continue;
+            if (c.match == "ADBE Vector Fill Color") {
+                vec_static_note(c, "cor");
+                if (VectorGroup* g = vgroup(gi)) g->fill.paint.color = first_color(c);
+            } else if (c.match == "ADBE Vector Fill Opacity") {
+                vec_apply(c, {vch(gi, kVecFillOpacity, 0, pct_mul(c), 0.0, 0.0, 100.0)});
+            } else if (c.match == "ADBE Vector Fill Rule") {
+                if (VectorGroup* g = vgroup(gi)) g->fill.rule = std::lround(first(c, 0, 1.0)) == 2 ? 1 : 0;
+            } else if (c.match == "ADBE Vector Blend Mode") {
+                if (std::lround(first(c, 0, 1.0)) != 1) rep.skip("forma", "Blend Mode", "modo de mesclagem do preenchimento não existe no Aurea");
+            } else if (gradient) {
+                shape_gradient_prop(gi, c, true);
+            }
+        }
+        if (gradient) shape_gradient_done(gi, n, true);
+    }
+
+    /// Traço 1..3 / vão 1..3 e deslocamento (os traços são animáveis no Aurea).
+    void shape_dashes(u32 gi, const Node& dashes) {
+        const Node* d[kVecMaxDashPairs]{};
+        const Node* gap[kVecMaxDashPairs]{};
+        const Node* off = nullptr;
+        for (const Node& c : dashes.children) {
+            if (c.kind != Node::Kind::Property) continue;
+            for (u32 k = 0; k < kVecMaxDashPairs; ++k) {
+                if (c.match == "ADBE Vector Stroke Dash " + std::to_string(k + 1)) d[k] = &c;
+                if (c.match == "ADBE Vector Stroke Gap " + std::to_string(k + 1)) gap[k] = &c;
+            }
+            if (c.match == "ADBE Vector Stroke Offset") off = &c;
+        }
+        std::vector<f32> pattern;
+        u32 pairs = 0;
+        for (u32 k = 0; k < kVecMaxDashPairs && d[k]; ++k) {
+            const f64 dv = first(*d[k], 0, 0.0);
+            pattern.push_back(static_cast<f32>(std::max(0.0, dv)));
+            pattern.push_back(static_cast<f32>(std::max(0.0, gap[k] ? first(*gap[k], 0, dv) : dv)));   // sem vão: igual ao traço (AE)
+            ++pairs;
+        }
+        if (pairs == 0) return;
+        if (VectorGroup* g = vgroup(gi)) g->stroke.dashes = pattern;
+        for (u32 k = 0; k < pairs; ++k) {
+            vec_apply(*d[k], {vch(gi, kVecDash1 + 2 * k, 0, 1.0, 0.0, 0.0, 100000.0)});
+            if (gap[k]) vec_apply(*gap[k], {vch(gi, kVecGap1 + 2 * k, 0, 1.0, 0.0, 0.0, 100000.0)});
+        }
+        if (off) vec_apply(*off, {vch(gi, kVecDashOffset, 0)});
+    }
+
+    void shape_stroke(u32 gi, const Node& n, bool gradient) {
+        if (VectorGroup* g = vgroup(gi)) {
+            g->stroke.enabled = true;
+            g->stroke.paint.type = 0;
+            g->stroke.width = 2.0f;   // padrão do AE
+        }
+        for (const Node& c : n.children) {
+            const std::string& m = c.match;
+            if (c.kind == Node::Kind::Group) {
+                if (m == "ADBE Vector Stroke Dashes") {
+                    shape_dashes(gi, c);
+                } else if (m == "ADBE Vector Stroke Taper") {
+                    for (const Node& t : c.children)
+                        if (t.kind == Node::Kind::Property && (animated(t) || std::fabs(first(t, 0, 0.0)) > 1e-6) &&
+                            (t.match == "ADBE Vector Taper Start Length" || t.match == "ADBE Vector Taper End Length")) {
+                            rep.skip("forma", "Taper", "afinar do contorno do AE não entrou (o Aurea afina por outra régua)");
+                            break;
+                        }
+                } else if (m == "ADBE Vector Stroke Wave") {
+                    for (const Node& t : c.children)
+                        if (t.kind == Node::Kind::Property && t.match == "ADBE Vector Taper Wave Amount" &&
+                            (animated(t) || std::fabs(first(t, 0, 0.0)) > 1e-6)) {
+                            rep.skip("forma", "Wave", "onda do contorno não existe no Aurea");
+                            break;
+                        }
+                }
+                continue;
+            }
+            if (c.kind != Node::Kind::Property) continue;
+            if (m == "ADBE Vector Stroke Color") {
+                vec_static_note(c, "cor");
+                if (VectorGroup* g = vgroup(gi)) g->stroke.paint.color = first_color(c);
+            } else if (m == "ADBE Vector Stroke Opacity") {
+                vec_apply(c, {vch(gi, kVecStrokeOpacity, 0, pct_mul(c), 0.0, 0.0, 100.0)});
+            } else if (m == "ADBE Vector Stroke Width") {
+                vec_apply(c, {vch(gi, kVecStrokeWidth, 0, 1.0, 0.0, 0.0, 2000.0)});
+            } else if (m == "ADBE Vector Stroke Line Cap") {
+                if (VectorGroup* g = vgroup(gi)) g->stroke.cap = static_cast<u8>(std::clamp<long>(std::lround(first(c, 0, 1.0)) - 1, 0, 2));
+            } else if (m == "ADBE Vector Stroke Line Join") {
+                if (VectorGroup* g = vgroup(gi)) g->stroke.join = static_cast<u8>(std::clamp<long>(std::lround(first(c, 0, 1.0)) - 1, 0, 2));
+            } else if (m == "ADBE Vector Stroke Miter Limit") {
+                if (VectorGroup* g = vgroup(gi)) g->stroke.miterLimit = static_cast<f32>(std::clamp(first(c, 0, 4.0), 1.0, 100.0));
+            } else if (m == "ADBE Vector Blend Mode") {
+                if (std::lround(first(c, 0, 1.0)) != 1) rep.skip("forma", "Blend Mode", "modo de mesclagem do contorno não existe no Aurea");
+            } else if (gradient) {
+                shape_gradient_prop(gi, c, false);
+            }
+        }
+        if (gradient) shape_gradient_done(gi, n, false);
+    }
+
+    void shape_trim(u32 gi, const Node& n) {
+        for (const Node& c : n.children) {
+            if (c.kind != Node::Kind::Property) continue;
+            if (c.match == "ADBE Vector Trim Start") vec_apply(c, {vch(gi, kVecTrimStart, 0, pct_mul(c), 0.0, 0.0, 100.0)});
+            else if (c.match == "ADBE Vector Trim End") vec_apply(c, {vch(gi, kVecTrimEnd, 0, pct_mul(c), 0.0, 0.0, 100.0)});
+            else if (c.match == "ADBE Vector Trim Offset") vec_apply(c, {vch(gi, kVecTrimOffset, 0, 100.0 / 360.0)});   // graus → % do comprimento
+            else if (c.match == "ADBE Vector Trim Type") {
+                if (VectorGroup* g = vgroup(gi)) g->trim.mode = std::lround(first(c, 0, 1.0)) == 2 ? 1 : 0;
+            }
+        }
+    }
+
+    void shape_repeater(u32 gi, const Node& n) {
+        std::vector<const Node*> leafs;
+        leaves(n, leafs);
+        for (const Node* c : leafs) {
+            const std::string& m = c->match;
+            if (m == "ADBE Vector Repeater Copies") {
+                vec_apply(*c, {vch(gi, kVecRepCopies, 0, 1.0, 0.0, 0.0, 500.0)});
+            } else if (m == "ADBE Vector Repeater Offset") {
+                vec_apply(*c, {vch(gi, kVecRepOffset, 0)});
+            } else if (m == "ADBE Vector Repeater Order") {
+                if (VectorGroup* g = vgroup(gi)) g->repeater.above = std::lround(first(*c, 0, 1.0)) == 2 ? 1 : 0;
+            } else if (m == "ADBE Vector Repeater Anchor") {
+                vec_static_note(*c, "âncora do repetidor");
+                if (VectorGroup* g = vgroup(gi)) g->repeater.anchor = first2(*c, Vec2{0.0f, 0.0f});
+            } else if (m == "ADBE Vector Repeater Position") {
+                vec_apply(*c, {vch(gi, kVecRepPosX, 0), vch(gi, kVecRepPosY, 1)}, 2);
+            } else if (m == "ADBE Vector Repeater Scale") {
+                // Escala X/Y (v6): X e Y iguais em todos os valores = ligada.
+                bool same = std::fabs(first(*c, 0, 100.0) - first(*c, 1, 100.0)) < 1e-6;
+                for (const Key& k : c->keys) same = same && k.value.size() >= 2 && std::fabs(k.value[0] - k.value[1]) < 1e-6;
+                if (VectorGroup* g = vgroup(gi)) g->repeater.scaleLinked = same ? 1 : 0;
+                const f64 mul = pct_mul(*c);
+                if (same) vec_apply(*c, {vch(gi, kVecRepScale, 0, mul, 0.0, -10000.0, 10000.0)}, 2);
+                else vec_apply(*c, {vch(gi, kVecRepScale, 0, mul, 0.0, -10000.0, 10000.0), vch(gi, kVecRepScaleY, 1, mul, 0.0, -10000.0, 10000.0)}, 2);
+            } else if (m == "ADBE Vector Repeater Rotation") {
+                vec_apply(*c, {vch(gi, kVecRepRotation, 0)});
+            } else if (m == "ADBE Vector Repeater Opacity 1") {
+                vec_apply(*c, {vch(gi, kVecRepStartOpacity, 0, pct_mul(*c), 0.0, 0.0, 100.0)});
+            } else if (m == "ADBE Vector Repeater Opacity 2") {
+                vec_apply(*c, {vch(gi, kVecRepEndOpacity, 0, pct_mul(*c), 0.0, 0.0, 100.0)});
+            }
+        }
+    }
+
+    /// Operador de caminho (Offset Paths, Pucker & Bloat, Wiggle Paths, Round
+    /// Corners, Twist, Zig Zag, Wiggle Transform): os parâmetros vão para as
+    /// trilhas do operador (vector_modifier_param), animáveis como no AE.
+    void shape_modifier(u32 gi, const Node& n, VectorModifierType type) {
+        VectorGroup* g = vgroup(gi);
+        if (!g) return;
+        if (g->modifiers.size() >= kVecMaxModifiers) {
+            rep.skip("forma", shown_name(n), "o grupo já tem o máximo de operadores");
+            return;
+        }
+        VectorModifier mod = vector::make_modifier(type);
+        // Padrões do AE onde o preset não traz o valor (os do Aurea são os de
+        // quem adiciona à mão: já mostram o efeito).
+        switch (type) {
+            case VectorModifierType::OffsetPaths: mod.params[kVecModOffsetAmount] = 0.0f; break;
+            case VectorModifierType::PuckerBloat: mod.params[kVecModPuckerAmount] = 0.0f; break;
+            case VectorModifierType::Twist: mod.params[kVecModTwistAngle] = 0.0f; break;
+            case VectorModifierType::RoundCorners: mod.params[kVecModRoundRadius] = 0.0f; break;
+            case VectorModifierType::ZigZag: mod.params[kVecModZigSize] = 0.0f; break;
+            case VectorModifierType::WigglePaths: mod.params[kVecModRoughSize] = 0.0f; break;
+            case VectorModifierType::WiggleTransform: mod.params[kVecModWigPosX] = mod.params[kVecModWigPosY] = 0.0f; break;
+            default: break;
+        }
+        mod.enabled = item_on(n);
+        g->modifiers.push_back(mod);
+        const u32 mi = static_cast<u32>(g->modifiers.size() - 1);
+        std::vector<const Node*> leafs;
+        leaves(n, leafs);
+        for (const Node* c : leafs) {
+            const i32 pi = vector::modifier_param_from_ae_match_name(type, c->match);
+            if (pi < 0) {
+                if (animated(*c) || (c->hasValue && !c->value.empty()))
+                    rep.skip("forma", shown_name(n) + ": " + shown_name(*c), "parâmetro do operador sem equivalente no Aurea");
+                continue;
+            }
+            const u32 p = static_cast<u32>(pi);
+            // Menus do AE começam em 1 (junta: 1 ponta, 2 redonda, 3 chanfro;
+            // pontos: 1 canto, 2 suave) → índices do Aurea a partir de 0.
+            const bool menu = (type == VectorModifierType::OffsetPaths && p == kVecModOffsetJoin) ||
+                              ((type == VectorModifierType::WigglePaths || type == VectorModifierType::Roughen) && p == kVecModRoughPoints) ||
+                              (type == VectorModifierType::ZigZag && p == kVecModZigPoints);
+            const bool pair = (type == VectorModifierType::Twist && p == kVecModTwistCenterX) ||
+                              (type == VectorModifierType::WiggleTransform &&
+                               (p == kVecModWigAnchorX || p == kVecModWigPosX || p == kVecModWigScaleX));
+            const f64 mul = type == VectorModifierType::WiggleTransform && p == kVecModWigScaleX ? pct_mul(*c) : 1.0;
+            if (pair) {
+                vec_apply(*c, {vch(gi, vector_modifier_param(mi, p), 0, mul), vch(gi, vector_modifier_param(mi, p + 1), 1, mul)}, 2);
+            } else {
+                Channel ch = vch(gi, vector_modifier_param(mi, p), 0, 1.0, menu ? -1.0 : 0.0);
+                if (menu) ch.conv = Conv::Round;
+                vec_apply(*c, {ch});
+            }
+        }
+        if (VectorGroup* back = vgroup(gi); back && mi < back->modifiers.size())
+            for (u32 k = 0; k < kVecModParams; ++k)
+                back->modifiers[mi].params[k] = vector::clamp_modifier_param(type, k, back->modifiers[mi].params[k]);
+    }
+
+    /// Transform do grupo do AE composto com o de fora (`ctx`): a matriz do
+    /// grupo do Aurea (posição · giro · escala · −âncora) = fora ∘ grupo.
+    void shape_transform(u32 gi, const Node* xf, const ShapeCtx& ctx) {
+        VectorGroup* g = vgroup(gi);
+        if (!g) return;
+        g->position = ctx.offset;
+        g->anchor = Vec2{0.0f, 0.0f};
+        g->scale = Vec2{100.0f * ctx.scale, 100.0f * ctx.scale};
+        g->rotation = ctx.rotation;
+        g->opacity = 100.0f * std::clamp(ctx.opacity, 0.0f, 1.0f);
+        if (!xf) return;
+        const f32 cr = std::cos(ctx.rotation * 0.017453292f), sr = std::sin(ctx.rotation * 0.017453292f);
+        for (const Node& c : xf->children) {
+            if (c.kind != Node::Kind::Property) continue;
+            const std::string& m = c.match;
+            if (m == "ADBE Vector Anchor") {
+                vec_static_note(c, "âncora do grupo");
+                if (VectorGroup* gg = vgroup(gi)) gg->anchor = first2(c, Vec2{0.0f, 0.0f});
+            } else if (m == "ADBE Vector Position") {
+                if (std::fabs(ctx.rotation) < 1e-6f) {
+                    vec_apply(c, {vch(gi, kVecPosX, 0, ctx.scale, ctx.offset.x), vch(gi, kVecPosY, 1, ctx.scale, ctx.offset.y)}, 2);
+                } else {
+                    // Grupo de fora girado: X e Y do AE se misturam — fica o valor parado.
+                    vec_static_note(c, "posição de grupo dentro de grupo girado");
+                    const Vec2 p = first2(c, Vec2{0.0f, 0.0f});
+                    if (VectorGroup* gg = vgroup(gi)) gg->position = ctx.offset + Vec2{cr * p.x - sr * p.y, sr * p.x + cr * p.y} * ctx.scale;
+                }
+            } else if (m == "ADBE Vector Scale") {
+                const f64 mul = pct_mul(c);
+                const f32 sx = static_cast<f32>(first(c, 0, 100.0) * mul), sy = static_cast<f32>(first(c, 1, 100.0) * mul);
+                if (VectorGroup* gg = vgroup(gi)) gg->scale = Vec2{sx * ctx.scale, sy * ctx.scale};
+                if (animated(c)) {
+                    // O Aurea anima a escala do grupo numa trilha (X); Y segue a proporção.
+                    bool uniform = true;
+                    for (const Key& k : c.keys) uniform = uniform && k.value.size() >= 2 && std::fabs(k.value[0] - k.value[1]) < 1e-6;
+                    if (!uniform) rep.note("forma", shown_name(c), "escala X/Y animada do grupo: Y segue a proporção do primeiro valor");
+                    vec_apply(c, {vch(gi, kVecScale, 0, mul * ctx.scale, 0.0, -10000.0, 10000.0)}, 2);
+                }
+            } else if (m == "ADBE Vector Rotation") {
+                vec_apply(c, {vch(gi, kVecRotation, 0, 1.0, ctx.rotation)});
+            } else if (m == "ADBE Vector Group Opacity") {
+                vec_apply(c, {vch(gi, kVecOpacity, 0, pct_mul(c) * ctx.opacity, 0.0, 0.0, 100.0)});
+            } else if (m == "ADBE Vector Skew") {
+                // Lote X: a inclinação do grupo existe (valor parado; a animação não).
+                vec_static_note(c, "inclinação do grupo");
+                if (VectorGroup* gg = vgroup(gi)) gg->skew = static_cast<f32>(std::clamp(first(c, 0, 0.0), -85.0, 85.0));
+            } else if (m == "ADBE Vector Skew Axis") {
+                vec_static_note(c, "eixo da inclinação do grupo");
+                if (VectorGroup* gg = vgroup(gi)) gg->skewAxis = static_cast<f32>(first(c, 0, 0.0));
+            }
+        }
+    }
+
+    /// O transform do grupo vira o "de fora" dos subgrupos (valores parados;
+    /// escala X ≠ Y: vale a média).
+    ShapeCtx shape_compose(const ShapeCtx& ctx, const Node* xf, const std::string& name) {
+        ShapeCtx out = ctx;
+        out.inherited.clear();
+        out.depth = ctx.depth + 1;
+        if (!xf) return out;
+        Vec2 p{0, 0}, a{0, 0};
+        f32 s = 1.0f, r = 0.0f, o = 1.0f;
+        bool moving = false, uneven = false;
+        for (const Node& c : xf->children) {
+            if (c.kind != Node::Kind::Property) continue;
+            const std::string& m = c.match;
+            if (m == "ADBE Vector Anchor") { a = first2(c, a); moving |= animated(c); }
+            else if (m == "ADBE Vector Position") { p = first2(c, p); moving |= animated(c); }
+            else if (m == "ADBE Vector Scale") {
+                const f64 mul = pct_mul(c) * 0.01;
+                const f64 sx = first(c, 0, 100.0) * mul, sy = first(c, 1, 100.0) * mul;
+                uneven = std::fabs(sx - sy) > 1e-6;
+                s = static_cast<f32>(0.5 * (sx + sy));
+                moving |= animated(c);
+            } else if (m == "ADBE Vector Rotation") { r = static_cast<f32>(first(c, 0, 0.0)); moving |= animated(c); }
+            else if (m == "ADBE Vector Group Opacity") { o = static_cast<f32>(first(c, 0, 100.0) * pct_mul(c) * 0.01); moving |= animated(c); }
+        }
+        out.moving = moving;
+        out.uneven = uneven;
+        const f32 cr = std::cos(r * 0.017453292f), sr = std::sin(r * 0.017453292f);
+        const Vec2 local = p - Vec2{cr * a.x - sr * a.y, sr * a.x + cr * a.y} * s;   // G(0)
+        const f32 oc = std::cos(ctx.rotation * 0.017453292f), os = std::sin(ctx.rotation * 0.017453292f);
+        out.offset = ctx.offset + Vec2{oc * local.x - os * local.y, os * local.x + oc * local.y} * ctx.scale;
+        out.scale = ctx.scale * s;
+        out.rotation = ctx.rotation + r;
+        out.opacity = ctx.opacity * std::clamp(o, 0.0f, 1.0f);
+        (void)name;
+        return out;
+    }
+
+    /// Um grupo do AE (ou a raiz do conteúdo): `items` na ordem do AE.
+    void shape_items(const std::vector<const Node*>& items, const ShapeCtx& ctx, const Node* xf, const std::string& name) {
+        if (ctx.depth > 32) return;
+        i32 firstPath = -1;
+        for (usize i = 0; i < items.size(); ++i)
+            if (is_path_item(items[i]->match)) { firstPath = static_cast<i32>(i); break; }
+        const ShapeCtx inner = shape_compose(ctx, xf, name);
+        bool subgroups = false;
+        for (i32 i = static_cast<i32>(items.size()) - 1; i >= 0; --i) {
+            const Node& it = *items[static_cast<usize>(i)];
+            if (it.match == "ADBE Vector Group") {
+                subgroups = true;
+                ShapeCtx child = inner;
+                for (usize k = static_cast<usize>(i) + 1; k < items.size(); ++k)
+                    if (is_paint_or_op(items[k]->match)) child.inherited.push_back(items[k]);
+                child.inherited.insert(child.inherited.end(), ctx.inherited.begin(), ctx.inherited.end());
+                std::vector<const Node*> sub;
+                if (const Node* contents = it.child("ADBE Vectors Group"))
+                    for (const Node& c : contents->children) if (item_on(c)) sub.push_back(&c);
+                shape_items(sub, child, it.child("ADBE Vector Transform Group"), it.name.empty() ? std::string("Grupo") : it.name);
+            } else if (i == firstPath) {
+                std::vector<const Node*> ops;
+                for (usize k = static_cast<usize>(firstPath) + 1; k < items.size(); ++k)
+                    if (is_paint_or_op(items[k]->match)) ops.push_back(items[k]);
+                ops.insert(ops.end(), ctx.inherited.begin(), ctx.inherited.end());
+                shape_emit(items, ops, ctx, xf, name);
+            } else if (!is_path_item(it.match) && !is_paint_or_op(it.match)) {
+                rep.skip("forma", shown_name(it), "item de camada de forma sem equivalente no Aurea");
+            }
+        }
+        if (subgroups && inner.moving) rep.note("forma", name, "grupo com subgrupos: o transform animado dele entrou parado nos subgrupos (o Aurea não aninha grupos)");
+        if (subgroups && inner.uneven) rep.note("forma", name, "grupo com subgrupos e escala X ≠ Y: os subgrupos usam a média");
+    }
+
+    void shape_emit(const std::vector<const Node*>& items, const std::vector<const Node*>& ops, const ShapeCtx& ctx,
+                    const Node* xf, const std::string& name) {
+        refresh();
+        if (!w.layer) return;
+        VectorGroup g;
+        g.name = name;
+        g.fill.enabled = false;
+        g.stroke.enabled = false;
+        for (const Node* it : items) {
+            if (!is_path_item(it->match)) continue;
+            VectorPath p;
+            if (shape_path(*it, p)) g.paths.push_back(std::move(p));
+        }
+        if (g.paths.empty()) return;
+        w.layer->shape.vector.groups.push_back(std::move(g));
+        const u32 gi = static_cast<u32>(w.layer->shape.vector.groups.size() - 1);
+        ++shapeGroups;
+        ++applied;
+        shape_transform(gi, xf, ctx);
+        bool fill = false, stroke = false, trim = false, merge = false, repeater = false;
+        for (const Node* op : ops) {
+            const std::string& m = op->match;
+            VectorModifierType type{};
+            if (m == "ADBE Vector Graphic - Fill" || m == "ADBE Vector Graphic - G-Fill") {
+                if (fill) { rep.note("forma", shown_name(*op), "o Aurea tem um preenchimento por grupo: valeu o de cima"); continue; }
+                fill = true;
+                shape_fill(gi, *op, m == "ADBE Vector Graphic - G-Fill");
+                if (VectorGroup* gg = vgroup(gi)) gg->fill.enabled = item_on(*op);
+            } else if (m == "ADBE Vector Graphic - Stroke" || m == "ADBE Vector Graphic - G-Stroke") {
+                if (stroke) { rep.note("forma", shown_name(*op), "o Aurea tem um contorno por grupo: valeu o de cima"); continue; }
+                stroke = true;
+                shape_stroke(gi, *op, m == "ADBE Vector Graphic - G-Stroke");
+                if (VectorGroup* gg = vgroup(gi)) gg->stroke.enabled = item_on(*op);
+            } else if (m == "ADBE Vector Filter - Trim") {
+                if (trim) { rep.note("forma", shown_name(*op), "o Aurea tem um Aparar por grupo: valeu o primeiro"); continue; }
+                trim = true;
+                shape_trim(gi, *op);
+                if (VectorGroup* gg = vgroup(gi)) gg->trim.enabled = item_on(*op);
+            } else if (m == "ADBE Vector Filter - Merge") {
+                if (merge) continue;
+                merge = true;
+                // AE: 1 mesclar, 2 somar, 3 subtrair, 4 interseção, 5 excluir interseções.
+                static constexpr u8 kMerge[] = {1, 1, 1, 2, 3, 4};
+                const Node* t = op->child("ADBE Vector Merge Type");
+                const long v = std::clamp<long>(t ? std::lround(first(*t, 0, 1.0)) : 1, 0, 5);
+                if (VectorGroup* gg = vgroup(gi)) gg->merge = item_on(*op) ? kMerge[v] : 0;
+            } else if (m == "ADBE Vector Filter - Repeater") {
+                if (repeater) { rep.note("forma", shown_name(*op), "o Aurea tem um Repetidor por grupo: valeu o primeiro"); continue; }
+                repeater = true;
+                shape_repeater(gi, *op);
+                if (VectorGroup* gg = vgroup(gi)) gg->repeater.enabled = item_on(*op);
+            } else if (vector::modifier_from_ae_match_name(m, type)) {
+                shape_modifier(gi, *op, type);
+            } else {
+                rep.skip("forma", shown_name(*op) + " (" + m + ")", "operador de camada de forma sem equivalente no Aurea");
+            }
+        }
+        if (!fill && !stroke) rep.note("forma", name, "grupo sem preenchimento nem contorno (no AE ele também não aparece)");
+        // Lote X: a ORDEM dos itens do AE (quem pinta por cima, o que cada operador
+        // alcança). O grupo só passa para a ordem livre quando ela difere da ordem
+        // de sempre do Aurea (operadores, Mesclar, Aparar, Contorno, Preencher,
+        // Repetidor): o preset comum continua no caminho de sempre.
+        if (VectorGroup* gg = vgroup(gi)) {
+            std::vector<VectorItemKind> order(gg->paths.size(), VectorItemKind::Path);
+            bool hasFill = false, hasStroke = false, hasTrim = false, hasMerge = false, hasRepeater = false;
+            u32 mods = 0;
+            for (const Node* op : ops) {
+                const std::string& m = op->match;
+                VectorModifierType type{};
+                if (m == "ADBE Vector Graphic - Fill" || m == "ADBE Vector Graphic - G-Fill") {
+                    if (!hasFill) order.push_back(VectorItemKind::Fill);
+                    hasFill = true;
+                } else if (m == "ADBE Vector Graphic - Stroke" || m == "ADBE Vector Graphic - G-Stroke") {
+                    if (!hasStroke) order.push_back(VectorItemKind::Stroke);
+                    hasStroke = true;
+                } else if (m == "ADBE Vector Filter - Trim") {
+                    if (!hasTrim) order.push_back(VectorItemKind::Trim);
+                    hasTrim = true;
+                } else if (m == "ADBE Vector Filter - Merge") {
+                    if (!hasMerge) order.push_back(VectorItemKind::Merge);
+                    hasMerge = true;
+                } else if (m == "ADBE Vector Filter - Repeater") {
+                    if (!hasRepeater) order.push_back(VectorItemKind::Repeater);
+                    hasRepeater = true;
+                } else if (vector::modifier_from_ae_match_name(m, type) && mods < gg->modifiers.size()) {
+                    order.push_back(VectorItemKind::Modifier);
+                    ++mods;
+                }
+            }
+            std::vector<VectorItemKind> usual(gg->paths.size(), VectorItemKind::Path);
+            usual.insert(usual.end(), mods, VectorItemKind::Modifier);
+            if (hasMerge) usual.push_back(VectorItemKind::Merge);
+            if (hasTrim) usual.push_back(VectorItemKind::Trim);
+            if (hasStroke) usual.push_back(VectorItemKind::Stroke);
+            if (hasFill) usual.push_back(VectorItemKind::Fill);
+            if (hasRepeater) usual.push_back(VectorItemKind::Repeater);
+            if (order != usual) {
+                gg->freeOrder = true;
+                gg->order = std::move(order);
+            }
+        }
+    }
+
+    void shapes(const Entry& e) {
+        Layer* l = w.layer;
+        if (!l || l->kind != LayerKind::Shape || l->shape.shapeType != kShapeVector) {
+            if (!shapeSkipped)
+                rep.skip("camada", "Contents",
+                         "o preset traz conteúdo de camada de forma: escolha uma camada vetorial (ou nenhuma camada, para o Aurea criar uma)");
+            shapeSkipped = true;
+            return;
+        }
+        if (e.path.size() > 2) {
+            rep.skip("forma", e.name.empty() ? std::string(e.path.back().match) : e.name,
+                     "o preset ajusta um item de forma que já existe na camada (não suportado)");
+            return;
+        }
+        std::vector<const Node*> items;
+        if (e.path.size() == 1) {
+            for (const Node& c : e.value.children) if (item_on(c)) items.push_back(&c);
+        } else if (item_on(e.value)) {
+            items.push_back(&e.value);
+        }
+        // Origem do conteúdo do AE = a âncora da camada (no AE a camada de
+        // forma tem âncora 0 no meio da composição; no Aurea a camada vetorial
+        // tem a âncora no centro do quadro dela).
+        ShapeCtx root;
+        root.offset = Vec2{l->transform.anchor.x, l->transform.anchor.y};
+        // Caminhos soltos na raiz (sem grupo) viram um grupo implícito.
+        shape_items(items, root, nullptr, e.name.empty() ? std::string("Forma") : e.name);
+    }
+
     // --- entrada ----------------------------------------------------------------
     void entry(const Entry& e) {
         if (e.path.empty() || !w.layer) return;
@@ -670,7 +1317,7 @@ struct Applier {
         } else if (root == "ADBE Audio Group") {
             rep.skip("propriedade", "Audio Levels", "níveis de áudio do preset não entram");
         } else if (root == "ADBE Root Vectors Group") {
-            rep.skip("camada", "Contents", "conteúdo de camada de forma do AE não existe no Aurea");
+            shapes(e);
         } else if (root == "ADBE Layer Styles") {
             rep.skip("efeito", "Layer Styles", "estilos de camada do AE não existem no Aurea");
         } else {

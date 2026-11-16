@@ -22,6 +22,7 @@
     <string name="aefx_name_emboss">Relieve</string>
     <string name="aefx_name_color_emboss">Relieve de color</string>
     <string name="aefx_name_radial_shadow">Sombra radial</string>
+    <string name="aefx_name_upscale">Ampliación con conservación de detalles</string>
     <string name="aefx_name_inner_shadow">Sombra interior</string>
     <string name="aefx_name_bevel_edges">Bisel de bordes</string>
     <string name="aefx_name_brush_strokes">Pinceladas</string>

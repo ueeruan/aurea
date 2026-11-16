@@ -210,6 +210,14 @@ struct Material {
     /// 0.3.1: recorte (SceneInstance::holdout) — grava a profundidade e deixa a
     /// cor transparente. Só nas cópias do render; nunca vem do arquivo.
     bool holdout = false;
+    /// Estilo CARTOON (texto 3D, Text3DSpec::style): 0 = PBR normal; 1 = cel
+    /// (cor chapada em 2 faixas + faixa de brilho onde a normal aponta para
+    /// cima, `toonParam` = força do brilho 0..1); 2 = CONTORNO (a primitiva de
+    /// casco + vincos, desenhada na cor do contorno; `toonParam` = largura em
+    /// px da composição, a da receita — os keyframes vêm na SceneInstance).
+    /// Nunca vem de arquivo importado.
+    u8   toon = 0;
+    f32  toonParam = 0.0f;
 
     // Extensões lidas e guardadas. As que o shader ainda não usa ficam em
     // `ignoredExtensions` — o import não finge suporte.

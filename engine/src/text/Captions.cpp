@@ -490,7 +490,11 @@ std::vector<CaptionGroup> group_captions(const std::vector<CaptionWord>& words, 
     const u32 maxLines = std::clamp<u32>(opt.maxLines, 1, 4);
     const f64 pause = static_cast<f64>(std::max(0.05f, opt.pauseSec));
     auto gap = [&](usize k) { return k + 1 < n ? std::max(0.0, items[k + 1].start - items[k].end) : 0.0; };
-    auto forced = [&](usize k) { return k + 1 < n && opt.breakOnPause && gap(k) > pause; };
+    // 0.5.3: "quebrar no fim da frase" fecha a legenda em todo ponto final.
+    auto forced = [&](usize k) { return k + 1 < n && ((opt.breakOnPause && gap(k) > pause) || (opt.breakOnSentence && items[k].sentence)); };
+    // Em milésimos: o 0,8f guardado vale exatamente o 0,8 de antes (o mesmo agrupamento).
+    const f64 minShown = std::isfinite(opt.minDurationSec) ? std::clamp(std::round(static_cast<f64>(opt.minDurationSec) * 1000.0) / 1000.0, 0.1, 10.0)
+                                                           : kCaptionMinDisplaySec;
     auto sep = [&](usize k) { return glue(items[k].text, items[k + 1].text) ? 0u : 1u; };
 
     // Blocos [a, b] de palavras. Programação dinâmica sobre a fala inteira: o
@@ -537,7 +541,7 @@ std::vector<CaptionGroup> group_captions(const std::vector<CaptionWord>& words, 
                 }
                 if (j == i) cost += 1.5;   // palavra órfã pisca sozinha na tela
                 const f64 shown = items[j].end - items[i].start + std::min(gap(j), kCaptionGapCloseSec);
-                if (shown < kCaptionMinDisplaySec) cost += 2.0 * (kCaptionMinDisplaySec - shown) / kCaptionMinDisplaySec;
+                if (shown < minShown) cost += 2.0 * (minShown - shown) / minShown;
                 if (best[i] + cost < best[j + 1] - 1e-9) { best[j + 1] = best[i] + cost; from[j + 1] = i; }
             }
         }
@@ -622,7 +626,7 @@ std::vector<CaptionGroup> group_captions(const std::vector<CaptionWord>& words, 
         const f64 next = k + 1 < out.size() ? out[k + 1].start : std::numeric_limits<f64>::infinity();
         if (next < g.end) g.end = std::max(g.start, next);
         else if (next - g.end < kCaptionGapCloseSec) g.end = next;
-        if (g.end - g.start < kCaptionMinDisplaySec) g.end = std::max(g.end, std::min(g.start + kCaptionMinDisplaySec, next));
+        if (g.end - g.start < minShown) g.end = std::max(g.end, std::min(g.start + minShown, next));
     }
     return out;
 }
@@ -631,7 +635,11 @@ std::vector<CaptionWord> parse_srt(const std::string& srt) {
     std::vector<CaptionWord> out;
     auto parse_time = [](const std::string& s, usize p, f64& t) {
         int h = 0, m = 0, sec = 0, ms = 0;
-        if (std::sscanf(s.c_str() + p, "%d:%d:%d%*[,.]%d", &h, &m, &sec, &ms) < 3) return false;
+        if (std::sscanf(s.c_str() + p, "%d:%d:%d%*[,.]%d", &h, &m, &sec, &ms) < 3) {
+            // 0.5.3: WebVTT aceita "mm:ss.mmm" (sem as horas).
+            h = 0; m = 0; sec = 0; ms = 0;
+            if (std::sscanf(s.c_str() + p, "%d:%d%*[,.]%d", &m, &sec, &ms) < 3) return false;
+        }
         t = h * 3600.0 + m * 60.0 + sec + ms / 1000.0;
         return true;
     };
@@ -786,17 +794,24 @@ void apply_caption_look(const CaptionOptions& opt, f32 size, TextData& t, u32 pa
         const f32 frac = std::clamp(opt.strokeFrac, 0.0f, 0.3f);
         t.strokeWidth = frac > 0.0f ? std::max(1.0f, size * frac) : 0.0f;
     }
+    // 0.5.3: margem, raio, cor e desfoque vêm das opções; os padrões (0,3 ·
+    // 0,25 · preto 60 % · 0,12) são os números fixos de antes.
+    auto frac = [](f32 v, f32 hi, f32 fallback) { return std::isfinite(v) ? std::clamp(v, 0.0f, hi) : fallback; };
     if (on & kCaptionLookBox) {
         t.background = opt.box;
         t.backgroundColor = opt.boxColor;
-        t.backgroundPadding = size * 0.3f;
-        t.backgroundRadius = size * 0.25f;
+        t.backgroundPadding = size * frac(opt.boxPadding, 2.0f, 0.3f);
+        t.backgroundRadius = size * frac(opt.boxRadius, 2.0f, 0.25f);
     }
     if (on & kCaptionLookShadow) {
         t.shadow = opt.shadow;
-        t.shadowColor = rgb(0x000000, 0.6f);
+        t.shadowColor = opt.shadowColor;
         t.shadowOffset = Vec2{0.0f, size * 0.06f};
-        t.shadowBlur = size * 0.12f;
+        t.shadowBlur = size * frac(opt.shadowBlur, 1.0f, 0.12f);
+    }
+    if (on & kCaptionLookLayout) {
+        t.alignment = std::min(opt.align, 2u);
+        t.lineHeight = std::isfinite(opt.lineSpacing) ? std::clamp(opt.lineSpacing, 0.6f, 3.0f) : 1.15f;
     }
 }
 
@@ -810,8 +825,11 @@ u32 changed_look(const CaptionOptions& a, const CaptionOptions& b) noexcept {
                                       a.fontItalic != b.fontItalic || a.fontPath != b.fontPath)) out |= kCaptionLookFont;
     if ((both & kCaptionLookFill) && !same(a.fill, b.fill)) out |= kCaptionLookFill;
     if ((both & kCaptionLookStroke) && (!same(a.stroke, b.stroke) || a.strokeFrac != b.strokeFrac)) out |= kCaptionLookStroke;
-    if ((both & kCaptionLookBox) && (a.box != b.box || !same(a.boxColor, b.boxColor))) out |= kCaptionLookBox;
-    if ((both & kCaptionLookShadow) && a.shadow != b.shadow) out |= kCaptionLookShadow;
+    if ((both & kCaptionLookBox) && (a.box != b.box || !same(a.boxColor, b.boxColor) || a.boxPadding != b.boxPadding ||
+                                     a.boxRadius != b.boxRadius)) out |= kCaptionLookBox;
+    if ((both & kCaptionLookShadow) && (a.shadow != b.shadow || !same(a.shadowColor, b.shadowColor) || a.shadowBlur != b.shadowBlur))
+        out |= kCaptionLookShadow;
+    if ((both & kCaptionLookLayout) && (a.align != b.align || a.lineSpacing != b.lineSpacing)) out |= kCaptionLookLayout;
     return out;
 }
 } // namespace
@@ -853,6 +871,7 @@ void update_caption_look(const CaptionOptions& before, const CaptionOptions& aft
         t.shadow = base.shadow; t.shadowColor = base.shadowColor;
         t.shadowOffset = base.shadowOffset; t.shadowBlur = base.shadowBlur;
     }
+    if (changed & kCaptionLookLayout) { t.alignment = base.alignment; t.lineHeight = base.lineHeight; }
 }
 
 void copy_caption_appearance(const CaptionOptions& from, CaptionOptions& to) {
@@ -871,6 +890,12 @@ void copy_caption_appearance(const CaptionOptions& from, CaptionOptions& to) {
     to.box = from.box;
     to.boxColor = from.boxColor;
     to.shadow = from.shadow;
+    to.align = std::min(from.align, 2u);
+    to.lineSpacing = from.lineSpacing;
+    to.boxPadding = from.boxPadding;
+    to.boxRadius = from.boxRadius;
+    to.shadowColor = from.shadowColor;
+    to.shadowBlur = from.shadowBlur;
 }
 
 CaptionOptions caption_block_options(const CaptionOptions& track, const CaptionSegment& segment) {
@@ -936,6 +961,19 @@ const std::vector<CaptionTemplate>& caption_templates() {
             o.highlight = false;
             o.look = kCaptionLookStroke | kCaptionLookShadow; o.strokeFrac = 0.0f; o.shadow = true;
         }));
+        // 0.5.3: modelos que usam o alinhamento, a margem do fundo e a sombra novos.
+        v.push_back(make("news", 1, [](CaptionOptions& o) {
+            o.highlight = false;
+            o.look = kCaptionLookFill | kCaptionLookBox | kCaptionLookLayout;
+            o.fill = rgb(0xFFFFFF); o.box = true; o.boxColor = rgb(0x0B1E3A, 0.9f); o.boxPadding = 0.45f; o.boxRadius = 0.08f;
+            o.align = 0; o.lineSpacing = 1.25f;
+        }));
+        v.push_back(make("cinema", 0, [](CaptionOptions& o) {
+            o.highlight = false;
+            o.look = kCaptionLookStroke | kCaptionLookShadow | kCaptionLookLayout;
+            o.strokeFrac = 0.0f; o.shadow = true; o.shadowColor = rgb(0x000000, 0.85f); o.shadowBlur = 0.25f;
+            o.lineSpacing = 1.3f;
+        }));
         return v;
     }();
     return list;
@@ -949,13 +987,21 @@ void apply_caption_template(const CaptionTemplate& tpl, CaptionOptions& opt) {
     opt.highlightColor = s.highlightColor;
     // A fonte escolhida pelo usuário fica; o resto da aparência é a do modelo.
     const bool keepFont = (opt.look & kCaptionLookFont) != 0;
-    opt.look = (s.look & ~kCaptionLookFont) | (keepFont ? kCaptionLookFont : 0u);
+    // Alinhamento e entrelinha do usuário também ficam, salvo se o modelo traz os dele.
+    const bool ownLayout = (s.look & kCaptionLookLayout) != 0;
+    const u32 layout = ownLayout ? kCaptionLookLayout : (opt.look & kCaptionLookLayout);
+    opt.look = (s.look & ~(kCaptionLookFont | kCaptionLookLayout)) | (keepFont ? kCaptionLookFont : 0u) | layout;
     opt.fill = s.fill;
     opt.stroke = s.stroke;
     opt.strokeFrac = s.strokeFrac;
     opt.box = s.box;
     opt.boxColor = s.boxColor;
     opt.shadow = s.shadow;
+    opt.boxPadding = s.boxPadding;
+    opt.boxRadius = s.boxRadius;
+    opt.shadowColor = s.shadowColor;
+    opt.shadowBlur = s.shadowBlur;
+    if (ownLayout) { opt.align = s.align; opt.lineSpacing = s.lineSpacing; }
 }
 
 void apply_caption_animation(const CaptionOptions& opt, TextData& t, TrackSet& tr, const std::vector<i64>& wf, i64 endFrame) {
@@ -1016,6 +1062,166 @@ void apply_caption_animation(const CaptionOptions& opt, TextData& t, TrackSet& t
         key(tr, kSelStart, f0, step * static_cast<f32>(i), Interpolation::Hold);
         key(tr, kSelEnd, f0, step * static_cast<f32>(i + 1), Interpolation::Hold);
     }
+}
+
+
+// -----------------------------------------------------------------------------
+// 0.5.3: edição no jeito do Premiere (lista de legendas, transcrição, arquivos)
+// -----------------------------------------------------------------------------
+
+namespace {
+/// Minúsculas que não mudam o tamanho em bytes (ASCII + Latin-1): as posições
+/// achadas na cópia valem no texto original.
+std::string lower_same_size(const std::string& s) {
+    std::string o = s;
+    for (usize i = 0; i < o.size(); ++i) {
+        const unsigned char c = static_cast<unsigned char>(o[i]);
+        if (c < 0x80) o[i] = static_cast<char>(std::tolower(c));
+        else if (c == 0xC3 && i + 1 < o.size()) {
+            const unsigned char d = static_cast<unsigned char>(o[i + 1]);
+            if (d >= 0x80 && d <= 0x9E && d != 0x97) o[i + 1] = static_cast<char>(d + 0x20);
+            ++i;
+        }
+    }
+    return o;
+}
+
+std::string timestamp(i64 frame, f64 fps, bool vtt) {
+    const f64 sec = std::max<f64>(0.0, static_cast<f64>(frame) / (fps > 0.0 ? fps : 30.0));
+    const i64 ms = static_cast<i64>(std::llround(sec * 1000.0));
+    char buf[40];
+    std::snprintf(buf, sizeof buf, "%02lld:%02lld:%02lld%c%03lld", static_cast<long long>(ms / 3600000),
+                  static_cast<long long>(ms / 60000 % 60), static_cast<long long>(ms / 1000 % 60), vtt ? '.' : ',',
+                  static_cast<long long>(ms % 1000));
+    return buf;
+}
+
+/// Palavras do texto (separadas por espaço ou quebra de linha).
+std::vector<std::string> tokens_of(const std::string& text) {
+    std::vector<std::string> out;
+    usize p = 0;
+    while (p < text.size()) {
+        while (p < text.size() && std::isspace(static_cast<unsigned char>(text[p]))) ++p;
+        usize q = p;
+        while (q < text.size() && !std::isspace(static_cast<unsigned char>(text[q]))) ++q;
+        if (q > p) out.push_back(text.substr(p, q - p));
+        p = q;
+    }
+    return out;
+}
+
+/// As linhas não vazias do texto (uma linha vazia fecharia o bloco do SRT antes da hora).
+std::vector<std::string> lines_of(const std::string& text) {
+    std::vector<std::string> v;
+    usize p = 0;
+    while (p <= text.size()) {
+        usize e = text.find('\n', p);
+        if (e == std::string::npos) e = text.size();
+        std::string l = text.substr(p, e - p);
+        while (!l.empty() && (l.back() == '\r' || l.back() == ' ')) l.pop_back();
+        if (!l.empty()) v.push_back(std::move(l));
+        p = e + 1;
+    }
+    return v;
+}
+} // namespace
+
+void apply_caption_gap(std::vector<CaptionSegment>& segments, u32 gapFrames) {
+    if (gapFrames == 0) return;
+    const i64 gap = std::min<i64>(gapFrames, 600);
+    for (usize i = 0; i + 1 < segments.size(); ++i) {
+        CaptionSegment& s = segments[i];
+        const i64 limit = segments[i + 1].start - gap;
+        if (s.end <= limit) continue;
+        // Nunca menos de 1 quadro na tela: o bloco curto encosta no seguinte.
+        s.end = std::max(s.start + 1, std::min(s.end, limit));
+        for (auto& w : s.words) {
+            w.start = std::min(w.start, s.end - 1);
+            w.end = std::clamp(w.end, w.start + 1, s.end);
+        }
+    }
+}
+
+bool split_caption_at_word(CaptionSegment& left, CaptionSegment& right, usize leftWords) {
+    if (leftWords == 0 || leftWords >= left.words.size()) return false;
+    const i64 frame = left.words[leftWords].start;
+    if (frame <= left.start || frame >= left.end) return false;
+    right = left;
+    right.start = frame;
+    right.words.erase(right.words.begin(), right.words.begin() + static_cast<std::ptrdiff_t>(leftWords));
+    left.words.resize(leftWords);
+    left.end = frame;
+    for (auto& w : left.words) { w.start = std::min(w.start, frame - 1); w.end = std::clamp(w.end, w.start + 1, frame); }
+    auto join = [](CaptionSegment& s) { s.text.clear(); for (const auto& w : s.words) s.text = caption_join(s.text, w.text); };
+    join(left); join(right);
+    return true;
+}
+
+void nudge_caption(std::vector<CaptionSegment>& segments, usize index, i64 deltaIn, i64 deltaOut) {
+    if (index >= segments.size()) return;
+    CaptionSegment& s = segments[index];
+    const i64 floor = index > 0 ? segments[index - 1].end : 0;
+    const i64 ceiling = index + 1 < segments.size() ? segments[index + 1].start : 100000000;
+    s.start = std::clamp(s.start + deltaIn, floor, std::max(floor, s.end - 1));
+    s.end = std::clamp(s.end + deltaOut, s.start + 1, std::max(s.start + 1, ceiling));
+    // Palavras presas na janela nova, em ordem crescente.
+    i64 last = s.start;
+    for (auto& w : s.words) {
+        w.start = std::clamp(std::max(w.start, last), s.start, s.end - 1);
+        w.end = std::clamp(w.end, w.start + 1, s.end);
+        last = w.start;
+    }
+}
+
+u32 replace_caption_text(std::string& text, const std::string& find, const std::string& replacement, bool matchCase) {
+    if (find.empty() || find.size() > 4096) return 0;
+    const std::string hay = matchCase ? text : lower_same_size(text);
+    const std::string needle = matchCase ? find : lower_same_size(find);
+    std::string out;
+    u32 count = 0;
+    usize p = 0;
+    for (usize hit = hay.find(needle); hit != std::string::npos; hit = hay.find(needle, p)) {
+        out.append(text, p, hit - p);
+        out += replacement;
+        p = hit + needle.size();
+        ++count;
+    }
+    if (!count) return 0;
+    out.append(text, p, std::string::npos);
+    text = std::move(out);
+    return count;
+}
+
+CaptionSegment make_caption_segment(u64 id, i64 start, i64 end, const std::string& text) {
+    CaptionSegment s;
+    s.id = id; s.start = start; s.end = std::max(end, start + 1);
+    const auto words = tokens_of(text);
+    s.text = text;
+    const i64 span = s.end - s.start;
+    const i64 n = static_cast<i64>(words.size());
+    for (i64 k = 0; k < n; ++k) {
+        // Repartido por igual; com mais palavras que quadros, as últimas dividem o último quadro.
+        const i64 a = s.start + std::min(span - 1, span * k / n);
+        const i64 b = std::max(a + 1, std::min(s.end, s.start + span * (k + 1) / n));
+        s.words.push_back({words[static_cast<usize>(k)], a, b});
+    }
+    return s;
+}
+
+std::string export_captions(const std::vector<CaptionSegment>& segments, f64 fps, i64 shift, bool vtt, bool uppercase) {
+    std::string out = vtt ? "WEBVTT\n\n" : "";
+    u32 n = 0;
+    for (const auto& s : segments) {
+        const i64 a = s.start + shift, b = s.end + shift;
+        if (b <= 0) continue;
+        out += std::to_string(++n) + "\n";
+        out += timestamp(std::max<i64>(a, 0), fps, vtt) + " --> " + timestamp(b, fps, vtt) + "\n";
+        const auto lines = lines_of(uppercase ? upper(s.text) : s.text);
+        if (lines.empty()) out += " \n";
+        for (const auto& line : lines) out += line + "\n";
+        out += "\n";
+    }
+    return out;
 }
 
 } // namespace aurea::text

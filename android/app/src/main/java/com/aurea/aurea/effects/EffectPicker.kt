@@ -19,6 +19,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -26,6 +27,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -73,6 +75,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
@@ -191,15 +194,66 @@ internal fun EffectAddSheet(
     onTool: (EffectTool) -> Unit,
     onDismiss: () -> Unit,
     onPickVariant: ((EffectCatalogEntry, Int) -> Unit)? = null,
+    /** Sem a folha modal: a galeria desenhada no lugar (a aba Efeitos da biblioteca do Aurea PC). */
+    inline: Boolean = false,
 ) {
     val nav = remember { BrowserNav() }
+    if (inline) {
+        SheetWidthScope { EffectBrowserBody(store, layerHasAudio, nav, onPick, onTool, onPickVariant, onDismiss) }
+        return
+    }
+    val maxSize = LocalEffectSheetMaxSize.current
     Dialog(
         onDismissRequest = { nav.back(onDismiss) },
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
-        EffectBrowserBody(store, layerHasAudio, nav, onPick, onTool, onPickVariant, onDismiss)
+        if (maxSize == null) {
+            EffectBrowserBody(store, layerHasAudio, nav, onPick, onTool, onPickVariant, onDismiss)
+        } else {
+            // Aurea PC: um cartão no meio da janela, não a tela inteira; clicar fora fecha.
+            Box(
+                Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { nav.back(onDismiss) } },
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    Modifier.sizeIn(maxWidth = maxSize.width, maxHeight = maxSize.height).fillMaxSize()
+                        .clip(RoundedCornerShape(12.dp)).pointerInput(Unit) { detectTapGestures { } },
+                ) {
+                    SheetWidthScope { EffectBrowserBody(store, layerHasAudio, nav, onPick, onTool, onPickVariant, onDismiss) }
+                }
+            }
+        }
     }
 }
+
+/**
+ * A galeria fora da tela inteira (só no Aurea PC): a grade conta colunas pela
+ * largura da "tela", então a tela vira o espaço que a galeria tem de verdade.
+ */
+@Composable
+private fun SheetWidthScope(content: @Composable () -> Unit) {
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
+        val base = LocalConfiguration.current
+        val w = maxWidth.value.toInt()
+        val h = maxHeight.value.toInt()
+        val scoped = remember(base, w, h) {
+            android.content.res.Configuration(base).apply { screenWidthDp = w; screenHeightDp = h; smallestScreenWidthDp = minOf(w, h) }
+        }
+        androidx.compose.runtime.CompositionLocalProvider(LocalConfiguration provides scoped) { content() }
+    }
+}
+
+/**
+ * Tamanho máximo da galeria de efeitos. Nulo (celular e tablet) = a tela
+ * inteira; o Aurea PC fornece um cartão no meio da janela.
+ */
+val LocalEffectSheetMaxSize = androidx.compose.runtime.staticCompositionLocalOf<androidx.compose.ui.unit.DpSize?> { null }
+
+/**
+ * Tocar num efeito dos recentes/favoritos: falso (celular e tablet) = adiciona
+ * na hora; verdadeiro (Aurea PC) = abre o detalhe, com a prévia e o adicionar.
+ */
+val LocalEffectTapOpensDetail = androidx.compose.runtime.staticCompositionLocalOf { false }
 
 @Composable
 private fun EffectBrowserBody(
@@ -217,7 +271,9 @@ private fun EffectBrowserBody(
     val kind by remember(store) { derivedStateOf { store.detail?.kind ?: 0 } }
     val text3dLayer = store.text3d != null
     val toolNames = EffectTool.entries.associateWith { stringResource(toolLabelRes(it)) }
-    val sorted = remember(catalog, layerHasAudio, kind, text3dLayer, toolNames) {
+    // Funções do AUREA (13/11/2026): as ferramentas que valem para esta camada.
+    val tools = com.aurea.aurea.editor.panels.toolsForSelection(store)
+    val sorted = remember(catalog, layerHasAudio, kind, text3dLayer, toolNames, tools) {
         val textLayer = kind == 4
         val effects = pickableEffects(catalog, layerHasAudio, layerKind = kind).filter {
             (textLayer || text3dLayer || it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.text.transform")) &&
@@ -228,7 +284,7 @@ private fun EffectBrowserBody(
                 (textLayer || it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.text.animator_pro"))   // 0.4.6: só texto 2D
         }
         // Bugs 0.3.4 (bug 3): um efeito por typeId (a chave das grades é o typeId).
-        val all = distinctEffects(effects + pickableTools(kind).map { toolCatalogEntry(it, toolNames.getValue(it)) })
+        val all = distinctEffects(effects + tools.map { toolCatalogEntry(it, toolNames.getValue(it)) })
         arrangeCatalog(all, effectCategories(all))
     }
     val locale = LocalConfiguration.current.locales[0]
@@ -641,6 +697,7 @@ private fun QuickTile(
     val addLabel = stringResource(R.string.effects_card_add, if (code.isEmpty()) name else "$name $code")
     val detailsLabel = stringResource(R.string.om_fx_menu_details)
     val panel = AureaColors.FxPanel
+    val tapOpensDetail = LocalEffectTapOpensDetail.current
     Column(
         Modifier
             .size(62.dp, 82.dp)
@@ -649,7 +706,7 @@ private fun QuickTile(
                 contentDescription = addLabel
                 customActions = listOf(CustomAccessibilityAction(detailsLabel) { onDetail(item); true })
             }
-            .tocavel(shrink = 0.94f, haptic = true, onLongClick = { onDetail(item) }, onClick = { onAdd(e, item.preset) }),
+            .tocavel(shrink = 0.94f, haptic = true, onLongClick = { onDetail(item) }, onClick = { if (tapOpensDetail) onDetail(item) else onAdd(e, item.preset) }),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(Modifier.padding(top = 8.dp).size(55.dp)) {

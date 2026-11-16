@@ -40,6 +40,8 @@
     <string name="hyper_continue">Lanjutkan</string>
     <string name="hyper_creating_project">Membuat proyek…</string>
     <string name="hyper_effect_locked">AureaHyper: fitur berbayar, terkunci untuk akun ini</string>
+    <string name="text3d_locked">Teks 3D adalah bagian dari AureaHyper: buka kuncinya untuk membuat</string>
+    <string name="text3d_locked_existing">Teks 3D (AureaHyper): teks ini tetap ada di proyek dan diekspor seperti biasa; membuat yang baru memerlukan akses</string>
     <string name="hyper_error_project">Video sudah selesai, tetapi proyek tidak dapat dibuat. Coba lagi.</string>
     <string name="hyper_error_result">Video sudah selesai, tetapi tidak dapat dibaca. Coba lagi.</string>
     <string name="hyper_error_video">Video ini tidak dapat dibuka. Coba file lain.</string>

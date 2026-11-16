@@ -99,6 +99,7 @@ entrega/
 # Local Worker state and development credentials
 /discovery/.wrangler/
 /discovery/.dev.vars
+/discovery/.aureaos-bundle/
 /discovery/.env*
 # 0.4.1: valores do Firebase do iOS (ver engine/platform/ios/Firebase.xcconfig.example).
 /engine/platform/ios/Firebase.xcconfig

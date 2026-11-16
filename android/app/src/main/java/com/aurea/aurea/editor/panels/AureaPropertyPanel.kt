@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.*
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
 import com.aurea.aurea.R
 import com.aurea.aurea.engine.BuiltinPropertySpec
@@ -90,7 +91,12 @@ internal fun AureaPropertyPanel(
                     }
                     ParamType.BOOL -> PropertyCustomRow(label, selected == spec.id, ::choose, minHeight = 48.dp) {
                         AureaToggle(spec.value(values) >= .5f, { choose(); write(spec, 0, if (it) 1f else 0f) },
-                            enabled = enabled, modifier = Modifier.testTag("property.$domain.${spec.id}").semantics { contentDescription = label })
+                            enabled = enabled, modifier = Modifier.testTag("property.$domain.${spec.id}").semantics {
+                                contentDescription = label
+                                role = Role.Switch
+                                toggleableState = if (spec.value(values) >= .5f) ToggleableState.On else ToggleableState.Off
+                                if (!enabled) disabled()
+                            })
                     }
                     ParamType.COLOR -> {
                         val nativeColor = FloatArray(4) { c -> if (c < spec.components) spec.value(values, c) else 1f }

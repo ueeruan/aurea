@@ -47,7 +47,7 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
     val first = track.firstOrNull() ?: return
     val fps = store.project.fps.coerceAtLeast(1f)
     val revision = store.curveRevision
-    val layerKeys = store.keyframes[layer].orEmpty()
+    val layerKeys = store.keysForLayer(layer).orEmpty()
     // O grupo inteiro aparece; a trilha escolhida vai por último (por cima) e é a editável.
     val group = remember(layerKeys, track) { graphGroup(layerKeys, track).sortedBy { if (it[0].sameTrack(first)) 1 else 0 } }
     // Velocidade da POSIÇÃO com dois ou mais eixos marcados nos mesmos
@@ -132,7 +132,7 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
             TextButton(onClick = { picked = track.map { it.time }.toSet() }) { Text(stringResource(R.string.common_all), fontSize = 11.sp) }
             TextButton(onClick = { store.copySelectedKeys(layer, track.filter { it.time in picked }) }, enabled = picked.isNotEmpty()) { Text(stringResource(R.string.common_copy), fontSize = 11.sp) }
             TextButton(onClick = {
-                val row = store.layers.firstOrNull { it.id == layer }
+                val row = store.editingLayers.firstOrNull { it.id == layer }
                 val target = track.maxOf { it.time }.toLong() + 1 + (row?.startFrame ?: 0) - (row?.offsetFrames ?: 0)
                 if (target in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong() && store.copySelectedKeys(layer, track.filter { it.time in picked })) {
                     store.pasteSelectedKeysAt(layer, target.toInt())
@@ -176,7 +176,7 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
                 }
                 val originalGroup = key?.let { store.graphKeyGroup(layer, it) }.orEmpty()
                 var currentTime = key?.time ?: 0
-                val groupTrack = store.keyframes[layer].orEmpty().filter { candidate -> originalGroup.any {
+                val groupTrack = store.keysForLayer(layer).orEmpty().filter { candidate -> originalGroup.any {
                     it.property == candidate.property && it.effectIndex == candidate.effectIndex && it.paramIndex == candidate.paramIndex
                 } }
                 val previous = key?.let { k -> groupTrack.filter { it.time < k.time }.maxOfOrNull { it.time } }

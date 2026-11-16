@@ -189,7 +189,7 @@ AUREA_TEST(CaptureEpochGpu, NewSeekCancelsOldThumbnailBeforeItsDecoderUnblocks) 
     e.shutdown();
 }
 
-AUREA_TEST(CaptureEpochGpu, NaturalPlaybackAdvanceDoesNotCancelBoundCapture) {
+AUREA_TEST(CaptureEpochGpu, NaturalPlaybackWaitsForBoundCaptureAndResumes) {
     AUREA_REQUIRE_GPU();
     CaptureValidationGuard validation;
     SyntheticConfig cfg;
@@ -209,8 +209,8 @@ AUREA_TEST(CaptureEpochGpu, NaturalPlaybackAdvanceDoesNotCancelBoundCapture) {
     Command play;
     play.type = CommandType::PlaybackPlay;
     AUREA_CHECK_EQ(e.submit_commands(&play, 1), 1u);
-    // Use the production warm-up and clock, not a seek disguised as progress.
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    // Exact capture owns the render resources. Playback waits for release.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(80);
     i64 advancedTo = 0;
     while (advancedTo < 3 && std::chrono::steady_clock::now() < deadline) {
         AUREA_CHECK(e.render_frame(false).ok());
@@ -222,9 +222,15 @@ AUREA_TEST(CaptureEpochGpu, NaturalPlaybackAdvanceDoesNotCancelBoundCapture) {
     std::printf("    bound frame0 survived natural playback to frame %lld; status %d\n",
                 static_cast<long long>(advancedTo), result.raw());
     AUREA_CHECK(waiting);
-    AUREA_CHECK(advancedTo >= 3);
+    AUREA_CHECK_EQ(advancedTo, 0ll);
     AUREA_CHECK(result.ok());
     capture_epoch_check_pixels(rgba, width, height, 0);
+    const auto resumed = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (e.read_status().playhead.value < 3 && std::chrono::steady_clock::now() < resumed) {
+        AUREA_CHECK(e.render_frame(false).ok());
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    AUREA_CHECK(e.read_status().playhead.value >= 3);
     e.shutdown();
 }
 #endif

@@ -56,6 +56,13 @@ struct PoseFrame {
     double time_s = 0.0;
     bool has_world = false;
     std::array<PoseLandmark, kPoseLandmarks> pts{};
+    /// Só o PC (BlazePose GHUM 3D no motor): pontos de MUNDO junto dos de
+    /// imagem — metros, origem no meio do quadril, x/y na orientação da
+    /// imagem (y para baixo), z maior = mais longe; `confidence` = visibilidade.
+    /// Chegam no quadro companheiro (kMocapWorldFlag). Com eles o solver usa o
+    /// 3D do modelo para as direções dos ossos e a imagem só para a translação.
+    bool has_aux_world = false;
+    std::array<PoseLandmark, kPoseLandmarks> world{};
 };
 
 /// Índices do modelo de 33 pontos (lado = do corpo da pessoa).
@@ -74,7 +81,13 @@ enum : u32 {
 /// [tempo s, tem mundo 0/1, 33 × (x, y, z, confiança)].
 inline constexpr u32 kMocapFrameFloats = 2 + kPoseLandmarks * 4;
 
-/// Desempacota `count` quadros (ignora quadros com números inválidos).
+/// Segundo campo = 2: quadro COMPANHEIRO do anterior (mesmo tempo) com os
+/// pontos de mundo, 33 × (x, y, z em metros, visibilidade). Só o PC manda;
+/// o celular nunca (ML Kit/Vision mandam 0 ou 1) e nada muda para ele.
+inline constexpr f32 kMocapWorldFlag = 2.0f;
+
+/// Desempacota `count` quadros (ignora quadros com números inválidos). Um
+/// companheiro de mundo vai para o quadro anterior (`world`), não vira quadro.
 void unpack_frames(const f32* data, u32 count, std::vector<PoseFrame>& out);
 
 // ---- Parâmetros e relatório -------------------------------------------------------
@@ -103,6 +116,8 @@ struct MocapReport {
     u32 frames = 0;
     f64 duration = 0.0;
     bool hasWorld = false;
+    bool auxWorld = false;                       ///< PC: mundo do BlazePose junto da imagem (PoseFrame::world)
+    f32 cameraPitchDeg = 0.0f;                   ///< PC: inclinação da câmera desfeita no 3D (0 = nenhuma)
     std::array<f32, kLimbCount> lowFraction{};   ///< fração de quadros com o membro oculto/incerto
     std::array<u8, kLimbCount> missing{};        ///< membro nunca visto (fica em repouso)
     bool lowConfidence = false;                  ///< algum membro > 25% incerto (aviso na UI)
@@ -154,8 +169,10 @@ using CapturePose = std::array<Vec3, kCapturePoints>;
 
 /// Levanta para 3D com comprimentos de osso constantes (ou normaliza os de
 /// mundo). Devolve o comprimento médio da perna (quadril→tornozelo).
+/// Com o mundo do PC (has_aux_world): o 3D dá as direções, a imagem a posição,
+/// e `cameraPitchDeg` recebe a inclinação da câmera que foi desfeita.
 f32 lift_frames(const std::vector<PoseFrame>& frames, const MocapParams& params, std::vector<CapturePose>& out,
-                const MocapControl& control = {});
+                const MocapControl& control = {}, f32* cameraPitchDeg = nullptr);
 
 /// Resultado do solver por quadro de captura.
 struct MocapResult {

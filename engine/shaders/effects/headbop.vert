@@ -27,6 +27,7 @@ struct Face {
     vec4 prevHairT;
     vec4 prevClothT;
     vec4 prevFlutter;
+    vec4 joints[22];
 };
 
 layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
@@ -119,6 +120,78 @@ vec3 looseness(int f, vec2 q, float mask) {
 
 vec2 torsoOf(vec2 x, vec2 hip, vec4 t) { return hip + rot(x - hip, t.z) + t.xy; }
 
+void boneWarp(Face F, vec2 q, int first, int second, vec2 targetFirst, vec2 targetSecond, float radius, inout vec3 accumulated) {
+    float confidence = min(F.joints[first].w, F.joints[second].w);
+    if (confidence < .35) return;
+    vec2 start = F.joints[first].xy, v = F.joints[second].xy - start;
+    float squared = dot(v, v);
+    if (!(squared > 1.0)) return;
+    float along = clamp(dot(q - start, v) / squared, 0.0, 1.0);
+    float distance = length(q - (start + v * along));
+    float weight = (1.0 - smoothstep(radius * .6, radius * 1.4, distance)) * confidence;
+    if (!(weight > 0.0)) return;
+    vec2 targetVector = targetSecond - targetFirst;
+    float angle = atan(targetVector.y, targetVector.x) - atan(v.y, v.x);
+    accumulated.xy += (targetFirst + rot(q - start, angle) - q) * weight;
+    accumulated.z += weight;
+}
+
+vec3 bodyWarp(Face F, vec2 q, bool previous, float mask) {
+    if (!(mask > 0.0) || max(max(F.joints[2].w, F.joints[3].w), max(F.joints[14].w, F.joints[15].w)) < .35) return vec3(0.0);
+    vec4 T = previous ? F.prevTorso : F.torso;
+    if (any(isnan(T.xy)) || any(isinf(T.xy)) || max(abs(T.x), abs(T.y)) > 2.0 * max(p.layer.x, p.layer.y)) return vec3(0.0);
+    vec2 hip = F.body.w > 0.0 ? F.body.zw : vec2(F.neck.z, F.neck.w + F.body.y);
+    float armRadius = max(2.0, F.head.z * .4), legRadius = max(2.0, F.head.z * .6);
+    float armAngle = T.z * .35 + (previous ? F.prevClothT.z : F.clothT.z) * .3;
+    vec3 accumulated = vec3(0.0);
+    for (int side = 0; side < 2; ++side) {
+        int shoulder = side, elbow = 2 + side, wrist = 4 + side;
+        if (F.joints[shoulder].w >= .35 && F.joints[elbow].w >= .35) {
+            vec2 root = torsoOf(F.joints[shoulder].xy, hip, T);
+            vec2 middle = root + rot(F.joints[elbow].xy - F.joints[shoulder].xy, armAngle);
+            vec2 end = middle + rot(F.joints[wrist].xy - F.joints[elbow].xy, armAngle * .6);
+            boneWarp(F, q, shoulder, elbow, root, middle, armRadius, accumulated);
+            boneWarp(F, q, elbow, wrist, middle, end, armRadius * .8, accumulated);
+            for (int index = 0; index < 3; ++index) {
+                int finger = 6 + index * 2 + side;
+                boneWarp(F, q, wrist, finger, end, end + rot(F.joints[finger].xy - F.joints[wrist].xy, armAngle * .6), armRadius * .7, accumulated);
+            }
+        }
+        int pelvis = 12 + side, knee = 14 + side, ankle = 16 + side;
+        if (F.joints[pelvis].w < .35 || F.joints[knee].w < .35) continue;
+        vec2 root = torsoOf(F.joints[pelvis].xy, hip, T);
+        vec2 middle = torsoOf(F.joints[knee].xy, hip, T), end = torsoOf(F.joints[ankle].xy, hip, T);
+        if (F.joints[ankle].w >= .35) {
+            float upper = length(F.joints[knee].xy - F.joints[pelvis].xy);
+            float lower = length(F.joints[ankle].xy - F.joints[knee].xy);
+            vec2 direction = F.joints[ankle].xy - root;
+            float distance = length(direction);
+            if (upper > 1.0 && lower > 1.0 && distance > .0001) {
+                vec2 axis = direction / distance;
+                float reach = clamp(distance, abs(upper - lower) + .0001, upper + lower);
+                float along = (upper * upper - lower * lower + reach * reach) / (2.0 * reach);
+                float bend = sqrt(max(0.0, upper * upper - along * along));
+                vec2 original = F.joints[ankle].xy - F.joints[pelvis].xy;
+                vec2 kneeOffset = F.joints[knee].xy - F.joints[pelvis].xy;
+                float sign = original.x * kneeOffset.y - original.y * kneeOffset.x >= 0.0 ? 1.0 : -1.0;
+                middle = root + axis * along + vec2(-axis.y, axis.x) * (bend * sign);
+                end = root + axis * reach;
+            }
+        }
+        boneWarp(F, q, pelvis, knee, root, middle, legRadius, accumulated);
+        boneWarp(F, q, knee, ankle, middle, end, legRadius * .7, accumulated);
+        for (int index = 0; index < 2; ++index) {
+            int foot = 18 + index * 2 + side;
+            boneWarp(F, q, ankle, foot, end, end + F.joints[foot].xy - F.joints[ankle].xy, legRadius * .55, accumulated);
+        }
+    }
+    if (!(accumulated.z > 0.0)) return vec3(0.0);
+    float m = p.window.w;
+    float edge = min(min(q.x + m, p.layer.x + m - q.x), min(q.y + m, p.layer.y + m - q.y));
+    float window = p.window.x > 0.0 ? smoothstep(0.0, p.window.x, edge) : 1.0;
+    return vec3(accumulated.xy / accumulated.z, min(accumulated.z, 1.0) * clamp(mask, 0.0, 1.0) * window);
+}
+
 vec2 deformPoint(vec2 q, bool previous, float mask) {
     vec2 sum = q;
     bool whole = p.mode.y > 0.5;
@@ -129,9 +202,10 @@ vec2 deformPoint(vec2 q, bool previous, float mask) {
         vec2 w = weights(f, q);
         vec3 lo = looseness(f, q, mask);
         float wh = max(w.x, lo.x);
-        if (w.y <= 0.0 && wh <= 0.0 && lo.z <= 0.0) continue;
+        vec3 body = whole ? vec3(0.0) : bodyWarp(F, q, previous, mask);
+        if (w.y <= 0.0 && wh <= 0.0 && lo.z <= 0.0 && body.z <= 0.0) continue;
         vec4 T = previous ? F.prevTorso : F.torso;
-        vec2 hip = vec2(F.neck.z, F.neck.w + F.body.y);
+        vec2 hip = F.body.w > 0.0 ? F.body.zw : vec2(F.neck.z, F.neck.w + F.body.y);
         vec2 tp = torsoOf(q, hip, T);
         vec2 q1 = q + (tp - q) * w.y;
         if (lo.z > 0.0) {
@@ -183,6 +257,7 @@ vec2 deformPoint(vec2 q, bool previous, float mask) {
             }
             q2 = q1 + (h - q1) * wh;
         }
+        q2 = mix(q2, q + body.xy, body.z);
         sum += q2 - q;
     }
     return sum;

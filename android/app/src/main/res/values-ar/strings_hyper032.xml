@@ -40,6 +40,8 @@
     <string name="hyper_continue">متابعة</string>
     <string name="hyper_creating_project">جارٍ إنشاء المشروع…</string>
     <string name="hyper_effect_locked">AureaHyper: ميزة مدفوعة ومقفلة لهذا الحساب</string>
+    <string name="text3d_locked">النص ثلاثي الأبعاد جزء من AureaHyper: افتحه لإنشاء نص جديد</string>
+    <string name="text3d_locked_existing">النص ثلاثي الأبعاد (AureaHyper): يبقى هذا النص في المشروع ويُصدَّر بشكل طبيعي؛ إنشاء نص جديد يتطلب الوصول</string>
     <string name="hyper_error_project">اكتمل الفيديو، لكن تعذّر إنشاء المشروع. حاول مرة أخرى.</string>
     <string name="hyper_error_result">اكتمل الفيديو، لكن تعذّرت قراءته. حاول مرة أخرى.</string>
     <string name="hyper_error_video">تعذّر فتح هذا الفيديو. جرّب ملفًا آخر.</string>

@@ -84,5 +84,33 @@ void main() {
     v_uv0 = a_uv0;
     v_uv1 = a_uv1;
     v_color = a_color;
-    gl_Position = u.viewProj * world;
+    vec4 clip = u.viewProj * world;
+    // 0.5.4 CONTORNO do Cartoon (alpha.z = −4; Text3D append_toon_outline).
+    // mr.xy = largura em NDC (2·px/largura e 2·px/altura da composição): o traço
+    // tem a mesma espessura relativa em qualquer resolução de render.
+    //  · uv1.y = 0: CASCO (triângulos invertidos) empurrado para fora na direção
+    //    de tela da normal suavizada — a silhueta grossa.
+    //  · uv1.y = 1: VINCO — a "normal" é a OUTRA ponta da aresta; o segmento vira
+    //    um quadrilátero de 0,6 × largura, com meia largura a mais nas pontas
+    //    (cantos fechados), puxado um pouco para a câmera (fica por cima das
+    //    faces da própria aresta; atrás de outra face continua escondido).
+    if (u.alpha.z < -3.5 && clip.w > 1e-6) {
+        vec2 ndcW = max(u.mr.xy, vec2(1e-7));
+        if (a_uv1.y > 0.5) {
+            vec4 other = u.viewProj * (model * vec4(a_normal, 1.0));
+            vec2 d = other.w > 1e-6 ? (other.xy / other.w - clip.xy / clip.w) / ndcW : vec2(0.0);
+            float len = length(d);
+            vec2 dir = len > 1e-6 ? d / len : vec2(1.0, 0.0);
+            vec2 perp = vec2(-dir.y, dir.x);
+            vec2 off = (perp * (0.3 * a_uv1.x) - dir * 0.3) * ndcW;
+            clip.xy += off * clip.w;
+            clip.z *= 1.0008;
+        } else {
+            vec4 nClip = u.viewProj * vec4(normalize(nm * n), 0.0);
+            vec2 d = (nClip.xy * clip.w - clip.xy * nClip.w) / ndcW;
+            float len = length(d);
+            if (len > 1e-8) clip.xy += (d / len) * ndcW * clip.w;
+        }
+    }
+    gl_Position = clip;
 }

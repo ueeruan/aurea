@@ -69,7 +69,9 @@ class AppStorage(
     /** Onde ficam as cópias que a galeria recusou (Exporter.keepInAppFolder) e as do Aurea AI. */
     private fun exportDirs(): List<File> =
         listOf(Environment.DIRECTORY_MOVIES, Environment.DIRECTORY_PICTURES, Environment.DIRECTORY_DOWNLOADS)
-            .mapNotNull { context.getExternalFilesDir(it)?.let { dir -> File(dir, "Aurea") } }
+            .mapNotNull { context.getExternalFilesDir(it)?.let { dir -> File(dir, "Aurea") } } +
+            // 0.5.3 (P0-2): o vídeo que nem a pasta externa aceitou (Exporter.rescueTemp) conta e é limpo junto.
+            File(files, "exports")
 
     /** O que apagar projetos libera: os caminhos (só os do motor) e a estimativa em bytes. */
     class Release(val paths: Array<String>, val bytes: Long)

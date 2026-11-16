@@ -128,7 +128,7 @@ struct EffectsView: View {
     }
     private var railLook: KeyframeLook {
         if meshSelected, let effect = openId, let layer = model.primarySelection {
-            let keys = (model.keyframes[layer] ?? []).filter { $0.property == 44 && $0.effectIndex == effect }
+            let keys = (model.keysForLayer(layer) ?? []).filter { $0.property == 44 && $0.effectIndex == effect }
             return keys.contains { $0.time == model.localPlayhead } ? .keyHere : keys.isEmpty ? .none : .animated
         }
         guard let selected = railSelection else { return .none }
@@ -136,7 +136,7 @@ struct EffectsView: View {
     }
     private var selectedTrack: [KeyframeItem] {
         guard let selected = railSelection, let layer = model.primarySelection else { return [] }
-        return (model.keyframes[layer] ?? []).filter { $0.property == 31 && $0.effectIndex == selected.effect && $0.paramIndex == selected.param * 4 + UInt32(selected.component) }.sorted { $0.time < $1.time }
+        return (model.keysForLayer(layer) ?? []).filter { $0.property == 31 && $0.effectIndex == selected.effect && $0.paramIndex == selected.param * 4 + UInt32(selected.component) }.sorted { $0.time < $1.time }
     }
     private var canExpress: Bool {
         guard !meshSelected, let p = railParam else { return false }
@@ -761,14 +761,10 @@ struct EffectsView: View {
 
     // --- Ferramentas-efeito na lista (máscaras, rastreio de câmera, legendas) ---
     /// As ferramentas que a camada usa, na ordem das linhas.
-    private var tools: [FxEffectTool] {
-        guard tabbed else { return [] }
-        var out: [FxEffectTool] = []
-        if maskTool { out.append(.mask) }
-        if cameraTracked { out.append(.cameraTrack) }
-        if captionCount > 0 { out.append(.captions) }
-        return out
-    }
+    /// Funções (F8, 13/11/2026): a lista de Efeitos mostra SÓ efeitos (par do EffectsPanel.kt).
+    /// Máscara, legendas e rastreio de câmera têm porta própria (botão Máscara / Editar da
+    /// grade, navegador de Efeitos, Funções do Aurea › Rastreio).
+    private var tools: [FxEffectTool] { [] }
     /// A Máscara posta pelo catálogo fica na lista mesmo vazia (o painel fechou
     /// sem caminho): a linha é a volta para desenhar. Sai só pelo 🗑 dela.
     private var maskTool: Bool {
@@ -797,6 +793,7 @@ struct EffectsView: View {
                 : hasMatte ? AureaText.t("panel_recorte_outra_camada") : AureaText.t("fxui_tool_mask_empty")
         case .captions: subtitle = AureaText.t("fxui_tool_captions_n", captionCount)
         case .cameraTrack: subtitle = AureaText.t("fxui_tool_camera_ready")
+        default: subtitle = ""   // funções do AUREA não ficam na lista de efeitos
         }
         return HStack(spacing: 0) {
             HStack(spacing: 0) {
@@ -859,7 +856,8 @@ struct EffectsView: View {
             model.selectedMask = nil; model.selectedMaskPoint = nil; model.maskDrawing = false
         case .captions:
             model.engine.removeCaptions(id)
-        case .cameraTrack:
+        default:
+            // Rastreio de câmera e as funções do AUREA não entram na pilha: nada a tirar.
             return
         }
         model.refreshModel(force: true); refreshTools()
@@ -897,7 +895,7 @@ struct EffectsView: View {
     }
     private var opacityLook: KeyframeLook {
         guard let layer = model.primarySelection else { return .none }
-        let keys = (model.keyframes[layer] ?? []).filter { $0.property == 12 }
+        let keys = (model.keysForLayer(layer) ?? []).filter { $0.property == 12 }
         return keys.contains(where: { $0.time == model.localPlayhead }) ? .keyHere : keys.isEmpty ? .none : .animated
     }
     private func setOpacity(_ value: Float) {
@@ -1011,6 +1009,8 @@ struct EffectsView: View {
                                     FxEqResponseGraph(values: (0..<12).map { i in model.effectParams.first { $0.index == UInt32(i) }?.scalar ?? 0 })
                                 }
                                 ForEach(bodyLayout.main) { param in parameter(param, effect: id, disabledBy: nil) }
+                                ForEach(bodyLayout.sections) { section in sectionView(section, effect: effect) }
+                                // Funções (F8): "Avançado" é a ÚLTIMA seção, no mesmo nível das outras.
                                 if !bodyLayout.advanced.isEmpty {
                                     FxSectionHeader(title: AureaText.t("om_fx_advanced"), open: advancedIsOpen,
                                                     count: bodyLayout.advanced.count, identifier: "effects.section.\(id).advanced",
@@ -1021,7 +1021,6 @@ struct EffectsView: View {
                                         ForEach(bodyLayout.advanced) { param in parameter(param, effect: id, disabledBy: nil) }
                                     }
                                 }
-                                ForEach(bodyLayout.sections) { section in sectionView(section, effect: effect) }
                             }
                         }
                     }
@@ -1564,7 +1563,7 @@ struct EffectsView: View {
     }
     private func look(effect: UInt32, param: UInt32, component: Int? = nil) -> KeyframeLook {
         guard let layer = model.primarySelection else { return .none }
-        let keys = (model.keyframes[layer] ?? []).filter { $0.property == 31 && $0.effectIndex == effect && $0.paramIndex / 4 == param && (component == nil || $0.paramIndex % 4 == UInt32(component!)) }
+        let keys = (model.keysForLayer(layer) ?? []).filter { $0.property == 31 && $0.effectIndex == effect && $0.paramIndex / 4 == param && (component == nil || $0.paramIndex % 4 == UInt32(component!)) }
         return keys.contains(where: { $0.time == model.localPlayhead }) ? .keyHere : keys.isEmpty ? .none : .animated
     }
 
@@ -1627,7 +1626,7 @@ struct EffectsView: View {
             },
             .item(AureaText.t(clipboardType != 0 ? "om_fx_list_paste_one" : "panel_colar_efeitos"),
                   enabled: hasClipboard && !locked, tag: "effects.list.paste") {
-                model.engine.pasteEffects(model.selection.map { NSNumber(value: $0) }); model.refreshModel(force: true)
+                model.engine.pasteEffects(model.editingSelection.map { NSNumber(value: $0) }); model.refreshModel(force: true)
             },
             .divider,
             .item(AureaText.t(anyOn ? "panel_desligar_todos" : "panel_ligar_todos"), enabled: !effects.isEmpty && !locked,
@@ -1749,7 +1748,7 @@ struct EffectsView: View {
         }
         guard let selection = railSelection, let param = currentParam(selection.param), let layer = model.primarySelection,
               model.selectedLayer?.locked != true, param.flags & 1 != 0 else { return }
-        let here = (model.keyframes[layer] ?? []).filter { $0.property == 31 && $0.effectIndex == selection.effect && $0.paramIndex / 4 == param.index && $0.time == model.localPlayhead }
+        let here = (model.keysForLayer(layer) ?? []).filter { $0.property == 31 && $0.effectIndex == selection.effect && $0.paramIndex / 4 == param.index && $0.time == model.localPlayhead }
         model.beginGesture("keyframe de efeito")
         if here.isEmpty {
             for component in 0..<fxComponentCount(Int(param.type)) {
@@ -1763,7 +1762,7 @@ struct EffectsView: View {
     /// Segurar ◆ com keyframe no quadro: apaga TODAS as marcas do parâmetro, um passo.
     private func deleteAllKeys() {
         guard let selection = railSelection, let layer = model.primarySelection, model.selectedLayer?.locked != true else { return }
-        let keys = (model.keyframes[layer] ?? []).filter { $0.property == 31 && $0.effectIndex == selection.effect && $0.paramIndex / 4 == selection.param }
+        let keys = (model.keysForLayer(layer) ?? []).filter { $0.property == 31 && $0.effectIndex == selection.effect && $0.paramIndex / 4 == selection.param }
         guard !keys.isEmpty else { return }
         model.beginGesture("apagar keyframes")
         for key in keys {
@@ -1897,7 +1896,7 @@ struct EffectsView: View {
     /// Escolheu no navegador: adiciona NO FIM da pilha das camadas escolhidas. A
     /// lista decide se abre (só o 1º efeito da camada abre sozinho).
     private func pick(_ entry: EffectCatalogItem) {
-        let targets = model.layers.filter { model.selection.contains($0.id) && !$0.locked }
+        let targets = model.editingLayers.filter { model.editingSelection.contains($0.id) && !$0.locked }
         guard model.started, !targets.isEmpty, pendingPick == nil else { return }
         if let layer = model.primarySelection { model.seenEffectIds[layer] = Set(shown.map(\.effectId)) }
         pendingPick = entry.typeId

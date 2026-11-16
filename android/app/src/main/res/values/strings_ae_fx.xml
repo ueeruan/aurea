@@ -22,6 +22,7 @@
     <string name="aefx_name_emboss">Relevo</string>
     <string name="aefx_name_color_emboss">Relevo colorido</string>
     <string name="aefx_name_radial_shadow">Sombra radial</string>
+    <string name="aefx_name_upscale">Ampliação com preservação de detalhes</string>
     <string name="aefx_name_inner_shadow">Sombra interna</string>
     <string name="aefx_name_bevel_edges">Bisel das bordas</string>
     <string name="aefx_name_brush_strokes">Pinceladas</string>

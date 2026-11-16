@@ -58,6 +58,14 @@ internal class RowModel(
     val clipToBelow: Boolean = false,
     /** Tímida (o Shy do AE): sai da lista com "Ocultar camadas tímidas" ([withoutShy]). */
     val shy: Boolean = false,
+    /**
+     * 0.5.3 (grupo aberto na timeline): != 0 = camada de DENTRO desse grupo da
+     * composição aberta, mostrada recuada embaixo dele. O [id] só vale junto com
+     * o grupo (cada composição tem os seus ids); início/fim já no tempo de fora.
+     */
+    val group: Long = 0L,
+    /** Linha de dentro que dá para mover/aparar no lugar (o grupo anda 1:1 com o tempo de dentro). */
+    val inlineEditable: Boolean = true,
 ) {
     /** Tem losango à vista, forte ou esmaecido (o trilho e o nome sobem). */
     val hasKeys: Boolean get() = instants.isNotEmpty() || dimInstants.isNotEmpty()
@@ -70,6 +78,9 @@ internal class RowModel(
         for (s in segments) if (s.id == id) return s
         return null
     }
+
+    /** Linha de dentro de um grupo aberto na timeline (0.5.3). */
+    val inner: Boolean get() = group != 0L
 
     /** Vídeo e imagem têm miniatura no motor; o resto é só a cor. */
     val hasThumbs: Boolean get() = track == null && (type == LayerType.Video || type == LayerType.Image)
@@ -214,6 +225,37 @@ internal fun buildRow(l: LayerRow, all: List<KeyframeRow>, name: String = l.name
         line = l.trackId,
         clipToBelow = l.clipToBelow,
         shy = l.shy,
+    )
+}
+
+/**
+ * 0.5.3 ("Please let us expand group, seeing all contents of it without
+ * ungrouping!!"): as camadas de dentro de cada grupo aberto entram logo depois
+ * da linha do grupo (e das trilhas abertas dele), recuadas. Sem grupo aberto, a
+ * MESMA lista volta. Par do `timelineWithInlineGroups` do iOS.
+ */
+internal fun withInlineGroups(rows: List<RowModel>, inner: Map<Long, List<RowModel>>): List<RowModel> {
+    if (inner.isEmpty()) return rows
+    val out = ArrayList<RowModel>(rows.size + inner.values.sumOf { it.size })
+    var i = 0
+    while (i < rows.size) {
+        val r = rows[i]
+        out.add(r)
+        i++
+        if (r.track != null || r.inner || r.type != LayerType.Group) continue
+        while (i < rows.size && rows[i].track != null && rows[i].id == r.id) out.add(rows[i++])
+        inner[r.id]?.let { out.addAll(it) }
+    }
+    return out
+}
+
+/** A linha recuada de uma camada de dentro de um grupo (sem losangos: os keyframes ficam no grupo aberto). */
+internal fun innerGroupRow(g: com.aurea.aurea.state.GroupInnerRow): RowModel {
+    val l = g.row
+    return RowModel(
+        id = l.id, type = LayerType.of(l.kind), start = l.startFrame, end = l.endFrame, offset = l.offsetFrames,
+        visible = l.visible, locked = l.locked, magnetic = false, animated = l.animated, name = l.name, label = l.label,
+        instants = IntArray(0), keysAt = emptyArray(), shy = l.shy, group = g.group, inlineEditable = g.editable,
     )
 }
 
@@ -624,6 +666,12 @@ private fun trackName(track: TimelineTrack, effects: List<Pair<Int, String>>): S
         // AE animation: texto-fonte e o Ponto de Interesse da câmera de dois nós.
         50 -> LaneNames.get(R.string.ae_anim_source_text)
         51, 52, 53 -> LaneNames.get(R.string.ae_anim_poi_axis, listOf("X", "Y", "Z")[track.property - 51])
+        // Painel 3D › Animação: a Evolução do clipe do modelo (v75).
+        54 -> LaneNames.get(R.string.m3d_anim_progress)
+        55 -> LaneNames.get(R.string.m3d_anim_speed)
+        // 0.5.4 Cartoon do texto 3D: largura (0) e cor R/G/B (1..3) do contorno.
+        56 -> if (track.param == 0) LaneNames.get(R.string.t3d_cartoon_outline_width)
+            else LaneNames.get(R.string.t3d_cartoon_outline_color) + " " + (listOf("R", "G", "B").getOrNull(track.param - 1) ?: track.param.toString())
         else -> LaneNames.get(R.string.tl_3d, track.property)
     }
 }

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="fx_ref_radial_wipe_name">रेडियल वाइप</string>
+    <string name="fx_ref_radial_wipe_desc">नरम किनारों के साथ चित्र को घड़ी की दिशा में, विपरीत दिशा में या दोनों दिशाओं में दिखाएँ या छिपाएँ।</string>
+    <string name="fx_ref_clockwise">घड़ी की दिशा में</string>
+    <string name="fx_ref_counterclockwise">घड़ी की विपरीत दिशा में</string>
+    <string name="fx_ref_block_name">ब्लॉक विघटन</string>
+    <string name="fx_ref_block_desc">आकार, किनारे की कोमलता और मुलायम किनारों के नियंत्रण के साथ चित्र के ब्लॉक हटाता है।</string>
+    <string name="fx_ref_soft_edges">मुलायम किनारे</string>
+    <string name="fx_ref_left_locked">बायाँ लॉक</string>
+    <string name="fx_ref_right_locked">दायाँ लॉक</string>
+    <string name="fx_ref_top_locked">ऊपर लॉक</string>
+    <string name="fx_ref_bottom_locked">नीचे लॉक</string>
+    <string name="fx_ref_fast_blur_name">तेज़ धुंधलापन</string>
+</resources>

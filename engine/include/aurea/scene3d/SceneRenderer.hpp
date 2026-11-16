@@ -153,6 +153,10 @@ struct SceneNodeTexture {
     u32 node = 0;
     TextureHandle texture{};
     f32 repeat = 1.0f;
+    /// v76: deslocamento (em repetições da imagem, com o rolar do instante já
+    /// somado) e giro (radianos) da textura — KHR_texture_transform.
+    Vec2 offset{0.0f, 0.0f};
+    f32 rotation = 0.0f;
 };
 
 /// TEXTURA DO MATERIAL (0.3.6, MaterialOverride::textureImage/textureLayer):
@@ -190,6 +194,13 @@ struct SceneInstance {
     std::vector<u32>  skinJointOffset; ///< início de cada skin em jointMatrices
     std::vector<std::vector<f32>> morphWeights;   ///< por nó (vazio = pesos da malha)
     std::vector<MaterialOverride> materials; ///< Per-instance factors; GPU/source assets remain shared.
+    /// 0.5.4 Cartoon (Material::toon == 2): largura do contorno em NDC
+    /// (2·px/largura e 2·px/altura da COMPOSIÇÃO — a mesma em qualquer
+    /// resolução de render) e a cor dele (linear). Zero = sem contorno. O
+    /// renderer aplica numa cópia do material do contorno; vem da receita ou da
+    /// trilha TrackProperty::Text3DOutline (place_model, Renderer.cpp).
+    Vec2 outlineNdc{0.0f, 0.0f};
+    Vec4 outlineColor{0.0f, 0.0f, 0.0f, 1.0f};
     /// Opacidade por nó (vazio = tudo 1): letras do texto 3D animadas. Abaixo
     /// de 1 o nó mistura como transparente; perto de 0 nem desenha.
     std::vector<f32> nodeOpacity;
@@ -533,7 +544,8 @@ public:
     [[nodiscard]] bool build(FrameGraph& graph, Arena& arena, const SceneFrame& frame, u32 width, u32 height,
                              u64 frameNumber, FGTexture& outColor, const std::vector<ScenePlane>* planes = nullptr,
                              const SceneParticleDraw* particles = nullptr, u32 particleCount = 0,
-                             FGTexture* outDepth = nullptr, FGTexture* outExposureHdr = nullptr) noexcept;
+                             FGTexture* outDepth = nullptr, FGTexture* outExposureHdr = nullptr,
+                             Vec2 previewJitterPixels = {}) noexcept;
     /// Complete a linear temporal exposure once, after all geometry samples.
     [[nodiscard]] FGTexture finish_exposure(FrameGraph& graph, const SceneFrame& frame, u32 width, u32 height,
                                             FGTexture display, FGTexture scene, bool bloomHasRadiance = true) noexcept;
@@ -646,6 +658,11 @@ public:
     void set_ao_quality(u32 directions, u32 steps) noexcept { aoDirections_ = directions; aoSteps_ = steps; }
     /// 0.4.6: reflexos de tela (SSR) nas superfícies lisas. Ligados por padrão.
     void set_screen_reflections(bool on) noexcept { screenReflections_ = on; }
+    void set_screen_effect_quality(u32 divisor, u32 reflectionSteps, u32 volumetricSteps) noexcept {
+        screenEffectDiv_ = divisor >= 4 ? 4u : 2u;
+        reflectionSteps_ = std::clamp(reflectionSteps, 8u, 48u);
+        volumetricSteps_ = std::clamp(volumetricSteps, 8u, 40u);
+    }
     [[nodiscard]] bool screen_reflections() const noexcept { return screenReflections_; }
     void set_quality(u32 shadowMapSize, u32 shadowFilter, f32 lodBias, bool lodHysteresis = true) noexcept {
         lodHysteresis_ = lodHysteresis;
@@ -707,6 +724,7 @@ private:
     bool ambientOcclusion_ = true;   ///< 0.4.6: GTAO (set_ambient_occlusion)
     u32 aoDirections_ = 2, aoSteps_ = 4;   ///< custo do GTAO neste quadro (HeavyQuality)
     bool screenReflections_ = true;  ///< 0.4.6: SSR (set_screen_reflections)
+    u32 screenEffectDiv_ = 2, reflectionSteps_ = 24, volumetricSteps_ = 20;
     f32 lodBias_ = 1.0f;
     bool lodHysteresis_ = true;
     bool instancing_ = true;

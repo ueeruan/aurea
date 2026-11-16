@@ -193,17 +193,19 @@ class Beta008DeviceTest {
         launch("008 directional controls")
         compose.runOnIdle { store.addShape3D(0); store.addLight(0); store.enterSceneEditor() }
         compose.waitUntil(10000) { store.detail?.kind == 9 && store.sceneEditor }
-        compose.onNodeWithText(context.getString(R.string.pn_t3d_lighting)).performClick()
-        compose.onNodeWithTag("scene.light.shadows").assertIsOn().performClick()
-        compose.onNodeWithTag("scene.light.shadows").assertIsOff()
+        compose.onNodeWithTag("scene.light").performClick()
+        compose.onNodeWithTag("property.light.castShadows").performScrollTo().assertIsOn().performClick()
+        compose.onNodeWithTag("property.light.castShadows").assertIsOff()
         assertEquals(0f, store.lightInfo()!![8], .0001f)
         compose.runOnIdle { store.undo() }
-        compose.onNodeWithTag("scene.light.shadows").assertIsOn()
+        compose.onNodeWithTag("property.light.castShadows").assertIsOn()
         assertEquals(1f, store.lightInfo()!![8], .0001f)
         compose.runOnIdle { store.setLightParam(1, 7f) }
-        compose.onNodeWithTag("scene.light.1").assertTextContains("7.0")
+        compose.onNodeWithTag("property.light.intensity").performScrollTo()
+            .assert(hasAnyDescendant(hasText(String.format(java.util.Locale.getDefault(), "%.2f", 7f))))
         compose.runOnIdle { store.undo() }
-        compose.onNodeWithTag("scene.light.1").assertTextContains("3.0")
+        compose.onNodeWithTag("property.light.intensity")
+            .assert(hasAnyDescendant(hasText(String.format(java.util.Locale.getDefault(), "%.2f", 3f))))
         note("PASS directional native shadow/intensity controls refresh and undo")
     }
 }

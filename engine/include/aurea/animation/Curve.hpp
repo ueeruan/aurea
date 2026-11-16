@@ -61,12 +61,28 @@ struct Keyframe {
     /// do fim da struct: o tamanho continua 48 bytes.
     u8 easePower = 1;
 
+    /// Lote K (AE): bits kKeyAutoBezier / kKeyContinuous / kKeyRoving. Zero =
+    /// o keyframe de sempre (alças só do usuário). Também mora no
+    /// preenchimento: o tamanho continua 48 bytes. v73 no arquivo.
+    u8 flags = 0;
+
     [[nodiscard]] bool operator<(FrameIndex other) const noexcept { return time < other; }
     [[nodiscard]] bool operator<(const Keyframe& o) const noexcept { return time < o.time; }
 };
 
 static_assert(std::is_trivially_copyable_v<Keyframe>, "Keyframe vai cru para o .aurea");
-static_assert(sizeof(Keyframe) == 48, "easePower cabe no preenchimento");
+static_assert(sizeof(Keyframe) == 48, "easePower e flags cabem no preenchimento");
+
+/// Bézier automática temporal (AE "Auto Bezier"): as duas alças do key saem da
+/// inclinação entre os vizinhos e são refeitas quando ele ou um vizinho muda.
+inline constexpr u8 kKeyAutoBezier = 1u << 0;
+/// Bézier contínua (AE "Continuous Bezier"): a velocidade de chegada e a de
+/// saída são a mesma (a média das duas quando algo muda).
+inline constexpr u8 kKeyContinuous = 1u << 1;
+/// Vagante (AE "Rove Across Time"): key de posição do meio cujo tempo segue o
+/// comprimento do caminho entre os keys fixos vizinhos (velocidade constante).
+inline constexpr u8 kKeyRoving = 1u << 2;
+inline constexpr u8 kKeyFlagMask = kKeyAutoBezier | kKeyContinuous | kKeyRoving;
 
 /// Força válida (1..3); 0 ou lixo de arquivo viram 1.
 [[nodiscard]] constexpr u8 clamp_ease_power(u32 power) noexcept {
@@ -215,8 +231,19 @@ struct Track {
     u32 move(FrameIndex from, FrameIndex to) noexcept;
 
     /// `power` 0 = mantém a força atual do keyframe; 1..3 = nova força.
+    /// Alças escolhidas à mão: o key e o seguinte deixam de ser automáticos
+    /// (kKeyAutoBezier), como ao puxar a alça no AE.
     void set_interpolation(FrameIndex t, Interpolation in, f32 bx1, f32 by1,
                            f32 bx2, f32 by2, u8 power = 0) noexcept;
+
+    /// Lote K: refaz as alças dos keys com kKeyAutoBezier / kKeyContinuous
+    /// (a track inteira; sem nenhum desses keys não faz nada). `set` e `move`
+    /// já chamam; quem reescreve `keys` direto chama depois.
+    void resolve_auto_handles() noexcept;
+    [[nodiscard]] bool has_auto_handles() const noexcept {
+        for (const Keyframe& k : keys) if (k.flags & (kKeyAutoBezier | kKeyContinuous)) return true;
+        return false;
+    }
 
     /// Primeiro e último tempo com keyframe. Usados para desenhar a barra de
     /// keyframes na timeline sem varrer tudo a cada quadro.

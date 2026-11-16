@@ -50,6 +50,16 @@ data class CaptionSettings(
     val box: Boolean = false,
     val boxColor: FloatArray = floatArrayOf(0f, 0f, 0f, 0.7f),
     val shadow: Boolean = false,
+    // 0.5.3 (Criar legendas, no jeito do Premiere) e a aparência nova; padrões = o de antes.
+    val minDurationSec: Float = 0.8f,
+    val gapFrames: Int = 0,
+    val breakOnSentence: Boolean = false,
+    val align: Int = 1,
+    val lineSpacing: Float = 1.15f,
+    val boxPadding: Float = 0.3f,
+    val boxRadius: Float = 0.25f,
+    val shadowColor: FloatArray = floatArrayOf(0f, 0f, 0f, 0.6f),
+    val shadowBlur: Float = 0.12f,
 ) {
     fun has(bit: Int) = look and bit != 0
     fun with(bit: Int, on: Boolean) = copy(look = if (on) look or bit else look and bit.inv())
@@ -64,6 +74,9 @@ data class CaptionSettings(
         put("look", look); put("fontFamily", fontFamily); put("fontWeight", fontWeight); put("fontItalic", fontItalic); put("fontPath", fontPath)
         put("fill", rgba(fill)); put("stroke", rgba(stroke)); put("strokeFrac", strokeFrac.toDouble())
         put("box", box); put("boxColor", rgba(boxColor)); put("shadow", shadow)
+        put("minDurationSec", minDurationSec.toDouble()); put("gapFrames", gapFrames); put("breakOnSentence", breakOnSentence)
+        put("align", align); put("lineSpacing", lineSpacing.toDouble()); put("boxPadding", boxPadding.toDouble())
+        put("boxRadius", boxRadius.toDouble()); put("shadowColor", rgba(shadowColor)); put("shadowBlur", shadowBlur.toDouble())
     }.toString()
 
     companion object {
@@ -91,6 +104,12 @@ data class CaptionSettings(
                 fill = o.color("fill", base.fill), stroke = o.color("stroke", base.stroke),
                 strokeFrac = o.optDouble("strokeFrac", base.strokeFrac.toDouble()).toFloat(),
                 box = o.optBoolean("box", base.box), boxColor = o.color("boxColor", base.boxColor), shadow = o.optBoolean("shadow", base.shadow),
+                minDurationSec = o.optDouble("minDurationSec", base.minDurationSec.toDouble()).toFloat(),
+                gapFrames = o.optInt("gapFrames", base.gapFrames), breakOnSentence = o.optBoolean("breakOnSentence", base.breakOnSentence),
+                align = o.optInt("align", base.align), lineSpacing = o.optDouble("lineSpacing", base.lineSpacing.toDouble()).toFloat(),
+                boxPadding = o.optDouble("boxPadding", base.boxPadding.toDouble()).toFloat(),
+                boxRadius = o.optDouble("boxRadius", base.boxRadius.toDouble()).toFloat(),
+                shadowColor = o.color("shadowColor", base.shadowColor), shadowBlur = o.optDouble("shadowBlur", base.shadowBlur.toDouble()).toFloat(),
             )
         }
     }
@@ -103,6 +122,8 @@ object CaptionLook {
     const val STROKE = 4
     const val BOX = 8
     const val SHADOW = 16
+    /** 0.5.3: alinhamento e entrelinha (text::kCaptionLookLayout). */
+    const val LAYOUT = 32
 }
 
 /** Aparência resolvida pelo motor (presets::caption_preview_json), para desenhar a amostra. */
@@ -213,6 +234,7 @@ class CaptionsState(
         transcription = null
         layer = null
         track = null
+        selectedBlocks = emptySet()
         captionCount = 0
         error = null
         notice = null
@@ -236,18 +258,66 @@ class CaptionsState(
         return CaptionBlockLook(engine, this, ids, initial)
     }
 
-    fun editBlocks(command: org.json.JSONObject) {
-        val current = track ?: return
-        if (!engine.editCaptionTrack(current.layer, command.toString())) { error = AppText.get(app, R.string.app_caption_edit_overlap); return }
+    /**
+     * Uma operação do motor na faixa (um passo de desfazer). Falhou: nada
+     * mudou e [failure] vira o erro mostrado.
+     */
+    fun editBlocks(command: org.json.JSONObject, failure: Int = R.string.app_caption_edit_overlap): Boolean {
+        val current = track ?: return false
+        if (!engine.editCaptionTrack(current.layer, command.toString())) { error = AppText.get(app, failure); return false }
         error = null
-        track = parseCaptionTracks(engine.captionTracks()).firstOrNull { it.layer == current.layer }
+        refreshTrack(current.layer)
         onModelChanged()
+        return true
+    }
+
+    /** Relê a faixa (depois de editar, desfazer ou mexer na timeline). */
+    fun refreshTrack(layerId: Long? = track?.layer) {
+        val id = layerId ?: return
+        track = parseCaptionTracks(engine.captionTracks()).firstOrNull { it.layer == id }
+        val ids = track?.segments?.mapTo(HashSet()) { it.id }.orEmpty()
+        if (!ids.containsAll(selectedBlocks)) selectedBlocks = selectedBlocks.filterTo(LinkedHashSet()) { it in ids }
+    }
+
+    /**
+     * 0.5.3: os blocos escolhidos na aba Legendas. A aba Estilo aplica neles
+     * (ou na faixa toda) e a timeline marca o bloco escolhido.
+     */
+    var selectedBlocks by mutableStateOf<Set<Long>>(emptySet())
+
+    /** SRT ou WebVTT da faixa, nos tempos da timeline; vazio = sem faixa. */
+    fun exportCaptions(vtt: Boolean): String = track?.let { engine.captionExport(it.layer, vtt) }.orEmpty()
+
+    /** Buscar e substituir na transcrição (o tempo das palavras fica). Devolve as trocas. */
+    fun replaceInTranscript(find: String, replacement: String, matchCase: Boolean): Int {
+        val (next, n) = CaptionWorkspace.replaceWords(words, find, replacement, matchCase)
+        if (n == 0) return 0
+        setWords(next, source)
+        persist()
+        return n
+    }
+
+    /**
+     * Legendas só do trecho [from]..[to] da transcrição. Com a faixa pronta, o
+     * motor refaz os blocos que o trecho cobre (o resto fica); sem faixa, ela
+     * nasce só com o trecho.
+     */
+    fun createFromWords(from: Int, to: Int) {
+        if (busy != null || words.isEmpty()) return
+        val a = from.coerceIn(0, words.lastIndex); val b = to.coerceIn(a, words.lastIndex)
+        val part = words.subList(a, b + 1).let { if (settings.removeFillers) it.filterIndexed { i, _ -> (a + i) !in fillers } else it }
+        if (part.isEmpty()) return
+        if (track == null) { generate(part); return }
+        val list = JSONArray()
+        part.forEach { w -> list.put(JSONObject().put("text", w.text).put("start", w.start).put("end", w.end)) }
+        editBlocks(JSONObject().put("op", "from_words").put("words", list), R.string.cap053_selection_failed)
     }
 
     var hasGroqKey by mutableStateOf(vault.has(KeyVault.GROQ))
         private set
     var layer by mutableStateOf<Long?>(null)
         private set
+    fun wordFrame(seconds: Double): Long = layer?.let { engine.captionWordFrame(it, seconds) } ?: -1L
     var words by mutableStateOf<List<Word>>(emptyList())
         private set
     /** Palavras marcadas como vício de linguagem (mesmo critério do motor). */
@@ -384,7 +454,9 @@ class CaptionsState(
 
     fun open(layerId: Long) {
         val tracks = parseCaptionTracks(engine.captionTracks())
+        val was = track?.layer
         track = tracks.firstOrNull { it.layer == layerId || it.source == layerId }
+        if (track?.layer != was) selectedBlocks = emptySet() else refreshTrack()
         val sourceId = tracks.firstOrNull { it.layer == layerId }?.source ?: layerId
         openSource(sourceId)
         if (track != null) loadTrackOptions() else if (preview == null) refreshPreview()
@@ -564,14 +636,15 @@ class CaptionsState(
     }
 
     /** Cria (ou refaz) as camadas de legenda — um passo de desfazer. */
-    fun generate() {
+    fun generate(only: List<Word>? = null) {
         if (busy != null) return
         val request = generation
         val id = layer ?: return
-        if (words.isEmpty()) return
+        val source = only ?: words
+        if (source.isEmpty()) return
         val options = settings.toJson()
-        val texts = words.map { it.text }.toTypedArray()
-        val times = DoubleArray(words.size * 2) { i -> if (i % 2 == 0) words[i / 2].start else words[i / 2].end }
+        val texts = source.map { it.text }.toTypedArray()
+        val times = DoubleArray(source.size * 2) { i -> if (i % 2 == 0) source[i / 2].start else source[i / 2].end }
         // Fase 8D: milhares de palavras viram milhares de camadas (texto medido
         // uma a uma): fora da thread da UI, com aviso enquanto faz.
         busy = AppText.get(app, R.string.app_caption_creating)
@@ -581,6 +654,9 @@ class CaptionsState(
                 if (generation != request || layer != id) return@launch
                 if (n < 0) error = AppText.get(app, R.string.app_caption_create_failed, -n) else error = null
                 captionCount = engine.captionCount(id)
+                // A faixa nova já aparece nas abas Legendas e Estilo.
+                track = parseCaptionTracks(engine.captionTracks()).firstOrNull { it.source == id }
+                selectedBlocks = emptySet()
                 onModelChanged()
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) { if (generation == request) error = AppText.get(app, R.string.app_caption_create_failed, 10) }
@@ -592,6 +668,8 @@ class CaptionsState(
         val id = layer ?: return
         engine.removeCaptions(id)
         captionCount = engine.captionCount(id)
+        track = null
+        selectedBlocks = emptySet()
         onModelChanged()
     }
 

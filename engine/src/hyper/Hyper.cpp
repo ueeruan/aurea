@@ -3,6 +3,8 @@
 // =============================================================================
 #include "aurea/hyper/Hyper.hpp"
 #include "aurea/hyper/HyperStage.hpp"
+#include "aurea/effects/EffectRegistry.hpp"
+#include "aurea/scene3d/Text3D.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -14,6 +16,41 @@ namespace {
 f32 unit(f32 v, f32 fallback) noexcept { return std::isfinite(v) ? std::clamp(v, 0.0f, 1.0f) : fallback; }
 u8 byte_of(f32 v) noexcept { return static_cast<u8>(std::clamp(std::lround(v), 0l, 255l)); }
 } // namespace
+
+bool effect_requires_access(u32 effectTypeId) noexcept {
+    static constexpr u32 paidEffects[] = {
+        effect_type_id(effect_keys::kHyperUpscale),
+        effect_type_id(effect_keys::kHyperMotion),
+        effect_type_id(effect_keys::kHyperClean),
+        effect_type_id("aurea.motion.cartoon_moblur"),
+        effect_type_id("aurea.motion.twitch_reference"),
+        effect_type_id("aurea.glitch.signal_reference"),
+        effect_type_id("aurea.blur.sharpen_reference"),
+        effect_type_id("aurea.blur.fast_blur_reference"),
+        effect_type_id("aurea.stylize.find_edges_reference"),
+        effect_type_id("aurea.distort.wave_warp_reference"),
+        effect_type_id("aurea.transition.block_dissolve_reference"),
+        effect_type_id("aurea.transition.radial_wipe_reference"),
+        effect_type_id("aurea.distort.turbulent_displace_reference"),
+        effect_type_id("aurea.stylize.drop_shadow_reference"),
+        // Radial Blur, Radial Shadow, Posterize Time and Time Displacement
+        // (AE reference batches A/A2) are NOT here: their legacy versions were
+        // free, and an AE-faithful replacement of a free effect stays free.
+        effect_type_id("aurea.generate.extrude_reference"),
+        effect_type_id("aurea.glitch.glitchify_reference"),
+        effect_type_id(aurea::effect_keys::kTwitch),
+        effect_type_id(aurea::effect_keys::kGlitchify),
+        effect_type_id(aurea::effect_keys::kSignal),
+        effect_type_id(aurea::effect_keys::kRasterExtrude),
+    };
+    return std::find(std::begin(paidEffects), std::end(paidEffects), effectTypeId) != std::end(paidEffects);
+}
+
+bool text3d_requires_access() noexcept { return true; }
+
+bool model_source_requires_access(const std::string& sourcePath) noexcept {
+    return text3d_requires_access() && sourcePath.rfind(scene3d::kText3DScheme, 0) == 0;
+}
 
 Recipe sanitize(const Recipe& in) noexcept {
     Recipe r = in;

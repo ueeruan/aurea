@@ -111,24 +111,31 @@ struct BorderShadowPanel: View {
     @State private var swipeOffset: CGFloat = 0
     @State private var swipeAxis = 0
 
+    /// Funções (13/11/2026): aba pedida por quem abre o painel (o atalho "Sombra" do
+    /// texto); lida e limpa ao aparecer. Par do `BorderShadowRequest` do Android.
+    @MainActor static var requestedTab: String?
     private static let space = "border.shadow.list"
     private static let tabStroke = "stroke"
     private static let tabBorders = "borders"
     private static let tabShadow = "shadow"
+    /// Funções (F4): o fundo do texto (a caixa atrás das letras).
+    private static let tabBackdrop = "backdrop"
 
     // --- Estado lido do modelo ------------------------------------------------
     private var layerId: Int64 { model.primarySelection ?? 0 }
     private var locked: Bool { model.selectedLayer?.locked == true }
     private var isText: Bool { model.selectedLayer?.kind == 4 }
     private var isShape: Bool { model.selectedLayer?.kind == 5 && !model.isVectorLayer }
-    private var hasStroke: Bool { isText || isShape }
+    // Redesenho do vetor (13/11/2026): o traço do vetor mora em Borda e sombra › Traço, como na referência.
+    private var hasStroke: Bool { isText || isShape || model.isVectorLayer }
     private var currentTab: String {
         let chosen = tab ?? (hasStroke ? Self.tabStroke : Self.tabBorders)
+        if chosen == Self.tabBackdrop && !isText { return Self.tabBorders }
         return chosen == Self.tabStroke && !hasStroke ? Self.tabBorders : chosen
     }
     private var borders: [EffectItem] { model.decorations.filter { $0.role == EffectItem.roleBorder } }
     private var shadow: EffectItem? { model.decorations.first { $0.role == EffectItem.roleShadow } }
-    private var layerKeys: [KeyframeItem] { model.keyframes[layerId] ?? [] }
+    private var layerKeys: [KeyframeItem] { model.keysForLayer(layerId) ?? [] }
 
     private func param(_ effect: UInt32, _ index: UInt32) -> EffectParamItem? { params[effect]?.first { $0.index == index } }
     private func scalar(_ effect: UInt32, _ index: UInt32, _ fallback: Float = 0) -> Float {
@@ -162,15 +169,30 @@ struct BorderShadowPanel: View {
     private var shapeKeyBits: UInt32 { shapeValues.count >= 2 ? UInt32(max(0, shapeValues[shapeValues.count - 1])) : 0 }
 
     var body: some View {
-        PanelFrame(rail: rail(), tabs: tabs, selectedTab: currentTab, onTab: selectTab, scrollContent: false) {
-            switch currentTab {
-            case Self.tabStroke: strokeTab
-            case Self.tabBorders: bordersTab
-            default: shadowTab
+        Group {
+            if model.isVectorLayer && currentTab == Self.tabStroke {
+                // O Traço do vetor: largura, tinta, pontas, cantos e tracejado do caminho escolhido,
+                // com o trilho do vetor (◆ na linha escolhida) e as abas daqui (par do Android).
+                VectorPanel(face: .stroke, hostTabs: tabs, hostSelected: currentTab, onHostTab: selectTab)
+            } else {
+                PanelFrame(rail: rail(), tabs: tabs, selectedTab: currentTab, onTab: selectTab, scrollContent: false) {
+                    switch currentTab {
+                    case Self.tabStroke: strokeTab
+                    case Self.tabBorders: bordersTab
+                    case Self.tabBackdrop:
+                        ScrollView {
+                            TextAppearanceControls(page: 7).padding(.leading, 8).padding(.trailing, 12).padding(.top, 6).padding(.bottom, 10)
+                        }
+                    default: shadowTab
+                    }
+                }
             }
         }
         .foregroundStyle(AureaColors.text)
-        .onAppear { load(); updateTimelineFocus() }
+        .onAppear {
+            if let requested = Self.requestedTab { tab = requested; Self.requestedTab = nil }
+            load(); updateTimelineFocus()
+        }
         .onChange(of: model.primarySelection) { _ in resetForLayer(); load(); updateTimelineFocus() }
         .onChange(of: model.decorations) { _ in load(); closeIfMissing() }
         .onChange(of: model.status.modelRevision) { _ in load() }
@@ -184,6 +206,8 @@ struct BorderShadowPanel: View {
         if hasStroke { list.append(PanelTab(id: Self.tabStroke, label: AureaText.t("om_ap_bs_stroke"), glyph: CupertinoGlyph.Scribble)) }
         list.append(PanelTab(id: Self.tabBorders, label: AureaText.t("om_ap_bs_borders"), glyph: CupertinoGlyph.Square))
         list.append(PanelTab(id: Self.tabShadow, label: AureaText.t("om_ap_bs_shadow"), glyph: CupertinoGlyph.SquareStack3dDownRight))
+        // Funções (F4): o FUNDO do texto saiu das Opções de texto (par do BorderShadowPanel.kt).
+        if isText { list.append(PanelTab(id: Self.tabBackdrop, label: AureaText.t("panel_fundo"), glyph: CupertinoGlyph.Square)) }
         return list
     }
 

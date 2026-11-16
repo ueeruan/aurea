@@ -28,7 +28,7 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 uvMap;   // região do efeito → região da silhueta (identidade: mesma região)
     vec4 texel;
     vec4 p0;      // x,y = passo por amostra, z = só a sombra, w = opacidade
-    vec4 p1;
+    vec4 p1;      // z = reference filter already completed both axes
     vec4 p2;      // mapa de uv da camada: x,y = escala, z,w = deslocamento
     vec4 p3;      // x,y = px de layer por uv da silhueta (largura, altura da região)
     vec4 color;   // cor da sombra, linear
@@ -40,13 +40,17 @@ void main() {
     const vec2 uvPerPx = vec2(1.0) / max(p.p3.xy, vec2(1e-6));
     const vec2 uv = v_uv * p.uvMap.xy + p.uvMap.zw;
     const vec2 axis = p.p0.xy * uvPerPx;
-    float sum = 0.0, weight = 0.0;
-    for (int i = -kTaps; i <= kTaps; ++i) {
-        const float w = exp(-3.0 * float(i * i) / float(kTaps * kTaps));
-        sum += texture(u_tex0, uv + axis * float(i)).a * w;
-        weight += w;
+    float filteredAlpha = texture(u_tex0, uv).a;
+    if (p.p1.z < 0.5) {
+        float sum = 0.0, weight = 0.0;
+        for (int i = -kTaps; i <= kTaps; ++i) {
+            const float w = exp(-3.0 * float(i * i) / float(kTaps * kTaps));
+            sum += texture(u_tex0, uv + axis * float(i)).a * w;
+            weight += w;
+        }
+        filteredAlpha = sum / max(weight, 1e-6);
     }
-    const float shadowA = (sum / max(weight, 1e-6)) * clamp(p.p0.w, 0.0, 1.0) * clamp(p.color.a, 0.0, 1.0);
+    const float shadowA = filteredAlpha * clamp(p.p0.w, 0.0, 1.0) * clamp(p.color.a, 0.0, 1.0);
     const vec4 shadow = vec4(p.color.rgb * shadowA, shadowA);
     if (p.p0.z > 0.5) { o_color = shadow; return; }
     // The expanded region extends beyond the clip. Clamping its edge pixels

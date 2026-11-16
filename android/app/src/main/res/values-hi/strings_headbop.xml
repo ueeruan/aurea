@@ -3,7 +3,7 @@
 <resources>
     <string name="fx_name_headbop">हेडबॉप</string>
     <string name="fx_desc_headbop">फ़ोटो या वीडियो में व्यक्ति संगीत की बीट पर सिर और शरीर हिलाता है</string>
-    <string name="headbop_note">सिर और कंधे खोजने के लिए लेयर का विश्लेषण करें। कोई व्यक्ति न हो तो पूरा फ़्रेम हिलता है।</string>
+    <string name="headbop_note">दिखने वाले जोड़ों को पहचानने के लिए व्यक्ति का विश्लेषण करें। शरीर लय के साथ हिलता है, बाँहें मुड़ती हैं और पैर टिके रहते हैं।</string>
     <string name="headbop_analyze">विश्लेषण करें</string>
     <string name="headbop_reanalyze">फिर से विश्लेषण करें</string>
     <string name="headbop_analyzing">व्यक्ति और बीट का विश्लेषण हो रहा है…</string>

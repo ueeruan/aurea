@@ -284,6 +284,48 @@ u64 buffer_identity(CVPixelBufferRef pixel) {
     return static_cast<u64>(reinterpret_cast<uintptr_t>(pixel));
 }
 
+/// 0.5.4 ("coloquei 3 vídeos e alguns não apareciam", iPhone): o motivo REAL da
+/// recusa no log — domínio e código do AVFoundation e o erro de baixo (o
+/// OSStatus do VideoToolbox). Com 3+ vídeos 4K abrindo junto com o proxy e a
+/// miniatura, o reader falha com "decoder ocupado" (AVErrorDecoderTemporarily-
+/// Unavailable, -11839; VT -12913) ou "serviços de mídia reiniciados" (-11819).
+/// Os dois são passageiros: o motor tenta de novo (VideoSource) e troca o
+/// decoder que não volta (MediaManager::set_persistent_retry).
+void log_reader_error(const char* what, NSError* error) {
+    if (!error) {
+        AUREA_LOG_ERROR("videotoolbox: %s (sem NSError)", what);
+        return;
+    }
+    NSError* under = [error.userInfo[NSUnderlyingErrorKey] isKindOfClass:[NSError class]]
+        ? (NSError*)error.userInfo[NSUnderlyingErrorKey] : nil;
+    AUREA_LOG_ERROR("videotoolbox: %s (%s %ld; por baixo %s %ld): %s", what,
+                    error.domain.UTF8String ? error.domain.UTF8String : "?", static_cast<long>(error.code),
+                    under && under.domain.UTF8String ? under.domain.UTF8String : "-",
+                    under ? static_cast<long>(under.code) : 0L,
+                    error.localizedDescription.UTF8String ? error.localizedDescription.UTF8String : "");
+}
+
+/// Erro passageiro do decoder do sistema (ocupado, sessões tomadas, serviços
+/// de mídia reiniciados, memória): vale tentar de novo com um reader novo.
+bool reader_error_transient(NSError* error) {
+    if (!error) return true;
+    if ([error.domain isEqualToString:AVFoundationErrorDomain]) {
+        switch (error.code) {
+            case AVErrorDecoderTemporarilyUnavailable:
+            case AVErrorMediaServicesWereReset:
+            case AVErrorOperationInterrupted:
+            case AVErrorOutOfMemory:
+                return true;
+            default: break;
+        }
+    }
+    NSError* under = [error.userInfo[NSUnderlyingErrorKey] isKindOfClass:[NSError class]]
+        ? (NSError*)error.userInfo[NSUnderlyingErrorKey] : nil;
+    // kVTVideoDecoderNotAvailableNowErr (-12913) e kVTVideoDecoderMalfunctionErr
+    // (-12911): sessão de hardware recusada ou derrubada.
+    return under && (under.code == -12913 || under.code == -12911);
+}
+
 } // namespace
 
 // =============================================================================
@@ -443,7 +485,7 @@ bool AVFoundationVideoDecoder::start_reader(i64 fromUs) noexcept {
         NSError* error = nil;
         AVAssetReader* reader = [[AVAssetReader alloc] initWithAsset:asset_ error:&error];
         if (!reader) {
-            AUREA_LOG_ERROR("videotoolbox: reader recusado (%s)", error.localizedDescription.UTF8String);
+            log_reader_error("reader recusado", error);
             return false;
         }
         // Non-nil settings ask AVFoundation to decode and reorder B-frames.
@@ -468,20 +510,31 @@ bool AVFoundationVideoDecoder::start_reader(i64 fromUs) noexcept {
         // one nominal frame misses long VFR samples that began much earlier.
         i64 begin = 0;
         CMTime exactBegin = kCMTimeZero;
-        if (start > 0) {
-            if (!build_timing_index()) return false;
+        if (start > 0 && build_timing_index()) {
             const auto after = std::upper_bound(presentationTimes_.begin(), presentationTimes_.end(), start,
                 [](i64 us, const PresentationTime& sample) { return us < sample.us; });
             if (after != presentationTimes_.begin()) {
                 begin = (after - 1)->us;
                 exactBegin = (after - 1)->exact;
             }
+        } else if (start > 0) {
+            // 0.5.4: sem o índice de tempo (folga de memória do processo curta
+            // com 3+ vídeos 4K abertos, ou o leitor do índice recusado), o seek
+            // falhava e a camada ficava sem quadro em qualquer instante depois
+            // do 0. Agora o reader começa 1 s antes do alvo: cobre a amostra
+            // longa de um VFR e os quadros antes do alvo saem descartados
+            // (wrap_sample com deliverFromUs) — mais decode, nunca camada vazia.
+            begin = std::max<i64>(0, start - 1'000'000);
+            exactBegin = cm_time_us(begin);
+            AUREA_LOG_WARN("videotoolbox: sem indice de tempo; reader a partir de %lld us (alvo %lld us)",
+                           static_cast<long long>(begin), static_cast<long long>(start));
         }
         // Rounding a rational PTS to microseconds can move the range start
         // beyond the requested sample (e.g. 2/3s -> 666667us), excluding it.
         reader.timeRange = CMTimeRangeMake(exactBegin, kCMTimePositiveInfinity);
         if (![reader startReading]) {
-            AUREA_LOG_ERROR("videotoolbox: reader nao comecou (%s)", reader.error.localizedDescription.UTF8String);
+            log_reader_error(reader_error_transient(reader.error) ? "reader nao comecou (decoder ocupado; tenta de novo)"
+                                                                  : "reader nao comecou", reader.error);
             return false;
         }
         reader_ = reader;
@@ -592,9 +645,16 @@ Status AVFoundationVideoDecoder::next_frame(i64 deliverFromUs, FrameRef& out, i6
         }
         // O reader pode estar "failed" (arquivo truncado no meio): a fonte
         // recebe o fim e mostra o último quadro bom.
+        // 0.5.4: também falha quando o sistema recusa ou derruba o decoder (3+
+        // vídeos 4K abrindo junto com o proxy e a miniatura). Sai o reader: a
+        // próxima tentativa (VideoSource, com espera) monta outro do zero.
         if (reader_.status == AVAssetReaderStatusFailed) {
+            const bool transient = reader_error_transient(reader_.error);
+            log_reader_error(transient ? "reader falhou (decoder ocupado/derrubado; tenta de novo)" : "reader falhou",
+                             reader_.error);
+            teardown();
             endOfStream = true;
-            return Status{Errc::DecodeFailed, "leitura do arquivo falhou"};
+            return Status{Errc::DecodeFailed, transient ? "decoder de video ocupado" : "leitura do arquivo falhou"};
         }
         CMSampleBufferRef sample = [output_ copyNextSampleBuffer];
         if (!sample) {
@@ -603,8 +663,13 @@ Status AVFoundationVideoDecoder::next_frame(i64 deliverFromUs, FrameRef& out, i6
                 return OkStatus;
             }
             if (reader_.status == AVAssetReaderStatusCancelled || reader_.status == AVAssetReaderStatusFailed) {
+                const bool transient = reader_.status == AVAssetReaderStatusFailed && reader_error_transient(reader_.error);
+                if (reader_.status == AVAssetReaderStatusFailed)
+                    log_reader_error(transient ? "reader parou (decoder ocupado/derrubado; tenta de novo)" : "reader parou",
+                                     reader_.error);
+                teardown();
                 endOfStream = true;
-                return Status{Errc::DecodeFailed, "leitura do arquivo terminou mal"};
+                return Status{Errc::DecodeFailed, transient ? "decoder de video ocupado" : "leitura do arquivo terminou mal"};
             }
             return Status{Errc::DecodeFailed, "reader sem amostra antes do fim"};
         }
@@ -778,7 +843,9 @@ public:
     [[nodiscard]] bool probe(const char* sourcePath, MediaProbe& out) override {
         @autoreleasepool {
             if (!sourcePath || !*sourcePath) return false;
-            NSURL* url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:sourcePath]];
+            NSString* path = [NSString stringWithUTF8String:sourcePath];   // UTF-8 inválido: nil (fileURLWithPath:nil lança)
+            if (!path) return {};
+            NSURL* url = [NSURL fileURLWithPath:path];
             if (!url) return false;
             AVURLAsset* asset = [AVURLAsset URLAssetWithURL:url options:nil];
             if (!asset) return false;
@@ -839,7 +906,11 @@ public:
                                                                  MediaPriority priority) override {
         @autoreleasepool {
             if (asset.sourcePath.empty()) return nullptr;
-            NSURL* url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:asset.sourcePath.c_str()]];
+            // Caminho com UTF-8 inválido: nil, e fileURLWithPath:nil lança (na
+            // thread do open, o app fechava). Mesma guarda do ios_load_image.
+            NSString* path = [NSString stringWithUTF8String:asset.sourcePath.c_str()];
+            if (!path) return nullptr;
+            NSURL* url = [NSURL fileURLWithPath:path];
             if (!url) return nullptr;
             AVURLAsset* av = [AVURLAsset URLAssetWithURL:url options:nil];
             NSArray<AVAssetTrack*>* tracks = [av tracksWithMediaType:AVMediaTypeVideo];
@@ -855,7 +926,9 @@ public:
     [[nodiscard]] std::unique_ptr<audio::AudioDecoderBackend> open_audio(const char* sourcePath) override {
         @autoreleasepool {
             if (!sourcePath || !*sourcePath) return nullptr;
-            NSURL* url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:sourcePath]];
+            NSString* path = [NSString stringWithUTF8String:sourcePath];   // UTF-8 inválido: nil (fileURLWithPath:nil lança)
+            if (!path) return {};
+            NSURL* url = [NSURL fileURLWithPath:path];
             if (!url) return nullptr;
             AVURLAsset* av = [AVURLAsset URLAssetWithURL:url options:nil];
             NSArray<AVAssetTrack*>* tracks = [av tracksWithMediaType:AVMediaTypeAudio];
@@ -1457,7 +1530,11 @@ bool ios_load_image(const char* sourcePath, ImagePixels& out, void* ctx) {
     (void)ctx;
     @autoreleasepool {
         if (!sourcePath || !*sourcePath) return false;
-        NSURL* url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:sourcePath]];
+        // 0.5.3: caminho com UTF-8 inválido dá nil, e fileURLWithPath:nil lança
+        // NSInvalidArgumentException (o app fechava ao reabrir o projeto).
+        NSString* path = [NSString stringWithUTF8String:sourcePath];
+        if (!path) return false;
+        NSURL* url = [NSURL fileURLWithPath:path];
         if (!url) return false;
         CGImageSourceRef src = CGImageSourceCreateWithURL((__bridge CFURLRef)url,
             (__bridge CFDictionaryRef)@{(id)kCGImageSourceShouldCache: @NO});

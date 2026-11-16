@@ -27,6 +27,7 @@ from collections import defaultdict
 from pathlib import Path
 
 MAGIC = b"AUREAMSL"
+KNOWN_FLAGS = 0xF  # Mirrors xlate::kMslKnownFlags in ShaderTranslate.hpp.
 SLOT_PUSH = 30
 
 OP_VARIABLE = 59
@@ -85,7 +86,7 @@ def le_blob(p):
         return None, "magic errado: %r" % magic
     if version != 1:
         return None, "versao %d (esperada 1)" % version
-    if flags & ~1:
+    if flags & ~KNOWN_FLAGS:
         return None, "flags desconhecidas: %d" % flags
     if size == 0 or 32 + size > len(raw) + 3:
         return None, "payload de %d bytes nao cabe no arquivo (%d)" % (size, len(raw))

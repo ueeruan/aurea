@@ -109,11 +109,19 @@ internal fun puppetActive(store: EditorStore): Boolean {
  * camada escolhida — cria o efeito se ainda não tem — já no modo de pinos.
  */
 internal fun openPuppetTool(store: EditorStore, ui: EditorUi) {
-    val layer = store.primary ?: return
+    if (preparePuppetTool(store)) openPanel(store, ui, EditorPanel.Effects)
+}
+
+/**
+ * Põe (ou foca) o Fantoche na camada escolhida, já no modo de pinos. Falso sem
+ * camada. Quem chama abre o painel Efeitos (o navegador de Efeitos usa isto).
+ */
+internal fun preparePuppetTool(store: EditorStore): Boolean {
+    val layer = store.primary ?: return false
     val type = PuppetStage.TYPE
     PuppetStage.pendingEdit = layer
     if (store.effects.any { it.typeId == type }) store.focusExistingEffect(type) else store.addEffectAndFocus(type)
-    openPanel(store, ui, EditorPanel.Effects)
+    return true
 }
 
 private fun puppetCorners(store: EditorStore): FloatArray? {

@@ -430,9 +430,17 @@ struct MiniRender {
 // =============================================================================
 hyper::DeviceProfile Engine::hyper_cached_profile() noexcept {
     HyperState& h = hyper_state();
+    const auto currentLimits = [&](hyper::DeviceProfile profile) {
+        profile.abi64 = sizeof(void*) == 8;
+        profile.npu = config_.hyperNpuAvailable;
+        const u64 reported = platformAvailableMemory_.load(std::memory_order_relaxed);
+        hyper::refresh_profile_limits(profile, reported == ~0ull ? caps_.cpu().availableMemoryBytes : reported,
+            platformMemoryPressure_.load(std::memory_order_relaxed), thermalDegrade_.load(std::memory_order_relaxed));
+        return profile;
+    };
     {
         std::lock_guard<std::mutex> l(h.mutex);
-        if (h.profileLoaded) return h.profile;
+        if (h.profileLoaded) return currentLimits(h.profile);
     }
     hyper::DeviceProfile p;
     p.abi64 = sizeof(void*) == 8;
@@ -460,10 +468,10 @@ hyper::DeviceProfile Engine::hyper_cached_profile() noexcept {
             std::lock_guard<std::mutex> l(h.mutex);
             h.profile = p;
             h.profileLoaded = true;
-            return p;
+            return currentLimits(p);
         }
     }
-    return p;
+    return currentLimits(p);
 }
 
 hyper::DeviceProfile Engine::hyper_device_profile(bool remeasure) noexcept {
@@ -476,11 +484,6 @@ hyper::DeviceProfile Engine::hyper_device_profile(bool remeasure) noexcept {
         return p;
     const u64 began = monotonic_ns();
     std::string note;
-    p.freeRamBytes = caps_.cpu().availableMemoryBytes;
-    p.abi64 = sizeof(void*) == 8;
-    // Tile das redes: 128 em 64 bits com folga de RAM, 96 com pouca, 64 em 32 bits.
-    p.tile = p.abi64 ? (p.freeRamBytes && p.freeRamBytes < (2ull << 30) ? 96u : 128u) : 64u;
-    p.tileMargin = p.abi64 ? 12u : 8u;
     // --- Turbo: FSR 1, 480p -> 1080p (o efeito Hyper Upscale de verdade) ------
     {
         Project project;
@@ -639,7 +642,7 @@ hyper::DeviceProfile Engine::hyper_device_profile(bool remeasure) noexcept {
         h.profile = p;
         h.profileLoaded = true;
     }
-    return p;
+    return hyper_cached_profile();
 }
 
 // =============================================================================

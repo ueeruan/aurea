@@ -18,6 +18,7 @@
 #include "aurea/tracking/TrackingValidation.hpp"
 #include "../tracking/AnalysisDecode.hpp"
 #include "EngineAeAnimation.hpp"   // AE animation: texto-fonte
+#include "TextShadowMigration.hpp"   // D2: sombra antiga do texto → decoração
 
 #include "aurea/text/Text.hpp"
 #include "aurea/text/TextAnimator.hpp"
@@ -46,6 +47,7 @@
 #include "aurea/export/ExportBoundedCall.hpp"
 #include "aurea/platform/AddressSpace.hpp"
 #include "aurea/export/ExportWatchdog.hpp"
+#include "aurea/export/ExportMemory.hpp"
 #include "aurea/export/ExportRecovery.hpp"
 #include "aurea/export/ExportCheckpoint.hpp"
 #include "aurea/export/ExportPacketLog.hpp"
@@ -59,11 +61,14 @@
 #include "aurea/effects/MeshWarp.hpp"
 #include "aurea/effects/MotionTile.hpp"
 #include "aurea/effects/RasterExtrude.hpp"
+#include "aurea/effects/DeepGlowReference.hpp"
 #include "aurea/effects/Particular.hpp"
 
 #include <algorithm>
 #include <limits>
 #include <cassert>
+#include <cctype>
+#include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -287,7 +292,7 @@ void write_time_remap(Layer& l, FrameIndex local, f32 sourceFrames, Interpolatio
 } // namespace
 
 namespace {
-constexpr u32 kCameraTrackerVersion = 4;   // 4: zoom variável, lente, cena plana
+constexpr u32 kCameraTrackerVersion = 5;   // 5: low-contrast features and bounded replenishment
 using CameraTrackResult = tracking::CameraTrackData;
 } // namespace
 
@@ -562,6 +567,7 @@ struct Engine::ExportContext {
     bool imageMode = false;
     bool preRenderMode = false;
     i32 preRenderDirection = 1;
+    i64 preRenderFirst = 0;   ///< lote K: 1º quadro da composição (o começo da área de trabalho)
     u64 preRenderToken = 0;
     ImageExportSettings image{};
     FrameIndex imageFrame{};   ///< PNG: o quadro do playhead no início
@@ -631,6 +637,60 @@ GpuCapabilities device_gpu_from(const GPUCapabilities& g) noexcept {
     return p;
 }
 
+namespace {
+/// AE expressions (sampleImage): a imagem do projeto reduzida a no máximo 128
+/// px de lado, feita UMA vez por imagem e guardada enquanto a imagem cheia
+/// viver (a referência fraca não a segura). É o que a expressão lê na CPU: a
+/// avaliação nunca espera a GPU nem decodifica arquivo.
+std::shared_ptr<const expr::LayerPixels> small_image_for_expressions(const std::shared_ptr<const ImagePixels>& full) {
+    struct Entry {
+        std::weak_ptr<const ImagePixels> full;
+        std::shared_ptr<const expr::LayerPixels> small;
+    };
+    static std::mutex mutex;
+    static std::vector<Entry> cache;
+    if (!full) return nullptr;
+    std::lock_guard<std::mutex> guard(mutex);
+    for (usize i = 0; i < cache.size();) {
+        const std::shared_ptr<const ImagePixels> alive = cache[i].full.lock();
+        if (!alive) { cache.erase(cache.begin() + static_cast<std::ptrdiff_t>(i)); continue; }
+        if (alive.get() == full.get()) return cache[i].small;
+        ++i;
+    }
+    const ImagePixels& px = *full;
+    if (!px.width || !px.height || px.rgba.size() < static_cast<usize>(px.width) * px.height * 4) return nullptr;
+    auto out = std::make_shared<expr::LayerPixels>();
+    const f64 k = std::min(1.0, 128.0 / static_cast<f64>(std::max(px.width, px.height)));
+    out->width = std::max<u32>(1, static_cast<u32>(std::lround(px.width * k)));
+    out->height = std::max<u32>(1, static_cast<u32>(std::lround(px.height * k)));
+    out->layerWidth = static_cast<f32>(px.width);
+    out->layerHeight = static_cast<f32>(px.height);
+    out->rgba.resize(static_cast<usize>(out->width) * out->height * 4);
+    constexpr u32 kTaps = 4;   // 4×4 amostras por texel: média ponderada pelo alfa
+    for (u32 y = 0; y < out->height; ++y) {
+        for (u32 x = 0; x < out->width; ++x) {
+            f64 sumA = 0.0, sum[3]{};
+            for (u32 j = 0; j < kTaps; ++j) {
+                for (u32 i = 0; i < kTaps; ++i) {
+                    const u32 sx = std::min<u32>(px.width - 1, static_cast<u32>((x + (i + 0.5) / kTaps) * px.width / out->width));
+                    const u32 sy = std::min<u32>(px.height - 1, static_cast<u32>((y + (j + 0.5) / kTaps) * px.height / out->height));
+                    const u8* q = &px.rgba[(static_cast<usize>(sy) * px.width + sx) * 4];
+                    const f64 a = q[3] / 255.0;
+                    sumA += a;
+                    for (u32 c = 0; c < 3; ++c) sum[c] += a * q[c];
+                }
+            }
+            u8* d = &out->rgba[(static_cast<usize>(y) * out->width + x) * 4];
+            for (u32 c = 0; c < 3; ++c) d[c] = static_cast<u8>(std::lround(sumA > 0.0 ? sum[c] / sumA : 0.0));
+            d[3] = static_cast<u8>(std::lround(sumA / (kTaps * kTaps) * 255.0));
+        }
+    }
+    if (cache.size() >= 32) cache.erase(cache.begin());
+    cache.push_back(Entry{full, out});
+    return out;
+}
+} // namespace
+
 Engine::Engine() {
     commandQueue_ = std::make_unique<CommandQueue>();
     preRenderCache_ = std::make_unique<PreRenderCache>();
@@ -641,10 +701,55 @@ Engine::Engine() {
         const Engine* e = static_cast<const Engine*>(self);
         return e->project_ ? &e->project_->timeline() : nullptr;
     }, this);
+    // AE expressions (lote E): footage("nome") e layer.source leem os arquivos
+    // do projeto deste motor (a avaliação já acontece sob o lock do modelo).
+    expr::register_footage_provider([](void* self, const Timeline* tl, std::string_view name, u64 asset,
+                                       expr::FootageInfo& out) -> bool {
+        const Engine* e = static_cast<const Engine*>(self);
+        if (!e->project_ || tl != &e->project_->timeline()) return false;
+        auto same = [](std::string_view a, std::string_view b) {
+            if (a.size() != b.size()) return false;
+            for (usize i = 0; i < a.size(); ++i) {
+                const char x = a[i] >= 'A' && a[i] <= 'Z' ? static_cast<char>(a[i] + 32) : a[i];
+                const char y = b[i] >= 'A' && b[i] <= 'Z' ? static_cast<char>(b[i] + 32) : b[i];
+                if (x != y) return false;
+            }
+            return true;
+        };
+        bool found = false;
+        for (int pass = 0; pass < 2 && !found; ++pass) {
+            const Project& project = *e->project_;
+            project.for_each_asset([&](AssetId id, const Asset& a) {
+                if (found) return;
+                if (name.empty()) { if (pass != 0 || id.pack() != asset) return; }
+                else if (pass == 0 ? a.name != name : !same(a.name, name)) return;
+                found = true;
+                const f64 fps = a.timebaseFps > 0.0 ? a.timebaseFps : 30.0;
+                out.name = a.name;
+                out.width = a.video.width;
+                out.height = a.video.height;
+                out.duration = static_cast<f64>(a.duration.value) / fps;
+                out.frameDuration = a.duration.value > 0 ? 1.0 / (a.video.fps > 0.0 ? a.video.fps : fps) : 0.0;
+                out.asset = id.pack();
+            });
+        }
+        return found;
+    }, this);
+    // AE expressions: sampleImage numa camada de IMAGEM lê os pixels da fonte que
+    // o motor já guarda na CPU (`images_`), sem efeitos nem máscaras. As outras
+    // camadas dependem de alguém publicar a imagem (expr::publish_layer_image).
+    expr::register_image_source([](void* self, const Timeline* tl, const Layer& layer, f64) -> std::shared_ptr<const expr::LayerPixels> {
+        const Engine* e = static_cast<const Engine*>(self);
+        if (!e->project_ || tl != &e->project_->timeline() || layer.kind != LayerKind::Image || !layer.source.valid()) return nullptr;
+        const auto it = e->images_.find(layer.source.pack());
+        return it == e->images_.end() ? nullptr : small_image_for_expressions(it->second);
+    }, this);
 }
 
 Engine::~Engine() {
     expr::unregister_provider(this);
+    expr::unregister_footage_provider(this);
+    expr::unregister_image_source(this);
     shutdown();
     {
         std::lock_guard<std::mutex> lifecycle(exportLifecycleMutex_);
@@ -678,6 +783,8 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
     if (state_ != EngineState::Uninitialized) {
         return Status{Errc::InvalidState, "motor ja inicializado"};
     }
+    platformMemoryPressure_.store(0.f, std::memory_order_relaxed);
+    platformAvailableMemory_.store(~0ull, std::memory_order_relaxed);
     offscreenCancelled_.store(false, std::memory_order_release);
     config_ = config;
     // Sequência de imagens (ImageSequence.hpp): a fábrica da plataforma fica
@@ -782,6 +889,12 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
         text::FontManager::instance().set_imported_dirs({config.documentsDirectory + "/fontes",
                                                          config.documentsDirectory + "/Media"});
     }
+    // 0.5.3: a varredura das pastas de fonte do sistema acontecia na 1ª busca de fonte
+    // por família, na thread de render, dentro do preparo do quadro e com o modelo
+    // travado. Sai agora num worker de fundo (FontManager::prewarm lê os arquivos fora
+    // da trava). O `jobs_.stop()` do shutdown espera o worker terminar.
+    (void)jobs_.submit(JobPriority::Background,
+                       [](void*, JobContext&) { text::FontManager::instance().prewarm(); }, nullptr);
     // 0.5.2: PreRender de uma sessão que morreu (crash, app fechado à força)
     // nunca mais é lido — a chave é da sessão do processo — e ficava no disco
     // até o próximo PreRender. Sai agora, na thread de limpeza do cache.
@@ -798,6 +911,25 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
     media_.set_factory(config_.mediaFactory);
     media_.set_memory(&memory_);
     media_.set_ready_callback(&Engine::on_frame_ready, this);
+    {
+        // 0.5.3: teto de decoders da PRÉVIA também em 64 bits. Numa timeline de
+        // cortes rápidos cada corte é uma layer com decoder próprio, e cada um
+        // ficava aberto 180 quadros depois de sair de cena (mais o que abre 1,5 s
+        // antes): uma dúzia de sessões de codec até o aparelho recusar a próxima,
+        // que caía no decoder de SOFTWARE para sempre. Aparelho de entrada: 4; os
+        // outros: 8; nunca acima das instâncias de hardware que o aparelho declara
+        // (mínimo 2). Só fontes ociosas cedem o lugar (MediaManager::set_source_cap).
+        const DeviceTier tier = caps_.device_class().tier;
+        u32 cap = tier == DeviceTier::Low ? 4u : 8u;
+        const CodecCapability& h264 = caps_.decoder_h264();
+        if (h264.supported && h264.hardwareAccelerated && h264.concurrentInstances > 0)
+            cap = std::min(cap, std::max(2u, h264.concurrentInstances));
+        media_.set_source_cap(cap);
+        // 0.5.4: camada visível sem decoder (recusado pelo aparelho, ocupado,
+        // derrubado) tenta de novo até conseguir, inclusive com a prévia parada
+        // (MediaManager::set_persistent_retry; o agendamento fica no render_frame).
+        media_.set_persistent_retry(true);
+    }
     // Proxy de edição (0.2.5): 2 GB no máximo, nunca o último 1 GB livre do
     // aparelho (PreviewProxyService::make_room).
     media_.proxies().configure(config_.mediaFactory, config.exportSinkFactory, config.exportSinkContext,
@@ -1087,6 +1219,25 @@ u64 Engine::process_budget_bytes() const noexcept {
     return DeviceCapabilities::process_budget_limit(budget);
 }
 
+// 0.5.3 (P0-7): o export usa o orçamento do processo preso pelo teto do APARELHO
+// (memória total e 32 bits; nenhuma marca) e pelo degrau de memória que as telas
+// pedem depois de o sistema matar um export. Orçamento fixado na config (testes,
+// debug.aurea.memory_budget_mb) não leva o teto do aparelho: só o degrau.
+u64 Engine::export_budget_bytes() const noexcept {
+    const u64 cap = config_.memoryBudgetBytes ? 0 : export_device_memory_cap_bytes(caps_.cpu().totalMemoryBytes, kPointerBits);
+    return export_memory_budget_bytes(process_budget_bytes(), cap, exportMemoryStep_.load(std::memory_order_relaxed));
+}
+
+void Engine::set_export_memory_step(u32 step) noexcept {
+    exportMemoryStep_.store(std::min(step, kExportMemoryStepMax), std::memory_order_relaxed);
+}
+
+void Engine::report_memory_headroom(u64 availableBytes, u64 criticalBytes, bool lowMemory) noexcept {
+    platformAvailableMemory_.store(availableBytes, std::memory_order_relaxed);
+    const f32 pressure = lowMemory ? 1.0f : memory_headroom_pressure(availableBytes, criticalBytes);
+    platformMemoryPressure_.store(pressure, std::memory_order_relaxed);
+}
+
 void Engine::apply_memory_budgets() noexcept {
     renderer_.set_bounded_text_surface_enabled(config_.enableBoundedTextSurface);
     // Uma tabela só (kBudgetShare, em MemoryManager.hpp): cada consumidor com o
@@ -1210,6 +1361,7 @@ void Engine::shutdown() noexcept {
         previewBuffering_ = false;
         previewBufferStatus_.store(0, std::memory_order_release);
         ++projectSession_;
+    inlineEditGroup_.store(0); inlineEditLayer_.store(0); inlineEditOuter_.store(0);
         captionCancelled.store(true);
         images_.clear();
         models_.clear();
@@ -1589,7 +1741,14 @@ void Engine::on_frame_ready(void* self) {
 void Engine::render_thread_main() noexcept {
     set_current_thread_name("aurea-render");
     set_current_thread_priority(ThreadPriority::Display);
+    // 0.5.3: quantos pipelines existiam na última gravação do cache em disco. O cache
+    // só era gravado no shutdown e no suspend: se o sistema matava o app (comum com
+    // 3-4 GB), os pipelines compilados na sessão se perdiam e a abertura seguinte
+    // recompilava tudo. Agora, com o motor PARADO há 500 ms (nada tocando, sem refino
+    // nem preenchimento pendente) e pipelines novos desde a última gravação, grava.
+    u32 savedPipelines = 0;
     while (renderRunning_) {
+        bool idleTimeout = false;
         {
             std::unique_lock<std::mutex> lock(wakeMutex_);
             if (exportActive_.load(std::memory_order_acquire)
@@ -1648,7 +1807,7 @@ void Engine::render_thread_main() noexcept {
                 // rede das mudanças do modelo que sobem `modelRevision_` sem
                 // chamar request_render (a render_frame pula barato quando
                 // nada mudou).
-                wakeCv_.wait_for(lock, std::chrono::milliseconds(500), [this] {
+                idleTimeout = !wakeCv_.wait_for(lock, std::chrono::milliseconds(500), [this] {
                     return !renderRunning_ || wakeFlag_ || playingHint_.load();
                 });
             }
@@ -1668,6 +1827,22 @@ void Engine::render_thread_main() noexcept {
             continue;
         }
         (void)render_frame(true);
+        if (idleTimeout && !playingHint_.load() && !exportActive_.load(std::memory_order_acquire)
+            && !offscreenReaders_.load(std::memory_order_acquire)) {
+            // Só se ninguém estiver com o render: nunca espera aqui.
+            std::unique_lock<std::mutex> rl(renderMutex_, std::try_to_lock);
+            if (rl.owns_lock() && gpu_ && surfaceAttached_ && state_ != EngineState::Suspended) {
+                const u32 pipelines = renderer_.shaders().pipeline_count();
+                if (pipelines != savedPipelines) {
+                    const u64 started = monotonic_ns();
+                    gpu_->wait_idle();
+                    gpu_->save_pipeline_cache();
+                    savedPipelines = pipelines;
+                    AUREA_LOG_INFO("cache de pipelines gravado com o motor parado: %u pipelines, %.1f ms", pipelines,
+                                   static_cast<double>(monotonic_ns() - started) * 1e-6);
+                }
+            }
+        }
     }
 }
 
@@ -1720,6 +1895,7 @@ Status Engine::new_project(u32 width, u32 height, f64 fps, const char* title, co
     }
     bg_remove_project_opened_locked();   // Remover fundo: projeto novo, sem recortes
     ++projectSession_;
+    inlineEditGroup_.store(0); inlineEditLayer_.store(0); inlineEditOuter_.store(0);
     captionCancelled.store(true);
     compStack_.clear();
     images_.clear();
@@ -1857,7 +2033,13 @@ bool load_strict(const std::string& path, Project& out, LoadReport& report, Stat
 } // namespace
 
 Status Engine::load_project(const char* path) noexcept {
-    return load_project_checked(path, nullptr);
+    // 0.5.3 (medição): abrir um projeto não tinha tempo no log. Linha única, com o
+    // total (ler o arquivo, religar mídia, decodificar imagens, fontes, modelos 3D).
+    const u64 started = monotonic_ns();
+    const Status s = load_project_checked(path, nullptr);
+    AUREA_LOG_INFO("projeto aberto em %.1f ms (%s)", static_cast<double>(monotonic_ns() - started) * 1e-6,
+                   s.ok() ? "ok" : "falhou");
+    return s;
 }
 
 bool Engine::export_restart_matches_locked(const ExportRestartGuard& guard) const noexcept {
@@ -2004,6 +2186,7 @@ Status Engine::load_project_checked(const char* path, ExportRestartGuard* restar
             project_ = std::make_unique<Project>(std::move(loaded));
         }
         loadedSession = ++projectSession_;
+    inlineEditGroup_.store(0); inlineEditLayer_.store(0); inlineEditOuter_.store(0);
         captionCancelled.store(true);
         // The saved current composition is only an editor view. Its navigation
         // stack is not serialized, so reopening it would strand the user in a
@@ -2014,6 +2197,11 @@ Status Engine::load_project_checked(const char* path, ExportRestartGuard* restar
         bg_remove_project_opened_locked();   // Remover fundo: `<projeto>.bgmask`
         mainFileSuspect_ = (notice & (kLoadRecoveredCopy | kLoadPartial)) != 0;
         migrate_echo_to_effect();
+        // D2 (13/11/2026): a sombra antiga do texto vira a decoração Sombra.
+        project_->timeline().for_each_composition([&](CompositionId, Composition& c) {
+            for (u32 i = 0; i < c.order().size(); ++i)
+                if (Layer* layer = c.layer(c.order().at(i))) (void)migrate_text_shadow_to_decoration(*layer, effectRegistry_);
+        });
         // Append newly introduced parameters without resetting old values,
         // expressions or keyframe addresses. Old projects otherwise display
         // the new controls but EffectSetParam rejects their missing slots.
@@ -2652,6 +2840,7 @@ Result<u64> Engine::extract_audio(u64 videoLayerId) noexcept {
 
 Result<u64> Engine::freeze_frame(u64 layerId, i64 frame, i64 holdFrames) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
     Composition* comp = current_composition();
     if (!comp) return Status{Errc::InvalidState, "projeto sem composicao"};
@@ -2725,13 +2914,14 @@ void Engine::recenter_text(Layer& l) noexcept {
 
 bool Engine::query_text(u64 layerId, TextData& out) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = current_composition();
     if (!comp) return false;
     const Layer* l = comp->layer(LayerId::unpack(layerId));
     if (!l || l->kind != LayerKind::Text) return false;
     out = l->text;
     // AE animation: com keys do texto-fonte, o que aparece no cabeçote.
-    (void)text::apply_source_text(l->text, l->local_time(playback_.current()).value, out);
+    (void)text::apply_source_text(l->text, l->local_time(editing_frame_locked()).value, out);
     return true;
 }
 
@@ -2956,6 +3146,7 @@ bool transform_is_static(const Layer& l) noexcept {
 
 u32 Engine::query_materials(u64 layerId, f32* values, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     auto* comp = project_ ? current_composition() : nullptr;
     const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer || layer->kind != LayerKind::Model3D) return 0;
@@ -2963,7 +3154,7 @@ u32 Engine::query_materials(u64 layerId, f32* values, u32 capacity) noexcept {
     if (found == models_.end() || !found->second) return 0;
     const auto& materials = found->second->materials;
     if (!values) return static_cast<u32>(materials.size());
-    const auto local = layer->local_time(playback_.current());
+    const auto local = layer->local_time(editing_frame_locked());
     const u32 count = std::min<u32>(capacity, static_cast<u32>(materials.size()));
     for (u32 i = 0; i < count; ++i) {
         const auto& source = materials[i];
@@ -3043,10 +3234,11 @@ Result<u64> Engine::add_light(u32 kind) noexcept {
 bool Engine::query_light(u64 layerId, f32* values, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId);
     auto* comp = project_ ? current_composition() : nullptr;
     const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer || layer->kind != LayerKind::Light || !values || capacity < 10) return false;
-    const auto local = layer->local_time(playback_.current());
+    const auto local = layer->local_time(editing_frame_locked());
     const auto& light = layer->light;
     values[0] = static_cast<f32>(light.kind);
     values[1] = layer->tracks.sample_or(TrackProperty::LightIntensity, local, light.intensity);
@@ -3063,10 +3255,11 @@ bool Engine::query_light(u64 layerId, f32* values, u32 capacity) noexcept {
 
 bool Engine::query_camera_lens(u64 layerId, f32* values, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     auto* comp = project_ ? current_composition() : nullptr;
     const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer || layer->kind != LayerKind::Camera || !values || capacity < 9) return false;
-    const FrameIndex local = layer->local_time(playback_.current());
+    const FrameIndex local = layer->local_time(editing_frame_locked());
     const CameraData& cam = layer->camera;
     // A MESMA conta da projeção: mm com keyframe manda; senão o FOV (parado
     // ou animado) vira o mm equivalente.
@@ -3092,10 +3285,11 @@ bool Engine::query_camera_lens(u64 layerId, f32* values, u32 capacity) noexcept 
 
 f32 Engine::pick_focus_distance(u64 layerId, f32 compX, f32 compY) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     const Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer || layer->kind != LayerKind::Camera) return -1.0f;
-    const FrameIndex now = playback_.current();
+    const FrameIndex now = editing_frame_locked();
     Vec3 hit{};
     if (!pick_scene_point(*comp, now, compX, compY, &Engine::model_lookup, this, hit)) return -1.0f;
     // Plano de foco perpendicular ao eixo ótico DESTA câmera (a mesma
@@ -3216,9 +3410,10 @@ Result<u64> Engine::parent_to_new_null(const u64* layerIds, u32 count) noexcept 
     if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
     // Edições ainda na fila (arrastos, keys) vêm ANTES: a compensação mede o estado final.
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, (count == 1 && layerIds ? layerIds[0] : 0), true);
     Composition* comp = current_composition();
     if (!comp) return Status{Errc::InvalidState, "projeto sem composicao"};
-    const FrameIndex now = playback_.current();
+    const FrameIndex now = editing_frame_locked();
     std::vector<LayerId> children;
     bool threeD = false;
     Vec3 center{0.0f, 0.0f, 0.0f};
@@ -3280,6 +3475,7 @@ Result<u32> Engine::set_parent_many(const u64* layerIds, u32 count, u64 parentId
     if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
     // Edições ainda na fila (arrastos, keys) vêm ANTES: a compensação mede o estado final.
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, (count == 1 && layerIds ? layerIds[0] : 0), true);
     Composition* comp = current_composition();
     if (!comp) return Status{Errc::InvalidState, "projeto sem composicao"};
     // As duas UIs mandam 0 para "nenhum" (mesma regra do LayerSetParent).
@@ -3351,6 +3547,7 @@ Result<u32> Engine::stagger_layers(const u64* layerIds, u32 count, i64 stepFrame
     if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
     // O que a UI enfileirou (arrastos, keys) vale antes: a cascata parte do estado final.
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, (count == 1 && layerIds ? layerIds[0] : 0), true);
     Composition* comp = current_composition();
     if (!comp) return Status{Errc::InvalidState, "projeto sem composicao"};
     std::vector<LayerId> order;
@@ -3402,6 +3599,7 @@ Result<u32> Engine::arrange_layer_times(const u64* layerIds, u32 count,
         return Status{Errc::InvalidArgument, "arranjo de tempo invalido"};
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, (count == 1 && layerIds ? layerIds[0] : 0), true);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return Status{Errc::InvalidState, "nenhuma composicao"};
     struct Item { LayerId id; i64 start, length, target; };
@@ -3558,6 +3756,7 @@ Result<u64> Engine::track_point(u64 layerId, f32 x, f32 y, bool stabilize, u32* 
     u32 layerW = 0, layerH = 0;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
+        InlineEditScope inlineScope(*this, layerId, true);
         Composition* comp = project_ ? current_composition() : nullptr;
         const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
         if (!l || l->kind != LayerKind::Video) return Status{Errc::InvalidArgument, "rastreio precisa de camada de video"};
@@ -3568,7 +3767,7 @@ Result<u64> Engine::track_point(u64 layerId, f32 x, f32 y, bool stabilize, u32* 
         fps = comp->fps() > 0.0 ? comp->fps() : 30.0;
         // Do quadro do cabeçote (onde o ponto foi tocado) até o fim, como o
         // rastreio para a frente do AE; antes dele o Nulo fica no 1º ponto.
-        start = std::clamp<i64>(playback_.current().value, l->start.value, std::max<i64>(l->start.value, l->end.value - 2));
+        start = std::clamp<i64>(editing_frame_locked().value, l->start.value, std::max<i64>(l->start.value, l->end.value - 2));
         end = std::min<i64>(l->end.value, start + 3600);   // até 2 min a 30 fps por vez
         layerW = a->video.width;
         layerH = a->video.height;
@@ -3772,6 +3971,7 @@ Status mask_key_command(Layer& layer, const Command& command, FrameIndex playhea
 i32 Engine::add_mask(u64 layerId, const f32* pts6, u32 count, bool closed) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->masks.size() >= kMaxMaskCount || count > 4096 || (count > 0 && !pts6)) return -1;
@@ -3791,6 +3991,7 @@ i32 Engine::add_mask(u64 layerId, const f32* pts6, u32 count, bool closed) noexc
 bool Engine::remove_mask(u64 layerId, u32 maskId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || !mask_by_id(*l, maskId)) return false;
@@ -3808,15 +4009,16 @@ bool Engine::remove_mask(u64 layerId, u32 maskId) noexcept {
 bool Engine::set_mask_path(u64 layerId, u32 maskId, const f32* pts6, u32 count, bool closed, bool undo) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     Mask* m = l ? mask_by_id(*l, maskId) : nullptr;
-    if (!m || count > 4096 || (count > 0 && !pts6)) return false;
+    if (!m || m->locked || count > 4096 || (count > 0 && !pts6)) return false;   // lote M: travada
     if (undo) history_.before_mutation(*comp, project_->timeline().current(), "editar mascara");
     std::vector<MaskPoint> pts;
     read_points6(pts6, count, pts);
     // Caminho animado: a edição vira (ou atualiza) o key no cabeçote.
-    if (!m->pathKeys.empty()) put_path_key(*m, l->local_time(playback_.current()).value, pts);
+    if (!m->pathKeys.empty()) put_path_key(*m, l->local_time(editing_frame_locked()).value, pts);
     else m->points = std::move(pts);
     m->closed = closed;
     m->cacheKey = 0;
@@ -3833,12 +4035,13 @@ void adjust_point_mask(std::vector<u8>& mask, Engine::PathOp op, const f32* args
 i32 Engine::edit_mask_path(u64 layerId, u32 maskId, PathOp op, const f32* args, u32 argc, bool continuing) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     Mask* m = l ? mask_by_id(*l, maskId) : nullptr;
-    if (!m || l->locked || (argc > 0 && !args)) return -1;
+    if (!m || l->locked || m->locked || (argc > 0 && !args)) return -1;   // lote M: máscara travada não edita
     for (u32 i = 0; i < argc; ++i) if (!std::isfinite(args[i])) return -1;
-    const i64 local = l->local_time(playback_.current()).value;
+    const i64 local = l->local_time(editing_frame_locked()).value;
     std::vector<MaskPoint> shape;
     mask::evaluate_path(*m, static_cast<f64>(local), shape);
     BezierPath b;
@@ -3926,11 +4129,12 @@ i32 Engine::edit_mask_path(u64 layerId, u32 maskId, PathOp op, const f32* args, 
 bool Engine::toggle_mask_path_points_key(u64 layerId, u32 maskId, const u32* indices, u32 count) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     Mask* m = l ? mask_by_id(*l, maskId) : nullptr;
     if (!m || l->locked || !indices || count == 0) return false;
-    const i64 local = l->local_time(playback_.current()).value;
+    const i64 local = l->local_time(editing_frame_locked()).value;
     std::vector<MaskPoint> now;
     mask::evaluate_path(*m, static_cast<f64>(local), now);
     const usize n = now.size();
@@ -3972,6 +4176,7 @@ bool Engine::toggle_mask_path_points_key(u64 layerId, u32 maskId, const u32* ind
 bool Engine::set_mask_props(u64 layerId, u32 maskId, u32 op, bool inverted, f32 feather, f32 expansion, f32 opacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     Mask* m = l ? mask_by_id(*l, maskId) : nullptr;
@@ -3980,10 +4185,10 @@ bool Engine::set_mask_props(u64 layerId, u32 maskId, u32 op, bool inverted, f32 
     bump_model_revision_locked();
     m->operation = static_cast<MaskOperation>(op);
     m->inverted = inverted;
-    const Vec3 current = mask::evaluate_props(*l, *m, static_cast<f64>(l->local_time(playback_.current()).value));
-    if (feather != current.x) write_mask_param(*l, *m, 0, feather, playback_.current());
-    if (expansion != current.y) write_mask_param(*l, *m, 1, expansion, playback_.current());
-    if (opacity != current.z) write_mask_param(*l, *m, 2, opacity, playback_.current());
+    const Vec3 current = mask::evaluate_props(*l, *m, static_cast<f64>(l->local_time(editing_frame_locked()).value));
+    if (feather != current.x) write_mask_param(*l, *m, 0, feather, editing_frame_locked());
+    if (expansion != current.y) write_mask_param(*l, *m, 1, expansion, editing_frame_locked());
+    if (opacity != current.z) write_mask_param(*l, *m, 2, opacity, editing_frame_locked());
     m->cacheKey = 0;
     project_->mark_dirty();
     request_render();
@@ -3994,12 +4199,13 @@ bool Engine::set_mask_param(u64 layerId, u32 maskId, u32 param, f32 value) noexc
     if (param > 2 || !std::isfinite(value)) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     Mask* m = l ? mask_by_id(*l, maskId) : nullptr;
     if (!m || l->locked) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "valor da mascara");
-    write_mask_param(*l, *m, param, value, playback_.current());
+    write_mask_param(*l, *m, param, value, editing_frame_locked());
     bump_model_revision_locked();
     project_->mark_dirty(); request_render();
     return true;
@@ -4009,13 +4215,14 @@ bool Engine::toggle_mask_param_key(u64 layerId, u32 maskId, u32 param) noexcept 
     if (param > 2) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     Mask* m = l ? mask_by_id(*l, maskId) : nullptr;
     if (!m || l->locked) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "keyframe da mascara");
     f32* base = mask_param_ref(*m, param);
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     Track& tr = l->tracks.get_or_create(TrackProperty::MaskParam, maskId, param);
     const u32 at = tr.find_exact(local);
     if (at != kInvalidIndex) {
@@ -4030,13 +4237,14 @@ bool Engine::toggle_mask_param_key(u64 layerId, u32 maskId, u32 param) noexcept 
 bool Engine::ensure_mask_path_key(u64 layerId, u32 maskId, bool* keyedOut) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     Mask* m = l ? mask_by_id(*l, maskId) : nullptr;
     if (!m) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "keyframe da mascara");
     bump_model_revision_locked();
-    const i64 local = l->local_time(playback_.current()).value;
+    const i64 local = l->local_time(editing_frame_locked()).value;
     // Com keyframe aqui, regrava a forma AVALIADA — nunca apaga (ver
     // `ensure_shape_param_key`).
     std::vector<MaskPoint> shape;
@@ -4052,13 +4260,14 @@ bool Engine::ensure_mask_path_key(u64 layerId, u32 maskId, bool* keyedOut) noexc
 bool Engine::toggle_mask_path_key(u64 layerId, u32 maskId, bool* keyedOut) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     Mask* m = l ? mask_by_id(*l, maskId) : nullptr;
     if (!m) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "keyframe da mascara");
     bump_model_revision_locked();
-    const i64 local = l->local_time(playback_.current()).value;
+    const i64 local = l->local_time(editing_frame_locked()).value;
     const i32 at = path_key_at(*m, local);
     bool keyed = false;
     if (at >= 0) {
@@ -4081,11 +4290,12 @@ bool Engine::toggle_mask_path_key(u64 layerId, u32 maskId, bool* keyedOut) noexc
 i32 Engine::toggle_mask_point_curve(u64 layerId, u32 maskId, u32 point) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     Mask* m = l ? mask_by_id(*l, maskId) : nullptr;
     if (!m) return -1;
-    const i64 local = l->local_time(playback_.current()).value;
+    const i64 local = l->local_time(editing_frame_locked()).value;
     std::vector<MaskPoint> shape;
     mask::evaluate_path(*m, static_cast<f64>(local), shape);
     if (point >= shape.size()) return -1;
@@ -4113,10 +4323,11 @@ i32 Engine::toggle_mask_point_curve(u64 layerId, u32 maskId, u32 point) noexcept
 
 u32 Engine::query_masks(u64 layerId, f32* out, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return 0;
-    const FrameIndex t = playback_.current();
+    const FrameIndex t = editing_frame_locked();
     const i64 local = l->local_time(t).value;
     // Tamanho primeiro: quem chama realoca se não couber.
     std::vector<MaskPoint> pts;
@@ -4175,6 +4386,7 @@ Result<u32> Engine::track_mask(u64 layerId, u32 maskId, u32 mode) noexcept {
     std::vector<MaskPoint> base;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
+        InlineEditScope inlineScope(*this, layerId, true);
         Composition* comp = project_ ? current_composition() : nullptr;
         Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
         if (!l || l->kind != LayerKind::Video) return Status{Errc::InvalidArgument, "rastreio de mascara precisa de camada de video"};
@@ -4185,7 +4397,7 @@ Result<u32> Engine::track_mask(u64 layerId, u32 maskId, u32 mode) noexcept {
         asset = *a;
         asset.sourcePath = resolve_asset_path(asset.sourcePath);
         fps = comp->fps() > 0.0 ? comp->fps() : 30.0;
-        start = std::clamp<i64>(playback_.current().value, l->start.value, std::max<i64>(l->start.value, l->end.value - 2));
+        start = std::clamp<i64>(editing_frame_locked().value, l->start.value, std::max<i64>(l->start.value, l->end.value - 2));
         end = std::min<i64>(l->end.value, start + 3600);
         localStart = l->local_time(FrameIndex{start}).value;
         mask::evaluate_path(*m, static_cast<f64>(localStart), base);
@@ -4277,6 +4489,7 @@ Result<u32> Engine::track_mask(u64 layerId, u32 maskId, u32 mode) noexcept {
 
 bool Engine::set_track_matte(u64 layerId, u64 matteLayerId, u32 mode) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || mode > static_cast<u32>(MatteMode::LumaInverted)) return false;
@@ -4306,6 +4519,7 @@ bool Engine::set_track_matte(u64 layerId, u64 matteLayerId, u32 mode) noexcept {
 
 bool Engine::query_track_matte(u64 layerId, u64& matte, u32& mode) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return false;
@@ -4331,6 +4545,7 @@ bool Engine::restore_camera_track(u64 layerId) noexcept {
         std::lock_guard<std::mutex> lock(modelMutex_);
         // Um desfazer/refazer acabou de ser enfileirado pela UI: aplica antes de ler.
         drain_commands_locked();
+        InlineEditScope inlineScope(*this, layerId, true);
         Composition* comp = project_ ? current_composition() : nullptr;
         Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
         if (!l || l->kind != LayerKind::Video) return false;
@@ -4407,6 +4622,7 @@ bool Engine::start_camera_track(u64 layerId, u32 mode, u32 motion, f32 knownFov,
         // Um corte feito logo antes de "Analisar" ainda pode estar na fila:
         // sem aplicar, a análise inteira terminava em "tempo mudou".
         drain_commands_locked();
+        InlineEditScope inlineScope(*this, layerId, true);
         Composition* comp = project_ ? current_composition() : nullptr;
         const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
         if (!l || l->kind != LayerKind::Video) return false;
@@ -5103,6 +5319,7 @@ Result<u32> Engine::add_camera_track_lens_effect(u64 layerId, bool redistort) no
     const ParameterRegistry* specs = effectRegistry_.params(type);
     if (!specs) return Status{Errc::NotFound, "efeito de lente indisponivel"};
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer) return Status{Errc::NotFound, "camada sumiu"};
@@ -5128,6 +5345,7 @@ Result<u32> Engine::add_camera_track_lens_effect(u64 layerId, bool redistort) no
 
 bool Engine::set_echo(u64 layerId, u32 count, f32 delay, f32 decay) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return false;
@@ -5143,6 +5361,7 @@ bool Engine::set_echo(u64 layerId, u32 count, f32 delay, f32 decay) noexcept {
 
 bool Engine::set_rgb_time(u64 layerId, f32 delay) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return false;
@@ -5156,6 +5375,7 @@ bool Engine::set_rgb_time(u64 layerId, f32 delay) noexcept {
 
 bool Engine::query_echo(u64 layerId, f32* out) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || !out) return false;
@@ -5168,6 +5388,7 @@ bool Engine::query_echo(u64 layerId, f32* out) noexcept {
 
 bool Engine::set_transition(u64 layerId, bool out, u32 type, u32 frames) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || type > 5) return false;
@@ -5519,6 +5740,7 @@ Result<u64> Engine::add_effect_adjustment_layer(const char* name, const char* ef
 
 bool Engine::apply_particle_preset(u64 layerId, u32 preset) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::ParticleSystem) return false;
@@ -5550,6 +5772,7 @@ bool Engine::apply_particle_preset(u64 layerId, u32 preset) noexcept {
 
 bool Engine::set_particle_param(u64 layerId, u32 param, f32 v) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::ParticleSystem || param >= static_cast<u32>(ParticleParam::Count)) return false;
@@ -5665,6 +5888,7 @@ bool Engine::set_particle_param(u64 layerId, u32 param, f32 v) noexcept {
 
 bool Engine::query_particles(u64 layerId, f32* out) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::ParticleSystem || !out) return false;
@@ -5672,7 +5896,7 @@ bool Engine::query_particles(u64 layerId, f32* out) noexcept {
     // entao a ordem aqui e o outro lado do contrato de `set_particle_param`.
     // Com keyframe, sai o valor do instante: o controle da UI mostra o que a
     // previa esta desenhando.
-    const ParticleData p = sampled_particles(*l, l->local_time(playback_.current()));
+    const ParticleData p = sampled_particles(*l, l->local_time(editing_frame_locked()));
     out[0]  = static_cast<f32>(p.emitterType);
     out[1]  = p.emitterSize.x;
     out[2]  = p.emitterSize.y;
@@ -5760,6 +5984,7 @@ Layer* particle_layer(Composition* comp, u64 layerId) noexcept {
 
 bool Engine::set_particle_source(u64 layerId, u64 sourceLayerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = particle_layer(comp, layerId);
     if (!l) return false;
@@ -5779,6 +6004,7 @@ bool Engine::set_particle_source(u64 layerId, u64 sourceLayerId) noexcept {
 
 bool Engine::set_particle_texture(u64 layerId, u64 assetOrImageLayer) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = particle_layer(comp, layerId);
     if (!l) return false;
@@ -5802,6 +6028,7 @@ bool Engine::set_particle_texture(u64 layerId, u64 assetOrImageLayer) noexcept {
 
 bool Engine::set_particle_mesh(u64 layerId, u64 modelLayerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = particle_layer(comp, layerId);
     if (!l) return false;
@@ -5821,6 +6048,7 @@ bool Engine::set_particle_mesh(u64 layerId, u64 modelLayerId) noexcept {
 bool Engine::set_particle_life_curves(u64 layerId, u32 kind, const f32* values, u32 count) noexcept {
     if (kind > 2 || (count > 0 && !values)) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = particle_layer(comp, layerId);
     if (!l) return false;
@@ -5852,6 +6080,7 @@ bool Engine::set_particle_life_curves(u64 layerId, u32 kind, const f32* values, 
 
 bool Engine::query_particle_links(u64 layerId, u64* out4) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = particle_layer(comp, layerId);
     if (!l || !out4) return false;
@@ -5875,6 +6104,7 @@ bool Engine::query_particle_links(u64 layerId, u64* out4) noexcept {
 
 u32 Engine::query_particle_curve(u64 layerId, u32 kind, f32* out, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = particle_layer(comp, layerId);
     if (!l || !out || kind > 2) return 0;
@@ -5896,6 +6126,7 @@ u32 Engine::query_particle_curve(u64 layerId, u32 kind, f32* out, u32 capacity) 
 
 bool Engine::set_time_remap(u64 layerId, bool on) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->timeRemapEnabled == on) return l != nullptr;
@@ -5925,12 +6156,13 @@ f64 source_last_frame(const Project& project, const Layer& l, f64 compFps) noexc
 
 u32 Engine::query_time_remap(u64 layerId, f32* out, u32 maxFloats) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || !out || maxFloats < 5) return 0;
     const f64 fps = comp->fps() > 0.0 ? comp->fps() : 30.0;
     const Track& t = l->timeRemap;
-    const FrameIndex now = playback_.current();
+    const FrameIndex now = editing_frame_locked();
     const f64 speed = l->source_frame(FrameIndex{now.value + 1}) - l->source_frame(now);
     out[0] = static_cast<f32>(t.keys.size());
     out[1] = static_cast<f32>(l->local_time(l->start).value);
@@ -5953,9 +6185,10 @@ u32 Engine::query_time_remap(u64 layerId, f32* out, u32 maxFloats) noexcept {
 
 f64 Engine::query_time_remap_current_source(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     const Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    return layer ? layer->source_frame_f(static_cast<f64>(playback_.current().value))
+    return layer ? layer->source_frame_f(static_cast<f64>(editing_frame_locked().value))
                  : std::numeric_limits<f64>::quiet_NaN();
 }
 
@@ -5965,6 +6198,7 @@ bool Engine::set_time_remap_value(u64 layerId, i64 localFrame, f32 sourceFrame) 
     // Apply a queued seek and begin-undo before editing. The gesture supplies
     // its fixed timeline key, so decoder feedback cannot move the edit target.
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || localFrame < l->local_time(l->start).value || localFrame > l->local_time(l->end).value) return false;
@@ -5983,6 +6217,7 @@ bool Engine::set_time_remap_value(u64 layerId, i64 localFrame, f32 sourceFrame) 
 
 i32 Engine::edit_time_remap_key(u64 layerId, i32 index, i64 localFrame, f32 sourceFrame, i32 interp) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || !l->timeRemapEnabled || interp > static_cast<i32>(kLastInterpolation)) return -1;
@@ -6020,6 +6255,7 @@ i32 Engine::edit_time_remap_key(u64 layerId, i32 index, i64 localFrame, f32 sour
 
 bool Engine::remove_time_remap_key(u64 layerId, u32 index) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || index >= l->timeRemap.keys.size() || l->timeRemap.keys.size() <= 2) return false;
@@ -6058,6 +6294,7 @@ void flatten_speed_curve(Layer& l) noexcept {
 
 u32 Engine::query_speed_curve(u64 layerId, u32 samples, f32* out, u32 maxFloats) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     constexpr u32 kHeader = 8;
@@ -6066,7 +6303,7 @@ u32 Engine::query_speed_curve(u64 layerId, u32 samples, f32* out, u32 maxFloats)
     const bool remap = l->timeRemapEnabled && !l->timeRemap.keys.empty();
     const Track* st = l->speed_track();
     const i64 lo = l->local_time(l->start).value, hi = l->local_time(l->end).value;
-    const FrameIndex now = playback_.current();
+    const FrameIndex now = editing_frame_locked();
     const f64 nowLocal = static_cast<f64>(l->local_time(now).value);
     auto speed_at_local = [&](f64 local) -> f64 {
         if (remap) {
@@ -6114,6 +6351,7 @@ u32 Engine::query_speed_curve(u64 layerId, u32 samples, f32* out, u32 maxFloats)
 bool Engine::apply_speed_curve(u64 layerId, u32 preset) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || preset > 8) return false;
@@ -6177,6 +6415,7 @@ i32 Engine::edit_speed_key(u64 layerId, i32 index, i64 localFrame, f32 speed, i3
     if (!std::isfinite(speed)) return -1;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || interp > static_cast<i32>(kLastInterpolation)) return -1;
@@ -6194,13 +6433,17 @@ i32 Engine::edit_speed_key(u64 layerId, i32 index, i64 localFrame, f32 speed, i3
         if (const u32 found = t.find_exact(f); found != kInvalidIndex) return static_cast<i32>(found);
         const u32 prev = t.find_before(f);
         const Interpolation in = prev != kInvalidIndex ? t.keys[prev].interp : Interpolation::EaseInOut;
-        at = static_cast<i32>(t.set(f, static_cast<f32>(std::clamp(before, 0.05, 16.0)), interp >= 0 ? static_cast<Interpolation>(interp) : in));
+        // B8: o sinal fica (negativa = a fonte anda para trás); o módulo em [0,05; 16].
+        const f64 mag = std::clamp(std::fabs(before), 0.05, 16.0);
+        at = static_cast<i32>(t.set(f, static_cast<f32>(before < 0.0 ? -mag : mag), interp >= 0 ? static_cast<Interpolation>(interp) : in));
     } else {
         Keyframe& k = t.keys[static_cast<u32>(index)];
         const i64 minT = index > 0 ? t.keys[static_cast<u32>(index) - 1].time.value + 1 : std::min(lo, k.time.value);
         const i64 maxT = static_cast<u32>(index) + 1 < t.keys.size() ? t.keys[static_cast<u32>(index) + 1].time.value - 1 : std::max(hi, k.time.value);
         k.time = FrameIndex{std::clamp(localFrame, minT, std::max(minT, maxT))};
-        k.value = std::clamp(speed, 0.05f, 16.0f);
+        // B8: velocidade negativa vale (reverso dentro da rampa); módulo em [0,05; 16].
+        const f32 mag = std::clamp(std::fabs(speed), 0.05f, 16.0f);
+        k.value = speed < 0.0f ? -mag : mag;
         if (interp >= 0) k.interp = static_cast<Interpolation>(interp);
     }
     t.lastIndex = 0;
@@ -6212,6 +6455,7 @@ i32 Engine::edit_speed_key(u64 layerId, i32 index, i64 localFrame, f32 speed, i3
 bool Engine::remove_speed_key(u64 layerId, u32 index) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     Track* t = l ? l->tracks.find(TrackProperty::Speed) : nullptr;
@@ -6256,6 +6500,7 @@ void mirror_remap_ease(Keyframe& k) noexcept {
 
 bool Engine::reverse_time_remap(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->end.value - l->start.value < 2 || l->timeRemap.has_expression()) return false;
@@ -6301,6 +6546,7 @@ bool Engine::reverse_time_remap(u64 layerId) noexcept {
 
 bool Engine::set_keep_pitch(u64 layerId, bool on) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return false;
@@ -6315,6 +6561,7 @@ bool Engine::set_keep_pitch(u64 layerId, bool on) noexcept {
 
 bool Engine::apply_speed_ramp(u64 layerId, u32 preset) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || preset > 7) return false;
@@ -6326,7 +6573,7 @@ bool Engine::apply_speed_ramp(u64 layerId, u32 preset) noexcept {
         // cabeçote ficam (dá para congelar em vários pontos, da esquerda para
         // a direita); as depois dele dão lugar ao congelamento.
         const i64 lo = l->local_time(l->start).value, hi = l->local_time(l->end).value;
-        const i64 t0 = std::clamp(l->local_time(playback_.current()).value, lo, hi);
+        const i64 t0 = std::clamp(l->local_time(editing_frame_locked()).value, lo, hi);
         if (t0 >= hi) return false;   // no último quadro não há o que segurar
         history_.before_mutation(*comp, project_->timeline().current(), "congelar aqui");
         bump_model_revision_locked();
@@ -6358,7 +6605,7 @@ bool Engine::apply_speed_ramp(u64 layerId, u32 preset) noexcept {
     history_.before_mutation(*comp, project_->timeline().current(), "rampa de velocidade");
     bump_model_revision_locked();
     // O trecho da fonte que a camada mostra agora (sem a curva antiga).
-    const f32 freezeFrame = static_cast<f32>(l->source_frame(playback_.current()));
+    const f32 freezeFrame = static_cast<f32>(l->source_frame(editing_frame_locked()));
     const bool had = l->timeRemapEnabled;
     l->timeRemapEnabled = false;
     const f64 s0 = l->source_frame(l->start), s1 = l->source_frame(l->end);
@@ -6404,6 +6651,7 @@ bool Engine::apply_speed_ramp(u64 layerId, u32 preset) noexcept {
 
 bool Engine::set_motion_blur(u64 layerId, bool on) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return false;
@@ -6463,6 +6711,7 @@ std::string fold_for_search(const std::string& s) {
 
 bool Engine::set_layer_adjustment(u64 layerId, bool on) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return false;
@@ -6479,6 +6728,7 @@ bool Engine::set_layer_adjustment(u64 layerId, bool on) noexcept {
 
 bool Engine::set_layer_guide(u64 layerId, bool on) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return false;
@@ -6494,6 +6744,7 @@ bool Engine::set_layer_guide(u64 layerId, bool on) noexcept {
 bool Engine::set_layer_label(u64 layerId, u32 label) noexcept {
     if (label >= kLayerLabelCount) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return false;
@@ -6507,6 +6758,7 @@ bool Engine::set_layer_label(u64 layerId, u32 label) noexcept {
 
 bool Engine::set_layer_clip_to_below(u64 layerId, bool on) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     const LayerId id = LayerId::unpack(layerId);
     Layer* l = comp ? comp->layer(id) : nullptr;
@@ -6537,6 +6789,7 @@ bool Engine::set_layer_clip_to_below(u64 layerId, bool on) noexcept {
 
 bool Engine::set_layer_solo(u64 layerId, bool on) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return false;
@@ -6570,6 +6823,7 @@ std::vector<u64> Engine::search_layers(const std::string& query) noexcept {
 
 bool Engine::set_frame_blend(u64 layerId, u32 mode) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Video || mode > 2) return false;
@@ -6584,6 +6838,7 @@ bool Engine::set_frame_blend(u64 layerId, u32 mode) noexcept {
 bool Engine::set_vector_blur(u64 layerId, f32 amount) noexcept {
     if (!std::isfinite(amount)) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Video) return false;
@@ -6711,8 +6966,9 @@ void Engine::set_scene_editor(bool enabled, f32 yaw, f32 pitch, f32 distance) no
     if (!std::isfinite(yaw) || !std::isfinite(pitch) || !std::isfinite(distance)) return;
     std::lock_guard<std::mutex> lock(modelMutex_);
     const SceneEditorView before = workspaceView_;
-    workspaceView_ = SceneEditorView{enabled, std::remainder(yaw, 360.0f), std::clamp(pitch, -80.0f, 80.0f), std::clamp(distance, 0.25f, 30.0f)};
+    workspaceView_ = SceneEditorView{enabled, std::remainder(yaw, 360.0f), std::clamp(pitch, -scenePitchLimit_, scenePitchLimit_), std::clamp(distance, 0.25f, 30.0f)};
     workspaceView_.targetX = before.targetX; workspaceView_.targetY = before.targetY; workspaceView_.targetZ = before.targetZ;
+    workspaceView_.orthographic = before.orthographic;
     apply_scene_view_locked();
     request_render();
 }
@@ -6750,6 +7006,59 @@ void Engine::reset_scene_pan() noexcept {
     workspaceView_.targetX = workspaceView_.targetY = workspaceView_.targetZ = 0.0f;
     apply_scene_view_locked();
     request_render();
+}
+
+void Engine::set_scene_view_options(bool orthographic, f32 pitchLimit) noexcept {
+    if (!std::isfinite(pitchLimit)) return;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    scenePitchLimit_ = std::clamp(pitchLimit, 10.0f, 89.5f);
+    workspaceView_.orthographic = orthographic;
+    workspaceView_.pitch = std::clamp(workspaceView_.pitch, -scenePitchLimit_, scenePitchLimit_);
+    apply_scene_view_locked();
+    request_render();
+}
+
+bool Engine::focus_scene_view(const u64* layers, u32 count) noexcept {
+    if (!layers || count == 0) return false;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const BoneAttachScope bones(&Engine::model_lookup, this);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return false;
+    const FrameIndex now = playback_.current();
+    Vec3 sum{0, 0, 0};
+    u32 used = 0;
+    for (u32 i = 0; i < count; ++i) {
+        const Layer* l = comp->layer(LayerId::unpack(layers[i]));
+        if (!l || !lives_in_3d(*l)) continue;
+        const FrameIndex local = l->local_time(now);
+        // A mesma origem do gizmo (query_gizmo): modelo, luz e câmera na origem; o resto na âncora.
+        const Vec3 a = (l->kind == LayerKind::Model3D || l->kind == LayerKind::Light || l->kind == LayerKind::Camera) ? Vec3{0, 0, 0} : Vec3{
+            l->tracks.sample_or(TrackProperty::AnchorX, local, l->transform.anchor.x),
+            l->tracks.sample_or(TrackProperty::AnchorY, local, l->transform.anchor.y),
+            l->tracks.sample_or(TrackProperty::AnchorZ, local, l->transform.anchor.z)};
+        const Vec3 o = layer_world_3d(*comp, *l, now).transform_point(a);
+        if (!std::isfinite(o.x) || !std::isfinite(o.y) || !std::isfinite(o.z)) continue;
+        sum = sum + o;
+        ++used;
+    }
+    if (used == 0) return false;
+    const f32 inv = 1.0f / static_cast<f32>(used);
+    const f32 limit = static_cast<f32>(std::max(comp->width(), comp->height())) * 50.0f;
+    workspaceView_.targetX = std::clamp(sum.x * inv - static_cast<f32>(comp->width()) * 0.5f, -limit, limit);
+    workspaceView_.targetY = std::clamp(sum.y * inv - static_cast<f32>(comp->height()) * 0.5f, -limit, limit);
+    workspaceView_.targetZ = std::clamp(sum.z * inv, -limit, limit);
+    apply_scene_view_locked();
+    request_render();
+    return true;
+}
+
+void Engine::query_scene_view(f32 out[8]) noexcept {
+    if (!out) return;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    out[0] = workspaceView_.yaw; out[1] = workspaceView_.pitch; out[2] = workspaceView_.distance;
+    out[3] = workspaceView_.orthographic ? 1.0f : 0.0f;
+    out[4] = workspaceView_.targetX; out[5] = workspaceView_.targetY; out[6] = workspaceView_.targetZ;
+    out[7] = scenePitchLimit_;
 }
 
 void Engine::apply_scene_view_locked() noexcept {
@@ -6877,12 +7186,13 @@ u32 Engine::query_scene_guides(f32* lines, u32 capacity) noexcept {
 
 bool Engine::query_gizmo(u64 layerId, f32 length, f32* out, bool localSpace) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     // 0.5.2: camada presa a um osso — a alça fica no osso (pose do modelo pai).
     const BoneAttachScope bones(&Engine::model_lookup, this);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || !out || !lives_in_3d(*l)) return false;
-    const FrameIndex now = playback_.current();
+    const FrameIndex now = editing_frame_locked();
     const Mat4 w = layer_world_3d(*comp, *l, now);
     const FrameIndex local = l->local_time(now);
     const Vec3 a = (l->kind == LayerKind::Model3D || l->kind == LayerKind::Light) ? Vec3{0, 0, 0} : Vec3{
@@ -6990,10 +7300,11 @@ u64 Engine::scene_pick(f32 compX, f32 compY, f32 radius) noexcept {
 
 bool Engine::query_preview_gesture_basis(u64 layerId, f32* out) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || !out || !lives_in_3d(*l) || l->locked) return false;
-    const auto now = playback_.current(), local = l->local_time(now);
+    const auto now = editing_frame_locked(), local = l->local_time(now);
     if (!l->contains_time(now)) return false;
     for (u32 i = 0; i < 3; ++i) {
         out[i] = l->tracks.sample_or(static_cast<TrackProperty>(i), local, (&l->transform.position.x)[i]);
@@ -7036,12 +7347,13 @@ Mat4 bone_world_delta(const Composition& comp, const Layer& l, FrameIndex now) n
 
 bool Engine::gizmo_move_local(u64 layerId, u32 axis, f32 amount, f32* out) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     // 0.5.2: camada presa a um osso — eixos e espaço do pai com o osso (como a alça).
     const BoneAttachScope bones(&Engine::model_lookup, this);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || !out || axis > 5 || !std::isfinite(amount)) return false;
-    const FrameIndex now = playback_.current();
+    const FrameIndex now = editing_frame_locked();
     const FrameIndex local = l->local_time(now);
     auto s = [&](TrackProperty prop, f32 fallback) {
         const Track* tr = l->tracks.find(prop);
@@ -7075,10 +7387,11 @@ bool Engine::gizmo_move_local(u64 layerId, u32 axis, f32 amount, f32* out) noexc
 // gizmo (câmera ativa ou a da Cena 3D); o pai entra só com a rotação.
 bool Engine::query_trackball(u64 layerId, f32* out) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || !out || !lives_in_3d(*l)) return false;
-    const FrameIndex now = playback_.current();
+    const FrameIndex now = editing_frame_locked();
     const FrameIndex local = l->local_time(now);
     const Mat4 w = layer_world_3d(*comp, *l, now);
     const Vec3 a = (l->kind == LayerKind::Model3D || l->kind == LayerKind::Light) ? Vec3{0, 0, 0} : Vec3{
@@ -7108,6 +7421,427 @@ bool Engine::query_trackball(u64 layerId, f32* out) noexcept {
     trackball::axes(out + 11, e, out + 2);
     out[20] = e.x; out[21] = e.y; out[22] = e.z;
     for (u32 i = 0; i < trackball::kQueryFloats; ++i) if (!std::isfinite(out[i])) return false;
+    return true;
+}
+
+// =============================================================================
+// Aurea PC, Cena 3D no jeito do Blender — fase 1 (12/11/2026): caixas, pivôs,
+// cursor 3D e câmera. Consultas e vista de navegação; o projeto só muda em
+// `align_camera_to_scene_view`.
+// =============================================================================
+namespace {
+/// Espaço do pai da camada no mundo (base herdada e osso), como em gizmo_move_local.
+Mat4 scene_parent_world(const Composition& comp, const Layer& l, FrameIndex now) noexcept {
+    const Layer* p = l.parent.valid() ? comp.layer(l.parent) : nullptr;
+    if (!p && !l.hasParentBasis) return Mat4::identity();
+    Mat4 pw = (p ? layer_world_3d(comp, *p, now) : Mat4::identity()) * l.parentBasis;
+    if (p && l.parentBone >= 0 && p->kind == LayerKind::Model3D) pw = bone_world_delta(comp, l, now) * pw;
+    return pw;
+}
+
+/// Origem da camada no mundo: a do gizmo (modelo, luz e câmera na origem; o resto na âncora).
+Vec3 scene_layer_origin(const Composition& comp, const Layer& l, FrameIndex now) noexcept {
+    const FrameIndex local = l.local_time(now);
+    const Vec3 a = (l.kind == LayerKind::Model3D || l.kind == LayerKind::Light || l.kind == LayerKind::Camera) ? Vec3{0, 0, 0} : Vec3{
+        l.tracks.sample_or(TrackProperty::AnchorX, local, l.transform.anchor.x),
+        l.tracks.sample_or(TrackProperty::AnchorY, local, l.transform.anchor.y),
+        l.tracks.sample_or(TrackProperty::AnchorZ, local, l.transform.anchor.z)};
+    return layer_world_3d(comp, l, now).transform_point(a);
+}
+
+bool scene_is_3d(const Composition& comp, const Layer& l, FrameIndex now) noexcept {
+    return l.kind != LayerKind::Audio && (wants_layer_3d(comp, l, now) || lives_in_3d(l));
+}
+} // namespace
+
+bool Engine::scene_layer_box_locked(u64 layerId, Mat4& toWorld, Vec3& lo, Vec3& hi) noexcept {
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l) return false;
+    const FrameIndex now = editing_frame_locked();
+    toWorld = layer_world_3d(*comp, *l, now);
+    if (l->kind == LayerKind::Model3D) {
+        const auto asset = model_lookup(this, l->model.scene);
+        if (asset && asset->bounds.valid()) {
+            // O mesmo `layer_from_model` do Renderer: arquivo (Y para cima) → camada (Y para baixo, px).
+            Mat4 flip;
+            flip.col[1] = Vec4{0, -1, 0, 0};
+            flip.col[2] = Vec4{0, 0, -1, 0};
+            const f32 s = l->model.unitScale;
+            toWorld = toWorld * (flip * Mat4::scale(Vec3{s, s, s}) * Mat4::translation(-l->model.pivot));
+            lo = asset->bounds.min; hi = asset->bounds.max;
+            return true;
+        }
+    } else if (l->kind != LayerKind::Camera && l->kind != LayerKind::Light && l->kind != LayerKind::Null) {
+        bridge::LayerDetailPOD pod{};
+        if (fill_layer_detail_locked(layerId, pod) && pod.sourceWidth > 0 && pod.sourceHeight > 0) {
+            Vec2 o{0.0f, 0.0f};
+            if (l->kind == LayerKind::Shape && l->shape.shapeType == kShapeVector) {
+                const Rect b = vector_content_box(*l, l->local_time(now), comp->fps());
+                o = Vec2{b.x, b.y};
+            } else if (l->kind == LayerKind::Shape) {
+                bool centered = false;
+                const ShapeData shape = evaluated_sdf_shape(*l, l->local_time(now), &centered);
+                if (centered) o = Vec2{l->transform.anchor.x - shape.bounds.w * 0.5f, l->transform.anchor.y - shape.bounds.h * 0.5f};
+            }
+            lo = Vec3{o.x, o.y, 0.0f};
+            hi = Vec3{o.x + static_cast<f32>(pod.sourceWidth), o.y + static_cast<f32>(pod.sourceHeight), 0.0f};
+            return true;
+        }
+    }
+    // Sem corpo (câmera, luz, nulo): um ponto na origem.
+    const Vec3 o = scene_layer_origin(*comp, *l, now);
+    toWorld = Mat4::translation(o);
+    lo = hi = Vec3{0, 0, 0};
+    return true;
+}
+
+bool Engine::query_layer_bounds(u64 layerId, f32* out, u32 capacity) noexcept {
+    if (!out || capacity < kLayerBoundsFloats) return false;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
+    const BoneAttachScope bones(&Engine::model_lookup, this);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return false;
+    Mat4 m; Vec3 lo, hi;
+    if (!scene_layer_box_locked(layerId, m, lo, hi)) return false;
+    const FrameIndex now = editing_frame_locked();
+    const Mat4 vp = sceneEditor_.enabled ? scene_editor_projection(comp->width(), comp->height(), sceneEditor_)
+        : comp_view_projection(*comp, now);
+    scene3d::Aabb box;
+    bool front = true;
+    for (u32 i = 0; i < 8; ++i) {
+        const Vec3 c = m.transform_point(Vec3{(i & 1) ? hi.x : lo.x, (i & 2) ? hi.y : lo.y, (i & 4) ? hi.z : lo.z});
+        box.add(c);
+        const Vec4 p = vp * Vec4{c.x, c.y, c.z, 1};
+        if (p.w > 1e-4f) { out[9 + i * 2] = p.x / p.w; out[10 + i * 2] = p.y / p.w; }
+        else { out[9 + i * 2] = out[10 + i * 2] = 0.0f; front = false; }
+    }
+    out[0] = box.min.x; out[1] = box.min.y; out[2] = box.min.z;
+    out[3] = box.max.x; out[4] = box.max.y; out[5] = box.max.z;
+    const Vec3 e = hi - lo;
+    out[6] = e.x * Vec3{m.col[0].x, m.col[0].y, m.col[0].z}.length();
+    out[7] = e.y * Vec3{m.col[1].x, m.col[1].y, m.col[1].z}.length();
+    out[8] = e.z * Vec3{m.col[2].x, m.col[2].y, m.col[2].z}.length();
+    out[25] = front ? 1.0f : 0.0f;
+    for (u32 i = 0; i < kLayerBoundsFloats; ++i) if (!std::isfinite(out[i])) return false;
+    return true;
+}
+
+bool Engine::scene_bounds_locked(const u64* layers, u32 count, Vec3& lo, Vec3& hi) noexcept {
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return false;
+    const FrameIndex now = editing_frame_locked();
+    scene3d::Aabb all;
+    auto add = [&](LayerId id) {
+        const Layer* l = comp->layer(id);
+        if (!l || !scene_is_3d(*comp, *l, now)) return;
+        Mat4 m; Vec3 a, b;
+        if (!scene_layer_box_locked(id.pack(), m, a, b)) return;
+        for (u32 i = 0; i < 8; ++i) {
+            const Vec3 c = m.transform_point(Vec3{(i & 1) ? b.x : a.x, (i & 2) ? b.y : a.y, (i & 4) ? b.z : a.z});
+            if (std::isfinite(c.x) && std::isfinite(c.y) && std::isfinite(c.z)) all.add(c);
+        }
+    };
+    if (layers && count > 0) {
+        for (u32 i = 0; i < count; ++i) add(LayerId::unpack(layers[i]));
+    } else {
+        const OrderedIds<LayerId>& order = comp->order();
+        for (u32 i = 0; i < order.size(); ++i) {
+            const Layer* l = comp->layer(order.at(i));
+            if (l && l->visible && l->contains_time(now)) add(order.at(i));
+        }
+    }
+    if (!all.valid()) return false;
+    lo = all.min; hi = all.max;
+    return true;
+}
+
+bool Engine::query_scene_bounds(const u64* layers, u32 count, f32 out[6]) noexcept {
+    if (!out) return false;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const BoneAttachScope bones(&Engine::model_lookup, this);
+    Vec3 lo, hi;
+    if (!scene_bounds_locked(layers, count, lo, hi)) return false;
+    out[0] = lo.x; out[1] = lo.y; out[2] = lo.z; out[3] = hi.x; out[4] = hi.y; out[5] = hi.z;
+    return true;
+}
+
+bool Engine::frame_scene_view(const u64* layers, u32 count, f32 margin) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const BoneAttachScope bones(&Engine::model_lookup, this);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    Vec3 lo, hi;
+    if (!comp || !scene_bounds_locked(layers, count, lo, hi)) return false;
+    const u32 w = std::max(1u, comp->width()), h = std::max(1u, comp->height());
+    const Vec3 center = (lo + hi) * 0.5f;
+    const f32 radius = (hi - lo).length() * 0.5f;
+    const f32 limit = static_cast<f32>(std::max(w, h)) * 50.0f;
+    workspaceView_.targetX = std::clamp(center.x - static_cast<f32>(w) * 0.5f, -limit, limit);
+    workspaceView_.targetY = std::clamp(center.y - static_cast<f32>(h) * 0.5f, -limit, limit);
+    workspaceView_.targetZ = std::clamp(center.z, -limit, limit);
+    // A esfera da caixa cabe no campo de visão mais estreito (vertical ou horizontal).
+    const f32 fovY = scene3d::default_camera(w, h).fovY;
+    const f32 halfY = fovY * 0.5f;
+    const f32 halfX = std::atan(std::tan(halfY) * static_cast<f32>(w) / static_cast<f32>(h));
+    const f32 half = std::max(0.05f, std::min(halfX, halfY));
+    const f32 m = std::isfinite(margin) ? std::clamp(margin, 1.0f, 4.0f) : 1.15f;
+    const f32 distancePx = std::max(radius, static_cast<f32>(h) * 0.08f) * m / std::sin(half);
+    workspaceView_.distance = std::clamp(distancePx / static_cast<f32>(h), 0.25f, 30.0f);
+    apply_scene_view_locked();
+    request_render();
+    return true;
+}
+
+bool Engine::query_layer_world_origin(u64 layerId, f32 out[3]) noexcept {
+    if (!out) return false;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
+    const BoneAttachScope bones(&Engine::model_lookup, this);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l) return false;
+    const Vec3 o = scene_layer_origin(*comp, *l, editing_frame_locked());
+    if (!std::isfinite(o.x) || !std::isfinite(o.y) || !std::isfinite(o.z)) return false;
+    out[0] = o.x; out[1] = o.y; out[2] = o.z;
+    return true;
+}
+
+namespace {
+/// Soma `delta` a uma propriedade da transformação: com keyframes, todos eles
+/// andam juntos (a animação continua a mesma, no lugar novo); sem, o valor parado.
+void shift_transform(Layer& l, TrackProperty property, f32& field, f32 delta) noexcept {
+    if (!(std::fabs(delta) > 0.0f) || !std::isfinite(delta)) return;
+    if (Track* track = l.tracks.find(property); track && !track->keys.empty() && !track->has_expression()) {
+        for (Keyframe& k : track->keys) k.value += delta;
+        track->staticValue += delta;
+        return;
+    }
+    field += delta;
+    sync_static_transform_track(l, property, field);
+}
+} // namespace
+
+bool Engine::place_model_layer(u64 layerId, u32 mode) noexcept {
+    if (mode > 2) return false;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
+    const BoneAttachScope bones(&Engine::model_lookup, this);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->kind != LayerKind::Model3D || l->locked) return false;
+    const auto asset = model_lookup(this, l->model.scene);
+    if (!asset || !asset->bounds.valid()) return false;
+    const FrameIndex now = editing_frame_locked();
+    const f32 w = static_cast<f32>(std::max(1u, comp->width())), h = static_cast<f32>(std::max(1u, comp->height()));
+    // A caixa do modelo no mundo, no cabeçote (a mesma da cena 3D do PC).
+    auto world_box = [&](Vec3& lo, Vec3& hi) {
+        return scene_bounds_locked(&layerId, 1, lo, hi) && std::isfinite(lo.x) && std::isfinite(hi.x)
+            && std::isfinite(lo.y) && std::isfinite(hi.y) && std::isfinite(lo.z) && std::isfinite(hi.z);
+    };
+    Vec3 lo, hi;
+    if (!world_box(lo, hi)) return false;
+    const char* label = mode == 0 ? "assentar o modelo no chão" : mode == 1 ? "centralizar o modelo" : "ajustar o modelo à tela";
+    history_.before_mutation(*comp, project_->timeline().current(), label);
+    if (mode == 2) {
+        // A silhueta vista de frente (largura × altura) ocupa 80 % do quadro;
+        // a escala da camada (e os keyframes dela) ficam como estão.
+        const f32 ex = std::max(hi.x - lo.x, 1e-3f), ey = std::max(hi.y - lo.y, 1e-3f);
+        const f32 k = std::min(0.8f * w / ex, 0.8f * h / ey);
+        if (std::isfinite(k) && k > 0.0f) l->model.unitScale = std::clamp(l->model.unitScale * k, 1e-6f, 1e9f);
+        if (!world_box(lo, hi)) lo = hi = Vec3{w * 0.5f, h * 0.5f, 0.0f};
+    }
+    Vec3 delta{0.0f, 0.0f, 0.0f};
+    if (mode == 0) {
+        // O chão: a base (maior Y) dos OUTROS modelos 3D visíveis agora — o
+        // mesmo chão que a cena põe sob eles. Sem outro modelo, a 90 % da altura.
+        f32 floorY = -1e30f;
+        const OrderedIds<LayerId>& order = comp->order();
+        for (u32 i = 0; i < order.size(); ++i) {
+            const Layer* o = comp->layer(order.at(i));
+            if (!o || o == l || o->kind != LayerKind::Model3D || !o->visible || !o->contains_time(now)) continue;
+            const u64 other = order.at(i).pack();
+            Vec3 a, b;
+            if (scene_bounds_locked(&other, 1, a, b) && std::isfinite(b.y)) floorY = std::max(floorY, b.y);
+        }
+        if (floorY < -1e29f) floorY = 0.9f * h;
+        delta.y = floorY - hi.y;
+    } else {
+        const Vec3 c = (lo + hi) * 0.5f;
+        delta = Vec3{w * 0.5f - c.x, h * 0.5f - c.y, -c.z};
+    }
+    // O passo no mundo vira o passo no espaço do pai (o que a Posição soma).
+    const Mat4 inv = inverse4(scene_parent_world(*comp, *l, now));
+    const Vec4 step = inv * Vec4{delta.x, delta.y, delta.z, 0.0f};
+    if (std::isfinite(step.x) && std::isfinite(step.y) && std::isfinite(step.z)) {
+        shift_transform(*l, TrackProperty::PositionX, l->transform.position.x, step.x);
+        shift_transform(*l, TrackProperty::PositionY, l->transform.position.y, step.y);
+        shift_transform(*l, TrackProperty::PositionZ, l->transform.position.z, step.z);
+    }
+    bump_model_revision_locked();
+    comp->touch();
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::scene_world_delta_to_parent(u64 layerId, const f32 worldDelta[3], f32 out[3]) noexcept {
+
+    if (!worldDelta || !out) return false;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
+    const BoneAttachScope bones(&Engine::model_lookup, this);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l) return false;
+    const Mat4 inv = inverse4(scene_parent_world(*comp, *l, editing_frame_locked()));
+    const Vec4 v = inv * Vec4{worldDelta[0], worldDelta[1], worldDelta[2], 0};
+    if (!std::isfinite(v.x) || !std::isfinite(v.y) || !std::isfinite(v.z)) return false;
+    out[0] = v.x; out[1] = v.y; out[2] = v.z;
+    return true;
+}
+
+bool Engine::scene_rotate_about(u64 layerId, u32 axis, f32 degrees, bool followPointer, const f32* pivotWorld,
+                                const f32 basePos[3], const f32 baseRot[3], f32 outPos[3], f32 outRot[3]) noexcept {
+    if (axis > 6 || !basePos || !baseRot || !outPos || !outRot || !std::isfinite(degrees)) return false;
+    for (u32 i = 0; i < 3; ++i) if (!std::isfinite(basePos[i]) || !std::isfinite(baseRot[i])) return false;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
+    const BoneAttachScope bones(&Engine::model_lookup, this);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l) return false;
+    const FrameIndex now = editing_frame_locked();
+    const u32 w = std::max(1u, comp->width()), h = std::max(1u, comp->height());
+    const Mat4 pw = scene_parent_world(*comp, *l, now);
+    const f32 frame[9]{pw.col[0].x, pw.col[0].y, pw.col[0].z, pw.col[1].x, pw.col[1].y, pw.col[1].z, pw.col[2].x, pw.col[2].y, pw.col[2].z};
+    using namespace trackball::detail;
+    const DQ parent = frame_quat(frame);
+    const DQ local0 = from_euler_deg(baseRot[0], baseRot[1], baseRot[2]);
+    const DQ world0 = qmul(parent, local0);
+    const scene3d::SceneCamera cam = sceneEditor_.enabled ? scene_editor_camera(w, h, sceneEditor_) : comp_camera(*comp, now, w, h);
+    const D3 forward = unit(D3{cam.view.col[0].z, cam.view.col[1].z, cam.view.col[2].z});
+    D3 a{};
+    if (axis < 3) a = D3{axis == 0 ? 1.0 : 0.0, axis == 1 ? 1.0 : 0.0, axis == 2 ? 1.0 : 0.0};
+    else if (axis < 6) a = unit(rotate(world0, D3{axis == 3 ? 1.0 : 0.0, axis == 4 ? 1.0 : 0.0, axis == 5 ? 1.0 : 0.0}));
+    else a = forward;
+    if (dot(a, a) < 0.5) return false;
+    f64 angle = static_cast<f64>(degrees);
+    if (followPointer && axis != 6 && dot(a, forward) < 0.0) angle = -angle;
+    const DQ turn = axis_angle(a, angle * kRad);
+    const DQ local1 = qunit(qmul(qconj(parent), qmul(turn, world0)));
+    const D3 e = euler_near(local1, D3{baseRot[0], baseRot[1], baseRot[2]});
+    outRot[0] = static_cast<f32>(e.x); outRot[1] = static_cast<f32>(e.y); outRot[2] = static_cast<f32>(e.z);
+    // A origem gira em volta do pivô; o passo no mundo volta para o espaço do pai.
+    const Vec3 o0 = pw.transform_point(Vec3{basePos[0], basePos[1], basePos[2]});
+    outPos[0] = basePos[0]; outPos[1] = basePos[1]; outPos[2] = basePos[2];
+    if (pivotWorld && std::isfinite(pivotWorld[0]) && std::isfinite(pivotWorld[1]) && std::isfinite(pivotWorld[2])) {
+        const D3 arm{o0.x - pivotWorld[0], o0.y - pivotWorld[1], o0.z - pivotWorld[2]};
+        const D3 turned = rotate(turn, arm);
+        const Vec4 step = inverse4(pw) * Vec4{static_cast<f32>(turned.x - arm.x), static_cast<f32>(turned.y - arm.y), static_cast<f32>(turned.z - arm.z), 0};
+        outPos[0] += step.x; outPos[1] += step.y; outPos[2] += step.z;
+    }
+    for (u32 i = 0; i < 3; ++i) if (!std::isfinite(outPos[i]) || !std::isfinite(outRot[i])) return false;
+    return true;
+}
+
+bool Engine::scene_point_at(f32 compX, f32 compY, const f32* planePoint, bool surfaces, f32 out[3]) noexcept {
+    if (!out || !std::isfinite(compX) || !std::isfinite(compY)) return false;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return false;
+    const FrameIndex now = playback_.current();
+    const u32 w = std::max(1u, comp->width()), h = std::max(1u, comp->height());
+    const scene3d::SceneCamera cam = sceneEditor_.enabled ? scene_editor_camera(w, h, sceneEditor_) : comp_camera(*comp, now, w, h);
+    Vec3 origin, dir;
+    if (!scene_ray(cam, w, h, compX, compY, origin, dir)) return false;
+    if (surfaces) {
+        f32 best = std::numeric_limits<f32>::max();
+        bool hit = false;
+        const OrderedIds<LayerId>& order = comp->order();
+        for (u32 i = 0; i < order.size(); ++i) {
+            const Layer* l = comp->layer(order.at(i));
+            if (!l || !l->visible || !l->contains_time(now) || l->kind != LayerKind::Model3D) continue;
+            if (auto asset = model_lookup(this, l->model.scene))
+                if (ray_hits_model_layer(*comp, *l, now, *asset, origin, dir, best)) hit = true;
+        }
+        if (hit && std::isfinite(best)) {
+            const Vec3 p = origin + dir * best;
+            out[0] = p.x; out[1] = p.y; out[2] = p.z;
+            return true;
+        }
+    }
+    const Vec3 n{cam.view.col[0].z, cam.view.col[1].z, cam.view.col[2].z};
+    Vec3 through{static_cast<f32>(w) * 0.5f + workspaceView_.targetX, static_cast<f32>(h) * 0.5f + workspaceView_.targetY, workspaceView_.targetZ};
+    if (planePoint && std::isfinite(planePoint[0]) && std::isfinite(planePoint[1]) && std::isfinite(planePoint[2]))
+        through = Vec3{planePoint[0], planePoint[1], planePoint[2]};
+    const f32 denom = n.dot(dir);
+    if (std::fabs(denom) < 1e-9f) return false;
+    const f32 t = n.dot(through - origin) / denom;
+    const Vec3 p = origin + dir * t;
+    if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) return false;
+    out[0] = p.x; out[1] = p.y; out[2] = p.z;
+    return true;
+}
+
+u32 Engine::project_scene_points(const f32* xyz, u32 count, f32* outXY) noexcept {
+    if (!xyz || !outXY || count == 0) return 0;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return 0;
+    const Mat4 vp = sceneEditor_.enabled ? scene_editor_projection(comp->width(), comp->height(), sceneEditor_)
+        : comp_view_projection(*comp, playback_.current());
+    u32 made = 0;
+    const f32 nan = std::numeric_limits<f32>::quiet_NaN();
+    for (u32 i = 0; i < count; ++i) {
+        const Vec4 p = vp * Vec4{xyz[i * 3], xyz[i * 3 + 1], xyz[i * 3 + 2], 1};
+        if (p.w > 1e-4f && std::isfinite(p.x) && std::isfinite(p.y)) { outXY[i * 2] = p.x / p.w; outXY[i * 2 + 1] = p.y / p.w; ++made; }
+        else outXY[i * 2] = outXY[i * 2 + 1] = nan;
+    }
+    return made;
+}
+
+bool Engine::align_camera_to_scene_view(u64 cameraLayer) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(cameraLayer)) : nullptr;
+    if (!l || l->locked || l->kind != LayerKind::Camera) return false;
+    const FrameIndex now = playback_.current();
+    const u32 w = std::max(1u, comp->width()), h = std::max(1u, comp->height());
+    // O olho e o alvo da órbita (a vista de navegação pedida pela Cena 3D, ligada ou não agora).
+    SceneEditorView view = workspaceView_;
+    view.enabled = true;
+    view.orthographic = false;      // a ortográfica recua a câmera; o olho é o da perspectiva
+    const scene3d::SceneCamera cam = scene_editor_camera(w, h, view);
+    const Vec3 target{static_cast<f32>(w) * 0.5f + view.targetX, static_cast<f32>(h) * 0.5f + view.targetY, view.targetZ};
+    const Mat4 inv = inverse4(scene_parent_world(*comp, *l, now));
+    const Vec3 eye = inv.transform_point(cam.position);
+    const Vec3 poi = inv.transform_point(target);
+    if (!std::isfinite(eye.x) || !std::isfinite(eye.y) || !std::isfinite(eye.z) || !std::isfinite(poi.x) || !std::isfinite(poi.y) || !std::isfinite(poi.z)) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "alinhar câmera à vista");
+    bump_model_revision_locked();
+    const FrameIndex local = l->local_time(now);
+    // Trilha com keyframe: a edição vira (ou troca) o key do cabeçote; parada: o valor.
+    auto put = [&](TrackProperty prop, f32& field, f32 value) {
+        if (const Track* t = l->tracks.find(prop); t && !t->keys.empty()) {
+            Track& track = l->tracks.get_or_create(prop, kInvalidIndex, 0);
+            if (const u32 at = track.find_exact(local); at != kInvalidIndex) track.keys[at].value = value;
+            else (void)track.set(local, value, Interpolation::Linear);
+        } else field = value;
+    };
+    l->camera.twoNode = true;
+    put(TrackProperty::PositionX, l->transform.position.x, eye.x);
+    put(TrackProperty::PositionY, l->transform.position.y, eye.y);
+    put(TrackProperty::PositionZ, l->transform.position.z, eye.z);
+    put(TrackProperty::RotationX, l->transform.rotation.x, 0.0f);
+    put(TrackProperty::RotationY, l->transform.rotation.y, 0.0f);
+    put(TrackProperty::RotationZ, l->transform.rotation.z, 0.0f);
+    put(TrackProperty::CameraPoiX, l->camera.poi.x, poi.x);
+    put(TrackProperty::CameraPoiY, l->camera.poi.y, poi.y);
+    put(TrackProperty::CameraPoiZ, l->camera.poi.z, poi.z);
+    request_render();
     return true;
 }
 
@@ -7503,6 +8237,7 @@ bool Engine::query_scene3d_post(f32* out) noexcept {
 bool Engine::set_object_environment(u64 layerId, u32 source, u64 hdriAsset, f32 intensity, f32 rotationDeg,
                                     f32 exposure) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     // Só objeto que vive no 3D tem ambiente próprio.
@@ -7521,6 +8256,7 @@ bool Engine::set_object_environment(u64 layerId, u32 source, u64 hdriAsset, f32 
 
 bool Engine::query_object_environment(u64 layerId, f32* out, u64* outAsset) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     const Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || !out) return false;
@@ -7535,6 +8271,7 @@ bool Engine::query_object_environment(u64 layerId, f32* out, u64* outAsset) noex
 
 bool Engine::set_model_shadows(u64 layerId, bool cast, bool receive) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Model3D) return false;
@@ -7549,6 +8286,7 @@ bool Engine::set_model_shadows(u64 layerId, bool cast, bool receive) noexcept {
 
 bool Engine::query_model_shadows(u64 layerId, f32* out) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     const Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || !out || l->kind != LayerKind::Model3D) return false;
@@ -7563,11 +8301,12 @@ bool Engine::query_model_shadows(u64 layerId, f32* out) noexcept {
 Result<u64> Engine::precompose(const u64* ids, u32 count, const char* name) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, (count == 1 && ids ? ids[0] : 0), true);
     return precompose_locked(ids, count, name, false, false);
 }
 
 Status Engine::group_and_mask_admission_locked(const u64* ids, u32 count) const noexcept {
-    const Composition* comp = project_ ? project_->timeline().composition(project_->timeline().current()) : nullptr;
+    const Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp || !ids || count < 2) return Status{Errc::InvalidArgument, "selecione duas camadas visuais"};
     std::unordered_set<u64> unique;
     for (u32 i = 0; i < count; ++i) {
@@ -7588,12 +8327,14 @@ Status Engine::group_and_mask_admission_locked(const u64* ids, u32 count) const 
 bool Engine::can_group_and_mask(const u64* ids, u32 count) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, (count == 1 && ids ? ids[0] : 0));
     return group_and_mask_admission_locked(ids, count).ok();
 }
 
 Result<u64> Engine::group_and_mask(const u64* ids, u32 count, bool exclude, const char* name) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, (count == 1 && ids ? ids[0] : 0), true);
     if (const Status admitted = group_and_mask_admission_locked(ids, count); !admitted.ok()) return admitted;
     return precompose_locked(ids, count, name, true, exclude);
 }
@@ -7694,7 +8435,7 @@ Result<u64> Engine::precompose_locked(const u64* ids, u32 count, const char* nam
             }
         }
     }
-    const FrameIndex now = playback_.current();
+    const FrameIndex now = editing_frame_locked();
     for (auto& [oldId, nid] : map) {
         Layer* dst = child->layer(nid);
         if (!dst || !dst->parent.valid()) continue;
@@ -7748,6 +8489,7 @@ Result<u32> Engine::ungroup_precomp(u64 layerId, std::string* why) noexcept {
     // Bug #6: comandos ainda na fila (um renomear, o fim de um arrasto) entram
     // ANTES, como no agrupar — senão caíam depois, fora de ordem no desfazer.
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     std::vector<u64> added;
     const Result<u32> r = ungroup_precomp_locked(layerId, why, &added);
     if (r.ok()) {
@@ -7763,6 +8505,7 @@ Result<u32> Engine::ungroup_precomps(const u64* ids, u32 count, std::string* why
     if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
     if (!ids || count == 0) return Status{Errc::InvalidArgument, "nao e uma pre-composicao"};
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, (count == 1 && ids ? ids[0] : 0), true);
     std::vector<u64> groups;
     for (u32 i = 0; i < count; ++i)
         if (std::find(groups.begin(), groups.end(), ids[i]) == groups.end()) groups.push_back(ids[i]);
@@ -7977,19 +8720,45 @@ bool Engine::open_precomp(u64 layerId) noexcept {
     // aplicado depois de entrar — na camada de mesmo id DENTRO do grupo.
     if (project_) drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
-    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || l->kind != LayerKind::Composition) return false;
+    if (!comp) return false;
     Timeline& tl = project_->timeline();
-    if (!tl.composition(l->nested.composition)) return false;
-    // Cabeçote no tempo correspondente dentro da filha.
-    const f64 f = l->source_frame(playback_.current());
-    compStack_.push_back(tl.current());
-    tl.set_current(l->nested.composition);
-    selection_.clear();
-    if (Composition* child = current_composition()) {
-        configure_playback_locked(child);
-        playback_.seek(FrameIndex{std::clamp<i64>(static_cast<i64>(f), 0, child->duration().value - 1)}, monotonic_ns());
+    std::array<u64, 2> path{layerId, 0};
+    u32 count = 1;
+    const u64 inlineGroup = inlineEditGroup_.load(std::memory_order_acquire);
+    if (inlineGroup && inlineEditLayer_.load(std::memory_order_relaxed) == layerId) {
+        if (inlineEditOuter_.load(std::memory_order_relaxed) != tl.current().pack()) return false;
+        const Layer* group = comp->layer(LayerId::unpack(inlineGroup));
+        if (!group || group->nested.composition.pack() != inlineEditInner_.load(std::memory_order_relaxed)) return false;
+        path = {inlineGroup, layerId};
+        count = 2;
     }
+    std::array<CompositionId, 2> destinations{};
+    std::array<FrameIndex, 2> frames{};
+    FrameIndex time = editing_frame_locked();
+    for (u32 i = 0; i < count; ++i) {
+        const Layer* layer = comp->layer(LayerId::unpack(path[i]));
+        if (!layer || layer->kind != LayerKind::Composition) return false;
+        Composition* child = tl.composition(layer->nested.composition);
+        if (!child || child == comp) return false;
+        const f64 mapped = layer->source_frame(time) * child->fps() / comp->fps();
+        if (!std::isfinite(mapped)) return false;
+        time = FrameIndex{static_cast<i64>(std::floor(std::clamp(mapped, 0., f64(std::max<i64>(0, child->duration().value - 1))) + 1e-6))};
+        destinations[i] = layer->nested.composition;
+        frames[i] = time;
+        comp = child;
+    }
+    // Validate the whole path before publishing either navigation step.
+    inlineEditGroup_.store(0, std::memory_order_release);
+    inlineEditLayer_.store(0, std::memory_order_relaxed);
+    inlineEditOuter_.store(0, std::memory_order_relaxed);
+    inlineEditInner_.store(0, std::memory_order_relaxed);
+    for (u32 i = 0; i < count; ++i) {
+        compStack_.push_back(tl.current());
+        tl.set_current(destinations[i]);
+        configure_playback_locked(tl.composition(destinations[i]));
+        playback_.seek(frames[i], monotonic_ns());
+    }
+    selection_.clear();
     bump_model_revision_locked();
     request_render();
     return true;
@@ -8019,7 +8788,9 @@ bool Engine::close_precomp() noexcept {
             const Layer* g = c->layer(c->order().at(i));
             if (!g || g->kind != LayerKind::Composition || g->nested.composition != inner) continue;
             if (g->timeRemapEnabled || g->speed != 1.0f || g->reversed || g->speed_track()) break;
-            const i64 outer = innerFrame + g->start.value - g->offset.value;
+            const Composition* child = tl.composition(inner);
+            const f64 ratio = child && child->fps() > 0 ? c->fps() / child->fps() : 1.;
+            const i64 outer = static_cast<i64>(std::floor(innerFrame * ratio + 1e-6)) + g->start.value - g->offset.value;
             playback_.seek(FrameIndex{std::clamp<i64>(outer, 0, std::max<i64>(0, c->duration().value - 1))}, monotonic_ns());
             break;
         }
@@ -8146,6 +8917,7 @@ void Engine::restore_clipboard_media_locked(const ClipboardMedia& bundle, std::v
 
 u32 Engine::copy_layers(const u64* ids, u32 count) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, (count == 1 && ids ? ids[0] : 0));
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp || !ids) return 0;
     clipboard_.layers.clear();
@@ -8169,6 +8941,8 @@ u32 Engine::copy_layers(const u64* ids, u32 count) noexcept {
 
 u32 Engine::paste_layers(i64 frame) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, inlineEditLayer_.load(std::memory_order_relaxed), true);
+    frame = inlineScope.map_frame(frame);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp || clipboard_.layers.empty()) return 0;
     history_.before_mutation(*comp, project_->timeline().current(), "colar camadas");
@@ -8270,6 +9044,7 @@ u32 Engine::paste_layers(i64 frame) noexcept {
 
 bool Engine::copy_style(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return false;
@@ -8333,6 +9108,7 @@ void copy_track(Layer& dst, const Layer& src, TrackProperty p) {
 bool Engine::copy_transform(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* source = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!source) return false;
@@ -8344,6 +9120,7 @@ bool Engine::copy_transform(u64 layerId) noexcept {
 u32 Engine::paste_transform(const u64* ids, u32 count) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, (count == 1 && ids ? ids[0] : 0), true);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp || !ids || !count || count > 4096 || !clipboard_.hasTransform) return 0;
     std::vector<LayerId> targets;
@@ -8369,6 +9146,7 @@ u32 Engine::paste_transform(const u64* ids, u32 count) noexcept {
 
 u32 Engine::paste_style(const u64* ids, u32 count) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, (count == 1 && ids ? ids[0] : 0), true);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp || !ids || !clipboard_.hasStyle) return 0;
     history_.before_mutation(*comp, project_->timeline().current(), "colar estilo");
@@ -8411,6 +9189,7 @@ u32 Engine::copy_effects(u64 layerId, u32 effectId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     // Comandos na fila (um keyframe recém-posto) entram ANTES da cópia.
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return 0;
@@ -8442,6 +9221,7 @@ u32 Engine::paste_effects(const u64* ids, u32 count) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     // Um aparo/movimento ainda na fila muda o `offset` do destino: entra antes.
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, (count == 1 && ids ? ids[0] : 0), true);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp || !ids || (clipboard_.effects.empty() && clipboard_.textAnimators.empty())) return 0;
     // Pré-comp com outro fps: o mesmo instante em SEGUNDOS (1 s a 30 fps = 60
@@ -8517,6 +9297,7 @@ u32 Engine::paste_effects(const u64* ids, u32 count) noexcept {
 
 u32 Engine::copy_keyframes(u64 layerId, i64 frame) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return 0;
@@ -8619,6 +9400,7 @@ bool resolve_selected_keys(const Layer& layer, const i64* refs, u32 count,
 u32 Engine::copy_keyframe_selection(u64 layerId, const i64* refs, u32 count) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     std::vector<SelectedTrackKey> selected;
@@ -8695,6 +9477,7 @@ u32 Engine::retime_keyframe_selection(u64 layerId, const i64* refs, u32 count, i
     // enfileirar precisa valer ANTES desta mutação, senão o 1º passo do
     // arrasto vira um desfazer à parte (arrasto = UM passo).
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     std::vector<SelectedTrackKey> selected;
@@ -8748,7 +9531,7 @@ u32 Engine::retime_keyframe_selection(u64 layerId, const i64* refs, u32 count, i
         for (usize k = 1; k < next.keys.size(); ++k) if (next.keys[k - 1].frame == next.keys[k].frame) return 0;
         if (remove && next.keys.empty())
             (void)mesh_warp::evaluate(&original, original.rows, original.cols,
-                static_cast<f64>(layer->local_time(playback_.current()).value), next.values);
+                static_cast<f64>(layer->local_time(editing_frame_locked()).value), next.values);
         changedMeshes.emplace_back(index, std::move(next));
     }
     struct ChangedPath { u32 group, path; VectorPath next; };
@@ -8777,14 +9560,14 @@ u32 Engine::retime_keyframe_selection(u64 layerId, const i64* refs, u32 count, i
         for (usize k = 1; k < next.keys.size(); ++k) if (next.keys[k - 1].frame == next.keys[k].frame) return 0;
         // Sem key nenhum, a forma fica parada como se via no cabeçote.
         if (remove && next.keys.empty())
-            next.path = vector::path_at(original, static_cast<f64>(layer->local_time(playback_.current()).value));
+            next.path = vector::path_at(original, static_cast<f64>(layer->local_time(editing_frame_locked()).value));
         changedPaths.push_back({item.track, item.pathIndex, std::move(next)});
     }
     history_.before_mutation(*comp, project_->timeline().current(),
                             remove ? "remover keyframes" : scaling ? "escalar keyframes" : "mover keyframes");
     for (auto& entry : changed) {
         Track& original = selected_track(*layer, entry.first);
-        if (remove && entry.second.keys.empty()) freeze_last_shape_key(*layer, original, layer->local_time(playback_.current()));
+        if (remove && entry.second.keys.empty()) freeze_last_shape_key(*layer, original, layer->local_time(editing_frame_locked()));
         original = std::move(entry.second);
     }
     for (auto& entry : changedMeshes) *mesh_warp::animation(layer->effects[entry.first]) = std::move(entry.second);
@@ -8797,6 +9580,8 @@ u32 Engine::retime_keyframe_selection(u64 layerId, const i64* refs, u32 count, i
 u32 Engine::paste_keyframes(const u64* ids, u32 count, i64 frame) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, (count == 1 && ids ? ids[0] : 0), true);
+    frame = inlineScope.map_frame(frame);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp || !ids || (clipboard_.keys.empty() && clipboard_.pathKeys.empty() && clipboard_.meshKeys.empty())
         || frame < INT32_MIN || frame > INT32_MAX) return 0;
@@ -8897,6 +9682,7 @@ u32 Engine::paste_keyframes(const u64* ids, u32 count, i64 frame) noexcept {
 u32 Engine::copy_animation(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return 0;
@@ -8964,6 +9750,7 @@ u32 Engine::copy_animation(u64 layerId) noexcept {
 u32 Engine::optimize_keyframes(u64 layerId, i32 property, f32 tolerance) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || !(tolerance >= 0.0f)) return 0;
@@ -9002,6 +9789,7 @@ u32 Engine::clipboard_state() noexcept {
 // =============================================================================
 std::string Engine::save_preset(u64 layerId, presets::PresetKind kind, const std::string& name, u32 parts) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return {};
@@ -9013,6 +9801,7 @@ std::string Engine::save_preset(u64 layerId, presets::PresetKind kind, const std
 
 std::string Engine::save_effect_preset(u64 layerId, u32 effectId, const std::string& name) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return {};
@@ -9037,6 +9826,7 @@ bool Engine::apply_preset(u64 layerId, const std::string& json, i64 durationFram
         return false;
     }
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) {
@@ -9083,10 +9873,12 @@ bool Engine::apply_preset(u64 layerId, const std::string& json, i64 durationFram
     bump_model_revision_locked();
     *l = std::move(prepared);
     // Animação: começa no cabeçote; fora da camada, no início dela.
-    const FrameIndex ph = playback_.current();
+    const FrameIndex ph = editing_frame_locked();
     const i64 anchor = l->contains_time(ph) ? l->local_time(ph).value : l->local_time(l->start).value;
     const bool ok = presets::apply(p, *l, anchor, durationFrames, comp->fps(), &effectRegistry_, meshText);
     if (ok && p.kind == presets::PresetKind::Text && !meshText) recenter_text(*l);
+    // D2: preset de texto salvo com a sombra antiga chega como a decoração Sombra.
+    if (ok && p.kind == presets::PresetKind::Text && !meshText) (void)migrate_text_shadow_to_decoration(*l, effectRegistry_);
     project_->mark_dirty();
     request_render();
     return ok;
@@ -9110,6 +9902,7 @@ bool Engine::edit_mode() noexcept {
 
 bool Engine::set_layer_magnetic_track(u64 layerId, bool on) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* current = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!current || current->locked || current->magneticTrack == on) return false;
@@ -9123,6 +9916,7 @@ bool Engine::set_layer_magnetic_track(u64 layerId, bool on) noexcept {
 
 bool Engine::layer_magnetic_track(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     const Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     return l && l->magneticTrack;
@@ -9131,6 +9925,7 @@ bool Engine::layer_magnetic_track(u64 layerId) noexcept {
 bool Engine::ripple_delete(const u64* ids, u32 count) noexcept {
     if (!ids || count == 0) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, (count == 1 && ids ? ids[0] : 0), true);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return false;
     // Trecho que as camadas excluídas ocupavam: só buracos DENTRO dele fecham.
@@ -9275,6 +10070,8 @@ void trim_clip_copy(Layer& l, i64 start, i64 end, f64 sourceLimit = -1) noexcept
 u32 Engine::query_clip_time_actions(u64 layerId, i64 frame) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId);
+    frame = inlineScope.map_frame(frame);
     const Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer || frame < 0 || frame >= (i64{1} << 31)) return 0;
@@ -9299,13 +10096,23 @@ bool Engine::edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous
     if (edgeToFrame) operation = 0;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
+    if (!atPlayhead && (operation <= 1 || operation == 6)) amount = inlineScope.map_frame(amount);
+    return edit_clip_time_locked(layerId, operation, amount, previous, next, atPlayhead, extendOnly, edgeToFrame);
+}
+
+/// O corpo de `edit_clip_time` na composição ATUAL, com o modelo travado (0.5.3:
+/// o grupo aberto na timeline reaproveita a mesma regra na composição de dentro).
+bool Engine::edit_clip_time_locked(u64 layerId, u32 operation, i64 amount, u64 previous, u64 next,
+                                   bool atPlayhead, bool extendOnly, bool edgeToFrame) noexcept {
+    constexpr i64 limit = i64{1} << 31;
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer || layer->locked) return false;
     if (atPlayhead) {
         // Só DENTRO do clipe: com o cabeçote fora, o aparar "no cabeçote" não
         // vira um corte preso na borda (o clamp abaixo faria um clipe de 1 quadro).
-        amount = playback_.current().value;
+        amount = editing_frame_locked().value;
         if (amount <= layer->start.value || amount >= layer->end.value) return false;
     }
     const bool needsPrevious = operation == 3 || operation == 5;
@@ -9464,6 +10271,7 @@ bool Engine::reorder_clip(u64 layerId, i64 targetFrame) noexcept {
     if (targetFrame < 0 || targetFrame >= limit) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return false;
     Layer* layer = comp->layer(LayerId::unpack(layerId));
@@ -9513,6 +10321,7 @@ bool Engine::move_layer_to_row(u64 layerId, u64 anchorId, i32 mode) noexcept {
     if (mode != 0 && mode != 1) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return false;
     const LayerId id = LayerId::unpack(layerId);
@@ -9725,6 +10534,74 @@ bool Engine::trim_composition_to_work_area() noexcept {
     return true;
 }
 
+// Lote K (gap_system item 8): "Lift Work Area" / "Extract Work Area" do AE.
+// Mora aqui porque divide e apara com o mesmo corte de clipe (trim_clip_copy,
+// duplicate_layer + ClipChainEdit) da divisão no cabeçote.
+u32 Engine::lift_work_area(bool extract) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp || !comp->has_work_area()) return 0;
+    const i64 in = comp->work_in(), out = comp->work_out(), gap = out - in;
+    std::vector<LayerId> ids;
+    comp->layers().for_each([&](LayerId id, const Layer& l) {
+        if (l.locked || l.end.value <= in || (!extract && l.start.value >= out)) return;
+        ids.push_back(id);
+    });
+    if (ids.empty() || gap <= 0) return 0;
+    history_.before_mutation(*comp, project_->timeline().current(),
+                             extract ? "extrair area de trabalho" : "levantar area de trabalho");
+    bump_model_revision_locked();
+    ClipChainEdit clipChains(comp);
+    u32 changed = 0;
+    for (const LayerId id : ids) {
+        Layer* l = comp->layer(id);
+        if (!l) continue;
+        const i64 s = l->start.value, e = l->end.value;
+        if (s >= out) {   // só no extrair: o que vem depois fecha o buraco
+            l->start.value -= gap; l->end.value -= gap;
+            ++changed;
+            continue;
+        }
+        if (s >= in && e <= out) {   // inteira dentro: sai
+            media_.close_layer(id);
+            comp->remove_layer(id);
+            ++changed;
+            continue;
+        }
+        const f64 limit = clip_source_limit(*project_, *comp, *l);
+        if (s < in && e > out) {
+            // Cruza as duas bordas: vira duas (a de depois é uma cópia, como
+            // na divisão no cabeçote) e o miolo some.
+            const FrameIndex originalOffset = l->offset;
+            const LayerId second = comp->duplicate_layer(id, FrameIndex{out});
+            if (!second.valid()) continue;
+            clipChains.alias(second, id);
+            if (Layer* b = comp->layer(second)) {
+                b->start = FrameIndex{s}; b->end = FrameIndex{e}; b->offset = originalOffset;
+                trim_clip_copy(*b, out, e, limit);
+                if (extract) { b->start.value -= gap; b->end.value -= gap; }
+            }
+            if (Layer* a = comp->layer(id)) trim_clip_copy(*a, s, in, limit);
+            ++changed;
+            continue;
+        }
+        if (s < in) {   // cruza só a entrada: perde o fim
+            trim_clip_copy(*l, s, in, limit);
+        } else {        // cruza só a saída: perde o começo
+            trim_clip_copy(*l, out, e, limit);
+            if (extract) { l->start.value -= gap; l->end.value -= gap; }
+        }
+        ++changed;
+    }
+    comp->rebuild_draw_order();
+    comp->touch();
+    configure_playback_locked(comp);
+    project_->mark_dirty();
+    request_render();
+    return changed;
+}
+
 void Engine::bump_revision_without_audio_locked() noexcept {
     const u32 before = bump_model_revision_locked();
     if (audioRevision_ == before) audioRevision_ = before + 1;
@@ -9877,6 +10754,7 @@ Result<u32> Engine::detect_beats(u64 layerId, f64* bpmOut) noexcept {
         i64 start = 0, end = 0;
         {
             std::lock_guard<std::mutex> lock(modelMutex_);
+            InlineEditScope inlineScope(*this, layerId, true);
             const Composition* comp = project_ ? current_composition() : nullptr;
             if (!comp) return Status{Errc::InvalidState, "nenhum projeto aberto"};
             const Layer* layer = comp->layer(LayerId::unpack(layerId));
@@ -10240,7 +11118,7 @@ void Engine::sync_audio_locked(const Composition& comp) noexcept {
                 audio_.cache()->register_asset(clip.asset, audio::AudioAssetRef{resolve_asset_path(asset->sourcePath), clip.end});
             }
             audio_.set_snapshot(std::move(snap), playback_.playing() ? playback_.current_ns() : -1);
-        } else audio_.set_snapshot(audio::build_snapshot(comp, *project_, audio_.cache(), &Engine::audio_path_resolver, this),
+        } else audio_.set_snapshot(audio::build_snapshot(comp, *project_, audio_.cache(), &Engine::audio_path_resolver, this, nullptr, &effectRegistry_),
                                    playback_.playing() ? playback_.current_ns() : -1);
     }
     // Audio remains master at every supported transport rate. Agulha segurada
@@ -10264,7 +11142,49 @@ void Engine::sync_audio_locked(const Composition& comp) noexcept {
     }
 }
 
+/// URI `file:` → caminho local (vazio se não for um). O PC grava a mídia como o
+/// Java escreve (`file:/C:/Users/.../Valorant%202026.mp4`, uma barra só), e o
+/// `file:///` também vale; `%XX` volta ao byte. Com o URI cru, o aviso de mídia
+/// ausente, o pacote e a limpeza procuravam um arquivo chamado "file:/C:/…".
+static std::string local_path_from_file_uri(const std::string& uri) {
+    if (uri.size() < 6 || (uri.compare(0, 5, "file:") != 0 && uri.compare(0, 5, "FILE:") != 0)) return {};
+    std::string rest = uri.substr(5);
+    if (rest.rfind("//", 0) == 0) {
+        const usize slash = rest.find('/', 2);
+        const std::string host = rest.substr(2, slash == std::string::npos ? std::string::npos : slash - 2);
+        rest = slash == std::string::npos ? std::string{} : rest.substr(slash);
+        // Compartilhamento de rede (file://servidor/pasta): \\servidor\pasta.
+        if (!host.empty() && host != "localhost") rest = "//" + host + rest;
+    }
+    std::string out;
+    out.reserve(rest.size());
+    auto hex = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    };
+    for (usize i = 0; i < rest.size(); ++i) {
+        if (rest[i] == '%' && i + 2 < rest.size() && hex(rest[i + 1]) >= 0 && hex(rest[i + 2]) >= 0) {
+            const char c = static_cast<char>(hex(rest[i + 1]) * 16 + hex(rest[i + 2]));
+            if (c == '\0') return {};
+            out.push_back(c);
+            i += 2;
+        } else {
+            out.push_back(rest[i]);
+        }
+    }
+#if defined(_WIN32)
+    // "/C:/..." → "C:\..." (e "//servidor/pasta" → "\\servidor\pasta"): a forma
+    // nativa que o Media Foundation e o resto do Windows abrem.
+    if (out.size() >= 3 && out[0] == '/' && std::isalpha(static_cast<unsigned char>(out[1])) && out[2] == ':') out.erase(0, 1);
+    for (char& c : out) if (c == '/') c = '\\';
+#endif
+    return out;
+}
+
 std::string Engine::resolve_asset_path(const std::string& stored) const {
+    if (std::string local = local_path_from_file_uri(stored); !local.empty()) return local;
     if (stored.rfind("docs:", 0) == 0) {
         return document_asset_path(config_.documentsDirectory, safe_asset_relative(stored.substr(5)), false);
     }
@@ -10577,18 +11497,19 @@ Result<text::FontEntry> Engine::import_font(const char* path) noexcept {
 
 bool Engine::set_text_font(u64 layerId, const std::string& family, u32 weight, bool italic, const std::string& path) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Text) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "fonte do texto");
     bump_model_revision_locked();
-    ae_anim::begin_text_edit(*l, playback_.current());
+    ae_anim::begin_text_edit(*l, editing_frame_locked());
     l->text.fontFamily = family;
     l->text.fontWeight = static_cast<u16>(std::clamp<u32>(weight, 100, 1000));
     l->text.fontItalic = italic;
     // Importada: o arquivo vai relativo ao projeto (abre em outro aparelho).
     l->text.fontPath = path.empty() ? std::string{} : store_asset_path(path);
-    ae_anim::end_text_edit(*l, playback_.current());
+    ae_anim::end_text_edit(*l, editing_frame_locked());
     recenter_text(*l);
     project_->mark_dirty();
     request_render();
@@ -10598,10 +11519,11 @@ bool Engine::set_text_font(u64 layerId, const std::string& family, u32 weight, b
 bool Engine::set_text_style(u64 layerId, const f32* v, u32 count) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || l->kind != LayerKind::Text || !v || count < 18) return false;
-    for (u32 i = 0; i < std::min(count, 20u); ++i) if (!std::isfinite(v[i])) return false;
+    for (u32 i = 0; i < std::min(count, 22u); ++i) if (!std::isfinite(v[i])) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "estilo do texto");
     bump_model_revision_locked();
     TextData& t = l->text;
@@ -10622,10 +11544,19 @@ bool Engine::set_text_style(u64 layerId, const f32* v, u32 count) noexcept {
         const f32 desired = std::clamp(v[19], -1000.0f, 1000.0f);
         Track* tracking = l->tracks.find(TrackProperty::TextTracking);
         if (tracking && !tracking->keys.empty()) {
-            const FrameIndex local = l->local_time(playback_.current());
+            const FrameIndex local = l->local_time(editing_frame_locked());
             if (std::fabs(tracking->value_or(local, t.tracking) - desired) > 1e-5f)
                 (void)tracking->set(local, desired, Interpolation::Linear);
         } else t.tracking = desired;
+    }
+    // v70, "Preenchimento e traço" do AE: 0 preenchimentos por cima, 1 por
+    // caractere, 2 traços por cima.
+    if (count >= 21) t.renderOrder = static_cast<u8>(std::clamp(v[20], 0.0f, 2.0f));
+    // v72, mistura entre caracteres (Inter-Character Blending do AE): um BlendMode
+    // que pinta cor (os de recorte não têm sentido entre letras e viram Normal).
+    if (count >= 22) {
+        const u16 blend = static_cast<u16>(std::clamp(v[21], 0.0f, static_cast<f32>(kLastBlendMode)));
+        t.interCharBlend = blend_is_stencil(static_cast<BlendMode>(blend)) ? u16{0} : blend;
     }
     recenter_text(*l);
     project_->mark_dirty();
@@ -10636,6 +11567,7 @@ bool Engine::set_text_style(u64 layerId, const f32* v, u32 count) noexcept {
 bool Engine::set_position_tangents(u64 layerId, i64 time, const f32* v) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || !v) return false;
@@ -10668,6 +11600,7 @@ bool Engine::set_position_tangents(u64 layerId, i64 time, const f32* v) noexcept
 u32 Engine::query_position_path(u64 layerId, f32* out, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId);
     const Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || !out || capacity < 2) return 0;
@@ -10710,6 +11643,7 @@ u32 Engine::query_position_path(u64 layerId, f32* out, u32 capacity) noexcept {
 bool Engine::set_layer_media_loop(u64 layerId, bool on) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || l->kind != LayerKind::Video) return false;
@@ -10725,6 +11659,7 @@ bool Engine::set_layer_media_loop(u64 layerId, bool on) noexcept {
 bool Engine::set_text_dynamic(u64 layerId, const f64* v) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || l->kind != LayerKind::Text || !v) return false;
@@ -10749,6 +11684,7 @@ bool Engine::set_text_dynamic(u64 layerId, const f64* v) noexcept {
 bool Engine::query_text_dynamic(u64 layerId, f64* out) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Text || !out) return false;
@@ -10761,6 +11697,7 @@ bool Engine::query_text_dynamic(u64 layerId, f64* out) noexcept {
 bool Engine::query_text_style(u64 layerId, f32* v, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Text || !v || capacity < 18) return false;
@@ -10771,8 +11708,10 @@ bool Engine::query_text_style(u64 layerId, f32* v, u32 capacity) noexcept {
     std::copy(o, o + 18, v);
     if (capacity >= 20) {
         v[18] = t.lineHeight;
-        v[19] = l->tracks.sample_or(TrackProperty::TextTracking, l->local_time(playback_.current()), t.tracking);
+        v[19] = l->tracks.sample_or(TrackProperty::TextTracking, l->local_time(editing_frame_locked()), t.tracking);
     }
+    if (capacity >= 21) v[20] = static_cast<f32>(t.renderOrder);   // v70: preenchimento e traço
+    if (capacity >= 22) v[21] = static_cast<f32>(t.interCharBlend);   // v72: mistura entre caracteres
     return true;
 }
 
@@ -10791,12 +11730,13 @@ void cut_spans(std::vector<TextSpan>& spans, u32 s, u32 e) {
 
 bool Engine::set_text_span(u64 layerId, u32 start, u32 end, bool hasColor, Vec4 color, u32 weight, f32 scale) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Text || end <= start) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "estilo do trecho");
     bump_model_revision_locked();
-    ae_anim::begin_text_edit(*l, playback_.current());
+    ae_anim::begin_text_edit(*l, editing_frame_locked());
     // O mesmo trecho de novo: junta (cor + negrito + tamanho), não substitui.
     for (const TextSpan& old : l->text.spans) {
         if (old.start != start || old.end != end) continue;
@@ -10813,7 +11753,7 @@ bool Engine::set_text_span(u64 layerId, u32 start, u32 end, bool hasColor, Vec4 
     sp.weight = static_cast<u16>(std::min<u32>(weight, 1000));
     sp.scale = std::clamp(scale, 0.1f, 10.0f);
     l->text.spans.push_back(sp);
-    ae_anim::end_text_edit(*l, playback_.current());
+    ae_anim::end_text_edit(*l, editing_frame_locked());
     project_->mark_dirty();
     request_render();
     return true;
@@ -10821,14 +11761,15 @@ bool Engine::set_text_span(u64 layerId, u32 start, u32 end, bool hasColor, Vec4 
 
 bool Engine::clear_text_spans(u64 layerId, u32 start, u32 end) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Text) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "limpar estilo do trecho");
     bump_model_revision_locked();
-    ae_anim::begin_text_edit(*l, playback_.current());
+    ae_anim::begin_text_edit(*l, editing_frame_locked());
     cut_spans(l->text.spans, start, end);
-    ae_anim::end_text_edit(*l, playback_.current());
+    ae_anim::end_text_edit(*l, editing_frame_locked());
     project_->mark_dirty();
     request_render();
     return true;
@@ -10847,10 +11788,11 @@ f32* text_param_ref(TextAnimator& a, u32 p) noexcept { return text::animator_par
 
 u32 Engine::query_text_animators(u64 layerId, f32* out, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || !supports_text_animation(*l)) return 0;
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     const u32 n = static_cast<u32>(l->text.animators.size());
     for (u32 i = 0; i < n && out && (i + 1) * kTextAnimFloats <= capacity; ++i) {
         TextAnimator a = l->text.animators[i];
@@ -10881,6 +11823,7 @@ u32 Engine::query_text_animators(u64 layerId, f32* out, u32 capacity) noexcept {
 
 u32 Engine::query_text_animator_fields(u64 layerId, u32 index, f32* out, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || index >= l->text.animators.size() || !out || capacity < text::kTextAnimatorFieldCount) return 0;
@@ -10891,6 +11834,7 @@ u32 Engine::query_text_animator_fields(u64 layerId, u32 index, f32* out, u32 cap
 bool Engine::set_text_animator_field(u64 layerId, u32 index, u32 field, f32 value) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || index >= l->text.animators.size()) return false;
@@ -10906,10 +11850,11 @@ bool Engine::set_text_animator_field(u64 layerId, u32 index, u32 field, f32 valu
 
 u32 Engine::query_text_anim_values(u64 layerId, u32 index, const u32* keys, u32 count, f32* out) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || index >= l->text.animators.size() || !keys || !out) return 0;
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     const TextAnimator& a = l->text.animators[index];
     for (u32 i = 0; i < count; ++i) {
         const f32* ref = text::animator_param_ref(a, keys[i]);
@@ -10930,10 +11875,12 @@ u32 Engine::query_text_anim_values(u64 layerId, u32 index, const u32* keys, u32 
 i32 Engine::add_text_selector(u64 layerId, u32 index, u32 type) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || index >= l->text.animators.size()) return -1;
-    if (type != kTextSelectorRange && type != kTextSelectorWiggly && type != kTextSelectorExpression) return -1;
+    // v72: a varredura (janela do Transformar texto do Motion) também entra como seletor.
+    if (type != kTextSelectorRange && type != kTextSelectorWiggly && type != kTextSelectorExpression && type != kTextSelectorSweep) return -1;
     TextAnimator& a = l->text.animators[index];
     if (a.rig != 0 || a.moreSelectors.size() + 1 >= text::kMaxTextSelectors) return -1;
     history_.before_mutation(*comp, project_->timeline().current(), "seletor do animador de texto");
@@ -10947,6 +11894,7 @@ i32 Engine::add_text_selector(u64 layerId, u32 index, u32 type) noexcept {
 bool Engine::remove_text_selector(u64 layerId, u32 index, u32 selector) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || index >= l->text.animators.size() || selector == 0) return false;
@@ -10970,6 +11918,7 @@ bool Engine::remove_text_selector(u64 layerId, u32 index, u32 selector) noexcept
 i32 Engine::add_text_animator(u64 layerId, u32 props) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || !supports_text_animation(*l) || l->text.animators.size() >= 64) return -1;
@@ -10980,7 +11929,7 @@ i32 Engine::add_text_animator(u64 layerId, u32 props) noexcept {
     bump_model_revision_locked();
     TextAnimator a;
     a.name = default_name(DefaultName::Animator) + " " + std::to_string(l->text.animators.size() + 1);
-    a.props = props & 0x3FFFFu;
+    a.props = props & kTextPropMask;
     a.selector.type = kTextSelectorRange;
     const u32 index = static_cast<u32>(l->text.animators.size());
     // The default "Add animation" action must create motion, rather than an
@@ -10988,7 +11937,7 @@ i32 Engine::add_text_animator(u64 layerId, u32 props) noexcept {
     if (a.props == kTextPropOpacity) {
         a.opacity = 0;
         a.selector.shape = 0;
-        const i64 at = l->contains_time(playback_.current()) ? playback_.current().value : l->start.value;
+        const i64 at = l->contains_time(editing_frame_locked()) ? editing_frame_locked().value : l->start.value;
         const i64 begin = std::min(at, std::max(l->start.value, l->end.value - 2));
         const i64 remaining = std::max<i64>(1, l->end.value - 1 - begin);
         const i64 duration = std::min(remaining, std::max<i64>(1, static_cast<i64>(std::lround(comp->fps()))));
@@ -11007,6 +11956,7 @@ i32 Engine::add_text_animator(u64 layerId, u32 props) noexcept {
 bool Engine::remove_text_animator(u64 layerId, u32 index) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || !supports_text_animation(*l) || index >= l->text.animators.size()) return false;
@@ -11027,6 +11977,7 @@ bool Engine::remove_text_animator(u64 layerId, u32 index) noexcept {
 i32 Engine::duplicate_text_animator(u64 layerId, u32 index) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || !supports_text_animation(*l) || index >= l->text.animators.size() || l->text.animators.size() >= 64) return -1;
@@ -11056,6 +12007,7 @@ i32 Engine::duplicate_text_animator(u64 layerId, u32 index) noexcept {
 bool Engine::move_text_animator(u64 layerId, u32 from, u32 to) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || !supports_text_animation(*l) || from >= l->text.animators.size() || to >= l->text.animators.size()) return false;
@@ -11080,6 +12032,7 @@ bool Engine::move_text_animator(u64 layerId, u32 from, u32 to) noexcept {
 bool Engine::set_text_animator(u64 layerId, u32 index, const f32* v) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || !supports_text_animation(*l) || !v || index >= l->text.animators.size()) return false;
@@ -11087,7 +12040,7 @@ bool Engine::set_text_animator(u64 layerId, u32 index, const f32* v) noexcept {
     bump_model_revision_locked();
     TextAnimator& a = l->text.animators[index];
     a.enabled = v[0] > 0.5f;
-    a.props = static_cast<u32>(std::max(0.0f, v[1])) & 0x3FFFFu;
+    a.props = static_cast<u32>(std::max(0.0f, v[1])) & kTextPropMask;
     a.selector.basedOn = static_cast<u8>(std::clamp(v[2], 0.0f, 3.0f));
     a.selector.type = static_cast<u8>(std::clamp(v[3], 0.0f, 5.0f));
     a.selector.shape = static_cast<u8>(std::clamp(v[4], 0.0f, 5.0f));
@@ -11104,6 +12057,7 @@ bool Engine::set_text_anim_param(u64 layerId, u32 index, u32 param, f32 value) n
     if (!std::isfinite(value)) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || !supports_text_animation(*l) || index >= l->text.animators.size()) return false;
@@ -11115,7 +12069,7 @@ bool Engine::set_text_anim_param(u64 layerId, u32 index, u32 param, f32 value) n
     Track* tr = l->tracks.find(TrackProperty::TextAnimParam, index, param);
     if (tr && !tr->keys.empty()) {
         // Animado: o valor vira keyframe no playhead (como nas outras propriedades).
-        const FrameIndex local = l->local_time(playback_.current());
+        const FrameIndex local = l->local_time(editing_frame_locked());
         const u32 k = tr->find_exact(local);
         if (k != kInvalidIndex) tr->keys[k].value = value;
         else (void)tr->set(local, value, Interpolation::Bezier);
@@ -11130,6 +12084,7 @@ bool Engine::set_text_anim_param(u64 layerId, u32 index, u32 param, f32 value) n
 bool Engine::toggle_text_anim_key(u64 layerId, u32 index, u32 param) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || !supports_text_animation(*l) || index >= l->text.animators.size()) return false;
@@ -11137,7 +12092,7 @@ bool Engine::toggle_text_anim_key(u64 layerId, u32 index, u32 param) noexcept {
     if (!r) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "keyframe do animador de texto");
     bump_model_revision_locked();
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     Track& tr = l->tracks.get_or_create(TrackProperty::TextAnimParam, index, param);
     const u32 k = tr.find_exact(local);
     if (k != kInvalidIndex) {
@@ -11189,6 +12144,7 @@ Status Engine::set_expression(u64 layerId, u32 property, u32 effectIndex, u32 pa
 
 Status Engine::set_expressions(u64 layerId, const u32* keys3, u32 count, const char* source, expr::Diagnostic* diag) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     if (diag) *diag = expr::Diagnostic{};
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
@@ -11197,6 +12153,43 @@ Status Engine::set_expressions(u64 layerId, const u32* keys3, u32 count, const c
     const std::string_view src = source ? std::string_view(source) : std::string_view();
     if (src.size() > expr::kMaxSourceBytes) return Status{Errc::InvalidArgument, "expressao longa demais"};
     const bool remove = src.find_first_not_of(" \t\r\n") == std::string_view::npos;
+    // v70: expressão no texto-fonte (mora no TextData, não numa trilha).
+    if (keys3[0] == static_cast<u32>(TrackProperty::TextSource)) {
+        if (count != 1 || l->kind != LayerKind::Text) return Errc::NotSupported;
+        if (remove && !l->text.sourceExpression) return OkStatus;
+        if (!remove && l->text.sourceExpression && l->text.sourceExpression->source == src && l->text.sourceExpressionEnabled) {
+            if (diag) *diag = l->text.sourceExpression->parseError;
+            return OkStatus;
+        }
+        history_.before_mutation(*comp, project_->timeline().current(), remove ? "remover expressão" : "expressão do texto");
+        bump_model_revision_locked();
+        l->text.sourceExpression = remove ? nullptr : expr::compile(src);
+        l->text.sourceExpressionEnabled = true;
+        if (diag && l->text.sourceExpression) *diag = l->text.sourceExpression->parseError;
+        project_->mark_dirty();
+        request_render();
+        return OkStatus;
+    }
+    // AE expressions (lote E): expressão no CAMINHO da máscara (mora na Mask;
+    // effectIndex = id da máscara). O resultado é um caminho: createPath(...).
+    if (keys3[0] == static_cast<u32>(TrackProperty::MaskPath)) {
+        Mask* m = count == 1 ? mask_by_id(*l, keys3[1]) : nullptr;
+        if (!m) return Status{Errc::InvalidArgument, "mascara invalida"};
+        if (remove && !m->pathExpression) return OkStatus;
+        if (!remove && m->pathExpression && m->pathExpression->source == src && m->pathExpressionEnabled) {
+            if (diag) *diag = m->pathExpression->parseError;
+            return OkStatus;
+        }
+        history_.before_mutation(*comp, project_->timeline().current(), remove ? "remover expressão" : "expressão do caminho");
+        bump_model_revision_locked();
+        m->pathExpression = remove ? nullptr : expr::compile(src);
+        m->pathExpressionEnabled = true;
+        m->cacheKey = 0;
+        if (diag && m->pathExpression) *diag = m->pathExpression->parseError;
+        project_->mark_dirty();
+        request_render();
+        return OkStatus;
+    }
     // Tudo validado ANTES de mexer: ou todas as trilhas recebem, ou nenhuma.
     bool anyChange = false;
     for (u32 i = 0; i < count; ++i) {
@@ -11242,9 +12235,32 @@ bool Engine::set_expression_enabled(u64 layerId, u32 property, u32 effectIndex, 
 
 bool Engine::set_expressions_enabled(u64 layerId, const u32* keys3, u32 count, bool enabled) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || !keys3 || count == 0 || count > 16) return false;
+    if (keys3[0] == static_cast<u32>(TrackProperty::TextSource)) {   // v70: texto-fonte
+        if (count != 1 || !l->text.sourceExpression) return false;
+        if (l->text.sourceExpressionEnabled == enabled) return true;
+        history_.before_mutation(*comp, project_->timeline().current(), enabled ? "ligar expressão" : "desligar expressão");
+        bump_model_revision_locked();
+        l->text.sourceExpressionEnabled = enabled;
+        project_->mark_dirty();
+        request_render();
+        return true;
+    }
+    if (keys3[0] == static_cast<u32>(TrackProperty::MaskPath)) {   // AE expressions: caminho da máscara
+        Mask* m = count == 1 ? mask_by_id(*l, keys3[1]) : nullptr;
+        if (!m || !m->pathExpression) return false;
+        if (m->pathExpressionEnabled == enabled) return true;
+        history_.before_mutation(*comp, project_->timeline().current(), enabled ? "ligar expressão" : "desligar expressão");
+        bump_model_revision_locked();
+        m->pathExpressionEnabled = enabled;
+        m->cacheKey = 0;
+        project_->mark_dirty();
+        request_render();
+        return true;
+    }
     bool found = false, change = false;
     for (u32 i = 0; i < count; ++i) {
         const Track* t = expression_track(*l, keys3[i * 3], keys3[i * 3 + 1], keys3[i * 3 + 2], false);
@@ -11267,9 +12283,43 @@ bool Engine::set_expressions_enabled(u64 layerId, const u32* keys3, u32 count, b
 
 bool Engine::query_expression(u64 layerId, u32 property, u32 effectIndex, u32 paramIndex, ExpressionInfo& out) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     out = ExpressionInfo{};
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (l && property == static_cast<u32>(TrackProperty::TextSource)) {
+        // v70: o texto que a expressão do texto-fonte dá no cabeçote.
+        if (l->kind != LayerKind::Text || !l->text.sourceExpression) return true;
+        out.exists = true;
+        out.enabled = l->text.sourceExpressionEnabled;
+        out.source = l->text.sourceExpression->source;
+        const expr::Scope scope(project_->timeline());
+        const i64 local = l->local_time(editing_frame_locked()).value;
+        TextData shown = l->text;
+        (void)text::apply_source_text(l->text, local, shown);
+        out.text = shown.content;
+        if (l->text.sourceExpression->program) {
+            expr::TextResult r = expr::evaluate_text(*l->text.sourceExpression, *l, shown.content, static_cast<f64>(local));
+            if (r.ok) out.text = std::move(r.text);
+        }
+        out.error = l->text.sourceExpression->error();
+        return true;
+    }
+    if (l && property == static_cast<u32>(TrackProperty::MaskPath)) {
+        // AE expressions: a expressão do caminho da máscara `effectIndex`; `value`
+        // = quantos pontos o caminho tem no cabeçote (avaliado agora, para o erro).
+        const Mask* m = mask_by_id(*l, effectIndex);
+        if (!m || !m->pathExpression) return true;
+        out.exists = true;
+        out.enabled = m->pathExpressionEnabled;
+        out.source = m->pathExpression->source;
+        const expr::Scope scope(project_->timeline());
+        std::vector<MaskPoint> shape;
+        mask::evaluate_path(*m, static_cast<f64>(l->local_time(editing_frame_locked()).value), shape);
+        out.value = static_cast<f32>(shape.size());
+        out.error = m->pathExpression->error();
+        return true;
+    }
     const Track* t = l ? expression_track(*l, property, effectIndex, paramIndex, false) : nullptr;
     if (!t || !t->expression) return l != nullptr;
     out.exists = true;
@@ -11278,7 +12328,7 @@ bool Engine::query_expression(u64 layerId, u32 property, u32 effectIndex, u32 pa
     // Avalia no playhead agora: o erro de execução mostrado é o do instante
     // que a pessoa está vendo, não o de um quadro antigo.
     const expr::Scope scope(project_->timeline());
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     out.value = t->value_or(local, expr::static_value(*l, *t));
     out.error = t->expression->error();
     return true;
@@ -11286,6 +12336,7 @@ bool Engine::query_expression(u64 layerId, u32 property, u32 effectIndex, u32 pa
 
 u32 Engine::query_expressions(u64 layerId, u32* out, u32 capacityRows) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return 0;
@@ -11302,13 +12353,71 @@ u32 Engine::query_expressions(u64 layerId, u32* out, u32 capacityRows) noexcept 
     };
     put(l->timeRemap, static_cast<u32>(TrackProperty::TimeRemap));
     for (u32 i = 0; i < l->tracks.size(); ++i) put(l->tracks.at(i), static_cast<u32>(l->tracks.at(i).property));
+    if (l->kind == LayerKind::Text && l->text.sourceExpression) {   // v70: texto-fonte
+        if (out && n < capacityRows) {
+            out[n * 4 + 0] = static_cast<u32>(TrackProperty::TextSource);
+            out[n * 4 + 1] = 0;
+            out[n * 4 + 2] = 0;
+            out[n * 4 + 3] = (l->text.sourceExpressionEnabled ? 1u : 0u) | (l->text.sourceExpression->error().ok ? 0u : 2u);
+        }
+        ++n;
+    }
+    for (const Mask& m : l->masks) {   // AE expressions: caminho da máscara
+        if (!m.pathExpression) continue;
+        if (out && n < capacityRows) {
+            out[n * 4 + 0] = static_cast<u32>(TrackProperty::MaskPath);
+            out[n * 4 + 1] = m.id;
+            out[n * 4 + 2] = 0;
+            out[n * 4 + 3] = (m.pathExpressionEnabled ? 1u : 0u) | (m.pathExpression->error().ok ? 0u : 2u);
+        }
+        ++n;
+    }
     return std::min(n, capacityRows);
+}
+
+// AE expressions (lote E): os itens do Menu suspenso (Dropdown Menu Control).
+bool Engine::set_effect_menu_items(u64 layerId, u32 effectId, const std::vector<std::string>& items) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    EffectInstance* fx = l ? l->find_effect(EffectId{effectId, 0}) : nullptr;
+    if (!fx || l->locked || !expr::is_menu_control(fx->type) || items.size() > expr::kMaxMenuItems) return false;
+    std::vector<std::string> clean;
+    clean.reserve(items.size());
+    for (const std::string& item : items) {
+        std::string s = item.substr(0, 256);
+        // '|' separa as opções na linha do parâmetro; quebra de linha não cabe num item.
+        for (char& c : s) if (c == '|' || c == '\n' || c == '\r' || c == '\t') c = ' ';
+        clean.push_back(std::move(s));
+    }
+    if (fx->menuItems == clean) return true;
+    history_.before_mutation(*comp, project_->timeline().current(), "itens do menu");
+    bump_model_revision_locked();
+    fx->menuItems = std::move(clean);
+    // O item escolhido não fica além do último.
+    const f32 last = static_cast<f32>(expr::menu_items(*fx).size() - 1);
+    if (!fx->params.empty() && fx->params[0].constant.v[0] > last) fx->params[0].constant.v[0] = last;
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+std::vector<std::string> Engine::effect_menu_items(u64 layerId, u32 effectId) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    const EffectInstance* fx = l ? l->find_effect(EffectId{effectId, 0}) : nullptr;
+    if (!fx || !expr::is_menu_control(fx->type)) return {};
+    return expr::menu_items(*fx);
 }
 
 bool Engine::apply_text_preset(u64 layerId, u32 preset) noexcept {
     if (preset >= kMotionTextPresetBase) return apply_motion_text_preset(layerId, preset - kMotionTextPresetBase);
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || !supports_text_animation(*l) || preset >= text::kTextPresetCount) return false;
@@ -11318,7 +12427,7 @@ bool Engine::apply_text_preset(u64 layerId, u32 preset) noexcept {
     *l = std::move(prepared);
     bump_model_revision_locked();
     const f64 fps = comp->fps();
-    const i64 at = l->contains_time(playback_.current()) ? playback_.current().value : l->start.value;
+    const i64 at = l->contains_time(editing_frame_locked()) ? editing_frame_locked().value : l->start.value;
     const i64 begin = std::min(at, std::max(l->start.value, l->end.value - 3));
     const i64 s = l->local_time(FrameIndex{begin}).value;
     const i64 len = std::max<i64>(2, l->end.value - begin);
@@ -11359,6 +12468,7 @@ bool Engine::apply_text_preset(u64 layerId, u32 preset) noexcept {
 
 std::string Engine::layer_media_path(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || (l->kind != LayerKind::Video && l->kind != LayerKind::Audio)) return {};
@@ -11396,6 +12506,7 @@ Result<std::vector<text::CaptionWord>> Engine::transcribe_local(u64 layerId, con
     u64 session = 0; CompositionId composition; AssetId source;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
+        InlineEditScope inlineScope(*this, layerId, true);
         Composition* comp = project_ ? current_composition() : nullptr;
         const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
         const Asset* asset = layer && (layer->kind == LayerKind::Video || layer->kind == LayerKind::Audio)
@@ -11430,6 +12541,7 @@ Result<std::string> Engine::export_speech_chunks(u64 layerId, const std::string&
     std::string path;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
+        InlineEditScope inlineScope(*this, layerId, true);
         Composition* comp = project_ ? current_composition() : nullptr;
         const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
         const Asset* asset = layer && (layer->kind == LayerKind::Video || layer->kind == LayerKind::Audio)
@@ -11528,6 +12640,8 @@ Result<u32> Engine::create_captions(u64 sourceLayer, const std::vector<text::Cap
         }
         track->captions.push_back(std::move(segment));
     }
+    // 0.5.3: "intervalo entre legendas" da janela Criar legendas (0 = encostadas, como antes).
+    text::apply_caption_gap(track->captions, track->captionOptions.gapFrames);
     if (track->captions.empty()) { comp->remove_layer(captionId); }
     else { track->text.content = track->captions.front().text; recenter_text(*track); }
     project_->mark_dirty();
@@ -11564,6 +12678,7 @@ u32 Engine::caption_count(u64 sourceLayer) noexcept {
 
 std::string Engine::text_font(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Text) return {};
@@ -11686,6 +12801,13 @@ namespace {
 /// Material da receita que vira o material `index` da malha (build_text3d:
 /// 0 = frente, ou o texto todo sem materiais por região; 1 lateral; 2 chanfro).
 scene3d::Text3DMaterial text3d_region_material(const scene3d::Text3DSpec& s, u32 index) noexcept {
+    // 0.5.4 Cartoon: frente, lateral (a do cartoon), chanfro (= frente) e contorno.
+    if (s.style == scene3d::kText3DStyleCartoon) {
+        scene3d::Text3DMaterial m = s.front_material();
+        if (index == 1) m.color = scene3d::text3d_cartoon_side(s);
+        else if (index == scene3d::kText3DOutlineMaterial) m.color = s.outlineColor;
+        return m;
+    }
     if (!s.regionMaterials || index == 0) return s.front_material();
     return index == 1 ? s.side : s.bevelMat;
 }
@@ -11746,6 +12868,7 @@ Status Engine::set_text3d_impl(u64 layerId, const scene3d::Text3DSpec& spec) noe
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         drain_commands_locked();
+        InlineEditScope inlineScope(*this, layerId, true);
         Composition* comp = project_ ? current_composition() : nullptr;
         const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
         if (!l || l->kind != LayerKind::Model3D) return Status{Errc::InvalidArgument, "selecione texto 3D"};
@@ -11799,7 +12922,7 @@ Status Engine::set_text3d_impl(u64 layerId, const scene3d::Text3DSpec& spec) noe
     const bool dropReplaced = meshBytes > text3d_room_locked();
     history_.before_mutation(*comp, project_->timeline().current(), "editar texto 3D");
     bump_model_revision_locked();
-    follow_text3d_material_edit(*l, prev, edited, *scene, l->local_time(playback_.current()));
+    follow_text3d_material_edit(*l, prev, edited, *scene, l->local_time(editing_frame_locked()));
     // Asset novo (o antigo fica para o desfazer religar a malha anterior).
     const AssetId assetId = add_model_asset(*project_, *scene, "Texto 3D", scene3d::encode_text3d(edited));
     models_[assetId.pack()] = scene;
@@ -11880,6 +13003,7 @@ void Engine::restore_text3d_models_locked() noexcept {
 
 bool Engine::query_text3d(u64 layerId, scene3d::Text3DSpec& out) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Model3D) return false;
@@ -11971,6 +13095,7 @@ Status Engine::set_image3d_impl(u64 layerId, const scene3d::Image3DSpec& spec) n
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         drain_commands_locked();
+        InlineEditScope inlineScope(*this, layerId, true);
         Composition* comp = project_ ? current_composition() : nullptr;
         const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
         if (!l || l->kind != LayerKind::Model3D) return Status{Errc::InvalidArgument, "selecione uma imagem 3D"};
@@ -12013,6 +13138,7 @@ Status Engine::set_image3d_impl(u64 layerId, const scene3d::Image3DSpec& spec) n
 
 bool Engine::query_image3d(u64 layerId, scene3d::Image3DSpec& out) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Model3D) return false;
@@ -12028,6 +13154,7 @@ std::shared_ptr<const scene3d::SceneAsset> Engine::model_asset(u64 assetId) cons
 
 std::vector<std::string> Engine::model_missing_textures(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     const Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Model3D) return {};
@@ -12038,6 +13165,7 @@ std::vector<std::string> Engine::model_missing_textures(u64 layerId) noexcept {
 
 std::string Engine::model_folder(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     const Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Model3D) return {};
@@ -12056,6 +13184,7 @@ Result<u32> Engine::reload_model_textures(u64 layerId, std::string* detail) noex
     u64 room = 0, session = 0; CompositionId composition;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
+        InlineEditScope inlineScope(*this, layerId, true);
         const Composition* comp = project_ ? current_composition() : nullptr;
         const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
         if (!l || l->kind != LayerKind::Model3D) return Status{Errc::InvalidArgument, "selecione um modelo 3D"};
@@ -12174,7 +13303,12 @@ u32 Engine::submit_commands(const Command* commands, u32 count,
                 c.stringOffset += base;
             }
         }
-        if (commandQueue_->push(c) == kInvalidIndex) break;
+        const bool compositionCommand = c.type >= CommandType::CompositionSetSize && c.type <= CommandType::CompositionSetBackground;
+        const bool scoped = (mutates_model(c.type) && !compositionCommand) || c.type == CommandType::UndoBeginGroup || c.type == CommandType::UndoEndGroup;
+        const u64 group = scoped ? inlineEditGroup_.load(std::memory_order_acquire) : 0;
+        const u64 outer = group ? inlineEditOuter_.load(std::memory_order_relaxed) : 0;
+        const u64 inner = group ? inlineEditInner_.load(std::memory_order_relaxed) : 0;
+        if (commandQueue_->push(c, outer, group, inner) == kInvalidIndex) break;
         ++accepted;
     }
     commandQueue_->commit();
@@ -12184,7 +13318,9 @@ u32 Engine::submit_commands(const Command* commands, u32 count,
 
 void Engine::drain_commands_locked() noexcept {
     if (!project_) return;
-    commandQueue_->drain([this](const Command& cmd) {
+    commandQueue_->drain([this](const Command& cmd, u64 outer, u64 group, u64 inner) {
+        InlineEditScope scope(*this, outer, group, true, inner);
+        if (group && !scope.active()) return;
         // O blob da fila guarda as strings coladas, SEM terminador: cópia com o
         // comprimento exato (lida até o NUL, um texto novo levava junto os
         // anteriores — "Texto ATexto AuTexto…").
@@ -12199,7 +13335,10 @@ void Engine::drain_commands_locked() noexcept {
                 return;
             }
         }
-        const Status s = apply_command_internal(cmd, str, true);
+        Command routed = cmd;
+        if (scope.active() && routed.type == CommandType::LayerSplit && routed.layer_split.at.value != kEditAtPlayhead)
+            routed.layer_split.at = FrameIndex{scope.map_frame(routed.layer_split.at.value)};
+        const Status s = apply_command_internal(routed, str, true);
         if (!s.ok()) {
             AUREA_LOG_WARN("comando %u recusado: %s", static_cast<unsigned>(cmd.type), s.message().data());
         } else if (mutates_model(cmd.type) || cmd.type == CommandType::CompositionCreate || cmd.type == CommandType::CompositionDelete) {
@@ -12209,6 +13348,11 @@ void Engine::drain_commands_locked() noexcept {
 }
 
 RenderSettings Engine::current_render_settings() noexcept {
+    // 0.5.3: o piso de resolução da política térmica (DevicePolicy::minPreviewDenominator:
+    // QUENTE = 1/2, CRÍTICO = 1/4) não chegava ao AUTO: `set_quality_floor` não tinha
+    // quem chamasse e só o CRÍTICO valia (pelo `severe()` do próprio controlador).
+    // Aqui, na thread de render, a mesma que roda `adapt().update()`: sem corrida.
+    adapt().set_quality_floor(caps_.policy().minPreviewDenominator, 0);
     RenderSettings rs;
     rs.previewCacheRevision = preview_cache_revision();
     if (project_) rs.previewCacheComposition = project_->timeline().current().pack();
@@ -12435,6 +13579,15 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
     bool warming = false, cachedPreview = false, idleWarming = false;
     bool preRendered = false, preRenderReadPending = false;
     i32 preRenderSlot = -1;
+    i64 preRenderFrame = -1;
+    struct GroupCacheContext {
+        Engine* engine;
+        u64 token = 0, composition = 0;
+        i32& slot;
+        i64& frame;
+        bool& pending;
+        const u16* pixels = nullptr;
+    } groupCache{this, 0, 0, preRenderSlot, preRenderFrame, preRenderReadPending};
     PreviewIdleKey idleKey;
     u64 idleMediaReady = 0;
     u64 preparedPlaybackGeneration = 0;
@@ -12450,6 +13603,8 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         const auto preRenderStats = preRenderCache_->stats();
         const u64 preRenderToken = preRenderToken_.load(std::memory_order_acquire);
         const bool preRenderComplete = preRenderValid && preRenderToken && preRenderStats.complete;
+        bool groupPreRender = false;
+        { std::lock_guard state(preRenderStateMutex_); groupPreRender = preRenderGroup_; }
         if (!preRenderValid || std::any_of(preRenderTextures_.begin(), preRenderTextures_.end(),
             [&](const auto& slot) { return slot.texture.valid() && slot.generation != gpuGeneration_; }))
             clear_prerender_gpu_locked();
@@ -12507,7 +13662,9 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         const u32 rev = modelRevision_.load(std::memory_order_acquire);
         const bool force = forceRender_.exchange(false, std::memory_order_acq_rel) || rev != lastRenderedRevision_;
         lastRenderedRevision_ = rev;
-        idleKey = {projectSession_, rev, project_->timeline().current().pack(), playback_.media_epoch(), t.value};
+        // 0.5.3: a revisão da PRÉVIA (não a do modelo): uma edição que não muda pixel
+        // (travar, renomear) não descarta o que o preenchimento ocioso já guardou.
+        idleKey = {projectSession_, preview_cache_revision(), project_->timeline().current().pack(), playback_.media_epoch(), t.value};
         preparedPlaybackGeneration = playback_.generation();
         const bool idleEligible = !playing && !previewBuffering_ && playback_.mode() == PlaybackMode::Paused
             && !rawPlaybackLayer_.valid() && surfaceAttached_ && state() == EngineState::Ready
@@ -12542,7 +13699,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         // já é ao vivo; uma espera antiga não pode valer para o próximo cache.
         if (!(preRenderComplete && surfaceAttached_ && !rs.rawPlayback && !rs.sceneEditor.enabled))
             preRenderStallSinceNs_ = 0;
-        if (preRenderComplete && surfaceAttached_ && !rs.rawPlayback && !rs.sceneEditor.enabled) {
+        if (preRenderComplete && !groupPreRender && surfaceAttached_ && !rs.rawPlayback && !rs.sceneEditor.enabled) {
             idleWarming = false;
             // Um quadro 540p (ler + descomprimir) custa mais que um intervalo de
             // 30 fps. Antes: pedia SÓ o quadro do relógio e, sem ele pronto,
@@ -12552,13 +13709,15 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
             const i32 readDirection = previewBuffering_ ? (playback_.speed() < 0 ? -1 : 1)
                                                         : (playback_.direction() < 0 ? -1 : 1);
             const u64 cacheFrames = preRenderStats.framesTotal;
-            const bool inCache = t.value >= 0 && static_cast<u64>(t.value) < cacheFrames;
+            // Lote K: o cache começa no 1º quadro do PreRender (área de trabalho).
+            const i64 cacheIndex = t.value - preRenderFirstFrame_.load(std::memory_order_acquire);
+            const bool inCache = cacheIndex >= 0 && static_cast<u64>(cacheIndex) < cacheFrames;
             const u32 window = std::max(1u, preRenderStats.residentLimit);
-            const u32 readyRun = inCache ? preRenderCache_->prefetch(preRenderToken, static_cast<u64>(t.value),
+            const u32 readyRun = inCache ? preRenderCache_->prefetch(preRenderToken, static_cast<u64>(cacheIndex),
                 readDirection, window, playback_.loop()) : 0;
             if (previewBuffering_) {
-                const u64 left = !inCache ? 0 : readDirection > 0 ? cacheFrames - static_cast<u64>(t.value)
-                                                                  : static_cast<u64>(t.value) + 1;
+                const u64 left = !inCache ? 0 : readDirection > 0 ? cacheFrames - static_cast<u64>(cacheIndex)
+                                                                  : static_cast<u64>(cacheIndex) + 1;
                 const u32 target = static_cast<u32>(std::min<u64>(window, playback_.loop() ? window : left));
                 // Teto de 1,5 s: um aparelho lento ainda toca (segurando quadros).
                 if (!inCache || readyRun >= target || frameStart - previewBufferSince_ > 1'500'000'000ull) {
@@ -12573,51 +13732,17 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
                     return OkStatus; // a imagem atual fica; o relógio ainda não andou
                 }
             }
-            for (i32 i = 0; i < 2; ++i) {
-                const auto& slot = preRenderTextures_[i];
-                if (slot.texture.valid() && slot.token == preRenderToken && slot.time == t.value) {
-                    preRenderSlot = i; break;
-                }
-            }
-            if (preRenderSlot < 0 && inCache) {
-                preRenderReadPending = true; // até achar textura livre e quadro pronto
-                for (i32 i = 0; i < 2; ++i) {
-                    auto& slot = preRenderTextures_[i];
-                    if (slot.texture.valid() && !gpu_->wait_frame(slot.gpuFrame, 0).ok()) continue;
-                    const Status ready = preRenderCache_->take(preRenderToken, static_cast<u64>(t.value), preRenderUpload_);
-                    if (ready.code() == Errc::Busy || ready.code() == Errc::NotFound) { preRenderReadPending = true; break; }
-                    if (!ready.ok()) {
-                        invalidate_prerender();
-                        std::lock_guard state(preRenderStateMutex_);
-                        preRenderProgress_.error = ready.raw();
-                        break;
-                    }
-                    PreRenderCache::Key key;
-                    { std::lock_guard state(preRenderStateMutex_); key = preRenderKey_; }
-                    if (slot.texture.valid()) {
-                        const auto desc = gpu_->texture_desc(slot.texture);
-                        if (desc.width != key.width || desc.height != key.height) { gpu_->destroy_texture(slot.texture); slot.texture = {}; }
-                    }
-                    if (!slot.texture.valid()) {
-                        TextureDesc desc; desc.width = key.width; desc.height = key.height;
-                        desc.format = SurfaceFormat::RGBA16F; desc.sampled = true; desc.transferDst = true;
-                        desc.debugName = "prerender-540p";
-                        auto texture = gpu_->create_texture(desc);
-                        if (!texture.ok()) {
-                            invalidate_prerender();
-                            std::lock_guard state(preRenderStateMutex_);
-                            preRenderProgress_.error = texture.status().raw();
-                            break;
-                        }
-                        slot.texture = *texture;
-                    }
-                    // A CPU frame is only pending here. Surface acquisition or
-                    // begin_frame may still fail before upload is recorded.
-                    slot.generation = gpuGeneration_; slot.token = preRenderToken; slot.time = -1;
-                    rs.cachedCompositionPixels = preRenderUpload_.data(); preRenderSlot = i; break;
-                }
+            const auto texture = prerender_texture_locked(preRenderToken, t.value, rs.cachedCompositionPixels);
+            if (texture.ok()) preRenderSlot = *texture;
+            else if (texture.status().code() == Errc::Busy || texture.status().code() == Errc::NotFound)
+                preRenderReadPending = inCache;
+            else {
+                invalidate_prerender();
+                std::lock_guard state(preRenderStateMutex_);
+                preRenderProgress_.error = texture.status().raw();
             }
             if (preRenderSlot >= 0) {
+                preRenderFrame = t.value;
                 rs.cachedComposition = preRenderTextures_[preRenderSlot].texture;
                 rs.previewCacheRevision = 0; preRendered = true;
                 preRenderReadPending = false; // a janela à frente já foi pedida pelo prefetch
@@ -12640,6 +13765,40 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
             } else if (!playing) {
                 preRenderStallSinceNs_ = 0; // pausado/scrub: exato, sem segurar
             }
+        }
+        if (preRenderComplete && groupPreRender && surfaceAttached_ && !rs.rawPlayback && !rs.sceneEditor.enabled) {
+            idleWarming = false;
+            rs.previewCacheBypass = true;
+            rs.previewCacheRevision = 0;
+            groupCache.token = preRenderToken;
+            { std::lock_guard state(preRenderStateMutex_); groupCache.composition = preRenderKey_.composition; }
+            rs.nestedCacheContext = &groupCache;
+            rs.nestedCacheLookup = [](void* context, CompositionId composition, FrameIndex at) -> CachedCompositionFrame {
+                auto& cache = *static_cast<GroupCacheContext*>(context);
+                Engine& engine = *cache.engine;
+                if (composition.pack() != cache.composition) return {};
+                // Temporal effects may ask for several child times in one
+                // frame. Keep the first cached frame immutable until submission.
+                if (cache.slot >= 0) {
+                    if (cache.frame != at.value) return {};
+                    return {engine.preRenderTextures_[cache.slot].texture, cache.pixels};
+                }
+                const i64 index = at.value - engine.preRenderFirstFrame_.load(std::memory_order_acquire);
+                const auto stats = engine.preRenderCache_->stats();
+                if (index < 0 || static_cast<u64>(index) >= stats.framesTotal) return {};
+                (void)engine.preRenderCache_->prefetch(cache.token, static_cast<u64>(index), 1,
+                    std::max(1u, stats.residentLimit), false);
+                auto texture = engine.prerender_texture_locked(cache.token, at.value, cache.pixels);
+                if (!texture.ok()) {
+                    cache.pending = true;
+                    if (texture.status().code() != Errc::Busy && texture.status().code() != Errc::NotFound)
+                        engine.invalidate_prerender(texture.status().raw());
+                    return {};
+                }
+                cache.slot = *texture;
+                cache.frame = at.value;
+                return {engine.preRenderTextures_[cache.slot].texture, cache.pixels};
+            };
         }
         if (caps_.thermal().severe() || memory_.pressure() >= .85f || preview_memory_hold()) rs.previewCacheRevision = 0;
         const u32 cacheCapacity = renderer_.configure_preview_cache(comp->width(), comp->height(), rs);
@@ -12720,6 +13879,10 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
                                   decodeDirection, mode, playback_.speed(), snapshot_);
             }
         }
+        // Preparation consumes this stack-owned lookup context. A retained
+        // preview graph only needs the immutable textures in the snapshot.
+        rs.nestedCacheLookup = nullptr;
+        rs.nestedCacheContext = nullptr;
         { EngineStatus published; fill_status_model_locked(published); }
     }
     const u64 tPrepared = monotonic_ns();
@@ -12790,7 +13953,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
             return OkStatus;
         }
     }
-    if (preRendered && (!preRenderActive_.load(std::memory_order_acquire)
+    if (preRenderSlot >= 0 && (!preRenderActive_.load(std::memory_order_acquire)
         || preRenderTextures_[preRenderSlot].token != preRenderToken_.load(std::memory_order_acquire))) {
         snapshot_.release_video_frames(); forceRender_.store(true, std::memory_order_release);
         return OkStatus;
@@ -12801,10 +13964,10 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         auto& slot = preRenderTextures_[preRenderSlot];
         const u64 submitted = gpu_->last_submitted_frame();
         slot.gpuFrame = submitted;
-        if (rs.cachedCompositionPixels) {
+        if (rs.cachedCompositionPixels || groupCache.pixels) {
             // Publish the frame identity after its upload was submitted. A
             // pending texture cannot satisfy a later cache hit by itself.
-            if (s.ok() && submitted != preRenderBeforeSubmit) slot.time = t.value;
+            if (s.ok() && submitted != preRenderBeforeSubmit) slot.time = preRenderFrame;
             else { slot.time = -1; forceRender_.store(true, std::memory_order_release); }
         }
         if (!s.ok() && s.code() != Errc::SurfaceLost && s.code() != Errc::Timeout && s.code() != Errc::Busy) {
@@ -12837,7 +14000,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         const u64 now = monotonic_ns();
         snapshot_.release_video_frames();
         std::lock_guard<std::mutex> lock(modelMutex_);
-        const PreviewIdleKey current{projectSession_, modelRevision_.load(std::memory_order_acquire),
+        const PreviewIdleKey current{projectSession_, preview_cache_revision(),
             project_ ? project_->timeline().current().pack() : 0, playback_.media_epoch(), playback_.current().value};
         // Seek/Play during preparation keeps the frame: it was prepared from
         // this same revision (seek/play only restart the decoder epoch, not
@@ -12867,7 +14030,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
             stats.cpuMs = timings.cpuPrepareMs + timings.cpuRecordMs;
             stats.decodeMs = media_.stats().decodeMsAvg;
             stats.droppedFrames = frameScheduler_.dropped_total();
-            stats.memoryPressure = memory_.pressure();
+            stats.memoryPressure = std::max(memory_.pressure(), platformMemoryPressure_.load(std::memory_order_relaxed));
             (void)adapt().update(stats, caps_.thermal());
         }
         std::lock_guard<std::mutex> lock(modelMutex_);
@@ -12948,6 +14111,19 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         forceRender_.store(true, std::memory_order_release);
         lastSkipped_ = true;
         wake_render();
+    } else if (!playing && (snapshot_.missingVideoFrames || snapshot_.staleVideoFrames)) {
+        // 0.5.4 ("coloquei 3 vídeos e alguns não apareciam"): a camada cujo
+        // decoder foi recusado só tenta de novo quando o render chama o
+        // MediaManager — e parado ninguém chamava: ela ficava vazia até o
+        // usuário mexer. Agenda o quadro para a hora da nova tentativa; uma
+        // edição, um decoder que fecha ou um quadro que chega acordam antes.
+        if (const u64 due = media_.next_retry_ns()) {
+            const u64 at = std::max<u64>(due, monotonic_ns() + 1'000'000ull);
+            const u64 current = previewRetryDueNs_.load(std::memory_order_acquire);
+            if (!current || at < current) previewRetryDueNs_.store(at, std::memory_order_release);
+            nextFrameDueNs_ = at;
+            forceRender_.store(true, std::memory_order_release);
+        }
     }
     if (s.ok() && !warming) {
         const u64 shownNs = monotonic_ns();
@@ -12985,7 +14161,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
     stats.decodeMs = media_.stats().decodeMsAvg;
     stats.droppedFrames = frameScheduler_.dropped_total();
     stats.cpuMemoryBytes = memory_.total_used();
-    stats.memoryPressure = memory_.pressure();
+    stats.memoryPressure = std::max(memory_.pressure(), platformMemoryPressure_.load(std::memory_order_relaxed));
     // O refino não entra na média do AUTO: é um quadro avulso em outra
     // resolução, não o ritmo do preview.
     if (!preRendered && !refineNow_ && !rs.rawPlayback && !lastFrameDrafted_.load(std::memory_order_acquire)
@@ -13006,7 +14182,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
     }
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
-        const PreviewIdleKey current{projectSession_, modelRevision_.load(std::memory_order_acquire),
+        const PreviewIdleKey current{projectSession_, preview_cache_revision(),
             project_ ? project_->timeline().current().pack() : 0, playback_.media_epoch(), playback_.current().value};
         const bool eligible = s.ok() && current == idleKey && !lastIncomplete_ && !refinePending_
             && !playing && !previewBuffering_ && playback_.mode() == PlaybackMode::Paused
@@ -14231,7 +15407,7 @@ void Engine::fill_status_model_locked(EngineStatus& st) noexcept {
     st.previewDenominator = adapt().current_denominator();
     st.previewAuto = adapt().auto_mode();
     if (project_) {
-        st.playhead = playback_.current();
+        st.playhead = editing_frame_locked();
         st.playing = playback_.playing() || previewBuffering_;
         st.assetCount = project_->asset_count();
         st.dirty = project_->dirty();
@@ -14307,7 +15483,13 @@ void Engine::debug_feed_frame_stats(const FrameStats& stats) noexcept {
 }
 
 Composition* Engine::current_composition() noexcept {
+    if (inlineAccessRejected_) return nullptr;
     if (!project_) return nullptr;
+    return project_->timeline().composition(project_->timeline().current());
+}
+
+const Composition* Engine::current_composition() const noexcept {
+    if (!project_ || inlineAccessRejected_) return nullptr;
     return project_->timeline().composition(project_->timeline().current());
 }
 
@@ -14362,6 +15544,8 @@ u32 Engine::query_layers(bridge::LayerRow* out, u32 capacity, char* outNameBlob,
         if (can_create_clip(*comp, n - 1 - i)) flags |= bridge::kLayerRowFlagClipCandidate;
         if (l->shy) flags |= bridge::kLayerRowFlagShy;
         if (l->preserveTransparency) flags |= bridge::kLayerRowFlagPreserveTransparency;
+        flags |= (static_cast<u32>(l->quality) << bridge::kLayerRowQualityShift) & bridge::kLayerRowQualityMask;
+        if (l->sampling == 1) flags |= bridge::kLayerRowFlagBicubic;
         flags |= (static_cast<u32>(l->label) << bridge::kLayerRowLabelShift) & bridge::kLayerRowLabelMask;
         row.flags = flags;
         row.parentIndex = kInvalidIndex;
@@ -14494,6 +15678,7 @@ u32 write_keyframe_rows(const Layer& l, bridge::KeyframeRow* out, u32 capacity) 
 u32 Engine::query_keyframes(u64 layerId, bridge::KeyframeRow* out, u32 capacity) noexcept {
     if (!out) return 0;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = current_composition();
     if (!comp) return 0;
     Layer* l = comp->layer(LayerId::unpack(layerId));
@@ -14508,6 +15693,7 @@ bool Engine::query_keyframe_navigation(u64 layerId, u32 property, u32 effectInde
         || compositionFrame > INT32_MAX) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId);
     const Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer) return false;
@@ -14563,6 +15749,7 @@ bool Engine::query_timeline_navigation(u64 layerId, i64 compositionFrame, i32 di
     if (direction == 0) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId);
     const Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return false;
     bool found = false;
@@ -14649,6 +15836,19 @@ u32 Engine::query_all_keyframes(bridge::KeyframeIndexRow* outIndex, u32 layerCap
 }
 
 u32 Engine::query_waveform(u64 layerId, f64 startFrame, f64 framesPerBucket, u32 count, u8* out) noexcept {
+    return query_waveform_scoped(0, layerId, startFrame, framesPerBucket, count, out);
+}
+
+u32 Engine::query_group_waveform(u64 groupLayerId, u64 layerId, f64 startFrame, f64 framesPerBucket,
+                                 u32 count, u8* out) noexcept {
+    if (groupLayerId == 0) return 0;
+    return query_waveform_scoped(groupLayerId, layerId, startFrame, framesPerBucket, count, out);
+}
+
+/// `groupLayerId` != 0: a camada é de DENTRO desse grupo da composição aberta
+/// e `startFrame` vem no tempo de fora (0.5.3, grupo aberto na timeline).
+u32 Engine::query_waveform_scoped(u64 groupLayerId, u64 layerId, f64 startFrame, f64 framesPerBucket,
+                                  u32 count, u8* out) noexcept {
     if (!out || count == 0 || !waveforms_ || !(framesPerBucket > 0.0)) return 0;
     u64 key = 0;
     f64 srcStart = 0.0, perBucket = 0.0;
@@ -14658,8 +15858,11 @@ u32 Engine::query_waveform(u64 layerId, f64 startFrame, f64 framesPerBucket, u32
     f64 remapFps = 30.0;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
-        Composition* comp = current_composition();
+        InlineEditScope inlineScope(*this, layerId);
+        i64 delta = 0;
+        Composition* comp = groupLayerId ? group_inner_locked(groupLayerId, &delta, nullptr) : current_composition();
         if (!comp || !project_) return 0;
+        startFrame -= static_cast<f64>(delta);   // tempo de fora → tempo de dentro
         const Layer* l = comp->layer(LayerId::unpack(layerId));
         if (!l || (l->kind != LayerKind::Video && l->kind != LayerKind::Audio)) return 0;
         const Asset* a = project_->asset(l->source);
@@ -14723,12 +15926,28 @@ u32 Engine::query_waveform(u64 layerId, f64 startFrame, f64 framesPerBucket, u32
 
 u32 Engine::query_thumbnail(u64 layerId, i32 timelineFrame, u32 height, u8* out, u32 capacity,
                             u32* outWidth) noexcept {
+    return query_thumbnail_scoped(0, layerId, timelineFrame, height, out, capacity, outWidth);
+}
+
+u32 Engine::query_group_thumbnail(u64 groupLayerId, u64 layerId, i32 timelineFrame, u32 height,
+                                  u8* out, u32 capacity, u32* outWidth) noexcept {
+    if (groupLayerId == 0) return 0;
+    return query_thumbnail_scoped(groupLayerId, layerId, timelineFrame, height, out, capacity, outWidth);
+}
+
+/// `groupLayerId` != 0: a camada é de DENTRO desse grupo da composição aberta
+/// e `timelineFrame` vem no tempo de fora (0.5.3, grupo aberto na timeline).
+u32 Engine::query_thumbnail_scoped(u64 groupLayerId, u64 layerId, i32 timelineFrame, u32 height,
+                                   u8* out, u32 capacity, u32* outWidth) noexcept {
     if (!out || height == 0 || height > 512) return 0;
     ThumbnailService::Image img;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
-        Composition* comp = current_composition();
+        i64 delta = 0;
+        Composition* comp = groupLayerId ? group_inner_locked(groupLayerId, &delta, nullptr) : current_composition();
         if (!comp || !project_) return 0;
+        timelineFrame = static_cast<i32>(std::clamp<i64>(static_cast<i64>(timelineFrame) - delta,
+            std::numeric_limits<i32>::min(), std::numeric_limits<i32>::max()));
         const Layer* l = comp->layer(LayerId::unpack(layerId));
         if (!l || !l->source.valid()) return 0;
         const Asset* a = project_->asset(l->source);
@@ -14797,6 +16016,7 @@ Rect vector_content_box(const Layer& l, FrameIndex local, f64 fps) {
 bool Engine::query_layer_detail(u64 layerId, bridge::LayerDetailPOD& out) noexcept {
     out = bridge::LayerDetailPOD{};
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     // 0.5.2: camada presa a um osso — o contorno no palco segue o osso.
     const BoneAttachScope bones(&Engine::model_lookup, this);
     if (!fill_layer_detail_locked(layerId, out)) return false;
@@ -14804,7 +16024,7 @@ bool Engine::query_layer_detail(u64 layerId, bridge::LayerDetailPOD& out) noexce
     const Composition* comp = current_composition();
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return true;
-    const FrameIndex now = playback_.current();
+    const FrameIndex now = editing_frame_locked();
     const Layer* p = l->parent.valid() ? comp->layer(l->parent) : nullptr;
     if (p || l->hasParentBasis) {
         const Mat4 pm = (p ? (wants_layer_3d(*comp, *l, now) ? layer_world_3d(*comp, *p, now) : layer_world_matrix(*comp, *p, now)) : Mat4::identity()) * l->parentBasis;
@@ -14899,7 +16119,7 @@ bool Engine::fill_layer_detail_locked(u64 layerId, bridge::LayerDetailPOD& out) 
     if (!comp || !project_) return false;
     const Layer* l = comp->layer(LayerId::unpack(layerId));
     if (!l) return false;
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     auto value = [&](TrackProperty p, f32 fallback, u32 bit) noexcept {
         const Track* tr = l->tracks.find(p);
         if (!tr) return fallback;
@@ -14925,6 +16145,8 @@ bool Engine::fill_layer_detail_locked(u64 layerId, bridge::LayerDetailPOD& out) 
               | (l->clipToBelow ? bridge::kLayerRowFlagClipToBelow : 0u)
               | (l->shy ? bridge::kLayerRowFlagShy : 0u)
               | (l->preserveTransparency ? bridge::kLayerRowFlagPreserveTransparency : 0u)
+              | ((static_cast<u32>(l->quality) << bridge::kLayerRowQualityShift) & bridge::kLayerRowQualityMask)
+              | (l->sampling == 1 ? bridge::kLayerRowFlagBicubic : 0u)
               | ((static_cast<u32>(l->label) << bridge::kLayerRowLabelShift) & bridge::kLayerRowLabelMask);
     if (const i32 zi = comp->z_index_of(LayerId::unpack(layerId)); zi >= 0 && can_create_clip(*comp, static_cast<u32>(zi)))
         out.flags |= bridge::kLayerRowFlagClipCandidate;
@@ -14956,7 +16178,7 @@ bool Engine::fill_layer_detail_locked(u64 layerId, bridge::LayerDetailPOD& out) 
     out.audioPan = l->pan;
     out.audioFadeIn = static_cast<i32>(l->fadeIn.value);
     out.audioFadeOut = static_cast<i32>(l->fadeOut.value);
-    out.speed = l->speed_at(playback_.current());
+    out.speed = l->speed_at(editing_frame_locked());
     out.timeFlags = (l->speed_track() ? 64u : 0u) | (l->reversed ? 1u : 0u) | (l->motionBlur ? 2u : 0u) | (l->timeRemapEnabled ? 4u : 0u)
                   | (l->frameBlend == 1 ? 8u : 0u) | (l->frameBlend == 2 ? 16u : 0u) | (l->vectorBlur > 0.0f ? 32u : 0u)
                   | (l->keepPitch ? 128u : 0u) | (l->loopMedia ? 512u : 0u)
@@ -15051,6 +16273,7 @@ bool Engine::query_keyframe_easing(u64 layerId, u32 property, u32 effectIndex, u
                                    i32 frame, f32* out4, u8* outPower) noexcept {
     if (!out4 || property >= static_cast<u32>(TrackProperty::_Count)) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     const Composition* comp = current_composition();
     const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     const TrackRef ref{LayerId::unpack(layerId), static_cast<TrackProperty>(property), effectIndex, paramIndex};
@@ -15107,6 +16330,7 @@ u32 Engine::query_track_curve(u64 layerId, u32 property, u32 effectIndex, u32 pa
                               i32 startFrame, i32 endFrame, f32* outValues, u32 sampleCount) noexcept {
     if (!outValues || sampleCount == 0 || endFrame <= startFrame || property >= static_cast<u32>(TrackProperty::_Count)) return 0;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = current_composition();
     if (!comp) return 0;
     Layer* l = comp->layer(LayerId::unpack(layerId));
@@ -15125,6 +16349,7 @@ u32 Engine::query_track_curve(u64 layerId, u32 property, u32 effectIndex, u32 pa
 u32 Engine::query_effect_catalog(bridge::EffectCatalogRow* out, u32 capacity, char* blob,
                                  u32 blobCapacity) noexcept {
     if (!out) return 0;
+    std::lock_guard<std::mutex> lock(modelMutex_);
     // Aposentados do CATÁLOGO (não do registro): projetos antigos abrem e tocam
     // igual, mas quem adiciona um efeito recebe as versões completas do pacote
     // de áudio — os envios de reverb/flanger/eco sem estado e o espectro antigo.
@@ -15137,12 +16362,36 @@ u32 Engine::query_effect_catalog(bridge::EffectCatalogRow* out, u32 capacity, ch
         // projetos que o usam abrem e renderizam igual; não entra mais no menu.
         effect_type_id(effect_keys::kDeepGlow2),
     };
+    // New additions use the reconstructed parameter contracts. Saved instances
+    // retain their original type and parameters in the registry.
+    static const struct Replacement { EffectTypeId legacy, current; } kReplacements[] = {
+        {effect_type_id(effect_keys::kSignal), effect_type_id("aurea.glitch.signal_reference")},
+        {effect_type_id(effect_keys::kTwitch), effect_type_id("aurea.motion.twitch_reference")},
+        {effect_type_id(effect_keys::kSharpen), effect_type_id(effect_keys::kSharpenReference)},
+        {effect_type_id(effect_keys::kFindEdges), effect_type_id(effect_keys::kFindEdgesReference)},
+        {effect_type_id(effect_keys::kWaveWarp), effect_type_id(effect_keys::kWaveWarpReference)},
+        {effect_type_id(effect_keys::kBlockDissolve), effect_type_id("aurea.transition.block_dissolve_reference")},
+        {effect_type_id(effect_keys::kRadialWipe), effect_type_id("aurea.transition.radial_wipe_reference")},
+        {effect_type_id(effect_keys::kTurbulence), effect_type_id("aurea.distort.turbulent_displace_reference")},
+        {effect_type_id(effect_keys::kDropShadow), effect_type_id("aurea.stylize.drop_shadow_reference")},
+        // AE reference batch A.
+        {effect_type_id(effect_keys::kRadialBlur), effect_type_id("aurea.blur.radial_blur_reference")},
+        {effect_type_id("aurea.stylize.radial_shadow"), effect_type_id("aurea.stylize.radial_shadow_reference")},
+        {effect_type_id(effect_keys::kPosterizeTime), effect_type_id("aurea.time.posterize_reference")},
+        // AE reference batch C.
+        {effect_type_id(effect_keys::kGlitchify), effect_type_id("aurea.glitch.glitchify_reference")},
+        // AE reference batch A2.
+        {effect_type_id("aurea.time.time_displacement"), effect_type_id("aurea.time.time_displacement_reference")},
+    };
     u32 cursor = 0, written = 0;
     for (u32 i = 0; i < effectRegistry_.count() && written < capacity; ++i) {
         // Plugin removido ou trocado por versão nova: a posição fica, o catálogo não.
         if (effectRegistry_.retired_at(i)) continue;
         const Effect& e = effectRegistry_.at(i);
         if (std::find(std::begin(kRetired), std::end(kRetired), e.type_id()) != std::end(kRetired)) continue;
+        const auto replacement = std::find_if(std::begin(kReplacements), std::end(kReplacements),
+            [&](const Replacement& r) { return r.legacy == e.type_id(); });
+        if (replacement != std::end(kReplacements) && effectRegistry_.find(replacement->current)) continue;
         bridge::EffectCatalogRow row;
         row.typeId = e.type_id();
         row.effectClass = static_cast<u32>(e.effect_class());
@@ -15181,6 +16430,7 @@ u32 Engine::query_layer_effects(u64 layerId, bridge::LayerEffectRow* out, u32 ca
     std::lock_guard<std::mutex> lock(modelMutex_);
     // O efeito que o painel acabou de pôr (ainda na fila) já aparece na pilha.
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return 0;
     const Layer* l = comp->layer(LayerId::unpack(layerId));
@@ -15226,6 +16476,7 @@ u32 Engine::query_effect_curve(u64 layer, u32 effect, u32 param, u32 channel,
     if (channel > 3 || !out || capacity < 2) return 0;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layer);
     CurveData* curve = editable_tone_curve(project_ ? current_composition() : nullptr, effectRegistry_, layer, effect, param);
     if (!curve) return 0;
     if (samples) {
@@ -15255,6 +16506,7 @@ u32 Engine::query_effect_gradient(u64 layer, u32 effect, u32 param, f32* out, u3
     if (!out || capacity < 5) return 0;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layer);
     const GradientData* gradient = editable_gradient(project_ ? current_composition() : nullptr, effectRegistry_, layer, effect, param);
     if (!gradient) return 0;
     const u32 count = std::min(static_cast<u32>(gradient->stops.size()), capacity / 5);
@@ -15279,6 +16531,7 @@ bool Engine::set_effect_gradient(u64 layer, u32 effect, u32 param, const f32* va
     std::stable_sort(next.begin(), next.end(), [](const GradientStop& a, const GradientStop& b) { return a.position < b.position; });
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layer, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     GradientData* gradient = editable_gradient(comp, effectRegistry_, layer, effect, param);
     if (!gradient) return false;
@@ -15301,6 +16554,7 @@ i32 Engine::edit_effect_curve(u64 layer, u32 effect, u32 param, u32 channel,
     if (channel > 3 || action > 3 || !std::isfinite(x) || !std::isfinite(y)) return -1;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layer, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     CurveData* curve = editable_tone_curve(comp, effectRegistry_, layer, effect, param);
     if (!curve) return -1;
@@ -15383,6 +16637,7 @@ u32 Engine::query_effect_params(u64 layerId, u32 effectId, bridge::EffectParamRo
     // escrever, o controle voltava e um vetor (cor, ponto) escrito por
     // componente perdia o que já tinha mudado.
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return 0;
     Layer* l = comp->layer(LayerId::unpack(layerId));
@@ -15392,7 +16647,7 @@ u32 Engine::query_effect_params(u64 layerId, u32 effectId, bridge::EffectParamRo
     const ParameterRegistry* params = effectRegistry_.params(inst->type);
     if (!params) return 0;
 
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     // Brilho / Brilho profundo salvos antes do brilho em oitavas (slot
     // "algorithm" = 0, projetos até a 0.0.4): o desenho de antes continua
     // valendo, então o card mostra OS CONTROLES DELE (núcleo, halo, estouro...)
@@ -15423,6 +16678,8 @@ u32 Engine::query_effect_params(u64 layerId, u32 effectId, bridge::EffectParamRo
             if (i > glowAlgorithmSlot) row.flags |= kParamHidden;     // só o algoritmo novo lê
             else row.flags &= ~static_cast<u32>(kParamHidden);       // desenho de antes: visível
         }
+        if (inst->type == effect_type_id(effect_keys::kDeepGlow) && deep_glow_reference::hidden(inst, i))
+            row.flags |= kParamHidden;
         row.enumCount = spec.enumCount;
         row.minValue = spec.minValue;
         row.maxValue = spec.maxValue;
@@ -15450,6 +16707,19 @@ u32 Engine::query_effect_params(u64 layerId, u32 effectId, bridge::EffectParamRo
                 (void)put_string(blob, blobCapacity, cursor, spec.enumLabels[k], o, n);
             }
             row.enumLength = cursor - row.enumOffset;
+        } else if (i == 0 && expr::is_menu_control(inst->type)) {
+            // AE expressions: Menu suspenso — as opções são os itens DA INSTÂNCIA.
+            const std::vector<std::string> items = expr::menu_items(*inst);
+            row.enumCount = static_cast<u32>(items.size());
+            row.maxValue = static_cast<f32>(items.size() - 1);
+            row.hardMax = row.maxValue;
+            row.enumOffset = cursor;
+            for (u32 k = 0; k < items.size(); ++k) {
+                u32 o = 0, n = 0;
+                if (k) (void)put_string(blob, blobCapacity, cursor, "|", o, n);
+                (void)put_string(blob, blobCapacity, cursor, items[k].c_str(), o, n);
+            }
+            row.enumLength = cursor - row.enumOffset;
         }
         // O id por último: se o blob encher, perde-se só a chave de tradução
         // (a UI cai no rótulo do motor), nunca o rótulo.
@@ -15466,7 +16736,7 @@ u32 Engine::query_effect_params(u64 layerId, u32 effectId, bridge::EffectParamRo
         if (is_time_remap_type(inst->type)) {
             const f64 compFps = comp->fps() > 0.0 ? comp->fps() : 30.0;
             if (i == 0) {
-                const f32 base = static_cast<f32>(l->source_frame(playback_.current()));
+                const f32 base = static_cast<f32>(l->source_frame(editing_frame_locked()));
                 const f32 frames = l->timeRemapEnabled ? l->timeRemap.value_or(local, base) : base;
                 row.value[0] = static_cast<f32>(frames / compFps);   // segundos da fonte
                 row.animated = l->timeRemap.keys.size() > 1 ? 1u : 0u;
@@ -15493,6 +16763,8 @@ u32 Engine::query_effect_specs(u32 typeId, bridge::EffectParamRow* out, u32 capa
         row.index = i;
         row.type = static_cast<u32>(spec.type);
         row.flags = spec.flags;
+        if (typeId == effect_type_id(effect_keys::kDeepGlow) && deep_glow_reference::hidden(nullptr, i))
+            row.flags |= kParamHidden;
         row.enumCount = spec.enumCount;
         row.minValue = spec.minValue;
         row.maxValue = spec.maxValue;
@@ -15526,6 +16798,7 @@ u32 Engine::query_effect_specs(u32 typeId, bridge::EffectParamRow* out, u32 capa
 bool Engine::set_effect_section_open(u64 layerId, u32 effectId, u32 section, bool open) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     EffectInstance* inst = l ? l->find_effect(EffectId{effectId, 0}) : nullptr;
@@ -15618,7 +16891,7 @@ void Engine::configure_playback_locked(const Composition* comp, i64 rawDuration)
     const bool keepEventCursor = bounded && playback_.mode() == PlaybackMode::Paused
         && pausedTimelineEventFrame_ > end && pausedTimelineEventSession_ == projectSession_
         && project_ && pausedTimelineEventComposition_ == project_->timeline().current()
-        && playback_.current().value == pausedTimelineEventFrame_
+        && editing_frame_locked().value == pausedTimelineEventFrame_
         && pausedTimelineEventFrame_ < comp->duration().value
         && std::any_of(comp->markers().begin(), comp->markers().end(), [&](const Marker& marker) {
             return marker.frame.value == pausedTimelineEventFrame_;
@@ -16043,7 +17316,7 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
         ctx->diagnostic_stage(ExportDiagnostics::Lane::Session, ExportDiagnostics::Stage::AudioSnapshot);
         auto offlineAudio = OfflineAudioSnapshot::create(*comp, *ctx->frozenProject,
             ctx->audioCache.get(), &Engine::audio_path_resolver, this,
-            OfflineAudioSnapshot::kDefaultBlockBudget, &ctx->cancelRequested);
+            OfflineAudioSnapshot::kDefaultBlockBudget, &ctx->cancelRequested, &effectRegistry_);
         if (!offlineAudio.ok()) return offlineAudio.status();
         ctx->offlineAudio = std::move(*offlineAudio);
         ctx->audioSnap = ctx->offlineAudio->snapshot();
@@ -16056,31 +17329,8 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
         return !(capLong > 0 && (std::max(w, h) > capLong || std::min(w, h) > capShort)) &&
                !(maxTex > 0 && std::max(w, h) > maxTex);
     };
-    if (!fitsDevice(ctx->width, ctx->height)) {
-        // 0.2.6: acima do teto do aparelho (32 bits fica em 1080p) ou da textura
-        // da GPU, o vídeo sai no MAIOR tamanho que cabe, com a mesma proporção,
-        // em vez de recusar ("resolução acima do que este aparelho exporta").
-        const u32 longSide = std::max(ctx->width, ctx->height), shortSide = std::min(ctx->width, ctx->height);
-        f64 scale = 1.0;
-        if (capLong > 0) scale = std::min(scale, static_cast<f64>(capLong) / longSide);
-        if (capShort > 0) scale = std::min(scale, static_cast<f64>(capShort) / shortSide);
-        if (maxTex > 0) scale = std::min(scale, static_cast<f64>(maxTex) / longSide);
-        const Composition* frozenComp = ctx->frozenProject
-            ? ctx->frozenProject->timeline().composition(ctx->recovery.composition) : nullptr;
-        u32 wantShort = static_cast<u32>(std::floor(shortSide * scale)) & ~1u;
-        ExportFrameSize reduced{};
-        while (frozenComp && wantShort >= 16) {
-            reduced = export_attempt_frame_size(frozenComp->width(), frozenComp->height(), wantShort, attemptPlan.align16);
-            if (reduced.width && reduced.height && fitsDevice(reduced.width, reduced.height)) break;
-            reduced = ExportFrameSize{};
-            wantShort -= 16;
-        }
-        if (!reduced.width || !reduced.height) return Status{Errc::NotSupported, "resolucao acima do que este aparelho exporta"};
-        AUREA_LOG_INFO("export: %ux%u acima do aparelho; saindo em %ux%u", ctx->width, ctx->height, reduced.width, reduced.height);
-        ctx->progress.flags |= kExportResolutionCapped;   // 0.3.2: a tela diz o tamanho que saiu
-        ctx->width = reduced.width;
-        ctx->height = reduced.height;
-    }
+    if (!fitsDevice(ctx->width, ctx->height))
+        return Status{Errc::NotSupported, "requested export dimensions exceed this device's capabilities"};
     ctx->outputWidth = ctx->width;
     ctx->outputHeight = ctx->height;
     if (hyper && !hyper->graph.empty()) {
@@ -16340,6 +17590,22 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
             AUREA_LOG_WARN("export: %s", detail);
             return Status{Errc::StorageFull, detail};
         }
+        // 0.5.3 (P0-10): a pasta de saída aceita arquivo? Com checkpoint o MP4 só
+        // abre na montagem: uma pasta que não existe (título com "/" no iOS) ou
+        // sem permissão custava o render inteiro e falhava no fim, sem nova
+        // tentativa. Agora falha aqui, antes de abrir encoder e GPU.
+        {
+            std::string probe;
+            probe.reserve(std::strlen(outputPath) + 16);
+            probe.append(outputPath).append(".aurea-probe");
+            std::FILE* f = fileio::open_file(probe, "wb");
+            if (!f) {
+                AUREA_LOG_WARN("export: a pasta de saida nao aceita arquivos (errno %d)", errno);
+                return Status{errno == ENOSPC ? Errc::StorageFull : Errc::IoError, "a pasta de saida do video nao aceita arquivos"};
+            }
+            std::fclose(f);
+            (void)fileio::remove_file(probe);
+        }
         ctx->outputDir = dir;
     }
     if (!ctx->packetLogPath.empty()) {
@@ -16559,8 +17825,8 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
         // ignorava a tabela e usava 3 em todo celular: um aparelho de 4 GB
         // segurava um slot de leitura a mais do que a política dele manda.
         const u32 policyDepth = caps_.policy().exportPipelineDepth;
-        const u64 trackedBudget = DeviceCapabilities::process_budget_limit(
-            config_.memoryBudgetBytes ? config_.memoryBudgetBytes : caps_.memory_budget_bytes());
+        const u64 exportBudget = export_budget_bytes();   // 0.5.3 (P0-7): teto do aparelho + degrau de memória
+        const u64 trackedBudget = exportBudget;
         // Small envelopes cannot retain readback buffers for several full-HD
         // frames beside a large effect target. Serialize instead of changing
         // output dimensions or shutter samples.
@@ -16570,7 +17836,7 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
                                                          : (policyDepth ? policyDepth : 3u), 1u, 4u));
         const u64 slotBytes = static_cast<u64>(ctx->width) * ctx->height * 3 / 2;
         ctx->queueByteLimit = config_.exportFrameQueueBudgetBytes ? config_.exportFrameQueueBudgetBytes
-            : std::min<u64>(64ull << 20, std::max<u64>(8ull << 20, caps_.memory_budget_bytes() / 8));
+            : std::min<u64>(64ull << 20, std::max<u64>(16ull << 20, exportBudget / 8));   // 16 MB: um quadro 4K NV12 sempre cabe
         const u32 boundedSlots = static_cast<u32>(std::min<u64>(want, ctx->queueByteLimit / slotBytes));
         if (!boundedSlots) { ctx->sink->abort(); return Status{Errc::BudgetExceeded, "um quadro nao cabe na fila de exportacao"}; }
         Status readbackFailure = OkStatus;
@@ -16878,7 +18144,7 @@ Status Engine::prepare_export_resources(ExportContext& ctx) noexcept {
 Status Engine::initialize_offline_export(ExportContext& ctx) noexcept {
     ctx.resourceGpuGeneration = gpuGeneration_;
     ctx.offline = std::make_unique<OfflineFrameRenderer>();
-    const u64 renderBudget = address_space::export_render_budget(std::max<u64>(32ull << 20, caps_.memory_budget_bytes() / 2));
+    const u64 renderBudget = address_space::export_render_budget(std::max<u64>(32ull << 20, export_budget_bytes() / 2));
     if (const Status initialized = ctx.offline->initialize(*gpu_, effectRegistry_, config_.mediaFactory,
             &memory_, renderBudget, static_cast<u64>(config_.exportGpuTimeoutMs) * 1'000'000ull,
             &ctx.cancelRequested); !initialized.ok())
@@ -16902,7 +18168,7 @@ Status Engine::initialize_offline_export(ExportContext& ctx) noexcept {
     }
     if (low_memory_device()) {
         offlineRenderer.set_low_memory_device(true);
-        offlineRenderer.set_transient_allocation_limit(std::max<u64>(192ull << 20, process_budget_bytes()));
+        offlineRenderer.set_transient_allocation_limit(std::max<u64>(192ull << 20, export_budget_bytes()));
     }
     offlineRenderer.set_model_lookup([](void* p, AssetId id) -> std::shared_ptr<const scene3d::SceneAsset> {
         const auto& c = *static_cast<ExportContext*>(p);
@@ -17075,7 +18341,6 @@ Status Engine::render_export_frame(FrameIndex time, const OffscreenTarget& targe
             if (out > 0 && out < full) { settings.previewNumerator = out; settings.previewDenominator = full; }
         }
     }
-    const u64 begin = monotonic_ns();
     const Status result = c.offline->render(*c.frozenProject, c.recovery.composition, time, target,
         [](void* p, AssetId id) -> const ImagePixels* {
             const auto& ctx = *static_cast<ExportContext*>(p);
@@ -17083,7 +18348,19 @@ Status Engine::render_export_frame(FrameIndex time, const OffscreenTarget& targe
             return nullptr;
         }, &c, settings, gpuFrame, c.preRenderMode ? &renderMutex_ : nullptr,
         c.preRenderMode ? &preRenderCancel_ : nullptr);
-    c.renderNs.fetch_add(monotonic_ns() - begin, std::memory_order_relaxed);
+    const auto& measured = c.offline->last_measurements();
+    // Producer wall time: source condition waits are separate from prepare /
+    // recording. Readback includes explicit internal GPU waits here plus the
+    // final-frame fence/mapping measured later by deliver_oldest().
+    c.decodeNs.fetch_add(measured.mediaWaitNs, std::memory_order_relaxed);
+    c.renderNs.fetch_add(measured.prepareNs + measured.recordNs, std::memory_order_relaxed);
+    c.readNs.fetch_add(measured.fenceWaitNs, std::memory_order_relaxed);
+    if (settings.gpuTimers && measured.recordAttempts) {
+        const f64 cpuMs = static_cast<f64>(measured.prepareNs + measured.recordNs) * 1e-6;
+        if (c.profiledFrames == 0) c.firstFrameMs = cpuMs;
+        else c.recordMs += cpuMs;
+        ++c.profiledFrames;
+    }
     // 0.5.2 (E2): onde o render parou, em segundos da timeline (o degrau que
     // limita a taxa muda o índice do mesmo instante). A escada compara isso
     // entre tentativas para não refazer uma falha determinística.
@@ -17163,8 +18440,13 @@ void Engine::log_export_profile() noexcept {
         used += static_cast<usize>(w);
     }
     const f64 steady = ctx.profiledFrames > 1 ? ctx.recordMs / static_cast<f64>(ctx.profiledFrames - 1) : 0.0;
-    AUREA_LOG_INFO("export perfil: %u q %ux%u | 1o quadro %.0f ms de CPU, depois %.2f ms/q | GPU %.2f ms/q: %s",
-                   ctx.profiledFrames, ctx.width, ctx.height, ctx.firstFrameMs, steady, gpuTotal * kg, top);
+    if (ctx.gpuFrames) {
+        AUREA_LOG_INFO("export perfil: %u q %ux%u | CPU parede prepare+record: 1o %.0f ms, depois %.2f ms/q | GPU %.2f ms/q: %s",
+                       ctx.profiledFrames, ctx.width, ctx.height, ctx.firstFrameMs, steady, gpuTotal * kg, top);
+    } else {
+        AUREA_LOG_INFO("export perfil: %u q %ux%u | CPU parede prepare+record: 1o %.0f ms, depois %.2f ms/q | GPU indisponivel",
+                       ctx.profiledFrames, ctx.width, ctx.height, ctx.firstFrameMs, steady);
+    }
 }
 
 void Engine::export_thread_main() noexcept {
@@ -17185,24 +18467,7 @@ void Engine::export_thread_main() noexcept {
 
     // Quadros submetidos à GPU e ainda não entregues ao encoder, em ordem.
     std::deque<u32> inflight;
-    // Motion blur 3D (beta 2185): até 128 renders completos da cena por
-    // quadro. Até a 0.3.1 o tempo real de cada quadro ajustava amostras e
-    // sombra/MSAA no meio do export; o arquivo dependia da carga do aparelho
-    // (docs/diagnostico/export-engine-2.0.md, 1.2). 0.3.2: tetos fixos por
-    // aparelho e por degrau da escada; GPU que estoura o prazo falha a
-    // tentativa e a próxima já começa mais leve, com aviso.
-    if (ctx.offline && !ctx.preRenderMode) {
-        Renderer& compositor = ctx.offline->compositor();
-        // 0.2.7: cada amostra de motion blur 3D é a cena inteira. Teto por
-        // aparelho (fixo) e o teto do degrau da escada por cima. 0.3.2: o
-        // degrau de custo 3D também vem da escada e não muda no meio do export.
-        compositor.set_export_scene_blur_cap(kAddressSpace32 ? 8u : low_memory_device() ? 16u : 32u);
-        compositor.set_export_blur_hard_cap(ctx.attemptBlurCap);
-        compositor.set_export_gpu_step(ctx.attemptGpuStep);
-        (void)compositor.take_reductions();
-        if (ctx.attemptBlurCap || ctx.attemptGpuStep)
-            AUREA_LOG_INFO("export: degrau com motion blur ate %u amostra(s), custo 3D %u", ctx.attemptBlurCap, ctx.attemptGpuStep);
-    }
+    if (ctx.offline) (void)ctx.offline->compositor().take_reductions();
     auto cancelled = [&] { return ctx.cancelRequested.load(std::memory_order_acquire); };
     // Espera a GPU terminar o quadro mais antigo em voo e o passa ao encoder.
     const auto beatProducer = [&ctx]() noexcept { ctx.producerBeatNs.store(monotonic_ns(), std::memory_order_release); };
@@ -17284,8 +18549,7 @@ void Engine::export_thread_main() noexcept {
             // Reclaim completed uploads before admitting another expensive
             // scene. This changes concurrency, never shadows/blur or pixels.
             const auto residency = gpu_->memory_stats();
-            const u64 budget = DeviceCapabilities::process_budget_limit(
-                config_.memoryBudgetBytes ? config_.memoryBudgetBytes : caps_.memory_budget_bytes());
+            const u64 budget = export_budget_bytes();   // 0.5.3 (P0-7)
             if (std::max(residency.usedBytes, residency.reservedBytes) > budget * 3 / 4) {
                 if (allowed != 1 && previousAdmission != 1)
                     AUREA_LOG_INFO("export: residencia da GPU %llu/%llu MB (usado/reservado) acima de 3/4 de %llu MB",
@@ -17455,6 +18719,16 @@ void Engine::export_thread_main() noexcept {
     // menos um GOP novo (até kMaxFailureResumes vezes); uma sessão retomada
     // que falhou no encoder sem gravar nada (o encoder pode não reproduzir o
     // fluxo do registro) descarta o checkpoint e refaz a tentativa do zero.
+    // 0.5.3 (P0-9): o app foi para o segundo plano no meio de um quadro. No iOS a
+    // GPU deixa de aceitar trabalho e o erro do Metal (InvalidState/Render) podia
+    // chegar antes do cancelamento: a sessão terminava como falha e a escada descia
+    // para 720p em vez de pausar. Com a marca de suspensão posta, a falha é a pausa
+    // (o checkpoint fica; a volta ao app continua do último GOP).
+    if (!result.ok() && result.code() != Errc::Cancelled && !abandonedWorker &&
+        !ctx.producerAbandoned.load(std::memory_order_acquire) && exportSuspendCancel_.load(std::memory_order_acquire)) {
+        AUREA_LOG_WARN("export: falha durante a suspensao do app (%s); tratada como pausa", resultDetail);
+        result = Status{Errc::Cancelled, resultDetail};
+    }
     const bool suspendedExport = result.code() == Errc::Cancelled && exportSuspendCancel_.load(std::memory_order_acquire);
     const bool userCancelled = result.code() == Errc::Cancelled && !suspendedExport;
     bool resumable = false;
@@ -18162,6 +19436,21 @@ Engine::ExportProgress Engine::export_progress() const noexcept {
         if (const u64 n = exportCtx_->validatedFrames.load(std::memory_order_relaxed))
             std::snprintf(p.message, sizeof(p.message), "validando %llu/%u", static_cast<unsigned long long>(n), p.framesTotal);
     }
+    // 0.5.3 (P0-3): finalizando / montando / validando sem contador novo (o AAC do
+    // áudio inteiro, o trailer do MP4, a abertura da validação): a mensagem leva
+    // o segundo da última batida do worker. Ela muda enquanto o trabalho anda
+    // (toda escrita/leitura do sink bate) e para quando ele trava — o vigia das
+    // telas (180 s sem mudança) não cancela mais um vídeo pronto nos 100%. A
+    // mensagem é diagnóstico; a tela só a mostra crua numa falha.
+    if (p.running) {
+        const u32 phase = (p.flags & kExportPhaseMask) >> kExportPhaseShift;
+        if (phase == static_cast<u32>(ExportPhase::Finalizing) || phase == static_cast<u32>(ExportPhase::Validating)) {
+            const u64 beat = exportCtx_->encoderBeatNs.load(std::memory_order_acquire);
+            const usize used = std::strlen(p.message);
+            if (beat && used + 24 < sizeof(p.message))
+                std::snprintf(p.message + used, sizeof(p.message) - used, " ~%llu", static_cast<unsigned long long>(beat / 1'000'000'000ull));
+        }
+    }
     return p;
     }();
     // Job Hyper: entre passagens (e na análise do Stable) o export "não
@@ -18279,8 +19568,9 @@ bool Engine::prerender_valid_locked() noexcept {
     {
         std::lock_guard lock(preRenderStateMutex_);
         matches = project_ && preRenderKey_.projectSession == projectSession_
-            && preRenderKey_.composition == project_->timeline().current().pack()
-            && preRenderKey_.modelRevision == modelRevision_.load(std::memory_order_acquire);
+            && (preRenderGroup_ || preRenderKey_.composition == project_->timeline().current().pack())
+            && project_->timeline().composition(CompositionId::unpack(preRenderKey_.composition))
+            && preRenderKey_.modelRevision == preview_cache_revision();   // 0.5.3: revisão da prévia
     }
     if (!matches) invalidate_prerender();
     return matches;
@@ -18294,9 +19584,54 @@ void Engine::clear_prerender_gpu_locked() noexcept {
     std::vector<u16>().swap(preRenderUpload_);
 }
 
-Status Engine::start_prerender(i32 direction) noexcept {
+Result<i32> Engine::prerender_texture_locked(u64 token, i64 frame, const u16*& pixels) noexcept {
+    pixels = nullptr;
+    for (i32 i = 0; i < static_cast<i32>(preRenderTextures_.size()); ++i) {
+        const auto& slot = preRenderTextures_[i];
+        if (slot.texture.valid() && slot.token == token && slot.time == frame) return i;
+    }
+    const i64 index = frame - preRenderFirstFrame_.load(std::memory_order_acquire);
+    if (index < 0 || static_cast<u64>(index) >= preRenderCache_->stats().framesTotal) return Status{Errc::NotFound};
+    for (i32 i = 0; i < static_cast<i32>(preRenderTextures_.size()); ++i) {
+        auto& slot = preRenderTextures_[i];
+        if (slot.texture.valid() && !gpu_->wait_frame(slot.gpuFrame, 0).ok()) continue;
+        const Status ready = preRenderCache_->take(token, static_cast<u64>(index), preRenderUpload_);
+        if (!ready.ok()) return ready;
+        PreRenderCache::Key key;
+        { std::lock_guard state(preRenderStateMutex_); key = preRenderKey_; }
+        if (slot.texture.valid()) {
+            const auto desc = gpu_->texture_desc(slot.texture);
+            if (desc.width != key.width || desc.height != key.height) {
+                gpu_->destroy_texture(slot.texture);
+                slot.texture = {};
+            }
+        }
+        if (!slot.texture.valid()) {
+            TextureDesc desc;
+            desc.width = key.width; desc.height = key.height;
+            desc.format = SurfaceFormat::RGBA16F;
+            desc.sampled = true; desc.transferDst = true;
+            desc.debugName = "prerender-540p";
+            auto texture = gpu_->create_texture(desc);
+            if (!texture.ok()) return texture.status();
+            slot.texture = *texture;
+        }
+        // Publish identity only after the ordinary frame upload was submitted.
+        slot.generation = gpuGeneration_; slot.token = token; slot.time = -1;
+        pixels = preRenderUpload_.data();
+        return i;
+    }
+    return Status{Errc::Busy};
+}
+
+Status Engine::start_prerender(i32 direction, u64 groupLayer) noexcept {
     if (direction != 1 && direction != -1) return Errc::InvalidArgument;
     if (config_.cacheDirectory.empty()) return Status{Errc::NotSupported, "PreRender precisa de cache privado"};
+    // A group request replaces the previous completed cache through the same
+    // cancellable producer lifecycle used by composition pre-rendering.
+    bool replaceGroup = false;
+    { std::lock_guard state(preRenderStateMutex_); replaceGroup = preRenderGroup_; }
+    if (groupLayer || replaceGroup) invalidate_prerender();
     bool expected = false;
     if (!preRenderActive_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
         const auto p = query_prerender_progress();
@@ -18309,7 +19644,7 @@ Status Engine::start_prerender(i32 direction) noexcept {
     }
     ImageExportSettings settings;
     settings.format = ImageExportFormat::PngSequence; settings.shortSide = 540; settings.trimToContent = false;
-    const Status result = start_image_export_internal(settings, config_.cacheDirectory.c_str(), direction);
+    const Status result = start_image_export_internal(settings, config_.cacheDirectory.c_str(), direction, groupLayer);
     if (!result.ok()) invalidate_prerender(result.raw());
     return result;
 }
@@ -18339,7 +19674,7 @@ Status Engine::start_image_export(const ImageExportSettings& settings, const cha
 }
 
 Status Engine::start_image_export_internal(const ImageExportSettings& settings, const char* outputPath,
-                                          i32 preRenderDirection) noexcept {
+                                          i32 preRenderDirection, u64 preRenderGroupLayer) noexcept {
     std::lock_guard<std::mutex> lifecycle(exportLifecycleMutex_);
     if (state_ != EngineState::Ready && state_ != EngineState::Rendering) return Errc::InvalidState;
     if (!project_) return Errc::InvalidState;
@@ -18427,6 +19762,12 @@ Status Engine::start_image_export_internal(const ImageExportSettings& settings, 
         drain_commands_locked();
         Composition* comp = current_composition();
         if (!comp) return Errc::NotFound;
+        if (preRenderGroupLayer) {
+            const Layer* group = comp->layer(LayerId::unpack(preRenderGroupLayer));
+            if (!group || group->kind != LayerKind::Composition) return Errc::InvalidArgument;
+            comp = project_->timeline().composition(group->nested.composition);
+            if (!comp) return Errc::NotFound;
+        }
         // Timeline do AE: sequência PNG e GIF "só da área de trabalho".
         WorkAreaFreeze workArea;
         if (!ctx->preRenderMode && settings.format != ImageExportFormat::Png
@@ -18437,8 +19778,16 @@ Status Engine::start_image_export_internal(const ImageExportSettings& settings, 
         }
         // 0.2.4 (C4): o PreRender ia ate a duracao da composicao, que pode ter
         // inflado a horas; agora para no fim da ultima camada.
+        // Lote K: com área de trabalho, o PreRender cobre só ela (o cache guarda
+        // quadros a partir do começo dela; a prévia repete dentro dela).
+        if (ctx->preRenderMode && comp->has_work_area()) {
+            const i64 end = std::clamp<i64>(comp->work_out(), 1, comp->duration().value);
+            ctx->preRenderFirst = std::clamp<i64>(comp->work_in(), 0, end - 1);
+        }
         const i64 span = ctx->preRenderMode
-            ? std::clamp<i64>(navigation_end_locked(comp), 1, comp->duration().value)
+            ? (comp->has_work_area()
+                ? std::clamp<i64>(comp->work_out(), 1, comp->duration().value) - ctx->preRenderFirst
+                : std::clamp<i64>(navigation_end_locked(comp), 1, comp->duration().value))
             : comp->export_duration(settings.trimToContent).value;
         if (!ctx->preRenderMode && config_.maxExportSeconds > 0 && static_cast<f64>(span) / comp->fps() > config_.maxExportSeconds + 1e-6)
             return export_too_long_status();
@@ -18454,17 +19803,19 @@ Status Engine::start_image_export_internal(const ImageExportSettings& settings, 
         ctx->imageFrame = project_->timeline().playhead();
         if (ctx->preRenderMode) {
             std::lock_guard state(preRenderStateMutex_);
-            preRenderKey_ = {projectSession_, project_->timeline().current().pack(),
-                modelRevision_.load(std::memory_order_acquire), plan.width, plan.height,
+            preRenderGroup_ = preRenderGroupLayer != 0;
+            preRenderKey_ = {projectSession_, comp->id().pack(),
+                preview_cache_revision(), plan.width, plan.height,
                 static_cast<u32>(std::llround(comp->fps() * 1000.0)), 1000u, 1u};
             preRenderProgress_.width = plan.width; preRenderProgress_.height = plan.height;
             preRenderProgress_.framesTotal = plan.frames;
+            preRenderFirstFrame_.store(ctx->preRenderFirst, std::memory_order_release);
         }
         freezeSettings.fps = plan.fps;
         freezeSettings.trimToContent = settings.trimToContent;
         SaveOptions save; save.writeThumbnail = false;
         if (const Status saved = ProjectSerializer::encode(*project_, save, frozenBytes); !saved.ok()) return saved;
-        frozenComposition = project_->timeline().current();
+        frozenComposition = comp->id();
         ctx->frozenImages = images_; ctx->frozenModels = models_;
         ctx->frozenHdris = hdris_; ctx->frozenLuts = cubeLuts_;
         ctx->frozenAssetBudget = source_asset_room_locked();
@@ -18687,7 +20038,7 @@ void Engine::image_export_thread_main() noexcept {
         // quadro do playhead.
         const FrameIndex t = format == ImageExportFormat::Png
             ? ctx.imageFrame
-            : FrameIndex{static_cast<i64>(std::floor(static_cast<f64>(sourceFrame) / ctx.fps * ctx.compFps + 1e-6))};
+            : FrameIndex{static_cast<i64>(std::floor(static_cast<f64>(sourceFrame) / ctx.fps * ctx.compFps + 1e-6)) + ctx.preRenderFirst};
         u64 gpuFrame = 0;
         result = render_export_frame(t, target, gpuFrame);
         if (!result.ok()) break;
@@ -18825,7 +20176,16 @@ void Engine::image_export_thread_main() noexcept {
 // =============================================================================
 Status Engine::apply_command(const Command& cmd, const char* stringData) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
-    const Status s = apply_command_internal(cmd, stringData, true);
+    const bool compositionCommand = cmd.type >= CommandType::CompositionSetSize && cmd.type <= CommandType::CompositionSetBackground;
+    const bool scoped = (mutates_model(cmd.type) && !compositionCommand) || cmd.type == CommandType::UndoBeginGroup || cmd.type == CommandType::UndoEndGroup;
+    const u64 group = scoped ? inlineEditGroup_.load(std::memory_order_acquire) : 0;
+    InlineEditScope scope(*this, group ? inlineEditOuter_.load(std::memory_order_relaxed) : 0, group, true,
+        group ? inlineEditInner_.load(std::memory_order_relaxed) : 0);
+    if (group && !scope.active()) return Errc::NotFound;
+    Command routed = cmd;
+    if (scope.active() && routed.type == CommandType::LayerSplit && routed.layer_split.at.value != kEditAtPlayhead)
+        routed.layer_split.at = FrameIndex{scope.map_frame(routed.layer_split.at.value)};
+    const Status s = apply_command_internal(routed, stringData, true);
     if (s.ok() && (mutates_model(cmd.type) || cmd.type == CommandType::CompositionCreate || cmd.type == CommandType::CompositionDelete)) project_->mark_dirty();
     request_render();
     return s;
@@ -18966,6 +20326,29 @@ std::optional<std::pair<i64, i64>> preview_local_range(const Composition& comp, 
     return std::pair<i64, i64>{edited->start.value - 1, edited->end.value + 1};
 }
 
+// 0.5.3: um nome de camada só aparece na imagem por uma expressão (thisLayer.name,
+// layer("nome"), texto-fonte com expressão). Sem nenhuma expressão no projeto,
+// renomear não muda pixel nenhum. A varredura é conservadora: qualquer expressão,
+// ligada ou não, em qualquer composição, conta.
+bool project_has_expressions(const Project& project) noexcept {
+    bool found = false;
+    project.timeline().for_each_composition([&](CompositionId, const Composition& c) {
+        if (found) return;
+        c.layers().for_each([&](LayerId, const Layer& l) {
+            if (found) return;
+            if (l.timeRemap.expression || l.text.sourceExpression) { found = true; return; }
+            for (u32 i = 0; i < l.tracks.size(); ++i)
+                if (l.tracks.at(i).expression) { found = true; return; }
+            for (const Mask& m : l.masks)
+                if (m.pathExpression) { found = true; return; }
+            for (const EffectInstance& e : l.effects)
+                for (const ParamSlot& p : e.params)
+                    if (p.source == ParamSource::Expression) { found = true; return; }
+        });
+    });
+    return found;
+}
+
 bool command_valid(const Command& c) noexcept {
     switch (c.type) {
         case CommandType::LayerCreate:
@@ -19023,7 +20406,9 @@ bool command_valid(const Command& c) noexcept {
         case CommandType::AudioSetFadeIn:
         case CommandType::AudioSetFadeOut:      return frame_ok(c.audio_fade.duration);
         case CommandType::ShapeSetParam:        return finite(c.shape_param.value);
-        case CommandType::LayerSetMaterialParam: return c.material_param.param < 6 && finite(c.material_param.value) && c.material_param.value >= 0 && c.material_param.value <= 1;
+        // v76: 6..8 cor da emissão (0..1) e 9 força da emissão (0..kMaterialEmissionMax).
+        case CommandType::LayerSetMaterialParam: return c.material_param.param < kMaterialParamCount && finite(c.material_param.value)
+            && c.material_param.value >= 0 && c.material_param.value <= material_param_max(c.material_param.param);
         case CommandType::LayerSetLightParam: {
             const u32 p = c.shape_param.param;
             const f32 v = c.shape_param.value;
@@ -19088,7 +20473,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                 return Status{Errc::InvalidState, "propriedade controlada por expressao; pause a expressao para editar"};
             // Gesto: o quadro que a prévia mostra, não o cabeçote que a UI leu.
             const FrameIndex at = (cmd.keyframe.onlyIfChanged & kAutoKeyAtPlayhead)
-                ? layer->local_time(playback_.current()) : cmd.keyframe.time;
+                ? layer->local_time(editing_frame_locked()) : cmd.keyframe.time;
             const f32 current = track ? track->value_or(at, base[property]) : base[property];
             const f32 value = property == static_cast<u32>(TrackProperty::Opacity)
                 && (cmd.keyframe.onlyIfChanged & kAutoKeyStaticWhenUnanimated) && !(track && track->driven())
@@ -19115,6 +20500,12 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         if (!layer || layer->locked || layer->kind != LayerKind::Model3D)
             return Status{Errc::InvalidArgument, "selecione um objeto 3D desbloqueado"};
     }
+    if (cmd.type == CommandType::EffectAdd) {
+        const Effect* effect = effectRegistry_.find(cmd.effect_add.effectType);
+        const Layer* layer = need_layer(cmd.effect_add.layer);
+        if (effect && effect->audio_program() && layer && layer->kind == LayerKind::Composition)
+            return Status{Errc::NotSupported, "audio plugins attach to source audio layers"};
+    }
     // A lock protects timeline edits at the shared boundary, including queued
     // commands after a gesture has started. Reject before recording undo.
     if (cmd.type == CommandType::LayerDelete || cmd.type == CommandType::LayerSetTimeRange ||
@@ -19129,7 +20520,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         if (playingHint_.exchange(playing) != playing) media_.proxies().set_pause_reason(PreviewProxyService::Playback, playing);
         if (playback_.playing()) timeline.play();
         else timeline.pause();
-        timeline.set_playhead(playback_.current());
+        timeline.set_playhead(editing_frame_locked());
     };
 
     if (recordUndo) record_history_locked(cmd.type);
@@ -19139,7 +20530,22 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         // Beta 08/10: esconder/travar/renomear não muda o som. Reconstruir o
         // mix durante o play descartava a fila e reancorava o relógio do áudio
         // ("esconder qualquer camada faz o áudio voltar para o começo").
-        if (cmd.type == CommandType::LayerSetVisible || cmd.type == CommandType::LayerSetLocked ||
+        // 0.5.3: travar, ligar o ímã da trilha e renomear (sem expressão no projeto)
+        // não mudam pixel nenhum. Antes cada um descartava a prévia guardada inteira
+        // (e a linha azul) e cancelava o PreRender; depois o preenchimento ocioso
+        // re-renderizava até 300 quadros. Agora a revisão do MODELO sobe (a UI relê
+        // a lista) junto com `previewRangeEdits_`, o mecanismo de edição "por trecho":
+        // `preview_cache_revision()` não muda e não há trecho a invalidar. O
+        // PreRender também fica (a chave dele passou a ser a revisão da prévia).
+        const bool previewNeutral = cmd.type == CommandType::LayerSetLocked
+            || cmd.type == CommandType::LayerSetMagnetic
+            || (cmd.type == CommandType::LayerSetName && !project_has_expressions(*project_));
+        if (previewNeutral) {
+            const u32 before = modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+            previewRangeEdits_.fetch_add(1, std::memory_order_acq_rel);
+            // Como antes: travar e renomear não reconstroem o som; o ímã reconstruía.
+            if (cmd.type != CommandType::LayerSetMagnetic && audioRevision_ == before) audioRevision_ = before + 1;
+        } else if (cmd.type == CommandType::LayerSetVisible || cmd.type == CommandType::LayerSetLocked ||
             cmd.type == CommandType::LayerSetName) bump_revision_without_audio_locked();
         else bump_model_revision_locked();
     }
@@ -19161,7 +20567,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             previewStuttered_ = dropped >= previewDroppedAtPlay_ && dropped - previewDroppedAtPlay_ > 3;
             previewDroppedAtPlay_ = dropped;
             previewBuffering_ = true;
-            previewBufferStart_ = playback_.current().value;
+            previewBufferStart_ = editing_frame_locked().value;
             previewBufferSince_ = now;
             previewBufferReady_ = previewBufferTarget_ = 0;
             previewBufferStatus_.store(preview_buffer_status(0, 0, true));
@@ -19322,7 +20728,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             // mostra AGORA (com o pausar do mesmo lote já aplicado). A UI mandava
             // o cabeçote que tinha lido: tocando, ele vinha quadros atrás e o
             // corte caía à esquerda do ponto (ou nem acontecia perto do começo).
-            const FrameIndex at = cmd.layer_split.at.value == kEditAtPlayhead ? playback_.current() : cmd.layer_split.at;
+            const FrameIndex at = cmd.layer_split.at.value == kEditAtPlayhead ? editing_frame_locked() : cmd.layer_split.at;
             if (at.value <= l->start.value || at.value >= l->end.value) return Errc::OutOfRange;
             const FrameIndex originalStart = l->start, originalEnd = l->end, originalOffset = l->offset;
             ClipChainEdit clipChains(comp);
@@ -19399,7 +20805,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             // Outro pai (ou nenhum): o osso do pai antigo não vale mais.
             if (parent != l->parent) l->parentBone = -1;
             if (!comp) { l->parent = parent; return OkStatus; }
-            const FrameIndex now = playback_.current();
+            const FrameIndex now = editing_frame_locked();
             const LayerId oldParent = l->parent;
             const bool wasThreeD = l->threeD;
             const bool in3d = l->kind == LayerKind::Model3D || l->kind == LayerKind::Camera || l->kind == LayerKind::Light
@@ -19571,26 +20977,33 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             if (!l || l->kind != LayerKind::Model3D) return Errc::NotFound;
             if (l->locked) return Errc::InvalidState;
             const auto found = models_.find(l->model.scene.pack());
-            if (found == models_.end() || !found->second || c.material >= found->second->materials.size() || c.material >= 4096) return Errc::OutOfRange;
-            const auto& source = found->second->materials[c.material];
-            MaterialOverride* target = nullptr;
-            for (auto& over : l->model.materials) if (over.materialIndex == c.material) { target = &over; break; }
-            Track* track = l->tracks.find(TrackProperty::MaterialParam, c.material, c.param);
-            if (track && track->has_expression()) return Errc::InvalidState;
-            f32 next = c.value;
-            if (track && !track->keys.empty()) {
-                const auto local = l->local_time(playback_.current());
-                track->set(local, c.value);
-            }
-            if (!target) {
-                MaterialOverride over; over.materialIndex = c.material; over.baseColor = source.baseColor; over.metallic = source.metallic; over.roughness = source.roughness;
-                l->model.materials.push_back(over); target = &l->model.materials.back();
-            }
-            target->mask |= 1u << c.param;
-            switch (c.param) {
-                case 0: target->baseColor.x = next; break; case 1: target->baseColor.y = next; break;
-                case 2: target->baseColor.z = next; break; case 3: target->baseColor.w = next; break;
-                case 4: target->metallic = next; break; case 5: target->roughness = next; break;
+            if (found == models_.end() || !found->second) return Errc::OutOfRange;
+            const u32 materialCount = static_cast<u32>(std::min<usize>(found->second->materials.size(), 4096));
+            // Painel 3D (13/11/2026): kAllMaterials = o modelo INTEIRO, num comando só.
+            const bool all = c.material == Engine::kAllMaterials;
+            if (all ? materialCount == 0 : c.material >= materialCount) return Errc::OutOfRange;
+            const u32 firstMaterial = all ? 0u : c.material;
+            const u32 lastMaterial = all ? materialCount : c.material + 1u;
+            for (u32 m = firstMaterial; m < lastMaterial; ++m)
+                if (const Track* t = l->tracks.find(TrackProperty::MaterialParam, m, c.param); t && t->has_expression())
+                    return Errc::InvalidState;
+            for (u32 m = firstMaterial; m < lastMaterial; ++m) {
+                const auto& source = found->second->materials[m];
+                MaterialOverride* target = nullptr;
+                for (auto& over : l->model.materials) if (over.materialIndex == m) { target = &over; break; }
+                Track* track = l->tracks.find(TrackProperty::MaterialParam, m, c.param);
+                const f32 next = c.value;
+                if (track && !track->keys.empty()) {
+                    const auto local = l->local_time(editing_frame_locked());
+                    track->set(local, c.value);
+                }
+                if (!target) {
+                    MaterialOverride over; over.materialIndex = m; over.baseColor = source.baseColor; over.metallic = source.metallic; over.roughness = source.roughness;
+                    over.emissive = source.emissive; over.emissiveStrength = source.emissiveStrength;
+                    l->model.materials.push_back(over); target = &l->model.materials.back();
+                }
+                target->mask |= 1u << c.param;
+                set_material_override_field(*target, c.param, next);
             }
             return OkStatus;
         }
@@ -19617,7 +21030,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                             : p == 6 ? TrackProperty::LightConeAngle : p == 7 ? TrackProperty::LightPenumbra : TrackProperty::_Count;
             Track* track = prop != TrackProperty::_Count ? l->tracks.find(prop) : nullptr;
             if (track && track->has_expression()) return Errc::InvalidState;
-            if (track && !track->keys.empty()) track->set(l->local_time(playback_.current()), v);
+            if (track && !track->keys.empty()) track->set(l->local_time(editing_frame_locked()), v);
             else { if (track) track->staticValue = v; *field = v; }
             return OkStatus;
         }
@@ -19629,7 +21042,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             if (l->locked) return Errc::InvalidState;
             const u32 p = cmd.shape_param.param;
             const f32 v = cmd.shape_param.value;
-            const FrameIndex local = l->local_time(playback_.current());
+            const FrameIndex local = l->local_time(editing_frame_locked());
             if (p == 1) { l->camera.dofEnabled = v >= 0.5f; return OkStatus; }
             if (p == 7) { l->camera.affectsLayersBelow = v >= 0.5f; return OkStatus; }
             if (p == 8) { l->camera.parallel = v >= 0.5f; return OkStatus; }   // 0.4.6: câmera paralela
@@ -19680,7 +21093,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             const f32 base = scalar ? *scalar : axis == 0 ? vector->x : axis == 1 ? vector->y : vector->z;
             Track* track = l->tracks.find(static_cast<TrackProperty>(property));
             if (track && track->has_expression()) return Status{Errc::InvalidState, "layout transform controlled by expression"};
-            const f32 current = track ? track->value_or(l->local_time(playback_.current()), base) : base;
+            const f32 current = track ? track->value_or(l->local_time(editing_frame_locked()), base) : base;
             const f64 target = cmd.shape_param.value;
             // At zero scale, multiplication cannot restore a visible object:
             // translate the whole scale curve instead, preserving its deltas.
@@ -19773,13 +21186,13 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             if (!l) return Errc::NotFound;
             if(const Status depth=prepare_raster_depth_key(*l,cmd.keyframe.track,cmd.keyframe.value);!depth.ok())return depth;
             if (cmd.keyframe.track.property == TrackProperty::MeshWarp)
-                return mesh_warp::key_command(*l, cmd, playback_.current());
+                return mesh_warp::key_command(*l, cmd, editing_frame_locked());
             if (cmd.keyframe.track.property == TrackProperty::VectorPath)
-                return path_key_command(*l, cmd, playback_.current());
+                return path_key_command(*l, cmd, editing_frame_locked());
             if (cmd.keyframe.track.property == TrackProperty::MaskPath)
-                return mask_key_command(*l, cmd, playback_.current());
+                return mask_key_command(*l, cmd, editing_frame_locked());
             if (cmd.keyframe.track.property == TrackProperty::TextSource)
-                return ae_anim::text_source_key_command(*l, cmd, playback_.current());
+                return ae_anim::text_source_key_command(*l, cmd, editing_frame_locked());
             // Gesto de transform (kAutoKey*): o tempo é o do quadro na tela e,
             // sem keyframe na trilha, o valor parado muda — a mesma regra nas
             // duas UIs, com o estado vivo do motor. Antes a UI decidia pelo
@@ -19788,7 +21201,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             // gravava o valor parado, que a animação esconde, ou a chave em
             // outro quadro — e a camada não andava.
             const u32 autoKey = cmd.keyframe.onlyIfChanged;
-            const FrameIndex time = (autoKey & kAutoKeyAtPlayhead) ? l->local_time(playback_.current()) : cmd.keyframe.time;
+            const FrameIndex time = (autoKey & kAutoKeyAtPlayhead) ? l->local_time(editing_frame_locked()) : cmd.keyframe.time;
             const u32 property = static_cast<u32>(cmd.keyframe.track.property);
             if ((autoKey & kAutoKeyStaticWhenUnanimated) && property <= static_cast<u32>(TrackProperty::SkewY)) {
                 const Track* existing = command_track(*l, cmd.keyframe.track, false);
@@ -19811,8 +21224,9 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                 return OkStatus;
             }
             if (track->property == TrackProperty::Speed) {
-                // Velocidade: presa em [0, 16]; regravar mantém a facilidade.
-                const f32 v = clampf(cmd.keyframe.value, 0.0f, 16.0f);
+                // Velocidade: presa em [−16, 16] (B8: negativa = para trás);
+                // regravar mantém a facilidade.
+                const f32 v = clampf(cmd.keyframe.value, -16.0f, 16.0f);
                 if (const u32 at = track->find_exact(time); at != kInvalidIndex) track->keys[at].value = v;
                 else (void)track->set(time, v, Interpolation::Linear);
                 return OkStatus;
@@ -19824,16 +21238,16 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             Layer* l = need_layer(cmd.keyframe.track.layer);
             if (!l) return Errc::NotFound;
             if (cmd.keyframe.track.property == TrackProperty::MeshWarp)
-                return mesh_warp::key_command(*l, cmd, playback_.current());
+                return mesh_warp::key_command(*l, cmd, editing_frame_locked());
             if (cmd.keyframe.track.property == TrackProperty::VectorPath)
-                return path_key_command(*l, cmd, playback_.current());
+                return path_key_command(*l, cmd, editing_frame_locked());
             if (cmd.keyframe.track.property == TrackProperty::MaskPath)
-                return mask_key_command(*l, cmd, playback_.current());
+                return mask_key_command(*l, cmd, editing_frame_locked());
             if (cmd.keyframe.track.property == TrackProperty::TextSource)
-                return ae_anim::text_source_key_command(*l, cmd, playback_.current());
+                return ae_anim::text_source_key_command(*l, cmd, editing_frame_locked());
             Track* track = command_track(*l, cmd.keyframe.track, false);
             if (!track || track->find_exact(cmd.keyframe.time) == kInvalidIndex) return Errc::NotFound;
-            if (track->keys.size() == 1) freeze_last_shape_key(*l, *track, l->local_time(playback_.current()));
+            if (track->keys.size() == 1) freeze_last_shape_key(*l, *track, l->local_time(editing_frame_locked()));
             (void)track->remove(cmd.keyframe.time);
             return OkStatus;
         }
@@ -19841,13 +21255,13 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             Layer* l = need_layer(cmd.keyframe_move.track.layer);
             if (!l) return Errc::NotFound;
             if (cmd.keyframe_move.track.property == TrackProperty::MeshWarp)
-                return mesh_warp::key_command(*l, cmd, playback_.current());
+                return mesh_warp::key_command(*l, cmd, editing_frame_locked());
             if (cmd.keyframe_move.track.property == TrackProperty::VectorPath)
-                return path_key_command(*l, cmd, playback_.current());
+                return path_key_command(*l, cmd, editing_frame_locked());
             if (cmd.keyframe_move.track.property == TrackProperty::MaskPath)
-                return mask_key_command(*l, cmd, playback_.current());
+                return mask_key_command(*l, cmd, editing_frame_locked());
             if (cmd.keyframe_move.track.property == TrackProperty::TextSource)
-                return ae_anim::text_source_key_command(*l, cmd, playback_.current());
+                return ae_anim::text_source_key_command(*l, cmd, editing_frame_locked());
             Track* track = command_track(*l, cmd.keyframe_move.track, false);
             if (!track) return Errc::NotFound;
             if (track->move(cmd.keyframe_move.fromTime, cmd.keyframe_move.toTime) == kInvalidIndex) return Errc::NotFound;
@@ -19857,20 +21271,20 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             Layer* l = need_layer(cmd.keyframe.track.layer);
             if (!l) return Errc::NotFound;
             if (cmd.keyframe.track.property == TrackProperty::MeshWarp)
-                return mesh_warp::key_command(*l, cmd, playback_.current());
+                return mesh_warp::key_command(*l, cmd, editing_frame_locked());
             if (cmd.keyframe.track.property == TrackProperty::VectorPath)
-                return path_key_command(*l, cmd, playback_.current());
+                return path_key_command(*l, cmd, editing_frame_locked());
             if (cmd.keyframe.track.property == TrackProperty::MaskPath)
-                return mask_key_command(*l, cmd, playback_.current());
+                return mask_key_command(*l, cmd, editing_frame_locked());
             if (cmd.keyframe.track.property == TrackProperty::TextSource)
-                return ae_anim::text_source_key_command(*l, cmd, playback_.current());
+                return ae_anim::text_source_key_command(*l, cmd, editing_frame_locked());
             Track* track = command_track(*l, cmd.keyframe.track, false);
             if (!track) return Errc::NotFound;
             const u32 idx = track->find_exact(cmd.keyframe.time);
             if (idx == kInvalidIndex) return Errc::NotFound;
             if(const Status depth=prepare_raster_depth_key(*l,cmd.keyframe.track,cmd.keyframe.value);!depth.ok())return depth;
             track->keys[idx].value = cmd.keyframe.value * (is_remap_time_alias(*l, cmd.keyframe.track) ? static_cast<f32>(comp->fps()) : 1.0f);
-            if (track->property == TrackProperty::Speed) track->keys[idx].value = clampf(track->keys[idx].value, 0.0f, 16.0f);
+            if (track->property == TrackProperty::Speed) track->keys[idx].value = clampf(track->keys[idx].value, -16.0f, 16.0f);
             return OkStatus;
         }
         case CommandType::KeyframeSetInterpolation:
@@ -19879,13 +21293,13 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             Layer* l = need_layer(cmd.keyframe_interp.track.layer);
             if (!l) return Errc::NotFound;
             if (cmd.keyframe_interp.track.property == TrackProperty::MeshWarp)
-                return mesh_warp::key_command(*l, cmd, playback_.current());
+                return mesh_warp::key_command(*l, cmd, editing_frame_locked());
             if (cmd.keyframe_interp.track.property == TrackProperty::VectorPath)
-                return path_key_command(*l, cmd, playback_.current());
+                return path_key_command(*l, cmd, editing_frame_locked());
             if (cmd.keyframe_interp.track.property == TrackProperty::MaskPath)
-                return mask_key_command(*l, cmd, playback_.current());
+                return mask_key_command(*l, cmd, editing_frame_locked());
             if (cmd.keyframe_interp.track.property == TrackProperty::TextSource)
-                return ae_anim::text_source_key_command(*l, cmd, playback_.current());
+                return ae_anim::text_source_key_command(*l, cmd, editing_frame_locked());
             const KeyframeInterpPayload& k = cmd.keyframe_interp;
             Track* track = command_track(*l, k.track, false);
             if (!track) return Errc::NotFound;
@@ -19950,7 +21364,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             if (!m) return Errc::NotFound;
             m->cacheKey = 0;
             const u32 param = cmd.type == CommandType::MaskSetFeather ? 0 : cmd.type == CommandType::MaskSetExpansion ? 1 : 2;
-            write_mask_param(*l, *m, param, cmd.mask_scalar.value, playback_.current());
+            write_mask_param(*l, *m, param, cmd.mask_scalar.value, editing_frame_locked());
             return OkStatus;
         }
         case CommandType::MaskSetPath: {
@@ -20144,7 +21558,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             // em segundos da fonte como no After Effects.
             if (is_time_remap_type(e->type)) {
                 const f64 compFps = comp && comp->fps() > 0.0 ? comp->fps() : 30.0;
-                const FrameIndex local = l->local_time(playback_.current());
+                const FrameIndex local = l->local_time(editing_frame_locked());
                 enable_time_remap_curve(*l);
                 const u32 at = l->timeRemap.find_exact(local);
                 if (p == 0) {
@@ -20341,9 +21755,9 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         case CommandType::TextSetContent: {
             Layer* l = need_layer(cmd.layer_ref.layer);
             if (!l) return Errc::NotFound;
-            ae_anim::begin_text_edit(*l, playback_.current());
+            ae_anim::begin_text_edit(*l, editing_frame_locked());
             if (stringData) l->text.content = stringData;
-            ae_anim::end_text_edit(*l, playback_.current());
+            ae_anim::end_text_edit(*l, editing_frame_locked());
             recenter_text(*l);
             return OkStatus;
         }
@@ -20352,36 +21766,36 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         case CommandType::TextSetSize: {
             Layer* l = need_layer(cmd.text_size.layer);
             if (!l) return Errc::NotFound;
-            ae_anim::begin_text_edit(*l, playback_.current());
+            ae_anim::begin_text_edit(*l, editing_frame_locked());
             l->text.size = std::clamp(cmd.text_size.size, 1.0f, 2000.0f);
-            ae_anim::end_text_edit(*l, playback_.current());
+            ae_anim::end_text_edit(*l, editing_frame_locked());
             recenter_text(*l);
             return OkStatus;
         }
         case CommandType::TextSetColor: {
             Layer* l = need_layer(cmd.text_color.layer);
             if (!l) return Errc::NotFound;
-            ae_anim::begin_text_edit(*l, playback_.current());
+            ae_anim::begin_text_edit(*l, editing_frame_locked());
             l->text.color = Vec4{cmd.text_color.r, cmd.text_color.g, cmd.text_color.b, cmd.text_color.a};
-            ae_anim::end_text_edit(*l, playback_.current());
+            ae_anim::end_text_edit(*l, editing_frame_locked());
             return OkStatus;
         }
         case CommandType::TextSetAlignment: {
             Layer* l = need_layer(cmd.text_align.layer);
             if (!l) return Errc::NotFound;
-            ae_anim::begin_text_edit(*l, playback_.current());
+            ae_anim::begin_text_edit(*l, editing_frame_locked());
             l->text.alignment = std::min(cmd.text_align.alignment, 2u);
-            ae_anim::end_text_edit(*l, playback_.current());
+            ae_anim::end_text_edit(*l, editing_frame_locked());
             recenter_text(*l);
             return OkStatus;
         }
         case CommandType::TextSetStrokeWidth: {
             Layer* l = need_layer(cmd.text_stroke_width.layer);
             if (!l) return Errc::NotFound;
-            ae_anim::begin_text_edit(*l, playback_.current());
+            ae_anim::begin_text_edit(*l, editing_frame_locked());
             const f32 previousPadding = std::max(0.0f, l->text.strokeWidth);
             l->text.strokeWidth = std::clamp(cmd.text_stroke_width.width, 0.0f, 200.0f);
-            ae_anim::end_text_edit(*l, playback_.current());
+            ae_anim::end_text_edit(*l, editing_frame_locked());
             // A stroke expands the source margin, not the authored pivot. Move
             // anchor coordinates by that margin delta so a manual anchor or an
             // anchor animation keeps the same position relative to the glyphs.
@@ -20401,9 +21815,9 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         case CommandType::TextSetStrokeColor: {
             Layer* l = need_layer(cmd.text_color.layer);
             if (!l) return Errc::NotFound;
-            ae_anim::begin_text_edit(*l, playback_.current());
+            ae_anim::begin_text_edit(*l, editing_frame_locked());
             l->text.strokeColor = Vec4{cmd.text_color.r, cmd.text_color.g, cmd.text_color.b, cmd.text_color.a};
-            ae_anim::end_text_edit(*l, playback_.current());
+            ae_anim::end_text_edit(*l, editing_frame_locked());
             return OkStatus;
         }
 
@@ -20449,7 +21863,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             if (c == comp) {
                 timeline.clock().set_fps(newFps);
                 // O cabeçote fica no mesmo SEGUNDO.
-                const FrameIndex at{static_cast<i64>(std::llround(static_cast<f64>(playback_.current().value) * k))};
+                const FrameIndex at{static_cast<i64>(std::llround(static_cast<f64>(editing_frame_locked().value) * k))};
                 configure_playback_locked(c);
                 playback_.seek(at, now);
                 sync_timeline();
@@ -20629,11 +22043,21 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                 && lastFrameDrafted_.load(std::memory_order_acquire)) request_render();
             return OkStatus;
         case CommandType::Undo:
-            if (!history_.undo(timeline)) return Errc::InvalidState;
+            {
+                const CompositionId outer = timeline.current();
+                const bool inlineEdit = inlineEditGroup_.load(std::memory_order_acquire) != 0;
+                if (!history_.undo(timeline)) return Errc::InvalidState;
+                if (inlineEdit && timeline.composition(outer)) timeline.set_current(outer);
+            }
             after_history_restore_locked();
             return OkStatus;
         case CommandType::Redo:
-            if (!history_.redo(timeline)) return Errc::InvalidState;
+            {
+                const CompositionId outer = timeline.current();
+                const bool inlineEdit = inlineEditGroup_.load(std::memory_order_acquire) != 0;
+                if (!history_.redo(timeline)) return Errc::InvalidState;
+                if (inlineEdit && timeline.composition(outer)) timeline.set_current(outer);
+            }
             after_history_restore_locked();
             return OkStatus;
 

@@ -65,6 +65,7 @@ set(AUREA_CORE_SOURCES
     src/core/Time.cpp
     src/core/MiniXml.cpp
     src/core/Thread.cpp
+    src/core/SafeAlloc.cpp
     src/ui/BuiltinPropertySchema.cpp
     src/memory/MemoryManager.cpp
     src/jobs/JobSystem.cpp
@@ -73,12 +74,14 @@ set(AUREA_CORE_SOURCES
     src/animation/Curve.cpp
     src/animation/Track.cpp
     src/animation/KeyframeOptimize.cpp
+    src/animation/KeyframeAssist.cpp      # lote K: inverter, escala exponencial, suavizador
     src/timeline/Composition.cpp
     src/timeline/LayerAnimator.cpp
     src/timeline/Timeline.cpp
     src/timeline/Rig.cpp
     src/timeline/ShapeGeometry.cpp
     src/timeline/LayerWorld.cpp   # AE animation: matrizes da camada + Auto-Orientar + câmera de dois nós
+    src/timeline/PathRig.cpp      # lote M: RotoBezier, Points Follow Nulls, Nulls Follow Points, Trace Path
     src/project/Project.cpp
     src/project/Serialization.cpp
     src/project/FileIO.cpp
@@ -120,6 +123,7 @@ set(AUREA_CORE_SOURCES
     src/render/GPUCapabilities.cpp
     src/render/FrameGraph.cpp
     src/render/ShaderLibrary.cpp
+    src/render/TemporalReconstruction.cpp
     src/render/RuntimeShaders.cpp
     src/render/RenderScheduler.cpp
     src/render/Renderer.cpp
@@ -162,9 +166,18 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/OpticalStylizeEffects.cpp
     src/effects/builtin/StylizeEffects.cpp
     src/effects/builtin/LightEffects.cpp
+    src/effects/builtin/DeepGlowReference.cpp
     src/effects/builtin/GlitchEffects.cpp
+    src/effects/builtin/TwitchReferenceEffect.cpp
+    src/effects/builtin/CartoonMotionEffect.cpp
+    src/effects/builtin/FastBlurReference.cpp
     src/effects/builtin/TemporalEffects.cpp
     src/effects/builtin/TransitionEffects.cpp
+    src/effects/builtin/RadialWipeReferenceEffect.cpp
+    src/effects/builtin/RadialBlurReferenceEffect.cpp
+    src/effects/builtin/RadialShadowReferenceEffect.cpp
+    src/effects/builtin/ReferenceBatchA.cpp
+    src/effects/builtin/UpscaleReferenceEffect.cpp
     src/effects/builtin/ProceduralWipeEffects.cpp
     src/effects/builtin/LensGradientEffect.cpp
     src/effects/builtin/PixelEncoderEffect.cpp
@@ -194,6 +207,14 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/GenerateEffects.cpp
     src/effects/builtin/MatteEffects.cpp
     src/effects/builtin/RasterExtrudeEffect.cpp
+    src/effects/builtin/ExtrudeReferenceEffect.cpp
+    src/effects/builtin/ExtrudeReferencePaths.cpp
+    src/effects/builtin/ExtrudeReferenceGeometry.cpp
+    src/effects/builtin/ReferenceBatchC.cpp
+    src/effects/builtin/SmearReference.cpp
+    src/effects/builtin/GlitchifyReference.cpp
+    src/effects/builtin/CardReferenceEffects.cpp
+    src/effects/builtin/ReferenceBatchB.cpp
     src/effects/builtin/VhsLookEffect.cpp
     src/effects/builtin/DepthEffects.cpp
     src/effects/builtin/RotobrushEffect.cpp
@@ -215,6 +236,8 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/TimeDisplacementEffect.cpp  # 0.4.5: Time Displacement
     src/expr/Expression.cpp
     src/plugins/PluginExpr.cpp
+    src/plugins/AudioGraph.cpp
+    src/plugins/AudioDsp.cpp
     src/plugins/PluginManifest.cpp
     src/plugins/PluginIsf.cpp
     src/plugins/PluginShader.cpp
@@ -240,6 +263,8 @@ set(AUREA_CORE_SOURCES
     src/ai/BackgroundRemoval.cpp
     src/ai/RotoRefine.cpp
     src/audio/AudioCore.cpp
+    src/audio/Fft.cpp
+    src/audio/PartitionedConvolution.cpp
     src/audio/AudioBlockCache.cpp
     src/audio/AudioMixer.cpp
     src/audio/AudioFx.cpp
@@ -263,6 +288,7 @@ set(AUREA_CORE_SOURCES
     src/engine/EngineUiMode.cpp
     src/engine/EngineCaptionPresets.cpp
     src/engine/EngineAssistant.cpp
+    src/engine/EngineMcpTools.cpp
     src/vector/Vector.cpp
     src/vector/ContourTrace.cpp
     src/vector/Clipper.cpp
@@ -286,6 +312,7 @@ set(AUREA_CORE_SOURCES
     src/rig/Ik.cpp               # 0.3.6 IK de dois ossos
     src/engine/EngineMedia.cpp
     src/engine/EngineOmegaTimeline.cpp
+    src/engine/EngineGroupInline.cpp
     src/engine/EngineOmegaLayer.cpp
     src/engine/EngineOmegaEffects.cpp
     src/engine/EngineOmegaContent.cpp
@@ -295,7 +322,16 @@ set(AUREA_CORE_SOURCES
     src/engine/EngineOmegaOutline.cpp   # bugs 0.3.4: converter em contorno
     src/engine/EngineAeCompositing.cpp  # AE compositing: tímidas, preservar transparência, queda do feather
     src/engine/EngineAeTimeline.cpp     # timeline do AE: marcas de camada, área de trabalho, escalar/easy ease, alinhar
+    src/engine/EngineAeKeys.cpp         # lote K: assistentes de keyframe do AE, bézier automática/contínua, vagante, Motion Sketch
     src/engine/EngineAeAnimation.cpp    # AE animation: texto-fonte, auto-orientar, câmera de dois nós
+    src/engine/EngineAeLayers.cpp       # AE layers: qualidade, clipe do modelo 3D, guias da prévia
+    src/engine/EngineModelPanel.cpp     # painel do modelo 3D: visuais do material, Evolução/Repetir/Velocidade do clipe
+    src/engine/EngineAeAssist.cpp       # lote X: Convert Audio to Keyframes
+    src/engine/EngineAeTextOutline.cpp  # lote X: Create Shapes / Masks from Text
+    src/engine/EngineVectorTree.cpp     # lote X: árvore de formas do AE (listar e editar pela ponte)
+    src/vector/VectorTree.cpp           # lote X: grupo vetorial em ordem livre, itens a mais, grupos de dentro
+    src/vector/VectorTreeDocument.cpp   # lote X: o fluxo da árvore (seção VectorTree do projeto)
+    src/engine/EngineAeMasks.cpp        # lote M: nulos de caminhos, auto-trace, feather variável, RotoBezier, travar/ocultar máscara
     src/engine/EnginePluginsV2.cpp   # 0.3.4 plugins
     src/engine/EngineImageSequence.cpp
     src/engine/EngineStorage.cpp   # 0.5.2 armazenamento (apagar projeto, tela, PreRender)
@@ -439,11 +475,14 @@ target_compile_options(aurea_core PRIVATE ${AUREA_WARNINGS})
 # Status. Their allocating dependencies need unwind cleanup too, so a failed
 # staging allocation releases local vectors and project snapshots on mobile.
 set(AUREA_IMPORT_BOUNDARIES
+    # 0.5.3: buffers de foto sem lançar (core/SafeAlloc.hpp).
+    src/core/SafeAlloc.cpp
     src/audio/Beats.cpp
     src/audio/AudioBlockCache.cpp
     src/engine/Engine.cpp
     src/engine/EngineMedia.cpp
     src/engine/EngineOmegaTimeline.cpp
+    src/engine/EngineGroupInline.cpp
     src/engine/EngineOmegaLayer.cpp
     src/engine/EngineOmegaEffects.cpp
     src/engine/EngineOmegaContent.cpp
@@ -704,5 +743,12 @@ if(WIN32 AND NOT AUREA_PLATFORM_ANDROID)
     option(AUREA_BUILD_DESKTOP "Build the Windows desktop editor" OFF)
     if(AUREA_BUILD_DESKTOP)
         add_subdirectory(platform/windows)
+    endif()
+    # Aurea PC: a MESMA ponte JNI do Android (platform/android/aurea_jni.cpp)
+    # numa aurea.dll que a interface Compose Desktop (JVM) carrega. A prévia
+    # vai para imagens do motor lidas pela UI (apresentação no host).
+    option(AUREA_BUILD_DESKTOP_JNI "Build aurea.dll (JNI bridge) for the Compose Desktop UI" OFF)
+    if(AUREA_BUILD_DESKTOP_JNI)
+        add_subdirectory(platform/desktop)
     endif()
 endif()

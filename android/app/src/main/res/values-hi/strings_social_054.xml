@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.5.4: tela "siga" com os perfis do criador e do Aurea. -->
+<resources>
+    <string name="social_body_054">क्रिएटर और Aurea को फ़ॉलो करें: ऐप खोलने के लिए चारों प्रोफ़ाइल खोलें। हम यह जाँच नहीं करते कि आपने फ़ॉलो किया या नहीं।</string>
+    <string name="social_body_054_store">नई चीज़ों से जुड़े रहने और ऐप का साथ देने के लिए क्रिएटर और Aurea को फ़ॉलो करें।</string>
+    <string name="social_continue">जारी रखें</string>
+</resources>

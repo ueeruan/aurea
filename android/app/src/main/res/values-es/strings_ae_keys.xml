@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lote K (AE): assistentes de keyframe, bézier automática/contínua, vagante, Lift/Extract e Motion Sketch. -->
+<resources>
+    <string name="aek_tools">Asistentes</string>
+    <string name="aek_time_reverse">Invertir en el tiempo</string>
+    <string name="aek_exponential_scale">Escala exponencial</string>
+    <string name="aek_smoother">Suavizador</string>
+    <string name="aek_smoother_level">Tolerancia de %1$s</string>
+    <string name="aek_bake_expression">Expresión a fotogramas clave</string>
+    <string name="aek_auto_bezier">Bézier automática</string>
+    <string name="aek_continuous_bezier">Bézier continua</string>
+    <string name="aek_rove">Vagar en el tiempo</string>
+    <string name="aek_lift_work_area">Levantar área de trabajo</string>
+    <string name="aek_extract_work_area">Extraer área de trabajo</string>
+    <string name="aek_lifted">Tramo del área de trabajo eliminado (el hueco queda)</string>
+    <string name="aek_extracted">Tramo del área de trabajo eliminado y hueco cerrado</string>
+    <string name="aek_reverse_nothing">No se pudo invertir: elige 2 fotogramas clave en una pista sin caer sobre otro</string>
+    <string name="aek_exp_scale_nothing">La escala exponencial necesita 2 fotogramas clave de Escala con valores del mismo signo</string>
+    <string name="aek_smoother_nothing">El Suavizador necesita 3 fotogramas clave o más en una pista</string>
+    <string name="aek_bake_nothing">No hay ninguna expresión activa para convertir</string>
+    <string name="aek_flags_nothing">Nada que cambiar en los fotogramas clave elegidos</string>
+    <string name="aek_motion_sketch">Motion Sketch</string>
+    <string name="aek_motion_sketch_stop">Detener Motion Sketch</string>
+    <string name="aek_motion_sketch_hint">Arrastra la capa elegida en el escenario: la vista previa se reproduce y el trazo se vuelve fotogramas clave de posición</string>
+    <string name="aek_motion_sketch_done">%1$d fotogramas de posición grabados</string>
+    <string name="aek_motion_sketch_nothing">Elige una capa y arrástrala en el escenario para grabar</string>
+</resources>

@@ -30,7 +30,13 @@ namespace {
 namespace fs = std::filesystem;
 constexpr u32 kChunk = 64u << 10;
 constexpr u64 kScratch = 2ull << 20; // conservative compressor workspace bound
+#if defined(_WIN32) && !defined(__ANDROID__)
+// Aurea PC: disco de computador; 4 GB davam ~8 s de 1080p. A reserva de espaço
+// livre (disk_room) continua valendo, então um disco cheio ainda para antes.
+constexpr u64 kMaxDisk = 48ull << 30, kMinReserve = 4ull << 30;
+#else
 constexpr u64 kMaxDisk = 4ull << 30, kMinReserve = 512ull << 20;
+#endif
 constexpr usize kHeader = 96, kManifest = 128;
 constexpr char kFrameMagic[8]{'A','U','R','P','R','F','0','1'};
 constexpr char kManifestMagic[8]{'A','U','R','P','R','M','0','1'};
@@ -608,17 +614,17 @@ Status PreRenderCache::write(u64 token, u64 frame, std::span<const u16> rgba, co
         std::array<u8, kHeader> header{}; std::memcpy(header.data(), kFrameMagic, 8);
         put32(header.data() + 8, 1); put64(header.data() + 16, token); put64(header.data() + 24, key_hash(session->key));
         put64(header.data() + 32, frame); put64(header.data() + 40, session->total); put64(header.data() + 48, session->frameBytes);
-        put32(header.data() + 56, crc32_update(0, pixels, static_cast<usize>(session->frameBytes)));
-        put32(header.data() + 60, count); put32(header.data() + 92, crc32_update(0, header.data(), 92));
+        put32(header.data() + 60, count);
         const fs::path destination = frame_path(session->directory, frame); fs::path temporary = destination; temporary += ".part";
         File file(temporary, true); if (!file.value) return {Errc::IoError, "nao foi possivel gravar o quadro PreRender"};
         if (const Status room = disk_room(session->directory, std::max(session->bytes, namespaceBytes), header.size(), session->limits); !room.ok()) return room;
         if (std::fwrite(header.data(), 1, header.size(), file.value) != header.size()) return Errc::StorageFull;
         u64 fileBytes = header.size(); std::vector<u8> compressed; compressed.reserve(kChunk * 2 + 1024);
+        u32 frameCrc = 0;
         for (u64 offset = 0; offset < session->frameBytes; offset += kChunk) {
             if (cancelled()) return Errc::Cancelled;
             const auto raw = static_cast<u32>(std::min<u64>(kChunk, session->frameBytes - offset));
-            compressed.clear(); zlib_compress(pixels + offset, raw, compressed);
+            compressed.clear(); zlib_compress_fast(pixels + offset, raw, compressed);
             if (compressed.size() > kChunk * 2 + 1024) return Errc::EncodeFailed;
             // O espaço livre é uma chamada ao sistema: a cada 16 MiB, não a cada 64 KiB.
             // Faltando no meio, o fwrite abaixo também devolve StorageFull.
@@ -627,12 +633,20 @@ Status PreRenderCache::write(u64 token, u64 frame, std::span<const u16> rgba, co
                         compressed.size() + 12, session->limits); !room.ok()) return room;
             }
             u8 block[12]; put32(block, raw); put32(block + 4, static_cast<u32>(compressed.size()));
-            put32(block + 8, crc32_update(0, pixels + offset, raw));
+            const u32 blockCrc = crc32_update(0, pixels + offset, raw);
+            put32(block + 8, blockCrc);
+            frameCrc = offset == 0 ? blockCrc : crc32_combine(frameCrc, blockCrc, raw);
             if (std::fwrite(block, 1, 12, file.value) != 12
                 || std::fwrite(compressed.data(), 1, compressed.size(), file.value) != compressed.size()) return Errc::StorageFull;
             fileBytes += compressed.size() + 12;
         }
-        if (!file.close()) return Errc::StorageFull;
+        // Reuse block checksums instead of scanning the entire HDR frame twice.
+        // The temporary file becomes visible only after its header is committed.
+        put32(header.data() + 56, frameCrc);
+        put32(header.data() + 92, crc32_update(0, header.data(), 92));
+        if (std::fseek(file.value, 0, SEEK_SET) != 0
+            || std::fwrite(header.data(), 1, header.size(), file.value) != header.size()
+            || !file.close()) return Errc::StorageFull;
         if (cancelled()) return Errc::Cancelled;
         std::error_code error; fs::rename(temporary, destination, error); if (error) return Errc::IoError;
         std::lock_guard lock(impl_->mutex);

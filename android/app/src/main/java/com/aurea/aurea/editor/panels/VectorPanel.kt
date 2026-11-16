@@ -38,6 +38,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.testTag
 import com.aurea.aurea.editor.PointTool
 import com.aurea.aurea.editor.VectorPathOps
 import com.aurea.aurea.editor.VectorStageState
@@ -57,8 +58,15 @@ import com.aurea.aurea.ui.theme.CupertinoIcon
 import com.aurea.aurea.ui.theme.tocavel
 
 private val PATH_KINDS = listOf(R.string.edt_vec_free_path, R.string.editor_retangulo, R.string.editor_elipse, R.string.editor_poligono, R.string.editor_estrela)
-private val VECTOR_TABS = listOf(R.string.target_shape, R.string.panel_preenchimento, R.string.panel_borda, R.string.panel_caminho,
-    R.string.panel_transformar, R.string.edt_vec_operators, R.string.panel_efeitos)
+/**
+ * Pedido de aba ao abrir Caminhos e operadores; lido e limpo pelo painel. Índices
+ * antigos (0 Forma, 3 Caminho, 4 Transformar, 5 Operadores), para quem já pedia assim.
+ */
+internal object VectorRequest {
+    /** A aba Operadores (a 6ª). */
+    const val OPERATORS = 5
+    var tab by androidx.compose.runtime.mutableStateOf<Int?>(null)
+}
 
 /** Operadores de caminho (VModType, mesma ordem do motor). */
 private val MOD_NAMES = listOf(R.string.ae_shapeop_offset, R.string.ae_shapeop_pucker, R.string.ae_shapeop_roughen, R.string.ae_shapeop_wiggle_paths,
@@ -69,26 +77,50 @@ private const val SEL_NONE = -1
 private const val SEL_SHAPE = -2
 
 /**
- * CAMADA VETORIAL (Fase 7D; UI da 7.2, Frente D).
+ * CAMADA VETORIAL, redesenho de 13/11/2026 (`VECTOR_MASK_AM.md` §3.2): o painel Vetor de 7
+ * abas de texto foi dividido como na referência, um assunto por tela, na moldura comum:
  *
- * Fluxo: escolher o caminho (fileira de cima) → ferramenta de pontos na aba
- * Forma (Selecionar, Adicionar ponto, Remover ponto, Canto/Suave, Fechar
- * caminho) → arrastar no palco; as alças aparecem no ponto escolhido. As
- * propriedades ficam em abas (Forma, Preenchimento, Borda, Caminho,
- * Transformar, Operadores, Efeitos), cada uma com os principais à vista e o
- * resto em "Avançado ▾". O losango do trilho age na linha escolhida (o
- * chip dela acende), igual aos outros painéis. Tudo lê e escreve no motor.
+ * - [VectorFace.Fill] — **Cor e preenchimento** do vetor (preencher, tinta, opacidade, regra);
+ * - [VectorFace.Stroke] — **Borda e sombra › Traço** do vetor (o BorderShadowPanel hospeda,
+ *   com as abas dele: [hostTabs]);
+ * - [VectorFace.Paths] — **Caminhos e operadores**: abas de ícone Forma · Caminho ·
+ *   Operadores · Grupo.
+ *
+ * Os pontos se editam no Editar pontos (botão Editar da grade). O losango do trilho age na
+ * linha escolhida (o chip dela acende). Os chips de caminho ficam em cima. Tudo lê e escreve
+ * no motor.
  */
+internal enum class VectorFace { Fill, Stroke, Paths }
+
+/** As abas de quem hospeda o painel (Borda e sombra › Traço do vetor). */
+internal class VectorHostTabs(val tabs: List<PanelTab>, val selected: String, val onTab: (String) -> Unit)
+
+private const val VT_SHAPE = "shape"
+private const val VT_PATH = "path"
+private const val VT_OPERATORS = "operators"
+private const val VT_GROUP = "group"
+
 @Composable
-internal fun VectorPanel(env: PanelEnv) {
+internal fun VectorPanel(env: PanelEnv, face: VectorFace = VectorFace.Paths, host: VectorHostTabs? = null) {
     val store = env.store
     val doc = store.vectorDoc
     if (doc == null) {
         PanelNotice(stringResource(R.string.panel_escolha_camada_vetorial), Modifier.padding(horizontal = 18.dp))
         return
     }
-    var tab by rememberSaveable { mutableIntStateOf(0) }
-    var sel by remember { mutableIntStateOf(SEL_NONE) }
+    var tab by rememberSaveable { mutableStateOf(VT_SHAPE) }
+    var sel by remember(face) { mutableIntStateOf(SEL_NONE) }
+    // Pedido de aba (índices antigos de VECTOR_TABS): Operadores, Caminho, Transformar.
+    androidx.compose.runtime.LaunchedEffect(VectorRequest.tab) {
+        when (VectorRequest.tab) {
+            0 -> VT_SHAPE
+            3 -> VT_PATH
+            4 -> VT_GROUP
+            VectorRequest.OPERATORS -> VT_OPERATORS
+            else -> null
+        }?.let { tab = it; sel = SEL_NONE }
+        VectorRequest.tab = null
+    }
     val gi = store.vectorGroup
     val g = doc.groups.getOrNull(gi)
     val at = store.vectorPathAt
@@ -103,41 +135,43 @@ internal fun VectorPanel(env: PanelEnv) {
         }
         else -> KeyframeLook.None
     }
-    Row(Modifier.fillMaxSize()) {
-        LeftRail(
-            onBack = env.onClose,
-            keyframeLook = railLook,
-            onKeyframe = when {
-                VParam.isMod(sel) && store.vectorModifiers != null -> ({ store.toggleVectorParamKey(sel) })
-                sel >= 0 && params != null -> ({ store.toggleVectorParamKey(sel) })
-                sel == SEL_SHAPE && at != null && at.free -> ({ store.toggleVectorPathKey() })
-                else -> null
-            },
-            curveAnimated = false,
-            onCurve = null,
-        )
-        Column(Modifier.weight(1f).fillMaxHeight()) {
-            PathPicker(store)
-            ScrollTabs(VECTOR_TABS.map { stringResource(it) }, tab, onSelect = { tab = it; sel = SEL_NONE })
-            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 4.dp, end = 10.dp, bottom = 16.dp)) {
-                if (g == null) {
-                    KitHint(stringResource(R.string.panel_esta_camada_ainda_nao_tem_grupos))
-                    return@Column
-                }
-                val s = Sel(sel) { sel = it }
-                when (tab) {
-                    0 -> ShapeTab(env, s)
-                    1 -> FillTab(env, g, s)
-                    2 -> StrokeTab(env, g, s)
-                    3 -> PathOpsTab(env, g, s)
-                    4 -> TransformTab(env, g, s)
-                    5 -> OperatorsTab(env, g, s)
-                    else -> {
-                        Spacer(Modifier.height(8.dp))
-                        ActionCard(stringResource(R.string.panel_abrir_efeitos_camada), stringResource(R.string.panel_desfoque_brilho_cor_outros_efeitos_aplicados)) {
-                            env.onOpenPanel(EditorPanel.Effects)
-                        }
-                    }
+    val rail = PanelRail(
+        onBack = env.onClose,
+        keyframeLook = railLook,
+        onKeyframe = when {
+            VParam.isMod(sel) && store.vectorModifiers != null -> ({ store.toggleVectorParamKey(sel) })
+            sel >= 0 && params != null -> ({ store.toggleVectorParamKey(sel) })
+            sel == SEL_SHAPE && at != null && at.free -> ({ store.toggleVectorPathKey() })
+            else -> null
+        },
+    )
+    val ownTabs = if (face == VectorFace.Paths) listOf(
+        PanelTab(VT_SHAPE, stringResource(R.string.target_shape), glyph = CupertinoGlyph.Pencil),
+        PanelTab(VT_PATH, stringResource(R.string.panel_caminho), glyph = CupertinoGlyph.Scribble),
+        PanelTab(VT_OPERATORS, stringResource(R.string.edt_vec_operators), glyph = CupertinoGlyph.Wrench),
+        PanelTab(VT_GROUP, stringResource(R.string.panel_transformar), glyph = CupertinoGlyph.Move),
+    ) else emptyList()
+    PanelFrame(
+        rail = rail,
+        tabs = host?.tabs ?: ownTabs,
+        selectedTab = host?.selected ?: tab,
+        onTab = { id -> if (host != null) host.onTab(id) else { tab = id; sel = SEL_NONE } },
+    ) {
+        Column(Modifier.fillMaxWidth().padding(start = 4.dp, end = 10.dp, bottom = 16.dp).testTag("vector.${face.name.lowercase()}")) {
+            PathPicker(store, allowAdd = face == VectorFace.Paths)
+            if (g == null) {
+                KitHint(stringResource(R.string.panel_esta_camada_ainda_nao_tem_grupos))
+                return@Column
+            }
+            val s = Sel(sel) { sel = it }
+            when (face) {
+                VectorFace.Fill -> FillTab(env, g, s)
+                VectorFace.Stroke -> StrokeTab(env, g, s)
+                VectorFace.Paths -> when (tab) {
+                    VT_PATH -> PathOpsTab(env, g, s)
+                    VT_OPERATORS -> OperatorsTab(env, g, s)
+                    VT_GROUP -> TransformTab(env, g, s)
+                    else -> ShapeTab(env, s)
                 }
             }
         }
@@ -149,9 +183,11 @@ private class Sel(val value: Int, val set: (Int) -> Unit)
 
 private fun paramLook(v: FloatArray, param: Int): KeyframeLook {
     if (param !in 0 until VParam.COUNT) return KeyframeLook.None
-    val anim = v.getOrElse(VParam.COUNT) { 0f }.toInt()
-    val keys = v.getOrElse(VParam.COUNT + 1) { 0f }.toInt()
-    val bit = 1 shl param
+    // Bits 0..23 em [COUNT]/[COUNT+1]; 24.. (traços) em [COUNT+2]/[COUNT+3].
+    val hi = if (param >= VParam.BITS_PER_FLOAT) 2 else 0
+    val anim = v.getOrElse(VParam.COUNT + hi) { 0f }.toInt()
+    val keys = v.getOrElse(VParam.COUNT + 1 + hi) { 0f }.toInt()
+    val bit = 1 shl (param - if (hi != 0) VParam.BITS_PER_FLOAT else 0)
     return when {
         keys and bit != 0 -> KeyframeLook.KeyHere
         anim and bit != 0 -> KeyframeLook.Animated
@@ -179,10 +215,13 @@ private fun modLook(mods: FloatArray?, id: Int): KeyframeLook {
  * "+ Adicionar", que abre as formas de caminho logo abaixo.
  */
 @Composable
-private fun PathPicker(store: EditorStore) {
+private fun PathPicker(store: EditorStore, allowAdd: Boolean) {
     val doc = store.vectorDoc ?: return
+    val canAdd = allowAdd
     var adding by remember { mutableStateOf(false) }
     val many = doc.groups.size > 1
+    // Preenchimento e Traço: os chips só aparecem com 2+ caminhos (com 1 não há o que escolher).
+    if (!canAdd && doc.groups.sumOf { it.paths.size } < 2) return
     ChipRow {
         doc.groups.forEachIndexed { gi, grp ->
             grp.paths.forEachIndexed { pi, p ->
@@ -192,7 +231,7 @@ private fun PathPicker(store: EditorStore) {
                 }
             }
         }
-        KitChip(if (adding) stringResource(R.string.panel_fechar) else stringResource(R.string.panel_adicionar), adding) { adding = !adding }
+        if (canAdd) KitChip(if (adding) stringResource(R.string.panel_fechar) else stringResource(R.string.panel_adicionar), adding) { adding = !adding }
     }
     if (adding) {
         ChipRow {
@@ -437,8 +476,14 @@ private fun PathOpsTab(env: PanelEnv, g: VGroup, s: Sel) {
     }
     if (g.dashes.size >= 2) {
         if (!g.strokeOn) KitHint(stringResource(R.string.panel_tracejado_aparece_borda_ligue_borda))
-        GroupRow(env, stringResource(R.string.panel_traco), { it.dashes.getOrElse(0) { 0f } }, { gr, x -> if (gr.dashes.size >= 2) gr.dashes[0] = x }, 0.3f, 0f, 5000f, "px", 0, 24f)
-        GroupRow(env, stringResource(R.string.panel_espaco), { it.dashes.getOrElse(1) { 0f } }, { gr, x -> if (gr.dashes.size >= 2) gr.dashes[1] = x }, 0.3f, 0f, 5000f, "px", 0, 12f)
+        if (com.aurea.aurea.ui.platform.PlatformFeatures.desktopAe) {
+            // Aurea PC: traço/vão 1..3 animáveis (o Tracejado do After Effects).
+            DashPairs(env, g, s)
+        } else {
+            // Celular: um par, como sempre foi.
+            GroupRow(env, stringResource(R.string.panel_traco), { it.dashes.getOrElse(0) { 0f } }, { gr, x -> if (gr.dashes.size >= 2) gr.dashes[0] = x }, 0.3f, 0f, 5000f, "px", 0, 24f)
+            GroupRow(env, stringResource(R.string.panel_espaco), { it.dashes.getOrElse(1) { 0f } }, { gr, x -> if (gr.dashes.size >= 2) gr.dashes[1] = x }, 0.3f, 0f, 5000f, "px", 0, 12f)
+        }
     }
     if (g.trimOn || g.dashes.size >= 2) {
         AdvancedSection(adv, { adv = !adv }) {
@@ -448,6 +493,41 @@ private fun PathOpsTab(env: PanelEnv, g: VGroup, s: Sel) {
                 ChoiceChips(listOf(stringResource(R.string.panel_cada_sozinho), stringResource(R.string.panel_depois_outro)), g.trimMode, onSelect = { m -> store.editVectorGroup { it.trimMode = m } })
             }
             if (g.dashes.size >= 2) ParamRow(env, s, stringResource(R.string.panel_deslocar_tracos), VParam.DASH_OFFSET, 0.5f, -100000f, 100000f, "px", 0, 0f)
+        }
+    }
+}
+
+/**
+ * Traço/vão 1..3 (como o Tracejado do After Effects): cada valor é animável
+ * (VParam.DASH_1..GAP_3, losango no trilho). Pares a mais entram e saem pelo
+ * documento; o motor aceita qualquer número de pares.
+ */
+@Composable
+private fun DashPairs(env: PanelEnv, g: VGroup, s: Sel) {
+    val store = env.store
+    val pairs = (g.dashes.size / 2).coerceAtMost(VParam.MAX_DASH_PAIRS)
+    val dash = stringResource(R.string.panel_traco)
+    val gap = stringResource(R.string.panel_espaco)
+    for (k in 0 until pairs) {
+        val n = if (pairs > 1) " ${k + 1}" else ""
+        ParamRow(env, s, dash + n, VParam.DASH_1 + 2 * k, 0.3f, 0f, 5000f, "px", 0, 24f)
+        ParamRow(env, s, gap + n, VParam.GAP_1 + 2 * k, 0.3f, 0f, 5000f, "px", 0, 12f)
+    }
+    ChipRow {
+        if (pairs < VParam.MAX_DASH_PAIRS) KitChip("+ " + stringResource(R.string.ae_shapeop_dash_add), false) {
+            store.editVectorGroup { gr ->
+                val keep = (gr.dashes.size / 2) * 2
+                while (gr.dashes.size > keep) gr.dashes.removeAt(gr.dashes.size - 1)
+                gr.dashes += gr.dashes.getOrElse(keep - 2) { 24f }
+                gr.dashes += gr.dashes.getOrElse(keep - 1) { 12f }
+            }
+        }
+        if (pairs > 1) KitChip(stringResource(R.string.ae_shapeop_dash_remove), false) {
+            if (s.value in (VParam.DASH_1 + 2 * (pairs - 1)) until VParam.COUNT) s.set(SEL_NONE)
+            store.editVectorGroup { gr ->
+                val keep = (pairs - 1) * 2
+                while (gr.dashes.size > keep) gr.dashes.removeAt(gr.dashes.size - 1)
+            }
         }
     }
 }

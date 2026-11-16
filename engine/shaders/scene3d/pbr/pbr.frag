@@ -242,6 +242,42 @@ void main() {
         return;
     }
 
+    // --- 0.5.4 Cartoon (texto 3D, Material::toon) -----------------------------------
+    // Cor de EXIBIÇÃO como o unlit (fora do tone map e do bloom): a cor
+    // escolhida é a cor que aparece.
+    //  z = −4: CONTORNO (casco + vincos, aberto no vértice) — tinta lisa.
+    //  z = −1 − brilho: CEL — 2 faixas por uma luz-chave presa à câmera (de cima,
+    //  um pouco da esquerda), sem especular; com brilho > 0 a faixa clara onde
+    //  uv1.y (direção do chanfro no espaço do texto, Y para cima) aponta para cima.
+    if (u.alpha.z < -3.5) {
+        vec3 ink = base.rgb * u.cameraPos.w;
+        float toonA = mode == 3 ? coverage : alpha;
+        o_color = vec4(ink * alpha, toonA);
+        o_scene = vec4(0.0, 0.0, 0.0, toonA);
+        return;
+    }
+    if (u.alpha.z < -0.5) {
+        float highlight = clamp(-u.alpha.z - 1.0, 0.0, 1.0);
+        vec3 Nt = normalize(v_normal);
+        if (u.alpha.w > 0.5 && !gl_FrontFacing) Nt = -Nt;
+        vec3 Vt = normalize(u.cameraPos.xyz - v_world);
+        // Mundo do Aurea: Y para BAIXO ("para cima" = −Y).
+        vec3 Lt = normalize(Vt + vec3(-0.35, -1.1, 0.0));
+        float ndl = dot(Nt, Lt) - 0.05;
+        float lit = clamp(ndl / max(fwidth(ndl), 1e-4) + 0.5, 0.0, 1.0);
+        vec3 toon = base.rgb * mix(0.8, 1.0, lit);
+        if (highlight > 0.0) {
+            float upward = v_uv1.y - 0.35;
+            float band = clamp(upward / max(fwidth(upward), 1e-4) + 0.5, 0.0, 1.0);
+            toon = mix(toon, mix(toon, vec3(1.0), 0.7), band * highlight);
+        }
+        toon *= u.cameraPos.w;
+        float toonA = mode == 3 ? coverage : alpha;
+        o_color = vec4(toon * alpha, toonA);
+        o_scene = vec4(0.0, 0.0, 0.0, toonA);
+        return;
+    }
+
     // --- Sem iluminação (KHR_materials_unlit) ------------------------------------
     if (u.alpha.z > 0.5) {
         // Unlit é cor de EXIBIÇÃO (texto, logotipo): vai no alvo 2D, fora do

@@ -1,0 +1,97 @@
+{
+  "aureaPlugin": 3,
+  "id": "aurea.example.audio-compressor",
+  "version": "1.0.0",
+  "name": "Compressor and peak limiter",
+  "author": "Aurea",
+  "kind": "audio",
+  "params": [
+    {
+      "id": "threshold",
+      "label": "Threshold (dB)",
+      "type": "float",
+      "default": -18,
+      "min": -60,
+      "max": 0
+    },
+    {
+      "id": "ratio",
+      "label": "Ratio",
+      "type": "float",
+      "default": 4,
+      "min": 1,
+      "max": 20
+    },
+    {
+      "id": "attack",
+      "label": "Attack (ms)",
+      "type": "float",
+      "default": 10,
+      "min": 0,
+      "max": 200
+    },
+    {
+      "id": "release",
+      "label": "Release (ms)",
+      "type": "float",
+      "default": 100,
+      "min": 1,
+      "max": 2000
+    },
+    {
+      "id": "makeup",
+      "label": "Make-up (dB)",
+      "type": "float",
+      "default": 0,
+      "min": -12,
+      "max": 24
+    }
+  ],
+  "audio": {
+    "nodes": [
+      {
+        "id": "source",
+        "type": "input"
+      },
+      {
+        "id": "compress",
+        "type": "compressor",
+        "input": "source",
+        "thresholdDb": {
+          "param": "threshold",
+          "scale": 1,
+          "offset": 0
+        },
+        "ratio": {
+          "param": "ratio",
+          "scale": 1,
+          "offset": 0
+        },
+        "attackMs": {
+          "param": "attack",
+          "scale": 1,
+          "offset": 0
+        },
+        "releaseMs": {
+          "param": "release",
+          "scale": 1,
+          "offset": 0
+        },
+        "kneeDb": 6,
+        "makeupDb": {
+          "param": "makeup",
+          "scale": 1,
+          "offset": 0
+        }
+      },
+      {
+        "id": "output",
+        "type": "limiter",
+        "input": "compress",
+        "thresholdDb": -0.5,
+        "releaseMs": 80
+      }
+    ],
+    "output": "output"
+  }
+}

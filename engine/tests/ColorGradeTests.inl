@@ -40,6 +40,88 @@ AUREA_TEST(Gpu, ColorGradeDefaultsAreNeutralAndMixFadesTheGrade) {
     AUREA_CHECK_NEAR(half.v(10, 16).y, (plain.v(10, 16).y + brighter.v(10, 16).y) * 0.5f, 0.01f);
 }
 
+AUREA_TEST(Gpu, ColorGradeWindowsLimitEachSerialCorrectionAndKeepLegacyDefaults) {
+    AUREA_REQUIRE_GPU();
+    Scene scene(64, 48);
+    const LayerId id = scene.image(uniform_image(64, 48, 90, 70, 50), 32, 24);
+    const FloatImage original = scene.render();
+    EffectInstance& effect = scene.add_effect(id, effect_keys::kColorGrade);
+    effect.params[3].constant = ParamValue::scalar(1.f);
+    effect.params[79].constant = ParamValue::scalar(2.f);
+    effect.params[83].constant = ParamValue::scalar(0.f);
+    const FloatImage windowed = scene.render();
+    AUREA_CHECK_NEAR(windowed.v(32, 24).x, original.v(32, 24).x * 2.f, .002f);
+    AUREA_CHECK_NEAR(windowed.v(2, 2).x, original.v(2, 2).x, .0001f);
+    effect.params[84].constant = ParamValue::scalar(1.f);
+    const FloatImage inverted = scene.render();
+    AUREA_CHECK_NEAR(inverted.v(32, 24).x, original.v(32, 24).x, .0001f);
+    AUREA_CHECK_NEAR(inverted.v(2, 2).x, original.v(2, 2).x * 2.f, .002f);
+    effect.params[84].constant = ParamValue::scalar(0.f);
+    effect.params[85].constant = ParamValue::scalar(1.f);
+    const FloatImage matte = scene.render();
+    AUREA_CHECK_NEAR(matte.v(32, 24).x, 1.f, .0001f);
+    AUREA_CHECK_NEAR(matte.v(2, 2).x, 0.f, .0001f);
+    // Saved grades ending at slot 78 receive neutral window defaults.
+    effect.params.resize(79);
+    const FloatImage legacy = scene.render();
+    AUREA_CHECK_NEAR(legacy.v(2, 2).x, original.v(2, 2).x * 2.f, .002f);
+}
+
+AUREA_TEST(Gpu, ColorGradeSerialNodesHaveIndependentIdentityAndUndo) {
+    Engine engine;
+    EngineConfig config;
+    config.workerCount = 2;
+    config.disableAutosave = true;
+    config.enableTelemetry = false;
+    AUREA_CHECK(engine.initialize(config).ok());
+    AUREA_CHECK(engine.new_project(64, 48, 30, "serial color").ok());
+    const auto id = engine.add_shape(0);
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) { engine.shutdown(); return; }
+    const u32 adjust = engine.ensure_color_grade(*id, 2);
+    const u32 first = engine.ensure_color_grade(*id, 3);
+    const u32 second = engine.ensure_color_grade(*id, 3);
+    AUREA_CHECK(first != kInvalidIndex && second != kInvalidIndex && first != second);
+    auto* comp = engine.project()->timeline().composition(engine.project()->timeline().current());
+    Layer* layer = comp->layer(LayerId::unpack(*id));
+    AUREA_CHECK_EQ(layer->effects.size(), usize{3});
+    AUREA_CHECK_EQ(layer->effects[0].id, adjust);
+    AUREA_CHECK_EQ(layer->effects[1].id, first);
+    AUREA_CHECK_EQ(layer->effects[2].id, second);
+    Command undo; undo.type = CommandType::Undo;
+    AUREA_CHECK(engine.apply_command(undo).ok());
+    comp = engine.project()->timeline().composition(engine.project()->timeline().current());
+    layer = comp->layer(LayerId::unpack(*id));
+    AUREA_CHECK_EQ(layer->effects.size(), usize{2});
+    Command redo; redo.type = CommandType::Redo;
+    AUREA_CHECK(engine.apply_command(redo).ok());
+    comp = engine.project()->timeline().composition(engine.project()->timeline().current());
+    layer = comp->layer(LayerId::unpack(*id));
+    AUREA_CHECK_EQ(layer->effects.size(), usize{3});
+    AUREA_CHECK_EQ(layer->effects[2].id, second);
+    layer->effects[1].params[3].constant = ParamValue::scalar(.75f);
+    layer->effects[1].params[79].constant = ParamValue::scalar(2.f);
+    layer->effects[1].params[80].constant = ParamValue::vec2(.25f, .6f);
+    layer->effects[2].enabled = false;
+    std::vector<u8> bytes;
+    AUREA_CHECK(ProjectSerializer::encode(*engine.project(), SaveOptions{}, bytes).ok());
+    Project restored;
+    AUREA_CHECK(ProjectSerializer::load_bytes(restored, bytes.data(), bytes.size(), LoadOptions{}, nullptr).ok());
+    const auto* reopened = restored.timeline().composition(restored.timeline().current())->layer(LayerId::unpack(*id));
+    AUREA_CHECK(reopened != nullptr);
+    if (reopened) {
+        AUREA_CHECK_EQ(reopened->effects.size(), usize{3});
+        AUREA_CHECK_EQ(reopened->effects[1].id, first);
+        AUREA_CHECK_EQ(reopened->effects[2].id, second);
+        AUREA_CHECK(!reopened->effects[2].enabled);
+        AUREA_CHECK_NEAR(reopened->effects[1].params[3].constant.v[0], .75f, .0001f);
+        AUREA_CHECK_NEAR(reopened->effects[1].params[79].constant.v[0], 2.f, .0001f);
+        AUREA_CHECK_NEAR(reopened->effects[1].params[80].constant.v[0], .25f, .0001f);
+        AUREA_CHECK_NEAR(reopened->effects[1].params[80].constant.v[1], .6f, .0001f);
+    }
+    engine.shutdown();
+}
+
 AUREA_TEST(Gpu, ColorGradeSaturationTemperatureAndContrastMoveTheRightWay) {
     AUREA_REQUIRE_GPU();
     Scene s(64, 32);
@@ -202,7 +284,7 @@ AUREA_TEST(Gpu, ColorGradeEngineRolesLooksResetScopesAndThumbnails) {
     AUREA_CHECK(adjust != kInvalidIndex && filter != kInvalidIndex && adjust != filter);
     AUREA_CHECK_EQ(e.ensure_color_grade(*id, 2), adjust);
     AUREA_CHECK_EQ(e.ensure_color_grade(*id, 1), filter);
-    AUREA_CHECK_EQ(e.ensure_color_grade(*id, 3), kInvalidIndex);
+    AUREA_CHECK_EQ(e.ensure_color_grade(*id, 4), kInvalidIndex);
     auto* comp = e.project()->timeline().composition(e.project()->timeline().current());
     Layer* l = comp->layer(LayerId::unpack(*id));
     auto index_of = [&](u32 effect) { return l->effect_index(EffectId{effect, 0}); };

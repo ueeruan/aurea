@@ -350,10 +350,13 @@ ae::ImportReport Engine::import_ae_data(const std::string& raw, const std::strin
         // entra numa camada NOVA — de texto se ele mexe em texto, senão um
         // sólido do tamanho da composição com o nome do preset.
         LayerId created{};
-        bool textLayer = false;
+        bool textLayer = false, shapeLayer = false;
         if (!comp->layer(target)) {
-            for (const ae::Entry& e : doc.entries)
+            for (const ae::Entry& e : doc.entries) {
                 textLayer = textLayer || (!e.path.empty() && e.path[0].match == "ADBE Text Properties");
+                shapeLayer = shapeLayer || (!e.path.empty() && e.path[0].match == "ADBE Root Vectors Group");
+            }
+            shapeLayer = shapeLayer && !textLayer;
             ae::NewLayerSpec spec;
             if (textLayer) {
                 spec.text = "Texto";
@@ -361,7 +364,14 @@ ae::ImportReport Engine::import_ae_data(const std::string& raw, const std::strin
                 const std::string stem = file_stem(fileName);
                 if (!stem.empty()) spec.name = unique_name(*comp, stem);
             }
-            created = host.create_layer(textLayer ? ae::NewLayer::Text : ae::NewLayer::Solid, spec);
+            created = host.create_layer(textLayer ? ae::NewLayer::Text : shapeLayer ? ae::NewLayer::Shape : ae::NewLayer::Solid, spec);
+            // Conteúdo de camada de forma: a camada nova é vetorial (vazia; os
+            // grupos do preset entram nela), do tamanho da composição.
+            if (Layer* nl = shapeLayer && created.valid() ? comp->layer(created) : nullptr) {
+                nl->shape.shapeType = kShapeVector;
+                nl->shape.filled = false;
+                nl->shape.vector = VectorData{};
+            }
             if (!created.valid()) {
                 report.message = textLayer ? "Não foi possível criar a camada de texto para o preset do After Effects."
                                            : "Não foi possível criar a camada para o preset do After Effects.";

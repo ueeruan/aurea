@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Painel do modelo 3D (13/11/2026): Material (visuais do modelo inteiro), Textura e Animação (Evolução com keyframe). -->
+<resources>
+    <string name="m3d_title">3D-модель</string>
+    <string name="m3d_tab_shadow">Тень</string>
+    <string name="m3d_look">Вид</string>
+    <string name="m3d_look_hint">Нажмите на шар, чтобы задать вид всей модели.</string>
+    <string name="m3d_look_original">Оригинал</string>
+    <string name="m3d_look_plastic">Пластик</string>
+    <string name="m3d_look_matte">Матовый</string>
+    <string name="m3d_look_metal">Металл</string>
+    <string name="m3d_look_chrome">Хром</string>
+    <string name="m3d_look_gold">Золото</string>
+    <string name="m3d_look_glass">Стекло</string>
+    <string name="m3d_look_custom">Настроено вручную</string>
+    <string name="m3d_adjust">Настроить</string>
+    <string name="m3d_whole_model">Вся модель</string>
+    <string name="m3d_material_n">Материал %1$d</string>
+    <string name="m3d_no_materials">У этой модели нет материалов для настройки.</string>
+    <string name="m3d_apply_to">Применить к</string>
+    <string name="m3d_one_part">Одна часть</string>
+    <string name="m3d_texture_pick">Изображение текстуры</string>
+    <string name="m3d_texture_hint">Изображение покрывает всю модель по текстурным координатам самого файла.</string>
+    <string name="m3d_texture_original">Вернуть исходную текстуру</string>
+    <string name="m3d_texture_no_parts">У этой модели нет частей для текстуры.</string>
+    <string name="m3d_texture_material_hint">Текстура этого материала может быть из файла или из слоя на таймлайне.</string>
+    <string name="m3d_part_hint">Нажмите на часть, чтобы сменить её текстуру или скрыть её.</string>
+    <string name="m3d_part_own_texture">Своя текстура</string>
+    <string name="m3d_part_hidden">Скрыта</string>
+    <string name="m3d_anim_progress">Прогресс</string>
+    <string name="m3d_anim_progress_hint">Поставьте ◆ в двух точках таймлайна, чтобы управлять анимацией файла ключевыми кадрами. Без ◆ она играет сама.</string>
+    <string name="m3d_anim_auto">Играть самой</string>
+    <string name="m3d_anim_auto_hint">Убирает фиксированное значение и ◆ прогресса: клип снова идёт со временем.</string>
+    <string name="m3d_anim_loop">Повтор</string>
+    <string name="m3d_anim_speed">Скорость</string>
+    <string name="m3d_anim_duration">Длина клипа: %1$s с</string>
+    <string name="m3d_anim_pick_clip">Выберите клип, чтобы анимировать модель.</string>
+    <string name="m3d_anim_playing">Играет сама</string>
+    <!-- 14/11/2026 (3D opções extras, v76): Luz e sombra, Posição, Brilho, textura que anda e animação. -->
+    <string name="m3d_tab_light_shadow">Свет и тень</string>
+    <string name="m3d_place">Положение</string>
+    <string name="m3d_place_ground">Поставить на пол</string>
+    <string name="m3d_place_center">По центру</string>
+    <string name="m3d_place_fit">Вписать в кадр</string>
+    <string name="m3d_place_hint">Каждое нажатие — один шаг отмены. С ключами положения все они сдвигаются вместе.</string>
+    <string name="m3d_look_neon">Неон</string>
+    <string name="m3d_glow">Свечение</string>
+    <string name="m3d_glow_color">Цвет свечения</string>
+    <string name="m3d_glow_strength">Сила свечения</string>
+    <string name="m3d_glow_hint">Собственный свет материала. С эффектом Bloom сцены (3D-сцена › Рендер) свечение расходится вокруг.</string>
+    <string name="m3d_tex_transform">Положение текстуры</string>
+    <string name="m3d_tex_offset_x">Сдвиг X</string>
+    <string name="m3d_tex_offset_y">Сдвиг Y</string>
+    <string name="m3d_tex_rotation">Поворот</string>
+    <string name="m3d_tex_scroll">Прокрутка во времени</string>
+    <string name="m3d_tex_scroll_x">Прокрутка X</string>
+    <string name="m3d_tex_scroll_y">Прокрутка Y</string>
+    <string name="m3d_tex_scroll_hint" formatted="false">В % изображения в секунду: текстура движется сама (лента, вода, экран).</string>
+    <string name="m3d_anim_start">Начать с</string>
+    <string name="m3d_anim_reverse">Задом наперёд</string>
+    <string name="m3d_anim_pingpong">Туда и обратно</string>
+    <string name="m3d_anim_speed_hint">Коснитесь «Скорость» и поставьте ◆ в левой колонке, чтобы ускорять или замедлять анимацию со временем.</string>
+    <string name="m3d_obj_light">Свет объекта</string>
+    <string name="m3d_obj_light_hint">Освещает и отражается только на этом объекте — студия или своё HDR-изображение. Остальная сцена не меняется.</string>
+    <string name="m3d_obj_light_scene">Из сцены</string>
+    <string name="m3d_obj_light_intensity">Свет и отражение</string>
+</resources>

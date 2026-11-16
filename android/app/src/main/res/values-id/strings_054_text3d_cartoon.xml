@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.5.4: estilo Cartoon do texto 3D (material pronto 14 do motor). -->
+    <string name="pn_t3d_preset_cartoon">Kartun</string>
+    <string name="t3d_cartoon_side_auto">Warna sisi otomatis</string>
+    <string name="t3d_cartoon_side">Warna sisi</string>
+    <string name="t3d_cartoon_highlight">Kilau</string>
+    <string name="t3d_cartoon_outline_color">Warna garis tepi</string>
+    <string name="t3d_cartoon_outline_width">Tebal garis tepi</string>
+    <string name="t3d_cartoon_hint">Warna kartun datar dengan garis tepi tebal. Tebal garis tepi dalam piksel komposisi, jadi terlihat sama di resolusi ekspor apa pun.</string>
+</resources>

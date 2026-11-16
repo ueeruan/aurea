@@ -209,4 +209,24 @@
     <string name="perf_badge">اختبار · %1$d ث</string>
     <string name="perf_badge_stall">تجمّد هنا</string>
     <string name="perf_badge_stop">إيقاف</string>
+    <string name="cam_stage_features">اكتشاف النقاط وتتبعها</string>
+    <string name="cam_stage_solve">حساب الكاميرا ثلاثية الأبعاد</string>
+    <string name="prerender_group">تصيير المجموعة مسبقًا</string>
+    <string name="edit_workspace_media">الوسائط</string>
+    <string name="edit_workspace_edit">التحرير</string>
+    <string name="edit_workspace_color">الألوان</string>
+    <string name="edit_workspace_audio">الصوت</string>
+    <string name="edit_workspace_text">النص</string>
+    <string name="grade_node_number">العقدة %1$d</string>
+    <string name="grade_add_node">إضافة عقدة</string>
+    <string name="grade_node_enabled">التصحيح مفعّل</string>
+    <string name="grade_node_previous">تقديم العقدة</string>
+    <string name="grade_node_next">تأخير العقدة</string>
+    <string name="grade_window">النوافذ</string>
+    <string name="grade_window_rectangle">مستطيل</string>
+    <string name="grade_window_ellipse">قطع ناقص</string>
+    <string name="grade_window_width">العرض</string>
+    <string name="grade_window_height">الارتفاع</string>
+    <string name="grade_window_rotation">الدوران</string>
+    <string name="grade_node_actions">إجراءات العقدة</string>
 </resources>

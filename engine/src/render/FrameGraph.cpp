@@ -1,6 +1,7 @@
 #include "aurea/render/FrameGraph.hpp"
 #include "aurea/render/TrackedResourceBudget.hpp"
 #include "aurea/core/Log.hpp"
+#include "aurea/core/Time.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -1017,6 +1018,9 @@ void FrameGraph::execute(CommandList& cmds, bool timers) noexcept {
 
     for (u32 pos = segmentFirst_; pos < segmentEnd_; ++pos) {
         Pass& p = passes_[order_[pos]];
+        const u64 startNs = timers ? monotonic_ns() : 0;
+        p.cpuMeasured = timers;
+        p.cpuRecordNs = 0;
 
         for (u32 b = 0; b < p.barrierCount; ++b) {
             const PlannedBarrier& pb = barriers_[p.barrierBegin + b];
@@ -1050,7 +1054,9 @@ void FrameGraph::execute(CommandList& cmds, bool timers) noexcept {
 
         if (timers) cmds.end_timer();
         cmds.end_label();
-        if (!cmds.finish_pass().ok()) return;
+        const Status status = cmds.finish_pass();
+        if (timers) p.cpuRecordNs = monotonic_ns() - startNs;
+        if (!status.ok()) return;
     }
 
     for (const PlannedBarrier& pb : finalBarriers_) {
@@ -1072,6 +1078,40 @@ void FrameGraph::release(TransientTexturePool& pool) noexcept {
 // =============================================================================
 // Consultas
 // =============================================================================
+FrameGraph::PassMetrics FrameGraph::pass_metrics(u32 pass) const noexcept {
+    PassMetrics result;
+    if (pass >= passes_.size() || passes_[pass].culled) return result;
+    const Pass& p = passes_[pass];
+    result.cpuRecordNs = p.cpuRecordNs;
+    result.cpuMeasured = p.cpuMeasured;
+    for (u32 index = 0; index < p.accessCount; ++index) {
+        const AccessRecord& access = sortedAccess_[p.accessBegin + index];
+        const bool read = access.access == Access::Read || access.access == Access::CopySrc;
+        bool resourceSeen = false, directionSeen = false;
+        for (u32 previous = 0; previous < index; ++previous) {
+            const AccessRecord& other = sortedAccess_[p.accessBegin + previous];
+            if (other.resource != access.resource) continue;
+            resourceSeen = true;
+            const bool otherRead = other.access == Access::Read || other.access == Access::CopySrc;
+            directionSeen |= read == otherRead;
+        }
+        const u64 bytes = resources_[access.resource].desc.estimated_bytes();
+        if (!resourceSeen) result.workingSetBytes = add_resource_bytes(result.workingSetBytes, bytes);
+        if (directionSeen) continue;
+        if (read) {
+            result.estimatedReadBytes = add_resource_bytes(result.estimatedReadBytes, bytes);
+        } else {
+            const bool discardedDepth = access.access == Access::DepthWrite && !p.storeDepth;
+            const bool resolvedColor = access.access == Access::ColorWrite
+                && ((access.resource == p.colorTarget.index && p.resolve.valid())
+                    || (access.resource == p.colorTarget1.index && p.resolve1.valid()));
+            if (!discardedDepth && !resolvedColor)
+                result.estimatedWriteBytes = add_resource_bytes(result.estimatedWriteBytes, bytes);
+        }
+    }
+    return result;
+}
+
 TextureHandle FrameGraph::physical(FGTexture t) const noexcept {
     if (!t.valid() || t.index >= resources_.size()) return TextureHandle{};
     return resources_[t.index].physical;
@@ -1106,8 +1146,15 @@ std::string FrameGraph::dump() const {
                   static_cast<f64>(stats_.transientBytes) / (1024.0 * 1024.0));
     s += line;
     for (u32 pos = 0; pos < order_.size(); ++pos) {
-        const Pass& p = passes_[order_[pos]];
-        std::snprintf(line, sizeof(line), "  %2u [%s] %s\n", pos, to_string(p.stage), p.name);
+        const u32 index = order_[pos];
+        const Pass& p = passes_[index];
+        const PassMetrics metrics = pass_metrics(index);
+        std::snprintf(line, sizeof(line), "  %2u [%s] %s | CPU-record %s%.3f ms | estimated R/W %.3f/%.3f MiB | working-set %.3f MiB\n",
+                      pos, to_string(p.stage), p.name, metrics.cpuMeasured ? "" : "unmeasured ",
+                      static_cast<double>(metrics.cpuRecordNs) * 1e-6,
+                      static_cast<double>(metrics.estimatedReadBytes) / (1024.0 * 1024.0),
+                      static_cast<double>(metrics.estimatedWriteBytes) / (1024.0 * 1024.0),
+                      static_cast<double>(metrics.workingSetBytes) / (1024.0 * 1024.0));
         s += line;
     }
     return s;

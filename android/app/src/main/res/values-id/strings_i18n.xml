@@ -209,4 +209,24 @@
     <string name="perf_badge">Uji · %1$d dtk</string>
     <string name="perf_badge_stall">Macet di sini</string>
     <string name="perf_badge_stop">Berhenti</string>
+    <string name="cam_stage_features">Mendeteksi dan melacak titik</string>
+    <string name="cam_stage_solve">Menghitung kamera 3D</string>
+    <string name="prerender_group">Prarender grup</string>
+    <string name="edit_workspace_media">Media</string>
+    <string name="edit_workspace_edit">Edit</string>
+    <string name="edit_workspace_color">Warna</string>
+    <string name="edit_workspace_audio">Audio</string>
+    <string name="edit_workspace_text">Teks</string>
+    <string name="grade_node_number">Node %1$d</string>
+    <string name="grade_add_node">Tambah node</string>
+    <string name="grade_node_enabled">Koreksi aktif</string>
+    <string name="grade_node_previous">Pindahkan node ke awal</string>
+    <string name="grade_node_next">Pindahkan node ke akhir</string>
+    <string name="grade_window">Jendela</string>
+    <string name="grade_window_rectangle">Persegi panjang</string>
+    <string name="grade_window_ellipse">Elips</string>
+    <string name="grade_window_width">Lebar</string>
+    <string name="grade_window_height">Tinggi</string>
+    <string name="grade_window_rotation">Rotasi</string>
+    <string name="grade_node_actions">Tindakan node</string>
 </resources>

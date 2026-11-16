@@ -59,6 +59,59 @@ Stage spirv_stage(const uint32_t* words, size_t wordCount) noexcept {
     }
 }
 
+bool spirv_msl_resource_flags(const uint32_t* words, size_t wordCount, uint32_t& flags,
+                              std::string& error) noexcept {
+    flags = 0;
+    error.clear();
+    try {
+        spirv_cross::Compiler compiler(to_vector(words, wordCount));
+        if (compiler.get_entry_points_and_stages().empty())
+            throw std::runtime_error("SPIR-V module has no entry point");
+        for (const auto& image : compiler.get_shader_resources().storage_images) {
+            const auto access = compiler.get_decoration_bitset(image.id);
+            if (access.get(spv::DecorationNonReadable) || access.get(spv::DecorationNonWritable))
+                continue;
+            const auto format = compiler.get_type(image.base_type_id).image.format;
+            switch (format) {
+                case spv::ImageFormatR32f:
+                case spv::ImageFormatR32ui:
+                case spv::ImageFormatR32i:
+                    flags |= kMslFlagRequiresReadWriteTier1;
+                    break;
+                case spv::ImageFormatRgba32f:
+                case spv::ImageFormatRgba32ui:
+                case spv::ImageFormatRgba32i:
+                case spv::ImageFormatRgba16f:
+                case spv::ImageFormatRgba16ui:
+                case spv::ImageFormatRgba16i:
+                case spv::ImageFormatRgba8:
+                case spv::ImageFormatRgba8ui:
+                case spv::ImageFormatRgba8i:
+                case spv::ImageFormatR16f:
+                case spv::ImageFormatR16ui:
+                case spv::ImageFormatR16i:
+                case spv::ImageFormatR8:
+                case spv::ImageFormatR8ui:
+                case spv::ImageFormatR8i:
+                    flags |= kMslFlagRequiresReadWriteTier2;
+                    break;
+                default:
+                    // Includes unformatted images, whose bound pixel format
+                    // cannot be proven compatible before Metal compilation.
+                    flags |= kMslFlagUnsupportedReadWriteFormat;
+                    break;
+            }
+        }
+        return true;
+    } catch (const std::exception& exception) {
+        error = exception.what();
+    } catch (...) {
+        error = "failed to reflect Metal storage-image requirements";
+    }
+    flags = 0;
+    return false;
+}
+
 // -----------------------------------------------------------------------------
 // GLES (ESSL 3.10)
 // -----------------------------------------------------------------------------

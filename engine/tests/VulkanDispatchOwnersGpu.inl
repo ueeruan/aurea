@@ -87,14 +87,19 @@ void mixed_dispatch_owners(bool destroyOlder) {
         u32 realFences = 0, exactChannels = 0;
         auto older = std::make_unique<Gpu>(false, firstValidation);
         AUREA_CHECK(older->ok); if (!older->ok) return;
+        const bool olderValidation = older->backend.capabilities().validationEnabled;
         const auto olderInstance = older->backend.instance_dispatch();
         const auto olderDevice = older->backend.device_dispatch();
         auto younger = std::make_unique<Gpu>(false, !firstValidation);
         AUREA_CHECK(younger->ok); if (!younger->ok) return;
         const auto youngerInstance = younger->backend.instance_dispatch();
         const auto youngerDevice = younger->backend.device_dispatch();
-        AUREA_CHECK_EQ(older->backend.capabilities().validationEnabled, firstValidation);
-        AUREA_CHECK_EQ(younger->backend.capabilities().validationEnabled, !firstValidation);
+        const bool youngerValidation = younger->backend.capabilities().validationEnabled;
+        // A request may fall back when the host has no validation layer.
+        // Creating the second device must preserve the first device's flags.
+        AUREA_CHECK_EQ(older->backend.capabilities().validationEnabled, olderValidation);
+        if (!firstValidation) AUREA_CHECK(!olderValidation);
+        if (firstValidation) AUREA_CHECK(!youngerValidation);
         check_dispatch_owner(older->backend, olderInstance, olderDevice);
         check_dispatch_owner(younger->backend, youngerInstance, youngerDevice);
         AUREA_CHECK(copy_owner_pixels(*older, 1, realFences, exactChannels));
@@ -107,6 +112,8 @@ void mixed_dispatch_owners(bool destroyOlder) {
         check_dispatch_owner(survivor->backend,
             destroyOlder ? youngerInstance : olderInstance,
             destroyOlder ? youngerDevice : olderDevice);
+        AUREA_CHECK_EQ(survivor->backend.capabilities().validationEnabled,
+            destroyOlder ? youngerValidation : olderValidation);
         const bool survivorVerified = copy_owner_pixels(*survivor, 3, realFences, exactChannels);
         AUREA_CHECK(survivorVerified);
         survivor->backend.wait_idle();

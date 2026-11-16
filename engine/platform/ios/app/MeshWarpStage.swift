@@ -235,7 +235,7 @@ private func meshToUv(_ c: [Float], _ x: Float, _ y: Float) -> (Float, Float)? {
     let onSelect: () -> Void
     private var keyLook: KeyframeLook {
         guard let layer = model.primarySelection else { return .none }
-        let keys = (model.keyframes[layer] ?? []).filter { $0.property == 44 && $0.effectIndex == effectId }
+        let keys = (model.keysForLayer(layer) ?? []).filter { $0.property == 44 && $0.effectIndex == effectId }
         return keys.contains { $0.time == model.localPlayhead } ? .keyHere : keys.isEmpty ? .none : .animated
     }
 

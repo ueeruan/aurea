@@ -40,12 +40,20 @@ constexpr char kMslMagic[8] = {'A', 'U', 'R', 'E', 'A', 'M', 'S', 'L'};
 struct MslHeader {
     char magic[8];
     u32  version;
-    u32  flags;            ///< bit 0: o payload é um `.metallib` já compilado
+    u32  flags;            ///< xlate::kMslFlag*: payload type and reflected resource requirements
     u32  payloadBytes;
     u32  threadgroup[3];   ///< compute: tamanho do grupo (0 = não declarado)
 };
 static_assert(sizeof(MslHeader) == 32, "cabecalho do MSL com tamanho fixo");
-constexpr u32 kMslFlagMetallib = 1u;
+bool supports_shader_resources(id<MTLDevice> device, u32 flags) noexcept {
+    if (flags & xlate::kMslFlagUnsupportedReadWriteFormat)
+        return false;
+    if (flags & xlate::kMslFlagRequiresReadWriteTier2)
+        return device.readWriteTextureSupport >= MTLReadWriteTextureTier2;
+    if (flags & xlate::kMslFlagRequiresReadWriteTier1)
+        return device.readWriteTextureSupport >= MTLReadWriteTextureTier1;
+    return true;
+}
 
 bool looks_like_spirv(const u8* bytes, usize len) noexcept {
     if (len < 4) return false;
@@ -437,6 +445,8 @@ Result<ShaderHandle> Backend::create_shader(const ShaderDesc& desc) noexcept {
             MslHeader h{};
             std::memcpy(&h, bytes, sizeof(h));
             if (h.version != 1) return Status{Errc::UnsupportedVersion, "versao do cabecalho MSL"};
+            if (h.flags & ~xlate::kMslKnownFlags)
+                return Status{Errc::UnsupportedVersion, "unknown MSL resource capability flags"};
             if (h.payloadBytes == 0 || h.payloadBytes > desc.spirvBytes - sizeof(MslHeader)) {
                 return Status{Errc::CorruptData, "tamanho do payload MSL"};
             }
@@ -444,7 +454,9 @@ Result<ShaderHandle> Backend::create_shader(const ShaderDesc& desc) noexcept {
             // O comprimento é o DECLARADO: o blob vem alinhado em palavras de
             // 32 bits, e o preenchimento que sobra não faz parte do shader.
             payloadBytes = h.payloadBytes;
-            metallib = (h.flags & kMslFlagMetallib) != 0;
+            if (!supports_shader_resources(d.device, h.flags))
+                return Status{Errc::NotSupported, "Metal device cannot support the shader's read-write texture formats"};
+            metallib = (h.flags & xlate::kMslFlagMetallib) != 0;
             threadgroup[0] = h.threadgroup[0];
             threadgroup[1] = h.threadgroup[1];
             threadgroup[2] = h.threadgroup[2];
@@ -549,6 +561,16 @@ Result<ShaderHandle> Backend::create_runtime_shader(const ShaderDesc& desc, std:
             return Status{Errc::InvalidArgument, "SPIR-V invalido"};
         }
         const usize words = desc.spirvBytes / 4;
+        u32 resourceFlags = 0;
+        std::string reflectionError;
+        if (!xlate::spirv_msl_resource_flags(desc.spirv, words, resourceFlags, reflectionError)) {
+            if (error) *error = "SPIR-V resource reflection: " + reflectionError;
+            return Status{Errc::ShaderCompileFailed, "cannot reflect plugin storage-image requirements"};
+        }
+        if (!supports_shader_resources(d.device, resourceFlags)) {
+            if (error) *error = "Metal device does not support the plugin's read-write texture formats";
+            return Status{Errc::NotSupported, "Metal device cannot support the shader's read-write texture formats"};
+        }
         const xlate::Stage stage = desc.stage == ShaderStage::Vertex ? xlate::Stage::Vertex
                                  : desc.stage == ShaderStage::Fragment ? xlate::Stage::Fragment
                                  : xlate::Stage::Compute;

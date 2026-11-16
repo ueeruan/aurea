@@ -155,7 +155,12 @@ void evaluate_pose(const SceneAsset& asset, i32 clip, f32 t, Pose& out, PoseWork
         out.nodeWorld[k] = parent >= 0 ? out.nodeWorld[static_cast<usize>(parent)] * local : local;
         for (i32 c : asset.nodes[k].children) todo.push_back({c, i});
     }
-    // Juntas: mundo da junta × inversa de bind (no espaço da cena do modelo).
+    rebuild_skin_matrices(asset, out);
+}
+
+void rebuild_skin_matrices(const SceneAsset& asset, Pose& out) {
+    const usize n = out.nodeWorld.size();
+    // Joint worlds may have changed through authored part transforms.
     out.jointMatrices.clear();
     out.skinJointOffset.assign(asset.skins.size(), 0);
     for (usize s = 0; s < asset.skins.size(); ++s) {

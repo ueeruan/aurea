@@ -41,6 +41,8 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.AwaitPointerEventScope
+import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
@@ -105,6 +107,16 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
     // salvo no arquivo; aqui a vista e o motor voltam juntos a 100 %).
     androidx.compose.runtime.LaunchedEffect(store) {
         androidx.compose.runtime.snapshotFlow { store.project.path }.collect { StageView.reset(store) }
+    }
+    // AE layers (B10), só no Aurea PC: grade, margens seguras e réguas são desenhadas
+    // pelo MOTOR na saída da prévia (nunca no export); aqui só vai o pedido. Lido num
+    // snapshotFlow para o corpo do palco não recompor quando a coluna de modos muda.
+    // No celular nada é pedido: a grade continua a do overlay (drawStageOverlay).
+    if (com.aurea.aurea.ui.platform.PlatformFeatures.desktopAe) androidx.compose.runtime.LaunchedEffect(store) {
+        androidx.compose.runtime.snapshotFlow {
+            val bits = (if (ViewModes.grid) 1 else 0) or (if (ViewModes.safe) 2 else 0) or (if (ViewModes.rulers) 4 else 0)
+            Triple(bits, ViewModes.gridSpacing, store.project.path)
+        }.collect { (bits, spacing, _) -> store.setPreviewGuides(bits, spacing.toFloat()) }
     }
     Box(modifier.testTag("editor.stage").background(AureaColors.EditorTopBar).clipToBounds()) {
         PreviewSurface(store, Modifier.fillMaxSize())
@@ -175,13 +187,13 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
         // rótulo "NN%" no canto sup-esq (o chip "250 %" saiu: o 100 % mora no
         // número da coluna de modos).
         // Na Cena 3D a vista mora na coluna da direita (Scene3DViewport.kt).
-        if (!store.rawPlayback && !ui.fullscreen && !store.sceneEditor) CanvasZoomMode(store, Modifier.align(Alignment.TopStart))
+        if (!store.rawPlayback && !ui.fullscreen && !store.sceneEditor && store.uiMode != com.aurea.aurea.state.UI_MODE_EDIT) CanvasZoomMode(store, Modifier.align(Alignment.TopStart))
         // 0.4.1 (mockup "interface 03"): grade, modos de visão e zoom flutuando no canto sup-dir.
-        if (!store.rawPlayback && !ui.fullscreen && !store.sceneEditor) StageFloatPills(store, Modifier.align(Alignment.TopEnd))
+        if (!store.rawPlayback && !ui.fullscreen && !store.sceneEditor && store.uiMode != com.aurea.aurea.state.UI_MODE_EDIT) StageFloatPills(store, Modifier.align(Alignment.TopEnd))
         // 0.4.6: o nome da vista do AE escolhida (Frente, Topo, Vista personalizada 1…).
-        if (!store.rawPlayback) StageViewLabel(store, Modifier.align(Alignment.BottomEnd).padding(end = 6.dp))
+        if (!store.rawPlayback && (store.sceneEditor || store.uiMode != com.aurea.aurea.state.UI_MODE_EDIT)) StageViewLabel(store, Modifier.align(Alignment.BottomEnd).padding(end = 6.dp))
         // Na Cena 3D as ferramentas ficam na barra da esquerda (Scene3DViewport.kt).
-        if (store.selection.size == 1 && !store.rawPlayback && !store.sceneEditor) {
+        if (store.selection.size == 1 && !store.rawPlayback && !store.sceneEditor && store.uiMode != com.aurea.aurea.state.UI_MODE_EDIT) {
             Row(Modifier.align(Alignment.BottomStart).padding(8.dp)) {
                 if (store.gizmoAxes) {
                     val toolLabel = stringResource(R.string.gizmo_tool_label)
@@ -479,7 +491,10 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     // partir do centro) + cruz do centro, ligada pela coluna de modos. O
     // tamanho da composição em 1× vai para os degraus de zoom da coluna.
     StageView.noteExtent(m.compW * m.baseFit, m.compH * m.baseFit)
-    if (ViewModes.grid) {
+    // No Aurea PC a grade (e a cruz do centro) sai do motor, na saída da prévia
+    // (Engine::set_preview_guides, shaders/composite/output.frag); no celular
+    // continua a deste overlay, como sempre.
+    if (ViewModes.grid && !com.aurea.aurea.ui.platform.PlatformFeatures.desktopAe) {
         val gridInk = AureaColors.Text.copy(alpha = .35f)
         val gridStroke = 1.dp.toPx()
         val step = ViewModes.gridSpacing.toFloat().coerceAtLeast(1f)
@@ -529,8 +544,10 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
         // linhas saem do motor, que não é estado do Compose).
         store.sceneYaw; store.scenePitch; store.sceneDistance; store.sceneCameraView
         val lines = store.sceneGuideLines()
+        val hiddenGuides = SceneWorkspaceHost.hiddenGuides   // Aurea PC: sobreposições (0 = todas)
         for (i in lines.indices step 5) {
             val kind = lines[i + 4].toInt()
+            if (hiddenGuides != 0 && kind in 0..30 && (hiddenGuides ushr kind) and 1 != 0) continue
             val color = when (kind) {
                 1 -> Color(0xFFFFCC55); 2 -> Color.Cyan
                 3 -> Color.White.copy(alpha = .10f)        // chão quadriculado
@@ -644,6 +661,8 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     if (ui.panel == com.aurea.aurea.editor.panels.EditorPanel.Mask) {
         store.masks?.let { drawMasks(m, it, store.maskEdit, store.maskPoint, store.maskDrawing) }
         drawMaskPointMarks(store, m)
+        // Lote M (só o Aurea PC): as alças do feather de largura variável.
+        if (com.aurea.aurea.ui.platform.PlatformFeatures.desktopAe) drawMaskFeatherOverlay(store, m)
     }
 
     val selection = store.selection
@@ -1283,6 +1302,12 @@ private suspend fun PointerInputScope.stageGestures(
         val down = awaitFirstDown(requireUnconsumed = false)
         val downX = down.position.x
         val downY = down.position.y
+        // Aurea PC (Cena 3D no jeito do Blender): botão do meio, Alt+arrasto e o clique do modo
+        // modal são da área de trabalho do PC. Nulo no celular e no tablet: nada muda.
+        if (store.sceneEditor && m.valid) {
+            val platformPointer = SceneWorkspaceHost.pointer
+            if (platformPointer != null && with(platformPointer) { press(store, m, down) }) return@awaitEachGesture
+        }
 
         // Rig 2D: criar/mover juntas (Montar) ou posar (Animar).
         if (rigActive(store)) {
@@ -1329,6 +1354,12 @@ private suspend fun PointerInputScope.stageGestures(
         // de forma RELATIVA (a alça, acima, continua absoluta); tocar sai do modo.
         if (m.valid && effectParamDragActive(store)) {
             effectParamRelativeGesture(store, m, down, slop)
+            return@awaitEachGesture
+        }
+        // Lote K (AE): Motion Sketch — arrastar a camada escolhida grava a posição
+        // enquanto a prévia toca (a regra dos keys mora no motor).
+        if (m.valid && store.motionSketch && com.aurea.aurea.ui.platform.PlatformFeatures.desktopAe) {
+            motionSketchGesture(store, m, down, slop)
             return@awaitEachGesture
         }
 
@@ -1402,7 +1433,11 @@ private suspend fun PointerInputScope.stageGestures(
                 rigPoseGesture(store, m, down, slop)
                 return@awaitEachGesture
             }
-            if (m.valid) sceneGesture(store, m, edit, down, slop, haptic)
+            if (m.valid) {
+                // Aurea PC: clique escolhe e arrastar no vazio abre a caixa (nulo = o toque de sempre).
+                val platformPointer = SceneWorkspaceHost.pointer
+                if (platformPointer != null) with(platformPointer) { gesture(store, m, down) } else sceneGesture(store, m, edit, down, slop, haptic)
+            }
             return@awaitEachGesture
         }
         // 0.4.6: vistas do AE (Frente..Base, Personalizada). Sem nada escolhido e
@@ -1516,7 +1551,9 @@ private suspend fun PointerInputScope.stageGestures(
         val ms = store.masks
         val editMask = store.maskEdit
         if (maskMode(store, ui) && ms != null && editMask != null && m.valid && ms.layer == store.primary) {
-            maskGesture(store, m, ms, editMask, down, slop, 28.dp.toPx(), haptic)
+            // Lote M (só o Aurea PC): com a ferramenta de feather ligada o gesto edita os pontos de feather.
+            if (com.aurea.aurea.ui.platform.PlatformFeatures.desktopAe && MaskFeatherTool.active) maskFeatherGesture(store, m, ms, editMask, down)
+            else maskGesture(store, m, ms, editMask, down, slop, 28.dp.toPx(), haptic)
             return@awaitEachGesture
         }
 
@@ -2222,6 +2259,7 @@ private fun DrawScope.drawMasks(m: StageMapper, ms: EditorStore.MaskState, edit:
         if (n == 0) continue
         val p = mask.points
         val on = mask.id == edit
+        if (mask.hidden && !on) continue   // lote M: máscara oculta (só o Aurea PC marca) some do palco
         path.reset()
         path.moveTo(sx(p[0], p[1]), sy(p[0], p[1]))
         val segs = if (mask.closed) n else n - 1
@@ -2368,4 +2406,32 @@ private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.mas
 @Composable
 private fun CameraTrackFollower(store: EditorStore) {
     androidx.compose.runtime.LaunchedEffect(store.playhead, store.cameraTrack, store.primary) { store.refreshCameraFeatures(true) }
+}
+
+/**
+ * Lote K (AE): Motion Sketch. O dedo que pousa no palco com a camada escolhida
+ * começa a captura (a prévia toca); cada movimento é uma amostra (quadro,
+ * x, y) na composição; soltar para a prévia e grava os keys de posição.
+ * Sem camada escolhida, nada acontece.
+ */
+private suspend fun AwaitPointerEventScope.motionSketchGesture(store: EditorStore, m: StageMapper, down: PointerInputChange, slop: Float) {
+    val layer = store.primary ?: return
+    down.consume()
+    var started = false
+    try {
+        while (true) {
+            val e = awaitPointerEvent()
+            val ch = e.changes.firstOrNull { it.id == down.id } ?: break
+            ch.consume()
+            if (!ch.pressed) break
+            if (!started) {
+                if (hypot(ch.position.x - down.position.x, ch.position.y - down.position.y) < slop) continue
+                started = store.motionSketchBegin(layer, m.cx(down.position.x), m.cy(down.position.y))
+                if (!started) break
+            }
+            store.motionSketchSample(m.cx(ch.position.x), m.cy(ch.position.y))
+        }
+    } finally {
+        if (started) store.motionSketchEnd()
+    }
 }

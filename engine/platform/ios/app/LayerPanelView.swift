@@ -405,6 +405,10 @@ struct LayerPanelView: View {
         // Omega aparência (área 05): Cor e preenchimento (forma e texto) e Borda e
         // sombra (todas as camadas visuais) têm painel próprio.
         case .colorFill:
+            // Redesenho do vetor: Cor e preenchimento do vetor (como na referência).
+            if l.vector { model.vectorFace = .fill }
+            // F6: no 3D, Cor e preenchimento = Material (Editar = Objeto 3D; acabou a duplicata).
+            if l.kind == 10 { model.face3D = .material }
             model.openPanel(l.kind == 10 ? .layer3D : l.vector ? .vector : .shape)
         case .borderShadow:
             model.openPanel(.borderShadow)
@@ -422,7 +426,8 @@ struct LayerPanelView: View {
             case .drawing: model.openPanel(.drawing)
             case .mediaShape: model.openPanel(.mask)
             case .camera: model.openPanel(.camera)   // Omega aparência (P1-6): Opções da câmera
-            case .light, .material: model.openPanel(.layer3D)
+            // F6: Editar do objeto 3D = Objeto 3D (forma, partes, animação); Opções da luz = Cena 3D.
+            case .light, .material: model.face3D = edit == .light ? .scene : .object; model.openPanel(.layer3D)
             case .particles: model.openPanel(.particles)
             case nil: break
             }
@@ -687,7 +692,7 @@ struct SpeedPanel: View {
     private var keyed: Bool { media || kind == 12 }
     private var remap: Bool { flags & 4 != 0 }
     private var animated: Bool { flags & 64 != 0 }
-    private var speedKeys: [KeyframeItem] { (model.keyframes[id] ?? []).filter { $0.property == 39 && $0.effectIndex == .max } }
+    private var speedKeys: [KeyframeItem] { (model.keysForLayer(id) ?? []).filter { $0.property == 39 && $0.effectIndex == .max } }
     private var look: KeyframeLook {
         guard keyed else { return .none }
         return speedKeys.contains { $0.time == model.localPlayhead } ? .keyHere : animated ? .animated : .none
@@ -706,13 +711,17 @@ struct SpeedPanel: View {
             onDeleteAllKeyframes: { model.deleteAllKeyframes(id, property: remapOn ? 30 : 39) },
             onCurve: canKey ? { openSpeedCurve() } : remapOn ? { openRemapCurve() } : nil,
             curveReady: remapOn ? keys.count >= 2 : speedKeys.count >= 2)
-        let tabs: [PanelTab] = media ? [
+        // F10: a aba Opções só tem o que é do vídeo (de trás para a frente, repetir, câmera
+        // lenta); as fichas de velocidade repetiam a régua e saíram. Áudio: Velocidade · Curva.
+        let video = kind == 1
+        let base: [PanelTab] = media ? [
             PanelTab(id: "speed", label: AureaText.t("editor_velocidade"), glyph: CupertinoGlyph.Speedometer),
             PanelTab(id: "curve", label: AureaText.t("om_lp_speed_tab_curve"), glyph: CupertinoGlyph.Waveform),
-            PanelTab(id: "options", label: AureaText.t("om_lp_speed_tab_options"), glyph: CupertinoGlyph.SliderHorizontal3),
         ] : []
+        let tabs: [PanelTab] = base + (media && video
+            ? [PanelTab(id: "options", label: AureaText.t("om_lp_speed_tab_options"), glyph: CupertinoGlyph.SliderHorizontal3)] : [])
         PanelFrame(rail: rail, tabs: tabs, selectedTab: tab, onTab: { tab = $0 }) {
-            switch media ? tab : "speed" {
+            switch media && (video || tab != "options") ? tab : "speed" {
             case "curve": curveTab
             case "options": optionsTab
             default: mainTab
@@ -733,7 +742,7 @@ struct SpeedPanel: View {
 
     /// 0.4.1: chaves do remapeamento (TrackProperty::TimeRemap = 30), em ordem.
     private var remapKeys: [KeyframeItem] {
-        (model.keyframes[id] ?? []).filter { $0.property == 30 }.sorted { $0.time < $1.time }
+        (model.keysForLayer(id) ?? []).filter { $0.property == 30 }.sorted { $0.time < $1.time }
     }
 
     /// 0.4.1: ◆ do remapeamento — mesmas chamadas do ◇ da linha (a curva mantém 2 chaves).
@@ -805,23 +814,18 @@ struct SpeedPanel: View {
                     SpeedChip(label: AureaText.t("remap_linha_tempo"), on: remap) { change { $0.setTimeRemap(true, forLayer: id) } }
                 }
             }
-            if remap { TimeRemapEffectEditor(effectId: .max) }
+            // F10: a interpolação dos quadros mora em Opções (câmera lenta); aqui só a curva.
+            if remap { TimeRemapEffectEditor(effectId: .max, showInterpolation: false) }
             else { hint("panel_velocidade_keyframes_duracao_fica") }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
     }
 
+    /// Aba Opções (só vídeo): de trás para a frente, repetir a mídia e a câmera lenta.
+    /// F10: as fichas 0,25x…4x saíram (a régua e o teclado da aba Velocidade fazem o mesmo).
     private var optionsTab: some View {
-        let speed = (model.detail["speed"] as? NSNumber)?.floatValue ?? 1
         let blend = flags & 16 != 0 ? 2 : flags & 8 != 0 ? 1 : 0
         return VStack(alignment: .leading, spacing: 0) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(Array([Float(0.25), 0.5, 1, 2, 4].enumerated()), id: \.offset) { index, value in
-                        SpeedChip(label: ["0,25x", "0,5x", "1x", "2x", "4x"][index], on: abs(speed - value) < 0.005) { setSpeed(value) }
-                    }
-                }
-            }
             if kind == 1 {
                 HStack {
                     Text(AureaText.t("panel_passar_tras_frente")).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
@@ -1090,7 +1094,7 @@ struct VolumeFrame: View {
     private func scalar(_ key: String, _ fallback: Float = 0) -> Float { (model.detail[key] as? NSNumber)?.floatValue ?? fallback }
     private var flags: UInt32 { (model.detail["audioFlags"] as? NSNumber)?.uint32Value ?? 0 }
     private var fps: Float { Float(max(1, model.compositionFps)) }
-    private var volumeKeys: [KeyframeItem] { (model.keyframes[id] ?? []).filter { $0.property == 32 && $0.effectIndex == .max && $0.paramIndex == 0 } }
+    private var volumeKeys: [KeyframeItem] { (model.keysForLayer(id) ?? []).filter { $0.property == 32 && $0.effectIndex == .max && $0.paramIndex == 0 } }
     private var keyLook: KeyframeLook { volumeKeys.contains { $0.time == model.localPlayhead } ? .keyHere : flags & 8 != 0 ? .animated : .none }
     private var expressionLook: ExpressionLook {
         let info = model.engine.expression(id, property: 32, effect: .max, param: 0)

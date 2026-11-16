@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -98,8 +99,24 @@ internal fun ParticlesPanel(env: PanelEnv) {
                 null
             },
         )
-        CompositionLocalProvider(LocalParticleSelection provides (selected to { selected = it })) {
-            ParticleBody(env, p)
+        // Funções (F9): um grupo por aba — Presets · Emissor · Física · Partícula (antes, uma
+        // rolagem só com ≈ 14 controles). Sem os controles (camada antiga) só há Presets.
+        val tabbed = p[P.EmitterType] >= 10f
+        var tab by androidx.compose.runtime.saveable.rememberSaveable(store.primary) { androidx.compose.runtime.mutableIntStateOf(0) }
+        val shown = if (tabbed) tab.coerceIn(0, 3) else 0
+        Box(Modifier.weight(1f).fillMaxHeight()) {
+            CompositionLocalProvider(LocalParticleSelection provides (selected to { selected = it })) {
+                ParticleBody(env, p, shown)
+            }
+        }
+        if (tabbed) {
+            Box(Modifier.width(0.7.dp).fillMaxHeight().background(AureaColors.ContentStrongLine))
+            PanelIconTabs(listOf(
+                PanelIconTab(com.aurea.aurea.ui.theme.CupertinoGlyph.WandStars, stringResource(R.string.panel_presets), "particles.tab.presets"),
+                PanelIconTab(com.aurea.aurea.ui.theme.CupertinoGlyph.Sparkles, stringResource(R.string.particular_group_emitter), "particles.tab.emitter"),
+                PanelIconTab(com.aurea.aurea.ui.theme.CupertinoGlyph.ArrowDown, stringResource(R.string.particular_group_physics), "particles.tab.physics"),
+                PanelIconTab(com.aurea.aurea.ui.theme.CupertinoGlyph.Circle, stringResource(R.string.particular_group_particle), "particles.tab.particle"),
+            ), shown, stringResource(R.string.panel_particulas)) { tab = it; selected = null }
         }
     }
 }
@@ -108,14 +125,15 @@ internal fun ParticlesPanel(env: PanelEnv) {
 private val LocalParticleSelection = compositionLocalOf<Pair<Int?, (Int) -> Unit>> { null to {} }
 
 @Composable
-private fun ParticleBody(env: PanelEnv, p: List<Float>) {
+private fun ParticleBody(env: PanelEnv, p: List<Float>, tab: Int) {
     val store = env.store
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(androidx.compose.runtime.remember(tab) { androidx.compose.foundation.ScrollState(0) }).padding(18.dp)) {
+        if (tab == 0) {
         PresetRow(store)
         Spacer(Modifier.height(8.dp))
         Text(stringResource(R.string.particular_convert_note), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
-        if (p[P.EmitterType] >= 10f) {
-        Group(stringResource(R.string.particular_group_emitter))
+        }
+        if (tab == 1) {
         if (p[P.EmitterType] >= 13f) {
             Dim(store, stringResource(R.string.particular_width), P.EmitterWidth, p, 10f, 0f, 8000f, " px")
             Dim(store, stringResource(R.string.particular_height), P.EmitterHeight, p, 10f, 0f, 8000f, " px")
@@ -126,11 +144,13 @@ private fun ParticleBody(env: PanelEnv, p: List<Float>) {
         }
         Dim(store, stringResource(R.string.panel_particulas_segundo), P.Rate, p, 5f, 0f, 6000f, "/s")
         Dim(store, stringResource(R.string.panel_duracao_cada), P.Lifetime, p, .02f, .05f, 10f, " s", decimals = 2)
-        Group(stringResource(R.string.particular_group_physics))
+        }
+        if (tab == 2) {
         Dim(store, stringResource(R.string.panel_velocidade), P.Speed, p, 2f, 0f, 4000f, " px/s")
         Dim(store, stringResource(R.string.panel_gravidade), P.GravityY, p, 4f, -4000f, 4000f, " px/s²", negate = true)
         Dim(store, stringResource(R.string.world_resistance), P.Drag, p, .02f, 0f, 10f, "", decimals = 2)
-        Group(stringResource(R.string.particular_group_particle))
+        }
+        if (tab == 3) {
         Choice(store, stringResource(R.string.particular_shape), P.ParticleType) {
             listOf(stringResource(R.string.particular_shape_circle), stringResource(R.string.particular_shape_square),
                 stringResource(R.string.particular_shape_streak), stringResource(R.string.particular_shape_soft), stringResource(R.string.world_purple_crystals))

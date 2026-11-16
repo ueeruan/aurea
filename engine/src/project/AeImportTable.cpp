@@ -69,11 +69,9 @@ constexpr i8 kGlowOperation[] = {-1, -1, 0, 1, -1, -1, -1, -1, -1, -1, -1, -1, -
 constexpr i8 kInvertAlpha[] = {-1, 0, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 1};
 constexpr i8 kMinimaxOp[] = {-1, 1, 0, 2, 3};                    // Min → Erodir, Max → Dilatar
 constexpr i8 kMinimaxChannel[] = {-1, 2, 3, -1, -1, -1, 1};
-constexpr i8 kWaveSquare[] = {-1, 0, 1, -1, -1, -1, -1, -1, -1, -1};
-constexpr i8 kWavePin[] = {-1, 0, 1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+constexpr i8 kWavePin[] = {-1, 0, 1, 2, -1, 3, 4, 5, 6, -1, 7, 8};
 constexpr i8 kTurbDisplace[] = {-1, 0, 1, 2, -1, 3, 4, 5, -1, 6, 7, 8};
-constexpr i8 kTurbPinning[] = {-1, 0, -1, 1, 6, 7, 2, 3, 4, 5, -1, 8, 9, 10, -1, -1, -1, -1};
-constexpr i8 kRadialWipeDir[] = {-1, 0, 1, -1};
+constexpr i8 kTurbPinning[] = {-1, 0, -1, 1, 2, 3, 4, 5, 6, 7, -1, 8, 9, 10, 11, 12, 13, 14};
 constexpr i8 kRadialFastZoom[] = {-1, 0, 1, 2};
 constexpr i8 kColoramaInput[] = {-1, 0, 2, 3, 4, 1, -1, -1, -1, -1, -1};
 // AE 2026
@@ -97,6 +95,12 @@ constexpr PRule kAngle[] = {P(1, "Angle", "angle")};
 constexpr PRule kCheckbox[] = {P(1, "Checkbox", "checkbox", PConv::Bool)};
 constexpr PRule kColor[] = {P(1, "Color", "color", PConv::Color)};
 constexpr PRule kPoint[] = {P(1, "Point", "point", PConv::PointPx)};
+// AE expressions (lote E): Dropdown Menu (o valor do AE é 1..; o Aurea guarda
+// o índice 0.. e a expressão volta a ler 1..), Layer (a camada escolhida não
+// vem no preset: fica para escolher aqui) e 3D Point Control.
+constexpr PRule kDropdown[] = {E(1, "Menu", "menu", kMinus1Long)};
+constexpr PRule kLayerControl[] = {U(1, "Layer", 0)};
+constexpr PRule kPoint3D[] = {P(1, "3D Point", "point3d")};
 
 constexpr PRule kGeometry2[] = {
     P(1, "Anchor Point", "anchor", PConv::PointRel),
@@ -193,6 +197,55 @@ constexpr PRule kGlow[] = {
     E(14, "Glow Dimensions", "glow_dimensions", kMinus1),   // H e V, Horizontal, Vertical
 };
 
+// PEDG 1.6.6: parameter numbers are matchName suffixes, not UI positions.
+// REA ParamSetup and the installed host property enumeration agree on these IDs.
+constexpr PRule kDeepGlow[] = {
+    I(72, "Version"), I(73, "Vendor"), I(74, "Renderer"), I(75, "Shader Version"),
+    P(1, "Radius", "ref_radius"),
+    P(2, "Exposure", "ref_exposure"),
+    P(4, "Threshold", "ref_threshold"),
+    P(5, "Threshold Smooth", "ref_threshold_smooth"),
+    U(56, "Layer", 0), // AE layer indices need composition-level reference resolution.
+    E(57, "Mask Mode", "ref_mask_mode", kTwoChoice),
+    P(59, "Invert", "ref_mask_invert", PConv::Bool),
+    E(8, "Blend Mode", "ref_blend", kTwoChoice),
+    P(35, "Smooth Blending", "ref_smooth_blending", PConv::Bool),
+    P(11, "Spread", "ref_spread"),
+    P(43, "Auto Detect Gamma", "ref_auto_gamma", PConv::Bool),
+    P(9, "Gamma Correction", "ref_gamma", PConv::Bool),
+    P(10, "Aspect Ratio", "ref_aspect"),
+    P(52, "Enable Angle", "ref_angle_enabled", PConv::Bool),
+    P(53, "Aspect Angle", "ref_angle"),
+    P(13, "Enable Chromatic", "ref_chromatic_enabled", PConv::Bool),
+    E(14, "Channels", "ref_channels", kMinus1),
+    P(15, "Amount", "ref_chromatic_amount"),
+    P(37, "Enable Tint", "ref_tint_enabled", PConv::Bool),
+    P(38, "Color", "ref_tint_color", PConv::Color),
+    E(39, "Mode", "ref_tint_mode", kMinus1),
+    P(41, "Mix", "ref_tint_mix"),
+    P(47, "Fixed Steps", "ref_fixed_steps", PConv::Bool),
+    P(48, "Number of Steps", "ref_steps"),
+    P(19, "Downsample", "ref_downsample"),
+    P(20, "Steps Multiplier", "ref_steps_multiplier"),
+    P(50, "Auto Iterations", "ref_auto_iterations", PConv::Bool),
+    P(21, "Glow Iterations", "ref_iterations"),
+    E(84, "Buffer Expansion", "ref_buffer_expansion", kTwoChoice),
+    P(85, "Aux Expansion", "ref_aux_expansion"),
+    P(31, "Enable Dither", "ref_dither_enabled", PConv::Bool),
+    P(32, "Monochromatic", "ref_dither_mono", PConv::Bool),
+    P(33, "Dither Amount", "ref_dither_amount"),
+    E(23, "View", "ref_view", kTwoChoice),
+    P(24, "Source Opacity", "ref_source_opacity"),
+    P(25, "Unmult", "ref_unmult", PConv::Bool),
+    E(55, "Edge Behaviour", "ref_edge_behaviour", kMinus1),
+    I(66, "Show Buffers"), I(88, "Draw Dimensions Comp UI"),
+    I(86, "Output PreRender Rects"), I(87, "Output Buffer Dimensions"),
+    U(89, "View Input CPU", 0),
+    P(26, "Left", "ref_left"), P(27, "Top", "ref_top"),
+    P(28, "Right", "ref_right"), P(29, "Bottom", "ref_bottom"),
+};
+constexpr FixedValue kDeepGlowFixed[] = {{"render_mode", {1, 0, 0, 0}}};
+
 constexpr PRule kInvert[] = {
     E(1, "Channel", "invert_color", kInvertColorAll),
     E(1, "Channel", "invert_alpha", kInvertAlpha),
@@ -272,17 +325,17 @@ constexpr PRule kMinimax[] = {
 };
 
 constexpr PRule kWaveWarp[] = {
-    E(1, "Wave Type", "square", kWaveSquare),
     E(1, "Wave Type", "wave_type", kMinus1),
     P(2, "Wave Height", "height"),
-    P(3, "Wave Width", "wavelength"),
-    P(4, "Direction", "direction_angle"),
+    P(3, "Wave Width", "width"),
+    P(4, "Direction", "direction"),
     P(5, "Wave Speed", "speed"),
-    E(6, "Pinning", "pin_edges", kWavePin),
+    E(6, "Pinning", "pinning", kWavePin),
     P(7, "Phase", "phase"),
-    I(8, "Antialiasing (Best Quality)"),
+    E(8, "Antialiasing (Best Quality)", "antialias", kMinus1),
 };
-constexpr FixedValue kWaveWarpFixed[] = {{"direction", {4, 0, 0, 0}}};
+
+constexpr PRule kSharpen[] = {P(1, "Sharpen Amount", "amount")};
 
 constexpr PRule kNoise[] = {
     P(1, "Amount of Noise", "intensity"),
@@ -294,8 +347,8 @@ constexpr PRule kBlockDissolve[] = {
     P(1, "Transition Completion", "completion"),
     P(2, "Block Width", "block_width"),
     P(3, "Block Height", "block_height"),
-    P(4, "Feather", "feather", PConv::PxPercentMax),
-    I(5, "Soft Edges (Best Quality)"),
+    P(4, "Feather", "feather"),
+    P(5, "Soft Edges (Best Quality)", "soft_edges", PConv::Bool),
 };
 
 constexpr PRule kDirectionalBlur[] = {
@@ -306,8 +359,24 @@ constexpr PRule kDirectionalBlur[] = {
 
 constexpr PRule kPosterizeTime[] = {P(1, "Frame Rate", "frame_rate")};
 
+// AE reference batch A2 (Time_Displace.aex). The layer menu defaults to the
+// layer itself, which is the Aurea default (no map layer); another AE layer
+// needs composition-level index resolution and is left at that default.
+constexpr PRule kTimeDisplacementReference[] = {
+    I(1, "Time Displacement Layer"),
+    P(2, "Max Displacement Time [sec]", "max_time"),
+    P(3, "Time Resolution [fps]", "time_resolution"),
+    P(4, "If Layer Sizes Differ", "stretch", PConv::Bool),
+};
+
 constexpr PRule kGaussian[] = {
     P(1, "Blurriness", "blurriness"),
+    E(2, "Blur Dimensions", "dimensions", kMinus1),
+    P(3, "Repeat Edge Pixels", "repeat_edges", PConv::Bool),
+};
+
+constexpr PRule kFastBlurReference[] = {
+    P(1, "Blurriness", "radius"),
     E(2, "Blur Dimensions", "dimensions", kMinus1),
     P(3, "Repeat Edge Pixels", "repeat_edges", PConv::Bool),
 };
@@ -343,9 +412,8 @@ constexpr PRule kColorama[] = {
 };
 
 constexpr PRule kFindEdges[] = {
-    // O "Inverter" do Aurea nasce ligado = o visual padrão do AE (desligado).
-    P(1, "Invert", "invert", PConv::Bool, -1, 1),
-    P(2, "Blend With Original", "mix", PConv::Same, -1, 100),
+    P(1, "Invert", "invert", PConv::Bool),
+    P(2, "Blend With Original", "blend_original"),
 };
 
 constexpr PRule kRadialFastBlur[] = {
@@ -358,16 +426,17 @@ constexpr PRule kTurbulentDisplace[] = {
     E(1, "Displacement", "displacement", kTurbDisplace),
     P(2, "Amount", "amount"),
     P(3, "Size", "size"),
-    P(4, "Offset (Turbulence)", "offset_x", PConv::PointCenter, 1, 0, 0),
-    P(4, "Offset (Turbulence)", "offset_y", PConv::PointCenter, 1, 0, 1),
+    P(4, "Offset (Turbulence)", "offset", PConv::PointRel),
     P(5, "Complexity", "complexity"),
     P(6, "Evolution", "evolution"),
+    I(7, "Evolution Options"),
     P(8, "Cycle Evolution", "cycle_evolution", PConv::Bool),
     P(9, "Cycle (in Revolutions)", "cycle"),
     P(10, "Random Seed", "seed"),
+    I(11, "Random Seed"),
     E(12, "Pinning", "pinning", kTurbPinning),
-    I(13, "Resize Layer"),
-    I(14, "Antialiasing for Best Quality"),
+    P(13, "Resize Layer", "resize", PConv::Bool),
+    E(14, "Antialiasing for Best Quality", "antialias", kTwoChoice),
 };
 
 constexpr PRule kFill[] = {
@@ -415,13 +484,24 @@ constexpr PRule kMotionTile[] = {
 
 constexpr PRule kPosterize[] = {P(1, "Level", "levels")};
 
-constexpr PRule kRadialBlur[] = {
+// AE reference batch A (RadialBlurReferenceEffect.cpp): every native control.
+constexpr PRule kRadialBlurReference[] = {
     P(1, "Amount", "amount"),
     P(2, "Center", "center", PConv::PointRel),
     E(3, "Type", "type", kMinus1),
-    I(4, "Antialiasing (Best Quality)"),
+    E(4, "Antialiasing (Best Quality)", "antialias", kMinus1),
     I(5, ""),
-    I(6, "Random Seed"),
+    P(6, "Random Seed", "seed"),
+};
+
+// Detail-preserving Upscale (batch A2): the Fit buttons have no value.
+constexpr PRule kUpscaleReference[] = {
+    I(1, "Fit to Comp Width"),
+    I(2, "Fit to Comp Height"),
+    P(3, "Scale", "scale"),
+    P(4, "Reduce Noise", "reduce_noise"),
+    P(5, "Detail", "detail"),
+    E(6, "Alpha", "alpha", kMinus1),
 };
 
 constexpr PRule kRipple[] = {
@@ -447,10 +527,9 @@ constexpr PRule kEcho[] = {
 constexpr PRule kRadialWipe[] = {
     P(1, "Transition Completion", "completion"),
     P(2, "Start Angle", "angle"),
-    P(3, "Wipe Center", "center_x", PConv::PointPercent, 1, 0, 0),
-    P(3, "Wipe Center", "center_y", PConv::PointPercent, 1, 0, 1),
-    E(4, "Wipe", "reverse", kRadialWipeDir),
-    P(5, "Feather", "feather", PConv::PxPercentMax),
+    P(3, "Wipe Center", "center", PConv::PointRel),
+    E(4, "Wipe", "direction", kMinus1),
+    P(5, "Feather", "feather"),
 };
 
 constexpr PRule kBulge[] = {
@@ -765,16 +844,176 @@ constexpr PRule kBrushStrokes[] = {
     E(6, "Paint Surface", "paint_surface", kMinus1),
     P(7, "Blend With Original", "blend"),
 };
-constexpr PRule kRadialShadow[] = {
+// AE reference batch A (RadialShadowReferenceEffect.cpp): opacity and color
+// influence are stored as fractions (1 = 100%).
+constexpr PRule kRadialShadowReference[] = {
     P(1, "Shadow Color", "shadow_color", PConv::Color),
-    P(2, "Opacity", "opacity"),
+    P(2, "Opacity", "opacity", PConv::Same, 100),
     P(3, "Light Source", "light_source", PConv::PointRel),
     P(4, "Projection Distance", "projection_distance"),
     P(5, "Softness", "softness"),
     E(6, "Render", "render", kMinus1),
-    P(7, "Color Influence", "color_influence"),
+    P(7, "Color Influence", "color_influence", PConv::Same, 100),
     P(8, "Shadow Only", "shadow_only", PConv::Bool),
     P(9, "Resize Layer", "resize_layer", PConv::Bool),
+};
+#define AUREA_CARD_CAMERA(sys, rx, ry, rz, xy, z, fl, ord, ul, ur, ll, lr, af, cf)              E(sys, "Camera System", "camera_system", kMinus1), P(rx, "X Rotation", "camera_rotation_x"),     P(ry, "Y Rotation", "camera_rotation_y"), P(rz, "Z Rotation", "camera_rotation_z"),             P(xy, "X,Y Position", "camera_position", PConv::PointRel), P(z, "Z Position", "camera_z"),       P(fl, "Focal Length", "focal_length"), E(ord, "Transform Order", "camera_order", kMinus1Long),     P(ul, "Upper Left Corner", "corner_upper_left", PConv::PointRel),                               P(ur, "Upper Right Corner", "corner_upper_right", PConv::PointRel),                             P(ll, "Lower Left Corner", "corner_lower_left", PConv::PointRel),                               P(lr, "Lower Right Corner", "corner_lower_right", PConv::PointRel),                             P(af, "Auto Focal Length", "auto_focal_length", PConv::Bool), P(cf, "Focal Length", "corner_focal_length")
+#define AUREA_CARD_LIGHT(in, co, po, de, ty, am, di, sp, sh)                                          P(in, "Light Intensity", "light_intensity"), P(co, "Light Color", "light_color", PConv::Color),     P(po, "Light Position", "light_position", PConv::PointRel), P(de, "Light Depth", "light_depth"),     E(ty, "Light Type", "light_type", kMinus1), P(am, "Ambient Light", "ambient_light"),              P(di, "Diffuse Reflection", "diffuse_reflection"), P(sp, "Specular Reflection", "specular_reflection"),     P(sh, "Highlight Sharpness", "highlight_sharpness")
+// AE reference batch B (CardReferenceEffects.cpp): the NNNN of the live AE
+// matchNames (added/runtime/parameters.jsonl). Layer choices are not in the
+// preset: the back layer stays this layer, the gradient layers are reported.
+constexpr PRule kCardWipeReference[] = {
+    P(2, "Transition Completion", "completion"), P(4, "Transition Width", "width"), I(6, "Back Layer"),
+    E(8, "Rows & Columns", "rows_columns", kMinus1), P(10, "Rows", "rows"), P(12, "Columns", "columns"),
+    P(14, "Card Scale", "card_scale"), E(16, "Flip Axis", "flip_axis", kMinus1),
+    E(18, "Flip Direction", "flip_direction", kMinus1), E(20, "Flip Order", "flip_order", kMinus1),
+    U(22, "Gradient Layer", 1), P(24, "Timing Randomness", "timing_randomness"),
+    P(26, "Random Seed", "random_seed"),
+    AUREA_CARD_CAMERA(28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48, 50, 52, 54),
+    AUREA_CARD_LIGHT(56, 58, 60, 62, 64, 66, 68, 70, 72),
+    P(74, "X Jitter Amount", "x_jitter"), P(76, "X Jitter Speed", "x_jitter_speed"),
+    P(78, "Y Jitter Amount", "y_jitter"), P(80, "Y Jitter Speed", "y_jitter_speed"),
+    P(82, "Z Jitter Amount", "z_jitter"), P(84, "Z Jitter Speed", "z_jitter_speed"),
+    P(86, "X Rot Jitter Amount", "x_rotation_jitter"), P(88, "X Rot Jitter Speed", "x_rotation_jitter_speed"),
+    P(90, "Y Rot Jitter Amount", "y_rotation_jitter"), P(92, "Y Rot Jitter Speed", "y_rotation_jitter_speed"),
+    P(94, "Z Rot Jitter Amount", "z_rotation_jitter"), P(96, "Z Rot Jitter Speed", "z_rotation_jitter_speed"),
+};
+constexpr PRule kCardDanceReference[] = {
+    E(2, "Rows & Columns", "rows_columns", kMinus1), P(4, "Rows", "rows"), P(6, "Columns", "columns"),
+    I(8, "Back Layer"), U(10, "Gradient Layer 1", 0), U(12, "Gradient Layer 2", 0),
+    E(14, "Rotation Order", "rotation_order", kMinus1), E(16, "Transformation Order", "transformation_order", kMinus1),
+    E(18, "Source", "x_position_source", kMinus1Long), P(20, "Multiplier", "x_position_multiplier"),
+    P(22, "Offset", "x_position_offset"),
+    E(24, "Source", "y_position_source", kMinus1Long), P(26, "Multiplier", "y_position_multiplier"),
+    P(28, "Offset", "y_position_offset"),
+    E(30, "Source", "z_position_source", kMinus1Long), P(32, "Multiplier", "z_position_multiplier"),
+    P(34, "Offset", "z_position_offset"),
+    E(36, "Source", "x_rotation_source", kMinus1Long), P(38, "Multiplier", "x_rotation_multiplier"),
+    P(40, "Offset", "x_rotation_offset"),
+    E(42, "Source", "y_rotation_source", kMinus1Long), P(44, "Multiplier", "y_rotation_multiplier"),
+    P(46, "Offset", "y_rotation_offset"),
+    E(48, "Source", "z_rotation_source", kMinus1Long), P(50, "Multiplier", "z_rotation_multiplier"),
+    P(52, "Offset", "z_rotation_offset"),
+    E(54, "Source", "x_scale_source", kMinus1Long), P(56, "Multiplier", "x_scale_multiplier"),
+    P(58, "Offset", "x_scale_offset"),
+    E(60, "Source", "y_scale_source", kMinus1Long), P(62, "Multiplier", "y_scale_multiplier"),
+    P(64, "Offset", "y_scale_offset"),
+    AUREA_CARD_CAMERA(66, 68, 70, 72, 74, 76, 78, 80, 82, 84, 86, 88, 90, 92),
+    AUREA_CARD_LIGHT(94, 96, 98, 100, 102, 104, 106, 108, 110),
+};
+#undef AUREA_CARD_CAMERA
+#undef AUREA_CARD_LIGHT
+// AE reference batch C (ExtrudeReferenceEffect.cpp): Plugin Everything Extrude.
+// The NNNN numbers come from the live AE property matchNames
+// (batch-c/status.json, deepglow-extrude/PEMUEXTRUDE-runtime-controls.json).
+// The gradient-wheel editor (Gradient Pt Select / Point Angle) is UI state.
+constexpr PRule kExtrudeReference[] = {
+    P(35, "Mask Path", "mask_path"),
+    P(36, "Use All Paths", "all_paths", PConv::Bool),
+    E(2, "Mode", "mode", kMinus1),
+    P(10, "Inner Extrude", "inner", PConv::Bool),
+    P(1002, "Extrusion Direction", "direction"),
+    P(3, "Extrusion Length Back", "back_length"),
+    P(4, "Extrusion Length Front", "front_length"),
+    P(5, "Vanishing Point", "vanishing", PConv::PointRel),
+    P(6, "Extrusion Amount Back", "back_amount"),
+    P(7, "Extrusion Amount Front", "front_amount"),
+    P(8, "Stroke Width", "stroke_width"),
+    P(9, "Stroke Color", "stroke_color", PConv::Color),
+    P(66, "Stroke Opacity", "stroke_opacity"),
+    P(11, "Inherit Layer Color", "inherit_color", PConv::Bool),
+    P(12, "Front Fill Color", "front_color", PConv::Color),
+    E(28, "Side Fill Mode", "side_mode", kMinus1),
+    P(13, "Number of Side Fill Colors", "color_count"),
+    P(14, "Side Fill Color", "side_color", PConv::Color),
+    I(33, "Gradient Pt Select"),
+    I(17, "Point Angle"),
+    P(15, "Global Offset", "global_offset"),
+    P(58, "Interpolate Gradient", "interpolate", PConv::Bool),
+    P(70, "Fill Opacity", "fill_opacity"),
+    P(16, "Side Fill 2 Color", "color_2", PConv::Color),
+    P(18, "Side Fill 3 Color", "color_3", PConv::Color),
+    P(19, "Side Fill 3 Angle", "angle_3"),
+    P(20, "Side Fill 4 Color", "color_4", PConv::Color),
+    P(21, "Side Fill 4 Angle", "angle_4"),
+    P(22, "Side Fill 5 Color", "color_5", PConv::Color),
+    P(23, "Side Fill 5 Angle", "angle_5"),
+    U(80, "Parent Layer", 0),
+    P(81, "Anchor Point", "anchor", PConv::PointRel),
+    P(65, "Input Opacity", "input_opacity"),
+    P(57, "Master Resolution", "resolution"),
+    P(24, "Corner Angle Threshold", "corner_threshold"),
+    P(25, "Flatness Threshold", "flatness"),
+    P(26, "Front Mask Resolution Scale", "front_resolution"),
+    E(59, "Debug View", "debug_view", kMinus1),
+    P(60, "Debug View X-Offset", "debug_x"),
+    P(61, "Debug View Y-Offset", "debug_y"),
+    P(71, "Left", "left"),
+    P(72, "Top", "top"),
+    P(73, "Right", "right"),
+    P(74, "Bottom", "bottom"),
+    I(75, "Sentinel Init Value"),
+};
+// AE reference batch C: Depth of Field (Z from the Aurea AI depth, see
+// ReferenceBatchC.cpp), Smear (masks by index) and Glitchify (native PF ids).
+constexpr PRule kDepthFieldReference[] = {
+    P(1, "Focal Plane", "focal_plane"),
+    P(2, "Maximum Radius", "max_radius"),
+    P(3, "Focal Plane Thickness", "focal_thickness"),
+    P(4, "Focal Bias", "focal_bias"),
+};
+constexpr PRule kSmearReference[] = {
+    P(1, "Source Mask", "source_mask"),
+    P(2, "Boundary Mask", "boundary_mask"),
+    P(3, "Mask Offset", "mask_offset", PConv::PointRel),
+    P(4, "Mask Rotation", "mask_rotation"),
+    P(5, "Mask Scale", "mask_scale"),
+    P(6, "Percent", "percent"),
+    E(7, "Elasticity", "elasticity", kMinus1),
+    E(8, "Interpolation Method", "interpolation", kMinus1),
+};
+// Glitchify menus keep their separators in AE: Red, Green, Blue, Alpha, (-,
+// Luminance, Lightness, Hue, Saturation, (-, Noise …
+constexpr i8 kGlitchTransition[] = {-1, 0, 1, 2, 3, -1, 4, 5, 6, 7, -1, 8};
+constexpr i8 kGlitchSplit[] = {-1, 0, 1, 2, -1, 3, 4, 5, -1, 6, 7, 8};
+constexpr i8 kGlitchScale[] = {-1, 0, 1, 2, 3, -1, 4, 5, 6, 7};
+constexpr i8 kGlitchTransfer[] = {-1, 0, 1, 2, 3, -1, 4, 5, 6, 7, 8, 9, -1, 10, 11, 12, 13, 14, 15, 16, -1,
+                                  17, 18, 19, 20, 21, 22, 23, -1, 24, 25, 26, 27, 28, -1, 29, 30, 31, 32, -1,
+                                  33, 34, 35, 36, -1, 37, 38};
+constexpr PRule kGlitchifyReference[] = {
+    P(1, "Glitchify Amount", "amount"), P(2, "Glitchify Speed", "speed"), P(3, "Random Seed", "seed"),
+    P(5, "Completion", "completion"), P(6, "Softness", "softness"),
+    E(7, "Channel", "transition_channel", kGlitchTransition),
+    P(10, "Speed", "transform_speed"), P(11, "Position", "position", PConv::PointRel),
+    P(12, "Position Wiggle", "position_wiggle"), P(13, "Scale", "scale"), P(14, "Scale Wiggle", "scale_wiggle"),
+    P(15, "Crop", "crop_top_left", PConv::PointRel), P(16, "Crop", "crop_bottom_right", PConv::PointRel),
+    P(17, "Crop Wiggle", "crop_wiggle"), P(18, "Opacity", "transform_opacity"),
+    E(19, "Transfer Mode", "transform_mode", kGlitchTransfer), P(20, "Composite Over", "composite_over", PConv::Bool),
+    P(23, "Enable", "channel_enabled", PConv::Bool), E(25, "Channel", "split_channel", kGlitchSplit),
+    P(26, "Horizontal Amount", "split_horizontal"), P(27, "Vertical amount", "split_vertical"),
+    P(28, "Speed Multiplier", "split_speed"), P(31, "Scale", "channel_scale"),
+    E(32, "Channel", "scale_channel", kGlitchScale), P(33, "Vertical", "scale_vertical", PConv::Bool),
+    P(34, "Offset", "scale_offset"), P(35, "Speed Multiplier", "scale_speed"),
+    E(37, "Transfer Mode", "channel_mode", kGlitchTransfer),
+    P(40, "Enable", "color_enabled", PConv::Bool), P(41, "Offset", "color_offset"), P(42, "Amount", "color_amount"),
+    P(43, "Opacity", "color_opacity"), E(44, "Transfer Mode", "color_mode", kGlitchTransfer),
+    P(47, "Enable", "image_enabled", PConv::Bool), P(48, "Pixel Streak", "pixel_streak"),
+    P(49, "Vertical Sort", "vertical_sort", PConv::Bool), P(51, "Amount", "slice_amount"),
+    P(52, "Position", "slice_position"), P(53, "Opacity", "slice_opacity"),
+    E(54, "Transfer Mode", "slice_mode", kGlitchTransfer), P(57, "Amount", "block_amount"),
+    P(58, "Speed Multiplier", "block_speed"), P(59, "Horizontal Size", "block_width"),
+    P(60, "Vertical Size", "block_height"), E(61, "Direction", "block_direction", kMinus1),
+    E(63, "Transfer Mode", "image_mode", kGlitchTransfer),
+    P(66, "Enable", "compression_enabled", PConv::Bool), P(67, "Multiplier", "compression_multiplier"),
+    P(68, "Dither Amount", "dither_amount"), P(69, "JPEG Amount", "jpeg_amount"),
+    P(73, "Show noise engine", "show_noise", PConv::Bool), P(74, "Gain", "noise_gain"),
+    P(75, "Lacunarity", "noise_lacunarity"), P(76, "Octaves", "noise_octaves"),
+    P(79, "Repeat Edge Pixels", "repeat_edges", PConv::Bool), P(82, "Sigmoidal Steps", "sigmoid_steps", PConv::Bool),
+    P(83, "Quantization Steps", "scale_steps"), P(84, "Fill Gaps", "fill_gaps", PConv::Bool),
+    P(87, "Use Noise", "use_noise", PConv::Bool), P(88, "Noise Cutoff", "noise_cutoff"),
+    P(91, "Quality", "slice_quality"), P(92, "Max Random Shift", "slice_shift"),
+    P(93, "Quantization Steps", "slice_steps"), P(96, "Grouping Factor", "grouping"),
+    P(99, "Wiggle Quantization Steps", "wiggle_steps"),
 };
 constexpr PRule kBevelEdges[] = {
     P(1, "Edge Thickness", "edge_thickness", PConv::Same, 100),
@@ -973,12 +1212,6 @@ void post_glow(EffectInstance& fx, const ParameterRegistry& s, const PostIn& in,
     }
 }
 
-void post_wave_warp(EffectInstance& fx, const ParameterRegistry& s, const PostIn& in, ImportReport&) {
-    // Velocidade do AE em ondas por segundo → px por quadro do Aurea.
-    const f64 speed = in.get(5, 0, 0.0), width = in.get(3, 0, 40.0);
-    set_param(fx, s, "speed", 0, static_cast<f32>(std::clamp(speed * width / std::max(1.0, in.fps), -5000.0, 5000.0)));
-}
-
 void post_mosaic(EffectInstance&, const ParameterRegistry&, const PostIn& in, ImportReport& rep) {
     const f64 hb = std::max(1.0, in.get(1, 0, 10.0)), vb = std::max(1.0, in.get(2, 0, 10.0));
     const f64 cw = in.layerW / hb, ch = in.layerH / vb;
@@ -1127,6 +1360,9 @@ const ERule kRules[] = {
     RULE("ADBE Checkbox Control", "Checkbox Control", effect_keys::kCheckboxControl, kCheckbox),
     RULE("ADBE Color Control", "Color Control", effect_keys::kColorControl, kColor),
     RULE("ADBE Point Control", "Point Control", effect_keys::kPointControl, kPoint),
+    RULE("ADBE Dropdown Control", "Dropdown Menu Control", effect_keys::kDropdownControl, kDropdown),
+    RULE("ADBE Layer Control", "Layer Control", effect_keys::kLayerControl, kLayerControl),
+    RULE("ADBE Point3D Control", "3D Point Control", effect_keys::kPoint3DControl, kPoint3D),
     // Transformar e geradores
     RULEX("ADBE Geometry2", "Transform", effect_keys::kTransform, kGeometry2, nullptr, nullptr, 0, post_geometry2),
     RULEX("ADBE Fractal Noise", "Fractal Noise", effect_keys::kFractalNoise, kFractalNoise,
@@ -1153,23 +1389,27 @@ const ERule kRules[] = {
     // Desfoque
     RULE("ADBE Gaussian Blur 2", "Gaussian Blur", effect_keys::kGaussianBlur, kGaussian),
     RULE("ADBE Gaussian Blur", "Gaussian Blur (Legacy)", effect_keys::kGaussianBlur, kGaussian),
+    RULE("ADBE Fast Blur", "Fast Blur (Legacy)", "aurea.blur.fast_blur_reference", kFastBlurReference),
+    RULE("ADBE Sharpen", "Sharpen", effect_keys::kSharpenReference, kSharpen),
     RULE("ADBE Box Blur2", "Fast Box Blur", effect_keys::kBoxBlur, kBoxBlur),
     RULE("ADBE Motion Blur", "Directional Blur", effect_keys::kDirectionalBlur, kDirectionalBlur),
-    RULE("ADBE Radial Blur", "Radial Blur", effect_keys::kRadialBlur, kRadialBlur),
+    RULE("ADBE Radial Blur", "Radial Blur", "aurea.blur.radial_blur_reference", kRadialBlurReference),
+    RULE("ADBE Upscale", "Detail-preserving Upscale", "aurea.distort.upscale_reference", kUpscaleReference),
     RULE("CC Radial Fast Blur", "CC Radial Fast Blur", effect_keys::kZoomBlur, kRadialFastBlur),
     // Luz e estilo
     RULEX("ADBE Glo2", "Glow", effect_keys::kGlow, kGlow, nullptr, nullptr, 0, post_glow),
-    RULE("ADBE Drop Shadow", "Drop Shadow", effect_keys::kDropShadow, kDropShadow),
+    RULEX("PEDG", "Deep Glow", effect_keys::kDeepGlow, kDeepGlow, nullptr, kDeepGlowFixed, 1, nullptr),
+    RULE("ADBE Drop Shadow", "Drop Shadow", "aurea.stylize.drop_shadow_reference", kDropShadow),
     RULE("ADBE Bevel Alpha", "Bevel Alpha", "aurea.stylize.bevel_alpha", kBevelAlpha),
     RULEX("ADBE Mosaic", "Mosaic", effect_keys::kMosaic, kMosaic, nullptr, nullptr, 0, post_mosaic),
     RULE("ADBE Minimax", "Minimax", effect_keys::kMinimax, kMinimax),
     RULE("ADBE Noise2", "Noise", effect_keys::kGrain, kNoise),
-    RULE("ADBE Find Edges", "Find Edges", effect_keys::kFindEdges, kFindEdges),
+    RULE("ADBE Find Edges", "Find Edges", effect_keys::kFindEdgesReference, kFindEdges),
     RULE("ADBE Tile", "Motion Tile", effect_keys::kMotionTile, kMotionTile),
     RULE("CS Vignette", "CC Vignette", effect_keys::kVignette, kVignette),
     // Distorção
-    RULEX("ADBE Wave Warp", "Wave Warp", effect_keys::kWaveWarp, kWaveWarp, nullptr, kWaveWarpFixed, 1, post_wave_warp),
-    RULE("ADBE Turbulent Displace", "Turbulent Displace", effect_keys::kTurbulence, kTurbulentDisplace),
+    RULE("ADBE Wave Warp", "Wave Warp", effect_keys::kWaveWarpReference, kWaveWarp),
+    RULE("ADBE Turbulent Displace", "Turbulent Displace", "aurea.distort.turbulent_displace_reference", kTurbulentDisplace),
     RULEX("ADBE Ripple", "Ripple", effect_keys::kRipple, kRipple, "o Aurea ondula a camada inteira (sem o raio do AE)", nullptr, 0,
           nullptr),
     RULEX("ADBE Bulge", "Bulge", effect_keys::kBulge, kBulge, "raio e altura do bojo convertidos por aproximação", nullptr, 0,
@@ -1179,12 +1419,13 @@ const ERule kRules[] = {
     RULE("ADBE Offset", "Offset", "aurea.transform.offset", kOffset),
     // Transições
     RULE("ADBE Linear Wipe", "Linear Wipe", effect_keys::kLinearWipe, kLinearWipe),
-    RULE("ADBE Radial Wipe", "Radial Wipe", effect_keys::kRadialWipe, kRadialWipe),
-    RULE("ADBE Block Dissolve", "Block Dissolve", effect_keys::kBlockDissolve, kBlockDissolve),
+    RULE("ADBE Radial Wipe", "Radial Wipe", "aurea.transition.radial_wipe_reference", kRadialWipe),
+    RULE("ADBE Block Dissolve", "Block Dissolve", "aurea.transition.block_dissolve_reference", kBlockDissolve),
     RULEX("ADBE Venetian Blinds", "Venetian Blinds", effect_keys::kVenetianBlinds, kVenetian,
           "largura das faixas convertida em quantidade de faixas", nullptr, 0, nullptr),
     // Tempo
-    RULE("ADBE Posterize Time", "Posterize Time", effect_keys::kPosterizeTime, kPosterizeTime),
+    RULE("ADBE Posterize Time", "Posterize Time", "aurea.time.posterize_reference", kPosterizeTime),
+    RULE("ADBE Time Displacement", "Time Displacement", "aurea.time.time_displacement_reference", kTimeDisplacementReference),
     RULE("ADBE Echo", "Echo", effect_keys::kEchoTrail, kEcho),
     RULEX("ADBE OFMotionBlur", "Pixel Motion Blur", effect_keys::kFlowMotionBlur, kPixelMotionBlur,
           "desfoque pelo movimento dos pixels do Aurea (fluxo óptico próprio)", nullptr, 0, nullptr),
@@ -1221,7 +1462,12 @@ const ERule kRules[] = {
     RULEX("ADBE Bilateral", "Bilateral Blur", "aurea.blur.bilateral", kBilateral, "parâmetros pela ordem da documentação do AE (sem preset para conferir os números)", nullptr, 0, nullptr),
     RULEX("ADBE Smart Blur", "Smart Blur", "aurea.blur.smart", kSmartBlur, "parâmetros pela ordem da documentação do AE (sem preset para conferir os números)", nullptr, 0, nullptr),
     RULEX("ADBE Brush Strokes", "Brush Strokes", "aurea.stylize.brush_strokes", kBrushStrokes, "parâmetros pela ordem da documentação do AE (sem preset para conferir os números)", nullptr, 0, nullptr),
-    RULEX("ADBE Radial Shadow", "Radial Shadow", "aurea.stylize.radial_shadow", kRadialShadow, "parâmetros pela ordem da documentação do AE (sem preset para conferir os números)", nullptr, 0, nullptr),
+    RULE("ADBE Radial Shadow", "Radial Shadow", "aurea.stylize.radial_shadow_reference", kRadialShadowReference),
+    RULE("PEMUEXTRUDE", "Extrude", "aurea.generate.extrude_reference", kExtrudeReference),
+    RULEX("ADBE DEPTH FIELD", "Depth of Field", "aurea.ai.depth_field_reference", kDepthFieldReference,
+          "a profundidade vem da IA do Aurea, não do canal 3D do render", nullptr, 0, nullptr),
+    RULE("ADBE SCHMEAR", "Smear", "aurea.distort.smear_mask_reference", kSmearReference),
+    RULE("CSpice Glitchify", "Glitchify", "aurea.glitch.glitchify_reference", kGlitchifyReference),
     RULEX("ADBE Bevel Edges", "Bevel Edges", "aurea.stylize.bevel_edges", kBevelEdges, "parâmetros pela ordem da documentação do AE (sem preset para conferir os números)", nullptr, 0, nullptr),
     RULEX("ADBE ELLIPSE", "Ellipse", "aurea.generate.ellipse", kEllipse, "parâmetros pela ordem da documentação do AE (sem preset para conferir os números)", nullptr, 0, nullptr),
     RULEX("ADBE Eyedropper Fill", "Eyedropper Fill", "aurea.generate.eyedropper_fill", kEyedropperFill, "parâmetros pela ordem da documentação do AE (sem preset para conferir os números)", nullptr, 0,
@@ -1284,7 +1530,9 @@ const ERule kRules[] = {
     NONE("ADBE Set Matte3", "Set Matte", "fosco de outra camada: use o recorte (track matte) do Aurea"),
     NONE("CS Composite", "CC Composite", "composição com o original não existe no Aurea"),
     NONE("ADBE Layer Control", "Layer Control", "controle de camada não existe no Aurea"),
-    NONE("APC CardWipeCam", "Card Wipe", "transição de cartões 3D não existe no Aurea"),
+    RULE("APC CardWipeCam", "Card Wipe", "aurea.transition.card_wipe_reference", kCardWipeReference),
+    RULE("APC CardDanceCam", "Card Dance", "aurea.3d.card_dance_reference", kCardDanceReference),
+    NONE("APC Shatter", "Shatter", "Shatter (simulação de peças) ainda não foi reconstruído no Aurea"),
     NONE("ADBE Stroke", "Stroke", "traço de máscara não existe no Aurea"),
     NONE("ADBE Channel Blur", "Channel Blur", "desfoque por canal não existe no Aurea"),
     NONE("APC Vegas", "Vegas", "traço luminoso em contornos não existe no Aurea"),
@@ -1341,6 +1589,23 @@ u16 effect_param_number(const ERule& r, std::string_view s) noexcept {
 }
 
 u16 effect_param_by_position(const ERule& r, u32 position) noexcept {
+    if (std::strcmp(r.ae, "PEDG") == 0) {
+        // The native UI includes nested groups and help fields between controls.
+        // Numeric JSX property access must retain the observed physical positions.
+        struct Position { u16 ui; u16 suffix; };
+        static constexpr Position positions[] = {
+            {10,72},{11,73},{12,74},{13,75},
+            {21,1},{22,2},{24,4},{25,5},{27,56},{28,57},{29,59},
+            {33,8},{34,35},{35,11},{37,43},{38,9},{42,10},{43,52},{44,53},
+            {47,13},{48,14},{49,15},{52,37},{53,38},{54,39},{55,41},
+            {58,47},{59,48},{63,19},{64,20},{65,50},{66,21},{67,84},{68,85},
+            {70,31},{71,32},{72,33},{75,23},{76,24},{77,25},{78,55},
+            {80,66},{81,88},{82,86},{83,87},{84,89},
+            {85,26},{86,27},{87,28},{88,29},
+        };
+        for (const Position& p : positions) if (p.ui == position) return p.suffix;
+        return 0;
+    }
     // Posição na interface = ordem das regras, sem repetir o mesmo parâmetro.
     u32 seen = 0;
     u16 last = 0;
@@ -1363,6 +1628,8 @@ const ERule& rule_at(u32 i) noexcept { return kRules[std::min<u32>(i, rule_count
 Binding bind_effect_param(const ERule& r, u32 effectId, u16 ae, u32 dims, const EffectRegistry& reg, f64 w, f64 h, f64 fps) {
     Binding b;
     b.label = std::string(r.aeName) + " > ";
+    if (std::strcmp(r.ae, "PEDG") == 0 && ae == 11)
+        b.approx = "Spread foi preservado no projeto; seu comportamento visual ainda não foi implementado";
     const ParameterRegistry* specs = r.key ? reg.params(effect_type_id(r.key)) : nullptr;
     w = std::max(1.0, w);
     h = std::max(1.0, h);

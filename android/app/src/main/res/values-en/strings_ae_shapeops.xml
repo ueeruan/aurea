@@ -50,4 +50,6 @@
     <string name="ae_shapeop_collapse">Hide settings of %1$s</string>
     <string name="ae_shapeop_lane">Operator %1$d · %2$d</string>
     <string name="ae_shapeop_rep_separate">Separate X and Y scale</string>
+    <string name="ae_shapeop_dash_add">Dash pair</string>
+    <string name="ae_shapeop_dash_remove">Remove dash pair</string>
 </resources>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE reference batch C: Extrude, Depth Field, Smear. -->
+<resources>
+    <string name="refc_extrude_name">بثق (متجه)</string>
+    <string name="refc_extrude_desc">بثق متجهي للنصوص والأشكال والأقنعة: اتجاهي أو نقطة تلاشٍ أو كاميرا ثلاثية الأبعاد، مع حد وتدرج على الجوانب.</string>
+    <string name="refc_depth_field_name">عمق الميدان</string>
+    <string name="refc_depth_field_desc">يطمس الطبقة حسب العمق: المستوى البؤري والسماكة ونصف القطر الأقصى، مع عمق يقدّره الذكاء الاصطناعي.</string>
+    <string name="refc_smear_name">لطخة (أقنعة)</string>
+    <string name="refc_smear_desc">ينقل منطقة قناع المصدر إلى مكان جديد ويمدّ الصورة حولها داخل قناع الحدود.</string>
+</resources>

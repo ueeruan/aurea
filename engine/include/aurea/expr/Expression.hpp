@@ -57,9 +57,15 @@
 #include <string>
 #include <string_view>
 
+#include <vector>
+
 namespace aurea {
 struct Track;
 struct Layer;
+struct TextData;
+struct Mask;
+struct MaskPoint;
+struct EffectInstance;
 class Timeline;
 class EffectRegistry;
 }
@@ -74,6 +80,13 @@ inline constexpr u32 kMaxSourceBytes  = 32 * 1024;
 inline constexpr u32 kMaxStringBytes  = 1024;     ///< literal de texto
 inline constexpr u32 kMaxLocals       = 128;
 inline constexpr u32 kMaxRefDepth     = 16;       ///< propriedade → propriedade → … (encadeamento)
+// AE expressions (lote E): funções da pessoa, vetores longos, objetos.
+inline constexpr u32 kMaxEvalDepth    = 224;      ///< recursão nativa do avaliador (árvore + chamadas)
+inline constexpr u32 kMaxCallDepth    = 32;       ///< chamadas de função da pessoa aninhadas
+inline constexpr u32 kMaxParams       = 16;       ///< parâmetros/argumentos por função
+inline constexpr u32 kMaxFunctions    = 256;      ///< funções por programa
+inline constexpr u32 kMaxArrayLength  = 65536;    ///< elementos de um vetor
+inline constexpr u32 kMaxHeapBytes    = 8u << 20; ///< texto + vetores + objetos criados numa avaliação
 
 /// Erro com posição (linha e coluna começam em 1; 0 = sem posição).
 struct Diagnostic {
@@ -156,6 +169,10 @@ private:
 using TimelineProvider = const Timeline* (*)(void* ctx);
 void register_provider(TimelineProvider fn, void* ctx);
 void unregister_provider(void* ctx);
+/// Lote M (timeline/PathRig): as timelines que esta thread enxerga agora — a
+/// do Scope de cima primeiro, depois as dos provedores (sem repetir). Vale a
+/// mesma precondição do Scope: o modelo não muda enquanto quem chama lê.
+u32 live_timelines(const Timeline** out, u32 capacity) noexcept;
 
 /// Avaliação isolada (testes, prévia da UI): sem camada; `value` com `n`
 /// componentes, `time` em segundos. Devolve até 4 componentes.
@@ -167,6 +184,88 @@ struct StandaloneResult {
 };
 [[nodiscard]] StandaloneResult evaluate_standalone(std::string_view source, f64 time,
                                                    const f64* value, u32 n, f64 fps = 30.0);
+
+/// v70, expressão no texto (o Texto-fonte do AE com expressão). `value` = o
+/// texto antes dela (com o key do texto-fonte no instante), que a expressão
+/// lê como `value` e `text.sourceText`; `localFrame` = quadro local da camada.
+/// O resultado vira texto como no JavaScript (número 2 → "2"). Com erro, `ok`
+/// falso, o diagnóstico vai para `te` (a interface mostra) e vale o texto.
+struct TextResult {
+    bool        ok = false;
+    std::string text;
+    Diagnostic  diag;
+};
+[[nodiscard]] TextResult evaluate_text(const TrackExpression& te, const Layer& layer, std::string_view value,
+                                       f64 localFrame) noexcept;
+/// A expressão do texto-fonte da camada (ligada e válida) no conteúdo de `t`
+/// (que já traz o key do instante). Devolve se o conteúdo mudou.
+bool apply_source_expression(const Layer& layer, f64 localFrame, TextData& t) noexcept;
+
+// --- AE expressions (lote E) ---------------------------------------------------
+
+/// Expressão no CAMINHO de uma máscara (`Mask::pathExpression`): `points` entra
+/// com o caminho de antes (parado ou dos keys no instante; é o `thisProperty`
+/// e o `value` da expressão) e sai com o resultado de `createPath(...)` (ou de
+/// outro caminho lido: `mask("x").maskPath`, `content("G").path`). Devolve se
+/// mudou. Com erro nada muda e o diagnóstico fica na expressão. `closedOut`
+/// (opcional) recebe o "fechado" do resultado; a máscara continua com o dela.
+bool apply_mask_path_expression(const Mask& mask, f64 localFrame, std::vector<MaskPoint>& points,
+                                bool* closedOut = nullptr) noexcept;
+
+/// Menu suspenso (`aurea.control.dropdown`, o Dropdown Menu Control do AE): os
+/// itens da instância (`EffectInstance::menuItems`) ou, sem nenhum, o padrão
+/// do After Effects ("Item 1", "Item 2", "Item 3").
+inline constexpr u32 kMaxMenuItems = 64;
+[[nodiscard]] bool is_menu_control(u32 effectType) noexcept;
+[[nodiscard]] std::vector<std::string> menu_items(const EffectInstance& effect);
+
+/// `footage("nome")` e `layer.source`: quem conhece os arquivos do projeto (o
+/// Engine) responde. `name` vazio = procurar por `asset` (AssetId empacotado).
+struct FootageInfo {
+    std::string name;
+    u32 width = 0, height = 0;
+    f64 duration = 0.0;         ///< segundos (imagem: 0)
+    f64 frameDuration = 0.0;    ///< segundos por quadro (0 = desconhecido)
+    u64 asset = 0;              ///< AssetId empacotado
+};
+using FootageProvider = bool (*)(void* ctx, const Timeline* timeline, std::string_view name, u64 asset, FootageInfo& out);
+void register_footage_provider(FootageProvider fn, void* ctx);
+void unregister_footage_provider(void* ctx);
+
+/// `sampleImage(ponto, raio, depoisDosEfeitos, t)`. A avaliação NÃO lê a GPU:
+/// ela consulta uma imagem pequena da camada na CPU, publicada por quem tem os
+/// pixels. Duas origens, nesta ordem:
+///   1. `publish_layer_image`: o último quadro que alguém publicou para a
+///      camada (o resultado fica UM QUADRO ATRASADO em relação ao render);
+///   2. `ImageSource` registrado (síncrono, só CPU, chamado a cada leitura:
+///      quem registra guarda a imagem pequena pronta): os pixels da FONTE da
+///      camada (o motor responde pelas camadas de imagem), sem efeitos nem
+///      máscaras.
+/// Sem nenhuma das duas, vale a cor chapada conhecida do modelo (forma/sólido)
+/// ou [0, 0, 0, 0]. Cada pedido sem imagem publicada entra numa fila que o
+/// dono dos pixels esvazia com `take_image_requests`.
+struct LayerPixels {
+    u32 width = 0, height = 0;       ///< da imagem pequena
+    f32 layerWidth = 0.0f, layerHeight = 0.0f;   ///< px da camada que ela cobre
+    f64 frame = 0.0;                 ///< quadro da composição em que foi capturada
+    std::vector<u8> rgba;            ///< RGBA8, cor no espaço da interface (sRGB), alfa reto
+};
+/// `layerKey` = LayerId empacotado; `compKey` = índice (1..) da composição na
+/// ordem da timeline (o mesmo de `ImageRequest::comp`).
+void publish_layer_image(const Timeline* timeline, u32 compKey, u64 layerKey, bool postEffect, LayerPixels pixels);
+void clear_layer_images(const Timeline* timeline) noexcept;
+struct ImageRequest {
+    const Timeline* timeline = nullptr;
+    u32  comp = 0;
+    u64  layer = 0;
+    bool postEffect = true;
+    f64  frame = 0.0;
+};
+/// Tira da fila os pedidos pendentes (sem repetir camada). Devolve quantos.
+u32 take_image_requests(std::vector<ImageRequest>& out);
+using ImageSource = std::shared_ptr<const LayerPixels> (*)(void* ctx, const Timeline* timeline, const Layer& layer, f64 localFrame);
+void register_image_source(ImageSource fn, void* ctx);
+void unregister_image_source(void* ctx);
 
 /// Valor parado da trilha `t` da camada `l` (o campo da camada que vale sem
 /// keyframe: a posição do Transform, a constante do parâmetro de efeito...),

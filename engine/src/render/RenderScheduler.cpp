@@ -85,7 +85,7 @@ void AdaptiveResolutionController::configure(u32 compWidth, u32 compHeight,
 
     // Taxa alvo limitada pelo que o display entrega. Pedir 60 num display de
     // 120 Hz desperdiça metade da margem; pedir 120 num de 60 é impossível.
-    if (targetFps <= 0.0f) targetFps = 60.0f;
+    if (!std::isfinite(targetFps) || targetFps <= 0.0f || !std::isfinite(1000.0f / targetFps)) targetFps = 60.0f;
     budget_.targetFps = targetFps;
     budget_.totalMs = 1000.0f / targetFps;
 
@@ -344,7 +344,9 @@ const AdaptiveState& AdaptiveResolutionController::update(const FrameStats& stat
     // frame depois de um seek é sempre caro (decodifica, aloca, compila), e
     // reagir a ele derrubaria a resolução sem motivo.
     constexpr f32 kAlpha = 0.15f;
-    const f32 frameMs = stats.gpuMs > 0.0f ? std::max(stats.cpuMs, stats.gpuMs) : stats.cpuMs;
+    const auto validMs = [](f32 value) { return std::isfinite(value) && value > 0.0f ? value : 0.0f; };
+    const f32 cpuMs = validMs(stats.cpuMs), gpuMs = validMs(stats.gpuMs), decodeMs = validMs(stats.decodeMs);
+    const f32 frameMs = std::max(cpuMs, gpuMs);
 
     // Complexidade mudou muito (camadas/passes): a média antiga não descreve a
     // cena nova — recomeça dela, e a espera de subida volta ao normal.
@@ -355,9 +357,9 @@ const AdaptiveState& AdaptiveResolutionController::update(const FrameStats& stat
     lastLayers_ = stats.layersRendered;
     if (state_.averageFrameMs <= 0.0f || sceneChanged) {
         state_.averageFrameMs = frameMs;
-        state_.averageGpuMs = stats.gpuMs;
-        state_.averageCpuMs = stats.cpuMs;
-        state_.decodeMs = stats.decodeMs;
+        state_.averageGpuMs = gpuMs;
+        state_.averageCpuMs = cpuMs;
+        state_.decodeMs = decodeMs;
         if (sceneChanged) {
             state_.overBudgetStreak = 0;
             state_.underBudgetStreak = 0;
@@ -366,12 +368,12 @@ const AdaptiveState& AdaptiveResolutionController::update(const FrameStats& stat
         }
     } else {
         state_.averageFrameMs = lerpf(state_.averageFrameMs, frameMs, kAlpha);
-        state_.averageGpuMs = lerpf(state_.averageGpuMs, stats.gpuMs, kAlpha);
-        state_.averageCpuMs = lerpf(state_.averageCpuMs, stats.cpuMs, kAlpha);
-        state_.decodeMs = lerpf(state_.decodeMs, stats.decodeMs, kAlpha);
+        state_.averageGpuMs = lerpf(state_.averageGpuMs, gpuMs, kAlpha);
+        state_.averageCpuMs = lerpf(state_.averageCpuMs, cpuMs, kAlpha);
+        state_.decodeMs = lerpf(state_.decodeMs, decodeMs, kAlpha);
     }
     state_.framesInFlight = stats.frameIndex;
-    state_.memoryPressure = stats.memoryPressure;
+    state_.memoryPressure = std::isfinite(stats.memoryPressure) ? std::clamp(stats.memoryPressure, 0.0f, 1.0f) : 1.0f;
     const u32 drops = stats.droppedFrames >= lastDropped_ ? stats.droppedFrames - lastDropped_ : 0u;
     lastDropped_ = stats.droppedFrames;
 
@@ -388,13 +390,15 @@ const AdaptiveState& AdaptiveResolutionController::update(const FrameStats& stat
     // Gargalo pela medição. Quadro perdido com carga média já alta também é
     // evidência (o pico que a média ainda não mostrou).
     const bool over = state_.averageFrameMs > budget * kDownThreshold || (drops > 0 && state_.averageFrameMs > budget * 0.6f);
-    if (over) {
+    if (state_.memoryPressure >= 0.9f) {
+        state_.bottleneck = PreviewBottleneck::Memory;
+    } else if (state_.decodeMs > budget && state_.decodeMs >= state_.averageFrameMs) {
+        state_.bottleneck = PreviewBottleneck::Decode;
+    } else if (over) {
         const bool gpuKnown = state_.averageGpuMs > 0.0f;
         state_.bottleneck = gpuKnown && state_.averageCpuMs > state_.averageGpuMs ? PreviewBottleneck::Cpu : PreviewBottleneck::Gpu;
     } else if (state_.decodeMs > budget) {
         state_.bottleneck = PreviewBottleneck::Decode;
-    } else if (state_.memoryPressure >= 0.9f) {
-        state_.bottleneck = PreviewBottleneck::Memory;
     } else if (thermal.should_degrade()) {
         state_.bottleneck = PreviewBottleneck::Thermal;
     } else {
@@ -427,15 +431,16 @@ const AdaptiveState& AdaptiveResolutionController::update(const FrameStats& stat
         return state_;
     }
 
-    if (state_.cooldownFrames > 0) {
+    // Memória no limite: alvos menores já (e nada de subir).
+    if (state_.memoryPressure >= 0.9f) {
+        state_.bottleneck = PreviewBottleneck::Memory;
+        step_down();
+        ratioPending_ = kInvalidIndex;
         apply_quality(thermal);
         return state_;
     }
 
-    // Memória no limite: alvos menores já (e nada de subir).
-    if (state_.memoryPressure >= 0.9f && state_.denominator < 8) {
-        state_.bottleneck = PreviewBottleneck::Memory;
-        step_down();
+    if (state_.cooldownFrames > 0 || state_.bottleneck == PreviewBottleneck::Decode) {
         apply_quality(thermal);
         return state_;
     }

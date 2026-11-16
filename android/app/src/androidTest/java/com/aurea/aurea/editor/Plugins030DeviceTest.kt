@@ -33,6 +33,66 @@ class Plugins030DeviceTest {
         return Uri.fromFile(out)
     }
 
+    @Test fun audioGraphInstallsPersistsAndExportsThroughTheNativeMixer() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        check(context.packageName.endsWith(".uitest"))
+        lateinit var store: EditorStore
+        var ready = false
+        compose.setContent {
+            store = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))
+            ready = true
+            AureaTheme { EditorScreen(store) }
+        }
+        compose.waitUntil(30000) { ready && store.engineReady }
+        compose.runOnIdle { store.newProject(320, 180, 30f, "Audio DSP 1.0") }
+        compose.waitUntil(15000) { store.project.title == "Audio DSP 1.0" && !store.projectOperationBusy }
+        val video = File(context.filesDir, "audio-plugin-source.mp4")
+        instrumentation.context.assets.open("video-with-tone.mp4").use { input -> video.outputStream().use { input.copyTo(it) } }
+        compose.runOnIdle { store.importVideo(Uri.fromFile(video)) }
+        compose.waitUntil(30000) { store.layers.any { it.kind == 1 } && store.busyMessage == null }
+        val layer = store.layers.first { it.kind == 1 }.id
+        compose.runOnIdle { store.setCompositionDuration(30); store.select(layer) }
+        compose.waitUntil(10000) { store.project.durationFrames == 30 }
+
+        fun export(name: String) {
+            val output = File(context.filesDir, name)
+            if (output.exists()) check(output.delete())
+            var start = -1
+            compose.runOnIdle { start = store.engineForStress.startExport(output.absolutePath, 180, 30.0, 0, 8) }
+            assertEquals("Native export failed to start", 0, start)
+            val bytes = java.nio.ByteBuffer.allocateDirect(128).order(java.nio.ByteOrder.nativeOrder())
+            val progress = com.aurea.aurea.engine.ExportProgress()
+            compose.waitUntil(120000) { store.engineForStress.exportProgress(bytes) && progress.readFrom(bytes).let { progress.finished } }
+            assertEquals("Native export failed", 0, progress.result)
+            assertTrue(output.length() > 500)
+        }
+        export("audio-plugin-dry.mp4")
+        compose.runOnIdle {
+            store.plugins.firstOrNull { it.id == "aurea.example.audio-delay" }?.let { store.removePlugin(it.id) }
+            store.installPlugin(asset("audio-delay.aureaplugin"))
+        }
+        compose.waitUntil(30000) { store.plugins.any { it.id == "aurea.example.audio-delay" } && store.busyMessage == null }
+        val plugin = store.plugins.single { it.id == "aurea.example.audio-delay" }
+        assertTrue(plugin.ok)
+        assertEquals("audio", plugin.kind)
+        compose.runOnIdle { store.select(layer); store.addEffect(plugin.effectTypeId) }
+        compose.waitUntil(10000) { store.effects.any { it.typeId == plugin.effectTypeId } }
+        val effect = store.effects.single { it.typeId == plugin.effectTypeId }
+        compose.waitUntil(10000) { store.effectParams[effect.effectId]?.size == 3 }
+        compose.runOnIdle { store.setEffectParam(effect.effectId, store.effectParams.getValue(effect.effectId).first { it.index == 2 }, .8f) }
+        compose.waitUntil(10000) { store.effectParams[effect.effectId]?.firstOrNull { it.index == 2 }?.value?.firstOrNull() == .8f }
+        val saved = File(context.filesDir, "audio-plugin-roundtrip.aurea")
+        compose.runOnIdle {
+            assertEquals(0, store.engineForStress.saveProject(saved.absolutePath))
+            assertEquals(0, store.engineForStress.loadProject(saved.absolutePath))
+            store.select(layer)
+        }
+        compose.waitUntil(10000) { store.effects.any { it.typeId == plugin.effectTypeId } }
+        assertEquals(.8f, store.effectParams.getValue(effect.effectId).first { it.index == 2 }.value[0], 1e-6f)
+        export("audio-plugin-wet.mp4")
+    }
+
     @Test fun examplePluginsInstallRenderAndRemove() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         check(context.packageName.endsWith(".uitest"))

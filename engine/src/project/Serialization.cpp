@@ -2,6 +2,7 @@
 #include "aurea/scene3d/StudioEnvironment.hpp"
 #include "aurea/project/FileIO.hpp"
 #include "aurea/vector/Vector.hpp"
+#include "aurea/vector/VectorTree.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
 #include "aurea/expr/Expression.hpp"
@@ -198,6 +199,7 @@ void write_track(ByteWriter& w, const Track& t) {
         w.f32v(k.tangentIn); w.f32v(k.tangentOut);
         w.u16v(k.easingPreset);
         w.u8v(clamp_ease_power(k.easePower));   // v35
+        w.u8v(static_cast<u8>(k.flags & kKeyFlagMask));   // v73 (lote K)
     }
 }
 
@@ -231,6 +233,7 @@ void read_track(ByteReader& r, Track& t) {
         k.tangentIn = r.f32v(); k.tangentOut = r.f32v();
         k.easingPreset = r.u16v();
         k.easePower = g_readingTimelineVersion >= 35 ? clamp_ease_power(r.u8v()) : u8{1};
+        k.flags = g_readingTimelineVersion >= 73 ? static_cast<u8>(r.u8v() & kKeyFlagMask) : u8{0};
         // Arquivo corrompido: NaN/Inf nas alças ou no valor entravam no
         // avaliador e no gráfico (só os comandos checavam). Como a malha de
         // deformação: o padrão no lugar do lixo.
@@ -329,7 +332,8 @@ void read_effect(ByteReader& r, EffectInstance& e) {
         e.sectionsFlipped = static_cast<u8>(panel >> 1);
     }
     const u32 paramCount = r.u32v();
-    if (paramCount > 256) { r.skip_to_end(); return; }
+    // The full-body Headbop rig stores 260 bounded parameter slots.
+    if (paramCount > 1024) { r.skip_to_end(); return; }
     e.params.resize(paramCount);
     for (ParamSlot& s : e.params) {
         for (f32& f : s.constant.v) f = r.f32v();
@@ -339,7 +343,19 @@ void read_effect(ByteReader& r, EffectInstance& e) {
         s.source = src <= static_cast<u8>(ParamSource::Expression) ? static_cast<ParamSource>(src)
                                                                    : ParamSource::Constant;
     }
+    // v76: o "Trocar textura 3D" ganhou deslocamento, giro e rolar NO FIM
+    // (Object3DEffects.cpp). A instância de um projeto antigo recebe os
+    // padrões (zeros): desenha igual e o painel 3D mostra as réguas novas.
+    if ((e.type == effect_type_id(effect_keys::kPart3DTexture) && e.params.size() >= 4)
+        || (e.type == effect_type_id(effect_keys::kPart3DTransform) && e.params.size() >= 8)) {
+        if (const ParameterRegistry* specs = expr::builtin_effects().params(e.type); specs && e.params.size() < specs->count()) {
+            EffectInstance defaults;
+            initialize_instance(defaults, *specs);
+            for (usize p = e.params.size(); p < specs->count() && p < defaults.params.size(); ++p) e.params.push_back(defaults.params[p]);
+        }
+    }
     const u32 curveCount = r.u32v();
+
     if (curveCount > 64) { r.skip_to_end(); return; }
     e.curves.resize(curveCount);
     for (CurveData& c : e.curves) {
@@ -664,10 +680,12 @@ void write_layer(ByteWriter& w, const Layer& l) {
     w.vec4(l.shape.strokeColor);
     w.f32v(l.shape.strokeWidth);
     w.boolv(l.shape.filled);
-    w.f32v(l.shape.trimStart);
-    w.f32v(l.shape.trimEnd);
-    w.f32v(l.shape.trimOffset);
-    w.boolv(l.shape.trimEnabled);
+    // B4: o trim das formas paramétricas saiu do modelo; os 4 campos ficam no
+    // arquivo com os padrões (início 0, fim 1, deslocamento 0, desligado).
+    w.f32v(0.0f);
+    w.f32v(1.0f);
+    w.f32v(0.0f);
+    w.boolv(false);
     w.u32v(static_cast<u32>(l.shape.path.size()));
     for (const Vec2& p : l.shape.path) w.vec2(p);
 
@@ -1111,6 +1129,22 @@ void write_layer(ByteWriter& w, const Layer& l) {
             for (const u8 on : k.pointMask) w.boolv(on != 0);
         }
     }
+    // v77 (0.5.3): o resto das opções da legenda (só nas faixas de legenda).
+    w.boolv(!l.captions.empty());
+    if (!l.captions.empty()) {
+        const text::CaptionOptions& o = l.captionOptions;
+        w.f32v(o.minDurationSec); w.u32v(o.gapFrames); w.boolv(o.breakOnSentence);
+        auto look = [&w](const text::CaptionOptions& x) {
+            w.u32v(x.align); w.f32v(x.lineSpacing); w.f32v(x.boxPadding); w.f32v(x.boxRadius);
+            w.vec4(x.shadowColor); w.f32v(x.shadowBlur);
+        };
+        look(o);
+        w.u32v(static_cast<u32>(l.captions.size()));
+        for (const auto& segment : l.captions) {
+            w.boolv(segment.look.has_value());
+            if (segment.look) look(*segment.look);
+        }
+    }
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
@@ -1263,10 +1297,12 @@ void read_layer(ByteReader& r, Layer& l) {
     l.shape.strokeColor = r.vec4();
     l.shape.strokeWidth = r.f32v();
     l.shape.filled = r.boolv();
-    l.shape.trimStart = r.f32v();
-    l.shape.trimEnd = r.f32v();
-    l.shape.trimOffset = r.f32v();
-    l.shape.trimEnabled = r.boolv();
+    // B4: trim antigo da forma paramétrica — lido e descartado (o render nunca
+    // o usou, então o quadro do projeto antigo continua igual).
+    (void)r.f32v();
+    (void)r.f32v();
+    (void)r.f32v();
+    (void)r.boolv();
     {
         const u32 pathCount = r.u32v();
         l.shape.path.clear();
@@ -1930,6 +1966,32 @@ void read_layer(ByteReader& r, Layer& l) {
             }
         }
     }
+    // v77 (0.5.3): duração mínima, intervalo, fim de frase e a aparência nova
+    // (alinhamento, entrelinha, fundo, sombra). Antes dela: os padrões, que são
+    // o que o motor desenhava (o projeto abre e renderiza igual).
+    if (g_readingTimelineVersion >= 77 && r.boolv()) {
+        auto unit = [](f32 x, f32 lo, f32 hi, f32 def) { return std::isfinite(x) ? std::clamp(x, lo, hi) : def; };
+        auto color = [&](Vec4 c) { return Vec4{unit(c.x, 0, 1, 0), unit(c.y, 0, 1, 0), unit(c.z, 0, 1, 0), unit(c.w, 0, 1, 0.6f)}; };
+        auto look = [&](text::CaptionOptions& x) {
+            x.align = std::min(r.u32v(), 2u);
+            x.lineSpacing = unit(r.f32v(), 0.6f, 3.0f, 1.15f);
+            x.boxPadding = unit(r.f32v(), 0.0f, 2.0f, 0.3f);
+            x.boxRadius = unit(r.f32v(), 0.0f, 2.0f, 0.25f);
+            x.shadowColor = color(r.vec4());
+            x.shadowBlur = unit(r.f32v(), 0.0f, 1.0f, 0.12f);
+        };
+        text::CaptionOptions& co = l.captionOptions;
+        co.minDurationSec = unit(r.f32v(), 0.1f, 10.0f, 0.8f);
+        co.gapFrames = std::min(r.u32v(), 600u);
+        co.breakOnSentence = r.boolv();
+        look(co);
+        if (r.u32v() != l.captions.size()) { r.fail(); return; }
+        for (auto& segment : l.captions) {
+            if (!r.boolv()) continue;
+            if (segment.look) look(*segment.look);
+            else { text::CaptionOptions scratch; look(scratch); }
+        }
+    }
     // Um bloco de legenda fora da regra (ordem, palavra vazia, id repetido) perdia o
     // projeto INTEIRO: a camada recusada derrubava a timeline e o .bak tinha o mesmo.
     if (!text::valid_caption_track(l.captions)) {
@@ -2386,6 +2448,92 @@ std::vector<u8> build_timeline_section(const Project& p) {
             w.f32v(t.speed); w.f32v(t.relief); w.f32v(t.lightAngle);
             w.u32v(t.seed); w.u64v(t.image);
         }
+        // v70: o restante do animador de texto do AE (HSB e opacidade do traço,
+        // valor e intervalo de caractere, tipo de tracking, âncora da linha) e a
+        // ordem preenchimento/traço. Só as camadas de texto: índice e campos.
+        u32 texts = 0;
+        for (u32 i = 0; i < c.order().size(); ++i) {
+            const Layer* l = c.layer(c.order().at(i));
+            if (l && l->kind == LayerKind::Text) ++texts;
+        }
+        w.u32v(texts);
+        for (u32 i = 0; i < c.order().size(); ++i) {
+            const Layer* l = c.layer(c.order().at(i));
+            if (!l || l->kind != LayerKind::Text) continue;
+            w.u32v(i);
+            w.u8v(l->text.renderOrder);
+            w.u32v(static_cast<u32>(l->text.animators.size()));
+            for (const TextAnimator& a : l->text.animators) {
+                for (f32 v : {a.strokeHue, a.strokeSaturation, a.strokeBrightness, a.strokeOpacity, a.charValue, a.lineAnchor}) w.f32v(v);
+                w.u8v(a.charRange); w.u8v(a.trackingType);
+            }
+            // A expressão do texto-fonte (ligada e o texto; vazio = nenhuma).
+            w.boolv(l->text.sourceExpressionEnabled);
+            w.str(l->text.sourceExpression ? l->text.sourceExpression->source : std::string{});
+            // v72: mistura entre caracteres e o alinhamento de caractere de cada animador.
+            w.u16v(l->text.interCharBlend);
+            for (const TextAnimator& a : l->text.animators) w.u8v(a.charAlign);
+        }
+        // v74: AE layers — qualidade e amostragem de cada camada (só as que
+        // fogem do padrão Melhor/bilinear): índice na ordem e o byte
+        // (bits 0..1 qualidade, bit 2 bicúbica).
+        u32 qualified = 0;
+        for (u32 i = 0; i < c.order().size(); ++i)
+            if (const Layer* l = c.layer(c.order().at(i)); l && (l->quality != 0 || l->sampling != 0)) ++qualified;
+        w.u32v(qualified);
+        for (u32 i = 0; i < c.order().size(); ++i) {
+            const Layer* l = c.layer(c.order().at(i));
+            if (!l || (l->quality == 0 && l->sampling == 0)) continue;
+            w.u32v(i);
+            w.u8v(static_cast<u8>((l->quality & 3u) | (l->sampling ? 4u : 0u)));
+        }
+        // v75: painel 3D › Animação — Evolução parada e Repetir do clipe de
+        // cada modelo 3D (só os que fogem do padrão: tocando sozinho, em laço).
+        // A trilha da Evolução vai com as outras trilhas da camada.
+        auto animated_model = [](const Layer* l) {
+            return l && l->kind == LayerKind::Model3D && (l->model.animProgress >= 0.0f || !l->model.animLoop);
+        };
+        u32 models = 0;
+        for (u32 i = 0; i < c.order().size(); ++i) if (animated_model(c.layer(c.order().at(i)))) ++models;
+        w.u32v(models);
+        for (u32 i = 0; i < c.order().size(); ++i) {
+            const Layer* l = c.layer(c.order().at(i));
+            if (!animated_model(l)) continue;
+            w.u32v(i);
+            w.f32v(l->model.animProgress);
+            w.boolv(l->model.animLoop);
+        }
+        // v76: painel 3D (opções extras) — Começar em, De trás para frente e
+        // Ida e volta do clipe e a EMISSÃO (cor e força) de cada material de
+        // cada modelo 3D (só os que fogem do padrão). A trilha da Velocidade
+        // (TrackProperty::ModelAnimSpeed) e os keyframes da emissão
+        // (MaterialParam 6..9) vão com as outras trilhas.
+        auto extra_model = [](const Layer* l) {
+            if (!l || l->kind != LayerKind::Model3D) return false;
+            if (l->model.animStart > 0.0f || l->model.animReverse || l->model.animPingPong) return true;
+            for (const MaterialOverride& o : l->model.materials) if (o.mask & kMaterialEmissionMask) return true;
+            return false;
+        };
+        u32 extras = 0;
+        for (u32 i = 0; i < c.order().size(); ++i) if (extra_model(c.layer(c.order().at(i)))) ++extras;
+        w.u32v(extras);
+        for (u32 i = 0; i < c.order().size(); ++i) {
+            const Layer* l = c.layer(c.order().at(i));
+            if (!extra_model(l)) continue;
+            w.u32v(i);
+            w.f32v(l->model.animStart);
+            w.u8v(static_cast<u8>((l->model.animReverse ? 1u : 0u) | (l->model.animPingPong ? 2u : 0u)));
+            u32 glowing = 0;
+            for (const MaterialOverride& o : l->model.materials) if (o.mask & kMaterialEmissionMask) ++glowing;
+            w.u32v(glowing);
+            for (const MaterialOverride& o : l->model.materials) {
+                if (!(o.mask & kMaterialEmissionMask)) continue;
+                w.u32v(o.materialIndex);
+                w.u32v(o.mask & kMaterialEmissionMask);
+                w.f32v(o.emissive.x); w.f32v(o.emissive.y); w.f32v(o.emissive.z);
+                w.f32v(o.emissiveStrength);
+            }
+        }
     });
 
     return std::vector<u8>(w.bytes().begin(), w.bytes().end());
@@ -2829,6 +2977,123 @@ bool apply_timeline_section(const u8* data, usize size, Project& p, bool salvage
                 if (l && l->kind == LayerKind::Text) l->text.texture = sanitized(t);
             }
         }
+        // v70: o restante do animador de texto do AE e a ordem preenchimento/traço.
+        // Antes dela: os padrões (traço sem mudança, tracking só para depois).
+        if (g_readingTimelineVersion >= 70) {
+            const u32 texts = r.u32v();
+            if (texts > c->order().size()) { r.fail(); return false; }
+            const auto fin = [](f32 v, f32 lo, f32 hi, f32 fallback) { return std::isfinite(v) ? std::clamp(v, lo, hi) : fallback; };
+            for (u32 i = 0; i < texts && r.good(); ++i) {
+                const u32 index = r.u32v();
+                const u8 order = r.u8v();
+                const u32 animators = r.u32v();
+                if (index >= c->order().size() || animators > 10000u) { r.fail(); return false; }
+                Layer* l = c->layer(c->order().at(index));
+                const bool text = l && l->kind == LayerKind::Text;
+                if (text && animators != l->text.animators.size()) { r.fail(); return false; }
+                if (text) l->text.renderOrder = order <= 2 ? order : u8{0};
+                for (u32 k = 0; k < animators && r.good(); ++k) {
+                    const f32 hue = r.f32v(), sat = r.f32v(), bri = r.f32v(), op = r.f32v(), value = r.f32v(), anchor = r.f32v();
+                    const u8 range = r.u8v(), type = r.u8v();
+                    if (!text) continue;
+                    TextAnimator& a = l->text.animators[k];
+                    a.strokeHue = fin(hue, -36000.0f, 36000.0f, 0.0f);
+                    a.strokeSaturation = fin(sat, -100.0f, 100.0f, 0.0f);
+                    a.strokeBrightness = fin(bri, -100.0f, 100.0f, 0.0f);
+                    a.strokeOpacity = fin(op, 0.0f, 100.0f, 100.0f);
+                    a.charValue = fin(value, 0.0f, 1114111.0f, 0.0f);
+                    a.lineAnchor = fin(anchor, -1000.0f, 1000.0f, 0.0f);
+                    a.charRange = range == 1 ? u8{1} : u8{0};
+                    a.trackingType = type <= 2 ? type : u8{2};
+                }
+                if (g_readingTimelineVersion < 71) continue;   // v71: a expressão do texto-fonte
+                const bool exprOn = r.boolv();
+                std::string exprSource = r.str();
+                if (exprSource.size() > expr::kMaxSourceBytes) { r.fail(); return false; }
+                if (text) {
+                    l->text.sourceExpressionEnabled = exprOn;
+                    l->text.sourceExpression = exprSource.empty() ? nullptr : expr::compile(exprSource);
+                }
+                if (g_readingTimelineVersion < 72) continue;   // v72: mistura entre caracteres e alinhamento
+                const u16 blend = r.u16v();
+                if (text) l->text.interCharBlend = blend <= static_cast<u16>(kLastBlendMode) ? blend : u16{0};
+                for (u32 k = 0; k < animators && r.good(); ++k) {
+                    const u8 align = r.u8v();
+                    if (text) l->text.animators[k].charAlign = align <= 3 ? align : u8{3};
+                }
+            }
+        }
+        // v74: qualidade e amostragem (AE layers). Antes dela: Melhor/bilinear.
+        if (g_readingTimelineVersion >= 74) {
+            const u32 qualified = r.u32v();
+            if (qualified > c->order().size()) { r.fail(); return false; }
+            for (u32 i = 0; i < qualified && r.good(); ++i) {
+                const u32 index = r.u32v();
+                const u8 bits = r.u8v();
+                if (index >= c->order().size()) { r.fail(); return false; }
+                if (Layer* l = c->layer(c->order().at(index))) {
+                    const u8 q = static_cast<u8>(bits & 3u);
+                    l->quality = q <= 2 ? q : u8{0};
+                    l->sampling = (bits & 4u) != 0 ? u8{1} : u8{0};
+                }
+            }
+        }
+        // v75: Evolução parada e Repetir do clipe dos modelos 3D. Antes dela:
+        // o clipe toca sozinho, em laço (Model3DData padrão).
+        if (g_readingTimelineVersion >= 75) {
+            const u32 models = r.u32v();
+            if (models > c->order().size()) { r.fail(); return false; }
+            for (u32 i = 0; i < models && r.good(); ++i) {
+                const u32 index = r.u32v();
+                const f32 progress = r.f32v();
+                const bool loop = r.boolv();
+                if (index >= c->order().size()) { r.fail(); return false; }
+                Layer* l = c->layer(c->order().at(index));
+                if (!l || l->kind != LayerKind::Model3D) continue;
+                l->model.animProgress = std::isfinite(progress) && progress >= 0.0f ? std::min(progress, 1.0f) : -1.0f;
+                l->model.animLoop = loop;
+            }
+        }
+        // v76: Começar em / De trás para frente / Ida e volta e a emissão dos
+        // materiais. Antes dela: o clipe do começo, para frente, só de ida, e a
+        // emissão do arquivo (Model3DData e MaterialOverride padrão).
+        if (g_readingTimelineVersion >= 76) {
+            const u32 extras = r.u32v();
+            if (extras > c->order().size()) { r.fail(); return false; }
+            const auto unit = [](f32 v, f32 hi) { return std::isfinite(v) ? std::clamp(v, 0.0f, hi) : 0.0f; };
+            for (u32 i = 0; i < extras && r.good(); ++i) {
+                const u32 index = r.u32v();
+                const f32 start = r.f32v();
+                const u8 flags = r.u8v();
+                const u32 glowing = r.u32v();
+                if (index >= c->order().size() || glowing > 4096u) { r.fail(); return false; }
+                Layer* l = c->layer(c->order().at(index));
+                const bool model = l && l->kind == LayerKind::Model3D;
+                if (model) {
+                    l->model.animStart = unit(start, 1.0f);
+                    l->model.animReverse = (flags & 1u) != 0;
+                    l->model.animPingPong = (flags & 2u) != 0;
+                }
+                for (u32 k = 0; k < glowing && r.good(); ++k) {
+                    const u32 material = r.u32v();
+                    const u32 bits = r.u32v() & kMaterialEmissionMask;
+                    const f32 er = r.f32v(), eg = r.f32v(), eb = r.f32v(), strength = r.f32v();
+                    if (!model || !bits || material >= 4096u) continue;
+                    MaterialOverride* target = nullptr;
+                    for (MaterialOverride& o : l->model.materials) if (o.materialIndex == material) { target = &o; break; }
+                    if (!target) {
+                        MaterialOverride o;
+                        o.materialIndex = material;
+                        l->model.materials.push_back(o);
+                        target = &l->model.materials.back();
+                    }
+                    target->mask |= bits;
+                    target->emissive = Vec3{unit(er, 1.0f), unit(eg, 1.0f), unit(eb, 1.0f)};
+                    target->emissiveStrength = unit(strength, kMaterialEmissionMax);
+                }
+            }
+        }
+
         c->rebuild_draw_order();
         // Máscara de recorte de um arquivo mexido à mão (ou de versão futura):
         // só as regras de validade (fundo, elegibilidade, base).
@@ -2953,6 +3218,355 @@ std::vector<u8> build_plugins_section(const Project& p) {
     return std::vector<u8>(w.bytes().begin(), w.bytes().end());
 }
 
+/// Seção Expressions (v1), AE expressions (lote E): o que as expressões
+/// ganharam e que não cabe nas trilhas — os itens do Menu suspenso
+/// (`EffectInstance::menuItems`) e a expressão do caminho da máscara
+/// (`Mask::pathExpression`). Seção à parte de propósito: a Timeline não muda
+/// de versão, projeto sem nenhum dos dois fica byte a byte igual, e um leitor
+/// antigo pula a seção (o menu volta a "Item 1..3", a máscara ao caminho
+/// gravado). Camada = (composição na ordem da timeline, posição na ordem de
+/// desenho), como a v74; efeito e máscara pelo id local.
+///   u32 menus · por menu: u32 comp · u32 camada · u32 efeito · u32 itens · str…
+///   u32 caminhos · por caminho: u32 comp · u32 camada · u32 máscara · bool ligada · str fonte
+template <typename Fn>
+void for_each_ordered_layer(const Project& p, Fn&& fn) {
+    u32 ci = 0;
+    p.timeline().for_each_composition([&](CompositionId, const Composition& c) {
+        for (u32 i = 0; i < c.order().size(); ++i) {
+            if (const Layer* l = c.layer(c.order().at(i))) fn(ci, i, *l);
+        }
+        ++ci;
+    });
+}
+
+/// Seção VectorTree (v1), lote X do AE: o que a árvore de formas acrescenta ao
+/// documento vetorial de cada camada (ordem livre, vários Preencher/Contorno/
+/// Aparar/Repetidor/Mesclar, grupos de dentro, inclinação do grupo) — o fluxo
+/// de vector::encode_tree. Seção à parte de propósito: a Timeline e o
+/// documento vetorial de sempre não mudam de versão, projeto sem árvore fica
+/// byte a byte igual, e um leitor antigo pula a seção (a camada abre com o
+/// primeiro item de cada tipo, na ordem de sempre). Camada = (composição na
+/// ordem da timeline, posição na ordem de desenho), como a seção Expressions.
+///   u32 camadas · por camada: u32 comp · u32 camada · u32 floats · f32…
+bool project_has_vector_tree(const Project& p) {
+    bool any = false;
+    for_each_ordered_layer(p, [&](u32, u32, const Layer& l) {
+        any = any || (l.kind == LayerKind::Shape && l.shape.shapeType == kShapeVector && vector::data_has_tree(l.shape.vector));
+    });
+    return any;
+}
+
+std::vector<u8> build_vector_tree_section(const Project& p) {
+    ByteWriter w;
+    u32 layers = 0;
+    for_each_ordered_layer(p, [&](u32, u32, const Layer& l) {
+        if (l.kind == LayerKind::Shape && l.shape.shapeType == kShapeVector && vector::data_has_tree(l.shape.vector)) ++layers;
+    });
+    w.u32v(layers);
+    for_each_ordered_layer(p, [&](u32 ci, u32 li, const Layer& l) {
+        if (l.kind != LayerKind::Shape || l.shape.shapeType != kShapeVector || !vector::data_has_tree(l.shape.vector)) return;
+        std::vector<f32> tree;
+        vector::encode_tree(l.shape.vector, tree);
+        w.u32v(ci); w.u32v(li);
+        w.u32v(static_cast<u32>(tree.size()));
+        for (f32 v : tree) w.f32v(v);
+    });
+    return std::vector<u8>(w.bytes().begin(), w.bytes().end());
+}
+
+void apply_vector_tree_section(const u8* data, usize size, Project& p) {
+    ByteReader r(data, size);
+    std::vector<Composition*> comps;
+    p.timeline().for_each_composition([&](CompositionId, Composition& c) { comps.push_back(&c); });
+    const u32 layers = r.u32v();
+    if (!r.good() || layers > 1000000u) return;
+    for (u32 i = 0; i < layers && r.good(); ++i) {
+        const u32 ci = r.u32v(), li = r.u32v(), n = r.u32v();
+        if (!r.good() || n > 64u * 1024u * 1024u) return;
+        std::vector<f32> tree(n);
+        for (u32 k = 0; k < n && r.good(); ++k) tree[k] = r.f32v();
+        if (!r.good()) return;
+        if (ci >= comps.size() || li >= comps[ci]->order().size()) continue;
+        Layer* l = comps[ci]->layer(comps[ci]->order().at(li));
+        // Camada que não é mais vetorial, ou árvore que não casa com os grupos: fica o documento de sempre.
+        if (!l || l->kind != LayerKind::Shape || l->shape.shapeType != kShapeVector) continue;
+        (void)vector::decode_tree(tree.data(), tree.size(), l->shape.vector);
+    }
+}
+
+bool project_has_expression_extras(const Project& p) {
+    bool any = false;
+    for_each_ordered_layer(p, [&](u32, u32, const Layer& l) {
+        for (const EffectInstance& e : l.effects) any = any || !e.menuItems.empty();
+        for (const Mask& m : l.masks) any = any || m.pathExpression != nullptr;
+    });
+    return any;
+}
+
+std::vector<u8> build_expressions_section(const Project& p) {
+    ByteWriter w;
+    u32 menus = 0, paths = 0;
+    for_each_ordered_layer(p, [&](u32, u32, const Layer& l) {
+        for (const EffectInstance& e : l.effects) if (!e.menuItems.empty()) ++menus;
+        for (const Mask& m : l.masks) if (m.pathExpression) ++paths;
+    });
+    w.u32v(menus);
+    for_each_ordered_layer(p, [&](u32 ci, u32 li, const Layer& l) {
+        for (const EffectInstance& e : l.effects) {
+            if (e.menuItems.empty()) continue;
+            w.u32v(ci); w.u32v(li); w.u32v(e.id);
+            w.u32v(static_cast<u32>(e.menuItems.size()));
+            for (const std::string& s : e.menuItems) w.str(s);
+        }
+    });
+    w.u32v(paths);
+    for_each_ordered_layer(p, [&](u32 ci, u32 li, const Layer& l) {
+        for (const Mask& m : l.masks) {
+            if (!m.pathExpression) continue;
+            w.u32v(ci); w.u32v(li); w.u32v(m.id);
+            w.boolv(m.pathExpressionEnabled);
+            w.str(m.pathExpression->source);
+        }
+    });
+    return std::vector<u8>(w.bytes().begin(), w.bytes().end());
+}
+
+void apply_expressions_section(const u8* data, usize size, Project& p) {
+    ByteReader r(data, size);
+    std::vector<Composition*> comps;
+    p.timeline().for_each_composition([&](CompositionId, Composition& c) { comps.push_back(&c); });
+    auto layer_at = [&](u32 ci, u32 li) -> Layer* {
+        if (ci >= comps.size() || li >= comps[ci]->order().size()) return nullptr;
+        return comps[ci]->layer(comps[ci]->order().at(li));
+    };
+    const u32 menus = r.u32v();
+    if (!r.good() || menus > 65536u) return;
+    for (u32 i = 0; i < menus && r.good(); ++i) {
+        const u32 ci = r.u32v(), li = r.u32v(), effectId = r.u32v(), count = r.u32v();
+        if (!r.good() || count > expr::kMaxMenuItems) return;
+        std::vector<std::string> items;
+        items.reserve(count);
+        for (u32 k = 0; k < count && r.good(); ++k) {
+            std::string s = r.str();
+            if (s.size() > 256) s.resize(256);
+            items.push_back(std::move(s));
+        }
+        if (!r.good()) return;
+        Layer* l = layer_at(ci, li);
+        if (!l) continue;
+        for (EffectInstance& e : l->effects) {
+            if (e.id == effectId && expr::is_menu_control(e.type)) e.menuItems = items;
+        }
+    }
+    const u32 paths = r.u32v();
+    if (!r.good() || paths > 65536u) return;
+    for (u32 i = 0; i < paths && r.good(); ++i) {
+        const u32 ci = r.u32v(), li = r.u32v(), maskId = r.u32v();
+        const bool enabled = r.boolv();
+        std::string source = r.str();
+        if (!r.good() || source.size() > expr::kMaxSourceBytes) return;
+        Layer* l = layer_at(ci, li);
+        if (!l || source.empty()) continue;
+        for (Mask& m : l->masks) {
+            if (m.id != maskId) continue;
+            m.pathExpression = expr::compile(source);
+            m.pathExpressionEnabled = enabled;
+            m.cacheKey = 0;
+        }
+    }
+}
+
+/// Seção MaskRig (v1), lote M: o que as máscaras e o rig do AE ganharam.
+/// Seção à parte, como a Expressions: a Timeline não muda de versão, projeto
+/// sem nada disso fica byte a byte igual e um leitor antigo pula a seção (as
+/// máscaras voltam ao feather comum e os nulos ficam onde estavam). Camadas
+/// pelo par (composição na ordem da timeline, posição na ordem de desenho);
+/// máscara e efeito pelo id local.
+///   u32 máscaras · por máscara: u32 comp · u32 camada · u32 id · u8 chaves
+///     (1 travada, 2 oculta, 4 RotoBezier) · f32 featherY · u32 tensões · f32…
+///     · u32 pontos de feather · (u32 trecho · f32 t · f32 raio · f32 tensão ·
+///     u8 segurar)… · u32 vértices ligados · (u32 vértice · u32 camada)…
+///   u32 camadas · por camada: u32 comp · u32 camada · u8 modo · u8 tipo do
+///     caminho · u32 camada de origem · u32 a · u32 b · u32 vértice · f32
+///     progresso · u32 efeito do progresso · u8 bits (1 laço, 2 orientar) ·
+///     u32 vértices vetoriais · (u32 grupo · u32 caminho · u32 vértice · u32 camada)…
+bool mask_has_rig(const Mask& m) noexcept {
+    return m.locked || m.hidden || m.rotoBezier || m.featherY >= 0.0f || !m.rotoTension.empty()
+        || !m.featherPoints.empty() || !m.drivers.empty();
+}
+bool layer_has_rig(const Layer& l) noexcept {
+    return l.pathFollow.mode != PathFollow::kNone || !l.vectorDrivers.empty();
+}
+
+bool project_has_mask_rig(const Project& p) {
+    bool any = false;
+    p.timeline().for_each_composition([&](CompositionId, const Composition& c) {
+        for (u32 i = 0; i < c.order().size() && !any; ++i) {
+            const Layer* l = c.layer(c.order().at(i));
+            if (!l) continue;
+            any = layer_has_rig(*l);
+            for (const Mask& m : l->masks) any = any || mask_has_rig(m);
+        }
+    });
+    return any;
+}
+
+std::vector<u8> build_mask_rig_section(const Project& p) {
+    ByteWriter w;
+    constexpr u32 kNoLayer = 0xFFFFFFFFu;
+    auto order_of = [](const Composition& c, LayerId id) {
+        for (u32 i = 0; i < c.order().size(); ++i) if (c.order().at(i) == id) return i;
+        return kNoLayer;
+    };
+    u32 masks = 0, layers = 0;
+    p.timeline().for_each_composition([&](CompositionId, const Composition& c) {
+        for (u32 i = 0; i < c.order().size(); ++i) {
+            const Layer* l = c.layer(c.order().at(i));
+            if (!l) continue;
+            if (layer_has_rig(*l)) ++layers;
+            for (const Mask& m : l->masks) if (mask_has_rig(m)) ++masks;
+        }
+    });
+    w.u32v(masks);
+    u32 ci = 0;
+    p.timeline().for_each_composition([&](CompositionId, const Composition& c) {
+        for (u32 i = 0; i < c.order().size(); ++i) {
+            const Layer* l = c.layer(c.order().at(i));
+            if (!l) continue;
+            for (const Mask& m : l->masks) {
+                if (!mask_has_rig(m)) continue;
+                w.u32v(ci); w.u32v(i); w.u32v(m.id);
+                w.u8v(static_cast<u8>((m.locked ? 1u : 0u) | (m.hidden ? 2u : 0u) | (m.rotoBezier ? 4u : 0u)));
+                w.f32v(m.featherY);
+                w.u32v(static_cast<u32>(m.rotoTension.size()));
+                for (const f32 t : m.rotoTension) w.f32v(t);
+                w.u32v(static_cast<u32>(m.featherPoints.size()));
+                for (const MaskFeatherPoint& f : m.featherPoints) {
+                    w.u32v(f.segment); w.f32v(f.t); w.f32v(f.radius); w.f32v(f.tension); w.u8v(f.hold ? 1 : 0);
+                }
+                w.u32v(static_cast<u32>(m.drivers.size()));
+                for (const PathVertexDriver& d : m.drivers) { w.u32v(d.vertex); w.u32v(order_of(c, d.driver)); }
+            }
+        }
+        ++ci;
+    });
+    w.u32v(layers);
+    ci = 0;
+    p.timeline().for_each_composition([&](CompositionId, const Composition& c) {
+        for (u32 i = 0; i < c.order().size(); ++i) {
+            const Layer* l = c.layer(c.order().at(i));
+            if (!l || !layer_has_rig(*l)) continue;
+            const PathFollow& f = l->pathFollow;
+            w.u32v(ci); w.u32v(i);
+            w.u8v(f.mode); w.u8v(f.pathKind);
+            w.u32v(order_of(c, f.source));
+            w.u32v(f.a); w.u32v(f.b); w.u32v(f.vertex);
+            w.f32v(f.progress);
+            w.u32v(f.progressEffect);
+            w.u8v(static_cast<u8>((f.loop ? 1u : 0u) | (f.orient ? 2u : 0u)));
+            w.u32v(static_cast<u32>(l->vectorDrivers.size()));
+            for (const VectorPathDriver& d : l->vectorDrivers) {
+                w.u32v(d.group); w.u32v(d.path); w.u32v(d.vertex); w.u32v(order_of(c, d.driver));
+            }
+        }
+        ++ci;
+    });
+    return std::vector<u8>(w.bytes().begin(), w.bytes().end());
+}
+
+void apply_mask_rig_section(const u8* data, usize size, Project& p) {
+    ByteReader r(data, size);
+    std::vector<Composition*> comps;
+    p.timeline().for_each_composition([&](CompositionId, Composition& c) { comps.push_back(&c); });
+    auto layer_at = [&](u32 ci, u32 li) -> Layer* {
+        if (ci >= comps.size() || li >= comps[ci]->order().size()) return nullptr;
+        return comps[ci]->layer(comps[ci]->order().at(li));
+    };
+    auto id_at = [&](u32 ci, u32 li) -> LayerId {
+        if (ci >= comps.size() || li >= comps[ci]->order().size()) return LayerId{};
+        return comps[ci]->order().at(li);
+    };
+    auto unit = [](f32 v, f32 fallback) { return std::isfinite(v) ? std::clamp(v, 0.0f, 1.0f) : fallback; };
+    const u32 masks = r.u32v();
+    if (!r.good() || masks > 1'000'000u) return;
+    for (u32 i = 0; i < masks && r.good(); ++i) {
+        const u32 ci = r.u32v(), li = r.u32v(), maskId = r.u32v();
+        const u8 bits = r.u8v();
+        const f32 featherY = r.f32v();
+        const u32 tensions = r.u32v();
+        if (!r.good() || tensions > 4096u) return;
+        std::vector<f32> tension(tensions);
+        for (f32& t : tension) t = unit(r.f32v(), 1.0f);
+        const u32 feathers = r.u32v();
+        if (!r.good() || feathers > kMaxFeatherPoints) return;
+        std::vector<MaskFeatherPoint> feather(feathers);
+        for (MaskFeatherPoint& f : feather) {
+            f.segment = std::min<u32>(r.u32v(), 4096u);
+            f.t = unit(r.f32v(), 0.0f);
+            const f32 radius = r.f32v();
+            f.radius = std::isfinite(radius) ? std::clamp(radius, -2000.0f, 2000.0f) : 0.0f;
+            f.tension = unit(r.f32v(), 0.0f);
+            f.hold = r.u8v() != 0;
+        }
+        const u32 drivers = r.u32v();
+        if (!r.good() || drivers > kMaxPathDrivers) return;
+        std::vector<PathVertexDriver> driver;
+        driver.reserve(drivers);
+        for (u32 k = 0; k < drivers && r.good(); ++k) {
+            const u32 vertex = r.u32v(), other = r.u32v();
+            const LayerId id = id_at(ci, other);
+            if (id.valid() && other != li && vertex <= 4096u) driver.push_back(PathVertexDriver{vertex, id});
+        }
+        if (!r.good()) return;
+        Layer* l = layer_at(ci, li);
+        if (!l) continue;
+        for (Mask& m : l->masks) {
+            if (m.id != maskId) continue;
+            m.locked = (bits & 1u) != 0;
+            m.hidden = (bits & 2u) != 0;
+            m.rotoBezier = (bits & 4u) != 0;
+            m.featherY = std::isfinite(featherY) && featherY >= 0.0f ? std::min(featherY, 2000.0f) : -1.0f;
+            m.rotoTension = tension;
+            m.featherPoints = feather;
+            m.drivers = driver;
+            m.cacheKey = 0;
+        }
+    }
+    const u32 layers = r.u32v();
+    if (!r.good() || layers > 1'000'000u) return;
+    for (u32 i = 0; i < layers && r.good(); ++i) {
+        const u32 ci = r.u32v(), li = r.u32v();
+        PathFollow f;
+        const u8 mode = r.u8v(), pathKind = r.u8v();
+        const u32 source = r.u32v();
+        f.a = r.u32v(); f.b = r.u32v(); f.vertex = r.u32v();
+        const f32 progress = r.f32v();
+        f.progressEffect = r.u32v();
+        const u8 bits = r.u8v();
+        const u32 drivers = r.u32v();
+        if (!r.good() || drivers > kMaxPathDrivers) return;
+        std::vector<VectorPathDriver> driver;
+        driver.reserve(drivers);
+        for (u32 k = 0; k < drivers && r.good(); ++k) {
+            const u32 group = r.u32v(), path = r.u32v(), vertex = r.u32v(), other = r.u32v();
+            const LayerId id = id_at(ci, other);
+            if (id.valid() && other != li && vertex <= 4096u) driver.push_back(VectorPathDriver{group, path, vertex, id});
+        }
+        if (!r.good()) return;
+        Layer* l = layer_at(ci, li);
+        if (!l) continue;
+        f.source = id_at(ci, source);
+        f.mode = mode <= PathFollow::kTrace && f.source.valid() && source != li ? mode : PathFollow::kNone;
+        f.pathKind = pathKind <= PathFollow::kVector ? pathKind : PathFollow::kMask;
+        f.progress = std::isfinite(progress) ? std::clamp(progress, -100000.0f, 100000.0f) : 0.0f;
+        f.loop = (bits & 1u) != 0;
+        f.orient = (bits & 2u) != 0;
+        l->pathFollow = f.mode == PathFollow::kNone ? PathFollow{} : f;
+        l->vectorDrivers = std::move(driver);
+        if (!l->vectorDrivers.empty()) pathrig::note_vector_drivers();
+    }
+}
+
 void apply_plugins_section(const u8* data, usize size, Project& p) {
     ByteReader r(data, size);
     const u32 count = r.u32v();
@@ -3073,6 +3687,15 @@ Status ProjectSerializer::encode(const Project& project, const SaveOptions& opti
         sections.push_back(PendingSection{SectionKind::Rig3D, 1, build_rig3d_section(project)});
     if (!project.plugin_refs().empty())
         sections.push_back(PendingSection{SectionKind::Plugins, 1, build_plugins_section(project)});
+    // AE expressions: só quando há Menu suspenso com itens ou expressão de caminho.
+    if (project_has_expression_extras(project))
+        sections.push_back(PendingSection{SectionKind::Expressions, 1, build_expressions_section(project)});
+    // Lote M: só quando alguma máscara/camada usa as chaves novas ou uma ligação de caminho.
+    if (project_has_mask_rig(project))
+        sections.push_back(PendingSection{SectionKind::MaskRig, 1, build_mask_rig_section(project)});
+    // Lote X: só quando alguma camada vetorial usa a árvore de formas.
+    if (project_has_vector_tree(project))
+        sections.push_back(PendingSection{SectionKind::VectorTree, 1, build_vector_tree_section(project)});
 
     // As seções Animations, Effects, Scene3D, Particles, Fonts e Thumbnails
     // existem no enum e no índice, mas ainda não são gravadas separadamente:
@@ -3350,6 +3973,15 @@ Status ProjectSerializer::load_bytes(Project& out, const u8* fileData, usize fil
                 break;
             case SectionKind::Plugins:
                 apply_plugins_section(effective, effectiveSize, out);
+                break;
+            case SectionKind::Expressions:
+                apply_expressions_section(effective, effectiveSize, out);
+                break;
+            case SectionKind::MaskRig:
+                apply_mask_rig_section(effective, effectiveSize, out);
+                break;
+            case SectionKind::VectorTree:
+                apply_vector_tree_section(effective, effectiveSize, out);
                 break;
             default:
                 // Seções que esta versão não grava ainda. Se aparecerem, foram

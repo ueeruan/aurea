@@ -92,13 +92,20 @@ public:
                      f32 texelScale, const LayerPlacement& placement,
                      EffectResources* resources, EffectPlan& out, f64 framesPerSecond = 30.0,
                      const Composition* composition = nullptr,
-                     u32 firstEffect = 0, u32 endEffect = kInvalidIndex);
+                     u32 firstEffect = 0, u32 endEffect = kInvalidIndex, bool skipHeavy = false);
 
+    /// `skipHeavy` (AE layers: camada em Rascunho na prévia): os efeitos
+    /// pesados (`is_heavy`) ficam fora do plano, como se estivessem desligados.
     static void plan_f(const Layer& layer, const EffectRegistry& registry, f64 localTime,
                        f32 texelScale, const LayerPlacement& placement,
                        EffectResources* resources, EffectPlan& out, f64 framesPerSecond = 30.0,
                        const Composition* composition = nullptr,
-                       u32 firstEffect = 0, u32 endEffect = kInvalidIndex);
+                       u32 firstEffect = 0, u32 endEffect = kInvalidIndex, bool skipHeavy = false);
+
+    /// Efeito PESADO para o Rascunho: precisa de outros instantes (temporal,
+    /// histórico, quadros vizinhos) ou do quadro inteiro (global). Os de
+    /// geometria e os de cor nunca são pesados (a camada não muda de lugar).
+    [[nodiscard]] static bool is_heavy(const Effect& effect) noexcept;
 
     /// Declara os passes do plano no FrameGraph e devolve a imagem final da
     /// layer. Sem etapas, devolve a própria entrada.

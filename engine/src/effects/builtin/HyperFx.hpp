@@ -18,7 +18,8 @@ namespace aurea::hyper::fx {
 inline constexpr u32 kBlock = 16;   ///< px da resolução cheia por bloco do campo
 
 /// Tamanho do campo de blocos para uma imagem w x h.
-void field_size(u32 w, u32 h, u32& fw, u32& fh) noexcept;
+void field_size(u32 w, u32 h, u32& fw, u32& fh, u32 blockSize = kBlock) noexcept;
+[[nodiscard]] u32 motion_block_size(EffectBuildContext& ctx) noexcept;
 
 /// Luma perceptual dos dois quadros no mesmo texel (R = A, G = B).
 [[nodiscard]] FGTexture luma_pair(EffectBuildContext& ctx, FGTexture a, FGTexture b, u32 w, u32 h,

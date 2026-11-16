@@ -66,6 +66,8 @@ struct AureaApp: App {
                 .onOpenURL { url in
                     // 0.4.1: a volta da folha do Google (GoogleLogin.swift) não é projeto.
                     if GoogleLogin.tratar(url) { return }
+                    // AureaMCP: aurea://mcp/pair?code=… (página de autorização do agente) abre o AureaMCP com o código.
+                    if AureaMcpClient.shared.openPairLink(url) { return }
                     openProjectFileFromOutside(url)
                 }
         }
@@ -208,7 +210,19 @@ private struct CreatorWelcome<Content: View>: View {
     /// Versão do texto de privacidade/termos aceito (o build em que mudou).
     static var currentConsent: Int { 2181 }
     @AppStorage("consentVersion") private var consentVersion = 0
-    @AppStorage("creatorWelcomeOpened") private var opened = 0
+    @AppStorage("creatorWelcomeOpened") private var openedOld = 0
+    /// 0.5.4 (pedido do dono, 14/11/2026): a tela "siga" volta para TODOS, mesmo quem já
+    /// seguiu, agora com os perfis do Aurea. Subir `currentSocial` faz ela aparecer de novo.
+    static var currentSocial: Int { 54 }
+    @AppStorage("socialVersion") private var socialVersion = 0
+    @AppStorage("socialOpened54") private var opened = 0
+    private static var profiles: [(String, String)] { [
+        ("TikTok @ruanzitwo", "https://www.tiktok.com/@ruanzitwo"),
+        ("Instagram @ofruanzitwo", "https://www.instagram.com/ofruanzitwo/"),
+        ("Instagram @aureaediting", "https://www.instagram.com/aureaediting/"),
+        ("TikTok @aurea.video", "https://www.tiktok.com/@aurea.video"),
+    ] }
+    private var allOpened: Int { (1 << Self.profiles.count) - 1 }
     @Environment(\.openURL) private var openURL
     @State private var failed = false
     @ViewBuilder var content: () -> Content
@@ -239,15 +253,22 @@ private struct CreatorWelcome<Content: View>: View {
                     .accessibilityIdentifier("welcome.consent.accept")
             }.padding(24).background(Color.black)
         }
-        else if opened == 3 || testing { content() }
+        else if socialVersion >= Self.currentSocial || testing { content() }
         else {
+            // App Store: abrir perfis não pode ser condição para usar o app (diretriz da loja);
+            // a tela aparece para todos, com "Continuar".
             VStack(alignment: .leading, spacing: 20) {
                 Text(AureaText.t("social_title")).font(.title)
-                Text(AureaText.t("social_body"))
-                profile("TikTok @ruanzitwo", "https://www.tiktok.com/@ruanzitwo", bit: 1)
-                profile("Instagram @ofruanzitwo", "https://www.instagram.com/ofruanzitwo/", bit: 2)
+                Text(AureaText.t("social_body_054_store"))
+                ForEach(Array(Self.profiles.enumerated()), id: \.offset) { i, p in
+                    profile(p.0, p.1, bit: 1 << i)
+                }
                 if failed { Text(AureaText.t("social_open_error")).foregroundStyle(.red) }
+                Button(AureaText.t("social_continue")) { socialVersion = Self.currentSocial }
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .accessibilityIdentifier("welcome.social.continue")
             }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.black)
+            .onChange(of: opened) { value in if value == allOpened { socialVersion = Self.currentSocial } }
         }
     }
     private func profile(_ title: String, _ address: String, bit: Int) -> some View {

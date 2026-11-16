@@ -88,7 +88,7 @@ import kotlin.math.sin
 /** Losango de uma trilha da lente (transform da câmera; tempo local da camada). */
 internal fun cameraTrackLook(store: EditorStore, property: Int): KeyframeLook {
     val d = store.detail ?: return KeyframeLook.None
-    val keys = store.keyframes[d.id].orEmpty()
+    val keys = store.keysForLayer(d.id).orEmpty()
     var animated = false
     for (i in keys.indices) {
         val k = keys[i]
@@ -152,6 +152,12 @@ internal fun CameraOptionsPanel(env: PanelEnv) {
                 onDeleteAllKeyframes = onDeleteAll,
                 onCurve = onCurve,
                 curveReady = store.curveStart(curveKeys) != null,
+                // F6 (D3): a Cena 3D (ambiente, render) da composição a partir da câmera.
+                moreEntries = listOf(com.aurea.aurea.ui.ds.MenuEntry.Item(stringResource(R.string.fn_3d_scene),
+                    glyph = com.aurea.aurea.ui.theme.CupertinoGlyph.Lightbulb, tag = "camera.more.scene3d") {
+                    Element3DRequest.face = Face3D.Scene
+                    env.onOpenPanel(EditorPanel.Element3D)
+                }),
             ),
             tabs = tabs,
             selectedTab = tab,
@@ -376,7 +382,7 @@ private fun CameraTwoNodeRows(env: PanelEnv, enabled: Boolean) {
     val poiLabel = stringResource(R.string.ae_anim_poi)
     val props = intArrayOf(com.aurea.aurea.engine.TrackProperty.CAMERA_POI_X, com.aurea.aurea.engine.TrackProperty.CAMERA_POI_Y,
         com.aurea.aurea.engine.TrackProperty.CAMERA_POI_Z)
-    val keys = store.keyframes[store.primary].orEmpty().filter { it.property in props }
+    val keys = store.keysForLayer(store.primary).orEmpty().filter { it.property in props }
     val here = keys.any { it.time == store.detail?.localPlayhead }
     Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp)) {

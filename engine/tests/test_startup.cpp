@@ -19,6 +19,7 @@
 #include "aurea/Engine.hpp"
 #include "aurea/effects/Effect.hpp"
 #include "aurea/render/Renderer.hpp"
+#include "aurea/project/FileIO.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -312,6 +313,48 @@ AUREA_TEST(Startup, ProjectPipelinesWarmWhenUsedNotAtOpen) {
     fs::remove_all(fs::path(dir), ec);
 }
 
+AUREA_TEST(Startup, FlowPipelinesWarmWithTheProjectNotInsideTheFirstFlowFrame) {
+    // 0.5.3: o conjunto do fluxo óptico (Renderer::video_flow e o desfoque vetorial)
+    // não pertence a nenhum Effect::pipelines(). Antes, os 12 pipelines só nasciam
+    // no meio do primeiro quadro que usava o fluxo. Agora a varredura do projeto os
+    // declara quando uma camada pode pedir fluxo.
+    if (!gpu_available()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    const std::string dir = startup_dir("fluxo");
+    Engine e;
+    AUREA_CHECK(open_engine(dir, e).ok);
+    ShaderLibrary& lib = e.renderer().shaders();
+    const PipelineKey lk = PipelineKey::fullscreen(ShaderId::video_flow_lk_frag, SurfaceFormat::RGBA16F);
+    const PipelineKey warp = PipelineKey::fullscreen(ShaderId::video_flow_warp_frag, SurfaceFormat::RGBA16F);
+    const PipelineKey vblur = PipelineKey::fullscreen(ShaderId::video_flow_vblur_frag, SurfaceFormat::RGBA16F);
+    AUREA_CHECK(!lib.has_pipeline(lk) && !lib.has_pipeline(warp) && !lib.has_pipeline(vblur));   // não vem da abertura
+
+    auto shape = e.add_shape(0);
+    AUREA_CHECK(shape.ok());
+    std::vector<u8> rgba;
+    u32 w = 0, h = 0;
+    AUREA_CHECK(e.capture_frame_rgba(128, rgba, w, h).ok());
+    AUREA_CHECK(!lib.has_pipeline(lk));   // projeto sem fluxo: nada a mais é compilado
+
+    // "Movimento de pixels" ligado na camada. Uma forma não tem dois quadros de vídeo,
+    // então o fluxo nunca roda neste quadro: o conjunto só existe se a varredura o
+    // declarou (antes da 0.5.3 esta verificação falhava).
+    auto* comp = e.project()->timeline().composition(e.project()->timeline().root());
+    AUREA_CHECK(comp != nullptr);
+    if (comp) comp->layer(LayerId::unpack(*shape))->frameBlend = 2;
+    const u32 before = lib.pipeline_count();
+    const auto started = std::chrono::steady_clock::now();
+    AUREA_CHECK(e.capture_frame_rgba(128, rgba, w, h).ok());
+    const f64 ms = std::chrono::duration<f64, std::milli>(std::chrono::steady_clock::now() - started).count();
+    AUREA_CHECK(lib.has_pipeline(lk));
+    AUREA_CHECK(lib.has_pipeline(warp));
+    AUREA_CHECK(lib.has_pipeline(vblur));
+    std::printf("\n    conjunto do fluxo: +%u pipelines na varredura do projeto, quadro com a compilacao %.1f ms\n    ",
+                lib.pipeline_count() - before, ms);
+    e.shutdown();
+    std::error_code ec;
+    fs::remove_all(fs::path(dir), ec);
+}
+
 AUREA_TEST(Startup, EffectBrowserPreviewCostIsMeasured) {
     // O que saiu da abertura (pipelines de efeito) é pago quando o navegador
     // de efeitos pede as prévias (320 × 200, o tamanho do cartão). No app a
@@ -348,6 +391,39 @@ AUREA_TEST(Startup, EffectBrowserPreviewCostIsMeasured) {
     e.shutdown();
     std::error_code ec;
     fs::remove_all(fs::path(dir), ec);
+}
+
+AUREA_TEST(Startup, IncrementalPipelineCacheTracksNewPipelinesEvenWhenBlobSizeIsStable) {
+    const std::string directory = startup_dir("incremental-pipelines");
+    Engine engine;
+    const auto opened = open_engine(directory, engine);
+    AUREA_CHECK(opened.ok);
+    if (!opened.ok) return;
+    engine.gpu()->save_pipeline_cache();
+    const auto before = engine.gpu()->pipeline_cache_info();
+    auto& shaders = engine.renderer().shaders();
+    const auto key = PipelineKey::fullscreen(ShaderId::scene3d_post_temporal_frag, SurfaceFormat::RGBA16F);
+    AUREA_CHECK(!shaders.has_pipeline(key));
+    AUREA_CHECK(shaders.pipeline(key).ok());
+    fileio::FaultInjection fault;
+    fault.kind = fileio::Fault::RenameFails;
+    fault.pathContains = directory;
+    fileio::set_fault_injection(fault);
+    engine.gpu()->save_pipeline_cache();
+    AUREA_CHECK_EQ(fileio::injected_failures(), 1u);
+    AUREA_CHECK_EQ(engine.gpu()->pipeline_cache_info().saves, before.saves);
+    fileio::clear_fault_injection();
+    engine.gpu()->save_pipeline_cache();
+    const auto after = engine.gpu()->pipeline_cache_info();
+    AUREA_CHECK_EQ(after.saves, before.saves + 1u);
+    AUREA_CHECK(after.savedBytes > 0);
+    engine.gpu()->save_pipeline_cache();
+    AUREA_CHECK_EQ(engine.gpu()->pipeline_cache_info().saves, after.saves);
+    std::printf("    incremental pipeline cache: %llu -> %llu bytes, saves %u -> %u\n",
+        static_cast<unsigned long long>(before.savedBytes), static_cast<unsigned long long>(after.savedBytes), before.saves, after.saves);
+    engine.shutdown();
+    std::error_code error;
+    fs::remove_all(fs::path(directory), error);
 }
 
 #endif // AUREA_TEST_VULKAN

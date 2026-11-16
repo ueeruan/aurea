@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.5.4: estilo Cartoon do texto 3D (material pronto 14 do motor). -->
+    <string name="pn_t3d_preset_cartoon">كرتون</string>
+    <string name="t3d_cartoon_side_auto">لون جانبي تلقائي</string>
+    <string name="t3d_cartoon_side">لون الجانب</string>
+    <string name="t3d_cartoon_highlight">اللمعة</string>
+    <string name="t3d_cartoon_outline_color">لون الحد الخارجي</string>
+    <string name="t3d_cartoon_outline_width">عرض الحد الخارجي</string>
+    <string name="t3d_cartoon_hint">ألوان كرتونية مسطحة مع حد خارجي سميك. عرض الحد بوحدات بكسل التكوين، لذا يبدو متماثلًا بأي دقة تصدير.</string>
+</resources>

@@ -117,6 +117,7 @@ private fun PluginRow(p: PluginTexts.Plugin, tag: String, onRemove: () -> Unit) 
             Text(PluginTexts.pick(p.names, tag) ?: p.id, style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600)))
             Text(stringResource(R.string.plug_by, p.author.ifEmpty { p.id }, p.version) + " · " +
                 stringResource(when {
+                    p.kind == "audio" -> R.string.plug_kind_audio
                     p.kind == "stack" -> R.string.plug_kind_stack
                     p.kind == "panel" -> R.string.pv2_kind_panel
                     p.scene3d -> R.string.plug_kind_shader3d
@@ -128,7 +129,7 @@ private fun PluginRow(p: PluginTexts.Plugin, tag: String, onRemove: () -> Unit) 
             }
             // No modo seguro o aviso do topo já explica: o plugin não está com defeito.
             if (!p.ok && !PluginRuntime.safeMode) Text(stringResource(R.string.plug_error, p.error), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Warning)))
-            else if (p.ok && p.testRenderMs > 0) Text(stringResource(R.string.plug_render_ms, String.format(java.util.Locale.ROOT, "%.1f", p.testRenderMs)),
+            else if (p.ok && p.testRenderMs > 0) Text(stringResource(if (p.kind == "audio") R.string.plug_audio_ms else R.string.plug_render_ms, String.format(java.util.Locale.ROOT, "%.1f", p.testRenderMs)),
                 style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, color = AureaColors.Muted)))
             // 0.3.4 plugins: ligar/desligar, permissões, painéis e console.
             if (p.ok && (p.hasScript || p.panels.isNotEmpty() || p.actions.isNotEmpty())) PluginV2Controls(p, tag)

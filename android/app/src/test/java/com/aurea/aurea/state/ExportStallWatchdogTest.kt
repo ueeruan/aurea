@@ -56,6 +56,81 @@ class ExportStallWatchdogTest {
         assertEquals(ExportStallWatchdog.Verdict.GiveUp, w.observe(1_500, 2, "cancelado"))
     }
 
+    // --- 0.5.3 (P0-3): o tempo em que ninguém leu o progresso não é travamento ---
+
+    private fun screenWatchdog() = ExportStallWatchdog(observeGapMs = ExportStallWatchdog.OBSERVE_GAP_MS)
+
+    @Test fun tenMinuteGapBetweenTwoReadsDoesNotCancel() {
+        // Serviço recusado + tela apagada: o processo congela e volta 10 min depois
+        // com o MESMO quadro. Antes a primeira leitura via 600 s "sem progresso".
+        val w = screenWatchdog()
+        var t = 1_000L
+        repeat(50) { assertEquals(ExportStallWatchdog.Verdict.Running, w.observe(t, 42, "exportando")); t += 100 }
+        t += 10 * 60_000L
+        assertEquals(ExportStallWatchdog.Verdict.Running, w.observe(t, 42, "exportando"))
+        assertFalse(w.cancelled)
+        // O prazo recomeça de onde estava: só o que foi OBSERVADO parado conta.
+        val observedBefore = 49 * 100L
+        var waited = 0L
+        while (waited + 100 < stall - observedBefore) {
+            t += 100; waited += 100
+            assertEquals(ExportStallWatchdog.Verdict.Running, w.observe(t, 42, "exportando"))
+        }
+        t += 100
+        assertEquals(ExportStallWatchdog.Verdict.Cancel, w.observe(t, 42, "exportando"))
+    }
+
+    @Test fun realStallObservedEvery100msStillCancelsAndGivesUp() {
+        val w = screenWatchdog()
+        var t = 0L
+        var verdict = w.observe(t, 7, "montando 3/9")
+        while (verdict == ExportStallWatchdog.Verdict.Running && t < stall + 1_000) { t += 100; verdict = w.observe(t, 7, "montando 3/9") }
+        assertEquals(ExportStallWatchdog.Verdict.Cancel, verdict)
+        assertEquals(stall, t)
+        val cancelledAt = t
+        verdict = ExportStallWatchdog.Verdict.Running
+        while (verdict == ExportStallWatchdog.Verdict.Running && t < cancelledAt + giveUp + 1_000) { t += 100; verdict = w.observe(t, 7, "montando 3/9") }
+        assertEquals(ExportStallWatchdog.Verdict.GiveUp, verdict)
+        assertEquals(cancelledAt + giveUp, t)
+    }
+
+    @Test fun gapAfterTheCancelDoesNotGiveUpEarly() {
+        val w = ExportStallWatchdog(stallMs = 1_000, giveUpMs = 500, observeGapMs = 200)
+        var t = 0L
+        while (w.observe(t, 1, "") == ExportStallWatchdog.Verdict.Running) t += 100
+        assertTrue(w.cancelled)
+        // Congelado logo depois do cancelar: o motor não teve os 500 ms para concluir.
+        t += 60_000L
+        assertEquals(ExportStallWatchdog.Verdict.Running, w.observe(t, 1, ""))
+        t += 100; assertEquals(ExportStallWatchdog.Verdict.Running, w.observe(t, 1, ""))
+        t += 100; assertEquals(ExportStallWatchdog.Verdict.Running, w.observe(t, 1, ""))
+        t += 100; assertEquals(ExportStallWatchdog.Verdict.Running, w.observe(t, 1, ""))
+        t += 100; assertEquals(ExportStallWatchdog.Verdict.Running, w.observe(t, 1, ""))
+        t += 100; assertEquals(ExportStallWatchdog.Verdict.GiveUp, w.observe(t, 1, ""))
+    }
+
+    @Test fun slowButRegularReadsBelowTheGapStillCount() {
+        // Leituras a cada 4 s (main thread engasgada) ainda são "alguém olhando".
+        val w = screenWatchdog()
+        var t = 0L
+        var verdict = w.observe(t, 3, "x")
+        while (verdict == ExportStallWatchdog.Verdict.Running && t < stall + 10_000) { t += 4_000; verdict = w.observe(t, 3, "x") }
+        assertEquals(ExportStallWatchdog.Verdict.Cancel, verdict)
+        assertEquals(stall, t)
+        assertEquals(5_000L, ExportStallWatchdog.OBSERVE_GAP_MS)
+    }
+
+    // --- 0.5.3 (P0-8): o Cancelar da pessoa sempre termina ---
+
+    @Test fun userCancelEndsAfterTheSameGiveUpAsTheWatchdog() {
+        assertFalse(ExportStallWatchdog.userCancelExpired(-1L, 1_000_000L))            // ainda não pediu
+        assertFalse(ExportStallWatchdog.userCancelExpired(50_000L, 50_000L))
+        assertFalse(ExportStallWatchdog.userCancelExpired(50_000L, 50_000L + giveUp - 1))
+        assertTrue(ExportStallWatchdog.userCancelExpired(50_000L, 50_000L + giveUp))   // 15 s, não 180 + 15
+        assertTrue(ExportStallWatchdog.userCancelExpired(0L, giveUp))                  // relógio em zero também vale
+        assertTrue(giveUp < stall)
+    }
+
     @Test fun uiWaitsLongerThanEveryEngineDeadline() {
         // GPU 120 s, worker do encoder por fase até 45 s (ExportWatchdog.hpp).
         assertTrue(stall > 120_000L + 45_000L)

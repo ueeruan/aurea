@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE reference batch C: Extrude, Depth Field, Smear. -->
+<resources>
+    <string name="refc_extrude_name">Выдавливание (вектор)</string>
+    <string name="refc_extrude_desc">Векторное выдавливание текста, фигур и масок: по направлению, к точке схода или в 3D-камере, с обводкой и градиентом граней.</string>
+    <string name="refc_depth_field_name">Глубина резкости</string>
+    <string name="refc_depth_field_desc">Размывает слой по глубине: фокальная плоскость, толщина и максимальный радиус; глубину оценивает ИИ.</string>
+    <string name="refc_smear_name">Размазывание (маски)</string>
+    <string name="refc_smear_desc">Переносит область исходной маски в новое место и растягивает изображение вокруг неё внутри маски-границы.</string>
+</resources>

@@ -204,7 +204,7 @@ AUREA_TEST(LightGlowGoldenGpu, NewInstancesUseOldAppLookAndBehave) {
         const ParameterRegistry* specs = rig.e.effects().params(fx->type);
         const u32 algo = specs->find("algorithm");
         AUREA_CHECK(algo != kInvalidIndex);
-        AUREA_CHECK_NEAR(fx->params[algo].constant.v[0], 1.0f, 1e-6f);
+        AUREA_CHECK_NEAR(fx->params[algo].constant.v[0], std::string(key) == effect_keys::kDeepGlow ? 2.0f : 1.0f, 1e-6f);
         AUREA_CHECK((specs->at(algo).flags & kParamHidden) != 0);
         seek_frame(rig.e, 0);
         const Image8 lit = rig.capture(320);
@@ -234,10 +234,11 @@ AUREA_TEST(LightGlowGoldenGpu, NewInstancesUseOldAppLookAndBehave) {
             brighter += lp > lb + 3; darker += lp + 6 < lb;
         }
         AUREA_CHECK(brighter > 50u);
+        std::printf("    %s source brighter=%u darker=%u\n", key, brighter, darker);
         AUREA_CHECK_EQ(darker, 0u);
 
-        // Intensidade 0 = identidade.
-        const u32 amount = specs->find(std::string(key) == effect_keys::kGlow ? "intensity" : "glow_intensity");
+        // The reference rendering is bypassed at radius zero, including source-opacity controls.
+        const u32 amount = specs->find(std::string(key) == effect_keys::kGlow ? "intensity" : "ref_radius");
         AUREA_CHECK(amount != kInvalidIndex);
         Composition* comp = current(rig);
         for (u64 id : {text, image}) {
@@ -264,7 +265,7 @@ AUREA_TEST(LightGlowGoldenGpu, MissingAlgorithmSlotMeansLegacy) {
         EffectInstance fx;
         initialize_instance(fx, *specs);
         TrackSet tracks;
-        AUREA_CHECK_NEAR(evaluate_param_f(tracks, fx, a, specs->at(a), 0.0, nullptr).v[0], 1.0f, 1e-6f);
+        AUREA_CHECK_NEAR(evaluate_param_f(tracks, fx, a, specs->at(a), 0.0, nullptr).v[0], std::string(key) == effect_keys::kDeepGlow ? 2.0f : 1.0f, 1e-6f);
         AUREA_CHECK((specs->at(a).flags & kParamHidden) != 0);
         fx.params.resize(a);
         AUREA_CHECK_NEAR(evaluate_param_f(tracks, fx, a, specs->at(a), 0.0, nullptr).v[0], 0.0f, 1e-6f);
@@ -280,7 +281,7 @@ AUREA_TEST(LightGlowGoldenGpu, LegacyInstanceCardShowsItsOwnControls) {
     AUREA_REQUIRE_GPU();
     using namespace light_golden;
     struct Expect { const char* key; u32 savedCount; const char* legacyOnly; const char* newOnly; };
-    for (const Expect& x : {Expect{effect_keys::kDeepGlow, kDeepGlowSavedCount, "core_intensity", "glow_intensity"},
+    for (const Expect& x : {Expect{effect_keys::kDeepGlow, kDeepGlowSavedCount, "core_intensity", "ref_exposure"},
                             Expect{effect_keys::kGlow, kGlowSavedCount, nullptr, "softness"}}) {
         if (!has_new_algorithm(x.key)) continue;
         Scene3DRig rig(160, 90);
@@ -304,14 +305,14 @@ AUREA_TEST(LightGlowGoldenGpu, LegacyInstanceCardShowsItsOwnControls) {
         { EffectInstance d; initialize_instance(d, *specs);
           for (usize k = b->params.size(); k < d.params.size(); ++k) {
               ParamSlot s = d.params[k];
-              if (k == alg) s.constant = ParamValue::scalar(0.0f);
+              if (k == alg || (specs->at(static_cast<u32>(k)).flags & kParamLegacyZero)) s.constant = ParamValue::scalar(0.0f);
               b->params.push_back(s);
           } }
         const u32 oldId = b->id;
         auto hidden = [&](u32 effectId, const char* param) -> int {
-            bridge::EffectParamRow rows[48]{};
+            bridge::EffectParamRow rows[128]{};
             char blob[8192]{};
-            const u32 n = rig.e.query_effect_params(*id, effectId, rows, 48, blob, sizeof(blob));
+            const u32 n = rig.e.query_effect_params(*id, effectId, rows, 128, blob, sizeof(blob));
             const u32 p = specs->find(param);
             for (u32 r = 0; r < n; ++r) if (rows[r].index == p) return (rows[r].flags & kParamHidden) ? 1 : 0;
             return -1;   // ausente
@@ -321,7 +322,7 @@ AUREA_TEST(LightGlowGoldenGpu, LegacyInstanceCardShowsItsOwnControls) {
         AUREA_CHECK_EQ(hidden(oldId, "algorithm"), 1);
         AUREA_CHECK_EQ(hidden(newId, x.newOnly), 0);
         AUREA_CHECK_EQ(hidden(oldId, x.newOnly), 1);
-        AUREA_CHECK_EQ(hidden(newId, "threshold"), 0);
+        AUREA_CHECK_EQ(hidden(newId, std::string(x.key) == effect_keys::kDeepGlow ? "ref_threshold" : "threshold"), 0);
         AUREA_CHECK_EQ(hidden(oldId, "threshold"), 0);
         if (x.legacyOnly) {
             AUREA_CHECK_EQ(hidden(newId, x.legacyOnly), 1);

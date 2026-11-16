@@ -118,10 +118,11 @@ void end_text_edit(Layer& layer, FrameIndex playhead) noexcept {
 i64 Engine::add_text_source_key(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || l->kind != LayerKind::Text || !l->captions.empty()) return -1;
-    const i64 local = l->local_time(playback_.current()).value;
+    const i64 local = l->local_time(editing_frame_locked()).value;
     history_.before_mutation(*comp, project_->timeline().current(), "key do texto-fonte");
     bump_model_revision_locked();
     (void)text::upsert_source_key(l->text, ae_anim::key_from_shown(l->text, local));
@@ -133,6 +134,7 @@ i64 Engine::add_text_source_key(u64 layerId) noexcept {
 bool Engine::set_text_source_key(u64 layerId, i64 frame, const std::string& content) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || l->kind != LayerKind::Text) return false;
@@ -153,6 +155,7 @@ bool Engine::set_text_source_key(u64 layerId, i64 frame, const std::string& cont
 bool Engine::delete_text_source_key(u64 layerId, i64 frame) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || l->kind != LayerKind::Text || ae_anim::key_at(l->text, frame) < 0) return false;
@@ -164,7 +167,7 @@ bool Engine::delete_text_source_key(u64 layerId, i64 frame) noexcept {
     c.keyframe.time = FrameIndex{frame};
     c.keyframe.value = 0.0f;
     c.keyframe.onlyIfChanged = 0;
-    const bool ok = ae_anim::text_source_key_command(*l, c, playback_.current()).ok();
+    const bool ok = ae_anim::text_source_key_command(*l, c, editing_frame_locked()).ok();
     project_->mark_dirty();
     request_render();
     return ok;
@@ -172,6 +175,7 @@ bool Engine::delete_text_source_key(u64 layerId, i64 frame) noexcept {
 
 u32 Engine::query_text_source_keys(u64 layerId, i64* frames, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Text) return 0;
@@ -182,6 +186,7 @@ u32 Engine::query_text_source_keys(u64 layerId, i64* frames, u32 capacity) noexc
 
 bool Engine::text_source_key_content(u64 layerId, i64 frame, std::string& out) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Text) return false;
@@ -197,6 +202,7 @@ bool Engine::text_source_key_content(u64 layerId, i64 frame, std::string& out) n
 bool Engine::set_layer_auto_orient(u64 layerId, u32 mode) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || mode > 2) return false;
@@ -212,6 +218,7 @@ bool Engine::set_layer_auto_orient(u64 layerId, u32 mode) noexcept {
 
 i32 Engine::query_layer_auto_orient(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     return l ? static_cast<i32>(l->autoOrient) : -1;
@@ -228,6 +235,7 @@ f32 track_value(const Layer& l, TrackProperty p, FrameIndex local, f32 fallback)
 bool Engine::set_camera_two_node(u64 layerId, bool on) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || l->kind != LayerKind::Camera) return false;
@@ -239,7 +247,7 @@ bool Engine::set_camera_two_node(u64 layerId, bool on) noexcept {
         // O POI nasce no eixo da câmera sem a rotação (posição + Z × foco): a
         // mira é a identidade e a rotação X/Y/Z continua girando por cima —
         // a imagem não pula ao ligar. Keys de POI que já existam mandam.
-        const FrameIndex local = l->local_time(playback_.current());
+        const FrameIndex local = l->local_time(editing_frame_locked());
         const Vec3 pos{track_value(*l, TrackProperty::PositionX, local, l->transform.position.x),
                        track_value(*l, TrackProperty::PositionY, local, l->transform.position.y),
                        track_value(*l, TrackProperty::PositionZ, local, l->transform.position.z)};
@@ -260,12 +268,13 @@ bool Engine::set_camera_poi(u64 layerId, f32 x, f32 y, f32 z, bool undo) noexcep
     if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || l->kind != LayerKind::Camera) return false;
     if (undo) history_.before_mutation(*comp, project_->timeline().current(), "ponto de interesse");
     bump_model_revision_locked();
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     const f32 v[3] = {std::clamp(x, -1.0e6f, 1.0e6f), std::clamp(y, -1.0e6f, 1.0e6f), std::clamp(z, -1.0e6f, 1.0e6f)};
     const TrackProperty props[3] = {TrackProperty::CameraPoiX, TrackProperty::CameraPoiY, TrackProperty::CameraPoiZ};
     bool keyed = false;
@@ -289,10 +298,11 @@ bool Engine::set_camera_poi(u64 layerId, f32 x, f32 y, f32 z, bool undo) noexcep
 bool Engine::query_camera_poi(u64 layerId, f32* out4) noexcept {
     if (!out4) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Camera) return false;
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     out4[0] = l->camera.twoNode ? 1.0f : 0.0f;
     out4[1] = track_value(*l, TrackProperty::CameraPoiX, local, l->camera.poi.x);
     out4[2] = track_value(*l, TrackProperty::CameraPoiY, local, l->camera.poi.y);

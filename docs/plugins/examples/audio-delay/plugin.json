@@ -1,0 +1,76 @@
+{
+  "aureaPlugin": 3,
+  "id": "aurea.example.audio-delay",
+  "version": "1.0.0",
+  "name": "Stereo delay",
+  "author": "Aurea",
+  "kind": "audio",
+  "params": [
+    {
+      "id": "delay_ms",
+      "label": "Time (ms)",
+      "type": "float",
+      "default": 250,
+      "min": 1,
+      "max": 2000
+    },
+    {
+      "id": "feedback",
+      "label": "Feedback",
+      "type": "float",
+      "default": 0.35,
+      "min": 0,
+      "max": 0.95
+    },
+    {
+      "id": "mix",
+      "label": "Wet mix",
+      "type": "float",
+      "default": 0.3,
+      "min": 0,
+      "max": 1
+    }
+  ],
+  "audio": {
+    "nodes": [
+      {
+        "id": "source",
+        "type": "input"
+      },
+      {
+        "id": "echo",
+        "type": "delay",
+        "input": "source",
+        "timeMs": {
+          "param": "delay_ms",
+          "scale": 1,
+          "offset": 0
+        },
+        "feedback": {
+          "param": "feedback",
+          "scale": 1,
+          "offset": 0
+        },
+        "dampingHz": 12000,
+        "maxDelayMs": 2000
+      },
+      {
+        "id": "output",
+        "type": "mix",
+        "inputs": [
+          "source",
+          "echo"
+        ],
+        "gains": [
+          1,
+          {
+            "param": "mix",
+            "scale": 1,
+            "offset": 0
+          }
+        ]
+      }
+    ],
+    "output": "output"
+  }
+}

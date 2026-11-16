@@ -132,8 +132,9 @@ internal fun CommandSearchSheet(store: EditorStore, ui: EditorUi, onDismiss: () 
                 effectTypeId("aurea.shape3d.layout") -> "shape3d"
                 else -> "selection"
             }, effect = it.typeId) } +
-        // Ferramentas-efeito (legendas, rastreio de câmera, máscara): o toque abre a ferramenta.
-        com.aurea.aurea.effects.EffectTool.entries.map { t ->
+        // Ferramentas-efeito (legendas, rastreio de câmera, máscara e as funções do AUREA):
+        // o toque abre a ferramenta; só as que valem para a camada escolhida.
+        com.aurea.aurea.editor.panels.toolsForSelection(store).map { t ->
             val label = stringResource(com.aurea.aurea.effects.toolLabelRes(t))
             val group = stringResource(com.aurea.aurea.effects.effectGroupLabelRes(com.aurea.aurea.effects.effectGroupOf(com.aurea.aurea.effects.toolCatalogEntry(t, label))))
             CommandHit("tool:${t.key}", label, addEffectDetail.format(group), normalizeSearch("$label $group ${t.key}"), "Efeitos", "selection")
@@ -217,7 +218,7 @@ private fun executeEditorCommand(id: String, store: EditorStore, ui: EditorUi) {
         "tracking" -> panel(EditorPanel.Tracking)
         "environment" -> panel(EditorPanel.Element3D)
         "particles" -> panel(EditorPanel.Particles)
-        "vector" -> panel(EditorPanel.Vector)
+        "vector" -> panel(EditorPanel.VectorPaths)
         "precompose" -> store.precompose()
         "enter_precomp" -> layer?.let { store.openPrecomp(it) }
         "marker" -> store.toggleMarker()

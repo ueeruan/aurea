@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.5.4: estilo Cartoon do texto 3D (material pronto 14 do motor). -->
+    <string name="pn_t3d_preset_cartoon">Мультяшный</string>
+    <string name="t3d_cartoon_side_auto">Автоцвет боковин</string>
+    <string name="t3d_cartoon_side">Цвет боковин</string>
+    <string name="t3d_cartoon_highlight">Блик</string>
+    <string name="t3d_cartoon_outline_color">Цвет контура</string>
+    <string name="t3d_cartoon_outline_width">Толщина контура</string>
+    <string name="t3d_cartoon_hint">Плоские мультяшные цвета с толстым контуром. Толщина контура задаётся в пикселях композиции, поэтому одинакова при любом разрешении экспорта.</string>
+</resources>

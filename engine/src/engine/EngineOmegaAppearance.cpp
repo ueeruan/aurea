@@ -17,6 +17,7 @@
 #include "aurea/timeline/Composition.hpp"
 #include "aurea/timeline/Layer.hpp"
 #include "aurea/timeline/ShapeFill.hpp"
+#include "TextShadowMigration.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -83,6 +84,7 @@ u32 Engine::decoration_add(u64 layerId, u32 role) noexcept {
     if (role != kEffectRoleBorder && role != kEffectRoleShadow) return kInvalidIndex;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked) return kInvalidIndex;
@@ -151,6 +153,7 @@ u32 Engine::decoration_add(u64 layerId, u32 role) noexcept {
 bool Engine::decoration_move(u64 layerId, u32 effectId, u32 slot) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked) return false;
@@ -175,13 +178,14 @@ bool Engine::decoration_set_shadow_offset(u64 layerId, u32 effectId, f32 dx, f32
     if (!std::isfinite(dx) || !std::isfinite(dy)) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked) return false;
     EffectInstance* e = nullptr;
     for (EffectInstance& item : l->effects) if (item.id == effectId) e = &item;
     if (!e || e->type != effect_type_id(effect_keys::kDropShadow)) return false;
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     const f32 distance = std::min(std::hypot(dx, dy), 5000.0f);
     history_.before_mutation(*comp, project_->timeline().current(), "posição da sombra");
     // Sem deslocamento a direção fica a de antes (girar para 0° mudaria o
@@ -198,6 +202,7 @@ bool Engine::decoration_shadow_offset(u64 layerId, u32 effectId, f32& dx, f32& d
     dx = dy = 0.0f;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return false;
@@ -206,7 +211,7 @@ bool Engine::decoration_shadow_offset(u64 layerId, u32 effectId, f32& dx, f32& d
     if (!e || e->type != effect_type_id(effect_keys::kDropShadow)) return false;
     const ParameterRegistry* params = effectRegistry_.params(e->type);
     if (!params || params->count() <= kShadowDistance) return false;
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     const f32 dir = evaluate_param(l->tracks, *e, kShadowDirection, params->at(kShadowDirection), local).v[0] * kDeg2Rad;
     const f32 dist = evaluate_param(l->tracks, *e, kShadowDistance, params->at(kShadowDistance), local).v[0];
     if (!std::isfinite(dir) || !std::isfinite(dist)) return false;
@@ -222,11 +227,12 @@ u32 Engine::query_shape_fill(u64 layerId, f32* out, u32 capacity) noexcept {
     if (!out || capacity < kShapeFillFloats) return 0;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return 0;
     std::fill(out, out + kShapeFillFloats, 0.0f);
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     const shape_fill::Eval e = shape_fill::evaluate(*l, static_cast<f64>(local.value));
     out[0] = e.kind;
     out[1] = e.type;
@@ -248,6 +254,7 @@ bool Engine::set_shape_fill_mode(u64 layerId, u32 mode) noexcept {
     if (mode > 2) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!is_sdf_shape(l) || l->locked) return false;
@@ -259,7 +266,7 @@ bool Engine::set_shape_fill_mode(u64 layerId, u32 mode) noexcept {
     if (mode == 2 && s.fillKind != 1) {
         // Degradê novo parte da cor atual: início = a cor; fim = preto ou
         // branco (o que contrasta), com o mesmo alfa.
-        const FrameIndex local = l->local_time(playback_.current());
+        const FrameIndex local = l->local_time(editing_frame_locked());
         const Vec4 c = shape_fill::evaluate(*l, static_cast<f64>(local.value)).color;
         const bool light = 0.2126f * c.x + 0.7152f * c.y + 0.0722f * c.z > 0.5f;
         s.gradColor0 = c;
@@ -277,6 +284,7 @@ bool Engine::set_shape_gradient_type(u64 layerId, u32 type) noexcept {
     if (type > 2) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!is_sdf_shape(l) || l->locked) return false;
@@ -306,11 +314,12 @@ bool Engine::set_shape_fill_value(u64 layerId, u32 group, const f32* values, u32
     for (u32 i = 0; i < count; ++i) if (!std::isfinite(values[i])) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!is_sdf_shape(l) || l->locked) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "cor do preenchimento");
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     const u32 first = shape_fill::group_first(group);
     for (u32 i = 0; i < count; ++i) put_fill_component(*l, first + i, values[i], local);
     bump_model_revision_locked();
@@ -323,10 +332,11 @@ bool Engine::toggle_shape_fill_key(u64 layerId, u32 group) noexcept {
     if (group >= shape_fill::kGroupCount) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!is_sdf_shape(l) || l->locked) return false;
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     const u32 first = shape_fill::group_first(group), n = shape_fill::group_size(group);
     bool keyed = false;
     for (u32 p = first; p < first + n; ++p) {
@@ -363,9 +373,10 @@ u32 Engine::query_snap_targets(u64 layerId, u32 axis, f32* values, f32* guides, 
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         drain_commands_locked();
+        InlineEditScope inlineScope(*this, layerId);
         Composition* comp = project_ ? current_composition() : nullptr;
         if (!comp || !comp->layer(LayerId::unpack(layerId))) return 0;
-        const FrameIndex now = playback_.current();
+        const FrameIndex now = editing_frame_locked();
         compW = static_cast<f32>(comp->width());
         compH = static_cast<f32>(comp->height());
         const OrderedIds<LayerId>& order = comp->order();
@@ -435,6 +446,58 @@ u32 Engine::query_snap_targets(u64 layerId, u32 axis, f32* values, f32* guides, 
     std::copy(v.begin(), v.begin() + written, values);
     if (guides) std::copy(g.begin(), g.begin() + written, guides);
     return written;
+}
+
+// =============================================================================
+// D2 (13/11/2026): a sombra antiga do texto vira a decoração Sombra
+// (TextShadowMigration.hpp). Conta: deslocamento (dx, dy) → direção atan2 e
+// distância; a cor do texto é sRGB e a do efeito é linear; o alfa da cor vira a
+// opacidade do efeito; o borrão do texto (raio ≈ metade do valor) vira a
+// suavidade, que espalha meia suavidade de cada lado.
+// =============================================================================
+bool migrate_text_shadow_to_decoration(Layer& l, const EffectRegistry& registry) noexcept {
+    if (l.kind != LayerKind::Text || !l.text.shadow || !l.captions.empty()) return false;
+    TextData& t = l.text;
+    const Vec4 c = t.shadowColor;
+    if (!(c.w > 0.0f) || !std::isfinite(c.w)) {
+        t.shadow = false;   // invisível: não há visual a levar
+        return true;
+    }
+    const EffectTypeId type = registry.find_key(effect_keys::kDropShadow);
+    const ParameterRegistry* params = registry.params(type);
+    // Sem o efeito ou com a pilha cheia, a sombra antiga continua desenhando.
+    if (!params || params->count() <= kShadowSoftness || l.effects.size() >= kMaxEffectCount) return false;
+    bool hasDecoration = false;
+    for (const EffectInstance& e : l.effects) hasDecoration |= e.role == kEffectRoleShadow;
+    EffectInstance e;
+    e.id = l.alloc_effect_id();
+    e.type = type;
+    e.role = static_cast<u8>(hasDecoration ? kEffectRoleNone : kEffectRoleShadow);
+    e.expanded = false;
+    initialize_instance(e, *params);
+    auto set = [&](u32 index, ParamValue v) { if (index < e.params.size()) e.params[index].constant = v; };
+    auto lin = [](f32 x) { return Color::srgb_to_linear(std::clamp(std::isfinite(x) ? x : 0.0f, 0.0f, 1.0f)); };
+    set(kShadowColor, ParamValue::color(lin(c.x), lin(c.y), lin(c.z), 1.0f));
+    set(kShadowOpacity, ParamValue::scalar(std::clamp(c.w, 0.0f, 1.0f) * 100.0f));
+    const f32 dx = std::isfinite(t.shadowOffset.x) ? t.shadowOffset.x : 0.0f;
+    const f32 dy = std::isfinite(t.shadowOffset.y) ? t.shadowOffset.y : 0.0f;
+    const f32 distance = std::min(std::hypot(dx, dy), 5000.0f);
+    // Sem deslocamento (o brilho dos presets de legenda) a direção não importa.
+    set(kShadowDirection, ParamValue::scalar(distance > 1e-4f ? std::atan2(dy, dx) * kRad2Deg : 45.0f));
+    set(kShadowDistance, ParamValue::scalar(distance));
+    set(kShadowSoftness, ParamValue::scalar(std::clamp(std::isfinite(t.shadowBlur) ? t.shadowBlur : 0.0f, 0.0f, 5000.0f)));
+    if (hasDecoration) {
+        // A camada já tem a sombra nova: a antiga entra como efeito comum no
+        // INÍCIO da pilha (era desenhada junto com as letras, antes dos efeitos).
+        l.effects.insert(l.effects.begin(), std::move(e));
+    } else {
+        u32 begin = 0, end = 0;
+        role_span(l, kEffectRoleShadow, begin, end);
+        l.effects.insert(l.effects.begin() + end, std::move(e));
+    }
+    l.modelEffects = true;
+    t.shadow = false;
+    return true;
 }
 
 } // namespace aurea

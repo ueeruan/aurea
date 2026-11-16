@@ -13,6 +13,7 @@
 #include "aurea/platform/AddressSpace.hpp"
 #include "aurea/platform/DeviceCapabilities.hpp"
 #include "aurea/render/PreviewCachePolicy.hpp"
+#include "aurea/core/Time.hpp"
 
 #include <chrono>
 #include <thread>
@@ -131,6 +132,33 @@ AUREA_TEST(AddressSpace32, LayersShownTogetherNeverEvictEachOther) {
     m.close_all();
 }
 
+AUREA_TEST(AddressSpace32, SixtyFourBitPreviewCapEvictsOnlyIdleSources) {
+    // 0.5.3: a prévia do motor também tem teto em 64 bits (set_source_cap). Cortes
+    // rápidos não acumulam decoders; layers visíveis juntas acima do teto ficam.
+    SyntheticFactory factory(SyntheticConfig{});
+    MediaManager m;
+    m.set_pointer_bits(64);
+    m.set_source_cap(4);
+    m.set_factory(&factory);
+    Asset asset;
+    u64 frame = 1;
+    for (u32 layer = 1; layer <= 10; ++layer, frame += 20) {
+        AUREA_CHECK(open_layer(m, layer, asset, frame) != nullptr);
+        AUREA_CHECK(m.live_sources() <= 4u);
+    }
+    AUREA_CHECK_EQ(m.live_sources(), 4u);
+    // Seis layers visíveis no mesmo quadro: nenhuma cede o lugar a outra.
+    m.close_all();
+    for (u32 layer = 1; layer <= 6; ++layer) AUREA_CHECK(open_layer(m, layer, asset, 1000) != nullptr);
+    const u32 opened = factory.opened.load();
+    for (u64 f = 1001; f < 1005; ++f)
+        for (u32 layer = 1; layer <= 6; ++layer)
+            AUREA_CHECK(m.source_for(LayerId{layer, 1}, AssetId{0, 1}, asset, f) != nullptr);
+    AUREA_CHECK_EQ(factory.opened.load(), opened);
+    AUREA_CHECK_EQ(m.live_sources(), 6u);
+    m.close_all();
+}
+
 AUREA_TEST(AddressSpace32, SixtyFourBitKeepsEveryDecoderAndTheLongIdle) {
     SyntheticFactory factory(SyntheticConfig{});
     MediaManager m;
@@ -144,5 +172,197 @@ AUREA_TEST(AddressSpace32, SixtyFourBitKeepsEveryDecoderAndTheLongIdle) {
     const u64 last = frame - 20;
     m.collect(last + 61);
     AUREA_CHECK(m.live_sources() >= 1u);
+    m.close_all();
+}
+
+// =============================================================================
+//  0.5.4 — "Coloquei uns 3 vídeos e alguns não apareciam" (iPhone; diminuir a
+//  qualidade da prévia ajudou um pouco). O aparelho tem poucas sessões de
+//  decoder e, logo depois de importar, o proxy de edição, a miniatura e as
+//  camadas disputam todas. Antes: o open recusado tentava 5 vezes contadas em
+//  QUADROS (parado o contador não anda) e o decode recusado tentava 2 vezes; a
+//  camada ficava transparente para sempre, mesmo depois de o proxy e a
+//  miniatura devolverem as sessões. Estes testes simulam a prévia PARADA: o
+//  render só roda quando algo o acorda (o callback de pronto das fontes, o
+//  fechamento de um decoder) ou quando o MediaManager agenda uma nova tentativa
+//  (next_retry_ns, que o Engine::render_frame transforma em quadro agendado).
+// =============================================================================
+namespace {
+/// Sessões de decoder do "aparelho". `used` inclui as do proxy/miniatura.
+struct DecoderSlots {
+    std::mutex mutex;
+    i32 total = 0, used = 0;
+    bool acquire() { std::lock_guard<std::mutex> l(mutex); if (used >= total) return false; ++used; return true; }
+    void release() { std::lock_guard<std::mutex> l(mutex); if (used > 0) --used; }
+};
+
+/// Decoder que ocupa uma sessão. Preguiçoso (iOS/AVAssetReader): o objeto abre
+/// sem sessão e a pede no primeiro seek; sem sessão livre o seek falha e ESTE
+/// decoder fica morto para sempre (o reader de uma sessão derrubada não volta):
+/// só uma fonte nova pode decodificar.
+class SlotDecoder final : public VideoDecoderBackend {
+public:
+    SlotDecoder(const SyntheticConfig& c, DecoderSlots& slots, bool holding) : inner_(c), slots_(slots), holding_(holding) {}
+    ~SlotDecoder() override { if (holding_) slots_.release(); }
+    const VideoStreamInfo& info() const noexcept override { return inner_.info(); }
+    Status seek_to_keyframe(i64 us) noexcept override {
+        if (!holding_ && !dead_) {
+            holding_ = slots_.acquire();
+            dead_ = !holding_;
+        }
+        if (dead_) return Status{Errc::DecodeFailed, "decoder ocupado (sintetico)"};
+        return inner_.seek_to_keyframe(us);
+    }
+    Status next_frame(i64 from, FrameRef& out, i64& pts, bool& eos) noexcept override {
+        if (!holding_) return Status{Errc::DecodeFailed, "decoder ocupado (sintetico)"};
+        return inner_.next_frame(from, out, pts, eos);
+    }
+    u32 max_live_frames() const noexcept override { return inner_.max_live_frames(); }
+    i64 keyframe_interval_us() const noexcept override { return inner_.keyframe_interval_us(); }
+private:
+    SyntheticDecoder inner_;
+    DecoderSlots& slots_;
+    bool holding_ = false, dead_ = false;
+};
+
+class SlotFactory final : public VideoSourceFactory {
+public:
+    SlotFactory(const SyntheticConfig& c, DecoderSlots& slots, bool lazy) : cfg_(c), slots_(slots), lazy_(lazy) {}
+    bool probe(const char*, MediaProbe& out) override { SyntheticDecoder d(cfg_); out.video = d.info(); out.hasVideo = true; return true; }
+    std::unique_ptr<VideoDecoderBackend> open_video(const Asset&, MediaPriority) override {
+        ++opens;
+        if (lazy_) return std::make_unique<SlotDecoder>(cfg_, slots_, false);
+        // Android: AMediaCodec_createDecoderByType/configure recusado → nulo.
+        if (!slots_.acquire()) { ++refused; return nullptr; }
+        return std::make_unique<SlotDecoder>(cfg_, slots_, true);
+    }
+    std::atomic<u32> opens{0}, refused{0};
+private:
+    SyntheticConfig cfg_;
+    DecoderSlots& slots_;
+    bool lazy_;
+};
+
+/// A prévia parada do motor, reduzida ao que importa aqui.
+struct PausedPreview {
+    std::atomic<u32> wakes{0};
+    u32 seen = 0;
+    u64 frame = 1;
+    u32 renders = 0;
+    static void on_ready(void* self) { static_cast<PausedPreview*>(self)->wakes.fetch_add(1); }
+    bool due(const MediaManager& m) {
+        if (wakes.load() != seen) return true;
+        const u64 retry = m.next_retry_ns();
+        return retry && monotonic_ns() >= retry;
+    }
+    /// Um quadro: cada camada visível pede o quadro 0 (parado, pedido igual a
+    /// cada quadro — a fonte o coalesce, como no motor). Devolve quantas têm
+    /// o quadro exato.
+    u32 render(MediaManager& m, const Asset& asset, u32 layers) {
+        seen = wakes.load();
+        ++frame; ++renders;
+        u32 exact = 0;
+        for (u32 layer = 1; layer <= layers; ++layer) {
+            VideoSource* src = m.source_for(LayerId{layer, 1}, AssetId{0, 1}, asset, frame);
+            if (!src) continue;
+            src->set_epoch(1);
+            bool ok = false;
+            (void)src->frame_for(0, &ok);
+            if (ok) { ++exact; continue; }
+            DecodeRequest req; req.targetUs = 0; req.mode = DecodeMode::Still;
+            src->request(req);
+        }
+        return exact;
+    }
+};
+
+/// Roda a prévia parada até `untilNs`; devolve o maior número de camadas com quadro visto.
+u32 run_paused(PausedPreview& p, MediaManager& m, const Asset& asset, u32 layers, u64 untilNs, bool stopWhenAll) {
+    u32 best = p.render(m, asset, layers);
+    while (monotonic_ns() < untilNs && !(stopWhenAll && best == layers)) {
+        if (p.due(m)) best = std::max(best, p.render(m, asset, layers));
+        else std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return best;
+}
+} // namespace
+
+AUREA_TEST(DecoderRecovery054, RefusedOpensRecoverWhilePausedOnceTheDeviceFreesSessions) {
+    // Android: o codec é recusado na abertura. 4 sessões, 2 tomadas pelo proxy
+    // e pela miniatura; 4 camadas visíveis (teto da prévia em 2: o teto nunca
+    // segura camada visível). Parado, por mais tempo que as 5 tentativas antigas.
+    DecoderSlots slots; slots.total = 4; slots.used = 2;
+    SlotFactory factory(SyntheticConfig{}, slots, false);
+    PausedPreview preview;
+    MediaManager m;
+    m.set_pointer_bits(64);
+    m.set_source_cap(2);
+    m.set_persistent_retry(true);
+    m.set_ready_callback(&PausedPreview::on_ready, &preview);
+    m.set_factory(&factory);
+    Asset asset;
+    const u32 layers = 4;
+    const u32 before = run_paused(preview, m, asset, layers, monotonic_ns() + 1'500'000'000ull, false);
+    AUREA_CHECK_EQ(before, 2u);                 // só cabem duas
+    AUREA_CHECK(factory.refused.load() >= 2u);  // as outras foram recusadas e seguem tentando
+    const u32 rendersWhileBusy = preview.renders;
+    // O proxy e a miniatura terminam: as sessões voltam.
+    slots.release(); slots.release();
+    const u64 released = monotonic_ns();
+    const u32 after = run_paused(preview, m, asset, layers, released + 4'000'000'000ull, true);
+    const f64 recoverMs = static_cast<f64>(monotonic_ns() - released) * 1e-6;
+    std::printf("recusadas=%u opens=%u renders=%u(+%u) volta=%.0f ms ", factory.refused.load(), factory.opens.load(),
+                rendersWhileBusy, preview.renders - rendersWhileBusy, recoverMs);
+    AUREA_CHECK_EQ(after, layers);              // todas as camadas visíveis com o quadro
+    AUREA_CHECK(recoverMs < 3000.0);            // no máximo uma espera de 2 s + o open
+    AUREA_CHECK(rendersWhileBusy < 200u);       // parado não vira laço de render
+    m.close_all();
+}
+
+AUREA_TEST(DecoderRecovery054, BusyDecodersAreReplacedAndEveryVisibleLayerGetsItsFrame) {
+    // iOS: o AVAssetReader abre, mas o decode falha com o decoder ocupado e o
+    // reader daquela sessão não volta (media services reset). 3 sessões, 2
+    // tomadas; 3 camadas visíveis. A fonte que só falha é trocada por uma nova
+    // (MediaManager) e a nova pega a sessão quando ela volta.
+    DecoderSlots slots; slots.total = 3; slots.used = 2;
+    SlotFactory factory(SyntheticConfig{}, slots, true);
+    PausedPreview preview;
+    MediaManager m;
+    m.set_pointer_bits(64);
+    m.set_persistent_retry(true);
+    m.set_ready_callback(&PausedPreview::on_ready, &preview);
+    m.set_factory(&factory);
+    Asset asset;
+    const u32 layers = 3;
+    const u32 before = run_paused(preview, m, asset, layers, monotonic_ns() + 1'500'000'000ull, false);
+    AUREA_CHECK_EQ(before, 1u);
+    const u32 opensWhileBusy = factory.opens.load();
+    AUREA_CHECK(opensWhileBusy > layers);       // decoders mortos foram trocados
+    slots.release(); slots.release();
+    const u64 released = monotonic_ns();
+    const u32 after = run_paused(preview, m, asset, layers, released + 5'000'000'000ull, true);
+    const f64 recoverMs = static_cast<f64>(monotonic_ns() - released) * 1e-6;
+    std::printf("opens=%u (%u ocupado) renders=%u volta=%.0f ms ", factory.opens.load(), opensWhileBusy,
+                preview.renders, recoverMs);
+    AUREA_CHECK_EQ(after, layers);
+    AUREA_CHECK(recoverMs < 4500.0);
+    m.close_all();
+}
+
+AUREA_TEST(DecoderRecovery054, ExportManagerKeepsTheBoundedRetries) {
+    // Sem set_persistent_retry (o MediaManager do export): as regras antigas —
+    // 5 opens contados em quadros, nada agendado pelo relógio.
+    DecoderSlots slots; slots.total = 0;
+    SlotFactory factory(SyntheticConfig{}, slots, false);
+    MediaManager m;
+    m.set_pointer_bits(64);
+    m.set_factory(&factory);
+    Asset asset;
+    for (u64 f = 1; f < 400; ++f) {
+        (void)m.source_for(LayerId{1, 1}, AssetId{0, 1}, asset, f);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    AUREA_CHECK_EQ(m.next_retry_ns(), 0ull);
+    AUREA_CHECK(factory.opens.load() <= 5u);
     m.close_all();
 }

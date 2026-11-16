@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="fx_ref_radial_wipe_name">Радиальное вытеснение</string>
+    <string name="fx_ref_radial_wipe_desc">Открывает или скрывает изображение по часовой стрелке, против неё или в обоих направлениях с растушёвкой краёв.</string>
+    <string name="fx_ref_clockwise">По часовой стрелке</string>
+    <string name="fx_ref_counterclockwise">Против часовой стрелки</string>
+    <string name="fx_ref_block_name">Блочное растворение</string>
+    <string name="fx_ref_block_desc">Удаляет блоки изображения с настройками размера, растушёвки и мягких краёв.</string>
+    <string name="fx_ref_soft_edges">Мягкие края</string>
+    <string name="fx_ref_left_locked">Левый край закреплён</string>
+    <string name="fx_ref_right_locked">Правый край закреплён</string>
+    <string name="fx_ref_top_locked">Верхний край закреплён</string>
+    <string name="fx_ref_bottom_locked">Нижний край закреплён</string>
+    <string name="fx_ref_fast_blur_name">Быстрое размытие</string>
+</resources>

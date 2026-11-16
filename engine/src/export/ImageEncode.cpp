@@ -490,6 +490,10 @@ void zlib_compress(const u8* data, usize size, std::vector<u8>& out) noexcept {
     zlib_compress_level(data, size, out, 32, true);
 }
 
+void zlib_compress_fast(const u8* data, usize size, std::vector<u8>& out) noexcept {
+    zlib_compress_level(data, size, out, 4, false);
+}
+
 // =============================================================================
 // PNG
 // =============================================================================

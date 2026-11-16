@@ -30,6 +30,10 @@
 
 #include <mutex>
 #include <string>
+#if defined(AUREA_VK_HOST_PRESENT)
+#include <atomic>
+#include <condition_variable>
+#endif
 #include <unordered_map>
 #include <vector>
 
@@ -417,14 +421,23 @@ public:
     [[nodiscard]] Status attach_surface(const SurfaceDesc& desc) noexcept override;
     void detach_surface() noexcept override;
     [[nodiscard]] Status resize_surface(u32 width, u32 height) noexcept override;
+#if defined(AUREA_VK_HOST_PRESENT)
+    [[nodiscard]] bool has_surface() const noexcept override { return swapchain_ != VK_NULL_HANDLE || host_.active; }
+#else
     [[nodiscard]] bool has_surface() const noexcept override { return swapchain_ != VK_NULL_HANDLE; }
+#endif
 
     [[nodiscard]] Status begin_frame(FrameBegin& out) noexcept override;
     [[nodiscard]] Status end_frame() noexcept override;
     [[nodiscard]] bool can_discard_frame() const noexcept override { return true; }
     [[nodiscard]] Status discard_frame() noexcept override;
     [[nodiscard]] Status begin_offscreen_frame(FrameBegin& out) noexcept override;
+#if defined(AUREA_VK_HOST_PRESENT)
+    // O aluguel prende uma imagem do SWAPCHAIN; na apresentação no host não há.
+    [[nodiscard]] bool can_lease_presentable_frame() const noexcept override { return !host_.active; }
+#else
     [[nodiscard]] bool can_lease_presentable_frame() const noexcept override { return true; }
+#endif
     [[nodiscard]] Status begin_presentable_frame_lease() noexcept override;
     [[nodiscard]] Status begin_leased_frame(FrameBegin& out) noexcept override;
     void end_presentable_frame_lease() noexcept override;
@@ -540,6 +553,28 @@ public:
     void destroy_texture_now(Texture& t) noexcept;
     void destroy_buffer_now(Buffer& b) noexcept;
 
+#if defined(AUREA_VK_HOST_PRESENT)
+    // --- Apresentação no host (Aurea PC, VulkanHostPresent.cpp) ---------------
+    // A interface do PC (Compose Desktop sobre Direct3D) desenha POR CIMA do
+    // palco, então o motor não apresenta numa janela: a thread de render
+    // desenha o quadro como desenharia no swapchain, mas num anel de imagens
+    // do motor, e a GPU copia o quadro pronto para buffers mapeados da CPU.
+    // A UI pega o mais novo terminado sem nunca travar a thread de render.
+    // Ativada por `attach_surface` com `host_present_window()` como janela.
+
+    /// Janela-sentinela: nenhum HWND/ANativeWindow real tem este endereço.
+    [[nodiscard]] static void* host_present_window() noexcept;
+    struct HostFrameInfo { u32 width = 0; u32 height = 0; u32 rowBytes = 0; };
+    /// Thread da UI. Copia o quadro terminado mais novo (BGRA8, sRGB, alfa
+    /// pré-multiplicado, linhas de `rowBytes`) para `dst` e devolve o número
+    /// de série dele; 0 = nada novo desde a última entrega (ou sem alvo).
+    /// `info` sai preenchido sempre que há quadro, mesmo quando `capacity`
+    /// não basta (aí devolve 0 e o quadro continua pendente).
+    [[nodiscard]] u64 copy_host_frame(void* dst, usize capacity, HostFrameInfo& info) noexcept;
+    /// Ritmo do "vsync" do host (padrão 60 Hz).
+    void set_host_refresh_rate(f32 hz) noexcept;
+#endif
+
     static constexpr u32 kMaxTimers = 512;   // um por passe: 50 camadas com efeitos passam de 190 (64 cortava o detalhe por etapa)
 
 private:
@@ -612,6 +647,8 @@ private:
     bool hasYcbcr_ = false;
     bool depthResolve_ = false;      ///< VK_KHR_depth_stencil_resolve + create_renderpass2
     bool alphaToOne_ = false;        ///< recurso `alphaToOne` ligado no dispositivo
+    bool fp16Shader_ = false;        ///< PC: shaderFloat16 ligado (VK_KHR_shader_float16_int8)
+    bool storage16_ = false;         ///< PC: storageBuffer16BitAccess ligado
     u32 apiVersion_ = 0;
     u32 instanceApiVersion_ = VK_API_VERSION_1_0;
 
@@ -619,7 +656,7 @@ private:
     VkPipelineCache pipelineCache_ = VK_NULL_HANDLE;
     std::string cachePath_;
     std::vector<u8> cacheHeader_;        ///< cabeçalho esperado (aparelho + versão), montado na carga
-    usize lastSavedCacheBytes_ = 0;      ///< tamanho do blob no disco (pula gravação sem novidade)
+    bool pipelineCacheDirty_ = false;
     PipelineCacheInfo cacheInfo_{};
 
     HandlePool<Texture> textures_;
@@ -718,6 +755,53 @@ private:
     VkSurfaceTransformFlagBitsKHR swapCapsTransform_ = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
     u64 suboptimalCheckFrame_ = 0;
     u32 suboptimalIgnored_ = 0;
+
+#if defined(AUREA_VK_HOST_PRESENT)
+    static constexpr u32 kHostSlots = 6;   ///< 3 em voo + 1 sendo lido + 1 mais novo + folga
+    struct HostSlot {
+        enum class State : u8 { Free = 0, InFlight, Ready };
+        VkBuffer buffer = VK_NULL_HANDLE;
+        VkDeviceMemory memory = VK_NULL_HANDLE;
+        void* mapped = nullptr;
+        VkDeviceSize bytes = 0;
+        bool coherent = true;
+        VkFence fence = VK_NULL_HANDLE;       ///< sinaliza depois da cópia deste quadro
+        State state = State::Free;
+        u32 readers = 0;                      ///< UI copiando os bytes agora
+        u64 serial = 0;
+        u32 width = 0, height = 0;
+    };
+    struct HostPresent {
+        std::atomic<bool> active{false};      ///< escrito sob `mutex`; lido também fora (has_surface)
+        bool dirty = false;                   ///< tamanho mudou: imagens refeitas no próximo quadro
+        u32 width = 0, height = 0;
+        u32 imageWidth = 0, imageHeight = 0;
+        u64 images[3]{};                      ///< um alvo por contexto de frame
+        bool acquired = false;
+        u32 imageIndex = 0;
+        i32 pendingSlot = -1;                 ///< cópia gravada, fence ainda não enviado
+        u64 nextSerial = 0;
+        u64 delivered = 0;                    ///< último número de série entregue à UI
+        u64 periodNs = 16'666'667;
+        u64 nextTickNs = 0;
+        i64 lastSlotNs = 0;                   ///< início da janela de vblank usada pelo último quadro
+        u64 lastFrameNs = 0;                  ///< quando o último quadro começou (0 = parado)
+        void* timer = nullptr;                ///< HANDLE do timer de alta resolução
+        HostSlot slots[kHostSlots];
+        std::mutex mutex;                     ///< estado dos slots (UI × render)
+        std::condition_variable readersDone;
+    };
+    HostPresent host_;
+    [[nodiscard]] Status attach_host_present(u32 width, u32 height) noexcept;
+    void detach_host_present() noexcept;
+    [[nodiscard]] Status prepare_host_images() noexcept;
+    void destroy_host_slot(HostSlot& s) noexcept;
+    void host_refresh_locked() noexcept;
+    void host_pace() noexcept;
+    void host_begin_frame(FrameContext& f, FrameBegin& out) noexcept;
+    void host_record_copy(FrameContext& f) noexcept;
+    void host_after_submit() noexcept;
+#endif
 
     // Medição
     std::vector<GpuTiming> timings_;

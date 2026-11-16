@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Painel do modelo 3D (13/11/2026): Material (visuais do modelo inteiro), Textura e Animação (Evolução com keyframe). -->
+<resources>
+    <string name="m3d_title">3D मॉडल</string>
+    <string name="m3d_tab_shadow">छाया</string>
+    <string name="m3d_look">लुक</string>
+    <string name="m3d_look_hint">पूरे मॉडल को लुक देने के लिए किसी गेंद पर टैप करें।</string>
+    <string name="m3d_look_original">मूल</string>
+    <string name="m3d_look_plastic">प्लास्टिक</string>
+    <string name="m3d_look_matte">मैट</string>
+    <string name="m3d_look_metal">धातु</string>
+    <string name="m3d_look_chrome">क्रोम</string>
+    <string name="m3d_look_gold">सोना</string>
+    <string name="m3d_look_glass">काँच</string>
+    <string name="m3d_look_custom">हाथ से बदला गया</string>
+    <string name="m3d_adjust">समायोजित करें</string>
+    <string name="m3d_whole_model">पूरा मॉडल</string>
+    <string name="m3d_material_n">मटेरियल %1$d</string>
+    <string name="m3d_no_materials">इस मॉडल में समायोजित करने के लिए कोई मटेरियल नहीं है।</string>
+    <string name="m3d_apply_to">इस पर लागू करें</string>
+    <string name="m3d_one_part">एक भाग</string>
+    <string name="m3d_texture_pick">टेक्सचर की छवि</string>
+    <string name="m3d_texture_hint">छवि पूरे मॉडल को ढकती है, फ़ाइल के अपने टेक्सचर निर्देशांकों के साथ।</string>
+    <string name="m3d_texture_original">मूल टेक्सचर पर लौटें</string>
+    <string name="m3d_texture_no_parts">इस मॉडल में टेक्सचर लेने वाले भाग नहीं हैं।</string>
+    <string name="m3d_texture_material_hint">इस मटेरियल का टेक्सचर किसी फ़ाइल या टाइमलाइन की लेयर से आ सकता है।</string>
+    <string name="m3d_part_hint">किसी भाग का टेक्सचर बदलने या उसे छिपाने के लिए उस पर टैप करें।</string>
+    <string name="m3d_part_own_texture">अपना टेक्सचर</string>
+    <string name="m3d_part_hidden">छिपा हुआ</string>
+    <string name="m3d_anim_progress">प्रगति</string>
+    <string name="m3d_anim_progress_hint">फ़ाइल के एनिमेशन को कीफ़्रेम से चलाने के लिए टाइमलाइन पर दो जगह ◆ लगाएँ। ◆ के बिना यह अपने आप चलता है।</string>
+    <string name="m3d_anim_auto">अपने आप चलाएँ</string>
+    <string name="m3d_anim_auto_hint">स्थिर मान और प्रगति के ◆ हटाता है: क्लिप फिर से समय के साथ चलती है।</string>
+    <string name="m3d_anim_loop">दोहराएँ</string>
+    <string name="m3d_anim_speed">गति</string>
+    <string name="m3d_anim_duration">क्लिप की अवधि: %1$s s</string>
+    <string name="m3d_anim_pick_clip">मॉडल को एनिमेट करने के लिए एक क्लिप चुनें।</string>
+    <string name="m3d_anim_playing">अपने आप चल रहा है</string>
+    <!-- 14/11/2026 (3D opções extras, v76): Luz e sombra, Posição, Brilho, textura que anda e animação. -->
+    <string name="m3d_tab_light_shadow">रोशनी और छाया</string>
+    <string name="m3d_place">स्थिति</string>
+    <string name="m3d_place_ground">फ़र्श पर टिकाएँ</string>
+    <string name="m3d_place_center">बीच में करें</string>
+    <string name="m3d_place_fit">स्क्रीन में फ़िट करें</string>
+    <string name="m3d_place_hint">हर टैप एक अनडू चरण है। स्थिति के कीफ़्रेम हों तो सब साथ खिसकते हैं।</string>
+    <string name="m3d_look_neon">नियॉन</string>
+    <string name="m3d_glow">चमक</string>
+    <string name="m3d_glow_color">चमक का रंग</string>
+    <string name="m3d_glow_strength">चमक की तीव्रता</string>
+    <string name="m3d_glow_hint">मटीरियल की अपनी रोशनी। सीन के Bloom (3D सीन › रेंडर) के साथ चमक आसपास फैलती है।</string>
+    <string name="m3d_tex_transform">टेक्सचर की स्थिति</string>
+    <string name="m3d_tex_offset_x">X खिसकाएँ</string>
+    <string name="m3d_tex_offset_y">Y खिसकाएँ</string>
+    <string name="m3d_tex_rotation">घुमाएँ</string>
+    <string name="m3d_tex_scroll">समय के साथ स्क्रॉल</string>
+    <string name="m3d_tex_scroll_x">X स्क्रॉल</string>
+    <string name="m3d_tex_scroll_y">Y स्क्रॉल</string>
+    <string name="m3d_tex_scroll_hint" formatted="false">छवि के % प्रति सेकंड में: टेक्सचर अपने आप चलता है (बेल्ट, पानी, स्क्रीन)।</string>
+    <string name="m3d_anim_start">यहाँ से शुरू करें</string>
+    <string name="m3d_anim_reverse">उल्टा चलाएँ</string>
+    <string name="m3d_anim_pingpong">आगे-पीछे</string>
+    <string name="m3d_anim_speed_hint">गति पर टैप करें और बाएँ कॉलम में ◆ लगाएँ ताकि समय के साथ एनिमेशन तेज़ या धीमा हो।</string>
+    <string name="m3d_obj_light">ऑब्जेक्ट की रोशनी</string>
+    <string name="m3d_obj_light_hint">केवल इस ऑब्जेक्ट को स्टूडियो या अपनी HDR छवि से रोशन और प्रतिबिंबित करता है। बाकी सीन नहीं बदलता।</string>
+    <string name="m3d_obj_light_scene">सीन से</string>
+    <string name="m3d_obj_light_intensity">रोशनी और प्रतिबिंब</string>
+</resources>

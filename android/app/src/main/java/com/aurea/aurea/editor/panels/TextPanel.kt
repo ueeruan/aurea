@@ -61,13 +61,21 @@ import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.tocavel
 import kotlin.math.roundToInt
 
+/** As abas de LAYOUT DO TEXTO (Funções, F4): ids estáveis `textLayout.tab.<id>`. */
+internal enum class TextLayoutTab(val id: String) { Spacing("spacing"), Box("box"), Path("path"), Dynamic("dynamic") }
+
 /**
- * TEXTO: o conteúdo (campo de várias linhas, aplicado enquanto digita), tamanho,
- * cor, alinhamento, contorno, entrelinha e espaçamento. O motor rasteriza com a
- * fonte do sistema na escala da tela — o texto fica nítido ampliado.
+ * EDITAR TEXTO (botão Editar da grade): um assunto só — o conteúdo (campo,
+ * texto-fonte, trechos ricos), fonte, tamanho, cor e alinhamento. Funções do
+ * AUREA, fase F4 (13/11/2026): as abas saíram. Textura → Cor e preenchimento ›
+ * Textura; contorno → Borda e sombra › Traço; fundo → Borda e sombra › Fundo;
+ * sombra → Borda e sombra › Sombra (D2); espaçamento, caixa, caminho e texto
+ * dinâmico → LAYOUT DO TEXTO ([layout] = true, 4 abas); animadores → Animadores
+ * (navegador de Efeitos › Funções do Aurea, ou o atalho no fim deste painel).
+ * O motor rasteriza com a fonte do sistema na escala da tela.
  */
 @Composable
-internal fun TextPanel(env: PanelEnv) {
+internal fun TextPanel(env: PanelEnv, layout: Boolean = false) {
     val store = env.store
     val t by remember(store) { derivedStateOf { store.textDetail } }
     val td = t ?: run {
@@ -96,18 +104,17 @@ internal fun TextPanel(env: PanelEnv) {
         }
     }
     // O desenho dos painéis de propriedade: a coluna fixa à esquerda, o conteúdo no centro e
-    // as abas em ícones à direita. O losango e a curva valem para a propriedade escolhida.
-    var tab by rememberSaveable(store.primary) { mutableIntStateOf(0) }
-    // Animador aberto: o editor fica com a largura toda, sem as abas.
-    var animatorOpen by remember(store.primary) { mutableStateOf(false) }
-    val fullWidth = tab == 3 && animatorOpen
+    // (só no Layout do texto) as abas em ícones à direita. O losango e a curva valem para a
+    // propriedade escolhida (texto-fonte, espaçamento entre letras, margens do caminho).
+    var layoutTab by rememberSaveable(store.primary) { mutableStateOf(TextLayoutTab.Spacing) }
+    val fullWidth = !layout
     DisposableEffect(store.primary) { onDispose { store.timelineFocus = null } }
     val focus = store.timelineFocus?.singleOrNull()?.takeIf { it.property in TEXT_RAIL_PROPERTIES }
     val keys = focus?.let { f -> store.primaryKeys().filter { it.property == f.property && it.effectIndex == f.effectIndex && it.paramIndex == f.paramIndex } }.orEmpty()
     val local = store.detail?.localPlayhead
     // O texto-fonte é sempre congelado: não tem curva.
     val curveFrom = if (focus?.property == com.aurea.aurea.engine.TrackProperty.TEXT_SOURCE) null else store.curveStart(keys)
-    Row(Modifier.fillMaxSize().testTag("text.panel")) {
+    Row(Modifier.fillMaxSize().testTag(if (layout) "textLayout.panel" else "text.panel")) {
         LeftRail(
             onBack = env.onClose,
             keyframeLook = when {
@@ -131,8 +138,14 @@ internal fun TextPanel(env: PanelEnv) {
         Box(Modifier.width(0.7.dp).fillMaxHeight().background(AureaColors.ContentStrongLine))
         Column(Modifier.weight(1f).fillMaxHeight()) {
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 8.dp, top = 8.dp, end = 8.dp, bottom = 24.dp)) {
-                when (tab) {
-                    0 -> {
+                if (layout) {
+                    when (layoutTab) {
+                        TextLayoutTab.Spacing -> TextSpacingRows(env)
+                        TextLayoutTab.Box -> TextBoxRows(env)
+                        TextLayoutTab.Path -> TextPathSection(env)
+                        TextLayoutTab.Dynamic -> TextDynamicSection(env)
+                    }
+                } else {
         Box(
             Modifier.fillMaxWidth().heightIn(min = 56.dp).clip(RoundedCornerShape(10.dp)).background(AureaColors.Chip)
                 .padding(horizontal = 12.dp, vertical = 10.dp),
@@ -217,40 +230,22 @@ internal fun TextPanel(env: PanelEnv) {
             Triple(1, R.string.panel_centro, com.aurea.aurea.editor.ContentIconKind.AlignCenter),
             Triple(2, R.string.panel_direita, com.aurea.aurea.editor.ContentIconKind.AlignRight),
         ).map { (a, label, icon) -> PanelItem(com.aurea.aurea.ui.theme.CupertinoGlyph.Textformat, stringResource(label), "text.align.$a", on = td.alignment == a, contentIcon = icon) { store.setTextAlignment(a) } }, columns = 3)
-        TextDynamicSection(env)
-                    }
-                    1 -> {
-        TextTextureSection(env)
-        PanelSection(stringResource(R.string.panel_contorno), com.aurea.aurea.ui.theme.CupertinoGlyph.Circle, "text.sec.stroke") {
-            ColorLine(stringResource(R.string.panel_cor_contorno), Color(td.strokeColor[0], td.strokeColor[1], td.strokeColor[2])) {
-                store.beginGesture("cor do contorno do texto")
-                env.openColor(ColorRequest(td.strokeColor.copyOf(), onChange = { r, g, b, a -> store.setTextStrokeColor(r, g, b, a) },
-                    onDone = { store.endGesture() }))
-            }
-            TextRuler(env, stringResource(R.string.panel_largura_contorno), { store.textDetail?.strokeWidth ?: 0f }, "${td.strokeWidth.roundToInt()} px",
-                0.1f, 0f, 60f, stringResource(R.string.panel_contorno_texto)) { store.setTextStrokeWidth(it) }
+        // F4: o resto do texto mora noutras funções; os atalhos levam até elas.
+        Spacer(Modifier.height(8.dp))
+        PanelItemRow(com.aurea.aurea.ui.theme.CupertinoGlyph.DocText, stringResource(R.string.fn_text_layout), "text.layout.link", chevron = true) {
+            env.onOpenPanel(EditorPanel.TextLayout)
         }
-        TextBackdropSection(env)
-                    }
-                    2 -> {
-                        TextLayoutSection(env)
-                        TextPathSection(env)
-                    }
-                    else -> {
-                        TextAnimSection(env) { animatorOpen = it }
-                        if (!animatorOpen) Spacer(Modifier.height(6.dp))
-                        if (!animatorOpen) PanelItemRow(com.aurea.aurea.ui.theme.CupertinoGlyph.Move, stringResource(R.string.la_animators), "text.layer.animators", chevron = true) { env.onOpenAnimators() }
-                    }
+        PanelItemRow(com.aurea.aurea.ui.theme.CupertinoGlyph.Sparkles, stringResource(R.string.la_animators), "text.layer.animators", chevron = true) { env.onOpenAnimators() }
                 }
             }
         }
         if (!fullWidth) Box(Modifier.width(0.7.dp).fillMaxHeight().background(AureaColors.ContentStrongLine))
         if (!fullWidth) PanelIconTabs(listOf(
-            PanelIconTab(com.aurea.aurea.ui.theme.CupertinoGlyph.Textformat, stringResource(R.string.panel_texto), "text.tab.text"),
-            PanelIconTab(com.aurea.aurea.ui.theme.CupertinoGlyph.Paintbrush, stringResource(R.string.tx_tab_style), "text.tab.style"),
-            PanelIconTab(com.aurea.aurea.ui.theme.CupertinoGlyph.DocText, stringResource(R.string.tx_tab_layout), "text.tab.layout"),
-            PanelIconTab(com.aurea.aurea.ui.theme.CupertinoGlyph.Sparkles, stringResource(R.string.tx_tab_animator), "text.tab.animator"),
-        ), tab, stringResource(R.string.text_options)) { tab = it; store.timelineFocus = null }
+            PanelIconTab(com.aurea.aurea.ui.theme.CupertinoGlyph.ArrowLeftRight, stringResource(R.string.edt_prop_spacing), "textLayout.tab.spacing"),
+            PanelIconTab(com.aurea.aurea.ui.theme.CupertinoGlyph.Square, stringResource(R.string.panel_caixa), "textLayout.tab.box"),
+            PanelIconTab(com.aurea.aurea.ui.theme.CupertinoGlyph.Scribble, stringResource(R.string.panel_caminho), "textLayout.tab.path"),
+            PanelIconTab(com.aurea.aurea.ui.theme.CupertinoGlyph.Timer, stringResource(R.string.text_dynamic), "textLayout.tab.dynamic"),
+        ), layoutTab.ordinal, stringResource(R.string.fn_text_layout)) { layoutTab = TextLayoutTab.entries[it]; store.timelineFocus = null }
     }
 }
 
@@ -302,13 +297,14 @@ private fun TextDynamicSection(env: PanelEnv) {
     }
 }
 
-/** Espaçamento e caixa de parágrafo (ver `set_text_style`). */
+/** Espaçamento (entrelinha e entre letras), a aba Espaçamento do Layout do texto (ver `set_text_style`). */
 @Composable
-private fun TextLayoutSection(env: PanelEnv) {
+private fun TextSpacingRows(env: PanelEnv) {
     val store = env.store
     val st by remember(store) { derivedStateOf { store.textStyle } }
     val v = st ?: return
-    if (v.size >= 20) PanelSection(stringResource(R.string.edt_prop_spacing), com.aurea.aurea.ui.theme.CupertinoGlyph.ArrowLeftRight, "text.sec.spacing") {
+    if (v.size < 20) return
+    Column(Modifier.fillMaxWidth().testTag("text.sec.spacing")) {
         TextRuler(env, stringResource(R.string.text_line_spacing), { (store.textStyle?.get(18) ?: 1.2f) * 100 },
             "${(v[18] * 100).roundToInt()}%", 0.5f, 10f, 1000f, stringResource(R.string.text_line_spacing)) {
             store.setTextStyleValue(18, it / 100)
@@ -318,7 +314,15 @@ private fun TextLayoutSection(env: PanelEnv) {
             store.setTextStyleValue(19, it)
         }
     }
-    PanelSection(stringResource(R.string.panel_caixa), com.aurea.aurea.ui.theme.CupertinoGlyph.Square, "text.sec.box") {
+}
+
+/** Caixa de parágrafo (livre, parágrafo, tamanho fixo, encolher), a aba Caixa do Layout do texto. */
+@Composable
+private fun TextBoxRows(env: PanelEnv) {
+    val store = env.store
+    val st by remember(store) { derivedStateOf { store.textStyle } }
+    val v = st ?: return
+    Column(Modifier.fillMaxWidth().testTag("text.sec.box")) {
         PanelItemGrid(listOf(
             Triple(0, R.string.panel_livre, com.aurea.aurea.ui.theme.CupertinoGlyph.Move), Triple(1, R.string.panel_paragrafo, com.aurea.aurea.ui.theme.CupertinoGlyph.LineHorizontal3),
             Triple(2, R.string.panel_tamanho_fixo, com.aurea.aurea.ui.theme.CupertinoGlyph.Square), Triple(3, R.string.panel_encolher_caber, com.aurea.aurea.ui.theme.CupertinoGlyph.FullscreenExit),
@@ -337,36 +341,30 @@ private fun TextLayoutSection(env: PanelEnv) {
     }
 }
 
-/** Fundo e sombra do texto (ver `set_text_style`). */
+/**
+ * FUNDO do texto (a caixa atrás das letras, ver `set_text_style`): a aba Fundo de
+ * Borda e sombra no texto (Funções, F4). Interruptor, cor, margem e cantos.
+ */
 @Composable
-private fun TextBackdropSection(env: PanelEnv) {
+internal fun TextBackdropRows(env: PanelEnv) {
     val store = env.store
     val st by remember(store) { derivedStateOf { store.textStyle } }
     val v = st ?: return
-    PanelSection(stringResource(R.string.panel_fundo), com.aurea.aurea.ui.theme.CupertinoGlyph.Square, "text.sec.backdrop", startOpen = v[3] > 0.5f,
-        trailing = { AureaToggle(checked = v[3] > 0.5f, onCheckedChange = { store.setTextStyleValue(3, if (it) 1f else 0f) }) }) {
-        ColorLine(stringResource(R.string.panel_cor), Color(v[4], v[5], v[6])) {
-            store.beginGesture("cor do fundo do texto")
-            env.openColor(ColorRequest(floatArrayOf(v[4], v[5], v[6], v[7]),
-                onChange = { r, g, b, a -> store.setTextStyleValues(mapOf(4 to r, 5 to g, 6 to b, 7 to a)) }, onDone = { store.endGesture() }))
+    Column(Modifier.fillMaxWidth().testTag("text.sec.backdrop")) {
+        ToggleLine(stringResource(R.string.panel_fundo), v[3] > 0.5f) { store.setTextStyleValue(3, if (it) 1f else 0f) }
+        if (v[3] > 0.5f) {
+            ColorLine(stringResource(R.string.panel_cor), Color(v[4], v[5], v[6])) {
+                store.beginGesture("cor do fundo do texto")
+                env.openColor(ColorRequest(floatArrayOf(v[4], v[5], v[6], v[7]),
+                    onChange = { r, g, b, a -> store.setTextStyleValues(mapOf(4 to r, 5 to g, 6 to b, 7 to a)) }, onDone = { store.endGesture() }))
+            }
+            TextRuler(env, stringResource(R.string.panel_margem_fundo), { store.textStyle?.get(8) ?: 14f }, "${v[8].roundToInt()} px", 0.2f, 0f, 500f, stringResource(R.string.panel_margem_fundo_276c)) {
+                store.setTextStyleValue(8, it)
+            }
+            TextRuler(env, stringResource(R.string.panel_cantos_arredondados), { store.textStyle?.get(9) ?: 10f }, "${v[9].roundToInt()} px", 0.2f, 0f, 500f, stringResource(R.string.panel_raio_fundo)) {
+                store.setTextStyleValue(9, it)
+            }
         }
-        TextRuler(env, stringResource(R.string.panel_margem_fundo), { store.textStyle?.get(8) ?: 14f }, "${v[8].roundToInt()} px", 0.2f, 0f, 500f, stringResource(R.string.panel_margem_fundo_276c)) {
-            store.setTextStyleValue(8, it)
-        }
-        TextRuler(env, stringResource(R.string.panel_cantos_arredondados), { store.textStyle?.get(9) ?: 10f }, "${v[9].roundToInt()} px", 0.2f, 0f, 500f, stringResource(R.string.panel_raio_fundo)) {
-            store.setTextStyleValue(9, it)
-        }
-    }
-    PanelSection(stringResource(R.string.panel_sombra), com.aurea.aurea.ui.theme.CupertinoGlyph.CircleLefthalfFill, "text.sec.shadow", startOpen = v[10] > 0.5f,
-        trailing = { AureaToggle(checked = v[10] > 0.5f, onCheckedChange = { store.setTextStyleValue(10, if (it) 1f else 0f) }) }) {
-        ColorLine(stringResource(R.string.panel_cor), Color(v[11], v[12], v[13])) {
-            store.beginGesture("cor da sombra do texto")
-            env.openColor(ColorRequest(floatArrayOf(v[11], v[12], v[13], v[14]),
-                onChange = { r, g, b, a -> store.setTextStyleValues(mapOf(11 to r, 12 to g, 13 to b, 14 to a)) }, onDone = { store.endGesture() }))
-        }
-        TextRuler(env, stringResource(R.string.panel_distancia_x), { store.textStyle?.get(15) ?: 4f }, "${v[15].roundToInt()} px", 0.2f, -500f, 500f, stringResource(R.string.panel_sombra_x)) { store.setTextStyleValue(15, it) }
-        TextRuler(env, stringResource(R.string.panel_distancia_y), { store.textStyle?.get(16) ?: 6f }, "${v[16].roundToInt()} px", 0.2f, -500f, 500f, stringResource(R.string.panel_sombra_y)) { store.setTextStyleValue(16, it) }
-        TextRuler(env, stringResource(R.string.panel_desfoque), { store.textStyle?.get(17) ?: 6f }, "${v[17].roundToInt()} px", 0.1f, 0f, 200f, stringResource(R.string.panel_desfoque_sombra)) { store.setTextStyleValue(17, it) }
     }
 }
 
@@ -380,7 +378,7 @@ private fun TextBackdropSection(env: PanelEnv) {
 private fun TextSourceKeysRow(env: PanelEnv) {
     val store = env.store
     val id = store.primary ?: return
-    val keys = store.keyframes[id].orEmpty().filter { it.property == com.aurea.aurea.engine.TrackProperty.TEXT_SOURCE }
+    val keys = store.keysForLayer(id).orEmpty().filter { it.property == com.aurea.aurea.engine.TrackProperty.TEXT_SOURCE }
     val local = store.detail?.localPlayhead
     val here = keys.any { it.time == local }
     val track = com.aurea.aurea.engine.TrackKey(com.aurea.aurea.engine.TrackProperty.TEXT_SOURCE, 0, 0)
@@ -389,9 +387,14 @@ private fun TextSourceKeysRow(env: PanelEnv) {
         keys.isNotEmpty() -> com.aurea.aurea.ui.ds.KeyframeLook.Animated
         else -> com.aurea.aurea.ui.ds.KeyframeLook.None
     }
+    // v70: expressão no texto-fonte (o "=" da linha abre a folha, como nas outras propriedades).
+    val label = stringResource(R.string.ae_anim_source_text)
+    val exprKeys = listOf(track)
+    val exprLook by remember(store) { derivedStateOf { store.expressionLook(exprKeys) } }
     Spacer(Modifier.height(6.dp))
-    PropertyCustomRow(stringResource(R.string.ae_anim_source_text), selected = store.timelineFocus?.singleOrNull() == track,
-        onSelect = { store.timelineFocus = listOf(track) }, keyframe = look) {
+    PropertyCustomRow(label, selected = store.timelineFocus?.singleOrNull() == track,
+        onSelect = { store.timelineFocus = listOf(track) }, keyframe = look,
+        expression = exprLook, onExpression = { store.openExpression(label, exprKeys) }) {
         PanelItemRow(
             com.aurea.aurea.ui.theme.CupertinoGlyph.SuitDiamond,
             stringResource(if (here) R.string.ae_anim_source_key_remove else R.string.ae_anim_source_key_add),
@@ -430,9 +433,9 @@ internal fun TextRuler(
     // coluna marca o keyframe.
     val track = keyProperty?.let { com.aurea.aurea.engine.TrackKey(it) }
     val id = store.primary
-    val row = store.layers.firstOrNull { it.id == id }
+    val row = store.editingLayers.firstOrNull { it.id == id }
     val local = store.playhead - (row?.startFrame ?: 0) + (row?.offsetFrames ?: 0)
-    val keys = if (keyProperty != null) store.keyframes[id].orEmpty().filter { it.property == keyProperty } else emptyList()
+    val keys = if (keyProperty != null) store.keysForLayer(id).orEmpty().filter { it.property == keyProperty } else emptyList()
     val look = when {
         keys.any { it.time == local } -> com.aurea.aurea.ui.ds.KeyframeLook.KeyHere
         keys.isNotEmpty() -> com.aurea.aurea.ui.ds.KeyframeLook.Animated

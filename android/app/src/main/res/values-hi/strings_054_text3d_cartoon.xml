@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.5.4: estilo Cartoon do texto 3D (material pronto 14 do motor). -->
+    <string name="pn_t3d_preset_cartoon">कार्टून</string>
+    <string name="t3d_cartoon_side_auto">स्वचालित साइड रंग</string>
+    <string name="t3d_cartoon_side">साइड का रंग</string>
+    <string name="t3d_cartoon_highlight">हाइलाइट</string>
+    <string name="t3d_cartoon_outline_color">आउटलाइन का रंग</string>
+    <string name="t3d_cartoon_outline_width">आउटलाइन की मोटाई</string>
+    <string name="t3d_cartoon_hint">मोटी आउटलाइन के साथ सपाट कार्टून रंग। आउटलाइन की मोटाई कंपोज़िशन पिक्सेल में है, इसलिए किसी भी एक्सपोर्ट रिज़ॉल्यूशन पर एक जैसी दिखती है।</string>
+</resources>

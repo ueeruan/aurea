@@ -48,6 +48,10 @@ binding = "AI"
 [vars]
 # 0.4.1: login com Google pelo Firebase Auth (firebase.js confere o aud/iss deste projeto).
 FIREBASE_PROJECT_ID = "aurea-8e5f1"
+# AureaMCP: "false" desliga /mcp, o OAuth e o relay (503) sem deploy de código.
+AUREAMCP_ENABLED = "true"
+# Purchases stay disabled during the closed beta (owner, 14 November 2026).
+AUREAOS_PURCHASES_ENABLED = "false"
 # Kill switch: "false" = nenhuma chamada paga chega à 8Scale.
 AI_VIDEO_ENABLED = "true"
 # Teto de gasto do dia (UTC). Atingido, nenhuma geração nova entra.
@@ -124,3 +128,20 @@ bucket_name = "aurea-community-files"
 # [[send_email]]
 # name = "CRASH_EMAIL"
 # destination_address = "ruanpablombl@gmail.com"
+
+# -----------------------------------------------------------------------------
+# AureaMCP (docs/aureamcp/DESIGN.md) — /mcp, /mcp/oauth/*, /api/mcp/*.
+# Um relay por conta (Durable Object com WebSocket em hibernação) liga os agentes
+# (Claude, ChatGPT, Codex...) ao app Aurea aberto no celular ou no PC.
+# Antes do deploy: `npx wrangler d1 export aurea-contas --remote` e
+# `npx wrangler d1 migrations apply aurea-contas --remote` (0010_aureamcp).
+# O AureaOS vai para o R2 (COMMUNITY_FILES, prefixo aureamcp/brain/) com
+# `node scripts/bundle-aureaos.mjs --upload`. Nenhum segredo novo.
+# -----------------------------------------------------------------------------
+[[durable_objects.bindings]]
+name = "AUREA_MCP"
+class_name = "AureaMcpRelay"
+
+[[migrations]]
+tag = "v3-aureamcp-relay"
+new_sqlite_classes = ["AureaMcpRelay"]

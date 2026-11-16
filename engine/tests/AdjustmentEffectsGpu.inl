@@ -39,6 +39,7 @@ inline const char* not_for_adjustment(const Effect& fx) {
     if (std::strcmp(key, "aurea.layout.grid_builder") == 0 || std::strcmp(key, "aurea.layout.grid_item") == 0)
         return "metadado de grade";
     if (t == effect_type_id(effect_keys::kSceneFlare)) return "so em luz 3D";
+    if (t == effect_type_id(effect_keys::kRasterExtrude)) return "volume da propria fonte 3D";
     // A segmentação por IA recorta o SUJEITO da própria fonte; a camada de
     // ajuste não tem fonte para o modelo (o recorte é o da camada de vídeo).
     if (t == effect_type_id(effect_keys::kRotobrush)) return "segmentacao da propria fonte";

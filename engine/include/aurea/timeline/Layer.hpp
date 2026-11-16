@@ -24,6 +24,7 @@
 #include "aurea/core/Math.hpp"
 #include "aurea/animation/Curve.hpp"
 #include "aurea/timeline/SpatialPath.hpp"
+#include "aurea/timeline/PathRig.hpp"   // lote M: feather variável, ligações de caminho
 #include "aurea/effects/Parameter.hpp"
 #include "aurea/vector/VectorData.hpp"
 #include "aurea/text/Captions.hpp"
@@ -112,11 +113,32 @@ struct Mask {
     /// Queda do feather (AE "Mask Feather Falloff"): 0 suave (gaussiano, o de
     /// sempre), 1 linear (rampa reta da mesma largura). Gravado na v65.
     u8            featherFalloff = 0;
+    // --- Lote M (máscaras e rig do AE; seção MaskRig do projeto) -------------
+    /// Feather vertical próprio (px da camada). < 0 = o mesmo de `feather`.
+    f32           featherY = -1.0f;
+    /// Feather de largura variável: o raio soma ao feather da máscara e
+    /// interpola ao longo da borda entre os pontos.
+    std::vector<MaskFeatherPoint> featherPoints;
+    /// RotoBezier: as tangentes saem dos vizinhos (`rotoTension` por vértice,
+    /// faltando = 1). As tangentes gravadas ficam guardadas.
+    bool          rotoBezier = false;
+    std::vector<f32> rotoTension;
+    /// Travada: os comandos de edição recusam. Oculta: o contorno some do
+    /// palco (o recorte continua valendo).
+    bool          locked = false;
+    bool          hidden = false;
+    /// "Points Follow Nulls": vértices que seguem a âncora de outra camada.
+    std::vector<PathVertexDriver> drivers;
 
     std::vector<MaskPoint> points;
     /// Caminho animado: vazio = `points` parado; senão os keys mandam (e
     /// `points` guarda a última forma editada fora deles).
     std::vector<MaskPathKey> pathKeys;
+    /// AE expressions (lote E): expressão do CAMINHO (o Mask Path do AE com
+    /// `createPath(...)`). Vale por cima de `points`/`pathKeys`; com erro, vale
+    /// o caminho de antes. Gravada na seção Expressions do projeto.
+    std::shared_ptr<const expr::TrackExpression> pathExpression;
+    bool pathExpressionEnabled = true;
 
     /// Quantos pontos o preview pode usar. Máscaras com centenas de pontos
     /// entram no modo adaptativo com uma versão simplificada.
@@ -170,7 +192,12 @@ enum TextAnimProp : u32 {
     kTextPropCharOffset = 1u << 8, kTextPropFill = 1u << 9, kTextPropStroke = 1u << 10,
     kTextPropAnchor = 1u << 11, kTextPropLineSpacing = 1u << 12, kTextPropFillHsb = 1u << 13, kTextPropFillOpacity = 1u << 14,
     kTextPropReveal = 1u << 15, kTextPropRandomize = 1u << 16, kTextPropSpacing = 1u << 17,
+    // v70: o restante do animador do After Effects.
+    kTextPropStrokeHsb = 1u << 18, kTextPropStrokeOpacity = 1u << 19, kTextPropCharValue = 1u << 20,
+    kTextPropLineAnchor = 1u << 21,
 };
+/// Todos os bits de TextAnimProp (o que entra de arquivo, preset ou interface).
+inline constexpr u32 kTextPropMask = (1u << 22) - 1u;
 
 /// Animador de texto: seletor + propriedades (valor com a unidade toda dentro).
 struct TextAnimator {
@@ -208,6 +235,19 @@ struct TextAnimator {
     /// v60: 1 = formas, ease, subtrair e pivôs medidos no After Effects; 0 = a
     /// matemática anterior, para projetos gravados antes não mudarem de aparência.
     u8   aeModel = 1;
+    // v65, o restante das propriedades do animador do After Effects.
+    f32  strokeHue = 0.0f, strokeSaturation = 0.0f, strokeBrightness = 0.0f, strokeOpacity = 100.0f;
+    f32  charValue = 0.0f;                     ///< Valor de caractere: código Unicode que substitui a letra
+    u8   charRange = 0;                        ///< 0 preserva maiúsculas e dígitos, 1 Unicode completo
+    /// Tipo de tracking: 0 antes e depois, 1 antes, 2 depois. O padrão é 2 porque
+    /// o Aurea sempre empurrou só as letras seguintes (projetos antigos iguais).
+    u8   trackingType = 2;
+    f32  lineAnchor = 0.0f;                    ///< % da linha que fica parada com o tracking (0 esquerda)
+    /// v72, alinhamento de caractere (Character Alignment do AE): onde a letra
+    /// trocada pelo deslocamento/valor de caractere fica na vaga da original —
+    /// 0 esquerda, 1 centro, 2 direita — ou 3 ajustar kerning (o layout refeito
+    /// com o avanço da letra nova; o que o Aurea sempre fez, padrão dos antigos).
+    u8   charAlign = 3;
 };
 
 /// Animador de CAMADA (qualquer tipo): entrada "a partir de" — a camada (ou
@@ -311,6 +351,10 @@ struct TextData {
     Vec4        color{1.0f, 1.0f, 1.0f, 1.0f};
     f32         strokeWidth = 0.0f;
     Vec4        strokeColor{0.0f, 0.0f, 0.0f, 1.0f};
+    /// v70, "Preenchimento e traço" do AE: 0 todos os preenchimentos sobre todos
+    /// os traços (o que o Aurea sempre fez), 1 por caractere, 2 todos os traços
+    /// sobre todos os preenchimentos.
+    u8          renderOrder = 0;
     u32         alignment = 0;         ///< 0 esquerda, 1 centro, 2 direita
     f32         lineHeight = 1.2f;
     f32         tracking   = 0.0f;     ///< thousandths of an em (tracking * size / 1000 pixels)
@@ -377,6 +421,20 @@ struct TextData {
     /// 0.5.2 (v69): preenchimento com TEXTURA (text/TextTexture.hpp). Padrão =
     /// cor lisa: projeto antigo abre igual.
     TextTexture texture;
+    /// v70: expressão do texto-fonte (o "Source Text" com expressão do AE). O
+    /// resultado troca o conteúdo no instante (depois do key do texto-fonte);
+    /// erro = vale o texto. Imutável e dividida entre cópias, como na trilha.
+    std::shared_ptr<const expr::TrackExpression> sourceExpression;
+    bool sourceExpressionEnabled = true;
+    /// v72, mistura entre caracteres (Inter-Character Blending do AE, em "Mais
+    /// opções"): o BlendMode (valor de core/Types.hpp) com que cada letra entra
+    /// sobre as anteriores onde elas se sobrepõem. 0 = Normal (o caminho de sempre).
+    u16 interCharBlend = 0;
+    /// Transitório (não gravado): vaga de cada código do `content` depois da
+    /// etapa de conteúdo (text::apply_text_content). 0 = sem vaga; senão
+    /// (código original & 0x1FFFFF) | ((alinhamento + 1) << 24): o layout mede o
+    /// avanço da letra original e põe a nova dentro dele (Character Alignment).
+    std::vector<u32> charSlots;
 };
 
 struct ShapeData {
@@ -397,11 +455,9 @@ struct ShapeData {
     Vec4 strokeColor{0.0f, 0.0f, 0.0f, 0.0f};
     f32  strokeWidth = 0.0f;
     bool filled = true;
-    /// Trim path: fração do comprimento desenhada.
-    f32  trimStart = 0.0f;
-    f32  trimEnd   = 1.0f;
-    f32  trimOffset = 0.0f;
-    bool trimEnabled = false;
+    // (B4) O trim das formas paramétricas saiu do modelo: nada o escrevia e o
+    // render não o lia. O arquivo guarda os 4 campos no mesmo lugar (padrões);
+    // o trim de verdade é o do grupo vetorial (VectorGroup::trim).
     /// Pontos livres para shapeType == path.
     std::vector<Vec2> path;
     /// Camada vetorial (shapeType == kShapeVector).
@@ -503,8 +559,40 @@ struct MaterialOverride {
     /// quadro. 0 = nada; as duas nunca valem juntas (a última escolha vence).
     u64 textureImage = 0;
     u64 textureLayer = 0;
+    /// EMISSÃO (v76; painel 3D › Material): a luz própria do material —
+    /// cor linear (bits 6..8 da máscara) e a força (bit 9, 0..
+    /// kMaterialEmissionMax). Sem esses bits vale a do arquivo, como antes.
+    Vec3 emissive{0.0f, 0.0f, 0.0f};
+    f32 emissiveStrength = 1.0f;
     [[nodiscard]] bool has_texture() const noexcept { return textureImage != 0 || textureLayer != 0; }
 };
+
+/// Canais do ajuste de material (o paramIndex de TrackProperty::MaterialParam
+/// e o bit da máscara): 0..2 cor, 3 opacidade, 4 metal, 5 rugosidade e, na
+/// v76, 6..8 cor da emissão e 9 força da emissão. Só se acrescenta no fim.
+inline constexpr u32 kMaterialParamCount = 10;
+inline constexpr u32 kMaterialParamMask = (1u << kMaterialParamCount) - 1u;
+/// Os bits da emissão (cor + força).
+inline constexpr u32 kMaterialEmissionMask = 0x3C0u;
+inline constexpr f32 kMaterialEmissionMax = 20.0f;
+/// Teto de cada canal (o piso é 0): a força da emissão passa de 1.
+[[nodiscard]] constexpr f32 material_param_max(u32 param) noexcept { return param == 9 ? kMaterialEmissionMax : 1.0f; }
+[[nodiscard]] inline f32 material_override_field(const MaterialOverride& o, u32 param) noexcept {
+    switch (param) {
+        case 0: return o.baseColor.x; case 1: return o.baseColor.y; case 2: return o.baseColor.z;
+        case 3: return o.baseColor.w; case 4: return o.metallic; case 5: return o.roughness;
+        case 6: return o.emissive.x; case 7: return o.emissive.y; case 8: return o.emissive.z;
+        default: return o.emissiveStrength;
+    }
+}
+inline void set_material_override_field(MaterialOverride& o, u32 param, f32 v) noexcept {
+    switch (param) {
+        case 0: o.baseColor.x = v; break; case 1: o.baseColor.y = v; break; case 2: o.baseColor.z = v; break;
+        case 3: o.baseColor.w = v; break; case 4: o.metallic = v; break; case 5: o.roughness = v; break;
+        case 6: o.emissive.x = v; break; case 7: o.emissive.y = v; break; case 8: o.emissive.z = v; break;
+        default: o.emissiveStrength = v; break;
+    }
+}
 
 /// MOSTRAR INTERIOR (dupla face) de um objeto 3D. Gravado no projeto (v43);
 /// o número é contrato de arquivo.
@@ -528,6 +616,22 @@ struct Model3DData {
     Vec3    pivot{0.0f, 0.0f, 0.0f};
     i32     animationClip = -1;
     f32     timeScale = 1.0f;
+    /// EVOLUÇÃO do clipe (v75; painel 3D › Animação): 0..1 do clipe escolhido,
+    /// valor parado da trilha TrackProperty::ModelAnimProgress. Negativo (o
+    /// padrão, e todo projeto antigo) = o clipe toca sozinho com o tempo da
+    /// camada × `timeScale`, como sempre.
+    f32     animProgress = -1.0f;
+    /// REPETIR (v75): tocando sozinho, o clipe recomeça ao acabar (o padrão de
+    /// sempre); falso = para no último quadro do clipe.
+    bool    animLoop = true;
+    /// COMEÇAR EM (v76): tocando sozinho, o clipe começa nesta fração (0..1)
+    /// dele no início da camada. 0 = o começo (o de sempre).
+    f32     animStart = 0.0f;
+    /// DE TRÁS PARA FRENTE (v76): tocando sozinho, o clipe corre do fim ao começo.
+    bool    animReverse = false;
+    /// IDA E VOLTA (v76): tocando sozinho, vai até o fim e volta (o laço tem o
+    /// dobro da duração; sem Repetir, para de volta no começo).
+    bool    animPingPong = false;
     bool    castShadows = true;
     bool    receiveShadows = true;
     /// Mostrar interior (dupla face) — ver ModelInterior.
@@ -936,6 +1040,13 @@ struct Layer {
     /// TÍMIDA (o Shy do AE): com `Composition::hide_shy()` ligado, a timeline
     /// não mostra a camada. Só organização: o quadro não muda. Gravado na v65.
     bool      shy = false;
+    /// QUALIDADE (o Quality switch do AE), só na prévia: 0 Melhor, 1 Rascunho
+    /// (densidade menor, amostra por vizinho, sem os efeitos pesados), 2 Arame
+    /// (só o contorno da caixa da camada). O export sai sempre em Melhor.
+    /// `sampling` (vale em Melhor, prévia e export): 0 bilinear, 1 bicúbica.
+    /// Gravado na v74; projeto anterior abre Melhor/bilinear.
+    u8        quality = 0;
+    u8        sampling = 0;
     /// MARCAS DA CAMADA (layer markers do AE), em ordem de quadro LOCAL, no
     /// máximo uma por quadro. Andam com a camada (mover/aparar não muda o
     /// quadro local); `thisLayer.marker` nas expressões. Gravado na v67.
@@ -962,6 +1073,10 @@ struct Layer {
 
     std::vector<EffectInstance> effects;
     std::vector<Mask>   masks;
+    /// Lote M: vértices de caminhos vetoriais que seguem outra camada e a
+    /// posição desta camada vinda de um caminho (timeline/PathRig.hpp).
+    std::vector<VectorPathDriver> vectorDrivers;
+    PathFollow          pathFollow;
     /// Animadores de camada (entrada/saída/wiggle), em qualquer tipo de camada.
     std::vector<LayerAnimator> layerAnimators;
     /// Rig 2D (só camada de imagem): juntas + ossos; a pose mora nas trilhas.
@@ -1033,11 +1148,16 @@ struct Layer {
             // desde a entrada (keyframes no tempo local, como os de transform).
             const f64 l0 = static_cast<f64>(offset.value);
             const f64 lt = timelineTime - static_cast<f64>(start.value) + l0;
+            // B8: com velocidade negativa a integral pode voltar além da
+            // entrada; antes do quadro 0 da fonte não há imagem (fica nele).
+            // Só velocidade negativa chega abaixo de min(0, entrada): com as
+            // positivas de sempre o resultado é o mesmo de antes.
+            const f64 floor0 = std::min(0.0, l0);
             if (reversed) {
                 const f64 lastLocal = static_cast<f64>(end.value - 1 - start.value) + l0;
-                return l0 + speed_integral(*st, lastLocal) - speed_integral(*st, lt);
+                return std::max(floor0, l0 + speed_integral(*st, lastLocal) - speed_integral(*st, lt));
             }
-            return l0 + speed_integral(*st, lt) - speed_integral(*st, l0);
+            return std::max(floor0, l0 + speed_integral(*st, lt) - speed_integral(*st, l0));
         }
         const f64 elapsed = reversed ? static_cast<f64>(end.value - 1) - timelineTime
                                      : timelineTime - static_cast<f64>(start.value);
@@ -1064,9 +1184,11 @@ struct Layer {
     }
 
     /// Velocidade do trecho a→b num instante LOCAL fracionário: a mesma curva
-    /// dos keyframes (easing do trecho), presa em [0, 16] (0 = parado).
+    /// dos keyframes (easing do trecho), presa em [−16, 16] (0 = parado).
+    /// B8: negativa = a fonte anda para TRÁS dentro da rampa (o reverso do AE
+    /// dentro de uma rampa com keys); a fonte nunca passa do quadro 0.
     [[nodiscard]] static f64 speed_segment(const Keyframe& a, const Keyframe& b, f64 local) noexcept {
-        auto clampv = [](f64 v) { return std::isfinite(v) ? std::clamp(v, 0.0, 16.0) : 1.0; };
+        auto clampv = [](f64 v) { return std::isfinite(v) ? std::clamp(v, -16.0, 16.0) : 1.0; };
         const f64 span = static_cast<f64>(b.time.value - a.time.value);
         if (a.interp == Interpolation::Hold || span <= 0.0) return clampv(a.value);
         const f32 u = static_cast<f32>(std::clamp((local - static_cast<f64>(a.time.value)) / span, 0.0, 1.0));
@@ -1074,7 +1196,7 @@ struct Layer {
     }
     [[nodiscard]] static f64 speed_value(const Track& t, f64 local) noexcept {
         const usize n = t.keys.size();
-        auto clampv = [](f64 v) { return std::isfinite(v) ? std::clamp(v, 0.0, 16.0) : 1.0; };
+        auto clampv = [](f64 v) { return std::isfinite(v) ? std::clamp(v, -16.0, 16.0) : 1.0; };
         if (n == 0) return clampv(t.staticValue);
         if (n == 1 || local <= static_cast<f64>(t.keys[0].time.value)) return clampv(t.keys[0].value);
         if (local >= static_cast<f64>(t.keys[n - 1].time.value)) return clampv(t.keys[n - 1].value);
@@ -1190,6 +1312,48 @@ struct Layer {
         default:
             return false;
     }
+}
+
+/// TEMPO DO CLIPE do modelo 3D (s, dentro do clipe de `clipDuration` s) no
+/// instante LOCAL `localFrames` da camada (quadros; fracionário nos
+/// sub-quadros do desfoque de movimento). A regra única de prévia, export,
+/// rig e câmera do arquivo:
+///  - EVOLUÇÃO (v75): com keyframe na trilha TrackProperty::ModelAnimProgress,
+///    ou com o valor parado `animProgress` ≥ 0, o clipe vai para essa fração
+///    (0..1, presa) da duração — sem laço; quem anima é o keyframe.
+///  - Senão (o padrão, e todo projeto antigo): toca com o tempo da camada ×
+///    `timeScale`, em laço (o mesmo cálculo de scene3d::clip_time) ou, com
+///    `animLoop` desligado, parado no começo/fim do clipe.
+///  - v76, tocando sozinho: a VELOCIDADE com keyframe (TrackProperty::
+///    ModelAnimSpeed) vira a integral dela; COMEÇAR EM soma `animStart` × a
+///    duração; IDA E VOLTA dobra o laço e volta; DE TRÁS PARA FRENTE espelha
+///    no fim. Nada disso ligado = exatamente a conta de antes.
+[[nodiscard]] inline f32 model_clip_seconds(const Layer& l, f32 clipDuration, f64 localFrames, f64 fps) noexcept {
+    if (!(clipDuration > 0.0f) || !std::isfinite(clipDuration) || !std::isfinite(localFrames)) return 0.0f;
+    const f64 d = clipDuration;
+    f32 progress = l.model.animProgress;
+    if (const Track* track = l.tracks.find(TrackProperty::ModelAnimProgress); track && track->driven())
+        progress = track->value_or_f(localFrames, progress);
+    if (std::isfinite(progress) && progress >= 0.0f)
+        return static_cast<f32>(std::clamp(static_cast<f64>(progress), 0.0, 1.0) * d);
+    const f64 rate = fps > 0.0 ? fps : 30.0;
+    f64 seconds = localFrames / rate * static_cast<f64>(l.model.timeScale);
+    if (const Track* speed = l.tracks.find(TrackProperty::ModelAnimSpeed); speed && !speed->keys.empty())
+        seconds = (Layer::speed_integral(*speed, localFrames) - Layer::speed_integral(*speed, 0.0)) / rate;
+    if (l.model.animStart > 0.0f && std::isfinite(l.model.animStart))
+        seconds += std::clamp(static_cast<f64>(l.model.animStart), 0.0, 1.0) * d;
+    if (!std::isfinite(seconds)) return 0.0f;
+    const bool pingPong = l.model.animPingPong;
+    const f64 span = pingPong ? 2.0 * d : d;
+    f64 t = 0.0;
+    if (!l.model.animLoop) t = std::clamp(seconds, 0.0, span);
+    else {
+        t = std::fmod(seconds, span);
+        if (t < 0.0) t += span;
+    }
+    if (pingPong && t > d) t = span - t;
+    if (l.model.animReverse) t = d - t;
+    return static_cast<f32>(std::clamp(t, 0.0, d));
 }
 
 /// Os parâmetros da camada de partículas com os keyframes aplicados.

@@ -12,6 +12,7 @@
 #include "aurea/Engine.hpp"
 #include "aurea/scene3d/Shape3D.hpp"
 #include "aurea/scene3d/PartEffects.hpp"
+#include "aurea/scene3d/Animation.hpp"
 #include "aurea/scene3d/MaterialPreview.hpp"
 #include "aurea/scene3d/Text3D.hpp"
 #include "aurea/effects/EffectRegistry.hpp"
@@ -632,9 +633,11 @@ AUREA_TEST(MaterialPreview, PresetBallsAreRoundDistinctAndDeterministic) {
         AUREA_CHECK_EQ(balls[p][((size / 2) * size + size / 2) * 4 + 3], 255);
         AUREA_CHECK(ball_stats(balls[p], size).opaque > size * size / 2);
     }
-    // Fora da faixa: nada.
+    // 0.5.4: o Cartoon (14) tem bola própria (cel + anel do contorno); fora da faixa: nada.
+    std::vector<u8> toonBall;
+    AUREA_CHECK(e.text3d_preset_preview(scene3d::kText3DPresetCartoon, size, toonBall) && toonBall.size() == size * size * 4);
     std::vector<u8> none;
-    AUREA_CHECK(!e.text3d_preset_preview(14, size, none) && none.empty());
+    AUREA_CHECK(!e.text3d_preset_preview(scene3d::kText3DMaterialPresetCount, size, none) && none.empty());
     AUREA_CHECK(!e.text3d_preset_preview(0, 8, none) && none.empty());
     AUREA_CHECK(!e.text3d_preset_preview(0, 512, none) && none.empty());
     const BallStats chrome = ball_stats(balls[0], size), gold = ball_stats(balls[1], size),
@@ -1289,3 +1292,246 @@ AUREA_TEST(Gpu, Part3DEffectsTextureHideAndMoveChangeTheRenderedCube) {
     std::remove(png.c_str());
 }
 #endif
+
+#if defined(AUREA_TEST_VULKAN)
+// 3D opções extras (14/11/2026, v76): a EMISSÃO por material e o deslocamento /
+// giro / rolar da textura trocada. Sem os bits/parâmetros novos o quadro é BIT
+// A BIT o de antes (projeto antigo); com eles, o quadro muda.
+AUREA_TEST(Gpu, ModelEmissionAndTextureTransformKeepOldFramesAndChangeNewOnes) {
+    Engine e;
+    EngineConfig ec;
+    ec.backend = new vk::Backend();
+    ec.backendConfig.enableValidation = false;
+    ec.disableAutosave = true;
+    ec.workerCount = 2;
+    if (!e.initialize(ec).ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    AUREA_CHECK(e.new_project(256, 144, 30.0, nullptr).ok());
+    const Result<u64> id = e.add_shape3d(static_cast<u32>(Shape3DKind::Cube), "Cubo");
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) { e.shutdown(); return; }
+    auto layer = [&]() -> Layer* {
+        Composition* comp = e.project()->timeline().composition(e.project()->timeline().current());
+        return comp ? comp->layer(LayerId::unpack(*id)) : nullptr;
+    };
+    auto capture = [&] {
+        test::Image8 img;
+        AUREA_CHECK(e.capture_frame_rgba(256, img.rgba, img.width, img.height).ok());
+        return img;
+    };
+    auto diff = [](const test::Image8& a, const test::Image8& b) {
+        u64 total = 0;
+        if (a.rgba.size() != b.rgba.size()) return ~u64{0};
+        for (usize i = 0; i < a.rgba.size(); ++i) total += static_cast<u64>(std::abs(int(a.rgba[i]) - int(b.rgba[i])));
+        return total;
+    };
+    auto energy = [](const test::Image8& img) {
+        u64 total = 0;
+        for (usize i = 0; i < img.rgba.size(); i += 4) total += img.rgba[i] + img.rgba[i + 1] + img.rgba[i + 2];
+        return total;
+    };
+    const test::Image8 plain = capture();
+    AUREA_CHECK(energy(plain) > 1000u);
+    // Emissão com valores esquisitos MAS sem os bits: nada muda (o projeto antigo).
+    if (Layer* l = layer()) {
+        MaterialOverride o;
+        o.materialIndex = 0;
+        o.mask = 0;
+        o.emissive = Vec3{1.0f, 0.0f, 1.0f};
+        o.emissiveStrength = 9.0f;
+        o.textureImage = 0;
+        l->model.materials.push_back(o);
+        l->model.materials.back().mask = 0;
+    }
+    const test::Image8 bitsOff = capture();
+    std::printf("\n    emissão sem bits: diferença %llu", static_cast<unsigned long long>(diff(plain, bitsOff)));
+    AUREA_CHECK_EQ(diff(plain, bitsOff), u64{0});
+    if (Layer* l = layer()) l->model.materials.clear();
+    // Emissão ligada no modelo inteiro: o cubo acende.
+    AUREA_CHECK(e.set_material_param(*id, Engine::kAllMaterials, 6, 1.0f).ok());
+    AUREA_CHECK(e.set_material_param(*id, Engine::kAllMaterials, 7, 0.2f).ok());
+    AUREA_CHECK(e.set_material_param(*id, Engine::kAllMaterials, 8, 0.1f).ok());
+    AUREA_CHECK(e.set_material_param(*id, Engine::kAllMaterials, 9, 3.0f).ok());
+    const test::Image8 glowing = capture();
+    std::printf("\n    emissão: energia %llu -> %llu", static_cast<unsigned long long>(energy(plain)),
+                static_cast<unsigned long long>(energy(glowing)));
+    AUREA_CHECK(energy(glowing) > energy(plain) + energy(plain) / 10u);
+    // O visual Neon (para conferir a olho: AUREA_DUMP_NEON=1 grava o quadro).
+    AUREA_CHECK(e.apply_model_material_preset(*id, 7));
+    const test::Image8 neon = capture();
+    AUREA_CHECK(diff(neon, plain) > 1000u);
+    if (std::getenv("AUREA_DUMP_NEON")) {
+        (void)test::write_png(temp_file("aurea_neon_cubo.png"), neon);
+        std::vector<u8> ball;
+        if (e.model_material_preset_preview(*id, 7, 128, ball)) {
+            test::Image8 b;
+            b.width = b.height = 128;
+            b.rgba = ball;
+            (void)test::write_png(temp_file("aurea_neon_bola.png"), b);
+        }
+    }
+    AUREA_CHECK(e.apply_model_material_preset(*id, 0));
+    AUREA_CHECK_EQ(diff(capture(), plain), u64{0});
+
+    // Textura trocada em todas as partes; os parâmetros novos em zero = a de antes.
+    auto add = [&](const char* key) -> u32 {
+        Command c;
+        c.type = CommandType::EffectAdd;
+        c.effect_add.layer = LayerId::unpack(*id);
+        c.effect_add.effectType = effect_type_id(key);
+        c.effect_add.index = kInvalidIndex;
+        AUREA_CHECK(e.apply_command(c).ok());
+        const Layer* l = layer();
+        return l && !l->effects.empty() ? l->effects.back().id : 0u;
+    };
+    auto set_param = [&](u32 effect, u32 param, f32 value) {
+        Command c;
+        c.type = CommandType::EffectSetParam;
+        c.effect_param.layer = LayerId::unpack(*id);
+        c.effect_param.effect = EffectId{effect, 0};
+        c.effect_param.paramIndex = param;
+        c.effect_param.value = value;
+        AUREA_CHECK(e.apply_command(c).ok());
+    };
+    const u32 swap = add(effect_keys::kPart3DTexture);
+    AUREA_CHECK(layer() && layer()->effects.back().params.size() == 9u);
+    const std::string png = checker_png("aurea_teste_textura_transformada.png");
+    AUREA_CHECK(e.set_effect_image(*id, swap, png.c_str()).ok());
+    set_param(swap, 2, 1.0f);
+    const test::Image8 textured = capture();
+    AUREA_CHECK(diff(textured, plain) > 5000u);
+    // Deslocar meia casa do quadriculado e girar: o quadro muda; de volta a zero, o de antes.
+    set_param(swap, kPartTextureOffsetX, 6.25f);
+    const test::Image8 shifted = capture();
+    std::printf("\n    deslocada: diferença %llu", static_cast<unsigned long long>(diff(shifted, textured)));
+    AUREA_CHECK(diff(shifted, textured) > 5000u);
+    set_param(swap, kPartTextureOffsetX, 0.0f);
+    AUREA_CHECK_EQ(diff(capture(), textured), u64{0});
+    set_param(swap, kPartTextureRotation, 30.0f);
+    const test::Image8 turned = capture();
+    std::printf("\n    girada: diferença %llu", static_cast<unsigned long long>(diff(turned, textured)));
+    AUREA_CHECK(diff(turned, textured) > 5000u);
+    set_param(swap, kPartTextureRotation, 0.0f);
+    AUREA_CHECK_EQ(diff(capture(), textured), u64{0});
+    // Controle: o quadro parado é o mesmo em qualquer instante.
+    AUREA_CHECK(e.apply_command(seek_to(15)).ok());
+    AUREA_CHECK_EQ(diff(capture(), textured), u64{0});
+    AUREA_CHECK(e.apply_command(seek_to(0)).ok());
+    // Rolar Y: no quadro 0 ainda não andou; no 15 (meio segundo), 5 % da imagem — o
+    // quadriculado repete a cada 25 %, então a velocidade não pode ser múltiplo disso.
+    set_param(swap, kPartTextureScrollY, 10.0f);
+    const test::Image8 atZero = capture();
+    AUREA_CHECK_EQ(diff(atZero, textured), u64{0});
+    AUREA_CHECK(e.apply_command(seek_to(15)).ok());
+    const test::Image8 later = capture();
+    std::printf("\n    rolando (quadro 15): diferença %llu", static_cast<unsigned long long>(diff(later, atZero)));
+    AUREA_CHECK(diff(later, atZero) > 5000u);
+    AUREA_CHECK(e.apply_command(seek_to(0)).ok());
+    set_param(swap, kPartTextureScrollY, 0.0f);
+    // A instância de um projeto antigo (4 parâmetros) desenha bit a bit igual.
+    if (Layer* l = layer()) l->effects.back().params.resize(4);
+    const test::Image8 oldEffect = capture();
+    std::printf("\n    efeito antigo (4 parâmetros): diferença %llu", static_cast<unsigned long long>(diff(textured, oldEffect)));
+    AUREA_CHECK_EQ(diff(textured, oldEffect), u64{0});
+    // Salvar e reabrir: a instância antiga ganha os parâmetros novos (zeros).
+    const std::string path = temp_file("aurea_teste_textura_transformada.aurea");
+    AUREA_CHECK(e.save_project(path.c_str()).ok());
+    AUREA_CHECK(e.load_project(path.c_str()).ok());
+    const Layer* reopened = layer();
+    AUREA_CHECK(reopened && !reopened->effects.empty() && reopened->effects.back().params.size() == 9u);
+    if (reopened && reopened->effects.back().params.size() == 9u)
+        for (u32 p = kPartTextureOffsetX; p <= kPartTextureScrollY; ++p)
+            AUREA_CHECK_EQ(reopened->effects.back().params[p].constant.as_float(), 0.0f);
+    e.shutdown();
+    std::remove(path.c_str());
+    std::remove(png.c_str());
+}
+#endif
+
+// Deslocamento + rolar da textura trocada: a conta pura e o que o efeito entrega.
+AUREA_TEST(Part3DEffects, TextureOffsetRotationAndScrollAreAppendedParameters) {
+    AUREA_CHECK_NEAR(part_texture_offset(0.0f, 0.0f, 100.0, 30.0), 0.0f, 1e-7f);
+    AUREA_CHECK_NEAR(part_texture_offset(25.0f, 0.0f, 0.0, 30.0), 0.25f, 1e-6f);
+    AUREA_CHECK_NEAR(part_texture_offset(-25.0f, 0.0f, 0.0, 30.0), 0.75f, 1e-6f);   // a imagem repete
+    AUREA_CHECK_NEAR(part_texture_offset(0.0f, 50.0f, 15.0, 30.0), 0.25f, 1e-6f);   // 50 %/s × 0,5 s
+    AUREA_CHECK_NEAR(part_texture_offset(10.0f, 100.0f, 30.0 * 3600.0, 30.0), 0.1f, 1e-5f);   // uma hora depois, sem erro
+    StarLayout s = star_with_layout();
+    AUREA_CHECK(s.asset != nullptr);
+    if (!s.asset) return;
+    const SceneAsset& a = *s.asset;
+    s.layer.effects.clear();
+    s.layer.tracks = TrackSet{};
+    s.layer.effects.push_back(part_effect(effect_keys::kPart3DTexture, 3));
+    AUREA_CHECK_EQ(s.layer.effects[0].params.size(), usize{9});
+    s.layer.effects[0].params[1].constant.ref = 77;
+    s.layer.effects[0].params[2].constant = ParamValue::boolean(true);
+    std::vector<PartTexture> swaps;
+    collect_part_textures(a, s.layer, 0.0, swaps, 30.0);
+    AUREA_CHECK_EQ(swaps.size(), usize{6});
+    for (const PartTexture& t : swaps) AUREA_CHECK(t.offset.x == 0.0f && t.offset.y == 0.0f && t.rotation == 0.0f);
+    s.layer.effects[0].params[kPartTextureOffsetX].constant = ParamValue::scalar(20.0f);
+    s.layer.effects[0].params[kPartTextureRotation].constant = ParamValue::scalar(90.0f);
+    s.layer.effects[0].params[kPartTextureScrollY].constant = ParamValue::scalar(-10.0f);
+    collect_part_textures(a, s.layer, 60.0, swaps, 30.0);
+    AUREA_CHECK_EQ(swaps.size(), usize{6});
+    if (!swaps.empty()) {
+        AUREA_CHECK_NEAR(swaps[0].offset.x, 0.2f, 1e-6f);
+        AUREA_CHECK_NEAR(swaps[0].offset.y, 0.8f, 1e-6f);         // −10 %/s × 2 s = −0,2 → 0,8
+        AUREA_CHECK_NEAR(swaps[0].rotation, kPi * 0.5f, 1e-5f);
+    }
+    // Com keyframe no deslocamento: anima (interpolado no sub-quadro).
+    Track& track = s.layer.tracks.get_or_create(TrackProperty::EffectParam, 3, param_track_key(kPartTextureOffsetX, 0));
+    (void)track.set(FrameIndex{0}, 0.0f);
+    (void)track.set(FrameIndex{10}, 50.0f);
+    collect_part_textures(a, s.layer, 5.0, swaps, 30.0);
+    if (!swaps.empty()) AUREA_CHECK_NEAR(swaps[0].offset.x, 0.25f, 1e-5f);
+    // Efeito antigo (4 parâmetros): os zeros de sempre.
+    s.layer.tracks = TrackSet{};
+    s.layer.effects[0].params.resize(4);
+    collect_part_textures(a, s.layer, 60.0, swaps, 30.0);
+    AUREA_CHECK_EQ(swaps.size(), usize{6});
+    for (const PartTexture& t : swaps) AUREA_CHECK(t.offset.x == 0.0f && t.offset.y == 0.0f && t.rotation == 0.0f);
+}
+
+AUREA_TEST(Part3DEffects, JointPartsUseAuthoredPivotAndRefreshSkinning) {
+    SceneAsset asset;
+    asset.bounds.add(Vec3{-1,-1,-1}); asset.bounds.add(Vec3{1,1,1});
+    asset.meshes.resize(1); asset.meshes[0].bounds = asset.bounds;
+    asset.nodes.resize(3); asset.nodes[0].mesh = 0;
+    asset.nodes[0].name = "Avatar";
+    asset.nodes[1].name = "Shoulder"; asset.nodes[1].children = {2};
+    asset.nodes[2].name = "Hand"; asset.nodes[2].parent = 1; asset.nodes[2].translation = Vec3{0,2,0};
+    asset.roots = {0,1}; asset.skins.resize(1); asset.skins[0].joints = {1,2};
+    asset.skins[0].inverseBind = {Mat4::identity(), Mat4::translation(Vec3{0,-2,0})};
+    std::vector<u32> parts; part_nodes(asset, parts, true);
+    AUREA_CHECK_EQ(parts.size(), 3u); AUREA_CHECK_EQ(parts[0], 0u); AUREA_CHECK_EQ(parts[1], 1u);
+    Layer layer; layer.effects.push_back(part_effect(effect_keys::kPart3DTransform, 1));
+    auto& effect = layer.effects[0];
+    AUREA_CHECK_EQ(effect.params.size(), 14u);
+    effect.params[0].constant = ParamValue::scalar(2);
+    effect.params[6].constant = ParamValue::scalar(90);
+    effect.params[8].constant = ParamValue::scalar(50);
+    Pose pose; evaluate_pose(asset, -1, 0, pose);
+    std::vector<f32> opacity;
+    apply_part_effects(asset, layer, 0, pose.nodeWorld, opacity);
+    rebuild_skin_matrices(asset, pose);
+    const Vec3 shoulder = pose.nodeWorld[1].transform_point(Vec3{});
+    AUREA_CHECK_NEAR(shoulder.x, 1, 1e-5); AUREA_CHECK_NEAR(shoulder.y, -1, 1e-5);
+    const Vec3 hand = pose.nodeWorld[2].transform_point(Vec3{});
+    AUREA_CHECK_NEAR(hand.x, -1, 1e-5); AUREA_CHECK_NEAR(hand.y, -1, 1e-5);
+    const Vec3 skinned = pose.jointMatrices[0].transform_point(Vec3{});
+    AUREA_CHECK((skinned - shoulder).length() < 1e-5);
+    // FBX unit conversion on the joint must not multiply the authored pivot offset.
+    asset.nodes[1].scale = Vec3{.01f,.01f,.01f};
+    evaluate_pose(asset, -1, 0, pose); apply_part_effects(asset, layer, 0, pose.nodeWorld, opacity);
+    AUREA_CHECK_NEAR(pose.nodeWorld[1].col[3].x, 1, 1e-5);
+    AUREA_CHECK_NEAR(pose.nodeWorld[1].col[3].y, -1, 1e-5);
+    asset.nodes[1].scale = Vec3{1,1,1};
+    // Changing the pivot changes the rotation centre, including descendants.
+    effect.params[8].constant = ParamValue::scalar(0);
+    evaluate_pose(asset, -1, 0, pose); apply_part_effects(asset, layer, 0, pose.nodeWorld, opacity);
+    AUREA_CHECK(pose.nodeWorld[1].transform_point(Vec3{}).length() < 1e-5);
+    // The eight original slots retain their defaults in older projects.
+    effect.params.resize(8); effect.params[6].constant = ParamValue::scalar(0);
+    evaluate_pose(asset, -1, 0, pose); apply_part_effects(asset, layer, 0, pose.nodeWorld, opacity);
+    AUREA_CHECK_NEAR(pose.nodeWorld[2].col[3].y, 2, 1e-5);
+}

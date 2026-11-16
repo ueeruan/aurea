@@ -40,6 +40,8 @@
     <string name="hyper_continue">जारी रखें</string>
     <string name="hyper_creating_project">प्रोजेक्ट बनाया जा रहा है…</string>
     <string name="hyper_effect_locked">AureaHyper: सशुल्क सुविधा, इस खाते के लिए लॉक है</string>
+    <string name="text3d_locked">3D टेक्स्ट AureaHyper का हिस्सा है: बनाने के लिए अनलॉक करें</string>
+    <string name="text3d_locked_existing">3D टेक्स्ट (AureaHyper): यह टेक्स्ट प्रोजेक्ट में रहता है और सामान्य रूप से एक्सपोर्ट होता है; नया बनाने के लिए एक्सेस चाहिए</string>
     <string name="hyper_error_project">वीडियो तैयार हो गया, लेकिन प्रोजेक्ट नहीं बन सका। फिर से कोशिश करें।</string>
     <string name="hyper_error_result">वीडियो तैयार हो गया, लेकिन उसे पढ़ा नहीं जा सका। फिर से कोशिश करें।</string>
     <string name="hyper_error_video">यह वीडियो खोला नहीं जा सका। कोई दूसरी फ़ाइल आज़माएँ।</string>

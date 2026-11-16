@@ -101,7 +101,7 @@ import UIKit
             },
             "markerCount": model.markerFrames.count,
             "missingAssets": model.engine.lastLoadMissingAssets,
-            "curveKeys": (primary.flatMap { model.keyframes[$0] } ?? []).map {
+            "curveKeys": (primary.flatMap { model.keysForLayer($0) } ?? []).map {
                 ["property": Int($0.property), "time": Int($0.time), "interpolation": Int($0.interpolation),
                  "value": Double($0.value)] as [String: Any]
             },

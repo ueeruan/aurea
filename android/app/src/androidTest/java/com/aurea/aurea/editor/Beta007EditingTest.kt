@@ -37,8 +37,10 @@ class Beta007EditingTest {
         compose.waitUntil(5000) { store.textStyle != null }
         compose.runOnIdle { store.setTextContent("AAAA"); store.setTextSize(64f); store.setTextColor(1f, 0f, 0f, 1f) }
         val id = checkNotNull(store.primary)
-        compose.onNodeWithTag("layer.panel.colorFill").performClick()
-        compose.onNodeWithTag("text.tab.layout").performClick()
+        // Funções (F4): espaçamento mora em Layout do texto (Editar texto › Layout do texto).
+        compose.onNodeWithTag("layer.panel.edit").performClick()
+        compose.onNodeWithTag("text.layout.link").performScrollTo().performClick()
+        compose.onNodeWithTag("textLayout.tab.spacing").performClick()
         compose.onNodeWithTag("text.tracking.key").performScrollTo()
         // O rótulo escolhe a propriedade; o ◆ da coluna marca o keyframe.
         compose.runOnIdle { store.timelineFocus = listOf(com.aurea.aurea.engine.TrackKey(29)) }

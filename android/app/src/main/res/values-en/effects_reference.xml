@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="fx_ref_radial_wipe_name">Radial Wipe</string>
+    <string name="fx_ref_radial_wipe_desc">Reveals or hides the image clockwise, counterclockwise or in both directions, with feathered edges.</string>
+    <string name="fx_ref_clockwise">Clockwise</string>
+    <string name="fx_ref_counterclockwise">Counterclockwise</string>
+    <string name="fx_ref_block_name">Block Dissolve</string>
+    <string name="fx_ref_block_desc">Removes image blocks with controls for size, feather and soft edges.</string>
+    <string name="fx_ref_soft_edges">Soft edges</string>
+    <string name="fx_ref_left_locked">Left locked</string>
+    <string name="fx_ref_right_locked">Right locked</string>
+    <string name="fx_ref_top_locked">Top locked</string>
+    <string name="fx_ref_bottom_locked">Bottom locked</string>
+    <string name="fx_ref_fast_blur_name">Fast Blur</string>
+</resources>

@@ -8,6 +8,7 @@
 
 #include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/plugins/Plugin.hpp"
+#include "aurea/plugins/AudioDsp.hpp"
 #include "aurea/render/RuntimeShaders.hpp"
 #include "PluginExpr.hpp"
 
@@ -115,6 +116,7 @@ using PluginImages = std::vector<std::shared_ptr<const PluginImage>>;
                                                          PluginImages images = {}, std::string frameSource = {});
 /// O efeito de um plugin "stack".
 [[nodiscard]] std::unique_ptr<Effect> make_stack_effect(const Manifest& m, std::vector<CompiledStackStep> steps);
+[[nodiscard]] std::unique_ptr<Effect> make_audio_effect(const Manifest& m, std::shared_ptr<const AudioProgram> program);
 
 /// A chave do efeito ("plugin.<id>").
 [[nodiscard]] inline std::string effect_key(std::string_view id) { return std::string(kEffectKeyPrefix) + std::string(id); }

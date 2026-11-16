@@ -87,7 +87,7 @@ internal object ColorFillStage {
     var dragging by mutableIntStateOf(0)
 }
 
-private enum class FillKind(val id: String) { None("none"), Color("color"), Gradient("gradient"), Media("media"), Original("original") }
+private enum class FillKind(val id: String) { None("none"), Color("color"), Gradient("gradient"), Media("media"), Original("original"), Texture("texture") }
 
 /** Trilhas da cor do preenchimento (ShapeParam 32..35) e do degradê (36..47). */
 private val FillColorKeys: List<TrackKey> = (32..35).map { TrackKey(TrackProperty.SHAPE_PARAM, 0, it) }
@@ -108,8 +108,13 @@ internal fun ColorFillPanel(env: PanelEnv) {
     val isVector = store.isVectorLayer
     val tabs: List<FillKind> = when {
         fill != null -> listOf(FillKind.None, FillKind.Color, FillKind.Gradient)
-        isText -> listOf(FillKind.Color)
+        // Funções (F4): a TEXTURA do texto saiu das Opções de texto e mora aqui.
+        isText -> listOf(FillKind.Color, FillKind.Texture)
         else -> listOf(FillKind.Original)
+    }
+    // Texto: Cor ou Textura é escolha da tela (a textura tem o próprio interruptor).
+    var textKind by androidx.compose.runtime.saveable.rememberSaveable(store.primary) {
+        mutableStateOf(if ((store.textTexture?.getOrNull(0) ?: 0f) >= 0.5f) FillKind.Texture.id else FillKind.Color.id)
     }
     val kind = when {
         fill != null -> when {
@@ -117,7 +122,7 @@ internal fun ColorFillPanel(env: PanelEnv) {
             fill[0] >= 0.5f -> FillKind.Gradient
             else -> FillKind.Color
         }
-        isText -> FillKind.Color
+        isText -> if (textKind == FillKind.Texture.id) FillKind.Texture else FillKind.Color
         else -> FillKind.Original
     }
 
@@ -181,8 +186,9 @@ internal fun ColorFillPanel(env: PanelEnv) {
         FillTypeBar(tabs, kind, enabled = store.eyedropper == null) { k ->
             when (k) {
                 FillKind.None -> store.setShapeFillMode(0)
-                FillKind.Color -> if (fill != null) store.setShapeFillMode(1) else Unit
+                FillKind.Color -> if (fill != null) store.setShapeFillMode(1) else textKind = FillKind.Color.id
                 FillKind.Gradient -> store.setShapeFillMode(2)
+                FillKind.Texture -> textKind = FillKind.Texture.id
                 FillKind.Media, FillKind.Original -> Unit
             }
         }
@@ -221,6 +227,7 @@ internal fun ColorFillPanel(env: PanelEnv) {
                     )
                 }
                 FillKind.Gradient -> if (fill != null) GradientContent(env, fill) else Unit
+                FillKind.Texture -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) { TextTextureSection(env) }
                 FillKind.Media -> Unit
             }
         }
@@ -258,6 +265,7 @@ private fun fillGlyph(k: FillKind): Char = when (k) {
     FillKind.Gradient -> CupertinoGlyph.CircleLefthalfFill
     FillKind.Media -> CupertinoGlyph.Photo
     FillKind.Original -> CupertinoGlyph.Paintbrush
+    FillKind.Texture -> CupertinoGlyph.SquareGrid2x2
 }
 
 @Composable
@@ -268,6 +276,7 @@ private fun fillLabel(k: FillKind): String = stringResource(
         FillKind.Gradient -> R.string.om_ap_fill_gradient
         FillKind.Media -> R.string.om_ap_fill_media
         FillKind.Original -> R.string.om_ap_fill_original
+        FillKind.Texture -> R.string.tex_section
     },
 )
 
@@ -360,7 +369,7 @@ private fun OriginalContent(env: PanelEnv, isGroup: Boolean, isVector: Boolean) 
                         val id = store.primary
                         when {
                             isGroup && id != null -> store.openPrecomp(id)
-                            !isGroup -> env.onOpenPanel(EditorPanel.Vector)
+                            !isGroup -> env.onOpenPanel(EditorPanel.VectorFill)
                             else -> Unit
                         }
                     },

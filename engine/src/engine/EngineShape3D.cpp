@@ -135,6 +135,7 @@ Result<u64> Engine::layer_to_3d_object(u64 layerId, const char* name) noexcept {
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         drain_commands_locked();
+        InlineEditScope inlineScope(*this, layerId, true);
         Composition* comp = project_ ? current_composition() : nullptr;
         const Layer* src = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
         if (!src) return Status{Errc::NotFound, "camada nao existe"};
@@ -203,6 +204,7 @@ Result<u64> Engine::layer_to_image3d(u64 layerId, const std::string& imagePath, 
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         drain_commands_locked();
+        InlineEditScope inlineScope(*this, layerId, true);
         Composition* comp = project_ ? current_composition() : nullptr;
         const Layer* src = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
         if (!src) return Status{Errc::NotFound, "camada nao existe"};
@@ -258,6 +260,7 @@ Status Engine::set_shape3d(u64 layerId, const scene3d::Shape3DSpec& in) noexcept
     u64 session = 0, room = 0; CompositionId composition; AssetId previous;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
+        InlineEditScope inlineScope(*this, layerId, true);
         const Layer* layer = project_ ? shape_layer(current_composition(), layerId) : nullptr;
         if (!layer) return Errc::InvalidArgument;
         session = projectSession_; composition = project_->timeline().current(); previous = layer->model.scene;
@@ -296,6 +299,7 @@ Status Engine::set_shape3d(u64 layerId, const scene3d::Shape3DSpec& in) noexcept
 
 bool Engine::query_shape3d(u64 layerId, scene3d::Shape3DSpec& out) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = shape_layer(comp, layerId);
     const Asset* a = l ? project_->asset(l->model.scene) : nullptr;
@@ -321,6 +325,7 @@ Status Engine::set_shape3d_part_style(u64 layerId, i32 part, const f32* rgba, co
 
 u32 Engine::query_shape3d_parts(u64 layerId, f32* out, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = shape_layer(comp, layerId);
     if (!l) return 0;
@@ -330,7 +335,7 @@ u32 Engine::query_shape3d_parts(u64 layerId, f32* out, u32 capacity) noexcept {
     const u32 parts = static_cast<u32>(std::min<usize>(asset.nodes.size(), scene3d::kShape3DMaxParts));
     const u32 need = parts * kShapePartFloats;
     if (!out || capacity < need) return need;
-    const FrameIndex now = playback_.current();
+    const FrameIndex now = editing_frame_locked();
     const FrameIndex local = l->local_time(now);
     const Mat4 world = layer_world_3d(*comp, *l, now) * layer_from_shape(l->model);
     const Mat4 vp = sceneEditor_.enabled ? scene_editor_projection(comp->width(), comp->height(), sceneEditor_)
@@ -366,12 +371,13 @@ bool Engine::set_shape3d_part(u64 layerId, u32 part, const f32* values, u32 mask
     mask &= (1u << scene3d::kShape3DChannels) - 1u;
     if (!mask) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = shape_layer(comp, layerId);
     if (!l || l->locked) return false;
     const auto it = models_.find(l->model.scene.pack());
     if (it == models_.end() || !it->second || !it->second->shapeParts || part >= it->second->nodes.size()) return false;
-    const FrameIndex now = playback_.current();
+    const FrameIndex now = editing_frame_locked();
     const FrameIndex local = l->local_time(now);
     const bool inside = l->contains_time(now);
     for (u32 c = 0; c < scene3d::kShape3DChannels; ++c) {
@@ -397,12 +403,13 @@ bool Engine::set_shape3d_part(u64 layerId, u32 part, const f32* values, u32 mask
 i32 Engine::toggle_shape3d_part_key(u64 layerId, u32 part) noexcept {
     if (part >= scene3d::kShape3DMaxParts) return -1;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = shape_layer(comp, layerId);
     if (!l || l->locked) return -1;
     const auto it = models_.find(l->model.scene.pack());
     if (it == models_.end() || !it->second || !it->second->shapeParts || part >= it->second->nodes.size()) return -1;
-    const FrameIndex now = playback_.current();
+    const FrameIndex now = editing_frame_locked();
     if (!l->contains_time(now)) return -1;
     const FrameIndex local = l->local_time(now);
     bool any = false;
@@ -434,6 +441,7 @@ i32 Engine::toggle_shape3d_part_key(u64 layerId, u32 part) noexcept {
 
 bool Engine::reset_shape3d_part(u64 layerId, i32 part) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = shape_layer(comp, layerId);
     if (!l || l->locked) return false;
@@ -455,13 +463,14 @@ bool Engine::reset_shape3d_part(u64 layerId, i32 part) noexcept {
 
 bool Engine::query_shape3d_part_gizmo(u64 layerId, u32 part, f32 length, f32* out, bool localSpace) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = shape_layer(comp, layerId);
     if (!l || !out || !std::isfinite(length)) return false;
     const auto it = models_.find(l->model.scene.pack());
     if (it == models_.end() || !it->second || !it->second->shapeParts || part >= it->second->nodes.size()) return false;
     const scene3d::SceneAsset& asset = *it->second;
-    const FrameIndex now = playback_.current();
+    const FrameIndex now = editing_frame_locked();
     const FrameIndex local = l->local_time(now);
     f32 c[scene3d::kShape3DChannels];
     part_channels(*l, part, local, c);
@@ -493,10 +502,11 @@ bool Engine::query_shape3d_part_gizmo(u64 layerId, u32 part, f32 length, f32* ou
 
 bool Engine::shape3d_part_move(u64 layerId, u32 part, u32 axis, f32 amount, f32* out) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = shape_layer(comp, layerId);
     if (!l || !out || axis > 5 || !std::isfinite(amount) || part >= scene3d::kShape3DMaxParts) return false;
-    const FrameIndex now = playback_.current();
+    const FrameIndex now = editing_frame_locked();
     const FrameIndex local = l->local_time(now);
     f32 c[scene3d::kShape3DChannels];
     part_channels(*l, part, local, c);
@@ -571,6 +581,7 @@ Result<u64> Engine::split_shape3d(u64 layerId, u32 axis, u32 count, std::vector<
     // A fila vem ANTES (como em add_null): um desfazer ainda na fila rodaria
     // depois deste passo e desmancharia o grupo pela metade.
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = current_composition();
     const LayerId groupId = LayerId::unpack(layerId);
     Layer* orig = shape_layer(comp, layerId);
@@ -659,6 +670,7 @@ Result<u64> Engine::split_shape3d(u64 layerId, u32 axis, u32 count, std::vector<
 // =============================================================================
 bool Engine::set_model_interior(u64 layerId, bool on) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = shape_layer(comp, layerId);
     if (!l) return false;
@@ -674,6 +686,7 @@ bool Engine::set_model_interior(u64 layerId, bool on) noexcept {
 
 i32 Engine::query_model_interior(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     const Layer* l = project_ ? shape_layer(current_composition(), layerId) : nullptr;
     if (!l) return -1;
     const auto found = models_.find(l->model.scene.pack());
@@ -691,6 +704,7 @@ bool Engine::material_preview(u64 layerId, u32 material, u32 size, std::vector<u
     scene3d::MaterialBall ball;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
+        InlineEditScope inlineScope(*this, layerId);
         const Layer* layer = project_ ? shape_layer(current_composition(), layerId) : nullptr;
         if (!layer) return false;
         const auto found = models_.find(layer->model.scene.pack());
@@ -720,7 +734,7 @@ bool Engine::material_preview(u64 layerId, u32 material, u32 size, std::vector<u
             }
             break;
         }
-        const auto local = layer->local_time(playback_.current());
+        const auto local = layer->local_time(editing_frame_locked());
         for (u32 p = 0; p < 6; ++p) {
             if (const Track* track = layer->tracks.find(TrackProperty::MaterialParam, material, p)) {
                 fields[p] = track->value_or(local, fields[p]);
@@ -735,6 +749,23 @@ bool Engine::material_preview(u64 layerId, u32 material, u32 size, std::vector<u
         if ((mask & 8u) && ball.alphaMode == scene3d::AlphaMode::Opaque && ball.baseColor.w < 1.0f)
             ball.alphaMode = scene3d::AlphaMode::Blend;
         if (mask & 48u) ball.unlit = false;
+        // v76: a EMISSÃO ajustada (cor e força) também acende a bola.
+        const scene3d::Material& src = asset->materials[material];
+        f32 glow[4]{src.emissive.x, src.emissive.y, src.emissive.z, src.emissiveStrength};
+        bool glowEdited = false;
+        for (const MaterialOverride& over : layer->model.materials) {
+            if (over.materialIndex != material) continue;
+            for (u32 p = 6; p < kMaterialParamCount; ++p)
+                if (over.mask & (1u << p)) { glow[p - 6] = material_override_field(over, p); glowEdited = true; }
+            break;
+        }
+        for (u32 p = 6; p < kMaterialParamCount; ++p)
+            if (const Track* track = layer->tracks.find(TrackProperty::MaterialParam, material, p)) {
+                glow[p - 6] = track->value_or(local, glow[p - 6]);
+                glowEdited = true;
+            }
+        if (glowEdited)
+            ball.emissive = Vec3{glow[0], glow[1], glow[2]} * std::clamp(glow[3], 0.0f, kMaterialEmissionMax);
     }
     out = scene3d::material_ball_cached(ball, size);
     return !out.empty();
@@ -745,6 +776,119 @@ bool Engine::apply_text3d_preset(u64 layerId, u32 preset) noexcept {
     if (!query_text3d(layerId, spec) || !scene3d::apply_text3d_material_preset(spec, preset)) return false;
     light_metal_preset(layerId, preset);
     return set_text3d(layerId, spec).ok();
+}
+
+// -----------------------------------------------------------------------------
+// 0.5.4 Cartoon: o contorno com keyframe (TrackProperty::Text3DOutline).
+// Parado = a receita (Text3DSpec::outlineWidth/outlineColor); com keyframe na
+// trilha, o valor no cabeçote é o keyframe (a regra das outras propriedades).
+// -----------------------------------------------------------------------------
+namespace {
+f32 text3d_outline_static(const scene3d::Text3DSpec& s, u32 p) noexcept {
+    return p == 0 ? s.outlineWidth : p == 1 ? s.outlineColor.x : p == 2 ? s.outlineColor.y : s.outlineColor.z;
+}
+f32 text3d_outline_max(u32 p) noexcept { return p == 0 ? scene3d::kText3DOutlineMaxWidth : 1.0f; }
+} // namespace
+
+bool Engine::query_text3d_outline(u64 layerId, f32* out) noexcept {
+    if (!out) return false;
+    scene3d::Text3DSpec spec;
+    if (!query_text3d(layerId, spec) || spec.style != scene3d::kText3DStyleCartoon) return false;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l) return false;
+    const FrameIndex local = l->local_time(editing_frame_locked());
+    f32 keyed[2]{0.0f, 0.0f};
+    for (u32 p = 0; p < 4; ++p) {
+        f32 v = text3d_outline_static(spec, p);
+        if (const Track* t = l->tracks.find(TrackProperty::Text3DOutline, kInvalidIndex, p); t && !t->keys.empty()) {
+            v = t->value_or(local, v);
+            f32& k = keyed[p == 0 ? 0 : 1];
+            k = std::max(k, t->find_exact(local) != kInvalidIndex ? 2.0f : 1.0f);
+        }
+        out[p] = std::clamp(v, 0.0f, text3d_outline_max(p));
+    }
+    out[4] = keyed[0];
+    out[5] = keyed[1];
+    return true;
+}
+
+bool Engine::set_text3d_outline(u64 layerId, u32 param, f32 value) noexcept {
+    if (param > 3 || !std::isfinite(value)) return false;
+    const f32 v = std::clamp(value, 0.0f, text3d_outline_max(param));
+    scene3d::Text3DSpec spec;
+    if (!query_text3d(layerId, spec) || spec.style != scene3d::kText3DStyleCartoon) return false;
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        drain_commands_locked();
+        InlineEditScope inlineScope(*this, layerId, true);
+        Composition* comp = project_ ? current_composition() : nullptr;
+        Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+        if (!l || l->locked) return false;
+        Track* t = l->tracks.find(TrackProperty::Text3DOutline, kInvalidIndex, param);
+        if (t && t->has_expression()) return false;
+        if (t && !t->keys.empty()) {
+            // Com keyframe: o valor vira (ou troca) o keyframe no cabeçote.
+            const FrameIndex local = l->local_time(editing_frame_locked());
+            history_.before_mutation(*comp, project_->timeline().current(), "contorno do texto 3D");
+            if (const u32 at = t->find_exact(local); at != kInvalidIndex) t->keys[at].value = v;
+            else (void)t->set(local, v, Interpolation::Linear);
+            bump_model_revision_locked();
+            comp->touch();
+            project_->mark_dirty();
+            request_render();
+            return true;
+        }
+    }
+    // Sem keyframe: a receita (malha em cache; só o material muda).
+    if (param == 0) spec.outlineWidth = v;
+    else if (param == 1) spec.outlineColor.x = v;
+    else if (param == 2) spec.outlineColor.y = v;
+    else spec.outlineColor.z = v;
+    return set_text3d(layerId, spec).ok();
+}
+
+bool Engine::toggle_text3d_outline_key(u64 layerId, u32 group) noexcept {
+    if (group > 1) return false;
+    scene3d::Text3DSpec spec;
+    if (!query_text3d(layerId, spec) || spec.style != scene3d::kText3DStyleCartoon) return false;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->locked) return false;
+    const u32 first = group == 0 ? 0u : 1u, last = group == 0 ? 0u : 3u;
+    const FrameIndex local = l->local_time(editing_frame_locked());
+    bool keyHere = false;
+    for (u32 p = first; p <= last; ++p) {
+        const Track* t = l->tracks.find(TrackProperty::Text3DOutline, kInvalidIndex, p);
+        if (t && t->has_expression()) return false;
+        keyHere = keyHere || (t && t->find_exact(local) != kInvalidIndex);
+    }
+    history_.before_mutation(*comp, project_->timeline().current(),
+                             keyHere ? "tirar keyframe do contorno" : "keyframe do contorno");
+    for (u32 p = first; p <= last; ++p) {
+        Track* t = l->tracks.find(TrackProperty::Text3DOutline, kInvalidIndex, p);
+        if (keyHere) {
+            if (t) (void)t->remove(local);
+        } else {
+            // O valor do keyframe novo = o que a prévia mostra ali.
+            const f32 v = t && !t->keys.empty() ? t->value_or(local, text3d_outline_static(spec, p)) : text3d_outline_static(spec, p);
+            Track& nt = l->tracks.get_or_create(TrackProperty::Text3DOutline, kInvalidIndex, p);
+            nt.staticValue = text3d_outline_static(spec, p);
+            (void)nt.set(local, std::clamp(v, 0.0f, text3d_outline_max(p)), Interpolation::Linear);
+        }
+    }
+    // Trilha sem keyframe some (o valor parado volta a ser o da receita).
+    l->tracks.remove_if([](const Track& t) { return t.property == TrackProperty::Text3DOutline && t.keys.empty() && !t.has_expression(); });
+    bump_model_revision_locked();
+    comp->touch();
+    project_->mark_dirty();
+    request_render();
+    return true;
 }
 
 bool Engine::apply_image3d_preset(u64 layerId, u32 preset) noexcept {
@@ -759,6 +903,7 @@ void Engine::light_metal_preset(u64 layerId, u32 preset) noexcept {
     bool bare = false;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
+        InlineEditScope inlineScope(*this, layerId, true);
         const Composition* comp = project_ ? current_composition() : nullptr;
         const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
         // Sem estúdio, sem HDRI da cena e sem ambiente próprio do objeto.

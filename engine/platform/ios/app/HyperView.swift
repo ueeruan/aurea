@@ -164,6 +164,17 @@ struct HyperLockedPanel: View {
     }
 }
 
+/// 0.5.4: o cadeado de um recurso pago sem o acesso fora do navegador de efeitos (Texto 3D);
+/// o mesmo desenho do selo dos efeitos Hyper (EffectsBrowser.swift). Par de HyperLockBadge (Android).
+struct HyperLockBadge: View {
+    var body: some View {
+        Image(systemName: "lock").font(.system(size: 10, weight: AureaIconStyle.symbol)).foregroundStyle(AureaColors.accent)
+            .frame(width: 20, height: 20).background(AureaColors.imageScrim, in: Circle())
+            .accessibilityLabel(AureaText.t("hyper_effect_locked"))
+            .accessibilityIdentifier("effects.hyper.cadeado")
+    }
+}
+
 /// A folha que o editor abre ao tocar num efeito Hyper sem o acesso.
 struct HyperLockedSheet: View {
     @EnvironmentObject private var conta: ContaModel

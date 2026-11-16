@@ -86,13 +86,13 @@ class CompactTransportClipboardTest {
         fun openClipboard() {
             val back = compose.onAllNodesWithContentDescription(context.getString(R.string.pn_back_to_layer_tools))
             if (back.fetchSemanticsNodes().isNotEmpty()) back.onFirst().performClick()
-            compose.onNodeWithContentDescription(context.getString(R.string.editor_mais_acoes_camada)).performClick()
+            compose.onNodeWithTag("transport.copyPaste").performClick()
         }
         openClipboard()
-        compose.onNodeWithText(context.getString(R.string.editor_copiar_camada)).performScrollTo().performClick()
+        compose.onNodeWithTag("copyPaste.copy").performScrollTo().performClick()
         compose.waitUntil(5000) { store.clipboard and 1 != 0 }
         openClipboard()
-        compose.onNodeWithText(context.getString(R.string.editor_colar_camada_cabecote)).performScrollTo().performClick()
+        compose.onNodeWithTag("copyPaste.paste").performScrollTo().performClick()
         compose.waitUntil(10000) { store.layers.size == 2 }
         assertTrue(store.layers.any { it.id == original })
         assertEquals(2, store.layers.map { it.id }.toSet().size)

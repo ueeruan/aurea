@@ -1,14 +1,16 @@
 // =============================================================================
 //  Aurea / vector / Vector.cpp
 //
-//  Caminhos bezier, achatamento adaptativo, aparar, tracejado, contorno por
-//  peças unidas, avaliação dos valores animados, a malha para a GPU e o ajuste
+//  Caminhos bezier, achatamento adaptativo, aparar, tracejado, contorno em
+//  anéis, avaliação dos valores animados, a malha para a GPU e o ajuste
 //  de curva do desenho à mão livre. O recorte mora em Clipper.cpp; o SVG em
 //  Svg.cpp.
 // =============================================================================
 #include "aurea/vector/Vector.hpp"
+#include "aurea/vector/VectorTree.hpp"
 
 #include "aurea/animation/Curve.hpp"
+#include "aurea/timeline/PathRig.hpp"   // lote M: vértices ligados a outra camada
 #include "aurea/scene3d/Text3D.hpp"
 
 #include <algorithm>
@@ -496,7 +498,7 @@ void dash(std::vector<Contour>& contours, const std::vector<f32>& pattern, f32 o
 }
 
 // =============================================================================
-// Contorno: peças por segmento + juntas + pontas, unidas em não-zero
+// Contorno: os dois lados de cada caminho num anel, resolvido em não-zero
 // =============================================================================
 namespace {
 void push_piece(std::vector<Contour>& pieces, std::vector<Vec2> pts) {
@@ -540,15 +542,64 @@ f32 taper_factor(const StrokeTaper& t, f32 u) noexcept {
     return f;
 }
 
+namespace {
+/// Junta do lado de FORA no vértice `v`: de A (fim da faixa do segmento que
+/// chega) a B (começo da faixa do que sai), os dois inclusive, na ordem do
+/// caminho. `phi` = virada assinada (a normal gira junto com a direção), o
+/// que também acerta o lado do arco numa volta exata de 180°.
+void outer_join(Vec2 v, Vec2 A, Vec2 B, Vec2 n0, Vec2 n1, f32 hw, f32 phi, u8 join, f32 miterLimit, f32 tol,
+                std::vector<Vec2>& out) {
+    if (join == 1) {
+        const usize first = out.size();
+        const f32 a0 = std::atan2(n0.y, n0.x);
+        arc_points(v, hw, a0, a0 + phi, tol, out);
+        out[first] = A;   // as pontas exatas (o arco em f32 erra um fio)
+        out.back() = B;
+        return;
+    }
+    out.push_back(A);
+    const Vec2 bis = (n0 + n1).normalized();
+    const f32 cosHalf = bis.dot(n0);
+    if (join == 0 && cosHalf > 1e-4f && 1.0f / cosHalf <= std::max(1.0f, miterLimit)) out.push_back(v + bis * (hw / cosHalf));
+    out.push_back(B);
+}
+
+/// Pontos de DENTRO da ponta em `p` (sem as duas quinas, que já estão no
+/// contorno): de p + nn a p − nn passando por fora (`d` aponta para fora).
+void cap_points(Vec2 p, Vec2 d, Vec2 nn, f32 hw, u8 cap, f32 tol, std::vector<Vec2>& out) {
+    if (cap == 0 || hw <= 1e-4f) return;
+    if (cap == 2) {
+        out.push_back(p + nn + d * hw);
+        out.push_back(p - nn + d * hw);
+        return;
+    }
+    std::vector<Vec2> arc;
+    const f32 a0 = std::atan2(nn.y, nn.x);
+    arc_points(p, hw, a0, a0 - kPi, tol, arc);
+    for (usize i = 1; i + 1 < arc.size(); ++i) out.push_back(arc[i]);
+}
+} // namespace
+
+// O contorno de cada caminho sai como UM anel (aberto: lado esquerdo, ponta,
+// lado direito de volta, ponta) ou DOIS (fechado: os dois lados), resolvidos
+// juntos uma vez em não-zero. É a soma, como cadeia, das bordas das peças de
+// sempre (faixa por segmento, junta, ponta): os raios entre faixas vizinhas se
+// cancelam, a junta fica do lado de fora e o lado de dentro da virada passa
+// pelo vértice. O enrolamento de cada ponto = quantas peças o cobrem, então o
+// não-zero dá exatamente a união das peças — sem unir milhares de peças no
+// arranjo (um retângulo com os sete operadores passava de 2 minutos).
 void stroke_to_rings(const std::vector<Contour>& contours, f32 width, u8 cap, u8 join, f32 miterLimit, f32 tolerance,
                      std::vector<Contour>& out, const StrokeTaper& taper, const std::vector<Vec2>* ranges) {
     out.clear();
     const f32 hw0 = width * 0.5f;
     if (hw0 <= 0.0f) return;
     const f32 tol = std::max(0.01f, tolerance);
+    const ClipToleranceScope scale(tol);   // o passo do recorte por amostragem, se o contorno passar do orçamento
     const bool tapered = taper.active();
-    std::vector<Contour> pieces;
-    std::vector<f32> H;   // meia largura em cada vértice (constante sem afinar)
+    std::vector<Contour> rings;
+    std::vector<f32> H;              // meia largura em cada vértice (constante sem afinar)
+    std::vector<Vec2> D, N;          // direção e normal esquerda de cada segmento
+    std::vector<Vec2> left, right;   // os dois lados, no sentido do caminho
     for (usize ci = 0; ci < contours.size(); ++ci) {
         const Contour& src = contours[ci];
         // Trecho do caminho de origem que este contorno cobre (inteiro sem `ranges`).
@@ -586,68 +637,105 @@ void stroke_to_rings(const std::vector<Contour>& contours, f32 width, u8 cap, u8
         if (P.size() == 1) {
             // Ponto isolado: só a ponta (redonda = círculo, quadrada = quadrado).
             const f32 hw = hw0;
-            if (cap == 1) { std::vector<Vec2> c; arc_points(P[0], hw, 0.0f, 2.0f * kPi, tol, c); c.pop_back(); push_piece(pieces, c); }
-            else if (cap == 2) push_piece(pieces, {P[0] + Vec2{-hw, -hw}, P[0] + Vec2{hw, -hw}, P[0] + Vec2{hw, hw}, P[0] + Vec2{-hw, hw}});
+            if (cap == 1) { std::vector<Vec2> c; arc_points(P[0], hw, 0.0f, 2.0f * kPi, tol, c); c.pop_back(); push_piece(rings, c); }
+            else if (cap == 2) push_piece(rings, {P[0] + Vec2{-hw, -hw}, P[0] + Vec2{hw, -hw}, P[0] + Vec2{hw, hw}, P[0] + Vec2{-hw, hw}});
             continue;
         }
         if (P.size() < 2) continue;
         const usize n = P.size();
         const usize segs = closed ? n : n - 1;
+        D.resize(segs);
+        N.resize(segs);
         for (usize i = 0; i < segs; ++i) {
-            const Vec2 a = P[i], b = P[(i + 1) % n];
-            const Vec2 d = (b - a).normalized();
-            const Vec2 na = left_normal(d) * H[i], nb = left_normal(d) * H[(i + 1) % n];
-            push_piece(pieces, {a + na, b + nb, b - nb, a - na});
+            D[i] = (P[(i + 1) % n] - P[i]).normalized();
+            N[i] = left_normal(D[i]);
         }
-        // Juntas.
-        const usize first = closed ? 0 : 1, last = closed ? n : n - 1;
-        for (usize i = first; i < last; ++i) {
-            const Vec2 v = P[i];
-            const f32 hw = H[i];
-            if (hw <= 1e-4f) continue;
-            const Vec2 d0 = (v - P[(i + n - 1) % n]).normalized(), d1 = (P[(i + 1) % n] - v).normalized();
-            const f32 cr = cross2(d0, d1), dt = d0.dot(d1);
-            if (std::fabs(cr) < 1e-6f && dt > 0.0f) continue;   // reto
-            // Lado de fora: à direita numa curva para a esquerda e vice-versa.
-            const f32 side = cr > 0.0f ? -1.0f : 1.0f;
-            const Vec2 n0 = left_normal(d0) * side, n1 = left_normal(d1) * side;
-            const Vec2 A = v + n0 * hw, B = v + n1 * hw;
-            if (join == 1) {
-                std::vector<Vec2> fan{v};
-                f32 a0 = std::atan2(n0.y, n0.x), a1 = std::atan2(n1.y, n1.x);
-                // O arco curto entre as duas normais.
-                while (a1 - a0 > kPi) a1 -= 2.0f * kPi;
-                while (a0 - a1 > kPi) a1 += 2.0f * kPi;
-                arc_points(v, hw, a0, a1, tol, fan);
-                push_piece(pieces, fan);
-            } else {
-                const Vec2 bis = (n0 + n1).normalized();
-                const f32 cosHalf = bis.dot(n0);
-                const bool miter = join == 0 && cosHalf > 1e-4f && 1.0f / cosHalf <= std::max(1.0f, miterLimit);
-                if (miter) push_piece(pieces, {v, A, v + bis * (hw / cosHalf), B});
-                else push_piece(pieces, {v, A, B});
-            }
-        }
-        // Pontas.
-        if (!closed && cap != 0) {
-            for (int end = 0; end < 2; ++end) {
-                const Vec2 p = end == 0 ? P[0] : P[n - 1];
-                const f32 hw = end == 0 ? H[0] : H[n - 1];
-                if (hw <= 1e-4f) continue;
-                const Vec2 d = end == 0 ? (P[0] - P[1]).normalized() : (P[n - 1] - P[n - 2]).normalized();   // para fora
-                const Vec2 nn = left_normal(d) * hw;
-                if (cap == 2) {
-                    push_piece(pieces, {p + nn, p + nn + d * hw, p - nn + d * hw, p - nn});
-                } else {
-                    std::vector<Vec2> fan;
-                    const f32 a0 = std::atan2(nn.y, nn.x);
-                    arc_points(p, hw, a0, a0 - kPi, tol, fan);
-                    push_piece(pieces, fan);
+        left.clear();
+        right.clear();
+        // Lado de DENTRO da virada no vértice v (s = +1 esquerda, −1 direita):
+        // pela soma das peças, o fim da faixa que chega → v → o começo da que
+        // sai. Numa curva suave as duas bordas de dentro se cruzam perto do
+        // vértice; o "losango" entre o cruzamento e o vértice fica dentro das
+        // DUAS faixas (enrolamento ≥ 2), e tirá-lo do contorno não muda o
+        // não-zero. Exigido: o losango cabe na metade final da faixa que chega
+        // e na metade inicial da que sai — losangos de vértices vizinhos nunca
+        // se encostam. Sem isso cada vértice punha duas pontas de meia largura
+        // para dentro, e numa linha toda ondulada elas se cruzavam às centenas
+        // de milhares.
+        auto inner = [&](f32 s, usize i0, usize i1, f32 dt, std::vector<Vec2>& side) {
+            const usize jb = (i1 + 1) % n;
+            const Vec2 a = P[i0], v = P[(i0 + 1) % n], b = P[jb];
+            const f32 ha = H[i0], hw = H[(i0 + 1) % n], hb = H[jb];
+            const Vec2 n0 = N[i0] * s, n1 = N[i1] * s;
+            const Vec2 E0 = v + n0 * hw, S1 = v + n1 * hw;
+            if (dt >= 0.0f) {
+                const Vec2 S0 = a + n0 * ha, E1 = b + n1 * hb;
+                const Vec2 r = E0 - S0, q = E1 - S1;
+                const f32 den = cross2(r, q);
+                const f32 li = (v - a).length(), lj = (b - v).length();
+                // p dentro da faixa do segmento (início o, direção d, meias larguras h0 → h1), na fração [t0, t1].
+                auto in_band = [](Vec2 p, Vec2 o, Vec2 d, Vec2 nn, f32 len, f32 h0, f32 h1, f32 t0, f32 t1) {
+                    const f32 along = (p - o).dot(d);
+                    if (len <= 0.0f || along < t0 * len || along > t1 * len) return false;
+                    return std::fabs((p - o).dot(nn)) <= h0 + (h1 - h0) * (along / len);
+                };
+                if (std::fabs(den) > 1e-12f) {
+                    const f32 u = cross2(S1 - S0, q) / den, w = cross2(S1 - S0, r) / den;
+                    if (u >= 0.5f && u <= 1.0f && w >= 0.0f && w <= 0.5f
+                        && in_band(S1, a, D[i0], N[i0], li, ha, hw, 0.5f, 1.0f)
+                        && in_band(E0, v, D[i1], N[i1], lj, hw, hb, 0.0f, 0.5f)) {
+                        side.push_back(S0 + r * u);
+                        return;
+                    }
                 }
             }
+            side.insert(side.end(), {E0, v, S1});
+        };
+        // Vértice j entre o segmento i0 (chega) e i1 (sai): do fim da faixa de
+        // i0 ao começo da de i1, nos dois lados.
+        auto vertex = [&](usize j, usize i0, usize i1) {
+            const Vec2 v = P[j];
+            const f32 hw = H[j];
+            const Vec2 Le = v + N[i0] * hw, Ls = v + N[i1] * hw, Re = v - N[i0] * hw, Rs = v - N[i1] * hw;
+            const f32 cr = cross2(D[i0], D[i1]), dt = D[i0].dot(D[i1]);
+            if (hw <= 1e-4f) {   // sem junta: os dois lados passam pelo vértice
+                left.insert(left.end(), {Le, v, Ls});
+                right.insert(right.end(), {Re, v, Rs});
+            } else if (std::fabs(cr) < 1e-6f && dt > 0.0f) {   // reto
+                left.insert(left.end(), {Le, Ls});
+                right.insert(right.end(), {Re, Rs});
+            } else if (cr > 0.0f) {   // vira à esquerda: a junta fica à direita
+                const f32 phi = std::atan2(std::fabs(cr), dt);
+                inner(1.0f, i0, i1, dt, left);
+                outer_join(v, Re, Rs, -N[i0], -N[i1], hw, phi, join, miterLimit, tol, right);
+            } else {                  // à direita (ou volta exata): a junta fica à esquerda
+                const f32 phi = -std::atan2(std::fabs(cr), dt);
+                outer_join(v, Le, Ls, N[i0], N[i1], hw, phi, join, miterLimit, tol, left);
+                inner(-1.0f, i0, i1, dt, right);
+            }
+        };
+        if (closed) {
+            for (usize j = 0; j < n; ++j) vertex(j, (j + n - 1) % n, j);
+            // Enrolamento positivo, como as peças: o lado esquerdo de volta, o direito de ida.
+            rings.push_back(Contour{std::vector<Vec2>(left.rbegin(), left.rend()), true});
+            rings.push_back(Contour{right, true});
+            continue;
         }
+        left.push_back(P[0] + N[0] * H[0]);
+        right.push_back(P[0] - N[0] * H[0]);
+        for (usize j = 1; j + 1 < n; ++j) vertex(j, j - 1, j);
+        left.push_back(P[n - 1] + N[segs - 1] * H[n - 1]);
+        right.push_back(P[n - 1] - N[segs - 1] * H[n - 1]);
+        std::vector<Vec2> r;
+        r.reserve(left.size() + right.size() + 16);
+        r = left;
+        cap_points(P[n - 1], D[segs - 1], N[segs - 1] * H[n - 1], H[n - 1], cap, tol, r);
+        r.insert(r.end(), right.rbegin(), right.rend());
+        cap_points(P[0], -D[0], N[0] * -H[0], H[0], cap, tol, r);
+        std::reverse(r.begin(), r.end());   // enrolamento positivo, como as peças
+        rings.push_back(Contour{std::move(r), true});
     }
-    resolve_fill(pieces, FillRule::NonZero, out);
+    resolve_fill(rings, FillRule::NonZero, out);
 }
 
 // =============================================================================
@@ -830,6 +918,10 @@ f32* param_ref(VectorGroup& g, u32 p) noexcept {
         case kVecScale: return &g.scale.x;
         case kVecOpacity: return &g.opacity;
         case kVecRepScaleY: return &g.repeater.scaleY;
+        case kVecDash1: case kVecGap1: case kVecDash2: case kVecGap2: case kVecDash3: case kVecGap3: {
+            const usize i = p - kVecDash1;
+            return i < g.stroke.dashes.size() ? &g.stroke.dashes[i] : nullptr;
+        }
         default: break;
     }
     // Operadores de caminho: um bloco de kVecModParams ids por operador.
@@ -849,6 +941,8 @@ f32 clamp_param(u32 p, f32 v) noexcept {
         case kVecRepStartOpacity: case kVecRepEndOpacity: return std::clamp(v, 0.0f, 100.0f);
         case kVecRepCopies: return std::clamp(v, 0.0f, 500.0f);
         case kVecRepScale: case kVecRepScaleY: case kVecScale: return std::clamp(v, -10000.0f, 10000.0f);
+        case kVecDash1: case kVecGap1: case kVecDash2: case kVecGap2: case kVecDash3: case kVecGap3:
+            return std::clamp(v, 0.0f, 100000.0f);
         default: return std::clamp(v, -100000.0f, 100000.0f);
     }
 }
@@ -884,11 +978,22 @@ VectorGroup evaluate_group(const VectorGroup& g, const TrackSet& tracks, u32 gi,
     }
     // Escala do grupo: um valor animável (uniforme) — Y acompanha X.
     if (tracks.find(TrackProperty::VectorParam, gi, kVecScale)) r.scale.y = r.scale.x * (g.scale.x != 0.0f ? g.scale.y / g.scale.x : 1.0f);
+    // Lote M ("Points Follow Nulls"): vértices ligados a outra camada. Só custa
+    // depois que algum caminho vetorial do processo foi ligado.
+    pathrig::apply_vector_drivers(tracks, gi, frame, r);
     return r;
 }
 
 Affine2 group_matrix(const VectorGroup& g) noexcept {
-    return Affine2::translate(g.position) * Affine2::rotate(g.rotation) * Affine2::scale(g.scale * 0.01f) * Affine2::translate(-g.anchor);
+    // O grupo de sempre (sem inclinação): a conta de sempre, bit a bit.
+    if (g.skew == 0.0f || !std::isfinite(g.skew) || !std::isfinite(g.skewAxis))
+        return Affine2::translate(g.position) * Affine2::rotate(g.rotation) * Affine2::scale(g.scale * 0.01f) * Affine2::translate(-g.anchor);
+    // Lote X (transform de grupo do After Effects): T·R·K·S·T(−âncora), com K =
+    // cisalhamento de tan(−inclinação) ao longo do eixo girado por `skewAxis`.
+    const f32 t = std::tan(-std::clamp(g.skew, -85.0f, 85.0f) * kDeg2Rad);
+    const Affine2 shear{1.0f, 0.0f, t, 1.0f, 0.0f, 0.0f};
+    const Affine2 K = Affine2::rotate(g.skewAxis) * shear * Affine2::rotate(-g.skewAxis);
+    return Affine2::translate(g.position) * Affine2::rotate(g.rotation) * K * Affine2::scale(g.scale * 0.01f) * Affine2::translate(-g.anchor);
 }
 
 Affine2 repeater_matrix(const VectorRepeater& r, f32 k) noexcept {
@@ -917,6 +1022,7 @@ bool group_strokes(const VectorGroup& g) noexcept {
 /// (`VectorPath::exclude`) saem à parte — recortam o preenchimento e ganham
 /// contorno, sem entrar na mesclagem nem no aparar.
 void group_lines(const VectorGroup& g, f64 frame, f32 tol, std::vector<Contour>& lines, std::vector<Contour>* holes = nullptr) {
+    const ClipToleranceScope scale(tol);   // operadores e mesclagem recortam na tolerância do grupo
     lines.clear();
     if (holes) holes->clear();
     std::vector<std::vector<Contour>> sets;
@@ -960,6 +1066,7 @@ void group_lines(const VectorGroup& g, f64 frame, f32 tol, std::vector<Contour>&
 /// desenhados e o preenchimento (das linhas inteiras) ganha `fillAlpha`.
 void group_paint(const VectorGroup& g, f32 tol, std::vector<Contour> lines, const DrawProgress* draw, GroupGeometry& out,
                  const std::vector<Contour>* holes = nullptr) {
+    const ClipToleranceScope scale(tol);
     out.fill.clear();
     out.stroke.clear();
     out.drawn.clear();
@@ -1234,6 +1341,7 @@ void build_mesh(const std::vector<VectorGroup>& groups, f64 frame, f32 density, 
         f32 lastAlpha = 1.0f;
         std::vector<Contour> lines;
         std::vector<Contour> holes;   // Omega conteúdo: furos (VectorPath::exclude)
+        bool tree = false;            // lote X: avaliado pela ordem dos itens (VectorTree.hpp)
     };
     std::vector<Prepared> list;
     list.reserve(groups.size());
@@ -1242,6 +1350,14 @@ void build_mesh(const std::vector<VectorGroup>& groups, f64 frame, f32 density, 
         Prepared p;
         p.g = &g;
         p.G = group_matrix(g);
+        if (group_has_tree(g)) {
+            // Lote X: ordem livre, itens a mais, grupos de dentro ou inclinação.
+            // O Progresso do desenho não corta estes grupos (saem inteiros).
+            p.tree = true;
+            p.tol = 0.2f / (dens * std::max(1e-3f, p.G.max_scale() * tree_repeat_scale(g)));
+            list.push_back(std::move(p));
+            continue;
+        }
         f32 repScale = 1.0f;
         if (g.repeater.enabled) {
             p.copies = copy_count(g.repeater, p.lastAlpha);
@@ -1325,6 +1441,20 @@ void build_mesh(const std::vector<VectorGroup>& groups, f64 frame, f32 density, 
         const Affine2 G = prep.G;
         const u32 copies = prep.copies;
         const f32 lastAlpha = prep.lastAlpha;
+        if (prep.tree) {
+            TreeResult tree;
+            evaluate_tree(g, frame, prep.tol, tree);
+            if (tree.layers.empty()) continue;
+            if (g.composite == kVectorCompositeErase) {
+                for (const TreePaint& layer : tree.layers) erase(layer.rings, G * layer.M);
+                continue;
+            }
+            const f32 treeOpacity = std::clamp(g.opacity * 0.01f, 0.0f, 1.0f);
+            const f32 firstPaint = static_cast<f32>(out.paints.size() / kPaintVec4);
+            for (const VectorPaint& paint : tree.paints) encode_paint(paint, out.paints);
+            for (const TreePaint& layer : tree.layers) put(layer.rings, G * layer.M, firstPaint + static_cast<f32>(layer.paint), treeOpacity * layer.alpha);
+            continue;
+        }
         DrawProgress mine = progress;
         if (drawing) { mine.amount = amounts[gi]; mine.start = gi < starts.size() ? starts[gi] : 0.0f; }
         GroupGeometry geo;
@@ -1374,6 +1504,12 @@ bool bounds_of(const std::vector<VectorGroup>& groups, f64 frame, Vec2& mn, Vec2
     };
     for (const VectorGroup& g : groups) {
         if (!g.visible) continue;
+        if (group_has_tree(g)) {
+            // Lote X: a caixa do que a árvore pinta.
+            Vec2 a{0, 0}, b{0, 0};
+            if (tree_bounds(g, frame, a, b)) { add(a); add(b); }
+            continue;
+        }
         const Affine2 G = group_matrix(g);
         f32 lastAlpha = 1.0f;
         const u32 copies = g.repeater.enabled ? copy_count(g.repeater, lastAlpha) : 1u;
@@ -1488,6 +1624,8 @@ u64 content_hash(const std::vector<VectorGroup>& groups, f64 frame, const DrawPr
             }
         }
         H.v2(g.position); H.v2(g.anchor); H.v2(g.scale); H.f(g.rotation); H.f(g.opacity);
+        // Lote X: o que a árvore acrescenta (0 = grupo de sempre: a chave de sempre).
+        if (const u64 tree = tree_hash(g, frame)) H.u(tree);
     }
     // Só o trecho ENTRE o primeiro e o último key muda a forma: fora dele o
     // caminho é o do key da ponta — o mesmo hash, sem retriangular (8E).

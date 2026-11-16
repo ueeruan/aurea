@@ -36,6 +36,7 @@ namespace aurea::ai { class RotoService; struct RotoStroke; class BgRemoveServic
 #include "aurea/render/ParticleScene.hpp"
 #include "aurea/render/RenderScheduler.hpp"
 #include "aurea/render/ShaderLibrary.hpp"
+#include "aurea/render/TemporalReconstruction.hpp"
 #include "aurea/scene3d/SceneRenderer.hpp"
 #include "aurea/scene3d/Animation.hpp"
 #include "aurea/timeline/Composition.hpp"
@@ -214,6 +215,8 @@ struct LayerSource {
     u32  width = 0;          ///< tamanho natural da layer (px)
     u32  height = 0;
 
+    // Temporal source checkouts may share one decoder and raw upload for the same media frame.
+    u64 videoCacheKey = 0;
     // Vídeo
     FrameRef frame;
     bool     frameExact = false;
@@ -254,6 +257,11 @@ struct LayerSource {
     u32      glyphFirst = 0;
     u32      glyphCount = 0;
     u32      glyphSets = 1;
+    /// v72, mistura entre caracteres (TextData::interCharBlend): 0 = Normal (um
+    /// desenho só). Senão cada glifo de [glyphBlendFrom, glyphCount) do conjunto
+    /// entra sobre os anteriores com este BlendMode (fundo e sombra vêm antes, normais).
+    u16      glyphBlend = 0;
+    u32      glyphBlendFrom = 0;
     Vec4     textPersp{0, 0, 0, 0};   ///< cx, cy da layer, distância focal (px) para o 3D por caractere
     /// 0.5.2: a imagem da galeria do preenchimento com textura (u_texfill do
     /// glyph.frag); nula = textura procedural ou cor lisa.
@@ -314,6 +322,9 @@ struct RenderLayer {
     /// Preservar transparência (Layer::preserveTransparency): entra como
     /// source-atop sobre tudo o que já foi composto abaixo.
     bool        preserveAlpha = false;
+    /// AE layers: filtro da camada na composição (0 bilinear, 1 vizinho mais
+    /// próximo = Rascunho na prévia, 2 bicúbica = amostragem bicúbica em Melhor).
+    u8          sampleFilter = 0;
     f32         texelScale = 1.0f;
     /// Desfoque de movimento: composição ← camada em cada amostra do
     /// obturador. Vazio = sem desfoque (ou camada parada no intervalo).
@@ -456,7 +467,18 @@ struct RenderLayer {
     ParticleSpace particle;
 };
 
+struct CachedCompositionFrame {
+    TextureHandle texture{};
+    const u16* pixels = nullptr;
+};
+
 struct FrameSnapshot {
+    Status effectFailure{};   ///< preparation failure belonging to this snapshot
+    std::unique_ptr<Layer> temporalPrefixLayer;
+    u64 temporalSourceLayer = 0;
+    bool temporalStaticScene = false;
+    u64 temporalComposition = 0, temporalRevision = 0, temporalContentKey = 0;
+    CachedCompositionFrame cachedComposition{};
     struct VideoSourceWait {
         LayerId layer{};
         AssetId asset{};
@@ -539,6 +561,8 @@ struct SceneEditorView {
     SceneViewKind kind = SceneViewKind::Orbit;
     /// O ponto que a vista olha, somado ao centro da composição (a mãozinha da Cena 3D).
     f32 targetX = 0.0f, targetY = 0.0f, targetZ = 0.0f;
+    /// Aurea PC (Cena 3D, Numpad 5): a órbita sem perspectiva. Falso = como sempre.
+    bool orthographic = false;
 };
 [[nodiscard]] scene3d::SceneCamera scene_editor_camera(u32 width, u32 height, const SceneEditorView& view) noexcept;
 [[nodiscard]] Mat4 scene_editor_projection(u32 width, u32 height, const SceneEditorView& view) noexcept;
@@ -560,6 +584,9 @@ struct RenderSettings {
     /// unchanged; presentation still applies the normal zoom/color/checkerboard.
     TextureHandle cachedComposition{};
     const u16* cachedCompositionPixels = nullptr; // one-frame upload, copied during begin_frame
+    // Preview-only child composition lookup. A miss follows ordinary preparation.
+    CachedCompositionFrame (*nestedCacheLookup)(void*, CompositionId, FrameIndex) = nullptr;
+    void* nestedCacheContext = nullptr;
     u64 mediaGeneration = 0;
     SceneEditorView sceneEditor{}; ///< transient preview observer; ignored by finalQuality/export
 
@@ -583,6 +610,10 @@ struct RenderSettings {
     u32  viewSelectionCount = 0;
     u64  viewSelectionIds[64]{};     ///< ids empacotados (Engine::kOmegaViewMaxIds)
     bool pixelPreview = false;       ///< saída por vizinho mais próximo (pixels reais)
+    /// AE layers (B10): guias desenhadas só na saída da tela (output.frag):
+    /// bit 0 grade, bit 1 margens de ação/título, bit 2 réguas. 0 no export.
+    u32  previewGuides = 0;
+    f32  guideGridSpacing = 100.0f;  ///< px da composição entre as linhas da grade
     /// Export: amostras de desfoque de movimento da qualidade final
     /// (`MotionBlurSettings::samples`); a prévia também, reduzida pela folga do aparelho.
     bool finalQuality = false;
@@ -743,7 +774,9 @@ public:
     void prepare(const Composition& comp, const Project& project, FrameIndex time,
                  MediaManager* media, const ImagePixels* (*imageLookup)(void*, AssetId), void* imageCtx,
                  const RenderSettings& settings, u64 frameNumber, i32 playDirection,
-                 DecodeMode decodeMode, f32 speed, FrameSnapshot& out);
+                 DecodeMode decodeMode, f32 speed, FrameSnapshot& out,
+                 f64 exactTime = std::numeric_limits<f64>::quiet_NaN(),
+                 LayerId prefixLayer = {}, u32 prefixEnd = kInvalidIndex);
 
     void prepare_raw(LayerId id, const Layer& layer, const Asset& asset, i64 mediaUs,
                      MediaManager& media, u64 frameNumber, DecodeMode mode,
@@ -870,19 +903,6 @@ public:
     [[nodiscard]] bool take_memory_short() noexcept { const bool b = memoryShort_; memoryShort_ = false; return b; }
     /// Onde o último quadro incompleto foi marcado (arquivo:linha do motor), para
     /// o motivo do export dizer QUAL recurso faltou. Nulo = nenhum ainda.
-    /// Degrau de custo 3D do export (0 = qualidade final cheia). Cada degrau
-    /// corta sombra/MSAA para o passe 3D caber no prazo do driver móvel (~2 s
-    /// por envio). 0.3.2: vem do DEGRAU DA ESCADA (ExportAttempts.hpp), fixo do
-    /// primeiro ao último quadro — antes subia no meio do export quando um
-    /// quadro demorava, e o vídeo dependia da carga do aparelho.
-    [[nodiscard]] u32 export_gpu_step() const noexcept { return exportGpuStep_; }
-    void set_export_gpu_step(u32 step) noexcept { exportGpuStep_ = std::min(step, 4u); }
-    /// Teto rígido do degrau da escada (ExportAttempts.hpp): 0 = nenhum, 1 = sem desfoque.
-    void set_export_blur_hard_cap(u32 cap) noexcept { exportBlurHardCap_ = cap; }
-    /// Teto das amostras de cena 3D no export: cada amostra é a cena inteira
-    /// (sombra, MSAA), então o custo cresce sem limite com o rastro (0.2.7).
-    /// Fixo por aparelho; quando corta, o quadro registra a redução.
-    void set_export_scene_blur_cap(u32 cap) noexcept { exportSceneBlurCap_ = cap; }
     /// 0.3.2: o que a qualidade final teve de reduzir nos quadros desde a
     /// última leitura (bits de RenderReduction). O export avisa a pessoa em vez
     /// de só registrar no log.
@@ -918,14 +938,24 @@ public:
     /// Orçamento do cache do optical flow (padrão 48 MB; o gerenciador de
     /// memória pode baixar sob pressão). Acima dele sai a camada mais antiga.
     void set_flow_cache_budget(u64 bytes) noexcept { flowCacheBudget_ = bytes; }
+    /// 0.5.3: teto das faixas guardadas do TimeSlice (padrão 384 MB). O export
+    /// passa uma parte do orçamento dele; os instantes de um quadro que não
+    /// cabem perdem densidade em vez de esgotar a GPU (mínimo 16 MB).
+    void set_slice_cache_budget(u64 bytes) noexcept { sliceCacheBudget_ = bytes > (16ull << 20) ? bytes : (16ull << 20); }
+    [[nodiscard]] u64 slice_cache_budget() const noexcept { return sliceCacheBudget_; }
     void set_transient_cache_budget(u64 bytes) noexcept { pool_.set_budget(bytes); }
     void set_transient_allocation_limit(u64 bytes) noexcept { pool_.set_allocation_limit(bytes); }
     void set_tracked_resource_budget(u64 bytes, TransientTexturePool::KnownResourceUse knownUse = nullptr, void* context = nullptr) noexcept {
         pool_.set_tracked_resource_budget(bytes, knownUse, context);
+        temporalBudget_ = bytes ? std::min<u64>(bytes / 8, 64ull << 20) : 32ull << 20;
     }
     [[nodiscard]] f32 effect_quality() const noexcept override { return heavyQ_.effects; }
+    [[nodiscard]] f32 motion_analysis_scale() const noexcept override { return heavyQ_.flow; }
 
     // --- EffectResources -----------------------------------------------------
+    bool motion_state(const Layer*, u64, f64, bool, EffectMotionState&) noexcept override;
+    void temporal_failure(Status failure) noexcept override;
+    void effect_failure(Status failure) noexcept override;
     [[nodiscard]] TextureHandle curve_lut(const CurveData& curve) noexcept override;
     [[nodiscard]] TextureHandle cube_lut(AssetId id) noexcept override;
     [[nodiscard]] TextureHandle data_texture(u64 key, const Vec4* texels, u32 width, u32 height) noexcept override;
@@ -996,6 +1026,7 @@ public:
 
     // --- Consultas -------------------------------------------------------------
     [[nodiscard]] const FrameGraph::Stats& graph_stats() const noexcept { return graph_.stats(); }
+    [[nodiscard]] const FrameGraph& frame_graph() const noexcept { return graph_; }
     [[nodiscard]] const TransientTexturePool::Stats& pool_stats() const noexcept { return pool_.stats(); }
     /// Tempos de GPU por passe lidos no último `render` com `gpuTimers`
     /// (rótulos estáticos; os de um quadro já concluído pela GPU).
@@ -1023,6 +1054,7 @@ public:
     [[nodiscard]] static PreviewQuality effective_quality(const RenderSettings& s) noexcept;
 
 private:
+    bool checkout_effect_sample(FrameSnapshot& parent, u32 index, u64 frameNumber, LayerImage& out, Mat4& matrix, f32& opacity) noexcept;
     struct CompositeDraw {
         FGTexture texture{};
         Rect      region{};
@@ -1049,6 +1081,8 @@ private:
         /// Preservar transparência: o mesmo source-atop, com o fundo = a pilha
         /// já composta abaixo (o alfa dela não muda).
         bool      preserveAlpha = false;
+        /// AE layers: 2 = amostra bicúbica no layer.frag (RenderLayer::sampleFilter).
+        u8        filter = 0;
     };
     /// Os desenhos da pilha → alvo: lotes de blend de hardware (Normal, Add)
     /// no mesmo alvo; modo que lê o fundo ou camada de ajuste = ping-pong.
@@ -1134,6 +1168,7 @@ private:
     /// pré-composições entram antes, cada uma no seu alvo (recursivo).
     void compose_layers(FrameSnapshot& snap, FGTexture comp, const TextureDesc& compDesc, u64 frameNumber,
                         std::vector<CompositeDraw>& draws, u32 depth) noexcept;
+    [[nodiscard]] bool compose_nested_target(const FrameSnapshot& parent, u32 index, u64 frameNumber) noexcept;
     [[nodiscard]] bool build_source(const RenderLayer& layer, u32 layerIndex, bool hasEffects,
                                     LayerImage& out, std::vector<FrameRef>& framesUsed,
                                     u64 frameNumber, u32 glyphSet = kInvalidIndex) noexcept;
@@ -1216,6 +1251,7 @@ private:
     mutable std::mutex sliceMutex_;
     u64 sliceGraphFrame_ = ~0ull;   ///< quadro do grafo que gravou as faixas mais novas
     u64 sliceSalt_ = 0;             ///< planos de CPU próprios para a conversão de uma faixa
+    u64 sliceCacheBudget_ = 384ull << 20;   ///< teto das faixas guardadas (set_slice_cache_budget)
     bool sliceApprox_ = false;      ///< este quadro desenhou faixa aproximada (o instante ainda não chegou)
     [[nodiscard]] bool has_slice_texture(u64 layer, i64 us) const noexcept;
     void release_slice_cache(bool destroy) noexcept;
@@ -1274,6 +1310,20 @@ private:
     /// listas reaproveitadas — eram 6 alocações por quadro (Fase 8C).
     std::vector<FrameSnapshot*> snapAll_, snapStack_;
     std::unordered_map<u64, PlanarTextures> planar_;   ///< por LayerId empacotado
+    /// 0.5.4: o último quadro de vídeo que cada camada mostrou na PRÉVIA (por
+    /// LayerId de render empacotado). Quando o decoder dela some ou ainda não
+    /// entregou nada (recusado, reabrindo, trocando para o proxy), a camada
+    /// continua com ele em vez de virar transparência. Quase sempre é o mesmo
+    /// FrameRef que o cache da fonte já segura (sem memória extra); sai depois
+    /// de 240 preparos sem uso, no trim e ao trocar de projeto.
+    struct HeldVideoFrame {
+        FrameRef frame;
+        VideoStreamInfo info{};
+        i64 frameUs = 0;
+        u64 asset = 0;
+        u64 lastFrame = 0;
+    };
+    std::unordered_map<u64, HeldVideoFrame> heldVideo_;
     // Texto na GPU: atlas de glifos (R8) e o buffer de glifos do quadro (anel).
     TextureHandle glyphAtlas_{};
     u64 glyphAtlasGen_ = 0;
@@ -1487,6 +1537,10 @@ private:
     const Project* planProject_ = nullptr;
     MediaManager* planMedia_ = nullptr;
     FrameIndex planTime_{0};
+    u32 effectSampleCount_ = 0;
+    u32 effectSourceDepth_ = 0;
+    std::map<std::vector<u64>, std::map<i64,u32>> effectVideoSlots_;
+    std::map<std::array<u64,4>,LayerImage> effectVideoImages_;
     /// Copiar fundo: a camada cujo plano do FUNDO (os efeitos depois do Copiar
     /// fundo) está sendo planejado agora. Como numa camada de ajuste, o plano
     /// é o da composição (Repetição no caminho, mapa de profundidade...), ou o
@@ -1497,24 +1551,15 @@ private:
     std::vector<PendingUpload> uploads_;
     std::unordered_map<u64, u64> textKeys_;   ///< chave sintética da camada de texto → chave dos pixels
     bool incomplete_ = false;   ///< o último quadro deixou camada de fora (recurso pendente)
+    Status* effectFailureSink_ = nullptr;
+    bool preparingEffects_ = false;
     const char* incompleteFile_ = nullptr;
     u32 incompleteLine_ = 0;
     bool unavailable_ = false;  ///< take_unavailable: deixou de fora algo que nunca chega
     bool memoryShort_ = false;  ///< take_memory_short
     const char* unavailableFile_ = nullptr;
     u32 unavailableLine_ = 0;
-    u32 exportGpuStep_ = 0;
-    u32 exportBlurHardCap_ = 0;
     u32 reductions_ = 0;          ///< RenderReduction (take_reductions)   ///< degrau da escada (0 = nenhum; 1 = sem desfoque)
-    u32 exportSceneBlurCap_ = 0;  ///< amostras de CENA 3D no export (0 = nenhum)
-    /// shutter_sample_count com o teto de amostras do export em GPU fraca.
-    [[nodiscard]] u32 capped_shutter_samples(const MotionBlurSettings& settings, bool finalQuality, f32 quality,
-            f64 pathPixels, bool changing = false, u32 resourceLimit = ShutterPlan::kHardLimit) const noexcept {
-        // Degrau da escada (0.2.7): teto RÍGIDO, acima do piso da prévia e das
-        // amostras escolhidas — é a última chance de o export sair.
-        if (finalQuality && exportBlurHardCap_ >= 1) resourceLimit = std::min(resourceLimit, exportBlurHardCap_);
-        return shutter_sample_count(settings, finalQuality, quality, pathPixels, changing, resourceLimit);
-    }
     void mark_incomplete(const char* file, u32 line) noexcept { incomplete_ = true; incompleteFile_ = file; incompleteLine_ = line; }
     void mark_unavailable(const char* file, u32 line) noexcept { unavailable_ = true; unavailableFile_ = file; unavailableLine_ = line; }
     void mark_incomplete_memory(const char* file, u32 line) noexcept { mark_incomplete(file, line); memoryShort_ = true; }
@@ -1523,6 +1568,8 @@ private:
     std::vector<PreviewFrame> previewFrames_;
     u64 previewCacheBudget_ = 0, previewCacheKey_ = 0, previewCacheUse_ = 0;
     bool lowMemoryDevice_ = false;   ///< set_low_memory_device
+    TemporalReconstruction temporalPreview_;
+    u64 temporalBudget_ = 32ull << 20;
     u64 previewCacheRevision_ = 0, previewCacheComposition_ = 0;
     u64 warmupScanRevision_ = 0;
     u32 previewCacheCapacity_ = 0;
@@ -1539,6 +1586,7 @@ private:
     std::span<const TextureHandle> boundedSceneTextures_{};
     std::span<const StagedSceneTarget> stagedSceneTargets_{};
     const FrameSnapshot* currentSnap_ = nullptr;   ///< dono das pré-composições da composição em curso
+    u32 compositionDepth_ = 0;
     u32 prepareDepth_ = 0;                          ///< aninhamento do prepare (guarda de recursão)
     u64 exposureBytesRemaining_ = 0;                ///< one frame budget shared by text, 3D and nested prepares
     u32 nestSalt_ = 0;                              ///< ≠ 0 dentro de uma pré-composição (ids únicos)

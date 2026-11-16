@@ -91,7 +91,11 @@ enum ProcessInfo { static let processInfo = Clock() }
 final class Native {
     var available: UInt64 = 100 * 1024 * 1024
     var trims: [Int32] = []
+    var reports: [(UInt64, UInt64, Bool)] = []
     func availableMemoryBytes() -> UInt64 { available }
+    func reportMemoryHeadroom(_ bytes: UInt64, critical: UInt64, lowMemory: Bool) {
+        reports.append((bytes, critical, lowMemory))
+    }
     func trimMemory(_ level: Int32) -> Int64 { trims.append(level); return 0 }
 }
 final class Previews { func resumeMemoryWork() {} }
@@ -116,10 +120,14 @@ final class Subject {
 }
 let subject = Subject()
 subject.poll()
+precondition(subject.engine.reports.count == 1)
+precondition(subject.engine.reports[0].0 == 100 * 1024 * 1024 &&
+             subject.engine.reports[0].1 == 64 * 1024 * 1024 && !subject.engine.reports[0].2)
 precondition(subject.lifecycleQueue.work.count == 1 && subject.memoryTrimPending)
 ProcessInfo.processInfo.systemUptime = 101
 subject.engine.available = 32 * 1024 * 1024
 subject.poll(); subject.warning(); subject.warning()
+precondition(subject.engine.reports.last!.0 == 32 * 1024 * 1024 && subject.engine.reports.last!.2)
 precondition(subject.lifecycleQueue.work.count == 1 && subject.memoryTrimRequestedLevel == 15,
              "critical pressure started duplicate GPU trim or was discarded")
 subject.lifecycleQueue.runOne()
@@ -149,6 +157,7 @@ precondition(completedModerate.engine.trims == [10, 15])
 let exhausted = Subject()
 exhausted.engine.available = 0
 exhausted.poll()
+precondition(exhausted.engine.reports.last!.0 == 0 && exhausted.engine.reports.last!.2)
 precondition(exhausted.lifecycleQueue.work.count == 1 && exhausted.memoryPressureLimited,
              "zero app headroom must trigger critical pressure, not be ignored")
 exhausted.lifecycleQueue.runOne(); DispatchQueue.main.runOne()

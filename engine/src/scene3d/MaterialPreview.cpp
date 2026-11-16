@@ -133,6 +133,11 @@ u64 recipe_key(const MaterialBall& m, u32 size) noexcept {
                     m.emissive.x, m.emissive.y, m.emissive.z, m.alphaCutoff, m.unlit ? 1.0f : 0.0f,
                     static_cast<f32>(static_cast<u8>(m.alphaMode))};
     h = fnv(h, f, sizeof(f));
+    if (m.toon) {
+        const f32 t[7]{m.toonSide.x, m.toonSide.y, m.toonSide.z, m.toonOutline.x, m.toonOutline.y, m.toonOutline.z,
+                       m.toonHighlight};
+        h = fnv(h, t, sizeof(t));
+    }
     if (has_image(m)) {
         h = fnv_of(h, m.imageWidth);
         h = fnv_of(h, m.imageHeight);
@@ -193,7 +198,27 @@ std::vector<u8> render_material_ball(const MaterialBall& m, u32 size) {
             if (coverage <= 0.0f) continue;
 
             Vec3 c;
-            if (m.unlit) {
+            if (m.toon) {
+                // Cartoon: anel do contorno por fora; dentro, cel em 2 faixas
+                // (frente / lateral) pela luz de cima-esquerda e a faixa clara.
+                const f32 inner = 0.82f;
+                if (dist > inner) {
+                    // Rampa de 1 px entre o anel e o miolo.
+                    const f32 ring = saturate((dist - inner) * radius + 0.5f);
+                    const Vec3 key{-0.45f, 0.75f, 0.48f};
+                    const f32 ndl = (n.x * key.x + n.y * key.y + n.z * key.z);
+                    const Vec3 body = ndl > 0.05f ? albedo : m.toonSide;
+                    c = mix(body, m.toonOutline, ring);
+                } else {
+                    const f32 ix = x / inner, iy = y / inner;
+                    const Vec3 ni{ix, iy, std::sqrt(std::max(0.0f, 1.0f - ix * ix - iy * iy))};
+                    const f32 ndl = ni.x * -0.45f + ni.y * 0.75f + ni.z * 0.48f;
+                    c = ndl > 0.05f ? albedo : m.toonSide;
+                    // A faixa clara: um crescente perto da borda de cima.
+                    const f32 hl = (ni.y > 0.55f && ni.z < 0.8f) ? saturate(m.toonHighlight) : 0.0f;
+                    c = mix(c, mix(c, Vec3{1.0f, 1.0f, 1.0f}, 0.7f), hl);
+                }
+            } else if (m.unlit) {
                 // Unlit = cor de exibição (texto, logotipo): sem luz e sem tone map.
                 c = albedo;
             } else {
@@ -255,7 +280,7 @@ MaterialBall material_ball_of(const SceneAsset& asset, const Material& m) noexce
     b.emissive = m.emissive * std::max(0.0f, m.emissiveStrength);
     b.alphaMode = m.alphaMode;
     b.alphaCutoff = m.alphaCutoff;
-    b.unlit = m.unlit;
+    b.unlit = m.unlit || m.toon != 0;   // Cartoon: cor chapada de exibição
     if (m.baseColorTex.valid() && static_cast<usize>(m.baseColorTex.image) < asset.images.size()) {
         const Image& img = asset.images[static_cast<usize>(m.baseColorTex.image)];
         const std::vector<u8>& px = img.pixels();
@@ -280,6 +305,15 @@ bool text3d_preset_ball(u32 preset, MaterialBall& out) noexcept {
     out.specular = saturate(spec.specular);
     out.emissive = Vec3{Color::srgb_to_linear(spec.emissive.x), Color::srgb_to_linear(spec.emissive.y),
                         Color::srgb_to_linear(spec.emissive.z)} * std::max(0.0f, spec.emissiveStrength);
+    if (spec.style == kText3DStyleCartoon) {
+        const Vec4 side = text3d_cartoon_side(spec);
+        out.toon = true;
+        out.toonSide = Vec3{Color::srgb_to_linear(side.x), Color::srgb_to_linear(side.y), Color::srgb_to_linear(side.z)};
+        out.toonOutline = Vec3{Color::srgb_to_linear(spec.outlineColor.x), Color::srgb_to_linear(spec.outlineColor.y),
+                               Color::srgb_to_linear(spec.outlineColor.z)};
+        out.toonHighlight = saturate(spec.toonHighlight);
+        out.emissive = Vec3{0.0f, 0.0f, 0.0f};
+    }
     return true;
 }
 

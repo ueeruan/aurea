@@ -100,6 +100,21 @@ internal fun rememberPresetThumb(store: EditorStore, preset: Int): ImageBitmap? 
 }
 
 /**
+ * A bola de um VISUAL do modelo 3D importado (Original, Plástico… — a ordem de
+ * Engine::apply_model_material_preset) NESTE modelo: o 1º material do arquivo,
+ * com a textura dele, e os valores do visual. Só depende do arquivo.
+ */
+@Composable
+internal fun rememberModelLookThumb(store: EditorStore, layer: Long, preset: Int): ImageBitmap? {
+    val key = "l:$layer:$preset"
+    var shown by remember(key) { mutableStateOf(MaterialThumbs.peek(key)) }
+    LaunchedEffect(key) {
+        if (shown == null) MaterialThumbs.load(key) { store.renderModelLookThumb(layer, preset, MaterialThumbs.SIZE) }?.let { shown = it }
+    }
+    return shown
+}
+
+/**
  * A bola desenhada: a miniatura do motor ou, enquanto ela não chega, a
  * bolinha da cor do material. Decorativa para a acessibilidade — o nome ao
  * lado já diz o que é.

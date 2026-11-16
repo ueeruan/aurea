@@ -1652,7 +1652,8 @@ AUREA_TEST(Serialization, InvalidMaterialOverridesAreRepairedOnLoad) {
         Layer* layer=comp->layer(comp->add_layer(LayerKind::Model3D,"Invalid"));
         MaterialOverride value;
         if (invalid==0) value.materialIndex=4096;
-        if (invalid==1) value.mask=64;
+        // v76: os bits 6..9 viraram a emissão; 1024 (bit 10) continua fora da faixa.
+        if (invalid==1) value.mask=1024;
         if (invalid==2) value.roughness=1.1f;
         if (invalid==3) value.baseColor.x=std::numeric_limits<f32>::quiet_NaN();
         layer->model.materials.push_back(value);

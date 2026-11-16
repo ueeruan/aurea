@@ -3,6 +3,9 @@ from pathlib import Path
 import struct
 import sys
 
+METALLIB_FLAG = 1
+KNOWN_FLAGS = 0xF  # Mirrors xlate::kMslKnownFlags in ShaderTranslate.hpp.
+
 root = Path(sys.argv[1])
 blobs = sorted(root.rglob('*.mslblob'))
 # Match CMake's shader catalog, including paths, so a newly added shader is
@@ -24,7 +27,8 @@ for blob in blobs:
     data = blob.read_bytes()
     try:
         magic, version, flags, size, gx, gy, gz = struct.unpack_from('<8s6I', data)
-        valid = (magic == b'AUREAMSL' and version == flags == 1 and size >= 32
+        valid = (magic == b'AUREAMSL' and version == 1 and bool(flags & METALLIB_FLAG)
+                 and not (flags & ~KNOWN_FLAGS) and size >= 32
                  and size <= len(data) - 32 and blob.with_suffix('.metallib').is_file())
     except struct.error:
         valid = False

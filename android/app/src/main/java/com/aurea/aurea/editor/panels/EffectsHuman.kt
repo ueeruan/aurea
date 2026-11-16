@@ -79,6 +79,49 @@ private val MatrixLabels = listOf(
 
 private val Table: Map<Int, EffectHuman> = buildMap {
     fun put(key: String, e: EffectHuman) = put(effectTypeId(key), e)
+    put("aurea.transition.radial_wipe_reference", EffectHuman(name = R.string.fx_ref_radial_wipe_name,
+        keywords = "radial wipe varredura abertura circular horario anti horario both", principal = listOf(0, 1, 2, 3, 4),
+        params = mapOf(4 to ParamHuman(scale = 1f, suffix = "px", decimals = 1))))
+    put("aurea.blur.fast_blur_reference", EffectHuman(name = R.string.fx_ref_fast_blur_name, keywords = "fast blur desfoque rapido horizontal vertical", principal = listOf(0, 1, 2),
+        params = mapOf(0 to ParamHuman(scale = 1f, suffix = "px", decimals = 1))))
+    // AE reference batch B.
+    put("aurea.transition.card_wipe_reference", EffectHuman(name = R.string.fx_ref_card_wipe_name,
+        keywords = "card wipe abertura de cartao cartoes cartas virar flip transicao 3d after effects", principal = listOf(0, 1, 4, 5, 7, 9)))
+    put("aurea.3d.card_dance_reference", EffectHuman(name = R.string.fx_ref_card_dance_name,
+        keywords = "card dance danca de cartas cartoes gradiente 3d grade mosaico after effects", principal = listOf(1, 2, 4, 6, 7)))
+    // AE reference batch A.
+    put("aurea.blur.radial_blur_reference", EffectHuman(name = R.string.fx_name_radial_blur,
+        keywords = "desfoque radial radial blur zoom blur spin giro rotacional velocidade after effects", principal = listOf(0, 1, 2, 3, 4),
+        params = mapOf(0 to ParamHuman(decimals = 1), 4 to ParamHuman(decimals = 0))))
+    put("aurea.time.posterize_reference", EffectHuman(name = R.string.fx_name_posterize_time,
+        keywords = "posterize time posterizar tempo taxa quadros stop motion animacao after effects", principal = listOf(0),
+        params = mapOf(0 to ParamHuman(label = R.string.fx_quadros_segundo, suffix = "fps", decimals = 2))))
+    put("aurea.time.time_displacement_reference", EffectHuman(name = R.string.fx045d_name_time_displacement,
+        keywords = "time displacement deslocamento no tempo deslocamento temporal slit scan fenda atraso mapa luminancia brilho after effects ae",
+        principal = listOf(0, 1, 2, 3), params = mapOf(1 to ParamHuman(decimals = 2), 2 to ParamHuman(decimals = 2))))
+    put("aurea.stylize.radial_shadow_reference", EffectHuman(name = R.string.aefx_name_radial_shadow,
+        keywords = "radial shadow sombra radial luz pontual projetada after effects", principal = listOf(0, 1, 2, 3, 4, 5, 6, 7, 8)))
+    put("aurea.distort.upscale_reference", EffectHuman(name = R.string.aefx_name_upscale,
+        keywords = "upscale ampliar ampliacao preservacao detalhes super resolucao escala aumentar resolucao sd hd after effects", principal = listOf(0, 3)))
+    // AE reference batch C.
+    put("aurea.generate.extrude_reference", EffectHuman(name = R.string.refc_extrude_name,
+        keywords = "extrude extrusao vetor texto forma mascara 3d ponto de fuga camera plugin everything", principal = listOf(2, 4, 5, 10, 14, 15)))
+    put("aurea.ai.depth_field_reference", EffectHuman(name = R.string.refc_depth_field_name,
+        keywords = "depth of field profundidade de campo desfoque foco plano focal ia after effects", principal = listOf(0, 1, 2, 3)))
+    put("aurea.distort.smear_mask_reference", EffectHuman(name = R.string.refc_smear_name,
+        keywords = "smear mancha mascara origem limite esticar deformar after effects", principal = listOf(0, 1, 2, 3, 4, 5, 6, 7)))
+    put("aurea.glitch.glitchify_reference", EffectHuman(name = R.string.fx_name_glitchify,
+        keywords = "glitchify glitch defeito digital transicao canal corrupcao fatia bloco compressao cinema spice", principal = listOf(0, 1, 2, 3)))
+    put("aurea.stylize.drop_shadow_reference", EffectHuman(name = R.string.fx_name_drop_shadow, keywords = "drop shadow sombra projetada distancia suavidade", principal = listOf(0, 1, 2, 3, 4, 5),
+        params = mapOf(1 to ParamHuman(scale = 1f, suffix = "%", decimals = 0), 2 to ParamHuman(suffix = "°", decimals = 0),
+            3 to ParamHuman(scale = 1f, suffix = "px", decimals = 1), 4 to ParamHuman(scale = 1f, suffix = "px", decimals = 1))))
+    put("aurea.blur.sharpen_reference", EffectHuman(name = R.string.fx_name_sharpen, keywords = "sharpen nitidez detalhe", principal = listOf(0)))
+    put("aurea.stylize.find_edges_reference", EffectHuman(name = R.string.fx_name_find_edges, keywords = "find edges detectar bordas contorno", principal = listOf(0, 1)))
+    put("aurea.transition.block_dissolve_reference", EffectHuman(name = R.string.fx_ref_block_name, keywords = "block dissolve dissolver blocos transicao", principal = listOf(0, 1, 2, 3, 4)))
+    put("aurea.distort.wave_warp_reference", EffectHuman(name = R.string.fx_name_wave_warp, keywords = "wave warp onda senoide agua", principal = listOf(0, 1, 2, 3, 4, 5, 6, 7),
+        params = mapOf(4 to ParamHuman(scale = 1f, suffix = "Hz", decimals = 2))))
+    put("aurea.distort.turbulent_displace_reference", EffectHuman(name = R.string.fx_name_turbulence, keywords = "turbulent displace turbulencia ruido calor agua", principal = listOf(0, 1, 2, 3, 4, 5),
+        params = mapOf(4 to ParamHuman(scale = 1f, suffix = "", decimals = 1))))
     put("aurea.stylize.pixel_encoder", EffectHuman(keywords = "pixel encoder pixel_encoder megakrunch ascii letras grunge",
         principal = listOf(0, 1, 2, 3, 4)))
     put("aurea.stylize.pix_dither", EffectHuman(keywords = "pixdither pix dither pontilhado paleta atkinson bayer", principal = listOf(0, 1, 2)))
@@ -632,6 +675,12 @@ private val Table: Map<Int, EffectHuman> = buildMap {
                 7 to ParamHuman(label = R.string.fx_halo_tela),
                 10 to ParamHuman(label = R.string.fx_so_brilho),
                 11 to ParamHuman(label = R.string.fx_estouro, decimals = 0),
+                22 to ParamHuman(label = R.string.fxl_radius, suffix = "px", decimals = 0),
+                23 to ParamHuman(label = R.string.fxl_exposure, suffix = "x", decimals = 2),
+                24 to ParamHuman(label = R.string.fxl_threshold, suffix = "%", decimals = 0),
+                25 to ParamHuman(label = R.string.fxl_threshold_smoothness, suffix = "%", decimals = 0),
+                47 to ParamHuman(suffix = "x", scale = 1f, decimals = 2),
+                56 to ParamHuman(label = R.string.fxl_source_opacity, suffix = "%", decimals = 0),
             ),
         ),
     )
@@ -1109,6 +1158,10 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put("aurea.control.checkbox", EffectHuman(name = R.string.fx_name_checkbox_control, keywords = "expressao caixa controle"))
     put("aurea.control.color", EffectHuman(name = R.string.fx_name_color_control, keywords = "expressao cor controle"))
     put("aurea.control.point", EffectHuman(name = R.string.fx_name_point_control, keywords = "expressao ponto controle"))
+    // AE expressions (lote E).
+    put("aurea.control.dropdown", EffectHuman(name = R.string.fx_name_dropdown_control, keywords = "expressao menu suspenso lista dropdown controle"))
+    put("aurea.control.layer", EffectHuman(name = R.string.fx_name_layer_control, keywords = "expressao camada layer controle"))
+    put("aurea.control.point3d", EffectHuman(name = R.string.fx_name_point3d_control, keywords = "expressao ponto 3d controle"))
     // --- Pacote de paridade: movimento, transições por forma e acabamento ---
     put("aurea.motion.oscillate.cycles", EffectHuman(
         name = R.string.fx_name_oscillate, keywords = "oscilar oscillate seno triangulo fase orbita",
@@ -2211,7 +2264,9 @@ internal fun paramDisplay(typeId: Int, s: ParamSlot): ParamDisplay {
  * tabela) e AVANÇADOS (na ordem do motor).
  */
 internal fun splitPrincipal(typeId: Int, visible: List<ParamSlot>): Pair<List<ParamSlot>, List<ParamSlot>> {
-    val wanted = Table[typeId]?.principal
+    val wanted = if (typeId == effectTypeId("aurea.light.deep_glow") && visible.any { it.index >= 22 }) {
+        listOf(22, 23, 24, 25, 56)
+    } else Table[typeId]?.principal
     if (wanted == null) {
         if (visible.size <= SHOW_ALL_UP_TO) return visible to emptyList()
         return visible.take(DEFAULT_PRINCIPAL) to visible.drop(DEFAULT_PRINCIPAL)

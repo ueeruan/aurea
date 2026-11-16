@@ -3,7 +3,7 @@
 <resources>
     <string name="fx_name_headbop">Хэдбоп</string>
     <string name="fx_desc_headbop">Человек на фото или видео качает головой и телом в такт музыке</string>
-    <string name="headbop_note">Проанализируйте слой, чтобы найти голову и плечи. Без человека качается весь кадр.</string>
+    <string name="headbop_note">Проанализируйте человека для определения видимых суставов. Тело движется в ритм с подвижными руками и опорой на стопы.</string>
     <string name="headbop_analyze">Анализ</string>
     <string name="headbop_reanalyze">Повторить анализ</string>
     <string name="headbop_analyzing">Анализ человека и ритма…</string>

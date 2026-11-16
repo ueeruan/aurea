@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Painel do modelo 3D (13/11/2026): Material (visuais do modelo inteiro), Textura e Animação (Evolução com keyframe). -->
+<resources>
+    <string name="m3d_title">Modelo 3D</string>
+    <string name="m3d_tab_shadow">Sombra</string>
+    <string name="m3d_look">Visual</string>
+    <string name="m3d_look_hint">Toque numa bola para dar um visual ao modelo inteiro.</string>
+    <string name="m3d_look_original">Original</string>
+    <string name="m3d_look_plastic">Plástico</string>
+    <string name="m3d_look_matte">Fosco</string>
+    <string name="m3d_look_metal">Metal</string>
+    <string name="m3d_look_chrome">Cromo</string>
+    <string name="m3d_look_gold">Ouro</string>
+    <string name="m3d_look_glass">Vidro</string>
+    <string name="m3d_look_custom">Ajustado à mão</string>
+    <string name="m3d_adjust">Ajustar</string>
+    <string name="m3d_whole_model">Modelo inteiro</string>
+    <string name="m3d_material_n">Material %1$d</string>
+    <string name="m3d_no_materials">Este modelo não tem materiais para ajustar.</string>
+    <string name="m3d_apply_to">Aplicar em</string>
+    <string name="m3d_one_part">Uma parte</string>
+    <string name="m3d_texture_pick">Imagem da textura</string>
+    <string name="m3d_texture_hint">A imagem cobre o modelo inteiro, nas coordenadas de textura do próprio arquivo.</string>
+    <string name="m3d_texture_original">Voltar à textura original</string>
+    <string name="m3d_texture_no_parts">Este modelo não tem partes para receber textura.</string>
+    <string name="m3d_texture_material_hint">A textura deste material pode vir de um arquivo ou de uma camada da timeline.</string>
+    <string name="m3d_part_hint">Toque numa parte para trocar a textura dela ou escondê-la.</string>
+    <string name="m3d_part_own_texture">Textura própria</string>
+    <string name="m3d_part_hidden">Escondida</string>
+    <string name="m3d_anim_progress">Evolução</string>
+    <string name="m3d_anim_progress_hint">Marque ◆ em dois pontos da timeline para comandar a animação do arquivo por keyframes. Sem ◆, ela toca sozinha.</string>
+    <string name="m3d_anim_auto">Tocar sozinho</string>
+    <string name="m3d_anim_auto_hint">Tira o valor parado e os ◆ da Evolução: o clipe volta a tocar com o tempo.</string>
+    <string name="m3d_anim_loop">Repetir</string>
+    <string name="m3d_anim_speed">Velocidade</string>
+    <string name="m3d_anim_duration">Duração do clipe: %1$s s</string>
+    <string name="m3d_anim_pick_clip">Escolha um clipe para animar o modelo.</string>
+    <string name="m3d_anim_playing">Tocando sozinho</string>
+    <!-- 14/11/2026 (3D opções extras, v76): Luz e sombra, Posição, Brilho, textura que anda e animação. -->
+    <string name="m3d_tab_light_shadow">Luz e sombra</string>
+    <string name="m3d_place">Posição</string>
+    <string name="m3d_place_ground">Assentar no chão</string>
+    <string name="m3d_place_center">Centralizar</string>
+    <string name="m3d_place_fit">Ajustar à tela</string>
+    <string name="m3d_place_hint">Cada toque é um passo de desfazer. Com keyframes de posição, todos andam juntos.</string>
+    <string name="m3d_look_neon">Neon</string>
+    <string name="m3d_glow">Brilho</string>
+    <string name="m3d_glow_color">Cor do brilho</string>
+    <string name="m3d_glow_strength">Intensidade do brilho</string>
+    <string name="m3d_glow_hint">Luz própria do material. Com o Bloom da cena (Cena 3D › Render), o brilho se espalha em volta.</string>
+    <string name="m3d_tex_transform">Posição da textura</string>
+    <string name="m3d_tex_offset_x">Deslocar X</string>
+    <string name="m3d_tex_offset_y">Deslocar Y</string>
+    <string name="m3d_tex_rotation">Girar</string>
+    <string name="m3d_tex_scroll">Rolar com o tempo</string>
+    <string name="m3d_tex_scroll_x">Rolar X</string>
+    <string name="m3d_tex_scroll_y">Rolar Y</string>
+    <string name="m3d_tex_scroll_hint" formatted="false">Em % da imagem por segundo: a textura anda sozinha (esteira, água, tela).</string>
+    <string name="m3d_anim_start">Começar em</string>
+    <string name="m3d_anim_reverse">De trás para frente</string>
+    <string name="m3d_anim_pingpong">Ida e volta</string>
+    <string name="m3d_anim_speed_hint">Toque na Velocidade e marque ◆ na coluna da esquerda para acelerar ou frear a animação ao longo do tempo.</string>
+    <string name="m3d_obj_light">Luz do objeto</string>
+    <string name="m3d_obj_light_hint">Ilumina e reflete só este objeto com um estúdio ou uma imagem HDR própria. O resto da cena não muda.</string>
+    <string name="m3d_obj_light_scene">Da cena</string>
+    <string name="m3d_obj_light_intensity">Luz e reflexo</string>
+</resources>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AE reference batch C: Extrude, Depth Field, Smear. -->
+<resources>
+    <string name="refc_extrude_name">Extrusión (vector)</string>
+    <string name="refc_extrude_desc">Extrusión vectorial de textos, formas y máscaras: direccional, punto de fuga o cámara 3D, con contorno y degradado en los lados.</string>
+    <string name="refc_depth_field_name">Profundidad de campo</string>
+    <string name="refc_depth_field_desc">Desenfoca la capa según la profundidad: plano focal, grosor y radio máximo, con la profundidad estimada por IA.</string>
+    <string name="refc_smear_name">Mancha (máscaras)</string>
+    <string name="refc_smear_desc">Lleva el área de la máscara de origen a otro lugar y estira la imagen alrededor, dentro de la máscara de límite.</string>
+</resources>

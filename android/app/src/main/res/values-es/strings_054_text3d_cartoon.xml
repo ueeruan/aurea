@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.5.4: estilo Cartoon do texto 3D (material pronto 14 do motor). -->
+    <string name="pn_t3d_preset_cartoon">Cartoon</string>
+    <string name="t3d_cartoon_side_auto">Lateral automática</string>
+    <string name="t3d_cartoon_side">Color lateral</string>
+    <string name="t3d_cartoon_highlight">Brillo</string>
+    <string name="t3d_cartoon_outline_color">Color del contorno</string>
+    <string name="t3d_cartoon_outline_width">Grosor del contorno</string>
+    <string name="t3d_cartoon_hint">Colores planos de dibujo animado con un contorno grueso. El grosor del contorno está en píxeles de la composición: se ve igual en cualquier resolución de exportación.</string>
+</resources>

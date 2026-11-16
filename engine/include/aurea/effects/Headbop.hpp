@@ -77,6 +77,7 @@ enum Param : u32 {
 };
 
 inline constexpr u32 kMaxFaces = 4;
+inline constexpr u32 kBodyJoints = 22; // MediaPipe landmarks 11..32
 /// Pontos (Point2D) por pessoa no rig parado: centro, eixos, (roll, yaw),
 /// (pitch, profundidade), pescoço, ombro esquerdo (da imagem), ombro direito.
 inline constexpr u32 kFaceParams = 7;
@@ -89,7 +90,8 @@ inline constexpr u32 kCloth = kHair + 1;
 inline constexpr u32 kPhysics = kCloth + 1;
 inline constexpr u32 kBakeSecondFirst = kPhysics + 1;
 inline constexpr u32 kSecondaryChannels = 11;
-inline constexpr u32 kParamCount = kBakeSecondFirst + kSecondaryChannels;
+inline constexpr u32 kBodyRigFirst = kBakeSecondFirst + kSecondaryChannels;
+inline constexpr u32 kParamCount = kBodyRigFirst + kMaxFaces * kBodyJoints * 2;
 
 enum class BeatSource : u32 { Automatic = 0, Manual = 1, Tap = 2 };
 enum class PoseSource : u32 { Beat = 0, Keyframes = 1 };
@@ -118,6 +120,7 @@ struct RigFace {
     Vec2 shoulderA{0.3f, 0.62f}; ///< ombro à esquerda da imagem
     Vec2 shoulderB{0.7f, 0.62f}; ///< ombro à direita da imagem
     f32 confidence = 0.0f;      ///< 0..1
+    std::array<Vec4, kBodyJoints> joints{}; // normalized x/y/z, confidence
 };
 
 struct RigFrame {
@@ -172,8 +175,9 @@ struct GpuFace {
     Vec4 prevHairT;
     Vec4 prevClothT;
     Vec4 prevFlutter;
+    Vec4 joints[kBodyJoints];
 };
-static_assert(sizeof(GpuFace) == 256, "std140");
+static_assert(sizeof(GpuFace) == 256 + kBodyJoints * sizeof(Vec4), "std140");
 
 inline constexpr u32 kGridX = 32, kGridY = 56;   ///< retrato; paisagem troca
 /// Com cabelo/roupa (0.5.2) a grade fica mais densa (as pontas do cabelo dobram).

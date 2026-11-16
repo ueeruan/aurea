@@ -1317,7 +1317,8 @@ void SceneRenderer::collect_pipelines(std::vector<PipelineKey>& out) const {
 
 bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& frame, u32 width, u32 height,
                           u64 frameNumber, FGTexture& outColor, const std::vector<ScenePlane>* planes,
-                          const SceneParticleDraw* particles, u32 particleCount, FGTexture* outDepth, FGTexture* outExposureHdr) noexcept {
+                          const SceneParticleDraw* particles, u32 particleCount, FGTexture* outDepth, FGTexture* outExposureHdr,
+                          Vec2 previewJitterPixels) noexcept {
     if (outDepth) *outDepth = FGTexture{};
     if (outExposureHdr) *outExposureHdr = FGTexture{};
     if (frameNumber != statsFrame_) {
@@ -1407,7 +1408,10 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     }
 
     const f32 aspect = static_cast<f32>(width) / static_cast<f32>(height);
-    const Mat4 proj = frame.camera.imageTransform * camera_projection(frame.camera, aspect);
+    Mat4 proj = frame.camera.imageTransform * camera_projection(frame.camera, aspect);
+    if (previewJitterPixels.x != 0.f || previewJitterPixels.y != 0.f)
+        proj = Mat4::translation(Vec3{2.f * previewJitterPixels.x / width,
+            2.f * previewJitterPixels.y / height, 0.f}) * proj;
     const Mat4 viewProj = proj * frame.camera.view;
 
     // --- Cabeçalho comum a todos os desenhos do frame ---------------------------
@@ -1620,6 +1624,24 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     auto material_for = [&](const SceneInstance& inst, const GpuModel& model, i32 index) -> const GpuMaterial* {
         const GpuMaterial* source = index >= 0 && index < static_cast<i32>(model.materials.size()) ? &model.materials[index] : &model.defaultMaterial;
         if (inst.holdout) return holdout_of(source, inst.doubleSided);
+        // 0.5.4 Cartoon: o CONTORNO leva a cor e a largura (NDC, metal/rugosidade
+        // da cópia — o shader do contorno não usa PBR) desta instância.
+        // toonParam > 0 = desenha; os ajustes de material não mexem nele.
+        if (source->factors.toon == 2) {
+            const auto cacheKey = std::make_pair(&inst, index);
+            if (auto found = materialCopies.find(cacheKey)) return *found;
+            auto& mat = copy_material(source);
+            const Vec2 ndc = inst.pose().outlineNdc;
+            const Vec4 ink = inst.pose().outlineColor;
+            mat.factors.baseColor = Vec4{ink.x, ink.y, ink.z, 1.0f};
+            mat.factors.metallic = std::isfinite(ndc.x) ? std::max(0.0f, ndc.x) : 0.0f;
+            mat.factors.roughness = std::isfinite(ndc.y) ? std::max(0.0f, ndc.y) : 0.0f;
+            mat.factors.toonParam = mat.factors.metallic > 0.0f && mat.factors.roughness > 0.0f ? 1.0f : 0.0f;
+            mat.factors.doubleSided = false;
+            mat.factors.unlit = false;
+            materialCopies.emplace(cacheKey, &mat);
+            return &mat;
+        }
         // The common unedited model needs neither a copy nor a per-node lookup.
         if (inst.pose().materials.empty() && !inst.doubleSided) return source;
         const auto cacheKey = std::make_pair(&inst, index);
@@ -1639,6 +1661,12 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             }
             if (over.mask & 16) values.factors[4] = over.metallic;
             if (over.mask & 32) values.factors[5] = over.roughness;
+            // v76: EMISSÃO do material (cor linear e força). Sem os bits, a do
+            // arquivo: o projeto antigo desenha bit a bit igual.
+            if (over.mask & 64) values.factors[6] = over.emissive.x;
+            if (over.mask & 128) values.factors[7] = over.emissive.y;
+            if (over.mask & 256) values.factors[8] = over.emissive.z;
+            if (over.mask & 512) values.factors[9] = std::max(0.0f, over.emissiveStrength);
             if (over.mask & 48) values.unlit = false; // An explicit PBR edit opts this instance into lighting.
             hasOverride = true;
             break;
@@ -1686,16 +1714,27 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         if (!swap.texture.valid()) return source;
         u32 repeatBits = 0;
         std::memcpy(&repeatBits, &swap.repeat, sizeof repeatBits);
-        const auto cacheKey = std::make_pair(source, swap.texture.id * 1099511628211ull ^ repeatBits);
+        u64 key = swap.texture.id * 1099511628211ull ^ repeatBits;
+        // v76: deslocamento e giro da textura (o rolar já vem somado ao
+        // deslocamento). Zeros = a chave de antes: a mesma cópia de sempre.
+        const f32 transform[3]{swap.offset.x, swap.offset.y, swap.rotation};
+        for (const f32 v : transform) {
+            u32 bits = 0;
+            std::memcpy(&bits, &v, sizeof bits);
+            if (bits) key = (key ^ (static_cast<u64>(bits) + 0x9e3779b97f4a7c15ull + (key << 6) + (key >> 2))) * 0xbf58476d1ce4e5b9ull;
+        }
+        const auto cacheKey = std::make_pair(source, key);
         if (auto found = texturedCopies.find(cacheKey)) return *found;
         auto& mat = copy_material(source);
         mat.tex[0] = swap.texture;
         mat.graphBase = FGTexture{};   // a troca por parte vence a textura do material
         mat.samp[0] = swapSampler_;
         const f32 repeat = std::isfinite(swap.repeat) && swap.repeat > 0.0f ? swap.repeat : 1.0f;
-        mat.factors.baseColorTex.offset = Vec2{0.0f, 0.0f};
+        mat.factors.baseColorTex.offset = Vec2{std::isfinite(swap.offset.x) ? swap.offset.x : 0.0f,
+                                               std::isfinite(swap.offset.y) ? swap.offset.y : 0.0f};
         mat.factors.baseColorTex.scale = Vec2{repeat, repeat};
-        mat.factors.baseColorTex.rotation = 0.0f;
+        mat.factors.baseColorTex.rotation = std::isfinite(swap.rotation) ? swap.rotation : 0.0f;
+
         mat.factors.baseColorTex.texCoord = 0;
         mat.factors.baseColor.x = mat.factors.baseColor.y = mat.factors.baseColor.z = 1.0f;
         texturedCopies.emplace(cacheKey, &mat);
@@ -1725,7 +1764,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         return &mat;
     };
     auto tinted = [&](const GpuMaterial* source, const Vec4& fill) -> const GpuMaterial* {
-        if (fill.w <= 0) return source;
+        if (fill.w <= 0 || source->factors.toon == 2) return source;   // o contorno do Cartoon fica na tinta dele
         auto& mat = copy_material(source);
         const f32 w = std::clamp(fill.w, 0.f, 1.f);
         mat.factors.baseColor.x += (fill.x - mat.factors.baseColor.x) * w;
@@ -1758,8 +1797,11 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         // MASK com MSAA vira o modo 3 (recorte por cobertura, ver pbr.frag).
         const f32 alphaMode = m.alphaMode == AlphaMode::Mask && passA2C_ ? 3.0f
                             : static_cast<f32>(static_cast<u8>(m.alphaMode));
-        b->alpha = Vec4{m.alphaCutoff, alphaMode, m.holdout ? 2.0f : m.unlit ? 1.0f : 0.0f,
-                        m.doubleSided ? 1.0f : 0.0f};
+        // z: 2 recorte, 1 unlit, 0 PBR; 0.5.4 Cartoon: −1 − brilho (cel, −2..−1)
+        // e −4 contorno (mr.xy = largura em NDC, lida também no vértice).
+        const f32 shading = m.holdout ? 2.0f : m.toon == 2 ? -4.0f
+                          : m.toon == 1 ? -1.0f - std::clamp(m.toonParam, 0.0f, 1.0f) : m.unlit ? 1.0f : 0.0f;
+        b->alpha = Vec4{m.alphaCutoff, alphaMode, shading, m.doubleSided ? 1.0f : 0.0f};
         // Verniz (pintura de carro), IOR/specular (F0 do dielétrico) e
         // transmissão (vidro fino) — lidos do glTF e antes ignorados.
         b->clearcoat = Vec4{std::clamp(m.clearcoat, 0.0f, 1.0f), std::clamp(m.clearcoatRoughness, 0.0f, 1.0f),
@@ -2037,6 +2079,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                     const auto& primitive = inst.asset->meshes[mi].primitives[primIndex];
                     const GpuMaterial* mat = material_for(inst, *gm, nodes[n].material_for(primitive));
                     if (mat->factors.alphaMode == AlphaMode::Blend) continue;   // transparente não projeta
+                    if (mat->factors.toon == 2) continue;   // contorno do Cartoon: só no passe de cor
                     const bool sk = skinnedNode && p.skinned;
                     auto pipe = shaders_->pipeline(shadow_key(sk));
                     if (!pipe.ok()) { mark_incomplete(__FILE__, __LINE__); continue; }
@@ -2191,6 +2234,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 const auto& primitive = inst.asset->meshes[mi].primitives[primIndex];
                 const i32 materialIndex = nodes[n].material_for(primitive);
                 const GpuMaterial* mat = material_for(inst, *gm, materialIndex);
+                // Contorno do Cartoon com largura 0 (ou recorte): nada a desenhar.
+                if (mat->factors.toon == 2 && (mat->factors.holdout || !(mat->factors.toonParam > 0.0f))) continue;
                 for (const SceneMaterialTexture& own : inst.materialTextures)
                     if (materialIndex >= 0 && own.material == static_cast<u32>(materialIndex)) { mat = material_textured(mat, own); break; }
                 for (const SceneNodeTexture& swap : inst.nodeTextures)
@@ -2255,7 +2300,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 }
                 d.viewDepth = viewFromLocal.transform_point(p.bounds.center()).z;
                 d.materialIndex = materialIndex;
-                if (velocityOn && drawMode != AlphaMode::Blend) {
+                if (velocityOn && drawMode != AlphaMode::Blend && mat->factors.toon != 2) {
                     PipelineKey vkey = velocity_key(skinDraw, mat->factors.doubleSided, key.frontFaceCCW);
                     auto vpipe = shaders_->pipeline(vkey);
                     auto* vb = arena.alloc_array<VelocityBlock>(1);
@@ -2309,10 +2354,15 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     // a SUA matriz (clip ← local no push); as instâncias juntadas abaixo têm a
     // matriz no SSBO e o pré-passe não as veria. Fica a lista de antes.
     std::vector<Draw> depthPrepass;
+    // 0.5.4: o contorno do Cartoon (toon 2) guarda a largura em metal/rugosidade
+    // e só existe no passe de cor — fora do pré-passe, do SSR e das sombras.
     if (ssrOn) ssrOn = std::any_of(opaque.begin(), opaque.end(), [](const Draw& d) {
-        return d.material && !d.material->factors.holdout && d.material->factors.roughness < 0.65f;
+        return d.material && !d.material->factors.holdout && d.material->factors.toon != 2 && d.material->factors.roughness < 0.65f;
     });
-    if (aoOn || ssrOn || (frame.post.fog && frame.post.fogDensity > 0.0f && passMrt_) || localTiles) depthPrepass = opaque;
+    if (aoOn || ssrOn || (frame.post.fog && frame.post.fogDensity > 0.0f && passMrt_) || localTiles) {
+        depthPrepass.reserve(opaque.size());
+        for (const Draw& d : opaque) if (!d.material || d.material->factors.toon != 2) depthPrepass.push_back(d);
+    }
 
     // --- Instancing (8E) ------------------------------------------------------
     // Objetos iguais (mesma malha, primitiva, LOD, material e pipeline; sem
@@ -2535,7 +2585,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     f32 farthest = 0.0f;
     for (const Draw& d : depthPrepass) farthest = std::max(farthest, std::fabs(d.viewDepth));
     if ((aoOn || fogOn || ssrOn) && !depthPrepass.empty()) {
-        const u32 aw = std::max(1u, width / 2), ah = std::max(1u, height / 2);
+        const u32 divisor = lodHysteresis_ ? screenEffectDiv_ : 2u;
+        const u32 aw = std::max(1u, width / divisor), ah = std::max(1u, height / divisor);
         auto depthStatic = shaders_->pipeline(ao_depth_key(false));
         auto depthSkinned = shaders_->pipeline(ao_depth_key(true));
         if (ssrOn) {
@@ -3096,14 +3147,15 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         if (!ssrPipe.ok() || !ssrApply.ok() || !rig::inverse(proj, invProj)) {
             mark_incomplete(__FILE__, __LINE__);
         } else {
-            const u32 sw = std::max(1u, width / 2), sh = std::max(1u, height / 2);
             const bool exportQuality = !lodHysteresis_;
+            const u32 divisor = exportQuality ? 2u : screenEffectDiv_;
+            const u32 sw = std::max(1u, width / divisor), sh = std::max(1u, height / divisor);
             struct SsrParams { Mat4 proj, invProj; Vec4 texel, cfg, holdout; } sp{};
             sp.proj = proj;
             sp.invProj = invProj;
             sp.texel = Vec4{1.0f / static_cast<f32>(sw), 1.0f / static_cast<f32>(sh), static_cast<f32>(sw), static_cast<f32>(sh)};
             // Passos; espessura 3% da profundidade; alcance 1,5× a profundidade; força.
-            sp.cfg = Vec4{exportQuality ? 48.0f : 24.0f, 0.03f, 1.5f, 1.0f};
+            sp.cfg = Vec4{exportQuality ? 48.0f : static_cast<f32>(reflectionSteps_), 0.03f, 1.5f, 1.0f};
             TextureDesc sd;
             sd.width = sw;
             sd.height = sh;
@@ -3219,8 +3271,9 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         if (!volPipe.ok() || !applyPipe.ok() || !rig::inverse(viewProj, worldFromClip)) {
             mark_incomplete(__FILE__, __LINE__);
         } else {
-            const u32 vw = std::max(1u, width / 2), vh = std::max(1u, height / 2);
             const bool exportQuality = !lodHysteresis_;
+            const u32 divisor = exportQuality ? 2u : screenEffectDiv_;
+            const u32 vw = std::max(1u, width / divisor), vh = std::max(1u, height / divisor);
             // O sol: a direcional com sombra (os feixes); sem ela, a primeira direcional.
             i32 sunIndex = shadowLight;
             for (u32 i = 0; sunIndex < 0 && i < frame.lights.size() && i < 4; ++i)
@@ -3236,7 +3289,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 vp.sunColor = Vec4{sl.color * sl.intensity, frame.post.fogRays};
             }
             vp.fog = Vec4{frame.post.fogColor * std::max(frame.environment.intensity, 0.0f), frame.post.fogDensity};
-            vp.cfg = Vec4{0.6f, shadowBiasDepth + 1e-4f, 1.0f / static_cast<f32>(mapSize), exportQuality ? 40.0f : 20.0f};
+            vp.cfg = Vec4{0.6f, shadowBiasDepth + 1e-4f, 1.0f / static_cast<f32>(mapSize),
+                         exportQuality ? 40.0f : static_cast<f32>(volumetricSteps_)};
             TextureDesc vd;
             vd.width = vw;
             vd.height = vh;
@@ -3358,8 +3412,9 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     // attachment. Their display colors still pass through unchanged; only
     // lit meshes, the sky and the floor can feed the bloom pyramid.
     bool bloomHasRadiance = frame.environment.showBackground || frame.floor.mode != 0;
-    for (const auto& draw : opaque) bloomHasRadiance |= !draw.material->factors.unlit;
-    for (const auto& draw : blended) bloomHasRadiance |= !draw.material->factors.unlit;
+    // Cartoon (toon) é cor de exibição como o unlit: não acende o bloom.
+    for (const auto& draw : opaque) bloomHasRadiance |= !draw.material->factors.unlit && !draw.material->factors.toon;
+    for (const auto& draw : blended) bloomHasRadiance |= !draw.material->factors.unlit && !draw.material->factors.toon;
     outColor = finish_exposure(graph, frame, width, height, display, scene, bloomHasRadiance);
     return outColor.valid();
 }

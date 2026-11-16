@@ -1,0 +1,44 @@
+#version 450
+// =============================================================================
+//  Aurea / shaders / effects / glitchify_reference_corrupt.comp
+//
+//  Glitchify reference › Color Glitch. The native effect walks the 8-bit ARGB
+//  frame as ONE byte stream and, in order, adds to byte[i + off] the already
+//  corrupted byte[i] (signed) times k, truncated and wrapped to 8 bits —
+//  off = trunc(Offset · 80), k = (0.8 + 0.2·noise(50, 50)) · Amount · Glitchify
+//  Amount. Bytes off apart form independent chains, so one invocation walks
+//  one chain serially: the exact recurrence, no approximation.
+//  Output: an r32f image (4 texels per pixel: A, R, G, B bytes).
+// =============================================================================
+#include "glitchify_reference_common.glsl"
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+layout(set = 0, binding = AUREA_TEX0) uniform sampler2D u_base;
+layout(set = 0, binding = AUREA_IMG0, r32f) writeonly uniform image2D u_bytes;
+
+int byte_at(int n, int width) {
+    const int p = n >> 2;
+    const vec4 b = gx_to_bytes(texelFetch(u_base, ivec2(p % width, p / width), 0));
+    const int c = n & 3;
+    return int(c == 0 ? b.a : (c == 1 ? b.r : (c == 2 ? b.g : b.b)));
+}
+
+void main() {
+    const ivec2 size = textureSize(u_base, 0);
+    const int off = int(u.stage.y + 0.5);
+    const int chain = int(gl_GlobalInvocationID.x);
+    const int total = size.x * size.y * 4;
+    if (off <= 0 || chain >= off || chain >= total) return;
+    const float k = u.stage.z;
+    int previous = 0;
+    for (int n = chain; n < total; n += off) {
+        int b = byte_at(n, size.x);
+        if (n >= off) {
+            const int signedPrevious = previous >= 128 ? previous - 256 : previous;
+            b = (b + int(trunc(float(signedPrevious) * k))) & 255;
+        }
+        previous = b;
+        const int p = n >> 2;
+        imageStore(u_bytes, ivec2((p % size.x) * 4 + (n & 3), p / size.x), vec4(float(b)));
+    }
+}

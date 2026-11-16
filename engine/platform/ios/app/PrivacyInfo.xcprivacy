@@ -17,6 +17,9 @@
   - UserDefaults (CA92.1): preferências e estado do próprio app.
   - Data de arquivo (C617.1): tamanho/metadados de arquivos dentro do app.
   - Tempo desde o boot (35F9.1): medir intervalos (relógio monotônico do motor).
+  - Espaço em disco: mostrar ao usuário (85F4.1, Sobre e Exportar), conferir
+    antes de gravar (E174.1, exportação e importação) e no relatório de
+    problema que a pessoa escolhe enviar (7D9E.1).
 -->
 <plist version="1.0">
 <dict>
@@ -111,6 +114,16 @@
 			<key>NSPrivacyAccessedAPITypeReasons</key>
 			<array>
 				<string>35F9.1</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryDiskSpace</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>85F4.1</string>
+				<string>E174.1</string>
+				<string>7D9E.1</string>
 			</array>
 		</dict>
 	</array>

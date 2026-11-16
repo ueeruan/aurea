@@ -109,6 +109,7 @@ Result<u64> Engine::add_drawing_stroke(u64 layerId, u32 tool, const f32* rgba, f
     if (!xyp || count < 3 || count % 3 != 0) return Status{Errc::InvalidArgument, "traço vazio"};
     if (tool > kDrawEraser) return Status{Errc::InvalidArgument, "ferramenta desconhecida"};
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return Status{Errc::InvalidState, "nenhum projeto aberto"};
     Layer* l = layerId ? content_vector_layer(comp, layerId) : nullptr;
@@ -117,7 +118,7 @@ Result<u64> Engine::add_drawing_stroke(u64 layerId, u32 tool, const f32* rgba, f
     // Composição → camada. A camada nova nasce com âncora = posição = centro:
     // a conta é a identidade.
     vector::Affine2 world{};
-    if (l) world = content_affine(layer_world_matrix(*comp, *l, playback_.current()));
+    if (l) world = content_affine(layer_world_matrix(*comp, *l, editing_frame_locked()));
     const vector::Affine2 inv = world.inverse();
     std::vector<Vec2> pts;
     std::vector<f32> press;
@@ -185,7 +186,7 @@ Result<u64> Engine::add_drawing_stroke(u64 layerId, u32 tool, const f32* rgba, f
         l = create_drawing_layer(*comp, lid);
         if (!l) return Status{Errc::OutOfMemory, "camada nao criada"};
         result = lid.pack();
-        const i64 t = std::clamp<i64>(playback_.current().value, 0, std::max<i64>(0, comp->duration().value - 1));
+        const i64 t = std::clamp<i64>(editing_frame_locked().value, 0, std::max<i64>(0, comp->duration().value - 1));
         l->start = FrameIndex{t};
         l->end = FrameIndex{new_layer_end_locked(comp, l, t)};
     }
@@ -200,6 +201,7 @@ Result<u64> Engine::add_drawing_stroke(u64 layerId, u32 tool, const f32* rgba, f
 
 u32 Engine::vector_layer_flags(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId);
     const Layer* l = content_vector_layer(project_ ? current_composition() : nullptr, layerId);
     if (!l) return 0;
     return 1u | (l->shape.vector.drawing ? 2u : 0u);
@@ -323,6 +325,7 @@ void propagate_path_topology(BezierPath& other, usize countBefore, Engine::PathO
 
 i32 Engine::edit_vector_path(u64 layerId, u32 group, u32 path, PathOp op, const f32* args, u32 argc, bool continuing) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = content_vector_layer(comp, layerId);
     if (!l || l->locked || group >= l->shape.vector.groups.size() || path >= l->shape.vector.groups[group].paths.size()) return -1;
@@ -343,7 +346,7 @@ i32 Engine::edit_vector_path(u64 layerId, u32 group, u32 path, PathOp op, const 
     }
 
     // A forma no cabeçote (paramétrico vira caminho livre com a mesma forma).
-    const i64 local = l->local_time(playback_.current()).value;
+    const i64 local = l->local_time(editing_frame_locked()).value;
     VectorPath work = vp;
     if (work.kind != VectorPathKind::Free) vector::make_editable(work);
     BezierPath b = work.keys.empty() ? work.path : vector::path_at(work, static_cast<f64>(local));
@@ -425,10 +428,11 @@ bool Engine::drag_text_box_width(u64 layerId, f32 dx, f32 dy, bool continuing) n
     if (!std::isfinite(dx) || !std::isfinite(dy)) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || l->kind != LayerKind::Text) return false;
-    const vector::Affine2 world = content_affine(layer_world_matrix(*comp, *l, playback_.current()));
+    const vector::Affine2 world = content_affine(layer_world_matrix(*comp, *l, editing_frame_locked()));
     const Vec2 d = world.inverse().apply_vec(Vec2{dx, dy});
     TextData& t = l->text;
     f32 width = t.box.w;
@@ -477,10 +481,11 @@ bool Engine::resize_shape_handle(u64 layerId, u32 handle, f32 du, f32 dv, bool k
     if (handle > 7 || !std::isfinite(du) || !std::isfinite(dv)) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || l->kind != LayerKind::Shape || l->shape.shapeType == kShapeVector) return false;
-    const FrameIndex local = l->local_time(playback_.current());
+    const FrameIndex local = l->local_time(editing_frame_locked());
     auto current = [&](u32 param) {
         const f32* r = shape::param_field(l->shape, param);
         const Track* tr = l->tracks.find(TrackProperty::ShapeParam, 0, param);

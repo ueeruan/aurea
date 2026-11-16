@@ -2,6 +2,7 @@
 
 #include "aurea/core/Time.hpp"
 #include "aurea/effects/EffectRegistry.hpp"
+#include "aurea/plugins/AudioDsp.hpp"
 #include "aurea/project/Project.hpp"
 #include "aurea/timeline/Composition.hpp"
 
@@ -67,6 +68,8 @@ struct OfflineAudioSnapshot::Impl final : audio::BlockSource {
     u64 budget = 0, liveBytes = 0, peakBytes = 0, renderedBlocks = 0;
     u64 clock = 0, epoch = 0, nextAsset = 0xFFFFFFFE00000000ull;
     Status status;
+    const EffectRegistry* registry = nullptr;
+    u64 pluginBytes = 0;
 
     bool cancelled() const noexcept {
         return cancel && cancel->load(std::memory_order_relaxed);
@@ -123,10 +126,17 @@ struct OfflineAudioSnapshot::Impl final : audio::BlockSource {
         ancestry.pop_back();
         if (!status.ok()) return nullptr;
         const audio::ExportNestedAudioSource nested{node, &resolve_nested};
-        node->snapshot = audio::build_snapshot(composition, project, cache, resolver, resolverUser, &nested);
+        node->snapshot = audio::build_snapshot(composition, project, cache, resolver, resolverUser, &nested, registry);
         if (!node->snapshot) {
             status = Status{Errc::OutOfMemory, "snapshot de audio offline"};
             return nullptr;
+        }
+        for (const auto& clip : node->snapshot->clips) for (const auto& stage : clip.chain) if (stage.plugin) {
+            pluginBytes += stage.plugin->stateBytes + stage.plugin->immutableBytes;
+            if (pluginBytes > (128ull << 20)) {
+                status = Status{Errc::BudgetExceeded, "audio plugin graph exceeds the session memory budget"};
+                return nullptr;
+            }
         }
         // Resolver keys are needed only while constructing the snapshot. Drop
         // them now: runtime audio owns no frozen Layer/Composition pointers.
@@ -190,6 +200,7 @@ struct OfflineAudioSnapshot::Impl final : audio::BlockSource {
                            *this, rendered->pcm.data(), &childStats, &child.state, false);
                 beat();
                 if (cancelled() && status.ok()) status = Errc::Cancelled;
+                if (childStats.dspError != Errc::Ok && status.ok()) status = childStats.dspError;
                 if (childStats.missingBlocks && status.ok())
                     status = Status{Errc::DecodeFailed, "audio aninhado incompleto"};
                 if (!status.ok()) { liveBytes -= kBlockBytes; return nullptr; }
@@ -216,10 +227,11 @@ OfflineAudioSnapshot::~OfflineAudioSnapshot() = default;
 Result<std::unique_ptr<OfflineAudioSnapshot>> OfflineAudioSnapshot::create(
     const Composition& root, const Project& project, audio::AudioBlockCache* cache,
     audio::AssetPathResolver resolver, void* resolverUser, u64 budget,
-    const std::atomic<bool>* cancel) noexcept {
+    const std::atomic<bool>* cancel, const EffectRegistry* registry) noexcept {
     try {
         auto impl = std::make_unique<Impl>();
         impl->budget = budget;
+        impl->registry = registry;
         impl->cancel = cancel;
         std::vector<const Composition*> ancestry;
         impl->root = impl->build(root, project, cache, resolver, resolverUser, ancestry);
@@ -251,6 +263,7 @@ Status OfflineAudioSnapshot::mix(i64 start, u32 frames, audio::BlockSource& sour
     if (impl.cancelled()) impl.status = Errc::Cancelled;
     else audio::mix(*impl.root->snapshot, start, frames, impl, stereo, &result, state);
     impl.beat();
+    if (result.dspError != Errc::Ok && impl.status.ok()) impl.status = result.dspError;
     if (result.missingBlocks && impl.status.ok()) impl.status = Errc::DecodeFailed;
     if (impl.cancelled() && impl.status.ok()) impl.status = Errc::Cancelled;
     impl.realSource = nullptr;
@@ -259,6 +272,7 @@ Status OfflineAudioSnapshot::mix(i64 start, u32 frames, audio::BlockSource& sour
     impl.leases.clear();
     if (!impl.status.ok()) std::fill(stereo, stereo + static_cast<usize>(frames) * audio::kMixChannels, 0.0f);
     if (stats) {
+        if (result.dspError != Errc::Ok) stats->dspError = result.dspError;
         stats->missingBlocks += result.missingBlocks;
         stats->peak = std::max(stats->peak, result.peak);
     }

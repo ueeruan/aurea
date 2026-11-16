@@ -16,6 +16,7 @@
 		CA2127000000000000000005 /* CrashReporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA2127000000000000000006 /* CrashReporter.swift */; };
 		CA2127000000000000000007 /* GoogleLogin.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA2127000000000000000008 /* GoogleLogin.swift */; };
 		CA2141000000000000000001 /* CloudCaptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA2141000000000000000002 /* CloudCaptions.swift */; };
+		CA0530C0000000000000000A /* CaptionsWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA0530C0000000000000000B /* CaptionsWorkspace.swift */; };
 		DA2121000000000000000001 /* CommandSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA2121000000000000000002 /* CommandSearch.swift */; };
 		DA2121000000000000000003 /* editor_commands.json in Resources */ = {isa = PBXBuildFile; fileRef = DA2121000000000000000004 /* editor_commands.json */; };
 		DA2113000000000000000001 /* PerformanceTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA2113000000000000000002 /* PerformanceTest.swift */; };
@@ -86,6 +87,8 @@
 		AE0000000000000000000089 /* MediaPanels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000088 /* MediaPanels.swift */; };
 		AE0000000000000000036D01 /* AssistantClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000036D00 /* AssistantClient.swift */; };
 		AE0000000000000000036E01 /* AssistantView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000036E00 /* AssistantView.swift */; };
+		AE0000000000000000036F01 /* AureaMcp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000036F00 /* AureaMcp.swift */; };
+		AE0000000000000000037001 /* AureaMcpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000037000 /* AureaMcpView.swift */; };
 		AE000000000000000000008B /* AnimationTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE000000000000000000008A /* AnimationTools.swift */; };
 		AE000000000000000000008D /* VectorPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE000000000000000000008C /* VectorPanel.swift */; };
 		AE000000000000000000008F /* AppPanels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE000000000000000000008E /* AppPanels.swift */; };
@@ -156,6 +159,7 @@
 		CA2127000000000000000006 /* CrashReporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrashReporter.swift; sourceTree = "<group>"; };
 		CA2127000000000000000008 /* GoogleLogin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleLogin.swift; sourceTree = "<group>"; };
 		CA2141000000000000000002 /* CloudCaptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudCaptions.swift; sourceTree = "<group>"; };
+		CA0530C0000000000000000B /* CaptionsWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptionsWorkspace.swift; sourceTree = "<group>"; };
 		DA2121000000000000000002 /* CommandSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandSearch.swift; sourceTree = "<group>"; };
 		DA2121000000000000000004 /* editor_commands.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = Resources/editor_commands.json; sourceTree = "<group>"; };
 		DA2113000000000000000002 /* PerformanceTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceTest.swift; sourceTree = "<group>"; };
@@ -233,6 +237,8 @@
 		AE0000000000000000000088 /* MediaPanels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaPanels.swift; sourceTree = "<group>"; };
 		AE0000000000000000036D00 /* AssistantClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantClient.swift; sourceTree = "<group>"; };
 		AE0000000000000000036E00 /* AssistantView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantView.swift; sourceTree = "<group>"; };
+		AE0000000000000000036F00 /* AureaMcp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AureaMcp.swift; sourceTree = "<group>"; };
+		AE0000000000000000037000 /* AureaMcpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AureaMcpView.swift; sourceTree = "<group>"; };
 		AE000000000000000000008A /* AnimationTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnimationTools.swift; sourceTree = "<group>"; };
 		AE000000000000000000008C /* VectorPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VectorPanel.swift; sourceTree = "<group>"; };
 		AE000000000000000000008E /* AppPanels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPanels.swift; sourceTree = "<group>"; };
@@ -339,6 +345,7 @@
 				CA2127000000000000000006 /* CrashReporter.swift */,
 				CA2127000000000000000008 /* GoogleLogin.swift */,
 				CA2141000000000000000002 /* CloudCaptions.swift */,
+				CA0530C0000000000000000B /* CaptionsWorkspace.swift */,
 				AE0000000000000000000003 /* HomeView.swift */,
 				AE0000000000000000000120 /* HomeBackdrop.swift */,
 				AE0000000000000000000004 /* EditorView.swift */,
@@ -366,6 +373,8 @@
 				AE0000000000000000000088 /* MediaPanels.swift */,
 				AE0000000000000000036D00 /* AssistantClient.swift */,
 				AE0000000000000000036E00 /* AssistantView.swift */,
+				AE0000000000000000036F00 /* AureaMcp.swift */,
+				AE0000000000000000037000 /* AureaMcpView.swift */,
 				AE000000000000000000008A /* AnimationTools.swift */,
 				AE000000000000000000008C /* VectorPanel.swift */,
 				AE000000000000000000008E /* AppPanels.swift */,
@@ -667,6 +676,7 @@
 				CA2127000000000000000005 /* CrashReporter.swift in Sources */,
 				CA2127000000000000000007 /* GoogleLogin.swift in Sources */,
 				CA2141000000000000000001 /* CloudCaptions.swift in Sources */,
+				CA0530C0000000000000000A /* CaptionsWorkspace.swift in Sources */,
 				AE000000000000000000003B /* HomeView.swift in Sources */,
 				AE0000000000000000000121 /* HomeBackdrop.swift in Sources */,
 				AE000000000000000000003C /* EditorView.swift in Sources */,
@@ -694,6 +704,8 @@
 				AE0000000000000000000089 /* MediaPanels.swift in Sources */,
 				AE0000000000000000036D01 /* AssistantClient.swift in Sources */,
 				AE0000000000000000036E01 /* AssistantView.swift in Sources */,
+				AE0000000000000000036F01 /* AureaMcp.swift in Sources */,
+				AE0000000000000000037001 /* AureaMcpView.swift in Sources */,
 				AE000000000000000000008B /* AnimationTools.swift in Sources */,
 				AE000000000000000000008D /* VectorPanel.swift in Sources */,
 				AE000000000000000000008F /* AppPanels.swift in Sources */,
@@ -823,8 +835,8 @@
 				CODE_SIGN_ENTITLEMENTS = app/Aurea.entitlements;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2217;
-				MARKETING_VERSION = 0.5.2;
+				CURRENT_PROJECT_VERSION = 2221;
+				MARKETING_VERSION = 1.0.1;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
@@ -900,8 +912,8 @@
 				CODE_SIGN_ENTITLEMENTS = app/Aurea.entitlements;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2217;
-				MARKETING_VERSION = 0.5.2;
+				CURRENT_PROJECT_VERSION = 2221;
+				MARKETING_VERSION = 1.0.1;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",

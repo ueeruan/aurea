@@ -26,12 +26,36 @@ ParamValue placed_param(ParamValue value, const ParamSpec& def, const LayerPlace
 // Utilidades de Effect.hpp
 // =============================================================================
 Rect visible_layer_rect(const LayerPlacement& pl) noexcept {
-    // Camada na CENA 3D: a matriz 2D da composição não diz onde ela aparece (o
-    // plano dela vive no mundo, sob a câmera), então não há retângulo visível a
-    // calcular. Vazio = "não corte por visibilidade" — quem chama já trata
-    // assim, e era o corte que encolhia a região para 1x1 e fazia a camada
-    // desaparecer atrás do efeito (Motion Tile, Meio-tom, brilhos...).
-    if (pl.inScene3d || pl.preserveFullExtent) return Rect{0, 0, 0, 0};
+    // compFromLayer includes camera projection for planes in the 3D scene.
+    // Full-input readers retain their entire source domain.
+    if (pl.preserveFullExtent) return Rect{0, 0, 0, 0};
+    if (pl.inScene3d || std::fabs(pl.compFromLayer.col[0].w) > 1e-9f
+        || std::fabs(pl.compFromLayer.col[1].w) > 1e-9f) {
+        // Invert the projected plane at the four viewport corners. A horizon
+        // crossing the viewport has an unbounded preimage and stays uncropped.
+        const Mat4& matrix = pl.compFromLayer;
+        if (!pl.compWidth || !pl.compHeight) return {};
+        f64 minX = 1e30, minY = 1e30, maxX = -1e30, maxY = -1e30;
+        for (const f64 y : {0.0, static_cast<f64>(pl.compHeight)})
+            for (const f64 x : {0.0, static_cast<f64>(pl.compWidth)}) {
+                const f64 a = matrix.col[0].x - x * matrix.col[0].w;
+                const f64 b = matrix.col[0].y - y * matrix.col[0].w;
+                const f64 c = matrix.col[1].x - x * matrix.col[1].w;
+                const f64 d = matrix.col[1].y - y * matrix.col[1].w;
+                const f64 tx = x * matrix.col[3].w - matrix.col[3].x;
+                const f64 ty = y * matrix.col[3].w - matrix.col[3].y;
+                const f64 determinant = a * d - b * c;
+                if (!std::isfinite(determinant) || std::fabs(determinant) < 1e-12) return {};
+                const f64 localX = (d * tx - c * ty) / determinant;
+                const f64 localY = (a * ty - b * tx) / determinant;
+                const f64 depth = matrix.col[0].w * localX + matrix.col[1].w * localY + matrix.col[3].w;
+                if (!std::isfinite(localX) || !std::isfinite(localY) || !(depth > 1e-6)) return {};
+                minX = std::min(minX, localX); maxX = std::max(maxX, localX);
+                minY = std::min(minY, localY); maxY = std::max(maxY, localY);
+            }
+        return Rect{static_cast<f32>(minX), static_cast<f32>(minY),
+                    static_cast<f32>(maxX - minX), static_cast<f32>(maxY - minY)};
+    }
     // Parte 2D afim de comp←layer: x' = a x + c y + tx ; y' = b x + d y + ty.
     const Mat4& m = pl.compFromLayer;
     const f32 a = m.col[0].x, b = m.col[0].y;
@@ -104,12 +128,18 @@ u32 EffectBuildContext::fullscreen_pass(const char* name, PassStage stage, FGTex
                                         ShaderId fragment, std::initializer_list<PassTexture> textures,
                                         const void* uniforms, u32 uniformBytes, LoadOp load) noexcept {
     auto pipe = shaders_.pipeline(PipelineKey::fullscreen(fragment, graph_.desc(target).format));
-    if (!pipe.ok()) return kInvalidIndex;
+    if (!pipe.ok()) {
+        resources_.effect_failure(pipe.status());
+        return kInvalidIndex;
+    }
 
     void* u = nullptr;
     if (uniforms && uniformBytes) {
         u = arena_.alloc(uniformBytes, 16);
-        if (!u) return kInvalidIndex;
+        if (!u) {
+            resources_.effect_failure(Status{Errc::OutOfMemory, "effect uniform allocation failed"});
+            return kInvalidIndex;
+        }
         std::memcpy(u, uniforms, uniformBytes);
     }
 
@@ -152,20 +182,32 @@ u32 EffectBuildContext::fullscreen_pass(const char* name, PassStage stage, FGTex
 u32 EffectBuildContext::fullscreen_pass(const char* name, PassStage stage, FGTexture target, ShaderId fragment,
                                         const PassTexture* textures, u32 textureCount,
                                         const void* uniforms, u32 uniformBytes, LoadOp load) noexcept {
-    if (textureCount > binding::kTextureSlots || (textureCount && !textures)) return kInvalidIndex;
+    if (textureCount > binding::kTextureSlots || (textureCount && !textures)) {
+        resources_.effect_failure(Status{Errc::InvalidArgument, "effect texture bindings are invalid"});
+        return kInvalidIndex;
+    }
     auto pipe = shaders_.pipeline(PipelineKey::fullscreen(fragment, graph_.desc(target).format));
-    if (!pipe.ok()) return kInvalidIndex;
+    if (!pipe.ok()) {
+        resources_.effect_failure(pipe.status());
+        return kInvalidIndex;
+    }
     void* u = nullptr;
     if (uniforms && uniformBytes) {
         u = arena_.alloc(uniformBytes, 16);
-        if (!u) return kInvalidIndex;
+        if (!u) {
+            resources_.effect_failure(Status{Errc::OutOfMemory, "effect uniform allocation failed"});
+            return kInvalidIndex;
+        }
         std::memcpy(u, uniforms, uniformBytes);
     }
     // As amarrações ficam na arena do frame (vivas até a execução do grafo):
     // a captura do passe guarda só o ponteiro e cabe no InplaceFunction.
     struct Bind { FGTexture graph; u64 raw; u64 sampler; };
     Bind* binds = textureCount ? static_cast<Bind*>(arena_.alloc(sizeof(Bind) * textureCount, alignof(Bind))) : nullptr;
-    if (textureCount && !binds) return kInvalidIndex;
+    if (textureCount && !binds) {
+        resources_.effect_failure(Status{Errc::OutOfMemory, "effect texture binding allocation failed"});
+        return kInvalidIndex;
+    }
     for (u32 i = 0; i < textureCount; ++i)
         binds[i] = Bind{textures[i].graph, textures[i].raw.id, shaders_.sampler(textures[i].sampler).id};
     struct Capture {
@@ -205,11 +247,17 @@ u32 EffectBuildContext::geometry_pass(const char* name, PassStage stage, FGTextu
         key.depthFormat = SurfaceFormat::Depth32F;
     }
     auto pipe = shaders_.pipeline(key);
-    if (!pipe.ok()) return kInvalidIndex;
+    if (!pipe.ok()) {
+        resources_.effect_failure(pipe.status());
+        return kInvalidIndex;
+    }
     void* u = nullptr;
     if (uniforms && uniformBytes) {
         u = arena_.alloc(uniformBytes, 16);
-        if (!u) return kInvalidIndex;
+        if (!u) {
+            resources_.effect_failure(Status{Errc::OutOfMemory, "effect geometry uniform allocation failed"});
+            return kInvalidIndex;
+        }
         std::memcpy(u, uniforms, uniformBytes);
     }
     constexpr u32 kGeometryTextures = 4;
@@ -285,15 +333,21 @@ void EffectPlan::clear() noexcept {
 void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, FrameIndex localTime,
                        f32 texelScale, const LayerPlacement& placement,
                        EffectResources* resources, EffectPlan& out, f64 framesPerSecond, const Composition* composition,
-                       u32 firstEffect, u32 endEffect) {
+                       u32 firstEffect, u32 endEffect, bool skipHeavy) {
     plan_f(layer, registry, static_cast<f64>(localTime.value), texelScale, placement, resources, out, framesPerSecond,
-           composition, firstEffect, endEffect);
+           composition, firstEffect, endEffect, skipHeavy);
+}
+
+bool EffectGraph::is_heavy(const Effect& effect) noexcept {
+    const EffectClass cls = effect.effect_class();
+    if (cls == EffectClass::Domain || cls == EffectClass::PerPixel) return false;
+    return cls == EffectClass::Temporal || cls == EffectClass::Global || effect.wants_history() || effect.wants_neighbors();
 }
 
 void EffectGraph::plan_f(const Layer& layer, const EffectRegistry& registry, f64 localTime,
                          f32 texelScale, const LayerPlacement& placement,
                          EffectResources* resources, EffectPlan& out, f64 framesPerSecond, const Composition* composition,
-                         u32 firstEffect, u32 endEffect) {
+                         u32 firstEffect, u32 endEffect, bool skipHeavy) {
     out.clear();
     out.placement = placement;
 
@@ -428,6 +482,8 @@ void EffectGraph::plan_f(const Layer& layer, const EffectRegistry& registry, f64
 
         const Effect* effect = registry.find(inst.type);
         const ParameterRegistry* params = registry.params(inst.type);
+        // AE layers: Rascunho na prévia — o pesado sai do plano (como desligado).
+        if (skipHeavy && effect && is_heavy(*effect)) continue;
         if (!effect || !params) {
             // Projeto de uma versão com um efeito que esta não tem: fica no
             // projeto, não desenha, e o painel mostra por quê.
@@ -579,6 +635,9 @@ void EffectGraph::plan_f(const Layer& layer, const EffectRegistry& registry, f64
     const auto wall_reach = [](const EffectEval& e) noexcept -> f32 {
         const EffectInfo& info = e.effect->info();
         if (!e.placement || info.cls != EffectClass::Domain || std::strcmp(info.category, "Distorcer") != 0) return 0.0f;
+        Mat4 transform = Mat4::identity();
+        f32 opacity = 1.0f;
+        if (e.effect->fold_into_composite(e, transform, opacity)) return 0.0f;
         return 0.6f * static_cast<f32>(std::max(e.placement->layerWidth, e.placement->layerHeight));
     };
     for (usize s = out.stages.size(); s-- > 0;) {
@@ -724,6 +783,7 @@ Status EffectGraph::build(const EffectPlan& plan, EffectBuildContext& ctx,
             if (pass == kInvalidIndex) {
                 // Sem pipeline o passe não existe: a layer segue sem os efeitos
                 // de cor em vez de desenhar com estado inválido.
+                ctx.resources().effect_failure(Status{Errc::PipelineCompileFailed,"fused color effect pipeline pending"});
                 note_bypass(1u, "cor fundida");
                 return false;
             }
@@ -757,6 +817,8 @@ Status EffectGraph::build(const EffectPlan& plan, EffectBuildContext& ctx,
         if (wants) ctx.set_history(LayerImage{});
         if (wantsNeighbors) ctx.set_neighbors({});
         if (!s.ok() || !next.valid()) {
+            ctx.resources().effect_failure(s.ok()
+                ? Status{Errc::InvalidState,"effect produced an invalid output image"} : s);
             // Bypass: `img` segue sendo a entrada; o quadro não cai por um efeito.
             note_bypass(e.effect->type_id(), e.effect->info().name);
             return false;

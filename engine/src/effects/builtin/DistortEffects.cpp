@@ -14,7 +14,9 @@
 #include "aurea/effects/ShakeMotion.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <mutex>
 
 namespace aurea::builtin {
 namespace {
@@ -532,12 +534,310 @@ public:
     }
 };
 
+class TurbulentDisplaceReference final : public Effect {
+public:
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo info{"aurea.distort.turbulent_displace_reference", "Turbulent Displace", "Distorcer", EffectClass::Domain};
+        return info;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        static const char* types[]{"Turbulento", "Protuberância", "Torção", "Turbulento suave", "Protuberância suave",
+            "Torção suave", "Vertical", "Horizontal", "Cruzado"};
+        static const char* pins[]{"Nenhuma", "Todas", "Bordas horizontais", "Bordas verticais", "Esquerda", "Direita",
+            "Acima", "Abaixo", "Todas travadas", "Horizontais travadas", "Verticais travadas", "Esquerda travada",
+            "Direita travada", "Acima travada", "Abaixo travada"};
+        static const char* aa[]{"Normal", "Alta"};
+        p.add_enum("displacement", "Deslocamento", types, 9, 0);
+        p.add_float("amount", "Valor", 50, -100, 100, kParamAnimatable | kParamPixels, "px");
+        p.typed_range(-10000, 10000);
+        p.add_float("size", "Tamanho", 100, 2, 1000, kParamAnimatable | kParamPixels, "px");
+        p.add_point2("offset", "Deslocar turbulência", {.5f, .5f}, -100, 100, kParamAnimatable | kParamRelative);
+        p.add_float("complexity", "Complexidade", 1, 1, 10);
+        p.add_angle("evolution", "Evolução", 0);
+        p.add_bool("cycle_evolution", "Evolução do ciclo", false);
+        p.add_int("cycle", "Ciclo em revoluções", 1, 1, 88);
+        p.add_int("seed", "Distribuição aleatória", 0, 0, 100000);
+        p.add_enum("pinning", "Fixação", pins, 15, 1);
+        p.add_bool("resize", "Redimensionar camada", false);
+        p.add_enum("antialias", "Suavização de borda", aa, 2, 0);
+        p.add_section_range("evolution", "Opções de evolução", 6, 8, kInvalidIndex, false);
+        p.set_enabled_by(7, 6, 1u);
+    }
+    bool is_identity(const EffectEval& e) const noexcept override { return std::fabs(finite_or(e.f(1), 0.0f)) < 1e-6f; }
+    bool needs_full_input() const noexcept override { return true; }
+    f32 input_margin(const EffectEval& e) const noexcept override {
+        const u32 type = std::min(e.e(0), 8u);
+        const f32 interpolationBound = type >= 3 && type <= 5 ? 1.728f : 1.2f;
+        const f32 differenceBound = type == 1 || type == 2 || type == 4 || type == 5 ? 2.0f : 1.0f;
+        const f32 amplitude = std::fabs(finite_or(e.f(1), 0.0f)) * std::clamp(finite_or(e.f(2), 100.0f), 2.0f, 1000.0f) * .05f;
+        return amplitude * octave_gain(e.f(4)) * interpolationBound * differenceBound;
+    }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat format) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_turbulent_displace_reference_frag, format));
+    }
+    void resolve_resources(EffectEval& e) const noexcept override {
+        if (!e.resources) return;
+        const i64 angle = static_cast<i64>(std::llround(std::clamp(static_cast<f64>(finite_or(e.f(5), 0.0f)), -32768.0, 32767.0) * 65536));
+        const u32 seed = static_cast<u32>(std::clamp(finite_or(e.f(8), 0.0f), 0.0f, 100000.0f));
+        const u32 cycle = e.b(6) ? std::clamp(e.e(7), 1u, 88u) : 90u;
+        const auto lattice = noise_lattice(angle, seed, cycle);
+        u64 key = (0x545552424c415431ull ^ static_cast<u64>(angle)) * 1099511628211ull;
+        key = ((key ^ seed) * 1099511628211ull) ^ cycle;
+        e.aux = e.resources->data_texture(key, lattice->data(), 64, 64);
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
+                 LayerImage& out) const override {
+        if (!e.aux.valid()) return Status{Errc::Busy, "Turbulent Displace lattice pending"};
+        const u32 type = std::min(e.e(0), 8u), pin = std::min(e.e(9), 14u);
+        const f32 size = std::clamp(finite_or(e.f(2), 100.0f), 2.0f, 1000.0f);
+        const f32 amplitude = finite_or(e.f(1), 0.0f) * size * .05f;
+        const bool resize = e.b(10) && pin != 1 && pin != 8;
+        const f32 reach = resize ? input_margin(e) : 0;
+        const Rect region = spread_region(input.region, reach, reach, e.placement, margin);
+        u32 width = 0, height = 0;
+        ctx.region_size(region, input.texel_scale_x(), width, height);
+        const f32 layerWidth = e.placement ? static_cast<f32>(e.placement->layerWidth) : input.region.w;
+        const f32 layerHeight = e.placement ? static_cast<f32>(e.placement->layerHeight) : input.region.h;
+        const f32 complexity = std::clamp(finite_or(e.f(4), 1.0f), 1.0f, 10.0f);
+        const f32 gain = octave_gain(complexity);
+        const f32 pinReach = std::max(0.0f, gain * amplitude * (4.0f / 3.0f));
+        const Vec2 point = e.p2(3);
+        const Vec2 offset{finite_or(point.x, .5f), finite_or(point.y, .5f)};
+        struct Uniforms {
+            Vec4 region, source, shape, offset, pin, quality;
+            std::array<Vec4, 30> coordinates;
+            std::array<Vec4, 10> octaveScale;
+        } u{};
+        u.region = {region.x, region.y, region.w, region.h};
+        u.source = {input.region.x, input.region.y, input.region.w, input.region.h};
+        u.shape = {amplitude, (.5f / size) * (type < 3 ? .35355339f : 1.0f), complexity, static_cast<f32>(type)};
+        const f64 anchorX = std::floor(static_cast<f64>(layerWidth) * .5);
+        const f64 anchorY = std::floor(static_cast<f64>(layerHeight) * .5);
+        u.offset = {static_cast<f32>(anchorX), static_cast<f32>(anchorY), layerWidth, layerHeight};
+        // The large lattice biases must retain their fractional parts through
+        // every octave. Evaluate them in double precision on the CPU, then let
+        // the shader add only the local displacement from the layer center.
+        const f64 scale = (.5 / static_cast<f64>(size)) * (type < 3 ? .3535533905932738 : 1.0);
+        constexpr std::array<std::array<f64, 2>, 3> branches{{{0, 0}, {37, 17}, {0, .25}}};
+        for (u32 branch = 0; branch < branches.size(); ++branch) {
+            f64 x = (anchorX - static_cast<f64>(offset.x) * layerWidth) * scale + 7913.17;
+            f64 y = (anchorY - static_cast<f64>(offset.y) * layerHeight) * scale + 9711.73;
+            if (type == 1 || type == 2 || type == 4 || type == 5) {
+                if (branch == 1) x += .25;
+                if (branch == 2) y += .25;
+            } else {
+                x += branches[branch][0];
+                y += branches[branch][1];
+            }
+            if (type < 3) {
+                const f64 originalX = x;
+                x -= y;
+                y += originalX;
+            }
+            f64 frequency = scale;
+            for (u32 octave = 0; octave < u.octaveScale.size(); ++octave) {
+                x *= 1.77;
+                y *= 1.77;
+                frequency *= 1.77;
+                const f64 cellX = std::floor(x), cellY = std::floor(y);
+                // The XOR corner permutation consumes all twelve low cell
+                // bits. Its exact period is 4096, including the high six bits
+                // mixed into the other axis. A 64-cell wrap changes the hash.
+                const f64 wrappedX = cellX - std::floor(cellX / 4096) * 4096;
+                const f64 wrappedY = cellY - std::floor(cellY / 4096) * 4096;
+                u.coordinates[branch * 10 + octave] = {
+                    static_cast<f32>(x - cellX), static_cast<f32>(y - cellY),
+                    static_cast<f32>(wrappedX), static_cast<f32>(wrappedY)};
+                u.octaveScale[octave].x = static_cast<f32>(frequency);
+            }
+        }
+        u.pin = {static_cast<f32>(pin), std::min(layerWidth * .5f, pinReach), std::min(layerHeight * .5f, pinReach), 0};
+        u.quality = {e.e(11) == 1 ? 2.0f : 1.0f, region.w / width, region.h / height, 0};
+        out = {ctx.texture("turbulent-displace-reference", width, height), region, width, height};
+        if (ctx.fullscreen_pass("turbulent-displace-reference", PassStage::Transform, out.texture,
+                ShaderId::effects_turbulent_displace_reference_frag,
+                {{input.texture, {}, CommonSampler::LinearBorder}, {{}, e.aux, CommonSampler::NearestClamp}},
+                &u, sizeof(u)) == kInvalidIndex) return Errc::PipelineCompileFailed;
+        return OkStatus;
+    }
+private:
+    using Lattice = std::array<Vec4, 4096>;
+    static f32 octave_gain(f32 complexity) noexcept {
+        complexity = std::clamp(finite_or(complexity, 1.0f), 1.0f, 10.0f);
+        const f32 full = std::floor(complexity);
+        const f32 next = std::pow(.7f, full);
+        return .25f * ((1 - next) / .3f + (complexity - full) * next);
+    }
+    static std::shared_ptr<const Lattice> noise_lattice(i64 angle, u32 seed, u32 cycle) noexcept {
+        struct Entry { i64 angle; u32 seed, cycle; std::shared_ptr<const Lattice> data; };
+        static std::mutex mutex;
+        static std::vector<Entry> cache;
+        std::lock_guard lock(mutex);
+        for (const auto& entry : cache) if (entry.angle == angle && entry.seed == seed && entry.cycle == cycle) return entry.data;
+        constexpr i64 quarter = 90ll * 65536;
+        const i64 base = static_cast<i64>(std::floor(static_cast<f64>(angle) / quarter)) * quarter + seed;
+        const f64 fraction = static_cast<f64>(angle + seed - base) / quarter;
+        const i64 period = static_cast<i64>(cycle) * quarter * 4;
+        std::array<u32, 6> streams{};
+        for (i64 index = 0; index < 6; ++index) {
+            const i64 value = ((base + (index - 2) * quarter) % period + period) % period;
+            streams[index] = static_cast<u32>(value) * static_cast<u32>(-341751747) + 229283573u;
+        }
+        auto lattice = std::make_shared<Lattice>();
+        u32 phaseStream = 12356789;
+        for (Vec4& point : *lattice) {
+            phaseStream = phaseStream * 1103515245u + 12345u;
+            f64 phase = static_cast<f64>((phaseStream >> 16) & 32767) / 16384 - 1 + fraction;
+            std::array<f64, 6> values{};
+            for (u32 index = 0; index < streams.size(); ++index) {
+                streams[index] = streams[index] * 1103515245u + 12345u;
+                values[index] = static_cast<f64>((streams[index] >> 16) & 32767) / 16384 - 1;
+            }
+            u32 start = 1;
+            if (phase < 0) { phase += 1; start = 0; }
+            else if (phase > 1) { phase -= 1; start = 2; }
+            const f64 square = phase * phase, cube = square * phase, inverse = 1 - phase;
+            const f64 value = (inverse * inverse * inverse * values[start]
+                + (3 * cube - 6 * square + 4) * values[start + 1]
+                + (-3 * cube + 3 * square + 3 * phase + 1) * values[start + 2]
+                + cube * values[start + 3]) * .2;
+            point.x = static_cast<f32>(value);
+        }
+        if (cache.size() == 4) cache.erase(cache.begin());
+        cache.push_back({angle, seed, cycle, lattice});
+        return lattice;
+    }
+};
+
+class WaveWarpReference final : public Effect {
+public:
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo info{effect_keys::kWaveWarpReference, "Wave Warp", "Distorcer", EffectClass::Domain};
+        return info;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        static const char* waves[]{"Senoidal", "Quadrada", "Triangular", "Dente de serra", "Círculo",
+            "Semicírculo", "Semicírculo inverso", "Ruído", "Ruído suave"};
+        static const char* pins[]{"Nenhuma", "Todas as bordas", "Centro", "Esquerda", "Acima", "Direita",
+            "Abaixo", "Bordas horizontais", "Bordas verticais"};
+        static const char* antialias[]{"2 × 2", "3 × 3", "4 × 4"};
+        p.add_enum("wave_type", "Tipo de onda", waves, 9, 0);
+        p.add_float("height", "Altura da onda", 10, -100, 100, kParamAnimatable | kParamPixels, "px");
+        p.typed_range(-32000, 32000);
+        p.add_float("width", "Largura da onda", 40, 1, 1000, kParamAnimatable | kParamPixels, "px");
+        p.typed_range(1, 32000);
+        p.add_angle("direction", "Direção", 90);
+        p.add_float("speed", "Velocidade da onda", 1, -10, 10, kParamAnimatable, "Hz");
+        p.typed_range(-100, 100);
+        p.add_enum("pinning", "Fixação", pins, 9, 0);
+        p.add_angle("phase", "Fase", 0);
+        p.add_enum("antialias", "Suavização de bordas", antialias, 3, 0);
+    }
+    bool is_identity(const EffectEval& e) const noexcept override { return std::fabs(e.f(1)) < 1e-6f; }
+    bool needs_full_input() const noexcept override { return true; }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat format) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_wave_warp_reference_frag, format));
+    }
+    void resolve_resources(EffectEval& e) const noexcept override {
+        if (!e.resources) return;
+        const u32 wave = std::min(e.e(0), 8u);
+        const auto& table = wave_tables()[wave];
+        e.aux = e.resources->data_texture(0x5756415645300000ull + wave, table.data(), 2048, 1);
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
+                 LayerImage& out) const override {
+        if (!e.aux.valid()) return Status{Errc::Busy, "Wave Warp waveform pending"};
+        EffectUniforms u = base_uniforms(input);
+        const f64 seconds = e.time_frames() / std::max(e.framesPerSecond, 1e-6);
+        // The reference CPU renderer adds the AngleParamSuite value directly
+        // to its table index. Its phase control therefore advances one sample
+        // per displayed degree, independently of the 2048-sample time cycle.
+        const f64 phase = e.f(6) - seconds * e.f(4) * 2048.0;
+        const f32 width = std::clamp(e.f(2), 1.0f, 32000.0f);
+        const f64 angle = (static_cast<f64>(e.f(3)) - 90) * 3.14159265358979323846 / 180;
+        const u32 samples = std::min(e.e(7), 2u) + 2;
+        // 16.16 waveform accumulator (AE 2027 oracle, all three AA levels):
+        // round(65536 * 1024 / (width * N)) per high-resolution pixel. The
+        // values exceed float precision, so they travel as 16-bit halves.
+        const f64 base = 65536.0 * 1024.0 / (static_cast<f64>(width) * samples);
+        const auto split = [](i64 value, f32& high, f32& low) {
+            const i64 h = value >= 0 ? value / 65536 : -((-value + 65535) / 65536);
+            high = static_cast<f32>(h);
+            low = static_cast<f32>(value - h * 65536);
+        };
+        f64 wrapped = std::fmod(phase, 2048.0);
+        if (!std::isfinite(wrapped)) wrapped = 0;
+        if (wrapped < 0) wrapped += 2048.0;
+        u.p0 = {e.f(1), width, static_cast<f32>(angle), static_cast<f32>(wrapped)};
+        u.p1 = {static_cast<f32>(std::min(e.e(5), 8u)), static_cast<f32>(samples), 0, 0};
+        split(static_cast<i64>(std::llround(wrapped * 65536)) % (i64{2048} * 65536), u.p1.z, u.p1.w);
+        split(std::llround(base * std::cos(angle)), u.color.x, u.color.y);
+        split(std::llround(base * std::sin(angle)), u.color.z, u.color.w);
+        u.p2 = {input.region.x, input.region.y, input.region.w, input.region.h};
+        u.p3 = {e.placement ? static_cast<f32>(e.placement->layerWidth) : input.region.w,
+                e.placement ? static_cast<f32>(e.placement->layerHeight) : input.region.h, 0, 0};
+        out = input;
+        out.texture = ctx.texture("wave-warp-reference", input.width, input.height);
+        if (ctx.fullscreen_pass("wave-warp-reference", PassStage::Transform, out.texture,
+                ShaderId::effects_wave_warp_reference_frag,
+                {{input.texture, {}, CommonSampler::LinearBorder}, {{}, e.aux, CommonSampler::NearestClamp}},
+                &u, sizeof(u)) == kInvalidIndex) return Errc::PipelineCompileFailed;
+        return OkStatus;
+    }
+private:
+    using WaveTable = std::array<Vec4, 2048>;
+    static const std::array<WaveTable, 9>& wave_tables() noexcept {
+        static const std::array<WaveTable, 9> tables = [] {
+            std::array<WaveTable, 9> result{};
+            std::array<i32, 256> noise{};
+            u32 state = 17245;
+            for (i32& value : noise) {
+                // Deterministic integer recurrence specified by the observed
+                // waveform. Quotient/remainder avoid signed overflow.
+                state = 48271u * (state % 44488u) + 3399u * (state / 44488u);
+                if (!state) state = 2147483647u;
+                value = static_cast<i32>((state >> 7) & 32767u) * 4 - 65536;
+            }
+            auto smooth = noise;
+            for (u32 pass = 0; pass < 20; ++pass) {
+                auto previous = smooth;
+                for (u32 index = 0; index < smooth.size(); ++index) {
+                    const i32 sum = previous[(index + 255) % 256] + previous[index] + previous[(index + 1) % 256];
+                    smooth[index] = sum / 3;
+                }
+            }
+            for (u32 index = 0; index < 2048; ++index) {
+                const f64 phase = static_cast<f64>(index) / 2048;
+                const f64 arc = 2 * std::fmod(phase * 2, 1.0) - 1;
+                const f64 semicircle = std::sqrt(std::max(0.0, 1 - arc * arc));
+                const f64 fullArc = 2 * phase - 1;
+                const f64 values[]{std::sin(phase * 6.283185307179586), phase < .5 ? 1.0 : -1.0,
+                    1 - 4 * std::fabs(phase - .5), 2 * phase - 1,
+                    phase < .5 ? semicircle : -semicircle,
+                    1 - 2 * std::sqrt(std::max(0.0, 1 - fullArc * fullArc)),
+                    phase < .5 ? 1 - semicircle : semicircle - 1};
+                for (u32 wave = 0; wave < 7; ++wave) {
+                    result[wave][index].x = static_cast<f32>(std::round(values[wave] * 65536) / 65536);
+                }
+                result[7][index].x = static_cast<f32>(noise[index / 8]) / 65536;
+                const u32 start = index / 8;
+                const f32 fraction = static_cast<f32>(index % 8) / 8;
+                result[8][index].x = (smooth[start] * (1 - fraction) + smooth[(start + 1) % 256] * fraction) / 65536;
+            }
+            return result;
+        }();
+        return tables;
+    }
+};
+
 } // namespace
 
 void register_distort_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<Shake>());
     (void)r.add(std::make_unique<Turbulence>());
     (void)r.add(std::make_unique<WaveWarp>());
+    (void)r.add(std::make_unique<WaveWarpReference>());
+    (void)r.add(std::make_unique<TurbulentDisplaceReference>());
     (void)r.add(std::make_unique<Warp>());
     (void)r.add(std::make_unique<RippleDissolve>());
     (void)r.add(std::make_unique<Bulge>());

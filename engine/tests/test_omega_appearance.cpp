@@ -479,3 +479,63 @@ AUREA_TEST(OmegaAppearance, NewBordersStackOutsideWithAlternatingColors) {
     AUREA_CHECK_NEAR(l->effects[0].params[1].constant.v[1], 0.0f, 1e-6f);
     AUREA_CHECK_NEAR(l->effects[2].params[1].constant.v[1], 1.0f, 1e-6f);
 }
+
+// -----------------------------------------------------------------------------
+// D2 (funções, 13/11/2026) · a sombra antiga do texto vira a decoração Sombra
+// -----------------------------------------------------------------------------
+AUREA_TEST(OmegaAppearance, OldTextShadowBecomesTheShadowDecorationOnLoad) {
+    AppearanceRig r;
+    const auto plain = r.e.add_text("Sombra antiga");
+    const auto both = r.e.add_text("Duas sombras");
+    const auto hidden = r.e.add_text("Sombra transparente");
+    AUREA_CHECK(plain.ok() && both.ok() && hidden.ok());
+    if (!plain.ok() || !both.ok() || !hidden.ok()) return;
+    auto oldShadow = [&](u64 id, f32 alpha) {
+        TextData& t = r.L(id)->text;
+        t.shadow = true;
+        t.shadowColor = Vec4{0.5f, 0.25f, 1.0f, alpha};
+        t.shadowOffset = Vec2{3.0f, 4.0f};
+        t.shadowBlur = 9.0f;
+    };
+    oldShadow(*plain, 0.6f);
+    oldShadow(*both, 0.6f);
+    oldShadow(*hidden, 0.0f);
+    // Esta já tem a sombra nova (a decoração): a antiga não pode sumir.
+    AUREA_CHECK(r.e.decoration_add(*both, kEffectRoleShadow) != kInvalidIndex);
+    const std::string path = r.temp("aurea_text_shadow_d2.aurea");
+    AUREA_CHECK(r.e.save_project(path.c_str()).ok());
+    AUREA_CHECK(r.e.load_project(path.c_str()).ok());
+    const EffectTypeId drop = r.e.effects().find_key("aurea.stylize.drop_shadow");
+    u32 seen = 0;
+    r.comp()->layers().for_each([&](LayerId, const Layer& l) {
+        if (l.kind != LayerKind::Text) return;
+        ++seen;
+        AUREA_CHECK(!l.text.shadow);   // a sombra do estilo do texto não existe mais
+        if (l.text.content == "Sombra transparente") {
+            AUREA_CHECK(l.effects.empty());   // invisível: nada a levar
+            return;
+        }
+        const bool twin = l.text.content == "Duas sombras";
+        AUREA_CHECK_EQ(l.effects.size(), static_cast<usize>(twin ? 2 : 1));
+        if (l.effects.empty()) return;
+        // Uma só decoração Sombra; na camada que já tinha a nova, a antiga vira
+        // "Sombra projetada" comum no início da pilha.
+        const EffectInstance& moved = l.effects.front();
+        AUREA_CHECK(moved.type == drop);
+        AUREA_CHECK_EQ(moved.role, twin ? kEffectRoleNone : kEffectRoleShadow);
+        AUREA_CHECK_EQ(l.effects.back().role, kEffectRoleShadow);
+        if (moved.params.size() <= 4) return;
+        // Cor sRGB → linear (a cor do efeito é linear); alfa → opacidade.
+        AUREA_CHECK_NEAR(moved.params[0].constant.v[0], Color::srgb_to_linear(0.5f), 1e-4f);
+        AUREA_CHECK_NEAR(moved.params[0].constant.v[1], Color::srgb_to_linear(0.25f), 1e-4f);
+        AUREA_CHECK_NEAR(moved.params[0].constant.v[2], 1.0f, 1e-4f);
+        AUREA_CHECK_NEAR(moved.params[0].constant.v[3], 1.0f, 1e-4f);
+        AUREA_CHECK_NEAR(moved.params[1].constant.v[0], 60.0f, 1e-3f);
+        // (3, 4) px → 5 px na direção atan2(4, 3); o borrão vira a suavidade.
+        AUREA_CHECK_NEAR(moved.params[2].constant.v[0], std::atan2(4.0f, 3.0f) * kRad2Deg, 1e-3f);
+        AUREA_CHECK_NEAR(moved.params[3].constant.v[0], 5.0f, 1e-4f);
+        AUREA_CHECK_NEAR(moved.params[4].constant.v[0], 9.0f, 1e-4f);
+    });
+    AUREA_CHECK_EQ(seen, 3u);
+    std::remove(path.c_str());
+}

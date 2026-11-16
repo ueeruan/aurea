@@ -28,7 +28,15 @@ std::string localized(const LocalizedText& text, std::string_view locale) {
     return text.front().second;
 }
 
-const char* kind_name(Kind k) noexcept { return k == Kind::Stack ? "stack" : k == Kind::Panel ? "panel" : "shader"; }
+const char* kind_name(Kind k) noexcept {
+    switch (k) {
+        case Kind::Shader: return "shader";
+        case Kind::Stack: return "stack";
+        case Kind::Panel: return "panel";
+        case Kind::Audio: return "audio";
+    }
+    return "shader";
+}
 
 const char* param_kind_name(ParamKind k) noexcept {
     switch (k) {
@@ -212,13 +220,16 @@ bool parse_hex_color(const std::string& s, f32 (&rgba)[4]) {
     return true;
 }
 
-bool read_param(const Value& v, u32 index, ParamDecl& p, Reader& r) {
+bool read_param(const Value& v, u32 index, ParamDecl& p, Reader& r, bool audio = false) {
     const std::string where = "parametro " + std::to_string(index + 1);
     if (!v.is_object()) return r.fail("plugin.json: " + where + " deve ser um objeto");
     const Value* id = v.get("id");
     if (!id || !id->is_string()) return r.fail("plugin.json: " + where + ": falta \"id\"");
     p.id = id->string;
-    if (!valid_shader_identifier(p.id))
+    const auto letter = [](char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'; };
+    const bool audioId = !p.id.empty() && p.id.size() <= 32 && letter(p.id.front())
+        && std::all_of(p.id.begin(), p.id.end(), [&](char c) { return letter(c) || (c >= '0' && c <= '9'); });
+    if (audio ? !audioId : !valid_shader_identifier(p.id))
         return r.fail("plugin.json: parametro \"" + p.id + "\": id invalido (letras, digitos e _, ate 32, "
                       "sem palavra reservada do GLSL nem prefixo aurea/gl_)");
     const std::string pw = "parametro \"" + p.id + "\"";
@@ -560,11 +571,12 @@ bool parse_manifest(std::string_view text, Manifest& m, std::string& error) {
     }
     const Value* kind = root.get("kind");
     if (!kind || !kind->is_string()
-        || (kind->string != "shader" && kind->string != "shader3d" && kind->string != "stack" && kind->string != "panel"))
+        || (kind->string != "shader" && kind->string != "shader3d" && kind->string != "stack" && kind->string != "panel" && kind->string != "audio"))
         return r.fail("plugin.json: \"kind\" deve ser \"shader\", \"shader3d\", \"stack\" ou \"panel\"");
     if (kind->string == "panel" && m.format < kFormatVersionV2)
         return r.fail("plugin.json: \"kind\": \"panel\" pede \"aureaPlugin\": 2");
-    m.kind = kind->string == "stack" ? Kind::Stack : kind->string == "panel" ? Kind::Panel : Kind::Shader;
+    m.kind = kind->string == "audio" ? Kind::Audio : kind->string == "stack" ? Kind::Stack : kind->string == "panel" ? Kind::Panel : Kind::Shader;
+    if (m.kind == Kind::Audio && m.format < kFormatVersionV3) return r.fail("plugin.json: audio requires aureaPlugin 3");
     m.scene3d = kind->string == "shader3d";
 
     if (const Value* params = root.get("params")) {
@@ -575,7 +587,7 @@ bool parse_manifest(std::string_view text, Manifest& m, std::string& error) {
                           + std::to_string(paramLimit) + ")");
         for (usize i = 0; i < params->array.size(); ++i) {
             ParamDecl p;
-            if (!read_param(params->array[i], static_cast<u32>(i), p, r)) return false;
+            if (!read_param(params->array[i], static_cast<u32>(i), p, r, m.kind == Kind::Audio)) return false;
             if ((p.kind == ParamKind::Curve || p.kind == ParamKind::Gradient || p.kind == ParamKind::LayerImage)) {
                 if (m.format < kFormatVersionV3) return r.fail("plugin.json: parametro \"" + p.id + "\": este tipo pede \"aureaPlugin\": 3");
                 if (m.kind != Kind::Shader) return r.fail("plugin.json: parametro \"" + p.id + "\": este tipo so vale em \"shader\"");
@@ -626,6 +638,11 @@ bool parse_manifest(std::string_view text, Manifest& m, std::string& error) {
         if (pass.inputs.size() + m.textures.size() + extra_samplers(m) > kMaxPassInputs)
             return r.fail("plugin.json: entradas + texturas + camadas + historico + audio passam de " + std::to_string(kMaxPassInputs));
     if (m.kind == Kind::Stack && !read_stack(root, m, r)) return false;
+    if (m.kind == Kind::Audio) {
+        const auto* audio = root.get("audio");
+        if (!audio) return r.fail("plugin.json: audio graph is required");
+        if (!parse_audio_graph(*audio, m.params, m.audioGraph, error)) return false;
+    }
     // 0.3.4 plugins: interface, script e permissões (formato 2).
     return parse_manifest_v2(root, m, m.format, error);
 }
@@ -728,6 +745,8 @@ std::string manifest_json(const Manifest& m) {
         }
         if (m.margin > 0.0f) w.key("margin").value(m.margin);
         w.key("colorSpace").value(m.colorSpace == ColorSpace::Srgb ? "srgb" : "linear");
+    } else if (m.kind == Kind::Audio && m.audioGraph) {
+        w.key("audio"); write_audio_graph(w, *m.audioGraph);
     } else {
         w.key("stack").begin_array();
         for (const StackStepDecl& s : m.stack) {

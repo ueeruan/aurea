@@ -385,13 +385,28 @@ final class HyperEntitlements: ObservableObject {
     private static func nowMillis() -> Int64 { Int64(Date().timeIntervalSince1970 * 1000) }
 }
 
-/// Os efeitos de camada do AureaHyper (hyper::effect_keys). Sem o acesso eles
+/// Os efeitos do AureaHyper, classificados pelo motor compartilhado. Sem o acesso eles
 /// aparecem com o cadeado e abrem a tela bloqueada (EffectsBrowser.swift).
 enum HyperEffectGate {
-    static let keys = ["aurea.hyper.upscale", "aurea.hyper.motion", "aurea.hyper.clean"]
-    static let typeIds: Set<UInt32> = Set(keys.map(fxEffectTypeId))
-    static func isHyper(typeId: UInt32) -> Bool { typeIds.contains(typeId) }
-    @MainActor static func locked(typeId: UInt32) -> Bool { isHyper(typeId: typeId) && !HyperEntitlements.shared.unlocked }
+    static func isHyper(typeId: UInt32) -> Bool { AureaEngine.effectRequiresHyper(typeId) }
+    @MainActor static func locked(typeId: UInt32) -> Bool { PaidGate.locked(paid: isHyper(typeId: typeId), access: HyperEntitlements.shared.access) }
+}
+
+/// A regra do portão, sem ponte nem estado (par de PaidGate em HyperEffectGate.kt): um
+/// recurso pago só passa com o acesso confirmado. Um recurso pago que JÁ está no projeto
+/// (efeito aplicado, texto 3D criado) nunca é tirado: abre, edita, aparece na prévia e
+/// exporta igual, sem marca d'água (o motor não conhece o acesso); sem o acesso ele só
+/// leva o cadeado. Só CRIAR um novo pede o acesso.
+enum PaidGate {
+    static func locked(paid: Bool, access: HyperAccess) -> Bool { paid && access != .unlocked }
+}
+
+/// 0.5.4 (pedido do dono, 15/11/2026): o TEXTO 3D é do mesmo produto pago. Toda entrada
+/// que CRIA texto 3D (+ › Texto 3D, o dock/menu da cena 3D, os presets de texto 3D) passa
+/// por AureaModel.addText3D, que confere `locked()`; as células levam o cadeado.
+enum Text3DGate {
+    static func isPaid() -> Bool { AureaEngine.text3DRequiresHyper() }
+    @MainActor static func locked() -> Bool { PaidGate.locked(paid: isPaid(), access: HyperEntitlements.shared.access) }
 }
 
 // MARK: - Plataforma: rostos (Vision), Neural Engine, pasta dos modelos

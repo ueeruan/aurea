@@ -72,6 +72,11 @@ public:
     void set_imported_dirs(std::vector<std::string> dirs);
     /// Caminho guardado ("docs:…") → caminho real (o motor passa o dele).
     void set_path_resolver(std::function<std::string(const std::string&)> fn);
+    /// 0.5.3: lê adiantado os arquivos de fonte das pastas do SISTEMA (a parte
+    /// cara da varredura da 1ª consulta por família), fora da trava. A lista do
+    /// gerenciador não muda: a varredura só reaproveita o que foi lido. Para
+    /// chamar num worker na abertura do motor.
+    void prewarm();
 
     /// Todas as fontes (sistema + importadas), por família e peso.
     [[nodiscard]] std::vector<FontEntry> list();

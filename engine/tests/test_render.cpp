@@ -5,6 +5,7 @@
 // =============================================================================
 #include "TestFramework.hpp"
 #include "aurea/render/PreviewCachePolicy.hpp"
+#include "aurea/render/TemporalReconstruction.hpp"
 #include "aurea/render/ShutterPlan.hpp"
 #include "aurea/render/MotionBlurBounds.hpp"
 #include <limits>
@@ -336,6 +337,50 @@ AUREA_TEST(FrameGraph, PassWithoutReaderIsCulled) {
     AUREA_CHECK_EQ(f.graph.stats().passesExecuted, static_cast<u32>(1));
     // Recurso de passe podado não aloca textura.
     AUREA_CHECK_EQ(f.graph.stats().transientTextures, static_cast<u32>(1));
+}
+
+AUREA_TEST(FrameGraph, PassMetricsCountUniqueTrafficAndDiscardedDepth) {
+    GraphFixture f;
+    const TextureDesc colorDesc = rt(32, 16);
+    TextureDesc depthDesc = colorDesc;
+    depthDesc.format = SurfaceFormat::Depth32F;
+    const FGTexture source = f.graph.import_texture("source", TextureHandle{99}, colorDesc);
+    const FGTexture output = f.graph.create_texture("output", colorDesc);
+    const FGTexture depth = f.graph.create_texture("depth", depthDesc);
+    const u32 pass = f.graph.add_raster_pass_depth("profile", PassStage::Scene3D, output,
+        LoadOp::Clear, {}, depth, LoadOp::Clear, false, 0.0f, [](PassContext&) {});
+    f.graph.read(pass, source);
+    f.graph.read(pass, source);
+    f.graph.set_output(output, ResourceState::ShaderRead);
+    FrameBegin frame;
+    AUREA_CHECK(f.backend.begin_frame(frame).ok());
+    f.pool.begin_frame(f.backend, frame.frameNumber);
+    AUREA_CHECK(f.graph.compile(f.pool).ok());
+    f.graph.execute(*frame.commands, true);
+    const auto metrics = f.graph.pass_metrics(pass);
+    AUREA_CHECK(metrics.cpuMeasured);
+    AUREA_CHECK_EQ(metrics.estimatedReadBytes, colorDesc.estimated_bytes());
+    AUREA_CHECK_EQ(metrics.estimatedWriteBytes, colorDesc.estimated_bytes());
+    AUREA_CHECK_EQ(metrics.workingSetBytes, 2 * colorDesc.estimated_bytes() + depthDesc.estimated_bytes());
+    AUREA_CHECK(!f.graph.pass_metrics(kInvalidIndex).cpuMeasured);
+    f.graph.release(f.pool);
+    f.pool.end_frame();
+    AUREA_CHECK(f.backend.end_frame().ok());
+}
+
+AUREA_TEST(FrameGraph, PassMetricsKeepUnprofiledAndCulledPassesUnmeasured) {
+    GraphFixture f;
+    const FGTexture output = f.graph.create_texture("output", rt());
+    const FGTexture unused = f.graph.create_texture("unused", rt());
+    const u32 pass = f.graph.add_raster_pass("output", PassStage::Output, output,
+        LoadOp::Clear, {}, [](PassContext&) {});
+    const u32 culled = f.graph.add_raster_pass("unused", PassStage::Effects, unused,
+        LoadOp::Clear, {}, [](PassContext&) {});
+    f.graph.set_output(output, ResourceState::ShaderRead);
+    AUREA_CHECK(f.run().ok());
+    AUREA_CHECK(!f.graph.pass_metrics(pass).cpuMeasured);
+    AUREA_CHECK_EQ(f.graph.pass_metrics(pass).cpuRecordNs, 0ull);
+    AUREA_CHECK_EQ(f.graph.pass_metrics(culled).estimatedWriteBytes, 0ull);
 }
 
 AUREA_TEST(FrameGraph, RecordingFailureStopsLaterPassesAndOutputTransitions) {
@@ -1473,6 +1518,22 @@ AUREA_TEST(MotionTile, ADownstreamBlurMarginUsesTheTransformInputCoordinates) {
     AUREA_CHECK_NEAR(plan.stages[0].margin, 24.0f * reach, 1e-3f);
     AUREA_CHECK_NEAR(plan.stages[1].margin, 24.0f, 1e-5f);
     AUREA_CHECK_NEAR(plan.stages[2].margin, 0.0f, 1e-5f);
+}
+
+AUREA_TEST(EffectGraph, PerspectiveViewportBoundsPreserveTheVisiblePlane) {
+    LayerPlacement plane = placement(160, 90);
+    plane.inScene3d = true;
+    plane.compFromLayer.col[0].w = .002f;
+    const Rect bounds = visible_layer_rect(plane);
+    AUREA_CHECK_NEAR(bounds.x, 0.f, 1e-5f);
+    AUREA_CHECK_NEAR(bounds.y, 0.f, 1e-5f);
+    AUREA_CHECK_NEAR(bounds.w, 160.f / .68f, 1e-3f);
+    AUREA_CHECK_NEAR(bounds.h, 90.f / .68f, 1e-3f);
+    plane.preserveFullExtent = true;
+    AUREA_CHECK_EQ(visible_layer_rect(plane).w, 0.f);
+    plane.preserveFullExtent = false;
+    plane.compFromLayer.col[0].w = .01f;
+    AUREA_CHECK_EQ(visible_layer_rect(plane).w, 0.f);
 }
 
 AUREA_TEST(MotionTile, EarlierEffectsKeepPixelsThatTheTileMayReadOffscreen) {
@@ -3557,3 +3618,136 @@ AUREA_TEST(MotionBlur, SamplesPerFrameDrivesThePreviewToo) {
 #include "FrameGraphSegments.inl"
 #include "FrameGraphLease.inl"
 #include "FrameGraphMemoryOrder.inl"
+
+// =============================================================================
+//  0.5.4 — "Coloquei uns 3 vídeos e alguns não apareciam" (iPhone): o palco
+//  mostrava só o xadrez no lugar de uma camada de vídeo cujo decoder tinha sido
+//  recusado/derrubado, mesmo ela já tendo mostrado o quadro antes. Agora a
+//  camada fica com o último quadro (aproximado) na PRÉVIA enquanto o decoder
+//  volta; o export (finalQuality) continua esperando o quadro exato.
+// =============================================================================
+namespace {
+class RefusingFactory final : public VideoSourceFactory {
+public:
+    explicit RefusingFactory(const aurea::test::SyntheticConfig& c) : inner_(c) {}
+    bool probe(const char* path, MediaProbe& out) override { return inner_.probe(path, out); }
+    std::unique_ptr<VideoDecoderBackend> open_video(const Asset& asset, MediaPriority priority) override {
+        if (refuse.load()) { ++refused; return nullptr; }
+        return inner_.open_video(asset, priority);
+    }
+    std::atomic<bool> refuse{false};
+    std::atomic<u32> refused{0};
+private:
+    aurea::test::SyntheticFactory inner_;
+};
+} // namespace
+
+AUREA_TEST(Renderer, Fix054VideoLayerKeepsItsLastFrameWhileItsDecoderIsRefused) {
+    RenderFixture f;
+    aurea::test::SyntheticConfig config;
+    RefusingFactory factory(config);
+    MediaManager media;
+    media.set_factory(&factory);
+    media.set_persistent_retry(true);
+    Asset asset;
+    asset.kind = AssetKind::Video;
+    asset.video.width = config.width; asset.video.height = config.height; asset.video.fps = config.fps;
+    const AssetId aid = f.project.add_asset(std::move(asset));
+    LayerId ids[3];
+    for (u32 i = 0; i < 3; ++i) {
+        ids[i] = f.comp->add_layer(LayerKind::Video, "video");
+        Layer* layer = f.comp->layer(ids[i]);
+        layer->source = aid; layer->end = FrameIndex{300};
+        // Sobrepostas, como as 3 do relato.
+        layer->transform.position = Vec3{760.0f + 200.0f * static_cast<f32>(i), 540, 0};
+    }
+    RenderSettings preview;
+    FrameSnapshot snapshot;
+    u64 frame = 1;
+    bool ready = false;
+    const auto start = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() - start < std::chrono::seconds(3)) {
+        f.renderer.prepare(*f.comp, f.project, FrameIndex{30}, &media, nullptr, nullptr, preview, ++frame, 0,
+                           DecodeMode::Still, 1, snapshot);
+        ready = snapshot.layers.size() == 3 && snapshot.missingVideoFrames == 0 && snapshot.staleVideoFrames == 0;
+        if (ready) break;
+        snapshot.release_video_frames();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    AUREA_CHECK(ready);
+    if (!ready) { media.close_all(); return; }
+    snapshot.release_video_frames();
+    // O aparelho tira o decoder da camada do meio (fechado para o proxy, para
+    // a exportação, por pressão de memória) e recusa o próximo.
+    factory.refuse = true;
+    media.close_layer(ids[1]);
+    for (u32 k = 0; k < 4; ++k) {
+        f.renderer.prepare(*f.comp, f.project, FrameIndex{30}, &media, nullptr, nullptr, preview, ++frame, 0,
+                           DecodeMode::Still, 1, snapshot);
+        AUREA_CHECK_EQ(snapshot.layers.size(), 3u);         // nenhuma camada some do palco
+        AUREA_CHECK_EQ(snapshot.missingVideoFrames, 0u);
+        AUREA_CHECK_EQ(snapshot.staleVideoFrames, 1u);      // a do meio, aproximada (a prévia segue tentando)
+        bool middle = false;
+        for (const auto& rl : snapshot.layers)
+            if (rl.id.pack() == ids[1].pack()) middle = rl.source.frame && !rl.source.frameExact;
+        AUREA_CHECK(middle);
+        snapshot.release_video_frames();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    // O export não usa o quadro guardado: espera o exato.
+    RenderSettings exact; exact.finalQuality = true;
+    f.renderer.prepare(*f.comp, f.project, FrameIndex{30}, &media, nullptr, nullptr, exact, ++frame, 0,
+                       DecodeMode::Still, 1, snapshot);
+    AUREA_CHECK_EQ(snapshot.missingVideoFrames, 1u);
+    AUREA_CHECK_EQ(snapshot.layers.size(), 2u);
+    snapshot.release_video_frames();
+    // O decoder volta: a camada recupera o quadro exato sem ninguém mexer.
+    factory.refuse = false;
+    ready = false;
+    const auto again = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() - again < std::chrono::seconds(4)) {
+        f.renderer.prepare(*f.comp, f.project, FrameIndex{30}, &media, nullptr, nullptr, preview, ++frame, 0,
+                           DecodeMode::Still, 1, snapshot);
+        ready = snapshot.layers.size() == 3 && snapshot.missingVideoFrames == 0 && snapshot.staleVideoFrames == 0;
+        snapshot.release_video_frames();
+        if (ready) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    AUREA_CHECK(ready);
+    AUREA_CHECK(factory.refused.load() >= 1u);
+    media.close_all();
+}
+
+AUREA_TEST(HyperAdaptive, TemporalAdmissionUsesRealCapabilitiesAndRetiresPartialAllocations) {
+    MockBackend backend;
+    ShaderLibrary shaders;
+    AUREA_CHECK(shaders.initialize(backend).ok());
+    TemporalReconstruction temporal;
+    AUREA_CHECK(!temporal.admit(backend, shaders, 64, 32, 1ull << 20));
+    backend.caps.rgba16fRenderable = backend.caps.rgba16fFilterable = backend.caps.depth32fSampled = true;
+    constexpr u64 bytes = 64ull * 32 * 24;
+    AUREA_CHECK(!temporal.admit(backend, shaders, 64, 32, bytes - 1));
+    AUREA_CHECK_EQ(temporal.bytes(), 0ull);
+    u32 creates = 0;
+    backend.beforeCreateTexture = [&](const TextureDesc&) {
+        return ++creates == 3 ? Status{Errc::OutOfDeviceMemory} : OkStatus;
+    };
+    const u32 destroyed = backend.texturesDestroyed;
+    AUREA_CHECK(!temporal.admit(backend, shaders, 64, 32, bytes));
+    AUREA_CHECK_EQ(temporal.bytes(), 0ull);
+    AUREA_CHECK_EQ(backend.texturesDestroyed - destroyed, 2u);
+    backend.beforeCreateTexture = {};
+    AUREA_CHECK(temporal.admit(backend, shaders, 64, 32, bytes));
+    AUREA_CHECK_EQ(temporal.bytes(), bytes);
+    const u32 allocated = backend.texturesCreated;
+    AUREA_CHECK(temporal.admit(backend, shaders, 64, 32, bytes));
+    AUREA_CHECK_EQ(backend.texturesCreated, allocated);
+    temporal.clear(&backend);
+    AUREA_CHECK_EQ(temporal.bytes(), 0ull);
+    for (i64 frame : std::array<i64, 5>{std::numeric_limits<i64>::min(), -1, 0, 1, std::numeric_limits<i64>::max()}) {
+        const auto jitter = TemporalReconstruction::jitter(frame);
+        AUREA_CHECK(std::isfinite(jitter.x) && std::isfinite(jitter.y));
+        AUREA_CHECK(std::fabs(jitter.x) < .5f && std::fabs(jitter.y) < .5f);
+    }
+    shaders.shutdown();
+}

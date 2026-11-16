@@ -229,7 +229,7 @@ jobs:
             xcodebuild -project engine/platform/ios/Aurea.xcodeproj -scheme Aurea \
               -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
               -derivedDataPath build/ios -archivePath build/Aurea.xcarchive \
-              CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+              CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGN_IDENTITY="Apple Development" \
               -allowProvisioningUpdates -authenticationKeyPath "$APPLE_KEY_PATH" \
               -authenticationKeyID "$APPLE_API_KEY_ID" -authenticationKeyIssuerID "$APPLE_API_ISSUER_ID" \
               SWIFT_COMPILATION_MODE=singlefile COMPILER_INDEX_STORE_ENABLE=NO -IDEBuildingContinueBuildingAfterErrors=YES \
@@ -385,8 +385,13 @@ jobs:
           if [ "$UPLOAD" = "true" ]; then
             mkdir -p ~/.appstoreconnect/private_keys
             cp "$APPLE_KEY_PATH" ~/.appstoreconnect/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8
-            xcrun altool --upload-app -f "build/ipa-signed/${UNSIGNED%-unsigned.ipa}.ipa" -t ios               --apiKey "$APPLE_API_KEY_ID" --apiIssuer "$APPLE_API_ISSUER_ID" --output-format normal 2>&1 | tee build-upload.log
+            xcrun altool --upload-app -f "build/ipa-signed/${UNSIGNED%-unsigned.ipa}.ipa" -t ios               --apiKey "$APPLE_API_KEY_ID" --apiIssuer "$APPLE_API_ISSUER_ID" --output-format normal 2>&1 | tee build-upload.log || true
             rm -f ~/.appstoreconnect/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8
+            # O altool pode sair com 0 mesmo recusado: a etapa só passa com o envio confirmado.
+            if grep -q -E "Failed to upload|Validation failed|ERROR ITMS" build-upload.log; then
+              echo "::error title=App Store Connect::$(grep -m1 -E 'Validation failed|ERROR ITMS|Failed to upload' build-upload.log | cut -c1-300)"
+              exit 1
+            fi
           fi
       - uses: actions/upload-artifact@v4
         if: env.APPLE_SIGNING == 'true' && steps.export-signed.outcome == 'success'

@@ -521,7 +521,7 @@ def capture_scene(scene, app, output, udid, console_option, report, frame_checke
             collect_export_artifacts(documents, output, record)
             if not probe.get('passed'):
                 raise RuntimeError('Real export/MP4 decode failed: ' + probe.get('error', 'missing terminal export result'))
-        if not state.get('coreStarted'):
+        if not state.get('coreStarted') and scene != 'paywall':
             raise RuntimeError('Metal/core startup failed; inspect app stdout/stderr and scene JSON')
         if scene not in ('home', 'home-scroll') and (not record.get('coreFrame') or state.get('frameWidth', 0) <= 0 or state.get('frameHeight', 0) <= 0):
             raise RuntimeError('Core did not produce a real preview frame')

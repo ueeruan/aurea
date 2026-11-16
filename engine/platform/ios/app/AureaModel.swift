@@ -1241,6 +1241,7 @@ final class AureaModel: ObservableObject {
     /// segundo plano, se por algum motivo ele não estiver de pé).
 #if DEBUG
     private var parityPrepared = false
+    @Published var parityHomePaywall = false
     /// CI only: create an actual core project and open the requested UI state.
     /// Release IPAs do not contain this entry point or fixture setup.
     func prepareParityCapture() {
@@ -1256,7 +1257,13 @@ final class AureaModel: ObservableObject {
             var homeScrollProbe: [String: Any] = [:]
             var hdriProbe: [String: Any] = [:]
             var projectProbe: [String: Any] = [:]
-            if scene == "home-scroll", started {
+            if scene == "paywall" {
+                // A folha de assinaturas para a revisão da App Store. Abre na Home e não
+                // depende do Metal: no simulador do CI o motor às vezes não sobe.
+                language = .pt
+                HyperEntitlements.shared.prepareParityPaywall()
+                parityHomePaywall = true
+            } else if scene == "home-scroll", started {
                 homeScrollProbe = await prepareParityHomeScroll()
             } else if scene == "android-hdri", started {
                 hdriProbe = await prepareParityHDRI()
@@ -1380,11 +1387,6 @@ final class AureaModel: ObservableObject {
                     case "text-2d": addText(); textContentRequest = nil; panel = .text
                     case "text-3d": addText3D(content: AureaText.t("panel_texto"), depth: 0.25, gate: false); textContentRequest = nil; panel = .layer3D
                     case "text-edit-2d": addText()
-                    case "paywall":
-                        // A folha de assinaturas do Texto 3D (a mesma do efeito pago) para a revisão da App Store.
-                        language = .pt
-                        HyperEntitlements.shared.prepareParityPaywall()
-                        hyperLockedPrompt = true
                     case "text-edit-3d": addText3D(content: AureaText.t("panel_texto"), depth: 0.25, gate: false)
                     // Omega conteúdo (área 06): o editor de desenho e o Editar pontos.
                     case "content-drawing": startDrawing()

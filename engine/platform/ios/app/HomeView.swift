@@ -331,6 +331,9 @@ struct HomeView: View {
             }, onError: { error in importing = false; model.toast = error })
         }
         .fullScreenCover(isPresented: $showAbout) { HomeAboutView { showAbout = false } }
+        #if DEBUG
+        .sheet(isPresented: $model.parityHomePaywall) { PaywallSheet(item: .text3D()) { model.parityHomePaywall = false } }
+        #endif
         .fullScreenCover(isPresented: $showReleaseNotes, onDismiss: {
             readReleaseNotes = releaseNotesEdition
             if model.donationPromptPending { showDonationPrompt = true }
@@ -347,6 +350,7 @@ struct HomeView: View {
             #if DEBUG
             // Slow video fixtures yield to Home while preparing their real export.
             if ProcessInfo.processInfo.environment["AUREA_UI_TEST_PROBE"] == "1" { return }
+            if ProcessInfo.processInfo.environment["AUREA_PARITY_SCENE"] == "paywall" { return }
             #endif
             if readReleaseNotes != releaseNotesEdition { showReleaseNotes = true }
             else if model.donationPromptPending { showDonationPrompt = true }

@@ -1380,6 +1380,11 @@ final class AureaModel: ObservableObject {
                     case "text-2d": addText(); textContentRequest = nil; panel = .text
                     case "text-3d": addText3D(content: AureaText.t("panel_texto"), depth: 0.25, gate: false); textContentRequest = nil; panel = .layer3D
                     case "text-edit-2d": addText()
+                    case "paywall":
+                        // A folha de assinaturas do Texto 3D (a mesma do efeito pago) para a revisão da App Store.
+                        language = .pt
+                        HyperEntitlements.shared.prepareParityPaywall()
+                        hyperLockedPrompt = true
                     case "text-edit-3d": addText3D(content: AureaText.t("panel_texto"), depth: 0.25, gate: false)
                     // Omega conteúdo (área 06): o editor de desenho e o Editar pontos.
                     case "content-drawing": startDrawing()

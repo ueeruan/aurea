@@ -357,6 +357,16 @@ final class HyperEntitlements: ObservableObject {
     @Published private(set) var access: HyperAccess = .needsConfig
     /// O que o servidor aceita vender agora (GET /api/entitlements: `purchasable`).
     @Published private(set) var purchasable: Set<String> = []
+#if DEBUG
+    /// Só CI (cena "paywall" do capture_simulator): mostra a folha de assinaturas
+    /// como para uma conta sem acesso, com tudo à venda, sem conta nem servidor.
+    private(set) var parityPaywall = false
+    func prepareParityPaywall() {
+        parityPaywall = true
+        purchasable = Set(AureaEngine.subscriptionProductIds())
+        revision += 1
+    }
+#endif
     /// Muda a cada recálculo: quem lê `accessFor(_:)` numa tela é redesenhado junto.
     @Published private(set) var revision = 0
     /// Só o portão por conta (o que vale no modo "entitled" da config remota).
@@ -415,6 +425,9 @@ final class HyperEntitlements: ObservableObject {
 
     /// O acesso a um item pago cuja assinatura avulsa é `item` (nil = só o AureaHyper).
     func accessFor(_ item: String?) -> HyperAccess {
+#if DEBUG
+        if parityPaywall { return .locked }
+#endif
         let entitlement = EntitlementRules.access(cache: cache, email: email, nowMillis: Self.nowMillis(), checking: inFlight > 0) {
             Self.engineRule($0, item)
         }

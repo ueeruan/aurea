@@ -20,7 +20,7 @@ SCENES = ('home', 'home-scroll', 'editor-empty', 'layer-dock', 'transform', 'eff
           'android-complex-3d', 'android-complex-particles',
           'android-hdri',
           'metal-face-control', 'metal-face-culling',
-          'android-precomp', 'android-precomp-inside', 'export-render')
+          'android-precomp', 'android-precomp-inside', 'export-render', 'paywall')
 # A identidade de um fixture de TEXTO é a forma LF, que é o que o repositório
 # guarda (`* text=auto eol=lf`) e o que QUALQUER checkout entrega — no Windows o
 # arquivo em disco fica com CRLF e o hash do disco não é o que o CI vê. Foi

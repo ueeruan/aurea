@@ -436,7 +436,8 @@ jobs:
   simulator-parity:
     if: (github.event_name != 'workflow_dispatch' && github.ref_name != 'claude/omega-0.3.2') || inputs.run_simulator
     runs-on: macos-15
-    timeout-minutes: 60
+    # 1.0.1: a compilação do simulador sem cache passa de 60 min.
+    timeout-minutes: 150
     env:
       CCACHE_DIR: ${{ github.workspace }}/build/ccache
       CCACHE_BASEDIR: ${{ github.workspace }}

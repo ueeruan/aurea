@@ -230,8 +230,19 @@ final class Native: @unchecked Sendable {
         lock.unlock()
     }
 }
+// 1.0.2: a tarefa contínua do iOS 26+ (BGContinuedProcessingTask) fica fora do
+// harness, como o codec nativo: só o progresso que o poll repassa é contado.
+final class ExportBackgroundRun {
+    var onExpire: (() -> Void)?
+    var keepsRunningInBackground: Bool { false }
+    var updates = 0
+    func begin(title: String) {}
+    func update(done: Int64, total: Int64) { updates += 1 }
+    func end(success: Bool) {}
+}
 @MainActor final class Subject {
     let engine = Native(), mediaQueue = DispatchQueue(label: "export-startup-regression")
+    let exportBackgroundRun = ExportBackgroundRun()
     var projectGeneration = UUID()
     var projectName = "Fixture", started = true, stopping = false
     var exportOptions = ExportOptions(), pendingExportOptions: ExportOptions?

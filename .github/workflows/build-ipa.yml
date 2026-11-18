@@ -37,6 +37,11 @@ on:
         required: false
         default: false
         type: boolean
+      sim_device:
+        description: 'Optional simulator for the captures (e.g. iPad Pro 13-inch (M4)); empty keeps iPhone 16'
+        required: false
+        default: ''
+        type: string
       bundle_id:
         description: 'Optional bundle identifier registered in App Store Connect (empty keeps com.aurea.aurea)'
         required: false
@@ -544,6 +549,7 @@ jobs:
       - name: Capture actual iOS UI and core fixture projects
         env:
           AUREA_PARITY_SCENES: ${{ inputs.capture_scenes || '' }}
+          AUREA_SIM_DEVICE: ${{ inputs.sim_device || '' }}
         run: python3 engine/platform/ios/verify/capture_simulator.py build/simulator/Build/Products/Debug-iphonesimulator/Aurea.app build/ios-parity
       - uses: actions/upload-artifact@v4
         if: always()

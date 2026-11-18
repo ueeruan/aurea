@@ -645,10 +645,22 @@ def main(argv=None):
         run(report, 'xcrun', 'swiftc', 'engine/platform/ios/verify/check_core_frame.swift',
             '-o', str(frame_checker))
         devices = json.loads(run(report, 'xcrun', 'simctl', 'list', 'devices', 'available', '-j'))['devices']
-        phones = [d for group in devices.values() for d in group if 'iPhone' in d['name']]
-        if not phones:
-            raise RuntimeError('no available iPhone simulator')
-        phone = next((d for d in phones if d['name'] == 'iPhone 16'), phones[0])
+        # 1.0.2: AUREA_SIM_DEVICE escolhe outro simulador (os prints de iPad 13" da
+        # App Store saem do "iPad Pro 13-inch (M4)"); vazio = o iPhone 16 de sempre.
+        wanted = os.environ.get('AUREA_SIM_DEVICE', '').strip()
+        available = [d for group in devices.values() for d in group]
+        if wanted:
+            family = 'iPad' if 'iPad' in wanted else 'iPhone'
+            phones = [d for d in available if family in d['name']]
+            if not phones:
+                raise RuntimeError(f'no available {family} simulator for {wanted!r}')
+            phone = next((d for d in phones if d['name'] == wanted), None) or next(
+                (d for d in phones if 'iPad Pro 13' in d['name']), None) or phones[0]
+        else:
+            phones = [d for d in available if 'iPhone' in d['name']]
+            if not phones:
+                raise RuntimeError('no available iPhone simulator')
+            phone = next((d for d in phones if d['name'] == 'iPhone 16'), phones[0])
         udid = phone['udid']
         report['device'] = phone
         if phone['state'] != 'Booted':

@@ -180,15 +180,10 @@ struct EditorView: View {
         // (a prévia fica); a faixa de entrada sobe sozinha (TextEditPanel).
         .ignoresSafeArea(model.textModeActive ? .keyboard : [], edges: .bottom)
         .fullScreenCover(isPresented: $model.showExport) { ExportView() }
-        // 1.0.2: o painel Pre Render & Pre Export e o player do pré-export (PreRenderPanelView.swift).
-        .background(Color.clear.sheet(isPresented: $model.preRenderPanelOpen) {
-            PreRenderPanelView().environmentObject(model).presentationDetents([.medium, .large])
-        })
-        .background(Color.clear.fullScreenCover(item: Binding(
-            get: { model.preExportWatching.map { PreExportPlayback(path: $0) } },
-            set: { model.preExportWatching = $0?.path })) { item in
-            PreExportPlayerView(path: item.path).environmentObject(model)
-        })
+        // 1.0.2: Pre Render & Pre Export, o player do pré-export e o paywall da Neural (IA)
+        // num modificador próprio (EditorPresentations102): na mesma cadeia o body passava
+        // do limite de checagem de tipos do compilador Swift.
+        .modifier(EditorPresentations102(model: model))
         // 0.4.6: o assistente de IA em tela cheia (AssistantView.swift).
         .background(Color.clear.fullScreenCover(isPresented: $model.assistantOpen) {
             // AureaMCP substitui o chat de IA; o chat antigo volta com AureaMcpFlags.legacyChat.
@@ -200,9 +195,7 @@ struct EditorView: View {
         })
         // 0.5.4: texto 3D pedido sem o acesso (Text3DGate em AureaModel.addText3D): o paywall (assinatura do
         // Texto 3D ou AureaHyper; 16/11/2026).
-        .background(Color.clear.sheet(isPresented: $model.hyperLockedPrompt) { PaywallSheet(item: .text3D()) { model.hyperLockedPrompt = false } })
-        // 1.0.2: Neural (IA) do Flow Retime sem o AureaHyper (EffectsView.choiceRow).
-        .background(Color.clear.sheet(isPresented: $model.hyperOptionPrompt) { PaywallSheet(item: .hyperTools) { model.hyperOptionPrompt = false } })
+        // (o sheet está em EditorPresentations102, no fim do arquivo)
         .fullScreenCover(item: $model.effectSearch) { request in
             // A tela "Adicionar efeito" (ou só a busca): EffectsBrowser.swift.
             EffectAddSheet(request: request, close: { model.effectSearch = nil })
@@ -3711,5 +3704,34 @@ struct AeImportSheet: View {
             .padding(.horizontal, 18).padding(.vertical, 16)
         }
         .background(AureaColors.surface.ignoresSafeArea())
+    }
+}
+
+/// 1.0.2: as apresentações novas do editor, fora da cadeia do EditorView.body.
+private struct EditorPresentations102: ViewModifier {
+    @ObservedObject var model: AureaModel
+    func body(content: Content) -> some View {
+        content
+            // O painel Pre Render & Pre Export (PreRenderPanelView.swift).
+            .background(Color.clear.sheet(isPresented: $model.preRenderPanelOpen) {
+                PreRenderPanelView().environmentObject(model).presentationDetents([.medium, .large])
+            })
+            // O player do pré-export.
+            .background(Color.clear.fullScreenCover(item: watching) { item in
+                PreExportPlayerView(path: item.path).environmentObject(model)
+            })
+            // 0.5.4: Texto 3D pedido sem o acesso (Text3DGate em AureaModel.addText3D).
+            .background(Color.clear.sheet(isPresented: $model.hyperLockedPrompt) {
+                PaywallSheet(item: PaidItem.text3D()) { model.hyperLockedPrompt = false }
+            })
+            // Neural (IA) do Flow Retime sem o AureaHyper (EffectsView.choiceRow).
+            .background(Color.clear.sheet(isPresented: $model.hyperOptionPrompt) {
+                PaywallSheet(item: PaidItem.hyperTools) { model.hyperOptionPrompt = false }
+            })
+    }
+    private var watching: Binding<PreExportPlayback?> {
+        Binding<PreExportPlayback?>(
+            get: { model.preExportWatching.map { PreExportPlayback(path: $0) } },
+            set: { model.preExportWatching = $0?.path })
     }
 }

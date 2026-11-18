@@ -542,6 +542,8 @@ jobs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
             build 2>&1 | tee build-simulator.log
       - name: Prepare official 3D export fixtures
+        # 1.0.2: a captura não depende do teste de export nativo acima (prints da loja).
+        if: always() && steps.compile_simulator.outcome == 'success'
         env:
           AUREA_PARITY_SCENES: ${{ inputs.capture_scenes || '' }}
         run: |
@@ -558,6 +560,8 @@ jobs:
               prepare_models(output)
           PY
       - name: Capture actual iOS UI and core fixture projects
+        # 1.0.2: a captura não depende do teste de export nativo acima (prints da loja).
+        if: always() && steps.compile_simulator.outcome == 'success'
         env:
           AUREA_PARITY_SCENES: ${{ inputs.capture_scenes || '' }}
           AUREA_SIM_DEVICE: ${{ inputs.sim_device || '' }}

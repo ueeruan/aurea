@@ -7855,15 +7855,7 @@ enum AureaText {
         "refc_extrude_name": "Extrusão (vetor)",
         "refc_smear_desc": "Leva a área da máscara de origem para um novo lugar e estica a imagem em volta, dentro da máscara de limite.",
         "refc_smear_name": "Mancha (máscaras)",
-        "release_notes_body": "Aurea 1.0.2 (2222) — 18/11/2026
-
-• Optical Flow para filmagem real: menos fantasma, controle Fantasma ↔ Deformação e qualidade Neural (IA) no AureaHYPER.
-• Glitchify igual ao After Effects.
-• Exportação mais rápida e com mais qualidade.
-• Importe só o trecho cortado de vídeos longos.
-• Painel de Pre Render e Pre Export por trecho.
-• AureaMCP acorda o app fechado.
-• HeadBop agora é pago (avulso ou no AureaHYPER). Projetos que já usam o HeadBop continuam abrindo e exportando.",
+        "release_notes_body": "Aurea 1.0.2 (2222) — 18/11/2026\n\n• Optical Flow para filmagem real: menos fantasma, controle Fantasma ↔ Deformação e qualidade Neural (IA) no AureaHYPER.\n• Glitchify igual ao After Effects.\n• Exportação mais rápida e com mais qualidade.\n• Importe só o trecho cortado de vídeos longos.\n• Painel de Pre Render e Pre Export por trecho.\n• AureaMCP acorda o app fechado.\n• HeadBop agora é pago (avulso ou no AureaHYPER). Projetos que já usam o HeadBop continuam abrindo e exportando.",
         "release_notes_title": "Novidades do Aurea",
         "remap_acelerar": "Acelerar",
         "remap_ao_contrario": "Ao contrário",
@@ -16754,15 +16746,7 @@ enum AureaText {
         "refc_extrude_name": "Extrude",
         "refc_smear_desc": "Moves the source mask area to a new place and stretches the image around it, inside the boundary mask.",
         "refc_smear_name": "Mask Smear",
-        "release_notes_body": "Aurea 1.0.2 (2222) — 11/18/2026
-
-• Optical Flow for real footage: less ghosting, a Ghosting ↔ Warping control and Neural (AI) quality with AureaHYPER.
-• Glitchify now matches After Effects.
-• Faster, higher-quality export.
-• Import only the trimmed part of long videos.
-• Pre Render and Pre Export panel by range.
-• AureaMCP can wake the app when it is closed.
-• HeadBop is now paid (on its own or with AureaHYPER). Projects that already use HeadBop still open and export.",
+        "release_notes_body": "Aurea 1.0.2 (2222) — 11/18/2026\n\n• Optical Flow for real footage: less ghosting, a Ghosting ↔ Warping control and Neural (AI) quality with AureaHYPER.\n• Glitchify now matches After Effects.\n• Faster, higher-quality export.\n• Import only the trimmed part of long videos.\n• Pre Render and Pre Export panel by range.\n• AureaMCP can wake the app when it is closed.\n• HeadBop is now paid (on its own or with AureaHYPER). Projects that already use HeadBop still open and export.",
         "release_notes_title": "Aurea updates",
         "remap_acelerar": "Speed-up ramp",
         "remap_ao_contrario": "Reverse",
@@ -25653,15 +25637,7 @@ enum AureaText {
         "refc_extrude_name": "Extrusión (vector)",
         "refc_smear_desc": "Lleva el área de la máscara de origen a otro lugar y estira la imagen alrededor, dentro de la máscara de límite.",
         "refc_smear_name": "Mancha (máscaras)",
-        "release_notes_body": "Aurea 1.0.2 (2222) — 18/11/2026
-
-• Optical Flow para filmación real: menos fantasma, control Fantasma ↔ Deformación y calidad Neural (IA) con AureaHYPER.
-• Glitchify igual a After Effects.
-• Exportación más rápida y con más calidad.
-• Importa solo el tramo recortado de videos largos.
-• Panel de Pre Render y Pre Export por tramo.
-• AureaMCP despierta la app cerrada.
-• HeadBop ahora es de pago (solo o con AureaHYPER). Los proyectos que ya usan HeadBop siguen abriendo y exportando.",
+        "release_notes_body": "Aurea 1.0.2 (2222) — 18/11/2026\n\n• Optical Flow para filmación real: menos fantasma, control Fantasma ↔ Deformación y calidad Neural (IA) con AureaHYPER.\n• Glitchify igual a After Effects.\n• Exportación más rápida y con más calidad.\n• Importa solo el tramo recortado de videos largos.\n• Panel de Pre Render y Pre Export por tramo.\n• AureaMCP despierta la app cerrada.\n• HeadBop ahora es de pago (solo o con AureaHYPER). Los proyectos que ya usan HeadBop siguen abriendo y exportando.",
         "release_notes_title": "Novedades de Aurea",
         "remap_acelerar": "Acelerar",
         "remap_ao_contrario": "Al revés",
@@ -34552,15 +34528,7 @@ enum AureaText {
         "refc_extrude_name": "Выдавливание (вектор)",
         "refc_smear_desc": "Переносит область исходной маски в новое место и растягивает изображение вокруг неё внутри маски-границы.",
         "refc_smear_name": "Размазывание (маски)",
-        "release_notes_body": "Aurea 1.0.2 (2222) — 18.11.2026
-
-• Optical Flow для живой съёмки: меньше двоения, регулятор Двоение ↔ Деформация и качество Neural (ИИ) в AureaHYPER.
-• Glitchify теперь как в After Effects.
-• Экспорт быстрее и качественнее.
-• Импорт только обрезанного фрагмента длинных видео.
-• Панель Pre Render и Pre Export для фрагмента.
-• AureaMCP будит закрытое приложение.
-• HeadBop теперь платный (отдельно или в AureaHYPER). Проекты с HeadBop по-прежнему открываются и экспортируются.",
+        "release_notes_body": "Aurea 1.0.2 (2222) — 18.11.2026\n\n• Optical Flow для живой съёмки: меньше двоения, регулятор Двоение ↔ Деформация и качество Neural (ИИ) в AureaHYPER.\n• Glitchify теперь как в After Effects.\n• Экспорт быстрее и качественнее.\n• Импорт только обрезанного фрагмента длинных видео.\n• Панель Pre Render и Pre Export для фрагмента.\n• AureaMCP будит закрытое приложение.\n• HeadBop теперь платный (отдельно или в AureaHYPER). Проекты с HeadBop по-прежнему открываются и экспортируются.",
         "release_notes_title": "Обновления Aurea",
         "remap_acelerar": "Ускорение",
         "remap_ao_contrario": "Реверс",
@@ -43451,15 +43419,7 @@ enum AureaText {
         "refc_extrude_name": "एक्सट्रूड (वेक्टर)",
         "refc_smear_desc": "स्रोत मास्क वाले हिस्से को नई जगह ले जाता है और सीमा मास्क के अंदर आसपास की छवि को खींचता है।",
         "refc_smear_name": "स्मियर (मास्क)",
-        "release_notes_body": "Aurea 1.0.2 (2222) — 18/11/2026
-
-• असली फ़ुटेज के लिए Optical Flow: कम घोस्टिंग, घोस्टिंग ↔ विरूपण कंट्रोल और AureaHYPER में Neural (AI) क्वालिटी।
-• Glitchify अब After Effects जैसा।
-• तेज़ और बेहतर क्वालिटी वाला एक्सपोर्ट।
-• लंबे वीडियो का सिर्फ़ काटा हुआ हिस्सा इम्पोर्ट करें।
-• हिस्से के लिए Pre Render और Pre Export पैनल।
-• AureaMCP बंद ऐप को जगा सकता है।
-• HeadBop अब पेड है (अलग से या AureaHYPER में)। जिन प्रोजेक्ट में HeadBop है, वे खुलते और एक्सपोर्ट होते रहेंगे।",
+        "release_notes_body": "Aurea 1.0.2 (2222) — 18/11/2026\n\n• असली फ़ुटेज के लिए Optical Flow: कम घोस्टिंग, घोस्टिंग ↔ विरूपण कंट्रोल और AureaHYPER में Neural (AI) क्वालिटी।\n• Glitchify अब After Effects जैसा।\n• तेज़ और बेहतर क्वालिटी वाला एक्सपोर्ट।\n• लंबे वीडियो का सिर्फ़ काटा हुआ हिस्सा इम्पोर्ट करें।\n• हिस्से के लिए Pre Render और Pre Export पैनल।\n• AureaMCP बंद ऐप को जगा सकता है।\n• HeadBop अब पेड है (अलग से या AureaHYPER में)। जिन प्रोजेक्ट में HeadBop है, वे खुलते और एक्सपोर्ट होते रहेंगे।",
         "release_notes_title": "Aurea अपडेट",
         "remap_acelerar": "तेज़ करें",
         "remap_ao_contrario": "उल्टा",
@@ -52350,15 +52310,7 @@ enum AureaText {
         "refc_extrude_name": "بثق (متجه)",
         "refc_smear_desc": "ينقل منطقة قناع المصدر إلى مكان جديد ويمدّ الصورة حولها داخل قناع الحدود.",
         "refc_smear_name": "لطخة (أقنعة)",
-        "release_notes_body": "Aurea 1.0.2 (2222) — 18/11/2026
-
-• Optical Flow للتصوير الحقيقي: ظلال أقل، وعنصر تحكم الظلال ↔ التشوه، وجودة Neural (الذكاء الاصطناعي) مع AureaHYPER.
-• Glitchify أصبح مطابقًا لـ After Effects.
-• تصدير أسرع وبجودة أعلى.
-• استورد الجزء المقصوص فقط من الفيديوهات الطويلة.
-• لوحة Pre Render وPre Export حسب المقطع.
-• AureaMCP يوقظ التطبيق وهو مغلق.
-• HeadBop أصبح مدفوعًا (منفردًا أو ضمن AureaHYPER). المشاريع التي تستخدم HeadBop تظل تُفتح وتُصدَّر.",
+        "release_notes_body": "Aurea 1.0.2 (2222) — 18/11/2026\n\n• Optical Flow للتصوير الحقيقي: ظلال أقل، وعنصر تحكم الظلال ↔ التشوه، وجودة Neural (الذكاء الاصطناعي) مع AureaHYPER.\n• Glitchify أصبح مطابقًا لـ After Effects.\n• تصدير أسرع وبجودة أعلى.\n• استورد الجزء المقصوص فقط من الفيديوهات الطويلة.\n• لوحة Pre Render وPre Export حسب المقطع.\n• AureaMCP يوقظ التطبيق وهو مغلق.\n• HeadBop أصبح مدفوعًا (منفردًا أو ضمن AureaHYPER). المشاريع التي تستخدم HeadBop تظل تُفتح وتُصدَّر.",
         "release_notes_title": "تحديثات Aurea",
         "remap_acelerar": "تسريع",
         "remap_ao_contrario": "بالعكس",
@@ -61249,15 +61201,7 @@ enum AureaText {
         "refc_extrude_name": "Ekstrusi (vektor)",
         "refc_smear_desc": "Memindahkan area mask sumber ke tempat baru dan meregangkan gambar di sekitarnya, di dalam mask batas.",
         "refc_smear_name": "Noda (mask)",
-        "release_notes_body": "Aurea 1.0.2 (2222) — 18/11/2026
-
-• Optical Flow untuk rekaman nyata: bayangan lebih sedikit, kontrol Bayangan ↔ Distorsi, dan kualitas Neural (AI) dengan AureaHYPER.
-• Glitchify kini sama dengan After Effects.
-• Ekspor lebih cepat dan berkualitas lebih tinggi.
-• Impor hanya bagian video panjang yang dipotong.
-• Panel Pre Render dan Pre Export per rentang.
-• AureaMCP bisa membangunkan aplikasi yang tertutup.
-• HeadBop kini berbayar (terpisah atau dengan AureaHYPER). Proyek yang sudah memakai HeadBop tetap bisa dibuka dan diekspor.",
+        "release_notes_body": "Aurea 1.0.2 (2222) — 18/11/2026\n\n• Optical Flow untuk rekaman nyata: bayangan lebih sedikit, kontrol Bayangan ↔ Distorsi, dan kualitas Neural (AI) dengan AureaHYPER.\n• Glitchify kini sama dengan After Effects.\n• Ekspor lebih cepat dan berkualitas lebih tinggi.\n• Impor hanya bagian video panjang yang dipotong.\n• Panel Pre Render dan Pre Export per rentang.\n• AureaMCP bisa membangunkan aplikasi yang tertutup.\n• HeadBop kini berbayar (terpisah atau dengan AureaHYPER). Proyek yang sudah memakai HeadBop tetap bisa dibuka dan diekspor.",
         "release_notes_title": "Pembaruan Aurea",
         "remap_acelerar": "Percepat",
         "remap_ao_contrario": "Terbalik",

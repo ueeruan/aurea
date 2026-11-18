@@ -1777,15 +1777,7 @@ to edit the curve.</string>
     <string name="am_import_failed">Couldn\'t import: %1$s</string>
     <string name="am_import_nothing">no effect with an Aurea equivalent</string>
     <string name="release_notes_title">Aurea updates</string>
-    <string name="release_notes_body">Aurea 1.0.2 (2222) — 11/18/2026
-
-• Optical Flow for real footage: less ghosting, a Ghosting ↔ Warping control and Neural (AI) quality with AureaHYPER.
-• Glitchify now matches After Effects.
-• Faster, higher-quality export.
-• Import only the trimmed part of long videos.
-• Pre Render and Pre Export panel by range.
-• AureaMCP can wake the app when it is closed.
-• HeadBop is now paid (on its own or with AureaHYPER). Projects that already use HeadBop still open and export.</string>
+    <string name="release_notes_body">Aurea 1.0.2 (2222) — 11/18/2026\n\n• Optical Flow for real footage: less ghosting, a Ghosting ↔ Warping control and Neural (AI) quality with AureaHYPER.\n• Glitchify now matches After Effects.\n• Faster, higher-quality export.\n• Import only the trimmed part of long videos.\n• Pre Render and Pre Export panel by range.\n• AureaMCP can wake the app when it is closed.\n• HeadBop is now paid (on its own or with AureaHYPER). Projects that already use HeadBop still open and export.</string>
     <string name="am_import_lossless_required">This preset contains effects, parameters or layers that cannot be preserved during conversion. Nothing was saved or applied.</string>
     <string name="am_import_read_failed">The file could not be read (64 MB limit), or the selected layer changed. Please try again.</string>
     <string name="world_explosive">Explosive</string>

@@ -1809,15 +1809,7 @@
     <string name="am_import_failed">Não deu para importar: %1$s</string>
     <string name="am_import_nothing">nenhum efeito com equivalente no Aurea</string>
     <string name="release_notes_title">Novidades do Aurea</string>
-    <string name="release_notes_body">Aurea 1.0.2 (2222) — 18/11/2026
-
-• Optical Flow para filmagem real: menos fantasma, controle Fantasma ↔ Deformação e qualidade Neural (IA) no AureaHYPER.
-• Glitchify igual ao After Effects.
-• Exportação mais rápida e com mais qualidade.
-• Importe só o trecho cortado de vídeos longos.
-• Painel de Pre Render e Pre Export por trecho.
-• AureaMCP acorda o app fechado.
-• HeadBop agora é pago (avulso ou no AureaHYPER). Projetos que já usam o HeadBop continuam abrindo e exportando.</string>
+    <string name="release_notes_body">Aurea 1.0.2 (2222) — 18/11/2026\n\n• Optical Flow para filmagem real: menos fantasma, controle Fantasma ↔ Deformação e qualidade Neural (IA) no AureaHYPER.\n• Glitchify igual ao After Effects.\n• Exportação mais rápida e com mais qualidade.\n• Importe só o trecho cortado de vídeos longos.\n• Painel de Pre Render e Pre Export por trecho.\n• AureaMCP acorda o app fechado.\n• HeadBop agora é pago (avulso ou no AureaHYPER). Projetos que já usam o HeadBop continuam abrindo e exportando.</string>
     <string name="am_import_lossless_required">Este preset tem efeitos, parâmetros ou camadas que não podem ser preservados na conversão. Nada foi salvo nem aplicado.</string>
     <string name="am_import_read_failed">Não foi possível ler o arquivo (limite de 64 MB), ou a camada selecionada mudou. Tente novamente.</string>
     <string name="world_explosive">Explosivo</string>

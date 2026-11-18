@@ -106,6 +106,25 @@ struct Asset {
     /// mesmo depois de o app renomear tudo na sandbox.
     std::string originalFilename;
 
+    // --- Janela da fonte (1.0.2: importar só o trecho cortado) ----------------
+    /// O arquivo em `sourcePath` é um TRECHO do original que começa neste
+    /// instante (µs, na régua do original). 0 = o arquivo inteiro, como sempre.
+    /// `duration`/`video.frameCount` continuam medindo até o FIM da janela na
+    /// régua do original: `offset`, keyframes, curva de tempo e os caches por
+    /// quadro da fonte (miniaturas, proxy, roto, profundidade) não mudam. Os
+    /// decoders da janela (media/SourceWindow.hpp) somam este instante ao que
+    /// o arquivo diz e o tiram no seek; antes dele, segura o primeiro quadro.
+    i64 windowStartUs = 0;
+    /// De onde o trecho veio (URI da galeria no Android, localIdentifier do
+    /// PHAsset no iOS), para reaproveitar/alargar o mesmo trecho depois.
+    std::string originRef;
+
+    /// Primeiro quadro da fonte que o arquivo tem, em quadros da composição
+    /// (`compFps`). 0 sem janela.
+    [[nodiscard]] f64 source_first_frame(f64 compFps) const noexcept {
+        return windowStartUs > 0 && compFps > 0.0 ? static_cast<f64>(windowStartUs) * compFps / 1e6 : 0.0;
+    }
+
     // --- 3D -------------------------------------------------------------------
     struct ModelInfo {
         u32 meshCount     = 0;

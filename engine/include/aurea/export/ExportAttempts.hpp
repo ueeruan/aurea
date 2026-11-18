@@ -25,7 +25,7 @@ inline constexpr u32 kExportAttemptBusyRetries = 2;
 
 /// O que um degrau muda no pedido.
 struct ExportAttemptPlan {
-    u32 safeMode = 0;        ///< 0 pedido, 1 Baseline no aparelho, 2 software (ExportWatchdog.hpp)
+    u32 safeMode = 0;        ///< 0 pedido, 1 aparelho sem Surface (mesmo perfil e taxa), 2 software (ExportWatchdog.hpp)
     bool forceH264 = false;  ///< HEVC vira H.264
     u32 shortSideCap = 0;    ///< teto do lado menor (0 = o pedido)
     f64 fpsCap = 0.0;        ///< teto da taxa (0 = a pedida)
@@ -97,6 +97,10 @@ enum class ExportRetryKind : u32 {
 [[nodiscard]] constexpr ExportRetryKind export_retry_kind(i32 code, u32 failure, bool stalled, bool tooLong) noexcept {
     if (tooLong) return ExportRetryKind::None;
     if (stalled) return ExportRetryKind::Stall;
+    // Dispositivo perdido no render: o motor recria a GPU e o backend passa a
+    // enviar o export um passe por vez neste aparelho (limite do driver). O
+    // que ajuda é refazer o MESMO degrau, não trocar encoder nem decoder.
+    if (code == static_cast<i32>(Errc::DeviceLost)) return ExportRetryKind::Busy;
     // Quadro que passou do prazo da GPU (motion blur 3D: dezenas de cenas
     // inteiras por quadro): o que ajuda é menos amostras, não outro encoder.
     if (static_cast<ExportFailure>(failure) == ExportFailure::Render && code == static_cast<i32>(Errc::Timeout))

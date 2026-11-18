@@ -14,6 +14,8 @@ struct AureaApp: App {
     /// A conta opcional, compartilhada com a Home.
     @StateObject private var conta = ContaModel()
     @Environment(\.scenePhase) private var scenePhase
+    /// AureaMCP fora do app (18/11/2026): token APNs e as respostas às notificações do agente.
+    @UIApplicationDelegateAdaptor(AureaAppDelegate.self) private var appDelegate
 
     init() {
         // Antes de qualquer tela: a pilha de um crash precisa ser gravada mesmo

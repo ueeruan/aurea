@@ -172,8 +172,18 @@ storage::RemoveResult Engine::remove_managed_media(const std::vector<std::string
 bool Engine::clear_prerender_cache() noexcept {
     // O PreRender grava pelo caminho do export: com ele andando, nada é mexido.
     if (exportActive_.load(std::memory_order_acquire)) return false;
+    poll_preexport();
+    // 1.0.2: o pré-export guardado sai junto (a mesma linha da tela).
+    {
+        std::lock_guard state(preRenderStateMutex_);
+        if (preExport_.running) return false;
+        preExport_ = PreExportState{};
+    }
     invalidate_prerender();
-    if (!config_.cacheDirectory.empty()) preRenderCache_->sweep_orphans(config_.cacheDirectory);
+    if (!config_.cacheDirectory.empty()) {
+        preRenderCache_->sweep_orphans(config_.cacheDirectory);
+        discard_preexport_file({});
+    }
     return true;
 }
 

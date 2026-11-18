@@ -1915,14 +1915,17 @@ AUREA_TEST(Export, HeatReducesParallelismNeverQuality) {
     cfg.width = 320;
     cfg.height = 180;
     cfg.pattern = SyntheticPattern::MovingSquare;
-    u64 hashes[2]{};
-    u32 flags[2]{};
-    for (int k = 0; k < 2; ++k) {
+    // 18/11/2026: só o calor CRÍTICO serializa; Serious + throttling mantém
+    // a profundidade (o sistema já baixou o clock).
+    u64 hashes[3]{};
+    u32 flags[3]{};
+    for (int k = 0; k < 3; ++k) {
         Rig r(cfg, 30.0, 30, 0);
         AUREA_CHECK(r.ok);
         if (!r.ok) return;
         build_effects_scene(r);
-        if (k == 1) r.e.set_thermal(static_cast<u32>(ThermalState::Level::Serious), true);
+        if (k == 1) r.e.set_thermal(static_cast<u32>(ThermalState::Level::Critical), true);
+        if (k == 2) r.e.set_thermal(static_cast<u32>(ThermalState::Level::Serious), true);
         const Outcome o = run_export(r, 180, 0.0, true, 120);
         AUREA_CHECK(o.finished && o.p.result == Errc::Ok);
         AUREA_CHECK_EQ(r.cap.hashes.size(), static_cast<usize>(30));
@@ -1932,8 +1935,10 @@ AUREA_TEST(Export, HeatReducesParallelismNeverQuality) {
         flags[k] = o.p.flags;
     }
     AUREA_CHECK_EQ(hashes[0], hashes[1]);
+    AUREA_CHECK_EQ(hashes[0], hashes[2]);
     AUREA_CHECK((flags[0] & Engine::kExportThermalReduced) == 0);
     AUREA_CHECK((flags[1] & Engine::kExportThermalReduced) != 0);
+    AUREA_CHECK((flags[2] & Engine::kExportThermalReduced) == 0);
 }
 
 AUREA_TEST(Export, MemoryWarningReducesAdmissionWithoutChangingFramesOrAudio) {
@@ -2898,16 +2903,17 @@ AUREA_TEST(ExportBitrate, CompactAutoAndExplicitManualUseSeparateCaps) {
         AUREA_CHECK_EQ(export_video_bitrate_bps(1920, 1080, 30, codec, ExportQuality::Normal, 80), 80'000'000u);
     }
     const u32 defaultRate = export_video_bitrate_bps(1920, 1080, 30, ExportCodec::H264, ExportQuality::Normal);
-    AUREA_CHECK(export_estimated_bytes(defaultRate, 192'000, 30) < 32'000'000ull);
+    AUREA_CHECK(export_estimated_bytes(defaultRate, 192'000, 30) < 64'000'000ull);
 }
 
-AUREA_TEST(ExportBitrate, OneMinute1080p30NormalStaysSmall) {
+// 18/11/2026: o padrão é ALTA qualidade (1080p30 ≈ 16 Mbps): ~123 MB por minuto.
+AUREA_TEST(ExportBitrate, OneMinute1080p30NormalIsHighQualityButBounded) {
     using namespace aurea;
     const u32 v = export_video_bitrate_bps(1920, 1080, 30.0, ExportCodec::H264, ExportQuality::Normal);
-    AUREA_CHECK(v >= 7'900'000u && v <= 8'100'000u);
+    AUREA_CHECK(v >= 15'900'000u && v <= 16'100'000u);
     const u64 bytes = export_estimated_bytes(v, kExportAudioKbps * 1000u, 60.0);
-    AUREA_CHECK_MSG(bytes < 65ull * 1000 * 1000, "1 min 1080p30 Normal deve ficar abaixo de ~65 MB");
-    AUREA_CHECK(bytes > 60ull * 1000 * 1000);
+    AUREA_CHECK_MSG(bytes < 126ull * 1000 * 1000, "1 min 1080p30 padrão deve ficar abaixo de ~126 MB");
+    AUREA_CHECK(bytes > 120ull * 1000 * 1000);
 }
 
 AUREA_TEST(ExportBitrate, ResolutionFpsQualityAndCodecScaleSanely) {
@@ -2916,8 +2922,8 @@ AUREA_TEST(ExportBitrate, ResolutionFpsQualityAndCodecScaleSanely) {
         return export_video_bitrate_bps(w, h, fps, c, q);
     };
     const u32 p720 = bps(1280, 720, 30), p1080 = bps(1920, 1080, 30), p4k = bps(3840, 2160, 30);
-    AUREA_CHECK(p720 >= 4'900'000u && p720 <= 5'100'000u);
-    AUREA_CHECK(p4k >= 31'900'000u && p4k <= 32'100'000u);
+    AUREA_CHECK(p720 >= 9'900'000u && p720 <= 10'100'000u);
+    AUREA_CHECK(p4k >= 49'900'000u && p4k <= 50'100'000u);
     AUREA_CHECK(bps(854, 480, 30) < p720 && p720 < p1080 && p1080 < bps(2560, 1440, 30) && bps(2560, 1440, 30) < p4k);
     // Vertical = mesma quantidade de pixels, mesma taxa.
     AUREA_CHECK_EQ(bps(1080, 1920, 30), p1080);
@@ -2932,8 +2938,8 @@ AUREA_TEST(ExportBitrate, ResolutionFpsQualityAndCodecScaleSanely) {
     // Nada passa do teto, nem 4K60 Alta nem Mbps manual absurdo; 1 min nunca 1 GB.
     const u32 worst = bps(3840, 2160, 60, ExportQuality::High);
     AUREA_CHECK(worst <= static_cast<u32>(kExportMaxAutoVideoBps));
-    AUREA_CHECK(export_video_bitrate_bps(1920, 1080, 30, ExportCodec::H264, ExportQuality::Normal, 900) <= 100'000'000u);
-    AUREA_CHECK(export_estimated_bytes(worst, 192'000u, 60.0) < 460ull * 1000 * 1000);
+    AUREA_CHECK(export_video_bitrate_bps(1920, 1080, 30, ExportCodec::H264, ExportQuality::Normal, 900) <= 150'000'000u);
+    AUREA_CHECK(export_estimated_bytes(worst, 192'000u, 60.0) < 800ull * 1000 * 1000);
     // Mbps manual é respeitado.
     AUREA_CHECK_EQ(export_video_bitrate_bps(1920, 1080, 30, ExportCodec::H264, ExportQuality::Low, 10), 10'000'000u);
     AUREA_CHECK_EQ(export_estimated_bytes(10'000'000u, 0u, 0.0), 0ull);

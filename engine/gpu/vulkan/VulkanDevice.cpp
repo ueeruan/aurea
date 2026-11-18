@@ -47,13 +47,55 @@ Backend::~Backend() { shutdown(); }
 u32 Backend::validation_errors() noexcept { return gValidationErrors.load(std::memory_order_relaxed); }
 u32 Backend::validation_warnings() noexcept { return gValidationWarnings.load(std::memory_order_relaxed); }
 
+// Dispositivo perdido durante um quadro de export sem fatia: vale para o resto
+// do processo (a recuperação reinicializa o MESMO backend) e, pelo arquivo no
+// diretório do cache, para as próximas aberturas do app neste aparelho/driver.
+namespace {
+std::atomic<bool> gExportSplitAfterLoss{false};
+bool read_whole(const std::string& path, std::vector<u8>& out) noexcept;
+} // namespace
+
 bool Backend::note_device_lost(VkResult r) noexcept {
     if (r == VK_ERROR_DEVICE_LOST) {
-        if (!deviceLost_) AUREA_LOG_ERROR("vulkan: dispositivo perdido");
+        if (!deviceLost_) {
+            AUREA_LOG_ERROR("vulkan: dispositivo perdido");
+            if (lastSubmitted_ && lastSubmitted_->offscreen && passesPerCommandBuffer_ == 0) remember_export_loss();
+        }
         deviceLost_ = true;
         return true;
     }
     return false;
+}
+
+std::string Backend::export_split_identity() const {
+    char id[96];
+    std::snprintf(id, sizeof(id), "%08x:%08x:%s|", caps_.vendorId, caps_.deviceId, caps_.driverInfo.c_str());
+    return id;
+}
+
+std::string Backend::export_split_marker_path() const {
+    if (!config_.cacheDirectory || !*config_.cacheDirectory) return {};
+    return std::string(config_.cacheDirectory) + "/aurea_vk_export_split.txt";
+}
+
+void Backend::remember_export_loss() noexcept {
+    gExportSplitAfterLoss.store(true, std::memory_order_release);
+    AUREA_LOG_WARN("vulkan: dispositivo perdido num quadro de export inteiro; o export deste aparelho passa a "
+                   "enviar um passe por vez");
+    if (splitMarkerPath_.empty()) return;
+    const std::string id = export_split_identity();
+    (void)fileio::write_atomic(splitMarkerPath_, id.data(), id.size());
+}
+
+void Backend::forget_export_loss_for_tests() noexcept {
+    gExportSplitAfterLoss.store(false, std::memory_order_release);
+}
+
+void Backend::set_export_pass_split(bool split) noexcept {
+    const u32 want = split ? 1u : 0u;
+    if (want == passesPerCommandBuffer_) return;
+    AUREA_LOG_INFO("vulkan: export %s", split ? "em um passe por envio" : "com o quadro inteiro num envio");
+    passesPerCommandBuffer_ = want;
 }
 
 // =============================================================================
@@ -74,6 +116,23 @@ Status Backend::initialize(const BackendConfig& config) noexcept {
     allocator_.initialize(physical_, device_, instanceFunctions_, deviceFunctions_);
     fill_capabilities();
     load_pipeline_cache();
+    {
+        // A recuperação de dispositivo reinicializa sem diretório de cache:
+        // fica o caminho da primeira inicialização.
+        if (std::string marker = export_split_marker_path(); !marker.empty()) splitMarkerPath_ = std::move(marker);
+        bool split = gExportSplitAfterLoss.load(std::memory_order_acquire);
+        if (!split && !splitMarkerPath_.empty()) {
+            std::vector<u8> file;
+            if (read_whole(splitMarkerPath_, file)) {
+                const std::string id = export_split_identity();
+                split = file.size() == id.size() && std::memcmp(file.data(), id.data(), id.size()) == 0;
+                // Outro driver (sistema atualizado) ou outra GPU: mede de novo.
+                if (!split) std::remove(splitMarkerPath_.c_str());
+            }
+        }
+        passesPerCommandBuffer_ = split ? 1u : 0u;
+        if (split) AUREA_LOG_INFO("vulkan: export em um passe por envio (dispositivo perdido antes neste aparelho)");
+    }
 
     if (const Status s = create_frames(); !s.ok()) return s;
     if (const Status s = create_dummies(); !s.ok()) return s;

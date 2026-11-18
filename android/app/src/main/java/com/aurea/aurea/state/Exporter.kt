@@ -484,7 +484,10 @@ class Exporter internal constructor(
                 "continuing attempt ${checkpoint.safeMode} from frame ${checkpoint.resumeFrame}/${checkpoint.totalFrames}")
             attempt = checkpoint.safeMode.coerceIn(0, AureaEngine.EXPORT_ATTEMPT_MAX)
             state = state.copy(notice = text(R.string.app_export_resumed))
-        } else if (died) {
+        } else if (died && memoryStep >= 2) {
+            // 18/11/2026: a 1a morte só aperta a memória (menos quadros em voo,
+            // mesmo encoder, mesma qualidade); o caminho mais leve do encoder
+            // só a partir da 2a morte seguida.
             val lighter = AureaEngine.nativeExportNextAttempt(0, OUT_OF_MEMORY, 0, false, false, options.shortSide, options.fps,
                 options.hevc, options.aiUpscale > 0)
             if (lighter in 1..AureaEngine.EXPORT_ATTEMPT_MAX) {

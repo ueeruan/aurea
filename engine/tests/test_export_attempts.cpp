@@ -106,7 +106,8 @@ AUREA_TEST(ExportAttempts, WhatCanHelpIsDecidedByCodeReasonAndStall) {
     AUREA_CHECK(export_retry_kind(code(Errc::OutOfMemory), 0, false, false) == ExportRetryKind::Memory);
     AUREA_CHECK(export_retry_kind(code(Errc::OutOfDeviceMemory), 0, false, false) == ExportRetryKind::Memory);
     AUREA_CHECK(export_retry_kind(code(Errc::NotSupported), 0, false, false) == ExportRetryKind::Memory);
-    AUREA_CHECK(export_retry_kind(code(Errc::DeviceLost), why(ExportFailure::Render), false, false) == ExportRetryKind::Memory);
+    // Dispositivo perdido: o MESMO degrau (a GPU volta fatiada por passe).
+    AUREA_CHECK(export_retry_kind(code(Errc::DeviceLost), why(ExportFailure::Render), false, false) == ExportRetryKind::Busy);
     AUREA_CHECK(export_retry_kind(code(Errc::OutOfMemory), why(ExportFailure::GpuMemory), false, false) == ExportRetryKind::Memory);
     // Parou de andar: encoder travado, decoder preso ou a tela desistiu.
     AUREA_CHECK(export_retry_kind(code(Errc::Timeout), why(ExportFailure::EncoderStalled), false, false) == ExportRetryKind::Stall);

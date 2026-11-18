@@ -7,6 +7,9 @@ struct BoundedCommandsTestAccess {
     static std::vector<VkCommandBuffer> buffers(const Backend& b) {
         return b.lastSubmitted_ ? b.lastSubmitted_->commandBuffers : std::vector<VkCommandBuffer>{};
     }
+    static u32 passes(const Backend& b) { return b.passesPerCommandBuffer_; }
+    static void remember_loss(Backend& b) { b.remember_export_loss(); }
+    static void forget_loss() { Backend::forget_export_loss_for_tests(); }
 };
 }
 namespace {
@@ -100,6 +103,58 @@ struct BoundedRecordingDispatch {
         return active->fail(Fault::Uniform) ? VK_ERROR_OUT_OF_DEVICE_MEMORY : active->buffer(d, i, a, b);
     }
 };
+}
+
+// 18/11/2026: o export manda o quadro inteiro num envio (a CPU já grava o
+// próximo). Um passe por envio só depois de um dispositivo perdido num quadro
+// de export NESTE aparelho/driver — lembrado no diretório do cache entre
+// aberturas do app; outro driver ou outra GPU mede de novo.
+AUREA_TEST(BoundedCommandsGpu, ExportSplitsPassesOnlyAfterADeviceLossOnThisDevice) {
+    AUREA_REQUIRE_GPU();
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path dir = fs::temp_directory_path() / "aurea_vk_export_split_test";
+    fs::remove_all(dir, ec);
+    fs::create_directories(dir, ec);
+    const std::string cache = dir.string();
+    const fs::path marker = dir / "aurea_vk_export_split.txt";
+    BackendConfig cfg;
+    cfg.cacheDirectory = cache.c_str();
+    cfg.enableGpuTimers = false;
+    vk::BoundedCommandsTestAccess::forget_loss();
+    {
+        vk::Backend b;
+        AUREA_CHECK(b.initialize(cfg).ok());
+        AUREA_CHECK(!b.export_pass_split());
+        AUREA_CHECK_EQ(vk::BoundedCommandsTestAccess::passes(b), 0u);
+        b.set_export_pass_split(true);
+        AUREA_CHECK(b.export_pass_split());
+        AUREA_CHECK_EQ(vk::BoundedCommandsTestAccess::passes(b), 1u);
+        b.set_export_pass_split(false);
+        AUREA_CHECK(!b.export_pass_split());
+        vk::BoundedCommandsTestAccess::remember_loss(b);
+        AUREA_CHECK(fs::exists(marker));
+        b.shutdown();
+    }
+    vk::BoundedCommandsTestAccess::forget_loss();   // outro processo: só o arquivo ficou
+    {
+        vk::Backend b;
+        AUREA_CHECK(b.initialize(cfg).ok());
+        AUREA_CHECK(b.export_pass_split());
+        b.shutdown();
+    }
+    // Driver atualizado / outra GPU: o arquivo não confere e sai.
+    if (std::FILE* f = std::fopen(marker.string().c_str(), "wb")) { std::fputs("outra-gpu", f); std::fclose(f); }
+    AUREA_CHECK(fs::exists(marker));
+    {
+        vk::Backend b;
+        AUREA_CHECK(b.initialize(cfg).ok());
+        AUREA_CHECK(!b.export_pass_split());
+        AUREA_CHECK(!fs::exists(marker));
+        b.shutdown();
+    }
+    vk::BoundedCommandsTestAccess::forget_loss();
+    fs::remove_all(dir, ec);
 }
 
 AUREA_TEST(BoundedCommandsGpu, SixHundredPassesPreservePixelsBindingsTimersAndReuseSequentialFencedSubmissions) {

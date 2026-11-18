@@ -41,6 +41,7 @@
     <string name="hyper_creating_project">Membuat proyek…</string>
     <string name="hyper_effect_locked">Fitur berbayar: berlangganan untuk memakai</string>
     <string name="text3d_locked">Teks 3D berbayar: berlangganan Teks 3D atau AureaHyper untuk membuat</string>
+    <string name="hyper_option_locked">Neural (AI) termasuk AureaHyper: berlangganan untuk memakai AI di Flow Retime</string>
     <string name="text3d_locked_existing">Teks 3D (berbayar): teks ini tetap ada di proyek dan diekspor seperti biasa; membuat yang baru memerlukan langganan</string>
     <string name="hyper_error_project">Video sudah selesai, tetapi proyek tidak dapat dibuat. Coba lagi.</string>
     <string name="hyper_error_result">Video sudah selesai, tetapi tidak dapat dibaca. Coba lagi.</string>

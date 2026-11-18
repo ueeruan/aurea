@@ -433,6 +433,9 @@ fun EditorScreen(store: EditorStore) {
     }
 
     ShellSheets(store, ui)
+    // 1.0.2: o painel Pre Render & Pre Export e o player do pré-export.
+    if (store.preRenderPanelOpen) PreRenderPanel(store)
+    store.preExportWatching?.let { PreExportPlayer(store, it) }
     // Omega painel: (área 04, P1-12) o cartão "ainda não há presets" do painel da camada.
     LayerPresetsEmptyDialog(store, ui)
     if (ui.effectsBrowser) EffectsBrowserSheet(store, onOpenPanel = { openPanel(store, ui, it) }) { ui.effectsBrowser = false }
@@ -440,6 +443,8 @@ fun EditorScreen(store: EditorStore) {
     // 0.5.4: texto 3D pedido sem o acesso (Text3DGate em EditorStore.addText3D): o paywall (assinatura do
     // Texto 3D ou AureaHyper; 16/11/2026).
     if (store.hyperLockedPrompt) com.aurea.aurea.hyper.PaywallDialog(com.aurea.aurea.hyper.PaidItem.text3d(), null) { store.hyperLockedPrompt = false }
+    // 1.0.2: Neural (IA) do Flow Retime sem o AureaHyper (EditorStore.setEffectParam).
+    if (store.hyperOptionPrompt) com.aurea.aurea.hyper.PaywallDialog(com.aurea.aurea.hyper.PaidItem.hyperTools, null) { store.hyperOptionPrompt = false }
     // Omega adicionar (área 08, P2-4): o "Fundo" das sub-páginas leva aos ajustes do projeto.
     if (ui.exporting) ExportScreen(store, onOpenProjectSettings = { ui.exporting = false; openSheet(store, ui, ShellSheet.ProjectSettings) }) { ui.exporting = false }
     // 0.4.6: o assistente de IA; o painel que ele pede fecha o chat e abre no editor.

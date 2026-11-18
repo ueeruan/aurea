@@ -45,6 +45,8 @@ constexpr PaidEffect kPaidEffects[] = {
     {effect_type_id("aurea.distort.wave_warp_reference"), "aurea_fx_wave_warp"},
     {effect_type_id("aurea.transition.block_dissolve_reference"), "aurea_fx_block_dissolve"},
     {effect_type_id("aurea.transition.radial_wipe_reference"), "aurea_fx_radial_wipe"},
+    // Headbop: pago desde a 1.0.2 (pedido do dono, 18/11/2026), mesma regra dos outros.
+    {effect_type_id("aurea.distort.headbop"), "aurea_fx_headbop"},
     // Fast Blur, Turbulent Displace and Drop Shadow: free by the owner (16/11).
     // Radial Blur, Radial Shadow, Posterize Time and Time Displacement
     // (AE reference batches A/A2) are NOT here: their legacy versions were
@@ -66,6 +68,12 @@ bool owns(const std::vector<std::string>& owned, std::string_view product) noexc
 } // namespace
 
 bool effect_requires_access(u32 effectTypeId) noexcept { return find_paid(effectTypeId) != nullptr; }
+
+bool effect_option_requires_access(u32 effectTypeId, u32 paramIndex, f32 value) noexcept {
+    // Neural (IA) do Flow Retime: só no AureaHyper (o produto é o do Hyper Motion).
+    return effectTypeId == effect_type_id(aurea::effect_keys::kFlowRetime) && paramIndex == kFlowRetimeVectorsParam
+        && std::isfinite(value) && std::lround(value) == static_cast<long>(kFlowRetimeNeuralValue);
+}
 
 bool text3d_requires_access() noexcept { return true; }
 

@@ -466,8 +466,29 @@ NS_SWIFT_NAME(AureaEngine)
 - (int32_t)startPreRender:(int32_t)direction NS_SWIFT_NAME(startPreRender(direction:));
 - (int32_t)startGroupPreRender:(int64_t)layer direction:(int32_t)direction NS_SWIFT_NAME(startGroupPreRender(_:direction:));
 - (void)cancelPreRender NS_SWIFT_NAME(cancelPreRender());
-/// running, complete, framesDone, framesTotal, width, height, direction, error, diskBytes, residentBytes.
+/// running, complete, framesDone, framesTotal, width, height, direction, error, diskBytes, residentBytes,
+/// firstFrame, endFrame, divisor (0 = gesto), dirtySegments (1.0.2).
 - (NSArray<NSNumber*>*)preRenderProgress NS_SWIFT_NAME(preRenderProgress());
+// --- Pre Render & Pre Export (1.0.2, motor: EnginePreRenderRange.cpp) ----------
+/// 0 Início no cabeçote, 1 Fim no cabeçote, 2 Inteiro, 3 Limpar.
+- (BOOL)preRenderRangeAction:(int32_t)action NS_SWIFT_NAME(preRenderRangeAction(_:));
+/// in, out (-1 = nenhum), effectiveIn, effectiveOut, loop, divisor, fps.
+- (NSArray<NSNumber*>*)preRenderRange NS_SWIFT_NAME(preRenderRange());
+- (void)setPreRenderLoop:(BOOL)on NS_SWIFT_NAME(setPreRenderLoop(_:));
+- (void)setPreRenderQuality:(int32_t)divisor NS_SWIFT_NAME(setPreRenderQuality(_:));
+/// width, height, divisor, mode, fps, fitsSeconds, rangeSeconds, bytesPerSecond, availableBytes, rangeBytes, fits.
+- (NSArray<NSNumber*>*)preRenderFit:(int32_t)divisor mode:(int32_t)mode NS_SWIFT_NAME(preRenderFit(_:mode:));
+/// Startup freezes a document: lifecycle queue.
+- (int32_t)startPreRenderRange:(int32_t)divisor NS_SWIFT_NAME(startPreRenderRange(_:));
+- (int32_t)startPreExport:(int32_t)divisor NS_SWIFT_NAME(startPreExport(_:));
+- (void)cancelPreExport NS_SWIFT_NAME(cancelPreExport());
+/// running, complete, stale, framesDone, framesTotal, in, out, width, height, divisor, dirtySegments, fps, bytes, error.
+- (NSArray<NSNumber*>*)preExportStatus NS_SWIFT_NAME(preExportStatus());
+/// Caminho do MP4 pronto ("" = nenhum).
+- (NSString*)preExportPath NS_SWIFT_NAME(preExportPath());
+/// Trechos desatualizados [de, até) em pares (mode 0 PreRender, 1 pré-export).
+- (NSArray<NSNumber*>*)preRenderDirty:(int32_t)mode NS_SWIFT_NAME(preRenderDirty(_:));
+- (int64_t)preExportDiskBytes NS_SWIFT_NAME(preExportDiskBytes());
 - (void)seekToFrame:(int64_t)frame;
 - (void)stepFrames:(int32_t)frames;
 - (void)scrubToFrame:(int64_t)frame;
@@ -816,6 +837,20 @@ NS_SWIFT_NAME(AureaEngine)
 /// Caminho de arquivo no sandbox (o Swift copia o que vem do seletor para lá).
 /// Devolve o id da camada, ou −Errc (ver `-lastImportError`).
 - (long long)importVideo:(NSString*)path name:(NSString*)name;
+/// 1.0.2: vídeo cujo arquivo é um TRECHO do original (`+importTrimmedMedia:`):
+/// `windowStartUs` = onde ele começa na régua do original; o projeto continua
+/// nessa régua. 0 e origem vazia = `-importVideo:name:`.
+- (long long)importVideo:(NSString*)path name:(NSString*)name windowStartUs:(int64_t)windowStartUs
+               originRef:(NSString*)originRef NS_SWIFT_NAME(importVideo(_:name:windowStartUs:originRef:));
+/// 1.0.2 "importar só o trecho cortado" (motor: media/MediaCut.hpp): remuxa
+/// [inUs, outUs] (com folga) de `source` para `directory`, reaproveitando um
+/// trecho do mesmo `originRef` que já cubra o corte. Bloqueia (segundos): fora
+/// da main. Devolve @{path, windowStartUs, windowEndUs, bytes, sourceBytes,
+/// reused} ou nil (o app copia o arquivo inteiro, como antes).
++ (nullable NSDictionary<NSString*, id>*)importTrimmedMedia:(NSString*)source directory:(NSString*)directory
+                                                  originRef:(NSString*)originRef fileExtension:(NSString*)fileExtension
+                                                       inUs:(int64_t)inUs outUs:(int64_t)outUs
+    NS_SWIFT_NAME(importTrimmedMedia(_:directory:originRef:fileExtension:inUs:outUs:));
 - (long long)importAudio:(NSString*)path name:(NSString*)name;
 /// Sequência de imagens (PNG/JPG/TGA/BMP/EXR numerados, ou um .zip deles).
 /// `paths`: caminhos no sandbox — os quadros, um quadro só (o motor acha os
@@ -1795,6 +1830,8 @@ NS_SWIFT_NAME(AureaEngine)
 + (NSArray<NSNumber*>*)hyperFaceStatus;
 /// Classificação de acesso do catálogo comum às duas plataformas.
 + (BOOL)effectRequiresHyper:(uint32_t)typeId NS_SWIFT_NAME(effectRequiresHyper(_:));
+/// 1.0.2: uma opção paga de um efeito grátis (Flow Retime › Neural (IA)); só o AureaHyper libera.
++ (BOOL)effectOptionRequiresHyper:(uint32_t)typeId param:(uint32_t)paramIndex value:(float)value NS_SWIFT_NAME(effectOptionRequiresHyper(_:param:value:));
 /// 0.5.4: criar texto 3D pede o mesmo acesso (hyper::text3d_requires_access).
 + (BOOL)text3DRequiresHyper NS_SWIFT_NAME(text3DRequiresHyper());
 /// 16/11/2026: assinaturas mensais. A assinatura avulsa que libera o efeito pago

@@ -41,6 +41,7 @@
     <string name="hyper_creating_project">جارٍ إنشاء المشروع…</string>
     <string name="hyper_effect_locked">ميزة مدفوعة: اشترك لاستخدامها</string>
     <string name="text3d_locked">النص ثلاثي الأبعاد مدفوع: اشترك في النص ثلاثي الأبعاد أو AureaHyper للإنشاء</string>
+    <string name="hyper_option_locked">Neural (الذكاء الاصطناعي) جزء من AureaHyper: اشترك لاستخدام الذكاء الاصطناعي في Flow Retime</string>
     <string name="text3d_locked_existing">النص ثلاثي الأبعاد (مدفوع): يبقى هذا النص في المشروع ويُصدَّر بشكل طبيعي؛ إنشاء نص جديد يتطلب اشتراكًا</string>
     <string name="hyper_error_project">اكتمل الفيديو، لكن تعذّر إنشاء المشروع. حاول مرة أخرى.</string>
     <string name="hyper_error_result">اكتمل الفيديو، لكن تعذّرت قراءته. حاول مرة أخرى.</string>

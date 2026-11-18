@@ -478,6 +478,12 @@ enum HyperEffectGate {
         guard isHyper(typeId: typeId) else { return false }
         return PaidGate.locked(paid: true, access: HyperEntitlements.shared.accessFor(AureaEngine.effectProductId(typeId)))
     }
+    /// 1.0.2: a opção `value` do parâmetro `param` é paga (Flow Retime › Neural (IA),
+    /// hyper::effect_option_requires_access) e a conta não tem o AureaHyper? Par de HyperEffectGate.optionLocked (Kotlin).
+    @MainActor static func optionLocked(typeId: UInt32, param: UInt32, value: Float) -> Bool {
+        guard AureaEngine.effectOptionRequiresHyper(typeId, param: param, value: value) else { return false }
+        return PaidGate.locked(paid: true, access: HyperEntitlements.shared.accessFor(nil))
+    }
 }
 
 /// A regra do portão, sem ponte nem estado (par de PaidGate em HyperEffectGate.kt): um

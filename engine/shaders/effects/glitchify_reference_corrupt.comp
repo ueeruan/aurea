@@ -16,29 +16,38 @@ layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 layout(set = 0, binding = AUREA_TEX0) uniform sampler2D u_base;
 layout(set = 0, binding = AUREA_IMG0, r32f) writeonly uniform image2D u_bytes;
 
-int byte_at(int n, int width) {
+// AE hands the effect a world whose rows are padded to a multiple of 16
+// pixels (observed: 600/601/607 px → 608, 610 → 624), and the native walk
+// covers width·height·4 bytes from the first row in THAT layout: the chains
+// run through the row padding (taken as zero bytes here) and the last
+// pad·height pixel slots are never reached (they keep the input bytes).
+int byte_at(int n, int width, int stride, out ivec2 pixel) {
     const int p = n >> 2;
-    const vec4 b = gx_to_bytes(texelFetch(u_base, ivec2(p % width, p / width), 0));
+    pixel = ivec2(p % stride, p / stride);
+    if (pixel.x >= width) return 0;
+    const vec4 b = gx_to_bytes(texelFetch(u_base, pixel, 0));
     const int c = n & 3;
     return int(c == 0 ? b.a : (c == 1 ? b.r : (c == 2 ? b.g : b.b)));
 }
 
 void main() {
     const ivec2 size = textureSize(u_base, 0);
+    const int stride = (size.x + 15) / 16 * 16;
     const int off = int(u.stage.y + 0.5);
     const int chain = int(gl_GlobalInvocationID.x);
-    const int total = size.x * size.y * 4;
-    if (off <= 0 || chain >= off || chain >= total) return;
+    const int total = size.x * size.y * 4;      // bytes the native loop walks
+    const int padded = stride * size.y * 4;     // bytes of the padded world
+    if (off <= 0 || chain >= off) return;
     const float k = u.stage.z;
     int previous = 0;
-    for (int n = chain; n < total; n += off) {
-        int b = byte_at(n, size.x);
-        if (n >= off) {
+    for (int n = chain; n < padded; n += off) {
+        ivec2 pixel;
+        int b = byte_at(n, size.x, stride, pixel);
+        if (n < total && n >= off) {
             const int signedPrevious = previous >= 128 ? previous - 256 : previous;
             b = (b + int(trunc(float(signedPrevious) * k))) & 255;
         }
         previous = b;
-        const int p = n >> 2;
-        imageStore(u_bytes, ivec2((p % size.x) * 4 + (n & 3), p / size.x), vec4(float(b)));
+        if (pixel.x < size.x) imageStore(u_bytes, ivec2(pixel.x * 4 + (n & 3), pixel.y), vec4(float(b)));
     }
 }

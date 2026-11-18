@@ -2871,10 +2871,14 @@ aurea.time.flow_retime	2	vectors	-1	fxl_vector_quality
 aurea.time.flow_retime	2	vectors	0	fxo_fast
 aurea.time.flow_retime	2	vectors	1	fxo_good
 aurea.time.flow_retime	2	vectors	2	fxo_best
+aurea.time.flow_retime	2	vectors	3	fxo_neural_ai
+aurea.time.flow_retime	2	vectors	-2	fxt_vector_quality_neural
 aurea.time.flow_retime	3	motion_blur	-1	fxl_motion_blur_2
 aurea.time.flow_retime	4	replace_duplicates	-1	fxl_replace_duplicate_frames
 aurea.time.flow_retime	5	duplicate_sensitivity	-1	fx_sensibilidade
 aurea.time.flow_retime	5	duplicate_sensitivity	-2	fxt_higher_frames_that_are_only_similar_also
+aurea.time.flow_retime	6	ghost_warp	-1	fxl_ghost_warp
+aurea.time.flow_retime	6	ghost_warp	-2	fxt_ghost_warp_tip
 aurea.time.flow_retime	1	duplicates	-3	fxl_replace_duplicate_frames
 aurea.time.flow_motion_blur	0	amount	-1	fx045g_amount
 aurea.time.flow_motion_blur	1	shutter	-1	fxl_shutter

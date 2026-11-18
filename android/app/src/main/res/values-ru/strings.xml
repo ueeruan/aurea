@@ -1142,7 +1142,15 @@
     <string name="consent_title">Согласие и ответственность</string>
     <string name="consent_accept">Согласиться и продолжить</string>
     <string name="consent_body">Aurea — профессиональный инструмент для редактирования, создания и производства цифрового контента. Используя приложение, пользователь признаёт, что несёт полную ответственность за контент, который он создаёт, редактирует, импортирует, экспортирует, публикует или распространяет через платформу.\n\nAurea не контролирует, не поощряет, не поддерживает и не разрешает использование инструмента для незаконной, оскорбительной, мошеннической, вредоносной деятельности или деятельности, нарушающей права третьих лиц.\n\nПользователь обязан убедиться, что у него есть необходимые разрешения, лицензии и права на используемые материалы, включая изображения, видео, музыку, товарные знаки, модели, файлы и другой защищённый контент.\n\nТворческая свобода, которую предоставляет Aurea, не означает одобрения, участия или ответственности приложения за то, что каждый пользователь решает создавать или делать с помощью инструмента.\n\nПользователь соглашается использовать Aurea в соответствии с применимым законодательством и принимает ответственность за свои действия и контент, созданный или распространённый через приложение.\n\nВ максимальной степени, допускаемой применимым законодательством, Aurea и ответственные за него лица не несут ответственности за действия, совершённые исключительно пользователем, за ненадлежащее использование инструмента или за последствия контента, созданного, опубликованного или распространённого самим пользователем.\n\nAurea предоставляет инструмент. Пользователь отвечает за то, как он решает его использовать.\n\nПродолжая, пользователь заявляет, что прочитал, понял и принимает эти условия.</string>
-    <string name="release_notes_body">Aurea 1.0.1 (2221) — 16.11.2026\n\n• Новые эффекты, точно повторяющие After Effects: Radial Blur, Radial Shadow, Posterize Time, Time Displacement, Detail-preserving Upscale, Card Wipe, Card Dance, Depth Field, Smear, Glitchify, Extrude.\n• Wave Warp, Block Dissolve, Drop Shadow, Fast Blur, Cartoon Moblur стали ближе к After Effects.\n• Проекты After Effects импортируют эти эффекты.\n• Новый стиль Cartoon для 3D-текста: плоская лицевая сторона, более тёмные бока, полоса блика и толстый анимируемый контур.\n• 3D-текст теперь входит в AureaHYPER. Проекты, где он уже используется, по-прежнему открываются и экспортируются.</string>
+    <string name="release_notes_body">Aurea 1.0.2 (2222) — 18.11.2026
+
+• Optical Flow для живой съёмки: меньше двоения, регулятор Двоение ↔ Деформация и качество Neural (ИИ) в AureaHYPER.
+• Glitchify теперь как в After Effects.
+• Экспорт быстрее и качественнее.
+• Импорт только обрезанного фрагмента длинных видео.
+• Панель Pre Render и Pre Export для фрагмента.
+• AureaMCP будит закрытое приложение.
+• HeadBop теперь платный (отдельно или в AureaHYPER). Проекты с HeadBop по-прежнему открываются и экспортируются.</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">Заливка</string>
@@ -4248,6 +4256,10 @@
     <string name="fxl_bilinear">Билинейно</string>
     <string name="fxo_nearest">Ближайший</string>
     <string name="fxl_vector_quality">Качество векторов</string>
+    <string name="fxl_ghost_warp">Двоение ↔ Деформация</string>
+    <string name="fxo_neural_ai">Нейросеть (ИИ)</string>
+    <string name="fxt_ghost_warp_tip">Влево: где векторы ошибаются, кадры смешиваются (двоение). Вправо: доверяет векторам и деформирует вместо смешивания.</string>
+    <string name="fxt_vector_quality_neural">Нейросеть (ИИ): кадр строит нейросеть при экспорте и в превью на паузе; при воспроизведении превью использует векторы GPU.</string>
     <string name="fxo_fast">Быстрое</string>
     <string name="fxo_best">Лучшее</string>
     <string name="fxl_shutter">Затвор</string>
@@ -5461,4 +5473,44 @@
     <string name="fxt_in_after_effects_2027_this_value_does_no">В After Effects 2027 это значение не меняет изображение; оно сохраняется для импортированных проектов.</string>
     <string name="fxo_detail_preserving">С сохранением деталей</string>
     <string name="fxo_bicubic">Бикубический</string>
+    <!-- 1.0.2 Pre Render & Pre Export (PreRenderPanel.kt / PreRenderPanelView.swift) -->
+    <string name="prx_title">Pre Render и Pre Export</string>
+    <string name="prx_open">Pre Render и Pre Export</string>
+    <string name="prx_open_detail">Воспроизведение без рывков: пререндер или предэкспорт фрагмента</string>
+    <string name="prx_quality">Качество</string>
+    <string name="prx_quality_full">Полное</string>
+    <string name="prx_fits">влезет ~%1$s</string>
+    <string name="prx_fits_detail">%1$d × %2$d · фрагмент %3$s</string>
+    <string name="prx_fits_hint">Сколько видео поместится в кэш телефона при этом качестве</string>
+    <string name="prx_range">Фрагмент: %1$s – %2$s</string>
+    <string name="prx_range_whole">Фрагмент не выбран: всё видео (%1$s – %2$s)</string>
+    <string name="prx_start">Начало</string>
+    <string name="prx_end">Конец</string>
+    <string name="prx_full">Всё</string>
+    <string name="prx_go_start">К началу</string>
+    <string name="prx_go_end">К концу</string>
+    <string name="prx_loop">Повтор</string>
+    <string name="prx_clear">Сбросить</string>
+    <string name="prx_mode">Режим</string>
+    <string name="prx_mode_prerender">Pre Render</string>
+    <string name="prx_mode_preexport">Pre Export</string>
+    <string name="prx_action_prerender">Пререндер фрагмента</string>
+    <string name="prx_action_preexport">Предэкспорт фрагмента</string>
+    <string name="prx_cancel">Отмена</string>
+    <string name="prx_progress_prerender">Пререндер: %1$d%%</string>
+    <string name="prx_progress_preexport">Предэкспорт: %1$d%%</string>
+    <string name="prx_ready_prerender">Pre Render готов: фрагмент играет без рывков</string>
+    <string name="prx_ready_preexport">Pre Export готов: смотрите монтаж плавно</string>
+    <string name="prx_watch">Смотреть предэкспорт</string>
+    <string name="prx_stale">Изменено частей после: %1$d (играют вживую)</string>
+    <string name="prx_stale_export">Монтаж изменился после предэкспорта: повторите, чтобы смотреть</string>
+    <string name="prx_not_fit">Не помещается: выберите качество ниже или фрагмент короче</string>
+    <string name="prx_busy">Дождитесь окончания текущего Pre Render или Pre Export</string>
+    <string name="prx_preexport_failed">Не удалось выполнить предэкспорт: %1$s</string>
+    <string name="prx_help">Справка</string>
+    <string name="prx_help_title">Зачем Pre Render и Pre Export?</string>
+    <string name="prx_help_body">Когда в видео много тяжёлых эффектов, телефон может тормозить и зависать при воспроизведении.\n\n• Pre Render: «запекает» тяжёлую часть видео в плавный предпросмотр, который играет без рывков.\n• Pre Export: предварительно экспортирует выбранную часть или всю шкалу времени; дождитесь окончания обработки, чтобы плавно посмотреть и проверить весь монтаж перед финальным сохранением.\n\nКак работает «влезет ~время»: показывает, сколько секунд видео поместится во временную память (кэш) телефона при выбранном качестве (Полное, 1/2, 1/4, 1/8), пока не кончится место. Полное = чётко, но огромные файлы: помещается мало. 1/2, 1/4, 1/8 = файлы намного меньше: помещается гораздо больше. Снижение до 1/4 или 1/8 позволяет уместить намного больше времени.\n\nКнопки: Начало и Конец задают начало и конец части; Всё выбирает всё видео; К началу и К концу переносят курсор в эти точки; Повтор проигрывает часть по кругу; Сбросить убирает начало и конец.</string>
+    <string name="prx_close">Закрыть</string>
+    <string name="prx_preparing">Подготовка…</string>
+    <string name="prx_ruler_range">Фрагмент Pre Render</string>
 </resources>

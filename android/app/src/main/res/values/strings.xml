@@ -1809,7 +1809,15 @@
     <string name="am_import_failed">Não deu para importar: %1$s</string>
     <string name="am_import_nothing">nenhum efeito com equivalente no Aurea</string>
     <string name="release_notes_title">Novidades do Aurea</string>
-    <string name="release_notes_body">Aurea 1.0.1 (2221) — 16/11/2026\n\n• Novos efeitos fiéis ao After Effects: Radial Blur, Radial Shadow, Posterize Time, Time Displacement, Detail-preserving Upscale, Card Wipe, Card Dance, Depth Field, Smear, Glitchify, Extrude.\n• Wave Warp, Block Dissolve, Drop Shadow, Fast Blur, Cartoon Moblur mais próximos do After Effects.\n• Projetos do After Effects importam esses efeitos.\n• Texto 3D com o novo estilo Cartoon: frente lisa, laterais mais escuras, faixa de brilho e contorno grosso animável.\n• Texto 3D agora faz parte do AureaHYPER. Projetos que já usam texto 3D continuam abrindo e exportando.</string>
+    <string name="release_notes_body">Aurea 1.0.2 (2222) — 18/11/2026
+
+• Optical Flow para filmagem real: menos fantasma, controle Fantasma ↔ Deformação e qualidade Neural (IA) no AureaHYPER.
+• Glitchify igual ao After Effects.
+• Exportação mais rápida e com mais qualidade.
+• Importe só o trecho cortado de vídeos longos.
+• Painel de Pre Render e Pre Export por trecho.
+• AureaMCP acorda o app fechado.
+• HeadBop agora é pago (avulso ou no AureaHYPER). Projetos que já usam o HeadBop continuam abrindo e exportando.</string>
     <string name="am_import_lossless_required">Este preset tem efeitos, parâmetros ou camadas que não podem ser preservados na conversão. Nada foi salvo nem aplicado.</string>
     <string name="am_import_read_failed">Não foi possível ler o arquivo (limite de 64 MB), ou a camada selecionada mudou. Tente novamente.</string>
     <string name="world_explosive">Explosivo</string>
@@ -4319,6 +4327,10 @@
     <string name="fxl_bilinear">Bilinear</string>
     <string name="fxo_nearest">Mais próximo</string>
     <string name="fxl_vector_quality">Qualidade dos vetores</string>
+    <string name="fxl_ghost_warp">Fantasma ↔ Deformação</string>
+    <string name="fxo_neural_ai">Neural (IA)</string>
+    <string name="fxt_ghost_warp_tip">Para a esquerda: onde os vetores falham, os quadros se misturam (fantasma). Para a direita: confia nos vetores e deforma em vez de misturar.</string>
+    <string name="fxt_vector_quality_neural">Neural (IA): a rede de IA monta o quadro na exportação e na prévia parada; durante a reprodução a prévia usa os vetores da GPU.</string>
     <string name="fxo_fast">Rápida</string>
     <string name="fxo_best">Melhor</string>
     <string name="fxl_shutter">Obturador</string>
@@ -5524,4 +5536,44 @@
     <string name="fxt_in_after_effects_2027_this_value_does_no">No After Effects 2027 este valor não muda a imagem; fica para projetos importados.</string>
     <string name="fxo_detail_preserving">Preservar detalhes</string>
     <string name="fxo_bicubic">Bicúbico</string>
+    <!-- 1.0.2 Pre Render & Pre Export (PreRenderPanel.kt / PreRenderPanelView.swift) -->
+    <string name="prx_title">Pre Render e Pre Export</string>
+    <string name="prx_open">Pre Render e Pre Export</string>
+    <string name="prx_open_detail">Toque sem travar: pré-renderize ou pré-exporte um trecho</string>
+    <string name="prx_quality">Qualidade</string>
+    <string name="prx_quality_full">Inteira</string>
+    <string name="prx_fits">cabe ~%1$s</string>
+    <string name="prx_fits_detail">%1$d × %2$d · trecho de %3$s</string>
+    <string name="prx_fits_hint">Quanto do vídeo cabe no cache do celular nesta qualidade</string>
+    <string name="prx_range">Trecho: %1$s – %2$s</string>
+    <string name="prx_range_whole">Sem trecho escolhido: o vídeo inteiro (%1$s – %2$s)</string>
+    <string name="prx_start">Início</string>
+    <string name="prx_end">Fim</string>
+    <string name="prx_full">Inteiro</string>
+    <string name="prx_go_start">Ir ao início</string>
+    <string name="prx_go_end">Ir ao fim</string>
+    <string name="prx_loop">Loop</string>
+    <string name="prx_clear">Limpar</string>
+    <string name="prx_mode">Modo</string>
+    <string name="prx_mode_prerender">Pre Render</string>
+    <string name="prx_mode_preexport">Pre Export</string>
+    <string name="prx_action_prerender">Pré-renderizar trecho</string>
+    <string name="prx_action_preexport">Pré-exportar trecho</string>
+    <string name="prx_cancel">Cancelar</string>
+    <string name="prx_progress_prerender">Pré-renderizando: %1$d%%</string>
+    <string name="prx_progress_preexport">Pré-exportando: %1$d%%</string>
+    <string name="prx_ready_prerender">Pre Render pronto: o trecho toca sem travar</string>
+    <string name="prx_ready_preexport">Pre Export pronto: assista à edição sem travar</string>
+    <string name="prx_watch">Assistir pré-export</string>
+    <string name="prx_stale">%1$d parte(s) mudaram depois: tocam ao vivo</string>
+    <string name="prx_stale_export">A edição mudou depois do pré-export: faça de novo para assistir</string>
+    <string name="prx_not_fit">Não cabe: use uma qualidade menor ou um trecho mais curto</string>
+    <string name="prx_busy">Espere o Pre Render ou o Pre Export atual terminar</string>
+    <string name="prx_preexport_failed">Não foi possível pré-exportar: %1$s</string>
+    <string name="prx_help">Ajuda</string>
+    <string name="prx_help_title">Por que Pre Render e Pre Export?</string>
+    <string name="prx_help_body">Com muitos efeitos pesados, o celular pode engasgar e travar na reprodução.\n\n• Pre Render: “assa” uma parte pesada do vídeo numa prévia fluida, que toca sem travar.\n• Pre Export: pré-exporta uma parte ou a timeline inteira; espere terminar de processar para assistir e conferir a edição inteira sem travar antes de salvar de vez.\n\nComo funciona o “cabe ~tempo”: mostra quantos segundos do vídeo cabem na memória temporária (cache) do celular na qualidade escolhida (Inteira, 1/2, 1/4, 1/8) antes de o espaço acabar. Inteira = nítida, mas arquivos enormes: cabe pouco tempo. 1/2, 1/4 e 1/8 = arquivos bem menores: cabe muito mais tempo. Baixar para 1/4 ou 1/8 deixa caber bem mais.\n\nBotões: Início e Fim marcam o começo e o fim da parte; Inteiro escolhe o vídeo todo; Ir ao início e Ir ao fim levam o cursor a esses pontos; Loop toca a parte em repetição; Limpar apaga o início e o fim.</string>
+    <string name="prx_close">Fechar</string>
+    <string name="prx_preparing">Preparando…</string>
+    <string name="prx_ruler_range">Trecho do Pre Render</string>
 </resources>

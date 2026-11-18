@@ -399,6 +399,25 @@ internal fun ViewModeColumn(store: EditorStore, width: Dp, modifier: Modifier) {
         Modifier.fillMaxWidth().fillMaxHeight(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        // 1.0.2: Pre Render & Pre Export (o painel do trecho e da qualidade).
+        val preRenderLabel = stringResource(R.string.prx_open)
+        val preRenderState = when {
+            store.preRenderProgress.running || store.preExport.running -> stringResource(R.string.prx_preparing)
+            store.preRenderProgress.complete && store.preRenderProgress.divisor > 0 -> stringResource(R.string.prx_ready_prerender)
+            store.preExport.playable -> stringResource(R.string.prx_ready_preexport)
+            else -> stringResource(R.string.prx_open_detail)
+        }
+        ViewModeCell(
+            glyph = CupertinoGlyph.Speedometer,
+            description = preRenderLabel,
+            state = preRenderState,
+            on = store.preRenderPanelOpen || store.preRenderProgress.running || store.preExport.running,
+            tag = "viewmode.prerender",
+            modifier = Modifier.weight(1f),
+        ) {
+            if (store.playing) store.pause()
+            store.openPreRenderPanel()
+        }
         ViewModeCell(
             glyph = ShellGlyph.PixelGrid,
             description = stringResource(R.string.om_vm_pixel),

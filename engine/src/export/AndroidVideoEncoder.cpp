@@ -695,6 +695,7 @@ struct Encoder::Impl {
     Request request{};
     bool started = false, eosSent = false;
     bool hintsUsed = false, cbrUsed = false;   ///< 0.5.3: como o encoder ficou configurado
+    bool profileUsed = false;                  ///< o configure aceitou o perfil de qualidade
     bool startFailed = false;                  ///< 0.5.3: o configure passou e o start recusou
     i64 lastPtsUs = 0;                         ///< 0.5.3: o tempo do último quadro (vai no EOS por buffer)
     std::vector<u8> csd;
@@ -1006,6 +1007,7 @@ struct Encoder::Impl {
         // 0.5.3: como ficou (diagnóstico do caminho do encoder e o que o sink aprende).
         hintsUsed = offlineHints;
         cbrUsed = cbrConfigured || mode == kBitrateCbr;
+        profileUsed = qualityProfile;
         {
             const usize used = std::strlen(description);
             std::snprintf(description + used, sizeof(description) - used, "%s%s%s%s", offlineHints ? "" : ":sem-dicas",
@@ -1140,7 +1142,7 @@ Status Encoder::open(const Request& request, const CodecInfo& codec) noexcept {
     impl_->csd.clear();
     impl_->eosSent = false;
     impl_->startFailed = false;
-    impl_->hintsUsed = impl_->cbrUsed = false;
+    impl_->hintsUsed = impl_->cbrUsed = impl_->profileUsed = false;
     impl_->lastPtsUs = 0;
     Status opened = impl_->open(request, codec);
     if (!opened.ok() && impl_->startFailed && impl_->hintsUsed) {
@@ -1260,6 +1262,7 @@ const char* Encoder::describe() const noexcept { return impl_ ? impl_->descripti
 bool Encoder::offline_hints() const noexcept { return impl_ && impl_->hintsUsed; }
 
 bool Encoder::constant_rate() const noexcept { return impl_ && impl_->cbrUsed; }
+bool Encoder::quality_profile() const noexcept { return impl_ && impl_->profileUsed; }
 
 void Encoder::set_direct_buffer(void* buffer) noexcept { if (impl_) impl_->directBuffer = buffer; }
 

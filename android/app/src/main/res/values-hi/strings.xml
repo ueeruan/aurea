@@ -1138,7 +1138,15 @@
     <string name="consent_title">सहमति और ज़िम्मेदारी</string>
     <string name="consent_accept">सहमत होकर जारी रखें</string>
     <string name="consent_body">Aurea डिजिटल सामग्री के संपादन, निर्माण और उत्पादन के लिए एक पेशेवर उपकरण है। ऐप का उपयोग करके उपयोगकर्ता स्वीकार करता है कि वह प्लेटफ़ॉर्म के माध्यम से बनाई, संपादित, आयात, निर्यात, प्रकाशित या साझा की गई सामग्री के लिए पूरी तरह ज़िम्मेदार है।\n\nAurea अवैध, अपमानजनक, धोखाधड़ी वाली, हानिकारक या तीसरे पक्ष के अधिकारों का उल्लंघन करने वाली गतिविधियों के लिए उपकरण के उपयोग को नियंत्रित, प्रोत्साहित, समर्थन या अधिकृत नहीं करता है।\n\nउपयोगकर्ता यह सुनिश्चित करने के लिए ज़िम्मेदार है कि उसके पास उपयोग की गई सामग्री के लिए आवश्यक अनुमतियाँ, लाइसेंस और अधिकार हैं, जिनमें चित्र, वीडियो, संगीत, ट्रेडमार्क, मॉडल, फ़ाइलें और अन्य संरक्षित सामग्री शामिल हैं।\n\nAurea द्वारा दी गई रचनात्मक स्वतंत्रता का अर्थ यह नहीं है कि ऐप उस चीज़ का अनुमोदन करता है, उसमें भाग लेता है या उसकी ज़िम्मेदारी लेता है जिसे प्रत्येक उपयोगकर्ता उपकरण से बनाने या करने का निर्णय लेता है।\n\nउपयोगकर्ता Aurea का उपयोग लागू कानून के अनुसार करने पर सहमत है और अपने कार्यों तथा ऐप के माध्यम से बनाई या वितरित की गई सामग्री की ज़िम्मेदारी स्वीकार करता है।\n\nलागू कानून द्वारा अनुमत अधिकतम सीमा तक, Aurea और उसके ज़िम्मेदार व्यक्ति केवल उपयोगकर्ता द्वारा किए गए कार्यों, उपकरण के दुरुपयोग या उपयोगकर्ता द्वारा बनाई, प्रकाशित या साझा की गई सामग्री से उत्पन्न परिणामों के लिए ज़िम्मेदार नहीं होंगे।\n\nAurea उपकरण प्रदान करता है। उपयोगकर्ता इसके उपयोग के अपने चुने हुए तरीके के लिए ज़िम्मेदार है।\n\nजारी रखकर उपयोगकर्ता घोषणा करता है कि उसने इन शर्तों को पढ़ा, समझा और स्वीकार किया है।</string>
-    <string name="release_notes_body">Aurea 1.0.1 (2221) — 16/11/2026\n\n• After Effects जैसे नए इफ़ेक्ट: Radial Blur, Radial Shadow, Posterize Time, Time Displacement, Detail-preserving Upscale, Card Wipe, Card Dance, Depth Field, Smear, Glitchify, Extrude.\n• Wave Warp, Block Dissolve, Drop Shadow, Fast Blur, Cartoon Moblur अब After Effects के और करीब।\n• After Effects प्रोजेक्ट इन इफ़ेक्ट के साथ इम्पोर्ट होते हैं।\n• 3D टेक्स्ट के लिए नई Cartoon स्टाइल: सपाट सामने का हिस्सा, गहरे किनारे, चमक की पट्टी और मोटी एनिमेट होने वाली आउटलाइन।\n• 3D टेक्स्ट अब AureaHYPER का हिस्सा है। जिन प्रोजेक्ट में पहले से 3D टेक्स्ट है, वे खुलते और एक्सपोर्ट होते रहेंगे।</string>
+    <string name="release_notes_body">Aurea 1.0.2 (2222) — 18/11/2026
+
+• असली फ़ुटेज के लिए Optical Flow: कम घोस्टिंग, घोस्टिंग ↔ विरूपण कंट्रोल और AureaHYPER में Neural (AI) क्वालिटी।
+• Glitchify अब After Effects जैसा।
+• तेज़ और बेहतर क्वालिटी वाला एक्सपोर्ट।
+• लंबे वीडियो का सिर्फ़ काटा हुआ हिस्सा इम्पोर्ट करें।
+• हिस्से के लिए Pre Render और Pre Export पैनल।
+• AureaMCP बंद ऐप को जगा सकता है।
+• HeadBop अब पेड है (अलग से या AureaHYPER में)। जिन प्रोजेक्ट में HeadBop है, वे खुलते और एक्सपोर्ट होते रहेंगे।</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">भरें</string>
@@ -4236,6 +4244,10 @@
     <string name="fxl_bilinear">बाइलिनियर</string>
     <string name="fxo_nearest">निकटतम</string>
     <string name="fxl_vector_quality">वेक्टर गुणवत्ता</string>
+    <string name="fxl_ghost_warp">घोस्टिंग ↔ विरूपण</string>
+    <string name="fxo_neural_ai">न्यूरल (AI)</string>
+    <string name="fxt_ghost_warp_tip">बाएँ: जहाँ वेक्टर चूकते हैं, फ़्रेम मिल जाते हैं (घोस्टिंग)। दाएँ: वेक्टर पर भरोसा करके मिलाने के बजाय विकृत करता है।</string>
+    <string name="fxt_vector_quality_neural">न्यूरल (AI): एक्सपोर्ट और रुके हुए प्रीव्यू में AI नेटवर्क फ़्रेम बनाता है; चलाते समय प्रीव्यू GPU वेक्टर इस्तेमाल करता है।</string>
     <string name="fxo_fast">तेज़</string>
     <string name="fxo_best">सर्वश्रेष्ठ</string>
     <string name="fxl_shutter">शटर</string>
@@ -5449,4 +5461,44 @@
     <string name="fxt_in_after_effects_2027_this_value_does_no">After Effects 2027 में यह मान छवि नहीं बदलता; यह आयातित प्रोजेक्ट के लिए रखा गया है।</string>
     <string name="fxo_detail_preserving">विवरण सुरक्षित</string>
     <string name="fxo_bicubic">बाइक्यूबिक</string>
+    <!-- 1.0.2 Pre Render & Pre Export (PreRenderPanel.kt / PreRenderPanelView.swift) -->
+    <string name="prx_title">Pre Render और Pre Export</string>
+    <string name="prx_open">Pre Render और Pre Export</string>
+    <string name="prx_open_detail">बिना अटके चलाएँ: किसी हिस्से को प्री-रेंडर या प्री-एक्सपोर्ट करें</string>
+    <string name="prx_quality">क्वालिटी</string>
+    <string name="prx_quality_full">पूरी</string>
+    <string name="prx_fits">~%1$s समाएगा</string>
+    <string name="prx_fits_detail">%1$d × %2$d · हिस्सा %3$s</string>
+    <string name="prx_fits_hint">इस क्वालिटी पर फ़ोन के कैश में कितना वीडियो समाता है</string>
+    <string name="prx_range">हिस्सा: %1$s – %2$s</string>
+    <string name="prx_range_whole">कोई हिस्सा नहीं चुना: पूरा वीडियो (%1$s – %2$s)</string>
+    <string name="prx_start">शुरुआत</string>
+    <string name="prx_end">अंत</string>
+    <string name="prx_full">पूरा</string>
+    <string name="prx_go_start">शुरुआत पर जाएँ</string>
+    <string name="prx_go_end">अंत पर जाएँ</string>
+    <string name="prx_loop">लूप</string>
+    <string name="prx_clear">साफ़ करें</string>
+    <string name="prx_mode">मोड</string>
+    <string name="prx_mode_prerender">Pre Render</string>
+    <string name="prx_mode_preexport">Pre Export</string>
+    <string name="prx_action_prerender">हिस्सा प्री-रेंडर करें</string>
+    <string name="prx_action_preexport">हिस्सा प्री-एक्सपोर्ट करें</string>
+    <string name="prx_cancel">रद्द करें</string>
+    <string name="prx_progress_prerender">प्री-रेंडर हो रहा है: %1$d%%</string>
+    <string name="prx_progress_preexport">प्री-एक्सपोर्ट हो रहा है: %1$d%%</string>
+    <string name="prx_ready_prerender">Pre Render तैयार: हिस्सा बिना अटके चलता है</string>
+    <string name="prx_ready_preexport">Pre Export तैयार: अपनी एडिटिंग आराम से देखें</string>
+    <string name="prx_watch">प्री-एक्सपोर्ट देखें</string>
+    <string name="prx_stale">बाद में %1$d हिस्से बदले: वे लाइव चलते हैं</string>
+    <string name="prx_stale_export">प्री-एक्सपोर्ट के बाद एडिट बदला: देखने के लिए फिर से करें</string>
+    <string name="prx_not_fit">नहीं समाता: कम क्वालिटी या छोटा हिस्सा चुनें</string>
+    <string name="prx_busy">चल रहे Pre Render या Pre Export के पूरा होने तक रुकें</string>
+    <string name="prx_preexport_failed">प्री-एक्सपोर्ट नहीं हो सका: %1$s</string>
+    <string name="prx_help">मदद</string>
+    <string name="prx_help_title">Pre Render और Pre Export क्यों?</string>
+    <string name="prx_help_body">जब आप बहुत सारे भारी इफ़ेक्ट वाले वीडियो एडिट करते हैं, तो चलाते समय फ़ोन अटकने और रुकने लगता है।\n\n• Pre Render: वीडियो के भारी हिस्से को एक स्मूद प्रीव्यू में “बेक” करता है, ताकि वह बिना अटके चले।\n• Pre Export: किसी खास हिस्से या पूरी टाइमलाइन को पहले से एक्सपोर्ट करता है; प्रोसेसिंग पूरी होने दें, ताकि अंतिम सेव से पहले पूरी एडिटिंग आराम से देख और जाँच सकें।\n\n“~समय समाएगा” कैसे काम करता है: चुनी गई क्वालिटी (पूरी, 1/2, 1/4, 1/8) पर जगह खत्म होने से पहले फ़ोन की अस्थायी मेमोरी (कैश) में वीडियो के कितने सेकंड समा सकते हैं, यह दिखाता है। पूरी = साफ़, पर बहुत बड़ी फ़ाइलें: कम समय समाता है। 1/2, 1/4, 1/8 = बहुत छोटी फ़ाइलें: कहीं ज़्यादा समय समाता है। 1/4 या 1/8 पर जाने से काफ़ी ज़्यादा समय समा जाता है।\n\nबटन: शुरुआत और अंत हिस्से की शुरुआत और अंत तय करते हैं; पूरा पूरे वीडियो को चुनता है; शुरुआत पर जाएँ और अंत पर जाएँ कर्सर को उन बिंदुओं पर ले जाते हैं; लूप चुने हिस्से को बार-बार चलाता है; साफ़ करें शुरुआत और अंत हटाता है।</string>
+    <string name="prx_close">बंद करें</string>
+    <string name="prx_preparing">तैयार हो रहा है…</string>
+    <string name="prx_ruler_range">Pre Render का हिस्सा</string>
 </resources>

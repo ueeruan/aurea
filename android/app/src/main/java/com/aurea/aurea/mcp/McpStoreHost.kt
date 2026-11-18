@@ -235,11 +235,11 @@ class McpStoreHost(private val store: EditorStore, private val cacheDir: File) :
     }
 
     /** Importa e espera o fim (a barra de "importando" some). */
-    private suspend fun importUris(uris: List<Uri>, overlay: Boolean, result: () -> JSONObject): McpReply {
+    private suspend fun importUris(uris: List<Uri>, overlay: Boolean, trimUs: LongRange? = null, result: () -> JSONObject): McpReply {
         if (main { store.screen } != Screen.Editor) return McpReply.fail("Open or create a project first.")
         return main {
             store.errorMessage = null
-            store.importMediaBatch(uris, asOverlay = overlay)
+            store.importMediaBatch(uris, asOverlay = overlay, trimUs = trimUs)
             withTimeoutOrNull(1_000) { snapshotFlow { store.busyMessage }.first { it != null } }
             val done = withTimeoutOrNull(300_000) { snapshotFlow { store.busyMessage }.first { it == null } }
             when {
@@ -277,7 +277,7 @@ class McpStoreHost(private val store: EditorStore, private val cacheDir: File) :
             .put("more", start + page.size < all.size).apply { if (access == "limited") put("hint", "Limited access: only the media the person selected for Aurea is visible.") })
     }
 
-    override suspend fun importDeviceMedia(ids: List<String>, overlay: Boolean): McpReply {
+    override suspend fun importDeviceMedia(ids: List<String>, overlay: Boolean, trimUs: LongRange?): McpReply {
         galleryAccess() ?: return McpReply.fail(NO_GALLERY)
         val uris = ids.map { id ->
             val kind = id.substringBefore(':')
@@ -289,7 +289,11 @@ class McpStoreHost(private val store: EditorStore, private val cacheDir: File) :
         val visible = withContext(Dispatchers.IO) { mediaItems(app).map { it.uri.toString() }.toSet() }
         val missing = uris.filter { it.toString() !in visible }
         if (missing.isNotEmpty()) return McpReply.fail("Not in the gallery Aurea can see: ${missing.size} of ${uris.size} (list_device_media again).")
-        return importUris(uris, overlay) { JSONObject().put("ok", true).put("imported", uris.size) }
+        return importUris(uris, overlay, trimUs) {
+            JSONObject().put("ok", true).put("imported", uris.size).apply {
+                if (trimUs != null) put("trimmed", "videos keep only the trimmed range (plus a small margin) inside Aurea")
+            }
+        }
     }
 
     private fun mediaId(video: Boolean, uri: Uri) = (if (video) "video:" else "image:") + ContentUris.parseId(uri)

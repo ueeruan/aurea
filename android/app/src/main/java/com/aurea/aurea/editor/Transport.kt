@@ -231,6 +231,7 @@ private fun PlayButton(store: EditorStore, modifier: Modifier = Modifier) {
     val forward = stringResource(R.string.prerender_forward)
     val backward = stringResource(R.string.prerender_backward)
     val cancel = stringResource(R.string.prerender_cancel)
+    val panel = stringResource(R.string.prx_open)
     val hint = stringResource(R.string.prerender_gesture_hint)
     val progress = store.preRenderProgress
     val progressDescription = when {
@@ -252,6 +253,7 @@ private fun PlayButton(store: EditorStore, modifier: Modifier = Modifier) {
                     CustomAccessibilityAction(forward) { store.startPreRender(1); true },
                     CustomAccessibilityAction(backward) { store.startPreRender(-1); true },
                     CustomAccessibilityAction(cancel) { store.cancelPreRender(); true },
+                    CustomAccessibilityAction(panel) { store.openPreRenderPanel(); true },
                 )
             }
             .onKeyEvent { event ->

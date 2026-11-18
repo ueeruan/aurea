@@ -58,6 +58,9 @@ import com.aurea.aurea.engine.PerfStats
 import com.aurea.aurea.engine.PodLayout
 import com.aurea.aurea.engine.PreviewBufferRange
 import com.aurea.aurea.engine.PreRenderProgress
+import com.aurea.aurea.engine.PreExportStatus
+import com.aurea.aurea.engine.PreRenderFit
+import com.aurea.aurea.engine.PreRenderRange
 import com.aurea.aurea.engine.TrackKey
 import com.aurea.aurea.engine.TrackProperty
 import com.aurea.aurea.engine.directBuffer
@@ -262,14 +265,21 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         com.aurea.aurea.assistant.AssistantChat(app, engine, viewModelScope,
             onUi = { assistantPanel = it }, onModelChanged = { refreshNow() })
     }
-    /** AureaMCP (docs/aureamcp/DESIGN.md): agentes de IA da pessoa controlam o app pelo relay do Worker. */
-    val mcp by lazy {
-        com.aurea.aurea.mcp.AureaMcp(app, viewModelScope,
+    /**
+     * AureaMCP (docs/aureamcp/DESIGN.md): agentes de IA da pessoa controlam o app pelo relay do Worker.
+     * 18/11/2026: a conexão vive no escopo do PROCESSO ([McpAgentHub.scope]), não no do
+     * ViewModel — com o serviço do agente ligado ela continua com o app fora da tela.
+     * Antes de cada chamada o motor acorda ([agentWake]); parado, volta a dormir ([agentTouch]).
+     */
+    private val mcpLazy = lazy {
+        com.aurea.aurea.mcp.AureaMcp(app, com.aurea.aurea.mcp.McpAgentHub.scope,
             engineTools = { engine.assistantTools() },
             engineCall = { name, args -> engine.assistantCall(name, args) },
             host = com.aurea.aurea.mcp.McpStoreHost(this, app.cacheDir),
-            onUi = { assistantPanel = it }, onModelChanged = { refreshNow() })
+            onUi = { assistantPanel = it }, onModelChanged = { refreshNow() },
+            wakeEngine = { agentWake() }, onCallEnded = { agentTouch() })
     }
+    val mcp by mcpLazy
 
     /**
      * "Otimizar vídeos pesados" (0.2.5): modo gravado, fila do proxy de edição
@@ -347,7 +357,46 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private fun suspendIfLeftDuringExport() {
         if (!suspendAfterExport) return
         suspendAfterExport = false
-        enqueueLifecycle { if (ready) engine.suspend() }
+        // O agente continua fora do app: o motor dorme só depois de ficar parado (agentTouch).
+        if (com.aurea.aurea.mcp.McpAgentHub.keepEngine) { agentTouch(); return }
+        enqueueLifecycle { if (ready) { engine.suspend(); engineSuspended = true } }
+    }
+
+    // --- AureaMCP fora do app (18/11/2026) ---------------------------------------------
+    /** O motor foi suspenso por nós (segundo plano ou ocioso) e ainda não voltou. */
+    @Volatile private var engineSuspended = false
+    /** A Activity está fora da tela (onStop sem onStart). */
+    @Volatile private var inBackground = !com.aurea.aurea.mcp.McpAgentHub.foreground
+    private val agentIdleSuspend = Runnable { agentIdle() }
+
+    /**
+     * Antes de cada chamada de um agente: com o app fora da tela e o motor suspenso,
+     * acorda o motor (sem superfície: render_frame e export usam a captura offscreen).
+     * Espera a fila de ciclo de vida (onde suspend/resume rodam, na ordem).
+     */
+    suspend fun agentWake() {
+        main.removeCallbacks(agentIdleSuspend)
+        if (!engineSuspended || destroyed) return
+        val done = kotlinx.coroutines.CompletableDeferred<Unit>()
+        enqueueLifecycle {
+            try { synchronized(lifecycleLock) { if (ready && engineSuspended) { engine.resume(); engineSuspended = false } } }
+            finally { done.complete(Unit) }
+        }
+        if (destroyed) return
+        kotlinx.coroutines.withTimeoutOrNull(15_000) { done.await() }
+    }
+
+    /** Uma chamada terminou (ou o app saiu com o agente ligado): o motor dorme depois de [AGENT_IDLE_MS] parado. */
+    fun agentTouch() {
+        main.removeCallbacks(agentIdleSuspend)
+        if (inBackground && !destroyed) main.postDelayed(agentIdleSuspend, AGENT_IDLE_MS)
+    }
+
+    /** Ocioso fora do app: suspende como o onStop faria (export em curso segura o motor de pé). */
+    private fun agentIdle() {
+        if (!inBackground || destroyed) return
+        if (exporter.busy) { suspendAfterExport = true; return }
+        enqueueLifecycle { if (ready && inBackground && !engineSuspended) { engine.suspend(); engineSuspended = true } }
     }
 
     /**
@@ -422,6 +471,20 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** 0.5.4: um recurso pago (texto 3D) pedido sem o acesso: o editor mostra HyperLockedDialog. */
     var hyperLockedPrompt by mutableStateOf(false)
+
+    /**
+     * 1.0.2 (pedido do dono, 18/11/2026): uma OPÇÃO paga de um efeito grátis
+     * (Flow Retime › Qualidade dos vetores › Neural (IA)) pedida sem o AureaHyper:
+     * o valor não muda e o editor abre o paywall do AureaHyper. Quem já tem a
+     * opção no projeto segue igual (regra de [com.aurea.aurea.effects.PaidGate]).
+     */
+    var hyperOptionPrompt by mutableStateOf(false)
+
+    /** A opção [value] do parâmetro [paramIndex] do efeito [effectId] da camada principal é paga e está bloqueada? */
+    fun optionLocked(effectId: Int, paramIndex: Int, value: Float): Boolean {
+        val typeId = effects.firstOrNull { it.effectId == effectId }?.typeId ?: return false
+        return com.aurea.aurea.effects.HyperEffectGate.optionLocked(typeId, paramIndex, value)
+    }
 
     fun openHyper() {
         if (screen != Screen.Home || exporter.busy) return
@@ -1170,7 +1233,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     fun onEnterForeground() {
         suspendAfterExport = false
-        enqueueLifecycle { synchronized(lifecycleLock) { if (ready) engine.resume() } }
+        inBackground = false
+        main.removeCallbacks(agentIdleSuspend)
+        enqueueLifecycle { synchronized(lifecycleLock) { if (ready) engine.resume(); engineSuspended = false } }
         if (ready) startStatusLoop()
         // Um export que a suspensão parou continua do trecho salvo.
     }
@@ -1184,6 +1249,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun onLeaving() = flushOnLeave(suspendAfter = false)
 
     fun onEnterBackground() {
+        inBackground = true
         stopStatusLoop()
         flushOnLeave(suspendAfter = true)
     }
@@ -1204,6 +1270,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         // plano segura o processo); a suspensão vem quando ele terminar.
         val keepForExport = suspendAfter && exporter.busy
         if (keepForExport) suspendAfterExport = true
+        // 18/11/2026: o serviço do agente segura o processo; o motor fica de pé para as
+        // chamadas e só dorme depois de AGENT_IDLE_MS sem nenhuma (agentTouch).
+        val keepForAgent = suspendAfter && !keepForExport && com.aurea.aurea.mcp.McpAgentHub.keepEngine
+        if (keepForAgent) agentTouch()
         enqueueLifecycle {
             if (path != null && ready) {
                 val t0 = System.nanoTime()
@@ -1213,7 +1283,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             }
             // suspend junta a thread do export: fora do lifecycleLock, senão o
             // surfaceDestroyed do onStop espera o export terminar na main.
-            if (suspendAfter && ready && !keepForExport) engine.suspend()
+            if (suspendAfter && ready && !keepForExport && !keepForAgent) { engine.suspend(); engineSuspended = true }
         }
     }
 
@@ -1381,6 +1451,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             sequenceDraft = null
             runCatching { draft.tempZip?.delete(); draft.copied?.deleteRecursively() }
         }
+        // O AureaMCP vive no escopo do processo: sai junto com o motor que ele comanda.
+        if (mcpLazy.isInitialized()) mcp.release()
+        main.removeCallbacks(agentIdleSuspend)
         shutdown()
         super.onCleared()
     }
@@ -1410,7 +1483,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** Lê o status do motor e publica. Devolve se algo que a UI mostra mudou. */
     private fun pollStatus(): Boolean {
-        if (exporter.state.preparing || preRenderPreparing) return false
+        if (exporter.state.preparing || preRenderPreparing || preExportPreparing) return false
         engine.readStatus(statusBuffer)
         status.readFrom(statusBuffer)
         val n = statusSigNow
@@ -1437,7 +1510,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         statusSlow = false
         statusIdleFrames = 0
         statusLoop = RenderLoop { frameTimeNanos ->
-            if (!ready || exporter.state.preparing || preRenderPreparing) return@RenderLoop
+            if (!ready || exporter.state.preparing || preRenderPreparing || preExportPreparing) return@RenderLoop
             checkMemoryPressure()
             engine.readStatus(statusBuffer)
             status.readFrom(statusBuffer)
@@ -1583,6 +1656,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             previewBufferRanges = readPreviewBufferRanges()
             localAiActivity = engine.localAiStatus()
             updatePreRenderProgress()
+            if (preRenderPanelOpen || preExport.running || preRenderProgress.complete || preExport.complete) refreshPreRenderPanel()
             lastPreviewAuxNs = auxNow
             lastPreviewAuxRevision = status.modelRevision
         }
@@ -3866,7 +3940,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** Força a releitura na mesma volta (depois de um comando local). */
     private fun refreshNow() {
-        if (destroyed || !ready || exporter.state.preparing || preRenderPreparing) return
+        if (destroyed || !ready || exporter.state.preparing || preRenderPreparing || preExportPreparing) return
         lastRevision = -1
         wakeStatusLoop()
         // Fase 8D: DENTRO de um gesto (arrasto, slider) a releitura fica para o
@@ -4941,6 +5015,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun setEffectParam(effectId: Int, param: EffectParam, value: Float, component: Int = 0) {
         val id = primary ?: return
         val d = detail ?: return
+        if (component == 0 && optionLocked(effectId, param.index, value)) {
+            showToast(appText(R.string.hyper_option_locked))
+            hyperOptionPrompt = true
+            return
+        }
         val local = d.localFrame(playhead)
         send {
             if (param.animated) {
@@ -5095,6 +5174,211 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (progress != preRenderProgress) preRenderProgress = progress
     }
 
+    // =========================================================================
+    // Pre Render & Pre Export (1.0.2). O trecho, a qualidade, o "cabe ~Xs" e os
+    // trechos desatualizados moram no motor (EnginePreRenderRange.cpp); aqui só
+    // o espelho para o painel (PreRenderPanel.kt) e a régua da timeline.
+    // =========================================================================
+    /** O painel está aberto: o laço de status lê o trecho e o "cabe" a 5 Hz. */
+    var preRenderPanelOpen by mutableStateOf(false)
+    var preRenderRange by mutableStateOf(PreRenderRange())
+        private set
+    /** Qualidade escolhida: 1 Inteira, 2, 4, 8 (divisor da composição). */
+    var preRenderQuality by mutableIntStateOf(2)
+        private set
+    /** Modo do painel: 0 PreRender, 1 pré-export (muda a conta do "cabe"). */
+    var preRenderMode by mutableIntStateOf(0)
+    /** "Cabe ~Xs" de cada qualidade no modo do painel. */
+    var preRenderFits by mutableStateOf<Map<Int, PreRenderFit>>(emptyMap())
+        private set
+    var preExport by mutableStateOf(PreExportStatus())
+        private set
+    var preExportPreparing by mutableStateOf(false)
+        private set
+    /** Trechos que edições desatualizaram ([de, até) em quadros): PreRender + pré-export. */
+    var preRenderStale by mutableStateOf<List<LongRange>>(emptyList())
+        private set
+    /** O pré-export tocando no player (caminho do MP4), ou null. */
+    var preExportWatching by mutableStateOf<String?>(null)
+    private val preRenderPanelBusy = AtomicBoolean(false)
+    private var preExportFailedShown = 0
+
+    fun openPreRenderPanel() {
+        preRenderPanelOpen = true
+        refreshPreRenderPanel()
+    }
+
+    fun closePreRenderPanel() { preRenderPanelOpen = false }
+
+    /** Lê o motor fora da main (fs::space no "cabe") e publica na main. */
+    fun refreshPreRenderPanel() {
+        if (destroyed || !ready) return
+        if (!preRenderPanelBusy.compareAndSet(false, true)) return
+        val mode = preRenderMode
+        val withFits = preRenderPanelOpen
+        viewModelScope.launch(Dispatchers.Default) {
+            try {
+                val range = engine.preRenderRange()
+                val fits = if (withFits) listOf(1, 2, 4, 8).associateWith { engine.preRenderFit(it, mode) } else null
+                val export = engine.preExportStatus()
+                val stale = engine.preRenderDirty(0) + engine.preRenderDirty(1)
+                withContext(Dispatchers.Main) {
+                    if (destroyed) return@withContext
+                    if (range != preRenderRange) preRenderRange = range
+                    if (fits != null && fits != preRenderFits) preRenderFits = fits
+                    if (export.error != 0 && export.error != 25 && !export.running && preExportFailedShown != export.error
+                        && preExport.running) {
+                        preExportFailedShown = export.error
+                        showToast(appText(R.string.prx_preexport_failed, humanError(export.error)))
+                    }
+                    if (export != preExport) preExport = export
+                    if (stale != preRenderStale) preRenderStale = stale
+                    if (preExportWatching != null && !export.playable) preExportWatching = null
+                }
+            } finally { preRenderPanelBusy.set(false) }
+        }
+    }
+
+    /** 0 Início, 1 Fim, 2 Inteiro, 3 Limpar (motor: o trecho é da sessão). */
+    fun preRenderRangeAction(action: Int) {
+        if (destroyed || !ready) return
+        pause()
+        playing = false
+        viewModelScope.launch(Dispatchers.Default) {
+            engine.preRenderRangeAction(action)
+            withContext(Dispatchers.Main) { refreshPreRenderPanel() }
+        }
+    }
+
+    fun changePreRenderQuality(divisor: Int) {
+        val d = divisor.takeIf { it in setOf(1, 2, 4, 8) } ?: 2
+        preRenderQuality = d
+        viewModelScope.launch(Dispatchers.Default) { engine.setPreRenderQuality(d) }
+    }
+
+    fun changePreRenderMode(mode: Int) {
+        preRenderMode = if (mode > 0) 1 else 0
+        refreshPreRenderPanel()
+    }
+
+    fun preRenderGoStart() = seek(preRenderRange.effectiveIn.toInt())
+    fun preRenderGoEnd() = seek((preRenderRange.effectiveOut - 1).coerceAtLeast(preRenderRange.effectiveIn).toInt())
+
+    /** Loop do trecho: a reprodução fica presa nele e repete; ligar começa a tocar do início dele. */
+    fun setPreRenderLoop(on: Boolean) {
+        if (destroyed || !ready) return
+        val from = preRenderRange.effectiveIn.toInt()
+        viewModelScope.launch(Dispatchers.Default) {
+            engine.setPreRenderLoop(on)
+            withContext(Dispatchers.Main) {
+                setLoop(on)
+                if (on) { seek(from); play() } else pause()
+                refreshPreRenderPanel()
+            }
+        }
+    }
+
+    /** PreRender do trecho na qualidade escolhida (mesmo ciclo do gesto: partida fora da main). */
+    fun startPreRenderRange() {
+        if (destroyed || !ready || screen != Screen.Editor || projectWork || exporter.busy || preRenderPreparing || preRenderProgress.running) return
+        if (preExport.running || preExportPreparing) { showToast(appText(R.string.prx_busy)); return }
+        pause()
+        playing = false
+        val request = AtomicBoolean(false)
+        val session = projectGeneration
+        val divisor = preRenderQuality
+        preRenderRequest = request
+        preRenderCancelled = false
+        preRenderPreparing = true
+        preRenderProgress = PreRenderProgress(divisor = divisor)
+        enqueueLifecycle {
+            var code = 5
+            try {
+                if (ready && !request.get()) {
+                    code = engine.startPreRenderRange(divisor)
+                    if (request.get()) engine.cancelPreRender()
+                }
+            } catch (failure: Exception) {
+                Log.w(TAG, "Range PreRender startup failed", failure)
+                code = 10
+            } catch (failure: OutOfMemoryError) { code = 8 }
+            finally {
+                val result = code
+                main.post {
+                    if (destroyed || preRenderRequest !== request) return@post
+                    preRenderRequest = null
+                    preRenderPreparing = false
+                    if (!ready || projectGeneration != session) return@post
+                    if (!request.get()) {
+                        updatePreRenderProgress()
+                        if (result != 0 && preRenderProgress.error != result) showToast(appText(R.string.prerender_failed, humanError(result)))
+                    }
+                    refreshPreRenderPanel()
+                    wakeStatusLoop()
+                }
+            }
+        }
+    }
+
+    /** Pré-export do trecho: um MP4 pelo encoder do aparelho, guardado no cache do motor. */
+    fun startPreExport() {
+        if (destroyed || !ready || screen != Screen.Editor || projectWork || exporter.busy || preExportPreparing || preExport.running) return
+        if (preRenderPreparing || preRenderProgress.running) { showToast(appText(R.string.prx_busy)); return }
+        pause()
+        playing = false
+        preExportWatching = null
+        preExportPreparing = true
+        preExportFailedShown = 0
+        val session = projectGeneration
+        val divisor = preRenderQuality
+        enqueueLifecycle {
+            var code = 5
+            try {
+                if (ready) code = engine.startPreExport(divisor)
+            } catch (failure: Exception) {
+                Log.w(TAG, "Pre-export startup failed", failure)
+                code = 10
+            } catch (failure: OutOfMemoryError) { code = 8 }
+            finally {
+                val result = code
+                main.post {
+                    if (destroyed) return@post
+                    preExportPreparing = false
+                    if (!ready || projectGeneration != session) return@post
+                    if (result != 0 && result != 25) showToast(appText(R.string.prx_preexport_failed, humanError(result)))
+                    refreshPreRenderPanel()
+                    wakeStatusLoop()
+                }
+            }
+        }
+    }
+
+    fun cancelPreExport() {
+        viewModelScope.launch(Dispatchers.Default) {
+            engine.cancelPreExport()
+            withContext(Dispatchers.Main) { refreshPreRenderPanel() }
+        }
+    }
+
+    /** Toca o pré-export pronto (vídeo decodificado em vez do render ao vivo). */
+    fun watchPreExport() {
+        val status = preExport
+        if (!status.playable) return
+        pause()
+        playing = false
+        preExportWatching = status.path
+    }
+
+    /** O player do pré-export parou em [seconds] do vídeo: o cabeçote vai ao quadro correspondente. */
+    fun closePreExportPlayer(seconds: Double) {
+        val status = preExport
+        preExportWatching = null
+        if (seconds >= 0.0 && status.outFrame > status.inFrame) {
+            val frame = status.inFrame + (seconds * status.fps).toLong()
+            seek(frame.coerceIn(status.inFrame, status.outFrame - 1).toInt())
+        }
+    }
+
     fun seek(frame: Int) {
         val f = clampFrame(frame)
         send { seek(frameToNs(f)) }
@@ -5159,6 +5443,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun setLoop(loop: Boolean) {
         looping = loop
         send { setLoop(loop) }
+        // 1.0.2: desligar a repetição no transporte também solta o trecho do Pre Render.
+        if (!loop && preRenderRange.loop) viewModelScope.launch(Dispatchers.Default) {
+            engine.setPreRenderLoop(false)
+            withContext(Dispatchers.Main) { refreshPreRenderPanel() }
+        }
     }
 
     fun setPreviewScale(automatic: Boolean, numerator: Int = 1, denominator: Int = 1) =
@@ -5265,6 +5554,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     private fun acceptsProjectChange(): Boolean {
         if (preRenderPreparing) { showToast(appText(R.string.prerender_preparing)); return false }
+        if (preExportPreparing || preExport.running) { showToast(appText(R.string.prx_busy)); return false }
         if (destroyed || !ready || projectWork) return false
         if (exporter.busy) { showToast(appText(R.string.msg_aguarde_a_exportacao_terminar)); return false }
         if (activeImports > 0 || busyMessage != null || captions.busy != null || tracking || maskTracking || detectingBeats) return false
@@ -5283,8 +5573,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** One bounded import job, retaining selection order without parallel decoders. */
-    fun importMediaBatch(uris: List<Uri>, asOverlay: Boolean = false) {
+    /**
+     * One bounded import job, retaining selection order without parallel decoders.
+     * [trimUs] (1.0.2, AureaMCP `import_device_media`): o corte [in, out] em µs de
+     * cada VÍDEO — entra só o trecho (com folga) e a camada já sai cortada.
+     */
+    fun importMediaBatch(uris: List<Uri>, asOverlay: Boolean = false, trimUs: LongRange? = null) {
         if (uris.isEmpty() || !acceptsImport()) return
         val overlayFrame = playhead.toLong()
         val app = getApplication<Application>()
@@ -5301,13 +5595,15 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                     var audio = false
                     try {
                         val id = withContext(Dispatchers.IO) {
-                            val source = durableSource(uri)
                             val display = displayName(uri) ?: uri.lastPathSegment.orEmpty()
                             val mime = app.contentResolver.getType(uri) ?: android.webkit.MimeTypeMap.getSingleton()
                                 .getMimeTypeFromExtension(display.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT))
                             val kind = com.aurea.aurea.editor.PickedMedia.kind(mime, display)
                             audio = kind == com.aurea.aurea.editor.PickedMedia.Kind.Audio
                             val video = kind == com.aurea.aurea.editor.PickedMedia.Kind.Video
+                            val trim = trimUs?.takeIf { video && it.last > it.first }
+                            val media = if (trim != null) durableTrimmedSource(uri, trim.first, trim.last) else DurableMedia(durableSource(uri))
+                            val source = media.path
                             val name = display.ifEmpty { appText(if (video) R.string.target_video else R.string.target_image) }
                             val ext = display.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT)
                             // 0.2.7: GIF toca (quadros numa pré-composição) e PSD
@@ -5316,7 +5612,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                             val psd = ext == "psd" || mime == "image/vnd.adobe.photoshop"
                             if (audio) engine.importAudio(source, display.substringBeforeLast('.').ifEmpty { appText(R.string.target_audio) })
                             else if (gif || psd) importLayeredNow(uri, gif)
-                            else if (video) engine.importVideo(source, name)
+                            else if (video) engine.importVideoWindow(source, name, media.windowStartUs, media.originRef).also { created ->
+                                // Corte do agente: a camada já sai cortada (o mesmo passo de desfazer da importação).
+                                if (created >= 0 && trim != null) engine.applyImportTiming(created, 0, trim.first, trim.last)
+                            }
                             else {
                                 val orientation = AureaEngine.exifOrientation(app, uri)
                                 val bmp = AureaEngine.decodeBitmapRgba(app, uri) ?: return@withContext -1L
@@ -5392,7 +5691,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                     try {
                         val id = withContext(Dispatchers.IO) {
                             val uri = pick.uri
-                            val source = durableSource(uri)
+                            // 1.0.2: vídeo cortado no navegador entra só com o trecho (e folga).
+                            val trimmed = pick.video && pick.trimOutUs > pick.trimInUs
+                            val media = if (trimmed) durableTrimmedSource(uri, pick.trimInUs, pick.trimOutUs)
+                                        else DurableMedia(durableSource(uri))
+                            val source = media.path
                             val display = displayName(uri) ?: uri.lastPathSegment.orEmpty()
                             val name = display.ifEmpty { appText(if (pick.video) R.string.target_video else R.string.target_image) }
                             val ext = display.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT)
@@ -5400,7 +5703,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                             val layered = !pick.video && (mime == "image/gif" || ext == "gif" || ext == "psd" || mime == "image/vnd.adobe.photoshop")
                             val created = when {
                                 layered -> importLayeredNow(uri, mime == "image/gif" || ext == "gif")
-                                pick.video -> engine.importVideo(source, name)
+                                pick.video -> engine.importVideoWindow(source, name, media.windowStartUs, media.originRef)
                                 else -> {
                                     val orientation = AureaEngine.exifOrientation(app, uri)
                                     val bmp = AureaEngine.decodeBitmapRgba(app, uri) ?: return@withContext -1L
@@ -10624,6 +10927,49 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         return copyIntoApp(uri)?.absolutePath ?: uri.toString()
     }
 
+    /** A fonte durável de um vídeo com corte (1.0.2): o caminho, onde o trecho começa no original e de onde veio. */
+    private data class DurableMedia(val path: String, val windowStartUs: Long = 0L, val originRef: String = "")
+
+    /**
+     * 1.0.2 "importar só o trecho cortado" (pedido de usuário: cortar 10 min de um
+     * vídeo de 1 h da galeria copiava a hora inteira para o app). Com permissão
+     * persistente nada é copiado (a URI de sempre). Sem ela, o motor remuxa só o
+     * trecho [inUs, outUs] com folga (AureaEngine.importTrimmedMedia) e o projeto
+     * continua na régua do original; se não der (container, fonte sem seek,
+     * trecho grande demais para valer a pena), a cópia inteira de sempre.
+     * Bloqueia: chame fora da main.
+     */
+    private fun durableTrimmedSource(uri: Uri, inUs: Long, outUs: Long): DurableMedia {
+        if (uri.scheme != android.content.ContentResolver.SCHEME_CONTENT || takePermission(uri)) return DurableMedia(uri.toString())
+        if (outUs > inUs && inUs >= 0) cutIntoApp(uri, inUs, outUs)?.let { return it }
+        return DurableMedia(copyIntoApp(uri)?.absolutePath ?: uri.toString())
+    }
+
+    private fun cutIntoApp(uri: Uri, inUs: Long, outUs: Long): DurableMedia? {
+        val app = getApplication<Application>()
+        val dir = File(app.filesDir, "projetos/import-sources").apply { mkdirs() }
+        val ext = displayName(uri)?.substringAfterLast('.', "")?.lowercase(java.util.Locale.ROOT)
+        // A mesma URI com outro conteúdo (vídeo editado na galeria) não reaproveita o trecho antigo.
+        val bytes = try {
+            app.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)
+                ?.use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else -1L } ?: -1L
+        } catch (_: Exception) { -1L }
+        val origin = "$uri#$bytes"
+        return try {
+            app.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                // O motor abre o MESMO arquivo pelo descritor (o libavformat lê o caminho do /proc).
+                val cut = AureaEngine.importTrimmedMedia("/proc/self/fd/${pfd.fd}", dir.absolutePath, origin,
+                    if (ext == "mov") "mov" else "mp4", inUs, outUs) ?: return null
+                Log.i(TAG, "trecho importado: ${cut.bytes shr 20} MB de ${cut.sourceBytes shr 20} MB" +
+                    (if (cut.reused) " (reaproveitado)" else ""))
+                DurableMedia(cut.path, cut.windowStartUs, origin)
+            }
+        } catch (failure: Exception) {
+            Log.w(TAG, "corte do trecho falhou: ${failure.javaClass.simpleName}")
+            null
+        }
+    }
+
     private fun copyIntoApp(uri: Uri): File? {
         val app = getApplication<Application>()
         val dir = File(app.filesDir, "projetos/import-sources").apply { mkdirs() }
@@ -11422,6 +11768,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         const val TRIM_RUNNING_CRITICAL = 15
         const val TRIM_UI_HIDDEN = 20
         const val TRIM_COMPLETE = 80
+        /** AureaMCP fora do app: o motor dorme depois deste tempo sem chamadas de agente. */
+        const val AGENT_IDLE_MS = 3L * 60 * 1000
     }
 }
 

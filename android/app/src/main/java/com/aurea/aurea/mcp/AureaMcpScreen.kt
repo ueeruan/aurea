@@ -110,6 +110,7 @@ fun AureaMcpScreen(mcp: AureaMcp, onClose: () -> Unit) {
                 Hero(mcp)
                 if (mcp.enabled && mcp.status != AureaMcp.Status.NoAccount) {
                     ConnectCard(mcp)
+                    BackgroundCard(mcp)
                     AureaOsCard(mcp)
                     TokenCard(mcp)
                     AgentsCard(mcp)
@@ -330,6 +331,45 @@ private fun PermissionsCard(mcp: AureaMcp) {
     }
 }
 
+/**
+ * "Fora do app" (18/11/2026): o agente continua com a pessoa em outro app ou com a
+ * tela apagada (McpAgentService) e, com o app fechado, o Worker põe os pedidos na
+ * fila e acorda o Aurea por push. Ligar pede a permissão de notificação (Android
+ * 13+): as aprovações fora da tela chegam por ela. No PC não aparece (a janela é o app).
+ */
+private var askedNotify = false
+
+@Composable
+private fun BackgroundCard(mcp: AureaMcp) {
+    if (com.aurea.aurea.ui.platform.PlatformFeatures.desktopAe) return
+    val platform = McpAgentHub.platform ?: return
+    var notifyOk by remember { mutableStateOf(platform.notificationsAllowed()) }
+    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { notifyOk = platform.notificationsAllowed() }
+    // Ligado por padrão: na primeira vez que a pessoa vê o cartão, o sistema pergunta (uma vez por abertura do app).
+    LaunchedEffect(Unit) {
+        val perm = platform.notificationPermission()
+        if (mcp.keepWorking && !notifyOk && perm != null && !askedNotify) { askedNotify = true; ask.launch(arrayOf(perm)) }
+    }
+    Section(stringResource(R.string.mcp_bg_title)) {
+        Text(stringResource(R.string.mcp_bg_body), style = style(13, color = AureaColors.Muted))
+        ToggleRow(stringResource(R.string.mcp_bg_toggle), mcp.keepWorking, "mcp.keepWorking") { on ->
+            mcp.changeKeepWorking(on)
+            val perm = platform.notificationPermission()
+            if (on && perm != null && !platform.notificationsAllowed()) ask.launch(arrayOf(perm))
+        }
+        if (mcp.keepWorking) {
+            val running = McpAgentHub.serviceRunning
+            Row(Modifier.testTag("mcp.keepWorking.status"), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(8.dp).clip(CircleShape).background(if (running) Online else Color(0xFF3A3348)))
+                Text(stringResource(if (running) R.string.mcp_bg_running else R.string.mcp_bg_ready), Modifier.padding(start = 8.dp),
+                    style = style(13, FontWeight.W600, if (running) Online else AureaColors.Muted))
+            }
+            if (!notifyOk) Text(stringResource(R.string.mcp_bg_notif_denied), Modifier.testTag("mcp.keepWorking.notify"), style = style(12, color = Color(0xFFFFB020)))
+            Text(stringResource(R.string.mcp_bg_limits), style = style(12, color = AureaColors.Muted))
+        }
+    }
+}
+
 @Composable
 private fun ToggleRow(label: String, checked: Boolean, tag: String, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().semantics { contentDescription = label }, verticalAlignment = Alignment.CenterVertically) {
@@ -377,7 +417,8 @@ fun AureaMcpRoot(store: com.aurea.aurea.state.EditorStore) {
         owner.lifecycle.addObserver(observer)
         onDispose { owner.lifecycle.removeObserver(observer) }
     }
-    LaunchedEffect(mcp) { mcp.start() }
+    // start + o estado de primeiro plano/serviço (o editor pode ter nascido depois do onStart).
+    LaunchedEffect(mcp) { mcp.start(); mcp.onLifecycleChanged() }
     val title = store.project.title
     val screen = store.screen
     LaunchedEffect(title, screen, mcp.status) { if (mcp.status == AureaMcp.Status.Online) mcp.projectChanged() }

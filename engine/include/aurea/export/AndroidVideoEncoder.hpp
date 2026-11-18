@@ -103,7 +103,20 @@ struct Packet {
 /// A escada do sink tenta cada encoder de hardware antes do software.
 [[nodiscard]] usize find_encoders(bool hevc, u32 width, u32 height, f64 fps, bool hardware, CodecInfo* out,
                                   usize capacity) noexcept;
+#elif defined(__APPLE__)
+// iOS (18/11/2026): o MESMO contrato, implementado com VTCompressionSession em
+// AppleVideoEncoder.cpp. Só o degrau sem cópia (Request::direct): cada quadro
+// chega como o CVPixelBuffer (IOSurface, 32BGRA) em que o Metal acabou de
+// renderizar (Backend::create_shared_render_target), e o VideoToolbox o
+// converte e codifica no hardware — sem readback, sem cópia na CPU. Os
+// pacotes saem em Annex-B e o SPS/PPS (VPS) à parte, como no Android; o
+// FFmpeg só multiplexa. Sem o buffer, o degrau falha e o sink segue no
+// h264_videotoolbox do FFmpeg (caminho de sempre).
+[[nodiscard]] inline bool find_encoder(bool, u32, u32, f64, bool, CodecInfo& out) noexcept { out = CodecInfo{}; return false; }
+[[nodiscard]] inline usize find_encoders(bool, u32, u32, f64, bool, CodecInfo*, usize) noexcept { return 0; }
+#endif
 
+#if defined(__ANDROID__) || defined(__APPLE__)
 class Encoder {
 public:
     Encoder() noexcept;
@@ -135,6 +148,8 @@ public:
     [[nodiscard]] bool offline_hints() const noexcept;
     /// 0.5.3: o encoder aberto ficou em taxa constante (CBR).
     [[nodiscard]] bool constant_rate() const noexcept;
+    /// O encoder aberto aceitou o perfil de qualidade (H.264 High).
+    [[nodiscard]] bool quality_profile() const noexcept;
     /// surface-direct: o AHardwareBuffer do PRÓXIMO send (o alimentador faz o
     /// próprio acquire e o segura até fechar).
     void set_direct_buffer(void* buffer) noexcept;
@@ -146,7 +161,9 @@ private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
+#endif
 
+#if defined(__ANDROID__)
 /// Propriedades de teste (adb shell setprop): `debug.aurea.enc.allowsw` = 1
 /// deixa os degraus do aparelho usarem encoder classificado como software
 /// (emulador); `debug.aurea.enc.skip` = "surface,buffer,legacy" pula degraus;
@@ -155,9 +172,11 @@ private:
 /// cada degrau.
 [[nodiscard]] bool debug_flag(const char* property, const char* token) noexcept;
 
+#elif defined(__APPLE__)
+[[nodiscard]] inline bool debug_flag(const char*, const char*) noexcept { return false; }
 #else
-// Fora do Android não há encoder do aparelho por aqui (iOS usa o
-// VideoToolbox pelo FFmpeg): a escada nunca cria um destes.
+// Fora do Android e do iOS não há encoder do aparelho por aqui: a escada
+// nunca cria um destes.
 class Encoder {
 public:
     [[nodiscard]] Status open(const Request&, const CodecInfo&) noexcept { return Errc::NotSupported; }
@@ -169,6 +188,7 @@ public:
     [[nodiscard]] const char* describe() const noexcept { return ""; }
     [[nodiscard]] bool offline_hints() const noexcept { return false; }
     [[nodiscard]] bool constant_rate() const noexcept { return false; }
+    [[nodiscard]] bool quality_profile() const noexcept { return false; }
     void set_direct_buffer(void*) noexcept {}
     void close() noexcept {}
 private:

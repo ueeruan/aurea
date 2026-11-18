@@ -2019,10 +2019,11 @@ enum EffectI18nTable {
     aurea.3d.stroke|21|opacity|fxl_opacity|
     aurea.time.flow_retime|0|speed|fxl_speed|
     aurea.time.flow_retime|1|frames|fxo_frames|fxo_nearest,fxl_mix,core2_fx_motion_mode
-    aurea.time.flow_retime|2|vectors|fxl_vector_quality|fxo_fast,fxo_good,fxo_best
+    aurea.time.flow_retime|2|vectors|fxl_vector_quality|fxo_fast,fxo_good,fxo_best,fxo_neural_ai
     aurea.time.flow_retime|3|motion_blur|fxl_motion_blur_2|
     aurea.time.flow_retime|4|replace_duplicates|fxl_replace_duplicate_frames|
     aurea.time.flow_retime|5|duplicate_sensitivity|fx_sensibilidade|
+    aurea.time.flow_retime|6|ghost_warp|fxl_ghost_warp|
     aurea.time.flow_motion_blur|0|amount|fx045g_amount|
     aurea.time.flow_motion_blur|1|shutter|fxl_shutter|
     aurea.time.flow_motion_blur|2|vectors|fxl_vector_quality|fxo_fast,fxo_good,fxo_best
@@ -3432,6 +3433,8 @@ enum EffectI18nTable {
     aurea.generate.raster_extrude|4|reflection|fxt_the_reflection_uses_the_3d_scene_s_hdri
     aurea.3d.shatter|4|center|fxt_tap_the_point_s_name_then_drag_it_on_the
     aurea.time.flow_retime|5|duplicate_sensitivity|fxt_higher_frames_that_are_only_similar_also
+    aurea.time.flow_retime|2|vectors|fxt_vector_quality_neural
+    aurea.time.flow_retime|6|ghost_warp|fxt_ghost_warp_tip
     aurea.light.saber|9|core_layer|fxt_used_when_the_core_is_layer_text
     aurea.light.saber|22|mask_evolution|fxt_applies_to_the_layer_masks_core
     aurea.enhance.video|0|model|fxt_automatic_estimates_compression_noise_an

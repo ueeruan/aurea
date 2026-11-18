@@ -6049,5 +6049,17 @@
  },
  "Esticar o mapa": {
   "en": "Stretch map to fit", "es": "Estirar el mapa", "ru": "Растянуть карту", "hi": "मैप को फैलाएं", "id": "Regangkan peta", "ar": "تمديد الخريطة"
+ },
+ "Fantasma ↔ Deformação": {
+  "en": "Ghosting ↔ Warping", "es": "Fantasma ↔ Deformación", "ru": "Двоение ↔ Деформация", "hi": "घोस्टिंग ↔ विरूपण", "id": "Bayangan ↔ Distorsi", "ar": "الظلال ↔ التشوه"
+ },
+ "Neural (IA)": {
+  "en": "Neural (AI)", "es": "Neural (IA)", "ru": "Нейросеть (ИИ)", "hi": "न्यूरल (AI)", "id": "Neural (AI)", "ar": "عصبي (ذكاء اصطناعي)"
+ },
+ "Para a esquerda: onde os vetores falham, os quadros se misturam (fantasma). Para a direita: confia nos vetores e deforma em vez de misturar.": {
+  "en": "Left: where the vectors fail, the frames blend (ghosting). Right: trusts the vectors and warps instead of blending.", "es": "A la izquierda: donde fallan los vectores, los fotogramas se mezclan (fantasma). A la derecha: confía en los vectores y deforma en vez de mezclar.", "ru": "Влево: где векторы ошибаются, кадры смешиваются (двоение). Вправо: доверяет векторам и деформирует вместо смешивания.", "hi": "बाएँ: जहाँ वेक्टर चूकते हैं, फ़्रेम मिल जाते हैं (घोस्टिंग)। दाएँ: वेक्टर पर भरोसा करके मिलाने के बजाय विकृत करता है।", "id": "Kiri: saat vektor gagal, bingkai dicampur (bayangan). Kanan: memercayai vektor dan mendistorsi alih-alih mencampur.", "ar": "لليسار: حيث تخطئ المتجهات تُمزج الإطارات (ظلال). لليمين: يثق بالمتجهات ويشوّه بدل المزج."
+ },
+ "Neural (IA): a rede de IA monta o quadro na exportação e na prévia parada; durante a reprodução a prévia usa os vetores da GPU.": {
+  "en": "Neural (AI): the AI network builds the frame on export and in the paused preview; during playback the preview uses the GPU vectors.", "es": "Neural (IA): la red de IA arma el fotograma al exportar y en la vista previa en pausa; al reproducir, la vista previa usa los vectores de la GPU.", "ru": "Нейросеть (ИИ): кадр строит нейросеть при экспорте и в превью на паузе; при воспроизведении превью использует векторы GPU.", "hi": "न्यूरल (AI): एक्सपोर्ट और रुके हुए प्रीव्यू में AI नेटवर्क फ़्रेम बनाता है; चलाते समय प्रीव्यू GPU वेक्टर इस्तेमाल करता है।", "id": "Neural (AI): jaringan AI menyusun bingkai saat ekspor dan di pratinjau yang dijeda; saat diputar, pratinjau memakai vektor GPU.", "ar": "عصبي (ذكاء اصطناعي): تبني الشبكة الإطار عند التصدير وفي المعاينة المتوقفة؛ أثناء التشغيل تستخدم المعاينة متجهات وحدة الرسوميات."
  }
 }

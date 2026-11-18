@@ -194,6 +194,11 @@ bool accumulate_audio_level(const AVFrame* frame, f64& sum, u64& count) noexcept
 // Até 900 quadros (30 s a 30 qps) o decode inteiro custa poucos segundos e
 // fica; o modo estrito (testes, guardas do retomável) também fica no inteiro.
 constexpr u64 kFullValidationFrames = 900;
+/// 18/11/2026: com o degrau do encoder já confirmado NESTE aparelho num export
+/// anterior (memória da escada 'G'), a validação tolerante amostra GOPs a partir
+/// de 5 s em vez de 30 s: o decode inteiro do arquivo no fim custava, num vídeo
+/// de 30 s, quase o mesmo que o próprio encode.
+constexpr u64 kKnownGoodFullValidationFrames = 150;
 constexpr f64 kBoundedBudgetScale = 20.0;
 constexpr u64 kBoundedBudgetFloor = 600, kBoundedBudgetCap = 2400;
 /// Amostras de imagem que os GOPs escolhidos têm de cobrir (ou todas, se menos).
@@ -607,9 +612,17 @@ private:
     // encoder descartou quadros) ou sem as dicas offline (o 1o pacote não veio).
     static constexpr usize kNoRung = ~usize{0};
     usize cbrRetryRung_ = kNoRung, noHintsRetryRung_ = kNoRung;
+    /// O degrau refeito sem o perfil de qualidade (H.264 High) nesta sessão: o
+    /// encoder aceitou o perfil mas entregou quadros reordenados (quadros B) ou
+    /// não conferiu. Aprendido = 'P' na memória da escada.
+    usize noProfileRetryRung_ = kNoRung;
+    /// O degrau confirmado agora já tinha dado certo neste aparelho antes
+    /// (memória 'G' anterior a esta confirmação): validação amostrada mais cedo.
+    bool rungKnownGood_ = false;
     bool reopening_ = false;          ///< open() chamado pela escada (não refaz a lista)
     bool lastDropped_ = false;        ///< a última falha foi "o encoder descartou quadros"
     bool legacyCbr_ = false;          ///< o degrau FFmpeg/MediaCodec abriu em CBR
+    bool vtNoProfile_ = false;        ///< o VideoToolbox recusou o perfil de qualidade nesta abertura
     bool hevcSoftwareSkipped_ = false;///< HEVC com hardware: o software HEVC fica fora (vem o H.264 do aparelho)
     bool rungConfirmed_ = false;      ///< o 1o quadro do encoder do aparelho foi conferido
     bool encoderColor_ = false;       ///< o ENCODER converte R'G'B' → Y'CbCr (degraus Surface)
@@ -715,7 +728,10 @@ private:
     Status verify_first_frame() noexcept;
     Status start_log() noexcept;
     Status finish_video_stream() noexcept;
-    Status drain_native(bool flushing, unsigned& produced) noexcept;
+    /// `waitUs`: a 1a consulta espera o pacote até isto DENTRO do encoder
+    /// (dequeueOutputBuffer acorda quando ele sai), em vez de a fila cheia
+    /// dormir 1 ms por volta.
+    Status drain_native(bool flushing, unsigned& produced, i64 waitUs = 0) noexcept;
     Status send_native(const u8*, u32, const u8*, u32, i64 us) noexcept;
     void fill_native_parameters(AVCodecParameters* par) const noexcept;
     void fill_log_info(export_log::StreamInfo& info) const noexcept;
@@ -844,7 +860,7 @@ Status FFmpegSink::open(const char* output, const VideoStreamConfig& video,
     // ~96 MB de NV12, nunca menos de 8 quadros (o 1o pacote sai em 1–2).
     pendingLimit_ = static_cast<unsigned>(std::clamp<u64>((96ull << 20) / std::max<u64>(frameBytes, 1), 8, maxPendingVideo));
 #endif
-    rungConfirmed_ = encoderColor_ = lastDropped_ = false;
+    rungConfirmed_ = encoderColor_ = lastDropped_ = rungKnownGood_ = false;
     retimedPackets_ = droppedFrames_ = 0;
     rate_ = av_d2q(video.fps, 1'000'000);
     if (rate_.num <= 0 || rate_.den <= 0)
@@ -878,7 +894,7 @@ Status FFmpegSink::open(const char* output, const VideoStreamConfig& video,
     }
     if (!firstRung && !reopening) {
         attempts_[0] = '\0';   // 0.5.3: antes da lista: os degraus pulados pela memória entram no diagnóstico
-        cbrRetryRung_ = noHintsRetryRung_ = kNoRung;
+        cbrRetryRung_ = noHintsRetryRung_ = noProfileRetryRung_ = kNoRung;
         build_rungs();
         testFaultAt_ = ladderTestFault.exchange(0, std::memory_order_acq_rel);
     }
@@ -982,13 +998,22 @@ Status FFmpegSink::try_video(const char* name, bool hardware, const char* native
     ctx->rc_buffer_size = static_cast<int>(std::min<i64>(ctx->bit_rate * 2, INT_MAX));
     ctx->gop_size = video_.keyframeIntervalFrames ? static_cast<int>(std::min<u32>(video_.keyframeIntervalFrames, INT_MAX)) :
         std::max(1, static_cast<int>(std::lround(video_.fps * 2)));
-    ctx->max_b_frames = 0; ctx->thread_count = 4; ctx->thread_type = FF_THREAD_SLICE;
+    // Encoder de software: todos os núcleos do aparelho (era 4 fixo — metade de
+    // um celular de 8 núcleos parada no degrau mais lento da escada).
+    const int cores = static_cast<int>(std::clamp(std::thread::hardware_concurrency(), 2u, 16u));
+    ctx->max_b_frames = 0; ctx->thread_count = cores; ctx->thread_type = FF_THREAD_SLICE;
     ctx->color_primaries = static_cast<AVColorPrimaries>(video_.color.primaries);
     ctx->color_trc = static_cast<AVColorTransferCharacteristic>(video_.color.transfer);
     ctx->colorspace = static_cast<AVColorSpace>(video_.color.matrix);
     ctx->color_range = video_.color.fullRange ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
     ctx->chroma_sample_location = AVCHROMA_LOC_LEFT;
     if (video_.profile == 1 && video_.codec == ExportCodec::H264) ctx->profile = AV_PROFILE_H264_BASELINE;
+    // VideoToolbox: perfil de qualidade (H.264 High / HEVC Main, nível
+    // automático). Sem quadros B (max_b_frames 0 = sem reordenação). Recusado
+    // na abertura = a mesma abertura sem perfil (abaixo), nunca outro degrau.
+    const bool vtProfile = std::strstr(name, "videotoolbox") && video_.profile != 1 && !vtNoProfile_ &&
+        (video_.codec == ExportCodec::H264 || video_.codec == ExportCodec::HEVC);
+    if (vtProfile) ctx->profile = video_.codec == ExportCodec::H264 ? AV_PROFILE_H264_HIGH : AV_PROFILE_HEVC_MAIN;
     if (format_->oformat->flags & AVFMT_GLOBALHEADER) ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
     AVDictionary* options = nullptr;
     if (std::strstr(name, "videotoolbox")) {
@@ -1022,11 +1047,13 @@ Status FFmpegSink::try_video(const char* name, bool hardware, const char* native
         // gop=0 disables B-picture reordering; owf=0 bounds frame buffering.
         // The wrapper copies the requested AVCodecContext bitrate and VUI.
         std::snprintf(parameters, sizeof(parameters),
-            "preset=ultrafast,threads=4,owf=0,gop=0,period=%d,open-gop=0", ctx->gop_size);
+            "preset=ultrafast,threads=%d,owf=0,gop=0,period=%d,open-gop=0", cores, ctx->gop_size);
         av_dict_set(&options, "kvazaar-params", parameters, 0);
     } else if (std::strcmp(name, "libx265") == 0) {
         av_dict_set(&options, "preset", "veryfast", 0);
-        av_dict_set(&options, "x265-params", "rc-lookahead=0:bframes=0:pools=4:frame-threads=1:log-level=error", 0);
+        char x265[128];
+        std::snprintf(x265, sizeof(x265), "rc-lookahead=0:bframes=0:pools=%d:frame-threads=1:log-level=error", cores);
+        av_dict_set(&options, "x265-params", x265, 0);
     } else if (std::strcmp(name, "libopenh264") == 0) {
         // OpenH264's "buffer" mode explicitly has no bitrate control. Both
         // fallback rate modes therefore use bitrate control, with the requested
@@ -1053,7 +1080,9 @@ Status FFmpegSink::try_video(const char* name, bool hardware, const char* native
         if (video_.profile == 1) av_dict_set(&options, "profile", "constrained_baseline", 0);
     } else if (std::strcmp(name, "libsvtav1") == 0) {
         av_dict_set(&options, "preset", "10", 0);
-        av_dict_set(&options, "svtav1-params", "lookahead=0:lp=4", 0);
+        char svt[64];
+        std::snprintf(svt, sizeof(svt), "lookahead=0:lp=%d", cores);
+        av_dict_set(&options, "svtav1-params", svt, 0);
     } else if (std::strcmp(name, "libaom-av1") == 0) {
         av_dict_set(&options, "cpu-used", "8", 0);
         av_dict_set(&options, "lag-in-frames", "0", 0);
@@ -1071,6 +1100,13 @@ Status FFmpegSink::try_video(const char* name, bool hardware, const char* native
             nativeName ? nativeName : name, name, av_get_pix_fmt_name(pixel),
             ctx->width, ctx->height, video_.fps, result, unused ? 1 : 0);
         avcodec_free_context(&videoCodec_);
+        if (vtProfile) {
+            AUREA_LOG_WARN("export: %s recusou o perfil de qualidade; abre no perfil padrao", name);
+            vtNoProfile_ = true;
+            const Status again = try_video(name, hardware, nativeName, wanted);
+            vtNoProfile_ = false;
+            return again;
+        }
         return Status{Errc::EncoderUnavailable, "encoder FFmpeg recusou configuracao solicitada"};
     }
     std::snprintf(encoder_.name, sizeof(encoder_.name), "%s", nativeName ? nativeName : name);
@@ -1159,10 +1195,10 @@ void FFmpegSink::build_rungs() noexcept {
             const avenc::CodecInfo& codec = deviceCodecs_[d];
             // surface-direct só quando o motor entrega o AHardwareBuffer
             // (VideoStreamConfig::directSurface); falhou = surface NV12 a seguir.
-            if (video_.directSurface && codec.surface && sdr &&
+            if (video_.directSurface && !video_.avoidSurface && codec.surface && sdr &&
                 !avenc::debug_flag("debug.aurea.enc.skip", "surface-direct"))
                 add(Rung::SurfaceDirect, codec.name, codec.hardware, AV_PIX_FMT_NONE, d);
-            if (codec.surface && sdr && !avenc::debug_flag("debug.aurea.enc.skip", "surface"))
+            if (codec.surface && sdr && !video_.avoidSurface && !avenc::debug_flag("debug.aurea.enc.skip", "surface"))
                 add(Rung::Surface, codec.name, codec.hardware, AV_PIX_FMT_NONE, d);
             if (!avenc::debug_flag("debug.aurea.enc.skip", "buffer"))
                 add(Rung::Buffer, codec.name, codec.hardware, AV_PIX_FMT_NONE, d);
@@ -1185,6 +1221,22 @@ void FFmpegSink::build_rungs() noexcept {
         // tentativas), não o HEVC por software (libkvazaar: minutos por vídeo).
         hevcSoftwareSkipped_ = hevc && hardwareExists;
 #elif defined(__APPLE__)
+        // 18/11/2026: degrau sem cópia (AppleVideoEncoder): o CVPixelBuffer
+        // IOSurface em que o Metal renderizou vai direto ao VTCompressionSession.
+        // Só quando o motor entrega o buffer (VideoStreamConfig::directSurface) e
+        // o quadro é SDR; reprovado/falhou = o h264_videotoolbox de sempre, com
+        // os quadros guardados do período de teste.
+        {
+            const u8 t = video_.color.transfer;
+            const bool sdr = t == 1 || t == 6 || t == 14 || t == 15;
+            if (video_.directSurface && !video_.avoidSurface && sdr) {
+                deviceCodecs_[0] = android_video::CodecInfo{};
+                std::snprintf(deviceCodecs_[0].name, sizeof(deviceCodecs_[0].name), "%s", "VideoToolbox");
+                deviceCodecs_[0].hardware = deviceCodecs_[0].surface = true;
+                deviceCodecCount_ = 1;
+                add(Rung::SurfaceDirect, "VideoToolbox", true, AV_PIX_FMT_NONE, 0);
+            }
+        }
         const char* vt = hevc ? "hevc_videotoolbox" : "h264_videotoolbox";
         add(Rung::VideoToolbox, vt, true);
         add(Rung::VideoToolboxPlanar, vt, true);
@@ -1289,6 +1341,16 @@ Status FFmpegSink::open_rung(const RungEntry& rung) noexcept {
         request.keyframeFrames = video_.keyframeIntervalFrames;
         request.baseline = video_.profile == 1;
         {
+            // Perfil de qualidade (H.264 High, no maior nível anunciado) sempre
+            // que o próprio encoder o anuncia. Recusado no configure = sem perfil
+            // (AndroidVideoEncoder); aceito mas com quadros fora de ordem = o
+            // mesmo degrau sem perfil, e o aparelho aprende ('P').
+            char learnedProfile[200];
+            codec_key("profile", rung.codec, learnedProfile, sizeof(learnedProfile));
+            request.qualityProfile = video_.profile != 1 && noProfileRetryRung_ != rung_ &&
+                export_rung_memory_count('P', learnedProfile, kLearnedSeconds) == 0;
+        }
+        {
             // 0.5.3 (P0-5/P0-6): o que este aparelho já ensinou sobre o encoder, e a
             // nova tentativa do MESMO degrau dentro desta sessão.
             char learned[200];
@@ -1317,6 +1379,44 @@ Status FFmpegSink::open_rung(const RungEntry& rung) noexcept {
         nativeActive_ = true;
         std::snprintf(encoder_.name, sizeof(encoder_.name), "%s", rung.codec);
         encoder_.acceleration = rung.hardware ? Acceleration::Hardware : Acceleration::Software;
+        return OkStatus;
+#elif defined(__APPLE__)
+        // iOS: só o degrau sem cópia (AppleVideoEncoder.cpp).
+        if (rung.kind != Rung::SurfaceDirect) return Status{Errc::NotSupported, "degrau do Android"};
+        if (!native_) native_.reset(new (std::nothrow) android_video::Encoder());
+        if (!native_) return Status{Errc::OutOfMemory, "encoder do VideoToolbox"};
+        android_video::Request request;
+        request.hevc = hevc;
+        request.width = video_.width;
+        request.height = video_.height;
+        request.fps = video_.fps;
+        request.bitrateBps = video_.bitrateBps;
+        request.rateMode = video_.rateMode;
+        request.keyframeFrames = video_.keyframeIntervalFrames;
+        request.baseline = video_.profile == 1;
+        {
+            char learnedProfile[200];
+            codec_key("profile", rung.codec, learnedProfile, sizeof(learnedProfile));
+            request.qualityProfile = video_.profile != 1 && noProfileRetryRung_ != rung_ &&
+                export_rung_memory_count('P', learnedProfile, kLearnedSeconds) == 0;
+        }
+        request.color = video_.color;
+        request.input = android_video::Input::Surface;
+        request.direct = true;
+        request.heartbeat = heartbeat_;
+        opened = native_->open(request, deviceCodecs_[0]);
+        beat();
+        if (!opened.ok()) {
+            const auto text = opened.detail().empty() ? opened.message() : opened.detail();
+            std::snprintf(rungDetail_, sizeof(rungDetail_), "%.*s", static_cast<int>(text.size()), text.data());
+            native_->close();
+            return Status{opened.code(), rungDetail_};
+        }
+        std::snprintf(rungName_, sizeof(rungName_), "%s", native_->describe());
+        nativeActive_ = true;
+        std::snprintf(encoder_.name, sizeof(encoder_.name), "%s", rung.codec);
+        // O VideoToolbox do iOS não diz se a sessão é de hardware (como no FFmpeg).
+        encoder_.acceleration = Acceleration::Unknown;
         return OkStatus;
 #else
         return Status{Errc::NotSupported, "encoder do aparelho so no Android"};
@@ -1471,6 +1571,13 @@ Status FFmpegSink::fallback(Status reason) noexcept {
             if (device && lastDropped_ && !constant && cbrRetryRung_ != rung_) {
                 cbrRetryRung_ = rung_;
                 sameRung = true;
+            } else if (nativeRung && nativeActive_ && native_ && native_->quality_profile() && noProfileRetryRung_ != rung_ &&
+                       (reason.code() == Errc::EncodeFailed || reason.code() == Errc::CorruptData ||
+                        reason.code() == Errc::DecodeFailed)) {
+                // Perfil High aceito, mas o encoder reordenou quadros (B) ou o 1o
+                // quadro não conferiu: o MESMO encoder no perfil padrão dele.
+                noProfileRetryRung_ = rung_;
+                sameRung = true;
             } else if (nativeRung && nativeActive_ && native_ && native_->offline_hints() && noHintsRetryRung_ != rung_ &&
                        (reason.code() == Errc::Timeout || reason.code() == Errc::EncodeFailed)) {
                 noHintsRetryRung_ = rung_;
@@ -1490,7 +1597,8 @@ Status FFmpegSink::fallback(Status reason) noexcept {
         }
         if (sameRung) {
             char retry[200];
-            std::snprintf(retry, sizeof(retry), "%s; refaz %s", why, cbrRetryRung_ == rung_ ? "em CBR" : "sem dicas offline");
+            std::snprintf(retry, sizeof(retry), "%s; refaz %s", why, cbrRetryRung_ == rung_ ? "em CBR"
+                          : noProfileRetryRung_ == rung_ && noHintsRetryRung_ != rung_ ? "sem perfil High" : "sem dicas offline");
             note_failure(retry, false);
         } else {
             note_failure(why);
@@ -1661,10 +1769,15 @@ Status FFmpegSink::first_packet() noexcept {
         const RungEntry& rung = rungs_[rung_];
         char key[200];
         rung_key(rung, key, sizeof(key));
+        rungKnownGood_ = export_rung_memory_count('G', key, kLearnedSeconds) > 0;
         export_rung_memory_note('G', key);
         if (noHintsRetryRung_ == rung_) {
             codec_key("hints", rung.codec, key, sizeof(key));
             export_rung_memory_note('N', key);
+        }
+        if (noProfileRetryRung_ == rung_) {
+            codec_key("profile", rung.codec, key, sizeof(key));
+            export_rung_memory_note('P', key);
         }
         rungConfirmed_ = nativeActive_ || legacy;
         // P1-1: nos degraus Surface o ENCODER converte R'G'B' → Y'CbCr; a cor é
@@ -1812,7 +1925,8 @@ Status FFmpegSink::send_native(const u8* y, u32 ys, const u8* uv, u32 uvs, i64 u
     while (limit && pendingCount_ >= limit) {
         if (cancelled()) return error(Errc::Cancelled, "encoder do aparelho cancelado");
         unsigned produced = 0;
-        if (const Status status = drain_native(false, produced); !status.ok()) return status;
+        // Espera o pacote dentro do encoder (até 2 ms), sem dormir às cegas.
+        if (const Status status = drain_native(false, produced, 2'000); !status.ok()) return status;
         if (produced) { waited = monotonic_ns(); continue; }
         if (monotonic_ns() - waited > stall_ns()) {
             // 0.3.2 (Moto g52, OMX.qcom.video.encoder.avc): a entrada por
@@ -1829,7 +1943,6 @@ Status FFmpegSink::send_native(const u8* y, u32 ys, const u8* uv, u32 uvs, i64 u
                                                    : "o encoder do aparelho parou de devolver quadros");
         }
         beat();
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     u64 started = monotonic_ns();
     for (;;) {
@@ -1853,14 +1966,15 @@ Status FFmpegSink::send_native(const u8* y, u32 ys, const u8* uv, u32 uvs, i64 u
     }
 }
 
-Status FFmpegSink::drain_native(bool flushing, unsigned& produced) noexcept {
+Status FFmpegSink::drain_native(bool flushing, unsigned& produced, i64 waitUs) noexcept {
     produced = 0;
     u64 progress = monotonic_ns();
     for (;;) {
         if (cancelled()) return error(Errc::Cancelled, "drenagem do encoder cancelada");
         if (nativeEos_) return OkStatus;
         bool got = false, eos = false;
-        const Status received = native_->receive(nativePacket_, got, eos, flushing ? 10'000 : 0);
+        const Status received = native_->receive(nativePacket_, got, eos, flushing ? 10'000 : waitUs);
+        waitUs = 0;
         beat();
         if (received.code() == Errc::Busy) {
             if (!flushing) return OkStatus;
@@ -2774,7 +2888,7 @@ Status FFmpegSink::decode_validate(const ExportOutputValidation& expected) noexc
         int code = avcodec_parameters_to_context(context, stream->codecpar);
         if (code < 0) return error(Errc::DecodeFailed, "parametros do decoder independente FFmpeg", code);
         context->pkt_timebase = stream->time_base;
-        context->thread_count = std::clamp(expected.decodeThreads, 1, 4);
+        context->thread_count = std::clamp(expected.decodeThreads, 1, 8);
         // Tolerante: o decoder esconde o erro do pacote (o quadro sai marcado)
         // em vez de explodir — a contagem de quadros decodificáveis é o que vale.
         context->err_recognition = AV_EF_CRCCHECK | AV_EF_BITSTREAM | AV_EF_BUFFER | (strict ? AV_EF_EXPLODE : 0);
@@ -2807,8 +2921,9 @@ Status FFmpegSink::decode_validate(const ExportOutputValidation& expected) noexc
     // agora e quantos dele já saíram — o índice de cada quadro decodificado sem
     // depender de ter decodificado os anteriores (no decode inteiro, 0 e `frames`).
     BoundedPlan plan;
-    const bool bounded = !strict && videoFrames_ > kFullValidationFrames &&
-        plan_bounded_validation(decoded.format->streams[videoIndex], videoFrames_, fingerprints_, plan);
+    const bool bounded = !strict && videoFrames_ > (rungKnownGood_ ? kKnownGoodFullValidationFrames : kFullValidationFrames) &&
+        plan_bounded_validation(decoded.format->streams[videoIndex], videoFrames_, fingerprints_, plan,
+            rungKnownGood_ ? 8.0 : kBoundedBudgetScale, rungKnownGood_ ? 120ull : kBoundedBudgetFloor);
     u64 videoPacketCount = 0, packetHash = hashSeed, submittedVideo = 0, runBase = 0, runDecoded = 0;
     i64 previousPacket = AV_NOPTS_VALUE;
     usize gop = 0;
@@ -3153,7 +3268,7 @@ char rungMemoryText[kRungMemoryMax * 240 + 320];   ///< arquivo montado (sob o m
 
 i64 rung_memory_now() noexcept { return static_cast<i64>(std::time(nullptr)); }
 
-bool rung_memory_valid(char kind) noexcept { return kind == 'F' || kind == 'G' || kind == 'C' || kind == 'N'; }
+bool rung_memory_valid(char kind) noexcept { return kind == 'F' || kind == 'G' || kind == 'C' || kind == 'N' || kind == 'P'; }
 
 /// Chave/identidade de uma linha: sem tabulação nem quebra (troca por espaço).
 void rung_memory_copy(char* out, usize capacity, const char* text) noexcept {

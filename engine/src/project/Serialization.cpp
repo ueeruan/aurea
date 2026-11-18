@@ -5,6 +5,7 @@
 #include "aurea/vector/VectorTree.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
+#include "aurea/media/SourceWindow.hpp"
 #include "aurea/expr/Expression.hpp"
 #include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/tracking/CameraTrackData.hpp"
@@ -3210,6 +3211,48 @@ void apply_rig3d_section(const u8* data, usize size, Project& p) {
     });
 }
 
+/// Seção SourceWindow (v1, 1.0.2 "importar só o trecho"): a janela de cada
+/// asset, na ordem da seção Assets. Seção à parte: o leitor antigo pula e o
+/// projeto sem trecho cortado não grava a seção (fica byte a byte igual).
+///   u32 quantos · por asset: i64 início da janela (µs), string origem
+std::vector<u8> build_source_window_section(const Project& p) {
+    ByteWriter w;
+    u32 count = 0;
+    p.for_each_asset([&](AssetId, const Asset&) { ++count; });
+    w.u32v(count);
+    p.for_each_asset([&w](AssetId, const Asset& a) {
+        w.i64v(a.windowStartUs);
+        w.str(a.originRef);
+    });
+    return std::vector<u8>(w.bytes().begin(), w.bytes().end());
+}
+
+bool project_has_source_windows(const Project& p) {
+    bool any = false;
+    p.for_each_asset([&](AssetId, const Asset& a) { any = any || a.windowStartUs > 0 || !a.originRef.empty(); });
+    return any;
+}
+
+void apply_source_window_section(const u8* data, usize size, Project& p) {
+    ByteReader r(data, size);
+    const u32 count = r.u32v();
+    u32 assets = 0;
+    p.for_each_asset([&](AssetId, const Asset&) { ++assets; });
+    if (!r.good() || count != assets) return;   // outra lista de assets: não adivinha
+    p.for_each_asset([&](AssetId, Asset& a) {
+        if (!r.good()) return;
+        const i64 start = r.i64v();
+        std::string origin = r.str();
+        if (!r.good() || origin.size() > 4096) return;
+        // Uma hora de vídeo cabe com folga; um valor absurdo é dado ruim.
+        if (start > 0 && start < (i64{1} << 46) && (a.kind == AssetKind::Video || a.kind == AssetKind::Audio)) {
+            a.windowStartUs = start;
+            register_source_window(a.sourcePath, start);
+        }
+        a.originRef = std::move(origin);
+    });
+}
+
 /// Seção Plugins (v1): u32 quantos · por plugin: id, versão, u32 número do efeito.
 std::vector<u8> build_plugins_section(const Project& p) {
     ByteWriter w;
@@ -3685,6 +3728,8 @@ Status ProjectSerializer::encode(const Project& project, const SaveOptions& opti
         sections.push_back(PendingSection{SectionKind::Scene3D, 1, build_scene3d_section(project)});
     if (project_has_rigs(project))
         sections.push_back(PendingSection{SectionKind::Rig3D, 1, build_rig3d_section(project)});
+    if (project_has_source_windows(project))
+        sections.push_back(PendingSection{SectionKind::SourceWindow, 1, build_source_window_section(project)});
     if (!project.plugin_refs().empty())
         sections.push_back(PendingSection{SectionKind::Plugins, 1, build_plugins_section(project)});
     // AE expressions: só quando há Menu suspenso com itens ou expressão de caminho.
@@ -3970,6 +4015,9 @@ Status ProjectSerializer::load_bytes(Project& out, const u8* fileData, usize fil
                 break;
             case SectionKind::Rig3D:
                 apply_rig3d_section(effective, effectiveSize, out);
+                break;
+            case SectionKind::SourceWindow:
+                apply_source_window_section(effective, effectiveSize, out);
                 break;
             case SectionKind::Plugins:
                 apply_plugins_section(effective, effectiveSize, out);

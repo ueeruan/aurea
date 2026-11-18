@@ -32,6 +32,18 @@
     <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
+    <!-- 18/11/2026: tarefas contínuas do iOS 26+ (BGContinuedProcessingTask).
+         UMA chave só (chave repetida num plist: só a última vale e o
+         register() da outra derruba o app):
+         · export.video: o export seguindo em segundo plano (ExportBackgroundRun
+           em AureaModel.swift);
+         · mcp.*: o AureaMCP que a pessoa liga para o agente seguir com o app
+           fechado. Curinga: cada pedido usa <bundle>.mcp.agent<n>. -->
+    <key>BGTaskSchedulerPermittedIdentifiers</key>
+    <array>
+        <string>$(PRODUCT_BUNDLE_IDENTIFIER).export.video</string>
+        <string>$(PRODUCT_BUNDLE_IDENTIFIER).mcp.*</string>
+    </array>
     <key>CFBundleName</key>
     <string>$(PRODUCT_NAME)</string>
     <key>CFBundlePackageType</key>
@@ -97,6 +109,7 @@
     </array>
     <key>LSRequiresIPhoneOS</key>
     <true/>
+
 
     <!-- O motor precisa de Metal. Sem esta exigência o app instalaria num
          aparelho sem GPU Metal e o preview nunca subiria — o mesmo critério do

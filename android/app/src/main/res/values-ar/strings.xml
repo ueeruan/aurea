@@ -1164,7 +1164,15 @@
     <string name="consent_title">الموافقة والمسؤولية</string>
     <string name="consent_accept">موافقة ومتابعة</string>
     <string name="consent_body">Aurea أداة احترافية لتحرير المحتوى الرقمي وإنشائه وإنتاجه. باستخدام التطبيق، يقر المستخدم بأنه يتحمل المسؤولية الكاملة عن المحتوى الذي ينشئه أو يحرره أو يستورده أو يصدره أو ينشره أو يشاركه عبر المنصة.\n\nلا يتحكم Aurea في استخدام الأداة لأنشطة غير قانونية أو مسيئة أو احتيالية أو ضارة أو تنتهك حقوق الآخرين، ولا يشجع هذا الاستخدام أو يدعمه أو يصرح به.\n\nيتحمل المستخدم مسؤولية التأكد من امتلاكه التصاريح والتراخيص والحقوق اللازمة للمواد المستخدمة، بما فيها الصور ومقاطع الفيديو والموسيقى والعلامات التجارية والنماذج والملفات وغيرها من المحتويات المحمية.\n\nلا تعني الحرية الإبداعية التي يوفرها Aurea موافقة التطبيق أو مشاركته أو مسؤوليته عما يقرر كل مستخدم إنتاجه أو فعله باستخدام الأداة.\n\nيوافق المستخدم على استخدام Aurea وفقاً للقانون المعمول به ويتحمل مسؤولية أفعاله والمحتوى المنتج أو الموزع عبر التطبيق.\n\nإلى أقصى حد يسمح به القانون المعمول به، لا يتحمل Aurea والمسؤولون عنه المسؤولية عن الأفعال التي يقوم بها المستخدم وحده، أو إساءة استخدام الأداة، أو العواقب الناجمة عن المحتوى الذي ينشئه المستخدم نفسه أو ينشره أو يشاركه.\n\nيوفر Aurea الأداة. ويتحمل المستخدم مسؤولية الطريقة التي يختار استخدامها بها.\n\nبالمتابعة، يقر المستخدم بأنه قرأ هذه الشروط وفهمها ووافق عليها.</string>
-    <string name="release_notes_body">Aurea 1.0.1 (2221) — 16/11/2026\n\n• تأثيرات جديدة مطابقة لـ After Effects: Radial Blur, Radial Shadow, Posterize Time, Time Displacement, Detail-preserving Upscale, Card Wipe, Card Dance, Depth Field, Smear, Glitchify, Extrude.\n• أصبحت Wave Warp, Block Dissolve, Drop Shadow, Fast Blur, Cartoon Moblur أقرب إلى After Effects.\n• مشاريع After Effects تستورد هذه التأثيرات.\n• نمط Cartoon جديد للنص ثلاثي الأبعاد: واجهة مسطحة وجوانب أغمق وشريط لمعان وحدّ سميك قابل للتحريك.\n• النص ثلاثي الأبعاد أصبح جزءًا من AureaHYPER. المشاريع التي تستخدمه بالفعل تظل تُفتح وتُصدَّر.</string>
+    <string name="release_notes_body">Aurea 1.0.2 (2222) — 18/11/2026
+
+• Optical Flow للتصوير الحقيقي: ظلال أقل، وعنصر تحكم الظلال ↔ التشوه، وجودة Neural (الذكاء الاصطناعي) مع AureaHYPER.
+• Glitchify أصبح مطابقًا لـ After Effects.
+• تصدير أسرع وبجودة أعلى.
+• استورد الجزء المقصوص فقط من الفيديوهات الطويلة.
+• لوحة Pre Render وPre Export حسب المقطع.
+• AureaMCP يوقظ التطبيق وهو مغلق.
+• HeadBop أصبح مدفوعًا (منفردًا أو ضمن AureaHYPER). المشاريع التي تستخدم HeadBop تظل تُفتح وتُصدَّر.</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">تعبئة</string>
@@ -4278,6 +4286,10 @@
     <string name="fxl_bilinear">ثنائي الخطية</string>
     <string name="fxo_nearest">الأقرب</string>
     <string name="fxl_vector_quality">جودة المتجهات</string>
+    <string name="fxl_ghost_warp">الظلال ↔ التشوه</string>
+    <string name="fxo_neural_ai">عصبي (ذكاء اصطناعي)</string>
+    <string name="fxt_ghost_warp_tip">لليسار: حيث تخطئ المتجهات تُمزج الإطارات (ظلال). لليمين: يثق بالمتجهات ويشوّه بدل المزج.</string>
+    <string name="fxt_vector_quality_neural">عصبي (ذكاء اصطناعي): تبني الشبكة الإطار عند التصدير وفي المعاينة المتوقفة؛ أثناء التشغيل تستخدم المعاينة متجهات وحدة الرسوميات.</string>
     <string name="fxo_fast">سريعة</string>
     <string name="fxo_best">الأفضل</string>
     <string name="fxl_shutter">الغالق</string>
@@ -5491,4 +5503,44 @@
     <string name="fxt_in_after_effects_2027_this_value_does_no">في After Effects 2027 لا تغيّر هذه القيمة الصورة؛ تُحفظ للمشاريع المستوردة.</string>
     <string name="fxo_detail_preserving">الحفاظ على التفاصيل</string>
     <string name="fxo_bicubic">تكعيبي ثنائي</string>
+    <!-- 1.0.2 Pre Render & Pre Export (PreRenderPanel.kt / PreRenderPanelView.swift) -->
+    <string name="prx_title">Pre Render و Pre Export</string>
+    <string name="prx_open">Pre Render و Pre Export</string>
+    <string name="prx_open_detail">تشغيل بلا تقطّع: اعرض مسبقًا أو صدّر مسبقًا جزءًا</string>
+    <string name="prx_quality">الجودة</string>
+    <string name="prx_quality_full">كاملة</string>
+    <string name="prx_fits">يتسع لـ ~%1$s</string>
+    <string name="prx_fits_detail">%1$d × %2$d · جزء مدته %3$s</string>
+    <string name="prx_fits_hint">كم من الفيديو يتسع في ذاكرة الهاتف المؤقتة بهذه الجودة</string>
+    <string name="prx_range">الجزء: %1$s – %2$s</string>
+    <string name="prx_range_whole">لم يُختر جزء: الفيديو كله (%1$s – %2$s)</string>
+    <string name="prx_start">البداية</string>
+    <string name="prx_end">النهاية</string>
+    <string name="prx_full">الكل</string>
+    <string name="prx_go_start">انتقل إلى البداية</string>
+    <string name="prx_go_end">انتقل إلى النهاية</string>
+    <string name="prx_loop">تكرار</string>
+    <string name="prx_clear">مسح</string>
+    <string name="prx_mode">الوضع</string>
+    <string name="prx_mode_prerender">Pre Render</string>
+    <string name="prx_mode_preexport">Pre Export</string>
+    <string name="prx_action_prerender">عرض الجزء مسبقًا</string>
+    <string name="prx_action_preexport">تصدير الجزء مسبقًا</string>
+    <string name="prx_cancel">إلغاء</string>
+    <string name="prx_progress_prerender">العرض المسبق: %1$d%%</string>
+    <string name="prx_progress_preexport">التصدير المسبق: %1$d%%</string>
+    <string name="prx_ready_prerender">Pre Render جاهز: يُشغَّل الجزء بلا تقطّع</string>
+    <string name="prx_ready_preexport">Pre Export جاهز: شاهد تعديلك بسلاسة</string>
+    <string name="prx_watch">شاهد التصدير المسبق</string>
+    <string name="prx_stale">أجزاء تغيّرت بعد ذلك: %1$d (تُشغَّل مباشرة)</string>
+    <string name="prx_stale_export">تغيّر التعديل بعد التصدير المسبق: أعده لتشاهده</string>
+    <string name="prx_not_fit">لا يتسع: اختر جودة أقل أو جزءًا أقصر</string>
+    <string name="prx_busy">انتظر انتهاء Pre Render أو Pre Export الحالي</string>
+    <string name="prx_preexport_failed">تعذّر التصدير المسبق: %1$s</string>
+    <string name="prx_help">مساعدة</string>
+    <string name="prx_help_title">لماذا Pre Render و Pre Export؟</string>
+    <string name="prx_help_body">عند تعديل فيديوهات بها مؤثرات ثقيلة كثيرة، قد يبدأ الهاتف بالتقطّع والتجمّد أثناء التشغيل.\n\n• Pre Render: يتيح لك «خَبز» جزء ثقيل من الفيديو في معاينة سلسة تُشغَّل بلا تقطّع.\n• Pre Export: يتيح لك تصدير جزء محدد أو الخط الزمني كله مسبقًا؛ انتظر حتى تنتهي المعالجة لتشاهد تعديلك كاملًا وتتحقق منه بسلاسة قبل الحفظ النهائي.\n\nكيف يعمل «يتسع لـ ~مدة»: يعرض عدد ثواني الفيديو التي تتسع في الذاكرة المؤقتة (الكاش) للهاتف بالجودة المختارة (كاملة، 1/2، 1/4، 1/8) قبل نفاد المساحة. كاملة = حادة لكن ملفات ضخمة: تتسع لمدة قصيرة. 1/2 و1/4 و1/8 = ملفات أصغر بكثير: تتسع لمدة أطول بكثير. النزول إلى 1/4 أو 1/8 يتيح وقتًا أطول بكثير.\n\nالأزرار: البداية والنهاية تحددان بداية الجزء ونهايته؛ الكل يختار الفيديو كله؛ انتقل إلى البداية وانتقل إلى النهاية تنقلان المؤشر إلى هاتين النقطتين؛ تكرار يشغّل الجزء المختار مرارًا؛ مسح يعيد ضبط البداية والنهاية.</string>
+    <string name="prx_close">إغلاق</string>
+    <string name="prx_preparing">جارٍ التحضير…</string>
+    <string name="prx_ruler_range">جزء Pre Render</string>
 </resources>

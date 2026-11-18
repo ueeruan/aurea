@@ -479,6 +479,8 @@ public:
 
     void wait_idle() noexcept override;
     [[nodiscard]] Status poll_export_work(Status* completedFailure = nullptr) noexcept override;
+    void set_export_pass_split(bool split) noexcept override;
+    [[nodiscard]] bool export_pass_split() const noexcept override { return passesPerCommandBuffer_ != 0; }
     [[nodiscard]] u64 last_submitted_frame() const noexcept override;
     [[nodiscard]] Status wait_frame(u64 frameNumber, u64 timeoutNs) noexcept override;
     /// Mensagens da camada de validação (erros / avisos) desde o início do
@@ -601,6 +603,14 @@ private:
     [[nodiscard]] FrameContext* deferral_target() noexcept;
     void load_pipeline_cache() noexcept;
     [[nodiscard]] bool note_device_lost(VkResult r) noexcept;
+    /// Dispositivo perdido com um quadro de export sem fatia na GPU: as próximas
+    /// inicializações (neste processo e, pelo arquivo no cache, nas próximas
+    /// aberturas) fatiam o export por passe.
+    void remember_export_loss() noexcept;
+    [[nodiscard]] std::string export_split_marker_path() const;
+    [[nodiscard]] std::string export_split_identity() const;
+    /// Testes: esquece a perda deste processo (o arquivo no cache continua).
+    static void forget_export_loss_for_tests() noexcept;
     /// Corpo comum de `begin_frame` e `begin_offscreen_frame`; `withSurface`
     /// decide se o swapchain é adquirido.
     [[nodiscard]] Status begin_frame_impl(FrameBegin& out, bool withSurface) noexcept;
@@ -624,11 +634,17 @@ private:
     VkFence recoveryFence_ = VK_NULL_HANDLE;
     // Bound temporal 3D batches without changing resolution or sample count.
     // end_frame completes each primary before admitting the next GPU batch.
-    // Export (quadro offscreen): UM pass por envio. O driver Qualcomm (KGSL)
-    // reseta a GPU quando um único envio passa de ~2 s, e um quadro 3D pesado
-    // leva ~2 s numa Adreno 610: com 8 passes por envio o export morria com
-    // VK_ERROR_DEVICE_LOST no meio (moto g52, Project 13, quadro 42/300).
-    u32 passesPerCommandBuffer_ = 1;
+    // Export (quadro offscreen): com fatia, UM pass por envio. O driver
+    // Qualcomm (KGSL) reseta a GPU quando um único envio passa de ~2 s, e um
+    // quadro 3D pesado leva ~2 s numa Adreno 610: com 8 passes por envio o
+    // export morria com VK_ERROR_DEVICE_LOST no meio (moto g52, Project 13,
+    // quadro 42/300). Mas a fatia custa uma espera da CPU por passe EM TODO
+    // quadro, e valia para todo aparelho: a CPU não gravava o quadro seguinte
+    // enquanto a GPU trabalhava. Agora 0 (o quadro inteiro num envio) por
+    // padrão; 1 só neste aparelho depois de um dispositivo perdido no export
+    // (lembrado no diretório do cache) ou quando o motor mede um quadro longo
+    // num driver Qualcomm (set_export_pass_split).
+    u32 passesPerCommandBuffer_ = 0;
     u32 trimCountdown_ = 0;   ///< begin_frame: blocos vazios devolvidos a cada ~90 quadros, nao a cada um
     bool debugUtils_ = false;
     bool timersEnabled_ = false;
@@ -655,6 +671,7 @@ private:
     MemoryAllocator allocator_;
     VkPipelineCache pipelineCache_ = VK_NULL_HANDLE;
     std::string cachePath_;
+    std::string splitMarkerPath_;   ///< arquivo do dispositivo perdido no export (export_split_marker_path)
     std::vector<u8> cacheHeader_;        ///< cabeçalho esperado (aparelho + versão), montado na carga
     bool pipelineCacheDirty_ = false;
     PipelineCacheInfo cacheInfo_{};

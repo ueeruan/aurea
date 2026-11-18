@@ -51,11 +51,13 @@ class CacheStorage(private val context: Context) {
     private val motor get() = File(context.cacheDir, "motor")
     private val previews get() = File(motor, "previas")
     private val preRender get() = File(motor, "pre-render")
+    /** 1.0.2: o MP4 do pré-export (motor: EnginePreRenderRange.cpp) — mesma linha do PreRender. */
+    private val preExport get() = File(motor, "pre-export")
     private val proxies get() = File(motor, "preview-proxies")
     /** Pipelines e o resto do motor: fora prévias, PreRender e proxies (linhas próprias).
      *  Inclui `motor/headbop` (rig do Headbop, regenerável: sem ele vale o rig parado do efeito). */
     private fun pipeline(f: File) = !f.path.startsWith(previews.path) && !f.path.startsWith(preRender.path) &&
-        !f.path.startsWith(proxies.path)
+        !f.path.startsWith(preExport.path) && !f.path.startsWith(proxies.path)
     private val export get() = File(context.cacheDir, "export")
     private val captions get() = File(context.cacheDir, "legendas")
     private val projects get() = File(context.filesDir, "projetos")
@@ -65,7 +67,7 @@ class CacheStorage(private val context: Context) {
     fun scan(exporting: Boolean = false): List<CacheKind> {
         val (pipeBytes, pipeFiles) = measure(motor, ::pipeline)
         val (prevBytes, prevFiles) = measure(previews)
-        val (preBytes, preFiles) = measure(preRender)
+        val (preBytes, preFiles) = measure(preRender).let { (b, f) -> measure(preExport).let { (b2, f2) -> (b + b2) to (f + f2) } }
         val (proxyBytes, proxyFiles) = measure(proxies)
         val (expBytes, expFiles) = measure(export)
         val (capBytes, capFiles) = measure(captions)

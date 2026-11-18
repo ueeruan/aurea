@@ -43,6 +43,7 @@ extern "C" {
 #include "aurea/Engine.hpp"
 #include "aurea/timeline/ShapeGeometry.hpp"
 #include "aurea/bridge/BridgePods.hpp"
+#include "aurea/media/MediaCut.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Version.hpp"
 #include "aurea/core/SafeAlloc.hpp"
@@ -1425,6 +1426,63 @@ AUREA_JNI jlong AUREA_FN(nativeImportAudio)(JNIEnv* env, jclass, jlong handle, j
         return -static_cast<jlong>(r.status().code());
     }
     return static_cast<jlong>(*r);
+}
+
+/// 1.0.2: vídeo cujo arquivo é um TRECHO do original (nativeImportTrimmedMedia):
+/// `windowStartUs` = onde o trecho começa na régua do original. Id ou −Errc.
+AUREA_JNI jlong AUREA_FN(nativeImportVideoWindow)(JNIEnv* env, jclass, jlong handle, jstring source, jstring name,
+                                                  jlong windowStartUs, jstring originRef) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return -static_cast<jlong>(Errc::InvalidState);
+    VideoImport request;
+    request.sourcePath = to_string(env, source);
+    request.displayName = to_string(env, name);
+    request.windowStartUs = std::max<jlong>(0, windowStartUs);
+    request.originRef = to_string(env, originRef);
+    const Result<u64> r = c->engine.import_video(request);
+    if (!r.ok()) {
+        AUREA_LOG_ERROR("importacao do trecho de video falhou: %s", r.status().message().data());
+        return -static_cast<jlong>(r.status().code());
+    }
+    return static_cast<jlong>(*r);
+}
+
+/// 1.0.2 "importar só o trecho cortado" (media/MediaCut.hpp): remuxa o trecho
+/// [inUs, outUs] (com folga) de `source` ("/proc/self/fd/N" de um descritor
+/// que o Kotlin mantém aberto) para `directory`, reaproveitando um trecho do
+/// mesmo `originRef` que já cubra o corte. Devolve
+/// [caminho, início da janela µs, fim µs, bytes, bytes da fonte, reaproveitado 0/1]
+/// ou [""] + código do erro (o app copia o arquivo inteiro, como antes).
+AUREA_JNI jobjectArray AUREA_FN(nativeImportTrimmedMedia)(JNIEnv* env, jclass, jstring source, jstring directory,
+                                                          jstring originRef, jstring extension, jlong inUs, jlong outUs) {
+    TrimmedImportRequest request;
+    request.source = to_string(env, source);
+    request.directory = to_string(env, directory);
+    request.originRef = to_string(env, originRef);
+    request.extension = to_string(env, extension);
+    request.inUs = inUs;
+    request.outUs = outUs;
+    TrimmedImportResult result;
+    const Status s = import_trimmed_media(request, result);
+    std::vector<std::string> fields;
+    if (s.ok()) {
+        fields = {result.path, std::to_string(result.windowStartUs), std::to_string(result.windowEndUs),
+                  std::to_string(result.bytes), std::to_string(result.sourceBytes), result.reused ? "1" : "0"};
+    } else {
+        AUREA_LOG_INFO("trecho nao cortado (%d): %.*s", s.raw(), static_cast<int>(s.detail().size()), s.detail().data());
+        fields = {std::string{}, std::to_string(s.raw())};
+    }
+    jclass stringClass = env->FindClass("java/lang/String");
+    if (!stringClass) return nullptr;
+    jobjectArray out = env->NewObjectArray(static_cast<jsize>(fields.size()), stringClass, nullptr);
+    if (!out) return nullptr;
+    for (jsize i = 0; i < static_cast<jsize>(fields.size()); ++i) {
+        jstring v = env->NewStringUTF(fields[static_cast<usize>(i)].c_str());
+        if (!v) return nullptr;
+        env->SetObjectArrayElement(out, i, v);
+        env->DeleteLocalRef(v);
+    }
+    return out;
 }
 
 // --- Sequência de imagens (ImageSequence.hpp) --------------------------------
@@ -6356,13 +6414,123 @@ AUREA_JNI jlongArray AUREA_FN(nativePreRenderProgress)(JNIEnv* env, jclass, jlon
     NativeContext* c = ctx_of(handle);
     if (!c) return env->NewLongArray(0);
     const auto p = c->engine.query_prerender_progress();
-    const jlong values[10] = {p.running ? 1 : 0, p.complete ? 1 : 0,
+    const jlong values[] = {p.running ? 1 : 0, p.complete ? 1 : 0,
         static_cast<jlong>(p.framesDone), static_cast<jlong>(p.framesTotal),
         static_cast<jlong>(p.width), static_cast<jlong>(p.height), p.direction, p.error,
-        static_cast<jlong>(p.diskBytes), static_cast<jlong>(p.residentBytes)};
-    jlongArray result = env->NewLongArray(10);
-    if (result) env->SetLongArrayRegion(result, 0, 10, values);
+        static_cast<jlong>(p.diskBytes), static_cast<jlong>(p.residentBytes),
+        // 1.0.2 Pre Render & Pre Export: trecho, qualidade e trechos desatualizados.
+        static_cast<jlong>(p.firstFrame), static_cast<jlong>(p.endFrame),
+        static_cast<jlong>(p.divisor), static_cast<jlong>(p.dirtySegments)};
+    constexpr jsize n = static_cast<jsize>(sizeof(values) / sizeof(values[0]));
+    jlongArray result = env->NewLongArray(n);
+    if (result) env->SetLongArrayRegion(result, 0, n, values);
     return result;
+}
+
+// --- Pre Render & Pre Export (1.0.2, src/engine/EnginePreRenderRange.cpp) ------
+/// 0 Início no cabeçote, 1 Fim no cabeçote, 2 Inteiro, 3 Limpar.
+AUREA_JNI jboolean AUREA_FN(nativePreRenderRangeAction)(JNIEnv*, jclass, jlong handle, jint action) {
+    NativeContext* c = ctx_of(handle);
+    return c && action >= 0 && c->engine.prerender_range_action(static_cast<u32>(action)) ? JNI_TRUE : JNI_FALSE;
+}
+
+/// [in, out, effectiveIn, effectiveOut, loop, divisor, fps × 1000].
+AUREA_JNI jlongArray AUREA_FN(nativePreRenderRange)(JNIEnv* env, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return env->NewLongArray(0);
+    const auto r = c->engine.query_prerender_range();
+    const jlong values[7] = {static_cast<jlong>(r.in), static_cast<jlong>(r.out), static_cast<jlong>(r.effectiveIn),
+        static_cast<jlong>(r.effectiveOut), r.loop ? 1 : 0, static_cast<jlong>(r.divisor),
+        static_cast<jlong>(std::llround(r.fps * 1000.0))};
+    jlongArray result = env->NewLongArray(7);
+    if (result) env->SetLongArrayRegion(result, 0, 7, values);
+    return result;
+}
+
+AUREA_JNI void AUREA_FN(nativeSetPreRenderLoop)(JNIEnv*, jclass, jlong handle, jboolean on) {
+    NativeContext* c = ctx_of(handle);
+    if (c) c->engine.set_prerender_loop(on == JNI_TRUE);
+}
+
+AUREA_JNI void AUREA_FN(nativeSetPreRenderQuality)(JNIEnv*, jclass, jlong handle, jint divisor) {
+    NativeContext* c = ctx_of(handle);
+    if (c) c->engine.set_prerender_quality(divisor > 0 ? static_cast<u32>(divisor) : 0u);
+}
+
+/// [width, height, divisor, mode, fps × 1000, fitsSeconds × 1000, rangeSeconds × 1000,
+///  bytesPerSecond, availableBytes, rangeBytes, fits].
+AUREA_JNI jlongArray AUREA_FN(nativePreRenderFit)(JNIEnv* env, jclass, jlong handle, jint divisor, jint mode) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return env->NewLongArray(0);
+    const auto f = c->engine.query_prerender_fit(divisor > 0 ? static_cast<u32>(divisor) : 0u, mode > 0 ? 1u : 0u);
+    const auto milli = [](f64 v) { return static_cast<jlong>(std::llround(std::clamp(v, 0.0, 9.0e12) * 1000.0)); };
+    const jlong values[11] = {static_cast<jlong>(f.width), static_cast<jlong>(f.height), static_cast<jlong>(f.divisor),
+        static_cast<jlong>(f.mode), milli(f.fps), milli(f.fitsSeconds), milli(f.rangeSeconds),
+        static_cast<jlong>(f.bytesPerSecond), static_cast<jlong>(f.availableBytes), static_cast<jlong>(f.rangeBytes),
+        f.fits ? 1 : 0};
+    jlongArray result = env->NewLongArray(11);
+    if (result) env->SetLongArrayRegion(result, 0, 11, values);
+    return result;
+}
+
+AUREA_JNI jint AUREA_FN(nativeStartPreRenderRange)(JNIEnv*, jclass, jlong handle, jint divisor) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jint>(c->engine.start_prerender_range(divisor > 0 ? static_cast<u32>(divisor) : 0u).raw())
+             : static_cast<jint>(Errc::InvalidState);
+}
+
+AUREA_JNI jint AUREA_FN(nativeStartPreExport)(JNIEnv*, jclass, jlong handle, jint divisor) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jint>(c->engine.start_preexport(divisor > 0 ? static_cast<u32>(divisor) : 0u).raw())
+             : static_cast<jint>(Errc::InvalidState);
+}
+
+AUREA_JNI void AUREA_FN(nativeCancelPreExport)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    if (c) c->engine.cancel_preexport();
+}
+
+/// [running, complete, stale, framesDone, framesTotal, in, out, width, height, divisor,
+///  dirtySegments, fps × 1000, bytes, error]; o caminho vem em nativePreExportPath.
+AUREA_JNI jlongArray AUREA_FN(nativePreExportStatus)(JNIEnv* env, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return env->NewLongArray(0);
+    const auto s = c->engine.query_preexport();
+    const jlong values[14] = {s.running ? 1 : 0, s.complete ? 1 : 0, s.stale ? 1 : 0,
+        static_cast<jlong>(s.framesDone), static_cast<jlong>(s.framesTotal), static_cast<jlong>(s.in),
+        static_cast<jlong>(s.out), static_cast<jlong>(s.width), static_cast<jlong>(s.height),
+        static_cast<jlong>(s.divisor), static_cast<jlong>(s.dirtySegments),
+        static_cast<jlong>(std::llround(s.fps * 1000.0)), static_cast<jlong>(s.bytes), s.error};
+    jlongArray result = env->NewLongArray(14);
+    if (result) env->SetLongArrayRegion(result, 0, 14, values);
+    return result;
+}
+
+AUREA_JNI jstring AUREA_FN(nativePreExportPath)(JNIEnv* env, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return env->NewStringUTF("");
+    const auto s = c->engine.query_preexport();
+    return env->NewStringUTF(s.complete ? s.path : "");
+}
+
+/// Trechos desatualizados [de, até) em pares, para a régua (mode 0 PreRender, 1 pré-export).
+AUREA_JNI jlongArray AUREA_FN(nativePreRenderDirty)(JNIEnv* env, jclass, jlong handle, jint mode) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return env->NewLongArray(0);
+    i64 pairs[64 * 2]{};
+    const u32 n = std::min<u32>(64, c->engine.query_prerender_dirty(mode > 0 ? 1u : 0u, pairs, 64));
+    jlongArray result = env->NewLongArray(static_cast<jsize>(n * 2));
+    if (result && n) {
+        jlong values[64 * 2];
+        for (u32 i = 0; i < n * 2; ++i) values[i] = static_cast<jlong>(pairs[i]);
+        env->SetLongArrayRegion(result, 0, static_cast<jsize>(n * 2), values);
+    }
+    return result;
+}
+
+AUREA_JNI jlong AUREA_FN(nativePreExportDiskBytes)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jlong>(c->engine.preexport_disk_bytes()) : 0;
 }
 
 /// Export como imagem (export/ImageEncode.hpp). `format` 0 PNG do playhead,
@@ -6576,6 +6744,11 @@ AUREA_JNI jintArray AUREA_FN(nativeHyperJobSteps)(JNIEnv* env, jclass, jlong han
 /// A classificação do produto é comum às interfaces nativas.
 AUREA_JNI jboolean AUREA_FN(nativeEffectRequiresHyper)(JNIEnv*, jclass, jint typeId) {
     return hyper::effect_requires_access(static_cast<u32>(typeId)) ? JNI_TRUE : JNI_FALSE;
+}
+
+/// 1.0.2: uma opção paga de um efeito grátis (Flow Retime › Neural (IA): AureaHyper).
+AUREA_JNI jboolean AUREA_FN(nativeEffectOptionRequiresHyper)(JNIEnv*, jclass, jint typeId, jint paramIndex, jfloat value) {
+    return hyper::effect_option_requires_access(static_cast<u32>(typeId), static_cast<u32>(paramIndex), value) ? JNI_TRUE : JNI_FALSE;
 }
 
 /// 0.5.4: criar texto 3D pede o mesmo acesso (hyper::text3d_requires_access).

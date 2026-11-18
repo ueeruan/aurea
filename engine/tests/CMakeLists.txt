@@ -30,6 +30,7 @@ add_executable(aurea_tests
     test_timeline.cpp
     test_render.cpp
     test_prerender_cache.cpp
+    test_prerender_plan.cpp   # 1.0.2 Pre Render & Pre Export: qualidade, cabe ~Xs, livro por trecho
     test_storage.cpp
     test_motion_blur.cpp
     test_serialization.cpp
@@ -45,6 +46,7 @@ add_executable(aurea_tests
     test_export_pixel_copy.cpp
     test_aac_output_integrity.cpp
     test_gpu.cpp
+    test_flow_live_action.cpp
     test_scene3d.cpp
     test_scene_environment_jobs.cpp
     test_morph_deformation.cpp
@@ -187,6 +189,19 @@ if(TARGET aurea_ffmpeg)
     endif()
     add_test(NAME aurea_ffmpeg_export_tests COMMAND aurea_ffmpeg_export_tests FFmpegExport)
     set_tests_properties(aurea_ffmpeg_export_tests PROPERTIES
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR} TIMEOUT 600)
+    # 1.0.2 "importar só o trecho cortado": remux do trecho, decoders na régua
+    # do original e a seção SourceWindow, num executável pequeno.
+    target_sources(aurea_tests PRIVATE test_media_cut.cpp)
+    add_executable(aurea_media_cut_tests main.cpp test_media_cut.cpp)
+    target_include_directories(aurea_media_cut_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(aurea_media_cut_tests PRIVATE aurea_core aurea_ffmpeg)
+    if(MSVC)
+        target_link_libraries(aurea_media_cut_tests PRIVATE dbghelp)
+        target_compile_options(aurea_media_cut_tests PRIVATE /utf-8)
+    endif()
+    add_test(NAME aurea_media_cut_tests COMMAND aurea_media_cut_tests)
+    set_tests_properties(aurea_media_cut_tests PROPERTIES
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR} TIMEOUT 600)
 endif()
 if(MSVC)

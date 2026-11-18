@@ -42,7 +42,7 @@ export const ASSINATURAS = Object.freeze([
   HYPER_SUBSCRIPTION,
   "aurea_fx_cartoon_moblur", "aurea_fx_twitch", "aurea_fx_signal", "aurea_fx_glitchify", "aurea_fx_extrude",
   "aurea_fx_sharpen", "aurea_fx_find_edges", "aurea_fx_wave_warp", "aurea_fx_block_dissolve",
-  "aurea_fx_radial_wipe", "aurea_texto3d",
+  "aurea_fx_radial_wipe", "aurea_texto3d", "aurea_fx_headbop",
 ]);
 export const PRODUTOS = Object.freeze(["aureahyper_lifetime", AUREAOS_PRODUCT, ...ASSINATURAS]);
 /** Os que se compram na loja (POST /api/entitlements/purchase confere com a Play/App Store). */

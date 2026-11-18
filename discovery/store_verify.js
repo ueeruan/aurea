@@ -16,24 +16,29 @@
 
 export const PLAY_PACKAGE = "com.aurea.editor";
 
-const b64url = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+export const b64url = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 const b64urlText = (text) => b64url(new TextEncoder().encode(text));
-const pemBytes = (pem) => Uint8Array.from(atob(pem.replace(/-----[^-]+-----/g, "").replace(/\s+/g, "")), (c) => c.charCodeAt(0));
+export const pemBytes = (pem) => Uint8Array.from(atob(pem.replace(/-----[^-]+-----/g, "").replace(/\s+/g, "")), (c) => c.charCodeAt(0));
 
 export const googleReady = (env) => !!env.GOOGLE_PLAY_SERVICE_ACCOUNT;
 export const appleReady = (env) => !!(env.APPLE_IAP_KEY_ID && env.APPLE_IAP_ISSUER_ID && env.APPLE_IAP_PRIVATE_KEY && env.APPLE_BUNDLE_ID);
 
-async function signedJwt(header, claims, key, algorithm) {
+/** JWT assinado (RS256 / ES256). Também usado pelo envio de push do AureaMCP (mcp_push.js). */
+export async function signedJwt(header, claims, key, algorithm) {
   const body = `${b64urlText(JSON.stringify(header))}.${b64urlText(JSON.stringify(claims))}`;
   return `${body}.${b64url(await crypto.subtle.sign(algorithm, key, new TextEncoder().encode(body)))}`;
 }
 
-async function googleAccessToken(env) {
-  const account = JSON.parse(env.GOOGLE_PLAY_SERVICE_ACCOUNT);
+/**
+ * Token OAuth de uma conta de serviço do Google (JWT bearer). `accountJson` é o JSON
+ * da conta; `scope`, o escopo pedido. Também usado pelo FCM (mcp_push.js).
+ */
+export async function googleServiceAccessToken(accountJson, scope) {
+  const account = typeof accountJson === "string" ? JSON.parse(accountJson) : accountJson;
   const key = await crypto.subtle.importKey("pkcs8", pemBytes(account.private_key), { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
   const now = Math.floor(Date.now() / 1000);
   const assertion = await signedJwt({ alg: "RS256", typ: "JWT" }, { iss: account.client_email,
-    scope: "https://www.googleapis.com/auth/androidpublisher", aud: "https://oauth2.googleapis.com/token",
+    scope, aud: "https://oauth2.googleapis.com/token",
     iat: now, exp: now + 600 }, key, "RSASSA-PKCS1-v1_5");
   const r = await fetch("https://oauth2.googleapis.com/token", { method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -41,6 +46,8 @@ async function googleAccessToken(env) {
   if (!r.ok) throw new Error("google_auth_failed");
   return (await r.json()).access_token;
 }
+
+const googleAccessToken = (env) => googleServiceAccessToken(env.GOOGLE_PLAY_SERVICE_ACCOUNT, "https://www.googleapis.com/auth/androidpublisher");
 
 /**
  * Produto único da Play: pago (purchaseState 0) e, se ainda não, RECONHECIDO

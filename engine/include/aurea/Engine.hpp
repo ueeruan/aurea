@@ -68,6 +68,7 @@
 #include "aurea/render/PreviewCachePolicy.hpp"
 #include "aurea/render/PreRender.hpp"
 #include "aurea/render/PreRenderCache.hpp"
+#include "aurea/render/PreRenderPlan.hpp"
 #include "aurea/hyper/Hyper.hpp"
 
 #include <array>
@@ -284,10 +285,12 @@ struct EngineConfig {
     bool enablePackedYuvExport = false;
     /// Export direto na Surface do encoder (Android, degrau surface-direct da
     /// escada): a composição sai em R'G'B' num AHardwareBuffer que a Surface
-    /// recebe sem readback. DESLIGADO até ser validado em aparelho
-    /// (docs/architecture/EXPORT_SURFACE_DIRETO_2026-10-15.md); no Android
-    /// também liga com `adb shell setprop debug.aurea.enc.direct 1`.
-    bool enableDirectSurfaceExport = false;
+    /// recebe sem readback nem a dupla conversão de cor
+    /// (docs/architecture/EXPORT_SURFACE_DIRETO_2026-10-15.md). LIGADO: o
+    /// degrau tem período de teste (1o quadro conferido) e cai para a Surface
+    /// NV12 sem perder quadro; o aparelho lembra o degrau que falhou (memória
+    /// da escada). `adb shell setprop debug.aurea.enc.direct 0` desliga.
+    bool enableDirectSurfaceExport = true;
     /// Deadline for a submitted export/startup GPU fence. Zero = 120 seconds.
     u32 exportGpuTimeoutMs = 0;
     /// 0.5.2 (E4): a partida do export espera o renderMutex_ (a prévia
@@ -375,6 +378,11 @@ struct ModelImportReport {
 struct VideoImport {
     std::string sourcePath;    ///< caminho, ou "fd:<n>" no Android
     std::string displayName;
+    /// 1.0.2: `sourcePath` é um TRECHO do original (import_trimmed_media) que
+    /// começa neste instante da régua do original (µs). 0 = arquivo inteiro.
+    i64 windowStartUs = 0;
+    /// De onde o trecho veio (URI da galeria, id do PHAsset). Vazio = sem origem.
+    std::string originRef;
 };
 
 /// Pedido de importação de SEQUÊNCIA DE IMAGENS (ImageSequence.hpp). Os
@@ -534,6 +542,12 @@ public:
     /// topo, a partir do início. Sendo o primeiro conteúdo, a composição adota
     /// a duração do som.
     [[nodiscard]] Result<u64> import_audio(const VideoImport& request) noexcept;
+    /// 1.0.2 "importar só o trecho cortado": remuxa [inUs − folga, outUs + folga]
+    /// de `source` para `destination` (cópia de pacotes; media/MediaCut.hpp).
+    /// `marginUs` < 0 = a política (max(2 s, 5% do trecho)). Não mexe no projeto;
+    /// roda em qualquer thread. Devolve o início da janela (µs, régua do original).
+    [[nodiscard]] static Result<i64> cut_media(const std::string& source, const std::string& destination,
+                                               i64 inUs, i64 outUs, i64 marginUs = -1) noexcept;
     /// Sequência de imagens (EngineImageSequence.cpp): acha o padrão
     /// (prefixo, dígitos, sufixo), a numeração, os quadros ausentes, tamanho,
     /// alfa, profundidade e o fps sugerido. Não muda o projeto. Um .zip é
@@ -3460,6 +3474,47 @@ public:
     [[nodiscard]] PreRenderProgress query_prerender_progress() noexcept;
 
     // =========================================================================
+    // Pre Render & Pre Export (1.0.2) — src/engine/EnginePreRenderRange.cpp e
+    // render/PreRenderPlan.hpp. O painel das duas interfaces só lê e pede.
+    //
+    // O trecho é da SESSÃO (não vai para o projeto nem para o desfazer) e vale
+    // para a composição atual. Qualidade = divisor do tamanho da composição
+    // (1 Inteira, 2, 4, 8). Edições que o motor sabe localizar (uma camada
+    // sem ninguém olhando para ela em outro instante) só desatualizam os
+    // trechos de 8 quadros que tocam: o resto do PreRender continua tocando do
+    // cache e o pré-export continua valendo fora delas.
+    // =========================================================================
+    /// Ações dos botões: 0 Início no cabeçote, 1 Fim no cabeçote, 2 Inteiro
+    /// (do começo ao fim do conteúdo), 3 Limpar. false = sem projeto.
+    enum PreRenderRangeAction : u32 { kRangeStart = 0, kRangeEnd = 1, kRangeFull = 2, kRangeClear = 3 };
+    bool prerender_range_action(u32 action) noexcept;
+    /// [in, out) direto (in < 0 ou out <= in limpa).
+    bool set_prerender_range(i64 in, i64 out) noexcept;
+    [[nodiscard]] PreRenderRangeInfo query_prerender_range() noexcept;
+    /// Loop do trecho: a reprodução fica presa nele (a repetição em si é o
+    /// loop da reprodução, que a tela liga junto).
+    void set_prerender_loop(bool on) noexcept;
+    /// A qualidade lembrada da sessão (o painel abre nela).
+    void set_prerender_quality(u32 divisor) noexcept;
+    /// "Cabe ~Xs" na qualidade e no modo (0 PreRender, 1 pré-export) pedidos,
+    /// com o trecho efetivo de agora.
+    [[nodiscard]] PreRenderFitInfo query_prerender_fit(u32 divisor, u32 mode) noexcept;
+    /// PreRender do trecho efetivo na qualidade pedida (progresso e cancelar:
+    /// query_prerender_progress / cancel_prerender).
+    [[nodiscard]] Status start_prerender_range(u32 divisor) noexcept;
+    /// Pré-export: um MP4 H.264 do trecho efetivo na qualidade pedida, no
+    /// cache privado (`<cache>/pre-export`). Usa o export do motor (o encoder
+    /// da plataforma); a reprodução depois toca o vídeo.
+    [[nodiscard]] Status start_preexport(u32 divisor) noexcept;
+    void cancel_preexport() noexcept;
+    [[nodiscard]] PreExportStatus query_preexport() noexcept;
+    /// Trechos desatualizados ([de, até) em pares) do PreRender (mode 0) ou do
+    /// pré-export (mode 1), para a régua. Devolve quantos pares existem.
+    u32 query_prerender_dirty(u32 mode, i64* pairs, u32 maxPairs) noexcept;
+    /// Bytes do pré-export guardado (a tela de armazenamento soma ao PreRender).
+    [[nodiscard]] u64 preexport_disk_bytes() const noexcept;
+
+    // =========================================================================
     // AureaHyper (0.3.2) — aurea/hyper/Hyper.hpp e aurea/hyper/HyperStage.hpp.
     //
     // Unidades: tempo em segundos (f64), tamanhos em pixels, fps em quadros
@@ -3655,7 +3710,8 @@ private:
     /// vem nele em vez do aberto, com o grafo Hyper entre readback e encoder.
     [[nodiscard]] Status start_export_checked(const ExportSettings& settings, const char* outputPath,
                                               const ExportRestartGuard* guard,
-                                              const HyperExportOverride* hyper = nullptr) noexcept;
+                                              const HyperExportOverride* hyper = nullptr,
+                                              const PreExportRequest* preExport = nullptr) noexcept;
     [[nodiscard]] Status save_project_impl(const char* path, bool idleOnly = false, bool dirtyOnly = false,
                                            bool* saved = nullptr) noexcept;
     mutable std::mutex saveStatsMutex_;
@@ -3819,6 +3875,10 @@ private:
     /// resolve_asset_path + o contêiner anterior do iOS (o mesmo religamento da
     /// abertura): a limpeza de armazenamento compara com o arquivo de AGORA.
     [[nodiscard]] std::string resolve_media_for_storage(const std::string& stored) const;
+    /// 1.0.2: registra a janela (SourceWindow.hpp) de cada trecho do projeto,
+    /// com o caminho gravado e os resolvidos (os decoders abrem por qualquer um).
+    void register_source_windows_locked();
+    void register_source_window_paths(const std::string& stored, i64 startUs) const;
     [[nodiscard]] u32 caption_count_locked(const Composition& comp, u64 sourceLayer) const noexcept;
     void migrate_echo_to_effect() noexcept;
     [[nodiscard]] std::string store_asset_path(const std::string& absolute) const;
@@ -4056,6 +4116,10 @@ private:
     std::condition_variable exportWakeCv_;
     /// Calor (set_thermal): o export reduz quadros em voo, nunca a qualidade.
     std::atomic<bool> thermalDegrade_{false};
+    /// Export: um quadro em voo SÓ no calor crítico (Critical/Emergency). Antes
+    /// valia a partir de Serious/throttling (thermalDegrade_), e o export de um
+    /// aparelho só morno ficava serial o tempo todo.
+    std::atomic<bool> exportThermalSerial_{false};
     std::atomic<u32> exportMemoryStep_{0};   ///< 0.5.3: set_export_memory_step
     void export_thread_main() noexcept;
     void export_encoder_main() noexcept;
@@ -4064,7 +4128,8 @@ private:
     [[nodiscard]] Status retire_abandoned_export_locked(bool admitNewSession = true) noexcept;
     void image_export_thread_main() noexcept;
     [[nodiscard]] Status start_image_export_internal(const ImageExportSettings& settings, const char* outputPath,
-                                                     i32 preRenderDirection, u64 preRenderGroupLayer = 0) noexcept;
+                                                     i32 preRenderDirection, u64 preRenderGroupLayer = 0,
+                                                     const PreRenderRangeRequest* preRenderRange = nullptr) noexcept;
     /// `error` is published as the progress error (Cancelled for edits/cancel;
     /// the real cause when the producer itself failed).
     void invalidate_prerender(i32 error = static_cast<i32>(Errc::Cancelled)) noexcept;
@@ -4105,9 +4170,57 @@ private:
     /// prévia volta ao render ao vivo em vez de congelar a imagem.
     u64 preRenderStallSinceNs_ = 0;
     static constexpr u64 kPreRenderStallNs = 250'000'000ull;
+
+    // --- Pre Render & Pre Export (1.0.2, EnginePreRenderRange.cpp) -------------
+    /// Livro de edições por trecho (modelMutex_). Uma edição localizada
+    /// (`pendingEditScoped_`, posta por apply_command_internal antes de subir a
+    /// revisão) mexe só nos trechos dela; o resto mexe em todos.
+    prerender::EditLedger editLedger_;
+    bool pendingEditScoped_ = false;   ///< modelMutex_
+    i64 pendingEditFrom_ = 0, pendingEditTo_ = 0;
+    /// Depois de subir a revisão: o PreRender/pré-export com algum quadro
+    /// ainda limpo fica (a chave anda junto); sem nenhum, sai.
+    void note_model_edit_locked() noexcept;
+    /// O quadro do PreRender ainda é o do retrato? (modelMutex_)
+    [[nodiscard]] bool prerender_frame_clean_locked(i64 frame) const noexcept;
+    /// O trecho efetivo da composição atual (modelMutex_).
+    [[nodiscard]] prerender::RangeChoice prerender_range_locked(const Composition& comp) noexcept;
+    /// Trecho escolhido da sessão (modelMutex_); vale para a sessão/composição gravadas.
+    i64 preRangeIn_ = -1, preRangeOut_ = -1;
+    bool preRangeLoop_ = false;
+    u32 preRangeDivisor_ = prerender::kDefaultDivisor;
+    u64 preRangeSession_ = 0, preRangeComposition_ = 0;
+    /// Retrato do PreRender (modelMutex_), válido só para a partida `preRenderSnapshotGeneration_`.
+    prerender::EditLedger::Snapshot preRenderSnapshot_;
+    u64 preRenderSnapshotSession_ = 0, preRenderSnapshotGeneration_ = 0;
+    std::atomic<u64> preRenderGeneration_{0};
+    std::atomic<u32> preRenderDivisor_{0};   ///< 0 = o 540p do gesto
+    std::atomic<u32> preRenderDirty_{0};     ///< último total de trechos desatualizados lido sob modelMutex_
+    /// Bytes por pixel que o cache gravou na última sessão completa (0 = sem medida).
+    std::atomic<f64> preRenderMeasuredBpp_{0.0};
+    /// Pré-export (preRenderStateMutex_ salvo onde dito).
+    struct PreExportState {
+        u64 id = 0;
+        bool running = false, complete = false;
+        i32 error = 0;
+        u64 framesDone = 0, framesTotal = 0, bytes = 0;
+        i64 in = 0, out = 0;
+        u32 width = 0, height = 0, divisor = prerender::kDefaultDivisor;
+        f64 fps = 30.0;
+        u64 session = 0, composition = 0;
+        std::string path;
+    };
+    PreExportState preExport_;                  ///< preRenderStateMutex_
+    prerender::EditLedger::Snapshot preExportSnapshot_;   ///< modelMutex_
+    std::atomic<bool> preExportStarting_{false};
+    std::atomic<u64> preExportSerial_{0};
+    /// Lê o progresso do export do pré-export e fecha a sessão quando terminou.
+    void poll_preexport() noexcept;
+    void discard_preexport_file(const std::string& path) noexcept;
     [[nodiscard]] Status initialize_offline_export(ExportContext& ctx) noexcept;
     [[nodiscard]] Status prepare_export_resources(ExportContext& ctx) noexcept;
-    void release_offline_export(ExportContext& ctx, bool retainReadbacks = false) noexcept;
+    /// `sourceGraceNs`: quanto esperar as fontes da sessão saírem (1 = só consulta).
+    void release_offline_export(ExportContext& ctx, bool retainReadbacks = false, u64 sourceGraceNs = 1) noexcept;
     [[nodiscard]] Status render_export_frame(FrameIndex t, const OffscreenTarget& target, u64& gpuFrame) noexcept;
     [[nodiscard]] Status wait_export_gpu(u64 gpuFrame) noexcept; // renderMutex_ held by caller
     /// O contexto vem explícito: um worker abandonado (ExportWatchdog.hpp) que

@@ -698,6 +698,8 @@ private fun FxChoiceRow(
     val locked = rememberLocked(env)
     val enabled = s.enabled && !locked
     val options = s.enumLabels.ifEmpty { List((s.max - s.min).roundToInt().coerceAtLeast(0) + 1) { "${it + 1}" } }
+        // 1.0.2: opção paga sem o AureaHyper (Flow Retime › Neural (IA)) leva o cadeado.
+        .mapIndexed { i, o -> if (store.optionLocked(effectId, s.index, i.toFloat())) "$o 🔒" else o }
     val current = value.roundToInt().coerceIn(0, max(0, options.lastIndex))
     val pick: (Int) -> Unit = { i: Int ->
         onSelect(ParamKey(effectId, s.index, 0), false)

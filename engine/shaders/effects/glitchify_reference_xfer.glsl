@@ -7,8 +7,9 @@
 //  without separators; index = the Aurea enum value). AE is the behaviour
 //  specification only; the formulas below are Aurea's own.
 //
-//  In/out: linear premultiplied RGBA. The blend function B(b, s) works on
-//  straight colours; composition is W3C:
+//  In/out of gx_transfer: linear premultiplied RGBA; the mode runs on the
+//  8-bit-domain encoding (sRGB in a standard project, see gx_encode). The
+//  blend function B(b, s) works on straight colours; composition is W3C:
 //      co = cs·(1 − ab) + as·ab·B(cb, cs) + cb·(1 − as),  ao = as + ab·(1 − as)
 //  `opacity` scales the source alpha first.
 // =============================================================================
@@ -80,8 +81,26 @@ vec3 gx_blend(int mode, vec3 b, vec3 s) {
     return s;
 }
 
-/// Composite premultiplied `src` (scaled by `opacity`) onto premultiplied `dst`.
-vec4 gx_transfer(int mode, vec4 dst, vec4 src, float opacity) {
+/// The plugin is 8 bpc only: AE runs its transfer modes on the 8-bit values
+/// of the project. In a standard (non-linear) project those values are
+/// sRGB-encoded, so the blend math runs on encoded colours (layer.z = 0);
+/// layer.z = 1 keeps the linear domain of a linearized project.
+vec4 gx_encode(vec4 premul) {
+    if (u.layer.z > 0.5) return premul;
+    const float a = clamp(premul.a, 0.0, 1.0);
+    const vec3 c = a > 1e-6 ? clamp(premul.rgb / a, 0.0, 1.0) : vec3(0.0);
+    return vec4(linear_to_srgb(c) * a, a);
+}
+vec4 gx_decode(vec4 premul) {
+    if (u.layer.z > 0.5) return premul;
+    const float a = clamp(premul.a, 0.0, 1.0);
+    const vec3 c = a > 1e-6 ? clamp(premul.rgb / a, 0.0, 1.0) : vec3(0.0);
+    return vec4(srgb_to_linear(c) * a, a);
+}
+
+/// Composite premultiplied `src` (scaled by `opacity`) onto premultiplied `dst`
+/// in the encoded domain of gx_encode.
+vec4 gx_transfer_encoded(int mode, vec4 dst, vec4 src, float opacity) {
     src *= clamp(opacity, 0.0, 1.0);
     float as = clamp(src.a, 0.0, 1.0), ab = clamp(dst.a, 0.0, 1.0);
     if (mode == GX_COPY) return src;
@@ -97,6 +116,11 @@ vec4 gx_transfer(int mode, vec4 dst, vec4 src, float opacity) {
     vec3 b = ab > 1e-6 ? dst.rgb / ab : vec3(0.0);
     vec3 co = src.rgb * (1.0 - ab) + as * ab * gx_blend(mode, b, s) + dst.rgb * (1.0 - as);
     return vec4(co, as + ab * (1.0 - as));
+}
+
+/// Linear premultiplied in and out; the mode itself runs on 8-bit-domain values.
+vec4 gx_transfer(int mode, vec4 dst, vec4 src, float opacity) {
+    return gx_decode(gx_transfer_encoded(mode, gx_encode(dst), gx_encode(src), opacity));
 }
 
 #endif

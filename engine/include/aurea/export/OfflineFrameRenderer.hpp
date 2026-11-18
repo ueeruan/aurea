@@ -82,7 +82,8 @@ public:
     void retire_gpu_after_done() noexcept;
     // Transfer opens/decoders to their owner retirement worker and poll only.
     // The caller must retain this renderer/factory until this returns true.
-    [[nodiscard]] bool retire_sources() noexcept;
+    /// `timeoutNs` 1 = só consulta (padrão); maior = espera a saída que já está acontecendo.
+    [[nodiscard]] bool retire_sources(u64 timeoutNs = 1) noexcept;
     void detach_device() noexcept; // Invalidates handles without joining a platform opener.
     void forget_device() noexcept;
 private:

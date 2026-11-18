@@ -72,4 +72,22 @@
     <string name="mcp_device_media_denied">Izinkan akses ke foto dan video di pengaturan sistem untuk memakai galeri perangkat.</string>
     <string name="mcp_device_media_limited">Aurea hanya melihat foto dan video yang Anda pilih.</string>
     <string name="mcp_device_media_manage">Ubah pilihan</string>
+    <!-- 18/11/2026: AureaMCP fora do app (serviço, notificações, push). -->
+    <string name="mcp_bg_title">Di luar aplikasi</string>
+    <string name="mcp_bg_body">Agen Anda tetap mengedit saat Anda keluar dari Aurea atau mematikan layar. Notifikasi menunjukkan agen sedang bekerja dan memungkinkan Anda menjeda atau menghentikannya. Saat aplikasi ditutup, permintaan menunggu di antrean dan Aurea dibangunkan untuk mengerjakannya.</string>
+    <string name="mcp_bg_toggle">Tetap bekerja di luar aplikasi</string>
+    <string name="mcp_bg_running">Agen sedang bekerja di luar aplikasi</string>
+    <string name="mcp_bg_ready">Aktif otomatis saat ada agen yang terhubung</string>
+    <string name="mcp_bg_notif_denied">Izinkan notifikasi Aurea untuk menyetujui permintaan (seperti menghapus proyek) saat aplikasi tidak di layar.</string>
+    <string name="mcp_bg_limits">Android dapat membatasi waktu di latar belakang (di beberapa perangkat sekitar 6 jam per hari). Membuka Aurea memperbaruinya.</string>
+    <string name="mcp_bg_channel">Agen AI (AureaMCP)</string>
+    <string name="mcp_bg_channel_confirm">Persetujuan agen AI</string>
+    <string name="mcp_bg_notification_title">Aurea: agen AI sedang bekerja</string>
+    <string name="mcp_bg_notification_text">Agen Anda dapat mengedit di Aurea saat aplikasi tidak di layar. Ketuk untuk membuka.</string>
+    <string name="mcp_bg_action_pause">Jeda</string>
+    <string name="mcp_bg_action_stop">Hentikan</string>
+    <string name="mcp_bg_timeout_title">Agen berhenti bekerja di luar aplikasi</string>
+    <string name="mcp_bg_timeout_text">Android membatasi waktu latar belakang untuk hari ini. Buka Aurea agar agen dapat melanjutkan.</string>
+    <string name="mcp_bg_wake_title">Agen AI ingin bekerja di Aurea</string>
+    <string name="mcp_bg_wake_text">Ketuk untuk membuka Aurea dan melanjutkan.</string>
 </resources>

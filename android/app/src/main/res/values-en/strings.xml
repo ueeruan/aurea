@@ -1777,7 +1777,15 @@ to edit the curve.</string>
     <string name="am_import_failed">Couldn\'t import: %1$s</string>
     <string name="am_import_nothing">no effect with an Aurea equivalent</string>
     <string name="release_notes_title">Aurea updates</string>
-    <string name="release_notes_body">Aurea 1.0.1 (2221) — 11/16/2026\n\n• New effects faithful to After Effects: Radial Blur, Radial Shadow, Posterize Time, Time Displacement, Detail-preserving Upscale, Card Wipe, Card Dance, Depth Field, Smear, Glitchify, Extrude.\n• Wave Warp, Block Dissolve, Drop Shadow, Fast Blur, Cartoon Moblur now closer to After Effects.\n• After Effects projects import these effects.\n• New Cartoon style for 3D Text: flat front, darker sides, highlight band and a thick, animatable outline.\n• 3D Text is now part of AureaHYPER. Projects that already use 3D text still open and export.</string>
+    <string name="release_notes_body">Aurea 1.0.2 (2222) — 11/18/2026
+
+• Optical Flow for real footage: less ghosting, a Ghosting ↔ Warping control and Neural (AI) quality with AureaHYPER.
+• Glitchify now matches After Effects.
+• Faster, higher-quality export.
+• Import only the trimmed part of long videos.
+• Pre Render and Pre Export panel by range.
+• AureaMCP can wake the app when it is closed.
+• HeadBop is now paid (on its own or with AureaHYPER). Projects that already use HeadBop still open and export.</string>
     <string name="am_import_lossless_required">This preset contains effects, parameters or layers that cannot be preserved during conversion. Nothing was saved or applied.</string>
     <string name="am_import_read_failed">The file could not be read (64 MB limit), or the selected layer changed. Please try again.</string>
     <string name="world_explosive">Explosive</string>
@@ -4287,6 +4295,10 @@ to edit the curve.</string>
     <string name="fxl_bilinear">Bilinear</string>
     <string name="fxo_nearest">Nearest</string>
     <string name="fxl_vector_quality">Vector quality</string>
+    <string name="fxl_ghost_warp">Ghosting ↔ Warping</string>
+    <string name="fxo_neural_ai">Neural (AI)</string>
+    <string name="fxt_ghost_warp_tip">Left: where the vectors fail, the frames blend (ghosting). Right: trusts the vectors and warps instead of blending.</string>
+    <string name="fxt_vector_quality_neural">Neural (AI): the AI network builds the frame on export and in the paused preview; during playback the preview uses the GPU vectors.</string>
     <string name="fxo_fast">Fast</string>
     <string name="fxo_best">Best</string>
     <string name="fxl_shutter">Shutter</string>
@@ -5492,4 +5504,44 @@ to edit the curve.</string>
     <string name="fxt_in_after_effects_2027_this_value_does_no">In After Effects 2027 this value does not change the image; it is kept for imported projects.</string>
     <string name="fxo_detail_preserving">Detail-preserving</string>
     <string name="fxo_bicubic">Bicubic</string>
+    <!-- 1.0.2 Pre Render & Pre Export (PreRenderPanel.kt / PreRenderPanelView.swift) -->
+    <string name="prx_title">Pre Render &amp; Pre Export</string>
+    <string name="prx_open">Pre Render &amp; Pre Export</string>
+    <string name="prx_open_detail">Play without lag: pre-render or pre-export a part</string>
+    <string name="prx_quality">Quality</string>
+    <string name="prx_quality_full">Full</string>
+    <string name="prx_fits">fits ~%1$s</string>
+    <string name="prx_fits_detail">%1$d × %2$d · part of %3$s</string>
+    <string name="prx_fits_hint">How much video fits in the phone cache at this quality</string>
+    <string name="prx_range">Part: %1$s – %2$s</string>
+    <string name="prx_range_whole">No part chosen: the whole video (%1$s – %2$s)</string>
+    <string name="prx_start">Start</string>
+    <string name="prx_end">End</string>
+    <string name="prx_full">Full</string>
+    <string name="prx_go_start">Go Start</string>
+    <string name="prx_go_end">Go End</string>
+    <string name="prx_loop">Loop</string>
+    <string name="prx_clear">Clear</string>
+    <string name="prx_mode">Mode</string>
+    <string name="prx_mode_prerender">Pre Render</string>
+    <string name="prx_mode_preexport">Pre Export</string>
+    <string name="prx_action_prerender">Pre-render part</string>
+    <string name="prx_action_preexport">Pre-export part</string>
+    <string name="prx_cancel">Cancel</string>
+    <string name="prx_progress_prerender">Pre-rendering: %1$d%%</string>
+    <string name="prx_progress_preexport">Pre-exporting: %1$d%%</string>
+    <string name="prx_ready_prerender">Pre Render ready: the part plays without lag</string>
+    <string name="prx_ready_preexport">Pre Export ready: watch your edit smoothly</string>
+    <string name="prx_watch">Watch pre-export</string>
+    <string name="prx_stale">%1$d part(s) changed since: they play live</string>
+    <string name="prx_stale_export">The edit changed after the pre-export: run it again to watch</string>
+    <string name="prx_not_fit">Does not fit: pick a lower quality or a shorter part</string>
+    <string name="prx_busy">Wait for the current Pre Render or Pre Export to finish</string>
+    <string name="prx_preexport_failed">Could not pre-export: %1$s</string>
+    <string name="prx_help">Help</string>
+    <string name="prx_help_title">Why Pre Render &amp; Pre Export?</string>
+    <string name="prx_help_body">When you edit videos with lots of heavy effects, your phone can start lagging and freezing during playback.\n\n• Pre Render: lets you “bake” a heavy part of your video into a smooth preview so it plays without lagging.\n• Pre Export: lets you pre-export a specific part or even the whole timeline; wait for it to finish processing so you can watch and check your entire edit smoothly before doing the final save.\n\nHow “fits ~duration” works: it shows how many seconds of your video can fit into the phone temporary memory (cache) at the chosen quality (Full, 1/2, 1/4, 1/8) before it runs out of space. Full = sharp but huge files, fits a short duration. 1/2, 1/4, 1/8 = much smaller files, much longer duration fits. Dropping to 1/4 or 1/8 lets you fit way more time.\n\nButtons: Start and End set the start and end of the part to work on; Full selects the whole video; Go Start and Go End jump the cursor to the start or end point; Loop plays the selected part on repeat; Clear resets start and end.</string>
+    <string name="prx_close">Close</string>
+    <string name="prx_preparing">Preparing…</string>
+    <string name="prx_ruler_range">Pre Render part</string>
 </resources>

@@ -352,9 +352,9 @@ void OfflineFrameRenderer::shutdown() noexcept {
     renderer_.shutdown();
     gpu_ = nullptr;
 }
-bool OfflineFrameRenderer::retire_sources() noexcept {
+bool OfflineFrameRenderer::retire_sources(u64 timeoutNs) noexcept {
     snapshot_ = FrameSnapshot{};
-    return media_.release_preview_for_export(nullptr, 1).ok();
+    return media_.release_preview_for_export(nullptr, timeoutNs ? timeoutNs : 1).ok();
 }
 void OfflineFrameRenderer::retire_gpu_after_done() noexcept {
     snapshot_ = FrameSnapshot{};

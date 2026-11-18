@@ -72,4 +72,22 @@
     <string name="mcp_device_media_denied">Allow access to photos and videos in the system settings to use the device gallery.</string>
     <string name="mcp_device_media_limited">Aurea sees only the photos and videos you selected.</string>
     <string name="mcp_device_media_manage">Change selection</string>
+    <!-- 18/11/2026: AureaMCP fora do app (serviço, notificações, push). -->
+    <string name="mcp_bg_title">Outside the app</string>
+    <string name="mcp_bg_body">Your agents keep editing when you leave Aurea or turn off the screen. A notification shows the agent is working and lets you pause or stop it. With the app closed, requests wait in a queue and Aurea is woken up to do them.</string>
+    <string name="mcp_bg_toggle">Keep working outside the app</string>
+    <string name="mcp_bg_running">Agent working outside the app now</string>
+    <string name="mcp_bg_ready">Turns on by itself when an agent is connected</string>
+    <string name="mcp_bg_notif_denied">Allow Aurea notifications to approve requests (like deleting a project) while the app is not on screen.</string>
+    <string name="mcp_bg_limits">Android may limit background time (on some devices, about 6 hours a day). Opening Aurea renews it.</string>
+    <string name="mcp_bg_channel">AI agent (AureaMCP)</string>
+    <string name="mcp_bg_channel_confirm">AI agent approvals</string>
+    <string name="mcp_bg_notification_title">Aurea: AI agent working</string>
+    <string name="mcp_bg_notification_text">Your agent can edit in Aurea while the app is not on screen. Tap to open.</string>
+    <string name="mcp_bg_action_pause">Pause</string>
+    <string name="mcp_bg_action_stop">Stop</string>
+    <string name="mcp_bg_timeout_title">The agent stopped working outside the app</string>
+    <string name="mcp_bg_timeout_text">Android limited background time for today. Open Aurea so the agent can continue.</string>
+    <string name="mcp_bg_wake_title">An AI agent wants to work in Aurea</string>
+    <string name="mcp_bg_wake_text">Tap to open Aurea and continue.</string>
 </resources>

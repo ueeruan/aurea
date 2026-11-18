@@ -588,12 +588,19 @@ AUREA_TEST(DeviceClass, ExportCeilingFollowsTheEncoderNotTheDecoder) {
     AUREA_CHECK_EQ(full.max_export_width(), 3840u);
     AUREA_CHECK_EQ(full.max_export_height(), 2160u);
     AUREA_CHECK_EQ(full.export_limit(), ExportLimit::None);
-    // Codificador 4K, mas RAM que não segura os quadros 4K: 1080p pela memória.
+    // Codificador 4K, mas RAM que não segura nem o caminho serial 4K: 1080p pela memória.
     Profile m = mid_profile();
     m.info.availableMemoryBytes = 700 * kMiB;
     const DeviceCapabilities tight = caps_for(m);
     AUREA_CHECK_EQ(tight.max_export_height(), 1080u);
     AUREA_CHECK_EQ(tight.export_limit(), ExportLimit::Memory);
+    // 18/11/2026: orçamento entre 3 e 6 quadros 4K (antes 1080p): 4K com menos
+    // quadros em voo, sem corte de resolução.
+    Profile serial = mid_profile();
+    serial.info.availableMemoryBytes = 1200 * kMiB;   // orçamento ~300 MB
+    const DeviceCapabilities fewer = caps_for(serial);
+    AUREA_CHECK_EQ(fewer.max_export_height(), 2160u);
+    AUREA_CHECK_EQ(fewer.export_limit(), ExportLimit::None);
 }
 
 AUREA_TEST(DeviceClass, ReportCarriesClassReasonAndCodecs) {

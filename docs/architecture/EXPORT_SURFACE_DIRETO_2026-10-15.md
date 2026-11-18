@@ -1,5 +1,14 @@
 # Export direto na Surface do encoder (surface-direct) — 2026-10-15
 
+> **Atualização 18/11/2026 (branch `claude/fix-export`):** o degrau passou a ser
+> **ligado por padrão** (`EngineConfig::enableDirectSurfaceExport = true`) em todo
+> projeto, com ou sem efeitos — só o grafo Hyper/upscale de IA e a tentativa 1 da
+> escada (`VideoStreamConfig::avoidSurface`) ficam fora. `debug.aurea.enc.direct=0`
+> desliga no aparelho. O iOS ganhou o equivalente (Metal → CVPixelBuffer IOSurface →
+> `VTCompressionSession`, `engine/src/export/AppleVideoEncoder.cpp`), com a chave
+> `aurea.export.disableZeroCopy` no UserDefaults. A seção "iOS" abaixo é histórica.
+> Validação em aparelho continua pendente nas duas plataformas.
+
 Branch `claude/120-surface`. Três commits:
 
 1. `408d3772` — escada de encoders na 1.2.0 (surface → buffer → legacy → software).

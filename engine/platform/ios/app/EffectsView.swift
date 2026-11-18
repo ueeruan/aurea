@@ -1406,7 +1406,11 @@ struct EffectsView: View {
         let d = display(param, effectId: effect)
         let enabled = rowEnabled(param)
         let ok = writeGuard(effect)
-        let options = enumOptions(param)
+        // 1.0.2: opção paga sem o AureaHyper (Flow Retime › Neural (IA)) leva o cadeado.
+        let type = typeOf(effect)
+        let options = enumOptions(param).enumerated().map { i, o in
+            HyperEffectGate.optionLocked(typeId: type, param: param.index, value: Float(i)) ? o + " 🔒" : o
+        }
         let top = Swift.max(0, options.count - 1)
         let current = param.scalar.isFinite ? Int(param.scalar.rounded().clamped(to: 0...Float(top))) : 0
         let chosen = selected?.effect == effect && selected?.param == param.index
@@ -1419,6 +1423,11 @@ struct EffectsView: View {
                             onLabelLong: { paramMenu(param, effect: effect) }) { index in
             choose(param, effect: effect, component: 0, explicit: false)
             guard ok() else { return }
+            if HyperEffectGate.optionLocked(typeId: type, param: param.index, value: Float(index)) {
+                model.toast = AureaText.t("hyper_option_locked")
+                model.hyperOptionPrompt = true
+                return
+            }
             writeComponent(param.index, effect: effect, component: 0, value: Float(index))
         }
     }

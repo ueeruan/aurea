@@ -42,7 +42,12 @@ interface McpHost {
     /** Galeria do aparelho (fase D): o mais novo primeiro; kind = all/video/image; eforeId pagina. */
     suspend fun listDeviceMedia(kind: String, limit: Int, beforeId: String?): McpReply
     /** Itens de [listDeviceMedia] (ids image:N / ideo:N), na ordem pedida. */
-    suspend fun importDeviceMedia(ids: List<String>, overlay: Boolean): McpReply
+    suspend fun importDeviceMedia(ids: List<String>, overlay: Boolean): McpReply = importDeviceMedia(ids, overlay, null)
+    /**
+     * 1.0.2: [trimUs] = o corte [in, out] (µs) de cada VÍDEO; só o trecho (com
+     * folga) é copiado para o app e a camada já sai cortada. null = inteiro.
+     */
+    suspend fun importDeviceMedia(ids: List<String>, overlay: Boolean, trimUs: LongRange?): McpReply
     /** Título do projeto [id] (para a pergunta de confirmação), ou null. */
     fun projectTitle(id: String): String?
     /** O projeto aberto agora: título e se há um aberto (vai no "hello"). */
@@ -153,9 +158,13 @@ class McpExecutor(
         "import_device_media" -> {
             val arr = a.optJSONArray("ids")
             val ids = (0 until (arr?.length() ?: 0)).map { arr!!.optString(it) }
+            val hasTrim = a.has("trimInSeconds") || a.has("trimOutSeconds")
+            val trim = if (hasTrim) a.trimUs() else null
             when {
                 ids.isEmpty() || ids.size > 20 -> McpReply.fail("ids must be 1..20 ids from list_device_media")
                 ids.any { !MEDIA_ID.matches(it) } -> McpReply.fail("unknown id (use the ids from list_device_media)")
+                hasTrim && trim == null -> McpReply.fail("trimInSeconds/trimOutSeconds: need 0 <= trimInSeconds < trimOutSeconds <= 86400")
+                trim != null -> host.importDeviceMedia(ids.distinct(), a.optBoolean("overlay", false), trim)
                 else -> host.importDeviceMedia(ids.distinct(), a.optBoolean("overlay", false))
             }
         }
@@ -163,6 +172,15 @@ class McpExecutor(
     }
 
     private companion object { val MEDIA_ID = Regex("^(image|video):[0-9]{1,19}$") }
+
+    /** O corte do `import_device_media` em µs (só um lado = do começo / até o fim); null = inválido. */
+    private fun JSONObject.trimUs(): LongRange? {
+        val maxSeconds = 86_400.0
+        val tin = if (has("trimInSeconds")) optDouble("trimInSeconds", Double.NaN) else 0.0
+        val tout = if (has("trimOutSeconds")) optDouble("trimOutSeconds", Double.NaN) else maxSeconds
+        if (!tin.isFinite() || !tout.isFinite() || tin < 0.0 || tout <= tin || tout > maxSeconds) return null
+        return Math.round(tin * 1e6)..Math.round(tout * 1e6)
+    }
 
     private fun JSONObject.requiredId(): String? = optString("id").takeIf { it.isNotBlank() && it.length <= 300 }
     private fun missing(field: String) = McpReply.fail("Missing $field.")

@@ -1178,6 +1178,7 @@ private struct PreRenderPlayControl: View {
             .accessibilityAction(named: Text(AureaText.t("prerender_forward"))) { model.startPreRender(1) }
             .accessibilityAction(named: Text(AureaText.t("prerender_backward"))) { model.startPreRender(-1) }
             .accessibilityAction(named: Text(AureaText.t("prerender_cancel"))) { model.cancelPreRender() }
+            .accessibilityAction(named: Text(AureaText.t("prx_open"))) { model.openPreRenderPanel() }
             .accessibilityAction(named: Text(AureaText.t("editor_reproducao_loop"))) { model.setLooping(!model.looping) }
             .onDisappear { resetPress() }
     }

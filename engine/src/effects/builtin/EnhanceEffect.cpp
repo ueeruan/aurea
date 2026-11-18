@@ -124,7 +124,8 @@ FGTexture motion_flow(EffectBuildContext& ctx, FGTexture cur, FGTexture nbr, u32
         const PairUniforms sp{Vec4{1.0f / fw, 1.0f / fh, fw, fh}, Vec4{0.0f, 0.06f, 0, 0}};
         const FGTexture smooth = ctx.texture("aprimorar-fluxo", sizes[i][0], sizes[i][1]);
         if (ctx.fullscreen_pass("aprimorar-fluxo-suave", PassStage::Effects, smooth, ShaderId::video_flow_smooth_frag,
-                                {PassTexture{raw, {}, CommonSampler::NearestClamp}, PassTexture{levels[i]}}, &sp, sizeof(sp)) == kInvalidIndex)
+                                {PassTexture{raw, {}, CommonSampler::NearestClamp}, PassTexture{levels[i]},
+                                 PassTexture{levels[i]}}, &sp, sizeof(sp)) == kInvalidIndex)   // guia de cor desligada (flags.z = 0)
             return FGTexture{};
         flow = smooth;
         have = true;

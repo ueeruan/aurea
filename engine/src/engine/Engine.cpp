@@ -3,6 +3,8 @@
 #include "aurea/Engine.hpp"
 #include "aurea/scene3d/Image3D.hpp"
 #include "aurea/media/ImageResample.hpp"
+#include "aurea/media/MediaCut.hpp"
+#include "aurea/media/SourceWindow.hpp"
 #include "aurea/tracking/RealCameraPreviewScope.hpp"
 #include "aurea/render/PreviewCachePolicy.hpp"
 #include "aurea/render/PreviewViewport.hpp"
@@ -414,6 +416,11 @@ struct Engine::ExportContext {
     i64 audioWritten = 0;
     std::vector<f32> audioMix;
     std::vector<i16> audioPcm;
+    /// 18/11/2026: o áudio mixado à frente numa thread própria durante o render
+    /// (ExportAudioPremix). Nulo = mix na hora, na thread do encoder (montagem
+    /// do registro, grafo Hyper, sessão retomada).
+    struct AudioPremix;
+    AudioPremix* premix = nullptr;
 
     // --- Pipeline -------------------------------------------------------------
     struct Slot {
@@ -569,6 +576,8 @@ struct Engine::ExportContext {
     i32 preRenderDirection = 1;
     i64 preRenderFirst = 0;   ///< lote K: 1º quadro da composição (o começo da área de trabalho)
     u64 preRenderToken = 0;
+    /// 1.0.2: o pré-export (EnginePreRenderRange.cpp) dono desta sessão de vídeo (0 = export comum).
+    u64 preExportId = 0;
     ImageExportSettings image{};
     FrameIndex imageFrame{};   ///< PNG: o quadro do playhead no início
     bool imageAlpha = false;   ///< fundo transparente: PNG RGBA, GIF com transparência
@@ -943,6 +952,8 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
     // Pronto → redesenha já (mesmo parado): o quadro seguinte abre o proxy, e
     // o play e o arrasto seguintes já decodificam a versão leve.
     media_.proxies().set_ready_callback([](void* self) { static_cast<Engine*>(self)->request_render(); }, this);
+    // Flow Retime Neural (1.0.2): o quadro da rede ficou pronto na prévia parada.
+    renderer_.set_neural_ready_callback([](void* self) { static_cast<Engine*>(self)->request_render(); }, this);
     media_.proxies().set_reduced_preview(config.initialPreviewScale == PreviewScale::Half
         || config.initialPreviewScale == PreviewScale::Quarter || config.initialPreviewScale == PreviewScale::Eighth);
     media_.proxies().set_policy(caps_.policy().proxyShortSide, caps_.policy().backgroundPauseMs);
@@ -2185,6 +2196,7 @@ Status Engine::load_project_checked(const char* path, ExportRestartGuard* restar
             commandQueue_->reset();
             project_ = std::make_unique<Project>(std::move(loaded));
         }
+        register_source_windows_locked();   // 1.0.2: trechos na régua do original
         loadedSession = ++projectSession_;
     inlineEditGroup_.store(0); inlineEditLayer_.store(0); inlineEditOuter_.store(0);
         captionCancelled.store(true);
@@ -2647,6 +2659,10 @@ Result<u64> Engine::import_video(const VideoImport& request) noexcept {
         session = projectSession_; composition = project_->timeline().current();
     }
 
+    // Trecho de um original (1.0.2): antes da sondagem, para ela já medir na
+    // régua do original (até o fim da janela).
+    const i64 windowUs = std::max<i64>(0, request.windowStartUs);
+    if (windowUs > 0) register_source_window_paths(request.sourcePath, windowUs);
     // Sondagem FORA do lock: abrir o container custa alguns ms e a UI e o
     // render não podem esperar por isso.
     MediaProbe probe;
@@ -2654,6 +2670,7 @@ Result<u64> Engine::import_video(const VideoImport& request) noexcept {
         return Status{Errc::UnsupportedFormat, "arquivo sem trilha de video decodificavel"};
     }
     const VideoStreamInfo& v = probe.video;
+    if (windowUs > 0 && v.durationUs <= windowUs) return Status{Errc::AssetCorrupted, "trecho sem duracao"};
     const u32 dispW = v.display_width();
     const u32 dispH = v.display_height();
     if (dispW == 0 || dispH == 0) return Status{Errc::AssetCorrupted, "video sem dimensoes"};
@@ -2700,6 +2717,8 @@ Result<u64> Engine::import_video(const VideoImport& request) noexcept {
         asset.audio.sampleRate = 0;
         asset.audio.channels = 0;
     }
+    asset.windowStartUs = windowUs;
+    asset.originRef = request.originRef;
     const AssetId assetId = project_->add_asset(std::move(asset));
     // Vídeo pesado: o proxy começa já, em segundo plano (um por vez, pausa no play).
     if (const Asset* added = project_->asset(assetId)) (void)media_.proxies().request(*added);
@@ -2708,7 +2727,10 @@ Result<u64> Engine::import_video(const VideoImport& request) noexcept {
     // Fit the layer below; only the duration grows to accommodate the clip.
     const bool first = comp->layers().count() == 0;
     const f64 fps = comp->fps();
-    const i64 frames = std::max<i64>(1, static_cast<i64>(std::ceil(static_cast<f64>(v.durationUs) * fps / 1e6 - 1e-6)));
+    // Trecho: a camada começa no 1º quadro do arquivo (o offset fica na régua
+    // do original) e dura só o que o trecho tem.
+    const i64 windowFrame = windowUs > 0 ? static_cast<i64>(std::ceil(static_cast<f64>(windowUs) * fps / 1e6 - 1e-6)) : 0;
+    const i64 frames = std::max<i64>(1, static_cast<i64>(std::ceil(static_cast<f64>(v.durationUs) * fps / 1e6 - 1e-6)) - windowFrame);
     const i64 endFrame = insertionFrame + frames;
     if ((first && insertionFrame == 0) || endFrame > comp->duration().value) comp->set_duration(FrameIndex{endFrame});
 
@@ -2718,6 +2740,7 @@ Result<u64> Engine::import_video(const VideoImport& request) noexcept {
     l->source = assetId;
     l->start = FrameIndex{insertionFrame};
     l->end = FrameIndex{endFrame};
+    l->offset = FrameIndex{windowFrame};
     // Modo Edição: na linha magnética o trecho entra no fim dela, não no cabeçote.
     if (place_on_magnetic_line_locked(*comp, lid, frames)) l = comp->layer(lid);
     l->transform.anchor = Vec3{static_cast<f32>(dispW) * 0.5f, static_cast<f32>(dispH) * 0.5f, 0.0f};
@@ -2748,11 +2771,13 @@ Result<u64> Engine::import_audio(const VideoImport& request) noexcept {
         insertionFrame = std::max<i64>(0, playback_.current().value);
         session = projectSession_; composition = project_->timeline().current();
     }
+    const i64 windowUs = std::max<i64>(0, request.windowStartUs);
+    if (windowUs > 0) register_source_window_paths(request.sourcePath, windowUs);
     MediaProbe probe;
     if (!factory->probe(request.sourcePath.c_str(), probe) || !probe.hasAudio || probe.audioSampleRate == 0) {
         return Status{Errc::UnsupportedFormat, "arquivo sem trilha de audio decodificavel"};
     }
-    if (probe.audioDurationUs <= 0) return Status{Errc::AssetCorrupted, "audio sem duracao"};
+    if (probe.audioDurationUs <= windowUs) return Status{Errc::AssetCorrupted, "audio sem duracao"};
 
     std::lock_guard<std::mutex> lock(modelMutex_);
     if (!project_ || session != projectSession_ || composition != project_->timeline().current()
@@ -2774,9 +2799,14 @@ Result<u64> Engine::import_audio(const VideoImport& request) noexcept {
     asset.audio.channels = probe.audioChannels;
     asset.audio.sampleCount = FrameIndex{probe.audioDurationUs * static_cast<i64>(probe.audioSampleRate) / 1'000'000};
     asset.timebaseFps = fps;
-    const i64 frames = std::max<i64>(1, static_cast<i64>(std::ceil(static_cast<f64>(probe.audioDurationUs) * fps / 1e6 - 1e-6)));
-    asset.duration = FrameIndex{frames};
+    const i64 sourceFrames = std::max<i64>(1, static_cast<i64>(std::ceil(static_cast<f64>(probe.audioDurationUs) * fps / 1e6 - 1e-6)));
+    asset.duration = FrameIndex{sourceFrames};
+    asset.windowStartUs = windowUs;
+    asset.originRef = request.originRef;
     const AssetId assetId = project_->add_asset(std::move(asset));
+    // Trecho (1.0.2): a camada começa no 1º instante do arquivo.
+    const i64 windowFrame = windowUs > 0 ? static_cast<i64>(std::ceil(static_cast<f64>(windowUs) * fps / 1e6 - 1e-6)) : 0;
+    const i64 frames = std::max<i64>(1, sourceFrames - windowFrame);
 
     const bool first = comp->layers().count() == 0;
     const i64 endFrame = insertionFrame + frames;
@@ -2787,6 +2817,7 @@ Result<u64> Engine::import_audio(const VideoImport& request) noexcept {
     l->source = assetId;
     l->start = FrameIndex{insertionFrame};
     l->end = FrameIndex{endFrame};
+    l->offset = FrameIndex{windowFrame};
     // Interface de Edição: áudio no cabeçote, numa linha de áudio embaixo da
     // trilha principal (nunca na sequência dos vídeos). Composição: como sempre.
     if (project_->editor_settings().uiMode == 1) place_on_audio_line_locked(*comp, lid);
@@ -9990,6 +10021,14 @@ f64 clip_source_limit(const Project& project, const Composition& comp, const Lay
     return -1.0;
 }
 
+/// Primeiro quadro da fonte que a mídia tem (quadros da composição): 0, ou o
+/// início da janela de um trecho importado (1.0.2, Asset::windowStartUs).
+f64 clip_source_first(const Project& project, const Composition& comp, const Layer& item) noexcept {
+    if (item.kind == LayerKind::Composition) return 0.0;
+    const Asset* asset = project.asset(item.source);
+    return asset ? asset->source_first_frame(comp.fps()) : 0.0;
+}
+
 /// Velocidade com keyframes → curva de tempo equivalente (a integral amostrada
 /// quadro a quadro, que é como a curva de tempo é lida). O `offset` também é o
 /// relógio dos keyframes, então a entrada não pode mudar sem isto.
@@ -10138,11 +10177,12 @@ bool Engine::edit_clip_time_locked(u64 layerId, u32 operation, i64 amount, u64 p
             restoredEnd = std::max(end, comp->duration().value);
         } else {
             const f64 sourceLimit = clip_source_limit(*project_, *comp, edited);
+            const f64 sourceFirst = clip_source_first(*project_, *comp, edited);
             if (sourceLimit < 0 || edited.timeRemap.has_expression() || edited.speed_track()) return false;
             if (!edited.timeRemapEnabled && edited.reversed) materialize_clip_time(edited, start, end, sourceLimit);
             const auto available = [&](i64 frame) {
                 const f64 sampled = edited.source_frame(FrameIndex{frame});
-                return std::isfinite(sampled) && sampled >= -0.001 && sampled <= sourceLimit + 0.001;
+                return std::isfinite(sampled) && sampled >= sourceFirst - 0.001 && sampled <= sourceLimit + 0.001;
             };
             // A held remap has no remaining source handle: extending it would
             // silently freeze the final frame instead of restoring the clip.
@@ -10213,7 +10253,11 @@ bool Engine::edit_clip_time_locked(u64 layerId, u32 operation, i64 amount, u64 p
         // Missing media cannot supply a reliable source bound; timeline edits
         // must still work so it can be relinked later.
         if (maxSource < 0) return true;
-        const auto inside = [&](f64 value) { return std::isfinite(value) && value >= -0.001 && value <= maxSource + 0.001; };
+        // Trecho importado (1.0.2): antes da janela o arquivo não tem quadro.
+        const f64 minSource = clip_source_first(*project_, *comp, item);
+        const auto inside = [&](f64 value) {
+            return std::isfinite(value) && value >= minSource - 0.001 && value <= maxSource + 0.001;
+        };
         // Older projects and manually extended clips may hold the last source
         // frame beyond the media's duration. Removing part of such a clip is
         // still valid: no new source range is introduced by a shorter interval.
@@ -11221,6 +11265,35 @@ std::string Engine::resolve_asset_path(const std::string& stored) const {
         return document_asset_path(config_.documentsDirectory, relative, true);
     }
     return stored;
+}
+
+void Engine::register_source_window_paths(const std::string& stored, i64 startUs) const {
+    if (stored.empty() || startUs <= 0) return;
+    register_source_window(stored, startUs);
+    if (const std::string resolved = resolve_asset_path(stored); !resolved.empty() && resolved != stored)
+        register_source_window(resolved, startUs);
+    if (const std::string moved = resolve_media_for_storage(stored); !moved.empty() && moved != stored)
+        register_source_window(moved, startUs);
+}
+
+void Engine::register_source_windows_locked() {
+    if (!project_) return;
+    project_->for_each_asset([&](AssetId, const Asset& a) {
+        if (a.windowStartUs > 0) register_source_window_paths(a.sourcePath, a.windowStartUs);
+    });
+}
+
+Result<i64> Engine::cut_media(const std::string& source, const std::string& destination, i64 inUs, i64 outUs,
+                              i64 marginUs) noexcept {
+    MediaCutRequest request;
+    request.source = source;
+    request.destination = destination;
+    request.inUs = inUs;
+    request.outUs = outUs;
+    request.marginUs = marginUs;
+    MediaCutResult result;
+    if (const Status s = aurea::cut_media(request, result); !s.ok()) return s;
+    return result.windowStartUs;
 }
 
 std::string Engine::resolve_media_for_storage(const std::string& stored) const {
@@ -13711,7 +13784,9 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
             const u64 cacheFrames = preRenderStats.framesTotal;
             // Lote K: o cache começa no 1º quadro do PreRender (área de trabalho).
             const i64 cacheIndex = t.value - preRenderFirstFrame_.load(std::memory_order_acquire);
-            const bool inCache = cacheIndex >= 0 && static_cast<u64>(cacheIndex) < cacheFrames;
+            // 1.0.2: quadro num trecho que uma edição mudou toca ao vivo.
+            const bool inCache = cacheIndex >= 0 && static_cast<u64>(cacheIndex) < cacheFrames
+                && prerender_frame_clean_locked(t.value);
             const u32 window = std::max(1u, preRenderStats.residentLimit);
             const u32 readyRun = inCache ? preRenderCache_->prefetch(preRenderToken, static_cast<u64>(cacheIndex),
                 readDirection, window, playback_.loop()) : 0;
@@ -14207,6 +14282,7 @@ void Engine::set_thermal(u32 level, bool throttling) noexcept {
     t.throttling = throttling;
     caps_.set_thermal_state(t);
     thermalDegrade_.store(t.should_degrade(), std::memory_order_release);
+    exportThermalSerial_.store(t.severe(), std::memory_order_release);
     // Morno: menos tarefa de fundo; crítico: metade do pool (§33, §35).
     jobs_.apply_thermal(static_cast<u32>(t.level));
     // A política térmica (DevicePolicy, §35–36) nos knobs que existem hoje:
@@ -16903,7 +16979,14 @@ void Engine::configure_playback_locked(const Composition* comp, i64 rawDuration)
         : bounded ? std::max<i64>(1, end) : comp->duration().value});
     // Timeline do AE: a prévia toca e repete dentro da área de trabalho
     // (presa no que a reprodução alcança; nada além do fim configurado).
-    if (comp->has_work_area()) {
+    // 1.0.2: o Loop do painel Pre Render & Pre Export prende a reprodução no
+    // trecho escolhido (vence a área de trabalho enquanto ligado).
+    if (preRangeLoop_ && preRangeOut_ > preRangeIn_ && preRangeIn_ >= 0 && preRangeSession_ == projectSession_
+        && preRangeComposition_ == comp->id().pack()) {
+        const i64 limit = playback_.duration().value;
+        const i64 in = std::clamp<i64>(preRangeIn_, 0, std::max<i64>(0, limit - 1)), out = std::min(preRangeOut_, limit);
+        playback_.set_play_range(FrameIndex{in}, FrameIndex{out > in ? out : -1});
+    } else if (comp->has_work_area()) {
         const i64 limit = playback_.duration().value;
         const i64 in = std::min(comp->work_in(), limit - 1), out = std::min(comp->work_out(), limit);
         playback_.set_play_range(FrameIndex{in}, FrameIndex{out > in ? out : -1});
@@ -16959,7 +17042,8 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
 }
 
 Status Engine::start_export_checked(const ExportSettings& requested, const char* outputPath,
-                                  const ExportRestartGuard* restartGuard, const HyperExportOverride* hyper) noexcept {
+                                  const ExportRestartGuard* restartGuard, const HyperExportOverride* hyper,
+                                  const PreExportRequest* preExport) noexcept {
     // 0.5.2 (E4): a partida anterior que a tela abandonou (a plataforma não
     // voltou) ainda segura o lifecycle; esta não espera sem fim por ela.
     std::unique_lock<std::mutex> lifecycle(exportLifecycleMutex_, std::defer_lock);
@@ -17185,7 +17269,22 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
         // Timeline do AE: "só a área de trabalho" congela a cópia aparada (o
         // documento congelado já sai com ela; o editor volta no fim do escopo).
         WorkAreaFreeze workArea;
-        if (exportWorkAreaOnly_.load(std::memory_order_relaxed) && comp->has_work_area()) {
+        if (preExport) {
+            // 1.0.2 pré-export: só o trecho do painel, pelo MESMO aparar da
+            // área de trabalho (a composição do editor volta no fim do escopo).
+            workArea.keep = comp->clone();
+            workArea.comp = comp;
+            const i64 duration = comp->duration().value;
+            const i64 out = std::clamp<i64>(preExport->out, 1, duration);
+            const i64 in = std::clamp<i64>(preExport->in, 0, out - 1);
+            if (in > 0 || out < duration) {
+                comp->set_work_area(in, out);
+                (void)trim_to_work_area_locked(*comp, false);
+            }
+            ctx->preExportId = preExport->id;
+            // O retrato do livro por trecho no instante do congelamento.
+            preExportSnapshot_ = editLedger_.capture(in, out);
+        } else if (exportWorkAreaOnly_.load(std::memory_order_relaxed) && comp->has_work_area()) {
             workArea.keep = comp->clone();
             workArea.comp = comp;
             (void)trim_to_work_area_locked(*comp, false);
@@ -17455,15 +17554,23 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
     // Omega adicionar (área 08, P1-9): `quality` 0..2 = fichas antigas; 20..100 = porcentagem.
     vc.bitrateBps = export_video_bitrate_bps_code(ctx->outputWidth, ctx->outputHeight, ctx->fps, vc.codec,
         settings.quality, settings.videoBitrateMbps);
-    vc.profile = ctx->safeMode > 0 ? kExportProfileBaseline : kExportProfileDefault;
+    // A escada muda o CAMINHO do encoder, nunca a qualidade primeiro: perfil
+    // de qualidade (H.264 High) em toda tentativa; a 1 só sai da Surface
+    // (VideoStreamConfig::avoidSurface), a 2 vai para o software.
+    vc.profile = kExportProfileDefault;
+    vc.avoidSurface = ctx->safeMode == 1;
     vc.preferSoftware = ctx->safeMode >= 2;
     // CBR só quando pedido; o padrão é VBR com pico limitado no encoder.
     vc.rateMode = settings.rateMode == 0 ? 0u : 1u;
     vc.keyframeIntervalFrames = settings.keyframeIntervalFrames;
-    // surface-direct (EXPORT_SURFACE_DIRETO_2026-10-15.md): desligado por
-    // padrão; no Android também por debug.aurea.enc.direct=1 (CI/aparelho).
+    // surface-direct (EXPORT_SURFACE_DIRETO_2026-10-15.md): ligado por padrão
+    // em todo projeto, com ou sem efeitos (o quadro sai do MESMO render). Fora
+    // só o grafo Hyper/upscale de IA (o quadro final vem da CPU, não do slot da
+    // GPU) e a tentativa 1 da escada (sem Surface). debug.aurea.enc.direct=0
+    // desliga no aparelho; =1 liga mesmo com a config desligada.
     ctx->directSurface = vc.directSurface = (config_.enableDirectSurfaceExport ||
             android_video::debug_flag("debug.aurea.enc.direct", nullptr)) &&
+        !android_video::debug_flag("debug.aurea.enc.direct", "0") && !vc.avoidSurface &&
         !ctx->graphWanted && gpu_ && gpu_->capabilities().externalMemoryHardwareBuffer;
     if (ctx->diagnostics) ctx->diagnostics->format({vc.width, vc.height, vc.bitrateBps,
         vc.profile, ctx->safeMode, vc.fps});
@@ -17830,7 +17937,12 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
         // Small envelopes cannot retain readback buffers for several full-HD
         // frames beside a large effect target. Serialize instead of changing
         // output dimensions or shutter samples.
-        const bool limitedBacking = config_.enableTrackedGpuAdmission && trackedBudget < (192ull << 20);
+        // 18/11/2026: o mesmo vale quando o orçamento não segura 6 quadros de
+        // composição (RGBA16F) nesta resolução — é o 4K num aparelho de 4 GB,
+        // que antes era cortado para 1080p (DeviceCapabilities::compute_budget).
+        const u64 compFrameBytes = static_cast<u64>(ctx->width) * ctx->height * 8ull;
+        const bool limitedBacking = (config_.enableTrackedGpuAdmission && trackedBudget < (192ull << 20))
+            || (exportBudget && exportBudget < compFrameBytes * 6);
         const u32 want = limitedBacking || config_.exportExecutionProfile == ExportExecutionProfile::HighQuality ? 1u
             : address_space::export_readback_slots(std::clamp<u32>(config_.exportPipelineDepth ? config_.exportPipelineDepth
                                                          : (policyDepth ? policyDepth : 3u), 1u, 4u));
@@ -18018,24 +18130,39 @@ Status Engine::retire_abandoned_export_locked(bool admitNewSession) noexcept {
         return session.imageMode || session.encoderExited;
     };
     usize retained = 0;
-    for (auto& retired : retiredExports_) {
-        if (!retired) continue;
-        if (exited(*retired)) {
-            // The flag is the worker's final access, after native codec close.
-            // Device generations prevent stale handles from touching a reset GPU.
-            release_offline_export(*retired, false);
-            if (!retired->deferredGpuCleanup && !retired->deferredSourceCleanup) retired.reset();
+    // A fonte presa na plataforma que acabou de voltar ainda está saindo (a
+    // thread de retirada do MediaManager fecha o decoder dela). A consulta
+    // instantânea via as duas sessões "presas" e recusava o export seguinte
+    // logo depois de a plataforma soltar — corrida que a prioridade das
+    // threads do export tornava frequente (ExportSourceStartupGpu.
+    // TwoRetiringSourcesBoundAdmissionAndReleaseAllowsRetry, 1 em 3). Com a
+    // quarentena cheia, a admissão dá a cada sessão até 250 ms para terminar a
+    // saída que já começou antes de recusar.
+    bool activeRetirement = false;
+    const auto sweep = [&](u64 graceNs) {
+        retained = 0;
+        for (auto& retired : retiredExports_) {
+            if (!retired) continue;
+            if (exited(*retired)) {
+                // The flag is the worker's final access, after native codec close.
+                // Device generations prevent stale handles from touching a reset GPU.
+                release_offline_export(*retired, false, graceNs);
+                if (!retired->deferredGpuCleanup && !retired->deferredSourceCleanup) retired.reset();
+            }
+            if (retired) ++retained;
         }
-        if (retired) ++retained;
-    }
-    const bool retiring = exportCtx_ && !exportCtx_->thread.joinable()
-        && (exportCtx_->abandoned_worker() || exportCtx_->deferredSourceCleanup);
-    if (retiring && exited(*exportCtx_)) {
-        release_offline_export(*exportCtx_, false);
-        if (!exportCtx_->deferredGpuCleanup && !exportCtx_->deferredSourceCleanup) exportCtx_.reset();
-    }
-    const bool activeRetirement = exportCtx_ && !exportCtx_->thread.joinable()
-        && (exportCtx_->abandoned_worker() || exportCtx_->deferredSourceCleanup);
+        const bool retiring = exportCtx_ && !exportCtx_->thread.joinable()
+            && (exportCtx_->abandoned_worker() || exportCtx_->deferredSourceCleanup);
+        if (retiring && exited(*exportCtx_)) {
+            release_offline_export(*exportCtx_, false, graceNs);
+            if (!exportCtx_->deferredGpuCleanup && !exportCtx_->deferredSourceCleanup) exportCtx_.reset();
+        }
+        activeRetirement = exportCtx_ && !exportCtx_->thread.joinable()
+            && (exportCtx_->abandoned_worker() || exportCtx_->deferredSourceCleanup);
+    };
+    sweep(1);
+    if (admitNewSession && retained + static_cast<usize>(activeRetirement) >= retiredExports_.size())
+        sweep(250'000'000ull);
     const usize held = retained + static_cast<usize>(activeRetirement);
     if (admitNewSession && held >= retiredExports_.size()) {
         // Preserve the previous progress/error. No third encoder or frame
@@ -18233,7 +18360,7 @@ Status Engine::initialize_offline_export(ExportContext& ctx) noexcept {
     return originals;
 }
 
-void Engine::release_offline_export(ExportContext& ctx, bool retainReadbacks) noexcept {
+void Engine::release_offline_export(ExportContext& ctx, bool retainReadbacks, u64 sourceGraceNs) noexcept {
     bool lostDevice = !gpu_ || gpu_->is_device_lost()
         || (ctx.resourceGpuGeneration && ctx.resourceGpuGeneration != gpuGeneration_)
         || (ctx.deferredGpuCleanup && ctx.deferredGpuGeneration != gpuGeneration_);
@@ -18291,7 +18418,7 @@ void Engine::release_offline_export(ExportContext& ctx, bool retainReadbacks) no
     // releases just queued above without another device-wide wait; no new GPU
     // submission is permitted between the full proof and this retirement.
     if (retirementFrame && gpu_ && !lostDevice) (void)gpu_->wait_frame(retirementFrame, 0);
-    if (ctx.offline && !ctx.offline->retire_sources()) {
+    if (ctx.offline && !ctx.offline->retire_sources(sourceGraceNs)) {
         // A platform opener/decoder may not honor cancellation. Publishing
         // failure/cancel must not join it. The session, callbacks and immutable
         // sources stay owned; next admission polls at most two quarantines.
@@ -18393,7 +18520,131 @@ Status Engine::render_export_frame(FrameIndex time, const OffscreenTarget& targe
     return c.frozenAssetStatus.ok() ? result : c.frozenAssetStatus;
 }
 
+
+// =============================================================================
+//  18/11/2026: o MIX do áudio do export numa thread própria, à frente do vídeo.
+//  Antes a thread do encoder mixava (decodificar as fontes, efeitos) o som de
+//  cada quadro entre um write_video e o próximo: o tempo do mix somava ao do
+//  encoder em todo quadro. Agora uma thread mixa até 2 s à frente, na MESMA
+//  sequência de pedaços de antes (limites de quadro, no máximo 4096 amostras),
+//  com o mesmo estado de efeitos — os bytes são os mesmos. O sink continua
+//  sendo chamado só pela thread do encoder (write_audio do pedaço já pronto).
+//  A espera do encoder pelo mix não bate o coração: o mixer bate quando anda
+//  (mix → encoderBeatNs), e um decoder de áudio preso ainda dispara o vigia.
+// =============================================================================
+struct Engine::ExportContext::AudioPremix {
+    struct Chunk { i64 start = 0; u32 n = 0; std::vector<i16> pcm; };
+    static constexpr i64 kAheadSamples = static_cast<i64>(audio::kMixRate) * 2;
+    static constexpr u32 kChunk = 4096;
+
+    ExportContext& ctx;
+    i64 total = 0;
+    std::mutex mutex;
+    std::condition_variable wake;
+    std::deque<Chunk> ready;
+    i64 buffered = 0;
+    Status status = OkStatus;
+    bool stop = false, done = false;
+    std::thread thread;
+
+    explicit AudioPremix(ExportContext& c) noexcept : ctx(c) {}
+    ~AudioPremix() { shutdown(); }
+
+    bool start(i64 totalSamples) noexcept {
+        total = totalSamples;
+        thread = std::thread([this] { run(); });   // sem exceções (-fno-exceptions)
+        return true;
+    }
+    void shutdown() noexcept {
+        { std::lock_guard<std::mutex> lock(mutex); stop = true; }
+        wake.notify_all();
+        if (thread.joinable()) thread.join();
+    }
+    void fail(Status s) noexcept {
+        { std::lock_guard<std::mutex> lock(mutex); if (status.ok()) status = s; done = true; }
+        wake.notify_all();
+    }
+    void run() noexcept {
+        set_current_thread_name("aurea-export-aud");
+        set_current_thread_priority(ThreadPriority::Export);
+        std::vector<f32> mix;
+        mix.resize(static_cast<usize>(kChunk) * audio::kMixChannels);
+        i64 written = ctx.audioWritten;
+        for (u32 frame = ctx.startFrame; written < total; ++frame) {
+            const i64 until = std::min<i64>(total, audio::frame_to_sample(static_cast<i64>(frame) + 1, ctx.fps));
+            if (until <= written) continue;
+            // Uma fonte de blocos por quadro, como write_export_audio fazia.
+            OfflineAudioBlockSource blocks(*ctx.audioCache, ctx.cancelRequested, &ctx.encoderBeatNs);
+            while (written < until) {
+                {
+                    std::unique_lock<std::mutex> lock(mutex);
+                    wake.wait(lock, [&] { return stop || buffered < kAheadSamples; });
+                    if (stop) return;
+                }
+                if (ctx.cancelRequested.load(std::memory_order_acquire)) { fail(Errc::Cancelled); return; }
+                if (!ctx.offlineAudio) { fail(Errc::InvalidState); return; }
+                const u32 n = static_cast<u32>(std::min<i64>(kChunk, until - written));
+                blocks.begin_chunk();
+                const Status mixed = ctx.offlineAudio->mix(written, n, blocks, mix.data(),
+                    nullptr, &ctx.audioFx, &ctx.cancelRequested, &ctx.encoderBeatNs);
+                if (!blocks.status().ok()) { fail(blocks.status()); return; }
+                if (!mixed.ok()) { fail(mixed); return; }
+                Chunk chunk;
+                chunk.start = written;
+                chunk.n = n;
+                chunk.pcm.resize(static_cast<usize>(n) * audio::kMixChannels);
+                audio::to_pcm16(mix.data(), static_cast<usize>(n) * audio::kMixChannels, chunk.pcm.data());
+                {
+                    std::lock_guard<std::mutex> lock(mutex);
+                    ready.push_back(std::move(chunk));
+                    if (done) { wake.notify_all(); return; }
+                    buffered += n;
+                }
+                wake.notify_all();
+                written += n;
+            }
+        }
+        { std::lock_guard<std::mutex> lock(mutex); done = true; }
+        wake.notify_all();
+    }
+    /// Thread do encoder: o próximo pedaço pronto (espera o mixer, olhando o cancelar).
+    Status take(Chunk& out) noexcept {
+        std::unique_lock<std::mutex> lock(mutex);
+        for (;;) {
+            if (!ready.empty()) {
+                out = std::move(ready.front());
+                ready.pop_front();
+                buffered -= out.n;
+                lock.unlock();
+                wake.notify_all();
+                return OkStatus;
+            }
+            if (!status.ok()) return status;
+            if (done) return Status{Errc::InvalidState, "o mix do audio do export terminou antes do video"};
+            if (ctx.cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
+            wake.wait_for(lock, std::chrono::milliseconds(20));
+        }
+    }
+};
+
 Status Engine::write_export_audio(ExportContext& ctx, i64 untilSample) noexcept {
+    if (ctx.premix) {
+        // O som até `untilSample` já vem mixado (os pedaços terminam nos
+        // mesmos limites de quadro): só a entrega ao sink fica aqui.
+        while (ctx.audioWritten < untilSample) {
+            ctx.enter(ExportWorkerPhase::AudioMix);
+            ExportContext::AudioPremix::Chunk chunk;
+            if (const Status s = ctx.premix->take(chunk); !s.ok()) return s;
+            if (chunk.start != ctx.audioWritten || ctx.audioWritten + chunk.n > untilSample)
+                return Status{Errc::InvalidState, "pedaco de audio do export fora de ordem"};
+            ctx.enter(ExportWorkerPhase::AudioWrite);
+            if (ctx.cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
+            const i64 ptsUs = audio::sample_to_ns(ctx.audioWritten) / 1000;
+            if (const Status s = ctx.sink->write_audio(chunk.pcm.data(), chunk.n, ptsUs); !s.ok()) return s;
+            ctx.audioWritten += chunk.n;
+        }
+        return OkStatus;
+    }
     OfflineAudioBlockSource blocks(*ctx.audioCache, ctx.cancelRequested, &ctx.encoderBeatNs);
     constexpr u32 kChunk = 4096;
     ctx.audioMix.resize(static_cast<usize>(kChunk) * audio::kMixChannels);
@@ -18451,7 +18702,10 @@ void Engine::log_export_profile() noexcept {
 
 void Engine::export_thread_main() noexcept {
     set_current_thread_name("aurea-export");
+    set_current_thread_priority(ThreadPriority::Export);   // 18/11/2026: ver export_encoder_main
     ExportContext& ctx = *exportCtx_;
+    PerformanceHintSession hint;
+    (void)hint.open_for_current_thread(static_cast<i64>(1e9 / std::max(1.0, ctx.fps)));
     ctx.producerBeatNs.store(monotonic_ns(), std::memory_order_release);
     ctx.producerBusy.store(true, std::memory_order_release);
     OffscreenTarget target;
@@ -18483,6 +18737,16 @@ void Engine::export_thread_main() noexcept {
             // on a mobile/software GPU. Poll in cancellable slices; keep a
             // finite deadline for a hung driver without dropping this frame.
             if (const Status s = wait_export_gpu(slot.gpuFrame); !s.ok()) return s;
+            // O quadro inteiro vai num envio só (a CPU já grava o próximo). No
+            // driver Qualcomm (KGSL), um envio acima de ~2 s reseta a GPU: quadro
+            // que fez a CPU esperar mais de 400 ms pela GPU passa o resto deste
+            // export a um passe por envio, antes de chegar perto do limite.
+            if (gpu_->capabilities().vendorId == 0x5143u && !gpu_->export_pass_split()
+                && monotonic_ns() - r0 > 400'000'000ull) {
+                AUREA_LOG_WARN("export: quadro %u esperou a GPU %.0f ms; um passe por envio (limite do driver)",
+                               slot.frame, static_cast<f64>(monotonic_ns() - r0) / 1e6);
+                gpu_->set_export_pass_split(true);
+            }
             // Memória não coerente: invalida para a CPU ver o que a GPU
             // escreveu (o ponteiro é o mesmo; coerente = nada a fazer).
             void* py = nullptr;
@@ -18540,9 +18804,10 @@ void Engine::export_thread_main() noexcept {
                                i, textures, static_cast<unsigned long long>((before > after ? before - after : 0) / 1024));
             }
         }
-        // Calor (§37): um quadro em voo só — menos CPU e GPU ao mesmo tempo.
-        // Resolução, fps, efeitos e amostras NÃO mudam.
-        const bool hot = thermalDegrade_.load(std::memory_order_acquire);
+        // Calor CRÍTICO (§37): um quadro em voo só — menos CPU e GPU ao mesmo
+        // tempo. Resolução, fps, efeitos e amostras NÃO mudam. Morno/quente
+        // (Serious, throttling) não serializa mais: o sistema já baixou o clock.
+        const bool hot = exportThermalSerial_.load(std::memory_order_acquire);
         u32 allowed = ctx.scheduler.admission_limit(memory_.pressure(), monotonic_ns() < osMemoryWarningUntilNs_.load(std::memory_order_acquire),
                                                     hot, monotonic_ns());
         if (ctx.queue && config_.enableTrackedGpuAdmission) {
@@ -18550,9 +18815,12 @@ void Engine::export_thread_main() noexcept {
             // scene. This changes concurrency, never shadows/blur or pixels.
             const auto residency = gpu_->memory_stats();
             const u64 budget = export_budget_bytes();   // 0.5.3 (P0-7)
-            if (std::max(residency.usedBytes, residency.reservedBytes) > budget * 3 / 4) {
+            // 18/11/2026: só ACIMA do orçamento (antes 3/4): o orçamento já é a
+            // fatia segura do aparelho, e a fila cheia é o que deixa a GPU e o
+            // encoder trabalhando juntos.
+            if (std::max(residency.usedBytes, residency.reservedBytes) > budget) {
                 if (allowed != 1 && previousAdmission != 1)
-                    AUREA_LOG_INFO("export: residencia da GPU %llu/%llu MB (usado/reservado) acima de 3/4 de %llu MB",
+                    AUREA_LOG_INFO("export: residencia da GPU %llu/%llu MB (usado/reservado) acima de %llu MB",
                                    static_cast<unsigned long long>(residency.usedBytes >> 20),
                                    static_cast<unsigned long long>(residency.reservedBytes >> 20),
                                    static_cast<unsigned long long>(budget >> 20));
@@ -18615,6 +18883,7 @@ void Engine::export_thread_main() noexcept {
         if (!result.ok()) break;
         slot.submitNs = renderStarted;
         slot.renderCpuNs = monotonic_ns() - renderStarted;
+        hint.report(static_cast<i64>(slot.renderCpuNs));
         inflight.push_back(si);
     }
     // Fim da timeline: entrega o que ainda está na GPU.
@@ -19041,7 +19310,13 @@ void Engine::export_encoder_hyper_loop(ExportContext& ctx) noexcept {
 
 void Engine::export_encoder_main() noexcept {
     set_current_thread_name("aurea-export-enc");
+    // 18/11/2026: o aparelho inteiro para o export — prioridade alta (Android
+    // nice -8, iOS userInitiated) e a dica de desempenho do sistema (Android
+    // 13+): o escalonador sobe o clock da CPU para o quadro caber no tempo alvo.
+    set_current_thread_priority(ThreadPriority::Export);
     ExportContext& ctx = *exportCtx_;
+    PerformanceHintSession hint;
+    (void)hint.open_for_current_thread(static_cast<i64>(1e9 / std::max(1.0, ctx.fps)));
     ctx.beat();
     // Saída do worker (qualquer `return` abaixo): ELE fecha o arquivo (finish)
     // ou o aborta — toda chamada ao sink fica nesta thread, e o produtor só
@@ -19115,7 +19390,9 @@ void Engine::export_encoder_main() noexcept {
                         c.validatedFrames.store(0, std::memory_order_relaxed);
                         expected.validatedFrames = &c.validatedFrames;
                         expected.strict = c.strictVerification;
-                        expected.decodeThreads = c.safeMode ? 2 : 4;
+                        // Todos os núcleos (até 8) na validação: o render já acabou.
+                        expected.decodeThreads = c.safeMode ? 2
+                            : static_cast<int>(std::clamp(std::thread::hardware_concurrency(), 2u, 8u));
                         if (fin.ok()) fin = c.sink->validate_output(expected);
                         if (c.abandoned_worker()) { retiredExit(); return; }
                         if (const char* warned = c.sink->validation_warnings(); fin.ok() && warned && *warned)
@@ -19153,6 +19430,18 @@ void Engine::export_encoder_main() noexcept {
     if (ctx.graphWanted) {
         export_encoder_hyper_loop(ctx);
         return;
+    }
+    // Mix do áudio à frente, numa thread própria (ExportContext::AudioPremix).
+    // Sai ANTES do workerExit: a montagem do registro mixa de novo na hora.
+    ExportContext::AudioPremix premix(ctx);
+    struct PremixLink {
+        ExportContext& c;
+        ExportContext::AudioPremix& p;
+        ~PremixLink() { c.premix = nullptr; p.shutdown(); }
+    } premixLink{ctx, premix};
+    if (ctx.audioSnap && ctx.offlineAudio && ctx.audioCache && (ctx.packetLogPath.empty() || ctx.startFrame == 0)) {
+        const i64 totalSamples = audio::frame_to_sample(static_cast<i64>(ctx.frames), ctx.fps);
+        if (ctx.audioWritten < totalSamples && premix.start(totalSamples)) ctx.premix = &premix;
     }
     u32 sinceLog = 0;
     u64 logWrite = 0, logRead = 0, logRender = 0, logDecode = 0;
@@ -19220,6 +19509,7 @@ void Engine::export_encoder_main() noexcept {
             ctx.audioNs.fetch_add(monotonic_ns() - w1, std::memory_order_relaxed);
         }
         ctx.leave();
+        hint.report(static_cast<i64>(monotonic_ns() - w0));
         if (ctx.queue) {
             if (s.ok()) { if (!slotReleased) s = ctx.queue->encoded(si, i); }
             else ctx.queue->fail(s);
@@ -19557,7 +19847,12 @@ Status Engine::await_cancelled_prerender_worker(u64 deadlineNs, bool forExport) 
 
 u32 Engine::bump_model_revision_locked() noexcept {
     const u32 before=modelRevision_.fetch_add(1, std::memory_order_acq_rel);
-    invalidate_prerender();
+    // 1.0.2: a edição vai para o livro por trecho; o PreRender só sai quando
+    // nenhum quadro dele continua valendo (note_model_edit_locked).
+    if (pendingEditScoped_) editLedger_.touch(pendingEditFrom_, pendingEditTo_);
+    else editLedger_.touch_all();
+    pendingEditScoped_ = false;
+    note_model_edit_locked();
     return before;
 }
 
@@ -19638,6 +19933,8 @@ Status Engine::start_prerender(i32 direction, u64 groupLayer) noexcept {
         return p.complete ? OkStatus : Status{Errc::Busy, "PreRender em andamento"};
     }
     preRenderCancel_.store(false, std::memory_order_release);
+    preRenderGeneration_.fetch_add(1, std::memory_order_acq_rel);
+    preRenderDivisor_.store(0, std::memory_order_release);
     {
         std::lock_guard lock(preRenderStateMutex_);
         preRenderProgress_ = {}; preRenderProgress_.running = true; preRenderProgress_.direction = direction;
@@ -19654,7 +19951,13 @@ void Engine::cancel_prerender() noexcept { invalidate_prerender(); request_rende
 PreRenderProgress Engine::query_prerender_progress() noexcept {
     {
         std::unique_lock lock(modelMutex_, std::try_to_lock);
-        if (lock.owns_lock()) (void)prerender_valid_locked();
+        if (lock.owns_lock()) {
+            (void)prerender_valid_locked();
+            // 1.0.2: trechos que edições desatualizaram (tocam ao vivo).
+            const bool ours = !preRenderSnapshot_.empty() && preRenderSnapshotSession_ == projectSession_
+                && preRenderSnapshotGeneration_ == preRenderGeneration_.load(std::memory_order_acquire);
+            preRenderDirty_.store(ours ? editLedger_.dirty_segments(preRenderSnapshot_) : 0u, std::memory_order_release);
+        }
     }
     const auto stats = preRenderCache_->stats();
     if (stats.lastError != Errc::Ok && stats.lastError != Errc::Cancelled && stats.lastError != Errc::Busy
@@ -19666,7 +19969,78 @@ PreRenderProgress Engine::query_prerender_progress() noexcept {
     std::lock_guard lock(preRenderStateMutex_);
     auto p = preRenderProgress_;
     p.diskBytes = stats.diskBytes; p.residentBytes = stats.residentBytes + stats.workingBytes;
+    p.dirtySegments = p.complete || p.running ? preRenderDirty_.load(std::memory_order_acquire) : 0u;
     return p;
+}
+
+// 1.0.2 Pre Render & Pre Export: o pré-export é uma sessão comum do export de
+// vídeo (start_export_checked com o trecho); aqui só o que precisa do contexto.
+void Engine::poll_preexport() noexcept {
+    u64 id = 0;
+    {
+        std::lock_guard state(preRenderStateMutex_);
+        if (!preExport_.running) return;
+        id = preExport_.id;
+    }
+    bool ours = false, finished = false;
+    Errc result = Errc::Ok;
+    u64 done = 0, total = 0;
+    {
+        std::lock_guard<std::mutex> context(exportContextMutex_);
+        if (exportCtx_ && exportCtx_->preExportId == id) {
+            ours = true;
+            std::lock_guard<std::mutex> pl(exportCtx_->mutex);
+            finished = exportCtx_->progress.finished && !exportCtx_->progress.running;
+            result = exportCtx_->progress.result;
+            done = exportCtx_->progress.framesDone;
+            total = exportCtx_->progress.framesTotal;
+        }
+    }
+    // A partida ainda não publicou o contexto: nada a fechar.
+    if (!ours && preExportStarting_.load(std::memory_order_acquire)) return;
+    std::string discard;
+    {
+        std::lock_guard state(preRenderStateMutex_);
+        if (!preExport_.running || preExport_.id != id) return;
+        if (ours) {
+            preExport_.framesDone = done;
+            if (total) preExport_.framesTotal = total;
+        }
+        if (!ours || finished) {
+            preExport_.running = false;
+            std::error_code ec;
+            const auto bytes = ours && result == Errc::Ok
+                ? std::filesystem::file_size(std::filesystem::u8path(preExport_.path), ec) : 0;
+            if (ours && result == Errc::Ok && !ec && bytes > 0) {
+                preExport_.complete = true;
+                preExport_.bytes = static_cast<u64>(bytes);
+                preExport_.error = 0;
+            } else {
+                // Outro export tomou o contexto, cancelado ou falhou: sem vídeo pela metade.
+                preExport_.error = !ours ? static_cast<i32>(Errc::Cancelled)
+                    : result == Errc::Ok ? static_cast<i32>(Errc::IoError) : static_cast<i32>(result);
+                discard = preExport_.path;
+                preExport_.path.clear();
+            }
+        }
+    }
+    if (!discard.empty()) discard_preexport_file(discard);
+}
+
+void Engine::cancel_preexport() noexcept {
+    u64 id = 0;
+    {
+        std::lock_guard state(preRenderStateMutex_);
+        if (!preExport_.running) return;
+        id = preExport_.id;
+    }
+    bool ours = false;
+    {
+        std::lock_guard<std::mutex> context(exportContextMutex_);
+        ours = exportCtx_ && exportCtx_->preExportId == id;
+    }
+    if (ours || preExportStarting_.load(std::memory_order_acquire)) (void)cancel_export();
+    request_render();
 }
 
 Status Engine::start_image_export(const ImageExportSettings& settings, const char* outputPath) noexcept {
@@ -19674,7 +20048,8 @@ Status Engine::start_image_export(const ImageExportSettings& settings, const cha
 }
 
 Status Engine::start_image_export_internal(const ImageExportSettings& settings, const char* outputPath,
-                                          i32 preRenderDirection, u64 preRenderGroupLayer) noexcept {
+                                          i32 preRenderDirection, u64 preRenderGroupLayer,
+                                          const PreRenderRangeRequest* preRenderRange) noexcept {
     std::lock_guard<std::mutex> lifecycle(exportLifecycleMutex_);
     if (state_ != EngineState::Ready && state_ != EngineState::Rendering) return Errc::InvalidState;
     if (!project_) return Errc::InvalidState;
@@ -19780,11 +20155,20 @@ Status Engine::start_image_export_internal(const ImageExportSettings& settings, 
         // inflado a horas; agora para no fim da ultima camada.
         // Lote K: com área de trabalho, o PreRender cobre só ela (o cache guarda
         // quadros a partir do começo dela; a prévia repete dentro dela).
-        if (ctx->preRenderMode && comp->has_work_area()) {
+        // 1.0.2: o painel Pre Render & Pre Export manda o trecho dele (o
+        // escolhido com Início/Fim, a área de trabalho ou o conteúdo).
+        const bool rangeRequest = ctx->preRenderMode && preRenderRange && !preRenderGroupLayer
+            && preRenderRange->out > preRenderRange->in;
+        i64 rangeSpan = 0;
+        if (rangeRequest) {
+            const i64 end = std::clamp<i64>(preRenderRange->out, 1, comp->duration().value);
+            ctx->preRenderFirst = std::clamp<i64>(preRenderRange->in, 0, end - 1);
+            rangeSpan = end - ctx->preRenderFirst;
+        } else if (ctx->preRenderMode && comp->has_work_area()) {
             const i64 end = std::clamp<i64>(comp->work_out(), 1, comp->duration().value);
             ctx->preRenderFirst = std::clamp<i64>(comp->work_in(), 0, end - 1);
         }
-        const i64 span = ctx->preRenderMode
+        const i64 span = rangeRequest ? rangeSpan : ctx->preRenderMode
             ? (comp->has_work_area()
                 ? std::clamp<i64>(comp->work_out(), 1, comp->duration().value) - ctx->preRenderFirst
                 : std::clamp<i64>(navigation_end_locked(comp), 1, comp->duration().value))
@@ -19809,7 +20193,19 @@ Status Engine::start_image_export_internal(const ImageExportSettings& settings, 
                 static_cast<u32>(std::llround(comp->fps() * 1000.0)), 1000u, 1u};
             preRenderProgress_.width = plan.width; preRenderProgress_.height = plan.height;
             preRenderProgress_.framesTotal = plan.frames;
+            preRenderProgress_.firstFrame = ctx->preRenderFirst;
+            preRenderProgress_.endFrame = ctx->preRenderFirst + span;
+            preRenderProgress_.divisor = preRenderDivisor_.load(std::memory_order_acquire);
             preRenderFirstFrame_.store(ctx->preRenderFirst, std::memory_order_release);
+        }
+        if (ctx->preRenderMode) {
+            // 1.0.2: o retrato do livro por trecho no MESMO instante em que o
+            // projeto é congelado (modelMutex_). O grupo segue a regra antiga
+            // (qualquer edição o descarta): o cache dele é de outra composição.
+            preRenderSnapshot_ = preRenderGroupLayer ? prerender::EditLedger::Snapshot{}
+                : editLedger_.capture(ctx->preRenderFirst, ctx->preRenderFirst + span);
+            preRenderSnapshotSession_ = projectSession_;
+            preRenderSnapshotGeneration_ = preRenderGeneration_.load(std::memory_order_acquire);
         }
         freezeSettings.fps = plan.fps;
         freezeSettings.trimToContent = settings.trimToContent;
@@ -20138,6 +20534,11 @@ void Engine::image_export_thread_main() noexcept {
         if (owner && result.ok()) result = preRenderCache_->finish(ctx.preRenderToken);
         if (owner && !result.ok()) invalidate_prerender(result.raw());
         if (owner && result.ok()) {
+            // 1.0.2: quanto o cache gravou por pixel neste aparelho (o "cabe ~Xs").
+            const auto written = preRenderCache_->stats();
+            if (written.framesWritten && ctx.width && ctx.height)
+                preRenderMeasuredBpp_.store(static_cast<f64>(written.diskBytes)
+                    / (static_cast<f64>(written.framesWritten) * ctx.width * ctx.height), std::memory_order_release);
             std::lock_guard state(preRenderStateMutex_);
             if (preRenderToken_.load(std::memory_order_acquire) == ctx.preRenderToken) {
                 preRenderProgress_.running = false;
@@ -20349,6 +20750,66 @@ bool project_has_expressions(const Project& project) noexcept {
     return found;
 }
 
+// 1.0.2 (Pre Render & Pre Export): o trecho [de, até) da composição atual que
+// um comando de UMA camada pode mudar, ou nada (qualquer quadro pode mudar).
+// Só comandos de propriedade/keyframe/máscara/efeito/texto de uma camada que
+// preview_local_range considera isolada; um quadro de folga (desfoque de
+// movimento) já vem de lá. Com o Modo Edição (ímã), aparar/cortar empurra
+// quem vem depois: o trecho vai até o fim.
+std::optional<std::pair<i64, i64>> scoped_command_range(const Command& cmd, const Composition* comp,
+                                                        const Project& project, const EffectRegistry& registry,
+                                                        bool inlineGroup) noexcept {
+    if (!comp || inlineGroup) return std::nullopt;
+    LayerId id{};
+    bool ripple = false;
+    switch (cmd.type) {
+        case CommandType::LayerSetTimeRange: id = cmd.layer_ref.layer; ripple = true; break;
+        case CommandType::LayerSplit: id = cmd.layer_ref.layer; ripple = true; break;
+        case CommandType::LayerSetVisible: id = cmd.layer_visible.layer; break;
+        case CommandType::LayerSetBlendMode: id = cmd.layer_blend.layer; break;
+        case CommandType::LayerSetTransform: id = cmd.transform.layer; break;
+        case CommandType::LayerSetPosition: id = cmd.position.layer; break;
+        case CommandType::LayerSetScale: id = cmd.scale.layer; break;
+        case CommandType::LayerSetRotation: id = cmd.rotation.layer; break;
+        case CommandType::LayerSetAnchor: id = cmd.anchor.layer; break;
+        case CommandType::LayerSetOpacity: id = cmd.opacity.layer; break;
+        case CommandType::LayerSetSkew: id = cmd.skew.layer; break;
+        case CommandType::KeyframeInsert:
+        case CommandType::KeyframeDelete:
+        case CommandType::KeyframeSetValue: id = cmd.keyframe.track.layer; break;
+        case CommandType::KeyframeMove: id = cmd.keyframe_move.track.layer; break;
+        case CommandType::KeyframeSetInterpolation:
+        case CommandType::KeyframeSetBezier:
+        case CommandType::KeyframeSetEasing: id = cmd.keyframe_interp.track.layer; break;
+        case CommandType::MaskSetOperation: id = cmd.mask_op.layer; break;
+        case CommandType::MaskSetFeather:
+        case CommandType::MaskSetExpansion:
+        case CommandType::MaskSetOpacity: id = cmd.mask_scalar.layer; break;
+        case CommandType::MaskSetPath: id = cmd.mask_point.layer; break;
+        case CommandType::MaskSetPathCommit: id = cmd.mask_commit.layer; break;
+        case CommandType::EffectSetEnabled: id = cmd.effect_enabled.layer; break;
+        case CommandType::EffectSetParam: id = cmd.effect_param.layer; break;
+        case CommandType::EffectSetColorParam: id = cmd.effect_color.layer; break;
+        case CommandType::TextSetColor:
+        case CommandType::TextSetStrokeColor: id = cmd.text_color.layer; break;
+        case CommandType::TextSetAlignment: id = cmd.text_align.layer; break;
+        case CommandType::TextSetStrokeWidth: id = cmd.text_stroke_width.layer; break;
+        default: return std::nullopt;
+    }
+    const Layer* layer = comp->layer(id);
+    if (!layer || layer->kind == LayerKind::Camera || layer->kind == LayerKind::Light) return std::nullopt;
+    auto range = preview_local_range(*comp, id, registry);
+    if (!range || project_has_expressions(project)) return std::nullopt;
+    if (cmd.type == CommandType::LayerSetTimeRange) {
+        range->first = std::min(range->first, cmd.layer_range.start.value - 1);
+        range->second = std::max(range->second, cmd.layer_range.end.value + 1);
+    }
+    if (ripple && comp->edit_mode()) range->second = std::numeric_limits<i64>::max() / 4;
+    range->first = std::max<i64>(0, range->first);
+    if (range->second <= range->first) return std::nullopt;
+    return range;
+}
+
 bool command_valid(const Command& c) noexcept {
     switch (c.type) {
         case CommandType::LayerCreate:
@@ -20540,6 +21001,18 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         const bool previewNeutral = cmd.type == CommandType::LayerSetLocked
             || cmd.type == CommandType::LayerSetMagnetic
             || (cmd.type == CommandType::LayerSetName && !project_has_expressions(*project_));
+        // 1.0.2 (Pre Render & Pre Export): uma edição de UMA camada que ninguém
+        // olha em outro instante muda só os quadros dela — o livro por trecho
+        // guarda esse trecho e o PreRender/pré-export fora dele continua.
+        pendingEditScoped_ = false;
+        if (!previewNeutral) {
+            if (const auto range = scoped_command_range(cmd, comp, *project_, effectRegistry_,
+                    inlineEditGroup_.load(std::memory_order_acquire) != 0)) {
+                pendingEditScoped_ = true;
+                pendingEditFrom_ = range->first;
+                pendingEditTo_ = range->second;
+            }
+        }
         if (previewNeutral) {
             const u32 before = modelRevision_.fetch_add(1, std::memory_order_acq_rel);
             previewRangeEdits_.fetch_add(1, std::memory_order_acq_rel);

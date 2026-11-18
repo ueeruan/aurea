@@ -40,7 +40,12 @@ inline constexpr u64 kExportMemoryFloorBytes = 128ull << 20;
         if (totalBytes <= 3200 * MB) cap = 384 * MB;        // até 3 GB
         else if (totalBytes <= 4608 * MB) cap = 512 * MB;   // 4 GB
         else if (totalBytes <= 7168 * MB) cap = 768 * MB;   // 6 GB
-        else cap = 1024 * MB;                               // 8 GB ou mais (o teto do iOS)
+        // 18/11/2026: o aparelho grande usa a memória que tem (antes 1 GB em
+        // todo aparelho de 8 GB ou mais: o 4K de um topo de linha rodava com a
+        // fila de um intermediário). Ainda limitado pelo orçamento medido do
+        // processo (1/4 do disponível) e pelos degraus depois de morte.
+        else if (totalBytes <= 10240 * MB) cap = 1536 * MB; // 8 GB
+        else cap = 2048 * MB;                               // 12 GB ou mais
     }
     if (pointerBits < 64) cap = cap ? std::min<u64>(cap, 512 * MB) : 512 * MB;
     return cap;

@@ -15,11 +15,20 @@
 //      Channel Split offsets; Channel Scale mapping and strength; the Color
 //      Glitch byte-stream recurrence (compute pass, exact); Glitch Block copy
 //      rule; the module order and transfer-mode/opacity composition.
+//  Pixel Streak (run detection by luma-key distance, descending sort of each
+//    run except its last pixel, rows picked by the noise cutoff) runs in a
+//    compute pass; Glitch Slice band geometry and Glitch Block cells (noise
+//    at the cell corner px, transparent outside the copied cells) follow the
+//    native rules. The Color Glitch byte stream walks AE's world layout,
+//    rows padded to a multiple of 16 px (measured in AE 26.5).
 //  Aurea approximations (native code not reproduced): Channel Scale ordering
-//    and Fill Gaps (gather instead of scatter), Pixel Streak segments, the
-//    WebP slice re-encode with a flipped bit, JPEG and Floyd–Steinberg.
-//  The 8-bit domain holds the linear working-space values, as AE does for an
-//  8 bpc effect in a linearized 32 bpc project (the oracle frames).
+//    and Fill Gaps (gather instead of scatter), equal-key order in the streak
+//    sort, the WebP slice re-encode with a flipped bit, JPEG and Floyd–Steinberg.
+//  The 8-bit domain and the transfer modes use sRGB-encoded values, as AE
+//  does for this 8 bpc-only effect in a standard (non-linear) project — the
+//  comp it is used in (verified on the AE 26.5 photo frames in
+//  build/reference/glitchify-ae). The earlier batch-C oracle was a
+//  linearized 32 bpc project, where the bytes are linear (layer.z = 1).
 //
 //  The legacy aurea.glitch.glitchify keeps its 60 slots and old output.
 // =============================================================================
@@ -244,6 +253,7 @@ public:
         out.push_back(PipelineKey::fullscreen(ShaderId::effects_glitchify_reference_base_frag, work));
         out.push_back(PipelineKey::fullscreen(ShaderId::effects_glitchify_reference_frag, work));
         out.push_back(PipelineKey::compute_shader(ShaderId::effects_glitchify_reference_corrupt_comp));
+        out.push_back(PipelineKey::compute_shader(ShaderId::effects_glitchify_reference_streak_comp));
     }
     void resolve_resources(EffectEval& e) const noexcept override {
         e.aux = {};
@@ -281,7 +291,9 @@ public:
 
         Uniforms u{};
         u.region = {input.region.x, input.region.y, std::max(input.region.w, 1e-3f), std::max(input.region.h, 1e-3f)};
-        u.layer = {W, H, 1, z0};   // bytes = linear working-space values (AE linearized project, as the oracle)
+        // Bytes and transfer modes in the sRGB encoding of a standard 8 bpc AE
+        // project (layer.z = 0), the comp the plugin is used in.
+        u.layer = {W, H, 0, z0};
         u.noise = {static_cast<f32>(octaves), lac, gain, amount};
         u.stage.x = e.b(kShowNoise) ? 1.f : 0.f;
 
@@ -341,17 +353,26 @@ public:
         u.enables = {e.b(kChannelEnabled) ? 1.f : 0.f, color ? 1.f : 0.f, e.b(kImageEnabled) ? 1.f : 0.f,
                      e.b(kCompressionEnabled) ? 1.f : 0.f};
         // Image Glitch.
-        u.streak = {std::round(e.f(kPixelStreak) * 0.4f * amount * scaleX), e.b(kVerticalSort) ? 1.f : 0.f,
+        // Pixel Streak (0x180066F40): the strength is a luma-key distance, not a length.
+        u.streak = {std::max(0.0f, e.f(kPixelStreak)) * 0.4f * amount, e.b(kVerticalSort) ? 1.f : 0.f,
                     e.b(kUseNoise) ? 1.f : 0.f, std::clamp(e.f(kNoiseCutoff), 0.0f, 100.0f)};
+        // Glitch Slice (0x18005E0E0): band top = trunc(Position·(H − 1)) + wiggle(0x2c, ×4)
+        // · trunc((1 − a²)·Shift·H), mirrored back inside the layer; height = trunc(H·a).
         const f32 a = std::clamp(e.f(kSliceAmount), 0.0f, 100.0f) * 0.01f * amount;
         const f32 sliceSteps = std::clamp(e.f(kSliceSteps), 1.0f, 64.0f);
-        const f32 sliceCenter = e.f(kSlicePosition) * 0.01f * (H - 1) +
-            wig(0x2b67, 4.0f, sliceSteps) * (1 - a * a) * e.f(kSliceShift) * 0.01f * H;
-        const f32 bandH = a * H;
-        u.slice = {sliceCenter - bandH * 0.5f, bandH, std::clamp(e.f(kSliceOpacity), 0.0f, 100.0f) * 0.01f,
+        const f32 sliceShift = wig(0x2c, 4.0f, sliceSteps) *
+            std::trunc((1 - a * a) * (std::clamp(e.f(kSliceShift), 0.0f, 100.0f) * 0.01f * H));
+        const f32 sliceBase = std::trunc(std::clamp(e.f(kSlicePosition), 0.0f, 100.0f) * 0.01f * (H - 1));
+        f32 sliceTop = sliceBase + sliceShift;
+        sliceTop = (sliceTop < 0 || sliceTop >= H) ? std::clamp(std::trunc(sliceBase - sliceShift), 0.0f, H - 1) : std::trunc(sliceTop);
+        f32 bandH = a > 0 ? std::trunc(H * a) : 0.0f;
+        if (bandH + sliceTop >= H) bandH = std::max(0.0f, H - sliceTop - 1);
+        u.slice = {sliceTop, bandH, std::clamp(e.f(kSliceOpacity), 0.0f, 100.0f) * 0.01f,
                    1.0f - std::clamp(e.f(kSliceQuality), 0.0f, 100.0f) * 0.01f};
+        // Glitch Block (0x180065A50): integer cell size, threshold (1 − b²)·100.
         const f32 b = std::clamp(e.f(kBlockAmount), 0.0f, 100.0f) * 0.01f * amount;
-        u.block = {(1 - b * b) * 100.0f, std::min(std::max(0.0f, e.f(kBlockWidth)), W), std::min(std::max(0.0f, e.f(kBlockHeight)), H),
+        u.block = {(1 - b * b) * 100.0f, std::trunc(std::min(std::max(0.0f, e.f(kBlockWidth)), W)),
+                   std::trunc(std::min(std::max(0.0f, e.f(kBlockHeight)), H)),
                    static_cast<f32>(std::min(e.e(kBlockDirection), 2u))};
         u.block2 = {std::max(0.0f, e.f(kGrouping)), z0 * e.f(kBlockSpeed) / 25.0f,
                     std::clamp(e.f(kColorOpacity), 0.0f, 100.0f) * 0.01f, z0 * 4.0f};
@@ -385,28 +406,43 @@ public:
             return OkStatus;
         };
         if (e.b(kChannelEnabled)) if (const Status st = stage(1, base); !st.ok()) return st;
-        if (color) {
+        // A compute pass reading the running world into an r32f byte image
+        // (4 texels per pixel), `invocations` lanes of 64.
+        auto byte_pass = [&](const char* name, ShaderId shader, u32 invocations, FGTexture& bytes) -> Status {
             const FGTexture source = running;
-            const FGTexture bytes = byte_image(ctx, input.width * 4, input.height);
-            const auto pipeline = ctx.shaders().pipeline(PipelineKey::compute_shader(ShaderId::effects_glitchify_reference_corrupt_comp));
+            bytes = byte_image(ctx, input.width * 4, input.height);
+            const auto pipeline = ctx.shaders().pipeline(PipelineKey::compute_shader(shader));
             if (!pipeline.ok()) return pipeline.status();
             const auto sampler = ctx.shaders().sampler(CommonSampler::NearestClamp);
             const auto handle = *pipeline;
-            const u32 chains = static_cast<u32>(offsetBytes);
-            const u32 pass = ctx.graph().add_compute_pass("glitchify-ref-corrupt", PassStage::Effects,
-                [u, source, bytes, sampler, handle, chains](PassContext& pc) {
+            const FGTexture target = bytes;
+            const u32 pass = ctx.graph().add_compute_pass(name, PassStage::Effects,
+                [u, source, target, sampler, handle, invocations](PassContext& pc) {
                     pc.cmds.bind_pipeline(handle);
                     pc.cmds.bind_texture(0, pc.texture(source), sampler);
-                    pc.cmds.bind_storage_image(0, pc.texture(bytes));
+                    pc.cmds.bind_storage_image(0, pc.texture(target));
                     pc.cmds.set_uniforms(&u, sizeof(u));
-                    pc.cmds.dispatch((chains + 63u) / 64u, 1, 1);
+                    pc.cmds.dispatch((invocations + 63u) / 64u, 1, 1);
                 });
             ctx.graph().read(pass, source);
             ctx.graph().write_storage(pass, bytes);
+            return OkStatus;
+        };
+        if (color) {
+            FGTexture bytes;
+            if (const Status st = byte_pass("glitchify-ref-corrupt", ShaderId::effects_glitchify_reference_corrupt_comp,
+                                            static_cast<u32>(offsetBytes), bytes); !st.ok()) return st;
             if (const Status st = stage(2, bytes); !st.ok()) return st;
         }
         if (e.b(kImageEnabled)) {
-            if (u.streak.x >= 1.0f) if (const Status st = stage(3, base); !st.ok()) return st;
+            if (u.streak.x > 0.0f) {
+                // Pixel Streak sorts runs of each row (column) in place: one lane per line.
+                FGTexture bytes;
+                const u32 lines = u.streak.y > 0.5f ? input.width : input.height;
+                if (const Status st = byte_pass("glitchify-ref-streak", ShaderId::effects_glitchify_reference_streak_comp,
+                                                lines, bytes); !st.ok()) return st;
+                if (const Status st = stage(3, bytes); !st.ok()) return st;
+            }
             if (u.slice.y > 0.0f) if (const Status st = stage(4, base); !st.ok()) return st;
         }
         if (const Status st = stage(5, base); !st.ok()) return st;

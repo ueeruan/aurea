@@ -39,6 +39,9 @@ val androidOnly = listOf(
     "com/aurea/aurea/editor/RealCameraMotion.kt",
     "com/aurea/aurea/mocap/MocapDetector.kt",
     "com/aurea/aurea/state/ExportForegroundService.kt",
+    // AureaMCP fora do app (serviço, notificações, FCM): no PC a janela já é o processo.
+    "com/aurea/aurea/mcp/McpAgentService.kt",
+    "com/aurea/aurea/mcp/McpPushService.kt",
 ) + (findProperty("aureaExtraExcludes") as String? ?: "").split(',').map { it.trim() }.filter { it.isNotEmpty() } +
     file("android-excludes.txt").takeIf { it.exists() }?.readLines()
         ?.map { it.substringBefore('#').trim() }?.filter { it.isNotEmpty() }.orEmpty()

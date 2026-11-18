@@ -173,15 +173,18 @@ Status Engine::apply_import_timing(u64 layerId, i64 durationFrames, i64 sourceIn
     } else if (l->kind == LayerKind::Video && sourceInUs >= 0 && sourceOutUs > sourceInUs) {
         // A fonte em quadros da composição (o `offset` mora nessa unidade).
         i64 sourceFrames = 0;
+        i64 firstFrame = 0;   // 1.0.2: trecho importado começa na janela
         if (const Asset* a = project_->asset(l->source)) {
             const f64 assetFps = a->video.fps > 0.0 ? a->video.fps : (a->timebaseFps > 0.0 ? a->timebaseFps : fps);
             if (a->video.frameCount.value > 0)
                 sourceFrames = static_cast<i64>(std::ceil(static_cast<f64>(a->video.frameCount.value) * fps / assetFps - 1e-6));
+            firstFrame = static_cast<i64>(std::ceil(a->source_first_frame(fps) - 1e-6));
         }
         i64 in = std::llround(static_cast<f64>(sourceInUs) * fps / 1e6);
         i64 length = std::max<i64>(1, std::llround(static_cast<f64>(sourceOutUs - sourceInUs) * fps / 1e6));
         if (sourceFrames > 0) {
-            in = std::clamp<i64>(in, 0, std::max<i64>(0, sourceFrames - 1));
+            const i64 lo = std::min(firstFrame, std::max<i64>(0, sourceFrames - 1));
+            in = std::clamp<i64>(in, lo, std::max<i64>(lo, sourceFrames - 1));
             length = std::clamp<i64>(length, 1, std::max<i64>(1, sourceFrames - in));
         }
         l->offset = FrameIndex{in};

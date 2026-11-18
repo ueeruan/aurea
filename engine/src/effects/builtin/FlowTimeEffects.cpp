@@ -33,11 +33,14 @@ public:
     }
     void declare_parameters(ParameterRegistry& p) const override {
         static const char* const frames[] = {"Mais próximo", "Mistura", "Movimento"};
-        static const char* const quality[] = {"Rápida", "Boa", "Melhor"};
+        // 1.0.2: "Neural (IA)" — a rede RIFE monta o quadro no export e na
+        // prévia parada; na reprodução a prévia usa o fluxo da GPU (Melhor).
+        static const char* const quality[] = {"Rápida", "Boa", "Melhor", "Neural (IA)"};
         p.add_float("speed", "Velocidade", 50.0f, 5.0f, 400.0f, kAnimPct, "%");
         p.typed_range(1.0f, 1000.0f);
         p.add_enum("frames", "Quadros", frames, 3, 2);
-        p.add_enum("vectors", "Qualidade dos vetores", quality, 3, 1);
+        const u32 vectors = p.add_enum("vectors", "Qualidade dos vetores", quality, 4, 1);
+        p.set_tip(vectors, "Neural (IA): a rede de IA monta o quadro na exportação e na prévia parada; durante a reprodução a prévia usa os vetores da GPU.");
         p.add_float("motion_blur", "Desfoque de movimento", 0.0f, 0.0f, 200.0f, kAnimPct, "%");
         p.typed_range(0.0f, 400.0f);
         // 0.3.0 — o "substituir quadros duplicados" dos interpoladores de
@@ -49,6 +52,12 @@ public:
         const u32 sens = p.add_float("duplicate_sensitivity", "Sensibilidade", 10.0f, 0.0f, 100.0f, kParamPercent, "%");
         p.set_tip(sens, "Mais alta: quadros só parecidos também contam como repetidos.");
         p.add_section("duplicates", "Substituir quadros duplicados", {sens}, dup, true);
+        // 1.0.2 (filmagem real): onde os vetores não têm certeza, o quadro do
+        // meio pode MISTURAR os dois quadros (fantasma, nada entorta) ou
+        // confiar nos vetores e DEFORMAR (nítido, pode entortar um contorno).
+        // 50% = o quadro mais próximo deformado nessas áreas, sem fantasma.
+        const u32 bias = p.add_float("ghost_warp", "Fantasma ↔ Deformação", 50.0f, 0.0f, 100.0f, kAnimPct, "%");
+        p.set_tip(bias, "Para a esquerda: onde os vetores falham, os quadros se misturam (fantasma). Para a direita: confia nos vetores e deforma em vez de misturar.");
     }
     bool is_identity(const EffectEval&) const noexcept override { return true; }
 };

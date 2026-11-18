@@ -776,6 +776,15 @@ public:
         return Status{Errc::Timeout, "backend sem prova de conclusao do export"};
     }
 
+    /// Export (quadro offscreen): enviar cada passe num envio próprio, com a
+    /// CPU esperando a GPU entre eles. Só para o driver que reseta a GPU quando
+    /// um envio passa de ~2 s (Qualcomm KGSL num quadro 3D pesado). Desligado,
+    /// o quadro inteiro vai num envio e a CPU já grava o próximo. O backend
+    /// liga sozinho depois de um dispositivo perdido no export deste aparelho;
+    /// o motor liga quando mede um quadro longo num driver que precisa disso.
+    virtual void set_export_pass_split(bool split) noexcept { (void)split; }
+    [[nodiscard]] virtual bool export_pass_split() const noexcept { return false; }
+
     /// Número do último frame submetido (o `FrameBegin::frameNumber` dele).
     /// 0 = nenhum / backend sem essa noção.
     [[nodiscard]] virtual u64 last_submitted_frame() const noexcept { return 0; }

@@ -72,4 +72,22 @@
     <string name="mcp_device_media_denied">Permite el acceso a fotos y videos en los ajustes del sistema para usar la galería del dispositivo.</string>
     <string name="mcp_device_media_limited">Aurea solo ve las fotos y videos que elegiste.</string>
     <string name="mcp_device_media_manage">Cambiar la selección</string>
+    <!-- 18/11/2026: AureaMCP fora do app (serviço, notificações, push). -->
+    <string name="mcp_bg_title">Fuera de la app</string>
+    <string name="mcp_bg_body">Tus agentes siguen editando cuando sales de Aurea o apagas la pantalla. Una notificación muestra que el agente está trabajando y permite pausarlo o detenerlo. Con la app cerrada, los pedidos esperan en una cola y Aurea se despierta para hacerlos.</string>
+    <string name="mcp_bg_toggle">Seguir trabajando fuera de la app</string>
+    <string name="mcp_bg_running">Agente trabajando fuera de la app ahora</string>
+    <string name="mcp_bg_ready">Se activa solo cuando hay un agente conectado</string>
+    <string name="mcp_bg_notif_denied">Permite las notificaciones de Aurea para aprobar pedidos (como borrar un proyecto) con la app fuera de la pantalla.</string>
+    <string name="mcp_bg_limits">Android puede limitar el tiempo en segundo plano (en algunos dispositivos, unas 6 horas al día). Abrir Aurea lo renueva.</string>
+    <string name="mcp_bg_channel">Agente de IA (AureaMCP)</string>
+    <string name="mcp_bg_channel_confirm">Aprobaciones del agente de IA</string>
+    <string name="mcp_bg_notification_title">Aurea: agente de IA trabajando</string>
+    <string name="mcp_bg_notification_text">Tu agente puede editar en Aurea con la app fuera de la pantalla. Toca para abrir.</string>
+    <string name="mcp_bg_action_pause">Pausar</string>
+    <string name="mcp_bg_action_stop">Detener</string>
+    <string name="mcp_bg_timeout_title">El agente dejó de trabajar fuera de la app</string>
+    <string name="mcp_bg_timeout_text">Android limitó el tiempo en segundo plano por hoy. Abre Aurea para que el agente continúe.</string>
+    <string name="mcp_bg_wake_title">Un agente de IA quiere trabajar en Aurea</string>
+    <string name="mcp_bg_wake_text">Toca para abrir Aurea y continuar.</string>
 </resources>

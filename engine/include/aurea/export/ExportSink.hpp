@@ -55,6 +55,11 @@ struct VideoStreamConfig {
     /// R'G'B' num AHardwareBuffer (set_direct_surface_frame): a escada do
     /// Android tenta o degrau surface-direct antes do surface.
     bool directSurface = false;
+    /// Tentativa 1 da escada (safeMode 1): o MESMO encoder do aparelho, mesmo
+    /// perfil, taxa e tamanho, pela entrada por buffer — sem a Surface (Android)
+    /// nem o caminho sem cópia (iOS). Antes a tentativa 1 forçava Baseline:
+    /// a qualidade caía antes de trocar o caminho.
+    bool avoidSurface = false;
     /// finish closes the temporary file; independent validation must
     /// succeed before the startup gate atomically replaces the destination.
     bool validateBeforePublish = false;

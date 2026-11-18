@@ -3,21 +3,29 @@
 <!--
   Aurea / platform / ios / app / Aurea.entitlements
 
-  VAZIO DE PROPÓSITO. O Aurea não usa nenhuma capability dos entitlements:
+  Uma capability só, e a decisão fica registrada aqui:
 
-   · sem iCloud (os projetos são arquivos locais em Documents, como no Android);
-   · sem push, sem chaves de assinatura de app, sem grupos de app;
-   · sem background audio (o Android não tem serviço de reprodução em segundo
-     plano: o motor PAUSA ao ir para trás — ver Engine::suspend);
-   · sem App Sandbox (isto é iOS, não macOS).
+   · aps-environment (18/11/2026, AureaMCP fora do app): o alerta APNs que o
+     relay manda quando um agente de IA quer trabalhar com o app fechado
+     ("O agente quer editar 'Projeto X'"); o toque abre o app e a fila drena.
+     O DONO precisa ligar "Push Notifications" no App ID (Apple Developer →
+     Identifiers) — a assinatura automática com -allowProvisioningUpdates
+     costuma fazer isso sozinha — e criar a chave APNs (.p8) para o Worker.
+     "development" aqui; a exportação para a App Store/TestFlight troca para
+     "production" sozinha.
 
-  O arquivo existe porque o alvo do Xcode o referencia
-  (`CODE_SIGN_ENTITLEMENTS`): se algum dia entrar uma capability, o lugar é
-  este, e a decisão fica registrada.
+  Continua sem: iCloud (projetos são arquivos locais em Documents, como no
+  Android), grupos de app, background audio (o motor PAUSA ao ir para trás —
+  ver Engine::suspend), App Sandbox (isto é iOS). A GPU em segundo plano da
+  tarefa contínua (com.apple.developer.background-tasks.continued-processing.gpu)
+  NÃO foi pedida: o app só usa o que o aparelho e o perfil já permitem.
 
   A ASSINATURA (team, provisioning, certificado) NÃO ESTÁ AQUI: ela é do dono,
   preenchida no Xcode. Ver README.
 -->
 <plist version="1.0">
-<dict/>
+<dict>
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
 </plist>

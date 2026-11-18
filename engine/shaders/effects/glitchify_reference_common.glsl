@@ -108,7 +108,7 @@ float gx_noise_map(float x, float y, float z, float top) {
 
 // --- 8-bit domain --------------------------------------------------------------
 // The native effect is 8 bpc ARGB. Bytes are sRGB-encoded (a standard AE
-// project) or linear (the linearized 32 bpc oracle project): layer.z.
+// project, the default: layer.z = 0) or linear (a linearized project, 1).
 vec4 gx_to_bytes(vec4 premul) {
     const float a = clamp(premul.a, 0.0, 1.0);
     vec3 c = a > 1e-6 ? clamp(premul.rgb / a, 0.0, 1.0) : vec3(0.0);

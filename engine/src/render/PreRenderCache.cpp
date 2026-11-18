@@ -518,6 +518,8 @@ struct PreRenderCache::Impl {
 };
 
 PreRenderCache::PreRenderCache() : impl_(std::make_unique<Impl>()) {}
+u64 PreRenderCache::max_disk_bytes() noexcept { return kMaxDisk; }
+u64 PreRenderCache::min_reserve_bytes() noexcept { return kMinReserve; }
 PreRenderCache::~PreRenderCache() = default;
 Result<u64> PreRenderCache::begin(const std::string& root, Key key, u64 frames, i32 direction, Limits limits) noexcept {
     if (root.empty() || !key.width || !key.height || !key.fpsNumerator || !key.fpsDenominator || !frames

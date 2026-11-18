@@ -234,6 +234,7 @@ internal class TimelinePainter(
         }
         drawRuler(w, view, ppf, cx, fps, st.pps)
         drawPreviewBuffer(store.previewBufferRanges, w, view, ppf, cx)
+        drawPreRenderSpans(store, w, view, ppf, cx)
         drawMarkers(store.markers, w, view, ppf, cx)
         drawTimecode(cx, store.playhead, fps)
         if (thumbs.starved) c.requestRedraw()
@@ -246,6 +247,30 @@ internal class TimelinePainter(
     }
 
     /** Completed frames only, using the same temporal axis as clips, ticks and playhead. */
+    /**
+     * 1.0.2 Pre Render & Pre Export, no topo da régua: o trecho escolhido
+     * (âmbar), o que já está pré-renderizado (verde) ou pré-exportado (azul) e,
+     * por cima, os trechos que edições desatualizaram (vermelho: tocam ao vivo).
+     */
+    private fun DrawScope.drawPreRenderSpans(
+        store: com.aurea.aurea.state.EditorStore, w: Float, view: Double, ppf: Float, cx: Float,
+    ) {
+        val band = 3f * m.density
+        fun span(from: Long, to: Long, color: Color, top: Float, height: Float) {
+            if (to <= from) return
+            val left = TimeAxis.xOf(from.toDouble(), view, ppf, cx).coerceAtLeast(0f)
+            val right = TimeAxis.xOf(to.toDouble(), view, ppf, cx).coerceAtMost(w)
+            if (right > left) drawRect(color, Offset(left, top), Size(right - left, height))
+        }
+        val range = store.preRenderRange
+        if (range.chosen) span(range.inFrame, range.outFrame, PRERENDER_RANGE, 0f, band)
+        val progress = store.preRenderProgress
+        if (progress.complete && progress.divisor > 0) span(progress.firstFrame, progress.endFrame, PRERENDER_READY, band, band * 0.7f)
+        val export = store.preExport
+        if (export.complete && !export.stale) span(export.inFrame, export.outFrame, PREEXPORT_READY, band, band * 0.7f)
+        for (stale in store.preRenderStale) span(stale.first, stale.last + 1, PRERENDER_STALE, band, band * 0.7f)
+    }
+
     private fun DrawScope.drawPreviewBuffer(ranges: List<com.aurea.aurea.engine.PreviewBufferRange>, w: Float,
                                            view: Double, ppf: Float, cx: Float) {
         val height = 3f * m.density
@@ -1396,6 +1421,7 @@ internal class TimelinePainter(
         omegaRuler(st, w, view, ppf, cx, fps)
         // Timeline do AE: a área de trabalho na régua (o rascunho do arrasto vale antes).
         drawWorkArea(c.workAreaDraft ?: store.workArea, w, view, ppf, cx)
+        drawPreRenderSpans(store, w, view, ppf, cx)
         val buffer = 3f * m.density
         for (range in store.previewBufferRanges) {
             val left = TimeAxis.xOf(range.startFrame.toDouble(), view, ppf, cx).coerceAtLeast(0f)
@@ -2227,6 +2253,11 @@ internal class TimelinePainter(
         val WORK_AREA_FILL = Color(0xB3FFC94D)
         val WORK_AREA_HANDLE = Color(0xFFFFC94D)
         val WORK_AREA_VEIL = Color(0x40000000)
+        /** 1.0.2 Pre Render & Pre Export: trecho escolhido, pronto, pré-exportado e desatualizado. */
+        val PRERENDER_RANGE = Color(0xE6FF9F43)
+        val PRERENDER_READY = Color(0xFF4CD08A)
+        val PREEXPORT_READY = Color(0xFF9B8CFF)
+        val PRERENDER_STALE = Color(0xFFFF6B6B)
         /** Fio do marcador: alfa 150/255 da referência. */
         const val MARKER_LINE_ALPHA = 150f / 255f
         /** Teto de faixas da zebra por clipe e quadro (uma tela larga cabe com folga). */

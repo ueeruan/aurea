@@ -159,7 +159,8 @@ AUREA_TEST(SmearReferenceGpu, MasksDriveTheDistortion) {
 }
 
 // The GPU noise engine equals the CPU rule (and so the AE frame): Show noise
-// engine on a 256×144 layer at t = 0, seed 0, linear bytes (as the AE frame).
+// engine on a 256×144 layer at t = 0, seed 0. The bytes are sRGB-encoded (a
+// standard 8 bpc AE project), so the linear output is their sRGB decode.
 AUREA_TEST(GlitchifyReferenceGpu, ShowNoiseMatchesTheNativeBytes) {
     AUREA_REQUIRE_GPU();
     using namespace glitchify_reference;
@@ -172,8 +173,74 @@ AUREA_TEST(GlitchifyReferenceGpu, ShowNoiseMatchesTheNativeBytes) {
                                                    {105, 60, 188}, {200, 130, 19}, {37, 90, 206}};
     for (const auto& e : expected) {
         const Vec4 c = noise.v(e.x, e.y);
-        AUREA_CHECK_NEAR(c.x, static_cast<f32>(e.byte) / 255.0f, 4.5e-3);   // linear bytes, ±1 byte
+        const f32 s = static_cast<f32>(e.byte) / 255.0f;
+        const f32 linear = s <= 0.04045f ? s / 12.92f : std::pow((s + 0.055f) / 1.055f, 2.4f);
+        const f32 tolerance = std::max(4.5e-3f, 1.5f * (linear - [&] {   // ±1 byte in the encoded domain
+            const f32 lower = std::max(0.0f, s - 1.0f / 255.0f);
+            return lower <= 0.04045f ? lower / 12.92f : std::pow((lower + 0.055f) / 1.055f, 2.4f);
+        }()));
+        AUREA_CHECK_NEAR(c.x, linear, tolerance);
         AUREA_CHECK_NEAR(c.w, 1, 1e-3);
+    }
+}
+
+// Image Glitch layers are transparent outside what they glitch (AE 26.5 photo
+// frames, build/reference/glitchify-ae/iso): the Divide slice only touches
+// its band (top = trunc(Position·(H − 1)) without shift, height = trunc(H·a)),
+// Glitch Block only its copied cells, and the default stack keeps the image's
+// tone (no wash-out from dividing the whole frame by itself).
+AUREA_TEST(GlitchifyReferenceGpu, ImageGlitchOnlyTouchesItsBandAndBlocks) {
+    AUREA_REQUIRE_GPU();
+    using namespace glitchify_reference;
+    constexpr u32 W = 160, H = 96;
+    auto setup = [&](Scene& scene) -> EffectInstance& {
+        const LayerId id = scene.image(reference_image(W, H), W * 0.5f, H * 0.5f);
+        return scene.add_effect(id, kKey);
+    };
+    Scene plainScene(W, H);
+    (void)plainScene.image(reference_image(W, H), W * 0.5f, H * 0.5f);
+    const auto plain = plainScene.render(FrameIndex{30});
+    auto row_diff = [&](const FloatImage& a, u32 y) {
+        f32 d = 0;
+        for (u32 x = 0; x < W; ++x) for (u32 c = 0; c < 3; ++c)
+            d = std::max(d, std::fabs(a.px[(static_cast<usize>(y) * W + x) * 4 + c] - plain.px[(static_cast<usize>(y) * W + x) * 4 + c]));
+        return d;
+    };
+    {
+        Scene scene(W, H);
+        auto& fx = setup(scene);
+        fx.params[kChannelEnabled].constant = ParamValue::scalar(0);
+        fx.params[kColorEnabled].constant = ParamValue::scalar(0);
+        fx.params[kPixelStreak].constant = ParamValue::scalar(0);
+        fx.params[kBlockAmount].constant = ParamValue::scalar(0);
+        fx.params[kSliceShift].constant = ParamValue::scalar(0);
+        const auto sliced = scene.render(FrameIndex{30});
+        const u32 top = static_cast<u32>((H - 1) / 2), height = static_cast<u32>(H * 0.25f);
+        f32 inside = 0, outside = 0;
+        for (u32 y = 0; y < H; ++y) {
+            if (y >= top && y < top + height) inside = std::max(inside, row_diff(sliced, y));
+            else outside = std::max(outside, row_diff(sliced, y));
+        }
+        AUREA_CHECK(outside < 2e-3f);
+        AUREA_CHECK(inside > 1e-2f);
+    }
+    {
+        Scene scene(W, H);
+        auto& fx = setup(scene);
+        fx.params[kChannelEnabled].constant = ParamValue::scalar(0);
+        fx.params[kColorEnabled].constant = ParamValue::scalar(0);
+        fx.params[kPixelStreak].constant = ParamValue::scalar(0);
+        fx.params[kSliceAmount].constant = ParamValue::scalar(0);
+        fx.params[kBlockAmount].constant = ParamValue::scalar(0);
+        AUREA_CHECK(image_diff(plain, scene.render(FrameIndex{30})) < 2e-3f);   // no block chosen: identity
+    }
+    {
+        Scene scene(W, H);
+        (void)setup(scene);
+        const auto glitched = scene.render(FrameIndex{30});
+        f64 a = 0, b = 0;
+        for (usize i = 0; i < plain.px.size(); i += 4) for (usize c = 0; c < 3; ++c) { a += plain.px[i + c]; b += glitched.px[i + c]; }
+        AUREA_CHECK(b < a * 1.35);   // the old linear stack brightened the frame far more
     }
 }
 
@@ -285,6 +352,54 @@ AUREA_TEST(GlitchifyReferenceGpu, RenderObservedReferenceCases) {
         fx.params[kShowNoise].constant = ParamValue::scalar(c.noise ? 1.f : 0.f);
         if (c.disable != kInvalidIndex) fx.params[c.disable].constant = ParamValue::scalar(0);
         save(scene.render(FrameIndex{0}, 1, true), out / (std::string(c.name) + ".rgba32f"));
+    }
+}
+
+// Glitchify review on a photo (8 bpc sRGB AE comp "Aurea - Glitchify iso",
+// 607×607, 30 fps, plugin defaults): each module alone and the full stack at
+// 1 s and 2.5 s. AUREA_GLITCHIFY_PHOTO = raw RGBA8 fixture (607×607),
+// AUREA_GLITCHIFY_REVIEW = output folder (linear premultiplied RGBA32F).
+AUREA_TEST(GlitchifyReferenceGpu, RenderAePhotoCases) {
+    const char* outputPath = std::getenv("AUREA_GLITCHIFY_REVIEW");
+    const char* fixturePath = std::getenv("AUREA_GLITCHIFY_PHOTO");
+    if (!outputPath || !fixturePath) return;
+    AUREA_REQUIRE_GPU();
+    using namespace glitchify_reference;
+    constexpr u32 kSide = 607;
+    ImagePixels image;
+    image.width = kSide;
+    image.height = kSide;
+    image.rgba.resize(static_cast<usize>(kSide) * kSide * 4);
+    std::ifstream in(fixturePath, std::ios::binary);
+    in.read(reinterpret_cast<char*>(image.rgba.data()), static_cast<std::streamsize>(image.rgba.size()));
+    AUREA_CHECK(in.good());
+    if (!in.good()) return;
+    const std::filesystem::path out(outputPath);
+    struct Override { u32 index; f32 value; };
+    struct Case { const char* name; std::vector<Override> set; };
+    const Case cases[] = {
+        {"full", {}},
+        {"none", {{kChannelEnabled, 0}, {kColorEnabled, 0}, {kImageEnabled, 0}}},
+        {"split", {{kColorEnabled, 0}, {kImageEnabled, 0}, {kChannelScale, 0}}},
+        {"cscale", {{kColorEnabled, 0}, {kImageEnabled, 0}, {kSplitHorizontal, 0}}},
+        {"channel", {{kColorEnabled, 0}, {kImageEnabled, 0}}},
+        {"color", {{kChannelEnabled, 0}, {kImageEnabled, 0}}},
+        {"streak", {{kChannelEnabled, 0}, {kColorEnabled, 0}, {kSliceAmount, 0}, {kBlockAmount, 0}}},
+        {"slice", {{kChannelEnabled, 0}, {kColorEnabled, 0}, {kPixelStreak, 0}, {kBlockAmount, 0}}},
+        {"block", {{kChannelEnabled, 0}, {kColorEnabled, 0}, {kPixelStreak, 0}, {kSliceAmount, 0}}},
+        {"noise", {{kShowNoise, 1}}},
+    };
+    for (const Case& c : cases) {
+        for (const i64 frame : {i64{30}, i64{75}}) {
+            Scene scene(kSide, kSide, 30.0);
+            const LayerId id = scene.image(image, kSide * 0.5f, kSide * 0.5f);
+            auto& fx = scene.add_effect(id, kKey);
+            for (const Override& o : c.set) fx.params[o.index].constant = ParamValue::scalar(o.value);
+            const FloatImage result = scene.render(FrameIndex{frame}, 1, true);
+            const std::string name = std::string(c.name) + (frame == 30 ? "-t1" : "-t2_5") + ".rgba32f";
+            std::ofstream output(out / name, std::ios::binary);
+            output.write(reinterpret_cast<const char*>(result.px.data()), static_cast<std::streamsize>(result.px.size() * sizeof(f32)));
+        }
     }
 }
 

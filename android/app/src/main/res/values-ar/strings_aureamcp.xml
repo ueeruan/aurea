@@ -72,4 +72,22 @@
     <string name="mcp_device_media_denied">اسمح بالوصول إلى الصور والفيديوهات من إعدادات النظام لاستخدام معرض الجهاز.</string>
     <string name="mcp_device_media_limited">يرى Aurea فقط الصور والفيديوهات التي اخترتها.</string>
     <string name="mcp_device_media_manage">تغيير الاختيار</string>
+    <!-- 18/11/2026: AureaMCP fora do app (serviço, notificações, push). -->
+    <string name="mcp_bg_title">خارج التطبيق</string>
+    <string name="mcp_bg_body">يواصل وكلاؤك التعديل عندما تغادر Aurea أو تطفئ الشاشة. يُظهر إشعار أن الوكيل يعمل ويتيح إيقافه مؤقتًا أو إيقافه. عندما يكون التطبيق مغلقًا، تنتظر الطلبات في قائمة ويُوقَظ Aurea لتنفيذها.</string>
+    <string name="mcp_bg_toggle">مواصلة العمل خارج التطبيق</string>
+    <string name="mcp_bg_running">الوكيل يعمل خارج التطبيق الآن</string>
+    <string name="mcp_bg_ready">يعمل تلقائيًا عند اتصال وكيل</string>
+    <string name="mcp_bg_notif_denied">اسمح بإشعارات Aurea للموافقة على الطلبات (مثل حذف مشروع) عندما لا يكون التطبيق على الشاشة.</string>
+    <string name="mcp_bg_limits">قد يحدّ Android من وقت العمل في الخلفية (في بعض الأجهزة نحو 6 ساعات يوميًا). فتح Aurea يجدّده.</string>
+    <string name="mcp_bg_channel">وكيل الذكاء الاصطناعي (AureaMCP)</string>
+    <string name="mcp_bg_channel_confirm">موافقات وكيل الذكاء الاصطناعي</string>
+    <string name="mcp_bg_notification_title">Aurea: وكيل الذكاء الاصطناعي يعمل</string>
+    <string name="mcp_bg_notification_text">يمكن لوكيلك التعديل في Aurea عندما لا يكون التطبيق على الشاشة. اضغط للفتح.</string>
+    <string name="mcp_bg_action_pause">إيقاف مؤقت</string>
+    <string name="mcp_bg_action_stop">إيقاف</string>
+    <string name="mcp_bg_timeout_title">توقّف الوكيل عن العمل خارج التطبيق</string>
+    <string name="mcp_bg_timeout_text">حدّ Android من وقت العمل في الخلفية لهذا اليوم. افتح Aurea ليواصل الوكيل.</string>
+    <string name="mcp_bg_wake_title">يريد وكيل ذكاء اصطناعي العمل في Aurea</string>
+    <string name="mcp_bg_wake_text">اضغط لفتح Aurea والمتابعة.</string>
 </resources>

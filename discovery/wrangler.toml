@@ -136,7 +136,15 @@ bucket_name = "aurea-community-files"
 # Antes do deploy: `npx wrangler d1 export aurea-contas --remote` e
 # `npx wrangler d1 migrations apply aurea-contas --remote` (0010_aureamcp).
 # O AureaOS vai para o R2 (COMMUNITY_FILES, prefixo aureamcp/brain/) com
-# `node scripts/bundle-aureaos.mjs --upload`. Nenhum segredo novo.
+# `node scripts/bundle-aureaos.mjs --upload`.
+# Fora do app (18/11/2026, mcp_push.js): segredos OPCIONAIS para acordar o app
+# com a fila parada. Sem eles a fila só anda quando a pessoa abre o Aurea.
+#   npx wrangler secret put FCM_SERVICE_ACCOUNT   # JSON da conta de serviço (Firebase Cloud Messaging API Admin)
+#   npx wrangler secret put APNS_KEY_ID           # chave .p8 de APNs (Apple Developer → Keys)
+#   npx wrangler secret put APNS_TEAM_ID
+#   npx wrangler secret put APNS_PRIVATE_KEY      # conteúdo do .p8
+#   npx wrangler secret put APNS_TOPIC            # bundle id (opcional; senão APPLE_BUNDLE_ID)
+# O alarme do Durable Object (fila) não precisa de configuração.
 # -----------------------------------------------------------------------------
 [[durable_objects.bindings]]
 name = "AUREA_MCP"

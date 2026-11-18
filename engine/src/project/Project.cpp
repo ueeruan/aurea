@@ -2,6 +2,7 @@
 #include "aurea/project/Serialization.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
+#include "aurea/media/SourceWindow.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -61,6 +62,10 @@ AssetId Project::add_asset(Asset asset) {
             return existing;
         }
     }
+    // Trecho de um original (1.0.2): os decoders deste arquivo andam na régua
+    // do original (SourceWindow.hpp). Colar de outro projeto e inserir projeto
+    // como camada passam por aqui com o caminho já resolvido.
+    if (asset.windowStartUs > 0) register_source_window(asset.sourcePath, asset.windowStartUs);
     const AssetId id = assets_.create(std::move(asset));
     mark_dirty();
     return id;

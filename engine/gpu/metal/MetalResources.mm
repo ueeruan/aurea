@@ -1243,6 +1243,87 @@ Result<ExternalTexture> Backend::import_external_image(const ExternalImageDesc& 
     }
 }
 
+
+// =============================================================================
+// Export sem cópia (18/11/2026): Metal → CVPixelBuffer → VTCompressionSession
+//
+// O equivalente do surface-direct do Android: o passe `export-rgb` escreve o
+// R'G'B' de 8 bits do quadro numa textura cuja memória é um CVPixelBuffer
+// IOSurface (32BGRA, compatível com Metal), e o encoder do VideoToolbox recebe
+// ESSE buffer — sem blit para buffer compartilhado, sem cópia na CPU, sem
+// sws_scale nem a segunda cópia do h264_videotoolbox. O buffer vai etiquetado
+// em BT.709 (primárias, curva e matriz) para o VideoToolbox converter para
+// Y'CbCr com a mesma matriz do NV12 do motor.
+// =============================================================================
+Result<TextureHandle> Backend::create_shared_render_target(u32 width, u32 height, void** nativeBuffer) noexcept {
+    if (nativeBuffer) *nativeBuffer = nullptr;
+    @autoreleasepool {
+        Impl& d = *impl_;
+        if (!d.device || !d.textureCache) return Status{Errc::NotSupported, "sem CVMetalTextureCache"};
+        if (!width || !height) return Status{Errc::InvalidArgument, "alvo sem tamanho"};
+        NSDictionary* attributes = @{
+            (__bridge NSString*)kCVPixelBufferIOSurfacePropertiesKey: @{},
+            (__bridge NSString*)kCVPixelBufferMetalCompatibilityKey: @YES,
+        };
+        CVPixelBufferRef pixelBuffer = nullptr;
+        const CVReturn made = CVPixelBufferCreate(kCFAllocatorDefault, width, height, kCVPixelFormatType_32BGRA,
+                                                  (__bridge CFDictionaryRef)attributes, &pixelBuffer);
+        if (made != kCVReturnSuccess || !pixelBuffer) {
+            AUREA_LOG_WARN("metal: CVPixelBuffer do export indisponivel (CVReturn %d)", static_cast<int>(made));
+            return Status{Errc::OutOfMemory, "CVPixelBuffer do export indisponivel"};
+        }
+        CVBufferSetAttachment(pixelBuffer, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2,
+                              kCVAttachmentMode_ShouldPropagate);
+        CVBufferSetAttachment(pixelBuffer, kCVImageBufferTransferFunctionKey, kCVImageBufferTransferFunction_ITU_R_709_2,
+                              kCVAttachmentMode_ShouldPropagate);
+        CVBufferSetAttachment(pixelBuffer, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_709_2,
+                              kCVAttachmentMode_ShouldPropagate);
+        // A textura do cache sai só para leitura sem pedir: o passe escreve nela.
+        NSDictionary* textureAttributes = @{
+            (__bridge NSString*)kCVMetalTextureUsage: @(MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead),
+        };
+        CVMetalTextureRef cvTexture = nullptr;
+        const CVReturn wrapped = CVMetalTextureCacheCreateTextureFromImage(kCFAllocatorDefault, d.textureCache, pixelBuffer,
+                                                                           (__bridge CFDictionaryRef)textureAttributes,
+                                                                           MTLPixelFormatBGRA8Unorm, width, height, 0,
+                                                                           &cvTexture);
+        id<MTLTexture> texture = (wrapped == kCVReturnSuccess && cvTexture) ? CVMetalTextureGetTexture(cvTexture) : nil;
+        if (!texture) {
+            if (cvTexture) CFRelease(cvTexture);
+            CVPixelBufferRelease(pixelBuffer);
+            AUREA_LOG_WARN("metal: alvo do export sem textura (CVReturn %d)", static_cast<int>(wrapped));
+            return Status{Errc::UnsupportedFeature, "alvo compartilhado do export indisponivel"};
+        }
+        if ((texture.usage & MTLTextureUsageRenderTarget) == 0) {
+            // Sem uso de alvo de render a GPU não pode escrever nele: o export
+            // segue no NV12 de sempre (o motor desfaz os alvos).
+            CFRelease(cvTexture);
+            CVPixelBufferRelease(pixelBuffer);
+            return Status{Errc::UnsupportedFeature, "textura do CVPixelBuffer sem uso de alvo de render"};
+        }
+        Texture t;
+        t.texture = texture;
+        t.format = MTLPixelFormatBGRA8Unorm;
+        t.ownsTexture = false;
+        t.external = true;            // destroy_texture_now solta o CVMetalTexture e o CVPixelBuffer
+        t.externalRgb = true;
+        t.cvTexture = cvTexture;
+        t.pixelBuffer = pixelBuffer;  // a referência de CVPixelBufferCreate fica com a textura
+        t.desc.width = width;
+        t.desc.height = height;
+        t.desc.format = SurfaceFormat::BGRA8;
+        t.desc.sampled = true;
+        t.desc.renderTarget = true;
+        t.desc.storage = false;
+        t.desc.debugName = "export-rgb-iosurface";
+        t.lastUsedFrame = d.frameNumber;
+        const u64 id = d.textures.add(std::move(t));
+        ++d.allocationCount;
+        if (nativeBuffer) *nativeBuffer = pixelBuffer;
+        return TextureHandle{id};
+    }
+}
+
 void Backend::release_external_image(TextureHandle imported) noexcept { destroy_texture(imported); }
 
 void Backend::begin_external_image_scope() noexcept {

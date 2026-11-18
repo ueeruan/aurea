@@ -6,7 +6,10 @@
 //  vizinhos). O desfoque vetorial usa esse vetor para saber se o rastro de um
 //  objeto rápido alcança um pixel que está parado.
 //
-//  Entrada: RG = fluxo. Saída: RG = o vetor mais longo, em px do nível base.
+//  1.0.3: o quadro intermediário (flow_warp.frag) usa o mesmo vetor como a
+//  segunda hipótese de cada lado — scale.z = 1 lê o sentido de volta (BA).
+//
+//  Entrada: RG = fluxo (ou BA). Saída: RG = o vetor mais longo, em px do nível base.
 // =============================================================================
 #include "../common/bindings.glsl"
 
@@ -17,7 +20,7 @@ layout(set = 0, binding = AUREA_TEX0) uniform sampler2D u_flow;
 
 layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 grid;    // xy = extensão em uv percorrida, z = amostras por lado
-    vec4 scale;   // x = multiplicador do vetor, y = comprimento máximo
+    vec4 scale;   // x = multiplicador do vetor, y = comprimento máximo, z = lê o BA (0/1)
 } p;
 
 void main() {
@@ -27,7 +30,8 @@ void main() {
     for (int j = 0; j < n; ++j) {
         for (int i = 0; i < n; ++i) {
             const vec2 o = (vec2(float(i), float(j)) + 0.5) / float(n) - 0.5;
-            vec2 v = textureLod(u_flow, v_uv + o * p.grid.xy, 0.0).rg;
+            const vec4 f = textureLod(u_flow, v_uv + o * p.grid.xy, 0.0);
+            vec2 v = p.scale.z > 0.5 ? f.ba : f.rg;
             if (v.x > 5000.0) continue;   // corte de cena (flow_pack.frag)
             v *= p.scale.x;
             const float len = length(v);

@@ -1136,7 +1136,15 @@ untuk mengedit kurvanya.</string>
     <string name="consent_title">Persetujuan dan Tanggung Jawab</string>
     <string name="consent_accept">Setuju dan lanjutkan</string>
     <string name="consent_body">Aurea adalah alat profesional untuk mengedit, membuat, dan memproduksi konten digital. Dengan menggunakan aplikasi ini, pengguna mengakui bahwa mereka bertanggung jawab penuh atas konten yang mereka buat, edit, impor, ekspor, publikasikan, atau bagikan melalui platform.\n\nAurea tidak mengendalikan, mendorong, mendukung, atau mengizinkan penggunaan alat ini untuk kegiatan ilegal, abusif, curang, merugikan, atau yang melanggar hak pihak ketiga.\n\nPengguna bertanggung jawab memastikan bahwa mereka memiliki izin, lisensi, dan hak yang diperlukan atas materi yang digunakan, termasuk gambar, video, musik, merek, model, berkas, dan konten terlindungi lainnya.\n\nKebebasan kreatif yang ditawarkan Aurea tidak berarti persetujuan, keterlibatan, atau tanggung jawab aplikasi atas apa yang dipilih setiap pengguna untuk dibuat atau dilakukan dengan alat ini.\n\nPengguna setuju untuk menggunakan Aurea sesuai hukum yang berlaku dan bertanggung jawab atas tindakan mereka sendiri serta konten yang diproduksi atau didistribusikan melalui aplikasi.\n\nSejauh diizinkan oleh hukum yang berlaku, Aurea dan pihak yang bertanggung jawab atasnya tidak bertanggung jawab atas tindakan yang dilakukan semata-mata oleh pengguna, penyalahgunaan alat, atau akibat dari konten yang dibuat, dipublikasikan, atau dibagikan oleh pengguna sendiri.\n\nAurea menyediakan alatnya. Pengguna bertanggung jawab atas cara mereka memilih untuk menggunakannya.\n\nDengan melanjutkan, pengguna menyatakan bahwa mereka telah membaca, memahami, dan menyetujui ketentuan ini.</string>
-    <string name="release_notes_body">Aurea 1.0.1 (2221) — 16/11/2026\n\n• Efek baru yang setia pada After Effects: Radial Blur, Radial Shadow, Posterize Time, Time Displacement, Detail-preserving Upscale, Card Wipe, Card Dance, Depth Field, Smear, Glitchify, Extrude.\n• Wave Warp, Block Dissolve, Drop Shadow, Fast Blur, Cartoon Moblur kini lebih mendekati After Effects.\n• Proyek After Effects mengimpor efek-efek ini.\n• Gaya Cartoon baru untuk Teks 3D: muka datar, sisi lebih gelap, pita kilau, dan garis tepi tebal yang bisa dianimasikan.\n• Teks 3D kini bagian dari AureaHYPER. Proyek yang sudah memakai teks 3D tetap bisa dibuka dan diekspor.</string>
+    <string name="release_notes_body">Aurea 1.0.2 (2222) — 18/11/2026
+
+• Optical Flow untuk rekaman nyata: bayangan lebih sedikit, kontrol Bayangan ↔ Distorsi, dan kualitas Neural (AI) dengan AureaHYPER.
+• Glitchify kini sama dengan After Effects.
+• Ekspor lebih cepat dan berkualitas lebih tinggi.
+• Impor hanya bagian video panjang yang dipotong.
+• Panel Pre Render dan Pre Export per rentang.
+• AureaMCP bisa membangunkan aplikasi yang tertutup.
+• HeadBop kini berbayar (terpisah atau dengan AureaHYPER). Proyek yang sudah memakai HeadBop tetap bisa dibuka dan diekspor.</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">Isi</string>
@@ -4230,6 +4238,10 @@ untuk mengedit kurvanya.</string>
     <string name="fxl_bilinear">Bilinear</string>
     <string name="fxo_nearest">Terdekat</string>
     <string name="fxl_vector_quality">Kualitas vektor</string>
+    <string name="fxl_ghost_warp">Bayangan ↔ Distorsi</string>
+    <string name="fxo_neural_ai">Neural (AI)</string>
+    <string name="fxt_ghost_warp_tip">Kiri: saat vektor gagal, bingkai dicampur (bayangan). Kanan: memercayai vektor dan mendistorsi alih-alih mencampur.</string>
+    <string name="fxt_vector_quality_neural">Neural (AI): jaringan AI menyusun bingkai saat ekspor dan di pratinjau yang dijeda; saat diputar, pratinjau memakai vektor GPU.</string>
     <string name="fxo_fast">Cepat</string>
     <string name="fxo_best">Terbaik</string>
     <string name="fxl_shutter">Rana</string>
@@ -5443,4 +5455,44 @@ untuk mengedit kurvanya.</string>
     <string name="fxt_in_after_effects_2027_this_value_does_no">Di After Effects 2027 nilai ini tidak mengubah gambar; disimpan untuk proyek impor.</string>
     <string name="fxo_detail_preserving">Pertahankan detail</string>
     <string name="fxo_bicubic">Bikubik</string>
+    <!-- 1.0.2 Pre Render & Pre Export (PreRenderPanel.kt / PreRenderPanelView.swift) -->
+    <string name="prx_title">Pre Render &amp; Pre Export</string>
+    <string name="prx_open">Pre Render &amp; Pre Export</string>
+    <string name="prx_open_detail">Putar tanpa lag: pre-render atau pre-export satu bagian</string>
+    <string name="prx_quality">Kualitas</string>
+    <string name="prx_quality_full">Penuh</string>
+    <string name="prx_fits">muat ~%1$s</string>
+    <string name="prx_fits_detail">%1$d × %2$d · bagian %3$s</string>
+    <string name="prx_fits_hint">Berapa banyak video yang muat di cache ponsel pada kualitas ini</string>
+    <string name="prx_range">Bagian: %1$s – %2$s</string>
+    <string name="prx_range_whole">Belum ada bagian: seluruh video (%1$s – %2$s)</string>
+    <string name="prx_start">Awal</string>
+    <string name="prx_end">Akhir</string>
+    <string name="prx_full">Semua</string>
+    <string name="prx_go_start">Ke awal</string>
+    <string name="prx_go_end">Ke akhir</string>
+    <string name="prx_loop">Ulang</string>
+    <string name="prx_clear">Hapus</string>
+    <string name="prx_mode">Mode</string>
+    <string name="prx_mode_prerender">Pre Render</string>
+    <string name="prx_mode_preexport">Pre Export</string>
+    <string name="prx_action_prerender">Pre-render bagian</string>
+    <string name="prx_action_preexport">Pre-export bagian</string>
+    <string name="prx_cancel">Batal</string>
+    <string name="prx_progress_prerender">Pre-render: %1$d%%</string>
+    <string name="prx_progress_preexport">Pre-export: %1$d%%</string>
+    <string name="prx_ready_prerender">Pre Render siap: bagian diputar tanpa lag</string>
+    <string name="prx_ready_preexport">Pre Export siap: tonton hasil edit dengan lancar</string>
+    <string name="prx_watch">Tonton pre-export</string>
+    <string name="prx_stale">%1$d bagian berubah setelahnya: diputar langsung</string>
+    <string name="prx_stale_export">Editan berubah setelah pre-export: ulangi untuk menonton</string>
+    <string name="prx_not_fit">Tidak muat: pilih kualitas lebih rendah atau bagian lebih pendek</string>
+    <string name="prx_busy">Tunggu Pre Render atau Pre Export yang berjalan selesai</string>
+    <string name="prx_preexport_failed">Tidak bisa pre-export: %1$s</string>
+    <string name="prx_help">Bantuan</string>
+    <string name="prx_help_title">Kenapa Pre Render &amp; Pre Export?</string>
+    <string name="prx_help_body">Saat mengedit video dengan banyak efek berat, ponsel bisa mulai lag dan macet saat diputar.\n\n• Pre Render: “memanggang” bagian berat video menjadi pratinjau mulus yang diputar tanpa lag.\n• Pre Export: mengekspor lebih dulu bagian tertentu atau seluruh timeline; tunggu prosesnya selesai agar bisa menonton dan memeriksa seluruh editan dengan lancar sebelum simpan akhir.\n\nCara kerja “muat ~durasi”: menunjukkan berapa detik video yang muat di memori sementara (cache) ponsel pada kualitas yang dipilih (Penuh, 1/2, 1/4, 1/8) sebelum ruangnya habis. Penuh = tajam tapi file sangat besar: muat durasi pendek. 1/2, 1/4, 1/8 = file jauh lebih kecil: muat durasi jauh lebih panjang. Turun ke 1/4 atau 1/8 membuat jauh lebih banyak waktu yang muat.\n\nTombol: Awal dan Akhir menandai awal dan akhir bagian; Semua memilih seluruh video; Ke awal dan Ke akhir memindahkan kursor ke titik itu; Ulang memutar bagian terpilih berulang-ulang; Hapus mengatur ulang awal dan akhir.</string>
+    <string name="prx_close">Tutup</string>
+    <string name="prx_preparing">Menyiapkan…</string>
+    <string name="prx_ruler_range">Bagian Pre Render</string>
 </resources>

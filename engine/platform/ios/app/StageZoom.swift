@@ -247,6 +247,14 @@ struct ViewModeColumn: View {
         }
     }
 
+    /// 1.0.2: o estado da célula do Pre Render & Pre Export (chave de AureaText).
+    private var preRenderStateKey: String {
+        if model.preRenderProgress.running || model.preExport.running { return "prx_preparing" }
+        if model.preRenderProgress.complete && model.preRenderProgress.divisor > 0 { return "prx_ready_prerender" }
+        if model.preExport.playable { return "prx_ready_preexport" }
+        return "prx_open_detail"
+    }
+
     private func syncEngine() {
         model.setPreviewView(mode: model.selection.isEmpty ? 0 : UInt32(modes.solo), pixel: modes.pixel)
     }
@@ -254,10 +262,15 @@ struct ViewModeColumn: View {
     private var column: some View {
         GeometryReader { geometry in
             // 0.3.3 recursos: + a célula da caixa da seleção (6 células + zoom de 1,8).
-            let unit = geometry.size.height / 6.8
+            // 1.0.2: + a célula do Pre Render & Pre Export (7 células + zoom de 1,8).
+            let unit = geometry.size.height / 7.8
             let hasSelection = !model.selection.isEmpty
             let hasCamera = model.layers.contains { $0.kind == 8 }
             VStack(spacing: 0) {
+                cell(CupertinoGlyph.Speedometer, "prx_open", state: preRenderStateKey,
+                     on: model.preRenderPanelOpen || model.preRenderProgress.running || model.preExport.running,
+                     tag: "viewmode.prerender") { model.openPreRenderPanel() }
+                    .frame(height: unit)
                 cell(OmegaGlyph.pixelGrid, "om_vm_pixel", state: modes.pixel ? "common_on" : "common_off", on: modes.pixel,
                      tag: "viewmode.pixel") { modes.pixel.toggle() }
                     .frame(height: unit)

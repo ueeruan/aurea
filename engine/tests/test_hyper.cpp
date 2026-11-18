@@ -9,6 +9,7 @@
 
 #include "aurea/hyper/Hyper.hpp"
 #include "aurea/hyper/HyperStage.hpp"
+#include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/effects/Parameter.hpp"
 #include "aurea/scene3d/Image3D.hpp"
 #include "aurea/scene3d/Shape3D.hpp"
@@ -53,6 +54,19 @@ AUREA_TEST(Hyper, ReferenceEffectsShareAccessClassification) {
     AUREA_CHECK(!effect_requires_access(0));
 }
 
+// 1.0.2: só a opção Neural (IA) do Flow Retime é paga; as outras qualidades e
+// os outros parâmetros/efeitos seguem livres.
+AUREA_TEST(Hyper, FlowRetimeNeuralOptionRequiresAccess) {
+    const u32 retime = effect_type_id(aurea::effect_keys::kFlowRetime);
+    AUREA_CHECK(effect_option_requires_access(retime, kFlowRetimeVectorsParam, 3.0f));
+    AUREA_CHECK(effect_option_requires_access(retime, kFlowRetimeVectorsParam, 2.6f));
+    for (f32 v : {0.0f, 1.0f, 2.0f}) AUREA_CHECK(!effect_option_requires_access(retime, kFlowRetimeVectorsParam, v));
+    AUREA_CHECK(!effect_option_requires_access(retime, 1, 3.0f));
+    AUREA_CHECK(!effect_option_requires_access(effect_type_id(aurea::effect_keys::kFlowMotionBlur), kFlowRetimeVectorsParam, 3.0f));
+    AUREA_CHECK(!effect_option_requires_access(retime, kFlowRetimeVectorsParam, std::nanf("")));
+    AUREA_CHECK(!effect_requires_access(retime));   // o efeito em si continua grátis
+}
+
 // 0.5.4: o texto 3D e do mesmo produto pago. So a receita de texto 3D conta;
 // formas 3D, imagem para 3D e modelos importados continuam livres.
 AUREA_TEST(Hyper, Text3DRequiresAccess) {
@@ -86,6 +100,7 @@ AUREA_TEST(Hyper, SubscriptionProductForEachPaidEffect) {
         {"aurea.distort.wave_warp_reference", "aurea_fx_wave_warp"},
         {"aurea.transition.block_dissolve_reference", "aurea_fx_block_dissolve"},
         {"aurea.transition.radial_wipe_reference", "aurea_fx_radial_wipe"},
+        {"aurea.distort.headbop", "aurea_fx_headbop"},
     };
     for (const auto& row : table) {
         const char* product = effect_product_id(effect_type_id(row.key));
@@ -100,7 +115,7 @@ AUREA_TEST(Hyper, SubscriptionProductForEachPaidEffect) {
 
     // Todo efeito pago tem assinatura avulsa, exceto as 3 ferramentas Hyper.
     const auto ids = subscription_product_ids();
-    AUREA_CHECK(ids.size() == 12);
+    AUREA_CHECK(ids.size() == 13);  // 13 desde o Headbop pago (1.0.2)
     AUREA_CHECK(!ids.empty() && ids.front() == "aurea_hyper_mensal");
     AUREA_CHECK(std::find(ids.begin(), ids.end(), "aurea_texto3d") != ids.end());
     AUREA_CHECK(std::find(ids.begin(), ids.end(), "aureahyper_lifetime") == ids.end());

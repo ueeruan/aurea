@@ -54,6 +54,7 @@ namespace aurea::ai { class RotoService; struct RotoStroke; class BgRemoveServic
 namespace aurea {
 
 class Project;
+class NeuralRetime;
 namespace audio { class AudioBlockCache; class MixState; }
 
 /// Pixels de uma imagem importada (RGBA8, sRGB, alfa reto).
@@ -232,6 +233,10 @@ struct LayerSource {
     /// Lado maior da base do optical flow (px; 0 = o padrão). O Flow Retime e
     /// o Flow Motion Blur pedem mais (ou menos) detalhe nos vetores.
     f32      flowBase = 0.0f;
+    /// 1.0.3: qualidade dos vetores (0 rápida, 1 boa, 2 melhor, 3 neural) e
+    /// o controle Fantasma (0) ↔ Deformação (1) do quadro intermediário.
+    u8       flowQuality = 1;
+    f32      flowBias = 0.5f;
 
     // Imagem
     AssetId  image{};
@@ -447,6 +452,8 @@ struct RenderLayer {
         u8  blendMode = 0;             ///< 1 mistura, 2 movimento (optical flow)
         f32 vectorBlur = 0.0f;         ///< Flow Motion Blur: fração do par que o obturador cobre
         f32 flowBase = 0.0f;
+        u8 flowQuality = 1;            ///< 0 rápida, 1 boa, 2 melhor, 3 neural (aqui: melhor)
+        f32 flowBias = 0.5f;           ///< Fantasma (0) ↔ Deformação (1)
         u32 channel[3] = {~0u, ~0u, ~0u};   ///< RGB no tempo (~0u = agora)
         bool rgb = false;
         u32 history = ~0u;             ///< o passado (Detectar movimento, Datamosh...)
@@ -1386,6 +1393,9 @@ private:
     struct FlowCache {
         TextureHandle tex[2]{};
         u64 key[2]{0, 0};
+        /// 1.0.3: o par de quadros (pts) de cada slot — o anterior dá o
+        /// contexto no tempo do seguinte (flow_temporal.frag).
+        i64 ptsA[2]{-1, -1}, ptsB[2]{-1, -1};
         u32 width = 0, height = 0;
         u32 next = 0;
         u64 lastFrame = 0;
@@ -1431,12 +1441,22 @@ private:
     bool motionBlurCropEnabled_ = true;
     bool boundedTextSurfaceEnabled_ = true;
     [[nodiscard]] FGTexture video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture b, u32 w, u32 h, f32 baseSide, u32& baseW, u32& baseH,
-                                       u64 frameNumber) noexcept;
+                                       u64 frameNumber, u8 quality = 1, i64 ptsA = -1, i64 ptsB = -1) noexcept;
+    /// Flow Retime "Neural (IA)": o quadro do meio pela rede (RIFE), montado
+    /// na GPU. Falso = sem rede para este par agora (o chamador usa a GPU).
+    [[nodiscard]] bool neural_interpolate(const RenderLayer& layer, u64 pairKey, FGTexture a, FGTexture b, FGTexture target) noexcept;
+    std::unique_ptr<NeuralRetime> neural_;
+    struct NeuralTextures { TextureHandle flow{}, mask{}; u32 width = 0, height = 0; u64 key = 0; } neuralTex_{};
+    void (*neuralReadyFn_)(void*) = nullptr;
+    void* neuralReadyCtx_ = nullptr;
 public:
     /// Acertos/erros do cache do optical flow (testes e HUD).
     void flow_cache_stats(u32& hits, u32& misses) const noexcept { hits = flowHits_; misses = flowMisses_; }
     /// Benchmark: sem cache, todo quadro calcula o fluxo.
     void set_flow_cache_enabled(bool on) noexcept { flowCacheEnabled_ = on; }
+    /// Flow Retime Neural na prévia parada: chamado (na thread da rede) quando
+    /// um quadro da rede fica pronto — a tela pede um novo quadro.
+    void set_neural_ready_callback(void (*fn)(void*), void* ctx) noexcept;
     /// Optimization toggle for pixel-equivalence tests and memory benchmarks.
     void set_motion_blur_crop_enabled(bool on) noexcept { motionBlurCropEnabled_ = on; }
     void set_bounded_text_surface_enabled(bool on) noexcept { boundedTextSurfaceEnabled_ = on; }

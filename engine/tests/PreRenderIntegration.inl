@@ -654,4 +654,85 @@ AUREA_TEST(PreRenderIntegration, WorkAreaLimitsPreRenderAndPreviewReadsItByCompo
     std::printf("    PreRender da área [4,9): %llu quadros no cache, quadro 2 ao vivo, quadro 6 do cache\n",
                 static_cast<unsigned long long>(done.framesTotal));
 }
+
+// 1.0.2 Pre Render & Pre Export: trecho escolhido no cabeçote, qualidade 1/2,
+// e o livro por trecho — editar a camada da segunda metade só desatualiza os
+// trechos dela (a primeira continua tocando do cache); editar a outra também
+// esgota o cache e ele sai.
+AUREA_TEST(PreRenderIntegration, RangePanelPreRendersTheChosenPartAndEditsOnlyStaleTheirSegments) {
+    using namespace prerender_integration;
+    Rig rig(true, 64, 64, 48);
+    const u64 a = rig.shape(.5f), b = rig.shape(.5f);
+    rig.comp()->layer(LayerId::unpack(a))->start = FrameIndex{0};
+    rig.comp()->layer(LayerId::unpack(a))->end = FrameIndex{24};
+    rig.comp()->layer(LayerId::unpack(b))->start = FrameIndex{24};
+    rig.comp()->layer(LayerId::unpack(b))->end = FrameIndex{48};
+    const auto seek_to = [&](i64 f) {
+        Command c; c.type = CommandType::PlaybackSeek; c.seek.time = tick_at(FrameIndex{f}, 30);
+        AUREA_CHECK(rig.engine.apply_command(c).ok());
+    };
+    // Início em 8, Fim em 40 (o quadro do cabeçote entra): [8, 41).
+    seek_to(8);
+    AUREA_CHECK(rig.engine.prerender_range_action(Engine::kRangeStart));
+    auto range = rig.engine.query_prerender_range();
+    AUREA_CHECK_EQ(range.in, 8); AUREA_CHECK_EQ(range.out, 48);
+    seek_to(40);
+    AUREA_CHECK(rig.engine.prerender_range_action(Engine::kRangeEnd));
+    range = rig.engine.query_prerender_range();
+    AUREA_CHECK_EQ(range.in, 8); AUREA_CHECK_EQ(range.out, 41);
+    AUREA_CHECK_EQ(range.effectiveIn, 8); AUREA_CHECK_EQ(range.effectiveOut, 41);
+    rig.engine.set_prerender_loop(true);
+    AUREA_CHECK(rig.engine.query_prerender_range().loop);
+    const auto fit = rig.engine.query_prerender_fit(2, 0);
+    AUREA_CHECK_EQ(fit.width, 32u); AUREA_CHECK_EQ(fit.height, 32u);
+    AUREA_CHECK_NEAR(fit.rangeSeconds, 33.0 / 30.0, 1e-6);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    Status started;
+    for (;;) {
+        started = rig.engine.start_prerender_range(2);
+        if (started.code() != Errc::Busy || std::chrono::steady_clock::now() >= deadline) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    AUREA_CHECK(started.ok());
+    const auto done = rig.wait();
+    AUREA_CHECK(done.complete && done.error == 0);
+    AUREA_CHECK_EQ(done.framesTotal, 33ull);
+    AUREA_CHECK_EQ(done.width, 32u); AUREA_CHECK_EQ(done.divisor, 2u);
+    AUREA_CHECK_EQ(done.firstFrame, 8); AUREA_CHECK_EQ(done.endFrame, 41);
+    AUREA_CHECK_EQ(done.dirtySegments, 0u);
+    // Editar a camada b ([24, 48)): só os trechos dela ficam velhos.
+    Command edit; edit.type = CommandType::LayerSetOpacity; edit.opacity.layer = LayerId::unpack(b); edit.opacity.opacity = .25f;
+    AUREA_CHECK(rig.engine.apply_command(edit).ok());
+    auto after = rig.engine.query_prerender_progress();
+    AUREA_CHECK(after.complete);
+    AUREA_CHECK(after.dirtySegments > 0);
+    i64 pairs[16]{};
+    const u32 count = rig.engine.query_prerender_dirty(0, pairs, 8);
+    AUREA_CHECK(count >= 1);
+    if (count >= 1) { AUREA_CHECK(pairs[0] >= 16); AUREA_CHECK_EQ(pairs[count * 2 - 1], 41); }
+    std::atomic<u32> uploads{0};
+    rig.mock->beforeTextureUpload = [&](TextureHandle texture, const void*, u32) {
+        if (is_cache_texture(rig.mock->texture_desc(texture))) ++uploads; return OkStatus; };
+    int window = 0; AUREA_CHECK(rig.engine.attach_surface(&window, 64, 64).ok());
+    // Quadro 30: trecho velho, ao vivo (nada sobe do cache).
+    seek_to(30);
+    for (u32 tick = 0; tick < 40; ++tick) { (void)rig.engine.render_frame(false); std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
+    AUREA_CHECK_EQ(uploads.load(), 0u);
+    // Quadro 10: trecho limpo, do cache.
+    seek_to(10);
+    for (u32 tick = 0; tick < 200 && !uploads.load(); ++tick) { (void)rig.engine.render_frame(false); std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
+    AUREA_CHECK(uploads.load() > 0);
+    AUREA_CHECK(rig.engine.query_prerender_progress().complete);
+    // Editar a camada a ([0, 24)) também: nenhum quadro vale mais, o cache sai.
+    edit.opacity.layer = LayerId::unpack(a);
+    AUREA_CHECK(rig.engine.apply_command(edit).ok());
+    AUREA_CHECK(!rig.engine.query_prerender_progress().complete);
+    // Limpar o trecho: volta ao conteúdo inteiro.
+    AUREA_CHECK(rig.engine.prerender_range_action(Engine::kRangeClear));
+    range = rig.engine.query_prerender_range();
+    AUREA_CHECK_EQ(range.in, -1); AUREA_CHECK_EQ(range.effectiveIn, 0); AUREA_CHECK_EQ(range.effectiveOut, 48);
+    std::printf("    PreRender do trecho [8,41) a 1/2: %u trecho(s) velho(s) depois de editar b; quadro 10 do cache\n",
+                after.dirtySegments);
+}
+
 #endif

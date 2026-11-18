@@ -6,6 +6,7 @@
 //  decoder com decodificação antecipada.
 // =============================================================================
 #include "aurea/media/ImageSequence.hpp"
+#include "aurea/media/SourceWindow.hpp"
 
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Thread.hpp"
@@ -1078,7 +1079,12 @@ std::string ImageSequenceFactory::resolve_directory(const std::string& stored) c
 }
 
 bool ImageSequenceFactory::probe(const char* sourcePath, MediaProbe& out) {
-    if (!sourcePath || !is_image_sequence(sourcePath)) return inner_ && inner_->probe(sourcePath, out);
+    if (!sourcePath || !is_image_sequence(sourcePath)) {
+        if (!inner_ || !inner_->probe(sourcePath, out)) return false;
+        // Trecho de um original (SourceWindow.hpp): mede até o fim da janela.
+        if (sourcePath) window_probe(out, source_window_us(sourcePath));
+        return true;
+    }
     try {
         ImageSequenceSpec spec;
         if (!decode_image_sequence(sourcePath, spec)) return false;
@@ -1135,7 +1141,8 @@ std::string ImageSequenceFactory::cache_identity(const char* sourcePath) {
 }
 
 std::unique_ptr<VideoDecoderBackend> ImageSequenceFactory::open_video(const Asset& asset, MediaPriority priority) {
-    if (!is_image_sequence(asset.sourcePath)) return inner_ ? inner_->open_video(asset, priority) : nullptr;
+    if (!is_image_sequence(asset.sourcePath))
+        return inner_ ? window_video_decoder(inner_->open_video(asset, priority), source_window_us(asset.sourcePath)) : nullptr;
     try {
         ImageSequenceSpec spec;
         if (!decode_image_sequence(asset.sourcePath, spec)) return nullptr;
@@ -1152,12 +1159,14 @@ std::unique_ptr<VideoDecoderBackend> ImageSequenceFactory::open_video(const Asse
 
 std::unique_ptr<audio::AudioDecoderBackend> ImageSequenceFactory::open_audio(const char* sourcePath) {
     if (sourcePath && is_image_sequence(sourcePath)) return nullptr;
-    return inner_ ? inner_->open_audio(sourcePath) : nullptr;
+    return inner_ ? window_audio_decoder(inner_->open_audio(sourcePath), sourcePath ? source_window_us(sourcePath) : 0)
+                  : nullptr;
 }
 
 std::unique_ptr<audio::AudioDecoderBackend> ImageSequenceFactory::open_audio_software(const char* sourcePath) {
     if (sourcePath && is_image_sequence(sourcePath)) return nullptr;
-    return inner_ ? inner_->open_audio_software(sourcePath) : nullptr;
+    return inner_ ? window_audio_decoder(inner_->open_audio_software(sourcePath), sourcePath ? source_window_us(sourcePath) : 0)
+                  : nullptr;
 }
 
 } // namespace aurea

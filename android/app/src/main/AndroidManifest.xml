@@ -193,5 +193,28 @@
             android:name=".state.ExportForegroundService"
             android:exported="false"
             android:foregroundServiceType="dataSync|mediaProcessing"/>
+        <!-- 18/11/2026: AureaMCP fora do app. O agente de IA da pessoa continua editando com o
+             app em segundo plano (os mesmos tipos do export: a conexão sincroniza o projeto com
+             o agente e renderiza quadros/vídeo). Declarar o uso no Play Console (Foreground
+             service permissions) antes de publicar. -->
+        <service
+            android:name=".mcp.McpAgentService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync|mediaProcessing"/>
+        <receiver
+            android:name=".mcp.McpActionReceiver"
+            android:exported="false"/>
+        <!-- O push de prioridade alta que acorda o app fechado para a fila do agente. -->
+        <service
+            android:name=".mcp.McpPushService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT"/>
+            </intent-filter>
+        </service>
+        <!-- O token do FCM só é gerado quando a pessoa liga "Continuar fora do app". -->
+        <meta-data
+            android:name="firebase_messaging_auto_init_enabled"
+            android:value="false"/>
     </application>
 </manifest>

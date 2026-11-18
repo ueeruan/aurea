@@ -6,8 +6,12 @@
 //  lado tinha a sua conta (0,2 bit por pixel·s, ×1,6 na "Alta", sem teto
 //  depois do fator): 4K60 "Alta" pedia 160 Mbps — 1,2 GB por minuto.
 //
-//  Referência (H.264, qualidade Normal, 30 fps), na faixa dos editores comuns:
-//      480p ≈ 2,5 Mbps · 720p ≈ 5 · 1080p ≈ 8 · 1440p ≈ 16 · 4K ≈ 32
+//  Referência (H.264, qualidade padrão 60%, 30 fps) — ALTA qualidade, a dos
+//  arquivos de câmera/editores de celular para reenvio às redes (18/11/2026,
+//  pedido do dono: "exportar em alta qualidade"; antes 1080p30 = 8 Mbps):
+//      480p ≈ 5 Mbps · 720p ≈ 10 · 1080p ≈ 16 · 1440p ≈ 28 · 4K ≈ 50
+//  O encoder do aparelho ainda limita ao teto que ANUNCIA (getBitrateRange no
+//  Android, export_encoder_bitrate_bps): a taxa nunca passa do que ele aceita.
 //  Entre os pontos, interpolação log-log pela quantidade de pixels. A taxa de
 //  quadros entra com expoente 0,6 (60 fps ≈ ×1,5, não ×2: quadros vizinhos
 //  se parecem mais). Qualidade: Baixa ×0,6, Normal ×1, Alta ×1,5. HEVC ×0,65
@@ -28,8 +32,8 @@ enum class ExportQuality : u32 { Low = 0, Normal = 1, High = 2 };
 
 /// Limites do perfil automático e da taxa explicitamente escolhida (bps).
 /// A taxa manual continua disponível para projetos que precisam de mais bits.
-inline constexpr f64 kExportMaxAutoVideoBps = 60.0e6;
-inline constexpr f64 kExportMaxVideoBps = 100.0e6;
+inline constexpr f64 kExportMaxAutoVideoBps = 100.0e6;
+inline constexpr f64 kExportMaxVideoBps = 150.0e6;
 inline constexpr f64 kExportMinVideoBps = 0.5e6;
 /// Áudio AAC-LC estéreo do export.
 inline constexpr u32 kExportAudioKbps = 192;
@@ -89,8 +93,8 @@ inline constexpr u32 kExportQualityPercentDefault = 60;
     }
     struct Anchor { f64 pixels, mbps; };
     static constexpr Anchor kAnchors[] = {
-        {854.0 * 480.0, 2.5}, {1280.0 * 720.0, 5.0}, {1920.0 * 1080.0, 8.0},
-        {2560.0 * 1440.0, 16.0}, {3840.0 * 2160.0, 32.0},
+        {854.0 * 480.0, 5.0}, {1280.0 * 720.0, 10.0}, {1920.0 * 1080.0, 16.0},
+        {2560.0 * 1440.0, 28.0}, {3840.0 * 2160.0, 50.0},
     };
     constexpr usize n = sizeof(kAnchors) / sizeof(kAnchors[0]);
     const f64 px = std::max(1.0, static_cast<f64>(width) * static_cast<f64>(height));

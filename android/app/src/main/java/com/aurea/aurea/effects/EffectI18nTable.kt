@@ -2091,10 +2091,11 @@ internal object EffectI18nTable {
         m.put("aurea.3d.stroke", 21, /* opacity */ intArrayOf(R.string.fxl_opacity))
         m.put("aurea.time.flow_retime", 0, /* speed */ intArrayOf(R.string.fxl_speed))
         m.put("aurea.time.flow_retime", 1, /* frames */ intArrayOf(R.string.fxo_frames, R.string.fxo_nearest, R.string.fxl_mix, R.string.core2_fx_motion_mode))
-        m.put("aurea.time.flow_retime", 2, /* vectors */ intArrayOf(R.string.fxl_vector_quality, R.string.fxo_fast, R.string.fxo_good, R.string.fxo_best))
+        m.put("aurea.time.flow_retime", 2, /* vectors */ intArrayOf(R.string.fxl_vector_quality, R.string.fxo_fast, R.string.fxo_good, R.string.fxo_best, R.string.fxo_neural_ai))
         m.put("aurea.time.flow_retime", 3, /* motion_blur */ intArrayOf(R.string.fxl_motion_blur_2))
         m.put("aurea.time.flow_retime", 4, /* replace_duplicates */ intArrayOf(R.string.fxl_replace_duplicate_frames))
         m.put("aurea.time.flow_retime", 5, /* duplicate_sensitivity */ intArrayOf(R.string.fx_sensibilidade))
+        m.put("aurea.time.flow_retime", 6, /* ghost_warp */ intArrayOf(R.string.fxl_ghost_warp))
         m.put("aurea.time.flow_motion_blur", 0, /* amount */ intArrayOf(R.string.fx045g_amount))
         m.put("aurea.time.flow_motion_blur", 1, /* shutter */ intArrayOf(R.string.fxl_shutter))
         m.put("aurea.time.flow_motion_blur", 2, /* vectors */ intArrayOf(R.string.fxl_vector_quality, R.string.fxo_fast, R.string.fxo_good, R.string.fxo_best))
@@ -3531,6 +3532,8 @@ internal object EffectI18nTable {
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.generate.raster_extrude"), 4), R.string.fxt_the_reflection_uses_the_3d_scene_s_hdri) // reflection
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.3d.shatter"), 4), R.string.fxt_tap_the_point_s_name_then_drag_it_on_the) // center
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.time.flow_retime"), 5), R.string.fxt_higher_frames_that_are_only_similar_also) // duplicate_sensitivity
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.time.flow_retime"), 2), R.string.fxt_vector_quality_neural) // vectors
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.time.flow_retime"), 6), R.string.fxt_ghost_warp_tip) // ghost_warp
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.light.saber"), 9), R.string.fxt_used_when_the_core_is_layer_text) // core_layer
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.light.saber"), 22), R.string.fxt_applies_to_the_layer_masks_core) // mask_evolution
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.enhance.video"), 0), R.string.fxt_automatic_estimates_compression_noise_an) // model

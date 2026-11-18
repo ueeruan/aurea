@@ -41,6 +41,7 @@
     <string name="hyper_creating_project">Создаём проект…</string>
     <string name="hyper_effect_locked">Платная функция: оформите подписку</string>
     <string name="text3d_locked">3D-текст платный: оформите подписку на 3D-текст или AureaHyper, чтобы создавать</string>
+    <string name="hyper_option_locked">Neural (ИИ) входит в AureaHyper: оформите подписку, чтобы использовать ИИ во Flow Retime</string>
     <string name="text3d_locked_existing">3D-текст (платный): этот текст остаётся в проекте и экспортируется как обычно; для создания нового нужна подписка</string>
     <string name="hyper_error_project">Видео готово, но проект создать не удалось. Попробуйте снова.</string>
     <string name="hyper_error_result">Видео готово, но его не удалось прочитать. Попробуйте снова.</string>

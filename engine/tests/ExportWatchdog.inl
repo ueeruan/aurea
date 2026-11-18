@@ -120,7 +120,7 @@ AUREA_TEST(ExportWatchdog, HungEncoderIsAbandonedAndSafeModeRetryFinishes) {
     // 0.2.6 (export/ExportAttempts.hpp): o degrau compatível é sempre H.264 —
     // o HEVC dos aparelhos de entrada é o encoder que mais trava.
     AUREA_CHECK(r.cap.video.codec == ExportCodec::H264);
-    AUREA_CHECK_EQ(r.cap.video.profile, kExportProfileBaseline);
+    AUREA_CHECK_EQ(r.cap.video.profile, kExportProfileDefault);   // a escada troca o caminho, não o perfil
     AUREA_CHECK(r.cap.video.preferSoftware);
     AUREA_CHECK_EQ(r.cap.video.width, 64u);
     AUREA_CHECK_EQ(r.cap.video.height, 36u);
@@ -253,7 +253,7 @@ AUREA_TEST(ExportWatchdog, SafeModeLevelTwoAsksForSoftwareAndIsTheLastRetry) {
     AUREA_CHECK_EQ(export_retry_from_flags(last.p.flags), 0u);
     AUREA_CHECK((last.p.flags & Engine::kExportSafeMode) != 0);
     AUREA_CHECK(r.cap.video.preferSoftware);
-    AUREA_CHECK_EQ(r.cap.video.profile, kExportProfileBaseline);
+    AUREA_CHECK_EQ(r.cap.video.profile, kExportProfileDefault);   // a escada troca o caminho, não o perfil
     AUREA_CHECK(r.cap.video.codec == ExportCodec::H264);
     AUREA_CHECK(r.cap.aborted && !r.cap.finished);
     // Fora do limite vale o máximo (a ponte também limita).
@@ -416,7 +416,7 @@ AUREA_TEST(OfflineExportSerialGpu, SafeModeTwoPublishesValidatedFramesInH264AtTh
     AUREA_CHECK_EQ(export_retry_from_flags(result.p.flags), 0u);
     // 0.2.6: o degrau 2 é H.264 no software (a taxa pedida continua).
     AUREA_CHECK_EQ(r.cap.video.codec, ExportCodec::H264);
-    AUREA_CHECK_EQ(r.cap.video.profile, kExportProfileBaseline);
+    AUREA_CHECK_EQ(r.cap.video.profile, kExportProfileDefault);   // a escada troca o caminho, não o perfil
     AUREA_CHECK(r.cap.video.preferSoftware);
     AUREA_CHECK_EQ(r.cap.video.bitrateBps, 13'000'000u);
     AUREA_CHECK(r.cap.video.validateBeforePublish);

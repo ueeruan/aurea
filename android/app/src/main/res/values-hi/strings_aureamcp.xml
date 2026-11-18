@@ -72,4 +72,22 @@
     <string name="mcp_device_media_denied">डिवाइस गैलरी इस्तेमाल करने के लिए सिस्टम सेटिंग में फ़ोटो और वीडियो की अनुमति दें।</string>
     <string name="mcp_device_media_limited">Aurea सिर्फ़ आपकी चुनी हुई फ़ोटो और वीडियो देखता है।</string>
     <string name="mcp_device_media_manage">चुनाव बदलें</string>
+    <!-- 18/11/2026: AureaMCP fora do app (serviço, notificações, push). -->
+    <string name="mcp_bg_title">ऐप के बाहर</string>
+    <string name="mcp_bg_body">जब आप Aurea से बाहर जाते हैं या स्क्रीन बंद करते हैं, तब भी आपके एजेंट एडिट करते रहते हैं। एक सूचना दिखाती है कि एजेंट काम कर रहा है और उसे रोकने या बंद करने देती है। ऐप बंद होने पर अनुरोध कतार में इंतज़ार करते हैं और Aurea उन्हें करने के लिए जगाया जाता है।</string>
+    <string name="mcp_bg_toggle">ऐप के बाहर काम जारी रखें</string>
+    <string name="mcp_bg_running">एजेंट अभी ऐप के बाहर काम कर रहा है</string>
+    <string name="mcp_bg_ready">एजेंट कनेक्ट होने पर अपने आप चालू होता है</string>
+    <string name="mcp_bg_notif_denied">ऐप स्क्रीन पर न होने पर अनुरोधों (जैसे प्रोजेक्ट हटाना) को मंज़ूरी देने के लिए Aurea की सूचनाओं की अनुमति दें।</string>
+    <string name="mcp_bg_limits">Android बैकग्राउंड समय सीमित कर सकता है (कुछ डिवाइस पर दिन में लगभग 6 घंटे)। Aurea खोलने से यह फिर से मिल जाता है।</string>
+    <string name="mcp_bg_channel">AI एजेंट (AureaMCP)</string>
+    <string name="mcp_bg_channel_confirm">AI एजेंट की मंज़ूरियाँ</string>
+    <string name="mcp_bg_notification_title">Aurea: AI एजेंट काम कर रहा है</string>
+    <string name="mcp_bg_notification_text">ऐप स्क्रीन पर न होने पर भी आपका एजेंट Aurea में एडिट कर सकता है। खोलने के लिए टैप करें।</string>
+    <string name="mcp_bg_action_pause">रोकें</string>
+    <string name="mcp_bg_action_stop">बंद करें</string>
+    <string name="mcp_bg_timeout_title">एजेंट ने ऐप के बाहर काम करना बंद कर दिया</string>
+    <string name="mcp_bg_timeout_text">Android ने आज के लिए बैकग्राउंड समय सीमित कर दिया। एजेंट जारी रखे, इसके लिए Aurea खोलें।</string>
+    <string name="mcp_bg_wake_title">एक AI एजेंट Aurea में काम करना चाहता है</string>
+    <string name="mcp_bg_wake_text">Aurea खोलने और जारी रखने के लिए टैप करें।</string>
 </resources>

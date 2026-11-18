@@ -26,6 +26,8 @@ Os preços ficam nas lojas. O app mostra o preço localizado que a loja devolve 
 | `aurea_fx_block_dissolve` | Block Dissolve | R$ 5,00/mês | `Efeito Block Dissolve` | Block Dissolve (referência AE) |
 | `aurea_fx_radial_wipe` | Radial Wipe | R$ 5,00/mês | `Efeito Radial Wipe` | Radial Wipe (referência AE) |
 | `aurea_texto3d` | Texto 3D | R$ 5,00/mês | `Texto 3D` | criar Texto 3D |
+| `aurea_fx_headbop` | Headbop | R$ 5,00/mês | `Efeito Headbop` | aurea.distort.headbop (pago desde a 1.0.2) |
+| `aurea_hyper_mensal` | (sem produto próprio) | — | — | Flow Retime › Qualidade dos vetores › **Neural (IA)**: só com o AureaHyper (desde a 1.0.2; hyper::effect_option_requires_access). O efeito Flow Retime continua grátis nas outras qualidades |
 
 Produtos que já existem e continuam iguais:
 

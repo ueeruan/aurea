@@ -121,7 +121,8 @@ class McpTest {
         override suspend fun cancelExport() = r("cancel")
         override suspend fun importMediaUrl(url: String, overlay: Boolean) = r("import:$url:$overlay")
         override suspend fun listDeviceMedia(kind: String, limit: Int, beforeId: String?) = r("gallery:$kind:$limit:$beforeId")
-        override suspend fun importDeviceMedia(ids: List<String>, overlay: Boolean) = r("galleryImport:${ids.joinToString(",")}:$overlay")
+        override suspend fun importDeviceMedia(ids: List<String>, overlay: Boolean, trimUs: LongRange?) =
+            r("galleryImport:${ids.joinToString(",")}:$overlay" + (trimUs?.let { ":${it.first}-${it.last}" } ?: ""))
         override fun projectTitle(id: String) = if (id == "a.aurea") "Reel A" else null
         override fun currentProject() = "Reel A" to true
     }
@@ -272,6 +273,13 @@ class McpTest {
         assertEquals("galleryImport:video:12,image:7:true", rig.host.calls.last())
         assertFalse(rig.run("import_device_media", """{"ids":["../etc/passwd"]}""").ok)
         assertFalse(rig.run("import_device_media", """{"ids":[]}""").ok)
+        // 1.0.2: corte opcional (só o trecho entra no app).
+        assertTrue(rig.run("import_device_media", """{"ids":["video:12"],"trimInSeconds":600,"trimOutSeconds":1200.5}""").ok)
+        assertEquals("galleryImport:video:12:false:600000000-1200500000", rig.host.calls.last())
+        assertTrue(rig.run("import_device_media", """{"ids":["video:12"],"trimOutSeconds":30}""").ok)
+        assertEquals("galleryImport:video:12:false:0-30000000", rig.host.calls.last())
+        assertFalse(rig.run("import_device_media", """{"ids":["video:12"],"trimInSeconds":30,"trimOutSeconds":10}""").ok)
+        assertFalse(rig.run("import_device_media", """{"ids":["video:12"],"trimInSeconds":-1}""").ok)
         assertEquals("device_media", McpCatalog.capabilityOf("import_device_media"))
     }
 

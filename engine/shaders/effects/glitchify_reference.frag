@@ -126,50 +126,60 @@ vec4 channel_at(ivec2 t) {
 
 // --- Image Glitch --------------------------------------------------------------
 float luma_byte(vec4 b) { return (299.0 * b.r + 587.0 * b.g + 114.0 * b.b) / 1000.0; }
-/// Pixel Streak: in rows (columns with Vertical Sort) picked by the noise
-/// cutoff, the brightest pixel within `strength` behind wins (own segment rule).
-vec4 streak_at(ivec2 t) {
-    vec4 best = base_at(t);
-    const int len = int(u.streak.x + 0.5);
-    if (len <= 0) return best;
-    const bool vertical = u.streak.y > 0.5;
-    const float lineIndex = vertical ? float(t.x) : float(t.y);
-    if (u.streak.z > 0.5 && gx_noise_map(lineIndex, 0.0, u.block2.y, 101.0) < u.streak.w) return best;
-    float key = luma_byte(gx_to_bytes(best));
-    for (int i = 1; i <= 64; ++i) {
-        if (i > len) break;
-        const vec4 c = base_at(vertical ? t - ivec2(0, i) : t - ivec2(i, 0));
-        const float k = luma_byte(gx_to_bytes(c));
-        if (k > key) { key = k; best = c; }
-    }
-    return best;
-}
+/// Glitch Slice: only the band rows carry the re-encoded copy; the rest of
+/// the slice layer is transparent, so the transfer leaves it untouched.
 vec4 slice_at(ivec2 t, vec2 px) {
-    vec4 c = base_at(t);
-    if (px.y < u.slice.x || px.y >= u.slice.x + u.slice.y || u.slice.y <= 0.0) return c;
-    // Own stand-in for the WebP re-encode with one flipped bit: from a noise-
-    // picked column the band desynchronises (shift + 8×8 block quantisation).
-    const float breakX = gx_noise_map(7.0, 7.0, u.block2.w, 1.0) * u.region.z;
-    const float shift = floor((gx_noise_map(11.0, 3.0, u.block2.w, 1.0) - 0.5) * 64.0 * u.slice.w);
-    ivec2 q = t;
-    if (px.x >= breakX) q.x += int(shift);
-    const ivec2 blockOrigin = (q / 8) * 8;
-    const vec4 blocky = base_at(blockOrigin + ivec2(4));
-    return mix(base_at(q), blocky, u.slice.w * 0.5);
+    if (px.y < u.slice.x || px.y >= u.slice.x + u.slice.y || u.slice.y <= 0.0) return vec4(0.0);
+    // Own stand-in for the native lossy WebP re-encode of the band with one
+    // flipped bit (Quality → damage = u.slice.w). Observed on AE frames: from
+    // a macroblock column on, the decoded band comes back blocky, lighter and
+    // washed of colour, so Divide lightens the band while saturated parts
+    // (whose decoded copy is near white) stay close to the original. Before
+    // the noise-picked column it is clean.
+    const vec4 c = base_at(t);
+    const float breakX = floor(gx_noise_map(30.0, 30.0, u.layer.w, 1.0) * 0.25 * u.layer.x / 16.0) * 16.0;
+    if (px.x - u.region.x < breakX || u.slice.w <= 0.0) return c;
+    const vec4 b = gx_to_bytes(c);
+    const ivec2 origin = (t / 4) * 4;
+    float mean = 0.0;
+    for (int y = 0; y < 4; ++y) for (int x = 0; x < 4; ++x) mean += luma_byte(gx_to_bytes(base_at(origin + ivec2(x, y))));
+    const float luma = mix(luma_byte(b), mean / 16.0, 0.5);
+    vec3 ycc = rgb2ycc(b.rgb);
+    // Fitted on the AE 26.5 frames (Quality 10): luma lifted ~20 % toward
+    // white, chroma kept at ~30 %, a small blue offset.
+    ycc.yz = 128.0 + (ycc.yz - 128.0) * (1.0 - 0.78 * u.slice.w) + vec2(11.0, 0.0) * u.slice.w;
+    ycc.x = luma + (255.0 - luma) * 0.22 * u.slice.w;
+    return gx_from_bytes(vec4(clamp(ycc2rgb(ycc), 0.0, 255.0), b.a));
 }
+/// Glitch Block (native 0x180065A50/0x180065CD0): the layer is cut into
+/// cells of Size px (row-major index i); a cell whose noise
+/// v = map(x·G, y·G, 0..100) (x, y = the cell's corner px, G = Grouping)
+/// reaches the threshold receives the cell (i − 3 + ⌊v/5⌋ mod 6) mod columns
+/// horizontally and the row (r − 3 + ⌊v/5 + 4⌋ mod 6) vertically (no wrap).
+/// Every other pixel of the block layer stays transparent.
 vec4 block_at(ivec2 t, vec2 px) {
-    if (u.block.y < 1.0 || u.block.z < 1.0) return base_at(t);
-    const vec2 local = px - u.region.xy;
-    const ivec2 nb = ivec2(max(vec2(1.0), ceil(u.region.zw / u.block.yz)));
-    const ivec2 cell = ivec2(floor(local / u.block.yz));
-    const float v = gx_noise_map(float(cell.x) * u.block2.x, float(cell.y) * u.block2.x, u.block2.y, 101.0);
-    if (v <= u.block.x) return base_at(t);
-    ivec2 to = cell;
+    if (u.block.y < 1.0 || u.block.z < 1.0) return vec4(0.0);
+    const vec2 local = floor(px - u.region.xy + 1e-3);
+    const ivec2 size = ivec2(u.block.yz);
+    const int columns = max(1, int(ceil(u.layer.x / u.block.y)));
+    const ivec2 cell = ivec2(local) / size;
+    const ivec2 corner = cell * size;
+    const float v = gx_noise_map(trunc(float(corner.x) * u.block2.x), trunc(float(corner.y) * u.block2.x), u.block2.y, 100.0);
+    if (v < u.block.x) return vec4(0.0);
+    ivec2 from = corner;
     const int dir = int(u.block.w + 0.5);
-    if (dir != 1) to.x = int(mod(float(cell.x - 3 + int(mod(floor(v / 5.0), 6.0))), float(nb.x)));
-    if (dir != 0) to.y = int(mod(float(cell.y - 3 + int(mod(floor(v / 5.0 + 4.0), 6.0))), float(nb.y)));
-    const vec2 fromPx = px + vec2(to - cell) * u.block.yz;
-    return base_at(to_texel(fromPx));
+    if (dir != 1) {
+        const int index = cell.y * columns + cell.x - 3 + int(v / 5.0) % 6;
+        if (index < 0) return vec4(0.0);
+        from.x = (index % columns) * size.x;
+    }
+    if (dir != 0) from.y = (cell.y - 3 + int(v / 5.0 + 4.0) % 6) * size.y;
+    // The copied size is clipped by the layer at both the source and the cell.
+    const ivec2 layerSize = ivec2(u.layer.xy);
+    const ivec2 extent = min(min(size, layerSize - from), layerSize - corner);
+    const ivec2 offset = ivec2(local) - corner;
+    if (from.y < 0 || any(greaterThanEqual(offset, extent))) return vec4(0.0);
+    return base_at(to_texel(px + vec2(from - corner)));
 }
 
 // --- Compression ---------------------------------------------------------------
@@ -211,7 +221,9 @@ void main() {
                             texelFetch(u_bytes, ivec2(x4 + 3, t.y), 0).x, texelFetch(u_bytes, ivec2(x4, t.y), 0).x);
         O = gx_transfer(int(u.modes.y + 0.5), O, gx_from_bytes(b), u.block2.z);
     } else if (stage == 3) {
-        O = streak_at(t);
+        const int x4 = t.x * 4;   // Pixel Streak bytes (compute pass), A R G B
+        O = gx_from_bytes(vec4(texelFetch(u_bytes, ivec2(x4 + 1, t.y), 0).x, texelFetch(u_bytes, ivec2(x4 + 2, t.y), 0).x,
+                               texelFetch(u_bytes, ivec2(x4 + 3, t.y), 0).x, texelFetch(u_bytes, ivec2(x4, t.y), 0).x));
     } else if (stage == 4) {
         O = gx_transfer(int(u.modes.z + 0.5), O, slice_at(t, px), u.slice.z);
     } else {

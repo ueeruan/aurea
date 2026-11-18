@@ -96,9 +96,28 @@ class AureaEngine private constructor() {
          */
         @JvmStatic external fun nativeContentKeyFd(fd: Int): LongArray?
 
+        /**
+         * 1.0.2 "importar só o trecho cortado" (motor: media/MediaCut.hpp). Remuxa
+         * [inUs, outUs] (com folga) de [source] para [directory], reaproveitando um
+         * trecho do mesmo [originRef] que já cubra o corte. Bloqueia (pode levar
+         * segundos): fora da main. null = o arquivo inteiro tem de ser copiado.
+         */
+        fun importTrimmedMedia(source: String, directory: String, originRef: String, extension: String,
+                               inUs: Long, outUs: Long): TrimmedMedia? {
+            val r = runCatching { nativeImportTrimmedMedia(source, directory, originRef, extension, inUs, outUs) }.getOrNull()
+            if (r == null || r.size < 6 || r[0].isEmpty()) return null
+            return TrimmedMedia(r[0], r[1].toLongOrNull() ?: return null, r[2].toLongOrNull() ?: 0L,
+                r[3].toLongOrNull() ?: 0L, r[4].toLongOrNull() ?: 0L, r[5] == "1")
+        }
+
+        @JvmStatic external fun nativeImportTrimmedMedia(source: String, directory: String, originRef: String,
+                                                                  extension: String, inUs: Long, outUs: Long): Array<String>?
+
         @JvmStatic external fun nativeHyperSetModelDirectory(path: String)
         /** Classificação de acesso dos efeitos, compartilhada com o iOS no motor. */
         @JvmStatic external fun nativeEffectRequiresHyper(typeId: Int): Boolean
+        /** 1.0.2: opção paga de um efeito grátis (Flow Retime › Neural (IA)); só o AureaHyper libera. */
+        @JvmStatic external fun nativeEffectOptionRequiresHyper(typeId: Int, paramIndex: Int, value: Float): Boolean
         /** 0.5.4: criar texto 3D pede o mesmo acesso do AureaHyper (hyper::text3d_requires_access). */
         @JvmStatic external fun nativeText3dRequiresHyper(): Boolean
         /** 16/11/2026: a assinatura avulsa que libera o efeito pago (null = grátis ou só AureaHyper). */
@@ -715,6 +734,14 @@ class AureaEngine private constructor() {
     /** Id da layer criada (≥ 0), ou `-código` do erro. */
     fun importVideo(source: String, displayName: String): Long =
         nativeWork.run(-5L) { nativeImportVideo(nativeHandle, source, displayName) }
+
+    /**
+     * 1.0.2: vídeo cujo arquivo é um TRECHO do original ([importTrimmedMedia]):
+     * o projeto continua na régua do original. `windowStartUs` 0 = [importVideo].
+     */
+    fun importVideoWindow(source: String, displayName: String, windowStartUs: Long, originRef: String): Long =
+        if (windowStartUs <= 0L && originRef.isEmpty()) importVideo(source, displayName)
+        else nativeWork.run(-5L) { nativeImportVideoWindow(nativeHandle, source, displayName, windowStartUs, originRef) }
 
     /** Arquivo de áudio: camada de áudio no topo. Id ≥ 0 ou −Errc. */
     fun importAudio(source: String, displayName: String): Long =
@@ -2030,6 +2057,33 @@ class AureaEngine private constructor() {
     fun preRenderProgress(): PreRenderProgress =
         PreRenderProgress.from(nativeWork.run(longArrayOf()) { nativePreRenderProgress(nativeHandle) })
 
+    // --- Pre Render & Pre Export (1.0.2, motor: EnginePreRenderRange.cpp) -----------
+    /** 0 Início no cabeçote, 1 Fim no cabeçote, 2 Inteiro, 3 Limpar. */
+    fun preRenderRangeAction(action: Int): Boolean =
+        nativeWork.run(false) { nativePreRenderRangeAction(nativeHandle, action) }
+    fun preRenderRange(): PreRenderRange =
+        PreRenderRange.from(nativeWork.run(longArrayOf()) { nativePreRenderRange(nativeHandle) })
+    fun setPreRenderLoop(on: Boolean) = nativeWork.run(Unit) { nativeSetPreRenderLoop(nativeHandle, on) }
+    fun setPreRenderQuality(divisor: Int) = nativeWork.run(Unit) { nativeSetPreRenderQuality(nativeHandle, divisor) }
+    /** "Cabe ~Xs" na qualidade ([divisor] 1, 2, 4, 8) e no modo (0 PreRender, 1 pré-export). */
+    fun preRenderFit(divisor: Int, mode: Int): PreRenderFit =
+        PreRenderFit.from(nativeWork.run(longArrayOf()) { nativePreRenderFit(nativeHandle, divisor, mode) })
+    /** Native startup freezes a document; call from the lifecycle worker. */
+    fun startPreRenderRange(divisor: Int): Int = nativeWork.run(5) { nativeStartPreRenderRange(nativeHandle, divisor) }
+    fun startPreExport(divisor: Int): Int = nativeWork.run(5) { nativeStartPreExport(nativeHandle, divisor) }
+    fun cancelPreExport() = nativeWork.run(Unit) { nativeCancelPreExport(nativeHandle) }
+    fun preExportStatus(): PreExportStatus {
+        val values = nativeWork.run(longArrayOf()) { nativePreExportStatus(nativeHandle) }
+        val path = if (values.size > 1 && values[1] != 0L) nativeWork.run("") { nativePreExportPath(nativeHandle) } else ""
+        return PreExportStatus.from(values, path)
+    }
+    /** Trechos desatualizados `[de, até)` (quadros) do PreRender (0) ou do pré-export (1). */
+    fun preRenderDirty(mode: Int): List<LongRange> {
+        val v = nativeWork.run(longArrayOf()) { nativePreRenderDirty(nativeHandle, mode) }
+        return (0 until v.size / 2).map { v[it * 2] until v[it * 2 + 1] }
+    }
+    fun preExportDiskBytes(): Long = nativeWork.run(0L) { nativePreExportDiskBytes(nativeHandle) }
+
     /**
      * Export como imagem (motor: export/ImageEncode.hpp). `format` 0 = quadro do
      * playhead em PNG, 1 = sequência PNG num .zip, 2 = GIF. `shortSide` 0 = a
@@ -2200,6 +2254,7 @@ class AureaEngine private constructor() {
     private external fun nativeSetSelection(handle: Long, layers: LongArray)
     private external fun nativeClearSelection(handle: Long)
     private external fun nativeImportVideo(handle: Long, source: String, name: String): Long
+    private external fun nativeImportVideoWindow(handle: Long, source: String, name: String, windowStartUs: Long, originRef: String): Long
     private external fun nativeImportAudio(handle: Long, source: String, name: String): Long
     private external fun nativeProbeImageSequence(handle: Long, absolutePaths: Array<String>): String?
     private external fun nativeImportImageSequence(
@@ -2698,6 +2753,18 @@ class AureaEngine private constructor() {
     private external fun nativeStartGroupPreRender(handle: Long, layer: Long, direction: Int): Int
     private external fun nativeCancelPreRender(handle: Long)
     private external fun nativePreRenderProgress(handle: Long): LongArray
+    private external fun nativePreRenderRangeAction(handle: Long, action: Int): Boolean
+    private external fun nativePreRenderRange(handle: Long): LongArray
+    private external fun nativeSetPreRenderLoop(handle: Long, on: Boolean)
+    private external fun nativeSetPreRenderQuality(handle: Long, divisor: Int)
+    private external fun nativePreRenderFit(handle: Long, divisor: Int, mode: Int): LongArray
+    private external fun nativeStartPreRenderRange(handle: Long, divisor: Int): Int
+    private external fun nativeStartPreExport(handle: Long, divisor: Int): Int
+    private external fun nativeCancelPreExport(handle: Long)
+    private external fun nativePreExportStatus(handle: Long): LongArray
+    private external fun nativePreExportPath(handle: Long): String
+    private external fun nativePreRenderDirty(handle: Long, mode: Int): LongArray
+    private external fun nativePreExportDiskBytes(handle: Long): Long
     private external fun nativeCancelExport(handle: Long): Int
     private external fun nativeRestartExport(handle: Long, recoveryPath: String, outputPath: String): Int
     private external fun nativeStartImageExport(handle: Long, outputPath: String, format: Int, shortSide: Int, maxWidth: Int, fps: Double, trimToContent: Boolean): Int
@@ -2899,18 +2966,109 @@ data class PreRenderProgress(
     val error: Int = 0,
     val diskBytes: Long = 0,
     val residentBytes: Long = 0,
+    /** 1.0.2: trecho do cache em quadros da composição `[firstFrame, endFrame)`. */
+    val firstFrame: Long = 0,
+    val endFrame: Long = 0,
+    /** 1, 2, 4, 8 = qualidade do painel; 0 = o PreRender de 540p do gesto. */
+    val divisor: Int = 0,
+    /** Trechos de 8 quadros que edições desatualizaram (tocam ao vivo). */
+    val dirtySegments: Int = 0,
 ) {
     val fraction: Float get() = if (framesTotal > 0) (framesDone.toDouble() / framesTotal).coerceIn(0.0, 1.0).toFloat() else 0f
     companion object {
         fun from(values: LongArray): PreRenderProgress {
             if (values.size < 10) return PreRenderProgress()
+            val extra = values.size >= 14
             return PreRenderProgress(values[0] != 0L, values[1] != 0L,
                 values[2].coerceAtLeast(0), values[3].coerceAtLeast(0),
                 values[4].coerceIn(0, Int.MAX_VALUE.toLong()).toInt(), values[5].coerceIn(0, Int.MAX_VALUE.toLong()).toInt(),
-                if (values[6] < 0) -1 else 1, values[7].toInt(), values[8].coerceAtLeast(0), values[9].coerceAtLeast(0))
+                if (values[6] < 0) -1 else 1, values[7].toInt(), values[8].coerceAtLeast(0), values[9].coerceAtLeast(0),
+                if (extra) values[10] else 0L, if (extra) values[11] else 0L,
+                if (extra) values[12].coerceIn(0, 8).toInt() else 0,
+                if (extra) values[13].coerceIn(0, Int.MAX_VALUE.toLong()).toInt() else 0)
         }
     }
 }
+
+/** O trecho do painel Pre Render & Pre Export (quadros da composição, `[in, out)`; -1 = nenhum escolhido). */
+data class PreRenderRange(
+    val inFrame: Long = -1,
+    val outFrame: Long = -1,
+    val effectiveIn: Long = 0,
+    val effectiveOut: Long = 0,
+    val loop: Boolean = false,
+    val divisor: Int = 2,
+    val fps: Double = 30.0,
+) {
+    val chosen: Boolean get() = inFrame >= 0 && outFrame > inFrame
+    companion object {
+        fun from(v: LongArray): PreRenderRange {
+            if (v.size < 7) return PreRenderRange()
+            return PreRenderRange(v[0], v[1], v[2], v[3], v[4] != 0L, v[5].toInt().takeIf { it in setOf(1, 2, 4, 8) } ?: 2,
+                (v[6] / 1000.0).takeIf { it > 0.0 } ?: 30.0)
+        }
+    }
+}
+
+/** "Cabe ~Xs" (motor: render/PreRenderPlan.hpp). */
+data class PreRenderFit(
+    val width: Int = 0,
+    val height: Int = 0,
+    val divisor: Int = 2,
+    val mode: Int = 0,
+    val fps: Double = 30.0,
+    val fitsSeconds: Double = 0.0,
+    val rangeSeconds: Double = 0.0,
+    val bytesPerSecond: Long = 0,
+    val availableBytes: Long = 0,
+    val rangeBytes: Long = 0,
+    val fits: Boolean = false,
+) {
+    companion object {
+        fun from(v: LongArray): PreRenderFit {
+            if (v.size < 11) return PreRenderFit()
+            return PreRenderFit(v[0].toInt(), v[1].toInt(), v[2].toInt(), v[3].toInt(), v[4] / 1000.0, v[5] / 1000.0,
+                v[6] / 1000.0, v[7], v[8], v[9], v[10] != 0L)
+        }
+    }
+}
+
+/** O pré-export: um MP4 do trecho no cache; `stale` = uma edição mudou o trecho depois. */
+data class PreExportStatus(
+    val running: Boolean = false,
+    val complete: Boolean = false,
+    val stale: Boolean = false,
+    val framesDone: Long = 0,
+    val framesTotal: Long = 0,
+    val inFrame: Long = 0,
+    val outFrame: Long = 0,
+    val width: Int = 0,
+    val height: Int = 0,
+    val divisor: Int = 2,
+    val dirtySegments: Int = 0,
+    val fps: Double = 30.0,
+    val bytes: Long = 0,
+    val error: Int = 0,
+    val path: String = "",
+) {
+    val fraction: Float get() = if (framesTotal > 0) (framesDone.toDouble() / framesTotal).coerceIn(0.0, 1.0).toFloat() else 0f
+    /** Pronto e ainda igual à edição: a reprodução pode tocar o vídeo. */
+    val playable: Boolean get() = complete && !stale && path.isNotEmpty()
+    companion object {
+        fun from(v: LongArray, path: String): PreExportStatus {
+            if (v.size < 14) return PreExportStatus()
+            return PreExportStatus(v[0] != 0L, v[1] != 0L, v[2] != 0L, v[3], v[4], v[5], v[6], v[7].toInt(), v[8].toInt(),
+                v[9].toInt(), v[10].toInt(), (v[11] / 1000.0).takeIf { it > 0.0 } ?: 30.0, v[12], v[13].toInt(), path)
+        }
+    }
+}
+
+/**
+ * 1.0.2: o trecho importado ([AureaEngine.importTrimmedMedia]). [windowStartUs] é
+ * onde ele começa na régua do original; [reused] = um trecho que já cobria o corte.
+ */
+data class TrimmedMedia(val path: String, val windowStartUs: Long, val windowEndUs: Long,
+                        val bytes: Long, val sourceBytes: Long, val reused: Boolean)
 
 /** Checkpoint de export que o motor continua: do quadro [resumeFrame] de [totalFrames], no degrau [safeMode]. */
 data class ExportResumeCandidate(val resumeFrame: Int, val totalFrames: Int, val safeMode: Int) {

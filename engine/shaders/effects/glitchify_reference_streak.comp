@@ -1,0 +1,99 @@
+#version 450
+// =============================================================================
+//  Aurea / shaders / effects / glitchify_reference_streak.comp
+//
+//  Glitchify reference › Image Glitch › Pixel Streak (behaviour observed in
+//  the native module, REA 0x180066F40 / 0x180067510, rewritten here):
+//    · each row (each column with Vertical Sort) is processed when Use Noise
+//      is off or trunc(noise(1, row, t) · 100) ≥ Noise Cutoff (columns use
+//      noise(column, 1, t));
+//    · the line is cut into runs: a run continues while both neighbours have
+//      a non-zero alpha byte and their luma keys differ by at most the
+//      strength (Pixel Streak · 0.4 · Amount); key = (299R + 587G + 114B)/1000
+//      on 8-bit values;
+//    · the pixels of a run, except its last one, are reordered by key from
+//      the brightest to the darkest (equal keys keep their order here).
+//  One invocation walks one line; each run is ordered by a stable counting
+//  sort over its key range (three reads per pixel).
+//  Output: an r32f image (4 texels per pixel: A, R, G, B bytes), like the
+//  Color Glitch pass.
+// =============================================================================
+#include "glitchify_reference_common.glsl"
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+layout(set = 0, binding = AUREA_TEX0) uniform sampler2D u_base;
+layout(set = 0, binding = AUREA_IMG0, r32f) writeonly uniform image2D u_bytes;
+
+ivec2 g_size;
+bool g_vertical;
+int g_line;
+int g_slot[256];   // per-key counts, then write positions
+
+ivec2 at(int i) { return g_vertical ? ivec2(g_line, i) : ivec2(i, g_line); }
+vec4 bytes_at(int i) { return gx_to_bytes(texelFetch(u_base, at(i), 0)); }
+int key_of(vec4 b) { return (299 * int(b.r) + 587 * int(b.g) + 114 * int(b.b)) / 1000; }
+void store(int i, vec4 b) {
+    const ivec2 p = at(i);
+    imageStore(u_bytes, ivec2(p.x * 4, p.y), vec4(b.a));
+    imageStore(u_bytes, ivec2(p.x * 4 + 1, p.y), vec4(b.r));
+    imageStore(u_bytes, ivec2(p.x * 4 + 2, p.y), vec4(b.g));
+    imageStore(u_bytes, ivec2(p.x * 4 + 3, p.y), vec4(b.b));
+}
+
+void main() {
+    g_size = textureSize(u_base, 0);
+    g_vertical = u.streak.y > 0.5;
+    g_line = int(gl_GlobalInvocationID.x);
+    const int lines = g_vertical ? g_size.x : g_size.y;
+    const int n = g_vertical ? g_size.y : g_size.x;
+    if (g_line >= lines) return;
+    bool process = u.streak.x > 0.0;
+    if (process && u.streak.z > 0.5) {
+        // The noise reads layer pixels (the texture may be a region or a preview).
+        const float linePx = g_vertical ? floor(u.region.x + (float(g_line) + 0.5) / float(g_size.x) * u.region.z)
+                                        : floor(u.region.y + (float(g_line) + 0.5) / float(g_size.y) * u.region.w);
+        const float v = g_vertical ? gx_noise(linePx, 1.0, u.layer.w) : gx_noise(1.0, linePx, u.layer.w);
+        process = int(trunc(v * 100.0)) >= int(u.streak.w + 0.5);
+    }
+    if (!process) {
+        for (int i = 0; i < n; ++i) store(i, bytes_at(i));
+        return;
+    }
+    int s = 0;
+    while (s < n) {
+        // Run [s, e]: neighbours opaque enough and close in key.
+        int e = s;
+        vec4 current = bytes_at(s);
+        int kmin = key_of(current), kmax = kmin;
+        int kc = kmin;
+        while (e + 1 < n) {
+            const vec4 next = bytes_at(e + 1);
+            if (current.a < 0.5 || next.a < 0.5) break;
+            const int kn = key_of(next);
+            if (float(abs(kc - kn)) > u.streak.x) break;
+            ++e;
+            // keys of the sorted part [s, e) only
+            kmin = min(kmin, kc);
+            kmax = max(kmax, kc);
+            current = next;
+            kc = kn;
+        }
+        if (e - s >= 2) {
+            // Stable counting sort over the run's key range, brightest first.
+            for (int k = kmin; k <= kmax; ++k) g_slot[k] = 0;
+            for (int i = s; i < e; ++i) ++g_slot[key_of(bytes_at(i))];
+            int position = s;
+            for (int k = kmax; k >= kmin; --k) { const int count = g_slot[k]; g_slot[k] = position; position += count; }
+            for (int i = s; i < e; ++i) {
+                const vec4 b = bytes_at(i);
+                const int k = key_of(b);
+                store(g_slot[k], b);
+                ++g_slot[k];
+            }
+        } else if (e - s == 1) {
+            store(s, bytes_at(s));
+        }
+        store(e, current);
+        s = e + 1;
+    }
+}

@@ -41,10 +41,14 @@ import com.aurea.aurea.ui.i18n.KeepAppLanguage
  * A única Activity. O [EditorStore] é um ViewModel de verdade: sobrevive a
  * mudanças de configuração e o motor é desligado em `onCleared` do ciclo do
  * ViewModel, não no `onDestroy` de uma rotação.
+ *
+ * 18/11/2026: o editor é do PROCESSO ([AureaApplication.editorStore]) para o
+ * agente do AureaMCP continuar com o app fora da tela; sem o serviço do agente,
+ * fechar esta Activity solta o editor como antes (onDestroy → releaseEditorIfIdle).
  */
 class MainActivity : ComponentActivity() {
 
-    private val store: EditorStore by viewModels()
+    private val store: EditorStore by lazy { (application as AureaApplication).editorStore() }
 
     /** A conta opcional, compartilhada com a Home. */
     private val conta: ContaViewModel by viewModels()
@@ -85,6 +89,7 @@ class MainActivity : ComponentActivity() {
         // ele aconteça no primeiro quadro.
         CrashReporter.instalar(this)
         super.onCreate(savedInstanceState)
+        (application as AureaApplication).activityCreated()
         // Barras do sistema escuras (o app antigo tinha o véu #0B0F13 sobre o fundo).
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
@@ -417,6 +422,8 @@ class MainActivity : ComponentActivity() {
         opcional("config") { com.aurea.aurea.config.AppConfigStore.refresh() }
         opcional("hyper") { com.aurea.aurea.hyper.HyperEntitlements.recheck() }
         store.onEnterForeground()
+        // AureaMCP: na frente (o serviço do agente só pode começar daqui).
+        opcional("mcp") { com.aurea.aurea.mcp.McpAgentHub.markForeground(true) }
         opcional("ads") { AureaAdsManager.onForeground(this, trabalhando()) }
     }
 
@@ -449,10 +456,22 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        opcional("mcp") { com.aurea.aurea.mcp.McpAgentHub.markForeground(false) }
         store.onEnterBackground()
         AureaAdsManager.onBackground()
         CrashReporter.primeiroPlano(this, false)
         super.onStop()
+    }
+
+    /**
+     * O editor é do processo: fechado de vez (não rotação nem troca de idioma) e sem
+     * o serviço do agente, ele sai como antes; com o agente trabalhando fora do app,
+     * fica até o serviço terminar (AureaApplication.releaseEditorIfIdle).
+     */
+    override fun onDestroy() {
+        val changing = isChangingConfigurations
+        super.onDestroy()
+        (application as AureaApplication).activityDestroyed(changing)
     }
 
     /**

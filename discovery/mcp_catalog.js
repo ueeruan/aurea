@@ -37,6 +37,20 @@ export const SESSION_TOOLS = [
     inputSchema: obj({ device: { type: "string", description: "Device id from aurea_status." } }, ["device"]),
     annotations: { ...EDIT, idempotentHint: true },
   },
+  {
+    name: "job_status",
+    title: "Queued call status",
+    description: "When the Aurea app is closed or asleep, light calls are QUEUED and the app is woken up (Android at once; iOS when the person taps the notification). The call then answers \"queued\" with a job_id. Pass that job_id here to get the state (queued, sent, done, failed, expired) and, when done, the tool result. Without job_id, lists your recent jobs.",
+    inputSchema: obj({ job_id: { type: "string", description: "The job_id a queued call returned." } }),
+    annotations: RO,
+  },
+  {
+    name: "aurea_queue_policy",
+    title: "Queue heavy calls",
+    description: "By default, heavy calls (run_ae_script, render_frame, export_video, imports, opening or creating projects) fail at once when the Aurea app is not connected. Set allowHeavy true to queue them for this session too; they run in order when the app reconnects. Calls that need the person's approval (delete_project) are never queued.",
+    inputSchema: obj({ allowHeavy: { type: "boolean" } }, ["allowHeavy"]),
+    annotations: { ...EDIT, idempotentHint: true },
+  },
 ];
 
 /** Ferramentas do app fora do motor. `capability` = interruptor; `confirm` = o app sempre pergunta. */
@@ -145,8 +159,13 @@ export const HOST_TOOLS = [
   },
   {
     name: "import_device_media", capability: "device_media",
-    description: "Add gallery items (ids from list_device_media) to the open composition, in order. overlay = on top of the selection; otherwise into the main track.",
-    inputSchema: obj({ ids: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 20 }, overlay: { type: "boolean" } }, ["ids"]),
+    description: "Add gallery items (ids from list_device_media) to the open composition, in order. overlay = on top of the selection; otherwise into the main track. trimInSeconds/trimOutSeconds (optional) trim every video: only that range (plus a small margin) is copied into Aurea, saving space on long videos.",
+    inputSchema: obj({
+      ids: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 20 },
+      overlay: { type: "boolean" },
+      trimInSeconds: { type: "number", minimum: 0, maximum: 86400, description: "Video start, in seconds of the original (default 0)." },
+      trimOutSeconds: { type: "number", minimum: 0, maximum: 86400, description: "Video end, in seconds of the original (default: the end). Must be greater than trimInSeconds." },
+    }, ["ids"]),
     annotations: EDIT,
   },
 ];
@@ -242,3 +261,20 @@ export const publicTool = ({ name, title, description, inputSchema, annotations 
 
 /** Ferramentas pesadas: uma por vez por conta (regra de CPU do aparelho). */
 export const HEAVY = new Set(["run_ae_script", "render_frame", "export_video", "import_media_url", "import_device_media", "open_project", "create_project", "duplicate_project"]);
+
+/** Ferramentas só de interface (nada a fazer com a pessoa fora do app): nunca vão para a fila. */
+export const UI_ONLY = new Set(["open_panel", "playback", "set_view"]);
+
+/**
+ * Pode ir para a fila quando nenhum app está conectado?
+ *   "never"  confirmação da pessoa, destrutiva, ou só de interface (falha na hora);
+ *   "heavy"  pesada: só com o agente pedindo (aurea_queue_policy ou _meta "aurea/queue");
+ *   "yes"    leve e segura.
+ * `ask` = o aparelho pede aprovação para toda edição ("Perguntar antes"): edições viram "never".
+ */
+export function queueClass(def, { ask = false } = {}) {
+  if (!def) return "never";
+  if (def.confirm === true || def.annotations?.destructiveHint === true || UI_ONLY.has(def.name)) return "never";
+  if (ask && def.capability !== "read" && def.name !== "export_status") return "never";
+  return HEAVY.has(def.name) ? "heavy" : "yes";
+}

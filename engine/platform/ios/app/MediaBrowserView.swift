@@ -195,29 +195,127 @@ struct OmegaAssetThumb: View {
 /// Exporta as mídias do Fotos para arquivos temporários (uma por vez), na ordem.
 enum OmegaAssetExporter {
     static func export(_ assets: [PHAsset], done: @escaping ([(URL, Bool)?]) -> Void) {
+        export(assets, trims: [:]) { files, _ in done(files) }
+    }
+
+    /// 1.0.2 "importar só o trecho cortado": com `trims` (µs do original por
+    /// localIdentifier), o vídeo cortado vem só no trecho (com folga), já dentro
+    /// de Media/ — `windows[url]` diz onde ele começa no original. O que não dá
+    /// para cortar sai inteiro, como antes.
+    static func export(_ assets: [PHAsset], trims: [String: (Int64, Int64)],
+                       done: @escaping ([(URL, Bool)?], [URL: AureaModel.MediaWindow]) -> Void) {
         var out: [(URL, Bool)?] = []
-        func next(_ index: Int) {
-            if index == assets.count { DispatchQueue.main.async { done(out) }; return }
-            let asset = assets[index]
+        var windows: [URL: AureaModel.MediaWindow] = [:]
+        func writeFull(_ asset: PHAsset, then: @escaping () -> Void) {
             let video = asset.mediaType == .video
             let resources = PHAssetResource.assetResources(for: asset)
             let primary: PHAssetResourceType = video ? .fullSizeVideo : .fullSizePhoto
             let fallback: PHAssetResourceType = video ? .video : .photo
             guard let resource = resources.first(where: { $0.type == primary }) ?? resources.first(where: { $0.type == fallback }) else {
-                out.append(nil); next(index + 1); return
+                out.append(nil); then(); return
             }
             let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
             do { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
-            catch { out.append(nil); next(index + 1); return }
+            catch { out.append(nil); then(); return }
             let destination = folder.appendingPathComponent(resource.originalFilename)
             let options = PHAssetResourceRequestOptions(); options.isNetworkAccessAllowed = true
             PHAssetResourceManager.default().writeData(for: resource, toFile: destination, options: options) { error in
                 if error != nil { try? FileManager.default.removeItem(at: folder); out.append(nil) }
                 else { out.append((destination, video)) }
-                next(index + 1)
+                then()
             }
         }
+        func next(_ index: Int) {
+            if index == assets.count { DispatchQueue.main.async { done(out, windows) }; return }
+            let asset = assets[index]
+            if asset.mediaType == .video, let trim = trims[asset.localIdentifier] {
+                OmegaTrimmedImport.cut(asset, inUs: trim.0, outUs: trim.1) { cut in
+                    if let cut {
+                        windows[cut.url] = cut.window
+                        out.append((cut.url, true))
+                        next(index + 1)
+                    } else {
+                        writeFull(asset) { next(index + 1) }
+                    }
+                }
+                return
+            }
+            writeFull(asset) { next(index + 1) }
+        }
         next(0)
+    }
+}
+
+/// 1.0.2 "importar só o trecho cortado" (par do `durableTrimmedSource` do
+/// Android). Pedido de usuário: cortar 10 min de um vídeo de 1 h do Fotos e o
+/// app copiar a hora inteira. O motor remuxa só o trecho (cópia de pacotes,
+/// sem recodificar; media/MediaCut.hpp) direto em Media/, reaproveitando um
+/// trecho do mesmo vídeo que já cubra o corte; o projeto continua na régua do
+/// original (Asset::windowStartUs). Se o arquivo do Fotos não abre pelo
+/// caminho (câmera lenta, composição), o AVAssetExportSession passthrough faz
+/// o trecho; se nada der, a cópia inteira de sempre.
+enum OmegaTrimmedImport {
+    struct Trimmed { let url: URL; let window: AureaModel.MediaWindow }
+
+    static func originRef(_ asset: PHAsset) -> String {
+        let changed = asset.modificationDate ?? asset.creationDate ?? Date(timeIntervalSince1970: 0)
+        return "\(asset.localIdentifier)#\(Int64(changed.timeIntervalSince1970))"
+    }
+
+    /// `done` roda numa fila de fundo; nil = copiar inteiro.
+    static func cut(_ asset: PHAsset, inUs: Int64, outUs: Int64, done: @escaping (Trimmed?) -> Void) {
+        guard asset.mediaType == .video, inUs >= 0, outUs > inUs else { done(nil); return }
+        let origin = originRef(asset)
+        let original = PHAssetResource.assetResources(for: asset).first(where: { $0.type == .fullSizeVideo || $0.type == .video })?.originalFilename
+        let name = ((original ?? "Video") as NSString).deletingPathExtension
+        let options = PHVideoRequestOptions()
+        options.isNetworkAccessAllowed = true
+        options.version = .current
+        options.deliveryMode = .highQualityFormat
+        PHImageManager.default().requestAVAsset(forVideo: asset, options: options) { avAsset, _, _ in
+            DispatchQueue.global(qos: .userInitiated).async {
+                guard let avAsset else { done(nil); return }
+                AureaPaths.ensureDirectories()
+                // 1. O arquivo do Fotos pelo caminho, sem cópia temporária inteira.
+                if let file = (avAsset as? AVURLAsset)?.url, file.isFileURL {
+                    let ext = file.pathExtension.lowercased() == "mov" ? "mov" : "mp4"
+                    if let r = AureaEngine.importTrimmedMedia(file.path, directory: AureaPaths.media.path, originRef: origin,
+                                                              fileExtension: ext, inUs: inUs, outUs: outUs),
+                       let path = r["path"] as? String, !path.isEmpty,
+                       let start = (r["windowStartUs"] as? NSNumber)?.int64Value {
+                        withExtendedLifetime(avAsset) {}
+                        done(Trimmed(url: URL(fileURLWithPath: path),
+                                     window: AureaModel.MediaWindow(windowStartUs: start, originRef: origin, name: name)))
+                        return
+                    }
+                }
+                // 2. Passthrough do AVFoundation com o intervalo (a folga é a mesma do motor).
+                passthrough(avAsset, inUs: inUs, outUs: outUs) { url, start in
+                    guard let url else { done(nil); return }
+                    done(Trimmed(url: url, window: AureaModel.MediaWindow(windowStartUs: start, originRef: origin, name: name)))
+                }
+            }
+        }
+    }
+
+    private static func passthrough(_ asset: AVAsset, inUs: Int64, outUs: Int64, done: @escaping (URL?, Int64) -> Void) {
+        let seconds = CMTimeGetSeconds(asset.duration)
+        guard seconds.isFinite, seconds > 0 else { done(nil, 0); return }
+        let durationUs = Int64(seconds * 1_000_000)
+        let margin = max(Int64(2_000_000), (outUs - inUs) / 20)
+        let startUs = max(0, inUs - margin), endUs = min(durationUs, outUs + margin)
+        // Mesma regra do motor: só vale a pena abaixo de 70% do original.
+        guard endUs > startUs, Double(endUs - startUs) < 0.7 * Double(durationUs),
+              let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetPassthrough) else { done(nil, 0); return }
+        let url = AureaPaths.media.appendingPathComponent("cut-\(UUID().uuidString).mov")
+        session.outputURL = url
+        session.outputFileType = .mov
+        session.timeRange = CMTimeRange(start: CMTime(value: startUs, timescale: 1_000_000),
+                                        end: CMTime(value: endUs, timescale: 1_000_000))
+        session.exportAsynchronously {
+            if session.status == .completed { done(url, startUs) }
+            else { try? FileManager.default.removeItem(at: url); done(nil, 0) }
+        }
     }
 }
 
@@ -729,7 +827,14 @@ struct MediaBrowserView: View {
         OmegaAddPrefs.set(Int(imageFrames), "media.imageDuration")
         let project = model.projectGeneration
         let ownDuration = ownDuration, trims = trims, imageFrames = imageFrames
-        OmegaAssetExporter.export(assets) { files in
+        // 1.0.2: o vídeo cortado entra só com o trecho (e folga), não o arquivo inteiro.
+        var trimUs: [String: (Int64, Int64)] = [:]
+        for asset in assets where asset.mediaType == .video {
+            if let trim = trims[asset.localIdentifier], trim.end > trim.start {
+                trimUs[asset.localIdentifier] = (Int64(trim.start * 1_000_000), Int64(trim.end * 1_000_000))
+            }
+        }
+        OmegaAssetExporter.export(assets, trims: trimUs) { files, windows in
             importing = false
             guard model.projectGeneration == project else { return }
             var picks: [AureaModel.OmegaMediaPick] = []
@@ -738,6 +843,7 @@ struct MediaBrowserView: View {
                 let (url, video) = file
                 let id = asset.localIdentifier
                 var pick = AureaModel.OmegaMediaPick(url: url, video: video)
+                pick.window = windows[url]
                 if video, let trim = trims[id] {
                     pick.trimInUs = Int64(trim.start * 1_000_000); pick.trimOutUs = Int64(trim.end * 1_000_000)
                 } else if !video { pick.durationFrames = ownDuration[id] ?? imageFrames }

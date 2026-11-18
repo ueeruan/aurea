@@ -72,4 +72,22 @@
     <string name="mcp_device_media_denied">Разрешите доступ к фото и видео в настройках системы, чтобы использовать галерею устройства.</string>
     <string name="mcp_device_media_limited">Aurea видит только выбранные вами фото и видео.</string>
     <string name="mcp_device_media_manage">Изменить выбор</string>
+    <!-- 18/11/2026: AureaMCP fora do app (serviço, notificações, push). -->
+    <string name="mcp_bg_title">Вне приложения</string>
+    <string name="mcp_bg_body">Ваши агенты продолжают редактировать, когда вы выходите из Aurea или выключаете экран. Уведомление показывает, что агент работает, и позволяет приостановить или остановить его. Когда приложение закрыто, запросы ждут в очереди, и Aurea пробуждается, чтобы их выполнить.</string>
+    <string name="mcp_bg_toggle">Продолжать работу вне приложения</string>
+    <string name="mcp_bg_running">Агент сейчас работает вне приложения</string>
+    <string name="mcp_bg_ready">Включается само, когда агент подключён</string>
+    <string name="mcp_bg_notif_denied">Разрешите уведомления Aurea, чтобы одобрять запросы (например, удаление проекта), когда приложение не на экране.</string>
+    <string name="mcp_bg_limits">Android может ограничивать время в фоне (на некоторых устройствах около 6 часов в день). Открытие Aurea обновляет его.</string>
+    <string name="mcp_bg_channel">ИИ-агент (AureaMCP)</string>
+    <string name="mcp_bg_channel_confirm">Одобрения ИИ-агента</string>
+    <string name="mcp_bg_notification_title">Aurea: ИИ-агент работает</string>
+    <string name="mcp_bg_notification_text">Ваш агент может редактировать в Aurea, когда приложение не на экране. Нажмите, чтобы открыть.</string>
+    <string name="mcp_bg_action_pause">Пауза</string>
+    <string name="mcp_bg_action_stop">Остановить</string>
+    <string name="mcp_bg_timeout_title">Агент перестал работать вне приложения</string>
+    <string name="mcp_bg_timeout_text">Android ограничил время в фоне на сегодня. Откройте Aurea, чтобы агент продолжил.</string>
+    <string name="mcp_bg_wake_title">ИИ-агент хочет поработать в Aurea</string>
+    <string name="mcp_bg_wake_text">Нажмите, чтобы открыть Aurea и продолжить.</string>
 </resources>

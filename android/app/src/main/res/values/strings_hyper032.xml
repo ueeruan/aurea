@@ -41,6 +41,7 @@
     <string name="hyper_creating_project">Criando o projeto…</string>
     <string name="hyper_effect_locked">Recurso pago: assine para usar</string>
     <string name="text3d_locked">Texto 3D é pago: assine o Texto 3D ou o AureaHyper para criar</string>
+    <string name="hyper_option_locked">Neural (IA) é do AureaHyper: assine para usar a IA no Flow Retime</string>
     <string name="text3d_locked_existing">Texto 3D (pago): este texto continua no projeto e exporta normalmente; criar um novo pede a assinatura</string>
     <string name="hyper_error_project">O vídeo ficou pronto, mas não deu para criar o projeto. Tente de novo.</string>
     <string name="hyper_error_result">O vídeo ficou pronto, mas não deu para lê-lo. Tente de novo.</string>

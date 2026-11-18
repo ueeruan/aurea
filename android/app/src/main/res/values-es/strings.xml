@@ -1138,7 +1138,15 @@ para editar la curva.</string>
     <string name="consent_title">Consentimiento y responsabilidad</string>
     <string name="consent_accept">Aceptar y continuar</string>
     <string name="consent_body">Aurea es una herramienta profesional de edición, creación y producción de contenido digital. Al utilizar la aplicación, el usuario reconoce que es plenamente responsable de los contenidos que crea, edita, importa, exporta, publica o comparte a través de la plataforma.\n\nAurea no controla, fomenta, apoya ni autoriza el uso de la herramienta para actividades ilegales, abusivas, fraudulentas, perjudiciales o que vulneren los derechos de terceros.\n\nEl usuario es responsable de garantizar que dispone de las autorizaciones, licencias y derechos necesarios sobre los materiales utilizados, incluidas imágenes, vídeos, música, marcas, modelos, archivos y demás contenidos protegidos.\n\nLa libertad creativa que ofrece Aurea no implica aprobación, participación ni responsabilidad de la aplicación por lo que cada usuario decide producir o hacer con la herramienta.\n\nEl usuario acepta utilizar Aurea conforme a la legislación aplicable y asume la responsabilidad de sus propias acciones y del contenido producido o distribuido mediante la aplicación.\n\nEn la máxima medida permitida por la legislación aplicable, Aurea y sus responsables no serán responsables de los actos realizados exclusivamente por el usuario, del uso indebido de la herramienta ni de las consecuencias derivadas de contenidos creados, publicados o compartidos por el propio usuario.\n\nAurea proporciona la herramienta. El usuario es responsable del modo en que decide utilizarla.\n\nAl continuar, el usuario declara que ha leído, comprendido y acepta estos términos.</string>
-    <string name="release_notes_body">Aurea 1.0.1 (2221) — 16/11/2026\n\n• Nuevos efectos fieles a After Effects: Radial Blur, Radial Shadow, Posterize Time, Time Displacement, Detail-preserving Upscale, Card Wipe, Card Dance, Depth Field, Smear, Glitchify, Extrude.\n• Wave Warp, Block Dissolve, Drop Shadow, Fast Blur, Cartoon Moblur más cercanos a After Effects.\n• Los proyectos de After Effects importan estos efectos.\n• Nuevo estilo Cartoon para Texto 3D: frente plano, laterales más oscuros, franja de brillo y contorno grueso animable.\n• El Texto 3D ahora forma parte de AureaHYPER. Los proyectos que ya usan texto 3D siguen abriendo y exportando.</string>
+    <string name="release_notes_body">Aurea 1.0.2 (2222) — 18/11/2026
+
+• Optical Flow para filmación real: menos fantasma, control Fantasma ↔ Deformación y calidad Neural (IA) con AureaHYPER.
+• Glitchify igual a After Effects.
+• Exportación más rápida y con más calidad.
+• Importa solo el tramo recortado de videos largos.
+• Panel de Pre Render y Pre Export por tramo.
+• AureaMCP despierta la app cerrada.
+• HeadBop ahora es de pago (solo o con AureaHYPER). Los proyectos que ya usan HeadBop siguen abriendo y exportando.</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">Rellenar</string>
@@ -4240,6 +4248,10 @@ para editar la curva.</string>
     <string name="fxl_bilinear">Bilineal</string>
     <string name="fxo_nearest">Más cercano</string>
     <string name="fxl_vector_quality">Calidad de vectores</string>
+    <string name="fxl_ghost_warp">Fantasma ↔ Deformación</string>
+    <string name="fxo_neural_ai">Neural (IA)</string>
+    <string name="fxt_ghost_warp_tip">A la izquierda: donde fallan los vectores, los fotogramas se mezclan (fantasma). A la derecha: confía en los vectores y deforma en vez de mezclar.</string>
+    <string name="fxt_vector_quality_neural">Neural (IA): la red de IA arma el fotograma al exportar y en la vista previa en pausa; al reproducir, la vista previa usa los vectores de la GPU.</string>
     <string name="fxo_fast">Rápida</string>
     <string name="fxo_best">Mejor</string>
     <string name="fxl_shutter">Obturador</string>
@@ -5453,4 +5465,44 @@ para editar la curva.</string>
     <string name="fxt_in_after_effects_2027_this_value_does_no">En After Effects 2027 este valor no cambia la imagen; se conserva para proyectos importados.</string>
     <string name="fxo_detail_preserving">Conservar detalles</string>
     <string name="fxo_bicubic">Bicúbico</string>
+    <!-- 1.0.2 Pre Render & Pre Export (PreRenderPanel.kt / PreRenderPanelView.swift) -->
+    <string name="prx_title">Pre Render y Pre Export</string>
+    <string name="prx_open">Pre Render y Pre Export</string>
+    <string name="prx_open_detail">Reproduce sin trabas: pre-renderiza o pre-exporta un tramo</string>
+    <string name="prx_quality">Calidad</string>
+    <string name="prx_quality_full">Completa</string>
+    <string name="prx_fits">caben ~%1$s</string>
+    <string name="prx_fits_detail">%1$d × %2$d · tramo de %3$s</string>
+    <string name="prx_fits_hint">Cuánto video cabe en la caché del teléfono con esta calidad</string>
+    <string name="prx_range">Tramo: %1$s – %2$s</string>
+    <string name="prx_range_whole">Sin tramo elegido: el video completo (%1$s – %2$s)</string>
+    <string name="prx_start">Inicio</string>
+    <string name="prx_end">Fin</string>
+    <string name="prx_full">Todo</string>
+    <string name="prx_go_start">Ir al inicio</string>
+    <string name="prx_go_end">Ir al fin</string>
+    <string name="prx_loop">Bucle</string>
+    <string name="prx_clear">Borrar</string>
+    <string name="prx_mode">Modo</string>
+    <string name="prx_mode_prerender">Pre Render</string>
+    <string name="prx_mode_preexport">Pre Export</string>
+    <string name="prx_action_prerender">Pre-renderizar tramo</string>
+    <string name="prx_action_preexport">Pre-exportar tramo</string>
+    <string name="prx_cancel">Cancelar</string>
+    <string name="prx_progress_prerender">Pre-renderizando: %1$d%%</string>
+    <string name="prx_progress_preexport">Pre-exportando: %1$d%%</string>
+    <string name="prx_ready_prerender">Pre Render listo: el tramo se reproduce sin trabas</string>
+    <string name="prx_ready_preexport">Pre Export listo: mira tu edición con fluidez</string>
+    <string name="prx_watch">Ver pre-export</string>
+    <string name="prx_stale">%1$d parte(s) cambiaron después: se reproducen en vivo</string>
+    <string name="prx_stale_export">La edición cambió después del pre-export: hazlo de nuevo para verlo</string>
+    <string name="prx_not_fit">No cabe: usa una calidad menor o un tramo más corto</string>
+    <string name="prx_busy">Espera a que termine el Pre Render o el Pre Export actual</string>
+    <string name="prx_preexport_failed">No se pudo pre-exportar: %1$s</string>
+    <string name="prx_help">Ayuda</string>
+    <string name="prx_help_title">¿Por qué Pre Render y Pre Export?</string>
+    <string name="prx_help_body">Cuando editas videos con muchos efectos pesados, el teléfono puede trabarse y congelarse durante la reproducción.\n\n• Pre Render: te permite “hornear” una parte pesada del video en una vista previa fluida que se reproduce sin trabas.\n• Pre Export: te permite pre-exportar una parte específica o toda la línea de tiempo; espera a que termine de procesar para ver y revisar toda tu edición con fluidez antes del guardado final.\n\nCómo funciona “caben ~duración”: muestra cuántos segundos del video caben en la memoria temporal (caché) del teléfono con la calidad elegida (Completa, 1/2, 1/4, 1/8) antes de quedarse sin espacio. Completa = nítida pero archivos enormes: cabe poco tiempo. 1/2, 1/4, 1/8 = archivos mucho más pequeños: cabe mucho más tiempo. Bajar a 1/4 o 1/8 te deja meter mucho más tiempo.\n\nBotones: Inicio y Fin marcan el comienzo y el final de la parte; Todo elige el video completo; Ir al inicio e Ir al fin llevan el cursor a esos puntos; Bucle reproduce la parte en repetición; Borrar quita el inicio y el fin.</string>
+    <string name="prx_close">Cerrar</string>
+    <string name="prx_preparing">Preparando…</string>
+    <string name="prx_ruler_range">Tramo del Pre Render</string>
 </resources>

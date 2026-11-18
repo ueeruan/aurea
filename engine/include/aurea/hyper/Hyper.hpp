@@ -152,6 +152,16 @@ inline constexpr const char* kText3DProductId = "aurea_texto3d";
 /// compra da conta antes de adicionar um efeito desse produto.
 [[nodiscard]] bool effect_requires_access(u32 effectTypeId) noexcept;
 
+/// 1.0.2 (pedido do dono, 18/11/2026): uma OPÇÃO paga dentro de um efeito
+/// grátis. Hoje só o Flow Retime › Qualidade dos vetores › "Neural (IA)" (a
+/// mesma rede RIFE do Hyper Motion): só no AureaHyper, sem assinatura avulsa.
+/// ESCOLHER a opção pede o acesso nas telas; um projeto que já a usa abre,
+/// mostra e exporta igual (mesma regra do efeito pago já aplicado).
+[[nodiscard]] bool effect_option_requires_access(u32 effectTypeId, u32 paramIndex, f32 value) noexcept;
+/// O índice do parâmetro "Qualidade dos vetores" do Flow Retime e o valor Neural.
+inline constexpr u32 kFlowRetimeVectorsParam = 2;
+inline constexpr u32 kFlowRetimeNeuralValue = 3;
+
 /// 0.5.4 (pedido do dono, 15/11/2026): o TEXTO 3D é do mesmo produto pago.
 /// CRIAR texto 3D (+ › Texto 3D, presets de texto 3D, o dock da cena) pede o
 /// acesso nas telas, como adicionar um efeito pago. Um texto 3D que JÁ está no

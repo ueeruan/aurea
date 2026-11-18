@@ -120,6 +120,7 @@ set(AUREA_CORE_SOURCES
     src/export/OfflineAudioBlockSource.cpp
     src/export/FFmpegExportSink.cpp
     src/export/AndroidVideoEncoder.cpp
+    src/export/AppleVideoEncoder.cpp   # iOS: VTCompressionSession sem copia (18/11/2026)
     src/render/GPUCapabilities.cpp
     src/render/FrameGraph.cpp
     src/render/ShaderLibrary.cpp
@@ -128,6 +129,7 @@ set(AUREA_CORE_SOURCES
     src/render/RenderScheduler.cpp
     src/render/Renderer.cpp
     src/render/PreRenderCache.cpp
+    src/render/PreRenderPlan.cpp    # 1.0.2 Pre Render & Pre Export: qualidade, cabe ~Xs, livro por trecho
     src/render/MaskRaster.cpp
     src/render/ParticleExtras.cpp
     src/render/ParticleScene.cpp
@@ -255,6 +257,8 @@ set(AUREA_CORE_SOURCES
     src/media/VideoSource.cpp
     src/media/MediaManager.cpp
     src/media/ImageSequence.cpp
+    src/media/SourceWindow.cpp
+    src/media/MediaCut.cpp
     src/media/ThumbnailService.cpp
     src/media/PreviewProxy.cpp
     src/ai/DepthMapService.cpp
@@ -335,6 +339,7 @@ set(AUREA_CORE_SOURCES
     src/engine/EnginePluginsV2.cpp   # 0.3.4 plugins
     src/engine/EngineImageSequence.cpp
     src/engine/EngineStorage.cpp   # 0.5.2 armazenamento (apagar projeto, tela, PreRender)
+    src/engine/EnginePreRenderRange.cpp   # 1.0.2 Pre Render & Pre Export (trecho, qualidade, pre-export)
     src/engine/EngineProxy.cpp
     src/engine/EngineLayerAnim.cpp
     src/engine/EngineRoto.cpp
@@ -519,7 +524,7 @@ set(AUREA_IMPORT_BOUNDARIES
 # 0.5.2 armazenamento: leitura de projetos e varredura de pastas devolvem Status.
 list(APPEND AUREA_IMPORT_BOUNDARIES src/project/MediaStorage.cpp src/engine/EngineStorage.cpp)
 list(APPEND AUREA_IMPORT_BOUNDARIES src/export/ExportRecovery.cpp src/export/ExportCheckpoint.cpp src/export/ExportSinkStartup.cpp
-    src/export/FFmpegExportSink.cpp src/export/AndroidVideoEncoder.cpp
+    src/export/FFmpegExportSink.cpp src/export/AndroidVideoEncoder.cpp src/export/AppleVideoEncoder.cpp
     src/export/OfflineAudioSnapshot.cpp src/export/OfflineAudioBlockSource.cpp)
 # AureaHyper: a fronteira das etapas (alocação de quadros, registro de redes,
 # JSON do medidor, job) traduz exceção em Status.

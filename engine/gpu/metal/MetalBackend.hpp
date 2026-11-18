@@ -225,6 +225,11 @@ public:
     [[nodiscard]] Result<ExternalTexture> import_external_image(
         const ExternalImageDesc& img) noexcept override;
     void release_external_image(TextureHandle imported) noexcept override;
+    /// Export sem cópia (18/11/2026): alvo BGRA8 com a memória de um
+    /// CVPixelBuffer IOSurface novo (`nativeBuffer`), que o VTCompressionSession
+    /// codifica direto (AppleVideoEncoder). A textura é a dona do buffer.
+    [[nodiscard]] Result<TextureHandle> create_shared_render_target(u32 width, u32 height,
+                                                                    void** nativeBuffer) noexcept override;
     u32 trim_external_images() noexcept override;
     void begin_external_image_scope() noexcept override;
     void end_external_image_scope() noexcept override;

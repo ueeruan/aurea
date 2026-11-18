@@ -292,7 +292,10 @@ u32 proxy_codec_tag(const char* mime) noexcept {
 
 u64 proxy_source_bitrate(const Asset& a) noexcept {
     if (!a.fileSizeBytes || !(a.video.fps > 0) || a.video.frameCount.value <= 0) return 0;
-    const f64 seconds = static_cast<f64>(a.video.frameCount.value) / a.video.fps;
+    // 1.0.2: um trecho importado (Asset::windowStartUs) mede até o fim da janela
+    // na régua do original; o arquivo só tem o que vem depois do início dela.
+    const f64 seconds = static_cast<f64>(a.video.frameCount.value) / a.video.fps
+                      - static_cast<f64>(std::max<i64>(0, a.windowStartUs)) / 1e6;
     // Clipe muito curto: cabeçalho e áudio dominam o arquivo; a média mente.
     if (!(seconds >= 1.0)) return 0;
     return static_cast<u64>(static_cast<f64>(a.fileSizeBytes) * 8.0 / seconds);
@@ -800,6 +803,9 @@ std::shared_ptr<PreviewProxy> PreviewProxyService::generate(const Request& reque
     u32 empty = 0;
     bool eos = false, success = false;
     i64 lastPts = std::numeric_limits<i64>::min(), lastEnd = 0;
+    // 1.0.2: o trecho importado começa no meio da régua do original
+    // (SourceWindow.hpp); progresso e espaço contam só o que o arquivo tem.
+    i64 firstPts = std::numeric_limits<i64>::min();
     const i64 durationUs = std::max<i64>(1, result->original.durationUs);
     // Quadro sem duração (decoder antigo): um intervalo nominal da fonte.
     const i64 nominalUs = result->original.fps > 0 ? std::max<i64>(1, std::llround(1e6 / result->original.fps)) : 33'333;
@@ -831,7 +837,9 @@ std::shared_ptr<PreviewProxy> PreviewProxyService::generate(const Request& reque
         if (pts <= lastPts) break;
         lastPts = pts;
         lastEnd = std::max(lastEnd, pts + (frame->durationUs > 0 ? frame->durationUs : nominalUs));
-        progress_.store(static_cast<f32>(std::clamp(static_cast<f64>(pts) / static_cast<f64>(durationUs), 0.0, 1.0)));
+        if (firstPts == std::numeric_limits<i64>::min()) firstPts = std::max<i64>(0, std::min(pts, durationUs - 1));
+        progress_.store(static_cast<f32>(std::clamp(static_cast<f64>(pts - firstPts)
+                                                    / static_cast<f64>(std::max<i64>(1, durationUs - firstPts)), 0.0, 1.0)));
         // Acima de 60 fps: o quadro fora da grade nem é reamostrado nem codificado.
         if (!decimator.keep(pts)) { frame.reset(); pace(); continue; }
         if (!sink) {
@@ -854,7 +862,8 @@ std::shared_ptr<PreviewProxy> PreviewProxyService::generate(const Request& reque
             config.color.primaries = color.primaries == ColorPrimaries::BT601 ? 6 : color.primaries == ColorPrimaries::BT2020 ? 9 : color.primaries == ColorPrimaries::P3 ? 12 : 1;
             config.color.transfer = color.transfer == TransferFunction::PQ ? 16 : color.transfer == TransferFunction::HLG ? 18 : color.transfer == TransferFunction::Linear ? 8 : 1;
             config.color.fullRange = color.fullRange;
-            const u64 expected = static_cast<u64>(std::max<i64>(0, result->original.durationUs) / 1e6 * config.bitrateBps / 8 * 1.25) + (1ull << 20);
+            const u64 expected = static_cast<u64>(std::max<i64>(0, result->original.durationUs - std::max<i64>(0, firstPts)) / 1e6
+                                                  * config.bitrateBps / 8 * 1.25) + (1ull << 20);
             if (!make_room(expected, path)) { AUREA_LOG_WARN("proxy: cache sem espaco ou inacessivel (%llu bytes)", static_cast<unsigned long long>(expected)); break; }
             sink = sink_(context_);
             if (!sink || !sink->open(partial.c_str(), config, nullptr).ok()) break;

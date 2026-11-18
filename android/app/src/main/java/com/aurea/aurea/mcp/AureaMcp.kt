@@ -46,6 +46,14 @@ object AureaMcpFlags {
  * - Cada chamada passa pelo [McpExecutor]: permissões, confirmação, motor/host.
  * - Pareamento (código que o Claude.ai/ChatGPT mostra) e tokens pessoais
  *   (Claude Code/Codex) pelas rotas /api/mcp/... com a mesma sessão.
+ * - FORA DO APP (18/11/2026, [keepWorking]): com o app na frente liga o
+ *   McpAgentService (serviço em primeiro plano, via [McpAgentHub.platform]); a
+ *   conexão vive no escopo do processo e continua com a pessoa em outro app.
+ *   Fechado de vez, o Worker põe as chamadas na fila e manda um push (FCM) que
+ *   sobe o serviço; o hello leva o token e o relay reenvia a fila em ordem. Cada
+ *   job tem id único: um job que chega de novo devolve o resultado guardado, sem
+ *   executar duas vezes. Aprovação com o app fora da tela = notificação com
+ *   Aprovar/Recusar.
  * Par do iOS: engine/platform/ios/app/AureaMcp.swift.
  */
 class AureaMcp(
@@ -56,6 +64,10 @@ class AureaMcp(
     private val host: McpHost,
     onUi: (String) -> Unit,
     onModelChanged: () -> Unit,
+    /** Antes de cada chamada: o editor acorda o motor se ele dormiu fora do app. */
+    private val wakeEngine: suspend () -> Unit = {},
+    /** Depois de cada chamada: o editor conta o tempo ocioso para o motor dormir de novo. */
+    private val onCallEnded: () -> Unit = {},
 ) {
     enum class Status { Off, NoAccount, Connecting, Online, Offline }
     data class Agent(val name: String, val version: String, val seen: Long, val tokenId: String?)
@@ -63,7 +75,7 @@ class AureaMcp(
     data class Grant(val id: String, val kind: String, val name: String, val createdAt: Long, val lastUsedAt: Long?, val expiresAt: Long?)
     data class NewToken(val token: String, val url: String)
     data class PairRequest(val code: String, val client: String, val redirectHost: String)
-    class Confirm(val tool: String, val agent: String, val detail: String, val answer: CompletableDeferred<Boolean>)
+    class Confirm(val tool: String, val agent: String, val detail: String, val answer: CompletableDeferred<Boolean>, val id: Long = AureaMcp.nextConfirmId())
 
     private val app = context.applicationContext
     private val prefs = app.getSharedPreferences("aurea.mcp", Context.MODE_PRIVATE)
@@ -71,6 +83,15 @@ class AureaMcp(
 
     var enabled by mutableStateOf(prefs.getBoolean(KEY_ENABLED, false))
         private set
+
+    /** "Continuar trabalhando fora do app" (ligado por padrão; a pessoa desliga na tela do AureaMCP). */
+    var keepWorking by mutableStateOf(prefs.getBoolean(KEY_BACKGROUND, true))
+        private set
+    /** O Worker sabe acordar este aparelho por push (welcome.push). Sem isso o serviço não dorme sozinho. */
+    var pushWake by mutableStateOf(false)
+        private set
+    private var pushToken: String? = prefs.getString(KEY_PUSH_TOKEN, null)
+    private var serviceIdle: Job? = null
 
     init { if (enabled) active = true }
     var status by mutableStateOf(if (enabled) Status.Connecting else Status.Off)
@@ -116,22 +137,36 @@ class AureaMcp(
         enabled = on
         active = on
         prefs.edit().putBoolean(KEY_ENABLED, on).apply()
-        if (on) start() else stop()
+        if (on) { start(); onLifecycleChanged() } else { stop(forgetPush = true); McpAgentHub.platform?.stopService(); forgetPushToken() }
     }
 
     /** Chamado na abertura do app e ao voltar ao primeiro plano. */
     fun start() {
         if (!enabled) { status = Status.Off; return }
-        if (loop?.isActive == true) { send(JSONObject().put("t", "focus")); return }
+        if (loop?.isActive == true) { if (McpAgentHub.foreground) send(JSONObject().put("t", "focus")); return }
         loop = scope.launch { connectLoop() }
     }
 
-    fun stop() {
+    /** `forgetPush`: o relay apaga o token antes de fechar (desligado = nada de push). */
+    fun stop(forgetPush: Boolean = false) {
         loop?.cancel(); loop = null
-        socket?.close(); socket = null
+        val s = socket
+        socket = null
+        if (s != null) scope.launch(Dispatchers.IO) {
+            if (forgetPush) runCatching { s.sendText(JSONObject().put("t", "state").put("push", JSONObject.NULL).toString()) }
+            s.close()
+        }
         running.values.forEach { it.cancel() }; running.clear()
-        confirm?.answer?.complete(false)
+        confirm?.let { c -> McpAgentHub.platform?.clearConfirm(c.id); c.answer.complete(false) }
+        confirm = null
+        serviceIdle?.cancel(); serviceIdle = null
         status = Status.Off
+    }
+
+    /** O editor foi encerrado (ViewModel limpo): a conexão sai junto. */
+    fun release() {
+        stop()
+        McpAgentHub.detach(this)
     }
 
     fun setPermission(capability: String, on: Boolean) {
@@ -143,6 +178,126 @@ class AureaMcp(
     fun changeAskEveryEdit(on: Boolean) {
         askEveryEdit = on
         prefs.edit().putBoolean(KEY_ASK, on).apply()
+        // O relay não põe edições na fila de quem pede aprovação para cada uma.
+        send(JSONObject().put("t", "state").put("askEveryEdit", on))
+    }
+
+    // --- fora do app ------------------------------------------------------------------
+
+    /** Liga/desliga "Continuar trabalhando fora do app". */
+    fun changeKeepWorking(on: Boolean) {
+        keepWorking = on
+        prefs.edit().putBoolean(KEY_BACKGROUND, on).apply()
+        if (on) {
+            onLifecycleChanged()
+            requestPush()
+        } else {
+            McpAgentHub.platform?.stopService()
+            send(JSONObject().put("t", "state").put("push", JSONObject.NULL))
+            forgetPushToken()
+        }
+    }
+
+    /** Desligado: o token do FCM é apagado no aparelho (um novo é pedido se a pessoa religar). */
+    private fun forgetPushToken() {
+        if (pushToken == null) return
+        pushToken = null
+        prefs.edit().remove(KEY_PUSH_TOKEN).apply()
+        McpAgentHub.platform?.deletePushToken()
+    }
+
+    /** Algum agente já se conectou a esta conta: só então o serviço sobe (a notificação não mente). */
+    private var hadAgent = prefs.getBoolean(KEY_HAD_AGENT, false)
+
+    private fun noteAgents(list: List<Agent>) {
+        agents = list
+        if (list.isNotEmpty() && !hadAgent) {
+            hadAgent = true
+            prefs.edit().putBoolean(KEY_HAD_AGENT, true).apply()
+            onLifecycleChanged()
+        }
+    }
+
+    /**
+     * Primeiro/segundo plano ou o serviço mudou ([McpAgentHub]). Na frente: liga o
+     * serviço (o Android só deixa começar daqui) e conta como foco. O relay recebe
+     * `background`/`serviced` e só manda chamadas a quem está na frente ou servido.
+     */
+    fun onLifecycleChanged() {
+        val fg = McpAgentHub.foreground
+        if (fg && enabled && keepWorking && hadAgent && !McpAgentHub.serviceRunning) McpAgentHub.platform?.startService()
+        if (fg && enabled && loop?.isActive != true) start()
+        send(JSONObject().put("t", "state").put("background", !fg).put("serviced", McpAgentHub.serviceRunning))
+        if (fg) { serviceIdle?.cancel(); serviceIdle = null } else touchService()
+    }
+
+    /** Ação "Parar" da notificação: o serviço sai; fora da tela, a conexão também (volta ao abrir o app). */
+    fun stopBackgroundSession() {
+        McpAgentHub.platform?.stopService()
+        if (!McpAgentHub.foreground) sleep()
+    }
+
+    /** O FCM deu (ou trocou) o token: vai ao relay sem refazer o hello. */
+    fun onPushToken(token: String?) {
+        pushToken = token
+        prefs.edit().apply { if (token == null) remove(KEY_PUSH_TOKEN) else putString(KEY_PUSH_TOKEN, token) }.apply()
+        if (keepWorking && enabled) send(JSONObject().put("t", "state").put("push", pushJson() ?: JSONObject.NULL))
+    }
+
+    private fun requestPush() {
+        if (!enabled || !keepWorking) return
+        McpAgentHub.platform?.requestPushToken { token -> if (token != null && token != pushToken) onPushToken(token) }
+    }
+
+    private fun pushJson(): JSONObject? {
+        val t = pushToken ?: return null
+        if (!keepWorking) return null
+        return JSONObject().put("provider", "fcm").put("token", t)
+    }
+
+    /** Fecha a conexão sem desligar o AureaMCP (o push ou a volta ao app reabrem). */
+    private fun sleep() {
+        loop?.cancel(); loop = null
+        socket?.let { s -> scope.launch(Dispatchers.IO) { s.close() } }
+        socket = null
+        if (enabled) status = Status.Offline
+    }
+
+    /**
+     * Fora da tela e sem chamadas por [SERVICE_IDLE_MS]: se o Worker sabe acordar
+     * este aparelho por push, o serviço sai (bateria); a próxima chamada do agente
+     * vira fila + push e o serviço volta. Sem push, o serviço fica até o limite do sistema.
+     */
+    private fun touchService() {
+        serviceIdle?.cancel()
+        if (McpAgentHub.foreground || !McpAgentHub.serviceRunning) { serviceIdle = null; return }
+        serviceIdle = scope.launch {
+            delay(SERVICE_IDLE_MS)
+            if (!McpAgentHub.foreground && pushWake && running.isEmpty() && confirm == null) {
+                McpAgentHub.platform?.stopService()
+                sleep()
+            }
+        }
+    }
+
+    // --- idempotência dos jobs da fila -----------------------------------------------
+
+    /** Últimos jobs executados (id → resultado compacto), para o relay não executar duas vezes. */
+    private val doneJobs: LinkedHashMap<String, JSONObject> by lazy {
+        val out = LinkedHashMap<String, JSONObject>()
+        runCatching {
+            val o = JSONObject(prefs.getString(KEY_JOBS, "{}") ?: "{}")
+            for (k in o.keys()) o.optJSONObject(k)?.let { out[k] = it }
+        }
+        out
+    }
+
+    private fun rememberJob(id: String, reply: McpReply) {
+        doneJobs[id] = JSONObject().put("ok", reply.ok).put("text", reply.text.take(4000)).put("image", reply.jpeg != null)
+        while (doneJobs.size > JOBS_MAX) doneJobs.remove(doneJobs.keys.first())
+        val o = JSONObject()
+        for ((k, v) in doneJobs) o.put(k, v)
+        prefs.edit().putString(KEY_JOBS, o.toString()).apply()
     }
 
     /** Stop: nenhum agente age até [resume]; as chamadas em andamento caem. */
@@ -155,16 +310,33 @@ class AureaMcp(
         send(JSONObject().put("t", "state").put("project", JSONObject().put("title", title).put("open", open)))
     }
 
-    fun answerConfirm(approved: Boolean) {
-        confirm?.answer?.complete(approved)
+    /** `id`: a notificação respondeu a ESTE pedido (um pedido velho não aprova o novo). */
+    fun answerConfirm(approved: Boolean, id: Long? = null) {
+        val c = confirm ?: return
+        if (id != null && id != c.id) return
+        McpAgentHub.platform?.clearConfirm(c.id)
+        c.answer.complete(approved)
         confirm = null
     }
 
+    /**
+     * Pede a aprovação da pessoa: o diálogo do app (raiz do Compose) e, com o app
+     * fora da tela, também a notificação com Aprovar/Recusar. Sem como notificar
+     * (permissão negada) e fora da tela, recusa na hora — o agente fica sabendo.
+     */
     private suspend fun askPerson(tool: String, agent: String, detail: String): Boolean {
         val c = Confirm(tool, agent, detail, CompletableDeferred())
-        withContext(Dispatchers.Main) { confirm?.answer?.complete(false); confirm = c }
-        val ok = withTimeoutOrNull(CONFIRM_MS) { c.answer.await() } ?: false
-        withContext(Dispatchers.Main) { if (confirm === c) confirm = null }
+        val reachable = withContext(Dispatchers.Main) {
+            confirm?.let { old -> McpAgentHub.platform?.clearConfirm(old.id); old.answer.complete(false) }
+            confirm = c
+            val notified = !McpAgentHub.foreground && McpAgentHub.platform?.showConfirm(c.id, tool, agent, detail) == true
+            McpAgentHub.foreground || notified
+        }
+        val ok = if (reachable) withTimeoutOrNull(CONFIRM_MS) { c.answer.await() } ?: false else false
+        withContext(Dispatchers.Main) {
+            McpAgentHub.platform?.clearConfirm(c.id)
+            if (confirm === c) confirm = null
+        }
         return ok
     }
 
@@ -186,6 +358,7 @@ class AureaMcp(
                 status = Status.Online
                 backoff = 1_000L
                 send(hello())
+                if (pushToken == null) requestPush()
                 pinger = scope.launch { while (isActive) { delay(25_000); runCatching { withContext(Dispatchers.IO) { s.sendText("ping") } } } }
                 withContext(Dispatchers.IO) { s.readLoop { text -> scope.launch(Dispatchers.Main) { onMessage(text) } } }
             } catch (c: CancellationException) {
@@ -215,6 +388,12 @@ class AureaMcp(
             .put("hostTools", JSONArray(McpCatalog.HOST.keys.toList()))
             .put("permissions", permissionsJson())
             .put("project", JSONObject().put("title", title).put("open", open))
+            // Fora do app: o relay escolhe quem está na frente ou servido e acorda pelo push.
+            .put("background", !McpAgentHub.foreground)
+            .put("serviced", McpAgentHub.serviceRunning)
+            .put("askEveryEdit", askEveryEdit)
+            .put("lang", java.util.Locale.getDefault().toLanguageTag())
+            .put("push", pushJson() ?: JSONObject.NULL)
     }
 
     private fun send(msg: JSONObject) {
@@ -228,10 +407,12 @@ class AureaMcp(
         val m = runCatching { JSONObject(text) }.getOrNull() ?: return
         when (m.optString("t")) {
             "welcome" -> {
-                paused = m.optBoolean("paused"); agents = parseAgents(m.optJSONArray("agents"))
+                paused = m.optBoolean("paused"); noteAgents(parseAgents(m.optJSONArray("agents")))
+                pushWake = m.optBoolean("push")
+                touchService()
                 m.optJSONArray("log")?.let { arr -> log.clear(); for (i in 0 until arr.length()) parseLog(arr.optJSONObject(i))?.let(log::add) }
             }
-            "agents" -> agents = parseAgents(m.optJSONArray("agents"))
+            "agents" -> noteAgents(parseAgents(m.optJSONArray("agents")))
             "paused" -> paused = m.optBoolean("paused")
             "log" -> parseLog(m)?.let { log.add(it); if (log.size > LOG_MAX) log.removeRange(0, log.size - LOG_MAX) }
             "cancel" -> running.remove(m.optString("id"))?.cancel()
@@ -244,19 +425,43 @@ class AureaMcp(
         val tool = m.optString("tool")
         val args = m.optJSONObject("args") ?: JSONObject()
         val agent = m.optString("agent").ifBlank { "agent" }.take(80)
+        val job = m.optBoolean("job")
+        // Job da fila que já rodou (o resultado se perdeu no caminho): só reenvia o resultado.
+        if (job) {
+            doneJobs[id]?.let { done ->
+                val text = done.optString("text") + if (done.optBoolean("image")) "\n(The image of this result was not kept; call render_frame again.)" else ""
+                sendResult(id, McpReply(done.optBoolean("ok"), text))
+                return
+            }
+            if (running.containsKey(id)) return
+        }
         running[id] = scope.launch {
+            McpAgentHub.platform?.callStarted()
+            serviceIdle?.cancel()
+            var ran = false
             val reply = try {
-                if (paused) McpReply.fail("The person paused AureaMCP in the app.") else executor.run(tool, args, agent)
+                if (paused) McpReply.fail("The person paused AureaMCP in the app.")
+                else { wakeEngine(); executor.run(tool, args, agent).also { ran = true } }
             } catch (c: CancellationException) {
                 McpReply.fail("Cancelled.")
             } catch (e: Exception) {
                 McpReply.fail("Aurea failed: ${e.javaClass.simpleName}")
+            } finally {
+                McpAgentHub.platform?.callEnded()
             }
             running.remove(id)
-            val out = JSONObject().put("t", "result").put("id", id).put("ok", reply.ok).put("content", reply.toContent())
-            if (!reply.ok) out.put("error", reply.text.take(2000))
-            send(out)
+            // Só o que de fato rodou até o fim vira "feito" (cancelado/pausado pode voltar da fila).
+            if (job && ran) rememberJob(id, reply)
+            sendResult(id, reply)
+            onCallEnded()
+            touchService()
         }
+    }
+
+    private fun sendResult(id: String, reply: McpReply) {
+        val out = JSONObject().put("t", "result").put("id", id).put("ok", reply.ok).put("content", reply.toContent())
+        if (!reply.ok) out.put("error", reply.text.take(2000))
+        send(out)
     }
 
     private fun parseAgents(arr: JSONArray?): List<Agent> = buildList {
@@ -264,7 +469,7 @@ class AureaMcp(
         for (i in 0 until arr.length()) arr.optJSONObject(i)?.let { add(Agent(it.optString("name"), it.optString("version"), it.optLong("seen"), it.optString("tokenId").ifBlank { null })) }
     }
 
-    private fun parseLog(o: JSONObject?): LogLine? = o?.let {
+    private fun parseLog(o: JSONObject?): LogLine? = o?.takeIf { it.optString("event") != "wake" }?.let {
         LogLine(it.optLong("at"), it.optString("agent"), it.optString("tool").ifBlank { null }, it.optBoolean("ok", true), it.optLong("ms"), it.optString("event").ifBlank { null })
     }
 
@@ -392,6 +597,9 @@ class AureaMcp(
         }
     }
 
+    // Por último: o hub só enxerga a instância depois de todas as propriedades prontas.
+    init { McpAgentHub.attach(this) }
+
     companion object {
         /** Há uma instância ligada: a raiz do app mostra as confirmações e segue o ciclo de vida. */
         var active by mutableStateOf(false)
@@ -438,8 +646,28 @@ class AureaMcp(
         private const val KEY_ASK = "ask_every_edit"
         private const val KEY_PERM = "perm."
         private const val KEY_DEVICE = "device"
+        private const val KEY_BACKGROUND = "keep_working"
+        private const val KEY_PUSH_TOKEN = "push_token"
+        private const val KEY_JOBS = "jobs_done"
+        private const val KEY_HAD_AGENT = "had_agent"
+        private const val JOBS_MAX = 60
+        /** Fora da tela sem chamadas por este tempo e com push no Worker: o serviço sai. */
+        private const val SERVICE_IDLE_MS = 30L * 60 * 1000
         private const val CONFIRM_MS = 85_000L
         private const val LOG_MAX = 200
+        private val confirmSeq = java.util.concurrent.atomic.AtomicLong(1)
+        internal fun nextConfirmId(): Long = confirmSeq.getAndIncrement()
+
+        /** Ligado e com "Continuar fora do app" (o push só sobe o serviço assim). */
+        fun keepWorkingIn(context: Context): Boolean {
+            val p = context.applicationContext.getSharedPreferences("aurea.mcp", Context.MODE_PRIVATE)
+            return p.getBoolean(KEY_ENABLED, false) && p.getBoolean(KEY_BACKGROUND, true)
+        }
+
+        /** O FCM trocou o token com o app fechado: guarda para o próximo hello. */
+        fun storePushToken(context: Context, token: String) {
+            context.applicationContext.getSharedPreferences("aurea.mcp", Context.MODE_PRIVATE).edit().putString(KEY_PUSH_TOKEN, token).apply()
+        }
 
         /** Comandos prontos para colar (Claude Code e Codex). */
         fun claudeCodeCommand(token: String) = "claude mcp add --transport http aurea $SERVER_URL --header \"Authorization: Bearer $token\""

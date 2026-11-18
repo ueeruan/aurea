@@ -376,7 +376,9 @@ final class StorageScreen: ObservableObject {
         let library = AureaStorage.measure(AureaStorage.keepRoots.map { URL(fileURLWithPath: $0, isDirectory: true) }
             + ["LUTs", "formas3d", "Sons"].map { documents.appendingPathComponent($0, isDirectory: true) })
         let exports = AureaStorage.measure(AureaStorage.exportFiles())
-        let preRender = AureaStorage.measure([caches.appendingPathComponent("pre-render", isDirectory: true)])
+        // 1.0.2: o MP4 do pré-export (motor: EnginePreRenderRange.cpp) entra na mesma linha.
+        let preRender = AureaStorage.measure([caches.appendingPathComponent("pre-render", isDirectory: true),
+                                              caches.appendingPathComponent("pre-export", isDirectory: true)])
         let proxies = AureaStorage.measure([caches.appendingPathComponent("preview-proxies", isDirectory: true)])
         let others = AureaStorage.measure(["effect-previews", "waveform", "headbop", "sequences", "plugin-install"]
             .map { caches.appendingPathComponent($0, isDirectory: true) }

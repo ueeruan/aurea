@@ -425,6 +425,10 @@ void DeviceCapabilities::compute_budget() noexcept {
             // textura, tempo) não foi medido além disso.
             maxExportWidth_  = std::min<u32>(std::max(encodeH264_.maxWidth, encodeH264_.maxHeight), 3840);
             maxExportHeight_ = std::min<u32>(std::min(encodeH264_.maxWidth, encodeH264_.maxHeight), 2160);
+            // Encoder que anuncia a altura em macroblocos (1920×1088): o degrau
+            // é o padrão logo abaixo (1080p). Antes o corte por memória escondia isso.
+            for (const u32 tier : {2160u, 1440u, 1080u, 720u, 480u})
+                if (maxExportHeight_ > tier && maxExportHeight_ < tier + 16) { maxExportHeight_ = tier; break; }
             exportLimit_ = (maxExportHeight_ < 2160) ? ExportLimit::Encoder : ExportLimit::None;
         } else {
             // A tabela veio e não tem H.264: conservador, e a UI diz o porquê.
@@ -441,11 +445,14 @@ void DeviceCapabilities::compute_budget() noexcept {
         exportLimit_ = ExportLimit::Unknown;
     }
 
-    // Teto por memória: um frame 4K RGBA16F ocupa 3840*2160*8 = 66 MB. Com
-    // orçamento de 384 MB, três desses já enchem — então o teto cai para 1080p.
+    // Teto por memória: um frame 4K RGBA16F ocupa 3840*2160*8 = 66 MB. Antes,
+    // abaixo de 6 desses (396 MB) o teto caía para 1080p: um aparelho de 4 GB
+    // com o encoder 4K exportava em 1080p. Agora o export 4K roda com MENOS
+    // quadros em voo nesse orçamento (Engine: uma leitura por vez, scheduler
+    // serial); só abaixo de 3 quadros 4K (198 MB) nem o caminho serial cabe.
     const u64 budget = memory_budget_bytes();
     const u64 frame4k = 3840ull * 2160ull * 8ull;
-    if (budget < frame4k * 6) {
+    if (budget < frame4k * 3) {
         if (exportLimit_ == ExportLimit::None) exportLimit_ = ExportLimit::Memory;   // era o codificador que deixava 4K
         if (maxExportWidth_ > 1920) maxExportWidth_ = 1920;
         if (maxExportHeight_ > 1080) maxExportHeight_ = 1080;
@@ -669,7 +676,7 @@ DevicePolicy device_policy(DeviceTier tier, ThermalTier thermal) noexcept {
             p.particleScale  *= 0.5f;
             p.shadowMapSize   = std::max<u32>(512, p.shadowMapSize / 2);
             p.backgroundPauseMs = 500;
-            p.exportPipelineDepth = std::max<u32>(1, p.exportPipelineDepth - 1);
+            // O export mantém a profundidade: só o crítico a reduz (abaixo).
             break;
         case ThermalTier::Critical:
             // O editor tem de continuar respondendo: preview no mínimo útil

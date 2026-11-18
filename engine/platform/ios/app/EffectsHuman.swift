@@ -141,7 +141,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.distort.page_turn", FxEffectHuman(name: "fx_name_page_turn", keywords: "page turn pagina papel cc", principal: [0, 1, 2, 3, 8])),
     ("aurea.distort.mesh_warp", FxEffectHuman(name: "fx_name_mesh_warp", keywords: "mesh warp malha deformacao grade bezier entortar", principal: [0, 1, 2])),
     ("aurea.distort.puppet", FxEffectHuman(name: "fx_name_puppet", keywords: "puppet fantoche pino pin marionete rig personagem deformar arap", principal: [0, 1, 2])),
-    ("aurea.distort.headbop", FxEffectHuman(name: "fx_name_headbop", keywords: "headbop head bop cabeça balançar batida musica ritmo danca dancar pessoa beat nod groove", principal: [0, 1, 2, 3, 13], futurePaid: true)),
+    ("aurea.distort.headbop", FxEffectHuman(name: "fx_name_headbop", keywords: "headbop head bop cabeça balançar batida musica ritmo danca dancar pessoa beat nod groove", principal: [0, 1, 2, 3, 13])),
     ("aurea.distort.liquid_glass", FxEffectHuman(name: "fx_name_liquid_glass", keywords: "liquid glass vidro liquido lente refracao glassmorphism", principal: [0, 1, 2, 3, 5])),
     ("aurea.transition.noise_dissolve", FxEffectHuman(name: "fx_name_noise_dissolve", keywords: "dissolve dissolver ruido queimar desintegrar", principal: [0, 1, 3, 8, 10])),
     ("aurea.stylize.eight_bit", FxEffectHuman(name: "fx_name_eight_bit", keywords: "8 bit 8bit pixel retro dither pontilhado game", principal: [0, 1, 2, 3])),
@@ -1007,9 +1007,9 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         ])),
     // Câmera lenta por vetores e desfoque calculado da filmagem (0.1.8).
     ("aurea.time.flow_retime", FxEffectHuman(
-        keywords: "twixtor kee flow retime camera lenta slow motion slowmo super slow optical flow vetores interpolar interpolacao quadros frame interpolation velocidade remapear tempo time remap timewarp suave duplicados repetidos duplicate frames chronos topaz camara lenta замедленная съемка замедление स्लो मोशन धीमी गति حركة بطيئة gerak lambat",
-        principal: [0, 1, 2, 3, 4],
-        params: [5: FxParamHuman(suffix: "%", decimals: 0)])),
+        keywords: "twixtor kee flow retime camera lenta slow motion slowmo super slow optical flow vetores interpolar interpolacao quadros frame interpolation velocidade remapear tempo time remap timewarp suave duplicados repetidos duplicate frames chronos topaz camara lenta rife neural ia ai fantasma ghosting deformacao warping замедленная съемка замедление स्लो मोशन धीमी गति حركة بطيئة gerak lambat",
+        principal: [0, 1, 2, 6, 3, 4],
+        params: [5: FxParamHuman(suffix: "%", decimals: 0), 6: FxParamHuman(suffix: "%", decimals: 0)])),
     // Aprimorar (0.3.0): a restauração do Topaz (Proteus) com nome próprio.
     ("aurea.enhance.video", FxEffectHuman(
         name: "fx030e_name",

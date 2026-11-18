@@ -47,6 +47,7 @@
 #include "aurea/export/ExportAttempts.hpp"
 #include "aurea/export/ExportWatchdog.hpp"
 #include "aurea/export/FFmpegExportSink.hpp"
+#include "aurea/media/MediaCut.hpp"
 #include "aurea/vector/Vector.hpp"
 #include "aurea/ui/BuiltinPropertySchema.hpp"
 #include "aurea/tracking/CameraTrackData.hpp"
@@ -617,7 +618,83 @@ bool aurea_vision_person_segment(void*, uint32_t model, const uint8_t* rgb, uint
     if (!e) return @[];
     const auto p = e->query_prerender_progress();
     return @[@(p.running), @(p.complete), @(p.framesDone), @(p.framesTotal),
-             @(p.width), @(p.height), @(p.direction), @(p.error), @(p.diskBytes), @(p.residentBytes)];
+             @(p.width), @(p.height), @(p.direction), @(p.error), @(p.diskBytes), @(p.residentBytes),
+             @(p.firstFrame), @(p.endFrame), @(p.divisor), @(p.dirtySegments)];
+}
+
+// --- Pre Render & Pre Export (1.0.2) -------------------------------------------
+- (BOOL)preRenderRangeAction:(int32_t)action {
+    auto* e = self.engine;
+    return e && action >= 0 && e->prerender_range_action(static_cast<aurea::u32>(action)) ? YES : NO;
+}
+
+- (NSArray<NSNumber*>*)preRenderRange {
+    auto* e = self.engine;
+    if (!e) return @[];
+    const auto r = e->query_prerender_range();
+    return @[@(r.in), @(r.out), @(r.effectiveIn), @(r.effectiveOut), @(r.loop), @(r.divisor), @(r.fps)];
+}
+
+- (void)setPreRenderLoop:(BOOL)on {
+    if (auto* e = self.engine) e->set_prerender_loop(on == YES);
+}
+
+- (void)setPreRenderQuality:(int32_t)divisor {
+    if (auto* e = self.engine) e->set_prerender_quality(divisor > 0 ? static_cast<aurea::u32>(divisor) : 0u);
+}
+
+- (NSArray<NSNumber*>*)preRenderFit:(int32_t)divisor mode:(int32_t)mode {
+    auto* e = self.engine;
+    if (!e) return @[];
+    const auto f = e->query_prerender_fit(divisor > 0 ? static_cast<aurea::u32>(divisor) : 0u, mode > 0 ? 1u : 0u);
+    return @[@(f.width), @(f.height), @(f.divisor), @(f.mode), @(f.fps), @(f.fitsSeconds), @(f.rangeSeconds),
+             @(f.bytesPerSecond), @(f.availableBytes), @(f.rangeBytes), @(f.fits)];
+}
+
+- (int32_t)startPreRenderRange:(int32_t)divisor {
+    auto* e = self.engine;
+    return e ? e->start_prerender_range(divisor > 0 ? static_cast<aurea::u32>(divisor) : 0u).raw()
+             : static_cast<int32_t>(aurea::Errc::InvalidState);
+}
+
+- (int32_t)startPreExport:(int32_t)divisor {
+    auto* e = self.engine;
+    return e ? e->start_preexport(divisor > 0 ? static_cast<aurea::u32>(divisor) : 0u).raw()
+             : static_cast<int32_t>(aurea::Errc::InvalidState);
+}
+
+- (void)cancelPreExport {
+    if (auto* e = self.engine) e->cancel_preexport();
+}
+
+- (NSArray<NSNumber*>*)preExportStatus {
+    auto* e = self.engine;
+    if (!e) return @[];
+    const auto s = e->query_preexport();
+    return @[@(s.running), @(s.complete), @(s.stale), @(s.framesDone), @(s.framesTotal), @(s.in), @(s.out),
+             @(s.width), @(s.height), @(s.divisor), @(s.dirtySegments), @(s.fps), @(s.bytes), @(s.error)];
+}
+
+- (NSString*)preExportPath {
+    auto* e = self.engine;
+    if (!e) return @"";
+    const auto s = e->query_preexport();
+    return s.complete ? ([NSString stringWithUTF8String:s.path] ?: @"") : @"";
+}
+
+- (NSArray<NSNumber*>*)preRenderDirty:(int32_t)mode {
+    auto* e = self.engine;
+    if (!e) return @[];
+    aurea::i64 pairs[64 * 2]{};
+    const aurea::u32 n = std::min<aurea::u32>(64, e->query_prerender_dirty(mode > 0 ? 1u : 0u, pairs, 64));
+    NSMutableArray<NSNumber*>* out = [NSMutableArray arrayWithCapacity:n * 2];
+    for (aurea::u32 i = 0; i < n * 2; ++i) [out addObject:@(pairs[i])];
+    return out;
+}
+
+- (int64_t)preExportDiskBytes {
+    auto* e = self.engine;
+    return e ? static_cast<int64_t>(e->preexport_disk_bytes()) : 0;
 }
 
 // =============================================================================
@@ -2695,6 +2772,45 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     }
     _lastImportError = @"";
     return static_cast<long long>(*r);
+}
+
+- (long long)importVideo:(NSString*)path name:(NSString*)name windowStartUs:(int64_t)windowStartUs
+               originRef:(NSString*)originRef {
+    if (windowStartUs <= 0 && originRef.length == 0) return [self importVideo:path name:name];
+    auto* e = self.engine;
+    if (!e) return -static_cast<long long>(aurea::Errc::InvalidState);
+    aurea::VideoImport request;
+    request.sourcePath = to_std(path);
+    request.displayName = to_std(name);
+    request.windowStartUs = std::max<int64_t>(0, windowStartUs);
+    request.originRef = to_std(originRef);
+    const aurea::Result<aurea::u64> r = e->import_video(request);
+    if (!r.ok()) {
+        _lastImportError = to_ns(std::string(r.status().message()));
+        return -static_cast<long long>(r.status().code());
+    }
+    _lastImportError = @"";
+    return static_cast<long long>(*r);
+}
+
++ (NSDictionary<NSString*, id>*)importTrimmedMedia:(NSString*)source directory:(NSString*)directory
+                                          originRef:(NSString*)originRef fileExtension:(NSString*)fileExtension
+                                               inUs:(int64_t)inUs outUs:(int64_t)outUs {
+    aurea::TrimmedImportRequest request;
+    request.source = to_std(source);
+    request.directory = to_std(directory);
+    request.originRef = to_std(originRef);
+    request.extension = to_std(fileExtension);
+    request.inUs = inUs;
+    request.outUs = outUs;
+    aurea::TrimmedImportResult result;
+    const aurea::Status s = aurea::import_trimmed_media(request, result);
+    if (!s.ok()) {
+        AUREA_LOG_INFO("trecho nao cortado (%d): %.*s", s.raw(), static_cast<int>(s.detail().size()), s.detail().data());
+        return nil;
+    }
+    return @{ @"path": to_ns(result.path), @"windowStartUs": @(result.windowStartUs), @"windowEndUs": @(result.windowEndUs),
+              @"bytes": @(result.bytes), @"sourceBytes": @(result.sourceBytes), @"reused": @(result.reused) };
 }
 
 - (NSDictionary<NSString*, id>*)probeImageSequence:(NSArray<NSString*>*)paths {
@@ -6384,6 +6500,10 @@ static aurea::ImageExportSettings AureaImageSettings(uint32_t format, uint32_t s
 
 + (BOOL)effectRequiresHyper:(uint32_t)typeId {
     return aurea::hyper::effect_requires_access(typeId) ? YES : NO;
+}
+
++ (BOOL)effectOptionRequiresHyper:(uint32_t)typeId param:(uint32_t)paramIndex value:(float)value {
+    return aurea::hyper::effect_option_requires_access(typeId, paramIndex, value) ? YES : NO;
 }
 
 + (BOOL)text3DRequiresHyper {

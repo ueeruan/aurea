@@ -159,8 +159,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put("aurea.distort.puppet", EffectHuman(name = R.string.fx_name_puppet,
         keywords = "puppet fantoche pino pin marionete rig personagem deformar arap", principal = listOf(0, 1, 2)))
     put("aurea.distort.headbop", EffectHuman(name = R.string.fx_name_headbop,
-        keywords = "headbop head bop cabeça balançar batida musica ritmo danca dancar pessoa beat nod groove", principal = listOf(0, 1, 2, 3, 13),
-        futurePaid = true))
+        keywords = "headbop head bop cabeça balançar batida musica ritmo danca dancar pessoa beat nod groove", principal = listOf(0, 1, 2, 3, 13)))
     put("aurea.move.path", EffectHuman(name = R.string.beta_move_path,
         keywords = "move along path caminho vetor trajetória percurso orientar", principal = listOf(0, 1, 2, 3, 4, 5)))
     put("aurea.distort.liquid_glass", EffectHuman(name = R.string.fx_name_liquid_glass,
@@ -1103,9 +1102,9 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     // Câmera lenta por vetores e desfoque calculado da filmagem (0.1.8). Nomes
     // próprios; a busca acha pelos nomes dos plugins de mesmo propósito.
     put("aurea.time.flow_retime", EffectHuman(
-        keywords = "twixtor kee flow retime camera lenta slow motion slowmo super slow optical flow vetores interpolar interpolacao quadros frame interpolation velocidade remapear tempo time remap timewarp suave duplicados repetidos duplicate frames chronos topaz camara lenta замедленная съемка замедление स्लो मोशन धीमी गति حركة بطيئة gerak lambat",
-        principal = listOf(0, 1, 2, 3, 4),
-        params = mapOf(5 to ParamHuman(suffix = "%", decimals = 0))))
+        keywords = "twixtor kee flow retime camera lenta slow motion slowmo super slow optical flow vetores interpolar interpolacao quadros frame interpolation velocidade remapear tempo time remap timewarp suave duplicados repetidos duplicate frames chronos topaz camara lenta rife neural ia ai fantasma ghosting deformacao warping замедленная съемка замедление स्लो मोशन धीमी गति حركة بطيئة gerak lambat",
+        principal = listOf(0, 1, 2, 6, 3, 4),
+        params = mapOf(5 to ParamHuman(suffix = "%", decimals = 0), 6 to ParamHuman(suffix = "%", decimals = 0))))
     // Aprimorar (0.3.0): a restauração do Topaz (Proteus) com nome próprio.
     put("aurea.enhance.video", EffectHuman(
         name = R.string.fx030e_name,

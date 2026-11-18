@@ -132,6 +132,9 @@ public:
         (void)margin;
         if (e.auxInfo.w != 0) return static_cast<Errc>(static_cast<i32>(e.auxInfo.w));
         if (!e.pathSamples || !e.aux.valid()) return Errc::InvalidState;
+        // Sem contorno (imagem ou vídeo sem máscara): não há o que extrudar. Mostra a
+        // camada como está em vez de apagá-la (a opacidade da entrada começa em 0).
+        if (e.auxInfo.z < 1) { out = input; return OkStatus; }
         const Vec4 box = e.pathSamples->front();
         Rect region{box.x, box.y, box.z, box.w};
         if (e.f(kInputOpacity) > 0 || region.empty()) region = Rect::unite(region, input.region);

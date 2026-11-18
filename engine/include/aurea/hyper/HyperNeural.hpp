@@ -24,6 +24,7 @@
 #include <atomic>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace aurea::hyper {
 
@@ -102,6 +103,17 @@ public:
                                      const StageContext& ctx) noexcept;
     /// O mesmo em RGB8 (w×h, stride w·3), para testes e ferramentas.
     [[nodiscard]] Status interpolate_rgb(const u8* a, const u8* b, f32 t, u8* out, const StageContext& ctx) noexcept;
+    /// Só o campo da rede (1.0.3, Flow Retime "Neural" na timeline, montado
+    /// na GPU): fluxos t→A e t→B (px da grade da rede, planos f0x, f0y, f1x,
+    /// f1y) e a máscara (peso de A), na grade gridW×gridH (borda até múltiplo
+    /// de 32; a parte netW×netH cobre a imagem). decision 1 = quadros iguais,
+    /// 2 = corte de cena: sem campo.
+    struct Fields {
+        std::vector<f32> flow, mask;
+        u32 gridW = 0, gridH = 0, netW = 0, netH = 0;
+        u32 decision = 0;
+    };
+    [[nodiscard]] Status fields_rgb(const u8* a, const u8* b, f32 t, Fields& out, const StageContext& ctx) noexcept;
     [[nodiscard]] u64 peak_bytes() const noexcept;
     /// Última decisão: 0 rede, 1 cópia (iguais), 2 corte de cena.
     [[nodiscard]] u32 last_decision() const noexcept;

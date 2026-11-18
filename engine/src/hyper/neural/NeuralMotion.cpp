@@ -256,6 +256,59 @@ Status MotionInterpolator::interpolate_rgb(const u8* a, const u8* b, f32 t, u8* 
     return Errc::OutOfMemory;
 }
 
+Status MotionInterpolator::fields_rgb(const u8* a, const u8* b, f32 t, Fields& out, const StageContext& ctx) noexcept try {
+    if (!impl_ || !impl_->runner.loaded()) return Errc::InvalidState;
+    Impl& m = *impl_;
+    const usize bytes = static_cast<usize>(m.width) * m.height * 3;
+    t = std::clamp(t, 0.0f, 1.0f);
+    out.decision = 0;
+    out.gridW = m.pw;
+    out.gridH = m.ph;
+    out.netW = m.nw;
+    out.netH = m.nh;
+    // Iguais ou corte de cena: sem rede (a mesma regra de interpolate_rgb).
+    u64 diff = 0, count = 0;
+    for (usize i = 0; i < bytes; i += 3 * 7) { diff += static_cast<u64>(std::abs(int(a[i]) - int(b[i]))); ++count; }
+    const f64 mean = count ? static_cast<f64>(diff) / static_cast<f64>(count) : 0.0;
+    if (mean < 0.5) { out.decision = 1; m.decision = 1; return OkStatus; }
+    if (mean > 48.0) { out.decision = 2; m.decision = 2; return OkStatus; }
+    m.decision = 0;
+    m.downscale(a, m.in0);
+    m.downscale(b, m.in1);
+    m.in2.fill(t);
+    ctx.beat();
+    if (ctx.cancelled()) return Errc::Cancelled;
+    auto run = [&]() -> bool {
+        ncnn::Extractor ex = m.runner.net().create_extractor();
+        ex.set_blob_allocator(&m.allocator);
+        ex.set_workspace_allocator(&m.allocator);
+        if (ex.input("in0", m.in0) != 0 || ex.input("in1", m.in1) != 0 || ex.input("in2", m.in2) != 0) return false;
+        if (ex.extract("327", m.flow) != 0 || ex.extract("332", m.mask) != 0) return false;
+        return !m.flow.empty() && !m.mask.empty() && m.flow.c == 4 && m.mask.c == 1 &&
+               m.flow.w == static_cast<int>(m.pw) && m.flow.h == static_cast<int>(m.ph);
+    };
+    bool ok = run();
+    if (!ok && m.runner.can_fallback() && m.runner.fallback_to_cpu().ok()) ok = run();
+    m.peak = std::max(m.peak, m.allocator.peak());
+    if (!ok) return Status{Errc::InvalidState, "a interpolacao falhou"};
+    // A rede no Vulkan com fp16 pode devolver fp16: converte antes de copiar.
+    ncnn::Mat flow = m.flow, mask = m.mask;
+    ncnn::Option opt;
+    if (flow.elembits() == 16) ncnn::cast_float16_to_float32(m.flow, flow, opt);
+    if (mask.elembits() == 16) ncnn::cast_float16_to_float32(m.mask, mask, opt);
+    if (flow.elempack != 1 || mask.elempack != 1 || flow.elembits() != 32 || mask.elembits() != 32) return Status{Errc::InvalidState, "campo da rede"};
+    const usize n = static_cast<usize>(m.pw) * m.ph;
+    out.flow.resize(n * 4);
+    out.mask.resize(n);
+    for (int c = 0; c < 4; ++c) std::memcpy(out.flow.data() + static_cast<usize>(c) * n, flow.channel(c), n * sizeof(f32));
+    std::memcpy(out.mask.data(), mask.channel(0), n * sizeof(f32));
+    m.flow.release();
+    m.mask.release();
+    return ctx.cancelled() ? Status{Errc::Cancelled} : OkStatus;
+} catch (const std::bad_alloc&) {
+    return Errc::OutOfMemory;
+}
+
 Status MotionInterpolator::interpolate(const FrameView& a, const FrameView& b, f32 t, FrameBuffer& out,
                                        const StageContext& ctx) noexcept {
     if (!impl_ || !a.valid() || !b.valid()) return Errc::InvalidArgument;

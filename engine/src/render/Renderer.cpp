@@ -40,9 +40,11 @@
 #include "aurea/project/Project.hpp"
 #include "aurea/hyper/Hyper.hpp"
 #include "effects/builtin/HyperFx.hpp"
+#include "hyper/neural/NeuralRetime.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <new>
@@ -1275,6 +1277,11 @@ void Renderer::release_project_resources_impl(bool gpuDone) noexcept {
     for (auto& [k, f] : flowCache_) for (TextureHandle& t : f.tex) if (t.valid()) backend_->destroy_texture(t);
     flowCache_.clear();
     heavyStats_.flowCacheBytes = 0;
+    // Flow Retime Neural: as texturas do campo e a rede (o projeto fechou).
+    if (neuralTex_.flow.valid()) backend_->destroy_texture(neuralTex_.flow);
+    if (neuralTex_.mask.valid()) backend_->destroy_texture(neuralTex_.mask);
+    neuralTex_ = NeuralTextures{};
+    if (neural_) neural_->clear();
     for (auto& [k, m] : maskCache_) for (TextureHandle& t : m.tex) if (t.valid()) backend_->destroy_texture(t);
     maskCache_.clear();
     release_slice_cache(true);
@@ -2012,12 +2019,128 @@ struct VideoFlowFx {
     f64 rate = 1.0;          ///< velocidade do retime agora (prefetch e direção)
     u8 frameBlend = 0;       ///< 0 repete, 1 mistura, 2 movimento
     f32 flowBase = 0.0f;     ///< base do optical flow (0 = padrão)
+    u8 flowQuality = 1;      ///< 0 rápida, 1 boa, 2 melhor, 3 neural
+    f32 flowBias = 0.5f;     ///< Fantasma (0) ↔ Deformação (1)
     f32 vectorAmount = 0.0f; ///< desfoque vetorial (0 = não)
     f64 shutter = 0.5;       ///< obturador em fração de quadro
     /// Flow Retime "Substituir quadros duplicados" (0.3.0) e a sensibilidade (0..100).
     bool replaceDuplicates = false;
     f32 duplicateSensitivity = 10.0f;
 };
+
+/// 1.0.2 — ajuste do optical flow por qualidade (Rápida, Boa, Melhor, Neural).
+/// `AUREA_FLOW_ABLATE` (só diagnóstico: testes de qualidade) desliga partes
+/// para medir cada uma: 1 deformação antiga, 2 sem guia de cor, 4 sem DIS
+/// (Lucas-Kanade), 8 sem contexto no tempo, 16 uma hipótese só, 32 subida sem
+/// guia, 64 sem regularizar o nível base, 128 liga a busca em dois níveis,
+/// 256 base antiga (Melhor = 576), 512 DIS em todas, 1024 liga o contexto no
+/// tempo. 1+2+4+16+32+64+256 = 375 reproduz o algoritmo de antes da 1.0.2.
+struct FlowTuning {
+    bool dis = false;
+    f32 stride = 4.0f;
+    u32 patchIters = 8;
+    u32 varIters = 5;
+    f32 varAlpha = 0.003f;
+    f32 varGamma = 1.0f;
+    f32 baseOverride = 0.0f;      ///< só para medir (AUREA_FLOW_TUNE)
+    f32 temporalWeight = 0.25f;   ///< peso máximo da previsão do par anterior
+    // Contexto no tempo: medido sem ganho na média (ajuda o HUD de jogo,
+    // atrapalha braço com oclusão) e deixa o quadro depender da ordem em que
+    // os pares foram calculados — desligado; 1024 em AUREA_FLOW_ABLATE liga.
+    // Busca em dois níveis: medida, perdeu para a busca num nível só (o
+    // segundo nível, mais fino, troca o vetor certo por outro de bloco
+    // parecido em textura que se repete) — desligada; 128 liga.
+    bool guide = true, level0Smooth = true, twoSearch = false, temporal = false, softRefine = true, hyp2 = true;
+    bool legacyWarp = false, legacyBase = false;
+};
+
+FlowTuning flow_tuning(u8 quality) noexcept {
+    FlowTuning t;
+    // DIS em todas as qualidades (medido em tests/test_flow_live_action.cpp:
+    // ganha do Lucas-Kanade em braço, oclusão, borrão e HUD de jogo). A
+    // qualidade muda a densidade dos blocos e as iterações, não a base: com
+    // blocos de 8 px, base maior que ~400 px no lado maior perdeu nas cenas
+    // de filmagem real (ruído de sensor, 4:2:0 e borrão de obturador).
+    t.dis = true;
+    if (quality == 0) {
+        t.stride = 4.0f;
+        t.patchIters = 6;
+        t.varIters = 3;
+    } else if (quality == 1) {
+        t.stride = 3.0f;
+        t.patchIters = 8;
+        t.varIters = 5;
+    } else {
+        t.stride = 3.0f;
+        t.patchIters = 12;
+        t.varIters = 8;
+    }
+    u32 off = 0;
+    if (const char* e = std::getenv("AUREA_FLOW_ABLATE")) off = static_cast<u32>(std::strtoul(e, nullptr, 0));
+    if (off & 1u) t.legacyWarp = true;
+    if (off & 2u) t.guide = false;
+    if (off & 4u) t.dis = false;
+    if (off & 8u) t.temporal = false;
+    if (off & 16u) t.hyp2 = false;
+    if (off & 32u) t.softRefine = false;
+    if (off & 64u) t.level0Smooth = false;
+    if (off & 128u) t.twoSearch = true;
+    if (off & 256u) t.legacyBase = true;
+    if (off & 512u) t.dis = true;
+    if (off & 1024u) t.temporal = true;
+    // Ajuste fino só para medir (testes): "passo:iterações:var:α:γ:base:λtempo".
+    if (const char* e = std::getenv("AUREA_FLOW_TUNE")) {
+        f32 v[7] = {t.stride, static_cast<f32>(t.patchIters), static_cast<f32>(t.varIters), t.varAlpha, t.varGamma, 0.0f, t.temporalWeight};
+        const char* c = e;
+        for (int i = 0; i < 7 && c && *c; ++i) {
+            char* end = nullptr;
+            const f32 x = std::strtof(c, &end);
+            if (end != c) v[i] = x;
+            const char* colon = std::strchr(c, ':');
+            c = colon ? colon + 1 : nullptr;
+        }
+        t.stride = std::max(2.0f, v[0]);
+        t.patchIters = static_cast<u32>(std::max(0.0f, v[1]));
+        t.varIters = static_cast<u32>(std::max(0.0f, v[2]));
+        t.varAlpha = v[3];
+        t.varGamma = v[4];
+        t.baseOverride = v[5];
+        t.temporalWeight = v[6];
+    }
+    return t;
+}
+
+/// O quadro intermediário pelo fluxo (flow_warp.frag): o maior vetor de cada
+/// vizinhança nos dois sentidos (a segunda hipótese de cada lado) e a
+/// deformação com mistura pela confiança. `bias` = Fantasma (0) ↔ Deformação (1).
+bool flow_interpolate(EffectBuildContext& ctx, PassStage stage, FGTexture target, FGTexture a, FGTexture b, FGTexture flow,
+                      u32 baseW, u32 baseH, u32 w, u32 h, f32 t, f32 bias, const FlowTuning& tune) noexcept {
+    FGTexture tile[2]{flow, flow};
+    if (tune.hyp2 && !tune.legacyWarp) {
+        constexpr u32 kTile = 8;
+        const u32 tileW = std::max(1u, baseW / kTile), tileH = std::max(1u, baseH / kTile);
+        for (u32 dir = 0; dir < 2; ++dir) {
+            const FGTexture coarse = ctx.texture("flow-blocos-quadro", tileW, tileH);
+            struct { Vec4 grid; Vec4 scale; } tp{Vec4{1.0f / static_cast<f32>(tileW), 1.0f / static_cast<f32>(tileH), 8.0f, 0},
+                                                 Vec4{1.0f, 4096.0f, static_cast<f32>(dir), 0}};
+            if (ctx.fullscreen_pass("flow-blocos-quadro", stage, coarse, ShaderId::video_flow_tile_frag, {PassTexture{flow}}, &tp, sizeof(tp))
+                == kInvalidIndex)
+                return false;
+            tile[dir] = ctx.texture("flow-vizinhos-quadro", tileW, tileH);
+            struct { Vec4 grid; Vec4 scale; } np{Vec4{3.0f / static_cast<f32>(tileW), 3.0f / static_cast<f32>(tileH), 3.0f, 0},
+                                                 Vec4{1.0f, 4096.0f, 0, 0}};
+            if (ctx.fullscreen_pass("flow-vizinhos-quadro", stage, tile[dir], ShaderId::video_flow_tile_frag,
+                                    {PassTexture{coarse, {}, CommonSampler::NearestClamp}}, &np, sizeof(np)) == kInvalidIndex)
+                return false;
+        }
+    }
+    struct { Vec4 blend; Vec4 image; } wp{Vec4{t, 1.0f / static_cast<f32>(baseW), 1.0f / static_cast<f32>(baseH), std::clamp(bias, 0.0f, 1.0f)},
+                                          Vec4{1.0f / static_cast<f32>(std::max(w, 1u)), 1.0f / static_cast<f32>(std::max(h, 1u)),
+                                               tune.hyp2 ? 2.0f : 1.0f, tune.legacyWarp ? 0.0f : 1.0f}};
+    const PassTexture wt[5] = {PassTexture{a}, PassTexture{b}, PassTexture{flow},
+                               PassTexture{tile[0], {}, CommonSampler::NearestClamp}, PassTexture{tile[1], {}, CommonSampler::NearestClamp}};
+    return ctx.fullscreen_pass("flow-deforma", stage, target, ShaderId::video_flow_warp_frag, wt, 5, &wp, sizeof(wp)) != kInvalidIndex;
+}
 
 // Twixtor/RSMB: acha o maior vetor de cada bloco e da vizinhança (dois passes
 // minúsculos) e borra por rastro. Devolve false se algum passe não gravou.
@@ -2054,7 +2177,11 @@ VideoFlowFx video_flow_fx(const Layer& l, f64 timelineTime, f64 compShutter) noe
     const EffectTypeId retimeType = effect_type_id(effect_keys::kFlowRetime);
     const EffectTypeId blurType = effect_type_id(effect_keys::kFlowMotionBlur);
     const EffectTypeId hyperType = effect_type_id(hyper::effect_keys::kHyperMotion);
-    static constexpr f32 kBase[3] = {256.0f, 384.0f, 576.0f};
+    // 1.0.2: com o DIS, Melhor fica na base de 384 (blocos mais densos e mais
+    // iterações). Base 576/768 foi medida e perdeu em filmagem real (ver
+    // flow_tuning). Neural usa a mesma base quando a GPU precisa do fluxo
+    // (prévia tocando, desfoque vetorial).
+    static constexpr f32 kBase[4] = {256.0f, 384.0f, 384.0f, 384.0f};
     const f64 local = timelineTime - static_cast<f64>(l.start.value) + static_cast<f64>(l.offset.value);
     for (const EffectInstance& e : l.effects) {
         if (!e.enabled) continue;
@@ -2075,7 +2202,9 @@ VideoFlowFx video_flow_fx(const Layer& l, f64 timelineTime, f64 compShutter) noe
             fx.srcTimeline = flow_retime_timeline(l, e, timelineTime);
             fx.rate = std::clamp(static_cast<f64>(flow_fx_param(l, e, 0, local, 50.0f, false)), 1.0, 1000.0) / 100.0;
             fx.frameBlend = static_cast<u8>(std::clamp(static_cast<i32>(std::lround(flow_fx_param(l, e, 1, local, 2.0f, true))), 0, 2));
-            fx.flowBase = kBase[std::clamp(static_cast<i32>(std::lround(flow_fx_param(l, e, 2, local, 1.0f, true))), 0, 2)];
+            fx.flowQuality = static_cast<u8>(std::clamp(static_cast<i32>(std::lround(flow_fx_param(l, e, 2, local, 1.0f, true))), 0, 3));
+            fx.flowBase = kBase[fx.flowQuality];
+            fx.flowBias = std::clamp(flow_fx_param(l, e, 6, local, 50.0f, false), 0.0f, 100.0f) / 100.0f;
             const f32 blur = std::clamp(flow_fx_param(l, e, 3, local, 0.0f, false), 0.0f, 400.0f) / 100.0f;
             if (blur > 0.0f) fx.vectorAmount = std::max(fx.vectorAmount, blur);
             fx.replaceDuplicates = flow_fx_param(l, e, 4, local, 0.0f, true) >= 0.5f;
@@ -2085,8 +2214,10 @@ VideoFlowFx video_flow_fx(const Layer& l, f64 timelineTime, f64 compShutter) noe
             if (amount <= 0.0f) continue;
             fx.vectorAmount = amount;
             fx.shutter = std::clamp(static_cast<f64>(flow_fx_param(l, e, 1, local, 180.0f, false)), 0.0, 720.0) / 360.0;
-            if (fx.flowBase <= 0.0f)
-                fx.flowBase = kBase[std::clamp(static_cast<i32>(std::lround(flow_fx_param(l, e, 2, local, 1.0f, true))), 0, 2)];
+            if (fx.flowBase <= 0.0f) {
+                fx.flowQuality = static_cast<u8>(std::clamp(static_cast<i32>(std::lround(flow_fx_param(l, e, 2, local, 1.0f, true))), 0, 2));
+                fx.flowBase = kBase[fx.flowQuality];
+            }
         }
     }
     return fx;
@@ -2141,6 +2272,8 @@ struct AdjustTimeAsk {
     bool replaced = false;
     u8 frameBlend = 0;        ///< 0 repete, 1 mistura, 2 movimento
     f32 flowBase = 0.0f;
+    u8 flowQuality = 1;
+    f32 flowBias = 0.5f;
     f32 vector = 0.0f;        ///< Flow Motion Blur (quantidade)
     f64 travel = 0.0;         ///< quadros do fundo que o obturador cobre
     bool rgb = false;
@@ -2266,6 +2399,8 @@ AdjustTimeAsk adjust_time_ask(const Layer& l, const EffectRegistry& registry, co
     if (flowFx) {
         ask.frameBlend = flow.retime ? flow.frameBlend : 0;
         ask.flowBase = flow.flowBase;
+        ask.flowQuality = flow.flowQuality;
+        ask.flowBias = flow.flowBias;
         if (flow.vectorAmount > 0.0f) {
             const f64 h = flow.shutter * 0.5, t0 = static_cast<f64>(layerTime.value);
             const f64 c = shown_at(t0);
@@ -3043,6 +3178,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         at.vectorBlur = static_cast<f32>(std::clamp(ask.vector, 0.0f, 4.0f) * ask.travel);
                     }
                     at.flowBase = ask.flowBase;
+                    at.flowQuality = ask.flowQuality;
+                    at.flowBias = ask.flowBias;
                     if (ask.rgb) {
                         at.rgb = true;
                         for (u32 c = 0; c < 3; ++c) at.channel[c] = backdropAt(ask.rgbAt[c], 2 + c, false);
@@ -5125,6 +5262,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         // calcular o movimento de pixels (o export mantém o modo).
                         rl.source.blendMode = (frameBlend == 2 && !settings.finalQuality && settings.flowPolicyScale <= 0.25f) ? 1 : frameBlend;
                         rl.source.flowBase = flowFx.flowBase;
+                        rl.source.flowQuality = flowFx.flowQuality;
+                        rl.source.flowBias = flowFx.flowBias;
                         // Flow spans this actual source pair, not one timeline
                         // frame. Normalize the remapped shutter by its PTS span
                         // so VFR, different frame rates, ramps and freezes agree.
@@ -6701,10 +6840,14 @@ bool Renderer::build_video_source(const RenderLayer& layer, u32 layerIndex, u32 
 }
 
 FGTexture Renderer::video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture b, u32 w, u32 h, f32 baseSide, u32& baseW, u32& baseH,
-                               u64 frameNumber) noexcept {
+                               u64 frameNumber, u8 quality, i64 ptsA, i64 ptsB) noexcept {
+    const FlowTuning tune = flow_tuning(quality);
     // Base da pirâmide com o lado maior ≤ 384 (o flow não precisa de 4K); o
-    // Flow Retime/Flow Motion Blur pedem 256 (rápido) ou 576 (melhor).
-    const f32 side = baseSide > 0.0f ? std::clamp(baseSide, 128.0f, 1024.0f) : 384.0f;
+    // Flow Retime/Flow Motion Blur pedem 256 (rápido) ou 768 (melhor).
+    // legacyBase (só medida): a base de antes da 1.0.2 (Melhor = 576).
+    const f32 asked = tune.baseOverride > 0.0f && baseSide > 0.0f ? tune.baseOverride
+                    : (tune.legacyBase && quality == 2 && baseSide > 0.0f ? 576.0f : baseSide);
+    const f32 side = asked > 0.0f ? std::clamp(asked, 128.0f, 1024.0f) : 384.0f;
     const f32 base = std::max(96.0f, side * std::clamp(heavyQ_.flow, 0.25f, 1.0f));
     const f32 s = std::min(1.0f, base / static_cast<f32>(std::max(w, h)));
     u32 lw = std::max(8u, static_cast<u32>(std::lround(static_cast<f32>(w) * s)));
@@ -6747,6 +6890,11 @@ FGTexture Renderer::video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture
     ++heavyStats_.flowComputed;
     const u32 slot = fc.next;
     fc.next ^= 1u;
+    // 1.0.2 — contexto no tempo: o outro slot guarda o par ANTERIOR (o quadro
+    // de chegada dele é o de partida deste) na mesma grade.
+    const u32 prevSlot = slot ^ 1u;
+    const bool havePrior = tune.temporal && flowCacheEnabled_ && ptsA >= 0 && fc.tex[prevSlot].valid() && fc.key[prevSlot] != 0
+                        && fc.ptsB[prevSlot] == ptsA && fc.ptsA[prevSlot] < ptsA;
     if (!fc.tex[slot].valid()) {
         // Orçamento do cache (todas as camadas): antes de criar, solta as
         // camadas paradas há mais tempo.
@@ -6759,9 +6907,10 @@ FGTexture Renderer::video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture
     // A chave só vale com os passes gravados: um fluxo que falhou não pode
     // ser servido do cache como válido nos quadros seguintes.
     fc.key[slot] = 0;
+    fc.ptsA[slot] = fc.ptsB[slot] = -1;
     bool recorded = true;
     EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat, 4096);
-    FGTexture levels[6];
+    FGTexture levels[6], guides[6];
     u32 sizes[6][2];
     levels[0] = ctx.texture("flow-nivel", lw, lh);
     sizes[0][0] = lw;
@@ -6769,6 +6918,15 @@ FGTexture Renderer::video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture
     const Vec4 lumaParams{1.0f / static_cast<f32>(lw), 1.0f / static_cast<f32>(lh), 1.0f, 0};
     recorded &= ctx.fullscreen_pass("flow-luma", PassStage::Decode, levels[0], ShaderId::video_flow_luma_frag,
                                     {PassTexture{a}, PassTexture{b}}, &lumaParams, sizeof(lumaParams)) != kInvalidIndex;
+    // 1.0.2: a guia de cor (CbCr dos dois quadros) na mesma pirâmide.
+    if (tune.guide) {
+        guides[0] = ctx.texture("flow-cor", lw, lh);
+        const Vec4 chromaParams{1.0f / static_cast<f32>(lw), 1.0f / static_cast<f32>(lh), 1.0f, 1.0f};
+        recorded &= ctx.fullscreen_pass("flow-cor", PassStage::Decode, guides[0], ShaderId::video_flow_luma_frag,
+                                        {PassTexture{a}, PassTexture{b}}, &chromaParams, sizeof(chromaParams)) != kInvalidIndex;
+    } else {
+        guides[0] = levels[0];
+    }
     u32 n = 1;
     while (n < 6 && std::min(lw, lh) >= 12) {
         const u32 nw = (lw + 1) / 2, nh = (lh + 1) / 2;
@@ -6776,31 +6934,94 @@ FGTexture Renderer::video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture
         levels[n] = ctx.texture("flow-nivel", nw, nh);
         recorded &= ctx.fullscreen_pass("flow-reduz", PassStage::Decode, levels[n], ShaderId::effects_downsample_frag,
                                         {PassTexture{levels[n - 1]}}, &dp, sizeof(dp)) != kInvalidIndex;
+        if (tune.guide) {
+            guides[n] = ctx.texture("flow-cor", nw, nh);
+            recorded &= ctx.fullscreen_pass("flow-reduz-cor", PassStage::Decode, guides[n], ShaderId::effects_downsample_frag,
+                                            {PassTexture{guides[n - 1]}}, &dp, sizeof(dp)) != kInvalidIndex;
+        } else {
+            guides[n] = levels[n];
+        }
         sizes[n][0] = lw = nw;
         sizes[n][1] = lh = nh;
         ++n;
     }
+    const f32 chroma = tune.guide ? 1.0f : 0.0f;
+    // Previsão do par anterior, por sentido, na grade base (flow_temporal.frag).
+    FGTexture prior[2]{};
+    if (havePrior) {
+        TextureDesc pd = fd;
+        const FGTexture prev = graph_.import_texture("flow-cache", fc.tex[prevSlot], pd);
+        for (u32 dir = 0; dir < 2 && recorded; ++dir) {
+            struct { Vec4 flags; Vec4 texel; } tp{Vec4{static_cast<f32>(dir), 0, 0, 1.0f},
+                                                  Vec4{1.0f / static_cast<f32>(pyramidW), 1.0f / static_cast<f32>(pyramidH), 0, 0}};
+            prior[dir] = ctx.texture("flow-previsao", pyramidW, pyramidH);
+            recorded &= ctx.fullscreen_pass("flow-previsao", PassStage::Decode, prior[dir], ShaderId::video_flow_temporal_frag,
+                                            {PassTexture{prev, {}, CommonSampler::LinearClamp}, PassTexture{prev}}, &tp, sizeof(tp)) != kInvalidIndex;
+        }
+    }
     // 0.1.8: os DOIS sentidos (atual → seguinte e seguinte → atual), cada nível
-    // regularizado pela confiança e pela luminância (flow_smooth.frag). O
-    // quadro intermediário usa os dois para saber quem aparece e quem some
-    // (flow_warp.frag); o nível base dos dois vai junto para o cache (RG/BA).
+    // regularizado. O quadro intermediário usa os dois para saber quem aparece
+    // e quem some (flow_warp.frag); o nível base dos dois vai junto para o
+    // cache (RG/BA).
     FGTexture baseFlow[2]{};
-    // Nível da busca de vetor: o maior com até 128 px no lado maior. Com o
-    // preview já reduzido pelo orçamento, a busca fica de fora.
-    u32 searchLevel = n;
+    // Busca de vetor (movimento grande): o maior nível com até 128 px no lado
+    // maior e, em 1.0.2, também o seguinte (até 256 px) — a primeira acha o
+    // objeto que corre, a segunda acerta onde ele está antes do refinamento
+    // fino. Com o preview já reduzido pelo orçamento, a busca fica de fora; no
+    // export (orçamento cheio) ela sempre roda.
+    u32 searchLevel = n, searchLevel2 = n;
     for (u32 i = 0; i < n && heavyQ_.flow >= 0.75f; ++i)
         if (std::max(sizes[i][0], sizes[i][1]) <= 128u) { searchLevel = i; break; }
+    if (tune.twoSearch && searchLevel < n && searchLevel > 1 && std::max(sizes[searchLevel - 1][0], sizes[searchLevel - 1][1]) <= 256u)
+        searchLevel2 = searchLevel - 1;
     for (u32 dir = 0; dir < 2 && recorded; ++dir) {
         FGTexture flow{};
         bool haveFlow = false;
         for (u32 i = n; i-- > 0;) {
             const f32 fw = static_cast<f32>(sizes[i][0]), fh = static_cast<f32>(sizes[i][1]);
-            if (i == searchLevel && haveFlow) {
+            if ((i == searchLevel || i == searchLevel2) && haveFlow) {
                 struct { Vec4 texel; Vec4 flags; } bp{Vec4{1.0f / fw, 1.0f / fh, fw, fh}, Vec4{static_cast<f32>(dir), 0, 0, 0}};
                 const FGTexture searched = ctx.texture("flow-busca", sizes[i][0], sizes[i][1]);
                 recorded &= ctx.fullscreen_pass("flow-busca", PassStage::Decode, searched, ShaderId::video_flow_search_frag,
                                                 {PassTexture{levels[i]}, PassTexture{flow}}, &bp, sizeof(bp)) != kInvalidIndex;
                 flow = searched;
+            }
+            if (tune.dis) {
+                // DIS: busca inversa por bloco → densificação → refinamento variacional.
+                const f32 stride = tune.stride;
+                const u32 gw = std::max(1u, static_cast<u32>(std::ceil(fw / stride)));
+                const u32 gh = std::max(1u, static_cast<u32>(std::ceil(fh / stride)));
+                struct { Vec4 texel; Vec4 patch; Vec4 prior; } pp{
+                    Vec4{1.0f / fw, 1.0f / fh, fw, fh},
+                    Vec4{stride, static_cast<f32>(tune.patchIters), static_cast<f32>(dir), haveFlow ? 1.0f : 0.0f},
+                    Vec4{fw / static_cast<f32>(pyramidW), havePrior ? 1.0f : 0.0f, static_cast<f32>(gw), static_cast<f32>(gh)}};
+                const FGTexture patches = ctx.texture("flow-blocos-dis", gw, gh);
+                recorded &= ctx.fullscreen_pass("flow-dis-blocos", PassStage::Decode, patches, ShaderId::video_flow_dis_patch_frag,
+                                                {PassTexture{levels[i]}, PassTexture{haveFlow ? flow : levels[i]},
+                                                 PassTexture{havePrior ? prior[dir] : levels[i]}}, &pp, sizeof(pp)) != kInvalidIndex;
+                struct { Vec4 texel; Vec4 patch; Vec4 grid; } dp{Vec4{1.0f / fw, 1.0f / fh, fw, fh},
+                                                                 Vec4{stride, static_cast<f32>(dir), chroma, 0},
+                                                                 Vec4{static_cast<f32>(gw), static_cast<f32>(gh), 0, 0}};
+                const FGTexture dense = ctx.texture("flow-denso", sizes[i][0], sizes[i][1]);
+                recorded &= ctx.fullscreen_pass("flow-dis-denso", PassStage::Decode, dense, ShaderId::video_flow_dis_dense_frag,
+                                                {PassTexture{patches, {}, CommonSampler::NearestClamp}, PassTexture{levels[i]},
+                                                 PassTexture{guides[i]}}, &dp, sizeof(dp)) != kInvalidIndex;
+                FGTexture cur = dense;
+                struct { Vec4 texel; Vec4 weights; Vec4 eps; } vp{Vec4{1.0f / fw, 1.0f / fh, fw, fh},
+                                                                  Vec4{tune.varAlpha, tune.varGamma, 0.06f, static_cast<f32>(dir)},
+                                                                  Vec4{0.01f, 0.05f, chroma, 0}};
+                for (u32 k = 0; k < tune.varIters && recorded; ++k) {
+                    const FGTexture next = ctx.texture("flow-var", sizes[i][0], sizes[i][1]);
+                    const PassTexture vt[4] = {PassTexture{levels[i]}, PassTexture{guides[i]},
+                                               PassTexture{dense, {}, CommonSampler::NearestClamp},
+                                               PassTexture{cur, {}, CommonSampler::NearestClamp}};
+                    recorded &= ctx.fullscreen_pass("flow-var", PassStage::Decode, next, ShaderId::video_flow_var_frag, vt, 4,
+                                                    &vp, sizeof(vp)) != kInvalidIndex;
+                    cur = next;
+                }
+                flow = cur;
+                haveFlow = true;
+                continue;
             }
             struct { Vec4 texel; Vec4 flags; } lp{Vec4{1.0f / fw, 1.0f / fh, fw, fh},
                                                   Vec4{haveFlow ? 1.0f : 0.0f, 6.0f, static_cast<f32>(dir), 5e-4f}};
@@ -6808,33 +7029,48 @@ FGTexture Renderer::video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture
             recorded &= ctx.fullscreen_pass("flow-lk", PassStage::Decode, raw, ShaderId::video_flow_lk_frag,
                                             {PassTexture{levels[i]}, PassTexture{haveFlow ? flow : levels[i]}}, &lp, sizeof(lp)) != kInvalidIndex;
             // Regulariza os níveis de cima (é onde o erro de um nível vira o
-            // ponto de partida do seguinte); o base segue direto para o
-            // preenchimento de oclusão e o refino, que preservam o contorno.
-            if (i == 0) {
+            // ponto de partida do seguinte). 1.0.2: o base também, com raio
+            // menor e guiado pela cor (o contorno fica onde a COR muda).
+            if (i == 0 && !tune.level0Smooth) {
                 flow = raw;
                 haveFlow = true;
                 continue;
             }
-            struct { Vec4 texel; Vec4 flags; } sp{Vec4{1.0f / fw, 1.0f / fh, fw, fh}, Vec4{static_cast<f32>(dir), 0.06f, 0, 0}};
+            struct { Vec4 texel; Vec4 flags; } sp{Vec4{1.0f / fw, 1.0f / fh, fw, fh},
+                                                  Vec4{static_cast<f32>(dir), i == 0 ? 0.04f : 0.06f, tune.guide ? 1.0f : 0.0f, i == 0 ? 1.0f : 0.0f}};
             const FGTexture smooth = ctx.texture("flow", sizes[i][0], sizes[i][1]);
             recorded &= ctx.fullscreen_pass("flow-suave", PassStage::Decode, smooth, ShaderId::video_flow_smooth_frag,
-                                            {PassTexture{raw, {}, CommonSampler::NearestClamp}, PassTexture{levels[i]}}, &sp, sizeof(sp)) != kInvalidIndex;
+                                            {PassTexture{raw, {}, CommonSampler::NearestClamp}, PassTexture{levels[i]},
+                                             PassTexture{guides[i]}}, &sp, sizeof(sp)) != kInvalidIndex;
             flow = smooth;
             haveFlow = true;
         }
         baseFlow[dir] = flow;
     }
     // Oclusão: onde a ida e volta não fecha (o pixel some no outro quadro), o
-    // fluxo vem dos vizinhos coerentes (flow_fill.frag), nos dois sentidos.
+    // fluxo vem dos vizinhos coerentes de cor parecida (flow_fill.frag).
     FGTexture filled[2]{};
     for (u32 dir = 0; dir < 2 && recorded; ++dir) {
         const f32 fw = static_cast<f32>(sizes[0][0]), fh = static_cast<f32>(sizes[0][1]);
-        struct { Vec4 texel; Vec4 flags; } fp{Vec4{1.0f / fw, 1.0f / fh, fw, fh}, Vec4{static_cast<f32>(dir), 0.8f, 0, 0}};
+        struct { Vec4 texel; Vec4 flags; } fp{Vec4{1.0f / fw, 1.0f / fh, fw, fh}, Vec4{static_cast<f32>(dir), 0.8f, chroma, 0}};
         filled[dir] = ctx.texture("flow-preenchido", sizes[0][0], sizes[0][1]);
         recorded &= ctx.fullscreen_pass("flow-oclusao", PassStage::Decode, filled[dir], ShaderId::video_flow_fill_frag,
                                         {PassTexture{baseFlow[dir], {}, CommonSampler::LinearClamp},
                                          PassTexture{baseFlow[dir ^ 1u], {}, CommonSampler::LinearClamp},
-                                         PassTexture{levels[0]}}, &fp, sizeof(fp)) != kInvalidIndex;
+                                         PassTexture{levels[0]}, PassTexture{guides[0]}}, &fp, sizeof(fp)) != kInvalidIndex;
+    }
+    // Filtro no tempo: onde este par e a previsão do anterior quase concordam,
+    // o fluxo puxa para a previsão (sem o tremido de um par para o outro).
+    if (havePrior) {
+        for (u32 dir = 0; dir < 2 && recorded; ++dir) {
+            struct { Vec4 flags; Vec4 texel; } tp{Vec4{static_cast<f32>(dir), tune.temporalWeight, 0.35f, 0.0f},
+                                                  Vec4{1.0f / static_cast<f32>(pyramidW), 1.0f / static_cast<f32>(pyramidH), 0, 0}};
+            const FGTexture steady = ctx.texture("flow-tempo", pyramidW, pyramidH);
+            recorded &= ctx.fullscreen_pass("flow-tempo", PassStage::Decode, steady, ShaderId::video_flow_temporal_frag,
+                                            {PassTexture{filled[dir], {}, CommonSampler::NearestClamp},
+                                             PassTexture{prior[dir], {}, CommonSampler::NearestClamp}}, &tp, sizeof(tp)) != kInvalidIndex;
+            filled[dir] = steady;
+        }
     }
     // O nível base dos dois sentidos vai para a textura do cache, antes
     // refinado na grade fina quando ela é maior que a pirâmide.
@@ -6856,15 +7092,104 @@ FGTexture Renderer::video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture
         const Vec4 fineLumaParams{1.0f / static_cast<f32>(fineW), 1.0f / static_cast<f32>(fineH), 1.0f, 0};
         recorded &= ctx.fullscreen_pass("flow-luma-fina", PassStage::Decode, fineLuma, ShaderId::video_flow_luma_frag,
                                         {PassTexture{a}, PassTexture{b}}, &fineLumaParams, sizeof(fineLumaParams)) != kInvalidIndex;
-        struct { Vec4 base; Vec4 fine; } rp{Vec4{1.0f / static_cast<f32>(pyramidW), 1.0f / static_cast<f32>(pyramidH), 0, 0},
-                                            Vec4{1.0f / static_cast<f32>(fineW), 1.0f / static_cast<f32>(fineH), 0, 0}};
-        recorded &= recorded && ctx.fullscreen_pass("flow-refina", PassStage::Decode, packed, ShaderId::video_flow_refine_frag,
-                                                    {PassTexture{joined, {}, CommonSampler::LinearClamp},
-                                                     PassTexture{fineLuma, {}, CommonSampler::LinearClamp}}, &rp, sizeof(rp)) != kInvalidIndex;
+        FGTexture fineChroma = fineLuma;
+        if (tune.guide) {
+            fineChroma = ctx.texture("flow-cor-fina", fineW, fineH);
+            const Vec4 fineChromaParams{1.0f / static_cast<f32>(fineW), 1.0f / static_cast<f32>(fineH), 1.0f, 1.0f};
+            recorded &= ctx.fullscreen_pass("flow-cor-fina", PassStage::Decode, fineChroma, ShaderId::video_flow_luma_frag,
+                                            {PassTexture{a}, PassTexture{b}}, &fineChromaParams, sizeof(fineChromaParams)) != kInvalidIndex;
+        }
+        struct { Vec4 base; Vec4 fine; Vec4 flags; } rp{
+            Vec4{1.0f / static_cast<f32>(pyramidW), 1.0f / static_cast<f32>(pyramidH), static_cast<f32>(pyramidW), static_cast<f32>(pyramidH)},
+            Vec4{1.0f / static_cast<f32>(fineW), 1.0f / static_cast<f32>(fineH), 0, 0},
+            Vec4{chroma, tune.softRefine ? 0.08f : 0.0f, tune.softRefine ? 0.04f : 1e-4f, 0}};
+        const PassTexture rt[5] = {PassTexture{joined, {}, CommonSampler::LinearClamp}, PassTexture{fineLuma, {}, CommonSampler::LinearClamp},
+                                   PassTexture{fineChroma, {}, CommonSampler::LinearClamp}, PassTexture{levels[0], {}, CommonSampler::LinearClamp},
+                                   PassTexture{guides[0], {}, CommonSampler::LinearClamp}};
+        recorded &= recorded && ctx.fullscreen_pass("flow-refina", PassStage::Decode, packed, ShaderId::video_flow_refine_frag, rt, 5,
+                                                    &rp, sizeof(rp)) != kInvalidIndex;
     }
     if (!recorded) return FGTexture{};
     fc.key[slot] = pairKey;
+    fc.ptsA[slot] = ptsA;
+    fc.ptsB[slot] = ptsB;
     return packed;
+}
+
+void Renderer::set_neural_ready_callback(void (*fn)(void*), void* ctx) noexcept {
+    neuralReadyFn_ = fn;
+    neuralReadyCtx_ = ctx;
+    if (neural_) neural_->set_ready_callback(fn, ctx);
+}
+
+bool Renderer::neural_interpolate(const RenderLayer& layer, u64 pairKey, FGTexture a, FGTexture b, FGTexture target) noexcept {
+    DecodedFrame* fa = layer.source.frame.get();
+    DecodedFrame* fb = layer.source.frameB.get();
+    if (!fa || !fb) return false;
+    // Prévia tocando: a rede não acompanha; fica o fluxo da GPU (Melhor).
+    if (!heavyQ_.exportFrame && planPlayback_) return false;
+    if (!NeuralRetime::supported(*fa, *fb)) return false;
+    if (!neural_) {
+        neural_ = std::make_unique<NeuralRetime>();
+        neural_->set_ready_callback(neuralReadyFn_, neuralReadyCtx_);
+    }
+    const f32 t = layer.source.blendT;
+    const u64 key = NeuralRetime::key_of(pairKey, t);
+    NeuralRetime::Field field;
+    // Export: o quadro espera a rede. Prévia parada: pede e mostra a GPU até ficar pronta.
+    const bool ready = heavyQ_.exportFrame ? neural_->compute(key, *fa, *fb, t, field) : neural_->request(key, *fa, *fb, t, field);
+    if (!ready) return false;
+    EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat, 4096);
+    if (field.copyA || field.copyB) {
+        // Quadros iguais ou corte de cena: o quadro de origem, sem rede.
+        struct { Vec4 image; } np{Vec4{0, 0, 1, 1}};
+        return ctx.fullscreen_pass("neural-copia", PassStage::Decode, target, ShaderId::video_flow_neural_warp_frag,
+                                   {PassTexture{field.copyA ? a : b}, PassTexture{field.copyA ? a : b}, PassTexture{a}, PassTexture{a}},
+                                   &np, sizeof(np)) != kInvalidIndex;
+    }
+    if (!field.width || !field.height) return false;
+    if (neuralTex_.width != field.width || neuralTex_.height != field.height) {
+        if (neuralTex_.flow.valid()) backend_->destroy_texture(neuralTex_.flow);
+        if (neuralTex_.mask.valid()) backend_->destroy_texture(neuralTex_.mask);
+        neuralTex_ = NeuralTextures{};
+        TextureDesc td;
+        td.width = field.width;
+        td.height = field.height;
+        td.format = SurfaceFormat::RGBA16F;
+        td.sampled = true;
+        td.debugName = "neural-campo";
+        auto ft = backend_->create_texture(td);
+        auto mt = backend_->create_texture(td);
+        if (!ft.ok() || !mt.ok()) {
+            if (ft.ok()) backend_->destroy_texture(*ft);
+            if (mt.ok()) backend_->destroy_texture(*mt);
+            return false;
+        }
+        neuralTex_.flow = *ft;
+        neuralTex_.mask = *mt;
+        neuralTex_.width = field.width;
+        neuralTex_.height = field.height;
+    }
+    if (neuralTex_.key != field.key) {
+        if (!backend_->upload_texture(neuralTex_.flow, field.flow.data(), field.width * 8).ok()
+            || !backend_->upload_texture(neuralTex_.mask, field.mask.data(), field.width * 8).ok()) {
+            neuralTex_.key = 0;
+            return false;
+        }
+        neuralTex_.key = field.key;
+    }
+    TextureDesc td;
+    td.width = field.width;
+    td.height = field.height;
+    td.format = SurfaceFormat::RGBA16F;
+    td.sampled = true;
+    td.debugName = "neural-campo";
+    const FGTexture flowTex = graph_.import_texture("neural-campo", neuralTex_.flow, td);
+    const FGTexture maskTex = graph_.import_texture("neural-mascara", neuralTex_.mask, td);
+    struct { Vec4 image; } np{Vec4{1.0f, 1.0f, field.validU, field.validV}};
+    return ctx.fullscreen_pass("neural-deforma", PassStage::Decode, target, ShaderId::video_flow_neural_warp_frag,
+                               {PassTexture{a}, PassTexture{b}, PassTexture{flowTex, {}, CommonSampler::LinearClamp},
+                                PassTexture{maskTex, {}, CommonSampler::LinearClamp}}, &np, sizeof(np)) != kInvalidIndex;
 }
 
 void Renderer::trim_flow_cache(u64 keepLayer, u64 incomingBytes) noexcept {
@@ -7324,7 +7649,7 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                     mark_incomplete(__FILE__, __LINE__);
                 }
                 const bool needFlow = (layer.source.blendMode == 2 && layer.source.blendT > 0.0f) || layer.source.vectorBlur > 0.0f;
-                FGTexture flow{};
+                FGTexture flow{}, neuralFrame{};
                 u32 baseW = 0, baseH = 0;
                 if (needFlow) {
                     u64 pair = (static_cast<u64>(layer.source.frame->ptsUs) * 1000003ull) ^ static_cast<u64>(layer.source.frameB->ptsUs)
@@ -7336,17 +7661,30 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                     for (const DecodedFrame* source : {layer.source.frame.get(), layer.source.frameB.get()})
                         pair ^= source->content_id() + 0x9e3779b97f4a7c15ull + (pair << 6) + (pair >> 2);
                     pair ^= static_cast<u64>(std::lround(layer.source.flowBase)) << 20;
-                    flow = video_flow(layer.id.pack(), pair, out.texture, b, w, h, layer.source.flowBase, baseW, baseH, frameNumber);
-                    if (!flow.valid() && layer.source.vectorBlur > 0.0f) mark_incomplete(__FILE__, __LINE__);
+                    // A qualidade muda o fluxo com a mesma base (Boa e Melhor).
+                    pair ^= static_cast<u64>(layer.source.flowQuality) * 0xD6E8FEB86659FD93ull;
+                    // Neural: com o quadro da rede pronto, o fluxo da GPU só
+                    // roda se o desfoque vetorial precisar dele.
+                    if (layer.source.flowQuality == 3 && layer.source.blendMode == 2 && layer.source.blendT > 0.0f) {
+                        const FGTexture moved = graph_.create_texture("layer-video-neural", d);
+                        if (neural_interpolate(layer, pair, out.texture, b, moved)) neuralFrame = moved;
+                    }
+                    if (!neuralFrame.valid() || layer.source.vectorBlur > 0.0f) {
+                        flow = video_flow(layer.id.pack(), pair, out.texture, b, w, h, layer.source.flowBase, baseW, baseH, frameNumber,
+                                          layer.source.flowQuality, layer.source.frame->ptsUs, layer.source.frameB->ptsUs);
+                        if (!flow.valid() && layer.source.vectorBlur > 0.0f) mark_incomplete(__FILE__, __LINE__);
+                    }
                 }
                 // Smooth Motion sem fluxo válido (passe não compilou, textura do
                 // cache não criou) cai na mistura: antes a layer ia preta/lixo.
                 bool warped = false;
-                if (layer.source.blendT > 0.0f && layer.source.blendMode == 2 && flow.valid()) {
+                if (neuralFrame.valid()) {
+                    out.texture = neuralFrame;
+                    warped = true;
+                } else if (layer.source.blendT > 0.0f && layer.source.blendMode == 2 && flow.valid()) {
                     const FGTexture moved = graph_.create_texture("layer-video-movimento", d);
-                    const Vec4 wp{layer.source.blendT, 1.0f / static_cast<f32>(baseW), 1.0f / static_cast<f32>(baseH), 0};
-                    if (ctx.fullscreen_pass("flow-deforma", PassStage::Decode, moved, ShaderId::video_flow_warp_frag,
-                                            {PassTexture{out.texture}, PassTexture{b}, PassTexture{flow}}, &wp, sizeof(wp)) != kInvalidIndex) {
+                    if (flow_interpolate(ctx, PassStage::Decode, moved, out.texture, b, flow, baseW, baseH, w, h, layer.source.blendT,
+                                         layer.source.flowBias, flow_tuning(layer.source.flowQuality))) {
                         out.texture = moved;
                         warped = true;
                     }
@@ -8156,16 +8494,17 @@ void Renderer::adjust_time_input(const FrameSnapshot& snap, const RenderLayer& l
                 // (a chave leva o número do quadro; nada velho sai do cache).
                 u64 pair = frameNumber * 0x9E3779B97F4A7C15ull ^ (static_cast<u64>(at.now) << 32) ^ at.next;
                 pair ^= static_cast<u64>(std::lround(at.flowBase)) << 20;
+                pair ^= static_cast<u64>(at.flowQuality) * 0xD6E8FEB86659FD93ull;
                 const u64 key = layer.id.pack() ^ (0xAD7ull << 52) ^ (static_cast<u64>(target) << 44);
-                flow = video_flow(key, pair, in.texture, b, in.width, in.height, at.flowBase, baseW, baseH, frameNumber);
+                flow = video_flow(key, pair, in.texture, b, in.width, in.height, at.flowBase, baseW, baseH, frameNumber,
+                                  std::min<u8>(at.flowQuality, 2));
                 if (!flow.valid()) mark_incomplete(__FILE__, __LINE__);
             }
             bool warped = false;
             if (at.blendT > 0.0f && at.blendMode == 2 && flow.valid()) {
                 const FGTexture moved = graph_.create_texture("ajuste-movimento", d);
-                const Vec4 wp{at.blendT, 1.0f / static_cast<f32>(baseW), 1.0f / static_cast<f32>(baseH), 0};
-                if (ctx.fullscreen_pass("ajuste-flow-deforma", PassStage::Effects, moved, ShaderId::video_flow_warp_frag,
-                                        {PassTexture{in.texture}, PassTexture{b}, PassTexture{flow}}, &wp, sizeof(wp)) != kInvalidIndex) {
+                if (flow_interpolate(ctx, PassStage::Effects, moved, in.texture, b, flow, baseW, baseH, in.width, in.height, at.blendT,
+                                     at.flowBias, flow_tuning(std::min<u8>(at.flowQuality, 2)))) {
                     in.texture = moved;
                     warped = true;
                 }
@@ -10239,7 +10578,9 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
             if (have.width == ow && have.height == oh) {
                 TextureDesc rd;
                 rd.width = ow; rd.height = oh;
-                rd.format = SurfaceFormat::RGBA8;
+                // O formato do próprio alvo: RGBA8 no AHardwareBuffer (Android),
+                // BGRA8 no CVPixelBuffer (iOS) — o pipeline segue o alvo.
+                rd.format = have.format == SurfaceFormat::BGRA8 ? SurfaceFormat::BGRA8 : SurfaceFormat::RGBA8;
                 rd.sampled = true; rd.renderTarget = true;
                 const FGTexture rgbTex = graph_.import_texture("export-rgb", offscreen->rgb, rd);
                 const YuvUniforms ur{Vec4{0.0f, dither, 0, 0}, Vec4{0.2126f, 0.0722f, 0, 0}};

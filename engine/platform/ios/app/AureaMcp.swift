@@ -9,11 +9,26 @@
 //    · ferramentas do MOTOR → engine.assistantCall (as mesmas regras do Android);
 //    · ferramentas de HOST → AureaModel (projetos, quadro, exportação, mídia).
 //  Permissões por capacidade e confirmação para o que é destrutivo.
+//
+//  FORA DO APP (18/11/2026), o que o iOS deixa:
+//    · ao sair, as chamadas em andamento terminam dentro de um beginBackgroundTask;
+//    · iOS 26+: a pessoa toca "Deixar o agente trabalhando com o app fechado" e o
+//      app pede um BGContinuedProcessingTask (pedido explícito, como o iOS exige;
+//      o sistema mostra o progresso). Sem GPU em segundo plano: renderizar,
+//      importar, abrir e exportar ficam para o app aberto (McpCatalog.foregroundOnlyIOS);
+//    · suspenso/fechado: o relay põe as chamadas na fila e manda um alerta APNs
+//      VISÍVEL; o toque abre o app, que conecta e drena a fila. O token APNs vai no hello;
+//    · aprovação com o app fora da tela = notificação local com Aprovar/Recusar.
+//  Não há como o iOS deixar o agente editar sozinho por tempo indefinido.
 // =============================================================================
+#if canImport(BackgroundTasks)
+import BackgroundTasks
+#endif
 import Photos
 import StoreKit
 import SwiftUI
 import UIKit
+import UserNotifications
 
 /// true = o botão do editor abre o chat antigo (0.4.6); false = abre o AureaMCP.
 /// Fica true até o Worker com o /mcp estar no ar; depois vira false (o mesmo flag do Android).
@@ -36,6 +51,9 @@ enum McpCatalog {
         "import_media_url": "media", "list_device_media": "device_media", "import_device_media": "device_media",
     ]
     static let confirm: Set<String> = ["delete_project"]
+    /// Precisam da GPU ou do motor acordado: o iOS não deixa em segundo plano (o motor fica suspenso).
+    static let foregroundOnlyIOS: Set<String> = ["render_frame", "export_video", "import_media_url", "import_device_media",
+        "open_project", "create_project", "duplicate_project", "close_project", "save_project", "playback", "open_panel"]
     static func capability(_ tool: String) -> String { host[tool] ?? (engineRead.contains(tool) ? "read" : "edit") }
 }
 
@@ -101,6 +119,20 @@ final class AureaMcpClient: ObservableObject {
     @Published private(set) var aureaosBusy = false
     static let aureaosProductId = "aurea_aureaos"
     private var confirmAnswer: CheckedContinuation<Bool, Never>?
+    // Fora do app (18/11/2026).
+    /// "Continuar trabalhando fora do app" (ligado por padrão).
+    @Published private(set) var keepWorking: Bool
+    /// Tarefa contínua do iOS 26+ ativa (o relay vê `serviced`).
+    @Published private(set) var continuedRunning = false
+    @Published private(set) var notificationsAllowed = true
+    @Published private(set) var pushToken: String?
+    private(set) var inBackground = false
+    private var finishTask: UIBackgroundTaskIdentifier = .invalid
+    private var continuedTask: AnyObject?
+    private var continuedIdle: Task<Void, Never>?
+    /// Últimos jobs da fila executados (id → resultado compacto): o mesmo job não roda duas vezes.
+    private var doneJobs: [String: [String: Any]]
+    private var doneOrder: [String]
 
     weak var model: AureaModel?
     private var task: URLSessionWebSocketTask?
@@ -115,6 +147,10 @@ final class AureaMcpClient: ObservableObject {
         enabled = on
         status = on ? .connecting : .off
         askEveryEdit = d.bool(forKey: "aurea.mcp.ask_every_edit")
+        keepWorking = d.object(forKey: "aurea.mcp.keep_working") as? Bool ?? true
+        pushToken = d.string(forKey: "aurea.mcp.push_token")
+        doneJobs = (d.dictionary(forKey: "aurea.mcp.jobs_done") as? [String: [String: Any]]) ?? [:]
+        doneOrder = d.stringArray(forKey: "aurea.mcp.jobs_order") ?? []
         var p: [String: Bool] = [:]
         for c in McpCatalog.capabilities {
             p[c] = d.object(forKey: "aurea.mcp.perm." + c) as? Bool ?? McpCatalog.defaults[c] ?? true
@@ -135,7 +171,12 @@ final class AureaMcpClient: ObservableObject {
     func changeEnabled(_ on: Bool) {
         enabled = on
         defaults.set(on, forKey: "aurea.mcp.enabled")
-        if on { start() } else { stop() }
+        if on { start(); requestPush() } else {
+            // Desligado: o relay esquece o token antes de fechar (nada de alerta para um app desligado).
+            send(["t": "state", "push": NSNull()])
+            endContinued(success: true)
+            stop()
+        }
     }
 
     /// Abertura e volta ao primeiro plano: conecta, ou avisa o relay que este é o aparelho ativo.
@@ -151,6 +192,7 @@ final class AureaMcpClient: ObservableObject {
         task?.cancel(with: .normalClosure, reason: nil); task = nil
         running.values.forEach { $0.cancel() }; running = [:]
         answerConfirm(false)
+        endFinishTask()
         status = .off
     }
 
@@ -160,7 +202,176 @@ final class AureaMcpClient: ObservableObject {
         send(["t": "state", "permissions": permissions])
     }
 
-    func changeAskEveryEdit(_ on: Bool) { askEveryEdit = on; defaults.set(on, forKey: "aurea.mcp.ask_every_edit") }
+    func changeAskEveryEdit(_ on: Bool) {
+        askEveryEdit = on; defaults.set(on, forKey: "aurea.mcp.ask_every_edit")
+        // O relay não põe edições na fila de quem pede aprovação para cada uma.
+        send(["t": "state", "askEveryEdit": on])
+    }
+
+    // MARK: fora do app (18/11/2026)
+
+    func changeKeepWorking(_ on: Bool) {
+        keepWorking = on
+        defaults.set(on, forKey: "aurea.mcp.keep_working")
+        if on { requestPush() } else {
+            send(["t": "state", "push": NSNull()])
+            pushToken = nil
+            defaults.removeObject(forKey: "aurea.mcp.push_token")
+            UIApplication.shared.unregisterForRemoteNotifications()
+            endContinued(success: true)
+        }
+    }
+
+    /// Permissão de notificação + token APNs (o AureaAppDelegate devolve em onPushToken).
+    func requestPush() {
+        guard enabled, keepWorking else { return }
+        Task { @MainActor in
+            let center = UNUserNotificationCenter.current()
+            let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
+            self.notificationsAllowed = granted
+            AureaMcpNotifications.registerCategories()
+            if granted { UIApplication.shared.registerForRemoteNotifications() }
+        }
+    }
+
+    /// O token APNs chegou (ou mudou): vai ao relay sem refazer o hello.
+    func onPushToken(_ hex: String) {
+        guard enabled, keepWorking else { return }
+        pushToken = hex
+        defaults.set(hex, forKey: "aurea.mcp.push_token")
+        send(["t": "state", "push": pushJSON()])
+    }
+
+    private func pushJSON() -> Any {
+        guard keepWorking, let t = pushToken else { return NSNull() }
+#if DEBUG
+        let env = "sandbox"
+#else
+        let env = "production"
+#endif
+        return ["provider": "apns", "token": t, "env": env]
+    }
+
+    /// `.background` (AureaMcpRoot): o relay deixa de mandar chamadas (a não ser com a
+    /// tarefa contínua); o que já está rodando termina num beginBackgroundTask.
+    func appDidEnterBackground() {
+        inBackground = true
+        send(["t": "state", "background": true, "serviced": continuedRunning])
+        if !running.isEmpty { beginFinishTask() }
+    }
+
+    /// `.active`: volta a ser o aparelho ativo; o relay drena a fila que juntou.
+    func appBecameActive() {
+        inBackground = false
+        endFinishTask()
+        guard enabled else { return }
+        start()
+        send(["t": "state", "background": false, "serviced": continuedRunning])
+        if keepWorking && pushToken == nil { requestPush() }
+    }
+
+    private func beginFinishTask() {
+        guard finishTask == .invalid else { return }
+        let app = UIApplication.shared
+        var task = UIBackgroundTaskIdentifier.invalid
+        task = app.beginBackgroundTask(withName: "aurea-mcp-terminar") {
+            if task != .invalid { app.endBackgroundTask(task); task = .invalid }
+        }
+        finishTask = task
+    }
+
+    private func endFinishTask() {
+        guard finishTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(finishTask)
+        finishTask = .invalid
+    }
+
+    /// A tarefa contínua existe neste iOS (26+) e neste SDK.
+    var continuedSupported: Bool {
+#if compiler(>=6.2) && canImport(BackgroundTasks)
+        if #available(iOS 26.0, *) { return true }
+#endif
+        return false
+    }
+
+    /// iOS 26+: a pessoa tocou "Deixar o agente trabalhando com o app fechado" (o iOS
+    /// exige um pedido explícito, com o app na frente). O sistema mostra o progresso;
+    /// sem chamadas por 10 min a tarefa termina sozinha.
+    func startContinuedSession() {
+#if compiler(>=6.2) && canImport(BackgroundTasks)
+        guard #available(iOS 26.0, *), enabled, !continuedRunning else { return }
+        let bundle = Bundle.main.bundleIdentifier ?? "com.aurea.aurea"
+        // Info.plist: BGTaskSchedulerPermittedIdentifiers = $(PRODUCT_BUNDLE_IDENTIFIER).mcp.* (curinga).
+        let id = "\(bundle).mcp.agent\(Int(Date().timeIntervalSince1970))"
+        let registered = BGTaskScheduler.shared.register(forTaskWithIdentifier: id, using: .main) { [weak self] task in
+            guard let task = task as? BGContinuedProcessingTask else { task.setTaskCompleted(success: false); return }
+            Task { @MainActor in self?.continuedBegan(task) }
+        }
+        guard registered else { return }
+        let request = BGContinuedProcessingTaskRequest(identifier: id, title: AureaText.t("mcp_bg_notification_title"), subtitle: AureaText.t("mcp_bg_task_subtitle_ios"))
+        request.strategy = .fail
+        // GPU em segundo plano só com o direito da Apple
+        // (com.apple.developer.background-tasks.continued-processing.gpu) e aparelho que suporte.
+        if BGTaskScheduler.supportedResources.contains(.gpu) { request.requiredResources = .gpu }
+        do { try BGTaskScheduler.shared.submit(request) } catch { continuedRunning = false }
+#endif
+    }
+
+#if compiler(>=6.2) && canImport(BackgroundTasks)
+    @available(iOS 26.0, *)
+    private func continuedBegan(_ task: BGContinuedProcessingTask) {
+        continuedTask = task
+        continuedRunning = true
+        task.progress.totalUnitCount = 100
+        task.progress.completedUnitCount = 0
+        task.expirationHandler = { [weak self] in Task { @MainActor in self?.endContinued(success: false) } }
+        send(["t": "state", "serviced": true])
+        touchContinued()
+    }
+#endif
+
+    /// Fim da tarefa contínua (ociosa, expirada, desligada).
+    func endContinued(success: Bool) {
+        continuedIdle?.cancel(); continuedIdle = nil
+#if compiler(>=6.2) && canImport(BackgroundTasks)
+        if #available(iOS 26.0, *), let t = continuedTask as? BGContinuedProcessingTask {
+            t.progress.completedUnitCount = t.progress.totalUnitCount
+            t.setTaskCompleted(success: success)
+        }
+#endif
+        continuedTask = nil
+        if continuedRunning { continuedRunning = false; send(["t": "state", "serviced": false]) }
+    }
+
+    /// Uma chamada terminou: o progresso anda (a tarefa contínua mostra trabalho de verdade).
+    private func tickContinued() {
+#if compiler(>=6.2) && canImport(BackgroundTasks)
+        if #available(iOS 26.0, *), let t = continuedTask as? BGContinuedProcessingTask {
+            let p = t.progress
+            if p.completedUnitCount + 1 >= p.totalUnitCount { p.totalUnitCount += 100 }
+            p.completedUnitCount += 1
+        }
+#endif
+        touchContinued()
+    }
+
+    private func touchContinued() {
+        continuedIdle?.cancel()
+        guard continuedRunning else { continuedIdle = nil; return }
+        continuedIdle = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 10 * 60 * 1_000_000_000)
+            guard !Task.isCancelled else { return }
+            self?.endContinued(success: true)
+        }
+    }
+
+    private func rememberJob(_ id: String, _ reply: McpReply) {
+        doneJobs[id] = ["ok": reply.ok, "text": String(reply.text.prefix(4000)), "image": reply.jpeg != nil]
+        doneOrder.append(id)
+        while doneOrder.count > 60 { doneJobs.removeValue(forKey: doneOrder.removeFirst()) }
+        defaults.set(doneJobs, forKey: "aurea.mcp.jobs_done")
+        defaults.set(doneOrder, forKey: "aurea.mcp.jobs_order")
+    }
 
     func pause() { paused = true; running.values.forEach { $0.cancel() }; send(["t": "pause"]) }
     func resume() { paused = false; send(["t": "resume"]) }
@@ -171,13 +382,22 @@ final class AureaMcpClient: ObservableObject {
     }
 
     func answerConfirm(_ approved: Bool) {
+        if let c = confirm { AureaMcpNotifications.clearConfirm(c.id.uuidString) }
         confirm = nil
         confirmAnswer?.resume(returning: approved)
         confirmAnswer = nil
     }
 
+    /// Resposta pela notificação: só vale para o MESMO pedido (um velho não aprova o novo).
+    func answerConfirm(_ approved: Bool, id: String) {
+        guard confirm?.id.uuidString == id else { return }
+        answerConfirm(approved)
+    }
+
     private func askPerson(tool: String, agent: String, detail: String) async -> Bool {
         answerConfirm(false)
+        // Fora da tela: notificação com Aprovar/Recusar; sem permissão de notificar, recusa já.
+        if inBackground && !notificationsAllowed { return false }
         let timeout = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 85_000_000_000)
             guard !Task.isCancelled else { return }
@@ -186,7 +406,9 @@ final class AureaMcpClient: ObservableObject {
         defer { timeout.cancel() }
         return await withCheckedContinuation { c in
             confirmAnswer = c
-            confirm = Confirm(tool: tool, agent: agent, detail: detail)
+            let request = Confirm(tool: tool, agent: agent, detail: detail)
+            confirm = request
+            if inBackground { AureaMcpNotifications.postConfirm(id: request.id.uuidString, tool: tool, agent: agent, detail: detail) }
         }
     }
 
@@ -243,6 +465,12 @@ final class AureaMcpClient: ObservableObject {
             "hostTools": Array(McpCatalog.host.keys),
             "permissions": permissions,
             "project": ["title": model?.projectName ?? "", "open": model?.screen == .editor] as [String: Any],
+            // Fora do app: o relay escolhe quem está na frente ou servido e acorda pelo alerta APNs.
+            "background": inBackground,
+            "serviced": continuedRunning,
+            "askEveryEdit": askEveryEdit,
+            "lang": AureaText.language.resolved.rawValue,
+            "push": pushJSON(),
         ]
     }
 
@@ -277,7 +505,8 @@ final class AureaMcpClient: ObservableObject {
     }
 
     private static func parseLog(_ o: [String: Any]) -> LogLine? {
-        LogLine(at: (o["at"] as? NSNumber)?.doubleValue ?? 0, agent: o["agent"] as? String ?? "", tool: o["tool"] as? String, ok: o["ok"] as? Bool ?? true)
+        if (o["event"] as? String) == "wake" { return nil }
+        return LogLine(at: (o["at"] as? NSNumber)?.doubleValue ?? 0, agent: o["agent"] as? String ?? "", tool: o["tool"] as? String, ok: o["ok"] as? Bool ?? true)
     }
 
     private func handleCall(_ m: [String: Any]) {
@@ -285,20 +514,51 @@ final class AureaMcpClient: ObservableObject {
         let tool = m["tool"] as? String ?? ""
         let args = m["args"] as? [String: Any] ?? [:]
         let agent = String((m["agent"] as? String ?? "agent").prefix(80))
+        let job = m["job"] as? Bool ?? false
+        // Job da fila que já rodou (o resultado se perdeu no caminho): só reenvia o resultado.
+        if job {
+            if let done = doneJobs[id] {
+                let image = done["image"] as? Bool ?? false
+                let text = (done["text"] as? String ?? "") + (image ? "\n(The image of this result was not kept; call render_frame again.)" : "")
+                sendResult(id, McpReply(ok: done["ok"] as? Bool ?? false, text: text))
+                return
+            }
+            if running[id] != nil { return }
+        }
+        // Fora da tela: o iOS dá alguns segundos para terminar (a tarefa contínua, mais).
+        if inBackground { beginFinishTask() }
         running[id] = Task { [weak self] in
             guard let self else { return }
-            let reply = self.paused ? McpReply.fail("The person paused AureaMCP in the app.") : await self.run(tool: tool, args: args, agent: agent)
+            let skipped = self.paused
+            let reply = skipped ? McpReply.fail("The person paused AureaMCP in the app.") : await self.run(tool: tool, args: args, agent: agent)
+            let cancelled = Task.isCancelled
             self.running.removeValue(forKey: id)
-            var out: [String: Any] = ["t": "result", "id": id, "ok": reply.ok, "content": reply.content]
-            if !reply.ok { out["error"] = String(reply.text.prefix(2000)) }
-            self.send(out)
+            // Só o que de fato rodou até o fim vira "feito" (cancelado/pausado pode voltar da fila).
+            if job && !cancelled && !skipped { self.rememberJob(id, reply) }
+            self.sendResult(id, reply)
+            self.tickContinued()
+            if self.running.isEmpty && self.finishTask != .invalid {
+                // Um instante para o resultado sair pelo socket antes de o iOS suspender.
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                if self.running.isEmpty { self.endFinishTask() }
+            }
         }
+    }
+
+    private func sendResult(_ id: String, _ reply: McpReply) {
+        var out: [String: Any] = ["t": "result", "id": id, "ok": reply.ok, "content": reply.content]
+        if !reply.ok { out["error"] = String(reply.text.prefix(2000)) }
+        send(out)
     }
 
     // MARK: executor (par do McpExecutor.kt)
 
     func run(tool: String, args: [String: Any], agent: String) async -> McpReply {
         guard let model else { return .fail("Aurea is not ready.") }
+        // Em segundo plano o motor fica suspenso e o iOS não deixa usar a GPU: estas esperam o app aberto.
+        if inBackground && McpCatalog.foregroundOnlyIOS.contains(tool) {
+            return .fail("iOS does not let Aurea render, import, open or export projects while it is in the background. Ask the person to open Aurea on the iPhone, then call \(tool) again.")
+        }
         let cap = McpCatalog.capability(tool)
         guard permissions[cap] == true else { return .fail("The person turned off the \"\(cap)\" permission for AureaMCP in the Aurea app.") }
         if McpCatalog.confirm.contains(tool) || (askEveryEdit && cap != "read" && tool != "export_status") {
@@ -576,17 +836,29 @@ struct AureaMcpHost {
             assets.enumerateObjects { asset, _, _ in byId[asset.localIdentifier] = asset }
             let ordered = unique.compactMap { byId[$0] }
             guard ordered.count == unique.count else { return .fail("Not in the gallery Aurea can see: \(unique.count - ordered.count) of \(unique.count) (list_device_media again).") }
+            // 1.0.2: corte opcional de cada vídeo — só o trecho (com folga) entra no app.
+            let hasTrim = a["trimInSeconds"] != nil || a["trimOutSeconds"] != nil
+            let trim = hasTrim ? Self.trimUs(a) : nil
+            if hasTrim && trim == nil { return .fail("trimInSeconds/trimOutSeconds: need 0 <= trimInSeconds < trimOutSeconds <= 86400") }
             var files: [(URL, Bool)] = []
+            var windows: [URL: AureaModel.MediaWindow] = [:]
             for asset in ordered {
                 guard !Task.isCancelled else { return .fail("Cancelled.") }
+                if let trim, asset.mediaType == .video, let cut = await Self.cut(asset, trim) {
+                    windows[cut.url] = cut.window
+                    files.append((cut.url, true))
+                    continue
+                }
                 guard let file = await Self.export(asset) else { return .fail("Could not read an item from the gallery (iCloud offline?).") }
                 files.append((file, asset.mediaType == .video))
             }
             model.pendingOverlayImport = (a["overlay"] as? Bool) == true
-            model.importMediaBatch(files)
+            model.importMediaBatch(files, windows: windows, trimUs: trim)
             _ = await wait(1, { model.importingMedia })
+            var reply: [String: Any] = ["ok": true, "imported": files.count]
+            if trim != nil { reply["trimmed"] = "videos keep only the trimmed range (plus a small margin) inside Aurea" }
             return await wait(300, { !model.importingMedia })
-                ? .done(["ok": true, "imported": files.count]) : .fail("Import is still running; check with get_project_state later.")
+                ? .done(reply) : .fail("Import is still running; check with get_project_state later.")
         default:
             return .fail("Unknown tool: \(tool)")
         }
@@ -635,6 +907,22 @@ struct AureaMcpHost {
         var out: [String: Any] = ["ok": true, "access": access, "items": items, "more": i < result.count]
         if access == "limited" { out["hint"] = "Limited access: only the media the person selected for Aurea is visible." }
         return .done(out)
+    }
+
+    /// O corte do `import_device_media` em µs (só um lado = do começo / até o fim); nil = inválido.
+    static func trimUs(_ a: [String: Any]) -> (Int64, Int64)? {
+        let maxSeconds = 86_400.0
+        let tin = a["trimInSeconds"] == nil ? 0.0 : ((a["trimInSeconds"] as? NSNumber)?.doubleValue ?? .nan)
+        let tout = a["trimOutSeconds"] == nil ? maxSeconds : ((a["trimOutSeconds"] as? NSNumber)?.doubleValue ?? .nan)
+        guard tin.isFinite, tout.isFinite, tin >= 0, tout > tin, tout <= maxSeconds else { return nil }
+        return (Int64((tin * 1_000_000).rounded()), Int64((tout * 1_000_000).rounded()))
+    }
+
+    /// 1.0.2: só o trecho do vídeo, já em Media/ (OmegaTrimmedImport); nil = copiar inteiro.
+    static func cut(_ asset: PHAsset, _ trim: (Int64, Int64)) async -> OmegaTrimmedImport.Trimmed? {
+        await withCheckedContinuation { done in
+            OmegaTrimmedImport.cut(asset, inUs: trim.0, outUs: trim.1) { done.resume(returning: $0) }
+        }
     }
 
     /// O arquivo original do item (do iCloud se preciso), numa pasta temporária.
@@ -780,5 +1068,91 @@ enum McpMediaFetch {
         }
         func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                         newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
+    }
+}
+
+// MARK: - Fora do app: notificações e AppDelegate (18/11/2026)
+
+/// Notificações do AureaMCP: aprovação com Aprovar/Recusar (local) e o alerta do
+/// relay ("O agente quer editar 'Projeto X'", remoto, APNs) que abre o app.
+enum AureaMcpNotifications {
+    static let confirmCategory = "AUREA_MCP_CONFIRM"
+    static let approveAction = "AUREA_MCP_APPROVE"
+    static let denyAction = "AUREA_MCP_DENY"
+
+    static func registerCategories() {
+        let approve = UNNotificationAction(identifier: approveAction, title: AureaText.t("mcp_approve"), options: [.authenticationRequired])
+        let deny = UNNotificationAction(identifier: denyAction, title: AureaText.t("mcp_deny"), options: [.destructive])
+        UNUserNotificationCenter.current().setNotificationCategories([
+            UNNotificationCategory(identifier: confirmCategory, actions: [approve, deny], intentIdentifiers: [], options: []),
+        ])
+    }
+
+    static func postConfirm(id: String, tool: String, agent: String, detail: String) {
+        let content = UNMutableNotificationContent()
+        content.title = AureaText.t("mcp_confirm_title", agent)
+        content.body = tool == "delete_project" ? AureaText.t("mcp_confirm_delete", detail)
+            : AureaText.t("mcp_confirm_edit", tool) + (detail.isEmpty ? "" : "\n" + String(detail.prefix(200)))
+        content.categoryIdentifier = confirmCategory
+        content.sound = .default
+        content.userInfo = ["aureaConfirm": id]
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "aurea-mcp-confirm-" + id, content: content, trigger: nil))
+    }
+
+    static func clearConfirm(_ id: String) {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: ["aurea-mcp-confirm-" + id])
+        center.removeDeliveredNotifications(withIdentifiers: ["aurea-mcp-confirm-" + id])
+    }
+}
+
+/// O delegate do app (AureaApp: @UIApplicationDelegateAdaptor): token APNs e as
+/// respostas às notificações do AureaMCP. Nada mais do ciclo de vida passa por aqui.
+final class AureaAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        UNUserNotificationCenter.current().delegate = self
+        AureaMcpNotifications.registerCategories()
+        return true
+    }
+
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        let hex = deviceToken.map { String(format: "%02x", $0) }.joined()
+        Task { @MainActor in AureaMcpClient.shared.onPushToken(hex) }
+    }
+
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        // Sem a capability Push no perfil (o dono liga no portal da Apple): a fila espera a pessoa abrir o app.
+    }
+
+    /// Com o app na frente: o alerta de "acordar" não aparece (o app já está conectando).
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        let info = notification.request.content.userInfo
+        if info["aurea"] != nil {
+            Task { @MainActor in AureaMcpClient.shared.start() }
+            completionHandler([])
+        } else if info["aureaConfirm"] != nil {
+            completionHandler([]) // o alerta do app já está na tela
+        } else {
+            completionHandler([.banner, .sound])
+        }
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        let info = response.notification.request.content.userInfo
+        let action = response.actionIdentifier
+        Task { @MainActor in
+            let mcp = AureaMcpClient.shared
+            if let id = info["aureaConfirm"] as? String {
+                if action == AureaMcpNotifications.approveAction { mcp.answerConfirm(true, id: id) }
+                else if action == AureaMcpNotifications.denyAction || action == UNNotificationDismissActionIdentifier { mcp.answerConfirm(false, id: id) }
+                // Toque no corpo: o app abre e o alerta de aprovação está lá.
+            } else if info["aurea"] != nil {
+                // O alerta do relay: o app abriu (ou vai abrir); conecta e a fila drena.
+                mcp.start()
+            }
+            completionHandler()
+        }
     }
 }

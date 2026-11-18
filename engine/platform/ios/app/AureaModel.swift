@@ -24,6 +24,9 @@ import Photos
 import ImageIO
 import Metal
 import UIKit
+#if canImport(BackgroundTasks)
+import BackgroundTasks
+#endif
 
 // =============================================================================
 // Tipos da UI, derivados do que a ponte devolve.
@@ -65,6 +68,11 @@ struct PreRenderState: Equatable {
     var error = 0
     var diskBytes: Int64 = 0
     var residentBytes: Int64 = 0
+    /// 1.0.2: trecho do cache [firstFrame, endFrame), qualidade (0 = gesto 540p) e trechos desatualizados.
+    var firstFrame: Int64 = 0
+    var endFrame: Int64 = 0
+    var divisor = 0
+    var dirtySegments = 0
     var fraction: Double { framesTotal > 0 ? min(1, max(0, Double(framesDone) / Double(framesTotal))) : 0 }
     init() {}
     init(_ values: [NSNumber]) {
@@ -74,6 +82,73 @@ struct PreRenderState: Equatable {
         width = max(0, values[4].intValue); height = max(0, values[5].intValue)
         direction = values[6].intValue < 0 ? -1 : 1; error = values[7].intValue
         diskBytes = max(0, values[8].int64Value); residentBytes = max(0, values[9].int64Value)
+        if values.count >= 14 {
+            firstFrame = values[10].int64Value; endFrame = values[11].int64Value
+            divisor = min(8, max(0, values[12].intValue)); dirtySegments = max(0, values[13].intValue)
+        }
+    }
+}
+
+/// Pre Render & Pre Export (1.0.2): o trecho do painel (quadros da composição, [in, out); -1 = nenhum).
+struct PreRenderRangeState: Equatable {
+    var inFrame: Int64 = -1
+    var outFrame: Int64 = -1
+    var effectiveIn: Int64 = 0
+    var effectiveOut: Int64 = 0
+    var loop = false
+    var divisor = 2
+    var fps: Double = 30
+    var chosen: Bool { inFrame >= 0 && outFrame > inFrame }
+    init() {}
+    init(_ v: [NSNumber]) {
+        guard v.count >= 7 else { return }
+        inFrame = v[0].int64Value; outFrame = v[1].int64Value
+        effectiveIn = v[2].int64Value; effectiveOut = v[3].int64Value
+        loop = v[4].boolValue
+        divisor = [1, 2, 4, 8].contains(v[5].intValue) ? v[5].intValue : 2
+        fps = v[6].doubleValue > 0 ? v[6].doubleValue : 30
+    }
+}
+
+/// "Cabe ~Xs" de uma qualidade (motor: render/PreRenderPlan.hpp).
+struct PreRenderFitState: Equatable {
+    var width = 0, height = 0, divisor = 2, mode = 0
+    var fps: Double = 30, fitsSeconds: Double = 0, rangeSeconds: Double = 0
+    var bytesPerSecond: Int64 = 0, availableBytes: Int64 = 0, rangeBytes: Int64 = 0
+    var fits = false
+    init() {}
+    init(_ v: [NSNumber]) {
+        guard v.count >= 11 else { return }
+        width = v[0].intValue; height = v[1].intValue; divisor = v[2].intValue; mode = v[3].intValue
+        fps = v[4].doubleValue; fitsSeconds = v[5].doubleValue; rangeSeconds = v[6].doubleValue
+        bytesPerSecond = v[7].int64Value; availableBytes = v[8].int64Value; rangeBytes = v[9].int64Value
+        fits = v[10].boolValue
+    }
+}
+
+/// O pré-export: um MP4 do trecho no cache; `stale` = uma edição mudou o trecho depois.
+struct PreExportState: Equatable {
+    var running = false, complete = false, stale = false
+    var framesDone: Int64 = 0, framesTotal: Int64 = 0
+    var inFrame: Int64 = 0, outFrame: Int64 = 0
+    var width = 0, height = 0, divisor = 2, dirtySegments = 0
+    var fps: Double = 30
+    var bytes: Int64 = 0
+    var error = 0
+    var path = ""
+    var fraction: Double { framesTotal > 0 ? min(1, max(0, Double(framesDone) / Double(framesTotal))) : 0 }
+    /// Pronto e ainda igual à edição: o player pode tocar o vídeo.
+    var playable: Bool { complete && !stale && !path.isEmpty }
+    init() {}
+    init(_ v: [NSNumber], path: String) {
+        guard v.count >= 14 else { return }
+        running = v[0].boolValue; complete = v[1].boolValue; stale = v[2].boolValue
+        framesDone = v[3].int64Value; framesTotal = v[4].int64Value
+        inFrame = v[5].int64Value; outFrame = v[6].int64Value
+        width = v[7].intValue; height = v[8].intValue; divisor = v[9].intValue; dirtySegments = v[10].intValue
+        fps = v[11].doubleValue > 0 ? v[11].doubleValue : 30
+        bytes = v[12].int64Value; error = v[13].intValue
+        self.path = path
     }
 }
 
@@ -914,6 +989,9 @@ final class AureaModel: ObservableObject {
     @Published var toast: String?
     /// 0.5.4: um recurso pago (texto 3D) pedido sem o acesso: o editor mostra HyperLockedSheet.
     @Published var hyperLockedPrompt = false
+    /// 1.0.2: opção paga (Flow Retime › Neural (IA)) pedida sem o AureaHyper: o paywall do AureaHyper.
+    /// Par de EditorStore.hyperOptionPrompt.
+    @Published var hyperOptionPrompt = false
     /// Ação do aviso ("Desfazer"), quando há; some junto com ele. Qualquer
     /// comando novo (`mutate`, `commitPendingCommands`, `beginGesture`) a tira:
     /// o passo desfeito tem de ser o que o aviso anuncia (EditorStore.kt).
@@ -1021,6 +1099,22 @@ final class AureaModel: ObservableObject {
     @Published private(set) var preRenderProgress = PreRenderState()
     private var preRenderStartup: PreRenderStartupRequest?
     private var preRenderCancelled = false
+    // --- Pre Render & Pre Export (1.0.2; PreRenderPanelView.swift) --------------
+    /// O painel aberto: o laço de status lê o trecho e o "cabe" a 5 Hz.
+    @Published var preRenderPanelOpen = false
+    @Published private(set) var preRenderRange = PreRenderRangeState()
+    /// 1 Inteira, 2, 4, 8 (divisor da composição).
+    @Published private(set) var preRenderQuality = 2
+    /// 0 PreRender, 1 pré-export (muda a conta do "cabe").
+    @Published private(set) var preRenderMode = 0
+    @Published private(set) var preRenderFits: [Int: PreRenderFitState] = [:]
+    @Published private(set) var preExport = PreExportState()
+    @Published private(set) var preExportPreparing = false
+    /// Trechos que edições desatualizaram ([de, até) em quadros): PreRender + pré-export.
+    @Published private(set) var preRenderStale: [Range<Int64>] = []
+    /// O MP4 do pré-export tocando no player, ou nil.
+    @Published var preExportWatching: String?
+    private var preExportFailedShown = 0
     @Published private(set) var exporting = false {
         // A marca de "export em andamento" só sobra se o app morrer no meio
         // (jetsam do iOS, crash): ver previousExportDied.
@@ -1030,8 +1124,23 @@ final class AureaModel: ObservableObject {
             // (o iOS suspende o app e o motor cancela). Tela acesa durante o
             // export; o Android já fazia isso (FLAG_KEEP_SCREEN_ON).
             if exporting != oldValue { UIApplication.shared.isIdleTimerDisabled = exporting }
+            // 18/11/2026: iOS 26+ — o export de vídeo pede ao sistema para
+            // continuar em segundo plano (BGContinuedProcessingTask, com GPU
+            // quando o aparelho e o app têm). Sem isso, a ida ao segundo plano
+            // pausa e o export continua do último GOP ao voltar (como antes).
+            if exporting != oldValue {
+                if exporting { exportBackgroundRun.begin(title: AureaText.t("ios_export_background_title")) }
+                else {
+                    exportBackgroundRun.end(success: !exportCancelled)
+                    finishBackgroundExportRun()
+                }
+            }
         }
     }
+    /// Pedido ao sistema para o export seguir em segundo plano (iOS 26+).
+    private let exportBackgroundRun = ExportBackgroundRun()
+    /// O app foi para o segundo plano com o export seguindo (sem pausa nem suspensão).
+    private var exportRunningInBackground = false
     /// Este export começou mais leve porque o app fechou no meio do anterior.
     @Published private(set) var exportLighterAfterClose = false
     /// 0.3.2 (CheckpointManager do motor): o iOS não deixa a GPU trabalhar em
@@ -1889,6 +1998,17 @@ final class AureaModel: ObservableObject {
         // já saindo de cena; um erro de GPU nessa janela virava falha de render
         // (degrau de memória) em vez de pausa. `pauseExport` não espera: marca
         // a suspensão e acorda o export; quem aguarda ele parar é o `suspend`.
+        // 18/11/2026: com o processamento continuado do iOS 26 (GPU liberada), o
+        // export de vídeo SEGUE em segundo plano: só grava o projeto, sem pausar
+        // nem suspender o motor (o render da prévia já está parado durante o export).
+        if exporting && !exportCancelled && !exportPublishing && exportedKind == .video && pendingExportURL != nil
+            && exportBackgroundRun.keepsRunningInBackground {
+            exportRunningInBackground = true
+            NSLog("AureaExport: continuing in background (continued processing task)")
+            saveWhileExportContinues()
+            exportBackgroundRun.onExpire = { [weak self] in self?.pauseBackgroundExportRun() }
+            return
+        }
         if exporting && !exportCancelled && !exportPublishing && exportedKind == .video && pendingExportURL != nil {
             if !exportPausedForBackground { exportReportLog.paused() }
             exportPausedForBackground = true
@@ -1987,9 +2107,67 @@ final class AureaModel: ObservableObject {
         else { defaults.set(true, forKey: Self.exportInFlightKey) }
     }
 
+    /// O sistema encerrou o tempo em segundo plano: o caminho de sempre —
+    /// pausa com checkpoint e suspensão do motor.
+    private func pauseBackgroundExportRun() {
+        guard exportRunningInBackground else { return }
+        exportRunningInBackground = false
+        guard appInBackground else { return }
+        if exporting && !exportCancelled && !exportPublishing && exportedKind == .video && pendingExportURL != nil {
+            if !exportPausedForBackground { exportReportLog.paused() }
+            exportPausedForBackground = true
+            engine.pauseExport()
+            markExportInFlight(paused: true)
+        }
+        suspendEngineInBackground()
+    }
+
+    /// Grava o projeto ao sair com o export seguindo (sem pausá-lo): o
+    /// exportador é dono do contexto de render, a capa fica para depois.
+    private func saveWhileExportContinues() {
+        guard screen == .editor, projectURL != nil else { return }
+        let app = UIApplication.shared
+        var task = UIBackgroundTaskIdentifier.invalid
+        task = app.beginBackgroundTask(withName: "aurea-salvar") {
+            if task != .invalid { app.endBackgroundTask(task); task = .invalid }
+        }
+        saveOnLeave(forceThumbnail: false)
+        if task != .invalid { app.endBackgroundTask(task); task = .invalid }
+    }
+
+    /// O export que seguia em segundo plano acabou (pronto, falha ou cancelado):
+    /// com o app ainda fora de cena, o motor é suspenso como na ida normal.
+    private func finishBackgroundExportRun() {
+        guard exportRunningInBackground else { return }
+        exportRunningInBackground = false
+        if appInBackground { suspendEngineInBackground() }
+    }
+
+    private func suspendEngineInBackground() {
+        let app = UIApplication.shared
+        var task = UIBackgroundTaskIdentifier.invalid
+        task = app.beginBackgroundTask(withName: "aurea-suspender") {
+            if task != .invalid { app.endBackgroundTask(task); task = .invalid }
+        }
+        let lifecycleEngine = engine
+        lifecycleQueue.async {
+            lifecycleEngine.suspend()
+            DispatchQueue.main.async {
+                if task != .invalid { app.endBackgroundTask(task); task = .invalid }
+            }
+        }
+    }
+
     func enterForeground() {
         guard started else { return }
         appInBackground = false
+        if exportRunningInBackground {
+            // Voltou com o export ainda rodando: nada foi suspenso, nada a refazer.
+            exportRunningInBackground = false
+            exportBackgroundRun.onExpire = nil
+            checkMemoryPressure(force: true)
+            return
+        }
         // 0.5.3 (P1-6 / R-33): na frente de novo, morrer no meio volta a contar.
         markExportInFlight(paused: false)
         checkMemoryPressure(force: true)
@@ -2200,7 +2378,7 @@ final class AureaModel: ObservableObject {
     private func refreshStatus() {
         // Native startup freezes the document under modelMutex. Polling it
         // here would move that background wait straight back onto UIKit.
-        guard started, !exportPreparing, !exportBackgroundSavePending, !preRenderPreparing else { return }
+        guard started, !exportPreparing, !exportBackgroundSavePending, !preRenderPreparing, !preExportPreparing else { return }
         var out = AureaStatus()
         guard engine.readStatus(&out) else { return }
         // Detail is evaluated at the native playhead. The optimistic timeline
@@ -2211,6 +2389,7 @@ final class AureaModel: ObservableObject {
         if out.playing == 0 { playheadStaleAfterPause = false }
         refreshPreviewBufferRanges(revision: out.modelRevision)
         updatePreRenderProgress()
+        if preRenderPanelOpen || preExport.running || preRenderProgress.complete || preExport.complete { refreshPreRenderPanel() }
         if let pending = pendingPlayhead {
             if out.playhead == pending || ProcessInfo.processInfo.systemUptime >= pendingPlayheadUntil { pendingPlayhead = nil }
             else { out.playhead = pending }
@@ -2302,7 +2481,7 @@ final class AureaModel: ObservableObject {
     /// Relê o modelo que as telas desenham. Barato o bastante para rodar a cada
     /// mudança de revisão (é UMA travessia por lista, ver Engine::query_*).
     func refreshModel(force: Bool = false) {
-        guard started, !exportPreparing, !exportBackgroundSavePending, !preRenderPreparing else { return }
+        guard started, !exportPreparing, !exportBackgroundSavePending, !preRenderPreparing, !preExportPreparing else { return }
         refreshPreviewBufferRanges(revision: status.modelRevision)
         let nextEditMode = engine.timelineEditMode
         if editMode != nextEditMode { editMode = nextEditMode }
@@ -2401,7 +2580,7 @@ final class AureaModel: ObservableObject {
 
     func refreshSelectedLayer(refreshEffectStack: Bool = true) {
         refreshInlineKeys()
-        guard !preRenderPreparing else { return }
+        guard !preRenderPreparing, !preExportPreparing else { return }
         guard let layerId = primarySelection, started else {
             if !effects.isEmpty { effects = [] }
             if !decorations.isEmpty { decorations = [] }   // Omega aparência
@@ -2672,6 +2851,162 @@ final class AureaModel: ObservableObject {
         if started { engine.cancelPreRender() }
     }
 
+    // =========================================================================
+    // Pre Render & Pre Export (1.0.2). O trecho, a qualidade, o "cabe ~Xs" e os
+    // trechos desatualizados moram no motor (EnginePreRenderRange.cpp); aqui
+    // só o espelho para o painel e a régua (o Android tem o mesmo, EditorStore).
+    // =========================================================================
+    func openPreRenderPanel() {
+        guard started else { return }
+        if status.playing != 0 { pause() }
+        preRenderPanelOpen = true
+        refreshPreRenderPanel()
+    }
+
+    func closePreRenderPanel() { preRenderPanelOpen = false }
+
+    /// Leituras curtas do motor (sem E/S além do espaço livre do disco).
+    func refreshPreRenderPanel() {
+        guard started, !preRenderPreparing, !preExportPreparing else { return }
+        let range = PreRenderRangeState(engine.preRenderRange())
+        if range != preRenderRange { preRenderRange = range }
+        if preRenderPanelOpen {
+            var fits: [Int: PreRenderFitState] = [:]
+            for d in [1, 2, 4, 8] { fits[d] = PreRenderFitState(engine.preRenderFit(Int32(d), mode: Int32(preRenderMode))) }
+            if fits != preRenderFits { preRenderFits = fits }
+        }
+        let values = engine.preExportStatus()
+        let complete = values.count > 1 && values[1].boolValue
+        let export = PreExportState(values, path: complete ? engine.preExportPath() : "")
+        if export.error != 0, export.error != 25, !export.running, preExport.running, preExportFailedShown != export.error {
+            preExportFailedShown = export.error
+            toast = AureaText.t("prx_preexport_failed", Self.preRenderErrorText(export.error))
+        }
+        if export != preExport { preExport = export }
+        var stale: [Range<Int64>] = []
+        for mode in [Int32(0), Int32(1)] {
+            let pairs = engine.preRenderDirty(mode)
+            var i = 0
+            while i + 1 < pairs.count {
+                let from = pairs[i].int64Value, to = pairs[i + 1].int64Value
+                if to > from { stale.append(from..<to) }
+                i += 2
+            }
+        }
+        if stale != preRenderStale { preRenderStale = stale }
+        if preExportWatching != nil, !export.playable { preExportWatching = nil }
+    }
+
+    /// 0 Início, 1 Fim, 2 Inteiro, 3 Limpar (o trecho é da sessão, no motor).
+    func preRenderRangeAction(_ action: Int) {
+        guard started, !preRenderPreparing, !preExportPreparing else { return }
+        pause()
+        _ = engine.preRenderRangeAction(Int32(action))
+        refreshPreRenderPanel()
+    }
+
+    func changePreRenderQuality(_ divisor: Int) {
+        let d = [1, 2, 4, 8].contains(divisor) ? divisor : 2
+        preRenderQuality = d
+        if started { engine.setPreRenderQuality(Int32(d)) }
+    }
+
+    func changePreRenderMode(_ mode: Int) {
+        preRenderMode = mode > 0 ? 1 : 0
+        refreshPreRenderPanel()
+    }
+
+    func preRenderGoStart() { seek(toFrame: preRenderRange.effectiveIn) }
+    func preRenderGoEnd() { seek(toFrame: max(preRenderRange.effectiveIn, preRenderRange.effectiveOut - 1)) }
+
+    /// Loop do trecho: a reprodução fica presa nele e repete; ligar toca do início dele.
+    func setPreRenderLoop(_ on: Bool) {
+        guard started else { return }
+        engine.setPreRenderLoop(on)
+        setLooping(on)
+        if on { seek(toFrame: preRenderRange.effectiveIn); play() } else { pause() }
+        refreshPreRenderPanel()
+    }
+
+    /// PreRender do trecho na qualidade escolhida (partida na fila do ciclo de vida, como o gesto).
+    func startPreRenderRange() {
+        guard started, screen == .editor, !exporting, !exportPreparing, !openingProject, !importingMedia,
+              !preRenderPreparing, !preRenderProgress.running else { return }
+        if preExportPreparing || preExport.running { toast = AureaText.t("prx_busy"); return }
+        pause()
+        let request = PreRenderStartupRequest(), project = projectGeneration
+        let native = engine, divisor = preRenderQuality
+        preRenderStartup = request
+        preRenderCancelled = false
+        preRenderPreparing = true
+        preRenderProgress = PreRenderState()
+        lifecycleQueue.async { [weak self] in
+            let code: Int32
+            if request.isCancelled { code = 25 }
+            else { code = native.startPreRenderRange(Int32(divisor)) }
+            if request.isCancelled { native.cancelPreRender() }
+            DispatchQueue.main.async {
+                guard let self, self.preRenderStartup === request else { return }
+                self.preRenderStartup = nil
+                self.preRenderPreparing = false
+                guard self.started, self.projectGeneration == project else { return }
+                if !request.isCancelled {
+                    self.updatePreRenderProgress()
+                    if code != 0, self.preRenderProgress.error != Int(code) {
+                        self.toast = AureaText.t("prerender_failed", Self.preRenderErrorText(Int(code)))
+                    }
+                }
+                self.refreshPreRenderPanel()
+            }
+        }
+    }
+
+    /// Pré-export do trecho: um MP4 pelo encoder do aparelho, guardado no cache do motor.
+    func startPreExport() {
+        guard started, screen == .editor, !exporting, !exportPreparing, !openingProject, !importingMedia,
+              !preExportPreparing, !preExport.running else { return }
+        if preRenderPreparing || preRenderProgress.running { toast = AureaText.t("prx_busy"); return }
+        pause()
+        preExportWatching = nil
+        preExportPreparing = true
+        preExportFailedShown = 0
+        let native = engine, divisor = preRenderQuality, project = projectGeneration
+        lifecycleQueue.async { [weak self] in
+            let code = native.startPreExport(Int32(divisor))
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.preExportPreparing = false
+                guard self.started, self.projectGeneration == project else { return }
+                if code != 0, code != 25 {
+                    self.toast = AureaText.t("prx_preexport_failed", Self.preRenderErrorText(Int(code)))
+                }
+                self.refreshPreRenderPanel()
+            }
+        }
+    }
+
+    func cancelPreExport() {
+        guard started else { return }
+        engine.cancelPreExport()
+        refreshPreRenderPanel()
+    }
+
+    /// Toca o pré-export pronto (vídeo decodificado em vez do render ao vivo).
+    func watchPreExport() {
+        guard preExport.playable else { return }
+        pause()
+        preExportWatching = preExport.path
+    }
+
+    /// O player parou em `seconds` do vídeo: o cabeçote vai ao quadro correspondente.
+    func closePreExportPlayer(seconds: Double) {
+        let export = preExport
+        preExportWatching = nil
+        guard seconds >= 0, export.outFrame > export.inFrame else { return }
+        let frame = export.inFrame + Int64(seconds * export.fps)
+        seek(toFrame: min(max(frame, export.inFrame), export.outFrame - 1))
+    }
+
     private func updatePreRenderProgress() {
         let progress = PreRenderState(engine.preRenderProgress())
         if progress.error != 0, progress.error != preRenderProgress.error, !preRenderCancelled, progress.error != 25 {
@@ -2709,7 +3044,7 @@ final class AureaModel: ObservableObject {
 
     /// Um quadro da tela: só o cabeçote do motor vai para a timeline.
     private func playheadTick() {
-        guard started, !exportPreparing, !exportBackgroundSavePending, !preRenderPreparing else { followPlayback(false); return }
+        guard started, !exportPreparing, !exportBackgroundSavePending, !preRenderPreparing, !preExportPreparing else { followPlayback(false); return }
         var out = AureaStatus()
         guard engine.readStatus(&out) else { return }
         if playheadClock.frame != out.playhead { playheadClock.frame = out.playhead }
@@ -3374,6 +3709,7 @@ final class AureaModel: ObservableObject {
     // =========================================================================
     private func canChangeProject() -> Bool {
         if preRenderPreparing { toast = AureaText.t("prerender_preparing"); return false }
+        if preExportPreparing || preExport.running { toast = AureaText.t("prx_busy"); return false }
         if exporting { toast = AureaText.t("editor_mantenha_aurea_aberto_ate_terminar"); return false }
         if importingMedia { toast = operationMessage; return false }
         if !projectOperations.isEmpty { toast = AureaText.t("ios_importing_media"); return false }
@@ -3435,7 +3771,10 @@ final class AureaModel: ObservableObject {
     /// guarda o caminho RELATIVO a Documents — é o que faz o mesmo .aurea
     /// abrir no Android e no iOS.
     /// Sequential media imports keep peak decoder/image memory bounded.
-    func importMediaBatch(_ items: [(URL, Bool)]) {
+    /// `windows` (1.0.2): arquivos que já são o TRECHO cortado, em Media/
+    /// (OmegaTrimmedImport). `trimUs` (AureaMCP `import_device_media`): o corte
+    /// [in, out] em µs de cada vídeo — a camada já sai cortada (par do Android).
+    func importMediaBatch(_ items: [(URL, Bool)], windows: [URL: MediaWindow] = [:], trimUs: (Int64, Int64)? = nil) {
         guard !items.isEmpty, !importingMedia else { return }
         importingMedia = true
         operationMessage = AureaText.t("ios_importing_media")
@@ -3454,8 +3793,11 @@ final class AureaModel: ObservableObject {
             for (url, video) in items {
                 do {
                     // 0.5.2: do tmp move (e a pasta sai); conteúdo repetido vira link do que já existe.
-                    let destination = try AureaPaths.importIntoMedia(url)
-                    let name = url.deletingPathExtension().lastPathComponent
+                    // 1.0.2: o trecho cortado já está em Media/.
+                    let window = windows[url]
+                    let destination: URL
+                    if window != nil { destination = url } else { destination = try AureaPaths.importIntoMedia(url) }
+                    let name = window?.name ?? url.deletingPathExtension().lastPathComponent
                     // 0.2.7 (EditorStore.importMediaBatch): GIF toca (quadros numa pré-composição) e
                     // PSD chega com as camadas — antes os dois viravam uma imagem parada. O motor lê
                     // o arquivo inteiro na importação, então a cópia sai depois.
@@ -3463,16 +3805,23 @@ final class AureaModel: ObservableObject {
                     let audio = !video && OmegaPickedMedia.kind(url) == .audio
                     let layered = !video && !audio && (ext == "gif" || ext == "psd")
                     let result = audio ? importer.importAudio(destination.path, name: name)
-                        : video ? importer.importVideo(destination.path, name: name)
+                        : video ? importer.importVideo(destination.path, name: name, windowStartUs: window?.windowStartUs ?? 0,
+                                                       originRef: window?.originRef ?? "")
                         : ext == "gif" ? importer.importGIF(destination.path, name: name)
                         : ext == "psd" ? importer.importPSD(destination.path, name: name)
                         : importer.importImageFile(destination.path, name: name)
                     if layered { try? FileManager.default.removeItem(at: destination) }
-                    if result >= 0 { imported.append(result); if audio { audioIds.insert(result) } }
+                    if result >= 0 {
+                        // Corte do agente: a camada já sai cortada (o mesmo passo de desfazer da importação).
+                        if video, let trim = trimUs, trim.1 > trim.0 {
+                            _ = importer.applyImportTiming(result, durationFrames: 0, sourceInUs: trim.0, sourceOutUs: trim.1)
+                        }
+                        imported.append(result); if audio { audioIds.insert(result) }
+                    }
                     else {
                         failures += 1
                         if layered { layeredFailure = (ext == "gif", -result) }
-                        else { try? FileManager.default.removeItem(at: destination) }
+                        else if window == nil { try? FileManager.default.removeItem(at: destination) }
                         if audio {
                             let raw = importer.lastImportError
                             audioFailure = raw.isEmpty ? AureaText.t("ios_import_failed_code", String(-result)) : AureaEngineText.sentence(raw, code: Int(-result))
@@ -3518,6 +3867,17 @@ final class AureaModel: ObservableObject {
         var durationFrames: Int64 = 0
         var trimInUs: Int64 = 0
         var trimOutUs: Int64 = 0
+        /// 1.0.2: `url` já é o TRECHO cortado, dentro de Media/ (OmegaTrimmedImport).
+        var window: MediaWindow? = nil
+    }
+
+    /// 1.0.2 "importar só o trecho cortado": o arquivo em Media/ é um trecho do
+    /// original que começa em `windowStartUs` (régua do original); `originRef`
+    /// diz de onde veio e `name` é o nome do original para a camada.
+    struct MediaWindow {
+        let windowStartUs: Int64
+        let originRef: String
+        let name: String
     }
 
     /// O "Adicionar" do navegador de mídia (P1-2): uma mídia por vez dentro de UM
@@ -3534,11 +3894,15 @@ final class AureaModel: ObservableObject {
             var imported: [Int64] = [], failures = 0
             for pick in picks {
                 do {
-                    let destination = try AureaPaths.importIntoMedia(pick.url)
-                    let name = pick.url.deletingPathExtension().lastPathComponent
+                    // 1.0.2: o trecho cortado já está em Media/ (e pode ser de outro projeto também).
+                    let destination: URL
+                    if pick.window != nil { destination = pick.url } else { destination = try AureaPaths.importIntoMedia(pick.url) }
+                    let name = pick.window?.name ?? pick.url.deletingPathExtension().lastPathComponent
                     let ext = pick.url.pathExtension.lowercased()
                     let layered = !pick.video && (ext == "gif" || ext == "psd")
-                    let result = pick.video ? importer.importVideo(destination.path, name: name)
+                    let result = pick.video ? importer.importVideo(destination.path, name: name,
+                                                                   windowStartUs: pick.window?.windowStartUs ?? 0,
+                                                                   originRef: pick.window?.originRef ?? "")
                         : ext == "gif" ? importer.importGIF(destination.path, name: name)
                         : ext == "psd" ? importer.importPSD(destination.path, name: name)
                         : importer.importImageFile(destination.path, name: name)
@@ -3552,7 +3916,8 @@ final class AureaModel: ObservableObject {
                         imported.append(result)
                     } else {
                         failures += 1
-                        if !layered { try? FileManager.default.removeItem(at: destination) }
+                        // O trecho reaproveitado pode ser de outro projeto: fica (a limpeza do armazenamento decide).
+                        if !layered && pick.window == nil { try? FileManager.default.removeItem(at: destination) }
                     }
                 } catch { failures += 1 }
             }
@@ -5485,7 +5850,10 @@ final class AureaModel: ObservableObject {
             // segundo plano também pergunta pelo checkpoint, mas não é morte
             // por memória: sem achar, começa no degrau pedido.
             probeCheckpoint = (Self.previousExportDied || Self.previousExportPaused) && startAttempt == 0 && options.kind == .video
-            if Self.previousExportDied && startAttempt == 0 && options.kind == .video {
+            // 18/11/2026: a 1a morte só aperta a memória (menos quadros em voo,
+            // mesmo encoder e qualidade); o caminho mais leve do encoder só a
+            // partir da 2a morte seguida (degrau de memória 2 ou mais).
+            if Self.previousExportDied && startAttempt == 0 && options.kind == .video && ExportMemoryStep.current() >= 2 {
                 let lighter = Self.nextExportAttempt(0, code: 8, failure: 0, stalled: false, tooLong: false, options: options)
                 if lighter > 0 && lighter <= 6 {
                     NSLog("AureaExport: previous process died while exporting; starting at attempt %u", lighter)
@@ -6097,6 +6465,9 @@ final class AureaModel: ObservableObject {
             Task { @MainActor in
                 guard let self, self.started, self.exporting, !self.exportPreparing else { return }
                 self.exportProgress = self.engine.exportProgress()
+                self.exportBackgroundRun.update(
+                    done: (self.exportProgress["framesDone"] as? NSNumber)?.int64Value ?? 0,
+                    total: (self.exportProgress["framesTotal"] as? NSNumber)?.int64Value ?? 0)
                 let running = (self.exportProgress["running"] as? NSNumber)?.boolValue ?? false
                 let finished = (self.exportProgress["finished"] as? NSNumber)?.boolValue ?? false
                 let progressFlags = (self.exportProgress["flags"] as? NSNumber)?.uint32Value ?? 0
@@ -6438,6 +6809,11 @@ final class AureaModel: ObservableObject {
         guard looping != on else { return }
         looping = on
         engine.run { $0.setLoop(on) }
+        // 1.0.2: desligar a repetição no transporte também solta o trecho do Pre Render.
+        if !on, preRenderRange.loop, started {
+            engine.setPreRenderLoop(false)
+            refreshPreRenderPanel()
+        }
     }
 
     @Published private(set) var rawPlayback = false
@@ -8671,5 +9047,110 @@ extension AureaModel {
     func setPreviewView(mode: UInt32, pixel: Bool) {
         let ids = mode != 0 ? selection.map { NSNumber(value: $0) } : []
         engine.setPreviewView(mode, ids: ids, pixel: pixel)
+    }
+}
+
+// =============================================================================
+//  18/11/2026: o export de vídeo continua com o app em segundo plano (iOS 26+,
+//  BGContinuedProcessingTask). O pedido é feito quando o export começa (com o
+//  app na frente, como o sistema exige); o sistema mostra o progresso e pode
+//  encerrar o tempo (expirationHandler → a pausa com checkpoint de sempre).
+//  A GPU em segundo plano só vem com o recurso `.gpu` — que exige o
+//  entitlement com.apple.developer.background-tasks.continued-processing.gpu
+//  no App ID. Sem a GPU, o render não roda fora de cena e o comportamento é o
+//  anterior (pausa ao sair, continua do último GOP ao voltar).
+//  Info.plist: BGTaskSchedulerPermittedIdentifiers com "<bundle>.export.*".
+// =============================================================================
+@MainActor
+final class ExportBackgroundRun {
+    /// Chamado (na main) quando o sistema encerra o tempo em segundo plano.
+    var onExpire: (() -> Void)?
+    private var running: AnyObject?
+    private var gpuGranted = false
+    private var lastPercent: Int64 = -1
+
+    /// O export pode seguir fora de cena: a tarefa começou e tem GPU.
+    var keepsRunningInBackground: Bool { running != nil && gpuGranted }
+
+    /// O identificador FIXO que o Info.plist permite (BGTaskSchedulerPermittedIdentifiers:
+    /// "$(PRODUCT_BUNDLE_IDENTIFIER).export.video"). Registrar um identificador
+    /// fora da lista derruba o app; registrar o mesmo duas vezes também — por
+    /// isso um registro só por processo, e o handler acha a instância atual.
+    private static var registeredIdentifier: String?
+    private static weak var current: ExportBackgroundRun?
+    private var title = ""
+
+    func begin(title: String) {
+#if compiler(>=6.2) && canImport(BackgroundTasks)
+        guard #available(iOS 26.0, *) else { return }
+        guard running == nil, let bundle = Bundle.main.bundleIdentifier else { return }
+        let identifier = bundle + ".export.video"
+        let permitted = (Bundle.main.object(forInfoDictionaryKey: "BGTaskSchedulerPermittedIdentifiers") as? [String]) ?? []
+        guard permitted.contains(identifier) else { return }
+        self.title = title
+        Self.current = self
+        if Self.registeredIdentifier != identifier {
+            let registered = BGTaskScheduler.shared.register(forTaskWithIdentifier: identifier, using: nil) { task in
+                guard let task = task as? BGContinuedProcessingTask else {
+                    task.setTaskCompleted(success: false)
+                    return
+                }
+                DispatchQueue.main.async {
+                    guard let run = ExportBackgroundRun.current else { task.setTaskCompleted(success: false); return }
+                    run.running = task
+                    run.lastPercent = -1
+                    task.progress.totalUnitCount = 100
+                    task.expirationHandler = {
+                        DispatchQueue.main.async {
+                            guard let run = ExportBackgroundRun.current else { return }
+                            run.running = nil
+                            run.onExpire?()
+                            run.onExpire = nil
+                        }
+                    }
+                }
+            }
+            guard registered else { NSLog("AureaExport: continued processing task not registered"); return }
+            Self.registeredIdentifier = identifier
+        }
+        let request = BGContinuedProcessingTaskRequest(identifier: identifier, title: title, subtitle: "0%")
+        request.strategy = .fail
+        gpuGranted = BGTaskScheduler.supportedResources.contains(.gpu)
+        if gpuGranted { request.requiredResources = .gpu }
+        do {
+            try BGTaskScheduler.shared.submit(request)
+        } catch {
+            gpuGranted = false
+            NSLog("AureaExport: continued processing task refused: %@", String(describing: error))
+        }
+#else
+        _ = title
+#endif
+    }
+
+    func update(done: Int64, total: Int64) {
+#if compiler(>=6.2) && canImport(BackgroundTasks)
+        guard #available(iOS 26.0, *), let task = running as? BGContinuedProcessingTask, total > 0 else { return }
+        let percent = max(0, min(100, done * 100 / total))
+        guard percent != lastPercent else { return }
+        lastPercent = percent
+        task.progress.completedUnitCount = percent
+        task.updateTitle(title, subtitle: "\(percent)%")
+#else
+        _ = (done, total)
+#endif
+    }
+
+    func end(success: Bool) {
+#if compiler(>=6.2) && canImport(BackgroundTasks)
+        if #available(iOS 26.0, *), let task = running as? BGContinuedProcessingTask {
+            task.setTaskCompleted(success: success)
+        }
+#else
+        _ = success
+#endif
+        running = nil
+        gpuGranted = false
+        onExpire = nil
     }
 }

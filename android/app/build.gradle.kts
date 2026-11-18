@@ -126,8 +126,8 @@ android {
         minSdk = 26
         targetSdk = 36
         // Deve superar os builds 2181–2191 já distribuídos; nunca reduzir o código.
-        versionCode = 2221
-        versionName = "1.0.1"
+        versionCode = 2222
+        versionName = "1.0.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -148,6 +148,9 @@ android {
         for ((campo, chave) in listOf(
             "FIREBASE_PROJECT_ID" to "projectId", "FIREBASE_APP_ID" to "appId",
             "FIREBASE_API_KEY" to "apiKey", "FIREBASE_WEB_CLIENT_ID" to "webClientId",
+            // 18/11/2026 (AureaMCP fora do app): o número do projeto para o FCM. Opcional:
+            // sem ele o app tira do appId (1:<número>:android:…).
+            "FIREBASE_SENDER_ID" to "messagingSenderId",
         )) buildConfigField("String", campo, "\"${firebaseProps.getProperty(chave, "").trim()}\"")
         buildConfigField(
             "String", "AUREA_DISCOVERY_BRANCH",
@@ -407,6 +410,9 @@ dependencies {
     // 0.4.1: login com Google (Firebase Auth + Credential Manager).
     implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
     implementation("com.google.firebase:firebase-auth")
+    // 18/11/2026: AureaMCP fora do app — o push (dados, prioridade alta) que acorda o
+    // app fechado para o agente continuar (mcp/McpPushService.kt). Mesmo BoM.
+    implementation("com.google.firebase:firebase-messaging")
     implementation("androidx.credentials:credentials:1.3.0")
     implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
     implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")

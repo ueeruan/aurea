@@ -288,7 +288,13 @@ AUREA_TEST(EnhanceGpu, DeclaresParametersSectionsPresetsAndFlowRetimeTools) {
     const ParameterRegistry* r = gpu().effects.params(effect_type_id(effect_keys::kFlowRetime));
     AUREA_CHECK(r != nullptr);
     if (!r) return;
-    AUREA_CHECK_EQ(r->count(), 6u);
+    // 1.0.3: "Fantasma ↔ Deformação" no fim (índice 6) e a opção Neural (IA).
+    AUREA_CHECK_EQ(r->count(), 7u);
+    AUREA_CHECK_EQ(r->find("ghost_warp"), 6u);
+    AUREA_CHECK_EQ(r->at(2).enumCount, 4u);
+    // 1.0.2: a opção Neural (IA) é paga; a regra do motor aponta para este parâmetro.
+    AUREA_CHECK_EQ(r->find("vectors"), hyper::kFlowRetimeVectorsParam);
+    AUREA_CHECK(hyper::kFlowRetimeNeuralValue + 1 == r->at(2).enumCount);
     AUREA_CHECK_EQ(r->find("replace_duplicates"), 4u);
     AUREA_CHECK_EQ(r->find("duplicate_sensitivity"), 5u);
     AUREA_CHECK(r->at(4).type == ParamType::Bool && r->at(4).defaultValue.v[0] == 0.0f);

@@ -42,6 +42,7 @@ struct AureaMcpView: View {
                     hero
                     if mcp.enabled && mcp.status != .noAccount {
                         McpConnectCard(mcp: mcp)
+                        McpBackgroundCard(mcp: mcp)
                         McpAureaosCard(mcp: mcp)
                         McpTokenCard(mcp: mcp)
                         McpAgentsCard(mcp: mcp)
@@ -145,6 +146,47 @@ struct AureaMcpView: View {
             AureaToggle(checked: on, onCheckedChange: change).accessibilityIdentifier(id)
         }
         .accessibilityElement(children: .combine).accessibilityLabel(label)
+    }
+}
+
+/// "Fora do app" (par do BackgroundCard do Android): o que o iOS deixa o agente
+/// fazer com o app fora da tela, o interruptor e, no iOS 26+, a tarefa contínua.
+private struct McpBackgroundCard: View {
+    @ObservedObject var mcp: AureaMcpClient
+    var body: some View {
+        McpSection(title: AureaText.t("mcp_bg_title")) {
+            Text(AureaText.t("mcp_bg_body_ios")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted)
+            HStack {
+                Text(AureaText.t("mcp_bg_toggle")).font(.aurea(size: 14))
+                Spacer(minLength: 10)
+                AureaToggle(checked: mcp.keepWorking, onCheckedChange: { mcp.changeKeepWorking($0) }).accessibilityIdentifier("mcp.keepWorking")
+            }
+            .accessibilityElement(children: .combine).accessibilityLabel(AureaText.t("mcp_bg_toggle"))
+            if mcp.keepWorking {
+                if !mcp.notificationsAllowed {
+                    Text(AureaText.t("mcp_bg_notif_denied_ios")).font(.aurea(size: 12)).foregroundStyle(McpInk.warn)
+                        .accessibilityIdentifier("mcp.keepWorking.notify")
+                } else if mcp.pushToken != nil {
+                    HStack(spacing: 8) {
+                        Circle().fill(McpInk.online).frame(width: 8, height: 8)
+                        Text(AureaText.t("mcp_bg_push_ready_ios")).font(.aurea(size: 13, weight: .semibold)).foregroundStyle(McpInk.online)
+                    }
+                    .accessibilityElement(children: .combine).accessibilityIdentifier("mcp.keepWorking.status")
+                }
+                if mcp.continuedSupported {
+                    if mcp.continuedRunning {
+                        HStack(spacing: 8) {
+                            Circle().fill(McpInk.online).frame(width: 8, height: 8)
+                            Text(AureaText.t("mcp_bg_session_running_ios")).font(.aurea(size: 13, weight: .semibold)).foregroundStyle(McpInk.online)
+                        }
+                        .accessibilityElement(children: .combine).accessibilityIdentifier("mcp.continued.status")
+                    } else if mcp.status == .online {
+                        McpSecondaryButton(title: AureaText.t("mcp_bg_session_ios"), id: "mcp.continued.start") { mcp.startContinuedSession() }
+                    }
+                }
+                Text(AureaText.t("mcp_bg_limits_ios")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+            }
+        }
     }
 }
 
@@ -419,7 +461,11 @@ struct AureaMcpRoot: View {
     var body: some View {
         Color.clear.frame(width: 0, height: 0)
             .onAppear { mcp.attach(model); if mcp.enabled { mcp.start() } }
-            .onChange(of: phase) { p in if p == .active, mcp.enabled { mcp.start() } }
+            // Fora do app (18/11/2026): o relay sabe se o app está na frente; voltar drena a fila.
+            .onChange(of: phase) { p in
+                if p == .active { mcp.appBecameActive() }
+                else if p == .background, mcp.enabled { mcp.appDidEnterBackground() }
+            }
             .onChange(of: model.projectName) { _ in if mcp.status == .online { mcp.projectChanged() } }
             .onChange(of: model.screen) { _ in if mcp.status == .online { mcp.projectChanged() } }
             .modifier(McpConfirmAlert(mcp: mcp))

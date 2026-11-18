@@ -83,6 +83,9 @@ public:
     /// o disco). Tenta de novo enquanto der Busy.
     void sweep_orphans(const std::string& cacheRoot) noexcept;
     [[nodiscard]] bool matches(u64 token, const Key& key) const noexcept;
+    /// Tetos que begin() aplica (1.0.2: o "cabe ~Xs" do painel usa os mesmos).
+    [[nodiscard]] static u64 max_disk_bytes() noexcept;
+    [[nodiscard]] static u64 min_reserve_bytes() noexcept;
     [[nodiscard]] Stats stats() const noexcept;
 private:
     struct Impl;

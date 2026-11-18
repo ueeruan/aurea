@@ -41,6 +41,15 @@ internal object HyperEffectGate {
         if (!isHyper(typeId)) return false
         return PaidGate.locked(true, HyperEntitlements.accessFor(AureaEngine.nativeEffectProductId(typeId)))
     }
+
+    /**
+     * 1.0.2: a opção [value] do parâmetro [paramIndex] é paga (Flow Retime › Neural (IA),
+     * hyper::effect_option_requires_access) e a conta não tem o AureaHyper?
+     */
+    fun optionLocked(typeId: Int, paramIndex: Int, value: Float): Boolean {
+        if (!AureaEngine.nativeEffectOptionRequiresHyper(typeId, paramIndex, value)) return false
+        return PaidGate.locked(true, HyperEntitlements.accessFor(null))
+    }
 }
 
 /**

@@ -28,8 +28,9 @@ AUREA_TEST(Export053, DeviceMemoryCapComesFromTotalRamAnd32BitProcessNeverFromTh
     AUREA_CHECK_EQ(export_device_memory_cap_bytes(3700 * kMiB, 64), 512 * kMiB);   // "4 GB" como o Android informa
     AUREA_CHECK_EQ(export_device_memory_cap_bytes(4 * kGiB, 64), 512 * kMiB);
     AUREA_CHECK_EQ(export_device_memory_cap_bytes(5600 * kMiB, 64), 768 * kMiB);   // "6 GB"
-    AUREA_CHECK_EQ(export_device_memory_cap_bytes(8 * kGiB, 64), 1024 * kMiB);
-    AUREA_CHECK_EQ(export_device_memory_cap_bytes(16 * kGiB, 64), 1024 * kMiB);
+    AUREA_CHECK_EQ(export_device_memory_cap_bytes(8 * kGiB, 64), 1536 * kMiB);
+    AUREA_CHECK_EQ(export_device_memory_cap_bytes(12 * kGiB, 64), 2048 * kMiB);
+    AUREA_CHECK_EQ(export_device_memory_cap_bytes(16 * kGiB, 64), 2048 * kMiB);
     // Processo de 32 bits: no máximo 512 MB, mesmo num aparelho de 8 GB.
     AUREA_CHECK_EQ(export_device_memory_cap_bytes(8 * kGiB, 32), 512 * kMiB);
     AUREA_CHECK_EQ(export_device_memory_cap_bytes(3 * kGiB, 32), 384 * kMiB);

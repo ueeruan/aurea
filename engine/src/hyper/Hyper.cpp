@@ -89,11 +89,11 @@ const char* effect_product_id(u32 effectTypeId) noexcept {
 const char* text3d_product_id() noexcept { return kText3DProductId; }
 
 bool product_unlocks_everything(std::string_view productId) noexcept {
-    return productId == kHyperSubscriptionId || productId == kProductId;
+    return productId == kHyperSubscriptionId || productId == kHyperMonthlyLegacyId || productId == kProductId;
 }
 
 std::vector<std::string> subscription_product_ids() {
-    std::vector<std::string> ids{kHyperSubscriptionId};
+    std::vector<std::string> ids{kHyperSubscriptionId, kHyperMonthlyLegacyId};
     for (const PaidEffect& e : kPaidEffects)
         if (e.product && std::find(ids.begin(), ids.end(), e.product) == ids.end()) ids.emplace_back(e.product);
     ids.emplace_back(kText3DProductId);

@@ -298,7 +298,7 @@ private struct PaywallStatus: View {
     }
 }
 
-/// As escolhas de assinatura para `item` (avulso + AureaHyper) e "Restaurar compras".
+/// A assinatura do AureaHyper anual (1.0.2.1: a única à venda) e "Restaurar compras".
 /// Também aparece no painel bloqueado do AureaHyper (só o AureaHyper).
 struct SubscriptionOptions: View {
     @ObservedObject private var store = AureaSubscriptions.shared
@@ -308,20 +308,13 @@ struct SubscriptionOptions: View {
     var body: some View {
         let purchasable = entitlements.purchasable
         VStack(alignment: .leading, spacing: 0) {
-            if let single = item.product {
-                let price = store.price(single) ?? AureaText.t("assinatura_preco_avulso")
-                SubscriptionOptionCard(
-                    title: AureaText.t(item.kind == .text3D ? "assinatura_so_texto3d" : "assinatura_so_efeito"),
-                    price: AureaText.t("assinatura_por_mes", price), id: "assinatura.avulso", highlighted: false,
-                    busy: store.busy == single, enabled: store.busy == nil && purchasable.contains(single)
-                ) { Task { await store.buy(single) } }
-                Spacer().frame(height: 10)
-            }
+            // 1.0.2.1 (19/11/2026): só o AureaHyper ANUAL se vende; acabaram os avulsos
+            // (quem já tinha um continua com ele: hyper::has_access).
             let hyper = store.hyperProduct
             let hyperPrice = store.price(hyper) ?? AureaText.t("assinatura_preco_hyper")
             SubscriptionOptionCard(
                 title: AureaText.t("hyper_title"),
-                price: AureaText.t("assinatura_por_mes", hyperPrice) + " · " + AureaText.t("assinatura_libera_tudo"),
+                price: AureaText.t("assinatura_por_ano", hyperPrice) + " · " + AureaText.t("assinatura_libera_tudo"),
                 id: "assinatura.hyper", highlighted: true,
                 busy: store.busy == hyper, enabled: store.busy == nil && purchasable.contains(hyper)
             ) { Task { await store.buy(hyper) } }

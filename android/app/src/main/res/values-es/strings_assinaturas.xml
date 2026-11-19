@@ -2,15 +2,16 @@
 <resources>
     <!-- 16/11/2026: assinaturas mensais (hyper/Paywall.kt, AureaSubscriptions.swift; docs/release/assinaturas.md). -->
     <string name="assinatura_badge">Función de pago</string>
-    <string name="assinatura_intro_efeito">Suscríbete solo a este efecto o suscríbete a AureaHyper, que desbloquea todos los efectos de pago, el Texto 3D y las herramientas Hyper.</string>
-    <string name="assinatura_intro_texto3d">Suscríbete solo al Texto 3D o suscríbete a AureaHyper, que también desbloquea todos los efectos de pago y las herramientas Hyper.</string>
+    <string name="assinatura_intro_efeito">Este efecto es parte de AureaHyper. Suscríbete a AureaHyper una vez al año y desbloquea todos los efectos de pago, el Texto 3D y las herramientas Hyper.</string>
+    <string name="assinatura_intro_texto3d">El Texto 3D es parte de AureaHyper. Suscríbete a AureaHyper una vez al año y desbloquea también todos los efectos de pago y las herramientas Hyper.</string>
     <string name="assinatura_intro_hyper">AureaHyper desbloquea todos los efectos de pago, el Texto 3D y las herramientas Hyper.</string>
     <string name="assinatura_so_efeito">Suscribirse solo a este efecto</string>
     <string name="assinatura_so_texto3d">Suscribirse solo al Texto 3D</string>
     <string name="assinatura_por_mes">%1$s/mes</string>
+    <string name="assinatura_por_ano">%1$s/año</string>
     <string name="assinatura_libera_tudo">desbloquea todo</string>
     <string name="assinatura_restaurar">Restaurar compras</string>
-    <string name="assinatura_renovacao">Se renueva automáticamente cada mes hasta que canceles. Cancela cuando quieras en %1$s.</string>
+    <string name="assinatura_renovacao">Se renueva automáticamente una vez al año hasta que canceles. Cancela cuando quieras en %1$s.</string>
     <string name="assinatura_entrar">Inicia sesión en tu cuenta Aurea para suscribirte. La suscripción queda vinculada a la cuenta.</string>
     <string name="assinatura_em_breve">Las suscripciones aún no están disponibles. Aquí no se cobra nada.</string>
     <string name="assinatura_obrigado">Suscripción activa. Ya puedes usarla.</string>

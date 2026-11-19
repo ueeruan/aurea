@@ -2,15 +2,16 @@
 <resources>
     <!-- 16/11/2026: assinaturas mensais (hyper/Paywall.kt, AureaSubscriptions.swift; docs/release/assinaturas.md). -->
     <string name="assinatura_badge">Fitur berbayar</string>
-    <string name="assinatura_intro_efeito">Berlangganan efek ini saja, atau berlangganan AureaHyper yang membuka semua efek berbayar, Teks 3D, dan alat Hyper.</string>
-    <string name="assinatura_intro_texto3d">Berlangganan Teks 3D saja, atau berlangganan AureaHyper yang juga membuka semua efek berbayar dan alat Hyper.</string>
+    <string name="assinatura_intro_efeito">Efek ini bagian dari AureaHyper. Berlangganan AureaHyper setahun sekali untuk membuka semua efek berbayar, Teks 3D, dan alat Hyper.</string>
+    <string name="assinatura_intro_texto3d">Teks 3D bagian dari AureaHyper. Berlangganan AureaHyper setahun sekali untuk juga membuka semua efek berbayar dan alat Hyper.</string>
     <string name="assinatura_intro_hyper">AureaHyper membuka semua efek berbayar, Teks 3D, dan alat Hyper.</string>
     <string name="assinatura_so_efeito">Berlangganan efek ini saja</string>
     <string name="assinatura_so_texto3d">Berlangganan Teks 3D saja</string>
     <string name="assinatura_por_mes">%1$s/bulan</string>
+    <string name="assinatura_por_ano">%1$s/tahun</string>
     <string name="assinatura_libera_tudo">membuka semuanya</string>
     <string name="assinatura_restaurar">Pulihkan pembelian</string>
-    <string name="assinatura_renovacao">Diperpanjang otomatis setiap bulan sampai Anda membatalkan. Batalkan kapan saja di %1$s.</string>
+    <string name="assinatura_renovacao">Diperpanjang otomatis setahun sekali sampai Anda membatalkan. Batalkan kapan saja di %1$s.</string>
     <string name="assinatura_entrar">Masuk ke akun Aurea Anda untuk berlangganan. Langganan terhubung ke akun.</string>
     <string name="assinatura_em_breve">Langganan belum tersedia. Tidak ada biaya di sini.</string>
     <string name="assinatura_obrigado">Langganan aktif. Sudah bisa dipakai.</string>

@@ -37,9 +37,12 @@ export const AUREAOS_PRODUCT = "aurea_aureaos";
  * esta lista só diz o que o servidor aceita vender. Mesma lista de
  * hyper::subscription_product_ids (test_hyper.cpp confere a contagem: 12).
  */
-export const HYPER_SUBSCRIPTION = "aurea_hyper_mensal";
+// 1.0.2.1 (19/11/2026, pedido do dono): só se vende o AureaHyper ANUAL (R$ 100/ano).
+// O mensal e os avulsos ficam aqui para renovar/restaurar quem já assinou.
+export const HYPER_SUBSCRIPTION = "aurea_hyper_anual";
+export const HYPER_MENSAL_LEGADO = "aurea_hyper_mensal";
 export const ASSINATURAS = Object.freeze([
-  HYPER_SUBSCRIPTION,
+  HYPER_SUBSCRIPTION, HYPER_MENSAL_LEGADO,
   "aurea_fx_cartoon_moblur", "aurea_fx_twitch", "aurea_fx_signal", "aurea_fx_glitchify", "aurea_fx_extrude",
   "aurea_fx_sharpen", "aurea_fx_find_edges", "aurea_fx_wave_warp", "aurea_fx_block_dissolve",
   "aurea_fx_radial_wipe", "aurea_texto3d", "aurea_fx_headbop",

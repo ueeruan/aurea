@@ -115,8 +115,9 @@ AUREA_TEST(Hyper, SubscriptionProductForEachPaidEffect) {
 
     // Todo efeito pago tem assinatura avulsa, exceto as 3 ferramentas Hyper.
     const auto ids = subscription_product_ids();
-    AUREA_CHECK(ids.size() == 13);  // 13 desde o Headbop pago (1.0.2)
-    AUREA_CHECK(!ids.empty() && ids.front() == "aurea_hyper_mensal");
+    AUREA_CHECK(ids.size() == 14);  // 1.0.2.1: anual (à venda) + mensal e 12 avulsos legados
+    AUREA_CHECK(!ids.empty() && ids.front() == "aurea_hyper_anual");
+    AUREA_CHECK(ids.size() > 1 && ids[1] == "aurea_hyper_mensal");
     AUREA_CHECK(std::find(ids.begin(), ids.end(), "aurea_texto3d") != ids.end());
     AUREA_CHECK(std::find(ids.begin(), ids.end(), "aureahyper_lifetime") == ids.end());
     for (const auto& row : table) AUREA_CHECK_MSG(std::find(ids.begin(), ids.end(), row.product) != ids.end(), row.product);
@@ -134,6 +135,7 @@ AUREA_TEST(Hyper, SubscriptionAccessRule) {
     const std::vector<std::string> onlyTwitch{"aurea_fx_twitch"};
     const std::vector<std::string> onlyText3D{"aurea_texto3d"};
     const std::vector<std::string> monthly{"aurea_hyper_mensal"};
+    const std::vector<std::string> annual{"aurea_hyper_anual"};
     const std::vector<std::string> lifetime{"aureahyper_lifetime"};
     const std::vector<std::string> unrelated{"aurea_aureaos", "", "aurea_fx_twitch_x"};
 
@@ -154,13 +156,14 @@ AUREA_TEST(Hyper, SubscriptionAccessRule) {
     AUREA_CHECK(has_text3d_access(onlyText3D));
     AUREA_CHECK(!has_effect_access(onlyText3D, twitch));
     // AureaHyper mensal e o legado vitalício: tudo.
-    for (const auto* all : {&monthly, &lifetime}) {
+    for (const auto* all : {&annual, &monthly, &lifetime}) {
         AUREA_CHECK(has_effect_access(*all, twitch));
         AUREA_CHECK(has_effect_access(*all, signal));
         AUREA_CHECK(has_effect_access(*all, upscale));
         AUREA_CHECK(has_text3d_access(*all));
         AUREA_CHECK(has_access(*all, nullptr));
     }
+    AUREA_CHECK(product_unlocks_everything("aurea_hyper_anual"));
     AUREA_CHECK(product_unlocks_everything("aurea_hyper_mensal"));
     AUREA_CHECK(product_unlocks_everything("aureahyper_lifetime"));
     AUREA_CHECK(!product_unlocks_everything("aurea_fx_twitch"));

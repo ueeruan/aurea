@@ -145,7 +145,13 @@ inline constexpr const char* kProductId = "aureahyper_lifetime";
 /// (docs/release/assinaturas.md). As telas perguntam ao motor qual produto
 /// libera um item e se o conjunto de produtos da conta dá acesso a ele — a
 /// tabela não se repete no Kotlin/Swift.
-inline constexpr const char* kHyperSubscriptionId = "aurea_hyper_mensal";
+/// 1.0.2.1 (pedido do dono, 19/11/2026): só existe o AureaHyper ANUAL (R$ 100/ano),
+/// que libera tudo; acabaram a mensalidade e as assinaturas avulsas. É o único
+/// produto que as telas oferecem. O AureaHyper mensal e os avulsos de antes
+/// continuam reconhecidos (quem já assinou não perde nada), mas não se vendem.
+inline constexpr const char* kHyperSubscriptionId = "aurea_hyper_anual";
+/// O AureaHyper mensal de 16/11 a 19/11/2026 (legado: libera tudo, não se vende).
+inline constexpr const char* kHyperMonthlyLegacyId = "aurea_hyper_mensal";
 inline constexpr const char* kText3DProductId = "aurea_texto3d";
 
 /// Classificação comum do catálogo. As plataformas continuam verificando a
@@ -182,8 +188,9 @@ inline constexpr u32 kFlowRetimeNeuralValue = 3;
 [[nodiscard]] const char* text3d_product_id() noexcept;
 /// Este produto libera TUDO o que é pago? (AureaHyper mensal e o legado vitalício.)
 [[nodiscard]] bool product_unlocks_everything(std::string_view productId) noexcept;
-/// Os produtos que as lojas vendem: AureaHyper primeiro, depois cada avulso
-/// (ordem estável, sem repetição). As telas usam para pedir preços e restaurar.
+/// Os produtos que o app reconhece: o AureaHyper anual primeiro (o ÚNICO à venda
+/// desde 1.0.2.1), depois o mensal legado e cada avulso legado (ordem estável,
+/// sem repetição). As telas usam para restaurar; à venda só kHyperSubscriptionId.
 [[nodiscard]] std::vector<std::string> subscription_product_ids();
 
 /// A REGRA de acesso (uma só, para as duas plataformas): a conta que tem

@@ -2,15 +2,16 @@
 <resources>
     <!-- 16/11/2026: assinaturas mensais (hyper/Paywall.kt, AureaSubscriptions.swift; docs/release/assinaturas.md). -->
     <string name="assinatura_badge">ميزة مدفوعة</string>
-    <string name="assinatura_intro_efeito">اشترك في هذا التأثير فقط أو اشترك في AureaHyper الذي يفتح كل التأثيرات المدفوعة والنص ثلاثي الأبعاد وأدوات Hyper.</string>
-    <string name="assinatura_intro_texto3d">اشترك في النص ثلاثي الأبعاد فقط أو اشترك في AureaHyper الذي يفتح أيضًا كل التأثيرات المدفوعة وأدوات Hyper.</string>
+    <string name="assinatura_intro_efeito">هذا التأثير جزء من AureaHyper. اشترك في AureaHyper مرة واحدة في السنة لفتح كل التأثيرات المدفوعة والنص ثلاثي الأبعاد وأدوات Hyper.</string>
+    <string name="assinatura_intro_texto3d">النص ثلاثي الأبعاد جزء من AureaHyper. اشترك في AureaHyper مرة واحدة في السنة لفتح كل التأثيرات المدفوعة وأدوات Hyper أيضًا.</string>
     <string name="assinatura_intro_hyper">يفتح AureaHyper كل التأثيرات المدفوعة والنص ثلاثي الأبعاد وأدوات Hyper.</string>
     <string name="assinatura_so_efeito">الاشتراك في هذا التأثير فقط</string>
     <string name="assinatura_so_texto3d">الاشتراك في النص ثلاثي الأبعاد فقط</string>
     <string name="assinatura_por_mes">%1$s/شهريًا</string>
+    <string name="assinatura_por_ano">%1$s/سنويًا</string>
     <string name="assinatura_libera_tudo">يفتح كل شيء</string>
     <string name="assinatura_restaurar">استعادة المشتريات</string>
-    <string name="assinatura_renovacao">يتجدد تلقائيًا كل شهر حتى تلغيه. ألغِ في أي وقت من %1$s.</string>
+    <string name="assinatura_renovacao">يتجدد تلقائيًا مرة كل سنة حتى تلغيه. ألغِ في أي وقت من %1$s.</string>
     <string name="assinatura_entrar">سجّل الدخول إلى حسابك في Aurea للاشتراك. يبقى الاشتراك مرتبطًا بالحساب.</string>
     <string name="assinatura_em_breve">الاشتراكات غير متاحة بعد. لا يُفرض أي مبلغ هنا.</string>
     <string name="assinatura_obrigado">الاشتراك نشط. يمكنك استخدامه الآن.</string>

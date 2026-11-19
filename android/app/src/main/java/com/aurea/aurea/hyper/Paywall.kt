@@ -60,9 +60,8 @@ import com.aurea.aurea.ui.theme.tocavel
 
 // =============================================================================
 //  O PAYWALL das assinaturas (16/11/2026). Abre ao tocar num efeito pago sem o
-//  acesso e ao criar Texto 3D sem o acesso. Duas escolhas:
-//    · "Assinar só este efeito/Texto 3D" — R$ 5,00/mês (o preço da loja quando carrega);
-//    · "AureaHyper" — R$ 59,90/mês · libera tudo;
+//  acesso e ao criar Texto 3D sem o acesso. 1.0.2.1 (19/11/2026): uma escolha só,
+//    · "AureaHyper" — R$ 100,00/ano · libera tudo (o preço da loja quando carrega);
 //  e "Restaurar compras". Sem conta: entrar primeiro (a assinatura fica ligada à
 //  conta Aurea). As mesmas tags no iOS (AureaSubscriptions.swift, PaywallSheet):
 //    assinatura · assinatura.fechar · assinatura.avulso · assinatura.hyper ·
@@ -161,22 +160,13 @@ fun SubscriptionOptions(item: PaidItem) {
     val purchasable = HyperEntitlements.purchasable
     val busy = AureaSubscriptions.busy
     val prices = AureaSubscriptions.prices
-    val single = item.product
-    if (single != null) {
-        val price = prices[single] ?: stringResource(R.string.assinatura_preco_avulso)
-        OptionCard(
-            title = stringResource(if (item.kind == PaidItem.Kind.Text3D) R.string.assinatura_so_texto3d else R.string.assinatura_so_efeito),
-            price = stringResource(R.string.assinatura_por_mes, price),
-            tag = "assinatura.avulso", highlighted = false, busy = busy == single,
-            enabled = busy == null && activity != null && single in purchasable,
-        ) { activity?.let { AureaSubscriptions.buy(it, single) } }
-        Spacer(Modifier.height(10.dp))
-    }
+    // 1.0.2.1 (19/11/2026): só o AureaHyper ANUAL se vende; acabaram os avulsos
+    // (quem já tinha um continua com ele: hyper::has_access).
     if (hyper != null) {
         val price = prices[hyper] ?: stringResource(R.string.assinatura_preco_hyper)
         OptionCard(
             title = stringResource(R.string.hyper_title),
-            price = stringResource(R.string.assinatura_por_mes, price) + " · " + stringResource(R.string.assinatura_libera_tudo),
+            price = stringResource(R.string.assinatura_por_ano, price) + " · " + stringResource(R.string.assinatura_libera_tudo),
             tag = "assinatura.hyper", highlighted = true, busy = busy == hyper,
             enabled = busy == null && activity != null && hyper in purchasable,
         ) { activity?.let { AureaSubscriptions.buy(it, hyper) } }

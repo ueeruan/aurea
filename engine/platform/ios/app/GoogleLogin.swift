@@ -111,12 +111,13 @@ enum GoogleLogin {
         let credencial: AuthCredential = GoogleAuthProvider.credential(withIDToken: idGoogle,
                                                                        accessToken: google.user.accessToken.tokenString)
         let auth: Auth = Auth.auth(app: firebase)
-        do {
-            let dados: AuthDataResult = try await auth.signIn(with: credencial)
-            let token: String = try await dados.user.getIDTokenResult(forcingRefresh: true).token
-            // 0.4.1: a sessão que vale é a do Aurea; o Firebase só provou o e-mail.
+        defer {
             try? auth.signOut()
             GIDSignIn.sharedInstance.signOut()
+        }
+        do {
+            let dados: AuthDataResult = try await auth.signIn(with: credencial)
+            let token: String = try await dados.user.getIDTokenResult(forcingRefresh: false).token
             return token.isEmpty ? .falhou("token") : .token(token)
         } catch {
             try? auth.signOut()

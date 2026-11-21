@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 
 import worker from "../worker.js";
 import {
-  hashSenha, conferirSenha, iguais, normalizarEmail, erroDaSenha, esquecerMemo, PBKDF2_ITERACOES, LIMITES,
+  hashSenha, conferirSenha, iguais, normalizarEmail, erroDaSenha, esquecerMemo, PBKDF2_ITERACOES, LIMITES, sha256hex,
 } from "../contas.js";
 import { kvFalso, d1Falso, pedido } from "./falsos.mjs";
 
@@ -20,6 +20,43 @@ const chamar = async (env, caminho, opcoes) => {
 };
 const cadastro = (env, email, password, ip) => chamar(env, "/api/auth/signup", { metodo: "POST", corpo: { email, password }, ip });
 const login = (env, email, password, ip) => chamar(env, "/api/auth/login", { metodo: "POST", corpo: { email, password }, ip });
+
+test("recuperação via e-mail é de uso único e revoga sessões atuais e antigas", async (t) => {
+  const env = { ...ambiente(), RESEND_API_KEY: "test", ACCOUNT_EMAIL_FROM: "Aurea <accounts@example.com>" };
+  const email = "reset@example.com";
+  const antigo = await cadastro(env, email, "senha anterior");
+  assert.equal(antigo.status, 201);
+  const legacyToken = "a".repeat(43);
+  const user = env.AUREA_DB.sqlite.prepare("SELECT id FROM users WHERE email = ?").get(email);
+  await env.AUREA_KV.put("sess:" + await sha256hex(legacyToken),
+    JSON.stringify({ uid: user.id, email, criado: Date.now() - 1000 }));
+  const messages = [];
+  const tasks = [];
+  t.mock.method(ctx, "waitUntil", (task) => tasks.push(task));
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    assert.equal(url, "https://api.resend.com/emails");
+    messages.push(JSON.parse(options.body));
+    return new Response(null, {status: 202});
+  });
+  const solicitacao = (address) => chamar(env, "/api/auth/password/reset", { metodo: "POST", corpo: { email: address } });
+  const unknown = await solicitacao("missing@example.com");
+  const known = await solicitacao(email);
+  await Promise.all(tasks);
+  assert.equal(known.status, 200);
+  assert.deepEqual(known.corpo, unknown.corpo);
+  assert.equal(messages.length, 1);
+  assert.deepEqual(messages[0].to, [email]);
+  const code = messages[0].text.split("\n\n")[1];
+  const stored = env.AUREA_DB.sqlite.prepare("SELECT token_hash FROM password_resets").get();
+  assert.equal(stored.token_hash, await sha256hex(code));
+  const confirmar = () => chamar(env, "/api/auth/password/confirm", { metodo: "POST", corpo: { code, password: "senha nova segura" } });
+  const outcomes = await Promise.all([confirmar(), confirmar()]);
+  assert.deepEqual(outcomes.map((r) => r.status).sort(), [200, 400]);
+  assert.equal((await chamar(env, "/api/auth/session", { token: antigo.corpo.token })).status, 401);
+  assert.equal((await chamar(env, "/api/auth/session", { token: legacyToken })).status, 401);
+  assert.equal((await login(env, email, "senha anterior")).status, 401);
+  assert.equal((await login(env, email, "senha nova segura")).status, 200);
+});
 
 test("hash PBKDF2-SHA256: 100000 iteracoes, sal de 16 bytes aleatorio, confere so a senha certa", async () => {
   const a = await hashSenha("senha-forte-1");

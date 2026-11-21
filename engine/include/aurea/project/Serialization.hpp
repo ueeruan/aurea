@@ -122,7 +122,8 @@ struct SectionHeader {
 /// legendas: duração mínima, intervalo entre legendas, quebrar no fim da frase,
 /// alinhamento, entrelinha, margem/raio do fundo, cor/desfoque da sombra, e as
 /// mesmas partes de aparência no estilo próprio de cada bloco.
-constexpr u32 kTimelineSectionVersion = 77;
+/// v78: cor sem iluminação por camada de modelo 3D.
+constexpr u32 kTimelineSectionVersion = 78;
 
 /// Cabeçalho do arquivo.
 struct FileHeader {

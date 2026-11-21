@@ -30,6 +30,12 @@ object ContaApi {
     fun entrar(email: String, senha: String): Resposta =
         chamar("POST", "/api/auth/login", JSONObject().put("email", email).put("password", senha), null)
 
+    fun solicitarRecuperacao(email: String): Resposta =
+        chamar("POST", "/api/auth/password/reset", JSONObject().put("email", email), null)
+
+    fun confirmarRecuperacao(code: String, password: String): Resposta =
+        chamar("POST", "/api/auth/password/confirm", JSONObject().put("code", code).put("password", password), null)
+
     /** 0.4.1: login com Google — o ID token do Firebase (GoogleLogin). */
     fun entrarComFirebase(idToken: String): Resposta =
         chamar("POST", "/api/auth/firebase", JSONObject().put("idToken", idToken), null)

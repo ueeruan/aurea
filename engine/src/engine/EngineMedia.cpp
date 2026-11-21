@@ -707,7 +707,7 @@ Status Engine::project_file_media(const char* path, std::vector<package::MediaRe
     const Status s = package::list_media(path, out);
     if (!s.ok()) return s;
     for (package::MediaRef& m : out) {
-        const std::string r = resolve_asset_path(m.stored);
+        const std::string r = resolve_media_for_storage(m.stored);
         m.resolved = r.empty() ? m.stored : r;
     }
     return OkStatus;

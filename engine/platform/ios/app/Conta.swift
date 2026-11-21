@@ -57,7 +57,7 @@ struct ContaSessao {
 }
 
 enum ContaErro: String {
-    case email, senha, credenciais, emUso, limite, rede, servico, expirada
+    case email, senha, credenciais, emUso, limite, rede, servico, expirada, google, codigoRecuperacao
 
     var chave: String {
         switch self {
@@ -69,6 +69,8 @@ enum ContaErro: String {
         case .rede: return "conta_erro_rede"
         case .servico: return "conta_erro_servico"
         case .expirada: return "conta_erro_expirada"
+        case .google: return "conta_google_failed"
+        case .codigoRecuperacao: return "conta_reset_invalid"
         }
     }
 }
@@ -114,6 +116,7 @@ enum ContaLogica {
         if status == 429 || codigo == "muitas_tentativas" { return .limite }
         if codigo == "email_em_uso" || status == 409 { return .emUso }
         if codigo == "email_invalido" { return .email }
+        if codigo == "codigo_recuperacao_invalido" { return .codigoRecuperacao }
         if codigo == "senha_curta" || codigo == "senha_longa" || codigo == "senha_invalida" { return .senha }
         if status == 401 { return .credenciais }
         return .servico
@@ -239,11 +242,11 @@ final class ContaModel: ObservableObject {
     }
 
     /// O portão dos recursos pagos (AureaHyper, HyperModel.swift) acompanha a sessão guardada.
-    func atualizarAcessos() {
+    func atualizarAcessos(retryPurchases: Bool = false) {
         let guardada: ContaSessao? = sessao()
         HyperEntitlements.shared.refresh(token: guardada?.token, email: guardada?.email)
         // Assinaturas da App Store ainda não entregues ao servidor (o app caiu, outro aparelho): restaura em silêncio.
-        if guardada != nil { Task { await AureaSubscriptions.shared.restore(silent: true) } }
+        if guardada != nil { Task { await AureaSubscriptions.shared.restore(silent: true, retry: retryPurchases) } }
     }
 
     func atualizarUsuarios() async {
@@ -313,6 +316,32 @@ final class ContaModel: ObservableObject {
 
     /// 0.4.1: entrar com o Google (Firebase Auth). A folha do Google, o token do
     /// Firebase e o servidor do Aurea; no fim é a mesma sessão do e-mail e senha.
+    func solicitarRecuperacao(_ email: String, onAccepted: @escaping () -> Void) {
+        guard let email = ContaLogica.normalizarEmail(email) else { erro = .email; return }
+        recuperar("/api/auth/password/reset", body: ["email": email], onAccepted: onAccepted)
+    }
+
+    func confirmarRecuperacao(_ code: String, password: String, onAccepted: @escaping () -> Void) {
+        let normalized = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalized.range(of: "^[A-Za-z0-9_-]{22}$", options: .regularExpression) != nil else {
+            erro = .codigoRecuperacao; return
+        }
+        guard ContaLogica.senhaValida(password) else { erro = .senha; return }
+        recuperar("/api/auth/password/confirm", body: ["code": normalized, "password": password], onAccepted: onAccepted)
+    }
+
+    private func recuperar(_ endpoint: String, body: [String: String], onAccepted: @escaping () -> Void) {
+        guard !ocupado else { return }
+        ocupado = true
+        erro = nil
+        Task { @MainActor in
+            defer { ocupado = false }
+            let response = await ContaAPI.chamar(endpoint, metodo: "POST", corpo: body, token: nil)
+            if response.ok { onAccepted() }
+            else { erro = response.status == 0 ? .rede : ContaLogica.erroDoServidor(status: response.status, codigo: response.codigo) }
+        }
+    }
+
     func signInWithGoogle() {
         guard !ocupado, GoogleLogin.disponivel else { return }
         ocupado = true
@@ -321,7 +350,7 @@ final class ContaModel: ObservableObject {
             let idToken: String
             switch await GoogleLogin.entrar() {
             case .cancelado: ocupado = false; return
-            case .falhou: ocupado = false; erro = .servico; return
+            case .falhou: ocupado = false; erro = .google; return
             case .token(let t): idToken = t
             }
             let r: ContaResposta = await ContaAPI.chamar("/api/auth/firebase", metodo: "POST",

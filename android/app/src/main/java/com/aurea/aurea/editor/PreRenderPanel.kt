@@ -19,9 +19,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -56,6 +54,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.aurea.aurea.R
 import com.aurea.aurea.engine.PreRenderFit
 import com.aurea.aurea.state.EditorStore
+import com.aurea.aurea.state.humanError
 import com.aurea.aurea.ui.ds.AureaAlert
 import com.aurea.aurea.ui.i18n.KeepLtr
 import com.aurea.aurea.ui.theme.AureaColors
@@ -99,7 +98,7 @@ internal fun PreRenderPanel(store: EditorStore) {
     var help by remember { mutableStateOf(false) }
     ShellMenuSheet(onDismiss = { store.closePreRenderPanel() }, maxHeightFraction = 0.82f) {
         Column(
-            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 16.dp)
+            Modifier.fillMaxWidth().padding(bottom = 16.dp)
                 .testTag("prerender.panel"),
         ) {
             PanelHeader(onHelp = { help = true })
@@ -338,6 +337,15 @@ private fun ActionSection(store: EditorStore) {
         ) {
             Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 16.sp, fontWeight = FontWeight.W600, color = AureaColors.OnAccent)))
         }
+    }
+    val error = if (mode == 0) progress.error else export.error
+    if (!running && error != 0 && error != 25) {
+        val detail = humanError(error)
+        Text(
+            stringResource(if (mode == 0) R.string.prerender_failed else R.string.prx_preexport_failed, detail),
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp).testTag("prerender.error"),
+            style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Danger)),
+        )
     }
     // Estado do que já está pronto.
     val status: String? = if (mode == 0) when {

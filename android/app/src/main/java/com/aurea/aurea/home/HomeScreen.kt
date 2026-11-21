@@ -68,6 +68,7 @@ fun HomeScreen(store: EditorStore) {
     var confirmLogout by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var showAccount by rememberSaveable { mutableStateOf(false) }
+    var accountRecoveryEmail by rememberSaveable { mutableStateOf<String?>(null) }
     var accountMenu by remember { mutableStateOf(false) }
     LaunchedEffect(conta.logado) { if (conta.logado) showAccount = false }
     val projects = rememberTabListState(vm, HomeViewModel.PROJECTS_TAB)
@@ -158,6 +159,7 @@ fun HomeScreen(store: EditorStore) {
                         signedInEmail = signedIn,
                         onAccount = {
                             if (signedIn == null) {
+                                accountRecoveryEmail = null
                                 conta.entrando = true
                                 showAccount = true
                             } else accountMenu = true
@@ -168,6 +170,13 @@ fun HomeScreen(store: EditorStore) {
                             MenuEntry.Header(stringResource(R.string.conta_conectado, signedIn), tag = "home.account.email"),
                             MenuEntry.Item(stringResource(R.string.social_profile), glyph = CupertinoGlyph.PersonCropCircle,
                                 tag = "home.account.profile") { accountMenu = false; pluginTab = false; vm.selectTab(HomeViewModel.PROFILE_TAB) },
+                            MenuEntry.Item(stringResource(R.string.conta_reset_new), glyph = CupertinoGlyph.Lock,
+                                tag = "home.account.password") {
+                                accountMenu = false
+                                conta.erro = null
+                                accountRecoveryEmail = signedIn
+                                showAccount = true
+                            },
                             MenuEntry.Item(stringResource(R.string.conta_sair), glyph = CupertinoGlyph.ArrowUturnLeft,
                                 tag = "home.account.logout") { confirmLogout = true },
                             MenuEntry.Item(stringResource(R.string.conta_excluir), glyph = CupertinoGlyph.Trash,
@@ -228,7 +237,9 @@ fun HomeScreen(store: EditorStore) {
             TextButton(onClick = { showAccount = false }, modifier = Modifier.align(Alignment.End).testTag("conta.fechar")) {
                 Text(stringResource(R.string.editor_fechar))
             }
-            Box(Modifier.weight(1f)) { com.aurea.aurea.conta.ContaScreen(conta) }
+            Box(Modifier.weight(1f)) {
+                com.aurea.aurea.conta.ContaScreen(conta, accountRecoveryEmail) { showAccount = false }
+            }
         }
     }
     if (reportProblem) ReportProblemSheet(sessao = { conta.sessao() }, onResult = { store.showToast(it) }) { reportProblem = false }

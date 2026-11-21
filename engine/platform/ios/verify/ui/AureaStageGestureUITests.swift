@@ -609,6 +609,18 @@ import UIKit
         XCTAssertTrue(edit.waitForExistence(timeout: 5))
         edit.tap()
         XCTAssertTrue(app.staticTexts["[540, 515]"].exists || app.textViews.firstMatch.waitForExistence(timeout: 5))
+        let close = app.buttons["expression.close"]
+        let apply = app.buttons["expression.apply"]
+        XCTAssertTrue(close.waitForExistence(timeout: 5))
+        XCTAssertTrue(apply.exists)
+        let editor = app.textViews.firstMatch
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        editor.tap()
+        editor.typeText(" ")
+        XCTAssertTrue(close.isHittable)
+        XCTAssertTrue(apply.isHittable)
+        close.tap()
+        XCTAssertTrue(close.waitForNonExistence(timeout: 5))
     }
 
     func testPausedPreviewPreparesFutureFramesBeforePlay() throws {

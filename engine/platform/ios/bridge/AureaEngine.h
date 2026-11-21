@@ -1436,6 +1436,8 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)applyText3DAnim:(long long)layerId preset:(int32_t)preset mode:(uint32_t)mode unit:(uint32_t)unit
                duration:(float)duration stagger:(float)stagger;
 - (NSArray<NSNumber*>*)modelShadows:(long long)layerId;
+- (BOOL)modelUnlitColors:(long long)layerId;
+- (BOOL)setModelUnlitColors:(long long)layerId enabled:(BOOL)enabled;
 - (BOOL)setModelShadows:(long long)layerId cast:(BOOL)cast receive:(BOOL)receive;
 /// Mostrar interior (dupla face) do objeto 3D: 1 mostra, 0 não, −1 não é objeto 3D.
 - (int32_t)modelInterior:(long long)layerId;

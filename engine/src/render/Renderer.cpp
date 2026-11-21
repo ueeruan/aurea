@@ -3479,6 +3479,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 }
                 inst.motionBlur = l->motionBlur;
                 inst.castShadows = l->model.castShadows;
+                inst.unlitColors = l->model.unlitColors;
                 inst.doubleSided = model_interior_visible(l->model.interior, asset->shapeParts);
                 inst.assetKey = l->model.scene.pack();
                 inst.asset = std::move(asset);

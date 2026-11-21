@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="conta_reset_title">पासवर्ड भूल गए</string>
+    <string name="conta_reset_send">कोड भेजें</string>
+    <string name="conta_reset_sent">अगर इस ईमेल से खाता जुड़ा है, तो आपको 15 मिनट के लिए मान्य कोड मिलेगा।</string>
+    <string name="conta_reset_code">रिकवरी कोड</string>
+    <string name="conta_reset_new">नया पासवर्ड</string>
+    <string name="conta_reset_save">नया पासवर्ड सहेजें</string>
+    <string name="conta_reset_done">पासवर्ड बदल गया। नए पासवर्ड से साइन इन करें।</string>
+    <string name="conta_reset_invalid">कोड अमान्य है या उसकी समय सीमा समाप्त हो गई है।</string>
+    <string name="conta_google_failed">Google से साइन इन नहीं हो सका। फिर कोशिश करें या ईमेल से साइन इन करें।</string>
+</resources>

@@ -137,6 +137,7 @@ internal fun ModelMaterialTab(env: PanelEnv) {
     val materials = remember(layer, detail, revision, clipRevision, playhead) { store.queryMaterials() }
     val missing = remember(layer, detail, revision) { store.selectedModelMissingTextures() }
     val locked = detail?.locked == true
+    val unlitColors = remember(layer, revision, clipRevision, detail) { store.modelUnlitColors(layer) }
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp).testTag("panel3d.modelMaterial")) {
         // POSIÇÃO (v76): assentar no chão, centralizar e ajustar à tela — um passo de desfazer cada.
         KitTitle(stringResource(R.string.m3d_place))
@@ -149,6 +150,10 @@ internal fun ModelMaterialTab(env: PanelEnv) {
                 Modifier.weight(1f)) { store.placeModel(layer, 2) }
         }
         KitHint(stringResource(R.string.m3d_place_hint))
+        KitChip(stringResource(R.string.m3d_unlit_colors), on = unlitColors,
+            modifier = Modifier.testTag("panel3d.material.unlit")) {
+            if (!locked) store.setModelUnlitColors(layer, !unlitColors)
+        }
         Spacer(Modifier.height(8.dp))
         // FBX/OBJ com textura/.mtl que não veio junto: o mesmo "Importar texturas" do import.
         if (missing > 0) {

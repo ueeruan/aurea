@@ -221,6 +221,7 @@ struct SceneInstance {
     /// vira dupla face — sem recorte da face de trás, normal invertida no
     /// shader (pbr.frag), a mesma textura. Copiado nos sub-quadros do desfoque.
     bool doubleSided = false;
+    bool unlitColors = false;
     u64  layerKey = 0;                 ///< camada de origem (sub-quadros do desfoque)
     bool motionBlur = false;           ///< a camada pede desfoque de movimento
     /// Ambiente PRÓPRIO deste objeto (v22). `ownEnvironment` falso = usa o do

@@ -2527,6 +2527,16 @@ AUREA_JNI jstring AUREA_FN(nativeQueryText3dFont)(JNIEnv* env, jclass, jlong han
     return env->NewStringUTF(s.fontPath.c_str());
 }
 
+AUREA_JNI jboolean AUREA_FN(nativeSetModelUnlitColors)(JNIEnv*, jclass, jlong handle, jlong layer, jboolean enabled) {
+    auto* c = ctx_of(handle);
+    return c && c->engine.set_model_unlit_colors(static_cast<u64>(layer), enabled == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeModelUnlitColors)(JNIEnv*, jclass, jlong handle, jlong layer) {
+    auto* c = ctx_of(handle);
+    return c && c->engine.model_unlit_colors(static_cast<u64>(layer)) ? JNI_TRUE : JNI_FALSE;
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeSetModelShadows)(JNIEnv*, jclass, jlong handle, jlong layer, jboolean cast, jboolean receive) {
     NativeContext* c = ctx_of(handle);
     return c && c->engine.set_model_shadows(static_cast<u64>(layer), cast == JNI_TRUE, receive == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;

@@ -54,7 +54,7 @@ import UniformTypeIdentifiers
                 VStack(alignment: .leading, spacing: 0) {
                     if entitlements.access != .unlocked && flow.step != .working {
                         HyperLockedPanel(access: entitlements.access, onSignIn: { conta.entrando = true; signingIn = true },
-                                         onRetry: { conta.atualizarAcessos() })
+                                         onRetry: { conta.atualizarAcessos(retryPurchases: true) })
                     } else {
                         switch flow.step {
                         case .choose: HyperChooseStep(flow: flow)
@@ -194,7 +194,7 @@ struct HyperLockedSheet: View {
                 else {
                     ScrollView {
                         HyperLockedPanel(access: entitlements.access, onSignIn: { conta.entrando = true; signingIn = true },
-                                         onRetry: { conta.atualizarAcessos() }).padding(.horizontal, 18)
+                                         onRetry: { conta.atualizarAcessos(retryPurchases: true) }).padding(.horizontal, 18)
                     }
                 }
             }

@@ -41,6 +41,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -82,6 +83,7 @@ fun AureaModalSheet(
     content: @Composable () -> Unit,
 ) {
     val state = rememberModalBottomSheetState(skipPartiallyExpanded = skipPartiallyExpanded)
+    val screenHeight = LocalConfiguration.current.screenHeightDp.coerceAtLeast(1).dp
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = state,
@@ -99,7 +101,9 @@ fun AureaModalSheet(
             )
         },
     ) {
-        Column(Modifier.navigationBarsPadding()) { content() }
+        Box(Modifier.fillMaxWidth().heightIn(max = screenHeight).navigationBarsPadding()) {
+            content()
+        }
     }
 }
 

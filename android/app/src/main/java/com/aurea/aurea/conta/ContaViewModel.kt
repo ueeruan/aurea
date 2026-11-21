@@ -53,11 +53,13 @@ class ContaViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** O portão dos recursos pagos acompanha a sessão guardada. */
-    fun atualizarAcessos() {
+    fun atualizarAcessos(retryPurchases: Boolean = false) {
         val s = sessao()
         com.aurea.aurea.hyper.HyperEntitlements.refresh(s?.token, s?.email)
         // Assinaturas da Play ainda não entregues ao servidor (o app caiu, outro aparelho): restaura em silêncio.
-        if (s != null) com.aurea.aurea.hyper.AureaSubscriptions.restore(getApplication<Application>(), silent = true)
+        if (s != null) com.aurea.aurea.hyper.AureaSubscriptions.restore(
+            getApplication<Application>(), silent = true, retry = retryPurchases,
+        )
     }
 
     /** A sessão guardada, ou null. Lê o cofre (rápido; o Keystore já está de pé). */
@@ -150,6 +152,33 @@ class ContaViewModel(app: Application) : AndroidViewModel(app) {
      * 0.4.1: entrar com o Google (Firebase Auth). A folha do Google, o token do Firebase
      * e o servidor do Aurea; no fim é a mesma sessão do login por e-mail e senha.
      */
+    fun solicitarRecuperacao(email: String, onAccepted: () -> Unit) {
+        val normalized = ContaLogica.normalizarEmail(email)
+        if (normalized == null) { erro = ErroConta.EMAIL; return }
+        recuperar({ ContaApi.solicitarRecuperacao(normalized) }, onAccepted)
+    }
+
+    fun confirmarRecuperacao(code: String, password: String, onAccepted: () -> Unit) {
+        if (!Regex("[A-Za-z0-9_-]{22}").matches(code.trim())) { erro = ErroConta.CODIGO_RECUPERACAO; return }
+        if (!ContaLogica.senhaValida(password)) { erro = ErroConta.SENHA; return }
+        recuperar({ ContaApi.confirmarRecuperacao(code.trim(), password) }, onAccepted)
+    }
+
+    private fun recuperar(request: () -> ContaApi.Resposta, onAccepted: () -> Unit) {
+        if (ocupado) return
+        ocupado = true
+        erro = null
+        viewModelScope.launch {
+            try {
+                val response = withContext(Dispatchers.IO) { request() }
+                if (response.ok) onAccepted()
+                else erro = if (response.status == 0) ErroConta.REDE else ContaLogica.erroDoServidor(response.status, response.codigo)
+            } finally {
+                ocupado = false
+            }
+        }
+    }
+
     fun entrarComGoogle(activity: android.app.Activity) {
         if (ocupado || !GoogleLogin.disponivel) return
         ocupado = true
@@ -157,7 +186,7 @@ class ContaViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val r = when (val g = GoogleLogin.entrar(activity)) {
                 GoogleLogin.Resultado.Cancelado -> { ocupado = false; return@launch }
-                is GoogleLogin.Resultado.Falhou -> { ocupado = false; erro = ErroConta.SERVICO; return@launch }
+                is GoogleLogin.Resultado.Falhou -> { ocupado = false; erro = ErroConta.GOOGLE; return@launch }
                 is GoogleLogin.Resultado.Token -> withContext(Dispatchers.IO) { ContaApi.entrarComFirebase(g.idToken) }
             }
             if (r.status == 0) { ocupado = false; erro = ErroConta.REDE; return@launch }

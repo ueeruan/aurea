@@ -9,7 +9,7 @@ import { generateKeyPairSync } from "node:crypto";
 
 import worker from "../worker.js";
 import { esquecerMemo } from "../contas.js";
-import { RENOVACAO_INTERVALO_S } from "../entitlements.js";
+import { HYPER_SUBSCRIPTION, RENOVACAO_INTERVALO_S } from "../entitlements.js";
 import { kvFalso, d1Falso, pedido } from "./falsos.mjs";
 
 const SEGREDO = "segredo-do-admin-de-teste-0123456789";
@@ -192,6 +192,25 @@ test("renovação: vencida há pouco é conferida de novo na loja (no máximo 1x
     assert.equal(loja.chamadas.length, antes);
   } finally {
     loja.restaurar();
+  }
+});
+
+test("App Store: compra anual aparece na resposta e na verificação seguinte", async () => {
+  const env = ambiente();
+  const session = await cadastro(env, "hyper@example.com");
+  const store = lojas();
+  try {
+    const expiresAt = agora() + 365 * 86400;
+    store.apple.tx["3901"] = appleTx("3901", HYPER_SUBSCRIPTION, expiresAt);
+    const bought = await comprar(env, session, "apple", HYPER_SUBSCRIPTION, "3901");
+    assert.equal(bought.status, 200);
+    assert.deepEqual(bought.corpo.products, [HYPER_SUBSCRIPTION]);
+    assert.equal(bought.corpo.expires[HYPER_SUBSCRIPTION], expiresAt);
+    const checked = await meus(env, session, "apple");
+    assert.equal(checked.status, 200);
+    assert.deepEqual(checked.corpo.products, [HYPER_SUBSCRIPTION]);
+  } finally {
+    store.restaurar();
   }
 });
 

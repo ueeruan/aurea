@@ -276,6 +276,7 @@ struct UfbxBuild {
     Material material(const ufbx_material* m) {
         Material out;
         out.name = std::string(m->name.data, m->name.length);
+        out.unlit = m->features.unlit.enabled;
         const ufbx_material_pbr_maps& p = m->pbr;
         Vec4 base{1, 1, 1, 1};
         if (p.base_color.has_value) {

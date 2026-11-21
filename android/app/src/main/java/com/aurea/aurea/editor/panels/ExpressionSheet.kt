@@ -9,9 +9,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -28,6 +30,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
@@ -43,10 +47,11 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.aurea.aurea.engine.ExpressionDiag
 import com.aurea.aurea.engine.ExpressionInfo
 import com.aurea.aurea.state.EditorStore
-import com.aurea.aurea.ui.ds.AureaModalSheet
 import com.aurea.aurea.ui.ds.AureaToggle
 import com.aurea.aurea.ui.ds.numeroPtBr
 import com.aurea.aurea.ui.theme.AureaColors
@@ -221,99 +226,113 @@ internal fun ExpressionSheet(store: EditorStore, target: EditorStore.ExpressionT
         else -> null
     }
 
-    AureaModalSheet(onDismiss = { store.closeExpression() }) {
-        Column(Modifier.fillMaxWidth().imePadding().padding(horizontal = 16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.panel_expressao), style = AureaType.Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W700)))
-                    Text(target.label, style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)))
-                }
-                if (applied) {
-                    Text(
-                        if (info?.enabled == true) stringResource(R.string.panel_ligada) else stringResource(R.string.panel_desligada),
-                        style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    AureaToggle(checked = info?.enabled == true, onCheckedChange = { on ->
-                        store.setExpressionEnabled(target, on)
-                        reread()
-                    })
+    Dialog(
+        onDismissRequest = store::closeExpression,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
+        val focus = LocalFocusManager.current
+        Column(Modifier.fillMaxSize().background(AureaColors.Surface).safeDrawingPadding()
+            .imePadding().padding(horizontal = 16.dp).testTag("expression.sheet")) {
+            Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SheetButton(stringResource(R.string.panel_fechar), AureaColors.Text,
+                    Modifier.weight(1f).testTag("expression.close"), onClick = store::closeExpression)
+                SheetButton(stringResource(R.string.panel_aplicar), AureaColors.Accent,
+                    Modifier.weight(1f).testTag("expression.apply"), enabled = dirty) {
+                    val diagnostic = store.applyExpression(target, field.text)
+                    refused = diagnostic == null
+                    if (diagnostic != null) {
+                        syntax = diagnostic
+                        if (diagnostic.ok) focus.clearFocus()
+                    }
+                    reread()
                 }
             }
-            Spacer(Modifier.height(12.dp))
-            CodeEditor(field, errorLine = shownError?.line ?: 0, onChange = { field = it })
-            Spacer(Modifier.height(8.dp))
-            // Linha de estado: erro (com linha e coluna) ou o resultado no cabeçote.
-            val status = when {
-                refused -> stringResource(R.string.panel_motor_recusou_esta_propriedade) to AureaColors.Danger
-                shownError != null -> {
-                    val msg = if (shownError.line > 0) stringResource(R.string.pn_expr_error_at, shownError.line, shownError.column, shownError.message) else shownError.message
-                    val tail = if (!dirty && applied && syntax.ok) stringResource(R.string.panel_usando_valor_keyframes) else ""
-                    (msg + tail) to AureaColors.Danger
+            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.panel_expressao), style = AureaType.Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W700)))
+                        Text(target.label, style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)))
+                    }
+                    if (applied) {
+                        Text(
+                            if (info?.enabled == true) stringResource(R.string.panel_ligada) else stringResource(R.string.panel_desligada),
+                            style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        AureaToggle(checked = info?.enabled == true, onCheckedChange = { on ->
+                            store.setExpressionEnabled(target, on)
+                            reread()
+                        })
+                    }
                 }
-                dirty -> (if (field.text.isBlank()) stringResource(R.string.panel_aplicar_sem_texto_remove_expressao) else stringResource(R.string.panel_sintaxe_ok_toque_aplicar)) to AureaColors.Muted
-                applied && info?.enabled == false -> stringResource(R.string.panel_desligada_propriedade_usa_keyframes) to AureaColors.Muted
-                applied && textSource -> stringResource(R.string.panel_resultado_agora) + "\u201C" + (info?.text ?: "") + "\u201D" to AureaColors.Keyframe
-                applied -> stringResource(R.string.panel_resultado_agora) + values.joinToString(" · ") { numeroPtBr(it, 2) + target.unit } to AureaColors.Keyframe
-                else -> stringResource(R.string.panel_escreva_expressao_ou_toque_num_atalho) to AureaColors.Muted
-            }
-            Text(status.first, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = status.second)))
-            Spacer(Modifier.height(10.dp))
-            // Atalho: o rótulo (nulo = o próprio código) e o código que entra no cursor.
-            val bounceInertia = stringResource(R.string.expr_snip_bounce)
-            val bounceDrop = stringResource(R.string.expr_snip_bounce_drop)
-            // AE expressions (lote E): só no Aurea PC; no celular a lista fica como estava.
-            val aeShortcuts: List<Pair<String?, String>> =
-                if (com.aurea.aurea.ui.platform.PlatformFeatures.desktopAe) listOf(
-                    stringResource(R.string.expr_snip_ae_color) to AeSnipColor,
-                    stringResource(R.string.expr_snip_ae_path) to AeSnipPathFollow,
-                    stringResource(R.string.expr_snip_ae_dropdown) to AeSnipDropdown,
-                    stringResource(R.string.expr_snip_ae_function) to AeSnipFunction,
-                    stringResource(R.string.expr_snip_ae_create_path) to AeSnipCreatePath,
-                ) else emptyList()
-            val shortcuts: List<Pair<String?, String>> =
-                if (textSource) TextSnippets.map { null to it }
-                else listOf(bounceInertia to BounceInertia, bounceDrop to BounceDrop) + aeShortcuts + Snippets.map { null to it }
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                shortcuts.forEach { (name, snip) ->
-                    Box(
-                        Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(AureaColors.Chip)
-                            .tocavel {
-                                val t = field.text
-                                val a = field.selection.min.coerceIn(0, t.length)
-                                val b = field.selection.max.coerceIn(0, t.length)
-                                // Um bounce inteiro troca o texto todo (ele já usa `value`).
-                                val whole = name != null
-                                val nt = if (whole) snip else t.substring(0, a) + snip + t.substring(b)
-                                field = TextFieldValue(nt, TextRange(if (whole) nt.length else a + snip.length))
+                Spacer(Modifier.height(12.dp))
+                CodeEditor(field, errorLine = shownError?.line ?: 0, onChange = { field = it })
+                Spacer(Modifier.height(8.dp))
+                // Linha de estado: erro (com linha e coluna) ou o resultado no cabeçote.
+                val status = when {
+                    refused -> stringResource(R.string.panel_motor_recusou_esta_propriedade) to AureaColors.Danger
+                    shownError != null -> {
+                        val msg = if (shownError.line > 0) stringResource(R.string.pn_expr_error_at, shownError.line, shownError.column, shownError.message) else shownError.message
+                        val tail = if (!dirty && applied && syntax.ok) stringResource(R.string.panel_usando_valor_keyframes) else ""
+                        (msg + tail) to AureaColors.Danger
+                    }
+                    dirty -> (if (field.text.isBlank()) stringResource(R.string.panel_aplicar_sem_texto_remove_expressao) else stringResource(R.string.panel_sintaxe_ok_toque_aplicar)) to AureaColors.Muted
+                    applied && info?.enabled == false -> stringResource(R.string.panel_desligada_propriedade_usa_keyframes) to AureaColors.Muted
+                    applied && textSource -> stringResource(R.string.panel_resultado_agora) + "\u201C" + (info?.text ?: "") + "\u201D" to AureaColors.Keyframe
+                    applied -> stringResource(R.string.panel_resultado_agora) + values.joinToString(" · ") { numeroPtBr(it, 2) + target.unit } to AureaColors.Keyframe
+                    else -> stringResource(R.string.panel_escreva_expressao_ou_toque_num_atalho) to AureaColors.Muted
+                }
+                Text(status.first, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = status.second)))
+                Spacer(Modifier.height(10.dp))
+                // Atalho: o rótulo (nulo = o próprio código) e o código que entra no cursor.
+                val bounceInertia = stringResource(R.string.expr_snip_bounce)
+                val bounceDrop = stringResource(R.string.expr_snip_bounce_drop)
+                // AE expressions (lote E): só no Aurea PC; no celular a lista fica como estava.
+                val aeShortcuts: List<Pair<String?, String>> =
+                    if (com.aurea.aurea.ui.platform.PlatformFeatures.desktopAe) listOf(
+                        stringResource(R.string.expr_snip_ae_color) to AeSnipColor,
+                        stringResource(R.string.expr_snip_ae_path) to AeSnipPathFollow,
+                        stringResource(R.string.expr_snip_ae_dropdown) to AeSnipDropdown,
+                        stringResource(R.string.expr_snip_ae_function) to AeSnipFunction,
+                        stringResource(R.string.expr_snip_ae_create_path) to AeSnipCreatePath,
+                    ) else emptyList()
+                val shortcuts: List<Pair<String?, String>> =
+                    if (textSource) TextSnippets.map { null to it }
+                    else listOf(bounceInertia to BounceInertia, bounceDrop to BounceDrop) + aeShortcuts + Snippets.map { null to it }
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    shortcuts.forEach { (name, snip) ->
+                        Box(
+                            Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(AureaColors.Chip)
+                                .tocavel {
+                                    val t = field.text
+                                    val a = field.selection.min.coerceIn(0, t.length)
+                                    val b = field.selection.max.coerceIn(0, t.length)
+                                    // Um bounce inteiro troca o texto todo (ele já usa `value`).
+                                    val whole = name != null
+                                    val nt = if (whole) snip else t.substring(0, a) + snip + t.substring(b)
+                                    field = TextFieldValue(nt, TextRange(if (whole) nt.length else a + snip.length))
+                                }
+                                .padding(horizontal = 10.dp, vertical = 7.dp),
+                        ) {
+                            if (name != null) {
+                                Text(name, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, fontWeight = FontWeight.W600, color = AureaColors.Keyframe)))
+                            } else {
+                                Text(snip, style = Mono.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Keyframe)))
                             }
-                            .padding(horizontal = 10.dp, vertical = 7.dp),
-                    ) {
-                        if (name != null) {
-                            Text(name, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, fontWeight = FontWeight.W600, color = AureaColors.Keyframe)))
-                        } else {
-                            Text(snip, style = Mono.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Keyframe)))
                         }
                     }
                 }
-            }
-            Spacer(Modifier.height(14.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (applied) {
-                    SheetButton(stringResource(R.string.panel_remover), AureaColors.Danger, Modifier.weight(1f)) {
+                    SheetButton(stringResource(R.string.panel_remover), AureaColors.Danger,
+                        Modifier.fillMaxWidth().padding(top = 12.dp).testTag("expression.remove")) {
                         refused = store.applyExpression(target, "") == null
-                        field = TextFieldValue("")
-                        reread()
+                        if (!refused) {
+                            field = TextFieldValue("")
+                            reread()
+                        }
                     }
-                }
-                SheetButton(stringResource(R.string.panel_fechar), AureaColors.Text, Modifier.weight(1f)) { store.closeExpression() }
-                SheetButton(stringResource(R.string.panel_aplicar), AureaColors.Accent, Modifier.weight(1f), enabled = dirty) {
-                    val d = store.applyExpression(target, field.text)
-                    refused = d == null
-                    if (d != null) syntax = d
-                    reread()
                 }
             }
             Spacer(Modifier.height(12.dp))

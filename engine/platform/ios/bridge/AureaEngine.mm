@@ -2204,6 +2204,14 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     auto* e = self.engine;
     return e && e->apply_text3d_anim(static_cast<aurea::u64>(layerId), preset, mode, unit, duration, stagger);
 }
+- (BOOL)modelUnlitColors:(long long)layerId {
+    auto* engine = self.engine;
+    return engine && engine->model_unlit_colors(layerId);
+}
+- (BOOL)setModelUnlitColors:(long long)layerId enabled:(BOOL)enabled {
+    auto* engine = self.engine;
+    return engine && engine->set_model_unlit_colors(layerId, enabled);
+}
 - (NSArray<NSNumber*>*)modelShadows:(long long)layerId {
     auto* e = self.engine; float v[2]{}; if (!e || !e->query_model_shadows(layerId, v)) return @[]; return @[@(v[0]), @(v[1])];
 }

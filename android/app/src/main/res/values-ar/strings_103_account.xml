@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="conta_reset_title">نسيت كلمة المرور</string>
+    <string name="conta_reset_send">إرسال الرمز</string>
+    <string name="conta_reset_sent">إذا كان هناك حساب بهذا البريد، فستتلقى رمزًا صالحًا لمدة 15 دقيقة.</string>
+    <string name="conta_reset_code">رمز الاسترداد</string>
+    <string name="conta_reset_new">كلمة المرور الجديدة</string>
+    <string name="conta_reset_save">حفظ كلمة المرور الجديدة</string>
+    <string name="conta_reset_done">تم تحديث كلمة المرور. سجّل الدخول بكلمة المرور الجديدة.</string>
+    <string name="conta_reset_invalid">الرمز غير صالح أو منتهي الصلاحية.</string>
+    <string name="conta_google_failed">تعذّر تسجيل الدخول باستخدام Google. حاول مرة أخرى أو استخدم البريد الإلكتروني.</string>
+</resources>

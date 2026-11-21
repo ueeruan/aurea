@@ -30,7 +30,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
 import kotlin.coroutines.resume
 
 // =============================================================================
@@ -66,6 +65,7 @@ object AureaSubscriptions {
 
     private val scope by lazy { CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate) }
     private var lastSilentRestore = 0L
+    private var lastRestoreSession: String? = null
     private var pricesLoading = false
 
     /** Preço localizado da Play por produto (só a fase recorrente do plano base). */
@@ -145,12 +145,15 @@ object AureaSubscriptions {
      * login: no máximo a cada 10 min, só manda ao servidor o que ainda não foi
      * reconhecido ou que a conta ainda não tem, e não mostra aviso.
      */
-    fun restore(context: Context, silent: Boolean) {
+    fun restore(context: Context, silent: Boolean, retry: Boolean = false) {
         if (busy != null) return
         val session = ContaViewModel.tokenGuardado(context) ?: run { if (!silent) notice = R.string.assinatura_entrar; return }
         val now = System.currentTimeMillis()
-        if (silent && now - lastSilentRestore < SILENT_RESTORE_MS) return
-        if (silent) lastSilentRestore = now
+        if (silent && !retry && lastRestoreSession == session && now - lastSilentRestore < SILENT_RESTORE_MS) return
+        if (silent) {
+            lastRestoreSession = session
+            lastSilentRestore = now
+        }
         val ours = productIds().toSet()
         if (ours.isEmpty()) return
         if (!silent) { busy = RESTORING; notice = null }
@@ -180,7 +183,11 @@ object AureaSubscriptions {
         val r = withContext(Dispatchers.IO) { ContaApi.purchase(session, product, purchase.purchaseToken) }
         return when (r.status) {
             200 -> {
-                applyServerAnswer(r.corpo)
+                val products = ServerEntitlementProvider.stringSet(r.corpo.optJSONArray("products"))
+                if (product !in products) return R.string.assinatura_processando
+                if (!HyperEntitlements.acceptServerProducts(session, products, ServerEntitlementProvider.expiresOf(r.corpo))) {
+                    return R.string.assinatura_entrar
+                }
                 if (!purchase.isAcknowledged) runCatching { billing.acknowledge(purchase) }
                 R.string.assinatura_obrigado
             }
@@ -195,10 +202,6 @@ object AureaSubscriptions {
         }
     }
 
-    private fun applyServerAnswer(body: JSONObject) {
-        val products = ServerEntitlementProvider.stringSet(body.optJSONArray("products"))
-        HyperEntitlements.acceptServerProducts(products, ServerEntitlementProvider.expiresOf(body))
-    }
 }
 
 /** O fim de um fluxo de compra da Play. */

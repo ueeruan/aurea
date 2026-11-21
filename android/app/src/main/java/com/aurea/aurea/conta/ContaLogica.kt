@@ -23,7 +23,7 @@ sealed interface ContaEstado {
 /** O que o aparelho guarda (no cofre do Keystore): SÓ o token e o e-mail. */
 data class SessaoGuardada(val token: String, val email: String)
 
-enum class ErroConta { EMAIL, SENHA, CREDENCIAIS, EM_USO, LIMITE, REDE, SERVICO, EXPIRADA }
+enum class ErroConta { EMAIL, SENHA, CREDENCIAIS, EM_USO, LIMITE, REDE, SERVICO, EXPIRADA, GOOGLE, CODIGO_RECUPERACAO }
 
 /** Resultado de uma revalidação da sessão no servidor. */
 enum class Revalidacao { VALIDA, INVALIDA, SEM_RESPOSTA }
@@ -70,6 +70,7 @@ object ContaLogica {
         status == 429 || codigo == "muitas_tentativas" -> ErroConta.LIMITE
         codigo == "email_em_uso" || status == 409 -> ErroConta.EM_USO
         codigo == "email_invalido" -> ErroConta.EMAIL
+        codigo == "codigo_recuperacao_invalido" -> ErroConta.CODIGO_RECUPERACAO
         codigo == "senha_curta" || codigo == "senha_longa" || codigo == "senha_invalida" -> ErroConta.SENHA
         status == 401 -> ErroConta.CREDENCIAIS
         else -> ErroConta.SERVICO

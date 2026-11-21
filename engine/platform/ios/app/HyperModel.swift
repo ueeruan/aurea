@@ -376,7 +376,9 @@ final class HyperEntitlements: ObservableObject {
     private var provider: EntitlementProvider = ServerEntitlementProvider()
     private var cache: EntitlementCache?
     private var email: String?
-    private var inFlight = 0
+    private var sessionToken: String?
+    private var checking = false
+    private var verification: UInt64 = 0
 
     private init() {
         if let raw = ContaKeychain.ler(Self.keychainKey), let data = raw.data(using: .utf8) {
@@ -388,15 +390,19 @@ final class HyperEntitlements: ObservableObject {
     func use(provider: EntitlementProvider) { self.provider = provider }
 
     func refresh(token: String?, email accountEmail: String?) {
+        verification &+= 1
+        let request = verification
+        if sessionToken != token { purchasable = [] }
+        sessionToken = token
         email = accountEmail
-        guard let token, let accountEmail else { recompute(); return }
-        inFlight += 1
+        checking = token != nil && accountEmail != nil
         recompute()
+        guard let token, let accountEmail else { return }
         let provider = self.provider
         Task { @MainActor in
             let result = await provider.fetch(sessionToken: token)
-            inFlight = max(0, inFlight - 1)
-            guard email == accountEmail else { recompute(); return }
+            guard request == verification else { return }
+            checking = false
             switch result {
             case .granted(let products, _, let expires, let forSale):
                 purchasable = forSale
@@ -410,11 +416,14 @@ final class HyperEntitlements: ObservableObject {
     }
 
     /// A loja confirmou uma compra e o servidor respondeu com os produtos da conta: vale na hora.
-    func acceptServerProducts(_ products: Set<String>, expires: [String: Int64]) {
-        guard let email else { return }
+    func acceptServerProducts(_ products: Set<String>, expires: [String: Int64], session: ContaSessao) -> Bool {
+        guard let email, sessionToken == session.token, email == session.email else { return false }
+        verification &+= 1
+        checking = false
         store(EntitlementCache(account: EntitlementRules.accountKey(email), products: products.sorted(),
                                checkedAtMillis: Self.nowMillis(), expiresMillis: expires.mapValues { $0 * 1000 }))
         recompute()
+        return true
     }
 
     /// Os produtos da conta que valem agora (vazio sem confirmação do servidor).
@@ -428,7 +437,7 @@ final class HyperEntitlements: ObservableObject {
 #if DEBUG
         if parityPaywall { return .locked }
 #endif
-        let entitlement = EntitlementRules.access(cache: cache, email: email, nowMillis: Self.nowMillis(), checking: inFlight > 0) {
+        let entitlement = EntitlementRules.access(cache: cache, email: email, nowMillis: Self.nowMillis(), checking: checking) {
             Self.engineRule($0, item)
         }
         let store = AppConfigStore.shared
@@ -436,6 +445,9 @@ final class HyperEntitlements: ObservableObject {
     }
 
     func clear() {
+        verification &+= 1
+        checking = false
+        sessionToken = nil
         email = nil
         purchasable = []
         store(nil)
@@ -453,7 +465,7 @@ final class HyperEntitlements: ObservableObject {
 
     private func recompute() {
         // O AureaHyper (o que libera tudo): a regra do motor com item nulo.
-        entitlementAccess = EntitlementRules.access(cache: cache, email: email, nowMillis: Self.nowMillis(), checking: inFlight > 0) {
+        entitlementAccess = EntitlementRules.access(cache: cache, email: email, nowMillis: Self.nowMillis(), checking: checking) {
             Self.engineRule($0, nil)
         }
         revision &+= 1

@@ -1643,7 +1643,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             return &mat;
         }
         // The common unedited model needs neither a copy nor a per-node lookup.
-        if (inst.pose().materials.empty() && !inst.doubleSided) return source;
+        if (inst.pose().materials.empty() && !inst.doubleSided && !inst.unlitColors) return source;
         const auto cacheKey = std::make_pair(&inst, index);
         if (auto found = materialCopies.find(cacheKey)) return *found;
         bool hasOverride = false;
@@ -1671,7 +1671,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             hasOverride = true;
             break;
         }
-        if (hasOverride) {
+        if (hasOverride || inst.unlitColors) {
+            values.unlit = values.unlit || inst.unlitColors;
             values.doubleSided = values.doubleSided || inst.doubleSided;
             MaterialOverrideKey key, original;
             const bool cacheable = material_override_key(source, values, key);
@@ -1727,6 +1728,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         if (auto found = texturedCopies.find(cacheKey)) return *found;
         auto& mat = copy_material(source);
         mat.tex[0] = swap.texture;
+        if (mat.factors.alphaMode == AlphaMode::Opaque) mat.factors.alphaMode = AlphaMode::Mask;
         mat.graphBase = FGTexture{};   // a troca por parte vence a textura do material
         mat.samp[0] = swapSampler_;
         const f32 repeat = std::isfinite(swap.repeat) && swap.repeat > 0.0f ? swap.repeat : 1.0f;
@@ -1754,6 +1756,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         auto& mat = copy_material(source);
         mat.tex[0] = layer ? TextureHandle{} : t.texture;
         mat.graphBase = layer ? t.layerImage : FGTexture{};
+        if (mat.factors.alphaMode == AlphaMode::Opaque) mat.factors.alphaMode = AlphaMode::Mask;
         mat.samp[0] = swapSampler_;
         mat.factors.baseColorTex.offset = Vec2{0.0f, 0.0f};
         mat.factors.baseColorTex.scale = Vec2{1.0f, 1.0f};

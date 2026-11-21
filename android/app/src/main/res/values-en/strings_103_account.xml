@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="conta_reset_title">Forgot my password</string>
+    <string name="conta_reset_send">Send code</string>
+    <string name="conta_reset_sent">If an account exists for this email, you will receive a code valid for 15 minutes.</string>
+    <string name="conta_reset_code">Recovery code</string>
+    <string name="conta_reset_new">New password</string>
+    <string name="conta_reset_save">Save new password</string>
+    <string name="conta_reset_done">Password updated. Sign in with your new password.</string>
+    <string name="conta_reset_invalid">Invalid or expired code.</string>
+    <string name="conta_google_failed">Could not sign in with Google. Try again or sign in with email.</string>
+</resources>

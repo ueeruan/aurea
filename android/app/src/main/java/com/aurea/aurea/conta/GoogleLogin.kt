@@ -6,8 +6,10 @@ import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.NoCredentialException
 import com.aurea.aurea.BuildConfig
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.gms.tasks.Task
 import com.google.firebase.FirebaseApp
@@ -61,20 +63,33 @@ object GoogleLogin {
     suspend fun entrar(activity: Activity): Resultado = try {
         val opcao = GetSignInWithGoogleOption.Builder(BuildConfig.FIREBASE_WEB_CLIENT_ID).build()
         val pedido = GetCredentialRequest.Builder().addCredentialOption(opcao).build()
-        val credencial = CredentialManager.create(activity).getCredential(activity, pedido).credential
+        val manager = CredentialManager.create(activity)
+        val credencial = try {
+            manager.getCredential(activity, pedido).credential
+        } catch (_: NoCredentialException) {
+            val option = GetGoogleIdOption.Builder()
+                .setServerClientId(BuildConfig.FIREBASE_WEB_CLIENT_ID)
+                .setFilterByAuthorizedAccounts(false)
+                .build()
+            manager.getCredential(activity, GetCredentialRequest.Builder().addCredentialOption(option).build()).credential
+        }
         if (credencial !is CustomCredential || credencial.type != GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
             Resultado.Falhou("credencial")
         } else {
             val google = GoogleIdTokenCredential.createFrom(credencial.data)
             val auth = FirebaseAuth.getInstance(app(activity))
-            val usuario = auth.signInWithCredential(GoogleAuthProvider.getCredential(google.idToken, null)).aguardar().user
-            val token = usuario?.getIdToken(true)?.aguardar()?.token
-            // A sessão que vale é a do Aurea: o Firebase só serviu para provar o e-mail.
-            auth.signOut()
+            val token = try {
+                val usuario = auth.signInWithCredential(GoogleAuthProvider.getCredential(google.idToken, null)).aguardar().user
+                usuario?.getIdToken(false)?.aguardar()?.token
+            } finally {
+                auth.signOut()
+            }
             if (token.isNullOrEmpty()) Resultado.Falhou("token") else Resultado.Token(token)
         }
     } catch (_: GetCredentialCancellationException) {
         Resultado.Cancelado
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
     } catch (e: Exception) {
         Resultado.Falhou(e.javaClass.simpleName)
     } catch (e: LinkageError) {

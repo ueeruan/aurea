@@ -537,6 +537,27 @@ AUREA_TEST(ModelPanel, AnimationExtrasAreUndoableKeyedAndSavedInV76) {
     std::remove(mi.path.c_str());
 }
 
+AUREA_TEST(ModelPanel, UnlitColorsSurviveUndoAndProjectReload) {
+    PanelRig rig;
+    ModelImport source;
+    source.path = write_model("aurea_test_model_unlit_colors.gltf");
+    const auto model = rig.e.import_model(source);
+    AUREA_CHECK(model.ok());
+    if (!model.ok()) return;
+    AUREA_CHECK(!rig.e.model_unlit_colors(*model));
+    AUREA_CHECK(rig.e.set_model_unlit_colors(*model, true));
+    AUREA_CHECK(rig.e.model_unlit_colors(*model));
+    AUREA_CHECK(rig.undo());
+    AUREA_CHECK(!rig.e.model_unlit_colors(*model));
+    AUREA_CHECK(rig.e.set_model_unlit_colors(*model, true));
+    const std::string path = rig.temp("aurea_test_model_unlit_colors.aurea");
+    AUREA_CHECK(rig.e.save_project(path.c_str()).ok());
+    AUREA_CHECK(rig.e.load_project(path.c_str()).ok());
+    AUREA_CHECK(rig.e.model_unlit_colors(rig.model_id()));
+    std::remove(path.c_str());
+    std::remove(source.path.c_str());
+}
+
 AUREA_TEST(ModelPanel, EmissionChannelsNeonLookAndV76RoundTrip) {
     PanelRig r;
     ModelImport mi;

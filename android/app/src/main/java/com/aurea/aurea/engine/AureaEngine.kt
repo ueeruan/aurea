@@ -141,15 +141,15 @@ class AureaEngine private constructor() {
          * URI, e cada decoder pede um descritor novo quando precisa.
          */
         @JvmStatic
-        fun openContentFd(uri: String): Int = try {
-            appContext?.contentResolver
-                ?.openFileDescriptor(Uri.parse(uri), "r")
-                ?.detachFd() ?: -1
-        } catch (e: Throwable) {
-            // Mídia apagada ou permissão revogada: o motor mostra o espaço vazio
-            // (placeholder); o motivo fica no log, sem a URI (dado do usuário).
-            android.util.Log.w("AureaEngine", "openContentFd falhou: ${e.javaClass.simpleName}")
-            -1
+        fun openContentFd(uri: String): Int {
+            val content = Uri.parse(uri)
+            if (content.scheme != "content" || content.authority.isNullOrBlank()) return -1
+            return try {
+                appContext?.contentResolver?.openFileDescriptor(content, "r")?.use { it.detachFd() } ?: -1
+            } catch (e: Exception) {
+                android.util.Log.w("AureaEngine", "openContentFd falhou: ${e.javaClass.simpleName}")
+                -1
+            }
         }
 
         /**
@@ -163,6 +163,11 @@ class AureaEngine private constructor() {
             val ctx = appContext ?: return null
             // Caminho solto (mídia restaurada de um arquivo do projeto) vira file://.
             val uri = if (source.startsWith("/")) Uri.fromFile(java.io.File(source)) else Uri.parse(source)
+            when (uri.scheme) {
+                "content" -> if (uri.authority.isNullOrBlank()) return null
+                "file" -> if (!uri.authority.isNullOrEmpty() || uri.path?.startsWith("/") != true) return null
+                else -> return null
+            }
             val orientation = exifOrientation(ctx, uri)
             val bmp = decodeBitmapRgba(ctx, uri) ?: return null
             return try {
@@ -311,7 +316,7 @@ class AureaEngine private constructor() {
     }
 
     /** Ponteiro para o contexto nativo. 0 = destruído. */
-    private var nativeHandle: Long = nativeCreate()
+    private var nativeHandle: Long = nativeCreate().takeIf { it > 0L } ?: 0L
     private val nativeWork = NativeWorkGate()
 
     private val commandBuffer: ByteBuffer = directBuffer(MAX_COMMANDS_PER_FRAME * COMMAND_SIZE_BYTES)
@@ -338,7 +343,7 @@ class AureaEngine private constructor() {
         codecs: IntArray? = null,
         /** Pasta dos plugins de efeito. Padrão: `files/plugins` (irmã de `files/projetos`). */
         pluginDir: String = defaultPluginDir(documentsDir),
-    ): Boolean = nativeInitialize(nativeHandle, refreshRate, cacheDir, documentsDir, debug, probe, codecs, pluginDir)
+    ): Boolean = nativeHandle > 0L && nativeInitialize(nativeHandle, refreshRate, cacheDir, documentsDir, debug, probe, codecs, pluginDir)
 
     // -------------------------------------------------------------------------
     // Plugins de efeito (docs/plugins/README.md). Um plugin acrescenta um efeito
@@ -1009,6 +1014,8 @@ class AureaEngine private constructor() {
     fun setModelShadows(layer: Long, cast: Boolean, receive: Boolean): Boolean =
         nativeSetModelShadows(nativeHandle, layer, cast, receive)
     fun queryModelShadows(layer: Long, out: FloatArray): Boolean = nativeQueryModelShadows(nativeHandle, layer, out)
+    fun modelUnlitColors(layer: Long): Boolean = nativeModelUnlitColors(nativeHandle, layer)
+    fun setModelUnlitColors(layer: Long, enabled: Boolean): Boolean = nativeSetModelUnlitColors(nativeHandle, layer, enabled)
 
     /** Mostrar interior (dupla face) do objeto 3D: um passo de desfazer. */
     fun setModelInterior(layer: Long, on: Boolean): Boolean = nativeSetModelInterior(nativeHandle, layer, on)
@@ -2578,6 +2585,8 @@ class AureaEngine private constructor() {
     private external fun nativeQueryText3d(handle: Long, layer: Long, out: FloatArray): String?
     private external fun nativeSetModelShadows(handle: Long, layer: Long, cast: Boolean, receive: Boolean): Boolean
     private external fun nativeQueryModelShadows(handle: Long, layer: Long, out: FloatArray): Boolean
+    private external fun nativeModelUnlitColors(handle: Long, layer: Long): Boolean
+    private external fun nativeSetModelUnlitColors(handle: Long, layer: Long, enabled: Boolean): Boolean
     private external fun nativeSetModelInterior(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeQueryModelInterior(handle: Long, layer: Long): Int
     private external fun nativeMaterialPreview(handle: Long, layer: Long, material: Int, size: Int): IntArray?

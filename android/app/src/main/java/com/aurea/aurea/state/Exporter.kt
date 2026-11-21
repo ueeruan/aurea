@@ -388,9 +388,10 @@ class Exporter internal constructor(
 
     /** A failed IO/JNI call is a recoverable export error, never an uncaught UI coroutine. */
     private suspend fun guardedExport(guarded: String?, video: Boolean = false, job: suspend () -> Unit) {
+        var serviceSession: Long? = null
         try {
             // 0.3.2: o export continua fora do app (serviço em primeiro plano).
-            ExportForegroundService.start(app)
+            serviceSession = ExportForegroundService.start(app)
             // 0.5.3 (P0-1): marca "export de vídeo em curso" no disco. Se o processo
             // morrer no meio ela fica, e o próximo export sabe — em qualquer Android,
             // seja qual for o motivo da morte. Só o vídeo do editor: o Hyper não marca.
@@ -406,7 +407,7 @@ class Exporter internal constructor(
             android.util.Log.e("AureaExport", "Export operation failed", error)
             state = state.copy(phase = ExportPhase.Failed, message = text(R.string.app_export_interrupted), preparing = false)
         } finally {
-            ExportForegroundService.stop(app)
+            serviceSession?.let { ExportForegroundService.stop(app, it) }
             onSessionEnded()
             try {
                 // 0.5.3 (P0-1, R-12): o app viu o fim deste export — a marca "em curso"

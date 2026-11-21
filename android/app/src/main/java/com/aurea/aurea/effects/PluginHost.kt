@@ -78,13 +78,24 @@ object PluginHost {
     }
 
     private fun clipboard(): ClipboardManager? = PluginRuntime.app?.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+    private fun readClipboard(): String? = runCatching {
+        val context = PluginRuntime.app ?: return null
+        clipboard()?.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()
+    }.getOrNull()
+
+    private fun writeClipboard(text: String): Boolean = runCatching {
+        val manager = clipboard() ?: return false
+        manager.setPrimaryClip(ClipData.newPlainText("AUREA", text))
+        true
+    }.getOrDefault(false)
 
     @JvmStatic
     fun clipboardRead(): String? {
+        if (Looper.myLooper() == main.looper) return readClipboard()
         val out = AtomicReference<String?>(null)
         val done = CountDownLatch(1)
         main.post {
-            out.set(runCatching { clipboard()?.primaryClip?.getItemAt(0)?.coerceToText(PluginRuntime.app)?.toString() }.getOrNull())
+            out.set(readClipboard())
             done.countDown()
         }
         done.await(5, TimeUnit.SECONDS)
@@ -93,28 +104,34 @@ object PluginHost {
 
     @JvmStatic
     fun clipboardWrite(text: String): Boolean {
+        if (Looper.myLooper() == main.looper) return writeClipboard(text)
         val done = CountDownLatch(1)
-        var ok = false
+        val ok = java.util.concurrent.atomic.AtomicBoolean(false)
         main.post {
-            ok = runCatching { clipboard()?.setPrimaryClip(ClipData.newPlainText("AUREA", text)); true }.getOrDefault(false)
+            ok.set(writeClipboard(text))
             done.countDown()
         }
-        done.await(5, TimeUnit.SECONDS)
-        return ok
+        return done.await(5, TimeUnit.SECONDS) && ok.get()
     }
 
     /** [nome, caminho, tamanho] ou nulo (cancelado). Espera a pessoa escolher (até 5 min). */
     @JvmStatic
     fun pickFile(pluginId: String, types: Array<String>): Array<String>? {
+        if (Looper.myLooper() == main.looper) return null
         val request = PickRequest(types.toList())
-        main.post { pickRequest = request }
-        request.latch.await(5, TimeUnit.MINUTES)
-        main.post { if (pickRequest === request) pickRequest = null }
-        return request.result.get()
+        main.post {
+            if (pickRequest == null) pickRequest = request else request.latch.countDown()
+        }
+        return try {
+            if (request.latch.await(5, TimeUnit.MINUTES)) request.result.get() else null
+        } finally {
+            main.post { if (pickRequest === request) pickRequest = null }
+        }
     }
 
     /** O seletor voltou: copia para o cache do app (o motor lê caminho) e solta o script. */
     fun completePick(request: PickRequest, uri: Uri?) {
+        if (pickRequest !== request) return
         val context = PluginRuntime.app
         if (uri == null || context == null) {
             request.latch.countDown()
@@ -153,12 +170,13 @@ object PluginHost {
     fun mimeTypes(types: List<String>): Array<String> {
         if (types.isEmpty()) return arrayOf("*/*")
         return types.map {
-            when (it.lowercase()) {
+            when (it.trim().removePrefix(".").lowercase()) {
                 "json" -> "application/json"
                 "txt", "text" -> "text/plain"
                 "csv" -> "text/csv"
                 "srt" -> "application/x-subrip"
                 "xml" -> "text/xml"
+                "bin" -> "application/octet-stream"
                 else -> "*/*"
             }
         }.distinct().toTypedArray() + "application/octet-stream"

@@ -135,10 +135,6 @@ struct ContentView: View {
                     }
                 }.id(request.id)
             }
-            if let request = model.expressionSheet { ExpressionSheet(request: request) {
-                guard model.expressionSheet?.id == request.id else { return }
-                model.expressionSheet = nil
-            }.id(request.id) }
             if let request = model.text3DFontSheet { T3DFontSheet(request: request) { model.text3DFontSheet = nil }.id(request.id) }
             if let request = model.numericKeypad { NumericKeypadSheet(request: request) {
                 guard model.numericKeypad?.id == request.id else { return }
@@ -146,6 +142,13 @@ struct ContentView: View {
             }.id(request.id) }
             if let request = model.namePrompt { AureaNamePrompt(title: request.title, initial: request.initial, onConfirm: request.onConfirm, onDismiss: { model.namePrompt = nil }).id(request.id) }
             if let request = model.presetDialog { PresetDialog(request: request) { model.presetDialog = nil }.id(request.id) }
+        }
+        .sheet(item: $model.expressionSheet) { request in
+            ExpressionSheet(request: request) {
+                guard model.expressionSheet?.id == request.id else { return }
+                model.expressionSheet = nil
+            }
+            .presentationDetents([.large])
         }
         .background {
             GeometryReader { geometry in

@@ -212,11 +212,20 @@ function tokenDoCabecalho(req) {
   return m ? m[1] : null;
 }
 
-async function criarSessao(env, usuario) {
+async function criarSessao(env, usuario, checkedPasswordHash = null) {
   const token = b64url(aleatorio(32));
   const registro = { uid: usuario.id, email: usuario.email, criado: Date.now() };
-  await env.AUREA_DB.prepare("INSERT INTO sessions (token_hash, uid, email, created_at, expires_at) VALUES (?, ?, ?, ?, ?)")
-    .bind(await sha256hex(token), usuario.id, usuario.email, registro.criado, registro.criado + SESSAO_TTL_S * 1000).run();
+  const row = [await sha256hex(token), usuario.id, usuario.email, registro.criado, registro.criado + SESSAO_TTL_S * 1000];
+  if (checkedPasswordHash != null) {
+    const inserted = await env.AUREA_DB.prepare(
+      "INSERT INTO sessions (token_hash, uid, email, created_at, expires_at) SELECT ?, ?, ?, ?, ? " +
+      "FROM users WHERE id = ? AND password_hash = ?"
+    ).bind(...row, usuario.id, checkedPasswordHash).run();
+    if (inserted.meta.changes !== 1) return null;
+  } else {
+    await env.AUREA_DB.prepare("INSERT INTO sessions (token_hash, uid, email, created_at, expires_at) VALUES (?, ?, ?, ?, ?)")
+      .bind(...row).run();
+  }
   return token;
 }
 
@@ -242,8 +251,8 @@ export async function lerSessao(env, req) {
     d = await env.AUREA_DB.prepare("SELECT uid, created_at, expires_at FROM sessions WHERE token_hash = ?").bind(hash).first();
   }
   if (!d || d.expires_at <= now || d.created_at > now || d.created_at + SESSAO_TTL_S * 1000 <= now) return null;
-  const account = await env.AUREA_DB.prepare("SELECT email FROM users WHERE id = ?").bind(d.uid).first();
-  return account ? { uid: d.uid, email: account.email, hash } : null;
+  const account = await env.AUREA_DB.prepare("SELECT email, password_changed_at FROM users WHERE id = ?").bind(d.uid).first();
+  return account && d.created_at >= account.password_changed_at ? { uid: d.uid, email: account.email, hash } : null;
 }
 
 async function contarUsuarios(env) {
@@ -321,7 +330,8 @@ async function entrar(req, env, ctx) {
   const atualizar = env.AUREA_DB.prepare("UPDATE users SET last_login_at = ? WHERE id = ?").bind(Date.now(), linha.id).run()
     .catch(() => {});
   if (ctx?.waitUntil) ctx.waitUntil(atualizar); else await atualizar;
-  const token = await criarSessao(env, { id: linha.id, email: linha.email });
+  const token = await criarSessao(env, { id: linha.id, email: linha.email }, linha.password_hash);
+  if (!token) return json({ error: "credenciais_invalidas" }, 401);
   return json({ token, email: linha.email });
 }
 
@@ -372,6 +382,72 @@ async function entrarComFirebase(req, env, ctx) {
   if (ctx?.waitUntil) ctx.waitUntil(atualizar); else await atualizar;
   const token = await criarSessao(env, { id: linha.id, email: linha.email });
   return json({ token, email: linha.email, created });
+}
+
+async function solicitarRecuperacao(req, env, ctx) {
+  if (!env.RESEND_API_KEY || !env.ACCOUNT_EMAIL_FROM)
+    return json({ error: "contas_indisponiveis" }, 503);
+  if (!(await dentroDoLimite(env, "reset-ip", ip(req), { max: 20, janela: 900 })))
+    return json({ error: "muitas_tentativas" }, 429);
+  const { valor, erro } = await lerJson(req, CORPO_MAX);
+  if (erro) return json({ error: erro }, 400);
+  const email = normalizarEmail(valor?.email);
+  if (!email) return json({ error: "email_invalido" }, 400);
+  if (!(await dentroDoLimite(env, "reset-email", email, { max: 3, janela: 900 })))
+    return json({ ok: true });
+  const deliver = async () => {
+    const user = await env.AUREA_DB.prepare("SELECT id FROM users WHERE email = ?").bind(email).first();
+    if (!user) return;
+    const code = b64url(aleatorio(16));
+    const hash = await sha256hex(code);
+    await env.AUREA_DB.prepare(
+      "INSERT INTO password_resets (uid, token_hash, expires_at) VALUES (?, ?, ?) " +
+      "ON CONFLICT(uid) DO UPDATE SET token_hash = excluded.token_hash, expires_at = excluded.expires_at"
+    ).bind(user.id, hash, Date.now() + 15 * 60 * 1000).run();
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        from: env.ACCOUNT_EMAIL_FROM,
+        to: [email],
+        subject: "Aurea · Password reset / Recuperação de senha",
+        text: `Paste this code into Aurea within 15 minutes. Cole este código no Aurea em até 15 minutos.\n\n${code}\n\nIgnore this email if you did not request it. Ignore este e-mail se você não fez o pedido.`,
+      }),
+    }).catch(() => null);
+    if (!response?.ok) {
+      await env.AUREA_DB.prepare("DELETE FROM password_resets WHERE token_hash = ?").bind(hash).run();
+      console.error("contas: envio de recuperação falhou");
+    }
+  };
+  const delivery = deliver().catch(() => console.error("contas: recuperação indisponível"));
+  if (ctx?.waitUntil) ctx.waitUntil(delivery); else await delivery;
+  return json({ ok: true });
+}
+
+async function confirmarRecuperacao(req, env) {
+  if (!(await dentroDoLimite(env, "reset-confirm-ip", ip(req), { max: 20, janela: 900 })))
+    return json({ error: "muitas_tentativas" }, 429);
+  const { valor, erro } = await lerJson(req, CORPO_MAX);
+  if (erro) return json({ error: erro }, 400);
+  const code = typeof valor?.code === "string" ? valor.code.trim() : "";
+  const password = valor?.password;
+  if (!/^[A-Za-z0-9_-]{22}$/.test(code)) return json({ error: "codigo_recuperacao_invalido" }, 400);
+  const passwordError = erroDaSenha(password);
+  if (passwordError) return json({ error: passwordError }, 400);
+  const hash = await sha256hex(code);
+  const db = env.AUREA_DB;
+  const reset = await db.prepare("SELECT uid FROM password_resets WHERE token_hash = ? AND expires_at > ?")
+    .bind(hash, Date.now()).first();
+  if (!reset) return json({ error: "codigo_recuperacao_invalido" }, 400);
+  const nextPassword = await hashSenha(password);
+  const now = Date.now();
+  const eligible = "SELECT uid FROM password_resets WHERE token_hash = ? AND expires_at > ?";
+  const [updated] = await db.batch([
+    db.prepare(`UPDATE users SET password_hash = ?, password_changed_at = ? WHERE id IN (${eligible})`).bind(nextPassword, now, hash, now),
+    db.prepare(`UPDATE sessions SET expires_at = 0 WHERE uid IN (${eligible})`).bind(hash, now),
+    db.prepare("DELETE FROM password_resets WHERE token_hash = ? AND expires_at > ?").bind(hash, now),
+  ]);
+  return updated.meta.changes === 1 ? json({ ok: true }) : json({ error: "codigo_recuperacao_invalido" }, 400);
 }
 
 async function sessao(req, env) {
@@ -526,6 +602,8 @@ export async function rotaDeContas(req, env, ctx, url) {
   if (rota === "/api/auth/signup" && req.method === "POST") return cadastrar(req, env);
   if (rota === "/api/auth/login" && req.method === "POST") return entrar(req, env, ctx);
   if (rota === "/api/auth/firebase" && req.method === "POST") return entrarComFirebase(req, env, ctx);
+  if (rota === "/api/auth/password/reset" && req.method === "POST") return solicitarRecuperacao(req, env, ctx);
+  if (rota === "/api/auth/password/confirm" && req.method === "POST") return confirmarRecuperacao(req, env);
   if (rota === "/api/auth/session" && req.method === "GET") return sessao(req, env);
   if (rota === "/api/auth/logout" && req.method === "POST") return sair(req, env);
   if (rota === "/api/auth/delete" && req.method === "POST") return excluirConta(req, env);

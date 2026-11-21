@@ -177,7 +177,9 @@ class McpAgentService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
         private fun action(context: Context, action: String, request: Int, id: Long = 0): PendingIntent = PendingIntent.getBroadcast(context, request,
-            Intent(context, McpActionReceiver::class.java).setAction(action).putExtra(McpActionReceiver.EXTRA_ID, id),
+            Intent(context, McpActionReceiver::class.java).setAction(action)
+                .setData(android.net.Uri.parse("aurea-mcp-action://request/$id"))
+                .putExtra(McpActionReceiver.EXTRA_ID, id),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
         private fun notification(context: Context): Notification {
@@ -237,11 +239,11 @@ class McpAgentService : Service() {
                 .addAction(0, AppText.get(context, R.string.mcp_approve), action(context, McpActionReceiver.ACTION_APPROVE, (id * 2).toInt(), id))
                 .addAction(0, AppText.get(context, R.string.mcp_deny), action(context, McpActionReceiver.ACTION_DENY, (id * 2 + 1).toInt(), id))
                 .build()
-            return runCatching { NotificationManagerCompat.from(context).notify(CONFIRM_BASE + (id % 64).toInt(), n); true }.getOrDefault(false)
+            return runCatching { NotificationManagerCompat.from(context).notify("mcp-confirm-$id", CONFIRM_BASE, n); true }.getOrDefault(false)
         }
 
         fun clearConfirm(context: Context, id: Long) {
-            runCatching { NotificationManagerCompat.from(context).cancel(CONFIRM_BASE + (id % 64).toInt()) }
+            runCatching { NotificationManagerCompat.from(context).cancel("mcp-confirm-$id", CONFIRM_BASE) }
         }
     }
 }

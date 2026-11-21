@@ -18,6 +18,8 @@ require(!fm.fileExists(atPath: url.appendingPathComponent("Resources").path), "i
 guard let bundle = Bundle(url: url) else { require(false, "Foundation cannot open the app bundle"); exit(1) }
 require(bundle.bundleIdentifier == "com.aurea.aurea.3ATTUN44P8", "Foundation did not resolve the Aurea bundle identifier")
 require(bundle.object(forInfoDictionaryKey: "CFBundlePackageType") as? String == "APPL", "Bundle is not an application")
+let deviceFamilies = bundle.object(forInfoDictionaryKey: "UIDeviceFamily") as? [Int] ?? []
+require(Set(deviceFamilies) == Set([1, 2]), "Release must support iPhone and iPad")
 require(bundle.executableURL.map { fm.isExecutableFile(atPath: $0.path) } == true, "Foundation could not resolve an executable app binary")
 let modelDeclarations = bundle.object(forInfoDictionaryKey: "UTImportedTypeDeclarations") as? [[String: Any]] ?? []
 for ext in ["fbx", "obj", "glb", "gltf", "mtl"] {

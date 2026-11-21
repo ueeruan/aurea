@@ -53,6 +53,8 @@ final class AureaSubscriptions: ObservableObject {
 
     private var loadingProducts = false
     private var lastSilentRestore: Date?
+    private var lastRestoreSession: String?
+    private var delivering: Set<UInt64> = []
     private var updates: Task<Void, Never>?
 
     private init() {}
@@ -131,11 +133,13 @@ final class AureaSubscriptions: ObservableObject {
 
     /// Restaura as assinaturas desta conta da loja. `silent` = abertura do app ou login:
     /// no máximo a cada 10 min, só o que a conta ainda não tem, sem aviso.
-    func restore(silent: Bool) async {
+    func restore(silent: Bool, retry: Bool = false) async {
         guard busy == nil else { return }
         guard let session = ContaModel.lerSessao() else { if !silent { notice = "assinatura_entrar" }; return }
         if silent {
-            if let last = lastSilentRestore, Date().timeIntervalSince(last) < Self.silentRestoreInterval { return }
+            if !retry, lastRestoreSession == session.token, let last = lastSilentRestore,
+               Date().timeIntervalSince(last) < Self.silentRestoreInterval { return }
+            lastRestoreSession = session.token
             lastSilentRestore = Date()
         } else {
             busy = Self.restoring; notice = nil
@@ -146,10 +150,16 @@ final class AureaSubscriptions: ObservableObject {
         let ours = Set(productIds)
         let have = HyperEntitlements.shared.ownedProducts()
         var found: [StoreKit.Transaction] = []
+        var seen = Set<UInt64>()
+        // An already charged purchase can still be waiting for delivery.
+        for await result in StoreKit.Transaction.unfinished {
+            guard case .verified(let t) = result, ours.contains(t.productID), t.revocationDate == nil else { continue }
+            if seen.insert(t.id).inserted { found.append(t) }
+        }
         for await result in StoreKit.Transaction.currentEntitlements {
             guard case .verified(let t) = result, ours.contains(t.productID), t.revocationDate == nil else { continue }
             if silent && have.contains(t.productID) { continue }
-            found.append(t)
+            if seen.insert(t.id).inserted { found.append(t) }
         }
         var result: String? = found.isEmpty ? "assinatura_nada_restaurar" : nil
         for t in found {
@@ -162,12 +172,16 @@ final class AureaSubscriptions: ObservableObject {
 
     /// Entrega ao servidor; com o OK, finaliza a transação. Devolve a chave do aviso.
     private func deliver(_ t: StoreKit.Transaction, session: ContaSessao) async -> String {
+        guard delivering.insert(t.id).inserted else { return "assinatura_processando" }
+        defer { delivering.remove(t.id) }
         let r = await ContaAPI.chamar("/api/entitlements/purchase", metodo: "POST",
                                       corpo: ["platform": "apple", "product": t.productID, "token": String(t.id)], token: session.token)
         switch r.status {
         case 200:
             let products = ServerEntitlementProvider.stringSet(r.corpo["products"] as? [Any] ?? [])
-            HyperEntitlements.shared.acceptServerProducts(products, expires: ServerEntitlementProvider.expiresOf(r.corpo))
+            guard products.contains(t.productID) else { return "assinatura_processando" }
+            guard HyperEntitlements.shared.acceptServerProducts(products, expires: ServerEntitlementProvider.expiresOf(r.corpo), session: session)
+            else { return "assinatura_entrar" }
             await t.finish()
             return "assinatura_obrigado"
         case 409: return "assinatura_outra_conta"
@@ -210,7 +224,7 @@ struct PaywallSheet: View {
                     ScrollView {
                         PaywallContent(item: item, access: entitlements.accessFor(item.product),
                                        onSignIn: { conta.entrando = true; signingIn = true },
-                                       onRetry: { conta.atualizarAcessos() })
+                                       onRetry: { conta.atualizarAcessos(retryPurchases: true) })
                             .padding(.horizontal, 18)
                         Spacer().frame(height: 24)
                     }

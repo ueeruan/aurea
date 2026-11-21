@@ -266,6 +266,7 @@ struct HomeView: View {
     @State private var drawerDrag: CGFloat = 0
     @State private var accountMenu = false
     @State private var showAccount = false
+    @State private var accountRecoveryEmail: String?
     @State private var confirmLogout = false
     @State private var confirmDelete = false
     @State private var showAbout = false
@@ -312,9 +313,9 @@ struct HomeView: View {
         }
         .overlay { HomeProjectDialogs(state: $dialog, library: library, selection: $selection) }
         .overlay { accountDialogs }
-        .sheet(isPresented: $showAccount) {
+        .sheet(isPresented: $showAccount, onDismiss: { accountRecoveryEmail = nil }) {
             NavigationStack {
-                ContaView().toolbar { ToolbarItem(placement: .confirmationAction) {
+                ContaView(recoveryEmail: accountRecoveryEmail).toolbar { ToolbarItem(placement: .confirmationAction) {
                     Button(AureaText.t("editor_fechar")) { showAccount = false }
                         .accessibilityIdentifier("conta.fechar")
                 } }
@@ -533,6 +534,9 @@ struct HomeView: View {
             .header(AureaText.t("conta_conectado", email), tag: "home.account.email"),
             .item(AureaText.t("social_profile"), glyph: CupertinoGlyph.PersonCropCircle, tag: "home.account.profile") {
                 accountMenu = false; pluginTab = false; select(.profile)
+            },
+            .item(AureaText.t("conta_reset_new"), glyph: CupertinoGlyph.Lock, tag: "home.account.password") {
+                accountMenu = false; conta.erro = nil; accountRecoveryEmail = email; showAccount = true
             },
             .item(AureaText.t("conta_sair"), glyph: CupertinoGlyph.ArrowUturnLeft, tag: "home.account.logout") { confirmLogout = true },
             .item(AureaText.t("conta_excluir"), glyph: CupertinoGlyph.Trash, destructive: true, tag: "home.account.delete") { confirmDelete = true },

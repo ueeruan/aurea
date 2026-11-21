@@ -105,8 +105,12 @@ def main():
             action.index('AureaSheetScroll(') < action.index('Text(AureaText.t("common_cancel"))') and 'footer: AureaDims.actionRowMinH' in action,
         'alerts scroll with confirmation outside body and width limited to viewport':
             alert.index('AureaSheetScroll(') < alert.index('HStack(spacing: 0)') and 'geometry.size.width - 2 * AureaDialogMetrics.outerPadding' in alert,
-        'color and expression actions use fixed footer':
-            'color.picker.done' in sheets and 'AureaBottomOverlay(modal: true, onDismiss: onDismiss, fixedFooter:' in animation,
+        # 1.0.3: Fechar e Aplicar da Expressão ficam no TOPO, acima do editor que rola
+        # com o teclado aberto (antes: rodapé fixo do AureaBottomOverlay).
+        'color actions use fixed footer and expression actions sit above the scrolling editor':
+            'color.picker.done' in sheets and '.accessibilityIdentifier("expression.close")' in animation
+            and animation.index('.accessibilityIdentifier("expression.apply")')
+            < animation.index('ScrollView {', animation.index('.accessibilityIdentifier("expression.apply")')),
         'local keypad and color native windows have compact detents and controlled dismissal':
             all(token in keypad_host for token in ['.height(456)', '.presentationDragIndicator(.hidden)', '.interactiveDismissDisabled()'])
             and all(token in color_host for token in ['.height(560)', '.presentationDragIndicator(.hidden)', '.interactiveDismissDisabled()']),

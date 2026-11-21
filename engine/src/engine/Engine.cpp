@@ -8315,6 +8315,30 @@ bool Engine::set_model_shadows(u64 layerId, bool cast, bool receive) noexcept {
     return true;
 }
 
+bool Engine::set_model_unlit_colors(u64 layerId, bool enabled) noexcept {
+    std::lock_guard lock(modelMutex_);
+    drain_commands_locked();
+    InlineEditScope scope(*this, layerId, true);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!layer || layer->locked || layer->kind != LayerKind::Model3D) return false;
+    if (layer->model.unlitColors == enabled) return true;
+    history_.before_mutation(*comp, project_->timeline().current(), "cores sem iluminacao");
+    layer->model.unlitColors = enabled;
+    bump_model_revision_locked();
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::model_unlit_colors(u64 layerId) noexcept {
+    std::lock_guard lock(modelMutex_);
+    InlineEditScope scope(*this, layerId);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    return layer && layer->kind == LayerKind::Model3D && layer->model.unlitColors;
+}
+
 bool Engine::query_model_shadows(u64 layerId, f32* out) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     InlineEditScope inlineScope(*this, layerId);
@@ -11142,7 +11166,7 @@ std::string Engine::store_asset_path(const std::string& absolute) const {
 }
 
 std::string Engine::audio_path_resolver(void* self, const std::string& stored) {
-    return static_cast<Engine*>(self)->resolve_asset_path(stored);
+    return static_cast<Engine*>(self)->resolve_media_for_storage(stored);
 }
 
 void Engine::sync_audio_locked(const Composition& comp) noexcept {
@@ -11159,7 +11183,7 @@ void Engine::sync_audio_locked(const Composition& comp) noexcept {
                 clip.fadeTo = clip.end;
                 snap->endSample = clip.end;
                 snap->clips.push_back(clip);
-                audio_.cache()->register_asset(clip.asset, audio::AudioAssetRef{resolve_asset_path(asset->sourcePath), clip.end});
+                audio_.cache()->register_asset(clip.asset, audio::AudioAssetRef{resolve_media_for_storage(asset->sourcePath), clip.end});
             }
             audio_.set_snapshot(std::move(snap), playback_.playing() ? playback_.current_ns() : -1);
         } else audio_.set_snapshot(audio::build_snapshot(comp, *project_, audio_.cache(), &Engine::audio_path_resolver, this, nullptr, &effectRegistry_),
@@ -13812,9 +13836,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
             else if (texture.status().code() == Errc::Busy || texture.status().code() == Errc::NotFound)
                 preRenderReadPending = inCache;
             else {
-                invalidate_prerender();
-                std::lock_guard state(preRenderStateMutex_);
-                preRenderProgress_.error = texture.status().raw();
+                invalidate_prerender(texture.status().raw(), preRenderToken);
             }
             if (preRenderSlot >= 0) {
                 preRenderFrame = t.value;
@@ -13867,7 +13889,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
                 if (!texture.ok()) {
                     cache.pending = true;
                     if (texture.status().code() != Errc::Busy && texture.status().code() != Errc::NotFound)
-                        engine.invalidate_prerender(texture.status().raw());
+                        engine.invalidate_prerender(texture.status().raw(), cache.token);
                     return {};
                 }
                 cache.slot = *texture;
@@ -14046,9 +14068,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
             else { slot.time = -1; forceRender_.store(true, std::memory_order_release); }
         }
         if (!s.ok() && s.code() != Errc::SurfaceLost && s.code() != Errc::Timeout && s.code() != Errc::Busy) {
-            invalidate_prerender();
-            std::lock_guard state(preRenderStateMutex_);
-            preRenderProgress_.error = s.raw();
+            invalidate_prerender(s.raw(), slot.token);
         }
     }
     if (renderer_.preview_graph_pending()) {
@@ -19804,18 +19824,17 @@ Status Engine::export_too_long_status() noexcept {
     return Status{Errc::NotSupported, "duracao acima de 3 h: apare o projeto ao conteudo antes de exportar"};
 }
 
-void Engine::invalidate_prerender(i32 error) noexcept {
+void Engine::invalidate_prerender(i32 error, u64 expectedToken, u64 expectedGeneration) noexcept {
+    // Invalidation from a reader or worker belongs to its cache session.
+    std::scoped_lock locks(preRenderStateMutex_, exportContextMutex_);
+    if (expectedToken && preRenderToken_.load(std::memory_order_acquire) != expectedToken) return;
+    if (expectedGeneration && preRenderGeneration_.load(std::memory_order_acquire) != expectedGeneration) return;
     if (!preRenderActive_.exchange(false, std::memory_order_acq_rel)) return;
     preRenderCancel_.store(true, std::memory_order_release);
     preRenderToken_.store(0, std::memory_order_release);
     preRenderCache_->invalidate();
-    {
-        std::lock_guard lock(preRenderStateMutex_);
-        preRenderProgress_.running = preRenderProgress_.complete = false;
-        preRenderProgress_.error = error;
-    }
-    // Short context lock only; never join the producer or remove files here.
-    std::lock_guard context(exportContextMutex_);
+    preRenderProgress_.running = preRenderProgress_.complete = false;
+    preRenderProgress_.error = error;
     if (preRenderStartupCancel_) preRenderStartupCancel_->store(true, std::memory_order_release);
     if (exportCtx_ && exportCtx_->preRenderMode) exportCtx_->cancelRequested.store(true, std::memory_order_release);
 }
@@ -19927,22 +19946,22 @@ Status Engine::start_prerender(i32 direction, u64 groupLayer) noexcept {
     bool replaceGroup = false;
     { std::lock_guard state(preRenderStateMutex_); replaceGroup = preRenderGroup_; }
     if (groupLayer || replaceGroup) invalidate_prerender();
-    bool expected = false;
-    if (!preRenderActive_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
-        const auto p = query_prerender_progress();
-        return p.complete ? OkStatus : Status{Errc::Busy, "PreRender em andamento"};
-    }
-    preRenderCancel_.store(false, std::memory_order_release);
-    preRenderGeneration_.fetch_add(1, std::memory_order_acq_rel);
-    preRenderDivisor_.store(0, std::memory_order_release);
+    u64 generation;
     {
         std::lock_guard lock(preRenderStateMutex_);
+        if (preRenderActive_.load(std::memory_order_acquire)) {
+            return preRenderProgress_.complete ? OkStatus : Status{Errc::Busy, "PreRender em andamento"};
+        }
+        preRenderCancel_.store(false, std::memory_order_release);
+        generation = preRenderGeneration_.fetch_add(1, std::memory_order_acq_rel) + 1;
+        preRenderDivisor_.store(0, std::memory_order_release);
         preRenderProgress_ = {}; preRenderProgress_.running = true; preRenderProgress_.direction = direction;
+        preRenderActive_.store(true, std::memory_order_release);
     }
     ImageExportSettings settings;
     settings.format = ImageExportFormat::PngSequence; settings.shortSide = 540; settings.trimToContent = false;
-    const Status result = start_image_export_internal(settings, config_.cacheDirectory.c_str(), direction, groupLayer);
-    if (!result.ok()) invalidate_prerender(result.raw());
+    const Status result = start_image_export_internal(settings, config_.cacheDirectory.c_str(), direction, groupLayer, nullptr, generation);
+    if (!result.ok()) invalidate_prerender(result.raw(), 0, generation);
     return result;
 }
 
@@ -19960,15 +19979,16 @@ PreRenderProgress Engine::query_prerender_progress() noexcept {
         }
     }
     const auto stats = preRenderCache_->stats();
-    if (stats.lastError != Errc::Ok && stats.lastError != Errc::Cancelled && stats.lastError != Errc::Busy
-        && preRenderActive_.load(std::memory_order_acquire)) {
-        invalidate_prerender();
-        std::lock_guard lock(preRenderStateMutex_);
-        preRenderProgress_.error = static_cast<i32>(stats.lastError);
+    if (stats.token != 0 && stats.lastError != Errc::Ok
+        && stats.lastError != Errc::Cancelled && stats.lastError != Errc::Busy) {
+        invalidate_prerender(static_cast<i32>(stats.lastError), stats.token);
     }
     std::lock_guard lock(preRenderStateMutex_);
     auto p = preRenderProgress_;
-    p.diskBytes = stats.diskBytes; p.residentBytes = stats.residentBytes + stats.workingBytes;
+    if (stats.token && stats.token == preRenderToken_.load(std::memory_order_acquire)) {
+        p.diskBytes = stats.diskBytes;
+        p.residentBytes = stats.residentBytes + stats.workingBytes;
+    }
     p.dirtySegments = p.complete || p.running ? preRenderDirty_.load(std::memory_order_acquire) : 0u;
     return p;
 }
@@ -20049,7 +20069,7 @@ Status Engine::start_image_export(const ImageExportSettings& settings, const cha
 
 Status Engine::start_image_export_internal(const ImageExportSettings& settings, const char* outputPath,
                                           i32 preRenderDirection, u64 preRenderGroupLayer,
-                                          const PreRenderRangeRequest* preRenderRange) noexcept {
+                                          const PreRenderRangeRequest* preRenderRange, u64 preRenderGeneration) noexcept {
     std::lock_guard<std::mutex> lifecycle(exportLifecycleMutex_);
     if (state_ != EngineState::Ready && state_ != EngineState::Rendering) return Errc::InvalidState;
     if (!project_) return Errc::InvalidState;
@@ -20057,6 +20077,12 @@ Status Engine::start_image_export_internal(const ImageExportSettings& settings, 
     if (static_cast<u32>(settings.format) > static_cast<u32>(ImageExportFormat::Gif)) return Errc::InvalidArgument;
     if (!gpu_ || !renderer_.ready()) return Status{Errc::NotSupported, "export precisa de GPU"};
     const bool preRenderStart = preRenderDirection != 0;
+    const auto owns_prerender = [&] {
+        return preRenderActive_.load(std::memory_order_acquire)
+            && !preRenderCancel_.load(std::memory_order_acquire)
+            && preRenderGeneration_.load(std::memory_order_acquire) == preRenderGeneration;
+    };
+    if (preRenderStart && !owns_prerender()) return Errc::Cancelled;
     const u64 preRenderWaitDeadline = monotonic_ns() + kPreRenderStartupWaitNs;
     const bool cancelledPreRender = !preRenderStart && cancel_prerender_for_export();
     if (preRenderStart || cancelledPreRender) {
@@ -20122,6 +20148,7 @@ Status Engine::start_image_export_internal(const ImageExportSettings& settings, 
             if (engine.preRenderStartupCancel_ == &flag) engine.preRenderStartupCancel_ = nullptr;
         }
     } startupCancellation{*this, ctx->cancelRequested, ctx->preRenderMode};
+    if (preRenderStart && !owns_prerender()) return Errc::Cancelled;
     struct ProxyExportPause {
         PreviewProxyService& service;
         bool started = false;
@@ -20187,6 +20214,7 @@ Status Engine::start_image_export_internal(const ImageExportSettings& settings, 
         ctx->imageFrame = project_->timeline().playhead();
         if (ctx->preRenderMode) {
             std::lock_guard state(preRenderStateMutex_);
+            if (!owns_prerender()) return Errc::Cancelled;
             preRenderGroup_ = preRenderGroupLayer != 0;
             preRenderKey_ = {projectSession_, comp->id().pack(),
                 preview_cache_revision(), plan.width, plan.height,
@@ -20278,7 +20306,7 @@ Status Engine::start_image_export_internal(const ImageExportSettings& settings, 
         ctx->outputDir = dir;
     }
     if (ctx->preRenderMode) {
-        if (preRenderCancel_.load(std::memory_order_acquire)) return Errc::Cancelled;
+        if (!owns_prerender()) return Errc::Cancelled;
         PreRenderCache::Key key;
         { std::lock_guard state(preRenderStateMutex_); key = preRenderKey_; }
         // Janela de leitura à frente medida pelo aparelho: cada quadro 540p
@@ -20310,6 +20338,9 @@ Status Engine::start_image_export_internal(const ImageExportSettings& settings, 
                 return Errc::Cancelled;
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
+        std::lock_guard state(preRenderStateMutex_);
+        if (!owns_prerender() || ctx->cancelRequested.load(std::memory_order_acquire))
+            return Errc::Cancelled;
         preRenderToken_.store(ctx->preRenderToken, std::memory_order_release);
     }
     struct OfflineStartupCleanup {
@@ -20404,6 +20435,16 @@ void Engine::image_export_thread_main() noexcept {
     StoredZipWriter zip;
     auto cancelled = [&] { return ctx.cancelRequested.load(std::memory_order_acquire)
         || (ctx.preRenderMode && preRenderCancel_.load(std::memory_order_acquire)); };
+    auto retry_cache_busy = [&](auto&& operation) {
+        const u64 deadline = monotonic_ns() + kPreRenderStartupWaitNs;
+        do {
+            if (cancelled()) return Status{Errc::Cancelled};
+            const Status status = operation();
+            if (status.code() != Errc::Busy) return status;
+            if (monotonic_ns() >= deadline) return Status{Errc::Timeout, "PreRender aguardou o cache ocupado"};
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        } while (true);
+    };
 
     Status result = OkStatus;
     if (ctx.preRenderMode) {
@@ -20464,7 +20505,9 @@ void Engine::image_export_thread_main() noexcept {
         const u64 w0 = monotonic_ns();
         ctx.readNs.fetch_add(w0 - r0, std::memory_order_relaxed);
         if (ctx.preRenderMode) {
-            result = preRenderCache_->write(ctx.preRenderToken, sourceFrame, half, &preRenderCancel_);
+            result = retry_cache_busy([&] {
+                return preRenderCache_->write(ctx.preRenderToken, sourceFrame, half, &preRenderCancel_);
+            });
         } else switch (format) {
             case ImageExportFormat::Png: {
                 result = encode_png(rgba.data(), ctx.width, ctx.height, ctx.imageAlpha, png);
@@ -20531,8 +20574,8 @@ void Engine::image_export_thread_main() noexcept {
         // aparelho lento) cancelava o novo e escrevia "cancelado" no progresso
         // dele: o PreRender seguinte não fazia nada e a UI não avisava (25).
         const bool owner = preRenderToken_.load(std::memory_order_acquire) == ctx.preRenderToken;
-        if (owner && result.ok()) result = preRenderCache_->finish(ctx.preRenderToken);
-        if (owner && !result.ok()) invalidate_prerender(result.raw());
+        if (owner && result.ok()) result = retry_cache_busy([&] { return preRenderCache_->finish(ctx.preRenderToken); });
+        if (owner && !result.ok()) invalidate_prerender(result.raw(), ctx.preRenderToken);
         if (owner && result.ok()) {
             // 1.0.2: quanto o cache gravou por pixel neste aparelho (o "cabe ~Xs").
             const auto written = preRenderCache_->stats();

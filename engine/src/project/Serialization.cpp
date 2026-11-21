@@ -1146,6 +1146,7 @@ void write_layer(ByteWriter& w, const Layer& l) {
             if (segment.look) look(*segment.look);
         }
     }
+    w.boolv(l.model.unlitColors);
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
@@ -1993,6 +1994,7 @@ void read_layer(ByteReader& r, Layer& l) {
             else { text::CaptionOptions scratch; look(scratch); }
         }
     }
+    if (g_readingTimelineVersion >= 78) l.model.unlitColors = r.boolv();
     // Um bloco de legenda fora da regra (ordem, palavra vazia, id repetido) perdia o
     // projeto INTEIRO: a camada recusada derrubava a timeline e o .bak tinha o mesmo.
     if (!text::valid_caption_track(l.captions)) {

@@ -1768,6 +1768,14 @@ struct Model3DMaterialView: View {
             .padding(.vertical, 6)
             .accessibilityElement(children: .contain)
             note("m3d_place_hint")
+            NativePanelChip(AureaText.t("m3d_unlit_colors"), selected: model.engine.modelUnlitColors(layerId),
+                            horizontal: 12, height: 36, radius: 9, fontSize: 12.5) {
+                let enabled = !model.engine.modelUnlitColors(layerId)
+                if model.engine.setModelUnlitColors(layerId, enabled: enabled) { model.refreshModel(force: true) }
+            }
+            .disabled(model.selectedLayer?.locked == true)
+            .frame(minHeight: 44)
+            .accessibilityIdentifier("panel3d.material.unlit")
             Color.clear.frame(height: 8)
             if materials.isEmpty {
                 note("m3d_no_materials").padding(.top, 10)

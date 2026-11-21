@@ -5,6 +5,9 @@ import android.graphics.Color
 import android.net.Uri
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.test.platform.app.InstrumentationRegistry
@@ -31,6 +34,28 @@ class PreviewStabilityRegressionTest {
         }
         compose.waitUntil(30000) { ready && store.engineReady }
         return store
+    }
+
+    @Test fun opensPreRenderFromPreviewAndCompletesAShortComposition() {
+        val store = editor()
+        val title = "PreRender regression"
+        compose.runOnIdle { store.newProject(320, 180, 30f, title) }
+        compose.waitUntil(15000) { store.project.title == title }
+        compose.runOnIdle {
+            store.addShape(1)
+            ViewModes.columnOpen = false
+        }
+        compose.waitUntil(10000) { store.layers.isNotEmpty() }
+        compose.onNodeWithTag("transport.viewModes").performClick()
+        compose.onNodeWithTag("viewmode.prerender").performClick()
+        compose.onNodeWithTag("prerender.panel").assertIsDisplayed()
+        compose.onNodeWithTag("prerender.mode.prerender").performClick()
+        compose.onNodeWithTag("prerender.quality.8").performClick()
+        compose.onNodeWithTag("prerender.start.prerender").performScrollTo().performClick()
+        compose.waitUntil(90000) { store.preRenderProgress.complete || store.preRenderProgress.error != 0 }
+        assertEquals(0, store.preRenderProgress.error)
+        assertTrue(store.preRenderProgress.framesDone > 0)
+        assertEquals(store.preRenderProgress.framesTotal, store.preRenderProgress.framesDone)
     }
 
     @Test fun thickTextOutlinePreservesTheFilledLetters() {

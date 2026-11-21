@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="conta_reset_title">Lupa kata sandi</string>
+    <string name="conta_reset_send">Kirim kode</string>
+    <string name="conta_reset_sent">Jika akun dengan email ini ada, Anda akan menerima kode yang berlaku selama 15 menit.</string>
+    <string name="conta_reset_code">Kode pemulihan</string>
+    <string name="conta_reset_new">Kata sandi baru</string>
+    <string name="conta_reset_save">Simpan kata sandi baru</string>
+    <string name="conta_reset_done">Kata sandi diperbarui. Masuk dengan kata sandi baru.</string>
+    <string name="conta_reset_invalid">Kode tidak valid atau kedaluwarsa.</string>
+    <string name="conta_google_failed">Gagal masuk dengan Google. Coba lagi atau masuk dengan email.</string>
+</resources>

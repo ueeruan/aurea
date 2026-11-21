@@ -61,6 +61,7 @@ jobs:
       - name: Check APK and prepare artifact
         run: |
           APK=build/android/app/outputs/apk/release/app-release.apk
+          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 -v 4 "$APK"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify "$APK"
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee apk-badging.txt
           python3 - "$APK" '${{ matrix.abi }}' <<'PY'

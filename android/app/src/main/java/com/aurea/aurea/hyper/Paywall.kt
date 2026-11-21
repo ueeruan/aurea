@@ -89,7 +89,8 @@ fun PaywallDialog(item: PaidItem, itemName: String?, onDismiss: () -> Unit) {
             }
             if (signingIn) Box(Modifier.weight(1f)) { ContaScreen(conta) }
             else Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 18.dp)) {
-                PaywallContent(item, itemName, access, onSignIn = { signingIn = true }, onRetry = { conta.atualizarAcessos() })
+                PaywallContent(item, itemName, access, onSignIn = { signingIn = true },
+                    onRetry = { conta.atualizarAcessos(retryPurchases = true) })
                 Spacer(Modifier.height(24.dp))
             }
         }

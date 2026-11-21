@@ -439,7 +439,9 @@ final class PluginRuntime: ObservableObject {
                     self.pendingInstall = PluginPendingInstall(path: temp.path, info: info)
                 } else {
                     try? fm.removeItem(at: temp)
-                    model.toast = AureaText.t("pv2_inspect_failed", (info?["error"] as? String) ?? "")
+                    let detail = (info?["error"] as? String) ?? ""
+                    self.alert = AureaText.t("pv2_inspect_failed", detail.isEmpty ? AureaText.t("msg_nao_consegui_ler_esse_arquivo") : detail)
+                    self.nextEmbedded()
                 }
             }
         }
@@ -464,7 +466,8 @@ final class PluginRuntime: ObservableObject {
                     self.states[id] = nil
                     self.errors[id] = nil
                 } else {
-                    model.toast = AureaText.t("plug_failed", raw.hasPrefix("error:") ? String(raw.dropFirst(6)) : raw)
+                    let detail = raw.hasPrefix("error:") ? String(raw.dropFirst(6)) : raw
+                    self.alert = AureaText.t("plug_failed", detail.isEmpty ? AureaText.t("msg_nao_consegui_ler_esse_arquivo") : detail)
                 }
                 self.nextEmbedded()
             }

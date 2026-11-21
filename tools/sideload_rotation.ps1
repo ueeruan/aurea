@@ -15,6 +15,7 @@ $ErrorActionPreference = "Stop"
 $env:JAVA_HOME = "D:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot"
 $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
 $apksigner = "D:\Users\Ruan\AppData\Local\Android\Sdk\build-tools\36.0.0\apksigner.bat"
+$zipalign = Join-Path (Split-Path $apksigner) "zipalign.exe"
 $oldKs = "D:\Users\Ruan\.android\debug.keystore"
 $newKs = "C:\Users\Ruan\.android\debug.keystore"
 $lineage = "D:\Users\Ruan\Documents\Aureabeta\build\release-signing\lineage-55bf-d7c0.bin"
@@ -25,6 +26,7 @@ foreach ($line in Get-Content "D:\Users\Ruan\Documents\Aureabeta\android\key.pro
 $env:AUREA_SIDELOAD_KS_PASS = $props["storePassword"]
 $env:AUREA_SIDELOAD_KEY_PASS = $props["keyPassword"]
 $alias = $props["keyAlias"]
+$alignedInput = $null
 try {
     if ($Mode -eq "lineage") {
         New-Item -ItemType Directory -Force (Split-Path $lineage) | Out-Null
@@ -34,14 +36,25 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "apksigner rotate falhou ($LASTEXITCODE)" }
         & $apksigner lineage --in $lineage --print-certs
     } elseif ($Mode -eq "sign") {
+        & $zipalign -c -P 16 4 $InApk
+        if ($LASTEXITCODE -ne 0) {
+            $alignedInput = Join-Path (Split-Path $lineage) ("aligned-" + [guid]::NewGuid() + ".apk")
+            & $zipalign -P 16 4 $InApk $alignedInput
+            if ($LASTEXITCODE -ne 0) { throw "zipalign falhou ($LASTEXITCODE)" }
+        }
+        $sourceApk = if ($alignedInput) { $alignedInput } else { $InApk }
         & $apksigner sign --min-sdk-version 26 --rotation-min-sdk-version 28 --lineage $lineage `
             --ks $oldKs --ks-key-alias $alias --ks-pass env:AUREA_SIDELOAD_KS_PASS --key-pass env:AUREA_SIDELOAD_KEY_PASS `
             --next-signer --ks $newKs --ks-key-alias $alias --ks-pass env:AUREA_SIDELOAD_KS_PASS --key-pass env:AUREA_SIDELOAD_KEY_PASS `
-            --out $OutApk $InApk
+            --out $OutApk $sourceApk
         if ($LASTEXITCODE -ne 0) { throw "apksigner sign falhou ($LASTEXITCODE)" }
         & $apksigner verify --min-sdk-version 26 --print-certs -v $OutApk
+        if ($LASTEXITCODE -ne 0) { throw "apksigner verify falhou ($LASTEXITCODE)" }
+        & $zipalign -c -P 16 4 $OutApk
+        if ($LASTEXITCODE -ne 0) { throw "O APK assinado perdeu o alinhamento de 16 KB." }
     } else { throw "modo desconhecido: $Mode" }
 } finally {
+    if ($alignedInput) { Remove-Item -LiteralPath $alignedInput -ErrorAction SilentlyContinue }
     Remove-Item Env:AUREA_SIDELOAD_KS_PASS -ErrorAction SilentlyContinue
     Remove-Item Env:AUREA_SIDELOAD_KEY_PASS -ErrorAction SilentlyContinue
 }

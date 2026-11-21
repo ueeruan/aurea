@@ -35,11 +35,13 @@ class ExportForegroundService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val session = intent?.getLongExtra(EXTRA_SESSION, 0L) ?: 0L
         if (intent?.action == ACTION_STOP) {
+            if (session != activeSession || exportActive) return START_NOT_STICKY
             release()
             foreground = false
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-            stopSelf()
+            stopSelfResult(startId)
             return START_NOT_STICKY
         }
         // 0.5.3 (P0-4): os tipos declarados no manifesto, na ordem. O Android 15+
@@ -62,16 +64,28 @@ class ExportForegroundService : Service() {
             // registrada (o Exporter a põe no relato local), `running` deixa de
             // mentir e o wake lock de reserva do processo continua segurando a CPU.
             Log.w(TAG, "foreground service refused", refusal)
-            refused = true
-            running = false
-            foreground = false
-            stopSelf()
+            if (session == activeSession) {
+                refused = true
+                running = false
+                foreground = false
+            }
+            stopSelfResult(startId)
             return START_NOT_STICKY
         }
         // Aceito: vale mesmo depois de um onDestroy da instância anterior. Com o
         // export já encerrado (este comando chegou atrasado), o STOP vem logo atrás.
         foreground = true
-        if (exportActive) running = true
+        if (session != activeSession || !exportActive) {
+            // A pending start must enter foreground even when its export has ended.
+            // Only terminate it if it is still the latest service command.
+            if (!exportActive) {
+                foreground = false
+                ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+                stopSelfResult(startId)
+            }
+            return START_NOT_STICKY
+        }
+        running = true
         if (wakeLock == null) {
             wakeLock = (getSystemService(Context.POWER_SERVICE) as PowerManager)
                 .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "aurea:export").apply {
@@ -131,6 +145,8 @@ class ExportForegroundService : Service() {
         private const val NOTIFICATION_ID = 0x3202
         private const val TIMEOUT_NOTIFICATION_ID = 0x3203
         private const val ACTION_STOP = "com.aurea.aurea.export.STOP"
+        private const val EXTRA_SESSION = "export_session"
+        @Volatile private var activeSession = 0L
         /** Teto do wake lock: um export nunca segura a CPU além disto. */
         private const val MAX_WAKE_MS = 6L * 60 * 60 * 1000
         @Volatile private var running = false
@@ -196,8 +212,9 @@ class ExportForegroundService : Service() {
         }
 
         /** O export começou (chamado com o app na frente). */
-        fun start(context: Context) {
+        @Synchronized fun start(context: Context): Long {
             val app = context.applicationContext
+            val session = ++activeSession
             lastPercent = -2
             timedOut = false
             refused = false
@@ -208,15 +225,21 @@ class ExportForegroundService : Service() {
             runCatching {
                 (app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(TIMEOUT_NOTIFICATION_ID)
             }
+            running = true
             runCatching {
-                androidx.core.content.ContextCompat.startForegroundService(app, Intent(app, ExportForegroundService::class.java))
-                running = true
-            }.onFailure { Log.w(TAG, "could not start export service", it) }
+                val intent = Intent(app, ExportForegroundService::class.java).putExtra(EXTRA_SESSION, session)
+                androidx.core.content.ContextCompat.startForegroundService(app, intent)
+            }.onFailure {
+                running = false
+                refused = true
+                Log.w(TAG, "could not start export service", it)
+            }
+            return session
         }
 
         /** Progresso na notificação (só quando o inteiro muda). */
         fun update(context: Context, framesDone: Int, framesTotal: Int) {
-            if (!running) return
+            if (!running || !foreground || !exportActive) return
             val percent = if (framesTotal > 0) (framesDone.toLong() * 100 / framesTotal).toInt().coerceIn(0, 100) else -1
             if (percent == lastPercent) return
             lastPercent = percent
@@ -228,7 +251,8 @@ class ExportForegroundService : Service() {
         }
 
         /** O export terminou (ok, falha ou cancelado). */
-        fun stop(context: Context) {
+        @Synchronized fun stop(context: Context, session: Long) {
+            if (session != activeSession) return
             // 0.5.3: antes do `running` — recusado ou destruído, o serviço não está
             // "rodando", mas o wake lock de reserva pode estar seguro.
             exportActive = false
@@ -236,7 +260,7 @@ class ExportForegroundService : Service() {
             if (!running) return
             running = false
             val app = context.applicationContext
-            runCatching { app.startService(Intent(app, ExportForegroundService::class.java).setAction(ACTION_STOP)) }
+            runCatching { app.startService(Intent(app, ExportForegroundService::class.java).setAction(ACTION_STOP).putExtra(EXTRA_SESSION, session)) }
                 .onFailure { runCatching { app.stopService(Intent(app, ExportForegroundService::class.java)) } }
         }
 

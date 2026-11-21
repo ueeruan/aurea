@@ -26,13 +26,16 @@ import java.nio.ShortBuffer
 object HyperFaceDetector {
     @JvmStatic
     fun detect(rgb565: ShortArray, width: Int, height: Int, maxFaces: Int): FloatArray? {
-        if (width < 16 || height < 16 || width % 2 != 0 || rgb565.size < width * height) return null
+        if (width < 16 || height < 16 || width % 2 != 0 || rgb565.size / width < height) return null
         return try {
             val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565)
-            bitmap.copyPixelsFromBuffer(ShortBuffer.wrap(rgb565, 0, width * height))
             val faces = arrayOfNulls<FaceDetector.Face>(maxFaces.coerceIn(1, 16))
-            val n = FaceDetector(width, height, faces.size).findFaces(bitmap, faces)
-            bitmap.recycle()
+            val n = try {
+                bitmap.copyPixelsFromBuffer(ShortBuffer.wrap(rgb565, 0, width * height))
+                FaceDetector(width, height, faces.size).findFaces(bitmap, faces)
+            } finally {
+                bitmap.recycle()
+            }
             val out = ArrayList<Float>(n * 6)
             val mid = PointF()
             for (i in 0 until n) {

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="conta_reset_title">Olvidé mi contraseña</string>
+    <string name="conta_reset_send">Enviar código</string>
+    <string name="conta_reset_sent">Si hay una cuenta con este correo, recibirás un código válido durante 15 minutos.</string>
+    <string name="conta_reset_code">Código de recuperación</string>
+    <string name="conta_reset_new">Nueva contraseña</string>
+    <string name="conta_reset_save">Guardar nueva contraseña</string>
+    <string name="conta_reset_done">Contraseña actualizada. Inicia sesión con la nueva contraseña.</string>
+    <string name="conta_reset_invalid">Código inválido o caducado.</string>
+    <string name="conta_google_failed">No se pudo iniciar sesión con Google. Inténtalo de nuevo o usa tu correo.</string>
+</resources>

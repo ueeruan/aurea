@@ -4305,6 +4305,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** O visual que o modelo mostra (−1 = ajustado à mão). */
     fun modelMaterialPreset(layer: Long): Int = engine.modelMaterialPreset(layer)
+    fun modelUnlitColors(layer: Long): Boolean = engineReady && engine.modelUnlitColors(layer)
+    fun setModelUnlitColors(layer: Long, enabled: Boolean) {
+        if (engineReady && engine.setModelUnlitColors(layer, enabled)) {
+            modelClipRevision++
+            refreshNow()
+        }
+    }
 
     /** A bola do visual [preset] neste modelo. Fora da thread principal. */
     fun renderModelLookThumb(layer: Long, preset: Int, size: Int): ImageBitmap? =

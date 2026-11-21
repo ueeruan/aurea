@@ -216,27 +216,28 @@ Status Engine::start_prerender_range(u32 divisor) noexcept {
     if (!shortSide || request.out <= request.in) return Errc::InvalidState;
     // Outro trecho/qualidade: o cache anterior (pronto ou andando) sai antes.
     invalidate_prerender();
-    bool expected = false;
-    if (!preRenderActive_.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
-        return Status{Errc::Busy, "PreRender em andamento"};
-    preRenderCancel_.store(false, std::memory_order_release);
-    preRenderGeneration_.fetch_add(1, std::memory_order_acq_rel);
-    preRenderDivisor_.store(divisor, std::memory_order_release);
+    u64 generation;
     {
         std::lock_guard lock(preRenderStateMutex_);
+        if (preRenderActive_.load(std::memory_order_acquire))
+            return Status{Errc::Busy, "PreRender em andamento"};
+        preRenderCancel_.store(false, std::memory_order_release);
+        generation = preRenderGeneration_.fetch_add(1, std::memory_order_acq_rel) + 1;
+        preRenderDivisor_.store(divisor, std::memory_order_release);
         preRenderProgress_ = {};
         preRenderProgress_.running = true;
         preRenderProgress_.direction = 1;
         preRenderProgress_.divisor = divisor;
         preRenderProgress_.firstFrame = request.in;
         preRenderProgress_.endFrame = request.out;
+        preRenderActive_.store(true, std::memory_order_release);
     }
     ImageExportSettings settings;
     settings.format = ImageExportFormat::PngSequence;
     settings.shortSide = shortSide;
     settings.trimToContent = false;
-    const Status result = start_image_export_internal(settings, config_.cacheDirectory.c_str(), 1, 0, &request);
-    if (!result.ok()) invalidate_prerender(result.raw());
+    const Status result = start_image_export_internal(settings, config_.cacheDirectory.c_str(), 1, 0, &request, generation);
+    if (!result.ok()) invalidate_prerender(result.raw(), 0, generation);
     else AUREA_LOG_INFO("PreRender do trecho [%lld, %lld) em 1/%u", static_cast<long long>(request.in),
                         static_cast<long long>(request.out), divisor);
     return result;

@@ -51,6 +51,7 @@ export function d1Falso() {
   db.exec(readFileSync(new URL("../migrations/0010_aureamcp.sql", import.meta.url), "utf8"));
   db.exec(readFileSync(new URL("../migrations/0011_entitlement_purchases.sql", import.meta.url), "utf8"));
   db.exec(readFileSync(new URL("../migrations/0012_entitlement_subscriptions.sql", import.meta.url), "utf8"));
+  db.exec(readFileSync(new URL("../migrations/0013_password_resets.sql", import.meta.url), "utf8"));
   const limpar = (r) => (r === undefined ? null : { ...r });
   const declaracao = (sql, params = []) => ({
     bind: (...p) => declaracao(sql, p),

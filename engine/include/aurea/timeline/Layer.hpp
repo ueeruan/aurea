@@ -634,6 +634,7 @@ struct Model3DData {
     bool    animPingPong = false;
     bool    castShadows = true;
     bool    receiveShadows = true;
+    bool    unlitColors = false;
     /// Mostrar interior (dupla face) — ver ModelInterior.
     ModelInterior interior = ModelInterior::Auto;
     /// Índices de LOD forçado, ou -1 para automático por tamanho na tela.

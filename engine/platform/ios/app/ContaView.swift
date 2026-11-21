@@ -10,14 +10,51 @@ import SwiftUI
 
 struct ContaView: View {
     @EnvironmentObject private var conta: ContaModel
+    @Environment(\.dismiss) private var dismiss
+    private let recoveryEmail: String?
     @State private var email: String = ""
     @State private var senha: String = ""
     @State private var mostrar: Bool = false
+    @State private var recovery = false
+    @State private var codeRequested = false
+    @State private var recoveryCode = ""
+    @State private var passwordChanged = false
     @FocusState private var campoSenha: Bool
+
+    init(recoveryEmail: String? = nil) {
+        self.recoveryEmail = recoveryEmail
+        _email = State(initialValue: recoveryEmail ?? "")
+        _recovery = State(initialValue: recoveryEmail != nil)
+    }
 
     private func enviar() {
         campoSenha = false
-        conta.enviar(email: email, senha: senha)
+        if !recovery { conta.enviar(email: email, senha: senha) }
+        else if !codeRequested { conta.solicitarRecuperacao(email) { codeRequested = true } }
+        else {
+            conta.confirmarRecuperacao(recoveryCode, password: senha) {
+                resetForm()
+                recovery = false
+                passwordChanged = true
+                conta.entrando = true
+                if recoveryEmail != nil { conta.sair() }
+            }
+        }
+    }
+
+    private func resetForm() {
+        campoSenha = false
+        codeRequested = false
+        recoveryCode = ""
+        senha = ""
+        mostrar = false
+        passwordChanged = false
+        conta.erro = nil
+    }
+
+    private var submitLabel: String {
+        if recovery { return codeRequested ? "conta_reset_save" : "conta_reset_send" }
+        return conta.entrando ? "conta_entrar" : "conta_criar"
     }
 
     var body: some View {
@@ -35,18 +72,21 @@ struct ContaView: View {
                         .background(AureaColors.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
                         .padding(.top, 10)
                         .accessibilityIdentifier("conta.membros")
-                    Text(AureaText.t(conta.entrando ? "conta_titulo_entrar" : "conta_titulo_cadastro"))
+                    Text(AureaText.t(recovery ? "conta_reset_title" : conta.entrando ? "conta_titulo_entrar" : "conta_titulo_cadastro"))
                         .font(.aurea(size: 22, weight: .bold)).foregroundStyle(AureaColors.text)
                         .multilineTextAlignment(.center).padding(.top, 16)
-                    Text(AureaText.t("conta_subtitulo"))
+                    Text(AureaText.t(codeRequested ? "conta_reset_sent" : passwordChanged ? "conta_reset_done" : "conta_subtitulo"))
                         .font(.aurea(size: 12.5)).foregroundStyle(AureaColors.muted)
                         .multilineTextAlignment(.center).padding(.top, 8)
 
-                    campoEmail.padding(.top, 24)
-                    campoDaSenha.padding(.top, 12)
-                    Text(AureaText.t("conta_senha_dica"))
-                        .font(.aurea(size: 11)).foregroundStyle(AureaColors.subtle)
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6).padding(.leading, 4)
+                    if codeRequested { campoRecuperacao.padding(.top, 24) }
+                    else { campoEmail.padding(.top, 24) }
+                    if !recovery || codeRequested {
+                        campoDaSenha.padding(.top, 12)
+                        Text(AureaText.t("conta_senha_dica"))
+                            .font(.aurea(size: 11)).foregroundStyle(AureaColors.subtle)
+                            .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6).padding(.leading, 4)
+                    }
 
                     if let erro: ContaErro = conta.erro {
                         Text(AureaText.t(erro.chave))
@@ -60,7 +100,7 @@ struct ContaView: View {
                             if conta.ocupado {
                                 AureaActivityIndicator()
                             } else {
-                                Text(AureaText.t(conta.entrando ? "conta_entrar" : "conta_criar"))
+                                Text(AureaText.t(submitLabel))
                                     .font(.aurea(size: 17, weight: .semibold)).foregroundStyle(AureaColors.onAccent)
                             }
                         }
@@ -72,7 +112,7 @@ struct ContaView: View {
                     .accessibilityIdentifier("conta.enviar")
 
                     // 0.4.1: entrar com o Google (Firebase Auth); some sem a configuração do Firebase.
-                    if GoogleLogin.disponivel {
+                    if !recovery && GoogleLogin.disponivel {
                         Text(AureaText.t("conta_ou"))
                             .font(.aurea(size: 12.5)).foregroundStyle(AureaColors.muted)
                             .multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(.top, 12)
@@ -97,16 +137,7 @@ struct ContaView: View {
                         .accessibilityIdentifier("conta.google")
                     }
 
-                    Button {
-                        conta.entrando.toggle()
-                        conta.erro = nil
-                    } label: {
-                        Text(AureaText.t(conta.entrando ? "conta_ir_cadastro" : "conta_ir_entrar"))
-                            .font(.aurea(size: 14.5, weight: .semibold)).foregroundStyle(AureaColors.accent)
-                            .padding(.horizontal, 12).frame(minHeight: 44)
-                    }
-                    .buttonStyle(.plain).disabled(conta.ocupado).padding(.top, 8)
-                    .accessibilityIdentifier("conta.alternar")
+                    accountLinks
 
                     Text(AureaText.t("conta_privacidade"))
                         .font(.aurea(size: 11)).foregroundStyle(AureaColors.subtle)
@@ -118,6 +149,46 @@ struct ContaView: View {
             }
             .scrollDismissesKeyboard(.interactively)
         }
+    }
+
+    @ViewBuilder private var accountLinks: some View {
+        if conta.entrando || recovery {
+            let label = recovery ? (recoveryEmail == nil ? "conta_ir_entrar" : "editor_fechar") : "conta_reset_title"
+            Button {
+                if recovery && recoveryEmail != nil { dismiss(); return }
+                resetForm()
+                recovery.toggle()
+            } label: {
+                Text(AureaText.t(label))
+                    .font(.aurea(size: 14.5, weight: .semibold)).foregroundStyle(AureaColors.accent)
+                    .padding(.horizontal, 12).frame(minHeight: 44)
+            }
+            .buttonStyle(.plain).disabled(conta.ocupado)
+            .accessibilityIdentifier("conta.reset")
+        }
+        if !recovery {
+            Button {
+                conta.entrando.toggle()
+                conta.erro = nil
+                passwordChanged = false
+            } label: {
+                Text(AureaText.t(conta.entrando ? "conta_ir_cadastro" : "conta_ir_entrar"))
+                    .font(.aurea(size: 14.5, weight: .semibold)).foregroundStyle(AureaColors.accent)
+                    .padding(.horizontal, 12).frame(minHeight: 44)
+            }
+            .buttonStyle(.plain).disabled(conta.ocupado).padding(.top, 8)
+            .accessibilityIdentifier("conta.alternar")
+        }
+    }
+
+    private var campoRecuperacao: some View {
+        TextField(AureaText.t("conta_reset_code"), text: $recoveryCode)
+            .font(.aurea(size: 17)).foregroundStyle(AureaColors.text)
+            .textContentType(.oneTimeCode).textInputAutocapitalization(.never).autocorrectionDisabled(true)
+            .onChange(of: recoveryCode) { _ in conta.erro = nil }
+            .padding(.horizontal, 14).frame(minHeight: 50)
+            .background(AureaColors.surfaceHigh, in: RoundedRectangle(cornerRadius: 12))
+            .accessibilityIdentifier("conta.reset.code")
     }
 
     private var campoEmail: some View {
@@ -138,8 +209,9 @@ struct ContaView: View {
     }
 
     private var campoDaSenha: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(AureaText.t("conta_senha")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted).padding(.leading, 4)
+        let label = AureaText.t(recovery ? "conta_reset_new" : "conta_senha")
+        return VStack(alignment: .leading, spacing: 6) {
+            Text(label).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted).padding(.leading, 4)
             HStack(spacing: 8) {
                 Group {
                     if mostrar {
@@ -149,12 +221,12 @@ struct ContaView: View {
                     }
                 }
                 .font(.aurea(size: 17)).foregroundStyle(AureaColors.text)
-                .textContentType(conta.entrando ? UITextContentType.password : UITextContentType.newPassword)
+                .textContentType(conta.entrando && !recovery ? UITextContentType.password : UITextContentType.newPassword)
                 .textInputAutocapitalization(.never).autocorrectionDisabled(true)
                 .focused($campoSenha)
                 .submitLabel(.done).onSubmit(enviar)
                 .onChange(of: senha) { _ in conta.erro = nil }
-                .accessibilityLabel(AureaText.t("conta_senha"))
+                .accessibilityLabel(label)
                 .accessibilityIdentifier("conta.senha")
                 Button(AureaText.t(mostrar ? "conta_ocultar" : "conta_mostrar")) { mostrar.toggle() }
                     .font(.aurea(size: 12, weight: .semibold)).foregroundStyle(AureaColors.accent)

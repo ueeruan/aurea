@@ -247,6 +247,13 @@ struct PreRenderPanelView: View {
             .accessibilityLabel(label)
             .accessibilityIdentifier(mode == 0 ? "prerender.start.prerender" : "prerender.start.preexport")
         }
+        let error = mode == 0 ? progress.error : export.error
+        if !running && error != 0 && error != 25 {
+            Text(AureaText.t(mode == 0 ? "prerender_failed" : "prx_preexport_failed", AureaModel.preRenderErrorText(error)))
+                .font(.system(size: 13)).foregroundColor(AureaColors.danger)
+                .padding(.horizontal, 20).padding(.vertical, 10)
+                .accessibilityIdentifier("prerender.error")
+        }
         if let status = statusText(mode: mode, progress: progress, export: export) {
             let warn = (mode == 0 && progress.dirtySegments > 0) || (mode == 1 && export.stale)
             Text(status).font(.system(size: 13)).foregroundColor(warn ? AureaColors.warning : AureaColors.success)

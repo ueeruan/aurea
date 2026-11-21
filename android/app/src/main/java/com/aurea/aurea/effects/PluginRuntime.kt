@@ -253,7 +253,11 @@ object PluginRuntime {
                 s.pluginBusy(null)
                 if (info == null || !info.optBoolean("ok")) {
                     temp.delete()
-                    s.pluginError(context.getString(R.string.pv2_inspect_failed, info?.optString("error").orEmpty()))
+                    val detail = info?.optString("error").orEmpty().ifBlank {
+                        context.getString(R.string.msg_nao_consegui_ler_esse_arquivo)
+                    }
+                    s.pluginError(context.getString(R.string.pv2_inspect_failed, detail))
+                    nextEmbedded()
                 } else {
                     pendingInstall = temp.absolutePath to info
                 }
@@ -279,7 +283,8 @@ object PluginRuntime {
                     val names = PluginTexts.plugins.firstOrNull { it.id == result.id }?.names ?: emptyMap()
                     s.showToast(context.getString(R.string.plug_installed, PluginTexts.pick(names, locale()) ?: result.id))
                 } else {
-                    s.pluginError(context.getString(R.string.plug_failed, result.error))
+                    val detail = result.error.ifBlank { context.getString(R.string.msg_nao_consegui_ler_esse_arquivo) }
+                    s.pluginError(context.getString(R.string.plug_failed, detail))
                 }
                 info.optString("id").let { states.remove(it); errors.remove(it) }
                 nextEmbedded()

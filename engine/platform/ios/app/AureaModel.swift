@@ -3015,7 +3015,7 @@ final class AureaModel: ObservableObject {
         if progress != preRenderProgress { preRenderProgress = progress }
     }
 
-    private static func preRenderErrorText(_ code: Int) -> String {
+    static func preRenderErrorText(_ code: Int) -> String {
         switch code {
         case 6, 24: return AureaText.t("msg_recurso_nao_suportado_neste_aparelho")
         case 8, 9: return AureaText.t("msg_memoria_insuficiente_feche_outros_apps_e")

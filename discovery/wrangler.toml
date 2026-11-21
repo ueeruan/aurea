@@ -48,6 +48,8 @@ binding = "AI"
 [vars]
 # 0.4.1: login com Google pelo Firebase Auth (firebase.js confere o aud/iss deste projeto).
 FIREBASE_PROJECT_ID = "aurea-8e5f1"
+# Recuperação de senha: configure ACCOUNT_EMAIL_FROM com um remetente de domínio
+# verificado na Resend e use RESEND_API_KEY no secret do Worker.
 # AureaMCP: "false" desliga /mcp, o OAuth e o relay (503) sem deploy de código.
 AUREAMCP_ENABLED = "true"
 # Purchases on for the App Store launch (owner, 16 November 2026).

@@ -2216,6 +2216,8 @@ public:
     /// Sombras de um objeto 3D (modelo importado ou texto 3D): se ele projeta
     /// (`cast`) e se recebe (`receive`) a sombra dos outros.
     bool set_model_shadows(u64 layerId, bool cast, bool receive) noexcept;
+    bool set_model_unlit_colors(u64 layerId, bool enabled) noexcept;
+    bool model_unlit_colors(u64 layerId) noexcept;
     /// {projeta, recebe}.
     bool query_model_shadows(u64 layerId, f32* out2) noexcept;
 
@@ -4129,10 +4131,12 @@ private:
     void image_export_thread_main() noexcept;
     [[nodiscard]] Status start_image_export_internal(const ImageExportSettings& settings, const char* outputPath,
                                                      i32 preRenderDirection, u64 preRenderGroupLayer = 0,
-                                                     const PreRenderRangeRequest* preRenderRange = nullptr) noexcept;
+                                                     const PreRenderRangeRequest* preRenderRange = nullptr,
+                                                     u64 preRenderGeneration = 0) noexcept;
     /// `error` is published as the progress error (Cancelled for edits/cancel;
     /// the real cause when the producer itself failed).
-    void invalidate_prerender(i32 error = static_cast<i32>(Errc::Cancelled)) noexcept;
+    void invalidate_prerender(i32 error = static_cast<i32>(Errc::Cancelled), u64 expectedToken = 0,
+                              u64 expectedGeneration = 0) noexcept;
     /// exportLifecycleMutex_: a PreRender cancelled by an edit/Cancel keeps its
     /// worker until the current frame returns. A new PreRender waits for it
     /// (bounded, cancellable) instead of failing with "export em andamento".

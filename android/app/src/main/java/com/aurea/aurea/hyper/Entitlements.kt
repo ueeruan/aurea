@@ -192,7 +192,9 @@ object HyperEntitlements {
     private val scope by lazy { CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate) }
     private var cache: EntitlementCache? = null
     private var email: String? = null
-    private var inFlight = 0
+    private var sessionToken: String? = null
+    private var checking = false
+    private var verification = 0L
 
     /** O acesso ao AureaHyper (as 3 ferramentas Hyper, a tela da Home): o que libera TUDO. */
     var access by mutableStateOf(HyperAccess.NeedsConfig)
@@ -229,14 +231,17 @@ object HyperEntitlements {
 
     /** Pergunta ao servidor (sem sessão = fora). Idempotente; pode chamar à vontade. */
     fun refresh(sessionToken: String?, accountEmail: String?) {
+        val request = ++verification
+        if (this.sessionToken != sessionToken) purchasable = emptySet()
+        this.sessionToken = sessionToken
         email = accountEmail
-        if (sessionToken == null || accountEmail == null) { recompute(); return }
-        inFlight++
+        checking = sessionToken != null && accountEmail != null
         recompute()
+        if (sessionToken == null || accountEmail == null) return
         scope.launch {
             val result = runCatching { provider.fetch(sessionToken) }.getOrDefault(EntitlementCheck.Unreachable)
-            inFlight = (inFlight - 1).coerceAtLeast(0)
-            if (email != accountEmail) { recompute(); return@launch }   // trocou de conta no meio
+            if (request != verification) return@launch
+            checking = false
             when (result) {
                 is EntitlementCheck.Granted -> {
                     purchasable = result.purchasable
@@ -254,11 +259,15 @@ object HyperEntitlements {
      * A loja confirmou uma compra e o servidor respondeu com os produtos da conta
      * (POST /api/entitlements/purchase): vale na hora, sem esperar outra consulta.
      */
-    fun acceptServerProducts(products: Set<String>, expiresSeconds: Map<String, Long>) {
-        val who = email ?: return
+    fun acceptServerProducts(expectedSession: String, products: Set<String>, expiresSeconds: Map<String, Long>): Boolean {
+        val who = email ?: return false
+        if (sessionToken != expectedSession) return false
+        ++verification
+        checking = false
         store(EntitlementCache(EntitlementRules.accountKey(who), products, System.currentTimeMillis(),
             expiresSeconds.mapValues { it.value * 1000 }))
         recompute()
+        return true
     }
 
     /** Os produtos da conta que valem agora (vazio sem confirmação do servidor). */
@@ -276,7 +285,7 @@ object HyperEntitlements {
     fun accessFor(itemProduct: String?): HyperAccess {
         revision
         if (platformUnlocked) return HyperAccess.Unlocked
-        val entitlement = EntitlementRules.access(cache, email, System.currentTimeMillis(), inFlight > 0) { owned ->
+        val entitlement = EntitlementRules.access(cache, email, System.currentTimeMillis(), checking) { owned ->
             runCatching { accessRule(owned, itemProduct) }.getOrDefault(false)
         }
         val store = com.aurea.aurea.config.AppConfigStore
@@ -285,6 +294,9 @@ object HyperEntitlements {
 
     /** Saiu ou excluiu a conta. */
     fun clear() {
+        ++verification
+        checking = false
+        sessionToken = null
         email = null
         purchasable = emptySet()
         store(null)
@@ -298,7 +310,7 @@ object HyperEntitlements {
 
     private fun recompute() {
         // O AureaHyper (o que libera tudo): a regra do motor com item nulo.
-        entitlementAccess = EntitlementRules.access(cache, email, System.currentTimeMillis(), inFlight > 0) { owned ->
+        entitlementAccess = EntitlementRules.access(cache, email, System.currentTimeMillis(), checking) { owned ->
             runCatching { accessRule(owned, null) }.getOrDefault(false)
         }
         revision++

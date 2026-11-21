@@ -2062,49 +2062,62 @@ struct ExpressionSheet: View {
         return (AureaText.t("panel_escreva_expressao_ou_toque_num_atalho"), AureaColors.muted)
     }
     var body: some View {
-        AureaBottomOverlay(modal: true, onDismiss: onDismiss, fixedFooter: AnyView(
+        VStack(spacing: 0) {
             HStack(spacing: 8) {
-                if applied { sheetButton(AureaText.t("panel_remover"), color: AureaColors.danger) { apply(""); source = ""; selection = NSRange(location: 0, length: 0) } }
                 sheetButton(AureaText.t("panel_fechar"), color: AureaColors.text, action: onDismiss)
+                    .accessibilityIdentifier("expression.close").keyboardShortcut(.cancelAction)
                 sheetButton(AureaText.t("panel_aplicar"), color: AureaColors.accent, enabled: dirty) { apply(source) }
-            }.padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 12)
-        )) {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 8) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(AureaText.t("panel_expressao")).font(.aurea(size: 17, weight: .bold))
-                        Text(request.label).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted)
-                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("expression.apply")
+            }.padding(.horizontal, 16).padding(.vertical, 8)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(AureaText.t("panel_expressao")).font(.aurea(size: 17, weight: .bold))
+                            Text(request.label).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted)
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                        if applied {
+                            Text(AureaText.t(enabled ? "panel_ligada" : "panel_desligada")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted)
+                            AureaToggle(checked: enabled) { on in
+                                _ = model.engine.enableExpressions(request.layer, tracks: request.packedTracks, enabled: on)
+                                model.refreshModel(force: true); reread()
+                            }
+                        }
+                    }.padding(.bottom, 12)
+                    codeEditor
+                    Text(status.0).font(.aurea(size: 12)).foregroundStyle(status.1).fixedSize(horizontal: false, vertical: true).padding(.top, 8)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(Array(shortcuts.enumerated()), id: \.offset) { _, item in
+                                Button {
+                                    if item.0 != nil {
+                                        source = item.1; selection = NSRange(location: (item.1 as NSString).length, length: 0)
+                                    } else { insert(item.1) }
+                                } label: {
+                                    Group {
+                                        if let name = item.0 { Text(name).font(.aurea(size: 12, weight: .semibold)) }
+                                        else { Text(item.1).font(.aurea(size: 12, design: .monospaced)) }
+                                    }.foregroundStyle(AureaColors.keyframe)
+                                        .padding(.horizontal, 10).padding(.vertical, 7).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
+                                }.buttonStyle(AureaPressStyle())
+                            }
+                        }
+                    }.padding(.top, 10)
                     if applied {
-                        Text(AureaText.t(enabled ? "panel_ligada" : "panel_desligada")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted)
-                        AureaToggle(checked: enabled) { on in
-                            _ = model.engine.enableExpressions(request.layer, tracks: request.packedTracks, enabled: on)
-                            model.refreshModel(force: true); reread()
+                        sheetButton(AureaText.t("panel_remover"), color: AureaColors.danger) {
+                            apply("")
+                            if !refused { source = ""; selection = NSRange(location: 0, length: 0) }
                         }
+                        .padding(.top, 12).accessibilityIdentifier("expression.remove")
                     }
-                }.padding(.bottom, 12)
-                codeEditor
-                Text(status.0).font(.aurea(size: 12)).foregroundStyle(status.1).fixedSize(horizontal: false, vertical: true).padding(.top, 8)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(Array(shortcuts.enumerated()), id: \.offset) { _, item in
-                            Button {
-                                if item.0 != nil {
-                                    source = item.1; selection = NSRange(location: (item.1 as NSString).length, length: 0)
-                                } else { insert(item.1) }
-                            } label: {
-                                Group {
-                                    if let name = item.0 { Text(name).font(.aurea(size: 12, weight: .semibold)) }
-                                    else { Text(item.1).font(.aurea(size: 12, design: .monospaced)) }
-                                }.foregroundStyle(AureaColors.keyframe)
-                                    .padding(.horizontal, 10).padding(.vertical, 7).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
-                            }.buttonStyle(AureaPressStyle())
-                        }
-                    }
-                }.padding(.top, 10)
-                Spacer().frame(height: 10)
-            }.padding(.horizontal, 16).foregroundStyle(AureaColors.text)
+                    Spacer().frame(height: 10)
+                }.padding(.horizontal, 16).foregroundStyle(AureaColors.text)
+            }.scrollDismissesKeyboard(.interactively)
         }
+        .background(AureaColors.surface.ignoresSafeArea())
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("expression.sheet")
+        .accessibilityAction(.escape, onDismiss)
         .onAppear {
             reread(); source = info["source"] as? String ?? ""; selection = NSRange(location: (source as NSString).length, length: 0); loaded = true
         }

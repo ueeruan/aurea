@@ -62,15 +62,31 @@ import com.aurea.aurea.ui.theme.tocavel
  * estado salvo da Activity.
  */
 @Composable
-fun ContaScreen(conta: ContaViewModel) {
-    var email by rememberSaveable { mutableStateOf("") }
+fun ContaScreen(conta: ContaViewModel, recoveryEmail: String? = null, onClose: () -> Unit = {}) {
+    var email by rememberSaveable(recoveryEmail) { mutableStateOf(recoveryEmail.orEmpty()) }
     var senha by remember { mutableStateOf("") }
     var mostrar by remember { mutableStateOf(false) }
+    var recovery by remember(recoveryEmail) { mutableStateOf(recoveryEmail != null) }
+    var codeRequested by remember { mutableStateOf(false) }
+    var recoveryCode by remember { mutableStateOf("") }
+    var passwordChanged by remember { mutableStateOf(false) }
     val foco = LocalFocusManager.current
     val entrando = conta.entrando
     val enviar = {
         foco.clearFocus()
-        conta.enviar(email, senha)
+        when {
+            !recovery -> conta.enviar(email, senha)
+            !codeRequested -> conta.solicitarRecuperacao(email) { codeRequested = true }
+            else -> conta.confirmarRecuperacao(recoveryCode, senha) {
+                recovery = false
+                codeRequested = false
+                recoveryCode = ""
+                senha = ""
+                passwordChanged = true
+                conta.entrando = true
+                if (recoveryEmail != null) conta.sair()
+            }
+        }
     }
 
     Box(Modifier.fillMaxSize().background(AureaColors.Background).safeDrawingPadding().imePadding(),
@@ -92,22 +108,30 @@ fun ContaScreen(conta: ContaViewModel) {
                     .padding(horizontal = 12.dp, vertical = 6.dp).testTag("conta.membros"),
             )
             Spacer(Modifier.height(16.dp))
-            Text(stringResource(if (entrando) R.string.conta_titulo_entrar else R.string.conta_titulo_cadastro),
+            Text(stringResource(if (recovery) R.string.conta_reset_title else if (entrando) R.string.conta_titulo_entrar else R.string.conta_titulo_cadastro),
                 style = AureaType.TitleLarge, textAlign = TextAlign.Center)
             Spacer(Modifier.height(8.dp))
-            Text(stringResource(R.string.conta_subtitulo), style = AureaType.Note, textAlign = TextAlign.Center)
+            Text(stringResource(if (codeRequested) R.string.conta_reset_sent else if (passwordChanged) R.string.conta_reset_done else R.string.conta_subtitulo),
+                style = AureaType.Note, textAlign = TextAlign.Center)
             Spacer(Modifier.height(24.dp))
 
-            CampoConta(
+            if (!codeRequested) CampoConta(
                 valor = email, aoMudar = { email = it.take(254); conta.erro = null },
                 rotulo = stringResource(R.string.conta_email), tag = "conta.email",
                 teclado = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next, autoCorrectEnabled = false),
                 acoes = KeyboardActions(onNext = { foco.moveFocus(androidx.compose.ui.focus.FocusDirection.Down) }),
             )
+            if (codeRequested) CampoConta(
+                valor = recoveryCode, aoMudar = { recoveryCode = it.take(64); conta.erro = null },
+                rotulo = stringResource(R.string.conta_reset_code), tag = "conta.reset.code",
+                teclado = KeyboardOptions(keyboardType = KeyboardType.Ascii, imeAction = ImeAction.Next, autoCorrectEnabled = false),
+                acoes = KeyboardActions(onNext = { foco.moveFocus(androidx.compose.ui.focus.FocusDirection.Down) }),
+            )
+            if (!recovery || codeRequested) {
             Spacer(Modifier.height(12.dp))
             CampoConta(
                 valor = senha, aoMudar = { senha = it.take(ContaLogica.SENHA_MAX * 2); conta.erro = null },
-                rotulo = stringResource(R.string.conta_senha), tag = "conta.senha",
+                rotulo = stringResource(if (recovery) R.string.conta_reset_new else R.string.conta_senha), tag = "conta.senha",
                 teclado = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done, autoCorrectEnabled = false),
                 acoes = KeyboardActions(onDone = { enviar() }),
                 transformacao = if (mostrar) VisualTransformation.None else PasswordVisualTransformation(),
@@ -120,6 +144,7 @@ fun ContaScreen(conta: ContaViewModel) {
             )
             Text(stringResource(R.string.conta_senha_dica), style = AureaType.Footer,
                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp, start = 4.dp))
+            }
 
             conta.erro?.let { e ->
                 Text(stringResource(textoDoErro(e)), style = AureaType.Note.copy(color = AureaColors.Danger),
@@ -127,7 +152,12 @@ fun ContaScreen(conta: ContaViewModel) {
             }
             Spacer(Modifier.height(20.dp))
 
-            val rotuloBotao = stringResource(if (entrando) R.string.conta_entrar else R.string.conta_criar)
+            val rotuloBotao = stringResource(when {
+                recovery && codeRequested -> R.string.conta_reset_save
+                recovery -> R.string.conta_reset_send
+                entrando -> R.string.conta_entrar
+                else -> R.string.conta_criar
+            })
             Box(
                 Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(RoundedCornerShape(14.dp))
                     .background(if (conta.ocupado) AureaColors.AccentDim else AureaColors.Accent)
@@ -139,7 +169,7 @@ fun ContaScreen(conta: ContaViewModel) {
                 else Text(rotuloBotao, style = AureaType.Button)
             }
             // 0.4.1: entrar com o Google (Firebase Auth); some sem a configuração do Firebase.
-            if (GoogleLogin.disponivel) {
+            if (!recovery && GoogleLogin.disponivel) {
                 val activity = androidx.compose.ui.platform.LocalContext.current.let { c ->
                     generateSequence(c) { (it as? android.content.ContextWrapper)?.baseContext }.filterIsInstance<android.app.Activity>().firstOrNull()
                 }
@@ -162,7 +192,26 @@ fun ContaScreen(conta: ContaViewModel) {
                 }
             }
             Spacer(Modifier.height(8.dp))
-            Text(
+            if (entrando || recovery) Text(
+                stringResource(if (recovery && recoveryEmail != null) R.string.editor_fechar
+                    else if (recovery) R.string.conta_ir_entrar else R.string.conta_reset_title),
+                style = AureaType.LinkRow.copy(color = AureaColors.Accent),
+                modifier = Modifier.testTag("conta.reset").tocavel(enabled = !conta.ocupado, role = Role.Button) {
+                    foco.clearFocus()
+                    if (recovery && recoveryEmail != null) {
+                        onClose()
+                        return@tocavel
+                    }
+                    recovery = !recovery
+                    passwordChanged = false
+                    codeRequested = false
+                    recoveryCode = ""
+                    senha = ""
+                    mostrar = false
+                    conta.erro = null
+                }.padding(12.dp),
+            )
+            if (!recovery) Text(
                 stringResource(if (entrando) R.string.conta_ir_cadastro else R.string.conta_ir_entrar),
                 style = AureaType.LinkRow.copy(color = AureaColors.Accent, fontWeight = FontWeight.SemiBold),
                 modifier = Modifier.clip(RoundedCornerShape(10.dp)).testTag("conta.alternar")
@@ -184,6 +233,8 @@ internal fun textoDoErro(e: ErroConta): Int = when (e) {
     ErroConta.REDE -> R.string.conta_erro_rede
     ErroConta.SERVICO -> R.string.conta_erro_servico
     ErroConta.EXPIRADA -> R.string.conta_erro_expirada
+    ErroConta.GOOGLE -> R.string.conta_google_failed
+    ErroConta.CODIGO_RECUPERACAO -> R.string.conta_reset_invalid
 }
 
 @Composable

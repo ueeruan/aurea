@@ -129,7 +129,7 @@ fun HyperScreen(store: EditorStore) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 18.dp)) {
             // Um job em andamento continua visível mesmo que o acesso mude no meio.
             if (access != HyperAccess.Unlocked && flow.step != HyperFlow.Step.Working) {
-                HyperLockedPanel(access, onSignIn = { signingIn = true }, onRetry = { conta.atualizarAcessos() })
+                HyperLockedPanel(access, onSignIn = { signingIn = true }, onRetry = { conta.atualizarAcessos(retryPurchases = true) })
             } else when (flow.step) {
                 HyperFlow.Step.Choose -> ChooseStep(flow)
                 HyperFlow.Step.Recipe -> RecipeStep(flow)
@@ -257,7 +257,7 @@ fun HyperLockedDialog(onDismiss: () -> Unit) {
             }
             if (signingIn) Box(Modifier.weight(1f)) { ContaScreen(conta) }
             else Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 18.dp)) {
-                HyperLockedPanel(access, onSignIn = { signingIn = true }, onRetry = { conta.atualizarAcessos() })
+                HyperLockedPanel(access, onSignIn = { signingIn = true }, onRetry = { conta.atualizarAcessos(retryPurchases = true) })
                 Spacer(Modifier.height(24.dp))
             }
         }

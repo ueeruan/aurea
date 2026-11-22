@@ -437,12 +437,13 @@ private func puppetToUv(_ c: [Float], _ x: Float, _ y: Float) -> (Float, Float)?
         model.pause()
         rigTask = Task {
             defer { rigTask = nil }
-            func current() -> Bool {
+            // Funções locais não herdam o isolamento da Task: leem o modelo na main.
+            @MainActor func current() -> Bool {
                 !Task.isCancelled && model.projectGeneration == project && model.primarySelection == layer &&
                     model.layerSourcePath(layer) == path && puppet.layer == layer && puppet.effect == effect
             }
             let bytes = (2 + 33 * 4) * MemoryLayout<Float>.size
-            func apply(_ pose: Data?) async -> Int32 {
+            @MainActor func apply(_ pose: Data?) async -> Int32 {
                 guard let pose, pose.count >= bytes else { return -1 }
                 let engine = model.engine
                 let landmarks = Data(pose.prefix(bytes))

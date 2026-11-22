@@ -227,6 +227,15 @@ void ThumbnailService::clear() {
     wake_.notify_one();
 }
 
+void ThumbnailService::set_playback_active(bool active) noexcept {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (playbackActive_ == active) return;
+        playbackActive_ = active;
+    }
+    if (!active) wake_.notify_one();
+}
+
 u32 ThumbnailService::cached() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return static_cast<u32>(lru_.size());
@@ -423,7 +432,9 @@ void ThumbnailService::thread_main() noexcept {
         u32 version = 0;
         {
             std::unique_lock<std::mutex> lock(mutex_);
-            const auto ready = [&] { return !running_ || !queue_.empty() || decoderVersion != version_; };
+            const auto ready = [&] {
+                return !running_ || decoderVersion != version_ || (!playbackActive_ && !queue_.empty());
+            };
             if (!decoders_.empty()) {
                 // Fila vazia com decoder aberto: espera o próximo pedido por um
                 // tempo; nada chegou, fecha. Antes os dois decoders ficavam

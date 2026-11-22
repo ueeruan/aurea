@@ -4697,9 +4697,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      */
     private fun keyTransformGroup(id: Long, d: LayerDetail, changes: Map<Int, Float>): Boolean {
         if (!autoKeyTransforms || changes.isEmpty()) return false
-        val threeD = d.kind in 8..10 || d.flags and com.aurea.aurea.engine.PodLayout.FLAG_THREE_D != 0 ||
-            kotlin.math.abs(d.position[2]) > .01f || kotlin.math.abs(d.rotation[0]) > .01f ||
-            kotlin.math.abs(d.rotation[1]) > .01f || d.animatedMask and ((1 shl 2) or (1 shl 6) or (1 shl 7)) != 0
+        val threeD = com.aurea.aurea.editor.panels.uses3D(d)
         val properties = transformKeyGroup(changes.keys.first(), threeD, d.animatedMask)
         if (properties.isEmpty() || changes.keys.any { it !in properties }) return false
         val values = properties.map { changes[it] ?: transformValue(d, it) }
@@ -7016,7 +7014,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** Máscaras da camada principal; [m] = composição ← camada (a b c d tx ty). */
     /** `w` é a linha de perspectiva da matriz: (0, 0, 1) em 2D; numa camada 3D a conta divide por ela. */
-    class MaskState(val layer: Long, val m: FloatArray, val masks: List<MaskPath>, val w: FloatArray = floatArrayOf(0f, 0f, 1f)) {
+    class MaskState(
+        val layer: Long,
+        val m: FloatArray,
+        val masks: List<MaskPath>,
+        val w: FloatArray = floatArrayOf(0f, 0f, 1f),
+        val pinState: Int = -1,
+    ) {
         fun find(id: Int?) = masks.firstOrNull { it.id == id }
         private fun den(x: Float, y: Float): Float {
             val d = w[0] * x + w[1] * y + w[2]
@@ -7105,7 +7109,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 )
                 o += MASK_HEADER + pc * 6
             }
-            MaskState(id, b.copyOfRange(0, 6), list, if (o + 3 <= need) b.copyOfRange(o, o + 3) else floatArrayOf(0f, 0f, 1f))
+            val perspective = if (o + 3 <= need) b.copyOfRange(o, o + 3) else floatArrayOf(0f, 0f, 1f)
+            MaskState(id, b.copyOfRange(0, 6), list, perspective, if (o + 3 < need) b[o + 3].toInt() else -1)
         } else {
             null
         }
@@ -7223,6 +7228,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             refreshNow()
         }
         return ok
+    }
+
+    fun pinLayerMasks(pinned: Boolean) {
+        val id = primary ?: return
+        if (engine.pinLayerMasks(id, pinned)) refreshNow()
     }
 
     /** Tensão do RotoBezier (0..1); [point] < 0 = todos os vértices. */
@@ -9777,6 +9787,20 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     fun clearGroupInnerSelection() { groupInnerSelection = null }
+
+    fun reorderGroupInner(group: Long, layer: Long, target: Long): Boolean {
+        if (layer == target) return false
+        val children = groupInnerRows[group] ?: return false
+        val child = children.firstOrNull { it.row.id == layer } ?: return false
+        val destination = children.indexOfFirst { it.row.id == target }
+        if (child.row.locked || destination < 0) return false
+        if (!engine.setInlineEditTarget(group, layer)) return false
+        val previous = groupInnerSelection
+        send { reorderLayer(layer, children.lastIndex - destination) }
+        engine.setInlineEditTarget(previous?.first ?: 0L, previous?.second ?: 0L)
+        refreshNow()
+        return true
+    }
 
     private fun refreshGroupRows() {
         val open = timelineInlineGroups

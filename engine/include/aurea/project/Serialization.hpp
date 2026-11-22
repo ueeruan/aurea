@@ -123,7 +123,7 @@ struct SectionHeader {
 /// alinhamento, entrelinha, margem/raio do fundo, cor/desfoque da sombra, e as
 /// mesmas partes de aparência no estilo próprio de cada bloco.
 /// v78: cor sem iluminação por camada de modelo 3D.
-constexpr u32 kTimelineSectionVersion = 78;
+constexpr u32 kTimelineSectionVersion = 79;
 
 /// Cabeçalho do arquivo.
 struct FileHeader {

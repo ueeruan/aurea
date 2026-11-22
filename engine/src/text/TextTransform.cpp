@@ -82,6 +82,7 @@ f32 rig_padding(const Layer& layer, f64 time, f32 extent) {
         extra += std::max(std::fabs(anim_param(layer.tracks, ai, kPosX, time, a.position.x)), std::fabs(anim_param(layer.tracks, ai, kPosY, time, a.position.y)));
         extra += extent * (std::max(0.f, anim_param(layer.tracks, ai, kScaleX, time, a.scale.x) * .01f) + std::max(0.f, anim_param(layer.tracks, ai, kScaleY, time, a.scale.y) * .01f));
         if (anim_param(layer.tracks, ai, kRotZ, time, a.rotation.z) != 0) extra += extent;
+        extra += 2.0f * std::max(0.0f, anim_param(layer.tracks, ai, kBlur, time, a.blur));
     }
     return std::min(extra, 4000.f);
 }
@@ -120,12 +121,14 @@ void evaluate_text_rigs(const Layer& layer, f64 time, const TextLayout& layout, 
         const f32 alpha = P(kOpacity, a.opacity) * .01f, scaleAmount = P(kScaleX, a.scale.x) * .01f, stretchAmount = P(kScaleY, a.scale.y) * .01f;
         const Vec2 offset{P(kPosX, a.position.x), P(kPosY, a.position.y)};
         const f32 angle = P(kRotZ, a.rotation.z) * kDeg2Rad;
+        const f32 blur = std::max(0.0f, P(kBlur, a.blur));
         const Vec4 color{P(kFillR, a.fill.x), P(kFillG, a.fill.y), P(kFillB, a.fill.z), P(kAnimFillA, a.fill.w)};
         for (usize g = 0; g < layout.quads.size(); ++g) {
             const u32 index = dense[unit(layout.quads[g])];
             const f32 weight = transform_influence(start, end, phase, overlap, s.shape, easeIn, easeOut, ranks[index], count);
             // Opacidade: negativa apaga o que está na faixa; positiva apaga o que está FORA dela.
             styles[g].opacity *= std::clamp(alpha < 0 ? 1.f + alpha * weight : 1.f - (1.f - weight) * alpha, 0.f, 1.f);
+            styles[g].blur += blur * weight;
             if (weight == 0) continue;
             const auto b = bounds[index];
             const f32 margin = layer.text.strokeWidth > 0 ? layer.text.strokeWidth + 2 : 2;

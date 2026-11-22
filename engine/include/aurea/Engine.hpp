@@ -1192,7 +1192,7 @@ public:
     /// começo da camada. Substituem as animações de texto anteriores da camada
     /// (animadores e esses mesmos efeitos), em um desfazer. Devolve false se
     /// a camada não for texto 2D ou o id não existir.
-    static constexpr u32 kMotionTextPresetCount = 10;
+    static constexpr u32 kMotionTextPresetCount = 11;
     /// `apply_text_preset` com id a partir daqui aplica o preset do modelo Motion
     /// (id − base): as grades de preset usam o mesmo número para os dois.
     static constexpr u32 kMotionTextPresetBase = 1000;
@@ -1749,6 +1749,7 @@ public:
     /// floats necessários; só escreve se `capacity` couber.
     static constexpr u32 kMaskHeaderFloats = 12;
     u32 query_masks(u64 layerId, f32* out, u32 capacity) noexcept;
+    bool pin_layer_masks(u64 layerId, bool pinned) noexcept;
 
     // --- Rig 2D (personagem desenhado; camada de imagem) — timeline/Rig.hpp ----
     /// Juntas no playhead: por junta kRigJointFloats floats (id, id do pai ou
@@ -3973,6 +3974,7 @@ private:
     std::atomic<u64> previewRetryDueNs_{0};   ///< retry de recurso/GPU; uma edição cancela a espera
     std::atomic<u64>  mediaReadyGen_{0};      ///< frames novos do decoder
     i64  lastRenderedFrame_ = -1;
+    PreviewIdleKey lastCompletePreview_{};
     /// Medição do transporte (log "perf:"): pedido → primeiro quadro apresentado e o
     /// desvio entre o relógio de áudio e o quadro na tela.
     u64  perfPlayAskNs_ = 0;
@@ -4253,6 +4255,8 @@ private:
     void release_offline_export(ExportContext& ctx, bool retainReadbacks = false, u64 sourceGraceNs = 1) noexcept;
     [[nodiscard]] Status render_export_frame(FrameIndex t, const OffscreenTarget& target, u64& gpuFrame) noexcept;
     [[nodiscard]] Status wait_export_gpu(u64 gpuFrame) noexcept; // renderMutex_ held by caller
+    [[nodiscard]] Status wait_export_gpu_work(ExportContext& ctx) noexcept; // renderMutex_ held by caller
+    [[nodiscard]] Status trim_export_resources(ExportContext& ctx, u8 stage, u32 frame) noexcept;
     /// O contexto vem explícito: um worker abandonado (ExportWatchdog.hpp) que
     /// volte depois nunca pode tocar no export SEGUINTE por `exportCtx_`.
     [[nodiscard]] Status write_export_audio(ExportContext& ctx, i64 untilSample) noexcept;

@@ -149,7 +149,7 @@ AUREA_TEST(SceneTargets, SubmittedCancellationAndTimeoutDoNotStartTheMainGraph) 
     }
 }
 
-AUREA_TEST(SceneTargets, ColdResourcesRemainIncompleteUntilTheSameSceneCanRender) {
+AUREA_TEST(SceneTargets, OptionalInstanceUploadFailureRetainsAllOriginalDraws) {
     RenderFixture f;
     f.backend.mapBuffers = true;
     const auto asset = test_fixtures::material_override::asset();
@@ -164,21 +164,31 @@ AUREA_TEST(SceneTargets, ColdResourcesRemainIncompleteUntilTheSameSceneCanRender
     OffscreenTarget target{*texture, 320, 180};
     RenderSettings settings; settings.finalQuality = settings.stageUnblurredScenes = true;
     FrameStats stats; RenderTimings timings;
-    auto cold = snapshot();
-    // A failed instance allocation is a genuine incomplete scene build.
-    f.backend.beforeCreateBuffer = [](const BufferDesc& buffer) {
-        return buffer.debugName && std::strcmp(buffer.debugName, "3d-instancias") == 0
-            ? Status{Errc::OutOfDeviceMemory} : OkStatus;
+    u32 rejected = 0;
+    auto unmerged = snapshot();
+    f.backend.beforeCreateBuffer = [&](const BufferDesc& buffer) {
+        if (!buffer.debugName || std::strcmp(buffer.debugName, "3d-instancias") != 0) return OkStatus;
+        ++rejected;
+        return Status{Errc::OutOfDeviceMemory};
     };
-    AUREA_CHECK(f.renderer.render(cold, settings, &target, stats, timings).ok());
-    AUREA_CHECK(f.renderer.take_incomplete());
-    AUREA_CHECK_EQ(f.backend.framesSubmitted, 1u); AUREA_CHECK(!f.backend.frameOpen);
+    AUREA_CHECK(f.renderer.render(unmerged, settings, &target, stats, timings).ok());
+    AUREA_CHECK(!f.renderer.take_incomplete());
+    AUREA_CHECK(rejected > 0);
+    AUREA_CHECK_EQ(timings.sceneExposureBatches, 2u);
+    AUREA_CHECK_EQ(f.backend.framesSubmitted, 3u); AUREA_CHECK(!f.backend.frameOpen);
+    const auto countDraws = [&] {
+        return std::count_if(f.backend.events.begin(), f.backend.events.end(),
+            [](const auto& event) { return event.kind == MockBackend::Event::Draw; });
+    };
+    const auto individualDraws = countDraws();
+    f.backend.events.clear();
     f.backend.beforeCreateBuffer = {};
     auto ready = snapshot(); stats = {}; timings = {};
     AUREA_CHECK(f.renderer.render(ready, settings, &target, stats, timings).ok());
     AUREA_CHECK(!f.renderer.take_incomplete());
     AUREA_CHECK_EQ(timings.sceneExposureBatches, 2u);
-    AUREA_CHECK_EQ(f.backend.framesSubmitted, 4u); AUREA_CHECK(!f.backend.frameOpen);
+    AUREA_CHECK_EQ(f.backend.framesSubmitted, 6u); AUREA_CHECK(!f.backend.frameOpen);
+    AUREA_CHECK(individualDraws > countDraws());
     f.backend.destroy_texture(*texture);
 }
 

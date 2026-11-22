@@ -540,7 +540,7 @@ private struct Model3DGridView: View {
     var body: some View {
         if shapes {
             ObjectGridView(cells: [ObjectCell(label: AureaText.t("shape3d_back"), tag: "add.model3d.back", glyph: CupertinoGlyph.ChevronLeft) { shapes = false }]
-                           + (0..<Shape3DState.names.count).map { kind in
+                           + (0..<Shape3DState.cloud).map { kind in
                 ObjectCell(label: AureaText.t(Shape3DState.names[kind]), tag: "shape3d.add.\(kind)", icon: AnyView(Shape3DGlyph(kind: kind))) {
                     model.addShape3D(kind: kind); close()
                 }
@@ -567,6 +567,8 @@ private struct Model3DGridView: View {
                 ObjectCell(label: AureaText.t("panel_camera_3d"), tag: "add.model3d.camera", glyph: CupertinoGlyph.CameraFill) { model.addCamera(); close() },
                 ObjectCell(label: AureaText.t("real_camera_title"), tag: "add.model3d.realCamera", glyph: CupertinoGlyph.CameraViewfinder) { model.startRealCamera(); close() },
                 ObjectCell(label: AureaText.t("sh_add_null_3d"), tag: "add.model3d.null", icon: AnyView(ShellNullGlyph())) { model.addNull(threeD: true); close() },
+                ObjectCell(label: AureaText.t("shape3d_cloud"), tag: "add.model3d.cloud",
+                           icon: AnyView(Shape3DGlyph(kind: Shape3DState.cloud))) { model.addShape3D(kind: Shape3DState.cloud); close() },
             ], footer: AureaText.t("sh_add_model_3d_hint"), warning: AureaText.t("model3d_risk_warning"))
             // O seletor de Fotos não abre o app Arquivos, onde costuma estar o PNG sem fundo.
             .confirmationDialog(AureaText.t("image3d_add"), isPresented: $choosingImage3D, titleVisibility: .visible) {
@@ -748,9 +750,8 @@ struct PresetsBrowserView: View {
 enum AddBarCatalog {
     /// As 5 da pílula: Forma, Mídia, Áudio, Texto, Elemento. Ids `addBar.<AddTab>`.
     static let pill = [0, 1, 2, 3, 4]
-    /// A grade 4 × 2 do "+": Forma, Mídia, Áudio, Texto / Presets, Elemento, 3D, Desenho.
-    /// Ids `addBar.grid.<AddTab>`.
-    static let grid = [0, 1, 2, 3, ShellAddCategories.textPresets, 4, 5, 6]
+    /// Categorias extras do "+", na ordem de leitura.
+    static let grid = [ShellAddCategories.textPresets, 5, 6, 7]
     /// A vaga da pílula que acende para o conteúdo aberto (Presets no Texto; 3D e
     /// Vetor no Elemento), mostrando o ícone e o nome do que está aberto.
     static func slot(_ index: Int) -> Int {
@@ -1029,10 +1030,7 @@ private enum AddBarDrawing {
     }
 }
 
-/// A grade do "+": o bloco cresce para cima, por cima da timeline e da própria
-/// barra, com o cartão 4 × 2 das categorias e o "X" redondo no lugar do "+".
-/// Ocupa a área que recebe (o véu transparente: tocar fora do cartão fecha e nada
-/// passa para a timeline). Mola suave de ~200 ms; nada com "reduzir movimento".
+/// O menu de categorias extras sobe por cima da timeline e fecha ao tocar fora.
 @MainActor struct AddBarMoreOverlay: View {
     @EnvironmentObject private var model: AureaModel
     @EnvironmentObject private var shell: ShellPresentation
@@ -1047,7 +1045,7 @@ private enum AddBarDrawing {
                 Color.black.opacity(0.45).contentShape(Rectangle())
                     .onTapGesture { AddBarState.close(reduce: reduceMotion) }
                     .accessibilityHidden(true)
-                AddBarGridBlock(reduce: reduceMotion) { index in
+                AddBarGridBlock(close: { AddBarState.close(reduce: reduceMotion) }) { index in
                     AddBarState.open(index, model: model, shell: shell, reduce: reduceMotion)
                 }
                 .transition(gridTransition)
@@ -1064,54 +1062,72 @@ private enum AddBarDrawing {
 }
 
 @MainActor private struct AddBarGridBlock: View {
-    let reduce: Bool
+    let close: () -> Void
     let open: (Int) -> Void
-    @State private var turned = false
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            VStack(spacing: 6) {
-                ForEach(0..<2, id: \.self) { row in
-                    HStack(spacing: 6) {
-                        ForEach(Array(AddBarCatalog.grid[(row * 4)..<(row * 4 + 4)]), id: \.self) { index in
-                            tile(index)
-                        }
-                    }
-                }
-            }
-            .padding(8)
-            .background(AddBarColors.pill, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).stroke(AddBarColors.raised, lineWidth: 1))
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel(AureaText.t("bar33_grid"))
-            .accessibilityIdentifier("addBar.grid")
-            AddBarRoundButton(label: AureaText.t("bar33_close"), id: "addBar.close", rotation: turned ? 45 : 0) {
-                AddBarState.close(reduce: reduce)
-            }
+        ViewThatFits(in: .vertical) {
+            card
+            ScrollView { card }
         }
-        .padding(6)
-        .background(AddBarColors.block, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-        // O fundo do bloco segura o toque: não fecha nem passa para a timeline.
-        .contentShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-        .onTapGesture { }
+        .frame(maxWidth: 470)
         .padding(.horizontal, 10)
         .padding(.vertical, 4)
-        .onAppear {
-            if reduce { turned = true } else { withAnimation(.spring(response: 0.26, dampingFraction: 0.8)) { turned = true } }
-        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("addBar.grid")
+        .accessibilityAction(.escape, close)
     }
 
-    private func tile(_ index: Int) -> some View {
+    private var card: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(AureaText.t("bar33_more"))
+                    .font(.aurea(size: 16, weight: .bold))
+                    .foregroundStyle(AureaColors.text)
+                    .accessibilityAddTraits(.isHeader)
+                    .padding(.leading, 6)
+                Spacer(minLength: 0)
+                Button(action: close) {
+                    EditToolIcon(icon: .close, size: 18)
+                        .frame(width: 32, height: 32)
+                        .background(AddBarColors.tile, in: RoundedRectangle(cornerRadius: 12))
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(AureaPressStyle())
+                .accessibilityLabel(AureaText.t("bar33_close"))
+                .accessibilityIdentifier("addBar.close")
+            }
+            HStack(spacing: 6) {
+                tile(AddBarCatalog.grid[0], icon: .presets)
+                tile(AddBarCatalog.grid[1], icon: .cube)
+            }
+            HStack(spacing: 6) {
+                tile(AddBarCatalog.grid[2], icon: .draw)
+                tile(AddBarCatalog.grid[3], icon: .vector)
+            }
+        }
+        .padding(10)
+        .background(AddBarColors.pill, in: RoundedRectangle(cornerRadius: 28))
+        .overlay(RoundedRectangle(cornerRadius: 28).strokeBorder(AddBarColors.raised))
+        .contentShape(RoundedRectangle(cornerRadius: 28))
+        .onTapGesture { }
+    }
+
+    private func tile(_ index: Int, icon: EditIcon) -> some View {
         let name = AureaText.t(ShellAddCategories.all[index].0)
         return Button { open(index) } label: {
-            VStack(spacing: 4) {
-                AddBarIcon(category: index, size: 20)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 46)
-                    .background(AddBarColors.tile, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                Text(name).font(.aurea(size: 10, weight: .medium)).foregroundStyle(AureaColors.muted)
-                    .lineLimit(1).minimumScaleFactor(0.75)
+            HStack(spacing: 8) {
+                EditToolIcon(icon: icon, color: AureaColors.accent, size: 20)
+                    .frame(width: 32, height: 32)
+                    .background(AureaColors.accentDim, in: RoundedRectangle(cornerRadius: 10))
+                Text(name).font(.aurea(size: 12, weight: .semibold))
+                    .foregroundStyle(AureaColors.text)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+            .background(AddBarColors.tile, in: RoundedRectangle(cornerRadius: 14))
             .contentShape(Rectangle())
         }
         .buttonStyle(AureaPressStyle())
@@ -1119,7 +1135,6 @@ private enum AddBarDrawing {
         .accessibilityIdentifier("addBar.grid.\(ShellAddCategories.name(index))")
     }
 }
-
 
 /// 0.4.1 (mockup "interface 03"): o véu de cima (barra, palco e transporte) com a grade do
 /// "+" ou uma gaveta aberta. Par do `editor.dock.veil` do Android.

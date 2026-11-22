@@ -29,9 +29,9 @@ data class Shape3DInfo(val kind: Int, val colors: List<FloatArray>, val images: 
     }
 }
 
-/** As 10 formas, na ordem do `Shape3DKind` do motor. */
+/** Ordem do `Shape3DKind` do motor, inclusive a nuvem do menu 3D. */
 object Shape3DCatalog {
-    const val COUNT = 10
+    const val CLOUD = 19
     /** Floats por parte do `query_shape3d_parts` (Engine::kShapePartFloats). */
     const val PART_FLOATS = 14
 
@@ -40,6 +40,9 @@ object Shape3DCatalog {
         R.string.shape3d_cube, R.string.shape3d_sphere, R.string.shape3d_cylinder, R.string.shape3d_cone,
         R.string.shape3d_pyramid, R.string.shape3d_torus, R.string.shape3d_star, R.string.shape3d_heart,
         R.string.shape3d_capsule, R.string.shape3d_diamond,
+        R.string.shape3d_triangle_prism, R.string.shape3d_pentagon_prism, R.string.shape3d_hexagon_prism,
+        R.string.shape3d_octagon_prism, R.string.shape3d_decagon_prism, R.string.shape3d_tetrahedron,
+        R.string.shape3d_icosahedron, R.string.shape3d_washer, R.string.shape3d_arrow, R.string.shape3d_cloud,
     )
 
     /** Nome curto de cada parte (a mesma ordem das partes do motor). */
@@ -54,6 +57,12 @@ object Shape3DCatalog {
         6 -> if (part == 5) R.string.shape3d_part_center else R.string.shape3d_part_tip
         7 -> intArrayOf(R.string.shape3d_part_left, R.string.shape3d_part_right).getOrElse(part) { R.string.shape3d_part_n }
         8 -> intArrayOf(R.string.shape3d_part_top, R.string.shape3d_part_body, R.string.shape3d_part_bottom).getOrElse(part) { R.string.shape3d_part_n }
+        in 10..14, 18 -> intArrayOf(R.string.shape3d_part_front, R.string.shape3d_part_back, R.string.shape3d_part_side)
+            .getOrElse(part) { R.string.shape3d_part_n }
+        16 -> intArrayOf(R.string.shape3d_part_upper, R.string.shape3d_part_lower).getOrElse(part) { R.string.shape3d_part_n }
+        17 -> intArrayOf(R.string.shape3d_part_front, R.string.shape3d_part_back, R.string.shape3d_part_outer, R.string.shape3d_part_inner)
+            .getOrElse(part) { R.string.shape3d_part_n }
+        CLOUD -> R.string.shape3d_part_volume
         else -> R.string.shape3d_part_n   // toro (quartos) e diamante (facetas): "Parte N"
     }
 

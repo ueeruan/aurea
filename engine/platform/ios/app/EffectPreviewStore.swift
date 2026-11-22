@@ -77,6 +77,11 @@ final class EffectPreviewStore {
         var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
     }
 
+    func cachedImage(for typeId: UInt32) -> UIImage? {
+        guard requestEpoch() != nil else { return nil }
+        return memory.object(forKey: NSNumber(value: typeId))
+    }
+
     func image(for typeId: UInt32) async -> UIImage? {
         guard let epoch = requestEpoch() else { return nil }
         let request = Request()

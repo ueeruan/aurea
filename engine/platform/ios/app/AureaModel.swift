@@ -1083,6 +1083,7 @@ final class AureaModel: ObservableObject {
     /// Detalhe da camada escolhida (transform avaliado no playhead).
     @Published private(set) var detail: [String: Any] = [:]
     @Published private(set) var masks: [MaskItem] = []
+    @Published private(set) var maskPinState = -1
     @Published private(set) var maskAffine: [Float] = [1, 0, 0, 1, 0, 0]
     /// Linha de perspectiva da matriz da máscara: (0, 0, 1) em 2D (ver Engine::query_masks).
     @Published private(set) var maskPerspective: [Float] = [0, 0, 1]
@@ -3279,11 +3280,17 @@ final class AureaModel: ObservableObject {
             offset += count
         }
         maskPerspective = offset + 3 <= data.count ? Array(data[offset..<(offset + 3)]) : [0, 0, 1]
+        maskPinState = offset + 3 < data.count ? Int(data[offset + 3]) : -1
         masks = next
         if let selectedMask, !next.contains(where: { $0.id == selectedMask }) { self.selectedMask = nil; maskDrawing = false; selectedMaskPoint = nil }
     }
 
     var editingMask: MaskItem? { masks.first { $0.id == selectedMask } }
+
+    func pinLayerMasks(_ pinned: Bool) {
+        guard let id = primarySelection, engine.pinLayerMasks(id, pinned: pinned) else { return }
+        refreshModel(force: true)
+    }
 
     /// Canto ↔ curva do ponto escolhido (a regra é do motor).
     func toggleMaskPointCurve(_ point: Int) {
@@ -7870,6 +7877,17 @@ final class AureaModel: ObservableObject {
 
     func clearGroupInnerSelection() { if groupInnerSelection != nil { groupInnerSelection = nil } }
 
+    func reorderGroupInner(group: Int64, layer: Int64, target: Int64) -> Bool {
+        guard layer != target, let children = groupInnerRows[group],
+              let child = children.first(where: { $0.layer.id == layer }), !child.layer.locked,
+              let destination = children.firstIndex(where: { $0.layer.id == target }),
+              engine.setInlineEditTarget(group, layer: layer) else { return false }
+        engine.run { $0.setLayerOrder(layer, newIndex: UInt32(children.count - 1 - destination)) }
+        _ = engine.setInlineEditTarget(groupInnerSelection?.group ?? 0, layer: groupInnerSelection?.layer ?? 0)
+        refreshModel(force: true)
+        return true
+    }
+
     private func refreshGroupRows() {
         guard !timelineInlineGroups.isEmpty else {
             if !groupInnerRows.isEmpty { groupInnerRows = [:] }
@@ -7965,6 +7983,7 @@ final class AureaModel: ObservableObject {
     /// Animated 3D vectors always key XYZ together at the layer-local playhead.
     private func keyTransformGroup(_ id: Int64, detail d: [String: Any], changes: [UInt32: Float]) -> Bool {
         guard autoKeyTransforms, let first = changes.keys.first, first < 12 else { return false }
+        if (d["force2D"] as? NSNumber)?.boolValue == true { return false }
         let base = first / 3 * 3
         guard changes.keys.allSatisfy({ $0 >= base && $0 < base + 3 }) else { return false }
         let mask = (d["animatedMask"] as? NSNumber)?.uint32Value ?? 0
@@ -8507,9 +8526,10 @@ extension AureaModel {
         let rotation = StageGeom.floats(d["rotation"])
         guard w > 0, h > 0, anchor.count >= 3, position.count >= 3, scale.count >= 2 else { return nil }
         let mask = (d["animatedMask"] as? NSNumber)?.uint32Value ?? 0
-        let threeD = [8, 9, 10].contains(StageGeom.layerKind(d)) || layers.first(where: { $0.id == id })?.threeD == true ||
+        let force2D = (d["force2D"] as? NSNumber)?.boolValue == true
+        let threeD = !force2D && ([8, 9, 10].contains(StageGeom.layerKind(d)) || layers.first(where: { $0.id == id })?.threeD == true ||
             abs(position[2]) > 0.01 || (rotation.count >= 2 && (abs(rotation[0]) > 0.01 || abs(rotation[1]) > 0.01)) ||
-            mask & ((1 << 2) | (1 << 6) | (1 << 7)) != 0
+            mask & ((1 << 2) | (1 << 6) | (1 << 7)) != 0)
         return FitGeom(w: w, h: h, anchor: anchor, position: position, scale: scale,
                        rad: (rotation.count > 2 ? rotation[2] : 0) * .pi / 180, centered: StageGeom.layerKind(d) == 10, threeD: threeD,
                        kind: Int32(StageGeom.layerKind(d)))

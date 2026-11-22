@@ -7,4 +7,5 @@
     <string name="fxo_simultaneous">Serentak</string>
     <string name="fxl_tip_softness">Kelembutan ujung</string>
     <string name="drawprog_reverse">Balik arah</string>
+    <string name="drawprog_animate">Animasikan garis</string>
 </resources>

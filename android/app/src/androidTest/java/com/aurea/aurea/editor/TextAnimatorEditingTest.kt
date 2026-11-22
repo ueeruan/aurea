@@ -73,25 +73,28 @@ class TextAnimatorEditingTest {
         compose.runOnIdle { assertTrue(store.primaryKeys().filter { it.property == 40 && it.paramIndex == 0 }.none { it.interpolation == 7 }) }
     }
 
-    @Test fun textAnimationIsAnEffectAndPresetsSurviveKeysCopyUndoAndReopen() {
+    @Test fun textAnimationOpensFromEffectsAndPreservesKeysOnReopen() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assertTrue(context.packageName.endsWith(".uitest"))
         lateinit var store: EditorStore
         var initialized = false
-        var opened by mutableStateOf<EditorPanel?>(null)
+        var opened by mutableStateOf(EditorPanel.Effects)
         compose.setContent {
             store = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))
             initialized = true
             AureaTheme {
                 Box(Modifier.fillMaxSize()) {
                 EditorScreen(store)
-                val env = PanelEnv(store, {}, { opened = it }, {}, {}, {}, { null })
-                if (opened == null) {
-                    Column(Modifier.fillMaxSize().background(AureaColors.Surface).verticalScroll(rememberScrollState())) { TextAnimSection(env) }
-                } else if (opened == EditorPanel.Curve) {
-                    Box(Modifier.fillMaxSize().background(AureaColors.Surface)) { CurvePanel(env) }
-                } else {
-                    Box(Modifier.fillMaxSize().background(AureaColors.Surface)) { EffectsPanel(env) }
+                val env = PanelEnv(store, {}, { opened = it }, {}, {}, {}, { null }, onOpenAnimators = {
+                    AnimationRequest.tab = AnimationTab.Text
+                    opened = EditorPanel.Animation
+                })
+                Box(Modifier.fillMaxSize().background(AureaColors.Surface)) {
+                    when (opened) {
+                        EditorPanel.Animation -> AnimationPanel(env)
+                        EditorPanel.Curve -> CurvePanel(env)
+                        else -> EffectsPanel(env)
+                    }
                 }
                 }
             }
@@ -101,47 +104,37 @@ class TextAnimatorEditingTest {
         compose.waitUntil(15000) { store.project.title == "Text animator editing" }
         compose.runOnIdle { store.addText(); store.dismissTextContentEditor() }
         compose.waitUntil(5000) { store.primary != null && store.textDetail != null }
-        compose.onNodeWithTag("text.anim.0.duplicate").assertDoesNotExist()
-        // Existing presets still author the same data; adding the effect preserves it.
-        compose.onNodeWithText(context.getString(R.string.edt_tp_pop)).performClick()
-        compose.waitUntil(5000) { store.textAnimators.isNotEmpty() }
-        val presetKeys = store.primaryKeys().filter { it.property == 33 }
-        val presetCount = store.textAnimators.size
-        compose.onNodeWithTag("text.transform.add").performScrollTo().performClick()
-        compose.waitUntil(5000) { store.effects.size == 1 && opened == EditorPanel.Effects }
-        val effect = store.effects.single().effectId
-        assertEquals(effectTypeId("aurea.text.transform"), store.effects.single().typeId)
-        compose.waitUntil(5000) { store.paramOf(effect, 0) != null }
-        compose.onNodeWithTag("effects.param.$effect.0.0").performScrollTo().performClick()
-        compose.runOnIdle { store.seek(0) }
-        compose.waitUntil(5000) { store.detail?.localPlayhead == 0 }
-        compose.onNodeWithContentDescription(context.getString(R.string.panel_marcar_keyframe_aqui)).performClick()
-        compose.waitUntil(5000) { store.primaryKeys().any { it.property == TrackProperty.EFFECT_PARAM && it.effectIndex == effect && it.paramIndex == 0 } }
-        compose.runOnIdle { store.seek(30) }
-        compose.waitUntil(5000) { store.detail?.localPlayhead == 30 }
-        compose.runOnIdle { store.setEffectParam(effect, store.paramOf(effect, 0)!!, 100f) }
-        compose.waitUntil(5000) { store.primaryKeys().count { it.property == TrackProperty.EFFECT_PARAM && it.effectIndex == effect && it.paramIndex == 0 } == 2 }
-        compose.onNodeWithContentDescription(context.getString(R.string.panel_editar_curva_propriedade)).performClick()
-        compose.onNodeWithTag("curve.category.bounces").performClick()
-        compose.onNodeWithTag("curve.bounce.count").performClick()
-        compose.onNodeWithTag("curve.bounce.strength").performTouchInput {
-            down(center); moveTo(androidx.compose.ui.geometry.Offset(width * .8f, center.y)); up()
+        compose.onNodeWithTag("effects.text.animators").performScrollTo().performClick()
+        compose.onNodeWithTag("animation.tab.ready").performClick()
+        compose.onNodeWithTag("text.motion.preset.10").performScrollTo().performClick()
+        compose.waitUntil(5000) { store.textAnimators.size == 1 }
+        compose.onNodeWithTag("animation.tab.text").performClick()
+        compose.onNodeWithTag("anim.item.0").performScrollTo().performClick()
+        compose.runOnIdle { store.seek(15) }
+        compose.waitUntil(5000) { store.detail?.localPlayhead == 15 }
+        val keyButton = compose.onNodeWithTag("anim.0.key.0.toggle")
+        fun progressKeys() = store.primaryKeys().filter {
+            it.property == TrackProperty.TEXT_ANIM_PARAM && it.effectIndex == 0 && it.paramIndex == 0
         }
-        compose.waitUntil(5000) { store.primaryKeys().first { it.property == 31 && it.time == 0 }.interpolation == 7 }
-        val bounce = store.engineForStress.queryKeyframeEasing(store.primary!!, 31, effect, 0, 0)!!
-        assertEquals(.5f, bounce[0], .0001f)
-        assertTrue("Bounce slider easing=${bounce.contentToString()}", bounce[1] > .6f); assertEquals(-10f, bounce[3], .0001f)
+        keyButton.performScrollTo().performClick()
+        compose.waitUntil(5000) { progressKeys().any { it.time == 15 } }
+        keyButton.performClick()
+        compose.waitUntil(5000) { progressKeys().none { it.time == 15 } }
+        val presetKeys = progressKeys()
+        assertEquals(2, presetKeys.size)
+        compose.onNodeWithTag("anim.0.duplicate").performScrollTo().performClick()
+        compose.waitUntil(5000) { store.textAnimators.size == 2 }
+        compose.runOnIdle { store.undo() }
+        compose.waitUntil(5000) { store.textAnimators.size == 1 }
+        keyButton.performScrollTo().performClick()
+        compose.waitUntil(5000) { progressKeys().size == 3 }
+        compose.onNodeWithContentDescription(context.getString(R.string.panel_editar_curva_propriedade)).performClick()
         compose.runOnIdle {
             assertEquals(EditorPanel.Curve, opened)
-            assertEquals(TrackProperty.EFFECT_PARAM, store.selectedKeyframe?.second?.property)
-            assertEquals(effect, store.selectedKeyframe?.second?.effectIndex)
-            assertEquals(presetCount, store.textAnimators.size)
-            assertEquals(presetKeys, store.primaryKeys().filter { it.property == 33 })
-            store.copyEffects(effect); store.pasteEffects()
+            assertEquals(TrackProperty.TEXT_ANIM_PARAM, store.selectedKeyframe?.second?.property)
+            assertEquals(0, store.selectedKeyframe?.second?.paramIndex)
         }
-        compose.waitUntil(5000) { store.effects.size == 2 }
-        compose.runOnIdle { store.undo() }
-        compose.waitUntil(5000) { store.effects.size == 1 }
+        val savedKeys = progressKeys()
         var saved = false
         compose.runOnIdle { store.saveProject { saved = true } }
         compose.waitUntil(10000) { saved }
@@ -151,21 +144,9 @@ class TextAnimatorEditingTest {
         compose.runOnIdle { store.openProject(path) }
         compose.waitUntil(10000) { store.layers.size == 1 }
         compose.runOnIdle { store.select(store.layers.single().id, openOptions = false) }
-        compose.waitUntil(5000) { store.effects.size == 1 && store.textAnimators.size == presetCount }
+        compose.waitUntil(5000) { store.textAnimators.size == 1 && progressKeys().size == 3 }
         compose.runOnIdle {
-            assertEquals(presetKeys, store.primaryKeys().filter { it.property == 33 })
-            assertEquals(listOf(0, 30), store.primaryKeys().filter { it.property == TrackProperty.EFFECT_PARAM }.map { it.time })
-            assertArrayEquals(bounce, store.engineForStress.queryKeyframeEasing(store.primary!!, 31, effect, 0, 0)!!, .0001f)
-        }
-        // Returning from a keyed Text Transform must open the NEW animator card.
-        compose.runOnIdle { opened = null }
-        compose.onNodeWithTag("text.animator.add").performScrollTo().performClick()
-        compose.waitUntil(5000) { store.effects.size == 2 && opened == EditorPanel.Effects }
-        val animator = store.effects.last { it.typeId == effectTypeId("aurea.text.animator") }.effectId
-        compose.waitUntil(5000) { store.timelineFocus?.any { it.effectIndex == animator } == true }
-        compose.runOnIdle {
-            assertNull(store.pendingEffectFocus)
-            assertEquals(presetCount, store.textAnimators.size)
+            assertEquals(savedKeys, progressKeys())
         }
     }
 }

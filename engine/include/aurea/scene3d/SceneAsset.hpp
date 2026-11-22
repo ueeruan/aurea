@@ -335,6 +335,7 @@ struct SceneAsset {
     /// Forma 3D gerada (Shape3D.hpp): o nó i é a parte i, e as trilhas
     /// TrackProperty::ShapePart da camada movem cada uma.
     bool shapeParts = false;
+    bool volumetricCloud = false; ///< Generated cloud. The mesh bounds enclose a density field.
     /// Texto 3D com letras separadas: 3 por nó (letra visível, palavra, linha)
     /// — as unidades dos animadores de letra/palavra/linha (Text3D.hpp).
     std::vector<u32> textUnits;

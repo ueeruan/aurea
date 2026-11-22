@@ -19,6 +19,7 @@ internal const val MOTION_TEXT_PRESET_BASE = 1000
 internal val MotionTextPresetLabels = listOf(
     R.string.tp_m_type_in, R.string.tp_m_decode, R.string.tp_m_uncensor, R.string.tp_m_password, R.string.tp_m_title_spread,
     R.string.tp_m_fade_up, R.string.tp_m_wave, R.string.tp_m_spin, R.string.tp_m_scale_word, R.string.tp_m_scale_out,
+    R.string.app_text_preset_smooth_bounce,
 )
 
 /** O preset serve para este texto? Os do modelo Motion só no 2D; os antigos só no 3D; os salvos em ambos. */

@@ -77,6 +77,20 @@ AUREA_TEST(TextAnimatorPro, RangeInIndexUnitsSmoothnessAndCharactersExcludingSpa
     for (usize i = 0; i < g.size(); ++i) AUREA_CHECK_NEAR(g[i].translate.y, i < 3 ? -10.0f : 0.0f, 1e-4f);
 }
 
+AUREA_TEST(TextAnimatorPro, OverlapAndSpringActOnSeveralLettersAndSettleAtTheEnds) {
+    for (u32 i = 0; i < 6; ++i) {
+        AUREA_CHECK_NEAR(spring_reveal_weight(0.0f, 4.5f, 0.83f, 1.5f, i, 6), 1.0f, 1e-6f);
+        AUREA_CHECK_NEAR(spring_reveal_weight(1.0f, 4.5f, 0.83f, 1.5f, i, 6), 0.0f, 1e-6f);
+    }
+    AUREA_CHECK(spring_reveal_weight(0.2f, 4.5f, 0.83f, 1.5f, 0, 6) < 0.0f);
+    AUREA_CHECK(spring_reveal_weight(0.2f, 4.5f, 0.83f, 1.5f, 1, 6) < 1.0f);
+    AUREA_CHECK_NEAR(spring_reveal_weight(0.999f, 4.5f, 0.83f, 1.5f, 5, 6), 0.0f, 1e-5f);
+    for (u32 i : {1u, 2u, 3u, 4u}) {
+        const f32 w = pro_range_weight(0, 50, 0, 0, 0, 1, 0, 0, i, 6, false, 4.5f);
+        AUREA_CHECK(w > 0.0f && w < 1.0f);
+    }
+}
+
 AUREA_TEST(TextAnimatorPro, ModesCombineSelectorsAndWigglyRespectsCorrelationAndLimits) {
     AUREA_CHECK_NEAR(combine_selector(0.25f, 0.5f, 0), 0.75f, 1e-6f);
     AUREA_CHECK_NEAR(combine_selector(1.0f, 0.25f, 1), 0.75f, 1e-6f);

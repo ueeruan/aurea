@@ -1213,6 +1213,7 @@ Status Backend::poll_export_work(Status* completedFailure) noexcept {
         if (const Status status = check(result, "fence auxiliar do export"); !status.ok()) return status;
     }
     collect_immediate();
+    if (pendingImmediate_.empty()) allocator_.trim_empty_blocks();
     return pendingImmediate_.empty() ? OkStatus : Status{Errc::Timeout};
 }
 

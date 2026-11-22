@@ -554,7 +554,7 @@ extension PanelPresetEntry {
         for kind in PanelPresetKind.allCases {
             if kind == .text {
                 // 0.5.0: os do modelo Motion primeiro (motor: base 1000); os antigos ficam para o texto 3D.
-                let motionKeys = ["tp_m_type_in", "tp_m_decode", "tp_m_uncensor", "tp_m_password", "tp_m_title_spread", "tp_m_fade_up", "tp_m_wave", "tp_m_spin", "tp_m_scale_word", "tp_m_scale_out"]
+                let motionKeys = ["tp_m_type_in", "tp_m_decode", "tp_m_uncensor", "tp_m_password", "tp_m_title_spread", "tp_m_fade_up", "tp_m_wave", "tp_m_spin", "tp_m_scale_word", "tp_m_scale_out", "app_text_preset_smooth_bounce"]
                 for (index, key) in motionKeys.enumerated() {
                     result.append(PanelPresetEntry(id: "motion:\(index)", name: AureaText.t(key), kind: kind, textPreset: PanelPresetEntry.motionTextBase + UInt32(index)))
                 }
@@ -2306,6 +2306,12 @@ struct MaskPanel: View {
 
     @ViewBuilder private var masksList: some View {
         Color.clear.frame(height: 6)
+        if !model.masks.isEmpty, model.maskPinState >= 0 {
+            NativePanelToggle(AureaText.t("mask_pin_to_comp"), checked: model.maskPinState == 1,
+                              fontSize: 13, weight: .regular, set: model.pinLayerMasks)
+                .disabled(model.selectedLayer?.locked == true)
+                .accessibilityIdentifier("mask.pin")
+        }
         ForEach(Array(model.masks.enumerated()), id: \.element.id) { entry in
             maskRow(entry.offset, entry.element)
                 .background(AureaColors.fxLowSurface, in: RoundedRectangle(cornerRadius: 5))
@@ -2664,6 +2670,7 @@ struct TextAnimationSection: View {
         ("tp_m_type_in", CupertinoGlyph.Pencil), ("tp_m_decode", CupertinoGlyph.LockOpen), ("tp_m_uncensor", CupertinoGlyph.Eye), ("tp_m_password", CupertinoGlyph.Lock),
         ("tp_m_title_spread", CupertinoGlyph.ArrowLeftRight), ("tp_m_fade_up", CupertinoGlyph.ArrowUp), ("tp_m_wave", CupertinoGlyph.Waveform),
         ("tp_m_spin", CupertinoGlyph.ArrowCounterclockwise), ("tp_m_scale_word", CupertinoGlyph.Fullscreen), ("tp_m_scale_out", CupertinoGlyph.FullscreenExit),
+        ("app_text_preset_smooth_bounce", CupertinoGlyph.Waveform),
     ] }
     private func load() {
         let flat = model.engine.textAnimators(id).map(\.floatValue)
@@ -2799,7 +2806,11 @@ private struct TextAnimatorEditor: View {
             : !((info["enabled"] as? NSNumber)?.boolValue ?? true) ? .off
             : (info["error"] as? String ?? "").isEmpty ? .ok : .error
         return NativePanelRuler(label: p.label, value: value, step: p.step, range: p.range, unit: p.unit, decimals: p.step < 0.5 ? 1 : 0, keypad: true,
-            look: look, expression: expression, onExpression: {
+            look: look, toggleKey: {
+                model.timelineFocus = [track]
+                model.engine.toggleTextAnimKey(id, index: UInt32(index), param: UInt32(p.key))
+                reload()
+            }, expression: expression, onExpression: {
                 model.expressionSheet = ExpressionRequest(layer: id, label: p.label, tracks: [ExpressionTrack(property: 33, effect: UInt32(index), param: UInt32(p.key))], unit: p.unit)
             }, selected: model.timelineFocus == [track], onSelect: { model.timelineFocus = [track] }, compactUnit: true, identifier: "anim.\(index).key.\(p.key)") {
                 model.engine.setTextAnimParam(id, index: UInt32(index), param: UInt32(p.key), value: $0)
@@ -2832,6 +2843,7 @@ private struct TextAnimatorEditor: View {
     }
     @ViewBuilder private func editor(_ f: [Float]) -> some View {
         let props = Int(f[0]), rig = f[1] > 0.5, tag = "anim.\(index)", on = values[0] > 0.5
+        let sweep = !rig && Int(f[selectorField(0, 1)]) == 4
         let toggleProp: (Int) -> Void = { setField(0, Float(props ^ $0)) }
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 0) {
@@ -2854,8 +2866,13 @@ private struct TextAnimatorEditor: View {
                     CupertinoGlyph.text(CupertinoGlyph.Trash, size: 18, color: AureaColors.fxListIcon).frame(width: 36, height: 40).contentShape(Rectangle())
                 }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityLabel(AureaText.t("panel_remover")).accessibilityIdentifier("\(tag).delete")
             }
-            PanelSection(title: AureaText.t("fxs_range"), glyph: CupertinoGlyph.ArrowLeftRight, tag: "\(tag).sec.range", startOpen: false, stacked: false) {
-                row(param(0, "panel_inicio", "%", 0.5, -1000...1000)); row(param(1, "panel_fim", "%", 0.5, -1000...1000)); row(param(2, "fxl_offset", "%", 0.5, -1000...1000))
+            PanelSection(title: AureaText.t(sweep ? "ae_anim_sweep" : "fxs_range"), glyph: CupertinoGlyph.ArrowLeftRight, tag: "\(tag).sec.range", startOpen: sweep, stacked: false) {
+                if sweep { sweepBody(0, f, tag: tag) }
+                else {
+                    row(param(0, "panel_inicio", "%", 0.5, -1000...1000))
+                    row(param(1, "panel_fim", "%", 0.5, -1000...1000))
+                    row(param(2, "fxl_offset", "%", 0.5, -1000...1000))
+                }
             }
             PanelSection(title: AureaText.t("fxs_transform"), glyph: CupertinoGlyph.Move, tag: "\(tag).sec.transform", startOpen: false, stacked: false) {
                 transformRows(f, props: props, rig: rig, toggleProp: toggleProp)
@@ -2914,12 +2931,15 @@ private struct TextAnimatorEditor: View {
                     }
                 }
             }
-            PanelSection(title: AureaText.t("fxs_interp_ease"), glyph: CupertinoGlyph.ArrowUpArrowDown, tag: "\(tag).sec.ease", startOpen: false, stacked: false) {
+            if !sweep { PanelSection(title: AureaText.t("fxs_interp_ease"), glyph: CupertinoGlyph.ArrowUpArrowDown, tag: "\(tag).sec.ease", startOpen: false, stacked: false) {
                 choice("fxl_shape", rig ? ["fxo_square_2", "fxo_smooth", "fxo_triangle"] : ["fxo_square_2", "panel_sobe", "panel_desce", "fxo_triangle", "panel_redondo", "fxo_smooth"], field: selectorField(0, 5), current: Int(f[selectorField(0, 5)]))
-                if !rig { row(param(32, "fx_suavidade", "%", 0.5, 0...100)) }
+                if !rig && Int(f[selectorField(0, 5)]) == 0 {
+                    row(param(32, "fx_suavidade", "%", 0.5, 0...100))
+                    row(param(41, "fxl_overlap", "%", 0.5, 0...1000))
+                }
                 row(param(4, rig ? "fxl_ease_in" : "fxl_ease_high", "%", 0.5, -100...100)); row(param(5, rig ? "fxl_ease_out" : "fxl_ease_low", "%", 0.5, -100...100))
                 if rig { row(param(41, "fxl_overlap", "%", 0.5, 0...1000)) }
-            }
+            } }
             PanelSection(title: AureaText.t("fxl_random_order"), glyph: CupertinoGlyph.Arrow2Squarepath, tag: "\(tag).sec.random", startOpen: false, stacked: false) {
                 toggle("fxl_random_order", f[selectorField(0, 6)] > 0.5) { setField(selectorField(0, 6), $0 ? 1 : 0) }
                 HStack(spacing: 8) {
@@ -2939,6 +2959,7 @@ private struct TextAnimatorEditor: View {
         ForEach(transformParameters(props: props, rig: rig), id: \.key) { parameter in
             row(parameter)
         }
+        if rig { row(param(20, "panel_desfoque", "px", 0.2, 0...200)) }
         if !rig {
             if props & (1 << 4) != 0 {
                 choice("ae_anim_tracking_type", ["ae_anim_tracking_both", "ae_anim_tracking_before", "ae_anim_tracking_after"], field: 11, current: Int(f[11]))
@@ -3051,7 +3072,10 @@ private struct TextAnimatorEditor: View {
                 choice("panel_anima_cada", ["panel_letra", "panel_palavra", "panel_linha", "ui_char_no_spaces"], field: selectorField(s, 2), current: Int(f[selectorField(s, 2)]))
                 choice("fxl_units", ["fxo_percentage", "fxo_index"], field: selectorField(s, 3), current: Int(f[selectorField(s, 3)]))
                 choice("fxl_shape", ["fxo_square_2", "panel_sobe", "panel_desce", "fxo_triangle", "panel_redondo", "fxo_smooth"], field: selectorField(s, 5), current: Int(f[selectorField(s, 5)]))
-                row(param(block + 32, "fx_suavidade", "%", 0.5, 0...100))
+                if Int(f[selectorField(s, 5)]) == 0 {
+                    row(param(block + 32, "fx_suavidade", "%", 0.5, 0...100))
+                    row(param(block + 41, "fxl_overlap", "%", 0.5, 0...1000))
+                }
                 row(param(block + 4, "fxl_ease_high", "%", 0.5, -100...100)); row(param(block + 5, "fxl_ease_low", "%", 0.5, -100...100))
                 toggle("fxl_random_order", f[selectorField(s, 6)] > 0.5) { setField(selectorField(s, 6), $0 ? 1 : 0) }
                 if f[selectorField(s, 6)] > 0.5 {
@@ -3075,13 +3099,22 @@ private extension TextAnimatorEditor {
     /// Par de `SweepSelector` no TextAnimSection.kt.
     @ViewBuilder func sweepBody(_ s: Int, _ f: [Float], tag: String) -> some View {
         let block = 64 * s
-        Text(AureaText.t("ae_anim_sweep_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).fixedSize(horizontal: false, vertical: true)
-        row(param(block, "panel_inicio", "%", 0.5, -1000...1000)); row(param(block + 1, "panel_fim", "%", 0.5, -1000...1000)); row(param(block + 2, "fxl_offset", "%", 0.5, -1000...1000))
+        let shape = min(3, Int(f[selectorField(s, 5)]))
+        if shape == 3 {
+            row(param(block, "la_progress", "%", 0.5, 0...100))
+            row(param(block + 2, "fxl_offset", "%", 0.5, -100...100))
+        } else {
+            Text(AureaText.t("ae_anim_sweep_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).fixedSize(horizontal: false, vertical: true)
+            row(param(block, "panel_inicio", "%", 0.5, -1000...1000))
+            row(param(block + 1, "panel_fim", "%", 0.5, -1000...1000))
+            row(param(block + 2, "fxl_offset", "%", 0.5, -1000...1000))
+        }
         row(param(block + 41, "fxl_overlap", "%", 0.5, 0...1000))
         row(param(block + 3, "panel_intensidade", "%", 0.5, -100...100))
         choice("panel_anima_cada", ["panel_letra", "panel_palavra", "panel_linha", "ui_char_no_spaces"], field: selectorField(s, 2), current: Int(f[selectorField(s, 2)]))
-        choice("fxl_shape", ["fxo_square_2", "fxo_smooth", "fxo_triangle"], field: selectorField(s, 5), current: min(2, Int(f[selectorField(s, 5)])))
-        row(param(block + 4, "fxl_ease_in", "%", 0.5, -100...100)); row(param(block + 5, "fxl_ease_out", "%", 0.5, -100...100))
+        choice("fxl_shape", ["fxo_square_2", "fxo_smooth", "fxo_triangle", "app_text_preset_smooth_bounce"], field: selectorField(s, 5), current: shape)
+        row(param(block + 4, shape == 3 ? "fx_amplitude" : "fxl_ease_in", "%", 0.5, shape == 3 ? 0...100 : -100...100))
+        row(param(block + 5, shape == 3 ? "fx_frequencia" : "fxl_ease_out", "%", 0.5, shape == 3 ? 0...100 : -100...100))
         toggle("fxl_random_order", f[selectorField(s, 6)] > 0.5) { setField(selectorField(s, 6), $0 ? 1 : 0) }
         if f[selectorField(s, 6)] > 0.5 {
             HStack(spacing: 8) {

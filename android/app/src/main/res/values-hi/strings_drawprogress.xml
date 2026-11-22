@@ -7,4 +7,5 @@
     <string name="fxo_simultaneous">एक साथ</string>
     <string name="fxl_tip_softness">सिरे की कोमलता</string>
     <string name="drawprog_reverse">उल्टी दिशा</string>
+    <string name="drawprog_animate">स्ट्रोक ऐनिमेट करें</string>
 </resources>

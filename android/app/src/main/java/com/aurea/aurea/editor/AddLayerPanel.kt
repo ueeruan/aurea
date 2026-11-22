@@ -8,7 +8,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.SizeTransform
@@ -100,6 +99,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -133,7 +133,7 @@ import kotlin.math.sin
 
 /**
  * Destinos do adicionar. 0.3.3 barra: a pílula mostra 5 ([ADD_BAR_PILL]) e o
- * "+" abre a grade de 8 ([ADD_BAR_GRID]); o Vetor abre pelo Elemento.
+ * "+" abre as categorias extras ([ADD_BAR_GRID]).
  *
  * Categorias do adicionar (7.2): ícone grande + nome curto, cada recurso num
  * lugar só. O antigo "Mais" e o trilho da direita (mão livre, vetorial, texto)
@@ -768,7 +768,7 @@ private fun Model3DGrid(store: EditorStore, close: () -> Unit) {
     if (shapes) {
         ObjectGrid(
             listOf(ObjectCell(stringResource(R.string.shape3d_back), "add.model3d.back", glyph = CupertinoGlyph.ChevronLeft) { shapes = false }) +
-                (0 until com.aurea.aurea.state.Shape3DCatalog.COUNT).map { k ->
+                (0 until com.aurea.aurea.state.Shape3DCatalog.CLOUD).map { k ->
                     ObjectCell(stringResource(com.aurea.aurea.state.Shape3DCatalog.names[k]), "shape3d.add.$k", draw = { drawShape3DIcon(k) }) {
                         store.addShape3D(k)
                         close()
@@ -800,6 +800,10 @@ private fun Model3DGrid(store: EditorStore, close: () -> Unit) {
             ObjectCell(stringResource(R.string.panel_camera_3d), "add.model3d.camera", glyph = CupertinoGlyph.CameraFill) { store.addCamera(); close() },
             ObjectCell(stringResource(R.string.real_camera_title), "add.model3d.realCamera", glyph = CupertinoGlyph.CameraViewfinder) { store.startRealCamera(); close() },
             ObjectCell(stringResource(R.string.sh_add_null_3d), "add.model3d.null", draw = { drawNullIcon(AureaColors.Text) }) { store.addNull(true); close() },
+            ObjectCell(stringResource(R.string.shape3d_cloud), "add.model3d.cloud",
+                draw = { drawShape3DIcon(com.aurea.aurea.state.Shape3DCatalog.CLOUD) }) {
+                if (store.addShape3D(com.aurea.aurea.state.Shape3DCatalog.CLOUD) >= 0) close()
+            },
         ),
         footer = stringResource(R.string.sh_add_model_3d_hint),
         warning = stringResource(R.string.model3d_risk_warning),
@@ -1039,11 +1043,11 @@ internal fun AddLayerOverlay(store: EditorStore, ui: EditorUi) {
 /** As 5 categorias da pílula, na ordem. Ids `addBar.<AddTab>` (iguais no iOS). */
 internal val ADD_BAR_PILL = listOf(AddTab.Shape, AddTab.Media, AddTab.Audio, AddTab.Text, AddTab.Element)
 
-/** A grade 4 × 2 do "+", na ordem de leitura. Ids `addBar.grid.<AddTab>`. */
-internal val ADD_BAR_GRID = listOf(
-    AddTab.Shape, AddTab.Media, AddTab.Audio, AddTab.Text,
-    AddTab.TextPresets, AddTab.Element, AddTab.Model3D, AddTab.Draw,
-)
+/** Categorias extras do "+", na ordem de leitura. */
+internal val ADD_BAR_GRID = listOf(AddTab.TextPresets, AddTab.Model3D, AddTab.Draw, AddTab.Vector)
+private val addBarExtras = ADD_BAR_GRID.zip(
+    listOf(EditIcon.Presets, EditIcon.Cube, EditIcon.Draw, EditIcon.Vector),
+).chunked(2)
 
 /**
  * A vaga da pílula que acende para o conteúdo aberto. Os destinos sem vaga
@@ -1103,8 +1107,6 @@ private object AddBarDims {
     val Icon = 19.dp
     val Line = 1.dp
     val CardRadius = 28.dp
-    val TileHeight = 46.dp
-    val TileRadius = 14.dp
     /** Peso da vaga acesa na pílula (as outras pesam 1; ficam com 44+ dp a partir de 360 dp de tela). */
     const val ACTIVE_WEIGHT = 2f
 }
@@ -1125,13 +1127,8 @@ private object AddBarColors {
 
 private val AddBarPillShape = RoundedCornerShape(percent = 50)
 
-/**
- * Altura nominal do bloco da grade do "+" (dp, fonte 1×): margem 4 + bloco 7 +
- * cartão 8 + 2 fileiras de (ladrilho 46 + 4 + nome 15) + 6 entre elas + 8 + 7 + 4.
- * Cabe na zona mínima da divisa ([EditorLayout.ZONE_MIN]). O iOS tem o par
- * `EditorLayout.addBarGridHeight`.
- */
-internal const val ADD_BAR_GRID_HEIGHT = 4f + 7f + 8f + 2f * (46f + 4f + 15f) + 6f + 8f + 7f + 4f
+/** Altura nominal em dp do menu com a fonte a 1×. */
+internal const val ADD_BAR_GRID_HEIGHT = 2f * (4f + 10f) + 44f + 2f * 48f + 2f * 6f
 
 /**
  * Traço dos ícones desenhados da barra, na caixa de 24 (o mesmo no iOS): 0.3.4, o
@@ -1222,7 +1219,7 @@ private fun DrawScope.drawAddBarDrawing(c: Color) {
  * redondo à direita. Sem nada aberto, cada categoria tem ícone e nome; com uma
  * aberta, a pílula mostra só os ícones e a aberta vira a pílula interna acesa
  * (ícone e nome lado a lado), que desliza e cresce até ela. Tocar na acesa
- * fecha. O "+" abre a grade de todas as categorias ([AddBarMore]).
+ * fecha. O "+" abre as categorias extras ([AddBarMore]).
  */
 @Composable
 internal fun AddBar(store: EditorStore, ui: EditorUi, modifier: Modifier = Modifier) {
@@ -1377,13 +1374,7 @@ private fun AddBarRoundButton(label: String, tag: String, rotation: Float, onCli
     }
 }
 
-/**
- * A grade do "+": o bloco cresce para cima, por cima da timeline e da própria
- * barra, com o cartão 4 × 2 das categorias e o "X" redondo no lugar do "+".
- * [modifier] dá a área que o véu transparente cobre (tocar fora do cartão
- * fecha, e nada passa para a timeline). Abre e fecha em ~200 ms com mola
- * suave; com "remover animações" troca na hora. O Voltar fecha.
- */
+/** O menu de categorias extras sobe por cima da timeline e fecha ao tocar fora. */
 @Composable
 internal fun AddBarMore(store: EditorStore, ui: EditorUi, modifier: Modifier = Modifier) {
     val reduce = com.aurea.aurea.effects.rememberReduceMotion()
@@ -1404,75 +1395,71 @@ internal fun AddBarMore(store: EditorStore, ui: EditorUi, modifier: Modifier = M
                 fadeOut(tween(140)) + scaleOut(tween(160), targetScale = 0.9f, transformOrigin = origin),
             label = "addBar.more",
         ) {
-            val rotation by transition.animateFloat(
-                transitionSpec = { if (reduce) snap() else spring(dampingRatio = 0.8f, stiffness = 600f) },
-                label = "addBar.x",
-            ) { if (it == EnterExitState.Visible) 45f else 0f }
-            AddBarGridBlock(store, ui, rotation)
+            AddBarGridBlock(store, ui)
         }
     }
 }
 
 @Composable
-private fun AddBarGridBlock(store: EditorStore, ui: EditorUi, rotation: Float) {
+private fun AddBarGridBlock(store: EditorStore, ui: EditorUi) {
+    val title = stringResource(R.string.bar33_more)
     val closeLabel = stringResource(R.string.bar33_close)
-    val gridLabel = stringResource(R.string.bar33_grid)
     val cardShape = RoundedCornerShape(AddBarDims.CardRadius)
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = AddBarDims.SideMargin, vertical = AddBarDims.VerticalMargin)
-            .clip(RoundedCornerShape(AddBarDims.BlockRadius))
-            .background(AddBarColors.Block)
-            // O fundo do bloco segura o toque: não fecha nem passa para a timeline.
-            .pointerInput(Unit) { detectTapGestures { } }
-            .padding(AddBarDims.BlockPadding),
+    Box(Modifier.fillMaxWidth().padding(horizontal = AddBarDims.SideMargin, vertical = AddBarDims.VerticalMargin),
+        contentAlignment = Alignment.Center,
     ) {
-        Row(verticalAlignment = Alignment.Bottom) {
-            Column(
-                Modifier
-                    .weight(1f)
-                    .clip(cardShape)
-                    .background(AddBarColors.Pill)
-                    .border(AddBarDims.Line, AddBarColors.Raised, cardShape)
-                    .semantics { contentDescription = gridLabel }
-                    .testTag("addBar.grid")
-                    .padding(8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                ADD_BAR_GRID.chunked(4).forEach { row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        row.forEach { tab -> AddBarGridTile(store, ui, tab, Modifier.weight(1f)) }
+        Column(
+            Modifier.widthIn(max = 470.dp).fillMaxWidth()
+                .clip(cardShape)
+                .background(AddBarColors.Pill)
+                .border(AddBarDims.Line, AddBarColors.Raised, cardShape)
+                .pointerInput(Unit) { detectTapGestures { } }
+                .testTag("addBar.grid")
+                .padding(10.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(title, Modifier.weight(1f).padding(start = 6.dp).semantics { heading() },
+                    style = AureaType.of(16f, FontWeight.W700, color = AureaColors.Text))
+                Box(
+                    Modifier.size(44.dp).testTag("addBar.close")
+                        .semantics { role = Role.Button; contentDescription = closeLabel }
+                        .tocavel { AddBarState.more = false },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(Modifier.size(32.dp).background(AddBarColors.Tile, RoundedCornerShape(12.dp)),
+                        contentAlignment = Alignment.Center) {
+                        EditToolIcon(EditIcon.Close, AureaColors.Text, 18.dp)
                     }
                 }
             }
-            Spacer(Modifier.width(AddBarDims.Gap))
-            AddBarRoundButton(closeLabel, "addBar.close", rotation) { AddBarState.more = false }
+            addBarExtras.forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    row.forEach { (tab, icon) -> AddBarGridTile(store, ui, tab, icon, Modifier.weight(1f)) }
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun AddBarGridTile(store: EditorStore, ui: EditorUi, tab: AddTab, modifier: Modifier) {
+private fun AddBarGridTile(store: EditorStore, ui: EditorUi, tab: AddTab, icon: EditIcon, modifier: Modifier) {
     val label = stringResource(tab.label)
-    Column(
-        modifier
-            .semantics { contentDescription = label }
+    Row(
+        modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(14.dp))
+            .background(AddBarColors.Tile)
             .testTag("addBar.grid.${tab.name}")
-            .tocavel(haptic = true) { openFromAddBar(store, ui, tab) },
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .semantics { role = Role.Button }
+            .tocavel(haptic = true) { openFromAddBar(store, ui, tab) }
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(AddBarDims.TileHeight)
-                .clip(RoundedCornerShape(AddBarDims.TileRadius))
-                .background(AddBarColors.Tile),
-            contentAlignment = Alignment.Center,
-        ) {
-            AddBarIcon(tab, 20.dp, AureaColors.Text)
+        Box(Modifier.size(32.dp).background(AureaColors.AccentDim, RoundedCornerShape(10.dp)),
+            contentAlignment = Alignment.Center) {
+            EditToolIcon(icon, AureaColors.Accent, 20.dp)
         }
-        Spacer(Modifier.height(4.dp))
-        AddBarLabel(label, 10, color = AureaColors.Muted)
+        Text(label, style = AureaType.of(12f, FontWeight.W600, color = AureaColors.Text))
     }
 }

@@ -5,8 +5,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 0.3.3 barra: a pílula de 5 categorias, a grade 4 × 2 do "+" (na ordem do
- * desenho do dono) e a vaga que acende para cada destino aberto. O iOS tem a
+ * 0.3.3 barra: a pílula de 5 categorias, as categorias extras do "+" e a vaga que acende para cada destino aberto. O iOS tem a
  * mesma tabela (`AddBarCatalog` em AddPanelView.swift).
  */
 class AddBar033Test {
@@ -14,10 +13,9 @@ class AddBar033Test {
         assertEquals(listOf(AddTab.Shape, AddTab.Media, AddTab.Audio, AddTab.Text, AddTab.Element), ADD_BAR_PILL)
     }
 
-    @Test fun gridIsFourByTwoInReadingOrder() {
-        assertEquals(8, ADD_BAR_GRID.size)
-        assertEquals(listOf(AddTab.Shape, AddTab.Media, AddTab.Audio, AddTab.Text), ADD_BAR_GRID.take(4))
-        assertEquals(listOf(AddTab.TextPresets, AddTab.Element, AddTab.Model3D, AddTab.Draw), ADD_BAR_GRID.drop(4))
+    @Test fun plusOffersOnlyCategoriesAbsentFromThePill() {
+        assertEquals(listOf(AddTab.TextPresets, AddTab.Model3D, AddTab.Draw, AddTab.Vector), ADD_BAR_GRID)
+        assertTrue(ADD_BAR_PILL.intersect(ADD_BAR_GRID.toSet()).isEmpty())
     }
 
     @Test fun everyDestinationLightsASlotOfThePill() {
@@ -29,13 +27,12 @@ class AddBar033Test {
     }
 
     @Test fun everyDestinationIsReachable() {
-        // Vetor abre pelo Elemento (add.element.vector); o resto pela pílula ou pela grade.
-        val reachable = (ADD_BAR_PILL + ADD_BAR_GRID + AddTab.Vector).toSet()
+        val reachable = (ADD_BAR_PILL + ADD_BAR_GRID).toSet()
         assertEquals(AddTab.entries.toSet(), reachable)
     }
 
     @Test fun plusGridFitsTheSmallestBottomZone() {
-        assertEquals(174f, ADD_BAR_GRID_HEIGHT, 0.01f)
+        assertEquals(180f, ADD_BAR_GRID_HEIGHT, 0.01f)
         assertTrue("the + grid fits the smallest zone of the divider", ADD_BAR_GRID_HEIGHT <= EditorLayout.ZONE_MIN)
     }
 }

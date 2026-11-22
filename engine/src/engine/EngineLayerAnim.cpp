@@ -472,6 +472,34 @@ bool Engine::apply_motion_text_preset(u64 layerId, u32 preset) noexcept {
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || l->kind != LayerKind::Text || preset >= kMotionTextPresetCount) return false;
+    if (preset == 10) {
+        if (l->text.animators.size() >= 64) return false;
+        history_.before_mutation(*comp, project_->timeline().current(), "salto suave");
+        const u32 index = static_cast<u32>(l->text.animators.size());
+        TextAnimator animator;
+        animator.name = "Salto suave";
+        animator.props = kTextPropPosition | kTextPropOpacity | kTextPropBlur;
+        animator.position.y = 46.f;
+        animator.opacity = 0.f;
+        animator.blur = 7.f;
+        animator.selector.type = kTextSelectorSweep;
+        animator.selector.shape = 3;
+        animator.selector.basedOn = 3;
+        animator.selector.overlap = 450.f;
+        animator.selector.easeHigh = 83.f;
+        animator.selector.easeLow = 52.f;
+        l->text.animators.push_back(std::move(animator));
+        const i64 first = l->local_time(l->start).value;
+        const i64 span = std::max<i64>(1, l->end.value - l->start.value - 1);
+        const i64 duration = std::clamp<i64>(std::lround(comp->fps() * 1.1), 1, span);
+        Track& progress = l->tracks.get_or_create(TrackProperty::TextAnimParam, index, text::kSelStart);
+        (void)progress.set(FrameIndex{first}, 0.f, Interpolation::Linear);
+        (void)progress.set(FrameIndex{first + duration}, 100.f, Interpolation::Linear);
+        bump_model_revision_locked();
+        project_->mark_dirty();
+        request_render();
+        return true;
+    }
     history_.before_mutation(*comp, project_->timeline().current(), "preset de texto");
     bump_model_revision_locked();
     // O preset substitui a animação de texto que a camada tinha.
@@ -756,9 +784,10 @@ bool Engine::set_layer_3d(u64 layerId, bool on) noexcept {
     if (!l || l->locked || l->kind == LayerKind::Audio) return false;
     // Intrinsic 3D objects cannot be flattened with the layer switch.
     if (!on && (l->kind == LayerKind::Camera || l->kind == LayerKind::Light || l->kind == LayerKind::Model3D)) return false;
-    if (l->threeD == on) return true;
+    if (l->threeD == on && l->force2D == !on) return true;
     history_.before_mutation(*comp, project_->timeline().current(), on ? "ativar camada 3D" : "desativar camada 3D");
     l->threeD = on;
+    l->force2D = !on;
     bump_model_revision_locked();
     project_->mark_dirty();
     request_render();

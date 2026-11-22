@@ -526,6 +526,12 @@ AUREA_TEST(ModelArchive, InvalidNamesAndCorruptPayloadLeaveNoPartialDirectory) {
         AUREA_CHECK(files.empty() && !fs::exists(root));
         AUREA_CHECK(!fs::exists(dir / "outside.obj"));
     }
+    for (const char* name : {"model/\xFF.obj", "model/\xED\xA0\x80.obj", "model/\xF4\x90\x80\x80.obj"}) {
+        write_text(archive, model_zip({{"first.obj", "good", false}, {name, "model", false}}));
+        std::vector<std::string> files;
+        AUREA_CHECK(package::extract_model_archive(archive, s8(root), files).code() == Errc::CorruptData);
+        AUREA_CHECK(files.empty() && !fs::exists(root));
+    }
     write_text(archive, model_zip({{"plane.obj", "one", false}, {"Plane.obj", "two", true}}));
     std::vector<std::string> files;
     AUREA_CHECK(!package::extract_model_archive(archive, s8(root), files).ok());

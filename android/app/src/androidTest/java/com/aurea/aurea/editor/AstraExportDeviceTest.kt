@@ -1,16 +1,23 @@
 package com.aurea.aurea.editor
 
+import android.graphics.Bitmap
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.os.SystemClock
+import android.util.Base64
 import androidx.test.platform.app.InstrumentationRegistry
 import com.aurea.aurea.engine.AureaEngine
 import com.aurea.aurea.engine.CommandBatch
 import com.aurea.aurea.engine.ExportProgress
 import com.aurea.aurea.engine.MotionBlurSettings
+import com.aurea.aurea.engine.PodLayout
+import com.aurea.aurea.engine.LayerEffect
 import com.aurea.aurea.engine.TrackProperty
+import com.aurea.aurea.editor.panels.effectTypeId
+import com.aurea.aurea.state.Shape3DCatalog
+import com.aurea.aurea.state.Shape3DInfo
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
@@ -41,7 +48,8 @@ class AstraExportDeviceTest {
             }
         }
         engine = AureaEngine.create(context)
-        assertTrue(engine.startupError(), engine.initialize(60f, context.cacheDir.absolutePath, folder.absolutePath, false))
+        val debugBudget = InstrumentationRegistry.getArguments().getString("aureaDenseDebug") == "true"
+        assertTrue(engine.startupError(), engine.initialize(60f, context.cacheDir.absolutePath, folder.absolutePath, debugBudget))
     }
     @After fun releaseNativeEngine() { if (::engine.isInitialized) engine.destroy() }
 
@@ -100,7 +108,7 @@ class AstraExportDeviceTest {
         }
         return file
     }
-    private fun export(name: String, frames: Int, width: Int, height: Int, audio: Boolean, requireAnimation: Boolean = true) {
+    private fun export(name: String, frames: Int, width: Int, height: Int, audio: Boolean, requireAnimation: Boolean = true, trimDuringExport: Boolean = false) {
         val movie = File(folder, "$name.mp4")
         val progressLog = File(folder, "$name-progress.txt")
         progressLog.writeText("headless-native=true preview-surface=false frames=$frames width=$width height=$height\n")
@@ -109,6 +117,7 @@ class AstraExportDeviceTest {
         val progress = ExportProgress()
         val began = SystemClock.elapsedRealtime()
         var last = -1; var moved = began
+        var trimmed = false
         try {
             while (true) {
                 assertTrue(engine.exportProgress(buffer)); progress.readFrom(buffer)
@@ -117,11 +126,23 @@ class AstraExportDeviceTest {
                     if (last % 30 == 0 || last == frames) progressLog.appendText("elapsedMs=${moved - began} frame=$last/${progress.framesTotal} flags=${progress.flags}\n")
                 }
                 if (progress.finished) break
+                if (trimDuringExport && !trimmed && progress.framesDone in 1 until frames) {
+                    engine.trimMemory(80)
+                    trimmed = true
+                    progressLog.appendText("memory-warning-at-frame=${progress.framesDone}\n")
+                }
                 assertTrue("No frame progress: ${progress.message}", SystemClock.elapsedRealtime() - moved < 180000)
                 assertTrue("Native export exceeded thirty minutes", SystemClock.elapsedRealtime() - began < 1800000)
                 SystemClock.sleep(50)
             }
             assertEquals(progress.message, 0, progress.result)
+            if (trimDuringExport) {
+                assertTrue("The memory warning must land during encoding", trimmed)
+                assertFalse("The scene must retain every element", progress.elementsOmitted)
+                assertFalse("The export must retain the requested motion blur", progress.blurReduced)
+                assertFalse("The export must retain the requested resolution", progress.resolutionCapped)
+                assertFalse("The export must retain the original 3D models", progress.modelFallback)
+            }
             assertEquals(frames, progress.framesDone); assertEquals(frames, progress.framesTotal)
             assertFalse("Export must never substitute a preview picture", progress.frameFallback)
             assertTrue("No native encoder acceleration was reported", progress.flags and 3 != 0)
@@ -202,6 +223,238 @@ class AstraExportDeviceTest {
         assertTrue(engine.importAudio(tone(2).absolutePath, "Owned stereo tone") > 0)
         export("headless-2d-stereo", 60, 320, 180, true)
     }
+
+    @Test fun textSpringKeepsItsProgressKeysAndExportsAnimatedFrames() {
+        scene(45)
+        val text = engine.addText("AUREA")
+        assertTrue(text > 0)
+        assertTrue(engine.applyMotionTextPreset(text, 10))
+        val project = File(folder, "text-spring.aurea")
+        assertEquals(0, engine.saveProject(project.absolutePath))
+        assertEquals(0, engine.loadProject(project.absolutePath))
+        val fields = checkNotNull(engine.textAnimatorFields(text, 0))
+        assertEquals(3f, fields[21], 0f)
+        val progress = checkNotNull(engine.textAnimValues(text, 0, intArrayOf(0)))
+        assertTrue(progress[1].toInt() and 1 != 0)
+        export("headless-text-spring", 45, 320, 180, false)
+    }
+
+    @Test fun textPrismRendersLiveTextStackedGradientsAndAlpha() {
+        val frames = 30
+        val width = 480
+        val height = 270
+        scene(frames, width, height)
+        fun capture(): IntArray {
+            val pixels = ByteBuffer.allocateDirect(width * height * 4)
+            assertEquals(pixels.capacity(), engine.captureFrame(width, pixels, IntArray(2)))
+            return IntArray(width * height) { n ->
+                val offset = n * 4
+                val r = pixels.get(offset).toInt() and 255
+                val g = pixels.get(offset + 1).toInt() and 255
+                val b = pixels.get(offset + 2).toInt() and 255
+                (255 shl 24) or (r shl 16) or (g shl 8) or b
+            }
+        }
+        fun commands(block: CommandBatch.() -> Unit) {
+            engine.beginCommandBatch()
+            CommandBatch(engine).block()
+            assertTrue(engine.submitCommands() > 0)
+        }
+        fun saveSample(name: String, pixels: IntArray) {
+            val image = Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
+            try {
+                File(folder, "text-prism-$name.png").outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            } finally {
+                image.recycle()
+            }
+        }
+        val blank = capture()
+        val id = engine.addText("PRISM")
+        assertTrue(id > 0)
+        val type = effectTypeId("aurea.text.prism")
+        assertTrue(AureaEngine.nativeEffectRequiresHyper(type))
+        assertNull(AureaEngine.nativeEffectProductId(type))
+        commands { assertTrue(setTextSize(id, 92f)); assertTrue(setLayerTimeRange(id, 0, frames)) }
+        val original = capture()
+        commands { assertTrue(addEffect(id, type)) }
+        fun effects(): List<LayerEffect> {
+            val rows = ByteBuffer.allocateDirect(4 * LayerEffect.ROW_BYTES).order(ByteOrder.nativeOrder())
+            val names = ByteBuffer.allocateDirect(1024)
+            return List(engine.queryLayerEffects(id, rows, 4, names)) { LayerEffect.read(rows, it, names) }
+        }
+        val first = effects().single().effectId
+        val linear = capture()
+        val saturated = linear.count { c ->
+            val p = listOf(c shr 16 and 255, c shr 8 and 255, c and 255)
+            p.max() - p.min() > 40
+        }
+        assertTrue("Prism should color the live glyphs", saturated > 250)
+        assertFalse(original.contentEquals(linear))
+        commands { assertTrue(setEffectParam(id, first, 0, 1f)) }
+        val radial = capture()
+        commands { assertTrue(setEffectParam(id, first, 0, 2f)) }
+        val conical = capture()
+        saveSample("linear", linear)
+        saveSample("radial", radial)
+        saveSample("conical", conical)
+        assertFalse(linear.contentEquals(radial))
+        assertFalse(conical.contentEquals(radial))
+        commands { assertTrue(setEffectParam(id, first, 5, 0f)) }
+        val rgb = capture()
+        commands { assertTrue(setEffectParam(id, first, 5, 2f)) }
+        val oklab = capture()
+        assertFalse(rgb.contentEquals(conical))
+        assertFalse(conical.contentEquals(oklab))
+        commands {
+            assertTrue(setEffectParam(id, first, 5, 1f))
+            assertTrue(setEffectParam(id, first, 48, 3f))
+            assertTrue(setEffectParam(id, first, 49, 1f))
+        }
+        val stroke = capture()
+        saveSample("stroke", stroke)
+        fun changed(from: IntArray, i: Int): Boolean = listOf(0, 8, 16).any { shift ->
+            kotlin.math.abs((from[i] shr shift and 255) - (blank[i] shr shift and 255)) > 32
+        }
+        assertTrue("The generated outline is visible without enabling the text stroke", stroke.indices.count { changed(stroke, it) } > 150)
+        val neighborhood = (-4..4).flatMap { y ->
+            (-4..4).filter { x -> x * x + y * y <= 16 }.map { x -> y * width + x }
+        }
+        val interior = (4 until height - 4).flatMap { y -> (4 until width - 4).map { x -> y * width + x } }.filter { i ->
+            changed(conical, i) && neighborhood.all { changed(conical, i + it) }
+        }
+        assertTrue("The reference has an opaque interior", interior.size > 200)
+        val cleared = interior.count { !changed(stroke, it) }
+        assertTrue("Solo stroke removes the filled interior ($cleared of ${interior.size} pixels)", cleared > interior.size * .9)
+        commands {
+            assertTrue(setEffectParam(id, first, 48, 0f))
+            assertTrue(setEffectParam(id, first, 49, 0f))
+            assertTrue(setEffectParam(id, first, 44, 35f))
+        }
+        assertFalse("Path motion must move the glyph coverage too", conical.contentEquals(capture()))
+        commands { assertTrue(setEffectParam(id, first, 44, 0f)) }
+        val transparent = floatArrayOf(0f, 1f, 0f, 0f, 0f, 1f, 0f, 1f, 0f, 0f)
+        commands { assertTrue(setEffectParam(id, first, 3, 0f)); assertTrue(setEffectParam(id, first, 6, 4f)) }
+        assertTrue(engine.setEffectGradient(id, first, 4, transparent))
+        assertTrue("Transparent stops should form a matte", blank.contentEquals(capture()))
+        commands {
+            assertTrue(setEffectParam(id, first, 3, 5f))
+            assertTrue(setEffectParam(id, first, 6, 0f))
+            assertTrue(addEffect(id, type))
+            assertTrue(setTextContent(id, "AUREA"))
+            assertTrue(setTextStrokeWidth(id, 0f))
+        }
+        capture()
+        val second = effects().last().effectId
+        commands {
+            assertTrue(setEffectParam(id, second, 2, 1f))
+            assertTrue(setEffectParam(id, second, 3, 2f))
+            assertTrue(setEffectParam(id, second, 48, 3f))
+            assertTrue(setEffectParam(id, first, 57, 1f))
+            assertTrue(setEffectParam(id, first, 20, 2f))
+            assertTrue(setEffectParam(id, first, 21, 9f))
+            assertTrue(setEffectParam(id, first, 42, 2f))
+            assertTrue(insertKeyframe(id, TrackProperty.EFFECT_PARAM, first, 13 * 4, 0, 0f))
+            assertTrue(insertKeyframe(id, TrackProperty.EFFECT_PARAM, first, 13 * 4, frames - 1, 180f))
+            assertTrue(insertKeyframe(id, TrackProperty.EFFECT_PARAM, first, 44 * 4, 0, 0f))
+            assertTrue(insertKeyframe(id, TrackProperty.EFFECT_PARAM, first, 44 * 4, 15, -26f))
+            assertTrue(insertKeyframe(id, TrackProperty.EFFECT_PARAM, first, 44 * 4, 29, 0f))
+        }
+        val beforeReopen = capture()
+        assertFalse(conical.contentEquals(beforeReopen))
+        val project = File(folder, "text-prism.aurea")
+        assertEquals(0, engine.saveProject(project.absolutePath))
+        assertEquals(0, engine.loadProject(project.absolutePath))
+        assertTrue("Stacked palettes should survive project reopen", beforeReopen.contentEquals(capture()))
+        export("headless-text-prism", frames, width, height, false)
+    }
+
+    @Test fun pinnedMaskKeepsItsCompositionCoordinatesAcrossEditsAndReload() {
+        scene(30)
+        val shape = engine.addShape(1)
+        assertTrue(shape > 0)
+        val points = floatArrayOf(35f, 35f, 0f, 0f, 0f, 0f, 155f, 35f, 0f, 0f, 0f, 0f,
+            155f, 145f, 0f, 0f, 0f, 0f, 35f, 145f, 0f, 0f, 0f, 0f)
+        assertTrue(engine.addMask(shape, points, 4, true) >= 0)
+        val masks = FloatArray(128)
+        assertTrue(engine.queryMasks(shape, masks) > 0)
+        val initial = masks.copyOfRange(0, 6)
+        assertTrue(engine.pinLayerMasks(shape, true))
+        engine.beginCommandBatch()
+        val batch = CommandBatch(engine)
+        assertTrue(batch.setPosition(shape, 120f, 80f, 0f))
+        assertTrue(batch.insertKeyframe(shape, TrackProperty.POSITION_X, -1, 0, 0, 120f))
+        assertTrue(batch.insertKeyframe(shape, TrackProperty.POSITION_X, -1, 0, 29, 275f))
+        assertEquals(3, engine.submitCommands())
+        val project = File(folder, "pinned-mask.aurea")
+        assertEquals(0, engine.saveProject(project.absolutePath))
+        assertEquals(0, engine.loadProject(project.absolutePath))
+        val count = engine.queryMasks(shape, masks)
+        assertTrue(count > 0)
+        assertEquals(1f, masks[count - 1], 0f)
+        assertArrayEquals(initial, masks.copyOfRange(0, 6), .001f)
+        export("headless-pinned-mask", 30, 320, 180, false)
+        assertTrue(engine.pinLayerMasks(shape, false))
+        assertTrue(engine.queryMasks(shape, masks) > 0)
+        assertFalse(initial.contentEquals(masks.copyOfRange(0, 6)))
+    }
+
+    @Test fun groupedSphereKeepsVolumeAtNinetyDegreesAndChildrenCanBeReordered() {
+        scene(16)
+        fun capture(): ByteArray {
+            val image = ByteBuffer.allocateDirect(320 * 180 * 4)
+            assertEquals(image.capacity(), engine.captureFrame(320, image, IntArray(2)))
+            return ByteArray(image.capacity()) { image.get(it) }
+        }
+        val background = capture()
+        val sphere = engine.addShape3d(1, "Sphere")
+        val text = engine.addText("TEXT")
+        assertTrue(sphere > 0 && text > 0)
+        engine.beginCommandBatch()
+        val setup = CommandBatch(engine)
+        assertTrue(setup.setScale(sphere, .65f, .65f, .65f))
+        assertTrue(setup.setPosition(sphere, 160f, 90f, 0f))
+        assertTrue(setup.setPosition(text, 50f, 22f, 0f))
+        assertEquals(3, engine.submitCommands())
+        val group = engine.precompose(longArrayOf(sphere, text))
+        assertTrue(group > 0)
+        assertTrue(engine.setLayer3D(group, true))
+        fun sphereArea(frame: ByteArray): Int = (56 until 124).sumOf { y ->
+            (126 until 194).count { x ->
+                val offset = (y * 320 + x) * 4
+                (0..2).any { c ->
+                    kotlin.math.abs((frame[offset + c].toInt() and 255) - (background[offset + c].toInt() and 255)) > 10
+                }
+            }
+        }
+        val frontArea = sphereArea(capture())
+        engine.beginCommandBatch()
+        assertTrue(CommandBatch(engine).setRotation(group, 0f, 90f, 0f))
+        assertEquals(1, engine.submitCommands())
+        val edgeOn = capture()
+        val edgeArea = sphereArea(edgeOn)
+        assertTrue("The sphere must be visible head-on ($frontArea pixels)", frontArea > 150)
+        assertTrue("Quarter turn should preserve the sphere's projected area ($frontArea to $edgeArea pixels)",
+            edgeArea >= frontArea * .65)
+        val rows = ByteBuffer.allocateDirect(PodLayout.LAYER_ROW_BYTES * 2).order(ByteOrder.nativeOrder())
+        val names = ByteBuffer.allocateDirect(256)
+        assertEquals(2, engine.queryGroupLayers(group, rows, 2, names))
+        val top = rows.getLong(PodLayout.LAYER_OFF_ID)
+        val bottom = rows.getLong(PodLayout.LAYER_ROW_BYTES + PodLayout.LAYER_OFF_ID)
+        assertTrue(engine.setInlineEditTarget(group, bottom))
+        engine.beginCommandBatch()
+        assertTrue(CommandBatch(engine).reorderLayer(bottom, 1))
+        assertEquals(1, engine.submitCommands())
+        assertTrue(engine.setInlineEditTarget(0, 0))
+        assertEquals(2, engine.queryGroupLayers(group, rows, 2, names))
+        assertEquals(bottom, rows.getLong(PodLayout.LAYER_OFF_ID))
+        assertEquals(top, rows.getLong(PodLayout.LAYER_ROW_BYTES + PodLayout.LAYER_OFF_ID))
+        assertTrue(engine.setLayer3D(group, false))
+        assertFalse(edgeOn.contentEquals(capture()))
+        val project = File(folder, "rotated-group.aurea")
+        assertEquals(0, engine.saveProject(project.absolutePath))
+        assertEquals(0, engine.loadProject(project.absolutePath))
+        assertFalse(edgeOn.contentEquals(capture()))
+    }
     @Test fun heavy3DParticlesTextAndMotionBlurRemainAnimated() {
         scene(60, 960, 540)
         val models = (0 until 24).map { engine.addShape3d(it % 3, "Mesh $it").also { id -> assertTrue(id > 0) } }
@@ -240,6 +493,122 @@ class AstraExportDeviceTest {
             assertTrue(commands.insertKeyframe(id, TrackProperty.ROTATION_Y, -1, 0, 29, 90f))
             assertEquals(4, engine.submitCommands())
             export("headless-imported-${source.extension}", 30, 640, 360, false)
+        }
+    }
+    @Test fun denseGltfExportsAllFramesAtRequestedSizeDuringMemoryWarning() {
+        val frames = 36
+        val width = 960
+        val height = 540
+        val columns = 48
+        val rows = 25
+        val objects = columns * rows
+        scene(frames, width, height)
+        val vertices = ByteBuffer.allocate(9 * Float.SIZE_BYTES).order(ByteOrder.LITTLE_ENDIAN)
+        for (value in floatArrayOf(-.18f, -.14f, 0f, .18f, -.14f, 0f, 0f, .19f, 0f)) vertices.putFloat(value)
+        val data = Base64.encodeToString(vertices.array(), Base64.NO_WRAP)
+        val nodes = (0 until objects).joinToString(",") { index ->
+            val x = (index % columns - (columns - 1) * .5f) * .43f
+            val y = (index / columns - (rows - 1) * .5f) * .43f
+            """{"mesh":0,"translation":[$x,$y,0]}"""
+        }
+        val source = File(folder, "dense-grid.gltf").apply {
+            writeText("""
+                {"asset":{"version":"2.0"},"scene":0,"scenes":[{"nodes":[${(0 until objects).joinToString(",")}]}],
+                "nodes":[$nodes],"meshes":[{"primitives":[{"attributes":{"POSITION":0},"material":0}]}],
+                "materials":[{"doubleSided":true,"pbrMetallicRoughness":{"baseColorFactor":[0.9,0.7,0.25,1],"metallicFactor":0}}],
+                "accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[-0.18,-0.14,0],"max":[0.18,0.19,0]}],
+                "bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":36,"target":34962}],
+                "buffers":[{"byteLength":36,"uri":"data:application/octet-stream;base64,$data"}]}
+            """.trimIndent())
+        }
+        val detail = arrayOfNulls<String>(1)
+        val id = engine.importModel(source.absolutePath, "Dense 3D scene ($objects objects)", detail)
+        assertTrue("Dense glTF import: ${detail[0]}", id > 0)
+        engine.beginCommandBatch()
+        val commands = CommandBatch(engine)
+        assertTrue(commands.setLayerTimeRange(id, 0, frames))
+        assertTrue(commands.setPosition(id, width * .5f, height * .5f, 0f))
+        assertTrue(commands.insertKeyframe(id, TrackProperty.ROTATION_Y, -1, 0, 0, 0f))
+        assertTrue(commands.insertKeyframe(id, TrackProperty.ROTATION_Y, -1, 0, frames - 1, 38f))
+        assertEquals(4, engine.submitCommands())
+        assertTrue(engine.setMotionBlur(id, true))
+        assertTrue(engine.setMotionBlurSettings(MotionBlurSettings(true, 270f, -135f, 8, 16, 4)))
+        export("headless-dense-$objects", frames, width, height, false, trimDuringExport = true)
+    }
+
+    @Test fun newSolidShapesKeepTheirTypesAndPartsAfterReopen() {
+        scene(30)
+        val counts = listOf(3, 3, 3, 3, 3, 4, 2, 4, 3)
+        val layers = (10 until Shape3DCatalog.CLOUD).map { kind ->
+            engine.addShape3d(kind, "Solid $kind").also { assertTrue("Shape $kind", it > 0) }
+        }
+        val project = File(folder, "new-solids.aurea")
+        assertEquals(0, engine.saveProject(project.absolutePath))
+        assertEquals(0, engine.loadProject(project.absolutePath))
+        for ((index, layer) in layers.withIndex()) {
+            val recipe = FloatArray(Shape3DInfo.FIELDS)
+            assertEquals(counts[index], engine.queryShape3d(layer, recipe))
+            assertEquals(10 + index, recipe[0].toInt())
+        }
+    }
+
+    @Test fun volumetricCloudRespondsToDensityAndLightingAndExports() {
+        val width = 320
+        val height = 180
+        val frames = 12
+        scene(frames, width, height)
+        fun capture(): IntArray {
+            val raw = ByteBuffer.allocateDirect(width * height * 4)
+            val dims = IntArray(2)
+            assertEquals(raw.capacity(), engine.captureFrame(width, raw, dims))
+            assertArrayEquals(intArrayOf(width, height), dims)
+            return IntArray(width * height) { i ->
+                val offset = i * 4
+                fun channel(c: Int) = raw.get(offset + c).toInt() and 0xFF
+                (channel(3) shl 24) or (channel(0) shl 16) or (channel(1) shl 8) or channel(2)
+            }
+        }
+        fun difference(a: IntArray, b: IntArray): Int = a.indices.count { i ->
+            val r = kotlin.math.abs(((a[i] shr 16) and 255) - ((b[i] shr 16) and 255))
+            val g = kotlin.math.abs(((a[i] shr 8) and 255) - ((b[i] shr 8) and 255))
+            val blue = kotlin.math.abs((a[i] and 255) - (b[i] and 255))
+            r + g + blue > 12
+        }
+        val blank = capture()
+        val id = engine.addShape3d(Shape3DCatalog.CLOUD, "3D cloud")
+        assertTrue(id > 0)
+        val cloud = capture()
+        assertTrue("Cloud must cover pixels outside the blank composition", difference(blank, cloud) > 450)
+        assertTrue("Cloud must retain variation across the density field", cloud.toSet().size > 40)
+        Bitmap.createBitmap(cloud, width, height, Bitmap.Config.ARGB_8888).useForCloudCapture()
+        assertTrue(engine.setMaterialParam(id, 0, 4, 0f))
+        assertTrue("Zero density must remove the volume", difference(blank, capture()) < 20)
+        assertTrue(engine.setMaterialParam(id, 0, 4, .57f))
+        val light = engine.addLight(0)
+        assertTrue(light > 0)
+        val lit = capture()
+        engine.beginCommandBatch()
+        assertTrue(CommandBatch(engine).setRotation(light, 25f, 150f, 0f))
+        assertEquals(1, engine.submitCommands())
+        val turned = capture()
+        assertTrue("Changing the scene light must change the cloud", difference(lit, turned) > 300)
+        engine.beginCommandBatch()
+        val commands = CommandBatch(engine)
+        assertTrue(commands.setLayerTimeRange(id, 0, frames))
+        assertTrue(commands.insertKeyframe(id, TrackProperty.POSITION_X, -1, 0, 0, width * .39f))
+        assertTrue(commands.insertKeyframe(id, TrackProperty.POSITION_X, -1, 0, frames - 1, width * .61f))
+        assertEquals(3, engine.submitCommands())
+        val project = File(folder, "reactive-cloud.aurea")
+        assertEquals(0, engine.saveProject(project.absolutePath))
+        assertEquals(0, engine.loadProject(project.absolutePath))
+        export("headless-volume-cloud", frames, width, height, false)
+    }
+
+    private fun Bitmap.useForCloudCapture() {
+        try {
+            File(folder, "aurea-3d-cloud.png").outputStream().use { compress(Bitmap.CompressFormat.PNG, 100, it) }
+        } finally {
+            recycle()
         }
     }
     @Test fun texturedAnimatedGlbAssetsRenderWithMotionBlurOffline() {

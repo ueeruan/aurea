@@ -183,7 +183,7 @@ struct ExportView: View {
         }
         .background(AureaColors.exportCard, in: RoundedRectangle(cornerRadius: 6))
         .padding(10)
-        .onAppear { if which == .package { loadPackageSizes() } }
+        .task(id: which == .package ? model.projectURL : nil) { if which == .package { await loadPackageSizes() } }
     }
 
     private func estimateRow(_ key: String, _ value: String, _ tag: String) -> some View {
@@ -204,24 +204,39 @@ struct ExportView: View {
     }
 
     /// A soma dos tamanhos da mídia do projeto, por tipo (AssetKind: 1 vídeo, 2 áudio, 3 imagem).
-    private func loadPackageSizes() {
-        guard let path = model.projectURL?.path else { return }
+    private func loadPackageSizes() async {
+        packageSizes = nil
+        guard let url = model.projectURL else { return }
+        let path = url.path
+        let generation = model.projectGeneration
         let engine = model.engine
-        DispatchQueue.global(qos: .userInitiated).async {
-            let size: (String) -> Int64 = { p in ((try? FileManager.default.attributesOfItem(atPath: p))?[.size] as? NSNumber)?.int64Value ?? 0 }
-            var images: Int64 = 0, videos: Int64 = 0, audio: Int64 = 0, other: Int64 = 0
-            if let refs = engine.projectFileMedia(path) {
-                var i = 0
-                while i + 3 < refs.count {
-                    let resolved = refs[i + 1].hasPrefix("file://") ? String(refs[i + 1].dropFirst(7)) : refs[i + 1]
-                    let bytes = size(resolved)
-                    switch Int(refs[i + 3]) ?? 0 { case 1: videos += bytes; case 2: audio += bytes; case 3: images += bytes; default: other += bytes }
-                    i += 4
+        let result: (project: Int64, images: Int64, videos: Int64, audio: Int64, other: Int64) =
+            await withCheckedContinuation { continuation in
+                DispatchQueue.global(qos: .utility).async {
+                    let size: (String) -> Int64 = { p in
+                        ((try? FileManager.default.attributesOfItem(atPath: p))?[.size] as? NSNumber)?.int64Value ?? 0
+                    }
+                    var images: Int64 = 0, videos: Int64 = 0, audio: Int64 = 0, other: Int64 = 0
+                    if let refs = engine.projectFileMedia(path) {
+                        var i = 0
+                        while i + 3 < refs.count {
+                            let ref = refs[i + 1]
+                            let resolved = ref.hasPrefix("file://") ? (URL(string: ref)?.path ?? ref) : ref
+                            let bytes = size(resolved)
+                            switch Int(refs[i + 3]) ?? 0 {
+                            case 1: videos += bytes
+                            case 2: audio += bytes
+                            case 3: images += bytes
+                            default: other += bytes
+                            }
+                            i += 4
+                        }
+                    }
+                    continuation.resume(returning: (size(path), images, videos, audio, other))
                 }
             }
-            let result = (size(path), images, videos, audio, other)
-            DispatchQueue.main.async { packageSizes = result }
-        }
+        guard !Task.isCancelled, model.projectGeneration == generation, model.projectURL == url else { return }
+        packageSizes = result
     }
 
     private func estimatedBytes(_ which: ExportItem) -> Double {
@@ -291,7 +306,6 @@ struct ExportView: View {
     private func pick(_ entry: ExportItem) {
         item = entry
         if let kind = entry.kind { model.exportOptions.kind = kind }
-        if entry == .package { loadPackageSizes() }
     }
 
     private func radio(_ on: Bool) -> some View {

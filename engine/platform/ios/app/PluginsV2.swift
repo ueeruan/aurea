@@ -1085,7 +1085,8 @@ struct GradientParamEditor: View {
     @State private var stops: [Float] = []
     @State private var selected = 0
     @State private var grabbed: Int?
-    @State private var dragged = false
+    @GestureState private var barDragActive = false
+    @State private var barScrollGesture = false
     @State private var gesturing = false
     private let inset: CGFloat = 14
     private let gap: Float = 0.001
@@ -1156,33 +1157,50 @@ struct GradientParamEditor: View {
         }
         .frame(width: width, height: 44, alignment: .leading)
         .contentShape(Rectangle())
-        .gesture(DragGesture(minimumDistance: 0).onChanged { g in
+        .simultaneousGesture(SpatialTapGesture().onEnded { touch in
             guard !locked else { return }
-            if grabbed == nil {
-                let x = g.startLocation.x
-                let nearest = (0..<count).min { abs(inset + CGFloat(stops[$0 * 5]) * usable - x) < abs(inset + CGFloat(stops[$1 * 5]) * usable - x) } ?? 0
-                if abs(inset + CGFloat(stops[nearest * 5]) * usable - x) <= 24 {
-                    grabbed = nearest
-                } else if count < maxStops {
-                    grabbed = insert(toT(x))
-                    dragged = true
-                } else {
-                    return
-                }
-                selected = grabbed ?? 0
+            if let stop = selectStop(at: touch.location.x, usable: usable, position: toT) {
+                selected = stop.index
+                if stop.inserted { commit() }
             }
-            if let index = grabbed, abs(g.translation.width) > 1 {
-                move(index, toT(g.location.x))
-                dragged = true
-            }
-        }.onEnded { _ in
-            if dragged { commit() }
-            grabbed = nil
-            dragged = false
         })
+        .simultaneousGesture(DragGesture(minimumDistance: FxParamMath.TOUCH_SLOP)
+            .updating($barDragActive) { _, active, _ in active = true }
+            .onChanged { gesture in
+                guard !locked, !barScrollGesture else { return }
+                if grabbed == nil {
+                    if abs(gesture.translation.width) <= abs(gesture.translation.height) {
+                        barScrollGesture = true
+                        return
+                    }
+                    guard let stop = selectStop(at: gesture.startLocation.x, usable: usable, position: toT) else { return }
+                    grabbed = stop.index
+                    selected = stop.index
+                }
+                if let index = grabbed { move(index, toT(gesture.location.x)) }
+            }.onEnded { _ in
+                if grabbed != nil { commit() }
+                grabbed = nil
+                barScrollGesture = false
+            })
+        .onChange(of: barDragActive) { active in
+            guard !active else { return }
+            DispatchQueue.main.async {
+                barScrollGesture = false
+                if grabbed != nil { grabbed = nil; reload() }
+            }
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label)
         .accessibilityIdentifier("fx.gradient.bar")
+    }
+
+    private func selectStop(at x: CGFloat, usable: CGFloat, position: (CGFloat) -> Float) -> (index: Int, inserted: Bool)? {
+        guard let nearest = (0..<count).min(by: {
+            abs(inset + CGFloat(stops[$0 * 5]) * usable - x) < abs(inset + CGFloat(stops[$1 * 5]) * usable - x)
+        }) else { return nil }
+        if abs(inset + CGFloat(stops[nearest * 5]) * usable - x) <= 24 { return (nearest, false) }
+        return count < maxStops ? (insert(position(x)), true) : nil
     }
 
     var body: some View {

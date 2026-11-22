@@ -623,7 +623,8 @@ func fxPickerEntries(_ model: AureaModel, layerHasAudio: Bool) -> [EffectCatalog
         (textLayer || $0.typeId != fxEffectTypeId("aurea.text.randomizer")) &&
         (textLayer || $0.typeId != fxEffectTypeId("aurea.text.spacing")) &&
         (textLayer || text3D || $0.typeId != fxEffectTypeId("aurea.text.animator")) &&
-        (textLayer || $0.typeId != fxEffectTypeId("aurea.text.animator_pro"))   // 0.4.6: só texto 2D
+        (textLayer || $0.typeId != fxEffectTypeId("aurea.text.animator_pro")) &&
+        (textLayer || $0.typeId != fxEffectTypeId("aurea.text.prism"))
     }
     let all = effects + fxToolsForSelection(model).map(fxToolCatalogItem)
     return fxArrangeCatalog(all, fxEffectCategories(all))
@@ -1048,8 +1049,7 @@ struct EffectAddSheet: View {
     @State private var detailClose = 0
     @State private var homeScrolled = false
     @State private var gridScrolled = false
-    /// 0.3.0: plugins de efeito (instalar, ver, remover) — PluginManagerSheet.kt.
-    @State private var managingPlugins = false
+    @State private var showingPlugins = false
     /// 0.3.2: efeito pago sem o acesso abre o paywall das assinaturas (HyperEffectGate; 16/11/2026).
     @State private var hyperLocked: PaidItem?
     @ObservedObject private var entitlements = HyperEntitlements.shared
@@ -1062,12 +1062,25 @@ struct EffectAddSheet: View {
     }
 
     var body: some View {
+        let runtime = PluginRuntime.shared
+        let pluginTypes = Set(model.plugins.map(\.effectTypeId))
+        let availablePluginTypes = Set(model.plugins.filter { $0.ok && runtime.plugin($0.id)?.enabled != false }.map(\.effectTypeId))
+        let catalog = fxDistinctEffects(request.sorted).filter { !pluginTypes.contains($0.typeId) && fxEffectGroupOf($0) != .plugins }
+        let layerHasAudio = ((model.detail["audioFlags"] as? NSNumber)?.uint32Value ?? 0) & 4 != 0
+        let pluginCatalog = model.effectCatalog.filter { availablePluginTypes.contains($0.typeId) }
+        let plugins = runtime.safeMode ? [] : fxDistinctEffects(fxPickableEffects(pluginCatalog, layerHasAudio: layerHasAudio,
+                                                                                 layerKind: model.selectedLayer?.kind ?? 0))
         ZStack {
-            browser
+            browser(catalog: catalog, plugins: plugins)
+                .allowsHitTesting(!searching && detail == nil)
+                .accessibilityHidden(searching || detail != nil)
             if searching {
-                FxSearchPane(sorted: fxDistinctEffects(request.sorted), chips: $searchChips, onDetail: openDetail,
+                FxSearchPane(sorted: request.browse ? (showingPlugins ? plugins : catalog) : catalog + plugins,
+                             chips: $searchChips, onDetail: openDetail,
                              onClose: { if request.browse { searching = false } else { close() } })
                     .id(searchEpoch)
+                    .allowsHitTesting(detail == nil)
+                    .accessibilityHidden(detail != nil)
             }
             if let current = detail {
                 FxDetailOverlay(entries: current.entries, startIndex: current.index, closeSignal: detailClose, variants: true,
@@ -1115,16 +1128,17 @@ struct EffectAddSheet: View {
                 .combined(with: AnyTransition.opacity.animation(.linear(duration: 0.025).delay(0.075))))
     }
 
-    private var browser: some View {
-        // Bugs 0.3.4 (bug 3): um efeito por typeId (identidade dos ForEach das grades).
-        let sorted = fxDistinctEffects(request.sorted)
-        let groups = fxSortedGroups(sorted)
+    private func browser(catalog: [EffectCatalogItem], plugins: [EffectCatalogItem]) -> some View {
+        let groups = fxSortedGroups(catalog)
         let group = groups.first { $0.group.id == groupId }
         return VStack(spacing: 0) {
             topBar(title: group?.group.label ?? AureaText.t("fx_browser_title"), inGroup: group != nil,
                    divider: group == nil ? homeScrolled : gridScrolled)
+            if group == nil { tabs }
             ZStack {
-                if let group {
+                if showingPlugins {
+                    PluginManagerView(prefs: prefs, effects: plugins, onOpenEffect: openDetail, onAdd: add)
+                } else if let group {
                     let near = fxAdjacentGroups(groups.map { $0.group }, group.group)
                     FxGroupGrid(group: group.group, entries: group.entries, store: model.effectPreviews,
                                 previous: near.previous, next: near.next, onDetail: openDetail,
@@ -1132,14 +1146,40 @@ struct EffectAddSheet: View {
                         .transition(categoryTransition)
                         .zIndex(1)
                 } else {
-                    home(sorted: sorted, groups: groups)
+                    home(sorted: catalog, groups: groups)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .foregroundStyle(AureaColors.text)
         .background(AureaColors.fxListSurface.ignoresSafeArea())
-        .sheet(isPresented: $managingPlugins) { PluginManagerView().environmentObject(model).presentationDetents([.large]) }
+    }
+
+    private var tabs: some View {
+        HStack(spacing: 4) {
+            tab(false, title: "panel_efeitos", glyph: CupertinoGlyph.Sparkles, id: "effects.tab.catalog")
+            tab(true, title: "fxui_group_plugins", glyph: CupertinoGlyph.SquareStack3dUp, id: "effects.plugins")
+        }
+        .padding(4).background(AureaColors.fxLowSurface, in: RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal, 16).padding(.vertical, 8)
+    }
+
+    private func tab(_ pluginTab: Bool, title: String, glyph: Character, id: String) -> some View {
+        let selected = pluginTab == showingPlugins
+        let color = selected ? AureaColors.accent : AureaColors.fxTextSecondary
+        return Button { showingPlugins = pluginTab } label: {
+            HStack(spacing: 8) {
+                CupertinoGlyph.text(glyph, size: 18, color: color).accessibilityHidden(true)
+                Text(AureaText.t(title)).font(.aurea(size: 14, weight: .semibold)).lineLimit(1)
+            }
+            .foregroundStyle(color).frame(maxWidth: .infinity, minHeight: 44)
+            .background(selected ? AureaColors.accent.opacity(0.15) : AureaColors.fxLowSurface,
+                        in: RoundedRectangle(cornerRadius: 12))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(AureaPressStyle(shrink: 1))
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityIdentifier(id)
     }
 
     private func home(sorted: [EffectCatalogItem], groups: [(group: FxEffectGroup, entries: [EffectCatalogItem])]) -> some View {
@@ -1151,7 +1191,7 @@ struct EffectAddSheet: View {
         let recommended = fxRecommendedEffects(sorted, layerKind: model.selectedLayer?.kind ?? 0, applied: model.effects.map(\.typeId))
         return FxBrowserHome(recommended: recommended, recents: recents, favorites: favorites, groups: groups, prefs: prefs,
                              store: model.effectPreviews, onAdd: add, onDetail: openDetail,
-                             onPlugins: { managingPlugins = true }, onGroup: { openGroup($0.id) },
+                             onGroup: { openGroup($0.id) },
                              onScrolled: { homeScrolled = $0 })
     }
 
@@ -1166,7 +1206,7 @@ struct EffectAddSheet: View {
                 }.buttonStyle(AureaPressStyle(shrink: 1))
                     .accessibilityLabel(AureaText.t(inGroup ? "fxui_back_categories" : "common_close"))
                     .accessibilityIdentifier(inGroup ? "effects.back" : "effects.close")
-                Text(title).font(.aurea(size: 17, weight: .medium)).lineLimit(1).truncationMode(.tail)
+                Text(title).font(.aurea(size: 19, weight: .semibold)).lineLimit(1).truncationMode(.tail)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, AureaDims.s1).frame(maxWidth: .infinity, alignment: .center)
                     .accessibilityAddTraits(.isHeader)
@@ -1180,7 +1220,7 @@ struct EffectAddSheet: View {
                         .accessibilityLabel(AureaText.t("fxui_search_effects"))
                         .accessibilityIdentifier("effects.search")
                 }
-            }.frame(height: 44)
+            }.frame(height: 52)
             AureaColors.fxLowSurface.opacity(divider ? 1 : 0).frame(height: 0.5)
         }
     }
@@ -1199,7 +1239,6 @@ private struct FxBrowserHome: View {
     let store: EffectPreviewStore
     let onAdd: (EffectCatalogItem, Int) -> Void
     let onDetail: ([EffectCatalogItem], Int) -> Void
-    let onPlugins: () -> Void
     let onGroup: (FxEffectGroup) -> Void
     let onScrolled: (Bool) -> Void
 
@@ -1217,11 +1256,12 @@ private struct FxBrowserHome: View {
                         FxQuickBand(pages: pages, perPage: perPage, hint: favorites.isEmpty && !recents.isEmpty, prefs: prefs,
                                     store: store, onAdd: onAdd, onDetail: onDetail)
                     }
-                    Color.clear.frame(height: 0)
-                        .accessibilityElement().accessibilityLabel(AureaText.t("fx_browser_categories"))
+                    Text(AureaText.t("fx_browser_categories"))
+                        .font(.aurea(size: 15, weight: .semibold))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 8)
                         .accessibilityAddTraits(.isHeader)
                     categories
-                    pluginDoor
                 }
             }
             .coordinateSpace(name: "fx.home")
@@ -1232,31 +1272,14 @@ private struct FxBrowserHome: View {
 
     /// Categorias: 2 colunas, espaço de 1, fundo «mais escuro», ladrilhos de 65.
     private var categories: some View {
-        LazyVGrid(columns: [GridItem(.flexible(), spacing: 1), GridItem(.flexible(), spacing: 1)], spacing: 1) {
-            // Bugs 0.3.4 (bug 3): identidade pelo GRUPO ("category:<id>"), não pela
-            // posição: instalar um plugin insere o grupo Plugins e deslocava os índices.
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
             ForEach(fxUniqueGroups(groups.map { $0.group }), id: \.self) { group in
                 FxGroupTile(group: group, entries: groups.first { $0.group == group }?.entries ?? [], store: store) {
                     onGroup(group)
                 }
             }
         }
-        .padding(.bottom, 1)
-        .background(AureaColors.fxDarkest)
-    }
-
-    /// 0.3.0: a porta dos plugins fica sempre à vista (a categoria só aparece com um instalado).
-    private var pluginDoor: some View {
-        Button(action: onPlugins) {
-            HStack(spacing: 10) {
-                CupertinoGlyph.text(CupertinoGlyph.SquareStack3dUp, size: 20, color: AureaColors.accent)
-                Text(AureaText.t("plug_manage")).font(.aurea(size: 14)).frame(maxWidth: .infinity, alignment: .leading)
-                CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 14, color: AureaColors.fxTextSecondary).mirrorsInRtl(true)
-            }
-            .padding(.horizontal, 16).frame(minHeight: 52)
-            .background(AureaColors.fxListSurface)
-            .contentShape(Rectangle())
-        }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityIdentifier("effects.plugins")
+        .padding(.horizontal, 16).padding(.bottom, 8)
     }
 }
 
@@ -1362,6 +1385,8 @@ private struct FxQuickBand: View {
     @State private var restored = false
 
     private var total: Int { pages.count + (hint ? 1 : 0) }
+    private var columns: Int { max(perPage / 2, 1) }
+    private var rowCount: Int { pages.contains { $0.items.count > columns } ? 2 : 1 }
 
     /// O detalhe pagina por todos os efeitos da faixa (um por efeito, sem repetir).
     private var detailList: [EffectCatalogItem] {
@@ -1373,14 +1398,13 @@ private struct FxQuickBand: View {
         VStack(spacing: 0) {
             TabView(selection: $page) {
                 ForEach(0..<total, id: \.self) { index in
-                    pageView(index).tag(index)
+                    pageView(index).padding(.horizontal, 10).padding(.vertical, 5).tag(index)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
-            .padding(.horizontal, 10).padding(.vertical, 5)
             indicator.padding(.bottom, 5)
         }
-        .frame(height: 210)
+        .frame(height: rowCount == 1 ? 112 : 194)
         .background(AureaColors.fxListSurface)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("effects.quick")
@@ -1396,13 +1420,13 @@ private struct FxQuickBand: View {
     private func pageView(_ index: Int) -> some View {
         if index < pages.count {
             HStack(spacing: 0) {
-                ForEach(0..<max(perPage / 2, 1), id: \.self) { column in
+                ForEach(0..<columns, id: \.self) { column in
                     VStack(spacing: 0) {
                         Spacer(minLength: 0)
-                        cell(index, column * 2)
-                        Spacer(minLength: 0)
-                        cell(index, column * 2 + 1)
-                        Spacer(minLength: 0)
+                        ForEach(0..<rowCount, id: \.self) { row in
+                            cell(index, column * rowCount + row)
+                            Spacer(minLength: 0)
+                        }
                     }.frame(maxWidth: .infinity)
                 }
             }
@@ -1513,10 +1537,10 @@ private struct FxGroupTile: View {
                 Text(group.label).font(.aurea(size: 15, weight: .bold)).foregroundStyle(AureaColors.text)
                     .multilineTextAlignment(.center).lineLimit(2).padding(.horizontal, 8)
             }
-            .frame(maxWidth: .infinity).frame(height: 65)
+            .frame(maxWidth: .infinity).frame(height: 72)
             .background(AureaColors.fxPanel)
-            .clipped()
-            .contentShape(Rectangle())
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .contentShape(RoundedRectangle(cornerRadius: 14))
         }.buttonStyle(AureaPressStyle(shrink: 1))
             .accessibilityLabel(AureaText.t("fx_browser_open_group", group.label))
             .accessibilityIdentifier("effects.category." + group.id)
@@ -1679,7 +1703,12 @@ private struct FxAfterThumb: View {
         }
         .task(id: "\(entry.typeId)-\(previewsEnabled)") {
             guard fxEffectToolOf(entry.typeId) == nil, previewsEnabled else { return }
-            image = nil
+            image = store.cachedImage(for: entry.typeId)
+            guard image == nil else { return }
+            // Briefly visible cells during a fast scroll may disappear before
+            // they ever enqueue disk or GPU work.
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            guard !Task.isCancelled else { return }
             let loaded = await store.image(for: entry.typeId)
             if !Task.isCancelled { image = loaded }
         }
@@ -2063,6 +2092,7 @@ private struct FxDetailPage: View {
                     extras
                 }
             }
+            .accessibilityIdentifier("effects.detail.scroll")
         }
         .task(id: "\(entry.typeId)-\(scene.rawValue)-\(animates)") {
             frames = []; failed = false
@@ -2074,6 +2104,7 @@ private struct FxDetailPage: View {
             if let loaded, !loaded.isEmpty { frames = loaded } else { failed = true }
         }
         .accessibilityValue(AureaText.t("om_fx_detail_page", index + 1, count))
+        .accessibilityHidden(!active)
     }
 
     private var preview: some View {
@@ -2407,15 +2438,43 @@ struct EffectAboutSheet: View {
 // =============================================================================
 struct PluginManagerView: View {
     @EnvironmentObject private var model: AureaModel
+    @ObservedObject var prefs: FxEffectPrefs
+    @ObservedObject private var runtime = PluginRuntime.shared
+    let effects: [EffectCatalogItem]
+    let onOpenEffect: ([EffectCatalogItem], Int) -> Void
+    let onAdd: (EffectCatalogItem, Int) -> Void
     @State private var removing: FxPluginInfo?
     @State private var help = false
     private var tag: String { FxPluginTexts.appTag }
 
+    init(prefs: FxEffectPrefs, effects: [EffectCatalogItem],
+         onOpenEffect: @escaping ([EffectCatalogItem], Int) -> Void, onAdd: @escaping (EffectCatalogItem, Int) -> Void) {
+        _prefs = ObservedObject(wrappedValue: prefs)
+        self.effects = effects
+        self.onOpenEffect = onOpenEffect
+        self.onAdd = onAdd
+    }
+
     var body: some View {
+        GeometryReader { geometry in
+            pluginList(width: geometry.size.width)
+        }
+        .accessibilityIdentifier("plugins.sheet")
+        .background(AureaColors.fxListSurface)
+        .overlay { PluginOverlays() }
+        .onAppear { model.refreshPlugins() }
+        .alert(AureaText.t("plug_remove_title", removing.flatMap { FxPluginTexts.pick($0.names, tag) } ?? removing?.id ?? ""),
+               isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
+            Button(AureaText.t("plug_remove"), role: .destructive) { if let p = removing { model.removePlugin(id: p.id) }; removing = nil }
+            Button(AureaText.t("common_cancel"), role: .cancel) { removing = nil }
+        } message: {
+            Text(AureaText.t("plug_remove_body"))
+        }
+    }
+
+    private func pluginList(width: CGFloat) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(AureaText.t("plug_title")).font(.aurea(size: 17, weight: .semibold))
-                Text(AureaText.t("plug_hint")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted)
+            LazyVStack(alignment: .leading, spacing: 8) {
                 Button {
                     DocumentImportPicker.present(types: [UTType(filenameExtension: "aureaplugin") ?? .data, UTType(filenameExtension: "fs") ?? .data, .zip, .data]) { urls in
                         // 0.3.4 plugins: lê o pacote primeiro; a folha de consentimento instala.
@@ -2425,30 +2484,34 @@ struct PluginManagerView: View {
                     Text(AureaText.t("plug_install")).font(.aurea(size: 15, weight: .semibold)).foregroundStyle(AureaColors.onAccent)
                         .frame(maxWidth: .infinity, minHeight: 46).background(AureaColors.accent, in: RoundedRectangle(cornerRadius: 12))
                 }.buttonStyle(.plain).disabled(model.importingMedia).accessibilityIdentifier("plugins.install")
+                Text(verbatim: ".aureaplugin · .fs · .zip").font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
                 if model.importingMedia { Text(model.operationMessage).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted) }
                 PluginSafeModeView()
+                shortcuts(width: max(0, width - 32))
                 if model.plugins.isEmpty {
                     Text(AureaText.t("plug_empty")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted).padding(.vertical, 8)
                 }
                 ForEach(model.plugins) { p in row(p) }
-                PluginOverlays()   // 0.3.4 plugins: consentimento, console e alertas
-                Text(AureaText.t("plug_safety")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
                 Button { help.toggle() } label: {
                     Text(AureaText.t("plug_help_title")).font(.aurea(size: 14, weight: .semibold)).foregroundStyle(AureaColors.accent)
                 }.buttonStyle(.plain).padding(.top, 6).accessibilityIdentifier("plugins.help")
                 if help { Text(AureaText.t("plug_help_body")).font(.aurea(size: 13)).fixedSize(horizontal: false, vertical: true) }
             }
             .foregroundStyle(AureaColors.text)
-            .padding(.horizontal, 18).padding(.vertical, 16)
+            .padding(.horizontal, 16).padding(.vertical, 8)
         }
-        .background(AureaColors.surface.ignoresSafeArea())
-        .onAppear { model.refreshPlugins() }
-        .alert(AureaText.t("plug_remove_title", removing.flatMap { FxPluginTexts.pick($0.names, tag) } ?? removing?.id ?? ""),
-               isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
-            Button(AureaText.t("plug_remove"), role: .destructive) { if let p = removing { model.removePlugin(id: p.id) }; removing = nil }
-            Button(AureaText.t("common_cancel"), role: .cancel) { removing = nil }
-        } message: {
-            Text(AureaText.t("plug_remove_body"))
+    }
+
+    @ViewBuilder
+    private func shortcuts(width: CGFloat) -> some View {
+        let presets: (UInt32) -> Int = { model.engine.effectPresets($0).count / 2 }
+        let recents = fxRecentItems(prefs.recentRefs, effects, presetCount: presets)
+        let favorites = fxFavoriteItems(prefs.favoriteRefs, effects, presetCount: presets)
+        let perPage = fxFavoritesPerPage(width)
+        let pages = fxQuickPages(recents, favorites, perPage: perPage)
+        if !pages.isEmpty {
+            FxQuickBand(pages: pages, perPage: perPage, hint: favorites.isEmpty && !recents.isEmpty, prefs: prefs,
+                        store: model.effectPreviews, onAdd: onAdd, onDetail: onOpenEffect)
         }
     }
 
@@ -2461,12 +2524,19 @@ struct PluginManagerView: View {
                     .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
                 if let d = FxPluginTexts.pick(p.descriptions, tag), !d.isEmpty { Text(d).font(.aurea(size: 12)) }
                 // No modo seguro o aviso do topo já explica: o plugin não está com defeito.
-                if !p.ok && !PluginRuntime.shared.safeMode {
+                if !p.ok && !runtime.safeMode {
                     Text(AureaText.t("plug_error", p.error)).font(.aurea(size: 12)).foregroundStyle(AureaColors.warning)
                 } else if p.ok && p.testRenderMs > 0 {
                     Text(AureaText.t(p.kind == "audio" ? "plug_audio_ms" : "plug_render_ms", String(format: "%.1f", p.testRenderMs))).font(.aurea(size: 11)).foregroundStyle(AureaColors.muted)
                 }
                 PluginV2Controls(pluginId: p.id)   // 0.3.4 plugins: ligar, permissões, painéis, console
+                if let index = effects.firstIndex(where: { $0.typeId == p.effectTypeId }) {
+                    Button { onOpenEffect(effects, index) } label: {
+                        Text(AureaText.t("fxo_add")).font(.aurea(size: 14, weight: .semibold))
+                            .foregroundStyle(AureaColors.accent).frame(minHeight: 44)
+                            .contentShape(Rectangle())
+                    }.buttonStyle(.plain).accessibilityIdentifier("plugins.effect.\(p.id)")
+                }
             }.frame(maxWidth: .infinity, alignment: .leading)
             Button { removing = p } label: {
                 Text(AureaText.t("plug_remove")).font(.aurea(size: 13)).foregroundStyle(AureaColors.danger)

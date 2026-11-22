@@ -107,7 +107,7 @@ class OmegaAddExportTest {
         assertEquals(0, compose.onAllNodesWithTag("add.panel").fetchSemanticsNodes().size)
     }
 
-    /** 0.3.3 barra: a pílula de 5, o "+" que abre a grade 4 × 2 e o "X" que fecha. */
+    /** A barra e o "+" oferecem conjuntos distintos de categorias. */
     @Test fun addBarPillAndPlusGridOpenEachDestination() {
         launch("AUREA · 0.3.3 barra")
         for (tab in listOf("Shape", "Media", "Audio", "Text", "Element")) compose.onNodeWithTag("addBar.$tab").assertIsDisplayed()
@@ -121,8 +121,11 @@ class OmegaAddExportTest {
         // O "+" fecha o conteúdo e abre a grade; o "X" fecha.
         compose.onNodeWithTag("addBar.more").performClick()
         compose.onNodeWithTag("addBar.grid").assertIsDisplayed()
-        for (tab in listOf("Shape", "Media", "Audio", "Text", "TextPresets", "Element", "Model3D", "Draw")) {
+        for (tab in listOf("TextPresets", "Model3D", "Draw", "Vector")) {
             compose.onNodeWithTag("addBar.grid.$tab").assertIsDisplayed()
+        }
+        for (tab in listOf("Shape", "Media", "Audio", "Text", "Element")) {
+            compose.onNodeWithTag("addBar.grid.$tab").assertDoesNotExist()
         }
         compose.onNodeWithTag("addBar.close").assertIsDisplayed()
         capture("bar-grid")
@@ -134,9 +137,12 @@ class OmegaAddExportTest {
         compose.onNodeWithTag("add.model3d.shapes").assertIsDisplayed()
         compose.onNodeWithTag("add.close").performClick()
         compose.waitUntil(3000) { compose.onAllNodesWithTag("add.panel").fetchSemanticsNodes().isEmpty() }
-        // Forma pela grade adiciona como pela pílula.
         compose.onNodeWithTag("addBar.more").performClick()
-        compose.onNodeWithTag("addBar.grid.Shape").performClick()
+        compose.onNodeWithTag("addBar.grid.Vector").performClick()
+        compose.onNodeWithTag("add.vector.rect").assertIsDisplayed()
+        compose.onNodeWithTag("add.close").performClick()
+        compose.waitUntil(3000) { compose.onAllNodesWithTag("add.panel").fetchSemanticsNodes().isEmpty() }
+        compose.onNodeWithTag("addBar.Shape").performClick()
         compose.onNodeWithTag("add.shape.0").performClick()
         compose.waitUntil(5000) { store.layers.size == 1 }
     }

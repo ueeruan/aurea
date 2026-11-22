@@ -109,6 +109,7 @@ inline constexpr u32 kLayerRowFlagPreserveTransparency = 1u << 17;
 inline constexpr u32 kLayerRowQualityShift = 18;
 inline constexpr u32 kLayerRowQualityMask  = 0x3u << kLayerRowQualityShift;
 inline constexpr u32 kLayerRowFlagBicubic  = 1u << 20;
+inline constexpr u32 kLayerRowFlagForce2D = 1u << 21;
 /// Etiqueta de cor (0 = nenhuma) nos bits 8..11.
 inline constexpr u32 kLayerRowLabelShift   = 8;
 inline constexpr u32 kLayerRowLabelMask    = 0xFu << kLayerRowLabelShift;

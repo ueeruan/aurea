@@ -1033,6 +1033,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)keyShape:(long long)layerId param:(uint32_t)param;
 - (NSArray<NSNumber*>*)trackMatte:(long long)layerId;
 - (NSArray<NSNumber*>*)maskData:(long long)layerId;
+- (BOOL)pinLayerMasks:(long long)layerId pinned:(BOOL)pinned;
 - (int32_t)addMask:(long long)layerId points:(NSArray<NSNumber*>*)points closed:(BOOL)closed;
 - (BOOL)removeMask:(long long)layerId mask:(uint32_t)mask;
 - (BOOL)setMaskPath:(long long)layerId mask:(uint32_t)mask points:(NSArray<NSNumber*>*)points closed:(BOOL)closed undo:(BOOL)undo;

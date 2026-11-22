@@ -96,6 +96,9 @@ private:
     MediaManager media_;
     FrameSnapshot snapshot_;
     u64 sequence_ = 0, fenceTimeoutNs_ = 120'000'000'000ull;
+    u64 sceneExposureBudgetBytes_ = 32ull << 20;
+    bool serialSceneExposure_ = false;
+    bool stageUnblurredScenes_ = false;
     std::atomic<u64> generation_{0};
     std::mutex wakeMutex_;
     std::condition_variable wake_;

@@ -213,6 +213,10 @@ void cut_drawn(const std::vector<Contour>& lines, f32 amount, bool sequential, b
 void group_amounts(const std::vector<f64>& lengths, const DrawProgress& p, std::vector<f32>& out);
 /// Comprimento dos contornos depois do afim `m` (exato para afim).
 [[nodiscard]] f64 length_under(const std::vector<Contour>& lines, const Affine2& m) noexcept;
+/// Draw a trimmed stroke while keeping dash phase and taper anchored to its original path.
+void build_drawn_stroke(const VectorStroke& stroke, f32 tolerance, const std::vector<DrawnLine>& pieces,
+                        std::vector<Contour>& out);
+[[nodiscard]] f32 draw_fill_alpha(f32 progress, bool stroked) noexcept;
 
 // --- Avaliação e malha ---------------------------------------------------------
 

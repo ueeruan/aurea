@@ -34,7 +34,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -142,8 +141,11 @@ internal fun GradientParamEditor(env: PanelEnv, effect: Int, param: Int, label: 
                         val pad = 14.dp.toPx()
                         val width = (size.width - pad * 2).coerceAtLeast(1f)
                         val toT = { x: Float -> ((x - pad) / width).coerceIn(0f, 1f) }
-                        var working = latest
+                        val original = latest
+                        val selectionAtStart = selected
+                        var working = original
                         val n = working.size / 5
+                        if (n < 2) return@awaitEachGesture
                         val nearest = (0 until n).minByOrNull { abs(pad + working[it * 5] * width - down.position.x) } ?: 0
                         var index = nearest
                         var changed = false
@@ -154,22 +156,39 @@ internal fun GradientParamEditor(env: PanelEnv, effect: Int, param: Int, label: 
                             index = at
                             changed = true
                         }
-                        selected = index
-                        dragging = true
-                        stops = working
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                            if (!change.pressed) break
-                            if (change.positionChange() != Offset.Zero) {
+                        val touchSlop = viewConfiguration.touchSlop
+                        var horizontal = false
+                        try {
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: return@awaitEachGesture
+                                if (change.isConsumed) return@awaitEachGesture
+                                val dx = abs(change.position.x - down.position.x)
+                                val dy = abs(change.position.y - down.position.y)
+                                if (!horizontal && dy >= touchSlop && dy >= dx) return@awaitEachGesture
+                                if (!change.pressed) {
+                                    change.consume()
+                                    selected = index
+                                    if (changed) commit(working)
+                                    dragging = false
+                                    return@awaitEachGesture
+                                }
+                                if (!horizontal && (dx < touchSlop || dx <= dy)) continue
+                                horizontal = true
+                                dragging = true
                                 change.consume()
+                                selected = index
                                 working = moveStop(working, index, toT(change.position.x))
                                 stops = working
                                 changed = true
                             }
+                        } finally {
+                            if (dragging) {
+                                dragging = false
+                                stops = original
+                                selected = selectionAtStart
+                            }
                         }
-                        dragging = false
-                        if (changed) commit(working)
                     }
                 },
         ) {

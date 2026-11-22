@@ -50,6 +50,9 @@ Status OfflineFrameRenderer::initialize(GPUBackend& gpu, const EffectRegistry& e
     media_.set_memory(memory);
     media_.set_ready_callback(&OfflineFrameRenderer::source_ready, this);
     renderer_.set_transient_cache_budget(budget);
+    // Leave room for decoded media, scene targets and the encoder. Changing
+    // the batch size does not change the number or order of shutter samples.
+    if (budget) sceneExposureBudgetBytes_ = std::clamp<u64>(budget / 8, 1ull << 20, 32ull << 20);
     renderer_.set_preview_cache_budget(0);
     renderer_.set_flow_cache_budget(16ull << 20);
     // 0.5.3: as faixas do TimeSlice dividem o orçamento do export (metade dele,
@@ -103,7 +106,12 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
     if (!comp) return Errc::NotFound;
     RenderSettings settings = requested;
     settings.finalQuality = true;
+    settings.warmupRevision = project.revision();
     settings.dither = false;
+    settings.sceneExposureBatchBudgetBytes = serialSceneExposure_
+        ? 1 : std::min(requested.sceneExposureBatchBudgetBytes, sceneExposureBudgetBytes_);
+    settings.sceneExposureFenceTimeoutNs = std::min(settings.sceneExposureFenceTimeoutNs, fenceTimeoutNs_);
+    settings.stageUnblurredScenes |= stageUnblurredScenes_;
     const auto cancelled = [&] {
         settings.beat();
         return (settings.cancelFlag && settings.cancelFlag->load(std::memory_order_acquire))
@@ -116,12 +124,11 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
     // no export) fazia o quadro parecer travado e a escada descer como se a
     // GPU tivesse estourado o prazo (docs/diagnostico/export-engine-2.0.md, 1.4).
     u64 idleSinceProgress = 0;
-    bool reclaimed = false, trimmed = false, reopened = false;
+    bool reclaimed = false, trimmed = false, staged = false, reopened = false;
     // 0.5.2 (E1): o ponto que deixou ESTE quadro incompleto (exato), e se há
     // algo a caminho que ainda pode resolvê-lo.
     const char* waitFile = nullptr;
     u32 waitLine = 0;
-    bool waitMemory = false;   ///< algum render deste quadro faltou memória (não entra na rede)
     const auto in_flight = [&]() noexcept { return renderer_.pending_uploads() != 0 || renderer_.environment_pending(); };
     for (;;) {
         if (cancelled()) return Errc::Cancelled;
@@ -141,6 +148,7 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
                 || checkNs - start >= (afterFirst ? deadlines_.approximateTotalAfterNs : deadlines_.approximateTotalNs));
         settings.approximateAhead = late;
         (void)renderer_.take_incomplete();
+        (void)renderer_.take_memory_short();
         {
             ScopedElapsedTime preparation{measurements_.prepareNs};
             renderer_.prepare(*comp, project, time, &media_, images, imageContext,
@@ -178,44 +186,47 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
             measurements_.recordNs += recordedNs - internalWaitNs;
             measurements_.fenceWaitNs += internalWaitNs;
             submittedFrame = gpu_->last_submitted_frame();
-            if (rendered.code() == Errc::OutOfDeviceMemory && !reclaimed) {
+            if (const bool memoryShort = renderer_.take_memory_short(); rendered.ok() && memoryShort)
+                rendered = Status{Errc::BudgetExceeded, "final frame exceeds its resource budget"};
+            const bool memoryFailure = rendered.code() == Errc::OutOfDeviceMemory
+                || rendered.code() == Errc::OutOfMemory || rendered.code() == Errc::BudgetExceeded;
+            if (memoryFailure) {
+                if (trimmed && (settings.stageUnblurredScenes || !target.texture.valid()
+                    || !Renderer::has_unblurred_scene_targets(snapshot_))) return rendered;
                 snapshot_.release_video_frames();
                 if (gpuLock.owns_lock()) gpuLock.unlock();
                 if (const Status ready = wait_gpu(submittedFrame, settings.cancelFlag, pollingMutex, additionalCancel); !ready.ok()) return ready;
                 if (pollingMutex) gpuLock.lock();
-                if (const Status ready = renderer_.reclaim_failed_transients(100'000'000ull); !ready.ok()) return ready;
-                reclaimed = true;
-                continue;
-            }
-            if (rendered.code() == Errc::OutOfDeviceMemory && !trimmed) {
-                // 0.5.2 (E1b): soltar só os transitórios do grafo que falhou não
-                // bastou ("textura transitoria indisponivel" no mesmo quadro em
-                // todo degrau, Galaxy A23/M21, vivo V2120). Antes de desistir do
-                // quadro, solta TUDO o que se refaz: o pool inteiro (entradas
-                // ociosas de quadros anteriores), caches de imagem, planos,
-                // fluxo, máscara, LUT e profundidade fora do quadro, e espera a
-                // GPU aposentar o que saiu (a destruição é adiada para o fence).
-                // Uma vez por quadro; falhando de novo, o quadro falha como antes.
-                snapshot_.release_video_frames();
-                if (gpuLock.owns_lock()) gpuLock.unlock();
-                if (const Status ready = wait_gpu(gpu_->last_submitted_frame(), settings.cancelFlag, pollingMutex, additionalCancel); !ready.ok()) return ready;
-                if (pollingMutex) gpuLock.lock();
-                (void)renderer_.reclaim_failed_transients(100'000'000ull);
+                if (cancelled()) return Errc::Cancelled;
+                if (const Status ready = renderer_.reclaim_failed_transients(); !ready.ok()) return ready;
+                if (!reclaimed && rendered.code() == Errc::OutOfDeviceMemory) {
+                    reclaimed = true;
+                    continue;
+                }
                 const auto before = gpu_->memory_stats();
                 const u32 released = renderer_.trim_memory(4, ~0ull);
-                if (gpuLock.owns_lock()) gpuLock.unlock();
-                if (const Status ready = wait_gpu(gpu_->last_submitted_frame(), settings.cancelFlag, pollingMutex, additionalCancel); !ready.ok()) return ready;
-                if (pollingMutex) gpuLock.lock();
+                const usize prefetchBytes = media_.reclaim_idle_prefetch_frames();
+                // Keep the leaner shutter plan for following frames. The
+                // same original samples still contribute to the same image.
+                if (settings.boundedSceneExposure) {
+                    serialSceneExposure_ = true;
+                    settings.sceneExposureBatchBudgetBytes = 1;
+                }
+                if (trimmed) {
+                    settings.stageUnblurredScenes = true;
+                    staged = true;
+                }
+                trimmed = reclaimed = true;
                 const auto after = gpu_->memory_stats();
-                AUREA_LOG_WARN("export: quadro %lld sem memoria de GPU depois de soltar os transitorios; %u recursos refeitos sob demanda saem (GPU %llu -> %llu KB) e o quadro tenta de novo",
-                               static_cast<long long>(time.value), released,
-                               static_cast<unsigned long long>(before.usedBytes / 1024), static_cast<unsigned long long>(after.usedBytes / 1024));
-                trimmed = true;
+                AUREA_LOG_WARN("export: quadro %lld refeito por pressao de memoria (codigo=%d, etapas_3d=%u, lote_obturador=%llu B, recursos_liberados=%u, prefetch=%llu KB, GPU=%llu -> %llu KB)",
+                    static_cast<long long>(time.value), rendered.raw(), staged ? 1u : 0u,
+                    static_cast<unsigned long long>(settings.sceneExposureBatchBudgetBytes), released,
+                    static_cast<unsigned long long>(prefetchBytes / 1024),
+                    static_cast<unsigned long long>(before.usedBytes / 1024),
+                    static_cast<unsigned long long>(after.usedBytes / 1024));
                 continue;
             }
             if (!rendered.ok()) return rendered;
-            if (renderer_.take_memory_short())
-                return Status{Errc::BudgetExceeded, "final frame exceeds its resource budget"};
             // 0.5.2 (E1): o quadro deixou de fora algo que nunca chega (modelo que
             // falhou ao subir): ele vale como está, como a prévia mostra; avisa.
             if (renderer_.take_unavailable()) {
@@ -243,16 +254,18 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
                                approximateFrames_);
                 return OkStatus;
             }
-            const bool memoryShort = renderer_.take_memory_short();
             if (!approximate) {
-                if (!renderer_.take_incomplete()) { approximateRun_ = 0; return OkStatus; }
-                waitMemory |= memoryShort;
+                if (!renderer_.take_incomplete()) {
+                    if (staged && timings.sceneExposureBatches) stageUnblurredScenes_ = true;
+                    approximateRun_ = 0;
+                    return OkStatus;
+                }
                 waitFile = renderer_.incomplete_file();
                 waitLine = renderer_.incomplete_line();
                 siteFile_ = waitFile; siteLine_ = waitLine;
                 // Ponto já declarado sem solução nesta sessão (abaixo): sem nada a
                 // caminho, o quadro sai depois da espera curta, como o primeiro.
-                if (!waitMemory && site_unresolved(waitFile, waitLine) && !in_flight() && monotonic_ns() - start >= kUnresolvedSiteWaitNs) {
+                if (site_unresolved(waitFile, waitLine) && !in_flight() && monotonic_ns() - start >= kUnresolvedSiteWaitNs) {
                     omitted_ = true;
                     approximateRun_ = 0;
                     return OkStatus;
@@ -313,8 +326,8 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
             // sessão. O alvo já tem o quadro como a prévia mostra (sem aquilo):
             // ele sai, o ponto entra na lista e o export avisa. Com upload ou
             // ambiente ainda a caminho (transitório), falha como antes.
-            // Falta de memória não entra: a escada (menos pixels) é quem resolve.
-            if (exact && waitFile && !waitMemory && !in_flight()) {
+            // Memory failures were handled above without encoding partial output.
+            if (exact && waitFile && !in_flight()) {
                 remember_unresolved(waitFile, waitLine);
                 omitted_ = true;
                 approximateRun_ = 0;
@@ -330,7 +343,7 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
                               site_name(waitFile), waitLine);
                 AUREA_LOG_ERROR("export: quadro %lld incompleto em %s:%u (%s); exportacao interrompida",
                                 static_cast<long long>(time.value), waitFile ? waitFile : "?", waitLine,
-                                in_flight() ? "recurso ainda a caminho" : waitMemory ? "sem memoria" : "sem ponto");
+                                in_flight() ? "recurso ainda a caminho" : "sem ponto");
             }
             return Status{exact ? Errc::Timeout : Errc::DecodeFailed,
                 exact ? failure_ : "a fonte nao entregou o quadro exato; exportacao interrompida"};

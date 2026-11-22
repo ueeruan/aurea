@@ -271,6 +271,27 @@ AUREA_TEST(DrawingProgress, MeshFollowsGroupsAndCacheKeyChanges) {
     AUREA_CHECK(content_hash(groups, 0.0, DrawProgress{0.25f, true, true}) != h25);
 }
 
+AUREA_TEST(DrawingProgress, NestedStrokeAndClassicStrokeShareSequentialLength) {
+    using namespace vector;
+    VectorGroup nested;
+    nested.children.push_back(line_group(Vec2{0, 100}, Vec2{300, 100}, 10.0f));
+    nested.order = {VectorItemKind::Group};
+    nested.freeOrder = true;
+    const std::vector<VectorGroup> groups{line_group(Vec2{0, 0}, Vec2{100, 0}, 10.0f), nested};
+    VectorMesh mesh;
+    build_mesh(groups, 0.0, 1.0f, mesh, DrawProgress{0.25f, true, false});
+    AUREA_CHECK(!mesh.empty());
+    AUREA_CHECK(mesh.max.y < 10.0f);
+    build_mesh(groups, 0.0, 1.0f, mesh, DrawProgress{0.5f, true, false});
+    AUREA_CHECK(mesh.max.y > 100.0f);
+    AUREA_CHECK_NEAR(mesh.max.x, 101.0f, 0.01f);
+    build_mesh(groups, 0.0, 1.0f, mesh, DrawProgress{0.25f, true, true});
+    AUREA_CHECK(mesh.min.y > 90.0f);
+    AUREA_CHECK(mesh.min.x > 190.0f);
+    build_mesh(groups, 0.0, 1.0f, mesh, DrawProgress{0.0f, true, false});
+    AUREA_CHECK(mesh.empty());
+}
+
 AUREA_TEST(DrawingProgress, EffectContractInTheRegistry) {
     EffectRegistry reg;
     register_builtin_effects(reg);

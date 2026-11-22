@@ -132,7 +132,7 @@ import java.util.Locale
 //   · Início: RECOMENDADOS (faixa de 186, até 6, sem os efeitos que a camada já
 //     tem), RECENTES/FAVORITOS (faixa de 210 em páginas de 2 linhas; toque
 //     ADICIONA, toque longo abre o DETALHE) e as CATEGORIAS (2 colunas, 65 dp).
-//     A porta "Gerenciar plugins" continua no fim.
+//     A aba Plugins reúne instalação, gerenciamento e aplicação na camada.
 //   · Categoria: grade de cartões de 88 dp em ordem alfabética, anterior/próxima
 //     nas pontas. Toque no cartão → detalhe.
 //   · Busca: etiquetas sugeridas, etiqueta vira ficha no campo, resultados em
@@ -152,6 +152,7 @@ private class DetailRequest(val entries: List<EffectCatalogEntry>, val index: In
 /** A pilha do navegador: categoria aberta, busca (com fichas) e detalhe. */
 @Stable
 private class BrowserNav {
+    var plugins by mutableStateOf(false)
     var groupId by mutableStateOf<String?>(null)
     var searching by mutableStateOf(false)
     var searchChips by mutableStateOf<List<String>>(emptyList())
@@ -281,24 +282,32 @@ private fun EffectBrowserBody(
                 (textLayer || it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.text.randomizer")) &&
                 (textLayer || it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.text.spacing")) &&
                 (textLayer || text3dLayer || it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.text.animator")) &&
-                (textLayer || it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.text.animator_pro"))   // 0.4.6: só texto 2D
+                (textLayer || it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.text.animator_pro")) &&
+                (textLayer || it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.text.prism"))
         }
         // Bugs 0.3.4 (bug 3): um efeito por typeId (a chave das grades é o typeId).
         val all = distinctEffects(effects + tools.map { toolCatalogEntry(it, toolNames.getValue(it)) })
         arrangeCatalog(all, effectCategories(all))
     }
+    val (pluginCatalog, browserEntries) = remember(sorted, store.plugins) {
+        sorted.partition { PluginTexts.isPlugin(it.typeId) || effectGroupOf(it) == EffectGroup.Plugins }
+    }
+    val safeMode = PluginRuntime.safeMode
+    val pluginEntries = remember(pluginCatalog, store.plugins, safeMode) {
+        val available = store.plugins.filter { it.enabled && it.ok }.map { it.effectTypeId }.toSet()
+        if (safeMode) emptyList() else pluginCatalog.filter { it.typeId in available }
+    }
     val locale = LocalConfiguration.current.locales[0]
-    val names = sorted.associate { it.typeId to pickerEntryName(it) }
+    val names = browserEntries.associate { it.typeId to pickerEntryName(it) }
     // Dentro da categoria, ordem ALFABÉTICA pelo nome mostrado (como a referência).
-    val groups = remember(sorted, names, locale) {
-        groupEntries(sorted).map { (g, list) -> g to sortedByName(list, locale) { names[it.typeId] ?: it.name } }
+    val groups = remember(browserEntries, names, locale) {
+        groupEntries(browserEntries).map { (g, list) -> g to sortedByName(list, locale) { names[it.typeId] ?: it.name } }
     }
     val presetCount: (Int) -> Int = remember(store) { { t: Int -> if (effectToolOf(t) != null) 0 else store.effectPresets(t).size } }
-    val recents = remember(prefs.recentRefs, sorted) { recentItems(prefs.recentRefs, sorted, presetCount) }
-    val favorites = remember(prefs.favoriteRefs, sorted) { favoriteItems(prefs.favoriteRefs, sorted, presetCount) }
+    val recents = remember(prefs.recentRefs, browserEntries) { recentItems(prefs.recentRefs, browserEntries, presetCount) }
+    val favorites = remember(prefs.favoriteRefs, browserEntries) { favoriteItems(prefs.favoriteRefs, browserEntries, presetCount) }
     val applied = store.effects.map { it.typeId }
-    val recommended = remember(sorted, kind, applied, layerHasAudio) { recommendedEffects(sorted, kind, applied, 6, layerHasAudio) }
-    var managingPlugins by remember { mutableStateOf(false) }
+    val recommended = remember(browserEntries, kind, applied, layerHasAudio) { recommendedEffects(browserEntries, kind, applied, 6, layerHasAudio) }
     // 0.3.2: efeito pago sem o acesso abre o paywall das assinaturas (HyperEffectGate).
     var hyperLocked by remember { mutableStateOf<EffectCatalogEntry?>(null) }
     val add: (EffectCatalogEntry, Int) -> Unit = { e, preset ->
@@ -335,7 +344,20 @@ private fun EffectBrowserBody(
                 onClose = onDismiss,
                 onSearch = { nav.openSearch(emptyList()) },
             )
-            AnimatedContent(
+            if (open == null) BrowserTabs(nav.plugins) { nav.plugins = it }
+            if (nav.plugins) {
+                val pluginRecents = remember(prefs.recentRefs, pluginEntries) { recentItems(prefs.recentRefs, pluginEntries, presetCount) }
+                val pluginFavorites = remember(prefs.favoriteRefs, pluginEntries) { favoriteItems(prefs.favoriteRefs, pluginEntries, presetCount) }
+                val perPage = favoritesPerPage(LocalConfiguration.current.screenWidthDp.toFloat())
+                val pages = remember(pluginRecents, pluginFavorites, perPage) { quickPages(pluginRecents, pluginFavorites, perPage) }
+                PluginManagerPane(
+                    store, Modifier.weight(1f), pluginEntries,
+                    onOpenEffect = { entry -> openDetail(pluginEntries, pluginEntries.indexOf(entry)) },
+                    shortcuts = if (pages.isEmpty()) null else ({
+                        QuickBand(store, pages, perPage, pluginFavorites.isEmpty(), previewsOn, add, openDetail)
+                    }),
+                )
+            } else AnimatedContent(
                 targetState = openId,
                 // Anterior/próxima trocam a categoria NO LUGAR: só início ↔ categoria anima.
                 contentKey = { it != null },
@@ -357,7 +379,7 @@ private fun EffectBrowserBody(
                 if (shown == null) {
                     BrowserHome(
                         store, homeState, recommended, recents, favorites, groups, previewsOn,
-                        onAdd = add, onDetail = openDetail, onGroup = { nav.groupId = it.id }, onPlugins = { managingPlugins = true },
+                        onAdd = add, onDetail = openDetail, onGroup = { nav.groupId = it.id },
                     )
                 } else {
                     val (previous, next) = adjacentGroups(groups.map { it.first }, shown.first)
@@ -368,7 +390,7 @@ private fun EffectBrowserBody(
         if (nav.searching) {
             key(nav.searchEpoch) {
                 SearchPane(
-                    store, sorted, nav.searchChips, onChips = { nav.searchChips = it }, previewsOn = previewsOn,
+                    store, if (nav.plugins) pluginEntries else browserEntries, nav.searchChips, onChips = { nav.searchChips = it }, previewsOn = previewsOn,
                     onDetail = openDetail, onClose = { nav.searching = false },
                 )
             }
@@ -391,8 +413,35 @@ private fun EffectBrowserBody(
     hyperLocked?.let { locked ->
         com.aurea.aurea.hyper.PaywallDialog(com.aurea.aurea.hyper.PaidItem.effect(locked.typeId), pickerEntryName(locked)) { hyperLocked = null }
     }
-    // 0.3.0: plugins de efeito (instalar, ver, remover); o catálogo relido entra nos grupos acima.
-    if (managingPlugins) PluginManagerSheet(store) { managingPlugins = false }
+}
+
+@Composable
+private fun BrowserTabs(plugins: Boolean, onSelect: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(16.dp)).background(AureaColors.FxLowSurface).padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        for (isPluginTab in listOf(false, true)) {
+            val active = isPluginTab == plugins
+            val color = if (active) AureaColors.Accent else AureaColors.FxTextSecondary
+            Row(
+                Modifier.weight(1f).heightIn(min = 44.dp).clip(RoundedCornerShape(12.dp))
+                    .background(if (active) AureaColors.Accent.copy(alpha = .15f) else AureaColors.FxLowSurface)
+                    .testTag(if (isPluginTab) "effects.plugins" else "effects.tab.catalog")
+                    .semantics { selected = active; role = Role.Tab }
+                    .tocavel(shrink = 1f, role = null) { onSelect(isPluginTab) },
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CupertinoIcon(if (isPluginTab) CupertinoGlyph.SquareStack3dUp else CupertinoGlyph.Sparkles, 18.dp, color)
+                Text(
+                    stringResource(if (isPluginTab) R.string.fxui_group_plugins else R.string.panel_efeitos),
+                    style = AureaType.of(14f, FontWeight.SemiBold, color = color), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
 }
 
 /**
@@ -406,7 +455,7 @@ private fun BrowserTopBar(title: String, inGroup: Boolean, divider: Boolean, onB
     val backLabel = stringResource(R.string.fxui_back_categories)
     val searchLabel = stringResource(R.string.fxui_search_effects)
     Column(Modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().height(52.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier
                     .size(AureaDims.MinTap)
@@ -421,7 +470,7 @@ private fun BrowserTopBar(title: String, inGroup: Boolean, divider: Boolean, onB
                 title,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                style = AureaType.of(17f, FontWeight.W500, color = AureaColors.Text),
+                style = AureaType.of(19f, FontWeight.SemiBold, color = AureaColors.Text),
                 textAlign = TextAlign.Center,
                 modifier = Modifier.weight(1f).padding(horizontal = AureaDims.S1).semantics { heading() },
             )
@@ -447,7 +496,7 @@ private fun BrowserTopBar(title: String, inGroup: Boolean, divider: Boolean, onB
 
 /**
  * A TELA INICIAL: Recomendados, Recentes/Favoritos, as categorias em 2
- * colunas e a porta "Gerenciar plugins" (`effects.home`).
+ * colunas (`effects.home`).
  */
 @Composable
 private fun BrowserHome(
@@ -461,7 +510,6 @@ private fun BrowserHome(
     onAdd: (EffectCatalogEntry, Int) -> Unit,
     onDetail: (List<EffectCatalogEntry>, Int) -> Unit,
     onGroup: (EffectGroup) -> Unit,
-    onPlugins: () -> Unit,
 ) {
     val perPage = favoritesPerPage(LocalConfiguration.current.screenWidthDp.toFloat())
     val pages = remember(recents, favorites, perPage) { quickPages(recents, favorites, perPage) }
@@ -479,11 +527,11 @@ private fun BrowserHome(
             when (homeRow) {
                 BrowserHomeRow.Recommended -> RecommendedBand(store, recommended, previewsOn, onDetail)
                 BrowserHomeRow.Quick -> QuickBand(store, pages, perPage, hint, previewsOn, onAdd, onDetail)
-                BrowserHomeRow.CategoriesHeader ->
-                    Spacer(Modifier.height(0.dp).semantics { contentDescription = categoriesLabel; heading() })
+                BrowserHomeRow.CategoriesHeader -> Text(
+                    categoriesLabel, style = AureaType.of(15f, FontWeight.SemiBold, color = AureaColors.Text),
+                    modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp).semantics { heading() },
+                )
                 is BrowserHomeRow.Categories -> CategoryRow(store, homeRow.groups, byGroup, previewsOn, onGroup)
-                // 0.3.0: a porta dos plugins fica sempre à vista (a categoria só aparece com um instalado).
-                BrowserHomeRow.PluginDoor -> PluginDoor(onPlugins)
             }
         }
     }
@@ -499,31 +547,11 @@ private fun CategoryRow(
     onGroup: (EffectGroup) -> Unit,
 ) {
     Row(
-        Modifier.fillMaxWidth().background(AureaColors.FxDarkest).padding(bottom = 1.dp),
-        horizontalArrangement = Arrangement.spacedBy(1.dp),
+        Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         row.forEach { g -> GroupTile(store, g, byGroup[g].orEmpty(), previewsOn, Modifier.weight(1f)) { onGroup(g) } }
         if (row.size == 1) Spacer(Modifier.weight(1f))
-    }
-}
-
-/** A porta "Gerenciar plugins" (`effects.plugins`), no fim da tela inicial. */
-@Composable
-private fun PluginDoor(onPlugins: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .heightIn(min = 52.dp)
-            .background(AureaColors.FxListSurface)
-            .testTag("effects.plugins")
-            .tocavel(shrink = 1f, onClick = onPlugins)
-            .padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        CupertinoIcon(CupertinoGlyph.SquareStack3dUp, 20.dp, AureaColors.Accent)
-        Spacer(Modifier.width(10.dp))
-        Text(stringResource(R.string.plug_manage), modifier = Modifier.weight(1f), style = AureaType.of(14f, color = AureaColors.Text))
-        CupertinoIcon(CupertinoGlyph.ChevronRight, 14.dp, AureaColors.FxTextSecondary)
     }
 }
 
@@ -604,7 +632,7 @@ private fun RecommendedItem(entry: EffectCatalogEntry, previews: EffectPreviewSt
 }
 
 /**
- * RECENTES/FAVORITOS: faixa de 210 com páginas de 2 linhas (a de Recentes, se
+ * RECENTES/FAVORITOS: faixa ajustada a uma ou duas linhas (a de Recentes, se
  * houver, e as de Favoritos) e o indicador de 9 dp embaixo (relógio = Recentes,
  * estrela = cada página de Favoritos). A página à vista é lembrada.
  * Toque ADICIONA; toque longo abre o DETALHE.
@@ -624,6 +652,7 @@ private fun QuickBand(
     val pager = rememberPagerState(initialPage = prefs.quickPage.coerceIn(0, (total - 1).coerceAtLeast(0))) { total }
     LaunchedEffect(pager) { snapshotFlow { pager.settledPage }.collect { prefs.updateQuickPage(it) } }
     val columns = (perPage / 2).coerceAtLeast(1)
+    val rowCount = if (pages.any { it.second.size > columns }) 2 else 1
     // O detalhe pagina por todos os efeitos da faixa (um por efeito, sem repetir).
     val detailList = remember(pages) { pages.flatMap { it.second }.map { it.entry }.distinctBy { it.typeId } }
     val openDetail: (QuickItem) -> Unit = { item ->
@@ -631,29 +660,29 @@ private fun QuickBand(
     }
     val recentLabel = stringResource(R.string.om_fx_recent)
     val favoritesLabel = stringResource(R.string.om_fx_favorites)
-    Column(Modifier.fillMaxWidth().height(210.dp).background(AureaColors.FxListSurface).testTag("effects.quick")) {
+    Column(Modifier.fillMaxWidth().height(if (rowCount == 1) 112.dp else 194.dp)
+        .background(AureaColors.FxListSurface).testTag("effects.quick")) {
         HorizontalPager(
             pager,
-            Modifier.fillMaxWidth().weight(1f).padding(horizontal = 10.dp),
+            Modifier.fillMaxWidth().weight(1f),
             contentPadding = PaddingValues(vertical = 5.dp),
         ) { page ->
             val p = pages.getOrNull(page)
             if (p == null) {
-                Box(Modifier.fillMaxSize().padding(horizontal = 24.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.fillMaxSize().padding(horizontal = 34.dp), contentAlignment = Alignment.Center) {
                     Text(stringResource(R.string.om_fx_favorites_empty_star), style = AureaType.of(13f, color = AureaColors.FxTextSecondary),
                         textAlign = TextAlign.Center)
                 }
             } else {
-                Row(Modifier.fillMaxSize()) {
+                Row(Modifier.fillMaxSize().padding(horizontal = 10.dp)) {
                     repeat(columns) { c ->
                         Column(
                             Modifier.weight(1f).fillMaxHeight(),
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.SpaceEvenly,
                         ) {
-                            repeat(2) { r ->
-                                val (col, row) = c to r
-                                val item = p.second.getOrNull(col * 2 + row)
+                            repeat(rowCount) { row ->
+                                val item = p.second.getOrNull(c * rowCount + row)
                                 if (item == null) Spacer(Modifier.size(62.dp, 82.dp))
                                 else QuickTile(item, p.first, store.effectPreviews, previewsOn, onAdd, openDetail)
                             }
@@ -754,7 +783,8 @@ private fun GroupTile(
     val banner = remember(group, entries) { groupBannerEntry(group, entries) }
     Box(
         modifier
-            .height(65.dp)
+            .height(72.dp)
+            .clip(RoundedCornerShape(14.dp))
             .background(AureaColors.FxPanel)
             .testTag("effects.category." + group.id)
             .semantics { contentDescription = description; role = Role.Button }

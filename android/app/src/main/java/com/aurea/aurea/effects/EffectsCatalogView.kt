@@ -7,7 +7,10 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -348,8 +351,13 @@ internal fun EffectDetailOverlay(
                 .graphicsLayer { translationY = (1f - progress.value) * fullPx }
                 .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
                 .background(AureaColors.FxDarkest)
-                // A caixa segura o toque: tocar nela não chega ao véu (que fecharia).
-                .pointerInput(Unit) { detectTapGestures { } }
+                // A folha cobre o véu sem consumir o toque que inicia a rolagem.
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false)
+                        waitForUpOrCancellation()
+                    }
+                }
                 .testTag("effects.detail"),
         ) {
             Box(Modifier.fillMaxWidth()) {
@@ -430,7 +438,8 @@ private fun DetailPage(
         else stringResource(R.string.fx_preview_still_desc, name)
     val pageLabel = stringResource(R.string.om_fx_detail_page, index + 1, count)
     val veil = AureaColors.FxSearch
-    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).semantics { stateDescription = pageLabel }) {
+    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+        .testTag("effects.detail.scroll").semantics { stateDescription = pageLabel }) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val side = maxWidth
             Box(Modifier.fillMaxWidth().height(side).semantics { contentDescription = previewDesc }) {

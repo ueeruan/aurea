@@ -62,6 +62,7 @@ struct TransformView: View {
     private var locked: Bool { model.selectedLayer?.locked ?? false }
     private var uses3D: Bool {
         let kind = model.selectedLayer?.kind ?? 0
+        if (model.detail["force2D"] as? NSNumber)?.boolValue == true { return false }
         return [8, 9, 10].contains(kind) || model.selectedLayer?.threeD == true || abs(value(6)) > 0.01 || abs(value(7)) > 0.01
             || abs(value(2)) > 0.01 || [UInt32(6), 7, 2].contains { animatedMask & (1 << $0) != 0 }
     }

@@ -3500,6 +3500,7 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     if (!e->query_layer_detail(static_cast<aurea::u64>(layerId), d)) return nil;
     return @{
         AureaDetailKind:           @(d.kind),
+        @"force2D":               @((d.flags & aurea::bridge::kLayerRowFlagForce2D) != 0),
         AureaDetailStartFrame:     @(d.startFrame),
         AureaDetailEndFrame:       @(d.endFrame),
         @"offsetFrames":          @(d.offsetFrames),
@@ -5191,6 +5192,9 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
     aurea::u64 matte = 0; aurea::u32 mode = 0;
     if (!e || !e->query_track_matte(layerId, matte, mode)) return @[];
     return @[@(matte), @(mode)];
+}
+- (BOOL)pinLayerMasks:(long long)layerId pinned:(BOOL)pinned {
+    auto* e = self.engine; return e && e->pin_layer_masks(layerId, pinned);
 }
 - (NSArray<NSNumber*>*)maskData:(long long)layerId {
     auto* e = self.engine; if (!e) return @[];

@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.ds.KeyframeLook
+import com.aurea.aurea.ui.ds.AureaToggle
 import com.aurea.aurea.ui.ds.PropertyCustomRow
 import com.aurea.aurea.engine.TrackKey
 import com.aurea.aurea.engine.TrackProperty
@@ -149,7 +150,22 @@ internal fun MaskPanel(env: PanelEnv) {
         ) {
             Column(Modifier.fillMaxWidth().padding(start = 4.dp, end = 10.dp, bottom = 16.dp).testTag("mask.scroll")) {
                 if (tab == MT_MATTE) TrackMatteTab(store)
-                else MaskList(store, st?.masks.orEmpty()) { openTab = MT_SHAPE }
+                else {
+                    val state = st
+                    if (state != null && state.masks.isNotEmpty() && state.pinState >= 0) {
+                        val pinLabel = stringResource(R.string.mask_pin_to_comp)
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(pinLabel, Modifier.weight(1f), style = AureaType.Base)
+                            AureaToggle(
+                                checked = state.pinState == 1,
+                                onCheckedChange = store::pinLayerMasks,
+                                modifier = Modifier.testTag("mask.pin").semantics { contentDescription = pinLabel },
+                                enabled = store.detail?.locked != true,
+                            )
+                        }
+                    }
+                    MaskList(store, state?.masks.orEmpty()) { openTab = MT_SHAPE }
+                }
             }
         }
         return

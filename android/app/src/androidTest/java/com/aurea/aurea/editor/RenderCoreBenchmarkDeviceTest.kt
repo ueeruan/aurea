@@ -8,6 +8,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.aurea.aurea.engine.AureaEngine
 import com.aurea.aurea.engine.CommandBatch
 import com.aurea.aurea.engine.ExportProgress
+import com.aurea.aurea.engine.LayerEffect
 import com.aurea.aurea.engine.TrackProperty
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -202,6 +203,94 @@ class RenderCoreBenchmarkDeviceTest {
         setDuration(comp, frames)
         waitComposition(frames); SystemClock.sleep(500)
         exportAndMeasure("photoSlideshow")
+    }
+
+    /** Same geometry and pixels in the preview and export comparisons. */
+    @Test fun denseVectorWithEffect() {
+        val frames = if (frameLimit > 0) frameLimit else 90
+        val comp = project(720, 1280, frames)
+        val svg = buildString {
+            append("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 720 1280'>")
+            for (row in 0 until 96) {
+                val y = 64 + row * 12
+                append("<path fill='none' stroke='#36c6f5' stroke-width='2' d='M 24 $y")
+                for (step in 1..64) {
+                    val x = 24 + 10 * step
+                    val offset = ((row + step * 3) % 11) - 5
+                    append(" L $x ${y + offset}")
+                }
+                append("'/>")
+            }
+            append("</svg>")
+        }
+        val layer = engine.importSvg(svg.toByteArray(Charsets.UTF_8), "Dense paths")
+        assertTrue("vector fixture could not be imported", layer > 0)
+        engine.beginCommandBatch()
+        val c = CommandBatch(engine)
+        c.setLayerTimeRange(layer, 0, frames)
+        c.insertKeyframe(layer, TrackProperty.SCALE_X, -1, 0, 0, 1f)
+        c.insertKeyframe(layer, TrackProperty.SCALE_X, -1, 0, frames - 1, 1.05f)
+        c.addEffect(layer, fnv1a("aurea.blur.gaussian"))
+        assertEquals(4, engine.submitCommands())
+        setDuration(comp, frames)
+        waitComposition(frames)
+
+        val side = 420
+        val pixels = ByteBuffer.allocateDirect(side * side * 4).order(ByteOrder.nativeOrder())
+        val size = IntArray(2)
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        val samples = mutableListOf<Double>()
+        for (frame in 0..12) {
+            engine.beginCommandBatch()
+            CommandBatch(engine).seek(frame * (1_000_000_000L / 30L))
+            assertEquals(1, engine.submitCommands())
+            val started = SystemClock.elapsedRealtimeNanos()
+            val bytes = engine.capturePreviewFrame(side, pixels, size)
+            assertTrue("preview capture failed on frame $frame ($bytes)", bytes > 0)
+            if (frame != 0) samples += (SystemClock.elapsedRealtimeNanos() - started) / 1_000_000.0
+            pixels.position(0)
+            pixels.limit(bytes)
+            digest.update(pixels)
+            pixels.clear()
+        }
+        val sorted = samples.sorted()
+        val hash = digest.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
+        note("PREVIEW scenario=denseVector samples=${sorted.size} medianMs=${sorted[sorted.size / 2]} " +
+            "p90Ms=${sorted[(sorted.size * 9 / 10).coerceAtMost(sorted.lastIndex)]} sha256=$hash")
+        exportAndMeasure("denseVector")
+    }
+
+    @Test fun drawingProgressCutsThePathInAFreeOrderVector() {
+        val comp = project(480, 480, 30)
+        val svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 480 480'>" +
+            "<path fill='none' stroke='#ffffff' stroke-width='18' d='M 36 240 L 444 240'/></svg>"
+        val layer = engine.importSvg(svg.toByteArray(Charsets.UTF_8), "Animated stroke")
+        assertTrue(layer > 0)
+        assertTrue(engine.vectorTreeEdit(layer, intArrayOf(0), op = 7, a = 1))
+        engine.beginCommandBatch()
+        assertTrue(CommandBatch(engine).addEffect(layer, fnv1a("aurea.draw.drawing_progress")))
+        assertEquals(1, engine.submitCommands())
+        setDuration(comp, 30)
+        waitComposition(30)
+        val rows = ByteBuffer.allocateDirect(32).order(ByteOrder.nativeOrder())
+        val names = ByteBuffer.allocateDirect(2048).order(ByteOrder.nativeOrder())
+        assertEquals(1, engine.queryLayerEffects(layer, rows, 1, names))
+        val id = LayerEffect.read(rows, 0, names).effectId
+        val size = IntArray(2)
+        val pixels = ByteBuffer.allocateDirect(360 * 360 * 4)
+        fun brightPixels(progress: Float): Int {
+            engine.beginCommandBatch()
+            assertTrue(CommandBatch(engine).setEffectParam(layer, id, 0, progress))
+            assertEquals(1, engine.submitCommands())
+            setDuration(comp, 30) // flush the command before taking the exact frame
+            val bytes = engine.captureFrame(360, pixels, size)
+            assertTrue("vector frame capture failed", bytes > 0)
+            return (0 until bytes step 4).count { (pixels.get(it).toInt() and 255) >= 200 }
+        }
+        val full = brightPixels(100f)
+        val half = brightPixels(50f)
+        val empty = brightPixels(0f)
+        assertTrue("full=$full half=$half empty=$empty", full > 500 && half in (full / 3)..(full * 2 / 3) && empty < 20)
     }
 
     private fun importBenchVideo(): Long {

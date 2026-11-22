@@ -247,7 +247,6 @@ fun groupEntries(sorted: List<EffectCatalogEntry>): List<Pair<EffectGroup, List<
 // derruba o app ("Key … was already used", SubcomposeLayout).
 
 /** Chave fixa da porta "Gerenciar plugins" no fim da tela inicial do navegador. */
-const val PLUGIN_DOOR_KEY = "action:manage-plugins"
 
 /** Faixa de recomendados da tela inicial. */
 const val HOME_RECOMMENDED_KEY = "section:recommended"
@@ -290,19 +289,17 @@ sealed class BrowserHomeRow(val key: String) {
     data object Quick : BrowserHomeRow(HOME_QUICK_KEY)
     data object CategoriesHeader : BrowserHomeRow(HOME_CATEGORIES_HEADER_KEY)
     class Categories(val groups: List<EffectGroup>) : BrowserHomeRow(groupRowKey(groups))
-    data object PluginDoor : BrowserHomeRow(PLUGIN_DOOR_KEY)
 }
 
 /**
  * Os itens da tela inicial: recomendados e rápidos (se houver), o título das
- * categorias, as linhas de 2 ladrilhos e a porta dos plugins, sempre no fim.
+ * categorias e as linhas de 2 ladrilhos. Plugins têm uma aba própria.
  */
 fun browserHomeRows(hasRecommended: Boolean, hasQuick: Boolean, groups: List<EffectGroup>): List<BrowserHomeRow> = buildList {
     if (hasRecommended) add(BrowserHomeRow.Recommended)
     if (hasQuick) add(BrowserHomeRow.Quick)
     add(BrowserHomeRow.CategoriesHeader)
-    groups.distinct().chunked(2).forEach { add(BrowserHomeRow.Categories(it)) }
-    add(BrowserHomeRow.PluginDoor)
+    groups.filter { it != EffectGroup.Plugins }.distinct().chunked(2).forEach { add(BrowserHomeRow.Categories(it)) }
 }
 
 /** O efeito cuja prévia (escurecida) vira o fundo do ladrilho do grupo. */

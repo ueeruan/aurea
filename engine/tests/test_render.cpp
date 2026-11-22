@@ -148,6 +148,11 @@ AUREA_TEST(PreviewRefill, SeekHoldsAreBoundedAndRecoverOnDecodeAndProjectChange)
     AUREA_CHECK(refill.hold(true, true, 900003000));
     AUREA_CHECK(!refill.hold(true, false, 900004000)); // new project/playback
     AUREA_CHECK(refill.hold(true, true, 1900000000));
+    AUREA_CHECK(!refill.hold(false, true, 1900000001));
+    constexpr u64 transition = PreviewRefill::kDecodeTransitionNs;
+    AUREA_CHECK(refill.hold(true, true, 2000000000, transition));
+    AUREA_CHECK(refill.hold(true, true, 2000000000 + transition - 1, transition));
+    AUREA_CHECK(!refill.hold(true, true, 2000000000 + transition, transition));
 }
 
 AUREA_TEST(CameraShake, ContinuousSeededMotionWorksInBothTimeDirections) {

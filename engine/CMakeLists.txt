@@ -285,6 +285,7 @@ set(AUREA_CORE_SOURCES
     src/text/TextAnimator.cpp
     src/text/TextAnimatorPro.cpp
     src/text/TextTransform.cpp
+    src/text/TextGradient.cpp
     src/text/TextAnimatorMigrate.cpp
     src/text/Captions.cpp
     src/engine/EngineCaptions.cpp

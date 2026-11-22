@@ -166,7 +166,7 @@ f32 ae_ease(f32 w, f32 high, f32 low) {
 } // namespace
 
 f32 pro_range_weight(f32 start, f32 end, f32 offset, u32 units, u32 shape, f32 smoothness,
-                     f32 easeHigh, f32 easeLow, u32 unit, u32 count, bool aeMath) noexcept {
+                     f32 easeHigh, f32 easeLow, u32 unit, u32 count, bool aeMath, f32 overlap) noexcept {
     const f32 n = static_cast<f32>(std::max<u32>(1, count));
     // Índice: as unidades viram % do total (Início 2 = depois da 2a unidade).
     const f32 k = units == 1 ? 100.0f / n : 1.0f;
@@ -177,9 +177,12 @@ f32 pro_range_weight(f32 start, f32 end, f32 offset, u32 units, u32 shape, f32 s
     if (shape == 0) {
         // Quadrada: a fração da unidade dentro do intervalo. Suavidade 0 = corte
         // seco no meio da unidade; 100 % = a entrada gradual pela fração.
-        const f32 cover = std::max(0.0f, std::min(u1, en) - std::max(u0, st)) / (u1 - u0);
+        const f32 padding = 50.0f / n * std::clamp(overlap, 0.0f, 10.0f);
+        const f32 lo = std::max(0.0f, u0 - padding), hi = std::min(100.0f, u1 + padding);
+        const f32 cover = std::max(0.0f, std::min(hi, en) - std::max(lo, st)) / std::max(1e-6f, hi - lo);
         const f32 s = std::clamp(smoothness, 0.0f, 1.0f);
         w = s <= 1e-4f ? (cover >= 0.5f ? 1.0f : 0.0f) : std::clamp((cover - 0.5f) / s + 0.5f, 0.0f, 1.0f);
+        if (padding > 0.0f) w = w * w * (3.0f - 2.0f * w);
     } else if (en > st) {
         const f32 c = (u0 + u1) * 0.5f;
         // Rampas continuam saturadas fora do intervalo (antes do início = 0 na
@@ -189,6 +192,17 @@ f32 pro_range_weight(f32 start, f32 end, f32 offset, u32 units, u32 shape, f32 s
         else if (c >= st && c <= en) w = aeMath ? ae_shape_at(shape, (c - st) / (en - st)) : shape_at(shape, (c - st) / (en - st));
     }
     return aeMath ? ae_ease(w, easeHigh, easeLow) : ease(w, easeHigh, easeLow);
+}
+
+f32 spring_reveal_weight(f32 progress, f32 overlap, f32 strength, f32 cycles, u32 unit, u32 count) noexcept {
+    if (count == 0 || unit >= count) return 0.0f;
+    const f32 reach = 1.0f + std::clamp(overlap, 0.0f, 10.0f);
+    const f32 t = std::clamp((progress * (count - 1 + reach) - unit) / reach, 0.0f, 1.0f);
+    // Quintic envelope gives zero velocity and acceleration at the first and
+    // last samples. The oscillator crosses the resting pose without a seam.
+    const f32 envelope = (1.0f - t) * (1.0f - t) * (1.0f - t) * (1.0f + 3.0f * t + 6.0f * t * t);
+    const f32 phase = 2.0f * kPi * std::clamp(cycles, 0.75f, 2.5f) * t;
+    return envelope * std::lerp(1.0f, std::cos(phase), std::clamp(strength, 0.0f, 1.0f));
 }
 
 f32 pro_wiggle(u32 seed, u32 unit, u32 dimension, f64 timeSec, f32 rate, f32 correlation,

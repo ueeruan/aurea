@@ -67,6 +67,8 @@ public:
     /// enche mais devagar em vez de disputar CPU e calor com o preview.
     void set_pacing_ms(u32 ms) noexcept { pacingMs_.store(ms, std::memory_order_relaxed); }
     [[nodiscard]] u32 pacing_ms() const noexcept { return pacingMs_.load(std::memory_order_relaxed); }
+    /// Keeps cached thumbnails available while deferring new decoder work.
+    void set_playback_active(bool active) noexcept;
 
     /// Decoders abertos agora. Fila vazia por `kDecoderIdleMs`: fecha todos
     /// (§38 — decoder parado segura memória e sessão de codec do sistema).
@@ -140,6 +142,7 @@ private:
     std::atomic<u32> pacingMs_{0};
     std::atomic<u32> openDecoders_{0};
     bool running_ = false;
+    bool playbackActive_ = false;
     std::thread thread_;
 };
 

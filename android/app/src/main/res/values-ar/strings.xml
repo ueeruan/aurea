@@ -1164,7 +1164,7 @@
     <string name="consent_title">الموافقة والمسؤولية</string>
     <string name="consent_accept">موافقة ومتابعة</string>
     <string name="consent_body">Aurea أداة احترافية لتحرير المحتوى الرقمي وإنشائه وإنتاجه. باستخدام التطبيق، يقر المستخدم بأنه يتحمل المسؤولية الكاملة عن المحتوى الذي ينشئه أو يحرره أو يستورده أو يصدره أو ينشره أو يشاركه عبر المنصة.\n\nلا يتحكم Aurea في استخدام الأداة لأنشطة غير قانونية أو مسيئة أو احتيالية أو ضارة أو تنتهك حقوق الآخرين، ولا يشجع هذا الاستخدام أو يدعمه أو يصرح به.\n\nيتحمل المستخدم مسؤولية التأكد من امتلاكه التصاريح والتراخيص والحقوق اللازمة للمواد المستخدمة، بما فيها الصور ومقاطع الفيديو والموسيقى والعلامات التجارية والنماذج والملفات وغيرها من المحتويات المحمية.\n\nلا تعني الحرية الإبداعية التي يوفرها Aurea موافقة التطبيق أو مشاركته أو مسؤوليته عما يقرر كل مستخدم إنتاجه أو فعله باستخدام الأداة.\n\nيوافق المستخدم على استخدام Aurea وفقاً للقانون المعمول به ويتحمل مسؤولية أفعاله والمحتوى المنتج أو الموزع عبر التطبيق.\n\nإلى أقصى حد يسمح به القانون المعمول به، لا يتحمل Aurea والمسؤولون عنه المسؤولية عن الأفعال التي يقوم بها المستخدم وحده، أو إساءة استخدام الأداة، أو العواقب الناجمة عن المحتوى الذي ينشئه المستخدم نفسه أو ينشره أو يشاركه.\n\nيوفر Aurea الأداة. ويتحمل المستخدم مسؤولية الطريقة التي يختار استخدامها بها.\n\nبالمتابعة، يقر المستخدم بأنه قرأ هذه الشروط وفهمها ووافق عليها.</string>
-    <string name="release_notes_body">Aurea 1.0.4 (2225)\n\n• AutoBeat لاختيار مصدر الصوت وتحريك الحجم والارتفاع والدوران · مجاني\n• تتبّع مستوٍ من زاويتين مع تثبيت بأربع نقاط · AureaHyper\n• ملصق حبري للنص ثلاثي الأبعاد بواجهة بيضاء وعمق داكن وحدود فاتحة · AureaHyper\n• AutoRig ثنائي الأبعاد في تأثير الدمية لاكتشاف الوضعية وتعديل الدبابيس وتحريك وضعية الانتظار · AureaHyper</string>
+    <string name="release_notes_body">Aurea 1.0.5 (2226)\n\n• تصدير أكثر استقرارًا لمشاهد 3D المعقدة ومعاينة أكثر سلاسة\n• أيقونات جديدة وقائمة + معاد تنظيمها وعلامتا تبويب منفصلتان للتأثيرات والإضافات\n• أشكال 3D جديدة وتحريك مسارات المتجهات وتأثير Text Prism ضمن AureaHyper</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">تعبئة</string>
@@ -3263,6 +3263,21 @@
     <string name="shape3d_back">رجوع</string>
     <string name="shape3d_add_failed">تعذّر إنشاء الشكل ثلاثي الأبعاد</string>
     <string name="shape3d_cube">مكعب</string>
+    <string name="shape3d_triangle_prism">منشور ثلاثي</string>
+    <string name="shape3d_pentagon_prism">منشور خماسي</string>
+    <string name="shape3d_hexagon_prism">منشور سداسي</string>
+    <string name="shape3d_octagon_prism">منشور ثماني</string>
+    <string name="shape3d_decagon_prism">منشور عشاري</string>
+    <string name="shape3d_tetrahedron">رباعي السطوح</string>
+    <string name="shape3d_icosahedron">عشروني السطوح</string>
+    <string name="shape3d_washer">حلقة مجوفة</string>
+    <string name="shape3d_arrow">سهم ثلاثي الأبعاد</string>
+    <string name="shape3d_cloud">سحابة ثلاثية الأبعاد</string>
+    <string name="shape3d_part_outer">الجدار الخارجي</string>
+    <string name="shape3d_part_inner">الجدار الداخلي</string>
+    <string name="shape3d_part_volume">الحجم</string>
+    <string name="shape3d_cloud_density">الكثافة</string>
+    <string name="shape3d_cloud_detail">التفاصيل</string>
     <string name="shape3d_sphere">كرة</string>
     <string name="shape3d_cylinder">أسطوانة</string>
     <string name="shape3d_cone">مخروط</string>
@@ -5546,4 +5561,31 @@
     <string name="autorig2d_busy">جارٍ تحليل الوضعية…</string>
     <string name="autorig2d_no_pose">لم يعثر AutoRig على نقاط مرئية كافية. أضف دبابيس في أداة الدمية.</string>
     <string name="autorig2d_existing">استخدم تأثير الدمية من دون دبابيس لإنشاء AutoRig.</string>
+    <string name="mask_pin_to_comp">تثبيت الأقنعة في التركيب</string>
+    <string name="fxo_conical">مخروطي</string>
+    <string name="fxl_map_by">التعيين حسب</string>
+    <string name="fxo_character">حرف</string>
+    <string name="fxo_fill">التعبئة</string>
+    <string name="fxo_stroke">الحد</string>
+    <string name="fxo_fill_and_stroke">التعبئة والحد</string>
+    <string name="fxo_custom_2">مخصصة</string>
+    <string name="fxo_prism">منشور</string>
+    <string name="fxo_glacier">جليدي</string>
+    <string name="fxo_ember">جمرة</string>
+    <string name="fxo_silver">فضي</string>
+    <string name="fxl_rgba_gradient">تدرج RGBA</string>
+    <string name="fxo_hsl">HSL</string>
+    <string name="fxo_oklab">Oklab</string>
+    <string name="fxl_blend_mode_3">وضع المزج</string>
+    <string name="fxo_alpha_matte">قناع ألفا</string>
+    <string name="fxl_extend">الامتداد</string>
+    <string name="fxl_hdr_exposure">تعريض HDR</string>
+    <string name="fxl_stagger_by">التدرج الزمني حسب</string>
+    <string name="fxl_delay_per_unit">التأخير لكل وحدة</string>
+    <string name="fxl_offset_per_unit">الإزاحة لكل وحدة</string>
+    <string name="fxo_forward">للأمام</string>
+    <string name="fxo_reverse">عكسي</string>
+    <string name="fxo_random_2">عشوائي</string>
+    <string name="fxs_geometry">الهندسة</string>
+    <string name="fxs_stagger">التدرج الزمني</string>
 </resources>

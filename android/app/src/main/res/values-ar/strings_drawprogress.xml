@@ -7,4 +7,5 @@
     <string name="fxo_simultaneous">متزامن</string>
     <string name="fxl_tip_softness">نعومة الطرف</string>
     <string name="drawprog_reverse">عكس الاتجاه</string>
+    <string name="drawprog_animate">تحريك الحد</string>
 </resources>

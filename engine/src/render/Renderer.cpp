@@ -13,6 +13,7 @@
 #include "aurea/timeline/GridLayout.hpp"
 #include "aurea/timeline/LayerWorld.hpp"
 #include "aurea/render/MaskRaster.hpp"
+#include "aurea/text/TextGradient.hpp"
 #include "aurea/audio/Audio.hpp"
 #include "aurea/audio/Spectrum.hpp"
 #include "aurea/expr/Expression.hpp"
@@ -478,6 +479,7 @@ struct CameraPassThrough {
     const Composition* parent = nullptr;
     const Layer* group = nullptr;
     f64 parentTime0 = 0.0, childTime0 = 0.0, rate = 1.0;   ///< tempo de fora = t0 + (tempo de dentro − c0) × rate
+    bool groupVolume = false;
 };
 thread_local CameraPassThrough g_cameraPassThrough;
 
@@ -555,7 +557,7 @@ scene3d::SceneCamera camera_for_frac(const Composition& comp, f64 timeF, u32 w, 
     const CameraPassThrough pt = g_cameraPassThrough;
     if (pt.child != &comp || !pt.parent || !pt.group) return camera_for_frac_own(comp, timeF, w, h);
     const f64 outer = pt.parentTime0 + (timeF - pt.childTime0) * pt.rate;
-    if (!has_active_camera_frac(*pt.parent, outer))
+    if (!pt.groupVolume && !has_active_camera_frac(*pt.parent, outer))
         return camera_for_frac_own(comp, timeF, w, h);
     g_cameraPassThrough = CameraPassThrough{};   // a de fora com as regras dela
     scene3d::SceneCamera cam = camera_for_frac(*pt.parent, outer, w, h);
@@ -998,6 +1000,9 @@ Status Renderer::initialize(GPUBackend& backend, const EffectRegistry& effects) 
     }
     warmPending_.clear();
     warmedEffects_.clear();
+    warmupProject_ = nullptr;
+    warmupScanRevision_ = 0;
+    flowPipelinesQueued_ = false;
     warmSceneQualities_ = warmedSceneSamples_ = 0;
     warmedForProject_ = 0;
     std::vector<PipelineKey> keys;
@@ -1083,9 +1088,10 @@ void Renderer::scan_for_warmup(const Project& project) noexcept {
         });
         if (want3d) warmSceneQualities_ |= 1u << std::min(c.post_process().quality3d, kScene3DQualityCount - 1);
     });
-    // Todos em kWorkFormat (EffectBuildContext de video_flow). Repetir a cada
-    // varredura é barato: ShaderLibrary::prewarm só cria o que ainda não existe.
-    if (wantFlow) {
+    // A biblioteca de pipelines vive tanto quanto o renderer. Uma única fila
+    // para o fluxo evita doze buscas de cache repetidas em cada edição.
+    if (wantFlow && !flowPipelinesQueued_) {
+        flowPipelinesQueued_ = true;
         for (const ShaderId id : {ShaderId::video_flow_luma_frag, ShaderId::effects_downsample_frag,
                                   ShaderId::video_flow_search_frag, ShaderId::video_flow_lk_frag,
                                   ShaderId::video_flow_smooth_frag, ShaderId::video_flow_fill_frag,
@@ -2630,17 +2636,15 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         // frame fence. A per-composition budget would multiply with nesting.
         exposureBytesRemaining_ = 32ull * 1024 * 1024;
     }
-    // Fora do playback contínuo (parado, scrub, export): o que o projeto usa e
-    // ainda não foi compilado entra na fila; render() compila antes do grafo.
-    // Tocando não varre: nada muda no modelo sem pausar. Parado o decoder também anda
-    // em Playback, e a varredura sumia justo depois de uma edição; a revisão resolve.
-    // 0.5.3: tocando TAMBÉM varre quando a revisão muda (efeito adicionado ou ligado
-    // com o playback rodando): os pipelines dele eram criados um a um, no meio dos
-    // quadros seguintes; agora entram juntos, antes de pegar a imagem da tela.
-    if (prepareDepth_ == 0 && (decodeMode != DecodeMode::Playback
-            || settings.previewCacheRevision != warmupScanRevision_)) {
-        warmupScanRevision_ = settings.previewCacheRevision;
-        scan_for_warmup(project);
+    // The live editor supplies its full model revision even while the image
+    // cache is bypassed. Offline rendering supplies an immutable scene revision.
+    if (prepareDepth_ == 0) {
+        const bool changed = warmupProject_ != &project || warmupScanRevision_ != settings.warmupRevision;
+        if (changed || (!settings.warmupRevision && decodeMode != DecodeMode::Playback)) {
+            warmupProject_ = &project;
+            warmupScanRevision_ = settings.warmupRevision;
+            scan_for_warmup(project);
+        }
     }
     // Expressões: a timeline do quadro (camada dona, outras camadas) e o memo
     // por (propriedade, quadro). O quadro é preparado sob o lock do modelo.
@@ -3331,7 +3335,6 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         const f32 v = tr->sample_f(localF);
                         dst = std::clamp(round ? std::round(v) : v, lo, hi);
                     };
-                    animated = l->shape;
                     ShapeData& a = animated;
                     pick(1, a.cornerRadius, 0.0f, 100000.0f);
                     pick(2, a.points, 1.0f, 64.0f, true);
@@ -3346,6 +3349,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         const Track* tr = l->tracks.find(TrackProperty::ShapeParam, 0, p);
                         if (!tr || tr->keys.empty()) continue;
                         if (f32* dst = shape::param_field(a, p)) {
+                            if (shp != &animated && !paramAnimated) animated = l->shape;
                             *dst = shape::clamp_param(p, tr->sample(local));
                             paramAnimated = true;
                         }
@@ -3368,9 +3372,21 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     while (dens < want && dens < 4.0f) dens *= 2.0f;
                     dens = std::max(dens, texel_scale_for(want));
                     const f64 lf = localF;
-                    std::vector<VectorGroup> ev;
-                    ev.reserve(sh.vector.groups.size());
-                    for (u32 gi = 0; gi < sh.vector.groups.size(); ++gi) ev.push_back(vector::evaluate_group(sh.vector.groups[gi], l->tracks, gi, lf, comp.fps()));
+                    const auto& sourceGroups = sh.vector.groups;
+                    bool evaluateGroups = !l->vectorDrivers.empty();
+                    for (u32 ti = 0; !evaluateGroups && ti < l->tracks.size(); ++ti)
+                        evaluateGroups = l->tracks.at(ti).property == TrackProperty::VectorParam;
+                    // Modifiers carry time in seconds, even with no scalar tracks.
+                    evaluateGroups = evaluateGroups || std::any_of(sourceGroups.begin(), sourceGroups.end(),
+                        [](const VectorGroup& g) { return !g.modifiers.empty(); });
+                    std::vector<VectorGroup> evaluated;
+                    if (evaluateGroups) {
+                        evaluated.reserve(sourceGroups.size());
+                        for (u32 gi = 0; gi < sourceGroups.size(); ++gi)
+                            evaluated.push_back(vector::evaluate_group(sourceGroups[gi], l->tracks, gi, lf, comp.fps()));
+                    }
+                    // Morph paths are still sampled by content_hash/build_mesh at lf.
+                    const auto& ev = evaluateGroups ? evaluated : sourceGroups;
                     // Progresso do desenho: o efeito corta os contornos aqui, na malha.
                     const vector::DrawProgress draw = vector_draw_progress(*l, effects_, lf, copyBgAt);
                     const u64 key = vector::content_hash(ev, lf, draw) ^ (static_cast<u64>(dens * 64.0f) * 0x9E3779B97F4A7C15ull);
@@ -3383,6 +3399,12 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         ce.paints = std::move(mesh.paints);
                         ce.min = mesh.min;
                         ce.max = mesh.max;
+                        // Store texture-local positions once per mesh, including its border.
+                        const Vec2 origin = ce.min - Vec2{1.0f, 1.0f};
+                        for (usize vi = 0; vi + 1 < ce.verts.size(); vi += 2) {
+                            ce.verts[vi].x -= origin.x;
+                            ce.verts[vi].y -= origin.y;
+                        }
                         ce.key = key;
                     } else {
                         ++heavyStats_.vectorCacheHits;
@@ -3398,11 +3420,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     rl.source.vecFirst = static_cast<u32>(out.vec.size());
                     rl.source.vecCount = static_cast<u32>(ce.verts.size() / 2);
                     out.vec.reserve(out.vec.size() + ce.verts.size() + ce.paints.size());
-                    for (usize vi = 0; vi + 1 < ce.verts.size(); vi += 2) {
-                        const Vec4 a = ce.verts[vi];
-                        out.vec.push_back(Vec4{a.x - mn.x, a.y - mn.y, a.z, a.w});
-                        out.vec.push_back(ce.verts[vi + 1]);
-                    }
+                    out.vec.insert(out.vec.end(), ce.verts.begin(), ce.verts.end());
                     rl.source.paintFirst = static_cast<u32>(out.vec.size());
                     out.vec.insert(out.vec.end(), ce.paints.begin(), ce.paints.end());
                     break;
@@ -3738,6 +3756,9 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         rl.source.textFillImage = fillImage;
                     }
                 }
+                const auto prism = effects_ ? text::prepare_prism(*l, L, *effects_, localF, out.glyphs)
+                                            : text::PrismDrawData{};
+                const bool prismMoves = !prism.transforms.empty();
                 rl.source.glyphFirst = static_cast<u32>(out.glyphs.size());
                 // Perspectiva do 3D por caractere: a distância da câmera padrão.
                 rl.source.textPersp = Vec4{L.width * 0.5f, L.height * 0.5f, static_cast<f32>(std::max(1u, comp.height())) * 1.2f, 0};
@@ -3959,7 +3980,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                             : world_2d_frac(comp, *l, t)) * Mat4::translation(Vec3{-srcShift.x, -srcShift.y, 0});
                         for (usize g = 0; g < L.quads.size(); ++g) {
                             const auto& q = L.quads[g];
-                            const Mat4 matrix = world * pathM(g) * (textEffect ? textTransforms[g] : Mat4::identity()) * glyphMatrix(q, anim[g]);
+                            const Mat4 matrix = world * pathM(g) * (prismMoves ? prism.transforms[g] : Mat4::identity())
+                                * (textEffect ? textTransforms[g] : Mat4::identity()) * glyphMatrix(q, anim[g]);
                             const Vec4 corners[4]{{q.x0,q.y0,0,1},{q.x1,q.y0,0,1},{q.x0,q.y1,0,1},{q.x1,q.y1,0,1}};
                             for (u32 c = 0; c < 4; ++c) {
                                 const Vec4 v = matrix * corners[c];
@@ -4023,6 +4045,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                             gi.stroke = sc;
                             gi.stroke.w *= shownOpacity(a, q) * w;
                             gi.xform = Mat4::translation(Vec3{T.shadowOffset.x, T.shadowOffset.y, 0}) * pathM(g)
+                                * (prismMoves ? prism.transforms[g] : Mat4::identity())
                                 * (textEffect ? textTransforms[g] : Mat4::identity()) * glyphMatrix(q, a);
                             gi.misc = Vec4{0, 0, q.k, glyphStroke(q, a)};
                             gi.extra = Vec4{std::max(0.0f, T.shadowBlur) * 0.5f + a.blur, 0, 0, 0};
@@ -4054,14 +4077,16 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         sc.w *= shownOpacity(a, q) * a.strokeOpacity * w;
                         gi.fill = fill;
                         gi.stroke = sc;
-                        gi.xform = pathM(g) * (textEffect ? textTransforms[g] : Mat4::identity()) * glyphMatrix(q, a);
-                        gi.misc = Vec4{strokeKnockout, 0, q.k, glyphStroke(q, a)};
-                        gi.extra = Vec4{a.blur, 0, textureRecord >= 0 ? 1.0f : 0.0f, 0};
+                        gi.xform = pathM(g) * (prismMoves ? prism.transforms[g] : Mat4::identity())
+                            * (textEffect ? textTransforms[g] : Mat4::identity()) * glyphMatrix(q, a);
+                        const f32 prismLink = prism.enabled ? -static_cast<f32>(out.glyphs.size() - prism.firstGlyph - g) : 0.f;
+                        gi.misc = Vec4{strokeKnockout, prismLink, q.k, glyphStroke(q, a)};
+                        gi.extra = Vec4{a.blur, 0, textureRecord >= 0 ? 1.0f : 0.0f, prism.stroke};
                         out.glyphs.push_back(gi);
                     }
                     // Mistura entre caracteres: cada letra (traço e preenchimento juntos)
                     // entra sobre as anteriores, a ordem por caractere do AE.
-                    if (outlinePass && T.renderOrder != 1 && T.interCharBlend == 0) {
+                    if (outlinePass && prism.stroke == 0.f && T.renderOrder != 1 && T.interCharBlend == 0) {
                         // "Preenchimento e traço" do AE. 0 (padrão): todos os
                         // traços atrás de todos os preenchimentos — intercalar
                         // por letra deixava o traço grosso da letra seguinte
@@ -4072,6 +4097,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         const usize end = out.glyphs.size();
                         for (usize gi = textGlyphStart; gi < end; ++gi) {
                             GlyphInstance second = out.glyphs[gi];
+                            if (second.misc.y < 0.f) second.misc.y -= static_cast<f32>(out.glyphs.size() - gi);
                             if (strokesOnTop) {
                                 // O preenchimento fica no lugar e não abre o miolo do traço.
                                 out.glyphs[gi].stroke = Vec4{};
@@ -4095,7 +4121,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 rl.source.glyphSets = sets;
                 rl.source.glyphBlend = blend_is_stencil(static_cast<BlendMode>(T.interCharBlend)) || T.interCharBlend > static_cast<u16>(kLastBlendMode)
                     ? u16{0} : T.interCharBlend;
-                if (!onPath.empty() || animated) {
+                if (!onPath.empty() || animated || prismMoves) {
                     // Extend animated bounds without changing the original
                     // raster grid: an opacity-only animator must not move the
                     // glyphs to a fractional texel and filter them twice.
@@ -4251,8 +4277,14 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 RenderSettings childSettings = settings;
                 childSettings.sceneEditor.enabled = false;
                 const CameraPassThrough savedThrough = g_cameraPassThrough;
-                cameraThrough = l->nested.cameraPassThrough && child->width() == comp.width() && child->height() == comp.height()
-                             && has_active_camera(comp, time)
+                bool groupVolume = false;
+                if (l->threeD && !l->force2D && !has_active_camera(*child, FrameIndex{cf})) {
+                    child->layers().for_each([&](LayerId, const Layer& layer) {
+                        groupVolume |= layer.visible && layer.kind == LayerKind::Model3D;
+                    });
+                }
+                cameraThrough = (groupVolume || (l->nested.cameraPassThrough && has_active_camera(comp, time)))
+                             && child->width() == comp.width() && child->height() == comp.height()
                              && !(settings.sceneEditor.enabled && !settings.finalQuality);
                 if (cameraThrough) {
                     CameraPassThrough pt;
@@ -4262,6 +4294,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     pt.parentTime0 = static_cast<f64>(time.value);
                     pt.childTime0 = static_cast<f64>(cf);
                     pt.rate = childFps > 0.0 ? fps / childFps / std::max(1e-3, std::fabs(static_cast<f64>(l->speed_at(time)))) : 1.0;
+                    pt.groupVolume = groupVolume;
                     g_cameraPassThrough = pt;
                 }
                 const CachedCompositionFrame cached = !cameraThrough && !settings.finalQuality && settings.nestedCacheLookup
@@ -4326,7 +4359,9 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 if (follow == kInvalidIndex || follow >= specs->count()) return false;
                 return effect.params.size() <= follow || effect.params[follow].constant.v[0] > 0.5f;
             }) && wants_3d(comp, *l, time);
-        const bool inScene3d = !cameraThrough && !particularSheet && !envSheet && wants_3d(comp, *l, time);
+        const bool inheritedGroupPlane = inheritedCamera.child == &comp && inheritedCamera.groupVolume && !l->adjustment;
+        const bool inScene3d = !cameraThrough && !particularSheet && !envSheet
+            && (wants_3d(comp, *l, time) || inheritedGroupPlane);
         Mat4 particularWorld = Mat4::identity();
         if (particularSheet) {
             particularWorld = world_3d(comp, *l, time);
@@ -4467,6 +4502,11 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             rl.maskFirst = static_cast<u32>(out.maskData.size());
             rl.maskCount = mask::build_block(*l, localF, srcShift,
                                              0.2f / std::max(rl.texelScale, 1e-3f), out.maskData, rl.maskStart, rl.maskKey);
+            Mat4 maskFromComp;
+            if (l->maskOnComposition && !inScene3d && !cameraThrough && !particularSheet && !envSheet
+                && world::invert(*l->maskOnComposition, maskFromComp)) {
+                rl.maskFromSource = Mat4::translation(Vec3{srcShift.x, srcShift.y, 0}) * maskFromComp * rl.compFromLayer;
+            }
         }
 
         // Exposure starts at phase/360 and lasts angle/360 frames. Sample
@@ -8309,6 +8349,14 @@ void Renderer::apply_masks(const RenderLayer& layer, LayerImage& img, u64 frameN
         std::memcpy(&b, &v, 4);
         key = (key ^ b) * 1099511628211ull;
     }
+    const auto& matrix = layer.maskFromSource.col;
+    const Vec4 maskX{matrix[0].x, matrix[1].x, matrix[3].x, 0};
+    const Vec4 maskY{matrix[0].y, matrix[1].y, matrix[3].y, 0};
+    for (f32 v : {maskX.x, maskX.y, maskX.z, maskY.x, maskY.y, maskY.z}) {
+        u32 bits;
+        std::memcpy(&bits, &v, sizeof(bits));
+        key = (key ^ bits) * 1099511628211ull;
+    }
     key |= 1ull;
     TextureDesc md;
     md.width = w;
@@ -8351,9 +8399,10 @@ void Renderer::apply_masks(const RenderLayer& layer, LayerImage& img, u64 frameN
         ++maskMisses_;
         ++heavyStats_.maskRasterizations;
         cov = graph_.import_texture("cobertura-da-mascara", mc.tex[slot], md);
-        struct { Vec4 region; Vec4 info; } u{Vec4{img.region.x, img.region.y, img.region.w, img.region.h},
+        const f32 maskScale = std::max({1e-3f, std::hypot(maskX.x, maskY.x), std::hypot(maskX.y, maskY.y)});
+        struct { Vec4 region; Vec4 info; Vec4 maskX; Vec4 maskY; } u{Vec4{img.region.x, img.region.y, img.region.w, img.region.h},
                                              Vec4{static_cast<f32>(currentSnap_->maskBase + layer.maskFirst),
-                                                  static_cast<f32>(layer.maskCount), k, layer.maskStart}};
+                                                  static_cast<f32>(layer.maskCount), k / maskScale, layer.maskStart}, maskX, maskY};
         void* ubo = arena_.alloc(sizeof(u), 16);
         std::memcpy(ubo, &u, sizeof(u));
         struct Cap { PipelineHandle p; BufferHandle buf; void* ubo; } cap{*pipe, maskFrameBuf_, ubo};
@@ -8361,7 +8410,7 @@ void Renderer::apply_masks(const RenderLayer& layer, LayerImage& img, u64 frameN
                                [cap](PassContext& pc) {
             pc.cmds.bind_pipeline(cap.p);
             pc.cmds.bind_storage_buffer(cap.buf);
-            pc.cmds.set_uniforms(cap.ubo, 32);
+            pc.cmds.set_uniforms(cap.ubo, sizeof(u));
             pc.cmds.draw(3);
         });
     }

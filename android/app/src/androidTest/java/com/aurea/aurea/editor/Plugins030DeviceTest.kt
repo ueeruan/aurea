@@ -4,11 +4,18 @@ import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.Uri
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.test.platform.app.InstrumentationRegistry
 import com.aurea.aurea.effects.PluginTexts
+import com.aurea.aurea.effects.effectCardId
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.theme.AureaTheme
 import org.junit.Assert.*
@@ -36,8 +43,16 @@ class Plugins030DeviceTest {
     }
 
     @Test fun textureParametersAtSlot1023ReachTheGpuAndPresetsUpdateTheEditor() {
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
         check(context.packageName.endsWith(".uitest"))
+        fun captureBrowser(name: String) {
+            if (InstrumentationRegistry.getArguments().getString("aureaCaptureEffectsUi") != "true") return
+            val image = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
+            try {
+                File(context.filesDir, "$name.png").outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            } finally { image.recycle() }
+        }
         lateinit var store: EditorStore
         var ready = false
         compose.setContent {
@@ -74,10 +89,6 @@ class Plugins030DeviceTest {
             store.newProject(160, 90, 30f, "Plugin V3.1")
         }
         compose.waitUntil(15000) { store.project.title == "Plugin V3.1" && !store.projectOperationBusy }
-        compose.runOnIdle { store.installPlugin(Uri.fromFile(pluginFile)) }
-        compose.waitUntil(45000) { store.plugins.any { it.id == pluginId } && store.busyMessage == null }
-        val plugin = store.plugins.single { it.id == pluginId }
-        assertTrue(plugin.ok)
         val source = java.nio.ByteBuffer.allocateDirect(160 * 90 * 4)
         repeat(160 * 90) { source.put(0); source.put(0); source.put(0); source.put(255.toByte()) }
         source.rewind()
@@ -85,7 +96,23 @@ class Plugins030DeviceTest {
         assertTrue(layer >= 0)
         compose.runOnIdle { store.select(layer) }
         compose.waitUntil(10000) { store.primary == layer && store.detail != null }
-        compose.runOnIdle { store.addEffect(plugin.effectTypeId) }
+        compose.onNodeWithTag("layer.panel.effects").performClick()
+        compose.onNodeWithTag("aurea.effects.add").performClick()
+        compose.onNodeWithTag("effects.tab.catalog").assertIsDisplayed()
+        captureBrowser("audit-effects-catalog")
+        compose.onNodeWithTag("effects.plugins").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("plugins.install").assertIsDisplayed()
+        compose.runOnIdle { store.installPlugin(Uri.fromFile(pluginFile)) }
+        compose.waitUntil(45000) { store.plugins.any { it.id == pluginId } && store.busyMessage == null }
+        val plugin = store.plugins.single { it.id == pluginId }
+        assertTrue(plugin.ok)
+        val pluginAction = "plugins.effect.$pluginId"
+        compose.onNodeWithTag("plugins.sheet").performScrollToNode(hasTestTag(pluginAction))
+        compose.onNodeWithTag(pluginAction).assertIsDisplayed()
+        captureBrowser("audit-effects-plugins")
+        compose.onNodeWithTag(pluginAction).performClick()
+        compose.onNodeWithTag("effects.detail.variant.${effectCardId(plugin.effectTypeId)}")
+            .performScrollTo().performClick()
         compose.waitUntil(15000) {
             val effect = store.effects.firstOrNull { it.typeId == plugin.effectTypeId }
             effect != null && store.effectParams[effect.effectId]?.size == params.size

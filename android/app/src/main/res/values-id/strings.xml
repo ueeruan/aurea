@@ -1136,7 +1136,7 @@ untuk mengedit kurvanya.</string>
     <string name="consent_title">Persetujuan dan Tanggung Jawab</string>
     <string name="consent_accept">Setuju dan lanjutkan</string>
     <string name="consent_body">Aurea adalah alat profesional untuk mengedit, membuat, dan memproduksi konten digital. Dengan menggunakan aplikasi ini, pengguna mengakui bahwa mereka bertanggung jawab penuh atas konten yang mereka buat, edit, impor, ekspor, publikasikan, atau bagikan melalui platform.\n\nAurea tidak mengendalikan, mendorong, mendukung, atau mengizinkan penggunaan alat ini untuk kegiatan ilegal, abusif, curang, merugikan, atau yang melanggar hak pihak ketiga.\n\nPengguna bertanggung jawab memastikan bahwa mereka memiliki izin, lisensi, dan hak yang diperlukan atas materi yang digunakan, termasuk gambar, video, musik, merek, model, berkas, dan konten terlindungi lainnya.\n\nKebebasan kreatif yang ditawarkan Aurea tidak berarti persetujuan, keterlibatan, atau tanggung jawab aplikasi atas apa yang dipilih setiap pengguna untuk dibuat atau dilakukan dengan alat ini.\n\nPengguna setuju untuk menggunakan Aurea sesuai hukum yang berlaku dan bertanggung jawab atas tindakan mereka sendiri serta konten yang diproduksi atau didistribusikan melalui aplikasi.\n\nSejauh diizinkan oleh hukum yang berlaku, Aurea dan pihak yang bertanggung jawab atasnya tidak bertanggung jawab atas tindakan yang dilakukan semata-mata oleh pengguna, penyalahgunaan alat, atau akibat dari konten yang dibuat, dipublikasikan, atau dibagikan oleh pengguna sendiri.\n\nAurea menyediakan alatnya. Pengguna bertanggung jawab atas cara mereka memilih untuk menggunakannya.\n\nDengan melanjutkan, pengguna menyatakan bahwa mereka telah membaca, memahami, dan menyetujui ketentuan ini.</string>
-    <string name="release_notes_body">Aurea 1.0.4 (2225)\n\n• AutoBeat dengan pilihan sumber audio, denyut skala, gerak naik, dan rotasi · gratis\n• Pelacakan planar dari dua sudut dengan pemasangan empat titik · AureaHyper\n• Poster Tinta untuk Teks 3D: muka putih, kedalaman gelap, dan garis tepi terang · AureaHyper\n• AutoRig 2D di Puppet: deteksi pose, pin yang bisa diedit, dan animasi diam · AureaHyper</string>
+    <string name="release_notes_body">Aurea 1.0.5 (2226)\n\n• Ekspor adegan 3D berat lebih stabil dan pratinjau lebih mulus\n• Ikon baru, menu + yang ditata ulang, serta tab Efek dan Plugin terpisah\n• Bentuk 3D baru, animasi goresan vektor, dan Text Prism di AureaHyper</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">Isi</string>
@@ -3235,6 +3235,21 @@ untuk mengedit kurvanya.</string>
     <string name="shape3d_back">Kembali</string>
     <string name="shape3d_add_failed">Tidak dapat membuat bentuk 3D</string>
     <string name="shape3d_cube">Kubus</string>
+    <string name="shape3d_triangle_prism">Prisma segitiga</string>
+    <string name="shape3d_pentagon_prism">Prisma segi lima</string>
+    <string name="shape3d_hexagon_prism">Prisma segi enam</string>
+    <string name="shape3d_octagon_prism">Prisma segi delapan</string>
+    <string name="shape3d_decagon_prism">Prisma segi sepuluh</string>
+    <string name="shape3d_tetrahedron">Tetrahedron</string>
+    <string name="shape3d_icosahedron">Ikosahedron</string>
+    <string name="shape3d_washer">Cincin berongga</string>
+    <string name="shape3d_arrow">Panah 3D</string>
+    <string name="shape3d_cloud">Awan 3D</string>
+    <string name="shape3d_part_outer">Dinding luar</string>
+    <string name="shape3d_part_inner">Dinding dalam</string>
+    <string name="shape3d_part_volume">Volume</string>
+    <string name="shape3d_cloud_density">Kepadatan</string>
+    <string name="shape3d_cloud_detail">Detail</string>
     <string name="shape3d_sphere">Bola</string>
     <string name="shape3d_cylinder">Silinder</string>
     <string name="shape3d_cone">Kerucut</string>
@@ -5498,4 +5513,31 @@ untuk mengedit kurvanya.</string>
     <string name="autorig2d_busy">Menganalisis pose…</string>
     <string name="autorig2d_no_pose">AutoRig tidak menemukan cukup titik yang terlihat. Tambahkan pin di Puppet.</string>
     <string name="autorig2d_existing">Gunakan efek Puppet tanpa pin untuk membuat AutoRig.</string>
+    <string name="mask_pin_to_comp">Sematkan mask ke komposisi</string>
+    <string name="fxo_conical">Kerucut</string>
+    <string name="fxl_map_by">Petakan menurut</string>
+    <string name="fxo_character">Karakter</string>
+    <string name="fxo_fill">Isian</string>
+    <string name="fxo_stroke">Garis tepi</string>
+    <string name="fxo_fill_and_stroke">Isian dan garis tepi</string>
+    <string name="fxo_custom_2">Kustom</string>
+    <string name="fxo_prism">Prisma</string>
+    <string name="fxo_glacier">Gletser</string>
+    <string name="fxo_ember">Bara</string>
+    <string name="fxo_silver">Perak</string>
+    <string name="fxl_rgba_gradient">Gradien RGBA</string>
+    <string name="fxo_hsl">HSL</string>
+    <string name="fxo_oklab">Oklab</string>
+    <string name="fxl_blend_mode_3">Mode campuran</string>
+    <string name="fxo_alpha_matte">Matte alfa</string>
+    <string name="fxl_extend">Perluasan</string>
+    <string name="fxl_hdr_exposure">Eksposur HDR</string>
+    <string name="fxl_stagger_by">Jeda menurut</string>
+    <string name="fxl_delay_per_unit">Jeda per unit</string>
+    <string name="fxl_offset_per_unit">Offset per unit</string>
+    <string name="fxo_forward">Maju</string>
+    <string name="fxo_reverse">Mundur</string>
+    <string name="fxo_random_2">Acak</string>
+    <string name="fxs_geometry">Geometri</string>
+    <string name="fxs_stagger">Jeda bertahap</string>
 </resources>

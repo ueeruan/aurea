@@ -5,6 +5,7 @@
 #include "aurea/hyper/HyperStage.hpp"
 #include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/scene3d/Text3D.hpp"
+#include "aurea/text/TextGradient.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -31,6 +32,7 @@ constexpr PaidEffect kPaidEffects[] = {
     {effect_type_id(effect_keys::kHyperUpscale), nullptr},
     {effect_type_id(effect_keys::kHyperMotion), nullptr},
     {effect_type_id(effect_keys::kHyperClean), nullptr},
+    {effect_type_id(text::kTextPrismEffect), nullptr},
     {effect_type_id("aurea.motion.cartoon_moblur"), "aurea_fx_cartoon_moblur"},
     {effect_type_id("aurea.motion.twitch_reference"), "aurea_fx_twitch"},
     {effect_type_id(aurea::effect_keys::kTwitch), "aurea_fx_twitch"},

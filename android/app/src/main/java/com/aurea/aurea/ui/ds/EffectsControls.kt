@@ -352,7 +352,7 @@ fun AureaSlider(
                             val dy = ch.position.y - down.position.y
                             // Vertical: é da rolagem da lista.
                             if (abs(dy) > slop && abs(dy) > abs(dx)) return@awaitEachGesture
-                            if (abs(dx) <= slop * FxParamMath.SLIDER_SLOP_FRACTION) continue
+                            if (abs(dx) <= abs(dy) || abs(dx) <= slop * FxParamMath.SLIDER_SLOP_FRACTION) continue
                             dragging = true
                             begin()
                         }
@@ -463,27 +463,23 @@ fun FxRuler(
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
                 val other = FxRulerFling.owner
-                if (other != null && other !== state) {
-                    // Outra régua arremessando: este gesto inteiro é ignorado.
-                    while (true) {
-                        val e = awaitPointerEvent()
-                        e.changes.forEach { it.consume() }
-                        if (e.changes.none { it.pressed }) break
-                    }
-                    return@awaitEachGesture
-                }
+                if (other != null && other !== state) return@awaitEachGesture
                 var inGesture = false
+                // Um toque pode parar a inércia sem tomar o gesto vertical da lista.
+                val interrupted = state.live
                 if (state.fling?.isActive == true) {
-                    // Tocar durante o arremesso já é gesto (e para o arremesso).
                     state.fling?.cancel()
                     state.fling = null
                     if (FxRulerFling.owner === state) FxRulerFling.owner = null
-                    inGesture = true
-                    down.consume()
+                    state.live = null
+                    if (state.open) {
+                        state.open = false
+                        finish()
+                    }
                 }
                 val tracker = VelocityTracker()
                 tracker.addPosition(down.uptimeMillis, down.position)
-                var start = state.live ?: current
+                var start = interrupted ?: current
                 if (!start.isFinite()) start = 0f
                 var walked = 0f
                 var lastX = down.position.x
@@ -497,10 +493,6 @@ fun FxRuler(
                     if (FxParamMath.crossedSnap(before, v, snapList)) FxRow.tick(view)
                     state.live = v
                     send(v)
-                }
-                if (inGesture && !state.open) {
-                    state.open = true
-                    begin()
                 }
                 while (true) {
                     val event = awaitPointerEvent()
@@ -519,7 +511,7 @@ fun FxRuler(
                         val dx = main.position.x - down.position.x
                         val dy = main.position.y - down.position.y
                         if (abs(dy) > touchSlop && abs(dy) > abs(dx)) return@awaitEachGesture
-                        if (abs(dx) <= touchSlop * FxParamMath.RULER_SLOP_FRACTION) continue
+                        if (abs(dx) <= abs(dy) || abs(dx) <= touchSlop * FxParamMath.RULER_SLOP_FRACTION) continue
                         inGesture = true
                         lastX = main.position.x
                         main.consume()
@@ -527,7 +519,7 @@ fun FxRuler(
                             state.open = true
                             begin()
                         }
-                        start = state.live ?: current
+                        start = state.live ?: interrupted ?: current
                         if (!start.isFinite()) start = 0f
                         continue
                     }

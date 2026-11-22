@@ -7,4 +7,5 @@
     <string name="fxo_simultaneous">Simultâneo</string>
     <string name="fxl_tip_softness">Suavidade da ponta</string>
     <string name="drawprog_reverse">Inverter</string>
+    <string name="drawprog_animate">Animar traço</string>
 </resources>

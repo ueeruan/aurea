@@ -344,6 +344,17 @@ internal fun MaskPointsColumn(env: PanelEnv, m: EditorStore.MaskPath, look: Keyf
             }) {
             KeyframeDiamondIcon(look, enabled = true, modifier = Modifier.padding(1.dp))
         }
+        if (m.closed && m.count > 0) {
+            PointsCell("mask.points.all", stringResource(R.string.home_select_all), true,
+                on = EditPointsState.multi.size == m.count, onClick = {
+                    val all = (0 until m.count).toSet()
+                    if (EditPointsState.multi == all) EditPointsState.multi = emptySet()
+                    else {
+                        EditPointsState.choosePoint(store, 0)
+                        EditPointsState.multi = all
+                    }
+                }) { CupertinoIcon(CupertinoGlyph.SquareOnSquare, 22.dp, it) }
+        }
         if (kind == EditPointsState.IN || kind == EditPointsState.OUT) {
             PointsCell("points.lock.angle", stringResource(R.string.om_pts_lock_angle), true, on = EditPointsState.lockAngle,
                 onClick = { EditPointsState.lockAngle = !EditPointsState.lockAngle; if (!EditPointsState.lockAngle) EditPointsState.lockLength = false }) {

@@ -95,6 +95,59 @@ internal fun DrawScope.drawShape3DIcon(kind: Int) {
             drawLine(line, p(.3f, .3f), p(.7f, .3f), s * .04f)
             drawLine(line, p(.3f, .7f), p(.7f, .7f), s * .04f)
         }
+        in 10..14 -> {
+            val sides = intArrayOf(3, 5, 6, 8, 10)[kind - 10]
+            val front = List(sides) { index ->
+                val angle = -Math.PI / 2 + (2 * index + if (sides % 2 == 0) 1 else 0) * Math.PI / sides
+                p(.43f + .32f * cos(angle).toFloat(), .57f + .32f * sin(angle).toFloat())
+            }
+            val depth = Offset(.16f * s, -.13f * s)
+            poly(front.map { it + depth })
+            front.forEach { drawLine(line, it, it + depth, s * .055f) }
+            poly(front, fill = accent.copy(alpha = .85f))
+        }
+        15 -> {
+            poly(listOf(p(.48f, .12f), p(.13f, .76f), p(.81f, .81f)), fill = face)
+            drawLine(line, p(.48f, .12f), p(.58f, .66f), s * .045f)
+            drawLine(line, p(.58f, .66f), p(.81f, .81f), s * .045f)
+            drawLine(line, p(.58f, .66f), p(.13f, .76f), s * .045f)
+        }
+        16 -> {
+            val top = p(.53f, .15f)
+            val left = p(.14f, .44f)
+            val right = p(.84f, .42f)
+            val center = p(.43f, .55f)
+            val bottom = p(.56f, .86f)
+            poly(listOf(top, left, center), fill = face)
+            poly(listOf(top, right, bottom, left))
+            listOf(top, right, bottom).forEach { drawLine(line, center, it, s * .045f) }
+        }
+        17 -> {
+            drawOval(line, p(.15f, .23f), Size(.7f * s, .45f * s), style = stroke)
+            drawOval(line, p(.15f, .35f), Size(.7f * s, .45f * s), style = stroke)
+            drawOval(accent, p(.29f, .4f), Size(.42f * s, .17f * s), style = stroke)
+        }
+        18 -> {
+            val outline = listOf(p(.12f, .46f), p(.53f, .46f), p(.53f, .29f), p(.86f, .59f),
+                p(.53f, .84f), p(.53f, .71f), p(.12f, .71f))
+            poly(outline.map { it + Offset(.03f * s, -.12f * s) })
+            poly(outline, fill = accent.copy(alpha = .85f))
+        }
+        19 -> {
+            val cloud = Path().apply {
+                moveTo(p(.25f, .76f).x, p(.25f, .76f).y)
+                fun curve(x1: Float, y1: Float, x2: Float, y2: Float, x: Float, y: Float) {
+                    val a = p(x1, y1); val b = p(x2, y2); val c = p(x, y)
+                    cubicTo(a.x, a.y, b.x, b.y, c.x, c.y)
+                }
+                curve(.05f, .76f, .07f, .46f, .28f, .46f)
+                curve(.30f, .21f, .65f, .19f, .70f, .44f)
+                curve(.95f, .44f, .96f, .76f, .75f, .76f)
+                close()
+            }
+            drawPath(cloud, face)
+            drawPath(cloud, line, style = stroke)
+        }
         else -> { // diamante
             poly(listOf(p(.5f, .1f), p(.22f, .46f), p(.5f, .56f)), fill = face)
             poly(listOf(p(.5f, .1f), p(.78f, .46f), p(.5f, .9f), p(.22f, .46f)))

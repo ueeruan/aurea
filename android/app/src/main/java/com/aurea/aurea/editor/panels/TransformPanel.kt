@@ -129,6 +129,7 @@ internal fun transformKeyProperties(tab: TransformTab, threeD: Boolean, axis: In
 internal fun uses3D(d: com.aurea.aurea.engine.LayerDetail?): Boolean {
     if (d == null) return false
     if (d.kind == LayerType.Model3D.kind || d.kind == LayerType.Camera.kind || d.kind == LayerType.Light.kind) return true
+    if (d.flags and com.aurea.aurea.engine.PodLayout.FLAG_FORCE_2D != 0) return false
     if ((d.flags and com.aurea.aurea.engine.PodLayout.FLAG_THREE_D) != 0) return true
     if (abs(d.rotation[0]) > 0.01f || abs(d.rotation[1]) > 0.01f || abs(d.position[2]) > 0.01f) return true
     return d.isAnimated(TrackProperty.ROTATION_X) || d.isAnimated(TrackProperty.ROTATION_Y) || d.isAnimated(TrackProperty.POSITION_Z)

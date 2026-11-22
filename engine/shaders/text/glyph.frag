@@ -48,13 +48,15 @@ float strokeCoverage(float inner, float outer, float knockout) {
 
 /// Cobertura do preenchimento (x) e a parte do contorno que aparece por baixo
 /// dele (y). As cores entram depois: a soma do desfoque é linear nelas.
-vec2 coverageAt(Glyph gl, vec2 uv, float aa, float fillAlpha) {
+vec2 coverageAt(Glyph gl, vec2 uv, float aa, float fillAlpha, float strokeRadius) {
     if (any(lessThan(uv, gl.uv.xy)) || any(greaterThan(uv, gl.uv.zw))) return vec2(0.0);
     vec2 inset = 0.5 / vec2(textureSize(u_atlas, 0));
     float sd = (texture(u_atlas, clamp(uv, gl.uv.xy + inset, gl.uv.zw - inset)).r * 255.0 - 128.0) / kDistScale * gl.misc.z;
     float inner = smoothstep(-aa, aa, sd);
     float fillA = inner * fillAlpha;
     float strokeA = gl.misc.w > 0.0 ? strokeCoverage(inner, smoothstep(-aa, aa, sd + gl.misc.w), gl.misc.x) * gl.stroke.a : 0.0;
+    if (strokeRadius > 0.0)
+        strokeA = max(strokeA, (smoothstep(-aa, aa, sd + strokeRadius) - smoothstep(-aa, aa, sd - strokeRadius)) * gl.stroke.a);
     return vec2(fillA, strokeA * (1.0 - fillA));
 }
 
@@ -155,8 +157,138 @@ void textureColors(Glyph gl, vec2 atlasUV, float sd, inout vec3 fillRGB, inout v
     }
 }
 
+vec4 prismSample(int first, int sampleIndex) {
+    const Glyph block = glyphs.g[first + 1 + sampleIndex / 8];
+    const int lane = sampleIndex % 8;
+    if (lane == 0) return block.rect;
+    if (lane == 1) return block.uv;
+    if (lane == 2) return block.fill;
+    if (lane == 3) return block.stroke;
+    return block.xform[lane - 4];
+}
+
+float prismStops(int base, float t, float softness) {
+    if (softness >= 0.9999) return t;
+    const int count = int(glyphs.g[base].misc.x);
+    float lo = glyphs.g[base].xform[0][0];
+    for (int i = 1; i < count; ++i) {
+        const float hi = glyphs.g[base].xform[i / 4][i % 4];
+        if (t <= hi) {
+            const float f = (t - lo) / max(hi - lo, 1e-6);
+            return mix(lo, hi, clamp((f - 0.5) / max(softness, 0.00001) + 0.5, 0.0, 1.0));
+        }
+        lo = hi;
+    }
+    return lo;
+}
+
+vec3 prismHue(vec3 rgb, float shift) {
+    if (abs(shift) < 0.00001) return rgb;
+    const float hi = max(rgb.r, max(rgb.g, rgb.b)), lo = min(rgb.r, min(rgb.g, rgb.b));
+    const float chroma = hi - lo;
+    if (chroma < 0.00001) return rgb;
+    const float lane = hi == rgb.r ? (rgb.g - rgb.b) / chroma
+        : hi == rgb.g ? 2.0 + (rgb.b - rgb.r) / chroma : 4.0 + (rgb.r - rgb.g) / chroma;
+    const vec3 wave = clamp(abs(fract(vec3(lane / 6.0 + shift) + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
+    return lo + chroma * wave;
+}
+
+vec3 prismMix(vec3 a, vec3 b, float amount, int mode) {
+    vec3 blend = b;
+    if (mode == 1) blend = a * b;
+    if (mode == 2) blend = 1.0 - (1.0 - a) * (1.0 - b);
+    if (mode == 3) blend = mix(2.0 * a * b, 1.0 - 2.0 * (1.0 - a) * (1.0 - b), step(0.5, a));
+    if (mode == 4) blend = a;
+    return mix(a, max(blend, vec3(0.0)), amount);
+}
+
+void textPrism(Glyph gl, inout vec3 fillRGB, inout vec3 strokeRGB, out vec2 alpha, out float strokeRadius) {
+    alpha = vec2(1.0);
+    strokeRadius = 0.0;
+    const int index = v_index + int(gl.misc.y);
+    const Glyph unit = glyphs.g[index];
+    const int first = index + int(unit.misc.x);
+    const vec2 pixel = mix(gl.rect.xy, gl.rect.zw, v_uv);
+    for (int i = 0; i < int(unit.misc.y); ++i) {
+        const int entry = first + i;
+        const vec4 directory = glyphs.g[entry].rect;
+        const int rank = int(unit.stroke[int(directory.x)]);
+        const int style = entry + int(directory.z) + min(rank, int(directory.y));
+        const Glyph g = glyphs.g[style];
+        const int mapping = int(g.rect.y);
+        const float relativeRank = g.misc.x > 0.5 ? unit.stroke[mapping] : (unit.stroke[mapping] + 0.5) / max(1.0, unit.xform[1][mapping]);
+        if (relativeRank < g.xform[1].x || relativeRank > g.xform[1].y) {
+            if (g.xform[1].z > 0.5) alpha = vec2(0.0);
+            continue;
+        }
+        if (g.stroke.x <= 0.0 && g.xform[2].x <= 0.0) continue;
+        vec4 box = mapping == 0 ? unit.rect : mapping == 1 ? unit.uv : mapping == 2 ? unit.fill : unit.xform[0];
+        const int alignment = int(g.xform[0].w);
+        if ((alignment & 1) != 0) box.xz = unit.xform[0].xz;
+        if ((alignment & 2) != 0) box.yw = unit.xform[0].yw;
+        const vec2 extent = max(box.zw - box.xy, vec2(0.001));
+        const vec2 origin = box.xy + extent * g.uv.xy;
+        const vec2 p = (pixel - origin) / g.uv.zw;
+        const vec2 q = vec2(dot(p, g.fill.xy), dot(p, vec2(-g.fill.y, g.fill.x)));
+        const float manual = g.xform[0].z;
+        const float linearSize = manual > 0.0 ? manual : dot(extent, abs(g.fill.xy));
+        float t = q.x / max(linearSize, 0.001) + 0.5;
+        if (g.rect.x == 1.0) {
+            const vec2 far = max(abs(origin - box.xy), abs(box.zw - origin));
+            const float radius = manual > 0.0 ? manual : length(far);
+            t = 1.0 - length(q) / max(radius, 0.001);
+        } else if (g.rect.x == 2.0) {
+            // North is zero at the neutral 90-degree orientation.
+            t = dot(q,q) > 1e-10 ? fract(atan(q.y, q.x) * 0.159154943 + 0.5) : 0.0;
+        }
+        const vec2 order = glyphs.g[entry].uv.xy;
+        const float phaseRank = order.x < 0.0 ? order.y - float(rank) : float(rank);
+        t = t * g.fill.w - g.fill.z - phaseRank * directory.w;
+        if (g.stroke.y == 2.0) t = 1.0 - abs(fract(t * 0.5) * 2.0 - 1.0);
+        else if (g.stroke.y == 1.0 || g.fill.w > 1.0 || g.misc.y > 0.5) t = fract(t);
+        t = clamp(t, 0.0, 1.0);
+        if (g.misc.z > 0.5) t = 1.0 - abs(2.0 * t - 1.0);
+        const int base = style + int(g.xform[0].y);
+        const float sampleIndex = prismStops(base, t, g.xform[1].w) * 127.0;
+        const int low = int(sampleIndex);
+        const vec4 tint = mix(prismSample(base, low), prismSample(base, min(low + 1, 127)), fract(sampleIndex));
+        vec3 rgb = max(prismHue(tint.rgb, g.xform[0].x), vec3(0.0));
+        if (abs(g.stroke.z - 1.0) > 0.00001)
+            rgb = pow(min(rgb, vec3(1.0)), vec3(1.0 / g.stroke.z)) + max(rgb - 1.0, vec3(0.0));
+        rgb *= g.stroke.w;
+        const int blend = int(g.rect.w);
+        const vec3 sourceRGB = fillRGB;
+        const float sourceAlpha = alpha.x;
+        const int matte = int(g.xform[2].z);
+        float mask = matte == 1 ? gl.fill.a * sourceAlpha : matte == 2 ? clamp(dot(sourceRGB, vec3(0.2126, 0.7152, 0.0722)) * sourceAlpha, 0.0, 1.0) : 1.0;
+        if (matte != 0 && g.xform[2].w > 0.5) mask = 1.0 - mask;
+        const bool generated = g.xform[2].x > 0.0;
+        const bool solo = generated && g.xform[2].y > 0.5;
+        const float opacity = mix(1.0, tint.a * mask, g.stroke.x);
+        if (!solo && g.rect.z != 1.0) {
+            fillRGB = prismMix(fillRGB, rgb, g.stroke.x, blend);
+            alpha.x *= opacity;
+        }
+        if (generated || g.rect.z != 0.0) {
+            strokeRGB = prismMix(strokeRGB, rgb, g.stroke.x, blend);
+            alpha.y *= opacity;
+        }
+        strokeRadius = max(strokeRadius, g.xform[2].x * 0.5);
+        if (solo) alpha.x = 0.0;
+        if (g.xform[3].w >= 1.0) {
+            const float original = sourceAlpha * g.extra.z;
+            const float a = alpha.x, b = original;
+            const bool behind = g.xform[3].w < 1.5;
+            const vec3 premul = behind ? fillRGB * a + sourceRGB * b * (1.0 - a)
+                                       : sourceRGB * b + fillRGB * a * (1.0 - b);
+            alpha.x = a + b * (1.0 - a);
+            fillRGB = premul / max(alpha.x, 1e-6);
+        }
+    }
+}
+
 void main() {
-    const Glyph gl = glyphs.g[v_index];
+    Glyph gl = glyphs.g[v_index];
     if (gl.uv.x < 0.0) {
         // Fundo: caixa arredondada (raio em uv.y), borda suave de 1 px.
         const vec2 size = gl.rect.zw - gl.rect.xy;
@@ -183,7 +315,20 @@ void main() {
     vec3 fillRGB = gl.fill.rgb;
     vec3 strokeRGB = gl.stroke.rgb;
     float texA = 1.0;
+    float strokeRadius = 0.0;
     if (gl.extra.z > 0.5) textureColors(gl, atlasUV, sd, fillRGB, strokeRGB, texA);
+    if (gl.misc.y < 0.0) {
+        vec2 alpha;
+        if (gl.extra.w > 0.0 && gl.misc.w <= 0.0) {
+            gl.stroke.a = gl.fill.a;
+            strokeRGB = fillRGB;
+        }
+        textPrism(gl, fillRGB, strokeRGB, alpha, strokeRadius);
+        strokeRadius = min(strokeRadius, 15.0 * gl.misc.z);
+        texA *= alpha.x;
+        gl.stroke.a *= alpha.y;
+        gl.misc.x = 1.0 - (1.0 - gl.misc.x) * alpha.x;
+    }
     const float fillAlpha = gl.fill.a * texA;
     if (gl.extra.x > 0.01) {
         vec2 uvPerPixel = (gl.uv.zw - gl.uv.xy) / max(gl.rect.zw - gl.rect.xy, vec2(0.001));
@@ -196,7 +341,7 @@ void main() {
         for (int y = -3; y <= 3; ++y) for (int x = -3; x <= 3; ++x) {
             vec2 d = vec2(x, y);
             float weight = exp(-0.5 * dot(d, d));
-            sum += coverageAt(gl, atlasUV + d * sigma * uvPerPixel, aa, fillAlpha) * weight;
+            sum += coverageAt(gl, atlasUV + d * sigma * uvPerPixel, aa, fillAlpha, strokeRadius) * weight;
             total += weight;
         }
         sum /= total;
@@ -223,6 +368,8 @@ void main() {
     const float fillA = inner * fillAlpha;
     float strokeA = 0.0;
     if (gl.misc.w > 0.0) strokeA = strokeCoverage(inner, smoothstep(-w, w, sd + gl.misc.w), gl.misc.x) * gl.stroke.a;
+    if (strokeRadius > 0.0)
+        strokeA = max(strokeA, (smoothstep(-w, w, sd + strokeRadius) - smoothstep(-w, w, sd - strokeRadius)) * gl.stroke.a);
     // Preenchimento por cima do contorno.
     const vec3 rgb = fillRGB * fillA + strokeRGB * strokeA * (1.0 - fillA);
     const float a = fillA + strokeA * (1.0 - fillA);

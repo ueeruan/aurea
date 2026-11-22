@@ -1,8 +1,7 @@
 // =============================================================================
 //  Aurea / scene3d / Shape3D.hpp
 //
-//  FORMAS 3D prontas (cubo, esfera, cilindro, cone, pirâmide, toro, estrela,
-//  coração, cápsula e diamante), geradas pelo motor — nenhum arquivo.
+//  Formas 3D e volume de nuvem gerados pelo motor, sem arquivos externos.
 //
 //  Cada forma é feita de PARTES com nome (as faces do cubo, as pontas da
 //  estrela, as metades do coração...): uma parte = um nó + uma malha + um
@@ -36,8 +35,10 @@ namespace aurea::scene3d {
 
 enum class Shape3DKind : u32 {
     Cube = 0, Sphere, Cylinder, Cone, Pyramid, Torus, Star, Heart, Capsule, Diamond,
+    TrianglePrism, PentagonPrism, HexagonPrism, OctagonPrism, DecagonPrism,
+    Tetrahedron, Icosahedron, Washer, Arrow, Cloud, Count,
 };
-inline constexpr u32 kShape3DKindCount = 10;
+inline constexpr u32 kShape3DKindCount = static_cast<u32>(Shape3DKind::Count);
 /// Teto de partes numa forma (o diamante tem 8). A receita recusa mais.
 inline constexpr u32 kShape3DMaxParts = 8;
 /// Canais de transform por parte: 0..2 posição, 3..5 rotação (°), 6..8 escala.

@@ -87,15 +87,20 @@ AUREA_TEST(Shape3D, ImageDecodeChecksPeakBudgetAndCacheDoesNotRetainClosedSource
 }
 
 AUREA_TEST(Shape3D, EveryShapeBuildsValidClosedOutwardParts) {
-    constexpr u32 expected[kShape3DKindCount] = {6, 2, 3, 2, 5, 4, 6, 2, 3, 8};
+    constexpr u32 expected[kShape3DKindCount] = {6, 2, 3, 2, 5, 4, 6, 2, 3, 8, 3, 3, 3, 3, 3, 4, 2, 4, 3, 1};
     for (u32 k = 0; k < kShape3DKindCount; ++k) {
         const auto kind = static_cast<Shape3DKind>(k);
         AUREA_CHECK_EQ(shape3d_part_count(kind), expected[k]);
+        Shape3DSpec restored;
+        AUREA_CHECK(decode_shape3d(encode_shape3d(default_shape3d(kind)), restored));
+        AUREA_CHECK_EQ(restored.kind, kind);
         auto r = build_shape3d(default_shape3d(kind));
         AUREA_CHECK(r.ok());
         if (!r.ok()) { std::printf("\n    forma %u: %s", k, r.detail.c_str()); continue; }
         const SceneAsset& a = *r.asset;
         AUREA_CHECK(a.shapeParts);
+        AUREA_CHECK_EQ(a.volumetricCloud, kind == Shape3DKind::Cloud);
+        if (kind == Shape3DKind::OctagonPrism) AUREA_CHECK_EQ(a.stats.triangles, 28u);
         AUREA_CHECK_EQ(a.nodes.size(), static_cast<usize>(expected[k]));
         AUREA_CHECK_EQ(a.meshes.size(), static_cast<usize>(expected[k]));
         AUREA_CHECK_EQ(a.materials.size(), static_cast<usize>(expected[k]));

@@ -12,7 +12,7 @@ import UIKit
 enum EditDockLevel: Hashable { case root, audio, text, videoClip, textClip, audioClip, otherClip }
 private struct EditDockItem: Identifiable {
     let id: String
-    let glyph: Character
+    let icon: EditIcon
     let label: String
     let action: () -> Void
 }
@@ -132,7 +132,7 @@ struct EditModeView: View {
     private var topBar: some View {
         HStack(spacing: 4) {
             Button { model.closeProject() } label: {
-                CupertinoGlyph.text(CupertinoGlyph.ChevronBack, size: 22).frame(width: 44, height: 50).contentShape(Rectangle())
+                EditToolIcon(icon: .back, size: 22).frame(width: 44, height: 50).contentShape(Rectangle())
             }.buttonStyle(.plain).accessibilityLabel(AureaText.t("common_close"))
                 .accessibilityIdentifier("edit.close")
             Text(model.projectName).font(.aurea(size: 14, weight: .semibold))
@@ -142,7 +142,7 @@ struct EditModeView: View {
             Button { model.showProjectSettings = true } label: {
                 HStack(spacing: 4) {
                     Text(short > 0 ? "\(short)P" : "—").font(.aurea(size: 13, weight: .semibold))
-                    CupertinoGlyph.text(CupertinoGlyph.ChevronDown, size: 10)
+                    EditToolIcon(icon: .chevronDown, size: 10)
                 }.padding(.horizontal, 8).frame(height: 28)
                     .background(AureaColors.editorRowPill, in: Capsule())
                     .frame(minHeight: 44).contentShape(Rectangle())
@@ -163,10 +163,10 @@ struct EditModeView: View {
                 Button(AureaText.t("ae_import_menu")) { model.pause(); shell.addPicker = .aeImport }
                     .accessibilityIdentifier("edit.aeImport")
             } label: {
-                CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: 22).frame(width: 44, height: 50).contentShape(Rectangle())
+                EditToolIcon(icon: .more, size: 22).frame(width: 44, height: 50).contentShape(Rectangle())
             }.accessibilityLabel(AureaText.t("edit_more")).accessibilityIdentifier("edit.more")
             Button { model.pause(); model.openExport() } label: {
-                CupertinoGlyph.text(CupertinoGlyph.SquareArrowUp, size: 23, color: AureaColors.accent)
+                EditToolIcon(icon: .export, color: AureaColors.accent, size: 23)
                     .frame(width: 44, height: 44).contentShape(Rectangle())
             }.buttonStyle(.plain).accessibilityLabel(AureaText.t("edit_export"))
                 .accessibilityIdentifier("edit.export")
@@ -184,14 +184,14 @@ struct EditModeView: View {
                     .padding(.horizontal, 8).frame(height: 28)
                     .background(AureaColors.editorRowPill, in: Capsule())
                 Spacer()
-                barIcon(CupertinoGlyph.ArrowUturnLeft, "common_undo", enabled: model.status.canUndo != 0, id: "edit.undo") { model.undo() }
-                barIcon(CupertinoGlyph.ArrowUturnRight, "common_redo", enabled: model.status.canRedo != 0, id: "edit.redo") { model.redo() }
-                barIcon(model.fullscreen ? CupertinoGlyph.FullscreenExit : CupertinoGlyph.Fullscreen, "editor_tela_cheia", enabled: true, id: "edit.fullscreen") {
+                barIcon(.undo, "common_undo", enabled: model.status.canUndo != 0, id: "edit.undo") { model.undo() }
+                barIcon(.redo, "common_redo", enabled: model.status.canRedo != 0, id: "edit.redo") { model.redo() }
+                barIcon(model.fullscreen ? .fullscreenExit : .fullscreen, "editor_tela_cheia", enabled: true, id: "edit.fullscreen") {
                     model.fullscreen.toggle()
                 }
             }
             Button { model.playPause() } label: {
-                CupertinoGlyph.text(model.status.playing != 0 ? CupertinoGlyph.PauseFill : CupertinoGlyph.PlayFill, size: 24, color: AureaColors.accent)
+                EditToolIcon(icon: model.status.playing != 0 ? .pause : .play, color: AureaColors.accent, size: 24)
                     .frame(width: 40, height: 40).background(AureaColors.accentDim, in: Circle())
                     .frame(width: 44, height: 44).contentShape(Rectangle())
             }.buttonStyle(AureaPressStyle(shrink: 0.9))
@@ -201,9 +201,9 @@ struct EditModeView: View {
         .padding(.horizontal, 10).frame(height: 40).foregroundStyle(AureaColors.text).background(AureaColors.editorBar)
     }
 
-    private func barIcon(_ glyph: Character, _ key: String, enabled: Bool, id: String, action: @escaping () -> Void) -> some View {
+    private func barIcon(_ icon: EditIcon, _ key: String, enabled: Bool, id: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            CupertinoGlyph.text(glyph, size: 20, color: enabled ? AureaColors.text : AureaColors.muted.opacity(0.4))
+            EditToolIcon(icon: icon, color: enabled ? AureaColors.text : AureaColors.muted.opacity(0.4), size: 20)
                 .frame(width: 32, height: 40).contentShape(Rectangle())
         }.buttonStyle(AureaPressStyle(shrink: 0.9)).disabled(!enabled)
             .accessibilityLabel(AureaText.t(key)).accessibilityIdentifier(id)
@@ -217,7 +217,7 @@ struct EditModeView: View {
                     if [.videoClip, .textClip, .audioClip, .otherClip].contains(level) { model.clearSelection() }
                     level = .root
                 } label: {
-                    CupertinoGlyph.text(CupertinoGlyph.ChevronBack, size: 18)
+                    EditToolIcon(icon: .back, size: 18)
                         .frame(width: 32, height: 58).contentShape(Rectangle())
                 }.buttonStyle(AureaPressStyle(shrink: 0.92)).padding(.leading, 10)
                     .accessibilityLabel(AureaText.t("edit_back")).accessibilityIdentifier("edit.dock.back")
@@ -227,7 +227,7 @@ struct EditModeView: View {
                     ForEach(items(for: level)) { item in
                         Button(action: item.action) {
                             VStack(spacing: 6) {
-                                CupertinoGlyph.text(item.glyph, size: 24)
+                                EditToolIcon(icon: item.icon, size: 24)
                                 Text(item.label).font(.aurea(size: dockLabelSize, weight: .medium)).lineLimit(2).multilineTextAlignment(.center)
                             }.frame(minWidth: 64, minHeight: 64).padding(.horizontal, 6).contentShape(Rectangle())
                         }.buttonStyle(AureaPressStyle(shrink: 0.92))
@@ -294,114 +294,114 @@ struct EditModeView: View {
         return model.layers.first { isMain($0) && frame >= Int64($0.startFrame) && frame < Int64($0.endFrame) }
     }
 
-    private func item(_ id: String, _ glyph: Character, _ key: String, _ action: @escaping () -> Void) -> EditDockItem {
-        EditDockItem(id: id, glyph: glyph, label: AureaText.t(key), action: action)
+    private func item(_ id: String, _ icon: EditIcon, _ key: String, _ action: @escaping () -> Void) -> EditDockItem {
+        EditDockItem(id: id, icon: icon, label: AureaText.t(key), action: action)
     }
 
     private func items(for level: EditDockLevel) -> [EditDockItem] {
         let ids = model.editingLayers.filter { model.editingSelection.contains($0.id) }.map(\.id)
-        let split = item("split", CupertinoGlyph.Scissors, "edit_clip_split") { model.splitAtPlayhead(ids) }
-        let duplicate = item("duplicate", CupertinoGlyph.PlusSquareOnSquare, "edit_clip_duplicate") {
+        let split = item("split", .razor, "edit_clip_split") { model.splitAtPlayhead(ids) }
+        let duplicate = item("duplicate", .duplicate, "edit_clip_duplicate") {
             model.duplicateSelectedLayers(ids)
         }
-        let delete = item("delete", CupertinoGlyph.Trash, "edit_clip_delete") { model.deleteSelectedLayers() }
-        let effects = item("effects", CupertinoGlyph.Sparkles, "edit_clip_effects") { panel(.effects) }
-        let transform = item("transform", CupertinoGlyph.Move, "edit_clip_transform") { panel(.transform) }
-        let opacity = item("opacity", CupertinoGlyph.CircleLefthalfFill, "edit_clip_opacity") { panel(.appearance) }
-        let mask = item("mask", ShellGlyph.SquareSplit2x2, "edit_clip_mask") { panel(.mask) }
-        let animations = item("animations", CupertinoGlyph.WandStars, "edit_clip_animations") { panel(.presets) }
-        let filters = item("filters", CupertinoGlyph.ColorFilter, "edit_dock_filters") { if model.status.playing != 0 { model.pause() }; panel(.filters) }
-        let adjust = item("adjust", CupertinoGlyph.SliderHorizontal3, "edit_dock_adjust") { if model.status.playing != 0 { model.pause() }; panel(.adjust) }
+        let delete = item("delete", .delete, "edit_clip_delete") { model.deleteSelectedLayers() }
+        let effects = item("effects", .effects, "edit_clip_effects") { panel(.effects) }
+        let transform = item("transform", .transform, "edit_clip_transform") { panel(.transform) }
+        let opacity = item("opacity", .opacity, "edit_clip_opacity") { panel(.appearance) }
+        let mask = item("mask", .mask, "edit_clip_mask") { panel(.mask) }
+        let animations = item("animations", .presets, "edit_clip_animations") { panel(.presets) }
+        let filters = item("filters", .filters, "edit_dock_filters") { if model.status.playing != 0 { model.pause() }; panel(.filters) }
+        let adjust = item("adjust", .adjust, "edit_dock_adjust") { if model.status.playing != 0 { model.pause() }; panel(.adjust) }
         switch level {
         case .root:
             return [
-                item("edit", CupertinoGlyph.Scissors, "edit_dock_edit") {
+                item("edit", .razor, "edit_dock_edit") {
                     if let hit = clipUnderPlayhead() { model.select(layerId: hit.id) } else { model.toast = AureaText.t("edit_no_clip_here") }
                 },
-                item("audio", CupertinoGlyph.MusicNote, "edit_dock_audio") { self.level = .audio },
-                item("text", CupertinoGlyph.Textformat, "edit_dock_text") { self.level = .text },
-                item("effects", CupertinoGlyph.Sparkles, "edit_dock_effects") { globalEffect() },
-                item("overlay", CupertinoGlyph.SquareOnSquare, "edit_dock_overlay") {
+                item("audio", .waveform, "edit_dock_audio") { self.level = .audio },
+                item("text", .text, "edit_dock_text") { self.level = .text },
+                item("effects", .effects, "edit_dock_effects") { globalEffect() },
+                item("overlay", .overlay, "edit_dock_overlay") {
                     if model.status.playing != 0 { model.pause() }
                     model.pendingOverlayImport = true
                     shell.addPicker = .gallery
                 },
-                item("captions", CupertinoGlyph.CaptionsBubble, "edit_dock_captions") { panel(.captions) },
-                item("filters", CupertinoGlyph.ColorFilter, "edit_dock_filters") { globalColor(.filters) },
-                item("adjust", CupertinoGlyph.SliderHorizontal3, "edit_dock_adjust") { globalColor(.adjust) },
-                item("ratio", CupertinoGlyph.Crop, "edit_dock_ratio") { model.showProjectSettings = true },
-                item("background", CupertinoGlyph.Paintbrush, "edit_dock_background") { model.showProjectSettings = true },
-                item("stickers", ShellGlyph.SquareOnCircle, "edit_dock_stickers") { shell.addCategory = 0; model.openAddLayer() },
+                item("captions", .captions, "edit_dock_captions") { panel(.captions) },
+                item("filters", .filters, "edit_dock_filters") { globalColor(.filters) },
+                item("adjust", .adjust, "edit_dock_adjust") { globalColor(.adjust) },
+                item("ratio", .crop, "edit_dock_ratio") { model.showProjectSettings = true },
+                item("background", .background, "edit_dock_background") { model.showProjectSettings = true },
+                item("stickers", .shapes, "edit_dock_stickers") { shell.addCategory = 0; model.openAddLayer() },
                 // 0.3.0: sequência de imagens (render do Blender com alfa) numa linha própria, no cabeçote.
-                item("sequence", CupertinoGlyph.SquareStack3dUp, "seq_dock") {
+                item("sequence", .sequence, "seq_dock") {
                     if model.status.playing != 0 { model.pause() }
                     model.pendingOverlayImport = true
                     shell.sequenceChooser = true
                 },
-                item("templates", CupertinoGlyph.WandStars, "edit_text_templates") { shell.addCategory = ShellAddCategories.textPresets; model.openAddLayer() },
+                item("templates", .presets, "edit_text_templates") { shell.addCategory = ShellAddCategories.textPresets; model.openAddLayer() },
             ]
         case .audio:
             return [
-                item("music", CupertinoGlyph.MusicNote2, "edit_audio_music") { if model.status.playing != 0 { model.pause() }; shell.addPicker = .audioFile },
-                item("voice", CupertinoGlyph.Mic, "edit_audio_voice") { if model.status.playing != 0 { model.pause() }; shell.voiceRecorder = true },
-                item("extract", CupertinoGlyph.Waveform, "edit_clip_extract_audio") {
+                item("music", .music, "edit_audio_music") { if model.status.playing != 0 { model.pause() }; shell.addPicker = .audioFile },
+                item("voice", .voice, "edit_audio_voice") { if model.status.playing != 0 { model.pause() }; shell.voiceRecorder = true },
+                item("extract", .extract, "edit_clip_extract_audio") {
                     guard let hit = clipUnderPlayhead() else { model.toast = AureaText.t("edit_no_clip_here"); return }
                     _ = model.engine.extractAudio(fromLayer: hit.id); model.refreshModel(force: true)
                 },
             ]
         case .text:
             return [
-                item("addText", CupertinoGlyph.Textformat, "edit_text_add") { _ = model.addText() },
-                item("autoCaptions", CupertinoGlyph.CaptionsBubble, "edit_text_auto_captions") { panel(.captions) },
-                item("templates", CupertinoGlyph.WandStars, "edit_text_templates") { shell.addCategory = ShellAddCategories.textPresets; model.openAddLayer() },
+                item("addText", .text, "edit_text_add") { _ = model.addText() },
+                item("autoCaptions", .captions, "edit_text_auto_captions") { panel(.captions) },
+                item("templates", .presets, "edit_text_templates") { shell.addCategory = ShellAddCategories.textPresets; model.openAddLayer() },
             ]
         case .videoClip:
             guard let clip = model.selectedLayer else { return [] }
             let video = clip.kind == 1
-            var list = [split, item("speed", CupertinoGlyph.Speedometer, "edit_clip_speed") { panel(.speed) }, animations, effects, delete, mask, adjust, filters]
-            if video { list.append(item("volume", CupertinoGlyph.Speaker2, "edit_clip_volume") { panel(.audio) }) }
+            var list = [split, item("speed", .speed, "edit_clip_speed") { panel(.speed) }, animations, effects, delete, mask, adjust, filters]
+            if video { list.append(item("volume", .speaker, "edit_clip_volume") { panel(.audio) }) }
             list += [transform, opacity, duplicate]
-            if clip.kind != 12 { list.append(item("replace", CupertinoGlyph.Arrow2Squarepath, "edit_clip_replace") { replaceTarget = clip }) }
+            if clip.kind != 12 { list.append(item("replace", .replace, "edit_clip_replace") { replaceTarget = clip }) }
             // 0.4.5: Remover fundo (vídeo/imagem): efeito + análise do clipe.
             if clip.kind == 1 || clip.kind == 2 {
-                list.append(item("bgRemove", CupertinoGlyph.PersonCropCircle, "bg_remove_action") { model.removeBackground(clip.id) })
+                list.append(item("bgRemove", .cutout, "bg_remove_action") { model.removeBackground(clip.id) })
             }
             if video {
-                list.append(item("freeze", ShellGlyph.Snow, "edit_clip_freeze") {
+                list.append(item("freeze", .freeze, "edit_clip_freeze") {
                     let created = model.engine.freezeFrame(forLayer: clip.id, frame: Int32(clamping: model.status.playhead),
                                                            hold: Int32(max(1, model.compositionFps * 3)))
                     model.refreshModel(force: true)
                     if created >= 0 { model.select(layerId: created) }
                 })
-                list.append(item("extract", CupertinoGlyph.Waveform, "edit_clip_extract_audio") {
+                list.append(item("extract", .extract, "edit_clip_extract_audio") {
                     _ = model.engine.extractAudio(fromLayer: clip.id); model.refreshModel(force: true)
                 })
-                list.append(item("stabilize", ShellGlyph.Viewfinder, "edit_clip_stabilize") { panel(.tracking) })
+                list.append(item("stabilize", .track, "edit_clip_stabilize") { panel(.tracking) })
             }
-            if isMain(clip) { list.append(item("toOverlay", CupertinoGlyph.SquareOnSquare, "edit_clip_to_overlay") { model.moveClipToOverlay(clip.id) }) }
-            else { list.append(item("toMain", CupertinoGlyph.RectangleStack, "edit_clip_to_main") { model.moveClipToMainTrack(clip.id) }) }
+            if isMain(clip) { list.append(item("toOverlay", .overlay, "edit_clip_to_overlay") { model.moveClipToOverlay(clip.id) }) }
+            else { list.append(item("toMain", .mainTrack, "edit_clip_to_main") { model.moveClipToMainTrack(clip.id) }) }
             return list
         case .textClip:
             return [
                 // Omega conteúdo (área 06, P2-15): "Editar texto" abre o MODO DE TEXTO e "Fonte"
                 // o navegador de fontes (par do EditModeScreen.kt).
-                item("editText", CupertinoGlyph.Pencil, "edit_clip_edit_text") { _ = model.openTextEdit() },
-                item("font", CupertinoGlyph.Textformat, "edit_clip_font") { FontBrowserRequest.shared.open = true },
+                item("editText", .pencil, "edit_clip_edit_text") { _ = model.openTextEdit() },
+                item("font", .font, "edit_clip_font") { FontBrowserRequest.shared.open = true },
                 animations, effects, transform, split, duplicate, delete,
             ]
         case .audioClip:
             return [
-                item("volume", CupertinoGlyph.Speaker2, "edit_clip_volume") { panel(.audio) },
-                item("speed", CupertinoGlyph.Speedometer, "edit_clip_speed") { panel(.speed) },
+                item("volume", .speaker, "edit_clip_volume") { panel(.audio) },
+                item("speed", .speed, "edit_clip_speed") { panel(.speed) },
                 effects, split, duplicate, delete,
             ]
         case .otherClip:
             // Omega conteúdo (área 06, P2-15): forma → Editar forma; vetor → Editar pontos; desenho → desenho.
             var list: [EditDockItem] = []
             if model.selectedLayer?.kind == 5 {
-                if model.isDrawingLayer { list.append(item("editDrawing", CupertinoGlyph.Scribble, "om_draw_title") { panel(.drawing) }) }
-                else if model.isVectorLayer { list.append(item("editPoints", CupertinoGlyph.PencilOutline, "om_pts_title") { EditPointsState.shared.reset(); panel(.editPoints) }) }
-                else { list.append(item("editShape", ShellGlyph.SliderHorizontalBelowRectangle, "sh_dock_edit_shape") { panel(.shapeEdit) }) }
+                if model.isDrawingLayer { list.append(item("editDrawing", .draw, "om_draw_title") { panel(.drawing) }) }
+                else if model.isVectorLayer { list.append(item("editPoints", .vector, "om_pts_title") { EditPointsState.shared.reset(); panel(.editPoints) }) }
+                else { list.append(item("editShape", .shapeEdit, "sh_dock_edit_shape") { panel(.shapeEdit) }) }
             }
             return list + [effects, filters, adjust, transform, opacity, mask, split, duplicate, delete]
         }
@@ -550,49 +550,121 @@ extension AureaModel {
     }
 }
 
-enum EditIcon {
-    case select, ripple, roll, razor, slip, slide, snap, markIn, markOut, lift, extract, razorAll, addVideo, addAudio, clearTracks, placeEnd, placeInsert, placeOverwrite
+enum EditIcon: Hashable {
+    case select, ripple, roll, razor, slip, slide, snap, markIn
+    case markOut, lift, extract, razorAll, addVideo, addAudio, clearTracks, placeEnd
+    case placeInsert, placeOverwrite, back, chevronDown, more, export, play, pause
+    case undo, redo, fullscreen, fullscreenExit, plus, close, start, lock
+    case unlock, eye, eyeOff, speaker, muted, text, font, captions
+    case effects, overlay, filters, adjust, crop, background, shapes, sequence
+    case presets, music, voice, waveform, speed, delete, mask, replace
+    case cutout, freeze, track, mainTrack, pencil, transform, duplicate, opacity
+    case draw, vector, shapeEdit, cube
 
-    var filled: Bool { self == .select }
+    var filled: Bool { self == .select || self == .play || self == .pause }
+    var paths: [Path] { Self.geometry[self] ?? [] }
 
-    var strokes: [[CGFloat]] {
-        switch self {
-        case .select: return [[6, 3, 6, 19.5, 10.4, 15.6, 13.2, 21.6, 15.9, 20.4, 13.1, 14.4, 19, 14.4, 6, 3]]
-        case .ripple: return [[9.5, 4, 5, 4, 5, 20, 9.5, 20], [9, 12, 20, 12], [16, 8, 20, 12, 16, 16]]
-        case .roll: return [[3, 4, 7.5, 4, 7.5, 20, 3, 20], [21, 4, 16.5, 4, 16.5, 20, 21, 20], [10, 12, 14, 12], [11.5, 9.5, 9.5, 12, 11.5, 14.5], [12.5, 9.5, 14.5, 12, 12.5, 14.5]]
-        case .razor: return [[9.1, 18, 8.84, 19.13, 8.12, 20.03, 7.08, 20.53, 5.92, 20.53, 4.88, 20.03, 4.16, 19.13, 3.9, 18, 4.16, 16.87, 4.88, 15.97, 5.92, 15.47, 7.08, 15.47, 8.12, 15.97, 8.84, 16.87, 9.1, 18], [9.1, 6, 8.84, 7.13, 8.12, 8.03, 7.08, 8.53, 5.92, 8.53, 4.88, 8.03, 4.16, 7.13, 3.9, 6, 4.16, 4.87, 4.88, 3.97, 5.92, 3.47, 7.08, 3.47, 8.12, 3.97, 8.84, 4.87, 9.1, 6], [8.7, 7.5, 20.5, 18.5], [8.7, 16.5, 20.5, 5.5]]
-        case .slip: return [[7, 4, 3, 4, 3, 20, 7, 20], [17, 4, 21, 4, 21, 20, 17, 20], [7.5, 12, 16.5, 12], [10, 9, 7, 12, 10, 15], [14, 9, 17, 12, 14, 15]]
-        case .slide: return [[8, 4, 16, 4, 16, 13, 8, 13, 8, 4], [3, 19, 21, 19], [6, 16, 3, 19, 6, 22], [18, 16, 21, 19, 18, 22]]
-        case .snap: return [[4, 4, 4, 12, 4, 12, 4.39, 14.47, 5.53, 16.7, 7.3, 18.47, 9.53, 19.61, 12, 20, 14.47, 19.61, 16.7, 18.47, 18.47, 16.7, 19.61, 14.47, 20, 12, 20, 4], [9, 4, 9, 12, 9, 12, 9.15, 12.93, 9.57, 13.76, 10.24, 14.43, 11.07, 14.85, 12, 15, 12.93, 14.85, 13.76, 14.43, 14.43, 13.76, 14.85, 12.93, 15, 12, 15, 4], [4, 4, 9, 4], [15, 4, 20, 4], [4, 8, 9, 8], [15, 8, 20, 8]]
-        case .markIn: return [[15, 3.5, 12, 3.5, 10.5, 5, 10.5, 10, 8, 12, 10.5, 14, 10.5, 19, 12, 20.5, 15, 20.5]]
-        case .markOut: return [[9, 3.5, 12, 3.5, 13.5, 5, 13.5, 10, 16, 12, 13.5, 14, 13.5, 19, 12, 20.5, 9, 20.5]]
-        case .lift: return [[12, 15, 12, 4], [8, 8, 12, 4, 16, 8], [3, 20, 9, 20], [15, 20, 21, 20]]
-        case .extract: return [[12, 15, 12, 4], [8, 8, 12, 4, 16, 8], [3, 20, 9, 20], [6.5, 17.5, 9, 20, 6.5, 22.5], [21, 20, 15, 20], [17.5, 17.5, 15, 20, 17.5, 22.5]]
-        case .razorAll: return [[3, 6, 10, 6], [14, 6, 21, 6], [3, 12, 10, 12], [14, 12, 21, 12], [3, 18, 10, 18], [14, 18, 21, 18], [12, 2.5, 12, 21.5]]
-        case .addVideo: return [[3, 7, 14.5, 7, 14.5, 17, 3, 17, 3, 7], [19, 9, 19, 15], [16, 12, 22, 12]]
-        case .addAudio: return [[3.5, 10, 3.5, 14], [7, 7, 7, 17], [10.5, 9, 10.5, 15], [14, 11, 14, 13], [19, 9, 19, 15], [16, 12, 22, 12]]
-        case .clearTracks: return [[4, 6, 20, 6], [9, 6, 9, 3.5, 15, 3.5, 15, 6], [6, 6, 7, 21, 17, 21, 18, 6]]
-        case .placeEnd: return [[3, 12, 15, 12], [11, 8, 15, 12, 11, 16], [19, 5, 19, 19]]
-        case .placeInsert: return [[3, 20, 9, 20], [15, 20, 21, 20], [12, 3, 12, 15], [8, 11, 12, 15, 16, 11]]
-        case .placeOverwrite: return [[12, 3, 12, 13], [8, 9, 12, 13, 16, 9], [3, 17, 21, 17, 21, 21, 3, 21, 3, 17]]
+    // Same 24-point artwork as Android's EditToolIcons.kt. Build each path once.
+    private static let geometry: [EditIcon: [Path]] = {
+        let strokes: [EditIcon: [[CGFloat]]] = [
+            .select: [[6, 3, 19, 13, 13, 14, 16, 20, 13, 22, 10, 16, 6, 20, 6, 3]],
+            .ripple: [[9, 4, 5, 4, 3, 6, 3, 18, 5, 20, 9, 20], [8, 12, 21, 12], [16, 7, 21, 12, 16, 17]],
+            .roll: [[3, 5, 6, 5, 6, 19, 3, 19], [21, 5, 18, 5, 18, 19, 21, 19], [12, 5, 12, 19], [9, 9, 6, 12, 9, 15], [15, 9, 18, 12, 15, 15]],
+            .razor: [[4, 4, 8, 3, 10, 6, 8, 9, 4, 8, 4, 4], [4, 16, 8, 15, 10, 18, 8, 21, 4, 20, 4, 16], [9, 8, 21, 19], [9, 16, 21, 5]],
+            .slip: [[6, 5, 3, 5, 3, 19, 6, 19], [18, 5, 21, 5, 21, 19, 18, 19], [7, 12, 17, 12], [10, 9, 7, 12, 10, 15], [14, 9, 17, 12, 14, 15]],
+            .slide: [[8, 4, 16, 4, 18, 6, 18, 11, 16, 13, 8, 13, 6, 11, 6, 6, 8, 4], [3, 19, 21, 19], [6, 16, 3, 19, 6, 22], [18, 16, 21, 19, 18, 22]],
+            .snap: [[4, 4, 9, 4, 9, 13, 12, 16, 15, 13, 15, 4, 20, 4, 20, 14, 17, 19, 12, 21, 7, 19, 4, 14, 4, 4], [4, 8, 9, 8], [15, 8, 20, 8]],
+            .markIn: [[15, 4, 9, 4, 7, 6, 7, 18, 9, 20, 15, 20], [10, 12, 20, 12], [16, 8, 20, 12, 16, 16]],
+            .markOut: [[9, 4, 15, 4, 17, 6, 17, 18, 15, 20, 9, 20], [4, 12, 14, 12], [8, 8, 4, 12, 8, 16]],
+            .lift: [[12, 15, 12, 4], [8, 8, 12, 4, 16, 8], [3, 17, 3, 20, 8, 20], [21, 17, 21, 20, 16, 20]],
+            .extract: [[12, 14, 12, 3], [8, 7, 12, 3, 16, 7], [3, 19, 9, 19], [6, 16, 9, 19, 6, 22], [21, 19, 15, 19], [18, 16, 15, 19, 18, 22]],
+            .razorAll: [[3, 5, 9, 5], [15, 5, 21, 5], [3, 12, 9, 12], [15, 12, 21, 12], [3, 19, 9, 19], [15, 19, 21, 19], [12, 3, 12, 21]],
+            .addVideo: [[4, 7, 12, 7, 14, 9, 14, 15, 12, 17, 3, 17, 3, 8, 4, 7], [19, 9, 19, 15], [16, 12, 22, 12]],
+            .addAudio: [[3, 10, 3, 14], [6, 7, 6, 17], [9, 9, 9, 15], [12, 11, 12, 13], [19, 9, 19, 15], [16, 12, 22, 12]],
+            .clearTracks: [[4, 6, 20, 6], [9, 6, 9, 3, 15, 3, 15, 6], [6, 6, 7, 19, 9, 21, 15, 21, 17, 19, 18, 6]],
+            .placeEnd: [[3, 12, 15, 12], [11, 8, 15, 12, 11, 16], [19, 5, 21, 5, 21, 19, 19, 19]],
+            .placeInsert: [[3, 20, 8, 20], [16, 20, 21, 20], [12, 3, 12, 17], [8, 13, 12, 17, 16, 13]],
+            .placeOverwrite: [[12, 3, 12, 12], [8, 8, 12, 12, 16, 8], [4, 16, 20, 16, 21, 17, 21, 20, 20, 21, 4, 21, 3, 20, 3, 17, 4, 16]],
+            .back: [[12, 5, 5, 12, 12, 19], [5, 12, 20, 12]],
+            .chevronDown: [[5, 9, 12, 16, 19, 9]],
+            .more: [[3, 12, 5, 10, 7, 12, 5, 14, 3, 12], [10, 12, 12, 10, 14, 12, 12, 14, 10, 12], [17, 12, 19, 10, 21, 12, 19, 14, 17, 12]],
+            .export: [[5, 12, 5, 19, 7, 21, 17, 21, 19, 19, 19, 12], [12, 15, 12, 3], [7, 8, 12, 3, 17, 8]],
+            .play: [[8, 4, 20, 12, 8, 20, 6, 19, 6, 5, 8, 4]],
+            .pause: [[5, 4, 8, 4, 9, 5, 9, 19, 8, 20, 5, 20, 4, 19, 4, 5, 5, 4], [16, 4, 19, 4, 20, 5, 20, 19, 19, 20, 16, 20, 15, 19, 15, 5, 16, 4]],
+            .undo: [[8, 5, 3, 10, 8, 15], [3, 10, 16, 10, 20, 14, 20, 19]],
+            .redo: [[16, 5, 21, 10, 16, 15], [21, 10, 8, 10, 4, 14, 4, 19]],
+            .fullscreen: [[4, 9, 4, 4, 9, 4], [15, 4, 20, 4, 20, 9], [20, 15, 20, 20, 15, 20], [9, 20, 4, 20, 4, 15]],
+            .fullscreenExit: [[4, 9, 9, 9, 9, 4], [15, 4, 15, 9, 20, 9], [20, 15, 15, 15, 15, 20], [9, 20, 9, 15, 4, 15]],
+            .plus: [[12, 4, 12, 20], [4, 12, 20, 12]],
+            .close: [[6, 6, 18, 18], [18, 6, 6, 18]],
+            .start: [[5, 5, 5, 19], [19, 5, 9, 12, 19, 19, 19, 5]],
+            .lock: [[6, 11, 18, 11, 20, 13, 20, 19, 18, 21, 6, 21, 4, 19, 4, 13, 6, 11], [8, 11, 8, 7, 10, 4, 14, 4, 16, 7, 16, 11], [12, 15, 12, 17]],
+            .unlock: [[6, 11, 18, 11, 20, 13, 20, 19, 18, 21, 6, 21, 4, 19, 4, 13, 6, 11], [8, 11, 8, 7, 10, 4, 14, 4, 16, 7], [12, 15, 12, 17]],
+            .eye: [[2, 12, 7, 7, 12, 5, 17, 7, 22, 12, 17, 17, 12, 19, 7, 17, 2, 12], [9, 12, 12, 9, 15, 12, 12, 15, 9, 12]],
+            .eyeOff: [[2, 12, 7, 7, 12, 5, 17, 7, 22, 12, 17, 17, 12, 19, 7, 17, 2, 12], [4, 3, 20, 21]],
+            .speaker: [[3, 9, 6, 9, 11, 5, 11, 19, 6, 15, 3, 15, 3, 9], [15, 9, 17, 12, 15, 15], [18, 6, 21, 9, 21, 15, 18, 18]],
+            .muted: [[3, 9, 6, 9, 11, 5, 11, 19, 6, 15, 3, 15, 3, 9], [15, 9, 21, 15], [21, 9, 15, 15]],
+            .text: [[4, 7, 4, 5, 20, 5, 20, 7], [12, 5, 12, 19], [9, 19, 15, 19]],
+            .font: [[3, 19, 9, 5, 15, 19], [5, 14, 13, 14], [21, 12, 17, 12, 16, 15, 16, 17, 18, 19, 21, 19, 21, 12]],
+            .captions: [[4, 5, 20, 5, 22, 7, 22, 16, 20, 18, 10, 18, 6, 21, 6, 18, 4, 18, 2, 16, 2, 7, 4, 5], [6, 10, 11, 10], [14, 10, 18, 10], [6, 14, 18, 14]],
+            .effects: [[12, 2, 14.5, 9.5, 22, 12, 14.5, 14.5, 12, 22, 9.5, 14.5, 2, 12, 9.5, 9.5, 12, 2], [19, 3, 19, 7], [17, 5, 21, 5]],
+            .overlay: [[5, 9, 15, 9, 17, 11, 17, 19, 15, 21, 5, 21, 3, 19, 3, 11, 5, 9], [8, 6, 8, 5, 10, 3, 19, 3, 21, 5, 21, 14, 20, 15]],
+            .filters: [[12, 3, 16, 7, 12, 11, 8, 7, 12, 3], [7, 11, 11, 15, 7, 19, 3, 15, 7, 11], [17, 11, 21, 15, 17, 19, 13, 15, 17, 11]],
+            .adjust: [[3, 6, 10, 6], [14, 6, 21, 6], [10, 6, 12, 4, 14, 6, 12, 8, 10, 6], [3, 12, 6, 12], [10, 12, 21, 12], [6, 12, 8, 10, 10, 12, 8, 14, 6, 12], [3, 18, 14, 18], [18, 18, 21, 18], [14, 18, 16, 16, 18, 18, 16, 20, 14, 18]],
+            .crop: [[7, 3, 7, 16, 9, 18, 21, 18], [3, 7, 15, 7, 17, 9, 17, 21]],
+            .background: [[12, 3, 21, 12, 14, 19, 10, 19, 3, 12, 12, 3], [3, 12, 21, 12], [21, 15, 19, 19, 20, 21, 22, 21, 23, 19, 21, 15]],
+            .shapes: [[5, 4, 15, 4, 17, 6, 17, 10], [9, 18, 5, 18, 3, 16, 3, 6, 5, 4], [16, 10, 22, 14, 20, 21, 12, 21, 10, 14, 16, 10]],
+            .sequence: [[4, 5, 16, 5, 18, 7, 18, 15, 16, 17, 4, 17, 2, 15, 2, 7, 4, 5], [7, 20, 20, 20, 22, 18, 22, 9], [8, 8, 13, 11, 8, 14, 8, 8]],
+            .presets: [[5, 3, 19, 3, 21, 5, 21, 19, 19, 21, 5, 21, 3, 19, 3, 5, 5, 3], [12, 6, 14, 10, 18, 12, 14, 14, 12, 18, 10, 14, 6, 12, 10, 10, 12, 6]],
+            .music: [[9, 17, 9, 5, 20, 3, 20, 14], [9, 15, 6, 14, 3, 16, 3, 19, 6, 20, 9, 18, 9, 15], [20, 12, 17, 11, 14, 13, 14, 16, 17, 17, 20, 15, 20, 12], [9, 9, 20, 7]],
+            .voice: [[10, 3, 14, 3, 16, 5, 16, 12, 14, 14, 10, 14, 8, 12, 8, 5, 10, 3], [5, 11, 5, 14, 9, 18, 15, 18, 19, 14, 19, 11], [12, 18, 12, 21], [8, 21, 16, 21]],
+            .waveform: [[2, 12, 5, 12, 7, 7, 10, 18, 13, 4, 16, 20, 18, 12, 22, 12]],
+            .speed: [[4, 18, 3, 14, 5, 8, 9, 4, 15, 4, 19, 8, 21, 14, 20, 18, 4, 18], [10, 14, 16, 8]],
+            .delete: [[4, 6, 20, 6], [8, 6, 9, 3, 15, 3, 16, 6], [6, 6, 7, 19, 9, 21, 15, 21, 17, 19, 18, 6], [10, 10, 10, 16], [14, 10, 14, 16]],
+            .mask: [[5, 3, 19, 3, 21, 5, 21, 19, 19, 21, 5, 21, 3, 19, 3, 5, 5, 3], [9, 9, 15, 9, 15, 15, 9, 15, 9, 9], [3, 13, 8, 8], [4, 20, 9, 15], [13, 21, 21, 13]],
+            .replace: [[4, 10, 4, 7, 7, 4, 19, 4], [15, 1, 19, 4, 15, 8], [20, 14, 20, 17, 17, 20, 5, 20], [9, 16, 5, 20, 9, 23]],
+            .cutout: [[3, 8, 3, 4, 7, 4], [17, 4, 21, 4, 21, 8], [21, 16, 21, 20, 17, 20], [7, 20, 3, 20, 3, 16], [9, 15, 9, 12, 12, 8, 15, 12, 15, 15, 12, 17, 9, 15]],
+            .freeze: [[12, 2, 12, 22], [3, 7, 21, 17], [3, 17, 21, 7], [9, 4, 12, 7, 15, 4], [9, 20, 12, 17, 15, 20], [4, 10, 8, 10, 7, 6], [20, 14, 16, 14, 17, 18], [4, 14, 8, 14, 7, 18], [20, 10, 16, 10, 17, 6]],
+            .track: [[3, 8, 3, 3, 8, 3], [16, 3, 21, 3, 21, 8], [21, 16, 21, 21, 16, 21], [8, 21, 3, 21, 3, 16], [7, 12, 12, 7, 17, 12, 12, 17, 7, 12]],
+            .mainTrack: [[3, 5, 21, 5], [3, 10, 12, 10, 14, 12, 14, 17, 12, 19, 3, 19, 3, 10], [18, 14, 22, 14], [20, 12, 22, 14, 20, 16]],
+            .pencil: [[4, 15, 15, 4, 17, 3, 21, 7, 20, 9, 9, 20, 3, 21, 4, 15], [14, 5, 19, 10]],
+            .transform: [[12, 2, 12, 22], [2, 12, 22, 12], [9, 5, 12, 2, 15, 5], [9, 19, 12, 22, 15, 19], [5, 9, 2, 12, 5, 15], [19, 9, 22, 12, 19, 15]],
+            .duplicate: [[8, 9, 19, 9, 21, 11, 21, 19, 19, 21, 8, 21, 6, 19, 6, 11, 8, 9], [3, 15, 3, 5, 5, 3, 16, 3, 18, 5], [13.5, 12, 13.5, 18], [10.5, 15, 16.5, 15]],
+            .opacity: [[12, 3, 17, 5, 21, 10, 21, 14, 17, 19, 12, 21, 7, 19, 3, 14, 3, 10, 7, 5, 12, 3, 12, 21], [6, 15, 12, 9], [5, 10, 10, 5], [9, 19, 12, 16]],
+            .draw: [[3, 16, 7, 5, 10, 4, 10, 9, 6, 17, 8, 20, 14, 14, 16, 13, 17, 16, 16, 19, 18, 20, 22, 17]],
+            .vector: [[5, 19, 11, 6, 19, 13], [3, 19, 5, 17, 7, 19, 5, 21, 3, 19], [9, 6, 11, 4, 13, 6, 11, 8, 9, 6], [17, 13, 19, 11, 21, 13, 19, 15, 17, 13]],
+            .shapeEdit: [[5, 4, 17, 4, 19, 6, 19, 11, 17, 13, 5, 13, 3, 11, 3, 6, 5, 4], [3, 19, 10, 19], [14, 19, 21, 19], [10, 19, 12, 17, 14, 19, 12, 21, 10, 19]],
+            .cube: [[12, 2, 21, 7, 21, 17, 12, 22, 3, 17, 3, 7, 12, 2], [3, 7, 12, 12, 21, 7], [12, 12, 12, 22]],
+        ]
+        var paths: [EditIcon: [Path]] = [:]
+        for (icon, segments) in strokes {
+            paths[icon] = segments.map { points in
+                var path = Path()
+                path.move(to: CGPoint(x: points[0], y: points[1]))
+                for i in stride(from: 2, to: points.count, by: 2) {
+                    path.addLine(to: CGPoint(x: points[i], y: points[i + 1]))
+                }
+                if icon.filled { path.closeSubpath() }
+                return path
+            }
         }
-    }
+        return paths
+    }()
 }
 
-private struct EditToolIcon: View {
+struct EditToolIcon: View {
     let icon: EditIcon
-    let color: Color
+    var color: Color = AureaColors.text
     var size: CGFloat = 22
 
     var body: some View {
         Canvas { context, canvasSize in
             let k = canvasSize.width / 24
-            for points in icon.strokes {
-                var path = Path()
-                path.move(to: CGPoint(x: points[0] * k, y: points[1] * k))
-                for i in stride(from: 2, to: points.count - 1, by: 2) { path.addLine(to: CGPoint(x: points[i] * k, y: points[i + 1] * k)) }
-                if icon.filled { context.fill(path, with: .color(color)) }
-                else { context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 1.7 * k, lineCap: .round, lineJoin: .round)) }
+            var scaled = context
+            scaled.scaleBy(x: k, y: k)
+            for path in icon.paths {
+                if icon.filled { scaled.fill(path, with: .color(color)) }
+                else { scaled.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 1.7, lineCap: .round, lineJoin: .round)) }
             }
         }
         .frame(width: size, height: size)
@@ -715,7 +787,7 @@ private struct EditTimelineView: View {
                                 .accessibilityIdentifier("edit.track.\(track.label).solo")
                         }
                     } label: {
-                        HStack { Text(track.label); Spacer(); Image(systemName: "ellipsis") }
+                        HStack { Text(track.label); Spacer(); EditToolIcon(icon: .more, size: 16) }
                             .font(.aurea(size: 13)).padding(.horizontal, 12).frame(minHeight: 44)
                     }.accessibilityIdentifier("edit.track.\(track.label).menu")
                 }
@@ -806,12 +878,12 @@ private struct EditTimelineBody: View {
         VStack(alignment: .leading, spacing: 4) {
             if missingAudio {
                 Button { model.pause(); shell.addPicker = .audioFile } label: {
-                    Label(AureaText.t("edit_add_audio_lane"), systemImage: "plus").font(.aurea(size: 12)).frame(minHeight: 32)
+                    Label { Text(AureaText.t("edit_add_audio_lane")) } icon: { EditToolIcon(icon: .plus, color: AureaColors.muted, size: 14) }.font(.aurea(size: 12)).frame(minHeight: 32)
                 }.accessibilityIdentifier("edit.inline.audio")
             }
             if missingText {
                 Button { model.pause(); _ = model.addText() } label: {
-                    Label(AureaText.t("edit_text_add"), systemImage: "plus").font(.aurea(size: 12)).frame(minHeight: 32)
+                    Label { Text(AureaText.t("edit_text_add")) } icon: { EditToolIcon(icon: .plus, color: AureaColors.muted, size: 14) }.font(.aurea(size: 12)).frame(minHeight: 32)
                 }.accessibilityIdentifier("edit.inline.text")
             }
         }.buttonStyle(.plain).foregroundStyle(AureaColors.muted).padding(.horizontal, 8)
@@ -845,7 +917,7 @@ private struct EditTimelineBody: View {
                     model.mutate { core in for id in audio.keys { core.setLayer(id, audioMuted: !muted) } }
                     model.endGesture(); model.refreshModel(force: true)
                 } label: {
-                    CupertinoGlyph.text(muted ? CupertinoGlyph.SpeakerSlash : CupertinoGlyph.Speaker2, size: 18)
+                    EditToolIcon(icon: muted ? .muted : .speaker, size: 18)
                         .frame(width: 32, height: 50).contentShape(Rectangle())
                 }.buttonStyle(.plain)
                     .accessibilityLabel(AureaText.t(muted ? "edit_mobile_main_audio_unmute" : "edit_mobile_main_audio_mute"))
@@ -853,7 +925,7 @@ private struct EditTimelineBody: View {
             }
             Button { model.pause(); model.seek(toFrame: 0); scrollFrames = 0 } label: {
                 VStack(spacing: 4) {
-                    CupertinoGlyph.text(CupertinoGlyph.BackwardEnd, size: 16)
+                    EditToolIcon(icon: .start, size: 16)
                     Text(AureaText.t("panel_inicio")).font(.aurea(size: 10)).lineLimit(1)
                 }.frame(width: 50, height: 50).background(EditColors.bar, in: RoundedRectangle(cornerRadius: 5))
             }.buttonStyle(.plain).accessibilityLabel(AureaText.t("edit_mobile_sequence_start")).accessibilityIdentifier("edit.sequenceStart")
@@ -897,7 +969,7 @@ private struct EditTimelineBody: View {
                 sequenceStart
                     .offset(x: size.width / 2 - scrollFrames * pxPerFrame - sequencePrefixWidth, y: rulerH + 2 - scrollY)
                 Button(action: onAddMedia) {
-                    CupertinoGlyph.text(CupertinoGlyph.Plus, size: 20, color: AureaColors.onAction)
+                    EditToolIcon(icon: .plus, color: AureaColors.onAction, size: 20)
                         .frame(width: 36, height: 36).background(AureaColors.accent, in: RoundedRectangle(cornerRadius: 12))
                         .frame(width: 44, height: 44).contentShape(Rectangle())
                 }.buttonStyle(.plain).accessibilityLabel(AureaText.t("edit_add_media"))

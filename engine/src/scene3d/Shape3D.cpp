@@ -1,7 +1,7 @@
 // =============================================================================
 //  Aurea / scene3d / Shape3D.cpp
 //
-//  As 10 formas 3D prontas: geometria em código, uma malha por PARTE, com
+//  Formas 3D prontas: geometria em código, uma malha por PARTE, com
 //  normais (suaves nas curvas, planas nas faces), UV pensada para imagem
 //  (face do cubo 0..1 inteira, lateral do cilindro/cone enrolada, esfera
 //  equirretangular, frente da estrela/coração planar) e fechadas como sólido
@@ -70,6 +70,16 @@ constexpr KindInfo kKinds[kShape3DKindCount] = {
     {"heart", 2, {"left", "right"}},
     {"capsule", 3, {"top", "body", "bottom"}},
     {"diamond", 8, {"facet1", "facet2", "facet3", "facet4", "facet5", "facet6", "facet7", "facet8"}},
+    {"triangle_prism", 3, {"front", "back", "side"}},
+    {"pentagon_prism", 3, {"front", "back", "side"}},
+    {"hexagon_prism", 3, {"front", "back", "side"}},
+    {"octagon_prism", 3, {"front", "back", "side"}},
+    {"decagon_prism", 3, {"front", "back", "side"}},
+    {"tetrahedron", 4, {"facet1", "facet2", "facet3", "facet4"}},
+    {"icosahedron", 2, {"upper", "lower"}},
+    {"washer", 4, {"front", "back", "outer", "inner"}},
+    {"arrow", 3, {"front", "back", "side"}},
+    {"cloud", 1, {"volume"}},
 };
 
 /// Paleta das partes (sRGB): dá para ver cada parte logo ao adicionar.
@@ -184,7 +194,8 @@ std::vector<Ring> sphere_rings(f32 r, f32 y0, f32 t0, f32 t1, u32 steps, f32 v0,
 /// e vincadas no resto. UV da frente planar global (u = x + 0,5, v = 0,5 − y;
 /// o fundo espelhado para ler certo por trás); paredes com u ao longo do
 /// contorno e v da frente ao fundo.
-void prism(PartMesh& m, const std::vector<Vec2>& ring, f32 depth, const std::vector<bool>& smooth) {
+void prism(PartMesh& m, const std::vector<Vec2>& ring, f32 depth, const std::vector<bool>& smooth,
+           PartMesh* front = nullptr, PartMesh* back = nullptr) {
     const f32 zf = depth * 0.5f, zb = -depth * 0.5f;
     std::vector<u32> tris;
     if (!triangulate_polygon({ring}, tris)) return;
@@ -197,9 +208,11 @@ void prism(PartMesh& m, const std::vector<Vec2>& ring, f32 depth, const std::vec
     for (int side = 0; side < 2; ++side) {
         const f32 z = side == 0 ? zf : zb;
         const Vec3 normal{0, 0, side == 0 ? 1.0f : -1.0f};
-        const u32 base = static_cast<u32>(m.p.size());
-        for (Vec2 q : ring) m.vert(Vec3{q.x, q.y, z}, normal, Vec2{side == 0 ? q.x + 0.5f : 0.5f - q.x, 0.5f - q.y});
-        for (usize t = 0; t + 2 < tris.size(); t += 3) m.tri(base + tris[t], base + tris[t + 1], base + tris[t + 2]);
+        PartMesh* target = side == 0 ? front : back;
+        PartMesh& cap = target ? *target : m;
+        const u32 base = static_cast<u32>(cap.p.size());
+        for (Vec2 q : ring) cap.vert(Vec3{q.x, q.y, z}, normal, Vec2{side == 0 ? q.x + 0.5f : 0.5f - q.x, 0.5f - q.y});
+        for (usize t = 0; t + 2 < tris.size(); t += 3) cap.tri(base + tris[t], base + tris[t + 1], base + tris[t + 2]);
     }
     // Paredes: normal para FORA (à direita da aresta num contorno anti-horário).
     const usize n = ring.size();
@@ -254,12 +267,86 @@ void box_face(PartMesh& m, Vec3 lo, Vec3 hi, Vec3 normal, Vec3 R, Vec3 U) {
 }
 
 void build_cube(std::vector<PartMesh>& parts, Vec3 lo, Vec3 hi) {
-    box_face(parts[0], lo, hi, Vec3{0, 0, 1}, Vec3{1, 0, 0}, Vec3{0, 1, 0});     // frente
-    box_face(parts[1], lo, hi, Vec3{0, 0, -1}, Vec3{-1, 0, 0}, Vec3{0, 1, 0});   // trás
-    box_face(parts[2], lo, hi, Vec3{1, 0, 0}, Vec3{0, 0, -1}, Vec3{0, 1, 0});    // direita
-    box_face(parts[3], lo, hi, Vec3{-1, 0, 0}, Vec3{0, 0, 1}, Vec3{0, 1, 0});    // esquerda
-    box_face(parts[4], lo, hi, Vec3{0, 1, 0}, Vec3{1, 0, 0}, Vec3{0, 0, -1});    // topo
-    box_face(parts[5], lo, hi, Vec3{0, -1, 0}, Vec3{1, 0, 0}, Vec3{0, 0, 1});    // base
+    auto face = [&](usize i) -> PartMesh& { return parts[parts.size() == 1 ? 0 : i]; };
+    box_face(face(0), lo, hi, Vec3{0, 0, 1}, Vec3{1, 0, 0}, Vec3{0, 1, 0});     // frente
+    box_face(face(1), lo, hi, Vec3{0, 0, -1}, Vec3{-1, 0, 0}, Vec3{0, 1, 0});   // trás
+    box_face(face(2), lo, hi, Vec3{1, 0, 0}, Vec3{0, 0, -1}, Vec3{0, 1, 0});    // direita
+    box_face(face(3), lo, hi, Vec3{-1, 0, 0}, Vec3{0, 0, 1}, Vec3{0, 1, 0});    // esquerda
+    box_face(face(4), lo, hi, Vec3{0, 1, 0}, Vec3{1, 0, 0}, Vec3{0, 0, -1});    // topo
+    box_face(face(5), lo, hi, Vec3{0, -1, 0}, Vec3{1, 0, 0}, Vec3{0, 0, 1});    // base
+}
+
+void build_regular_prism(std::vector<PartMesh>& parts, u32 sides) {
+    std::vector<Vec2> contour;
+    contour.reserve(sides);
+    for (u32 i = 0; i < sides; ++i) {
+        const f32 angle = kPi * (0.5f + (2.0f * i + (sides % 2 == 0 ? 1.0f : 0.0f)) / sides);
+        contour.push_back(Vec2{0.49f * std::cos(angle), 0.49f * std::sin(angle)});
+    }
+    prism(parts[2], contour, 0.45f, {}, &parts[0], &parts[1]);
+}
+
+void regular_face(PartMesh& mesh, Vec3 a, Vec3 b, Vec3 c) {
+    Vec3 normal = (b - a).cross(c - a);
+    if (normal.dot(a + b + c) < 0.0f) normal = -normal;
+    flat_poly(mesh, {a, b, c}, {{0, 1}, {1, 1}, {0.5f, 0}}, normal);
+}
+
+void build_tetrahedron(std::vector<PartMesh>& parts) {
+    constexpr Vec3 a{0.5f, 0.5f, 0.5f}, b{-0.5f, -0.5f, 0.5f},
+        c{0.5f, -0.5f, -0.5f}, d{-0.5f, 0.5f, -0.5f};
+    regular_face(parts[0], a, b, c);
+    regular_face(parts[1], a, c, d);
+    regular_face(parts[2], a, d, b);
+    regular_face(parts[3], b, d, c);
+}
+
+void build_icosahedron(std::vector<PartMesh>& parts) {
+    constexpr f32 r = 0.309016994f;
+    constexpr Vec3 vertices[] = {{0, r, 0.5f}, {0, -r, 0.5f}, {0, r, -0.5f}, {0, -r, -0.5f},
+        {r, 0.5f, 0}, {-r, 0.5f, 0}, {r, -0.5f, 0}, {-r, -0.5f, 0},
+        {0.5f, 0, r}, {0.5f, 0, -r}, {-0.5f, 0, r}, {-0.5f, 0, -r}};
+    const auto edge = [](Vec3 a, Vec3 b) { return std::abs((b - a).length_sq() - 4.0f * r * r) < 1e-5f; };
+    for (usize a = 0; a < std::size(vertices); ++a)
+        for (usize b = a + 1; b < std::size(vertices); ++b) {
+            if (!edge(vertices[a], vertices[b])) continue;
+            for (usize c = b + 1; c < std::size(vertices); ++c)
+                if (edge(vertices[b], vertices[c]) && edge(vertices[c], vertices[a]))
+                    regular_face(parts[vertices[a].y + vertices[b].y + vertices[c].y >= 0 ? 0 : 1],
+                                 vertices[a], vertices[b], vertices[c]);
+        }
+}
+
+void build_washer(std::vector<PartMesh>& parts) {
+    constexpr f32 front = 0.16f, outer = 0.49f, inner = 0.27f;
+    const auto direction = [](u32 i) {
+        const f32 a = 2.0f * kPi * (i % kRound) / kRound;
+        return Vec2{std::cos(a), std::sin(a)};
+    };
+    for (u32 i = 0; i < kRound; ++i) {
+        const Vec2 a = direction(i), b = direction(i + 1);
+        for (usize face = 0; face < 2; ++face) {
+            const f32 sign = face == 0 ? 1.0f : -1.0f;
+            PartMesh& cap = parts[face];
+            const auto point = [&](Vec2 p, f32 radius) {
+                p = p * radius;
+                return cap.vert({p.x, p.y, sign * front}, {0, 0, sign}, {0.5f + sign * p.x, 0.5f - p.y});
+            };
+            const u32 i0 = point(a, outer), i1 = point(b, outer), i2 = point(b, inner), i3 = point(a, inner);
+            cap.quad(i0, i1, i2, i3);
+        }
+        for (usize wall = 0; wall < 2; ++wall) {
+            const f32 radius = wall == 0 ? outer : inner, sign = wall == 0 ? 1.0f : -1.0f;
+            PartMesh& mesh = parts[wall + 2];
+            const auto point = [&](Vec2 p, f32 z, u32 angleIndex, f32 v) {
+                return mesh.vert({p.x * radius, p.y * radius, z}, {p.x * sign, p.y * sign, 0},
+                                 {static_cast<f32>(angleIndex) / kRound, v});
+            };
+            const u32 i0 = point(a, front, i, 0), i1 = point(b, front, i + 1, 0);
+            const u32 i2 = point(b, -front, i + 1, 1), i3 = point(a, -front, i, 1);
+            mesh.quad(i0, i1, i2, i3);
+        }
+    }
 }
 
 void build_sphere(std::vector<PartMesh>& parts) {
@@ -438,6 +525,11 @@ Shape3DSpec default_shape3d(Shape3DKind kind) {
     s.parts.resize(n);
     for (u32 i = 0; i < n; ++i) s.parts[i].color = rgb(kPalette[i % kShape3DMaxParts]);
     if (s.kind == Shape3DKind::Heart) { s.parts[0].color = rgb(0xE8455A); s.parts[1].color = rgb(0xF06277); }
+    if (s.kind == Shape3DKind::Cloud) {
+        s.parts[0].color = rgb(0xFFFFFF);
+        s.metallic = 0.57f;  // Density and detail use the existing animated material channels.
+        s.roughness = 0.55f;
+    }
     return s;
 }
 
@@ -676,10 +768,28 @@ ImportResult build_shape3d(const Shape3DSpec& in, const Shape3DPathResolver& res
         case Shape3DKind::Heart:    build_heart(parts); break;
         case Shape3DKind::Capsule:  build_capsule(parts); break;
         case Shape3DKind::Diamond:  build_diamond(parts); break;
+        case Shape3DKind::TrianglePrism: build_regular_prism(parts, 3); break;
+        case Shape3DKind::PentagonPrism:  build_regular_prism(parts, 5); break;
+        case Shape3DKind::HexagonPrism:   build_regular_prism(parts, 6); break;
+        case Shape3DKind::OctagonPrism:   build_regular_prism(parts, 8); break;
+        case Shape3DKind::DecagonPrism:   build_regular_prism(parts, 10); break;
+        case Shape3DKind::Tetrahedron:   build_tetrahedron(parts); break;
+        case Shape3DKind::Icosahedron:   build_icosahedron(parts); break;
+        case Shape3DKind::Washer:        build_washer(parts); break;
+        case Shape3DKind::Arrow:
+            prism(parts[2], {{-.49f, -.16f}, {.04f, -.16f}, {.04f, -.37f}, {.49f, 0},
+                             {.04f, .37f}, {.04f, .16f}, {-.49f, .16f}},
+                  0.3f, {}, &parts[0], &parts[1]);
+            break;
+        case Shape3DKind::Cloud:
+            build_cube(parts, {-.5f, -.5f, -.5f}, {.5f, .5f, .5f});
+            break;
+        case Shape3DKind::Count: break; // normalize_shape3d already rejected this value.
     }
     auto asset = std::make_unique<SceneAsset>();
     asset->sourceName = shape3d_kind_key(spec.kind);
     asset->shapeParts = true;
+    asset->volumetricCloud = spec.kind == Shape3DKind::Cloud;
     // Unidades da animação por parte (as mesmas do texto 3D): parte i é a
     // "letra" i e a "palavra" i; tudo numa "linha" só.
     asset->textWords = count;
@@ -693,6 +803,10 @@ ImportResult build_shape3d(const Shape3DSpec& in, const Shape3DPathResolver& res
         mat.baseColor = Vec4{srgb_to_linear(part.color.x), srgb_to_linear(part.color.y), srgb_to_linear(part.color.z), 1.0f};
         mat.metallic = spec.metallic;
         mat.roughness = spec.roughness;
+        if (asset->volumetricCloud) {
+            mat.alphaMode = AlphaMode::Blend;
+            mat.doubleSided = true; // A camera can enter the volume.
+        }
         mat.specular = 0.5f;
         mat.specularColor = Vec3{0.5f, 0.5f, 0.5f};
         if (!part.image.empty()) {

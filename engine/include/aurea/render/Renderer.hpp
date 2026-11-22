@@ -398,6 +398,7 @@ struct RenderLayer {
     u32 maskCount = 0;
     f32 maskStart = 0.0f;
     u64 maskKey = 0;
+    Mat4 maskFromSource = Mat4::identity();
     /// Track matte: esta camada aparece através da matte `matteIndex` (índice
     /// neste snapshot; −1 = matte ausente no instante).
     MatteMode matteMode = MatteMode::None;
@@ -578,6 +579,9 @@ struct RenderSettings {
     // Nonzero only for the editor's composed-frame cache. Final export ignores it.
     u64 previewCacheRevision = 0;
     u64 previewCacheComposition = 0;
+    // Whole-project revision used for the shader scan, independent of composed-frame caching.
+    // Zero keeps the conservative behavior for callers without a revision contract.
+    u64 warmupRevision = 0;
     bool previewCacheOnly = false; // prepare a future frame without presenting it
     // Quadro de outra qualidade (refino parado, rascunho do dedo): passa ao lado da
     // prévia guardada. Trocar a chave por causa dele jogava fora tudo o que estava pronto.
@@ -816,6 +820,7 @@ public:
     /// before discarding only unleased transient targets. A timeout keeps the
     /// pending frame and blocks the next graph from acquiring those targets.
     [[nodiscard]] Status reclaim_failed_transients(u64 timeoutNs = 0) noexcept;
+    [[nodiscard]] static bool has_unblurred_scene_targets(const FrameSnapshot& snapshot) noexcept;
 
     /// Descarta texturas de imagem e LUTs (projeto fechado).
     void release_project_resources() noexcept;
@@ -1594,7 +1599,9 @@ private:
     TemporalReconstruction temporalPreview_;
     u64 temporalBudget_ = 32ull << 20;
     u64 previewCacheRevision_ = 0, previewCacheComposition_ = 0;
+    const Project* warmupProject_ = nullptr;
     u64 warmupScanRevision_ = 0;
+    bool flowPipelinesQueued_ = false;
     u32 previewCacheCapacity_ = 0;
     bool previewCacheHit_ = false;
     void publish_preview_buffer_ranges() noexcept;

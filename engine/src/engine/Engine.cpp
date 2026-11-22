@@ -65,6 +65,8 @@
 #include "aurea/effects/RasterExtrude.hpp"
 #include "aurea/effects/DeepGlowReference.hpp"
 #include "aurea/effects/Particular.hpp"
+#include "aurea/timeline/LayerWorld.hpp"
+#include "aurea/text/TextGradient.hpp"
 
 #include <algorithm>
 #include <limits>
@@ -1483,30 +1485,28 @@ MemoryManager::TrimReport Engine::trim_memory(i32 osLevel) noexcept {
     // próprio lock. O projeto (Persistent) não é registrável.
     (void)memory_.trim(upTo);
     const u8 st = static_cast<u8>(upTo);
-    // Export em andamento: o renderizador DO EXPORT (pool, Roto, redes, cache
-    // de imagens) também solta, entre dois quadros (export_thread_main). Antes
-    // só o da prévia ouvia o aviso, e o iPhone 11/XR e os celulares de até 4 GB
-    // fechavam no meio do export com Roto Brush, BCC Glitch ou Ball Action.
-    if (exportActive_.load(std::memory_order_acquire) && st >= static_cast<u8>(TrimStage::OldRenderCache)) {
-        u8 pending = exportTrimRequest_.load(std::memory_order_relaxed);
-        while (pending < st && !exportTrimRequest_.compare_exchange_weak(pending, st, std::memory_order_acq_rel)) {}
-    }
+    const auto deferExportTrim = [&]() noexcept {
+        if (!exportActive_.load(std::memory_order_acquire)) return false;
+        if (previewRelease) {
+            u8 pending = exportTrimRequest_.load(std::memory_order_relaxed);
+            while (pending < st && !exportTrimRequest_.compare_exchange_weak(pending, st, std::memory_order_acq_rel)) {}
+        }
+        return true;
+    };
+    // The producer owns GPU retirement during export. In particular, the
+    // platform memory callback must not wait for a stalled graphics driver.
+    if (deferExportTrim()) return memory_.last_trim();
     // Estágio 3 (RUNNING_LOW, UI_HIDDEN): só a prévia guardada da GPU; o resto
     // do cache de render fica para o estágio 4. wait_idle roda as destruições
     // adiadas e devolve ao driver (vkFreeMemory) os blocos que ficaram vazios —
     // o LMKD da Samsung conta a memória da GPU (dmabuf/mali), não o pool.
-    // vivo 1938 / V2026 (2185, ANR com LOW_MEMORY): o início do export segura
-    // renderMutex_ dentro do driver Vulkan (compilação de pipeline, segundos);
-    // o aviso de memória esperava esse mutex na thread "aurea-ciclo", que
-    // segura o lifecycleLock do Kotlin, e o surfaceDestroyed da main ficava
-    // atrás dela → ANR e "Preparando" sem fim. Com export ativo, a etapa de
-    // GPU só roda se o mutex estiver livre AGORA; o export libera os próprios
-    // caches (prepare_export_resources) e o próximo aviso tenta de novo.
-    auto lockRender = [this](std::unique_lock<std::mutex>& rl) noexcept {
-        if (!exportActive_.load(std::memory_order_acquire)) { rl.lock(); return true; }
-        if (rl.try_lock()) return true;
-        AUREA_LOG_INFO("memoria: export segura a GPU; etapa de GPU do aviso adiada");
-        return false;
+    auto lockRender = [&](std::unique_lock<std::mutex>& rl) noexcept {
+        if (deferExportTrim()) return false;
+        if (!rl.try_lock()) {
+            if (deferExportTrim()) return false;
+            rl.lock();
+        }
+        return !deferExportTrim();
     };
     if (previewRelease && st < static_cast<u8>(TrimStage::OldRenderCache)) {
         std::unique_lock<std::mutex> rl(renderMutex_, std::defer_lock);
@@ -1530,11 +1530,7 @@ MemoryManager::TrimReport Engine::trim_memory(i32 osLevel) noexcept {
                            static_cast<unsigned long long>((before.reservedBytes > after.reservedBytes ? before.reservedBytes - after.reservedBytes : 0) / 1024));
         }
     }
-    // Reusable render resources can be reclaimed during export too. Every
-    // producer GPU operation holds renderMutex_; waiting for submitted work
-    // makes the cache safe to drop between frames. Export targets and mapped
-    // encoder slots belong to ExportContext, not the renderer cache/pool.
-    // Skipping this during export ignored pressure precisely at its peak.
+    // Idle editor memory reclamation. The active export owns its own drain.
     if (st >= static_cast<u8>(TrimStage::OldRenderCache)) {
         std::unique_lock<std::mutex> rl(renderMutex_, std::defer_lock);
         if (lockRender(rl) && gpu_ && renderer_.ready() && poll_export_gpu_locked().ok()) {
@@ -1596,6 +1592,7 @@ void Engine::invalidate() noexcept {
 
 void Engine::apply_pending_surface_locked(bool allowAttach) noexcept {
     if (!surfaceOpPending_.exchange(false, std::memory_order_acq_rel)) return;
+    lastCompletePreview_ = {};
     PendingSurfaceAttach attach;
     {
         std::lock_guard<std::mutex> pl(surfacePendingMutex_);
@@ -1642,6 +1639,7 @@ Status Engine::attach_surface(void* nativeWindow, u32 width, u32 height) noexcep
     if (!gpu_) return Status{Errc::NotSupported, "sem backend grafico"};
     if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
     pendingSurfaceSize_.store(0, std::memory_order_release);
+    lastCompletePreview_ = {};
     surface_.nativeWindow = nativeWindow;
     surface_.width = width;
     surface_.height = height;
@@ -2192,6 +2190,11 @@ Status Engine::load_project_checked(const char* path, ExportRestartGuard* restar
     u64 loadedSession = 0;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
+        const bool reopenPresentedProject = project_ && project_->path() == main && !project_->dirty()
+            && !restartGuard && !(notice & (kLoadRecoveredCopy | kLoadPartial))
+            && lastCompletePreview_.session == projectSession_
+            && lastCompletePreview_.revision == preview_cache_revision()
+            && lastCompletePreview_.composition == project_->timeline().root().pack();
         rawPlaybackLayer_ = {};
         {
             std::lock_guard<std::mutex> commands(commandSubmitMutex_);
@@ -2267,6 +2270,16 @@ Status Engine::load_project_checked(const char* path, ExportRestartGuard* restar
         }
         // Recuperado de cópia/parcial: está sujo (o principal ainda é o ruim).
         if (mainFileSuspect_) project_->mark_dirty();
+        // Reopening the saved project may keep its complete picture while its
+        // decoder reopens. Never carry a picture across different files.
+        if (reopenPresentedProject) {
+            lastCompletePreview_.session = loadedSession;
+            lastCompletePreview_.revision = preview_cache_revision();
+            lastCompletePreview_.composition = project_->timeline().current().pack();
+        } else {
+            lastCompletePreview_ = {};
+        }
+        previewRefill_ = {};
         if (restartGuard) *restartGuard = ExportRestartGuard{loadedSession, project_->edit_generation(),
             modelRevision_.load(std::memory_order_acquire), project_->timeline().current()};
     }
@@ -4354,6 +4367,38 @@ i32 Engine::toggle_mask_point_curve(u64 layerId, u32 maskId, u32 point) noexcept
     return curve ? 1 : 0;
 }
 
+namespace {
+bool can_pin_masks(const Composition& comp, const Layer& layer, FrameIndex frame) noexcept {
+    return !layer.adjustment && layer.kind != LayerKind::Adjustment && layer.kind != LayerKind::ParticleSystem
+        && !world::wants_3d(comp, layer, frame);
+}
+} // namespace
+
+bool Engine::pin_layer_masks(u64 layerId, bool pinned) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!layer || layer->locked || layer->masks.empty()) return false;
+    if (pinned == layer->maskOnComposition.has_value()) return true;
+    std::optional<Mat4> placement;
+    if (pinned) {
+        const FrameIndex frame = editing_frame_locked();
+        if (!can_pin_masks(*comp, *layer, frame)) return false;
+        const Mat4 reference = world::world_2d_frac(*comp, *layer, static_cast<f64>(frame.value));
+        Mat4 inverse;
+        if (!world::invert(reference, inverse)) return false;
+        placement = reference;
+    }
+    history_.before_mutation(*comp, project_->timeline().current(), "posição das máscaras");
+    bump_model_revision_locked();
+    layer->maskOnComposition = placement;
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
 u32 Engine::query_masks(u64 layerId, f32* out, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     InlineEditScope inlineScope(*this, layerId);
@@ -4364,13 +4409,14 @@ u32 Engine::query_masks(u64 layerId, f32* out, u32 capacity) noexcept {
     const i64 local = l->local_time(t).value;
     // Tamanho primeiro: quem chama realoca se não couber.
     std::vector<MaskPoint> pts;
-    u32 need = 7 + 3;   // os 3 últimos: a linha de perspectiva
+    u32 need = 7 + 3 + 1;   // linha de perspectiva e estado da fixação
     for (const Mask& m : l->masks) {
         mask::evaluate_path(m, static_cast<f64>(local), pts);
         need += kMaskHeaderFloats + static_cast<u32>(pts.size()) * 6;
     }
     if (!out || capacity < need) return need;
-    const Mat4 w = layer_comp_matrix(*comp, *l, t);
+    const bool canPin = can_pin_masks(*comp, *l, t);
+    const Mat4 w = canPin && l->maskOnComposition ? *l->maskOnComposition : layer_comp_matrix(*comp, *l, t);
     // Camada 3D: a matriz é PROJETIVA. Lida como afim, o caminho caía fora da tela e o
     // toque virava ponto perto da origem da camada: a curva sumia e a máscara fechada
     // apagava o elemento. Escala para w = 1 na âncora (a parte afim vale ali) e manda
@@ -4406,6 +4452,7 @@ u32 Engine::query_masks(u64 layerId, f32* out, u32 capacity) noexcept {
         }
     }
     out[o++] = w.col[0].w * k; out[o++] = w.col[1].w * k; out[o++] = w.col[3].w * k;
+    out[o++] = l->maskOnComposition ? 1.0f : canPin ? 0.0f : -1.0f;
     return o;
 }
 
@@ -7089,6 +7136,7 @@ bool Engine::set_raw_playback(bool enabled) noexcept {
         if (!chosen.valid() && layer.kind == LayerKind::Video) chosen = id;
     });
     if (enabled && !chosen.valid()) return false;
+    if (chosen == rawPlaybackLayer_) return true;
     rawPlaybackLayer_ = chosen;
     { std::lock_guard<std::mutex> perfLock(perfMutex_); playbackMeasurement_ = {}; }
     audio_.stop();
@@ -9413,6 +9461,7 @@ u32 Engine::paste_effects(const u64* ids, u32 count) noexcept {
         u32 next = d->nextEffectId;
         for (const EffectInstance& e : d->effects) if (e.id != kInvalidIndex) next = std::max(next, e.id + 1);
         for (const EffectInstance& e : copiedEffects) {
+            if (e.type == effect_type_id(text::kTextPrismEffect) && d->kind != LayerKind::Text) continue;
             if ((text::is_animator_effect(e.type) || e.type == effect_type_id(text::kTransformEffect)) && !supports_text_animation(*d)) continue;
             if ((e.type == effect_type_id(effect_keys::kText3DLayout) ||
                  ((text::is_animator_effect(e.type) || e.type == effect_type_id(text::kTransformEffect)) && d->kind == LayerKind::Model3D)) &&
@@ -10016,6 +10065,12 @@ bool Engine::apply_preset(u64 layerId, const std::string& json, i64 durationFram
         return effect.type == effect_type_id(text::kTransformEffect) || text::is_animator_effect(effect.type);
     })) {
         if (error) *error = "este preset precisa de texto";
+        return false;
+    }
+    if (l->kind != LayerKind::Text && std::any_of(p.effects.begin(), p.effects.end(), [](const EffectInstance& effect) {
+        return effect.type == effect_type_id(text::kTextPrismEffect);
+    })) {
+        if (error) *error = "Text Prism precisa de texto 2D";
         return false;
     }
     Layer prepared = *l;
@@ -13557,6 +13612,7 @@ RenderSettings Engine::current_render_settings() noexcept {
     adapt().set_quality_floor(caps_.policy().minPreviewDenominator, 0);
     RenderSettings rs;
     rs.previewCacheRevision = preview_cache_revision();
+    rs.warmupRevision = static_cast<u64>(modelRevision_.load(std::memory_order_acquire)) + 1;
     if (project_) rs.previewCacheComposition = project_->timeline().current().pack();
     rs.sceneEditor = sceneEditor_;
     rs.mediaGeneration = playback_.media_epoch();
@@ -13761,6 +13817,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
     if (const u64 size = pendingSurfaceSize_.exchange(0, std::memory_order_acq_rel)) {
         const u32 width = static_cast<u32>(size >> 32), height = static_cast<u32>(size);
         if (width != surface_.width || height != surface_.height) {
+            lastCompletePreview_ = {};
             if (gpu_ && surfaceAttached_) {
                 if (const Status s = gpu_->resize_surface(width, height); !s.ok()) {
                     set_last_error(s, "redimensionar preview");
@@ -13851,7 +13908,10 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         pubFps_.store(comp->fps() > 0.0 ? static_cast<f64>(comp->fps()) : 30.0, std::memory_order_relaxed);
         pubWallNs_.store(frameStart, std::memory_order_release);
         const bool busyPreview = playing || previewBuffering_;
-        if (playingHint_.exchange(busyPreview) != busyPreview) media_.proxies().set_pause_reason(PreviewProxyService::Playback, busyPreview);
+        if (playingHint_.exchange(busyPreview) != busyPreview) {
+            media_.proxies().set_pause_reason(PreviewProxyService::Playback, busyPreview);
+            thumbs_.set_playback_active(busyPreview);
+        }
 
         if (!gpu_ || !renderer_.ready()) return OkStatus;   // sem GPU: só o modelo avança
 
@@ -14113,15 +14173,22 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         media_.collect(frameCounter_);
         return OkStatus;
     }
-    // Também TOCANDO: uma camada de vídeo sem quadro nenhum (decoder abrindo
-    // no corte, primeiro quadro a caminho) segura a última imagem inteira em
-    // vez de apresentar a composição sem ela — preto no meio do play. A
-    // espera é limitada (PreviewRefill); o relógio segue, nada atrasa o som.
-    const bool refill = previewRefill_.hold(!warming && !idleWarming && !cachedPreview && snapshot_.missingVideoFrames > 0,
-        !rs.rawPlayback && lastRenderedFrame_ >= 0, frameStart);
+    // Keep the previous complete picture through a short decoder transition.
+    // A project/comp/edit change invalidates it. Continuous playback still
+    // permits in-range approximate frames while it advances in the same epoch.
+    const bool samePreview = lastCompletePreview_.session == idleKey.session
+        && lastCompletePreview_.composition == idleKey.composition
+        && lastCompletePreview_.revision == idleKey.revision;
+    const bool transitioning = !playing || lastCompletePreview_.mediaEpoch != idleKey.mediaEpoch;
+    const bool awaitingVideo = snapshot_.missingVideoFrames || (snapshot_.staleVideoFrames && transitioning);
+    const bool refill = previewRefill_.hold(!warming && !idleWarming && !cachedPreview && awaitingVideo,
+        !rs.rawPlayback && !rs.sceneEditor.enabled && samePreview, frameStart, PreviewRefill::kDecodeTransitionNs);
     if (refill) {
         snapshot_.release_video_frames();
-        nextFrameDueNs_ = frameStart + static_cast<u64>(1e9 / std::max(1.0f, config_.displayRefreshRate));
+        const u64 interval = playing ? static_cast<u64>(1e9 / std::max(1.0f, config_.displayRefreshRate))
+                                     : 50'000'000ull;
+        nextFrameDueNs_ = monotonic_ns() + interval;
+        previewRetryDueNs_.store(nextFrameDueNs_, std::memory_order_release);
         lastIncomplete_ = true; lastSkipped_ = true;
         // Recheck even when decode fails silently, so the bounded hold expires.
         forceRender_.store(true, std::memory_order_release);
@@ -14297,6 +14364,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
     // media generation; retain incomplete state so that wake actually renders
     // the paused frame instead of being skipped forever as "unchanged".
     lastIncomplete_ = !s.ok() || snapshot_.missingVideoFrames > 0 || snapshot_.staleVideoFrames > 0 || rendererIncomplete;
+    if (!lastIncomplete_ && !rs.sceneEditor.enabled) lastCompletePreview_ = idleKey;
     lastCulledLayers_.store(snapshot_.culledLayers, std::memory_order_relaxed);
     // Resource retries are bounded, and occur at most once per display tick.
     // GPU/surface errors get a longer delay because they may bypass vsync.
@@ -16341,6 +16409,7 @@ bool Engine::fill_layer_detail_locked(u64 layerId, bridge::LayerDetailPOD& out) 
               | (selected ? bridge::kLayerRowFlagSelected : 0u) | (l->solo ? bridge::kLayerRowFlagSolo : 0u)
               | (l->adjustment ? bridge::kLayerRowFlagAdjustment : 0u) | (l->guide ? bridge::kLayerRowFlagGuide : 0u)
               | (l->threeD ? bridge::kLayerRowFlagThreeD : 0u)
+              | (l->force2D && !l->threeD ? bridge::kLayerRowFlagForce2D : 0u)
               | (l->captions.empty() ? 0u : bridge::kLayerRowFlagCaptions)
               | (l->magneticTrack ? bridge::kLayerRowFlagMagnetic : 0u)
               | (l->clipToBelow ? bridge::kLayerRowFlagClipToBelow : 0u)
@@ -18325,6 +18394,42 @@ Status Engine::wait_export_gpu(u64 gpuFrame) noexcept {
     }
 }
 
+Status Engine::wait_export_gpu_work(ExportContext& ctx) noexcept {
+    ctx.diagnostic_stage(ExportDiagnostics::Lane::Producer, ExportDiagnostics::Stage::Readback);
+    if (!gpu_) return Status{Errc::InvalidState, "sem GPU"};
+    const u64 begin = monotonic_ns();
+    const u64 timeout = config_.exportGpuTimeoutMs
+        ? static_cast<u64>(config_.exportGpuTimeoutMs) * 1'000'000ull : kExportWorkerHangNs;
+    for (;;) {
+        if (ctx.cancelRequested.load(std::memory_order_acquire)
+            || (ctx.preRenderMode && preRenderCancel_.load(std::memory_order_acquire))) return Errc::Cancelled;
+        Status completedFailure;
+        const Status ready = gpu_->poll_export_work(&completedFailure);
+        if (ready.ok()) return completedFailure;
+        if (ready.code() != Errc::Timeout) return ready;
+        if (monotonic_ns() - begin >= timeout)
+            return Status{Errc::Timeout, "GPU sem resposta ao liberar memoria da exportacao"};
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+}
+
+Status Engine::trim_export_resources(ExportContext& ctx, u8 stage, u32 frame) noexcept {
+    std::lock_guard<std::mutex> renderLock(renderMutex_);
+    if (const Status ready = wait_export_gpu_work(ctx); !ready.ok()) return ready;
+    const u64 before = gpu_->memory_stats().usedBytes;
+    cancel_preview_graph_locked();
+    u32 textures = stage >= static_cast<u8>(TrimStage::OldRenderCache)
+        ? renderer_.trim_memory(stage, frameCounter_) : renderer_.release_preview_cache();
+    if (ctx.offline) textures += ctx.offline->compositor().trim_memory(stage, ~0ull);
+    if (const Status ready = wait_export_gpu_work(ctx); !ready.ok()) return ready;
+    const u64 after = gpu_->memory_stats().usedBytes;
+    const u64 freed = before > after ? before - after : 0;
+    memory_.note_trim_freed(static_cast<TrimStage>(stage), freed);
+    AUREA_LOG_INFO("export: aviso de memoria no quadro %u; renderizadores soltaram %u texturas (%llu KB)",
+                   frame, textures, static_cast<unsigned long long>(freed / 1024));
+    return OkStatus;
+}
+
 Status Engine::prepare_export_resources(ExportContext& ctx) noexcept {
     // Preview and export use distinct renderers/codec sessions. Reclaim the
     // recreatable preview BEFORE cloning images/audio and opening those sessions.
@@ -18916,23 +19021,8 @@ void Engine::export_thread_main() noexcept {
             trim && ctx.offline && !ctx.preRenderMode) {
             while (!inflight.empty() && result.ok()) result = deliver_oldest();
             if (!result.ok()) break;
-            std::lock_guard<std::mutex> rl(renderMutex_);
-            if (gpu_) {
-                // 0.4.6: espera LIMITADA (o mesmo prazo e o cancelar do quadro):
-                // o wait_idle sem prazo segurava o renderMutex_ para sempre
-                // com o driver travado — fora de todo watchdog do export.
-                if (const u64 f = gpu_->last_submitted_frame(); f) result = wait_export_gpu(f);
-                if (result.ok()) gpu_->wait_idle();   // já ocioso: só cobre uploads imediatos
-                if (!result.ok()) break;
-                const u64 before = gpu_->memory_stats().usedBytes;
-                const u32 textures = ctx.offline->compositor().trim_memory(trim, ~0ull);
-                if (const u64 f = gpu_->last_submitted_frame(); f) result = wait_export_gpu(f);
-                if (result.ok()) gpu_->wait_idle();   // já ocioso: só cobre uploads imediatos
-                if (!result.ok()) break;
-                const u64 after = gpu_->memory_stats().usedBytes;
-                AUREA_LOG_INFO("export: aviso de memoria no quadro %u; renderizador do export soltou %u texturas (%llu KB)",
-                               i, textures, static_cast<unsigned long long>((before > after ? before - after : 0) / 1024));
-            }
+            result = trim_export_resources(ctx, trim, i);
+            if (!result.ok()) break;
         }
         // Calor CRÍTICO (§37): um quadro em voo só — menos CPU e GPU ao mesmo
         // tempo. Resolução, fps, efeitos e amostras NÃO mudam. Morno/quente
@@ -20571,14 +20661,9 @@ void Engine::image_export_thread_main() noexcept {
         // soltava o renderizador do export. Aqui o quadro anterior já foi lido da
         // GPU (read_texture esperou o fence): nada do renderizador está em uso.
         if (const u8 trim = exportTrimRequest_.exchange(0, std::memory_order_acq_rel);
-            trim && ctx.offline && !ctx.preRenderMode) {
-            std::lock_guard<std::mutex> rl(renderMutex_);
-            if (gpu_) {
-                gpu_->wait_idle();
-                const u32 textures = ctx.offline->compositor().trim_memory(trim, ~0ull);
-                gpu_->wait_idle();
-                AUREA_LOG_INFO("export imagem: aviso de memoria no quadro %u; renderizador soltou %u texturas", i, textures);
-            }
+            trim && ctx.offline) {
+            result = trim_export_resources(ctx, trim, i);
+            if (!result.ok()) break;
         }
         const u32 sourceFrame = ctx.preRenderMode && ctx.preRenderDirection < 0 ? ctx.frames - 1 - i : i;
         // Tempo de SAÍDA → quadro da composição (como no vídeo). O PNG é o
@@ -21131,7 +21216,10 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
     // para quem a consulta (serialização, estado da UI).
     auto sync_timeline = [&] {
         const bool playing = playback_.playing() || previewBuffering_;
-        if (playingHint_.exchange(playing) != playing) media_.proxies().set_pause_reason(PreviewProxyService::Playback, playing);
+        if (playingHint_.exchange(playing) != playing) {
+            media_.proxies().set_pause_reason(PreviewProxyService::Playback, playing);
+            thumbs_.set_playback_active(playing);
+        }
         if (playback_.playing()) timeline.play();
         else timeline.pause();
         timeline.set_playhead(editing_frame_locked());
@@ -22036,7 +22124,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             if (type == effect_type_id(effect_keys::kRotobrush) && l->kind != LayerKind::Image && l->kind != LayerKind::Video) return Errc::InvalidArgument;
             if (type == effect_type_id(effect_keys::kBackgroundRemove) && l->kind != LayerKind::Image && l->kind != LayerKind::Video) return Errc::InvalidArgument;
             // 0.4.6: o Text Animator Pro e so de texto 2D (a forma 3D usa o Text Animator).
-            if (type == effect_type_id(text::kAnimatorProEffect) && l->kind != LayerKind::Text) return Errc::InvalidArgument;
+            if ((type == effect_type_id(text::kAnimatorProEffect) || type == effect_type_id(text::kTextPrismEffect))
+                && l->kind != LayerKind::Text) return Errc::InvalidArgument;
             if ((type == effect_type_id(text::kTransformEffect) || type == effect_type_id(text::kAnimatorEffect)) && l->kind != LayerKind::Text) {
                 const Asset* source = project_->asset(l->model.scene);
                 scene3d::Text3DSpec spec;

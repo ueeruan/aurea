@@ -1142,7 +1142,7 @@
     <string name="consent_title">Согласие и ответственность</string>
     <string name="consent_accept">Согласиться и продолжить</string>
     <string name="consent_body">Aurea — профессиональный инструмент для редактирования, создания и производства цифрового контента. Используя приложение, пользователь признаёт, что несёт полную ответственность за контент, который он создаёт, редактирует, импортирует, экспортирует, публикует или распространяет через платформу.\n\nAurea не контролирует, не поощряет, не поддерживает и не разрешает использование инструмента для незаконной, оскорбительной, мошеннической, вредоносной деятельности или деятельности, нарушающей права третьих лиц.\n\nПользователь обязан убедиться, что у него есть необходимые разрешения, лицензии и права на используемые материалы, включая изображения, видео, музыку, товарные знаки, модели, файлы и другой защищённый контент.\n\nТворческая свобода, которую предоставляет Aurea, не означает одобрения, участия или ответственности приложения за то, что каждый пользователь решает создавать или делать с помощью инструмента.\n\nПользователь соглашается использовать Aurea в соответствии с применимым законодательством и принимает ответственность за свои действия и контент, созданный или распространённый через приложение.\n\nВ максимальной степени, допускаемой применимым законодательством, Aurea и ответственные за него лица не несут ответственности за действия, совершённые исключительно пользователем, за ненадлежащее использование инструмента или за последствия контента, созданного, опубликованного или распространённого самим пользователем.\n\nAurea предоставляет инструмент. Пользователь отвечает за то, как он решает его использовать.\n\nПродолжая, пользователь заявляет, что прочитал, понял и принимает эти условия.</string>
-    <string name="release_notes_body">Aurea 1.0.4 (2225)\n\n• AutoBeat с выбором звука, импульсом масштаба, подъёмом и поворотом · бесплатно\n• Планарное отслеживание по двум углам с привязкой по четырём точкам · AureaHyper\n• Тушь и контур для 3D-текста: белая лицевая часть, тёмный объём и светлый контур · AureaHyper\n• AutoRig 2D в эффекте марионетки: распознавание позы, редактируемые точки и анимация покоя · AureaHyper</string>
+    <string name="release_notes_body">Aurea 1.0.5 (2226)\n\n• Более стабильный экспорт сложных 3D-сцен и плавный предпросмотр\n• Новые значки, обновлённое меню + и отдельные вкладки эффектов и плагинов\n• Новые 3D-фигуры, анимация векторных контуров и Text Prism в AureaHyper</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">Заливка</string>
@@ -3241,6 +3241,21 @@
     <string name="shape3d_back">Назад</string>
     <string name="shape3d_add_failed">Не удалось создать 3D-фигуру</string>
     <string name="shape3d_cube">Куб</string>
+    <string name="shape3d_triangle_prism">Треугольная призма</string>
+    <string name="shape3d_pentagon_prism">Пятиугольная призма</string>
+    <string name="shape3d_hexagon_prism">Шестиугольная призма</string>
+    <string name="shape3d_octagon_prism">Восьмиугольная призма</string>
+    <string name="shape3d_decagon_prism">Десятиугольная призма</string>
+    <string name="shape3d_tetrahedron">Тетраэдр</string>
+    <string name="shape3d_icosahedron">Икосаэдр</string>
+    <string name="shape3d_washer">Полое кольцо</string>
+    <string name="shape3d_arrow">3D-стрелка</string>
+    <string name="shape3d_cloud">3D-облако</string>
+    <string name="shape3d_part_outer">Внешняя стенка</string>
+    <string name="shape3d_part_inner">Внутренняя стенка</string>
+    <string name="shape3d_part_volume">Объём</string>
+    <string name="shape3d_cloud_density">Плотность</string>
+    <string name="shape3d_cloud_detail">Детализация</string>
     <string name="shape3d_sphere">Сфера</string>
     <string name="shape3d_cylinder">Цилиндр</string>
     <string name="shape3d_cone">Конус</string>
@@ -5516,4 +5531,31 @@
     <string name="autorig2d_busy">Анализ позы…</string>
     <string name="autorig2d_no_pose">AutoRig не нашёл достаточно видимых точек. Добавьте булавки в инструменте «Марионетка».</string>
     <string name="autorig2d_existing">Для AutoRig используйте эффект марионетки без булавок.</string>
+    <string name="mask_pin_to_comp">Закрепить маски в композиции</string>
+    <string name="fxo_conical">Конический</string>
+    <string name="fxl_map_by">Область градиента</string>
+    <string name="fxo_character">Символ</string>
+    <string name="fxo_fill">Заливка</string>
+    <string name="fxo_stroke">Обводка</string>
+    <string name="fxo_fill_and_stroke">Заливка и обводка</string>
+    <string name="fxo_custom_2">Своя</string>
+    <string name="fxo_prism">Призма</string>
+    <string name="fxo_glacier">Ледник</string>
+    <string name="fxo_ember">Уголёк</string>
+    <string name="fxo_silver">Серебро</string>
+    <string name="fxl_rgba_gradient">Градиент RGBA</string>
+    <string name="fxo_hsl">HSL</string>
+    <string name="fxo_oklab">Oklab</string>
+    <string name="fxl_blend_mode_3">Режим наложения</string>
+    <string name="fxo_alpha_matte">Альфа-маска</string>
+    <string name="fxl_extend">За пределами</string>
+    <string name="fxl_hdr_exposure">Экспозиция HDR</string>
+    <string name="fxl_stagger_by">Сдвиг по</string>
+    <string name="fxl_delay_per_unit">Задержка на элемент</string>
+    <string name="fxl_offset_per_unit">Смещение на элемент</string>
+    <string name="fxo_forward">Прямой</string>
+    <string name="fxo_reverse">Обратный</string>
+    <string name="fxo_random_2">Случайно</string>
+    <string name="fxs_geometry">Геометрия</string>
+    <string name="fxs_stagger">Сдвиг по времени</string>
 </resources>

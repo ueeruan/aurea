@@ -1175,6 +1175,7 @@ class AureaEngine private constructor() {
     // Lote M (EngineAeMasks.cpp): máscaras e rig do AE. Só o Aurea PC tem tela para isto.
     /** Chaves da máscara: 1 travada, 2 oculta, 4 RotoBezier; [change] = quais bits trocar. */
     fun setMaskFlags(layer: Long, mask: Int, flags: Int, change: Int): Boolean = nativeSetMaskFlags(nativeHandle, layer, mask, flags, change)
+    fun pinLayerMasks(layer: Long, pinned: Boolean): Boolean = nativePinLayerMasks(nativeHandle, layer, pinned)
     /** Tensão do RotoBezier (0..1) do vértice; [point] < 0 = todos. */
     fun setMaskRotoTension(layer: Long, mask: Int, point: Int, tension: Float, continuing: Boolean): Boolean =
         nativeSetMaskRotoTension(nativeHandle, layer, mask, point, tension, continuing)
@@ -2362,6 +2363,7 @@ class AureaEngine private constructor() {
     private external fun nativePreviewGuides(handle: Long): Int
     private external fun nativeSetMaskFalloff(handle: Long, layer: Long, mask: Int, falloff: Int): Boolean
     private external fun nativeSetMaskFlags(handle: Long, layer: Long, mask: Int, flags: Int, change: Int): Boolean
+    private external fun nativePinLayerMasks(handle: Long, layer: Long, pinned: Boolean): Boolean
     private external fun nativeSetMaskRotoTension(handle: Long, layer: Long, mask: Int, point: Int, tension: Float, continuing: Boolean): Boolean
     private external fun nativeSetMaskFeatherXY(handle: Long, layer: Long, mask: Int, x: Float, y: Float, continuing: Boolean): Boolean
     private external fun nativeSetMaskFeatherPoints(handle: Long, layer: Long, mask: Int, points: FloatArray, continuing: Boolean): Boolean

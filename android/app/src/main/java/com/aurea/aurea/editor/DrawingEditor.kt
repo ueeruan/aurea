@@ -54,6 +54,8 @@ import androidx.compose.ui.unit.dp
 import com.aurea.aurea.R
 import com.aurea.aurea.editor.panels.EditorPanel
 import com.aurea.aurea.editor.panels.PanelEnv
+import com.aurea.aurea.editor.panels.PanelItemRow
+import com.aurea.aurea.editor.panels.effectTypeId
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.i18n.AppText
 import com.aurea.aurea.ui.theme.AureaColors
@@ -113,6 +115,7 @@ internal fun DrawingPanel(env: PanelEnv) {
         Column(
             Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp),
         ) {
+            if (store.isVectorLayer) DrawingProgressAction(env)
             WidthRow(store)
             Spacer(Modifier.height(8.dp))
             val c = Color(ContentPrefs.drawColor)
@@ -131,6 +134,23 @@ internal fun DrawingPanel(env: PanelEnv) {
             ToolButton(R.string.om_draw_tool_fill, "draw.tool.fill", tool == 2) { tint -> CupertinoIcon(CupertinoGlyph.DropFill, 22.dp, tint) }
             ToolButton(R.string.om_draw_tool_eraser, "draw.tool.eraser", tool == 3) { tint -> ContentIcon(ContentIconKind.Eraser, 22.dp, tint) }
         }
+    }
+}
+
+@Composable
+internal fun DrawingProgressAction(env: PanelEnv) {
+    val store = env.store
+    if (store.detail?.locked != false) return
+    PanelItemRow(
+        glyph = CupertinoGlyph.Scribble,
+        title = stringResource(R.string.drawprog_animate),
+        tag = "draw.progress.open",
+        chevron = true,
+    ) {
+        val type = effectTypeId("aurea.draw.drawing_progress")
+        if (store.effects.any { it.typeId == type }) store.focusExistingEffect(type)
+        else store.addEffectAndFocus(type)
+        env.onOpenPanel(EditorPanel.Effects)
     }
 }
 
@@ -167,18 +187,30 @@ private fun WidthRow(store: EditorStore) {
                 .pointerInput(Unit) {
                     awaitEachGesture {
                         val down = awaitFirstDown()
-                        down.consume()
                         fun at(x: Float) {
                             val i = ((x / size.width.coerceAtLeast(1)) * (DrawWidthSteps.size - 1)).roundToInt().coerceIn(0, DrawWidthSteps.size - 1)
                             ContentPrefs.setDrawWidth(DrawWidthSteps[i])
                         }
-                        at(down.position.x)
+                        val slop = viewConfiguration.touchSlop
+                        var adjusting = false
                         while (true) {
-                            val e = awaitPointerEvent()
-                            val c = e.changes.firstOrNull { it.id == down.id } ?: break
-                            c.consume()
-                            if (!c.pressed) break
-                            at(c.position.x)
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            if (change.isConsumed) break
+                            val dx = abs(change.position.x - down.position.x)
+                            val dy = abs(change.position.y - down.position.y)
+                            if (!adjusting && dy >= slop && dy >= dx) break
+                            if (!change.pressed) {
+                                if (!adjusting) {
+                                    change.consume()
+                                    at(change.position.x)
+                                }
+                                break
+                            }
+                            if (!adjusting && (dx < slop || dx <= dy)) continue
+                            adjusting = true
+                            change.consume()
+                            at(change.position.x)
                         }
                     }
                 },

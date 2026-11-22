@@ -79,8 +79,6 @@ import com.aurea.aurea.engine.LayerRow
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
-import com.aurea.aurea.ui.theme.CupertinoGlyph
-import com.aurea.aurea.ui.theme.CupertinoIcon
 import com.aurea.aurea.ui.theme.tocavel
 import kotlin.math.abs
 import kotlin.math.max
@@ -293,7 +291,7 @@ internal fun EditTimeline(
         Box(Modifier.align(Alignment.TopEnd).size(44.dp).background(EditPalette.Lane)
             .testTag("edit.tools.more").semantics { contentDescription = moreLabel; role = Role.Button }
             .tocavel { more = true }, contentAlignment = Alignment.Center) {
-            CupertinoIcon(CupertinoGlyph.Ellipsis, 18.dp, AureaColors.Text)
+            EditToolIcon(EditIcon.More, AureaColors.Text, 18.dp)
         }
     }
     if (more) EditMoreSheet(store, tool, { tool = it }, snap, { snap = it }, { view.revealedTrack = it }) { more = false }
@@ -715,7 +713,7 @@ private fun EditLanes(
             Box(Modifier.width(32.dp).fillMaxSize().testTag("edit.mainAudio")
                 .semantics { contentDescription = muteLabel; selected = muted; role = Role.Switch }
                 .tocavel { store.setLayersAudioMuted(audioClips.map { it.first }, !muted) }, contentAlignment = Alignment.Center) {
-                CupertinoIcon(if (muted) CupertinoGlyph.SpeakerSlash else CupertinoGlyph.Speaker2, 22.dp, AureaColors.Text)
+                EditToolIcon(if (muted) EditIcon.Muted else EditIcon.Speaker, AureaColors.Text, 22.dp)
             }
             Box(Modifier.width(8.dp))
         }
@@ -723,7 +721,7 @@ private fun EditLanes(
             .semantics { contentDescription = startDescription; role = Role.Button }
             .tocavel { store.pause(); view.scrollFrames = 0f; store.seek(0) },
             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-            CupertinoIcon(CupertinoGlyph.BackwardEnd, 18.dp, AureaColors.Text)
+            EditToolIcon(EditIcon.Start, AureaColors.Text, 18.dp)
             Text(startLabel, style = AureaType.of(10f, color = AureaColors.Text), maxLines = 1)
         }
     }
@@ -734,7 +732,7 @@ private fun EditLanes(
         .semantics { contentDescription = addLabel; role = Role.Button }.tocavel(haptic = true, onClick = onAddMedia),
         contentAlignment = Alignment.Center) {
         Box(Modifier.size(36.dp).clip(RoundedCornerShape(12.dp)).background(AureaColors.Accent), contentAlignment = Alignment.Center) {
-            CupertinoIcon(CupertinoGlyph.Plus, 20.dp, AureaColors.OnAction)
+            EditToolIcon(EditIcon.Plus, AureaColors.OnAction, 20.dp)
         }
     }
     if (!compact) {
@@ -751,7 +749,7 @@ private fun EditLanes(
                 .height(44.dp).widthIn(min = 130.dp).testTag("edit.inline.$id")
                 .semantics { contentDescription = label; role = Role.Button }.tocavel(onClick = action)
                 .padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                CupertinoIcon(CupertinoGlyph.Plus, 14.dp, AureaColors.Muted)
+                EditToolIcon(EditIcon.Plus, AureaColors.Muted, 14.dp)
                 Text(label, style = AureaType.of(12f, color = AureaColors.Muted), modifier = Modifier.padding(start = 8.dp), maxLines = 1)
             }
         }
@@ -777,13 +775,13 @@ private fun TrackHead(store: EditorStore, lane: EditTrackInfo, onTarget: () -> U
         Box(Modifier.size(48.dp).testTag("edit.track.${lane.label}.lock")
             .semantics { contentDescription = lockLabel; role = Role.Switch; selected = lane.locked }
             .tocavel { store.setEditTrackFlag(lane.id, 0, !lane.locked) }, contentAlignment = Alignment.Center) {
-            CupertinoIcon(if (lane.locked) CupertinoGlyph.LockFill else ShellGlyph.LockOpenFill, 20.dp, AureaColors.Text)
+            EditToolIcon(if (lane.locked) EditIcon.Lock else EditIcon.Unlock, AureaColors.Text, 20.dp)
         }
         Box(Modifier.size(48.dp).testTag("edit.track.${lane.label}.${if (lane.audio) "mute" else "visible"}")
             .semantics { contentDescription = muteLabel; role = Role.Switch; selected = lane.muted }
             .tocavel { store.setEditTrackFlag(lane.id, 1, !lane.muted) }, contentAlignment = Alignment.Center) {
-            CupertinoIcon(if (lane.audio) { if (lane.muted) CupertinoGlyph.SpeakerSlash else CupertinoGlyph.Speaker2 }
-                else if (lane.muted) CupertinoGlyph.EyeSlash else CupertinoGlyph.Eye, 20.dp, AureaColors.Text)
+            EditToolIcon(if (lane.audio) { if (lane.muted) EditIcon.Muted else EditIcon.Speaker }
+                else if (lane.muted) EditIcon.EyeOff else EditIcon.Eye, AureaColors.Text, 20.dp)
         }
         if (lane.audio) Box(Modifier.size(48.dp).testTag("edit.track.${lane.label}.solo")
             .semantics { contentDescription = soloLabel; role = Role.Switch; selected = lane.solo }

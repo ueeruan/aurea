@@ -734,10 +734,17 @@ private struct NativeCurveGraph: View {
         grid(0.03, in: band)
         for y in [top, bottom] { line(CGPoint(x: curveInset, y: y), CGPoint(x: curveInset + w, y: y), .white.opacity(0.25), 1, [2, 2]) }
         var curve = Path()
-        for index in 0...256 {
-            let t = Float(index) / 256
-            let p = point(t, samples.flatMap { index < $0.count ? $0[index] : nil } ?? ease.transform(t))
-            if index == 0 { curve.move(to: p) } else { curve.addLine(to: p) }
+        if ease.isBezier && ease.power == 1 {
+            let handles = ease.handles
+            curve.move(to: point(0, 0))
+            curve.addCurve(to: point(1, 1), control1: point(handles[0], handles[1]),
+                           control2: point(handles[2], handles[3]))
+        } else {
+            for index in 0...256 {
+                let t = Float(index) / 256
+                let p = point(t, samples.flatMap { index < $0.count ? $0[index] : nil } ?? ease.transform(t))
+                if index == 0 { curve.move(to: p) } else { curve.addLine(to: p) }
+            }
         }
         let start = point(0, 0), end = point(1, 1)
         if ease.hasHandles {

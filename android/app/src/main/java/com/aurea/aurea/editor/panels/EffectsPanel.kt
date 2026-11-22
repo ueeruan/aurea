@@ -705,6 +705,10 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
                     contentPadding = PaddingValues(start = FxRow.Gap, end = FxRow.Gap, bottom = FxRow.Gap),
                 ) {
                     if (kind == LayerType.Adjustment.kind) item(key = "ajuste") { AdjustmentIntensity(env) }
+                    if (kind == LayerType.Text.kind) item(key = "text.animators") {
+                        PanelItemRow(CupertinoGlyph.Textformat, stringResource(R.string.la_animators),
+                            "effects.text.animators", onClick = env.onOpenAnimators)
+                    }
                     items(tools, key = { "tool." + it.key }) { tool ->
                         FxToolRow(
                             tool = tool,

@@ -1145,6 +1145,19 @@ AUREA_TEST(Thumbnail, ServiceDecodesAsyncAndCaches) {
     // Mesmo balde de 250 ms: vem do cache, sem abrir decoder novo.
     AUREA_CHECK(svc.video(7, a, 1'100'000, 24, img));
     AUREA_CHECK_EQ(factory.opened.load(), 1u);
+    svc.set_playback_active(true);
+    const u32 pausedGeneration = svc.generation();
+    AUREA_CHECK(svc.video(7, a, 1'100'000, 24, img));
+    AUREA_CHECK(!svc.video(8, a, 1'000'000, 24, img));
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    AUREA_CHECK_EQ(svc.generation(), pausedGeneration);
+    AUREA_CHECK_EQ(factory.opened.load(), 1u);
+    svc.set_playback_active(false);
+    const u64 resumeAt = monotonic_ns();
+    while (svc.generation() == pausedGeneration && monotonic_ns() - resumeAt < 2'000'000'000ull)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    AUREA_CHECK(svc.video(8, a, 1'000'000, 24, img));
+    AUREA_CHECK_EQ(factory.opened.load(), 2u);
     svc.stop();
 }
 

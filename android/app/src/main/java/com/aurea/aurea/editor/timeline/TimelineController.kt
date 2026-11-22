@@ -2219,6 +2219,12 @@ internal class TimelineController(
      * passo de desfazer. Uma camada sozinha manda o MESMO comando de sempre.
      */
     private fun commitReorder(list: List<RowModel>, source: Int, target: Int): Boolean {
+        val sourceRow = list.getOrNull(source) ?: return false
+        val targetRow = list.getOrNull(target) ?: return false
+        if (sourceRow.inner || targetRow.inner) {
+            return sourceRow.inner && targetRow.inner && sourceRow.group == targetRow.group &&
+                store.reorderGroupInner(sourceRow.group, sourceRow.id, targetRow.id)
+        }
         val keys = timelineGroupKeys(list, byLine = !omega)
         if (source !in keys.indices || target !in keys.indices) return false
         val from = keys[source]

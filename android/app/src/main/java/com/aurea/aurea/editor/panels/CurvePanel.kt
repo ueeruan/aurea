@@ -1154,10 +1154,20 @@ private fun CurveGraph(
             val y1 = pt(0f, 1f).y
             drawGrid(inset, w, h, y1, y0)
             val curve = Path()
-            for (i in 0..256) {
-                val t = i / 256f
-                val q = pt(t, samples?.getOrNull(i) ?: ease.transform(t))
-                if (i == 0) curve.moveTo(q.x, q.y) else curve.lineTo(q.x, q.y)
+            if (ease.isBezier && ease.power == 1) {
+                val hh = ease.handles()
+                val first = pt(0f, 0f)
+                val last = pt(1f, 1f)
+                val out = pt(hh[0], hh[1])
+                val input = pt(hh[2], hh[3])
+                curve.moveTo(first.x, first.y)
+                curve.cubicTo(out.x, out.y, input.x, input.y, last.x, last.y)
+            } else {
+                for (i in 0..256) {
+                    val t = i / 256f
+                    val q = pt(t, samples?.getOrNull(i) ?: ease.transform(t))
+                    if (i == 0) curve.moveTo(q.x, q.y) else curve.lineTo(q.x, q.y)
+                }
             }
             val p0 = pt(0f, 0f)
             val p1 = pt(1f, 1f)

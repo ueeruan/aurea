@@ -7,4 +7,5 @@
     <string name="fxo_simultaneous">Simultaneous</string>
     <string name="fxl_tip_softness">Tip softness</string>
     <string name="drawprog_reverse">Reverse</string>
+    <string name="drawprog_animate">Animate stroke</string>
 </resources>

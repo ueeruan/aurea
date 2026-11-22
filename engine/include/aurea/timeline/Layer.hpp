@@ -996,6 +996,7 @@ struct Layer {
     /// está ligado, e cada camada pode discordar depois.
     bool     magneticTrack = false;
     bool     threeD  = false;  ///< participa da cena 3D da composição
+    bool     force2D = false;  ///< explicit 3D toggle off; retain dormant spatial tracks
     /// "Aceita luzes" (o Accepts Lights do After Effects): camada 2D no espaço
     /// 3D recebe as luzes da composição. Desligado por padrão — projeto do
     /// build 2138 (as luzes eram só para os modelos) abre com as imagens,
@@ -1074,6 +1075,8 @@ struct Layer {
 
     std::vector<EffectInstance> effects;
     std::vector<Mask>   masks;
+    /// Composição ← caminho da máscara ao fixá-la. Sem valor, segue a camada.
+    std::optional<Mat4> maskOnComposition;
     /// Lote M: vértices de caminhos vetoriais que seguem outra camada e a
     /// posição desta camada vinda de um caminho (timeline/PathRig.hpp).
     std::vector<VectorPathDriver> vectorDrivers;

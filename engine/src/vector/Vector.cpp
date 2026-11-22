@@ -14,6 +14,7 @@
 #include "aurea/scene3d/Text3D.hpp"
 
 #include <algorithm>
+#include <memory>
 #include <cmath>
 
 namespace aurea::vector {
@@ -840,7 +841,6 @@ void group_amounts(const std::vector<f64>& lengths, const DrawProgress& p, std::
     }
 }
 
-namespace {
 /// Quanto do preenchimento aparece com o grupo na fração `u` do desenho.
 f32 draw_fill_alpha(f32 u, bool stroked) noexcept {
     if (!stroked) return u;   // só preenchimento: acende ao longo do trecho do grupo
@@ -851,7 +851,7 @@ f32 draw_fill_alpha(f32 u, bool stroked) noexcept {
 /// Contorno dos pedaços desenhados. O tracejado e o afinar continuam presos
 /// ao contorno de ORIGEM: o pedaço é exatamente o começo (ou o fim) do
 /// contorno de 100 % — o padrão não escorrega e a ponta afinada não estica.
-void stroke_drawn(const VectorStroke& st, f32 tol, const std::vector<DrawnLine>& pieces, std::vector<Contour>& out) {
+void build_drawn_stroke(const VectorStroke& st, f32 tol, const std::vector<DrawnLine>& pieces, std::vector<Contour>& out) {
     std::vector<Contour> lines;
     std::vector<Vec2> ranges;
     std::vector<f64> pat;
@@ -890,7 +890,6 @@ void stroke_drawn(const VectorStroke& st, f32 tol, const std::vector<DrawnLine>&
                             st.widthProfile.empty() ? nullptr : &st.widthProfile};   // Omega conteúdo: pincel
     stroke_to_rings(lines, st.width, st.cap, st.join, st.miterLimit, tol, out, taper, &ranges);
 }
-} // namespace
 
 // =============================================================================
 // Valores animados
@@ -1106,7 +1105,7 @@ void group_paint(const VectorGroup& g, f32 tol, std::vector<Contour> lines, cons
         }
     }
     if (stroke && cut) {
-        stroke_drawn(g.stroke, tol, pieces, out.stroke);
+        build_drawn_stroke(g.stroke, tol, pieces, out.stroke);
     } else if (stroke) {
         std::vector<Contour> s = lines;
         if (holes) s.insert(s.end(), holes->begin(), holes->end());   // Omega conteúdo: o furo tem contorno
@@ -1342,7 +1341,9 @@ void build_mesh(const std::vector<VectorGroup>& groups, f64 frame, f32 density, 
         std::vector<Contour> lines;
         std::vector<Contour> holes;   // Omega conteúdo: furos (VectorPath::exclude)
         bool tree = false;            // lote X: avaliado pela ordem dos itens (VectorTree.hpp)
+        std::unique_ptr<TreeResult> drawTree;
     };
+    const bool drawing = progress.active();
     std::vector<Prepared> list;
     list.reserve(groups.size());
     for (const VectorGroup& g : groups) {
@@ -1352,9 +1353,12 @@ void build_mesh(const std::vector<VectorGroup>& groups, f64 frame, f32 density, 
         p.G = group_matrix(g);
         if (group_has_tree(g)) {
             // Lote X: ordem livre, itens a mais, grupos de dentro ou inclinação.
-            // O Progresso do desenho não corta estes grupos (saem inteiros).
             p.tree = true;
             p.tol = 0.2f / (dens * std::max(1e-3f, p.G.max_scale() * tree_repeat_scale(g)));
+            if (drawing) {
+                p.drawTree = std::make_unique<TreeResult>();
+                evaluate_tree(g, frame, p.tol, *p.drawTree, true);
+            }
             list.push_back(std::move(p));
             continue;
         }
@@ -1373,12 +1377,21 @@ void build_mesh(const std::vector<VectorGroup>& groups, f64 frame, f32 density, 
     }
     // Progresso do desenho: a fração de cada grupo pelo comprimento dele na
     // camada (grupo sem tinta não gasta tempo do desenho).
-    const bool drawing = progress.active();
     std::vector<f32> amounts, starts;
     if (drawing) {
         std::vector<f64> lengths(list.size(), 0.0);
-        for (usize i = 0; i < list.size(); ++i)
-            if (group_strokes(*list[i].g) || group_fills(*list[i].g)) lengths[i] = length_under(list[i].lines, list[i].G);
+        for (usize i = 0; i < list.size(); ++i) {
+            const Prepared& p = list[i];
+            if (p.drawTree) {
+                f64 outline = 0.0, fill = 0.0;
+                for (const TreeDrawPaint& paint : p.drawTree->drawPaints) {
+                    (paint.stroke ? outline : fill) += paint.length;
+                }
+                lengths[i] = outline > 0.0 ? outline : fill;
+            } else if (group_strokes(*p.g) || group_fills(*p.g)) {
+                lengths[i] = length_under(p.lines, p.G);
+            }
+        }
         group_amounts(lengths, progress, amounts);
         // 0.4.6: o Início pela mesma conta (a fração em que cada grupo começa a sumir).
         DrawProgress head = progress;
@@ -1441,22 +1454,55 @@ void build_mesh(const std::vector<VectorGroup>& groups, f64 frame, f32 density, 
         const Affine2 G = prep.G;
         const u32 copies = prep.copies;
         const f32 lastAlpha = prep.lastAlpha;
+        DrawProgress mine = progress;
+        if (drawing) { mine.amount = amounts[gi]; mine.start = starts[gi]; }
         if (prep.tree) {
             TreeResult tree;
-            evaluate_tree(g, frame, prep.tol, tree);
+            if (prep.drawTree) tree = std::move(*prep.drawTree);
+            else evaluate_tree(g, frame, prep.tol, tree);
             if (tree.layers.empty()) continue;
-            if (g.composite == kVectorCompositeErase) {
-                for (const TreePaint& layer : tree.layers) erase(layer.rings, G * layer.M);
-                continue;
+            // Paint ordinals stay shared by repeater copies, so trim/tessellate
+            // each source stroke only once and then draw it at each transform.
+            std::vector<std::vector<Contour>> strokes;
+            f32 fillAlpha = 1.0f;
+            if (prep.drawTree) {
+                if (mine.amount <= mine.start) continue;
+                const bool outlined = std::any_of(tree.drawPaints.begin(), tree.drawPaints.end(),
+                    [](const TreeDrawPaint& paint) { return paint.stroke != nullptr; });
+                fillAlpha = draw_fill_alpha(mine.amount, outlined);
+                std::vector<f64> paintLengths;
+                paintLengths.reserve(tree.drawPaints.size());
+                for (const TreeDrawPaint& paint : tree.drawPaints)
+                    paintLengths.push_back(paint.stroke ? paint.length : 0.0);
+                std::vector<f32> ends, begins;
+                group_amounts(paintLengths, mine, ends);
+                DrawProgress head = mine;
+                head.amount = mine.start;
+                group_amounts(paintLengths, head, begins);
+                strokes.resize(tree.drawPaints.size());
+                std::vector<DrawnLine> trimmed;
+                for (usize i = 0; i < tree.drawPaints.size(); ++i) {
+                    const TreeDrawPaint& paint = tree.drawPaints[i];
+                    if (!paint.stroke || ends[i] <= begins[i]) continue;
+                    cut_drawn(paint.centerlines, ends[i], mine.sequential, mine.reverse, trimmed, begins[i]);
+                    const ClipToleranceScope tolerance(paint.tolerance);
+                    build_drawn_stroke(*paint.stroke, paint.tolerance, trimmed, strokes[i]);
+                }
             }
             const f32 treeOpacity = std::clamp(g.opacity * 0.01f, 0.0f, 1.0f);
             const f32 firstPaint = static_cast<f32>(out.paints.size() / kPaintVec4);
-            for (const VectorPaint& paint : tree.paints) encode_paint(paint, out.paints);
-            for (const TreePaint& layer : tree.layers) put(layer.rings, G * layer.M, firstPaint + static_cast<f32>(layer.paint), treeOpacity * layer.alpha);
+            if (g.composite != kVectorCompositeErase)
+                for (const VectorPaint& paint : tree.paints) encode_paint(paint, out.paints);
+            for (const TreePaint& layer : tree.layers) {
+                const bool stroke = prep.drawTree && tree.drawPaints[layer.paint].stroke;
+                const auto& rings = stroke ? strokes[layer.paint] : layer.rings;
+                const f32 alpha = stroke ? 1.0f : fillAlpha;
+                if (alpha <= 0.0f || rings.empty()) continue;
+                if (g.composite == kVectorCompositeErase) erase(rings, G * layer.M);
+                else put(rings, G * layer.M, firstPaint + static_cast<f32>(layer.paint), treeOpacity * layer.alpha * alpha);
+            }
             continue;
         }
-        DrawProgress mine = progress;
-        if (drawing) { mine.amount = amounts[gi]; mine.start = gi < starts.size() ? starts[gi] : 0.0f; }
         GroupGeometry geo;
         group_paint(g, prep.tol, std::move(prep.lines), drawing ? &mine : nullptr, geo, &prep.holes);
         if (geo.fill.empty() && geo.stroke.empty()) continue;

@@ -137,9 +137,10 @@ Geo transformed(const Geo& g, const Affine2& m) {
 struct Eval {
     f64 frame = 0.0;
     TreeResult* res = nullptr;
+    bool prepareDraw = false;
 
     /// `top` = as camadas de tinta do grupo, de CIMA para baixo.
-    void group(const VectorGroup& g, f32 tol, std::vector<Geo>& geo, std::vector<TreePaint>& top, u32 depth) {
+    void group(const VectorGroup& g, f32 tol, std::vector<Geo>& geo, std::vector<TreePaint>& top, u32 depth, const Affine2& drawTransform) {
         const ClipToleranceScope scope(tol);
         const std::vector<VectorItemKind> order = effective_order(g);
         const std::vector<u32> nth = ordinals(order);
@@ -203,6 +204,7 @@ struct Eval {
                     if (!f.enabled || !(f.paint.opacity > 0.0f)) break;
                     std::vector<Contour> lines, holes, closed, rings;
                     lines_of(geo, tol, lines, holes);
+                    const f64 drawLength = prepareDraw ? length_under(lines, drawTransform) : 0.0;
                     for (Contour& c : lines) if (c.pts.size() >= 3) closed.push_back(std::move(c));
                     const FillRule rule = f.rule == 1 ? FillRule::EvenOdd : FillRule::NonZero;
                     // Depois da mesclagem os anéis já saem limpos (a regra de sempre).
@@ -224,6 +226,7 @@ struct Eval {
                     layer.rings = std::move(rings);
                     layer.paint = static_cast<u32>(res->paints.size());
                     res->paints.push_back(f.paint);
+                    if (prepareDraw) res->drawPaints.push_back(TreeDrawPaint{{}, nullptr, tol, drawLength});
                     top.push_back(std::move(layer));
                     break;
                 }
@@ -233,6 +236,16 @@ struct Eval {
                     std::vector<Contour> lines, holes, rings;
                     lines_of(geo, tol, lines, holes);
                     lines.insert(lines.end(), holes.begin(), holes.end());
+                    if (prepareDraw) {
+                        if (lines.empty()) break;
+                        TreePaint layer;
+                        layer.paint = static_cast<u32>(res->paints.size());
+                        res->paints.push_back(st.paint);
+                        const f64 length = length_under(lines, drawTransform);
+                        res->drawPaints.push_back(TreeDrawPaint{std::move(lines), &st, tol, length});
+                        top.push_back(std::move(layer));
+                        break;
+                    }
                     if (!st.dashes.empty()) dash(lines, st.dashes, st.dashOffset);
                     const StrokeTaper taper{st.taperStart * 0.01f, st.taperEnd * 0.01f, st.taperEase * 0.01f,
                                             st.widthProfile.empty() ? nullptr : &st.widthProfile};
@@ -297,7 +310,7 @@ struct Eval {
                     const Affine2 C = group_matrix(child);
                     std::vector<Geo> childGeo;
                     std::vector<TreePaint> childTop;
-                    group(child, tol / std::max(1e-3f, C.max_scale()), childGeo, childTop, depth + 1);
+                    group(child, tol / std::max(1e-3f, C.max_scale()), childGeo, childTop, depth + 1, prepareDraw ? drawTransform * C : Affine2{});
                     const f32 a = std::clamp(child.opacity * 0.01f, 0.0f, 1.0f);
                     for (TreePaint& layer : childTop) {
                         layer.M = C * layer.M;
@@ -515,17 +528,24 @@ void materialize_order(VectorGroup& g) {
 // Avaliação
 // =============================================================================
 
-void evaluate_tree(const VectorGroup& g, f64 frame, f32 tolerance, TreeResult& out) {
+void evaluate_tree(const VectorGroup& g, f64 frame, f32 tolerance, TreeResult& out, bool prepareDraw) {
     out.layers.clear();
     out.paints.clear();
+    out.drawPaints.clear();
     Eval e;
+    e.prepareDraw = prepareDraw;
     e.frame = frame;
     e.res = &out;
     std::vector<Geo> geo;
     std::vector<TreePaint> top;
-    e.group(g, tolerance, geo, top, 0);
+    e.group(g, tolerance, geo, top, 0, prepareDraw ? group_matrix(g) : Affine2{});
     std::reverse(top.begin(), top.end());
     out.layers = std::move(top);
+    if (prepareDraw) {
+        std::vector<bool> live(out.drawPaints.size(), false);
+        for (const TreePaint& layer : out.layers) if (layer.alpha > 0.0f) live[layer.paint] = true;
+        for (usize i = 0; i < live.size(); ++i) if (!live[i]) out.drawPaints[i] = {};
+    }
 }
 
 f32 tree_repeat_scale(const VectorGroup& g) noexcept {

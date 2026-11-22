@@ -6,7 +6,7 @@ import PhotosUI
 // FORMAS 3D — port de state/Shape3DInfo.kt, editor/ShapePartStage.kt,
 // editor/Shape3DIcons.kt e editor/panels/Shape3DSection.kt (Android).
 //
-//  - Adicionar: "Formas 3D" na aba 3D abre a grade das 10 formas prontas.
+//  - Adicionar: "Formas 3D" na aba 3D abre a grade das formas prontas.
 //  - Painel 3D: as PARTES em fichas ("Tudo" = a forma inteira); cor e imagem
 //    da galeria por parte, losango de keyframe, reset e réguas de posição,
 //    giro e escala (o mesmo motor de keyframes: preview = export).
@@ -19,8 +19,12 @@ import PhotosUI
     static let shared = Shape3DState()
     /// Floats por parte do `shape3DParts` (Engine::kShapePartFloats).
     static let partFloats = 14
+    static let cloud = 19
     static let names = ["shape3d_cube", "shape3d_sphere", "shape3d_cylinder", "shape3d_cone", "shape3d_pyramid",
-                        "shape3d_torus", "shape3d_star", "shape3d_heart", "shape3d_capsule", "shape3d_diamond"]
+                        "shape3d_torus", "shape3d_star", "shape3d_heart", "shape3d_capsule", "shape3d_diamond",
+                        "shape3d_triangle_prism", "shape3d_pentagon_prism", "shape3d_hexagon_prism",
+                        "shape3d_octagon_prism", "shape3d_decagon_prism", "shape3d_tetrahedron",
+                        "shape3d_icosahedron", "shape3d_washer", "shape3d_arrow", "shape3d_cloud"]
 
     @Published var layer: Int64 = 0
     /// Parte escolhida (−1 = a forma inteira).
@@ -58,6 +62,10 @@ import PhotosUI
         case 6: return part == 5 ? AureaText.t("shape3d_part_center") : AureaText.t("shape3d_part_tip", n)
         case 7: return pick(["shape3d_part_left", "shape3d_part_right"])
         case 8: return pick(["shape3d_part_top", "shape3d_part_body", "shape3d_part_bottom"])
+        case 10...14, 18: return pick(["shape3d_part_front", "shape3d_part_back", "shape3d_part_side"])
+        case 16: return pick(["shape3d_part_upper", "shape3d_part_lower"])
+        case 17: return pick(["shape3d_part_front", "shape3d_part_back", "shape3d_part_outer", "shape3d_part_inner"])
+        case Self.cloud: return AureaText.t("shape3d_part_volume")
         default: return AureaText.t("shape3d_part_n", n)
         }
     }
@@ -162,6 +170,56 @@ struct Shape3DGlyph: View {
                 bands.move(to: p(0.3, 0.3)); bands.addLine(to: p(0.7, 0.3))
                 bands.move(to: p(0.3, 0.7)); bands.addLine(to: p(0.7, 0.7))
                 context.stroke(bands, with: line, lineWidth: s * 0.04)
+            case 10...14:
+                let sides = [3, 5, 6, 8, 10][kind - 10]
+                let front = (0..<sides).map { index in
+                    let angle = -.pi / 2 + Double(2 * index + (sides.isMultiple(of: 2) ? 1 : 0)) * .pi / Double(sides)
+                    return p(0.43 + 0.32 * CGFloat(cos(angle)), 0.57 + 0.32 * CGFloat(sin(angle)))
+                }
+                let back = front.map { CGPoint(x: $0.x + 0.16 * s, y: $0.y - 0.13 * s) }
+                poly(back)
+                for (a, b) in zip(front, back) {
+                    var edge = Path(); edge.move(to: a); edge.addLine(to: b)
+                    context.stroke(edge, with: line, lineWidth: width)
+                }
+                poly(front, fill: true)
+            case 15:
+                poly([p(0.48, 0.12), p(0.13, 0.76), p(0.81, 0.81)], fill: true)
+                for corner in [p(0.48, 0.12), p(0.13, 0.76), p(0.81, 0.81)] {
+                    var edge = Path(); edge.move(to: p(0.58, 0.66)); edge.addLine(to: corner)
+                    context.stroke(edge, with: line, lineWidth: width)
+                }
+            case 16:
+                let top = p(0.53, 0.15), left = p(0.14, 0.44), right = p(0.84, 0.42)
+                let center = p(0.43, 0.55), bottom = p(0.56, 0.86)
+                poly([top, left, center], fill: true)
+                poly([top, right, bottom, left])
+                for corner in [top, right, bottom] {
+                    var edge = Path(); edge.move(to: center); edge.addLine(to: corner)
+                    context.stroke(edge, with: line, lineWidth: width)
+                }
+            case 17:
+                for y in [CGFloat(0.23), 0.35] {
+                    let start = p(0.15, y)
+                    context.stroke(Path(ellipseIn: CGRect(origin: start, size: CGSize(width: 0.7 * s, height: 0.45 * s))),
+                                   with: line, lineWidth: width)
+                }
+                context.stroke(Path(ellipseIn: CGRect(origin: p(0.29, 0.4), size: CGSize(width: 0.42 * s, height: 0.17 * s))),
+                               with: .color(AureaColors.accent), lineWidth: width)
+            case 18:
+                let outline = [p(0.12, 0.46), p(0.53, 0.46), p(0.53, 0.29), p(0.86, 0.59),
+                               p(0.53, 0.84), p(0.53, 0.71), p(0.12, 0.71)]
+                poly(outline.map { CGPoint(x: $0.x + 0.03 * s, y: $0.y - 0.12 * s) })
+                poly(outline, fill: true)
+            case Shape3DState.cloud:
+                var cloud = Path()
+                cloud.move(to: p(0.25, 0.76))
+                cloud.addCurve(to: p(0.28, 0.46), control1: p(0.05, 0.76), control2: p(0.07, 0.46))
+                cloud.addCurve(to: p(0.70, 0.44), control1: p(0.30, 0.21), control2: p(0.65, 0.19))
+                cloud.addCurve(to: p(0.75, 0.76), control1: p(0.95, 0.44), control2: p(0.96, 0.76))
+                cloud.closeSubpath()
+                context.fill(cloud, with: face)
+                context.stroke(cloud, with: line, lineWidth: width)
             default:
                 poly([p(0.5, 0.1), p(0.22, 0.46), p(0.5, 0.56)], fill: true)
                 poly([p(0.5, 0.1), p(0.78, 0.46), p(0.5, 0.9), p(0.22, 0.46)])
@@ -307,7 +365,7 @@ struct Shape3DPanelSection: View {
     @State private var positionAxis = 0
     @State private var rotationAxis = 0
     @State private var selectedVector: String?
-    @State private var scaleDragging = false
+    @State private var activeScalar: String?
 
     var body: some View {
         let _ = model.status.modelRevision
@@ -315,9 +373,12 @@ struct Shape3DPanelSection: View {
         let _ = state.revision
         if let info = model.shape3DInfo(layerId) {
             let part = state.part(model)
+            let cloud = info.kind == Shape3DState.cloud
+            let title = AureaText.t(Shape3DState.names.indices.contains(info.kind) ? Shape3DState.names[info.kind] : "shape3d_title")
             VStack(alignment: .leading, spacing: 0) {
-                Text(AureaText.t(info.kind < Shape3DState.names.count ? Shape3DState.names[info.kind] : "shape3d_title") + " · " + AureaText.t("shape3d_parts"))
+                Text(cloud && page == .material ? title : title + " · " + AureaText.t("shape3d_parts"))
                     .font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted).padding(.bottom, 6)
+                if !cloud || page == .shape {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
                         chip(AureaText.t("shape3d_whole"), on: part < 0) { choose(-1) }
@@ -330,15 +391,19 @@ struct Shape3DPanelSection: View {
                         }
                     }
                 }
+                }
                 if page == .material {
                     let shown = part >= 0 && part < info.colors.count ? info.colors[part] : (info.colors.first ?? [1, 1, 1, 1])
                     HStack {
                         Text(AureaText.t("panel_cor")).font(.aurea(size: 13))
                         Spacer()
-                        Button { openColor(part, shown) } label: {
+                        Button { openColor(cloud ? 0 : part, shown) } label: {
                             AureaColorSwatch(color: AureaColorSpace.color(shown)).frame(width: 30, height: 30).clipShape(RoundedRectangle(cornerRadius: 6))
                         }.buttonStyle(AureaPressStyle()).accessibilityLabel(AureaText.t("panel_cor"))
                     }.frame(height: 44)
+                    if cloud {
+                        cloudMaterialControls()
+                    } else {
                     // Imagem no material da parte (ou de todas, "Tudo"): a textura
                     // de cor base da forma. Tinha saído na reorganização da aba 3D
                     // (relato 1.2.0: "material no longer shows add image"); o efeito
@@ -358,6 +423,7 @@ struct Shape3DPanelSection: View {
                             }.accessibilityIdentifier("shape3d.image.clear")
                         }
                     }.frame(height: 44)
+                    }
                 } else if part >= 0, let values = model.shapePartValues(layerId, part: part) {
                     partControls(part, values)
                 } else if info.kind == 0 {
@@ -371,6 +437,22 @@ struct Shape3DPanelSection: View {
                     picking = false
                     if let (url, _) = items.first { model.setShapePartImage(layerId, part: state.part(model), url: url) }
                 }
+            }
+        }
+    }
+
+    @ViewBuilder private func cloudMaterialControls() -> some View {
+        let values = model.engine.materials(forLayer: layerId).map(\.floatValue)
+        if values.count >= 8 {
+            ForEach(4...5, id: \.self) { param in
+                let key = param == 4 ? "shape3d_cloud_density" : "shape3d_cloud_detail"
+                let value = values[2 + param]
+                ruler(AureaText.t(key), value: value, step: 0.005, min: 0, max: 1,
+                      shown: "\(Int((value * 100).rounded()))%", animated: false, control: key) { amount in
+                    if model.engine.setMaterial(forLayer: layerId, index: 0, param: UInt32(param), value: amount) {
+                        model.refreshModel(force: true)
+                    }
+                }.accessibilityIdentifier("shape3d.cloud.\(param)")
             }
         }
     }
@@ -516,31 +598,33 @@ struct Shape3DPanelSection: View {
     }
 
     private func ruler(_ label: String, value: Float, step: Float, min: Float, max: Float, shown: String, animated: Bool,
+                       control: String = "scale",
                        onValue: @escaping (Float) -> Void) -> some View {
         let project = model.projectGeneration, composition = (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value
-        let finish = { if scaleDragging { scaleDragging = false; model.endShapeGesture() } }
+        let locked = model.selectedLayer?.locked == true
+        let finish = { if activeScalar == control { activeScalar = nil; model.endShapeGesture() } }
         let send: (Float) -> Void = { amount in
-            guard model.projectGeneration == project, model.primarySelection == layerId,
+            guard !locked, model.projectGeneration == project, model.primarySelection == layerId,
                   (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value == composition else { return }
             onValue(amount)
         }
-        return PropertyCustomRow(label, selected: selectedVector == "scale", onSelect: { selectedVector = "scale" }) {
+        return PropertyCustomRow(label, selected: selectedVector == control, onSelect: { selectedVector = control }) {
             HStack(spacing: 8) {
-                TickRuler(value: { value }, unitsPerDp: step, active: selectedVector == "scale" || scaleDragging, height: ParamRowDims.labelH)
+                TickRuler(value: { value }, unitsPerDp: step, active: selectedVector == control || activeScalar == control, height: ParamRowDims.labelH)
                     .frame(maxWidth: .infinity)
-                    .valueDrag(enabled: true, start: { value }, unitsPerDp: { step }, min: min, max: max,
-                               onStart: { selectedVector = "scale"; scaleDragging = true; model.beginShapeGesture("parte da forma 3D") }, onValue: send,
+                    .valueDrag(enabled: !locked, start: { value }, unitsPerDp: { step }, min: min, max: max,
+                               onStart: { selectedVector = control; activeScalar = control; model.beginShapeGesture(label) }, onValue: send,
                                onEnd: finish)
                 ParamValueBox(shown, onTap: {
-                    guard !scaleDragging else { return }; selectedVector = "scale"
+                    guard !locked, activeScalar == nil else { return }; selectedVector = control
                     model.numericKeypad = KeypadRequest(title: label, value: value * 100, unit: "%", min: min * 100, max: max * 100, decimals: 1) { amount in
                         guard model.projectGeneration == project, model.primarySelection == layerId,
                               (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value == composition else { return }
-                        model.beginShapeGesture("parte da forma 3D"); send(amount / 100); model.endShapeGesture()
+                        model.beginShapeGesture(label); send(amount / 100); model.endShapeGesture()
                     }
                 })
             }
         }.onDisappear(perform: finish)
-         .id("shape.scale:\(project):\(composition ?? 0):\(layerId):\(state.part(model))")
+         .id("shape.\(control):\(project):\(composition ?? 0):\(layerId):\(state.part(model))")
     }
 }

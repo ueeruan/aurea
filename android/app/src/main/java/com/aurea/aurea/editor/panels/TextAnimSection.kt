@@ -47,6 +47,7 @@ import com.aurea.aurea.R
 import com.aurea.aurea.engine.TrackKey
 import com.aurea.aurea.engine.TrackProperty
 import com.aurea.aurea.ui.ds.KeyframeLook
+import com.aurea.aurea.ui.ds.KeyframeDiamondIcon
 import com.aurea.aurea.ui.ds.KeypadRequest
 import com.aurea.aurea.ui.ds.PropertyCustomRow
 import com.aurea.aurea.ui.ds.TickRuler
@@ -66,6 +67,7 @@ private val TextPresets = listOf(
     R.string.tp_m_password to CupertinoGlyph.Lock, R.string.tp_m_title_spread to CupertinoGlyph.ArrowLeftRight, R.string.tp_m_fade_up to CupertinoGlyph.ArrowUp,
     R.string.tp_m_wave to CupertinoGlyph.Waveform, R.string.tp_m_spin to CupertinoGlyph.ArrowCounterclockwise,
     R.string.tp_m_scale_word to CupertinoGlyph.Fullscreen, R.string.tp_m_scale_out to CupertinoGlyph.FullscreenExit,
+    R.string.app_text_preset_smooth_bounce to CupertinoGlyph.Waveform,
 )
 
 // Propriedades do motor (TextAnimProp) e chaves das trilhas (TextAnimParam).
@@ -220,6 +222,7 @@ private fun AnimatorEditor(env: PanelEnv, index: Int, v: FloatArray, onClose: ()
     val fields = store.textAnimatorFields(index) ?: return
     val props = fields[FIELD_PROPS].toInt()
     val rig = fields[FIELD_RIG] > 0.5f
+    val sweep = !rig && fields[selectorField(0, SEL_TYPE)].toInt() == TYPE_SWEEP
     val on = v[0] > 0.5f
     val setField = { field: Int, value: Float -> store.setTextAnimatorField(index, field, value) }
     val toggleProp = { bit: Int -> setField(FIELD_PROPS, (props xor bit).toFloat()) }
@@ -242,8 +245,9 @@ private fun AnimatorEditor(env: PanelEnv, index: Int, v: FloatArray, onClose: ()
                 CupertinoIcon(CupertinoGlyph.Trash, 18.dp, AureaColors.FxListIcon)
             }
         }
-        PanelSection(stringResource(R.string.fxs_range), CupertinoGlyph.ArrowLeftRight, "$tag.sec.range", startOpen = false, stacked = false) {
-            rangeKeys(0).forEach { KeyRow(env, index, it) }
+        PanelSection(stringResource(if (sweep) R.string.ae_anim_sweep else R.string.fxs_range), CupertinoGlyph.ArrowLeftRight, "$tag.sec.range", startOpen = sweep, stacked = false) {
+            if (sweep) SweepSelector(env, index, fields, 0, "$tag.range")
+            else rangeKeys(0).forEach { KeyRow(env, index, it) }
         }
         PanelSection(stringResource(R.string.fxs_transform), CupertinoGlyph.Move, "$tag.sec.transform", startOpen = false, stacked = false) {
             ChipRow(stringResource(R.string.panel_anima_cada),
@@ -257,6 +261,7 @@ private fun AnimatorEditor(env: PanelEnv, index: Int, v: FloatArray, onClose: ()
                 KeyRow(env, index, KeyParam(13, R.string.panel_escala, "%", 1f, -100f, 1000f))
                 KeyRow(env, index, KeyParam(14, R.string.fxl_stretch, "%", 1f, -100f, 1000f))
                 KeyRow(env, index, KeyParam(18, R.string.panel_opacidade, "%", 0.5f, -100f, 100f))
+                KeyRow(env, index, KeyParam(20, R.string.panel_desfoque, "px", 0.2f, 0f, 200f))
             } else {
                 KeyRow(env, index, KeyParam(10, R.string.panel_posicao_x, "px", 1f, -20000f, 20000f))
                 KeyRow(env, index, KeyParam(11, R.string.panel_posicao_y, "px", 1f, -20000f, 20000f))
@@ -357,11 +362,14 @@ private fun AnimatorEditor(env: PanelEnv, index: Int, v: FloatArray, onClose: ()
                 }
             }
         }
-        PanelSection(stringResource(R.string.fxs_interp_ease), CupertinoGlyph.ArrowUpArrowDown, "$tag.sec.ease", startOpen = false, stacked = false) {
+        if (!sweep) PanelSection(stringResource(R.string.fxs_interp_ease), CupertinoGlyph.ArrowUpArrowDown, "$tag.sec.ease", startOpen = false, stacked = false) {
             val shapes = if (rig) listOf(R.string.fxo_square_2, R.string.fxo_smooth, R.string.fxo_triangle)
                 else listOf(R.string.fxo_square_2, R.string.panel_sobe, R.string.panel_desce, R.string.fxo_triangle, R.string.panel_redondo, R.string.fxo_smooth)
             ChipRow(stringResource(R.string.fxl_shape), shapes.map { stringResource(it) }, fields[selectorField(0, SEL_SHAPE)].toInt()) { setField(selectorField(0, SEL_SHAPE), it.toFloat()) }
-            if (!rig) KeyRow(env, index, KeyParam(32, R.string.fx_suavidade, "%", 0.5f, 0f, 100f))
+            if (!rig && fields[selectorField(0, SEL_SHAPE)].toInt() == 0) {
+                KeyRow(env, index, KeyParam(32, R.string.fx_suavidade, "%", 0.5f, 0f, 100f))
+                KeyRow(env, index, KeyParam(41, R.string.fxl_overlap, "%", 0.5f, 0f, 1000f))
+            }
             KeyRow(env, index, KeyParam(4, if (rig) R.string.fxl_ease_in else R.string.fxl_ease_high, "%", 0.5f, -100f, 100f))
             KeyRow(env, index, KeyParam(5, if (rig) R.string.fxl_ease_out else R.string.fxl_ease_low, "%", 0.5f, -100f, 100f))
             if (rig) KeyRow(env, index, KeyParam(41, R.string.fxl_overlap, "%", 0.5f, 0f, 1000f))
@@ -457,7 +465,10 @@ private fun RangeSelectorShape(env: PanelEnv, index: Int, fields: FloatArray, s:
     ChipRow(stringResource(R.string.fxl_shape), shapes.map { stringResource(it) }, fields[selectorField(s, SEL_SHAPE)].toInt()) {
         setField(selectorField(s, SEL_SHAPE), it.toFloat())
     }
-    KeyRow(env, index, KeyParam(block + 32, R.string.fx_suavidade, "%", 0.5f, 0f, 100f))
+    if (fields[selectorField(s, SEL_SHAPE)].toInt() == 0) {
+        KeyRow(env, index, KeyParam(block + 32, R.string.fx_suavidade, "%", 0.5f, 0f, 100f))
+        KeyRow(env, index, KeyParam(block + 41, R.string.fxl_overlap, "%", 0.5f, 0f, 1000f))
+    }
     KeyRow(env, index, KeyParam(block + 4, R.string.fxl_ease_high, "%", 0.5f, -100f, 100f))
     KeyRow(env, index, KeyParam(block + 5, R.string.fxl_ease_low, "%", 0.5f, -100f, 100f))
     ToggleLine(stringResource(R.string.fxl_random_order), fields[selectorField(s, SEL_RANDOM)] > 0.5f) {
@@ -482,15 +493,22 @@ private fun SweepSelector(env: PanelEnv, index: Int, fields: FloatArray, s: Int,
     val store = env.store
     val block = KEY_BLOCK * s
     val setField = { field: Int, value: Float -> store.setTextAnimatorField(index, field, value) }
-    KitHint(stringResource(R.string.ae_anim_sweep_hint))
-    rangeKeys(block).forEach { KeyRow(env, index, it) }
+    val shape = fields[selectorField(s, SEL_SHAPE)].toInt().coerceIn(0, 3)
+    if (shape == 3) {
+        KeyRow(env, index, KeyParam(block, R.string.la_progress, "%", 0.5f, 0f, 100f))
+        KeyRow(env, index, KeyParam(block + 2, R.string.fxl_offset, "%", 0.5f, -100f, 100f))
+    } else {
+        KitHint(stringResource(R.string.ae_anim_sweep_hint))
+        rangeKeys(block).forEach { KeyRow(env, index, it) }
+    }
     KeyRow(env, index, KeyParam(block + 41, R.string.fxl_overlap, "%", 0.5f, 0f, 1000f))
     KeyRow(env, index, KeyParam(block + 3, R.string.panel_intensidade, "%", 0.5f, -100f, 100f))
     SelectorBasedOn(env, index, fields, s)
-    ChipRow(stringResource(R.string.fxl_shape), listOf(stringResource(R.string.fxo_square_2), stringResource(R.string.fxo_smooth), stringResource(R.string.fxo_triangle)),
-        fields[selectorField(s, SEL_SHAPE)].toInt().coerceIn(0, 2)) { setField(selectorField(s, SEL_SHAPE), it.toFloat()) }
-    KeyRow(env, index, KeyParam(block + 4, R.string.fxl_ease_in, "%", 0.5f, -100f, 100f))
-    KeyRow(env, index, KeyParam(block + 5, R.string.fxl_ease_out, "%", 0.5f, -100f, 100f))
+    ChipRow(stringResource(R.string.fxl_shape),
+        listOf(R.string.fxo_square_2, R.string.fxo_smooth, R.string.fxo_triangle, R.string.app_text_preset_smooth_bounce).map { stringResource(it) },
+        shape) { setField(selectorField(s, SEL_SHAPE), it.toFloat()) }
+    KeyRow(env, index, KeyParam(block + 4, if (shape == 3) R.string.fx_amplitude else R.string.fxl_ease_in, "%", 0.5f, if (shape == 3) 0f else -100f, 100f))
+    KeyRow(env, index, KeyParam(block + 5, if (shape == 3) R.string.fx_frequencia else R.string.fxl_ease_out, "%", 0.5f, if (shape == 3) 0f else -100f, 100f))
     ToggleLine(stringResource(R.string.fxl_random_order), fields[selectorField(s, SEL_RANDOM)] > 0.5f) {
         setField(selectorField(s, SEL_RANDOM), if (it) 1f else 0f)
     }
@@ -553,6 +571,14 @@ private fun KeyRow(env: PanelEnv, index: Int, p: KeyParam) {
         expression = exprLook, onExpression = { store.openExpression(label, exprKeys, 1f, p.unit) },
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            val keyLabel = stringResource(if (look == KeyframeLook.KeyHere) R.string.panel_tirar_keyframe_daqui else R.string.panel_marcar_keyframe_aqui)
+            Box(
+                Modifier.size(40.dp).testTag("anim.$index.key.${p.key}.toggle").semantics { contentDescription = keyLabel }
+                    .tocavel { store.timelineFocus = exprKeys; store.toggleTextAnimKey(index, p.key) },
+                contentAlignment = Alignment.Center,
+            ) {
+                KeyframeDiamondIcon(look, enabled = true)
+            }
             Box(Modifier.weight(1f).height(44.dp)) {
                 TickRuler(
                     value = value,

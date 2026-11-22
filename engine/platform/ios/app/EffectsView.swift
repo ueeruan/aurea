@@ -526,6 +526,12 @@ struct EffectsView: View {
             ScrollView(.vertical) {
                 VStack(spacing: 0) {
                     if tabbed && model.selectedLayer?.adjustment == true { adjustmentIntensity.padding(.top, gap) }
+                    if tabbed && model.selectedLayer?.kind == 4 {
+                        PanelItemRow(glyph: CupertinoGlyph.Textformat, title: AureaText.t("la_animators"), tag: "effects.text.animators") {
+                            AnimationPanelRequest.tab = .text
+                            model.openPanel(.animation)
+                        }.padding(.top, gap)
+                    }
                     ForEach(tools, id: \.key) { tool in toolRow(tool).padding(.top, gap) }
                     ForEach(ordered) { effect in
                         swipeable(effect) { listRow(effect) }

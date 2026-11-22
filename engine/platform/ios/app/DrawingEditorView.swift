@@ -56,13 +56,17 @@ struct DrawingPanelView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 8) {
-                widthRow
-                ContentColorPicker(color: prefs.drawRGBA, tag: "draw.color", label: AureaText.t("om_draw_color_cd"),
-                                   onChange: { prefs.setDrawColor($0) })
-                    .frame(maxWidth: 320)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    if model.isVectorLayer { DrawingProgressActionView() }
+                    widthRow
+                    ContentColorPicker(color: prefs.drawRGBA, tag: "draw.color", label: AureaText.t("om_draw_color_cd"),
+                                       onChange: { prefs.setDrawColor($0) })
+                        .frame(maxWidth: 320)
+                }
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.horizontal, 12).padding(.vertical, 6)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             AureaColors.contentStrongLine.frame(width: 0.7)
             VStack(spacing: 0) {
@@ -101,6 +105,10 @@ struct DrawingPanelView: View {
             CupertinoGlyph.text(CupertinoGlyph.Scribble, size: 20)
             GeometryReader { geo in
                 let w = geo.size.width
+                let selectWidth: (CGFloat) -> Void = { x in
+                    let i = Int((max(0, min(x, w)) / max(1, w) * CGFloat(DrawWidthSteps.values.count - 1)).rounded())
+                    prefs.setDrawWidth(DrawWidthSteps.values[i])
+                }
                 ZStack(alignment: .leading) {
                     Capsule().fill(AureaColors.fxTrack).frame(height: 3)
                     Capsule().fill(AureaColors.accent).frame(width: w * frac, height: 3)
@@ -108,9 +116,10 @@ struct DrawingPanelView: View {
                 }
                 .frame(maxHeight: .infinity)
                 .contentShape(Rectangle())
-                .gesture(DragGesture(minimumDistance: 0).onChanged { g in
-                    let i = Int((g.location.x / max(1, w) * CGFloat(DrawWidthSteps.values.count - 1)).rounded())
-                    prefs.setDrawWidth(DrawWidthSteps.values[min(DrawWidthSteps.values.count - 1, max(0, i))])
+                .simultaneousGesture(SpatialTapGesture().onEnded { selectWidth($0.location.x) })
+                .simultaneousGesture(DragGesture(minimumDistance: 8).onChanged { gesture in
+                    guard abs(gesture.translation.width) > abs(gesture.translation.height) else { return }
+                    selectWidth(gesture.location.x)
                 })
             }
             .accessibilityElement()
@@ -126,6 +135,24 @@ struct DrawingPanelView: View {
                 .accessibilityIdentifier("draw.width.value")
         }
         .frame(height: 40)
+    }
+}
+
+struct DrawingProgressActionView: View {
+    @EnvironmentObject private var model: AureaModel
+
+    var body: some View {
+        if let layer = model.selectedLayer, !layer.locked {
+            PanelItemRow(glyph: CupertinoGlyph.Scribble, title: AureaText.t("drawprog_animate"), tag: "draw.progress.open") {
+                let type = fxEffectTypeId("aurea.draw.drawing_progress")
+                if model.effects.contains(where: { $0.typeId == type }) {
+                    model.pendingEffectFocus = .init(layer: layer.id, type: type, previous: [])
+                } else {
+                    model.addEffectAndFocus(type, layer: layer.id)
+                }
+                model.openPanel(.effects)
+            }
+        }
     }
 }
 

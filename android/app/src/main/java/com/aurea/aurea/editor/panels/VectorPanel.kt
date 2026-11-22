@@ -163,6 +163,9 @@ internal fun VectorPanel(env: PanelEnv, face: VectorFace = VectorFace.Paths, hos
                 KitHint(stringResource(R.string.panel_esta_camada_ainda_nao_tem_grupos))
                 return@Column
             }
+            if (face == VectorFace.Paths && tab == VT_OPERATORS) {
+                com.aurea.aurea.editor.DrawingProgressAction(env)
+            }
             val s = Sel(sel) { sel = it }
             when (face) {
                 VectorFace.Fill -> FillTab(env, g, s)

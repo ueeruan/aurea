@@ -3050,6 +3050,11 @@ AUREA_JNI jboolean AUREA_FN(nativeSetMaskFalloff)(JNIEnv*, jclass, jlong handle,
 }
 
 // Lote M (EngineAeMasks.cpp): máscaras e rig do AE. Só o Aurea PC tem tela para isto.
+AUREA_JNI jboolean AUREA_FN(nativePinLayerMasks)(JNIEnv*, jclass, jlong handle, jlong layer, jboolean pinned) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.pin_layer_masks(static_cast<u64>(layer), pinned == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeSetMaskFlags)(JNIEnv*, jclass, jlong handle, jlong layer, jint mask, jint flags, jint change) {
     NativeContext* c = ctx_of(handle);
     return c && mask >= 0 && flags >= 0 && change >= 0

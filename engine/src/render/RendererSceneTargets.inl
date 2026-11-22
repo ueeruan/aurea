@@ -42,6 +42,10 @@ Status Renderer::reclaim_failed_transients(u64 timeoutNs) noexcept {
     return OkStatus;
 }
 
+bool Renderer::has_unblurred_scene_targets(const FrameSnapshot& snapshot) noexcept {
+    return unblurred_scene_target_count(snapshot, 0) != 0;
+}
+
 bool Renderer::can_stage_small_scene_capture(const FrameSnapshot& root, u32 width, u32 height) noexcept {
     if (!width || !height || width > 320 || height > 320) return false;
     u32 groups = 0;

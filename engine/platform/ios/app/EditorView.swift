@@ -1815,7 +1815,7 @@ private struct AddLayerSheet: View {
                     case 5:
                         if shapes3D {
                             card("shape3d_back", glyph: CupertinoGlyph.ChevronLeft) { shapes3D = false }
-                            ForEach(0..<Shape3DState.names.count, id: \.self) { kind in
+                            ForEach(0..<Shape3DState.cloud, id: \.self) { kind in
                                 cardBody(Shape3DState.names[kind], action: { model.addShape3D(kind: kind); close() }) {
                                     Shape3DGlyph(kind: kind).frame(width: 30, height: 30)
                                 }.accessibilityIdentifier("shape3d.add.\(kind)")
@@ -1829,6 +1829,9 @@ private struct AddLayerSheet: View {
                         card("panel_camera_3d", glyph: CupertinoGlyph.CameraFill, accent: true) { model.addCamera(); close() }
                         card("real_camera_title", glyph: CupertinoGlyph.CameraFill, accent: true) { model.startRealCamera(); close() }
                         drawnCard("sh_add_null_3d", kind: -1) { model.addNull(threeD: true); close() }
+                        cardBody("shape3d_cloud", action: { model.addShape3D(kind: Shape3DState.cloud); close() }) {
+                            Shape3DGlyph(kind: Shape3DState.cloud).frame(width: 30, height: 30)
+                        }.accessibilityIdentifier("add.model3d.cloud")
                         }
                     case 6:
                         card("editor_mao_livre", glyph: ShellGlyph.Scribble, accent: true) { close(); model.addVector(0, freehand: true) }

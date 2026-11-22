@@ -467,6 +467,19 @@ struct MaskPointsColumn: View {
             cell("mask.points.key", AureaText.t(look == .keyHere ? "panel_tirar_keyframe_daqui" : "panel_marcar_keyframe_aqui"), enabled: mask.closed, action: onKey) { _ in
                 KeyframeDiamondIcon(look: look, enabled: true).padding(1)
             }
+            let count = mask.points.count / 6
+            if mask.closed && count > 0 {
+                cell("mask.points.all", AureaText.t("home_select_all"), enabled: true, on: state.multi.count == count, action: {
+                    let all = Set(0..<count)
+                    if state.multi == all { state.multi = [] }
+                    else {
+                        state.kind = EPKind.point
+                        state.index = 0
+                        model.selectedMaskPoint = 0
+                        state.multi = all
+                    }
+                }) { tint in CupertinoGlyph.text(CupertinoGlyph.SquareOnSquare, size: 22, color: tint) }
+            }
             if kind == EPKind.inHandle || kind == EPKind.outHandle {
                 cell("points.lock.angle", AureaText.t("om_pts_lock_angle"), enabled: true, on: state.lockAngle, action: {
                     state.lockAngle.toggle()

@@ -1147,6 +1147,9 @@ void write_layer(ByteWriter& w, const Layer& l) {
         }
     }
     w.boolv(l.model.unlitColors);
+    w.boolv(l.force2D);
+    w.boolv(l.maskOnComposition.has_value());
+    if (l.maskOnComposition) for (Vec4 column : l.maskOnComposition->col) w.vec4(column);
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
@@ -1995,6 +1998,14 @@ void read_layer(ByteReader& r, Layer& l) {
         }
     }
     if (g_readingTimelineVersion >= 78) l.model.unlitColors = r.boolv();
+    if (g_readingTimelineVersion >= 79) {
+        l.force2D = r.boolv();
+        if (r.boolv()) {
+            Mat4 pinned;
+            for (Vec4& column : pinned.col) column = r.vec4();
+            l.maskOnComposition = pinned;
+        }
+    }
     // Um bloco de legenda fora da regra (ordem, palavra vazia, id repetido) perdia o
     // projeto INTEIRO: a camada recusada derrubava a timeline e o .bak tinha o mesmo.
     if (!text::valid_caption_track(l.captions)) {

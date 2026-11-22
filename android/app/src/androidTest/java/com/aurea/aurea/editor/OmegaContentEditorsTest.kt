@@ -7,6 +7,8 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.test.platform.app.InstrumentationRegistry
+import com.aurea.aurea.editor.panels.effectTypeId
+import com.aurea.aurea.effects.effectCardId
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.theme.AureaTheme
 import org.junit.Assert.*
@@ -55,6 +57,29 @@ class OmegaContentEditorsTest {
         compose.waitUntil(5000) { groups() == before + 1 }
         compose.runOnIdle { store.undo() }
         compose.waitUntil(5000) { groups() == before }
+    }
+
+    @Test fun drawingProgressOpensItsKeyframeableEffect() {
+        launch("Stroke animation")
+        compose.runOnIdle { store.chooseVectorTool(2) }
+        compose.waitUntil(5000) { store.isDrawingLayer }
+        compose.onNodeWithTag("editor.stage").performTouchInput {
+            down(center)
+            moveBy(Offset(90f, 45f))
+            moveBy(Offset(55f, 35f))
+            up()
+        }
+        compose.waitUntil(5000) { groups() > 0 }
+        compose.onNodeWithTag("draw.progress.open").performTouchInput { click() }
+        val type = effectTypeId("aurea.draw.drawing_progress")
+        val card = "effects.settings." + effectCardId(type)
+        compose.waitUntil(5000) { compose.onAllNodesWithTag(card).fetchSemanticsNodes().isNotEmpty() }
+        compose.runOnIdle {
+            val effect = store.effects.single { it.typeId == type }
+            val parameters = store.effectParams[effect.effectId].orEmpty()
+            assertTrue(parameters.any { it.index == 0 && (it.flags and 1) != 0 })
+            assertTrue(parameters.any { it.index == 5 && (it.flags and 1) != 0 })
+        }
     }
 
     @Test fun drawWithPointsOpensEditPointsAndTheTrackpadPlacesPoints() {

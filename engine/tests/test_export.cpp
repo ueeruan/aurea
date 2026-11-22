@@ -2118,8 +2118,8 @@ AUREA_TEST(Export, PersistentMissingGpuTextBufferFailsInsteadOfSavingIncompleteV
     };
     const Outcome o = run_export(r, 36, 30, false, 8);
     AUREA_CHECK(o.finished);
-    AUREA_CHECK_EQ(o.p.result, Errc::Timeout);
-    AUREA_CHECK_EQ(o.p.failure, 3u); // ExportFailure::Render
+    AUREA_CHECK_EQ(o.p.result, Errc::BudgetExceeded);
+    AUREA_CHECK_EQ(o.p.failure, static_cast<u32>(ExportFailure::GpuMemory));
     AUREA_CHECK(r.cap.aborted && !r.cap.finished);
     AUREA_CHECK(r.cap.hashes.empty());
 }
@@ -2293,7 +2293,7 @@ AUREA_TEST(Export, CriticalMemoryTrimReleasesCachesWhileEncoderKeepsItsFrame) {
     const u32 waits = backend->idleWaits.load();
     const auto trim = r.e.trim_memory(15);
     AUREA_CHECK(trim.upTo == TrimStage::Temporaries);
-    AUREA_CHECK(backend->idleWaits.load() >= waits + 2);
+    AUREA_CHECK_EQ(backend->idleWaits.load(), waits);
     // The frame already handed to the encoder remains mapped and readable;
     // all subsequent frames must still encode, without altering the project.
     allow.store(true, std::memory_order_release);
@@ -2306,6 +2306,44 @@ AUREA_TEST(Export, CriticalMemoryTrimReleasesCachesWhileEncoderKeepsItsFrame) {
     AUREA_CHECK(r.cap.finished && !r.cap.aborted);
     AUREA_CHECK_EQ(r.cap.hashes.size(), usize{3});
     AUREA_CHECK(r.cap.ptsMonotonic);
+}
+
+AUREA_TEST(Export, AuxiliaryGpuStallDuringMemoryWarningReturnsAnErrorWithoutDeviceIdle) {
+    SyntheticConfig cfg; cfg.width = 64; cfg.height = 36;
+    auto* backend = new MockBackend(); backend->mapBuffers = true;
+    std::atomic<bool> holdProducer{true}, stallUploads{false};
+    std::atomic<u32> blockedPolls{0};
+    g_holdProducer = &holdProducer; g_holdProducerFrame = 0;
+    Rig r(cfg, 30, 4, 1, nullptr, backend, 0, false, "sintetico",
+          ExportExecutionProfile::Balanced, false, nullptr, nullptr, false, 0, true, 150);
+    g_holdProducer = nullptr; g_holdProducerFrame = 0;
+    AUREA_CHECK(r.ok); if (!r.ok) return;
+    r.comp()->layer(r.video_layer())->visible = false;
+    backend->beforeExportWorkPoll = [&] {
+        if (!stallUploads.load()) return OkStatus;
+        ++blockedPolls;
+        return Status{Errc::Timeout};
+    };
+    ExportSettings settings; settings.height = 36;
+    const Status started = r.e.start_export(settings, "nao-usado.mp4");
+    AUREA_CHECK(started.ok());
+    if (!started.ok()) { holdProducer.store(false); return; }
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    AUREA_CHECK(r.e.export_progress().running);
+    const u32 idleBefore = backend->idleWaits.load();
+    stallUploads.store(true);
+    (void)r.e.trim_memory(15);
+    AUREA_CHECK_EQ(backend->idleWaits.load(), idleBefore);
+    holdProducer.store(false);
+    while (!r.e.export_progress().finished && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    const auto progress = r.e.export_progress();
+    AUREA_CHECK(progress.finished && progress.result == Errc::Timeout);
+    AUREA_CHECK(blockedPolls.load() > 1);
+    AUREA_CHECK_EQ(backend->idleWaits.load(), idleBefore);
+    stallUploads.store(false);
+    r.e.shutdown();
+    AUREA_CHECK(r.cap.aborted && !r.cap.finished);
 }
 
 AUREA_TEST(Export, PreviewSleepsThroughExportWithExpiredRefinementAndResumes) {

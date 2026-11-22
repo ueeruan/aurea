@@ -7,4 +7,5 @@
     <string name="fxo_simultaneous">Одновременно</string>
     <string name="fxl_tip_softness">Мягкость кончика</string>
     <string name="drawprog_reverse">В обратную сторону</string>
+    <string name="drawprog_animate">Анимировать обводку</string>
 </resources>

@@ -225,12 +225,17 @@ bool under_layering_camera(const Composition& comp, const Layer& l, FrameIndex t
 }
 
 bool wants_3d(const Composition& comp, const Layer& l, FrameIndex time) noexcept {
+    if (l.force2D && !l.threeD) return false;
     if (under_layering_camera(comp, l, time)) return true;
     const Layer* p = &l;
     // Omega grid: a cadeia de pais não tem teto; o limite só corta um ciclo.
     const u32 chainLimit = std::max(comp.layers().count(), comp.order().size()) + 1;
     for (u32 depth = 0; p && depth <= chainLimit; ++depth) {
         if (p->threeD) return true;
+        if (p->force2D) {
+            p = p->parent.valid() ? comp.layer(p->parent) : nullptr;
+            continue;
+        }
         const FrameIndex local = p->local_time(time);
         auto s = [&](TrackProperty prop, f32 fallback) noexcept {
             const Track* tr = p->tracks.find(prop);
@@ -380,14 +385,15 @@ Mat4 world_chain_frac(const Composition& comp, const Layer& l, f64 time, bool th
         const f64 local = (&node == &l ? time : parentTime) - static_cast<f64>(node.start.value) + static_cast<f64>(node.offset.value);
         const f64 fps = comp.fps() > 0.0 ? comp.fps() : 30.0;
         Vec3 camera;
-        const bool facing = threeD && node.autoOrient == 2 && tCameraProbe == 0
+        const bool node3D = threeD && (node.threeD || !node.force2D);
+        const bool facing = node3D && node.autoOrient == 2 && tCameraProbe == 0
             && node.kind != LayerKind::Camera && node.kind != LayerKind::Light
             && camera_in_parent(comp, &node == &l ? time : parentTime, parentWorld, camera);
-        const Mat4 own = threeD ? layer_matrix_3d_frac(node, local, fps, facing ? &camera : nullptr) : layer_matrix_frac(node, local, fps);
+        const Mat4 own = node3D ? layer_matrix_3d_frac(node, local, fps, facing ? &camera : nullptr) : layer_matrix_frac(node, local, fps);
         const Mat4 bound = node.hasParentBasis ? node.parentBasis * own : own;
         const Mat4 m = grid::evaluate(comp,node,&node == &l ? time : parentTime).matrix * bound;
         // 0.5.2: preso a um osso do pai (modelo 3D): o osso entra entre o pai e a camada.
-        if (threeD && node.parentBone >= 0)
+        if (node3D && node.parentBone >= 0)
             if (const Layer* p = parentOf(&node)) return bone_frame(comp, *p, node.parentBone, parentTime) * m;
         return m;
     };

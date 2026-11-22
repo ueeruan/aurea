@@ -289,7 +289,7 @@ FrameRef DecodedFrameCache::find(i64 targetUs, i64 halfFrameUs, bool* exact, boo
     if (exact) *exact = false;
     if (frames_.empty()) { ++stats_.misses; return FrameRef{}; }
 
-    auto covering = std::upper_bound(frames_.begin(), frames_.end(), targetUs,
+    const auto covering = std::upper_bound(frames_.begin(), frames_.end(), targetUs,
         [](i64 time, const FrameRef& frame) { return time < frame->ptsUs; });
     if (covering != frames_.begin() && (*(covering - 1))->covers(targetUs)) {
         ++stats_.hits;
@@ -307,10 +307,8 @@ FrameRef DecodedFrameCache::find(i64 targetUs, i64 halfFrameUs, bool* exact, boo
     ++stats_.misses;
 
     // Mais próximo anterior; na falta dele, o mais próximo de qualquer lado.
-    auto after = std::upper_bound(frames_.begin(), frames_.end(), targetUs,
-                                  [](i64 v, const FrameRef& f) { return v < f->ptsUs; });
-    if (reverseFallback) return after != frames_.end() ? *after : FrameRef{};
-    if (after != frames_.begin()) return *(after - 1);
+    if (reverseFallback) return covering != frames_.end() ? *covering : FrameRef{};
+    if (covering != frames_.begin()) return *(covering - 1);
     return frames_.front();
 }
 

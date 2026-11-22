@@ -83,6 +83,30 @@ class EditorUiCaptureTest {
         compose.onNodeWithTag("timeline.add").assertDoesNotExist()
     }
 
+    @Test fun octagonalPrismAndCloudOpenFromTheProduction3DTab() {
+        assertTrue(context.packageName.endsWith(".uitest"))
+        compose.setContent {
+            store = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))
+            AureaTheme { EditorScreen(store) }
+        }
+        compose.waitUntil(30000) { ::store.isInitialized && store.engineReady }
+        compose.runOnIdle { store.newProject(480, 480, 30f, "AUREA · Formas 3D") }
+        compose.waitUntil(10000) { store.project.title == "AUREA · Formas 3D" }
+        compose.onNodeWithTag("addBar.more").performClick()
+        compose.onNodeWithTag("addBar.grid.Model3D").performClick()
+        compose.onNodeWithTag("add.model3d.shapes").performClick()
+        compose.onNodeWithTag("shape3d.add.13").performScrollTo().assertIsDisplayed().performClick()
+        compose.waitUntil(10000) { store.shape3d?.kind == 13 && store.shape3d?.partCount == 3 }
+        compose.runOnIdle { store.clearSelection() }
+        compose.onNodeWithTag("addBar.more").performClick()
+        compose.onNodeWithTag("addBar.grid.Model3D").performClick()
+        val cloud = compose.onNodeWithTag("add.model3d.cloud").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("add.model3d.null").assertIsDisplayed()
+        capture("cloud-3d-menu")
+        cloud.performClick()
+        compose.waitUntil(10000) { store.shape3d?.kind == com.aurea.aurea.state.Shape3DCatalog.CLOUD }
+    }
+
     @Test fun captureOscillateAndEditableBounceInTheProductionEditor() {
         assertTrue(context.packageName.endsWith(".uitest"))
         compose.setContent {

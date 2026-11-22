@@ -6,19 +6,20 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -33,9 +34,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aurea.aurea.R
+import com.aurea.aurea.engine.EffectCatalogEntry
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.ds.AureaAlert
-import com.aurea.aurea.ui.ds.AureaModalSheet
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.tocavel
@@ -44,10 +45,16 @@ import com.aurea.aurea.ui.theme.tocavel
  * PLUGINS DE EFEITO (0.3.0): instalar um .aureaplugin ou um shader ISF (.fs),
  * ver o que está instalado (autor, versão, se funciona neste aparelho) e
  * remover. O guia de criação completo mora em docs/plugins; aqui fica o resumo.
- * Par do iOS: `PluginManagerView` (PluginsView na EffectsView.swift).
+ * Par do iOS: `PluginManagerView` em EffectsBrowser.swift.
  */
 @Composable
-internal fun PluginManagerSheet(store: EditorStore, onDismiss: () -> Unit) {
+internal fun PluginManagerPane(
+    store: EditorStore,
+    modifier: Modifier,
+    effects: List<EffectCatalogEntry>,
+    onOpenEffect: (EffectCatalogEntry) -> Unit,
+    shortcuts: (@Composable () -> Unit)?,
+) {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         // 0.3.4 plugins: lê o pacote primeiro; a folha de consentimento instala.
         if (uri != null) PluginRuntime.beginInstall(uri)
@@ -56,44 +63,57 @@ internal fun PluginManagerSheet(store: EditorStore, onDismiss: () -> Unit) {
     var removing by remember { mutableStateOf<PluginTexts.Plugin?>(null) }
     var help by remember { mutableStateOf(false) }
     val tag = LocalConfiguration.current.locales[0].toLanguageTag()
-    AureaModalSheet(onDismiss = onDismiss) {
-        Column(
-            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 6.dp).testTag("plugins.sheet"),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(stringResource(R.string.plug_title), style = AureaType.Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W600)))
-            Text(stringResource(R.string.plug_hint), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)))
-            Box(
-                Modifier.fillMaxWidth().height(46.dp).clip(RoundedCornerShape(12.dp)).background(AureaColors.Accent)
-                    .testTag("plugins.install")
-                    .tocavel(enabled = store.busyMessage == null) { picker.launch(arrayOf("application/zip", "application/octet-stream", "text/plain", "*/*")) },
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(stringResource(R.string.plug_install), style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W600, color = AureaColors.OnAccent)))
+    val byType = remember(effects) { effects.associateBy { it.typeId } }
+    LazyColumn(
+        modifier.fillMaxWidth().testTag("plugins.sheet"),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        item("plugins:import") {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(
+                    Modifier.fillMaxWidth().heightIn(min = 46.dp).clip(RoundedCornerShape(12.dp)).background(AureaColors.Accent)
+                        .testTag("plugins.install")
+                        .tocavel(enabled = store.busyMessage == null) { picker.launch(arrayOf("application/zip", "application/octet-stream", "text/plain", "*/*")) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(stringResource(R.string.plug_install), style = AureaType.of(15f, FontWeight.SemiBold, color = AureaColors.OnAccent))
+                }
+                Text(".aureaplugin · .fs · .zip", style = AureaType.of(12f, color = AureaColors.Muted))
+                store.busyMessage?.let { Text(it, style = AureaType.of(12f, color = AureaColors.Muted)) }
             }
-            store.busyMessage?.let { Text(it, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted))) }
-            if (PluginRuntime.safeMode) {
-                Text(stringResource(if (PluginRuntime.safeModeAutomatic) R.string.plugv3_safe_auto else R.string.plugv3_safe_on),
-                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(AureaColors.Warning.copy(alpha = 0.14f)).padding(10.dp).testTag("plugins.safeMode.notice"),
-                    style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+        }
+        item("plugins:safe-mode") {
+            Column {
+                if (PluginRuntime.safeMode) {
+                    Text(stringResource(if (PluginRuntime.safeModeAutomatic) R.string.plugv3_safe_auto else R.string.plugv3_safe_on),
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(AureaColors.Warning.copy(alpha = 0.14f)).padding(10.dp).testTag("plugins.safeMode.notice"),
+                        style = AureaType.of(13f))
+                }
+                PermissionRow(stringResource(R.string.plugv3_safe_mode), PluginRuntime.safeMode, "plugins.safeMode") { PluginRuntime.changeSafeMode(it) }
             }
-            PermissionRow(stringResource(R.string.plugv3_safe_mode), PluginRuntime.safeMode, "plugins.safeMode") { PluginRuntime.changeSafeMode(it) }
-            if (store.plugins.isEmpty()) {
+        }
+        if (shortcuts != null) item("plugins:shortcuts") { shortcuts() }
+        if (store.plugins.isEmpty()) {
+            item("plugins:empty") {
                 Text(stringResource(R.string.plug_empty), modifier = Modifier.padding(vertical = 8.dp),
                     style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)))
             }
-            // Bugs 0.3.4 (bug 3): cada linha com a sua chave "plugin:<id>" (estado dos
-            // interruptores fica com o plugin certo quando outro entra ou sai).
-            store.plugins.forEach { p -> key(pluginItemKey(p.id)) { PluginRow(p, tag) { removing = p } } }
-            // 0.3.4 plugins: consentimento, console e alertas dos scripts.
-            PluginOverlays(store)
-            Text(stringResource(R.string.plug_safety), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
-            Text(stringResource(R.string.plug_help_title), modifier = Modifier.padding(top = 6.dp).testTag("plugins.help").tocavel(shrink = 1f) { help = !help },
-                style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600, color = AureaColors.Accent)))
-            if (help) Text(stringResource(R.string.plug_help_body), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, lineHeight = 19.sp)))
-            Spacer(Modifier.height(12.dp))
+        }
+        items(store.plugins, key = { pluginItemKey(it.id) }) { p ->
+            val effect = byType[p.effectTypeId]
+            PluginRow(p, tag, effect?.let { { onOpenEffect(it) } }) { removing = p }
+        }
+        item("plugins:help") {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(stringResource(R.string.plug_help_title), modifier = Modifier.testTag("plugins.help").tocavel(shrink = 1f) { help = !help },
+                    style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600, color = AureaColors.Accent)))
+                if (help) Text(stringResource(R.string.plug_help_body), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, lineHeight = 19.sp)))
+                Spacer(Modifier.height(12.dp))
+            }
         }
     }
+    PluginOverlays(store)
     removing?.let { p ->
         val name = PluginTexts.pick(p.names, tag) ?: p.id
         AureaAlert(
@@ -108,7 +128,7 @@ internal fun PluginManagerSheet(store: EditorStore, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun PluginRow(p: PluginTexts.Plugin, tag: String, onRemove: () -> Unit) {
+private fun PluginRow(p: PluginTexts.Plugin, tag: String, onOpenEffect: (() -> Unit)?, onRemove: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(AureaColors.Chip).padding(12.dp).testTag("plugins.row.${p.id}"),
         verticalAlignment = Alignment.CenterVertically,
@@ -133,6 +153,15 @@ private fun PluginRow(p: PluginTexts.Plugin, tag: String, onRemove: () -> Unit) 
                 style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, color = AureaColors.Muted)))
             // 0.3.4 plugins: ligar/desligar, permissões, painéis e console.
             if (p.ok && (p.hasScript || p.panels.isNotEmpty() || p.actions.isNotEmpty())) PluginV2Controls(p, tag)
+            if (onOpenEffect != null) {
+                Box(
+                    Modifier.heightIn(min = 44.dp).testTag("plugins.effect.${p.id}")
+                        .tocavel(shrink = 1f, onClick = onOpenEffect),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    Text(stringResource(R.string.fxo_add), style = AureaType.of(14f, FontWeight.SemiBold, color = AureaColors.Accent))
+                }
+            }
         }
         Text(stringResource(R.string.plug_remove), modifier = Modifier.padding(start = 10.dp).testTag("plugins.remove.${p.id}").tocavel(onClick = onRemove),
             style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Danger)))

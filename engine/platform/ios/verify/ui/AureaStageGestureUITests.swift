@@ -380,6 +380,11 @@ import UIKit
             .press(forDuration: 0.05, thenDragTo: surface.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.55)))
         _ = try awaitSnapshot("The stroke reaches the engine") { ($0.modelRevision ?? 0) > revision }
         XCTAssertEqual(try snapshot().layerCount, before.layerCount, "Strokes are groups of the same drawing layer")
+        let animate = app.buttons["draw.progress.open"].firstMatch
+        XCTAssertTrue(animate.waitForExistence(timeout: 5))
+        animate.tap()
+        let progress = effectCardId("aurea.draw.drawing_progress")
+        XCTAssertTrue(app.descendants(matching: .any)["effects.settings.\(progress)"].firstMatch.waitForExistence(timeout: 5))
     }
     func testEditPointsModeSegmentAndTrackpadPlacePoints() throws {
         _ = try launch("content-points")
@@ -1396,7 +1401,13 @@ import UIKit
         XCTAssertTrue(vhs.waitForExistence(timeout: 5))
         vhs.tap()
         let vhsBase = app.buttons["effects.detail.variant.\(effectCardId("aurea.glitch.vhs"))"].firstMatch
-        XCTAssertTrue(vhsBase.waitForExistence(timeout: 5)); vhsBase.tap()
+        let detailScroll = app.scrollViews["effects.detail.scroll"].firstMatch
+        XCTAssertTrue(detailScroll.waitForExistence(timeout: 5))
+        for _ in 0..<4 { detailScroll.swipeUp() }
+        for _ in 0..<4 { detailScroll.swipeDown() }
+        for _ in 0..<4 where !vhsBase.isHittable { detailScroll.swipeUp() }
+        XCTAssertTrue(vhsBase.isHittable)
+        vhsBase.tap()
         _ = try awaitSnapshot("One tap on a grid card adds the effect") { $0.effectCount == 2 }
         // Omega efeitos (P0-2): com um efeito já na camada, o novo entra no FIM da
         // lista, que continua fechada.
@@ -1465,8 +1476,7 @@ import UIKit
         attach("After undo added shape", stage.value as? String ?? "missing")
     }
 
-    /// 0.3.3 barra: a pílula de 5 categorias; o "+" abre a grade 4 × 2 com as 8
-    /// categorias e vira o "X", que fecha; cada ladrilho abre o seu destino.
+    /// A barra e o "+" oferecem conjuntos distintos de categorias.
     func testAddBarPlusOpensTheGridAndTheXClosesIt() throws {
         _ = try launch("layer-dock")
         app.buttons["Back (clear the selection)"].firstMatch.tap()
@@ -1478,15 +1488,18 @@ import UIKit
         }
         let more = app.buttons["addBar.more"].firstMatch
         XCTAssertTrue(more.waitForExistence(timeout: 5)); more.tap()
-        for name in ["Shape", "Media", "Audio", "Text", "TextPresets", "Element", "Model3D", "Draw"] {
+        for name in ["TextPresets", "Model3D", "Draw", "Vector"] {
             XCTAssertTrue(app.buttons["addBar.grid.\(name)"].firstMatch.waitForExistence(timeout: 5), "grid \(name)")
+        }
+        for name in ["Shape", "Media", "Audio", "Text", "Element"] {
+            XCTAssertFalse(app.buttons["addBar.grid.\(name)"].firstMatch.exists, "duplicate \(name)")
         }
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "Add bar grid"; shot.lifetime = .keepAlways; self.add(shot)
         let close = app.buttons["addBar.close"].firstMatch
         XCTAssertTrue(close.waitForExistence(timeout: 5) && close.isHittable); close.tap()
         let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"),
-                                             object: app.buttons["addBar.grid.Shape"].firstMatch)
+                                             object: app.buttons["addBar.grid.Model3D"].firstMatch)
         XCTAssertEqual(XCTWaiter.wait(for: [gone], timeout: 5), .completed)
         // 3D pela grade abre a grade de objetos 3D.
         XCTAssertTrue(more.waitForExistence(timeout: 5)); more.tap()
@@ -1495,6 +1508,11 @@ import UIKit
         XCTAssertTrue(app.buttons["add.model3d.shapes"].firstMatch.waitForExistence(timeout: 5))
         let opened = XCTAttachment(screenshot: app.screenshot())
         opened.name = "Add bar with 3D open"; opened.lifetime = .keepAlways; self.add(opened)
+        app.buttons["add.close"].firstMatch.tap()
+        XCTAssertTrue(more.waitForExistence(timeout: 5)); more.tap()
+        let vector = app.buttons["addBar.grid.Vector"].firstMatch
+        XCTAssertTrue(vector.waitForExistence(timeout: 5)); vector.tap()
+        XCTAssertTrue(app.buttons["add.vector.rect"].firstMatch.waitForExistence(timeout: 5))
     }
 
     /// Presets de texto de volta (2026-10-03): a categoria ao lado do Texto

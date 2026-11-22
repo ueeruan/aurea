@@ -28,6 +28,7 @@
 #include <map>
 #include <mutex>
 #include <set>
+#include <string_view>
 
 namespace aurea::package {
 namespace {
@@ -39,6 +40,7 @@ constexpr u32 kSigLocal = 0x04034b50u;
 constexpr u32 kSigCentral = 0x02014b50u;
 constexpr u32 kSigEnd = 0x06054b50u;
 constexpr u16 kFlagUtf8 = 0x0800;
+constexpr usize kCopyChunk = 1u << 20;
 std::mutex packageWriteMutex;
 
 const std::array<u32, 256>& crc_table() {
@@ -132,6 +134,22 @@ std::string utf8_of(const fs::path& p) {
     return {reinterpret_cast<const char*>(s.data()), s.size()};
 }
 
+bool valid_utf8_path(std::string_view name) noexcept {
+    for (usize i = 0; i < name.size();) {
+        const auto lead = static_cast<u8>(name[i++]);
+        if (lead < 0x80) continue;
+        if (lead < 0xC2 || lead > 0xF4) return false;
+        const usize remaining = lead < 0xE0 ? 1 : lead < 0xF0 ? 2 : 3;
+        if (remaining > name.size() - i) return false;
+        const auto next = static_cast<u8>(name[i]);
+        if ((lead == 0xE0 && next < 0xA0) || (lead == 0xED && next >= 0xA0)
+            || (lead == 0xF0 && next < 0x90) || (lead == 0xF4 && next >= 0x90)) return false;
+        for (usize j = 0; j < remaining; ++j)
+            if ((static_cast<u8>(name[i++]) & 0xC0) != 0x80) return false;
+    }
+    return true;
+}
+
 /// Nome de arquivo seguro para a entrada e para o disco: só o último pedaço,
 /// sem separador, controle, `:` ou ponto na frente; até 100 bytes (a extensão
 /// fica — o decodificador escolhe o demuxer por ela).
@@ -202,16 +220,16 @@ public:
 
         u32 crc = 0;
         u64 size = 0;
-        std::vector<u8> buf(1u << 20);
+        if (copyBuffer_.empty()) copyBuffer_.resize(kCopyChunk);
         for (;;) {
             usize n = 0;
-            const Status rs = read(buf.data(), buf.size(), n);
+            const Status rs = read(copyBuffer_.data(), copyBuffer_.size(), n);
             if (!rs.ok()) return rs;
             if (n == 0) break;
-            crc = crc_update(crc, buf.data(), n);
+            crc = crc_update(crc, copyBuffer_.data(), n);
             size += n;
             if (start + h.size() + size > kZipLimit) return Status{Errc::NotSupported, "pacote maior que 4 GB"};
-            if (std::fwrite(buf.data(), 1, n, f_) != n) return write_error();
+            if (std::fwrite(copyBuffer_.data(), 1, n, f_) != n) return write_error();
         }
         const u64 end = tell(f_);
         std::vector<u8> fix;
@@ -268,6 +286,7 @@ private:
     }
     std::FILE* f_;
     std::vector<CentralEntry> entries_;
+    std::vector<u8> copyBuffer_;
 };
 
 // --- Leitura -------------------------------------------------------------------
@@ -301,8 +320,10 @@ Status read_directory(std::FILE* f, std::vector<ZipEntry>& out) {
     // diretório 10 bytes a menos (StoredZipWriter). Sem ZIP64, o diretório
     // termina onde o EOCD começa: um tamanho declarado MENOR que esse espaço
     // usa o espaço real (cada registro continua conferido abaixo).
-    if (const u64 eocdAt = total - tail + eocd; cdOffset <= eocdAt && static_cast<u64>(cdOffset) + cdSize < eocdAt)
+    if (const u64 eocdAt = total - tail + eocd; cdOffset <= eocdAt && static_cast<u64>(cdOffset) + cdSize < eocdAt) {
+        if (eocdAt - cdOffset > kZipLimit) return Status{Errc::UnsupportedFormat, "diretorio ZIP64"};
         cdSize = static_cast<u32>(eocdAt - cdOffset);
+    }
     if (get16(&b[eocd + 4]) || get16(&b[eocd + 6]) || get16(&b[eocd + 8]) != count)
         return Status{Errc::UnsupportedFormat, "pacote em varios volumes"};
     if (static_cast<u64>(cdOffset) + cdSize > total - tail + eocd || count > cdSize / 46)
@@ -311,9 +332,10 @@ Status read_directory(std::FILE* f, std::vector<ZipEntry>& out) {
     u64 p = 0, nameBytes = 0;
     constexpr u64 kNameBudget = 8ull << 20;
     std::set<std::string> names;
+    if (!seek(f, cdOffset)) return Status{Errc::CorruptData, "diretorio do pacote"};
     for (u32 i = 0; i < count; ++i) {
         u8 h[46];
-        if (p + sizeof h > cdSize || !seek(f, cdOffset + p) || std::fread(h, 1, sizeof h, f) != sizeof h || get32(h) != kSigCentral)
+        if (p + sizeof h > cdSize || std::fread(h, 1, sizeof h, f) != sizeof h || get32(h) != kSigCentral)
             return Status{Errc::CorruptData, "diretorio do pacote"};
         if ((get16(h + 8) & ~static_cast<u16>(kFlagUtf8 | 8)) || get16(h + 34))
             return Status{Errc::UnsupportedFormat, "entrada nao suportada"};
@@ -336,10 +358,32 @@ Status read_directory(std::FILE* f, std::vector<ZipEntry>& out) {
         if (std::fread(e.name.data(), 1, nameLen, f) != nameLen || !names.insert(e.name).second)
             return Status{Errc::CorruptData, "diretorio do pacote"};
         p += 46 + nameLen + extraLen + commentLen;
+        if ((extraLen || commentLen) && !seek(f, cdOffset + p))
+            return Status{Errc::CorruptData, "diretorio do pacote"};
         out.push_back(std::move(e));
     }
     return p == cdSize ? OkStatus : Status{Errc::CorruptData, "diretorio do pacote"};
 }
+
+// Keep central-directory order for legacy packages with a wrapping folder.
+// Look up manifest entries through a separate sorted index.
+class ZipEntryIndex {
+public:
+    explicit ZipEntryIndex(const std::vector<ZipEntry>& entries) {
+        sorted_.reserve(entries.size());
+        for (const ZipEntry& entry : entries) sorted_.push_back(&entry);
+        std::sort(sorted_.begin(), sorted_.end(), [](const ZipEntry* a, const ZipEntry* b) { return a->name < b->name; });
+    }
+
+    const ZipEntry* find(std::string_view name) const noexcept {
+        const auto it = std::lower_bound(sorted_.begin(), sorted_.end(), name,
+            [](const ZipEntry* entry, std::string_view key) { return entry->name < key; });
+        return it != sorted_.end() && (*it)->name == name ? *it : nullptr;
+    }
+
+private:
+    std::vector<const ZipEntry*> sorted_;
+};
 
 Status seek_entry(std::FILE* f, const ZipEntry& e, bool allowDeflate = false) {
     if ((e.method != 0 && !(allowDeflate && e.method == 8)) || (e.method == 0 && e.compressed != e.size))
@@ -384,7 +428,7 @@ Status inflate_entry(std::FILE* f, const ZipEntry& e, std::vector<u8>& out) {
 
 /// Copia a entrada para `dest` conferindo o CRC. "stored" em pedaços;
 /// "deflate" (pacote recompactado) pela memória, com teto.
-Status extract(std::FILE* f, const ZipEntry& e, const std::string& dest) {
+Status extract(std::FILE* f, const ZipEntry& e, const std::string& dest, std::vector<u8>& copyBuffer) {
     if (e.method == 8) {
         std::vector<u8> data;
         if (const Status s = inflate_entry(f, e, data); !s.ok()) return s;
@@ -393,14 +437,14 @@ Status extract(std::FILE* f, const ZipEntry& e, const std::string& dest) {
     if (const Status s = seek_entry(f, e); !s.ok()) return s;
     File out(fileio::open_file(dest, "wb"));
     if (!out.f) return Status{Errc::IoError, "destino"};
-    std::vector<u8> buf(1u << 20);
+    if (e.size > copyBuffer.size()) copyBuffer.resize(std::min<usize>(e.size, kCopyChunk));
     u64 left = e.size;
     u32 crc = 0;
     while (left > 0) {
-        const usize want = static_cast<usize>(std::min<u64>(left, buf.size()));
-        if (std::fread(buf.data(), 1, want, f) != want) return Status{Errc::CorruptData, "pacote cortado"};
-        crc = crc_update(crc, buf.data(), want);
-        if (std::fwrite(buf.data(), 1, want, out.f) != want) {
+        const usize want = static_cast<usize>(std::min<u64>(left, copyBuffer.size()));
+        if (std::fread(copyBuffer.data(), 1, want, f) != want) return Status{Errc::CorruptData, "pacote cortado"};
+        crc = crc_update(crc, copyBuffer.data(), want);
+        if (std::fwrite(copyBuffer.data(), 1, want, out.f) != want) {
             return errno == ENOSPC ? Status{Errc::StorageFull, "sem espaco"} : Status{Errc::IoError, "falha ao gravar"};
         }
         left -= want;
@@ -433,6 +477,7 @@ Status read_entry_text(std::FILE* f, const ZipEntry& e, std::string& out) {
 
 /// Caminho livre em `dir` para `name` ("foto.jpg", "foto-2.jpg", ...).
 std::string free_path(const fs::path& dir, const std::string& name) {
+    if (!valid_utf8_path(name)) return {};
     const fs::path base = fs::u8path(name);
     const std::string stem = utf8_of(base.stem());
     const std::string ext = utf8_of(base.extension());
@@ -747,12 +792,9 @@ Status read_package(const std::string& packagePath, const std::string& projectOu
     if (std::fread(sig, 1, 4, f.f) != 4 || get32(sig) != kSigLocal) return Status{Errc::UnsupportedFormat, "nao e um projeto do Aurea"};
     std::vector<ZipEntry> entries;
     if (const Status s = read_directory(f.f, entries); !s.ok()) return s;
-    const auto find = [&](const std::string& name) -> const ZipEntry* {
-        for (const ZipEntry& e : entries) if (e.name == name) return &e;
-        return nullptr;
-    };
-    const ZipEntry* manifestEntry = find(kManifestEntry);
-    const ZipEntry* projectEntry = find(kProjectEntry);
+    const ZipEntryIndex index(entries);
+    const ZipEntry* manifestEntry = index.find(kManifestEntry);
+    const ZipEntry* projectEntry = index.find(kProjectEntry);
     // Bugs 0.3.4 (importar projeto): o pacote descompactado e compactado de
     // novo ganha uma pasta por cima ("Meu projeto/manifest.txt"). É o mesmo
     // pacote: as entradas valem a partir dessa pasta (`root`).
@@ -765,7 +807,7 @@ Status read_package(const std::string& packagePath, const std::string& projectOu
             if (n.size() <= tail.size() || n.compare(n.size() - tail.size(), tail.size(), tail) != 0) continue;
             const std::string prefix = n.substr(0, n.size() - std::strlen(kManifestEntry));
             if (prefix.find('/') != prefix.size() - 1 || prefix.rfind("__MACOSX/", 0) == 0 || prefix.rfind("._", 0) == 0) continue;
-            if (const ZipEntry* p = find(prefix + kProjectEntry)) {
+            if (const ZipEntry* p = index.find(prefix + kProjectEntry)) {
                 root = prefix;
                 manifestEntry = &e;
                 projectEntry = p;
@@ -842,7 +884,8 @@ Status read_package(const std::string& packagePath, const std::string& projectOu
         if (fs::is_empty(fs::u8path(mediaDir), e2)) fs::remove(fs::u8path(mediaDir), e2);
     };
 
-    if (const Status s = extract(f.f, *projectEntry, projectOut); !s.ok()) {
+    std::vector<u8> copyBuffer;
+    if (const Status s = extract(f.f, *projectEntry, projectOut, copyBuffer); !s.ok()) {
         fileio::remove_file(projectOut);
         return s;
     }
@@ -875,7 +918,7 @@ Status read_package(const std::string& packagePath, const std::string& projectOu
         if (ec) { rollback(); return Status{Errc::IoError, "pasta de midia"}; }
     }
     for (const auto& [entryName, stored] : mediaLines) {
-        const ZipEntry* e = find(root + entryName);   // `root`: pasta por cima (pacote recompactado)
+        const ZipEntry* e = index.find(root + entryName);   // `root`: pasta por cima (pacote recompactado)
         if (!e || entryName.rfind("media/", 0) != 0) continue;
         std::string name = safe_file_name(entryName.substr(6));
         // "NNN-" do pacote sai: o arquivo volta com o nome que a pessoa conhece.
@@ -899,7 +942,7 @@ Status read_package(const std::string& packagePath, const std::string& projectOu
             dest = free_path(fs::u8path(mediaDir), name);
         }
         if (dest.empty()) { rollback(); return Status{Errc::AlreadyExists, "nenhum nome de midia disponivel"}; }
-        if (const Status s = extract(f.f, *e, dest); !s.ok()) {
+        if (const Status s = extract(f.f, *e, dest, copyBuffer); !s.ok()) {
             fileio::remove_file(dest);
             // Mídia comprimida grande demais para a memória (pacote recompactado):
             // fica de fora e conta como ausente ("Substituir mídia" depois).
@@ -911,14 +954,14 @@ Status read_package(const std::string& packagePath, const std::string& projectOu
         relink.emplace_back(stored, dest);
     }
     for (const PluginLine& line : pluginLines) {
-        const ZipEntry* e = find(root + line.entry);
+        const ZipEntry* e = index.find(root + line.entry);
         if (!e || line.entry.rfind("plugins/", 0) != 0) continue;
         const fs::path dir = fs::u8path(mediaDir) / "plugins";
         fs::create_directories(dir, ec);
         const std::string dest = ec ? std::string{} : free_path(dir, safe_file_name(line.entry.substr(8)));
         if (dest.empty()) continue;
         // Plugin ilegível não impede abrir o projeto: o efeito só fica indisponível.
-        if (!extract(f.f, *e, dest).ok()) { fileio::remove_file(dest); continue; }
+        if (!extract(f.f, *e, dest, copyBuffer).ok()) { fileio::remove_file(dest); continue; }
         written.push_back(dest);
         out.plugins.push_back({line.id, line.version, dest});
     }
@@ -952,7 +995,7 @@ Status extract_model_archive(const std::string& archivePath, const std::string& 
     for (const ZipEntry& entry : entries) {
         std::string name = entry.name;
         std::replace(name.begin(), name.end(), '\\', '/');
-        if (name.empty() || name.front() == '/' || name.find('\0') != std::string::npos)
+        if (name.empty() || name.front() == '/' || name.find('\0') != std::string::npos || !valid_utf8_path(name))
             return Errc::CorruptData;
         if (name.back() == '/') continue;
         if (name.starts_with("__MACOSX/") || name.find("/._") != std::string::npos || name.starts_with("._")) continue;
@@ -983,13 +1026,14 @@ Status extract_model_archive(const std::string& archivePath, const std::string& 
         files.clear();
         return status;
     };
+    std::vector<u8> copyBuffer;
     for (const auto& item : plan) {
         const ZipEntry& entry = *item.first;
         fs::create_directories(item.second.parent_path(), ec);
         if (ec) return fail(Errc::IoError);
         const std::string path = utf8_of(item.second);
         if (entry.method == 0) {
-            if (const Status s = extract(input.f, entry, path); !s.ok()) return fail(s);
+            if (const Status s = extract(input.f, entry, path, copyBuffer); !s.ok()) return fail(s);
         } else {
             if (const Status s = seek_entry(input.f, entry, true); !s.ok()) return fail(s);
             std::vector<u8> compressed(entry.compressed), decoded(std::max(entry.size, 1u));

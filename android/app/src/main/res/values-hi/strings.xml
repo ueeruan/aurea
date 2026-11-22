@@ -1138,7 +1138,7 @@
     <string name="consent_title">सहमति और ज़िम्मेदारी</string>
     <string name="consent_accept">सहमत होकर जारी रखें</string>
     <string name="consent_body">Aurea डिजिटल सामग्री के संपादन, निर्माण और उत्पादन के लिए एक पेशेवर उपकरण है। ऐप का उपयोग करके उपयोगकर्ता स्वीकार करता है कि वह प्लेटफ़ॉर्म के माध्यम से बनाई, संपादित, आयात, निर्यात, प्रकाशित या साझा की गई सामग्री के लिए पूरी तरह ज़िम्मेदार है।\n\nAurea अवैध, अपमानजनक, धोखाधड़ी वाली, हानिकारक या तीसरे पक्ष के अधिकारों का उल्लंघन करने वाली गतिविधियों के लिए उपकरण के उपयोग को नियंत्रित, प्रोत्साहित, समर्थन या अधिकृत नहीं करता है।\n\nउपयोगकर्ता यह सुनिश्चित करने के लिए ज़िम्मेदार है कि उसके पास उपयोग की गई सामग्री के लिए आवश्यक अनुमतियाँ, लाइसेंस और अधिकार हैं, जिनमें चित्र, वीडियो, संगीत, ट्रेडमार्क, मॉडल, फ़ाइलें और अन्य संरक्षित सामग्री शामिल हैं।\n\nAurea द्वारा दी गई रचनात्मक स्वतंत्रता का अर्थ यह नहीं है कि ऐप उस चीज़ का अनुमोदन करता है, उसमें भाग लेता है या उसकी ज़िम्मेदारी लेता है जिसे प्रत्येक उपयोगकर्ता उपकरण से बनाने या करने का निर्णय लेता है।\n\nउपयोगकर्ता Aurea का उपयोग लागू कानून के अनुसार करने पर सहमत है और अपने कार्यों तथा ऐप के माध्यम से बनाई या वितरित की गई सामग्री की ज़िम्मेदारी स्वीकार करता है।\n\nलागू कानून द्वारा अनुमत अधिकतम सीमा तक, Aurea और उसके ज़िम्मेदार व्यक्ति केवल उपयोगकर्ता द्वारा किए गए कार्यों, उपकरण के दुरुपयोग या उपयोगकर्ता द्वारा बनाई, प्रकाशित या साझा की गई सामग्री से उत्पन्न परिणामों के लिए ज़िम्मेदार नहीं होंगे।\n\nAurea उपकरण प्रदान करता है। उपयोगकर्ता इसके उपयोग के अपने चुने हुए तरीके के लिए ज़िम्मेदार है।\n\nजारी रखकर उपयोगकर्ता घोषणा करता है कि उसने इन शर्तों को पढ़ा, समझा और स्वीकार किया है।</string>
-    <string name="release_notes_body">Aurea 1.0.4 (2225)\n\n• AutoBeat में ऑडियो स्रोत, स्केल पल्स, उठाव और घुमाव चुनें। · मुफ़्त\n• दो कोनों से प्लेनर ट्रैकिंग और चार बिंदुओं से अटैचमेंट। · AureaHyper\n• 3D टेक्स्ट के लिए स्याही पोस्टर: सफ़ेद सामने का भाग, गहरी साइड और हल्की आउटलाइन। · AureaHyper\n• Puppet में AutoRig 2D: पोज़ पहचान, एडिट होने वाले पिन और आइडल ऐनिमेशन। · AureaHyper</string>
+    <string name="release_notes_body">Aurea 1.0.5 (2226)\n\n• जटिल 3D दृश्यों का ज़्यादा स्थिर एक्सपोर्ट और अधिक सहज प्रीव्यू\n• नए आइकन, बेहतर + मेन्यू और इफ़ेक्ट व प्लगइन के लिए अलग टैब\n• नए 3D आकार, वेक्टर स्ट्रोक ऐनिमेशन और AureaHyper में Text Prism</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">भरें</string>
@@ -3237,6 +3237,21 @@
     <string name="shape3d_back">वापस</string>
     <string name="shape3d_add_failed">3D आकार नहीं बन सका</string>
     <string name="shape3d_cube">घन</string>
+    <string name="shape3d_triangle_prism">त्रिकोणीय प्रिज़्म</string>
+    <string name="shape3d_pentagon_prism">पंचकोणीय प्रिज़्म</string>
+    <string name="shape3d_hexagon_prism">षट्कोणीय प्रिज़्म</string>
+    <string name="shape3d_octagon_prism">अष्टकोणीय प्रिज़्म</string>
+    <string name="shape3d_decagon_prism">दशकोणीय प्रिज़्म</string>
+    <string name="shape3d_tetrahedron">चतुष्फलक</string>
+    <string name="shape3d_icosahedron">बीस-फलक</string>
+    <string name="shape3d_washer">खोखली अंगूठी</string>
+    <string name="shape3d_arrow">3D तीर</string>
+    <string name="shape3d_cloud">3D बादल</string>
+    <string name="shape3d_part_outer">बाहरी दीवार</string>
+    <string name="shape3d_part_inner">भीतरी दीवार</string>
+    <string name="shape3d_part_volume">आयतन</string>
+    <string name="shape3d_cloud_density">घनत्व</string>
+    <string name="shape3d_cloud_detail">विवरण</string>
     <string name="shape3d_sphere">गोला</string>
     <string name="shape3d_cylinder">बेलन</string>
     <string name="shape3d_cone">शंकु</string>
@@ -5504,4 +5519,31 @@
     <string name="autorig2d_busy">पोज़ का विश्लेषण हो रहा है…</string>
     <string name="autorig2d_no_pose">AutoRig को पर्याप्त दिखाई देने वाले बिंदु नहीं मिले। Puppet में पिन जोड़ें।</string>
     <string name="autorig2d_existing">AutoRig बनाने के लिए बिना पिन वाला Puppet इफ़ेक्ट उपयोग करें।</string>
+    <string name="mask_pin_to_comp">मास्क को कंपोज़िशन में स्थिर रखें</string>
+    <string name="fxo_conical">शंक्वाकार</string>
+    <string name="fxl_map_by">मैपिंग</string>
+    <string name="fxo_character">अक्षर</string>
+    <string name="fxo_fill">भराव</string>
+    <string name="fxo_stroke">स्ट्रोक</string>
+    <string name="fxo_fill_and_stroke">भराव और स्ट्रोक</string>
+    <string name="fxo_custom_2">कस्टम</string>
+    <string name="fxo_prism">प्रिज़्म</string>
+    <string name="fxo_glacier">हिमनद</string>
+    <string name="fxo_ember">अंगारा</string>
+    <string name="fxo_silver">चाँदी</string>
+    <string name="fxl_rgba_gradient">RGBA ग्रेडिएंट</string>
+    <string name="fxo_hsl">HSL</string>
+    <string name="fxo_oklab">Oklab</string>
+    <string name="fxl_blend_mode_3">ब्लेंड मोड</string>
+    <string name="fxo_alpha_matte">अल्फ़ा मैट</string>
+    <string name="fxl_extend">विस्तार</string>
+    <string name="fxl_hdr_exposure">HDR एक्सपोज़र</string>
+    <string name="fxl_stagger_by">क्रमिक विलंब का आधार</string>
+    <string name="fxl_delay_per_unit">प्रति इकाई विलंब</string>
+    <string name="fxl_offset_per_unit">प्रति इकाई ऑफ़सेट</string>
+    <string name="fxo_forward">आगे</string>
+    <string name="fxo_reverse">उलटा</string>
+    <string name="fxo_random_2">यादृच्छिक</string>
+    <string name="fxs_geometry">ज्यामिति</string>
+    <string name="fxs_stagger">क्रमिक विलंब</string>
 </resources>

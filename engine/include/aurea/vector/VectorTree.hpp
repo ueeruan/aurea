@@ -29,7 +29,6 @@
 //    * Mesclar e Aparar trabalham em contornos achatados: um operador de
 //      caminho DEPOIS deles recebe polilinhas (Aspereza e Zigue-zague contam
 //      os segmentos achatados, não os da curva original).
-//    * Progresso do desenho não corta grupos de ordem livre (saem inteiros).
 //    * Só os itens do primeiro nível animam por trilha (os de sempre); os de
 //      grupos de dentro e os itens a mais ficam parados.
 // =============================================================================
@@ -72,13 +71,21 @@ struct TreePaint {
     u32 paint = 0;          ///< índice em TreeResult::paints
     f32 alpha = 1.0f;
 };
+// Draw progress needs the centerline even if a repeater will reuse this paint.
+struct TreeDrawPaint {
+    std::vector<Contour> centerlines;
+    const VectorStroke* stroke = nullptr; // borrowed from the input group during tessellation
+    f32 tolerance = 0.0f;
+    f64 length = 0.0;
+};
 struct TreeResult {
     std::vector<TreePaint> layers;      ///< em ordem de desenho: a primeira fica por baixo
     std::vector<VectorPaint> paints;
+    std::vector<TreeDrawPaint> drawPaints; // present only when preparing drawing progress
 };
 /// Avalia o grupo (já com as trilhas aplicadas) pela ordem que vale, no
 /// espaço do grupo. `tolerance` em px do grupo.
-void evaluate_tree(const VectorGroup& g, f64 frame, f32 tolerance, TreeResult& out);
+void evaluate_tree(const VectorGroup& g, f64 frame, f32 tolerance, TreeResult& out, bool prepareDraw = false);
 /// Maior escala que os repetidores do grupo (e dos de dentro) dão a uma cópia
 /// (≥ 1, com teto): entra na tolerância do achatamento.
 [[nodiscard]] f32 tree_repeat_scale(const VectorGroup& g) noexcept;

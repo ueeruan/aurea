@@ -83,7 +83,9 @@ struct VectorPanel: View {
                     case .paths:
                         switch tab {
                         case "path": pathTab
-                        case "operators": operatorsTab
+                        case "operators":
+                            DrawingProgressActionView()
+                            operatorsTab
                         case "group": transformTab
                         default: shapeTab
                         }
@@ -107,7 +109,8 @@ struct VectorPanel: View {
                 load()
             }
             .onChange(of: model.status.modelRevision) { _ in load() }
-            .onChange(of: model.status.playhead) { _ in load() }
+            .onChange(of: model.status.playhead) { _ in if model.status.playing == 0 { load() } }
+            .onChange(of: model.status.playing) { playing in if playing == 0 { load() } }
             .onChange(of: id) { _ in selected = -1; load() }
             .onChange(of: model.vectorGroup) { _ in selected = -1; collapsedModifiers.removeAll(); model.selectedMaskPoint = nil; load() }
             .onChange(of: model.vectorPath) { _ in selected = -1; model.selectedMaskPoint = nil; load() }
@@ -524,7 +527,8 @@ struct VectorPanel: View {
         return Int(params[Self.paramCount + 1]) & (1 << n) != 0 ? .keyHere : Int(params[Self.paramCount]) & (1 << n) != 0 ? .animated : .none
     }
     private func load() {
-        groups = model.engine.vectorGroups(id)
+        let next = model.engine.vectorGroups(id)
+        if !NSArray(array: next).isEqual(to: groups) { groups = next }
         if model.vectorGroup >= UInt32(groups.count) { model.vectorGroup = UInt32(max(0, groups.count - 1)) }
         if model.vectorPath >= UInt32(paths.count) { model.vectorPath = UInt32(max(0, paths.count - 1)) }
         let state = model.engine.vectorPath(id, group: model.vectorGroup, path: model.vectorPath)

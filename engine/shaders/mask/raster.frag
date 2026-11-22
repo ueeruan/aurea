@@ -31,6 +31,8 @@ layout(set = 0, binding = AUREA_DATA, std430) readonly buffer MaskData { vec4 d[
 layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 region;   // x, y, w, h: px da fonte que o alvo cobre
     vec4 info;     // x = 1º cabeçalho no buffer, y = nº de máscaras, z = texels por px, w = cobertura inicial
+    vec4 maskX;
+    vec4 maskY;
 } p;
 
 float erf_approx(float x) {
@@ -43,7 +45,8 @@ float erf_approx(float x) {
 }
 
 void main() {
-    vec2 pos = p.region.xy + v_uv * p.region.zw;
+    vec3 source = vec3(p.region.xy + v_uv * p.region.zw, 1.0);
+    vec2 pos = vec2(dot(p.maskX.xyz, source), dot(p.maskY.xyz, source));
     int first = int(p.info.x + 0.5);
     int count = int(p.info.y + 0.5);
     float k = p.info.z;

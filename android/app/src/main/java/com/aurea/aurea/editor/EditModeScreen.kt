@@ -63,8 +63,6 @@ import com.aurea.aurea.ui.i18n.KeepLtr
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaShape
 import com.aurea.aurea.ui.theme.AureaType
-import com.aurea.aurea.ui.theme.CupertinoGlyph
-import com.aurea.aurea.ui.theme.CupertinoIcon
 import com.aurea.aurea.ui.theme.tocavel
 
 // =============================================================================
@@ -87,7 +85,7 @@ import com.aurea.aurea.ui.theme.tocavel
 internal enum class EditDockLevel { Root, Audio, Text, VideoClip, TextClip, AudioClip, OtherClip }
 
 /** Um botão do Dock: ícone, rótulo e o que ele faz. [id] vira `edit.dock.<id>`. */
-internal class EditDockItem(val id: String, val glyph: Char, val label: Int, val action: () -> Unit)
+internal class EditDockItem(val id: String, val icon: EditIcon, val label: Int, val action: () -> Unit)
 
 @Composable
 internal fun EditModeEditor(store: EditorStore, ui: EditorUi, stage: @Composable (Modifier) -> Unit) {
@@ -268,7 +266,7 @@ private fun EditTopBar(store: EditorStore, ui: EditorUi) {
             Modifier.size(44.dp).testTag("edit.close").semantics { contentDescription = close; role = Role.Button }
                 .tocavel(shrink = 1f) { store.closeProject() },
             contentAlignment = Alignment.Center,
-        ) { CupertinoIcon(CupertinoGlyph.ChevronBack, 22.dp, AureaColors.Text) }
+        ) { EditToolIcon(EditIcon.Back, AureaColors.Text, 22.dp) }
         Text(store.project.title, style = AureaType.of(13f, FontWeight.W600, color = AureaColors.Text),
             maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f).padding(horizontal = 4.dp).testTag("edit.title"))
@@ -291,7 +289,7 @@ private fun EditTopBar(store: EditorStore, ui: EditorUi) {
                 Modifier.size(44.dp).testTag("edit.more").semantics { contentDescription = more; role = Role.Button }
                     .tocavel(shrink = 1f) { menu = true },
                 contentAlignment = Alignment.Center,
-            ) { CupertinoIcon(CupertinoGlyph.Ellipsis, 20.dp, AureaColors.Text) }
+            ) { EditToolIcon(EditIcon.More, AureaColors.Text, 20.dp) }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.fxl_view)) },
@@ -349,7 +347,7 @@ private fun EditTopBar(store: EditorStore, ui: EditorUi) {
                 .testTag("edit.export").semantics { contentDescription = export; role = Role.Button }
                 .tocavel(shrink = 0.96f) { if (store.playing) store.pause(); ui.exporting = true },
             contentAlignment = Alignment.Center,
-        ) { CupertinoIcon(CupertinoGlyph.SquareArrowUp, 23.dp, AureaColors.Accent) }
+        ) { EditToolIcon(EditIcon.Export, AureaColors.Accent, 23.dp) }
     }
     if (renaming) com.aurea.aurea.ui.ds.AureaAlert(
         title = stringResource(R.string.common_rename),
@@ -392,11 +390,11 @@ private fun EditPlayBar(store: EditorStore, ui: EditorUi) {
                 .semantics { contentDescription = play; role = Role.Button }
                 .tocavel(shrink = 0.9f) { store.togglePlayback() },
             contentAlignment = Alignment.Center,
-        ) { CupertinoIcon(if (store.playing) CupertinoGlyph.PauseFill else CupertinoGlyph.PlayFill, 24.dp, AureaColors.Accent) }
+        ) { EditToolIcon(if (store.playing) EditIcon.Pause else EditIcon.Play, AureaColors.Accent, 24.dp) }
         Row(Modifier.align(Alignment.CenterEnd), verticalAlignment = Alignment.CenterVertically) {
-            PlayBarIcon(CupertinoGlyph.ArrowUturnLeft, undo, store.project.canUndo, "edit.undo") { store.undo() }
-            PlayBarIcon(CupertinoGlyph.ArrowUturnRight, redo, store.project.canRedo, "edit.redo") { store.redo() }
-            PlayBarIcon(if (ui.fullscreen) CupertinoGlyph.FullscreenExit else CupertinoGlyph.Fullscreen, full, true, "edit.fullscreen") {
+            PlayBarIcon(EditIcon.Undo, undo, store.project.canUndo, "edit.undo") { store.undo() }
+            PlayBarIcon(EditIcon.Redo, redo, store.project.canRedo, "edit.redo") { store.redo() }
+            PlayBarIcon(if (ui.fullscreen) EditIcon.FullscreenExit else EditIcon.Fullscreen, full, true, "edit.fullscreen") {
                 ui.fullscreen = !ui.fullscreen
             }
         }
@@ -404,12 +402,12 @@ private fun EditPlayBar(store: EditorStore, ui: EditorUi) {
 }
 
 @Composable
-private fun PlayBarIcon(glyph: Char, label: String, enabled: Boolean, tag: String, onClick: () -> Unit) {
+private fun PlayBarIcon(icon: EditIcon, label: String, enabled: Boolean, tag: String, onClick: () -> Unit) {
     Box(
         Modifier.size(30.dp, 40.dp).testTag(tag).semantics { contentDescription = label; role = Role.Button }
             .tocavel(enabled = enabled, shrink = 0.9f, onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { CupertinoIcon(glyph, 20.dp, if (enabled) AureaColors.Text else AureaColors.Muted.copy(alpha = 0.4f)) }
+    ) { EditToolIcon(icon, if (enabled) AureaColors.Text else AureaColors.Muted.copy(alpha = 0.4f), 20.dp) }
 }
 
 /** "mm:ss" do quadro (o relógio da barra de reprodução). */
@@ -440,7 +438,7 @@ private fun EditDock(level: EditDockLevel, items: List<EditDockItem>, onBack: ()
                     .semantics { contentDescription = back; role = Role.Button }
                     .tocavel(shrink = 0.92f, onClick = onBack),
                 contentAlignment = Alignment.Center,
-            ) { CupertinoIcon(CupertinoGlyph.ChevronBack, 18.dp, AureaColors.Text) }
+            ) { EditToolIcon(EditIcon.Back, AureaColors.Text, 18.dp) }
         }
         LazyRow(
             Modifier.weight(1f).fillMaxHeight().testTag("edit.dock.items"),
@@ -464,7 +462,7 @@ private fun EditDockButton(item: EditDockItem) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        CupertinoIcon(item.glyph, 24.dp, AureaColors.Text)
+        EditToolIcon(item.icon, AureaColors.Text, 24.dp)
         Spacer(Modifier.height(6.dp))
         Text(label, style = AureaType.of(12f, FontWeight.W500, color = AureaColors.Text), maxLines = 1, overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center)
@@ -541,110 +539,110 @@ private fun rememberEditActions(store: EditorStore, ui: EditorUi, setLevel: (Edi
         val itemsFor: (EditDockLevel, LayerRow?) -> List<EditDockItem> = { level, clip ->
             when (level) {
                 EditDockLevel.Root -> listOf(
-                    EditDockItem("edit", CupertinoGlyph.Scissors, R.string.edit_dock_edit) {
+                    EditDockItem("edit", EditIcon.Razor, R.string.edit_dock_edit) {
                         val hit = clipUnderPlayhead()
                         if (hit != null) store.select(hit.id) else store.showToast(noClip)
                     },
-                    EditDockItem("audio", CupertinoGlyph.MusicNote, R.string.edit_dock_audio) { setLevel(EditDockLevel.Audio) },
-                    EditDockItem("text", CupertinoGlyph.Textformat, R.string.edit_dock_text) { setLevel(EditDockLevel.Text) },
-                    EditDockItem("effects", CupertinoGlyph.Sparkles, R.string.edit_dock_effects) { globalEffect() },
-                    EditDockItem("overlay", CupertinoGlyph.SquareOnSquare, R.string.edit_dock_overlay) {
+                    EditDockItem("audio", EditIcon.Waveform, R.string.edit_dock_audio) { setLevel(EditDockLevel.Audio) },
+                    EditDockItem("text", EditIcon.Text, R.string.edit_dock_text) { setLevel(EditDockLevel.Text) },
+                    EditDockItem("effects", EditIcon.Effects, R.string.edit_dock_effects) { globalEffect() },
+                    EditDockItem("overlay", EditIcon.Overlay, R.string.edit_dock_overlay) {
                         if (store.playing) store.pause(); overlay.launch(visual)
                     },
-                    EditDockItem("captions", CupertinoGlyph.CaptionsBubble, R.string.edit_dock_captions) { panel(EditorPanel.Captions) },
-                    EditDockItem("filters", CupertinoGlyph.ColorFilter, R.string.edit_dock_filters) { globalColor(EditorPanel.Filters) },
-                    EditDockItem("adjust", CupertinoGlyph.SliderHorizontal3, R.string.edit_dock_adjust) { globalColor(EditorPanel.Adjust) },
-                    EditDockItem("ratio", CupertinoGlyph.Crop, R.string.edit_dock_ratio) { openSheet(store, ui, ShellSheet.ProjectSettings) },
-                    EditDockItem("background", CupertinoGlyph.Paintbrush, R.string.edit_dock_background) { openSheet(store, ui, ShellSheet.ProjectSettings) },
-                    EditDockItem("stickers", ShellGlyph.SquareOnCircle, R.string.edit_dock_stickers) { openAdd(store, ui, AddTab.Shape) },
-                    EditDockItem("sequence", CupertinoGlyph.SquareStack3dUp, R.string.seq_dock) { sequence() },
-                    EditDockItem("templates", CupertinoGlyph.WandStars, R.string.edit_text_templates) { openAdd(store, ui, AddTab.TextPresets) },
+                    EditDockItem("captions", EditIcon.Captions, R.string.edit_dock_captions) { panel(EditorPanel.Captions) },
+                    EditDockItem("filters", EditIcon.Filters, R.string.edit_dock_filters) { globalColor(EditorPanel.Filters) },
+                    EditDockItem("adjust", EditIcon.Adjust, R.string.edit_dock_adjust) { globalColor(EditorPanel.Adjust) },
+                    EditDockItem("ratio", EditIcon.Crop, R.string.edit_dock_ratio) { openSheet(store, ui, ShellSheet.ProjectSettings) },
+                    EditDockItem("background", EditIcon.Background, R.string.edit_dock_background) { openSheet(store, ui, ShellSheet.ProjectSettings) },
+                    EditDockItem("stickers", EditIcon.Shapes, R.string.edit_dock_stickers) { openAdd(store, ui, AddTab.Shape) },
+                    EditDockItem("sequence", EditIcon.Sequence, R.string.seq_dock) { sequence() },
+                    EditDockItem("templates", EditIcon.Presets, R.string.edit_text_templates) { openAdd(store, ui, AddTab.TextPresets) },
                 )
                 EditDockLevel.Audio -> listOf(
-                    EditDockItem("music", CupertinoGlyph.MusicNote2, R.string.edit_audio_music) {
+                    EditDockItem("music", EditIcon.Music, R.string.edit_audio_music) {
                         if (store.playing) store.pause(); music.launch(arrayOf("audio/*"))
                     },
-                    EditDockItem("voice", CupertinoGlyph.Mic, R.string.edit_audio_voice) { if (store.playing) store.pause(); ui.voice = true },
-                    EditDockItem("extract", CupertinoGlyph.Waveform, R.string.edit_clip_extract_audio) {
+                    EditDockItem("voice", EditIcon.Voice, R.string.edit_audio_voice) { if (store.playing) store.pause(); ui.voice = true },
+                    EditDockItem("extract", EditIcon.Extract, R.string.edit_clip_extract_audio) {
                         val hit = clipUnderPlayhead()
                         if (hit != null) store.extractAudio(hit.id) else store.showToast(noClip)
                     },
                 )
                 EditDockLevel.Text -> listOf(
-                    EditDockItem("addText", CupertinoGlyph.Textformat, R.string.edit_text_add) { openAdd(store, ui, AddTab.Text) },
-                    EditDockItem("autoCaptions", CupertinoGlyph.CaptionsBubble, R.string.edit_text_auto_captions) { panel(EditorPanel.Captions) },
-                    EditDockItem("templates", CupertinoGlyph.WandStars, R.string.edit_text_templates) { openAdd(store, ui, AddTab.TextPresets) },
+                    EditDockItem("addText", EditIcon.Text, R.string.edit_text_add) { openAdd(store, ui, AddTab.Text) },
+                    EditDockItem("autoCaptions", EditIcon.Captions, R.string.edit_text_auto_captions) { panel(EditorPanel.Captions) },
+                    EditDockItem("templates", EditIcon.Presets, R.string.edit_text_templates) { openAdd(store, ui, AddTab.TextPresets) },
                 )
                 EditDockLevel.VideoClip -> buildList {
                     val video = clip?.kind == 1
                     val main = clip != null && isMainTrack(store, clip)
-                    add(EditDockItem("split", CupertinoGlyph.Scissors, R.string.edit_clip_split) { store.splitAtPlayhead() })
-                    add(EditDockItem("speed", CupertinoGlyph.Speedometer, R.string.edit_clip_speed) { panel(EditorPanel.Speed) })
-                    add(EditDockItem("animations", CupertinoGlyph.WandStars, R.string.edit_clip_animations) { panel(EditorPanel.Presets) })
-                    add(EditDockItem("effects", CupertinoGlyph.Sparkles, R.string.edit_clip_effects) { effects() })
-                    add(EditDockItem("delete", CupertinoGlyph.Trash, R.string.edit_clip_delete) { store.deleteLayers() })
-                    add(EditDockItem("mask", ShellGlyph.SquareSplit2x2, R.string.edit_clip_mask) { panel(EditorPanel.Mask) })
-                    add(EditDockItem("adjust", CupertinoGlyph.SliderHorizontal3, R.string.edit_dock_adjust) { clipColor(EditorPanel.Adjust) })
-                    add(EditDockItem("filters", CupertinoGlyph.ColorFilter, R.string.edit_dock_filters) { clipColor(EditorPanel.Filters) })
-                    if (video) add(EditDockItem("volume", CupertinoGlyph.Speaker2, R.string.edit_clip_volume) { panel(EditorPanel.Audio) })
-                    add(EditDockItem("transform", CupertinoGlyph.Move, R.string.edit_clip_transform) { panel(EditorPanel.Transform) })
-                    add(EditDockItem("opacity", CupertinoGlyph.CircleLefthalfFill, R.string.edit_clip_opacity) { panel(EditorPanel.Appearance) })
-                    add(EditDockItem("duplicate", CupertinoGlyph.PlusSquareOnSquare, R.string.edit_clip_duplicate) { store.duplicateLayers() })
-                    if (clip != null && clip.kind != 12) add(EditDockItem("replace", CupertinoGlyph.Arrow2Squarepath, R.string.edit_clip_replace) {
+                    add(EditDockItem("split", EditIcon.Razor, R.string.edit_clip_split) { store.splitAtPlayhead() })
+                    add(EditDockItem("speed", EditIcon.Speed, R.string.edit_clip_speed) { panel(EditorPanel.Speed) })
+                    add(EditDockItem("animations", EditIcon.Presets, R.string.edit_clip_animations) { panel(EditorPanel.Presets) })
+                    add(EditDockItem("effects", EditIcon.Effects, R.string.edit_clip_effects) { effects() })
+                    add(EditDockItem("delete", EditIcon.Delete, R.string.edit_clip_delete) { store.deleteLayers() })
+                    add(EditDockItem("mask", EditIcon.Mask, R.string.edit_clip_mask) { panel(EditorPanel.Mask) })
+                    add(EditDockItem("adjust", EditIcon.Adjust, R.string.edit_dock_adjust) { clipColor(EditorPanel.Adjust) })
+                    add(EditDockItem("filters", EditIcon.Filters, R.string.edit_dock_filters) { clipColor(EditorPanel.Filters) })
+                    if (video) add(EditDockItem("volume", EditIcon.Speaker, R.string.edit_clip_volume) { panel(EditorPanel.Audio) })
+                    add(EditDockItem("transform", EditIcon.Transform, R.string.edit_clip_transform) { panel(EditorPanel.Transform) })
+                    add(EditDockItem("opacity", EditIcon.Opacity, R.string.edit_clip_opacity) { panel(EditorPanel.Appearance) })
+                    add(EditDockItem("duplicate", EditIcon.Duplicate, R.string.edit_clip_duplicate) { store.duplicateLayers() })
+                    if (clip != null && clip.kind != 12) add(EditDockItem("replace", EditIcon.Replace, R.string.edit_clip_replace) {
                         replaceTarget = clip.id; if (store.playing) store.pause(); replace.launch(visual)
                     })
                     // 0.4.5: Remover fundo (vídeo/imagem): efeito + análise do clipe.
-                    if (clip != null && (clip.kind == 1 || clip.kind == 2)) add(EditDockItem("bgRemove", CupertinoGlyph.PersonCropCircle, R.string.bg_remove_action) {
+                    if (clip != null && (clip.kind == 1 || clip.kind == 2)) add(EditDockItem("bgRemove", EditIcon.Cutout, R.string.bg_remove_action) {
                         if (store.removeBackground(clip.id)) panel(EditorPanel.Effects)
                     })
-                    if (video) add(EditDockItem("freeze", ShellGlyph.Snow, R.string.edit_clip_freeze) { store.freezeFrame() })
-                    if (video) add(EditDockItem("extract", CupertinoGlyph.Waveform, R.string.edit_clip_extract_audio) { store.extractAudio() })
-                    if (video) add(EditDockItem("stabilize", ShellGlyph.Viewfinder, R.string.edit_clip_stabilize) { panel(EditorPanel.Tracking) })
+                    if (video) add(EditDockItem("freeze", EditIcon.Freeze, R.string.edit_clip_freeze) { store.freezeFrame() })
+                    if (video) add(EditDockItem("extract", EditIcon.Extract, R.string.edit_clip_extract_audio) { store.extractAudio() })
+                    if (video) add(EditDockItem("stabilize", EditIcon.Track, R.string.edit_clip_stabilize) { panel(EditorPanel.Tracking) })
                     if (clip != null) {
-                        if (main) add(EditDockItem("toOverlay", CupertinoGlyph.SquareOnSquare, R.string.edit_clip_to_overlay) { store.moveClipToOverlay(clip.id) })
-                        else add(EditDockItem("toMain", CupertinoGlyph.RectangleStack, R.string.edit_clip_to_main) { store.moveClipToMainTrack(clip.id) })
+                        if (main) add(EditDockItem("toOverlay", EditIcon.Overlay, R.string.edit_clip_to_overlay) { store.moveClipToOverlay(clip.id) })
+                        else add(EditDockItem("toMain", EditIcon.MainTrack, R.string.edit_clip_to_main) { store.moveClipToMainTrack(clip.id) })
                     }
                 }
                 EditDockLevel.TextClip -> listOf(
                     // Omega conteúdo (área 06, P2-15): "Editar texto" abre o MODO DE TEXTO
                     // (dá para mudar as palavras) e "Fonte" o navegador de fontes.
-                    EditDockItem("editText", CupertinoGlyph.Pencil, R.string.edit_clip_edit_text) { store.openTextEdit() },
-                    EditDockItem("font", CupertinoGlyph.Textformat, R.string.edit_clip_font) { FontBrowserRequest.open = true },
-                    EditDockItem("animations", CupertinoGlyph.WandStars, R.string.edit_clip_animations) { panel(EditorPanel.Presets) },
-                    EditDockItem("effects", CupertinoGlyph.Sparkles, R.string.edit_clip_effects) { effects() },
-                    EditDockItem("transform", CupertinoGlyph.Move, R.string.edit_clip_transform) { panel(EditorPanel.Transform) },
-                    EditDockItem("split", CupertinoGlyph.Scissors, R.string.edit_clip_split) { store.splitAtPlayhead() },
-                    EditDockItem("duplicate", CupertinoGlyph.PlusSquareOnSquare, R.string.edit_clip_duplicate) { store.duplicateLayers() },
-                    EditDockItem("delete", CupertinoGlyph.Trash, R.string.edit_clip_delete) { store.deleteLayers() },
+                    EditDockItem("editText", EditIcon.Pencil, R.string.edit_clip_edit_text) { store.openTextEdit() },
+                    EditDockItem("font", EditIcon.Font, R.string.edit_clip_font) { FontBrowserRequest.open = true },
+                    EditDockItem("animations", EditIcon.Presets, R.string.edit_clip_animations) { panel(EditorPanel.Presets) },
+                    EditDockItem("effects", EditIcon.Effects, R.string.edit_clip_effects) { effects() },
+                    EditDockItem("transform", EditIcon.Transform, R.string.edit_clip_transform) { panel(EditorPanel.Transform) },
+                    EditDockItem("split", EditIcon.Razor, R.string.edit_clip_split) { store.splitAtPlayhead() },
+                    EditDockItem("duplicate", EditIcon.Duplicate, R.string.edit_clip_duplicate) { store.duplicateLayers() },
+                    EditDockItem("delete", EditIcon.Delete, R.string.edit_clip_delete) { store.deleteLayers() },
                 )
                 EditDockLevel.AudioClip -> listOf(
-                    EditDockItem("volume", CupertinoGlyph.Speaker2, R.string.edit_clip_volume) { panel(EditorPanel.Audio) },
-                    EditDockItem("speed", CupertinoGlyph.Speedometer, R.string.edit_clip_speed) { panel(EditorPanel.Speed) },
-                    EditDockItem("effects", CupertinoGlyph.Sparkles, R.string.edit_clip_effects) { effects() },
-                    EditDockItem("split", CupertinoGlyph.Scissors, R.string.edit_clip_split) { store.splitAtPlayhead() },
-                    EditDockItem("duplicate", CupertinoGlyph.PlusSquareOnSquare, R.string.edit_clip_duplicate) { store.duplicateLayers() },
-                    EditDockItem("delete", CupertinoGlyph.Trash, R.string.edit_clip_delete) { store.deleteLayers() },
+                    EditDockItem("volume", EditIcon.Speaker, R.string.edit_clip_volume) { panel(EditorPanel.Audio) },
+                    EditDockItem("speed", EditIcon.Speed, R.string.edit_clip_speed) { panel(EditorPanel.Speed) },
+                    EditDockItem("effects", EditIcon.Effects, R.string.edit_clip_effects) { effects() },
+                    EditDockItem("split", EditIcon.Razor, R.string.edit_clip_split) { store.splitAtPlayhead() },
+                    EditDockItem("duplicate", EditIcon.Duplicate, R.string.edit_clip_duplicate) { store.duplicateLayers() },
+                    EditDockItem("delete", EditIcon.Delete, R.string.edit_clip_delete) { store.deleteLayers() },
                 )
                 EditDockLevel.OtherClip -> buildList {
                     // Omega conteúdo (área 06, P2-15): forma → Editar forma; vetor →
                     // Editar pontos; desenho → o editor de desenho.
                     if (clip?.kind == com.aurea.aurea.ui.theme.LayerType.Shape.kind) {
                         when {
-                            store.isDrawingLayer -> add(EditDockItem("editDrawing", CupertinoGlyph.Scribble, R.string.om_draw_title) { panel(EditorPanel.Drawing) })
-                            store.isVectorLayer -> add(EditDockItem("editPoints", CupertinoGlyph.PencilOutline, R.string.om_pts_title) { panel(EditorPanel.EditPoints) })
-                            else -> add(EditDockItem("editShape", ShellGlyph.SliderHorizontalBelowRectangle, R.string.sh_dock_edit_shape) { panel(EditorPanel.ShapeEdit) })
+                            store.isDrawingLayer -> add(EditDockItem("editDrawing", EditIcon.Draw, R.string.om_draw_title) { panel(EditorPanel.Drawing) })
+                            store.isVectorLayer -> add(EditDockItem("editPoints", EditIcon.Vector, R.string.om_pts_title) { panel(EditorPanel.EditPoints) })
+                            else -> add(EditDockItem("editShape", EditIcon.ShapeEdit, R.string.sh_dock_edit_shape) { panel(EditorPanel.ShapeEdit) })
                         }
                     }
                     addAll(listOf(
-                    EditDockItem("effects", CupertinoGlyph.Sparkles, R.string.edit_clip_effects) { effects() },
-                    EditDockItem("filters", CupertinoGlyph.ColorFilter, R.string.edit_dock_filters) { clipColor(EditorPanel.Filters) },
-                    EditDockItem("adjust", CupertinoGlyph.SliderHorizontal3, R.string.edit_dock_adjust) { clipColor(EditorPanel.Adjust) },
-                    EditDockItem("transform", CupertinoGlyph.Move, R.string.edit_clip_transform) { panel(EditorPanel.Transform) },
-                    EditDockItem("opacity", CupertinoGlyph.CircleLefthalfFill, R.string.edit_clip_opacity) { panel(EditorPanel.Appearance) },
-                    EditDockItem("mask", ShellGlyph.SquareSplit2x2, R.string.edit_clip_mask) { panel(EditorPanel.Mask) },
-                    EditDockItem("split", CupertinoGlyph.Scissors, R.string.edit_clip_split) { store.splitAtPlayhead() },
-                    EditDockItem("duplicate", CupertinoGlyph.PlusSquareOnSquare, R.string.edit_clip_duplicate) { store.duplicateLayers() },
-                    EditDockItem("delete", CupertinoGlyph.Trash, R.string.edit_clip_delete) { store.deleteLayers() },
+                    EditDockItem("effects", EditIcon.Effects, R.string.edit_clip_effects) { effects() },
+                    EditDockItem("filters", EditIcon.Filters, R.string.edit_dock_filters) { clipColor(EditorPanel.Filters) },
+                    EditDockItem("adjust", EditIcon.Adjust, R.string.edit_dock_adjust) { clipColor(EditorPanel.Adjust) },
+                    EditDockItem("transform", EditIcon.Transform, R.string.edit_clip_transform) { panel(EditorPanel.Transform) },
+                    EditDockItem("opacity", EditIcon.Opacity, R.string.edit_clip_opacity) { panel(EditorPanel.Appearance) },
+                    EditDockItem("mask", EditIcon.Mask, R.string.edit_clip_mask) { panel(EditorPanel.Mask) },
+                    EditDockItem("split", EditIcon.Razor, R.string.edit_clip_split) { store.splitAtPlayhead() },
+                    EditDockItem("duplicate", EditIcon.Duplicate, R.string.edit_clip_duplicate) { store.duplicateLayers() },
+                    EditDockItem("delete", EditIcon.Delete, R.string.edit_clip_delete) { store.deleteLayers() },
                     ))
                 }
             }

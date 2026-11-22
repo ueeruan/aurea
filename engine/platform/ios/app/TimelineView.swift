@@ -2542,6 +2542,13 @@ struct TimelineView: View {
     /// MESMO comando de sempre.
     private func commitReorder(source: Int, target: Int) {
         let list = rows
+        guard list.indices.contains(source), list.indices.contains(target) else { return }
+        let from = list[source], to = list[target]
+        if from.inner || to.inner {
+            if from.inner, to.inner, from.group == to.group,
+               model.reorderGroupInner(group: from.group, layer: from.id, target: to.id) { haptics.light() }
+            return
+        }
         // Omega (P0-1/P1-6): uma camada por linha; cada fileira anda sozinha.
         let keys = timelineGroupKeys(list, byLine: !EditorTimelineRefresh.enabled)
         guard keys.indices.contains(source), keys.indices.contains(target), keys[source] != keys[target] else { return }
@@ -3161,6 +3168,9 @@ extension TimelineView {
             if let row, row.inner, !compact {
                 // 0.5.3: camada de dentro de um grupo aberto — alças aparam, o corpo move.
                 if innerRefused(row) { begin(.blocked, start: start, width: size.width) }
+                else if omegaReorders(touched, point: start, width: size.width) {
+                    begin(.reorder, start: start, width: size.width)
+                }
                 else if touched.kind == .trimStart || touched.kind == .trimEnd {
                     haptics.light()
                     begin(touched.kind == .trimStart ? .trimStart : .trimEnd, start: start, width: size.width)

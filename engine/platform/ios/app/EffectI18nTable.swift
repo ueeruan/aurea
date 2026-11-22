@@ -3411,6 +3411,65 @@ enum EffectI18nTable {
     aurea.distort.upscale_reference|1|reduce_noise|fxl_reduce_noise|
     aurea.distort.upscale_reference|2|detail|fxl_detail|
     aurea.distort.upscale_reference|3|alpha|fxo_alpha_2|fxo_detail_preserving,fxo_bicubic
+    aurea.text.prism|0|shape|fxl_shape|fxo_linear,fxo_radial,fxo_conical
+    aurea.text.prism|1|mapping|fxl_map_by|fxo_character,fxo_word,fxo_line,fxo_entire_text
+    aurea.text.prism|2|target|fx_aplicar_em|fxo_fill,fxo_stroke,fxo_fill_and_stroke
+    aurea.text.prism|3|palette|fx_diffusion_palette|fxo_custom_2,fxo_prism,fxo_glacier,fxo_ember,fxo_silver,fxo_spectrum
+    aurea.text.prism|4|gradient|fxl_rgba_gradient|
+    aurea.text.prism|5|color_space|fxl_color_space|fxo_rgb,fxo_hsl,fxo_oklab
+    aurea.text.prism|6|blend|fxl_blend_mode_3|fxo_normal,fxo_multiply,fxo_screen,fxo_overlay,fxo_alpha_matte
+    aurea.text.prism|7|mix|fxl_amount|
+    aurea.text.prism|8|center_x|fxl_center_x|
+    aurea.text.prism|9|center_y|fxl_center_y|
+    aurea.text.prism|10|angle|fxl_angle|
+    aurea.text.prism|11|scale|fxl_scale|
+    aurea.text.prism|12|aspect|fxl_aspect_ratio|
+    aurea.text.prism|13|offset|fxl_offset|
+    aurea.text.prism|14|repeats|fxl_repeats|
+    aurea.text.prism|15|extend|fxl_extend|fxo_clamp,fxo_repeat,fxo_mirror
+    aurea.text.prism|16|gamma|fxl_gamma_2|
+    aurea.text.prism|17|hue|fx_matiz|
+    aurea.text.prism|18|exposure|fxl_hdr_exposure|
+    aurea.text.prism|19|stagger_by|fxl_stagger_by|fxo_character,fxo_word,fxo_line
+    aurea.text.prism|20|delay|fxl_delay_per_unit|
+    aurea.text.prism|21|offset_step|fxl_offset_per_unit|
+    aurea.text.prism|22|order|fxl_draw_order|fxo_forward,fxo_reverse,fxo_random_2,fxo_interleave
+    aurea.text.prism|23|seed|fxl_seed|
+    aurea.text.prism|24|size_mode|fxl_size_mode|fxo_auto,fxo_manual
+    aurea.text.prism|25|size_px|fxl_fixed_size|
+    aurea.text.prism|26|align_bounds|fxl_bounds_alignment|fxo_none_2,fxo_x,fxo_y,fxo_xy
+    aurea.text.prism|27|range_start|fxl_start|
+    aurea.text.prism|28|range_end|fxl_end|
+    aurea.text.prism|29|outside_range|fxl_outside_range|fxo_original,fxo_hidden
+    aurea.text.prism|30|radial_x|fxl_radial_origin_x|
+    aurea.text.prism|31|radial_y|fxl_radial_origin_y|
+    aurea.text.prism|32|offset_mode|fxl_gradient_offset_mode|fxo_cascade,fxo_stack
+    aurea.text.prism|33|size_step|fxl_size_per_unit|
+    aurea.text.prism|34|hue_step|fxl_hue_per_unit|
+    aurea.text.prism|35|angle_step|fxl_angle_per_unit|
+    aurea.text.prism|36|center_step_x|fxl_center_x_per_unit|
+    aurea.text.prism|37|center_step_y|fxl_center_y_per_unit|
+    aurea.text.prism|38|scale_step_x|fxl_scale_x_per_unit|
+    aurea.text.prism|39|scale_step_y|fxl_scale_y_per_unit|
+    aurea.text.prism|40|opacity_step|fxl_opacity_per_unit|
+    aurea.text.prism|41|path_mode|fxl_path_offset_mode|fxo_cascade,fxo_stack
+    aurea.text.prism|42|path_delay|fxl_path_delay|
+    aurea.text.prism|43|path_x|fxl_path_position_x|
+    aurea.text.prism|44|path_y|fxl_path_position_y|
+    aurea.text.prism|45|path_rotation|fxl_path_rotation|
+    aurea.text.prism|46|path_scale_x|fxl_path_scale_x|
+    aurea.text.prism|47|path_scale_y|fxl_path_scale_y|
+    aurea.text.prism|48|stroke_width|fxl_stroke_thickness_2|
+    aurea.text.prism|49|solo_stroke|fxl_stroke_only|
+    aurea.text.prism|50|original|fxl_composite_original_3|fxo_none_2,fxo_behind,fxo_above
+    aurea.text.prism|51|original_opacity|fxl_original_opacity|
+    aurea.text.prism|52|source_matte|fxl_source_matte|fxo_none_2,fxo_alpha_2,fx045g_opt_luma
+    aurea.text.prism|53|invert_matte|fxl_invert_mask_2|
+    aurea.text.prism|54|stop_blend|fxl_color_transition_softness|
+    aurea.text.prism|55|range_units|fxl_units|fxo_percentage,fxo_index
+    aurea.text.prism|56|range_offset|fxl_range_offset|
+    aurea.text.prism|57|wrap_cycle|fxl_wrap_cycle|
+    aurea.text.prism|58|mirror_palette|fxl_mirror_palette|
     """
 
     /// "typeId#índice" → dica do parâmetro.
@@ -3432,8 +3491,8 @@ enum EffectI18nTable {
     aurea.distort.mirror|4|mode|fxt_overlay_copy_the_layer_stays_whole_and_t
     aurea.generate.raster_extrude|4|reflection|fxt_the_reflection_uses_the_3d_scene_s_hdri
     aurea.3d.shatter|4|center|fxt_tap_the_point_s_name_then_drag_it_on_the
-    aurea.time.flow_retime|5|duplicate_sensitivity|fxt_higher_frames_that_are_only_similar_also
     aurea.time.flow_retime|2|vectors|fxt_vector_quality_neural
+    aurea.time.flow_retime|5|duplicate_sensitivity|fxt_higher_frames_that_are_only_similar_also
     aurea.time.flow_retime|6|ghost_warp|fxt_ghost_warp_tip
     aurea.light.saber|9|core_layer|fxt_used_when_the_core_is_layer_text
     aurea.light.saber|22|mask_evolution|fxt_applies_to_the_layer_masks_core
@@ -3565,6 +3624,13 @@ enum EffectI18nTable {
     aurea.3d.card_dance_reference|5|camera|fxo_camera_position
     aurea.3d.card_dance_reference|6|lighting|fx_deform_lighting
     aurea.3d.card_dance_reference|7|material|fxs_material
+    aurea.text.prism|1|style|fxl_style
+    aurea.text.prism|2|geometry|fxs_geometry
+    aurea.text.prism|3|color|fxl_color
+    aurea.text.prism|4|stagger|fxs_stagger
+    aurea.text.prism|5|paths|fxs_path_motion
+    aurea.text.prism|6|stroke|fxo_stroke
+    aurea.text.prism|7|composite|fxo_composite
     """
 
 }

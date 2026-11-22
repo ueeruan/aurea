@@ -372,7 +372,7 @@ private struct ValueDragModifier: ViewModifier {
         DragGesture(minimumDistance: 4)
             .updating($dragging) { _, held, _ in held = true }
             .onChanged { g in
-                if direction == 0 { direction = abs(g.translation.width) >= abs(g.translation.height) ? 1 : -1 }
+                if direction == 0 { direction = abs(g.translation.width) > abs(g.translation.height) ? 1 : -1 }
                 guard direction == 1 else { return }
                 if !active {
                     let s = start()
@@ -2257,7 +2257,7 @@ struct AureaSlider: View {
         DragGesture(minimumDistance: FxParamMath.TOUCH_SLOP * FxParamMath.SLIDER_SLOP_FRACTION)
             .updating($held) { _, state, _ in state = true }
             .onChanged { g in
-                if direction == 0 { direction = abs(g.translation.width) >= abs(g.translation.height) ? 1 : -1 }
+                if direction == 0 { direction = abs(g.translation.width) > abs(g.translation.height) ? 1 : -1 }
                 guard direction == 1 else { return }
                 if !active { live = value; active = true; onBegin() }
                 let v = FxParamMath.sliderValueAt(x: Float(g.location.x - AureaSlider.thumb / 2), width: Float(track),
@@ -2288,9 +2288,9 @@ enum FxRulerFling {
 /// slop é da rolagem); dedo para a esquerda aumenta; arremesso acima de 300 pt/s
 /// com a desaceleração do `UIScrollView` (0,998/ms), parando na ponta da faixa;
 /// prende na faixa (estendida até o valor de partida); vibração leve ao cruzar um
-/// encaixe; dois dedos = 1/10 (controle fino do AUREA). Tocar durante o próprio
-/// arremesso o para e continua o MESMO gesto; enquanto OUTRA régua arremessa, o
-/// toque aqui é ignorado. Um passo de desfazer por gesto, arremesso incluído.
+/// encaixe; dois dedos = 1/10 (controle fino do AUREA). Tocar na régua em movimento
+/// para a inércia. Enquanto outra régua arremessa, só o arrasto vertical passa para a lista.
+/// Um passo de desfazer por gesto, incluindo a inércia.
 /// Mesmo comportamento do `FxRuler` do EffectsControls.kt.
 struct FxRuler: View {
     let value: Float
@@ -2323,16 +2323,6 @@ struct FxRuler: View {
     @State private var fling: Task<Void, Never>?
     @State private var haptic = UIImpactFeedbackGenerator(style: .light)
     @GestureState private var held = false
-    /// Bugs 0.3.4 (bug 6a): o arrasto só começa no toque (distância 0) enquanto
-    /// ESTA régua arremessa (tocar a para e continua o mesmo gesto). Parada, ele
-    /// espera 4 pt como o `AureaSlider`: um arrasto de distância 0 é reconhecido no
-    /// toque e, dentro do ScrollView do corpo, tirava a rolagem vertical do painel.
-    /// Só muda entre gestos (armado ao arremessar, desarmado no fim do gesto).
-    @State private var catchArmed = false
-    private var dragStartDistance: CGFloat {
-        catchArmed ? 0 : FxParamMath.TOUCH_SLOP * FxParamMath.SLIDER_SLOP_FRACTION
-    }
-
     private var shown: Float { dragging ? live : value }
     private var tickStep: Float { step > 0 && step.isFinite ? step : 1 }
     private var spacing: CGFloat { FxParamMath.TICK_SPACING }
@@ -2345,6 +2335,7 @@ struct FxRuler: View {
         Canvas { context, size in draw(context, size: size) }
             .contentShape(Rectangle())
             .simultaneousGesture(drag, including: enabled ? .all : .none)
+            .simultaneousGesture(TapGesture().onEnded { stopFling() }, including: enabled ? .all : .none)
             .keepLtr()
             .onChange(of: held) { down in
                 // O fim normal passa pelo `onEnded` (que pode arremessar); aqui só o
@@ -2353,7 +2344,6 @@ struct FxRuler: View {
                     DispatchQueue.main.async {
                         phase = 0
                         if fling == nil { finish() }
-                        catchArmed = fling != nil
                     }
                 }
             }
@@ -2412,7 +2402,7 @@ struct FxRuler: View {
     }
 
     private var drag: some Gesture {
-        DragGesture(minimumDistance: dragStartDistance)
+        DragGesture(minimumDistance: FxParamMath.TOUCH_SLOP * FxParamMath.RULER_SLOP_FRACTION)
             .updating($held) { _, state, _ in state = true }
             .onChanged { g in changed(g) }
             .onEnded { g in ended(g) }
@@ -2423,35 +2413,18 @@ struct FxRuler: View {
         let dx = g.translation.width
         let dy = g.translation.height
         if phase == 0 {
-            if dx == 0 && dy == 0 {
-                // O dedo desceu: outra régua arremessando = este gesto é ignorado;
-                // a própria arremessando = parar o arremesso já é gesto.
-                if let owner = FxRulerFling.owner, owner != token { phase = -1; return }
-                if let task = fling {
-                    task.cancel()
-                    fling = nil
-                    if FxRulerFling.owner == token { FxRulerFling.owner = nil }
-                    if dragging {
-                        phase = 1
-                        start = live
-                        walked = 0
-                        lastX = 0
-                        samples = []
-                    }
-                }
-                return
-            }
-            // Vertical (acima do slop) é da rolagem da lista.
-            if abs(dy) > FxParamMath.TOUCH_SLOP && abs(dy) > abs(dx) { phase = -1; return }
-            if abs(dx) <= FxParamMath.TOUCH_SLOP * FxParamMath.RULER_SLOP_FRACTION { return }
+            // Rolagem vertical continua no ScrollView, mesmo com a régua em movimento.
+            if abs(dy) >= abs(dx) { phase = -1; return }
             if let owner = FxRulerFling.owner, owner != token { phase = -1; return }
+            let resumedValue = shown
+            stopFling()
             phase = 1
             lastX = dx
             walked = 0
             samples = []
             if !dragging {
                 dragging = true
-                live = value.isFinite ? value : 0
+                live = resumedValue.isFinite ? resumedValue : 0
                 haptic.prepare()
                 onBegin()
             }
@@ -2470,7 +2443,7 @@ struct FxRuler: View {
     }
 
     private func ended(_ g: DragGesture.Value) {
-        defer { phase = 0; catchArmed = fling != nil }
+        defer { phase = 0 }
         guard phase == 1, dragging else { return }
         let speed = velocity(at: g.time.timeIntervalSinceReferenceDate)
         if abs(speed) > FxParamMath.FLING_MIN_PX_S { startFling(-speed * gain) } else { finish() }
@@ -2502,7 +2475,6 @@ struct FxRuler: View {
 
     private func startFling(_ speed: CGFloat) {
         FxRulerFling.owner = token
-        catchArmed = true
         fling = Task { @MainActor in
             // UIScrollView.DecelerationRate.normal: a velocidade cai 0,2 % por ms.
             let rate = 0.998
@@ -2531,8 +2503,6 @@ struct FxRuler: View {
                 fling = nil
                 if FxRulerFling.owner == token { FxRulerFling.owner = nil }
                 finish()
-                // Sem dedo na régua: volta a esperar os 4 pt (com dedo, o fim do gesto desarma).
-                if phase == 0 { catchArmed = false }
             }
         }
     }
@@ -2543,7 +2513,6 @@ struct FxRuler: View {
         task.cancel()
         fling = nil
         if FxRulerFling.owner == token { FxRulerFling.owner = nil }
-        catchArmed = false
         finish()
     }
 }

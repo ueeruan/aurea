@@ -2063,7 +2063,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         Aabb ls;   // projetores, no espaço da luz
         for (usize instIndex = 0; instIndex < frame.instances.size(); ++instIndex) {
             const SceneInstance& inst = frame.instances[instIndex];
-            if (!inst.asset || !inst.castShadows) continue;
+            if (!inst.asset || !inst.castShadows || inst.asset->volumetricCloud) continue;
             const GpuModel* gm = instanceModels[instIndex];
             if (!gm) continue;
             const std::vector<Node>& nodes = inst.asset->nodes;
@@ -2252,11 +2252,19 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 const bool skinDraw = skinnedNode && p.skinned;
                 // Vidro (KHR_materials_transmission) mistura como transparente:
                 // o que está atrás aparece e o reflexo continua inteiro.
-                const AlphaMode drawMode = mat->factors.transmission > 0.0f ? AlphaMode::Blend : mat->factors.alphaMode;
+                const bool cloud = inst.asset->volumetricCloud;
+                const AlphaMode drawMode = cloud || mat->factors.transmission > 0.0f ? AlphaMode::Blend : mat->factors.alphaMode;
                 PipelineKey key = key_for(drawMode, mat->factors.doubleSided, skinDraw);
+                if (cloud) {
+                    key.vertex = ShaderId::scene3d_cloud_vert;
+                    key.fragment = ShaderId::scene3d_cloud_frag;
+                    // The exit face stays rasterizable when the camera is
+                    // inside the volume or its near plane clips the entry.
+                    key.cull = CullMode::Front;
+                }
                 // A reflected node/parent reverses winding without changing
                 // which authored surface is its front face.
-                if (mirrored && !mat->factors.doubleSided) key.frontFaceCCW = false;
+                if (mirrored && (cloud || !mat->factors.doubleSided)) key.frontFaceCCW = false;
                 auto pipe = shaders_->pipeline(key);
                 if (!pipe.ok()) { mark_incomplete(__FILE__, __LINE__); continue; }
                 const EnvSlot* env = env_of(inst);
@@ -2283,6 +2291,11 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 d.push.model = world;
                 if (!normalReady) { normal_matrix(world, normalCols); normalReady = true; }
                 std::copy(std::begin(normalCols), std::end(normalCols), std::begin(d.push.normalCol));
+                if (cloud) {
+                    d.push.normalCol[0].w = lodHysteresis_ ? static_cast<f32>(volumetricSteps_) + 10.0f : 48.0f;
+                    d.push.normalCol[1].w = frame.camera.orthographic ? 1.0f : 0.0f;
+                    d.push.normalCol[2].w = passMrt_ ? 1.0f : 0.0f;
+                }
                 d.skinned = skinDraw;
                 d.morph = mj != nullptr;
                 if (mj) {
@@ -2375,81 +2388,78 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     // sombra (luz ← local). Transparentes ficam fora: a ordem do blend é por
     // profundidade, desenho a desenho. O recorte por frustum já aconteceu —
     // instância fora da tela nem entra no grupo.
-    std::vector<Mat4> instData;
-    if (instancing_ && (opaque.size() > 1 || shadowDraws.size() > 1)) {
-        // Merge adjacent runs only. A/B/A at the same depth must remain A/B/A;
-        // collecting all A draws before B changes the winning opaque surface.
-        // The deformation upload cache above remains shared across all runs.
-        struct Members { u32 head, tail, count; };
-        std::vector<Members> members;
-        std::vector<Draw> merged;
-        merged.reserve(opaque.size());
-        members.reserve(opaque.size());
-        for (u32 i = 0; i < opaque.size(); ++i) {
-            const Draw& d = opaque[i];
-            const Draw* prior = merged.empty() ? nullptr : &merged.back();
-            const bool equal = !d.skinned && prior && !prior->skinned
-                && prior->model == d.model && prior->prim == d.prim && prior->material == d.material
-                && prior->block == d.block && prior->pipeline.id == d.pipeline.id && prior->firstIndex == d.firstIndex
-                && prior->indexCount == d.indexCount && prior->morph == d.morph
-                && (!d.morph || (prior->morphPos == d.morphPos && prior->morphShade == d.morphShade));
-            if (!equal) { merged.push_back(d); members.push_back({i, i, 1}); }
-            else { auto& group = members.back(); group.tail = i; ++group.count; }
-        }
-        for (u32 g = 0; g < merged.size(); ++g) {
-            if (members[g].count < 2) continue;
-            const u32 base = static_cast<u32>(instData.size());
-            for (u32 idx = members[g].head; idx <= members[g].tail; ++idx) {
-                const Draw& m = opaque[idx];
-                instData.push_back(m.push.model);
-                Mat4 nm;
-                nm.col[0] = Vec4{m.push.normalCol[0].x, m.push.normalCol[0].y, m.push.normalCol[0].z, 0};
-                nm.col[1] = Vec4{m.push.normalCol[1].x, m.push.normalCol[1].y, m.push.normalCol[1].z, 0};
-                nm.col[2] = Vec4{m.push.normalCol[2].x, m.push.normalCol[2].y, m.push.normalCol[2].z, 0};
-                nm.col[3] = Vec4{0, 0, 0, 0};
-                instData.push_back(nm);
-            }
-            merged[g].instanceCount = members[g].count;
-            merged[g].push.normalCol[0].w = static_cast<f32>(base + 1u);
-            ++stats_.instancedDraws;
-        }
-        opaque.swap(merged);
-
-        // The shadow pass also preserves its original contiguous draw order.
-        std::vector<Members> smembers;
-        std::vector<ShadowDraw> smerged;
-        smerged.reserve(shadowDraws.size());
-        smembers.reserve(shadowDraws.size());
-        for (u32 i = 0; i < shadowDraws.size(); ++i) {
-            const ShadowDraw& d = shadowDraws[i];
-            const ShadowDraw* prior = smerged.empty() ? nullptr : &smerged.back();
-            const bool equal = !d.skinned && prior && !prior->skinned
-                && prior->model == d.model && prior->prim == d.prim && prior->pipeline.id == d.pipeline.id
-                && prior->morph == d.morph && (!d.morph || prior->morphPos == d.morphPos);
-            if (!equal) { smerged.push_back(d); smembers.push_back({i, i, 1}); }
-            else { auto& group = smembers.back(); group.tail = i; ++group.count; }
-        }
-        for (u32 g = 0; g < smerged.size(); ++g) {
-            if (smembers[g].count < 2) continue;
-            const u32 base = static_cast<u32>(instData.size());
-            for (u32 idx = smembers[g].head; idx <= smembers[g].tail; ++idx) instData.push_back(shadowDraws[idx].push.model);
-            smerged[g].instanceCount = smembers[g].count;
-            smerged[g].push.normalCol[0].y = static_cast<f32>(base + 1u);
-        }
-        shadowDraws.swap(smerged);
-    }
     BufferHandle instBuf{};
-    if (!instData.empty()) {
-        const BufferHandle buf = take_upload(instPool_, instData.size() * sizeof(Mat4));
-        void* ptr = nullptr;
-        if (buf.valid() && gpu_->map_buffer(buf, ptr).ok() && ptr) {
-            std::copy(instData.begin(), instData.end(), static_cast<Mat4*>(ptr));
-            gpu_->unmap_buffer(buf);
-            instBuf = buf;
+    if (instancing_ && (opaque.size() > 1 || shadowDraws.size() > 1)) {
+        // Merge adjacent runs only. A/B/A at equal depth must stay A/B/A.
+        const auto sameOpaque = [](const Draw& a, const Draw& b) {
+            return !a.skinned && !b.skinned && a.model == b.model && a.prim == b.prim
+                && a.material == b.material && a.block == b.block && a.pipeline.id == b.pipeline.id
+                && a.firstIndex == b.firstIndex && a.indexCount == b.indexCount && a.morph == b.morph
+                && (!a.morph || (a.morphPos == b.morphPos && a.morphShade == b.morphShade));
+        };
+        const auto sameShadow = [](const ShadowDraw& a, const ShadowDraw& b) {
+            return !a.skinned && !b.skinned && a.model == b.model && a.prim == b.prim
+                && a.pipeline.id == b.pipeline.id && a.morph == b.morph && (!a.morph || a.morphPos == b.morphPos);
+        };
+        const auto forRuns = [](const auto& draws, const auto& equal, const auto& visit) {
+            for (usize first = 0; first < draws.size();) {
+                usize end = first + 1;
+                while (end < draws.size() && equal(draws[first], draws[end])) ++end;
+                visit(first, end);
+                first = end;
+            }
+        };
+        usize matrixCount = 0;
+        forRuns(opaque, sameOpaque, [&](usize start, usize end) {
+            if (end - start > 1) matrixCount += (end - start) * 2;
+        });
+        forRuns(shadowDraws, sameShadow, [&](usize start, usize end) {
+            if (end - start > 1) matrixCount += end - start;
+        });
+        // Offsets travel as floats in the existing draw shader ABI.
+        if (matrixCount > 0 && matrixCount <= (1u << 24)) {
+            const BufferHandle buffer = take_upload(instPool_, matrixCount * sizeof(Mat4));
+            void* mapping = nullptr;
+            if (buffer.valid() && gpu_->map_buffer(buffer, mapping).ok() && mapping) {
+                auto* matrices = static_cast<Mat4*>(mapping);
+                usize offset = 0;
+                usize kept = 0;
+                // Write directly into the upload and compact in place. A
+                // failed allocation/map leaves both original lists intact.
+                forRuns(opaque, sameOpaque, [&](usize start, usize end) {
+                    Draw draw = opaque[start];
+                    if (end - start > 1) {
+                        draw.instanceCount = static_cast<u32>(end - start);
+                        draw.push.normalCol[0].w = static_cast<f32>(offset + 1);
+                        for (usize i = start; i < end; ++i) {
+                            const auto& push = opaque[i].push;
+                            matrices[offset++] = push.model;
+                            Mat4 normals;
+                            for (u32 c = 0; c < 3; ++c)
+                                normals.col[c] = Vec4{push.normalCol[c].x, push.normalCol[c].y, push.normalCol[c].z, 0};
+                            normals.col[3] = Vec4{};
+                            matrices[offset++] = normals;
+                        }
+                        ++stats_.instancedDraws;
+                    }
+                    opaque[kept++] = draw;
+                });
+                opaque.resize(kept);
+                kept = 0;
+                forRuns(shadowDraws, sameShadow, [&](usize start, usize end) {
+                    ShadowDraw draw = shadowDraws[start];
+                    if (end - start > 1) {
+                        draw.instanceCount = static_cast<u32>(end - start);
+                        draw.push.normalCol[0].y = static_cast<f32>(offset + 1);
+                        for (usize i = start; i < end; ++i) matrices[offset++] = shadowDraws[i].push.model;
+                    }
+                    shadowDraws[kept++] = draw;
+                });
+                shadowDraws.resize(kept);
+                gpu_->unmap_buffer(buffer);
+                instBuf = buffer;
+            }
         }
-        // Sem o buffer (memória de GPU): o grupo não desenha — melhor faltar
-        // um quadro do que desenhar todas as instâncias no lugar da primeira.
-        if (!instBuf.valid()) return false;
     }
 
     {

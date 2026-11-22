@@ -67,6 +67,7 @@ internal object PodLayout {
     const val FLAG_ANIMATED = 1 shl 3
     const val FLAG_SELECTED = 1 shl 4
     const val FLAG_THREE_D = 1 shl 5
+    const val FLAG_FORCE_2D = 1 shl 21
     const val FLAG_ADJUSTMENT = 1 shl 6
     const val FLAG_GUIDE = 1 shl 7
     const val FLAG_CAPTIONS = 1 shl 12

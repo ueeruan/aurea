@@ -79,9 +79,9 @@ class AudioDockControlsDeviceTest {
 
         compose.onNodeWithTag("layer.panel.volume.close").assertIsDisplayed().performClick()
         compose.onNodeWithTag("layer.panel.speed").assertIsDisplayed().performClick()
-        // Os valores prontos moram na aba Opções da moldura (a 3ª aba).
-        compose.onNodeWithTag("panel.tab.2").assertIsDisplayed().performClick()
-        compose.onNodeWithText("2x").performScrollTo().performClick()
+        compose.onNodeWithTag("speed.value").assertIsDisplayed().performClick()
+        compose.onNodeWithText("2", substring = false).performClick()
+        compose.onNodeWithTag("numeric.keypad.confirm").assertIsDisplayed().performClick()
         compose.waitUntil(5000) { nativeDuration() == originalDuration / 2 }
         assertEquals(originalDuration / 2, nativeDuration())
         compose.waitUntil(5000) {

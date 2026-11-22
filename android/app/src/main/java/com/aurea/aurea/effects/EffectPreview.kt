@@ -9,6 +9,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -161,7 +162,10 @@ fun rememberEffectPreviewState(store: EffectPreviewStore?, effectTypeId: Int, wi
     if (store == null) return EffectPreviewResult()
     val cached = store.peek(effectTypeId, width, height)
     val state = produceState(EffectPreviewResult(cached, cached == null), store, effectTypeId, width, height) {
-        value = EffectPreviewResult(store.peek(effectTypeId, width, height) ?: store.load(effectTypeId, width, height))
+        val image = store.peek(effectTypeId, width, height)
+        // A tile recycled during a fling never gets as far as the native renderer.
+        if (image == null) delay(100)
+        value = EffectPreviewResult(image ?: store.load(effectTypeId, width, height))
     }
     return state.value
 }

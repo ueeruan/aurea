@@ -1,5 +1,6 @@
 #include "BuiltinEffects.hpp"
 #include "aurea/text/TextTransform.hpp"
+#include "aurea/text/TextGradient.hpp"
 #include <algorithm>
 #include <cmath>
 
@@ -77,6 +78,16 @@ public:
     }
     void declare_parameters(ParameterRegistry& p) const override { text::declare_transform_params(p); }
     // Applied to glyph geometry by the text renderer, before the raster stack.
+    bool is_identity(const EffectEval&) const noexcept override { return true; }
+};
+
+class TextPrismEffect final : public Effect {
+public:
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo info{text::kTextPrismEffect, "Text Prism", "Text", EffectClass::Domain};
+        return info;
+    }
+    void declare_parameters(ParameterRegistry& params) const override { text::declare_prism_parameters(params); }
     bool is_identity(const EffectEval&) const noexcept override { return true; }
 };
 
@@ -344,6 +355,7 @@ void register_pattern_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<ParentingHelper>());
     (void)r.add(std::make_unique<Text3DLayout>());
     (void)r.add(std::make_unique<TextTransform>());
+    (void)r.add(std::make_unique<TextPrismEffect>());
     (void)r.add(std::make_unique<TextProgressEffect>());
     (void)r.add(std::make_unique<TextRandomizerEffect>());
     (void)r.add(std::make_unique<TextSpacingEffect>());

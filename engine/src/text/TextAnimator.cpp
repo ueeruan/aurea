@@ -205,7 +205,8 @@ void selector_weights(const TextAnimator& a, u32 ai, const TrackSet& tracks, f64
                     expr::TextScope glyph(raw + 1, count);
                     const f32 w = pro_range_weight(P(kSelStart, s.start), P(kSelEnd, s.end), P(kSelOffset, s.offset), s.units, s.shape,
                                                    P(kAnimSmoothness, s.smoothness) / 100.0f, P(kSelEaseHigh, s.easeHigh) / 100.0f,
-                                                   P(kSelEaseLow, s.easeLow) / 100.0f, unit, count, a.aeModel != 0) * P(kSelAmount, s.amount) / 100.0f;
+                                                   P(kSelEaseLow, s.easeLow) / 100.0f, unit, count, a.aeModel != 0,
+                                                   P(kAnimOverlap, s.overlap) * .01f) * P(kSelAmount, s.amount) / 100.0f;
                     value = Vec3{w, w, w};
                     break;
                 }
@@ -218,6 +219,14 @@ void selector_weights(const TextAnimator& a, u32 ai, const TrackSet& tracks, f64
                     break;
                 }
                 case kTextSelectorSweep: {
+                    if (s.shape == 3) {
+                        const f32 w = spring_reveal_weight((P(kSelStart, s.start) + P(kSelOffset, s.offset)) * .01f,
+                            P(kAnimOverlap, s.overlap) * .01f, P(kSelEaseHigh, s.easeHigh) * .01f,
+                            0.75f + 1.75f * std::clamp(P(kSelEaseLow, s.easeLow) * .01f, 0.f, 1.f),
+                            unit, count) * P(kSelAmount, s.amount) * .01f;
+                        value = Vec3{w, w, w};
+                        break;
+                    }
                     // v72: a janela do Transformar texto do Motion como seletor do
                     // animador comum (antes só valia como seletor do rig).
                     const f32 w = transform_influence(P(kSelStart, s.start) * .01f, P(kSelEnd, s.end) * .01f, P(kSelOffset, s.offset) * .01f,

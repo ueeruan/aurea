@@ -72,7 +72,11 @@ void declare_animator_pro_params(ParameterRegistry& params);
 /// Seletor de intervalo do Pro para a unidade `unit` de `count`: 0..1 (sem a intensidade).
 /// `units` 0 = %, 1 = índice. `smoothness` 0..1 (só na forma quadrada).
 [[nodiscard]] f32 pro_range_weight(f32 start, f32 end, f32 offset, u32 units, u32 shape, f32 smoothness,
-                                   f32 easeHigh, f32 easeLow, u32 unit, u32 count, bool aeMath = true) noexcept;
+                                   f32 easeHigh, f32 easeLow, u32 unit, u32 count, bool aeMath = true,
+                                   f32 overlap = 0.0f) noexcept;
+/// A staggered reveal with continuous acceleration at each unit's boundaries.
+[[nodiscard]] f32 spring_reveal_weight(f32 progress, f32 overlap, f32 strength, f32 cycles,
+                                      u32 unit, u32 count) noexcept;
 /// Oscilação do Pro: −1..1 por unidade e dimensão, entre `minAmount` e `maxAmount` (−1..1).
 /// `correlation` 0..1 (1 = todas iguais), fases em graus.
 [[nodiscard]] f32 pro_wiggle(u32 seed, u32 unit, u32 dimension, f64 timeSec, f32 rate, f32 correlation,

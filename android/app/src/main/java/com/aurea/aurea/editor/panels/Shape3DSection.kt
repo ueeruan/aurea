@@ -66,9 +66,11 @@ internal enum class Shape3DPage { Material, Shape }
 @Composable
 internal fun Shape3DSection(env: PanelEnv, info: Shape3DInfo, page: Shape3DPage = Shape3DPage.Material) {
     val store = env.store
+    val cloud = info.kind == Shape3DCatalog.CLOUD
     val part = store.shapePartOf(store.primary)
-    ShapeTitle(stringResource(Shape3DCatalog.names.getOrElse(info.kind) { R.string.shape3d_title }) + " · " + stringResource(R.string.shape3d_parts))
-    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    val title = stringResource(Shape3DCatalog.names.getOrElse(info.kind) { R.string.shape3d_title })
+    ShapeTitle(if (cloud && page == Shape3DPage.Material) title else title + " · " + stringResource(R.string.shape3d_parts))
+    if (!cloud || page == Shape3DPage.Shape) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         ShapeChip(stringResource(R.string.shape3d_whole), on = part < 0, modifier = Modifier.testTag("shape3d.part.all")) { store.chooseShapePart(-1) }
         val layer = store.primary
         for (i in 0 until info.partCount) {
@@ -89,12 +91,17 @@ internal fun Shape3DSection(env: PanelEnv, info: Shape3DInfo, page: Shape3DPage 
         Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.panel_cor), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
             ColorWell(Color(shown[0], shown[1], shown[2])) {
-                val target = part
+                val target = if (cloud) 0 else part
                 store.beginGesture("cor da parte")
                 env.openColor(ColorRequest(shown.copyOf(), onChange = { r, g, b, _ ->
                     store.setShapePartColor(target, floatArrayOf(r, g, b, 1f))
                 }, onDone = { store.endGesture() }))
             }
+        }
+        if (cloud) {
+            CloudMaterialControls(env)
+            Spacer(Modifier.height(14.dp))
+            return
         }
         // Imagem no material da parte (ou de todas, "Tudo"): a textura de cor
         // base da forma. Tinha saído na reorganização da aba 3D (relato 1.2.0:
@@ -150,6 +157,31 @@ internal fun Shape3DSection(env: PanelEnv, info: Shape3DInfo, page: Shape3DPage 
     }
     ShapeHint(stringResource(R.string.shape3d_part_hint))
     Spacer(Modifier.height(8.dp))
+}
+
+@Composable
+private fun CloudMaterialControls(env: PanelEnv) {
+    val store = env.store
+    val layer = store.primary ?: return
+    val material = store.queryMaterials().firstOrNull() ?: return
+    val generation = store.projectGeneration
+    val composition = store.composition?.id
+    for ((param, key) in listOf(4 to R.string.shape3d_cloud_density, 5 to R.string.shape3d_cloud_detail)) {
+        val label = stringResource(key)
+        val value = material[2 + param] * 100f
+        fun write(percent: Float) {
+            if (store.primary == layer && store.projectGeneration == generation &&
+                store.composition?.id == composition && store.detail?.locked != true) {
+                store.setMaterialParameter(0, param, percent / 100f)
+            }
+        }
+        androidx.compose.runtime.key(generation, composition, layer, param) {
+            PropertyRow(label, value, .5f, 0f, 100f, { "${numeroPtBr(it, 0)}%" },
+                false, {}, { store.beginGesture(label) }, ::write, store::endGesture,
+                onTapValue = { env.openKeypad(KeypadRequest(label, value, "%", 0f, 100f, 0, onConfirm = ::write)) },
+                enabled = store.detail?.locked != true, modifier = Modifier.testTag("shape3d.cloud.$param"))
+        }
+    }
 }
 
 /**

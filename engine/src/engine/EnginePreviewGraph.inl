@@ -86,6 +86,7 @@ bool Engine::continue_preview_graph_locked(u64 frameStart, Status& result) noexc
     }
     lastRenderedFrame_ = livePreviewGraphKey_.playhead;
     lastIncomplete_ = renderer_.take_incomplete() || snapshot_.missingVideoFrames || snapshot_.staleVideoFrames;
+    if (!lastIncomplete_) lastCompletePreview_ = livePreviewGraphKey_;
     lastSkipped_ = false;
     incompleteRetries_ = 0;
     lastCulledLayers_.store(snapshot_.culledLayers, std::memory_order_relaxed);

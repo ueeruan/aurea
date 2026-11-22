@@ -2,4 +2,28 @@
 <resources>
     <string name="track2_row_moved">Layer moved to another row</string>
     <string name="track2_row_joined">Layer joined the track</string>
+    <string name="trk_track_selection">Track selection</string>
+    <string name="trk_remove_last_point">Remove last point</string>
+    <string name="trk_pause">Pause analysis</string>
+    <string name="trk_resume">Resume analysis</string>
+    <string name="trk_review">Confidence by frame</string>
+    <string name="trk_export_csv">Export tracking CSV</string>
+    <string name="trk_csv_failed">Could not save the tracking data.</string>
+    <string name="trk_reconstruction">3D reconstruction</string>
+    <string name="trk_orbit">Orbit view</string>
+    <string name="trk_pan">Pan view</string>
+    <string name="trk_smart_title">Aurea Smart Tracker</string>
+    <string name="trk_auto_point">Detect and track a point</string>
+    <string name="trk_object">Track object</string>
+    <string name="trk_object_hint">Mark two corners to track position, rotation and scale.</string>
+    <string name="trk_create_mask">Create tracked mask</string>
+    <string name="trk_create_mask_hint">Creates an editable mask that follows the region in the video.</string>
+    <string name="trk_min_confidence">Minimum confidence • %1$d%%</string>
+    <string name="trk_validate_backward">Validate forward and backward</string>
+    <string name="trk_show_trails">Show motion paths</string>
+    <string name="trk_camera_frame">Camera frame</string>
+    <string name="trk_face">Track face</string>
+    <string name="trk_body">Track body</string>
+    <string name="trk_landmarks_created">Created %1$d animated nulls.</string>
+    <string name="trk_landmarks_failed">There were too few measurements to create keyframes.</string>
 </resources>

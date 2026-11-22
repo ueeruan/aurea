@@ -323,7 +323,9 @@ bool outline_cells(const f32* rows, std::vector<u8>& cells) {
     bool any = false;
     for (u32 y = 0; y < kOutline; ++y) {
         const f32 r = rows ? rows[y] : 0.0f;
-        const u32 bits = std::isfinite(r) && r > 0.0f ? static_cast<u32>(std::min(r, 16777215.0f) + 0.5f) : 0u;
+        // Above 2^23, adding .5f to an odd exact mask can round up and erase a long run of set bits.
+        const u32 bits = std::isfinite(r) && r > 0.0f
+            ? static_cast<u32>(std::round(std::min(r, 16777215.0f))) : 0u;
         for (u32 x = 0; x < kOutline; ++x) {
             const u8 on = (bits >> x) & 1u ? 1 : 0;
             cells[y * kOutline + x] = on;

@@ -2,4 +2,28 @@
 <resources>
     <string name="track2_row_moved">Camada movida para outra fileira</string>
     <string name="track2_row_joined">Camada entrou na linha</string>
+    <string name="trk_track_selection">Rastrear seleção</string>
+    <string name="trk_remove_last_point">Remover último ponto</string>
+    <string name="trk_pause">Pausar análise</string>
+    <string name="trk_resume">Retomar análise</string>
+    <string name="trk_review">Confiança por quadro</string>
+    <string name="trk_export_csv">Exportar dados em CSV</string>
+    <string name="trk_csv_failed">Não foi possível salvar os dados do rastreio.</string>
+    <string name="trk_reconstruction">Reconstrução 3D</string>
+    <string name="trk_orbit">Girar vista</string>
+    <string name="trk_pan">Mover vista</string>
+    <string name="trk_smart_title">Aurea Smart Tracker</string>
+    <string name="trk_auto_point">Detectar e rastrear um ponto</string>
+    <string name="trk_object">Rastrear objeto</string>
+    <string name="trk_object_hint">Marque dois cantos para seguir posição, rotação e escala.</string>
+    <string name="trk_create_mask">Criar máscara rastreada</string>
+    <string name="trk_create_mask_hint">Cria uma máscara editável que acompanha a região no vídeo.</string>
+    <string name="trk_min_confidence">Confiança mínima • %1$d%%</string>
+    <string name="trk_validate_backward">Validar ida e volta</string>
+    <string name="trk_show_trails">Mostrar trajetórias</string>
+    <string name="trk_camera_frame">Quadro da câmera</string>
+    <string name="trk_face">Rastrear rosto</string>
+    <string name="trk_body">Rastrear corpo</string>
+    <string name="trk_landmarks_created">%1$d nulos animados criados.</string>
+    <string name="trk_landmarks_failed">Não foram encontradas medidas suficientes para criar keyframes.</string>
 </resources>

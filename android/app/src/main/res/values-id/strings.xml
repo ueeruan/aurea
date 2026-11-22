@@ -1136,7 +1136,7 @@ untuk mengedit kurvanya.</string>
     <string name="consent_title">Persetujuan dan Tanggung Jawab</string>
     <string name="consent_accept">Setuju dan lanjutkan</string>
     <string name="consent_body">Aurea adalah alat profesional untuk mengedit, membuat, dan memproduksi konten digital. Dengan menggunakan aplikasi ini, pengguna mengakui bahwa mereka bertanggung jawab penuh atas konten yang mereka buat, edit, impor, ekspor, publikasikan, atau bagikan melalui platform.\n\nAurea tidak mengendalikan, mendorong, mendukung, atau mengizinkan penggunaan alat ini untuk kegiatan ilegal, abusif, curang, merugikan, atau yang melanggar hak pihak ketiga.\n\nPengguna bertanggung jawab memastikan bahwa mereka memiliki izin, lisensi, dan hak yang diperlukan atas materi yang digunakan, termasuk gambar, video, musik, merek, model, berkas, dan konten terlindungi lainnya.\n\nKebebasan kreatif yang ditawarkan Aurea tidak berarti persetujuan, keterlibatan, atau tanggung jawab aplikasi atas apa yang dipilih setiap pengguna untuk dibuat atau dilakukan dengan alat ini.\n\nPengguna setuju untuk menggunakan Aurea sesuai hukum yang berlaku dan bertanggung jawab atas tindakan mereka sendiri serta konten yang diproduksi atau didistribusikan melalui aplikasi.\n\nSejauh diizinkan oleh hukum yang berlaku, Aurea dan pihak yang bertanggung jawab atasnya tidak bertanggung jawab atas tindakan yang dilakukan semata-mata oleh pengguna, penyalahgunaan alat, atau akibat dari konten yang dibuat, dipublikasikan, atau dibagikan oleh pengguna sendiri.\n\nAurea menyediakan alatnya. Pengguna bertanggung jawab atas cara mereka memilih untuk menggunakannya.\n\nDengan melanjutkan, pengguna menyatakan bahwa mereka telah membaca, memahami, dan menyetujui ketentuan ini.</string>
-    <string name="release_notes_body">Aurea 1.0.2.1 (2223) — 19/11/2026\n\n• AureaHyper kini TAHUNAN: satu langganan per tahun membuka semua efek berbayar, Teks 3D, Neural (AI), dan alat Hyper. Tanpa biaya bulanan dan tanpa langganan per efek. Pelanggan lama tetap mendapatkan semuanya.\n• Optical Flow untuk rekaman nyata: bayangan lebih sedikit, kontrol Bayangan ↔ Distorsi, dan kualitas Neural (AI) dengan AureaHYPER.\n• Glitchify kini sama dengan After Effects.\n• Ekspor lebih cepat dan berkualitas lebih tinggi.\n• Impor hanya bagian video panjang yang dipotong.\n• Panel Pre Render dan Pre Export per rentang.\n• AureaMCP bisa membangunkan aplikasi yang tertutup.</string>
+    <string name="release_notes_body">Aurea 1.0.4 (2225)\n\n• AutoBeat dengan pilihan sumber audio, denyut skala, gerak naik, dan rotasi · gratis\n• Pelacakan planar dari dua sudut dengan pemasangan empat titik · AureaHyper\n• Poster Tinta untuk Teks 3D: muka putih, kedalaman gelap, dan garis tepi terang · AureaHyper\n• AutoRig 2D di Puppet: deteksi pose, pin yang bisa diedit, dan animasi diam · AureaHyper</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">Isi</string>
@@ -1889,7 +1889,7 @@ untuk mengedit kurvanya.</string>
     <string name="msg_o_projeto_esta_danificado_e_nao">Proyek rusak dan tidak ada salinan valid untuk dipulihkan.</string>
     <string name="msg_este_aparelho_nao_tem_codificador_para">Perangkat ini tidak punya encoder untuk pengaturan ekspor ini.</string>
     <string name="msg_erro_inesperado_codigo">Kesalahan tak terduga (kode %1$s).</string>
-    <string name="msg_nao_foi_possivel_iniciar_o_motor">Tidak dapat memulai mesin grafis (Vulkan) di perangkat ini.</string>
+    <string name="msg_nao_foi_possivel_iniciar_o_motor">Tidak dapat memulai mesin grafis di perangkat ini.</string>
     <string name="msg_o_aparelho_sera_medido_de_novo">Perangkat akan diukur ulang saat Aurea dibuka berikutnya</string>
     <string name="msg_o_preview_nao_conseguiu_usar_a">Pratinjau tidak dapat menggunakan permukaan video.</string>
     <string name="msg_salvamento_automatico_falhou">Simpan otomatis gagal: %1$s</string>
@@ -5487,4 +5487,15 @@ untuk mengedit kurvanya.</string>
     <string name="prx_close">Tutup</string>
     <string name="prx_preparing">Menyiapkan…</string>
     <string name="prx_ruler_range">Bagian Pre Render</string>
+    <string name="pn_t3d_preset_ink_poster">Poster Tinta</string>
+    <string name="trk_surface_quick">Lacak permukaan</string>
+    <string name="trk_surface_hint">Ketuk dua sudut yang berlawanan pada area bertekstur.</string>
+    <string name="trk_show_advanced">Tampilkan opsi lanjutan</string>
+    <string name="trk_hide_advanced">Sembunyikan opsi lanjutan</string>
+    <string name="autobeat_hint">Denyut mengikuti penanda ketukan komposisi. Analisis sumber memperbarui penanda pada rentang waktunya.</string>
+    <string name="autobeat_source">Deteksi ketukan audio</string>
+    <string name="autorig2d_action">AutoRig 2D dan animasikan</string>
+    <string name="autorig2d_busy">Menganalisis pose…</string>
+    <string name="autorig2d_no_pose">AutoRig tidak menemukan cukup titik yang terlihat. Tambahkan pin di Puppet.</string>
+    <string name="autorig2d_existing">Gunakan efek Puppet tanpa pin untuk membuat AutoRig.</string>
 </resources>

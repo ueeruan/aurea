@@ -112,3 +112,31 @@ AUREA_TEST(MotionExtras, MoveAlongPathUsesClipClockAndExplicitGuide) {
     f.eval.pathSamples.reset(); const auto identity = f.matrix(75, 30, opacity);
     AUREA_CHECK_EQ(identity.col[3], Mat4::identity().col[3]);
 }
+
+AUREA_TEST(MotionExtras, AutoBeatUsesCompositionTimeAndReturnsToRest) {
+    struct BeatResources : EffectResources {
+        TextureHandle curve_lut(const CurveData&) noexcept override { return {}; }
+        f64 frames_since_beat(f64 time) const noexcept override {
+            return time >= 60.0 ? time - 60.0 : std::numeric_limits<f64>::infinity();
+        }
+    } resources;
+    MotionFixture f("aurea.move.autobeat");
+    f.eval.resources = &resources;
+    f.eval.framesPerSecond = 30.0;
+    f.eval.compositionTime = 59.9;
+    AUREA_CHECK(f.eval.effect->is_identity(f.eval));
+    f.eval.compositionTime = 60.0;
+    AUREA_CHECK(!f.eval.effect->is_identity(f.eval));
+    f.eval.effect->resolve_resources(f.eval);
+    f32 opacity = 0;
+    const auto peak = f.matrix(7, 30, opacity);
+    AUREA_CHECK_NEAR(peak.col[0].x, 1.12f, 1e-5);
+    const auto anchor = peak * Vec4{50, 40, 0, 1};
+    AUREA_CHECK_NEAR(anchor.x, 50, 1e-5);
+    AUREA_CHECK_NEAR(anchor.y, 40, 1e-5);
+    f.eval.compositionTime = 63.6;
+    f.eval.effect->resolve_resources(f.eval);
+    AUREA_CHECK_NEAR(f.matrix(14, 30, opacity).col[0].x, 1.03f, 1e-5);
+    f.eval.compositionTime = 68.0;
+    AUREA_CHECK(f.eval.effect->is_identity(f.eval));
+}

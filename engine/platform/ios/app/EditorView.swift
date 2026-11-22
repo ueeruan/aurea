@@ -440,6 +440,9 @@ private struct ModelOptimizePrompt: ViewModifier {
                 .overlay { if !model.fullscreen && !model.rawPlayback { RealCameraStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { Shape3DPartOverlay() } }
             if model.panel == .tracking && model.cameraTrackerVisible && !model.cameraFeatures.isEmpty && model.pointPick == nil { CameraTrackingOverlay() }
+            if model.panel == .tracking && !model.cameraTrackerVisible && model.pointPick == nil {
+                MotionSurfaceOverlay()
+            }
             if let layer = model.selectedLayer, model.selection.count == 1, layer.locked {
                 ShellStageBanner(label: AureaText.t("editor_camada_bloqueada"), button: AureaText.t("editor_desbloquear"), icon: CupertinoGlyph.LockFill) {
                     model.mutate { $0.setLayer(layer.id, locked: false) }; model.refreshModel(force: true)
@@ -3481,6 +3484,69 @@ private struct ShellAddCategoryDialog: View {
     }
 }
 
+@MainActor private struct MotionSurfaceOverlay: View {
+    @EnvironmentObject private var model: AureaModel
+    @ObservedObject private var viewZoom = StageViewZoom.shared
+
+    var body: some View {
+        let state = (model.motionStatus["state"] as? NSNumber)?.intValue
+        let tool = (model.motionStatus["tool"] as? NSNumber)?.intValue ?? 0
+        let picked = model.pickedMotionPoints()
+        if !picked.isEmpty || state == 2 {
+            let samples = state == 2 && model.pointPick == nil ? model.engine.motionTrackFeatures(model.status.playhead).map(\.doubleValue) : []
+            let trail = (state == 2 && model.pointPick == nil && model.motionTrailVisible)
+                ? model.primarySelection.map { model.engine.motionTrackTrail($0, frame: model.status.playhead).map(\.doubleValue) } ?? [] : []
+            let surfaceReady = (2...3).contains(tool) && samples.count == 12 &&
+                (0..<4).allSatisfy { samples[$0 * 3].isFinite && samples[$0 * 3 + 1].isFinite && samples[$0 * 3 + 2] > 0 }
+            if !picked.isEmpty || !samples.isEmpty {
+                GeometryReader { geometry in
+                    let composition = CGSize(width: CGFloat(max(1, model.compositionWidth)), height: CGFloat(max(1, model.compositionHeight)))
+                    let placed = StageZoomMath.fit(size: geometry.size, composition: composition, zoom: viewZoom.zoom, pan: viewZoom.pan)
+                    Canvas { context, _ in
+                        func project(_ point: CGPoint) -> CGPoint {
+                            CGPoint(x: placed.origin.x + point.x * placed.scale, y: placed.origin.y + point.y * placed.scale)
+                        }
+                        func dot(_ point: CGPoint, _ color: Color) {
+                            let at = project(point)
+                            context.fill(Path(ellipseIn: CGRect(x: at.x-7, y: at.y-7, width: 14, height: 14)), with: .color(.black.opacity(0.68)))
+                            context.fill(Path(ellipseIn: CGRect(x: at.x-4, y: at.y-4, width: 8, height: 8)), with: .color(color))
+                        }
+                        var previous = [CGPoint?](repeating: nil, count: 4)
+                        var motion = Path()
+                        for i in stride(from: 0, to: trail.count, by: 4) {
+                            let point = Int(trail[i])
+                            guard previous.indices.contains(point) else { continue }
+                            if trail[i + 3] <= 0 { previous[point] = nil; continue }
+                            let at = project(CGPoint(x: trail[i + 1], y: trail[i + 2]))
+                            if let from = previous[point] { motion.move(to: from); motion.addLine(to: at) }
+                            previous[point] = at
+                        }
+                        context.stroke(motion, with: .color(AureaColors.accent.opacity(0.7)), lineWidth: 1.3)
+                        for point in picked { dot(point, AureaColors.accent) }
+                        if surfaceReady {
+                            var surface = Path()
+                            for i in 0..<4 {
+                                let point = project(CGPoint(x: samples[i * 3], y: samples[i * 3 + 1]))
+                                if i == 0 { surface.move(to: point) } else { surface.addLine(to: point) }
+                            }
+                            surface.closeSubpath()
+                            context.fill(surface, with: .color(AureaColors.accent.opacity(0.12)))
+                            context.stroke(surface, with: .color(AureaColors.accent), lineWidth: 1.5)
+                        } else if (0...1).contains(tool) {
+                            for i in stride(from: 0, to: samples.count, by: 3) where samples[i].isFinite && samples[i + 1].isFinite {
+                                let quality = samples[i + 2].clamped(to: 0...1)
+                                dot(CGPoint(x: samples[i], y: samples[i + 1]), quality == 0 ? .red : AureaColors.accent.opacity(0.45 + 0.55 * quality))
+                            }
+                        }
+                    }
+                }
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
+        }
+    }
+}
+
 // Real solved features in composition coordinates; dragging selects a region.
 @MainActor private struct CameraTrackingOverlay: View {
     @EnvironmentObject private var model: AureaModel
@@ -3726,7 +3792,7 @@ private struct EditorPresentations102: ViewModifier {
             })
             // Neural (IA) do Flow Retime sem o AureaHyper (EffectsView.choiceRow).
             .background(Color.clear.sheet(isPresented: $model.hyperOptionPrompt) {
-                PaywallSheet(item: PaidItem.hyperTools) { model.hyperOptionPrompt = false }
+                PaywallSheet(item: model.hyperOptionSubscriptionOnly ? .subscriptionTools : .hyperTools) { model.hyperOptionPrompt = false }
             })
     }
     private var watching: Binding<PreExportPlayback?> {

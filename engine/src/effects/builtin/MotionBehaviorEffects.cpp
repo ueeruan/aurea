@@ -160,6 +160,49 @@ protected:
     }
 };
 
+class AutoBeat final : public MotionBehavior {
+public:
+    enum : u32 { Scale, Lift, Tilt, Release };
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{"aurea.move.autobeat", "AutoBeat", "Distorcer", EffectClass::Domain};
+        return i;
+    }
+
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_float("scale", "Pulso de escala", 12.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("lift", "Altura", 0.0f, 0.0f, 500.0f, kParamAnimatable | kParamPixels, "px");
+        p.add_angle("tilt", "Rotação", 0.0f);
+        p.add_float("release", "Duração", 0.24f, 0.03f, 2.0f, kParamAnimatable, "s");
+    }
+
+    bool is_identity(const EffectEval& e) const noexcept override {
+        return pulse(e) <= 0.0f || (e.f(Scale) == 0 && e.f(Lift) == 0 && e.f(Tilt) == 0);
+    }
+
+    void resolve_resources(EffectEval& e) const noexcept override { e.auxInfo.x = pulse(e); }
+
+protected:
+    Pose pose(const EffectEval& e, f64) const noexcept override {
+        Pose p;
+        p.pivot = layer_point(e, {0.5f, 0.5f});
+        p.scale += 0.01f * finite_or(e.f(Scale), 0.0f) * e.auxInfo.x;
+        p.offset.y = -finite_or(e.f(Lift), 0.0f) * e.auxInfo.x;
+        p.rotation = finite_or(e.f(Tilt), 0.0f) * e.auxInfo.x;
+        return p;
+    }
+
+private:
+    static f32 pulse(const EffectEval& e) noexcept {
+        if (!e.resources || !(e.framesPerSecond > 0.0)) return 0.0f;
+        const f64 elapsed = e.resources->frames_since_beat(e.compositionTime) / e.framesPerSecond;
+        const f32 release = std::clamp(finite_or(e.f(Release), 0.24f), 0.03f, 2.0f);
+        if (!(elapsed >= 0.0 && elapsed < release)) return 0.0f;
+        const f32 remainder = 1.0f - static_cast<f32>(elapsed / release);
+        return remainder * remainder;
+    }
+};
+
 class Oscillate final : public MotionBehavior {
 public:
     enum : u32 { kDirection = 0, kMagnitude, kFrequency, kPhase, kRotation, kScale, kWaveform,
@@ -554,6 +597,7 @@ void register_motion_behavior_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<OscillateCycles>());
     (void)r.add(std::make_unique<Swing>());
     (void)r.add(std::make_unique<Wiggle>());
+    (void)r.add(std::make_unique<AutoBeat>());
 }
 
 void register_twitch_effect(EffectRegistry& r) { (void)r.add(std::make_unique<Twitch>()); }

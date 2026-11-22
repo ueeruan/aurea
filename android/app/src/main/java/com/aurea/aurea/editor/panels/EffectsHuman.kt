@@ -157,9 +157,10 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put("aurea.distort.mesh_warp", EffectHuman(name = R.string.fx_name_mesh_warp,
         keywords = "mesh warp malha deformacao grade bezier entortar", principal = listOf(0, 1, 2)))
     put("aurea.distort.puppet", EffectHuman(name = R.string.fx_name_puppet,
-        keywords = "puppet fantoche pino pin marionete rig personagem deformar arap", principal = listOf(0, 1, 2)))
+        keywords = "puppet fantoche pino pin marionete rig autorig 2d autoanimacao png personagem deformar arap", principal = listOf(0, 1, 2)))
     put("aurea.distort.headbop", EffectHuman(name = R.string.fx_name_headbop,
         keywords = "headbop head bop cabeça balançar batida musica ritmo danca dancar pessoa beat nod groove", principal = listOf(0, 1, 2, 3, 13)))
+    put("aurea.move.autobeat", EffectHuman(keywords = "beat batida audio música music pulso sync", principal = listOf(0, 1, 2, 3)))
     put("aurea.move.path", EffectHuman(name = R.string.beta_move_path,
         keywords = "move along path caminho vetor trajetória percurso orientar", principal = listOf(0, 1, 2, 3, 4, 5)))
     put("aurea.distort.liquid_glass", EffectHuman(name = R.string.fx_name_liquid_glass,

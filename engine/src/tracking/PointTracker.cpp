@@ -315,13 +315,15 @@ i32 feature_half_at(const Gray& g, Vec2 c, i32 minHalf, i32 maxHalf) noexcept {
     return std::clamp(static_cast<i32>(std::lround(3.0 * bestSigma)), minHalf, maxHalf);
 }
 
-void TemplateTracker::build(const Gray& g, Vec2 seed) {
+TemplateFrame::TemplateFrame(Gray gray)
+    : full(std::make_shared<const Gray>(std::move(gray))), coarse(half_res(*full)) {}
+
+void TemplateTracker::build(const TemplateFrame& frame, Vec2 seed) {
     const i32 n = 2 * half_ + 1;
     l0_.half = half_;
-    l0_.t = patch(g, seed, half_);
-    const Gray g1 = half_res(g);
+    l0_.t = patch(*frame.full, seed, half_);
     l1_.half = std::max(2, half_ / 2);
-    l1_.t = patch(g1, Vec2{(seed.x + 0.5f) * 0.5f - 0.5f, (seed.y + 0.5f) * 0.5f - 0.5f}, l1_.half);
+    l1_.t = patch(frame.coarse, Vec2{(seed.x + 0.5f) * 0.5f - 0.5f, (seed.y + 0.5f) * 0.5f - 0.5f}, l1_.half);
     prior_.assign(static_cast<usize>(n) * n, 0.0f);
     const f64 sigma = std::max(1.0, static_cast<f64>(half_));
     for (i32 y = -half_; y <= half_; ++y)
@@ -343,44 +345,51 @@ void TemplateTracker::refresh_weights() {
         }
 }
 
-void TemplateTracker::start(const Gray& g, Vec2 seed, i32 half) {
+void TemplateTracker::start(const TemplateFrame& frame, Vec2 seed, i32 half) {
     half_ = std::clamp(half, 2, 48);
-    build(g, seed);
-    last_ = g;
+    build(frame, seed);
+    last_ = frame.full;
     lastPos_ = seed;
 }
 
-TrackStep TemplateTracker::track(const Gray& cur, Vec2 predicted, i32 radius, f32 accept) {
+TrackStep TemplateTracker::track(const TemplateFrame& frame, Vec2 predicted, i32 radius, f32 accept, bool validateBack) {
+    const auto& cur = *frame.full;
     radius = std::clamp(radius, 2, 192);
     // 1. Janela inteira na metade da resolução; 2. refino ±2 px; 3. pesos
     //    robustos (resíduo de cada pixel) e um novo refino ±1 px.
-    const Gray c1 = half_res(cur);
     const Vec2 p1{(predicted.x + 0.5f) * 0.5f - 0.5f, (predicted.y + 0.5f) * 0.5f - 0.5f};
-    const TrackStep coarse = weighted_search(l1_.t, l1_.w, l1_.half, c1, p1, std::max(2, (radius + 1) / 2));
+    const TrackStep coarse = weighted_search(l1_.t, l1_.w, l1_.half, frame.coarse, p1, std::max(2, (radius + 1) / 2));
     TrackStep step = weighted_search(l0_.t, l0_.w, half_, cur, Vec2{coarse.pos.x * 2 + 0.5f, coarse.pos.y * 2 + 0.5f}, 2);
+    auto agrees = [&](Vec2 candidate) {
+        if (!validateBack) return true;
+        const auto reverse = track_step(cur, *last_, candidate, std::min(half_, 14), 4, lastPos_, true);
+        return reverse.score >= .55f && (reverse.pos - lastPos_).length_sq() <= 2.25f;
+    };
     // A aceitação usa os pesos JÁ aprendidos: o reajuste dos pesos no próprio
     // quadro não pode "explicar" um objeto que sumiu (oclusão) pelo fundo.
-    if (step.score >= accept) {
-        std::vector<f32> resid;
-        (void)weighted_ncc(l0_.t, l0_.w, half_, cur, static_cast<i32>(std::lround(step.pos.x)), static_cast<i32>(std::lround(step.pos.y)), &resid);
-        for (usize k = 0; k < rho_.size(); ++k) rho_[k] = 0.7f * rho_[k] + 0.3f * resid[k] * resid[k];
+    if (step.score >= accept && agrees(step.pos)) {
+        (void)weighted_ncc(l0_.t, l0_.w, half_, cur, static_cast<i32>(std::lround(step.pos.x)), static_cast<i32>(std::lround(step.pos.y)), &residuals_);
+        for (usize k = 0; k < rho_.size(); ++k) rho_[k] = 0.7f * rho_[k] + 0.3f * residuals_[k] * residuals_[k];
         refresh_weights();
         const TrackStep again = weighted_search(l0_.t, l0_.w, half_, cur, step.pos, 1);
-        if (again.score >= accept) step.pos = again.pos;
-        last_ = cur;
+        if (again.score >= accept && agrees(again.pos)) step.pos = again.pos;
+        last_ = frame.full;
         lastPos_ = step.pos;
         return step;
     }
     // Aparência mudou (giro, escala, luz local): o passo a passo desde o
     // último quadro aceito; se ele casar bem, o bloco é renovado ali.
-    const TrackStep chained = track_step(last_, cur, lastPos_, half_, std::min(radius, 96), predicted);
-    if (chained.score >= std::max(accept, 0.8f)) {
-        build(cur, chained.pos);
-        last_ = cur;
+    const TrackStep chained = track_step(*last_, cur, lastPos_, half_, std::min(radius, 96), predicted);
+    if (chained.score >= std::max(accept, 0.8f) && agrees(chained.pos)) {
+        build(frame, chained.pos);
+        last_ = frame.full;
         lastPos_ = chained.pos;
         return chained;
     }
-    return step.score >= chained.score ? step : chained;
+    // Only report a measurement above accept when the tracker advanced its
+    // state. The chained match has a stricter threshold because it can drift.
+    if (step.score >= accept) step.score = 0;
+    return step;
 }
 
 } // namespace aurea::tracking

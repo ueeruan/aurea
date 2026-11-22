@@ -28,13 +28,15 @@ struct PaidItem: Equatable, Identifiable {
     let product: String?
     let kind: Kind
     var name: String? = nil
-    var id: String { "\(kind)-\(product ?? "hyper")-\(name ?? "")" }
+    var subscriptionOnly = false
+    var id: String { "\(kind)-\(product ?? "hyper")-\(name ?? "")-\(subscriptionOnly)" }
 
     static func effect(_ typeId: UInt32, name: String?) -> PaidItem {
         PaidItem(product: AureaEngine.effectProductId(typeId), kind: .effect, name: name)
     }
     static func text3D() -> PaidItem { PaidItem(product: AureaEngine.text3DProductId(), kind: .text3D) }
     static let hyperTools = PaidItem(product: nil, kind: .hyperTools)
+    static let subscriptionTools = PaidItem(product: nil, kind: .hyperTools, subscriptionOnly: true)
 }
 
 @MainActor
@@ -222,7 +224,7 @@ struct PaywallSheet: View {
                 if signingIn { ContaView() }
                 else {
                     ScrollView {
-                        PaywallContent(item: item, access: entitlements.accessFor(item.product),
+                        PaywallContent(item: item, access: entitlements.accessFor(item.product, subscriptionOnly: item.subscriptionOnly),
                                        onSignIn: { conta.entrando = true; signingIn = true },
                                        onRetry: { conta.atualizarAcessos(retryPurchases: true) })
                             .padding(.horizontal, 18)
@@ -243,7 +245,7 @@ struct PaywallSheet: View {
         }
         .onChange(of: conta.logado) { if $0 { signingIn = false; conta.atualizarAcessos() } }
         .onChange(of: entitlements.revision) { _ in
-            if entitlements.accessFor(item.product) == .unlocked { onDismiss() }
+            if entitlements.accessFor(item.product, subscriptionOnly: item.subscriptionOnly) == .unlocked { onDismiss() }
         }
     }
 }

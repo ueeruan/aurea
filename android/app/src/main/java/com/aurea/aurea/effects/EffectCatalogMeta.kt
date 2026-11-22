@@ -267,7 +267,7 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     put("aurea.distort.mirror", EffectMeta(R.string.fx_desc_distort_mirror, AllTargets,
         "espelhar camada mirror layer flip dois eixos sobrepor copia alight motion"))
     put("aurea.distort.puppet", EffectMeta(R.string.fx_desc_puppet, AllTargets,
-        "fantoche puppet pino pin marionete rig personagem deformar"))
+        "fantoche puppet pino pin marionete rig autorig 2d autoanimacao png personagem deformar"))
     put("aurea.transform.crop", EffectMeta(R.string.fx_desc_transform_crop, AllTargets))
     put("aurea.stylize.vignette", EffectMeta(R.string.fx_desc_stylize_vignette, AllTargets))
     put("aurea.stylize.mosaic", EffectMeta(R.string.fx_desc_stylize_mosaic, AllTargets))

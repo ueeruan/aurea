@@ -40,6 +40,7 @@
 #include <atomic>
 #include <cmath>
 #include <string>
+#include <span>
 #include <vector>
 
 namespace aurea::tracking {
@@ -59,13 +60,14 @@ enum class TrackMode : u8 { Fast = 0, Balanced, High };
 class FeatureTracker {
 public:
     explicit FeatureTracker(TrackMode mode = TrackMode::Balanced) noexcept;
-    void add_frame(const Gray& g);
+    /// A region, when present, limits detection of new corners in this frame.
+    void add_frame(const Gray& g, std::span<const Vec2> seedRegion = {});
     [[nodiscard]] const Tracks2D& tracks() const noexcept { return tracks_; }
     [[nodiscard]] u32 active() const noexcept { return static_cast<u32>(active_.size()); }
 
 private:
     struct Active { u32 track; Vec2 pos; };
-    void detect(const Gray& g);
+    void detect(const Gray& g, std::span<const Vec2> seedRegion);
     u32 maxFeatures_ = 400;
     f32 minDistance_ = 10.0f;
     std::vector<Gray> prev_;

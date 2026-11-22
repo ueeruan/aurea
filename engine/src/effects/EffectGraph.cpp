@@ -452,6 +452,7 @@ void EffectGraph::plan_f(const Layer& layer, const EffectRegistry& registry, f64
             e.effectIndex = source.index;
             e.localTime = FrameIndex{static_cast<i64>(std::floor(source.time))};
             e.fractionalTime = source.time;
+            e.compositionTime = globalTime;
             e.framesPerSecond = std::isfinite(framesPerSecond) && framesPerSecond > 0 ? framesPerSecond : 30.0;
             e.texelScale = texelScale;
             e.placement = &out.placement;
@@ -508,6 +509,7 @@ void EffectGraph::plan_f(const Layer& layer, const EffectRegistry& registry, f64
         e.effectIndex = source.index;
         e.localTime = FrameIndex{static_cast<i64>(std::floor(source.time))};
         e.fractionalTime = source.time;
+        e.compositionTime = globalTime;
         e.framesPerSecond = std::isfinite(framesPerSecond) && framesPerSecond > 0 ? framesPerSecond : 30.0;
         e.texelScale = texelScale;
         e.layer = &layer;

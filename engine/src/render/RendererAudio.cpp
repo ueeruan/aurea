@@ -60,6 +60,17 @@ private:
 
 } // namespace
 
+f64 Renderer::frames_since_beat(f64 compositionTime) const noexcept {
+    if (!planComp_ || !std::isfinite(compositionTime)) return std::numeric_limits<f64>::infinity();
+    const auto& markers = planComp_->markers();
+    auto next = std::upper_bound(markers.begin(), markers.end(), compositionTime,
+        [](f64 time, const Marker& marker) { return time < marker.frame.value; });
+    while (next != markers.begin()) {
+        if ((--next)->kind == kMarkerBeat) return compositionTime - next->frame.value;
+    }
+    return std::numeric_limits<f64>::infinity();
+}
+
 AudioAnalysisResult Renderer::audio_analysis(const AudioAnalysisRequest& request) noexcept {
     AudioAnalysisResult none;
     if (!backend_ || !planComp_ || !planProject_) return none;

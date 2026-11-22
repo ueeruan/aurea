@@ -106,12 +106,12 @@ struct Panel3DView: View {
                               "pn_t3d_preset_puffy", "pn_t3d_preset_retro80", "pn_t3d_preset_neon_edge", "pn_t3d_preset_block",
                               "pn_t3d_preset_ice", "pn_t3d_preset_stone", "pn_t3d_preset_rose_gold",
                               // 0.5.4: Cartoon (motor 14 — cel chapado + contorno; só no texto 3D).
-                              "pn_t3d_preset_cartoon"]
+                              "pn_t3d_preset_cartoon", "pn_t3d_preset_ink_poster"]
     /// Cor da amostra de cada material pronto (a mesma ordem do motor).
     private let presetSwatches: [[Float]] = [[0.95, 0.96, 0.98], [1, 0.77, 0.34], [0.78, 0.79, 0.8], [0.9, 0.1, 0.12],
                                              [0.85, 0.85, 0.86], [0.1, 1, 0.85], [0.66, 0.68, 0.72],
                                              [1, 0.45, 0.72], [0.75, 0.1, 0.62], [1, 0.2, 0.85], [1, 0.82, 0.2],
-                                             [0.78, 0.92, 1], [0.55, 0.53, 0.5], [0.98, 0.68, 0.6], [0.96, 0.45, 0.57]]
+                                             [0.78, 0.92, 1], [0.55, 0.53, 0.5], [0.98, 0.68, 0.6], [0.96, 0.45, 0.57], [1, 1, 1]]
     private let finishKeys = ["ui3d_finish_smooth", "ui3d_finish_brushed", "ui3d_finish_scratched",
                               "ui3d_finish_hammered", "ui3d_finish_weathered"]
 
@@ -292,9 +292,10 @@ struct Panel3DView: View {
         VStack(alignment: .leading, spacing: 0) {
             envSection("ui3d_ready_materials", id: "text3d.presets") {
             horizontal {
-                ForEach([6, 0, 1, 2, 3, 4, 5] + Array(7...14), id: \.self) { index in
+                ForEach([6, 0, 1, 2, 3, 4, 5] + Array(7...15), id: \.self) { index in
                     // A bola de estúdio do material (o motor calcula; até chegar, a cor chapada).
-                    swatchChip(presetKeys[index], swatch: presetSwatches[index], thumb: presetThumb(index)) {
+                    swatchChip(presetKeys[index], swatch: presetSwatches[index], thumb: presetThumb(index), subscriptionOnly: index == 15) {
+                        guard index != 15 || model.requireHyperSubscription() else { return }
                         finishEditing()
                         model.reportText3D(model.engine.applyText3DPreset(layerId, preset: UInt32(index)))
                         refresh()
@@ -1021,11 +1022,13 @@ struct Panel3DView: View {
                 .contentShape(Rectangle())
         }.buttonStyle(AureaPressStyle())
     }
-    private func swatchChip(_ key: String, swatch: [Float], thumb: UIImage?, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+    private func swatchChip(_ key: String, swatch: [Float], thumb: UIImage?, subscriptionOnly: Bool = false,
+                            action: @escaping () -> Void) -> some View {
+        let label = AureaText.t(key) + (subscriptionOnly ? " · " + AureaText.t("hyper_title") : "")
+        return Button(action: action) {
             HStack(spacing: 7) {
                 MaterialBallView(image: thumb, fallback: AureaColorSpace.color(swatch + [1]), size: 30)
-                Text(AureaText.t(key)).font(.aurea(size: 12.5)).foregroundStyle(AureaColors.text)
+                Text(label).font(.aurea(size: 12.5)).foregroundStyle(AureaColors.text)
             }
             .padding(.leading, 5).padding(.trailing, 10).frame(minHeight: 44)
             .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 9))

@@ -14,6 +14,7 @@
 
 #include <vector>
 #include <cmath>
+#include <memory>
 
 namespace aurea { class DecodedFrame; }
 
@@ -60,6 +61,14 @@ struct TrackStep {
 /// diferente dominava a correlação e o rastreio seguia o fundo.
 [[nodiscard]] i32 feature_half_at(const Gray& g, Vec2 c, i32 minHalf, i32 maxHalf) noexcept;
 
+/// One analysis frame shared by the point trackers in a job. Trackers retain
+/// only the full-resolution luma of their last accepted measurement.
+struct TemplateFrame {
+    explicit TemplateFrame(Gray gray);
+    std::shared_ptr<const Gray> full;
+    Gray coarse;
+};
+
 /// Rastreio de UM detalhe contra o bloco do quadro onde ele foi escolhido
 /// (sem a deriva do passo a passo), com peso por pixel: gaussiano no centro e,
 /// aprendido quadro a quadro, menor onde o conteúdo não acompanha o detalhe
@@ -68,19 +77,20 @@ struct TrackStep {
 /// muda demais (giro, escala), segue o passo a passo e renova o bloco.
 class TemplateTracker {
 public:
-    void start(const Gray& g, Vec2 seed, i32 half);
+    void start(const TemplateFrame& frame, Vec2 seed, i32 half);
     /// Procura em `cur` perto de `predicted` (±radius px). Com pontuação ≥
     /// `accept`, a posição é aceita (pesos e quadro anterior atualizados).
-    TrackStep track(const Gray& cur, Vec2 predicted, i32 radius, f32 accept);
+    TrackStep track(const TemplateFrame& frame, Vec2 predicted, i32 radius, f32 accept, bool validateBack = false);
     [[nodiscard]] i32 half() const noexcept { return half_; }
 
 private:
     struct Level { i32 half = 0; std::vector<f32> t, w; };
-    void build(const Gray& g, Vec2 seed);
+    void build(const TemplateFrame& frame, Vec2 seed);
     void refresh_weights();
     Level l0_, l1_;
     std::vector<f32> prior_, rho_;
-    Gray last_;
+    std::shared_ptr<const Gray> last_;
+    std::vector<f32> residuals_;
     Vec2 lastPos_{0, 0};
     i32 half_ = 0;
 };

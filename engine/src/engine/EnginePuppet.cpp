@@ -14,8 +14,10 @@
 #include "aurea/effects/Puppet.hpp"
 #include "aurea/ai/RotoService.hpp"
 #include "aurea/render/Renderer.hpp"
+#include "AutoRigParts.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace aurea {
@@ -269,6 +271,374 @@ i32 Engine::puppet_add_pin(u64 layerId, u32 effectId, f32 u, f32 v) noexcept {
     project_->mark_dirty();
     request_render();
     return slot;
+}
+
+i32 Engine::puppet_auto_rig_image(u64 layerId, u32 effectId, const f32* pose, u32 count) noexcept {
+    if (!pose || count != 2 + 33 * 4) return -1;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    EffectInstance* effect = puppet_effect(layer, effectId);
+    if (!effect || !layer || layer->locked || layer->kind != LayerKind::Image
+        || layer->duration().value < 2 || effect->params.size() < puppet::kParamCount) return -1;
+    for (u32 slot = 0; slot < puppet::kMaxPins; ++slot)
+        if (pin_on(*effect, slot)) return -2;
+
+    const auto source = images_.find(layer->source.pack());
+    if (source == images_.end() || !source->second) return -1;
+    const auto& image = *source->second;
+    if (image.width == 0 || image.height == 0
+        || image.rgba.size() / 4 < static_cast<usize>(image.width) * image.height) return -1;
+    const f32 w = static_cast<f32>(image.width), h = static_cast<f32>(image.height);
+    enum Joint : u32 { Pelvis, Head, LeftShoulder, RightShoulder, LeftElbow, RightElbow,
+        LeftWrist, RightWrist, LeftHip, RightHip, LeftKnee, RightKnee, LeftAnkle, RightAnkle, Chest, JointCount };
+    static_assert(JointCount <= puppet::kMaxPins);
+    constexpr std::array<u32, JointCount> detector = {0, 0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28, 0};
+    std::array<Vec2, JointCount> rest{};
+    std::array<bool, JointCount> detected{};
+    for (u32 joint = Head; joint < Chest; ++joint) {
+        const f32* point = pose + 2 + detector[joint] * 4;
+        if (!std::isfinite(point[0]) || !std::isfinite(point[1]) || !std::isfinite(point[3])
+            || point[3] < 0.45f || point[0] < 0 || point[0] >= 1 || point[1] < 0 || point[1] >= 1) continue;
+        const u32 x = std::min(image.width - 1, static_cast<u32>(point[0] * w));
+        const u32 y = std::min(image.height - 1, static_cast<u32>(point[1] * h));
+        if (image.rgba[(static_cast<usize>(y) * image.width + x) * 4 + 3] < 26) continue;
+        rest[joint] = {point[0] * w, point[1] * h};
+        detected[joint] = true;
+    }
+    const bool shoulders = detected[LeftShoulder] && detected[RightShoulder];
+    const bool hips = detected[LeftHip] && detected[RightHip];
+    const bool wholeTorso = shoulders && hips;
+    const bool leftArm = detected[LeftShoulder] && detected[LeftElbow];
+    const bool rightArm = detected[RightShoulder] && detected[RightElbow];
+    // Crops can omit the hips or hide a shoulder. Require a visible head plus
+    // a shoulder and elbow, or the two shoulders and a visible head or arm.
+    if (!wholeTorso && !(shoulders ? detected[Head] || leftArm || rightArm
+                                 : detected[Head] && (leftArm || rightArm))) return -1;
+    rest[Chest] = shoulders ? (rest[LeftShoulder] + rest[RightShoulder]) * .5f
+                            : rest[leftArm ? LeftShoulder : RightShoulder];
+    detected[Chest] = shoulders;
+    if (wholeTorso) {
+        rest[Pelvis] = (rest[LeftHip] + rest[RightHip]) * .5f;
+        detected[Pelvis] = true;
+    } else {
+        // No lower-body chain without an observed pelvis to anchor it.
+        for (Joint joint : {LeftHip, RightHip, LeftKnee, RightKnee, LeftAnkle, RightAnkle}) detected[joint] = false;
+    }
+    const Vec2 pivot = rest[wholeTorso ? Pelvis : Chest];
+    const f32 torso = wholeTorso ? (rest[Chest] - pivot).length()
+        : shoulders ? (rest[LeftShoulder] - rest[RightShoulder]).length()
+                    : (rest[Head] - rest[Chest]).length();
+    if (!std::isfinite(torso) || torso < 5.0f) return -1;
+    detected[LeftElbow] = leftArm;
+    detected[RightElbow] = rightArm;
+    detected[LeftWrist] = detected[LeftWrist] && detected[LeftElbow];
+    detected[RightWrist] = detected[RightWrist] && detected[RightElbow];
+    detected[LeftAnkle] = detected[LeftAnkle] && detected[LeftKnee];
+    detected[RightAnkle] = detected[RightAnkle] && detected[RightKnee];
+
+    const FrameIndex start = layer->local_time(layer->start);
+    const i64 length = layer->duration().value - 1;
+    const f64 fps = std::isfinite(comp->fps()) ? std::clamp(comp->fps(), 1.0, 240.0) : 30.0;
+    const i64 period = std::max<i64>(8, static_cast<i64>(std::llround(fps * 2.4)));
+    const i64 step = std::max<i64>(1, period / 16);
+    // Keep key density bounded on long stills. After the final key the idle holds.
+    const i64 animationLength = std::min(length, period * 32);
+    auto rotate = [](Vec2 delta, f32 angle) {
+        const f32 c = std::cos(angle), s = std::sin(angle);
+        return Vec2{c * delta.x - s * delta.y, s * delta.x + c * delta.y};
+    };
+    f32 outline[puppet::kOutline];
+    if (!puppet_capture_outline(*comp, *layer, start, outline)) return -1;
+    history_.before_mutation(*comp, project_->timeline().current(), "AutoRig 2D");
+    for (u32 row = 0; row < puppet::kOutline; ++row)
+        effect->params[puppet::kOutlineFirst + row].constant.v[0] = outline[row];
+
+    auto normalized = [w, h](Vec2 p) { return Vec2{p.x / w, p.y / h}; };
+    i32 pins = 0;
+    for (u32 joint = 0; joint < JointCount; ++joint) {
+        if (!detected[joint]) continue;
+        const auto p = normalized(rest[joint]);
+        effect->params[puppet::pin_on(joint)].constant.v[0] = 1.0f;
+        auto& bind = effect->params[puppet::pin_rest(joint)].constant;
+        bind.v[0] = p.x;
+        bind.v[1] = p.y;
+        write_pin_pos(*layer, *effect, joint, p, start, true);
+        ++pins;
+    }
+
+    for (i64 frame = step; ; frame = std::min(animationLength, frame + step)) {
+        frame = std::min(animationLength, frame);
+        const f32 phase = static_cast<f32>((frame % period) * 2.0 * kPi / period);
+        const f32 wave = std::sin(phase), breath = 0.5f - 0.5f * std::cos(phase);
+        const Vec2 rootShift{.025f * torso * wave, .012f * torso * breath};
+        const Vec2 upperShift{rootShift.x, rootShift.y - .018f * torso * breath};
+        const f32 sway = .045f * wave;
+        auto now = rest;
+        auto upper = [&](Joint j) { return pivot + upperShift + rotate(rest[j] - pivot, sway); };
+        now[Pelvis] = rest[Pelvis] + rootShift;
+        for (Joint j : {Head, Chest, LeftShoulder, RightShoulder}) now[j] = upper(j);
+        if (detected[Head]) {
+            now[Head] = now[Chest] + rotate(rest[Head] - rest[Chest], sway * .35f);
+        }
+        auto arm = [&](Joint shoulder, Joint elbow, Joint wrist, f32 direction) {
+            if (!detected[elbow]) return;
+            const f32 swing = direction * .055f * wave;
+            now[elbow] = now[shoulder] + rotate(rest[elbow] - rest[shoulder], sway + swing);
+            if (detected[wrist]) now[wrist] = now[elbow] + rotate(rest[wrist] - rest[elbow], sway + swing * 1.4f);
+        };
+        arm(LeftShoulder, LeftElbow, LeftWrist, 1);
+        arm(RightShoulder, RightElbow, RightWrist, -1);
+        auto leg = [&](Joint hip, Joint knee, Joint ankle) {
+            now[hip] = rest[hip] + rootShift;
+            if (!detected[knee]) return;
+            now[knee] = rest[knee] + rootShift * .45f;
+            if (!detected[ankle]) return;
+            const Vec2 toAnkle = rest[ankle] - now[hip];
+            const f32 span = toAnkle.length();
+            const f32 upperLength = (rest[knee] - rest[hip]).length();
+            const f32 lowerLength = (rest[ankle] - rest[knee]).length();
+            if (span < 1.0f || upperLength < 1.0f || lowerLength < 1.0f) return;
+            const Vec2 along = toAnkle / span, across{-along.y, along.x};
+            const f32 reach = std::clamp(span, std::abs(upperLength - lowerLength), upperLength + lowerLength);
+            const f32 distance = (upperLength * upperLength - lowerLength * lowerLength + reach * reach) / (2.0f * reach);
+            const f32 bend = std::sqrt(std::max(0.0f, upperLength * upperLength - distance * distance));
+            const Vec2 original = rest[knee] - rest[hip];
+            const f32 side = original.x * across.x + original.y * across.y >= 0 ? 1.0f : -1.0f;
+            now[knee] = now[hip] + along * distance + across * (bend * side);
+        };
+        leg(LeftHip, LeftKnee, LeftAnkle);
+        leg(RightHip, RightKnee, RightAnkle);
+        for (u32 joint = 0; joint < JointCount; ++joint) {
+            if (detected[joint]) write_pin_pos(*layer, *effect, joint, normalized(now[joint]), FrameIndex{start.value + frame}, true);
+        }
+        if (frame == animationLength) break;
+    }
+    bump_model_revision_locked();
+    comp->touch();
+    project_->mark_dirty();
+    request_render();
+    return pins;
+}
+
+i32 Engine::puppet_auto_rig_parts(u64 layerId, u32 effectId, const f32* pose, u32 count) noexcept {
+    if (!pose || count != 2 + 33 * 4) return -1;
+    const LayerId sourceId = LayerId::unpack(layerId);
+    std::shared_ptr<const ImagePixels> image;
+    CompositionId parent{};
+    u64 session = 0;
+    auto compatible = [&](const Layer* layer) {
+        return layer && !layer->locked && layer->kind == LayerKind::Image && !layer->threeD &&
+               layer->visible && layer->duration().value >= 2 && layer->effects.size() == 1 &&
+               layer->effects.front().id == effectId && layer->effects.front().enabled &&
+               layer->effects.front().type == effect_type_id(puppet::kPuppetKey) &&
+               layer->effects.front().params.size() >= puppet::kParamCount && layer->masks.empty() &&
+               !layer->matteSource.valid() && layer->blendMode == BlendMode::Normal &&
+               !layer->adjustment;
+    };
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        drain_commands_locked();
+        InlineEditScope inlineScope(*this, layerId);
+        const auto* comp = project_ ? current_composition() : nullptr;
+        const auto* layer = comp ? comp->layer(sourceId) : nullptr;
+        if (!compatible(layer)) return -3;
+        for (u32 i = 0; i < puppet::kMaxPins; ++i) if (pin_on(layer->effects.front(), i)) return -2;
+        const auto it = images_.find(layer->source.pack());
+        if (it == images_.end() || !it->second) return -1;
+        image = it->second;
+        parent = project_->timeline().current();
+        session = projectSession_;
+    }
+    const u32 w = image->width, h = image->height;
+    if (!w || !h || image->rgba.size() / 4 < static_cast<usize>(w) * h) return -1;
+    const auto cuts = autorig::cut(image->rgba.data(), w, h, pose);
+    if (cuts.empty()) return -1;
+    usize masks = 0;
+    for (const auto& cut : cuts) masks += cut.contours.size();
+    if (masks > kMaxMaskCount || std::any_of(cuts.begin(), cuts.end(), [](const autorig::Cut& cut) {
+        return std::any_of(cut.contours.begin(), cut.contours.end(), [](const autorig::Contour& c) {
+            return c.points.size() > 4096;
+        });
+    })) return -3;
+
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    InlineEditScope inlineScope(*this, layerId, true);
+    Composition* comp = project_ && projectSession_ == session && project_->timeline().current() == parent
+        ? current_composition() : nullptr;
+    Layer* layer = comp ? comp->layer(sourceId) : nullptr;
+    if (!compatible(layer) || comp->layers().count() + cuts.size() > kMaxLayerCount) return -3;
+    const auto found = images_.find(layer->source.pack());
+    if (found == images_.end() || found->second != image) return -1;
+    for (u32 i = 0; i < puppet::kMaxPins; ++i) if (pin_on(layer->effects.front(), i)) return -2;
+    // An image used as another layer's matte has to remain whole.
+    bool usedAsMatte = false;
+    comp->layers().for_each([&](LayerId, const Layer& sibling) { usedAsMatte |= sibling.matteSource == sourceId; });
+    if (usedAsMatte) return -3;
+
+    using autorig::Part;
+    constexpr std::array names{"Tronco e base", "Rosto", "Cabelo", "Mão esquerda", "Mão direita",
+                               "Braço esquerdo", "Braço direito", "Perna esquerda", "Perna direita",
+                               "Pálpebra esquerda", "Pálpebra direita"};
+    const std::string name = layer->name;
+    const FrameIndex timelineStart = layer->start;
+    const i64 length = layer->duration().value - 1;
+    const f64 fps = std::clamp(comp->fps(), 1.0, 240.0);
+    const i64 period = std::max<i64>(8, std::llround(fps * 2.6));
+    const i64 step = std::max<i64>(1, period / 14);
+    const i64 end = std::min(length, period * 32);
+    const Vec2 imageSize{static_cast<f32>(w), static_cast<f32>(h)};
+    const f32 unit = std::min(imageSize.x, imageSize.y);
+    const auto normalize = [&](Vec2 p) { return Vec2{p.x / imageSize.x, p.y / imageSize.y}; };
+    f32 outline[puppet::kOutline]{};
+    const bool hasOutline = puppet_capture_outline(*comp, *layer, layer->local_time(layer->start), outline);
+    auto addMask = [&](Layer& part, const autorig::Contour& contour, bool inverse) {
+        Mask mask;
+        mask.id = part.alloc_mask_id();
+        mask.name = part.name;
+        mask.operation = contour.hole != inverse ? MaskOperation::Subtract : MaskOperation::Add;
+        // A narrow underlap keeps a moving cut from opening a transparent
+        // seam across an otherwise connected illustration.
+        if (inverse && !contour.hole) mask.expansion = -std::clamp(unit * .006f, 1.5f, 7.f);
+        for (Vec2 p : contour.points) mask.points.push_back({p, {}, {}});
+        part.masks.push_back(std::move(mask));
+    };
+    auto rig = [&](Layer& part, Part kind, Vec2 pivot, Vec2 tip) {
+        EffectInstance& effect = part.effects.front();
+        const FrameIndex first = part.local_time(part.start);
+        // Keep enough of the source-coordinate mesh to carry all mask edges.
+        // The image cutout is applied before the Puppet effect in the render graph.
+        if (hasOutline) {
+            for (u32 row = 0; row < puppet::kOutline; ++row)
+                effect.params[puppet::kOutlineFirst + row].constant.v[0] = outline[row];
+        }
+        if ((tip - pivot).length() < 4) tip = pivot + Vec2{unit * .05f, 0};
+        const Vec2 delta = tip - pivot;
+        const std::array rest{pivot, tip, pivot + delta * .56f + Vec2{-delta.y, delta.x} * .27f};
+        for (u32 pin = 0; pin < rest.size(); ++pin) {
+            const Vec2 uv = normalize(rest[pin]);
+            effect.params[puppet::pin_on(pin)].constant.v[0] = 1;
+            auto& bind = effect.params[puppet::pin_rest(pin)].constant;
+            bind.v[0] = uv.x;
+            bind.v[1] = uv.y;
+        }
+        for (i64 frame = 0; ; frame = std::min(end, frame + step)) {
+            const f32 phase = static_cast<f32>((frame % period) * 6.283185307 / period);
+            const f32 sway = std::sin(phase), breath = .5f - .5f * std::cos(phase);
+            const Vec2 root{unit * .004f * sway, -unit * .006f * breath};
+            f32 angle = .012f * sway;
+            if (kind == Part::Face || autorig::is_lid(kind)) angle += .024f * sway;
+            if (kind == Part::Hair) angle += .045f * (.8f * sway - .24f * std::sin(phase * 2));
+            if (kind == Part::LeftHand || kind == Part::RightHand)
+                angle += .081f * sway * (kind == Part::LeftHand ? 1 : -1);
+            if (kind == Part::LeftArm || kind == Part::RightArm)
+                angle += .046f * sway * (kind == Part::LeftArm ? 1 : -1);
+            if (kind == Part::LeftLeg || kind == Part::RightLeg)
+                angle += .021f * sway * (kind == Part::LeftLeg ? -1 : 1);
+            for (u32 pin = 0; pin < rest.size(); ++pin) {
+                f32 bend = angle;
+                if (kind == Part::Hair && pin > 0)
+                    bend += .017f * (pin == 1 ? sway : std::sin(phase * 2));
+                if ((kind == Part::LeftHand || kind == Part::RightHand) && pin == 1)
+                    bend += .019f * std::sin(phase * 2);
+                const f32 c = std::cos(bend), s = std::sin(bend);
+                const Vec2 d = rest[pin] - pivot;
+                const Vec2 position = pivot + root + Vec2{c * d.x - s * d.y, s * d.x + c * d.y};
+                write_pin_pos(part, effect, pin, normalize(position), FrameIndex{first.value + frame}, true);
+            }
+            if (frame == end) break;
+        }
+    };
+    auto blink = [&](Layer& part, const autorig::Cut& cut) {
+        const Vec2 down = cut.down, across{down.y, -down.x};
+        const f32 extent = 2 * std::max(imageSize.x, imageSize.y);
+        f32 top = extent, bottom = -extent;
+        for (const auto& contour : cut.contours) for (const Vec2 p : contour.points) {
+            const f32 height = p.x * down.x + p.y * down.y;
+            top = std::min(top, height);
+            bottom = std::max(bottom, height);
+        }
+        top -= 1;
+        bottom += 1;
+        Mask clip;
+        clip.id = part.alloc_mask_id();
+        clip.name = part.name;
+        clip.operation = MaskOperation::Intersect;
+        const auto points = [&](f32 closure) {
+            const f32 edge = top + (bottom - top) * closure;
+            return std::vector<MaskPoint>{
+                {across * -extent - down * extent, {}, {}}, {across * extent - down * extent, {}, {}},
+                {across * extent + down * edge, {}, {}}, {across * -extent + down * edge, {}, {}},
+            };
+        };
+        clip.points = points(0);
+        const i64 first = part.local_time(part.start).value;
+        const auto key = [&](i64 frame, f32 closure) {
+            if (frame > end) return;
+            MaskPathKey k;
+            k.frame = first + frame;
+            k.points = points(closure);
+            clip.pathKeys.push_back(std::move(k));
+        };
+        key(0, 0);
+        const i64 closing = std::max<i64>(1, std::llround(fps * .077));
+        const i64 opening = std::max<i64>(1, std::llround(fps * .114));
+        for (i64 start = std::llround(period * .43); start + closing + opening + 1 <= end; start += period) {
+            key(start, 0);
+            key(start + closing, 1);
+            key(start + closing + 1, 1);
+            key(start + closing + opening + 1, 0);
+        }
+        part.masks.push_back(std::move(clip));
+    };
+
+    // Reuse the original layer for the base so existing layer references and
+    // transform keyframes keep the same ID. Copies share the image asset.
+    history_.before_mutation(*comp, parent, "AutoRig 2D · camadas");
+    std::vector<LayerId> made;
+    made.reserve(cuts.size());
+    const i32 z = comp->z_index_of(sourceId);
+    for (const auto& cut : cuts) {
+        const LayerId id = comp->duplicate_layer(sourceId, timelineStart);
+        auto* part = comp->layer(id);
+        if (!part) {
+            for (const auto created : made) comp->remove_layer(created);
+            return -3;
+        }
+        part->name = name + " · " + names[static_cast<usize>(cut.part)];
+        part->magneticTrack = false;
+        for (const auto& contour : cut.contours) addMask(*part, contour, false);
+        if (autorig::is_lid(cut.part)) {
+            part->kind = LayerKind::Shape;
+            part->source = {};
+            part->shape = {};
+            part->shape.bounds = {0, 0, imageSize.x, imageSize.y};
+            part->shape.fillColor = cut.fill;
+            for (auto& mask : part->masks) if (mask.operation == MaskOperation::Add) mask.expansion = .5f;
+            blink(*part, cut);
+        }
+        rig(*part, cut.part, cut.pivot, cut.tip);
+        made.push_back(id);
+    }
+    for (usize i = 0; i < made.size(); ++i) comp->reorder_layer(made[i], static_cast<u32>(z + 1 + i));
+    layer = comp->layer(sourceId);
+    layer->name = name + " · " + names[0];
+    for (const auto& cut : cuts)
+        if (!autorig::is_lid(cut.part))
+            for (const auto& contour : cut.contours) if (!contour.hole) addMask(*layer, contour, true);
+    for (const auto& cut : cuts)
+        if (!autorig::is_lid(cut.part))
+            for (const auto& contour : cut.contours) if (contour.hole) addMask(*layer, contour, true);
+    rig(*layer, Part::Body, {imageSize.x * .48f, imageSize.y * .74f},
+        {imageSize.x * .45f, imageSize.y * .32f});
+    bump_model_revision_locked();
+    comp->touch();
+    project_->mark_dirty();
+    request_render();
+    return static_cast<i32>(made.size() + 1);
 }
 
 bool Engine::puppet_move_pin(u64 layerId, u32 effectId, u32 pin, f32 u, f32 v, bool autoKey, bool continuing) noexcept {

@@ -9,6 +9,9 @@
 #include <atomic>
 #include <cstdio>
 #include <cstring>
+#if defined(__ANDROID__)
+#include <sys/system_properties.h>
+#endif
 #if !defined(_WIN32)
 #include <unistd.h>
 #endif
@@ -110,6 +113,14 @@ Status Backend::initialize(const BackendConfig& config) noexcept {
 
     if (!load_library()) return Status{Errc::NotSupported, "biblioteca Vulkan ausente"};
     if (const Status s = create_instance(config.enableValidation); !s.ok()) return s;
+#if defined(__ANDROID__)
+    if (config.enableValidation) {
+        char startupProbe[PROP_VALUE_MAX]{};
+        __system_property_get("debug.aurea.gpu", startupProbe);
+        if (std::strcmp(startupProbe, "reject-vulkan") == 0)
+            return Status{Errc::NotSupported, "diagnostic: Vulkan device rejected after instance creation"};
+    }
+#endif
     if (const Status s = pick_device(); !s.ok()) return s;
     if (const Status s = create_device(); !s.ok()) return s;
 

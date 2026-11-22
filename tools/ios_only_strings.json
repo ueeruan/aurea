@@ -1,0 +1,73 @@
+{
+ "_comment": "Textos que só existem no iOS (AureaMCP e export em segundo plano). Valores já são literais Swift. tools/_ios_strings.py acrescenta estes a cada idioma.",
+ "pt": {
+  "ios_export_background_title": "\"Exportando vídeo\"",
+  "mcp_bg_body_ios": "\"Seus agentes continuam quando você sai do Aurea por alguns instantes. Com o app fechado ou suspenso, os pedidos esperam na fila e chega uma notificação: toque nela para o Aurea fazer o que o agente pediu.\"",
+  "mcp_bg_limits_ios": "\"O iOS não deixa um app trabalhar sozinho por tempo indefinido em segundo plano. Renderizar quadros, importar e exportar só com o Aurea aberto.\"",
+  "mcp_bg_session_ios": "\"Deixar o agente trabalhando com o app fechado\"",
+  "mcp_bg_session_running_ios": "\"Agente trabalhando com o app fechado\"",
+  "mcp_bg_task_subtitle_ios": "\"Seu agente de IA está editando no Aurea\"",
+  "mcp_bg_notif_denied_ios": "\"Permita as notificações do Aurea: é por elas que o agente avisa que quer trabalhar e pede aprovações.\"",
+  "mcp_bg_push_ready_ios": "\"O agente pode chamar você por notificação\""
+ },
+ "en": {
+  "ios_export_background_title": "\"Exporting video\"",
+  "mcp_bg_body_ios": "\"Your agents keep going for a few moments after you leave Aurea. With the app closed or suspended, requests wait in a queue and a notification arrives: tap it so Aurea does what the agent asked.\"",
+  "mcp_bg_limits_ios": "\"iOS does not let an app work on its own in the background indefinitely. Rendering frames, importing and exporting only work with Aurea open.\"",
+  "mcp_bg_session_ios": "\"Keep the agent working with the app closed\"",
+  "mcp_bg_session_running_ios": "\"Agent working with the app closed\"",
+  "mcp_bg_task_subtitle_ios": "\"Your AI agent is editing in Aurea\"",
+  "mcp_bg_notif_denied_ios": "\"Allow Aurea notifications: that is how the agent tells you it wants to work and asks for approvals.\"",
+  "mcp_bg_push_ready_ios": "\"The agent can reach you by notification\""
+ },
+ "es": {
+  "ios_export_background_title": "\"Exportando video\"",
+  "mcp_bg_body_ios": "\"Tus agentes siguen unos instantes después de que sales de Aurea. Con la app cerrada o suspendida, los pedidos esperan en una cola y llega una notificación: tócala para que Aurea haga lo que pidió el agente.\"",
+  "mcp_bg_limits_ios": "\"iOS no deja que una app trabaje sola en segundo plano por tiempo indefinido. Renderizar cuadros, importar y exportar solo funcionan con Aurea abierta.\"",
+  "mcp_bg_session_ios": "\"Dejar el agente trabajando con la app cerrada\"",
+  "mcp_bg_session_running_ios": "\"Agente trabajando con la app cerrada\"",
+  "mcp_bg_task_subtitle_ios": "\"Tu agente de IA está editando en Aurea\"",
+  "mcp_bg_notif_denied_ios": "\"Permite las notificaciones de Aurea: por ellas el agente avisa que quiere trabajar y pide aprobaciones.\"",
+  "mcp_bg_push_ready_ios": "\"El agente puede avisarte por notificación\""
+ },
+ "ru": {
+  "ios_export_background_title": "\"Экспорт видео\"",
+  "mcp_bg_body_ios": "\"Ваши агенты продолжают работать ещё несколько мгновений после выхода из Aurea. Когда приложение закрыто или приостановлено, запросы ждут в очереди и приходит уведомление: нажмите на него, чтобы Aurea выполнил запрос агента.\"",
+  "mcp_bg_limits_ios": "\"iOS не позволяет приложению бесконечно работать в фоне. Рендер кадров, импорт и экспорт работают только при открытом Aurea.\"",
+  "mcp_bg_session_ios": "\"Оставить агента работать с закрытым приложением\"",
+  "mcp_bg_session_running_ios": "\"Агент работает с закрытым приложением\"",
+  "mcp_bg_task_subtitle_ios": "\"Ваш ИИ-агент редактирует в Aurea\"",
+  "mcp_bg_notif_denied_ios": "\"Разрешите уведомления Aurea: через них агент сообщает, что хочет поработать, и просит одобрения.\"",
+  "mcp_bg_push_ready_ios": "\"Агент может позвать вас уведомлением\""
+ },
+ "hi": {
+  "ios_export_background_title": "\"वीडियो एक्सपोर्ट हो रहा है\"",
+  "mcp_bg_body_ios": "\"Aurea से बाहर जाने के बाद भी आपके एजेंट कुछ पल काम करते रहते हैं। ऐप बंद या रुका होने पर अनुरोध कतार में इंतज़ार करते हैं और एक सूचना आती है: उस पर टैप करें ताकि Aurea एजेंट का काम कर सके।\"",
+  "mcp_bg_limits_ios": "\"iOS किसी ऐप को बैकग्राउंड में अनिश्चित समय तक अपने आप काम नहीं करने देता। फ़्रेम रेंडर करना, इंपोर्ट और एक्सपोर्ट सिर्फ़ Aurea खुला होने पर होते हैं।\"",
+  "mcp_bg_session_ios": "\"ऐप बंद होने पर भी एजेंट को काम करने दें\"",
+  "mcp_bg_session_running_ios": "\"ऐप बंद होने पर एजेंट काम कर रहा है\"",
+  "mcp_bg_task_subtitle_ios": "\"आपका AI एजेंट Aurea में एडिट कर रहा है\"",
+  "mcp_bg_notif_denied_ios": "\"Aurea की सूचनाओं की अनुमति दें: इन्हीं से एजेंट बताता है कि वह काम करना चाहता है और मंज़ूरी मांगता है।\"",
+  "mcp_bg_push_ready_ios": "\"एजेंट सूचना से आपको बुला सकता है\""
+ },
+ "ar": {
+  "ios_export_background_title": "\"جارٍ تصدير الفيديو\"",
+  "mcp_bg_body_ios": "\"يواصل وكلاؤك العمل لبضع لحظات بعد مغادرة Aurea. عندما يكون التطبيق مغلقًا أو معلّقًا، تنتظر الطلبات في قائمة ويصل إشعار: اضغط عليه لينفّذ Aurea ما طلبه الوكيل.\"",
+  "mcp_bg_limits_ios": "\"لا يسمح iOS لأي تطبيق بالعمل وحده في الخلفية إلى ما لا نهاية. عرض الإطارات والاستيراد والتصدير تعمل فقط و Aurea مفتوح.\"",
+  "mcp_bg_session_ios": "\"دع الوكيل يعمل والتطبيق مغلق\"",
+  "mcp_bg_session_running_ios": "\"الوكيل يعمل والتطبيق مغلق\"",
+  "mcp_bg_task_subtitle_ios": "\"وكيل الذكاء الاصطناعي يعدّل في Aurea\"",
+  "mcp_bg_notif_denied_ios": "\"اسمح بإشعارات Aurea: من خلالها يخبرك الوكيل أنه يريد العمل ويطلب الموافقات.\"",
+  "mcp_bg_push_ready_ios": "\"يمكن للوكيل تنبيهك بإشعار\""
+ },
+ "id": {
+  "ios_export_background_title": "\"Mengekspor video\"",
+  "mcp_bg_body_ios": "\"Agen Anda tetap berjalan beberapa saat setelah Anda keluar dari Aurea. Saat aplikasi ditutup atau ditangguhkan, permintaan menunggu di antrean dan notifikasi muncul: ketuk agar Aurea mengerjakan permintaan agen.\"",
+  "mcp_bg_limits_ios": "\"iOS tidak mengizinkan aplikasi bekerja sendiri di latar belakang tanpa batas. Render bingkai, impor, dan ekspor hanya berjalan saat Aurea terbuka.\"",
+  "mcp_bg_session_ios": "\"Biarkan agen bekerja saat aplikasi ditutup\"",
+  "mcp_bg_session_running_ios": "\"Agen bekerja saat aplikasi ditutup\"",
+  "mcp_bg_task_subtitle_ios": "\"Agen AI Anda sedang mengedit di Aurea\"",
+  "mcp_bg_notif_denied_ios": "\"Izinkan notifikasi Aurea: lewat notifikasi agen memberi tahu bahwa ia ingin bekerja dan meminta persetujuan.\"",
+  "mcp_bg_push_ready_ios": "\"Agen dapat memanggil Anda lewat notifikasi\""
+ }
+}

@@ -444,7 +444,11 @@ fun EditorScreen(store: EditorStore) {
     // Texto 3D ou AureaHyper; 16/11/2026).
     if (store.hyperLockedPrompt) com.aurea.aurea.hyper.PaywallDialog(com.aurea.aurea.hyper.PaidItem.text3d(), null) { store.hyperLockedPrompt = false }
     // 1.0.2: Neural (IA) do Flow Retime sem o AureaHyper (EditorStore.setEffectParam).
-    if (store.hyperOptionPrompt) com.aurea.aurea.hyper.PaywallDialog(com.aurea.aurea.hyper.PaidItem.hyperTools, null) { store.hyperOptionPrompt = false }
+    if (store.hyperOptionPrompt) {
+        val item = if (store.hyperOptionSubscriptionOnly) com.aurea.aurea.hyper.PaidItem.subscriptionTools
+            else com.aurea.aurea.hyper.PaidItem.hyperTools
+        com.aurea.aurea.hyper.PaywallDialog(item, null) { store.hyperOptionPrompt = false }
+    }
     // Omega adicionar (área 08, P2-4): o "Fundo" das sub-páginas leva aos ajustes do projeto.
     if (ui.exporting) ExportScreen(store, onOpenProjectSettings = { ui.exporting = false; openSheet(store, ui, ShellSheet.ProjectSettings) }) { ui.exporting = false }
     // 0.4.6: o assistente de IA; o painel que ele pede fecha o chat e abre no editor.

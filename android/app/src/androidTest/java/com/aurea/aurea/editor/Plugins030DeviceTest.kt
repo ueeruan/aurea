@@ -15,6 +15,8 @@ import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import java.io.File
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 /**
  * 0.3.0: plugins de efeito no aparelho — os exemplos de docs/plugins instalados
@@ -31,6 +33,81 @@ class Plugins030DeviceTest {
         val out = File(dir, name)
         instrumentation.context.assets.open("plugins/$name").use { input -> out.outputStream().use { input.copyTo(it) } }
         return Uri.fromFile(out)
+    }
+
+    @Test fun textureParametersAtSlot1023ReachTheGpuAndPresetsUpdateTheEditor() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        check(context.packageName.endsWith(".uitest"))
+        lateinit var store: EditorStore
+        var ready = false
+        compose.setContent {
+            store = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))
+            ready = true
+            AureaTheme { EditorScreen(store) }
+        }
+        compose.waitUntil(30000) { ready && store.engineReady }
+        val pluginId = "aurea.tests.texture-parameters"
+        val params = List(31) { """{"id":"gradient$it","type":"gradient"}""" } +
+            """{"id":"timing","type":"curve"}""" +
+            List(14) { """{"id":"unused$it","type":"float"}""" } +
+            """{"id":"colorOn","type":"bool","default":false}""" +
+            """{"id":"intensity","type":"float","default":0.25,"visible_if":{"param":"colorOn","equals":true}}"""
+        val pluginFile = File(context.cacheDir, "texture-parameters.aureaplugin")
+        ZipOutputStream(pluginFile.outputStream()).use { zip ->
+            fun add(name: String, content: String) {
+                zip.putNextEntry(ZipEntry(name))
+                zip.write(content.toByteArray(Charsets.UTF_8))
+                zip.closeEntry()
+            }
+            add("plugin.json", """
+                {"aureaPlugin":3.1,"id":"$pluginId","name":"Texture parameters","version":"1.0.0",
+                 "kind":"shader","parameterStorage":"texture","uses":["history"],
+                 "params":[${params.joinToString(",")}],
+                 "presets":[{"id":"bright","name":"Bright","set":{"colorOn":true,"intensity":0.75}}],
+                 "passes":[{"shader":"bright.frag","target":"glow","scale":0.5},{"shader":"final.frag","inputs":{"glow":"glow"}}]}
+            """.trimIndent())
+            add("bright.frag", "vec4 aurea_main(vec2 uv) { return vec4(4.0 * intensity, 0.0, 0.0, 1.0); }")
+            add("final.frag", "vec4 aurea_main(vec2 uv) { return vec4(texture(glow, uv).r * 0.25, texture(u_prev_frame, uv).g, 0.0, 1.0); }")
+        }
+        compose.runOnIdle {
+            store.plugins.firstOrNull { it.id == pluginId }?.let { store.removePlugin(it.id) }
+            store.newProject(160, 90, 30f, "Plugin V3.1")
+        }
+        compose.waitUntil(15000) { store.project.title == "Plugin V3.1" && !store.projectOperationBusy }
+        compose.runOnIdle { store.installPlugin(Uri.fromFile(pluginFile)) }
+        compose.waitUntil(45000) { store.plugins.any { it.id == pluginId } && store.busyMessage == null }
+        val plugin = store.plugins.single { it.id == pluginId }
+        assertTrue(plugin.ok)
+        val source = java.nio.ByteBuffer.allocateDirect(160 * 90 * 4)
+        repeat(160 * 90) { source.put(0); source.put(0); source.put(0); source.put(255.toByte()) }
+        source.rewind()
+        val layer = store.engineForStress.importImage(source, 160, 90, "Source", "test://plugin-v31")
+        assertTrue(layer >= 0)
+        compose.runOnIdle { store.select(layer) }
+        compose.waitUntil(10000) { store.primary == layer && store.detail != null }
+        compose.runOnIdle { store.addEffect(plugin.effectTypeId) }
+        compose.waitUntil(15000) {
+            val effect = store.effects.firstOrNull { it.typeId == plugin.effectTypeId }
+            effect != null && store.effectParams[effect.effectId]?.size == params.size
+        }
+        val effect = store.effects.single { it.typeId == plugin.effectTypeId }.effectId
+        fun intensity() = store.effectParams.getValue(effect).last()
+        fun redChannel(): Int {
+            compose.waitForIdle()
+            val image = checkNotNull(store.captureBitmap(160))
+            return Color.red(image.getPixel(image.width / 2, image.height / 2))
+        }
+        val hiddenFlag = com.aurea.aurea.engine.ParamType.FLAG_HIDDEN
+        assertTrue(intensity().flags and hiddenFlag != 0)
+        val before = redChannel()
+        assertTrue("Slot 1023, linear red 0.25 → $before", before in 125..150)
+        compose.runOnIdle {
+            assertEquals("bright", store.effectPresets(plugin.effectTypeId).single().first)
+            store.applyEffectPreset(effect, 0)
+        }
+        compose.waitUntil(10000) { intensity().flags and hiddenFlag == 0 && intensity().value[0] == 0.75f }
+        val after = redChannel()
+        assertTrue("Slot 1023, HDR intermediate 3.0 → linear red 0.75 → $after", after in 210..237)
     }
 
     @Test fun audioGraphInstallsPersistsAndExportsThroughTheNativeMixer() {

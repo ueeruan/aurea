@@ -792,6 +792,8 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
     if (state_ != EngineState::Uninitialized) {
         return Status{Errc::InvalidState, "motor ja inicializado"};
     }
+    lastError_ = Errc::Ok;
+    lastErrorDetail_[0] = '\0';
     platformMemoryPressure_.store(0.f, std::memory_order_relaxed);
     platformAvailableMemory_.store(~0ull, std::memory_order_relaxed);
     offscreenCancelled_.store(false, std::memory_order_release);
@@ -4734,17 +4736,15 @@ bool Engine::start_camera_track(u64 layerId, u32 mode, u32 motion, f32 knownFov,
         const f64 fps = asset.timebaseFps > 0.0 ? asset.timebaseFps : 30.0;
         // O mesmo quadro que o preview mostra em cada instante (VFR incluso) e
         // luma por área (sem o serrilhado da miniatura por vizinho mais próximo).
-        tracking::AnalysisFramePicker picker(*dec, fps, job->cancel);
+        tracking::AnalysisGraySequence sequence(*dec, fps, job->cancel, targetUs,
+                                                analysisH, asset.video.width, asset.video.height);
         u32 aw = 0, ah = 0;
         for (usize i = 0; i < targetUs.size(); ++i) {
             if (job->cancel.load()) return fail("cancelado");
-            FrameRef frame;
-            const auto picked = picker.pick(targetUs[i], frame);
-            if (picked == tracking::AnalysisFramePicker::Result::Cancelled) return fail("cancelado");
-            if (picked != tracking::AnalysisFramePicker::Result::Ok || !frame) break;
             tracking::Gray gray;
-            if (!tracking::frame_to_gray(*frame.get(), analysisH, gray)) break;
-            frame = {};
+            const auto picked = sequence.read(i, gray);
+            if (picked == tracking::AnalysisGraySequence::Result::Cancelled) return fail("cancelado");
+            if (picked != tracking::AnalysisGraySequence::Result::Ok) break;
             aw = gray.width;
             ah = gray.height;
             ft.add_frame(gray);
@@ -5143,6 +5143,111 @@ Mat4 camera_scene_mapping(const CameraTrackResult& res,const Composition& comp) 
     return res.sceneCalibration*Mat4::translation(def.position)*Mat4::scale(Vec3{scale,scale,scale});
 }
 Vec3 mapped_point(const Mat4& m,Vec3 p){auto q=m*Vec4{p.x,p.y,p.z,1};return {q.x,q.y,q.z};}
+}
+
+std::vector<f32> Engine::camera_track_reconstruction(u64 source, i64 frame) noexcept {
+    if (!cameraTrack_ || cameraTrack_->state.load() != 2 || cameraTrack_->layerId != source) return {};
+    auto* job = cameraTrack_.get();
+    std::shared_ptr<const CameraTrackResult> result;
+    std::vector<u32> selected;
+    {
+        std::lock_guard<std::mutex> lock(job->mutex);
+        result = job->result;
+        selected = job->selectedTracks;
+    }
+    if (!result || !result->solution.ok) return {};
+    Mat4 mapping;
+    i64 start;
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        if (!project_ || projectSession_ != job->session || project_->timeline().current() != job->composition) return {};
+        const auto* comp = current_composition();
+        const auto* video = comp ? comp->layer(LayerId::unpack(source)) : nullptr;
+        if (!video || video->cameraTrack != result || video->source != job->source ||
+            result->sourceSignature != tracking::source_signature(project_->asset(video->source))) return {};
+        mapping = camera_scene_mapping(*result, *comp);
+        start = video->start.value;
+    }
+    const auto& solution = result->solution;
+    std::vector<Vec3> cloud;
+    cloud.reserve(solution.points.size());
+    for (Vec3 p : solution.points) cloud.push_back(mapped_point(mapping, p));
+    Vec3 centre{};
+    f32 radius = 1;
+    if (!cloud.empty()) {
+        std::vector<f32> values;
+        values.reserve(cloud.size());
+        auto quantile = [&](auto get, usize index) {
+            values.clear();
+            for (Vec3 p : cloud) values.push_back(get(p));
+            std::nth_element(values.begin(), values.begin() + index, values.end());
+            return values[index];
+        };
+        centre = {quantile([](Vec3 p) { return p.x; }, cloud.size() / 2),
+                  quantile([](Vec3 p) { return p.y; }, cloud.size() / 2),
+                  quantile([](Vec3 p) { return p.z; }, cloud.size() / 2)};
+        radius = std::max(1.f, quantile([&](Vec3 p) { return (p - centre).length(); }, cloud.size() * 9 / 10));
+    } else {
+        const auto pose = std::find_if(solution.poses.begin(), solution.poses.end(), [](const auto& p) { return p.valid; });
+        if (pose == solution.poses.end()) return {};
+        centre = mapped_point(mapping, pose->center());
+    }
+    std::vector<f32> rows;
+    auto append = [&](u32 kind, f32 id, Vec3 p, f32 value) {
+        p = (p - centre) / radius;
+        if (std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z))
+            rows.insert(rows.end(), {static_cast<f32>(kind), id, p.x, p.y, p.z, value});
+    };
+    usize index = 0;
+    const usize pointStep = std::max<usize>(1, (cloud.size() + 511) / 512);
+    for (u32 track = 0; track < solution.trackSolved.size() && index < cloud.size(); ++track) {
+        if (!solution.trackSolved[track]) continue;
+        const bool active = std::find(selected.begin(), selected.end(), track) != selected.end();
+        if (index % pointStep == 0 || active) append(0, static_cast<f32>(track), cloud[index], active ? 1.f : 0.f);
+        ++index;
+    }
+    const usize pathStep = std::max<usize>(1, (solution.poses.size() + 239) / 240);
+    for (usize i = 0; i < solution.poses.size(); ++i) {
+        const auto& pose = solution.poses[i];
+        if (!pose.valid || (i % pathStep != 0 && i + 1 != solution.poses.size())) continue;
+        append(1, static_cast<f32>(start + i), mapped_point(mapping, pose.center()),
+               i < solution.frameErrorPx.size() ? solution.frameErrorPx[i] : -1.f);
+    }
+    if (!solution.poses.empty() && frame >= start && frame - start < static_cast<i64>(solution.poses.size())) {
+        const auto i = static_cast<usize>(frame - start);
+        const auto& pose = solution.poses[i];
+        if (pose.valid) {
+            const Vec3 c = mapped_point(mapping, pose.center());
+            const auto basis = [&](u32 row) {
+                const Vec3 d{static_cast<f32>(pose.R[row * 3]), static_cast<f32>(pose.R[row * 3 + 1]), static_cast<f32>(pose.R[row * 3 + 2])};
+                return (mapped_point(mapping, pose.center() + d) - c).normalized();
+            };
+            const f32 length = .22f * radius;
+            const f32 halfH = length * std::tan(solution.fov_at(static_cast<u32>(i)) * .5f);
+            const f32 halfW = halfH * result->analysisW / std::max(1u, result->analysisH);
+            const Vec3 image = c + basis(2) * length;
+            const Vec3 right = basis(0) * halfW, down = basis(1) * halfH;
+            append(2, 0, c, 0);
+            append(2, 1, image - right - down, 0); append(2, 2, image + right - down, 0);
+            append(2, 3, image + right + down, 0); append(2, 4, image - right + down, 0);
+        }
+    }
+    Vec3 floor, normal;
+    if (cloud.size() >= 6 && tracking::dominant_plane(cloud, .035f * radius, .38f, floor, normal)) {
+        const Vec3 right = normal.cross(std::abs(normal.x) > .8f ? Vec3{0, 1, 0} : Vec3{1, 0, 0}).normalized();
+        const Vec3 forward = right.cross(normal).normalized();
+        for (i32 i = -4; i <= 4; ++i) {
+            const Vec3 x = right * radius, z = forward * radius;
+            const f32 t = static_cast<f32>(i) * .25f;
+            append(3, 0, floor + x * t - z, 0); append(3, 0, floor + x * t + z, 0);
+            append(3, 0, floor + z * t - x, 0); append(3, 0, floor + z * t + x, 0);
+        }
+    }
+    append(4, 0, centre, 0);
+    append(4, 1, centre + Vec3{radius * .38f, 0, 0}, 0);
+    append(4, 2, centre + Vec3{0, -radius * .38f, 0}, 0);
+    append(4, 3, centre + Vec3{0, 0, radius * .38f}, 0);
+    return rows;
 }
 
 u32 Engine::camera_track_target(i64 frame,f32* xy,u32 capacity) noexcept {
@@ -16768,6 +16873,11 @@ u32 Engine::query_effect_params(u64 layerId, u32 effectId, bridge::EffectParamRo
         row.index = i;
         row.type = static_cast<u32>(spec.type);
         row.flags = spec.flags;
+        if (spec.visibleIfParam < params->count()) {
+            const ParamSpec& controller = params->at(spec.visibleIfParam);
+            const ParamValue value = evaluate_param(l->tracks, *inst, spec.visibleIfParam, controller, local);
+            if (std::round(value.v[0]) != spec.visibleIfValue) row.flags |= kParamHidden;
+        }
         if(inst->type==effect_type_id(effect_keys::kStrokeOutline) && i==raster_extrude::kStrokeDepth
             && !raster_extrude::accepts(l->kind))row.flags|=kParamHidden;
         if (glowAlgorithmSlot != kInvalidIndex && i != glowAlgorithmSlot) {

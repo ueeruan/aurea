@@ -48,6 +48,7 @@ class MocapDetector(private val context: Context) {
         uri: Uri,
         reduced: Boolean,
         onProgress: suspend (Float) -> Unit,
+        maxFrames: Int = Int.MAX_VALUE,
         sink: (FloatArray, Int, Float) -> Unit,
     ): Int = withContext(Dispatchers.Default) {
         val retriever = MediaMetadataRetriever()
@@ -115,12 +116,13 @@ class MocapDetector(private val context: Context) {
                 val sourceFps = frameCount * 1000.0 / durationMs
                 val step = max(1, (sourceFps / targetFps).roundToInt())
                 var i = 0
-                while (i < frameCount) {
+                while (i < frameCount && analyzed < maxFrames) {
                     coroutineContext.ensureActive()
                     val count = min(chunk, frameCount - i)
                     val frames = runCatching { retriever.getFramesAtIndex(i, count) }.getOrNull() ?: break
                     try {
                         for ((k, bitmap) in frames.withIndex()) {
+                            if (analyzed >= maxFrames) break
                             val index = i + k
                             if (index % step == 0) detect(bitmap, index * durationMs / 1000.0 / frameCount)
                         }
@@ -135,7 +137,7 @@ class MocapDetector(private val context: Context) {
                 val stepUs = (1_000_000.0 / targetFps).toLong()
                 var t = 0L
                 val endUs = durationMs * 1000L
-                while (t < endUs) {
+                while (t < endUs && analyzed < maxFrames) {
                     coroutineContext.ensureActive()
                     val bitmap = if (Build.VERSION.SDK_INT >= 27)
                         retriever.getScaledFrameAtTime(t, MediaMetadataRetriever.OPTION_CLOSEST, maxSide, maxSide)

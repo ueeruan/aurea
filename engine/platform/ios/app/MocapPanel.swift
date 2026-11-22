@@ -27,7 +27,8 @@ enum MocapDetector {
 
     /// Analisa o vídeo e manda os quadros para `sink` (Data de floats, quantos,
     /// largura/altura). `progress` 0..1. Cancelável (Task). Devolve os quadros analisados.
-    static func run(url: URL, reduced: Bool, imageSpace: Bool = false, progress: @escaping (Float) -> Void,
+    static func run(url: URL, reduced: Bool, imageSpace: Bool = false, faceOnly: Bool = false,
+                    maxFrames: Int = .max, progress: @escaping (Float) -> Void,
                     sink: @escaping (Data, Int, Float) -> Void) async throws -> Int {
         let asset = AVURLAsset(url: url)
         guard let track = try await asset.loadTracks(withMediaType: .video).first else { throw Failure() }
@@ -59,7 +60,7 @@ enum MocapDetector {
         // primeiro quadro com gente — 3D se o Vision 3D (iOS 17+) também a achou.
         var mode = imageSpace ? 2 : 0   // 0 indeciso · 1 3D · 2 2D
 
-        while let sample = output.copyNextSampleBuffer() {
+        while analyzed < maxFrames, let sample = output.copyNextSampleBuffer() {
             try Task.checkCancellation()
             let time = CMSampleBufferGetPresentationTimeStamp(sample).seconds
             guard time.isFinite, time >= nextTime - 1e-4, let pixels = CMSampleBufferGetImageBuffer(sample) else { continue }
@@ -70,7 +71,13 @@ enum MocapDetector {
             for i in 2..<frameFloats { buffer[base + i] = 0 }
             let handler = VNImageRequestHandler(cvPixelBuffer: pixels, orientation: orientation, options: [:])
             let request2D = VNDetectHumanBodyPoseRequest()
-            if #available(iOS 17.0, *), mode != 2 {
+            if faceOnly {
+                let request = VNDetectFaceLandmarksRequest()
+                try? handler.perform([request])
+                if let face = request.results?.max(by: { $0.boundingBox.width < $1.boundingBox.width }) {
+                    fillFace(face, into: &buffer, at: base)
+                }
+            } else if #available(iOS 17.0, *), mode != 2 {
                 let request3D = VNDetectHumanBodyPose3DRequest()
                 try? handler.perform([request2D, request3D])
                 if mode == 0, request2D.results?.first != nil { mode = request3D.results?.first != nil ? 1 : 2 }
@@ -81,7 +88,7 @@ enum MocapDetector {
                 try? handler.perform([request2D])
                 if mode == 0, request2D.results?.first != nil { mode = 2 }
             }
-            if mode == 2, let body = request2D.results?.first { fill2D(body, into: &buffer, at: base) }
+            if !faceOnly, mode == 2, let body = request2D.results?.first { fill2D(body, into: &buffer, at: base) }
             buffer[base + 1] = mode == 1 ? 1 : 0
             pending += 1
             analyzed += 1
@@ -98,6 +105,24 @@ enum MocapDetector {
         }
         progress(1)
         return analyzed
+    }
+
+    private static func fillFace(_ face: VNFaceObservation, into buffer: inout [Float], at base: Int) {
+        guard let landmarks = face.landmarks else { return }
+        let box = face.boundingBox
+        let regions: [(VNFaceLandmarkRegion2D?, Int)] = [
+            (landmarks.leftEye, 2), (landmarks.rightEye, 5), (landmarks.nose, 0),
+            (landmarks.outerLips, 9), (landmarks.outerLips, 10),
+        ]
+        for (region, slot) in regions {
+            guard let points = region?.normalizedPoints, !points.isEmpty else { continue }
+            let x = points.reduce(CGFloat.zero) { $0 + $1.x } / CGFloat(points.count)
+            let y = points.reduce(CGFloat.zero) { $0 + $1.y } / CGFloat(points.count)
+            let o = base + 2 + slot * 4
+            buffer[o] = Float(box.minX + x * box.width)
+            buffer[o + 1] = Float(1 - box.minY - y * box.height)
+            buffer[o + 3] = face.confidence
+        }
     }
 
     /// Vision 2D (19 pontos) → ordem de 33; y para baixo; sem profundidade.

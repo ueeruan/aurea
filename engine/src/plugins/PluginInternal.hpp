@@ -94,6 +94,14 @@ using PluginImages = std::vector<std::shared_ptr<const PluginImage>>;
 [[nodiscard]] inline u32 param_slot_size(const ParamDecl& p) noexcept {
     return p.kind == ParamKind::Curve ? kCurveSlots : p.kind == ParamKind::Gradient ? kGradientSlots : 1u;
 }
+[[nodiscard]] inline u32 preset_component_count(ParamKind kind) noexcept {
+    switch (kind) {
+        case ParamKind::Layer: case ParamKind::LayerImage: case ParamKind::Curve: case ParamKind::Gradient: return 0;
+        case ParamKind::Color: return 4;
+        case ParamKind::Point: return 2;
+        default: return 1;
+    }
+}
 /// Primeiro vec4 do parâmetro `index` (igual ao índice se não há curva nem degradê).
 [[nodiscard]] inline u32 param_slot_at(const Manifest& m, u32 index) noexcept {
     u32 slot = 0;
@@ -106,7 +114,7 @@ using PluginImages = std::vector<std::shared_ptr<const PluginImage>>;
 }
 /// Samplers que o formato 3 acrescenta depois das entradas e das texturas do pacote.
 [[nodiscard]] inline u32 extra_samplers(const Manifest& m) noexcept {
-    u32 n = (m.history ? 1u : 0u) + (m.audio ? 1u : 0u);
+    u32 n = (m.history ? 1u : 0u) + (m.audio ? 1u : 0u) + (m.textureParameters ? 1u : 0u);
     for (const ParamDecl& p : m.params) n += p.kind == ParamKind::LayerImage;
     return n;
 }

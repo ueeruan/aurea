@@ -1164,7 +1164,7 @@
     <string name="consent_title">الموافقة والمسؤولية</string>
     <string name="consent_accept">موافقة ومتابعة</string>
     <string name="consent_body">Aurea أداة احترافية لتحرير المحتوى الرقمي وإنشائه وإنتاجه. باستخدام التطبيق، يقر المستخدم بأنه يتحمل المسؤولية الكاملة عن المحتوى الذي ينشئه أو يحرره أو يستورده أو يصدره أو ينشره أو يشاركه عبر المنصة.\n\nلا يتحكم Aurea في استخدام الأداة لأنشطة غير قانونية أو مسيئة أو احتيالية أو ضارة أو تنتهك حقوق الآخرين، ولا يشجع هذا الاستخدام أو يدعمه أو يصرح به.\n\nيتحمل المستخدم مسؤولية التأكد من امتلاكه التصاريح والتراخيص والحقوق اللازمة للمواد المستخدمة، بما فيها الصور ومقاطع الفيديو والموسيقى والعلامات التجارية والنماذج والملفات وغيرها من المحتويات المحمية.\n\nلا تعني الحرية الإبداعية التي يوفرها Aurea موافقة التطبيق أو مشاركته أو مسؤوليته عما يقرر كل مستخدم إنتاجه أو فعله باستخدام الأداة.\n\nيوافق المستخدم على استخدام Aurea وفقاً للقانون المعمول به ويتحمل مسؤولية أفعاله والمحتوى المنتج أو الموزع عبر التطبيق.\n\nإلى أقصى حد يسمح به القانون المعمول به، لا يتحمل Aurea والمسؤولون عنه المسؤولية عن الأفعال التي يقوم بها المستخدم وحده، أو إساءة استخدام الأداة، أو العواقب الناجمة عن المحتوى الذي ينشئه المستخدم نفسه أو ينشره أو يشاركه.\n\nيوفر Aurea الأداة. ويتحمل المستخدم مسؤولية الطريقة التي يختار استخدامها بها.\n\nبالمتابعة، يقر المستخدم بأنه قرأ هذه الشروط وفهمها ووافق عليها.</string>
-    <string name="release_notes_body">Aurea 1.0.2.1 (2223) — 19/11/2026\n\n• أصبح AureaHyper سنويًا: اشتراك واحد في السنة يفتح كل التأثيرات المدفوعة والنص ثلاثي الأبعاد وNeural (الذكاء الاصطناعي) وأدوات Hyper. بلا رسوم شهرية وبلا اشتراك لكل تأثير. المشتركون الحاليون يحتفظون بكل شيء.\n• Optical Flow للتصوير الحقيقي: ظلال أقل، وعنصر تحكم الظلال ↔ التشوه، وجودة Neural (الذكاء الاصطناعي) مع AureaHYPER.\n• Glitchify أصبح مطابقًا لـ After Effects.\n• تصدير أسرع وبجودة أعلى.\n• استورد الجزء المقصوص فقط من الفيديوهات الطويلة.\n• لوحة Pre Render وPre Export حسب المقطع.\n• AureaMCP يوقظ التطبيق وهو مغلق.</string>
+    <string name="release_notes_body">Aurea 1.0.4 (2225)\n\n• AutoBeat لاختيار مصدر الصوت وتحريك الحجم والارتفاع والدوران · مجاني\n• تتبّع مستوٍ من زاويتين مع تثبيت بأربع نقاط · AureaHyper\n• ملصق حبري للنص ثلاثي الأبعاد بواجهة بيضاء وعمق داكن وحدود فاتحة · AureaHyper\n• AutoRig ثنائي الأبعاد في تأثير الدمية لاكتشاف الوضعية وتعديل الدبابيس وتحريك وضعية الانتظار · AureaHyper</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">تعبئة</string>
@@ -1915,7 +1915,7 @@
     <string name="msg_o_projeto_esta_danificado_e_nao">المشروع تالف ولا توجد نسخة صالحة لاستعادته.</string>
     <string name="msg_este_aparelho_nao_tem_codificador_para">لا يحتوي هذا الجهاز على مُرمّز لإعداد التصدير هذا.</string>
     <string name="msg_erro_inesperado_codigo">خطأ غير متوقع (الرمز %1$s).</string>
-    <string name="msg_nao_foi_possivel_iniciar_o_motor">تعذّر تشغيل محرك الرسومات (Vulkan) على هذا الجهاز.</string>
+    <string name="msg_nao_foi_possivel_iniciar_o_motor">تعذّر تشغيل محرك الرسومات على هذا الجهاز.</string>
     <string name="msg_o_aparelho_sera_medido_de_novo">سيُقاس أداء الجهاز مجددًا في المرة القادمة التي يُفتح فيها Aurea</string>
     <string name="msg_o_preview_nao_conseguiu_usar_a">تعذّر على المعاينة استخدام سطح الفيديو.</string>
     <string name="msg_salvamento_automatico_falhou">فشل الحفظ التلقائي: %1$s</string>
@@ -5535,4 +5535,15 @@
     <string name="prx_close">إغلاق</string>
     <string name="prx_preparing">جارٍ التحضير…</string>
     <string name="prx_ruler_range">جزء Pre Render</string>
+    <string name="pn_t3d_preset_ink_poster">ملصق حبري</string>
+    <string name="trk_surface_quick">تتبّع السطح</string>
+    <string name="trk_surface_hint">المس زاويتين متقابلتين في منطقة ذات تفاصيل.</string>
+    <string name="trk_show_advanced">إظهار الخيارات المتقدمة</string>
+    <string name="trk_hide_advanced">إخفاء الخيارات المتقدمة</string>
+    <string name="autobeat_hint">تتبع النبضة علامات الإيقاع في التركيب. يحدّث تحليل المصدر العلامات ضمن نطاقه الزمني.</string>
+    <string name="autobeat_source">اكتشاف الإيقاع من الصوت</string>
+    <string name="autorig2d_action">إنشاء وتحريك هيكل AutoRig ثنائي الأبعاد</string>
+    <string name="autorig2d_busy">جارٍ تحليل الوضعية…</string>
+    <string name="autorig2d_no_pose">لم يعثر AutoRig على نقاط مرئية كافية. أضف دبابيس في أداة الدمية.</string>
+    <string name="autorig2d_existing">استخدم تأثير الدمية من دون دبابيس لإنشاء AutoRig.</string>
 </resources>

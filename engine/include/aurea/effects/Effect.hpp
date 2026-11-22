@@ -351,6 +351,10 @@ struct EffectMotionState;
 class EffectResources {
 public:
     virtual ~EffectResources() = default;
+    /// Frames since the latest detected beat, or infinity when there is none.
+    [[nodiscard]] virtual f64 frames_since_beat(f64) const noexcept {
+        return std::numeric_limits<f64>::infinity();
+    }
     /// 0.4.6: imagem RGBA8 `width`×`height` (as "textures" de um plugin),
     /// guardada por `key`; `srgb` = a GPU lineariza ao amostrar. Sobe uma vez
     /// e fica enquanto for usada. Nula = sem GPU (o shader lê preto).
@@ -380,6 +384,8 @@ public:
         (void)key; (void)texels; (void)width; (void)height;
         return {};
     }
+    /// Data assembled during effect graph construction, available to the same frame.
+    [[nodiscard]] virtual TextureHandle upload_effect_data(u64, const Vec4*, u32, u32) noexcept { return {}; }
     /// Fração das amostras que os efeitos caros usam neste quadro (0,25..1).
     /// Preview adaptativo/calor < 1; export e prévia do catálogo = 1 sempre.
     [[nodiscard]] virtual f32 effect_quality() const noexcept { return 1.0f; }
@@ -446,6 +452,7 @@ struct EffectEval {
     u32                   effectIndex = 0;     ///< posição na layer (painel)
     FrameIndex            localTime{0};
     f64                   framesPerSecond = 30.0;
+    f64                   compositionTime = std::numeric_limits<f64>::quiet_NaN();
     /// Progress through the visible clip, independent of source offset/remapping.
     /// Captured while the layer is locked; effects may use it during GPU build.
     f32                   clipProgress = 0.0f;

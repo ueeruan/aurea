@@ -506,7 +506,9 @@ private fun DetailPage(
 @Composable
 private fun VariantList(store: EditorStore, entry: EffectCatalogEntry, onAdd: (EffectCatalogEntry, Int) -> Unit) {
     val prefs = store.effectPrefs
-    val presets = remember(entry.typeId) { if (effectToolOf(entry.typeId) != null) emptyList() else store.effectPresets(entry.typeId) }
+    val presets = remember(entry.typeId, store.plugins) {
+        if (effectToolOf(entry.typeId) != null) emptyList() else store.effectPresets(entry.typeId)
+    }
     val id = effectCardId(entry.typeId)
     val variationsLabel = stringResource(R.string.om_fx_detail_variations)
     Spacer(Modifier.fillMaxWidth().height(0.dp).semantics { contentDescription = variationsLabel; heading() })

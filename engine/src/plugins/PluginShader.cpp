@@ -104,7 +104,7 @@ constexpr const char* kHelpersCurve = R"GLSL(
 float aurea_curve_at(int first, float t) {
     float x = clamp(t, 0.0, 1.0) * 63.0;
     int i = int(floor(x)), j = min(i + 1, 63);
-    float a = aurea.params[first + i / 4][i % 4], b = aurea.params[first + j / 4][j % 4];
+    float a = aurea_param_at(first + i / 4)[i % 4], b = aurea_param_at(first + j / 4)[j % 4];
     return mix(a, b, x - float(i));
 }
 )GLSL";
@@ -112,12 +112,16 @@ constexpr const char* kHelpersGradient = R"GLSL(
 vec4 aurea_gradient_at(int first, float t) {
     float x = clamp(t, 0.0, 1.0) * 31.0;
     int i = int(floor(x)), j = min(i + 1, 31);
-    return mix(aurea.params[first + i], aurea.params[first + j], x - float(i));
+    return mix(aurea_param_at(first + i), aurea_param_at(first + j), x - float(i));
 }
 )GLSL";
 
-std::string param_macro(const ParamDecl& p, u32 slot) {
-    const std::string ref = "aurea.params[" + std::to_string(slot) + "]";
+std::string param_ref(const Manifest& m, u32 slot) {
+    const std::string index = std::to_string(slot);
+    return m.textureParameters ? "aurea_param_at(" + index + ")" : "aurea.params[" + index + "]";
+}
+
+std::string param_macro(const ParamDecl& p, const std::string& ref) {
     switch (p.kind) {
         case ParamKind::Color: return ref;
         case ParamKind::Point: return "(" + ref + ".xy)";
@@ -153,6 +157,7 @@ std::string shader_header(const Manifest& m, u32 pass) {
     u32 nextBinding = static_cast<u32>(1 + p.inputs.size() + m.textures.size());
     if (m.history) {
         h += "layout(set = 0, binding = " + std::to_string(nextBinding++) + ") uniform sampler2D aurea_history;\n#define AUREA_HISTORY 1\n";
+        if (m.v31) h += "#define u_prev_frame aurea_history\n#define AUREA_HISTORY_VALID (aurea.time.w > 0.5)\n";
     }
     if (m.audio) {
         h += "layout(set = 0, binding = " + std::to_string(nextBinding++) + ") uniform sampler2D aurea_audio_spectrum;\n#define AUREA_AUDIO 1\n";
@@ -160,14 +165,21 @@ std::string shader_header(const Manifest& m, u32 pass) {
     for (const ParamDecl& d : m.params)
         if (d.kind == ParamKind::LayerImage)
             h += "layout(set = 0, binding = " + std::to_string(nextBinding++) + ") uniform sampler2D " + d.id + ";\n";
+    if (m.textureParameters) {
+        h += "layout(set = 0, binding = " + std::to_string(nextBinding) + ") uniform sampler2D aurea_param_data;\n";
+        const std::string width = std::to_string(kTextureParamWidth);
+        h += "vec4 aurea_param_at(int i) { return texelFetch(aurea_param_data, ivec2(i % " + width
+             + ", i / " + width + "), 0); }\n";
+    }
     h += "#define getFile(name) (name)\n";
     h += "#define AUREA_TEXTURE_COUNT " + std::to_string(m.textures.size()) + "\n";
     h += "layout(set = 0, binding = 12, std140) uniform AureaPluginBlock {\n"
          "    vec4 resolution;   // xy = texels deste passe, zw = 1/xy\n"
          "    vec4 time;         // x = segundos, y = quadro, z = fps\n"
          "    vec4 layer;        // xy = tamanho da camada (px), zw = texels por px da camada neste passe\n"
-         "    vec4 region;       // xy = origem da regiao (px da camada), zw = tamanho (px da camada)\n"
-         "    vec4 params[" + std::to_string(param_slots(m)) + "];   // um vec4 por parametro, na ordem de plugin.json\n";
+         "    vec4 region;       // xy = origem da regiao (px da camada), zw = tamanho (px da camada)\n";
+    if (!m.textureParameters)
+        h += "    vec4 params[" + std::to_string(param_slots(m)) + "];   // um vec4 por parametro, na ordem de plugin.json\n";
     if (m.scene3d) {
         h += "    mat4 view;          // vista <- mundo (x direita, y baixo, z frente)\n"
              "    mat4 compFromWorld; // px da composicao (homogeneo) <- mundo\n"
@@ -181,24 +193,36 @@ std::string shader_header(const Manifest& m, u32 pass) {
     }
     h += "} aurea;\n";
     u32 layerSlot = 0;
+    u32 slot = 0;
     for (u32 i = 0; i < m.params.size(); ++i) {
         // "layer": o nome vira a POSIÇÃO da camada ligada (aurea_layer_*(nome)).
         const ParamDecl& d = m.params[i];
-        const u32 slot = param_slot_at(m, i);
         if (d.kind == ParamKind::Layer) h += "#define " + d.id + " " + std::to_string(layerSlot++) + "\n";
         else if (d.kind == ParamKind::Curve) h += "#define " + d.id + "(t) aurea_curve_at(" + std::to_string(slot) + ", t)\n";
         else if (d.kind == ParamKind::Gradient) h += "#define " + d.id + "(t) aurea_gradient_at(" + std::to_string(slot) + ", t)\n";
-        else if (d.kind == ParamKind::LayerImage) h += "#define " + d.id + "_connected (aurea.params[" + std::to_string(slot) + "].x > 0.5)\n";
-        else h += "#define " + d.id + " " + param_macro(d, slot) + "\n";
+        else if (d.kind == ParamKind::LayerImage) h += "#define " + d.id + "_connected (" + param_ref(m, slot) + ".x > 0.5)\n";
+        else h += "#define " + d.id + " " + param_macro(d, param_ref(m, slot)) + "\n";
+        slot += param_slot_size(d);
     }
-    if (m.audio) h += "#define AUREA_AUDIO_PEAK (aurea.params[" + std::to_string(param_slots(m) - 1) + "].x)\n"
-                      "#define aurea_audio(band) (texture(aurea_audio_spectrum, vec2((band), 0.5)).r)\n";
+    if (m.audio) {
+        const std::string audio = param_ref(m, slot);
+        h += "#define AUREA_AUDIO_PEAK (" + audio + ".x)\n";
+        if (m.v31) {
+            h += "#define AUREA_AUDIO_VALID (" + audio + ".y > 0.5)\n"
+                 "#define aurea_audio(band) (AUREA_AUDIO_VALID ? texture(aurea_audio_spectrum, vec2((band), 0.5)).r : 0.0)\n";
+        } else {
+            h += "#define aurea_audio(band) (texture(aurea_audio_spectrum, vec2((band), 0.5)).r)\n";
+        }
+    }
     if (m.scene3d) h += "#define AUREA_SCENE3D 1\n";
     h += kHelpers;
     if (m.scene3d) h += kHelpers3D;
     const auto uses = [&](ParamKind k) { return std::any_of(m.params.begin(), m.params.end(), [&](const ParamDecl& d) { return d.kind == k; }); };
-    if (uses(ParamKind::Curve)) h += kHelpersCurve;
-    if (uses(ParamKind::Gradient)) h += kHelpersGradient;
+    if (uses(ParamKind::Curve) || uses(ParamKind::Gradient)) {
+        if (!m.textureParameters) h += "#define aurea_param_at(i) (aurea.params[i])\n";
+        if (uses(ParamKind::Curve)) h += kHelpersCurve;
+        if (uses(ParamKind::Gradient)) h += kHelpersGradient;
+    }
     return h;
 }
 

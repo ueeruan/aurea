@@ -1065,6 +1065,10 @@ NS_SWIFT_NAME(AureaEngine)
 // pinos = 4 floats cada {índice, u, v, key no cabeçote}; malha = 6 por triângulo.
 - (NSArray<NSNumber*>*)puppetPins:(long long)layerId effect:(int32_t)effectId NS_SWIFT_NAME(puppetPins(_:effect:));
 - (NSArray<NSNumber*>*)puppetMesh:(long long)layerId effect:(int32_t)effectId NS_SWIFT_NAME(puppetMesh(_:effect:));
+- (int32_t)puppetAutoRigImage:(long long)layerId effect:(int32_t)effectId pose:(NSData *)pose parts:(BOOL)parts NS_SWIFT_NAME(puppetAutoRigImage(_:effect:pose:parts:));
++ (nullable NSData *)detectIllustratedPose:(NSData *)rgba width:(uint32_t)width height:(uint32_t)height
+                                     stride:(uint32_t)stride modelPrefix:(NSString *)modelPrefix
+    NS_SWIFT_NAME(detectIllustratedPose(_:width:height:stride:modelPrefix:));
 - (int32_t)puppetAddPin:(long long)layerId effect:(int32_t)effectId u:(float)u v:(float)v NS_SWIFT_NAME(puppetAddPin(_:effect:u:v:));
 - (BOOL)puppetMovePin:(long long)layerId effect:(int32_t)effectId pin:(int32_t)pin u:(float)u v:(float)v autoKey:(BOOL)autoKey continuing:(BOOL)continuing NS_SWIFT_NAME(puppetMovePin(_:effect:pin:u:v:autoKey:continuing:));
 - (BOOL)puppetRemovePin:(long long)layerId effect:(int32_t)effectId pin:(int32_t)pin NS_SWIFT_NAME(puppetRemovePin(_:effect:pin:));
@@ -1142,10 +1146,16 @@ NS_SWIFT_NAME(AureaEngine)
 - (NSString*)applyPreset:(long long)layerId json:(NSString*)json duration:(int64_t)duration;
 - (NSString*)trackPoint:(long long)layerId x:(float)x y:(float)y stabilize:(BOOL)stabilize;
 - (NSDictionary<NSString*, id>*)cameraTrackingStatus;
-- (BOOL)startMotionTrack:(long long)layer tool:(uint32_t)tool model:(uint32_t)model backward:(BOOL)backward points:(NSArray<NSNumber*>*)points feature:(float)feature search:(float)search;
+- (BOOL)startMotionTrack:(long long)layer tool:(uint32_t)tool model:(uint32_t)model backward:(BOOL)backward points:(NSArray<NSNumber*>*)points feature:(float)feature search:(float)search confidence:(float)confidence validateBack:(BOOL)validateBack;
 - (void)cancelMotionTrack;
+- (void)pauseMotionTrack:(BOOL)paused;
+- (NSArray<NSNumber*>*)motionTrackReview:(long long)source;
+- (NSArray<NSNumber*>*)motionTrackTrail:(long long)source frame:(long long)frame;
+- (nullable NSString*)motionTrackCsv:(long long)source;
+- (uint32_t)applyLandmarkTracks:(long long)source samples:(NSData*)samples face:(BOOL)face;
 - (BOOL)restoreMotionTrack:(long long)layer;
 - (long long)motionTrackSource;
+- (NSArray<NSNumber*>*)motionTrackFeatures:(long long)frame;
 - (NSDictionary<NSString*, id>*)motionTrackStatus;
 - (NSString*)applyMotionTrack:(long long)target apply:(uint32_t)apply lock:(BOOL)lock smooth:(float)smooth maxScale:(float)maxScale crop:(uint32_t)crop;
 - (NSArray<NSNumber*>*)gizmo:(long long)layerId length:(float)length NS_SWIFT_NAME(gizmo(_:length:));
@@ -1178,6 +1188,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)restoreCameraTrackForLayer:(long long)layerId NS_SWIFT_NAME(restoreCameraTrack(forLayer:));
 - (NSArray<NSNumber*>*)cameraTrackDetailsAtFrame:(long long)frame NS_SWIFT_NAME(cameraTrackDetails(atFrame:));
 - (uint32_t)selectCameraTrackPoints:(NSArray<NSNumber*>*)ids operation:(uint32_t)operation NS_SWIFT_NAME(selectCameraTrackPoints(_:operation:));
+- (NSArray<NSNumber*>*)cameraTrackReconstruction:(long long)source frame:(long long)frame;
 - (NSString*)createCameraTrackObject:(uint32_t)kind NS_SWIFT_NAME(createCameraTrackObject(_:));
 - (NSArray<NSNumber*>*)cameraFeaturesAtFrame:(long long)frame NS_SWIFT_NAME(cameraFeatures(atFrame:));
 - (NSString*)applyCameraSelectionAtFrame:(long long)frame x0:(float)x0 y0:(float)y0 x1:(float)x1 y1:(float)y1 NS_SWIFT_NAME(applyCameraSelection(atFrame:x0:y0:x1:y1:));

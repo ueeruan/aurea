@@ -966,6 +966,7 @@ public:
     [[nodiscard]] TextureHandle curve_lut(const CurveData& curve) noexcept override;
     [[nodiscard]] TextureHandle cube_lut(AssetId id) noexcept override;
     [[nodiscard]] TextureHandle data_texture(u64 key, const Vec4* texels, u32 width, u32 height) noexcept override;
+    [[nodiscard]] TextureHandle upload_effect_data(u64 key, const Vec4* texels, u32 width, u32 height) noexcept override;
     /// 0.4.6: imagens dos plugins ("textures"), RGBA8 por conteúdo (`key`).
     [[nodiscard]] TextureHandle image_texture(u64 key, const u8* rgba, u32 width, u32 height, bool srgb) noexcept override;
     /// Espectro do som de uma camada no instante do `prepare` em curso (ver
@@ -982,6 +983,7 @@ public:
     /// camada escolhida, com os efeitos de áudio dela, numa janela em volta do
     /// quadro. Preview: blocos que faltam são pedidos e o quadro volta
     /// (incompleto); export: decodifica na hora.
+    [[nodiscard]] f64 frames_since_beat(f64 compositionTime) const noexcept override;
     [[nodiscard]] AudioAnalysisResult audio_analysis(const AudioAnalysisRequest& request) noexcept override;
     /// O cache de blocos do mixer (os mesmos blocos que tocam) e o resolvedor
     /// de caminhos do motor. Sem ele (testes), um cache próprio.
@@ -1569,6 +1571,7 @@ private:
     const Layer* compSpaceHost_ = nullptr;
     Mat4 compSpaceFromHost_ = Mat4::identity();
     std::vector<PendingUpload> uploads_;
+    [[nodiscard]] TextureHandle cache_data_texture(u64 key, const Vec4* texels, u32 width, u32 height, bool uploadNow) noexcept;
     std::unordered_map<u64, u64> textKeys_;   ///< chave sintética da camada de texto → chave dos pixels
     bool incomplete_ = false;   ///< o último quadro deixou camada de fora (recurso pendente)
     Status* effectFailureSink_ = nullptr;

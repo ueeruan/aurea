@@ -48,7 +48,7 @@ import kotlin.coroutines.resume
 // =============================================================================
 
 /** O item pago que o paywall vende. [product] = assinatura avulsa (null = só o AureaHyper). */
-data class PaidItem(val product: String?, val kind: Kind) {
+data class PaidItem(val product: String?, val kind: Kind, val subscriptionOnly: Boolean = false) {
     enum class Kind { Effect, Text3D, HyperTools }
 
     companion object {
@@ -56,6 +56,7 @@ data class PaidItem(val product: String?, val kind: Kind) {
             PaidItem(runCatching { AureaEngine.nativeEffectProductId(typeId) }.getOrNull(), Kind.Effect)
         fun text3d(): PaidItem = PaidItem(runCatching { AureaEngine.nativeText3dProductId() }.getOrNull(), Kind.Text3D)
         val hyperTools = PaidItem(null, Kind.HyperTools)
+        val subscriptionTools = PaidItem(null, Kind.HyperTools, subscriptionOnly = true)
     }
 }
 

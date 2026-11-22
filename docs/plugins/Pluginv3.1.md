@@ -53,7 +53,7 @@ Exemplos prontos em [`examples/`](examples/):
 **`"kind": "shader"`** — você escreve o efeito em **GLSL 4.50**: uma função
 `vec4 aurea_main(vec2 uv)` que devolve a cor de cada pixel. O plugin pode ter de
 1 a 8 passes (cada um com o próprio shader), texturas intermediárias em
-resolução reduzida e até 252 parâmetros (189 em `shader3d`; 1024 em `stack` e `audio`). O AUREA compila o shader **no aparelho**
+resolução reduzida. Shaders com uniformes têm 252 posições (189 em `shader3d`); shaders 3.1 com textura de parâmetros têm até 1.024. O AUREA compila o shader **no aparelho**
 na instalação: GLSL → SPIR-V (glslang) → a API de GPU do aparelho (Vulkan usa o
 SPIR-V; OpenGL ES recebe ESSL 3.10 e o Metal recebe MSL, traduzidos pelo
 SPIRV-Cross com as mesmas opções dos shaders do próprio app).
@@ -122,7 +122,7 @@ Texto em UTF-8. Exemplo completo (o do `rgb-wave`):
 
 | Campo | Tipo | Obrigatório | Descrição |
 | --- | --- | --- | --- |
-| `aureaPlugin` | número | sim | Versão do formato. Este app lê **`1`** e **`2`**. |
+| `aureaPlugin` | número | sim | Versão do formato. Valores aceitos: **`1`**, **`2`**, **`3`** e **`3.1`**. |
 | `id` | texto | sim | Identidade única, em domínio reverso: 3 a 64 caracteres `a-z 0-9 . _ -`, sem começar/terminar em `.` e sem `..`. Ex.: `com.estudio.brilho`. A chave do efeito no projeto é `plugin.<id>` — **nunca mude o id** de um plugin publicado. |
 | `version` | texto | sim | `x.y.z` (cada parte 0..99999). Reinstalar o mesmo `id` com versão **igual ou mais nova** substitui; mais velha é recusada. |
 | `author` | texto | não | Autor (até 128). |
@@ -130,7 +130,9 @@ Texto em UTF-8. Exemplo completo (o do `rgb-wave`):
 | `description` | texto ou idiomas | não | Descrição (até 512). |
 | `category` | texto | não | Subcategoria mostrada dentro de **Plugins** (até 32). |
 | `kind` | `"shader"`, `"shader3d"` ou `"stack"` | sim | O tipo (seção 1). `shader3d` (0.3.1) é um `shader` que também recebe a câmera da cena e as camadas ligadas (seção 4, "Plugins 3D"). |
-| `params` | lista | não | Até **64** parâmetros (abaixo). |
+| `params` | lista | não | Declarações de parâmetros. O limite depende do tipo de efeito e do armazenamento. |
+| `parameterStorage` | `"uniform"` ou `"texture"` | não | Em `shader` e `shader3d` do formato 3.1. O padrão é `"uniform"`. |
+| `presets` | lista | não | Até 64 presets declarados no manifesto de um efeito 3.1. |
 | `passes` | lista | shader | 1 a **32** passes (abaixo). |
 | `textures` | objeto | não | 0.4.6: até **8** imagens do pacote lidas no shader com `getFile(nome)` (abaixo). |
 | `margin` | número | não | Quantos **px da camada** o efeito lê/desenha além da caixa da camada (0..4096). Ex.: um brilho de raio 50 declara `50`. Sem margem, o resultado é recortado à caixa. |
@@ -156,13 +158,14 @@ da pessoa, vale `en`, depois `pt-BR`, depois o primeiro declarado. O nome em
 | Campo | Descrição |
 | --- | --- |
 | `id` | Nome do parâmetro: letras, dígitos e `_`, até 32, começando por letra ou `_`. É também o **nome no shader** (macro) e nas expressões. Não pode ser palavra reservada do GLSL nem função nativa (`mix`, `texture`, `float`...), nem começar com `gl_`, `aurea`, `isf_`, `IMG_`, `vv_`, nem conter `__`. |
-| `type` | `float`, `int`, `bool`, `enum`, `color`, `point`, `angle`, `layer` (só `shader3d`). |
+| `type` | `float`, `int`, `bool`, `enum`, `color`, `point`, `angle`, `layer` (só `shader3d`), `curve`, `gradient` e `layerImage` (shaders de formato 3 ou superior). |
 | `label` | Texto ou idiomas (até 48). Padrão: o `id`. |
 | `default` | Valor inicial (por tipo, abaixo). |
 | `min`, `max` | Faixa do controle (números). |
-| `options` | Só `enum`: lista de 1 a 32 textos (ou objetos de idioma). |
+| `options` | Só `enum`: lista de 1 a 256 textos (ou objetos de idioma). |
 | `animatable` | `true` (padrão) ou `false`: aceita keyframes/expressões. |
 | `accept` | Só `layer`: lista com `"camera"`, `"null"`, `"light"` ou `"any"` (padrão: qualquer camada). A tela só oferece essas camadas. |
+| `visible_if` | Formato 3.1. Referencia um `bool` ou `enum` sempre visível, pelo ID. A condição usa o valor no playhead. As trilhas do parâmetro oculto continuam ativas. |
 
 | Tipo | `default` | `min`/`max` padrão | No shader |
 | --- | --- | --- | --- |
@@ -174,6 +177,54 @@ da pessoa, vale `en`, depois `pt-BR`, depois o primeiro declarado. O nome em
 | `point` | `[x, y]` relativo à camada (0..1 = largura/altura; `[0.5, 0.5]` = centro) | -1..2 | `vec2` **no espaço `uv`** do passe (já convertido pelo motor) |
 | `angle` | graus | -360..360 | `float` em **radianos** |
 | `layer` | — (nenhuma camada) | — | um **inteiro** (a posição da camada entre os parâmetros `layer`), para usar nas funções `aurea_layer_*` (até **8** por plugin; nunca animável) |
+
+### Armazenamento e controles do formato 3.1
+
+Um shader com `"parameterStorage": "texture"` lê parâmetros de uma textura
+RGBA32F. O teto é **1.024 posições de `vec4`** (4.096 valores float, até 16 KiB).
+Cada curva usa 16 posições, cada degradê usa 32 e a análise de áudio usa uma.
+O restante usa uma posição por parâmetro. A textura ocupa uma das 11 entradas
+adicionais de cada passe. Use os IDs declarados em `params` no GLSL. O array
+`aurea.params` só existe no caminho de uniformes.
+
+Este manifesto completo declara cor, ponto arrastável no preview, uma condição
+de visibilidade e um preset. A cor do manifesto usa sRGB com alfa reto.
+
+```json
+{
+  "aureaPlugin": 3.1,
+  "id": "com.estudio.tint",
+  "name": "Tint",
+  "version": "1.0.0",
+  "kind": "shader",
+  "parameterStorage": "texture",
+  "params": [
+    {"id": "enabledTint", "type": "bool", "default": true},
+    {"id": "pivot", "type": "point", "default": [0.5, 0.5]},
+    {"id": "ink", "type": "color", "default": "#FF7033CC",
+     "visible_if": {"param": "enabledTint", "equals": true}}
+  ],
+  "presets": [
+    {"id": "cool", "name": "Cool", "set": {"enabledTint": true, "ink": "#3DABFFCC"}}
+  ],
+  "passes": [{"shader": "tint.frag"}]
+}
+```
+
+`tint.frag` usa a cor `ink` como `vec4`, em RGB linear e alfa reto.
+
+```glsl
+vec4 aurea_main(vec2 uv) {
+    vec4 src = texture(aurea_source, uv);
+    float weight = enabledTint * ink.a * (1.0 - smoothstep(0.0, 0.5, distance(uv, pivot)));
+    return vec4(mix(src.rgb, ink.rgb * src.a, weight), src.a);
+}
+```
+
+Para testar `visible_if` com uma lista `enum`, passe o índice inteiro da opção,
+começando em zero. Os presets alteram as constantes dos parâmetros indicados.
+Aceitam escalares, cores e pontos. Curvas, degradês e referências de camada
+continuam sendo configurados no editor.
 
 ### Passes (`passes`)
 
@@ -260,7 +311,7 @@ O motor junta três trechos e compila como GLSL 4.50 com a semântica do Vulkan:
 | `aurea.time` | `vec4` | `x` = segundos, `y` = quadro (com fração no desfoque de movimento), `z` = fps da composição. É o tempo **da camada** (0 no início dela). |
 | `aurea.layer` | `vec4` | `xy` = tamanho da camada em px; `zw` = **texels por px da camada neste passe** (1 no export em tamanho natural, 0,25 num preview em 1/4 ou num passe `scale: 0.25`). |
 | `aurea.region` | `vec4` | A região que o `uv` 0..1 cobre, em px da camada: `xy` = origem, `zw` = tamanho. Sem `margin` é a caixa da camada (`0, 0, largura, altura`). |
-| `aurea.params[N]` | `vec4[N]` | Os valores dos parâmetros, um `vec4` por parâmetro, na ordem do `plugin.json` (`N` = parâmetros declarados, até 252 (189 em `shader3d`)). Use as macros abaixo. |
+| `aurea.params[N]` | `vec4[N]` | Apenas com armazenamento por uniformes. Use os IDs e as funções geradas para que o mesmo shader também funcione com `parameterStorage: texture`. |
 | `<id do parâmetro>` | macro | `#define amount (aurea.params[0].x)` — o valor já convertido (tabela da seção 3). `color` = `aurea.params[i]` (vec4), `point` = `aurea.params[i].xy`. |
 | `AUREA_PI` | `const float` | π. |
 | `aurea_srgb_to_linear(x)`, `aurea_linear_to_srgb(x)` | `float`/`vec3` | Curva sRGB (IEC 61966-2-1), a mesma do motor. |
@@ -557,7 +608,7 @@ não a criatividade.
 | Limite | Valor | Por quê |
 | --- | --- | --- |
 | Passes | 32 | Cada passe é uma textura e uma ida à memória; em GPU de celular a banda é o gargalo. Use `scale` nos passes intermediários. |
-| Parâmetros | 252 em `shader`, 189 em `shader3d`, 1024 em `stack` e `audio` | Shaders respeitam o bloco uniforme de 4 KB. Grafos e pilhas usam armazenamento de CPU. |
+| Parâmetros | 252 posições em `shader`, 189 em `shader3d`, 1.024 posições em shaders 3.1 com `parameterStorage: texture`; 1.024 declarações em `stack` e `audio` | Shaders usam uniformes de até 4 KiB ou textura RGBA32F de até 16 KiB. Grafos e pilhas usam armazenamento de CPU. |
 | Entradas + texturas por passe | 11 + a fonte | 12 slots de textura por passe no motor. |
 | Imagens do pacote (`textures`) | 8, até 64 MB e 8192 px cada | Ficam decodificadas na RAM e na GPU enquanto o efeito é usado. |
 | Camadas ligadas (`layer`) | 8, só em `shader3d` | O mundo de cada camada vai no bloco de parâmetros. |
@@ -630,7 +681,7 @@ Mensagens exatas da instalação (`<...>` = valor do seu pacote):
 | `pacote maior que 512 MB` | Tire arquivos que o plugin não usa. |
 | `plugin.json ausente no pacote` / `plugin.json ausente ou ilegivel no pacote` | O `plugin.json` tem de estar na raiz do ZIP (ou numa única subpasta). |
 | `plugin.json invalido: <detalhe>` | JSON malformado (vírgula sobrando, aspas). |
-| `plugin.json: falta "aureaPlugin": 1 (versao do formato)` / `... nao suportado (este app le as versoes 1 e 2 do formato)` | Declare `"aureaPlugin": 1` ou `2`. |
+| `plugin.json: falta "aureaPlugin": 1, 2, 3 ou 3.1 (versao do formato)` / `plugin.json: "aureaPlugin" nao suportado (formatos 1, 2, 3 e 3.1)` | Declare a versão numérica exigida pelos recursos do plugin. |
 | `plugin.json: "id" invalido "<id>": use 3 a 64 caracteres a-z, 0-9, '.', '_' ou '-' (ex.: com.estudio.brilho)` | Só minúsculas; sem espaço. |
 | `plugin.json: "version" deve ser "x.y.z" (ex.: "1.0.0")` | — |
 | `plugin.json: "kind" deve ser "shader", "shader3d" ou "stack"` | — |
@@ -1148,7 +1199,8 @@ Só em plugins `"kind": "shader"` ou `"shader3d"` com formato 3.
 `layerImage` chega no tamanho da composição, já com efeitos e transformações da
 camada escolhida. Sem camada, `id_connected` é falso e o sampler devolve a
 própria entrada. As posições somam no limite de parâmetros (252 em `shader`, 189
-em `shader3d`), e os samplers somam no limite de entradas.
+em `shader3d` com uniformes; 1.024 usando textura no formato 3.1). A referência a
+uma camada conta como uma posição e um sampler adicional.
 
 ### 15.2 `uses`: histórico e som
 
@@ -1158,8 +1210,8 @@ em `shader3d`), e os samplers somam no limite de entradas.
 
 | Pedido | O que o shader ganha |
 | --- | --- |
-| `history` | `sampler2D aurea_history` (o resultado do quadro anterior) e o macro `AUREA_HISTORY` |
-| `audio` | `sampler2D aurea_audio_spectrum`, `float aurea_audio(float banda)` (banda de 0 a 1), `float AUREA_AUDIO_PEAK` e o macro `AUREA_AUDIO` |
+| `history` | `sampler2D aurea_history` e macro `AUREA_HISTORY`. No formato 3.1, `u_prev_frame` aponta para o mesmo sampler e `AUREA_HISTORY_VALID` indica disponibilidade. A amostra traz a entrada do efeito no quadro anterior quando há histórico; caso contrário recebe a fonte atual. |
+| `audio` | `sampler2D aurea_audio_spectrum`, `float aurea_audio(float banda)` (banda de 0 a 1), `float AUREA_AUDIO_PEAK` e macro `AUREA_AUDIO`. No formato 3.1, `AUREA_AUDIO_VALID` indica disponibilidade e `aurea_audio()` retorna zero na ausência de espectro. |
 
 ### 15.3 Script por quadro (`frameScript`)
 

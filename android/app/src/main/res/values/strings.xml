@@ -1493,7 +1493,7 @@
     <string name="msg_o_projeto_esta_danificado_e_nao">O projeto está danificado e não há cópia válida para recuperar.</string>
     <string name="msg_este_aparelho_nao_tem_codificador_para">Este aparelho não tem codificador para essa configuração de exportação.</string>
     <string name="msg_erro_inesperado_codigo">Erro inesperado (código %1$s).</string>
-    <string name="msg_nao_foi_possivel_iniciar_o_motor">Não foi possível iniciar o motor gráfico (Vulkan) neste aparelho.</string>
+    <string name="msg_nao_foi_possivel_iniciar_o_motor">Não foi possível iniciar o motor gráfico neste aparelho.</string>
     <string name="msg_o_aparelho_sera_medido_de_novo">O aparelho será medido de novo na próxima vez que o Aurea abrir</string>
     <string name="msg_o_preview_nao_conseguiu_usar_a">O preview não conseguiu usar a superfície de vídeo.</string>
     <string name="msg_salvamento_automatico_falhou">Salvamento automático falhou: %1$s</string>
@@ -1809,7 +1809,7 @@
     <string name="am_import_failed">Não deu para importar: %1$s</string>
     <string name="am_import_nothing">nenhum efeito com equivalente no Aurea</string>
     <string name="release_notes_title">Novidades do Aurea</string>
-    <string name="release_notes_body">Aurea 1.0.2.1 (2223) — 19/11/2026\n\n• AureaHyper agora é ANUAL: R$ 100 por ano libera todos os efeitos pagos, o Texto 3D, a Neural (IA) e as ferramentas Hyper. Sem mensalidade e sem assinatura por efeito. Quem já assinou continua com tudo.\n• Optical Flow para filmagem real: menos fantasma, controle Fantasma ↔ Deformação e qualidade Neural (IA) no AureaHYPER.\n• Glitchify igual ao After Effects.\n• Exportação mais rápida e com mais qualidade.\n• Importe só o trecho cortado de vídeos longos.\n• Painel de Pre Render e Pre Export por trecho.\n• AureaMCP acorda o app fechado.</string>
+    <string name="release_notes_body">Aurea 1.0.4 (2225)\n\n• AutoBeat com seleção do áudio, pulso de escala, subida e rotação · grátis\n• Rastreio planar a partir de dois cantos, com aplicação em quatro pontos · AureaHyper\n• Pôster em tinta no Texto 3D: frente branca, volume escuro e contorno claro · AureaHyper\n• AutoRig 2D no Fantoche: pose detectada na imagem, pinos editáveis e animação de repouso · AureaHyper</string>
     <string name="am_import_lossless_required">Este preset tem efeitos, parâmetros ou camadas que não podem ser preservados na conversão. Nada foi salvo nem aplicado.</string>
     <string name="am_import_read_failed">Não foi possível ler o arquivo (limite de 64 MB), ou a camada selecionada mudou. Tente novamente.</string>
     <string name="world_explosive">Explosivo</string>
@@ -5568,4 +5568,19 @@
     <string name="prx_close">Fechar</string>
     <string name="prx_preparing">Preparando…</string>
     <string name="prx_ruler_range">Trecho do Pre Render</string>
+    <string name="pn_t3d_preset_ink_poster">Pôster em tinta</string>
+    <string name="trk_surface_quick">Rastrear superfície</string>
+    <string name="trk_surface_hint">Toque em dois cantos opostos de uma área com textura.</string>
+    <string name="trk_show_advanced">Mostrar opções avançadas</string>
+    <string name="trk_hide_advanced">Ocultar opções avançadas</string>
+    <string name="autobeat_hint">O pulso acompanha as marcas de batida da composição. Analisar uma fonte atualiza as marcas no trecho dela.</string>
+    <string name="autobeat_source">Detectar batidas no áudio</string>
+    <string name="autorig2d_action">AutoRig 2D e animar</string>
+    <string name="autorig2d_parts">Separar e animar camadas</string>
+    <string name="autorig2d_pins">Animar pinos no PNG inteiro</string>
+    <string name="autorig2d_parts_created">Camadas animadas criadas na timeline.</string>
+    <string name="autorig2d_parts_incompatible">Para separar, use uma camada de imagem com apenas o efeito Fantoche, sem máscaras.</string>
+    <string name="autorig2d_busy">Analisando a pose…</string>
+    <string name="autorig2d_no_pose">O AutoRig não encontrou pontos visíveis suficientes. Adicione pinos no Fantoche.</string>
+    <string name="autorig2d_existing">Use um efeito Fantoche sem pinos para criar o AutoRig.</string>
 </resources>

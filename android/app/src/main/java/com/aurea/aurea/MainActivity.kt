@@ -102,7 +102,14 @@ class MainActivity : ComponentActivity() {
         opcional("tema") { com.aurea.aurea.home.HomeViewModel.loadTheme(this) }
         // 0.3.2: config remota assinada (atualização obrigatória, política do AureaHyper, aviso).
         opcional("config") { com.aurea.aurea.config.AppConfigStore.init(this) }
-        opcional("hyper") { com.aurea.aurea.hyper.HyperEntitlements.init(this) }
+        opcional("hyper") {
+            val entitlements = com.aurea.aurea.hyper.HyperEntitlements
+            entitlements.init(this)
+            // O opt-in é gravado via adb run-as no pacote de teste, nunca por um intent.
+            if (BuildConfig.DEBUG && packageName == "com.aurea.aurea.uitest" && runningOnEmulator()) {
+                entitlements.platformUnlocked = java.io.File(filesDir, "unlock-emulator-editor").isFile
+            }
+        }
         if (savedInstanceState == null) opcional("config") { com.aurea.aurea.config.AppConfigStore.refresh(force = true) }
         // Debug (0.4.6): a cena demo — e QUALQUER teste no emulador — abre direto,
         // sem as telas de boas-vindas, do criador e da conta. Só no build de

@@ -20,6 +20,7 @@
 #include "aurea/tracking/MotionGeometry.hpp"
 #include "aurea/tracking/MotionTrackData.hpp"
 #include "aurea/tracking/CameraTrackData.hpp"
+#include "../src/tracking/AnalysisDecode.hpp"
 
 #if defined(AUREA_TEST_VULKAN)
 #if defined(AUREA_TEST_GLES)
@@ -141,12 +142,14 @@ public:
     }
     const VideoStreamInfo& info() const noexcept override { return info_; }
     Status seek_to_keyframe(i64 targetUs) noexcept override {
+        ++seeks;
         u32 i = 0;
         while (i + 1 < pts_.size() && pts_[i + 1] <= targetUs) ++i;
         pos_ = (i / 30) * 30;
         return OkStatus;
     }
     Status next_frame(i64 deliverFromUs, FrameRef& out, i64& outPts, bool& eos) noexcept override {
+        ++reads;
         eos = false;
         if (pos_ >= pts_.size()) { eos = true; outPts = pts_.back(); return OkStatus; }
         const u32 index = pos_++;
@@ -157,6 +160,7 @@ public:
         return OkStatus;
     }
     i64 keyframe_interval_us() const noexcept override { return 1'000'000; }
+    u32 seeks = 0, reads = 0;
 
 private:
     DecodedFrame* make(u32 index) const {
@@ -741,6 +745,46 @@ AUREA_TEST(TrackingFlow, LongClipIsAnalysedInsteadOfRefused) {
 }
 
 // Cancelar no meio: volta rápido, o projeto não muda, dá para recomeçar.
+AUREA_TEST(TrackingFlow, ReverseDecodeKeepsVfrFramesAndAvoidsRepeatedSeeks) {
+    FlowScene scene;
+    scene.width = 176;
+    scene.height = 96;
+    scene.frames = 96;
+    scene.vfr = true;
+    scene.rotation = 90;
+    scene.lumaFn = [](f64 t, f64 x, f64 y) { return std::fmod((t * 17 + x * .07 + y * .13), 1.0); };
+    FlowDecoder slow(scene), fast(scene);
+    std::atomic<bool> cancel{false};
+    std::vector<i64> times;
+    for (i64 i = 83; i >= 0; --i) times.push_back(i * 33333);
+    AnalysisFramePicker baseline(slow, scene.fps, cancel);
+    AnalysisGraySequence sequence(fast, scene.fps, cancel, times, scene.height, scene.width, scene.height);
+    std::vector<Gray> reference(times.size());
+    const auto a = std::chrono::steady_clock::now();
+    for (usize i = 0; i < times.size(); ++i) {
+        FrameRef frame;
+        AUREA_CHECK(baseline.pick(times[i], frame) == AnalysisFramePicker::Result::Ok);
+        AUREA_CHECK(frame && frame_to_gray(*frame.get(), scene.height, reference[i]));
+    }
+    const auto b = std::chrono::steady_clock::now();
+    for (usize i = 0; i < times.size(); ++i) {
+        Gray actual;
+        AUREA_CHECK(sequence.read(i, actual) == AnalysisGraySequence::Result::Ok);
+        AUREA_CHECK_EQ(actual.width, reference[i].width);
+        AUREA_CHECK_EQ(actual.height, reference[i].height);
+        AUREA_CHECK(actual.px == reference[i].px);
+    }
+    const auto c = std::chrono::steady_clock::now();
+    const auto ms = [](auto delta) { return std::chrono::duration<f64, std::milli>(delta).count(); };
+    std::printf("    reverse VFR: %zu frames, %u -> %u seeks, %u -> %u reads, %.1f -> %.1f ms\n",
+                times.size(), slow.seeks, fast.seeks, slow.reads, fast.reads, ms(b-a), ms(c-b));
+    AUREA_CHECK(fast.seeks * 3 < slow.seeks);
+    AUREA_CHECK(fast.reads * 2 < slow.reads);
+    cancel.store(true);
+    Gray ignored;
+    AUREA_CHECK(sequence.read(0, ignored) == AnalysisGraySequence::Result::Cancelled);
+}
+
 AUREA_TEST(TrackingFlow, CancelStopsQuicklyAndLeavesProjectUntouched) {
     FlowScene scene;
     scene.frames = 900;
@@ -752,6 +796,13 @@ AUREA_TEST(TrackingFlow, CancelStopsQuicklyAndLeavesProjectUntouched) {
     AUREA_CHECK(rig.e.start_motion_track(rig.video, 4, 0, false, nullptr, 0));
     std::this_thread::sleep_for(std::chrono::milliseconds(150));
     const f32 midway = rig.e.motion_track_status().progress;
+    AUREA_CHECK(rig.e.pause_motion_track(true));
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    const auto paused = rig.e.motion_track_status();
+    AUREA_CHECK(paused.paused);
+    AUREA_CHECK(rig.e.pause_motion_track(false));
+    AUREA_CHECK(!rig.e.motion_track_status().paused);
+    AUREA_CHECK(rig.e.pause_motion_track(true));
     const auto t0 = std::chrono::steady_clock::now();
     rig.e.cancel_motion_track();
     const auto st = rig.wait_motion(10);
@@ -851,6 +902,17 @@ AUREA_TEST(TrackingFlow, CameraTrackerSolvesRotatedPhoneVideo) {
     AUREA_CHECK_EQ(rig.e.select_camera_track_points(ids.data(), static_cast<u32>(ids.size())), 3u);
     const u32 before = rig.comp()->layers().count();
     const FrameIndex clipStart = rig.layer(rig.video)->start, clipEnd = rig.layer(rig.video)->end;
+    const auto reconstruction = rig.e.camera_track_reconstruction(rig.video, clipStart.value + 12);
+    AUREA_CHECK(!reconstruction.empty() && reconstruction.size() % 6 == 0);
+    u32 selected = 0, pathRows = 0, frustum = 0;
+    for (usize i = 0; i < reconstruction.size(); i += 6) {
+        selected += reconstruction[i] == 0 && reconstruction[i+5] > 0;
+        pathRows += reconstruction[i] == 1;
+        frustum += reconstruction[i] == 2;
+    }
+    AUREA_CHECK_EQ(selected, 3u);
+    AUREA_CHECK(pathRows > 5);
+    AUREA_CHECK_EQ(frustum, 5u);
     auto solid = rig.e.apply_camera_track(-1, {}, 4);
     AUREA_CHECK(solid.ok());
     AUREA_CHECK_EQ(rig.comp()->layers().count(), before + 1);

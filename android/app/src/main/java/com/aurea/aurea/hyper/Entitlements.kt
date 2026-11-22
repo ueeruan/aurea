@@ -282,14 +282,16 @@ object HyperEntitlements {
      * O acesso a um item pago cuja assinatura avulsa é [itemProduct] (null = só o
      * AureaHyper). Lê estado do Compose: a tela recompõe quando o acesso muda.
      */
-    fun accessFor(itemProduct: String?): HyperAccess {
+    fun accessFor(itemProduct: String?, subscriptionOnly: Boolean = false): HyperAccess {
         revision
         if (platformUnlocked) return HyperAccess.Unlocked
         val entitlement = EntitlementRules.access(cache, email, System.currentTimeMillis(), checking) { owned ->
             runCatching { accessRule(owned, itemProduct) }.getOrDefault(false)
         }
         val store = com.aurea.aurea.config.AppConfigStore
-        return com.aurea.aurea.config.AppConfigPolicy.hyperAccess(store.config, entitlement, store.now(), store.fetching)
+        return com.aurea.aurea.config.AppConfigPolicy.hyperAccess(
+            store.config, entitlement, store.now(), store.fetching, subscriptionOnly = subscriptionOnly,
+        )
     }
 
     /** Saiu ou excluiu a conta. */

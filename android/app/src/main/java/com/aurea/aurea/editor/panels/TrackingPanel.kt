@@ -1,6 +1,11 @@
 package com.aurea.aurea.editor.panels
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +16,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,6 +31,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableFloatStateOf
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.window.Dialog
+import kotlin.math.cos
+import kotlin.math.sin
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
@@ -40,7 +56,11 @@ import com.aurea.aurea.ui.ds.AureaToggle
 import com.aurea.aurea.ui.ds.ChoiceChips
 import kotlin.math.roundToInt
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.setProgress
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -59,19 +79,25 @@ import com.aurea.aurea.ui.theme.CupertinoGlyph
 @Composable
 internal fun TrackingPanel(env: PanelEnv) {
     val store = env.store
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 18.dp, top = 12.dp, end = 18.dp, bottom = 24.dp)) {
+    Column(Modifier.fillMaxSize().padding(horizontal = 14.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(false to R.string.cam_mode_2d, true to R.string.panel_camera_3d).forEach { (camera, label) ->
                 androidx.compose.material3.FilterChip(selected = store.cameraTrackerVisible == camera,
-                    onClick = { store.cameraTrackerVisible = camera }, modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                    onClick = {
+                        if (camera && store.pointPick != null) store.cancelMotionPick()
+                        store.cameraTrackerVisible = camera
+                    }, modifier = Modifier.weight(1f).heightIn(min = 48.dp),
                     colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
                         selectedContainerColor = AureaColors.AccentDim, selectedLabelColor = AureaColors.Accent,
                         containerColor = AureaColors.Background, labelColor = AureaColors.Muted),
                     label = { Text(stringResource(label)) })
             }
         }
-        Spacer(Modifier.height(16.dp))
-        if (store.cameraTrackerVisible) CameraTrackSection(env) else MotionTrackSection(env)
+        androidx.compose.runtime.key(store.cameraTrackerVisible) {
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(top = 10.dp, bottom = 16.dp)) {
+                if (store.cameraTrackerVisible) CameraTrackSection(env) else MotionTrackSection(env)
+            }
+        }
     }
 }
 
@@ -101,44 +127,98 @@ private fun MotionTrackSection(env: PanelEnv) {
     var zoom by remember { mutableFloatStateOf(1.15f) }
     var crop by remember { mutableIntStateOf(1) }
     var tool by remember(store.primary) { mutableIntStateOf(0) }
+    var advanced by remember(store.primary) { mutableStateOf(false) }
     LaunchedEffect(store) { while (true) { store.refreshMotionStatus(); delay(400) } }
     LaunchedEffect(store.primary) { store.refreshMotionStatus() }
     val s = store.motionStatus
-    Text(stringResource(R.string.trk_title), style = AureaType.Base.merge(TextStyle(fontWeight = FontWeight.W700)))
+    val hyperLabel = stringResource(R.string.hyper_title)
+    Text(stringResource(R.string.trk_smart_title), style = AureaType.Base.merge(TextStyle(fontWeight = FontWeight.W700)))
+    store.landmarkProgress?.let { progress ->
+        androidx.compose.material3.LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
+        Text(stringResource(R.string.edt_track_analyzing, (progress * 100).toInt()))
+        androidx.compose.material3.TextButton(onClick = store::cancelLandmarks) { Text(stringResource(R.string.common_cancel)) }
+        return
+    }
     if (s[0].toInt() != 1 && store.pointPick == null) {
-        val tools = listOf(R.string.trk_tool_point, R.string.trk_tool_two_points, R.string.trk_tool_planar, R.string.trk_tool_corner_pin, R.string.trk_tool_stabilizer)
-            .map { stringResource(it) }
-        TrackingChoices(tools, tool) { tool = it }
-        Action(tools[tool], stringResource(if (tool == 4) R.string.edt_track_global_motion else R.string.edt_track_pick_points)) {
-            store.beginMotionPick(tool)
+        Action(stringResource(R.string.trk_tool_point), stringResource(R.string.edt_track_pick_points)) {
+            store.beginMotionPick(0, confirm = true)
         }
-        if (tool == 0) {
-            Action(stringResource(R.string.editor_estabilizar_pelo_ponto), stringResource(R.string.editor_move_video_ponto_ficar_parado_tela)) {
-                store.beginPointPick(true)
-            }
+        androidx.compose.material3.TextButton(onClick = { store.beginMotionPick(0, auto = true) },
+            modifier = Modifier.testTag("tracking.autoPoint")) { Text(stringResource(R.string.trk_auto_point)) }
+        Action("${stringResource(R.string.trk_object)} · $hyperLabel", stringResource(R.string.trk_object_hint)) {
+            store.beginMotionPick(2, rectangle = true, confirm = true, modelOverride = 2)
+        }
+        Spacer(Modifier.height(6.dp))
+        Action("${stringResource(R.string.trk_surface_quick)} · $hyperLabel", stringResource(R.string.trk_surface_hint)) {
+            store.beginMotionPick(2, rectangle = true, confirm = true, modelOverride = 3)
+        }
+        androidx.compose.material3.TextButton(onClick = { store.trackLandmarks(true) }, modifier = Modifier.testTag("tracking.face")) {
+            Text("${stringResource(R.string.trk_face)} · $hyperLabel")
+        }
+        androidx.compose.material3.TextButton(onClick = { store.trackLandmarks(false) }, modifier = Modifier.testTag("tracking.body")) {
+            Text("${stringResource(R.string.trk_body)} · $hyperLabel")
         }
         TrackingChoices(listOf(stringResource(R.string.trk_direction_forward), stringResource(R.string.trk_direction_backward)),
             if (store.motionBackward) 1 else 0, { store.motionBackward = it == 1 })
-        Text(stringResource(R.string.trk_motion), style = AureaType.Base)
-        TrackingChoices(listOf(R.string.trk_auto, R.string.trk_motion_position, R.string.trk_motion_prs, R.string.trk_motion_perspective)
-            .map { stringResource(it) }, store.motionModel, { store.motionModel = it })
-        Text(stringResource(R.string.trk_feature_radius, store.motionFeature.toInt()))
-        androidx.compose.material3.Slider(value = store.motionFeature, onValueChange = { store.motionFeature = it }, valueRange = 6f..48f)
-        Text(stringResource(R.string.trk_search_radius, store.motionSearch.toInt()))
-        androidx.compose.material3.Slider(value = store.motionSearch, onValueChange = { store.motionSearch = it }, valueRange = 16f..192f)
+        androidx.compose.material3.TextButton(onClick = { advanced = !advanced }, modifier = Modifier.testTag("tracking.advanced")) {
+            Text(stringResource(if (advanced) R.string.trk_hide_advanced else R.string.trk_show_advanced))
+        }
+        if (advanced) {
+            val tools = listOf(R.string.trk_tool_point, R.string.trk_tool_two_points, R.string.trk_tool_planar, R.string.trk_tool_corner_pin, R.string.trk_tool_stabilizer)
+                .map { stringResource(it) }
+            TrackingChoices(tools, tool) { tool = it }
+            val toolLabel = if (tool in 2..3) "${tools[tool]} · $hyperLabel" else tools[tool]
+            Action(toolLabel, stringResource(if (tool == 4) R.string.edt_track_global_motion else R.string.edt_track_pick_points)) {
+                store.beginMotionPick(tool, confirm = true)
+            }
+            if (tool == 0) {
+                Action(stringResource(R.string.editor_estabilizar_pelo_ponto), stringResource(R.string.editor_move_video_ponto_ficar_parado_tela)) {
+                    store.beginPointPick(true)
+                }
+            }
+            Text(stringResource(R.string.trk_motion), style = AureaType.Base)
+            TrackingChoices(listOf(R.string.trk_auto, R.string.trk_motion_position, R.string.trk_motion_prs, R.string.trk_motion_perspective)
+                .map { stringResource(it) }, store.motionModel, { store.motionModel = it })
+            Text(stringResource(R.string.trk_feature_radius, store.motionFeature.toInt()))
+            androidx.compose.material3.Slider(value = store.motionFeature, onValueChange = { store.motionFeature = it }, valueRange = 6f..48f)
+            Text(stringResource(R.string.trk_search_radius, store.motionSearch.toInt()))
+            androidx.compose.material3.Slider(value = store.motionSearch, onValueChange = { store.motionSearch = it }, valueRange = 16f..192f)
+            if (tool in 0..1) {
+                Text(stringResource(R.string.trk_min_confidence, (store.motionConfidence * 100).roundToInt()))
+                androidx.compose.material3.Slider(value = store.motionConfidence, onValueChange = { store.motionConfidence = it }, valueRange = 0.4f..0.95f)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.Checkbox(checked = store.motionValidateBack, onCheckedChange = { store.motionValidateBack = it })
+                    Text(stringResource(R.string.trk_validate_backward))
+                }
+            }
+        }
         androidx.compose.material3.TextButton(onClick = store::restoreMotion) { Text(stringResource(R.string.trk_restore)) }
     }
     if (store.pointPick != null) {
         Text(stringResource(R.string.edt_track_points_selected, store.motionPicked))
+        androidx.compose.material3.TextButton(onClick = store::confirmMotionPoints, enabled = store.motionPointsReady,
+            modifier = Modifier.testTag("tracking.confirm")) { Text(stringResource(R.string.trk_track_selection)) }
+        androidx.compose.material3.TextButton(onClick = store::removeMotionPoint, enabled = store.motionPicked > 0) {
+            Text(stringResource(R.string.trk_remove_last_point))
+        }
         androidx.compose.material3.TextButton(onClick = store::cancelMotionPick) { Text(stringResource(R.string.editor_cancelar_selecao)) }
     }
     if (s[0].toInt() == 1) {
         androidx.compose.material3.LinearProgressIndicator(progress = { s[1].coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
         Text(stringResource(R.string.edt_track_analyzing, (s[1] * 100).toInt()))
+        val paused = s[11] != 0f
+        androidx.compose.material3.TextButton(onClick = { store.pauseMotion(!paused) }) {
+            Text(stringResource(if (paused) R.string.trk_resume else R.string.trk_pause))
+        }
         androidx.compose.material3.TextButton(onClick = store::cancelMotion) { Text(stringResource(R.string.common_cancel)) }
     }
     if (store.motionMessage.isNotEmpty()) Text(store.motionMessage, color = AureaColors.Muted, fontSize = 12.sp)
     if (s[0].toInt() == 2) {
+        MotionReview(env)
+        if (s[4].toInt() != 4) Row(verticalAlignment = Alignment.CenterVertically) {
+            androidx.compose.material3.Checkbox(checked = store.motionTrailVisible, onCheckedChange = { store.motionTrailVisible = it })
+            Text(stringResource(R.string.trk_show_trails))
+        }
         Text(stringResource(R.string.trk_stats, s[3].toInt(), s[2].toInt(), (s[7] * 100).toInt(), "%.2f".format(s[8])), fontSize = 12.sp)
         // Quadros perdidos não escondem mais as ações: ficam sem key (interpolados).
         if (s[5] > 0f) Text(stringResource(R.string.track_lost_frames_note, s[5].toInt()), color = AureaColors.Muted, fontSize = 12.sp)
@@ -174,6 +254,7 @@ private fun MotionTrackSection(env: PanelEnv) {
                     }
                 }
                 if (s[4].toInt() >= 2) {
+                    Action(stringResource(R.string.trk_create_mask), stringResource(R.string.trk_create_mask_hint)) { store.applyMotion(6) }
                     Spacer(Modifier.height(6.dp))
                     targets.filter { it.kind == LayerType.Video.kind || it.kind == LayerType.Image.kind }.forEach { layer ->
                         androidx.compose.material3.TextButton(onClick = { store.applyMotion(2, target = layer.id) }) { Text(stringResource(R.string.track_corner_pin_to, layer.name)) }
@@ -182,6 +263,66 @@ private fun MotionTrackSection(env: PanelEnv) {
             }
         }
     }
+}
+
+@Composable
+private fun MotionReview(env: PanelEnv) {
+    val store = env.store
+    val source = store.primary ?: return
+    val status = store.motionStatus
+    val bins = remember(source, status[2], status[5], status[7]) { store.motionReview(source) }
+    if (bins.size <= 2) return
+    val first = bins[0].roundToInt()
+    val last = bins[1].roundToInt()
+    val label = stringResource(R.string.trk_review)
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val failed = stringResource(R.string.trk_csv_failed)
+    var exporting by remember { mutableStateOf(false) }
+    // Capture the source when opening the system picker. A later selection
+    // change must not export another clip.
+    var exportSource by remember { mutableStateOf(source) }
+    val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
+        if (uri != null) {
+            exporting = true
+            val requested = exportSource
+            scope.launch {
+                val success = withContext(Dispatchers.IO) {
+                    runCatching {
+                        val csv = store.motionCsv(requested) ?: return@runCatching false
+                        context.contentResolver.openOutputStream(uri, "wt")?.bufferedWriter()?.use { it.write(csv) } != null
+                    }.getOrDefault(false)
+                }
+                exporting = false
+                if (!success) store.showToast(failed)
+            }
+        }
+    }
+    Text(label, style = AureaType.Base)
+    Canvas(Modifier.fillMaxWidth().height(42.dp).testTag("tracking.review")
+        .pointerInput(first, last) {
+            detectTapGestures { p ->
+                store.seek(first + ((last - first) * (p.x / size.width).coerceIn(0f, 1f)).roundToInt())
+            }
+        }.semantics {
+            contentDescription = label
+            progressBarRangeInfo = ProgressBarRangeInfo(store.playhead.coerceIn(first, last).toFloat(), first.toFloat()..last.toFloat())
+            setProgress { store.seek(it.roundToInt().coerceIn(first, last)); true }
+        }) {
+        val width = size.width / (bins.size - 2)
+        for (i in 2 until bins.size) {
+            val confidence = bins[i].coerceIn(0f, 1f)
+            val height = size.height * (.18f + .82f * confidence)
+            val color = if (bins[i] < 0) Color(0xFFCB5C62) else AureaColors.Accent.copy(alpha = .35f + .65f * confidence)
+            drawRect(color, Offset((i - 2) * width, size.height - height), Size(width, height))
+        }
+        val x = size.width * (store.playhead - first).coerceIn(0, last - first) / (last - first).coerceAtLeast(1)
+        drawLine(Color(0xFFFF6268), Offset(x, 0f), Offset(x, size.height), strokeWidth = 2.dp.toPx())
+    }
+    androidx.compose.material3.TextButton(enabled = !exporting, onClick = {
+        exportSource = source
+        save.launch("aurea-motion.csv")
+    }) { Text(stringResource(R.string.trk_export_csv)) }
 }
 
 /**
@@ -195,6 +336,8 @@ private fun CameraTrackSection(env: PanelEnv) {
     val st by remember(store) { derivedStateOf { store.cameraTrack } }
     var mode by remember { mutableIntStateOf(1) }
     var advanced by remember { mutableStateOf(false) }
+    var analyzeOptions by remember { mutableStateOf(false) }
+    var reconstruction by remember { mutableStateOf(false) }
     var cameraMotion by remember { mutableIntStateOf(0) }
     var knownFov by remember { mutableFloatStateOf(0f) }
     var distanceText by remember { mutableStateOf("100") }
@@ -224,10 +367,6 @@ private fun CameraTrackSection(env: PanelEnv) {
         Text(stringResource(R.string.cam_step_analyze), style = AureaType.Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W700)))
     }
     Spacer(Modifier.height(6.dp))
-    if (st?.state != 1 && st?.state != 2) {
-        CameraQualityPicker(mode) { mode = it }
-        CameraSolveOptions(shotType, { shotType = it }, cameraMotion, { cameraMotion = it }, knownFov, { knownFov = it }, lens, { lens = it })
-    }
     Spacer(Modifier.height(8.dp))
     val s = st
     when {
@@ -260,6 +399,10 @@ private fun CameraTrackSection(env: PanelEnv) {
             Spacer(Modifier.height(8.dp))
             if (!advanced) {
             Action(stringResource(R.string.panel_criar_camera), stringResource(R.string.cam_create_camera_desc)) { store.createCameraTrackObject(0) }
+            androidx.compose.material3.TextButton(onClick = { reconstruction = true }, modifier = Modifier.testTag("cam.reconstruction")) {
+                Text(stringResource(R.string.trk_reconstruction))
+            }
+            if (reconstruction) CameraReconstructionDialog(env) { reconstruction = false }
             if (s.lensSolved) {
                 Spacer(Modifier.height(6.dp))
                 Action(stringResource(R.string.cam_lens_remove), stringResource(R.string.cam_lens_remove_desc)) { store.addCameraLensEffect(false) }
@@ -334,6 +477,122 @@ private fun CameraTrackSection(env: PanelEnv) {
             Action(stringResource(R.string.panel_analisar_camera), stringResource(R.string.panel_acha_movimento_camera_video_roda_segundo)) {
                 store.startCameraTrack(mode, cameraMotion, knownFov, shotType, if (lens) 1 else 0)
             }
+            androidx.compose.material3.TextButton(onClick = { analyzeOptions = !analyzeOptions }, modifier = Modifier.testTag("cam.analyze.options")) {
+                Text(stringResource(if (analyzeOptions) R.string.trk_hide_advanced else R.string.trk_show_advanced))
+            }
+            if (analyzeOptions) {
+                CameraQualityPicker(mode) { mode = it }
+                CameraSolveOptions(shotType, { shotType = it }, cameraMotion, { cameraMotion = it }, knownFov, { knownFov = it }, lens, { lens = it })
+            }
+        }
+    }
+}
+
+@Composable
+private fun CameraReconstructionDialog(env: PanelEnv, close: () -> Unit) {
+    val store = env.store
+    val source = store.primary ?: return
+    var rows by remember(source) { mutableStateOf(FloatArray(0)) }
+    var yaw by remember { mutableFloatStateOf(-.35f) }
+    var pitch by remember { mutableFloatStateOf(-.20f) }
+    var zoom by remember { mutableFloatStateOf(1f) }
+    var pan by remember { mutableStateOf(Offset.Zero) }
+    var panning by remember { mutableStateOf(false) }
+    var revision by remember { mutableIntStateOf(0) }
+    val playhead = store.playhead
+    LaunchedEffect(source, playhead, revision) {
+        rows = withContext(Dispatchers.Default) { store.cameraReconstruction(source, playhead) }
+    }
+    val title = stringResource(R.string.trk_reconstruction)
+    fun project(row: Int, width: Float, height: Float): Offset {
+        val x = rows[row + 2]
+        val y = rows[row + 3]
+        val z = rows[row + 4]
+        val horiz = cos(yaw) * x + sin(yaw) * z
+        val depth = -sin(yaw) * x + cos(yaw) * z
+        val vert = cos(pitch) * y - sin(pitch) * depth
+        val scale = minOf(width, height) * .31f * zoom
+        return Offset(width / 2 + pan.x + scale * horiz, height / 2 + pan.y + scale * vert)
+    }
+    Dialog(onDismissRequest = close) {
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(AureaColors.Background)
+            .verticalScroll(rememberScrollState()).padding(14.dp)) {
+            Text(title, style = AureaType.Base.merge(TextStyle(fontWeight = FontWeight.W700)))
+            Canvas(Modifier.fillMaxWidth().height(240.dp).clip(RoundedCornerShape(8.dp))
+                .background(AureaColors.Chip).testTag("cam.reconstruction.canvas")
+                .pointerInput(panning) {
+                    detectTransformGestures { _, delta, scale, _ ->
+                        zoom = (zoom * scale).coerceIn(.35f, 5f)
+                        if (panning) pan += delta
+                        else {
+                            yaw += delta.x * .009f
+                            pitch = (pitch + delta.y * .009f).coerceIn(-1.55f, 1.55f)
+                        }
+                    }
+                }
+                .pointerInput(rows, yaw, pitch, zoom, pan) {
+                    detectTapGestures { tap ->
+                        val target = rows.indices.step(6).filter { rows[it] == 0f }
+                            .minByOrNull { (project(it, size.width.toFloat(), size.height.toFloat()) - tap).getDistanceSquared() }
+                        if (target != null && (project(target, size.width.toFloat(), size.height.toFloat()) - tap).getDistance() < 24.dp.toPx()) {
+                            store.selectReconstructionPoint(rows[target + 1].toInt())
+                            revision++
+                        }
+                    }
+                }
+                .semantics { contentDescription = title }) {
+                val pointRows = rows.indices.step(6)
+                fun p(i: Int) = project(i, size.width, size.height)
+                var previous: Int? = null
+                val frustum = ArrayList<Int>(5)
+                val axes = ArrayList<Int>(4)
+                var gridStart: Int? = null
+                for (i in pointRows) when (rows[i].toInt()) {
+                    0 -> drawCircle(if (rows[i + 5] > 0) Color(0xFF58E29B) else AureaColors.Accent,
+                        (if (rows[i + 5] > 0) 3.5f else 1.8f).dp.toPx(), p(i))
+                    1 -> {
+                        previous?.let {
+                            drawLine(if (rows[i + 5] > 2f) Color(0xFFE68A77) else Color(0xFFBEA8FF), p(it), p(i), 1.5.dp.toPx())
+                        }
+                        previous = i
+                    }
+                    2 -> frustum.add(i)
+                    3 -> {
+                        val start = gridStart
+                        if (start != null) drawLine(AureaColors.Muted.copy(alpha = .30f), p(start), p(i))
+                        gridStart = if (start == null) i else null
+                    }
+                    4 -> axes.add(i)
+                }
+                if (frustum.size == 5) for (i in 1..4) {
+                    drawLine(Color.White, p(frustum[0]), p(frustum[i]))
+                    drawLine(Color.White, p(frustum[i]), p(frustum[if (i == 4) 1 else i + 1]))
+                }
+                if (axes.size == 4) {
+                    listOf(Color(0xFFFF6268), Color(0xFF58E29B), Color(0xFF72AFFF)).forEachIndexed { i, color ->
+                        drawLine(color, p(axes[0]), p(axes[i + 1]), 1.8.dp.toPx())
+                    }
+                }
+            }
+            TrackingChoices(listOf(stringResource(R.string.trk_orbit), stringResource(R.string.trk_pan)), if (panning) 1 else 0) { panning = it == 1 }
+            androidx.compose.material3.Slider(value = zoom, onValueChange = { zoom = it }, valueRange = .35f..5f,
+                modifier = Modifier.semantics { contentDescription = "Zoom" })
+            val path = rows.indices.step(6).filter { rows[it] == 1f }
+            if (path.size >= 2) {
+                val frames = rows[path.first() + 1]..rows[path.last() + 1]
+                if (frames.endInclusive > frames.start) {
+                    val label = stringResource(R.string.trk_camera_frame)
+                    androidx.compose.material3.Slider(value = playhead.toFloat().coerceIn(frames),
+                        onValueChange = { store.seek(it.roundToInt()) }, valueRange = frames,
+                        modifier = Modifier.semantics { contentDescription = label })
+                }
+            }
+            if (store.cameraSelectedCount > 0) {
+                androidx.compose.material3.TextButton(onClick = { store.calibrateCamera(0); revision++ }) { Text(stringResource(R.string.cam_set_origin)) }
+                androidx.compose.material3.TextButton(enabled = store.cameraSelectedCount >= 3, onClick = { store.calibrateCamera(1); revision++ }) { Text(stringResource(R.string.cam_set_ground)) }
+                androidx.compose.material3.TextButton(onClick = { close(); store.createCameraTrackObject(1) }) { Text(stringResource(R.string.cam_create_null_anchor)) }
+            }
+            androidx.compose.material3.TextButton(onClick = close) { Text(stringResource(R.string.common_cancel)) }
         }
     }
 }

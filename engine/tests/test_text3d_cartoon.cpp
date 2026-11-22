@@ -562,3 +562,18 @@ AUREA_TEST(Text3DCartoonGpu, KeyframedOutlineWidthChangesTheFrame) {
     AUREA_CHECK(thick > thin * 1.5f);
 }
 #endif
+
+AUREA_TEST(Text3DCartoon, InkPosterPreservesContentAndUsesContrastingExtrusion) {
+    Text3DSpec text;
+    text.content = "INK";
+    AUREA_CHECK(apply_text3d_material_preset(text, kText3DPresetInkPoster));
+    AUREA_CHECK_EQ(text.content, "INK");
+    AUREA_CHECK_EQ(text.style, kText3DStyleCartoon);
+    AUREA_CHECK(text.color.x > .95f && text3d_cartoon_side(text).x < .05f);
+    AUREA_CHECK(text.depth > .5f && text.outlineWidth > 0.0f);
+    MaterialBall preview;
+    AUREA_CHECK(text3d_preset_ball(kText3DPresetInkPoster, preview));
+    AUREA_CHECK(preview.toon);
+    Image3DSpec image;
+    AUREA_CHECK(!apply_image3d_material_preset(image, kText3DPresetInkPoster));
+}

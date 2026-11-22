@@ -433,7 +433,7 @@ final class HyperEntitlements: ObservableObject {
     }
 
     /// O acesso a um item pago cuja assinatura avulsa é `item` (nil = só o AureaHyper).
-    func accessFor(_ item: String?) -> HyperAccess {
+    func accessFor(_ item: String?, subscriptionOnly: Bool = false) -> HyperAccess {
 #if DEBUG
         if parityPaywall { return .locked }
 #endif
@@ -441,7 +441,8 @@ final class HyperEntitlements: ObservableObject {
             Self.engineRule($0, item)
         }
         let store = AppConfigStore.shared
-        return AppConfigPolicy.hyperAccess(store.config, entitlement: entitlement, now: AppConfigStore.now(), fetching: store.fetching)
+        return AppConfigPolicy.hyperAccess(store.config, entitlement: entitlement, now: AppConfigStore.now(),
+                                           fetching: store.fetching, subscriptionOnly: subscriptionOnly)
     }
 
     func clear() {

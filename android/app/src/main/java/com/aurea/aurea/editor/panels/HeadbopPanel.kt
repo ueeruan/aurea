@@ -3,6 +3,7 @@ package com.aurea.aurea.editor.panels
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.PointF
 import android.graphics.Matrix
 import android.media.FaceDetector
@@ -93,14 +94,22 @@ private fun HbChip(label: String, tag: String, on: Boolean, onClick: () -> Unit)
 private fun uriOf(path: String): Uri = if (path.contains("://")) Uri.parse(path) else Uri.fromFile(File(path))
 
 /** Foto: pose (pessoa 0) + rostos extras (pessoas 1..3) no formato do motor. */
-private suspend fun detectPhoto(context: Context, path: String): Pair<FloatArray, Float>? = withContext(Dispatchers.Default) {
+internal suspend fun detectHeadbopPhoto(
+    context: Context,
+    path: String,
+    rigOnly: Boolean = false,
+    illustratedModel: String? = null,
+): Pair<FloatArray, Float>? = withContext(Dispatchers.Default) {
     val uri = uriOf(path)
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
     if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@withContext null
     var sample = 1
     while (max(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 768) sample *= 2
-    val opts = BitmapFactory.Options().apply { inSampleSize = sample; inPreferredConfig = Bitmap.Config.RGB_565 }
+    val opts = BitmapFactory.Options().apply {
+        inSampleSize = sample
+        inPreferredConfig = if (rigOnly) Bitmap.Config.ARGB_8888 else Bitmap.Config.RGB_565
+    }
     val decoded = context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) } ?: return@withContext null
     val orientation = AureaEngine.exifOrientation(context, uri)
     val matrix = Matrix().apply {
@@ -122,11 +131,31 @@ private suspend fun detectPhoto(context: Context, path: String): Pair<FloatArray
     try {
         val w = bmp.width.toFloat()
         val h = bmp.height.toFloat()
+        if (illustratedModel != null) {
+            if (bmp.config != Bitmap.Config.ARGB_8888) return@withContext null
+            val rgba = java.nio.ByteBuffer.allocateDirect(bmp.byteCount)
+            bmp.copyPixelsToBuffer(rgba)
+            return@withContext AureaEngine.nativeDetectIllustratedPose(
+                rgba, bmp.width, bmp.height, bmp.rowBytes, illustratedModel,
+            )?.let { it to (w / h) }
+        }
         val rows = ArrayList<FloatArray>()
         val detector = PoseDetection.getClient(
             AccuratePoseDetectorOptions.Builder().setDetectorMode(AccuratePoseDetectorOptions.SINGLE_IMAGE_MODE).build())
         try {
-            val pose = Tasks.await(detector.process(InputImage.fromBitmap(bmp, 0)))
+            val input = if (rigOnly && bmp.hasAlpha()) {
+                Bitmap.createBitmap(bmp.width, bmp.height, Bitmap.Config.ARGB_8888).also { flat ->
+                    Canvas(flat).apply {
+                        drawColor(0xff808080.toInt())
+                        drawBitmap(bmp, 0f, 0f, null)
+                    }
+                }
+            } else bmp
+            val pose = try {
+                Tasks.await(detector.process(InputImage.fromBitmap(input, 0)))
+            } finally {
+                if (input !== bmp) input.recycle()
+            }
             if (pose.allPoseLandmarks.isNotEmpty()) {
                 val f = FloatArray(FRAME_FLOATS)
                 for (lm in pose.allPoseLandmarks) {
@@ -141,6 +170,7 @@ private suspend fun detectPhoto(context: Context, path: String): Pair<FloatArray
         } finally {
             detector.close()
         }
+        if (rigOnly) return@withContext rows.firstOrNull()?.let { it to (w / h) }
         // Mais pessoas: os rostos (olhos + giro). FaceDetector pede largura par em RGB_565.
         val even = if (bmp.width % 2 == 0) bmp else Bitmap.createScaledBitmap(bmp, bmp.width - 1, bmp.height, true)
         try {
@@ -238,7 +268,7 @@ internal fun HeadbopCardTools(store: EditorStore, effectId: Int) {
                                         MocapDetector(context.applicationContext).run(uriOf(path), false,
                                             { detecting = it }) { data, n, aspect -> engine.headbopPushFrames(data, n, aspect) }
                                     } else {
-                                        detectPhoto(context.applicationContext, path)?.let { (data, aspect) ->
+                                        detectHeadbopPhoto(context.applicationContext, path)?.let { (data, aspect) ->
                                             if (data.isNotEmpty()) engine.headbopPushFrames(data, data.size / FRAME_FLOATS, aspect)
                                         }
                                     }

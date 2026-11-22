@@ -1800,6 +1800,11 @@ public:
     u32 query_puppet(u64 layerId, u32 effectId, f32* out, u32 capacity) noexcept;
     /// Pino novo sob o toque (−1 = cheio/sem efeito). Um passo de desfazer.
     i32 puppet_add_pin(u64 layerId, u32 effectId, f32 u, f32 v) noexcept;
+    /// Bind confident body landmarks to a fresh image Puppet effect and key a planted idle animation.
+    /// Returns the number of pins, -1 for unavailable input, -2 if the effect already has pins.
+    i32 puppet_auto_rig_image(u64 layerId, u32 effectId, const f32* pose, u32 count) noexcept;
+    /// Build editable masked image layers and animate their independent meshes.
+    i32 puppet_auto_rig_parts(u64 layerId, u32 effectId, const f32* pose, u32 count) noexcept;
     /// Arrasto do pino; `continuing` = mesmo gesto (sem passo novo).
     bool puppet_move_pin(u64 layerId, u32 effectId, u32 pin, f32 u, f32 v, bool autoKey, bool continuing) noexcept;
     bool puppet_remove_pin(u64 layerId, u32 effectId, u32 pin) noexcept;
@@ -2052,18 +2057,22 @@ public:
     /// Place an already-imported GLB/3D object at the selected tracked surface.
     bool place_model_on_track(u64 layer) noexcept;
     /// Point / 2 Point / Planar / Corner Pin / Stabilizer. Seeds are source
-    /// pixels, analysis starts at the playhead (stabilizer uses the full clip),
+    /// pixels (zero seeds auto-detects for Point / 2 Point). Analysis starts
+    /// at the playhead (stabilizer uses the full clip),
     /// up to tracking::kMaxMotionTrackFrames. A cancelled job still exiting
     /// does not block a new start. Frames without a measurement stay invalid
     /// (counted in `lost`) and never block applying.
     bool start_motion_track(u64 layerId, u32 tool, u32 model, bool backward,
-                            const f32* pointsXY, u32 count, f32 featureRadius = 12, f32 searchRadius = 48) noexcept;
+                            const f32* pointsXY, u32 count, f32 featureRadius = 12, f32 searchRadius = 48,
+                            f32 minimumConfidence = .65f, bool validateBack = false) noexcept;
     bool restore_motion_track(u64 layerId) noexcept;
     void cancel_motion_track() noexcept;
+    bool pause_motion_track(bool paused) noexcept;
     struct MotionTrackStatus {
         u32 state = 0, tool = 0, frames = 0, validFrames = 0, lost = 0, reacquired = 0;
         f32 progress = 0, confidence = 0, errorPx = 0, cropPercent = 0;
         u64 memoryBytes = 0;
+        bool paused = false;
         std::string message;
     };
     [[nodiscard]] MotionTrackStatus motion_track_status() noexcept;
@@ -2072,9 +2081,22 @@ public:
     [[nodiscard]] u64 motion_track_source() noexcept;
     /// x,y,confidence for the chosen source points, in composition pixels.
     u32 motion_track_features(i64 frame, f32* out3, u32 capacity) noexcept;
+    /// Recent track measurements {point id, x, y, confidence}; confidence
+    /// zero is a gap. Coordinates are evaluated in composition space.
+    [[nodiscard]] std::vector<f32> motion_track_trail(u64 source, i64 frame) noexcept;
+    /// {first timeline frame, last timeline frame, confidence buckets}.
+    /// An invalid observation marks its bucket as -1 even if others succeeded.
+    [[nodiscard]] std::vector<f32> motion_track_review(u64 source, u32 buckets) noexcept;
+    /// Measurements in chronological timeline order. Lost sample coordinates
+    /// are blank. Times are composition frames and source microseconds.
+    [[nodiscard]] std::string motion_track_csv(u64 source) noexcept;
+    /// Pose detector rows {source seconds, reserved, 33*(u,v,z,confidence)}.
+    /// Creates editable 2D null tracks, accounting for trim and speed.
+    [[nodiscard]] u32 apply_landmark_tracks(u64 source, const f32* rows, u32 frames, bool face) noexcept;
     /// Apply: 0 new Null, 1 target transform, 2 target Corner Pin,
     /// 3 stabilize source (Stabilizer = global motion; Point / 2 Point = the
-    /// tracked detail stays still), 4 new Shape, 5 new Text. One undo
+    /// tracked detail stays still), 4 new Shape, 5 new Text, 6 tracked mask
+    /// on the source video. One undo
     /// operation. Lost frames get no keyframe (interpolated by the curve).
     [[nodiscard]] Result<u64> apply_motion_track(u64 target, u32 apply, bool lock = false,
         f32 smoothSeconds = .5f, f32 maxScale = 1.15f, u32 crop = 1) noexcept;
@@ -2095,6 +2117,10 @@ public:
     u32 camera_track_features_detail(i64 frame, f32* out6, u32 maxPoints) noexcept;
     /// Pontos 3D reconstruídos, no mundo da composição (depois de aplicar).
     [[nodiscard]] std::vector<Vec3> camera_track_points() noexcept;
+    /// Preview-only rows {kind, id, x, y, z, value}. Kind 0 = solved point
+    /// (id is track id, value selected), 1 = path (id is frame, value error),
+    /// 2 = current camera frustum, 3 = estimated ground grid, 4 = XYZ axes.
+    [[nodiscard]] std::vector<f32> camera_track_reconstruction(u64 source, i64 frame) noexcept;
     /// Pontos seguidos no quadro `frame` da composição, em px da composição
     /// sobre o vídeo analisado: (x, y, estado) — estado 1 = entrou no solve,
     /// 0 = rejeitado. Como os pontos coloridos do AE. Devolve quantos.

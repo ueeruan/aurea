@@ -28,6 +28,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
+import com.aurea.aurea.editor.panels.EditorPanel
 import com.aurea.aurea.ui.i18n.AppText
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
@@ -638,6 +639,48 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
             k += 6
         }
     }
+    if (ui.panel == EditorPanel.Tracking && !store.cameraTrackerVisible) {
+        store.motionTrail()?.let { trail ->
+            val previous = arrayOfNulls<Offset>(4)
+            for (i in trail.indices step 4) {
+                val point = trail[i].toInt()
+                if (point !in previous.indices) continue
+                if (trail[i + 3] <= 0f) {
+                    previous[point] = null
+                    continue
+                }
+                val at = Offset(m.sx(trail[i + 1]), m.sy(trail[i + 2]))
+                previous[point]?.let { drawLine(TrackSolved.copy(alpha = .70f), it, at, 1.3.dp.toPx()) }
+                previous[point] = at
+            }
+        }
+        store.pickedMotionPoints().forEach { (x, y) ->
+            drawCircle(Color.Black.copy(alpha = .72f), 7.dp.toPx(), Offset(m.sx(x), m.sy(y)))
+            drawCircle(TrackSolved, 4.dp.toPx(), Offset(m.sx(x), m.sy(y)))
+        }
+        store.motionPointSamples()?.let { samples ->
+            for (i in samples.indices step 3) {
+                if (!samples[i].isFinite() || !samples[i + 1].isFinite()) continue
+                val at = Offset(m.sx(samples[i]), m.sy(samples[i + 1]))
+                val confidence = samples[i + 2]
+                val color = if (confidence <= 0) TrackRejected else TrackSolved.copy(alpha = .45f + .55f * confidence.coerceIn(0f, 1f))
+                drawCircle(Color.Black.copy(alpha = .68f), 7.dp.toPx(), at)
+                drawCircle(color, 4.dp.toPx(), at)
+            }
+        }
+        store.motionSurface()?.let { surface ->
+            if ((0 until 4).all { surface[it * 3 + 2] > 0f && surface[it * 3].isFinite() && surface[it * 3 + 1].isFinite() }) {
+                val path = Path().apply {
+                    moveTo(m.sx(surface[0]), m.sy(surface[1]))
+                    for (index in 1..3) lineTo(m.sx(surface[index * 3]), m.sy(surface[index * 3 + 1]))
+                    close()
+                }
+                drawPath(path, TrackSolved.copy(alpha = .12f))
+                drawPath(path, TrackSolved, style = Stroke(1.5.dp.toPx()))
+            }
+        }
+    }
+
     // Rastreio de ponto: a mira onde o dedo está (bloco seguido + janela de busca).
     store.pickCursor?.let { p ->
         val c = Offset(m.sx(p.x), m.sy(p.y))

@@ -186,6 +186,9 @@ struct ParamSpec {
     /// kInvalidIndex = sempre habilitado (salvo o interruptor da seção).
     u32         enabledBy = kInvalidIndex;
     u32         enabledMask = 0;
+    /// Visibility in the effect editor, evaluated at the playhead.
+    u32         visibleIfParam = kInvalidIndex;
+    f32         visibleIfValue = 0.0f;
 
     [[nodiscard]] bool animatable() const noexcept {
         return (flags & kParamAnimatable) != 0 && component_count(type) > 0;

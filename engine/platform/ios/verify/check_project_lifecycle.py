@@ -29,7 +29,8 @@ rename = method("func renameCurrentProject(to")
 assert "projectURL =" not in rename, "failed rename must not redirect autosave to another document"
 assert "projectName =" not in rename
 beats = method("private func finishBeatDetection(")
-beat_start = method("func detectBeats()")
+# 1.0.4: detectBeats() virou atalho de detectBeats(for:), que tem a lógica.
+beat_start = method("func detectBeats(for source: LayerItem?)")
 assert "guard started, !importingMedia" in beat_start
 assert "beatDetectionRequest = request" in beat_start
 assert beats.index("beatDetectionRequest == request") < beats.index("importingMedia = false")

@@ -423,19 +423,48 @@ func bgRemoveFailedKey(_ reason: Int64) -> String {
     }
 
     /// Foto: rostos do Vision (olhos, nariz, boca) no formato de 33 pontos, uma pessoa por rosto.
-    nonisolated private static func detectPhoto(_ path: String) -> (Data, Int, Float)? {
+    nonisolated static func detectPhoto(_ path: String, rigOnly: Bool = false,
+                                      illustratedModel: String? = nil) -> (Data, Int, Float)? {
         let url = path.contains("://") ? URL(string: path) : URL(fileURLWithPath: path)
         guard let url, let src = CGImageSourceCreateWithURL(url as CFURL, nil),
               let image = CGImageSourceCreateThumbnailAtIndex(src, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true,
                   kCGImageSourceThumbnailMaxPixelSize: 1024, kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary)
         else { return nil }
         let w = Float(image.width), h = Float(image.height)
+        if let illustratedModel {
+            let stride = image.width * 4
+            var rgba = Data(count: stride * image.height)
+            let drawn = rgba.withUnsafeMutableBytes { (bytes: UnsafeMutableRawBufferPointer) -> Bool in
+                guard let canvas = CGContext(data: bytes.baseAddress, width: image.width, height: image.height,
+                    bitsPerComponent: 8, bytesPerRow: stride, space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue)
+                else { return false }
+                canvas.draw(image, in: CGRect(x: 0, y: 0, width: CGFloat(image.width), height: CGFloat(image.height)))
+                return true
+            }
+            guard drawn, let pose = AureaEngine.detectIllustratedPose(rgba, width: UInt32(image.width),
+                height: UInt32(image.height), stride: UInt32(stride), modelPrefix: illustratedModel) else { return nil }
+            return (pose, 1, w / max(h, 1))
+        }
         let request = VNDetectFaceLandmarksRequest()
         let bodies = VNDetectHumanBodyPoseRequest()
-        try? VNImageRequestHandler(cgImage: image, options: [:]).perform([request, bodies])
+        let input: CGImage
+        if rigOnly, let canvas = CGContext(data: nil, width: image.width, height: image.height,
+            bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) {
+            let bounds = CGRect(x: 0, y: 0, width: CGFloat(image.width), height: CGFloat(image.height))
+            canvas.setFillColor(red: 0.5, green: 0.5, blue: 0.5, alpha: 1)
+            canvas.fill(bounds)
+            canvas.draw(image, in: bounds)
+            input = canvas.makeImage() ?? image
+        } else {
+            input = image
+        }
+        let requests: [VNRequest] = rigOnly ? [bodies] : [request, bodies]
+        try? VNImageRequestHandler(cgImage: input, options: [:]).perform(requests)
         var rows: [Float] = []
         var person = 0
-        for body in (bodies.results ?? []).prefix(4) {
+        for body in (bodies.results ?? []).prefix(rigOnly ? 1 : 4) {
             var frame = [Float](repeating: 0, count: frameFloats)
             MocapDetector.fill2D(body, into: &frame, at: 0)
             frame[1] = Float(person)

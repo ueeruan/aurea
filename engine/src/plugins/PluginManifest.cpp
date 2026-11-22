@@ -365,6 +365,102 @@ bool read_param(const Value& v, u32 index, ParamDecl& p, Reader& r, bool audio =
     return true;
 }
 
+bool read_visibility(const Value& params, Manifest& m, Reader& r) {
+    for (u32 i = 0; i < m.params.size(); ++i) {
+        const Value* condition = params.array[i].get("visible_if");
+        if (!condition) continue;
+        ParamDecl& p = m.params[i];
+        const std::string where = "plugin.json: parametro \"" + p.id + "\": visible_if";
+        if (!m.v31) return r.fail(where + " pede aureaPlugin 3.1");
+        const Value* id = condition->get("param");
+        const Value* equals = condition->get("equals");
+        if (!id || !id->is_string() || !equals)
+            return r.fail(where + " precisa de {param, equals}");
+        const auto controller = std::find_if(m.params.begin(), m.params.end(),
+            [&](const ParamDecl& candidate) { return candidate.id == id->string; });
+        if (controller == m.params.end())
+            return r.fail(where + ": parametro de controle desconhecido \"" + id->string + "\"");
+        const u32 index = static_cast<u32>(controller - m.params.begin());
+        if (params.array[index].get("visible_if"))
+            return r.fail(where + ": o parametro de controle precisa estar sempre visivel");
+        if (controller->kind == ParamKind::Bool && equals->type == Value::Type::Bool) {
+            p.visibleIfValue = equals->boolean ? 1.0f : 0.0f;
+        } else if (controller->kind == ParamKind::Enum && equals->is_number() && equals->number >= 0
+                   && equals->number < controller->options.size() && std::trunc(equals->number) == equals->number) {
+            p.visibleIfValue = static_cast<f32>(equals->number);
+        } else {
+            return r.fail(where + ": equals deve ser true/false para bool ou um indice valido para enum");
+        }
+        p.visibleIfParam = index;
+    }
+    return true;
+}
+
+bool read_preset_value(const ParamDecl& p, const Value& source, std::array<f32, 4>& value) {
+    const u32 count = preset_component_count(p.kind);
+    if (count == 0) return false;
+    if (p.kind == ParamKind::Bool) {
+        if (source.type != Value::Type::Bool) return false;
+        value[0] = source.boolean ? 1.0f : 0.0f;
+        return true;
+    }
+    if (p.kind == ParamKind::Color && source.is_string()) {
+        f32 rgba[4];
+        if (!parse_hex_color(source.string, rgba)) return false;
+        std::copy_n(rgba, 4, value.begin());
+    } else if (count > 1) {
+        if (!source.is_array() || (source.array.size() != count
+            && !(p.kind == ParamKind::Color && source.array.size() == 3))) return false;
+        value[3] = 1.0f;
+        for (usize i = 0; i < source.array.size(); ++i) {
+            const Value& item = source.array[i];
+            if (!item.is_number() || !(item.number >= p.min && item.number <= p.max)) return false;
+            value[i] = static_cast<f32>(item.number);
+        }
+    } else {
+        if (!source.is_number() || !(source.number >= p.min && source.number <= p.max)) return false;
+        if ((p.kind == ParamKind::Int || p.kind == ParamKind::Enum) && std::trunc(source.number) != source.number)
+            return false;
+        value[0] = static_cast<f32>(source.number);
+    }
+    if (p.kind == ParamKind::Color)
+        for (u32 i = 0; i < 3; ++i) value[i] = srgb_to_linear(value[i]);
+    return true;
+}
+
+bool read_presets(const Value& list, Manifest& m, Reader& r) {
+    if (!m.v31 || m.kind == Kind::Panel)
+        return r.fail("plugin.json: presets de efeito pedem aureaPlugin 3.1");
+    if (!list.is_array() || list.array.size() > 64)
+        return r.fail("plugin.json: presets deve ser uma lista de ate 64 entradas");
+    for (const Value& entry : list.array) {
+        const Value* id = entry.get("id");
+        const Value* set = entry.get("set");
+        if (!id || !id->is_string() || !valid_plugin_id(id->string))
+            return r.fail("plugin.json: preset precisa de um id valido");
+        const std::string where = "plugin.json: preset \"" + id->string + "\"";
+        if (std::any_of(m.presets.begin(), m.presets.end(), [&](const PresetDecl& p) { return p.id == id->string; }))
+            return r.fail(where + ": id repetido");
+        if (!set || !set->is_object() || set->object.empty() || set->object.size() > m.params.size())
+            return r.fail(where + ": set precisa listar os parametros do preset");
+        PresetDecl preset;
+        preset.id = id->string;
+        if (!read_text(entry.get("name"), preset.name, "presets.name", 64, true, r)) return false;
+        for (const auto& [key, source] : set->object) {
+            const auto parameter = std::find_if(m.params.begin(), m.params.end(),
+                [&](const ParamDecl& p) { return p.id == key; });
+            if (parameter == m.params.end()) return r.fail(where + ": parametro desconhecido \"" + key + "\"");
+            PresetAssignment assignment;
+            assignment.param = static_cast<u32>(parameter - m.params.begin());
+            if (!read_preset_value(*parameter, source, assignment.value))
+                return r.fail(where + ": valor invalido para \"" + key + "\"");
+            preset.values.push_back(assignment);
+        }
+        m.presets.push_back(std::move(preset));
+    }
+    return true;
+}
+
 /// 0.4.6: "textures": { "nome": "arquivo.png" } ou
 /// { "nome": { "file": "...", "colorSpace": "data", "filter": "nearest", "wrap": "repeat" } }.
 bool read_textures(const Value& root, Manifest& m, Reader& r) {
@@ -541,13 +637,13 @@ bool parse_manifest(std::string_view text, Manifest& m, std::string& error) {
     if (!root.is_object()) return r.fail("plugin.json invalido: a raiz deve ser um objeto");
 
     const Value* format = root.get("aureaPlugin");
-    f32 fmt = 0.0f;
-    if (!format || !read_number(format, fmt)) return r.fail("plugin.json: falta \"aureaPlugin\": 1, 2 ou 3 (versao do formato)");
+    if (!format || !format->is_number()) return r.fail("plugin.json: falta \"aureaPlugin\": 1, 2, 3 ou 3.1 (versao do formato)");
+    const f64 fmt = format->number;
     // 0.3.4 plugins: o formato 2 traz interface, script e permissões.
-    if (fmt != static_cast<f32>(kFormatVersion) && fmt != static_cast<f32>(kFormatVersionV2) && fmt != static_cast<f32>(kFormatVersionV3))
-        return r.fail("plugin.json: \"aureaPlugin\" " + std::to_string(static_cast<int>(fmt))
-                      + " nao suportado (este app le as versoes 1, 2 e 3 do formato)");
+    if (fmt != kFormatVersion && fmt != kFormatVersionV2 && fmt != kFormatVersionV3 && fmt != 3.1)
+        return r.fail("plugin.json: \"aureaPlugin\" nao suportado (formatos 1, 2, 3 e 3.1)");
     m.format = static_cast<u32>(fmt);
+    m.v31 = fmt == 3.1;
 
     const Value* id = root.get("id");
     if (!id || !id->is_string()) return r.fail("plugin.json: falta \"id\"");
@@ -578,10 +674,17 @@ bool parse_manifest(std::string_view text, Manifest& m, std::string& error) {
     m.kind = kind->string == "audio" ? Kind::Audio : kind->string == "stack" ? Kind::Stack : kind->string == "panel" ? Kind::Panel : Kind::Shader;
     if (m.kind == Kind::Audio && m.format < kFormatVersionV3) return r.fail("plugin.json: audio requires aureaPlugin 3");
     m.scene3d = kind->string == "shader3d";
+    if (const Value* storage = root.get("parameterStorage")) {
+        if (!m.v31 || m.kind != Kind::Shader || !storage->is_string()
+            || (storage->string != "uniform" && storage->string != "texture"))
+            return r.fail("plugin.json: \"parameterStorage\" aceita \"uniform\" ou \"texture\" em shaders do formato 3.1");
+        m.textureParameters = storage->string == "texture";
+    }
 
     if (const Value* params = root.get("params")) {
         if (!params->is_array()) return r.fail("plugin.json: \"params\" deve ser uma lista");
-        const u32 paramLimit = m.kind != Kind::Shader ? kMaxParams : m.scene3d ? kMaxShader3dParams : kMaxShaderParams;
+        const u32 paramLimit = m.kind != Kind::Shader ? kMaxParams : m.textureParameters ? kMaxTextureParamSlots
+            : m.scene3d ? kMaxShader3dParams : kMaxShaderParams;
         if (params->array.size() > paramLimit)
             return r.fail("plugin.json: " + std::to_string(params->array.size()) + " parametros (limite "
                           + std::to_string(paramLimit) + ")");
@@ -596,7 +699,9 @@ bool parse_manifest(std::string_view text, Manifest& m, std::string& error) {
                 if (other.id == p.id) return r.fail("plugin.json: parametro repetido \"" + p.id + "\"");
             m.params.push_back(std::move(p));
         }
+        if (!read_visibility(*params, m, r)) return false;
     }
+    if (const Value* presets = root.get("presets"); presets && !read_presets(*presets, m, r)) return false;
     u32 layerParams = 0;
     for (const ParamDecl& p : m.params) if (p.kind == ParamKind::Layer) ++layerParams;
     if (layerParams && !m.scene3d)
@@ -628,15 +733,18 @@ bool parse_manifest(std::string_view text, Manifest& m, std::string& error) {
         u32 used = 0;
         for (const ParamDecl& p : m.params) used += param_slot_size(p);
         used += m.audio ? 1u : 0u;
-        const u32 limit = m.scene3d ? kMaxShader3dParams : kMaxShaderParams;
+        const u32 limit = m.textureParameters ? kMaxTextureParamSlots : m.scene3d ? kMaxShader3dParams : kMaxShaderParams;
         if (used > limit)
             return r.fail("plugin.json: os parametros ocupam " + std::to_string(used) + " posicoes (limite " + std::to_string(limit)
                           + "; curva ocupa " + std::to_string(kCurveSlots) + " e degrade " + std::to_string(kGradientSlots) + ")");
     }
     if (m.kind == Kind::Shader && !read_passes(root, m, r)) return false;
-    for (const PassDecl& pass : m.passes)
+    for (const PassDecl& pass : m.passes) {
         if (pass.inputs.size() + m.textures.size() + extra_samplers(m) > kMaxPassInputs)
-            return r.fail("plugin.json: entradas + texturas + camadas + historico + audio passam de " + std::to_string(kMaxPassInputs));
+            return r.fail("plugin.json: entradas + texturas + camadas + historico + audio"
+                          + std::string(m.textureParameters ? " + textura de parametros" : "")
+                          + " passam de " + std::to_string(kMaxPassInputs));
+    }
     if (m.kind == Kind::Stack && !read_stack(root, m, r)) return false;
     if (m.kind == Kind::Audio) {
         const auto* audio = root.get("audio");
@@ -659,7 +767,7 @@ void write_text(json::Writer& w, const LocalizedText& t) {
     w.end_object();
 }
 
-void write_param(json::Writer& w, const ParamDecl& p, bool srgbColorDefaults) {
+void write_param(json::Writer& w, const ParamDecl& p, const Manifest& m) {
     w.begin_object();
     w.key("id").value(p.id);
     w.key("type").value(param_kind_name(p.kind));
@@ -668,7 +776,7 @@ void write_param(json::Writer& w, const ParamDecl& p, bool srgbColorDefaults) {
     switch (p.kind) {
         case ParamKind::Color:
             w.key("default").begin_array();
-            for (int c = 0; c < 3; ++c) w.value(srgbColorDefaults ? linear_to_srgb(p.def[c]) : p.def[c]);
+            for (int c = 0; c < 3; ++c) w.value(linear_to_srgb(p.def[c]));
             w.value(p.def[3]).end_array();
             break;
         case ParamKind::Point:
@@ -698,6 +806,13 @@ void write_param(json::Writer& w, const ParamDecl& p, bool srgbColorDefaults) {
             break;
     }
     if (!p.animatable && p.kind != ParamKind::Layer) w.key("animatable").value(false);
+    if (p.visibleIfParam < m.params.size()) {
+        const ParamDecl& controller = m.params[p.visibleIfParam];
+        w.key("visible_if").begin_object().key("param").value(controller.id).key("equals");
+        if (controller.kind == ParamKind::Bool) w.value(p.visibleIfValue != 0.0f);
+        else w.value(p.visibleIfValue);
+        w.end_object();
+    }
     w.end_object();
 }
 
@@ -706,7 +821,9 @@ void write_param(json::Writer& w, const ParamDecl& p, bool srgbColorDefaults) {
 std::string manifest_json(const Manifest& m) {
     json::Writer w;
     w.begin_object();
-    w.key("aureaPlugin").value(static_cast<u32>(m.format));
+    if (m.v31) w.key("aureaPlugin").value(3.1);
+    else w.key("aureaPlugin").value(m.format);
+    if (m.textureParameters) w.key("parameterStorage").value("texture");
     w.key("id").value(m.id);
     w.key("version").value(m.version);
     if (!m.author.empty()) w.key("author").value(m.author);
@@ -716,9 +833,38 @@ std::string manifest_json(const Manifest& m) {
     if (!m.category.empty()) w.key("category").value(m.category);
     w.key("kind").value(m.scene3d ? "shader3d" : kind_name(m.kind));
     w.key("params").begin_array();
-    for (const ParamDecl& p : m.params) write_param(w, p, true);
+    for (const ParamDecl& p : m.params) write_param(w, p, m);
     w.end_array();
+    if (!m.presets.empty()) {
+        w.key("presets").begin_array();
+        for (const PresetDecl& preset : m.presets) {
+            w.begin_object().key("id").value(preset.id).key("name");
+            write_text(w, preset.name);
+            w.key("set").begin_object();
+            for (const PresetAssignment& assignment : preset.values) {
+                const ParamDecl& param = m.params[assignment.param];
+                w.key(param.id);
+                if (param.kind == ParamKind::Bool) w.value(assignment.value[0] != 0.0f);
+                else if (param.kind == ParamKind::Color) {
+                    w.begin_array();
+                    for (u32 channel = 0; channel < 3; ++channel) w.value(linear_to_srgb(assignment.value[channel]));
+                    w.value(assignment.value[3]).end_array();
+                } else if (param.kind == ParamKind::Point) {
+                    w.begin_array().value(assignment.value[0]).value(assignment.value[1]).end_array();
+                } else w.value(assignment.value[0]);
+            }
+            w.end_object().end_object();
+        }
+        w.end_array();
+    }
     if (m.kind == Kind::Shader) {
+        if (m.history || m.audio) {
+            w.key("uses").begin_array();
+            if (m.history) w.value("history");
+            if (m.audio) w.value("audio");
+            w.end_array();
+        }
+        if (!m.frameScript.empty()) w.key("frameScript").value(m.frameScript);
         w.key("passes").begin_array();
         for (const PassDecl& p : m.passes) {
             w.begin_object().key("shader").value(p.shader);

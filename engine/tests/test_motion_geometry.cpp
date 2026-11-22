@@ -270,3 +270,22 @@ AUREA_TEST(MotionGeometry, RealMotionProbe) {
     std::printf("    REAL STABILIZER: frames=%u/%u rms=%.4f meanScale=%.4f meanStrength=%.4f jitterBefore=%.4f jitterAfter=%.4f analysis=%.3fs\n",valid,tracks.frames,rms/std::max(1u,valid),scale/std::max(1u,valid),strength/std::max(1u,valid),jitter(raw),jitter(stable),elapsed);
     AUREA_CHECK(tracks.frames>=300);AUREA_CHECK_EQ(valid,tracks.frames);AUREA_CHECK(jitter(stable)<jitter(raw));
 }
+
+AUREA_TEST(MotionGeometry, SelectedSurfaceSeedsAreIndependentOfBackgroundContrast) {
+    Gray image;
+    image.width = 160;
+    image.height = 96;
+    image.px.resize(image.width * image.height);
+    for (u32 y = 0; y < image.height; ++y) for (u32 x = 0; x < image.width; ++x) {
+        const f32 texture = static_cast<f32>((x * 271 + y * 761 + x * y * 31) % 1024) / 1024.0f;
+        image.px[y * image.width + x] = x >= 30 && x < 68 && y >= 28 && y < 70 ? texture * 0.07f : texture;
+    }
+    const std::array<Vec2, 4> region{{{30, 28}, {68, 28}, {68, 70}, {30, 70}}};
+    FeatureTracker tracker;
+    tracker.add_frame(image, region);
+    AUREA_CHECK(tracker.active() >= 4);
+    for (const auto& path : tracker.tracks().pos) {
+        const auto point = path.front();
+        AUREA_CHECK(point.x >= 30 && point.x < 68 && point.y >= 28 && point.y < 70);
+    }
+}

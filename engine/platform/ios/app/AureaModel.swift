@@ -992,6 +992,14 @@ final class AureaModel: ObservableObject {
     /// 1.0.2: opção paga (Flow Retime › Neural (IA)) pedida sem o AureaHyper: o paywall do AureaHyper.
     /// Par de EditorStore.hyperOptionPrompt.
     @Published var hyperOptionPrompt = false
+    var hyperOptionSubscriptionOnly = false
+
+    func requireHyperSubscription() -> Bool {
+        if HyperEntitlements.shared.accessFor(nil, subscriptionOnly: true) == .unlocked { return true }
+        hyperOptionSubscriptionOnly = true
+        hyperOptionPrompt = true
+        return false
+    }
     /// Ação do aviso ("Desfazer"), quando há; some junto com ele. Qualquer
     /// comando novo (`mutate`, `commitPendingCommands`, `beginGesture`) a tira:
     /// o passo desfeito tem de ser o que o aviso anuncia (EditorStore.kt).
@@ -4535,6 +4543,52 @@ final class AureaModel: ObservableObject {
     @Published var motionBackward = false
     @Published var motionFeature: Float = 12
     @Published var motionSearch: Float = 48
+    @Published var motionConfidence: Float = 0.65
+    @Published var motionValidateBack = false
+    @Published var motionTrailVisible = true
+    @Published private(set) var landmarkProgress: Float?
+    private var landmarkTask: Task<Void, Never>?
+
+    func cancelLandmarks() { landmarkTask?.cancel() }
+    func trackLandmarks(face: Bool) {
+        guard landmarkTask == nil, (motionStatus["state"] as? NSNumber)?.intValue != 1,
+            let layer = selectedLayer, layer.kind == 1, !layer.locked, requireHyperSubscription() else { return }
+        let source = layer.id
+        let path = layerSourcePath(source)
+        guard !path.isEmpty else { return }
+        let file = (path.hasPrefix("file:") ? URL(string: path) : nil) ?? URL(fileURLWithPath: path)
+        let generation = projectGeneration
+        pause()
+        landmarkProgress = 0
+        landmarkTask = Task {
+            defer { landmarkProgress = nil; landmarkTask = nil }
+            do {
+                var samples = Data()
+                let frames = try await MocapDetector.run(url: file, reduced: true, imageSpace: true,
+                    faceOnly: face, maxFrames: 9000, progress: { [weak self] value in
+                        Task { @MainActor in
+                            guard self?.projectGeneration == generation, self?.landmarkTask != nil else { return }
+                            self?.landmarkProgress = value.clamped(to: 0...1)
+                        }
+                    }, sink: { data, _, _ in samples.append(data) })
+                try Task.checkCancellation()
+                guard projectGeneration == generation, layerSourcePath(source) == path, requireHyperSubscription() else { return }
+                guard frames >= 2 else { toast = AureaText.t("trk_landmarks_failed"); return }
+                let engine = self.engine
+                let measured = samples
+                let count = await Task.detached { engine.applyLandmarkTracks(source, samples: measured, face: face) }.value
+                guard projectGeneration == generation else { return }
+                if count > 0 {
+                    refreshModel(force: true)
+                    toast = AureaText.t("trk_landmarks_created", Int(count))
+                } else { toast = AureaText.t("trk_landmarks_failed") }
+            } catch is CancellationError {
+                return
+            } catch {
+                if projectGeneration == generation { toast = AureaText.t("trk_landmarks_failed") }
+            }
+        }
+    }
     @Published var motionStatus: [String: Any] = [:]
     @Published var motionPicked = 0
     private var motionSeeds: [NSNumber] = []
@@ -4547,23 +4601,35 @@ final class AureaModel: ObservableObject {
         beginMotionPick(0)
         if pointPick != nil { motionAutoApply = stabilize ? 3 : 0 }
     }
-    func beginMotionPick(_ tool: UInt32) {
+    private var motionRectanglePick = false
+    private var motionModelOverride: UInt32?
+    private var motionConfirmPick = false
+    private var motionNeeded: Int { motionTool == 0 ? 1 : motionTool == 1 || motionRectanglePick ? 2 : 4 }
+    var motionPointsReady: Bool { pointPick != nil && motionPicked == motionNeeded }
+
+    func beginMotionPick(_ tool: UInt32, rectangle: Bool = false, confirm: Bool = false,
+                         modelOverride: UInt32? = nil, auto: Bool = false) {
         cameraTrackerVisible = false
         guard let layer = selectedLayer, layer.kind == 1, !layer.locked, let id = primarySelection else { return }
-        guard (engine.motionTrackStatus()["state"] as? NSNumber)?.intValue != 1 else { return }
+        guard (engine.motionTrackStatus()["state"] as? NSNumber)?.intValue != 1, landmarkProgress == nil else { return }
+        guard !(2...3).contains(tool) || requireHyperSubscription() else { return }
         engine.run { $0.pause() }
         motionAutoApply = -1
+        motionRectanglePick = rectangle && tool == 2
+        motionConfirmPick = confirm
+        motionModelOverride = modelOverride
         motionTool = tool; motionSource = id; motionSeeds = []; motionPicked = 0
-        if tool == 4 { startPickedMotion(); return }
+        if tool == 4 || (auto && tool <= 1) { startPickedMotion(); return }
         pointPick = false
-        toast = tool >= 2 ? AureaText.t("ios_motion_tap_corners") : AureaText.t("ios_motion_tap_detail")
+        toast = AureaText.t(motionRectanglePick ? "trk_surface_hint" : tool >= 2 ? "ios_motion_tap_corners" : "ios_motion_tap_detail")
     }
-    func cancelMotionPick() { pointPick = nil; motionSeeds = []; motionPicked = 0; motionAutoApply = -1 }
+    func cancelMotionPick() { pointPick = nil; motionSeeds = []; motionPicked = 0; motionAutoApply = -1; motionRectanglePick = false; motionConfirmPick = false }
     /// -1 nada; 0 cria o Nulo; 3 estabiliza pelo ponto — quando a análise do menu termina.
     private var motionAutoApply = -1
     private var motionPoll: Task<Void, Never>?
     func finishPointPick(_ point: CGPoint) {
         guard pointPick != nil, let id = primarySelection, id == motionSource else { cancelMotionPick(); return }
+        guard !motionPointsReady else { return }
         let a = engine.maskData(id).prefix(6).map(\.floatValue)
         guard a.count == 6 else { return }
         let det = a[0] * a[3] - a[1] * a[2]
@@ -4571,13 +4637,42 @@ final class AureaModel: ObservableObject {
         let x = Float(point.x) - a[4], y = Float(point.y) - a[5]
         motionSeeds += [NSNumber(value: (a[3] * x - a[2] * y) / det), NSNumber(value: (-a[1] * x + a[0] * y) / det)]
         motionPicked += 1
-        let needed = motionTool == 0 ? 1 : motionTool == 1 ? 2 : 4
-        if motionPicked < needed { toast = AureaText.t("ios_motion_point_next", motionPicked, needed); return }
+        if !motionPointsReady { toast = AureaText.t("ios_motion_point_next", motionPicked, motionNeeded); return }
+        if !motionConfirmPick { confirmMotionPoints() }
+    }
+    func removeMotionPoint() {
+        guard pointPick != nil, motionSeeds.count >= 2 else { return }
+        motionSeeds.removeLast(2)
+        motionPicked -= 1
+    }
+    func pickedMotionPoints() -> [CGPoint] {
+        guard pointPick != nil, motionPicked > 0, let layer = motionSource else { return [] }
+        let a = engine.maskData(layer).prefix(6).map { CGFloat($0.doubleValue) }
+        guard a.count == 6 else { return [] }
+        return stride(from: 0, to: motionSeeds.count, by: 2).map { i in
+            let x = CGFloat(motionSeeds[i].doubleValue), y = CGFloat(motionSeeds[i + 1].doubleValue)
+            return CGPoint(x: a[0]*x + a[2]*y + a[4], y: a[1]*x + a[3]*y + a[5])
+        }
+    }
+    func confirmMotionPoints() {
+        guard motionPointsReady, motionSource == primarySelection else { return }
+        if motionRectanglePick {
+            let left = min(motionSeeds[0].floatValue, motionSeeds[2].floatValue)
+            let right = max(motionSeeds[0].floatValue, motionSeeds[2].floatValue)
+            let top = min(motionSeeds[1].floatValue, motionSeeds[3].floatValue)
+            let bottom = max(motionSeeds[1].floatValue, motionSeeds[3].floatValue)
+            motionSeeds = [left, top, right, top, right, bottom, left, bottom].map { NSNumber(value: $0) }
+        }
         pointPick = nil; startPickedMotion()
     }
     private func startPickedMotion() {
         guard let id = motionSource else { return }
-        if !engine.startMotionTrack(id, tool: motionTool, model: motionModel, backward: motionBackward, points: motionSeeds, feature: motionFeature, search: motionSearch) {
+        guard !(2...3).contains(motionTool) || requireHyperSubscription() else { cancelMotionPick(); return }
+        let solveModel = motionModelOverride ?? (motionRectanglePick ? 0 : motionModel)
+        motionRectanglePick = false
+        motionModelOverride = nil
+        if !engine.startMotionTrack(id, tool: motionTool, model: solveModel, backward: motionBackward, points: motionSeeds,
+                                    feature: motionFeature, search: motionSearch, confidence: motionConfidence, validateBack: motionValidateBack) {
             motionAutoApply = -1
             toast = AureaText.t("track_start_failed")
             refreshMotionStatus()
@@ -4630,6 +4725,8 @@ final class AureaModel: ObservableObject {
     }
     private func applyMotionFromSource(_ source: Int64, apply: UInt32, lock: Bool, smooth: Float, maxScale: Float, crop: UInt32, target: Int64) {
         guard engine.motionTrackSource() == source else { toast = AureaText.t("app_track_check_analysis"); return }
+        let tool = (engine.motionTrackStatus()["tool"] as? NSNumber)?.intValue ?? 0
+        guard !(2...3).contains(tool) || requireHyperSubscription() else { return }
         let error = engine.applyMotionTrack(target, apply: apply, lock: lock, smooth: smooth, maxScale: maxScale, crop: crop)
         toast = error.isEmpty ? AureaText.t("ios_motion_applied") : AureaEngineText.sentence(error)
         refreshModel(force: true); refreshMotionStatus()
@@ -5163,8 +5260,10 @@ final class AureaModel: ObservableObject {
         endGesture()
     }
 
-    func detectBeats() {
-        guard started, !importingMedia, let layer = selectedLayer, layer.kind == 1 || layer.kind == 3 else {
+    func detectBeats() { detectBeats(for: selectedLayer) }
+
+    func detectBeats(for source: LayerItem?) {
+        guard started, !importingMedia, let layer = source, layer.kind == 1 || layer.kind == 3 else {
             toast = AureaText.t("msg_escolha_uma_camada_de_audio_ou"); return
         }
         let request = UUID(), project = projectGeneration

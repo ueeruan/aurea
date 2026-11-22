@@ -150,10 +150,16 @@ object AppConfigPolicy {
     fun accept(candidate: AppConfig, cached: AppConfig?): Boolean = cached == null || candidate.issuedAt >= cached.issuedAt
 
     /** O acesso ao AureaHyper. `entitlement` = o portão por conta; `fetching` = consulta em voo. */
-    fun hyperAccess(config: AppConfig?, entitlement: HyperAccess, nowSeconds: Long, fetching: Boolean): HyperAccess {
+    fun hyperAccess(
+        config: AppConfig?,
+        entitlement: HyperAccess,
+        nowSeconds: Long,
+        fetching: Boolean,
+        subscriptionOnly: Boolean = false,
+    ): HyperAccess {
         if (!fresh(config, nowSeconds)) return if (fetching) HyperAccess.Checking else HyperAccess.NeedsConfig
         return when (config!!.hyperMode) {
-            HyperMode.Free -> HyperAccess.Unlocked
+            HyperMode.Free -> if (subscriptionOnly) entitlement else HyperAccess.Unlocked
             HyperMode.Entitled -> entitlement
             HyperMode.Off -> HyperAccess.Off
         }

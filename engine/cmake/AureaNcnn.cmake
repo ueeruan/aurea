@@ -55,7 +55,9 @@ if(NOT aurea_ncnn_POPULATED)
         # Eltwise), GFPGAN (Slice, UnaryOp) e o int8 da CPU.
         swish deconvolution eltwise slice unaryop quantize dequantize requantize
         # Seleção por clique do Roto (EfficientTAM-Ti, src/ai/RotoClick.cpp).
-        gelu layernorm matmul permute softmax)
+        gelu layernorm matmul permute softmax
+        # RTMPose HumanArt (modelo local experimental para o AutoRig 2D).
+        expanddims hardsigmoid reduction)
     file(STRINGS "${aurea_ncnn_SOURCE_DIR}/src/CMakeLists.txt" ai_layer_lines REGEX "^ncnn_add_layer\\(")
     foreach(line IN LISTS ai_layer_lines)
         string(REGEX REPLACE "^ncnn_add_layer\\(([A-Za-z0-9_]+).*" "\\1" name "${line}")
@@ -170,6 +172,7 @@ else()
         "${AI_ROTO_CLICK_ENCODER_BIN};${AI_ROTO_CLICK_ENCODER_PARAM};${AI_ROTO_CLICK_DECODER_BIN};${AI_ROTO_CLICK_DECODER_PARAM};${AI_ROTO_CLICK_PROMPT}")
 endif()
 target_sources(aurea_core PRIVATE src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp src/ai/RotoClick.cpp
+               src/ai/IllustratedPose.cpp
                "${ai_model_cpp}" "${ai_depth_cpp}" "${ai_foreground_cpp}" "${ai_click_cpp}")
 target_link_libraries(aurea_core PRIVATE ncnn)
 # Motion Capture do Aurea PC (BlazePose do MediaPipe em ncnn, modelos lidos de
@@ -183,9 +186,9 @@ include(${CMAKE_CURRENT_LIST_DIR}/AureaHyperNeural.cmake)
 # Model/vector allocation failures are translated to Status at this boundary.
 # The rest of the shared core retains its existing no-exceptions contract.
 if(MSVC)
-    set_source_files_properties(src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp src/ai/DepthMapService.cpp src/ai/RotoService.cpp src/ai/RotoClick.cpp
+    set_source_files_properties(src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp src/ai/DepthMapService.cpp src/ai/RotoService.cpp src/ai/RotoClick.cpp src/ai/IllustratedPose.cpp
                                 PROPERTIES COMPILE_OPTIONS /EHsc)
 else()
-    set_source_files_properties(src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp src/ai/DepthMapService.cpp src/ai/RotoService.cpp src/ai/RotoClick.cpp
+    set_source_files_properties(src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp src/ai/DepthMapService.cpp src/ai/RotoService.cpp src/ai/RotoClick.cpp src/ai/IllustratedPose.cpp
                                 PROPERTIES COMPILE_OPTIONS -fexceptions)
 endif()

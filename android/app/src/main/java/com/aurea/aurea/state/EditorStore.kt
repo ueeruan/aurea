@@ -479,6 +479,16 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * opção no projeto segue igual (regra de [com.aurea.aurea.effects.PaidGate]).
      */
     var hyperOptionPrompt by mutableStateOf(false)
+    var hyperOptionSubscriptionOnly by mutableStateOf(false)
+        private set
+
+    internal fun requireHyperSubscription(): Boolean {
+        val entitlements = com.aurea.aurea.hyper.HyperEntitlements
+        if (entitlements.accessFor(null, subscriptionOnly = true) == com.aurea.aurea.hyper.HyperAccess.Unlocked) return true
+        hyperOptionSubscriptionOnly = true
+        hyperOptionPrompt = true
+        return false
+    }
 
     /** A opção [value] do parâmetro [paramIndex] do efeito [effectId] da camada principal é paga e está bloqueada? */
     fun optionLocked(effectId: Int, paramIndex: Int, value: Float): Boolean {
@@ -2361,6 +2371,26 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         }
         return if (need <= 0) FloatArray(0) else buf.copyOf(need)
     }
+    fun puppetAutoRigImage(layer: Long, effect: Int, pose: FloatArray, onApplied: () -> Unit = {}): Int {
+        val pins = engine.puppetAutoRigImage(layer, effect, pose)
+        if (pins > 0) {
+            onApplied()
+            rigRevision++
+            refreshNow()
+        }
+        return pins
+    }
+
+    suspend fun puppetAutoRigParts(layer: Long, effect: Int, pose: FloatArray): Int {
+        val generation = projectGeneration
+        val parts = withContext(Dispatchers.Default) { engine.puppetAutoRigImage(layer, effect, pose, parts = true) }
+        if (parts > 0 && projectGeneration == generation) {
+            rigRevision++
+            refreshNow()
+        }
+        return parts
+    }
+
     fun puppetPins(layer: Long, effect: Int): FloatArray = puppetQuery(layer, effect, false)
     fun puppetMesh(layer: Long, effect: Int): FloatArray = puppetQuery(layer, effect, true)
     fun puppetAddPin(layer: Long, effect: Int, u: Float, v: Float): Int {
@@ -2755,12 +2785,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     // valida, compila no aparelho e faz um quadro de teste antes de aceitar.
     // =========================================================================
 
+    private val effectPresetCache = HashMap<Int, List<Pair<String, String>>>()
     var plugins by mutableStateOf<List<com.aurea.aurea.effects.PluginTexts.Plugin>>(emptyList())
         private set
 
     /** Relê a lista do motor (nomes por idioma para o navegador e os cartões). */
     fun refreshPlugins() {
         if (!engineReady) return
+        effectPresetCache.clear()
         com.aurea.aurea.effects.PluginTexts.update(engine.pluginsJson())
         plugins = com.aurea.aurea.effects.PluginTexts.plugins
         com.aurea.aurea.effects.PluginRuntime.attach(this)   // 0.3.4 plugins: rede/seletor e painéis
@@ -3724,6 +3756,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     fun applyText3DPreset(preset: Text3DPreset) {
         val id = primary ?: return
+        if (preset == Text3DPreset.InkPoster && !requireHyperSubscription()) return
         typingHandler.removeCallbacks(applyText3d)
         if (text3dPending) text3d?.let { pushText3D(id, it) }
         typingHandler.removeCallbacks(closeTyping)
@@ -5024,6 +5057,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val d = detail ?: return
         if (component == 0 && optionLocked(effectId, param.index, value)) {
             showToast(appText(R.string.hyper_option_locked))
+            hyperOptionSubscriptionOnly = false
             hyperOptionPrompt = true
             return
         }
@@ -6708,6 +6742,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var motionBackward by mutableStateOf(false)
     var motionFeature by mutableFloatStateOf(12f)
     var motionSearch by mutableFloatStateOf(48f)
+    var motionConfidence by mutableFloatStateOf(.65f)
+    var motionValidateBack by mutableStateOf(false)
+    var motionTrailVisible by mutableStateOf(true)
     var motionStatus by mutableStateOf(FloatArray(12))
     var motionMessage by mutableStateOf("")
     var motionPicked by mutableIntStateOf(0)
@@ -6726,26 +6763,67 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         beginMotionPick(0)
         if (pointPick != null) motionAutoApply = if (stabilize) 3 else 0
     }
-    fun beginMotionPick(tool: Int) {
+    private var motionRectanglePick = false
+    private var motionModelOverride: Int? = null
+    private var motionConfirmPick = false
+    private val motionNeeded get() = if (motionTool == 0) 1 else if (motionTool == 1 || motionRectanglePick) 2 else 4
+    val motionPointsReady get() = pointPick != null && motionPicked == motionNeeded
+
+    fun beginMotionPick(tool: Int, rectangle: Boolean = false, confirm: Boolean = false,
+                        modelOverride: Int? = null, auto: Boolean = false) {
         cameraTrackerVisible = false
         val id = primary ?: return
-        if (layers.firstOrNull { it.id == id }?.kind != com.aurea.aurea.ui.theme.LayerType.Video.kind) {
+        val source = layers.firstOrNull { it.id == id }
+        if (source?.kind != com.aurea.aurea.ui.theme.LayerType.Video.kind) {
             showToast(appText(R.string.msg_escolha_uma_camada_de_video)); return
         }
-        if (tracking) { showToast(appText(R.string.app_track_cancel_first)); return }
+        if (source.locked) return
+        if (tracking || landmarkProgress != null) { showToast(appText(R.string.app_track_cancel_first)); return }
+        if (tool in 2..3 && !requireHyperSubscription()) return
         pause()
         motionAutoApply = -1
+        motionRectanglePick = rectangle && tool == 2
+        motionConfirmPick = confirm
+        motionModelOverride = modelOverride
         motionTool = tool; motionSource = id; motionSeeds.clear(); motionPicked = 0
-        if (tool == 4) { startPickedMotion(); return }
+        if (tool == 4 || auto && tool in 0..1) { startPickedMotion(); return }
         pointPick = false
-        showToast(appText(if (tool >= 2) R.string.app_track_tap_corners else R.string.app_track_tap_detail))
+        showToast(appText(when {
+            motionRectanglePick -> R.string.trk_surface_hint
+            tool >= 2 -> R.string.app_track_tap_corners
+            else -> R.string.app_track_tap_detail
+        }))
     }
-    fun cancelMotionPick() { pointPick = null; motionSeeds.clear(); motionPicked = 0; pickCursor = null; motionAutoApply = -1 }
+    fun cancelMotionPick() { pointPick = null; motionSeeds.clear(); motionPicked = 0; pickCursor = null; motionAutoApply = -1; motionRectanglePick = false; motionConfirmPick = false }
     fun finishPointPick(x: Float, y: Float) {
         if (pointPick == null || motionSource != primary) { cancelMotionPick(); return }
+        if (motionPointsReady) return
         motionSeeds.add(x); motionSeeds.add(y); motionPicked++
-        val needed = if (motionTool == 0) 1 else if (motionTool == 1) 2 else 4
-        if (motionPicked < needed) { showToast(appText(R.string.app_track_point_n, motionPicked, needed)); return }
+        if (!motionPointsReady) { showToast(appText(R.string.app_track_point_n, motionPicked, motionNeeded)); return }
+        if (!motionConfirmPick) confirmMotionPoints()
+    }
+    fun removeMotionPoint() {
+        if (pointPick == null || motionSeeds.size < 2) return
+        repeat(2) { motionSeeds.removeAt(motionSeeds.lastIndex) }
+        motionPicked--
+    }
+    fun pickedMotionPoints(): List<Pair<Float, Float>> {
+        if (pointPick == null || motionPicked == 0) return emptyList()
+        val transform = masks ?: return emptyList()
+        return motionSeeds.chunked(2).map { (x, y) -> transform.toCompX(x, y) to transform.toCompY(x, y) }
+    }
+    fun confirmMotionPoints() {
+        if (!motionPointsReady || motionSource != primary) return
+        if (motionRectanglePick) {
+            val x = motionSeeds[2]
+            val y = motionSeeds[3]
+            val left = minOf(motionSeeds[0], x)
+            val right = maxOf(motionSeeds[0], x)
+            val top = minOf(motionSeeds[1], y)
+            val bottom = maxOf(motionSeeds[1], y)
+            motionSeeds.clear()
+            motionSeeds.addAll(listOf(left, top, right, top, right, bottom, left, bottom))
+        }
         pointPick = null; pickCursor = null; startPickedMotion()
     }
     /** -1 nada; 0 cria o Nulo; 3 estabiliza pelo ponto — quando a análise do menu termina. */
@@ -6753,7 +6831,15 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private var motionPoll: kotlinx.coroutines.Job? = null
     private fun startPickedMotion() {
         val id = motionSource ?: return
-        if (!engine.startMotionTrack(id, motionTool, motionModel, motionBackward, motionSeeds.toFloatArray(), motionFeature, motionSearch)) {
+        if (motionTool in 2..3 && !requireHyperSubscription()) {
+            cancelMotionPick()
+            return
+        }
+        val solveModel = motionModelOverride ?: if (motionRectanglePick) 0 else motionModel
+        motionRectanglePick = false
+        motionModelOverride = null
+        if (!engine.startMotionTrack(id, motionTool, solveModel, motionBackward, motionSeeds.toFloatArray(),
+                motionFeature, motionSearch, motionConfidence, motionValidateBack)) {
             motionAutoApply = -1
             showToast(appText(R.string.track_start_failed))
             refreshMotionStatus()
@@ -6786,6 +6872,76 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             refreshMotionStatus()
         }
     }
+    fun motionSurface(): FloatArray? {
+        if (pointPick != null || motionStatus[0].toInt() != 2 || motionStatus[4].toInt() !in 2..3) return null
+        val points = FloatArray(12)
+        return points.takeIf { engine.motionTrackFeatures(playhead, it) == 4 }
+    }
+    fun motionPointSamples(): FloatArray? {
+        if (pointPick != null || motionStatus[0].toInt() != 2 || motionStatus[4].toInt() !in 0..1) return null
+        val values = FloatArray(12)
+        val count = engine.motionTrackFeatures(playhead, values)
+        return if (count > 0) values.copyOf(count * 3) else null
+    }
+    fun motionReview(source: Long): FloatArray = engine.motionTrackReview(source)
+    fun motionTrail(): FloatArray? {
+        val source = primary ?: return null
+        if (pointPick != null || motionStatus[0].toInt() != 2 || !motionTrailVisible) return null
+        return engine.motionTrackTrail(source, playhead)
+    }
+    fun motionCsv(source: Long): String? = engine.motionTrackCsv(source)
+    fun pauseMotion(paused: Boolean) { engine.pauseMotionTrack(paused); refreshMotionStatus() }
+    var landmarkProgress by mutableStateOf<Float?>(null)
+        private set
+    private var landmarkJob: kotlinx.coroutines.Job? = null
+    fun cancelLandmarks() { landmarkJob?.cancel() }
+    fun trackLandmarks(face: Boolean) {
+        if (tracking || cameraTrack?.state == 1 || landmarkJob != null) return
+        val source = primary ?: return
+        val row = editingLayers.firstOrNull { it.id == source && it.kind == 1 && !it.locked } ?: return
+        val path = layerSourcePath(row.id)?.takeIf { it.isNotBlank() } ?: return
+        if (!requireHyperSubscription()) return
+        val generation = projectGeneration
+        val url = if (path.contains("://")) android.net.Uri.parse(path) else android.net.Uri.fromFile(java.io.File(path))
+        pause()
+        landmarkProgress = 0f
+        landmarkJob = viewModelScope.launch {
+            try {
+                val detector = com.aurea.aurea.mocap.MocapDetector(storeApp)
+                val stride = com.aurea.aurea.mocap.MocapDetector.FRAME_FLOATS
+                val batches = ArrayList<FloatArray>()
+                val analyzed = detector.run(url, reduced = true, maxFrames = 9000,
+                    onProgress = { progress -> withContext(Dispatchers.Main) { landmarkProgress = progress.coerceIn(0f, 1f) } }) { batch, count, _ ->
+                    batches.add(batch.copyOf(count * stride))
+                }
+                if (projectGeneration != generation || layerSourcePath(source) != path || !requireHyperSubscription()) return@launch
+                val count = withContext(Dispatchers.Default) {
+                    val rows = FloatArray(analyzed * stride)
+                    var cursor = 0
+                    for (batch in batches) { batch.copyInto(rows, cursor); cursor += batch.size }
+                    engine.applyLandmarkTracks(source, rows, face)
+                }
+                if (projectGeneration != generation) return@launch
+                if (count > 0) {
+                    refreshNow()
+                    showToast(appText(R.string.trk_landmarks_created, count))
+                } else showToast(appText(R.string.trk_landmarks_failed))
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (projectGeneration == generation) showToast(appText(R.string.trk_landmarks_failed))
+            } finally {
+                landmarkProgress = null
+                landmarkJob = null
+            }
+        }
+    }
+    fun cameraReconstruction(source: Long, frame: Int): FloatArray = engine.cameraTrackReconstruction(source, frame)
+    fun selectReconstructionPoint(id: Int) {
+        cameraSelectedCount = engine.selectCameraTrackPoints(intArrayOf(id), if (cameraMultiSelect) 1 else 0)
+        refreshCameraFeatures(true)
+    }
+
     fun refreshMotionStatus() {
         // A frase do motor (pt/en) sai no idioma do app.
         val values = FloatArray(12)
@@ -6813,6 +6969,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
     private fun applyMotionFromSource(source: Long, apply: Int, lock: Boolean, smooth: Float, maxScale: Float, crop: Int, target: Long) {
         if (engine.motionTrackSource() != source) { showToast(appText(R.string.app_track_check_analysis)); return }
+        val analysis = FloatArray(12)
+        engine.motionTrackStatus(analysis)
+        if (analysis[4].toInt() in 2..3 && !requireHyperSubscription()) return
         val result = engine.applyMotionTrack(target, apply, lock, smooth, maxScale, crop)
         if (result < 0) { showToast(appText(R.string.app_track_check_analysis)); return }
         refreshNow(); refreshMotionStatus()
@@ -7509,6 +7668,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** Analisa a câmera do vídeo escolhido em segundo plano (0 rápido, 1 equilibrado, 2 alta). */
     fun startCameraTrack(mode: Int, motion: Int = 0, knownFov: Float = 0f, shotType: Int = 0, lens: Int = 0) {
+        if (landmarkProgress != null) { showToast(appText(R.string.app_track_cancel_first)); return }
         val id = primary ?: return
         // 0.3.0: método (0 auto, 1 típico, 2 tripé, 3 cena quase plana), tipo de tomada e lente.
         if (!engine.startCameraTrack(id, mode, motion, knownFov, shotType, lens)) {
@@ -8216,7 +8376,6 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     /** Presets do efeito (pares id → nome do motor), guardados por tipo. */
-    private val effectPresetCache = HashMap<Int, List<Pair<String, String>>>()
     fun effectPresets(typeId: Int): List<Pair<String, String>> = effectPresetCache.getOrPut(typeId) { engine.effectPresets(typeId) }
 
     /** Aplica o preset [preset] ao efeito: todos os valores num passo de desfazer. */
@@ -9742,9 +9901,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * "Detectar batidas" no som da camada escolhida. Decodifica o áudio fora da
      * UI (thread do ciclo de vida: o motor não fecha no meio).
      */
-    fun detectBeats() {
+    fun detectBeats() = detectBeatsForLayer(primary)
+
+    fun detectBeatsForLayer(id: Long?) {
         if (!ready || destroyed || projectWork || exporter.busy) return
-        val id = primary
         val row = layers.firstOrNull { it.id == id }
         if (id == null || row == null || (row.kind != com.aurea.aurea.ui.theme.LayerType.Audio.kind && row.kind != com.aurea.aurea.ui.theme.LayerType.Video.kind)) {
             showToast(appText(R.string.msg_escolha_uma_camada_de_audio_ou))
@@ -9754,6 +9914,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val session = projectGeneration
         val compositionId = composition?.id
         detectingBeats = true
+        pause()
         showToast(appText(R.string.msg_detectando_batidas))
         enqueueLifecycle {
             val bpm = DoubleArray(1)
@@ -12035,7 +12196,8 @@ enum class Text3DPreset(val labelRes: Int) {
     Stone(R.string.pn_t3d_preset_stone),
     RoseGold(R.string.pn_t3d_preset_rose_gold),
     // 0.5.4: cel chapado + contorno (scene3d::kText3DPresetCartoon = 14).
-    Cartoon(R.string.pn_t3d_preset_cartoon);
+    Cartoon(R.string.pn_t3d_preset_cartoon),
+    InkPoster(R.string.pn_t3d_preset_ink_poster);
 
 }
 

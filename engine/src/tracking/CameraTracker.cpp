@@ -307,7 +307,33 @@ FeatureTracker::FeatureTracker(TrackMode mode) noexcept {
     minDistance_ = mode == TrackMode::Fast ? 14.0f : (mode == TrackMode::High ? 8.0f : 10.0f);
 }
 
-void FeatureTracker::detect(const Gray& g) {
+void FeatureTracker::detect(const Gray& frameImage, std::span<const Vec2> seedRegion) {
+    // For a planar selection the integral images only need pixels inside
+    // its bounding box plus the Shi–Tomasi border, not the whole frame.
+    Gray roi;
+    u32 shiftX = 0, shiftY = 0;
+    if (!seedRegion.empty()) {
+        f32 minX = seedRegion.front().x, maxX = minX;
+        f32 minY = seedRegion.front().y, maxY = minY;
+        for (const Vec2 p : seedRegion) {
+            if (!Tracks2D::present(p)) return;
+            minX = std::min(minX, p.x); maxX = std::max(maxX, p.x);
+            minY = std::min(minY, p.y); maxY = std::max(maxY, p.y);
+        }
+        const auto clip = [](f32 coordinate, u32 dimension) {
+            return static_cast<u32>(std::clamp(coordinate, 0.f, static_cast<f32>(dimension)));
+        };
+        shiftX = clip(std::floor(minX) - 12.f, frameImage.width);
+        shiftY = clip(std::floor(minY) - 12.f, frameImage.height);
+        roi.width = clip(std::ceil(maxX) + 13.f, frameImage.width) - shiftX;
+        roi.height = clip(std::ceil(maxY) + 13.f, frameImage.height) - shiftY;
+        if (roi.width < 24 || roi.height < 24) return;
+        roi.px.resize(static_cast<usize>(roi.width) * roi.height);
+        for (u32 y = 0; y < roi.height; ++y)
+            std::copy_n(frameImage.px.data() + static_cast<usize>(y + shiftY) * frameImage.width + shiftX,
+                        roi.width, roi.px.data() + static_cast<usize>(y) * roi.width);
+    }
+    const Gray& g = seedRegion.empty() ? frameImage : roi;
     const u32 w = g.width, h = g.height;
     if (w < 24 || h < 24 || active_.size() >= maxFeatures_) return;
     // Menor autovalor do tensor de estrutura (janela 5×5), por imagens integrais.
@@ -328,8 +354,18 @@ void FeatureTracker::detect(const Gray& g) {
     std::vector<f32> score(static_cast<usize>(w) * h, 0.0f);
     f32 best = 0.0f;
     const u32 border = 10;
+    auto contains = [seedRegion](f32 x, f32 y) {
+        if (seedRegion.empty()) return true;
+        bool inside = false;
+        for (usize i = 0, j = seedRegion.size() - 1; i < seedRegion.size(); j = i++) {
+            const auto a = seedRegion[i], b = seedRegion[j];
+            if ((a.y > y) != (b.y > y) && x < a.x + (b.x - a.x) * (y - a.y) / (b.y - a.y)) inside = !inside;
+        }
+        return inside;
+    };
     for (u32 y = border; y + border < h; ++y)
         for (u32 x = border; x + border < w; ++x) {
+            if (!contains(static_cast<f32>(x + shiftX), static_cast<f32>(y + shiftY))) continue;
             const f64 a = box(sxx, x - 2, y - 2, x + 3, y + 3), b = box(sxy, x - 2, y - 2, x + 3, y + 3), c = box(syy, x - 2, y - 2, x + 3, y + 3);
             const f64 tr = a + c, dt = a * c - b * b;
             const f32 l = static_cast<f32>(0.5 * (tr - std::sqrt(std::max(0.0, tr * tr - 4 * dt))));
@@ -352,7 +388,7 @@ void FeatureTracker::detect(const Gray& g) {
         }
     std::sort(cands.begin(), cands.end(), [](const Cand& a, const Cand& b) { return a.s > b.s; });
     // Grade de ocupação (célula = distância mínima): espalha os pontos.
-    const f32 cell = minDistance_;
+    const f32 cell = seedRegion.empty() ? minDistance_ : minDistance_ * .60f;
     const u32 gw = static_cast<u32>(std::ceil(static_cast<f32>(w) / cell)) + 1, gh = static_cast<u32>(std::ceil(static_cast<f32>(h) / cell)) + 1;
     std::vector<std::vector<Vec2>> occ(static_cast<usize>(gw) * gh);
     auto mark = [&](Vec2 p) {
@@ -370,7 +406,11 @@ void FeatureTracker::detect(const Gray& g) {
             }
         return true;
     };
-    for (const Active& a : active_) mark(a.pos);
+    const Vec2 offset{static_cast<f32>(shiftX), static_cast<f32>(shiftY)};
+    for (const Active& a : active_) {
+        const Vec2 p = a.pos - offset;
+        if (p.x >= 0 && p.y >= 0 && p.x < w && p.y < h) mark(p);
+    }
     const u32 frame = tracks_.frames - 1;
     for (const Cand& c : cands) {
         if (active_.size() >= maxFeatures_) break;
@@ -378,13 +418,13 @@ void FeatureTracker::detect(const Gray& g) {
         if (!freeAt(p)) continue;
         mark(p);
         std::vector<Vec2> row(tracks_.frames, Vec2{kNaN, kNaN});
-        row[frame] = p;
+        row[frame] = p + offset;
         tracks_.pos.push_back(std::move(row));
-        active_.push_back({static_cast<u32>(tracks_.pos.size() - 1), p});
+        active_.push_back({static_cast<u32>(tracks_.pos.size() - 1), p + offset});
     }
 }
 
-void FeatureTracker::add_frame(const Gray& g) {
+void FeatureTracker::add_frame(const Gray& g, std::span<const Vec2> seedRegion) {
     std::vector<Gray> cur = pyramid(g, 4);
     ++tracks_.frames;
     tracks_.width = g.width;
@@ -406,7 +446,7 @@ void FeatureTracker::add_frame(const Gray& g) {
     }
     // Refill after meaningful attrition. Recomputing three integral images
     // for one lost corner on every frame dominated analysis on mobile CPUs.
-    if (active_.size() < maxFeatures_ * 3u / 4u || frame % 12u == 0u) detect(g);
+    if (active_.size() < maxFeatures_ * 3u / 4u || frame % 12u == 0u) detect(g, seedRegion);
     prev_ = std::move(cur);
 }
 

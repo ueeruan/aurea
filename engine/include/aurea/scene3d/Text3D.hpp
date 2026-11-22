@@ -119,7 +119,8 @@ inline constexpr u32 kText3DStyleStandard = 0;
 inline constexpr u32 kText3DStyleCartoon = 1;
 /// Material pronto que liga o estilo Cartoon (apply_text3d_material_preset).
 inline constexpr u32 kText3DPresetCartoon = 14;
-inline constexpr u32 kText3DMaterialPresetCount = 15;
+inline constexpr u32 kText3DPresetInkPoster = 15;
+inline constexpr u32 kText3DMaterialPresetCount = 16;
 /// Teto da largura do contorno (px da composição).
 inline constexpr f32 kText3DOutlineMaxWidth = 64.0f;
 /// Índice do material do CONTORNO no asset de um texto Cartoon (frente,

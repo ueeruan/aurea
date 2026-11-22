@@ -26,6 +26,7 @@
 #include "aurea/effects/Parameter.hpp"
 #include "aurea/plugins/PluginUi.hpp"
 
+#include <array>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -59,6 +60,9 @@ inline constexpr u32 kMaxParams = 1024;          ///< "stack" e "audio" (é o te
 inline constexpr u32 kMaxShaderParams = 252;
 /// "shader3d": o mesmo bloco com os 1008 bytes da cena.
 inline constexpr u32 kMaxShader3dParams = 189;
+/// Formato 3.1, parameterStorage: texture. Cada texel carrega um vec4.
+inline constexpr u32 kTextureParamWidth = 256;
+inline constexpr u32 kMaxTextureParamSlots = 1024;
 inline constexpr u32 kMaxPasses = 32;
 inline constexpr u32 kMaxPassInputs = 11;           ///< entradas nomeadas + texturas do pacote, além da fonte
 /// 0.4.6: imagens do pacote amarradas como sampler2D ("textures": o getFile do GLSL).
@@ -122,6 +126,19 @@ struct ParamDecl {
     bool animatable = true;
     /// "layer": tipos aceitos (kAccept*; 0 = qualquer camada).
     u16 accept = 0;
+    u32 visibleIfParam = kInvalidIndex;
+    f32 visibleIfValue = 0.0f;
+};
+
+struct PresetAssignment {
+    u32 param = 0;
+    std::array<f32, 4> value{};
+};
+
+struct PresetDecl {
+    std::string id;
+    LocalizedText name;
+    std::vector<PresetAssignment> values;
 };
 
 /// Um passe de um plugin "shader".
@@ -158,6 +175,8 @@ struct StackStepDecl {
 /// O plugin.json lido e conferido.
 struct Manifest {
     u32 format = kFormatVersion;
+    bool v31 = false;
+    bool textureParameters = false;
     std::string id;
     std::string version;
     std::string author;
@@ -170,6 +189,7 @@ struct Manifest {
     /// camadas ligadas pelos parâmetros "layer" (docs/plugins/README.md §5).
     bool scene3d = false;
     std::vector<ParamDecl> params;
+    std::vector<PresetDecl> presets;
     std::vector<PassDecl> passes;
     std::vector<TextureDecl> textures;   ///< 0.4.6: imagens do pacote (todos os passes)
     bool history = false;                ///< "uses": o quadro anterior (sampler aurea_history)

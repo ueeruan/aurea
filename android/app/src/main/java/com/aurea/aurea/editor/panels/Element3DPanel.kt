@@ -364,6 +364,7 @@ private val PresetSwatch = mapOf(
     Text3DPreset.Stone to Color(0xFF8C8780),
     Text3DPreset.RoseGold to Color(0xFFFAAD99),
     Text3DPreset.Cartoon to Color(0xFFF57391),
+    Text3DPreset.InkPoster to Color(0xFFFFFFFF),
 )
 
 private val FinishLabels = listOf(
@@ -383,7 +384,9 @@ private fun Text3DMaterialTab(env: PanelEnv, info: Text3DInfo) {
         (listOf(Text3DPreset.CinematicMetal) + Text3DPreset.values().filter { it != Text3DPreset.CinematicMetal }).forEach { preset ->
             // A bola de estúdio do material (o motor calcula; até chegar, a cor chapada).
             val thumb = rememberPresetThumb(store, preset.ordinal)
-            SwatchChip(stringResource(preset.labelRes), PresetSwatch[preset] ?: Color.White, thumb,
+            val label = stringResource(preset.labelRes)
+            val title = if (preset == Text3DPreset.InkPoster) "$label · ${stringResource(R.string.hyper_title)}" else label
+            SwatchChip(title, PresetSwatch[preset] ?: Color.White, thumb,
                 Modifier.testTag("text3d.materialPreset.${preset.ordinal}")) {
                 store.applyText3DPreset(preset)
             }
@@ -615,7 +618,7 @@ private fun Image3DMaterialTab(env: PanelEnv, f: FloatArray) {
     EnvSection(stringResource(R.string.ui3d_ready_materials), null) {
         ChipRow {
             // O Cartoon é só do texto 3D (o motor recusa na Imagem 3D).
-            (listOf(Text3DPreset.CinematicMetal) + Text3DPreset.values().filter { it != Text3DPreset.CinematicMetal && it != Text3DPreset.Cartoon }).forEach { preset ->
+            (listOf(Text3DPreset.CinematicMetal) + Text3DPreset.values().filter { it != Text3DPreset.CinematicMetal && it != Text3DPreset.Cartoon && it != Text3DPreset.InkPoster }).forEach { preset ->
                 val thumb = rememberPresetThumb(store, preset.ordinal)
                 SwatchChip(stringResource(preset.labelRes), PresetSwatch[preset] ?: Color.White, thumb,
                     Modifier.testTag("image3d.materialPreset.${preset.ordinal}")) {

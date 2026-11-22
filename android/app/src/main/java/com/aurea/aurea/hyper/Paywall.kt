@@ -80,7 +80,7 @@ fun PaywallDialog(item: PaidItem, itemName: String?, onDismiss: () -> Unit) {
         AureaSubscriptions.loadPrices(context)
     }
     LaunchedEffect(conta.logado) { if (conta.logado) { signingIn = false; conta.atualizarAcessos() } }
-    val access = HyperEntitlements.accessFor(item.product)
+    val access = HyperEntitlements.accessFor(item.product, subscriptionOnly = item.subscriptionOnly)
     LaunchedEffect(access) { if (access == HyperAccess.Unlocked) onDismiss() }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(Modifier.fillMaxSize().background(AureaColors.Background).safeDrawingPadding().testTag("assinatura")) {

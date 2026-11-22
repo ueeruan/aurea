@@ -169,6 +169,43 @@ AUREA_TEST(PluginV3, NewFeaturesAreRefusedInOlderFormatsAndPastTheLimits) {
     AUREA_CHECK(refused(v3_manifest(images), "passam de"));
 }
 
+AUREA_TEST(PluginV3, TextureStorageBuildsShader3dPastTheLegacyLimit) {
+    std::string params;
+    for (u32 i = 0; i < 31; ++i)
+        params += "{\"id\":\"g" + std::to_string(i) + "\",\"type\":\"gradient\"},";
+    params += R"({"id":"easing","type":"curve"},{"id":"reference","type":"layer"},{"id":"overlay","type":"layerImage"})";
+    const std::string storage = R"(,"parameterStorage":"texture","uses":["history","audio"])";
+    std::string manifest = v3_manifest(params, storage);
+    manifest.replace(manifest.find("\"shader\""), 8, "\"shader3d\"");
+    manifest.replace(manifest.find(":3,"), 3, ":3.1,");
+    plugins::Manifest m;
+    std::string error;
+    AUREA_CHECK_MSG(plugins::parse_manifest(manifest, m, error), error.c_str());
+    AUREA_CHECK_EQ(plugins::param_slots(m), 1011u);
+    AUREA_CHECK_EQ(plugins::extra_samplers(m), 4u);
+    AUREA_CHECK(m.scene3d && m.v31 && m.textureParameters);
+    const std::string header = plugins::shader_header(m, 0);
+    AUREA_CHECK(header.find("vec4 params[") == std::string::npos);
+    const char* shader = R"(
+vec4 aurea_main(vec2 uv) {
+    vec4 c = g30(easing(uv.x));
+    if (overlay_connected) c += texture(overlay, uv);
+    return c + texture(u_prev_frame, uv) * aurea_audio(uv.x) * AUREA_AUDIO_PEAK
+        + aurea.layerPos[reference] * 0.1;
+}
+)";
+    std::vector<u32> spirv;
+    AUREA_CHECK_MSG(plugins::compile_pass(m, 0, shader, spirv, error), error.c_str());
+    AUREA_CHECK(!spirv.empty());
+    plugins::Manifest reopened;
+    AUREA_CHECK_MSG(plugins::parse_manifest(plugins::manifest_json(m), reopened, error), error.c_str());
+    AUREA_CHECK(reopened.v31 && reopened.textureParameters && reopened.history && reopened.audio);
+    AUREA_CHECK(refused(v3_manifest(params, storage), "parameterStorage"));
+    const auto pos = manifest.find("\"id\":\"easing\"");
+    manifest.insert(pos - 1, R"({"id":"overflow","type":"gradient"},)");
+    AUREA_CHECK(refused(manifest, "1043 posicoes"));
+}
+
 AUREA_TEST(PluginV3, TreeInterfaceKeepsIdsAcrossTheWholeTree) {
     const std::string button = R"({"id":"b","type":"button","label":"B","onClick":"go"})";
     const std::string row = R"({"id":"r","type":"row","children":[)" + button + "]}";

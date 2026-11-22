@@ -114,6 +114,10 @@ class AureaEngine private constructor() {
                                                                   extension: String, inUs: Long, outUs: Long): Array<String>?
 
         @JvmStatic external fun nativeHyperSetModelDirectory(path: String)
+
+        @JvmStatic external fun nativeDetectIllustratedPose(
+            rgba: ByteBuffer, width: Int, height: Int, stride: Int, modelPrefix: String,
+        ): FloatArray?
         /** Classificação de acesso dos efeitos, compartilhada com o iOS no motor. */
         @JvmStatic external fun nativeEffectRequiresHyper(typeId: Int): Boolean
         /** 1.0.2: opção paga de um efeito grátis (Flow Retime › Neural (IA)); só o AureaHyper libera. */
@@ -315,8 +319,8 @@ class AureaEngine private constructor() {
         const val EXPORT_ATTEMPT_MAX = 6
     }
 
-    /** Ponteiro para o contexto nativo. 0 = destruído. */
-    private var nativeHandle: Long = nativeCreate().takeIf { it > 0L } ?: 0L
+    /** Identificador opaco do JNI. Só 0 indica contexto ausente. */
+    private var nativeHandle: Long = nativeCreate()
     private val nativeWork = NativeWorkGate()
 
     private val commandBuffer: ByteBuffer = directBuffer(MAX_COMMANDS_PER_FRAME * COMMAND_SIZE_BYTES)
@@ -343,7 +347,9 @@ class AureaEngine private constructor() {
         codecs: IntArray? = null,
         /** Pasta dos plugins de efeito. Padrão: `files/plugins` (irmã de `files/projetos`). */
         pluginDir: String = defaultPluginDir(documentsDir),
-    ): Boolean = nativeHandle > 0L && nativeInitialize(nativeHandle, refreshRate, cacheDir, documentsDir, debug, probe, codecs, pluginDir)
+    ): Boolean = initializeNativeContext(nativeHandle) {
+        nativeInitialize(it, refreshRate, cacheDir, documentsDir, debug, probe, codecs, pluginDir)
+    }
 
     // -------------------------------------------------------------------------
     // Plugins de efeito (docs/plugins/README.md). Um plugin acrescenta um efeito
@@ -947,6 +953,8 @@ class AureaEngine private constructor() {
     fun queryPuppet(layer: Long, effect: Int, out: FloatArray): Int = nativeQueryPuppet(nativeHandle, layer, effect, out)
     fun queryPuppetMesh(layer: Long, effect: Int, out: FloatArray): Int = nativeQueryPuppetMesh(nativeHandle, layer, effect, out)
     /** Pino novo (−1 = cheio). */
+    fun puppetAutoRigImage(layer: Long, effect: Int, pose: FloatArray, parts: Boolean = false): Int =
+        nativePuppetAutoRigImage(nativeHandle, layer, effect, pose, parts)
     fun puppetAddPin(layer: Long, effect: Int, u: Float, v: Float): Int = nativePuppetAddPin(nativeHandle, layer, effect, u, v)
     fun puppetMovePin(layer: Long, effect: Int, pin: Int, u: Float, v: Float, autoKey: Boolean, continuing: Boolean): Boolean =
         nativePuppetMovePin(nativeHandle, layer, effect, pin, u, v, autoKey, continuing)
@@ -1547,19 +1555,38 @@ class AureaEngine private constructor() {
     fun timeRemapCurrentSource(layer: Long): Double = nativeWork.run(Double.NaN) { nativeQueryTimeRemapCurrentSource(nativeHandle, layer) }
 
     // Rastreio de câmera 3D.
-    fun startMotionTrack(layer: Long, tool: Int, model: Int, backward: Boolean, points: FloatArray, feature: Float, search: Float): Boolean = nativeStartMotionTrack(nativeHandle, layer, tool, model, backward, points, feature, search)
+    fun startMotionTrack(layer: Long, tool: Int, model: Int, backward: Boolean, points: FloatArray, feature: Float, search: Float,
+                         confidence: Float = .65f, validateBack: Boolean = false): Boolean =
+        nativeStartMotionTrack(nativeHandle, layer, tool, model, backward, points, feature, search, confidence, validateBack)
     fun cancelMotionTrack() = nativeCancelMotionTrack(nativeHandle)
+    fun pauseMotionTrack(paused: Boolean) = nativePauseMotionTrack(nativeHandle, paused)
+    fun motionTrackReview(source: Long): FloatArray = nativeMotionTrackReview(nativeHandle, source) ?: FloatArray(0)
+    fun motionTrackTrail(source: Long, frame: Int): FloatArray =
+        nativeMotionTrackTrail(nativeHandle, source, frame.toLong()) ?: FloatArray(0)
+    fun motionTrackCsv(source: Long): String? = nativeMotionTrackCsv(nativeHandle, source)
+    fun applyLandmarkTracks(source: Long, rows: FloatArray, face: Boolean): Int =
+        nativeApplyLandmarkTracks(nativeHandle, source, rows, face)
     fun restoreMotionTrack(layer: Long): Boolean = nativeRestoreMotionTrack(nativeHandle, layer)
     fun motionTrackSource(): Long = nativeMotionTrackSource(nativeHandle)
+    fun motionTrackFeatures(frame: Int, out: FloatArray): Int = nativeMotionTrackFeatures(nativeHandle, frame.toLong(), out)
     fun motionTrackStatus(out: FloatArray): String = nativeMotionTrackStatus(nativeHandle, out) ?: ""
     fun applyMotionTrack(target: Long, apply: Int, lock: Boolean, smooth: Float, maxScale: Float, crop: Int): Long = nativeApplyMotionTrack(nativeHandle, target, apply, lock, smooth, maxScale, crop)
-    private external fun nativeStartMotionTrack(handle: Long, layer: Long, tool: Int, model: Int, backward: Boolean, points: FloatArray, feature: Float, search: Float): Boolean
+    private external fun nativeStartMotionTrack(handle: Long, layer: Long, tool: Int, model: Int, backward: Boolean, points: FloatArray, feature: Float, search: Float, confidence: Float, validateBack: Boolean): Boolean
     private external fun nativeCancelMotionTrack(handle: Long)
+    private external fun nativePauseMotionTrack(handle: Long, paused: Boolean)
+    private external fun nativeMotionTrackReview(handle: Long, source: Long): FloatArray?
+    private external fun nativeMotionTrackTrail(handle: Long, source: Long, frame: Long): FloatArray?
+    private external fun nativeMotionTrackCsv(handle: Long, source: Long): String?
+    private external fun nativeApplyLandmarkTracks(handle: Long, source: Long, rows: FloatArray, face: Boolean): Int
     private external fun nativeRestoreMotionTrack(handle: Long, layer: Long): Boolean
+    private external fun nativeMotionTrackFeatures(handle: Long, frame: Long, out: FloatArray): Int
     private external fun nativeMotionTrackStatus(handle: Long, out: FloatArray): String?
     private external fun nativeMotionTrackSource(handle: Long): Long
     private external fun nativeApplyMotionTrack(handle: Long, target: Long, apply: Int, lock: Boolean, smooth: Float, maxScale: Float, crop: Int): Long
     fun startCameraTrack(layer: Long, mode: Int): Boolean = nativeStartCameraTrack(nativeHandle, layer, mode)
+    fun cameraTrackReconstruction(source: Long, frame: Int): FloatArray =
+        nativeCameraTrackReconstruction(nativeHandle, source, frame.toLong()) ?: FloatArray(0)
+    private external fun nativeCameraTrackReconstruction(handle: Long, source: Long, frame: Long): FloatArray?
     /** motion: 0 auto, 1 típico, 2 tripé, 3 cena quase plana; shotType: 0 FOV fixa, 1 zoom variável,
      *  2 FOV informada (knownFov > 0); lens: 1 = estimar a distorção radial (k1; k2 se estável). */
     fun startCameraTrack(layer: Long, mode: Int, motion: Int, knownFov: Float, shotType: Int, lens: Int): Boolean =
@@ -2630,6 +2657,7 @@ class AureaEngine private constructor() {
     private external fun nativeMeshWarpToggleKey(handle: Long, layer: Long, effect: Int): Boolean
     private external fun nativeQueryPuppet(handle: Long, layer: Long, effect: Int, out: FloatArray): Int
     private external fun nativeQueryPuppetMesh(handle: Long, layer: Long, effect: Int, out: FloatArray): Int
+    private external fun nativePuppetAutoRigImage(handle: Long, layer: Long, effect: Int, pose: FloatArray, parts: Boolean): Int
     private external fun nativePuppetAddPin(handle: Long, layer: Long, effect: Int, u: Float, v: Float): Int
     private external fun nativePuppetMovePin(handle: Long, layer: Long, effect: Int, pin: Int, u: Float, v: Float,
                                              autoKey: Boolean, continuing: Boolean): Boolean

@@ -1138,7 +1138,7 @@ para editar la curva.</string>
     <string name="consent_title">Consentimiento y responsabilidad</string>
     <string name="consent_accept">Aceptar y continuar</string>
     <string name="consent_body">Aurea es una herramienta profesional de edición, creación y producción de contenido digital. Al utilizar la aplicación, el usuario reconoce que es plenamente responsable de los contenidos que crea, edita, importa, exporta, publica o comparte a través de la plataforma.\n\nAurea no controla, fomenta, apoya ni autoriza el uso de la herramienta para actividades ilegales, abusivas, fraudulentas, perjudiciales o que vulneren los derechos de terceros.\n\nEl usuario es responsable de garantizar que dispone de las autorizaciones, licencias y derechos necesarios sobre los materiales utilizados, incluidas imágenes, vídeos, música, marcas, modelos, archivos y demás contenidos protegidos.\n\nLa libertad creativa que ofrece Aurea no implica aprobación, participación ni responsabilidad de la aplicación por lo que cada usuario decide producir o hacer con la herramienta.\n\nEl usuario acepta utilizar Aurea conforme a la legislación aplicable y asume la responsabilidad de sus propias acciones y del contenido producido o distribuido mediante la aplicación.\n\nEn la máxima medida permitida por la legislación aplicable, Aurea y sus responsables no serán responsables de los actos realizados exclusivamente por el usuario, del uso indebido de la herramienta ni de las consecuencias derivadas de contenidos creados, publicados o compartidos por el propio usuario.\n\nAurea proporciona la herramienta. El usuario es responsable del modo en que decide utilizarla.\n\nAl continuar, el usuario declara que ha leído, comprendido y acepta estos términos.</string>
-    <string name="release_notes_body">Aurea 1.0.2.1 (2223) — 19/11/2026\n\n• AureaHyper ahora es ANUAL: una suscripción al año desbloquea todos los efectos de pago, el Texto 3D, Neural (IA) y las herramientas Hyper. Sin mensualidad ni suscripción por efecto. Quien ya está suscrito conserva todo.\n• Optical Flow para filmación real: menos fantasma, control Fantasma ↔ Deformación y calidad Neural (IA) con AureaHYPER.\n• Glitchify igual a After Effects.\n• Exportación más rápida y con más calidad.\n• Importa solo el tramo recortado de videos largos.\n• Panel de Pre Render y Pre Export por tramo.\n• AureaMCP despierta la app cerrada.</string>
+    <string name="release_notes_body">Aurea 1.0.4 (2225)\n\n• AutoBeat con selección de audio, pulso de escala, elevación y rotación · gratis\n• Rastreo planar con dos esquinas y aplicación en cuatro puntos · AureaHyper\n• Póster de tinta para Texto 3D: frente blanco, volumen oscuro y contorno claro · AureaHyper\n• AutoRig 2D en Marioneta: detección de pose, pines editables y animación en reposo · AureaHyper</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">Rellenar</string>
@@ -1889,7 +1889,7 @@ para editar la curva.</string>
     <string name="msg_o_projeto_esta_danificado_e_nao">El proyecto está dañado y no hay ninguna copia válida para recuperarlo.</string>
     <string name="msg_este_aparelho_nao_tem_codificador_para">Este dispositivo no tiene codificador para esta configuración de exportación.</string>
     <string name="msg_erro_inesperado_codigo">Error inesperado (código %1$s).</string>
-    <string name="msg_nao_foi_possivel_iniciar_o_motor">No se pudo iniciar el motor gráfico (Vulkan) en este dispositivo.</string>
+    <string name="msg_nao_foi_possivel_iniciar_o_motor">No se pudo iniciar el motor gráfico en este dispositivo.</string>
     <string name="msg_o_aparelho_sera_medido_de_novo">El dispositivo se volverá a medir la próxima vez que se abra Aurea</string>
     <string name="msg_o_preview_nao_conseguiu_usar_a">La vista previa no pudo usar la superficie de video.</string>
     <string name="msg_salvamento_automatico_falhou">Falló el guardado automático: %1$s</string>
@@ -5497,4 +5497,15 @@ para editar la curva.</string>
     <string name="prx_close">Cerrar</string>
     <string name="prx_preparing">Preparando…</string>
     <string name="prx_ruler_range">Tramo del Pre Render</string>
+    <string name="pn_t3d_preset_ink_poster">Póster de tinta</string>
+    <string name="trk_surface_quick">Rastrear superficie</string>
+    <string name="trk_surface_hint">Toca dos esquinas opuestas de un área con textura.</string>
+    <string name="trk_show_advanced">Mostrar opciones avanzadas</string>
+    <string name="trk_hide_advanced">Ocultar opciones avanzadas</string>
+    <string name="autobeat_hint">El pulso sigue las marcas de ritmo de la composición. Analizar una fuente actualiza las marcas de su intervalo.</string>
+    <string name="autobeat_source">Detectar pulsos del audio</string>
+    <string name="autorig2d_action">AutoRig 2D y animar</string>
+    <string name="autorig2d_busy">Analizando la pose…</string>
+    <string name="autorig2d_no_pose">AutoRig no encontró suficientes puntos visibles. Añade pines en Marioneta.</string>
+    <string name="autorig2d_existing">Usa un efecto Marioneta sin pines para crear el AutoRig.</string>
 </resources>

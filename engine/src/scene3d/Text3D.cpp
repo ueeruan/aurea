@@ -1634,7 +1634,7 @@ bool apply_text3d_material_preset(Text3DSpec& s, u32 preset) noexcept {
     s.surfaceFinish = preset == 2 ? 1u : 0u;
     s.regionMaterials = false;
     // Os materiais PBR desligam o Cartoon; o Cartoon (14) liga.
-    s.style = preset == kText3DPresetCartoon ? kText3DStyleCartoon : kText3DStyleStandard;
+    s.style = preset == kText3DPresetCartoon || preset == kText3DPresetInkPoster ? kText3DStyleCartoon : kText3DStyleStandard;
     switch (preset) {
         case 0: s.bevel = true; s.color = {.95f, .96f, .98f, 1}; s.metallic = 1; s.roughness = .05f; break;
         case 1: s.bevel = true; s.color = {1, .77f, .34f, 1}; s.metallic = 1; s.roughness = .18f; break;
@@ -1703,6 +1703,17 @@ bool apply_text3d_material_preset(Text3DSpec& s, u32 preset) noexcept {
             s.color = {.96f, .45f, .55f, 1}; s.metallic = 0; s.roughness = 1; s.specular = 0;
             s.toonSideAuto = true; s.toonHighlight = .6f;
             s.outlineColor = {.106f, .098f, .176f, 1}; s.outlineWidth = 10;
+            break;
+        case kText3DPresetInkPoster:
+            s.depth = .53f;
+            s.bevel = false;
+            s.color = {1, 1, 1, 1};
+            s.metallic = 0; s.roughness = 1; s.specular = 0;
+            s.toonSideAuto = false;
+            s.toonSideColor = {.018f, .018f, .023f, 1};
+            s.toonHighlight = 0;
+            s.outlineColor = {.94f, .94f, .96f, 1};
+            s.outlineWidth = 2.5f;
             break;
     }
     return true;
@@ -2380,7 +2391,7 @@ void image3d_from_fields(const f32* v, Image3DSpec& s) noexcept {
 bool apply_image3d_material_preset(Image3DSpec& spec, u32 preset) noexcept {
     Text3DSpec look;
     // O Cartoon é um estilo do TEXTO 3D (cel + contorno); a Imagem 3D não o tem.
-    if (preset == kText3DPresetCartoon || !apply_text3d_material_preset(look, preset)) return false;
+    if (!apply_text3d_material_preset(look, preset) || look.style != kText3DStyleStandard) return false;
     const Text3DMaterial flat = look.front_material();
     spec.side = look.regionMaterials ? look.side : flat;
     spec.bevelMat = look.regionMaterials ? look.bevelMat : flat;

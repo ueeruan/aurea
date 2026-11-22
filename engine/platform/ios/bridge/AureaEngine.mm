@@ -31,6 +31,7 @@
 #include "aurea/animation/TemporalEase.hpp"
 #include "aurea/text/TextAnimator.hpp"
 #include "aurea/ai/BackgroundRemoval.hpp"
+#include "aurea/ai/IllustratedPose.hpp"
 #include "aurea/timeline/ShapeGeometry.hpp"
 #include "aurea/DefaultNames.hpp"
 
@@ -4243,17 +4244,51 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
     auto result = e->track_point(layerId, x, y, stabilize);
     return result.ok() ? @"" : @"Não foi possível rastrear esse ponto. Escolha um detalhe visível no vídeo.";
 }
-- (BOOL)startMotionTrack:(long long)layer tool:(uint32_t)tool model:(uint32_t)model backward:(BOOL)backward points:(NSArray<NSNumber*>*)points feature:(float)feature search:(float)search {
+- (BOOL)startMotionTrack:(long long)layer tool:(uint32_t)tool model:(uint32_t)model backward:(BOOL)backward points:(NSArray<NSNumber*>*)points feature:(float)feature search:(float)search confidence:(float)confidence validateBack:(BOOL)validateBack {
     auto* e=self.engine;if(!e||points.count>8||points.count%2)return NO;
     float xy[8]{};for(NSUInteger i=0;i<points.count;++i)xy[i]=points[i].floatValue;
-    return e->start_motion_track(layer,tool,model,backward,xy,static_cast<aurea::u32>(points.count/2),feature,search);
+    return e->start_motion_track(layer,tool,model,backward,xy,static_cast<aurea::u32>(points.count/2),feature,search,confidence,validateBack);
 }
 - (void)cancelMotionTrack { if(auto* e=self.engine)e->cancel_motion_track(); }
+- (void)pauseMotionTrack:(BOOL)paused { if (auto* e = self.engine) (void)e->pause_motion_track(paused); }
+- (NSArray<NSNumber*>*)motionTrackReview:(long long)source {
+    auto* e = self.engine;
+    if (!e) return @[];
+    const auto data = e->motion_track_review(source, 160);
+    return floats_to_array(data.data(), data.size());
+}
+- (NSArray<NSNumber*>*)motionTrackTrail:(long long)source frame:(long long)frame {
+    auto* e = self.engine;
+    if (!e) return @[];
+    const auto data = e->motion_track_trail(source, frame);
+    return floats_to_array(data.data(), data.size());
+}
+- (NSString*)motionTrackCsv:(long long)source {
+    auto* e = self.engine;
+    if (!e) return nil;
+    const auto data = e->motion_track_csv(source);
+    return data.empty() ? nil : [NSString stringWithUTF8String:data.c_str()];
+}
+- (uint32_t)applyLandmarkTracks:(long long)source samples:(NSData*)samples face:(BOOL)face {
+    auto* e = self.engine;
+    constexpr NSUInteger stride = (2 + 33 * 4) * sizeof(float);
+    if (!e || samples.length % stride || samples.length > 9000 * stride) return 0;
+    std::vector<float> values(samples.length / sizeof(float));
+    [samples getBytes:values.data() length:samples.length];
+    return e->apply_landmark_tracks(source, values.data(), static_cast<aurea::u32>(samples.length / stride), face);
+}
 - (BOOL)restoreMotionTrack:(long long)layer { auto* e=self.engine;return e&&e->restore_motion_track(layer); }
 - (long long)motionTrackSource { auto* e=self.engine;return e?static_cast<long long>(e->motion_track_source()):0; }
+- (NSArray<NSNumber*>*)motionTrackFeatures:(long long)frame {
+    auto* e = self.engine;
+    if (!e) return @[];
+    float features[12]{};
+    const auto count = e->motion_track_features(frame, features, 4);
+    return floats_to_array(features, count * 3);
+}
 - (NSDictionary<NSString*, id>*)motionTrackStatus {
     auto* e=self.engine;if(!e)return @{};const auto s=e->motion_track_status();
-    return @{ @"state":@(s.state), @"progress":@(s.progress), @"tool":@(s.tool), @"frames":@(s.frames), @"validFrames":@(s.validFrames), @"lost":@(s.lost), @"reacquired":@(s.reacquired), @"confidence":@(s.confidence), @"error":@(s.errorPx), @"crop":@(s.cropPercent), @"memoryMB":@(s.memoryBytes/1048576.0), @"message":[NSString stringWithUTF8String:s.message.c_str()]?:@"" };
+    return @{ @"state":@(s.state), @"progress":@(s.progress), @"tool":@(s.tool), @"frames":@(s.frames), @"validFrames":@(s.validFrames), @"lost":@(s.lost), @"reacquired":@(s.reacquired), @"confidence":@(s.confidence), @"error":@(s.errorPx), @"crop":@(s.cropPercent), @"memoryMB":@(s.memoryBytes/1048576.0), @"paused":@(s.paused), @"message":[NSString stringWithUTF8String:s.message.c_str()]?:@"" };
 }
 - (NSString*)applyMotionTrack:(long long)target apply:(uint32_t)apply lock:(BOOL)lock smooth:(float)smooth maxScale:(float)maxScale crop:(uint32_t)crop {
     auto* e=self.engine;if(!e)return @"Motor indisponível";
@@ -4359,6 +4394,12 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
     std::vector<float> values(9000);
     const auto count = e->camera_track_features_detail(frame, values.data(), 1500);
     return floats_to_array(values.data(), count * 6);
+}
+- (NSArray<NSNumber*>*)cameraTrackReconstruction:(long long)source frame:(long long)frame {
+    auto* e = self.engine;
+    if (!e) return @[];
+    const auto values = e->camera_track_reconstruction(source, frame);
+    return floats_to_array(values.data(), values.size());
 }
 - (uint32_t)selectCameraTrackPoints:(NSArray<NSNumber*>*)ids operation:(uint32_t)operation {
     auto* e = self.engine; if (!e || ids.count > 1500) return 0;
@@ -5270,6 +5311,25 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
     const aurea::u32 got = e->query_puppet_mesh(layerId, static_cast<aurea::u32>(effectId), v.data(), need);
     return got == need ? floats_to_array(v.data(), need) : @[];
 }
+- (int32_t)puppetAutoRigImage:(long long)layerId effect:(int32_t)effectId pose:(NSData *)pose parts:(BOOL)parts {
+    auto* e = self.engine;
+    constexpr aurea::u32 count = 2 + 33 * 4;
+    if (!e || effectId < 0 || pose.length != count * sizeof(float)) return -1;
+    float data[count];
+    [pose getBytes:data length:sizeof(data)];
+    if (parts) return e->puppet_auto_rig_parts(layerId, static_cast<aurea::u32>(effectId), data, count);
+    return e->puppet_auto_rig_image(layerId, static_cast<aurea::u32>(effectId), data, count);
+}
+
++ (NSData *)detectIllustratedPose:(NSData *)rgba width:(uint32_t)width height:(uint32_t)height
+                            stride:(uint32_t)stride modelPrefix:(NSString *)modelPrefix {
+    if (rgba.length < static_cast<aurea::u64>(stride) * height) return nil;
+    float pose[aurea::ai::kIllustratedPoseFloats];
+    if (!aurea::ai::detect_illustrated_pose(static_cast<const aurea::u8*>(rgba.bytes),
+                                            width, height, stride, modelPrefix.fileSystemRepresentation, pose)) return nil;
+    return [NSData dataWithBytes:pose length:sizeof(pose)];
+}
+
 - (int32_t)puppetAddPin:(long long)layerId effect:(int32_t)effectId u:(float)u v:(float)v {
     auto* e = self.engine; return e && effectId >= 0 ? e->puppet_add_pin(layerId, static_cast<aurea::u32>(effectId), u, v) : -1;
 }

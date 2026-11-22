@@ -11,6 +11,7 @@ EN = ROOT + r"\android\app\src\main\res\values-en\strings.xml"
 OUT = ROOT + r"\engine\platform\ios\app\AureaStrings.swift"
 
 KEYS = [
+    'pn_t3d_preset_ink_poster', 'trk_surface_quick', 'trk_surface_hint', 'trk_show_advanced', 'trk_hide_advanced', 'autobeat_hint', 'autobeat_source', 'autorig2d_action', 'autorig2d_busy', 'autorig2d_no_pose', 'autorig2d_existing',
     "export_range_content", "export_range_full",
     "real_camera_title", "real_camera_hint", "real_camera_record", "real_camera_stop", "real_camera_recording",
     "real_camera_recenter", "real_camera_invert", "real_camera_sensitivity", "real_camera_done", "real_camera_no_sensor",
@@ -225,6 +226,9 @@ lines += ['    static func plural(_ key: String, _ count: Int, _ args: CVarArg..
           '        return String(format: format, arguments: args.isEmpty ? [count] : args)', '    }']
 plurals = {}
 en_table = load(EN)
+import json as _json
+IOS_ONLY = {k: v for k, v in _json.load(io.open(Path(ROOT) / 'tools' / 'ios_only_strings.json', encoding='utf-8')).items()
+            if not k.startswith('_')}
 for code, raw, label, folder in languages:
     path = Path(ROOT) / 'android/app/src/main/res' / folder / 'strings.xml'
     if not path.exists() and code == 'id':
@@ -242,6 +246,11 @@ for code, raw, label, folder in languages:
     fallback = pt if code == 'pt' else {**pt, **en_table}
     for key in KEYS:
         lines.append('        "%s": %s,' % (key, swift_literal(to_swift_format(table.get(key, fallback[key])))))
+    # Textos que só existem no iOS (sem par no catálogo do Android): sem isto
+    # a regeneração os apagava (1.0.3 e 1.0.4) e a tela mostrava a chave crua.
+    for key, literal in IOS_ONLY.get(code, {}).items():
+        if key not in KEYS:
+            lines.append('        "%s": %s,' % (key, literal))
     lines.append('    ]')
 lines.append('    private static let plurals: [String: [String: [String: String]]] = [')
 for language, table in plurals.items():

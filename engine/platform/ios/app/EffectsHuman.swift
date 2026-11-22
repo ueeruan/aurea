@@ -134,13 +134,14 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.distort.lens_gradient", FxEffectHuman(keywords: "s_distort sapphire distort lente lens refracao matte", principal: [0, 2, 4, 5, 6])),
     ("aurea.transition.wipe_flux", FxEffectHuman(keywords: "wipeflux s_wipeflux sapphire fluxo bolhas transicao", principal: [0, 1, 3, 8, 9], params: [5: FxParamHuman(scale: 1, suffix: "", decimals: 3)])),
     ("aurea.transition.wipe_plasma", FxEffectHuman(keywords: "wipeplasma s_wipeplasma sapphire plasma filamentos transicao", principal: [0, 1, 3, 8, 9], params: [5: FxParamHuman(scale: 1, suffix: "", decimals: 3)])),
+    ("aurea.move.autobeat", FxEffectHuman(keywords: "beat batida audio música music pulso sync", principal: [0, 1, 2, 3])),
     ("aurea.move.path", FxEffectHuman(name: "beta_move_path", keywords: "move along path caminho vetor trajetória percurso orientar", principal: [0, 1, 2, 3, 4, 5])),
     ("aurea.distort.bender", FxEffectHuman(name: "fx_name_bender", keywords: "bender bend curve curvar pontos", principal: [0, 1, 2, 3])),
     ("aurea.distort.bend", FxEffectHuman(name: "fx_name_bend", keywords: "bend fold dobra papel", principal: [0, 1, 2, 5])),
     ("aurea.distort.curl", FxEffectHuman(name: "fx_name_curl", keywords: "curl roll enrolar cilindro", principal: [0, 1, 2, 3, 6])),
     ("aurea.distort.page_turn", FxEffectHuman(name: "fx_name_page_turn", keywords: "page turn pagina papel cc", principal: [0, 1, 2, 3, 8])),
     ("aurea.distort.mesh_warp", FxEffectHuman(name: "fx_name_mesh_warp", keywords: "mesh warp malha deformacao grade bezier entortar", principal: [0, 1, 2])),
-    ("aurea.distort.puppet", FxEffectHuman(name: "fx_name_puppet", keywords: "puppet fantoche pino pin marionete rig personagem deformar arap", principal: [0, 1, 2])),
+    ("aurea.distort.puppet", FxEffectHuman(name: "fx_name_puppet", keywords: "puppet fantoche pino pin marionete rig autorig 2d autoanimacao png personagem deformar arap", principal: [0, 1, 2])),
     ("aurea.distort.headbop", FxEffectHuman(name: "fx_name_headbop", keywords: "headbop head bop cabeça balançar batida musica ritmo danca dancar pessoa beat nod groove", principal: [0, 1, 2, 3, 13])),
     ("aurea.distort.liquid_glass", FxEffectHuman(name: "fx_name_liquid_glass", keywords: "liquid glass vidro liquido lente refracao glassmorphism", principal: [0, 1, 2, 3, 5])),
     ("aurea.transition.noise_dissolve", FxEffectHuman(name: "fx_name_noise_dissolve", keywords: "dissolve dissolver ruido queimar desintegrar", principal: [0, 1, 3, 8, 10])),
@@ -2385,7 +2386,7 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.generate.particular", "afx_desc_particular", FxAllTargets, "particulas particles particular emissor emitter neve snow chuva rain fogo fire faiscas sparks fogos fireworks poeira dust bokeh")
     // --- IA: a rede lê a FONTE da camada (foto ou vídeo) ---
     put("aurea.ai.depth_map", "fx_desc_ai_depth_map", [.imagem, .video], "profundidade depth mapa ia ai midas distancia perto longe z matte fundo")
-    put("aurea.distort.puppet", "fx_desc_puppet", FxAllTargets, "fantoche puppet pino pin marionete rig personagem deformar")
+    put("aurea.distort.puppet", "fx_desc_puppet", FxAllTargets, "fantoche puppet pino pin marionete rig autorig 2d autoanimacao png personagem deformar")
     // --- 0.4.5: pedidos de usuários (mesma tabela no Android, EffectCatalogMeta.kt) ---
     put("aurea.distort.water_reflection", "fx045_desc_water_reflection", [.imagem, .video, .texto, .vetor, .forma, .preComposicao, .cena3D],
         "reflejo agua отражение вода प्रतिबिंब पानी انعكاس ماء pantulan air")

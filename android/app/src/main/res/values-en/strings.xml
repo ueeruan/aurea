@@ -1458,7 +1458,7 @@ to edit the curve.</string>
     <string name="msg_o_projeto_esta_danificado_e_nao">The project is damaged and there is no valid copy to recover.</string>
     <string name="msg_este_aparelho_nao_tem_codificador_para">This device has no encoder for this export setting.</string>
     <string name="msg_erro_inesperado_codigo">Unexpected error (code %1$s).</string>
-    <string name="msg_nao_foi_possivel_iniciar_o_motor">Could not start the graphics engine (Vulkan) on this device.</string>
+    <string name="msg_nao_foi_possivel_iniciar_o_motor">Could not start the graphics engine on this device.</string>
     <string name="msg_o_aparelho_sera_medido_de_novo">The device will be measured again the next time Aurea opens</string>
     <string name="msg_o_preview_nao_conseguiu_usar_a">The preview could not use the video surface.</string>
     <string name="msg_salvamento_automatico_falhou">Autosave failed: %1$s</string>
@@ -1777,7 +1777,7 @@ to edit the curve.</string>
     <string name="am_import_failed">Couldn\'t import: %1$s</string>
     <string name="am_import_nothing">no effect with an Aurea equivalent</string>
     <string name="release_notes_title">Aurea updates</string>
-    <string name="release_notes_body">Aurea 1.0.2.1 (2223) — 11/19/2026\n\n• AureaHyper is now YEARLY: one yearly subscription unlocks every paid effect, 3D Text, Neural (AI) and the Hyper tools. No monthly fee and no per-effect subscriptions. Existing subscribers keep everything.\n• Optical Flow for real footage: less ghosting, a Ghosting ↔ Warping control and Neural (AI) quality with AureaHYPER.\n• Glitchify now matches After Effects.\n• Faster, higher-quality export.\n• Import only the trimmed part of long videos.\n• Pre Render and Pre Export panel by range.\n• AureaMCP can wake the app when it is closed.</string>
+    <string name="release_notes_body">Aurea 1.0.4 (2225)\n\n• AutoBeat with audio source selection, scale pulse, lift, and rotation · free\n• Planar tracking from two corners, with four-point attachment · AureaHyper\n• Ink Poster for 3D Text: white face, dark depth, and light outline · AureaHyper\n• AutoRig 2D in Puppet: pose detection, editable pins, and idle animation · AureaHyper</string>
     <string name="am_import_lossless_required">This preset contains effects, parameters or layers that cannot be preserved during conversion. Nothing was saved or applied.</string>
     <string name="am_import_read_failed">The file could not be read (64 MB limit), or the selected layer changed. Please try again.</string>
     <string name="world_explosive">Explosive</string>
@@ -5536,4 +5536,19 @@ to edit the curve.</string>
     <string name="prx_close">Close</string>
     <string name="prx_preparing">Preparing…</string>
     <string name="prx_ruler_range">Pre Render part</string>
+    <string name="pn_t3d_preset_ink_poster">Ink Poster</string>
+    <string name="trk_surface_quick">Track surface</string>
+    <string name="trk_surface_hint">Tap two opposite corners of a textured area.</string>
+    <string name="trk_show_advanced">Show advanced options</string>
+    <string name="trk_hide_advanced">Hide advanced options</string>
+    <string name="autobeat_hint">The pulse follows composition beat markers. Analyzing a source updates the markers in its time range.</string>
+    <string name="autobeat_source">Detect beats from audio</string>
+    <string name="autorig2d_action">AutoRig 2D and animate</string>
+    <string name="autorig2d_parts">Separate and animate layers</string>
+    <string name="autorig2d_pins">Animate pins on the whole PNG</string>
+    <string name="autorig2d_parts_created">Animated layers added to the timeline.</string>
+    <string name="autorig2d_parts_incompatible">Use an image layer with only the Puppet effect and no masks.</string>
+    <string name="autorig2d_busy">Analyzing pose…</string>
+    <string name="autorig2d_no_pose">AutoRig found too few visible points. Add pins in Puppet.</string>
+    <string name="autorig2d_existing">Use a Puppet effect with no pins to create an AutoRig.</string>
 </resources>

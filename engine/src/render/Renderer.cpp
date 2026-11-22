@@ -1539,8 +1539,15 @@ TextureHandle Renderer::image_texture(u64 key, const u8* rgba, u32 width, u32 he
 // Malha de deformação: grade tesselada em px da camada (float cheio — meia
 // precisão erraria 2 px numa camada de 4000).
 TextureHandle Renderer::data_texture(u64 key, const Vec4* texels, u32 width, u32 height) noexcept {
+    return cache_data_texture(key ^ 0x4d4553485f574152ull, texels, width, height, false);
+}
+
+TextureHandle Renderer::upload_effect_data(u64 key, const Vec4* texels, u32 width, u32 height) noexcept {
+    return cache_data_texture(key ^ 0x504c5547494e4441ull, texels, width, height, true);
+}
+
+TextureHandle Renderer::cache_data_texture(u64 key, const Vec4* texels, u32 width, u32 height, bool uploadNow) noexcept {
     if (!backend_ || !texels || width == 0 || height == 0 || width > 4096 || height > 4096) return {};
-    key ^= 0x4d4553485f574152ull;
     if (auto it = luts_.find(key); it != luts_.end()) {
         it->second.lastFrame = frameNumber_;
         return it->second.texture;
@@ -1551,15 +1558,23 @@ TextureHandle Renderer::data_texture(u64 key, const Vec4* texels, u32 width, u32
     d.format = SurfaceFormat::RGBA32F;
     d.sampled = true;
     d.transferDst = true;
-    d.debugName = "malha-deformacao";
+    d.debugName = uploadNow ? "plugin-parameter-data" : "malha-deformacao";
     auto tex = backend_->create_texture(d);
     if (!tex.ok()) return {};
-    PendingUpload up;
-    up.texture = *tex;
-    up.bytesPerRow = width * 16;
-    up.data.resize(usize(width) * height * 16);
-    std::memcpy(up.data.data(), texels, up.data.size());
-    uploads_.push_back(std::move(up));
+    const u32 rowBytes = width * sizeof(Vec4);
+    if (uploadNow) {
+        if (const Status uploaded = backend_->upload_texture(*tex, texels, rowBytes); !uploaded.ok()) {
+            backend_->destroy_texture(*tex);
+            return {};
+        }
+    } else {
+        PendingUpload up;
+        up.texture = *tex;
+        up.bytesPerRow = rowBytes;
+        up.data.resize(usize(rowBytes) * height);
+        std::memcpy(up.data.data(), texels, up.data.size());
+        uploads_.push_back(std::move(up));
+    }
     luts_[key] = LutTexture{*tex, frameNumber_};
     // Malha animada = uma grade por quadro: só as últimas ficam (a faxina de
     // 240 quadros das LUTs guardaria dezenas de MB na reprodução).

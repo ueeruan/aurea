@@ -515,8 +515,18 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
     val meshOpen = openId != null && effects.any { it.effectId == openId && it.typeId == effectTypeId("aurea.distort.mesh_warp") }
     val meshSelected = meshOpen && selectedMesh == openId
     val puppet = com.aurea.aurea.editor.PuppetStage
-    val puppetOpen = layerId != null && puppet.layer == layerId && puppet.effect == openId &&
-        effects.any { it.effectId == openId && it.typeId == puppet.TYPE }
+    val puppetId = openId?.takeIf { id -> effects.any { it.effectId == id && it.typeId == puppet.TYPE } }
+    // A linha do Fantoche é reciclada pela lista. A sessão de pinos pertence ao cartão aberto.
+    DisposableEffect(layerId, puppetId) {
+        if (layerId != null && puppetId != null) puppet.open(layerId, puppetId)
+        onDispose {
+            if (layerId != null && puppetId != null && puppet.layer == layerId) puppet.close(puppetId)
+        }
+    }
+    LaunchedEffect(layerId, puppetId, puppet.pendingEdit) {
+        if (layerId != null && puppetId != null && puppet.pendingEdit == layerId) puppet.open(layerId, puppetId)
+    }
+    val puppetOpen = layerId != null && puppetId != null && puppet.layer == layerId && puppet.effect == puppetId
     val activePins = remember(store, layerId, openId, puppetOpen, store.rigRevision, store.curveRevision) {
         if (puppetOpen && layerId != null && openId != null) store.puppetPins(layerId, openId!!) else FloatArray(0)
     }
@@ -1423,6 +1433,7 @@ private const val SPECIAL_GRID = 8
 private const val SPECIAL_BG_REMOVE = 45
 // 0.5.2: Headbop (Analisar, tap tempo, Converter em keyframes) — HeadbopPanel.kt.
 private const val SPECIAL_HEADBOP = 52
+private const val SPECIAL_AUTOBEAT = 53
 
 /**
  * O CORPO, na ordem do P0-3: 1) ferramentas do efeito especial; 2) "Variação"
@@ -1433,6 +1444,7 @@ private fun fxBodyItems(store: EditorStore, effectId: Int, typeId: Int, visible:
     if (typeId == effectTypeId("aurea.key.rotobrush")) add(FxBody.Special(SPECIAL_ROTO))
     if (typeId == BG_REMOVE_TYPE_ID) add(FxBody.Special(SPECIAL_BG_REMOVE))
     if (typeId == effectTypeId("aurea.distort.headbop")) add(FxBody.Special(SPECIAL_HEADBOP))
+    if (typeId == effectTypeId("aurea.move.autobeat")) add(FxBody.Special(SPECIAL_AUTOBEAT))
     if (typeId == effectTypeId("aurea.ai.depth_map") || typeId == effectTypeId("aurea.key.rotobrush")) add(FxBody.Special(SPECIAL_LOCAL_AI))
     if (typeId == effectTypeId("aurea.time.remap")) {
         add(FxBody.Special(SPECIAL_TIME_REMAP))
@@ -1447,7 +1459,7 @@ private fun fxBodyItems(store: EditorStore, effectId: Int, typeId: Int, visible:
         return@buildList
     }
     val presets = store.effectPresets(typeId)
-    if (presets.size >= 2) add(FxBody.Variation(presets))
+    if (presets.isNotEmpty()) add(FxBody.Variation(presets))
     if (typeId == effectTypeId("aurea.audio.parametric_eq")) add(FxBody.Special(SPECIAL_EQ))
     val layout = effectLayout(typeId, visible)
     layout.main.forEach { add(FxBody.Param(it, null)) }
@@ -1549,7 +1561,7 @@ private fun FxSettingsOverlay(
         // Corpo.
         val slots by remember(store, id) { derivedStateOf { store.effectParams[id]?.map { ParamSlot.of(it) } ?: emptyList() } }
         val visible = slots.filter { !it.hidden }
-        val bodyItems = if (effect.known) remember(visible, effect.typeId, advancedOpen) {
+        val bodyItems = if (effect.known) remember(visible, effect.typeId, advancedOpen, store.plugins) {
             // Bugs 0.3.4 (bug 3): um parâmetro listado em dois lugares do layout não
             // pode repetir a chave da LazyColumn (o app fechava).
             fxBodyItems(store, id, effect.typeId, visible, advancedOpen).distinctBy { it.key }
@@ -1653,6 +1665,31 @@ private fun FxSpecialTools(env: PanelEnv, effect: LayerEffect, what: Int, meshSe
             SPECIAL_GRID -> GridControlRow(store)   // Omega grid
             SPECIAL_BG_REMOVE -> BgRemoveControls(store, id)
             SPECIAL_HEADBOP -> HeadbopCardTools(store, id)
+            SPECIAL_AUTOBEAT -> AutoBeatControls(store)
+        }
+    }
+}
+
+@Composable
+private fun AutoBeatControls(store: EditorStore) {
+    var choosing by remember { mutableStateOf(false) }
+    val sources = store.layers.filter { it.kind == 3 || it.kind == 1 }
+    FxBodyNotice(stringResource(R.string.autobeat_hint), Modifier.testTag("effects.autobeat.hint"))
+    Box {
+        androidx.compose.material3.TextButton(
+            onClick = { choosing = true },
+            enabled = sources.isNotEmpty() && !store.detectingBeats,
+            modifier = Modifier.testTag("effects.autobeat.source"),
+        ) {
+            Text(stringResource(if (store.detectingBeats) R.string.msg_detectando_batidas else R.string.autobeat_source))
+        }
+        androidx.compose.material3.DropdownMenu(expanded = choosing, onDismissRequest = { choosing = false }) {
+            sources.forEach { source ->
+                androidx.compose.material3.DropdownMenuItem(text = { Text(source.name) }, onClick = {
+                    choosing = false
+                    store.detectBeatsForLayer(source.id)
+                })
+            }
         }
     }
 }

@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <mutex>
 #include <string>
 #include <cctype>
@@ -122,6 +123,8 @@ void declare_from_manifest(const Manifest& m, const std::vector<ParamStrings>& s
         spec.flags = d.animatable ? kParamAnimatable : kParamNone;
         spec.minValue = d.min;
         spec.maxValue = d.max;
+        spec.visibleIfParam = d.visibleIfParam;
+        spec.visibleIfValue = d.visibleIfValue;
         switch (d.kind) {
             case ParamKind::Float: spec.type = ParamType::Float; spec.defaultValue = ParamValue::scalar(d.def[0]); break;
             case ParamKind::Int: spec.type = ParamType::Int; spec.defaultValue = ParamValue::scalar(d.def[0]); break;
@@ -181,6 +184,32 @@ std::vector<ParamStrings> make_strings(const Manifest& m) {
     for (ParamStrings& s : out) for (const std::string& o : s.options) s.optionPtrs.push_back(o.c_str());
     return out;
 }
+
+class PluginPresets {
+public:
+    explicit PluginPresets(const Manifest& manifest) {
+        names_.reserve(manifest.presets.size());
+        values_.reserve(manifest.presets.size());
+        rows_.reserve(manifest.presets.size());
+        for (const PresetDecl& p : manifest.presets) {
+            names_.push_back(localized(p.name, "pt-BR"));
+            auto& values = values_.emplace_back();
+            for (const PresetAssignment& assignment : p.values) {
+                const u32 count = preset_component_count(manifest.params[assignment.param].kind);
+                for (u32 c = 0; c < count; ++c)
+                    values.push_back(EffectPresetValue{assignment.param, assignment.value[c], c});
+            }
+            rows_.push_back(EffectPreset{p.id.c_str(), names_.back().c_str(), values});
+        }
+    }
+
+    [[nodiscard]] std::span<const EffectPreset> rows() const noexcept { return rows_; }
+
+private:
+    std::vector<std::string> names_;
+    std::vector<std::vector<EffectPresetValue>> values_;
+    std::vector<EffectPreset> rows_;
+};
 
 /// `onFrame(f)` do plugin: devolve valores novos para os parâmetros neste quadro.
 /// Roda no planejamento, sob o lock do modelo: passos, tempo e memória curtos, e
@@ -270,16 +299,23 @@ private:
 class PluginShaderEffect final : public Effect {
 public:
     PluginShaderEffect(const Manifest& m, std::vector<ShaderId> shaders, PluginImages images, const std::string& frameSource)
-        : manifest_(m), shaders_(std::move(shaders)), images_(std::move(images)) {
+        : manifest_(m), presets_(manifest_), shaders_(std::move(shaders)), images_(std::move(images)) {
         if (!frameSource.empty()) frameScript_ = std::make_unique<FrameScript>(frameSource, m.id);
-        for (u32 i = 0; i < manifest_.params.size(); ++i)
+        u32 nextSlot = 0;
+        paramSlots_.reserve(manifest_.params.size());
+        for (u32 i = 0; i < manifest_.params.size(); ++i) {
+            paramSlots_.push_back(nextSlot);
+            nextSlot += param_slot_size(manifest_.params[i]);
             if (manifest_.params[i].kind == ParamKind::LayerImage) imageParams_.push_back(i);
+        }
+        slots_ = std::max(1u, nextSlot + (manifest_.audio ? 1u : 0u));
         key_ = effect_key(m.id);
         name_ = localized(m.name, "pt-BR");
         strings_ = make_strings(manifest_);
         info_ = EffectInfo{key_.c_str(), name_.c_str(), kCatalogCategory, EffectClass::Neighborhood};
     }
     const EffectInfo& info() const noexcept override { return info_; }
+    std::span<const EffectPreset> presets() const noexcept override { return presets_.rows(); }
     void declare_parameters(ParameterRegistry& p) const override {
         declare_from_manifest(manifest_, strings_, p);
     }
@@ -407,13 +443,21 @@ public:
 
         PluginUniforms3D u3{};
         PluginUniforms& u = u3.base;
-        const u32 slots = param_slots(manifest_);
+        const u32 slots = slots_;
+        const bool textureParams = manifest_.textureParameters;
+        const u32 textureRows = (slots + kTextureParamWidth - 1) / kTextureParamWidth;
+        std::vector<Vec4> texels;
+        if (textureParams) texels.resize(kTextureParamWidth * textureRows);
+        Vec4* values = textureParams ? texels.data() : u.params;
         alignas(16) u8 packed[binding::kMaxUniformBytes];
         const f64 fps = e.framesPerSecond > 0.0 ? e.framesPerSecond : 30.0;
         const f64 frame = e.time_frames();
-        u.time = Vec4{static_cast<f32>(frame / fps), static_cast<f32>(frame), static_cast<f32>(fps), 0.0f};
+        const bool historyValid = manifest_.history && ctx.history().valid();
+        u.time = Vec4{static_cast<f32>(frame / fps), static_cast<f32>(frame), static_cast<f32>(fps),
+                      manifest_.v31 && historyValid ? 1.0f : 0.0f};
         const f32 layerW = e.placement && e.placement->layerWidth ? static_cast<f32>(e.placement->layerWidth) : region.w;
         const f32 layerH = e.placement && e.placement->layerHeight ? static_cast<f32>(e.placement->layerHeight) : region.h;
+        u.layer = Vec4{layerW, layerH, 0, 0};
         u.region = Vec4{region.x, region.y, region.w, region.h};
         // Depois do mundo das camadas: as tabelas; depois delas, o script por quadro.
         const std::vector<Vec4>* samples = e.pathSamples.get();
@@ -423,17 +467,17 @@ public:
         const usize overrides = cursor + tableBytes;
         const bool driven = samples && samples->size() >= overrides + manifest_.params.size() * 2 && !manifest_.params.empty();
         for (u32 i = 0; i < manifest_.params.size() && i < e.count; ++i) {
-            const u32 at = param_slot_at(manifest_, i);
-            if (at >= kMaxShaderParams) break;
+            const u32 at = paramSlots_[i];
             ParamValue v = e.values[i];
             if (driven && (*samples)[overrides + i * 2 + 1].x > 0.5f) {
                 const Vec4 o = (*samples)[overrides + i * 2];
                 v.v[0] = o.x; v.v[1] = o.y; v.v[2] = o.z; v.v[3] = o.w;
             }
-            Vec4& slot = u.params[at];
+            Vec4& slot = values[at];
             if (manifest_.params[i].kind == ParamKind::Curve || manifest_.params[i].kind == ParamKind::Gradient) {
                 const u32 count = param_slot_size(manifest_.params[i]);
-                for (u32 k = 0; k < count && samples && cursor + k < samples->size() && at + k < kMaxShaderParams; ++k) u.params[at + k] = (*samples)[cursor + k];
+                if (samples && cursor + count <= samples->size())
+                    std::copy_n(samples->data() + cursor, count, values + at);
                 cursor += count;
                 continue;
             }
@@ -459,8 +503,22 @@ public:
                 default: slot = Vec4{v.v[0], 0, 0, 0}; break;
             }
         }
-        if (manifest_.audio && slots > 0) u.params[slots - 1] = Vec4{e.auxInfo.y, e.auxInfo.x, 0.0f, 0.0f};
-        if (manifest_.scene3d) fill_scene(e, u3);
+        if (manifest_.audio) values[slots - 1] = Vec4{e.auxInfo.y, e.auxInfo.x, 0.0f, 0.0f};
+        if (manifest_.scene3d) fill_scene(e, u3, values);
+        TextureHandle parameterTexture{};
+        if (textureParams) {
+            u64 key = (14695981039346656037ull ^ slots) * 1099511628211ull;
+            for (const Vec4& value : std::span<const Vec4>(values, slots)) {
+                for (u32 component : std::bit_cast<std::array<u32, 4>>(value))
+                    key = (key ^ component) * 1099511628211ull;
+            }
+            parameterTexture = ctx.resources().upload_effect_data(key, values, kTextureParamWidth, textureRows);
+            if (!parameterTexture.valid()) {
+                const Status failure{Errc::OutOfMemory, "could not upload plugin parameter texture (RGBA32F)"};
+                ctx.resources().effect_failure(failure);
+                return failure;
+            }
+        }
 
         FGTexture targets[kMaxPasses]{};
         u32 lastW = w, lastH = h;
@@ -496,7 +554,7 @@ public:
             // Formato 3: sem o recurso, o slot recebe a fonte (nunca um descritor vazio).
             if (manifest_.history && n < 1 + kMaxPassInputs) {
                 const LayerImage& past = ctx.history();
-                t[n++] = past.valid() ? PassTexture{past.texture, {}, CommonSampler::LinearClamp} : PassTexture{src, {}, CommonSampler::LinearClamp};
+                t[n++] = historyValid ? PassTexture{past.texture, {}, CommonSampler::LinearClamp} : PassTexture{src, {}, CommonSampler::LinearClamp};
             }
             if (manifest_.audio && n < 1 + kMaxPassInputs)
                 t[n++] = e.aux.valid() ? PassTexture{{}, e.aux, CommonSampler::LinearClamp} : PassTexture{src, {}, CommonSampler::LinearClamp};
@@ -506,7 +564,8 @@ public:
                 const LayerImage* other = ref ? ctx.layer_input(ref) : nullptr;
                 t[n++] = other && other->valid() ? PassTexture{other->texture, {}, CommonSampler::LinearClamp} : PassTexture{src, {}, CommonSampler::LinearClamp};
             }
-            const u32 bytes = pack_uniforms(u3, slots, manifest_.scene3d, packed);
+            if (textureParams) t[n++] = PassTexture{{}, parameterTexture, CommonSampler::NearestClamp};
+            const u32 bytes = pack_uniforms(u3, textureParams ? 0 : slots, manifest_.scene3d, packed);
             const u32 added = ctx.fullscreen_pass(pass_name(p), PassStage::Effects, dst, shaders_[p], t, n, packed, bytes);
             if (added == kInvalidIndex) return Errc::PipelineCompileFailed;
             targets[p] = dst;
@@ -526,7 +585,7 @@ public:
 private:
     /// A câmera da cena e as camadas ligadas no bloco 3D (sem câmera preenchida,
     /// a padrão da composição: no centro, a 0,5·h/tan(fov/2), olhando para +z).
-    void fill_scene(const EffectEval& e, PluginUniforms3D& u) const noexcept {
+    void fill_scene(const EffectEval& e, PluginUniforms3D& u, Vec4* values) const noexcept {
         const LayerPlacement* pl = e.placement;
         const f32 cw = pl && pl->compWidth ? static_cast<f32>(pl->compWidth) : u.base.layer.x;
         const f32 ch = pl && pl->compHeight ? static_cast<f32>(pl->compHeight) : u.base.layer.y;
@@ -561,7 +620,7 @@ private:
                 u.layerInfo[slot] = (*data)[at + 5];
             }
             // params[i] da camada: (ligada, tipo, posição entre as camadas, 0).
-            u.base.params[param_slot_at(manifest_, i)] = Vec4{u.layerPos[slot].w, u.layerInfo[slot].x, static_cast<f32>(slot), 0.0f};
+            values[paramSlots_[i]] = Vec4{u.layerPos[slot].w, u.layerInfo[slot].x, static_cast<f32>(slot), 0.0f};
             ++slot;
         }
     }
@@ -573,10 +632,13 @@ private:
     }
 
     Manifest manifest_;
+    PluginPresets presets_;
     std::vector<ShaderId> shaders_;
     PluginImages images_;
     std::unique_ptr<FrameScript> frameScript_;
     std::vector<u32> imageParams_;
+    std::vector<u32> paramSlots_;
+    u32 slots_ = 1;
     std::string key_, name_;
     std::vector<ParamStrings> strings_;
     EffectInfo info_{};
@@ -588,13 +650,14 @@ private:
 class PluginStackEffect final : public Effect {
 public:
     PluginStackEffect(const Manifest& m, std::vector<CompiledStackStep> steps)
-        : manifest_(m), steps_(std::move(steps)) {
+        : manifest_(m), presets_(manifest_), steps_(std::move(steps)) {
         key_ = effect_key(m.id);
         name_ = localized(m.name, "pt-BR");
         strings_ = make_strings(manifest_);
         info_ = EffectInfo{key_.c_str(), name_.c_str(), kCatalogCategory, EffectClass::Neighborhood};
     }
     const EffectInfo& info() const noexcept override { return info_; }
+    std::span<const EffectPreset> presets() const noexcept override { return presets_.rows(); }
     void declare_parameters(ParameterRegistry& p) const override {
         declare_from_manifest(manifest_, strings_, p);
     }
@@ -717,6 +780,7 @@ private:
     }
 
     Manifest manifest_;
+    PluginPresets presets_;
     std::vector<CompiledStackStep> steps_;
     std::string key_, name_;
     std::vector<ParamStrings> strings_;
@@ -833,16 +897,18 @@ std::unique_ptr<Effect> make_stack_effect(const Manifest& m, std::vector<Compile
 class PluginAudioEffect final : public Effect {
 public:
     PluginAudioEffect(const Manifest& manifest, std::shared_ptr<const AudioProgram> program)
-        : manifest_(manifest), program_(std::move(program)), key_(effect_key(manifest.id)),
+        : manifest_(manifest), presets_(manifest_), program_(std::move(program)), key_(effect_key(manifest.id)),
           name_(localized(manifest.name, "pt-BR")), strings_(make_strings(manifest_)) {
         info_ = EffectInfo{key_.c_str(), name_.c_str(), "Áudio", EffectClass::PerPixel};
     }
     const EffectInfo& info() const noexcept override { return info_; }
+    std::span<const EffectPreset> presets() const noexcept override { return presets_.rows(); }
     void declare_parameters(ParameterRegistry& params) const override { declare_from_manifest(manifest_, strings_, params); }
     bool is_identity(const EffectEval&) const noexcept override { return true; }
     std::shared_ptr<const AudioProgram> audio_program() const noexcept override { return program_; }
 private:
     Manifest manifest_;
+    PluginPresets presets_;
     std::shared_ptr<const AudioProgram> program_;
     std::string key_, name_;
     std::vector<ParamStrings> strings_;

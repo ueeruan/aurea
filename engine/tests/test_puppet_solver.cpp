@@ -19,6 +19,7 @@
 // =============================================================================
 #include "TestFramework.hpp"
 #include "aurea/effects/Puppet.hpp"
+#include "aurea/Engine.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -59,6 +60,17 @@ std::vector<u8> two_parts() {
 }
 
 } // namespace
+
+AUREA_TEST(puppet_solver, alpha_outline_keeps_all_24_bits) {
+    std::vector<f32> alpha(puppet::kOutline * puppet::kOutline, 0.0f);
+    for (u32 x = 0; x < 20; ++x) alpha[puppet::kOutline * 7 + x] = 1.0f;
+    alpha[puppet::kOutline * 7 + 23] = 1.0f;
+    f32 rows[puppet::kOutline]{};
+    puppet::outline_rows(alpha.data(), puppet::kOutline, puppet::kOutline, .1f, rows);
+    std::vector<u8> cells;
+    AUREA_CHECK(puppet::outline_cells(rows, cells));
+    for (usize i = 0; i < alpha.size(); ++i) AUREA_CHECK_EQ(cells[i], static_cast<u8>(alpha[i]));
+}
 
 AUREA_TEST(puppet_solver, unmoved_pins_keep_rest) {
     puppet::Mesh m;
@@ -174,4 +186,62 @@ AUREA_TEST(puppet_solver, full_rigidity_moves_each_part_rigidly) {
     for (usize i = 0; i < out.size(); ++i)
         if (m.rest[i].x >= 250.0f) loose = std::max(loose, dist(out[i], m.rest[i]));
     AUREA_CHECK_MSG(loose < 0.01f, "parte sem pino andou com rigidez total");
+}
+
+AUREA_TEST(PuppetSolver, AutoRigKeepsFeetPlantedAndUndoClearsGeneratedPins) {
+    Engine engine;
+    EngineConfig config;
+    config.workerCount = 1;
+    config.disableAutosave = true;
+    AUREA_CHECK(engine.initialize(config).ok());
+    AUREA_CHECK(engine.new_project(128, 128, 30, "AutoRig sample").ok());
+    const std::vector<u8> image(128 * 128 * 4, 255);
+    const auto imported = engine.import_image(image.data(), 128, 128, "Person");
+    AUREA_CHECK(imported.ok());
+    if (!imported.ok()) return;
+    const auto id = LayerId::unpack(*imported);
+    auto* comp = engine.project()->timeline().composition(engine.project()->timeline().current());
+    auto* layer = comp->layer(id);
+    layer->end = FrameIndex{layer->start.value + 72};
+    Command add;
+    add.type = CommandType::EffectAdd;
+    add.effect_add.layer = id;
+    add.effect_add.effectType = effect_type_id(puppet::kPuppetKey);
+    add.effect_add.index = kInvalidIndex;
+    AUREA_CHECK(engine.apply_command(add).ok());
+    layer = comp->layer(id);
+    if (layer->effects.empty()) return;
+    const u32 effect = layer->effects.front().id;
+
+    std::array<f32, 2 + 33 * 4> pose{};
+    AUREA_CHECK_EQ(engine.puppet_auto_rig_image(*imported, effect, pose.data(), pose.size()), -1);
+    auto joint = [&](u32 index, f32 x, f32 y) {
+        pose[2 + index * 4] = x; pose[3 + index * 4] = y; pose[5 + index * 4] = 0.95f;
+    };
+    joint(0, .5f, .14f);
+    joint(11, .37f, .27f); joint(12, .63f, .27f);
+    joint(13, .30f, .43f); joint(14, .70f, .43f);
+    joint(15, .28f, .55f); joint(16, .72f, .55f);
+    joint(23, .43f, .55f); joint(24, .57f, .55f);
+    joint(25, .40f, .73f); joint(26, .60f, .73f);
+    joint(27, .42f, .94f); joint(28, .58f, .94f);
+    AUREA_CHECK_EQ(engine.puppet_auto_rig_image(*imported, effect, pose.data(), pose.size()), 15);
+    AUREA_CHECK_EQ(engine.puppet_auto_rig_image(*imported, effect, pose.data(), pose.size()), -2);
+    AUREA_CHECK_EQ(engine.query_puppet(*imported, effect, nullptr, 0), 15u * Engine::kPuppetPinFloats);
+    const Track* foot = comp->layer(id)->tracks.find(TrackProperty::EffectParam, effect, param_track_key(puppet::pin_pos(12), 1));
+    AUREA_CHECK(foot && foot->keys.size() > 2);
+    if (foot) for (const auto& key : foot->keys) AUREA_CHECK_NEAR(key.value, .94f, 1e-5);
+    Command undo;
+    undo.type = CommandType::Undo;
+    AUREA_CHECK(engine.apply_command(undo).ok());
+    AUREA_CHECK_EQ(engine.query_puppet(*imported, effect, nullptr, 0), 0u);
+
+    // One shoulder, its arm and the head are visible in this crop. Other
+    // lower-body predictions cannot form a chain without a visible pelvis.
+    pose[5 + 11 * 4] = 0.0f;
+    pose[5 + 23 * 4] = 0.0f;
+    pose[5 + 24 * 4] = 0.0f;
+    AUREA_CHECK_EQ(engine.puppet_auto_rig_image(*imported, effect, pose.data(), pose.size()), 4);
+    AUREA_CHECK_EQ(engine.query_puppet(*imported, effect, nullptr, 0), 4u * Engine::kPuppetPinFloats);
+    AUREA_CHECK(!comp->layer(id)->tracks.find(TrackProperty::EffectParam, effect, param_track_key(puppet::pin_pos(12), 1)));
 }

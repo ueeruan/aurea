@@ -12,12 +12,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -44,6 +45,9 @@ import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.tocavel
+import com.aurea.aurea.editor.panels.detectHeadbopPhoto
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 import kotlin.math.hypot
 
 /**
@@ -338,14 +342,80 @@ internal suspend fun AwaitPointerEventScope.puppetGesture(store: EditorStore, m:
 @Composable
 internal fun PuppetCardTools(store: EditorStore, effectId: Int) {
     val layer = store.primary ?: return
-    DisposableEffect(layer, effectId) {
-        PuppetStage.open(layer, effectId)
-        onDispose { PuppetStage.close(effectId) }
-    }
-    LaunchedEffect(PuppetStage.pendingEdit) { if (PuppetStage.pendingEdit == layer) PuppetStage.open(layer, effectId) }
     val editing = PuppetStage.editing && PuppetStage.effect == effectId && PuppetStage.layer == layer
     val label = stringResource(if (editing) R.string.puppet_done else R.string.puppet_edit_pins)
+    val context = LocalContext.current
+    val noPose = stringResource(R.string.autorig2d_no_pose)
+    val existing = stringResource(R.string.autorig2d_existing)
+    val unsupported = stringResource(R.string.autorig2d_parts_incompatible)
+    val layered = stringResource(R.string.autorig2d_parts_created)
+    val scope = rememberCoroutineScope()
+    var analyzing by remember(layer, effectId) { mutableStateOf(false) }
+    val row = store.editingLayers.firstOrNull { it.id == layer }
+    val revision = store.rigRevision
+    val empty = remember(layer, effectId, revision, store.curveRevision) {
+        store.puppetPins(layer, effectId).isEmpty()
+    }
     Column(Modifier.padding(bottom = 6.dp)) {
+        if (row?.kind == 2 && !row.locked && empty) {
+            fun startRig(parts: Boolean) {
+                if (!store.requireHyperSubscription()) return
+                val path = store.layerSourcePath(layer) ?: return
+                val project = store.projectGeneration
+                store.pause()
+                analyzing = true
+                scope.launch {
+                    try {
+                        val frameSize = 2 + 33 * 4
+                        fun current() = store.projectGeneration == project && store.primary == layer &&
+                            store.layerSourcePath(layer) == path && PuppetStage.effect == effectId && PuppetStage.layer == layer
+                        suspend fun apply(pose: FloatArray?): Int {
+                            if (pose == null || pose.size < frameSize) return -1
+                            val landmarks = pose.copyOfRange(0, frameSize)
+                            if (parts) return store.puppetAutoRigParts(layer, effectId, landmarks)
+                            return store.puppetAutoRigImage(layer, effectId, landmarks) {
+                                PuppetStage.pendingEdit = layer
+                                PuppetStage.editing = true
+                            }
+                        }
+                        val prefix = java.io.File(context.filesDir, "models/pose/humanart-tiny").path
+                        val illustrated = com.aurea.aurea.BuildConfig.DEBUG &&
+                            java.io.File("$prefix.param").isFile && java.io.File("$prefix.bin").isFile
+                        val detected = detectHeadbopPhoto(context.applicationContext, path, rigOnly = true,
+                            illustratedModel = prefix.takeIf { illustrated && parts })?.first
+                        if (!current() || !store.requireHyperSubscription()) return@launch
+                        var count = apply(detected)
+                        if (count == -1 && illustrated) {
+                            val fallback = detectHeadbopPhoto(context.applicationContext, path,
+                                rigOnly = true, illustratedModel = prefix.takeUnless { parts })?.first
+                            if (!current() || !store.requireHyperSubscription()) return@launch
+                            count = apply(fallback)
+                        }
+                        if (store.projectGeneration == project) when {
+                            count > 0 && parts -> store.showToast(layered)
+                            count == -2 -> store.showToast(existing)
+                            count == -3 -> store.showToast(unsupported)
+                            count <= 0 -> store.showToast(noPose)
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        store.showToast(noPose)
+                    } finally {
+                        analyzing = false
+                    }
+                }
+            }
+            androidx.compose.material3.TextButton(enabled = !analyzing,
+                modifier = Modifier.testTag("fx.puppet.autoRigParts"), onClick = { startRig(true) }) {
+                Text(if (analyzing) stringResource(R.string.autorig2d_busy)
+                    else "${stringResource(R.string.autorig2d_parts)} · ${stringResource(R.string.hyper_title)}")
+            }
+            androidx.compose.material3.TextButton(enabled = !analyzing,
+                modifier = Modifier.testTag("fx.puppet.autoRigImage"), onClick = { startRig(false) }) {
+                Text(stringResource(R.string.autorig2d_pins))
+            }
+        }
         Text(
             stringResource(R.string.puppet_hint),
             style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, color = AureaColors.Muted)),
@@ -361,7 +431,10 @@ internal fun PuppetCardTools(store: EditorStore, effectId: Int) {
                 .tocavel(haptic = true, onClick = {
                     if (PuppetStage.effect != effectId || PuppetStage.layer != layer) PuppetStage.open(layer, effectId)
                     PuppetStage.editing = !editing
-                    if (!PuppetStage.editing) PuppetStage.selected = -1
+                    if (!PuppetStage.editing) {
+                        if (PuppetStage.pendingEdit == layer) PuppetStage.pendingEdit = 0L
+                        PuppetStage.selected = -1
+                    }
                 })
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {

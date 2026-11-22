@@ -106,10 +106,11 @@ enum AppConfigPolicy {
         return candidate.issuedAt >= cached.issuedAt
     }
 
-    static func hyperAccess(_ config: AppConfig?, entitlement: HyperAccess, now: Int64, fetching: Bool) -> HyperAccess {
+    static func hyperAccess(_ config: AppConfig?, entitlement: HyperAccess, now: Int64, fetching: Bool,
+                            subscriptionOnly: Bool = false) -> HyperAccess {
         guard fresh(config, now: now), let c = config else { return fetching ? .checking : .needsConfig }
         switch c.hyperMode {
-        case .free: return .unlocked
+        case .free: return subscriptionOnly ? entitlement : .unlocked
         case .entitled: return entitlement
         case .off: return .off
         }

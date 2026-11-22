@@ -364,12 +364,28 @@ private func puppetToUv(_ c: [Float], _ x: Float, _ y: Float) -> (Float, Float)?
     @EnvironmentObject private var model: AureaModel
     @ObservedObject private var puppet = PuppetStageState.shared
     let effectId: UInt32
+    @State private var rigTask: Task<Void, Never>?
     private var id32: Int32 { Int32(truncatingIfNeeded: effectId) }
 
     var body: some View {
         let editing = puppet.editing && puppet.effect == id32 && puppet.layer == model.primarySelection
         let label = AureaText.t(editing ? "puppet_done" : "puppet_edit_pins")
         VStack(alignment: .leading, spacing: 6) {
+            if let layer = model.selectedLayer, layer.kind == 2, !layer.locked,
+               model.puppetPins(layer.id, effect: id32).isEmpty {
+                let title = rigTask == nil ? AureaText.t("autorig2d_parts") + " · " + AureaText.t("hyper_title")
+                    : AureaText.t("autorig2d_busy")
+                Button(title) {
+                    autoRig(layer: layer.id, parts: true)
+                }
+                .disabled(rigTask != nil)
+                .accessibilityIdentifier("fx.puppet.autoRigParts")
+                .frame(minHeight: 44)
+                Button(AureaText.t("autorig2d_pins")) { autoRig(layer: layer.id, parts: false) }
+                .disabled(rigTask != nil)
+                .accessibilityIdentifier("fx.puppet.autoRigImage")
+                .frame(minHeight: 44)
+            }
             Text(AureaText.t("puppet_hint"))
                 .font(.system(size: 11.5))
                 .foregroundStyle(AureaColors.muted)
@@ -409,8 +425,66 @@ private func puppetToUv(_ c: [Float], _ x: Float, _ y: Float) -> (Float, Float)?
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.bottom, 6)
-        .onAppear { if let layer = model.primarySelection { puppet.open(layer, id32) } }
-        .onDisappear { puppet.close(id32) }
+        .onDisappear { rigTask?.cancel() }
+    }
+
+    private func autoRig(layer: Int64, parts: Bool) {
+        guard model.requireHyperSubscription() else { return }
+        let path = model.layerSourcePath(layer)
+        guard !path.isEmpty else { return }
+        let project = model.projectGeneration
+        let effect = id32
+        model.pause()
+        rigTask = Task {
+            defer { rigTask = nil }
+            func current() -> Bool {
+                !Task.isCancelled && model.projectGeneration == project && model.primarySelection == layer &&
+                    model.layerSourcePath(layer) == path && puppet.layer == layer && puppet.effect == effect
+            }
+            let bytes = (2 + 33 * 4) * MemoryLayout<Float>.size
+            func apply(_ pose: Data?) async -> Int32 {
+                guard let pose, pose.count >= bytes else { return -1 }
+                let engine = model.engine
+                let landmarks = Data(pose.prefix(bytes))
+                if parts {
+                    return await Task.detached {
+                        engine.puppetAutoRigImage(layer, effect: effect, pose: landmarks, parts: true)
+                    }.value
+                }
+                return engine.puppetAutoRigImage(layer, effect: effect, pose: landmarks, parts: false)
+            }
+            var illustrated: String?
+            #if DEBUG
+            if let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+                let prefix = directory.appendingPathComponent("models/pose/humanart-tiny").path
+                if FileManager.default.fileExists(atPath: prefix + ".param") &&
+                    FileManager.default.fileExists(atPath: prefix + ".bin") { illustrated = prefix }
+            }
+            #endif
+            let firstModel = parts ? illustrated : nil
+            let detected = await Task.detached {
+                HeadbopCardTools.detectPhoto(path, rigOnly: true, illustratedModel: firstModel)?.0
+            }.value
+            guard current(), model.requireHyperSubscription() else { return }
+            var count = await apply(detected)
+            if count == -1, let illustrated {
+                let fallback = await Task.detached {
+                    HeadbopCardTools.detectPhoto(path, rigOnly: true, illustratedModel: parts ? nil : illustrated)?.0
+                }.value
+                guard current(), model.requireHyperSubscription() else { return }
+                count = await apply(fallback)
+            }
+            guard model.projectGeneration == project else { return }
+            if count > 0 {
+                if parts { model.toast = AureaText.t("autorig2d_parts_created") }
+                else { puppet.editing = true }
+                puppet.revision += 1
+                model.refreshModel(force: true)
+            } else {
+                let message = count == -3 ? "autorig2d_parts_incompatible" : count == -2 ? "autorig2d_existing" : "autorig2d_no_pose"
+                model.toast = AureaText.t(message)
+            }
+        }
     }
 
     private func groupChip(_ label: String, on: Bool, action: @escaping () -> Void) -> some View {

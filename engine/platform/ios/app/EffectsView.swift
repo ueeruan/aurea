@@ -195,7 +195,14 @@ struct EffectsView: View {
                 .contentShape(Rectangle())
             }
         }
-        .onAppear { refreshTools(); enterLayer(); model.refreshSelectedLayer(); refreshExpressions(); updateTimelineFocus() }
+        .onAppear {
+            refreshTools()
+            enterLayer()
+            openPuppetCard()
+            model.refreshSelectedLayer()
+            refreshExpressions()
+            updateTimelineFocus()
+        }
         .onChange(of: model.primarySelection) { _ in refreshTools(); enterLayer() }
         .onChange(of: selected) { _ in updateTimelineFocus() }
         .onChange(of: openId) { _ in updateTimelineFocus(); syncStage() }
@@ -253,6 +260,7 @@ struct EffectsView: View {
         .onDisappear {
             model.timelineFocus = nil
             pointStage.deactivate()
+            closePuppetCard()
             importTask?.cancel(); importTask = nil
             finishReorder()
             model.endGesture()
@@ -268,8 +276,9 @@ struct EffectsView: View {
     /// o navegador sozinha: só mostra "+ Adicionar efeito".
     private func enterLayer() {
         guard loadedLayer != model.primarySelection else { return }
+        closeNow()
         loadedLayer = model.primarySelection
-        closeNow(); advancedOpen = []; expressionLooks = [:]; pendingPick = nil; autoGuideFor = nil
+        advancedOpen = []; expressionLooks = [:]; pendingPick = nil; autoGuideFor = nil
         if let requested = model.requestedEffectFocusId {
             open(requested, animated: false); model.pendingEffectFocus = nil; return
         }
@@ -337,11 +346,13 @@ struct EffectsView: View {
     /// a lista some no início (referência: invisível antes da animação).
     private func open(_ id: UInt32, animated: Bool) {
         guard let layer = model.primarySelection else { return }
+        if openId != id { closePuppetCard() }
         if pointStage.active && pointStage.effect != id { pointStage.deactivate() }
         effectMenuOpen = false
         overlayToken += 1
         openId = id
         overlayId = id
+        openPuppetCard()
         model.loadParams(layerId: layer, effectId: id)
         chooseFirstParam(id)
         refreshExpressions()
@@ -359,6 +370,7 @@ struct EffectsView: View {
         guard tabbed, let id = openId ?? overlayId else { return }
         guard animated else { closeNow(); return }
         pointStage.deactivate()
+        closePuppetCard()
         effectMenuOpen = false
         openId = nil
         selected = nil
@@ -376,6 +388,7 @@ struct EffectsView: View {
     /// Fecha na hora, sem animar (🗑 do cabeçalho, efeito que sumiu, outra camada).
     private func closeNow() {
         pointStage.deactivate()
+        closePuppetCard()
         effectMenuOpen = false
         openId = nil
         selected = nil
@@ -383,6 +396,18 @@ struct EffectsView: View {
         overlayId = nil
         overlayProgress = 0
         model.selectedEffectId = nil
+    }
+
+    private func openPuppetCard() {
+        guard let layer = model.primarySelection, let id = openId,
+              model.effects.contains(where: { $0.effectId == id && $0.typeId == PuppetStageState.type }) else { return }
+        puppet.open(layer, Int32(truncatingIfNeeded: id))
+    }
+
+    private func closePuppetCard() {
+        guard let id = openId, loadedLayer == puppet.layer,
+              puppet.effect == Int32(truncatingIfNeeded: id) else { return }
+        puppet.close(puppet.effect)
     }
 
     /// Os controles abertos escolhem a primeira linha principal animável (◆± e
@@ -1071,6 +1096,19 @@ struct EffectsView: View {
             MeshWarpCardTools(effectId: effect.effectId, selected: meshSelected, onSelect: { selected = nil; pointStage.deactivate() })
                 .padding(.horizontal, 6).padding(.vertical, 4)
         }
+        if type == fxEffectTypeId("aurea.move.autobeat") {
+            FxBodyNotice(text: AureaText.t("autobeat_hint"))
+                .accessibilityIdentifier("effects.autobeat.hint")
+            let sources = model.layers.filter { $0.kind == 1 || $0.kind == 3 }
+            Menu(AureaText.t("autobeat_source")) {
+                ForEach(sources) { source in
+                    Button(source.name) { model.detectBeats(for: source) }
+                }
+            }
+            .disabled(sources.isEmpty || model.importingMedia)
+            .accessibilityIdentifier("effects.autobeat.source")
+            .frame(minHeight: 44)
+        }
         if type == fxEffectTypeId("aurea.distort.puppet") {
             PuppetCardTools(effectId: effect.effectId).padding(.horizontal, 6).padding(.vertical, 4)
         }
@@ -1084,7 +1122,7 @@ struct EffectsView: View {
     @ViewBuilder private func variationRow(_ effect: EffectItem) -> some View {
         let presets = model.engine.effectPresets(effect.typeId)
         let labels = stride(from: 0, to: presets.count - 1, by: 2).map { fxPresetLabel(presets[$0], presets[$0 + 1]) }
-        if labels.count >= 2 {
+        if !labels.isEmpty {
             choiceLayout(label: AureaText.t("om_fx_variation"), options: labels, current: -1,
                          segmented: labels.count <= 4 && labels.allSatisfy { $0.count <= 10 },
                          enabled: !locked, labelActive: false, tag: "effects.variation.\(effect.effectId)") { preset in
@@ -1425,6 +1463,7 @@ struct EffectsView: View {
             guard ok() else { return }
             if HyperEffectGate.optionLocked(typeId: type, param: param.index, value: Float(index)) {
                 model.toast = AureaText.t("hyper_option_locked")
+                model.hyperOptionSubscriptionOnly = false
                 model.hyperOptionPrompt = true
                 return
             }

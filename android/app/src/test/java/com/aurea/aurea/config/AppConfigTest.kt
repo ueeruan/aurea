@@ -93,6 +93,17 @@ class AppConfigTest {
         assertEquals(HyperAccess.Off, AppConfigPolicy.hyperAccess(off, HyperAccess.Unlocked, now, false))
     }
 
+    @Test fun subscriptionOnlyToolsRequireAccessInFreeMode() {
+        val now = issued + 3600
+        val free = parse(freePayload, freeSig, now)!!
+        val off = parse(offPayload, offSig, now)!!
+        for (access in listOf(HyperAccess.SignedOut, HyperAccess.Locked, HyperAccess.Expired, HyperAccess.Unlocked)) {
+            assertEquals(access, AppConfigPolicy.hyperAccess(free, access, now, false, subscriptionOnly = true))
+        }
+        assertEquals(HyperAccess.Off,
+            AppConfigPolicy.hyperAccess(off, HyperAccess.Unlocked, now, false, subscriptionOnly = true))
+    }
+
     @Test fun freeNeedsARecentConfig() {
         val free = parse(freePayload, freeSig, allowExpired = true)!!
         // Nunca buscou: "conecte-se" (ou conferindo, se há consulta em voo).

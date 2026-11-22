@@ -110,6 +110,8 @@ struct TrackingPanel: View {
     @State private var status: [String: Any] = [:]
     @State private var sourceLayer: Int64? = nil
     @State private var advanced = false
+    @State private var analyzeOptions = false
+    @State private var showReconstruction = false
     @State private var cameraMotion: UInt32 = 0
     @State private var knownFov: Float = 0
     @State private var distanceText = "100"
@@ -125,20 +127,27 @@ struct TrackingPanel: View {
     var body: some View {
         VStack(spacing: 0) {
             PanelHeader(title: AureaText.t("panel_rastreio"), onBack: { model.panel = .none })
+            Picker(AureaText.t("panel_rastreio"), selection: $model.cameraTrackerVisible) {
+                Text(AureaText.t("cam_mode_2d")).tag(false)
+                Text(AureaText.t("panel_camera_3d")).tag(true)
+            }.pickerStyle(.segmented).frame(minHeight: 44).padding(.horizontal, 14)
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    Picker(AureaText.t("panel_rastreio"), selection: $model.cameraTrackerVisible) {
-                        Text(AureaText.t("cam_mode_2d")).tag(false)
-                        Text(AureaText.t("panel_camera_3d")).tag(true)
-                    }.pickerStyle(.segmented).frame(minHeight: 44)
-                    Spacer().frame(height: 16)
                     if model.cameraTrackerVisible { cameraSection } else { MotionTrackingSection() }
                 }.padding(.init(top: 12, leading: 18, bottom: 24, trailing: 18))
-            }
+            }.id(model.cameraTrackerVisible)
         }.foregroundStyle(AureaColors.text).background(AureaColors.editorPanel)
             .onAppear { restore(); reload() }.onReceive(timer) { _ in reload() }
             .onChange(of: model.primarySelection) { _ in restore(); reload() }
+            .onChange(of: model.cameraTrackerVisible) { camera in
+                if camera && model.pointPick != nil { model.cancelMotionPick() }
+            }
             .onDisappear { model.cameraFeatures = []; model.cameraSelection = nil }
+            .sheet(isPresented: $showReconstruction) {
+                if let sourceLayer {
+                    CameraReconstructionView(source: sourceLayer).environmentObject(model)
+                }
+            }
     }
     @ViewBuilder private var cameraSection: some View {
         if state == 2 {
@@ -160,10 +169,6 @@ struct TrackingPanel: View {
             Text(AureaText.t("cam_step_analyze")).font(.aurea(size: 17, weight: .bold))
         }
         Spacer().frame(height: 6)
-        if state != 1 && state != 2 {
-            qualityPicker
-            solveOptions
-        }
         Spacer().frame(height: 8)
         if state == 1 {
             let progress = number("progress").clamped(to: 0...1)
@@ -191,6 +196,8 @@ struct TrackingPanel: View {
             Spacer().frame(height: 8)
             if !advanced {
             action("panel_criar_camera", "cam_create_camera_desc") { model.createTrackedObject(0); reload() }
+            Button(AureaText.t("trk_reconstruction")) { showReconstruction = true }
+                .frame(minHeight: 44).accessibilityIdentifier("cam.reconstruction")
             if flag("lensSolved") {
                 Spacer().frame(height: 6)
                 action("cam_lens_remove", "cam_lens_remove_desc") { model.addCameraLensEffect(redistort: false, trackedLayer: sourceLayer) }
@@ -258,6 +265,10 @@ struct TrackingPanel: View {
                 Spacer().frame(height: 8)
             }
             action("panel_analisar_camera", "panel_acha_movimento_camera_video_roda_segundo", run: analyze)
+            DisclosureGroup(AureaText.t(analyzeOptions ? "trk_hide_advanced" : "trk_show_advanced"), isExpanded: $analyzeOptions) {
+                qualityPicker
+                solveOptions
+            }.accessibilityIdentifier("cam.analyze.options")
         }
     }
     private func number(_ key: String) -> Double { (status[key] as? NSNumber)?.doubleValue ?? 0 }
@@ -275,6 +286,7 @@ struct TrackingPanel: View {
         if model.engine.restoreCameraTrack(forLayer: id) { sourceLayer = id; model.cameraSelectedCount = 0 }
     }
     private func analyze() {
+        guard model.landmarkProgress == nil else { return }
         guard let id = model.primarySelection else { return }
         // Não começou (outra análise rodando, clipe curto): avisa e NÃO adota a
         // camada — antes o painel desta camada mostrava a análise de outra.
@@ -348,47 +360,85 @@ private struct MotionTrackingSection: View {
     @State private var zoom: Float = 1.15
     @State private var crop: UInt32 = 1
     @State private var tool = 0
+    @State private var advanced = false
     private let timer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
     private func n(_ key: String) -> Double { (model.motionStatus[key] as? NSNumber)?.doubleValue ?? 0 }
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(AureaText.t("trk_title")).font(.aurea(size: 14, weight: .bold))
-            if n("state") != 1 && model.pointPick == nil {
-                let tools = ["trk_tool_point", "trk_tool_two_points", "trk_tool_planar", "trk_tool_corner_pin", "trk_tool_stabilizer"]
-                Picker(AureaText.t("trk_title"), selection: $tool) {
-                    ForEach(tools.indices, id: \.self) { i in Text(AureaText.t(tools[i])).tag(i) }
-                }.pickerStyle(.menu)
-                button(AureaText.t(tools[tool])) { model.beginMotionPick(UInt32(tool)) }
-                if tool == 0 {
-                    button(AureaText.t("editor_estabilizar_pelo_ponto")) { model.beginPointPick(stabilize: true) }
+            Text(AureaText.t("trk_smart_title")).font(.aurea(size: 14, weight: .bold))
+            if let progress = model.landmarkProgress {
+                ProgressView(value: progress)
+                Text(AureaText.t("ios_analyzing_pct", Int(progress * 100)))
+                button(AureaText.t("common_cancel")) { model.cancelLandmarks() }
+            } else if n("state") != 1 && model.pointPick == nil {
+                button(AureaText.t("trk_tool_point")) { model.beginMotionPick(0, confirm: true) }
+                Button(AureaText.t("trk_auto_point")) { model.beginMotionPick(0, auto: true) }
+                    .frame(minHeight: 44).accessibilityIdentifier("tracking.autoPoint")
+                button(AureaText.t("trk_object") + " · " + AureaText.t("hyper_title")) {
+                    model.beginMotionPick(2, rectangle: true, confirm: true, modelOverride: 2)
                 }
-                Text(AureaText.t(tool == 4 ? "edt_track_global_motion" : "edt_track_pick_points"))
-                    .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                Text(AureaText.t("trk_object_hint")).foregroundStyle(AureaColors.muted)
+                button(AureaText.t("trk_surface_quick") + " · " + AureaText.t("hyper_title")) {
+                    model.beginMotionPick(2, rectangle: true, confirm: true, modelOverride: 3)
+                }
+                Text(AureaText.t("trk_surface_hint")).foregroundStyle(AureaColors.muted)
+                button(AureaText.t("trk_face") + " · " + AureaText.t("hyper_title")) { model.trackLandmarks(face: true) }
+                    .accessibilityIdentifier("tracking.face")
+                button(AureaText.t("trk_body") + " · " + AureaText.t("hyper_title")) { model.trackLandmarks(face: false) }
+                    .accessibilityIdentifier("tracking.body")
                 Picker(AureaText.t("trk_backward"), selection: $model.motionBackward) {
                     Text(AureaText.t("trk_direction_forward")).tag(false)
                     Text(AureaText.t("trk_direction_backward")).tag(true)
                 }
-                Picker(AureaText.t("trk_motion"), selection: $model.motionModel) {
-                    Text(AureaText.t("trk_auto")).tag(UInt32(0)); Text(AureaText.t("trk_motion_position")).tag(UInt32(1))
-                    Text(AureaText.t("trk_motion_prs")).tag(UInt32(2)); Text(AureaText.t("trk_motion_perspective")).tag(UInt32(3))
+                DisclosureGroup(AureaText.t(advanced ? "trk_hide_advanced" : "trk_show_advanced"), isExpanded: $advanced) {
+                    let tools = ["trk_tool_point", "trk_tool_two_points", "trk_tool_planar", "trk_tool_corner_pin", "trk_tool_stabilizer"]
+                    Picker(AureaText.t("trk_title"), selection: $tool) {
+                        ForEach(tools.indices, id: \.self) { i in Text(AureaText.t(tools[i])).tag(i) }
+                    }.pickerStyle(.menu)
+                    let title = AureaText.t(tools[tool]) + ((2...3).contains(tool) ? " · " + AureaText.t("hyper_title") : "")
+                    button(title) { model.beginMotionPick(UInt32(tool), confirm: true) }
+                    if tool == 0 {
+                        button(AureaText.t("editor_estabilizar_pelo_ponto")) { model.beginPointPick(stabilize: true) }
+                    }
+                    Text(AureaText.t(tool == 4 ? "edt_track_global_motion" : "edt_track_pick_points"))
+                        .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                    Picker(AureaText.t("trk_motion"), selection: $model.motionModel) {
+                        Text(AureaText.t("trk_auto")).tag(UInt32(0)); Text(AureaText.t("trk_motion_position")).tag(UInt32(1))
+                        Text(AureaText.t("trk_motion_prs")).tag(UInt32(2)); Text(AureaText.t("trk_motion_perspective")).tag(UInt32(3))
+                    }
+                    Text(AureaText.t("trk_feature_radius", Int(model.motionFeature)))
+                    Slider(value: $model.motionFeature, in: 6...48)
+                    Text(AureaText.t("trk_search_radius", Int(model.motionSearch)))
+                    Slider(value: $model.motionSearch, in: 16...192)
+                    if (0...1).contains(tool) {
+                        Text(AureaText.t("trk_min_confidence", Int((model.motionConfidence * 100).rounded())))
+                        Slider(value: $model.motionConfidence, in: 0.4...0.95)
+                        Toggle(AureaText.t("trk_validate_backward"), isOn: $model.motionValidateBack)
+                    }
                 }
-                Text(AureaText.t("trk_feature_radius", Int(model.motionFeature)))
-                Slider(value: $model.motionFeature, in: 6...48)
-                Text(AureaText.t("trk_search_radius", Int(model.motionSearch)))
-                Slider(value: $model.motionSearch, in: 16...192)
+                .accessibilityIdentifier("tracking.advanced")
                 button(AureaText.t("trk_restore")) { model.restoreMotion() }
             }
             if model.pointPick != nil {
                 Text(AureaText.t("ios_motion_points_selected", model.motionPicked))
+                button(AureaText.t("trk_track_selection")) { model.confirmMotionPoints() }
+                    .disabled(!model.motionPointsReady).accessibilityIdentifier("tracking.confirm")
+                button(AureaText.t("trk_remove_last_point")) { model.removeMotionPoint() }.disabled(model.motionPicked == 0)
                 button(AureaText.t("editor_cancelar_selecao")) { model.cancelMotionPick() }
             }
             if n("state") == 1 {
                 ProgressView(value: n("progress"))
                 Text(AureaText.t("ios_analyzing_pct", Int(n("progress") * 100)))
+                button(AureaText.t(n("paused") != 0 ? "trk_resume" : "trk_pause")) {
+                    model.engine.pauseMotionTrack(n("paused") == 0)
+                    model.refreshMotionStatus()
+                }
                 button(AureaText.t("common_cancel")) { model.engine.cancelMotionTrack() }
             }
             if let message = model.motionStatus["message"] as? String, !message.isEmpty { Text(AureaEngineText.sentence(message)).foregroundStyle(AureaColors.muted) }
-            if n("state") == 2 {
+            if n("state") == 2 && model.landmarkProgress == nil {
+                if let source = model.primarySelection { MotionTrackReview(source: source, revision: n("confidence")) }
+                if n("tool") != 4 { Toggle(AureaText.t("trk_show_trails"), isOn: $model.motionTrailVisible) }
                 Text(AureaText.t("trk_stats", Int(n("validFrames")), Int(n("frames")), Int(n("confidence") * 100), String(format: "%.2f", n("error"))))
                 // Quadros perdidos não escondem mais as ações: ficam sem key (interpolados).
                 if n("lost") > 0 { Text(AureaText.t("track_lost_frames_note", Int(n("lost")))).foregroundStyle(AureaColors.muted) }
@@ -412,6 +462,8 @@ private struct MotionTrackingSection: View {
                         }
                         if n("tool") <= 1 { button(AureaText.t("editor_estabilizar_pelo_ponto")) { model.applyMotion(3, lock: true, smooth: 0.5, maxScale: 1, crop: 0) } }
                         if n("tool") >= 2 {
+                            button(AureaText.t("trk_create_mask")) { model.applyMotion(6) }
+                            Text(AureaText.t("trk_create_mask_hint")).foregroundStyle(AureaColors.muted)
                             ForEach(targets.filter { $0.kind == 1 || $0.kind == 2 }) { layer in
                                 Button(AureaText.t("track_corner_pin_to", layer.name)) { model.applyMotion(2, target: layer.id) }.padding(.vertical, 6)
                             }
@@ -427,6 +479,220 @@ private struct MotionTrackingSection: View {
     private func button(_ title: String, run: @escaping () -> Void) -> some View {
         Button(action: run) { Text(title).font(.aurea(size: 14, weight: .semibold)).frame(maxWidth: .infinity, alignment: .leading).padding(12).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 12)) }.buttonStyle(AureaPressStyle())
     }
+}
+
+@MainActor private struct MotionTrackReview: View {
+    @EnvironmentObject private var model: AureaModel
+    let source: Int64
+    let revision: Double
+    @State private var bins: [Float] = []
+    @State private var export: MotionCsvDocument?
+    @State private var saving = false
+    @State private var exporting = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if bins.count > 2 {
+                let first = Int64(bins[0]), last = Int64(bins[1])
+                let playhead = model.status.playhead
+                let range = max(1, last - first)
+                let label = AureaText.t("trk_review")
+                Text(label)
+                Canvas { graphics, size in
+                    let width = size.width / CGFloat(bins.count - 2)
+                    for i in 2..<bins.count {
+                        let confidence = CGFloat(bins[i].clamped(to: 0...1))
+                        let h = size.height * (0.18 + 0.82 * confidence)
+                        let color: Color = bins[i] < 0 ? Color(red: 0.8, green: 0.36, blue: 0.38) : AureaColors.accent.opacity(0.35 + 0.65 * confidence)
+                        graphics.fill(Path(CGRect(x: CGFloat(i - 2)*width, y: size.height - h, width: width, height: h)), with: .color(color))
+                    }
+                    let x = size.width * CGFloat((playhead - first).clamped(to: 0...range)) / CGFloat(range)
+                    var line = Path()
+                    line.move(to: CGPoint(x: x, y: 0)); line.addLine(to: CGPoint(x: x, y: size.height))
+                    graphics.stroke(line, with: .color(.red), lineWidth: 2)
+                }
+                .frame(height: 42)
+                .overlay {
+                    GeometryReader { geo in
+                        Color.clear.contentShape(Rectangle()).gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                            let fraction = (value.location.x / max(1, geo.size.width)).clamped(to: 0...1)
+                            model.seek(toFrame: first + Int64((CGFloat(range) * fraction).rounded()))
+                        })
+                    }
+                }
+                .accessibilityElement()
+                .accessibilityLabel(label)
+                .accessibilityIdentifier("tracking.review")
+                .accessibilityAdjustableAction { direction in
+                    let delta: Int64 = direction == .increment ? 1 : -1
+                    model.seek(toFrame: (playhead + delta).clamped(to: first...last))
+                }
+                Button(AureaText.t("trk_export_csv")) {
+                    let engine = model.engine
+                    exporting = true
+                    Task {
+                        let csv = await Task.detached { engine.motionTrackCsv(source) }.value
+                        exporting = false
+                        guard let csv else { model.toast = AureaText.t("trk_csv_failed"); return }
+                        export = MotionCsvDocument(data: Data(csv.utf8))
+                        saving = true
+                    }
+                }.disabled(exporting).frame(minHeight: 44)
+            }
+        }
+        .task(id: "\(source):\(revision)") { bins = model.engine.motionTrackReview(source).map(\.floatValue) }
+        .fileExporter(isPresented: $saving, document: export, contentType: .commaSeparatedText, defaultFilename: "aurea-motion") { result in
+            if case .failure = result { model.toast = AureaText.t("trk_csv_failed") }
+        }
+    }
+}
+
+@MainActor private struct CameraReconstructionView: View {
+    @EnvironmentObject private var model: AureaModel
+    @Environment(\.dismiss) private var dismiss
+    let source: Int64
+    @State private var rows: [Float] = []
+    @State private var yaw = -0.35
+    @State private var pitch = -0.20
+    @State private var zoom = 1.0
+    @State private var pan = CGSize.zero
+    @State private var panning = false
+    @GestureState private var drag = CGSize.zero
+    @GestureState private var pinch = 1.0
+    @State private var revision = 0
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            PanelHeader(title: AureaText.t("trk_reconstruction"), onBack: { dismiss() })
+            GeometryReader { geo in
+                Canvas { graphics, size in
+                    var previous: CGPoint?
+                    var gridStart: CGPoint?
+                    var frustum: [CGPoint] = []
+                    var axes: [CGPoint] = []
+                    for i in stride(from: 0, to: rows.count, by: 6) {
+                        let at = project(i, in: size)
+                        switch Int(rows[i]) {
+                        case 0:
+                            let selected = rows[i + 5] > 0
+                            let r: CGFloat = selected ? 3.5 : 1.8
+                            graphics.fill(Path(ellipseIn: CGRect(x: at.x-r, y: at.y-r, width: 2*r, height: 2*r)),
+                                          with: .color(selected ? .green : AureaColors.accent))
+                        case 1:
+                            if let previous { line(graphics, previous, at, rows[i + 5] > 2 ? .orange : .purple, 1.5) }
+                            previous = at
+                        case 2: frustum.append(at)
+                        case 3:
+                            if let start = gridStart {
+                                line(graphics, start, at, AureaColors.muted.opacity(0.3))
+                                gridStart = nil
+                            } else { gridStart = at }
+                        case 4: axes.append(at)
+                        default: break
+                        }
+                    }
+                    if frustum.count == 5 {
+                        for i in 1...4 {
+                            line(graphics, frustum[0], frustum[i], .white)
+                            line(graphics, frustum[i], frustum[i == 4 ? 1 : i + 1], .white)
+                        }
+                    }
+                    if axes.count == 4 {
+                        for (i, color) in [Color.red, .green, .blue].enumerated() {
+                            line(graphics, axes[0], axes[i + 1], color, 1.8)
+                        }
+                    }
+                }
+                .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .contentShape(Rectangle())
+                .gesture(DragGesture().updating($drag) { value, state, _ in state = value.translation }
+                    .onEnded { value in
+                        if panning {
+                            pan.width += value.translation.width
+                            pan.height += value.translation.height
+                        } else {
+                            yaw += Double(value.translation.width) * 0.009
+                            pitch = (pitch + Double(value.translation.height) * 0.009).clamped(to: -1.55...1.55)
+                        }
+                    })
+                .simultaneousGesture(MagnificationGesture().updating($pinch) { value, state, _ in state = Double(value) }
+                    .onEnded { zoom = (zoom * Double($0)).clamped(to: 0.35...5) })
+                .simultaneousGesture(SpatialTapGesture().onEnded { select($0.location, in: geo.size) })
+                .accessibilityLabel(AureaText.t("trk_reconstruction"))
+                .accessibilityIdentifier("cam.reconstruction.canvas")
+            }.frame(minHeight: 180, maxHeight: .infinity)
+            Picker(AureaText.t("trk_reconstruction"), selection: $panning) {
+                Text(AureaText.t("trk_orbit")).tag(false)
+                Text(AureaText.t("trk_pan")).tag(true)
+            }.pickerStyle(.segmented)
+            Slider(value: $zoom, in: 0.35...5).accessibilityLabel("Zoom")
+            let path = stride(from: 0, to: rows.count, by: 6).filter { rows[$0] == 1 }
+            if let first = path.first, let last = path.last, rows[last + 1] > rows[first + 1] {
+                let limits = Double(rows[first + 1])...Double(rows[last + 1])
+                Slider(value: Binding(get: { Double(model.status.playhead).clamped(to: limits) },
+                    set: { model.seek(toFrame: Int64($0.rounded())) }), in: limits)
+                    .accessibilityLabel(AureaText.t("trk_camera_frame"))
+            }
+            Toggle(AureaText.t("cam_multi_select"), isOn: $model.cameraMultiSelect)
+            if model.cameraSelectedCount > 0 {
+                HStack {
+                    Button(AureaText.t("cam_set_origin")) { model.calibrateCamera(0); revision += 1 }
+                    Button(AureaText.t("cam_set_ground")) { model.calibrateCamera(1); revision += 1 }.disabled(model.cameraSelectedCount < 3)
+                    Button(AureaText.t("cam_create_null_anchor")) { model.createTrackedObject(1); dismiss() }
+                }.frame(minHeight: 44)
+            }
+        }
+        .padding(16).background(AureaColors.editorPanel)
+        .task(id: "\(source):\(model.status.playhead):\(revision)") {
+            let engine = model.engine, frame = model.status.playhead
+            let data = await Task.detached { engine.cameraTrackReconstruction(source, frame: frame).map(\.floatValue) }.value
+            if !Task.isCancelled { rows = data }
+        }
+    }
+
+    private func project(_ i: Int, in size: CGSize) -> CGPoint {
+        let x = Double(rows[i + 2]), y = Double(rows[i + 3]), z = Double(rows[i + 4])
+        let a = yaw + (panning ? 0 : Double(drag.width) * 0.009)
+        let b = (pitch + (panning ? 0 : Double(drag.height) * 0.009)).clamped(to: -1.55...1.55)
+        let horizontal = cos(a)*x + sin(a)*z
+        let depth = -sin(a)*x + cos(a)*z
+        let vertical = cos(b)*y - sin(b)*depth
+        let scale = min(size.width, size.height)*0.31*CGFloat((zoom*pinch).clamped(to: 0.35...5))
+        return CGPoint(x: size.width/2 + pan.width + (panning ? drag.width : 0) + scale*CGFloat(horizontal),
+                       y: size.height/2 + pan.height + (panning ? drag.height : 0) + scale*CGFloat(vertical))
+    }
+
+    private func line(_ graphics: GraphicsContext, _ a: CGPoint, _ b: CGPoint, _ color: Color, _ width: CGFloat = 1) {
+        var path = Path()
+        path.move(to: a)
+        path.addLine(to: b)
+        graphics.stroke(path, with: .color(color), lineWidth: width)
+    }
+
+    private func select(_ at: CGPoint, in size: CGSize) {
+        func distance(_ i: Int) -> CGFloat {
+            let p = project(i, in: size)
+            return hypot(at.x - p.x, at.y - p.y)
+        }
+        guard let i = stride(from: 0, to: rows.count, by: 6).filter({ rows[$0] == 0 }).min(by: { distance($0) < distance($1) }),
+              distance(i) < 24 else { return }
+        model.cameraSelectedCount = engineSelection(rows[i + 1])
+        model.refreshCameraTrackPoints()
+        revision += 1
+    }
+
+    private func engineSelection(_ id: Float) -> UInt32 {
+        model.engine.selectCameraTrackPoints([NSNumber(value: id)], operation: model.cameraMultiSelect ? 1 : 0)
+    }
+}
+
+private struct MotionCsvDocument: FileDocument {
+    static let readableContentTypes: [UTType] = [.commaSeparatedText]
+    let data: Data
+    init(data: Data) { self.data = data }
+    init(configuration: ReadConfiguration) throws { data = configuration.file.regularFileContents ?? Data() }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: data) }
 }
 
 struct CaptionWord: Codable, Identifiable {

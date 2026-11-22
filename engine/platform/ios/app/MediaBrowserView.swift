@@ -387,9 +387,6 @@ struct MediaStripView: View {
                                 model.pendingOverlayImport = false
                                 shell.sequenceChooser = true
                             }
-                            StripActionCell(cell: cell, label: AureaText.t("sh_add_ai_video"), glyph: CupertinoGlyph.WandStars, tag: "add.media.ai") {
-                                model.openPanel(.aiVideo)
-                            }
                         }
                     }
                     Button { withAnimation { reader.scrollTo("first", anchor: .leading) } } label: {

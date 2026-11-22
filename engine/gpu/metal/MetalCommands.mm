@@ -264,7 +264,13 @@ void CommandListImpl::end_render_pass() noexcept {
 void CommandListImpl::bind_pipeline(PipelineHandle pipeline) noexcept {
     if (!impl_) return;
     const PipelineObject* p = impl_->pipeline(pipeline.id);
-    if (!p) return;
+    if (!p || (p->isCompute ? !p->compute : !p->render)) {
+        // 1.0.6 (paridade com o Vulkan): handle inválido não deixa o pipeline
+        // anterior valendo para o desenho/dispatch seguinte.
+        pipeline_ = nullptr;
+        pipelineDirty_ = true;
+        return;
+    }
     if (p == pipeline_) return;
     pipeline_ = p;
     pipelineDirty_ = true;
@@ -545,6 +551,7 @@ void CommandListImpl::draw_indexed(u32 indexCount, u32 instanceCount, u32 firstI
 
 void CommandListImpl::dispatch(u32 x, u32 y, u32 z) noexcept {
     if (!impl_ || !pipeline_ || !pipeline_->isCompute) return;
+    if (!x || !y || !z) return;   // 1.0.6: grade vazia não vai ao driver
     if (!compute_encoder()) return;
     if (pipelineDirty_ || pushDirty_) apply_pipeline_state();
     apply_bindings();

@@ -190,10 +190,6 @@
     <string name="i18n_timeline_surface">المخطط الزمني في Aurea</string>
     <string name="i18n_caption_source_cache">ذاكرة التخزين المؤقت</string>
     <string name="i18n_caption_source_whisper">Whisper على الجهاز</string>
-    <string name="ai_state_searching">جارٍ البحث</string>
-    <string name="ai_state_online">متصل</string>
-    <string name="ai_state_reconnecting">جارٍ إعادة الاتصال</string>
-    <string name="ai_state_offline">غير متصل</string>
     <string name="perf_section_test">اختبار على iPhone</string>
     <string name="perf_intro">افتح مشروعًا يحتوي على فيديو. يقيس التقرير المعاينة ووحدتَي CPU/GPU وفك الترميز والذاكرة والصوت وتوقفات الواجهة. لا يُرسَل أي فيديو إلى خادم.</string>
     <string name="perf_mark_stall">وضع علامة: تجمّد هنا</string>

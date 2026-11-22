@@ -993,8 +993,6 @@ class Exporter internal constructor(
         state = ExportUiState()
         hyperOutput = null
         hyperSteps = IntArray(0)
-        // Momento ocioso (fora do render): prepara o anúncio da próxima exportação.
-        com.aurea.aurea.ads.AureaAdsManager.preloadExportInterstitial()
     }
 
     fun shareIntent(): Intent? {
@@ -1065,10 +1063,7 @@ class Exporter internal constructor(
                 }
                 val pronto = state.copy(phase = ExportPhase.Done, outputUri = uri,
                     message = (listOf(label) + notes).joinToString("\n"))
-                // Publication succeeded independently of the ad SDK. A late
-                // callback must never overwrite a newer export's state.
                 state = pronto
-                runCatching { com.aurea.aurea.ads.AureaAdsManager.showExportInterstitialIfAvailable { } }
             },
             onFailure = {
                 android.util.Log.e("AureaExport", "Gallery publish failed", it)

@@ -766,7 +766,7 @@ private fun RangeRow(opts: ExportOptions, onChange: (ExportOptions) -> Unit, sto
 private fun BackgroundRow(store: EditorStore, onOpen: (() -> Unit)?) {
     val bg = store.composition?.background ?: listOf(0f, 0f, 0f, 1f)
     val transparent = bg.getOrElse(3) { 1f } < 0.5f
-    val color = Color(bg.getOrElse(0) { 0f }, bg.getOrElse(1) { 0f }, bg.getOrElse(2) { 0f }, 1f)
+    val color = com.aurea.aurea.ui.ds.swatchColor(bg.getOrElse(0) { 0f }, bg.getOrElse(1) { 0f }, bg.getOrElse(2) { 0f }, 1f)
     val hex = String.format(Locale.ROOT, "#%02X%02X%02X", (color.red * 255).roundToInt(), (color.green * 255).roundToInt(), (color.blue * 255).roundToInt())
     val value = if (transparent) stringResource(R.string.sh_bg_transparent) else hex
     val description = stringResource(R.string.om_exp_background_open)

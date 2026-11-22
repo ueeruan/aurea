@@ -6,10 +6,11 @@
   faz o APK novo substituir a instalação existente em vez de virar um segundo
   app. Ver _identity/signing/IDENTIDADE.md.
 -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Rede: conta (obrigatória), comunidade, relatório de crash, IA de
-         vídeo, avisos, download do modelo de legendas e anúncios. Tudo HTTPS
+    <!-- Rede: conta (obrigatória), comunidade, relatório de crash, avisos,
+         download do modelo de legendas e AureaMCP. Tudo HTTPS
          (usesCleartextTraffic="false"). -->
     <uses-permission android:name="android.permission.INTERNET"/>
 
@@ -50,10 +51,14 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28"/>
 
-    <!-- ID de publicidade: os SDKs de anúncio (LevelPlay/Unity Ads, AdMob) o
-         usam. Explícito para não depender do merge das bibliotecas; o Play
-         Console tem de declarar "usa ID de publicidade: sim (publicidade)". -->
-    <uses-permission android:name="com.google.android.gms.permission.AD_ID"/>
+    <!-- 22/11/2026: o app não tem anúncios nem usa o ID de publicidade. Estas
+         remoções garantem que nenhuma biblioteca (Firebase, Play services) as
+         traga de volta pelo merge do manifesto. No Play Console: "contém
+         anúncios = não" e "usa ID de publicidade = não". -->
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID" tools:node="remove"/>
+    <uses-permission android:name="android.permission.ACCESS_ADSERVICES_AD_ID" tools:node="remove"/>
+    <uses-permission android:name="android.permission.ACCESS_ADSERVICES_ATTRIBUTION" tools:node="remove"/>
+    <uses-permission android:name="android.permission.ACCESS_ADSERVICES_TOPICS" tools:node="remove"/>
 
     <!-- Microfone: só o "Gravar voz" (Adicionar → Áudio) grava, e só depois que
          a pessoa toca em Gravar; a permissão é pedida em tempo de execução com a
@@ -98,19 +103,6 @@
         android:theme="@style/AureaTheme">
 
         <meta-data android:name="com.google.ar.core" android:value="optional"/>
-
-        <!-- AdMob: o App ID vem de res/values*/ads_config.xml (debug = teste do
-             Google; release = o real). As duas flags tiram a inicialização e o
-             carregamento de anúncio da thread principal. -->
-        <meta-data
-            android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="@string/admob_app_id"/>
-        <meta-data
-            android:name="com.google.android.gms.ads.flag.OPTIMIZE_INITIALIZATION"
-            android:value="true"/>
-        <meta-data
-            android:name="com.google.android.gms.ads.flag.OPTIMIZE_AD_LOADING"
-            android:value="true"/>
 
         <!-- Android 8–9 exports stay in app-owned storage and are shared via scoped content URIs. -->
         <provider

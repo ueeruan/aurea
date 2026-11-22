@@ -20,7 +20,6 @@
     <string name="mod_blocked_note">لقد حظرت هذا الملف الشخصي.</string>
     <string name="mod_report_profile">الإبلاغ عن الملف الشخصي</string>
     <string name="mod_remove">إزالة (إشراف)</string>
-    <string name="mod_report_ai">الإبلاغ عن الفيديو</string>
     <string name="mod_report_preset">الإبلاغ عن الإعداد المسبق</string>
     <string name="mod_more_actions">إجراءات أخرى</string>
 </resources>

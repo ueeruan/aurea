@@ -49,6 +49,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cerrno>
 #include <cstdio>
 #include <cmath>
@@ -372,6 +373,9 @@ private:
     std::vector<PresentationTime> presentationTimes_;
     bool timingIndexed_ = false;
     bool timingIndexLimited_ = false;
+    /// 1.0.6: o índice passou do prazo uma vez; este decoder segue sem ele (o seek
+    /// usa o recuo de 1 s do start_reader) em vez de reler o arquivo a cada seek.
+    bool timingIndexGaveUp_ = false;
 };
 
 AVFoundationVideoDecoder::AVFoundationVideoDecoder(AVAsset* asset, AVAssetTrack* track,
@@ -429,6 +433,7 @@ void AVFoundationVideoDecoder::teardown() noexcept {
 
 bool AVFoundationVideoDecoder::build_timing_index() noexcept {
     if (timingIndexed_) return true;
+    if (timingIndexGaveUp_) return false;
     timingIndexLimited_ = false;
     // A complete VFR/B-frame index must not grow outside every memory budget.
     // Limit each decoder to 16 MiB and at most 1/16 of current process headroom.
@@ -444,6 +449,12 @@ bool AVFoundationVideoDecoder::build_timing_index() noexcept {
     [indexReader addOutput:references];
     if (![indexReader startReading]) return false;
     std::vector<PresentationTime> times;
+    // 1.0.6: prazo de 400 ms. Num vídeo longo ler todas as referências levava
+    // segundos de CPU, sem como parar: o VideoSource::stop() (e com ele o
+    // MediaManager::close_all() do abrir projeto, na main) esperava o fim —
+    // HANG de 3–7 s e morte pelo watchdog (sinal 9) no MetricKit de 2223/2224.
+    const auto indexStarted = std::chrono::steady_clock::now();
+    size_t scanned = 0;
     while (CMSampleBufferRef sample = [references copyNextSampleBuffer]) {
         const CMTime time = CMSampleBufferGetPresentationTimeStamp(sample);
         if (CMTIME_IS_NUMERIC(time)) {
@@ -469,6 +480,13 @@ bool AVFoundationVideoDecoder::build_timing_index() noexcept {
             }
         }
         CFRelease(sample);
+        if ((++scanned & 255u) == 0u &&
+            std::chrono::steady_clock::now() - indexStarted > std::chrono::milliseconds(400)) {
+            [indexReader cancelReading];
+            timingIndexGaveUp_ = true;
+            AUREA_LOG_WARN("videotoolbox: indice de tempo passou de 400 ms (%zu amostras); seek com recuo de 1 s", scanned);
+            return false;
+        }
     }
     if (indexReader.status != AVAssetReaderStatusCompleted || times.empty()) return false;
     std::sort(times.begin(), times.end(), [](const auto& a, const auto& b) { return CMTimeCompare(a.exact, b.exact) < 0; });

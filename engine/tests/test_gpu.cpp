@@ -9426,6 +9426,55 @@ AUREA_TEST(Gpu, EveryRegisteredEffectBuildsAndRenders) {
     AUREA_CHECK_MSG(broken.empty(), "efeito do catálogo nao desenha");
 }
 
+// 1.0.6 (frente engine): o mesmo catalogo sobre as camadas que a varredura
+// acima nao cobre - 1x1 px e uma camada inteira transparente -, nos padroes
+// e em cada controle numerico no minimo e no maximo do slider. O que se procura
+// aqui e travamento (divisao por zero na extensao, textura de 0 px, dispatch
+// vazio) e pixel nao-finito; quadro preto e esperado numa camada transparente.
+AUREA_TEST(Gpu, EveryRegisteredEffectSurvivesOnePixelAndTransparentLayers) {
+    AUREA_REQUIRE_GPU();
+    std::vector<std::string> broken;
+    const u32 total = gpu().effects.count();
+    for (u32 i = 0; i < total; ++i) {
+        const Effect& fx = gpu().effects.at(i);
+        const char* key = fx.info().key;
+        const ParameterRegistry& params = gpu().effects.params_at(i);
+        for (u32 variant = 0; variant < 2; ++variant) {
+            Scene s(16, 16);
+            const LayerId id = variant == 0 ? s.image(uniform_image(1, 1, 200, 120, 40), 8, 8)
+                                            : s.image(uniform_image(16, 16, 0, 0, 0, 0), 8, 8);
+            Layer* l = s.comp->layer(id);
+            EffectInstance e;
+            e.id = l->alloc_effect_id();
+            e.type = fx.type_id();
+            initialize_instance(e, params);
+            l->effects.push_back(std::move(e));
+            const char* what = variant == 0 ? "camada 1x1" : "camada transparente";
+            auto check = [&](const FloatImage& im, const std::string& when) {
+                for (const f32 x : im.px) {
+                    if (!std::isfinite(x)) {
+                        broken.emplace_back(std::string(key) + " (" + what + "): pixel nao-finito " + when);
+                        return;
+                    }
+                }
+            };
+            check(s.render(), "nos padroes");
+            for (u32 p = 0; p < params.count(); ++p) {
+                const ParamSpec& spec = params.at(p);
+                if (spec.type != ParamType::Float && spec.type != ParamType::Int) continue;
+                const ParamValue original = s.comp->layer(id)->effects[0].params[p].constant;
+                for (const f32 v : {spec.minValue, spec.maxValue}) {
+                    s.comp->layer(id)->effects[0].params[p].constant = ParamValue::scalar(v);
+                    check(s.render(), "com o parametro " + std::to_string(p) + " em " + std::to_string(v));
+                }
+                s.comp->layer(id)->effects[0].params[p].constant = original;
+            }
+        }
+    }
+    for (const std::string& b : broken) std::printf("\n    efeito quebrado: %s", b.c_str());
+    AUREA_CHECK_MSG(broken.empty(), "efeito do catalogo falha em camada 1x1 ou transparente");
+}
+
 // Fase 8A (custo por efeito): Varredura, Grão e Colorama eram PerPixel sem
 // ColorOp — o EffectGraph os tirava do plano como identidade e, aplicados no
 // projeto, não mudavam nada (só a prévia do catálogo, que chama o build

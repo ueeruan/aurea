@@ -28,6 +28,7 @@
 #include "VulkanLoader.hpp"
 #include "aurea/render/GPUBackend.hpp"
 
+#include <cstdio>
 #include <mutex>
 #include <string>
 #if defined(AUREA_VK_HOST_PRESENT)
@@ -226,6 +227,10 @@ struct PipelineObject {
     VkDescriptorSetLayout setLayout = VK_NULL_HANDLE;
     VkPipelineBindPoint bindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     u64 sharedKey = 0;   ///< chave no cache de pipelines; 0 = exclusivo deste handle
+    /// 1.0.6: chave estável entre aberturas (identidade ou nome) para o guarda
+    /// de travamento do driver; 0 = sem guarda.
+    u64 guardKey = 0;
+    char guardName[48]{};   ///< cópia do debugName, para o log do guarda
 };
 
 /// Tudo que `create_pipeline` entrega ao driver, em palavras: dois pedidos
@@ -361,6 +366,10 @@ private:
     VkPipelineLayout pushLayout_ = VK_NULL_HANDLE;
     u8 pushData_[binding::kPushConstantBytes]{};
     u32 pushBytes_ = 0, labelDepth_ = 0;
+    /// 1.0.6: compute pipelines whose first vkCmdDispatch in this process has
+    /// already returned. Until then the dispatch runs under the driver crash
+    /// guard (Backend::guard_begin); this list is per command list, so no lock.
+    std::vector<VkPipeline> provenDispatch_;
 };
 
 // -----------------------------------------------------------------------------
@@ -611,6 +620,30 @@ private:
     [[nodiscard]] std::string export_split_identity() const;
     /// Testes: esquece a perda deste processo (o arquivo no cache continua).
     static void forget_export_loss_for_tests() noexcept;
+
+    // --- 1.0.6: guarda de travamento do driver --------------------------------
+    // SIGSEGV dentro do driver (vulkan.adreno.so em vkCmdDispatch, fault 0xf0,
+    // Galaxy Tab S7 FE / S20+; vulkan.sp9863a.so em vkCreateGraphicsPipelines)
+    // não volta como VkResult: o processo morre e o usuário repete o mesmo
+    // passo. Antes de cada chamada arriscada a chave do pipeline vai para um
+    // marcador no cache; a chamada que volta limpa o marcador. Se o processo
+    // morrer no meio, a próxima abertura conta a chave; com 2 mortes no mesmo
+    // driver o pipeline passa a falhar com PipelineCompileFailed (o efeito sai
+    // em bypass, como em qualquer pipeline recusado) em vez de matar o app.
+    // Driver atualizado (outra identidade) zera a lista.
+public:
+    /// Pipelines bloqueados neste driver (diagnóstico e testes).
+    [[nodiscard]] u32 blocked_pipeline_count() const noexcept { return static_cast<u32>(blockedKeys_.size()); }
+    /// Testes: chave de guarda que `create_pipeline` usaria para `desc`.
+    [[nodiscard]] u64 guard_key_for_tests(const PipelineDesc& desc) noexcept;
+private:
+    void load_crash_guard() noexcept;
+    void close_crash_guard() noexcept;
+    void guard_begin(u64 key, const char* what) noexcept;
+    void guard_end() noexcept;
+    [[nodiscard]] bool pipeline_blocked(u64 key) const noexcept { return key && blockedKeys_.count(key) != 0; }
+    [[nodiscard]] u64 pipeline_guard_key(const PipelineDesc& desc, const PipelineIdentity* identity) const noexcept;
+    void save_blocklist() noexcept;
     /// Corpo comum de `begin_frame` e `begin_offscreen_frame`; `withSurface`
     /// decide se o swapchain é adquirido.
     [[nodiscard]] Status begin_frame_impl(FrameBegin& out, bool withSurface) noexcept;
@@ -672,6 +705,15 @@ private:
     VkPipelineCache pipelineCache_ = VK_NULL_HANDLE;
     std::string cachePath_;
     std::string splitMarkerPath_;   ///< arquivo do dispositivo perdido no export (export_split_marker_path)
+    // Guarda de travamento do driver (load_crash_guard).
+    std::mutex guardMutex_;
+    std::FILE* guardFile_ = nullptr;      ///< marcador aberto: chave da chamada em curso
+    std::string blocklistPath_;
+    struct BlockEntry { u32 crashes = 0; std::string name; };
+    std::unordered_map<u64, BlockEntry> crashCounts_;   ///< por chave, neste driver
+    std::unordered_map<u64, u32> blockedKeys_;          ///< crashes >= kGuardCrashesToBlock
+    static constexpr u32 kGuardCrashesToBlock = 2;
+    u32 maxDispatch_[3] = {65535, 65535, 65535};   ///< maxComputeWorkGroupCount
     std::vector<u8> cacheHeader_;        ///< cabeçalho esperado (aparelho + versão), montado na carga
     bool pipelineCacheDirty_ = false;
     PipelineCacheInfo cacheInfo_{};

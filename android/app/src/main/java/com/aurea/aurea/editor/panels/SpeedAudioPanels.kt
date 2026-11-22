@@ -1215,13 +1215,13 @@ private fun RemapKeyStrip(
                 val r = 5.dp.toPx()
                 keys.forEach { t ->
                     if (t < lo - 1 || t > hi + 1) return@forEach
-                    val x = xOf(t.coerceIn(lo, hi))
+                    val x = xOf(t.coerceIn(lo, max(lo, hi)))   // 1.0.6: hi < lo não derruba o desenho
                     val path = androidx.compose.ui.graphics.Path().apply {
                         moveTo(x, y - r); lineTo(x + r, y); lineTo(x, y + r); lineTo(x - r, y); close()
                     }
                     drawPath(path, if (t == selected || t == playhead) accent else keyColor)
                 }
-                val px = xOf(playhead.coerceIn(lo, hi))
+                val px = xOf(playhead.coerceIn(lo, max(lo, hi)))
                 drawLine(head, Offset(px, 2.dp.toPx()), Offset(px, size.height - 2.dp.toPx()), strokeWidth = 2.dp.toPx())
             },
     )

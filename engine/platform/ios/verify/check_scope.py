@@ -33,9 +33,6 @@ APPLE_IMPORTS = {
 }
 
 ADS_IMPORTS = {
-    "Ads/GoogleAdsBackend.swift": {"GoogleMobileAds", "UserMessagingPlatform"},
-    "Ads/UmpConsent.swift": {"UserMessagingPlatform"},
-    "Ads/LevelPlayAdsBackend.swift": {"IronSource"},
     # 0.4.1: login com Google pelo Firebase Auth (só neste adaptador).
     "GoogleLogin.swift": {"FirebaseAuth", "FirebaseCore", "GoogleSignIn"},
 }

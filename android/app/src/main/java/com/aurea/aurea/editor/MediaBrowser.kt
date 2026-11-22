@@ -247,7 +247,10 @@ internal fun MediaBrowser(store: EditorStore, onAdded: () -> Unit, onDismiss: ()
                 } else if (!full && !partial) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         AccessNotice {
-                            context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}")))
+                            // 1.0.6: aparelho sem a tela de detalhes do app não fecha o Aurea.
+                            runCatching {
+                                context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}")))
+                            }
                         }
                     }
                 } else {

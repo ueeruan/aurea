@@ -1,7 +1,10 @@
 #pragma once
 
 #include <cstdint>
+#include <cstddef>
 #include <cstring>
+#include <memory>
+#include <new>
 #include <vector>
 
 namespace aurea::media {
@@ -18,26 +21,60 @@ inline bool decoded_plane_fits(uint32_t width, uint32_t height, int rowStride,
 
 // Copy only visible samples, never final-row padding or vendor-specific layouts.
 // Validate every plane before reading any of them. Output owns its storage.
-inline bool copy_decoded_yuv420(uint32_t width, uint32_t height,
-        const uint8_t* const data[3], const int row[3], const int pixel[3],
-        const int length[3], std::vector<uint8_t>& output) {
-    if (!width || !height || width > 16384 || height > 16384) return false;
+// Validates every plane and returns the I420 byte count (0 = rejected).
+inline size_t decoded_yuv420_bytes(uint32_t width, uint32_t height,
+        const uint8_t* const data[3], const int row[3], const int pixel[3], const int length[3]) noexcept {
+    if (!width || !height || width > 16384 || height > 16384) return 0;
     const uint32_t cw = (width + 1) / 2, ch = (height + 1) / 2;
     for (int i = 0; i < 3; ++i) {
         if (!data[i] || (pixel[i] != 1 && (i == 0 || pixel[i] != 2)) ||
-            !decoded_plane_fits(i ? cw : width, i ? ch : height, row[i], pixel[i], length[i])) return false;
+            !decoded_plane_fits(i ? cw : width, i ? ch : height, row[i], pixel[i], length[i])) return 0;
     }
+    return size_t(width) * height + 2 * size_t(cw) * ch;
+}
+
+inline void copy_decoded_yuv420_into(uint32_t width, uint32_t height, const uint8_t* const data[3],
+        const int row[3], const int pixel[3], uint8_t* output) noexcept {
+    const uint32_t cw = (width + 1) / 2, ch = (height + 1) / 2;
     const size_t yBytes = size_t(width) * height, cBytes = size_t(cw) * ch;
-    output.resize(yBytes + 2 * cBytes);
     for (int i = 0; i < 3; ++i) {
         const uint32_t w = i ? cw : width, h = i ? ch : height;
-        uint8_t* dst = output.data() + (i ? yBytes + size_t(i - 1) * cBytes : 0);
+        uint8_t* dst = output + (i ? yBytes + size_t(i - 1) * cBytes : 0);
         for (uint32_t y = 0; y < h; ++y) {
             const uint8_t* src = data[i] + size_t(y) * row[i];
             if (pixel[i] == 1) std::memcpy(dst + size_t(y) * w, src, w);
             else for (uint32_t x = 0; x < w; ++x) dst[size_t(y) * w + x] = src[size_t(x) * 2];
         }
     }
+}
+
+inline bool copy_decoded_yuv420(uint32_t width, uint32_t height,
+        const uint8_t* const data[3], const int row[3], const int pixel[3],
+        const int length[3], std::vector<uint8_t>& output) {
+    const size_t bytes = decoded_yuv420_bytes(width, height, data, row, pixel, length);
+    if (!bytes) return false;
+    output.resize(bytes);
+    copy_decoded_yuv420_into(width, height, data, row, pixel, output.data());
+    return true;
+}
+
+// Native decoder frames use this overload. Android builds without exceptions:
+// a 1080p frame is ~3 MB, and on a 32-bit process (armeabi-v7a, SM-A135F) a
+// vector resize that fails threw std::bad_alloc on thread aurea-decode and
+// aborted the app (1.0.5, build 2225). A failed allocation returns false and
+// the frame is dropped like any other decode failure.
+inline bool copy_decoded_yuv420(uint32_t width, uint32_t height,
+        const uint8_t* const data[3], const int row[3], const int pixel[3],
+        const int length[3], std::unique_ptr<uint8_t[]>& output, size_t& outputBytes) noexcept {
+    const size_t bytes = decoded_yuv420_bytes(width, height, data, row, pixel, length);
+    if (!bytes) return false;
+    if (!output || outputBytes != bytes) {
+        std::unique_ptr<uint8_t[]> fresh{new (std::nothrow) uint8_t[bytes]};
+        if (!fresh) return false;
+        output.swap(fresh);
+        outputBytes = bytes;
+    }
+    copy_decoded_yuv420_into(width, height, data, row, pixel, output.get());
     return true;
 }
 

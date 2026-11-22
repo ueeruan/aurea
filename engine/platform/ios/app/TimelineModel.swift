@@ -771,19 +771,26 @@ func timelineMediaKey(_ row: TimelineRow) -> Int64 {
      */
     var budget = Int.max
     private(set) var starved = false
+    /// 1.0.6: pedido recusado por falta de memória (`thumbnailWorkAllowed`). Antes isso
+    /// marcava `starved`, e a timeline repedia A CADA TIQUE (60 Hz) enquanto a pressão
+    /// durasse, regravando o estado e redesenhando o Canvas inteiro: CPU 90 s em ~150 s
+    /// (EXCESSIVE_RESOURCE_USAGE do MetricKit, drawOmega na main). Quem chama só repede
+    /// quando a memória voltar.
+    private(set) var blocked = false
 
     func beginFrame(_ queries: Int) {
         budget = queries
         starved = false
+        blocked = false
     }
 
     func get(_ model: AureaModel, layer: Int64, bucket: Int32, timelineFrame: Int32, heightPx: Int, generation: UInt32, group: Int64 = 0) -> UIImage? {
-        guard model.thumbnailWorkAllowed else { starved = true; return nil }
         // Os dois lados de um corte dividem a chave (mesma mídia, mesma origem).
         // 0.5.3: camada de dentro de um grupo aberto — o grupo entra na chave (ids se repetem).
         let owner = group == 0 ? model.thumbOwner(layer) : timelineInnerMediaKey(group, layer)
         let key = Key(layer: owner, bucket: bucket, height: heightPx)
         if let hit = hits[key] { return hit }
+        guard model.thumbnailWorkAllowed else { blocked = true; return nil }
         if let missed = misses[key], missed == Int(generation) { return nil }
         if budget <= 0 { starved = true; return nil }
         budget -= 1

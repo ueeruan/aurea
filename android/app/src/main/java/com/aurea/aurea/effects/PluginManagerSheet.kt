@@ -59,7 +59,7 @@ internal fun PluginManagerPane(
         // 0.3.4 plugins: lê o pacote primeiro; a folha de consentimento instala.
         if (uri != null) PluginRuntime.beginInstall(uri)
     }
-    LaunchedEffect(Unit) { store.refreshPlugins() }
+    LaunchedEffect(Unit) { store.refreshPluginsOffMain() }
     var removing by remember { mutableStateOf<PluginTexts.Plugin?>(null) }
     var help by remember { mutableStateOf(false) }
     val tag = LocalConfiguration.current.locales[0].toLanguageTag()

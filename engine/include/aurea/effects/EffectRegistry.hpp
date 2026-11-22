@@ -107,6 +107,7 @@ namespace effect_keys {
     inline constexpr const char* kLensDistortionMatch = "aurea.distort.lens_distortion_match";
     inline constexpr const char* kCornerPin = "aurea.distort.corner_pin";
     inline constexpr const char* kLinearWipe = "aurea.transition.linear_wipe";
+    inline constexpr const char* kRangeWipe = "aurea.transition.range_wipe";
     inline constexpr const char* kRadialWipe = "aurea.transition.radial_wipe";
     inline constexpr const char* kBlockDissolve = "aurea.transition.block_dissolve";
     inline constexpr const char* kTransform          = "aurea.transform";
@@ -228,6 +229,7 @@ namespace effect_keys {
     inline constexpr const char* kColorBalanceHls    = "aurea.color.balance_hls";
     // Desfoque
     inline constexpr const char* kZoomBlur           = "aurea.blur.zoom";
+    inline constexpr const char* kChromaticZoomBlur  = "aurea.blur.chromatic_zoom";
     // Distorção
     inline constexpr const char* kBulge              = "aurea.distort.bulge";
     // Padrões

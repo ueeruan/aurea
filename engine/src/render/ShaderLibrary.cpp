@@ -380,16 +380,19 @@ Result<PipelineHandle> ShaderLibrary::pipeline(const PipelineKey& key) noexcept 
     return *created;
 }
 
-u32 ShaderLibrary::prewarm(const PipelineKey* keys, u32 count) noexcept {
+u32 ShaderLibrary::prewarm(const PipelineKey* keys, u32 count, u32* processed) noexcept {
     u32 created = 0;
     const bool wasSteady = steady_;
     steady_ = false;   // pré-aquecer não é "durante o playback"
-    for (u32 i = 0; i < count; ++i) {
+    u32 i = 0;
+    for (; i < count; ++i) {
         if (abort_ && abort_->load(std::memory_order_acquire)) break;   // set_abort
+        if (yield_ && yield_->load(std::memory_order_acquire) > 0) break;   // set_yield
         const usize before = pipelines_.size();
         (void)pipeline(keys[i]);
         if (pipelines_.size() > before) ++created;
     }
+    if (processed) *processed = i;
     steady_ = wasSteady;
     return created;
 }

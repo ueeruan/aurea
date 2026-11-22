@@ -1146,10 +1146,18 @@ void Renderer::flush_warmup() noexcept {
     if (warmPending_.empty()) return;
     // Só o que ainda não existe: vários efeitos dividem pipelines.
     const u64 started = monotonic_ns();   // 0.5.3: o tempo desta compilação vai para o log
-    const u32 made = shaders_.prewarm(warmPending_.data(), static_cast<u32>(warmPending_.size()));
+    u32 processed = 0;
+    const u32 made = shaders_.prewarm(warmPending_.data(), static_cast<u32>(warmPending_.size()), &processed);
     warmedForProject_ += made;
     if (made) AUREA_LOG_INFO("renderer: %u pipelines do projeto pre-aquecidos em %.1f ms", made,
                              static_cast<double>(monotonic_ns() - started) * 1e-6);
+    // 1.0.6: parou porque a UI pediu o renderMutex_ (set_yield): o resto fica
+    // para o próximo quadro. Parada pelo export (set_abort) descarta como antes
+    // (o que faltar compila no primeiro uso).
+    if (processed < warmPending_.size() && shaders_.yield_requested()) {
+        warmPending_.erase(warmPending_.begin(), warmPending_.begin() + processed);
+        return;
+    }
     warmPending_.clear();
 }
 

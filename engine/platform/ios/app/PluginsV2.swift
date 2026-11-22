@@ -1260,10 +1260,14 @@ struct GradientParamEditor: View {
 /// Alertas, console e consentimento pedidos pelos plugins.
 struct PluginOverlays: View {
     @ObservedObject private var runtime = PluginRuntime.shared
+    /// 1.0.6: o título do alerta fica no último texto: `runtime.alert ?? ""` virava "" no
+    /// fechamento e mudava o alerta ainda na tela (o UIKit aborta nisso).
+    @State private var alertTitle = ""
 
     var body: some View {
         Color.clear.frame(width: 0, height: 0)
-            .alert(runtime.alert ?? "", isPresented: Binding(get: { runtime.alert != nil }, set: { if !$0 { runtime.alert = nil } })) {
+            .onReceive(runtime.$alert) { next in if let next, next != alertTitle { alertTitle = next } }
+            .alert(alertTitle, isPresented: Binding(get: { runtime.alert != nil }, set: { if !$0 { runtime.alert = nil } })) {
                 Button(AureaText.t("common_ok"), role: .cancel) { runtime.alert = nil }
             }
             .sheet(isPresented: Binding(get: { runtime.console != nil }, set: { if !$0 { runtime.console = nil } })) {

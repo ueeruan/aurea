@@ -30,18 +30,47 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 uvMap;
     vec4 texel;
     vec4 p0;   // x,y = centro em uv, z = intensidade, w = reservado
-    vec4 p1;   // x = mistura com o original, y = modo (0 média, 1 mais claro, 2 mais escuro)
+    vec4 p1;   // x = mistura, y = modo, z = separação RGB, w = amostragem adaptativa
     vec4 p2;
     vec4 p3;
     vec4 color;
 } p;
 
 const int kTaps = 24;
+const int kChromaticTaps = 12;
+
+vec4 chromatic_trail(vec2 uv, vec2 delta, float separation) {
+    int taps = kChromaticTaps;
+    if (p.p1.w > 0.5) {
+        float spanInPixels = length(delta / max(p.texel.xy, vec2(0.000001))) * (1.0 + separation);
+        taps = int(clamp(ceil(spanInPixels / 5.0), 4.0, float(kChromaticTaps)));
+    }
+    vec3 colors = vec3(0.0);
+    vec3 alpha = vec3(0.0);
+    for (int i = 0; i < kChromaticTaps; ++i) {
+        if (i >= taps) break;
+        float t = (float(i) + 0.5) / float(taps) - 0.5;
+        vec2 stepUV = delta * t;
+        vec4 r = texture(u_tex0, uv + stepUV * (1.0 + separation));
+        vec4 g = texture(u_tex0, uv + stepUV);
+        vec4 b = texture(u_tex0, uv + stepUV * (1.0 - separation));
+        colors += vec3(r.r, g.g, b.b);
+        alpha += vec3(r.a, g.a, b.a);
+    }
+    // Keep every channel's colored trail in premultiplied space. The widest
+    // alpha footprint covers the separated color without clipping HDR.
+    return vec4(colors, max(alpha.r, max(alpha.g, alpha.b))) / float(taps);
+}
 
 void main() {
     const vec2 uv = v_uv * p.uvMap.xy + p.uvMap.zw;
     const vec2 centre = p.p0.xy;
     const float amount = p.p0.z;
+    if (p.p1.z > 0.0) {
+        vec4 trail = chromatic_trail(uv, (uv - centre) * amount, p.p1.z);
+        o_color = mix(texture(u_tex0, uv), trail, clamp(p.p1.x, 0.0, 1.0));
+        return;
+    }
 
     const int mode = int(p.p1.y + 0.5);
     vec4 sum = vec4(0.0);

@@ -74,6 +74,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.aurea.aurea.R
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.ds.AureaAlert
+import com.aurea.aurea.ui.ds.uniqueListKeys
 import com.aurea.aurea.ui.ds.AureaDialog
 import com.aurea.aurea.ui.ds.DialogAction
 import com.aurea.aurea.ui.ds.DialogRole
@@ -361,6 +362,8 @@ internal fun FontBrowserDialog(store: EditorStore, onPick: (EditorStore.FontItem
                                 }
                             }
                     }
+                    // 1.0.6: a lista do motor pode repetir uma face (chave "1#|0|0" repetida fechava o app).
+                    val keys = remember(visible) { uniqueListKeys(visible) { it.path + "#" + FontPrefs.key(it) } }
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(2),
                         state = gridState,
@@ -369,7 +372,8 @@ internal fun FontBrowserDialog(store: EditorStore, onPick: (EditorStore.FontItem
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(8.dp),
                     ) {
-                        items(visible, key = { it.path + "#" + FontPrefs.key(it) }) { f ->
+                        items(visible.size, key = { keys[it] }) { i ->
+                            val f = visible[i]
                             FontCell(f, query, FontPrefs.key(f) in favorites,
                                 onPick = { onPick(f) },
                                 onFavorite = { FontPrefs.toggleFavorite(f) },

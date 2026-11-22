@@ -281,13 +281,6 @@ internal fun SettingsDrawer(
                 TapRow(stringResource(R.string.settings_stress), stringResource(R.string.settings_stress_note)) {
                     stressSheet = true
                 }
-                // Consentimento de anúncios (UMP/GDPR): só onde a região exige.
-                if (remember { com.aurea.aurea.ads.UmpConsent.opcoesDePrivacidadeExigidas(context) }) {
-                    GroupDivider()
-                    TapRow(stringResource(R.string.settings_ad_privacy), stringResource(R.string.settings_ad_privacy_note)) {
-                        (context.findActivity())?.let { com.aurea.aurea.ads.UmpConsent.mostrarOpcoesDePrivacidade(it) }
-                    }
-                }
             }
         }
         item(key = "sobre") {

@@ -3,11 +3,12 @@
 <!--
   Manifesto de privacidade do Aurea (exigido pela Apple para envio).
 
-  Coletado pelo PRÓPRIO app (os SDKs de anúncio trazem os manifestos deles):
-  - IDFV, só para o limite diário da geração de vídeo por IA (prevenção de
-    abuso). O servidor guarda apenas um HMAC dele. Não liga à pessoa, não rastreia.
-  - Prompt de texto e, no modo imagem→vídeo, a imagem escolhida: vão ao
-    servidor do Aurea e ao provedor de geração (8Scale) para gerar o vídeo.
+  Coletado pelo PRÓPRIO app (1.0.6: sem anúncios, sem SDK de anúncio, sem
+  rastreamento e sem geração de vídeo por IA; o app não lê IDFA nem IDFV):
+  - ID de instalação aleatório (gerado pelo app): o pareamento do AureaMCP e
+    o relatório de crash. Não rastreia.
+  - Conteúdo do usuário (texto do assistente, envios da comunidade/loja) e
+    fotos/vídeos que a pessoa escolhe enviar (Mural, comunidade).
   - E-mail da conta opcional (Conta.swift): cadastro e login. A senha só
     viaja no HTTPS; o servidor guarda um hash PBKDF2, nunca a senha.
   - Relatório de crash (CrashReporter.swift): versão, aparelho, motivo e pilha,

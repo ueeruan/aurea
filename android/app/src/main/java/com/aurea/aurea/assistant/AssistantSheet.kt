@@ -164,7 +164,7 @@ private fun KeyGate(chat: AssistantChat) {
         }
         Spacer(Modifier.height(10.dp))
         Text(stringResource(R.string.ai_key_open), Modifier.clip(RoundedCornerShape(10.dp)).tocavel(role = Role.Button) {
-            uri.openUri("https://openrouter.ai/keys") }.padding(vertical = 8.dp),
+            runCatching { uri.openUri("https://openrouter.ai/keys") } }.padding(vertical = 8.dp),
             style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600, color = AureaColors.Accent)))
         Spacer(Modifier.height(12.dp))
         Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Card).border(1.dp, Line, RoundedCornerShape(14.dp)).padding(14.dp)) {

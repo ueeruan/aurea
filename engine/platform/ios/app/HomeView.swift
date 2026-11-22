@@ -1975,10 +1975,6 @@ struct HomeSettingsDrawer: View {
                         FxEffectPrefs().clearRecents()
                         model.toast = AureaText.t("settings_recents_cleared")
                     }
-                    if UmpConsent.privacyOptionsRequired {
-                        divider
-                        tapRow("settings_ad_privacy", subtitle: AureaText.t("settings_ad_privacy_note")) { UmpConsent.presentPrivacyOptions() }
-                    }
                 }
                 card { tapRow("settings_group_about", subtitle: nil, tag: "home.drawer.about", action: onAbout) }
                 card { tapRow("om_drawer_support", subtitle: AureaText.t("report_title"), tag: "home.drawer.support", action: onSupport) }

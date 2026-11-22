@@ -239,6 +239,67 @@ class AstraExportDeviceTest {
         export("headless-text-spring", 45, 320, 180, false)
     }
 
+    @Test fun explainerWipeAndChromaticZoomRenderAsEditableEffects() {
+        val width = 320
+        val height = 180
+        val frames = 30
+        scene(frames, width, height)
+        val shape = engine.addShape(1)
+        assertTrue(shape > 0)
+        fun edit(block: CommandBatch.() -> Unit) {
+            engine.beginCommandBatch()
+            CommandBatch(engine).block()
+            assertTrue(engine.submitCommands() > 0)
+        }
+        edit {
+            assertTrue(setLayerTimeRange(shape, 0, frames))
+            assertTrue(setPosition(shape, width * .5f, height * .5f, 0f))
+            assertTrue(setShapeFill(shape, 1f, 1f, 1f, 1f))
+        }
+        fun frame(): ByteArray {
+            val rgba = ByteBuffer.allocateDirect(width * height * 4)
+            assertEquals(rgba.capacity(), engine.captureFrame(width, rgba, IntArray(2)))
+            return ByteArray(rgba.capacity()) { rgba.get(it) }
+        }
+        fun add(key: String): Int {
+            val type = effectTypeId(key)
+            edit { assertTrue(addEffect(shape, type)) }
+            frame()
+            val rows = ByteBuffer.allocateDirect(4 * LayerEffect.ROW_BYTES).order(ByteOrder.nativeOrder())
+            val names = ByteBuffer.allocateDirect(1024)
+            val count = engine.queryLayerEffects(shape, rows, 4, names)
+            return List(count) { LayerEffect.read(rows, it, names) }.single { it.typeId == type }.effectId
+        }
+        fun red(pixels: ByteArray, x: Int): Int = pixels[(height / 2 * width + x) * 4].toInt() and 255
+        val original = frame()
+        val wipe = add("aurea.transition.range_wipe")
+        assertArrayEquals("An open wipe keeps the original", original, frame())
+        edit {
+            assertTrue(setEffectParam(shape, wipe, 0, 25f))
+            assertTrue(setEffectParam(shape, wipe, 1, 75f))
+        }
+        val strip = frame()
+        for (x in listOf(width / 2 - 20, width / 2 + 20)) {
+            assertTrue(red(original, x) > 200)
+            assertTrue(red(strip, x) < 100)
+        }
+        assertTrue(red(strip, width / 2) > 200)
+        edit { assertTrue(setEffectEnabled(shape, wipe, false)) }
+
+        val blur = add("aurea.blur.chromatic_zoom")
+        edit {
+            assertTrue(setEffectParam(shape, blur, 1, 160f))
+            assertTrue(setEffectParam(shape, blur, 4, 80f))
+        }
+        fun coloredPixels(pixels: ByteArray): Int = (0 until width * height).count {
+            val offset = it * 4
+            kotlin.math.abs((pixels[offset].toInt() and 255) - (pixels[offset + 2].toInt() and 255)) > 20
+        }
+        assertTrue("Zoom trails separate RGB on a neutral subject", coloredPixels(frame()) > 50)
+        edit { assertTrue(setEffectParam(shape, blur, 4, 0f)) }
+        assertEquals("Zero separation keeps neutral colors", 0, coloredPixels(frame()))
+    }
+
     @Test fun textPrismRendersLiveTextStackedGradientsAndAlpha() {
         val frames = 30
         val width = 480

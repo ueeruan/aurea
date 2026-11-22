@@ -126,8 +126,8 @@ android {
         minSdk = 26
         targetSdk = 36
         // Deve superar os builds 2181–2191 já distribuídos; nunca reduzir o código.
-        versionCode = 2226
-        versionName = "1.0.5"
+        versionCode = 2227
+        versionName = "1.0.6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -425,15 +425,12 @@ dependencies {
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 
-    // Anúncios (AdMob) + consentimento oficial do Google (UMP). Só o pacote
-    // `ads` do app importa isto (GoogleAdsBackend).
-    implementation(libs.play.services.ads)
-    implementation(libs.ump)
-    implementation(libs.appset)
+    // 22/11/2026: sem SDK de anúncio nem de consentimento e sem a geração de
+    // vídeo por IA (App Set ID) — o dono tirou tudo.
     // GoogleApiHandler can hold the service map during Binder IPC while the
     // supervisor's main-thread Handler waits for it (reported ANR). Keep the
-    // documented background-callback fix even when Ads/AppSet request older
-    // transitive libraries. Constraints do not add unused Google components.
+    // documented background-callback fix even when Firebase/ML Kit/Credentials
+    // request older transitive libraries. Constraints do not add unused Google components.
     // https://developers.google.com/android/guides/releases#january_12_2026
     constraints {
         implementation(libs.play.services.base) {
@@ -446,12 +443,6 @@ dependencies {
             because("Match the documented 18.10 service-binding dependency family")
         }
     }
-    // Unity LevelPlay (mediação) — o provedor ATIVO no Android. O AdMob acima
-    // fica para entrar depois como rede mediada pelo LevelPlay; o UMP segue
-    // sendo o consentimento (TCF) que o LevelPlay e as redes leem.
-    implementation(libs.levelplay)
-    implementation(libs.levelplay.unityads.adapter)
-    implementation(libs.unity.ads)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")

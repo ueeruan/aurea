@@ -22,8 +22,6 @@ import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.snapshotFlow
 import androidx.lifecycle.lifecycleScope
-import com.aurea.aurea.ads.AureaAds
-import com.aurea.aurea.ads.AureaAdsManager
 import com.aurea.aurea.conta.ContaEstado
 import com.aurea.aurea.conta.ContaViewModel
 import com.aurea.aurea.diagnostics.CrashReporter
@@ -82,6 +80,36 @@ class MainActivity : ComponentActivity() {
             resources.updateConfiguration(fixed, resources.displayMetrics)
         }
         super.onConfigurationChanged(fixed ?: newConfig)
+    }
+
+    /**
+     * 1.0.6: TODO seletor do app (`rememberLauncherForActivityResult`: abrir
+     * documento, pasta, câmera, criar arquivo…) passa por aqui. Num aparelho
+     * sem o app de Arquivos (ou com ele desligado) o `launch` lançava
+     * ActivityNotFoundException e fechava o app (OPEN_DOCUMENT no AudioBrowser,
+     * build 2222). Agora: aviso na tela e o pedido volta como "cancelado" para
+     * quem esperava a resposta (o callback recebe nulo/vazio, como se a pessoa
+     * tivesse desistido).
+     *
+     * Só os pedidos com resposta (requestCode >= 0, os do ActivityResultRegistry):
+     * um `startActivity` comum (-1) continua lançando para quem já trata a falha
+     * com um caminho alternativo (doação, notas da versão, perfil).
+     */
+    @Deprecated("Deprecated in Java")
+    @Suppress("DEPRECATION")
+    override fun startActivityForResult(intent: Intent, requestCode: Int, options: Bundle?) {
+        if (requestCode < 0) return super.startActivityForResult(intent, requestCode, options)
+        try {
+            super.startActivityForResult(intent, requestCode, options)
+        } catch (failure: RuntimeException) {
+            if (failure !is android.content.ActivityNotFoundException && failure !is SecurityException) throw failure
+            android.util.Log.w("Aurea", "nenhum app para ${intent.action}", failure)
+            runCatching { store.showToast(getString(R.string.common_no_app_for_action)) }
+            // Depois de o launch voltar: quem chamou ainda pode estar marcando "esperando".
+            window.decorView.post {
+                runCatching { activityResultRegistry.dispatchResult(requestCode, RESULT_CANCELED, null) }
+            }
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -350,35 +378,16 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Anúncios: consentimento + SDK fora do caminho do app (nada aqui espera).
-        // 0.5.3: sai de dentro do onCreate. Para quem já deu o consentimento, a
-        // chamada fazia na thread principal, antes do primeiro quadro, a consulta ao
-        // provedor do WebView (IPC), o UMP e o LevelPlay.init. Agora roda logo depois
-        // do primeiro desenho da janela; o caminho do App Open garante a ordem abaixo.
-        window.decorView.post { iniciarAnuncios() }
         if (savedInstanceState == null) {
-            // Abertura fria: o App Open só tem chance no instante em que o Aurea
-            // termina de carregar. Se o anúncio não estiver pronto nessa hora, a
-            // Home segue e ele não aparece depois.
             lifecycleScope.launch {
                 snapshotFlow { store.engineReady }.first { it }
                 // 0.5.3 (medição): o sistema registra "Fully drawn" no logcat com o
                 // tempo da abertura até o motor pronto. Nada muda na tela.
                 runCatching { reportFullyDrawn() }
-                iniciarAnuncios()   // mesma ordem de antes: o SDK começa antes do "app carregou"
-                AureaAdsManager.onAppLoaded(this@MainActivity, trabalhando())
             }
         }
         // Bugs 0.3.4 (importar projeto): aberto por um arquivo do projeto.
         if (savedInstanceState == null && !com.aurea.aurea.mcp.AureaMcp.openPairLink(intent?.dataString)) importProjectFileFrom(intent)
-    }
-
-    private var anunciosIniciados = false
-    /** Uma vez por Activity, na thread principal (AureaAds.initialize ignora repetição). */
-    private fun iniciarAnuncios() {
-        if (anunciosIniciados || isDestroyed) return
-        anunciosIniciados = true
-        AureaAds.initialize(this)
     }
 
     // Bugs 0.3.4 (importar projeto): com o app já aberto (singleTask), o
@@ -418,9 +427,6 @@ class MainActivity : ComponentActivity() {
         return uri.takeIf { it.scheme == android.content.ContentResolver.SCHEME_CONTENT }
     }
 
-    /** No editor, exportando ou na tela de conta: nenhum App Open. */
-    private fun trabalhando(): Boolean = store.screen == Screen.Editor || store.exporter.busy || !conta.logado
-
     override fun onStart() {
         super.onStart()
         CrashReporter.primeiroPlano(this, true)
@@ -431,12 +437,11 @@ class MainActivity : ComponentActivity() {
         store.onEnterForeground()
         // AureaMCP: na frente (o serviço do agente só pode começar daqui).
         opcional("mcp") { com.aurea.aurea.mcp.McpAgentHub.markForeground(true) }
-        opcional("ads") { AureaAdsManager.onForeground(this, trabalhando()) }
     }
 
     /**
      * Bug #2 (abre e fecha): um serviço OPCIONAL (config remota, conta, Hyper,
-     * anúncios) que falhe fica no log; o app continua aberto sem ele.
+     * AureaMCP) que falhe fica no log; o app continua aberto sem ele.
      */
     private inline fun opcional(nome: String, bloco: () -> Unit) {
         try {
@@ -448,9 +453,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        AureaAdsManager.attach(this)
-        // O WebView do anúncio pode ter gravado o resumo de estado do processo
-        // por cima da nossa etapa enquanto estava na frente.
+        // Um WebView pode ter gravado o resumo de estado do processo por cima
+        // da nossa etapa enquanto estava na frente.
         com.aurea.aurea.diagnostics.ExitDiagnostics.reassert(this)
     }
 
@@ -458,14 +462,12 @@ class MainActivity : ComponentActivity() {
         // Grava já no onPause (fora da main): arrastar o app para fora dos
         // recentes mata o processo sem esperar pelo onStop.
         store.onLeaving()
-        AureaAdsManager.detach(this)
         super.onPause()
     }
 
     override fun onStop() {
         opcional("mcp") { com.aurea.aurea.mcp.McpAgentHub.markForeground(false) }
         store.onEnterBackground()
-        AureaAdsManager.onBackground()
         CrashReporter.primeiroPlano(this, false)
         super.onStop()
     }

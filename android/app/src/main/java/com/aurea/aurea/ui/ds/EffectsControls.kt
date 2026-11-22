@@ -331,7 +331,7 @@ fun AureaSlider(
             .semantics {
                 contentDescription = a11yLabel
                 stateDescription = a11yValue
-                if (lo < hi) progressBarRangeInfo = ProgressBarRangeInfo(value.coerceIn(lo, hi), lo..hi)
+                if (lo < hi && !value.isNaN()) progressBarRangeInfo = ProgressBarRangeInfo(value.coerceIn(lo, hi), lo..hi)
                 if (!enabled) disabled() else setProgress { next ->
                     if (!next.isFinite()) return@setProgress false
                     begin(); send(next.coerceIn(lo, hi)); finish(); true

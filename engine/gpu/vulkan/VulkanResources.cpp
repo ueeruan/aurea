@@ -1008,6 +1008,26 @@ u64 Backend::publish_pipeline(PipelineObject&& p, const PipelineIdentity* identi
     return pipelines_.add(std::move(p));
 }
 
+u64 Backend::pipeline_guard_key(const PipelineDesc& desc, const PipelineIdentity* identity) const noexcept {
+    // Estável entre aberturas: a identidade usa o hash do SPIR-V (não ids de
+    // handle). Sem identidade (shader exclusivo), o nome + tipo.
+    u64 key = 0;
+    if (identity) {
+        key = identity->hash();
+    } else if (desc.debugName && *desc.debugName) {
+        key = 1469598103934665603ull;
+        for (const char* s = desc.debugName; *s; ++s) key = (key ^ static_cast<u8>(*s)) * 1099511628211ull;
+        key ^= desc.isCompute ? 0x9e3779b97f4a7c15ull : 0x7f4a7c159e3779b9ull;
+    }
+    return key;
+}
+
+u64 Backend::guard_key_for_tests(const PipelineDesc& desc) noexcept {
+    PipelineIdentity identity;
+    const bool shareable = pipeline_identity(desc, identity);
+    return pipeline_guard_key(desc, shareable ? &identity : nullptr);
+}
+
 Result<PipelineHandle> Backend::create_pipeline(const PipelineDesc& desc) noexcept {
     PipelineObject p;
     p.layout = pipeline_layout(desc.immutableSampler0.id, p.setLayout);
@@ -1017,6 +1037,13 @@ Result<PipelineHandle> Backend::create_pipeline(const PipelineDesc& desc) noexce
     // sem passar pelo compilador do driver.
     PipelineIdentity identity;
     const bool shareable = pipeline_identity(desc, identity);
+    // 1.0.6: este pipeline já derrubou o driver deste aparelho (guarda de
+    // travamento): falha como pipeline recusado, sem entrar no driver.
+    p.guardKey = pipeline_guard_key(desc, shareable ? &identity : nullptr);
+    if (desc.debugName) std::snprintf(p.guardName, sizeof(p.guardName), "%s", desc.debugName);
+    if (pipeline_blocked(p.guardKey)) {
+        return Status{Errc::PipelineCompileFailed, "pipeline bloqueado: travou o driver deste aparelho"};
+    }
     if (shareable) {
         const auto it = sharedPipelines_.find(identity.hash());
         if (it != sharedPipelines_.end() && it->second.identity == identity) {
@@ -1038,7 +1065,13 @@ Result<PipelineHandle> Backend::create_pipeline(const PipelineDesc& desc) noexce
         info.stage.module = cs->module;
         info.stage.pName = "main";
         info.layout = p.layout;
-        if (deviceFunctions_.vkCreateComputePipelines(device_, pipelineCache_, 1, &info, nullptr, &p.pipeline) != VK_SUCCESS) {
+        guard_begin(p.guardKey, desc.debugName);
+        const VkResult made = deviceFunctions_.vkCreateComputePipelines(device_, pipelineCache_, 1, &info, nullptr, &p.pipeline);
+        guard_end();
+        // Driver que devolve VK_SUCCESS sem objeto: o pipeline nulo amarrado
+        // derrubaria o vkCmdDispatch depois. Trata como recusado.
+        if (made != VK_SUCCESS || p.pipeline == VK_NULL_HANDLE) {
+            if (made == VK_SUCCESS) AUREA_LOG_ERROR("vulkan: '%s' compilou sem objeto (VK_SUCCESS nulo)", desc.debugName ? desc.debugName : "?");
             return Status{Errc::PipelineCompileFailed, desc.debugName};
         }
         pipelineCacheDirty_ = true;
@@ -1186,7 +1219,11 @@ Result<PipelineHandle> Backend::create_pipeline(const PipelineDesc& desc) noexce
     }
     info.subpass = 0;
     if (!info.renderPass) return Status{Errc::PipelineCompileFailed, "render pass"};
-    if (deviceFunctions_.vkCreateGraphicsPipelines(device_, pipelineCache_, 1, &info, nullptr, &p.pipeline) != VK_SUCCESS) {
+    guard_begin(p.guardKey, desc.debugName);
+    const VkResult made = deviceFunctions_.vkCreateGraphicsPipelines(device_, pipelineCache_, 1, &info, nullptr, &p.pipeline);
+    guard_end();
+    if (made != VK_SUCCESS || p.pipeline == VK_NULL_HANDLE) {
+        if (made == VK_SUCCESS) AUREA_LOG_ERROR("vulkan: '%s' compilou sem objeto (VK_SUCCESS nulo)", desc.debugName ? desc.debugName : "?");
         return Status{Errc::PipelineCompileFailed, desc.debugName};
     }
     pipelineCacheDirty_ = true;

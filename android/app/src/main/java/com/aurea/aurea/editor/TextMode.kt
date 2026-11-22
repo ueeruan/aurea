@@ -196,7 +196,7 @@ internal fun TextStyleBar(store: EditorStore) {
                     val c = detail?.color ?: floatArrayOf(1f, 1f, 1f, 1f)
                     StylePiece(Modifier.width(38.dp), stringResource(R.string.om_txm_color_cd), "text.style.color",
                         active = popup == TextPopup.Color, onClick = { toggle(TextPopup.Color) }) { _ ->
-                        ColorDot(Color(c[0], c[1], c[2], c.getOrElse(3) { 1f }))
+                        ColorDot(com.aurea.aurea.ui.ds.swatchColor(c[0], c[1], c[2], c.getOrElse(3) { 1f }))
                     }
                 }
                 val blank = is3D && (TextModeState.draftBlank || store.text3d?.content.isNullOrBlank() == true)
@@ -437,7 +437,7 @@ private fun ColorPopup(store: EditorStore) {
     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopEnd) {
         Box(Modifier.width(281.dp).background(AureaColors.ContentStyleButton).padding(8.dp)) {
             ContentColorPicker(
-                color = Color(c[0], c[1], c[2], c.getOrElse(3) { 1f }),
+                color = com.aurea.aurea.ui.ds.swatchColor(c[0], c[1], c[2], c.getOrElse(3) { 1f }),
                 tag = "text.color.picker",
                 label = stringResource(R.string.om_txm_color_cd),
                 onStart = { store.beginGesture("cor do texto") },

@@ -79,8 +79,14 @@ struct PreviewMetalView: UIViewRepresentable {
         // A view desanexa a superfície no `deinit`/`didMoveToWindow`, mas o
         // caminho explícito aqui garante a ordem quando a tela é trocada.
         view.isPaused = true
-        coordinator.finishStageEdit()
         view.engine = nil
+        // 1.0.6: NÃO publicar (@Published) daqui. O dismantle roda no meio da
+        // atualização do grafo do SwiftUI que está desmontando a view; mudar
+        // `model.stageManipulating`/`shell.*` aqui reentrava o grafo e abortava
+        // (sinal 6 em SwiftUICore ← Combine ← finishStageEdit ← dismantleUIView:
+        // ~150 relatórios do MetricKit em 2223/2224). O fim do gesto vai para a
+        // próxima volta do runloop, e só escreve o que de fato mudou.
+        DispatchQueue.main.async { coordinator.finishStageEdit() }
     }
 
     // =========================================================================
@@ -487,9 +493,16 @@ struct PreviewMetalView: UIViewRepresentable {
             markerHold?.cancel(); markerHold = nil
             markerAnchorLayer = nil
             if editBegan { model.endGesture() }
-            editBegan = false; model.stageManipulating = false
-            shell.snapX = nil; shell.snapY = nil; shell.grabbedHandle = -1; shell.grabbedShapeHandle = -1
-            shell.grabbedResizeHandle = -1; resizeHandle = -1
+            editBegan = false
+            // Só escreve o que mudou: cada atribuição a um @Published dispara o
+            // objectWillChange (redesenho da árvore) mesmo com o mesmo valor.
+            if model.stageManipulating { model.stageManipulating = false }
+            if shell.snapX != nil { shell.snapX = nil }
+            if shell.snapY != nil { shell.snapY = nil }
+            if shell.grabbedHandle != -1 { shell.grabbedHandle = -1 }
+            if shell.grabbedShapeHandle != -1 { shell.grabbedShapeHandle = -1 }
+            if shell.grabbedResizeHandle != -1 { shell.grabbedResizeHandle = -1 }
+            resizeHandle = -1
         }
         private func keepTransform() {
             startPosition = vector(model.detail["position"])

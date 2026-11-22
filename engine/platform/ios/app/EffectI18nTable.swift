@@ -3470,6 +3470,16 @@ enum EffectI18nTable {
     aurea.text.prism|56|range_offset|fxl_range_offset|
     aurea.text.prism|57|wrap_cycle|fxl_wrap_cycle|
     aurea.text.prism|58|mirror_palette|fxl_mirror_palette|
+    aurea.transition.range_wipe|0|start|fxl_start|
+    aurea.transition.range_wipe|1|end|fxl_end|
+    aurea.transition.range_wipe|2|angle|fx_angulo|
+    aurea.transition.range_wipe|3|feather|fxl_softness|
+    aurea.blur.chromatic_zoom|0|center|fx_centro|
+    aurea.blur.chromatic_zoom|1|amount|fx_intensidade|
+    aurea.blur.chromatic_zoom|2|repeat_edge|fx_esticar_bordas|
+    aurea.blur.chromatic_zoom|3|mix|fx_mistura|
+    aurea.blur.chromatic_zoom|4|separation|fxl_rgb_separation|
+    aurea.blur.chromatic_zoom|5|adaptive|fxl_adaptive_sampling|
     """
 
     /// "typeId#índice" → dica do parâmetro.

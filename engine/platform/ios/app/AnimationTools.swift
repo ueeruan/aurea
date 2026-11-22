@@ -1883,7 +1883,11 @@ private struct TimeRemapTouchSurface: UIViewRepresentable {
         return view
     }
     func updateUIView(_ uiView: UIView, context: Context) { context.coordinator.owner = self }
-    static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) { coordinator.finish() }
+    /// 1.0.6: o `onEnd` publica no modelo; de dentro do dismantle isso reentra o grafo
+    /// do SwiftUI que está desmontando (abort). Vai para a próxima volta do runloop.
+    static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) {
+        DispatchQueue.main.async { coordinator.finish() }
+    }
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var owner: TimeRemapTouchSurface
         private var index: Int?

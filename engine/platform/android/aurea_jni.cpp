@@ -3373,9 +3373,16 @@ AUREA_JNI jlong AUREA_FN(nativeClearProxyCache)(JNIEnv*, jclass, jlong handle) {
 }
 
 namespace {
+// 1.0.6: TAB/quebra de linha num campo partiam a linha (face fantasma, chave
+// repetida no navegador de fontes). O FontManager já limpa os nomes; aqui o
+// formato da linha se defende sozinho (caminho incluído).
+std::string font_field(std::string s) {
+    for (char& ch : s) if (ch == '\t' || ch == '\n' || ch == '\r') ch = ' ';
+    return s;
+}
 std::string font_line(const aurea::text::FontEntry& e) {
     // Omega conteúdo (área 06): + categoria e escritas (bits) no fim da linha.
-    return e.family + "\t" + e.style + "\t" + std::to_string(e.weight) + "\t" + (e.italic ? "1" : "0") + "\t" + e.path + "\t" + (e.imported ? "1" : "0")
+    return font_field(e.family) + "\t" + font_field(e.style) + "\t" + std::to_string(e.weight) + "\t" + (e.italic ? "1" : "0") + "\t" + font_field(e.path) + "\t" + (e.imported ? "1" : "0")
          + "\t" + std::to_string(static_cast<unsigned>(e.category)) + "\t" + std::to_string(e.scripts);
 }
 } // namespace

@@ -192,9 +192,8 @@ def main():
 
     sources_block = re.search(r"/\* Begin PBXSourcesBuildPhase section \*/(.*?)/\* End", text, flags=re.S)
     swift_files = sorted(n for _, _, files in os.walk(os.path.join(IOS, "app")) for n in files if n.endswith(".swift"))
-    # Kept as a reference adapter, explicitly disabled in its source. LevelPlay
-    # is the active SDK; this file must not silently pull GoogleAds into the app.
-    inactive_swift = {"GoogleAdsBackend.swift"}
+    # 1.0.6: no inactive adapters (the ad SDKs and app/Ads/ were removed).
+    inactive_swift = set()
     objcxx_files = sorted(n for n in os.listdir(os.path.join(IOS, "bridge")) if n.endswith(".mm"))
     if not sources_block:
         fail("nao achei a secao de PBXSourcesBuildPhase")

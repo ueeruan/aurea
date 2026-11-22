@@ -207,7 +207,6 @@ struct TopBarView: View {
         case .tracking: return AureaText.t("panel_rastreio")
         case .captions: return AureaText.t("panel_legendas")
         case .vector: return AureaText.t(model.vectorFace == .fill ? "panel_cor_preenchimento" : "fn_vec_paths_title")
-        case .aiVideo: return AureaText.t("panel_ai_video")
         case .filters: return AureaText.t("grade_title_filters")
         case .adjust: return AureaText.t("grade_title_adjust")
         // Omega aparência (área 05).

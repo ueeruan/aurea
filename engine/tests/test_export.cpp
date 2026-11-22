@@ -39,6 +39,7 @@ namespace aurea { namespace vk = gles; }
 #include "aurea/export/OfflineFrameRenderer.hpp"
 #include "NativeExportVerifier.hpp"
 #include "aurea/project/FileIO.hpp"
+#include "aurea/render/ShaderLibrary.hpp"
 #include "aurea/audio/AudioEffects.hpp"
 #include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/effects/Parameter.hpp"
@@ -3110,3 +3111,108 @@ AUREA_TEST(ExportWatchdogRules, StreamEndsWithoutEosOnlyWhenEverythingCameOut) {
 #include "ExportDiagnosticsProbe.inl"
 #include "ExportDirectSurface.inl"
 #include "ExportSourceText.inl"
+
+#if !defined(AUREA_TEST_METAL) && !defined(AUREA_TEST_GLES)
+// 1.0.6 (frente engine): guarda de travamento do driver. SIGSEGV dentro do
+// vulkan.adreno.so (vkCmdDispatch, fault 0xf0) ou do vulkan.sp9863a.so
+// (vkCreateGraphicsPipelines) mata o processo sem VkResult. O marcador no cache
+// guarda a chave da chamada em curso; duas mortes com a mesma chave no mesmo
+// driver bloqueiam o pipeline (falha como recusado, o efeito sai em bypass).
+AUREA_TEST(VulkanCrashGuard, TwoDeathsInsideTheDriverBlockThatPipelineOnly) {
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "aurea_vk_guard_test";
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    fs::create_directories(dir, ec);
+    const std::string dirText = dir.string();
+    const std::string marker = (dir / "aurea_vk_guard.txt").string();
+    BackendConfig cfg;
+    cfg.cacheDirectory = dirText.c_str();
+    // Registro de 64 bytes como o do backend; o byte 62 = 'C' e o que o
+    // tratador de SIGSEGV marca (morte por SIGKILL deixa ' ' e nao conta).
+    auto write_marker = [&](u64 key, bool crashed) {
+        char rec[64];
+        std::memset(rec, ' ', sizeof(rec));
+        const int n = std::snprintf(rec, sizeof(rec), "%016llx teste-dispatch", static_cast<unsigned long long>(key));
+        if (n > 0 && n < 64) rec[n] = ' ';
+        rec[62] = crashed ? 'C' : ' ';
+        rec[63] = '\n';
+        std::FILE* f = std::fopen(marker.c_str(), "wb");
+        AUREA_CHECK(f != nullptr);
+        if (!f) return;
+        std::fwrite(rec, 1, sizeof(rec), f);
+        std::fclose(f);
+    };
+    auto make = [&](vk::Backend& b, ShaderLibrary& lib, PipelineDesc& desc) {
+        AUREA_CHECK(b.initialize(cfg).ok());
+        AUREA_CHECK(lib.initialize(b).ok());
+        // Shaders adiados: o pedido do pipeline carrega o modulo (e, bloqueado,
+        // falha sem entrar no driver; o modulo fica carregado).
+        (void)lib.pipeline(PipelineKey::compute_shader(ShaderId::effects_pixel_sort_comp));
+        (void)lib.pipeline(PipelineKey::compute_shader(ShaderId::effects_signal_reference_comp));
+        desc = PipelineDesc{};
+        desc.isCompute = true;
+        desc.computeShader = lib.shader(ShaderId::effects_pixel_sort_comp);
+        desc.debugName = "teste-dispatch";
+    };
+
+    u64 key = 0;
+    {
+        vk::Backend b; ShaderLibrary lib; PipelineDesc desc;
+        make(b, lib, desc);
+        if (!desc.computeShader.valid()) { lib.shutdown(); b.shutdown(); std::printf("(sem shader de compute: pulado) "); return; }
+        key = b.guard_key_for_tests(desc);
+        AUREA_CHECK(key != 0);
+        auto p = b.create_pipeline(desc);
+        AUREA_CHECK(p.ok());
+        if (p.ok()) b.destroy_pipeline(*p);
+        lib.shutdown();
+        b.shutdown();   // saída limpa: o marcador fica zerado
+    }
+    {
+        // Morto pelo sistema (SIGKILL) no meio da chamada: nao conta.
+        write_marker(key, false);
+        vk::Backend b; ShaderLibrary lib; PipelineDesc desc;
+        make(b, lib, desc);
+        AUREA_CHECK_EQ(b.blocked_pipeline_count(), 0u);
+        lib.shutdown();
+        b.shutdown();
+    }
+    for (u32 death = 1; death <= 2; ++death) {
+        write_marker(key, true);   // o processo "morreu" (SIGSEGV) dentro do driver
+        vk::Backend b; ShaderLibrary lib; PipelineDesc desc;
+        make(b, lib, desc);
+        auto p = b.create_pipeline(desc);
+        if (death == 1) {
+            AUREA_CHECK_EQ(b.blocked_pipeline_count(), 0u);
+            AUREA_CHECK(p.ok());
+        } else {
+            AUREA_CHECK_EQ(b.blocked_pipeline_count(), 1u);
+            AUREA_CHECK(!p.ok());
+            AUREA_CHECK(p.status().code() == Errc::PipelineCompileFailed);
+        }
+        if (p.ok()) b.destroy_pipeline(*p);
+        // Outro pipeline segue normal.
+        PipelineDesc other = desc;
+        other.computeShader = lib.shader(ShaderId::effects_signal_reference_comp);
+        other.debugName = "outro";
+        if (other.computeShader.valid()) {
+            auto q = b.create_pipeline(other);
+            AUREA_CHECK(q.ok());
+            if (q.ok()) b.destroy_pipeline(*q);
+        }
+        lib.shutdown();
+        b.shutdown();
+    }
+    {
+        // Sem morte nova: o bloqueio continua (mesmo driver), sem contar de novo.
+        vk::Backend b; ShaderLibrary lib; PipelineDesc desc;
+        make(b, lib, desc);
+        AUREA_CHECK_EQ(b.blocked_pipeline_count(), 1u);
+        lib.shutdown();
+        b.shutdown();
+    }
+    fs::remove_all(dir, ec);
+}
+#endif

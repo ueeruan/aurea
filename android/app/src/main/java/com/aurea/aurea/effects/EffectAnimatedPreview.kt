@@ -137,15 +137,22 @@ class EffectAnimatedPreviewStore(
         val count = file.name.removePrefix("$key-n").removeSuffix(".webp").toIntOrNull()?.takeIf { it in 1..64 }
             ?: run { file.delete(); return null }
         val strip = runCatching { BitmapFactory.decodeFile(file.path) }.getOrNull() ?: run { file.delete(); return null }
+        // 1.0.6: com um quadro só, createBitmap devolve a própria tira — reciclá-la
+        // deixava a prévia apontando para um bitmap morto ("recycled bitmap" no desenho).
+        var keepStrip = false
         return try {
             val h = strip.height / count
             if (h <= 0 || strip.width <= 0) { file.delete(); return null }
             file.setLastModified(System.currentTimeMillis())   // LRU: usado agora
-            List(count) { i -> Bitmap.createBitmap(strip, 0, i * h, strip.width, h).asImageBitmap() }
+            List(count) { i ->
+                val frame = Bitmap.createBitmap(strip, 0, i * h, strip.width, h)
+                if (frame === strip) keepStrip = true
+                frame.asImageBitmap()
+            }
         } catch (_: Throwable) {
             file.delete(); null
         } finally {
-            strip.recycle()
+            if (!keepStrip) strip.recycle()
         }
     }
 

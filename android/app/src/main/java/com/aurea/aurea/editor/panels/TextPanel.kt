@@ -353,7 +353,7 @@ internal fun TextBackdropRows(env: PanelEnv) {
     Column(Modifier.fillMaxWidth().testTag("text.sec.backdrop")) {
         ToggleLine(stringResource(R.string.panel_fundo), v[3] > 0.5f) { store.setTextStyleValue(3, if (it) 1f else 0f) }
         if (v[3] > 0.5f) {
-            ColorLine(stringResource(R.string.panel_cor), Color(v[4], v[5], v[6])) {
+            ColorLine(stringResource(R.string.panel_cor), com.aurea.aurea.ui.ds.swatchColor(v[4], v[5], v[6])) {
                 store.beginGesture("cor do fundo do texto")
                 env.openColor(ColorRequest(floatArrayOf(v[4], v[5], v[6], v[7]),
                     onChange = { r, g, b, a -> store.setTextStyleValues(mapOf(4 to r, 5 to g, 6 to b, 7 to a)) }, onDone = { store.endGesture() }))

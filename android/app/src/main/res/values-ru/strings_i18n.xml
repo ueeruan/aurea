@@ -190,10 +190,6 @@
     <string name="i18n_timeline_surface">Таймлайн Aurea</string>
     <string name="i18n_caption_source_cache">кэш</string>
     <string name="i18n_caption_source_whisper">локальный Whisper</string>
-    <string name="ai_state_searching">Поиск</string>
-    <string name="ai_state_online">В сети</string>
-    <string name="ai_state_reconnecting">Переподключение</string>
-    <string name="ai_state_offline">Не в сети</string>
     <string name="perf_section_test">Тест на вашем iPhone</string>
     <string name="perf_intro">Откройте проект с видео. Отчёт измеряет превью, CPU/GPU, декодирование, память, звук и паузы интерфейса. Видео на сервер не отправляется.</string>
     <string name="perf_mark_stall">Отметить: зависло здесь</string>

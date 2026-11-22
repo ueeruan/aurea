@@ -135,7 +135,7 @@ internal fun AureaPropertyPanel(
                                     modifier = Modifier.weight(1f).testTag("property.$domain.${spec.id}.$c")
                                         .semantics {
                                             contentDescription = "$label · $channelLabel"
-                                            progressBarRangeInfo = ProgressBarRangeInfo(channelValue, 0f..factor)
+                                            progressBarRangeInfo = ProgressBarRangeInfo(if (channelValue.isNaN()) 0f else channelValue, 0f..factor)
                                             if (!enabled) disabled() else setProgress { write(spec, c, convert(it.coerceIn(0f, factor))); true }
                                         })
                                 keyButton(c)
@@ -154,7 +154,7 @@ internal fun AureaPropertyPanel(
                                 enabled = enabled, keyframe = look,
                                 modifier = Modifier.weight(1f).testTag("property.$domain.${spec.id}").semantics {
                                     contentDescription = label
-                                    progressBarRangeInfo = ProgressBarRangeInfo(value.coerceIn(lo, hi), lo..hi)
+                                    progressBarRangeInfo = ProgressBarRangeInfo(if (value.isNaN()) lo else value.coerceIn(lo, hi), lo..hi)
                                     if (!enabled) disabled() else setProgress { write(spec, 0, it.coerceIn(lo, hi) / scale); true }
                                 })
                             keyButton()

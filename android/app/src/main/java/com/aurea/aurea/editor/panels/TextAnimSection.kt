@@ -541,7 +541,7 @@ private val InterCharBlends = listOf(
 private fun AnimatorColor(env: PanelEnv, index: Int, label: String, base: Int, v: FloatArray) {
     val store = env.store
     val slot = if (base == 6) 28 else 32
-    ColorLine(label, Color(v[slot], v[slot + 1], v[slot + 2])) {
+    ColorLine(label, com.aurea.aurea.ui.ds.swatchColor(v[slot], v[slot + 1], v[slot + 2])) {
         env.openColor(ColorRequest(floatArrayOf(v[slot], v[slot + 1], v[slot + 2], 1f),
             onChange = { r, g, b, _ -> store.setTextAnimParam(index, base, r); store.setTextAnimParam(index, base + 1, g); store.setTextAnimParam(index, base + 2, b) },
             onDone = {}))

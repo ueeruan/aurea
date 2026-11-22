@@ -338,7 +338,8 @@ private fun PluginControl(
                                 onDragEnd = { live?.let { PluginRuntime.event(id, c.id, "change", it.toString()) }; live = null },
                                 onDragCancel = { live = null },
                             ) { _, dx ->
-                                acc = (acc - dx / density * perDp).coerceIn(c.min, c.max)
+                                // 1.0.6: min/max vêm do JSON do plugin e podem vir invertidos.
+                                acc = (acc - dx / density * perDp).coerceIn(minOf(c.min, c.max), maxOf(c.min, c.max))
                                 live = acc
                             }
                         },

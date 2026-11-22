@@ -1339,6 +1339,27 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             1 to ParamHuman(label = R.string.fx_luminosidade, decimals = 0),
             2 to ParamHuman(label = R.string.fx_saturacao, decimals = 0),
         )))
+    put("aurea.transition.range_wipe", EffectHuman(
+        name = R.string.fx_name_range_wipe,
+        keywords = "wipe linear crop reveal mask revelar recorte varredura inicio fim",
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fxl_start),
+            1 to ParamHuman(label = R.string.fxl_end),
+            2 to ParamHuman(label = R.string.fx_angulo),
+            3 to ParamHuman(label = R.string.fxl_softness),
+        )))
+    put("aurea.blur.chromatic_zoom", EffectHuman(
+        name = R.string.fx_name_chromatic_zoom,
+        keywords = "chromatic zoom blur rgb aberration desfoque zoom cromatico separacao radial",
+        principal = listOf(0, 1, 4, 5),
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_centro),
+            1 to ParamHuman(label = R.string.fx_intensidade),
+            2 to ParamHuman(label = R.string.fx_esticar_bordas),
+            3 to ParamHuman(label = R.string.fx_mistura),
+            4 to ParamHuman(label = R.string.fxl_rgb_separation),
+            5 to ParamHuman(label = R.string.fxl_adaptive_sampling),
+        )))
     put("aurea.blur.zoom", EffectHuman(
         name = R.string.fx_name_zoom_blur,
         keywords = "zoom rastro radial lente empurrar desfoque cc fast blur cc radial fast blur radial fast blur mais claro mais escuro brightest darkest",

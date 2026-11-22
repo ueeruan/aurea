@@ -290,14 +290,17 @@ struct ReaderState {
 class CodecFrame final : public DecodedFrame {
 public:
     bool owns_cpu_backing() const noexcept override {
-        return !image && !owner && !compact.empty() && planes[0] == compact.data() && compact.size() >= approx_bytes();
+        return !image && !owner && compact && planes[0] == compact.get() && compactBytes >= approx_bytes();
     }
     ~CodecFrame() override {
         if (image) AImage_delete(image);
     }
     AImage* image = nullptr;
     std::shared_ptr<ReaderState> owner;
-    std::vector<u8> compact;   // só para layouts de plano que o renderer não lê direto
+    // Só para layouts de plano que o renderer não lê direto. Alocação sem
+    // exceção (1.0.6): bad_alloc no 32 bits abortava a thread aurea-decode.
+    std::unique_ptr<u8[]> compact;
+    size_t compactBytes = 0;
 };
 
 /// Quadro do caminho GL do driver: um alvo RGBA8 (AHardwareBuffer) já com a
@@ -1152,10 +1155,10 @@ private:
             if (!media::decoded_plane_fits(w, h, row[i], pixel[i], len[i])) return false;
         }
         const uint8_t* input[3]{data[0], data[1], data[2]};
-        if (!media::copy_decoded_yuv420(f.width, f.height, input, row, pixel, len, f.compact)) return false;
+        if (!media::copy_decoded_yuv420(f.width, f.height, input, row, pixel, len, f.compact, f.compactBytes)) return false;
         const u32 cw = (f.width + 1) / 2, ch = (f.height + 1) / 2;
         f.format = PixelFormat::YUV420P;
-        f.planes[0] = f.compact.data();
+        f.planes[0] = f.compact.get();
         f.planes[1] = f.planes[0] + static_cast<size_t>(f.width) * f.height;
         f.planes[2] = f.planes[1] + static_cast<size_t>(cw) * ch;
         f.strides[0] = f.width;

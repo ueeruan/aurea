@@ -178,6 +178,9 @@ private lateinit var storeApp: Application
 /** Lote M: vetor vazio compartilhado (máscara sem pontos de feather). */
 private val NO_FLOATS = FloatArray(0)
 
+/** Linha de fonte do motor (`font_line` do JNI): 8 campos, 7 TABs. */
+private const val FONT_LINE_TABS = 7
+
 private fun appText(@StringRes id: Int, vararg args: Any): String =
     if (args.isEmpty()) AppText.get(storeApp, id) else AppText.get(storeApp, id, *args)
 
@@ -285,63 +288,17 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * "Otimizar vídeos pesados" (0.2.5): modo gravado, fila do proxy de edição
      * e cache (ver `ProxyState`). A decisão e a geração são do motor.
      */
-    val proxies by lazy {
+    // 1.0.6: criado já na construção (main), não no primeiro uso. Preguiçoso, ele
+    // nascia na thread do motor (`pushModeToEngine` no initialize) DEPOIS de a
+    // composição dos Ajustes tirar o snapshot dela, e ler `mode` ali fechava o
+    // app ("Reading a state that was created after the snapshot was taken",
+    // SettingsTab ProxyGroup, 2219/2222).
+    val proxies =
         ProxyState(
             app, engine, viewModelScope,
             onOptimized = { showToast(appText(R.string.proxy_ready)) },
             onFailed = { showToast(appText(R.string.proxy_failed)) },
         )
-    }
-
-    /**
-     * Aurea AI (Fase 9.4): geracao remota de video.
-     *
-     * Nao mexe em timeline nem no motor de render: o unico ponto de contato com
-     * o editor e `importarGerado`, que faz o mesmo que importar um video do
-     * aparelho — cria uma camada. O resto (gerar, acompanhar, baixar) vive no
-     * proprio estado.
-     */
-    val aureaAi by lazy {
-        com.aurea.aurea.ai.AureaAiState(
-            app, viewModelScope,
-            aoAdicionarNaTimeline = ::importarGerado,
-        ) { refreshNow() }
-    }
-
-    /**
-     * Poe o video gerado na timeline.
-     *
-     * O arquivo ja esta dentro do app (`filesDir/aurea-ai`), entao nao ha Uri
-     * de outro app a autorizar — ao contrario de `importVideo`, que precisa
-     * pedir permissao persistente ao provedor. Pelo mesmo motivo o caminho vai
-     * como caminho absoluto: o motor le o arquivo direto.
-     */
-    private fun importarGerado(arquivo: java.io.File, titulo: String) {
-        if (!acceptsImport()) return
-        if (!arquivo.isFile() || arquivo.length() == 0L) {
-            // 3 = Errc::NotFound (core/Result.hpp); o arquivo sumiu entre o
-            // download e o toque, ou veio vazio.
-            errorMessage = appText(R.string.msg_nao_foi_possivel_importar_o_video, humanError(3))
-            return
-        }
-        busyMessage = appText(R.string.app_importing_generated_video)
-        launchImport launch@{
-            val id = withContext(Dispatchers.IO) {
-                engine.importVideo(arquivo.absolutePath, titulo)
-            }
-            busyMessage = null
-            if (id < 0) {
-                errorMessage = appText(R.string.msg_nao_foi_possivel_importar_o_video,
-                    humanError((-id).toInt()))
-                return@launch
-            }
-            refreshNow()
-            // O importador põe o clipe no zero; o gerado entra onde o usuário
-            // está (a operação de sempre de "puxar para o cabeçote").
-            moveToPlayhead(id)
-            select(id)
-        }
-    }
 
     /** Export (tela Exportar). O motor renderiza; aqui só acompanha e publica. */
     val exporter = Exporter(app, engine, viewModelScope, releaseUiCaches = { releaseExportUiCaches() },
@@ -1341,7 +1298,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (destroyed) return
         if (level >= TRIM_RUNNING_LOW) {
             // O LMKD pode matar a seguir: a etapa no relatório tem de ser a
-            // nossa, não o resumo que o WebView do SDK de anúncios gravou.
+            // nossa, não o resumo que um WebView gravou.
             com.aurea.aurea.diagnostics.ExitDiagnostics.reassert(getApplication<Application>())
             com.aurea.aurea.engine.UiImageCaches.trim()
         }
@@ -2792,8 +2749,23 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Relê a lista do motor (nomes por idioma para o navegador e os cartões). */
     fun refreshPlugins() {
         if (!engineReady) return
+        applyPlugins(engine.pluginsJson())
+    }
+
+    /**
+     * 1.0.6: o mesmo, lendo o motor fora da main. Abrir o gerenciador de
+     * plugins enquanto um plugin compila (a instalação segura o motor) travava
+     * a main no `nativeListPlugins` (ANR VER-N49, build 2225).
+     */
+    suspend fun refreshPluginsOffMain() {
+        if (!engineReady) return
+        val json = withContext(Dispatchers.Default) { engine.pluginsJson() }
+        if (engineReady) applyPlugins(json)
+    }
+
+    private fun applyPlugins(json: String) {
         effectPresetCache.clear()
-        com.aurea.aurea.effects.PluginTexts.update(engine.pluginsJson())
+        com.aurea.aurea.effects.PluginTexts.update(json)
         plugins = com.aurea.aurea.effects.PluginTexts.plugins
         com.aurea.aurea.effects.PluginRuntime.attach(this)   // 0.3.4 plugins: rede/seletor e painéis
     }
@@ -7942,9 +7914,32 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun loadFonts() {
         if (fonts.isNotEmpty()) return
         viewModelScope.launch {
-            val list = withContext(Dispatchers.IO) { engine.listFonts()?.lineSequence()?.mapNotNull { parseFont(it) }?.toList() ?: emptyList() }
+            val list = withContext(Dispatchers.IO) { engine.listFonts()?.let(::parseFonts) ?: emptyList() }
             fonts = list
         }
+    }
+
+    /**
+     * 1.0.6: uma linha por face, 8 campos separados por TAB. Um nome de estilo
+     * ou família com quebra de linha (fonte importada) partia a linha em duas:
+     * a primeira se perdia e a segunda virava uma face fantasma (família vazia,
+     * peso 0, caminho "1") — duas delas repetiam a chave da grade e fechavam o
+     * navegador de fontes ("Key 1#|0|0 was already used", 2225). Os pedaços
+     * voltam a ser uma linha só e o que não tem caminho de arquivo sai.
+     */
+    private fun parseFonts(text: String): List<FontItem> {
+        val out = ArrayList<FontItem>()
+        var pending: String? = null
+        for (raw in text.split('\n')) {
+            val line = (if (pending != null) "$pending $raw" else raw).replace('\r', ' ')
+            if (line.isBlank()) { pending = null; continue }
+            if (line.count { it == '\t' } < FONT_LINE_TABS) { pending = line; continue }
+            pending = null
+            val f = parseFont(line) ?: continue
+            if (f.path.isBlank() || (!f.path.contains('/') && !f.path.contains('\\') && !f.path.startsWith("docs:"))) continue
+            out += f.copy(family = f.family.trim(), style = f.style.trim())
+        }
+        return out
     }
 
     /** Estilo de parágrafo da camada de texto (ver `set_text_style`: 18 valores). */
@@ -11752,12 +11747,21 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * Onde fica cada um está em [CacheStorage]; projetos nunca. Devolve os
      * bytes liberados (disco + memória do motor).
      */
-    fun clearCache(): Long {
-        var freed = 0L
-        for (k in storage.scan(exporter.busy)) freed += clearStorage(k.id)
-        freed += clearStorage(MEMORY)
-        main.post { showToast(appText(R.string.msg_cache_cleared, "%.1f".format(freed / (1024.0 * 1024.0)))) }
-        return freed
+    fun clearCache() {
+        // 1.0.6: fora da main. Aqui a main varria e apagava as pastas e, no fim,
+        // esperava o lifecycleLock — que a subida do motor segura durante o
+        // initialize (10–20 s compilando shaders em PowerVR): ANR no "Limpar
+        // cache" com o motor ainda subindo (vivo 1938, build 2222/2225).
+        viewModelScope.launch(Dispatchers.IO) {
+            var freed = 0L
+            runCatching {
+                for (k in storage.scan(exporter.busy)) freed += clearStorage(k.id)
+                freed += clearStorage(MEMORY)
+            }.onFailure { Log.w(TAG, "limpar cache falhou", it) }
+            withContext(Dispatchers.Main) {
+                showToast(appText(R.string.msg_cache_cleared, "%.1f".format(freed / (1024.0 * 1024.0))))
+            }
+        }
     }
 
     /**

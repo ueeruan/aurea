@@ -20,7 +20,6 @@
     <string name="mod_blocked_note">Вы заблокировали этот профиль.</string>
     <string name="mod_report_profile">Пожаловаться на профиль</string>
     <string name="mod_remove">Удалить (модерация)</string>
-    <string name="mod_report_ai">Пожаловаться на видео</string>
     <string name="mod_report_preset">Пожаловаться на пресет</string>
     <string name="mod_more_actions">Другие действия</string>
 </resources>

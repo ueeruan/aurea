@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.0.6: crashes de interface (seletor de arquivo/abrir link sem app no aparelho). -->
+<resources>
+    <string name="common_no_app_for_action">Tidak ada aplikasi di perangkat ini yang bisa membukanya.</string>
+</resources>

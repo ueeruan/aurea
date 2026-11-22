@@ -96,7 +96,9 @@ internal fun SkeletonPanel(store: EditorStore, modifier: Modifier = Modifier) {
     // Osso escolhido no palco: abre os pais dele na árvore.
     LaunchedEffect(chosenSlot, nodesKey) {
         var p = if (chosenSlot >= 0) parents[chosenSlot] else -1
-        while (p >= 0) { collapsed.remove(p); p = parents[p] }
+        // 1.0.6: pai fora da faixa ou ciclo nos dados do modelo não derruba nem trava o painel.
+        val seen = HashSet<Int>()
+        while (p in parents.indices && seen.add(p)) { collapsed.remove(p); p = parents[p] }
     }
     Column(modifier.background(AureaColors.EditorPanel).testTag("skeleton.panel")) {
         // --- O osso escolhido --------------------------------------------------------
@@ -157,7 +159,10 @@ internal fun SkeletonPanel(store: EditorStore, modifier: Modifier = Modifier) {
                 if (rows.isEmpty()) KitHint(stringResource(R.string.skeleton_no_match))
                 val hasChildren = remember(nodesKey) { BooleanArray(count).also { h -> for (i in 0 until count) if (parents[i] in 0 until count) h[parents[i]] = true } }
                 LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
-                    items(rows, key = { nodes[it.first] }) { (slot, depth) ->
+                    // 1.0.6: dois ossos com o mesmo nó repetiam a chave e fechavam o app.
+                    val rowKeys = com.aurea.aurea.ui.ds.uniqueListKeys(rows) { "n" + nodes[it.first] }
+                    items(rows.size, key = { rowKeys[it] }) { index ->
+                        val (slot, depth) = rows[index]
                         BoneRow(
                             name = names[slot],
                             depth = depth,

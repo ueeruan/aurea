@@ -202,8 +202,14 @@ final class CrashReporter: NSObject, MXMetricManagerSubscriber {
     }
 
     private func adicionar(_ d: MXDiagnostic, motivo: String, detalhe: String, quando: Int64) {
-        let json: Data = d.jsonRepresentation()
-        let resumo: SHA256.Digest = SHA256.hash(data: json)
+        let bruto: Data = d.jsonRepresentation()
+        // 1.0.6: o JSON do MetricKit vem indentado (até ~60 níveis de subFrames): os
+        // espaços enchiam os 200 KB e a pilha chegava cortada (477 de 535 relatórios
+        // de 2219+), sem as outras threads. Compacto cabe inteiro. O id segue o bruto
+        // (a lista de vistos continua valendo).
+        let json: Data = (try? JSONSerialization.jsonObject(with: bruto))
+            .flatMap { (o: Any) -> Data? in try? JSONSerialization.data(withJSONObject: o) } ?? bruto
+        let resumo: SHA256.Digest = SHA256.hash(data: bruto)
         let hex: String = resumo.map { (b: UInt8) -> String in String(format: "%02x", b) }.joined()
         let id: String = "mx-" + String(hex.prefix(32))
         let meta: MXMetaData = d.metaData

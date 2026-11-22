@@ -59,6 +59,12 @@ import kotlin.math.roundToInt
  */
 /** Baldes de waveform por linha e quadro (tela de 4K a 1,5 dp com folga). */
 private const val WAVE_MAX = 2048
+/**
+ * Fileira sem fade (nenhuma camada aberta). 1.0.6: o fade e os clipes fecham
+ * pela altura da pilha (`restoreToCount`), nunca com um `restore()` solto —
+ * um restore a mais derrubava o app no restore do Compose ("Underflow in restore").
+ */
+private const val NO_FADE = -1
 
 internal class TimelinePainter(
     private val m: TimelineMetrics,
@@ -321,7 +327,7 @@ internal class TimelinePainter(
             }
             // Fileira recém-criada: surge com fade (RowFade, 600 ms).
             val fade = c.rowAlpha(r, frameNanos)
-            if (fade < 1f) beginFade(fade, top, c.rowHeight(r), w)
+            val fadeDepth = if (fade < 1f) beginFade(fade, top, c.rowHeight(r), w) else NO_FADE
             if (segs.size == 1) {
                 // O trecho no ar sai da fileira dele (é desenhado sob o dedo).
                 if (segs[0].id != st.liftId) drawSegment(c, segs[0], top, w, view, ppf, cx, fps, compact, selCount, multi, cache, generation, arrows = true)
@@ -353,7 +359,7 @@ internal class TimelinePainter(
                     if (offLeft) drawEdgeArrow(false, top, w, color)
                 }
             }
-            if (fade < 1f) drawContext.canvas.restore()
+            endFade(fadeDepth)
         }
 
         // Pílulas por cima das barras (as barras passam por baixo): olho + miniatura do tipo.
@@ -365,7 +371,7 @@ internal class TimelinePainter(
             if (rowTop + c.rowHeight(r) < m.rowsTop || rowTop > h) continue
             val track = r.track
             val fade = c.rowAlpha(r, frameNanos)
-            if (fade < 1f) beginFade(fade, rowTop, c.rowHeight(r), w)
+            val fadeDepth = if (fade < 1f) beginFade(fade, rowTop, c.rowHeight(r), w) else NO_FADE
             if (track != null) {
                 drawLaneGutter(r, track, rowTop, c.rowHeight(r), c.openGroups.value)
             } else {
@@ -375,7 +381,7 @@ internal class TimelinePainter(
                 if (multi) for (s in r.segments) if (c.isSelected(s.id)) inBatch = true
                 drawGutter(c, r, rowTop + m.barTop, inBatch, c.isExpanded(r), fps)
             }
-            if (fade < 1f) drawContext.canvas.restore()
+            endFade(fadeDepth)
         }
 
         // Trecho no ar (arrasto vertical de UM trecho): o traço de inserção entre
@@ -529,9 +535,9 @@ internal class TimelinePainter(
             } else {
                 barClip.addRoundRect(rectF, m.barRadius, m.barRadius, android.graphics.Path.Direction.CW)
             }
-            canvas.save()
+            val barDepth = canvas.save()
             canvas.clipPath(barClip)
-            canvas.save()
+            val bodyDepth = canvas.save()
             // A decoração externa não muda a origem de miniaturas, ondas ou keyframes.
             canvas.clipRect(bodyLeft, top, right, bottom)
             // Bloco escuro no tom do tipo.
@@ -552,7 +558,7 @@ internal class TimelinePainter(
             // de cor (o mockup não tem faixa: a cor do clipe já diz o tipo).
             val stripe = ShellColors.LabelPalette.getOrNull(r.label - 1)
             if (stripe != null) drawRect(stripe, Offset(x0, top), Size(m.stripe, m.bar), alpha = alpha)
-            canvas.restore()
+            canvas.restoreToCount(bodyDepth)
             if (capped) {
                 // A borda direita da tampa coincide com o início temporal do clipe.
                 val capL = RowHit.capLeft(m, x0)
@@ -562,7 +568,7 @@ internal class TimelinePainter(
                     drawGlyph(CupertinoGlyph.ChevronLeft, m.capGlyph, CAP_INK, capL + m.capWidth / 2f, top + m.bar / 2f)
                 }
             }
-            canvas.restore()
+            canvas.restoreToCount(barDepth)
 
             // Setas ‹ › do compacto só no trecho escolhido (os outros da linha também aparecem).
             clipRect(bodyLeft, top, right, bottom) { drawBarContent(r, top, x0, x1, w, capped, tone, alpha) }
@@ -637,20 +643,26 @@ internal class TimelinePainter(
         }
     }
 
-    /** Abre a camada de desenho do fade da fileira nova (fecha com `canvas.restore()`). */
-    private fun DrawScope.beginFade(alpha: Float, top: Float, height: Float, w: Float) {
+    /** Abre a camada de desenho do fade da fileira nova (fecha com [endFade]); devolve a altura da pilha antes dela. */
+    private fun DrawScope.beginFade(alpha: Float, top: Float, height: Float, w: Float): Int {
         fadePaint.alpha = alpha
         val pad = m.pillInset + m.diamond * 2f
+        val depth = platformCanvas.saveCount
         drawContext.canvas.saveLayer(androidx.compose.ui.geometry.Rect(0f, top - pad, w, top + height + pad), fadePaint)
+        return depth
     }
+
+    /** Fecha a camada do fade (por altura da pilha: nunca um restore a mais). */
+    private fun DrawScope.endFade(depth: Int) { if (depth != NO_FADE) platformCanvas.restoreToCount(depth) }
 
     /** Losangos só de referência (camada não selecionada): a mesma figura, esmaecida numa camada de desenho. */
     private inline fun DrawScope.lockedKeys(locked: Boolean, top: Float, height: Float, w: Float, block: DrawScope.() -> Unit) {
         if (!locked) { block(); return }
         val paint = androidx.compose.ui.graphics.Paint().apply { alpha = KeyframeVisibility.LOCKED_ALPHA }
         val pad = m.diamond * 2f
+        val lockedDepth = platformCanvas.saveCount
         drawContext.canvas.saveLayer(androidx.compose.ui.geometry.Rect(0f, top - pad, w, top + height + pad), paint)
-        try { block() } finally { drawContext.canvas.restore() }
+        try { block() } finally { platformCanvas.restoreToCount(lockedDepth) }
     }
 
     /**
@@ -924,6 +936,7 @@ internal class TimelinePainter(
         val groups = Keyframes.visibleGroups(inst, view, ppf, cx, w, m.keyTouchHalf, m.keyMergeGap, dimGroupBuf)
         if (groups == 0) return
         val pad = m.diamond * 2f
+        val dimDepth = platformCanvas.saveCount
         drawContext.canvas.saveLayer(androidx.compose.ui.geometry.Rect(0f, cy - pad, w, cy + pad), dimPaint)
         try {
             for (g in 0 until groups) {
@@ -934,7 +947,7 @@ internal class TimelinePainter(
                 else drawKeyPill(kx, TimeAxis.xOf(inst[j].toDouble(), view, ppf, cx), cy, KEY_OFF)
             }
         } finally {
-            drawContext.canvas.restore()
+            platformCanvas.restoreToCount(dimDepth)
         }
     }
 
@@ -1111,11 +1124,11 @@ internal class TimelinePainter(
         val canvas = platformCanvas
         barClip.reset()
         barClip.addRoundRect(rectF, m.glyphBoxRadius, m.glyphBoxRadius, android.graphics.Path.Direction.CW)
-        canvas.save()
+        val glyphDepth = canvas.save()
         canvas.clipPath(barClip)
         bitmapPaint.alpha = (alpha * 255f).roundToInt()
         canvas.drawBitmap(bmp, glyphSrc, rectF, bitmapPaint)
-        canvas.restore()
+        canvas.restoreToCount(glyphDepth)
         return true
     }
 
@@ -1495,10 +1508,10 @@ internal class TimelinePainter(
             if (top + rh < m.rowsTop || top > h) continue
             if (lifted) drawRect(AureaTimeline.OmegaDragRow, Offset(0f, top), Size(w, rh))
             val fade = c.rowAlpha(r, frameNanos)
-            if (fade < 1f) beginFade(fade, top, rh, w)
+            val fadeDepth = if (fade < 1f) beginFade(fade, top, rh, w) else NO_FADE
             if (r.track != null) omegaLane(c, r, top, w, view, ppf, cx, fps)
             else for (s in r.segments) omegaClip(c, s, top, w, view, ppf, cx, fps, compact, cache, generation)
-            if (fade < 1f) drawContext.canvas.restore()
+            endFade(fadeDepth)
         }
         // 3) Cabeçalhos e alças ≡ por cima: as barras passam por baixo deles.
         for (pass in passes) for (i in indices) {
@@ -1509,7 +1522,7 @@ internal class TimelinePainter(
             val rh = c.rowHeight(r)
             if (top + rh < m.rowsTop || top > h) continue
             val fade = c.rowAlpha(r, frameNanos)
-            if (fade < 1f) beginFade(fade, top, rh, w)
+            val fadeDepth = if (fade < 1f) beginFade(fade, top, rh, w) else NO_FADE
             val track = r.track
             if (track != null) {
                 drawLaneGutter(r, track, top, rh, c.openGroups.value)
@@ -1518,7 +1531,7 @@ internal class TimelinePainter(
                 omegaHeader(c, r, top, activated, (hideEyes && !compact) || r.inner, fps)
                 if (!compact) omegaGrip(top, rh, w)
             }
-            if (fade < 1f) drawContext.canvas.restore()
+            endFade(fadeDepth)
         }
         // 4) Retângulo da seleção de losangos (do AUREA) e fio do ímã.
         if (st.boxActive) {
@@ -1602,7 +1615,7 @@ internal class TimelinePainter(
                 rectF.set(left, top, right, bottom)
                 barClip.reset()
                 barClip.addRoundRect(rectF, radius, radius, android.graphics.Path.Direction.CW)
-                canvas.save()
+                val clipDepth = canvas.save()
                 canvas.clipPath(barClip)
                 // 1. 0.3.4 (bugs-034, cores): cor SÓLIDA do tipo, um pouco dessaturada (ClipColors.solid).
                 drawRect(Color(ClipColors.solid(r.type.color.toArgb())), Offset(left, top), Size(right - left, m.bar))
@@ -1635,7 +1648,7 @@ internal class TimelinePainter(
                 omegaLabel(r, top, x0, x1)
                 // 7. Timeline do AE: as marcas da CAMADA (andam com o clipe). As de dentro de um grupo não vêm.
                 if (!r.inner) drawLayerMarkers(store.layerMarkers, r.id, top, left, right, view, ppf, cx)
-                canvas.restore()
+                canvas.restoreToCount(clipDepth)
             }
             // Escolhida na visão geral: o contorno branco de 2 dp do AUREA.
             if (selected && !compact) {
@@ -2054,6 +2067,7 @@ internal class TimelinePainter(
             ),
         )
         omegaLayerPaint.alpha = alpha
+        val handleDepth = platformCanvas.saveCount
         drawContext.canvas.saveLayer(androidx.compose.ui.geometry.Rect(left, top, left + hw, top + bar), omegaLayerPaint)
         drawPath(omegaHandlePath, AureaTimeline.TrimGrip)
         val cx = left + hw / 2f
@@ -2068,7 +2082,7 @@ internal class TimelinePainter(
             omegaChevron.lineTo(cx + o + dir * s / 2f, cy + s)
         }
         drawPath(omegaChevron, AureaTimeline.KeyStroke, style = omegaHandleStroke, blendMode = BlendMode.Clear)
-        drawContext.canvas.restore()
+        platformCanvas.restoreToCount(handleDepth)
     }
 
     /** Régua (P0-5): tiques de 1 dp pendurados do alto — segundo 18, meio 12, quadro 5 —, sem rótulos. */

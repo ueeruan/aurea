@@ -98,7 +98,7 @@ internal fun TextTextureSection(env: PanelEnv) {
             0.5f, -100f, 100f, "contraste da textura") { store.setTextTextureValues(mapOf(7 to it / 100)) }
         TextRuler(env, stringResource(R.string.tex_brightness), { (store.textTexture?.get(8) ?: 0f) * 100 }, "${(v[8] * 100).roundToInt()}%",
             0.5f, -100f, 100f, "brilho da textura") { store.setTextTextureValues(mapOf(8 to it / 100)) }
-        ColorLine(stringResource(R.string.tex_tint), Color(v[9], v[10], v[11])) {
+        ColorLine(stringResource(R.string.tex_tint), com.aurea.aurea.ui.ds.swatchColor(v[9], v[10], v[11])) {
             store.beginGesture("tinta da textura")
             env.openColor(ColorRequest(floatArrayOf(v[9], v[10], v[11], 1f),
                 onChange = { r, g, b, _ -> store.setTextTextureValues(mapOf(9 to r, 10 to g, 11 to b, 12 to 1f)) },

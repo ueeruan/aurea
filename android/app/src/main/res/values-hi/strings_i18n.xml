@@ -190,10 +190,6 @@
     <string name="i18n_timeline_surface">Aurea टाइमलाइन</string>
     <string name="i18n_caption_source_cache">कैश</string>
     <string name="i18n_caption_source_whisper">डिवाइस पर Whisper</string>
-    <string name="ai_state_searching">खोज रहा है</string>
-    <string name="ai_state_online">ऑनलाइन</string>
-    <string name="ai_state_reconnecting">फिर से कनेक्ट हो रहा है</string>
-    <string name="ai_state_offline">ऑफ़लाइन</string>
     <string name="perf_section_test">अपने iPhone पर टेस्ट</string>
     <string name="perf_intro">वीडियो वाला प्रोजेक्ट खोलें। रिपोर्ट प्रीव्यू, CPU/GPU, डिकोडिंग, मेमोरी, ऑडियो और इंटरफ़ेस के रुकने को मापती है। कोई वीडियो सर्वर पर नहीं भेजा जाता।</string>
     <string name="perf_mark_stall">मार्क करें: यहाँ अटका</string>

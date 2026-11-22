@@ -190,10 +190,6 @@
     <string name="i18n_timeline_surface">Timeline do Aurea</string>
     <string name="i18n_caption_source_cache">cache</string>
     <string name="i18n_caption_source_whisper">Whisper local</string>
-    <string name="ai_state_searching">Procurando</string>
-    <string name="ai_state_online">Online</string>
-    <string name="ai_state_reconnecting">Reconectando</string>
-    <string name="ai_state_offline">Offline</string>
     <string name="perf_section_test">Teste no seu iPhone</string>
     <string name="perf_intro">Abra um projeto com vídeo. O relatório mede prévia, CPU/GPU, decodificação, memória, áudio e pausas da interface. Nenhum vídeo é enviado para um servidor.</string>
     <string name="perf_mark_stall">Marcar: travou aqui</string>

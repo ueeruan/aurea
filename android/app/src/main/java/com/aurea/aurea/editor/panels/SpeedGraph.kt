@@ -65,7 +65,8 @@ internal fun SpeedGraph(
     onMoveEnd: () -> Unit,
     onScrub: (local: Int) -> Unit,
 ) {
-    val samples = data[0].toInt().coerceAtLeast(0)
+    // 1.0.6: nunca mais amostras do que o vetor do motor tem (leitura em data[8 + i]).
+    val samples = data[0].toInt().coerceAtLeast(0).coerceAtMost((data.size - 8).coerceAtLeast(0))
     val keyCount = data[1].toInt().coerceAtLeast(0)
     val lo = data[2].roundToInt()
     val hi = maxOf(lo + 1, data[3].roundToInt())

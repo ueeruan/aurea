@@ -85,7 +85,7 @@ internal fun Rig3DTab(env: PanelEnv) {
             progress = { store.autoRigProgress },
             modifier = Modifier.fillMaxWidth().semantics {
                 contentDescription = label
-                progressBarRangeInfo = ProgressBarRangeInfo(store.autoRigProgress, 0f..1f)
+                progressBarRangeInfo = ProgressBarRangeInfo(store.autoRigProgress.takeIf { !it.isNaN() } ?: 0f, 0f..1f)
             },
             color = AureaColors.Accent,
             trackColor = AureaColors.Chip,

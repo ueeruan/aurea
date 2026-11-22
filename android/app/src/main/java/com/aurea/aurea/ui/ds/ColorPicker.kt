@@ -549,7 +549,8 @@ private fun PreviewEyedropper(frame: Bitmap, onColor: (Color) -> Unit) {
             val tx = ox + (px + 0.5f) * k
             val ty = oy + (py + 0.5f) * k
             val r = 34.dp.toPx()
-            val c = Offset(tx.coerceIn(r, size.width - r), (ty - r - 18.dp.toPx()).coerceAtLeast(r))
+            // 1.0.6: caixa mais estreita que a lupa (tela dividida, fonte grande) não lança.
+            val c = Offset(tx.coerceIn(r, max(r, size.width - r)), (ty - r - 18.dp.toPx()).coerceAtLeast(r))
             val n = 11
             val sx = (px - n / 2).coerceIn(0, max(0, frame.width - n))
             val sy = (py - n / 2).coerceIn(0, max(0, frame.height - n))
@@ -596,7 +597,7 @@ private fun Strip(value: Float, onValue: (Float) -> Unit, background: DrawScope.
         Canvas(Modifier.fillMaxWidth().height(26.dp).clip(RoundedCornerShape(6.dp))) { background() }
         Canvas(Modifier.fillMaxWidth().fillMaxHeight()) {
             val hw = 7.dp.toPx()
-            val x = (value.coerceIn(0f, 1f) * size.width).coerceIn(hw, size.width - hw)
+            val x = (value.coerceIn(0f, 1f) * size.width).coerceIn(hw, max(hw, size.width - hw))
             drawRoundRect(
                 color = Color.White,
                 topLeft = Offset(x - hw, 0f),

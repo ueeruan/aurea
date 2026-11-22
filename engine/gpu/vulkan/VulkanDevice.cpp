@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstring>
 #if defined(__ANDROID__)
+#include <signal.h>
 #include <sys/system_properties.h>
 #endif
 #if !defined(_WIN32)
@@ -94,6 +95,208 @@ void Backend::forget_export_loss_for_tests() noexcept {
     gExportSplitAfterLoss.store(false, std::memory_order_release);
 }
 
+// =============================================================================
+// 1.0.6: guarda de travamento do driver (ver VulkanBackend.hpp)
+//
+// Marcador (aurea_vk_guard.txt): "<16 hex> <nome>\n" enquanto uma chamada
+// arriscada está no driver, "0000000000000000\n" fora dela. Escrito com
+// fwrite+fflush (vai para o kernel: sobrevive à morte do processo; não precisa
+// de fsync — desligar o aparelho no meio só perde uma contagem).
+// Lista (aurea_vk_blocklist.txt): 1ª linha = identidade do driver
+// (export_split_identity), depois "<16 hex> <mortes> <nome>" por chave.
+// =============================================================================
+namespace {
+constexpr usize kGuardRecordBytes = 64;   // registro de tamanho fixo: sobrescreve sem truncar
+// Byte do registro que o tratador de sinal marca com 'C': o processo morreu
+// por SIGSEGV/SIGBUS/SIGILL/SIGFPE DENTRO da chamada guardada. Morte por
+// SIGKILL (LMK, usuario fechando, ANR) nao marca e nao conta: senao um app
+// fechado no meio do pre-aquecimento bloquearia um pipeline sadio.
+constexpr usize kGuardCrashFlag = kGuardRecordBytes - 2;
+
+#if defined(__ANDROID__)
+std::atomic<int> gGuardFd{-1};
+std::atomic<bool> gGuardArmed{false};
+constexpr int kGuardSignals[] = {SIGSEGV, SIGBUS, SIGILL, SIGFPE};
+constexpr usize kGuardSignalCount = sizeof(kGuardSignals) / sizeof(kGuardSignals[0]);
+struct sigaction gGuardPrevious[kGuardSignalCount];
+std::atomic<bool> gGuardHandlersInstalled{false};
+
+void guard_signal(int sig, siginfo_t* info, void*) {
+    if (gGuardArmed.load(std::memory_order_relaxed)) {
+        const int fd = gGuardFd.load(std::memory_order_relaxed);
+        if (fd >= 0) {
+            const char crashed = 'C';
+            (void)pwrite(fd, &crashed, 1, static_cast<off_t>(kGuardCrashFlag));
+        }
+    }
+    // Devolve o sinal a quem estava antes (debuggerd/Crashlytics, via
+    // libsigchain): restaura o tratador anterior e retorna; a instrucao que
+    // falhou executa de novo e cai nele com o contexto verdadeiro. Sinal
+    // mandado por kill/tgkill nao se repete sozinho: reenvia.
+    for (usize i = 0; i < kGuardSignalCount; ++i) {
+        if (kGuardSignals[i] != sig) continue;
+        (void)sigaction(sig, &gGuardPrevious[i], nullptr);
+        if (!info || info->si_code <= 0) (void)raise(sig);
+        return;
+    }
+}
+
+void install_guard_handlers() noexcept {
+    if (gGuardHandlersInstalled.exchange(true)) return;
+    for (usize i = 0; i < kGuardSignalCount; ++i) {
+        struct sigaction sa{};
+        sa.sa_sigaction = &guard_signal;
+        sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
+        sigemptyset(&sa.sa_mask);
+        (void)sigaction(kGuardSignals[i], &sa, &gGuardPrevious[i]);
+    }
+}
+#endif
+}
+
+void Backend::save_blocklist() noexcept {
+    if (blocklistPath_.empty()) return;
+    std::string out = export_split_identity();
+    out += '\n';
+    for (const auto& [key, e] : crashCounts_) {
+        char line[128];
+        std::snprintf(line, sizeof(line), "%016llx %u %s\n", static_cast<unsigned long long>(key), e.crashes,
+                      e.name.empty() ? "?" : e.name.c_str());
+        out += line;
+    }
+    (void)fileio::write_atomic(blocklistPath_, out.data(), out.size());
+}
+
+void Backend::load_crash_guard() noexcept {
+    std::lock_guard<std::mutex> lock(guardMutex_);
+    if (guardFile_) { std::fclose(guardFile_); guardFile_ = nullptr; }
+    // Recuperação de dispositivo reinicializa sem diretório de cache: fica o
+    // estado (e os caminhos) da primeira inicialização deste processo.
+    if (!config_.cacheDirectory || !*config_.cacheDirectory) {
+        if (blocklistPath_.empty()) return;
+    } else {
+        blocklistPath_ = std::string(config_.cacheDirectory) + "/aurea_vk_blocklist.txt";
+    }
+    const std::string guardPath = blocklistPath_.substr(0, blocklistPath_.size() - std::strlen("blocklist.txt")) + "guard.txt";
+
+    crashCounts_.clear();
+    blockedKeys_.clear();
+    const std::string id = export_split_identity();
+    std::vector<u8> file;
+    if (read_whole(blocklistPath_, file)) {
+        const std::string text(file.begin(), file.end());
+        const usize eol = text.find('\n');
+        if (eol == std::string::npos || text.compare(0, eol, id) != 0) {
+            // Outro driver (sistema atualizado) ou outra GPU: tudo de novo.
+            std::remove(blocklistPath_.c_str());
+        } else {
+            usize pos = eol + 1;
+            while (pos < text.size()) {
+                const usize end = std::min(text.find('\n', pos), text.size());
+                const std::string line = text.substr(pos, end - pos);
+                pos = end + 1;
+                unsigned long long key = 0;
+                unsigned crashes = 0;
+                char name[64]{};
+                if (std::sscanf(line.c_str(), "%16llx %u %63s", &key, &crashes, name) >= 2 && key) {
+                    crashCounts_[key] = BlockEntry{crashes, name};
+                }
+            }
+        }
+    }
+
+    // O processo anterior morreu dentro do driver?
+    bool changed = false;
+    if (read_whole(guardPath, file) && file.size() >= kGuardRecordBytes) {
+        const std::string text(file.begin(), file.end());
+        unsigned long long key = 0;
+        char name[64]{};
+        const bool crashed = text[kGuardCrashFlag] == 'C';
+        const bool inside = std::sscanf(text.c_str(), "%16llx %63s", &key, name) >= 1 && key;
+        if (inside && !crashed) {
+            AUREA_LOG_INFO("vulkan: o processo anterior terminou durante '%s' sem travar (morto pelo sistema); "
+                           "nao conta", name[0] ? name : "?");
+        } else if (inside) {
+            BlockEntry& e = crashCounts_[key];
+            ++e.crashes;
+            if (name[0]) e.name = name;
+            changed = true;
+            AUREA_LOG_ERROR("vulkan: o processo anterior morreu dentro do driver em '%s' (%016llx), %u vez(es) "
+                            "neste driver", e.name.c_str(), key, e.crashes);
+        }
+    }
+    for (const auto& [key, e] : crashCounts_) {
+        if (e.crashes >= kGuardCrashesToBlock) {
+            blockedKeys_[key] = e.crashes;
+            AUREA_LOG_WARN("vulkan: '%s' (%016llx) bloqueado neste driver (%u travamentos); sai em bypass",
+                           e.name.c_str(), static_cast<unsigned long long>(key), e.crashes);
+        }
+    }
+    if (changed) save_blocklist();
+
+    guardFile_ = std::fopen(guardPath.c_str(), "wb");
+    if (guardFile_) {
+        char rec[kGuardRecordBytes];
+        std::memset(rec, ' ', sizeof(rec));
+        std::memcpy(rec, "0000000000000000", 16);
+        rec[sizeof(rec) - 1] = '\n';
+        (void)std::fwrite(rec, 1, sizeof(rec), guardFile_);
+        (void)std::fflush(guardFile_);
+#if defined(__ANDROID__)
+        gGuardFd.store(fileno(guardFile_), std::memory_order_release);
+        install_guard_handlers();
+#endif
+    }
+}
+
+void Backend::close_crash_guard() noexcept {
+    std::lock_guard<std::mutex> lock(guardMutex_);
+    if (!guardFile_) return;
+#if defined(__ANDROID__)
+    gGuardArmed.store(false, std::memory_order_release);
+    gGuardFd.store(-1, std::memory_order_release);
+#endif
+    std::fclose(guardFile_);
+    guardFile_ = nullptr;
+}
+
+void Backend::guard_begin(u64 key, const char* what) noexcept {
+    if (!key) return;
+    std::lock_guard<std::mutex> lock(guardMutex_);
+    if (!guardFile_) return;
+    char rec[kGuardRecordBytes];
+    std::memset(rec, ' ', sizeof(rec));
+    char name[40]{};
+    usize n = 0;
+    // Nome sem espaços (o leitor usa %s): o resto vira '_'.
+    for (const char* s = what && *what ? what : "?"; *s && n + 1 < sizeof(name); ++s)
+        name[n++] = (*s == ' ' || *s == '\n' || *s == '\t') ? '_' : *s;
+    const int len = std::snprintf(rec, sizeof(rec), "%016llx %s", static_cast<unsigned long long>(key), name);
+    if (len > 0 && static_cast<usize>(len) < sizeof(rec)) rec[len] = ' ';
+    rec[sizeof(rec) - 1] = '\n';
+    std::rewind(guardFile_);
+    (void)std::fwrite(rec, 1, sizeof(rec), guardFile_);
+    (void)std::fflush(guardFile_);
+#if defined(__ANDROID__)
+    gGuardArmed.store(true, std::memory_order_release);
+#endif
+}
+
+void Backend::guard_end() noexcept {
+    std::lock_guard<std::mutex> lock(guardMutex_);
+    if (!guardFile_) return;
+    char rec[kGuardRecordBytes];
+    std::memset(rec, ' ', sizeof(rec));
+#if defined(__ANDROID__)
+    gGuardArmed.store(false, std::memory_order_release);
+#endif
+    std::memcpy(rec, "0000000000000000", 16);
+    rec[sizeof(rec) - 1] = '\n';
+    std::rewind(guardFile_);
+    (void)std::fwrite(rec, 1, sizeof(rec), guardFile_);
+    (void)std::fflush(guardFile_);
+}
+
 void Backend::set_export_pass_split(bool split) noexcept {
     const u32 want = split ? 1u : 0u;
     if (want == passesPerCommandBuffer_) return;
@@ -144,6 +347,17 @@ Status Backend::initialize(const BackendConfig& config) noexcept {
         passesPerCommandBuffer_ = split ? 1u : 0u;
         if (split) AUREA_LOG_INFO("vulkan: export em um passe por envio (dispositivo perdido antes neste aparelho)");
     }
+    load_crash_guard();
+#if defined(__ANDROID__)
+    // Três pipelines diferentes já derrubaram este driver: ele não é confiável
+    // para o motor. Recusar aqui faz a JNI subir o OpenGL ES 3.1 (aurea_jni.cpp)
+    // em vez de o app morrer a cada abertura. No PC não há reserva: segue.
+    if (blockedKeys_.size() >= 3) {
+        AUREA_LOG_ERROR("vulkan: %u pipelines travaram este driver; usando a reserva OpenGL ES",
+                        static_cast<u32>(blockedKeys_.size()));
+        return Status{Errc::NotSupported, "driver Vulkan instavel neste aparelho (travou em varios pipelines)"};
+    }
+#endif
 
     if (const Status s = create_frames(); !s.ok()) return s;
     if (const Status s = create_dummies(); !s.ok()) return s;
@@ -154,6 +368,7 @@ Status Backend::initialize(const BackendConfig& config) noexcept {
 }
 
 void Backend::shutdown() noexcept {
+    close_crash_guard();
     if (!device_ && !instance_) return;
     if (device_) deviceFunctions_.vkDeviceWaitIdle(device_);
     if (device_ && recoveryFence_) deviceFunctions_.vkDestroyFence(device_, recoveryFence_, nullptr);
@@ -552,6 +767,7 @@ void Backend::fill_capabilities() noexcept {
     caps_.maxComputeWorkGroupInvocations = l.maxComputeWorkGroupInvocations;
     for (int i = 0; i < 3; ++i) caps_.maxComputeWorkGroupSize[i] = l.maxComputeWorkGroupSize[i];
     caps_.maxComputeSharedMemoryBytes = l.maxComputeSharedMemorySize;
+    for (int i = 0; i < 3; ++i) maxDispatch_[i] = std::max<u32>(1, l.maxComputeWorkGroupCount[i]);
     caps_.maxPushConstantBytes = l.maxPushConstantsSize;
     caps_.maxUniformBufferRange = l.maxUniformBufferRange;
     caps_.maxBoundDescriptorSets = l.maxBoundDescriptorSets;

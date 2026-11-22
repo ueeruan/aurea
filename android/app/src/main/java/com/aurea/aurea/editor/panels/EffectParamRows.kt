@@ -271,7 +271,7 @@ private fun FxNumberRow(
     fun write(display: Float) {
         if (!guard.ok() || !display.isFinite()) return
         val p = store.paramOf(effectId, s.index) ?: return
-        val clamped = d.toEngine(display).coerceIn(s.typedLo, s.typedHi)
+        val clamped = d.toEngine(display).coerceIn(min(s.typedLo, s.typedHi), max(s.typedLo, s.typedHi))
         store.setEffectParam(effectId, p, if (s.type == ParamType.INT) clamped.roundToInt().toFloat() else clamped, 0)
     }
     val format = { v: Float -> comUnidade(numeroPtBr(v, d.decimals), d.suffix) }
@@ -399,7 +399,7 @@ private fun FxVectorRow(
     fun write(c: Int, display: Float) {
         if (!guard.ok() || !display.isFinite()) return
         val p = store.paramOf(effectId, s.index) ?: return
-        store.setEffectParam(effectId, p, d.toEngine(display).coerceIn(s.typedLo, s.typedHi), c)
+        store.setEffectParam(effectId, p, d.toEngine(display).coerceIn(min(s.typedLo, s.typedHi), max(s.typedLo, s.typedHi)), c)
     }
     fun choose(c: Int, explicit: Boolean) = onSelect(ParamKey(effectId, s.index, c), explicit)
     fun keypad(c: Int) {
@@ -423,7 +423,7 @@ private fun FxVectorRow(
                         // releriam o vetor velho.
                         val next = p.value.copyOf()
                         edits.forEachIndexed { i, v ->
-                            if (v != null && v.isFinite() && i < next.size) next[i] = d.toEngine(v).coerceIn(s.typedLo, s.typedHi)
+                            if (v != null && v.isFinite() && i < next.size) next[i] = d.toEngine(v).coerceIn(min(s.typedLo, s.typedHi), max(s.typedLo, s.typedHi))
                         }
                         store.beginGesture("ajustar $label")
                         try {

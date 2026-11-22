@@ -394,7 +394,7 @@ private fun PaintEditor(env: PanelEnv, paint: VPaint, colorLabel: String, edit: 
         })
     })
     if (paint.type == 0) {
-        ColorLine(colorLabel, Color(paint.r, paint.g, paint.b)) {
+        ColorLine(colorLabel, com.aurea.aurea.ui.ds.swatchColor(paint.r, paint.g, paint.b)) {
             val live = BooleanArray(1)
             env.openColor(ColorRequest(floatArrayOf(paint.r, paint.g, paint.b, paint.a),
                 onChange = { r, g, b, a ->
@@ -405,7 +405,7 @@ private fun PaintEditor(env: PanelEnv, paint: VPaint, colorLabel: String, edit: 
         }
     } else {
         paint.stops.forEachIndexed { i, st ->
-            ColorLine(if (i == 0) stringResource(R.string.panel_cor_inicial) else if (i == paint.stops.size - 1) stringResource(R.string.panel_cor_final) else stringResource(R.string.edt_color_n, i + 1), Color(st.r, st.g, st.b)) {
+            ColorLine(if (i == 0) stringResource(R.string.panel_cor_inicial) else if (i == paint.stops.size - 1) stringResource(R.string.panel_cor_final) else stringResource(R.string.edt_color_n, i + 1), com.aurea.aurea.ui.ds.swatchColor(st.r, st.g, st.b)) {
                 val live = BooleanArray(1)
                 env.openColor(ColorRequest(floatArrayOf(st.r, st.g, st.b, st.a),
                     onChange = { r, g, b, a ->
@@ -425,9 +425,12 @@ private fun PaintAdvanced(env: PanelEnv, paint: VPaint, edit: (Pair<Boolean, (VP
     ChipRow {
         if (paint.stops.size < 8) KitChip(stringResource(R.string.panel_cor_meio), false) {
             edit(false to { p: VPaint ->
-                val a = p.stops[p.stops.size - 2]
-                val b = p.stops.last()
-                p.stops.add(p.stops.size - 1, VStop((a.pos + b.pos) / 2, (a.r + b.r) / 2, (a.g + b.g) / 2, (a.b + b.b) / 2, (a.a + b.a) / 2))
+                // 1.0.6: degradê importado com 0–1 parada não fecha o app.
+                if (p.stops.size >= 2) {
+                    val a = p.stops[p.stops.size - 2]
+                    val b = p.stops.last()
+                    p.stops.add(p.stops.size - 1, VStop((a.pos + b.pos) / 2, (a.r + b.r) / 2, (a.g + b.g) / 2, (a.b + b.b) / 2, (a.a + b.a) / 2))
+                }
             })
         }
         if (paint.stops.size > 2) KitChip(stringResource(R.string.panel_cor_meio_dd59), false) { edit(false to { p: VPaint -> p.stops.removeAt(p.stops.size - 2) }) }

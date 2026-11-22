@@ -306,10 +306,9 @@ fun EditorScreen(store: EditorStore) {
         // Omega adicionar (área 08, P0-1): o conteúdo embutido acima da barra.
         ui.adding && addBarState -> SheetContent.Adding
         ui.adding -> SheetContent.None
-        // O painel da Aurea AI CRIA a camada: abrir sem nada selecionado é o
-        // caso normal do projeto novo, então ele não passa pelo portão do
+        // Legendas não dependem de camada escolhida: não passam pelo portão do
         // `selectionSize == 1` que vale para os painéis que EDITAM a camada.
-        ui.panel == EditorPanel.AiVideo || ui.panel == EditorPanel.Captions -> SheetContent.Panel
+        ui.panel == EditorPanel.Captions -> SheetContent.Panel
         ui.panel == EditorPanel.Curve && selectionSize == 1 -> SheetContent.Curve
         ui.panel != null && selectionSize == 1 -> SheetContent.Panel
         timelineOnly -> if (store.keySelectMode) SheetContent.None else SheetContent.AddBar

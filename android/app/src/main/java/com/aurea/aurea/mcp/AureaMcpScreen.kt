@@ -393,8 +393,10 @@ fun AureaMcpConfirmHost(mcp: AureaMcp) {
         confirmLabel = stringResource(R.string.mcp_approve),
         cancelLabel = stringResource(R.string.mcp_deny),
         destructive = c.tool == "delete_project",
-        onConfirm = { mcp.answerConfirm(true) },
-        onDismiss = { mcp.answerConfirm(false) },
+        // 1.0.6 (par do McpConfirmAlert do iOS): cada botão responde só ao pedido que
+        // mostrou; um toque atrasado num diálogo trocado não aprova/recusa o seguinte.
+        onConfirm = { mcp.answerConfirm(true, c.id) },
+        onDismiss = { mcp.answerConfirm(false, c.id) },
     )
 }
 

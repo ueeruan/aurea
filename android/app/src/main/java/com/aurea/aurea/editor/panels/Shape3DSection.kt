@@ -79,7 +79,7 @@ internal fun Shape3DSection(env: PanelEnv, info: Shape3DInfo, page: Shape3DPage 
             val c = info.colors[i]
             // A bola do material da parte (cor + imagem da galeria), feita pelo motor.
             val thumb = if (layer != null) rememberMaterialThumb(store, layer, i, store.curveRevision) else null
-            ShapeChip(label, on = part == i, dot = Color(c[0], c[1], c[2]), thumb = thumb, modifier = Modifier.testTag("shape3d.part.$i")) {
+            ShapeChip(label, on = part == i, dot = com.aurea.aurea.ui.ds.swatchColor(c[0], c[1], c[2]), thumb = thumb, modifier = Modifier.testTag("shape3d.part.$i")) {
                 store.chooseShapePart(if (part == i) -1 else i)
             }
         }

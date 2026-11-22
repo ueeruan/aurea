@@ -20,7 +20,6 @@
     <string name="mod_blocked_note">Você bloqueou este perfil.</string>
     <string name="mod_report_profile">Denunciar perfil</string>
     <string name="mod_remove">Remover (moderação)</string>
-    <string name="mod_report_ai">Denunciar vídeo</string>
     <string name="mod_report_preset">Denunciar preset</string>
     <string name="mod_more_actions">Mais ações</string>
 </resources>

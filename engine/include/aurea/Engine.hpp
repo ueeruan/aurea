@@ -3994,6 +3994,13 @@ private:
     bool livePreviewGraphPlaying_ = false, livePreviewGraphRefine_ = false;
     void cancel_preview_graph_locked() noexcept;
     [[nodiscard]] bool continue_preview_graph_locked(u64 frameStart, Status& result) noexcept;
+    /// 1.0.6: threads da UI esperando o renderMutex_ (lock_render_for_ui);
+    /// o pré-aquecimento de pipelines cede o mutex enquanto houver alguma.
+    std::atomic<u32> uiRenderWaiters_{0};
+    /// Espera o renderMutex_ no máximo `budgetMs`; falso = adiar a operação.
+    [[nodiscard]] bool lock_render_for_ui(std::unique_lock<std::mutex>& rl, u32 budgetMs) noexcept;
+    static constexpr u32 kUiSurfaceWaitMs = 300;
+    void defer_surface_detach() noexcept;
     std::atomic<u64> previewPressureUntilNs_{0}; ///< trim_memory(>= RUNNING_LOW): prévia guardada pausada até aqui
     std::atomic<f32> platformMemoryPressure_{0.0f};
     std::atomic<u64> platformAvailableMemory_{~0ull};

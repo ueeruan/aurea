@@ -10,11 +10,15 @@ layout(set=0,binding=AUREA_PARAMS,std140) uniform Params {vec4 uvMap;vec4 texel;
 float g_near=1e6;   // menor distância a qualquer traço (para o glow)
 float line(vec2 pt,vec2 a,vec2 b){vec2 ab=b-a;return length(pt-a-ab*clamp(dot(pt-a,ab)/max(dot(ab,ab),1e-5),0.,1.));}
 float stroke(float d,float size){float aa=max(.5,.5/max(p.extra.y,.1));return 1.-smoothstep(max(0.,size*.5-aa),size*.5+aa,d);}
+// 1.0.6: tabelas no escopo do arquivo (memória constante) e etiqueta desenhada UMA vez,
+// fora do laço das regiões: dentro dele o compilador do Adreno expandia os 10 dígitos
+// 64 vezes e falhava ("No spillable register?"), e o efeito sumia nesses aparelhos.
+const int kCodes[10]=int[10](119,36,93,109,46,107,123,37,127,111);
+const vec2 kSegA[7]=vec2[7](vec2(0,0),vec2(0,0),vec2(4,0),vec2(0,4),vec2(0,4),vec2(4,4),vec2(0,8));
+const vec2 kSegB[7]=vec2[7](vec2(4,0),vec2(0,4),vec2(4,4),vec2(4,4),vec2(0,8),vec2(4,8),vec2(4,8));
 float digit(vec2 pt,int number){
-    const int codes[10]=int[10](119,36,93,109,46,107,123,37,127,111);if(number<0||number>9)return 0.;
-    const vec2 a[7]=vec2[7](vec2(0,0),vec2(0,0),vec2(4,0),vec2(0,4),vec2(0,4),vec2(4,4),vec2(0,8));
-    const vec2 b[7]=vec2[7](vec2(4,0),vec2(0,4),vec2(4,4),vec2(4,4),vec2(0,8),vec2(4,8),vec2(4,8));
-    float d=1000.;for(int j=0;j<7;++j)if((codes[number]&(1<<j))!=0)d=min(d,line(pt,a[j],b[j]));return stroke(d,1.);
+    if(number<0||number>9)return 0.;
+    float d=1000.;for(int j=0;j<7;++j)if((kCodes[number]&(1<<j))!=0)d=min(d,line(pt,kSegA[j],kSegB[j]));return stroke(d,1.);
 }
 float number3(vec2 pt,int n){n=clamp(n,0,999);return max(digit(pt,n/100),max(digit(pt-vec2(6,0),(n/10)%10),digit(pt-vec2(12,0),n%10)));}
 float number5(vec2 pt,int n){n=clamp(n,0,99999);return max(max(digit(pt,n/10000),digit(pt-vec2(6,0),(n/1000)%10)),number3(pt-vec2(12,0),n%1000));}
@@ -27,6 +31,7 @@ void main(){
     vec4 src=p.p2.y>.5?vec4(0):texture(u_tex0,v_uv);
     if(p.p2.z>.5){float a=texture(u_labels,v_uv).a;o_color=vec4(vec3(a),1);return;}
     vec2 pt=v_uv*p.texel.xy;float coverage=0.;int limit=int(p.p0.x);
+    int labelBox=-1;vec2 labelAt=vec2(0),labelMiddle=vec2(0);
     for(int j=0;j<64;++j){if(j>=limit)break;vec4 center=texelFetch(u_boxes,ivec2(j,1),0);if(center.a<.5)continue;vec4 box=texelFetch(u_boxes,ivec2(j,0),0);
         vec2 lo=box.xy*p.texel.xy-p.p2.w,hi=box.zw*p.texel.xy+p.p2.w,middle=center.xy*p.texel.xy;
         vec2 q=abs(pt-(lo+hi)*.5)-(hi-lo)*.5;float signedDistance=length(max(q,0.))+min(max(q.x,q.y),0.);
@@ -43,8 +48,10 @@ void main(){
         if(int(p.p0.w)==5&&j<24)for(int k=0;k<24;++k){if(k>=j)break;vec4 other=texelFetch(u_boxes,ivec2(k,1),0);if(other.a<.5)continue;
             vec2 to=other.xy*p.texel.xy;float dist=length(to-middle);if(dist>=p.p3.z)continue;
             float fade=1.-dist/p.p3.z;coverage=max(coverage,connector(pt,middle,to)*fade);}
-        if(p.p2.x>.5){vec2 at=pt-(lo+vec2(0,-12));if(at.x>=-2.&&at.x<66.&&at.y>=-2.&&at.y<10.){float label=p.p2.x<1.5?number3(at,j+1):max(number5(at,int(middle.x)),number5(at-vec2(36,0),int(middle.y)));coverage=max(coverage,label);}}
+        if(p.p2.x>.5){vec2 at=pt-(lo+vec2(0,-12));if(at.x>=-2.&&at.x<66.&&at.y>=-2.&&at.y<10.){labelBox=j;labelAt=at;labelMiddle=middle;}}
     }
+    if(labelBox>=0)coverage=max(coverage,p.p2.x<1.5?number3(labelAt,labelBox+1)
+        :max(number5(labelAt,int(labelMiddle.x)),number5(labelAt-vec2(36,0),int(labelMiddle.y))));
     float alpha=clamp(coverage*p.color.a*p.extra.x,0.,1.);
     // Glow: halo que cai com a distância ao traço mais perto.
     float glow=p.p3.x>0.&&p.p3.y>0.?p.p3.x*exp(-max(g_near-p.p0.y*.5,0.)/p.p3.y)*p.color.a*p.extra.x:0.;

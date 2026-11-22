@@ -72,7 +72,7 @@ private val Swatches = listOf(
 )
 
 private fun rgba(hex: Int, a: Float = 1f) = floatArrayOf(((hex shr 16) and 255) / 255f, ((hex shr 8) and 255) / 255f, (hex and 255) / 255f, a)
-private fun FloatArray.color() = Color(this[0], this[1], this[2], getOrElse(3) { 1f })
+private fun FloatArray.color() = com.aurea.aurea.ui.ds.swatchColor(this[0], this[1], this[2], getOrElse(3) { 1f })
 private fun same(a: FloatArray, hex: Int) = (0..2).all { kotlin.math.abs(a[it] - rgba(hex)[it]) < 0.01f }
 
 /**

@@ -710,7 +710,7 @@ fun VectorPropertyRow(
                     .semantics {
                         contentDescription = "$label · ${axisLabels[shownAxis]}"
                         stateDescription = format(if (dragging) live else values[shownAxis])
-                        if (min.isFinite() && max.isFinite()) progressBarRangeInfo = ProgressBarRangeInfo(values[shownAxis].coerceIn(min, max), min..max)
+                        if (min.isFinite() && max.isFinite() && !values[shownAxis].isNaN()) progressBarRangeInfo = ProgressBarRangeInfo(values[shownAxis].coerceIn(min, max), min..max)
                         if (!enabled) disabled() else {
                             onClick { onTapValue(shownAxis); true }
                             setProgress { next ->

@@ -90,7 +90,7 @@ internal fun PcPanelWindowHost(store: EditorStore, ui: EditorUi, maxW: Float, ma
     val panel = windowPanel(ui)
     // Abrir um painel (menu da timeline, grade, palco, assistente) mostra a janela.
     LaunchedEffect(panel) { if (panel != null) PcPanelWindow.open = true }
-    val free = panel == EditorPanel.AiVideo || panel == EditorPanel.Captions
+    val free = panel == EditorPanel.Captions
     val layer = store.primary
     // Sem camada (e sem um painel que dispensa camada) a janela fecha.
     LaunchedEffect(layer == null, free) { if (layer == null && !free) PcPanelWindow.open = false }

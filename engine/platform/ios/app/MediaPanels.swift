@@ -492,8 +492,9 @@ private struct MotionTrackingSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            if bins.count > 2 {
-                let first = Int64(bins[0]), last = Int64(bins[1])
+            // 1.0.6 (par do TrackingPanel.kt): NaN ou faixa invertida do motor não derrubam o painel.
+            if bins.count > 2, bins[0].isFinite, bins[1].isFinite {
+                let first = Int64(bins[0]), last = max(Int64(bins[0]), Int64(bins[1]))
                 let playhead = model.status.playhead
                 let range = max(1, last - first)
                 let label = AureaText.t("trk_review")

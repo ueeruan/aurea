@@ -273,7 +273,9 @@ struct SkeletonPanelView: View {
         .onChange(of: chosenSlot) { slot in
             // Osso escolhido no palco: abre os pais dele na árvore.
             var p = slot >= 0 && slot < parents.count ? parents[slot] : -1
-            while p >= 0 && p < parents.count { collapsed.remove(p); p = parents[p] }
+            // 1.0.6 (par do SkeletonPanel.kt): um ciclo nos pais do modelo não trava a tela.
+            var seen = Set<Int>()
+            while p >= 0 && p < parents.count && seen.insert(p).inserted { collapsed.remove(p); p = parents[p] }
         }
     }
 

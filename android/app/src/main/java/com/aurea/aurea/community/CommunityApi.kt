@@ -47,14 +47,15 @@ internal fun JSONObject.comment() = CommunityComment(getString("id"), getString(
 internal fun <T> JSONArray?.mapObjects(transform: (JSONObject) -> T): List<T> = if (this == null) emptyList() else (0 until length()).map { transform(getJSONObject(it)) }
 internal fun JSONObject.nextCursor(): String? = optString("cursor").takeIf { it.isNotEmpty() && it != "null" }
 
-// Denúncias (Google Play: conteúdo gerado pelo usuário e por IA). Os motivos e os
+// Denúncias (Google Play: conteúdo gerado pelo usuário). Os motivos e os
 // alvos são os mesmos que o servidor aceita; o que não passa aqui ele recusa.
+// 22/11/2026: sem "ai_video" (a geração de vídeo por IA saiu do app).
 internal val reportReasons = listOf("spam", "nudity", "violence", "hate", "harassment", "illegal", "copyright", "other")
 internal const val REPORT_DETAILS_MAX = 500
-private val reportKinds = setOf("post", "comment", "user", "ai_video", "store", "mural")
-/** Post, comentário e perfil são UUID; o vídeo de IA é o id opaco do job. */
+private val reportKinds = setOf("post", "comment", "user", "store", "mural")
+/** Todos os alvos são UUID. */
 internal fun isReportTarget(kind: String, id: String): Boolean =
-    kind in reportKinds && id.matches(if (kind == "ai_video") Regex("[A-Za-z0-9_.:-]{1,80}") else Regex("[0-9a-f-]{36}"))
+    kind in reportKinds && id.matches(Regex("[0-9a-f-]{36}"))
 /** Corta em [REPORT_DETAILS_MAX] sem partir um emoji (par substituto) ao meio. */
 internal fun String.clipReportDetails(): String =
     if (length <= REPORT_DETAILS_MAX) this else take(if (this[REPORT_DETAILS_MAX - 1].isHighSurrogate()) REPORT_DETAILS_MAX - 1 else REPORT_DETAILS_MAX)

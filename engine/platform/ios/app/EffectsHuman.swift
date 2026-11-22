@@ -1235,6 +1235,27 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             1: FxParamHuman(label: "fx_luminosidade", decimals: 0),
             2: FxParamHuman(label: "fx_saturacao", decimals: 0),
         ])),
+    ("aurea.transition.range_wipe", FxEffectHuman(
+        name: "fx_name_range_wipe",
+        keywords: "wipe linear crop reveal mask revelar recorte varredura inicio fim",
+        params: [
+            0: FxParamHuman(label: "fxl_start"),
+            1: FxParamHuman(label: "fxl_end"),
+            2: FxParamHuman(label: "fx_angulo"),
+            3: FxParamHuman(label: "fxl_softness"),
+        ])),
+    ("aurea.blur.chromatic_zoom", FxEffectHuman(
+        name: "fx_name_chromatic_zoom",
+        keywords: "chromatic zoom blur rgb aberration desfoque zoom cromatico separacao radial",
+        principal: [0, 1, 4, 5],
+        params: [
+            0: FxParamHuman(label: "fx_centro"),
+            1: FxParamHuman(label: "fx_intensidade"),
+            2: FxParamHuman(label: "fx_esticar_bordas"),
+            3: FxParamHuman(label: "fx_mistura"),
+            4: FxParamHuman(label: "fxl_rgb_separation"),
+            5: FxParamHuman(label: "fxl_adaptive_sampling"),
+        ])),
     ("aurea.blur.zoom", FxEffectHuman(
         name: "fx_name_zoom_blur",
         keywords: "zoom rastro radial lente empurrar desfoque cc fast blur cc radial fast blur radial fast blur mais claro mais escuro brightest darkest",
@@ -2316,6 +2337,8 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     // --- Pacote do editor antigo: o que só ele tinha ---
     put("aurea.color.fill", "fx_desc_color_fill", FxAllTargets, "preencher fill cor chapada tinta solido")
     put("aurea.color.balance_hls", "fx_desc_color_balance_hls", FxAllTargets, "equilibrio balanco cor hls matiz luz saturacao")
+    put("aurea.transition.range_wipe", "fx_desc_range_wipe")
+    put("aurea.blur.chromatic_zoom", "fx_desc_chromatic_zoom")
     put("aurea.blur.zoom", "fx_desc_blur_zoom", FxAllTargets, "zoom rastro radial lente empurrar desfoque cc radial fast blur mais claro mais escuro")
     put("aurea.distort.bulge", "fx_desc_distort_bulge", FxAllTargets, "bojo bulge pinca estufar puxar lente centro")
     put("aurea.pattern.checkerboard", "fx_desc_pattern_checkerboard", FxAllTargets, "xadrez checkerboard quadriculado tabuleiro celulas padrao")

@@ -60,6 +60,7 @@ import com.aurea.aurea.engine.KeyframeRow
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.tocavel
+import com.aurea.aurea.ui.platform.balancedCanvas
 
 /**
  * CONTRATO da timeline. A casca dá a área; a timeline desenha régua,
@@ -183,7 +184,8 @@ fun Timeline(
                 }
                 .pointerInput(controller) { with(controller) { handleGestures() } }
                 .pointerInput(controller) { with(controller) { handleWheel() } }
-                .drawBehind { painter.draw(this, controller) },
+                // 1.0.6: a pilha do Canvas termina onde começou ("Underflow in restore").
+                .drawBehind { balancedCanvas("timeline") { painter.draw(this, controller) } },
         )
         // Máscara de recorte: a pílula desenha o "↳"; o leitor de tela ouve
         // "Recortada pela camada abaixo" (mesmo id do iOS).

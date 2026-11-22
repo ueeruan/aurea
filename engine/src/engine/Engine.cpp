@@ -848,6 +848,7 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
     // 0.5.2 (E4): o pré-aquecimento da prévia para quando o export começa
     // (ShaderLibrary::set_abort): a partida não espera a lista inteira.
     renderer_.shaders().set_abort(&exportActive_);
+    renderer_.shaders().set_yield(&uiRenderWaiters_);
     if (gpu_) {
         // O backend guarda o caminho do cache de pipeline: por padrão, o mesmo
         // diretório de cache do motor (que vive em config_, não no chamador).
@@ -1602,7 +1603,7 @@ void Engine::apply_pending_surface_locked(bool allowAttach) noexcept {
     if (surfaceDetachPending_.exchange(false, std::memory_order_acq_rel) && surface_.nativeWindow) {
         if (gpu_) gpu_->detach_surface();
         surface_.nativeWindow = nullptr;
-        AUREA_LOG_INFO("superficie: soltura adiada pelo export aplicada");
+        AUREA_LOG_INFO("superficie: soltura adiada aplicada");
     }
     if (!attach.valid || !allowAttach || !gpu_) return;
     surface_.nativeWindow = attach.window;
@@ -1619,6 +1620,38 @@ void Engine::apply_pending_surface_locked(bool allowAttach) noexcept {
     forceRender_.store(true, std::memory_order_release);
 }
 
+// 1.0.6: a thread da UI (surfaceCreated/Destroyed) esperando o renderMutex_
+// avisa o pré-aquecimento de pipelines, que para entre um pipeline e o próximo
+// (ShaderLibrary::set_yield) e devolve o mutex. Antes, numa PowerVR o render
+// segurava o mutex compilando a lista inteira e o Android dava ANR (53 dumps
+// com a main em nativeDetachSurface: flush_warmup/create_pipeline no render,
+// trim_memory/shutdown no aurea-ciclo, prévia de efeito criando pipeline).
+// Espera no máximo `budgetMs`; sem o mutex, quem chama adia a operação para
+// a thread de render (o mesmo caminho que o export já usava): a superfície
+// Vulkan/EGL/CAMetalLayer guarda a própria referência da janela.
+bool Engine::lock_render_for_ui(std::unique_lock<std::mutex>& rl, u32 budgetMs) noexcept {
+    if (rl.try_lock()) return true;
+    uiRenderWaiters_.fetch_add(1, std::memory_order_acq_rel);
+    const u64 deadline = monotonic_ns() + static_cast<u64>(budgetMs) * 1'000'000ull;
+    bool got = false;
+    while (!(got = rl.try_lock()) && monotonic_ns() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    uiRenderWaiters_.fetch_sub(1, std::memory_order_acq_rel);
+    return got;
+}
+
+void Engine::defer_surface_detach() noexcept {
+    surfaceAttached_ = false;
+    pendingSurfaceSize_.store(0, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> pl(surfacePendingMutex_);
+        pendingAttach_ = {};   // a janela de um anexo ainda não aplicado morre agora
+    }
+    surfaceDetachPending_.store(true, std::memory_order_release);
+    surfaceOpPending_.store(true, std::memory_order_release);
+    wake_render();
+}
+
 Status Engine::attach_surface(void* nativeWindow, u32 width, u32 height) noexcept {
     std::unique_lock<std::mutex> rl(renderMutex_, std::defer_lock);
     // vivo 1938 (2185): o start do export segura renderMutex_ dentro do driver
@@ -1633,7 +1666,17 @@ Status Engine::attach_surface(void* nativeWindow, u32 width, u32 height) noexcep
         AUREA_LOG_INFO("superficie: export segura a GPU; anexo adiado");
         return OkStatus;
     }
-    if (!rl.owns_lock()) rl.lock();
+    if (!rl.owns_lock() && !lock_render_for_ui(rl, kUiSurfaceWaitMs)) {
+        if (!gpu_) return Status{Errc::NotSupported, "sem backend grafico"};
+        {
+            std::lock_guard<std::mutex> pl(surfacePendingMutex_);
+            pendingAttach_ = PendingSurfaceAttach{nativeWindow, width, height, true};
+        }
+        surfaceOpPending_.store(true, std::memory_order_release);
+        wake_render();
+        AUREA_LOG_INFO("superficie: render ocupado; anexo adiado para a thread de render");
+        return OkStatus;
+    }
     apply_pending_surface_locked(false);
     cancel_preview_graph_locked();
     if (!gpu_) return Status{Errc::NotSupported, "sem backend grafico"};
@@ -1661,18 +1704,15 @@ void Engine::detach_surface() noexcept {
         // A prévia está estacionada durante o export (não apresenta). O
         // VkSurfaceKHR/EGLSurface guarda a própria referência da janela; a
         // thread de render solta a superfície quando o export larga a GPU.
-        surfaceAttached_ = false;
-        pendingSurfaceSize_.store(0, std::memory_order_release);
-        {
-            std::lock_guard<std::mutex> pl(surfacePendingMutex_);
-            pendingAttach_ = {};   // a janela de um anexo ainda não aplicado morre agora
-        }
-        surfaceDetachPending_.store(true, std::memory_order_release);
-        surfaceOpPending_.store(true, std::memory_order_release);
+        defer_surface_detach();
         AUREA_LOG_INFO("superficie: export segura a GPU; soltura adiada");
         return;
     }
-    if (!rl.owns_lock()) rl.lock();
+    if (!rl.owns_lock() && !lock_render_for_ui(rl, kUiSurfaceWaitMs)) {
+        defer_surface_detach();
+        AUREA_LOG_INFO("superficie: render ocupado; soltura adiada para a thread de render");
+        return;
+    }
     apply_pending_surface_locked(false);
     cancel_preview_graph_locked();
     surfaceAttached_ = false;
@@ -13748,6 +13788,7 @@ Status Engine::recover_device_locked() noexcept {
     renderer_.set_hdri_lookup(&Engine::hdri_lookup, this);
     renderer_.set_cube_lookup(&Engine::cube_lookup, this);
     renderer_.shaders().set_abort(&exportActive_);   // 0.5.2 (E4): ShaderLibrary::set_abort
+    renderer_.shaders().set_yield(&uiRenderWaiters_);
     if (const Status s = renderer_.initialize(*gpu_, effectRegistry_); !s.ok()) {
         renderer_.forget_device(); gpu_->shutdown();
         return s;
@@ -17759,6 +17800,10 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
     vc.profile = kExportProfileDefault;
     vc.avoidSurface = ctx->safeMode == 1;
     vc.preferSoftware = ctx->safeMode >= 2;
+    // 1.0.6: no software o HEVC (kvazaar) leva minutos por segundo de vídeo num
+    // aparelho de entrada e a exportação "não termina"; o degrau 2 sai em H.264
+    // (openh264) com a MESMA taxa já calculada acima (ExportWatchdog.inl).
+    if (vc.preferSoftware && vc.codec == ExportCodec::HEVC) vc.codec = ExportCodec::H264;
     // CBR só quando pedido; o padrão é VBR com pico limitado no encoder.
     vc.rateMode = settings.rateMode == 0 ? 0u : 1u;
     vc.keyframeIntervalFrames = settings.keyframeIntervalFrames;

@@ -679,6 +679,13 @@ if(AUREA_PLATFORM_ANDROID)
     # padrão no arm64; explícito para não depender do padrão do NDK e cobrir
     # também o armeabi-v7a.
     target_link_options(aurea PRIVATE -Wl,-z,max-page-size=16384)
+    # 1.0.6 (peso): relocações dinâmicas compactadas (formato APS2 do Android,
+    # lido pelo linker do sistema desde o API 23; o piso é 26). A .rela.dyn do
+    # arm64 caía de ~1 MB para ~0,1 MB por ABI sem mudar código nem símbolos.
+    # Só no link: não recompila nada. (RELR exigiria API 28+/30.)
+    if(ANDROID_PLATFORM_LEVEL GREATER_EQUAL 23 OR CMAKE_SYSTEM_VERSION GREATER_EQUAL 23)
+        target_link_options(aurea PRIVATE -Wl,--pack-dyn-relocs=android)
+    endif()
 
     option(AUREA_ANDROID_SCENE_BENCHMARK "Build isolated on-device Vulkan/GLES scene performance probes" OFF)
     if(AUREA_ANDROID_SCENE_BENCHMARK)

@@ -5535,3 +5535,13 @@ aurea.text.prism	4	stagger	-3	fxs_stagger
 aurea.text.prism	5	paths	-3	fxs_path_motion
 aurea.text.prism	6	stroke	-3	fxo_stroke
 aurea.text.prism	7	composite	-3	fxo_composite
+aurea.transition.range_wipe	0	start	-1	fxl_start
+aurea.transition.range_wipe	1	end	-1	fxl_end
+aurea.transition.range_wipe	2	angle	-1	fx_angulo
+aurea.transition.range_wipe	3	feather	-1	fxl_softness
+aurea.blur.chromatic_zoom	0	center	-1	fx_centro
+aurea.blur.chromatic_zoom	1	amount	-1	fx_intensidade
+aurea.blur.chromatic_zoom	2	repeat_edge	-1	fx_esticar_bordas
+aurea.blur.chromatic_zoom	3	mix	-1	fx_mistura
+aurea.blur.chromatic_zoom	4	separation	-1	fxl_rgb_separation
+aurea.blur.chromatic_zoom	5	adaptive	-1	fxl_adaptive_sampling

@@ -7,7 +7,7 @@ import com.aurea.aurea.R
 internal object EffectI18nTable {
     /** (typeId << 16 | índice do parâmetro) → [rótulo, opção 0, opção 1, ...] (recursos). */
     val entries: Map<Long, IntArray> by lazy {
-        HashMap<Long, IntArray>(6906).apply {
+        HashMap<Long, IntArray>(6926).apply {
             part0(this)
             part1(this)
             part2(this)
@@ -3578,6 +3578,16 @@ internal object EffectI18nTable {
         m.put("aurea.text.prism", 56, /* range_offset */ intArrayOf(R.string.fxl_range_offset))
         m.put("aurea.text.prism", 57, /* wrap_cycle */ intArrayOf(R.string.fxl_wrap_cycle))
         m.put("aurea.text.prism", 58, /* mirror_palette */ intArrayOf(R.string.fxl_mirror_palette))
+        m.put("aurea.transition.range_wipe", 0, /* start */ intArrayOf(R.string.fxl_start))
+        m.put("aurea.transition.range_wipe", 1, /* end */ intArrayOf(R.string.fxl_end))
+        m.put("aurea.transition.range_wipe", 2, /* angle */ intArrayOf(R.string.fx_angulo))
+        m.put("aurea.transition.range_wipe", 3, /* feather */ intArrayOf(R.string.fxl_softness))
+        m.put("aurea.blur.chromatic_zoom", 0, /* center */ intArrayOf(R.string.fx_centro))
+        m.put("aurea.blur.chromatic_zoom", 1, /* amount */ intArrayOf(R.string.fx_intensidade))
+        m.put("aurea.blur.chromatic_zoom", 2, /* repeat_edge */ intArrayOf(R.string.fx_esticar_bordas))
+        m.put("aurea.blur.chromatic_zoom", 3, /* mix */ intArrayOf(R.string.fx_mistura))
+        m.put("aurea.blur.chromatic_zoom", 4, /* separation */ intArrayOf(R.string.fxl_rgb_separation))
+        m.put("aurea.blur.chromatic_zoom", 5, /* adaptive */ intArrayOf(R.string.fxl_adaptive_sampling))
     }
 
     /** (typeId << 16 | índice do parâmetro) → dica (recurso). */

@@ -47,6 +47,10 @@ struct AureaApp: App {
                 // AUREA: barra de status e controles do sistema no modo escuro.
                 .preferredColorScheme(.dark)
                 .onAppear {
+                    // 1.0.6: os relatórios pendentes saem ANTES de ligar o motor — um crash
+                    // que se repete em toda abertura não pode impedir o envio do anterior.
+                    // Relatórios de crash só saem com conta: o cadastro avisa do envio antes.
+                    if conta.logado { CrashReporter.shared.enviarPendentes(sessao: conta.sessao()) }
                     model.start()
                     // 0.3.2: config remota assinada (atualização obrigatória, política do AureaHyper, aviso).
                     AppConfigStore.shared.refresh(force: true)
@@ -54,8 +58,6 @@ struct AureaApp: App {
                     AureaSubscriptions.shared.startListening()
                     // Número de cadastrados + revalidação (com rede; offline, segue dentro).
                     conta.aoAbrir()
-                    // Relatórios de crash só saem com conta: o cadastro avisa do envio antes.
-                    if conta.logado { CrashReporter.shared.enviarPendentes(sessao: conta.sessao()) }
 #if DEBUG
                     model.prepareParityCapture()
 #endif
@@ -76,7 +78,6 @@ struct AureaApp: App {
                 }
         }
         .onChange(of: scenePhase) { phase in
-            if phase == .active { AureaAds.start() }   // anúncios: uma vez (o manager ignora as repetidas)
             // O motor tem uma thread de render e decoders de hardware: em
             // segundo plano ele PAUSA e devolve os decoders ao sistema. O
             // projeto fica intacto (é o `Engine::suspend`).

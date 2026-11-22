@@ -1539,7 +1539,39 @@ struct TimelineView: View {
                 nextWaves[mediaKey] = waveCache.get(model, layer: row.id, generation: model.status.modelRevision &+ model.status.thumbnailGeneration, fpb: fpb, first: firstBucket, last: lastBucket, group: row.group)
             }
         }
-        thumbnails = next; waves = nextWaves; pillThumbs = nextPill
+        // 1.0.6: só grava o que mudou. Cada gravação destes @State (UIImage não é
+        // Equatable) invalidava a timeline e redesenhava o Canvas inteiro.
+        if !Self.sameTiles(thumbnails, next) { thumbnails = next }
+        if !Self.sameWaves(waves, nextWaves) { waves = nextWaves }
+        if !Self.samePills(pillThumbs, nextPill) { pillThumbs = nextPill }
+    }
+
+    private static func sameTiles(_ a: [Int64: [MediaTile]], _ b: [Int64: [MediaTile]]) -> Bool {
+        guard a.count == b.count else { return false }
+        for (key, left) in a {
+            guard let right = b[key], left.count == right.count else { return false }
+            for index in left.indices {
+                let l = left[index], r = right[index]
+                if l.image !== r.image || l.localFrame != r.localFrame || l.width != r.width { return false }
+            }
+        }
+        return true
+    }
+
+    private static func sameWaves(_ a: [Int64: TimelineWaveStrip.Entry], _ b: [Int64: TimelineWaveStrip.Entry]) -> Bool {
+        guard a.count == b.count else { return false }
+        for (key, l) in a {
+            guard let r = b[key], l.generation == r.generation, l.fpb == r.fpb, l.w0 == r.w0, l.w1 == r.w1, l.count == r.count else { return false }
+        }
+        return true
+    }
+
+    private static func samePills(_ a: [Int64: UIImage], _ b: [Int64: UIImage]) -> Bool {
+        guard a.count == b.count else { return false }
+        for (key, image) in a {
+            guard let other = b[key], other === image else { return false }
+        }
+        return true
     }
 
     // Marker updates are independent of thumbnail work and its frame budget.
@@ -2676,7 +2708,8 @@ struct TimelineView: View {
                 if abs(scrollVelocity) < 12 { scrollVelocity = 0 }
             }
         }
-        if mediaNeedsRefresh || thumbCache.starved {
+        // 1.0.6: sem memória (`blocked`) não repede a cada tique; só quando ela voltar.
+        if mediaNeedsRefresh || thumbCache.starved || (thumbCache.blocked && model.thumbnailWorkAllowed) {
             mediaNeedsRefresh = false
             refreshMedia(size: size)
         }

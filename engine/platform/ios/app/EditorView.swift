@@ -348,7 +348,9 @@ private struct ModelTexturesPrompt: ViewModifier {
         content
             .alert(AureaText.t("model_textures_title"), isPresented: Binding(
                 get: { model.missingModelTextures != nil },
-                set: { if !$0 { model.missingModelTextures = nil } })) {
+                set: { if !$0 { model.missingModelTextures = nil } }),
+                // 1.0.6: o texto vem do pedido congelado (o botão zera o pedido com o alerta aberto).
+                presenting: model.missingModelTextures) { _ in
                 Button(AureaText.t("model_textures_choose")) {
                     model.missingModelTextures = nil
                     // O seletor sobe pela raiz (`AddLayerPickers`) depois que o alerta fecha.
@@ -356,8 +358,8 @@ private struct ModelTexturesPrompt: ViewModifier {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { shell.addPicker = .modelTextures }
                 }
                 Button(AureaText.t("common_cancel"), role: .cancel) { model.missingModelTextures = nil }
-            } message: {
-                let names = model.missingModelTextures?.names ?? []
+            } message: { missing in
+                let names = missing.names
                 Text(AureaText.t("model_textures_message", names.prefix(8).joined(separator: "\n") + (names.count > 8 ? "\n…" : "")))
             }
     }
@@ -391,20 +393,21 @@ private struct ModelOptimizePrompt: ViewModifier {
                 get: { model.modelOptimize != nil },
                 // Fechar só limpa o pedido: a pasta copiada sai no Cancelar (o botão
                 // de importar pode rodar depois do fechamento e ainda precisa dela).
-                set: { if !$0 { model.modelOptimize = nil } })) {
-                if let req = model.modelOptimize {
-                    ForEach(req.plan.offered, id: \.self) { q in
-                        Button(label(q, req.plan)) { model.confirmModelOptimize(req, quality: q) }
-                    }
-                    Button(AureaText.t("common_cancel"), role: .cancel) { model.dismissModelOptimize(req) }
+                set: { if !$0 { model.modelOptimize = nil } }),
+                // 1.0.6: `presenting:` congela o pedido enquanto o alerta está na tela. Antes os
+                // botões saíam de `model.modelOptimize`, que o próprio botão zera: os botões
+                // sumiam com o alerta ainda aberto (o UIKit não tira ações de um alerta na
+                // tela; NSInternalInconsistencyException "contained alert controller").
+                presenting: model.modelOptimize) { req in
+                ForEach(req.plan.offered, id: \.self) { q in
+                    Button(label(q, req.plan)) { model.confirmModelOptimize(req, quality: q) }
                 }
-            } message: {
-                if let req = model.modelOptimize {
-                    let tris = AureaModel.modelCount(req.plan.triangles)
-                    let lines = req.plan.offered.map { "\(label($0, req.plan)): \(hint($0, req.plan))" }
-                    Text(AureaText.t("model3d_heavy_body", req.plan.exact ? tris : "~" + tris) + "\n\n" + lines.joined(separator: "\n")
-                         + "\n\n" + AureaText.t("model3d_risk_warning"))
-                }
+                Button(AureaText.t("common_cancel"), role: .cancel) { model.dismissModelOptimize(req) }
+            } message: { req in
+                let tris = AureaModel.modelCount(req.plan.triangles)
+                let lines = req.plan.offered.map { "\(label($0, req.plan)): \(hint($0, req.plan))" }
+                Text(AureaText.t("model3d_heavy_body", req.plan.exact ? tris : "~" + tris) + "\n\n" + lines.joined(separator: "\n")
+                     + "\n\n" + AureaText.t("model3d_risk_warning"))
             }
     }
 }
@@ -602,7 +605,7 @@ private struct ShellStageBanner: View {
     private func decimal(_ key: String) -> String { number(key).map { String(format: "%.1f", locale: Locale(identifier: "en_US_POSIX"), $0.doubleValue) } ?? "—" }
     private func mb(_ key: String) -> String { number(key).map { String($0.uint64Value / (1024 * 1024)) } ?? "—" }
     private func gpu(_ key: String) -> String { number("gpuTimers")?.boolValue == true ? decimal(key) : "—" }
-    private func line(_ key: String, _ args: String...) -> String { String(format: AureaText.t(key), arguments: args.map { $0 as CVarArg }) }
+    private func line(_ key: String, _ args: String...) -> String { AureaText.format(AureaText.t(key), args.map { $0 as CVarArg }) }
     private var text: String {
         if model.rawPlayback && !playbackReport.isEmpty { return playbackReport }
         var out = [line("sh_diag_fps", decimal("previewFps"), String(format: "%.1f", display.fps))]
@@ -1014,7 +1017,7 @@ struct ContextSheet: View {
                     Spacer(minLength: 0)
                     AddPanelView().frame(height: EditorLayout.addContentHeight)
                 }
-            } else if model.selection.count > 1 && model.panel != .aiVideo && model.panel != .captions {
+            } else if model.selection.count > 1 && model.panel != .captions {
                 BatchToolsView()
             } else {
             // 0.4.1 (mockup "interface 03"): a ferramenta entra deslizando da direita por cima
@@ -1069,8 +1072,6 @@ struct ContextSheet: View {
                 CaptionsPanel()
             case .vector:
                 VectorPanel(face: model.vectorFace)
-            case .aiVideo:
-                AiVideoPanel()
             case .filters:
                 EditFiltersView()
             case .adjust:
@@ -1750,7 +1751,7 @@ private struct AddLayerSheet: View {
             AureaColors.hairline.frame(height: 1)
             if tab == 0 { shapeGrid }
             else if tab == 1 {
-                EditorMediaGallery(openFiles: { photos($0 ? .video : .photo) }, openAI: { model.openPanel(.aiVideo) }) { items in
+                EditorMediaGallery(openFiles: { photos($0 ? .video : .photo) }) { items in
                     model.importMediaBatch(items); close()
                 }
             } else if tab == ShellAddCategories.textPresets {
@@ -1789,7 +1790,6 @@ private struct AddLayerSheet: View {
                         card("editor_galeria", glyph: CupertinoGlyph.PhotoOnRectangle, accent: true) { photos(.gallery) }
                         card("editor_foto", glyph: CupertinoGlyph.Photo) { photos(.photo) }
                         card("editor_video", glyph: CupertinoGlyph.Videocam) { photos(.video) }
-                        card("sh_add_ai_video", glyph: CupertinoGlyph.WandStars) { model.openPanel(.aiVideo) }
                         card("seq_title", glyph: CupertinoGlyph.SquareStack3dUp) { openSequenceChooser() }
                             .accessibilityIdentifier("add.sequence")
                     case 2:
@@ -1995,7 +1995,6 @@ private struct EditorMediaGallery: View {
     @State private var selecting = false
     @State private var selectedAssets: [PHAsset] = []
     let openFiles: (Bool) -> Void
-    let openAI: () -> Void
     let picked: ([(URL, Bool)]) -> Void
     var body: some View {
         VStack(spacing: 0) {
@@ -2008,7 +2007,6 @@ private struct EditorMediaGallery: View {
                     }.buttonStyle(.plain).accessibilityIdentifier(mode ? "gallery.videos" : "gallery.photos")
                 }
                 ShellBarButton(glyph: CupertinoGlyph.Folder, description: AureaText.t("gallery_files"), size: 20, width: 48, height: 48) { openFiles(video) }
-                ShellBarButton(glyph: CupertinoGlyph.WandStars, description: AureaText.t("sh_add_ai_video"), size: 20, width: 48, height: 48, action: openAI)
             }
             if library.status == .limited {
                 HStack {
@@ -3599,7 +3597,7 @@ private struct ShellAddCategoryDialog: View {
                         model.selectCameraPoint(CGPoint(x: (value.location.x-ox)/fit, y: (value.location.y-oy)/fit), radius: 24/fit)
                     } else if !model.cameraTargetMode { model.finishCameraSelectionBox() }
                 })
-                .simultaneousGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in model.cameraContextMenu = true })
+                .simultaneousGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in if !model.cameraContextMenu { model.cameraContextMenu = true } })
                 .confirmationDialog(AureaText.t("cam_tracker_title"), isPresented: $model.cameraContextMenu) {
                     Button(AureaText.t("panel_criar_camera")) { model.createTrackedObject(0) }
                     if model.cameraSelectedCount > 0 {

@@ -159,13 +159,23 @@ public:
     [[nodiscard]] Result<PipelineHandle> pipeline(const PipelineKey& key) noexcept;
 
     /// Compila antecipadamente. Devolve quantos foram criados agora.
-    u32 prewarm(const PipelineKey* keys, u32 count) noexcept;
+    /// `processed` (opcional) recebe quantas chaves foram visitadas antes de
+    /// parar (set_abort / set_yield): o resto pode ficar para o próximo quadro.
+    u32 prewarm(const PipelineKey* keys, u32 count, u32* processed = nullptr) noexcept;
     /// 0.5.2 (E4): o pré-aquecimento para entre um pipeline e o próximo quando
     /// `*abort` fica verdadeiro (prévia: o export começou; export: cancelar).
     /// Numa GPU lenta para compilar (PowerVR GE8320) a lista inteira segurava
     /// o renderMutex_ por dezenas de segundos e a partida do export esperava
     /// sem cancelar. O que não foi compilado compila no primeiro uso.
     void set_abort(const std::atomic<bool>* abort) noexcept { abort_ = abort; }
+    /// 1.0.6: o pré-aquecimento também para entre dois pipelines enquanto
+    /// `*waiters > 0` — a thread da UI esperando o renderMutex_ (surfaceDestroyed
+    /// → detach_surface). Numa PowerVR (PVRUniFlexCompileToHw) a lista inteira
+    /// passava dos 5 s e o Android dava ANR (vivo V2134, OPPO CPH2035, SM-A032F).
+    void set_yield(const std::atomic<u32>* waiters) noexcept { yield_ = waiters; }
+    [[nodiscard]] bool yield_requested() const noexcept {
+        return yield_ && yield_->load(std::memory_order_acquire) > 0;
+    }
 
     /// A partir daqui, toda criação de pipeline conta como "durante o
     /// playback" — o painel DEV mostra, e o número certo é zero.
@@ -251,6 +261,7 @@ private:
     u32 compilesSinceMark_ = 0;
     bool steady_ = false;
     const std::atomic<bool>* abort_ = nullptr;   ///< set_abort
+    const std::atomic<u32>* yield_ = nullptr;    ///< set_yield
     PipelineCreationProbe pipelineProbe_ = nullptr;
     void* pipelineProbeContext_ = nullptr;
     std::string lastError_;

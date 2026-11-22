@@ -215,7 +215,7 @@ private fun LifeGradient(env: PanelEnv) {
         listOf(listOf(0f,1f,1f,.3137255f), listOf(1f,.7843137f,.1568627f,.1568627f))
     Row(Modifier.padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
         stops.forEachIndexed { index, color ->
-            ColorWell(Color(color[1], color[2], color[3])) {
+            ColorWell(com.aurea.aurea.ui.ds.swatchColor(color[1], color[2], color[3])) {
                 store.beginGesture("Particle World color")
                 env.openColor(ColorRequest(floatArrayOf(color[1], color[2], color[3], 1f),
                     onChange = { r, g, b, _ ->

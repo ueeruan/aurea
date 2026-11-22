@@ -124,21 +124,8 @@
 		AE0000000000000000025A01 /* EditModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000025A00 /* EditModeView.swift */; };
 		AE00000000000000000000C3 /* EffectPreviewStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000000C2 /* EffectPreviewStore.swift */; };
 		AE00000000000000000000C5 /* previa_efeitos.jpg in Resources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000000C4 /* previa_efeitos.jpg */; };
-		AD0000000000000000000011 /* AureaAdsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000001 /* AureaAdsManager.swift */; };
-		AD0000000000000000000012 /* LevelPlayAdsBackend.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000002 /* LevelPlayAdsBackend.swift */; };
-		AD0000000000000000000013 /* UmpConsent.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000003 /* UmpConsent.swift */; };
-		AD0000000000000000000014 /* AureaAds.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000004 /* AureaAds.swift */; };
-		AD0000000000000000000041 /* UnityMediationSDK in Frameworks */ = {isa = PBXBuildFile; productRef = AD0000000000000000000031 /* UnityMediationSDK */; };
-		AD0000000000000000000042 /* UnityAdsAdapter in Frameworks */ = {isa = PBXBuildFile; productRef = AD0000000000000000000032 /* UnityAdsAdapter */; };
-		AD0000000000000000000043 /* GoogleUserMessagingPlatform in Frameworks */ = {isa = PBXBuildFile; productRef = AD0000000000000000000033 /* GoogleUserMessagingPlatform */; };
 		AD0000000000000000000044 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = AD0000000000000000000034 /* FirebaseAuth */; };
 		AD0000000000000000000045 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = AD0000000000000000000035 /* GoogleSignIn */; };
-		AD0000000000000000000061 /* AureaAiClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000051 /* AureaAiClient.swift */; };
-		AD0000000000000000000062 /* AiRewardFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000052 /* AiRewardFlow.swift */; };
-		AD000000000000000000051 /* GuardaDaSessao.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD000000000000000000050 /* GuardaDaSessao.swift */; };
-		AD0000000000000000000063 /* AureaAiState.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000053 /* AureaAiState.swift */; };
-		AD0000000000000000000064 /* AiVideoPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000054 /* AiVideoPanel.swift */; };
-		AD0000000000000000000065 /* minimax_h3_api.json in Resources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000055 /* minimax_h3_api.json */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -276,16 +263,6 @@
 		AE0000000000000000025A00 /* EditModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditModeView.swift; sourceTree = "<group>"; };
 		AE00000000000000000000C2 /* EffectPreviewStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EffectPreviewStore.swift; sourceTree = "<group>"; };
 		AE00000000000000000000C4 /* previa_efeitos.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = previa_efeitos.jpg; sourceTree = "<group>"; };
-		AD0000000000000000000001 /* AureaAdsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AureaAdsManager.swift; path = Ads/AureaAdsManager.swift; sourceTree = "<group>"; };
-		AD0000000000000000000002 /* LevelPlayAdsBackend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LevelPlayAdsBackend.swift; path = Ads/LevelPlayAdsBackend.swift; sourceTree = "<group>"; };
-		AD0000000000000000000003 /* UmpConsent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UmpConsent.swift; path = Ads/UmpConsent.swift; sourceTree = "<group>"; };
-		AD0000000000000000000004 /* AureaAds.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AureaAds.swift; path = Ads/AureaAds.swift; sourceTree = "<group>"; };
-		AD0000000000000000000051 /* AureaAiClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AureaAiClient.swift; path = Ai/AureaAiClient.swift; sourceTree = "<group>"; };
-		AD0000000000000000000052 /* AiRewardFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AiRewardFlow.swift; path = Ai/AiRewardFlow.swift; sourceTree = "<group>"; };
-		AD000000000000000000050 /* GuardaDaSessao.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GuardaDaSessao.swift; path = Ai/GuardaDaSessao.swift; sourceTree = "<group>"; };
-		AD0000000000000000000053 /* AureaAiState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AureaAiState.swift; path = Ai/AureaAiState.swift; sourceTree = "<group>"; };
-		AD0000000000000000000054 /* AiVideoPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AiVideoPanel.swift; path = Ai/AiVideoPanel.swift; sourceTree = "<group>"; };
-		AD0000000000000000000055 /* minimax_h3_api.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = minimax_h3_api.json; path = Resources/ai/minimax_h3_api.json; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -313,9 +290,6 @@
 				AE0000000000000000000057 /* UniformTypeIdentifiers.framework in Frameworks */,
 				AE0000000000000000000058 /* Foundation.framework in Frameworks */,
 				AE0000000000000000000059 /* UIKit.framework in Frameworks */,
-				AD0000000000000000000041 /* UnityMediationSDK in Frameworks */,
-				AD0000000000000000000042 /* UnityAdsAdapter in Frameworks */,
-				AD0000000000000000000043 /* GoogleUserMessagingPlatform in Frameworks */,
 				AD0000000000000000000044 /* FirebaseAuth in Frameworks */,
 				AD0000000000000000000045 /* GoogleSignIn in Frameworks */,
 			);
@@ -400,16 +374,6 @@
 				AE00000000000000000000F3 /* RealCameraStage.swift */,
 				AE0000000000000000000E01 /* VoiceRecorder.swift */,
 				AE0000000000000000003401 /* PluginsV2.swift */,
-				AD0000000000000000000001 /* AureaAdsManager.swift */,
-				AD0000000000000000000002 /* LevelPlayAdsBackend.swift */,
-				AD0000000000000000000003 /* UmpConsent.swift */,
-				AD0000000000000000000004 /* AureaAds.swift */,
-				AD0000000000000000000051 /* AureaAiClient.swift */,
-				AD0000000000000000000052 /* AiRewardFlow.swift */,
-				AD000000000000000000050 /* GuardaDaSessao.swift */,
-				AD0000000000000000000053 /* AureaAiState.swift */,
-				AD0000000000000000000054 /* AiVideoPanel.swift */,
-				AD0000000000000000000055 /* minimax_h3_api.json */,
 				AE000000000000000000000C /* Theme.swift */,
 				AE000000000000000000000D /* AureaModel.swift */,
 				AE000000000000000000000E /* AureaStrings.swift */,
@@ -524,9 +488,6 @@
 			);
 			name = Aurea;
 			packageProductDependencies = (
-				AD0000000000000000000031 /* UnityMediationSDK */,
-				AD0000000000000000000032 /* UnityAdsAdapter */,
-				AD0000000000000000000033 /* GoogleUserMessagingPlatform */,
 				AD0000000000000000000034 /* FirebaseAuth */,
 				AD0000000000000000000035 /* GoogleSignIn */,
 			);
@@ -581,9 +542,6 @@
 			);
 			mainGroup = AE0000000000000000000027;
 			packageReferences = (
-				AD0000000000000000000021 /* XCRemoteSwiftPackageReference "LevelPlay-Swift-Package" */,
-				AD0000000000000000000022 /* XCRemoteSwiftPackageReference "LevelPlay-UnityAds-Adapter-Swift-Package" */,
-				AD0000000000000000000023 /* XCRemoteSwiftPackageReference "swift-package-manager-google-user-messaging-platform" */,
 				AD0000000000000000000024 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
 				AD0000000000000000000025 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
 			);
@@ -609,7 +567,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				AE0000000000000000000080 /* Assets.xcassets in Resources */,
-				AD0000000000000000000065 /* minimax_h3_api.json in Resources */,
 				AE00000000000000000000E0 /* Fonts in Resources */,
 				AE0000000000000000000087 /* presets in Resources */,
 				DA2121000000000000000003 /* editor_commands.json in Resources */,
@@ -731,15 +688,6 @@
 				AE00000000000000000000F4 /* RealCameraStage.swift in Sources */,
 				AE0000000000000000000E02 /* VoiceRecorder.swift in Sources */,
 				AE0000000000000000003402 /* PluginsV2.swift in Sources */,
-				AD0000000000000000000011 /* AureaAdsManager.swift in Sources */,
-				AD0000000000000000000012 /* LevelPlayAdsBackend.swift in Sources */,
-				AD0000000000000000000013 /* UmpConsent.swift in Sources */,
-				AD0000000000000000000014 /* AureaAds.swift in Sources */,
-				AD0000000000000000000061 /* AureaAiClient.swift in Sources */,
-				AD0000000000000000000062 /* AiRewardFlow.swift in Sources */,
-				AD000000000000000000051 /* GuardaDaSessao.swift in Sources */,
-				AD0000000000000000000063 /* AureaAiState.swift in Sources */,
-				AD0000000000000000000064 /* AiVideoPanel.swift in Sources */,
 				AE0000000000000000000044 /* Theme.swift in Sources */,
 				AE0000000000000000000045 /* AureaModel.swift in Sources */,
 				AE00000000000000000000A1 /* DesignSystem.swift in Sources */,
@@ -843,8 +791,8 @@
 				CODE_SIGN_ENTITLEMENTS = app/Aurea.entitlements;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2226;
-				MARKETING_VERSION = 1.0.5;
+				CURRENT_PROJECT_VERSION = 2227;
+				MARKETING_VERSION = 1.0.6;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
@@ -920,8 +868,8 @@
 				CODE_SIGN_ENTITLEMENTS = app/Aurea.entitlements;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2226;
-				MARKETING_VERSION = 1.0.5;
+				CURRENT_PROJECT_VERSION = 2227;
+				MARKETING_VERSION = 1.0.6;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
@@ -1058,30 +1006,6 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		AD0000000000000000000021 /* XCRemoteSwiftPackageReference "LevelPlay-Swift-Package" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/ironsource-mobile/LevelPlay-Swift-Package";
-			requirement = {
-				kind = exactVersion;
-				version = 9.6.0;
-			};
-		};
-		AD0000000000000000000022 /* XCRemoteSwiftPackageReference "LevelPlay-UnityAds-Adapter-Swift-Package" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/ironsource-mobile/LevelPlay-UnityAds-Adapter-Swift-Package";
-			requirement = {
-				kind = exactVersion;
-				version = 5.12.0;
-			};
-		};
-		AD0000000000000000000023 /* XCRemoteSwiftPackageReference "swift-package-manager-google-user-messaging-platform" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/googleads/swift-package-manager-google-user-messaging-platform";
-			requirement = {
-				kind = exactVersion;
-				version = 3.1.0;
-			};
-		};
 		AD0000000000000000000024 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
@@ -1101,21 +1025,6 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		AD0000000000000000000031 /* UnityMediationSDK */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = AD0000000000000000000021 /* XCRemoteSwiftPackageReference "LevelPlay-Swift-Package" */;
-			productName = UnityMediationSDK;
-		};
-		AD0000000000000000000032 /* UnityAdsAdapter */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = AD0000000000000000000022 /* XCRemoteSwiftPackageReference "LevelPlay-UnityAds-Adapter-Swift-Package" */;
-			productName = UnityAdsAdapter;
-		};
-		AD0000000000000000000033 /* GoogleUserMessagingPlatform */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = AD0000000000000000000023 /* XCRemoteSwiftPackageReference "swift-package-manager-google-user-messaging-platform" */;
-			productName = GoogleUserMessagingPlatform;
-		};
 		AD0000000000000000000034 /* FirebaseAuth */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = AD0000000000000000000024 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;

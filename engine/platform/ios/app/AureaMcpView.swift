@@ -480,17 +480,48 @@ struct AureaMcpRoot: View {
 /// AureaMCP: um alerta da raiz não aparece por cima de uma tela cheia.
 struct McpConfirmAlert: ViewModifier {
     @ObservedObject var mcp: AureaMcpClient
+    /// 1.0.6: o pedido NA TELA fica parado enquanto o alerta aparece. Antes título,
+    /// papel do botão e texto liam `mcp.confirm` ao vivo: com "perguntar a cada edição"
+    /// o agente troca o pedido (nil → novo) com o alerta aberto, e o UIKit abortava com
+    /// "A view controller not containing an alert controller was asked for its contained
+    /// alert controller" (NSInternalInconsistencyException, 2224, no editor). Agora o
+    /// velho fecha e o novo entra depois; cada botão responde só ao pedido que mostrou.
+    @State private var shown: AureaMcpClient.Confirm?
+    @State private var shownTitle = ""
 
     func body(content: Content) -> some View {
-        content.alert(title, isPresented: Binding(get: { mcp.confirm != nil }, set: { if !$0 && mcp.confirm != nil { mcp.answerConfirm(false) } })) {
-            Button(AureaText.t("mcp_approve"), role: mcp.confirm?.tool == "delete_project" ? .destructive : nil) { mcp.answerConfirm(true) }
-            Button(AureaText.t("mcp_deny"), role: .cancel) { mcp.answerConfirm(false) }
-        } message: { Text(message) }
+        content
+            .alert(shownTitle, isPresented: Binding(get: { shown != nil }, set: { presented in
+                guard !presented else { return }
+                if let c = shown, mcp.confirm?.id == c.id { mcp.answerConfirm(false, id: c.id.uuidString) }
+                shown = nil
+            }), presenting: shown) { c in
+                Button(AureaText.t("mcp_approve"), role: c.tool == "delete_project" ? .destructive : nil) { mcp.answerConfirm(true, id: c.id.uuidString) }
+                Button(AureaText.t("mcp_deny"), role: .cancel) { mcp.answerConfirm(false, id: c.id.uuidString) }
+            } message: { c in Text(Self.message(c)) }
+            .onAppear { if shown == nil, let c = mcp.confirm { show(c) } }
+            .onReceive(mcp.$confirm) { next in
+                guard next?.id != shown?.id else { return }
+                if shown == nil {
+                    if let next { show(next) }
+                } else {
+                    // Fecha o que está na tela; o próximo sobe quando ele tiver saído.
+                    shown = nil
+                    if next != nil {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            if shown == nil, let c = mcp.confirm { show(c) }
+                        }
+                    }
+                }
+            }
     }
 
-    private var title: String { AureaText.t("mcp_confirm_title", mcp.confirm?.agent ?? "") }
-    private var message: String {
-        guard let c = mcp.confirm else { return "" }
+    private func show(_ c: AureaMcpClient.Confirm) {
+        shownTitle = AureaText.t("mcp_confirm_title", c.agent)
+        shown = c
+    }
+
+    private static func message(_ c: AureaMcpClient.Confirm) -> String {
         if c.tool == "delete_project" { return AureaText.t("mcp_confirm_delete", c.detail) }
         return AureaText.t("mcp_confirm_edit", c.tool) + (c.detail.isEmpty ? "" : "\n\n" + String(c.detail.prefix(300)))
     }

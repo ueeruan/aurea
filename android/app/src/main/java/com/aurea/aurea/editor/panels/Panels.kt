@@ -59,7 +59,6 @@ enum class EditorPanel {
     Mask,          // máscaras (roto) e track matte
     Vector,        // camada vetorial: caminhos, tinta, contorno, aparar, repetidor
     ShapeEdit,     // Frente D (7.2): editar forma — tamanho, raio, pontas; alças no palco
-    AiVideo,       // Aurea AI: gerar vídeo remoto (MiniMax H3) e trazer para a timeline
     Filters,       // 0.3.0, modo de edição: looks prontos com intensidade (ColorToolsPanels.kt)
     Adjust,        // 0.3.0, modo de edição: ajustes de cor, HSL, curvas, rodas, scopes
     // Omega conteúdo (área 06): editor de desenho e o modo Editar pontos (no fim: o ordinal fica salvo).
@@ -172,15 +171,11 @@ fun PanelContent(
     ) {
         // Com camada escolhida, o título da seção mora na barra de cima
         // (SectionTopBar, redesenho 2026-09-29); o cabeçalho próprio só fica
-        // para o painel aberto sem camada (Aurea AI, legendas).
+        // para o painel aberto sem camada (legendas).
         if (panel != EditorPanel.Curve && (!hasLayer || alwaysHeader)) PanelHeader(title, onBack = onClose)
         Box(Modifier.fillMaxWidth().weight(1f)) {
-            // O painel da Aurea AI gera um video e o poe na timeline: nao ha
-            // camada escolhida para ele consultar, entao fica FORA do
-            // `hasLayer` — abrir sem nada selecionado e o caso normal.
-            if (panel == EditorPanel.AiVideo) {
-                AiVideoPanel(env)
-            } else if (panel == EditorPanel.Captions) {
+            // Legendas não dependem de camada escolhida: ficam FORA do `hasLayer`.
+            if (panel == EditorPanel.Captions) {
                 CaptionsPanel(env)
             } else if (hasLayer) {
                 when (panel) {
@@ -311,7 +306,6 @@ internal fun panelSectionTitle(store: EditorStore, panel: EditorPanel): String =
     EditorPanel.Vector, EditorPanel.VectorPaths -> stringResource(R.string.fn_vec_paths_title)
     EditorPanel.VectorFill -> stringResource(R.string.panel_cor_preenchimento)
     EditorPanel.ShapeEdit -> stringResource(R.string.panel_editar_forma)
-    EditorPanel.AiVideo -> stringResource(R.string.panel_ai_video)
     EditorPanel.Filters -> stringResource(R.string.grade_title_filters)
     EditorPanel.Adjust -> stringResource(R.string.grade_title_adjust)
     // Omega conteúdo (área 06).

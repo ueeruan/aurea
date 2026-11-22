@@ -636,8 +636,8 @@ final class AureaModel: ObservableObject {
         let timelineOnly = groupInnerSelection == nil && !editingSelection.isEmpty && editingSelection == timelineOnlySelection
         // Omega adicionar (área 08, P0-1): o conteúdo embutido acima da barra (.adding).
         if showAddLayer { return editingSelection.isEmpty || (timelineOnly && !timelineKeySelectMode) ? .adding : .none }
-        // O painel da Aurea AI CRIA a camada: abre sem nada selecionado (igual ao Android).
-        if panel == .aiVideo || panel == .captions { return .panel }
+        // O painel de legendas CRIA a camada: abre sem nada selecionado (igual ao Android).
+        if panel == .captions { return .panel }
         if editingSelection.isEmpty { return .addBar }
         if timelineOnly && (panel == .none || panel == .dock) { return timelineKeySelectMode ? .none : .addBar }
         if editingSelection.count > 1 { return .batch }
@@ -1263,7 +1263,7 @@ final class AureaModel: ObservableObject {
 
     enum Screen { case home, editor, hyper }
     /// `filters`/`adjust` (0.3.0): as telas próprias do modo de edição (EditModeView.swift).
-    enum PanelKind { case none, dock, transform, text, effects, layer3D, exportPanel, appearance, speed, clipEdit, audio, shape, shapeEdit, mask, textAnimation, curve, presets, particles, tracking, captions, vector, aiVideo, filters, adjust,
+    enum PanelKind { case none, dock, transform, text, effects, layer3D, exportPanel, appearance, speed, clipEdit, audio, shape, shapeEdit, mask, textAnimation, curve, presets, particles, tracking, captions, vector, filters, adjust,
         // Omega aparência (área 05): Borda e sombra e Opções da câmera.
         borderShadow, camera,
         // Omega conteúdo (área 06): o editor de desenho e o Editar pontos.
@@ -3033,7 +3033,8 @@ final class AureaModel: ObservableObject {
         case 19: return AureaText.t("msg_a_gpu_foi_reiniciada_tente_de")
         case 20: return AureaText.t("msg_memoria_de_video_gpu_insuficiente_baixe")
         case 28: return AureaText.t("msg_sem_espaco_no_aparelho_libere_espaco")
-        default: return AureaText.t("msg_erro_inesperado_codigo", code)
+        // 1.0.6: o texto é "%1$@": um Int ali era objc_msgSend num inteiro (SIGSEGV, 2223).
+        default: return AureaText.t("msg_erro_inesperado_codigo", String(code))
         }
     }
 
@@ -4915,7 +4916,22 @@ final class AureaModel: ObservableObject {
 
     /// Relê a lista do motor (os nomes por idioma do navegador e dos cartões).
     func refreshPlugins() {
-        FxPluginTexts.update(engine.pluginsJSON)
+        applyPlugins(engine.pluginsJSON)
+    }
+
+    /// 1.0.6 (par do EditorStore.refreshPluginsOffMain): abrir a lista de plugins
+    /// enquanto um plugin compila (a instalação segura o motor) travava a main na
+    /// leitura da lista (ANR no Android). Lê fora da main e aplica na main.
+    func refreshPluginsOffMain() {
+        let native = engine
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let json = native.pluginsJSON
+            DispatchQueue.main.async { self?.applyPlugins(json) }
+        }
+    }
+
+    private func applyPlugins(_ json: String) {
+        FxPluginTexts.update(json)
         plugins = FxPluginTexts.plugins
         PluginRuntime.shared.attach(self)   // 0.3.4 plugins: painéis, scripts e rede/seletor
     }
@@ -5300,20 +5316,28 @@ final class AureaModel: ObservableObject {
         refreshModel(force: true); refreshMarkers()
         if count > 0 {
             guard bpm.isFinite, bpm >= 0, let roundedBPM = Int32(exactly: bpm.rounded()) else {
-                toast = AureaText.t("msg_nao_foi_possivel_analisar_o_som", 10); return
+                toast = AureaText.t("msg_nao_foi_possivel_analisar_o_som", "10"); return
             }
-            toast = AureaText.t("msg_batidas_bpm", count, Int(roundedBPM))
+            // The localized placeholders use %@ and must receive strings.
+            toast = AureaText.t("msg_batidas_bpm", String(count), String(roundedBPM))
             _ = saveProject(writeThumbnail: false)
         } else {
+            let errorCode = count == Int64.min ? Int64.max : -count
             toast = count == 0 ? AureaText.t("msg_nenhuma_batida_clara_neste_som")
-                : AureaText.t("msg_nao_foi_possivel_analisar_o_som", count == Int64.min ? Int64.max : -count)
+                : AureaText.t("msg_nao_foi_possivel_analisar_o_som", String(errorCode))
         }
     }
 
     func clearHomeCaches() {
         HomeThumbCache.shared.clear()
-        let freed = engine.trimMemory(80)
+        // 1.0.6 (par do EditorStore.clearCache): o trim do motor espera a GPU e a
+        // trava do motor — que a subida segura enquanto compila shaders. Fora da
+        // main, para "Limpar cache" nunca congelar a tela (ANR no Android).
+        let native = engine
         Task {
+            let freed = await withCheckedContinuation { (done: CheckedContinuation<Int64, Never>) in
+                DispatchQueue.global(qos: .userInitiated).async { done.resume(returning: native.trimMemory(80)) }
+            }
             let disk = await effectPreviews.clear()
             toast = AureaText.t("msg_cache_cleared", String(format: "%.1f", Double(freed + disk) / (1024 * 1024)))
         }
@@ -6728,7 +6752,6 @@ final class AureaModel: ObservableObject {
             exportPublishing = false; exporting = false
             exportMessage = AureaText.t("exp2_saved_files")
             toast = AureaText.t("exp2_done_sequence")
-            AureaAdsManager.shared.showExportInterstitialIfAvailable {}
             return
         }
         let kind = exportedKind
@@ -6739,8 +6762,6 @@ final class AureaModel: ObservableObject {
                     self?.exportPublishing = false; self?.exporting = false
                     self?.exportMessage = AureaText.t("ios_export_saved_allow_photos")
                     self?.toast = AureaText.t(readyKey)
-                    // Ponto seguro: o render acabou e o vídeo já está salvo. Não segura nada.
-                    AureaAdsManager.shared.showExportInterstitialIfAvailable {}
                 }
                 return
             }
@@ -6769,7 +6790,6 @@ final class AureaModel: ObservableObject {
                         + (reducedFps > 0 ? "\n" + AureaText.t("export_done_fps", reducedFps) : "")
                         + qualityNotes
                     self?.toast = AureaText.t(readyKey)
-                    AureaAdsManager.shared.showExportInterstitialIfAvailable {}
                 }
             }
         }

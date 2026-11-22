@@ -2462,7 +2462,7 @@ struct PluginManagerView: View {
         .accessibilityIdentifier("plugins.sheet")
         .background(AureaColors.fxListSurface)
         .overlay { PluginOverlays() }
-        .onAppear { model.refreshPlugins() }
+        .onAppear { model.refreshPluginsOffMain() }
         .alert(AureaText.t("plug_remove_title", removing.flatMap { FxPluginTexts.pick($0.names, tag) } ?? removing?.id ?? ""),
                isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
             Button(AureaText.t("plug_remove"), role: .destructive) { if let p = removing { model.removePlugin(id: p.id) }; removing = nil }

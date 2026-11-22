@@ -93,8 +93,7 @@ jobs:
           chmod 600 "$key"
           grep -q 'BEGIN PRIVATE KEY' "$key" || { echo "::error::APPLE_API_KEY_P8 nao parece um .p8"; exit 1; }
           echo "APPLE_KEY_PATH=$key" >> "$GITHUB_ENV"
-      # O IronSource (LevelPlay 9.6.0) vem compilado com Swift 6.2: so linka com o
-      # Xcode 26 (no 16.4 faltam isIsolatingCurrentContext e swift_coroFrameAlloc).
+      # O app compila com o Xcode 26 (Swift 6.2), o mesmo das builds publicadas.
       - name: Select Xcode 26
         id: xcode
         run: |
@@ -165,7 +164,6 @@ jobs:
           python3 engine/platform/ios/verify/check_editor_layout.py
           python3 engine/platform/ios/verify/check_sheet_layout.py
           python3 engine/platform/ios/verify/check_preview_buffer.py
-          python3 engine/platform/ios/verify/check_ai_sessions.py
           python3 engine/platform/ios/verify/check_project_lifecycle.py
           python3 engine/platform/ios/verify/check_scene_drag.py
           python3 engine/platform/ios/verify/check_memory_pressure.py
@@ -459,8 +457,7 @@ jobs:
       CCACHE_BASEDIR: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v4
-      # O IronSource (LevelPlay 9.6.0) vem compilado com Swift 6.2: so linka com o
-      # Xcode 26 (no 16.4 faltam isIsolatingCurrentContext e swift_coroFrameAlloc).
+      # O app compila com o Xcode 26 (Swift 6.2), o mesmo das builds publicadas.
       - name: Select Xcode 26
         run: |
           XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)

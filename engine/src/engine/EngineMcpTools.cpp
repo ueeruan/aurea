@@ -1137,7 +1137,10 @@ std::string get_effect(Ctx& ctx, const json::Value& args) {
 constexpr const char* kMotionTextPresets[Engine::kMotionTextPresetCount] = {
     "Typewriter with cursor", "Decode", "Uncensor", "Reveal password", "Open title (letters spread)",
     "Rise by letter", "Wave", "Cascade spin", "Grow by word", "Letters out (random order)",
+    "Soft bounce",
 };
+// 1.0.6: o 11º preset entrou no motor sem nome aqui e o nullptr derrubava list_presets.
+static_assert(kMotionTextPresets[Engine::kMotionTextPresetCount - 1] != nullptr, "todo preset Motion precisa de nome");
 
 std::string list_presets(Ctx& ctx, const json::Value& args) {
     const std::string kind = lower(str_arg(args, "kind"));

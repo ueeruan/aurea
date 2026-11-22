@@ -7,7 +7,7 @@ import java.util.TreeSet
 //
 //  FONTES: o código Kotlin do app Android entra INTEIRO e sem cópia
 //  (`../android/app/src/main/java`). Só ficam de fora os arquivos presos a SDKs
-//  que não existem no PC (anúncios, Play Billing, login do Credential Manager,
+//  que não existem no PC (Play Billing, login do Credential Manager,
 //  ARCore, ML Kit, serviço de primeiro plano). No lugar deles, e no lugar das
 //  classes `android.*` que a UI usa, entra `src/main/kotlin` (a camada de
 //  compatibilidade, ver desktop/README.md).
@@ -31,9 +31,6 @@ val generatedRes = layout.buildDirectory.dir("generated/aureaRes")
 val androidOnly = listOf(
     "com/aurea/aurea/MainActivity.kt",
     "com/aurea/aurea/AureaApplication.kt",
-    "com/aurea/aurea/ads/GoogleAdsBackend.kt",
-    "com/aurea/aurea/ads/LevelPlayAdsBackend.kt",
-    "com/aurea/aurea/ads/UmpConsent.kt",
     "com/aurea/aurea/conta/GoogleLogin.kt",
     "com/aurea/aurea/editor/RealCameraArTracker.kt",
     "com/aurea/aurea/editor/RealCameraMotion.kt",

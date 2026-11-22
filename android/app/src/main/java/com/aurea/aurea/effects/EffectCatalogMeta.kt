@@ -299,6 +299,8 @@ private val Table: Map<Int, EffectMeta> = buildMap {
         "preencher fill cor chapada tinta solido"))
     put("aurea.color.balance_hls", EffectMeta(R.string.fx_desc_color_balance_hls, AllTargets,
         "equilibrio balanco cor hls matiz luz saturacao"))
+    put("aurea.transition.range_wipe", EffectMeta(R.string.fx_desc_range_wipe, AllTargets))
+    put("aurea.blur.chromatic_zoom", EffectMeta(R.string.fx_desc_chromatic_zoom, AllTargets))
     put("aurea.blur.zoom", EffectMeta(R.string.fx_desc_blur_zoom, AllTargets,
         "zoom rastro radial lente empurrar desfoque cc radial fast blur mais claro mais escuro"))
     put("aurea.distort.bulge", EffectMeta(R.string.fx_desc_distort_bulge, AllTargets,

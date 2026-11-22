@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aurea.aurea.R
 import com.aurea.aurea.state.EditorStore
+import com.aurea.aurea.ui.ds.uniqueListKeys
 import com.aurea.aurea.state.Image3DField
 import com.aurea.aurea.state.Text3DInfo
 import com.aurea.aurea.state.Text3DPreset
@@ -171,7 +172,7 @@ internal fun Element3DPanel(env: PanelEnv) {
                             val part = store.shapePartOf(store.primary)
                             if (part >= 0) {
                                 val c = shape.colors.getOrNull(part) ?: floatArrayOf(1f, 1f, 1f, 1f)
-                                MaterialTextureRow(env, part, Color(c[0], c[1], c[2]), allowFile = false)
+                                MaterialTextureRow(env, part, com.aurea.aurea.ui.ds.swatchColor(c[0], c[1], c[2]), allowFile = false)
                             }
                         }
                         else -> EnvSection(stringResource(R.string.panel_material), null) { ImportedMaterialSection(env) }
@@ -410,7 +411,7 @@ private fun Text3DMaterialTab(env: PanelEnv, info: Text3DInfo) {
             KitChip(stringResource(R.string.shape3d_image_clear), on = false) { store.clearText3DTexture() }
         }
     }
-    ColorLine(stringResource(R.string.panel_cor), Color(info.color[0], info.color[1], info.color[2])) {
+    ColorLine(stringResource(R.string.panel_cor), com.aurea.aurea.ui.ds.swatchColor(info.color[0], info.color[1], info.color[2])) {
         store.beginGesture("cor do texto 3D")
         env.openColor(ColorRequest(info.color.copyOf(), onChange = { r, g, b, _ ->
             store.text3d?.let { store.setText3D(it.copy(color = floatArrayOf(r, g, b, 1f)), lazy = true) }
@@ -428,7 +429,7 @@ private fun Text3DMaterialTab(env: PanelEnv, info: Text3DInfo) {
             }
         }
         T3DRow(env, stringResource(R.string.pn_t3d_specular), info.specular, 1f, 1f, "especular") { t, v -> t.copy(specular = v) }
-        ColorLine(stringResource(R.string.pn_t3d_emissive), Color(info.emissive[0], info.emissive[1], info.emissive[2])) {
+        ColorLine(stringResource(R.string.pn_t3d_emissive), com.aurea.aurea.ui.ds.swatchColor(info.emissive[0], info.emissive[1], info.emissive[2])) {
             store.beginGesture("emissao do texto 3D")
             env.openColor(ColorRequest(info.emissive.copyOf(), onChange = { r, g, b, _ ->
                 store.text3d?.let { store.setText3D(it.copy(emissive = floatArrayOf(r, g, b)), lazy = true) }
@@ -445,7 +446,7 @@ private fun Text3DMaterialTab(env: PanelEnv, info: Text3DInfo) {
             T3DRow(env, stringResource(R.string.pn_t3d_region_side), info.sideRoughness, 1f, 0.35f, "rugosidade da lateral") { t, v ->
                 t.copy(sideRoughness = v)
             }
-            ColorLine(stringResource(R.string.pn_t3d_region_bevel), Color(info.bevelColor[0], info.bevelColor[1], info.bevelColor[2])) {
+            ColorLine(stringResource(R.string.pn_t3d_region_bevel), com.aurea.aurea.ui.ds.swatchColor(info.bevelColor[0], info.bevelColor[1], info.bevelColor[2])) {
                 store.beginGesture("cor do chanfro")
                 env.openColor(ColorRequest(info.bevelColor.copyOf(), onChange = { r, g, b, _ ->
                     store.text3d?.let { store.setText3D(it.copy(bevelColor = floatArrayOf(r, g, b, 1f)), lazy = true) }
@@ -477,7 +478,7 @@ private fun Text3DCartoonSection(env: PanelEnv, info: Text3DInfo) {
     val width = outline?.getOrNull(0) ?: info.outlineWidth
     val ink = if (outline != null) floatArrayOf(outline[1], outline[2], outline[3], 1f) else info.outlineColor
     EnvSection(stringResource(R.string.pn_t3d_preset_cartoon), null) {
-        ColorLine(stringResource(R.string.panel_cor), Color(info.color[0], info.color[1], info.color[2])) {
+        ColorLine(stringResource(R.string.panel_cor), com.aurea.aurea.ui.ds.swatchColor(info.color[0], info.color[1], info.color[2])) {
             store.beginGesture("cor do texto 3D")
             env.openColor(ColorRequest(info.color.copyOf(), onChange = { r, g, b, _ ->
                 store.text3d?.let { store.setText3D(it.copy(color = floatArrayOf(r, g, b, 1f)), lazy = true) }
@@ -489,7 +490,7 @@ private fun Text3DCartoonSection(env: PanelEnv, info: Text3DInfo) {
             }
         }
         if (!info.toonSideAuto) {
-            ColorLine(stringResource(R.string.t3d_cartoon_side), Color(info.toonSideColor[0], info.toonSideColor[1], info.toonSideColor[2])) {
+            ColorLine(stringResource(R.string.t3d_cartoon_side), com.aurea.aurea.ui.ds.swatchColor(info.toonSideColor[0], info.toonSideColor[1], info.toonSideColor[2])) {
                 store.beginGesture("lateral do cartoon")
                 env.openColor(ColorRequest(info.toonSideColor.copyOf(), onChange = { r, g, b, _ ->
                     store.text3d?.let { store.setText3D(it.copy(toonSideColor = floatArrayOf(r, g, b, 1f)), lazy = true) }
@@ -503,7 +504,7 @@ private fun Text3DCartoonSection(env: PanelEnv, info: Text3DInfo) {
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.weight(1f).testTag("text3d.cartoon.outlineColor")) {
-                ColorLine(stringResource(R.string.t3d_cartoon_outline_color), Color(ink[0], ink[1], ink[2])) {
+                ColorLine(stringResource(R.string.t3d_cartoon_outline_color), com.aurea.aurea.ui.ds.swatchColor(ink[0], ink[1], ink[2])) {
                     store.beginGesture("cor do contorno")
                     env.openColor(ColorRequest(ink.copyOf(), onChange = { r, g, b, _ ->
                         store.setText3DOutlineColor(r, g, b, keyed = colorLook != com.aurea.aurea.ui.ds.KeyframeLook.None)
@@ -568,7 +569,11 @@ private fun Text3DShapeTab(env: PanelEnv, info: Text3DInfo) {
         text = {
             LazyColumn(Modifier.heightIn(max = 400.dp)) {
                 item { TextButton(onClick = { store.text3d?.let { store.setText3D(it.copy(fontPath = "")) }; fontsOpen = false }) { Text(stringResource(R.string.t3d_default_font)) } }
-                items(store.fonts, key = { it.path }) { font ->
+                // 1.0.6: várias faces no mesmo arquivo (variável, .ttc) repetiam a chave e fechavam o app.
+                val fonts = store.fonts
+                val fontKeys = uniqueListKeys(fonts) { it.path }
+                items(fonts.size, key = { fontKeys[it] }) { i ->
+                    val font = fonts[i]
                     TextButton(onClick = { store.text3d?.let { store.setText3D(it.copy(fontPath = font.path)) }; fontsOpen = false }) {
                         // A importada volta do motor como "docs:…" (caminho portátil), como no iOS.
                         val chosen = info.fontPath == font.path ||
@@ -641,7 +646,7 @@ private fun Image3DMaterialTab(env: PanelEnv, f: FloatArray) {
 private fun Image3DRegion(env: PanelEnv, title: String, f: FloatArray, at: Int) {
     val store = env.store
     EnvSection(title, null) {
-        ColorLine(stringResource(R.string.panel_cor), Color(f[at], f[at + 1], f[at + 2])) {
+        ColorLine(stringResource(R.string.panel_cor), com.aurea.aurea.ui.ds.swatchColor(f[at], f[at + 1], f[at + 2])) {
             store.beginGesture("cor da imagem 3D")
             env.openColor(ColorRequest(floatArrayOf(f[at], f[at + 1], f[at + 2], 1f), onChange = { r, g, b, _ ->
                 store.setImage3D(lazy = true) { it[at] = r; it[at + 1] = g; it[at + 2] = b }

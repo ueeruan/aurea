@@ -5,6 +5,7 @@
 #include "aurea/core/Log.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstring>
 
@@ -334,7 +335,14 @@ void CommandListImpl::end_render_pass() noexcept {
 void CommandListImpl::bind_pipeline(PipelineHandle pipeline) noexcept {
     if (!cmd_) return;
     const PipelineObject* p = backend_->pipeline(pipeline.id);
-    if (!p) return;
+    if (!p || !p->pipeline || !p->layout) {
+        // 1.0.6: handle inválido (pipeline que não compilou, destruído) não
+        // deixa o anterior "amarrado" para o desenho/dispatch seguinte: com
+        // pipeline_ nulo eles saem sem chamar o driver.
+        pipeline_ = nullptr;
+        dirty_ = true;
+        return;
+    }
     if (p != pipeline_) {
         backend_->device_dispatch().vkCmdBindPipeline(cmd_, p->bindPoint, p->pipeline);
         // Layout diferente invalida o set amarrado.
@@ -433,6 +441,7 @@ bool CommandListImpl::flush_descriptors() noexcept {
     Texture& dummy = backend_->dummy_texture();
     for (u32 i = 0; i < binding::kTextureSlots; ++i) {
         Texture* t = textures_[i].texture ? backend_->texture(textures_[i].texture) : nullptr;
+        if (t && !t->view) t = nullptr;   // 1.0.6: view que não existe nunca vai ao driver
         const SamplerObject* s = textures_[i].sampler ? backend_->sampler(textures_[i].sampler) : nullptr;
         images[i].imageView = t ? t->view : dummy.view;
         images[i].imageLayout = t && t->layout == VK_IMAGE_LAYOUT_GENERAL ? VK_IMAGE_LAYOUT_GENERAL
@@ -462,6 +471,14 @@ bool CommandListImpl::flush_descriptors() noexcept {
     Texture& dummyStorage = backend_->dummy_storage();
     for (u32 i = 0; i < binding::kStorageImageSlots; ++i) {
         Texture* t = storageImages_[i] ? backend_->texture(storageImages_[i]) : nullptr;
+        // 1.0.6: storage só de imagem criada com STORAGE e com view: o
+        // descritor de uma imagem sem o uso é lido pelo driver no dispatch.
+        if (t && (!t->view || !t->desc.storage)) {
+            static std::atomic<bool> logged{false};
+            if (!logged.exchange(true))
+                AUREA_LOG_ERROR("storage image sem uso STORAGE/view no slot %u: reserva no lugar", i);
+            t = nullptr;
+        }
         storage[i].imageView = t ? t->view : dummyStorage.view;
         storage[i].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
         writes[n] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
@@ -546,9 +563,34 @@ void CommandListImpl::draw_indexed(u32 indexCount, u32 instanceCount, u32 firstI
 }
 
 void CommandListImpl::dispatch(u32 x, u32 y, u32 z) noexcept {
-    if (inRenderPass_ || !pipeline_ || pipeline_->bindPoint != VK_PIPELINE_BIND_POINT_COMPUTE) return;
+    if (!cmd_ || inRenderPass_ || !pipeline_ || pipeline_->bindPoint != VK_PIPELINE_BIND_POINT_COMPUTE) return;
+    if (!pipeline_->pipeline || !pipeline_->layout) return;
+    // Grade vazia: nada a fazer (e há driver que não gosta de 0).
+    if (!x || !y || !z) return;
+    if (x > backend_->maxDispatch_[0] || y > backend_->maxDispatch_[1] || z > backend_->maxDispatch_[2]) {
+        static std::atomic<bool> logged{false};
+        if (!logged.exchange(true))
+            AUREA_LOG_ERROR("dispatch %ux%ux%u acima do limite do aparelho (%ux%ux%u): passe ignorado", x, y, z,
+                            backend_->maxDispatch_[0], backend_->maxDispatch_[1], backend_->maxDispatch_[2]);
+        return;
+    }
     if (dirty_ && !flush_descriptors()) return;
+    if (!lastSet_) return;   // sem descritores amarrados o driver lê um set nulo
+    // 1.0.6: o 1º dispatch de cada pipeline neste processo roda sob o guarda de
+    // travamento (SIGSEGV 0xf0 no vkCmdDispatch do vulkan.adreno.so: Galaxy Tab
+    // S7 FE e S20+, export/render/prévia de efeito). Se o driver derrubar o
+    // processo, a próxima abertura conta; na 2ª o pipeline fica bloqueado.
+    const VkPipeline handle = pipeline_->pipeline;
+    const bool proven = std::find(provenDispatch_.begin(), provenDispatch_.end(), handle) != provenDispatch_.end();
+    if (!proven) backend_->guard_begin(pipeline_->guardKey, pipeline_->guardName);
     backend_->device_dispatch().vkCmdDispatch(cmd_, x, y, z);
+    if (!proven) {
+        backend_->guard_end();
+        // Handles de pipelines destruídos podem ser reaproveitados pelo driver:
+        // a lista é curta (efeitos de compute), então só cresce até um teto.
+        if (provenDispatch_.size() >= 64) provenDispatch_.erase(provenDispatch_.begin());
+        provenDispatch_.push_back(handle);
+    }
 }
 
 void CommandListImpl::copy_texture(TextureHandle src, TextureHandle dst) noexcept {

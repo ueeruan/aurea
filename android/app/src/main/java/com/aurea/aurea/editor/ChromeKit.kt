@@ -149,6 +149,11 @@ internal fun Modifier.mirrorX(): Modifier = this.graphicsLayer { scaleX = -1f }
 /**
  * A folha de menu: fundo `#0F141A`, raio 18, puxador 36×4, lista rolável
  * que nunca passa de 80 % da tela.
+ *
+ * A folha JÁ rola: o [content] não pode ter `verticalScroll`/`LazyColumn` sem
+ * altura fixa (mede com altura infinita e fecha o app — "Vertically scrollable
+ * component was measured with an infinity maximum height", 143 crashes do
+ * PreRenderPanel no 2222).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

@@ -20,7 +20,6 @@
     <string name="mod_blocked_note">Anda memblokir profil ini.</string>
     <string name="mod_report_profile">Laporkan profil</string>
     <string name="mod_remove">Hapus (moderasi)</string>
-    <string name="mod_report_ai">Laporkan video</string>
     <string name="mod_report_preset">Laporkan preset</string>
     <string name="mod_more_actions">Tindakan lain</string>
 </resources>

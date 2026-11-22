@@ -322,7 +322,7 @@ internal fun ProjectSettingsSheet(store: EditorStore, ui: EditorUi, onDismiss: (
                                     bgName,
                                     tag = if (group) "groupSettings.background" else "projectSettings.background",
                                     contentDescription = stringResource(R.string.editor_plano_fundo),
-                                    swatch = if (bgTransparent) Color.Transparent else Color(bg[0], bg[1], bg[2]),
+                                    swatch = if (bgTransparent) Color.Transparent else com.aurea.aurea.ui.ds.swatchColor(bg[0], bg[1], bg[2]),
                                     checkerSwatch = bgTransparent,
                                     entries = Backgrounds.map { (res, c) ->
                                         val name = stringResource(res)

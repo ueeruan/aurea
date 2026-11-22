@@ -15,10 +15,8 @@ class ModerationRulesTest {
             assertTrue(isReportTarget(kind, uuid))
             assertFalse(isReportTarget(kind, "job_123"))
         }
-        assertTrue(isReportTarget("ai_video", "job_123.a:b-C"))
-        assertFalse(isReportTarget("ai_video", "job/123"))
-        assertFalse(isReportTarget("ai_video", "x".repeat(81)))
-        assertFalse(isReportTarget("ai_video", ""))
+        // 22/11/2026: a geração de vídeo por IA saiu; "ai_video" não é mais alvo.
+        assertFalse(isReportTarget("ai_video", "job_123.a:b-C"))
         assertFalse(isReportTarget("preset", uuid)) // preset vai pela rota das legendas
     }
 

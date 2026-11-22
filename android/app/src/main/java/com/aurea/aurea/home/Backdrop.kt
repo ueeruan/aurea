@@ -24,6 +24,7 @@ import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.toIntSize
+import com.aurea.aurea.ui.platform.balancedCanvas
 
 /**
  * Vidro da Home (barra de abas, barra compacta, barra de lote): o app antigo
@@ -61,7 +62,8 @@ internal fun Modifier.backdropSource(backdrop: Backdrop): Modifier {
     return this
         .onPlaced { backdrop.origin = it.positionInRoot() }
         .drawWithContent {
-            backdrop.layer.record { this@drawWithContent.drawContent() }
+            // 1.0.6: a Home inteira é desenhada aqui dentro; a pilha do Canvas volta à altura do começo.
+            backdrop.layer.record { balancedCanvas("home") { this@drawWithContent.drawContent() } }
             drawLayer(backdrop.layer)
         }
 }

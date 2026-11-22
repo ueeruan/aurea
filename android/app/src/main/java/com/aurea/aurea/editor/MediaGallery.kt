@@ -387,7 +387,8 @@ internal fun MediaStrip(store: EditorStore, ui: EditorUi, close: () -> Unit) {
             loading -> CircularProgressIndicator(Modifier.size(28.dp).align(Alignment.Center), color = AureaColors.Accent)
             !full && !partial -> AccessNotice(Modifier.align(Alignment.Center)) {
                 if (!requested) { requested = true; permissions.launch(galleryPermissions()) }
-                else context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}")))
+                // 1.0.6: aparelho sem a tela de detalhes do app não fecha o Aurea.
+                else runCatching { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) }
             }
             failed -> Text(
                 stringResource(R.string.gallery_error),
@@ -443,11 +444,6 @@ internal fun MediaStrip(store: EditorStore, ui: EditorUi, close: () -> Unit) {
                     }
                     item(key = "sequence") {
                         StripIconCell(cell, stringResource(R.string.seq_title), CupertinoGlyph.SquareStack3dUp, "add.media.sequence", onClick = sequence)
-                    }
-                    item(key = "ai") {
-                        StripIconCell(cell, stringResource(R.string.sh_add_ai_video), CupertinoGlyph.WandStars, "add.media.ai") {
-                            openPanel(store, ui, EditorPanel.AiVideo)
-                        }
                     }
                 }
                 // Seta de volta (15 × 30 dp): aparece depois de rolar; leva ao início.

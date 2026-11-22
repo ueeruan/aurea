@@ -20,7 +20,6 @@
     <string name="mod_blocked_note">You blocked this profile.</string>
     <string name="mod_report_profile">Report profile</string>
     <string name="mod_remove">Remove (moderation)</string>
-    <string name="mod_report_ai">Report video</string>
     <string name="mod_report_preset">Report preset</string>
     <string name="mod_more_actions">More actions</string>
 </resources>

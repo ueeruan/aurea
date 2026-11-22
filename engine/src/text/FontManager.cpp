@@ -50,6 +50,33 @@ std::string decode_name(const u8* p, u16 len, u16 platform) {
     return out;
 }
 
+// 1.0.6: nome de família/estilo vem do arquivo da fonte (tabela 'name'): um
+// estilo com TAB ou quebra de linha partia a linha que a JNI entrega ao
+// Kotlin (nativeListFonts, 8 campos com TAB, uma fonte por linha) e criava
+// uma face fantasma com chave repetida no navegador de fontes. Controles
+// viram espaço, bytes que não são UTF-8 válido viram '?', espaços nas pontas
+// e repetidos saem. Vale para Android e iOS (o motor é o mesmo).
+std::string clean_font_name(const std::string& in) {
+    std::string out;
+    out.reserve(in.size());
+    const auto* s = reinterpret_cast<const unsigned char*>(in.data());
+    const size_t n = in.size();
+    auto push_space = [&] { if (!out.empty() && out.back() != ' ') out.push_back(' '); };
+    for (size_t i = 0; i < n;) {
+        const unsigned char c = s[i];
+        if (c < 0x20 || c == 0x7F) { push_space(); ++i; continue; }
+        if (c < 0x80) { if (c == ' ') push_space(); else out.push_back(static_cast<char>(c)); ++i; continue; }
+        size_t len = (c & 0xE0) == 0xC0 ? 2 : (c & 0xF0) == 0xE0 ? 3 : (c & 0xF8) == 0xF0 ? 4 : 0;
+        bool ok = len != 0 && i + len <= n && !(c == 0xC0 || c == 0xC1);
+        for (size_t k = 1; ok && k < len; ++k) ok = (s[i + k] & 0xC0) == 0x80;
+        if (!ok) { out.push_back('?'); ++i; continue; }
+        out.append(in, i, len);
+        i += len;
+    }
+    while (!out.empty() && out.back() == ' ') out.pop_back();
+    return out;
+}
+
 u32 hash_path(const std::string& s) {
     u32 h = 2166136261u;
     for (char c : s) { h ^= static_cast<u8>(c); h *= 16777619u; }
@@ -206,8 +233,9 @@ bool read_font_info(const std::string& path, FontEntry& out) {
             }
         }
     }
-    out.family = !fam16.empty() ? fam16 : fam1;
-    out.style = !sub17.empty() ? sub17 : (!sub2.empty() ? sub2 : "Regular");
+    out.family = clean_font_name(!fam16.empty() ? fam16 : fam1);
+    out.style = clean_font_name(!sub17.empty() ? sub17 : sub2);
+    if (out.style.empty()) out.style = "Regular";
     out.weight = 400;
     out.italic = false;
     // Omega conteúdo (área 06): classe IBM, PANOSE e faixas Unicode (OS/2),
@@ -247,7 +275,7 @@ bool read_font_info(const std::string& path, FontEntry& out) {
         if (read_at(f, cmapOff, cmap.data(), cmap.size())) out.scripts = scripts_from_cmap(cmap);
     }
     std::fclose(f);
-    if (out.family.empty()) out.family = std::filesystem::path(path).stem().string();
+    if (out.family.empty()) out.family = clean_font_name(std::filesystem::path(path).stem().string());
     out.category = font_category(familyClass, panose, fixedPitch, out.family);
     if (out.scripts == 0) out.scripts = kScriptLatin;
     out.path = path;

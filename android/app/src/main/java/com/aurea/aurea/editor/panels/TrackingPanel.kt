@@ -271,9 +271,10 @@ private fun MotionReview(env: PanelEnv) {
     val source = store.primary ?: return
     val status = store.motionStatus
     val bins = remember(source, status[2], status[5], status[7]) { store.motionReview(source) }
-    if (bins.size <= 2) return
+    if (bins.size <= 2 || !bins[0].isFinite() || !bins[1].isFinite()) return
     val first = bins[0].roundToInt()
-    val last = bins[1].roundToInt()
+    // 1.0.6: faixa invertida do motor fazia o coerceIn lançar no desenho.
+    val last = maxOf(first, bins[1].roundToInt())
     val label = stringResource(R.string.trk_review)
     val scope = rememberCoroutineScope()
     val context = LocalContext.current

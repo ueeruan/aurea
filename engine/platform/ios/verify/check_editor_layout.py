@@ -63,8 +63,8 @@ check(near(EditorLayout.bottomZone(), 280) && near(EditorLayout.layerPanel(), 20
 check(near(EditorLayout.timelineFocusHeight(fontScale: 1), 80) && near(EditorLayout.timelineFocusHeight(fontScale: 1), EditorLayout.timelineFocus),
       "faixa de foco de 80 em 1×")
 check(near(EditorLayout.timelineFocusHeight(fontScale: 1.5), 99), "faixa de foco de 99 com fonte 150 %")
-// 0.3.3 barra: o bloco da grade do "+" (174) cabe na zona mínima da divisa (110 + 70).
-check(near(EditorLayout.addBarGridHeight, 174) && EditorLayout.addBarGridHeight <= EditorLayout.zoneMin,
+// 1.0.5 barra: o bloco da grade do "+" (180, igual ao ADD_BAR_GRID_HEIGHT do Android) cabe na zona mínima da divisa (110 + 70).
+check(near(EditorLayout.addBarGridHeight, 180) && EditorLayout.addBarGridHeight <= EditorLayout.zoneMin,
       "grade do + de \(EditorLayout.addBarGridHeight) cabe na zona mínima \(EditorLayout.zoneMin)")
 let contents: [SheetContent] = [.none, .addBar, .dock, .panel, .curve, .batch, .adding, .hint]
 for h in [CGFloat(640), 700, 760, 780, 844, 900, 960] {

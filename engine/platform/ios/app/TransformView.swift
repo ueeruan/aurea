@@ -1545,7 +1545,7 @@ struct PanelTabTags: View {
             HStack(spacing: 0) {
                 Spacer(minLength: 0)
                 VStack(spacing: 0) {
-                    ForEach(Array(tags.prefix(PanelFrameMetrics.maxTabs).enumerated()), id: \.offset) { _, tag in
+                    ForEach(Array(tags.enumerated()), id: \.offset) { _, tag in
                         Color.clear
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .accessibilityElement(children: .contain)

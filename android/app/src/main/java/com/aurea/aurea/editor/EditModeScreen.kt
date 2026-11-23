@@ -323,8 +323,11 @@ private fun EditTopBar(store: EditorStore, ui: EditorUi) {
                     onClick = { menu = false; store.autoKeyTransforms = !store.autoKeyTransforms },
                     modifier = Modifier.testTag("edit.autokey"),
                 )
-                // 0.3.1: o mesmo "Importar do After Effects" da Composição (o seletor mora
-                // no AureaApp); vale a camada escolhida, ou o preset cria uma.
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.ae_project_import)) },
+                    onClick = { menu = false; store.requestAeProjectImport() },
+                    modifier = Modifier.testTag("edit.aeProjectImport"),
+                )
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.ae_import_menu)) },
                     onClick = { menu = false; store.requestAeImport() },

@@ -1,6 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 0.3.0: importar presets .ffx e scripts .jsx do After Effects. -->
 <resources>
+    <string name="ae_project_import">Impor dari AE</string>
+    <string name="home_project_import">Impor</string>
+    <string name="home_project_import_aurea">Proyek Aurea (.aureaproj)</string>
+    <string name="home_project_import_aep">After Effects (.aep, .zip, .rar)</string>
+    <string name="ae_project_import_detail">Impor proyek beserta media asli dan pertahankan komposisi yang dapat diedit.</string>
+    <string name="ae_project_select_file">Pilih proyek After Effects .aep atau paket .zip atau .rar.</string>
+    <string name="ae_project_use_separate_import">Gunakan Impor dari AE untuk membuka proyek atau paket After Effects.</string>
+    <string name="ae_project_too_big">Proyek melebihi batas 64 MB untuk .aep atau 8 GB untuk .zip dan .rar.</string>
+    <string name="ae_kind_media">Media</string>
     <string name="ae_import_menu">Impor dari After Effects (.ffx, .jsx)</string>
     <string name="ae_import_menu_detail">Preset: efek, keyframe, dan animator teks pada lapisan terpilih. Skrip: membuat dan menganimasi lapisan.</string>
     <string name="ae_importing">Mengimpor dari After Effects…</string>

@@ -63,7 +63,9 @@ bool Backend::note_device_lost(VkResult r) noexcept {
     if (r == VK_ERROR_DEVICE_LOST) {
         if (!deviceLost_) {
             AUREA_LOG_ERROR("vulkan: dispositivo perdido");
-            if (lastSubmitted_ && lastSubmitted_->offscreen && passesPerCommandBuffer_ == 0) remember_export_loss();
+            // 1.0.7.1: também com a fatia preventiva (8 passes): só o passe a
+            // passe já é o mais fino, e aí lembrar não muda nada.
+            if (lastSubmitted_ && lastSubmitted_->offscreen && passesPerCommandBuffer_ != 1) remember_export_loss();
         }
         deviceLost_ = true;
         return true;
@@ -297,10 +299,11 @@ void Backend::guard_end() noexcept {
     (void)std::fflush(guardFile_);
 }
 
-void Backend::set_export_pass_split(bool split) noexcept {
-    const u32 want = split ? 1u : 0u;
+void Backend::set_export_pass_split(bool split, u32 passes) noexcept {
+    const u32 want = split ? std::max(1u, passes) : 0u;
     if (want == passesPerCommandBuffer_) return;
-    AUREA_LOG_INFO("vulkan: export %s", split ? "em um passe por envio" : "com o quadro inteiro num envio");
+    if (split) AUREA_LOG_INFO("vulkan: export com %u passe(s) por envio", want);
+    else AUREA_LOG_INFO("vulkan: export com o quadro inteiro num envio");
     passesPerCommandBuffer_ = want;
 }
 

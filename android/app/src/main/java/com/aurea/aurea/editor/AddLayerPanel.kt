@@ -765,6 +765,12 @@ private fun Model3DGrid(store: EditorStore, close: () -> Unit) {
     }
     // "Formas 3D": a grade das 10 formas prontas (motor: scene3d/Shape3D.hpp).
     var shapes by rememberSaveable { mutableStateOf(false) }
+    var library by rememberSaveable { mutableStateOf(false) }
+    if (library) com.aurea.aurea.home.ModelLibraryDialog(onUse = { id, name ->
+        library = false
+        close()
+        store.importLibraryModel(id, name)
+    }, onDismiss = { library = false })
     if (shapes) {
         ObjectGrid(
             listOf(ObjectCell(stringResource(R.string.shape3d_back), "add.model3d.back", glyph = CupertinoGlyph.ChevronLeft) { shapes = false }) +
@@ -780,6 +786,8 @@ private fun Model3DGrid(store: EditorStore, close: () -> Unit) {
     }
     ObjectGrid(
         listOf(
+            ObjectCell(stringResource(R.string.model_shop_title), "add.model3d.library", glyph = CupertinoGlyph.Cube,
+                tint = AureaColors.Accent) { library = true },
             ObjectCell(stringResource(R.string.shape3d_title), "add.model3d.shapes", draw = { drawShape3DIcon(0) }) { shapes = true },
             ObjectCell(stringResource(R.string.sh_add_model_3d), "add.model3d.file", glyph = CupertinoGlyph.Cube, tint = AureaColors.Accent) {
                 // Keep the broad fallback for providers that assign FBX/OBJ a

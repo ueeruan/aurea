@@ -834,6 +834,15 @@ public:
     /// 2048 e cache do Roto Brush pela metade. O export não muda.
     void set_low_memory_device(bool low) noexcept;
     [[nodiscard]] bool low_memory_device() const noexcept { return lowMemoryDevice_; }
+    /// 1.0.7.1: último recurso do export antes de falhar por memória — a cena
+    /// 3D passa a sombra de 4096 para 2048 e o MSAA para no máximo 2×. Uma vez
+    /// por Renderer (o do export é próprio da sessão); false = já reduzido.
+    [[nodiscard]] bool reduce_export_scene_memory() noexcept {
+        if (exportSceneMemoryReduced_) return false;
+        exportSceneMemoryReduced_ = true;
+        return true;
+    }
+    [[nodiscard]] bool export_scene_memory_reduced() const noexcept { return exportSceneMemoryReduced_; }
     /// Edição local: descarta só os quadros guardados em [start, end).
     void invalidate_preview_frames(i64 start, i64 end) noexcept;
     void clear_preview_cache() noexcept;
@@ -1596,6 +1605,7 @@ private:
     std::vector<PreviewFrame> previewFrames_;
     u64 previewCacheBudget_ = 0, previewCacheKey_ = 0, previewCacheUse_ = 0;
     bool lowMemoryDevice_ = false;   ///< set_low_memory_device
+    bool exportSceneMemoryReduced_ = false;   ///< reduce_export_scene_memory
     TemporalReconstruction temporalPreview_;
     u64 temporalBudget_ = 32ull << 20;
     u64 previewCacheRevision_ = 0, previewCacheComposition_ = 0;

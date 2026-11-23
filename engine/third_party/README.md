@@ -12,6 +12,7 @@ dos materiais e da integração com timeline/export.
 | `ufbx/` | github.com/ufbx/ufbx | v0.18.0 (729ab83) | MIT ou domínio público | leitor FBX (entrada → formato interno) |
 | `basisu/` | github.com/BinomialLLC/basis_universal | v1_50_0_2 (b76a431), só o transcoder + zstd de decodificação (`zstd/zstd.h` é nosso: declara só as 2 funções usadas) | Apache-2.0 (zstd: BSD) | KTX2 (ETC1S/UASTC, Zstd) → RGBA no import |
 | `tinyexr/` | github.com/syoyo/tinyexr | v1.0.13 (4946b5d): `tinyexr.h` + `exr_reader.hh` + `streamreader.hh`; `tinyexr.cc` é nosso (sem miniz: inflate do stb_image, compressão "stored") | BSD-3-Clause (LICENSE; trechos OpenEXR BSD-3) | HDRI .exr do ambiente 3D (scene3d/HdriImage.cpp) |
+| `AureaProjectArchives.cmake` | libarchive.org | 3.8.11, verificado por SHA-256 no CMake, link estático | `assets/licenses/libarchive.txt` | Leitura de ZIP/RAR/RAR5 no importador de projetos do After Effects. Usa o zlib do SDK móvel. O host Windows usa zlib 1.3.2. |
 | `harfbuzz/` | github.com/harfbuzz/harfbuzz | 14.5.0 (863d3f7), só `src/` (.cc/.hh/.h), compilado pelo amálgama `harfbuzz.cc` | MIT (COPYING) | shaping de texto (kerning, ligaduras, árabe, scripts complexos) |
 
 Atualizar: trocar os arquivos pela nova versão e esta tabela no mesmo commit.

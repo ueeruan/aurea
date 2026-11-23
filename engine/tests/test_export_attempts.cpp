@@ -167,9 +167,11 @@ AUREA_TEST(ExportAttempts, SoftwareStepsAlsoDecodeMediaInSoftware) {
 }
 
 AUREA_TEST(ExportAttempts, GpuTimeoutsNeverReduceAuthoredSamples) {
+    // 1.0.7.1: o mesmo degrau de novo (agora um passe por envio), nunca um
+    // degrau com menos amostras, pixels ou quadros.
     const auto request = shape(2160, 120.0, true, true);
     for (u32 attempt = 0; attempt <= kExportAttemptMax; ++attempt)
-        AUREA_CHECK_EQ(export_next_attempt(attempt, ExportRetryKind::GpuTime, request), 0u);
+        AUREA_CHECK_EQ(export_next_attempt(attempt, ExportRetryKind::GpuTime, request), attempt | kExportAttemptWait);
 }
 
 AUREA_TEST(ExportAttempts, EveryRetryKeepsFullGpuQuality) {
@@ -353,7 +355,7 @@ AUREA_TEST(ExportAttempts, GpuTimeStopsWhileEncoderStartupStillHasCompatibleRout
     const auto request = shape(1080, 30.0);
     ExportAttemptHistory history;
     history.record(ran(0, 2.0, 59));
-    AUREA_CHECK_EQ(export_next_attempt_with_history(0, ExportRetryKind::GpuTime, request, history), 0u);
+    AUREA_CHECK_EQ(export_next_attempt_with_history(0, ExportRetryKind::GpuTime, request, history), 0u | kExportAttemptWait);
     ExportAttemptHistory opening;
     ExportAttemptRecord record; record.request = 7; record.code = code(Errc::EncoderUnavailable);
     opening.record(record);

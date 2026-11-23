@@ -4606,6 +4606,12 @@ AUREA_JNI jbyteArray AUREA_FN(nativeImportAeData)(JNIEnv* env, jclass, jlong han
     return bytes_of(env, ae::report_json(report));
 }
 
+AUREA_JNI jbyteArray AUREA_FN(nativeImportAeProjectFile)(JNIEnv* env, jclass, jbyteArray input, jbyteArray output, jbyteArray title) {
+    const auto report = Engine::import_ae_project_file(utf8_of(env, input).c_str(),
+                                                      utf8_of(env, output).c_str(), utf8_of(env, title).c_str());
+    return bytes_of(env, ae::report_json(report));
+}
+
 /// Aplica (um passo de desfazer). Nulo = aplicado; senão, o motivo (UTF-8).
 AUREA_JNI jbyteArray AUREA_FN(nativeApplyPreset)(JNIEnv* env, jclass, jlong handle, jlong layer, jbyteArray json, jlong duration) {
     NativeContext* c = ctx_of(handle);

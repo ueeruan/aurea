@@ -169,7 +169,9 @@ private:
     struct Env { u32 parent; std::vector<std::pair<std::string, Value>> vars; };
     std::vector<Env> envs_;
 
-    void account(u64 bytes);
+    bool can_allocate(u64 bytes);
+    bool account(u64 bytes);
+    [[nodiscard]] std::string to_str(const Value& v, u32* ancestors, usize depth);
 };
 
 } // namespace aurea::ae::script

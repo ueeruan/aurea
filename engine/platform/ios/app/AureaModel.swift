@@ -3329,6 +3329,7 @@ final class AureaModel: ObservableObject {
 
     /// Same back order as EditorScreen.shellBack on Android.
     func editorBack() {
+        guard !aeImportExecuting else { return }
         // Omega conteúdo (área 06): o modo de texto sai primeiro.
         if textEditLayer != nil { closeTextEdit(); return }
         if showAddLayer { showAddLayer = false }
@@ -4162,7 +4163,7 @@ final class AureaModel: ObservableObject {
 
     /// Copy provider files while their security scope is held. Folder imports retain
     /// relative paths, so glTF buffers and model textures remain beside the model.
-    func importModelFiles(urls: [URL]) {
+    func importModelFiles(urls: [URL], displayName: String? = nil) {
         guard !importingMedia else { toast = AureaText.t("ios_importing_media"); return }
         guard !urls.isEmpty else { toast = AureaText.t("msg_esse_arquivo_nao_e_um_modelo"); return }
         // Só o .mtl/texturas (o modelo já entrou antes sem eles): religa no
@@ -4225,7 +4226,7 @@ final class AureaModel: ObservableObject {
                     // Plano do motor ANTES do import (só cabeçalhos e contagens):
                     // o que cabe neste aparelho. Pesado = pergunta; pesado demais = recusa.
                     let plan = ModelPlanInfo(importer.inspectModel(modelURL.path))
-                    let modelName = modelURL.deletingPathExtension().lastPathComponent
+                    let modelName = displayName ?? modelURL.deletingPathExtension().lastPathComponent
                     if plan.tooHeavy {
                         failure = AureaText.t("model3d_too_heavy")
                     } else if plan.heavy {
@@ -4866,46 +4867,197 @@ final class AureaModel: ObservableObject {
         var hasCounts: Bool { effects + keyframes + layers + expressions + animators > 0 }
     }
 
-    /// Preset .ffx na camada escolhida ou script .jsx (interpretador fechado: sem arquivos, rede
-    /// nem sistema). Um passo de desfazer; o relatório diz o que ficou de fora. 0.3.1: sem camada
-    /// escolhida, o motor cria uma para o preset (como o AE).
-    /// 0.4.6: o próximo .ffx entra no Text Animator Pro (pedido pelo painel de texto). Par do Android.
+    /// O próximo .ffx entra no Text Animator Pro quando pedido pelo painel de texto.
     var aeImportTextPro = false
-    func importAeFile(url: URL) {
-        // Outra importação em curso: diz o porquê em vez de calar (EditorStore.importAeFile).
-        guard !importingMedia else { toast = AureaText.t("ios_importing_media"); return }
+    private var aeImportExecuting = false
+
+    nonisolated private static func isAeProjectExtension(_ ext: String) -> Bool {
+        ["aep", "zip", "rar"].contains(ext.lowercased())
+    }
+
+    nonisolated private static func readAeFile(_ url: URL) throws -> Data {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        // O limite vale para os bytes lidos, inclusive quando o provedor omite o tamanho.
+        let maxBytes = 64 * 1024 * 1024
+        var data = Data()
+        while let chunk = try handle.read(upToCount: 65_536), !chunk.isEmpty {
+            guard chunk.count <= maxBytes - data.count else { throw CocoaError(.fileReadTooLarge) }
+            data.append(chunk)
+        }
+        return data
+    }
+
+    func importAeFile(url: URL, projectFile: Bool = false) {
+        guard started, screen == .editor, !openingProject, canChangeProject() else { return }
+        let fileName = url.lastPathComponent
+        let ext = url.pathExtension.lowercased()
+        let isProjectSource = Self.isAeProjectExtension(ext)
+        if ext == "aepx" || (projectFile && !isProjectSource) {
+            toast = AureaText.t("ae_project_select_file")
+            return
+        }
+        if !projectFile && isProjectSource {
+            toast = AureaText.t("ae_project_use_separate_import")
+            return
+        }
+        let project = projectGeneration
+        let compositionID = (composition[AureaCompositionId] as? NSNumber)?.uint64Value
         importingMedia = true; operationMessage = AureaText.t("ae_importing")
-        let native = engine, target = UInt64(bitPattern: primarySelection ?? 0)
-        let textPro = aeImportTextPro
+        let native = engine
+        let target = projectFile ? 0 : UInt64(bitPattern: primarySelection ?? 0)
+        let textPro = !projectFile && aeImportTextPro
         aeImportTextPro = false
-        mediaQueue.async { [weak self] in
+        if projectFile {
+            aeImportExecuting = true
             let scoped = url.startAccessingSecurityScopedResource()
+            mediaQueue.async { [weak self] in
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                let imported = Result {
+                    try Self.withStagedAeProject(url) { native.importAeFile($0.path, layer: 0) }
+                }
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.aeImportExecuting = false
+                    self.importingMedia = false
+                    guard self.isCurrentAeDestination(project, compositionID) else { return }
+                    switch imported {
+                    case .success(let json): self.finishAeImport(json, fileName: fileName, projectFile: true)
+                    case .failure(let error):
+                        self.toast = AureaText.t((error as? CocoaError)?.code == .fileReadTooLarge ? "ae_project_too_big" : "ae_failed_read")
+                    }
+                }
+            }
+            return
+        }
+        mediaQueue.async { [weak self] in
+            let read = Result { try Self.readAeFile(url) }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                guard self.isCurrentAeDestination(project, compositionID) else {
+                    self.importingMedia = false
+                    return
+                }
+                switch read {
+                case .failure(let error):
+                    self.importingMedia = false
+                    self.toast = AureaText.t((error as? CocoaError)?.code == .fileReadTooLarge ? "ae_too_big" : "ae_failed_read")
+                case .success(let data):
+                    self.aeImportExecuting = true
+                    self.mediaQueue.async { [weak self] in
+                        let json = native.importAeData(data, fileName: fileName, layer: target, textAnimatorPro: textPro)
+                        DispatchQueue.main.async {
+                            guard let self else { return }
+                            self.aeImportExecuting = false
+                            self.importingMedia = false
+                            guard self.isCurrentAeDestination(project, compositionID) else { return }
+                            self.finishAeImport(json, fileName: fileName, projectFile: projectFile)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func isCurrentAeDestination(_ project: UUID, _ compositionID: UInt64?) -> Bool {
+        started && screen == .editor && projectGeneration == project &&
+            (composition[AureaCompositionId] as? NSNumber)?.uint64Value == compositionID
+    }
+
+    nonisolated private static func parseAeImportResult(_ json: String, fileName: String) -> AeImportResult? {
+        guard let raw = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any] else {
+            return nil
+        }
+        func items(_ key: String) -> [AeImportItem] {
+            (raw[key] as? [[String: Any]] ?? []).map {
+                AeImportItem(kind: $0["kind"] as? String ?? "", name: $0["name"] as? String ?? "",
+                             reason: $0["reason"] as? String ?? "", line: ($0["line"] as? NSNumber)?.intValue ?? 0)
+            }
+        }
+        func int(_ key: String) -> Int { (raw[key] as? NSNumber)?.intValue ?? 0 }
+        return AeImportResult(ok: (raw["ok"] as? NSNumber)?.boolValue ?? false, fileName: fileName,
+                              kind: raw["kind"] as? String ?? "", message: raw["message"] as? String ?? "",
+                              effects: int("effects"), keyframes: int("keyframes"), layers: int("layers"),
+                              expressions: int("expressions"), animators: int("animators"),
+                              skipped: items("skipped"), notes: items("notes"), changes: int("changes"))
+    }
+
+    private func finishAeImport(_ json: String, fileName: String, projectFile: Bool) {
+        guard let result = Self.parseAeImportResult(json, fileName: fileName) else {
+            toast = AureaText.t("ae_failed_read")
+            return
+        }
+        aeImportResult = result
+        syncAfterEdit()
+        // Project imports use the ordinary background autosave path.
+        if !projectFile && (result.ok || result.changes > 0) { _ = saveProject(writeThumbnail: false) }
+    }
+
+    nonisolated private static func withStagedAeProject<T>(_ source: URL, convert: (URL) throws -> T) throws -> T {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("aurea-ae-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = directory.appendingPathComponent(source.lastPathComponent)
+        try AureaPaths.readImport(source) { readable in
+            let input = try FileHandle(forReadingFrom: readable)
+            defer { try? input.close() }
+            guard FileManager.default.createFile(atPath: destination.path, contents: nil) else {
+                throw CocoaError(.fileWriteUnknown)
+            }
+            let output = try FileHandle(forWritingTo: destination)
+            defer { try? output.close() }
+            var remaining = source.pathExtension.lowercased() == "aep" ? 64 << 20 : 8 << 30
+            while let chunk = try input.read(upToCount: 65_536), !chunk.isEmpty {
+                guard chunk.count <= remaining else { throw CocoaError(.fileReadTooLarge) }
+                try output.write(contentsOf: chunk)
+                remaining -= chunk.count
+            }
+        }
+        return try convert(destination)
+    }
+
+    /// Importa um projeto independente na biblioteca, sem trocar o projeto do editor.
+    func importHomeAeProject(_ url: URL, done: @escaping () -> Void) {
+        guard screen == .home, !openingProject, canChangeProject() else { return }
+        guard Self.isAeProjectExtension(url.pathExtension) else {
+            toast = AureaText.t("ae_project_select_file")
+            return
+        }
+        let basename = url.deletingPathExtension().lastPathComponent
+        let fallback = String(decoding: basename.utf8.prefix(120), as: UTF8.self)
+        let title = uniqueHomeProjectName(fallback.isEmpty ? AureaText.t("project_file_imported_title") : fallback)
+        let project = AureaPaths.documents.appendingPathComponent(title + ".aurea")
+        let scoped = url.startAccessingSecurityScopedResource()
+        importingMedia = true
+        operationMessage = AureaText.t("ae_importing")
+        mediaQueue.async { [weak self] in
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-            // O mesmo teto do motor (kMaxAeFile, 64 MB).
-            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-            let tooBig = size > 64 * 1024 * 1024
-            let data = tooBig ? nil : try? Data(contentsOf: url)
-            let json = data.map { native.importAeData($0, fileName: url.lastPathComponent, layer: target, textAnimatorPro: textPro) }
+            let imported = Result { () throws -> AeImportResult in
+                let json = try Self.withStagedAeProject(url) {
+                    AureaEngine.importAeProjectFile($0.path, outputPath: project.path, title: title)
+                }
+                guard let report = Self.parseAeImportResult(json, fileName: url.lastPathComponent),
+                      !report.ok || FileManager.default.fileExists(atPath: project.path) else {
+                    throw CocoaError(.fileReadUnknown)
+                }
+                return report
+            }
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.importingMedia = false
-                guard let json, let raw = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any] else {
-                    self.toast = AureaText.t(tooBig ? "ae_too_big" : "ae_failed_read"); return
-                }
-                func items(_ key: String) -> [AeImportItem] {
-                    (raw[key] as? [[String: Any]] ?? []).map {
-                        AeImportItem(kind: $0["kind"] as? String ?? "", name: $0["name"] as? String ?? "",
-                                     reason: $0["reason"] as? String ?? "", line: ($0["line"] as? NSNumber)?.intValue ?? 0)
+                switch imported {
+                case .failure(let error):
+                    self.toast = AureaText.t((error as? CocoaError)?.code == .fileReadTooLarge ? "ae_project_too_big" : "ae_failed_read")
+                case .success(let report):
+                    if report.ok {
+                        writeHomeProjectMeta(url: project, title: title, width: 0, height: 0, fps: 30, durationFrames: 0)
+                        self.refreshProjectList()
+                        done()
                     }
+                    self.aeImportResult = report
                 }
-                func int(_ key: String) -> Int { (raw[key] as? NSNumber)?.intValue ?? 0 }
-                self.aeImportResult = AeImportResult(ok: (raw["ok"] as? NSNumber)?.boolValue ?? false, fileName: url.lastPathComponent,
-                                                     kind: raw["kind"] as? String ?? "", message: raw["message"] as? String ?? "",
-                                                     effects: int("effects"), keyframes: int("keyframes"), layers: int("layers"),
-                                                     expressions: int("expressions"), animators: int("animators"),
-                                                     skipped: items("skipped"), notes: items("notes"), changes: int("changes"))
-                self.syncAfterEdit()
-                _ = self.saveProject(writeThumbnail: false)
             }
         }
     }

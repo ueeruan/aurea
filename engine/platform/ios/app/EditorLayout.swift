@@ -283,11 +283,11 @@ enum ShellAddPicker: Equatable {
     case gallery, photo, video, audioFromVideo, audioFile, model, svg, psd, modelTextures
     /// 0.3.0: sequência de imagens pela pasta (render do Blender) ou pelos quadros/.zip.
     case sequenceFolder, sequenceFiles
-    /// 0.3.0: preset .ffx ou script .jsx do After Effects.
-    case aeImport
+    /// Projetos e presets/scripts do After Effects têm entradas próprias.
+    case aeProjectImport, aeImport
     // Omega bugs-034 mídia: "Outros arquivos e nuvem" da faixa de mídia (fotos, vídeos e áudio pelo Arquivos).
     case mediaFiles
-    var isFile: Bool { self == .audioFile || self == .model || self == .svg || self == .psd || self == .modelTextures || self == .sequenceFolder || self == .sequenceFiles || self == .aeImport || self == .mediaFiles }
+    var isFile: Bool { self == .audioFile || self == .model || self == .svg || self == .psd || self == .modelTextures || self == .sequenceFolder || self == .sequenceFiles || self == .aeProjectImport || self == .aeImport || self == .mediaFiles }
 }
 
 enum ShellStageGeometry {

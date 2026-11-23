@@ -2952,7 +2952,9 @@ AUREA_TEST(MotionBlur, MissingIntegrationPipelineCannotCompleteASharpExportFrame
 }
 
 AUREA_TEST(MotionBlur, RejectedVectorBlurPassRetainsAValidSourceAndRecovers) {
-    for (const auto failedShader : {ShaderId::video_flow_vblur_frag,ShaderId::video_flow_lk_frag}) {
+    // 1.0.7.1: desde a 1.0.2 o fluxo usa DIS em toda qualidade (flow_tuning);
+    // o Lucas-Kanade (video_flow_lk_frag) não roda mais, o DIS é o passe a recusar.
+    for (const auto failedShader : {ShaderId::video_flow_vblur_frag,ShaderId::video_flow_dis_patch_frag}) {
         RenderFixture f;
         const auto id = f.solid("footage blur",Vec4{1,1,1,1});
         FrameSnapshot snapshot; f.prepare(snapshot);

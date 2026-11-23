@@ -6214,8 +6214,16 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             const u32 desired = shutter_sample_count(mb, settings.finalQuality,
                 effective_quality(settings).motionBlurSamples, travel, changing, ShutterPlan::kHardLimit);
             const u64 batchBudget = std::min(stateBudget, settings.sceneExposureBatchBudgetBytes);
+            // 1.0.7.1 ("nem um cubo 3D com motion blur exporta no celular"): o
+            // lote também é escolhido pelo CUSTO de GPU, não só pela memória da
+            // CPU. Um cubo cabe inteiro no orçamento de bytes e ia com todas as
+            // amostras (16–128 cenas 3D completas: sombra 4096, MSAA, AO) num
+            // envio só, que passava do vigia do driver (reset da GPU, Mali e
+            // Adreno) ou do prazo do quadro. Em lotes, cada envio tem a cerca
+            // e as mesmas amostras somam a mesma imagem.
             const bool batchExposure = batchEligible && desired > 1
-                && bytesPerSample > batchBudget / desired;
+                && (bytesPerSample > batchBudget / desired
+                    || desired > scene_exposure_samples_per_submission(out.compWidth, out.compHeight));
             const u64 admittedBytes = batchExposure ? poseBytesPerSample : bytesPerSample;
             const u32 admitted = static_cast<u32>(std::min<u64>(ShutterPlan::kHardLimit, stateBudget / std::max<u64>(1, admittedBytes)));
             const u32 required = std::max(minimum, desired);
@@ -6327,7 +6335,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     // Admit only uploads that fit beside all of that state at the batch fence.
     for (auto& batch : out.sceneExposureBatches) {
         const u64 budget = std::min(exposureBytesRemaining_, settings.sceneExposureBatchBudgetBytes);
-        batch.samplesPerBatch = static_cast<u32>(std::min<u64>(ShutterPlan::kHardLimit,
+        batch.samplesPerBatch = static_cast<u32>(std::min<u64>(
+            std::min<u64>(ShutterPlan::kHardLimit, scene_exposure_samples_per_submission(out.compWidth, out.compHeight)),
             budget / std::max<u64>(1, batch.renderBytesPerSample)));
         // Sem espaço para um lote: uma amostra por envio (mais lento, completo).
         if (!batch.samplesPerBatch) batch.samplesPerBatch = 1;
@@ -10273,7 +10282,13 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
             prepared=renderEffectFailure;
         if (!prepared.ok()) {
             if (prepared.code() == Errc::OutOfDeviceMemory) failedGraphFrame_ = backend_->last_submitted_frame();
-            mark_incomplete(__FILE__, __LINE__); snap.release_video_frames(); return prepared;
+            mark_incomplete(__FILE__, __LINE__); snap.release_video_frames();
+            // 1.0.7.1: amostra 3D incompleta com upload ou ambiente ainda a
+            // caminho é transitória: o quadro fica incompleto e o export espera
+            // e refaz (como render_staged_scene_targets), em vez de falhar.
+            if (prepared.code() == Errc::InvalidState && (pending_uploads() != 0 || environment_pending()))
+                return OkStatus;
+            return prepared;
         }
         boundedSceneTextures_ = completed.textures;
     }

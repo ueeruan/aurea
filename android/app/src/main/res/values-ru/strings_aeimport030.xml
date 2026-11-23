@@ -1,6 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 0.3.0: importar presets .ffx e scripts .jsx do After Effects. -->
 <resources>
+    <string name="ae_project_import">Импорт из AE</string>
+    <string name="home_project_import">Импорт</string>
+    <string name="home_project_import_aurea">Проект Aurea (.aureaproj)</string>
+    <string name="home_project_import_aep">After Effects (.aep, .zip, .rar)</string>
+    <string name="ae_project_import_detail">Импортируйте проект вместе с исходными медиафайлами и редактируемыми композициями.</string>
+    <string name="ae_project_select_file">Выберите проект .aep или архив .zip либо .rar для After Effects.</string>
+    <string name="ae_project_use_separate_import">Используйте «Импорт из AE», чтобы открыть проект или архив After Effects.</string>
+    <string name="ae_project_too_big">Проект превышает предел в 64 МБ для .aep или 8 ГБ для .zip и .rar.</string>
+    <string name="ae_kind_media">Медиа</string>
     <string name="ae_import_menu">Импорт из After Effects (.ffx, .jsx)</string>
     <string name="ae_import_menu_detail">Пресет: эффекты, ключи и аниматоры текста на выбранном слое. Скрипт: создаёт и анимирует слои.</string>
     <string name="ae_importing">Импорт из After Effects…</string>

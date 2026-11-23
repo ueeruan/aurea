@@ -12,8 +12,10 @@ ffmpeg -f lavfi -i testsrc2=size=160x90:rate=30:duration=3 -c:v libx264 -profile
 
 The iOS `export-render` parity scene compares all production-decoder pixels
 and presentation timestamps against an independent AVAssetReader, in both
-CPU and IOSurface modes. It also checks EOS, seeks, retained frame ownership,
-and suspend/resume. This fixture can be imported unchanged on Android.
+CPU and IOSurface modes. Sequential reads from zero also check for holes and
+overlaps between presentation intervals without requiring a full timing index.
+The probe checks EOS, seeks, retained frame ownership, and suspend/resume.
+This fixture can be imported unchanged on Android.
 
 `preview-vfr.mp4` uses the same generated source, selecting frames 0, 10, 20
 and all frames from 30 onwards: 63 samples with 333 ms intervals followed by

@@ -108,6 +108,7 @@ require(aureaAbi == null || aureaAbi in aureasAbisPermitidas) {
 android {
     // The same licensed Roboto used by iOS; Samsung system font paths vary.
     sourceSets.getByName("main").assets.srcDir("../../engine/assets/fonts")
+    sourceSets.getByName("main").assets.srcDir("../../engine/assets/model-library")
     namespace = "com.aurea.aurea"
     compileSdk = 36
     ndkVersion = "28.2.13676358"
@@ -126,8 +127,8 @@ android {
         minSdk = 26
         targetSdk = 36
         // Deve superar os builds 2181–2191 já distribuídos; nunca reduzir o código.
-        versionCode = 2229
-        versionName = "1.0.7"
+        versionCode = 2230
+        versionName = "1.0.7.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

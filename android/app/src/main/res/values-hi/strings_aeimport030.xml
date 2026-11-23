@@ -1,6 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 0.3.0: importar presets .ffx e scripts .jsx do After Effects. -->
 <resources>
+    <string name="ae_project_import">AE से इम्पोर्ट</string>
+    <string name="home_project_import">इम्पोर्ट</string>
+    <string name="home_project_import_aurea">Aurea प्रोजेक्ट (.aureaproj)</string>
+    <string name="home_project_import_aep">After Effects (.aep, .zip, .rar)</string>
+    <string name="ae_project_import_detail">मूल मीडिया के साथ प्रोजेक्ट इम्पोर्ट करें और कंपोज़िशन को संपादन योग्य रखें।</string>
+    <string name="ae_project_select_file">After Effects का .aep प्रोजेक्ट या .zip या .rar पैकेज चुनें।</string>
+    <string name="ae_project_use_separate_import">After Effects प्रोजेक्ट या पैकेज खोलने के लिए AE से इम्पोर्ट करें।</string>
+    <string name="ae_project_too_big">प्रोजेक्ट .aep के लिए 64 MB या .zip और .rar के लिए 8 GB की सीमा से बड़ा है।</string>
+    <string name="ae_kind_media">मीडिया</string>
     <string name="ae_import_menu">After Effects से इम्पोर्ट (.ffx, .jsx)</string>
     <string name="ae_import_menu_detail">प्रीसेट: चुनी लेयर पर इफ़ेक्ट, कीफ़्रेम और टेक्स्ट एनिमेटर। स्क्रिप्ट: लेयर बनाती और एनिमेट करती है।</string>
     <string name="ae_importing">After Effects से इम्पोर्ट हो रहा है…</string>

@@ -160,6 +160,8 @@ struct EditModeView: View {
                     .accessibilityIdentifier("edit.autokey")
                 Button(AureaText.t("ui_mode_switch_to_composition")) { model.setUiMode(AureaUiMode.composition) }
                 Button(AureaText.t(model.editMode ? "edit_magnet_on" : "edit_magnet_off")) { model.toggleEditMode() }
+                Button(AureaText.t("ae_project_import")) { model.pause(); shell.addPicker = .aeProjectImport }
+                    .accessibilityIdentifier("edit.aeProjectImport")
                 Button(AureaText.t("ae_import_menu")) { model.pause(); shell.addPicker = .aeImport }
                     .accessibilityIdentifier("edit.aeImport")
             } label: {

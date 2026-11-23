@@ -15,18 +15,106 @@
 #include "aurea/Engine.hpp"
 
 #include "aurea/core/Log.hpp"
+#include "aurea/core/Time.hpp"
+#include "aurea/project/AeProject.hpp"
+#include "aurea/project/FileIO.hpp"
 #include "aurea/scene3d/SceneRenderer.hpp"
 #include "aurea/text/Text.hpp"
+#include "../project/AeProjectSource.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <string>
+#include <unordered_map>
 
 namespace aurea {
 
 namespace {
 constexpr usize kMaxAeFile = 64u << 20;
+
+bool read_ae_file(const char* path, std::string& data, std::string& why) {
+    if (!path || !*path) { why = "Nenhum arquivo escolhido."; return false; }
+    const std::unique_ptr<std::FILE, decltype(&std::fclose)> f(fileio::open_file(path, "rb"), &std::fclose);
+    if (!f) { why = "Não foi possível abrir o arquivo."; return false; }
+    char buf[64 * 1024];
+    while (const usize n = std::fread(buf, 1, sizeof(buf), f.get())) {
+        if (n > kMaxAeFile - data.size()) {
+            why = "Arquivo grande demais para importar.";
+            break;
+        }
+        data.append(buf, n);
+    }
+    if (std::ferror(f.get())) why = "Não foi possível ler o arquivo inteiro.";
+    return why.empty();
+}
+
+std::string utf8_path(const std::filesystem::path& path) {
+    const auto encoded = path.u8string();
+    return std::string(encoded.begin(), encoded.end());
+}
+
+bool ae_extension(std::string_view name, std::string_view suffix) {
+    if (name.size() < suffix.size()) return false;
+    name.remove_prefix(name.size() - suffix.size());
+    for (usize i = 0; i < name.size(); ++i) {
+        const char c = name[i];
+        if ((c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c) != suffix[i]) return false;
+    }
+    return true;
+}
+
+BlendMode ae_blend(u8 mode, u8 flags) {
+    using B = BlendMode;
+    constexpr B modes[] = {
+        B::Normal, B::Normal, B::Normal, B::Dissolve, B::Add, B::Multiply, B::Screen,
+        B::Overlay, B::SoftLight, B::HardLight, B::Darken, B::Lighten, B::ClassicDifference,
+        B::Hue, B::Saturation, B::Color, B::Luminosity, B::Mask, B::StencilLuma,
+        B::Exclude, B::SilhouetteLuma, B::LuminescentPremul, B::AlphaAdd, B::ClassicColorDodge,
+        B::ClassicColorBurn, B::Exclusion, B::Difference, B::ColorDodge, B::ColorBurn,
+        B::LinearDodge, B::LinearBurn, B::LinearLight, B::VividLight, B::PinLight,
+        B::HardMix, B::LighterColor, B::DarkerColor, B::Subtract, B::Divide,
+    };
+    if (mode == 3 && (flags & 2)) return B::DancingDissolve;
+    return mode < std::size(modes) ? modes[mode] : B::Normal;
+}
+
+bool ae_composition_roots(const ae::ProjectDocument& doc, std::vector<usize>& roots) {
+    std::unordered_map<u32, usize> indices;
+    for (usize i = 0; i < doc.comps.size(); ++i) indices.emplace(doc.comps[i].id, i);
+    std::vector<bool> dependent(doc.comps.size(), false);
+    struct RenderCost { usize depth = 0, layers = 0; };
+    std::vector<RenderCost> costs(doc.comps.size());
+    std::vector<bool> visiting(doc.comps.size(), false);
+    auto visit = [&](auto&& self, usize index, usize depth) -> bool {
+        if (depth >= kMaxNestingDepth - 1 || visiting[index]) return false;
+        if (costs[index].depth) return depth + costs[index].depth < kMaxNestingDepth;
+        visiting[index] = true;
+        RenderCost cost{1, doc.comps[index].layers.size()};
+        for (const auto& layer : doc.comps[index].layers) {
+            const auto child = indices.find(layer.source);
+            if (child == indices.end()) continue;
+            dependent[child->second] = true;
+            if (!self(self, child->second, depth + 1)) return false;
+            cost.depth = std::max(cost.depth, 1 + costs[child->second].depth);
+            cost.layers += costs[child->second].layers;
+            if (cost.layers > kMaxLayerCount) return false;
+        }
+        visiting[index] = false;
+        costs[index] = cost;
+        return true;
+    };
+    for (usize i = 0; i < doc.comps.size(); ++i)
+        if (!visit(visit, i, 0)) return false;
+    for (usize i = 0; i < doc.comps.size(); ++i)
+        if (!dependent[i]) roots.push_back(i);
+    std::stable_sort(roots.begin(), roots.end(), [&](usize a, usize b) {
+        return costs[a].layers > costs[b].layers;
+    });
+    return !roots.empty();
+}
 
 std::string unique_name(const Composition& comp, const std::string& base) {
     for (u32 n = 1;; ++n) {
@@ -134,41 +222,166 @@ std::string file_stem(const std::string& path) {
 }
 } // namespace
 
-ae::ImportReport Engine::import_ae_file(const char* path, u64 targetLayer, bool textAnimatorPro) noexcept {
-    ae::ImportReport r;
-    if (!path || !*path) {
-        r.message = "Nenhum arquivo escolhido.";
-        return r;
-    }
-    std::FILE* f = std::fopen(path, "rb");
-    if (!f) {
-        r.message = "Não foi possível abrir o arquivo.";
-        return r;
-    }
+ae::ImportReport Engine::import_ae_file(const char* path, u64 targetLayer, bool textAnimatorPro) noexcept try {
     std::string data;
-    char buf[64 * 1024];
-    usize n = 0;
-    bool tooBig = false;
-    while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) {
-        if (data.size() + n > kMaxAeFile) { tooBig = true; break; }
-        data.append(buf, n);
-    }
-    std::fclose(f);
-    if (tooBig) {
-        r.message = "Arquivo grande demais para importar.";
+    ae::ImportReport r;
+    if (path && ae::is_project_source_name(path)) {
+        const auto root = config_.documentsDirectory.empty() ? std::filesystem::u8path(path).parent_path()
+                                                             : std::filesystem::u8path(config_.documentsDirectory);
+        ae::ProjectImportMedia media(root / "Media");
+        r = import_ae_data_impl({}, path, targetLayer, textAnimatorPro, nullptr, &media);
+        media.keep = r.ok;
         return r;
     }
+    if (!read_ae_file(path, data, r.message)) return r;
     return import_ae_data(data, path, targetLayer, textAnimatorPro);
+} catch (...) {
+    return {};
+}
+
+ae::ImportReport Engine::import_ae_project_file(const char* inputPath, const char* outputPath,
+                                                const char* title) noexcept try {
+    ae::ImportReport r;
+    r.kind = "aep";
+    if (!outputPath || !*outputPath || fileio::exists(outputPath)) {
+        r.message = "Escolha um nome livre para o novo projeto.";
+        return r;
+    }
+    if (!inputPath || !ae::is_project_source_name(inputPath)) {
+        r.message = "Escolha um projeto .aep ou um pacote .zip ou .rar do After Effects.";
+        return r;
+    }
+    namespace fs = std::filesystem;
+    const fs::path dest = fs::u8path(outputPath);
+    ae::ProjectImportMedia media(dest.parent_path() / "Media");
+    // No GPU, workers, or callbacks into the editor's expression providers.
+    std::unique_ptr<Engine> staging(new Engine(false));
+    r = staging->import_ae_data_impl({}, inputPath, 0, false, title ? title : "", &media);
+    if (!r.ok) {
+        r.changes = 0;
+        return r;
+    }
+
+    static std::atomic<u64> nextImport{0};
+    const auto temporary = dest.parent_path() / (".aurea-aep-" + std::to_string(monotonic_ns()) +
+                                                 "-" + std::to_string(nextImport.fetch_add(1, std::memory_order_relaxed)));
+    const auto saved = temporary / "project.aurea";
+    const std::string stagePath = utf8_path(saved);
+    const auto tempPath = fileio::temp_path(stagePath);
+    const auto backupPath = fileio::backup_path(stagePath);
+    const auto rejectedPath = stagePath + ".recusado";
+    std::error_code ec;
+    if (!fs::create_directory(temporary, ec)) {
+        r.ok = false;
+        r.changes = 0;
+        r.message = "Não foi possível preparar o arquivo do novo projeto.";
+        return r;
+    }
+    const bool written = staging->save_project(stagePath.c_str()).ok();
+    // Publish only a complete project, and fail safely if the name was taken
+    // during import. Both files live in the same app-owned directory.
+    if (written) fs::create_hard_link(saved, dest, ec);
+    const bool published = written && !ec;
+    media.keep = published;
+    (void)fileio::remove_file(stagePath);
+    (void)fileio::remove_file(tempPath);
+    (void)fileio::remove_file(backupPath);
+    (void)fileio::remove_file(rejectedPath);
+    fs::remove(temporary, ec);
+    if (!published) {
+        r.ok = false;
+        r.changes = 0;
+        r.message = "Não foi possível salvar o novo projeto do After Effects.";
+    }
+    return r;
+} catch (...) {
+    return {};
 }
 
 ae::ImportReport Engine::import_ae_data(const std::string& raw, const std::string& fileName, u64 targetLayer, bool textAnimatorPro) noexcept {
+    return import_ae_data_impl(raw, fileName, targetLayer, textAnimatorPro, nullptr);
+}
+
+ae::ImportReport Engine::import_ae_data_impl(const std::string& raw, const std::string& fileName, u64 targetLayer,
+                                             bool textAnimatorPro, const char* standaloneTitle,
+                                             ae::ProjectImportMedia* sourceMedia) noexcept try {
     ae::ImportReport report;
+    if (raw.size() > kMaxAeFile) {
+        report.message = "Arquivo grande demais para importar.";
+        return report;
+    }
+    const bool isProject = sourceMedia || standaloneTitle || ae::is_project_file(raw) || ae_extension(fileName, ".aep");
+    if (!isProject && ae_extension(fileName, ".aepx")) {
+        report.message = "Salve o projeto do After Effects como .aep para importar.";
+        return report;
+    }
+    ae::ProjectDocument aep;
+    std::unordered_map<std::string, std::shared_ptr<const ImagePixels>> aeImages;
+    std::vector<usize> roots;
+    usize imageBudget = 0;
+    u64 session = 0;
+    CompositionId destination{};
+    if (isProject) {
+        report.kind = "aep";
+        if (!standaloneTitle) {
+            std::lock_guard<std::mutex> lock(modelMutex_);
+            if (!project_ || !current_composition()) {
+                report.message = "Abra um projeto do Aurea para importar a edição.";
+                return report;
+            }
+            session = projectSession_;
+            destination = project_->timeline().current();
+            imageBudget = std::min<usize>(source_asset_room_locked(), 96u << 20);
+        }
+        std::string error;
+        const bool read = sourceMedia ? ae::read_project_source(fileName, aep, *sourceMedia, error)
+                                      : ae::parse_project(raw, aep, error);
+        if (!read) {
+            report.message = sourceMedia ? error : "Projeto do After Effects ilegível: " + error + ".";
+            return report;
+        }
+        if (!ae_composition_roots(aep, roots)) {
+            report.message = "A hierarquia de composições do After Effects é inválida ou excede o limite do Aurea.";
+            return report;
+        }
+        if (!standaloneTitle && sourceMedia && config_.imageLoader) {
+            std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
+            for (auto& item : aep.media) {
+                if (item.solid || item.duration != 0 || !item.width || !item.height || item.resolvedPath.empty()) continue;
+                if (aeImages.contains(item.resolvedPath)) continue;
+                const u64 bytes = static_cast<u64>(item.width) * item.height * 4;
+                if (bytes + sizeof(ImagePixels) > imageBudget) continue;
+                ImagePixels pixels;
+                if (!config_.imageLoader(item.resolvedPath.c_str(), pixels, config_.imageLoaderContext) ||
+                    pixels.width != item.width || pixels.height != item.height || pixels.rgba.size() != bytes ||
+                    pixels.rgba.capacity() + sizeof(ImagePixels) > imageBudget) continue;
+                imageBudget -= pixels.rgba.capacity() + sizeof(ImagePixels);
+                aeImages.emplace(item.resolvedPath, std::make_shared<const ImagePixels>(std::move(pixels)));
+            }
+        }
+        if (standaloneTitle) {
+            const auto& source = aep.comps[roots.front()];
+            const std::string name = *standaloneTitle ? standaloneTitle : source.name;
+            auto created = Project::create_new(source.width, source.height, source.fps, name);
+            if (!created.ok()) {
+                report.message = "Não foi possível criar o projeto do After Effects.";
+                return report;
+            }
+            project_ = std::make_unique<Project>(std::move(*created));
+            register_builtin_effects(effectRegistry_);
+            destination = project_->timeline().current();
+        }
+    }
     // Script salvo em UTF-16 ou Latin-1 vira UTF-8 antes de tudo (o .ffx é
     // binário RIFX e passa direto).
     std::string converted;
     const bool rifx = raw.size() >= 4 && raw.compare(0, 4, "RIFX") == 0;
-    const std::string& data = !rifx && text_to_utf8(raw, converted) ? converted : raw;
-    const std::string kind = ae::detect_kind(data, fileName);
+    if (!isProject && !rifx && raw.size() > 2 * ae::ScriptLimits{}.maxSourceBytes + 2) {
+        report.message = "Script grande demais para importar.";
+        return report;
+    }
+    const std::string& data = !isProject && !rifx && text_to_utf8(raw, converted) ? converted : raw;
+    const std::string kind = isProject ? "aep" : ae::detect_kind(data, fileName);
     report.kind = kind;
     if (kind == "jsxbin") {
         report.message = "Script compilado (.jsxbin) não pode ser lido: use o .jsx original.";
@@ -176,7 +389,7 @@ ae::ImportReport Engine::import_ae_data(const std::string& raw, const std::strin
         return report;
     }
     if (kind.empty()) {
-        report.message = "O arquivo não é um preset (.ffx) nem um script (.jsx) do After Effects.";
+        report.message = "Escolha um projeto .aep, um preset .ffx ou um script .jsx do After Effects.";
         return report;
     }
     // O .ffx é lido FORA da trava (só bytes); a aplicação vem depois.
@@ -191,6 +404,11 @@ ae::ImportReport Engine::import_ae_data(const std::string& raw, const std::strin
 
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
+    if (isProject && !standaloneTitle &&
+        (!project_ || projectSession_ != session || project_->timeline().current() != destination)) {
+        report.message = "O projeto aberto mudou durante a importação.";
+        return report;
+    }
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) {
         report.message = "Nenhum projeto aberto.";
@@ -200,12 +418,13 @@ ae::ImportReport Engine::import_ae_data(const std::string& raw, const std::strin
     // O importador monta os efeitos antes de ligar as trilhas: a migração fica para o fim.
     struct DeferMigration { bool& flag; explicit DeferMigration(bool& f) : flag(f) { flag = true; } ~DeferMigration() { flag = false; } } deferMigration(deferTextMigration_);
     const i64 durationBefore = comp->duration().value;
-    std::unique_ptr<Composition> before = comp->clone();
+    std::unique_ptr<Composition> before = standaloneTitle ? nullptr : comp->clone();
 
     // O motor visto pelo importador (as regras das ações da UI, sem passo próprio).
     class EngineHost final : public ae::Host {
     public:
         EngineHost(Engine& e, Composition* c) : e_(e), comp_(c) {}
+        void set_composition(Composition* c) noexcept { comp_ = c; }
         Composition* composition() noexcept override { return comp_; }
         const EffectRegistry& registry() const noexcept override { return e_.effectRegistry_; }
         i64 playhead() const noexcept override { return e_.playback_.current().value; }
@@ -332,6 +551,14 @@ ae::ImportReport Engine::import_ae_data(const std::string& raw, const std::strin
                 c.layer_parent.parent = parent;
                 if (!e_.apply_command_internal(c, nullptr, false).ok()) return false;
             } else {
+                u32 steps = 0;
+                for (LayerId next = parent; next.valid();) {
+                    const auto* ancestor = comp_->layer(next);
+                    if (!ancestor || next == child) return false;
+                    next = ancestor->parent;
+                    if (++steps > comp_->layers().count()) return false;
+                }
+                if (l->parent != parent) l->parentBone = -1;
                 l->parent = parent;
             }
             ++mutations;
@@ -344,6 +571,9 @@ ae::ImportReport Engine::import_ae_data(const std::string& raw, const std::strin
     };
 
     EngineHost host(*this, comp);
+    if (isProject) {
+#include "EngineAeProject.inc"
+    }
     LayerId target = targetLayer ? LayerId::unpack(targetLayer) : LayerId{};
     if (kind == "ffx") {
         // Sem camada escolhida (ou ela não existe mais): como o AE, o preset
@@ -386,7 +616,7 @@ ae::ImportReport Engine::import_ae_data(const std::string& raw, const std::strin
                 // Nada do preset entrou: a camada nova sai e o projeto fica
                 // como estava (sem passo de desfazer vazio). Tudo o que o preset
                 // fez foi nessa camada.
-                (void)comp->remove_layer(created);
+                comp->restore_from(*before);
                 host.mutations = 0;
                 report.changes = 0;
             } else {
@@ -410,9 +640,13 @@ ae::ImportReport Engine::import_ae_data(const std::string& raw, const std::strin
     ae::finish_report(report);
     AUREA_LOG_INFO("importar do AE (%s): %s", kind.c_str(), report.message.c_str());
     // O importador monta efeitos do After Effects; o animador único fica com eles.
-    for (u32 i = 0; i < comp->order().size(); ++i)
-        if (Layer* layer = comp->layer(comp->order().at(i))) text::migrate_text_effects(*layer);
+    if (changed) {
+        for (u32 i = 0; i < comp->order().size(); ++i)
+            if (Layer* layer = comp->layer(comp->order().at(i))) text::migrate_text_effects(*layer);
+    }
     return report;
+} catch (...) {
+    return {};
 }
 
 } // namespace aurea

@@ -1,6 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 0.3.0: importar presets .ffx e scripts .jsx do After Effects. -->
 <resources>
+    <string name="ae_project_import">استيراد من AE</string>
+    <string name="home_project_import">استيراد</string>
+    <string name="home_project_import_aurea">مشروع Aurea ⁦(.aureaproj)⁩</string>
+    <string name="home_project_import_aep">After Effects (.aep, .zip, .rar)</string>
+    <string name="ae_project_import_detail">استورد المشروع مع وسائطه الأصلية واحتفظ بالتركيبات القابلة للتحرير.</string>
+    <string name="ae_project_select_file">اختر مشروع After Effects بصيغة .aep أو حزمة .zip أو .rar.</string>
+    <string name="ae_project_use_separate_import">استخدم الاستيراد من AE لفتح مشروع أو حزمة After Effects.</string>
+    <string name="ae_project_too_big">يتجاوز المشروع الحد البالغ 64 ميغابايت لملف .aep أو 8 غيغابايت لحزمة .zip أو .rar.</string>
+    <string name="ae_kind_media">وسائط</string>
     <string name="ae_import_menu">استيراد من After Effects ‏(.ffx، .jsx)</string>
     <string name="ae_import_menu_detail">إعداد مسبق: تأثيرات وإطارات مفتاحية ومحرّكات نص على الطبقة المختارة. سكربت: ينشئ الطبقات ويحرّكها.</string>
     <string name="ae_importing">جارٍ الاستيراد من After Effects…</string>

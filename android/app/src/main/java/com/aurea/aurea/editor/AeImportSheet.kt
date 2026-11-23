@@ -49,12 +49,14 @@ internal fun AeImportSheet(store: EditorStore, result: EditorStore.AeImportResul
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 6.dp).testTag("ae.sheet"),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            // 0.3.1: script que parou com erro DEPOIS de mudar o projeto = "importado em
-            // parte" (contagens + o erro); rodou sem mudar nada = "nada foi importado".
-            val partial = !result.ok && (result.hasCounts || result.changes > 0)
+            val partial = if (result.ok) {
+                result.kind == "aep" && result.skipped.isNotEmpty()
+            } else {
+                result.hasCounts || result.changes > 0
+            }
             Text(stringResource(when {
-                    result.ok -> R.string.ae_done_title
                     partial -> R.string.ae_partial_title
+                    result.ok -> R.string.ae_done_title
                     else -> R.string.ae_failed_title
                 }),
                 modifier = Modifier.semantics { heading() },
@@ -113,6 +115,7 @@ private fun aeKindLabel(kind: String): Int = when (kind) {
     "seletor" -> R.string.ae_kind_selector
     "expressao" -> R.string.ae_kind_expression
     "camada" -> R.string.ae_kind_layer
+    "midia" -> R.string.ae_kind_media
     "mascara" -> R.string.ae_kind_mask
     "script" -> R.string.ae_kind_script
     "chamada" -> R.string.ae_kind_call

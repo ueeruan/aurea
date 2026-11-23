@@ -2,9 +2,13 @@
 void Renderer::configure_scene_quality(const scene3d::SceneFrame& group) noexcept {
     HeavyQuality q = heavyQ_;
     apply_scene3d_quality(q, static_cast<Scene3DQuality>(group.post.quality));
-    scene3d_.set_shadow_map_cap(heavyQ_.exportFrame || !lowMemoryDevice_ ? 4096u : 2048u);
+    // 1.0.7.1: o export usa sombra 4096 e o MSAA pedido; depois de
+    // reduce_export_scene_memory (sem memória mesmo em etapas), 2048 e até 2×.
+    const bool fullShadow = heavyQ_.exportFrame ? !exportSceneMemoryReduced_ : !lowMemoryDevice_;
+    scene3d_.set_shadow_map_cap(fullShadow ? 4096u : 2048u);
     scene3d_.set_quality(q.shadowMapSize, q.shadowFilter, heavyQ_.lodBias, !heavyQ_.exportFrame);
-    scene3d_.set_post_quality(q.msaaSamples, q.fxaa, q.bloomStartDiv, q.bloomLevels);
+    const u32 msaa = heavyQ_.exportFrame && exportSceneMemoryReduced_ ? std::min<u32>(q.msaaSamples, 2u) : q.msaaSamples;
+    scene3d_.set_post_quality(msaa, q.fxaa, q.bloomStartDiv, q.bloomLevels);
     scene3d_.set_ao_quality(q.aoDirections, q.aoSteps);
     scene3d_.set_screen_effect_quality(q.screenEffectDiv, q.reflectionSteps, q.volumetricSteps);
     scene3d_.set_dof_quality(heavyQ_.exportFrame ? 96u

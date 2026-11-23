@@ -538,10 +538,15 @@ private fun EditingTab(store: EditorStore, onDismiss: () -> Unit) {
     MoreAction(stringResource(R.string.editor_ir_proxima_marca), "projectSettings.more.nextMarker", if (store.markers.size > 0) act { store.seekToNextMarker() } else null)
 }
 
-/** Aba Importar: o projeto do After Effects (como camada nova ou na camada escolhida). */
+/** Aba Importar: projeto do After Effects e presets/scripts. */
 @Composable
 private fun ImportTab(store: EditorStore, onDismiss: () -> Unit) {
     MoreSubheader(stringResource(R.string.om_settings_import))
+    MoreAction(
+        stringResource(R.string.ae_project_import), "menu.aeProjectImport",
+        { onDismiss(); store.requestAeProjectImport() },
+        detail = stringResource(R.string.ae_project_import_detail),
+    )
     MoreAction(
         stringResource(R.string.ae_import_menu), "menu.aeImport",
         { onDismiss(); store.requestAeImport() },

@@ -254,11 +254,23 @@ struct EditorView: View {
 private struct AddLayerPickers: ViewModifier {
     @EnvironmentObject private var model: AureaModel
     @ObservedObject var shell: ShellPresentation
+    @ObservedObject private var requests = OmegaChromeRequests.shared
     @State private var choosingPhotos = false
     @State private var photoKind = ShellAddPicker.gallery
     @State private var pickerProject = UUID()
     func body(content: Content) -> some View {
         content
+            .onChange(of: requests.aeImport) { request in
+                guard let request else { return }
+                requests.aeImport = nil
+                let model = model, shell = shell
+                let generation = model.projectGeneration
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                    guard model.screen == .editor, model.projectGeneration == generation, shell.addPicker == nil else { return }
+                    model.pause()
+                    shell.addPicker = request
+                }
+            }
             .onChange(of: shell.addPicker) { request in
                 guard let request else { return }
                 pickerProject = model.projectGeneration
@@ -302,6 +314,8 @@ private struct AddLayerPickers: ViewModifier {
     private func presentFilePicker(_ kind: ShellAddPicker) {
         let project = pickerProject
         let model = self.model
+        let aeComposition = kind == .aeProjectImport || kind == .aeImport
+            ? (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value : nil
         let multiple = kind == .model || kind == .modelTextures || kind == .sequenceFiles || kind == .mediaFiles
         DocumentImportPicker.present(types: Self.fileTypes(kind), multiple: multiple, asCopy: kind != .sequenceFolder) { urls in
             guard project == model.projectGeneration, let urls, let url = urls.first else { return }
@@ -314,7 +328,9 @@ private struct AddLayerPickers: ViewModifier {
             case .svg: model.importSvg(url: url)
             case .psd: model.importPsd(url: url)
             case .sequenceFolder, .sequenceFiles: model.prepareImageSequence(urls: urls)
-            case .aeImport: model.importAeFile(url: url)
+            case .aeProjectImport, .aeImport:
+                guard (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value == aeComposition else { return }
+                model.importAeFile(url: url, projectFile: kind == .aeProjectImport)
             default: model.importMedia(url: url, kind: .audio)
             }
         }
@@ -324,6 +340,7 @@ private struct AddLayerPickers: ViewModifier {
         case .svg: return [UTType(filenameExtension: "svg") ?? .data, .data]
         case .psd: return [UTType(filenameExtension: "psd") ?? .data, .data]
         case .sequenceFolder: return [.folder]
+        case .aeProjectImport: return [.data, .item]
         case .aeImport: return [UTType(filenameExtension: "ffx") ?? .data, UTType(filenameExtension: "jsx") ?? .data, .plainText, .data]
         // EXR e TGA não têm tipo registrado em muitos provedores: o filtro é o motor.
         case .sequenceFiles: return [.image, .zip, UTType(filenameExtension: "exr") ?? .data, UTType(filenameExtension: "tga") ?? .data, .data]
@@ -1717,6 +1734,7 @@ private struct AddLayerSheet: View {
     var inSheet = false
     /// Aba 3D mostrando a grade "Formas 3D" (Shape3DViews.swift).
     @State private var shapes3D = false
+    @State private var modelLibrary = false
     private let categories: [(String, Character)] = [
         ("sh_add_tab_shape", ShellGlyph.SquareOnCircle), ("sh_add_tab_media", CupertinoGlyph.PhotoOnRectangle),
         ("sh_add_tab_audio", CupertinoGlyph.MusicNote2), ("sh_add_tab_text", CupertinoGlyph.Textformat),
@@ -1757,6 +1775,13 @@ private struct AddLayerSheet: View {
             } else { cards }
         }
         .background(AureaColors.editorPanel)
+        .sheet(isPresented: $modelLibrary) {
+            ModelLibraryView(actionKey: "model_shop_insert", onUse: { url, name in
+                modelLibrary = false
+                model.importModelFiles(urls: [url], displayName: name)
+                close()
+            }, onClose: { modelLibrary = false })
+        }
         // Os seletores NÃO moram aqui: ver `AddLayerPickers` (raiz do editor).
     }
 
@@ -1819,6 +1844,8 @@ private struct AddLayerSheet: View {
                                 }.accessibilityIdentifier("shape3d.add.\(kind)")
                             }
                         } else {
+                        card("model_shop_title", glyph: CupertinoGlyph.Cube, accent: true) { modelLibrary = true }
+                            .accessibilityIdentifier("add.model3d.library")
                         cardBody("shape3d_title", action: { shapes3D = true }) { Shape3DGlyph(kind: 0).frame(width: 30, height: 30) }
                         card("scene_workspace", glyph: CupertinoGlyph.Cube, accent: true) { close(); model.enterSceneEditor() }
                         card("sh_add_model_3d", glyph: CupertinoGlyph.Cube, accent: true) { files(.model) }
@@ -3709,7 +3736,9 @@ struct AeImportSheet: View {
     @EnvironmentObject private var model: AureaModel
     let result: AureaModel.AeImportResult
     @State private var showNotes = false
-    private var partial: Bool { !result.ok && (result.hasCounts || result.changes > 0) }
+    private var partial: Bool {
+        result.ok ? result.kind == "aep" && !result.skipped.isEmpty : result.hasCounts || result.changes > 0
+    }
     private func kindLabel(_ kind: String) -> String {
         switch kind {
         case "efeito": return AureaText.t("ae_kind_effect")
@@ -3719,6 +3748,7 @@ struct AeImportSheet: View {
         case "seletor": return AureaText.t("ae_kind_selector")
         case "expressao": return AureaText.t("ae_kind_expression")
         case "camada": return AureaText.t("ae_kind_layer")
+        case "midia": return AureaText.t("ae_kind_media")
         case "mascara": return AureaText.t("ae_kind_mask")
         case "script": return AureaText.t("ae_kind_script")
         case "chamada": return AureaText.t("ae_kind_call")
@@ -3736,9 +3766,7 @@ struct AeImportSheet: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 6) {
-                // 0.3.1 (AeImportSheet.kt): script que parou com erro DEPOIS de mudar o projeto =
-                // "importado em parte" (contagens + o erro); rodou sem mudar nada = "nada foi importado".
-                Text(AureaText.t(result.ok ? "ae_done_title" : partial ? "ae_partial_title" : "ae_failed_title"))
+                Text(AureaText.t(partial ? "ae_partial_title" : result.ok ? "ae_done_title" : "ae_failed_title"))
                     .font(.aurea(size: 17, weight: .semibold)).accessibilityAddTraits(.isHeader)
                 Text(result.fileName).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted)
                 if result.ok || result.hasCounts {

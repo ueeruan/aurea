@@ -156,6 +156,9 @@ public:
     [[nodiscard]] bool can_discard_frame() const noexcept override { return true; }
     [[nodiscard]] Status discard_frame() noexcept override;
     [[nodiscard]] Status begin_offscreen_frame(FrameBegin& out) noexcept override;
+    void set_export_pass_split(bool split, u32 passes = 1) noexcept override;
+    [[nodiscard]] bool export_pass_split() const noexcept override;
+    [[nodiscard]] u32 export_pass_budget() const noexcept override;
     [[nodiscard]] bool can_lease_presentable_frame() const noexcept override { return true; }
     [[nodiscard]] Status begin_presentable_frame_lease() noexcept override;
     [[nodiscard]] Status begin_leased_frame(FrameBegin& out) noexcept override;

@@ -121,10 +121,10 @@ fun AureaApp(store: EditorStore, conta: com.aurea.aurea.conta.ContaViewModel? = 
             com.aurea.aurea.mcp.AureaMcpDeepLinkHost(store)
             // 0.3.0: o que a sondagem da sequência de imagens achou, antes de entrar na timeline.
             store.sequenceDraft?.let { draft -> com.aurea.aurea.editor.ImageSequenceSheet(store, draft) }
-            // 0.3.1: o seletor do After Effects (.ffx/.jsx) fica aqui, fora das folhas: os
+            // O seletor do After Effects fica aqui, fora das folhas: os
             // menus (projeto, camada, Edição) fecham na hora e o retorno ainda importa.
             val pickAe = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-                if (uri != null) store.importAeFile(uri)
+                store.finishAePick(uri)
             }
             androidx.compose.runtime.LaunchedEffect(store.aePickRequested) {
                 if (store.aePickRequested) {

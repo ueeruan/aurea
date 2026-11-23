@@ -91,6 +91,9 @@ fun HomeScreen(store: EditorStore) {
     val projectFilePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) vm.afterEngine(store) { store.importProjectFile(uri) }
     }
+    val aeProjectPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) vm.afterEngine(store) { store.importHomeAeProject(uri) }
+    }
     val backupTarget = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         if (uri != null) vm.afterEngine(store) { store.exportProjectBackup(uri) }
     }
@@ -165,6 +168,8 @@ fun HomeScreen(store: EditorStore) {
                 } else {
                     HomeTopBar(
                         onMenu = { scope.launch { drawer.open() } },
+                        onImportAurea = { projectFilePicker.launch(arrayOf("*/*")) },
+                        onImportAe = { aeProjectPicker.launch(arrayOf("*/*")) },
                         signedInEmail = signedIn,
                         onAccount = {
                             if (signedIn == null) {
@@ -195,7 +200,7 @@ fun HomeScreen(store: EditorStore) {
                 }
             }
             // A faixa do Mural fica à vista em toda aba: a Home reabre na última usada.
-            if (!pluginTab && vm.tab != HomeViewModel.MURAL_TAB && !selecting)
+            if (!pluginTab && vm.tab != HomeViewModel.MURAL_TAB && vm.tab != HomeViewModel.MODELS_TAB && !selecting)
                 com.aurea.aurea.community.MuralBanner { vm.selectTab(HomeViewModel.MURAL_TAB) }
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (pluginTab) com.aurea.aurea.effects.PluginHomeTab(store)   // 0.3.4 plugins
@@ -205,6 +210,8 @@ fun HomeScreen(store: EditorStore) {
                     HomeViewModel.MURAL_TAB -> com.aurea.aurea.community.MuralScreen(store, conta) { vm.selectTab(HomeViewModel.HOME_TAB) }
                     HomeViewModel.PROFILE_TAB -> com.aurea.aurea.community.CommunityScreen(store, conta, true)
                     HomeViewModel.PRESETS_TAB -> PresetsTab(store)
+                    HomeViewModel.MODELS_TAB -> ModelLibrary(stringResource(R.string.model_shop_create),
+                        onUse = { id, name -> vm.createFromLibraryModel(store, id, name) })
                     else -> ProjectsTab(store, vm, projects, dialogs, openProject)
                 }
             }
@@ -281,14 +288,15 @@ fun HomeScreen(store: EditorStore) {
     if (licenses) LicensesScreen { licenses = false }
     val savingBackup = stringResource(R.string.project_backup_saving)
     val restoringBackup = stringResource(R.string.project_backup_restoring)
-    store.busyMessage?.takeIf { it == savingBackup || it == restoringBackup }?.let { message ->
+    val importingAe = stringResource(R.string.ae_importing)
+    store.busyMessage?.takeIf { it == savingBackup || it == restoringBackup || it == importingAe }?.let { message ->
         androidx.compose.ui.window.Dialog(
             onDismissRequest = {},
             properties = androidx.compose.ui.window.DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
         ) {
             Column(
                 Modifier.fillMaxWidth().background(AureaColors.Surface, RoundedCornerShape(14.dp)).padding(24.dp)
-                    .testTag("home.projectBackup.progress"),
+                    .testTag(if (message == importingAe) "home.import.progress" else "home.projectBackup.progress"),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -383,6 +391,8 @@ internal fun HomeDock(selected: Int, onSelect: (Int) -> Unit, onCreate: () -> Un
                 selected == HomeViewModel.PROJECTS_TAB, "home.projects") { onSelect(HomeViewModel.PROJECTS_TAB) }
             DockTab(CupertinoGlyph.WandStars, CupertinoGlyph.WandStars, stringResource(R.string.home_presets_short),
                 selected == HomeViewModel.PRESETS_TAB, "home.presets") { onSelect(HomeViewModel.PRESETS_TAB) }
+            DockTab(CupertinoGlyph.Cube, CupertinoGlyph.Cube, stringResource(R.string.model_shop_tab),
+                selected == HomeViewModel.MODELS_TAB, "home.models") { onSelect(HomeViewModel.MODELS_TAB) }
             // 0.3.4 plugins: a aba dos plugins (nome e ícone do plugin quando há uma só).
             pluginTab?.let { (label, glyph) ->
                 DockTab(glyph, glyph, label, selected == com.aurea.aurea.effects.PLUGIN_HOME_TAB, "home.pluginsTab") {

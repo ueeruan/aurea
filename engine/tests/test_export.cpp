@@ -3218,3 +3218,4 @@ AUREA_TEST(VulkanCrashGuard, TwoDeathsInsideTheDriverBlockThatPipelineOnly) {
     fs::remove_all(dir, ec);
 }
 #endif
+

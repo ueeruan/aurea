@@ -799,6 +799,8 @@ Status Impl::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
         collect_timings(f);
     }
     f.frameNumber = ++frameNumber;
+    f.offscreen = !withSurface;
+    f.passesInCommandBuffer = 0;
     f.leasedDrawable = nil;
     f.leasedSurfaceGeneration = 0;
     f.leasedFinal = false;
@@ -859,6 +861,50 @@ Status Impl::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
 
 Status Backend::end_frame() noexcept {
     return impl_->end_frame_impl(true);
+}
+
+void Backend::set_export_pass_split(bool split, u32 passes) noexcept {
+    if (!impl_) return;
+    const u32 want = split ? std::max(1u, passes) : 0u;
+    if (want == impl_->passesPerCommandBuffer) return;
+    if (split) AUREA_LOG_INFO("metal: export com %u passe(s) por envio", want);
+    else AUREA_LOG_INFO("metal: export com o quadro inteiro num envio");
+    impl_->passesPerCommandBuffer = want;
+}
+
+bool Backend::export_pass_split() const noexcept {
+    return impl_ && impl_->passesPerCommandBuffer != 0;
+}
+
+u32 Backend::export_pass_budget() const noexcept {
+    return impl_ ? impl_->passesPerCommandBuffer : 0u;
+}
+
+// 1.0.7.1: um quadro 3D na qualidade final num command buffer só passava do
+// vigia da GPU do iOS (o command buffer era abortado). Com a fatia ligada,
+// cada N passes o buffer atual é enviado e outro continua na MESMA fila: os
+// buffers de uma fila executam na ordem do commit, então o fence do quadro
+// passa para o último e a imagem não muda.
+Status CommandListImpl::finish_pass() noexcept {
+    if (!impl_ || !frame_ || !cmd_) return OkStatus;
+    if (!impl_->passesPerCommandBuffer || !frame_->offscreen) return OkStatus;
+    ++frame_->passesInCommandBuffer;
+    if (frame_->passesInCommandBuffer < impl_->passesPerCommandBuffer
+        || enc_ == Enc::Render || labelDepth_ || !frame_->timerStack.empty()) return OkStatus;
+    @autoreleasepool {
+        id<MTLCommandBuffer> next = [impl_->queue commandBuffer];
+        if (!next) return OkStatus;   // sem buffer novo: segue no mesmo (como antes)
+        dispatch_semaphore_t completion = command_buffer_completion(next);
+        if (!completion) return OkStatus;
+        next.label = @"frame (fatia do export)";
+        end_current();
+        [cmd_ commit];
+        frame_->cmd = next;
+        frame_->completion = completion;
+        frame_->passesInCommandBuffer = 0;
+        cmd_ = next;
+    }
+    return OkStatus;
 }
 
 Status Backend::discard_frame() noexcept {

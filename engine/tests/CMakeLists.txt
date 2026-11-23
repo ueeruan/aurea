@@ -166,6 +166,9 @@ target_include_directories(aurea_tests PRIVATE
 )
 
 target_link_libraries(aurea_tests PRIVATE aurea_core)
+set_source_files_properties(test_ae_import.cpp PROPERTIES
+    INCLUDE_DIRECTORIES "${AUREA_ARCHIVE_INCLUDE_DIR}"
+    COMPILE_DEFINITIONS LIBARCHIVE_STATIC)
 # Motion Capture do Aurea PC: o PoseEstimator só existe no Windows (AureaNcnn.cmake).
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     target_sources(aurea_tests PRIVATE test_pose_estimator.cpp)

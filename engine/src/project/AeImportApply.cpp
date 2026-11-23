@@ -25,6 +25,7 @@
 #include "AeImportBind.hpp"
 
 #include "aurea/effects/EffectRegistry.hpp"
+#include "aurea/project/AeProject.hpp"
 #include "aurea/text/TextAnimator.hpp"
 #include "aurea/timeline/Composition.hpp"
 #include "aurea/vector/Vector.hpp"
@@ -1486,6 +1487,87 @@ bool apply_ffx(const FfxDocument& doc, Host& host, LayerId target, ImportReport&
         report.message = report.skipped.empty() ? "O preset não tem nada que o Aurea aplique."
                                                 : "Nada do preset tem equivalente no Aurea.";
     return report.ok;
+}
+
+namespace {
+void project_key_times(Node& property, f64 origin, f64 stretch) {
+    for (auto& key : property.keys) {
+        key.time = origin + key.time * stretch;
+        for (auto& ease : key.inEase) ease.speed /= std::abs(stretch);
+        for (auto& ease : key.outEase) ease.speed /= std::abs(stretch);
+        if (stretch < 0) {
+            std::swap(key.in, key.out);
+            std::swap(key.inEase, key.outEase);
+            std::swap(key.inTangent, key.outTangent);
+        }
+    }
+    if (stretch < 0) std::reverse(property.keys.begin(), property.keys.end());
+    for (auto& child : property.children) project_key_times(child, origin, stretch);
+}
+
+Interpolation project_interpolation(const Key& key) {
+    switch (key.out) {
+        case KeyInterp::Hold: return Interpolation::Hold;
+        case KeyInterp::Bezier: return Interpolation::EaseInOut;
+        default: return Interpolation::Linear;
+    }
+}
+} // namespace
+
+void apply_project_properties(ProjectLayer& source, Host& host, LayerId target, ImportReport& report) {
+    auto* comp = host.composition();
+    auto* layer = comp->layer(target);
+    Applier a(host, target, report);
+    a.comp = comp;
+    a.w.layer = layer;
+    a.w.fps = comp->fps();
+    a.w.report = &report;
+    a.w.registry = &host.registry();
+    a.w.compTime = true;
+    layer_size(*layer, comp->width(), comp->height(), a.layerW, a.layerH);
+    const f64 origin = source.start + (source.stretch < 0 ? source.stretch / 3000.0 : 0);
+    for (auto& group : source.properties.children) {
+        const auto& m = group.match;
+        if (m == "ADBE Time Remapping") {
+            if (group.keys.empty()) continue;
+            project_key_times(group, origin, source.stretch);
+            for (const auto& key : group.keys) {
+                if (key.value.empty()) continue;
+                const f32 frame = static_cast<f32>(std::clamp(key.value[0] * a.w.fps, -1e9, 1e9));
+                (void)layer->timeRemap.set(FrameIndex{a.w.local_frame(key.time)}, frame, project_interpolation(key));
+                ++report.keyframes;
+            }
+            if (!layer->timeRemap.keys.empty()) {
+                layer->timeRemapEnabled = true;
+                report.note("propriedade", "Time Remap", "curva de tempo editável; as alças temporais personalizadas precisam de revisão");
+            }
+            continue;
+        }
+        if (m == "ADBE Audio Group") {
+            const Node* levels = group.child("ADBE Audio Levels");
+            if (levels && levels->hasValue && !levels->value.empty()) {
+                const f64 left = levels->value[0];
+                const f64 right = levels->value.size() > 1 ? levels->value[1] : left;
+                layer->gain = static_cast<f32>(std::pow(10.0, std::clamp((left + right) / 2, -96.0, 24.0) / 20));
+                if (!levels->keys.empty() || left != right)
+                    report.note("propriedade", "Audio Levels", "ganho inicial importado; automação e canais separados precisam de revisão");
+            }
+            continue;
+        }
+        if (m != "ADBE Transform Group" && m != "ADBE Effect Parade" && m != "ADBE Text Properties" &&
+            m != "ADBE Mask Parade" && m != "ADBE Root Vectors Group") continue;
+        if (m == "ADBE Effect Parade" && (source.flagsC & 4) == 0) continue;
+        project_key_times(group, origin, source.stretch);
+        Entry entry;
+        entry.path.push_back(PathStep{m});
+        entry.name = group.name;
+        entry.value = std::move(group);
+        a.refresh();
+        a.entry(entry);
+    }
+    a.refresh();
+    a.finish();
+    report.changes += a.applied + a.w.writes;
 }
 
 } // namespace aurea::ae

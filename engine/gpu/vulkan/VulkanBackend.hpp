@@ -488,8 +488,9 @@ public:
 
     void wait_idle() noexcept override;
     [[nodiscard]] Status poll_export_work(Status* completedFailure = nullptr) noexcept override;
-    void set_export_pass_split(bool split) noexcept override;
+    void set_export_pass_split(bool split, u32 passes = 1) noexcept override;
     [[nodiscard]] bool export_pass_split() const noexcept override { return passesPerCommandBuffer_ != 0; }
+    [[nodiscard]] u32 export_pass_budget() const noexcept override { return passesPerCommandBuffer_; }
     [[nodiscard]] u64 last_submitted_frame() const noexcept override;
     [[nodiscard]] Status wait_frame(u64 frameNumber, u64 timeoutNs) noexcept override;
     /// Mensagens da camada de validação (erros / avisos) desde o início do

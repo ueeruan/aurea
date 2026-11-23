@@ -13,11 +13,17 @@
 #include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/expr/Expression.hpp"
 #include "aurea/project/AeImport.hpp"
+#include "aurea/project/AeProject.hpp"
+#include "aurea/project/ProjectPackage.hpp"
 #include "aurea/text/Text.hpp"
 #include "aurea/text/TextAnimator.hpp"
 #include "aurea/vector/Vector.hpp"
 
+#include <archive.h>
+#include <archive_entry.h>
+
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -265,6 +271,25 @@ AUREA_TEST(AeImport, TableMatchesRegistry) {
 // =============================================================================
 // .ffx sintético: efeito + parâmetro parado + keyframes com ease
 // =============================================================================
+
+AUREA_TEST(AeImport, FfxRejectsInvalidAndOversizedChunkTrees) {
+    auto riff = [](const std::string& contents) {
+        const std::string body = "FaFX" + list("besc", contents);
+        return "RIFX" + be32(static_cast<u32>(body.size())) + body;
+    };
+    ae::FfxDocument parsed;
+    std::string error;
+    AUREA_CHECK(!ae::parse_ffx(riff(chunk("LIST", "")), parsed, error));
+    AUREA_CHECK(!ae::parse_ffx(riff("tdmn" + be32(16) + "ADBE"), parsed, error));
+    AUREA_CHECK(!ae::parse_ffx("RIFX" + be32(0xffffffffu) + "FaFX", parsed, error));
+
+    const std::string empty = list("tdbs", "");
+    std::string tooMany;
+    tooMany.reserve(100000 * empty.size());
+    for (u32 i = 0; i < 100000; ++i) tooMany += empty;
+    AUREA_CHECK(!ae::parse_ffx(riff(tooMany), parsed, error));
+    AUREA_CHECK(parsed.entries.empty());
+}
 
 AUREA_TEST(AeImport, SyntheticFfxEffectWithEasedKeys) {
     // Desfoque gaussiano: Blurriness de 0 → 30 em 1 s com ease (velocidade 0,
@@ -1078,6 +1103,35 @@ app.project.activeItem.selectedLayers[0].Effects.addProperty("ADBE Slider Contro
     if (l && !l->effects.empty()) AUREA_CHECK_NEAR(l->effects[0].params[0].constant.v[0], 219.0, 1e-6);
 }
 
+AUREA_TEST(AeImport, JsxCoercionBoundsNestedArrays) {
+    AeRig rig;
+    const u64 layer = rig.shape();
+    const char* src = R"JS(var tags = ['A'];
+var nested = [tags];
+tags.push(nested);
+tags.push('B');
+var singleton = [];
+singleton.push(singleton);
+var points = (String(tags) === 'A,,B' ? 1 : 0)
+           + (isNaN(Number(singleton)) ? 2 : 0)
+           + (Number([[12]]) === 12 ? 4 : 0);
+app.project.activeItem.selectedLayers[0].Effects.addProperty('ADBE Slider Control').property(1).setValue(points);
+)JS";
+    const auto applied = rig.e.import_ae_data(src, "collections.jsx", layer);
+    AUREA_CHECK(applied.ok);
+    const Layer* l = rig.L(layer);
+    AUREA_CHECK(l && l->effects.size() == 1);
+    if (l && !l->effects.empty()) AUREA_CHECK_NEAR(l->effects[0].params[0].constant.v[0], 7.0, 1e-6);
+
+    const u32 undoDepth = rig.e.history().depth();
+    const auto exceeded = rig.e.import_ae_data(
+        "var nested = []; for (var i = 0; i < 256; ++i) nested = [nested]; String(nested);",
+        "nested.jsx", layer);
+    AUREA_CHECK(!exceeded.ok);
+    AUREA_CHECK(has_item(exceeded.skipped, "aninhado demais"));
+    AUREA_CHECK_EQ(rig.e.history().depth(), undoDepth);
+}
+
 AUREA_TEST(AeImport, JsxSandboxBlocksFileNetworkAndSystem) {
     const char* src = "var f = new File(\"C:/Windows/win.ini\");\n"
                       "f.open(\"r\");\n"
@@ -1105,6 +1159,20 @@ AUREA_TEST(AeImport, JsxSandboxBlocksFileNetworkAndSystem) {
     AUREA_CHECK(l && l->effects.size() == 1);
     const std::string json = ae::report_json(r);
     AUREA_CHECK(json.find("\"line\":3") != std::string::npos);
+}
+
+AUREA_TEST(AeImport, JsxRejectsArrayOperationsBeforeExceedingHeapLimit) {
+    AeRig rig;
+    const u64 layer = rig.shape();
+    const u32 undoDepth = rig.e.history().depth();
+    for (const char* source : {"var a = []; a.length = 9000000;", "var a = new Array(9000000);",
+                               "var a = []; a[9000000] = 1;",
+                               "var a = new Array(400000); a.concat(a, a, a, a, a, a, a);"}) {
+        const auto report = rig.e.import_ae_data(source, "collections.jsx", layer);
+        AUREA_CHECK(!report.ok);
+        AUREA_CHECK(has_item(report.skipped, "memória"));
+        AUREA_CHECK_EQ(rig.e.history().depth(), undoDepth);
+    }
 }
 
 AUREA_TEST(AeImport, JsxInfiniteLoopAndDeepRecursionStop) {
@@ -2168,6 +2236,315 @@ AUREA_TEST(AeImport, DropdownLayerAnd3DPointControlsMapToAureaControls) {
 
 // AE reference batch C: Smear and Depth of Field import into the reconstructed
 // keys (Elasticity and Interpolation menus are 1-based in AE).
+AUREA_TEST(AeImport, AepBuildsEditableCompositionAndUndoPreservesExistingProject) {
+    std::string header(204, '\0');
+    header.replace(4, 4, be32(1024));
+    header.replace(8, 4, be32(30720));
+    header.replace(0x2c, 4, be32(61440));
+    header.replace(0x30, 4, be32(30720));
+    header.replace(0x8c, 4, be16(640) + be16(360));
+    std::string identity(84, '\0');
+    identity.replace(0, 2, be16(4));
+    identity.replace(16, 4, be32(7));
+    std::string timing(164, '\0');
+    timing.replace(0, 4, be32(18));
+    timing.replace(8, 4, be32(1));       // stretch numerator
+    timing.replace(12, 8, be32(15) + be32(60));
+    timing.replace(20, 8, be32(15) + be32(60));
+    timing.replace(28, 8, be32(75) + be32(60));
+    timing.replace(0x6c, 4, be32(1));
+    timing[0x26] = 2;                  // adjustment
+    timing[0x27] = 5;                  // video and effects
+    timing[0x63] = 6;                  // Screen
+    const auto position = prop_keys("Position", 2, {{7680, {10, 20}}, {23040, {110, 120}}}, 30720, true);
+    const auto transform = list("tdgp", tdmn("ADBE Position") + position);
+    const auto blur = effect("ADBE Gaussian Blur 2", "Gaussian Blur", {{"Blurriness", 1}},
+                             {{1, prop("Blurriness", 1, {12.0}, 30720)}});
+    const auto fx = list("tdgp", tdmn("ADBE Gaussian Blur 2") + blur);
+    const auto layer = list("Layr", chunk("ldta", timing) + chunk("Utf8", "Grade") +
+                                   list("tdgp", tdmn("ADBE Transform Group") + transform + tdmn("ADBE Effect Parade") + fx));
+    const auto item = list("Item", chunk("idta", identity) + chunk("Utf8", "AE timeline") + chunk("cdta", header) + layer);
+    const auto body = "Egg!" + list("Fold", item);
+    const auto file = "RIFX" + be32(static_cast<u32>(body.size())) + body;
+
+    AeRig rig;
+    const u64 existing = rig.shape();
+    AUREA_CHECK(!rig.e.import_ae_data(file.substr(0, file.size() - 1), "broken.aep", 0).ok);
+    AUREA_CHECK(!rig.e.import_ae_data("app.project.activeItem.layers.addNull();", "script.aep", 0).ok);
+    auto cyclic = file;
+    const usize layerTiming = cyclic.find("ldta");
+    AUREA_CHECK(layerTiming != std::string::npos);
+    if (layerTiming == std::string::npos) return;
+    cyclic.replace(layerTiming + 8 + 0x28, 4, be32(7));
+    AUREA_CHECK(!rig.e.import_ae_data(cyclic, "cycle.aep", 0).ok);
+    AUREA_CHECK_EQ(rig.comp()->layers().count(), 1u);
+    const auto report = rig.e.import_ae_data(file, "test.AEP", 0);
+    if (!report.ok || report.effects != 1) dump(report);
+    AUREA_CHECK(report.ok && report.kind == "aep");
+    AUREA_CHECK_EQ(report.layers, 1u);
+    AUREA_CHECK_EQ(report.effects, 1u);
+    AUREA_CHECK_EQ(rig.comp()->layers().count(), 2u);
+    const auto* wrapper = layer_named(rig, "AE timeline");
+    AUREA_CHECK(wrapper && wrapper->kind == LayerKind::Composition);
+    if (!wrapper) return;
+    const auto* child = rig.e.project()->timeline().composition(wrapper->nested.composition);
+    AUREA_CHECK(child && child->width() == 640 && child->height() == 360 && child->duration().value == 60);
+    if (!child) return;
+    AUREA_CHECK(child->transparent_background());
+    const auto* grade = child->layer(child->order().at(0));
+    AUREA_CHECK(grade && grade->kind == LayerKind::Adjustment && grade->blendMode == BlendMode::Screen);
+    if (!grade) return;
+    AUREA_CHECK(grade->start.value == 15 && grade->end.value == 45);
+    const Track* x = grade->tracks.find(TrackProperty::PositionX);
+    AUREA_CHECK(x && x->keys.size() == 2);
+    if (x && x->keys.size() == 2) {
+        AUREA_CHECK_EQ(x->keys[0].time.value, 0);
+        AUREA_CHECK_EQ(x->keys[1].time.value, 15);
+        AUREA_CHECK_NEAR(x->keys[1].value, 110, 1e-4);
+    }
+    AUREA_CHECK(rig.undo());
+    AUREA_CHECK(rig.L(existing));
+    AUREA_CHECK_EQ(rig.comp()->layers().count(), 1u);
+
+    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto directory = std::filesystem::temp_directory_path() / ("aurea-home-aep-" + std::to_string(stamp));
+    std::error_code ec;
+    const bool created = std::filesystem::create_directory(directory, ec);
+    AUREA_CHECK(created);
+    if (!created) return;
+    const auto input = directory / "grade.aep";
+    const auto output = directory / "Grade.aurea";
+    std::ofstream(input, std::ios::binary) << file;
+    const auto imported = Engine::import_ae_project_file(input.string().c_str(), output.string().c_str(), "Grade edit");
+    if (!imported.ok) dump(imported);
+    AUREA_CHECK(imported.ok && imported.layers == 1 && imported.effects == 1);
+    Project opened;
+    AUREA_CHECK(opened.load(output.string()).ok());
+    const auto* root = opened.timeline().composition(opened.timeline().root());
+    AUREA_CHECK_EQ(opened.timeline().composition_count(), 1u);
+    AUREA_CHECK(root && root->width() == 640 && root->height() == 360 && root->order().size() == 1);
+    AUREA_CHECK(root && root->transparent_background());
+    if (root && !root->order().empty()) {
+        const auto* adjustment = root->layer(root->order().at(0));
+        AUREA_CHECK(adjustment && adjustment->kind == LayerKind::Adjustment && adjustment->blendMode == BlendMode::Screen);
+    }
+    const auto saved = read_file(output);
+    AUREA_CHECK(!Engine::import_ae_project_file(input.string().c_str(), output.string().c_str(), "Replacement").ok);
+    AUREA_CHECK(read_file(output) == saved);
+
+    std::string mediaId(20, '\0');
+    mediaId.replace(0, 2, be16(7));
+    mediaId.replace(16, 4, be32(8));
+    std::string mediaInfo(0x66, '\0');
+    mediaInfo.replace(0x26, 8, be32(2) + be32(1));
+    mediaInfo.replace(0x64, 2, be16(1));
+    const auto footage = list("Item", chunk("idta", mediaId) + chunk("Utf8", "Narration.wav") +
+                 list("Pin ", chunk("sspc", mediaInfo) +
+                      list("Als2", chunk("alas", R"({"fullpath":"C:/OldProject/Footage/Narration.wav"})"))));
+    timing.replace(0x28, 4, be32(8));
+    timing[0x26] = 0;
+    timing[0x27] = 2;
+    const auto audio = list("Layr", chunk("ldta", timing));
+    const auto composition = list("Item", chunk("idta", identity) + chunk("Utf8", "Archive edit") + chunk("cdta", header) + audio);
+    const auto packedBody = "Egg!" + list("Fold", composition + footage);
+    const auto packedAep = "RIFX" + be32(static_cast<u32>(packedBody.size())) + packedBody;
+    const auto bundle = directory / "Edit.zip";
+    const auto writeZip = [&](const auto& records) {
+        std::unique_ptr<archive, decltype(&archive_write_free)> zip(archive_write_new(), archive_write_free);
+        if (!zip || archive_write_set_format_zip(zip.get()) != ARCHIVE_OK) return false;
+#ifdef _WIN32
+        if (archive_write_open_filename_w(zip.get(), bundle.c_str()) != ARCHIVE_OK) return false;
+#else
+        if (archive_write_open_filename(zip.get(), bundle.c_str()) != ARCHIVE_OK) return false;
+#endif
+        for (const auto& [name, content] : records) {
+            std::unique_ptr<archive_entry, decltype(&archive_entry_free)> entry(archive_entry_new(), archive_entry_free);
+            archive_entry_set_pathname(entry.get(), name);
+            archive_entry_set_filetype(entry.get(), AE_IFREG);
+            archive_entry_set_perm(entry.get(), 0644);
+            archive_entry_set_size(entry.get(), content.size());
+            if (archive_write_header(zip.get(), entry.get()) != ARCHIVE_OK ||
+                archive_write_data(zip.get(), content.data(), content.size()) != static_cast<la_ssize_t>(content.size())) return false;
+        }
+        return archive_write_close(zip.get()) == ARCHIVE_OK;
+    };
+    using ZipContents = std::vector<std::pair<const char*, std::string>>;
+    const std::string linkedBytes = "Original footage bytes";
+    AUREA_CHECK(writeZip(ZipContents{{"Collect/Edit.aep", packedAep}, {"Collect/Adobe After Effects Auto-Save/Old.aep", file},
+                                    {"Collect/Footage/narration.WAV", linkedBytes}, {"Alternate/Narration.wav", "Different take"}}));
+    const auto utf8Path = [](const std::filesystem::path& path) {
+        const auto bytes = path.u8string();
+        return std::string(bytes.begin(), bytes.end());
+    };
+    const auto bundlePath = utf8Path(bundle);
+    const auto bundleProject = directory / "Archive.aurea";
+    const auto fromZip = Engine::import_ae_project_file(bundlePath.c_str(), utf8Path(bundleProject).c_str(), "Archive");
+    if (!fromZip.ok) dump(fromZip);
+    AUREA_CHECK(fromZip.ok && fromZip.layers == 1 && fromZip.skipped.empty());
+    Project restored;
+    AUREA_CHECK(restored.load(utf8Path(bundleProject)).ok());
+    AUREA_CHECK_EQ(restored.asset_count(), 1u);
+    restored.for_each_asset([&](AssetId, const Asset& asset) {
+        AUREA_CHECK(asset.kind == AssetKind::Audio && asset.originalFilename == "Narration.wav");
+        AUREA_CHECK(read_file(std::filesystem::u8path(asset.sourcePath)) == linkedBytes);
+    });
+    const auto intoEditor = rig.e.import_ae_file(bundlePath.c_str(), 0);
+    AUREA_CHECK(intoEditor.ok && intoEditor.layers == 1 && intoEditor.skipped.empty());
+    AUREA_CHECK(rig.undo());
+    AUREA_CHECK(rig.L(existing));
+
+    AUREA_CHECK(writeZip(ZipContents{{"Footage/Narration.wav", linkedBytes}}));
+    const auto noProject = directory / "No project.aurea";
+    AUREA_CHECK(!Engine::import_ae_project_file(bundlePath.c_str(), utf8Path(noProject).c_str(), "Missing").ok);
+    AUREA_CHECK(!std::filesystem::exists(noProject));
+    const auto rejected = directory / "Rejected.aurea";
+    std::ofstream(input, std::ios::binary | std::ios::trunc) << cyclic;
+    AUREA_CHECK(!Engine::import_ae_project_file(input.string().c_str(), rejected.string().c_str(), "Cycle").ok);
+    AUREA_CHECK(!std::filesystem::exists(rejected));
+    AUREA_CHECK(rig.L(existing));
+    std::filesystem::remove_all(directory, ec);
+}
+
+AUREA_TEST(AeImport, OriginalProjectArchiveRoundTrips) {
+    const char* input = std::getenv("AUREA_AEP_ARCHIVE_SAMPLE");
+    const char* output = std::getenv("AUREA_AEP_ARCHIVE_OUTPUT");
+    if (!input || !output) return;
+    const auto report = Engine::import_ae_project_file(input, output, "Archive integration test");
+    dump(report);
+    AUREA_CHECK(report.ok && report.layers > 0 && report.effects > 0);
+    if (!report.ok) return;
+    Project restored;
+    AUREA_CHECK(restored.load(output).ok());
+    u32 linked = 0, missing = 0;
+    restored.for_each_asset([&](AssetId, const Asset& asset) {
+        if (asset.sourcePath.empty()) {
+            ++missing;
+        } else {
+            AUREA_CHECK(std::filesystem::file_size(std::filesystem::u8path(asset.sourcePath)) == asset.fileSizeBytes);
+            ++linked;
+        }
+    });
+    std::printf("\n  pacote: %u mídias vinculadas, %u ausentes\n", linked, missing);
+    AUREA_CHECK(linked > 0);
+}
+
+AUREA_TEST(AeImport, JawsRestoresAnimatedAlphaOnAForegroundSolid) {
+    AeRig rig;
+    const u64 solid = rig.shape();
+    const auto completion = prop_keys("Completion", 1, {{0, {1.0}}, {30720, {0.85}}}, 30720);
+    const auto height = prop("Height", 1, {0}, 30720);
+    const auto jaws = effect("CC Jaws", "CC Jaws",
+                             {{"Completion", 1}, {"Center", 1}, {"Direction", 1}, {"Height", 1}},
+                             {{1, completion}, {4, height}});
+    const auto input = ffx(30720, {{{{"ADBE Effect Parade", -1}, {"CC Jaws", 0}}, "CC Jaws"}}, {jaws});
+    const auto result = rig.e.import_ae_data(input, "Jaws.ffx", solid);
+    if (!result.ok || result.effects != 1) dump(result);
+    AUREA_CHECK(result.ok && result.effects == 1 && result.keyframes == 2);
+    const auto* layer = rig.L(solid);
+    AUREA_CHECK(layer && layer->effects.size() == 1);
+    if (!layer || layer->effects.size() != 1) return;
+    const auto& applied = layer->effects.front();
+    AUREA_CHECK_EQ(applied.type, effect_type_id(effect_keys::kJaws));
+    const u32 index = param_index(rig.e, effect_keys::kJaws, "completion");
+    const auto* track = rig.track(solid, TrackProperty::EffectParam, applied.id, param_track_key(index, 0));
+    AUREA_CHECK(track && track->keys.size() == 2);
+    if (track && track->keys.size() == 2) {
+        AUREA_CHECK_NEAR(track->sample(FrameIndex{0}), 100.0, 1e-4);
+        AUREA_CHECK_NEAR(track->sample(FrameIndex{30}), 85.0, 1e-4);
+    }
+}
+
+AUREA_TEST(AeImport, JsxSetParentWithJumpRejectsHierarchyCycles) {
+    AeRig rig;
+    constexpr auto script = R"JS(
+var c = app.project.activeItem;
+var a = c.layers.addNull();
+var b = c.layers.addNull();
+a.name = "First";
+b.name = "Second";
+a.setParentWithJump(b);
+b.setParentWithJump(a);
+)JS";
+    const auto result = rig.e.import_ae_data(script, "cycle.jsx", 0);
+    AUREA_CHECK_EQ(result.layers, 2u);
+    const auto* first = layer_named(rig, "First");
+    const auto* second = layer_named(rig, "Second");
+    AUREA_CHECK(first && second && first->parent.valid() && !second->parent.valid());
+}
+
+AUREA_TEST(AeImport, AepLabSampleImportsAndReopens) {
+    const char* path = std::getenv("AUREA_AEP_SAMPLE");
+    if (!path || !*path) return;
+    const auto source = std::filesystem::path(path);
+    const auto file = read_file(source);
+    ae::ProjectDocument doc;
+    std::string error;
+    const bool parsed = ae::parse_project(file, doc, error);
+    AUREA_CHECK_MSG(parsed, error.c_str());
+    if (!parsed) return;
+    const auto display = std::max_element(doc.comps.begin(), doc.comps.end(), [](const auto& a, const auto& b) {
+        return a.layers.size() < b.layers.size();
+    });
+    AeRig rig;
+    AUREA_CHECK(rig.e.new_project(display->width, display->height, display->fps, nullptr).ok());
+    const bool includeMedia = std::getenv("AUREA_AEP_INCLUDE_MEDIA") != nullptr;
+    std::vector<package::MediaFile> packageMedia;
+    if (includeMedia) for (const auto& item : doc.media) {
+        if (item.solid || item.filename.empty() || item.filename == "." || item.filename == "..") continue;
+        const std::u8string filename(item.filename.begin(), item.filename.end());
+        const auto local = source.parent_path() / std::filesystem::path(filename);
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(local, ec)) continue;
+        Asset asset;
+        asset.name = item.name;
+        asset.originalFilename = item.filename;
+        const auto utf8 = local.generic_u8string();
+        asset.sourcePath.assign(utf8.begin(), utf8.end());
+        asset.kind = item.width == 0 || item.height == 0 ? AssetKind::Audio : item.duration == 0 ? AssetKind::Image : AssetKind::Video;
+        asset.video.width = item.width;
+        asset.video.height = item.height;
+        asset.timebaseFps = item.fps > 0 ? item.fps : 30;
+        asset.video.fps = asset.timebaseFps;
+        asset.duration = FrameIndex{std::llround(item.duration * asset.timebaseFps)};
+        asset.video.frameCount = asset.duration;
+        asset.audio.channels = item.channels;
+        packageMedia.push_back({asset.sourcePath, asset.sourcePath, asset.originalFilename});
+        (void)rig.e.project()->add_asset(std::move(asset));
+    }
+    const auto report = rig.e.import_ae_data(file, u8name(source), 0);
+    dump(report);
+    AUREA_CHECK(report.ok && report.layers > 0 && report.effects > 0);
+    if (!report.ok) return;
+    if (const char* save = std::getenv("AUREA_AEP_OUTPUT"); save && *save) {
+        const std::filesystem::path out(save);
+        AUREA_CHECK(rig.e.save_project(save).ok());
+        std::ofstream(out.string() + ".json", std::ios::binary) << ae::report_json(report);
+        const auto layers = rig.comp()->layers().count();
+        AeRig reopened;
+        AUREA_CHECK(reopened.e.load_project(save).ok());
+        AUREA_CHECK_EQ(reopened.comp()->layers().count(), layers);
+        auto packaged = out;
+        packaged.replace_extension(".aureaproj");
+        package::ExportResult exportResult;
+        AUREA_CHECK(package::write_package(out.string(), packaged.string(), out.stem().string(), "1.0.7.1",
+                                           packageMedia, &exportResult).ok());
+        AUREA_CHECK_EQ(exportResult.included, static_cast<u32>(packageMedia.size()));
+        const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
+        const auto temp = out.parent_path() / ("package-check-" + std::to_string(nonce));
+        std::error_code ec;
+        const bool created = std::filesystem::create_directory(temp, ec);
+        AUREA_CHECK(created);
+        if (!created) return;
+        const auto restored = temp / "project.aurea";
+        package::ImportResult importResult;
+        AUREA_CHECK(package::read_package(packaged.string(), restored.string(), (temp / "media").string(), importResult).ok());
+        AUREA_CHECK_EQ(importResult.relinked, static_cast<u32>(packageMedia.size()));
+        AUREA_CHECK(reopened.e.load_project(restored.string().c_str()).ok());
+        AUREA_CHECK_EQ(reopened.comp()->layers().count(), layers);
+        (void)std::filesystem::remove_all(temp, ec);
+    }
+}
+
 AUREA_TEST(AeImport, SmearAndDepthFieldImportIntoReferenceKeys) {
     const char* src = R"JS(var fx = app.project.activeItem.selectedLayers[0].Effects.addProperty("ADBE SCHMEAR");
 fx.property(1).setValue(1);

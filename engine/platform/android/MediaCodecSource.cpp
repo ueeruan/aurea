@@ -534,9 +534,8 @@ public:
             if (const Status s = next_raw_frame(next, nextPts, eos); !s.ok()) return s;
         }
         FrameRef current = std::move(pendingFrame_);
-        current->durationUs = next ? next->ptsUs - current->ptsUs
-            : info_.durationUs > current->ptsUs ? info_.durationUs - current->ptsUs
-            : std::max<i64>(1, static_cast<i64>(1e6 / std::max(1.0, info_.fps)));
+        current->durationUs = media::presentation_duration_us(current->ptsUs,
+            next ? next->ptsUs : info_.durationUs, static_cast<i64>(1e6 / std::max(1.0, info_.fps)));
         outPtsUs = current->ptsUs;
         nextDeliveryUs_ = current->ptsUs + current->durationUs;
         pendingFrame_ = std::move(next);

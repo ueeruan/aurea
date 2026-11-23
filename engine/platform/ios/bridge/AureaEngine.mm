@@ -4170,6 +4170,11 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
     else report.message = e ? "arquivo vazio" : "motor indisponivel";
     return to_ns(aurea::ae::report_json(report));
 }
++ (NSString*)importAeProjectFile:(NSString*)inputPath outputPath:(NSString*)outputPath title:(NSString*)title {
+    const auto report = aurea::Engine::import_ae_project_file(to_std(inputPath).c_str(),
+                                                             to_std(outputPath).c_str(), to_std(title).c_str());
+    return to_ns(aurea::ae::report_json(report));
+}
 - (NSString*)applyPreset:(long long)layerId json:(NSString*)json duration:(int64_t)duration {
     auto* e = self.engine;
     if (!e) return @"Motor indisponível";

@@ -702,10 +702,13 @@ std::shared_ptr<const expr::LayerPixels> small_image_for_expressions(const std::
 }
 } // namespace
 
-Engine::Engine() {
+Engine::Engine() : Engine(true) {}
+
+Engine::Engine(bool registerExpressionInputs) {
     commandQueue_ = std::make_unique<CommandQueue>();
     preRenderCache_ = std::make_unique<PreRenderCache>();
     adaptive_ = new AdaptiveResolutionController(caps_);
+    if (!registerExpressionInputs) return;
     // Expressões lidas FORA de um quadro do renderer (consultas da UI, que já
     // seguram o lock do modelo) acham a camada dona pela timeline deste motor.
     expr::register_provider([](void* self) -> const Timeline* {
@@ -944,8 +947,8 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
         // (MediaManager::set_persistent_retry; o agendamento fica no render_frame).
         media_.set_persistent_retry(true);
     }
-    // Proxy de edição (0.2.5): 2 GB no máximo, nunca o último 1 GB livre do
-    // aparelho (PreviewProxyService::make_room).
+    // Proxy de edição: cache de até 2 GB, com reserva proporcional ao volume
+    // para guardar mídias originais e exportações (PreviewProxyService::make_room).
     media_.proxies().configure(config_.mediaFactory, config.exportSinkFactory, config.exportSinkContext,
         config.cacheDirectory.empty() ? std::string{} : config.cacheDirectory + "/preview-proxies", 2048ull << 20,
         [](const std::string& path, void* context) { return static_cast<Engine*>(context)->resolve_asset_path(path); }, this);
@@ -18794,6 +18797,10 @@ Status Engine::render_export_frame(FrameIndex time, const OffscreenTarget& targe
             return nullptr;
         }, &c, settings, gpuFrame, c.preRenderMode ? &renderMutex_ : nullptr,
         c.preRenderMode ? &preRenderCancel_ : nullptr);
+    // 1.0.7.1: quadro que estourou o prazo da GPU: a próxima tentativa (o
+    // mesmo degrau, export_next_attempt) já sai um passe por envio.
+    if (result.code() == Errc::Timeout && !c.preRenderMode && gpu_ && gpu_->export_pass_budget() != 1)
+        gpu_->set_export_pass_split(true, 1);
     const auto& measured = c.offline->last_measurements();
     // Producer wall time: source condition waits are separate from prepare /
     // recording. Readback includes explicit internal GPU waits here plus the
@@ -19019,6 +19026,12 @@ void Engine::log_export_profile() noexcept {
     }
 }
 
+namespace {
+/// 1.0.7.1: passes por envio da fatia preventiva do export 3D (a reativa,
+/// depois de um quadro longo ou de um estouro, é 1).
+constexpr u32 kPreventiveExportPasses = 8;
+} // namespace
+
 void Engine::export_thread_main() noexcept {
     set_current_thread_name("aurea-export");
     set_current_thread_priority(ThreadPriority::Export);   // 18/11/2026: ver export_encoder_main
@@ -19034,6 +19047,39 @@ void Engine::export_thread_main() noexcept {
     target.yPlane = ctx.y;
     target.uvPlane = ctx.uv;
     target.encodeDither = ctx.dither;
+
+    // 1.0.7.1 ("nem um cubo 3D exporta no celular"): projeto com 3D vai um
+    // passe por envio DESDE O 1º QUADRO. Antes a fatia só ligava depois de um
+    // quadro que fez a CPU esperar 400 ms (e só no Qualcomm): o 1º quadro 3D
+    // na qualidade final (sombra 4096, MSAA, AO, motion blur com camadas 2D
+    // em 3D, partículas ou pré-comps, que não vão em lotes) já passava do
+    // vigia do driver. A fatia não muda a imagem; volta ao que era no fim.
+    struct PassSplitRestore {
+        Engine* engine = nullptr;
+        bool restore = false;
+        ~PassSplitRestore() {
+            if (!restore) return;
+            std::lock_guard<std::mutex> rl(engine->renderMutex_);
+            // Um estouro neste export passou a 1 passe por envio: isso fica
+            // (a próxima tentativa precisa dele); só a prevenção volta.
+            if (engine->gpu_ && engine->gpu_->export_pass_budget() == kPreventiveExportPasses)
+                engine->gpu_->set_export_pass_split(false);
+        }
+    } passSplit{this};
+    {
+        bool has3d = false;
+        if (ctx.frozenProject) ctx.frozenProject->timeline().for_each_composition([&](CompositionId, const Composition& c) {
+            for (u32 i = 0; i < c.order().size() && !has3d; ++i) {
+                const Layer* l = c.layer(c.order().at(i));
+                has3d = l && (l->threeD || l->kind == LayerKind::Model3D);
+            }
+        });
+        std::lock_guard<std::mutex> rl(renderMutex_);
+        if (has3d && gpu_ && !gpu_->export_pass_split()) {
+            gpu_->set_export_pass_split(true, kPreventiveExportPasses);
+            passSplit.restore = gpu_->export_pass_split();
+        }
+    }
 
     ctx.startNs = monotonic_ns();
     ctx.encoder = std::thread([this] { export_encoder_main(); });
@@ -19055,16 +19101,23 @@ void Engine::export_thread_main() noexcept {
             // A dense 3D frame can legitimately take longer than five seconds
             // on a mobile/software GPU. Poll in cancellable slices; keep a
             // finite deadline for a hung driver without dropping this frame.
-            if (const Status s = wait_export_gpu(slot.gpuFrame); !s.ok()) return s;
+            if (const Status s = wait_export_gpu(slot.gpuFrame); !s.ok()) {
+                // 1.0.7.1: o quadro passou do prazo da GPU; a tentativa seguinte
+                // (o mesmo degrau) vai um passe por envio.
+                if (s.code() == Errc::Timeout && gpu_->export_pass_budget() != 1) gpu_->set_export_pass_split(true, 1);
+                return s;
+            }
             // O quadro inteiro vai num envio só (a CPU já grava o próximo). No
             // driver Qualcomm (KGSL), um envio acima de ~2 s reseta a GPU: quadro
             // que fez a CPU esperar mais de 400 ms pela GPU passa o resto deste
             // export a um passe por envio, antes de chegar perto do limite.
-            if (gpu_->capabilities().vendorId == 0x5143u && !gpu_->export_pass_split()
+            // 1.0.7.1: Mali, Xclipse, PowerVR e o Windows (TDR de 2 s) têm o
+            // mesmo tipo de vigia do driver; a proteção vale para todo fabricante.
+            if (gpu_->export_pass_budget() != 1
                 && monotonic_ns() - r0 > 400'000'000ull) {
                 AUREA_LOG_WARN("export: quadro %u esperou a GPU %.0f ms; um passe por envio (limite do driver)",
                                slot.frame, static_cast<f64>(monotonic_ns() - r0) / 1e6);
-                gpu_->set_export_pass_split(true);
+                gpu_->set_export_pass_split(true, 1);
             }
             // Memória não coerente: invalida para a CPU ver o que a GPU
             // escreveu (o ponteiro é o mesmo; coerente = nada a fazer).

@@ -32,7 +32,7 @@
 //  Leitura DEFENSIVA: tamanho de pedaço fora do pai, contagem absurda ou
 //  profundidade demais param a leitura daquele ramo, nunca o processo.
 // =============================================================================
-#include "aurea/project/AeImport.hpp"
+#include "aurea/project/AeProject.hpp"
 #include "aurea/animation/Curve.hpp"
 
 #include <algorithm>
@@ -46,6 +46,23 @@ constexpr usize kMaxFile = 64u << 20;
 constexpr u32   kMaxDepth = 64;
 constexpr u32   kMaxKeys = 100000;
 constexpr u32   kMaxShapePoints = 1u << 16;
+
+struct ReadBudget {
+    usize bytes = 0;
+    u32 chunks = 0;
+    const char* error = nullptr;
+
+    bool take(usize allocation) {
+        constexpr usize kMaxExpandedBytes = 32u << 20;
+        if (error) return false;
+        if (allocation > kMaxExpandedBytes - bytes) {
+            error = "projeto do After Effects excede o limite de dados expandidos";
+            return false;
+        }
+        bytes += allocation;
+        return true;
+    }
+};
 
 u32 be32(const u8* p) noexcept {
     return (static_cast<u32>(p[0]) << 24) | (static_cast<u32>(p[1]) << 16) | (static_cast<u32>(p[2]) << 8) | p[3];
@@ -78,25 +95,34 @@ struct Chunk {
 
 /// Percorre os pedaços de [p, end). Tamanho que passa do pai encerra o ramo.
 template <class Fn>
-void each_chunk(const u8* p, const u8* end, Fn&& fn) {
-    while (p + 8 <= end) {
+void each_chunk(const u8* p, const u8* end, ReadBudget& budget, Fn&& fn) {
+    while (p != end && !budget.error) {
+        if (++budget.chunks > 262144) {
+            budget.error = "arquivo do After Effects tem blocos demais";
+            return;
+        }
+        if (end - p < 8) {
+            budget.error = "cabeçalho de bloco truncado";
+            return;
+        }
         Chunk c;
         std::memcpy(c.id, p, 4);
         const u32 size = be32(p + 4);
         c.body = p + 8;
-        if (size > static_cast<usize>(end - c.body)) {
-            c.size = static_cast<usize>(end - c.body);
-            fn(c);
+        if (size > static_cast<usize>(end - c.body) || (c.is("LIST") && size < 4)) {
+            budget.error = "tamanho inválido de bloco do After Effects";
             return;
         }
         c.size = size;
         if (!fn(c)) return;
-        p = c.body + size + (size & 1u);
+        p = c.body + size;
+        if ((size & 1u) && p < end) ++p;
     }
 }
 
 /// Latin-1 → UTF-8 (nomes antigos sem prefixo "Utf8").
-std::string latin1(const u8* p, usize n) {
+std::string latin1(const u8* p, usize n, ReadBudget& budget) {
+    if (!budget.take(2 * n)) return {};
     std::string s;
     s.reserve(n);
     for (usize i = 0; i < n; ++i) {
@@ -109,7 +135,8 @@ std::string latin1(const u8* p, usize n) {
 }
 
 /// UTF-8 inválido vira '?' (o texto atravessa JNI/NSString).
-std::string clean_utf8(const u8* p, usize n) {
+std::string clean_utf8(const u8* p, usize n, ReadBudget& budget) {
+    if (!budget.take(n)) return {};
     std::string o;
     o.reserve(n);
     usize i = 0;
@@ -126,18 +153,18 @@ std::string clean_utf8(const u8* p, usize n) {
 }
 
 /// Texto de tdsn/fnam/pdnm: "Utf8" + u32 tamanho + texto, ou C-string Latin-1.
-std::string name_payload(const Chunk& c) {
+std::string name_payload(const Chunk& c, ReadBudget& budget) {
     if (c.size >= 8 && std::memcmp(c.body, "Utf8", 4) == 0) {
         const u32 n = std::min<u32>(be32(c.body + 4), static_cast<u32>(c.size - 8));
-        return clean_utf8(c.body + 8, n);
+        return clean_utf8(c.body + 8, n, budget);
     }
-    return latin1(c.body, c.size);
+    return latin1(c.body, c.size, budget);
 }
 
 /// Nome sem o \t que o AE põe nos nomes "localizáveis" e sem o marcador
 /// "-_0_/-" (nome padrão da propriedade, observado nos presets): vazio.
 std::string strip_tab(std::string s) {
-    while (!s.empty() && (s.front() == '\t' || s.front() == ' ')) s.erase(s.begin());
+    s.erase(0, s.find_first_not_of(" \t"));
     if (s.rfind("-_0_/-", 0) == 0) s.clear();
     return s;
 }
@@ -145,13 +172,14 @@ std::string strip_tab(std::string s) {
 struct Reader {
     u32 timescale = 0;
     u32 depth = 0;
+    ReadBudget budget;
 
     void property(const u8* p, const u8* end, Node& n);
     void group(const u8* p, const u8* end, Node& n);
     void effect(const u8* p, const u8* end, Node& n);
     void shape(const u8* p, const u8* end, Node& n);
     void keys(const Chunk& hd, const Chunk& data, u32 scale, Node& n);
-    bool value(const Chunk& c, const std::string& match, Node& out);
+    bool value(const Chunk& c, std::string_view match, Node& out);
 };
 
 void color_fix(std::vector<f64>& v, f64 k) {
@@ -163,18 +191,18 @@ void color_fix(std::vector<f64>& v, f64 k) {
 
 void Reader::keys(const Chunk& hd, const Chunk& data, u32 scale, Node& n) {
     if (hd.size < 20) return;
-    const u32 count = std::min(be32(hd.body + 8), kMaxKeys);
     const u32 size = be32(hd.body + 16);
     if (size < 8 || size > 4096) return;
+    const usize count = std::min<usize>({be32(hd.body + 8), kMaxKeys, data.size / size});
     const u32 dims = std::max<u32>(1, n.dims);
     const bool spatial = n.spatial && size == 56 + 24 * dims;
     const bool flat = !spatial && size >= 8 + 40 * dims;
     const u32 nd = spatial ? dims : flat ? (size - 8) / 40 : 0;
+    if (!budget.take(count * 2 * (sizeof(Key) + nd * (3 * sizeof(f64) + 2 * sizeof(Ease))))) return;
     const f64 ts = scale ? static_cast<f64>(scale) : (timescale ? static_cast<f64>(timescale) : 30.0);
     const bool color = nd == 4;
-    for (u32 i = 0; i < count; ++i) {
-        if (static_cast<usize>(i + 1) * size > data.size) break;
-        const u8* k = data.body + static_cast<usize>(i) * size;
+    for (usize i = 0; i < count; ++i) {
+        const u8* k = data.body + i * size;
         Key key;
         key.time = static_cast<f64>(be32(k)) / ts;
         auto interp = [](u8 b) { return b == 2 ? KeyInterp::Bezier : b == 3 ? KeyInterp::Hold : KeyInterp::Linear; };
@@ -223,9 +251,9 @@ void Reader::property(const u8* p, const u8* end, Node& n) {
     u32 scale = 0;
     Chunk hd{};
     bool haveHd = false;
-    each_chunk(p, end, [&](const Chunk& c) {
+    each_chunk(p, end, budget, [&](const Chunk& c) {
         if (c.is("tdsb") && c.size >= 4) n.flags = be32(c.body);
-        else if (c.is("tdsn")) n.name = strip_tab(name_payload(c));
+        else if (c.is("tdsn")) n.name = strip_tab(name_payload(c, budget));
         else if (c.is("tdb4") && c.size >= 16) {
             n.dims = be16(c.body + 2);
             const u32 sp = be32(c.body + 4);
@@ -233,7 +261,7 @@ void Reader::property(const u8* p, const u8* end, Node& n) {
             scale = be32(c.body + 12);
         } else if (c.is("cdat")) {
             const u32 dims = std::max<u32>(1, n.dims);
-            if (c.size >= dims * 8u) {
+            if (c.size >= dims * 8u && budget.take(dims * sizeof(f64))) {
                 n.hasValue = true;
                 n.value.clear();
                 for (u32 i = 0; i < dims; ++i) n.value.push_back(bed(c.body + 8 * i));
@@ -242,7 +270,7 @@ void Reader::property(const u8* p, const u8* end, Node& n) {
         } else if (c.list("list")) {
             Chunk h{}, d{};
             bool gh = false, gd = false;
-            each_chunk(c.body + 4, c.body + c.size, [&](const Chunk& x) {
+            each_chunk(c.body + 4, c.body + c.size, budget, [&](const Chunk& x) {
                 if (x.is("lhd3")) { h = x; gh = true; }
                 else if (x.is("ldat")) { d = x; gd = true; }
                 return true;
@@ -251,9 +279,9 @@ void Reader::property(const u8* p, const u8* end, Node& n) {
             hd = h;
             haveHd = gh;
         } else if (c.is("expr")) {
-            n.expression = latin1(c.body, c.size);
+            n.expression = latin1(c.body, c.size, budget);
         } else if (c.is("Utf8")) {
-            n.expression = clean_utf8(c.body, c.size);
+            n.expression = clean_utf8(c.body, c.size, budget);
         }
         return true;
     });
@@ -268,7 +296,7 @@ void Reader::property(const u8* p, const u8* end, Node& n) {
 void Reader::shape(const u8* p, const u8* end, Node& n) {
     n.kind = Node::Kind::Property;
     n.hasShape = false;
-    each_chunk(p, end, [&](const Chunk& c) {
+    each_chunk(p, end, budget, [&](const Chunk& c) {
         if (c.list("tdbs")) {
             Node keysNode;
             property(c.body + 4, c.body + c.size, keysNode);
@@ -277,27 +305,28 @@ void Reader::shape(const u8* p, const u8* end, Node& n) {
             n.shapeKeyed = keysNode.keys.size() > 1;
             n.expression = keysNode.expression;
         } else if (c.list("omks")) {
-            each_chunk(c.body + 4, c.body + c.size, [&](const Chunk& s) {
+            each_chunk(c.body + 4, c.body + c.size, budget, [&](const Chunk& s) {
                 if (!s.list("shap") || n.hasShape) return true;
                 MaskShape ms;
                 std::vector<f32> pts;
-                each_chunk(s.body + 4, s.body + s.size, [&](const Chunk& x) {
+                each_chunk(s.body + 4, s.body + s.size, budget, [&](const Chunk& x) {
                     if (x.is("shph") && x.size >= 4) ms.closed = (x.body[3] & 0x08u) == 0;
                     else if (x.list("list")) {
                         Chunk h{}, d{};
                         bool gh = false, gd = false;
-                        each_chunk(x.body + 4, x.body + x.size, [&](const Chunk& y) {
+                        each_chunk(x.body + 4, x.body + x.size, budget, [&](const Chunk& y) {
                             if (y.is("lhd3")) { h = y; gh = true; }
                             else if (y.is("ldat")) { d = y; gd = true; }
                             return true;
                         });
                         if (gh && gd && h.size >= 20) {
-                            const u32 count = std::min(be32(h.body + 8), kMaxShapePoints);
                             const u32 size = be32(h.body + 16);
                             if (size >= 8) {
-                                for (u32 i = 0; i < count && static_cast<usize>(i + 1) * size <= d.size; ++i) {
-                                    pts.push_back(bef(d.body + static_cast<usize>(i) * size));
-                                    pts.push_back(bef(d.body + static_cast<usize>(i) * size + 4));
+                                const usize count = std::min<usize>({be32(h.body + 8), kMaxShapePoints, d.size / size});
+                                if (!budget.take(2 * count * (2 * sizeof(f32) + sizeof(ShapeVertex) / 3))) return false;
+                                for (usize i = 0; i < count; ++i) {
+                                    pts.push_back(bef(d.body + i * size));
+                                    pts.push_back(bef(d.body + i * size + 4));
                                 }
                             }
                         }
@@ -329,10 +358,10 @@ void Reader::shape(const u8* p, const u8* end, Node& n) {
 void Reader::group(const u8* p, const u8* end, Node& n) {
     n.kind = Node::Kind::Group;
     std::string pending;
-    each_chunk(p, end, [&](const Chunk& c) {
+    each_chunk(p, end, budget, [&](const Chunk& c) {
         if (c.is("tdsb") && c.size >= 4) n.flags = be32(c.body);
-        else if (c.is("tdsn")) n.name = strip_tab(name_payload(c));
-        else if (c.is("tdmn")) pending = latin1(c.body, c.size);
+        else if (c.is("tdsn")) n.name = strip_tab(name_payload(c, budget));
+        else if (c.is("tdmn")) pending = latin1(c.body, c.size, budget);
         else if (c.is("LIST")) {
             if (c.list("btgu") || c.list("tdsp")) return true;
             Node child;
@@ -345,23 +374,26 @@ void Reader::group(const u8* p, const u8* end, Node& n) {
 
 void Reader::effect(const u8* p, const u8* end, Node& n) {
     n.kind = Node::Kind::Effect;
-    each_chunk(p, end, [&](const Chunk& c) {
-        if (c.is("fnam")) n.effectName = strip_tab(name_payload(c));
+    each_chunk(p, end, budget, [&](const Chunk& c) {
+        if (c.is("fnam")) n.effectName = strip_tab(name_payload(c, budget));
         else if (c.list("parT")) {
-            each_chunk(c.body + 4, c.body + c.size, [&](const Chunk& x) {
+            each_chunk(c.body + 4, c.body + c.size, budget, [&](const Chunk& x) {
                 if (x.is("tdmn")) {
+                    if (!budget.take(2 * sizeof(EffectParamDef))) return false;
                     EffectParamDef d;
-                    d.match = latin1(x.body, x.size);
+                    d.match = latin1(x.body, x.size, budget);
                     n.params.push_back(std::move(d));
                 } else if (x.is("pard") && !n.params.empty() && x.size >= 48) {
                     n.params.back().type = x.body[15];
-                    n.params.back().name = strip_tab(latin1(x.body + 16, 32));
+                    n.params.back().name = strip_tab(latin1(x.body + 16, 32, budget));
                 } else if (x.is("pdnm") && !n.params.empty()) {
-                    const std::string all = name_payload(x);
+                    const std::string all = name_payload(x, budget);
                     usize s = 0;
                     while (s <= all.size()) {
                         const usize bar = all.find('|', s);
-                        n.params.back().popup.push_back(all.substr(s, bar == std::string::npos ? std::string::npos : bar - s));
+                        const usize length = bar == std::string::npos ? all.size() - s : bar - s;
+                        if (!budget.take(2 * sizeof(std::string) + length)) return false;
+                        n.params.back().popup.push_back(all.substr(s, length));
                         if (bar == std::string::npos) break;
                         s = bar + 1;
                     }
@@ -379,20 +411,23 @@ void Reader::effect(const u8* p, const u8* end, Node& n) {
     });
 }
 
-bool Reader::value(const Chunk& c, const std::string& match, Node& out) {
-    if (depth >= kMaxDepth) return false;
+bool Reader::value(const Chunk& c, std::string_view match, Node& out) {
+    if (depth >= kMaxDepth) {
+        budget.error = "arquivo do After Effects tem grupos aninhados demais";
+        return false;
+    }
+    if (!budget.take(2 * sizeof(Node) + match.size())) return false;
     ++depth;
     out.match = match;
     const u8* p = c.body + 4;
     const u8* end = c.body + c.size;
-    bool ok = true;
     if (c.list("tdbs")) property(p, end, out);
     else if (c.list("tdgp")) group(p, end, out);
     else if (c.list("sspc")) effect(p, end, out);
     else if (c.list("om-s")) shape(p, end, out);
     else if (c.list("btds")) {
         out.kind = Node::Kind::TextDocument;
-        each_chunk(p, end, [&](const Chunk& x) {
+        each_chunk(p, end, budget, [&](const Chunk& x) {
             if (x.list("tdbs")) {
                 Node t;
                 property(x.body + 4, x.body + x.size, t);
@@ -407,7 +442,7 @@ bool Reader::value(const Chunk& c, const std::string& match, Node& out) {
         out.kind = Node::Kind::Unknown;
     }
     --depth;
-    return ok;
+    return !budget.error;
 }
 
 } // namespace
@@ -417,8 +452,35 @@ const Node* Node::child(std::string_view m) const noexcept {
     return nullptr;
 }
 
+bool parse_property_tree(std::string_view payload, u32 fallbackTimescale,
+                         usize& expandedBytes, Node& out, std::string& error) {
+    out = Node{};
+    error.clear();
+    if (payload.size() > kMaxFile || !payload.starts_with("tdgp")) {
+        error = "grupo de propriedades do After Effects inválido";
+        return false;
+    }
+    Reader r;
+    r.timescale = fallbackTimescale;
+    if (!r.budget.take(expandedBytes)) {
+        error = r.budget.error;
+        return false;
+    }
+    const auto* begin = reinterpret_cast<const u8*>(payload.data());
+    Node tree;
+    r.group(begin + 4, begin + payload.size(), tree);
+    if (r.budget.error) {
+        error = r.budget.error;
+        return false;
+    }
+    out = std::move(tree);
+    expandedBytes = r.budget.bytes;
+    return true;
+}
+
 bool parse_ffx(std::string_view bytes, FfxDocument& out, std::string& error) {
     out = FfxDocument{};
+    error.clear();
     const u8* b = reinterpret_cast<const u8*>(bytes.data());
     if (bytes.size() < 12 || std::memcmp(b, "RIFX", 4) != 0 || std::memcmp(b + 8, "FaFX", 4) != 0) {
         error = "nao e um preset .ffx do After Effects (RIFX FaFX)";
@@ -428,28 +490,39 @@ bool parse_ffx(std::string_view bytes, FfxDocument& out, std::string& error) {
         error = "preset grande demais";
         return false;
     }
-    const u8* end = b + std::min<usize>(bytes.size(), 8 + static_cast<usize>(be32(b + 4)));
-    if (end < b + 12) end = b + bytes.size();
+    const usize bodySize = be32(b + 4);
+    if (bodySize < 4 || bodySize > bytes.size() - 8) {
+        error = "tamanho inválido do preset RIFX";
+        return false;
+    }
+    const u8* end = b + 8 + bodySize;
+    FfxDocument doc;
     Reader r;
     bool found = false;
-    each_chunk(b + 12, end, [&](const Chunk& c) {
+    each_chunk(b + 12, end, r.budget, [&](const Chunk& c) {
         if (!c.list("besc")) return true;
         found = true;
         std::vector<std::vector<PathStep>> paths;
         std::vector<std::string> names;
         std::vector<Node> values;
-        each_chunk(c.body + 4, c.body + c.size, [&](const Chunk& x) {
+        each_chunk(c.body + 4, c.body + c.size, r.budget, [&](const Chunk& x) {
             if (x.is("beso") && x.size >= 16) {
                 r.timescale = be32(x.body + 12);
-                out.timescale = r.timescale;
+                doc.timescale = r.timescale;
             } else if (x.list("tdsp")) {
+                if (!r.budget.take(2 * sizeof(Entry))) return false;
                 std::vector<PathStep> path;
-                each_chunk(x.body + 4, x.body + x.size, [&](const Chunk& s) {
+                each_chunk(x.body + 4, x.body + x.size, r.budget, [&](const Chunk& s) {
                     if (!s.list("tdsi")) return true;
+                    if (path.size() == kMaxDepth) {
+                        r.budget.error = "caminho de propriedade longo demais";
+                        return false;
+                    }
+                    if (!r.budget.take(2 * sizeof(PathStep))) return false;
                     PathStep step;
-                    each_chunk(s.body + 4, s.body + s.size, [&](const Chunk& t) {
+                    each_chunk(s.body + 4, s.body + s.size, r.budget, [&](const Chunk& t) {
                         if (t.is("tdix") && t.size >= 4) step.index = static_cast<i32>(be32(t.body));
-                        else if (t.is("tdmn")) step.match = latin1(t.body, t.size);
+                        else if (t.is("tdmn")) step.match = latin1(t.body, t.size, r.budget);
                         return true;
                     });
                     path.push_back(std::move(step));
@@ -458,33 +531,38 @@ bool parse_ffx(std::string_view bytes, FfxDocument& out, std::string& error) {
                 paths.push_back(std::move(path));
                 names.emplace_back();
             } else if (x.is("tdsn")) {
-                if (!names.empty()) names.back() = strip_tab(name_payload(x));
+                if (!names.empty()) names.back() = strip_tab(name_payload(x, r.budget));
             } else if (x.is("LIST")) {
                 if (x.list("btgu")) return true;
                 const usize k = values.size();
-                std::string leaf;
+                std::string_view leaf;
                 if (k < paths.size() && !paths[k].empty()) leaf = paths[k].back().match;
                 Node v;
-                r.value(x, leaf, v);
+                if (!r.value(x, leaf, v)) return false;
                 values.push_back(std::move(v));
             }
             return true;
         });
-        for (usize i = 0; i < paths.size(); ++i) {
+        for (usize i = 0; i < paths.size() && !r.budget.error; ++i) {
             if (paths[i].empty() || paths[i].back().match == "ADBE End of path sentinel") continue;
             if (i >= values.size()) break;
             Entry e;
             e.path = std::move(paths[i]);
-            e.name = names[i];
+            e.name = std::move(names[i]);
             e.value = std::move(values[i]);
-            out.entries.push_back(std::move(e));
+            doc.entries.push_back(std::move(e));
         }
         return false;
     });
+    if (r.budget.error) {
+        error = r.budget.error;
+        return false;
+    }
     if (!found) {
         error = "preset sem o bloco de valores (besc)";
         return false;
     }
+    out = std::move(doc);
     return true;
 }
 

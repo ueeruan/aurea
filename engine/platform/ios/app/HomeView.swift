@@ -2,7 +2,7 @@
 //  Aurea / platform / ios / app / HomeView.swift
 //
 //  A HOME (Omega 0.3.2, área 01; par do `home/HomeScreen.kt`): barra superior
-//  de 57 pt (☰ · AUREA · ✦ · avatar), as abas Início (Comunidade) · Perfil ·
+//  de 57 pt (menu de ajustes, importação e conta), as abas Início (Comunidade) · Perfil ·
 //  [+] · Projetos · Presets no dock de 72 pt e a gaveta de ajustes. Escolhendo
 //  projetos, o cabeçalho de seleção cobre a barra superior e a barra de seleção
 //  cobre o dock. Clara no Omega (D6): pinta só com os papéis claros e os da Home.
@@ -228,7 +228,7 @@ enum HomeType {
 // =============================================================================
 enum HomeTabKind: Int, CaseIterable, Identifiable {
     /// Home nova: o Início é Mural + Novidades; a Comunidade tem aba própria.
-    case start, projects, presets, profile, mural, community
+    case start, projects, presets, profile, mural, community, models
     var id: Int { rawValue }
 }
 
@@ -315,7 +315,9 @@ struct HomeView: View {
         .overlay { HomeProjectDialogs(state: $dialog, library: library, selection: $selection) }
         .overlay { accountDialogs }
         .overlay {
-            if model.importingMedia && (model.operationMessage == AureaText.t("project_backup_saving") ||
+            let importingAe = model.operationMessage == AureaText.t("ae_importing")
+            if model.importingMedia && (importingAe ||
+                                       model.operationMessage == AureaText.t("project_backup_saving") ||
                                        model.operationMessage == AureaText.t("project_backup_restoring")) {
                 ZStack {
                     AureaColors.homeCover.ignoresSafeArea()
@@ -327,7 +329,7 @@ struct HomeView: View {
                     .background(AureaColors.surface, in: RoundedRectangle(cornerRadius: 14))
                 }
                 .accessibilityAddTraits(.isModal)
-                .accessibilityIdentifier("home.projectBackup.progress")
+                .accessibilityIdentifier(importingAe ? "home.import.progress" : "home.projectBackup.progress")
             }
         }
         .sheet(isPresented: $showAccount, onDismiss: { accountRecoveryEmail = nil }) {
@@ -343,6 +345,9 @@ struct HomeView: View {
             ReportProblemView(sessao: conta.sessao()) { model.toast = $0 }
         }
         .sheet(item: $backupFile) { file in ProjectFileShareSheet(url: file.url) }
+        .sheet(item: $model.aeImportResult) { result in
+            AeImportSheet(result: result).environmentObject(model).presentationDetents([.medium, .large])
+        }
         .sheet(isPresented: $importing) {
             HomeMediaPicker(onDismiss: { importing = false }, onPick: { [project = model.projectGeneration] url, kind in
                 guard project == model.projectGeneration else { importing = false; return }
@@ -401,6 +406,8 @@ struct HomeView: View {
                 } else {
                     OmegaHomeTopBar(signedInEmail: conta.email, accountMenu: $accountMenu,
                                     onMenu: openDrawer,
+                                    onImportAurea: pickProjectFile,
+                                    onImportAe: pickAeProjectFile,
                                     onAccount: {
                                         if conta.logado { accountMenu = true }
                                         else { conta.entrando = true; showAccount = true }
@@ -411,7 +418,7 @@ struct HomeView: View {
             }
             .animation(.easeInOut(duration: 0.3), value: selecting)
             // A faixa do Mural fica à vista em toda aba: a Home reabre na última usada.
-            if !pluginTab && tab != .mural && !selecting { MuralBanner { select(.mural) } }
+            if !pluginTab && tab != .mural && tab != .models && !selecting { MuralBanner { select(.mural) } }
             ZStack {
                 if pluginTab && pluginRuntime.homeTabLabel != nil {
                     PluginHomeTab()   // 0.3.4 plugins
@@ -422,6 +429,12 @@ struct HomeView: View {
                 case .community: CommunityView(profileMode: false)
                 case .profile: CommunityView(profileMode: true)
                 case .presets: OmegaPresetsTab(onQuickMenu: { quick = $0 })
+                case .models:
+                    ModelLibraryView(actionKey: "model_shop_create", onUse: { url, name in
+                        if model.newProject(width: 1080, height: 1080, fps: 30, title: name) {
+                            model.importModelFiles(urls: [url], displayName: name)
+                        }
+                    })
                 case .projects:
                     OmegaProjectsTab(library: library, defaults: defaults, searching: $projectsSearching,
                                      selection: $selection, onOpen: openProject,
@@ -549,6 +562,13 @@ struct HomeView: View {
         }
     }
 
+    private func pickAeProjectFile() {
+        DocumentImportPicker.present(types: [.data, .item], asCopy: false) { urls in
+            guard let url = urls?.first else { return }
+            model.importHomeAeProject(url) { library.refresh() }
+        }
+    }
+
     private func pickProjectBackup() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             DocumentImportPicker.present(types: [.data]) { urls in
@@ -664,8 +684,11 @@ struct OmegaHomeTopBar: View {
     let signedInEmail: String?
     @Binding var accountMenu: Bool
     let onMenu: () -> Void
+    let onImportAurea: () -> Void
+    let onImportAe: () -> Void
     let onAccount: () -> Void
     let accountEntries: () -> [MenuEntry]
+    @State private var importMenu = false
 
     var body: some View {
         ZStack {
@@ -684,6 +707,33 @@ struct OmegaHomeTopBar: View {
                     .aureaAnchoredMenu(isPresented: $accountMenu, alignEnd: true, tag: "home.account.menu", entries: accountEntries)
             }
             .padding(.leading, 4).padding(.trailing, 6)
+            Button { importMenu = true } label: {
+                HStack(spacing: 7) {
+                    CupertinoGlyph.text(CupertinoGlyph.ArrowDownToLine, size: 16, color: AureaColors.lightOnInk)
+                        .accessibilityHidden(true)
+                    Text(AureaText.t("home_project_import"))
+                        .font(.aurea(size: 14, weight: .semibold))
+                        .foregroundStyle(AureaColors.lightOnInk)
+                        .lineLimit(1)
+                    CupertinoGlyph.text(CupertinoGlyph.ChevronDown, size: 10, color: AureaColors.lightOnInk)
+                        .accessibilityHidden(true)
+                }
+                .padding(.horizontal, 11).padding(.vertical, 8)
+                .background(AureaColors.lightInk, in: RoundedRectangle(cornerRadius: 12))
+                .frame(minHeight: 48)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(AureaPressStyle())
+            .accessibilityIdentifier("home.import")
+            .aureaAnchoredMenu(isPresented: $importMenu, width: 276, tag: "home.import.menu") {
+                [
+                    .item(AureaText.t("home_project_import_aurea"), glyph: CupertinoGlyph.DocText,
+                          tag: "home.import.aurea", onClick: onImportAurea),
+                    .item(AureaText.t("home_project_import_aep"), glyph: CupertinoGlyph.Film,
+                          tag: "home.import.aep", onClick: onImportAe),
+                ]
+            }
+            .padding(.horizontal, 56)
         }
         .frame(height: OmegaHomeDims.topBar)
         .frame(maxWidth: .infinity)
@@ -827,6 +877,7 @@ struct OmegaHomeDock: View {
                 .accessibilityIdentifier("home.create")
             tab(.projects, CupertinoGlyph.RectangleStack, CupertinoGlyph.RectangleStack, "home_tab_projects", "home.projects")
             tab(.presets, CupertinoGlyph.WandStars, CupertinoGlyph.WandStars, "home_presets_short", "home.presets")
+            tab(.models, CupertinoGlyph.Cube, CupertinoGlyph.Cube, "model_shop_tab", "home.models")
             if let plugin = pluginTab {
                 let ink = pluginSelected ? AureaColors.lightText : AureaColors.lightTextMuted
                 Button(action: onPlugin) {

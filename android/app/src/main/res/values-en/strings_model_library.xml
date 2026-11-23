@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="model_shop_title">Model Store</string>
+    <string name="model_shop_tab">Models</string>
+    <string name="model_shop_all">All</string>
+    <string name="model_shop_low_poly">Low poly</string>
+    <string name="model_shop_realistic">Realistic</string>
+    <string name="model_shop_create">Create project</string>
+    <string name="model_shop_insert">Insert</string>
+</resources>

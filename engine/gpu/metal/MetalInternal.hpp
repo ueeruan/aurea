@@ -232,6 +232,10 @@ struct FrameContext {
     dispatch_semaphore_t    completion = nil;
     u64                     frameNumber = 0;
     bool                    submitted = false;
+    /// 1.0.7.1: frame sem tela (export, captura) e quantos passes já foram
+    /// gravados no command buffer atual — a fatia do export (finish_pass).
+    bool                    offscreen = false;
+    u32                     passesInCommandBuffer = 0;
     // A discarded drawable must stay out of CAMetalLayer's reuse pool until
     // the submitted writes complete. This owns the acquired drawable itself,
     // without allocating or copying another full-resolution image.
@@ -292,6 +296,9 @@ public:
     void end_timer() noexcept override;
     void begin_label(const char* label) noexcept override;
     void end_label() noexcept override;
+    /// 1.0.7.1: com a fatia do export ligada, fecha o command buffer depois
+    /// de N passes e abre outro na mesma fila (par do VulkanCommands.cpp).
+    [[nodiscard]] Status finish_pass() noexcept override;
 
     [[nodiscard]] bool in_render_pass() const noexcept { return enc_ == Enc::Render; }
     /// Encerra o encoder aberto. Chamado pelo `end_frame` e antes de qualquer
@@ -375,6 +382,9 @@ struct Impl {
 
     id<MTLDevice>       device = nil;
     id<MTLCommandQueue> queue = nil;
+    /// 1.0.7.1: passes por command buffer no export (0 = o quadro inteiro num
+    /// envio). O vigia da GPU do iOS aborta command buffers longos.
+    u32 passesPerCommandBuffer = 0;
     /// Upload/leitura que atingiu timeout: shutdown precisa esperar antes de
     /// liberar também os recursos externos (CoreVideo) fora do ARC do Metal.
     std::vector<PendingSubmission> pendingImmediate;

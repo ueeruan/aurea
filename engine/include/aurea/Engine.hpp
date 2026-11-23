@@ -27,6 +27,8 @@
 #include "aurea/text/Captions.hpp"
 #include "aurea/effects/CubeLut.hpp"
 #include "aurea/project/AeImport.hpp"
+
+namespace aurea::ae { struct ProjectImportMedia; }
 #include "aurea/project/AlightMotion.hpp"
 #include "aurea/project/Presets.hpp"
 #include "aurea/project/ProjectPackage.hpp"
@@ -2504,6 +2506,10 @@ public:
     /// O mesmo com o conteúdo já lido (`fileName` só serve para a extensão).
     [[nodiscard]] ae::ImportReport import_ae_data(const std::string& data, const std::string& fileName,
                                                   u64 targetLayer, bool textAnimatorPro = false) noexcept;
+    /// Importa um .aep como projeto novo, fora da sessão do editor. O destino
+    /// precisa ser um caminho livre na biblioteca do app.
+    [[nodiscard]] static ae::ImportReport import_ae_project_file(const char* inputPath, const char* outputPath,
+                                                                 const char* title) noexcept;
 
     // --- Modo Edição (timeline magnética) ------------------------------------------
     /// Ligar/desligar o modo Edição da COMPOSIÇÃO. Ele é o PADRÃO das camadas
@@ -3651,6 +3657,11 @@ public:
     [[nodiscard]] const std::string& documents_directory() const noexcept { return config_.documentsDirectory; }
 
 private:
+    explicit Engine(bool registerExpressionInputs);
+    [[nodiscard]] ae::ImportReport import_ae_data_impl(const std::string& data, const std::string& fileName,
+                                                       u64 targetLayer, bool textAnimatorPro,
+                                                       const char* standaloneTitle,
+                                                       ae::ProjectImportMedia* sourceMedia = nullptr) noexcept;
     [[nodiscard]] Status apply_command_internal(const Command& cmd, const char* stringData,
                                                 bool recordUndo) noexcept;
     /// Divide o orçamento de memória pelas categorias. Chamado na subida e de

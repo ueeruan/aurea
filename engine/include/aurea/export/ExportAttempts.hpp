@@ -215,10 +215,13 @@ struct ExportAttemptEffect {
 [[nodiscard]] constexpr u32 export_next_attempt(u32 attempt, ExportRetryKind kind, const ExportRequestShape& r) noexcept {
     if (kind == ExportRetryKind::None) return 0;
     if (kind == ExportRetryKind::Busy) return attempt | kExportAttemptWait;
-    if (attempt >= kExportAttemptMax) return 0;
     // GPU cost and sample counts are handled by bounded rendering. A retry
     // must never discard requested samples, pixels, frames or upscaling.
-    if (kind == ExportRetryKind::GpuTime) return 0;
+    // 1.0.7.1: o quadro que estourou o prazo deixou o export um passe por
+    // envio (Engine); refazer o MESMO degrau, como "ocupado" (as telas fazem
+    // isso no máximo kExportAttemptBusyRetries vezes), em vez de desistir.
+    if (kind == ExportRetryKind::GpuTime) return attempt | kExportAttemptWait;
+    if (attempt >= kExportAttemptMax) return 0;
     const ExportAttemptEffect now = export_attempt_effect(attempt, r);
     for (u32 next = attempt + 1; next <= kExportAttemptMax; ++next) {
         const ExportAttemptEffect candidate = export_attempt_effect(next, r);

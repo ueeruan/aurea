@@ -1747,7 +1747,7 @@
     <string name="am_import_failed">Não deu para importar: %1$s</string>
     <string name="am_import_nothing">nenhum efeito com equivalente no Aurea</string>
     <string name="release_notes_title">Novidades do Aurea</string>
-    <string name="release_notes_body">Aurea 1.0.7 (2229)\n\n• 100 efeitos no catálogo ampliado e 7 novas animações de texto\n• Novas categorias de halos, reflexos, vídeo e película\n• Toques e rolagem corrigidos no seletor de efeitos e plugins\n• Ajustes nos painéis e no início da exportação no iOS\n• Backup em lote de projetos e mídias do Beta</string>
+    <string name="release_notes_body">Aurea 1.0.7.1 (2230)\n\n• Importar do After Effects aceita .aep, .zip e .rar, com composições, camadas, keyframes e efeitos\n• Loja de Modelos com 81 modelos 3D grátis e offline\n• Exportação de cenas 3D com Motion Blur corrigida: não trava mais e o efeito fica igual à prévia\n• 100 efeitos no catálogo ampliado e 7 novas animações de texto\n• Novas categorias de halos, reflexos, vídeo e película\n• Toques e rolagem corrigidos no seletor de efeitos e plugins\n• Ajustes nos painéis e no início da exportação no iOS\n• Backup em lote de projetos e mídias do Beta</string>
     <string name="am_import_lossless_required">Este preset tem efeitos, parâmetros ou camadas que não podem ser preservados na conversão. Nada foi salvo nem aplicado.</string>
     <string name="am_import_read_failed">Não foi possível ler o arquivo (limite de 64 MB), ou a camada selecionada mudou. Tente novamente.</string>
     <string name="world_explosive">Explosivo</string>

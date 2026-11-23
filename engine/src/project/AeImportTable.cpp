@@ -1132,6 +1132,15 @@ constexpr PRule kLightWipe[] = {
     P(7, "Color", "color", PConv::Color),
     P(8, "Reverse Transition", "reverse", PConv::Bool),
 };
+
+constexpr PRule kJaws[] = {
+    P(1, "Completion", "completion"),
+    P(2, "Center", "center", PConv::PointRel),
+    P(3, "Direction", "direction"),
+    P(4, "Height", "height"),
+    P(5, "Width", "width"),
+    E(6, "Shape", "shape", kMinus1),
+};
 constexpr PRule kLineSweep[] = {
     P(1, "Completion", "completion"),
     P(2, "Direction", "direction"),
@@ -1347,6 +1356,50 @@ constexpr PRule kOverbrights[] = {
     P(2, "Clip Color", "clip_color", PConv::Color),
 };
 
+// Mapeamentos a partir dos match names e pard do projeto AEP de referência.
+constexpr i8 kExposureMode[] = {-1, 0, 1};
+constexpr PRule kAeExposure[] = {
+    E(1, "Channel", "channels", kExposureMode),
+    I(2, "Master Group"), P(3, "Exposure", "exposure"), P(4, "Offset", "offset"), P(5, "Gamma Correction", "gamma"),
+    I(6, "Master End"), I(7, "Red Group"),
+    P(8, "Red Exposure", "red_exposure"), P(9, "Red Offset", "red_offset"), P(10, "Red Gamma", "red_gamma"),
+    I(11, "Red End"), I(12, "Green Group"),
+    P(13, "Green Exposure", "green_exposure"), P(14, "Green Offset", "green_offset"), P(15, "Green Gamma", "green_gamma"),
+    I(16, "Green End"), I(17, "Blue Group"),
+    P(18, "Blue Exposure", "blue_exposure"), P(19, "Blue Offset", "blue_offset"), P(20, "Blue Gamma", "blue_gamma"),
+    I(21, "Blue End"),
+};
+constexpr PRule kAeBlackWhite[] = {
+    P(1, "Reds", "reds"), P(2, "Yellows", "yellows"), P(3, "Greens", "greens"),
+    P(4, "Cyans", "cyans"), P(5, "Blues", "blues"), P(6, "Magentas", "magentas"),
+    P(7, "Tint", "tint", PConv::Bool), P(8, "Tint Color", "tint_color", PConv::Color),
+};
+constexpr PRule kAeVibrance[] = {
+    P(1, "Vibrance", "vibrance"), P(2, "Saturation", "saturation", PConv::Same, 1, 100),
+};
+constexpr PRule kSapphireRandomEdits[] = {
+    P(50, "Edit Frame Length", "edit_length"), P(51, "Seed", "seed"),
+};
+constexpr PRule kSapphireShake[] = {
+    P(50, "Amplitude", "amount", PConv::Same, 100),
+    P(51, "Frequency", "frequency"), P(52, "Phase", "phase"),
+    P(56, "Seed", "seed"), P(59, "X Rand Amp", "amplitude_x"),
+    P(64, "Y Rand Amp", "amplitude_y"), P(74, "Tilt Rand Amp", "rotation"),
+};
+constexpr PRule kSapphireRays[] = {
+    P(50, "Center XY", "center", PConv::PointRel),
+    P(51, "Rays Length", "length", PConv::Same, 100),
+    P(52, "Rays Brightness", "intensity"), P(53, "Rays Color", "color", PConv::Color),
+    P(56, "Threshold", "threshold", PConv::Same, 100),
+};
+constexpr PRule kBccUnsharp[] = {
+    P(2, "Radius", "radius"), P(3, "Amount", "amount"), P(4, "Threshold", "threshold"),
+    P(6, "Mix with Original", "blend", PConv::Same, -1, 100),
+};
+constexpr PRule kBccHls[] = {
+    P(2, "Hue", "hue"), P(3, "Saturation", "saturation"), P(4, "Lightness", "lightness"),
+};
+
 // --- a tabela ----------------------------------------------------------------
 #define RULE(ae, name, key, params) ERule{ae, name, key, params, static_cast<u32>(std::size(params)), nullptr, nullptr, 0, nullptr}
 #define RULEX(ae, name, key, params, reason, fixed, nfixed, post) \
@@ -1373,6 +1426,13 @@ const ERule kRules[] = {
     RULE("ADBE Tritone", "Tritone", "aurea.color.gradient_map", kTritone),
     RULE("CC Toner", "CC Toner", "aurea.color.gradient_map", kToner),
     RULE("ADBE Easy Levels2", "Levels", effect_keys::kLevels, kLevels),
+    RULE("ADBE Exposure2", "Exposure", effect_keys::kExposure, kAeExposure),
+    RULE("ADBE Black&White", "Black & White", "aurea.color.black_white", kAeBlackWhite),
+    RULEX("ADBE Vibrance", "Vibrance", effect_keys::kColorGrade, kAeVibrance,
+          "vibração e saturação usam a correção de cor nativa", nullptr, 0, nullptr),
+    RULEX("BCC3Hue-Sat-Lightness", "BCC Hue-Sat-Lightness", effect_keys::kColorBalanceHls, kBccHls,
+          "matiz, saturação e luminosidade entram; opções de espaço de cor e recortes do plugin precisam de revisão",
+          nullptr, 0, nullptr),
     RULE("ADBE Tint", "Tint", effect_keys::kTint, kTint),
     RULE("ADBE Fill", "Fill", effect_keys::kFill, kFill),
     RULE("ADBE Invert", "Invert", effect_keys::kInvert, kInvert),
@@ -1391,6 +1451,9 @@ const ERule kRules[] = {
     RULE("ADBE Gaussian Blur", "Gaussian Blur (Legacy)", effect_keys::kGaussianBlur, kGaussian),
     RULE("ADBE Fast Blur", "Fast Blur (Legacy)", "aurea.blur.fast_blur_reference", kFastBlurReference),
     RULE("ADBE Sharpen", "Sharpen", effect_keys::kSharpenReference, kSharpen),
+    RULEX("BCC3Unsharp Mask", "BCC Unsharp Mask", effect_keys::kUnsharp, kBccUnsharp,
+          "o ganho e o raio entram na máscara de nitidez nativa; o filtro e a seleção de pixels do plugin diferem",
+          nullptr, 0, nullptr),
     RULE("ADBE Box Blur2", "Fast Box Blur", effect_keys::kBoxBlur, kBoxBlur),
     RULE("ADBE Motion Blur", "Directional Blur", effect_keys::kDirectionalBlur, kDirectionalBlur),
     RULE("ADBE Radial Blur", "Radial Blur", "aurea.blur.radial_blur_reference", kRadialBlurReference),
@@ -1407,6 +1470,8 @@ const ERule kRules[] = {
     RULE("ADBE Find Edges", "Find Edges", effect_keys::kFindEdgesReference, kFindEdges),
     RULE("ADBE Tile", "Motion Tile", effect_keys::kMotionTile, kMotionTile),
     RULE("CS Vignette", "CC Vignette", effect_keys::kVignette, kVignette),
+    RULEX("S_Rays", "Rays", effect_keys::kRays, kSapphireRays,
+          "raios de luz nativos; o perfil luminoso e a dispersão espectral diferem", nullptr, 0, nullptr),
     // Distorção
     RULE("ADBE Wave Warp", "Wave Warp", effect_keys::kWaveWarpReference, kWaveWarp),
     RULE("ADBE Turbulent Displace", "Turbulent Displace", "aurea.distort.turbulent_displace_reference", kTurbulentDisplace),
@@ -1417,8 +1482,11 @@ const ERule kRules[] = {
     RULEX("ADBE Spherize", "Spherize", effect_keys::kWarp, kSpherize, nullptr, kSpherizeFixed, 1, nullptr),
     RULE("CC Power Pin", "CC Power Pin", effect_keys::kCornerPin, kPowerPin),
     RULE("ADBE Offset", "Offset", "aurea.transform.offset", kOffset),
+    RULEX("S_Shake", "Shake", effect_keys::kShake, kSapphireShake,
+          "amplitudes e frequência entram; a trajetória de ruído do Aurea difere", nullptr, 0, nullptr),
     // Transições
     RULE("ADBE Linear Wipe", "Linear Wipe", effect_keys::kLinearWipe, kLinearWipe),
+    RULE("CC Jaws", "CC Jaws", effect_keys::kJaws, kJaws),
     RULE("ADBE Radial Wipe", "Radial Wipe", "aurea.transition.radial_wipe_reference", kRadialWipe),
     RULE("ADBE Block Dissolve", "Block Dissolve", "aurea.transition.block_dissolve_reference", kBlockDissolve),
     RULEX("ADBE Venetian Blinds", "Venetian Blinds", effect_keys::kVenetianBlinds, kVenetian,
@@ -1427,6 +1495,8 @@ const ERule kRules[] = {
     RULE("ADBE Posterize Time", "Posterize Time", "aurea.time.posterize_reference", kPosterizeTime),
     RULE("ADBE Time Displacement", "Time Displacement", "aurea.time.time_displacement_reference", kTimeDisplacementReference),
     RULE("ADBE Echo", "Echo", effect_keys::kEchoTrail, kEcho),
+    RULEX("S_RandomEdits", "Random Edits", effect_keys::kRandomEdits, kSapphireRandomEdits,
+          "duração dos cortes arredondada em quadros; a ordem sorteada pelo Aurea difere", nullptr, 0, nullptr),
     RULEX("ADBE OFMotionBlur", "Pixel Motion Blur", effect_keys::kFlowMotionBlur, kPixelMotionBlur,
           "desfoque pelo movimento dos pixels do Aurea (fluxo óptico próprio)", nullptr, 0, nullptr),
     // Chave
@@ -1630,6 +1700,9 @@ Binding bind_effect_param(const ERule& r, u32 effectId, u16 ae, u32 dims, const 
     b.label = std::string(r.aeName) + " > ";
     if (std::strcmp(r.ae, "PEDG") == 0 && ae == 11)
         b.approx = "Spread foi preservado no projeto; seu comportamento visual ainda não foi implementado";
+    // CC Jaws stores Completion as a fraction in the project/preset. The
+    // scripting API and the Aurea parameter both use percentages.
+    if (std::strcmp(r.ae, "CC Jaws") == 0 && ae == 1) b.fileMul[0] = 100.0;
     const ParameterRegistry* specs = r.key ? reg.params(effect_type_id(r.key)) : nullptr;
     w = std::max(1.0, w);
     h = std::max(1.0, h);

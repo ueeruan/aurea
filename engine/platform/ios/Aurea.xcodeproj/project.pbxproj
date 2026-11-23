@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		DA3D11000000000000000001 /* ModelLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA3D11000000000000000002 /* ModelLibraryView.swift */; };
+		DA3D11000000000000000003 /* ModelLibrary in Resources */ = {isa = PBXBuildFile; fileRef = DA3D11000000000000000004 /* ModelLibrary */; };
 		CC2130000000000000000001 /* CommunityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC2130000000000000000002 /* CommunityView.swift */; };
 		CC4810000000000000000001 /* MuralView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC4810000000000000000002 /* MuralView.swift */; };
 		CC4610000000000000000001 /* StoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC4610000000000000000002 /* StoreView.swift */; };
@@ -139,6 +141,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		DA3D11000000000000000002 /* ModelLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelLibraryView.swift; sourceTree = "<group>"; };
+		DA3D11000000000000000004 /* ModelLibrary */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ModelLibrary; path = ../../../assets/model-library/ModelLibrary; sourceTree = "<group>"; };
 		CC2130000000000000000002 /* CommunityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunityView.swift; sourceTree = "<group>"; };
 		CC4810000000000000000002 /* MuralView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MuralView.swift; sourceTree = "<group>"; };
 		CC4610000000000000000002 /* StoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreView.swift; sourceTree = "<group>"; };
@@ -325,6 +329,8 @@
 				CA2141000000000000000002 /* CloudCaptions.swift */,
 				CA0530C0000000000000000B /* CaptionsWorkspace.swift */,
 				AE0000000000000000000003 /* HomeView.swift */,
+				DA3D11000000000000000002 /* ModelLibraryView.swift */,
+				DA3D11000000000000000004 /* ModelLibrary */,
 				AE0000000000000000000120 /* HomeBackdrop.swift */,
 				AE0000000000000000000004 /* EditorView.swift */,
 				AE0000000000000000000005 /* PreviewMetalView.swift */,
@@ -569,6 +575,7 @@
 				AE0000000000000000000080 /* Assets.xcassets in Resources */,
 				AE00000000000000000000E0 /* Fonts in Resources */,
 				AE0000000000000000000087 /* presets in Resources */,
+				DA3D11000000000000000003 /* ModelLibrary in Resources */,
 				DA2121000000000000000003 /* editor_commands.json in Resources */,
 				AE00000000000000000000C5 /* previa_efeitos.jpg in Resources */,
 				AE0000000000000000000090 /* CupertinoIcons.ttf in Resources */,
@@ -592,6 +599,7 @@
 			name = "Build Aurea core (CMake)";
 			outputPaths = (
 				"$(SRCROOT)/build/core/libaurea_ios.a",
+				"$(SRCROOT)/build/core/libaurea_project_archive.a",
 				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/licenses/native-export/NativeExport-DEPENDENCIES.txt",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -641,6 +649,7 @@
 				CA2141000000000000000001 /* CloudCaptions.swift in Sources */,
 				CA0530C0000000000000000A /* CaptionsWorkspace.swift in Sources */,
 				AE000000000000000000003B /* HomeView.swift in Sources */,
+				DA3D11000000000000000001 /* ModelLibraryView.swift in Sources */,
 				AE0000000000000000000121 /* HomeBackdrop.swift in Sources */,
 				AE000000000000000000003C /* EditorView.swift in Sources */,
 				AE000000000000000000003D /* PreviewMetalView.swift in Sources */,
@@ -791,8 +800,8 @@
 				CODE_SIGN_ENTITLEMENTS = app/Aurea.entitlements;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2229;
-				MARKETING_VERSION = 1.0.7;
+				CURRENT_PROJECT_VERSION = 2230;
+				MARKETING_VERSION = 1.0.7.1;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
@@ -826,6 +835,7 @@
 					"-laurea_metal",
 					"-laurea_core",
 					"-laurea_thirdparty",
+					"-laurea_project_archive",
 					"-lavformat",
 					"-lavcodec",
 					"-lswscale",
@@ -868,8 +878,8 @@
 				CODE_SIGN_ENTITLEMENTS = app/Aurea.entitlements;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2229;
-				MARKETING_VERSION = 1.0.7;
+				CURRENT_PROJECT_VERSION = 2230;
+				MARKETING_VERSION = 1.0.7.1;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
@@ -903,6 +913,7 @@
 					"-laurea_metal",
 					"-laurea_core",
 					"-laurea_thirdparty",
+					"-laurea_project_archive",
 					"-lavformat",
 					"-lavcodec",
 					"-lswscale",

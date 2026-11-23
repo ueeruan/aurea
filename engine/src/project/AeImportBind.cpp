@@ -137,7 +137,8 @@ void finish_report(ImportReport& r) {
         return;
     }
     const std::string parts = count_parts(r);
-    std::string m = r.kind == "jsx" ? "Script do After Effects executado" : "Preset do After Effects importado";
+    std::string m = r.kind == "aep" ? "Projeto do After Effects importado"
+                    : r.kind == "jsx" ? "Script do After Effects executado" : "Preset do After Effects importado";
     m += parts.empty() ? "." : ": " + parts + ".";
     if (!r.skipped.empty())
         m += " " + std::to_string(r.skipped.size()) + (r.skipped.size() == 1 ? " item ficou de fora." : " itens ficaram de fora.");

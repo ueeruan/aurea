@@ -217,3 +217,26 @@ AUREA_TEST(MotionBlur, UnsupportedBoundedExposureReportsTheExactFrameBudgetFailu
     AUREA_CHECK_EQ(mixed.renderer.take_reductions(), 0u);
     AUREA_CHECK(snapshot.sceneExposureBatches.empty());
 }
+
+// 1.0.7.1 ("nem um cubo 3D com motion blur exporta no celular"): um grupo 3D
+// barato cabe no orçamento de bytes, mas as amostras são cenas inteiras; elas
+// vão em lotes limitados pelo custo de GPU, nunca todas num envio só.
+AUREA_TEST(MotionBlur, CheapSceneExposureIsBatchedByGpuCost) {
+    AUREA_CHECK_EQ(scene_exposure_samples_per_submission(1920, 1080), 4u);
+    AUREA_CHECK_EQ(scene_exposure_samples_per_submission(1080, 1920), 4u);
+    AUREA_CHECK_EQ(scene_exposure_samples_per_submission(3840, 2160), 1u);
+    AUREA_CHECK_EQ(scene_exposure_samples_per_submission(1280, 720), 8u);
+    AUREA_CHECK_EQ(scene_exposure_samples_per_submission(0, 0), 8u);
+    MorphExposureFixture f(64);
+    FrameSnapshot snapshot; f.prepare(snapshot, true, true);
+    AUREA_CHECK(!f.renderer.take_incomplete());
+    AUREA_CHECK_EQ(snapshot.sceneExposureBatches.size(), 1u);
+    if (snapshot.sceneExposureBatches.empty() || snapshot.scenes.empty()) return;
+    const u32 cap = scene_exposure_samples_per_submission(320, 180);
+    AUREA_CHECK(snapshot.scenes[0].blurFrames.size() > cap);
+    AUREA_CHECK(snapshot.sceneExposureBatches[0].samplesPerBatch >= 1u);
+    AUREA_CHECK(snapshot.sceneExposureBatches[0].samplesPerBatch <= cap);
+    // A prévia segue no caminho de sempre (sem lotes).
+    FrameSnapshot preview; f.prepare(preview, false, true);
+    AUREA_CHECK(preview.sceneExposureBatches.empty());
+}

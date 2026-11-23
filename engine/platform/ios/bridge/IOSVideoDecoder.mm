@@ -36,6 +36,7 @@
 #include "aurea/text/Text.hpp"
 
 #include "aurea/core/Log.hpp"
+#include "aurea/media/MediaDuration.hpp"
 #include "aurea/core/Time.hpp"
 #include "aurea/media/MediaManager.hpp"
 
@@ -352,13 +353,14 @@ private:
     bool start_reader(i64 fromUs) noexcept;
     bool build_timing_index() noexcept;
     void teardown() noexcept;
-    [[nodiscard]] Status wrap_sample(CMSampleBufferRef sample, i64 deliverFromUs, FrameRef& out,
-                                    i64& outPtsUs) noexcept;
+    [[nodiscard]] Status wrap_sample(CMSampleBufferRef sample, i64 nextPresentationUs,
+                                    i64 deliverFromUs, FrameRef& out, i64& outPtsUs) noexcept;
 
     __strong AVAsset* asset_ = nil;
     __strong AVAssetTrack* track_ = nil;
     __strong AVAssetReader* reader_ = nil;
     __strong AVAssetReaderTrackOutput* output_ = nil;
+    CMSampleBufferRef pendingSample_ = nullptr; // Owned lookahead when no timing index is available.
 
     VideoStreamInfo info_{};
     i64 keyframeUs_ = 2'000'000;
@@ -426,6 +428,10 @@ AVFoundationVideoDecoder::AVFoundationVideoDecoder(AVAsset* asset, AVAssetTrack*
 AVFoundationVideoDecoder::~AVFoundationVideoDecoder() { teardown(); }
 
 void AVFoundationVideoDecoder::teardown() noexcept {
+    if (pendingSample_) {
+        CFRelease(pendingSample_);
+        pendingSample_ = nullptr;
+    }
     if (reader_.status == AVAssetReaderStatusReading) [reader_ cancelReading];
     output_ = nil;
     reader_ = nil;
@@ -575,8 +581,8 @@ Status AVFoundationVideoDecoder::seek_to_keyframe(i64 targetUs) noexcept {
     }
 }
 
-Status AVFoundationVideoDecoder::wrap_sample(CMSampleBufferRef sample, i64 deliverFromUs, FrameRef& out,
-                                               i64& outPtsUs) noexcept {
+Status AVFoundationVideoDecoder::wrap_sample(CMSampleBufferRef sample, i64 nextPresentationUs,
+                                            i64 deliverFromUs, FrameRef& out, i64& outPtsUs) noexcept {
     const CMTime pts = CMSampleBufferGetPresentationTimeStamp(sample);
     if (!CMTIME_IS_NUMERIC(pts)) return Status{Errc::DecodeFailed, "timestamp de video invalido"};
     outPtsUs = us_of(pts);
@@ -586,11 +592,12 @@ Status AVFoundationVideoDecoder::wrap_sample(CMSampleBufferRef sample, i64 deliv
     if (timingIndexed_) {
         const auto next = std::upper_bound(presentationTimes_.begin(), presentationTimes_.end(), outPtsUs,
             [](i64 us, const PresentationTime& sample) { return us < sample.us; });
-        const i64 end = next != presentationTimes_.end() ? next->us : info_.durationUs;
-        // Container PTS define the display interval. A decoded sample may carry
-        // nominal duration even when a VFR frame remains visible much longer.
-        if (end > outPtsUs) durationUs = end - outPtsUs;
+        nextPresentationUs = next != presentationTimes_.end() ? next->us : info_.durationUs;
     }
+    // Use the two presentation endpoints in the same rounded timebase. On
+    // phone recordings, sample duration can be nominal or round differently,
+    // leaving a hole precisely where the export requests an exact frame.
+    durationUs = media::presentation_duration_us(outPtsUs, nextPresentationUs, durationUs);
     if (outPtsUs < deliverFromUs && deliverFromUs - outPtsUs >= durationUs) return OkStatus;
     CVPixelBufferRef pixel = CMSampleBufferGetImageBuffer(sample);
     if (!pixel) return Status{Errc::DecodeFailed, "amostra decodificada sem imagem"};
@@ -674,7 +681,9 @@ Status AVFoundationVideoDecoder::next_frame(i64 deliverFromUs, FrameRef& out, i6
             endOfStream = true;
             return Status{Errc::DecodeFailed, transient ? "decoder de video ocupado" : "leitura do arquivo falhou"};
         }
-        CMSampleBufferRef sample = [output_ copyNextSampleBuffer];
+        CMSampleBufferRef sample = pendingSample_;
+        pendingSample_ = nullptr;
+        if (!sample) sample = [output_ copyNextSampleBuffer];
         if (!sample) {
             if (reader_.status == AVAssetReaderStatusCompleted) {
                 endOfStream = true;
@@ -691,7 +700,34 @@ Status AVFoundationVideoDecoder::next_frame(i64 deliverFromUs, FrameRef& out, i6
             }
             return Status{Errc::DecodeFailed, "reader sem amostra antes do fim"};
         }
-        const Status s = wrap_sample(sample, deliverFromUs, out, outPtsUs);
+        i64 nextPresentationUs = std::numeric_limits<i64>::min();
+        const CMTime currentPts = CMSampleBufferGetPresentationTimeStamp(sample);
+        if (!timingIndexed_ && CMTIME_IS_NUMERIC(currentPts)) {
+            // Long or fragmented assets can exceed the timing-index deadline.
+            // AVAssetReader's decoded output is in presentation order. Keep
+            // just the next sample so this path still has exact VFR intervals.
+            const i64 currentUs = us_of(currentPts);
+            for (u32 skipped = 0; ; ++skipped) {
+                pendingSample_ = [output_ copyNextSampleBuffer];
+                if (!pendingSample_) {
+                    if (reader_.status == AVAssetReaderStatusCompleted) nextPresentationUs = info_.durationUs;
+                    break;
+                }
+                const CMTime nextPts = CMSampleBufferGetPresentationTimeStamp(pendingSample_);
+                const i64 nextUs = CMTIME_IS_NUMERIC(nextPts) ? us_of(nextPts) : std::numeric_limits<i64>::min();
+                if (nextUs > currentUs) {
+                    nextPresentationUs = nextUs;
+                    break;
+                }
+                CFRelease(pendingSample_);
+                pendingSample_ = nullptr;
+                if (skipped == 64) {
+                    CFRelease(sample);
+                    return Status{Errc::DecodeFailed, "PTS de video fora de ordem"};
+                }
+            }
+        }
+        const Status s = wrap_sample(sample, nextPresentationUs, deliverFromUs, out, outPtsUs);
         CFRelease(sample);
         positionUs_ = outPtsUs;
         return s;
@@ -1206,10 +1242,18 @@ NSDictionary<NSString*, id>* AureaVerifyVideoDecoder(NSString* path, NSUInteger 
                 return hash == reference.hash;
             };
             FrameRef retained;
-            for (const auto& reference : expected) {
+            for (usize index = 0; index < expected.size(); ++index) {
+                const auto& reference = expected[index];
                 FrameRef frame; i64 pts = -1; bool eos = false;
                 if (!decoder->next_frame(0, frame, pts, eos).ok() || eos || pts != reference.pts || !matches(frame, reference))
                     return failure(@"Sequential decode pixels/PTS differ");
+                // Starting at zero has no timing index. Check the production
+                // fallback on VFR and B-frame fixtures as well as pixel order.
+                if (index + 1 < expected.size()) {
+                    const i64 next = expected[index + 1].pts;
+                    if (!frame->covers(next - 1) || frame->covers(next))
+                        return failure(@"Sequential decode leaves gaps or overlaps between presentation timestamps");
+                }
                 if (!retained) retained = frame;
             }
             FrameRef frame; i64 pts = -1; bool eos = false;

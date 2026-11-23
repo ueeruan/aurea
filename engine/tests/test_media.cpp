@@ -7,6 +7,7 @@
 
 #include "aurea/core/Time.hpp"
 #include "aurea/media/DecodedFrameCache.hpp"
+#include "aurea/media/MediaDuration.hpp"
 #include "aurea/media/ThumbnailService.hpp"
 #include "aurea/media/VideoSource.hpp"
 #include "aurea/playback/Playback.hpp"
@@ -363,7 +364,8 @@ AUREA_TEST(VideoSource, VariableRateSeekWaitsForPresentationInterval) {
             const i64 starts[] = {0, 500000, 510000, 600000};
             out.reset(); eos = index == 3; pts = starts[index];
             if (eos) return OkStatus;
-            auto frame = frame_at(pts); frame->durationUs = starts[index + 1] - pts;
+            auto frame = frame_at(pts);
+            frame->durationUs = media::presentation_duration_us(pts, starts[index + 1], 33'333);
             ++index;
             if (pts >= from || frame->covers(from)) out = std::move(frame);
             return OkStatus;
@@ -1384,7 +1386,6 @@ AUREA_TEST(VideoSource, ScrubSeekShowsTheKeyframeBeforeTheExactFrame) {
     source.stop();
 }
 
-#include "aurea/media/MediaDuration.hpp"
 // 0.2.4 (C6): duração declarada falsa não vira horas de timeline.
 AUREA_TEST(MediaDuration, DeclaredDurationFarBeyondTheLastSampleIsCut) {
     using aurea::media::reconcile_duration_us;
@@ -1398,6 +1399,23 @@ AUREA_TEST(MediaDuration, DeclaredDurationFarBeyondTheLastSampleIsCut) {
     AUREA_CHECK_EQ(reconcile_duration_us(0, 4'966'667, frame), i64{5'000'000});
     AUREA_CHECK_EQ(reconcile_duration_us(8'000'000, -1, frame), i64{8'000'000});
     AUREA_CHECK_EQ(reconcile_duration_us(-5, -1, frame), i64{0});
+}
+
+AUREA_TEST(MediaDuration, NextTimestampCoversRoundingAndVariableRateGaps) {
+    DecodedFrameCache cache;
+    cache.configure({4, 128 * 1024});
+    const i64 pts[] = {33'333, 66'667, 400'000, 433'333};
+    for (usize i = 0; i + 1 < std::size(pts); ++i) {
+        auto frame = frame_at(pts[i]);
+        frame->durationUs = media::presentation_duration_us(pts[i], pts[i + 1], 33'333);
+        AUREA_CHECK(cache.insert(std::move(frame)));
+        bool exact = false;
+        const auto selected = cache.find(pts[i + 1] - 1, 16'667, &exact);
+        AUREA_CHECK(exact && selected && selected->ptsUs == pts[i]);
+        AUREA_CHECK(selected && !selected->covers(pts[i + 1]));
+    }
+    AUREA_CHECK_EQ(media::presentation_duration_us(400'000, 400'000, 0), i64{1});
+    AUREA_CHECK_EQ(media::presentation_duration_us(400'000, 390'000, 33'333), i64{33'333});
 }
 
 // 0.3.6: MKV de 60 fps (carimbos em ms: 0, 17, 33, 50...) é 60 fps, não 58,8.

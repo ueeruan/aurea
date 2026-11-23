@@ -412,9 +412,12 @@ struct ProjectSettingsPanel: View {
     // --- Aba Importar -----------------------------------------------------------------
     @ViewBuilder private var importTab: some View {
         subheader("om_settings_import")
+        actionRow("ae_project_import", tag: "menu.aeProjectImport", detail: "ae_project_import_detail") {
+            close(); OmegaChromeRequests.shared.aeImport = .aeProjectImport
+        }
         actionRow("ae_import_menu", tag: "menu.ae_import",
                   detail: model.primarySelection != nil ? "ae_import_layer_detail" : "ae_import_new_layer_detail") {
-            close(); OmegaChromeRequests.shared.aeImport = true
+            close(); OmegaChromeRequests.shared.aeImport = .aeImport
         }
     }
     /// Qualidade da prévia (D3): não muda a exportação.

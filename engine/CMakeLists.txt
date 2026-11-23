@@ -88,6 +88,8 @@ set(AUREA_CORE_SOURCES
     src/project/Presets.cpp
     src/project/AlightMotion.cpp
     src/project/AeImportFfx.cpp
+    src/project/AeProject.cpp
+    src/project/AeProjectSource.cpp
     src/project/AeImportBind.cpp
     src/project/AeImportTable.cpp
     src/project/AeImportApply.cpp
@@ -417,6 +419,11 @@ target_compile_options(aurea_thirdparty PRIVATE
 set_target_properties(aurea_thirdparty PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 add_library(aurea_core STATIC ${AUREA_CORE_SOURCES})
+include(cmake/AureaProjectArchives.cmake)
+target_link_libraries(aurea_core PRIVATE archive_static)
+set_source_files_properties(src/project/AeProjectSource.cpp PROPERTIES
+    INCLUDE_DIRECTORIES "${AUREA_ARCHIVE_INCLUDE_DIR}"
+    COMPILE_DEFINITIONS LIBARCHIVE_STATIC)
 include(cmake/AureaNcnn.cmake)
 include(cmake/AureaWhisper.cmake)
 target_link_libraries(aurea_core PUBLIC aurea_thirdparty)
@@ -524,6 +531,7 @@ set(AUREA_IMPORT_BOUNDARIES
 )
 # 0.5.2 armazenamento: leitura de projetos e varredura de pastas devolvem Status.
 list(APPEND AUREA_IMPORT_BOUNDARIES src/project/MediaStorage.cpp src/engine/EngineStorage.cpp)
+list(APPEND AUREA_IMPORT_BOUNDARIES src/engine/EngineAeImport.cpp src/project/AeProject.cpp src/project/AeProjectSource.cpp)
 list(APPEND AUREA_IMPORT_BOUNDARIES src/export/ExportRecovery.cpp src/export/ExportCheckpoint.cpp src/export/ExportSinkStartup.cpp
     src/export/FFmpegExportSink.cpp src/export/AndroidVideoEncoder.cpp src/export/AppleVideoEncoder.cpp
     src/export/OfflineAudioSnapshot.cpp src/export/OfflineAudioBlockSource.cpp)

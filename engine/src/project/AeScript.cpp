@@ -9,6 +9,7 @@
 #include "AeScript.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -1005,9 +1006,17 @@ Interp::Interp(Host& host, ImportReport& report, const ScriptLimits& limits)
 
 Interp::~Interp() = default;
 
-void Interp::account(u64 bytes) {
+bool Interp::can_allocate(u64 bytes) {
+    if (flow_ == 5) return false;
+    if (bytes <= limits_.maxHeapBytes - heapBytes_) return true;
+    abort("memória do script esgotada (limite do sandbox)");
+    return false;
+}
+
+bool Interp::account(u64 bytes) {
+    if (!can_allocate(bytes)) return false;
     heapBytes_ += bytes;
-    if (heapBytes_ > limits_.maxHeapBytes && flow_ < 5) abort("memória do script esgotada (limite do sandbox)");
+    return true;
 }
 
 u32 Interp::new_object(OK kind, std::string cls) {
@@ -1030,7 +1039,7 @@ Value Interp::str(std::string s) {
 
 Value Interp::array(std::vector<Value> elems) {
     const u32 a = new_object(OK::Array, "Array");
-    account(elems.size() * sizeof(Value));
+    if (!account(elems.size() * sizeof(Value))) return Value::undef();
     o(a).elems = std::move(elems);
     return obj(a);
 }
@@ -1072,24 +1081,48 @@ bool Interp::truthy(const Value& v) const noexcept {
     return false;
 }
 
-f64 Interp::to_num(const Value& v) {
-    switch (v.t) {
-        case T::Undef: return NAN;
-        case T::Null: return 0.0;
-        case T::Bool: return v.b ? 1.0 : 0.0;
-        case T::Num: return v.n;
-        case T::Str: return str_to_num(strings_[v.r]);
-        case T::Obj: {
-            const Object& ob = o(v);
-            if (ob.kind == OK::Array && ob.elems.size() == 1) return to_num(ob.elems[0]);
-            if (ob.kind == OK::Array && ob.elems.empty()) return 0.0;
+namespace {
+constexpr usize kMaxCoercionDepth = 128;
+}
+
+f64 Interp::to_num(const Value& value) {
+    Value v = value;
+    // Uma cadeia de arrays unitários pode conter ciclos. Não use a pilha
+    // nativa para essa coerção, que também é chamada fora do avaliador.
+    for (usize depth = 0; depth < kMaxCoercionDepth; ++depth) {
+        if (depth != 0 && (++steps_ > limits_.maxSteps || flow_ == 5)) {
+            abort("o script passou do limite de passos ao converter um valor em número");
             return NAN;
+        }
+        switch (v.t) {
+            case T::Undef: return NAN;
+            case T::Null: return 0.0;
+            case T::Bool: return v.b ? 1.0 : 0.0;
+            case T::Num: return v.n;
+            case T::Str: return str_to_num(strings_[v.r]);
+            case T::Obj: {
+                const Object& ob = o(v);
+                if (ob.kind != OK::Array || ob.elems.size() > 1) return NAN;
+                if (ob.elems.empty()) return 0.0;
+                if (ob.elems.front().is_obj() && ob.elems.front().r == v.r) return NAN;
+                v = ob.elems.front();
+                break;
+            }
         }
     }
     return NAN;
 }
 
 std::string Interp::to_str(const Value& v) {
+    std::array<u32, kMaxCoercionDepth> ancestors;
+    return to_str(v, ancestors.data(), 0);
+}
+
+std::string Interp::to_str(const Value& v, u32* ancestors, usize depth) {
+    if (depth != 0 && (++steps_ > limits_.maxSteps || flow_ == 5)) {
+        abort("o script passou do limite de passos ao converter um valor em texto");
+        return {};
+    }
     switch (v.t) {
         case T::Undef: return "undefined";
         case T::Null: return "null";
@@ -1098,19 +1131,27 @@ std::string Interp::to_str(const Value& v) {
         case T::Str: return strings_[v.r];
         case T::Obj: {
             Object& ob = o(v);
+            if (ob.kind == OK::Array || ob.kind == OK::Error) {
+                if (std::find(ancestors, ancestors + depth, v.r) != ancestors + depth) return {};
+                if (depth == kMaxCoercionDepth) {
+                    abort("valor aninhado demais para converter em texto");
+                    return {};
+                }
+                ancestors[depth++] = v.r;
+            }
             if (ob.kind == OK::Array) {
                 std::string s;
                 for (usize i = 0; i < ob.elems.size(); ++i) {
                     if (i) s += ",";
-                    if (!ob.elems[i].nullish()) s += to_str(ob.elems[i]);
-                    if (s.size() > (1u << 20)) break;
+                    if (!ob.elems[i].nullish()) s += to_str(ob.elems[i], ancestors, depth);
+                    if (s.size() > (1u << 20) || flow_ == 5) break;
                 }
                 return s;
             }
             if (ob.kind == OK::Error) {
                 const Value m = own(v.r, "message");
                 const Value n = own(v.r, "name");
-                return (n.is_str() ? s(n) : std::string("Error")) + ": " + (m.nullish() ? std::string() : to_str(m));
+                return (n.is_str() ? s(n) : std::string("Error")) + ": " + (m.nullish() ? std::string() : to_str(m, ancestors, depth));
             }
             if (ob.kind == OK::Function || ob.kind == OK::Native || ob.kind == OK::BoundHost) return "function () { [code] }";
             bool found = false;
@@ -1337,14 +1378,21 @@ struct Evaluator {
         if (ob.kind == OK::Array) {
             if (name == "length") {
                 const f64 n = in.to_num(v);
-                if (n >= 0 && n < 1e7) { in.account(sizeof(Value) * static_cast<u64>(n)); ob.elems.resize(static_cast<usize>(n)); }
+                if (n >= 0 && n < 1e7) {
+                    const usize length = static_cast<usize>(n);
+                    if (length <= ob.elems.size() || in.account(sizeof(Value) * (length - ob.elems.size())))
+                        ob.elems.resize(length);
+                }
                 return;
             }
             const f64 idx = str_to_num(name);
             if (std::isfinite(idx) && idx >= 0 && idx == std::floor(idx)) {
                 if (idx > 1e7) { in.abort("índice de array grande demais"); return; }
                 const usize i = static_cast<usize>(idx);
-                if (i >= ob.elems.size()) { in.account(sizeof(Value) * (i + 1 - ob.elems.size())); ob.elems.resize(i + 1); }
+                if (i >= ob.elems.size()) {
+                    if (!in.account(sizeof(Value) * (i + 1 - ob.elems.size()))) return;
+                    ob.elems.resize(i + 1);
+                }
                 ob.elems[i] = v;
                 return;
             }
@@ -1359,7 +1407,8 @@ struct Evaluator {
             Object& ob = O(base);
             if (ob.kind == OK::Array && key.is_num()) {
                 const f64 i = key.n;
-                if (i >= 0 && i == std::floor(i)) return static_cast<usize>(i) < ob.elems.size() ? ob.elems[static_cast<usize>(i)] : Value::undef();
+                if (i >= 0 && i == std::floor(i))
+                    return i < static_cast<f64>(ob.elems.size()) ? ob.elems[static_cast<usize>(i)] : Value::undef();
             }
             if (ob.kind == OK::Host && in.dom) {
                 bool handled = false;
@@ -1370,7 +1419,9 @@ struct Evaluator {
         if (base.is_str() && key.is_num()) {
             // caractere (ponto de código) na posição
             const std::string& s = in.s(base);
-            i64 want = static_cast<i64>(key.n), cpi = 0;
+            if (!(key.n >= 0 && key.n < static_cast<f64>(s.size()))) return Value::undef();
+            const usize want = static_cast<usize>(key.n);
+            usize cpi = 0;
             for (usize i = 0; i < s.size();) {
                 const u8 c = static_cast<u8>(s[i]);
                 const usize n = c < 0x80 ? 1 : (c >> 5) == 0x6 ? 2 : (c >> 4) == 0xE ? 3 : 4;
@@ -1390,7 +1441,10 @@ struct Evaluator {
                 if (i > 1e7) { in.abort("índice de array grande demais"); return; }
                 Object& ob = O(base);
                 const usize k = static_cast<usize>(i);
-                if (k >= ob.elems.size()) { in.account(sizeof(Value) * (k + 1 - ob.elems.size())); ob.elems.resize(k + 1); }
+                if (k >= ob.elems.size()) {
+                    if (!in.account(sizeof(Value) * (k + 1 - ob.elems.size()))) return;
+                    ob.elems.resize(k + 1);
+                }
                 ob.elems[k] = v;
                 return;
             }
@@ -1873,7 +1927,9 @@ struct Evaluator {
                 if (a.size() == 1 && a[0].is_num()) {
                     const f64 n = a[0].n;
                     if (n < 0 || n > 1e7 || n != std::floor(n)) return in.throw_error("tamanho de array inválido");
-                    return in.array(std::vector<Value>(static_cast<usize>(n)));
+                    const auto count = static_cast<usize>(n);
+                    if (!in.can_allocate(sizeof(Value) * count)) return Value::undef();
+                    return in.array(std::vector<Value>(count));
                 }
                 return in.array(a);
             }
@@ -2099,7 +2155,7 @@ struct Evaluator {
             auto& el = O(self).elems;
             switch (id) {
                 case APush:
-                    in.account(sizeof(Value) * a.size());
+                    if (!in.account(sizeof(Value) * a.size())) return Value::undef();
                     for (const Value& v : a) el.push_back(v);
                     return Value::num(static_cast<f64>(el.size()));
                 case APop: {
@@ -2115,33 +2171,42 @@ struct Evaluator {
                     return v;
                 }
                 case AUnshift:
-                    in.account(sizeof(Value) * a.size());
+                    if (!in.account(sizeof(Value) * a.size())) return Value::undef();
                     el.insert(el.begin(), a.begin(), a.end());
                     return Value::num(static_cast<f64>(el.size()));
                 case ASlice: {
                     const i64 len = static_cast<i64>(el.size());
                     const i64 b = clamp_index(arg_num(a, 0, 0), len, true);
                     const i64 e = a.size() > 1 && !a[1].nullish() ? clamp_index(arg_num(a, 1), len, true) : len;
-                    std::vector<Value> out;
-                    for (i64 i = b; i < e; ++i) out.push_back(el[static_cast<usize>(i)]);
-                    return in.array(out);
+                    if (b >= e) return in.array({});
+                    if (!in.can_allocate(sizeof(Value) * static_cast<usize>(e - b))) return Value::undef();
+                    return in.array(std::vector<Value>(el.begin() + b, el.begin() + e));
                 }
                 case ASplice: {
                     const i64 len = static_cast<i64>(el.size());
                     const i64 b = clamp_index(arg_num(a, 0, 0), len, true);
                     const i64 n = a.size() > 1 ? std::clamp<i64>(static_cast<i64>(arg_num(a, 1, 0)), 0, len - b) : len - b;
+                    const usize inserted = a.size() > 2 ? a.size() - 2 : 0;
+                    if (!in.can_allocate(sizeof(Value) * (static_cast<usize>(n) + inserted))) return Value::undef();
                     std::vector<Value> removed(el.begin() + b, el.begin() + b + n);
                     el.erase(el.begin() + b, el.begin() + b + n);
-                    if (a.size() > 2) { in.account(sizeof(Value) * (a.size() - 2)); el.insert(el.begin() + b, a.begin() + 2, a.end()); }
-                    return in.array(removed);
+                    if (inserted != 0 && in.account(sizeof(Value) * inserted))
+                        el.insert(el.begin() + b, a.begin() + 2, a.end());
+                    return in.array(std::move(removed));
                 }
                 case AConcat: {
-                    std::vector<Value> out = el;
+                    u64 count = el.size();
+                    for (const Value& v : a)
+                        count += v.is_obj() && O(v).kind == OK::Array ? O(v).elems.size() : 1;
+                    if (!in.can_allocate(sizeof(Value) * count)) return Value::undef();
+                    std::vector<Value> out;
+                    out.reserve(static_cast<usize>(count));
+                    out.insert(out.end(), el.begin(), el.end());
                     for (const Value& v : a) {
                         if (v.is_obj() && O(v).kind == OK::Array) { const auto& x = O(v).elems; out.insert(out.end(), x.begin(), x.end()); }
                         else out.push_back(v);
                     }
-                    return in.array(out);
+                    return in.array(std::move(out));
                 }
                 case AJoin: case AToString: {
                     const std::string sep = id == AJoin && !a.empty() && !a[0].nullish() ? in.to_str(a[0]) : std::string(",");

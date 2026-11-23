@@ -1715,7 +1715,7 @@ to edit the curve.</string>
     <string name="am_import_failed">Couldn\'t import: %1$s</string>
     <string name="am_import_nothing">no effect with an Aurea equivalent</string>
     <string name="release_notes_title">Aurea updates</string>
-    <string name="release_notes_body">Aurea 1.0.7 (2229)\n\n• 100 effects in the expanded catalog and 7 new text animations\n• New glow, glare, video and film categories\n• Fixed taps and scrolling in the effects and plugins picker\n• Improved panel layouts and export startup on iOS\n• Batch backup for Beta projects and media</string>
+    <string name="release_notes_body">Aurea 1.0.7.1 (2230)\n\n• Import from After Effects accepts .aep, .zip and .rar, with compositions, layers, keyframes and effects\n• Model Store with 81 free, offline 3D models\n• Fixed exporting 3D scenes with motion blur: it no longer stalls and the blur matches the preview\n• 100 effects in the expanded catalog and 7 new text animations\n• New glow, glare, video and film categories\n• Fixed taps and scrolling in the effects and plugins picker\n• Improved panel layouts and export startup on iOS\n• Batch backup for Beta projects and media</string>
     <string name="am_import_lossless_required">This preset contains effects, parameters or layers that cannot be preserved during conversion. Nothing was saved or applied.</string>
     <string name="am_import_read_failed">The file could not be read (64 MB limit), or the selected layer changed. Please try again.</string>
     <string name="world_explosive">Explosive</string>

@@ -67,6 +67,7 @@ import com.aurea.aurea.engine.directBuffer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -2680,59 +2681,197 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         private set
     fun dismissAeImport() { aeImportResult = null }
 
-    /**
-     * 0.3.1: pedido de abrir o seletor do AE. O lançador mora no AureaApp (fora
-     * de qualquer folha): o menu fecha na hora e o retorno do seletor ainda acha
-     * quem importar. Sem camada escolhida, o motor cria uma (como o AE).
-     */
+    /** O lançador fica no AureaApp para sobreviver ao fechamento dos menus. */
     var aePickRequested by mutableStateOf(false)
         private set
-    /** 0.4.6: o próximo .ffx entra no Text Animator Pro (pedido pelo painel de texto). */
-    private var aeImportTextPro = false
-    fun requestAeImport(textAnimatorPro: Boolean = false) {
+    private data class AePick(val project: Long, val composition: Long?, val projectFile: Boolean, val textPro: Boolean)
+    private var pendingAePick: AePick? = null
+    internal var aeImportExecuting = false
+        private set
+
+    private fun requestAePicker(projectFile: Boolean, textPro: Boolean) {
+        if (pendingAePick != null || screen != Screen.Editor || !acceptsImport()) return
         if (playing) pause()
-        aeImportTextPro = textAnimatorPro
+        pendingAePick = AePick(projectGeneration, composition?.id, projectFile, textPro)
         aePickRequested = true
     }
+    fun requestAeProjectImport() = requestAePicker(projectFile = true, textPro = false)
+    fun requestAeImport(textAnimatorPro: Boolean = false) = requestAePicker(projectFile = false, textPro = textAnimatorPro)
     fun consumeAePickRequest() { aePickRequested = false }
 
-    fun importAeFile(uri: Uri) {
-        if (!acceptsImport()) return
+    fun finishAePick(uri: Uri?) {
+        val pick = pendingAePick ?: return
+        pendingAePick = null
+        if (uri != null) importAeFile(uri, pick)
+    }
+
+    fun importAeFile(uri: Uri) = importAeFile(uri, AePick(projectGeneration, composition?.id, projectFile = false, textPro = false))
+
+    private fun importAeFile(uri: Uri, pick: AePick) {
+        fun stillCurrent() = screen == Screen.Editor && pick.project == projectGeneration && pick.composition == composition?.id
+        if (!stillCurrent() || !acceptsImport()) return
         // Outra importação em curso: diz o porquê em vez de calar.
         if (busyMessage != null) { showToast(appText(R.string.ios_importing_media)); return }
         val app = getApplication<Application>()
-        val target = primary ?: 0L
-        val textPro = aeImportTextPro
-        aeImportTextPro = false
+        val target = if (pick.projectFile) 0L else primary ?: 0L
         busyMessage = appText(R.string.ae_importing)
         launchImport launch@{
-            val name = displayName(uri) ?: uri.lastPathSegment.orEmpty()
+            val name = withContext(Dispatchers.IO) { displayName(uri) ?: uri.lastPathSegment.orEmpty() }
+            val ext = name.substringAfterLast('.', "")
+            val isProjectSource = aeProjectExtension(ext)
+            if (ext.equals("aepx", ignoreCase = true) || (pick.projectFile && !isProjectSource)) {
+                errorMessage = appText(R.string.ae_project_select_file)
+                return@launch
+            }
+            if (!pick.projectFile && isProjectSource) {
+                errorMessage = appText(R.string.ae_project_use_separate_import)
+                return@launch
+            }
+            if (pick.projectFile) {
+                aeImportExecuting = true
+                val json = try {
+                    withContext(Dispatchers.IO) {
+                        withStagedAeProject(uri, name) { engine.importAeFile(it.absolutePath, 0L) }
+                    }
+                } catch (_: AeProjectTooLarge) {
+                    errorMessage = appText(R.string.ae_project_too_big)
+                    return@launch
+                } finally {
+                    aeImportExecuting = false
+                }
+                if (!stillCurrent()) return@launch
+                aeImportResult = json?.let { parseAeImportResult(it, name) }
+                if (aeImportResult == null) errorMessage = appText(R.string.ae_failed_read)
+                refreshNow(); refreshDetail()
+                return@launch
+            }
             var tooBig = false
-            val json = withContext(Dispatchers.IO) {
-                val bytes = app.contentResolver.openInputStream(uri)?.use { input ->
+            val bytes = withContext(Dispatchers.IO) {
+                app.contentResolver.openInputStream(uri)?.use { input ->
                     val out = java.io.ByteArrayOutputStream()
-                    val buf = ByteArray(65536); var total = 0
+                    val buf = ByteArray(65536)
                     while (true) {
-                        val n = input.read(buf); if (n < 0) break
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        if (n == 0) return@withContext null
                         // O mesmo teto do motor (kMaxAeFile, 64 MB).
-                        total += n; if (total > 64 * 1024 * 1024) { tooBig = true; return@withContext null }
+                        if (n > 64 * 1024 * 1024 - out.size()) { tooBig = true; return@withContext null }
                         out.write(buf, 0, n)
                     }
                     out.toByteArray()
-                } ?: return@withContext null
-                engine.importAeData(bytes, name, target, textPro)
+                }
+            }
+            if (!stillCurrent()) return@launch
+            if (bytes == null) { errorMessage = appText(if (tooBig) R.string.ae_too_big else R.string.ae_failed_read); return@launch }
+            // O Voltar do sistema ignora o véu de progresso. Mantém o destino
+            // estável enquanto a chamada nativa já não pode ser cancelada.
+            aeImportExecuting = true
+            val json = try {
+                withContext(Dispatchers.IO) { engine.importAeData(bytes, name, target, pick.textPro) }
+            } finally {
+                aeImportExecuting = false
+            }
+            if (!stillCurrent()) return@launch
+            val result = parseAeImportResult(json, name)
+            if (result == null) { errorMessage = appText(R.string.ae_failed_read); return@launch }
+            aeImportResult = result
+            refreshNow(); refreshDetail()
+        }
+    }
+
+    private fun parseAeImportResult(json: String, fileName: String): AeImportResult? {
+        val report = runCatching { JSONObject(json) }.getOrNull() ?: return null
+        fun items(key: String) = report.optJSONArray(key)?.let { array ->
+            (0 until array.length()).mapNotNull { index ->
+                array.optJSONObject(index)?.let {
+                    AeImportItem(it.optString("kind"), it.optString("name"), it.optString("reason"), it.optInt("line"))
+                }
+            }
+        }.orEmpty()
+        return AeImportResult(
+            report.optBoolean("ok"), fileName, report.optString("kind"), report.optString("message"),
+            report.optInt("effects"), report.optInt("keyframes"), report.optInt("layers"),
+            report.optInt("expressions"), report.optInt("animators"),
+            items("skipped"), items("notes"), report.optInt("changes"),
+        )
+    }
+
+    private fun aeProjectExtension(ext: String) = ext.equals("aep", true) ||
+        ext.equals("zip", true) || ext.equals("rar", true)
+
+    private class AeProjectTooLarge : java.io.IOException()
+
+    private suspend fun <T> withStagedAeProject(uri: Uri, fileName: String, convert: (File) -> T): T? {
+        val app = getApplication<Application>()
+        val name = fileName.substringAfterLast('/').substringAfterLast('\\')
+        val ext = name.substringAfterLast('.')
+        val base = name.substringBeforeLast('.').ifBlank { "project" }
+            .let { if (it.toByteArray(Charsets.UTF_8).size <= 230) it else it.take(48) }
+        val directory = java.nio.file.Files.createTempDirectory(app.cacheDir.toPath(), "aurea-ae-").toFile()
+        val file = File(directory, "$base.$ext")
+        try {
+            val input = app.contentResolver.openInputStream(uri) ?: return null
+            var remaining = if (ext.equals("aep", true)) 64L shl 20 else 8L shl 30
+            input.use { source ->
+                file.outputStream().use { destination ->
+                    val buffer = ByteArray(65_536)
+                    while (true) {
+                        kotlin.coroutines.coroutineContext.ensureActive()
+                        val count = source.read(buffer)
+                        if (count < 0) break
+                        if (count == 0) return null
+                        if (count > remaining) throw AeProjectTooLarge()
+                        destination.write(buffer, 0, count)
+                        remaining -= count
+                    }
+                }
+            }
+            kotlin.coroutines.coroutineContext.ensureActive()
+            return convert(file)
+        } finally {
+            file.delete()
+            directory.delete()
+        }
+    }
+
+    /** Importa um projeto independente na biblioteca, sem trocar o projeto do editor. */
+    fun importHomeAeProject(uri: Uri) {
+        if (screen != Screen.Home || !acceptsImport()) return
+        busyMessage = appText(R.string.ae_importing)
+        launchImport launch@{
+            val fileName = withContext(Dispatchers.IO) { displayName(uri) ?: uri.lastPathSegment.orEmpty() }
+            if (!aeProjectExtension(fileName.substringAfterLast('.', ""))) {
+                errorMessage = appText(R.string.ae_project_select_file)
+                return@launch
+            }
+            val fallback = fileName.substringBeforeLast('.').take(60).ifBlank { appText(R.string.project_file_imported_title) }
+            val result = try {
+                withContext(Dispatchers.IO) {
+                    withStagedAeProject(uri, fileName) { inputFile ->
+                        val title = uniqueName(fallback)
+                        val project = File(directories().projects, "$title.aurea")
+                        val json = engine.importAeProjectFile(inputFile.absolutePath, project.absolutePath, title)
+                        val report = parseAeImportResult(json, fileName) ?: return@withStagedAeProject null
+                        if (report.ok) {
+                            if (!project.isFile) return@withStagedAeProject null
+                            runCatching {
+                                writeTextAtomic(File(project.path + META_SUFFIX), JSONObject().put("title", title).toString())
+                            }
+                        }
+                        report
+                    }
+                }
+            } catch (_: AeProjectTooLarge) {
+                errorMessage = appText(R.string.ae_project_too_big)
+                return@launch
             }
             busyMessage = null
-            if (json == null) { errorMessage = appText(if (tooBig) R.string.ae_too_big else R.string.ae_failed_read); return@launch }
-            val o = runCatching { org.json.JSONObject(json) }.getOrNull()
-            if (o == null) { errorMessage = appText(R.string.ae_failed_read); return@launch }
-            fun items(key: String) = o.optJSONArray(key)?.let { a ->
-                List(a.length()) { i -> a.getJSONObject(i).let { AeImportItem(it.optString("kind"), it.optString("name"), it.optString("reason"), it.optInt("line")) } }
-            }.orEmpty()
-            aeImportResult = AeImportResult(o.optBoolean("ok"), name, o.optString("kind"), o.optString("message"),
-                o.optInt("effects"), o.optInt("keyframes"), o.optInt("layers"), o.optInt("expressions"), o.optInt("animators"),
-                items("skipped"), items("notes"), o.optInt("changes"))
-            refreshNow(); refreshDetail()
+            if (result == null) {
+                errorMessage = appText(R.string.ae_failed_read)
+                return@launch
+            }
+            if (result.ok) refreshProjects()
+            aeImportResult = result
         }
     }
 
@@ -6688,13 +6827,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     fun openPrecomp(layer: Long) {
-        if (!engine.openPrecomp(layer)) return
+        if (aeImportExecuting || !engine.openPrecomp(layer)) return
         onCompositionSwitched()
         refreshNow()
     }
 
     fun closePrecomp() {
-        if (!engine.closePrecomp()) return
+        if (aeImportExecuting || !engine.closePrecomp()) return
         onCompositionSwitched()
         refreshNow()
     }
@@ -10684,33 +10823,36 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 errorMessage = appText(R.string.msg_esse_arquivo_nao_e_um_modelo)
                 return@launch
             }
-            busyMessage = appText(R.string.app_importing_model)
-            // Cópia para o sandbox e o plano do motor (só cabeçalhos e contagens):
-            // o que cabe NESTE aparelho, com a memória medida agora.
-            val memory = com.aurea.aurea.engine.ModelPlan.memoryNow(getApplication())
-            var stagedPath: String? = null
-            var stagedName = ""
-            val plan = withContext(Dispatchers.IO) {
-                val staged = stageModel(picks) ?: return@withContext null
-                val file = staged.first ?: return@withContext null
-                stagedPath = file.absolutePath
-                stagedName = staged.second
-                engine.inspectModel(file.absolutePath, memory)
+            prepareModelImport { stageModel(picks) }
+        }
+    }
+
+    fun importLibraryModel(id: String, name: String) {
+        if (!acceptsImport() || !id.matches(Regex("[a-z0-9_-]+"))) return
+        launchImport { prepareModelImport { stageModel(emptyList(), "$id.glb")?.let { it.first to name } } }
+    }
+
+    private suspend fun prepareModelImport(stage: () -> Pair<File?, String>?) {
+        busyMessage = appText(R.string.app_importing_model)
+        val memory = com.aurea.aurea.engine.ModelPlan.memoryNow(getApplication())
+        val staged = withContext(Dispatchers.IO) {
+            val (file, name) = stage() ?: return@withContext null
+            file?.let { Triple(it.absolutePath, name, engine.inspectModel(it.absolutePath, memory)) }
+        }
+        busyMessage = null
+        if (staged == null) {
+            errorMessage = appText(R.string.msg_nao_consegui_ler_esse_arquivo)
+            return
+        }
+        val (path, name, plan) = staged
+        when {
+            plan.tooHeavy -> errorMessage = appText(R.string.model3d_too_heavy)
+            plan.heavy -> {
+                modelOptimizeQuality = plan.recommended.takeIf { it != com.aurea.aurea.engine.MODEL_QUALITY_ORIGINAL }
+                    ?: com.aurea.aurea.engine.MODEL_QUALITY_BALANCED
+                modelOptimize = ModelOptimizeRequest(path, name, plan, memory)
             }
-            busyMessage = null
-            val path = stagedPath
-            when {
-                plan == null && path == null -> errorMessage = appText(R.string.msg_nao_consegui_ler_esse_arquivo)
-                plan == null || path == null -> errorMessage = appText(R.string.msg_esse_arquivo_nao_e_um_modelo)
-                // Nem o Leve cabe: recusa com o motivo, sem arriscar o app (e o launcher) no import.
-                plan.tooHeavy -> errorMessage = appText(R.string.model3d_too_heavy)
-                plan.heavy -> {
-                    modelOptimizeQuality = plan.recommended.takeIf { it != com.aurea.aurea.engine.MODEL_QUALITY_ORIGINAL }
-                        ?: com.aurea.aurea.engine.MODEL_QUALITY_BALANCED
-                    modelOptimize = ModelOptimizeRequest(path, stagedName, plan, memory)
-                }
-                else -> runModelImport(path, stagedName, com.aurea.aurea.engine.MODEL_QUALITY_ORIGINAL, memory)
-            }
+            else -> runModelImport(path, name, com.aurea.aurea.engine.MODEL_QUALITY_ORIGINAL, memory)
         }
     }
 
@@ -10864,7 +11006,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         return (name.ifBlank { "modelo" }) + "." + sniffed
     }
 
-    private fun stageModel(picks: List<Pair<Uri, String>>): Pair<File?, String>? {
+    private fun stageModel(picks: List<Pair<Uri, String>>, bundled: String? = null): Pair<File?, String>? {
         val app = getApplication<Application>()
         val root = File(File(app.filesDir, "projetos"), "modelos").apply { mkdirs() }
         val unzipDir = File(root, "importando-zip-${java.util.UUID.randomUUID()}")
@@ -10873,6 +11015,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             // Keep each archive's identity: another ZIP's texture with the same
             // filename must not overwrite the selected model's companions.
             val sources = mutableListOf<Triple<String, () -> java.io.InputStream?, String?>>()
+            if (bundled != null) sources += Triple(bundled, { app.assets.open("ModelLibrary/$bundled") }, null)
             val archiveHashes = mutableMapOf<String, ByteArray>()
             for ((uri, name) in picks) {
                 if (name.substringAfterLast('.', "").lowercase() != "zip") {

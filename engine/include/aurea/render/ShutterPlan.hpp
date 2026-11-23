@@ -23,6 +23,17 @@ struct ShutterPlan {
     [[nodiscard]] f32 weight() const noexcept { return 1.f / std::max(1u, count); }
 };
 
+/// 1.0.7.1: quantas cenas 3D inteiras (uma por amostra do obturador) cabem
+/// num envio de GPU no export. O vigia do driver do celular (Mali, Adreno) e o
+/// TDR do Windows derrubam envios de ~2 s; uma cena 3D na qualidade final
+/// (sombra 4096, MSAA, AO) custa dezenas de ms num celular. Quatro em 1080p,
+/// menos em telas maiores, nunca menos de uma; a soma das amostras é a mesma.
+[[nodiscard]] constexpr u32 scene_exposure_samples_per_submission(u32 width, u32 height) noexcept {
+    const u64 pixels = static_cast<u64>(width ? width : 1) * (height ? height : 1);
+    const u64 fit = (4ull * 1920ull * 1080ull) / pixels;
+    return fit < 1 ? 1u : fit > 8 ? 8u : static_cast<u32>(fit);
+}
+
 inline f32 motion_blur_amount(f32 amount) noexcept {
     return std::isfinite(amount) ? std::clamp(amount, 0.f, 4.f) : 0.f;
 }

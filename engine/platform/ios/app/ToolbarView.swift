@@ -173,12 +173,6 @@ struct TopBarView: View {
             guard on else { return }
             requests.performanceTest = false; shell.performanceTest = true
         }
-        .onChange(of: requests.aeImport) { on in
-            guard on else { return }
-            requests.aeImport = false
-            let shell = shell
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { shell.addPicker = .aeImport }
-        }
     }
 
     /// Título da seção aberta da camada (par do `panelSectionTitle` do Android);

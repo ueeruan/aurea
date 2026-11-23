@@ -1,0 +1,812 @@
+[
+  {
+    "id": "kenney-tree_pinedefaulta",
+    "names": {
+      "pt": "Pinheiro",
+      "en": "Pine tree"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-tree_palm",
+    "names": {
+      "pt": "Palmeira",
+      "en": "Palm tree"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-tree_simple_fall",
+    "names": {
+      "pt": "Árvore de outono",
+      "en": "Autumn tree"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-plant_bushlarge",
+    "names": {
+      "pt": "Arbusto",
+      "en": "Bush"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-cactus_tall",
+    "names": {
+      "pt": "Cacto",
+      "en": "Cactus"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-rock_largea",
+    "names": {
+      "pt": "Rocha low poly",
+      "en": "Low-poly rock"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-bridge_wood",
+    "names": {
+      "pt": "Ponte de madeira",
+      "en": "Wooden bridge"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-tent_detailedopen",
+    "names": {
+      "pt": "Barraca",
+      "en": "Tent"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-campfire_logs",
+    "names": {
+      "pt": "Lenha para fogueira",
+      "en": "Campfire logs"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-fence_planks",
+    "names": {
+      "pt": "Cerca de tábuas",
+      "en": "Plank fence"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-mushroom_redgroup",
+    "names": {
+      "pt": "Cogumelos vermelhos",
+      "en": "Red mushrooms"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-cliff_waterfall_rock",
+    "names": {
+      "pt": "Cachoeira",
+      "en": "Waterfall"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "camera_01",
+    "names": {
+      "pt": "Câmera vintage",
+      "en": "Vintage camera"
+    },
+    "provider": "Poly Haven",
+    "category": "realistic",
+    "source": "https://polyhaven.com/a/Camera_01"
+  },
+  {
+    "id": "boulder_01",
+    "names": {
+      "pt": "Rocha digitalizada",
+      "en": "Scanned boulder"
+    },
+    "provider": "Poly Haven",
+    "category": "realistic",
+    "source": "https://polyhaven.com/a/boulder_01"
+  },
+  {
+    "id": "food_apple_01",
+    "names": {
+      "pt": "Maçã vermelha",
+      "en": "Red apple"
+    },
+    "provider": "Poly Haven",
+    "category": "realistic",
+    "source": "https://polyhaven.com/a/food_apple_01"
+  },
+  {
+    "id": "wooden_table_02",
+    "names": {
+      "pt": "Mesa de madeira",
+      "en": "Wooden table"
+    },
+    "provider": "Poly Haven",
+    "category": "realistic",
+    "source": "https://polyhaven.com/a/wooden_table_02"
+  },
+  {
+    "id": "ceramic_vase_04",
+    "names": {
+      "pt": "Vaso de cerâmica",
+      "en": "Ceramic vase"
+    },
+    "provider": "Poly Haven",
+    "category": "realistic",
+    "source": "https://polyhaven.com/a/ceramic_vase_04"
+  },
+  {
+    "id": "kenney-tree_oak",
+    "names": {
+      "pt": "Carvalho",
+      "en": "Oak tree"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-tree_blocks",
+    "names": {
+      "pt": "Árvore cúbica",
+      "en": "Blocky tree"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-tree_pinetalla_detailed",
+    "names": {
+      "pt": "Pinheiro alto",
+      "en": "Tall pine"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-plant_flattall",
+    "names": {
+      "pt": "Folhagem alta",
+      "en": "Tall foliage"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-flower_purplea",
+    "names": {
+      "pt": "Flor roxa",
+      "en": "Purple flower"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-flower_yellowa",
+    "names": {
+      "pt": "Flor amarela",
+      "en": "Yellow flower"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-grass_large",
+    "names": {
+      "pt": "Touceira de grama",
+      "en": "Grass tuft"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-hanging_moss",
+    "names": {
+      "pt": "Musgo pendente",
+      "en": "Hanging moss"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-lily_large",
+    "names": {
+      "pt": "Vitória-régia",
+      "en": "Lily pad"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-crop_carrot",
+    "names": {
+      "pt": "Cenoura",
+      "en": "Carrot"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-crop_pumpkin",
+    "names": {
+      "pt": "Abóbora",
+      "en": "Pumpkin"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-crops_cornstaged",
+    "names": {
+      "pt": "Milho",
+      "en": "Corn plant"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-crops_wheatstageb",
+    "names": {
+      "pt": "Trigo",
+      "en": "Wheat"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-canoe",
+    "names": {
+      "pt": "Canoa",
+      "en": "Canoe"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-canoe_paddle",
+    "names": {
+      "pt": "Remo",
+      "en": "Paddle"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-bridge_stoneround",
+    "names": {
+      "pt": "Ponte de pedra em arco",
+      "en": "Arched stone bridge"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-cliff_cave_rock",
+    "names": {
+      "pt": "Entrada de caverna",
+      "en": "Cave entrance"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-ground_riverstraight",
+    "names": {
+      "pt": "Rio reto",
+      "en": "Straight river"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-ground_riverbend",
+    "names": {
+      "pt": "Curva do rio",
+      "en": "River bend"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-stump_rounddetailed",
+    "names": {
+      "pt": "Toco de árvore",
+      "en": "Tree stump"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-pot_large",
+    "names": {
+      "pt": "Vaso grande",
+      "en": "Large pot"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-statue_head",
+    "names": {
+      "pt": "Cabeça de estátua",
+      "en": "Statue head"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-statue_obelisk",
+    "names": {
+      "pt": "Obelisco",
+      "en": "Obelisk"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-statue_columndamaged",
+    "names": {
+      "pt": "Coluna em ruínas",
+      "en": "Ruined column"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/nature-kit?part=e79b84f8-9663-4137-a688-08360a0b0f3d"
+  },
+  {
+    "id": "kenney-space-spacecraft1",
+    "names": {
+      "pt": "Nave de reconhecimento",
+      "en": "Scout spaceship"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/space-kit"
+  },
+  {
+    "id": "kenney-space-spacecraft2",
+    "names": {
+      "pt": "Nave interceptora",
+      "en": "Interceptor spaceship"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/space-kit"
+  },
+  {
+    "id": "kenney-space-spacecraft3",
+    "names": {
+      "pt": "Nave de transporte",
+      "en": "Transport spaceship"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/space-kit"
+  },
+  {
+    "id": "kenney-space-spacecraft4",
+    "names": {
+      "pt": "Nave de carga",
+      "en": "Cargo spaceship"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/space-kit"
+  },
+  {
+    "id": "kenney-space-spacecraftstand",
+    "names": {
+      "pt": "Suporte de nave",
+      "en": "Spaceship stand"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/space-kit"
+  },
+  {
+    "id": "kenney-space-station",
+    "names": {
+      "pt": "Estação espacial",
+      "en": "Space station"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/space-kit"
+  },
+  {
+    "id": "kenney-space-stationlarge",
+    "names": {
+      "pt": "Estação espacial grande",
+      "en": "Large space station"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/space-kit"
+  },
+  {
+    "id": "kenney-space-robot",
+    "names": {
+      "pt": "Robô explorador",
+      "en": "Explorer robot"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/space-kit"
+  },
+  {
+    "id": "kenney-space-portal",
+    "names": {
+      "pt": "Portal espacial",
+      "en": "Space portal"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/space-kit"
+  },
+  {
+    "id": "kenney-space-satellitedishantenna",
+    "names": {
+      "pt": "Antena parabólica",
+      "en": "Satellite dish"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/space-kit"
+  },
+  {
+    "id": "kenney-space-satellitedishlarge",
+    "names": {
+      "pt": "Parabólica de grande porte",
+      "en": "Large satellite dish"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/space-kit"
+  },
+  {
+    "id": "kenney-space-buildingcorner",
+    "names": {
+      "pt": "Canto de estação",
+      "en": "Station corner"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/space-kit"
+  },
+  {
+    "id": "kenney-space-buildingcorridor",
+    "names": {
+      "pt": "Corredor modular",
+      "en": "Modular corridor"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/space-kit"
+  },
+  {
+    "id": "kenney-space-stairslong",
+    "names": {
+      "pt": "Escada modular longa",
+      "en": "Long modular stairs"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/space-kit"
+  },
+  {
+    "id": "kenney-space-consolescreen",
+    "names": {
+      "pt": "Painel com tela",
+      "en": "Screen console"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/space-kit"
+  },
+  {
+    "id": "kenney-space-consolecorner",
+    "names": {
+      "pt": "Console de canto",
+      "en": "Corner console"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/space-kit"
+  },
+  {
+    "id": "kenney-space-craterlarge",
+    "names": {
+      "pt": "Cratera lunar",
+      "en": "Lunar crater"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/space-kit"
+  },
+  {
+    "id": "kenney-space-meteorfull",
+    "names": {
+      "pt": "Meteoro",
+      "en": "Meteor"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/space-kit"
+  },
+  {
+    "id": "kenney-space-rocksore",
+    "names": {
+      "pt": "Rochas com minério",
+      "en": "Ore rocks"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/space-kit"
+  },
+  {
+    "id": "kenney-space-barrellarge",
+    "names": {
+      "pt": "Tambor industrial",
+      "en": "Industrial barrel"
+    },
+    "provider": "Kenney",
+    "category": "low_poly",
+    "source": "https://kenney.nl/assets/space-kit"
+  },
+  {
+    "id": "gamepad",
+    "names": {
+      "pt": "Controle de videogame",
+      "en": "Game controller"
+    },
+    "provider": "Poly Haven",
+    "category": "realistic",
+    "source": "https://polyhaven.com/a/gamepad"
+  },
+  {
+    "id": "gaming_console",
+    "names": {
+      "pt": "Console de videogame",
+      "en": "Game console"
+    },
+    "provider": "Poly Haven",
+    "category": "realistic",
+    "source": "https://polyhaven.com/a/gaming_console"
+  },
+  {
+    "id": "boombox",
+    "names": {
+      "pt": "Rádio portátil",
+      "en": "Boombox"
+    },
+    "provider": "Poly Haven",
+    "category": "realistic",
+    "source": "https://polyhaven.com/a/boombox"
+  },
+  {
+    "id": "vintage_oil_lamp",
+    "names": {
+      "pt": "Lamparina vintage",
+      "en": "Vintage oil lamp"
+    },
+    "provider": "Poly Haven",
+    "category": "realistic",
+    "source": "https://polyhaven.com/a/vintage_oil_lamp"
+  },
+  {
+    "id": "pocket_watch",
+    "names": {
+      "pt": "Relógio de bolso",
+      "en": "Pocket watch"
+    },
+    "provider": "Poly Haven",
+    "category": "realistic",
+    "source": "https://polyhaven.com/a/pocket_watch"
+  },
+  {
+    "id": "wooden_crate_01",
+    "names": {
+      "pt": "Caixote de madeira",
+      "en": "Wooden crate"
+    },
+    "provider": "Poly Haven",
+    "category": "realistic",
+    "source": "https://polyhaven.com/a/wooden_crate_01"
+  },
+  {
+    "id": "screwdriver",
+    "names": {
+      "pt": "Chave de fenda",
+      "en": "Screwdriver"
+    },
+    "provider": "Poly Haven",
+    "category": "realistic",
+    "source": "https://polyhaven.com/a/screwdriver"
+  },
+  {
+    "id": "cross_pein_hammer",
+    "names": {
+      "pt": "Martelo de pena",
+      "en": "Cross-pein hammer"
+    },
+    "provider": "Poly Haven",
+    "category": "realistic",
+    "source": "https://polyhaven.com/a/cross_pein_hammer"
+  },
+  {
+    "id": "street_lamp_02",
+    "names": {
+      "pt": "Poste de rua",
+      "en": "Street lamp"
+    },
+    "provider": "Poly Haven",
+    "category": "realistic",
+    "source": "https://polyhaven.com/a/street_lamp_02"
+  },
+  {
+    "id": "painted_wooden_stool",
+    "names": {
+      "pt": "Banco pintado",
+      "en": "Painted wooden stool"
+    },
+    "provider": "Poly Haven",
+    "category": "realistic",
+    "source": "https://polyhaven.com/a/painted_wooden_stool"
+  },
+  {
+    "id": "woodenchair_01",
+    "names": {
+      "pt": "Cadeira de madeira",
+      "en": "Wooden chair"
+    },
+    "provider": "Poly Haven",
+    "category": "realistic",
+    "source": "https://polyhaven.com/a/WoodenChair_01"
+  },
+  {
+    "id": "mid_century_lounge_chair",
+    "names": {
+      "pt": "Poltrona retrô",
+      "en": "Retro lounge chair"
+    },
+    "provider": "Poly Haven",
+    "category": "realistic",
+    "source": "https://polyhaven.com/a/mid_century_lounge_chair"
+  },
+  {
+    "id": "brass_vase_01",
+    "names": {
+      "pt": "Vaso de latão",
+      "en": "Brass vase"
+    },
+    "provider": "Poly Haven",
+    "category": "realistic",
+    "source": "https://polyhaven.com/a/brass_vase_01"
+  },
+  {
+    "id": "wooden_bowl_01",
+    "names": {
+      "pt": "Tigela de madeira",
+      "en": "Wooden bowl"
+    },
+    "provider": "Poly Haven",
+    "category": "realistic",
+    "source": "https://polyhaven.com/a/wooden_bowl_01"
+  },
+  {
+    "id": "marble_bust_01",
+    "names": {
+      "pt": "Busto de mármore",
+      "en": "Marble bust"
+    },
+    "provider": "Poly Haven",
+    "category": "realistic",
+    "source": "https://polyhaven.com/a/marble_bust_01"
+  },
+  {
+    "id": "food_avocado_01",
+    "names": {
+      "pt": "Abacate",
+      "en": "Avocado"
+    },
+    "provider": "Poly Haven",
+    "category": "realistic",
+    "source": "https://polyhaven.com/a/food_avocado_01"
+  },
+  {
+    "id": "food_kiwi_01",
+    "names": {
+      "pt": "Kiwi",
+      "en": "Kiwi"
+    },
+    "provider": "Poly Haven",
+    "category": "realistic",
+    "source": "https://polyhaven.com/a/food_kiwi_01"
+  },
+  {
+    "id": "croissant",
+    "names": {
+      "pt": "Croissant",
+      "en": "Croissant"
+    },
+    "provider": "Poly Haven",
+    "category": "realistic",
+    "source": "https://polyhaven.com/a/croissant"
+  },
+  {
+    "id": "lambis_shell",
+    "names": {
+      "pt": "Concha marinha",
+      "en": "Seashell"
+    },
+    "provider": "Poly Haven",
+    "category": "realistic",
+    "source": "https://polyhaven.com/a/lambis_shell"
+  },
+  {
+    "id": "magnifying_glass_01",
+    "names": {
+      "pt": "Lupa",
+      "en": "Magnifying glass"
+    },
+    "provider": "Poly Haven",
+    "category": "realistic",
+    "source": "https://polyhaven.com/a/magnifying_glass_01"
+  }
+]

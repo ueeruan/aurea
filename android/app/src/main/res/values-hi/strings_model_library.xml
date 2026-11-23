@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="model_shop_title">मॉडल स्टोर</string>
+    <string name="model_shop_tab">मॉडल</string>
+    <string name="model_shop_all">सभी</string>
+    <string name="model_shop_low_poly">लो पॉली</string>
+    <string name="model_shop_realistic">यथार्थवादी</string>
+    <string name="model_shop_create">प्रोजेक्ट बनाएँ</string>
+    <string name="model_shop_insert">जोड़ें</string>
+</resources>

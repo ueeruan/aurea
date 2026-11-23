@@ -13,6 +13,13 @@
 
 namespace aurea::media {
 
+// Decoded frames cover [pts, nextPts). Subtract the endpoints after converting
+// both to microseconds so a nominal duration cannot leave a gap in VFR or CFR.
+[[nodiscard]] constexpr i64 presentation_duration_us(i64 ptsUs, i64 nextPtsUs,
+                                                       i64 fallbackUs) noexcept {
+    return nextPtsUs > ptsUs ? nextPtsUs - ptsUs : std::max<i64>(1, fallbackUs);
+}
+
 /// `declaredUs`: duração do contêiner (0 = ausente). `lastSampleUs`: maior
 /// instante de amostra lido perto do fim (< 0 = não lido). `frameUs`: duração
 /// de uma amostra (1/fps). Devolve a duração a usar, em µs.

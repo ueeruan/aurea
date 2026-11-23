@@ -52,7 +52,9 @@ public:
     /// degrau. Os quadros seguintes presos SÓ por esse ponto saem depois desta
     /// espera curta — o custo do prazo é pago uma vez por ponto, não por quadro.
     static constexpr u64 kUnresolvedSiteWaitNs = 150'000'000ull;
-    static constexpr u32 kMaxUnresolvedSites = 8;
+    // 1.0.7.1: 8 pontos lembrados era pouco para uma cena 3D (sombra, cor,
+    // SSR, plano, céu...): do 9º em diante cada quadro pagava a espera inteira.
+    static constexpr u32 kMaxUnresolvedSites = 64;
     /// Prazos do quadro exato (0.3.0). Sem avanço do decoder por `reopenNs`, a
     /// fonte que espera é reaberta (uma vez por quadro); sem o exato depois de
     /// `approximateNs` sem avanço (ou `approximateTotalNs` no total), sai o mais

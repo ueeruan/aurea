@@ -18,8 +18,13 @@ namespace {
 namespace fs = std::filesystem;
 constexpr u64 kMaxFrames = 2'000'000;
 constexpr usize kMaxQueue = 64;
-/// Espaço livre que o cache de proxies nunca consome (galeria, câmera, export).
-constexpr u64 kFreeSpaceReserve = 1ull << 30;
+constexpr u64 proxy_cache_space_reserve(u64 capacity) noexcept {
+    // Preserve 5% on small volumes and keep the original cap on large ones.
+    return std::clamp<u64>(capacity / 20, 256ull << 20, 1ull << 30);
+}
+static_assert(proxy_cache_space_reserve(6ull << 30) < (578ull << 20));
+static_assert(proxy_cache_space_reserve(1ull << 30) == (256ull << 20));
+static_assert(proxy_cache_space_reserve(32ull << 30) == (1ull << 30));
 constexpr u32 kTagAvc1 = 0x61766331u, kTagHvc1 = 0x68766331u, kTagHev1 = 0x68657631u,
               kTagAv01 = 0x61763031u, kTagVp09 = 0x76703039u;
 
@@ -662,13 +667,14 @@ bool PreviewProxyService::make_room(u64 bytes, const std::string& preserve) {
         used += size; files.push_back({it->path(), it->last_write_time(ec), size});
     }
     if (ec) return false;
-    // O orçamento nunca come o espaço livre do aparelho: sobra sempre 1 GB.
+    // Reserva espaço para a exportação também em volumes pequenos.
     // O arquivo preservado (o parcial pronto) já saiu do espaço livre.
     u64 budget = diskBudget_;
     if (const auto space = fs::space(fs::u8path(directory_), ec); !ec) {
         u64 available = space.available;
         if (!preserve.empty()) { const u64 own = fs::file_size(fs::u8path(preserve), ec); if (!ec) available += own; }
-        const u64 room = available > kFreeSpaceReserve ? available - kFreeSpaceReserve : 0;
+        const u64 reserve = proxy_cache_space_reserve(space.capacity);
+        const u64 room = available > reserve ? available - reserve : 0;
         budget = std::min(budget, used + room);
     }
     ec.clear();

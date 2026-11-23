@@ -1522,6 +1522,9 @@ class AureaEngine private constructor() {
     fun importAeData(data: ByteArray, fileName: String, layer: Long, textAnimatorPro: Boolean = false): String =
         nativeImportAeData(nativeHandle, data, fileName.toByteArray(Charsets.UTF_8), layer, textAnimatorPro)?.toString(Charsets.UTF_8)
             ?: """{"ok":false,"skipped":[],"notes":[],"message":"motor indisponivel"}"""
+    fun importAeProjectFile(inputPath: String, outputPath: String, title: String): String =
+        nativeImportAeProjectFile(inputPath.toByteArray(Charsets.UTF_8), outputPath.toByteArray(Charsets.UTF_8),
+            title.toByteArray(Charsets.UTF_8))?.toString(Charsets.UTF_8).orEmpty()
     /** Um passo de desfazer. Nulo = aplicado; senão, o motivo. `duration` > 0 estica a animação. */
     fun applyPreset(layer: Long, json: String, duration: Long = 0): String? =
         nativeApplyPreset(nativeHandle, layer, json.toByteArray(Charsets.UTF_8), duration)?.toString(Charsets.UTF_8)
@@ -2513,6 +2516,7 @@ class AureaEngine private constructor() {
     private external fun nativeAddTextSelector(handle: Long, layer: Long, index: Int, type: Int): Int
     private external fun nativeRemoveTextSelector(handle: Long, layer: Long, index: Int, selector: Int): Boolean
     private external fun nativeImportAeData(handle: Long, data: ByteArray, fileName: ByteArray, layer: Long, textAnimatorPro: Boolean): ByteArray?
+    private external fun nativeImportAeProjectFile(input: ByteArray, output: ByteArray, title: ByteArray): ByteArray?
     private external fun nativeMakeCaptionPreset(name: ByteArray, ints: IntArray, floats: FloatArray): ByteArray?
     private external fun nativeParseCaptionPreset(json: ByteArray): FloatArray?
     private external fun nativeMakeCurvePreset(name: ByteArray, interp: Int, x1: Float, y1: Float, x2: Float, y2: Float, power: Int): ByteArray?

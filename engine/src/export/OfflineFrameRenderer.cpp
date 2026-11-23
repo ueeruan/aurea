@@ -191,8 +191,12 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
             const bool memoryFailure = rendered.code() == Errc::OutOfDeviceMemory
                 || rendered.code() == Errc::OutOfMemory || rendered.code() == Errc::BudgetExceeded;
             if (memoryFailure) {
-                if (trimmed && (settings.stageUnblurredScenes || !target.texture.valid()
-                    || !Renderer::has_unblurred_scene_targets(snapshot_))) return rendered;
+                // 1.0.7.1: tudo já foi liberado e repartido e o quadro ainda não
+                // coube: antes de falhar, a cena 3D usa sombra 2048 e MSAA 2×
+                // (o resto do quadro e as amostras de motion blur não mudam).
+                const bool exhausted = trimmed && (settings.stageUnblurredScenes || !target.texture.valid()
+                    || !Renderer::has_unblurred_scene_targets(snapshot_));
+                if (exhausted && renderer_.export_scene_memory_reduced()) return rendered;
                 snapshot_.release_video_frames();
                 if (gpuLock.owns_lock()) gpuLock.unlock();
                 if (const Status ready = wait_gpu(submittedFrame, settings.cancelFlag, pollingMutex, additionalCancel); !ready.ok()) return ready;
@@ -201,6 +205,13 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
                 if (const Status ready = renderer_.reclaim_failed_transients(); !ready.ok()) return ready;
                 if (!reclaimed && rendered.code() == Errc::OutOfDeviceMemory) {
                     reclaimed = true;
+                    continue;
+                }
+                if (exhausted) {
+                    (void)renderer_.reduce_export_scene_memory();
+                    (void)renderer_.trim_memory(4, ~0ull);
+                    AUREA_LOG_WARN("export: quadro %lld sem memoria mesmo em etapas; cena 3D com sombra 2048 e MSAA 2x daqui em diante",
+                                   static_cast<long long>(time.value));
                     continue;
                 }
                 const auto before = gpu_->memory_stats();

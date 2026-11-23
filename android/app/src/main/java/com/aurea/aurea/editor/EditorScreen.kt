@@ -196,6 +196,7 @@ internal fun openSheet(store: EditorStore, ui: EditorUi, sheet: ShellSheet) {
  * chegar aqui.
  */
 internal fun shellBack(store: EditorStore, ui: EditorUi) {
+    if (store.aeImportExecuting) return
     when {
         // Omega conteúdo (área 06): o Voltar sai do modo de texto (o texto já está salvo).
         store.textEditLayer != null -> store.closeTextEdit()

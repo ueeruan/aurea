@@ -782,8 +782,12 @@ public:
     /// o quadro inteiro vai num envio e a CPU já grava o próximo. O backend
     /// liga sozinho depois de um dispositivo perdido no export deste aparelho;
     /// o motor liga quando mede um quadro longo num driver que precisa disso.
-    virtual void set_export_pass_split(bool split) noexcept { (void)split; }
+    /// 1.0.7.1: `passes` = passes por envio quando ligado (1 = o mais fino;
+    /// o motor usa 8 como prevenção em projeto 3D e 1 depois de um estouro).
+    virtual void set_export_pass_split(bool split, u32 passes = 1) noexcept { (void)split; (void)passes; }
     [[nodiscard]] virtual bool export_pass_split() const noexcept { return false; }
+    /// Passes por envio no export (0 = desligado).
+    [[nodiscard]] virtual u32 export_pass_budget() const noexcept { return 0; }
 
     /// Número do último frame submetido (o `FrameBegin::frameNumber` dele).
     /// 0 = nenhum / backend sem essa noção.

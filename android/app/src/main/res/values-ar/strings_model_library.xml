@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="model_shop_title">متجر النماذج</string>
+    <string name="model_shop_tab">النماذج</string>
+    <string name="model_shop_all">الكل</string>
+    <string name="model_shop_low_poly">مضلعات قليلة</string>
+    <string name="model_shop_realistic">واقعية</string>
+    <string name="model_shop_create">إنشاء مشروع</string>
+    <string name="model_shop_insert">إدراج</string>
+</resources>

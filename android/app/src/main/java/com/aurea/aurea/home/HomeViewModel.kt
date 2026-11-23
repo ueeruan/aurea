@@ -263,22 +263,34 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                 store.showToast(com.aurea.aurea.ui.i18n.AppText.get(getApplication(), R.string.import_failed))
                 return@launch
             }
-            if (!awaitEngine(store) || request != mediaCreation || destination != store.projectGeneration) return@launch
-            val previousPath = store.project.path
             val ratio = if (media.width > 0 && media.height > 0) media.width.toFloat() / media.height else 9f / 16f
-            val frame = frameFor(ratio, 1080)
-            // Encoders de vídeo pedem medidas pares.
-            store.newProject(frame.width and 1.inv(), frame.height and 1.inv(), 30f, media.name)
-            val expectedGeneration = destination + 1
-            if (store.projectGeneration != expectedGeneration) return@launch
-            val opened = withTimeoutOrNull(ENGINE_WAIT_MS) {
-                snapshotFlow { Triple(store.project.path, store.screen, store.projectOperationBusy) }.first {
-                    it.first != previousPath && it.second == Screen.Editor && !it.third
-                }
-            }
-            if (opened == null || request != mediaCreation || store.projectGeneration != expectedGeneration) return@launch   // a falha já foi avisada pelo store
+            if (!openMediaProject(store, media.name, ratio, request, destination)) return@launch
             if (media.video) store.importVideo(uri) else store.importImage(uri)
         }
+    }
+
+    internal fun createFromLibraryModel(store: EditorStore, id: String, name: String) {
+        val request = ++mediaCreation
+        val destination = store.projectGeneration
+        viewModelScope.launch {
+            if (openMediaProject(store, name, 1f, request, destination)) store.importLibraryModel(id, name)
+        }
+    }
+
+    private suspend fun openMediaProject(store: EditorStore, name: String, ratio: Float, request: Long, destination: Long): Boolean {
+        if (!awaitEngine(store) || request != mediaCreation || destination != store.projectGeneration) return false
+        val previousPath = store.project.path
+        val frame = frameFor(ratio, 1080)
+        // Encoders de vídeo pedem medidas pares.
+        store.newProject(frame.width and 1.inv(), frame.height and 1.inv(), 30f, name)
+        val expectedGeneration = destination + 1
+        if (store.projectGeneration != expectedGeneration) return false
+        val opened = withTimeoutOrNull(ENGINE_WAIT_MS) {
+            snapshotFlow { Triple(store.project.path, store.screen, store.projectOperationBusy) }.first {
+                it.first != previousPath && it.second == Screen.Editor && !it.third
+            }
+        }
+        return opened != null && request == mediaCreation && store.projectGeneration == expectedGeneration
     }
 
     private class Media(val name: String, val video: Boolean, val width: Int, val height: Int)
@@ -327,7 +339,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
          * Omega home · P0-2: Início (Comunidade) · Perfil · [+] · Projetos ·
          * Presets. Os Ajustes saíram da barra para a gaveta (P0-3).
          */
-        const val TAB_COUNT = 6
+        const val TAB_COUNT = 7
         const val HOME_TAB = 0
         const val PROJECTS_TAB = 1
         const val PRESETS_TAB = 2
@@ -336,6 +348,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         const val MURAL_TAB = 4
         /** Home nova: o feed da comunidade tem aba própria; o Início é Mural + Novidades. */
         const val COMMUNITY_TAB = 5
+        const val MODELS_TAB = 6
 
         private const val PREFS = "aurea.home"
         // Omega home.

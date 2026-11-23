@@ -1134,6 +1134,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (NSString*)importAeData:(NSData*)data fileName:(NSString*)fileName layer:(uint64_t)layer NS_SWIFT_NAME(importAeData(_:fileName:layer:));
 /// 0.4.6: `textAnimatorPro` = animadores de texto do .ffx viram efeitos Text Animator Pro (editáveis).
 - (NSString*)importAeData:(NSData*)data fileName:(NSString*)fileName layer:(uint64_t)layer textAnimatorPro:(BOOL)pro NS_SWIFT_NAME(importAeData(_:fileName:layer:textAnimatorPro:));
++ (NSString*)importAeProjectFile:(NSString*)inputPath outputPath:(NSString*)outputPath title:(NSString*)title NS_SWIFT_NAME(importAeProjectFile(_:outputPath:title:));
 - (NSArray<NSNumber*>*)parseCaptionPreset:(NSString*)json NS_SWIFT_NAME(parseCaptionPreset(_:));
 - (NSString*)makeCaptionPreset:(NSString*)name options:(NSDictionary<NSString*, NSNumber*>*)options NS_SWIFT_NAME(makeCaptionPreset(_:options:));
 - (NSArray<NSNumber*>*)parseCurvePreset:(NSString*)json NS_SWIFT_NAME(parseCurvePreset(_:));

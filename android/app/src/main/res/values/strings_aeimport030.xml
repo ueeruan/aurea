@@ -1,6 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 0.3.0: importar presets .ffx e scripts .jsx do After Effects. -->
 <resources>
+    <string name="ae_project_import">Importar do AE</string>
+    <string name="home_project_import">Importar</string>
+    <string name="home_project_import_aurea">Projeto do Aurea (.aureaproj)</string>
+    <string name="home_project_import_aep">After Effects (.aep, .zip, .rar)</string>
+    <string name="ae_project_import_detail">Importe o projeto com as mídias originais e mantenha as composições editáveis.</string>
+    <string name="ae_project_select_file">Escolha um projeto .aep ou um pacote .zip ou .rar do After Effects.</string>
+    <string name="ae_project_use_separate_import">Use Importar do AE para abrir um projeto ou pacote do After Effects.</string>
+    <string name="ae_project_too_big">O projeto excede o limite de 64 MB para .aep ou 8 GB para .zip e .rar.</string>
+    <string name="ae_kind_media">Mídia</string>
     <string name="ae_import_menu">Importar do After Effects (.ffx, .jsx)</string>
     <string name="ae_import_menu_detail">Preset: efeitos, keyframes e animadores de texto na camada escolhida. Script: cria e anima camadas.</string>
     <string name="ae_importing">Importando do After Effects…</string>

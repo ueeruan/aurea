@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="model_shop_title">Toko Model</string>
+    <string name="model_shop_tab">Model</string>
+    <string name="model_shop_all">Semua</string>
+    <string name="model_shop_low_poly">Low poly</string>
+    <string name="model_shop_realistic">Realistis</string>
+    <string name="model_shop_create">Buat proyek</string>
+    <string name="model_shop_insert">Sisipkan</string>
+</resources>

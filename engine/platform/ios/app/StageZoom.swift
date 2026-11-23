@@ -208,8 +208,8 @@ struct StagePinchTracker {
     static let shared = OmegaChromeRequests()
     @Published var commandSearch = false
     @Published var performanceTest = false
-    /// Preset/script do After Effects (o seletor abre pela raiz do editor).
-    @Published var aeImport = false
+    /// O seletor do After Effects abre pela raiz do editor.
+    @Published var aeImport: ShellAddPicker?
 }
 
 /// A coluna de modos (`viewmode.column`): presa à direita da prévia, abre pelo

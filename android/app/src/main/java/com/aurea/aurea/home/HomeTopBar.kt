@@ -1,6 +1,7 @@
 package com.aurea.aurea.home
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,8 +12,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -34,9 +40,7 @@ import com.aurea.aurea.ui.theme.CupertinoIcon
 import com.aurea.aurea.ui.theme.tocavel
 
 /**
- * Omega home · P0-1: a barra superior da Home (57 dp). ☰ (50 × 50) abre a
- * gaveta de ajustes; a marca do AUREA fica centrada na largura toda; à direita
- * as Novidades (o lugar do botão extra da referência) e o avatar da conta.
+ * Barra superior da Home: menu de ajustes, importação de projetos e conta.
  *
  * [accountMenu]: com login, o avatar abre um menu ancorado (conectado como,
  * sair, excluir); sem login, [onAccount] abre a tela de entrar.
@@ -44,6 +48,8 @@ import com.aurea.aurea.ui.theme.tocavel
 @Composable
 internal fun HomeTopBar(
     onMenu: () -> Unit,
+    onImportAurea: () -> Unit,
+    onImportAe: () -> Unit,
     signedInEmail: String?,
     onAccount: () -> Unit,
     accountMenuOpen: Boolean,
@@ -69,6 +75,47 @@ internal fun HomeTopBar(
             contentAlignment = Alignment.Center,
         ) {
             CupertinoIcon(CupertinoGlyph.LineHorizontal3, 24.dp, AureaColors.LightText)
+        }
+        var importMenuOpen by remember { mutableStateOf(false) }
+        Box(Modifier.align(Alignment.Center).padding(horizontal = 56.dp)) {
+            Box(
+                Modifier
+                    .heightIn(min = 48.dp)
+                    .testTag("home.import")
+                    .tocavel { importMenuOpen = true },
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(AureaColors.LightInk)
+                        .padding(horizontal = 11.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CupertinoIcon(CupertinoGlyph.ArrowDownToLine, 16.dp, AureaColors.LightOnInk)
+                    Text(
+                        stringResource(R.string.home_project_import),
+                        style = AureaType.of(14f, FontWeight.SemiBold, 0f, AureaColors.LightOnInk),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    CupertinoIcon(CupertinoGlyph.ChevronDown, 10.dp, AureaColors.LightOnInk)
+                }
+            }
+            AnchoredMenu(
+                expanded = importMenuOpen,
+                onDismiss = { importMenuOpen = false },
+                width = 276.dp,
+                entries = listOf(
+                    MenuEntry.Item(stringResource(R.string.home_project_import_aurea),
+                        glyph = CupertinoGlyph.DocText, tag = "home.import.aurea", onClick = onImportAurea),
+                    MenuEntry.Item(stringResource(R.string.home_project_import_aep),
+                        glyph = CupertinoGlyph.Film, tag = "home.import.aep", onClick = onImportAe),
+                ),
+                alignEnd = false,
+                tag = "home.import.menu",
+            )
         }
         Row(Modifier.align(Alignment.CenterEnd).padding(end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             // A abertura das Novidades uma vez por versão (e o pedido de doação) continua.

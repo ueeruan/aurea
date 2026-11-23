@@ -20,6 +20,12 @@ function(aurea_add_project_archive_reader)
     else()
         find_package(ZLIB REQUIRED)
     endif()
+    # 1.0.7.1: o SDK da Apple tem o símbolo futimesat, mas nenhum header o
+    # declara; a checagem da libarchive o achava e o iOS não compilava
+    # (archive_read_disk_posix.c, "call to undeclared function futimesat").
+    if(APPLE)
+        set(HAVE_FUTIMESAT 0 CACHE INTERNAL "futimesat nao declarado no SDK da Apple")
+    endif()
     FetchContent_Declare(aurea_libarchive
         URL https://libarchive.org/downloads/libarchive-3.8.11.tar.xz
         URL_HASH SHA256=a3dc0872b1b39da34dc18ef1b944f0f11ffd37425d70ae04be679279f1cf43d2)

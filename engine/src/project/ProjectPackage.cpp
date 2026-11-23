@@ -12,6 +12,7 @@
 #include "aurea/media/ImageSequence.hpp"
 #include "aurea/platform/AddressSpace.hpp"
 #include "aurea/project/Project.hpp"
+#include "aurea/project/Presets.hpp"
 #include "aurea/project/Serialization.hpp"
 #include "aurea/scene3d/Shape3D.hpp"
 #include "aurea/scene3d/Text3D.hpp"
@@ -972,6 +973,135 @@ Status read_package(const std::string& packagePath, const std::string& projectOu
     out.relinked = relinked;
     const u32 total = distinct_media(projectOut);
     out.missing = total > static_cast<u32>(relink.size()) ? total - static_cast<u32>(relink.size()) : 0;
+    return OkStatus;
+}
+
+namespace {
+
+constexpr std::array<u8, 8> kBackupMagic{'A', 'U', 'R', 'E', 'A', 'B', 'A', 'K'};
+constexpr u32 kBackupVersion = 1;
+constexpr u32 kBackupMaxProjects = 10000;
+
+Status copy_backup_record(std::FILE* in, std::FILE* out, u64 bytes, std::vector<u8>& buffer, u32& crc) {
+    while (bytes > 0) {
+        const usize size = static_cast<usize>(std::min<u64>(bytes, buffer.size()));
+        if (std::fread(buffer.data(), 1, size, in) != size) return Errc::CorruptData;
+        if (std::fwrite(buffer.data(), 1, size, out) != size) return errno == ENOSPC ? Errc::StorageFull : Errc::IoError;
+        crc = crc_update(crc, buffer.data(), size);
+        bytes -= size;
+    }
+    return OkStatus;
+}
+
+} // namespace
+
+Status append_backup_project(const std::string& backupPath, const std::string& packagePath,
+                             u32 index, u32 count) noexcept {
+    if (backupPath == packagePath || count == 0 || count > kBackupMaxProjects || index >= count) return Errc::InvalidArgument;
+    std::error_code ec;
+    const u64 size = fs::file_size(fs::u8path(packagePath), ec);
+    if (ec || size == 0) return Errc::IoError;
+    if (size >= kZipLimit) return Errc::BudgetExceeded;
+    File src(fileio::open_file(packagePath, "rb"));
+    File out(fileio::open_file(backupPath, index == 0 ? "wb" : "ab"));
+    if (!src.f || !out.f) return Errc::IoError;
+    std::vector<u8> fields;
+    if (index == 0) {
+        fields.assign(kBackupMagic.begin(), kBackupMagic.end());
+        put32(fields, kBackupVersion);
+        put32(fields, count);
+    }
+    put32(fields, index);
+    put32(fields, static_cast<u32>(size));
+    if (std::fwrite(fields.data(), 1, fields.size(), out.f) != fields.size()) return Errc::IoError;
+    std::vector<u8> buffer(kCopyChunk);
+    u32 crc = 0;
+    if (const Status s = copy_backup_record(src.f, out.f, size, buffer, crc); !s.ok()) return s;
+    fields.clear();
+    put32(fields, crc);
+    if (std::fwrite(fields.data(), 1, fields.size(), out.f) != fields.size()) return Errc::IoError;
+    return std::fclose(out.release()) == 0 ? OkStatus : Status{Errc::IoError};
+}
+
+Status restore_backup(const std::string& backupPath, const std::string& projectsDir, const std::string& mediaRoot,
+                      const std::string& batchId, BackupRestoreResult& out) noexcept {
+    out = {};
+    if (batchId.empty() || batchId.size() > 64 || batchId.find_first_not_of("0123456789abcdefABCDEF-") != std::string::npos)
+        return Errc::InvalidArgument;
+    File input(fileio::open_file(backupPath, "rb"));
+    if (!input.f) return Errc::IoError;
+    u8 header[16];
+    if (std::fread(header, 1, sizeof(header), input.f) != sizeof(header) ||
+        !std::equal(kBackupMagic.begin(), kBackupMagic.end(), header)) return Errc::UnsupportedFormat;
+    if (get32(header + 8) != kBackupVersion) return Errc::UnsupportedVersion;
+    const u32 count = get32(header + 12);
+    if (count == 0 || count > kBackupMaxProjects) return Errc::CorruptData;
+
+    const fs::path projects = fs::u8path(projectsDir);
+    const fs::path staging = projects / (".restore-" + batchId);
+    const fs::path media = fs::u8path(mediaRoot) / ("backup-" + batchId);
+    std::error_code ec;
+    if (!fs::create_directory(staging, ec) || ec) return Errc::IoError;
+    if (!fs::create_directories(media.parent_path(), ec) && ec) {
+        fs::remove(staging, ec);
+        return Errc::IoError;
+    }
+    if (!fs::create_directory(media, ec) || ec) {
+        fs::remove(staging, ec);
+        return Errc::IoError;
+    }
+    std::vector<fs::path> published;
+    auto fail = [&](Status status) {
+        std::error_code ignored;
+        for (const auto& file : published) fs::remove(file, ignored);
+        fs::remove_all(staging, ignored);
+        fs::remove_all(media, ignored);
+        return status;
+    };
+    std::vector<fs::path> ready;
+    std::vector<u8> buffer(kCopyChunk);
+    BackupRestoreResult result;
+    const std::string package = utf8_of(staging / "project.aureaproj");
+    for (u32 index = 0; index < count; ++index) {
+        u8 record[8];
+        if (std::fread(record, 1, sizeof(record), input.f) != sizeof(record) || get32(record) != index) return fail(Errc::CorruptData);
+        const u32 bytes = get32(record + 4);
+        if (bytes == 0 || bytes == kZipLimit) return fail(Errc::CorruptData);
+        u32 crc = 0;
+        {
+            File part(fileio::open_file(package, "wb"));
+            if (!part.f) return fail(Errc::IoError);
+            const Status copied = copy_backup_record(input.f, part.f, bytes, buffer, crc);
+            const int closed = std::fclose(part.release());
+            if (!copied.ok()) return fail(copied);
+            if (closed != 0) return fail(Errc::IoError);
+        }
+        if (std::fread(record, 1, 4, input.f) != 4 || get32(record) != crc) return fail(Errc::ChecksumMismatch);
+        const std::string name = "restored-" + batchId + "-" + std::to_string(index + 1) + ".aurea";
+        const fs::path stageProject = staging / name;
+        ImportResult project;
+        const Status unpacked = read_package(package, utf8_of(stageProject), utf8_of(media / std::to_string(index + 1)), project);
+        if (!unpacked.ok()) return fail(unpacked);
+        if (project.missing != 0) return fail(Errc::MediaSourceMissing);
+        json::Writer meta;
+        meta.begin_object().key("title").value(project.title.empty() ? std::string("Aurea ") + std::to_string(index + 1) : project.title).end_object();
+        const fs::path sidecar = staging / (name + ".meta.json");
+        if (const Status s = fileio::write_atomic(utf8_of(sidecar), meta.str().data(), meta.str().size()); !s.ok()) return fail(s);
+        ready.push_back(sidecar);
+        ready.push_back(stageProject);
+        for (auto& plugin : project.plugins) result.plugins.push_back(std::move(plugin));
+    }
+    if (std::fgetc(input.f) != EOF || std::ferror(input.f)) return fail(Errc::CorruptData);
+    for (const auto& staged : ready) {
+        const fs::path final = projects / staged.filename();
+        if (fs::exists(final, ec) || ec) return fail(Errc::AlreadyExists);
+        fs::rename(staged, final, ec);
+        if (ec) return fail(Errc::IoError);
+        published.push_back(final);
+    }
+    fs::remove_all(staging, ec);
+    result.projects = count;
+    out = std::move(result);
     return OkStatus;
 }
 

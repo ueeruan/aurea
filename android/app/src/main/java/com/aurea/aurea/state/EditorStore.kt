@@ -11595,11 +11595,55 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun exportProjectBackup(target: Uri) {
+        if (!acceptsImport()) return
+        val app = getApplication<Application>()
+        busyMessage = appText(R.string.project_backup_saving)
+        launchImport {
+            val openPath = project.path?.takeIf { ready && it.isNotEmpty() }
+            val result = withContext(Dispatchers.IO) {
+                if (openPath != null) {
+                    val saveCode = saveBlocking(openPath, withThumbnail = false)
+                    if (saveCode != 0) return@withContext ProjectFile.BackupOutcome(saveCode)
+                }
+                val files = directories().projects.listFiles { file -> file.isFile && file.extension.equals("aurea", ignoreCase = true) }
+                    ?: return@withContext ProjectFile.BackupOutcome(ProjectFile.ERR_IO)
+                val entries = files.sortedBy { it.name }.map { it to (readMeta(it)?.title ?: it.nameWithoutExtension) }
+                ProjectFile.exportBackup(app, engine, entries, target)
+            }
+            when {
+                result.code != 0 -> {
+                    val reason = projectFileError(result.code)
+                    errorMessage = result.projectTitle?.let { appText(R.string.project_backup_project_failed, it, reason) } ?: reason
+                }
+                result.count == 0 -> showToast(appText(R.string.project_backup_empty))
+                else -> showToast(appText(R.string.project_backup_saved, result.count))
+            }
+        }
+    }
+
+    fun restoreProjectBackup(source: Uri) {
+        if (!acceptsImport()) return
+        val app = getApplication<Application>()
+        busyMessage = appText(R.string.project_backup_restoring)
+        launchImport {
+            val result = withContext(Dispatchers.IO) { ProjectFile.restoreBackup(app, engine, source, directories().projects) }
+            if (result.code != 0) {
+                errorMessage = if (result.code == ProjectFile.ERR_NOT_PROJECT) appText(R.string.project_backup_invalid) else projectFileError(result.code)
+                return@launchImport
+            }
+            refreshProjects()
+            com.aurea.aurea.effects.PluginRuntime.offerEmbedded(result.plugins)
+            showToast(appText(R.string.project_backup_restored, result.count))
+        }
+    }
+
     private fun projectFileError(code: Int): String = when (code) {
         ProjectFile.ERR_NOT_PROJECT -> appText(R.string.project_file_err_not_project)
         ProjectFile.ERR_NEWER -> appText(R.string.project_file_err_newer)
         ProjectFile.ERR_CORRUPT, ProjectFile.ERR_CHECKSUM -> appText(R.string.project_file_err_corrupt)
         ProjectFile.ERR_IO -> appText(R.string.project_file_err_unreadable)
+        ProjectFile.ERR_MISSING_MEDIA -> appText(R.string.project_backup_missing)
         else -> humanError(code)
     }
 

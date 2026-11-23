@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.LruCache
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.key
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
@@ -71,12 +73,13 @@ class EffectPreviewStore(
      * A prévia do efeito: memória → disco → GPU. Disco e GPU FORA do main
      * thread; a GPU numa fila de um só.
      */
-    suspend fun load(typeId: Int, width: Int, height: Int): ImageBitmap? {
+    suspend fun load(typeId: Int, width: Int, height: Int, generate: Boolean = true): ImageBitmap? {
         val k = key(typeId, width, height)
         memory.get(k)?.let { return it }
         val epoch = trimEpoch
         val file = File(dir, "$k.webp")
         withContext(EffectPreviewDisk) { readPng(file) }?.let { if (epoch == trimEpoch) memory.put(k, it); return it }
+        if (!generate) return null
         val bmp = withContext(EffectPreviewGpu) {
             // Outro cartão com o mesmo efeito pode ter gerado enquanto este esperava.
             if (epoch != trimEpoch) null else memory.get(k) ?: try { render(typeId, width, height) }
@@ -157,17 +160,27 @@ internal val EffectPreviewDisk = Dispatchers.IO.limitedParallelism(2)
  */
 data class EffectPreviewResult(val image: ImageBitmap? = null, val loading: Boolean = false)
 
+internal val LocalFxThumbnailWork = compositionLocalOf { true }
+
 @Composable
-fun rememberEffectPreviewState(store: EffectPreviewStore?, effectTypeId: Int, width: Int, height: Int): EffectPreviewResult {
+fun rememberEffectPreviewState(
+    store: EffectPreviewStore?,
+    effectTypeId: Int,
+    width: Int,
+    height: Int,
+    generate: Boolean = true,
+    active: Boolean = true,
+): EffectPreviewResult {
     if (store == null) return EffectPreviewResult()
-    val cached = store.peek(effectTypeId, width, height)
-    val state = produceState(EffectPreviewResult(cached, cached == null), store, effectTypeId, width, height) {
-        val image = store.peek(effectTypeId, width, height)
-        // A tile recycled during a fling never gets as far as the native renderer.
-        if (image == null) delay(100)
-        value = EffectPreviewResult(image ?: store.load(effectTypeId, width, height))
+    return key(store, effectTypeId, width, height) {
+        val cached = store.peek(effectTypeId, width, height)
+        produceState(EffectPreviewResult(cached, cached == null && generate), active, generate) {
+            if (!active || value.image != null) return@produceState
+            // Wait for this cell to stay visible after the list settles.
+            delay(150)
+            value = EffectPreviewResult(store.load(effectTypeId, width, height, generate))
+        }.value
     }
-    return state.value
 }
 
 @Composable

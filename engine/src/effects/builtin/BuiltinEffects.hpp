@@ -213,6 +213,11 @@ struct BlurRequest {
 [[nodiscard]] Status build_gaussian(EffectBuildContext& ctx, const LayerImage& input,
                                     const BlurRequest& request, LayerImage& out);
 
+enum class BlurKernel { Gaussian, Box, Triangle };
+
+[[nodiscard]] Status build_separable_blur(EffectBuildContext& ctx, const LayerImage& input,
+                                          const BlurRequest& request, BlurKernel kernel, LayerImage& out);
+
 /// Região de saída de um efeito que espalha luz: a entrada expandida pela
 /// extensão do kernel, recortada ao que o quadro mostra (mais a margem que os
 /// efeitos seguintes leem). Sem o recorte, um blur numa layer em 1000% de

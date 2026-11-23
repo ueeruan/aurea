@@ -30,6 +30,9 @@ float fbm(vec3 v) {
 mat2 rotation(float a) { float c=cos(a),s=sin(a);return mat2(c,s,-s,c); }
 float field(vec2 point) {
     vec2 uv=point/p.q5.xy;
+    // The calibrated plasma profile advances in the measured horizontal
+    // direction. Serialized legacy instances retain the original field.
+    if (p.q6.w > 0.5) uv.x = 1.0 - uv.x;
     vec2 v=(uv-0.5-p.p2.xy)*vec2(p.q5.x/p.q5.y*p.p1.y,1.0)*p.p1.x;
     float f;
     if(p.p0.w<0.5) {

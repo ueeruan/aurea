@@ -12,6 +12,132 @@ f32 finite_or(f32 value, f32 fallback) noexcept {
     return std::isfinite(value) ? value : fallback;
 }
 
+class BlurDissolve final : public Effect {
+public:
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo info{"aurea.transition.blur_dissolve", "Dissolver com desfoque",
+                                     "Transição", EffectClass::Neighborhood};
+        return info;
+    }
+
+    void declare_parameters(ParameterRegistry& p) const override {
+        static const char* const directions[] = {"Saída", "Entrada"};
+        static const char* const filters[] = {"Gaussiano", "Caixa", "Triangular"};
+        p.add_float("progress", "Progresso", 0.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_layer_ref("background", "Camada de fundo");
+        p.add_enum("direction", "Direção", directions, 2, 0);
+        p.add_bool("auto", "Duração da camada", false);
+        p.add_float("radius", "Desfoque", 32.0f, 0.0f, 512.0f, kParamAnimatable | kParamPixels, "px");
+        p.add_point2("axis", "Largura X / Y", {1.0f, 0.0f}, 0.0f, 4.0f, kParamAnimatable);
+        p.add_float("outgoing", "Desfoque da saída", 100.0f, 0.0f, 300.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("incoming", "Desfoque da entrada", 100.0f, 0.0f, 300.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_enum("filter", "Filtro", filters, 3, 0);
+        p.add_bool("repeat_edges", "Repetir pixels da borda", true);
+    }
+
+    i32 input_layer_param() const noexcept override { return kBackground; }
+
+    bool is_identity(const EffectEval& e) const noexcept override { return foreground_exit(e) <= 0.0f; }
+
+    bool demo_values(EffectInstance&, std::vector<ParamValue>& values) const noexcept override {
+        values[kProgress] = ParamValue::scalar(50.0f);
+        return true;
+    }
+
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        for (const auto id : {ShaderId::effects_blur_dissolve_frag, ShaderId::effects_gaussian_blur_frag,
+                              ShaderId::effects_downsample_frag}) {
+            out.push_back(PipelineKey::fullscreen(id, work));
+        }
+    }
+
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
+                 LayerImage& out) const override {
+        const f32 t = foreground_exit(e);
+        if (t <= 0.0f) { out = input; return OkStatus; }
+        const LayerImage* background = ctx.layer_input(e.value(kBackground).ref);
+        const f32 radius = std::clamp(finite_or(e.f(kRadius), 32.0f), 0.0f, 512.0f);
+        const f32 toward = scale(e, kIncoming);
+        const f32 away = scale(e, kOutgoing);
+        const bool reverse = e.e(kDirection) != 0;
+        LayerImage foreground = input;
+        LayerImage back = background ? *background : LayerImage{};
+        if (t < 1.0f) {
+            if (const Status result = blur(ctx, e, input, radius * t * (reverse ? toward : away), true, foreground);
+                !result.ok()) return result;
+        }
+        if (background && t < 1.0f) {
+            if (const Status result = blur(ctx, e, *background, radius * (1.0f - t) * (reverse ? away : toward), false, back);
+                !result.ok()) return result;
+        }
+
+        Rect region = foreground.region;
+        if (background) {
+            Rect visible = input.region;
+            if (e.placement) {
+                auto placement = *e.placement;
+                placement.preserveFullExtent = false;
+                const Rect viewport = visible_layer_rect(placement);
+                if (!viewport.empty()) visible = viewport;
+            } else {
+                visible = background->region;
+            }
+            region = t < 1.0f ? Rect::unite(region, visible) : visible;
+        }
+        const Mat4 m = e.placement ? e.placement->compFromLayer : Mat4::identity();
+        Uniforms u{};
+        u.region = {region.x, region.y, region.w, region.h};
+        u.foreground = EffectBuildContext::uv_map(region, foreground.region);
+        if (background) u.background = {back.region.x, back.region.y, back.region.w, back.region.h};
+        u.compX = {m.col[0].x, m.col[1].x, m.col[3].x, 0.0f};
+        u.compY = {m.col[0].y, m.col[1].y, m.col[3].y, 0.0f};
+        u.compW = {m.col[0].w, m.col[1].w, m.col[3].w, 0.0f};
+        u.blend = {t, background ? 1.0f : 0.0f, 0.0f, 0.0f};
+
+        u32 width = 0, height = 0;
+        ctx.region_size(region, input.texel_scale_x(), width, height);
+        out = LayerImage{ctx.texture("blur-dissolve", width, height), region, width, height};
+        if (ctx.fullscreen_pass("blur-dissolve", PassStage::Effects, out.texture, ShaderId::effects_blur_dissolve_frag,
+                                {PassTexture{foreground.texture, {}, CommonSampler::LinearBorder},
+                                 PassTexture{background ? back.texture : foreground.texture, {}, CommonSampler::LinearBorder}},
+                                &u, sizeof(u)) == kInvalidIndex) return Errc::PipelineCompileFailed;
+        return OkStatus;
+    }
+
+private:
+    enum : u32 { kProgress, kBackground, kDirection, kAuto, kRadius, kAxis, kOutgoing, kIncoming, kFilter, kEdges };
+    struct Uniforms { Vec4 region, foreground, background, compX, compY, compW, blend; };
+    static_assert(sizeof(Uniforms) == 112);
+
+    static f32 foreground_exit(const EffectEval& e) noexcept {
+        const f32 progress = e.b(kAuto) ? e.clipProgress : e.f(kProgress) * 0.01f;
+        const f32 t = std::clamp(finite_or(progress, 0.0f), 0.0f, 1.0f);
+        return e.e(kDirection) != 0 ? 1.0f - t : t;
+    }
+
+    static f32 scale(const EffectEval& e, u32 param) noexcept {
+        return std::clamp(finite_or(e.f(param), 100.0f), 0.0f, 300.0f) * 0.01f;
+    }
+
+    static Status blur(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& source, f32 radius,
+                       bool foreground, LayerImage& out) {
+        const Vec2 axis = e.p2(kAxis);
+        BlurRequest request;
+        request.sigmaX = radius * std::clamp(finite_or(axis.x, 1.0f), 0.0f, 4.0f) / 3.0f;
+        request.sigmaY = radius * std::clamp(finite_or(axis.y, 0.0f), 0.0f, 4.0f) / 3.0f;
+        request.repeatEdges = e.b(kEdges);
+        if (foreground && !request.repeatEdges && (request.sigmaX > 0.0f || request.sigmaY > 0.0f)) {
+            const f32 extendX = std::ceil(3.0f * request.sigmaX);
+            const f32 extendY = std::ceil(3.0f * request.sigmaY);
+            request.outRegion = spread_region(source.region, extendX, extendY, e.placement, 2.0f);
+            request.clippedRegion = request.outRegion.w < source.region.w + 2.0f * extendX
+                                 || request.outRegion.h < source.region.h + 2.0f * extendY;
+        }
+        static constexpr BlurKernel kernels[] = {BlurKernel::Gaussian, BlurKernel::Box, BlurKernel::Triangle};
+        return build_separable_blur(ctx, source, request, kernels[std::min(e.e(kFilter), 2u)], out);
+    }
+};
+
 // Native alpha transitions. Coordinates stay in layer space, including cropped
 // preview tiles, so changing preview resolution cannot move the transition.
 class Wipe final : public Effect {
@@ -266,7 +392,7 @@ private:
 // -----------------------------------------------------------------------------
 class ShapeWipe final : public Effect {
 public:
-    enum Mode : u32 { kIris = 0, kBox, kBlinds };
+    enum Mode : u32 { kIris = 0, kBox, kBlinds, kCircular };
     enum : u32 { kCompletion = 0, kFeather, kReverse };
 
     explicit ShapeWipe(u32 mode) : mode_(mode) {}
@@ -275,11 +401,13 @@ public:
             {effect_keys::kIrisWipe, "Íris", "Transição", EffectClass::Domain},
             {effect_keys::kBoxWipe, "Caixa", "Transição", EffectClass::Domain},
             {effect_keys::kVenetianBlinds, "Persianas", "Transição", EffectClass::Domain},
+            {"aurea.transition.circular_aperture", "Transição circular", "Transição", EffectClass::Domain},
         };
         return infos[mode_];
     }
     void declare_parameters(ParameterRegistry& p) const override {
-        p.add_float("completion", "Conclusão", 50.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("completion", "Conclusão", mode_ == kCircular ? 0.f : 50.f, 0.f, 100.f,
+                    kParamAnimatable | kParamPercent, "%");
         p.add_float("feather", "Suavidade", 0.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
         p.add_bool("reverse", "Inverter direção", false);
         if (mode_ == kBlinds) {
@@ -297,6 +425,7 @@ public:
         }
         p.add_point2("center", "Centro", Vec2{0.5f, 0.5f}, -1.f, 2.f, kParamAnimatable | kParamRelative);
         p.typed_range(-10.f, 10.f);
+        if (mode_ == kCircular) return;
         p.add_angle("rotation", "Rotação", 0.f);
         if (mode_ == kIris) {
             p.add_int("sides", "Lados da íris", 0, 0, 16);   // 0..2 = círculo
@@ -332,7 +461,7 @@ public:
         } else {
             const Vec2 c = e.p2(3);
             u.p1 = {c.x * w, c.y * h, mode_ == kIris ? static_cast<f32>(e.value(5).as_int()) : 0.f,
-                    e.f(4) * kDeg2Rad};
+                    mode_ != kCircular ? e.f(4) * kDeg2Rad : 0.f};
         }
         u.p2 = {input.region.x, input.region.y, input.region.w, input.region.h};
         u.p3 = {w, h, 0.f, 0.f};
@@ -350,9 +479,10 @@ private:
 void register_transition_effects(EffectRegistry& r) {
     for (u32 mode = Wipe::Linear; mode <= Wipe::Range; ++mode) (void)r.add(std::make_unique<Wipe>(mode));
     (void)r.add(std::make_unique<BlockDissolveReference>());
+    (void)r.add(std::make_unique<BlurDissolve>());
     register_radial_wipe_reference(r);
 }
 void register_shape_transition_effects(EffectRegistry& r) {
-    for (u32 mode = 0; mode < 3; ++mode) (void)r.add(std::make_unique<ShapeWipe>(mode));
+    for (u32 mode = 0; mode <= ShapeWipe::kCircular; ++mode) (void)r.add(std::make_unique<ShapeWipe>(mode));
 }
 }

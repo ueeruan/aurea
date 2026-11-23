@@ -420,6 +420,115 @@ public:
     }
 };
 
+class OpticalWarp final : public Effect {
+public:
+    enum Kind : u32 { Fish, Lens, Repeat, Perspective };
+    explicit OpticalWarp(Kind kind) : kind_(kind) {}
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo entries[] = {
+            {"aurea.distort.optical_fisheye", "Olho de peixe óptico", "Distorcer", EffectClass::Domain},
+            {"aurea.distort.optical_lens", "Lupa óptica", "Distorcer", EffectClass::Domain},
+            {"aurea.distort.repeated_transform", "Transformações múltiplas", "Distorcer", EffectClass::Domain},
+            {"aurea.distort.plane_perspective", "Perspectiva de plano", "Distorcer", EffectClass::Domain},
+        };
+        return entries[kind_];
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_point2("center", "Centro", Vec2{0.5f, 0.5f}, -1.f, 2.f, kParamAnimatable | kParamRelative);
+        if (kind_ == Fish) {
+            p.add_float("amount", "Intensidade", 1.f, -0.95f, 8.f, kParamAnimatable);
+            p.add_float("distance", "Distância", 1.f, 0.05f, 8.f, kParamAnimatable);
+            p.add_angle("rotation", "Rotação", 0.f);
+            p.add_point2("shift", "Deslocamento", Vec2{0, 0}, -2.f, 2.f, kParamAnimatable | kParamRelative);
+            p.add_bool("reflect", "Espelhar bordas", true);
+        } else if (kind_ == Lens) {
+            p.add_float("magnification", "Ampliação", 2.f, 0.1f, 20.f, kParamAnimatable);
+            p.add_float("radius", "Raio", 384.f, 0.f, 2048.f, kParamAnimatable | kParamPixels, "px");
+            p.add_float("edge", "Suavidade da borda", 50.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
+            p.add_float("edge_curve", "Curva da borda", 1.f, -1.f, 1.f, kParamAnimatable);
+            p.add_float("relative_width", "Largura relativa", 1.f, 0.1f, 5.f, kParamAnimatable);
+            p.add_float("relative_height", "Altura relativa", 1.f, 0.1f, 5.f, kParamAnimatable);
+            p.add_angle("rotation", "Rotação", 0.f);
+        } else if (kind_ == Repeat) {
+            p.add_int("steps", "Amostras", 3, 2, 100);
+            p.add_float("start_distance", "Distância inicial", 1.5f, 0.05f, 8.f, kParamAnimatable);
+            p.add_float("end_distance", "Distância final", 1.f, 0.05f, 8.f, kParamAnimatable);
+            p.add_angle("start_rotation", "Rotação inicial", 0.f);
+            p.add_angle("end_rotation", "Rotação final", 0.f);
+            p.add_point2("start_shift", "Deslocamento inicial", Vec2{0, 0}, -2.f, 2.f, kParamAnimatable | kParamRelative);
+            p.add_point2("end_shift", "Deslocamento final", Vec2{0, 0}, -2.f, 2.f, kParamAnimatable | kParamRelative);
+            p.add_float("strength", "Intensidade", 100.f, 0.f, 200.f, kParamAnimatable | kParamPercent, "%");
+            p.add_float("exposure_bias", "Viés de exposição", 50.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
+            p.add_bool("reflect", "Espelhar bordas", false);
+        } else {
+            p.add_float("latitude", "Inclinação", 35.f, -89.f, 89.f, kParamAnimatable, "°");
+            p.add_angle("swing", "Rotação do plano", 0.f);
+            p.add_angle("roll", "Rotação da câmera", 0.f);
+            p.add_float("distance", "Distância", 3.f, 0.05f, 16.f, kParamAnimatable);
+            p.add_float("lens_width", "Largura da lente", 1.f, 0.2f, 3.f, kParamAnimatable);
+            p.add_point2("shift", "Deslocamento", Vec2{0, 0}, -2.f, 2.f, kParamAnimatable | kParamRelative);
+            p.add_bool("tile", "Repetir bordas", true);
+            p.add_bool("wrap_horizon", "Repetir acima do horizonte", false);
+        }
+    }
+    bool is_identity(const EffectEval& e) const noexcept override {
+        return (kind_ == Lens && (e.f(2) <= 0.f || e.f(1) == 1.f)) || (kind_ == Repeat && e.f(8) <= 0.f);
+    }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_optical_warps_frag, work));
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
+                 LayerImage& out) const override {
+        const Vec2 size = layer_size(e, input);
+        const Vec2 center = e.p2(0);
+        EffectUniforms u = base_uniforms(input);
+        const f32 regionWidth = std::max(input.region.w, 1e-4f);
+        const f32 regionHeight = std::max(input.region.h, 1e-4f);
+        u.p0 = Vec4{(finite_or(center.x, 0.5f) * size.x - input.region.x) / regionWidth,
+                    (finite_or(center.y, 0.5f) * size.y - input.region.y) / regionHeight,
+                    regionHeight / regionWidth, static_cast<f32>(kind_)};
+        if (kind_ == Fish) {
+            const Vec2 shift = e.p2(4);
+            u.p1 = Vec4{number(e, 1, 1.f, -0.95f, 8.f), number(e, 2, 1.f, 0.05f, 8.f),
+                        finite_or(e.f(3), 0.f) * kDeg2Rad, size.x / regionWidth};
+            u.p2 = Vec4{finite_or(shift.x, 0.f) * size.x / regionWidth, finite_or(shift.y, 0.f) * size.y / regionHeight,
+                        0.f, 0.f};
+            u.p3.w = e.b(5) ? 1.f : 0.f;
+        } else if (kind_ == Lens) {
+            u.p1 = Vec4{number(e, 2, 384.f, 0.f, 2048.f) / regionWidth, pct(e, 3),
+                        number(e, 1, 2.f, 0.1f, 20.f), number(e, 4, 1.f, -1.f, 1.f)};
+            u.p2 = Vec4{number(e, 5, 1.f, 0.1f, 5.f), number(e, 6, 1.f, 0.1f, 5.f),
+                        finite_or(e.f(7), 0.f) * kDeg2Rad, 0.f};
+            u.p3.w = 1.f;
+        } else if (kind_ == Repeat) {
+            const Vec2 start = e.p2(6);
+            const Vec2 end = e.p2(7);
+            u.p1 = Vec4{number(e, 2, 1.5f, 0.05f, 8.f), number(e, 3, 1.f, 0.05f, 8.f),
+                        finite_or(e.f(4), 0.f) * kDeg2Rad, finite_or(e.f(5), 0.f) * kDeg2Rad};
+            u.p2 = Vec4{finite_or(start.x, 0.f) * size.x / regionWidth, finite_or(start.y, 0.f) * size.y / regionWidth,
+                        finite_or(end.x, 0.f) * size.x / regionWidth, finite_or(end.y, 0.f) * size.y / regionWidth};
+            u.p3 = Vec4{static_cast<f32>(std::clamp(e.value(1).as_int(), 2, 100)),
+                        pct(e, 8, 0.f, 2.f), pct(e, 9), e.b(10) ? 1.f : 0.f};
+        } else {
+            const Vec2 shift = e.p2(6);
+            u.p1 = Vec4{number(e, 1, 35.f, -89.f, 89.f) * kDeg2Rad, finite_or(e.f(2), 0.f) * kDeg2Rad,
+                        finite_or(e.f(3), 0.f) * kDeg2Rad, number(e, 4, 3.f, 0.05f, 16.f)};
+            u.p2 = Vec4{number(e, 5, 1.f, 0.2f, 3.f), size.x / regionWidth,
+                        finite_or(shift.x, 0.f) * size.x / regionWidth, finite_or(shift.y, 0.f) * size.y / regionHeight};
+            u.p3 = Vec4{e.b(8) ? 1.f : 0.f, 0.f, 0.f, e.b(7) ? 2.f : 0.f};
+        }
+        return same_region_pass(ctx, input, u, ShaderId::effects_optical_warps_frag,
+                                "deformacao-optica", CommonSampler::LinearBorder, out);
+    }
+
+private:
+    static f32 number(const EffectEval& e, u32 slot, f32 fallback, f32 lo, f32 hi) noexcept {
+        return std::clamp(finite_or(e.f(slot), fallback), lo, hi);
+    }
+    Kind kind_;
+};
+
 } // namespace
 
 void register_gap_effects_046(EffectRegistry& r) {
@@ -427,6 +536,10 @@ void register_gap_effects_046(EffectRegistry& r) {
     (void)r.add(std::make_unique<PolarCoordinates>());
     (void)r.add(std::make_unique<Tunnel>());
     (void)r.add(std::make_unique<Magnify>());
+    (void)r.add(std::make_unique<OpticalWarp>(OpticalWarp::Fish));
+    (void)r.add(std::make_unique<OpticalWarp>(OpticalWarp::Lens));
+    (void)r.add(std::make_unique<OpticalWarp>(OpticalWarp::Repeat));
+    (void)r.add(std::make_unique<OpticalWarp>(OpticalWarp::Perspective));
     (void)r.add(std::make_unique<LongShadow>());
     (void)r.add(std::make_unique<RoughenEdges>());
     (void)r.add(std::make_unique<ContourLines>());

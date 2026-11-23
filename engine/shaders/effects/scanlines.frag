@@ -27,7 +27,34 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 color;
 } p;
 
+vec4 sinusoidal_scanlines(vec4 src) {
+    const vec3 lumaWeights = vec3(0.3125, 0.5, 0.1875);
+    float alpha = clamp(src.a, 0.0, 1.0);
+    if (alpha <= 1e-6) return vec4(0.0);
+
+    // The amplitude is fitted in encoded premultiplied color, where values
+    // near black and white have less headroom for the symmetric modulation.
+    vec3 encoded = aurea_linear_to_srgb(max(src.rgb / alpha, vec3(0.0))) * alpha;
+    float gray = dot(encoded, lumaWeights);
+    encoded = max(mix(vec3(gray), encoded, p.p2.z), vec3(0.0));
+    vec3 tint = aurea_linear_to_srgb(max(p.color.rgb, vec3(0.0)));
+    vec3 base = pow(encoded * p.p1.w * tint, vec3(p.p2.y)) + p.p2.x;
+
+    vec2 centered = (v_uv - vec2(0.5)) * vec2(1.0, p.p3.x);
+    vec2 normal = vec2(-sin(p.p0.z), cos(p.p0.z));
+    float period = 2.0 * p.p0.x * dot(centered, normal) + p.p0.w;
+    vec3 phase = AUREA_TAU * (vec3(period) + p.p1.rgb);
+    vec3 amplitude = max(min(base, vec3(1.0) - base), vec3(0.0));
+    vec3 wave = clamp(p.p0.y * sin(phase), -1.0, 1.0);
+    vec3 outputEncoded = clamp(base - wave * amplitude, 0.0, alpha);
+    return vec4(aurea_srgb_to_linear(outputEncoded / alpha) * alpha, alpha);
+}
+
 void main() {
+    if (p.p2.w > 0.5) {
+        o_color = sinusoidal_scanlines(texture(u_tex0, v_uv * p.uvMap.xy + p.uvMap.zw));
+        return;
+    }
     // A rolagem desloca a imagem verticalmente: a varredura "prende" na tela
     // enquanto a imagem anda, como a sincronia vertical fora de ajuste.
     // A rolagem é medida em pixels da LAYER, não da textura: assim o preview

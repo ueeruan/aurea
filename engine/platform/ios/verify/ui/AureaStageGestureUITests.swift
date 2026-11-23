@@ -1348,6 +1348,11 @@ import UIKit
         let first = app.buttons["effects.category.color_light"].firstMatch
         for _ in 0..<6 where !(first.exists && first.isHittable) && home.exists { home.swipeUp() }
         XCTAssertTrue(first.exists); XCTAssertGreaterThanOrEqual(first.frame.height, 44)
+        for _ in 0..<4 { home.swipeUp() }
+        app.buttons["effects.plugins"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["plugins.install"].firstMatch.waitForExistence(timeout: 5))
+        app.buttons["effects.tab.catalog"].firstMatch.tap()
+        XCTAssertTrue(home.waitForExistence(timeout: 5))
 
         // Busca: o campo abre focado acima do teclado; um toque no resultado adiciona.
         search.tap()

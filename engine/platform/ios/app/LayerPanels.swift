@@ -537,6 +537,9 @@ struct PanelPresetEntry: Identifiable {
     var source: String? { json ?? file.flatMap { try? String(contentsOf: $0, encoding: .utf8) } }
     /// 0.5.0: Engine::kMotionTextPresetBase.
     static let motionTextBase: UInt32 = 1000
+    static let titleMotionBase: UInt32 = 1100
+    static let titleMotionKeys = ["tp_title_cascade", "tp_title_tracking", "tp_title_bar", "tp_title_return",
+                                  "tp_title_crossfade", "tp_title_split", "tp_title_orbit"]
     /// Os do modelo Motion só no 2D; os antigos só no 3D; os salvos em ambos.
     func fitsText(threeD: Bool) -> Bool {
         guard let preset = textPreset else { return true }
@@ -557,6 +560,10 @@ extension PanelPresetEntry {
                 let motionKeys = ["tp_m_type_in", "tp_m_decode", "tp_m_uncensor", "tp_m_password", "tp_m_title_spread", "tp_m_fade_up", "tp_m_wave", "tp_m_spin", "tp_m_scale_word", "tp_m_scale_out", "app_text_preset_smooth_bounce"]
                 for (index, key) in motionKeys.enumerated() {
                     result.append(PanelPresetEntry(id: "motion:\(index)", name: AureaText.t(key), kind: kind, textPreset: PanelPresetEntry.motionTextBase + UInt32(index)))
+                }
+                for (index, key) in titleMotionKeys.enumerated() {
+                    result.append(PanelPresetEntry(id: "title-motion:\(index)", name: AureaText.t(key), kind: kind,
+                                                   textPreset: titleMotionBase + UInt32(index)))
                 }
                 let keys = ["pn_pop", "pn_textpreset_bounce", "pn_textpreset_slide", "panel_escala", "pn_textpreset_appear",
                             "panel_desfoque", "pn_textpreset_word_highlight", "pn_karaoke", "pn_textpreset_typewriter", "pn_textpreset_wave", "pn_textpreset_elastic"]
@@ -2705,6 +2712,18 @@ struct TextAnimationSection: View {
                 }
                 if parts & 2 != 0 {
                 PanelSection(title: AureaText.t("ui_ready_anims"), glyph: CupertinoGlyph.WandStars, tag: "text.sec.presets") {
+                    if model.selectedLayer?.kind == 4 {
+                        let glyphs = [CupertinoGlyph.Textformat, CupertinoGlyph.ArrowLeftRight, CupertinoGlyph.LineHorizontal3,
+                                      CupertinoGlyph.ArrowCounterclockwise, CupertinoGlyph.SquareOnSquare, CupertinoGlyph.Scissors,
+                                      CupertinoGlyph.ArrowCounterclockwise]
+                        PanelItemGrid(items: zip(PanelPresetEntry.titleMotionKeys, glyphs).enumerated().map { index, item in
+                            PanelItem(glyph: item.1, label: AureaText.t(item.0), tag: "text.title.preset.\(index)") {
+                                beforeAnimation()
+                                animationError = !model.engine.applyTextPreset(id, preset: PanelPresetEntry.titleMotionBase + UInt32(index))
+                                refresh()
+                            }
+                        })
+                    }
                     PanelItemGrid(items: presets.enumerated().map { n, preset in
                         PanelItem(glyph: preset.glyph, label: AureaText.t(preset.key), tag: "text.motion.preset.\(n)") {
                             beforeAnimation()

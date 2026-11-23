@@ -162,10 +162,14 @@ internal fun EffectAfterPreview(
     previewsOn: Boolean,
     width: Int = FX_PREVIEW_W,
     height: Int = FX_PREVIEW_H,
+    generate: Boolean = true,
 ) {
     val tool = effectToolOf(entry.typeId)
     if (tool != null) { EffectToolPlate(toolGlyph(tool)); return }
-    val image = rememberEffectPreviewState(previews?.takeIf { previewsOn }, entry.typeId, width, height).image
+    val image = rememberEffectPreviewState(
+        previews?.takeIf { previewsOn }, entry.typeId, width, height,
+        generate = generate, active = LocalFxThumbnailWork.current,
+    ).image
     if (image == null) GenericPlate(categoryGlyph(entry.category)) else AfterOnlyImage(image)
 }
 

@@ -42,11 +42,14 @@ namespace aurea { namespace vk = gles; }
 #include "aurea/effects/MotionTile.hpp"
 #include "aurea/effects/RandomEdits.hpp"
 #include "aurea/effects/Particular.hpp"
+#include "aurea/project/AeImport.hpp"
+#include "aurea/project/Presets.hpp"
 #include "aurea/project/Project.hpp"
 #include "aurea/project/Serialization.hpp"
 #include "aurea/render/MaskRaster.hpp"
 #include "aurea/render/Renderer.hpp"
 #include "aurea/audio/AudioEffects.hpp"
+#include "aurea/text/Text.hpp"
 #include "aurea/text/TextAnimator.hpp"
 #include "aurea/text/TextTransform.hpp"
 #include "aurea/render/ParticleExtras.hpp"
@@ -6449,6 +6452,119 @@ AUREA_TEST(Gpu, ParticleWorldModesSurviveReverseSeekAndReopen) {
         }
         std::remove(path.c_str());
     }
+}
+
+AUREA_TEST(Gpu, TextAnimationReferenceSamples) {
+    const char* configured = std::getenv("AUREA_TEXT_REFERENCE_MATRIX");
+    if (!configured || !*configured) return;
+    AUREA_REQUIRE_GPU();
+    const std::filesystem::path file(configured);
+    std::ifstream manifest(file, std::ios::binary);
+    AUREA_CHECK(manifest.good());
+    if (!manifest) return;
+    const std::string raw((std::istreambuf_iterator<char>(manifest)), std::istreambuf_iterator<char>());
+    json::Value matrix;
+    AUREA_CHECK(json::parse(raw, matrix) && matrix.is_array());
+    if (!matrix.is_array()) return;
+    Scene3DRig rig;
+    const char* fontPath = std::getenv("AUREA_TEXT_REFERENCE_FONT");
+    if (fontPath && *fontPath) text::set_default_font_path(fontPath);
+    for (const auto& row : matrix.array) {
+        const auto* id = row.get("id");
+        const auto* width = row.get("width");
+        const auto* height = row.get("height");
+        const auto* fps = row.get("fps");
+        const auto* frames = row.get("frames");
+        if (!id || !id->is_number() || !width || !width->is_number() || !height || !height->is_number() ||
+            !fps || !fps->is_number() || !frames || !frames->is_array() || frames->array.empty()) {
+            AUREA_CHECK_MSG(false, "invalid text comparison entry");
+            continue;
+        }
+        const std::string stem = std::to_string(static_cast<u32>(id->number));
+        std::ifstream demo(file.parent_path() / (stem + ".jsx"), std::ios::binary);
+        AUREA_CHECK_MSG(demo.good(), stem.c_str());
+        if (!demo) continue;
+        const std::string source((std::istreambuf_iterator<char>(demo)), std::istreambuf_iterator<char>());
+        const Status fresh = rig.e.new_project(static_cast<u32>(width->number), static_cast<u32>(height->number),
+                                               fps->number, nullptr);
+        AUREA_CHECK_MSG(fresh.ok(), stem.c_str());
+        if (!fresh.ok()) continue;
+        auto& timeline = rig.e.project()->timeline();
+        Composition* comp = timeline.composition(timeline.current());
+        comp->set_duration(FrameIndex{static_cast<i64>(frames->array.back().number) + 2});
+        const auto imported = rig.e.import_ae_data(source, stem + ".jsx", 0);
+        std::printf("    %s: %u layer(s), %u animators, %u keyframes, %zu unsupported\n",
+                    stem.c_str(), imported.layers, imported.animators, imported.keyframes, imported.skipped.size());
+        if (!imported.ok || !imported.layers) {
+            std::printf("      import: %s\n", imported.message.c_str());
+            continue;
+        }
+        for (const auto& item : imported.skipped)
+            std::printf("      line %u: %s (%s)\n", item.line, item.name.c_str(), item.reason.c_str());
+        for (const auto& frame : frames->array) {
+            const FrameIndex index{static_cast<i64>(frame.number)};
+            Command command;
+            command.type = CommandType::PlaybackSeek;
+            command.seek.time = tick_at(index, fps->number);
+            AUREA_CHECK(rig.e.apply_command(command).ok());
+            const Image8 image = rig.capture(480);
+            const auto output = file.parent_path() / (stem + "-" + std::to_string(index.value) + ".png");
+            AUREA_CHECK_MSG(write_png(output.string(), image), stem.c_str());
+        }
+    }
+    if (fontPath && *fontPath) text::set_default_font_path({});
+}
+
+AUREA_TEST(Gpu, TitleMotionPresetsAnimateAndUndoAsOneEdit) {
+    AUREA_REQUIRE_GPU();
+    const char* fontPath = std::getenv("AUREA_TEXT_REFERENCE_FONT");
+    if (fontPath && *fontPath) text::set_default_font_path(fontPath);
+    Scene3DRig rig(640, 360);
+    for (u32 i = 0; i < 7; ++i) {
+        AUREA_CHECK(rig.e.new_project(640, 360, 30, nullptr).ok());
+        const auto textId = rig.e.add_text("AUREA MOTION");
+        AUREA_CHECK(textId.ok());
+        if (!textId.ok()) continue;
+        auto& timeline = rig.e.project()->timeline();
+        Composition* comp = timeline.composition(timeline.current());
+        comp->set_duration(FrameIndex{150});
+        const auto id = LayerId::unpack(*textId);
+        comp->layer(id)->end = FrameIndex{150};
+        const auto baseline = rig.capture(640);
+        const std::string preset = std::to_string(i + 1100);
+        const bool applied = rig.e.apply_text_preset(*textId, i + 1100);
+        AUREA_CHECK_MSG(applied, preset.c_str());
+        if (!applied) continue;
+        comp = timeline.composition(timeline.current());
+        AUREA_CHECK_EQ(comp->layers().count(), i < 2 ? 1u : 2u);
+        AUREA_CHECK(comp->layer(id)->text.content == "AUREA MOTION");
+        if (i >= 2 && i <= 5) AUREA_CHECK_EQ(comp->layer(id)->masks.size(), 1u);
+        auto render = [&](i64 frame) {
+            Command seek;
+            seek.type = CommandType::PlaybackSeek;
+            seek.seek.time = tick_at(FrameIndex{frame}, 30.0);
+            AUREA_CHECK(rig.e.apply_command(seek).ok());
+            return rig.capture(640);
+        };
+        const auto first = render(0);
+        const auto middle = render(50);
+        const auto last = render(119);
+        AUREA_CHECK_MSG(std::max({coverage(first), coverage(middle), coverage(last)}) > .001f, preset.c_str());
+        AUREA_CHECK_MSG(std::max(max_diff(first, middle), max_diff(middle, last)) > 16, preset.c_str());
+        if (i == 2 || i == 4) {
+            AUREA_CHECK_MSG(coverage(first) < coverage(baseline) * .5f, preset.c_str());
+            AUREA_CHECK_MSG(max_diff(baseline, last) <= 2, preset.c_str());
+        }
+        if (i == 3) AUREA_CHECK_MSG(coverage(last) == 0, preset.c_str());
+        Command undo;
+        undo.type = CommandType::Undo;
+        AUREA_CHECK(rig.e.apply_command(undo).ok());
+        comp = timeline.composition(timeline.current());
+        AUREA_CHECK_EQ(comp->layers().count(), 1u);
+        AUREA_CHECK(comp->layer(id)->masks.empty() && comp->layer(id)->layerAnimators.empty()
+                    && comp->layer(id)->text.animators.empty());
+    }
+    if (fontPath && *fontPath) text::set_default_font_path({});
 }
 
 AUREA_TEST(Gpu, JuanPresetsRenderAndKeepExpressionsAfterReopen) {
@@ -14641,6 +14757,7 @@ AUREA_TEST(MotionBlurGpu, FloorReflectionKeepsPerInstanceCamera) {
 #include "RadialWipeReferenceGpu.inl"
 #include "ReferenceBatchAGpu.inl"
 #include "ReferenceBatchBGpu.inl"
+#include "SapphireOracleGpu.inl"
 #include "ExtrudeReferenceGpu.inl"
 #include "ReferenceBatchCGpu.inl"
 #include "TurbulenceTypesGpu.inl"
@@ -14662,6 +14779,7 @@ AUREA_TEST(MotionBlurGpu, FloorReflectionKeepsPerInstanceCamera) {
 #include "RigPoseGpu.inl"
 #include "CCEffectsGpu.inl"
 #include "SaberLumaDissolveGpu.inl"
+#include "MediaCompletionGpu.inl"
 #include "DrawingProgressGpu.inl"
 #include "SplitParentNullGpu.inl"
 #include "GlesFallbackGpu.inl"

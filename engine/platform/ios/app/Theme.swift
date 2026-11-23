@@ -1377,11 +1377,8 @@ struct ClipTone {
 // =============================================================================
 // As alturas das zonas do editor — porte literal de `EditorLayout` do Android.
 //
-//  A regra que a casca A.01 cobrava: abrir painel, adicionar ou trocar de aba
-//  NUNCA move o preview. O painel tira espaço da TIMELINE, e a timeline nunca
-//  fica abaixo do piso. No iOS isso também é o que mantém o CAMetalLayer com o
-//  mesmo tamanho durante um arrasto (redimensionar o drawable a cada gesto
-//  custaria uma recriação de swapchain).
+//  O inspetor reserva uma zona inferior mais alta. A prévia mantém a altura
+//  ao trocar as abas do inspetor, preservando também a faixa de foco da timeline.
 // =============================================================================
 enum SheetContent { case none, hint, dock, panel, curve, batch, adding, addBar }
 
@@ -1409,8 +1406,8 @@ struct EditorMetrics {
 /// Omega fundação (F6, geometria da referência; par do `EditorLayout.kt`): no
 /// telefone em retrato o topo tem 42, o transporte 46 e embaixo fica uma ZONA
 /// FIXA de 280 (timeline + barra de adicionar, ou a timeline com o painel da
-/// camada de 200 por cima). A prévia é o resto e NUNCA muda de altura ao abrir
-/// ou fechar painel. 0.3.3: a divisa arrastável volta (`preferred`, ver `solve`).
+/// camada de 200 por cima). A prévia é o resto. O inspetor aberto reserva mais
+/// espaço para os controles. A divisa ajusta a altura via `preferred`.
 /// O largo fica.
 enum EditorLayout {
     /// Barra superior da referência (botões de 40 com alvo de 44+).
@@ -1452,8 +1449,10 @@ enum EditorLayout {
     static let layerPanelHeight: CGFloat = 200
     /// O que sobra da timeline com o painel aberto: régua 42 + uma linha.
     static let timelineFocus: CGFloat = 80
-    /// O painel cresce com a fonte do sistema: 200 em 1×, 240 em 2×.
+    /// A zona da camada cresce com a fonte do sistema: 200 em 1×, 240 em 2×.
     static func layerPanel(fontScale: CGFloat = 1) -> CGFloat { layerPanelHeight + 40 * (min(max(fontScale, 1), 2) - 1) }
+    /// Espaço adicional para cabeçalho, abas e controles do inspetor aberto.
+    private static let inspectorExtra: CGFloat = 72
     /// 0.3.6: o teto dos painéis de propriedade (par do `EditorLayout.panelMax` do Android):
     /// com a divisa no alto (ou a Edição numa tela alta) o painel ocupava a zona inteira;
     /// passando disso, a timeline fica com o resto. Cresce com a fonte.
@@ -1494,17 +1493,17 @@ enum EditorLayout {
     static func maxPreview(_ total: CGFloat) -> CGFloat { max(previewMin, workspace(total) - zoneMin) }
 
     /// O retrato do telefone (e do tablet em pé): prévia = área − 42 − 46 − zona,
-    /// igual em todos os `SheetContent`. Dentro da zona: `.addBar` = timeline (210)
+    /// com 72 pt a mais na zona inferior ao abrir `.panel`. Dentro da zona: `.addBar` = timeline (210)
     /// + barra (70) embaixo; `.dock`, `.panel`, `.curve` = timeline na zona inteira
-    /// e a folha (200) POR CIMA (`overlay`; ficam 80 de timeline); `.none` = só a
+    /// e a folha sobreposta (`overlay`; ficam 80 de timeline); `.none` = só a
     /// timeline; `.hint`, `.batch`, `.adding` = empilhados embaixo dela. Tela baixa
     /// demais: a prévia fica no piso e a zona encolhe (a soma é sempre a altura).
     /// 0.3.3 recursos: `preferred` > 0 é a altura da prévia escolhida arrastando a
     /// divisa (guardada no aparelho), de `previewMin` até `maxPreview`: a zona cresce
     /// (mais timeline) ou encolhe até `zoneMin`. O painel da camada (`.dock`,
     /// `.panel`, `.curve`) e o adicionar aberto precisam da zona inteira: com a prévia
-    /// maior que a automática, ela devolve o espaço enquanto eles estão abertos (como
-    /// na 0.3.2). Sem preferência, a prévia é a automática (área − 42 − 46 − 280).
+    /// maior que a automática, ela devolve o espaço enquanto eles estão abertos.
+    /// Sem preferência, a prévia ocupa o espaço que sobra da zona automática.
     /// `width` e `aspect` ficam para quem já chamava. Par do `EditorLayout.solve`.
     static func solve(total: CGFloat, content: SheetContent, fullscreen: Bool,
                       width: CGFloat = 0, aspect: CGFloat = 0, preferred: CGFloat = 0, dockRows: Int = 2, fontScale: CGFloat = 1) -> EditorMetrics {
@@ -1516,7 +1515,8 @@ enum EditorLayout {
         let panel = layerPanel(fontScale: fontScale)
         let focus = timelineFocusHeight(fontScale: fontScale)
         let previewFloor = min(previewMin, ws * 0.25)
-        let automatic = min(max(previewFloor, ws - bottomZone(fontScale: fontScale)), ws)
+        let targetZone = bottomZone(fontScale: fontScale) + (content == .panel ? inspectorExtra : 0)
+        let automatic = min(max(previewFloor, ws - targetZone), ws)
         // 0.3.3 recursos: a altura arrastada na divisa (0 = automática).
         let chosen: CGFloat = preferred > 0 && preferred.isFinite
             ? min(min(max(preferred, previewFloor), max(previewFloor, ws - zoneMin)), ws)

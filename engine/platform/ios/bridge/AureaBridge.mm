@@ -189,11 +189,13 @@ Status Host::initialize(const std::string& cacheDirectory, const std::string& do
     // export 4K com a fila cheia. Ainda limitado por ¼ da RAM livre medida e
     // pelos degraus depois de o sistema encerrar o app (ExportMemoryStep).
     if (NSProcessInfo.processInfo.physicalMemory >= (7ull << 30)) config.memoryBudgetCapBytes = 1536ull << 20;
-    // Export sem cópia (Metal → CVPixelBuffer → VTCompressionSession,
-    // AppleVideoEncoder.cpp): ligado; o degrau tem período de teste e cai para
-    // o h264_videotoolbox do FFmpeg. Chave de diagnóstico para desligar no
-    // aparelho: defaults "aurea.export.disableZeroCopy" = YES.
-    config.enableDirectSurfaceExport = ![NSUserDefaults.standardUserDefaults boolForKey:@"aurea.export.disableZeroCopy"];
+    // Keep the buffered VideoToolbox path as the iOS default. The direct
+    // encoder synchronously drains VideoToolbox on every frame to safely
+    // return the Metal render target. A stalled driver can hold that call
+    // past the sink deadline while the input decoder is also active.
+    NSUserDefaults* exportDefaults = NSUserDefaults.standardUserDefaults;
+    config.enableDirectSurfaceExport = [exportDefaults boolForKey:@"aurea.export.enableZeroCopy"]
+                                    && ![exportDefaults boolForKey:@"aurea.export.disableZeroCopy"];
     // Admit against tracked Metal resources within the existing device budget.
     // The legacy half-share rejects a 101 MiB Motion Tile target even when
     // the measured device envelope is larger and live GPU use is below 8 MiB.

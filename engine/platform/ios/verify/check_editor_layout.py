@@ -7,8 +7,8 @@ são os mesmos do `EditorLayoutTest.kt` do Android: tablet EM PÉ usa o layout d
 celular ("a UI inteira sumiu" no iPad 13" era o layout largo em pé), deitado usa
 o largo, e todas as zonas ficam visíveis e somam a tela.
 
-Sem `swiftc` (Windows), confere só a regra do `isWide` no texto e avisa que a
-execução ficou para o CI (macOS).
+Sem `swiftc` (Windows), confere os contratos no código-fonte. A execução
+da geometria fica para o CI (macOS).
 """
 import re
 import shutil
@@ -56,7 +56,7 @@ check(EditorLayout.isWide(844, 390), "celular deitado (≥ 600) é largo")
 check(EditorLayout.isWide(560, 320), "celular deitado usa folha lateral")
 check(!EditorLayout.isWide(1000, 1000), "janela quadrada fica empilhada")
 check(EditorLayout.dockQuick >= 44 && EditorLayout.dockTile >= 44, "doca preserva alvos de toque")
-// Omega fundação (F6): topo 42, transporte 46, zona fixa de 280 e a prévia igual em todos os estados.
+// Topo 42, transporte 46, zona de 280 e mais espaço para o inspetor.
 check(near(EditorLayout.topBar, 42) && near(EditorLayout.transport, 46), "barras da referência")
 check(near(EditorLayout.bottomZone(), 280) && near(EditorLayout.layerPanel(), 200), "zona de 280 com painel de 200")
 // 0.3.4 painéis: a faixa de foco é régua 42 + linha 28 + folga 10 (e cresce com a fonte).
@@ -70,9 +70,10 @@ let contents: [SheetContent] = [.none, .addBar, .dock, .panel, .curve, .batch, .
 for h in [CGFloat(640), 700, 760, 780, 844, 900, 960] {
     for content in contents {
         let m = EditorLayout.solve(total: h, content: content, fullscreen: false, width: 375, aspect: 9.0 / 16.0)
-        check(near(m.preview, h - 368), "\(h) \(content): prévia \(m.preview) deveria ser H - 368")
+        let zone: CGFloat = content == .panel ? 352 : 280
+        check(near(m.preview, h - 88 - zone), "\(h) \(content): altura da prévia")
         check(near(m.total, h), "\(h) \(content): soma \(m.total)")
-        check(near(m.zone, 280), "\(h) \(content): zona \(m.zone)")
+        check(near(m.zone, zone), "\(h) \(content): zona \(m.zone)")
     }
     let bar = EditorLayout.solve(total: h, content: .addBar, fullscreen: false)
     check(!bar.overlay && near(bar.timeline, 210) && near(bar.sheet, 70), "sem camada: timeline 210 + barra 70")
@@ -82,8 +83,9 @@ for h in [CGFloat(640), 700, 760, 780, 844, 900, 960] {
           "adicionando: timeline 210 + barra 70, conteúdo de 193 por cima")
     for content in [SheetContent.dock, .panel, .curve] {
         let m = EditorLayout.solve(total: h, content: content, fullscreen: false)
-        check(m.overlay && near(m.timeline, 280) && near(m.sheet, 200) && near(m.visibleTimeline, 80),
-              "\(content): painel de 200 por cima, 80 de timeline à vista")
+        let height: CGFloat = content == .panel ? 272 : 200
+        check(m.overlay && near(m.timeline, height + 80) && near(m.sheet, height) && near(m.visibleTimeline, 80),
+              "\(content): folha de \(height), 80 de timeline à vista")
     }
     let batch = EditorLayout.solve(total: h, content: .batch, fullscreen: false)
     check(near(batch.sheet, 132) && near(batch.timeline, 148), "seleção múltipla empilhada dentro da zona")
@@ -123,7 +125,8 @@ for h in [CGFloat(640), 700, 760, 780, 844, 900, 960] {
           "\(h) divisa descendo: timeline 150 + barra 70")
     for content in [SheetContent.dock, .panel, .curve, .adding] {
         let m = EditorLayout.solve(total: h, content: content, fullscreen: false, preferred: down)
-        check(near(m.preview, h - 368) && near(m.zone, 280) && near(m.total, h),
+        let zone: CGFloat = content == .panel ? 352 : 280
+        check(near(m.preview, h - 88 - zone) && near(m.zone, zone) && near(m.total, h),
               "\(h) \(content) divisa descendo: painel aberto recebe a zona inteira")
     }
     let tall = EditorLayout.solve(total: h, content: .addBar, fullscreen: false, preferred: 10_000)
@@ -142,8 +145,8 @@ for height in [CGFloat(240), 320, 480, 568] {
     }
 }
 let bigFont = EditorLayout.solve(total: 900, content: .panel, fullscreen: false, fontScale: 1.5)
-check(near(bigFont.sheet, 220) && near(bigFont.timeline, 319) && near(bigFont.visibleTimeline, 99) && near(bigFont.preview, 900 - 407),
-      "fonte 150 %: painel 220, zona 319 (faixa de foco de 99)")
+check(near(bigFont.sheet, 292) && near(bigFont.timeline, 391) && near(bigFont.visibleTimeline, 99) && near(bigFont.preview, 900 - 479),
+      "fonte 150 %: painel 292, zona 391 (faixa de foco de 99)")
 let oneRowDock = EditorLayout.solve(total: 780, content: .dock, fullscreen: false, dockRows: 1)
 let twoRowDock = EditorLayout.solve(total: 780, content: .dock, fullscreen: false)
 check(near(oneRowDock.sheet, EditorLayout.dockHeight(rows: 1)) && near(oneRowDock.preview, twoRowDock.preview), "doca de uma fileira não mexe na prévia")
@@ -158,7 +161,7 @@ for (w, h) in portraitTablets {
             check(near(m.topBar, EditorLayout.topBar), "\(label): topo \(m.topBar)")
             check(near(m.transport, EditorLayout.transport), "\(label): transporte \(m.transport)")
             check(m.preview >= EditorLayout.previewMin, "\(label): palco \(m.preview)")
-            check(near(m.zone, 280), "\(label): zona \(m.zone)")
+            check(near(m.zone, content == .panel ? 352 : 280), "\(label): zona \(m.zone)")
             check(near(m.total, h), "\(label): zonas somam \(m.total), tela \(h)")
         }
     }
@@ -192,9 +195,17 @@ def main() -> int:
     if not wide or re.sub(r'[\s()]+', '', wide.group(1)) != 'width>=520&&width>height&&height<600||width>=900&&width>height':
         print('check_editor_layout: divergência na regra responsiva entre plataformas')
         return 1
+    swift_chrome = THEME.with_name('DesignSystem.swift').read_text(encoding='utf-8')
+    android_chrome = (ROOT / 'android/app/src/main/java/com/aurea/aurea/editor/panels/PanelChrome.kt').read_text(encoding='utf-8')
+    right_rail = block(swift_chrome, 'private var rightRail: some View')
+    if ('ForEach(Array(tabs.enumerated())' not in right_rail
+            or 'railLayout(tabs.count)' not in right_rail
+            or 'FrameRightRail(tabs, selectedTab, onTab)' not in android_chrome):
+        print('check_editor_layout: a moldura precisa receber todas as abas nos dois sistemas')
+        return 1
     swiftc = shutil.which('swiftc')
     if not swiftc:
-        print('check_editor_layout: regra do isWide OK; sem swiftc aqui — os casos rodam no CI (macOS)')
+        print('check_editor_layout: contratos de janela e abas OK. Geometria Swift pendente de swiftc.')
         return 0
     sheet = re.search(r'^enum SheetContent \{[^\n]*\}', source, re.M)
     if not sheet:

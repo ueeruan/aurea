@@ -227,6 +227,59 @@ AUREA_TEST(ProjectPackage, ExportImportRelinksMediaAndNeverOverwrites) {
     AUREA_CHECK_EQ(in3.missing, 2u);
 }
 
+AUREA_TEST(ProjectPackage, BackupRestoresEveryProjectAndRejectsDamageBeforePublishing) {
+    const auto dir = scratch("library-backup");
+    const auto target = dir / "official";
+    const auto existing = s8(target / "Existing.aurea");
+    std::error_code ec;
+    fs::create_directory(target, ec);
+    Rig rig;
+    const auto source = s8(dir / "source.aurea");
+    AUREA_CHECK(rig.e.save_project(source.c_str()).ok());
+    const auto original = read_text(source);
+    const auto media = s8(dir / "longo.mp4");
+    write_text(media, "local video bytes");
+    write_text(existing, original);
+    const std::vector<package::MediaFile> mediaFiles{{"longo.mp4", media, "longo.mp4"}};
+    const auto archive = s8(dir / "library.aureabackup");
+    const auto pkg = s8(dir / "single.aureaproj");
+    for (u32 index = 0; index < 2; ++index) {
+        AUREA_CHECK(package::write_package(source, pkg, index ? "Second" : "First", "1", mediaFiles).ok());
+        AUREA_CHECK(package::append_backup_project(archive, pkg, index, 2).ok());
+    }
+    auto damaged = read_text(archive);
+    AUREA_CHECK(damaged.size() > 32);
+    if (damaged.size() <= 32) return;
+    damaged.back() ^= 0x01;
+    const auto corrupt = s8(dir / "corrupt.aureabackup");
+    write_text(corrupt, damaged);
+    package::BackupRestoreResult result;
+    const auto mediaRoot = s8(target / "media");
+    AUREA_CHECK_EQ(package::restore_backup(corrupt, s8(target), mediaRoot, "bad", result).code(), Errc::ChecksumMismatch);
+    AUREA_CHECK_EQ(result.projects, 0u);
+    AUREA_CHECK(!fs::exists(target / "restored-bad-1.aurea"));
+    AUREA_CHECK(!fs::exists(target / "media" / "backup-bad"));
+    const auto incomplete = s8(dir / "incomplete.aureabackup");
+    AUREA_CHECK(package::write_package(source, pkg, "Missing media", "1", {}).ok());
+    AUREA_CHECK(package::append_backup_project(incomplete, pkg, 0, 1).ok());
+    AUREA_CHECK_EQ(package::restore_backup(incomplete, s8(target), mediaRoot, "dead", result).code(), Errc::MediaSourceMissing);
+    AUREA_CHECK(!fs::exists(target / "restored-dead-1.aurea"));
+    AUREA_CHECK(package::restore_backup(archive, s8(target), mediaRoot, "ace", result).ok());
+    AUREA_CHECK_EQ(result.projects, 2u);
+    AUREA_CHECK_EQ(read_text(existing), original);
+    AUREA_CHECK_EQ(read_text(source), original);
+    for (u32 index = 1; index <= result.projects; ++index) {
+        const auto path = s8(target / ("restored-ace-" + std::to_string(index) + ".aurea"));
+        std::vector<package::MediaRef> restoredMedia;
+        AUREA_CHECK(package::list_media(path, restoredMedia).ok());
+        AUREA_CHECK_EQ(restoredMedia.size(), 1u);
+        if (!restoredMedia.empty()) AUREA_CHECK_EQ(read_text(restoredMedia.front().stored), "local video bytes");
+        AUREA_CHECK(read_text(path + ".meta.json").find(index == 1 ? "First" : "Second") != std::string::npos);
+    }
+    AUREA_CHECK(!package::restore_backup(archive, s8(target), mediaRoot, "ace", result).ok());
+    AUREA_CHECK(fs::exists(target / "restored-ace-1.aurea"));
+}
+
 AUREA_TEST(ProjectPackage, RejectsMalformedDirectoryAndMismatchedLocalHeader) {
     const fs::path dir = scratch("malformed_directory");
     const auto project = s8(dir / "original.aurea");

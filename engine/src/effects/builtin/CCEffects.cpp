@@ -187,6 +187,43 @@ public:
     }
 };
 
+class PolarKaleidoscope final : public Effect {
+public:
+    enum : u32 { kCenter, kDistance, kRotation, kStretch, kInsideShift, kRepeats, kAmount, kFilter };
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{"aurea.distort.polar_kaleidoscope", "Caleidoscópio polar", "Repetir", EffectClass::Domain};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_point2("center", "Centro", Vec2{.5f, .5f}, -1, 2, kAnimRel);
+        p.add_float("distance", "Distância", 1, .01f, 8);
+        p.add_angle("rotation", "Rotação", 0);
+        p.add_point2("stretch", "Alongamento", Vec2{1, 1}, .1f, 5, kParamAnimatable);
+        p.add_float("inside_shift", "Deslocamento radial", 0, -200, 200, kAnimPct, "%");
+        p.add_float("repeats", "Repetições", 6, .01f, 48);
+        p.add_float("amount", "Intensidade", 100, 0, 100, kAnimPct, "%");
+        p.add_bool("filter", "Filtragem adaptativa", true);
+    }
+    bool is_identity(const EffectEval& e) const noexcept override { return e.f(kAmount) <= 0; }
+    bool needs_full_input() const noexcept override { return true; }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_cc_kaleidoscope_frag, work));
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& in, f32, LayerImage& out) const override {
+        Uniforms u{};
+        const Rect box = layer_box(e, in);
+        const Vec2 c = layer_point(e, in, kCenter);
+        const Vec2 stretchBy = e.p2(kStretch);
+        u.p0 = {c.x, c.y, min_side(box) * .5f / clampf(e.f(kDistance), .01f, 8, 1),
+                std::remainder(finite_or(e.f(kRotation), 0), 360.0f) * kDeg};
+        u.p1 = {4, clampf(e.f(kRepeats), .01f, 48, 6), clampf(stretchBy.x, .1f, 5, 1),
+                clampf(stretchBy.y, .1f, 5, 1)};
+        u.p2 = {clampf(e.f(kInsideShift), -200, 200, 0) * .01f,
+                clampf(e.f(kAmount), 0, 100, 100) * .01f, e.b(kFilter) ? 1.0f : 0.0f, 0};
+        return same_region(ctx, e, ShaderId::effects_cc_kaleidoscope_frag, in, u, "caleidoscopio-polar", out);
+    }
+};
+
 // =============================================================================
 // Sphere Wrap (CC Sphere) e Cylinder Wrap (CC Cylinder)
 // =============================================================================
@@ -649,6 +686,7 @@ public:
 
 void register_cc_distort_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<Kaleidoscope>());
+    (void)r.add(std::make_unique<PolarKaleidoscope>());
     (void)r.add(std::make_unique<SphereWrap>());
     (void)r.add(std::make_unique<CylinderWrap>());
     (void)r.add(std::make_unique<Twister>());

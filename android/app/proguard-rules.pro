@@ -48,3 +48,11 @@
 # legíveis com o mapping.txt do build (guardar junto com o APK publicado).
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile
+
+# 1.0.6.1: o Room cria `<Banco>_Impl` por reflexão (Class.forName). A regra
+# vinha junto com o SDK de anúncio; sem ele o R8 apagou o WorkDatabase_Impl do
+# WorkManager e o app fechava na abertura (androidx.startup.InitializationProvider:
+# "Failed to create an instance of androidx.work.impl.WorkDatabase").
+-keep class * extends androidx.room.RoomDatabase { <init>(); }
+-keep class androidx.work.impl.WorkDatabase_Impl { *; }
+-keep class androidx.work.** { *; }

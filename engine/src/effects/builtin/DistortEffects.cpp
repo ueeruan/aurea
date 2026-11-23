@@ -264,6 +264,68 @@ public:
 // -----------------------------------------------------------------------------
 // Onda
 // -----------------------------------------------------------------------------
+class SineWaves final : public Effect {
+public:
+    enum : u32 { kAmplitude, kFrequency, kAngle, kDisplacementAngle, kPhase, kSpeed,
+                 kDistance, kWrapX, kWrapY, kFilter, kMatte, kMatteChannel, kInvertMatte };
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{"aurea.distort.sine_waves", "Ondas senoidais", "Distorcer", EffectClass::Domain};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        static const char* const wrap[] = {"Transparente", "Repetir", "Espelhar"};
+        static const char* const matte[] = {"Luminância", "Alfa"};
+        p.add_float("amplitude", "Amplitude", 10, -100, 100, kParamAnimatable | kParamPercent, "%");
+        p.add_float("frequency", "Frequência", 8, .1f, 64);
+        p.typed_range(.1f, 256);
+        p.add_angle("angle", "Ângulo da onda", 45);
+        p.add_angle("displacement_angle", "Ângulo do deslocamento", 90);
+        p.add_angle("phase", "Fase", 0);
+        p.add_float("speed", "Velocidade de fase", 0, -20, 20, kParamAnimatable, "Hz");
+        p.add_float("distance", "Distância", 1, .05f, 5);
+        p.add_enum("wrap_x", "Borda horizontal", wrap, 3, 2);
+        p.add_enum("wrap_y", "Borda vertical", wrap, 3, 2);
+        p.add_bool("filter", "Filtragem adaptativa", true);
+        p.add_layer_ref("matte", "Camada do matte");
+        p.add_enum("matte_channel", "Canal do matte", matte, 2, 0);
+        p.add_bool("invert_matte", "Inverter matte", false);
+    }
+    bool is_identity(const EffectEval& e) const noexcept override {
+        return std::abs(e.f(kAmplitude)) < 1e-5f && std::abs(e.f(kDistance) - 1.0f) < 1e-5f;
+    }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_sine_waves_frag, work));
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32, LayerImage& out) const override {
+        const u64 matteRef = e.value(kMatte).ref;
+        const LayerImage* matte = matteRef ? ctx.layer_input(matteRef) : nullptr;
+        if (matteRef && !matte) { out = input; return OkStatus; }
+        const f32 angle = std::remainder(finite_or(e.f(kAngle), 45.0f), 360.0f) * kDeg2Rad;
+        const f32 shift = angle - std::remainder(finite_or(e.f(kDisplacementAngle), 90.0f), 360.0f) * kDeg2Rad;
+        const f64 seconds = e.time_frames() / std::max(e.framesPerSecond, 1e-6);
+        const f32 phase = static_cast<f32>(std::remainder(seconds * finite_or(e.f(kSpeed), 0.0f) +
+            finite_or(e.f(kPhase), 0.0f) / 360.0, 1.0));
+        struct Uniforms { EffectUniforms base; Vec4 inputOrigin; Mat4 compFromLayer; } u{};
+        u.base = base_uniforms(input);
+        u.base.p0 = {std::cos(angle), -std::sin(angle), std::cos(shift), -std::sin(shift)};
+        u.base.p1 = {finite_or(e.f(kAmplitude), 0.0f) * .005f, 2.0f * finite_or(e.f(kFrequency), 8.0f),
+                phase, std::max(.05f, finite_or(e.f(kDistance), 1.0f))};
+        u.base.p2 = {f32(e.e(kWrapX)), f32(e.e(kWrapY)), e.b(kFilter) ? 1.0f : 0.0f, matte ? 1.0f : 0.0f};
+        u.base.p3 = {input.region.w, input.region.h, f32(e.e(kMatteChannel)), e.b(kInvertMatte) ? 1.0f : 0.0f};
+        if (matte) u.base.color = {matte->region.x, matte->region.y, matte->region.w, matte->region.h};
+        u.inputOrigin = {input.region.x, input.region.y, 0, 0};
+        u.compFromLayer = e.placement ? e.placement->compFromLayer : Mat4::identity();
+        out = input;
+        out.texture = ctx.texture("sine-waves", input.width, input.height);
+        if (ctx.fullscreen_pass("sine-waves", PassStage::Transform, out.texture, ShaderId::effects_sine_waves_frag,
+                                {PassTexture{input.texture}, PassTexture{matte ? matte->texture : input.texture}},
+                                &u, sizeof(u)) == kInvalidIndex)
+            return Errc::PipelineCompileFailed;
+        return OkStatus;
+    }
+};
+
 class WaveWarp final : public Effect {
 public:
     enum : u32 { kHeight = 0, kWavelength, kSpeed, kPhase, kDirection, kSquare, kEdges, kPin, kMix,
@@ -837,6 +899,7 @@ void register_distort_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<Turbulence>());
     (void)r.add(std::make_unique<WaveWarp>());
     (void)r.add(std::make_unique<WaveWarpReference>());
+    (void)r.add(std::make_unique<SineWaves>());
     (void)r.add(std::make_unique<TurbulentDisplaceReference>());
     (void)r.add(std::make_unique<Warp>());
     (void)r.add(std::make_unique<RippleDissolve>());

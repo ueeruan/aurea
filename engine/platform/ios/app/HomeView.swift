@@ -271,6 +271,7 @@ struct HomeView: View {
     @State private var confirmDelete = false
     @State private var showAbout = false
     @State private var importing = false
+    @State private var backupFile: SharedProjectFile?
     /// "Relatar um problema" (ProjectTransfer.swift). "Importar arquivo do
     /// projeto" não tem estado aqui: abre pelo UIKit (`pickProjectFile`).
     @State private var reportingProblem = false
@@ -313,6 +314,22 @@ struct HomeView: View {
         }
         .overlay { HomeProjectDialogs(state: $dialog, library: library, selection: $selection) }
         .overlay { accountDialogs }
+        .overlay {
+            if model.importingMedia && (model.operationMessage == AureaText.t("project_backup_saving") ||
+                                       model.operationMessage == AureaText.t("project_backup_restoring")) {
+                ZStack {
+                    AureaColors.homeCover.ignoresSafeArea()
+                    VStack(spacing: 12) {
+                        ProgressView().tint(AureaColors.accent)
+                        Text(model.operationMessage).multilineTextAlignment(.center).foregroundStyle(AureaColors.text)
+                    }
+                    .padding(24)
+                    .background(AureaColors.surface, in: RoundedRectangle(cornerRadius: 14))
+                }
+                .accessibilityAddTraits(.isModal)
+                .accessibilityIdentifier("home.projectBackup.progress")
+            }
+        }
         .sheet(isPresented: $showAccount, onDismiss: { accountRecoveryEmail = nil }) {
             NavigationStack {
                 ContaView(recoveryEmail: accountRecoveryEmail).toolbar { ToolbarItem(placement: .confirmationAction) {
@@ -325,6 +342,7 @@ struct HomeView: View {
         .sheet(isPresented: $reportingProblem) {
             ReportProblemView(sessao: conta.sessao()) { model.toast = $0 }
         }
+        .sheet(item: $backupFile) { file in ProjectFileShareSheet(url: file.url) }
         .sheet(isPresented: $importing) {
             HomeMediaPicker(onDismiss: { importing = false }, onPick: { [project = model.projectGeneration] url, kind in
                 guard project == model.projectGeneration else { importing = false; return }
@@ -463,6 +481,11 @@ struct HomeView: View {
         HomeSettingsDrawer(model: model, defaults: defaults,
                            onImportMedia: { closeDrawer(); importing = true },
                            onImportProject: { closeDrawer(); pickProjectFile() },
+                           onSaveBackup: {
+                               closeDrawer()
+                               model.exportProjectBackup { url in if let url { backupFile = SharedProjectFile(url: url) } }
+                           },
+                           onRestoreBackup: { closeDrawer(); pickProjectBackup() },
                            onHyper: { closeDrawer(); model.openHyper() },
                            onAbout: { closeDrawer(); showAbout = true },
                            onSupport: { closeDrawer(); reportingProblem = true })
@@ -522,6 +545,15 @@ struct HomeView: View {
             DocumentImportPicker.present(types: ProjectFileTypes.picker) { urls in
                 guard let url = urls?.first else { return }
                 model.importProjectFile(url) { library.refresh() }
+            }
+        }
+    }
+
+    private func pickProjectBackup() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            DocumentImportPicker.present(types: [.data]) { urls in
+                guard let url = urls?.first else { return }
+                model.restoreProjectBackup(url) { library.refresh() }
             }
         }
     }
@@ -1874,6 +1906,8 @@ struct HomeSettingsDrawer: View {
     @ObservedObject var defaults: HomeDefaults
     let onImportMedia: () -> Void
     let onImportProject: () -> Void
+    let onSaveBackup: () -> Void
+    let onRestoreBackup: () -> Void
     let onHyper: () -> Void
     let onAbout: () -> Void
     let onSupport: () -> Void
@@ -1906,6 +1940,10 @@ struct HomeSettingsDrawer: View {
                     tile(CupertinoGlyph.PhotoOnRectangle, "home_import_media", tag: "home.drawer.importMedia", action: onImportMedia)
                     divider
                     tile(CupertinoGlyph.ArrowDownToLine, "project_file_import", tag: "home.drawer.importProject", action: onImportProject)
+                    divider
+                    tile(CupertinoGlyph.SquareArrowUp, "project_backup_save", tag: "home.drawer.saveProjectBackup", action: onSaveBackup)
+                    divider
+                    tile(CupertinoGlyph.ArrowDownToLine, "project_backup_restore", tag: "home.drawer.restoreProjectBackup", action: onRestoreBackup)
                     divider
                     tile(CupertinoGlyph.Bolt, "hyper_title", tag: "home.drawer.hyper", action: onHyper)
                 }

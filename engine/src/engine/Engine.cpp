@@ -12710,14 +12710,53 @@ std::vector<std::string> Engine::effect_menu_items(u64 layerId, u32 effectId) no
     return expr::menu_items(*fx);
 }
 
+#include "TitleMotionPresets.inc"
+
 bool Engine::apply_text_preset(u64 layerId, u32 preset) noexcept {
-    if (preset >= kMotionTextPresetBase) return apply_motion_text_preset(layerId, preset - kMotionTextPresetBase);
+    const bool titlePreset = preset >= kTitleMotionBase && preset - kTitleMotionBase < kTitleMotionNames.size();
+    if (!titlePreset && preset >= kMotionTextPresetBase) return apply_motion_text_preset(layerId, preset - kMotionTextPresetBase);
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
     InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || l->locked || !supports_text_animation(*l) || preset >= text::kTextPresetCount) return false;
+    if (!l || l->locked || !supports_text_animation(*l)) return false;
+    if (titlePreset) {
+        const u32 index = preset - kTitleMotionBase;
+        if (l->kind != LayerKind::Text || l->duration().value < 8 || l->text.content.empty()) return false;
+        if (index < 2 && l->text.animators.size() > 61) return false;
+        if (index >= 2 && comp->layers().count() >= kMaxLayerCount) return false;
+        if (index >= 2 && index <= 5 && l->masks.size() >= kMaxMaskCount) return false;
+        if (index >= 4 && l->layerAnimators.size() >= 32) return false;
+        Rect ink{};
+        if (index >= 2 && index <= 5) {
+            if (l->text.pathLayer != 0 || l->text.pathMask != kInvalidIndex) return false;
+            const auto font = text::FontManager::instance().font_for(l->text);
+            text::TextLayout layout;
+            if (!font || !text::layout_quads(*font, l->text, std::max(2.0f, l->text.strokeWidth + 2.0f), layout)
+                || layout.quads.empty()) return false;
+            f32 minX = layout.quads.front().x0, maxX = layout.quads.front().x1;
+            f32 minY = layout.quads.front().y0, maxY = layout.quads.front().y1;
+            for (const auto& glyph : layout.quads) {
+                minX = std::min(minX, glyph.x0);
+                maxX = std::max(maxX, glyph.x1);
+                minY = std::min(minY, glyph.y0);
+                maxY = std::max(maxY, glyph.y1);
+            }
+            ink = Rect{minX, minY, maxX - minX, maxY - minY};
+        }
+        const f64 seconds = index < 2 ? 2.5 : index <= 4 ? 3.4 : 4.3;
+        const i64 frames = std::clamp<i64>(std::lround(comp->fps() * seconds), 7, l->duration().value - 1);
+        history_.before_mutation(*comp, project_->timeline().current(), kTitleMotionNames[index]);
+        const bool applied = apply_title_motion(*comp, LayerId::unpack(layerId), index, ink, frames);
+        if (applied) {
+            bump_model_revision_locked();
+            project_->mark_dirty();
+            request_render();
+        }
+        return applied;
+    }
+    if (preset >= text::kTextPresetCount) return false;
     Layer prepared = *l;
     if (prepared.kind == LayerKind::Model3D && !ensure_text3d_layout(prepared).ok()) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "preset de texto");
@@ -17798,7 +17837,7 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
     // de qualidade (H.264 High) em toda tentativa; a 1 só sai da Surface
     // (VideoStreamConfig::avoidSurface), a 2 vai para o software.
     vc.profile = kExportProfileDefault;
-    vc.avoidSurface = ctx->safeMode == 1;
+    vc.avoidSurface = ctx->safeMode != 0;
     vc.preferSoftware = ctx->safeMode >= 2;
     // 1.0.6: no software o HEVC (kvazaar) leva minutos por segundo de vídeo num
     // aparelho de entrada e a exportação "não termina"; o degrau 2 sai em H.264
@@ -17810,7 +17849,7 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
     // surface-direct (EXPORT_SURFACE_DIRETO_2026-10-15.md): ligado por padrão
     // em todo projeto, com ou sem efeitos (o quadro sai do MESMO render). Fora
     // só o grafo Hyper/upscale de IA (o quadro final vem da CPU, não do slot da
-    // GPU) e a tentativa 1 da escada (sem Surface). debug.aurea.enc.direct=0
+    // GPU) e as tentativas de compatibilidade (sem Surface). debug.aurea.enc.direct=0
     // desliga no aparelho; =1 liga mesmo com a config desligada.
     ctx->directSurface = vc.directSurface = (config_.enableDirectSurfaceExport ||
             android_video::debug_flag("debug.aurea.enc.direct", nullptr)) &&

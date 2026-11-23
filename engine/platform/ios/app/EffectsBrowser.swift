@@ -11,8 +11,6 @@ private enum EffectPickerLayout {
     static let longPress: Double = 0.45
     /// Abrir/fechar o detalhe (referência: 200 ms subindo; véu + descida ao fechar).
     static let detailSeconds: Double = 0.2
-    /// Transição da categoria (100 ms; alfa em 25 ms, na saída atrasado 75 ms).
-    static let categorySeconds: Double = 0.1
 }
 
 // =============================================================================
@@ -382,21 +380,24 @@ enum FxEffectGroup: String, CaseIterable {
     // A ordem dos casos é a ordem dos ladrilhos (igual à do EffectGroup do Android).
     // Funções (13/11/2026): "Funções do Aurea" é o primeiro ladrilho.
     case aureaTools = "aurea_tools"
-    case colorLight = "color_light", drawEdge = "draw_edge", blur, distort, procedural, threeD = "3d"
+    case colorLight = "color_light", halosReflections = "halos_reflections"
+    case drawEdge = "draw_edge", blur, distort, procedural, threeD = "3d"
     // `repeat` é palavra reservada do Swift: o caso se chama repeatTiles, o id continua "repeat".
-    case motion, repeatTiles = "repeat", matte, visibility, text, stylize, glitch, time
+    case motion, repeatTiles = "repeat", matte, visibility, text, stylize, videoFilm = "video_film", glitch, time
     case audio, utility, plugins, other
     var id: String { rawValue }
     var label: String {
         switch self {
         case .aureaTools: return AureaText.t("fn_group_aurea_tools")
         case .colorLight: return AureaText.t("fxui_group_color_light")
+        case .halosReflections: return AureaText.t("fxui_group_halos_reflections")
         case .blur: return AureaText.t("fxui_group_blur")
         case .distort: return AureaText.t("fxui_group_distort")
         case .motion: return AureaText.t("fxui_group_motion")
         case .repeatTiles: return AureaText.t("fxui_group_repeat")
         case .visibility: return AureaText.t("fxui_group_visibility")
         case .stylize: return AureaText.t("fxui_group_stylize")
+        case .videoFilm: return AureaText.t("fxui_group_video_film")
         case .glitch: return AureaText.t("fxui_group_glitch")
         case .drawEdge: return AureaText.t("fxui_group_draw_edge")
         case .procedural: return AureaText.t("fxui_group_procedural")
@@ -413,12 +414,13 @@ enum FxEffectGroup: String, CaseIterable {
     var glyph: Character {
         switch self {
         case .aureaTools: return CupertinoGlyph.Wrench
-        case .colorLight: return CupertinoGlyph.Sparkles
+        case .colorLight, .halosReflections: return CupertinoGlyph.Sparkles
         case .blur: return CupertinoGlyph.DropFill
         case .distort, .motion: return CupertinoGlyph.Move
         case .repeatTiles, .stylize: return CupertinoGlyph.SquareGrid2x2
         case .visibility: return CupertinoGlyph.Sparkles
         case .glitch: return CupertinoGlyph.Bolt
+        case .videoFilm: return CupertinoGlyph.Film
         case .drawEdge: return CupertinoGlyph.PencilOutline
         case .procedural: return CupertinoGlyph.WandStars
         case .matte: return CupertinoGlyph.Scissors
@@ -459,15 +461,31 @@ private let fxGroupByKey: [UInt32: FxEffectGroup] = {
     var map: [UInt32: FxEffectGroup] = [:]
     map[fxEffectTypeId("aurea.generate.raster_extrude")] = .threeD
     map[fxEffectTypeId("aurea.distort.hollow_box")] = .threeD
+    for key in ["aurea.light.chromatic_halo", "aurea.light.spectral_aura", "aurea.light.shadow_halo",
+                "aurea.light.outline_halo", "aurea.light.rainbow_halo", "aurea.light.glow_rings",
+                "aurea.light.spectral_glint", "aurea.light.diffraction_glare",
+                "aurea.light.outline_rays", "aurea.light.exposure_streaks",
+                "aurea.light.displaced_halo", "aurea.light.multiscale_glow",
+                "aurea.light.prismatic_glints", "aurea.light.light_leak"] {
+        map[fxEffectTypeId(key)] = .halosReflections
+    }
+    for key in ["aurea.stylize.jpeg_compression_damage", "aurea.stylize.analog_tape_damage",
+                "aurea.stylize.photochemical_film_damage", "aurea.stylize.photographic_grain",
+                "aurea.stylize.sinusoidal_scanlines", "aurea.stylize.sinusoidal_scanlines_mono",
+                "aurea.stylize.film_profile_grain"] {
+        map[fxEffectTypeId(key)] = .videoFilm
+    }
     for key in ["aurea.stylize.stroke_outline", "aurea.stylize.border", "aurea.stylize.drop_shadow", "aurea.stylize.drop_shadow_reference",
-                "aurea.stylize.find_edges", "aurea.stylize.find_edges_reference", "aurea.stylize.bevel_alpha", "aurea.draw.drawing_progress"] { map[fxEffectTypeId(key)] = .drawEdge }
+                "aurea.stylize.find_edges", "aurea.stylize.find_edges_reference", "aurea.stylize.bevel_alpha",
+                "aurea.draw.drawing_progress", "aurea.stylize.chromatic_edges"] { map[fxEffectTypeId(key)] = .drawEdge }
     for key in ["aurea.transform", "aurea.motion.oscillate.cycles", "aurea.motion.swing", "aurea.motion.wiggle",
                 "aurea.motion.twitch", "aurea.distort.shake", "aurea.distort.corner_pin", "aurea.transform.parenting_helper"] {
         map[fxEffectTypeId(key)] = .motion
     }
     for key in ["aurea.stylize.repeat_tile", "aurea.stylize.motion_tile", "aurea.stylize.tiler", "aurea.stylize.hex_tile",
                 "aurea.distort.kaleidoscope", "aurea.distort.mirror", "aurea.distort.griddler", "aurea.stylize.ball_grid",
-                "aurea.distort.tile_shift", "aurea.distort.hex_tile_rotate", "aurea.distort.hex_tile_shift"] {
+                "aurea.distort.tile_shift", "aurea.distort.hex_tile_rotate", "aurea.distort.hex_tile_shift",
+                "aurea.distort.repeated_transform"] {
         map[fxEffectTypeId(key)] = .repeatTiles
     }
     return map
@@ -506,6 +524,8 @@ func fxSortedGroups(_ sorted: [EffectCatalogItem]) -> [(group: FxEffectGroup, en
 }
 
 private let fxGroupBannerKeys: [FxEffectGroup: String] = [
+    .halosReflections: "aurea.light.rainbow_halo",
+    .videoFilm: "aurea.stylize.photochemical_film_damage",
     .colorLight: "aurea.color.colorama", .blur: "aurea.blur.radial_blur_reference", .distort: "aurea.distort.wave_warp_reference",
     .motion: "aurea.distort.corner_pin", .repeatTiles: "aurea.stylize.motion_tile", .stylize: "aurea.stylize.halftone",
     .glitch: "aurea.glitch.glitchify", .drawEdge: "aurea.stylize.find_edges_reference", .procedural: "aurea.generate.fractal_noise",
@@ -840,6 +860,7 @@ private let fxTagByCategory: [String: String] = {
 }()
 
 private let fxTagByGroup: [FxEffectGroup: String] = [
+    .halosReflections: "light", .videoFilm: "retro",
     .drawEdge: "outline", .blur: "blur", .distort: "distort", .threeD: "3d", .motion: "motion", .repeatTiles: "repeat",
     .matte: "mask", .text: "text", .stylize: "stylize", .glitch: "glitch", .time: "time", .audio: "audio",
 ]
@@ -1036,6 +1057,28 @@ private struct FxScrollProbe: View {
     }
 }
 
+private struct FxThumbnailWorkKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+private extension EnvironmentValues {
+    var fxThumbnailWork: Bool {
+        get { self[FxThumbnailWorkKey.self] }
+        set { self[FxThumbnailWorkKey.self] = newValue }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func observeFxScrolling(_ scrolling: Binding<Bool>) -> some View {
+        if #available(iOS 18.0, *) {
+            onScrollPhaseChange { _, phase in scrolling.wrappedValue = phase.isScrolling }
+        } else {
+            self
+        }
+    }
+}
+
 struct EffectAddSheet: View {
     @EnvironmentObject private var model: AureaModel
     @ObservedObject var prefs: FxEffectPrefs
@@ -1116,18 +1159,6 @@ struct EffectAddSheet: View {
         else { model.addEffectWithPreset(entry.typeId, preset: variant) }
     }
 
-    private func openGroup(_ id: String?) {
-        withAnimation(.easeOut(duration: EffectPickerLayout.categorySeconds)) { groupId = id }
-    }
-
-    private var categoryTransition: AnyTransition {
-        .asymmetric(
-            insertion: AnyTransition.offset(x: 100).animation(.easeOut(duration: EffectPickerLayout.categorySeconds))
-                .combined(with: AnyTransition.opacity.animation(.linear(duration: 0.025))),
-            removal: AnyTransition.offset(x: 100).animation(.easeIn(duration: EffectPickerLayout.categorySeconds))
-                .combined(with: AnyTransition.opacity.animation(.linear(duration: 0.025).delay(0.075))))
-    }
-
     private func browser(catalog: [EffectCatalogItem], plugins: [EffectCatalogItem]) -> some View {
         let groups = fxSortedGroups(catalog)
         let group = groups.first { $0.group.id == groupId }
@@ -1135,16 +1166,14 @@ struct EffectAddSheet: View {
             topBar(title: group?.group.label ?? AureaText.t("fx_browser_title"), inGroup: group != nil,
                    divider: group == nil ? homeScrolled : gridScrolled)
             if group == nil { tabs }
-            ZStack {
+            Group {
                 if showingPlugins {
                     PluginManagerView(prefs: prefs, effects: plugins, onOpenEffect: openDetail, onAdd: add)
                 } else if let group {
                     let near = fxAdjacentGroups(groups.map { $0.group }, group.group)
                     FxGroupGrid(group: group.group, entries: group.entries, store: model.effectPreviews,
                                 previous: near.previous, next: near.next, onDetail: openDetail,
-                                onGroup: { groupId = $0.id }, onScrolled: { gridScrolled = $0 })
-                        .transition(categoryTransition)
-                        .zIndex(1)
+                                onGroup: { groupId = $0.id }, onScrolled: { if gridScrolled != $0 { gridScrolled = $0 } })
                 } else {
                     home(sorted: catalog, groups: groups)
                 }
@@ -1177,7 +1206,7 @@ struct EffectAddSheet: View {
                         in: RoundedRectangle(cornerRadius: 12))
             .contentShape(Rectangle())
         }
-        .buttonStyle(AureaPressStyle(shrink: 1))
+        .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityIdentifier(id)
     }
@@ -1191,15 +1220,15 @@ struct EffectAddSheet: View {
         let recommended = fxRecommendedEffects(sorted, layerKind: model.selectedLayer?.kind ?? 0, applied: model.effects.map(\.typeId))
         return FxBrowserHome(recommended: recommended, recents: recents, favorites: favorites, groups: groups, prefs: prefs,
                              store: model.effectPreviews, onAdd: add, onDetail: openDetail,
-                             onGroup: { openGroup($0.id) },
-                             onScrolled: { homeScrolled = $0 })
+                             onGroup: { groupId = $0.id },
+                             onScrolled: { if homeScrolled != $0 { homeScrolled = $0 } })
     }
 
     /// ✕ (ou ‹ dentro de um grupo) · título 17 · 🔍 — `effects.close`, `effects.back`, `effects.search`.
     private func topBar(title: String, inGroup: Bool, divider: Bool) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
-                Button { if inGroup { openGroup(nil) } else { close() } } label: {
+                Button { if inGroup { groupId = nil } else { close() } } label: {
                     CupertinoGlyph.text(inGroup ? CupertinoGlyph.ChevronBack : CupertinoGlyph.Xmark, size: 22)
                         .mirrorsInRtl(inGroup)
                         .frame(width: AureaDims.minTap, height: AureaDims.minTap).contentShape(Rectangle())
@@ -1241,6 +1270,7 @@ private struct FxBrowserHome: View {
     let onDetail: ([EffectCatalogItem], Int) -> Void
     let onGroup: (FxEffectGroup) -> Void
     let onScrolled: (Bool) -> Void
+    @State private var scrolling = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -1266,6 +1296,8 @@ private struct FxBrowserHome: View {
             }
             .coordinateSpace(name: "fx.home")
             .onPreferenceChange(FxScrollOffsetKey.self) { onScrolled($0 < -0.5) }
+            .observeFxScrolling($scrolling)
+            .environment(\.fxThumbnailWork, !scrolling)
             .accessibilityIdentifier("effects.home")
         }
     }
@@ -1528,7 +1560,7 @@ private struct FxGroupTile: View {
             ZStack {
                 Group {
                     if let banner = fxGroupBannerEntry(group, entries) {
-                        FxAfterThumb(entry: banner, store: store)
+                        FxAfterThumb(entry: banner, store: store, generate: false)
                     } else {
                         FxToolPlate(glyph: group.glyph, opacity: 0.35)
                     }
@@ -1540,8 +1572,8 @@ private struct FxGroupTile: View {
             .frame(maxWidth: .infinity).frame(height: 72)
             .background(AureaColors.fxPanel)
             .clipShape(RoundedRectangle(cornerRadius: 14))
-            .contentShape(RoundedRectangle(cornerRadius: 14))
-        }.buttonStyle(AureaPressStyle(shrink: 1))
+            .contentShape(Rectangle())
+        }.buttonStyle(.plain)
             .accessibilityLabel(AureaText.t("fx_browser_open_group", group.label))
             .accessibilityIdentifier("effects.category." + group.id)
     }
@@ -1558,6 +1590,7 @@ private struct FxGroupGrid: View {
     let onDetail: ([EffectCatalogItem], Int) -> Void
     let onGroup: (FxEffectGroup) -> Void
     let onScrolled: (Bool) -> Void
+    @State private var scrolling = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -1580,6 +1613,8 @@ private struct FxGroupGrid: View {
                     }
                     .coordinateSpace(name: "fx.grid")
                     .onPreferenceChange(FxScrollOffsetKey.self) { onScrolled($0 < -0.5) }
+                    .observeFxScrolling($scrolling)
+                    .environment(\.fxThumbnailWork, !scrolling)
                     .accessibilityIdentifier("effects.grid")
                     .onChange(of: group) { _ in proxy.scrollTo("topo", anchor: .top) }
                 }
@@ -1629,9 +1664,9 @@ private struct FxGridCard: View {
                 Text(name).font(.aurea(size: 10)).foregroundStyle(AureaColors.text)
                     .multilineTextAlignment(.center).lineLimit(2).frame(width: 88)
             }
-            .frame(width: 88).padding(.bottom, 8)
+            .frame(maxWidth: .infinity).padding(.bottom, 8)
             .contentShape(Rectangle())
-        }.buttonStyle(AureaPressStyle(shrink: 0.96))
+        }.buttonStyle(.plain)
             .accessibilityLabel(name)
             .accessibilityIdentifier("effects.card." + fxEffectCardId(entry.typeId))
     }
@@ -1686,30 +1721,36 @@ private struct FxNewBadge: View {
 private struct FxAfterThumb: View {
     let entry: EffectCatalogItem
     let store: EffectPreviewStore
+    var generate = true
     /// "Prévias de efeitos" desligado em Ajustes (0.2.4): só a cartela, sem pedir render.
     @AppStorage(FxEffectPrefs.previewsEnabledKey) private var previewsEnabled = true
+    @Environment(\.fxThumbnailWork) private var thumbnailWork
     @State private var image: UIImage?
+    @State private var imageType: UInt32?
 
     var body: some View {
         GeometryReader { geometry in
             if let tool = fxEffectToolOf(entry.typeId) {
                 FxToolPlate(glyph: tool.glyph)
-            } else if previewsEnabled, let cropped = fxAfterOnly(image, size: geometry.size) {
+            } else if previewsEnabled, imageType == entry.typeId, let cropped = fxAfterOnly(image, size: geometry.size) {
                 Image(uiImage: cropped).resizable().interpolation(.medium).scaledToFill()
                     .frame(width: geometry.size.width, height: geometry.size.height).clipped()
             } else {
                 FxGenericPlate(glyph: fxCategoryGlyph(entry.category))
             }
         }
-        .task(id: "\(entry.typeId)-\(previewsEnabled)") {
+        .allowsHitTesting(false)
+        .task(id: "\(entry.typeId)-\(previewsEnabled)-\(thumbnailWork)") {
             guard fxEffectToolOf(entry.typeId) == nil, previewsEnabled else { return }
+            if imageType == entry.typeId, image != nil { return }
+            imageType = entry.typeId
             image = store.cachedImage(for: entry.typeId)
-            guard image == nil else { return }
+            guard image == nil, thumbnailWork else { return }
             // Briefly visible cells during a fast scroll may disappear before
             // they ever enqueue disk or GPU work.
-            try? await Task.sleep(nanoseconds: 100_000_000)
+            try? await Task.sleep(nanoseconds: 150_000_000)
             guard !Task.isCancelled else { return }
-            let loaded = await store.image(for: entry.typeId)
+            let loaded = await store.image(for: entry.typeId, generate: generate)
             if !Task.isCancelled { image = loaded }
         }
     }

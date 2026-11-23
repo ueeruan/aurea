@@ -43,6 +43,10 @@ token + e-mail (Android: EncryptedSharedPreferences; iOS: Keychain).
      `[[send_email]]` e defina `CRASH_EMAIL_FROM` no `wrangler.toml`.
    Depois: `npx.cmd wrangler deploy`. Sem isso os relatórios ficam guardados
    30 dias e podem ser lidos pelo `/api/crash/list`.
+   Desde 22/11/2026 os relatórios ficam no D1 (`crash_reports`, migração
+   0014, registro em gzip), não mais no KV: com ~550 por dia as 2 gravações
+   de cada um esgotavam as 1 000 gravações/dia do KV grátis.
+   `scripts/crash-kv-para-d1.mjs` copia os que ainda estão no KV.
 2. **Token de admin** para ler os relatórios pela API:
    `npx.cmd wrangler secret put CRASH_ADMIN_TOKEN`.
 

@@ -22,7 +22,7 @@ const chamar = async (env, caminho, opcoes) => {
   const r = await worker.fetch(pedido(caminho, opcoes), env, ctx);
   return { status: r.status, corpo: await r.json(), cabecalhos: r.headers };
 };
-const config = (env, plataforma = "android") => chamar(env, `/api/app-config?platform=${plataforma}&version=2198`);
+const config = (env, plataforma = "android", versao = 2226) => chamar(env, `/api/app-config?platform=${plataforma}&version=${versao}`);
 const admin = (env, corpo, token = SEGREDO, ip) => chamar(env, "/api/admin/app-config", { metodo: "POST", corpo, token, ip });
 
 async function confere(resposta, chave = par.publicKey) {
@@ -153,4 +153,21 @@ test("app-config: payload canonico estavel (mesmas entradas -> mesmos bytes)", (
   assert.equal(a, b);
   assert.equal(JSON.parse(a).message["pt-BR"], "oi");
   assert.equal(Object.keys(JSON.parse(a).message)[0], "pt-BR");
+});
+
+test("app-config: betas do Android (APK direto, <= 2220) nunca recebem a atualizacao obrigatoria", async () => {
+  const env = ambiente();
+  await admin(env, { platform: "android", minVersionCode: 2225 });
+  for (const v of [2199, 2219, 2220]) {
+    const r = await config(env, "android", v);
+    assert.ok(await confere(r.corpo));
+    assert.equal(JSON.parse(r.corpo.payload).minVersionCode, 0, `beta ${v}`);
+  }
+  for (const v of [2221, 2224]) assert.equal(JSON.parse((await config(env, "android", v)).corpo.payload).minVersionCode, 2225, `play ${v}`);
+  // Sem versao ou versao estranha: segue a regra normal.
+  assert.equal(JSON.parse((await chamar(env, "/api/app-config?platform=android")).corpo.payload).minVersionCode, 2225);
+  assert.equal(JSON.parse((await chamar(env, "/api/app-config?platform=android&version=abc")).corpo.payload).minVersionCode, 2225);
+  // iOS nao tem esta excecao.
+  await admin(env, { platform: "ios", minVersionCode: 2225 });
+  assert.equal(JSON.parse((await config(env, "ios", 2219)).corpo.payload).minVersionCode, 2225);
 });

@@ -118,6 +118,8 @@ internal fun SettingsDrawer(
     vm: HomeViewModel,
     onImportMedia: () -> Unit,
     onImportProject: () -> Unit,
+    onSaveBackup: () -> Unit,
+    onRestoreBackup: () -> Unit,
     onHyper: () -> Unit,
     onAbout: () -> Unit,
     onSupport: () -> Unit,
@@ -163,6 +165,12 @@ internal fun SettingsDrawer(
                 GroupDivider()
                 TileRow(leading = { DrawerGlyph(CupertinoGlyph.ArrowDownToLine) }, title = stringResource(R.string.project_file_import),
                     onClick = onImportProject, tag = "home.drawer.importProject")
+                GroupDivider()
+                TileRow(leading = { DrawerGlyph(CupertinoGlyph.SquareArrowUp) }, title = stringResource(R.string.project_backup_save),
+                    onClick = onSaveBackup, tag = "home.drawer.saveProjectBackup")
+                GroupDivider()
+                TileRow(leading = { DrawerGlyph(CupertinoGlyph.ArrowDownToLine) }, title = stringResource(R.string.project_backup_restore),
+                    onClick = onRestoreBackup, tag = "home.drawer.restoreProjectBackup")
                 GroupDivider()
                 TileRow(leading = { DrawerGlyph(CupertinoGlyph.Bolt) }, title = stringResource(R.string.hyper_title),
                     onClick = onHyper, tag = "home.drawer.hyper")

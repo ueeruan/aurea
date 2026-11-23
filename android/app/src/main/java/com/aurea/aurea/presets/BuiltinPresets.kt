@@ -21,6 +21,11 @@ internal val MotionTextPresetLabels = listOf(
     R.string.tp_m_fade_up, R.string.tp_m_wave, R.string.tp_m_spin, R.string.tp_m_scale_word, R.string.tp_m_scale_out,
     R.string.app_text_preset_smooth_bounce,
 )
+internal const val TITLE_MOTION_PRESET_BASE = 1100
+internal val TitleMotionPresetLabels = listOf(
+    R.string.tp_title_cascade, R.string.tp_title_tracking, R.string.tp_title_bar,
+    R.string.tp_title_return, R.string.tp_title_crossfade, R.string.tp_title_split, R.string.tp_title_orbit,
+)
 
 /** O preset serve para este texto? Os do modelo Motion só no 2D; os antigos só no 3D; os salvos em ambos. */
 internal fun PresetEntry.fitsText(threeD: Boolean): Boolean {
@@ -68,7 +73,10 @@ class BuiltinPresets(private val context: Context) {
         val motion = MotionTextPresetLabels.mapIndexed { i, id ->
             PresetEntry("b:motion:$i", PresetKind.Text, res.getString(id), builtin = true, textPreset = MOTION_TEXT_PRESET_BASE + i)
         }
-        val list = motion + TextPresetNames.mapIndexed { i, id ->
+        val titles = TitleMotionPresetLabels.mapIndexed { i, id ->
+            PresetEntry("b:title-motion:$i", PresetKind.Text, res.getString(id), builtin = true, textPreset = TITLE_MOTION_PRESET_BASE + i)
+        }
+        val list = motion + titles + TextPresetNames.mapIndexed { i, id ->
             PresetEntry("b:texto:$i", PresetKind.Text, res.getString(id), builtin = true, textPreset = i)
         } + ExtraTextPresetNames.mapIndexed { i, name ->
             PresetEntry("b:texto:${i + 11}", PresetKind.Text, if (i >= 8) AppText.get(context, PackTextPresetLabels[i - 8]) else ExtraTextPresetLabels.getOrNull(i)?.let { res.getString(it) } ?: name, builtin = true, textPreset = i + 11)

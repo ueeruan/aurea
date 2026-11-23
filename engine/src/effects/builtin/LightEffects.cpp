@@ -13,6 +13,7 @@
 #include "aurea/effects/DeepGlowReference.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace aurea::builtin {
@@ -424,19 +425,22 @@ public:
 // -----------------------------------------------------------------------------
 class Hotspots final : public Effect {
 public:
+    enum : u32 { kThreshold, kBrightness, kBlurInput, kSaturation, kThresholdColor, kMix, kModel };
+
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{"aurea.light.hotspots", "Hotspots", "Luz", EffectClass::Neighborhood};
         return i;
     }
     void declare_parameters(ParameterRegistry& p) const override {
-        p.add_float("threshold", "Limite", 50, 0, 200, kParamAnimatable | kParamPercent, "%");
-        p.add_float("brightness", "Brilho", 2, 0, 10);
+        p.add_float("threshold", "Limite", 70, 0, 200, kParamAnimatable | kParamPercent, "%");
+        p.add_float("brightness", "Brilho", 1, 0, 10);
         p.add_float("blur_input", "Desfoque de entrada", 0, 0, 100, kParamAnimatable | kParamPixels, "px");
         p.add_float("saturation", "Saturação", 100, 0, 300, kParamAnimatable | kParamPercent, "%");
         p.add_color("threshold_color", "Cor adicional do limite", Vec4{0,0,0,1});
         p.add_float("mix", "Mistura", 100, 0, 100, kParamAnimatable | kParamPercent, "%");
+        p.add_float("model", "Modelo", 1, 0, 1, kParamHidden | kParamLegacyZero);
     }
-    bool is_identity(const EffectEval& e) const noexcept override { return e.f(5) <= 0; }
+    bool is_identity(const EffectEval& e) const noexcept override { return e.f(kMix) <= 0; }
     void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
         for (auto id : {ShaderId::effects_hotspots_frag, ShaderId::effects_gaussian_blur_frag,
                         ShaderId::effects_downsample_frag}) out.push_back(PipelineKey::fullscreen(id, work));
@@ -444,15 +448,16 @@ public:
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
                  LayerImage& out) const override {
         LayerImage blurred = input;
-        if (e.f(2) > 0) {
+        if (e.f(kBlurInput) > 0) {
             BlurRequest req;
-            req.sigmaX = req.sigmaY = e.f(2) / 3;
+            req.sigmaX = req.sigmaY = e.f(kBlurInput) / 3;
             req.repeatEdges = true; req.outRegion = input.region; req.label = "hotspots-blur-input";
             if (const Status s = build_gaussian(ctx, input, req, blurred); !s.ok()) return s;
         }
         auto u = base_uniforms(blurred);
-        u.p0 = Vec4{e.f(0)/100, e.f(1), e.f(3)/100, e.f(5)/100};
-        u.color = e.color(4);
+        u.p0 = Vec4{e.f(kThreshold) / 100, e.f(kBrightness), e.f(kSaturation) / 100, e.f(kMix) / 100};
+        u.p1.x = e.count > kModel && e.f(kModel) >= 0.5f ? 1.f : 0.f;
+        u.color = e.color(kThresholdColor);
         out = input; out.texture = ctx.texture("hotspots", input.width, input.height);
         if (ctx.fullscreen_pass("hotspots", PassStage::Effects, out.texture, ShaderId::effects_hotspots_frag,
                 {PassTexture{blurred.texture, {}, CommonSampler::LinearClamp}}, &u, sizeof(u)) == kInvalidIndex)
@@ -460,6 +465,10 @@ public:
         return OkStatus;
     }
 };
+
+#include "ChromaticHaloEffects.inl"
+#include "PatternedHaloEffects.inl"
+#include "MultiscaleGlow.inl"
 
 class Rays final : public Effect {
 public:
@@ -699,12 +708,17 @@ public:
 // -----------------------------------------------------------------------------
 class LensBlur final : public Effect {
 public:
+    explicit LensBlur(bool rack = false) noexcept : rack_(rack) {}
+
     enum : u32 { kRadius = 0, kHighlightBoost, kIrisSides, kIrisRotation, kQuality,
-                 kIrisSharpness, kOnlyBlur, kMix, kIrisCurvature, kScaleX, kScaleY };
+                 kIrisSharpness, kOnlyBlur, kMix, kIrisCurvature, kScaleX, kScaleY,
+                 kRackTarget, kRackProgress, kRackAuto, kRackGamma, kRackBokeh, kRackThreshold,
+                 kRackEdges, kRackSoftBorders };
 
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kLensBlur, "Desfoque de lente", "Desfoque", EffectClass::Neighborhood};
-        return i;
+        static const EffectInfo rack{"aurea.blur.rack_defocus", "Transição de foco", "Desfoque", EffectClass::Neighborhood};
+        return rack_ ? rack : i;
     }
     /// Quanto o disco pode esticar: o maior dos dois eixos, em fator.
     static f32 stretch(const EffectEval& e, u32 axis) noexcept {
@@ -712,11 +726,16 @@ public:
         return std::isfinite(v) ? std::clamp(v, 1.0f, 1000.0f) / 100.0f : 1.0f;
     }
     void declare_parameters(ParameterRegistry& p) const override {
-        p.add_float("radius", "Raio", 18.0f, 0.0f, 400.0f, kParamAnimatable | kParamPixels, "px");
-        p.add_float("highlight_boost", "Ganho das luzes", 60.0f, 0.0f, 300.0f, kParamAnimatable | kParamPercent, "%");
+        if (rack_) {
+            p.add_float("focus_from", "Desfoque inicial", 8.8f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        } else {
+            p.add_float("radius", "Raio", 18.0f, 0.0f, 400.0f, kParamAnimatable | kParamPixels, "px");
+        }
+        p.add_float("highlight_boost", "Ganho das luzes", rack_ ? 0.0f : 60.0f, 0.0f, 300.0f,
+                    kParamAnimatable | kParamPercent, "%");
         p.add_int("iris_sides", "Lados da íris", 0, 0, 9);
         p.add_angle("iris_rotation", "Rotação da íris", 0.0f);
-        p.add_float("quality", "Qualidade", 2.0f, 1.0f, 6.0f);
+        p.add_float("quality", "Qualidade", rack_ ? 5.0f : 2.0f, 1.0f, 6.0f);
         p.add_float("iris_sharpness", "Suavidade", 100.0f, 10.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_bool("only_blur", "Só o desfoque", false);
         p.add_float("mix", "Mistura", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
@@ -729,27 +748,57 @@ public:
         p.typed_range(1.0f, 1000.0f);
         p.add_float("scale_y", "Escala Y", 100.0f, 10.0f, 300.0f, kParamAnimatable | kParamPercent, "%");
         p.typed_range(1.0f, 1000.0f);
+        if (rack_) {
+            constexpr u16 percent = kParamAnimatable | kParamPercent;
+            static const char* const edges[] = {"Transparente", "Repetir", "Refletir"};
+            p.add_float("focus_to", "Desfoque final", 0.0f, 0.0f, 100.0f, percent, "%");
+            p.add_float("progress", "Progresso do foco", 0.0f, 0.0f, 100.0f, percent, "%");
+            p.add_bool("auto", "Duração da camada", false);
+            p.add_float("gamma", "Gama", 1.0f, 0.1f, 8.0f, kParamAnimatable);
+            p.add_float("bokeh", "Bokeh", 0.0f, -100.0f, 100.0f, percent, "%");
+            p.add_float("highlight_threshold", "Limiar das luzes", 90.0f, 0.0f, 100.0f, percent, "%");
+            p.add_enum("edges", "Bordas", edges, 3, 2);
+            p.add_bool("soft_borders", "Bordas suaves", false);
+            p.add_section_range("focus", "Transição de foco", kRackTarget, kRackAuto);
+            p.add_section_range("optics", "Lente", kRackGamma, kRackSoftBorders);
+        }
     }
-    bool is_identity(const EffectEval& e) const noexcept override { return e.f(kRadius) < 0.5f || e.f(kMix) < 0.01f; }
+    bool is_identity(const EffectEval& e) const noexcept override {
+        if (e.f(kMix) < 0.01f) return true;
+        if (!rack_ || (e.placement && e.placement->layerWidth)) return blur_radius(e, 1.0f) < 0.5f;
+        return rack_width(e) <= 0.0f;
+    }
     f32 input_margin(const EffectEval& e) const noexcept override {
-        return e.f(kRadius) * std::max(stretch(e, kScaleX), stretch(e, kScaleY));
+        return blur_radius(e, 1.0f) * std::max(stretch(e, kScaleX), stretch(e, kScaleY));
     }
     void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
         out.push_back(PipelineKey::fullscreen(ShaderId::effects_lens_blur_frag, work));
+        if (rack_) {
+            out.push_back(PipelineKey::fullscreen(ShaderId::effects_photographic_blur_frag, work));
+            out.push_back(PipelineKey::fullscreen(ShaderId::common_copy_frag, work));
+        }
     }
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
-        v[kRadius] = ParamValue::scalar(22.0f);
+        v[kRadius] = ParamValue::scalar(rack_ ? 8.8f : 22.0f);
         v[kIrisSides] = ParamValue::scalar(6.0f);
         return true;
     }
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
                  LayerImage& out) const override {
-        const f32 radius = std::max(0.0f, e.f(kRadius));
+        const f32 radius = blur_radius(e, input.region.w);
         const f32 sx = stretch(e, kScaleX), sy = stretch(e, kScaleY);
+        const bool softEdges = !rack_ || e.b(kRackSoftBorders);
+        static constexpr CommonSampler rackSamplers[] = {
+            CommonSampler::LinearBorder, CommonSampler::LinearClamp, CommonSampler::LinearMirror,
+        };
+        const CommonSampler sampler = softEdges ? CommonSampler::LinearBorder
+            : rackSamplers[std::min(e.e(kRackEdges), 2u)];
         // Um disco de raio r na escala 1/k é um disco de raio r/k: reduzir não
         // muda o desenho e prende o custo por pixel.
         const u32 k = reduction_for(radius * std::max(sx, sy), 20.0f);
-        const Rect region = spread_region(input.region, radius * sx, radius * sy, e.placement, margin);
+        const Rect region = softEdges
+            ? spread_region(input.region, radius * sx, radius * sy, e.placement, margin)
+            : input.region;
         u32 w = 0, h = 0;
         ctx.region_size(region, input.texel_scale_x() / static_cast<f32>(k), w, h);
 
@@ -769,14 +818,60 @@ public:
         const f32 curvature = std::isfinite(e.f(kIrisCurvature)) ? std::clamp(e.f(kIrisCurvature) / 100.0f, -1.0f, 1.0f) : 0.0f;
         u.p3 = Vec4{e.b(kOnlyBlur) ? 1.0f : 0.0f, curvature, sx, sy};
 
+        FGTexture source = input.texture;
+        if (rack_) {
+            u.p2 = {bounded(e.f(kRackGamma), 0.1f, 8.0f, 1.0f),
+                    bounded(e.f(kRackThreshold), 0.0f, 100.0f, 90.0f) * 0.01f,
+                    bounded(e.f(kRackBokeh), -100.0f, 100.0f, 0.0f) * 0.01f, 1.0f};
+            const std::array<Vec4, 6> encode{};
+            source = ctx.texture("rack-defocus-encoded", input.width, input.height);
+            if (ctx.fullscreen_pass("rack-defocus-encoded", PassStage::Effects, source,
+                                    ShaderId::effects_photographic_blur_frag, {PassTexture{input.texture}},
+                                    encode.data(), sizeof(encode)) == kInvalidIndex) return Errc::PipelineCompileFailed;
+        }
         out = LayerImage{ctx.texture("desfoque-lente", w, h), region, w, h};
         if (ctx.fullscreen_pass("desfoque-lente", PassStage::Effects, out.texture, ShaderId::effects_lens_blur_frag,
-                                {PassTexture{input.texture, {}, CommonSampler::LinearBorder}},
+                                {PassTexture{source, {}, sampler}},
                                 &u, sizeof(u)) == kInvalidIndex) {
             return Errc::PipelineCompileFailed;
         }
+        if (rack_ && !softEdges && (w != input.width || h != input.height)) {
+            // A full-width layer samples the reduced texture at sub-texel
+            // positions at the frame edge. Promote with clamp to avoid
+            // interpolating against transparent pixels beyond that edge.
+            const FGTexture reduced = out.texture;
+            const Vec4 uv{1.0f, 1.0f, 0.0f, 0.0f};
+            out = LayerImage{ctx.texture("rack-defocus-resize", input.width, input.height),
+                             input.region, input.width, input.height};
+            if (ctx.fullscreen_pass("rack-defocus-resize", PassStage::Effects, out.texture, ShaderId::common_copy_frag,
+                                    {PassTexture{reduced, {}, CommonSampler::LinearClamp}}, &uv, sizeof(uv)) == kInvalidIndex) {
+                return Errc::PipelineCompileFailed;
+            }
+        }
         return OkStatus;
     }
+
+private:
+    static f32 bounded(f32 value, f32 lower, f32 upper, f32 fallback) noexcept {
+        return std::clamp(std::isfinite(value) ? value : fallback, lower, upper);
+    }
+
+    static f32 rack_width(const EffectEval& e) noexcept {
+        const f32 from = bounded(e.f(kRadius), 0.0f, 100.0f, 8.8f);
+        const f32 to = bounded(e.f(kRackTarget), 0.0f, 100.0f, 0.0f);
+        const f32 progress = bounded(e.b(kRackAuto) ? e.clipProgress : e.f(kRackProgress) * 0.01f,
+                                     0.0f, 1.0f, 0.0f);
+        return 0.005f * std::lerp(from, to, progress);
+    }
+
+    f32 blur_radius(const EffectEval& e, f32 fallbackWidth) const noexcept {
+        if (!rack_) return std::max(0.0f, e.f(kRadius));
+        const f32 width = e.placement && e.placement->layerWidth
+            ? static_cast<f32>(e.placement->layerWidth) : fallbackWidth;
+        return rack_width(e) * width;
+    }
+
+    bool rack_;
 };
 
 // -----------------------------------------------------------------------------
@@ -830,10 +925,19 @@ public:
 void register_light_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<DeepGlow>());
     (void)r.add(std::make_unique<Hotspots>());
+    (void)r.add(std::make_unique<ChromaticHalo>(ChromaticHalo::Model::Highlights));
+    (void)r.add(std::make_unique<ChromaticHalo>(ChromaticHalo::Model::Shadows));
+    (void)r.add(std::make_unique<ChromaticHalo>(ChromaticHalo::Model::Outline));
+    (void)r.add(std::make_unique<PatternedHalo>(PatternedHalo::Model::Aura));
+    (void)r.add(std::make_unique<PatternedHalo>(PatternedHalo::Model::Rainbow));
+    (void)r.add(std::make_unique<PatternedHalo>(PatternedHalo::Model::Rings));
+    (void)r.add(std::make_unique<PatternedHalo>(PatternedHalo::Model::Distance));
+    (void)r.add(std::make_unique<MultiscaleGlow>());
     (void)r.add(std::make_unique<Halation>());
     (void)r.add(std::make_unique<Rays>());
     (void)r.add(std::make_unique<LightSweep>());
     (void)r.add(std::make_unique<LensBlur>());
+    (void)r.add(std::make_unique<LensBlur>(true));
     (void)r.add(std::make_unique<Colorama>());
 }
 

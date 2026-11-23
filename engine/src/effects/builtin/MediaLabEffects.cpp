@@ -57,6 +57,90 @@ public:
     }
 };
 
+class JpegCompressionDamage final : public Effect {
+public:
+    enum : u32 {
+        kQuality, kReduction, kReductionX, kAll, kFrequencyX, kFrequencyY, kLow, kMid, kHigh,
+        kLuma, kChroma, kErrorRate, kErrorDensity, kErrorAmplitude, kSeed, kFrameInterval,
+        kGain, kOffset, kSaturation,
+    };
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{"aurea.stylize.jpeg_compression_damage", "Compressão JPEG",
+                                  "Estilizar", EffectClass::Neighborhood};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_float("quality", "Qualidade", 10.0f, 1.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_int("resolution_factor", "Fator de redução", 1, 1, 64);
+        p.add_float("resolution_x", "Redução relativa X", 1.0f, 0.01f, 64.0f, kParamAnimatable);
+        p.add_float("frequency_all", "Todas as frequências", 1.0f, 0.0f, 8.0f, kParamAnimatable);
+        p.add_float("frequency_x", "Frequências horizontais", 1.0f, 0.0f, 8.0f, kParamAnimatable);
+        p.add_float("frequency_y", "Frequências verticais", 1.0f, 0.0f, 8.0f, kParamAnimatable);
+        p.add_float("frequency_low", "Frequências baixas", 1.0f, 0.0f, 8.0f, kParamAnimatable);
+        p.add_float("frequency_mid", "Frequências médias", 1.0f, 0.0f, 8.0f, kParamAnimatable);
+        p.add_float("frequency_high", "Frequências altas", 1.0f, 0.0f, 8.0f, kParamAnimatable);
+        p.add_float("affect_luma", "Influência na luma", 1.0f, 0.0f, 4.0f, kParamAnimatable);
+        p.add_float("affect_chroma", "Influência na croma", 0.5f, 0.0f, 4.0f, kParamAnimatable);
+        p.add_float("error_rate", "Taxa de erros", 0.0f, 0.0f, 64.0f, kParamAnimatable);
+        p.add_float("error_density", "Densidade dos erros", 0.75f, 0.0f, 1.0f, kParamAnimatable);
+        p.add_float("error_amplitude", "Amplitude dos erros", 1.0f, 0.0f, 8.0f, kParamAnimatable);
+        p.add_float("seed", "Semente", 0.123f, 0.0f, 1024.0f, kParamAnimatable);
+        p.add_int("frame_interval", "Intervalo entre quadros", 1, 0, 300);
+        p.add_float("scale_lights", "Ganho das luzes", 1.0f, 0.0f, 8.0f, kParamAnimatable);
+        p.add_float("offset_darks", "Deslocamento das sombras", 0.0f, -2.0f, 2.0f, kParamAnimatable);
+        p.add_float("saturation", "Saturação", 1.0f, -2.0f, 10.0f, kParamAnimatable);
+    }
+    void pipelines(std::vector<PipelineKey>& v, SurfaceFormat f) const override {
+        v.push_back(PipelineKey::fullscreen(ShaderId::effects_jpeg_codec_frag, f));
+    }
+    Status build(EffectBuildContext& c, const EffectEval& e, const LayerImage& in, f32,
+                 LayerImage& out) const override {
+        auto read = [&](u32 index, f32 fallback, f32 lo, f32 hi) {
+            const f32 value = e.f(index);
+            return std::clamp(std::isfinite(value) ? value : fallback, lo, hi);
+        };
+        const f32 reduction = read(kReduction, 1.0f, 1.0f, 64.0f);
+        const f32 reductionX = std::max(1.0f, reduction * read(kReductionX, 1.0f, 0.01f, 64.0f));
+        const u32 maxPaddedSize = c.max_texture_size() & ~15u;
+        const u32 width = std::min(maxPaddedSize, static_cast<u32>(std::ceil(in.width / reductionX)));
+        const u32 height = std::min(maxPaddedSize, static_cast<u32>(std::ceil(in.height / reduction)));
+        if (width == 0 || height == 0) return Errc::PipelineCompileFailed;
+        // Chroma is stored in the upper-left half of the same intermediate
+        // surface. Aligning the luma plane to 16 also aligns the chroma DCT to 8.
+        const u32 w = (width + 15u) & ~15u;
+        const u32 h = (height + 15u) & ~15u;
+        EffectUniforms u = base_uniforms(in);
+        u.texel = {f32(width), f32(height), f32(w), f32(h)};
+        u.p0 = {read(kQuality, 10, 1, 100), read(kAll, 1, 0, 8),
+                read(kFrequencyX, 1, 0, 8), read(kFrequencyY, 1, 0, 8)};
+        u.p1 = {read(kLow, 1, 0, 8), read(kMid, 1, 0, 8), read(kHigh, 1, 0, 8), read(kLuma, 1, 0, 4)};
+        u.p2 = {read(kChroma, .5f, 0, 4), read(kErrorRate, 0, 0, 64),
+                read(kErrorDensity, .75f, 0, 1), read(kErrorAmplitude, 1, 0, 8)};
+        const u32 interval = static_cast<u32>(read(kFrameInterval, 1, 0, 300));
+        const u64 frame = interval ? static_cast<u64>(std::max<i64>(0, e.localTime.value)) / interval : 0u;
+        const u32 seed = static_cast<u32>(std::round(read(kSeed, .123f, 0, 1024) * 1000000.0f))
+                         ^ (static_cast<u32>(frame) * 0x9e3779b9u)
+                         ^ (static_cast<u32>(frame >> 32) * 0x85ebca6bu);
+        u.p3 = {0.0f, static_cast<f32>(seed & 0xffffu), static_cast<f32>(seed >> 16), 0.0f};
+        u.color = {read(kGain, 1, 0, 8), read(kOffset, 0, -2, 2), read(kSaturation, 1, -2, 10), 1.0f};
+
+        FGTexture previous = in.texture;
+        for (u32 stage = 0; stage < 5; ++stage) {
+            u.p3.x = static_cast<f32>(stage);
+            const bool final = stage == 4;
+            const auto target = c.texture("compressao-jpeg", final ? in.width : w, final ? in.height : h);
+            if (c.fullscreen_pass("compressao-jpeg", PassStage::Effects, target, ShaderId::effects_jpeg_codec_frag,
+                                  {PassTexture{previous, {}, final ? CommonSampler::LinearClamp : CommonSampler::NearestClamp},
+                                   PassTexture{in.texture, {}, CommonSampler::LinearClamp}},
+                                  &u, sizeof(u)) == kInvalidIndex) return Errc::PipelineCompileFailed;
+            previous = target;
+        }
+        out = {previous, in.region, in.width, in.height};
+        return OkStatus;
+    }
+};
+
 class AnalogSignal final : public Effect {
 public:
     const EffectInfo& info() const noexcept override {
@@ -311,6 +395,7 @@ public:
 } // namespace
 void register_media_lab_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<JpegGlitch>());
+    (void)r.add(std::make_unique<JpegCompressionDamage>());
     (void)r.add(std::make_unique<AnalogSignal>());
     (void)r.add(std::make_unique<SignalReference>());
 }

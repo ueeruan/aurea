@@ -4571,6 +4571,18 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
     for (const auto& p : r.plugins) { [out addObject:to_ns(p.id)]; [out addObject:to_ns(p.version)]; [out addObject:to_ns(p.directory)]; }
     return out;
 }
++ (NSInteger)appendBackupProject:(NSString*)packagePath to:(NSString*)backupPath index:(NSInteger)index count:(NSInteger)count {
+    return static_cast<NSInteger>(aurea::package::append_backup_project(to_std(backupPath), to_std(packagePath),
+        static_cast<aurea::u32>(index), static_cast<aurea::u32>(count)).code());
+}
++ (NSArray<NSString*>*)restoreProjectBackup:(NSString*)backupPath projects:(NSString*)projectsDir media:(NSString*)mediaRoot batch:(NSString*)batch {
+    aurea::package::BackupRestoreResult result;
+    const auto status = aurea::package::restore_backup(to_std(backupPath), to_std(projectsDir), to_std(mediaRoot), to_std(batch), result);
+    auto* out = [@[[NSString stringWithFormat:@"%d", static_cast<int>(status.code())],
+                   [NSString stringWithFormat:@"%u", result.projects]] mutableCopy];
+    for (const auto& plugin : result.plugins) { [out addObject:to_ns(plugin.id)]; [out addObject:to_ns(plugin.directory)]; }
+    return out;
+}
 - (NSArray<NSDictionary<NSString*, id>*>*)parseSRT:(NSString*)srt {
     NSMutableArray* out = [NSMutableArray array];
     for (const auto& word : aurea::text::parse_srt(to_std(srt))) {

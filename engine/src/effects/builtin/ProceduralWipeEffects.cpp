@@ -14,10 +14,10 @@ public:
         Shift, Phase, Speed, ShapeA, ShapeB, ShapeC, Gradient, GradientAngle,
         Feather, BorderWidth, BorderColor, BorderOpacity, BorderSoftness, BorderShift,
         Glow, GlowWidth, GlowWidths, GlowColor, Noise, NoiseFrequency, NoiseSpeed,
-        OpacityMode, Background };
+        OpacityMode, Background, PlasmaDirectionModel };
     const EffectInfo& info() const noexcept override {
         static const EffectInfo flux{effect_keys::kWipeFlux, "WipeFlux", "Transição", EffectClass::Domain};
-        static const EffectInfo plasma{effect_keys::kWipePlasma, "WipePlasma", "Transição", EffectClass::Domain};
+        static const EffectInfo plasma{effect_keys::kWipePlasma, "Transição de plasma", "Transição", EffectClass::Domain};
         return plasma_ ? plasma : flux;
     }
     void declare_parameters(ParameterRegistry& p) const override {
@@ -58,6 +58,8 @@ public:
         p.add_float("glow_noise_speed", "Velocidade do ruído", 2, -20, 20);
         p.add_enum("opacity", "Processamento de alfa", opacity, 3, 0);
         p.add_layer_ref("background", "Camada de fundo");
+        if (plasma_) p.add_int("plasma_direction_model", "Modelo de direção", 1, 0, 1,
+                               kParamHidden | kParamLegacyZero);
     }
     i32 input_layer_param() const noexcept override { return Background; }
     static f32 safe(f32 v, f32 fallback = 0) noexcept { return std::isfinite(v) ? v : fallback; }
@@ -102,7 +104,10 @@ public:
         const u64 ref = e.value(Background).ref;
         const LayerImage* bg = ref ? ctx.layer_input(ref) : nullptr;
         u.q5 = {std::max(width,1.f),std::max(height,1.f),static_cast<f32>(e.e(OpacityMode)),bg ? 1.f : 0.f};
-        u.q6 = {bg ? std::max(bg->region.w,1.f) : 1.f,bg ? std::max(bg->region.h,1.f) : 1.f,safe(e.f(NoiseSpeed),2),0};
+        const bool calibratedDirection = plasma_ && e.count > PlasmaDirectionModel &&
+                                         e.value(PlasmaDirectionModel).as_int() == 1;
+        u.q6 = {bg ? std::max(bg->region.w,1.f) : 1.f,bg ? std::max(bg->region.h,1.f) : 1.f,
+                safe(e.f(NoiseSpeed),2),calibratedDirection ? 1.f : 0.f};
         u.compFromLayer = e.placement ? e.placement->compFromLayer : Mat4::identity();
         out = input;
         out.texture = ctx.texture("procedural-wipe", input.width, input.height);

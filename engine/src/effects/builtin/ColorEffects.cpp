@@ -7,7 +7,10 @@
 //  a tradução dos parâmetros da interface para os números do shader.
 // =============================================================================
 #include "BuiltinEffects.hpp"
+#include "AeEffects2026.hpp"
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace aurea::builtin {
@@ -207,6 +210,134 @@ public:
         op.p[7] = e.f(kAmount) / 100.0f;
         return true;
     }
+};
+
+class TonePalette final : public Effect {
+public:
+    explicit TonePalette(bool quad) noexcept : quad_(quad) {}
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo duo{"aurea.color.duotone", "Duotone", "Cor", EffectClass::Neighborhood};
+        static const EffectInfo quad{"aurea.color.quadtone", "Quatro tons", "Cor", EffectClass::Neighborhood};
+        return quad_ ? quad : duo;
+    }
+
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_float("amount", "Intensidade", 100.0f, 0.0f, 100.0f, kPercent, "%");
+        p.add_color("shadow_color", "Cor das sombras", quad_ ? palette(0, 0, 0) : palette(0, 0, .20f));
+        if (quad_) {
+            p.add_color("low_color", "Cor dos tons escuros", palette(.33f, .33f, .33f));
+            p.add_color("high_color", "Cor dos tons claros", palette(.66f, .66f, .66f));
+            p.add_color("highlight_color", "Cor das luzes", palette(1, 1, 1));
+            p.add_float("shadow_level", "Limiar das sombras", 0.0f, -100.0f, 200.0f, kPercent, "%");
+            p.add_float("low_level", "Limiar dos tons escuros", 33.0f, -100.0f, 200.0f, kPercent, "%");
+            p.add_float("high_level", "Limiar dos tons claros", 66.0f, -100.0f, 200.0f, kPercent, "%");
+            p.add_float("highlight_level", "Limiar das luzes", 100.0f, -100.0f, 200.0f, kPercent, "%");
+            p.add_float("softness", "Suavidade", 100.0f, 0.1f, 400.0f, kPercent, "%");
+            p.add_float("shadow_softness", "Suavidade das sombras", 100.0f, 0.1f, 400.0f, kPercent, "%");
+            p.add_float("midtone_softness", "Suavidade dos meios-tons", 100.0f, 0.1f, 400.0f, kPercent, "%");
+            p.add_float("highlight_softness", "Suavidade das luzes", 100.0f, 0.1f, 400.0f, kPercent, "%");
+            p.add_section_range("levels", "Posições e suavidade", kQuadShadowLevel, kQuadHighlightSoftness);
+        } else {
+            p.add_color("highlight_color", "Cor das luzes", palette(1, .90f, .80f));
+            p.add_float("threshold", "Limiar", 50.0f, -100.0f, 200.0f, kPercent, "%");
+            p.add_float("softness", "Suavidade", 100.0f, 0.1f, 400.0f, kPercent, "%");
+            p.add_bool("invert", "Inverter tons", false);
+        }
+        const u32 matte = p.add_layer_ref("matte", "Camada de máscara");
+        static const char* const channels[] = {"Luminância", "Alfa"};
+        p.add_enum("matte_channel", "Canal da máscara", channels, 2, 0);
+        p.add_float("matte_blur", "Desfoque da máscara", 0.0f, 0.0f, 100.0f, kParamAnimatable | kParamPixels, "px");
+        p.add_bool("invert_matte", "Inverter máscara", false);
+        p.add_section_range("matte", "Máscara", matte, matte + 3, kInvalidIndex, false);
+    }
+
+    i32 input_layer_param() const noexcept override { return static_cast<i32>(matte_index()); }
+    bool is_identity(const EffectEval& e) const noexcept override { return !(e.f(kAmount) > 0.0f); }
+
+    bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
+        if (!quad_) return false;
+        const Vec4 blue = palette(.09f, .21f, .44f);
+        const Vec4 coral = palette(.83f, .28f, .19f);
+        v[kQuadLowColor] = ParamValue::color(blue.x, blue.y, blue.z, 1.0f);
+        v[kQuadHighColor] = ParamValue::color(coral.x, coral.y, coral.z, 1.0f);
+        return true;
+    }
+
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        for (const auto id : {ShaderId::effects_ae_two_layer_frag, ShaderId::effects_gaussian_blur_frag,
+                              ShaderId::effects_downsample_frag}) out.push_back(PipelineKey::fullscreen(id, work));
+    }
+
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32, LayerImage& out) const override {
+        auto pct = [&](u32 index, f32 fallback, f32 lower, f32 upper) {
+            return ae26::clampf(e.f(index) * 0.01f, lower, upper, fallback);
+        };
+        ae26::AeUniforms u = ae26::ae_uniforms(e, input, false);
+        u.p[0] = {2.0f, quad_ ? 1.0f : 0.0f, pct(kAmount, 1.0f, 0.0f, 1.0f), 0.0f};
+        u.c[0] = e.color(kShadowColor);
+        if (quad_) {
+            u.c[1] = e.color(kQuadLowColor);
+            u.c[2] = e.color(kQuadHighColor);
+            u.p[8] = e.color(kQuadHighlightColor);
+            const f32 low = pct(kQuadShadowLevel, 0.0f, -1.0f, 2.0f);
+            constexpr f32 spacing = 1e-5f;
+            const f32 below = std::max(low + spacing, pct(kQuadLowLevel, .33f, -1.0f, 2.0f));
+            const f32 above = std::max(below + spacing, pct(kQuadHighLevel, .66f, -1.0f, 2.0f));
+            const f32 high = std::max(above + spacing, pct(kQuadHighlightLevel, 1.0f, -1.0f, 2.0f));
+            u.p[1] = {low, below, above, high};
+            const f32 soft = pct(kQuadSoftness, 1.0f, .001f, 4.0f);
+            u.p[2] = {soft * pct(kQuadShadowSoftness, 1.0f, .001f, 4.0f),
+                      soft * pct(kQuadMidSoftness, 1.0f, .001f, 4.0f),
+                      soft * pct(kQuadHighlightSoftness, 1.0f, .001f, 4.0f), 0.0f};
+        } else {
+            u.c[1] = e.color(kDuoHighlightColor);
+            u.p[1] = {pct(kDuoThreshold, .5f, -1.0f, 2.0f), pct(kDuoSoftness, 1.0f, .001f, 4.0f),
+                      e.b(kDuoInvert) ? 1.0f : 0.0f, 0.0f};
+        }
+
+        const u32 matteParam = matte_index();
+        const u64 reference = e.value(matteParam).ref;
+        const LayerImage* matte = ctx.layer_input(reference);
+        if (reference && !matte) { out = input; return OkStatus; }
+        LayerImage filtered;
+        PassTexture auxiliary{input.texture};
+        if (matte) {
+            BlurRequest request;
+            request.sigmaX = request.sigmaY = ae26::clampf(e.f(matteParam + 2), 0.0f, 100.0f, 0.0f) / 3.0f;
+            request.repeatEdges = true;
+            const Status blurred = build_gaussian(ctx, *matte, request, filtered);
+            if (!blurred.ok()) return blurred;
+            const Mat4 m = e.placement ? e.placement->compFromLayer : Mat4::identity();
+            u.p[4] = {m.col[0].x, m.col[1].x, m.col[3].x, 0.0f};
+            u.p[5] = {m.col[0].y, m.col[1].y, m.col[3].y, 0.0f};
+            u.p[6] = {m.col[0].w, m.col[1].w, m.col[3].w, 0.0f};
+            u.p[7] = {filtered.region.x, filtered.region.y, filtered.region.w, filtered.region.h};
+            u.p[9] = {1.0f, static_cast<f32>(e.e(matteParam + 1)), e.b(matteParam + 3) ? 1.0f : 0.0f, 0.0f};
+            auxiliary = PassTexture{filtered.texture, {}, CommonSampler::LinearBorder};
+        }
+        return ae26::ae_pass(ctx, input, u, ShaderId::effects_ae_two_layer_frag, "paleta-tonal",
+                             CommonSampler::LinearClamp, out, &auxiliary, 1);
+    }
+
+private:
+    static constexpr u16 kPercent = kParamAnimatable | kParamPercent;
+    enum : u32 { kAmount, kShadowColor, kDuoHighlightColor, kDuoThreshold, kDuoSoftness, kDuoInvert, kDuoMatte };
+    enum : u32 {
+        kQuadLowColor = 2, kQuadHighColor, kQuadHighlightColor, kQuadShadowLevel, kQuadLowLevel,
+        kQuadHighLevel, kQuadHighlightLevel, kQuadSoftness, kQuadShadowSoftness, kQuadMidSoftness, kQuadHighlightSoftness,
+        kQuadMatte,
+    };
+
+    static Vec4 palette(f32 r, f32 g, f32 b) noexcept {
+        return {Color::srgb_to_linear(r), Color::srgb_to_linear(g), Color::srgb_to_linear(b), 1.0f};
+    }
+
+    [[nodiscard]] u32 matte_index() const noexcept {
+        return quad_ ? static_cast<u32>(kQuadMatte) : static_cast<u32>(kDuoMatte);
+    }
+
+    bool quad_;
 };
 
 // -----------------------------------------------------------------------------
@@ -419,6 +550,72 @@ public:
     }
 };
 
+class ColorSpaceTransform final : public Effect {
+public:
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{"aurea.color.space_transform", "Transformação de espaço de cor", "Cor", EffectClass::Neighborhood};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        static const char* const spaces[] = {
+            "Linear Rec.709", "sRGB", "Rec.709 OETF", "Linear Display P3", "Display P3",
+            "Linear Rec.2020", "Rec.2020 OETF", "ACEScg", "ACEScct", "ACES2065-1",
+        };
+        p.add_enum("input", "Espaço de entrada", spaces, std::size(spaces), 0);
+        p.add_enum("output", "Espaço de saída", spaces, std::size(spaces), 0);
+        p.add_float("mix", "Intensidade", 100, 0, 100, kParamAnimatable | kParamPercent, "%");
+        p.set_tip(0, "Interpreta os valores RGB neste espaço. Use Linear Rec.709 para o vídeo ou imagem já decodificado pelo Aurea.");
+    }
+    bool demo_values(EffectInstance&, std::vector<ParamValue>& values) const noexcept override {
+        values[1] = ParamValue::scalar(1.0f);
+        return true;
+    }
+    bool is_identity(const EffectEval& e) const noexcept override { return e.e(0) == e.e(1) || e.f(2) <= 0; }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_color_space_transform_frag, work));
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32, LayerImage& out) const override {
+        // Matrices use CIE XYZ with D65 as the common white. ACES AP0/AP1
+        // include Bradford adaptation from their native D60.
+        struct Gamut { std::array<f32, 9> toXyz, fromXyz; };
+        static constexpr Gamut gamuts[] = {
+            {{.412390799f, .357584339f, .180480788f, .212639006f, .715168679f, .072192315f, .019330819f, .119194780f, .950532152f},
+             {3.240969942f, -1.537383178f, -.498610760f, -.969243636f, 1.875967502f, .041555057f, .055630080f, -.203976959f, 1.056971514f}},
+            {{.486570949f, .265667693f, .198217285f, .228974564f, .691738522f, .079286914f, 0, .045113382f, 1.043944369f},
+             {2.493496912f, -.931383618f, -.402710784f, -.829488970f, 1.762664060f, .023624686f, .035845830f, -.076172389f, .956884524f}},
+            {{.636958048f, .144616904f, .168880975f, .262700212f, .677998072f, .059301716f, 0, .028072693f, 1.060985058f},
+             {1.716651188f, -.355670784f, -.253366281f, -.666684352f, 1.616481237f, .015768546f, .017639857f, -.042770613f, .942103121f}},
+            {{.652237542f, .128236136f, .169982249f, .267672180f, .674339989f, .057987831f, -.005381816f, .001369060f, 1.093070506f},
+             {1.660585326f, -.315295561f, -.241509328f, -.659926063f, 1.608391470f, .017298595f, .009002569f, -.003566876f, .913643313f}},
+            {{.938279849f, -.004451446f, .016627524f, .337368891f, .729521567f, -.066890457f, .001173951f, -.003710706f, 1.091594506f},
+             {1.063495491f, .006408910f, -.015806787f, -.492074128f, 1.368223407f, .091337088f, -.002816462f, .004644171f, .916418575f}},
+        };
+        struct Encoding { u32 gamut; f32 curve; };
+        static constexpr Encoding encodings[] = {{0,0},{0,1},{0,2},{1,0},{1,1},{2,0},{2,3},{3,0},{3,4},{4,0}};
+        const Encoding from = encodings[std::min<u32>(e.e(0), 9)];
+        const Encoding to = encodings[std::min<u32>(e.e(1), 9)];
+        const auto& a = gamuts[from.gamut].toXyz;
+        const auto& b = gamuts[to.gamut].fromXyz;
+        auto row = [&](u32 y) -> Vec4 {
+            if (from.gamut == to.gamut) return {f32(y == 0), f32(y == 1), f32(y == 2), 0};
+            auto at = [&](u32 x) { return b[y*3] * a[x] + b[y*3+1] * a[3+x] + b[y*3+2] * a[6+x]; };
+            return {at(0), at(1), at(2), 0};
+        };
+        auto u = base_uniforms(input);
+        u.p0 = row(0);
+        u.p1 = row(1);
+        u.p2 = row(2);
+        u.p3 = {from.curve, to.curve, e.f(2) * .01f, 0};
+        out = input;
+        out.texture = ctx.texture("color-space-transform", input.width, input.height);
+        if (ctx.fullscreen_pass("color-space-transform", PassStage::Effects, out.texture,
+                                ShaderId::effects_color_space_transform_frag,
+                                {PassTexture{input.texture}}, &u, sizeof(u)) == kInvalidIndex)
+            return Errc::PipelineCompileFailed;
+        return OkStatus;
+    }
+};
+
 class ImportedCubeLut final : public Effect {
 public:
     const EffectInfo& info() const noexcept override {
@@ -465,6 +662,8 @@ void register_color_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<BrightnessContrast>());
     (void)r.add(std::make_unique<Saturation>());
     (void)r.add(std::make_unique<Tint>());
+    (void)r.add(std::make_unique<TonePalette>(false));
+    (void)r.add(std::make_unique<TonePalette>(true));
     (void)r.add(std::make_unique<ColorMatrix>());
     (void)r.add(std::make_unique<Levels>());
     (void)r.add(std::make_unique<Curves>());
@@ -472,6 +671,7 @@ void register_color_effects(EffectRegistry& r) {
     // fundida dos outros de cor — sem passe a mais.
     (void)r.add(std::make_unique<Fill>());
     (void)r.add(std::make_unique<ColorBalanceHls>());
+    (void)r.add(std::make_unique<ColorSpaceTransform>());
 }
 
 } // namespace aurea::builtin

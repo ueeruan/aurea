@@ -7,15 +7,22 @@ namespace aurea::builtin {
 namespace {
 class CornerPin final : public Effect {
 public:
+    explicit CornerPin(bool projected = false) : projected_(projected) {}
+
     const EffectInfo& info() const noexcept override {
-        static const EffectInfo info{effect_keys::kCornerPin,"Corner Pin","Distort",EffectClass::Domain};return info;
+        static const EffectInfo info{effect_keys::kCornerPin,"Corner Pin","Distort",EffectClass::Domain};
+        static const EffectInfo projected{"aurea.distort.projective_pin","Projeção de quatro cantos",
+                                          "Distorcer",EffectClass::Domain};
+        return projected_ ? projected : info;
     }
     void declare_parameters(ParameterRegistry& p) const override {
         const char* names[]={"Top left X","Top left Y","Top right X","Top right Y","Bottom right X","Bottom right Y","Bottom left X","Bottom left Y"};
         const char* keys[]={"tl_x","tl_y","tr_x","tr_y","br_x","br_y","bl_x","bl_y"};
         const f32 defaults[]={0,0,100,0,100,100,0,100};
-        for(int i=0;i<8;++i)p.add_float(keys[i],names[i],defaults[i],-5000,5000,kParamAnimatable|kParamPercent,"%");
-        p.add_bool("crop","Crop to layer",false);
+        const f32 projective[]={9.7f,41.1333f,69.45f,11.5333f,80.55f,82.3333f,22.2f,79.4f};
+        for(int i=0;i<8;++i)p.add_float(keys[i],names[i],projected_ ? projective[i] : defaults[i],
+                                        -5000,5000,kParamAnimatable|kParamPercent,"%");
+        p.add_bool("crop","Crop to layer",projected_);
     }
     bool is_identity(const EffectEval& e) const noexcept override {
         const f32 defaults[]={0,0,100,0,100,100,0,100};
@@ -48,7 +55,7 @@ public:
         if(!ow||!oh){out=input;return OkStatus;}
         auto u=base_uniforms(input);
         u.uvMap={region.x,region.y,region.w,region.h};
-        u.p0={static_cast<f32>(inv.m[0]),static_cast<f32>(inv.m[1]),static_cast<f32>(inv.m[2]),0};
+        u.p0={static_cast<f32>(inv.m[0]),static_cast<f32>(inv.m[1]),static_cast<f32>(inv.m[2]),projected_ ? 1.f : 0.f};
         u.p1={static_cast<f32>(inv.m[3]),static_cast<f32>(inv.m[4]),static_cast<f32>(inv.m[5]),0};
         u.p2={static_cast<f32>(inv.m[6]),static_cast<f32>(inv.m[7]),static_cast<f32>(inv.m[8]),valid?1.f:0.f};
         // O lado do horizonte em que a caixa está (sinal de z no centro dela):
@@ -63,7 +70,12 @@ public:
             {PassTexture{input.texture,{},CommonSampler::LinearClamp}},&u,sizeof(u))==kInvalidIndex)return Errc::PipelineCompileFailed;
         return OkStatus;
     }
+private:
+    bool projected_;
 };
 }
-void register_corner_pin_effect(EffectRegistry& r){(void)r.add(std::make_unique<CornerPin>());}
+void register_corner_pin_effect(EffectRegistry& r){
+    (void)r.add(std::make_unique<CornerPin>());
+    (void)r.add(std::make_unique<CornerPin>(true));
+}
 }

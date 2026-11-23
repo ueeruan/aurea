@@ -189,6 +189,7 @@ final class AppConfigStore: ObservableObject {
 /// Cobre o app inteiro: Home e editor não aparecem por trás. Os projetos ficam no aparelho.
 struct ForcedUpdateView: View {
     @EnvironmentObject private var model: AureaModel
+    @State private var backupFile: SharedProjectFile?
     let config: AppConfig
 
     var body: some View {
@@ -220,6 +221,21 @@ struct ForcedUpdateView: View {
                     Text(AureaText.t("app_update_no_link")).font(.aurea(size: 14, weight: .semibold)).multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                Spacer().frame(height: 8)
+                Button {
+                    model.exportProjectBackup { url in if let url { backupFile = SharedProjectFile(url: url) } }
+                } label: {
+                    Text(AureaText.t("project_backup_save")).font(.aurea(size: 15, weight: .semibold))
+                        .frame(maxWidth: .infinity, minHeight: 52).contentShape(Rectangle())
+                }
+                .accessibilityIdentifier("atualizacao.backup")
+                .disabled(!model.started || model.importingMedia)
+                if model.importingMedia {
+                    AureaActivityIndicator()
+                    Text(model.operationMessage).font(.aurea(size: 13)).multilineTextAlignment(.center)
+                } else if let status = model.toast {
+                    Text(status).font(.aurea(size: 13)).multilineTextAlignment(.center)
+                }
                 Spacer().frame(height: 48)
             }
             .padding(.horizontal, 24)
@@ -227,6 +243,7 @@ struct ForcedUpdateView: View {
         .background(AureaColors.background.ignoresSafeArea()).foregroundStyle(AureaColors.text)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("atualizacao.obrigatoria")
+        .sheet(item: $backupFile) { file in ProjectFileShareSheet(url: file.url) }
     }
 }
 

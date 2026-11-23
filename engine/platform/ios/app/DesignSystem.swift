@@ -1614,7 +1614,7 @@ private struct AureaDropdownMenuRow: View {
 // Par de `PanelFrame`/`PanelBar` do `editor/panels/PanelChrome.kt` (mesmos ids):
 // coluna esquerda de 60 com 4 células que repartem a altura (‹ · ◆± · Curva ·
 // ⋯, e o "=" do AUREA entre Curva e ⋯ quando há), conteúdo no centro rolando por
-// dentro, coluna direita com até 4 abas de ícone (só com 2 ou mais), divisórias
+// dentro, coluna direita rolável com abas de ícone (só com 2 ou mais), divisórias
 // de 0,7, altura de 200 (dada por quem hospeda). Segurar ◆ com keyframe no
 // quadro pede "apagar todos os keyframes"; Curva com menos de 2 keyframes avisa.
 //
@@ -1634,7 +1634,6 @@ enum PanelFrameMetrics {
     static let tabInset: CGFloat = PanelMetrics.tabInset
     static let tabRadius: CGFloat = PanelMetrics.tabRadius
     static let disabledAlpha: Double = 0.15
-    static let maxTabs = 4
 }
 
 /// 0.3.4 painéis: AS MEDIDAS CENTRAIS dos painéis de propriedade (moldura e
@@ -1795,7 +1794,7 @@ struct PanelFrame<Content: View>: View {
     private var only = 0
     @State private var moreOpen = false
 
-    /// - `tabs`: no máximo 4; com 0 ou 1 a coluna direita não existe.
+    /// - `tabs`: com 0 ou 1 a coluna direita não existe na moldura completa.
     /// - `selectedTab`: o `PanelTab.id` ativo (ou o id da `alt` dele).
     /// - `scrollContent`: o conteúdo rola por dentro (padrão); falso para listas próprias.
     init(rail: PanelRail, tabs: [PanelTab] = [], selectedTab: String? = nil, onTab: @escaping (String) -> Void = { _ in },
@@ -1846,21 +1845,35 @@ struct PanelFrame<Content: View>: View {
         Rectangle().fill(AureaColors.panelFrameDivider).frame(width: PanelFrameMetrics.divider).frame(maxHeight: .infinity)
     }
 
+    private func railLayout<Rows: View>(_ count: Int, @ViewBuilder rows: @escaping (CGFloat) -> Rows) -> some View {
+        GeometryReader { geometry in
+            let height = max(0, geometry.size.height)
+            let rowHeight = max(PanelMetrics.touch, height / CGFloat(max(1, count)))
+            let overflow = height < PanelMetrics.touch * CGFloat(count)
+            ScrollView(.vertical, showsIndicators: overflow) {
+                VStack(spacing: 0) { rows(rowHeight) }
+            }
+            .scrollDisabled(!overflow)
+        }
+        .frame(width: PanelFrameMetrics.railWidth)
+    }
+
     private var leftRail: some View {
-        VStack(spacing: 0) {
-            cell("panel.rail.back", label: AureaText.t("panel_voltar_ferramentas"), enabled: true, action: rail.onBack) {
+        let count = 4 + (rail.supportsAnimation && rail.onExpression != nil ? 1 : 0)
+        return railLayout(count) { height in
+            cell("panel.rail.back", label: AureaText.t("panel_voltar_ferramentas"), enabled: true, height: height, action: rail.onBack) {
                 CupertinoGlyph.text(CupertinoGlyph.ChevronLeft, size: PanelMetrics.railIcon).mirrorsInRtl()
             }
             if rail.supportsAnimation {
                 cell("panel.rail.keyframe",
                      label: AureaText.t(rail.keyframeLook == .keyHere ? "panel_tirar_keyframe_daqui" : "panel_marcar_keyframe_aqui"),
-                     enabled: rail.onKeyframe != nil, action: rail.onKeyframe,
+                     enabled: rail.onKeyframe != nil, height: height, action: rail.onKeyframe,
                      longAction: rail.keyframeLook == .keyHere && rail.onDeleteAllKeyframes != nil ? askDeleteAll : nil) {
                     // 0.3.4 painéis: os ícones pintados no tamanho da coluna (26).
                     KeyframeDiamondIcon(look: rail.keyframeLook, enabled: true)
                         .scaleEffect(PanelMetrics.railIcon / AureaDims.diamondIcon)
                 }
-                cell("panel.rail.curve", label: AureaText.t("panel_editar_curva_propriedade"), enabled: rail.onCurve != nil,
+                cell("panel.rail.curve", label: AureaText.t("panel_editar_curva_propriedade"), enabled: rail.onCurve != nil, height: height,
                      action: rail.onCurve.map { openCurve in { if rail.curveReady { openCurve() } else { curveWarning() } } }) {
                     CurveRailIcon(enabled: true, animated: rail.keyframeLook != .none)
                         .scaleEffect(PanelMetrics.railIcon / AureaDims.curveIcon)
@@ -1868,39 +1881,32 @@ struct PanelFrame<Content: View>: View {
                 if let onExpression = rail.onExpression {
                     cell("panel.rail.expression",
                          label: AureaText.t(rail.expression == .none ? "panel_adicionar_expressao" : "panel_editar_expressao"),
-                         enabled: true, action: onExpression) {
+                         enabled: true, height: height, action: onExpression) {
                         Text("=").font(.aurea(size: PanelMetrics.railExpression, weight: .bold))
                             .foregroundStyle(rail.expression == .none ? AureaColors.text : expressionColor(rail.expression))
                     }
                 }
                 if let entries = rail.moreEntries {
-                    cell("panel.rail.more", label: AureaText.t("editor_mais"), enabled: rail.moreEnabled, action: { moreOpen = true }) {
+                    cell("panel.rail.more", label: AureaText.t("editor_mais"), enabled: rail.moreEnabled, height: height, action: { moreOpen = true }) {
                         CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: PanelMetrics.railIcon, color: rail.moreActive ? AureaColors.accent : AureaColors.text)
                     }
                     .aureaAnchoredMenu(isPresented: $moreOpen, tag: "panel.rail.more.menu", entries: entries)
                 } else if let onMore = rail.onMore {
-                    cell("panel.rail.more", label: AureaText.t("editor_mais"), enabled: rail.moreEnabled, action: onMore) {
+                    cell("panel.rail.more", label: AureaText.t("editor_mais"), enabled: rail.moreEnabled, height: height, action: onMore) {
                         CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: PanelMetrics.railIcon, color: rail.moreActive ? AureaColors.accent : AureaColors.text)
                     }
-                } else {
-                    Color.clear.frame(maxHeight: .infinity)
                 }
-            } else {
-                Color.clear.frame(maxHeight: .infinity)
-                Color.clear.frame(maxHeight: .infinity)
-                Color.clear.frame(maxHeight: .infinity)
             }
         }
-        .frame(width: PanelFrameMetrics.railWidth)
-        .frame(maxHeight: .infinity)
     }
 
-    /// Uma célula da coluna esquerda: reparte a altura com as outras.
+    /// Uma célula da coluna esquerda: reparte a altura e preserva o alvo mínimo.
     @ViewBuilder
-    private func cell<Icon: View>(_ id: String, label: String, enabled: Bool, action: (() -> Void)?,
+    private func cell<Icon: View>(_ id: String, label: String, enabled: Bool, height: CGFloat, action: (() -> Void)?,
                                   longAction: (() -> Void)? = nil, @ViewBuilder icon: () -> Icon) -> some View {
         let face = icon()
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(maxWidth: .infinity)
+            .frame(height: height)
             .contentShape(Rectangle())
             .opacity(enabled ? 1 : PanelFrameMetrics.disabledAlpha)
         if let action, enabled {
@@ -1932,8 +1938,8 @@ struct PanelFrame<Content: View>: View {
     }
 
     private var rightRail: some View {
-        VStack(spacing: 0) {
-            ForEach(Array(tabs.prefix(PanelFrameMetrics.maxTabs).enumerated()), id: \.offset) { index, tab in
+        railLayout(tabs.count) { height in
+            ForEach(Array(tabs.enumerated()), id: \.offset) { index, tab in
                 let altOn = tab.alt.map { selectedTab == $0.id } ?? false
                 let on = selectedTab == tab.id || altOn
                 let shown = altOn ? (tab.alt ?? tab) : tab
@@ -1946,6 +1952,7 @@ struct PanelFrame<Content: View>: View {
                         .background(on ? AureaColors.panelFrameDivider : Color.clear,
                                     in: RoundedRectangle(cornerRadius: PanelFrameMetrics.tabRadius))
                         .padding(PanelFrameMetrics.tabInset)
+                        .frame(height: height)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(AureaPressStyle(shrink: 1))
@@ -1954,8 +1961,6 @@ struct PanelFrame<Content: View>: View {
                 .accessibilityIdentifier(tab.tag ?? "panel.tab.\(index)")
             }
         }
-        .frame(width: PanelFrameMetrics.railWidth)
-        .frame(maxHeight: .infinity)
     }
 
     @ViewBuilder

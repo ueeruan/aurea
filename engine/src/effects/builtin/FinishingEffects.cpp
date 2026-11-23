@@ -250,6 +250,50 @@ public:
     }
 };
 
+class OpticalVignette final : public Effect {
+public:
+    enum : u32 { kRadius, kSoftness, kCurve, kWidth, kHeight, kSquare, kCenter, kAngle, kOpacity, kColor };
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo info{"aurea.stylize.optical_vignette", "Vinheta óptica", "Estilizar",
+                                     EffectClass::Neighborhood};
+        return info;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_float("radius", "Raio", 0.9f, 0.f, 4.f, kParamAnimatable);
+        p.add_float("softness", "Suavidade", 1.f, 0.f, 4.f, kParamAnimatable);
+        p.add_float("curve", "Curva de suavidade", 0.4f, 0.f, 1.f, kParamAnimatable);
+        p.add_float("relative_width", "Largura relativa", 1.f, 0.05f, 5.f, kParamAnimatable);
+        p.add_float("relative_height", "Altura relativa", 0.75f, 0.05f, 5.f, kParamAnimatable);
+        p.add_float("squareness", "Forma quadrada", 0.f, 0.f, 1.f, kParamAnimatable);
+        p.add_point2("center", "Centro", Vec2{0.5f, 0.5f}, -1.f, 2.f, kParamAnimatable | kParamRelative);
+        p.add_angle("rotation", "Rotação", 0.f);
+        p.add_float("opacity", "Opacidade", 100.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
+        p.add_color("color", "Cor", Vec4{0, 0, 0, 1});
+    }
+    bool is_identity(const EffectEval& e) const noexcept override { return e.f(kOpacity) <= 0.f; }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_vignette_frag, work));
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
+                 LayerImage& out) const override {
+        const Vec2 size = layer_size(e, input);
+        const Vec2 center = e.p2(kCenter);
+        EffectUniforms u = base_uniforms(input);
+        u.p0 = Vec4{std::clamp(finite_or(e.f(kOpacity), 100.f) * 0.01f, 0.f, 1.f),
+                    std::max(finite_or(e.f(kRadius), 0.9f), 0.f), std::max(finite_or(e.f(kSoftness), 1.f), 0.f),
+                    std::clamp(finite_or(e.f(kSquare), 0.f), 0.f, 1.f)};
+        u.p1 = Vec4{finite_or(center.x, 0.5f) * size.x, finite_or(center.y, 0.5f) * size.y,
+                    size.x * 0.5f * std::max(finite_or(e.f(kWidth), 1.f), 0.05f),
+                    size.x * 0.5f * std::max(finite_or(e.f(kHeight), 0.75f), 0.05f)};
+        u.p2 = region_vec(input.region);
+        u.p3 = Vec4{1.f, std::clamp(finite_or(e.f(kCurve), 0.4f), 0.f, 1.f),
+                    finite_or(e.f(kAngle), 0.f) * kDeg2Rad, 0.f};
+        u.color = e.color(kColor);
+        return single_pass(ctx, ShaderId::effects_vignette_frag, input, u, "vinheta-optica", out);
+    }
+};
+
 // -----------------------------------------------------------------------------
 // Mosaico / painel de LED
 // -----------------------------------------------------------------------------
@@ -367,6 +411,86 @@ public:
     }
 private:
     bool reference_;
+};
+
+class ChromaticEdgeDetect final : public Effect {
+public:
+    enum : u32 { kSmooth, kSubpixel, kBrightness, kSaturation, kThreshold, kWeightR, kWeightG, kWeightB };
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{"aurea.stylize.chromatic_edges", "Contornos cromáticos",
+                                  "Estilizar", EffectClass::Neighborhood};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_float("edge_smooth", "Suavidade", 0.0224f, 0.0f, 0.64f, kParamAnimatable);
+        p.add_bool("subpixel_smooth", "Suavização subpixel", true);
+        p.add_float("brightness", "Brilho", 1.0f, 0.0f, 8.0f, kParamAnimatable);
+        p.add_float("saturation", "Saturação", 1.0f, -2.0f, 10.0f, kParamAnimatable);
+        p.add_float("threshold", "Limite", 0.0f, 0.0f, 1.0f, kParamAnimatable);
+        p.add_float("weight_red", "Peso do vermelho", 1.0f, 0.0f, 8.0f, kParamAnimatable);
+        p.add_float("weight_green", "Peso do verde", 1.0f, 0.0f, 8.0f, kParamAnimatable);
+        p.add_float("weight_blue", "Peso do azul", 1.0f, 0.0f, 8.0f, kParamAnimatable);
+    }
+    f32 input_margin(const EffectEval& e) const noexcept override {
+        const f32 sigma = sigma_px(e);
+        return std::ceil(3.0f * sigma + sample_step_px(sigma));
+    }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_find_edges_frag, work));
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_gaussian_blur_frag, work));
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_downsample_frag, work));
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
+                 LayerImage& out) const override {
+        const f32 sigma = sigma_px(e);
+        LayerImage sampled = input;
+        if (sigma > 0.05f) {
+            EffectUniforms encode = base_uniforms(input);
+            encode.p1.x = 3.0f;
+            LayerImage encoded;
+            auto status = single_pass(ctx, ShaderId::effects_find_edges_frag, input, encode, "contornos-rgb", encoded);
+            if (!status.ok()) return status;
+            BlurRequest req;
+            req.sigmaX = sigma;
+            req.sigmaY = sigma;
+            req.repeatEdges = true;
+            req.outRegion = input.region;
+            req.label = "contornos-suavizar";
+            status = build_gaussian(ctx, encoded, req, sampled);
+            if (!status.ok()) return status;
+        }
+
+        EffectUniforms u = base_uniforms(input);
+        u.uvMap = EffectBuildContext::uv_map(input.region, sampled.region);
+        const f32 step = sample_step_px(sigma);
+        u.p0 = {2.4f * std::clamp(finite_or(e.f(kBrightness), 1.0f), 0.0f, 8.0f),
+                step / std::max(sampled.region.w, 1e-6f), step / std::max(sampled.region.h, 1e-6f),
+                std::clamp(finite_or(e.f(kThreshold), 0.0f), 0.0f, 1.0f)};
+        u.p1 = {2.0f, sigma > 0.05f ? 1.0f : 0.0f, 0.0f, 0.0f};
+        u.p2 = {std::clamp(finite_or(e.f(kWeightR), 1.0f), 0.0f, 8.0f),
+                std::clamp(finite_or(e.f(kWeightG), 1.0f), 0.0f, 8.0f),
+                std::clamp(finite_or(e.f(kWeightB), 1.0f), 0.0f, 8.0f),
+                std::clamp(finite_or(e.f(kSaturation), 1.0f), -2.0f, 10.0f)};
+        out = input;
+        out.texture = ctx.texture("contornos-cromaticos", input.width, input.height);
+        if (ctx.fullscreen_pass("contornos-cromaticos", PassStage::Effects, out.texture,
+                                ShaderId::effects_find_edges_frag,
+                                {PassTexture{sampled.texture, {}, CommonSampler::LinearClamp},
+                                 PassTexture{input.texture, {}, CommonSampler::LinearClamp}},
+                                &u, sizeof(u)) == kInvalidIndex) return Errc::PipelineCompileFailed;
+        return OkStatus;
+    }
+
+private:
+    static f32 sigma_px(const EffectEval& e) noexcept {
+        const f32 sigma = 100.0f * std::clamp(finite_or(e.f(kSmooth), 0.0224f), 0.0f, 0.64f);
+        return e.b(kSubpixel) ? sigma : std::round(sigma);
+    }
+    static f32 sample_step_px(f32 sigma) noexcept {
+        // Select the symmetric finite-difference span for the filtered image.
+        return std::sqrt(1.0f + 0.6f * sigma * sigma);
+    }
 };
 
 // -----------------------------------------------------------------------------
@@ -709,9 +833,11 @@ void register_finishing_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<Mirror>());
     (void)r.add(std::make_unique<CropEdges>());
     (void)r.add(std::make_unique<Vignette>());
+    (void)r.add(std::make_unique<OpticalVignette>());
     (void)r.add(std::make_unique<Mosaic>());
     (void)r.add(std::make_unique<FindEdges>());
     (void)r.add(std::make_unique<FindEdges>(true));
+    (void)r.add(std::make_unique<ChromaticEdgeDetect>());
     (void)r.add(std::make_unique<HueSaturation>());
     (void)r.add(std::make_unique<DropShadow>());
     (void)r.add(std::make_unique<Border>());

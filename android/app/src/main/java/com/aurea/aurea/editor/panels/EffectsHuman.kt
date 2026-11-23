@@ -129,6 +129,84 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         params = mapOf(0 to ParamHuman(suffix = " fps", decimals = 0), 1 to ParamHuman(decimals = 1), 3 to ParamHuman(decimals = 0))))
     put("aurea.light.glow_scan", EffectHuman(keywords = "glow scan varredura scanner faixa de luz brilho light sweep shine logo",
         principal = listOf(0, 1, 5, 8), params = mapOf(0 to ParamHuman(decimals = 0), 8 to ParamHuman(decimals = 0), 10 to ParamHuman(decimals = 0))))
+    put("aurea.color.luma_posterize", EffectHuman(name = R.string.fx_name_refined_posterize, keywords = "posterize"))
+    put("aurea.color.luma_hue_cycle", EffectHuman(name = R.string.fx_name_refined_pseudocolor, keywords = "pseudocolor"))
+    put("aurea.color.silver_retention", EffectHuman(name = R.string.fx_name_refined_bleachbypass, keywords = "bleachbypass"))
+    put("aurea.stylize.optical_vignette", EffectHuman(name = R.string.fx_name_refined_vignette, keywords = "vignette"))
+    put("aurea.blur.photographic", EffectHuman(name = R.string.fx_name_refined_blur, keywords = "blur"))
+    put("aurea.blur.rgb_channels", EffectHuman(name = R.string.fx_name_refined_blurchannels, keywords = "blurchannels"))
+    put("aurea.blur.chroma_luma", EffectHuman(name = R.string.fx_name_refined_blurchroma, keywords = "blurchroma"))
+    put("aurea.blur.photographic_direction", EffectHuman(name = R.string.fx_name_refined_blurdirectional, keywords = "blurdirectional"))
+    put("aurea.blur.transform_motion", EffectHuman(name = R.string.fx_name_refined_blurmotion, keywords = "blurmotion"))
+    put("aurea.blur.prism_defocus", EffectHuman(name = R.string.fx_name_refined_defocusprism, keywords = "defocusprism"))
+    put("aurea.blur.edge_masked", EffectHuman(name = R.string.fx_name_refined_edgeblur, keywords = "edgeblur"))
+    put("aurea.blur.detail_sharpen", EffectHuman(name = R.string.fx_name_refined_sharpen, keywords = "sharpen"))
+    put("aurea.blur.soft_focus", EffectHuman(name = R.string.fx_name_refined_softfocus, keywords = "softfocus"))
+    put("aurea.light.chromatic_halo", EffectHuman(name = R.string.fx_name_refined_glow, keywords = "glow"))
+    put("aurea.light.shadow_halo", EffectHuman(name = R.string.fx_name_refined_glowdarks, keywords = "glowdarks"))
+    put("aurea.light.outline_halo", EffectHuman(name = R.string.fx_name_refined_glowedges, keywords = "glowedges"))
+    put("aurea.stylize.sinusoidal_scanlines", EffectHuman(name = R.string.fx_name_refined_scanlines, keywords = "scanlines"))
+    put("aurea.stylize.sinusoidal_scanlines_mono", EffectHuman(name = R.string.fx_name_refined_scanlinesmono, keywords = "scanlinesmono"))
+    put("aurea.stylize.radial_screen", EffectHuman(name = R.string.fx_name_refined_halftone, keywords = "halftone"))
+    put("aurea.stylize.radial_screen_color", EffectHuman(name = R.string.fx_name_refined_halftonecolor, keywords = "halftonecolor"))
+    put("aurea.stylize.chromatic_edges", EffectHuman(name = R.string.fx_name_refined_edgedetect, keywords = "edgedetect"))
+    put("aurea.distort.optical_fisheye", EffectHuman(name = R.string.fx_name_refined_warpfisheye, keywords = "warpfisheye"))
+    put("aurea.distort.optical_lens", EffectHuman(name = R.string.fx_name_refined_warpmagnify, keywords = "warpmagnify"))
+    put("aurea.distort.repeated_transform", EffectHuman(name = R.string.fx_name_refined_warprepeat, keywords = "warprepeat"))
+    put("aurea.transition.circular_aperture", EffectHuman(name = R.string.fx_name_refined_wipecircle, keywords = "wipecircle"))
+    put("aurea.distort.projective_pin", EffectHuman(name = R.string.fx_name_refined_warpcornerpin, keywords = "warpcornerpin"))
+    put("aurea.distort.plane_perspective", EffectHuman(name = R.string.fx_name_refined_warpperspective, keywords = "warpperspective"))
+    put("aurea.stylize.photographic_grain", EffectHuman(name = R.string.fx_name_refined_grain, keywords = "grain"))
+    put("aurea.distort.refraction", EffectHuman(name = R.string.fx_name_refined_distort, keywords = "distort"))
+    put("aurea.distort.refraction_rgb", EffectHuman(name = R.string.fx_name_refined_distortrgb, keywords = "distortrgb"))
+    put("aurea.light.exposure_streaks", EffectHuman(name = R.string.fx_name_refined_streaks, keywords = "streaks"))
+    put("aurea.stylize.jpeg_compression_damage", EffectHuman(name = R.string.fx_name_refined_jpegdamage, keywords = "jpegdamage"))
+    put("aurea.light.spectral_glint", EffectHuman(name = R.string.fx_name_refined_glint, keywords = "glint"))
+    put("aurea.light.diffraction_glare", EffectHuman(name = R.string.fx_name_refined_glare, keywords = "glare"))
+    put("aurea.light.outline_rays", EffectHuman(name = R.string.fx_name_refined_edgerays, keywords = "edgerays"))
+    put("aurea.stylize.photochemical_film_damage", EffectHuman(name = R.string.fx_name_refined_filmdamage, keywords = "filmdamage"))
+    put("aurea.light.spectral_aura", EffectHuman(name = R.string.fx_name_refined_glowaura, keywords = "glowaura"))
+    put("aurea.light.displaced_halo", EffectHuman(name = R.string.fx_name_distance_halo, keywords = "distance halo brilho contorno faixa"))
+    put("aurea.light.multiscale_glow", EffectHuman(name = R.string.fx_name_multiscale_glow, keywords = "multiscale glow brilho escala fino largo bloom"))
+    put("aurea.light.prismatic_glints", EffectHuman(name = R.string.fx_name_prismatic_glints, keywords = "prismatic glints reflexos dispersao prisma rainbow"))
+    put("aurea.light.light_leak", EffectHuman(name = R.string.fx_name_light_leak, keywords = "light leak vazamento luz filme pelicula"))
+    put("aurea.stylize.film_profile_grain", EffectHuman(name = R.string.fx_name_film_profile_grain, keywords = "grain ruido grao pelicula film profile"))
+    put("aurea.transition.blur_dissolve", EffectHuman(name = R.string.fx_name_blur_dissolve, keywords = "blur dissolve dissolucao desfoque transicao"))
+    put("aurea.color.space_transform", EffectHuman(name = R.string.fx_name_space_transform, keywords = "ocio aces color space transform transformacao espaco cor srgb p3"))
+    put("aurea.distort.sine_waves", EffectHuman(name = R.string.fx_name_sine_waves, keywords = "sine waves ondas senoidais frequencia amplitude wave warp"))
+    put("aurea.blur.motion_curves", EffectHuman(name = R.string.fx_name_motion_curve_blur, keywords = "blurmocurves motion curve blur desfoque curvas movimento obturador"))
+    put("aurea.distort.polar_kaleidoscope", EffectHuman(name = R.string.fx_name_polar_kaleidoscope, keywords = "kaleidopolar caleidoscopio polar cilindro fatias espelho"))
+    put("aurea.color.duotone", EffectHuman(name = R.string.fx_name_duotone, keywords = "duotone duotonico cor tons luma"))
+    put("aurea.color.quadtone", EffectHuman(name = R.string.fx_name_four_tones, keywords = "quadtone quatro tons quad tone gradiente luminancia"))
+    put("aurea.blur.rack_defocus", EffectHuman(name = R.string.fx_name_rack_focus, keywords = "rack defocus lens foco rack focus bokeh transicao"))
+    put("aurea.light.rainbow_halo", EffectHuman(name = R.string.fx_name_refined_glowrainbow, keywords = "glowrainbow"))
+    put("aurea.light.glow_rings", EffectHuman(name = R.string.fx_name_refined_glowrings, keywords = "glowrings"))
+    put("aurea.stylize.analog_tape_damage", EffectHuman(name = R.string.fx_name_refined_vhsdamage, keywords = "vhsdamage"))
+    put("aurea.color.soft_rgb_threshold", EffectHuman(
+        name = R.string.fx_name_soft_rgb_threshold,
+        keywords = "threshold limiar contraste rgb canais",
+        principal = listOf(0, 1, 2, 6),
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_limite),
+            1 to ParamHuman(label = R.string.fx_suavidade),
+            2 to ParamHuman(label = R.string.fx_soft_rgb_threshold_offset),
+            3 to ParamHuman(label = R.string.fx_soft_rgb_threshold_red),
+            4 to ParamHuman(label = R.string.fx_soft_rgb_threshold_green),
+            5 to ParamHuman(label = R.string.fx_soft_rgb_threshold_blue),
+            6 to ParamHuman(label = R.string.fx_saturacao),
+        ),
+    ))
+    put("aurea.color.solarize", EffectHuman(
+        name = R.string.fx_name_solarize,
+        keywords = "solarize solarizar negativo inversão",
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_limite),
+            1 to ParamHuman(label = R.string.fx_saturacao),
+            2 to ParamHuman(label = R.string.fx_inverter),
+            3 to ParamHuman(label = R.string.fx_brilho),
+            4 to ParamHuman(label = R.string.fx_sombras),
+        ),
+    ))
     put("aurea.color.threshold", EffectHuman(keywords = "threshold limiar limite preto e branco duas cores 2 cores", principal = listOf(0, 1),
         params = mapOf(0 to ParamHuman(decimals = 0), 1 to ParamHuman(decimals = 0))))
     put("aurea.color.posterize", EffectHuman(keywords = "posterize posterizar niveis tons reduzir cores", principal = listOf(0, 1),
@@ -140,11 +218,11 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         params = mapOf(1 to ParamHuman(label = R.string.fx_deslocamento), 2 to ParamHuman(label = R.string.fx_escala))))
     put("aurea.light.starglow", EffectHuman(keywords = "starglow trapcode estrela brilho star raios shimmer",
         principal = listOf(0, 1, 2, 9, 15), params = mapOf(0 to ParamHuman(label = R.string.fx_comprimento))))
-    put("aurea.distort.lens_gradient", EffectHuman(keywords = "s_distort sapphire distort lente lens refracao matte",
+    put("aurea.distort.lens_gradient", EffectHuman(name = R.string.fx_name_map_refraction, keywords = "distort lente lens refracao matte",
         principal = listOf(0, 2, 4, 5, 6)))
     put("aurea.transition.wipe_flux", EffectHuman(keywords = "wipeflux s_wipeflux sapphire fluxo bolhas transicao",
         principal = listOf(0, 1, 3, 8, 9), params = mapOf(5 to ParamHuman(scale = 1f, suffix = "", decimals = 3))))
-    put("aurea.transition.wipe_plasma", EffectHuman(keywords = "wipeplasma s_wipeplasma sapphire plasma filamentos transicao",
+    put("aurea.transition.wipe_plasma", EffectHuman(name = R.string.fx_name_plasma_wipe, keywords = "wipeplasma plasma filamentos transicao",
         principal = listOf(0, 1, 3, 8, 9), params = mapOf(5 to ParamHuman(scale = 1f, suffix = "", decimals = 3))))
     put("aurea.distort.bender", EffectHuman(name = R.string.fx_name_bender,
         keywords = "bender bend curve curvar pontos", principal = listOf(0, 1, 2, 3)))
@@ -517,6 +595,18 @@ private val Table: Map<Int, EffectHuman> = buildMap {
                 14 to ParamHuman(label = R.string.fx_angulo_canal_2, suffix = "°", decimals = 0),
                 15 to ParamHuman(label = R.string.fx_angulo_canal_3, suffix = "°", decimals = 0),
                 16 to ParamHuman(label = R.string.fx_angulo_canal_4, suffix = "°", decimals = 0),
+            ),
+        ),
+    )
+    put(
+        "aurea.blur.median",
+        EffectHuman(
+            name = R.string.fx_name_median_filter,
+            keywords = "median mediana mediano ruido limpar denoise",
+            params = mapOf(
+                0 to ParamHuman(label = R.string.fxl_radius_x, suffix = "px", decimals = 1),
+                1 to ParamHuman(label = R.string.fxl_radius_y, suffix = "px", decimals = 1),
+                2 to ParamHuman(label = R.string.fx_intensidade, decimals = 0),
             ),
         ),
     )

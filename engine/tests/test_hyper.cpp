@@ -54,6 +54,47 @@ AUREA_TEST(Hyper, ReferenceEffectsShareAccessClassification) {
     AUREA_CHECK(!effect_requires_access(0));
 }
 
+AUREA_TEST(Hyper, ReviewedEffectAvailability) {
+    EffectRegistry registry;
+    register_builtin_effects(registry);
+    const std::vector<std::string> annual{kHyperSubscriptionId};
+    const std::vector<std::string> legacySignal{"aurea_fx_signal"};
+    for (const char* key : {
+             "aurea.blur.rgb_channels", "aurea.blur.chroma_luma", "aurea.blur.transform_motion",
+             "aurea.blur.prism_defocus", "aurea.blur.detail_sharpen", "aurea.blur.soft_focus",
+             "aurea.light.chromatic_halo", "aurea.light.spectral_aura", "aurea.light.shadow_halo",
+             "aurea.light.outline_halo", "aurea.light.rainbow_halo", "aurea.light.glow_rings",
+             "aurea.light.diffraction_glare", "aurea.light.outline_rays", "aurea.light.exposure_streaks",
+             "aurea.light.prismatic_glints", "aurea.light.light_leak", "aurea.stylize.film_profile_grain",
+             aurea::effect_keys::kEchoTrail, aurea::effect_keys::kRandomEdits, aurea::effect_keys::kPixelSort,
+             aurea::effect_keys::kDatamosh, "aurea.stylize.jpeg_compression_damage",
+             "aurea.stylize.analog_tape_damage", "aurea.stylize.emboss",
+             "aurea.distort.refraction", "aurea.distort.refraction_rgb", "aurea.distort.projective_pin"}) {
+        const u32 id = effect_type_id(key);
+        AUREA_CHECK_MSG(registry.find(id), key);
+        AUREA_CHECK_MSG(effect_requires_access(id), key);
+        AUREA_CHECK_MSG(!has_effect_access({}, id), key);
+        AUREA_CHECK_MSG(has_effect_access(annual, id), key);
+        AUREA_CHECK_MSG(!has_effect_access(legacySignal, id), key);
+        AUREA_CHECK_MSG(effect_product_id(id) == nullptr, key);
+    }
+    for (const char* key : {
+             "aurea.light.spectral_glint", "aurea.light.hotspots", "aurea.light.glow",
+             "aurea.light.deep_glow_2", "aurea.stylize.photochemical_film_damage",
+             "aurea.stylize.photographic_grain", "aurea.glitch.vhs",
+             "aurea.distort.lens_gradient", "aurea.distort.repeated_transform",
+             "aurea.transition.wipe_plasma", "aurea.transition.circular_aperture",
+             "aurea.light.displaced_halo", "aurea.light.multiscale_glow", "aurea.color.space_transform",
+             "aurea.distort.sine_waves", "aurea.transition.blur_dissolve",
+             "aurea.blur.motion_curves", "aurea.distort.polar_kaleidoscope",
+             "aurea.color.duotone", "aurea.color.quadtone", "aurea.blur.rack_defocus"}) {
+        const u32 id = effect_type_id(key);
+        AUREA_CHECK_MSG(registry.find(id), key);
+        AUREA_CHECK_MSG(!effect_requires_access(id), key);
+        AUREA_CHECK_MSG(has_effect_access({}, id), key);
+    }
+}
+
 // 1.0.2: só a opção Neural (IA) do Flow Retime é paga; as outras qualidades e
 // os outros parâmetros/efeitos seguem livres.
 AUREA_TEST(Hyper, FlowRetimeNeuralOptionRequiresAccess) {

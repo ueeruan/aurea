@@ -1326,6 +1326,12 @@ class AureaEngine private constructor() {
     /** [erro (0 = ok), título, versão do app, religadas, ausentes]. */
     fun importProjectPackage(pkg: String, projectOut: String, mediaDir: String): Array<String> =
         nativeImportProjectPackage(pkg, projectOut, mediaDir) ?: arrayOf("10", "", "", "0", "0")
+
+    fun appendBackupProject(backup: String, project: String, index: Int, count: Int): Int =
+        nativeAppendBackupProject(backup, project, index, count)
+
+    fun restoreProjectBackup(backup: String, projects: String, media: String, batch: String): Array<String> =
+        nativeRestoreProjectBackup(backup, projects, media, batch) ?: arrayOf("10", "0")
     fun extractModelArchive(archive: String, directory: String): Array<String>? = nativeExtractModelArchive(archive, directory)
     fun createCaptions(layer: Long, texts: Array<String>, times: DoubleArray, ints: IntArray, floats: FloatArray): Int =
         nativeWork.run(-5) { nativeCreateCaptions(nativeHandle, layer, texts, times, ints, floats) }
@@ -2432,6 +2438,8 @@ class AureaEngine private constructor() {
     private external fun nativeDiscardSequenceFrames(handle: Long, staging: String): Boolean
     private external fun nativeExportProjectPackage(project: String, out: String, title: String, appVersion: String, media: Array<String>, plugins: Array<String>): IntArray?
     private external fun nativeImportProjectPackage(pkg: String, projectOut: String, mediaDir: String): Array<String>?
+    private external fun nativeAppendBackupProject(backup: String, project: String, index: Int, count: Int): Int
+    private external fun nativeRestoreProjectBackup(backup: String, projects: String, media: String, batch: String): Array<String>?
     private external fun nativeExtractModelArchive(archive: String, directory: String): Array<String>?
     private external fun nativeCreateCaptions(handle: Long, layer: Long, texts: Array<String>, times: DoubleArray, ints: IntArray, floats: FloatArray): Int
     private external fun nativeRemoveCaptions(handle: Long, layer: Long): Int

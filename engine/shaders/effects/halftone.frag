@@ -66,7 +66,49 @@ float halftone_ink(vec2 f, float light, float softness, int pattern) {
     return smoothstep(r + softness * 0.5, r - softness * 0.5, length(f));
 }
 
+float radial_screen_coverage(vec2 uv, vec2 shift, float brightness) {
+    vec2 pos = uv - 0.5 * shift;
+    pos.x /= p.p0.y;
+    float c = cos(p.p0.z);
+    float s = sin(p.p0.z);
+    vec2 rotated = vec2(c * pos.x - s * pos.y, s * pos.x + c * pos.y);
+    vec2 q = fract(rotated + vec2(0.5)) - vec2(0.5);
+    const float diagonal = 1.414;
+    float radius = diagonal * length(q);
+    return clamp((p.p0.w + 2.0) * brightness + (p.p0.w + 1.0) * (radius - 1.0), 0.0, 1.0);
+}
+
+vec4 radial_screen(vec4 src) {
+    float alpha = clamp(src.a, 0.0, 1.0);
+    if (alpha <= 1e-6) return vec4(0.0);
+    const vec3 lumaWeights = vec3(0.3125, 0.5, 0.1875);
+    vec3 color = aurea_linear_to_srgb(max(src.rgb / alpha, vec3(0.0))) * alpha;
+    color = mix(vec3(dot(color, lumaWeights)), color, p.p1.z);
+    color = clamp(color + p.p1.x, 0.0, 1.0);
+    bool inverted = p.p1.w > 0.5;
+    if (inverted) color = vec3(1.0) - color;
+
+    vec2 uv = (v_uv - vec2(0.5)) * vec2(1.0, p.p2.z) * p.p0.x - 0.5 * p.p2.xy;
+    vec3 screened;
+    if (p.p1.y < -1.5) {
+        screened = vec3(radial_screen_coverage(uv, p.p3.xy, color.r),
+                        radial_screen_coverage(uv, p.p3.zw, color.g),
+                        radial_screen_coverage(uv, p.color.xy, color.b));
+        if (inverted) screened = vec3(1.0) - screened;
+    } else {
+        float level = radial_screen_coverage(uv, vec2(0.0), color.r);
+        if (inverted) level = 1.0 - level;
+        screened = mix(aurea_linear_to_srgb(max(p.p3.rgb, vec3(0.0))),
+                       aurea_linear_to_srgb(max(p.color.rgb, vec3(0.0))), level);
+    }
+    return vec4(aurea_srgb_to_linear(clamp(screened, 0.0, alpha) / alpha) * alpha, alpha);
+}
+
 void main() {
+    if (p.p1.y < -0.5) {
+        o_color = radial_screen(texture(u_tex0, v_uv * p.uvMap.xy + p.uvMap.zw));
+        return;
+    }
     const vec2 px = v_uv / max(p.texel.xy, vec2(1e-6));
     const float softness = max(p.p0.w, 0.01);
     const int pattern = int(p.p1.y + 0.5);

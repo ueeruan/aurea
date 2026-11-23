@@ -15,6 +15,7 @@ vec2 compPoint(vec2 point) { vec4 q=p.compFromLayer*vec4(point,0,1);return q.xy/
 float brightness(vec2 point) {
     vec2 q=p.p3.x>.5?compPoint(point):point;
     vec4 value=texture(lens,(q-p.lensRegion.xy)/max(p.lensRegion.zw,vec2(.001)));
+    if (p.modes.z>=2.0) return dot(value.rgb,vec3(.3125,.5,.1875));
     vec3 enc=aurea_linear_to_srgb(max(unpremultiply(value).rgb,vec3(0)));
     return dot(enc,vec3(.2126,.7152,.0722))*value.a;
 }
@@ -27,13 +28,14 @@ float maskAt(vec2 point) {
     }
     return clamp(p.p3.z>.5?1.0-mask:mask,0.0,1.0);
 }
-vec2 refracted(vec2 point) {
+vec2 refractedOffset(vec2 point) {
     vec2 stepPx=1.0/max(p.texel.zw,vec2(.001));
     vec2 g=vec2(brightness(point+vec2(stepPx.x,0))-brightness(point-vec2(stepPx.x,0)),brightness(point+vec2(0,stepPx.y))-brightness(point-vec2(0,stepPx.y)))/(2.0*stepPx);
     float c=cos(p.p0.y),s=sin(p.p0.y);
     g=mat2(c,s,-s,c)*g;
     // Differentiate brightness, rather than interpreting R/G as displacement.
-    return point-g*p.p0.zw*p.p0.x*(p.modes.y*p.modes.y*.05)*maskAt(point);
+    float distanceScale=p.modes.z>=2.0 ? p.modes.x*41.8 : -p.modes.y*p.modes.y*.05;
+    return g*p.p0.zw*p.p0.x*distanceScale*maskAt(point);
 }
 float wrapCoordinate(float q,int mode) {
     if(mode==1) return fract(q);
@@ -51,11 +53,33 @@ vec4 sampleSource(vec2 point) {
     if(p.p2.w>.5 && p.p2.w<1.5) { value.rgb=unpremultiply(value).rgb;value.a=1.0; }
     return value;
 }
-void main() {
-    vec2 point=p.p1.xy+v_uv*p.p1.zw;
-    vec2 warped=refracted(point);
-    if(p.p2.z<.5) { o_color=sampleSource(warped);return; }
+vec4 sampleWarp(vec2 warped) {
+    if(p.p2.z<.5) return sampleSource(warped);
     // Integrate the warped pixel footprint when it contracts the input.
     vec2 dx=dFdx(warped)*.25,dy=dFdy(warped)*.25;
-    o_color=(sampleSource(warped-dx-dy)+sampleSource(warped+dx-dy)+sampleSource(warped-dx+dy)+sampleSource(warped+dx+dy))*.25;
+    return (sampleSource(warped-dx-dy)+sampleSource(warped+dx-dy)+sampleSource(warped-dx+dy)+sampleSource(warped+dx+dy))*.25;
+}
+void main() {
+    if (p.modes.z==1.0) {
+        vec4 value=texture(src,v_uv);
+        o_color=vec4(aurea_linear_to_srgb(max(unpremultiply(value).rgb,vec3(0)))*value.a,value.a);
+        return;
+    }
+    vec2 point=p.p1.xy+v_uv*p.p1.zw;
+    vec2 offset=refractedOffset(point);
+    vec4 value;
+    if (p.modes.z==3.0) {
+        vec4 red=sampleWarp(point+offset*p.color.r);
+        vec4 green=sampleWarp(point+offset*p.color.g);
+        vec4 blue=sampleWarp(point+offset*p.color.b);
+        float alpha=max(red.a,max(green.a,blue.a));
+        vec3 channels=vec3(unpremultiply(red).r,unpremultiply(green).g,unpremultiply(blue).b);
+        value=vec4(channels*alpha,alpha);
+    } else {
+        value=sampleWarp(point+offset);
+    }
+    if (p.modes.z>=2.0) {
+        value=vec4(aurea_srgb_to_linear(max(unpremultiply(value).rgb,vec3(0)))*value.a,value.a);
+    }
+    o_color=value;
 }

@@ -515,9 +515,8 @@ private fun NarrowEditor(
         } else {
             // 0.3.3 recursos: a divisa palco/timeline volta, como na 0.3.2 — arrastar
             // na vertical no transporte (fora dos botões) troca palco por timeline
-            // (sobe ou desce a timeline); toque duplo volta à altura automática. A
-            // zona de baixo continua a da Omega: o painel de 200 fica por cima da
-            // timeline e, aberto, recebe a zona inteira (EditorLayout.solve).
+            // (sobe ou desce a timeline); toque duplo volta à altura automática.
+            // O inspetor fica sobre a timeline.
             val preview by rememberUpdatedState(m.preview)
             val max by rememberUpdatedState(maxPreview)
             val resize by rememberUpdatedState(onPreviewResize)
@@ -550,10 +549,9 @@ private fun NarrowEditor(
             // volta à timeline inteira. O ícone do tipo abre as trilhas da camada
             // (e a timeline fica inteira enquanto estão abertas); arrastar só rola.
             //
-            // Omega fundação (F6): a zona inferior fixa (280 dp). Sem camada, a
-            // timeline (210) e a barra de adicionar (70) empilhadas; com camada, a
-            // timeline ocupa a zona e o painel de 200 fica POR CIMA dela (sobram
-            // 80 dp: régua + uma linha). A prévia não muda de altura.
+            // Sem camada, a timeline (210) e a barra de adicionar (70) ficam
+            // empilhadas. O inspetor reserva uma zona maior e deixa a régua e
+            // a linha em foco à vista.
             Box(Modifier.fillMaxWidth().height(m.zone.dp)) {
                 Column(Modifier.fillMaxSize()) {
                     // 0.3.6: o que o painel por cima (doca/painel) ou o adicionar cobre embaixo.

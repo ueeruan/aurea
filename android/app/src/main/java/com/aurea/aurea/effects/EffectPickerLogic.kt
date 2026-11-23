@@ -165,6 +165,7 @@ enum class EffectGroup(val id: String) {
     /** Funções do AUREA (13/11/2026): animadores, rastreio, corte preciso, fantoche, rig, operadores, 3D, camada. */
     AureaTools("aurea_tools"),
     ColorLight("color_light"),
+    HalosReflections("halos_reflections"),
     DrawEdge("draw_edge"),
     Blur("blur"),
     Distort("distort"),
@@ -176,6 +177,7 @@ enum class EffectGroup(val id: String) {
     Visibility("visibility"),
     Text("text"),
     Stylize("stylize"),
+    VideoFilm("video_film"),
     Glitch("glitch"),
     Time("time"),
     Audio("audio"),
@@ -213,8 +215,23 @@ private val GroupByKey: Map<Int, EffectGroup> by lazy {
         put(effectTypeId("aurea.generate.raster_extrude"), EffectGroup.ThreeD)
         put(effectTypeId("aurea.distort.hollow_box"), EffectGroup.ThreeD)
         listOf(
+            "aurea.light.chromatic_halo", "aurea.light.spectral_aura", "aurea.light.shadow_halo",
+            "aurea.light.outline_halo", "aurea.light.rainbow_halo", "aurea.light.glow_rings",
+            "aurea.light.spectral_glint", "aurea.light.diffraction_glare",
+            "aurea.light.outline_rays", "aurea.light.exposure_streaks",
+            "aurea.light.displaced_halo", "aurea.light.multiscale_glow",
+            "aurea.light.prismatic_glints", "aurea.light.light_leak",
+        ).forEach { put(effectTypeId(it), EffectGroup.HalosReflections) }
+        listOf(
+            "aurea.stylize.jpeg_compression_damage", "aurea.stylize.analog_tape_damage",
+            "aurea.stylize.photochemical_film_damage", "aurea.stylize.photographic_grain",
+            "aurea.stylize.sinusoidal_scanlines", "aurea.stylize.sinusoidal_scanlines_mono",
+            "aurea.stylize.film_profile_grain",
+        ).forEach { put(effectTypeId(it), EffectGroup.VideoFilm) }
+        listOf(
             "aurea.stylize.stroke_outline", "aurea.stylize.border", "aurea.stylize.drop_shadow", "aurea.stylize.drop_shadow_reference",
-            "aurea.stylize.find_edges", "aurea.stylize.find_edges_reference", "aurea.stylize.bevel_alpha", "aurea.draw.drawing_progress",
+            "aurea.stylize.find_edges", "aurea.stylize.find_edges_reference", "aurea.stylize.bevel_alpha",
+            "aurea.draw.drawing_progress", "aurea.stylize.chromatic_edges",
         ).forEach { put(effectTypeId(it), EffectGroup.DrawEdge) }
         listOf(
             "aurea.transform", "aurea.motion.oscillate.cycles", "aurea.motion.swing", "aurea.motion.wiggle",
@@ -224,6 +241,7 @@ private val GroupByKey: Map<Int, EffectGroup> by lazy {
             "aurea.stylize.repeat_tile", "aurea.stylize.motion_tile", "aurea.stylize.tiler", "aurea.stylize.hex_tile",
             "aurea.distort.kaleidoscope", "aurea.distort.mirror", "aurea.distort.griddler", "aurea.stylize.ball_grid",
             "aurea.distort.tile_shift", "aurea.distort.hex_tile_rotate", "aurea.distort.hex_tile_shift",
+            "aurea.distort.repeated_transform",
         ).forEach { put(effectTypeId(it), EffectGroup.Repeat) }
     }
 }
@@ -305,11 +323,13 @@ fun browserHomeRows(hasRecommended: Boolean, hasQuick: Boolean, groups: List<Eff
 /** O efeito cuja prévia (escurecida) vira o fundo do ladrilho do grupo. */
 private val GroupBannerKeys: Map<EffectGroup, String> = mapOf(
     EffectGroup.ColorLight to "aurea.color.colorama",
+    EffectGroup.HalosReflections to "aurea.light.rainbow_halo",
     EffectGroup.Blur to "aurea.blur.radial_blur_reference",
     EffectGroup.Distort to "aurea.distort.wave_warp_reference",
     EffectGroup.Motion to "aurea.distort.corner_pin",
     EffectGroup.Repeat to "aurea.stylize.motion_tile",
     EffectGroup.Stylize to "aurea.stylize.halftone",
+    EffectGroup.VideoFilm to "aurea.stylize.photochemical_film_damage",
     EffectGroup.Glitch to "aurea.glitch.glitchify",
     EffectGroup.DrawEdge to "aurea.stylize.find_edges_reference",
     EffectGroup.Procedural to "aurea.generate.fractal_noise",

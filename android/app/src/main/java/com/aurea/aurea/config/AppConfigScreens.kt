@@ -2,6 +2,8 @@ package com.aurea.aurea.config
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,6 +22,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,6 +40,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.aurea.aurea.R
+import com.aurea.aurea.editor.ActivityIndicator
+import com.aurea.aurea.state.EditorStore
+import com.aurea.aurea.state.ProjectFile
+import com.aurea.aurea.ui.ds.AureaAlert
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
@@ -51,11 +58,14 @@ import com.aurea.aurea.ui.theme.tocavel
 
 /** Cobre o app inteiro: Home e editor não aparecem por trás. Os projetos ficam no aparelho. */
 @Composable
-fun ForcedUpdateScreen(config: AppConfig) {
+fun ForcedUpdateScreen(config: AppConfig, store: EditorStore) {
     val context = LocalContext.current
     val url = config.updateUrl.takeIf { it.startsWith("https://") } ?: AppConfigKeys.PLAY_LISTING
     val language = LocalConfiguration.current.locales[0].language
     val action = stringResource(R.string.app_update_button)
+    val backupTarget = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        if (uri != null) store.exportProjectBackup(uri)
+    }
     Column(
         Modifier.fillMaxSize().background(AureaColors.Background).safeDrawingPadding()
             .verticalScroll(rememberScrollState()).padding(horizontal = 24.dp).testTag("atualizacao.obrigatoria"),
@@ -88,7 +98,30 @@ fun ForcedUpdateScreen(config: AppConfig) {
                 },
             contentAlignment = Alignment.Center,
         ) { Text(action, style = AureaType.of(16f, FontWeight.W600, color = AureaColors.OnAccent)) }
+        Spacer(Modifier.height(8.dp))
+        TextButton(
+            onClick = { backupTarget.launch("Aurea.${ProjectFile.BACKUP_EXTENSION}") },
+            enabled = store.engineReady && store.busyMessage == null,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("atualizacao.backup"),
+        ) { Text(stringResource(R.string.project_backup_save), style = AureaType.of(15f, FontWeight.SemiBold)) }
+        store.busyMessage?.let { status ->
+            ActivityIndicator()
+            Spacer(Modifier.height(8.dp))
+            Text(status, style = AureaType.of(13f), textAlign = TextAlign.Center)
+        } ?: store.toast?.let { status ->
+            Text(status, style = AureaType.of(13f), textAlign = TextAlign.Center)
+        }
         Spacer(Modifier.height(48.dp))
+    }
+    store.errorMessage?.let { message ->
+        AureaAlert(
+            title = stringResource(R.string.project_backup_save),
+            message = message,
+            confirmLabel = stringResource(R.string.common_ok),
+            showCancel = false,
+            onConfirm = {},
+            onDismiss = store::dismissError,
+        )
     }
 }
 

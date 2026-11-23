@@ -74,6 +74,18 @@ void main() {
     const int mode = int(p.p0.w + 0.5);
     const mat2 unrotate = aurea_rot2(p.p1.w);   // gira o ponto para o referencial da forma
 
+    if (mode == 3) {
+        vec2 corner = max(abs(p.p1.xy), abs(size - p.p1.xy));
+        float reach = length(corner);
+        float distanceFromCenter = length(point - p.p1.xy);
+        float width = max(1.0, p.p0.y * size.x);
+        bool outward = p.p0.z > 0.5;
+        float radius = mix(reach + 0.5 * width, -0.5 * width,
+                           outward ? 1.0 - completion : completion);
+        float keep = clamp(0.5 + (radius - distanceFromCenter) / width, 0.0, 1.0);
+        o_color = source * (outward ? 1.0 - keep : keep);
+        return;
+    }
     float threshold;
     if (mode == 2) {
         // Persianas: faixas paralelas perpendiculares à direção, todas fecham

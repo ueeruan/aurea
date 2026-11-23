@@ -27,6 +27,7 @@ layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 o_color;
 
 layout(set = 0, binding = AUREA_TEX0) uniform sampler2D u_tex0;
+layout(set = 0, binding = AUREA_TEX1) uniform sampler2D u_chroma;
 
 layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 uvMap;
@@ -148,7 +149,98 @@ float vhs_hash(uint a, uint b, uint c) { return aurea_hash(uvec2(a, b ^ (c * 0x9
 
 vec3 vhs_rgb(vec2 uv) { return unpremultiply(texture(u_tex0, uv)).rgb; }
 
+vec3 cassette_encoded(vec2 uv) {
+    return aurea_linear_to_srgb(max(vhs_rgb(uv), vec3(0.0)));
+}
+
+vec3 cassette_color(float y, vec2 chroma, float style) {
+    const vec3 yNeutral = vec3(0.9846, 0.9651, 1.1004);
+    const vec3 yStyle = vec3(1.0135, 0.9009, 1.3667);
+    const vec3 yCurveNeutral = vec3(0.0159, 0.0317, -0.1086);
+    const vec3 yCurveStyle = vec3(-0.0125, 0.1005, -0.4008);
+    const vec3 cbNeutral = vec3(-0.0706, -0.1768, 0.9597);
+    const vec3 cbStyle = vec3(-0.0932, -0.3078, 1.7246);
+    const vec3 crNeutral = vec3(0.9962, -0.5038, -0.1556);
+    const vec3 crStyle = vec3(1.0406, -0.5578, 0.0141);
+    const vec3 cbCurveNeutral = vec3(0.0242, -0.1342, 0.5254);
+    const vec3 cbCurveStyle = vec3(0.4241, -0.1454, -0.5063);
+    const vec3 crCurveNeutral = vec3(0.3457, -0.2185, 0.2722);
+    const vec3 crCurveStyle = vec3(0.4794, -0.1692, -0.3591);
+    const vec3 liftNeutral = vec3(0.0037, 0.0034, -0.0163);
+    const vec3 liftStyle = vec3(0.0029, 0.0084, -0.0409);
+    // Calibrated polynomial transfer on luma and bandwidth-limited chroma;
+    // no preset LUT, texture or external image is needed.
+    vec3 rgb = y * mix(yNeutral, yStyle, style) + y * y * mix(yCurveNeutral, yCurveStyle, style);
+    rgb += chroma.x * (mix(cbNeutral, cbStyle, style) + y * mix(cbCurveNeutral, cbCurveStyle, style));
+    rgb += chroma.y * (mix(crNeutral, crStyle, style) + y * mix(crCurveNeutral, crCurveStyle, style));
+    return rgb + mix(liftNeutral, liftStyle, style);
+}
+
+vec4 cassette_damage() {
+    const vec3 lumaWeight = vec3(0.299, 0.587, 0.114);
+    const vec2 size = max(p.p0.xy, vec2(1.0));
+    const uint frame = uint(max(p.q0.x, 0.0));
+    const uint seed = uint(max(p.q0.z, 0.0));
+    // The output has the same dimensions as the unfiltered input, even if
+    // the frame graph reduced the separate chroma texture for its blur.
+    const vec2 originalUv = vec2(gl_FragCoord.x / float(textureSize(u_tex0, 0).x), v_uv.y);
+    vec2 pixel = originalUv * size;
+    vec2 uv = originalUv;
+    if (p.p2.z > 0.0) {
+        uint row = uint(floor(pixel.y));
+        float deflect = vhs_hash(row, frame, seed) * 2.0 - 1.0;
+        float vertical = vhs_hash(row / 8u + 331u, frame, seed) * 2.0 - 1.0;
+        uv += vec2(deflect * p.p3.x, vertical * p.p3.y) * p.p2.z * 3.0 / size;
+    }
+    const float captureWidth = p.q1.x;
+    if (captureWidth >= 16.0) {
+        uv.x = (floor(uv.x * captureWidth) + 0.5) / captureWidth;
+    }
+    vec3 current = cassette_encoded(uv);
+    float y = dot(current, lumaWeight);
+    if (p.p1.x > 0.01) {
+        vec2 vertical = vec2(0.0, p.p1.x * 1.5 / size.y);
+        float adjacent = dot(cassette_encoded(uv - vertical) + cassette_encoded(uv + vertical), lumaWeight);
+        y = 0.60 * y + 0.20 * adjacent;
+    }
+    vec2 chromaUv = uv - vec2(p.p1.y, p.p1.y * 0.078 * size.x / size.y);
+    vec3 colorSignal = unpremultiply(texture(u_chroma, chromaUv)).rgb;
+    if (p.q0.w < 0.5) colorSignal = aurea_linear_to_srgb(max(colorSignal, vec3(0.0)));
+    float colorY = dot(colorSignal, lumaWeight);
+    vec2 chroma = vec2(colorSignal.b - colorY, colorSignal.r - colorY) * p.p2.x;
+    float tint = p.p1.w * 0.52359878;
+    chroma = aurea_rot2(tint) * chroma;
+    vec3 rgb = cassette_color(y, chroma, p.p1.z);
+
+    // Low-frequency dye leakage and additive tape noise are independent.
+    float bleed = max(abs(chroma.x), abs(chroma.y));
+    rgb += (p.p2.y - 0.5) * (0.45 + y + bleed) * vec3(-0.007, -0.0002, 0.020);
+    if (p.p2.z > 0.0) {
+        vec2 phase = pixel * vec2(0.60, 0.35) +
+                     vec2(float((seed + frame * 107u) & 1023u), float((seed + frame * 61u) & 1023u));
+        float narrow = aurea_value_noise(phase) - 0.67 * aurea_value_noise(phase + vec2(1.4, 0.0)) - 0.165;
+        rgb += vec3(narrow * p.p2.z * 0.92);
+    }
+    if (p.p2.w > 0.0) {
+        rgb += vec3((vhs_hash(uint(floor(pixel.x)), uint(floor(pixel.y)) ^ frame, seed) - 0.5) * 2.0 * p.p2.w);
+    }
+    rgb *= 1.0 - p.p3.z * (0.5 + 0.5 * sin(AUREA_TAU * (v_uv.y * p.p3.w + 1.5 * p.q0.y)));
+
+    vec4 original = texture(u_tex0, originalUv);
+    vec4 damaged = premultiply(vec4(aurea_srgb_to_linear(max(rgb, vec3(0.0))), original.a));
+    return mix(original, damaged, p.p0.w);
+}
+
 void main() {
+    if (p.q3.w > 1.5) {
+        vec4 source = unpremultiply(texture(u_tex0, v_uv));
+        o_color = premultiply(vec4(aurea_linear_to_srgb(max(source.rgb, vec3(0.0))), source.a));
+        return;
+    }
+    if (p.q3.w > 0.5) {
+        o_color = cassette_damage();
+        return;
+    }
     const vec2 size = max(p.p3.xy, vec2(1.0));
     const vec2 pt = p.p2.xy + v_uv * p.p2.zw;                       // px da camada
     const vec2 uvPerPx = p.uvMap.xy / max(p.p2.zw, vec2(1e-6));     // uv de entrada por px

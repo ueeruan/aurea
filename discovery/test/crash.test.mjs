@@ -1,6 +1,8 @@
-// Crash: validação, deduplicação, limites, e-mail (Resend e Email Workers) e admin.
+// Crash: validação, deduplicação, limites, e-mail (Resend e Email Workers), admin e
+// armazenamento no D1 (migração 0014) sem nenhuma gravação no KV.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { gunzipSync } from "node:zlib";
 
 import worker from "../worker.js";
 import { validarRelatorio, cortarUtf8, PILHA_MAX_BYTES, LIMITES_CRASH } from "../crash.js";
@@ -30,6 +32,12 @@ function fetchFalso(status = 200) {
     return new Response(JSON.stringify({ id: "re_1" }), { status });
   };
   return { chamadas, restaurar: () => { globalThis.fetch = original; } };
+}
+
+/** O que ficou no D1: as colunas e o registro descomprimido. */
+function guardados(env) {
+  return env.AUREA_DB.sqlite.prepare("SELECT * FROM crash_reports ORDER BY id").all()
+    .map((l) => ({ ...l, registro: JSON.parse(gunzipSync(l.report_gz).toString("utf8")) }));
 }
 
 async function chamar(env, caminho, opcoes) {
@@ -88,10 +96,14 @@ test("Resend: um e-mail por relatorio para o desenvolvedor, com anexo; reenvio n
     assert.equal(de_novo.corpo.id, r.corpo.id);
     assert.equal(f.chamadas.length, 1, "o mesmo relatorio nao vira segundo e-mail");
 
-    const guardado = JSON.parse([...env.AUREA_KV.mapa].find(([k]) => k.startsWith("crash:"))[1].valor);
-    assert.equal(guardado.email_enviado, true);
-    assert.equal(guardado.email_via, "resend");
-    assert.ok(!JSON.stringify(guardado).includes("198.51.100.7"), "o IP nao e guardado");
+    const linhas = guardados(env);
+    assert.equal(linhas.length, 1, "um relatorio, uma linha");
+    assert.equal(linhas[0].emailed, 1);
+    assert.equal(linhas[0].email_via, "resend");
+    assert.equal(linhas[0].email_error, null);
+    assert.equal(linhas[0].registro.reportId, "exit-1790000000000-4242");
+    assert.ok(!JSON.stringify(linhas[0]).includes("198.51.100.7"), "o IP nao e guardado");
+    assert.equal(env.AUREA_KV.escritas, 0, "nada no KV");
   } finally {
     f.restaurar();
   }
@@ -144,7 +156,7 @@ test("sem provedor o relatorio fica guardado e o admin lista e le; sem token de 
   const item = await chamar(env, `/api/crash/item?id=${lista.corpo.items[0].id}`, { token: ADMIN });
   assert.equal(item.corpo.reportId, "java-guardado-01");
   assert.equal(item.corpo.email_erro, "sem_provedor");
-  assert.equal((await chamar({ AUREA_KV: kvFalso() }, "/api/crash/list", { token: ADMIN })).status, 401, "sem secret configurado, admin fechado");
+  assert.equal((await chamar({ AUREA_DB: d1Falso() }, "/api/crash/list", { token: ADMIN })).status, 401, "sem secret configurado, admin fechado");
 });
 
 test("e-mail da conta vem da SESSAO; o do corpo sem sessao entra marcado", async () => {
@@ -170,10 +182,9 @@ test("limites: por instalacao, tamanho do corpo e teto diario de e-mails", async
     const r = await enviar(env, relatorio({ reportId: "rel-limite-extra" }));
     assert.equal(r.status, 429);
     assert.equal(f.chamadas.length, 2, "so 2 e-mails no dia; o resto ficou guardado");
-    const naoEnviados = [...env.AUREA_KV.mapa].filter(([k]) => k.startsWith("crash:")).map(([, v]) => JSON.parse(v.valor))
-      .filter((x) => !x.email_enviado);
+    const naoEnviados = guardados(env).filter((x) => !x.emailed);
     assert.equal(naoEnviados.length, LIMITES_CRASH.instalacaoHora.max - 2);
-    assert.equal(naoEnviados[0].email_erro, "teto_diario");
+    assert.equal(naoEnviados[0].email_error, "teto_diario");
 
     const grande = await enviar(env, relatorio({ reportId: "rel-grande-01", installId: "3f2b8c1e-9d4a-4e6f-8a7b-000000000001", stack: "x".repeat(300 * 1024) }));
     assert.equal(grande.status, 413);
@@ -189,8 +200,80 @@ test("falha do provedor nao perde o relatorio", async () => {
     const r = await enviar(env, relatorio({ reportId: "rel-falha-01" }));
     assert.equal(r.status, 202);
     assert.equal(r.corpo.emailed, false);
-    const guardado = JSON.parse([...env.AUREA_KV.mapa].find(([k]) => k.startsWith("crash:"))[1].valor);
-    assert.match(guardado.email_erro, /^resend_http_500/);
+    const [guardado] = guardados(env);
+    assert.equal(guardado.emailed, 0);
+    assert.match(guardado.email_error, /^resend_http_500/);
+  } finally {
+    f.restaurar();
+  }
+});
+
+test("D1: grava sem KV, pilha de 200 KiB comprimida, lista pagina dos mais novos e item le tudo", async () => {
+  const env = { AUREA_DB: d1Falso(), CRASH_ADMIN_TOKEN: ADMIN };
+  const pilha = "Thread 0 Crashed:\n" + "0   Aurea  0x0000000100a1b2c3 aurea::render + 64\n".repeat(4000);
+  const r = await enviar(env, relatorio({ reportId: "ios-grande-0001", platform: "ios", stack: pilha }));
+  assert.equal(r.status, 202, "sem KV nenhum o crash continua sendo aceito");
+  const [linha] = guardados(env);
+  assert.ok(linha.report_gz.length < 20 * 1024, `gzip pequeno (${linha.report_gz.length} bytes)`);
+  const item = await chamar(env, `/api/crash/item?id=${r.corpo.id}`, { token: ADMIN });
+  assert.equal(item.status, 200);
+  assert.equal(item.corpo.stack, validarRelatorio(relatorio({ stack: pilha })).relatorio.stack);
+  assert.equal(item.corpo.platform, "ios");
+  assert.equal(item.corpo.email_enviado, false);
+
+  // 150 relatórios de instalações diferentes: 100 na primeira página, 51 na segunda.
+  for (let i = 0; i < 150; i++) {
+    const inst = `3f2b8c1e-9d4a-4e6f-8a7b-${String(i).padStart(12, "0")}`;
+    const ok = await enviar(env, relatorio({ reportId: `pagina-${String(i).padStart(4, "0")}`, installId: inst }), { ip: `203.0.113.${i % 250}` });
+    assert.equal(ok.status, 202);
+  }
+  const p1 = await chamar(env, "/api/crash/list", { token: ADMIN });
+  assert.equal(p1.corpo.items.length, 100);
+  assert.ok(p1.corpo.cursor);
+  const t = p1.corpo.items.map((x) => x.t);
+  assert.deepEqual(t, [...t].sort((a, b) => b - a), "os mais novos primeiro");
+  const p2 = await chamar(env, `/api/crash/list?cursor=${p1.corpo.cursor}`, { token: ADMIN });
+  assert.equal(p2.corpo.items.length, 51);
+  assert.equal(p2.corpo.cursor, null);
+  const ids = new Set([...p1.corpo.items, ...p2.corpo.items].map((x) => x.id));
+  assert.equal(ids.size, 151, "nenhum repetido entre as paginas");
+  assert.deepEqual(Object.keys(p1.corpo.items[0]).sort(), ["b", "e", "id", "m", "p", "r", "t"], "mesmo formato da lista do KV");
+  assert.equal((await chamar(env, "/api/crash/list?cursor=x'--", { token: ADMIN })).status, 400);
+  assert.equal((await chamar(env, "/api/crash/item?id=0000000000000-0000000000000000", { token: ADMIN })).status, 404);
+});
+
+test("D1: vencido some da lista e do item na hora e e apagado no proximo POST; reenvio simultaneo nao duplica", async () => {
+  const env = { AUREA_DB: d1Falso(), CRASH_ADMIN_TOKEN: ADMIN, CRASH_TTL_DAYS: "30" };
+  const velho = await enviar(env, relatorio({ reportId: "velho-000001" }));
+  assert.equal(velho.status, 202);
+  const [linha] = guardados(env);
+  assert.equal(linha.expires_at - linha.received_at, 30 * 86400_000);
+  env.AUREA_DB.sqlite.prepare("UPDATE crash_reports SET expires_at = ?").run(Date.now() - 1);
+  assert.equal((await chamar(env, "/api/crash/list", { token: ADMIN })).corpo.items.length, 0);
+  assert.equal((await chamar(env, `/api/crash/item?id=${velho.corpo.id}`, { token: ADMIN })).status, 404);
+
+  const [a, b] = await Promise.all([
+    enviar(env, relatorio({ reportId: "junto-000001" })),
+    enviar(env, relatorio({ reportId: "junto-000001" })),
+  ]);
+  assert.deepEqual([a.status, b.status].sort(), [200, 202]);
+  assert.equal(a.corpo.id, b.corpo.id);
+  const restantes = guardados(env).map((x) => x.registro.reportId);
+  assert.deepEqual(restantes, ["junto-000001"], "o vencido foi apagado e o reenvio nao duplicou");
+});
+
+test("D1 fora do ar: 503, sem e-mail", async () => {
+  const quebrado = d1Falso();
+  const prepareOriginal = quebrado.prepare;
+  quebrado.prepare = (sql) => (/crash_reports/.test(sql) && /INSERT/.test(sql)
+    ? { bind: () => ({ run: async () => { throw new Error("D1_ERROR: network"); } }) }
+    : prepareOriginal(sql));
+  const env = { AUREA_DB: quebrado, RESEND_API_KEY: "k" };
+  const f = fetchFalso();
+  try {
+    const r = await enviar(env, relatorio({ reportId: "d1-fora-0001" }));
+    assert.equal(r.status, 503);
+    assert.equal(f.chamadas.length, 0);
   } finally {
     f.restaurar();
   }

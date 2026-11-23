@@ -11,9 +11,12 @@
 //  (até 200 KiB), id aleatório da instalação e — se houver sessão — o e-mail da
 //  conta, tirado da SESSÃO (não do corpo). Nada de projeto, caminho de mídia ou URI.
 //
-//  Guardado no KV (`crash:<ordem>-<hash>`, TTL CRASH_TTL_DAYS) com um marcador de
-//  deduplicação (`crashvisto:<hash(instalação+id)>`): reenvio do mesmo relatório
-//  não vira segundo e-mail. E-mails por dia têm teto (CRASH_EMAIL_DAILY_LIMIT);
+//  Guardado no D1 (tabela crash_reports, migração 0014; o registro inteiro em
+//  gzip) — o KV grátis só grava 1 000 vezes por dia na conta inteira e em
+//  22/11/2026 acabou, levando a config remota junto. Reenvio do mesmo relatório
+//  (mesma instalação + reportId, UNIQUE `dedupe`) não duplica nem vira segundo
+//  e-mail. Some depois de CRASH_TTL_DAYS: invisível na hora, apagado aos poucos
+//  a cada relatório novo. E-mails por dia têm teto (CRASH_EMAIL_DAILY_LIMIT);
 //  passou dele, o relatório só fica guardado.
 // =============================================================================
 
@@ -118,7 +121,33 @@ function autorizadoAdmin(req, env) {
   return dif === 0;
 }
 
-async function receber(req, env) {
+/** O registro em gzip (CompressionStream existe no Worker e no Node). */
+async function comprimir(texto) {
+  const fluxo = new Blob([texto]).stream().pipeThrough(new CompressionStream("gzip"));
+  return new Uint8Array(await new Response(fluxo).arrayBuffer());
+}
+
+/** O D1 devolve BLOB como lista de números; o SQLite do Node, como Uint8Array. */
+async function descomprimir(blob) {
+  const fluxo = new Blob([new Uint8Array(blob)]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return new Response(fluxo).text();
+}
+
+const ID_CRASH = /^[0-9]{13}-[0-9a-f]{16}$/;
+const VENCIDOS_POR_VEZ = 50;
+
+/** Apaga um punhado de vencidos (o índice de expires_at só lê os que saem). */
+async function apagarVencidos(env, agora) {
+  await env.AUREA_DB.prepare(
+    "DELETE FROM crash_reports WHERE id IN (SELECT id FROM crash_reports WHERE expires_at <= ? LIMIT ?)")
+    .bind(agora, VENCIDOS_POR_VEZ).run()
+    .catch((e) => console.error("crash: limpeza falhou", String(e?.message ?? e).slice(0, 200)));
+}
+
+const jaVisto = (env, marca) =>
+  env.AUREA_DB.prepare("SELECT id FROM crash_reports WHERE dedupe = ?").bind(marca).first();
+
+async function receber(req, env, ctx) {
   const ip = req.headers.get("cf-connecting-ip") ?? "local";
   if (!(await dentroDoLimite(env, "crash-ip", ip, LIMITES_CRASH.ipDia))) return json({ error: "muitas_tentativas" }, 429);
   const { valor, erro } = await lerJson(req, CRASH_MAX_BYTES);
@@ -127,8 +156,8 @@ async function receber(req, env) {
   if (invalido) return json({ error: invalido }, 400);
 
   const marca = await sha256hex(`${r.installId}|${r.reportId}`);
-  const visto = await env.AUREA_KV.get(`crashvisto:${marca}`);
-  if (visto) return json({ ok: true, id: visto, duplicate: true }, 200);
+  const visto = await jaVisto(env, marca);
+  if (visto) return json({ ok: true, id: visto.id, duplicate: true }, 200);
 
   if (!(await dentroDoLimite(env, "crash-inst-h", r.installId, LIMITES_CRASH.instalacaoHora)) ||
       !(await dentroDoLimite(env, "crash-inst-d", r.installId, LIMITES_CRASH.instalacaoDia))) {
@@ -146,10 +175,32 @@ async function receber(req, env) {
 
   const recebido = Date.now();
   const id = `${String(9_999_999_999_999 - recebido).padStart(13, "0")}-${marca.slice(0, 16)}`;
-  const ttl = Math.max(1, numero(env.CRASH_TTL_DAYS, 30)) * 86400;
+  const ttl = Math.max(1, numero(env.CRASH_TTL_DAYS, 30)) * 86400_000;
   const pais = typeof req.cf?.country === "string" ? req.cf.country : "";
+  const registro = { id, recebido, pais, ...r };
 
-  // Teto diário de e-mails (aproximado: contador de KV).
+  // Grava ANTES do e-mail: o relatório não se perde se o e-mail falhar.
+  try {
+    await env.AUREA_DB.prepare(
+      "INSERT INTO crash_reports (id, dedupe, received_at, expires_at, platform, reason, app_build, device, " +
+      "emailed, email_via, email_error, report_gz) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, 'pendente', ?)")
+      .bind(id, marca, recebido, recebido + ttl, r.platform, r.reason, r.appBuild,
+        `${r.manufacturer} ${r.deviceModel}`.slice(0, 60), await comprimir(JSON.stringify(registro)))
+      .run();
+  } catch (e) {
+    // Corrida com um reenvio simultâneo: o UNIQUE de `dedupe` segura.
+    if (/UNIQUE/i.test(String(e?.message ?? e))) {
+      const outro = await jaVisto(env, marca).catch(() => null);
+      return json({ ok: true, id: outro?.id ?? id, duplicate: true }, 200);
+    }
+    console.error("crash: D1 indisponível", String(e?.message ?? e).slice(0, 200));
+    return json({ error: "indisponivel" }, 503);
+  }
+  const limpeza = apagarVencidos(env, recebido);
+  if (ctx?.waitUntil) ctx.waitUntil(limpeza);
+  else await limpeza;
+
+  // Teto diário de e-mails (contador no D1).
   const teto = { max: numero(env.CRASH_EMAIL_DAILY_LIMIT, 50), janela: 86400 };
   let envio = { enviado: false, via: null, erro: "teto_diario" };
   if (await dentroDoLimite(env, "crash-email", "global", teto)) {
@@ -158,33 +209,40 @@ async function receber(req, env) {
     envio = await enviarEmail(env, { assunto, texto, anexo });
     if (!envio.enviado) console.error("crash: e-mail não saiu", envio.via, envio.erro);
   }
-
-  const registro = { id, recebido, pais, ...r, email_enviado: envio.enviado, email_via: envio.via, email_erro: envio.erro ?? null };
-  const meta = {
-    t: recebido, p: r.platform, r: r.reason.slice(0, 40), b: r.appBuild,
-    m: `${r.manufacturer} ${r.deviceModel}`.slice(0, 60), e: envio.enviado ? 1 : 0,
-  };
-  await env.AUREA_KV.put(`crash:${id}`, JSON.stringify(registro), { expirationTtl: ttl, metadata: meta });
-  await env.AUREA_KV.put(`crashvisto:${marca}`, id, { expirationTtl: ttl });
+  await env.AUREA_DB.prepare("UPDATE crash_reports SET emailed = ?, email_via = ?, email_error = ? WHERE id = ?")
+    .bind(envio.enviado ? 1 : 0, envio.via ?? null, envio.erro ?? null, id).run()
+    .catch((e) => console.error("crash: estado do e-mail não gravou", String(e?.message ?? e).slice(0, 200)));
   return json({ ok: true, id, emailed: envio.enviado }, 202);
 }
 
+/** Os mais novos primeiro, 100 por página; `cursor` é o último id da página anterior. */
 async function listar(req, env, url) {
   if (!autorizadoAdmin(req, env)) return json({ error: "nao_autorizado" }, 401);
-  const cursor = url.searchParams.get("cursor") || undefined;
-  const r = await env.AUREA_KV.list({ prefix: "crash:", cursor, limit: 100 });
+  const cursor = url.searchParams.get("cursor") || "";
+  if (cursor && !ID_CRASH.test(cursor)) return json({ error: "cursor_invalido" }, 400);
+  const { results } = await env.AUREA_DB.prepare(
+    "SELECT id, received_at, platform, reason, app_build, device, emailed FROM crash_reports " +
+    "WHERE id > ? AND expires_at > ? ORDER BY id LIMIT 101")
+    .bind(cursor, Date.now()).all();
+  const pagina = results.slice(0, 100);
   return json({
-    items: r.keys.map((k) => ({ id: k.name.slice("crash:".length), ...(k.metadata ?? {}) })),
-    cursor: r.list_complete ? null : r.cursor,
+    items: pagina.map((x) => ({
+      id: x.id, t: x.received_at, p: x.platform, r: x.reason.slice(0, 40), b: x.app_build, m: x.device, e: x.emailed ? 1 : 0,
+    })),
+    cursor: results.length > 100 ? pagina[pagina.length - 1].id : null,
   });
 }
 
 async function item(req, env, url) {
   if (!autorizadoAdmin(req, env)) return json({ error: "nao_autorizado" }, 401);
   const id = url.searchParams.get("id") ?? "";
-  if (!/^[0-9]{13}-[0-9a-f]{16}$/.test(id)) return json({ error: "id_invalido" }, 400);
-  const r = await env.AUREA_KV.get(`crash:${id}`, "json");
-  return r ? json(r) : json({ error: "nao_encontrado" }, 404);
+  if (!ID_CRASH.test(id)) return json({ error: "id_invalido" }, 400);
+  const linha = await env.AUREA_DB.prepare(
+    "SELECT report_gz, emailed, email_via, email_error FROM crash_reports WHERE id = ? AND expires_at > ?")
+    .bind(id, Date.now()).first();
+  if (!linha) return json({ error: "nao_encontrado" }, 404);
+  const registro = JSON.parse(await descomprimir(linha.report_gz));
+  return json({ ...registro, email_enviado: linha.emailed === 1, email_via: linha.email_via, email_erro: linha.email_error });
 }
 
 export async function rotaDeCrash(req, env, ctx, url) {
@@ -193,8 +251,8 @@ export async function rotaDeCrash(req, env, ctx, url) {
   if (url.protocol !== "https:" && url.hostname !== "127.0.0.1" && url.hostname !== "localhost") {
     return json({ error: "https_obrigatorio" }, 403);
   }
-  if (!env.AUREA_KV) return json({ error: "indisponivel" }, 503);
-  if (rota === "/api/crash" && req.method === "POST") return receber(req, env);
+  if (!env.AUREA_DB) return json({ error: "indisponivel" }, 503);
+  if (rota === "/api/crash" && req.method === "POST") return receber(req, env, ctx);
   if (rota === "/api/crash/list" && req.method === "GET") return listar(req, env, url);
   if (rota === "/api/crash/item" && req.method === "GET") return item(req, env, url);
   return json({ error: "nao_encontrado" }, 404);

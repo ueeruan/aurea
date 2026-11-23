@@ -1,5 +1,12 @@
 # Export direto na Surface do encoder (surface-direct) — 2026-10-15
 
+> **Compatibilidade iOS (23/11/2026).** O Aurea volta a usar a entrada NV12 do
+> VideoToolbox por padrão. Nas duas plataformas, as tentativas de
+> compatibilidade dispensam os alvos diretos. No iOS, a opção de diagnóstico
+> `aurea.export.enableZeroCopy` permite testar o caminho direto e
+> `aurea.export.disableZeroCopy` tem precedência. A renderização dos efeitos,
+> as dimensões e o relógio do vídeo continuam no motor compartilhado.
+
 > **Atualização 18/11/2026 (branch `claude/fix-export`):** o degrau passou a ser
 > **ligado por padrão** (`EngineConfig::enableDirectSurfaceExport = true`) em todo
 > projeto, com ou sem efeitos — só o grafo Hyper/upscale de IA e a tentativa 1 da

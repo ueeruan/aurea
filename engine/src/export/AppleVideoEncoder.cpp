@@ -129,8 +129,12 @@ struct Encoder::Impl {
             self->ready.notify_all();
             return;
         }
-        // Quadro descartado: nenhum pacote; o sink percebe a falta no relógio.
+        // Export requires every submitted frame. Return the failure in this
+        // write so the sink can retry instead of waiting for a packet that
+        // VideoToolbox has already said it will not produce.
         if ((flags & kVTEncodeInfo_FrameDropped) || !sample || !CMSampleBufferDataIsReady(sample)) {
+            if (self->failure.ok())
+                self->failure = Status{Errc::EncodeFailed, "VideoToolbox nao entregou o quadro codificado"};
             self->ready.notify_all();
             return;
         }

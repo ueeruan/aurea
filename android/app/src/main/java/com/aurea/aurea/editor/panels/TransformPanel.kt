@@ -633,7 +633,9 @@ internal fun BoxScope.PanelTabTags(tags: List<String>) {
     Row(Modifier.matchParentSize()) {
         Spacer(Modifier.weight(1f))
         Column(Modifier.width(PanelFrameDefaults.RailWidth).fillMaxHeight()) {
-            tags.take(PanelFrameDefaults.MAX_TABS).forEach { Box(Modifier.weight(1f).fillMaxWidth().testTag(it)) }
+            tags.forEach { tag ->
+                Box(Modifier.weight(1f).fillMaxWidth().testTag(tag))
+            }
         }
     }
 }

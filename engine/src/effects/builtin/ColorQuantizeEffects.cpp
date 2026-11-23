@@ -13,6 +13,11 @@ namespace aurea::builtin {
 namespace {
 struct TwoColorUniforms { EffectUniforms base; Vec4 second; };
 
+f32 normalized_percent(const EffectEval& effect, u32 index, f32 fallback, f32 lo, f32 hi) noexcept {
+    const f32 value = effect.f(index);
+    return std::clamp(std::isfinite(value) ? value : fallback, lo, hi) * 0.01f;
+}
+
 Status passthrough_pass(EffectBuildContext& ctx, const char* name, ShaderId shader, const LayerImage& input,
                         LayerImage& out, const void* u, usize size, std::initializer_list<PassTexture> textures) {
     out = input; out.texture = ctx.texture(name, input.width, input.height);
@@ -52,6 +57,128 @@ public:
     }
 };
 
+class SoftRgbThreshold final : public Effect {
+public:
+    enum : u32 { kLimit, kSoftness, kOffset, kSoftRed, kSoftGreen, kSoftBlue, kSaturation };
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo info{"aurea.color.soft_rgb_threshold", "Limiar suave RGB", "Cor",
+                                     EffectClass::Neighborhood};
+        return info;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        constexpr auto percent = kParamAnimatable | kParamPercent;
+        p.add_float("limit", "Limite", 50.0f, 0.0f, 200.0f, percent, "%");
+        p.add_float("softness", "Suavidade", 20.0f, 0.0f, 100.0f, percent, "%");
+        p.add_color("offset", "Cor de deslocamento", Vec4{0, 0, 0, 1});
+        p.add_float("soft_red", "Suavidade do vermelho", 100.0f, 0.0f, 800.0f, percent, "%");
+        p.add_float("soft_green", "Suavidade do verde", 100.0f, 0.0f, 800.0f, percent, "%");
+        p.add_float("soft_blue", "Suavidade do azul", 100.0f, 0.0f, 800.0f, percent, "%");
+        p.add_float("saturation", "Saturação", 100.0f, 0.0f, 400.0f, percent, "%");
+    }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_color_threshold_frag, work));
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
+                 LayerImage& out) const override {
+        TwoColorUniforms u{};
+        u.base = base_uniforms(input);
+        u.base.p0 = Vec4{normalized_percent(e, kLimit, 50.0f, 0.0f, 200.0f),
+                         normalized_percent(e, kSoftness, 20.0f, 0.0f, 100.0f), 1.0f,
+                         normalized_percent(e, kSaturation, 100.0f, 0.0f, 400.0f)};
+        u.base.p1 = Vec4{normalized_percent(e, kSoftRed, 100.0f, 0.0f, 800.0f),
+                         normalized_percent(e, kSoftGreen, 100.0f, 0.0f, 800.0f),
+                         normalized_percent(e, kSoftBlue, 100.0f, 0.0f, 800.0f), 0.0f};
+        u.base.color = e.color(kOffset);
+        return passthrough_pass(ctx, "limiar-suave-rgb", ShaderId::effects_color_threshold_frag, input, out,
+                                &u, sizeof(u), {PassTexture{input.texture}});
+    }
+};
+
+class Solarize final : public Effect {
+public:
+    enum : u32 { kThreshold, kSaturation, kInvert, kBrightness, kShadows };
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo info{"aurea.color.solarize", "Solarizar", "Cor", EffectClass::Neighborhood};
+        return info;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        constexpr auto percent = kParamAnimatable | kParamPercent;
+        p.add_float("threshold", "Limite", 50.0f, 0.0f, 100.0f, percent, "%");
+        p.add_float("saturation", "Saturação", 100.0f, -400.0f, 800.0f, percent, "%");
+        p.add_bool("invert", "Inverter", false);
+        p.add_float("brightness", "Brilho", 200.0f, 0.0f, 800.0f, percent, "%");
+        p.add_float("shadows", "Sombras", 0.0f, -100.0f, 200.0f, percent, "%");
+    }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_color_threshold_frag, work));
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
+                 LayerImage& out) const override {
+        TwoColorUniforms u{};
+        u.base = base_uniforms(input);
+        u.base.p0 = Vec4{normalized_percent(e, kThreshold, 50.0f, 0.0f, 100.0f),
+                         normalized_percent(e, kSaturation, 100.0f, -400.0f, 800.0f), 2.0f,
+                         e.b(kInvert) ? 1.0f : 0.0f};
+        u.base.p1 = Vec4{normalized_percent(e, kShadows, 0.0f, -100.0f, 200.0f),
+                         normalized_percent(e, kBrightness, 200.0f, 0.0f, 800.0f), 0.0f, 0.0f};
+        return passthrough_pass(ctx, "solarizar", ShaderId::effects_color_threshold_frag, input, out,
+                                &u, sizeof(u), {PassTexture{input.texture}});
+    }
+};
+
+class EncodedFilmColor final : public Effect {
+public:
+    explicit EncodedFilmColor(bool palette) : palette_(palette) {}
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo colors{"aurea.color.luma_hue_cycle", "Ciclo de cores por brilho", "Cor",
+                                       EffectClass::Neighborhood};
+        static const EffectInfo silver{"aurea.color.silver_retention", "Retenção de prata", "Cor",
+                                       EffectClass::Neighborhood};
+        return palette_ ? colors : silver;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        constexpr auto percent = kParamAnimatable | kParamPercent;
+        if (palette_) {
+            p.add_float("frequency", "Frequência", 2.0f, 0.0f, 20.0f, kParamAnimatable);
+            p.add_float("phase", "Deslocamento de matiz", 0.0f, -100.0f, 100.0f, percent, "%");
+            p.add_float("scale_source", "Escalar pelo brilho", 100.0f, 0.0f, 100.0f, percent, "%");
+            p.add_float("source_gamma", "Expoente do brilho", 1.0f, 0.1f, 8.0f, kParamAnimatable);
+        } else {
+            p.add_float("amount", "Intensidade", 100.0f, 0.0f, 300.0f, percent, "%");
+            p.add_float("dark_offset", "Deslocamento das sombras", 0.0f, -100.0f, 100.0f, percent, "%");
+        }
+        p.add_float("saturation", "Saturação", 100.0f, -200.0f, 800.0f, percent, "%");
+        p.add_float("brightness", "Brilho", 100.0f, 0.0f, 400.0f, percent, "%");
+        p.add_float("original_mix", "Mistura com o original", 0.0f, 0.0f, 100.0f, percent, "%");
+    }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_color_threshold_frag, work));
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
+                 LayerImage& out) const override {
+        TwoColorUniforms u{};
+        u.base = base_uniforms(input);
+        const u32 tail = palette_ ? 4 : 2;
+        u.base.p0 = Vec4{palette_ ? std::clamp(std::isfinite(e.f(0)) ? e.f(0) : 2.0f, 0.0f, 20.0f)
+                                  : normalized_percent(e, 0, 100.0f, 0.0f, 300.0f),
+                         normalized_percent(e, 1, 0.0f, -100.0f, 100.0f),
+                         palette_ ? 3.0f : 4.0f, normalized_percent(e, tail, 100.0f, -200.0f, 800.0f)};
+        u.base.p1 = Vec4{normalized_percent(e, tail + 1, 100.0f, 0.0f, 400.0f),
+                         normalized_percent(e, tail + 2, 0.0f, 0.0f, 100.0f),
+                         palette_ ? normalized_percent(e, 2, 100.0f, 0.0f, 100.0f) : 0.0f,
+                         palette_ && std::isfinite(e.f(3)) ? std::clamp(e.f(3), 0.1f, 8.0f) : 1.0f};
+        return passthrough_pass(ctx, palette_ ? "ciclo-de-cores" : "retencao-de-prata",
+                                ShaderId::effects_color_threshold_frag, input, out,
+                                &u, sizeof(u), {PassTexture{input.texture}});
+    }
+
+private:
+    bool palette_;
+};
+
 // -----------------------------------------------------------------------------
 // Posterize — menos tons por canal (ou só no brilho, em Oklab).
 // -----------------------------------------------------------------------------
@@ -78,6 +205,61 @@ public:
         u.p0 = {std::round(std::clamp(levels, 2.f, 32.f)), std::clamp(gamma, 0.1f, 4.f), e.b(kLumaOnly) ? 1.f : 0.f, 0};
         return passthrough_pass(ctx, "posterize", ShaderId::effects_color_posterize_frag, input, out, &u, sizeof(u),
                                 {PassTexture{input.texture}});
+    }
+};
+
+class LumaPosterization final : public Effect {
+public:
+    enum : u32 { kStep, kPreserve, kSoftEdge, kSmooth, kPhase, kBrightness, kShadows, kSaturation };
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo info{"aurea.color.luma_posterize", "Posterização por brilho", "Cor",
+                                     EffectClass::Neighborhood};
+        return info;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        constexpr auto percent = kParamAnimatable | kParamPercent;
+        p.add_float("step", "Tamanho do degrau", 10.f, 0.f, 100.f, percent, "%");
+        p.add_float("preserve_chroma", "Preservar croma", 100.f, 0.f, 100.f, percent, "%");
+        p.add_float("smooth_edges", "Suavidade da borda", 10.f, 0.f, 100.f, percent, "%");
+        p.add_float("smooth_source", "Suavizar fonte", 1.92f, 0.f, 80.f, kParamAnimatable | kParamPixels, "px");
+        p.add_float("phase", "Fase da cor", 0.f, -100.f, 100.f, percent, "%");
+        p.add_float("brightness", "Brilho", 100.f, 0.f, 400.f, percent, "%");
+        p.add_float("shadows", "Sombras", 0.f, -100.f, 100.f, percent, "%");
+        p.add_float("saturation", "Saturação", 100.f, -200.f, 800.f, percent, "%");
+    }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_color_posterize_frag, work));
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
+                 LayerImage& out) const override {
+        auto uniforms = base_uniforms(input);
+        LayerImage signal;
+        uniforms.p0.w = 1.f;
+        const ShaderId shader = ShaderId::effects_color_posterize_frag;
+        auto status = passthrough_pass(ctx, "posterizacao-codificar", shader, input, signal,
+                                      &uniforms, sizeof(uniforms), {PassTexture{input.texture}});
+        if (!status.ok()) return status;
+        const f32 smooth = std::clamp(std::isfinite(e.f(kSmooth)) ? e.f(kSmooth) : 1.92f, 0.f, 80.f);
+        LayerImage filtered = signal;
+        if (smooth > 0.02f) {
+            BlurRequest request{};
+            request.sigmaX = request.sigmaY = smooth * 0.63f;
+            request.repeatEdges = true;
+            request.outRegion = signal.region;
+            request.label = "posterizacao-suavizar";
+            status = build_gaussian(ctx, signal, request, filtered);
+            if (!status.ok()) return status;
+        }
+        uniforms.p0 = Vec4{normalized_percent(e, kStep, 10.f, 0.f, 100.f),
+                           normalized_percent(e, kSoftEdge, 10.f, 0.f, 100.f),
+                           normalized_percent(e, kPreserve, 100.f, 0.f, 100.f), 2.f};
+        uniforms.p1 = Vec4{normalized_percent(e, kPhase, 0.f, -100.f, 100.f),
+                           normalized_percent(e, kBrightness, 100.f, 0.f, 400.f),
+                           normalized_percent(e, kShadows, 0.f, -100.f, 100.f),
+                           normalized_percent(e, kSaturation, 100.f, -200.f, 800.f)};
+        return passthrough_pass(ctx, "posterizacao-luma", shader, input, out, &uniforms, sizeof(uniforms),
+                                {PassTexture{filtered.texture}, PassTexture{input.texture}});
     }
 };
 
@@ -195,7 +377,12 @@ public:
 
 void register_color_quantize_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<Threshold>());
+    (void)r.add(std::make_unique<SoftRgbThreshold>());
+    (void)r.add(std::make_unique<Solarize>());
+    (void)r.add(std::make_unique<EncodedFilmColor>(true));
+    (void)r.add(std::make_unique<EncodedFilmColor>(false));
     (void)r.add(std::make_unique<Posterize>());
+    (void)r.add(std::make_unique<LumaPosterization>());
     (void)r.add(std::make_unique<Palettize>());
 }
 }

@@ -38,8 +38,62 @@ vec3 grain_at(vec2 px, float seed, float sizePx) {
     return vec3(a, b, c);
 }
 
+float photographic_grain_knot(uvec2 cell, uint seed) {
+    float a = aurea_hash(cell ^ uvec2(seed, seed * 2654435761u));
+    float b = aurea_hash(cell ^ uvec2(seed ^ 0x85ebca6bu, seed * 2246822519u + 0xc2b2ae35u));
+    return (a + b - 1.0) * 0.974;
+}
+
+float photographic_grain_value(vec2 q, uint seed) {
+    uvec2 cell = uvec2(ivec2(floor(q)));
+    vec2 f = fract(q);
+    vec2 t = f * f * (3.0 - 2.0 * f);
+    float a = photographic_grain_knot(cell, seed);
+    float b = photographic_grain_knot(cell + uvec2(1u, 0u), seed);
+    float c = photographic_grain_knot(cell + uvec2(0u, 1u), seed);
+    float d = photographic_grain_knot(cell + uvec2(1u, 1u), seed);
+    return mix(mix(a, b, t.x), mix(c, d, t.x), t.y);
+}
+
+float photographic_grain_band(vec2 q, uint seed, int octaves) {
+    float value = 0.0;
+    float amplitude = 1.0;
+    for (int i = 0; i < octaves; ++i) {
+        value += photographic_grain_value(q, seed + uint(i) * 0x9e3779b9u) * amplitude;
+        q *= 2.0;
+        amplitude *= 0.5;
+    }
+    return value;
+}
+
+vec4 photographic_grain(vec4 src) {
+    // Frequency is layer-width relative. The lattice basis and gain fit the
+    // measured spatial correlation and variance, with original seeded samples.
+    const float latticeScale = 2.814;
+    vec2 q = (v_uv - vec2(0.5)) * vec2(1.0, p.p0.w) * latticeScale;
+    uint seed = uint(p.p3.x) | (uint(p.p3.y) << 16);
+    vec3 perturbation = vec3(0.0);
+    if (p.p0.x > 0.0) {
+        int octaves = int(p.p0.z);
+        perturbation = p.p0.x * vec3(
+            photographic_grain_band(q * (p.p0.y * p.p2.x), seed ^ 0x243f6a88u, octaves),
+            photographic_grain_band(q * (p.p0.y * p.p2.y), seed ^ 0xb7e15162u, octaves),
+            photographic_grain_band(q * (p.p0.y * p.p2.z), seed ^ 0x9e3779b9u, octaves));
+        perturbation *= aurea_linear_to_srgb(max(p.color.rgb, vec3(0.0)));
+    }
+    if (p.p1.x > 0.0) {
+        perturbation += p.p1.x * photographic_grain_band(q * p.p1.y, seed ^ 0x3745a11du, int(p.p1.z));
+    }
+    vec3 encoded = aurea_linear_to_srgb(max(src.rgb, vec3(0.0)));
+    return premultiply(vec4(aurea_srgb_to_linear(max(encoded + perturbation, vec3(0.0))), src.a));
+}
+
 void main() {
     vec4 src = unpremultiply(texture(u_tex0, v_uv * p.uvMap.xy + p.uvMap.zw));
+    if (p.p2.w > 0.5) {
+        o_color = photographic_grain(src);
+        return;
+    }
     vec3 c = src.rgb;
     float alpha = src.a;
 

@@ -107,6 +107,22 @@ struct ImportResult {
 [[nodiscard]] Status read_package(const std::string& packagePath, const std::string& projectOut,
                                   const std::string& mediaDir, ImportResult& out) noexcept;
 
+/// Append one complete .aureaproj to a private, disposable backup file. Call in
+/// order starting at zero. A reader rejects a truncated or unfinished backup.
+[[nodiscard]] Status append_backup_project(const std::string& backupPath, const std::string& packagePath,
+                                           u32 index, u32 count) noexcept;
+
+struct BackupRestoreResult {
+    u32 projects = 0;
+    std::vector<PluginFile> plugins;
+};
+
+/// Validate and unpack every project before publishing copies to the library.
+/// `batchId` uniquely identifies folders owned by this invocation.
+[[nodiscard]] Status restore_backup(const std::string& backupPath, const std::string& projectsDir,
+                                    const std::string& mediaRoot, const std::string& batchId,
+                                    BackupRestoreResult& out) noexcept;
+
 /// Extract model ZIPs (stored/deflate) into a NEW directory. Relative paths are
 /// preserved; unsafe names, CRC errors and excessive memory/disk costs fail
 /// without leaving partial files. Native pickers call the same implementation.

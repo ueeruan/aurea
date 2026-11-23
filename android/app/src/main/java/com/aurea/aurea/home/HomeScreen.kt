@@ -42,6 +42,7 @@ import com.aurea.aurea.conta.ContaEstado
 import com.aurea.aurea.conta.ContaViewModel
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.state.ProjectEntry
+import com.aurea.aurea.state.ProjectFile
 import com.aurea.aurea.ui.ds.AureaAlert
 import com.aurea.aurea.ui.ds.AureaDialog
 import com.aurea.aurea.ui.ds.DialogAction
@@ -90,6 +91,12 @@ fun HomeScreen(store: EditorStore) {
     val projectFilePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) vm.afterEngine(store) { store.importProjectFile(uri) }
     }
+    val backupTarget = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        if (uri != null) vm.afterEngine(store) { store.exportProjectBackup(uri) }
+    }
+    val backupSource = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) vm.afterEngine(store) { store.restoreProjectBackup(uri) }
+    }
     // Omega home · P2-1: "Prévia leve" abre o editor com a prévia em 1/2.
     val openProject: (ProjectEntry) -> Unit = { e ->
         vm.afterEngine(store) {
@@ -128,6 +135,8 @@ fun HomeScreen(store: EditorStore) {
                         picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
                     },
                     onImportProject = { closeDrawer(); projectFilePicker.launch(arrayOf("*/*")) },
+                    onSaveBackup = { closeDrawer(); backupTarget.launch("Aurea.${ProjectFile.BACKUP_EXTENSION}") },
+                    onRestoreBackup = { closeDrawer(); backupSource.launch(arrayOf("*/*")) },
                     onHyper = { closeDrawer(); store.openHyper() },
                     onAbout = { closeDrawer(); about = true },
                     onSupport = { closeDrawer(); reportProblem = true },
@@ -270,6 +279,24 @@ fun HomeScreen(store: EditorStore) {
     if (about) AboutScreen(store, onLicenses = { licenses = true }) { about = false }
     // Depois do Sobre: as licenças abertas de lá ficam por cima dele.
     if (licenses) LicensesScreen { licenses = false }
+    val savingBackup = stringResource(R.string.project_backup_saving)
+    val restoringBackup = stringResource(R.string.project_backup_restoring)
+    store.busyMessage?.takeIf { it == savingBackup || it == restoringBackup }?.let { message ->
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = {},
+            properties = androidx.compose.ui.window.DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
+        ) {
+            Column(
+                Modifier.fillMaxWidth().background(AureaColors.Surface, RoundedCornerShape(14.dp)).padding(24.dp)
+                    .testTag("home.projectBackup.progress"),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                androidx.compose.material3.CircularProgressIndicator(Modifier.size(28.dp))
+                Text(message, style = AureaType.Base, color = AureaColors.Text, textAlign = TextAlign.Center)
+            }
+        }
+    }
 }
 
 /**

@@ -1242,6 +1242,8 @@ NS_SWIFT_NAME(AureaEngine)
                                   appVersion:(NSString*)appVersion media:(NSArray<NSString*>*)media plugins:(NSArray<NSString*>*)plugins;
 /// [erro (0 = ok), título, versão do app, religadas, ausentes]. Nunca sobrescreve `projectOut`.
 + (NSArray<NSString*>*)importProjectPackage:(NSString*)packagePath project:(NSString*)projectOut mediaDir:(NSString*)mediaDir;
++ (NSInteger)appendBackupProject:(NSString*)packagePath to:(NSString*)backupPath index:(NSInteger)index count:(NSInteger)count;
++ (NSArray<NSString*>*)restoreProjectBackup:(NSString*)backupPath projects:(NSString*)projectsDir media:(NSString*)mediaRoot batch:(NSString*)batch;
 - (NSArray<NSDictionary<NSString*, id>*>*)parseSRT:(NSString*)srt;
 - (BOOL)isFillerWord:(NSString*)word NS_SWIFT_NAME(isFillerWord(_:));
 - (NSString*)createCaptions:(long long)layerId words:(NSArray<NSDictionary<NSString*, id>*>*)words options:(NSDictionary<NSString*, NSNumber*>*)options;

@@ -568,6 +568,74 @@ public:
     }
 };
 
+class PhotochemicalFilmDamage final : public Effect {
+public:
+    enum : u32 {
+        kGrain, kGrainShadows, kGrainHighlights, kDust, kStains, kHairs, kScratches, kScratchWidth,
+        kWeave, kWeaveFrequency, kVignette, kVignetteRadius, kVignetteSoftness, kVignetteAspect,
+        kFlicker, kFlickerFrequency, kSaturation, kGain, kOffset, kSeed,
+    };
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{"aurea.stylize.photochemical_film_damage", "Desgaste de película",
+                                  "Estilizar", EffectClass::Neighborhood};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_float("grain", "Intensidade do grão", 0.1f, 0.0f, 2.0f, kParamAnimatable);
+        p.add_float("grain_shadows", "Grão nas sombras", 0.2f, 0.0f, 2.0f, kParamAnimatable);
+        p.add_float("grain_highlights", "Grão nas luzes", 0.0f, 0.0f, 2.0f, kParamAnimatable);
+        p.add_float("dust", "Poeira", 30.0f, 0.0f, 256.0f, kParamAnimatable);
+        p.add_float("stains", "Manchas", 0.2f, 0.0f, 12.0f, kParamAnimatable);
+        p.add_int("hairs", "Fibras", 2, 0, 8);
+        p.add_int("scratches", "Riscos", 5, 0, 16);
+        p.add_float("scratch_width", "Largura dos riscos", 0.15f, 0.0f, 8.0f,
+                    kParamAnimatable | kParamPixels, "px");
+        p.add_float("weave", "Oscilação da película", 1.0f, 0.0f, 24.0f,
+                    kParamAnimatable | kParamPixels, "px");
+        p.add_float("weave_frequency", "Frequência da oscilação", 0.1f, 0.01f, 5.0f, kParamAnimatable, "Hz");
+        p.add_float("vignette", "Escurecimento da vinheta", .1f, 0.0f, 1.0f, kParamAnimatable);
+        p.add_float("vignette_radius", "Raio da vinheta", 1.0f, 0.0f, 4.0f, kParamAnimatable);
+        p.add_float("vignette_softness", "Suavidade da vinheta", 0.5f, 0.0f, 4.0f, kParamAnimatable);
+        p.add_float("vignette_aspect", "Altura relativa da vinheta", 0.75f, 0.05f, 4.0f, kParamAnimatable);
+        p.add_float("flicker", "Cintilação", .2f, 0.0f, 2.0f, kParamAnimatable);
+        p.add_float("flicker_frequency", "Frequência da cintilação", 10.0f, 0.0f, 100.0f, kParamAnimatable, "Hz");
+        p.add_float("saturation", "Saturação", 1.0f, -2.0f, 8.0f, kParamAnimatable);
+        p.add_float("scale_lights", "Ganho das luzes", 1.0f, 0.0f, 8.0f, kParamAnimatable);
+        p.add_float("offset_darks", "Deslocamento das sombras", 0.0f, -2.0f, 2.0f, kParamAnimatable);
+        p.add_float("seed", "Semente", 0.123f, 0.0f, 16.0f, kParamAnimatable);
+    }
+    f32 input_margin(const EffectEval& e) const noexcept override {
+        return std::clamp(std::isfinite(e.f(kWeave)) ? e.f(kWeave) : 1.0f, 0.0f, 24.0f);
+    }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_film_damage_frag, work));
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
+                 LayerImage& out) const override {
+        auto read = [&](u32 index, f32 fallback, f32 lo, f32 hi) {
+            const f32 value = e.f(index);
+            return std::clamp(std::isfinite(value) ? value : fallback, lo, hi);
+        };
+        EffectUniforms u = base_uniforms(input);
+        u.uvMap = {read(kGrainShadows, .2f, 0, 2), read(kGrainHighlights, 0, 0, 2),
+                   1.0f / std::max(input.region.w, 1.0f), 1.0f / std::max(input.region.h, 1.0f)};
+        u.texel.z = read(kWeaveFrequency, .1f, .01f, 5);
+        u.texel.w = read(kScratchWidth, .15f, 0, 8);
+        u.p0 = {read(kGrain, .1f, 0, 2), read(kDust, 30, 0, 256), read(kScratches, 5, 0, 16),
+                read(kWeave, 1, 0, 24)};
+        u.p1 = {read(kVignette, .1f, 0, 1), read(kVignetteRadius, 1, 0, 4),
+                read(kVignetteSoftness, .5f, 0, 4), read(kVignetteAspect, .75f, .05f, 4)};
+        u.p2 = {read(kFlicker, .2f, 0, 2), read(kFlickerFrequency, 10, 0, 100),
+                read(kSaturation, 1, -2, 8), read(kGain, 1, 0, 8)};
+        const f64 fps = e.framesPerSecond > 0.0 ? e.framesPerSecond : 30.0;
+        u.p3 = {static_cast<f32>(e.time_frames() / fps), input.region.h / std::max(input.region.w, 1e-6f),
+                std::round(read(kSeed, .123f, 0, 16) * 1000000.0f), static_cast<f32>(e.localTime.value)};
+        u.color = {read(kStains, .2f, 0, 12), read(kHairs, 2, 0, 8), read(kOffset, 0, -2, 2), 1};
+        return single_pass(ctx, ShaderId::effects_film_damage_frag, input, u, "desgaste-de-pelicula", out);
+    }
+};
+
 // -----------------------------------------------------------------------------
 // Dano de JPEG
 // -----------------------------------------------------------------------------
@@ -1025,6 +1093,7 @@ void register_glitch_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<CrossGlitch>());
     (void)r.add(std::make_unique<HoloMatrix>());
     (void)r.add(std::make_unique<FilmDamage>());
+    (void)r.add(std::make_unique<PhotochemicalFilmDamage>());
     (void)r.add(std::make_unique<JpegDamage>());
     (void)r.add(std::make_unique<PixelSort>());
     (void)r.add(std::make_unique<HyperGlitch>());

@@ -355,14 +355,32 @@ class EffectPickerLogicTest {
             // Funções do AUREA (13/11/2026): "Funções do Aurea" é o primeiro ladrilho.
             listOf(
                 "aurea_tools",
-                "color_light", "draw_edge", "blur", "distort", "procedural", "3d", "motion", "repeat", "matte",
-                "visibility", "text", "stylize", "glitch", "time", "audio", "utility", "plugins", "other",
+                "color_light", "halos_reflections", "draw_edge", "blur", "distort", "procedural", "3d",
+                "motion", "repeat", "matte", "visibility", "text", "stylize", "video_film",
+                "glitch", "time", "audio", "utility", "plugins", "other",
             ),
             EffectGroup.entries.map { it.id },
         )
         val captions = toolCatalogEntry(EffectTool.Captions, "Legendas")
         val groups = groupEntries(listOf(vhs, captions, glow)).map { it.first }
         assertEquals(listOf(EffectGroup.ColorLight, EffectGroup.Text, EffectGroup.Glitch), groups)
+    }
+
+    @Test
+    fun revisedEffectsAppearInTheirDedicatedGroups() {
+        val aura = fx("aurea.light.spectral_aura", "Aura espectral", "Luz")
+        val tape = fx("aurea.stylize.analog_tape_damage", "Degradação de fita VHS", "Glitch")
+        val repeat = fx("aurea.distort.repeated_transform", "Transformações múltiplas", "Distorcer")
+        assertEquals(
+            listOf(
+                EffectGroup.ColorLight to listOf(glow),
+                EffectGroup.HalosReflections to listOf(aura),
+                EffectGroup.Repeat to listOf(repeat),
+                EffectGroup.VideoFilm to listOf(tape),
+                EffectGroup.Glitch to listOf(vhs),
+            ),
+            groupEntries(listOf(tape, repeat, vhs, aura, glow)),
+        )
     }
 
     @Test

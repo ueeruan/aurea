@@ -46,6 +46,8 @@ import androidx.compose.ui.unit.sp
 import com.aurea.aurea.R
 import com.aurea.aurea.engine.TrackKey
 import com.aurea.aurea.engine.TrackProperty
+import com.aurea.aurea.presets.TITLE_MOTION_PRESET_BASE
+import com.aurea.aurea.presets.TitleMotionPresetLabels
 import com.aurea.aurea.ui.ds.KeyframeLook
 import com.aurea.aurea.ui.ds.KeyframeDiamondIcon
 import com.aurea.aurea.ui.ds.KeypadRequest
@@ -68,6 +70,12 @@ private val TextPresets = listOf(
     R.string.tp_m_wave to CupertinoGlyph.Waveform, R.string.tp_m_spin to CupertinoGlyph.ArrowCounterclockwise,
     R.string.tp_m_scale_word to CupertinoGlyph.Fullscreen, R.string.tp_m_scale_out to CupertinoGlyph.FullscreenExit,
     R.string.app_text_preset_smooth_bounce to CupertinoGlyph.Waveform,
+)
+
+private val TitlePresetGlyphs = listOf(
+    CupertinoGlyph.Textformat, CupertinoGlyph.ArrowLeftRight, CupertinoGlyph.LineHorizontal3,
+    CupertinoGlyph.ArrowCounterclockwise, CupertinoGlyph.SquareOnSquare, CupertinoGlyph.Scissors,
+    CupertinoGlyph.ArrowCounterclockwise,
 )
 
 // Propriedades do motor (TextAnimProp) e chaves das trilhas (TextAnimParam).
@@ -172,6 +180,13 @@ internal fun TextAnimSection(env: PanelEnv, onEditing: (Boolean) -> Unit = {}, p
         }
     }
     if (parts and TEXT_ANIM_READY != 0) PanelSection(stringResource(R.string.ui_ready_anims), CupertinoGlyph.WandStars, "text.sec.presets") {
+        if (store.detail?.kind == LayerType.Text.kind) {
+            PanelItemGrid(TitleMotionPresetLabels.mapIndexed { i, label ->
+                PanelItem(TitlePresetGlyphs[i], stringResource(label), "text.title.preset.$i") {
+                    store.applyTextPreset(TITLE_MOTION_PRESET_BASE + i)
+                }
+            })
+        }
         PanelItemGrid(TextPresets.mapIndexed { i, (label, glyph) ->
             PanelItem(glyph, stringResource(label), "text.motion.preset.$i") { store.applyMotionTextPreset(i) }
         })

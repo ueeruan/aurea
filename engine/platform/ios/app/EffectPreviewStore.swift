@@ -82,14 +82,14 @@ final class EffectPreviewStore {
         return memory.object(forKey: NSNumber(value: typeId))
     }
 
-    func image(for typeId: UInt32) async -> UIImage? {
+    func image(for typeId: UInt32, generate: Bool = true) async -> UIImage? {
         guard let epoch = requestEpoch() else { return nil }
         let request = Request()
         return await withTaskCancellationHandler(operation: {
             await withCheckedContinuation { continuation in
                 queue.async { [self] in
                     guard !request.isCancelled, self.requestEpoch() == epoch else { continuation.resume(returning: nil); return }
-                    let image = autoreleasepool { load(typeId) }
+                    let image = autoreleasepool { load(typeId, generate: generate) }
                     guard self.requestEpoch() == epoch else {
                         memory.removeAllObjects()
                         continuation.resume(returning: nil); return
@@ -123,7 +123,7 @@ final class EffectPreviewStore {
         }
     }
 
-    private func load(_ typeId: UInt32) -> UIImage? {
+    private func load(_ typeId: UInt32, generate: Bool) -> UIImage? {
         let key = NSNumber(value: typeId)
         if let image = memory.object(forKey: key) { return image }
         let file = directory.appendingPathComponent("\(typeId)@320x200.png")
@@ -131,6 +131,7 @@ final class EffectPreviewStore {
             cache(image, key: key)
             return image
         }
+        guard generate else { return nil }
         // Foto ausente ou ilegível: o motor desenha a cartela procedural no
         // lugar (paridade com EditorStore.kt ensureEffectPreviewPhoto), em vez
         // de deixar todo cartão em "Prévia indisponível".

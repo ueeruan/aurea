@@ -7,9 +7,8 @@ import org.junit.Test
 
 /**
  * Omega fundação (F6): a geometria da referência no telefone em retrato — topo
- * 42, transporte 46, zona inferior fixa de 280 (timeline 210 + barra de
- * adicionar 70, ou a timeline com o painel de 200 POR CIMA) e a prévia, que é
- * o resto, igual em todos os estados.
+ * 42, transporte 46, zona inferior de 280 e prévia no espaço restante.
+ * O inspetor aberto amplia a zona sem encobrir a régua nem a camada em foco.
  */
 class EditorLayoutTest {
     private val phones = listOf(640f, 700f, 760f, 780f, 844f, 900f, 960f)
@@ -26,11 +25,13 @@ class EditorLayoutTest {
         assertEquals(42f + 28f + 10f, EditorLayout.timelineFocus(), 0f)
     }
 
-    @Test fun previewIsTheRestAndNeverMovesWhenPanelsOpenOrClose() {
+    @Test fun defaultPreviewReservesMoreSpaceOnlyForTheOpenInspector() {
         for (h in phones) {
-            val previews = allContents.map { EditorLayout.solve(h, it, false, 375f, 9f / 16f).preview }
-            // P0-1 da área 02: prévia = H − 368 em todos os estados do retrato.
-            for (p in previews) assertEquals("preview at $h", h - 368f, p, 0.01f)
+            for (content in allContents) {
+                val m = EditorLayout.solve(h, content, false, 375f, 9f / 16f)
+                val zone = if (content == SheetContent.Panel) 352f else 280f
+                assertEquals("$content preview at $h", h - 88f - zone, m.preview, 0.01f)
+            }
             // O aspecto do projeto não mexe na prévia.
             assertEquals(h - 368f, EditorLayout.solve(h, SheetContent.None, false, 375f, 16f / 9f).preview, 0.01f)
         }
@@ -89,8 +90,8 @@ class EditorLayoutTest {
         assertEquals(m.zone - EditorLayout.panelMax(), m.visibleTimeline, 0.01f)
         assertTrue(m.visibleTimeline > EditorLayout.timelineFocus())
         assertEquals(h, m.total, 0.01f)
-        // Na zona padrão nada muda: 200 + 80.
-        assertEquals(200f, EditorLayout.solve(h, SheetContent.Panel, false).sheet, 0.01f)
+        // Na zona padrão do inspetor: 272 + 80.
+        assertEquals(272f, EditorLayout.solve(h, SheetContent.Panel, false).sheet, 0.01f)
     }
 
     @Test fun dividerLowersTheTimelineButPanelsGetTheWholeZone() {
@@ -103,14 +104,15 @@ class EditorLayoutTest {
             assertEquals(EditorLayout.ADD_BAR, bar.sheet, 0.01f)
             assertEquals(h, bar.total, 0.01f)
             // Painel e adicionar abertos precisam da zona inteira (como na 0.3.2): a prévia
-            // devolve o espaço enquanto estão abertos; o painel continua 200 + 80.
+            // devolve o espaço enquanto estão abertos, inclusive a altura extra do inspetor.
             for (content in listOf(SheetContent.Dock, SheetContent.Panel, SheetContent.Curve, SheetContent.Adding)) {
                 val m = EditorLayout.solve(h, content, false, preferred = p)
-                assertEquals("$content preview", h - 368f, m.preview, 0.01f)
-                assertEquals("$content zone", 280f, m.zone, 0.01f)
+                val zone = if (content == SheetContent.Panel) 352f else 280f
+                assertEquals("$content preview", h - 88f - zone, m.preview, 0.01f)
+                assertEquals("$content zone", zone, m.zone, 0.01f)
                 assertEquals(h, m.total, 0.01f)
             }
-            assertEquals(200f, EditorLayout.solve(h, SheetContent.Panel, false, preferred = p).sheet, 0.01f)
+            assertEquals(272f, EditorLayout.solve(h, SheetContent.Panel, false, preferred = p).sheet, 0.01f)
         }
     }
 
@@ -153,10 +155,11 @@ class EditorLayoutTest {
         for (h in phones) for (content in listOf(SheetContent.Dock, SheetContent.Panel, SheetContent.Curve)) {
             val m = EditorLayout.solve(h, content, false)
             assertTrue("$content overlay", m.overlay)
-            assertEquals("$content timeline", 280f, m.timeline, 0.01f)
-            assertEquals("$content sheet", 200f, m.sheet, 0.01f)
+            val height = if (content == SheetContent.Panel) 272f else 200f
+            assertEquals("$content timeline", height + 80f, m.timeline, 0.01f)
+            assertEquals("$content sheet", height, m.sheet, 0.01f)
             assertEquals("$content visible", 80f, m.visibleTimeline, 0.01f)
-            assertEquals("$content obscured", 200f, m.obscuredTimeline, 0.01f)
+            assertEquals("$content obscured", height, m.obscuredTimeline, 0.01f)
             assertEquals(h, m.total, 0.01f)
         }
     }
@@ -200,10 +203,10 @@ class EditorLayoutTest {
         val m = EditorLayout.solve(900f, SheetContent.Panel, false, fontScale = 1.5f)
         // 0.3.4 painéis: a faixa de foco cresce com a régua (+7) e a linha (+12): 99.
         assertEquals(99f, EditorLayout.timelineFocus(1.5f), 0.01f)
-        assertEquals(220f, m.sheet, 0.01f)
-        assertEquals(319f, m.timeline, 0.01f)
+        assertEquals(292f, m.sheet, 0.01f)
+        assertEquals(391f, m.timeline, 0.01f)
         assertEquals(99f, m.visibleTimeline, 0.01f)
-        assertEquals(900f - 42f - 46f - 319f, m.preview, 0.01f)
+        assertEquals(900f - 42f - 46f - 391f, m.preview, 0.01f)
         assertTrue(EditorLayout.dockTile(2f) > EditorLayout.dockTile())
         assertTrue(EditorLayout.DOCK_QUICK >= 48f)
         assertTrue(EditorLayout.DOCK_TILE >= 48f)
@@ -258,8 +261,9 @@ class EditorLayoutTest {
             val label = "$w x $h $content aspect $aspect"
             assertEquals(label, EditorLayout.TOP_BAR, m.topBar, 0.01f)
             assertEquals(label, EditorLayout.TRANSPORT, m.transport, 0.01f)
-            assertEquals(label, h - 368f, m.preview, 0.01f)
-            assertEquals(label, 280f, m.zone, 0.01f)
+            val zone = if (content == SheetContent.Panel) 352f else 280f
+            assertEquals(label, h - 88f - zone, m.preview, 0.01f)
+            assertEquals(label, zone, m.zone, 0.01f)
             assertEquals(label, h, m.total, 0.01f)
         }
     }

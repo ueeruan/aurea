@@ -7,6 +7,7 @@ import com.aurea.aurea.BuildConfig
 import com.aurea.aurea.diagnostics.ProjectGuard
 import com.aurea.aurea.engine.AureaEngine
 import java.io.File
+import java.util.UUID
 
 /**
  * "Exportar arquivo do projeto" / "Importar arquivo do projeto" no Android.
@@ -17,6 +18,7 @@ import java.io.File
 internal object ProjectFile {
     /** Extensão do pacote (um ZIP sem compressão com o `.aurea` e a mídia). */
     const val EXTENSION = "aureaproj"
+    const val BACKUP_EXTENSION = "aureabackup"
 
     /** Códigos de `aurea::Errc` que a tela diferencia. */
     const val ERR_IO = 10
@@ -24,6 +26,7 @@ internal object ProjectFile {
     const val ERR_NEWER = 12
     const val ERR_CHECKSUM = 13
     const val ERR_NOT_PROJECT = 17
+    const val ERR_MISSING_MEDIA = 18
     const val ERR_STORAGE_FULL = 28
 
     data class ExportOutcome(val code: Int, val included: Int, val skipped: Int)
@@ -33,6 +36,21 @@ internal object ProjectFile {
                requireReadable: Boolean = false): ExportOutcome {
         val tmp = try { File.createTempFile("saida-", ".$EXTENSION", context.cacheDir) }
         catch (_: Exception) { return ExportOutcome(ERR_IO, 0, 0) }
+        try {
+            val result = writePackage(context, engine, projectPath, title, includeMedia, tmp, requireReadable)
+            if (result.code != 0) return result
+            val out = context.contentResolver.openOutputStream(target, "wt") ?: return ExportOutcome(ERR_IO, 0, 0)
+            out.use { o -> tmp.inputStream().use { it.copyTo(o, 1 shl 20) } }
+            return result
+        } catch (e: Exception) {
+            return ExportOutcome(ioCode(e), 0, 0)
+        } finally {
+            tmp.delete()
+        }
+    }
+
+    private fun writePackage(context: Context, engine: AureaEngine, projectPath: String, title: String,
+                             includeMedia: Boolean, tmp: File, requireReadable: Boolean): ExportOutcome {
         val opened = mutableListOf<ParcelFileDescriptor>()
         try {
             val media = mutableListOf<String>()
@@ -62,20 +80,67 @@ internal object ProjectFile {
                 ProjectGuard.end(context, ProjectGuard.Stage.EXPORT_FILE)
             }
             if (r.isEmpty() || r[0] != 0) return ExportOutcome(r.getOrElse(0) { ERR_IO }, 0, 0)
-            val out = context.contentResolver.openOutputStream(target, "wt") ?: return ExportOutcome(ERR_IO, 0, 0)
-            out.use { o -> tmp.inputStream().use { it.copyTo(o, 1 shl 20) } }
             return ExportOutcome(0, r.getOrElse(1) { 0 }, r.getOrElse(2) { 0 })
-        } catch (e: java.io.IOException) {
-            return ExportOutcome(if (e.message?.contains("ENOSPC") == true) ERR_STORAGE_FULL else ERR_IO, 0, 0)
-        } catch (_: RuntimeException) {
-            // SecurityException, provedor que lança IllegalArgument/IllegalState...:
-            // um documento ruim é erro na tela, nunca o app fechando.
-            return ExportOutcome(ERR_IO, 0, 0)
         } finally {
             opened.forEach { runCatching { it.close() } }
+        }
+    }
+
+    data class BackupOutcome(
+        val code: Int = 0,
+        val count: Int = 0,
+        val projectTitle: String? = null,
+        val plugins: List<Pair<String, File>> = emptyList(),
+    )
+
+    fun exportBackup(context: Context, engine: AureaEngine, projects: List<Pair<File, String>>, target: Uri): BackupOutcome {
+        if (projects.isEmpty()) return BackupOutcome()
+        val dir = File(context.cacheDir, "project-backup-${UUID.randomUUID()}")
+        if (!dir.mkdir()) return BackupOutcome(ERR_IO)
+        val backup = File(dir, "Aurea.$BACKUP_EXTENSION")
+        val pkg = File(dir, "project.$EXTENSION")
+        var projectTitle: String? = null
+        try {
+            projects.forEachIndexed { index, (file, title) ->
+                projectTitle = title
+                val result = writePackage(context, engine, file.absolutePath, title, true, pkg, requireReadable = true)
+                if (result.code != 0) return BackupOutcome(result.code, projectTitle = title)
+                if (result.skipped != 0) return BackupOutcome(ERR_MISSING_MEDIA, projectTitle = title)
+                val status = engine.appendBackupProject(backup.absolutePath, pkg.absolutePath, index, projects.size)
+                if (status != 0) return BackupOutcome(status, projectTitle = title)
+                pkg.delete()
+            }
+            projectTitle = null
+            val out = context.contentResolver.openOutputStream(target, "wt") ?: return BackupOutcome(ERR_IO)
+            out.use { output -> backup.inputStream().use { it.copyTo(output, 1 shl 20) } }
+            return BackupOutcome(count = projects.size)
+        } catch (e: Exception) {
+            return BackupOutcome(ioCode(e), projectTitle = projectTitle)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    fun restoreBackup(context: Context, engine: AureaEngine, source: Uri, projectsDir: File): BackupOutcome {
+        val tmp = try { File.createTempFile("entrada-", ".$BACKUP_EXTENSION", context.cacheDir) }
+        catch (e: Exception) { return BackupOutcome(ioCode(e)) }
+        try {
+            val input = context.contentResolver.openInputStream(source) ?: return BackupOutcome(ERR_IO)
+            input.use { i -> tmp.outputStream().use { i.copyTo(it, 1 shl 20) } }
+            val result = engine.restoreProjectBackup(tmp.absolutePath, projectsDir.absolutePath,
+                File(projectsDir, "midia").absolutePath, UUID.randomUUID().toString())
+            val code = result.firstOrNull()?.toIntOrNull() ?: ERR_IO
+            if (code != 0) return BackupOutcome(code)
+            val plugins = (2 until result.size - 1 step 2).map { result[it] to File(result[it + 1]) }
+            return BackupOutcome(count = result.getOrNull(1)?.toIntOrNull() ?: 0, plugins = plugins.distinctBy { it.first })
+        } catch (e: Exception) {
+            return BackupOutcome(ioCode(e))
+        } finally {
             tmp.delete()
         }
     }
+
+    private fun ioCode(e: Exception): Int = if (e.message?.contains("ENOSPC") == true) ERR_STORAGE_FULL else ERR_IO
 
     data class ImportOutcome(val code: Int, val path: String = "", val title: String = "", val missing: Int = 0, val plugins: List<Pair<String, File>> = emptyList())
 

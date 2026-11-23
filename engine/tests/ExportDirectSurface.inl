@@ -77,3 +77,21 @@ AUREA_TEST(ExportDirectSurface, MissingSharedTargetKeepsTheNv12PathUnchanged) {
     AUREA_CHECK(exact_clock(r.cap, 6, 30));
     AUREA_CHECK(backend->bufferCopies.load() >= 2u * 6u);
 }
+
+AUREA_TEST(ExportDirectSurface, CompatibilityAttemptsDoNotAllocateDirectTargets) {
+    DirectSurfaceSwitch on(true);
+    SyntheticConfig cfg; cfg.width = 64; cfg.height = 36;
+    for (const u32 attempt : {1u, 2u}) {
+        auto* backend = direct_backend(true);
+        Rig r(cfg, 30, 6, 2, nullptr, backend);
+        AUREA_CHECK(r.ok); if (!r.ok) return;
+        const Outcome out = run_export(r, 36, 30, false, 30, 0, attempt);
+        AUREA_CHECK(out.finished);
+        AUREA_CHECK_EQ(out.p.result, Errc::Ok);
+        AUREA_CHECK(r.cap.video.avoidSurface);
+        AUREA_CHECK(!r.cap.video.directSurface);
+        AUREA_CHECK_EQ(r.cap.video.preferSoftware, attempt == 2);
+        AUREA_CHECK_EQ(backend->sharedTargetsCreated, 0u);
+        AUREA_CHECK(exact_clock(r.cap, 6, 30));
+    }
+}

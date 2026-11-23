@@ -103,6 +103,8 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     put("aurea.color.saturation", EffectMeta(R.string.fx_desc_color_saturation, AllTargets))
     put("aurea.color.tint", EffectMeta(R.string.fx_desc_color_tint, AllTargets))
     put("aurea.color.threshold", EffectMeta(R.string.fx_desc_color_threshold, AllTargets))
+    put("aurea.color.soft_rgb_threshold", EffectMeta(R.string.fx_desc_soft_rgb_threshold, AllTargets))
+    put("aurea.color.solarize", EffectMeta(R.string.fx_desc_solarize, AllTargets))
     put("aurea.color.posterize", EffectMeta(R.string.fx_desc_color_posterize, AllTargets))
     put("aurea.color.palettize", EffectMeta(R.string.fx_desc_color_palettize, AllTargets))
     put("aurea.light.glow_scan", EffectMeta(R.string.fx_desc_light_glow_scan, AllTargets))
@@ -144,6 +146,7 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     put("aurea.color.invert", EffectMeta(R.string.fx_desc_color_invert, AllTargets))
     put("aurea.color.colorama", EffectMeta(R.string.fx_desc_color_colorama, AllTargets))
     put("aurea.blur.unsharp", EffectMeta(R.string.fx_desc_blur_unsharp, AllTargets))
+    put("aurea.blur.median", EffectMeta(R.string.fx_desc_median_filter, AllTargets))
     put("aurea.blur.lens", EffectMeta(
         R.string.fx_desc_blur_lens,
         AllTargets,
@@ -779,12 +782,14 @@ fun pickerEntryName(entry: EffectCatalogEntry): String =
 fun effectGroupLabelRes(group: EffectGroup): Int = when (group) {
     EffectGroup.AureaTools -> R.string.fn_group_aurea_tools
     EffectGroup.ColorLight -> R.string.fxui_group_color_light
+    EffectGroup.HalosReflections -> R.string.fxui_group_halos_reflections
     EffectGroup.Blur -> R.string.fxui_group_blur
     EffectGroup.Distort -> R.string.fxui_group_distort
     EffectGroup.Motion -> R.string.fxui_group_motion
     EffectGroup.Repeat -> R.string.fxui_group_repeat
     EffectGroup.Visibility -> R.string.fxui_group_visibility
     EffectGroup.Stylize -> R.string.fxui_group_stylize
+    EffectGroup.VideoFilm -> R.string.fxui_group_video_film
     EffectGroup.Glitch -> R.string.fxui_group_glitch
     EffectGroup.DrawEdge -> R.string.fxui_group_draw_edge
     EffectGroup.Procedural -> R.string.fxui_group_procedural
@@ -860,6 +865,7 @@ private val TagByCategory: Map<String, String> = buildMap {
 
 /** Grupo da tela → etiqueta (os grupos que dizem o que o efeito é). */
 private val TagByGroup: Map<EffectGroup, String> = mapOf(
+    EffectGroup.HalosReflections to "light", EffectGroup.VideoFilm to "retro",
     EffectGroup.DrawEdge to "outline", EffectGroup.Blur to "blur", EffectGroup.Distort to "distort",
     EffectGroup.ThreeD to "3d", EffectGroup.Motion to "motion", EffectGroup.Repeat to "repeat",
     EffectGroup.Matte to "mask", EffectGroup.Text to "text", EffectGroup.Stylize to "stylize",
@@ -954,13 +960,14 @@ fun effectTags(entry: EffectCatalogEntry): List<String> {
 /** O glifo do ladrilho quando o grupo não tem prévia (Texto, 3D, Áudio). */
 fun effectGroupGlyph(group: EffectGroup): Char = when (group) {
     EffectGroup.AureaTools -> CupertinoGlyph.Wrench
-    EffectGroup.ColorLight -> CupertinoGlyph.Sparkles
+    EffectGroup.ColorLight, EffectGroup.HalosReflections -> CupertinoGlyph.Sparkles
     EffectGroup.Blur -> CupertinoGlyph.DropFill
     EffectGroup.Distort, EffectGroup.Motion -> CupertinoGlyph.Move
     EffectGroup.Repeat -> CupertinoGlyph.SquareGrid2x2
     EffectGroup.Visibility -> CupertinoGlyph.Sparkles
     EffectGroup.Stylize -> CupertinoGlyph.SquareGrid2x2
     EffectGroup.Glitch -> CupertinoGlyph.Bolt
+    EffectGroup.VideoFilm -> CupertinoGlyph.Film
     EffectGroup.DrawEdge -> CupertinoGlyph.PencilOutline
     EffectGroup.Procedural -> CupertinoGlyph.WandStars
     EffectGroup.Matte -> CupertinoGlyph.Scissors

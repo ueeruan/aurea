@@ -3846,6 +3846,22 @@ AUREA_JNI jobjectArray AUREA_FN(nativeExtractModelArchive)(JNIEnv* env, jclass, 
     return string_array(env, files);
 }
 
+AUREA_JNI jint AUREA_FN(nativeAppendBackupProject)(JNIEnv* env, jclass, jstring backup, jstring project,
+                                                  jint index, jint count) {
+    return static_cast<jint>(package::append_backup_project(to_string(env, backup), to_string(env, project),
+                                                            static_cast<u32>(index), static_cast<u32>(count)).code());
+}
+
+AUREA_JNI jobjectArray AUREA_FN(nativeRestoreProjectBackup)(JNIEnv* env, jclass, jstring backup, jstring projects,
+                                                           jstring media, jstring batch) {
+    package::BackupRestoreResult result;
+    const Status s = package::restore_backup(to_string(env, backup), to_string(env, projects), to_string(env, media),
+                                              to_string(env, batch), result);
+    std::vector<std::string> values{std::to_string(static_cast<int>(s.code())), std::to_string(result.projects)};
+    for (const auto& plugin : result.plugins) { values.push_back(plugin.id); values.push_back(plugin.directory); }
+    return string_array(env, values);
+}
+
 /// Legendas: palavras (texto + [início, fim] em segundos da mídia) e opções.
 /// ints = modo, palavras, caracteres, linhas, estilo, destaque, maiúsculas,
 /// quebrar nas pausas, tirar vícios; floats = pausa, y, tamanho, cor (rgb).

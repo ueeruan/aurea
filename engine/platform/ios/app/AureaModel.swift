@@ -8423,11 +8423,30 @@ extension AureaModel {
     static func projectFileError(_ code: Int) -> String {
         switch code {
         case 17: return AureaText.t("project_file_err_not_project")
+        case 18: return AureaText.t("project_backup_missing")
         case 12: return AureaText.t("project_file_err_newer")
         case 11, 13: return AureaText.t("project_file_err_corrupt")
         case 28: return AureaText.t("msg_sem_espaco_no_aparelho_libere_espaco")
         default: return AureaText.t("project_file_err_unreadable")
         }
+    }
+
+    private nonisolated static func writePortableProject(_ engine: AureaEngine, path: String, to output: URL,
+                                                          title: String, version: String, includeMedia: Bool,
+                                                          requireComplete: Bool) -> (code: Int, skipped: Int) {
+        var media: [String] = []
+        if includeMedia {
+            if let refs = engine.projectFileMedia(path) {
+                for i in stride(from: 0, to: max(0, refs.count - 3), by: 4) {
+                    let url = refs[i + 1]
+                    let resolved = URL(string: url).flatMap { $0.isFileURL ? $0.path : nil } ?? url
+                    media += [refs[i], resolved, refs[i + 2]]
+                }
+            } else if requireComplete { return (11, 0) }
+        }
+        let plugins = includeMedia ? engine.projectFilePlugins(path) ?? [] : []
+        let result = AureaEngine.exportProjectPackage(path, to: output.path, title: title, appVersion: version, media: media, plugins: plugins)
+        return (result.first?.intValue ?? 10, result.count > 2 ? result[2].intValue : 0)
     }
 
     /// "Exportar arquivo do projeto": grava o pacote numa pasta temporária e
@@ -8450,42 +8469,21 @@ extension AureaModel {
         let out = directory.appendingPathComponent((safe.isEmpty ? "Aurea" : safe) + ".aureaproj")
         toast = AureaText.t("project_file_exporting")
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            var code = 0, skipped = 0
-            var media: [String] = []
-            if includeMedia {
-                if let refs = importer.projectFileMedia(path) {
-                    var i = 0
-                    while i + 3 < refs.count {
-                        let resolved = refs[i + 1].hasPrefix("file://") ? String(refs[i + 1].dropFirst(7)) : refs[i + 1]
-                        media += [refs[i], resolved, refs[i + 2]]
-                        i += 4
-                    }
-                } else if requireComplete { code = 11 }
-                // Sem lista de mídia o projeto não abre: exporta só o arquivo, em modo de
-                // resgate (ProjectPackage). Publicar exige o projeto inteiro.
-            }
-            if code == 0 {
-                try? FileManager.default.removeItem(at: directory)
-                try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                // Os plugins vão no arquivo completo, como a mídia.
-                let plugins = includeMedia ? importer.projectFilePlugins(path) ?? [] : []
-                let r = AureaEngine.exportProjectPackage(path, to: out.path, title: title, appVersion: version, media: media, plugins: plugins)
-                code = r.first?.intValue ?? 10
-                skipped = r.count > 2 ? r[2].intValue : 0
-            }
-            let finalCode = code, finalSkipped = skipped
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let (code, skipped) = AureaModel.writePortableProject(importer, path: path, to: out, title: title, version: version,
+                                                                 includeMedia: includeMedia, requireComplete: requireComplete)
             // Falhou (ou publicar exigia o projeto inteiro): o pacote pela metade é só
             // desta operação e sai agora, com a pasta dele.
             if code != 0 || (requireComplete && skipped > 0) { try? FileManager.default.removeItem(at: directory) }
             DispatchQueue.main.async {
                 guard let self else { return }
-                if finalCode != 0 || (requireComplete && finalSkipped > 0) {
-                    let reason = finalCode != 0 ? AureaModel.projectFileError(finalCode) : AureaText.t("project_file_err_unreadable")
+                if code != 0 || (requireComplete && skipped > 0) {
+                    let reason = code != 0 ? AureaModel.projectFileError(code) : AureaText.t("project_file_err_unreadable")
                     self.toast = AureaText.t("project_file_export_failed", reason)
                     done(nil)
                     return
                 }
-                self.toast = finalSkipped > 0 ? AureaText.t("project_file_exported_skipped", finalSkipped) : AureaText.t("project_file_exported")
+                self.toast = skipped > 0 ? AureaText.t("project_file_exported_skipped", skipped) : AureaText.t("project_file_exported")
                 done(out)
             }
         }
@@ -8527,6 +8525,96 @@ extension AureaModel {
                 else if missing > 0 { self.toast = AureaText.t("project_file_imported_missing", title, missing) }
                 else { self.toast = AureaText.t("project_file_imported", title) }
                 done()
+            }
+        }
+    }
+
+    func exportProjectBackup(done: @escaping (URL?) -> Void) {
+        guard canChangeProject() else { return }
+        if projectURL != nil && !saveProject(writeThumbnail: false) {
+            toast = AureaText.t("project_file_err_unreadable")
+            return
+        }
+        importingMedia = true
+        operationMessage = AureaText.t("project_backup_saving")
+        toast = operationMessage
+        let engine = self.engine
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArquivoProjeto")
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let fm = FileManager.default
+            let projects = scanHomeProjects()
+            let output = directory.appendingPathComponent("Aurea.aureabackup")
+            let package = directory.appendingPathComponent("project.aureaproj")
+            var status = 0
+            var failedTitle: String?
+            if !projects.isEmpty {
+                do { try fm.createDirectory(at: directory, withIntermediateDirectories: true) }
+                catch { status = 10 }
+            }
+            if status == 0 {
+                for (index, entry) in projects.enumerated() {
+                    let result = AureaModel.writePortableProject(engine, path: entry.file.url.path, to: package, title: entry.title,
+                                                                 version: version, includeMedia: true, requireComplete: true)
+                    status = result.code
+                    if status == 0 && result.skipped != 0 { status = 18 }
+                    if status == 0 { status = AureaEngine.appendBackupProject(package.path, to: output.path, index: index, count: projects.count) }
+                    if status != 0 { failedTitle = entry.title; break }
+                    try? fm.removeItem(at: package)
+                }
+            }
+            let code = status, title = failedTitle, count = projects.count
+            if code != 0 { try? fm.removeItem(at: directory) }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.importingMedia = false
+                if code != 0 {
+                    let reason = Self.projectFileError(code)
+                    self.toast = title.map { AureaText.t("project_backup_project_failed", $0, reason) } ?? reason
+                } else if count == 0 {
+                    self.toast = AureaText.t("project_backup_empty")
+                } else {
+                    self.toast = AureaText.t("project_backup_saved", count)
+                    done(output)
+                }
+            }
+        }
+    }
+
+    func restoreProjectBackup(_ source: URL, done: @escaping () -> Void) {
+        guard canChangeProject() else { return }
+        importingMedia = true
+        operationMessage = AureaText.t("project_backup_restoring")
+        toast = operationMessage
+        let scoped = source.startAccessingSecurityScopedResource()
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("entrada-\(UUID().uuidString).aureabackup")
+        let projects = AureaPaths.documents.path
+        let media = AureaPaths.media.appendingPathComponent("Projetos", isDirectory: true).path
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            defer { if scoped { source.stopAccessingSecurityScopedResource() } }
+            var result = ["10", "0"]
+            do {
+                try AureaPaths.copyImport(source, to: temporary)
+                result = AureaEngine.restoreProjectBackup(temporary.path, projects: projects, media: media, batch: UUID().uuidString)
+            } catch {}
+            try? FileManager.default.removeItem(at: temporary)
+            let code = Int(result.first ?? "10") ?? 10
+            let count = Int(result.dropFirst().first ?? "0") ?? 0
+            var seen = Set<String>()
+            let plugins = stride(from: 2, to: max(2, result.count - 1), by: 2).compactMap { index -> (id: String, file: String)? in
+                seen.insert(result[index]).inserted ? (result[index], result[index + 1]) : nil
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.importingMedia = false
+                if code == 0 {
+                    PluginRuntime.shared.offerEmbedded(plugins)
+                    self.toast = AureaText.t("project_backup_restored", count)
+                    done()
+                } else {
+                    self.toast = code == 17 ? AureaText.t("project_backup_invalid") : Self.projectFileError(code)
+                }
             }
         }
     }

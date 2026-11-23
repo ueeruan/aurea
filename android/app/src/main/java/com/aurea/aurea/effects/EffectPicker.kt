@@ -3,19 +3,10 @@ package com.aurea.aurea.effects
 import android.content.Context
 import android.content.res.Configuration
 import android.content.res.Resources
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.core.FastOutLinearInEasing
-import androidx.compose.animation.core.LinearOutSlowInEasing
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.LocalOverscrollFactory
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -54,6 +45,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -62,6 +54,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.derivedStateOf
@@ -83,7 +76,6 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
@@ -199,8 +191,14 @@ internal fun EffectAddSheet(
     inline: Boolean = false,
 ) {
     val nav = remember { BrowserNav() }
+    val content: @Composable () -> Unit = {
+        // The stretch left over at either end of a fling can consume the next tap.
+        CompositionLocalProvider(LocalOverscrollFactory provides null) {
+            EffectBrowserBody(store, layerHasAudio, nav, onPick, onTool, onPickVariant, onDismiss)
+        }
+    }
     if (inline) {
-        SheetWidthScope { EffectBrowserBody(store, layerHasAudio, nav, onPick, onTool, onPickVariant, onDismiss) }
+        SheetWidthScope(content)
         return
     }
     val maxSize = LocalEffectSheetMaxSize.current
@@ -209,18 +207,18 @@ internal fun EffectAddSheet(
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
         if (maxSize == null) {
-            EffectBrowserBody(store, layerHasAudio, nav, onPick, onTool, onPickVariant, onDismiss)
+            content()
         } else {
             // Aurea PC: um cartão no meio da janela, não a tela inteira; clicar fora fecha.
             Box(
-                Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { nav.back(onDismiss) } },
+                Modifier.fillMaxSize().pointerInput(onDismiss) { detectTapGestures { nav.back(onDismiss) } },
                 contentAlignment = Alignment.Center,
             ) {
                 Box(
                     Modifier.sizeIn(maxWidth = maxSize.width, maxHeight = maxSize.height).fillMaxSize()
                         .clip(RoundedCornerShape(12.dp)).pointerInput(Unit) { detectTapGestures { } },
                 ) {
-                    SheetWidthScope { EffectBrowserBody(store, layerHasAudio, nav, onPick, onTool, onPickVariant, onDismiss) }
+                    SheetWidthScope(content)
                 }
             }
         }
@@ -298,10 +296,16 @@ private fun EffectBrowserBody(
         if (safeMode) emptyList() else pluginCatalog.filter { it.typeId in available }
     }
     val locale = LocalConfiguration.current.locales[0]
-    val names = browserEntries.associate { it.typeId to pickerEntryName(it) }
+    val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    val english = remember(context, configuration) { englishResources(context) }
     // Dentro da categoria, ordem ALFABÉTICA pelo nome mostrado (como a referência).
-    val groups = remember(browserEntries, names, locale) {
-        groupEntries(browserEntries).map { (g, list) -> g to sortedByName(list, locale) { names[it.typeId] ?: it.name } }
+    val groups = remember(browserEntries, locale, toolNames, english) {
+        groupEntries(browserEntries).map { (group, entries) ->
+            group to sortedByName(entries, locale) { entry ->
+                effectToolOf(entry.typeId)?.let(toolNames::get) ?: englishEffectName(entry.typeId, entry.name, english)
+            }
+        }
     }
     val presetCount: (Int) -> Int = remember(store) { { t: Int -> if (effectToolOf(t) != null) 0 else store.effectPresets(t).size } }
     val recents = remember(prefs.recentRefs, browserEntries) { recentItems(prefs.recentRefs, browserEntries, presetCount) }
@@ -329,7 +333,6 @@ private fun EffectBrowserBody(
     val homeState = rememberLazyListState()
     val gridState = rememberLazyGridState()
     val previewsOn = prefs.previewsEnabled
-    val shift = with(LocalDensity.current) { 100.dp.roundToPx() } * (if (LocalLayoutDirection.current == LayoutDirection.Rtl) -1 else 1)
 
     Box(Modifier.fillMaxSize().background(AureaColors.FxListSurface)) {
         Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
@@ -357,33 +360,15 @@ private fun EffectBrowserBody(
                         QuickBand(store, pages, perPage, pluginFavorites.isEmpty(), previewsOn, add, openDetail)
                     }),
                 )
-            } else AnimatedContent(
-                targetState = openId,
-                // Anterior/próxima trocam a categoria NO LUGAR: só início ↔ categoria anima.
-                contentKey = { it != null },
-                transitionSpec = {
-                    if (targetState != null) {
-                        (slideInHorizontally(tween(100, easing = LinearOutSlowInEasing)) { shift } + fadeIn(tween(25)))
-                            .togetherWith(ExitTransition.None)
-                    } else {
-                        EnterTransition.None.togetherWith(
-                            slideOutHorizontally(tween(100, easing = FastOutLinearInEasing)) { shift } +
-                                fadeOut(tween(25, delayMillis = 75)),
-                        ).apply { targetContentZIndex = -1f }
-                    }
-                },
-                label = "fx-categoria",
-                modifier = Modifier.fillMaxWidth().weight(1f),
-            ) { id ->
-                val shown = id?.let { g -> groups.firstOrNull { it.first.id == g } }
-                if (shown == null) {
+            } else Box(Modifier.fillMaxWidth().weight(1f)) {
+                if (open == null) {
                     BrowserHome(
                         store, homeState, recommended, recents, favorites, groups, previewsOn,
                         onAdd = add, onDetail = openDetail, onGroup = { nav.groupId = it.id },
                     )
                 } else {
-                    val (previous, next) = adjacentGroups(groups.map { it.first }, shown.first)
-                    GroupGrid(store, gridState, shown.first, shown.second, previous, next, previewsOn, openDetail) { nav.groupId = it.id }
+                    val (previous, next) = adjacentGroups(groups.map { it.first }, open.first)
+                    GroupGrid(store, gridState, open.first, open.second, previous, next, previewsOn, openDetail) { nav.groupId = it.id }
                 }
             }
         }
@@ -429,8 +414,7 @@ private fun BrowserTabs(plugins: Boolean, onSelect: (Boolean) -> Unit) {
                 Modifier.weight(1f).heightIn(min = 44.dp).clip(RoundedCornerShape(12.dp))
                     .background(if (active) AureaColors.Accent.copy(alpha = .15f) else AureaColors.FxLowSurface)
                     .testTag(if (isPluginTab) "effects.plugins" else "effects.tab.catalog")
-                    .semantics { selected = active; role = Role.Tab }
-                    .tocavel(shrink = 1f, role = null) { onSelect(isPluginTab) },
+                    .selectable(selected = active, role = Role.Tab) { onSelect(isPluginTab) },
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -522,16 +506,18 @@ private fun BrowserHome(
     val rows = remember(recommended.isNotEmpty(), pages.isNotEmpty(), groups) {
         browserHomeRows(recommended.isNotEmpty(), pages.isNotEmpty(), groups.map { it.first })
     }
-    LazyColumn(state = state, modifier = Modifier.fillMaxSize().testTag("effects.home")) {
-        items(rows, key = { it.key }) { homeRow ->
-            when (homeRow) {
-                BrowserHomeRow.Recommended -> RecommendedBand(store, recommended, previewsOn, onDetail)
-                BrowserHomeRow.Quick -> QuickBand(store, pages, perPage, hint, previewsOn, onAdd, onDetail)
-                BrowserHomeRow.CategoriesHeader -> Text(
-                    categoriesLabel, style = AureaType.of(15f, FontWeight.SemiBold, color = AureaColors.Text),
-                    modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp).semantics { heading() },
-                )
-                is BrowserHomeRow.Categories -> CategoryRow(store, homeRow.groups, byGroup, previewsOn, onGroup)
+    CompositionLocalProvider(LocalFxThumbnailWork provides !state.isScrollInProgress) {
+        LazyColumn(state = state, modifier = Modifier.fillMaxSize().testTag("effects.home")) {
+            items(rows, key = { it.key }) { homeRow ->
+                when (homeRow) {
+                    BrowserHomeRow.Recommended -> RecommendedBand(store, recommended, previewsOn, onDetail)
+                    BrowserHomeRow.Quick -> QuickBand(store, pages, perPage, hint, previewsOn, onAdd, onDetail)
+                    BrowserHomeRow.CategoriesHeader -> Text(
+                        categoriesLabel, style = AureaType.of(15f, FontWeight.SemiBold, color = AureaColors.Text),
+                        modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp).semantics { heading() },
+                    )
+                    is BrowserHomeRow.Categories -> CategoryRow(store, homeRow.groups, byGroup, previewsOn, onGroup)
+                }
             }
         }
     }
@@ -787,12 +773,12 @@ private fun GroupTile(
             .clip(RoundedCornerShape(14.dp))
             .background(AureaColors.FxPanel)
             .testTag("effects.category." + group.id)
-            .semantics { contentDescription = description; role = Role.Button }
-            .tocavel(shrink = 1f, role = null, onClick = onClick),
+            .semantics { contentDescription = description }
+            .clickable(role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Box(Modifier.fillMaxSize().graphicsLayer { alpha = 0.7f }) {
-            if (banner != null) EffectAfterPreview(banner, store.effectPreviews, previewsOn)
+            if (banner != null) EffectAfterPreview(banner, store.effectPreviews, previewsOn, generate = false)
             else EffectToolPlate(effectGroupGlyph(group), alpha = 0.35f)
         }
         Box(Modifier.fillMaxSize().background(AureaColors.FxPanel.copy(alpha = 0.5f)))
@@ -835,7 +821,7 @@ private fun GroupGrid(
                 EmptyLine(stringResource(R.string.effect_empty_category))
             }
             itemsIndexed(entries, key = { _, e -> effectItemKey(e.typeId) }) { i, e ->
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                CompositionLocalProvider(LocalFxThumbnailWork provides !state.isScrollInProgress) {
                     GridCard(e, store.effectPreviews, previewsOn) { onDetail(entries, i) }
                 }
             }
@@ -854,10 +840,10 @@ private fun GridCard(entry: EffectCatalogEntry, previews: EffectPreviewStore?, p
     val name = pickerEntryName(entry)
     Column(
         Modifier
-            .width(88.dp)
+            .fillMaxWidth()
             .testTag("effects.card." + effectCardId(entry.typeId))
             .semantics { contentDescription = name }
-            .tocavel(shrink = 0.96f, onClick = onClick)
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(bottom = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {

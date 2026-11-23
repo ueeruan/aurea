@@ -23,8 +23,11 @@
 //
 //  A chave privada é o secret AUREA_CONFIG_SIGNING_KEY (PKCS8 em base64, gerada
 //  por scripts/gen-config-key.mjs). Os apps embutem só a pública (SPKI).
-//  Sem nada guardado: minVersionCode 0, hyper "free", validade de 7 dias. O
-//  `version` da consulta não muda a resposta (fica para diagnóstico).
+//  Sem nada guardado: minVersionCode 0, hyper "free", validade de 7 dias.
+//  `version` só muda a resposta para as BETAS do Android (APK direto,
+//  com.aurea.aurea, versionCode <= ULTIMA_BETA_ANDROID): elas nunca recebem a
+//  atualização obrigatória, que mandaria para o app da Play (com.aurea.editor,
+//  outro app) e deixaria os projetos para trás.
 // =============================================================================
 
 import { json, lerJson, dentroDoLimite } from "./contas.js";
@@ -39,6 +42,14 @@ const MENSAGEM_MAX = 500;
 const URL_MAX = 500;
 const SEGREDO_MIN = 16;
 const VERSAO_MAX = 2_100_000_000;
+/** 1.0.0 (2220) foi o último APK direto; a Play começou na 1.0.1 (2221). */
+export const ULTIMA_BETA_ANDROID = 2220;
+
+/** Beta Android: o `version` da consulta é um versionCode de APK direto. */
+export function ehBetaAndroid(plataforma, versao) {
+  if (plataforma !== "android" || versao === null || !/^\d{1,10}$/.test(versao)) return false;
+  return Number(versao) <= ULTIMA_BETA_ANDROID;
+}
 
 const ip = (req) => req.headers.get("cf-connecting-ip") ?? "local";
 const chaveKv = (plataforma) => `appconfig:${plataforma}`;
@@ -140,7 +151,9 @@ async function consultar(req, env, url) {
   const chave = await chavePrivada(env);
   // Sem chave não há config: o app segue com a última válida (nunca bloqueia por isto).
   if (!chave) return json({ error: "config_indisponivel" }, 503);
-  const payload = montarPayload(plataforma, await lerGuardado(env, plataforma));
+  let guardado = await lerGuardado(env, plataforma);
+  if (ehBetaAndroid(plataforma, url.searchParams.get("version"))) guardado = { ...guardado, minVersionCode: 0 };
+  const payload = montarPayload(plataforma, guardado);
   return json({ payload, signature: await assinar(chave, payload) });
 }
 

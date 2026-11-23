@@ -197,7 +197,10 @@ def main() -> int:
         "P0-2 ⋯ inativo com os controles abertos": "moreEnabled: openId == nil" in view,
         "P0-2 só o 1º efeito de camada vazia abre": "FxParamMath.opensAfterAdd(previousCount: seen.count" in view,
         "P0-2 decorações fora da lista": "fxShownInEffectList($0)" in view and "!e.isDecoration" in human,
-        "P0-2 toque longo de 0,4 s reordena": "LongPressGesture(minimumDuration: 0.4" in view,
+        "P0-2 toque longo de 0,4 s reordena": all(token in view for token in (
+            "UILongPressGestureRecognizer(target: self, action: #selector(pressed(_:)))",
+            "newPress.minimumPressDuration = 0.4", "found.addGestureRecognizer(newPress)",
+        )),
         "P0-3 abertura de 200 ms acelera-desacelera": "timingCurve(0.42, 0, 0.58, 1, duration: Double(FxParamMath.OPEN_MS)" in view,
         "P0-3 recorte + deslocamento": ".mask(alignment: .top)" in view and "overlayFrom * (1 - overlayProgress)" in view,
         "P0-4 controles da referência": all(n in design for n in ("struct FxParamLabel", "struct FxValueBox",

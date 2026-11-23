@@ -120,6 +120,70 @@ public:
     }
 };
 
+class SinusoidalScanlines final : public Effect {
+public:
+    explicit SinusoidalScanlines(bool monochrome) noexcept : monochrome_(monochrome) {}
+
+    enum : u32 {
+        kFrequency, kSharpness, kAngle, kPhase, kBrightness, kOffset, kGamma,
+        kSaturation, kRedPhase, kGreenPhase, kBluePhase, kTint,
+    };
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo color{"aurea.stylize.sinusoidal_scanlines", "Varredura senoidal",
+                                      "Estilizar", EffectClass::Neighborhood};
+        static const EffectInfo monochrome{"aurea.stylize.sinusoidal_scanlines_mono", "Varredura senoidal P&B",
+                                           "Estilizar", EffectClass::Neighborhood};
+        return monochrome_ ? monochrome : color;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_float("frequency", "Frequência", 50.0f, 1.0f, 1000.0f, kParamAnimatable);
+        p.add_float("sharpness", "Nitidez", 1.0f, 0.0f, 8.0f, kParamAnimatable);
+        p.add_angle("angle", "Ângulo", 0.0f);
+        p.add_float("phase", "Fase", 0.0f, -1.0f, 1.0f, kParamAnimatable);
+        p.typed_range(-100.0f, 100.0f);
+        p.add_float("brightness", "Brilho", 1.0f, 0.0f, 8.0f, kParamAnimatable);
+        p.add_float("offset", "Deslocamento tonal", 0.0f, -2.0f, 2.0f, kParamAnimatable);
+        p.add_float("gamma", "Gama", 1.5f, 0.1f, 10.0f, kParamAnimatable);
+        if (!monochrome_) {
+            p.add_float("saturation", "Saturação", 1.0f, 0.0f, 8.0f, kParamAnimatable);
+            p.add_float("red_phase", "Fase do vermelho", 0.0f, -1.0f, 1.0f, kParamAnimatable);
+            p.add_float("green_phase", "Fase do verde", 0.0f, -1.0f, 1.0f, kParamAnimatable);
+            p.add_float("blue_phase", "Fase do azul", 0.0f, -1.0f, 1.0f, kParamAnimatable);
+            p.add_color("tint", "Cor", Vec4{1, 1, 1, 1});
+        }
+    }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_scanlines_frag, work));
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
+                 LayerImage& out) const override {
+        EffectUniforms u = base_uniforms(input);
+        auto read = [&](u32 index, f32 fallback, f32 lo, f32 hi) {
+            return std::clamp(finite_or(e.f(index), fallback), lo, hi);
+        };
+        const f32 angle = std::remainder(finite_or(e.f(kAngle), 0.0f), 360.0f) * kDeg2Rad;
+        const f32 phase = std::remainder(finite_or(e.f(kPhase), 0.0f), 1.0f);
+        u.p0 = {read(kFrequency, 50.0f, 1.0f, 1000.0f), read(kSharpness, 1.0f, 0.0f, 8.0f), angle, phase};
+        u.p1.w = read(kBrightness, 1.0f, 0.0f, 8.0f);
+        u.p2 = {read(kOffset, 0.0f, -2.0f, 2.0f), read(kGamma, 1.5f, 0.1f, 10.0f), 0.0f,
+                monochrome_ ? 2.0f : 1.0f};
+        u.p3.x = input.region.h / std::max(1e-6f, input.region.w);
+        u.color = Vec4{1, 1, 1, 1};
+        if (!monochrome_) {
+            u.p1.x = std::remainder(finite_or(e.f(kRedPhase), 0.0f), 1.0f);
+            u.p1.y = std::remainder(finite_or(e.f(kGreenPhase), 0.0f), 1.0f);
+            u.p1.z = std::remainder(finite_or(e.f(kBluePhase), 0.0f), 1.0f);
+            u.p2.z = read(kSaturation, 1.0f, 0.0f, 8.0f);
+            u.color = e.color(kTint);
+        }
+        return single_pass(ctx, ShaderId::effects_scanlines_frag, input, u, "varredura-senoidal", out);
+    }
+
+private:
+    bool monochrome_;
+};
+
 // -----------------------------------------------------------------------------
 // Grão
 // -----------------------------------------------------------------------------
@@ -161,6 +225,180 @@ public:
         u.p3 = Vec4{static_cast<f32>(e.localTime.value), 0, 0, 0};
         return single_pass(ctx, ShaderId::effects_grain_frag, input, u, "grao", out);
     }
+};
+
+class PhotographicGrain final : public Effect {
+public:
+    enum : u32 {
+        kColorStrength, kColorFrequency, kColorOctaves, kMonoStrength, kMonoFrequency, kMonoOctaves,
+        kRedFrequency, kGreenFrequency, kBlueFrequency, kSeed, kJitterFrames, kTint,
+    };
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{"aurea.stylize.photographic_grain", "Grão fotográfico",
+                                  "Estilizar", EffectClass::Neighborhood};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_float("color_strength", "Intensidade do grão de cor", 0.1f, 0.0f, 2.0f, kParamAnimatable);
+        p.add_float("color_frequency", "Frequência do grão de cor", 100.0f, 0.1f, 1000.0f, kParamAnimatable);
+        p.add_int("color_octaves", "Oitavas de cor", 1, 1, 10);
+        p.add_float("mono_strength", "Intensidade do grão P&B", 0.0f, 0.0f, 2.0f, kParamAnimatable);
+        p.add_float("mono_frequency", "Frequência do grão P&B", 100.0f, 0.1f, 1000.0f, kParamAnimatable);
+        p.add_int("mono_octaves", "Oitavas P&B", 1, 1, 10);
+        p.add_float("red_frequency", "Frequência do vermelho", 1.0f, 0.01f, 8.0f, kParamAnimatable);
+        p.add_float("green_frequency", "Frequência do verde", 1.0f, 0.01f, 8.0f, kParamAnimatable);
+        p.add_float("blue_frequency", "Frequência do azul", 1.0f, 0.01f, 8.0f, kParamAnimatable);
+        p.add_float("seed", "Semente", 0.123f, 0.0f, 1024.0f, kParamAnimatable);
+        p.add_int("jitter_frames", "Intervalo entre quadros", 1, 0, 300);
+        p.add_color("tint", "Cor do grão", Vec4{1, 1, 1, 1});
+    }
+    bool is_identity(const EffectEval& e) const noexcept override {
+        return e.f(kColorStrength) <= 0.0f && e.f(kMonoStrength) <= 0.0f;
+    }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_grain_frag, work));
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
+                 LayerImage& out) const override {
+        EffectUniforms u = base_uniforms(input);
+        auto read = [&](u32 index, f32 fallback, f32 lo, f32 hi) {
+            return std::clamp(finite_or(e.f(index), fallback), lo, hi);
+        };
+        const u32 seed = static_cast<u32>(std::round(read(kSeed, 0.123f, 0.0f, 1024.0f) * 1000000.0f));
+        const u32 interval = static_cast<u32>(read(kJitterFrames, 1.0f, 0.0f, 300.0f));
+        const u64 frame = interval == 0 ? 0u : static_cast<u64>(std::max<i64>(0, e.localTime.value)) / interval;
+        // Split the uint32 in halves before passing through float uniforms.
+        const u32 field = seed ^ (static_cast<u32>(frame) * 0x9e3779b9u)
+                               ^ (static_cast<u32>(frame >> 32) * 0x85ebca6bu);
+        u.p0 = {read(kColorStrength, 0.1f, 0.0f, 2.0f), read(kColorFrequency, 100.0f, 0.1f, 1000.0f),
+                read(kColorOctaves, 1.0f, 1.0f, 10.0f), input.region.h / std::max(input.region.w, 1e-6f)};
+        u.p1 = {read(kMonoStrength, 0.0f, 0.0f, 2.0f), read(kMonoFrequency, 100.0f, 0.1f, 1000.0f),
+                read(kMonoOctaves, 1.0f, 1.0f, 10.0f), 0.0f};
+        u.p2 = {read(kRedFrequency, 1.0f, 0.01f, 8.0f), read(kGreenFrequency, 1.0f, 0.01f, 8.0f),
+                read(kBlueFrequency, 1.0f, 0.01f, 8.0f), 1.0f};
+        u.p3 = {static_cast<f32>(field & 0xffffu), static_cast<f32>(field >> 16), 0.0f, 0.0f};
+        u.color = e.color(kTint);
+        return single_pass(ctx, ShaderId::effects_grain_frag, input, u, "grao-fotografico", out);
+    }
+};
+
+class FilmProfileGrain final : public Effect {
+public:
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo info{"aurea.stylize.film_profile_grain", "Grão de película",
+                                     "Estilizar", EffectClass::Neighborhood};
+        return info;
+    }
+
+    void declare_parameters(ParameterRegistry& p) const override {
+        static const char* const profiles[] = {"Digital", "Negativo fino", "16 mm", "Prata P&B"};
+        p.add_enum("profile", "Perfil de grão", profiles, 4, 0);
+        p.add_float("amount", "Intensidade", 100.0f, 0.0f, 200.0f, kPercent, "%");
+        p.add_float("size", "Tamanho do grão", 1.0f, 0.5f, 12.0f, kParamAnimatable | kParamPixels, "px");
+        p.add_float("softness", "Suavidade", 100.0f, 0.0f, 200.0f, kPercent, "%");
+        p.add_float("shadow_strength", "Grão nas sombras", 37.0f, 0.0f, 200.0f, kPercent, "%");
+        p.add_float("midtone_strength", "Grão nos meios-tons", 100.0f, 0.0f, 200.0f, kPercent, "%");
+        p.add_float("highlight_strength", "Grão nas luzes", 0.0f, 0.0f, 200.0f, kPercent, "%");
+        p.add_float("red_strength", "Intensidade do vermelho", 100.0f, 0.0f, 200.0f, kPercent, "%");
+        p.add_float("green_strength", "Intensidade do verde", 100.0f, 0.0f, 200.0f, kPercent, "%");
+        p.add_float("blue_strength", "Intensidade do azul", 100.0f, 0.0f, 200.0f, kPercent, "%");
+        p.add_float("red_midpoint", "Meio-tom do vermelho", 27.0f, 1.0f, 99.0f, kPercent, "%");
+        p.add_float("green_midpoint", "Meio-tom do verde", 30.0f, 1.0f, 99.0f, kPercent, "%");
+        p.add_float("blue_midpoint", "Meio-tom do azul", 31.0f, 1.0f, 99.0f, kPercent, "%");
+        p.add_float("red_softness", "Suavidade do vermelho", 100.0f, 0.0f, 200.0f, kPercent, "%");
+        p.add_float("green_softness", "Suavidade do verde", 100.0f, 0.0f, 200.0f, kPercent, "%");
+        p.add_float("blue_softness", "Suavidade do azul", 100.0f, 0.0f, 200.0f, kPercent, "%");
+        p.add_bool("monochrome", "Monocromático", false);
+        p.add_int("seed", "Semente", 123, 0, 65535);
+        p.add_bool("animate", "Grão animado", true);
+        p.add_layer_ref("matte", "Camada de máscara");
+        p.add_section_range("tones", "Resposta tonal", kDarks, kLights, kInvalidIndex, false);
+        p.add_section_range("channels", "Canais de cor", kRed, kBlueSoftness, kInvalidIndex, false);
+    }
+
+    i32 input_layer_param() const noexcept override { return kMatte; }
+
+    bool is_identity(const EffectEval& e) const noexcept override {
+        return !(e.f(kAmount) > 0.0f)
+            || (e.f(kDarks) <= 0.0f && e.f(kMids) <= 0.0f && e.f(kLights) <= 0.0f)
+            || (e.f(kRed) <= 0.0f && e.f(kGreen) <= 0.0f && e.f(kBlue) <= 0.0f);
+    }
+
+    bool demo_values(EffectInstance&, std::vector<ParamValue>& values) const noexcept override {
+        values[kProfile] = ParamValue::scalar(2.0f);
+        values[kAmount] = ParamValue::scalar(175.0f);
+        return true;
+    }
+
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_film_profile_grain_frag, work));
+    }
+
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
+                 LayerImage& out) const override {
+        auto number = [&](u32 index, f32 fallback, f32 lower, f32 upper) {
+            return std::clamp(finite_or(e.f(index), fallback), lower, upper);
+        };
+        auto percent = [&](u32 index, f32 fallback) {
+            return number(index, fallback, 0.0f, 200.0f) * 0.01f;
+        };
+        const Profile& profile = profiles_[std::min(e.e(kProfile), 3u)];
+        const u32 seed = static_cast<u32>(std::lround(number(kSeed, 123.0f, 0.0f, 65535.0f)));
+        const u64 frame = e.b(kAnimate) ? static_cast<u64>(e.localTime.value) : 0u;
+        const u32 field = seed ^ (static_cast<u32>(frame) * 0x9e3779b9u)
+                              ^ (static_cast<u32>(frame >> 32) * 0x85ebca6bu);
+        const u64 matteRef = e.value(kMatte).ref;
+        const LayerImage* matte = ctx.layer_input(matteRef);
+        if (matteRef && !matte) { out = input; return OkStatus; }
+        const f32 strength = percent(kAmount, 100.0f) * profile.strength;
+        const f32 softness = percent(kSoftness, 100.0f) * profile.softness;
+        const bool mono = e.b(kMono) || profile.mono;
+        Uniforms u{};
+        u.region = {input.region.x, input.region.y, input.region.w, input.region.h};
+        u.response = {percent(kDarks, 37.0f), percent(kMids, 100.0f), percent(kLights, 0.0f), 0.0f};
+        u.midpoints = {number(kRedMid, 27.0f, 1.0f, 99.0f) * 0.01f, number(kGreenMid, 30.0f, 1.0f, 99.0f) * 0.01f,
+                       number(kBlueMid, 31.0f, 1.0f, 99.0f) * 0.01f, 0.0f};
+        u.gains = {strength * 0.0226f * percent(kRed, 100.0f), strength * 0.0210f * percent(kGreen, 100.0f),
+                   strength * 0.0242f * percent(kBlue, 100.0f), 0.0f};
+        u.sigma = {0.23f + 0.65f * softness * percent(kRedSoftness, 100.0f),
+                   0.23f + (mono ? 0.65f : 0.63f) * softness * percent(kGreenSoftness, 100.0f),
+                   0.23f + (mono ? 0.65f : 0.56f) * softness * percent(kBlueSoftness, 100.0f),
+                   std::min(input.texel_scale_x(), input.texel_scale_y())};
+        u.sampling = {number(kSize, 1.0f, 0.5f, 12.0f) * profile.size, static_cast<f32>(field & 0xffffu),
+                      static_cast<f32>(field >> 16), mono ? 1.0f : 0.0f};
+        if (mono) {
+            const f32 gain = strength * 0.0226f;
+            u.gains = {gain * percent(kRed, 100.0f), gain * percent(kGreen, 100.0f), gain * percent(kBlue, 100.0f), 0.0f};
+        }
+        if (matte) {
+            const Mat4 m = e.placement ? e.placement->compFromLayer : Mat4::identity();
+            u.matteRegion = {matte->region.x, matte->region.y, matte->region.w, matte->region.h};
+            u.compX = {m.col[0].x, m.col[1].x, m.col[3].x, 0.0f};
+            u.compY = {m.col[0].y, m.col[1].y, m.col[3].y, 0.0f};
+            u.compW = {m.col[0].w, m.col[1].w, m.col[3].w, 0.0f};
+        }
+        out = LayerImage{ctx.texture("film-profile-grain", input.width, input.height), input.region, input.width, input.height};
+        if (ctx.fullscreen_pass("film-profile-grain", PassStage::Effects, out.texture, ShaderId::effects_film_profile_grain_frag,
+                                {PassTexture{input.texture}, PassTexture{matte ? matte->texture : input.texture, {},
+                                                                         CommonSampler::LinearBorder}},
+                                &u, sizeof(u)) == kInvalidIndex) return Errc::PipelineCompileFailed;
+        return OkStatus;
+    }
+
+private:
+    static constexpr u16 kPercent = kParamAnimatable | kParamPercent;
+    enum : u32 {
+        kProfile, kAmount, kSize, kSoftness, kDarks, kMids, kLights, kRed, kGreen, kBlue,
+        kRedMid, kGreenMid, kBlueMid, kRedSoftness, kGreenSoftness, kBlueSoftness, kMono, kSeed, kAnimate, kMatte,
+    };
+    struct Profile { f32 strength, size, softness; bool mono; };
+    static constexpr Profile profiles_[] = {
+        {1.0f, 1.0f, 1.0f, false}, {0.7f, 0.8f, 1.15f, false},
+        {1.35f, 1.65f, 0.86f, false}, {1.2f, 1.2f, 0.95f, true},
+    };
+    struct Uniforms { Vec4 region, response, midpoints, gains, sigma, sampling, matteRegion, compX, compY, compW; };
+    static_assert(sizeof(Uniforms) == 160);
 };
 
 // -----------------------------------------------------------------------------
@@ -281,6 +519,122 @@ public:
 // Minimax — dilatar / erodir / abrir / fechar
 // -----------------------------------------------------------------------------
 #include "MinimaxEffect.inl"
+
+class RadialScreen final : public Effect {
+public:
+    explicit RadialScreen(bool color) noexcept : color_(color) {}
+
+    enum : u32 {
+        kFrequency, kAngle, kWidth, kSharpness, kLighten, kShift, kInkMode,
+        kToneA, kToneB, kBlueShift, kSaturation,
+    };
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo mono{"aurea.stylize.radial_screen", "Retícula radial",
+                                     "Estilizar", EffectClass::Neighborhood};
+        static const EffectInfo color{"aurea.stylize.radial_screen_color", "Retícula radial colorida",
+                                      "Estilizar", EffectClass::Neighborhood};
+        return color_ ? color : mono;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        static const char* const kMonoModes[] = {"Preto", "Branco"};
+        static const char* const kColorModes[] = {"CMY", "RGB"};
+        p.add_float("frequency", "Frequência", 50.0f, 0.0f, 1000.0f, kParamAnimatable);
+        p.add_angle("angle", "Ângulo", 30.0f);
+        p.add_float("relative_width", "Largura relativa", 1.0f, 0.05f, 20.0f, kParamAnimatable);
+        p.add_float("sharpness", "Nitidez", 4.0f, 0.0f, 40.0f, kParamAnimatable);
+        p.add_float("lighten", "Clarear", 0.0f, -2.0f, 2.0f, kParamAnimatable);
+        p.add_point2("shift", "Deslocamento", Vec2{0, 0}, -20.0f, 20.0f, kParamAnimatable);
+        p.add_enum("ink_mode", "Cor dos pontos", color_ ? kColorModes : kMonoModes, 2, 0);
+        if (color_) {
+            p.add_point2("red_shift", "Deslocamento do vermelho", Vec2{0, 0.5f},
+                         -20.0f, 20.0f, kParamAnimatable);
+            p.add_point2("green_shift", "Deslocamento do verde", Vec2{0, 0},
+                         -20.0f, 20.0f, kParamAnimatable);
+            p.add_point2("blue_shift", "Deslocamento do azul", Vec2{0, -0.5f},
+                         -20.0f, 20.0f, kParamAnimatable);
+            p.add_float("saturation", "Saturação", 1.0f, -2.0f, 10.0f, kParamAnimatable);
+        } else {
+            p.add_color("dark", "Cor escura", Vec4{0, 0, 0, 1});
+            p.add_color("light", "Cor clara", Vec4{1, 1, 1, 1});
+        }
+    }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_halftone_frag, work));
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
+                 LayerImage& out) const override {
+        EffectUniforms u = base_uniforms(input);
+        const auto read = [&](u32 index, f32 fallback, f32 lo, f32 hi) {
+            return std::clamp(finite_or(e.f(index), fallback), lo, hi);
+        };
+        const auto shift = [&](u32 index, Vec2 fallback) {
+            const Vec2 v = e.p2(index);
+            return Vec2{finite_or(v.x, fallback.x), finite_or(v.y, fallback.y)};
+        };
+        const f32 angle = std::remainder(finite_or(e.f(kAngle), 30.0f), 360.0f) * kDeg2Rad;
+        u.p0 = {read(kFrequency, 50.0f, 0.0f, 1000.0f), read(kWidth, 1.0f, 0.05f, 20.0f),
+                angle, read(kSharpness, 4.0f, 0.0f, 40.0f)};
+        u.p1 = {read(kLighten, 0.0f, -2.0f, 2.0f), color_ ? -2.0f : -1.0f,
+                color_ ? read(kSaturation, 1.0f, -2.0f, 10.0f) : 0.0f,
+                e.e(kInkMode) == 1 ? 1.0f : 0.0f};
+        const Vec2 shiftAll = shift(kShift, Vec2{0, 0});
+        u.p2 = {shiftAll.x, shiftAll.y, input.region.h / std::max(input.region.w, 1e-6f), 0.0f};
+        if (color_) {
+            const Vec2 r = shift(kToneA, Vec2{0, 0.5f});
+            const Vec2 g = shift(kToneB, Vec2{0, 0});
+            const Vec2 b = shift(kBlueShift, Vec2{0, -0.5f});
+            u.p3 = {r.x, r.y, g.x, g.y};
+            u.color = {b.x, b.y, 0, 0};
+        } else {
+            u.p3 = e.color(kToneA);
+            u.color = e.color(kToneB);
+        }
+        return single_pass(ctx, ShaderId::effects_halftone_frag, input, u, "reticula-radial", out);
+    }
+
+private:
+    bool color_;
+};
+
+class MedianFilter final : public Effect {
+public:
+    enum : u32 { kRadiusX, kRadiusY, kAmount };
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo info{"aurea.blur.median", "Filtro mediano", "Desfoque", EffectClass::Neighborhood};
+        return info;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_float("radius_x", "Raio X", 1.0f, 0.0f, 20.0f, kParamAnimatable | kParamPixels, "px");
+        p.add_float("radius_y", "Raio Y", 1.0f, 0.0f, 20.0f, kParamAnimatable | kParamPixels, "px");
+        p.add_float("amount", "Intensidade", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+    }
+    bool is_identity(const EffectEval& e) const noexcept override {
+        return input_margin(e) <= 0.0f || amount(e) <= 0.0f;
+    }
+    f32 input_margin(const EffectEval& e) const noexcept override {
+        return std::max(radius(e, kRadiusX), radius(e, kRadiusY));
+    }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_median_filter_frag, work));
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
+                 LayerImage& out) const override {
+        EffectUniforms uniforms = base_uniforms(input);
+        uniforms.p0 = Vec4{radius(e, kRadiusX) * uniforms.texel.z,
+                           radius(e, kRadiusY) * uniforms.texel.w, amount(e), 0.0f};
+        return single_pass(ctx, ShaderId::effects_median_filter_frag, input, uniforms, "filtro-mediano", out);
+    }
+
+private:
+    static f32 radius(const EffectEval& e, u32 slot) noexcept {
+        return std::clamp(finite_or(e.f(slot), 1.0f), 0.0f, 20.0f);
+    }
+    static f32 amount(const EffectEval& e) noexcept {
+        return std::clamp(finite_or(e.f(kAmount), 100.0f) / 100.0f, 0.0f, 1.0f);
+    }
+};
 
 // -----------------------------------------------------------------------------
 // Máscara de nitidez
@@ -426,9 +780,16 @@ void register_stylize_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<OminoDiffusion>());
     (void)r.add(std::make_unique<Invert>());
     (void)r.add(std::make_unique<Scanlines>());
+    (void)r.add(std::make_unique<SinusoidalScanlines>(false));
+    (void)r.add(std::make_unique<SinusoidalScanlines>(true));
     (void)r.add(std::make_unique<Grain>());
+    (void)r.add(std::make_unique<PhotographicGrain>());
+    (void)r.add(std::make_unique<FilmProfileGrain>());
     (void)r.add(std::make_unique<Halftone>());
+    (void)r.add(std::make_unique<RadialScreen>(false));
+    (void)r.add(std::make_unique<RadialScreen>(true));
     (void)r.add(std::make_unique<Minimax>());
+    (void)r.add(std::make_unique<MedianFilter>());
     (void)r.add(std::make_unique<UnsharpMask>());
 }
 

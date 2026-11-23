@@ -5,10 +5,8 @@
 //  `EditorLayout.solve` — topo, preview, tira, transporte, timeline e a folha
 //  contextual, nessa ordem.
 //
-//  A REGRA DA CASCA: abrir painel, adicionar camada ou trocar de aba NUNCA move
-//  o preview. O painel tira espaço da TIMELINE, e a timeline tem piso. É o que
-//  mantém o CAMetalLayer com o mesmo tamanho durante o uso (redimensionar o
-//  drawable a cada toque faria o motor recriar o swapchain sem motivo).
+//  A prévia mantém sua altura ao trocar as abas do inspetor. Abrir o inspetor
+//  reserva mais espaço para os controles e preserva a faixa de foco da timeline.
 // =============================================================================
 import SwiftUI
 import UniformTypeIdentifiers
@@ -35,7 +33,7 @@ struct EditorView: View {
             let aspect: CGFloat = model.compositionHeight > 0 ? CGFloat(model.compositionWidth) / CGFloat(model.compositionHeight) : 0
             // Fora da tela cheia o palco tem 8 pt de margem de cada lado.
             let sideMargin: CGFloat = model.fullscreen ? 0 : EditorLayout.previewSideMargin
-            // Omega fundação (F6): prévia fixa e zona inferior de 280 (0.3.3: a divisa voltou, `preferred`).
+            // A zona inferior cresce ao abrir o inspetor e a divisa permite ajustá-la.
             // Omega chrome (área 02, P0-4): com a seleção múltipla a timeline fica com a zona
             // inteira e a barra inferior flutua por cima dela (sem o painel de lote).
             let metrics = EditorLayout.solve(total: geometry.size.height, content: model.sheetContent == .batch ? .none : model.sheetContent, fullscreen: model.fullscreen,
@@ -89,8 +87,7 @@ struct EditorView: View {
                             // 0.3.3 recursos: a divisa palco/timeline volta, como na 0.3.2 —
                             // arrastar na vertical no transporte (fora dos botões) troca palco
                             // por timeline (sobe ou desce a timeline); toque duplo volta à
-                            // altura automática. A zona de baixo continua a da Omega: o painel
-                            // de 200 fica por cima da timeline e, aberto, recebe a zona inteira.
+                            // altura automática. O inspetor fica sobre a timeline.
                             TransportView().frame(height: metrics.transport)
                                 .contentShape(Rectangle())
                                 // `.contain` antes do identificador: sem ele o id da divisa
@@ -111,8 +108,9 @@ struct EditorView: View {
                                 .simultaneousGesture(TapGesture(count: 2).onEnded { previewPreference = 0 })
                             // Omega fundação (F6): a zona inferior fixa (280). Sem camada, a
                             // timeline (210) e a barra de adicionar (70) empilhadas; com camada,
-                            // a timeline ocupa a zona e o painel de 200 fica POR CIMA dela
-                            // (sobram 80: régua + uma linha). A prévia não muda de altura.
+                            // a timeline ocupa a zona e a folha fica sobre ela
+                            // (sobram 80: régua + uma linha). O inspetor aberto
+                            // reserva uma zona maior e preserva essa faixa.
                             ZStack(alignment: .bottom) {
                                 VStack(spacing: 0) {
                                     // 0.3.6: o que o painel por cima (doca/painel) ou o adicionar cobre embaixo.

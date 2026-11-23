@@ -47,7 +47,7 @@ fun AureaApp(store: EditorStore, conta: com.aurea.aurea.conta.ContaViewModel? = 
         val forced = com.aurea.aurea.config.AppConfigStore.config
             ?.takeIf { com.aurea.aurea.config.AppConfigStore.updateRequired }
         if (forced != null) {
-            com.aurea.aurea.config.ForcedUpdateScreen(forced)
+            com.aurea.aurea.config.ForcedUpdateScreen(forced, store)
             return@AureaTheme
         }
         Box(Modifier.fillMaxSize().background(AureaColors.Background)) {

@@ -9,9 +9,8 @@ import kotlin.math.min
  * Omega fundação (F6, geometria da referência): no telefone em retrato o topo
  * tem 42, o transporte 46 e embaixo fica uma ZONA FIXA de 280 (timeline +
  * barra de adicionar, ou a timeline com o painel da camada de 200 por cima).
- * A prévia é o que sobra e NUNCA muda de altura ao abrir ou fechar painel,
- * adicionar ou escolher camada — o que também mantém a SurfaceView do motor
- * parada (a superfície só muda na tela cheia ou ao girar o aparelho). Sem a
+ * A prévia é o que sobra. O inspetor aberto reserva mais altura para os
+ * controles, mas trocar entre suas abas mantém a mesma altura da prévia. Sem a
  * divisa arrastável no retrato (decisão D2). 0.3.3 recursos: a divisa volta
  * (`preferred` em [EditorLayout.solve]). O layout largo continua o do AUREA.
  */
@@ -85,8 +84,11 @@ internal object EditorLayout {
     /** O que sobra da timeline com o painel aberto: régua 42 + uma linha. */
     const val TIMELINE_FOCUS = 80f
 
-    /** O painel cresce com a fonte do sistema: 200 em 1×, 240 em 2×. */
+    /** A zona da camada cresce com a fonte do sistema: 200 em 1×, 240 em 2×. */
     fun layerPanel(fontScale: Float = 1f): Float = LAYER_PANEL + 40f * (fontScale.coerceIn(1f, 2f) - 1f)
+
+    /** Espaço adicional para cabeçalho, abas e controles do inspetor aberto. */
+    private const val INSPECTOR_EXTRA = 72f
 
     /**
      * 0.3.6: o teto dos painéis de propriedade. Com a divisa no alto (ou a Edição numa
@@ -136,10 +138,10 @@ internal object EditorLayout {
 
     /**
      * O retrato do telefone (e do tablet em pé): prévia = área − 42 − 46 − zona,
-     * igual em todos os [SheetContent]. Dentro da zona:
+     * com 72 dp a mais na zona inferior ao abrir [SheetContent.Panel]. Dentro da zona:
      * - [SheetContent.AddBar]: timeline (210) e a barra de adicionar (70) embaixo;
      * - [SheetContent.Dock], [SheetContent.Panel], [SheetContent.Curve]: timeline na
-     *   zona inteira e a folha (200) POR CIMA ([EditorMetrics.overlay]); ficam 80 de timeline;
+     *   zona inteira e a folha sobreposta ([EditorMetrics.overlay]); ficam 80 de timeline;
      * - [SheetContent.None]: só a timeline; Hint, Batch e Adding: empilhados embaixo dela.
      * Tela baixa demais: a prévia fica no piso e a zona encolhe (a soma é sempre a altura).
      *
@@ -148,11 +150,10 @@ internal object EditorLayout {
      * [maxPreview]: a zona cresce (mais timeline) ou encolhe até [ZONE_MIN]. O painel
      * da camada (Dock/Panel/Curve) e o adicionar aberto precisam da zona inteira:
      * com a prévia maior que a automática, ela devolve o espaço enquanto eles estão
-     * abertos (como na 0.3.2), e o painel continua com 200 + 80 de timeline.
-     * Sem preferência, a prévia é a automática (área − 42 − 46 − 280).
+     * abertos. Sem preferência, a prévia ocupa o espaço que sobra da zona automática.
      * 0.3.4 painéis: Panel e Curve ocupam a zona inteira menos [timelineFocus]
      * (régua + a linha em foco + folga): com a divisa no alto o painel cresce em vez
-     * de deixar um vazio de timeline por cima dele (200 + 80 só na zona padrão).
+     * de deixar um vazio de timeline por cima dele.
      * [width] e [aspect] ficam na assinatura para quem já chamava.
      */
     @Suppress("UNUSED_PARAMETER")
@@ -173,7 +174,8 @@ internal object EditorLayout {
         val panel = layerPanel(fontScale)
         val focus = timelineFocus(fontScale)
         val previewFloor = min(PREVIEW_MIN, ws * 0.25f)
-        val automatic = max(previewFloor, ws - bottomZone(fontScale)).coerceAtMost(ws)
+        val targetZone = bottomZone(fontScale) + if (content == SheetContent.Panel) INSPECTOR_EXTRA else 0f
+        val automatic = max(previewFloor, ws - targetZone).coerceAtMost(ws)
         // 0.3.3 recursos: a altura arrastada na divisa (0 = automática).
         val chosen = if (preferred > 0f && preferred.isFinite()) {
             preferred.coerceIn(previewFloor, max(previewFloor, ws - ZONE_MIN)).coerceAtMost(ws)

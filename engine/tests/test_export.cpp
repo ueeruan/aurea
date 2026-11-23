@@ -568,13 +568,15 @@ struct Outcome {
     bool finished = false;
 };
 
-Outcome run_export(Rig& r, u32 shortSide, f64 fps, bool dither = true, int timeoutS = 600, u32 aiScale = 0) {
+Outcome run_export(Rig& r, u32 shortSide, f64 fps, bool dither = true, int timeoutS = 600, u32 aiScale = 0,
+                   u32 attempt = 0) {
     Outcome o;
     ExportSettings s;
     s.height = shortSide;
     s.fps = fps;
     s.dither = dither;
     s.aiUpscale = aiScale;
+    s.safeMode = attempt;
     const auto t0 = std::chrono::steady_clock::now();
     if (!r.e.start_export(s, "nao-usado.mp4").ok()) return o;
     for (int i = 0; i < timeoutS * 1000; ++i) {

@@ -13,6 +13,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -68,6 +69,47 @@ class EffectsAddSheetTest {
 
     private fun tagPrefix(prefix: String) = SemanticsMatcher("testTag começa com $prefix") {
         it.config.getOrNull(SemanticsProperties.TestTag)?.startsWith(prefix) == true
+    }
+
+    @Test fun browserAcceptsPointerTapsOnPluginsAndEffectsAfterScrolling() {
+        var show by mutableStateOf(false)
+        var picked: Int? = null
+        val invertId = effectTypeId("aurea.color.invert")
+        val invertCard = effectCardId(invertId)
+        compose.setContent {
+            store = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))
+            AureaTheme {
+                if (show) EffectAddSheet(
+                    store = store,
+                    layerHasAudio = false,
+                    onPick = { picked = it.typeId; show = false },
+                    onTool = {},
+                    onDismiss = { show = false },
+                )
+            }
+        }
+        compose.waitUntil(30000) { ::store.isInitialized && store.engineReady && store.catalog.any { it.typeId == invertId } }
+        compose.runOnIdle { show = true }
+        val home = compose.onNodeWithTag("effects.home")
+        val last = "effects.category.other"
+        home.performScrollToNode(hasTestTag(last))
+        home.performTouchInput { swipeUp(durationMillis = 160) }
+        compose.onNodeWithTag(last).performTouchInput { click(Offset(right - 3f, centerY)) }
+        compose.onNodeWithTag("effects.grid").assertIsDisplayed()
+        compose.onNodeWithTag("effects.back").performTouchInput { click() }
+
+        compose.onNodeWithTag("effects.plugins").performTouchInput { click(Offset(right - 3f, centerY)) }
+        compose.onNodeWithTag("plugins.install").assertIsDisplayed()
+        compose.onNodeWithTag("effects.tab.catalog").performTouchInput { click(Offset(left + 3f, centerY)) }
+
+        val colors = "effects.category.color_light"
+        home.performScrollToNode(hasTestTag(colors))
+        compose.onNodeWithTag(colors).performTouchInput { click() }
+        val card = "effects.card.$invertCard"
+        compose.onNodeWithTag("effects.grid").performScrollToNode(hasTestTag(card))
+        compose.onNodeWithTag(card).performTouchInput { click(Offset(right - 3f, centerY)) }
+        compose.onNodeWithTag("effects.detail.variant.$invertCard").performScrollTo().performTouchInput { click() }
+        compose.runOnIdle { assertEquals(invertId, picked) }
     }
 
     @Test fun anotherRulerFlingDoesNotBlockScrollInEitherDirection() {

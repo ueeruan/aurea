@@ -125,15 +125,91 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.stylize.pix_dither", FxEffectHuman(keywords: "pixdither pix dither pontilhado paleta atkinson bayer", principal: [0, 1, 2])),
     ("aurea.time.low_fps", FxEffectHuman(keywords: "low fps stop motion travado quadros choppy tremido", principal: [0, 1, 3])),
     ("aurea.light.glow_scan", FxEffectHuman(keywords: "glow scan varredura scanner faixa de luz brilho light sweep shine logo", principal: [0, 1, 5, 8])),
+    ("aurea.color.luma_posterize", FxEffectHuman(name: "fx_name_refined_posterize", keywords: "posterize")),
+    ("aurea.color.luma_hue_cycle", FxEffectHuman(name: "fx_name_refined_pseudocolor", keywords: "pseudocolor")),
+    ("aurea.color.silver_retention", FxEffectHuman(name: "fx_name_refined_bleachbypass", keywords: "bleachbypass")),
+    ("aurea.stylize.optical_vignette", FxEffectHuman(name: "fx_name_refined_vignette", keywords: "vignette")),
+    ("aurea.blur.photographic", FxEffectHuman(name: "fx_name_refined_blur", keywords: "blur")),
+    ("aurea.blur.rgb_channels", FxEffectHuman(name: "fx_name_refined_blurchannels", keywords: "blurchannels")),
+    ("aurea.blur.chroma_luma", FxEffectHuman(name: "fx_name_refined_blurchroma", keywords: "blurchroma")),
+    ("aurea.blur.photographic_direction", FxEffectHuman(name: "fx_name_refined_blurdirectional", keywords: "blurdirectional")),
+    ("aurea.blur.transform_motion", FxEffectHuman(name: "fx_name_refined_blurmotion", keywords: "blurmotion")),
+    ("aurea.blur.prism_defocus", FxEffectHuman(name: "fx_name_refined_defocusprism", keywords: "defocusprism")),
+    ("aurea.blur.edge_masked", FxEffectHuman(name: "fx_name_refined_edgeblur", keywords: "edgeblur")),
+    ("aurea.blur.detail_sharpen", FxEffectHuman(name: "fx_name_refined_sharpen", keywords: "sharpen")),
+    ("aurea.blur.soft_focus", FxEffectHuman(name: "fx_name_refined_softfocus", keywords: "softfocus")),
+    ("aurea.light.chromatic_halo", FxEffectHuman(name: "fx_name_refined_glow", keywords: "glow")),
+    ("aurea.light.shadow_halo", FxEffectHuman(name: "fx_name_refined_glowdarks", keywords: "glowdarks")),
+    ("aurea.light.outline_halo", FxEffectHuman(name: "fx_name_refined_glowedges", keywords: "glowedges")),
+    ("aurea.stylize.sinusoidal_scanlines", FxEffectHuman(name: "fx_name_refined_scanlines", keywords: "scanlines")),
+    ("aurea.stylize.sinusoidal_scanlines_mono", FxEffectHuman(name: "fx_name_refined_scanlinesmono", keywords: "scanlinesmono")),
+    ("aurea.stylize.radial_screen", FxEffectHuman(name: "fx_name_refined_halftone", keywords: "halftone")),
+    ("aurea.stylize.radial_screen_color", FxEffectHuman(name: "fx_name_refined_halftonecolor", keywords: "halftonecolor")),
+    ("aurea.stylize.chromatic_edges", FxEffectHuman(name: "fx_name_refined_edgedetect", keywords: "edgedetect")),
+    ("aurea.distort.optical_fisheye", FxEffectHuman(name: "fx_name_refined_warpfisheye", keywords: "warpfisheye")),
+    ("aurea.distort.optical_lens", FxEffectHuman(name: "fx_name_refined_warpmagnify", keywords: "warpmagnify")),
+    ("aurea.distort.repeated_transform", FxEffectHuman(name: "fx_name_refined_warprepeat", keywords: "warprepeat")),
+    ("aurea.transition.circular_aperture", FxEffectHuman(name: "fx_name_refined_wipecircle", keywords: "wipecircle")),
+    ("aurea.distort.projective_pin", FxEffectHuman(name: "fx_name_refined_warpcornerpin", keywords: "warpcornerpin")),
+    ("aurea.distort.plane_perspective", FxEffectHuman(name: "fx_name_refined_warpperspective", keywords: "warpperspective")),
+    ("aurea.stylize.photographic_grain", FxEffectHuman(name: "fx_name_refined_grain", keywords: "grain")),
+    ("aurea.distort.refraction", FxEffectHuman(name: "fx_name_refined_distort", keywords: "distort")),
+    ("aurea.distort.refraction_rgb", FxEffectHuman(name: "fx_name_refined_distortrgb", keywords: "distortrgb")),
+    ("aurea.light.exposure_streaks", FxEffectHuman(name: "fx_name_refined_streaks", keywords: "streaks")),
+    ("aurea.stylize.jpeg_compression_damage", FxEffectHuman(name: "fx_name_refined_jpegdamage", keywords: "jpegdamage")),
+    ("aurea.light.spectral_glint", FxEffectHuman(name: "fx_name_refined_glint", keywords: "glint")),
+    ("aurea.light.diffraction_glare", FxEffectHuman(name: "fx_name_refined_glare", keywords: "glare")),
+    ("aurea.light.outline_rays", FxEffectHuman(name: "fx_name_refined_edgerays", keywords: "edgerays")),
+    ("aurea.stylize.photochemical_film_damage", FxEffectHuman(name: "fx_name_refined_filmdamage", keywords: "filmdamage")),
+    ("aurea.light.spectral_aura", FxEffectHuman(name: "fx_name_refined_glowaura", keywords: "glowaura")),
+    ("aurea.light.displaced_halo", FxEffectHuman(name: "fx_name_distance_halo", keywords: "distance halo brilho contorno faixa")),
+    ("aurea.light.multiscale_glow", FxEffectHuman(name: "fx_name_multiscale_glow", keywords: "multiscale glow brilho escala fino largo bloom")),
+    ("aurea.light.prismatic_glints", FxEffectHuman(name: "fx_name_prismatic_glints", keywords: "prismatic glints reflexos dispersao prisma rainbow")),
+    ("aurea.light.light_leak", FxEffectHuman(name: "fx_name_light_leak", keywords: "light leak vazamento luz filme pelicula")),
+    ("aurea.stylize.film_profile_grain", FxEffectHuman(name: "fx_name_film_profile_grain", keywords: "grain ruido grao pelicula film profile")),
+    ("aurea.transition.blur_dissolve", FxEffectHuman(name: "fx_name_blur_dissolve", keywords: "blur dissolve dissolucao desfoque transicao")),
+    ("aurea.color.space_transform", FxEffectHuman(name: "fx_name_space_transform", keywords: "ocio aces color space transform transformacao espaco cor srgb p3")),
+    ("aurea.distort.sine_waves", FxEffectHuman(name: "fx_name_sine_waves", keywords: "sine waves ondas senoidais frequencia amplitude wave warp")),
+    ("aurea.blur.motion_curves", FxEffectHuman(name: "fx_name_motion_curve_blur", keywords: "blurmocurves motion curve blur desfoque curvas movimento obturador")),
+    ("aurea.distort.polar_kaleidoscope", FxEffectHuman(name: "fx_name_polar_kaleidoscope", keywords: "kaleidopolar caleidoscopio polar cilindro fatias espelho")),
+    ("aurea.color.duotone", FxEffectHuman(name: "fx_name_duotone", keywords: "duotone duotonico cor tons luma")),
+    ("aurea.color.quadtone", FxEffectHuman(name: "fx_name_four_tones", keywords: "quadtone quatro tons quad tone gradiente luminancia")),
+    ("aurea.blur.rack_defocus", FxEffectHuman(name: "fx_name_rack_focus", keywords: "rack defocus lens foco rack focus bokeh transicao")),
+    ("aurea.light.rainbow_halo", FxEffectHuman(name: "fx_name_refined_glowrainbow", keywords: "glowrainbow")),
+    ("aurea.light.glow_rings", FxEffectHuman(name: "fx_name_refined_glowrings", keywords: "glowrings")),
+    ("aurea.stylize.analog_tape_damage", FxEffectHuman(name: "fx_name_refined_vhsdamage", keywords: "vhsdamage")),
+    ("aurea.color.soft_rgb_threshold", FxEffectHuman(
+        name: "fx_name_soft_rgb_threshold",
+        keywords: "threshold limiar contraste rgb canais",
+        principal: [0, 1, 2, 6],
+        params: [
+            0: FxParamHuman(label: "fx_limite"),
+            1: FxParamHuman(label: "fx_suavidade"),
+            2: FxParamHuman(label: "fx_soft_rgb_threshold_offset"),
+            3: FxParamHuman(label: "fx_soft_rgb_threshold_red"),
+            4: FxParamHuman(label: "fx_soft_rgb_threshold_green"),
+            5: FxParamHuman(label: "fx_soft_rgb_threshold_blue"),
+            6: FxParamHuman(label: "fx_saturacao"),
+        ])),
+    ("aurea.color.solarize", FxEffectHuman(
+        name: "fx_name_solarize",
+        keywords: "solarize solarizar negativo inversão",
+        params: [
+            0: FxParamHuman(label: "fx_limite"),
+            1: FxParamHuman(label: "fx_saturacao"),
+            2: FxParamHuman(label: "fx_inverter"),
+            3: FxParamHuman(label: "fx_brilho"),
+            4: FxParamHuman(label: "fx_sombras"),
+        ])),
     ("aurea.color.threshold", FxEffectHuman(keywords: "threshold limiar limite preto e branco duas cores 2 cores", principal: [0, 1])),
     ("aurea.color.posterize", FxEffectHuman(keywords: "posterize posterizar niveis tons reduzir cores", principal: [0, 1])),
     ("aurea.color.palettize", FxEffectHuman(keywords: "palettize paleta gameboy game boy nes pico-8 cga lospec gimp gpl hex retro pontilhado dither oklab", principal: [0, 2, 4])),
     ("aurea.glitch.video_glitch", FxEffectHuman(keywords: "bcc glitch video continuum blocos flicker tremor", principal: [0, 1, 2, 3, 55])),
     ("aurea.distort.displace_transform", FxEffectHuman(keywords: "displace displacer pro mapa escala rotacao aberracao", principal: [0, 1, 2, 3, 4], params: [1: FxParamHuman(label: "fx_deslocamento"), 2: FxParamHuman(label: "fx_escala")])),
     ("aurea.light.starglow", FxEffectHuman(keywords: "starglow trapcode estrela brilho star raios shimmer", principal: [0, 1, 2, 9, 15], params: [0: FxParamHuman(label: "fx_comprimento")])),
-    ("aurea.distort.lens_gradient", FxEffectHuman(keywords: "s_distort sapphire distort lente lens refracao matte", principal: [0, 2, 4, 5, 6])),
+    ("aurea.distort.lens_gradient", FxEffectHuman(name: "fx_name_map_refraction", keywords: "distort lente lens refracao matte", principal: [0, 2, 4, 5, 6])),
     ("aurea.transition.wipe_flux", FxEffectHuman(keywords: "wipeflux s_wipeflux sapphire fluxo bolhas transicao", principal: [0, 1, 3, 8, 9], params: [5: FxParamHuman(scale: 1, suffix: "", decimals: 3)])),
-    ("aurea.transition.wipe_plasma", FxEffectHuman(keywords: "wipeplasma s_wipeplasma sapphire plasma filamentos transicao", principal: [0, 1, 3, 8, 9], params: [5: FxParamHuman(scale: 1, suffix: "", decimals: 3)])),
+    ("aurea.transition.wipe_plasma", FxEffectHuman(name: "fx_name_plasma_wipe", keywords: "wipeplasma plasma filamentos transicao", principal: [0, 1, 3, 8, 9], params: [5: FxParamHuman(scale: 1, suffix: "", decimals: 3)])),
     ("aurea.move.autobeat", FxEffectHuman(keywords: "beat batida audio música music pulso sync", principal: [0, 1, 2, 3])),
     ("aurea.move.path", FxEffectHuman(name: "beta_move_path", keywords: "move along path caminho vetor trajetória percurso orientar", principal: [0, 1, 2, 3, 4, 5])),
     ("aurea.distort.bender", FxEffectHuman(name: "fx_name_bender", keywords: "bender bend curve curvar pontos", principal: [0, 1, 2, 3])),
@@ -416,6 +492,14 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             14: FxParamHuman(label: "fx_angulo_canal_2", suffix: "°", decimals: 0),
             15: FxParamHuman(label: "fx_angulo_canal_3", suffix: "°", decimals: 0),
             16: FxParamHuman(label: "fx_angulo_canal_4", suffix: "°", decimals: 0),
+        ])),
+    ("aurea.blur.median", FxEffectHuman(
+        name: "fx_name_median_filter",
+        keywords: "median mediana mediano ruido limpar denoise",
+        params: [
+            0: FxParamHuman(label: "fxl_radius_x", suffix: "px", decimals: 1),
+            1: FxParamHuman(label: "fxl_radius_y", suffix: "px", decimals: 1),
+            2: FxParamHuman(label: "fx_intensidade", decimals: 0),
         ])),
     ("aurea.stylize.minimax", FxEffectHuman(
         name: "fx_name_minimax",
@@ -2223,6 +2307,8 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.color.saturation", "fx_desc_color_saturation")
     put("aurea.color.tint", "fx_desc_color_tint")
     put("aurea.color.threshold", "fx_desc_color_threshold")
+    put("aurea.color.soft_rgb_threshold", "fx_desc_soft_rgb_threshold")
+    put("aurea.color.solarize", "fx_desc_solarize")
     put("aurea.color.posterize", "fx_desc_color_posterize")
     put("aurea.color.palettize", "fx_desc_color_palettize")
     put("aurea.light.glow_scan", "fx_desc_light_glow_scan")
@@ -2254,6 +2340,7 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.color.invert", "fx_desc_color_invert")
     put("aurea.color.colorama", "fx_desc_color_colorama")
     put("aurea.blur.unsharp", "fx_desc_blur_unsharp")
+    put("aurea.blur.median", "fx_desc_median_filter")
     put("aurea.blur.lens", "fx_desc_blur_lens")
     put("aurea.light.deep_glow", "fx_desc_light_deep_glow")
     put("aurea.light.rays", "fx_desc_light_rays")

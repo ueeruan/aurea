@@ -66,12 +66,30 @@ vec2 fold_triangle(vec2 d, float s) {
     return vec2(cos(a), sin(a)) * length(best);
 }
 
+float mirror_unit(float v) { return 1.0 - abs(mod(v, 2.0) - 1.0); }
+
 void main() {
     const vec2 c = p.p0.xy;
     const float size = max(p.p0.z, 0.5);
     const float rot = p.p0.w;
     const int mode = int(p.p1.x + 0.5);
     const vec2 d = cc_rot(cc_px() - c, -rot);
+    if (mode == 4) {
+        vec2 polar = d / p.p1.zw;
+        float angle = length(polar) < 1e-6 ? 0.0 : atan(polar.y, polar.x);
+        vec2 folded = vec2(mirror_unit(angle * p.p1.y / (2.0 * CC_PI)),
+                           mirror_unit(1.0 - length(polar) / size + p.p2.x));
+        vec2 samplePoint = mix(cc_px(), p.box.xy + folded * p.box.zw, p.p2.y);
+        vec2 dx = dFdx(samplePoint), dy = dFdy(samplePoint);
+        if (p.p2.z > 0.5 && max(length(dx), length(dy)) > 1.35 * p.info.x) {
+            vec2 a = dx * 0.25, b = dy * 0.25;
+            o_color = (cc_at(samplePoint + a + b) + cc_at(samplePoint - a + b) +
+                       cc_at(samplePoint + a - b) + cc_at(samplePoint - a - b)) * 0.25;
+        } else {
+            o_color = cc_at(samplePoint);
+        }
+        return;
+    }
     vec2 f;
     if (mode == 2) f = fold_square(d, size);
     else if (mode == 3) f = fold_triangle(d, size);

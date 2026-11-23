@@ -311,7 +311,7 @@ internal fun PanelNotice(text: String, modifier: Modifier = Modifier) {
 // Coluna esquerda: ‹ Voltar · ◆± keyframe · Curva · (= expressão, extra do
 // AUREA) · ⋯. Segurar ◆ com keyframe no quadro pede "apagar todos os keyframes"
 // (confirmação); Curva com menos de 2 keyframes mostra o aviso. Coluna direita:
-// até 4 abas de ícone (só com 2 ou mais; a aba com `alt` troca para a irmã no
+// abas de ícone roláveis (só com 2 ou mais; a aba com `alt` troca para a irmã no
 // segundo toque). Em RTL a coluna esquerda vai para a direita (a Row espelha).
 // Par de `PanelFrame`/`PanelBar` do DesignSystem.swift (mesmos ids).
 //
@@ -340,7 +340,6 @@ internal object PanelFrameDefaults {
     val TabInset = PanelMetrics.TabInset
     val TabRadius = PanelMetrics.TabRadius
     const val DISABLED_ALPHA = 0.15f
-    const val MAX_TABS = 4
 }
 
 /**
@@ -480,7 +479,7 @@ internal class PanelRail(
  * A moldura comum dos painéis de propriedade (200 dp; quem hospeda dá a altura).
  *
  * @param rail a coluna esquerda ([PanelRail]).
- * @param tabs as abas de ícone (no máximo 4); com 0 ou 1 a coluna direita não existe.
+ * @param tabs as abas de ícone; com 0 ou 1 a coluna direita não existe.
  * @param selectedTab o [PanelTab.id] ativo (ou o id da `alt` dele).
  * @param onTab troca de aba (já resolve o segundo toque para a `alt`).
  * @param scrollContent o conteúdo rola por dentro (padrão). Falso para quem tem lista preguiçosa.
@@ -528,7 +527,7 @@ internal fun PanelFrame(
         }
         if (tabs.size >= 2) {
             FrameDivider()
-            FrameRightRail(tabs.take(PanelFrameDefaults.MAX_TABS), selectedTab, onTab)
+            FrameRightRail(tabs, selectedTab, onTab)
         }
     }
     if (askDeleteAll) {
@@ -557,19 +556,30 @@ private fun FrameDivider() {
 }
 
 @Composable
+private fun RailColumn(rows: Int, content: @Composable (Dp) -> Unit) {
+    BoxWithConstraints(Modifier.width(PanelFrameDefaults.RailWidth).fillMaxHeight()) {
+        val count = rows.coerceAtLeast(1)
+        val overflow = constraints.hasBoundedHeight && maxHeight < PanelMetrics.Touch * count
+        val height = if (constraints.hasBoundedHeight) maxOf(PanelMetrics.Touch, maxHeight / count) else PanelMetrics.Touch
+        val scrollState = rememberScrollState()
+        val scroll = if (overflow) Modifier.verticalScroll(scrollState) else Modifier
+        Column(Modifier.fillMaxSize().then(scroll)) { content(height) }
+    }
+}
+
+@Composable
 private fun FrameLeftRail(rail: PanelRail, onAskDeleteAll: () -> Unit, onCurveWarning: () -> Unit) {
     var moreOpen by remember { mutableStateOf(false) }
-    Column(Modifier.width(PanelFrameDefaults.RailWidth).fillMaxHeight()) {
-        FrameCell("panel.rail.back", stringResource(R.string.panel_voltar_ferramentas), enabled = true, onClick = rail.onBack) {
+    val count = 4 + if (rail.supportsAnimation && rail.onExpression != null) 1 else 0
+    RailColumn(count) { height ->
+        FrameCell("panel.rail.back", stringResource(R.string.panel_voltar_ferramentas), height, enabled = true, onClick = rail.onBack) {
             CupertinoIcon(CupertinoGlyph.ChevronLeft, PanelMetrics.RailIcon, AureaColors.Text)
         }
-        if (!rail.supportsAnimation) {
-            Spacer(Modifier.weight(3f))
-            return@Column
-        }
+        if (!rail.supportsAnimation) return@RailColumn
         FrameCell(
             "panel.rail.keyframe",
             stringResource(if (rail.keyframeLook == KeyframeLook.KeyHere) R.string.panel_tirar_keyframe_daqui else R.string.panel_marcar_keyframe_aqui),
+            height,
             enabled = rail.onKeyframe != null,
             onClick = rail.onKeyframe,
             onLongClick = if (rail.keyframeLook == KeyframeLook.KeyHere && rail.onDeleteAllKeyframes != null) onAskDeleteAll else null,
@@ -580,6 +590,7 @@ private fun FrameLeftRail(rail: PanelRail, onAskDeleteAll: () -> Unit, onCurveWa
         FrameCell(
             "panel.rail.curve",
             stringResource(R.string.panel_editar_curva_propriedade),
+            height,
             enabled = curve != null,
             onClick = if (curve != null) ({ if (rail.curveReady) curve() else onCurveWarning() }) else null,
         ) {
@@ -590,6 +601,7 @@ private fun FrameLeftRail(rail: PanelRail, onAskDeleteAll: () -> Unit, onCurveWa
             FrameCell(
                 "panel.rail.expression",
                 stringResource(if (rail.expression == ExpressionLook.None) R.string.panel_adicionar_expressao else R.string.panel_editar_expressao),
+                height,
                 enabled = true,
                 onClick = onExpression,
             ) {
@@ -608,7 +620,7 @@ private fun FrameLeftRail(rail: PanelRail, onAskDeleteAll: () -> Unit, onCurveWa
         val entries = rail.moreEntries
         val onMore = rail.onMore
         if (entries != null || onMore != null) {
-            Box(Modifier.weight(1f).fillMaxWidth()) {
+            Box(Modifier.height(height).fillMaxWidth()) {
                 FrameCellBody(
                     "panel.rail.more",
                     stringResource(R.string.editor_mais),
@@ -626,23 +638,22 @@ private fun FrameLeftRail(rail: PanelRail, onAskDeleteAll: () -> Unit, onCurveWa
                     )
                 }
             }
-        } else {
-            Spacer(Modifier.weight(1f))
         }
     }
 }
 
-/** Uma célula da coluna esquerda: reparte a altura com as outras. */
+/** Uma célula da coluna esquerda: reparte a altura e preserva o alvo mínimo. */
 @Composable
-private fun ColumnScope.FrameCell(
+private fun FrameCell(
     tag: String,
     label: String,
+    height: Dp,
     enabled: Boolean,
     onClick: (() -> Unit)?,
     onLongClick: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
-    Box(Modifier.weight(1f).fillMaxWidth()) {
+    Box(Modifier.height(height).fillMaxWidth()) {
         FrameCellBody(tag, label, enabled, onClick, onLongClick, content)
     }
 }
@@ -672,7 +683,7 @@ private fun FrameCellBody(
 
 @Composable
 internal fun FrameRightRail(tabs: List<PanelTab>, selectedId: String?, onTab: (String) -> Unit) {
-    Column(Modifier.width(PanelFrameDefaults.RailWidth).fillMaxHeight()) {
+    RailColumn(tabs.size) { height ->
         tabs.forEachIndexed { i, tab ->
             val alt = tab.alt
             val altOn = alt != null && selectedId == alt.id
@@ -681,7 +692,7 @@ internal fun FrameRightRail(tabs: List<PanelTab>, selectedId: String?, onTab: (S
             val tint = if (on) AureaColors.Accent else AureaColors.Text
             Box(
                 Modifier
-                    .weight(1f)
+                    .height(height)
                     .fillMaxWidth()
                     .testTag(tab.tag ?: "panel.tab.$i")
                     .semantics {

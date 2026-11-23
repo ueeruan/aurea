@@ -65,20 +65,20 @@ struct ModelLibraryView: View {
         .accessibilityIdentifier("models.library")
     }
 
-    private func card(_ model: LibraryModel) -> some View {
-        let url = model.resource("glb")
+    private func card(_ item: LibraryModel) -> some View {
+        let url = item.resource("glb")
         return VStack(alignment: .leading, spacing: 0) {
             Color.clear.aspectRatio(1.16, contentMode: .fit).overlay {
-                if let path = model.resource("jpg")?.path, let thumb = UIImage(contentsOfFile: path) {
+                if let path = item.resource("jpg")?.path, let thumb = UIImage(contentsOfFile: path) {
                     Image(uiImage: thumb).resizable().scaledToFit().accessibilityHidden(true)
                 }
             }.background(AureaColors.lightBackground).clipped()
             VStack(alignment: .leading, spacing: 2) {
-                Text(model.name).font(.aurea(size: 15, weight: .medium)).foregroundStyle(AureaColors.lightText)
-                Text("\(model.provider) · CC0").font(.aurea(size: 12)).foregroundStyle(AureaColors.lightTextMuted)
+                Text(item.name).font(.aurea(size: 15, weight: .medium)).foregroundStyle(AureaColors.lightText)
+                Text("\(item.provider) · CC0").font(.aurea(size: 12)).foregroundStyle(AureaColors.lightTextMuted)
             }.padding(.horizontal, 10).padding(.top, 8)
             Button {
-                if let url { onUse(url, model.name) }
+                if let url { onUse(url, item.name) }
             } label: {
                 Text(AureaText.t(actionKey))
                     .font(.aurea(size: 14, weight: .medium))
@@ -92,6 +92,6 @@ struct ModelLibraryView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(AureaColors.lightSurface, in: RoundedRectangle(cornerRadius: 14))
         .clipShape(RoundedRectangle(cornerRadius: 14))
-        .accessibilityIdentifier("models.card.\(model.id)")
+        .accessibilityIdentifier("models.card.\(item.id)")
     }
 }

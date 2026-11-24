@@ -240,6 +240,12 @@ final class ExportBackgroundRun {
     func update(done: Int64, total: Int64) { updates += 1 }
     func end(success: Bool) {}
 }
+// 1.0.8: a etapa do relatório de fechamento (quadro e memória) fica fora do harness.
+final class CrashReporter {
+    static let shared = CrashReporter()
+    var breadcrumbs = 0
+    func etapaExport(feitos: Int, total: Int) { breadcrumbs += 1 }
+}
 @MainActor final class Subject {
     let engine = Native(), mediaQueue = DispatchQueue(label: "export-startup-regression")
     let exportBackgroundRun = ExportBackgroundRun()
@@ -250,6 +256,7 @@ final class ExportBackgroundRun {
     var exporting = false, exportPreparing = false, exportCancelled = false, exportPublishing = false
     var exportSavedToPhotos = false, exportStalled = false
     var exportProgress: [String: Any] = [:]
+    var exportBreadcrumbTick = 0
     var exportedURL: URL?, pendingExportURL: URL?
     var exportMessage: String?, toast: String?
     var exportSafeMode: UInt32 = 0

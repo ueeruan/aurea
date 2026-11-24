@@ -1288,7 +1288,7 @@ private struct FxBrowserHome: View {
                 FxScrollProbe(space: "fx.home")
                 LazyVStack(alignment: .leading, spacing: 4) {
                     if !pages.isEmpty {
-                        FxQuickBand(pages: pages, perPage: perPage, hint: favorites.isEmpty(), prefs: prefs,
+                        FxQuickBand(pages: pages, perPage: perPage, hint: favorites.isEmpty, prefs: prefs,
                                     store: store, onAdd: onAdd, onDetail: onDetail)
                     }
                     heading("fx_browser_categories")

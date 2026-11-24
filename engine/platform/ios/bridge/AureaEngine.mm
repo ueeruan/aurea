@@ -5002,7 +5002,7 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
     text:(NSString*)text rgba:(NSArray<NSNumber*>*)rgba {
     auto* e = self.engine;
     return e && rgba.count == 4 && e->edit_precomp_control(group, target, kind, operation, to_std(text),
-        Vec4{rgba[0].floatValue, rgba[1].floatValue, rgba[2].floatValue, rgba[3].floatValue});
+        aurea::Vec4{rgba[0].floatValue, rgba[1].floatValue, rgba[2].floatValue, rgba[3].floatValue});
 }
 - (NSDictionary<NSString*, id>*)vectorTree:(long long)layerId {
     auto* e = self.engine;

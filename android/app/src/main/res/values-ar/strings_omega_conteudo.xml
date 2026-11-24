@@ -85,4 +85,6 @@
     <string name="om_anim_list_cd">محرّكات النص</string>
     <string name="om_anim_item_cd">المحرّك %1$d: %2$s</string>
     <string name="om_anim_collapse_cd">طي المحرّك</string>
+    <string name="om_pts_3d_plane">طبقة ثلاثية الأبعاد · تتحرك النقاط على مستواها</string>
+    <string name="om_pts_3d_edge">الطبقة جانبية بالنسبة للكاميرا. دوّر العرض لتحريك النقاط.</string>
 </resources>

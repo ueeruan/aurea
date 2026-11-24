@@ -46,10 +46,12 @@ import com.aurea.aurea.R
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
@@ -76,9 +78,8 @@ import com.aurea.aurea.ui.theme.CupertinoIcon
 import com.aurea.aurea.ui.theme.tocavel
 // Omega painel: (área 04, P1-11) o editor de curva no layout da referência.
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.semantics.disabled
+import com.aurea.aurea.ui.ds.FxRow
 import com.aurea.aurea.ui.ds.AnchoredMenu
 import com.aurea.aurea.ui.ds.MenuEntry
 import kotlin.math.abs
@@ -857,7 +858,7 @@ private fun CurveLeftColumn(
     var menu by remember { mutableStateOf(false) }
     Column(Modifier.width(PanelFrameDefaults.RailWidth).fillMaxHeight()) {
         CurveCell("curve.back", stringResource(R.string.panel_voltar), onBack) {
-            CupertinoIcon(CupertinoGlyph.ChevronLeft, PanelMetrics.RailIcon, AureaColors.Text)
+            CupertinoIcon(CupertinoGlyph.ChevronLeft, PanelMetrics.RailIcon, AureaColors.RailIconInk)
         }
         CurveCell("curve.keyframe", stringResource(if (keyHere) R.string.panel_tirar_keyframe_daqui else R.string.panel_marcar_keyframe_aqui), onKey) {
             com.aurea.aurea.ui.ds.KeyframeDiamondIcon(
@@ -866,14 +867,14 @@ private fun CurveLeftColumn(
             )
         }
         CurveCell("curve.reverse", stringResource(R.string.om_curve_reverse), onInvert, enabled = invertible, alpha = if (invertible) 1f else .5f) {
-            CupertinoIcon(CupertinoGlyph.ArrowRightArrowLeft, 24.dp, if (inverted) AureaColors.Accent else AureaColors.Text)
+            CupertinoIcon(CupertinoGlyph.ArrowRightArrowLeft, PanelMetrics.RailIcon, if (inverted) AureaColors.Accent else AureaColors.RailIconInk)
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             val more = stringResource(R.string.editor_mais)
             Box(
                 Modifier.fillMaxSize().testTag("curve.menu").semantics { contentDescription = more }.tocavel(shrink = 1f) { menu = true },
                 contentAlignment = Alignment.Center,
-            ) { CupertinoIcon(CupertinoGlyph.Ellipsis, PanelMetrics.RailIcon, AureaColors.Text) }
+            ) { CupertinoIcon(CupertinoGlyph.Ellipsis, PanelMetrics.RailIcon, AureaColors.RailIconInk) }
             AnchoredMenu(expanded = menu, onDismiss = { menu = false }, entries = menuEntries, tag = "curve.menu.list")
         }
     }
@@ -912,9 +913,10 @@ private fun CurveSegmentBar(
     val nextLabel = stringResource(R.string.om_curve_next)
     // 0.3.4 painéis: faixa de 44 (antes 40), setas 18 e rótulo 12 (antes 9).
     Row(modifier.fillMaxWidth().height(PanelMetrics.Touch), verticalAlignment = Alignment.CenterVertically) {
+        // 1.0.8 visual minimalista: setas finas de 14 a 60 % e rótulo 12 a 60 %, sem caixa.
         Box(Modifier.size(44.dp, PanelMetrics.Touch).testTag("curve.prev").semantics { contentDescription = previousLabel }.tocavel(enabled = before) { onJump(-1) },
             contentAlignment = Alignment.Center) {
-            CupertinoIcon(CupertinoGlyph.ChevronLeft, 18.dp, if (before) AureaColors.Text else AureaColors.Disabled)
+            CupertinoIcon(CupertinoGlyph.ChevronLeft, 14.dp, if (before) AureaColors.Text.copy(alpha = .6f) else AureaColors.Disabled)
         }
         // A curva do trecho; tocar troca a força (×1 → ×2 → ×3) — extra do AUREA.
         Text(
@@ -922,19 +924,22 @@ private fun CurveSegmentBar(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f).testTag("curve.power").tocavel(enabled = powered, shrink = 1f, onClick = onPower).padding(vertical = 12.dp),
-            style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Note, fontWeight = FontWeight.W500, color = Color.White.copy(alpha = .5f), textAlign = TextAlign.Center)),
+            style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Note, fontWeight = FontWeight.W500, color = Color.White.copy(alpha = .6f), textAlign = TextAlign.Center)),
         )
         Box(Modifier.size(44.dp, PanelMetrics.Touch).testTag("curve.next").semantics { contentDescription = nextLabel }.tocavel(enabled = after) { onJump(1) },
             contentAlignment = Alignment.Center) {
-            CupertinoIcon(CupertinoGlyph.ChevronRight, 18.dp, if (after) AureaColors.Text else AureaColors.Disabled)
+            CupertinoIcon(CupertinoGlyph.ChevronRight, 14.dp, if (after) AureaColors.Text.copy(alpha = .6f) else AureaColors.Disabled)
         }
     }
 }
 
-/** A coluna de presets (60, 4 vagas do grupo ativo; a acesa com o painel a 50 %). */
+/**
+ * A coluna de presets (48, 4 vagas do grupo ativo). 1.0.8 visual minimalista:
+ * sem fundo; só a acesa ganha a pílula em destaque a 22 % com contorno fino.
+ */
 @Composable
 private fun CurvePresetColumn(category: CurveCategory, ease: Ease, enabled: Boolean, onPick: (CurveSlot) -> Unit) {
-    Column(Modifier.width(PanelFrameDefaults.RailWidth).fillMaxHeight().background(AureaColors.CurveColumn)) {
+    Column(Modifier.width(PanelMetrics.CurveColumn).fillMaxHeight()) {
         curveSlots(category).forEachIndexed { i, slot ->
             if (slot == null) {
                 Spacer(Modifier.weight(1f).fillMaxWidth())
@@ -947,23 +952,21 @@ private fun CurvePresetColumn(category: CurveCategory, ease: Ease, enabled: Bool
                         .semantics { contentDescription = name; selected = active }
                         .tocavel(enabled = enabled, shrink = 1f) { onPick(slot) }
                         .alpha(if (enabled) 1f else .25f)
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                        .clip(RoundedCornerShape(5.dp))
-                        .background(if (active) AureaColors.PanelFrameBackground.copy(alpha = .5f) else Color.Transparent),
+                        .padding(horizontal = 6.dp, vertical = 4.dp)
+                        .curvePick(active),
                     contentAlignment = Alignment.Center,
                 ) {
-                    CurveThumb(slot.ease, points, if (active) CurveGreen else Color.White)
+                    CurveThumb(slot.ease, points, if (active) CurveGreen else AureaColors.RailIconInk)
                 }
             }
         }
     }
 }
 
-/** A coluna de grupos (60): o ativo com o fundo A11 e o losango (cue) apontando para os presets. */
+/** A coluna de grupos (48): sem fundo; o ativo com a mesma pílula das vagas (1.0.8 visual minimalista). */
 @Composable
 private fun CurveGroupColumn(category: CurveCategory, onlyBezier: Boolean, onPick: (CurveCategory) -> Unit) {
-    val cue = AureaColors.PanelFrameDivider
-    Column(Modifier.width(PanelFrameDefaults.RailWidth).fillMaxHeight().background(AureaColors.CurveColumn)) {
+    Column(Modifier.width(PanelMetrics.CurveColumn).fillMaxHeight()) {
         CurveCategory.entries.forEach { c ->
             val active = c == category
             val off = onlyBezier && c != CurveCategory.Curves
@@ -983,34 +986,30 @@ private fun CurveGroupColumn(category: CurveCategory, onlyBezier: Boolean, onPic
                     }
                     .tocavel(enabled = !off, shrink = 1f) { onPick(c) }
                     .alpha(if (off) .25f else 1f)
-                    .drawBehind {
-                        if (!active) return@drawBehind
-                        // O losango de 45° na borda que encosta nos presets (lado de início).
-                        val s = 7.dp.toPx()
-                        val x = if (layoutDirection == androidx.compose.ui.unit.LayoutDirection.Rtl) size.width else 0f
-                        val path = Path().apply {
-                            moveTo(x, size.height / 2f - s); lineTo(x + s, size.height / 2f)
-                            lineTo(x, size.height / 2f + s); lineTo(x - s, size.height / 2f); close()
-                        }
-                        drawPath(path, cue)
-                    }
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
-                    .clip(RoundedCornerShape(5.dp))
-                    .background(if (active) cue else Color.Transparent),
+                    .padding(horizontal = 6.dp, vertical = 4.dp)
+                    .curvePick(active),
                 contentAlignment = Alignment.Center,
             ) {
-                CurveThumb(first, points, if (active) CurveGreen else Color.White)
+                CurveThumb(first, points, if (active) CurveGreen else AureaColors.RailIconInk)
             }
         }
     }
 }
 
+/** A pílula da vaga/grupo aceso: destaque a 22 % e contorno fino; o resto transparente. */
+private fun Modifier.curvePick(active: Boolean): Modifier =
+    if (!active) this
+    else this
+        .clip(RoundedCornerShape(FxRow.Soft))
+        .background(AureaColors.FxSegmentPick)
+        .border(1.dp, AureaColors.FxPickLine, RoundedCornerShape(FxRow.Soft))
+
 /** A miniatura de uma curva (o motor amostra), na faixa que cabe o *overshoot*. */
 @Composable
 private fun CurveThumb(ease: Ease, points: FloatArray, color: Color) {
-    Canvas(Modifier.size(36.dp)) {
+    Canvas(Modifier.size(PanelMetrics.CurveThumb)) {
         val (lo, hi) = easeRange(ease, points)
-        val pad = 4.dp.toPx()
+        val pad = 3.dp.toPx()
         val w = size.width - 2 * pad
         val h = size.height - 2 * pad
         val path = Path()
@@ -1019,16 +1018,18 @@ private fun CurveThumb(ease: Ease, points: FloatArray, color: Color) {
             val y = pad + h - (v - lo) / (hi - lo) * h
             if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
         }
-        drawPath(path, color, style = Stroke(1.8.dp.toPx(), cap = StrokeCap.Round))
+        drawPath(path, color, style = Stroke(1.5.dp.toPx(), cap = StrokeCap.Round))
     }
 }
 
 /**
- * O GRÁFICO DA CURVA (`EasingCurveView` da referência): margem de 15 dp, grade
- * 32 × 32 (grossa a cada 8, branco 6 %; fora de 0..1 a 3 %), 0 e 1 tracejados,
- * a curva em destaque de 3 dp, alças de 12 dp (×1,2 no dedo) ligadas às marcas e
- * a linha tracejada do cabeçote. O toque pega a alça MAIS PERTO e o arrasto é
- * RELATIVO (posição de partida + deslocamento); começar e soltar = um desfazer.
+ * O GRÁFICO DA CURVA (`EasingCurveView` da referência): margem de 15 dp. 1.0.8
+ * visual minimalista: grade discreta 4 × 4 (branco 6 %), curva de 2,5 dp com o
+ * degradê do slider (destaque 70 % → 100 %), pontas = ponto de 6 dp, linhas das
+ * alças de 1,5 dp em destaque a 60 %, alças = círculo branco de 14 dp com sombra
+ * macia e halo de 26 dp (destaque 18 %) no dedo; cabeçote tracejado fino a 35 %.
+ * O toque pega a alça MAIS PERTO e o arrasto é RELATIVO (posição de partida +
+ * deslocamento); começar e soltar = um desfazer.
  */
 @Composable
 private fun CurveGraph(
@@ -1175,43 +1176,36 @@ private fun CurveGraph(
                 val hh = ease.handles()
                 val h1 = pt(hh[0], hh[1])
                 val h2 = pt(hh[2], hh[3])
-                // A linha da marca até a alça, na cor da alça.
-                drawLine(Color.White.copy(alpha = .8f), p0, h1, 1.5.dp.toPx())
-                drawLine(Color.White.copy(alpha = .8f), p1, h2, 1.5.dp.toPx())
+                // A linha da marca até a alça: fina, em destaque a 60 %.
+                drawLine(green.copy(alpha = .6f), p0, h1, 1.5.dp.toPx(), StrokeCap.Round)
+                drawLine(green.copy(alpha = .6f), p1, h2, 1.5.dp.toPx(), StrokeCap.Round)
             }
-            drawPath(curve, green, style = Stroke(3.dp.toPx(), cap = StrokeCap.Round))
+            // A curva com o degradê do slider (70 % → 100 %).
+            val ink = Brush.linearGradient(listOf(green.copy(alpha = .7f), green), p0, p1)
+            drawPath(curve, ink, style = Stroke(2.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
             drawCircle(green, 3.dp.toPx(), p0)
             drawCircle(green, 3.dp.toPx(), p1)
             if (!ease.hasHandles && ease.isParametric) {
                 // A alça de parâmetros: posição = (A, B) num quadro central do gráfico.
-                val r = 12.dp.toPx()
                 val c = Offset(inset + (PARAM_MIN + ease.paramA() * PARAM_SPAN) * w,
                                inset + (1f - (PARAM_MIN + (ease.paramB() ?: .5f) * PARAM_SPAN)) * h)
-                val rr = if (activeHandle == 0) r * 1.2f else r
-                drawCircle(Color.White, rr, c)
-                drawCircle(green, rr, c, style = Stroke(2.dp.toPx()))
+                drawCurveKnob(c, activeHandle == 0)
                 // Setas: só horizontal (curva de um parâmetro) ou as duas direções.
-                val a = 5.dp.toPx()
-                drawLine(green, Offset(c.x - a, c.y), Offset(c.x + a, c.y), 1.5.dp.toPx())
-                if (ease.paramB() != null) drawLine(green, Offset(c.x, c.y - a), Offset(c.x, c.y + a), 1.5.dp.toPx())
+                val a = 3.5.dp.toPx()
+                drawLine(green, Offset(c.x - a, c.y), Offset(c.x + a, c.y), 1.5.dp.toPx(), StrokeCap.Round)
+                if (ease.paramB() != null) drawLine(green, Offset(c.x, c.y - a), Offset(c.x, c.y + a), 1.5.dp.toPx(), StrokeCap.Round)
             }
             if (ease.hasHandles) {
                 val hh = ease.handles()
-                val r = 12.dp.toPx()
-                for (k in 0..1) {
-                    val c = if (k == 0) pt(hh[0], hh[1]) else pt(hh[2], hh[3])
-                    val rr = if (activeHandle == k) r * 1.2f else r
-                    drawCircle(Color.White, rr, c)
-                    drawCircle(green, rr, c, style = Stroke(2.dp.toPx()))
-                }
+                for (k in 0..1) drawCurveKnob(if (k == 0) pt(hh[0], hh[1]) else pt(hh[2], hh[3]), activeHandle == k)
             }
         }
-        // O cabeçote em camada própria: a linha tracejada no instante do trecho.
+        // O cabeçote em camada própria: a linha tracejada fina no instante do trecho.
         Canvas(Modifier.fillMaxSize()) {
             val f = progress() ?: return@Canvas
             val inset = CURVE_INSET.toPx()
             val x = inset + f * max(1f, size.width - 2 * inset)
-            drawLine(Color.White.copy(alpha = 0.6f), Offset(x, 0f), Offset(x, size.height),
+            drawLine(Color.White.copy(alpha = 0.35f), Offset(x, 0f), Offset(x, size.height),
                 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 3.dp.toPx())))
         }
     }
@@ -1279,28 +1273,43 @@ private val HANDLE_HIT = 28.dp
 private val CURVE_SNAP = 10.dp
 
 /**
- * A grade da referência: 32 × 32 na área do gráfico, grossa (1 dp) a cada 8 e
- * fina (0,5 dp); branco 6 % na faixa 0..1 e 3 % fora dela; 0 e 1 tracejados a 25 %.
+ * A grade (1.0.8 visual minimalista): 4 × 4 na área do gráfico, linhas finas a
+ * 6 %, sem borda pesada; 0 e 1 só um tracejado fino a 12 % (com passar do ponto).
  */
 private fun DrawScope.drawGrid(inset: Float, w: Float, h: Float, yTop: Float, yBottom: Float) {
-    val thick = 1.dp.toPx()
-    val thin = 0.5.dp.toPx()
-    fun lines(alpha: Float) {
-        val c = Color.White.copy(alpha = alpha)
-        for (i in 0..32) {
-            val sw = if (i % 8 == 0) thick else thin
-            val x = inset + w * i / 32f
-            val y = inset + h * i / 32f
-            drawLine(c, Offset(x, inset), Offset(x, inset + h), sw)
-            drawLine(c, Offset(inset, y), Offset(inset + w, y), sw)
-        }
+    val c = AureaColors.CurveGridLine
+    val thin = 1.dp.toPx()
+    for (i in 0..4) {
+        val x = inset + w * i / 4f
+        val y = inset + h * i / 4f
+        drawLine(c, Offset(x, inset), Offset(x, inset + h), thin)
+        drawLine(c, Offset(inset, y), Offset(inset + w, y), thin)
     }
-    lines(0.03f)
-    // Dentro da faixa 0..1 a grade fica mais forte (3 % + 3 % ≈ 6 %).
-    clipRect(top = minOf(yTop, yBottom), bottom = maxOf(yTop, yBottom)) { lines(0.03f) }
-    val lim = Color.White.copy(alpha = 0.25f)
-    val dash = PathEffect.dashPathEffect(floatArrayOf(2.dp.toPx(), 2.dp.toPx()))
-    for (py in floatArrayOf(yTop, yBottom)) drawLine(lim, Offset(inset, py), Offset(inset + w, py), thick, pathEffect = dash)
+    val lim = Color.White.copy(alpha = 0.12f)
+    val dash = PathEffect.dashPathEffect(floatArrayOf(2.dp.toPx(), 3.dp.toPx()))
+    for (py in floatArrayOf(yTop, yBottom)) drawLine(lim, Offset(inset, py), Offset(inset + w, py), thin, pathEffect = dash)
+}
+
+/**
+ * A alça (1.0.8): círculo branco de 14 dp com sombra macia (18 dp, preto a 25 %,
+ * 1 dp abaixo) e, no dedo, halo de 26 dp em destaque a 18 % — o polegar do slider.
+ */
+private fun DrawScope.drawCurveKnob(c: Offset, held: Boolean) {
+    if (held) drawCircle(AureaColors.FxThumbHalo, 13.dp.toPx(), c)
+    val shadowR = 9.dp.toPx()
+    val shadowC = Offset(c.x, c.y + 1.dp.toPx())
+    drawCircle(
+        Brush.radialGradient(
+            0f to AureaColors.FxThumbShadow,
+            0.7f to AureaColors.FxThumbShadow,
+            1f to Color.Transparent,
+            center = shadowC,
+            radius = shadowR,
+        ),
+        shadowR,
+        shadowC,
+    )
+    drawCircle(Color.White, 7.dp.toPx(), c)
 }
 
 /** Instante LOCAL do cabeçote na camada [layer] (o tempo das marcas dela). */

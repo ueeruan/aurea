@@ -893,12 +893,18 @@ AUREA_TEST(ClipTime, SplitAndReverseKeepTheIntegratedSpeedTime) {
     TimeRig q(cfg_with_audio());
     speed_key(q, 0, 1.0f);
     speed_key(q, 20, 3.0f);
+    std::vector<f64> forward;
+    for (i64 f = q.L()->start.value; f < q.L()->end.value; ++f) forward.push_back(q.L()->source_frame(FrameIndex{f}));
     q.reverse(true);
     const Layer* l = q.L();
     AUREA_CHECK_NEAR(l->source_frame(FrameIndex{l->end.value - 1}), 0.0, 1e-9);
     bool down = true;
     for (i64 f = 1; f < l->end.value; ++f) down = down && l->source_frame(FrameIndex{f}) < l->source_frame(FrameIndex{f - 1});
     AUREA_CHECK(down);
+    for (usize f = 0; f < forward.size(); ++f) {
+        AUREA_CHECK_NEAR(l->source_frame(FrameIndex{l->start.value + static_cast<i64>(f)}),
+                         forward[forward.size() - 1 - f], 1e-6);
+    }
 }
 
 // =============================================================================

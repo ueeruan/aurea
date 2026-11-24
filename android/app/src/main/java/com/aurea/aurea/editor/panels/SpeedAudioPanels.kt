@@ -40,6 +40,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -52,6 +54,11 @@ import androidx.compose.ui.unit.sp
 import com.aurea.aurea.engine.TrackProperty
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.ds.AureaToggle
+import com.aurea.aurea.ui.ds.FxParamLabel
+import com.aurea.aurea.ui.ds.FxRow
+import com.aurea.aurea.ui.ds.FxRuler
+import com.aurea.aurea.ui.ds.FxValueBox
+import com.aurea.aurea.ui.ds.rememberFxRulerState
 import com.aurea.aurea.ui.ds.KeypadRequest
 import com.aurea.aurea.ui.ds.KeyframeLook
 import com.aurea.aurea.ui.ds.PropertyCustomRow
@@ -177,8 +184,7 @@ private fun clock(frames: Int, fps: Float): String {
 // (`fragment_speed_keyframe` da referência: retempo · valor · régua)
 //
 // Coluna esquerda: ‹ · ◆ (velocidade no cabeçote) · Curva (só Bézier) · ⋯.
-// Vídeo e áudio têm os extras do AUREA nas abas da direita: Velocidade ·
-// Curva de tempo · Opções. Nas camadas sem fonte (forma, texto, nulo…) a
+// Vídeo tem a aba Opções. Nas camadas sem fonte (forma, texto, nulo…) a
 // velocidade é constante e o motor reescala a animação da própria camada.
 // =============================================================================
 
@@ -200,42 +206,23 @@ internal fun SpeedPanel(env: PanelEnv) {
         detail.speedAnimated -> KeyframeLook.Animated
         else -> KeyframeLook.None
     }
-    val canKey = keyed && !detail.timeRemap
-    // 0.4.1: com o Remapear ligado, o ◆ e a Curva da coluna esquerda passam a ser os do
-    // remapeamento (antes a curva tinha um botão próprio na linha do tempo da fonte).
-    val remap = keyed && detail.timeRemap
-    val remapKeys = if (remap) store.keysForLayer(detail.id).orEmpty().filter { it.property == TrackProperty.TIME_REMAP }.sortedBy { it.time } else emptyList()
-    val remapHere = remapKeys.indexOfFirst { it.time == detail.localPlayhead }
+    val canKey = keyed && !detail.locked && !detail.timeRemap
     val rail = PanelRail(
         onBack = env.onClose,
-        keyframeLook = if (remap) (if (remapHere >= 0) KeyframeLook.KeyHere else if (remapKeys.isNotEmpty()) KeyframeLook.Animated else KeyframeLook.None) else look,
-        onKeyframe = when {
-            canKey -> ({ store.toggleSpeedKeyframe() })
-            remap -> ({ if (remapHere >= 0) store.remapRemove(remapHere) else store.remapInsert(detail.localPlayhead.toLong()) })
-            else -> null
-        },
-        onDeleteAllKeyframes = { store.deleteAllKeyframes(detail.id, listOf(TrackKey(if (remap) TrackProperty.TIME_REMAP else TrackProperty.SPEED))) },
-        onCurve = when {
-            canKey -> ({ openTrackCurve(env, TrackProperty.SPEED) })
-            remap -> ({ openRemapCurve(env, detail.localPlayhead) })
-            else -> null
-        },
-        curveReady = if (remap) remapKeys.size >= 2 else speedKeys.size >= 2,
+        keyframeLook = if (canKey) look else KeyframeLook.None,
+        onKeyframe = if (canKey) ({ store.toggleSpeedKeyframe() }) else null,
+        onDeleteAllKeyframes = if (canKey) ({ store.deleteAllKeyframes(detail.id, listOf(TrackKey(TrackProperty.SPEED))) }) else null,
+        onCurve = if (canKey) ({ openTrackCurve(env, TrackProperty.SPEED) }) else null,
+        curveReady = speedKeys.size >= 2,
     )
-    // F10: a aba Opções só tem o que é do vídeo (de trás para a frente, repetir, câmera
-    // lenta); as fichas de velocidade repetiam a régua e saíram. Áudio: Velocidade · Curva.
     val video = kind == LayerType.Video.kind
-    val tabs = if (media) listOfNotNull(
+    val tabs = if (video) listOf(
         PanelTab("speed", stringResource(R.string.editor_velocidade), glyph = CupertinoGlyph.Speedometer),
-        PanelTab("curve", stringResource(R.string.om_lp_speed_tab_curve), glyph = CupertinoGlyph.Waveform),
-        if (video) PanelTab("options", stringResource(R.string.om_lp_speed_tab_options), glyph = CupertinoGlyph.SliderHorizontal3) else null,
+        PanelTab("options", stringResource(R.string.om_lp_speed_tab_options), glyph = CupertinoGlyph.SliderHorizontal3),
     ) else emptyList()
-    PanelFrame(rail = rail, tabs = tabs, selectedTab = tab, onTab = { tab = it }) {
-        when (if (media && (video || tab != "options")) tab else "speed") {
-            "curve" -> SpeedCurveTab(env)
-            "options" -> SpeedOptionsTab(env)
-            else -> SpeedMainTab(env, keyed)
-        }
+    val activeTab = if (video && tab == "options") "options" else "speed"
+    PanelFrame(rail = rail, tabs = tabs, selectedTab = activeTab, onTab = { tab = it }) {
+        if (activeTab == "options") SpeedOptionsTab(env) else SpeedMainTab(env, keyed)
     }
 }
 
@@ -263,7 +250,12 @@ private fun SpeedMainTab(env: PanelEnv, keyed: Boolean) {
         val blocked = detail.timeRemap || frozen || notBakeable
         val value = "${speedLabel(speed)} · ${clock(detail.endFrame - detail.startFrame, store.project.fps)}"
         when {
-            detail.timeRemap -> Text(stringResource(R.string.om_lp_speed_remap_on), style = muted)
+            detail.timeRemap -> PanelItemRow(CupertinoGlyph.Clock, stringResource(R.string.remap_linha_tempo), "speed.open-remap", chevron = true) {
+                val type = effectTypeId("aurea.time.remap")
+                if (store.effects.any { it.typeId == type }) store.focusExistingEffect(type)
+                else if (!detail.locked) store.addEffectAndFocus(type)
+                env.onOpenPanel(EditorPanel.Effects)
+            }
             frozen -> Text(stringResource(R.string.panel_este_trecho_quadro_parado_apare_bordas), style = muted)
             notBakeable -> Text(stringResource(R.string.om_lp_speed_keyed), style = muted)
             else -> Text(
@@ -278,7 +270,7 @@ private fun SpeedMainTab(env: PanelEnv, keyed: Boolean) {
             )
         }
         Spacer(Modifier.height(6.dp))
-        SpeedSlider(
+        if (!detail.timeRemap) SpeedSlider(
             value = speed,
             enabled = !blocked,
             height = PanelMetrics.Touch,
@@ -295,25 +287,6 @@ private fun SpeedMainTab(env: PanelEnv, keyed: Boolean) {
     }
 }
 
-/** Aba Curva de tempo (extra do AUREA): Normal/Remapear, a curva de velocidade e os prontos. */
-@Composable
-private fun SpeedCurveTab(env: PanelEnv) {
-    val store = env.store
-    val remapping by remember(store) { derivedStateOf { store.detail?.timeRemap ?: false } }
-    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            RemapChip(stringResource(R.string.remap_normal), on = !remapping) { store.applySpeedRamp(-1) }
-            RemapChip(stringResource(R.string.remap_linha_tempo), on = remapping) { store.enableManualTimeRemap() }
-        }
-        Spacer(Modifier.height(8.dp))
-        // As mesmas linhas do painel antigo (par do iOS): o remapeamento em lista,
-        // ou a dica de como a curva de velocidade nasce dos keyframes (◆ na coluna).
-        // F10: a interpolação dos quadros mora em Opções (câmera lenta); aqui só a curva.
-        if (remapping) TimeRemapControls(env, showInterpolation = false)
-        else Text(stringResource(R.string.panel_velocidade_keyframes_duracao_fica), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
-    }
-}
-
 /**
  * Aba Opções (extras do AUREA, só vídeo): de trás para a frente, repetir a mídia e a
  * câmera lenta (quadros entre os da fonte). F10: as fichas 0,25x…4x saíram (a régua e
@@ -327,7 +300,7 @@ private fun SpeedOptionsTab(env: PanelEnv) {
     val isVideo by remember(store) { derivedStateOf { store.detail?.kind == LayerType.Video.kind } }
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
         if (isVideo) {
-            Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (store.detail?.timeRemap != true) Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.panel_passar_tras_frente), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Label)))
                 AureaToggle(checked = reversed, onCheckedChange = { store.setLayerReversed(it) })
             }
@@ -694,27 +667,6 @@ private fun SpeedCurveSection(env: PanelEnv, data: FloatArray) {
     Text(stringResource(R.string.speed_curve_hint), style = muted)
 }
 
-/**
- * Remapear: tempo da fonte, keyframes e rampas prontas.
- */
-@Composable
-private fun RemapSection(env: PanelEnv, @Suppress("UNUSED_PARAMETER") data: FloatArray?) {
-    val store = env.store
-    Text(stringResource(R.string.speed_presets), style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Label)))
-    Spacer(Modifier.height(6.dp))
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        listOf(
-            0 to R.string.panel_linear, 1 to R.string.panel_suave, 2 to R.string.speed_preset_hero,
-            3 to R.string.remap_acelerar, 4 to R.string.panel_desacelerar, 7 to R.string.remap_congelar_aqui,
-            5 to R.string.speed_ramp_freeze_all,
-        ).forEach { (preset, label) ->
-            RemapChip(stringResource(label), on = false) { store.applySpeedRamp(preset) }
-        }
-    }
-    Spacer(Modifier.height(4.dp))
-    TimeRemapControls(env, showInterpolation = false)
-}
-
 private fun log2Speed(s: Float): Float = (kotlin.math.ln(s.coerceIn(0.05f, 16f)) / kotlin.math.ln(2f)) * 100f
 
 /** Encosta nos valores redondos (0,25 · 0,5 · 1 · 2 · 4) quando passa perto. */
@@ -973,146 +925,82 @@ private fun AudioRuler(
     }
 }
 
-/**
- * REMAPEAR TEMPO em lista (inspirado no Node Video, com o tema do Aurea): três
- * linhas e o Ao contrário, nada de gráfico de valor.
- *  1. Manter o tom do áudio — liga/desliga (o som segue a curva sem mudar a nota).
- *  2. Remapear tempo — o MOMENTO DA FONTE no cabeçote, em timecode. Arrastar o
- *     valor para os lados (ajuste fino: 1 quadro a cada 4 dp) ou tocar para
- *     digitar grava a chave ali: "neste instante da timeline mostra este
- *     instante do vídeo". O ◇ do rótulo marca/tira a chave; a faixa fina embaixo
- *     mostra as chaves e o cabeçote (tocar numa chave vai até ela e a escolhe; a
- *     curva ao lado abre o editor de curva NORMAL do Aurea para aquele trecho).
- *  3. Interpolação do tempo — Desligado / Mistura de quadros / Optical flow.
- * O dado é a MESMA curva da camada: prévia, exportação e som seguem ela.
- */
+/** Source time at the playhead. Keyframes and curve use the Effects sidebar. */
 @Composable
-internal fun TimeRemapEffectEditor(env: PanelEnv, @Suppress("UNUSED_PARAMETER") effectId: Int) {
-    TimeRemapControls(env, showInterpolation = true)
-}
-
-/**
- * As linhas do remapeamento, no efeito antigo (projetos salvos com ele) e na
- * aba Remapear do painel de velocidade (0.1.8). O momento da fonte no cabeçote
- * vem do motor (`query_speed_curve`), não do parâmetro do efeito.
- */
-@Composable
-internal fun TimeRemapControls(env: PanelEnv, showInterpolation: Boolean) {
+internal fun TimeRemapEffectEditor(env: PanelEnv, effectEnabled: Boolean) {
     val store = env.store
-    val q by remember(store) { derivedStateOf { store.timeRemap } }
-    val local by remember(store) { derivedStateOf { store.detail?.localPlayhead ?: 0 } }
-    // Manual remap has no effect id. Read the source moment from the same core
-    // curve used by preview/export instead of looking up an effect parameter.
-    val sourceFrames by remember(store) {
-        derivedStateOf {
-            if (store.timeRemap == null) 0f else store.detail?.let { detail ->
-                // detail is observable and includes localPlayhead; the curve
-                // state above also invalidates this value when keys change.
-                store.timeRemapCurrentSource(detail.id).takeIf { it.isFinite() }?.toFloat()
-            } ?: 0f
+    val detail = store.detail ?: return
+    val data = store.timeRemap
+    if (!effectEnabled || data == null || data.size < 5 || !detail.timeRemap) {
+        KitHint(stringResource(R.string.remap_ligue_efeito))
+        return
+    }
+    val layer = detail.id
+    val local = detail.localPlayhead
+    val inside = local in data[1].toInt()..data[2].toInt() && !detail.locked
+    val fps = store.project.fps.takeIf { it > 0f } ?: 30f
+    val last = max(1f, if (data[3] > 0f) data[3] else data[2] - data[1] - 1f)
+    val value = store.timeRemapCurrentSource(layer).takeIf { it.isFinite() }?.toFloat() ?: 0f
+    val ruler = rememberFxRulerState()
+    val shown = timecode((ruler.live ?: value).roundToInt(), fps)
+    val title = stringResource(R.string.remap_linha_tempo)
+    val rulerLabel = stringResource(R.string.om_fx_ruler, title)
+    var dragLocal by remember(layer) { mutableStateOf<Int?>(null) }
+    val project = store.projectGeneration
+    val composition = store.composition?.id
+    val write = { frame: Int, source: Float ->
+        if (store.primary == layer && store.projectGeneration == project && store.composition?.id == composition) {
+            store.setRemapSourceFrame(frame, source.roundToInt().toFloat())
         }
     }
-    val keepPitch by remember(store) { derivedStateOf { store.detail?.keepPitch ?: false } }
-    val frameBlend by remember(store) { derivedStateOf { store.detail?.frameBlendMode ?: 0 } }
-    val reversed by remember(store) { derivedStateOf { store.detail?.remapReversed ?: false } }
-    val isVideo by remember(store) { derivedStateOf { store.detail?.kind == LayerType.Video.kind } }
-    val selectedKey by remember(store) {
-        derivedStateOf { store.selectedKeyframe?.second?.takeIf { it.property == TrackProperty.TIME_REMAP }?.time }
-    }
-    val muted = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Note, lineHeight = 16.sp, color = AureaColors.Muted))
-    val rowText = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Label))
-    Column(Modifier.fillMaxWidth()) {
-        // 1) Manter o tom do áudio.
-        Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.remap_manter_tom), modifier = Modifier.weight(1f), style = rowText)
-            AureaToggle(checked = keepPitch, onCheckedChange = { store.setKeepPitch(it) })
+    val begin = { dragLocal = local; store.beginGesture(title) }
+    val finish = { dragLocal = null; store.endGesture() }
+    Column(Modifier.fillMaxWidth().testTag("effects.remap.controls")) {
+        Row(Modifier.fillMaxWidth().height(FxRow.Ruler), verticalAlignment = Alignment.CenterVertically) {
+            FxParamLabel(title, 45.dp, Modifier.padding(FxRow.Margin), active = inside, enabled = inside)
+            FxRuler(value, 1f, 0f, last, onStart = begin, onValue = { write(dragLocal ?: local, it) },
+                onEnd = finish, state = ruler, enabled = inside, limits = true,
+                modifier = Modifier.weight(1f).height(FxRow.Ruler - 12.dp).testTag("effects.remap.ruler").semantics {
+                    contentDescription = rulerLabel
+                    stateDescription = shown
+                    if (inside) setProgress { next ->
+                        if (!next.isFinite()) return@setProgress false
+                        begin()
+                        write(local, next.coerceIn(0f, last))
+                        finish()
+                        true
+                    }
+                })
+            FxValueBox(shown, 45.dp, Modifier.padding(FxRow.Margin).testTag("effects.remap.timecode"), width = 85.dp, enabled = inside,
+                onClick = {
+                    env.openKeypad(KeypadRequest(title, value / fps, "s", 0f, last / fps, 3) { seconds ->
+                        store.beginGesture(title)
+                        write(local, seconds * fps)
+                        store.endGesture()
+                    })
+                })
         }
-        val data = q
-        if (data == null || data.size < 5) {
-            Text(stringResource(R.string.remap_ligue_efeito), style = muted)
-            return@Column
-        }
-        val fps = store.project.fps.takeIf { it > 0f } ?: 30f
-        val lo = data[1].toInt()
-        val hi = data[2].toInt()
-        val lastFrame = max(1f, if (data[3] > 0f) data[3] else data[2])
-        val keyTimes = (0 until data[0].toInt()).mapNotNull { i -> data.getOrNull(5 + i * 7)?.toInt() }
-        val keyHere = keyTimes.indexOf(local)
-        val inside = local in lo..hi
-        // 2) Remapear tempo: ◇ no rótulo, timecode arrastável/digitável e a curva.
-        var drag by remember { mutableStateOf<Float?>(null) }
-        var dragLocal by remember(store.primary) { mutableStateOf<Int?>(null) }
-        val shownFrames = drag ?: sourceFrames
-        val title = stringResource(R.string.remap_linha_tempo)
-        PropertyCustomRow(
-            label = title,
-            selected = keyHere >= 0,
-            onSelect = {
-                if (inside) {
-                    if (keyHere >= 0) store.remapRemove(keyHere) else store.remapInsert(local.toLong())
-                }
-            },
-            keyframe = if (keyHere >= 0) KeyframeLook.KeyHere else KeyframeLook.Animated,
-        ) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.weight(1f).height(48.dp).valueDrag(
-                        enabled = inside,
-                        start = { sourceFrames },
-                        unitsPerDp = { 0.25f },
-                        min = 0f,
-                        max = lastFrame,
-                        onStart = { dragLocal = local; store.beginGesture("tempo do vídeo") },
-                        onValue = { f -> drag = f.roundToInt().toFloat(); store.setRemapTime(0, f.roundToInt() / fps, dragLocal ?: local) },
-                        onEnd = { store.endGesture(); drag = null; dragLocal = null },
-                    ),
-                    contentAlignment = Alignment.CenterStart,
-                ) {
-                    ValueBox(
-                        timecode(shownFrames.roundToInt(), fps),
-                        width = 112.dp,
-                        enabled = inside,
-                        onTap = {
-                            env.openKeypad(
-                                KeypadRequest(title, (shownFrames / fps), "s", 0f, lastFrame / fps, 2) { s ->
-                                    store.setRemapTime(0, s.coerceIn(0f, lastFrame / fps))
-                                },
-                            )
-                        },
-                    )
-                }
-                // 0.4.1: a curva do trecho é a da coluna esquerda (Curva), como em toda propriedade.
+        if (!inside && !detail.locked) KitHint(stringResource(R.string.remap_fora_clipe))
+        if (!detail.locked && detail.endFrame - detail.startFrame >= 2) {
+            PanelItemRow(CupertinoGlyph.ArrowLeftRight, stringResource(R.string.remap_ao_contrario), "effects.remap.reverse") {
+                store.reverseRemap()
             }
         }
-        RemapKeyStrip(
-            keys = keyTimes,
-            lo = lo,
-            hi = hi,
-            playhead = local,
-            selected = selectedKey,
-            description = stringResource(R.string.remap_faixa_chaves),
-            onKey = { t -> store.selectRemapKey(t) },
-            onScrub = { t -> store.detail?.let { d -> store.seek(d.timelineFrame(t.coerceIn(lo, max(lo, hi - 1)))) } },
-        )
-        if (!inside) Text(stringResource(R.string.remap_fora_clipe), style = muted)
-        Spacer(Modifier.height(6.dp))
-        // 3) Interpolação do tempo (quadros entre os da fonte: prévia e exportação).
-        if (isVideo && showInterpolation) {
-            Text(stringResource(R.string.remap_interpolacao), style = rowText)
-            Spacer(Modifier.height(6.dp))
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf(0 to R.string.remap_interp_off, 1 to R.string.remap_interp_blend, 2 to R.string.remap_interp_flow).forEach { (m, label) ->
-                    RemapChip(stringResource(label), on = frameBlend == m) { store.setFrameBlend(m) }
+        if (!detail.locked) {
+            PanelSection(stringResource(R.string.om_lp_speed_tab_options), CupertinoGlyph.SliderHorizontal3,
+                "effects.remap.options", startOpen = false, flat = true) {
+                Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.remap_manter_tom), modifier = Modifier.weight(1f),
+                        style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Label)))
+                    AureaToggle(checked = detail.keepPitch, onCheckedChange = { store.setKeepPitch(it) })
+                }
+                if (detail.kind == LayerType.Video.kind) {
+                    ChipRow(stringResource(R.string.remap_interpolacao),
+                        listOf(R.string.remap_interp_off, R.string.remap_interp_blend, R.string.remap_interp_flow).map { stringResource(it) },
+                        detail.frameBlendMode, onPick = { store.setFrameBlend(it) })
                 }
             }
-            Spacer(Modifier.height(4.dp))
         }
-        // Ao contrário: espelha a curva (duas vezes volta ao que era).
-        Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.remap_ao_contrario), modifier = Modifier.weight(1f), style = rowText)
-            AureaToggle(checked = reversed, onCheckedChange = { store.reverseRemap() })
-        }
-        Text(stringResource(R.string.remap_dica_lista), style = muted)
     }
 }
 
@@ -1131,13 +1019,13 @@ internal fun timecode(frames: Int, fps: Float): String {
  * Editor de curva NORMAL do Aurea para o trecho do remapeamento: a chave
  * escolhida na faixa, senão a que abre o trecho sob o cabeçote.
  */
-private fun openRemapCurve(env: PanelEnv, local: Int) {
+internal fun openRemapCurve(env: PanelEnv, local: Int) {
     val store = env.store
     val layer = store.primary ?: return
     val keys = store.keysForLayer(layer).orEmpty().filter { it.property == TrackProperty.TIME_REMAP }.sortedBy { it.time }
     if (keys.size < 2) return
     val chosen = store.selectedKeyframe?.takeIf { it.first == layer && it.second.property == TrackProperty.TIME_REMAP }?.second
-    val key = chosen?.let { c -> keys.firstOrNull { it.time == c.time } }
+    val key = chosen?.let { c -> keys.dropLast(1).firstOrNull { it.time == c.time } ?: keys[keys.size - 2] }
         ?: keys.lastOrNull { it.time <= local }?.takeIf { it != keys.last() }
         ?: keys[keys.size - 2].takeIf { local >= keys.last().time }
         ?: keys.first()
@@ -1156,73 +1044,4 @@ private fun RemapChip(label: String, on: Boolean, onClick: () -> Unit) {
     ) {
         Text(label, maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.ChipText, color = if (on) AureaColors.Accent else AureaColors.Text)))
     }
-}
-
-/**
- * A faixa fina das chaves (tempo local do clipe, lo..hi): losangos nas chaves,
- * o escolhido aceso, e a linha do cabeçote. Tocar perto de um losango vai até
- * ele e o escolhe; tocar/arrastar no resto move o cabeçote (a prévia segue).
- */
-@Composable
-private fun RemapKeyStrip(
-    keys: List<Int>,
-    lo: Int,
-    hi: Int,
-    playhead: Int,
-    selected: Int?,
-    description: String,
-    onKey: (Int) -> Unit,
-    onScrub: (Int) -> Unit,
-) {
-    val span = max(1, hi - lo)
-    val accent = AureaColors.Accent
-    val keyColor = AureaColors.Text
-    val track = AureaColors.Chip
-    val head = AureaColors.Playhead
-    val readKeys by androidx.compose.runtime.rememberUpdatedState(keys)
-    val readKey by androidx.compose.runtime.rememberUpdatedState(onKey)
-    val readScrub by androidx.compose.runtime.rememberUpdatedState(onScrub)
-    Box(
-        Modifier.fillMaxWidth().height(32.dp).padding(start = 102.dp, end = 4.dp)
-            .semantics { contentDescription = description }
-            .pointerInput(lo, hi) {
-                val pad = 8.dp.toPx()
-                fun frameAt(x: Float): Int {
-                    val w = (size.width - pad * 2).coerceAtLeast(1f)
-                    return lo + (((x - pad) / w).coerceIn(0f, 1f) * span).roundToInt()
-                }
-                fun xOf(t: Int): Float = pad + (size.width - pad * 2).coerceAtLeast(1f) * ((t - lo).toFloat() / span)
-                awaitEachGesture {
-                    val down = awaitFirstDown()
-                    down.consume()
-                    val hit = readKeys.minByOrNull { abs(xOf(it) - down.position.x) }
-                        ?.takeIf { abs(xOf(it) - down.position.x) <= 14.dp.toPx() }
-                    if (hit != null) readKey(hit) else readScrub(frameAt(down.position.x))
-                    while (true) {
-                        val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
-                        if (!change.pressed) break
-                        change.consume()
-                        if (hit == null) readScrub(frameAt(change.position.x))
-                    }
-                }
-            }
-            .drawBehind {
-                val pad = 8.dp.toPx()
-                val w = (size.width - pad * 2).coerceAtLeast(1f)
-                fun xOf(t: Int): Float = pad + w * ((t - lo).toFloat() / span)
-                val y = size.height / 2f
-                drawRoundRect(track, topLeft = Offset(pad, y - 1.5.dp.toPx()), size = Size(w, 3.dp.toPx()), cornerRadius = CornerRadius(2f, 2f))
-                val r = 5.dp.toPx()
-                keys.forEach { t ->
-                    if (t < lo - 1 || t > hi + 1) return@forEach
-                    val x = xOf(t.coerceIn(lo, max(lo, hi)))   // 1.0.6: hi < lo não derruba o desenho
-                    val path = androidx.compose.ui.graphics.Path().apply {
-                        moveTo(x, y - r); lineTo(x + r, y); lineTo(x, y + r); lineTo(x - r, y); close()
-                    }
-                    drawPath(path, if (t == selected || t == playhead) accent else keyColor)
-                }
-                val px = xOf(playhead.coerceIn(lo, max(lo, hi)))
-                drawLine(head, Offset(px, 2.dp.toPx()), Offset(px, size.height - 2.dp.toPx()), strokeWidth = 2.dp.toPx())
-            },
-    )
 }

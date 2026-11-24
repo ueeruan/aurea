@@ -483,8 +483,9 @@ struct CachedCompositionFrame {
 struct FrameSnapshot {
     Status effectFailure{};   ///< preparation failure belonging to this snapshot
     std::unique_ptr<Layer> temporalPrefixLayer;
+    std::vector<std::unique_ptr<Layer>> precompControlLayers;
     u64 temporalSourceLayer = 0;
-    bool temporalStaticScene = false;
+    bool temporalEligible = false, temporalModelSpace = false;
     u64 temporalComposition = 0, temporalRevision = 0, temporalContentKey = 0;
     CachedCompositionFrame cachedComposition{};
     struct VideoSourceWait {
@@ -591,6 +592,7 @@ struct RenderSettings {
     /// do buffer antes do play e no export: false. O TimeSlice em vídeo não
     /// tira o decoder do fluxo do playback para buscar faixas enquanto toca.
     bool previewPlaying = false;
+    u64 previewPlaybackGeneration = 0; ///< discontinuities, including seeks and scrub
     /// Opt-in completed540p composition. Default leaves ordinary preview/export
     /// unchanged; presentation still applies the normal zoom/color/checkerboard.
     TextureHandle cachedComposition{};
@@ -787,7 +789,8 @@ public:
                  const RenderSettings& settings, u64 frameNumber, i32 playDirection,
                  DecodeMode decodeMode, f32 speed, FrameSnapshot& out,
                  f64 exactTime = std::numeric_limits<f64>::quiet_NaN(),
-                 LayerId prefixLayer = {}, u32 prefixEnd = kInvalidIndex);
+                 LayerId prefixLayer = {}, u32 prefixEnd = kInvalidIndex,
+                 const CompositionRef* instance = nullptr);
 
     void prepare_raw(LayerId id, const Layer& layer, const Asset& asset, i64 mediaUs,
                      MediaManager& media, u64 frameNumber, DecodeMode mode,

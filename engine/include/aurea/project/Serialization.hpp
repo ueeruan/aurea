@@ -59,6 +59,7 @@ enum class SectionKind : u16 {
     MaskRig     = 13,   ///< lote M: chaves/feather variável/RotoBezier das máscaras e as ligações de caminho (nulos)
     VectorTree  = 15,   ///< lote X: árvore de formas do AE (ordem livre, itens a mais, grupos de dentro, inclinação) de cada camada vetorial
     SourceWindow = 16,  ///< 1.0.2: mídia importada só no trecho cortado (início da janela e origem de cada asset)
+    PrecompControls = 17,
     _Count,
 };
 

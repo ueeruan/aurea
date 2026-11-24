@@ -40,4 +40,29 @@ struct TemporalEase {
     return true;
 }
 
+/// Speed graph tangent for the selected end of a segment. The x coordinate
+/// is a fraction of the segment, and base speed is in property units/sec.
+[[nodiscard]] inline bool speed_graph_tangent(f32* handles, bool incoming, u32 power, f32 base,
+                                              f32& fraction, f32& velocity, bool editing) noexcept {
+    if (!handles || !std::isfinite(base) || std::abs(base) < 1e-6f) return false;
+    for (u32 i = 0; i < 4; ++i) if (!std::isfinite(handles[i])) return false;
+    power = std::clamp(power, 1u, 3u);
+    const u32 x = incoming ? 2u : 0u;
+    if (editing) {
+        if (!std::isfinite(fraction) || !std::isfinite(velocity)) return false;
+        fraction = std::clamp(fraction, .01f, .99f);
+        const f32 relative = velocity / base;
+        f32 slope = relative;
+        if (power == 2) slope = std::sqrt(std::max(0.f, relative));
+        if (power == 3) slope = std::cbrt(relative);
+        handles[x] = fraction;
+        handles[x + 1] = std::clamp(incoming ? 1.f - slope * (1.f - fraction) : slope * fraction, -2.f, 3.f);
+    } else {
+        fraction = std::clamp(handles[x], .01f, .99f);
+        const f32 slope = incoming ? (1.f - handles[x + 1]) / (1.f - fraction) : handles[x + 1] / fraction;
+        velocity = base * (power == 1 ? slope : power == 2 ? slope * slope : slope * slope * slope);
+    }
+    return std::isfinite(velocity);
+}
+
 } // namespace aurea

@@ -209,7 +209,9 @@ internal fun FxParamRow(
             if (typeId == effectTypeId("aurea.3d.part_texture")) PartTextureImageRow(env, effectId, label)
             else CubeLutImportRow(env, effectId)
         ParamType.CURVE ->
-            if (com.aurea.aurea.effects.PluginTexts.isPlugin(typeId)) CollapsibleCurveEditor(env, effectId, s.index, label)
+            if (com.aurea.aurea.effects.PluginTexts.isPlugin(typeId) ||
+                (typeId == effectTypeId("aurea.generate.particular") && s.index in 59..60) || isCopyLayoutEffect(typeId)
+            ) CollapsibleCurveEditor(env, effectId, s.index, label)
             else ColorCurveEditor(env, effectId, s.index)
         ParamType.GRADIENT -> GradientParamEditor(env, effectId, s.index, label)
         else -> Row(Modifier.fillMaxWidth().height(FxRow.Small), verticalAlignment = Alignment.CenterVertically) {
@@ -311,7 +313,8 @@ private fun FxNumberRow(
                 onStart = { onSelect(key, false); store.beginGesture("ajustar $label") },
                 onValue = ::write,
                 onEnd = { store.endGesture() },
-                modifier = Modifier.weight(1f).fillMaxHeight().padding(horizontal = 8.dp)
+                // 1.0.8: o slider é régua — a mesma altura da régua da linha ao lado.
+                modifier = Modifier.weight(1f).height(FxRow.Ruler - 12.dp)
                     .testTag("effects.slider.$effectId.${s.index}"),
                 enabled = enabled,
                 a11yLabel = stringResource(R.string.om_fx_slider, label),
@@ -487,7 +490,8 @@ private fun FxVectorRow(
                         val v = if (c == axis && ruler.live != null) now else values[c]
                         Row(
                             Modifier.weight(1f).fillMaxWidth()
-                                .padding(top = if (c == 0) 7.dp else 1.dp, bottom = if (c == 0) 1.dp else 7.dp),
+                                // 1.0.8: folgas de 4 (antes 7) na linha mais baixa.
+                                .padding(top = if (c == 0) 4.dp else 1.dp, bottom = if (c == 0) 1.dp else 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
@@ -697,7 +701,32 @@ private fun FxChoiceRow(
     val value = rememberParamValue(env, effectId, s.index, 0)
     val locked = rememberLocked(env)
     val enabled = s.enabled && !locked
-    val options = s.enumLabels.ifEmpty { List((s.max - s.min).roundToInt().coerceAtLeast(0) + 1) { "${it + 1}" } }
+    val type = store.effects.firstOrNull { it.effectId == effectId }?.typeId
+    if (type == effectTypeId("aurea.generate.particular") && s.index == 48) {
+        val guard = remember(env, effectId) { FxWriteGuard(env) }
+        ParticleShapeField(value.roundToInt(), enabled, "effects.choice.$effectId.${s.index}") { shape ->
+            if (guard.ok()) {
+                onSelect(ParamKey(effectId, s.index, 0), false)
+                store.paramOf(effectId, s.index)?.let { store.setEffectParam(effectId, it, shape.toFloat()) }
+            }
+        }
+        return
+    }
+    val rawOptions = when {
+        type == effectTypeId("aurea.generate.particular") && s.index == 52 -> listOf(
+            stringResource(R.string.particle_continuous), stringResource(R.string.particle_form_grid),
+            stringResource(R.string.particle_burst), stringResource(R.string.particle_path),
+        )
+        isCopyLayoutEffect(type) && (s.index == 1 || s.index == 5) -> listOf(
+            stringResource(R.string.copies_line), stringResource(R.string.copies_grid),
+            stringResource(R.string.copies_ring), stringResource(R.string.copies_scatter),
+        )
+        type == effectTypeId("aurea.transition.ink_bloom") && s.index == 1 -> listOf(
+            stringResource(R.string.ink_mark), stringResource(R.string.ink_reveal), stringResource(R.string.ink_erase),
+        )
+        else -> s.enumLabels.ifEmpty { List((s.max - s.min).roundToInt().coerceAtLeast(0) + 1) { "${it + 1}" } }
+    }
+    val options = rawOptions
         // 1.0.2: opção paga sem o AureaHyper (Flow Retime › Neural (IA)) leva o cadeado.
         .mapIndexed { i, o -> if (store.optionLocked(effectId, s.index, i.toFloat())) "$o 🔒" else o }
     val current = value.roundToInt().coerceIn(0, max(0, options.lastIndex))

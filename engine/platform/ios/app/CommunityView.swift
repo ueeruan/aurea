@@ -242,6 +242,7 @@ struct CommunityView: View {
                         Text(AureaText.t("conta_erro_rede")).font(.aurea(size: 12, weight: .bold)).foregroundStyle(AureaColors.lightText)
                             .multilineTextAlignment(.center).frame(maxWidth: 300)
                     }.frame(maxWidth: .infinity).padding(.top, 120).padding(24)
+                    .background(ScrollBounceProbe(bounces: true).accessibilityHidden(true))
                 }
                 .refreshable { await state.pullRefresh() }
                 .accessibilityIdentifier("home.feed.offline")
@@ -264,6 +265,7 @@ struct CommunityView: View {
                     ForEach(state.feed) { post in postCard(post) }
                     if state.cursor != nil { Button(AureaText.t("social_more")) { state.run { try await state.loadFeed(more: true) } }.frame(minHeight: 44).disabled(state.busy) }
                 }.padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 69)
+                .background(ScrollBounceProbe(bounces: true).accessibilityHidden(true))
             }
             .refreshable { await state.pullRefresh() }
             .accessibilityIdentifier("social.feed")

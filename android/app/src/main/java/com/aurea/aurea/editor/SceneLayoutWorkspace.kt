@@ -69,6 +69,11 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.aurea.aurea.editor.panels.curveStart
 import com.aurea.aurea.editor.panels.sameTrack
+import com.aurea.aurea.editor.panels.effectTypeId
+import com.aurea.aurea.effects.PluginRuntime
+import com.aurea.aurea.effects.scenePluginMenuEntries
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import com.aurea.aurea.state.EditorStore
 
 /** Mobile scene workspace. Rendering and object/pose gestures keep their shared owner. */
@@ -82,6 +87,10 @@ internal fun SceneLayoutWorkspace(store: EditorStore, ui: EditorUi, stage: @Comp
     var expanded by remember { mutableStateOf(false) }
     var transform by remember { mutableStateOf(false) }
     var materialPanel by remember { mutableStateOf(EditorPanel.Element3D) }
+    var addonEffect by remember { mutableStateOf<Int?>(null) }
+    val addonPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) PluginRuntime.beginInstall(uri)
+    }
     val wide = sceneWide()
     var fullscreen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     // Deitado a altura é pouca: as barras do sistema saem para dar espaço às viewports.
@@ -99,7 +108,7 @@ internal fun SceneLayoutWorkspace(store: EditorStore, ui: EditorUi, stage: @Comp
     }
     if (materials) SceneSheet(onDismiss = { materials = false }) {
         PanelContent(store = store, panel = materialPanel, onClose = { materials = false }, onOpenPanel = { materialPanel = it }, onOpenEffectsBrowser = { ui.effectsBrowser = true }, modifier = Modifier.fillMaxWidth().fillMaxHeight(.8f),
-            alwaysHeader = true)
+            alwaysHeader = true, focusedEffectType = addonEffect)
     }
     if (lights) SceneSheet(onDismiss = { lights = false }) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(.8f)) {
@@ -114,9 +123,19 @@ internal fun SceneLayoutWorkspace(store: EditorStore, ui: EditorUi, stage: @Comp
         }
     }
     val selected = store.layers.firstOrNull { it.id == store.primary }
-    val openMaterial = { materialPanel = EditorPanel.Element3D; materials = true }
+    val openMaterial = { addonEffect = null; materialPanel = EditorPanel.Element3D; materials = true }
     val openLights = { lights = true }
     val isModel = selected?.kind == LayerType.Model3D.kind
+    val openAddon: (Int) -> Unit = { type ->
+        if (store.effects.none { it.typeId == type }) store.addEffectAndFocus(type)
+        addonEffect = type
+        materialPanel = EditorPanel.Effects
+        materials = true
+    }
+    val drawPlane = {
+        store.exitSceneEditor()
+        store.startDrawing(inScene = true)
+    }
     // O painel 3D e os menus abrem o Esqueleto: ele vira a área de baixo.
     LaunchedEffect(store.skeletonPanel) { if (store.skeletonPanel) area = AREA_SKELETON }
     LaunchedEffect(isModel) { if (!isModel && area == AREA_SKELETON) area = 0 }
@@ -219,6 +238,9 @@ internal fun SceneLayoutWorkspace(store: EditorStore, ui: EditorUi, stage: @Comp
                         } else StudioProperties(store, openMaterial, openLights)
                     }
                 } else SceneMobileDock(store, ui, moreEntries, { addMenu = !addMenu }, openMaterial, openLights,
+                    onAddon = openAddon, onDrawPlane = drawPlane, onImportAddon = {
+                        addonPicker.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
+                    },
                     onTransform = { tool ->
                         if (rigPoseActive(store)) store.choosePoseTool(if (tool == com.aurea.aurea.state.GIZMO_MOVE) com.aurea.aurea.state.POSE_TOOL_MOVE else com.aurea.aurea.state.POSE_TOOL_ROTATE)
                         else store.chooseSceneTool(tool)
@@ -298,7 +320,8 @@ private fun ScenePanelBack(onBack: () -> Unit) {
 
 @Composable
 private fun SceneMobileDock(store: EditorStore, ui: EditorUi, entries: List<MenuEntry>, onModels: () -> Unit,
-                            onMaterial: () -> Unit, onLights: () -> Unit, onTransform: (Int) -> Unit,
+                            onMaterial: () -> Unit, onLights: () -> Unit, onAddon: (Int) -> Unit,
+                            onDrawPlane: () -> Unit, onImportAddon: () -> Unit, onTransform: (Int) -> Unit,
                             onAnimation: () -> Unit, onPivot: () -> Unit, onParts: () -> Unit, onBack: () -> Unit) {
     val selected = store.layers.firstOrNull { it.id == store.primary }
     val fontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale.coerceIn(1f, 2f)
@@ -330,6 +353,24 @@ private fun SceneMobileDock(store: EditorStore, ui: EditorUi, entries: List<Menu
                 if (selected.kind == LayerType.Model3D.kind || store.shape3d != null)
                     SceneDockAction(CupertinoGlyph.SquareOnSquare, stringResource(R.string.shape3d_parts), "scene.parts", onClick = onParts)
                 SceneDockAction(CupertinoGlyph.SmallcircleCircle, stringResource(R.string.om_ap_tf_pivot), "scene.pivot", onClick = onPivot)
+            }
+            var addons by remember { mutableStateOf(false) }
+            Box {
+                SceneDockAction(CupertinoGlyph.Sparkles, stringResource(R.string.scene_addons), "scene.addons") { addons = true }
+                val modelSelected = selected?.kind == LayerType.Model3D.kind && store.detail?.locked != true
+                val plugins = if (addons) scenePluginMenuEntries(store, onAddon) else emptyList()
+                val tools = listOf(
+                    MenuEntry.Item(stringResource(R.string.fx_model_repeat), CupertinoGlyph.SquareOnSquare,
+                        enabled = modelSelected, tag = "scene.addons.repeater") { onAddon(effectTypeId("aurea.3d.replicator")) },
+                    MenuEntry.Item(stringResource(R.string.fx_model_toon), CupertinoGlyph.CubeFill,
+                        enabled = modelSelected, tag = "scene.addons.toon") { onAddon(effectTypeId("aurea.3d.toon")) },
+                    MenuEntry.Item(stringResource(R.string.scene_drawing_plane), CupertinoGlyph.Pencil,
+                        tag = "scene.addons.drawing", onClick = onDrawPlane),
+                    MenuEntry.Divider,
+                    MenuEntry.Item(stringResource(R.string.plug_install), CupertinoGlyph.Folder,
+                        enabled = store.busyMessage == null, tag = "scene.plugins.install", onClick = onImportAddon),
+                ) + plugins
+                AnchoredMenu(addons, { addons = false }, tools, tone = AureaSurfaceTone.Editor, alignEnd = true, tag = "scene.addons.list")
             }
             var more by remember { mutableStateOf(false) }
             Box {

@@ -158,9 +158,47 @@ float map_value(vec2 px, vec4 src) {
     return p.p1.x > 0.5 ? 1.0 - m : m;
 }
 
+float ink_coverage(vec2 px) {
+    const float progress = p.p0.x;
+    if (progress <= 0.0) return 0.0;
+    if (progress >= 1.0) return 1.0;
+    const float edge = max(p.p0.y, max(p.box.z, p.box.w) * 0.0007);
+    const float fibers = p.p2.w;
+    float total = 0.0;
+    for (int i = 0; i < 6; ++i) {
+        if (float(i) >= p.p1.x) break;
+        const vec2 id = vec2(i, 17.0);
+        const vec2 random = ld_h2(id);
+        const vec2 center = i == 0 ? p.p2.xy : p.p2.xy + (random - 0.5) * p.box.zw * 0.82;
+        const float delay = i == 0 ? 0.0 : 0.08 + 0.26 * random.y;
+        if (progress <= delay) continue;
+        const float growth = (progress - delay) / (1.0 - delay);
+        const float radius = p.p2.z * growth * growth * (i == 0 ? 1.45 : 0.42 + 0.48 * random.x);
+        const vec2 local = px - center;
+        const float dist = length(local);
+        if (dist > radius * 1.7 + edge) continue;
+        const vec2 direction = local / max(dist, 0.001);
+        const vec2 offset = random * 48.0;
+        const float lobes = ld_fbm(direction * 4.0 + offset, 3) - 0.5;
+        const float texture = ld_fbm(direction * 22.0 + local * 0.04 + offset, 3);
+        const float wisps = pow(clamp(texture * 1.35, 0.0, 1.0), 3.0) - 0.25;
+        const float rim = radius * (1.0 + fibers * (0.48 * lobes + 0.53 * wisps));
+        const float wet = smoothstep(-edge, edge, rim - dist);
+        const float dilute = smoothstep(-2.5 * edge, edge, rim - dist);
+        total = max(total, mix(dilute * 0.45, 1.0, wet));
+    }
+    return total;
+}
+
 void main() {
     const vec2 px = cc_px();
     const vec4 src = cc_at(px);
+    if (p.p0.w > 21.5) {
+        const float coverage = ink_coverage(px);
+        if (p.p0.z < 0.5) o_color = p.color * coverage;
+        else o_color = src * (p.p0.z < 1.5 ? coverage : 1.0 - coverage);
+        return;
+    }
     if (p.p5.w > 0.5) { o_color = vec4(0.0); return; }
     const float m = map_value(px, src);
     const float t = p.p0.x;

@@ -2,6 +2,7 @@
 // Omega aparência: inclinação da camada (P0-6) e preenchimento em degradê (P1-4).
 #include "aurea/core/LayerSkew.hpp"
 #include "aurea/timeline/ShapeFill.hpp"
+#include "aurea/timeline/PrecompControls.hpp"
 #include "aurea/effects/RandomEdits.hpp"
 #include "aurea/render/PreviewCachePolicy.hpp"
 #include "aurea/render/ShutterPlan.hpp"
@@ -24,6 +25,7 @@
 #include "aurea/scene3d/Shape3D.hpp"
 #include "aurea/scene3d/PartEffects.hpp"
 #include "aurea/scene3d/Explode3D.hpp"
+#include "aurea/scene3d/RepeatLayout.hpp"
 #include "aurea/scene3d/RigPose.hpp"
 #include "aurea/rig/Mocap.hpp"
 #include "aurea/scene3d/StudioEnvironment.hpp"
@@ -217,6 +219,20 @@ Mat4 layer_from_model(const Model3DData& m) noexcept {
     flip.col[1] = Vec4{0, -1, 0, 0};
     flip.col[2] = Vec4{0, 0, -1, 0};
     return flip * Mat4::scale(Vec3{m.unitScale, m.unitScale, m.unitScale}) * Mat4::translation(-m.pivot);
+}
+
+Mat4 replica_matrix(const Mat4& layerWorld, const Model3DData& model, const repeat_layout::Copy& copy) noexcept {
+    const Vec3 radians = copy.rotation * kDeg2Rad;
+    return layerWorld * Mat4::translation(copy.position)
+        * Mat4::from_quat(Quat::from_euler_zyx(radians.x, radians.y, radians.z))
+        * Mat4::scale(Vec3{copy.scale}) * layer_from_model(model);
+}
+
+void place_replica(scene3d::SceneInstance& instance, const Model3DData& model, const Mat4& world,
+                   const repeat_layout::Copy& copy) noexcept {
+    instance.world = replica_matrix(world, model, copy);
+    instance.replicaOpacity = copy.opacity;
+    instance.replicaTint = copy.tint;
 }
 
 Mat4 layer_matrix(const Layer& l, FrameIndex local) noexcept {
@@ -462,6 +478,26 @@ bool can_share_static_pose(const Layer& layer, const scene3d::SceneAsset& asset)
             (asset.shapeParts && effect.type == effect_type_id(effect_keys::kShape3DLayout)))) return false;
     }
     return true;
+}
+
+bool has_only_model_transform_animation(const Layer& layer) {
+    if (layer.kind != LayerKind::Model3D || layer.timeRemapEnabled) return false;
+    for (const auto& effect : layer.effects) if (effect.enabled) return false;
+    bool animated = false;
+    for (u32 i = 0; i < layer.tracks.size(); ++i) {
+        const auto& track = layer.tracks.at(i);
+        if (!track.animated()) continue;
+        switch (track.property) {
+            case TrackProperty::PositionX: case TrackProperty::PositionY: case TrackProperty::PositionZ:
+            case TrackProperty::ScaleX: case TrackProperty::ScaleY: case TrackProperty::ScaleZ:
+            case TrackProperty::RotationX: case TrackProperty::RotationY: case TrackProperty::RotationZ:
+                animated = true;
+                break;
+            default:
+                return false;
+        }
+    }
+    return animated;
 }
 
 /// FOV vertical (graus) da câmera no instante local: a trilha de distância
@@ -1108,9 +1144,8 @@ void Renderer::scan_for_warmup(const Project& project) noexcept {
 }
 
 void Renderer::warm_scene_pipelines(const FrameSnapshot& snapshot) noexcept {
-    if (snapshot.temporalStaticScene && !heavyQ_.exportFrame) {
-        warmPending_.push_back(PipelineKey::fullscreen(ShaderId::scene3d_post_temporal_frag, kWorkFormat));
-        warmPending_.push_back(PipelineKey::fullscreen(ShaderId::scene3d_post_temporal_depth_frag, SurfaceFormat::R32F));
+    if (snapshot.temporalEligible && !heavyQ_.exportFrame) {
+        TemporalReconstruction::warmup_pipelines(backend_->capabilities(), warmPending_);
     }
     // The project scan runs before render quality has been resolved. Keep its
     // composition qualities, then derive the SAME sample count as the draw.
@@ -2056,14 +2091,26 @@ f64 flow_retime_timeline(const Layer& l, const EffectInstance& e, f64 timelineTi
     };
     const Track* t = l.tracks.find(TrackProperty::EffectParam, e.id, param_track_key(0, 0));
     if (!t || t->keys.empty()) return static_cast<f64>(l.start.value) + elapsed * speed(l0);
-    // Velocidade animada: ponto médio quadro a quadro (exato no segurado e no
-    // linear; o easing erra muito abaixo de um quadro). Teto de 2^20 passos.
-    const i64 n = std::min<i64>(static_cast<i64>(std::floor(elapsed)), i64{1} << 20);
-    f64 acc = 0.0;
-    for (i64 k = 0; k < n; ++k) acc += speed(l0 + static_cast<f64>(k) + 0.5);
-    const f64 frac = elapsed - static_cast<f64>(n);
-    if (frac > 0.0) acc += frac * speed(l0 + static_cast<f64>(n) + 0.5 * frac);
-    return static_cast<f64>(l.start.value) + acc;
+    // Integrate between keyframes. The number of evaluations depends on the
+    // curve, even if a single segment spans hours of footage.
+    const f64 end = l0 + elapsed;
+    f64 cursor = l0, distance = 0.0;
+    auto next = std::upper_bound(t->keys.begin(), t->keys.end(), cursor,
+        [](f64 time, const Keyframe& key) { return time < static_cast<f64>(key.time.value); });
+    for (; next != t->keys.end() && cursor < end; ++next) {
+        const f64 boundary = std::min(end, static_cast<f64>(next->time.value));
+        const f64 width = boundary - cursor;
+        if (next == t->keys.begin() || (next - 1)->interp == Interpolation::Hold) {
+            distance += width * speed(cursor);
+        } else {
+            constexpr int samples = 16;
+            const f64 step = width / samples;
+            for (int i = 0; i < samples; ++i) distance += step * speed(cursor + (i + 0.5) * step);
+        }
+        cursor = boundary;
+    }
+    if (cursor < end) distance += (end - cursor) * speed(cursor);
+    return static_cast<f64>(l.start.value) + distance;
 }
 
 /// Os efeitos de tempo por optical flow da camada de vídeo no instante.
@@ -2581,7 +2628,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                        MediaManager* media, const ImagePixels* (*imageLookup)(void*, AssetId),
                        void* imageCtx, const RenderSettings& settings, u64 frameNumber,
                        i32 playDirection, DecodeMode decodeMode, f32 speed, FrameSnapshot& out,
-                       f64 exactTime, LayerId prefixLayer, u32 prefixEnd) {
+                       f64 exactTime, LayerId prefixLayer, u32 prefixEnd, const CompositionRef* instance) {
     if (previewGraph_.active) return;
     out.effectFailure=OkStatus;
     EffectFailureScope failureScope{effectFailureSink_,preparingEffects_,out.effectFailure,true};
@@ -2593,6 +2640,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         ~EffectSourceScope() { if (entered) --depth; }
     } effectSourceScope{effectSourceDepth_,prefixLayer.valid()};
     out.temporalPrefixLayer.reset();
+    out.precompControlLayers.clear();
     out.temporalSourceLayer = 0;
     if (const Layer* prefix = comp.layer(prefixLayer); prefix && prefixEnd != kInvalidIndex) {
         out.temporalPrefixLayer = std::make_unique<Layer>(*prefix);
@@ -2705,7 +2753,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     }
     out.target = FGTexture{};
     out.cachedComposition = {};
-    out.temporalStaticScene = false;
+    out.temporalEligible = false;
+    out.temporalModelSpace = false;
     out.temporalComposition = comp.id().pack();
     out.temporalRevision = settings.previewCacheRevision;
     out.temporalContentKey = 0;
@@ -2857,6 +2906,19 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         // Effects sample their input source outside the layer's composition
         // interval as well. Keep start/offset intact for the media clock.
         if (!l || (!temporalHost && !contains_time_frac(*l,compositionTime))) continue;
+        if (instance && l->precompExposed) {
+            std::unique_ptr<Layer> edited;
+            for (const auto& value : instance->overrides) {
+                if (value.target != id || !(l->precompExposed & precomp_control_bit(value.kind) & available_precomp_controls(*l))) continue;
+                if (temporalHost && value.kind == PrecompControl::Opacity) continue;
+                if (!edited) edited = std::make_unique<Layer>(*l);
+                apply_precomp_value(*edited, value);
+            }
+            if (edited) {
+                l = edited.get();
+                out.precompControlLayers.push_back(std::move(edited));
+            }
+        }
         u64 clipBaseOf = 0;          // id com sal da base; 0 = não recortada
         bool clipHidden = false;     // recortada sem base válida embaixo
         bool clipHasChild = false;   // a próxima camada no instante é recortada por esta
@@ -3195,7 +3257,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         backdropBare_ = bare || rl.adjustScope != 0;
                         ++prepareDepth_;
                         prepare(comp, project, FrameIndex{frame}, media, imageLookup, imageCtx, settings, frameNumber,
-                                playDirection, decodeMode, speed, *snap);
+                                playDirection, decodeMode, speed, *snap, static_cast<f64>(frame), {}, kInvalidIndex, instance);
                         --prepareDepth_;
                         nestSalt_ = savedSalt;
                         renderInstancePath_.resize(savedPathSize);
@@ -3571,6 +3633,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 inst.doubleSided = model_interior_visible(l->model.interior, asset->shapeParts) || explodeHollow;
                 inst.assetKey = modelKey;
                 inst.asset = std::move(asset);
+                inst.celBands = repeat_layout::toon_bands(*l, localF);
                 // EFEITOS DA CAMADA (Raios de luz, Brilho, Reflexo de lente...)
                 // num modelo / texto 3D / forma 3D: valem sobre o RESULTADO 3D
                 // desta camada. Ela ganha uma cena só dela (do tamanho da
@@ -3589,8 +3652,36 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     sceneFx = !out.plans[used].empty() || out.plans[used].hasFold;
                     if (!sceneFx) out.plans[used].clear();
                 }
+                const auto* repeat = repeat_layout::active(*l, repeat_layout::kModelKey);
+                auto appendModel = [&](scene3d::SceneFrame& scene) {
+                    if (!repeat) {
+                        scene.instances.push_back(std::move(inst));
+                        return;
+                    }
+                    if (!inst.sharedPose) {
+                        auto pose = std::make_shared<scene3d::SceneInstance>();
+                        pose->nodeWorld = std::move(inst.nodeWorld);
+                        pose->jointMatrices = std::move(inst.jointMatrices);
+                        pose->skinJointOffset = std::move(inst.skinJointOffset);
+                        pose->morphWeights = std::move(inst.morphWeights);
+                        pose->materials = std::move(inst.materials);
+                        pose->nodeOpacity = std::move(inst.nodeOpacity);
+                        pose->nodeFill = std::move(inst.nodeFill);
+                        pose->outlineNdc = inst.outlineNdc;
+                        pose->outlineColor = inst.outlineColor;
+                        inst.sharedPose = std::move(pose);
+                    }
+                    const Mat4 layerWorld = world_3d_frac(comp, *l, compositionTime);
+                    const u32 count = repeat_layout::model_count(*l, *repeat, localF);
+                    scene.instances.reserve(scene.instances.size() + count);
+                    for (u32 index = 0; index < count; ++index) {
+                        scene3d::SceneInstance& copy = scene.instances.emplace_back(inst);
+                        copy.replicaIndex = index + 1;
+                        place_replica(copy, l->model, layerWorld, repeat_layout::sample_model(*l, *repeat, localF, index));
+                    }
+                };
                 if (groupOpen && !out.scenes.empty() && !sceneFx && !clipInvolved) {
-                    out.scenes.back().instances.push_back(std::move(inst));
+                    appendModel(out.scenes.back());
                     continue;   // entra no grupo aberto; nenhuma layer nova na pilha
                 }
                 // Com efeitos o objeto sai da cena comum, mas o chão fica nela (os
@@ -3615,7 +3706,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     out.plans[used] = std::move(objectFx);
                 }
                 out.scenes.emplace_back();
-                out.scenes.back().instances.push_back(std::move(inst));
+                appendModel(out.scenes.back());
                 rl.source.kind = LayerSource::Kind::Scene3D;
                 rl.source.sceneGroup = static_cast<u32>(out.scenes.size() - 1);
                 if (sceneFx) fxSceneGroups.push_back(rl.source.sceneGroup);
@@ -4352,7 +4443,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     pt.groupVolume = groupVolume;
                     g_cameraPassThrough = pt;
                 }
-                const CachedCompositionFrame cached = !cameraThrough && !settings.finalQuality && settings.nestedCacheLookup
+                const CachedCompositionFrame cached = !cameraThrough && l->nested.overrides.empty() &&
+                    !settings.finalQuality && settings.nestedCacheLookup
                     ? settings.nestedCacheLookup(settings.nestedCacheContext, child->id(), FrameIndex{cf})
                     : CachedCompositionFrame{};
                 if (cached.texture.valid()) {
@@ -4362,7 +4454,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     snapChild->cachedComposition = cached;
                 } else {
                     prepare(*child, project, FrameIndex{cf}, media, imageLookup, imageCtx, childSettings, frameNumber,
-                            playDirection, decodeMode, speed, *snapChild, childTimeF);
+                            playDirection, decodeMode, speed, *snapChild, childTimeF, {}, kInvalidIndex,
+                            l->nested.overrides.empty() ? nullptr : &l->nested);
                 }
                 g_cameraPassThrough = savedThrough;
                 --prepareDepth_;
@@ -4920,7 +5013,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     const CameraPassThrough savedThrough = g_cameraPassThrough;
                     g_cameraPassThrough = CameraPassThrough{};
                     prepare(*child, project, FrameIndex{cf}, media, imageLookup, imageCtx, childSettings, frameNumber,
-                            playDirection, decodeMode, speed, *snap);
+                            playDirection, decodeMode, speed, *snap, static_cast<f64>(cf), {}, kInvalidIndex,
+                            l->nested.overrides.empty() ? nullptr : &l->nested);
                     g_cameraPassThrough = savedThrough;
                     --prepareDepth_;
                     nestSalt_ = savedSalt;
@@ -5162,6 +5256,10 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 const f64 srcFrameF = l->source_frame_f(flowFx.srcTimeline);
                 u8 frameBlend = flowFx.frameBlend;
                 i64 mediaUs = static_cast<i64>(std::llround(srcFrameF * 1e6 / fps));
+                const i64 dur = streamInfo.durationUs;
+                if (dur > 0 && l->loopMedia) mediaUs = ((mediaUs % dur) + dur) % dur;
+                mediaUs = std::clamp<i64>(mediaUs, 0, dur > 0 ? dur - 1 : std::numeric_limits<i64>::max());
+                const i64 sourceMomentUs = mediaUs;
                 // Mistura de quadros: posição FRACIONÁRIA na grade da fonte.
                 i64 nextUs = -1;
                 f32 blendT = 0.0f;
@@ -5178,16 +5276,21 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     }
                 }
                 const bool wantVector = flowFx.vectorAmount > 0.0f && shutterTravel > 1e-8;
-                if (streamInfo.preciseFrameTiming && (frameBlend >= 1 || wantVector)) {
+                const bool nearest = flowFx.retime && frameBlend == 0 && !wantVector;
+                if (streamInfo.preciseFrameTiming && (frameBlend >= 1 || wantVector || nearest)) {
                     bool currentReady = false;
                     const FrameRef current = src->frame_for(mediaUs, &currentReady);
                     if (currentReady && current && current->durationUs > 0) {
                         const i64 next = current->ptsUs + current->durationUs;
                         const f64 fraction = static_cast<f64>(mediaUs - current->ptsUs) / current->durationUs;
                         const bool between = frameBlend >= 1 && fraction > 0.01 && fraction < 0.99;
-                        if ((streamInfo.durationUs <= 0 || next < streamInfo.durationUs) && (between || wantVector)) {
-                            nextUs = next;
-                            blendT = between ? static_cast<f32>(fraction) : 0.0f;
+                        if (dur <= 0 || next < dur) {
+                            if (nearest && fraction >= 0.5) {
+                                mediaUs = next;
+                            } else if (between || wantVector) {
+                                nextUs = next;
+                                blendT = between ? static_cast<f32>(fraction) : 0.0f;
+                            }
                         }
                     }
                 } else if (frameBlend >= 1 || wantVector) {
@@ -5210,12 +5313,10 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 // quadros da fonte — a meia distância de ambos, nenhum era
                 // "exato", e o export esperava o decoder até estourar o prazo.
                 if (const f64 srcFps = streamInfo.fps; srcFps > 0.0 && !streamInfo.preciseFrameTiming) {
-                    const f64 idx = std::floor(static_cast<f64>(mediaUs) * srcFps / 1e6 + 1e-3);
+                    const f64 rounding = nearest ? 0.5 + srcFps * 0.5e-6 : 1e-3;
+                    const f64 idx = std::floor(static_cast<f64>(mediaUs) * srcFps / 1e6 + rounding);
                     mediaUs = static_cast<i64>(std::llround(idx * 1e6 / srcFps));
                 }
-                const i64 dur = streamInfo.durationUs;
-                // 0.4.6: Repetir — o tempo da fonte dá a volta (positivo também antes do 0).
-                if (dur > 0 && l->loopMedia) mediaUs = ((mediaUs % dur) + dur) % dur;
                 if (dur > 0) mediaUs = std::clamp<i64>(mediaUs, 0, last_source_timestamp(streamInfo,src->frame_duration_us()));
                 // FLOW RETIME, "Substituir quadros duplicados" (0.3.0): o quadro da
                 // fonte que REPETE o anterior (30 dentro de 60, quadro perdido ou
@@ -5228,17 +5329,60 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 // e o export esperar o quadro chegar.
                 bool duplicateMissing = false;
                 i64 duplicateWantUs = -1;
-                if (flowFx.retime && flowFx.replaceDuplicates && streamInfo.fps > 0.0) {
+                auto useDuplicatePair = [&](i64 from, i64 to) {
+                    if (to <= from) return;
+                    const f64 t = static_cast<f64>(sourceMomentUs - from) / static_cast<f64>(to - from);
+                    mediaUs = from;
+                    nextUs = t > 1e-3 ? to : -1;
+                    blendT = nextUs >= 0 ? static_cast<f32>(std::clamp(t, 0.0, 1.0)) : 0.0f;
+                    if (nextUs >= 0 && frameBlend == 0) frameBlend = 2;
+                };
+                if (flowFx.retime && flowFx.replaceDuplicates && streamInfo.preciseFrameTiming && dur > 0) {
+                    // Reach real presentation intervals through the decoder.
+                    // Its advertised average FPS does not identify VFR neighbors.
+                    bool exactCenter = false;
+                    const FrameRef center = src->frame_for(sourceMomentUs, &exactCenter);
+                    if (exactCenter && center && center->durationUs > 0) {
+                        auto adjacent = [&](i64 us) -> FrameRef {
+                            if (us < 0 || us >= dur) return {};
+                            bool exact = false;
+                            FrameRef candidate = src->frame_for(us, &exact);
+                            if (exact && candidate) return candidate;
+                            if (duplicateWantUs < 0) duplicateWantUs = us;
+                            duplicateMissing = true;
+                            return {};
+                        };
+                        auto same = [&](const FrameRef& a, const FrameRef& b) {
+                            const u64 assetKey = l->source.pack();
+                            const FrameSignature* sa = frame_signature(assetKey, a->ptsUs, a.get());
+                            const FrameSignature* sb = frame_signature(assetKey, b->ptsUs, b.get());
+                            return sa && sb && signatures_match(*sa, *sb, flowFx.duplicateSensitivity);
+                        };
+                        constexpr int reach = 6;
+                        FrameRef first = center;
+                        for (int i = 0; i < reach; ++i) {
+                            FrameRef prev = adjacent(first->ptsUs - 1);
+                            if (!prev || prev->ptsUs >= first->ptsUs || !same(prev, first)) break;
+                            first = std::move(prev);
+                        }
+                        FrameRef previous = center, next;
+                        for (int i = 0; i < reach && !duplicateMissing && previous->durationUs > 0; ++i) {
+                            FrameRef candidate = adjacent(previous->ptsUs + previous->durationUs);
+                            if (!candidate || candidate->ptsUs <= previous->ptsUs) break;
+                            if (!same(previous, candidate)) {
+                                next = std::move(candidate);
+                                break;
+                            }
+                            previous = std::move(candidate);
+                        }
+                        if (next && (first->ptsUs < center->ptsUs || previous->ptsUs > center->ptsUs))
+                            useDuplicatePair(first->ptsUs, next->ptsUs);
+                    }
+                } else if (flowFx.retime && flowFx.replaceDuplicates && dur > 0 && streamInfo.fps > 0.0
+                           && (!asset || !asset->video.variableFrameRate)) {
                     const f64 srcFps = streamInfo.fps;
-                    // O índice do ÚLTIMO quadro da grade (0.3.2, Moto g52): com tempos
-                    // precisos last_source_timestamp devolve duração − 1 µs, e o piso
-                    // com folga dava o quadro N (que não existe) — o Hyper Motion
-                    // esperava a assinatura dele e o export parava no fim do clipe.
-                    const i64 lastIndex = dur > 0
-                        ? static_cast<i64>(std::max(0.0, std::ceil(static_cast<f64>(dur) * srcFps / 1e6 - 1e-6) - 1.0))
-                        : std::numeric_limits<i64>::max() / 4;
-                    const f64 pos = std::clamp(srcFrameF / fps * srcFps, 0.0, static_cast<f64>(lastIndex));
-                    const i64 base = static_cast<i64>(std::floor(pos + 1e-3));
+                    const i64 lastIndex = static_cast<i64>(std::max(0.0, std::ceil(static_cast<f64>(dur) * srcFps / 1e6 - 1e-6) - 1.0));
+                    const i64 base = std::clamp<i64>(static_cast<i64>(std::floor(sourceMomentUs * srcFps / 1e6 + 1e-3)), 0, lastIndex);
                     auto usOf = [&](i64 i) { return static_cast<i64>(std::llround(static_cast<f64>(i) * 1e6 / srcFps)); };
                     const u64 assetKey = l->source.pack();
                     // A assinatura do quadro i; `pending` = o quadro ainda não chegou.
@@ -5281,18 +5425,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         if (d == 0) break;
                         ++next;
                     }
-                    if (known && next <= lastIndex && first < next && !(first == base && next == base + 1)) {
-                        const f64 t = (pos - static_cast<f64>(first)) / static_cast<f64>(next - first);
-                        mediaUs = usOf(first);
-                        if (t > 1e-3) {
-                            nextUs = usOf(next);
-                            blendT = static_cast<f32>(std::clamp(t, 0.0, 1.0));
-                            frameBlend = frameBlend == 1 ? u8{1} : (frameBlend == 3 ? u8{3} : u8{2});   // a mistura, se pedida; senão o movimento
-                        } else {
-                            nextUs = -1;
-                            blendT = 0.0f;
-                        }
-                    }
+                    if (known && next <= lastIndex && first < next && !(first == base && next == base + 1))
+                        useDuplicatePair(usOf(first), usOf(next));
                 }
                 if (!settings.finalQuality) {
                     for (const auto& effect : out.plans[used].evals) {
@@ -5321,8 +5455,9 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 if (flowFx.retime && playDirection != 0) {
                     // Flow Retime: a direção é a do tempo da fonte no próximo quadro.
                     const f64 b = l->source_frame_f(flow_retime_timeline(*l, *flowFx.retime,
-                                                                        static_cast<f64>(layerTime.value + playDirection)));
+                                                                        layerTimeF + playDirection));
                     req.direction = b > srcFrameF + 1e-6 ? 1 : (b < srcFrameF - 1e-6 ? -1 : 0);
+                    remapSlope = static_cast<f32>(std::abs(b - srcFrameF));
                 } else if (l->timeRemapEnabled && playDirection != 0) {
                     // Time remap (§16): a direção do DECODER é a da curva no
                     // próximo quadro — subindo, prefetch à frente; descendo,
@@ -5334,7 +5469,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 }
                 // Com remap quem manda no consumo da fonte é a curva: em 4x a
                 // janela de 1x esvaziava antes do decoder alcançar o alvo.
-                req.speed = speed * (remapSlope >= 0.0f ? std::max(0.05f, remapSlope) : std::max(0.0f, l->speed)) * static_cast<f32>(flowFx.rate);
+                req.speed = speed * (remapSlope >= 0.0f ? std::max(0.05f, remapSlope)
+                    : std::max(0.0f, l->speed) * static_cast<f32>(flowFx.rate));
                 // O pedido do quadro principal: quem pede um quadro EXTRA (vizinho
                 // do Aprimorar, assinatura de duplicado) só pede se ninguém trocou.
                 const i64 mainTargetUs = req.targetUs;
@@ -5902,7 +6038,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 sampleSettings.cachedCompositionPixels = nullptr;
                 prepare(comp, project, FrameIndex{static_cast<i64>(std::floor(request.time))}, media,
                         imageLookup, imageCtx, sampleSettings, frameNumber, playDirection, decodeMode, speed,
-                        *sample, request.time, id, eval.effectIndex);
+                        *sample, request.time, id, eval.effectIndex, instance);
                 --prepareDepth_;
                 nestSalt_ = savedSalt;
                 renderInstancePath_.resize(savedPath);
@@ -6095,7 +6231,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         };
         auto tryVector = [&](scene3d::SceneFrame& f, f64 travel) -> bool {
             if (travel > vectorLimit || !f.planeLayers.empty() || !f.particleLayers.empty()) return false;
-            for (const auto& in : f.instances) if (in.holdout || mayBlend(in)) return false;
+            for (const auto& in : f.instances) if (in.holdout || in.replicaIndex || mayBlend(in)) return false;
             const ShutterPlan window = shutter_window(mb);
             if (window.duration <= 0.0) return false;
             const f64 begin = window.begin, end = window.begin + window.duration, mid = begin + window.duration * .5;
@@ -6212,7 +6348,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     || scene3d::has_part_effects(*layer) || scene3d::explode3d::find(*layer) != nullptr;
                 for (u32 t = 0; t < layer->tracks.size(); ++t)
                     if (layer->tracks.at(t).property == TrackProperty::MaterialParam && layer->tracks.at(t).animated()) deforming[i] = true;
-                changing |= deforming[i];
+                changing |= deforming[i] || (in.replicaIndex && layer->animated());
                 if (deforming[i]) {
                     const u64 bytes = poseBytes(in);
                     bytesPerSample += bytes;
@@ -6227,7 +6363,16 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         const Mat4 camera = settings.sceneEditor.enabled && !settings.finalQuality
                             ? scene_editor_projection(out.compWidth, out.compHeight, settings.sceneEditor)
                             : comp_view_projection_frac(comp, time.value + offset, out.compWidth, out.compHeight);
-                        return camera * world_3d_frac(comp, *layer, time.value + offset) * layer_from_model(layer->model) * origin;
+                        const f64 instant = time.value + offset;
+                        const Mat4 world = world_3d_frac(comp, *layer, instant);
+                        if (in.replicaIndex) {
+                            if (const auto* repeat = repeat_layout::active(*layer, repeat_layout::kModelKey)) {
+                                const f64 local = instant - layer->start.value + layer->offset.value;
+                                return camera * replica_matrix(world, layer->model,
+                                    repeat_layout::sample_model(*layer, *repeat, local, in.replicaIndex - 1)) * origin;
+                            }
+                        }
+                        return camera * world * layer_from_model(layer->model) * origin;
                     };
                     const f32 bw = bounds.max.x - bounds.min.x, bh = bounds.max.y - bounds.min.y;
                     const f64 path = shutter_projected_path(own, bw, bh, matrixAt, previewFactor);
@@ -6296,6 +6441,11 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 base.asset = pose->asset; base.assetKey = pose->assetKey; base.world = pose->world;
                 base.layerKey = pose->layerKey; base.motionBlur = pose->motionBlur; base.castShadows = pose->castShadows;
                 base.doubleSided = pose->doubleSided;
+                base.unlitColors = pose->unlitColors;
+                base.replicaIndex = pose->replicaIndex;
+                base.replicaOpacity = pose->replicaOpacity;
+                base.replicaTint = pose->replicaTint;
+                base.celBands = pose->celBands;
                 // O recorte tem de sobreviver: sem isto a cópia de um objeto com
                 // efeitos, nos outros grupos, saía colorida por cima dele e o
                 // efeito "sumia" assim que o desfoque abria as amostras.
@@ -6353,6 +6503,11 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     in.asset = base.asset; in.assetKey = base.assetKey; in.world = base.world;
                     in.layerKey = base.layerKey; in.motionBlur = base.motionBlur; in.castShadows = base.castShadows;
                     in.doubleSided = base.doubleSided;
+                    in.unlitColors = base.unlitColors;
+                    in.replicaIndex = base.replicaIndex;
+                    in.replicaOpacity = base.replicaOpacity;
+                    in.replicaTint = base.replicaTint;
+                    in.celBands = base.celBands;
                     in.holdout = base.holdout;
                     in.ownEnvironment = base.ownEnvironment; in.environment = base.environment;
                     in.nodeTextures = base.nodeTextures;
@@ -6366,6 +6521,13 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                             in.sharedPose.reset();
                             place_model(comp, *layer, *in.asset, time.value + offset, in, &poseWorkspace_);
                         } else in.world = world_3d_frac(comp, *layer, time.value + offset) * layer_from_model(layer->model);
+                        const f64 local = time.value + offset - layer->start.value + layer->offset.value;
+                        in.celBands = repeat_layout::toon_bands(*layer, local);
+                        if (in.replicaIndex) {
+                            if (const auto* repeat = repeat_layout::active(*layer, repeat_layout::kModelKey))
+                                place_replica(in, layer->model, world_3d_frac(comp, *layer, time.value + offset),
+                                    repeat_layout::sample_model(*layer, *repeat, local, in.replicaIndex - 1));
+                        }
                     }
                     // A layer with blur off (or amount zero) retains its center
                     // camera too. Other blurred objects in the group cannot smear it.
@@ -6394,27 +6556,43 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         bool eligible = !scene.instances.empty() && scene.blurFrames.empty() && !scene.velocity.enabled
             && !scene.camera.dof && !scene.environment.showBackground && scene.planeLayers.empty()
             && scene.particleLayers.empty() && !scene3d::scene_uses_layer_textures(scene);
+        bool modelSpace = false;
         u64 content = 1469598103934665603ull;
         const auto add = [&](u64 value) { content = (content ^ value) * 1099511628211ull; };
+        // A seek or scrub can land numerically on the next frame. Preserve
+        // continuity only within the same playback generation.
+        add(settings.previewPlaybackGeneration);
         for (const auto& instance : scene.instances) {
             const auto* layer = comp.layer(LayerId::unpack(instance.layerKey));
-            eligible &= layer && instance.asset && !instance.holdout && !instance.cameraOverride;
+            eligible &= layer && instance.asset && !instance.holdout && !instance.cameraOverride
+                && !instance.replicaIndex && !instance.celBands;
             if (!eligible) break;
-            eligible &= !layer->animated() && can_share_static_pose(*layer, *instance.asset)
+            if (layer->animated()) {
+                // A single immutable model pose lets every depth sample use
+                // the same model-to-world transform. A floor has its own space.
+                modelSpace = scene.instances.size() == 1 && scene.floor.mode == 0
+                    && instance.sharedPose && has_only_model_transform_animation(*layer);
+                if (!modelSpace) { eligible = false; break; }
+            }
+            eligible &= can_share_static_pose(*layer, *instance.asset)
                 && instance.nodeTextures.empty() && instance.materialTextures.empty();
             for (const auto& material : instance.asset->materials)
-                eligible &= material.alphaMode == scene3d::AlphaMode::Opaque;
+                eligible &= material.alphaMode == scene3d::AlphaMode::Opaque
+                    && (!modelSpace || material.transmission <= 0.f);
             for (f32 opacity : instance.pose().nodeOpacity) eligible &= opacity == 1.f;
             add(instance.layerKey); add(instance.assetKey);
             add(reinterpret_cast<uintptr_t>(instance.asset.get()));
             add(reinterpret_cast<uintptr_t>(instance.sharedPose.get()));
-            for (const auto& column : instance.world.col)
-                for (f32 value : {column.x, column.y, column.z, column.w}) add(std::bit_cast<u32>(value));
+            if (!modelSpace)
+                for (const auto& column : instance.world.col)
+                    for (f32 value : {column.x, column.y, column.z, column.w}) add(std::bit_cast<u32>(value));
         }
-        comp.layers().for_each([&](LayerId, const Layer& layer) {
+        comp.layers().for_each([&](LayerId id, const Layer& layer) {
+            if (modelSpace && id.pack() == scene.instances.front().layerKey) return;
             if (layer.kind != LayerKind::Camera && layer.animated()) eligible = false;
         });
-        out.temporalStaticScene = eligible;
+        out.temporalEligible = eligible;
+        out.temporalModelSpace = eligible && modelSpace;
         out.temporalContentKey = content;
     }
 }
@@ -7446,7 +7624,7 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
             const u32 np = scene_particle_draws(group, group, parts);
             const auto& caps = backend_->capabilities();
             bool temporal = !heavyQ_.exportFrame && compositionDepth_ == 0 && currentSnap_
-                && currentSnap_->temporalStaticScene && compTargetW_ < currentSnap_->compWidth
+                && currentSnap_->temporalEligible && compTargetW_ < currentSnap_->compWidth
                 && (scene3d_.pass_samples() == 1 || caps.depthResolveSampleZero)
                 && temporalPreview_.admit(*backend_, shaders_, compTargetW_, compTargetH_,
                     lowMemoryDevice_ ? std::min<u64>(temporalBudget_, 16ull << 20) : temporalBudget_);
@@ -7457,8 +7635,10 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                 history.revision = currentSnap_->temporalRevision;
                 history.quality = currentSnap_->temporalContentKey ^ previewCacheKey_;
                 history.time = currentSnap_->time.value;
+                history.modelSpace = currentSnap_->temporalModelSpace;
                 history.viewProjection = group.camera.imageTransform * scene3d::camera_projection(group.camera,
                     static_cast<f32>(compTargetW_) / compTargetH_) * group.camera.view;
+                if (history.modelSpace) history.viewProjection = history.viewProjection * group.instances.front().world;
                 if (temporalPreview_.can_reuse(history)) jitter = TemporalReconstruction::jitter(history.time);
                 const Mat4 jittered = Mat4::translation(Vec3{2.f * jitter.x / compTargetW_,
                     2.f * jitter.y / compTargetH_, 0.f}) * history.viewProjection;
@@ -10220,7 +10400,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         ~EnvironmentTraceScope() { (void)scene.set_environment_trace(previous); }
     } environmentTrace(scene3d_, capturePhases.enabled);
     if (previewGraph_.active) return Status{Errc::Busy, "preview graph continuation active"};
-    if (!settings.previewPlaying || settings.finalQuality || !snap.temporalStaticScene)
+    if (!settings.previewPlaying || settings.finalQuality || !snap.temporalEligible)
         temporalPreview_.clear(backend_);
     if (settings.cancelFlag && settings.cancelFlag->load(std::memory_order_acquire)) {
         snap.release_video_frames(); return Errc::Cancelled;

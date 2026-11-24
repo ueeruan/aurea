@@ -36,7 +36,9 @@
 #include "aurea/core/Result.hpp"
 #include "aurea/core/Math.hpp"
 #include "aurea/render/GPUCapabilities.hpp"
+#include <array>
 #include <limits>
+#include <optional>
 #include <string>
 
 namespace aurea {
@@ -486,6 +488,33 @@ struct GpuMemoryStats {
     u64 uploadBytesThisFrame = 0;
 };
 
+struct GpuHeapBudget {
+    u64 budgetBytes = 0;  ///< Zero when unavailable.
+    u64 usageBytes = 0;   ///< Driver accounting, including this process's backing allocations.
+    bool deviceLocal = false;
+
+    [[nodiscard]] constexpr u64 headroom_bytes() const noexcept {
+        return budgetBytes > usageBytes ? budgetBytes - usageBytes : 0;
+    }
+};
+
+struct GpuMemoryBudget {
+    std::array<GpuHeapBudget, 16> heaps{};
+    u32 heapCount = 0;
+
+    /// An individual allocation must fit in one heap. Ignore host-only heaps.
+    [[nodiscard]] constexpr std::optional<u64> largest_device_local_headroom() const noexcept {
+        std::optional<u64> largest;
+        for (u32 i = 0; i < heapCount && i < heaps.size(); ++i) {
+            const auto& heap = heaps[i];
+            if (!heap.deviceLocal || !heap.budgetBytes) continue;
+            const u64 headroom = heap.headroom_bytes();
+            if (!largest || headroom > *largest) largest = headroom;
+        }
+        return largest;
+    }
+};
+
 // -----------------------------------------------------------------------------
 // Lista de comandos do frame. O backend grava; o motor só descreve.
 // -----------------------------------------------------------------------------
@@ -824,6 +853,8 @@ public:
     }
     [[nodiscard]] virtual u32  frames_in_flight() const noexcept = 0;
     [[nodiscard]] virtual GpuMemoryStats memory_stats() const noexcept = 0;
+    /// Advisory driver snapshot. Use independently of allocator-tracked bytes.
+    [[nodiscard]] virtual GpuMemoryBudget memory_budget() const noexcept { return {}; }
     /// Optional, failure-only allocation diagnostics. Never changes residency.
     virtual void log_memory_breakdown() noexcept {}
 

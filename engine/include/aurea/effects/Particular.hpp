@@ -44,6 +44,8 @@ enum Param : u32 {
     kPlexusSurface, kPlexusSurfaceOpacity, kPlexusSurfacePoints,
     // Forma da partícula (1.0.8): desenho, giro, bater de asas/balanço, cintilar.
     kShape, kSpin, kFlutter, kTwinkle,
+    kBehavior, kPathLayer, kSpriteLayer, kGridX, kGridY, kGridZ, kDisperse,
+    kSizeCurve, kOpacityCurve, kUseLifeGradient, kLifeGradient,
     kParamCount,
 };
 
@@ -51,6 +53,12 @@ enum Param : u32 {
 enum Shape : u32 {
     kShapeDisc = 0, kShapeStar, kShapeHeart, kShapeLeaf, kShapePetal, kShapeButterfly,
     kShapeConfetti, kShapeSparkle, kShapeSnowflake,
+    kShapeLine, kShapeShadedSphere, kShapeFadedSphere, kShapeDarkFadedSphere, kShapeBubble,
+    kShapeMotionPolygon, kShapeMotionSquare, kShapeTriangle, kShapeQuad,
+    kShapeTexturedTriangle, kShapeTexturedQuad, kShapeTetrahedron, kShapeCube,
+    kShapeLensConvex, kShapeLensConcave, kShapeLensFade, kShapeLensDarkFade, kShapeLensBubble,
+    kShapeTexturedSquare, kShapeTexturedDisc, kShapeTexturedFadedDisc,
+    kShapeGlowSphere, kShapeGlowStar, kShapeCloudlet, kShapeStreaklet, kShapeSprite,
     kShapeCount,
 };
 

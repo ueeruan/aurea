@@ -41,6 +41,10 @@ Result<TextureHandle> Backend::create_texture(const TextureDesc& desc) noexcept 
     if (desc.width > d.caps.maxTexture2D || desc.height > d.caps.maxTexture2D) return Status{Errc::OutOfRange};
     if (desc.sampleCount != 1) return Status{Errc::NotSupported, "GLES texture MSAA requires a separate resolve target"};
     if (desc.cube && (desc.width != desc.height || desc.layers != 6 || desc.depth != 1)) return Status{Errc::InvalidArgument};
+    // GL_R32F can be sampled on ES 3.x. Rendering into it requires the
+    // full float extension, even when the device can render into RGBA16F.
+    if (desc.renderTarget && desc.format == SurfaceFormat::R32F && !d.extension("GL_EXT_color_buffer_float"))
+        return Status{Errc::UnsupportedFormat, "GLES R32F attachments require GL_EXT_color_buffer_float"};
     const Format f = format_of(desc.format);
     if (!f.internal) return Status{Errc::UnsupportedFormat};
     Texture t; t.desc = desc;

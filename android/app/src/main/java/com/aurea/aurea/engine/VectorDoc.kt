@@ -310,43 +310,98 @@ object VModType {
     const val COUNT = 8
 }
 
-/** Caminho no cabeçote: afim grupo → composição, flags e o bezier. */
-class VPathAt(val a: FloatArray, val flags: Int, val path: VBezier) {
+/**
+ * Caminho no cabeçote: afim grupo → composição, flags e o bezier. Camada 3D
+ * (bit3): [w] é a linha de perspectiva da câmera do palco e a conta divide por
+ * ela (Engine::vector_path_at); em 2D [w] = (0, 0, 1) e nada muda.
+ */
+class VPathAt(val a: FloatArray, val flags: Int, val path: VBezier, val w: FloatArray = floatArrayOf(0f, 0f, 1f)) {
     val free: Boolean get() = flags and 1 != 0
     val animated: Boolean get() = flags and 2 != 0
     val keyHere: Boolean get() = flags and 4 != 0
+    /** Camada 3D vista pela câmera: pontos no plano dela, em perspectiva. */
+    val perspective: Boolean get() = w[0] != 0f || w[1] != 0f || w[2] != 1f
+
+    /** Profundidade (w) do ponto do grupo: ≤ 0 = atrás da câmera. */
+    fun depth(x: Float, y: Float): Float = w[0] * x + w[1] * y + w[2]
+
+    /** O ponto do grupo aparece no palco (na frente da câmera)? */
+    fun visible(x: Float, y: Float): Boolean = depth(x, y) > 1e-4f
 
     fun toComp(x: Float, y: Float, out: FloatArray) {
-        out[0] = a[0] * x + a[2] * y + a[4]
-        out[1] = a[1] * x + a[3] * y + a[5]
+        val d = depth(x, y)
+        val k = if (kotlin.math.abs(d) < 1e-6f) 1e6f else 1f / d
+        out[0] = (a[0] * x + a[2] * y + a[4]) * k
+        out[1] = (a[1] * x + a[3] * y + a[5]) * k
     }
 
-    /** Composição → grupo (nulo se a afim não inverte). */
+    /** Composição → grupo (nulo se a conta não inverte ou o ponto cai atrás da câmera). */
     fun fromComp(x: Float, y: Float, out: FloatArray): Boolean {
-        val det = a[0] * a[3] - a[1] * a[2]
-        if (kotlin.math.abs(det) < 1e-9f) return false
-        val dx = x - a[4]
-        val dy = y - a[5]
-        out[0] = (a[3] * dx - a[2] * dy) / det
-        out[1] = (-a[1] * dx + a[0] * dy) / det
+        if (!perspective) {
+            val det = a[0] * a[3] - a[1] * a[2]
+            if (kotlin.math.abs(det) < 1e-9f) return false
+            val dx = x - a[4]
+            val dy = y - a[5]
+            out[0] = (a[3] * dx - a[2] * dy) / det
+            out[1] = (-a[1] * dx + a[0] * dy) / det
+            return true
+        }
+        // Inversa da homografia [a0 a2 a4; a1 a3 a5; w0 w1 w2] (adjunta) em (x, y, 1).
+        val p = a[0]; val q = a[2]; val r = a[4]
+        val s = a[1]; val t = a[3]; val u = a[5]
+        val g = w[0]; val h = w[1]; val i = w[2]
+        val gx = (t * i - u * h) * x + (r * h - q * i) * y + (q * u - r * t)
+        val gy = (u * g - s * i) * x + (p * i - r * g) * y + (r * s - p * u)
+        val gz = (s * h - t * g) * x + (q * g - p * h) * y + (p * t - q * s)
+        if (kotlin.math.abs(gz) < 1e-12f) return false
+        val ox = gx / gz
+        val oy = gy / gz
+        if (!ox.isFinite() || !oy.isFinite() || !visible(ox, oy)) return false
+        out[0] = ox
+        out[1] = oy
         return true
     }
 
-    /** Vetor (tangente) composição → grupo. */
-    fun vecFromComp(x: Float, y: Float, out: FloatArray): Boolean {
-        val det = a[0] * a[3] - a[1] * a[2]
-        if (kotlin.math.abs(det) < 1e-9f) return false
-        out[0] = (a[3] * x - a[2] * y) / det
-        out[1] = (-a[1] * x + a[0] * y) / det
+    /**
+     * Vetor (tangente) composição → grupo. Em 3D o deslocamento depende de onde
+     * ele acontece: vale no ponto do grupo ([atX], [atY]; padrão = o centro do
+     * caminho), levado à tela, somado e trazido de volta ao plano.
+     */
+    fun vecFromComp(x: Float, y: Float, out: FloatArray, atX: Float = Float.NaN, atY: Float = Float.NaN): Boolean {
+        if (!perspective) {
+            val det = a[0] * a[3] - a[1] * a[2]
+            if (kotlin.math.abs(det) < 1e-9f) return false
+            out[0] = (a[3] * x - a[2] * y) / det
+            out[1] = (-a[1] * x + a[0] * y) / det
+            return true
+        }
+        var cx = atX
+        var cy = atY
+        if (cx.isNaN() || cy.isNaN()) {
+            cx = 0f; cy = 0f
+            path.v.forEach { cx += it.x; cy += it.y }
+            if (path.v.isNotEmpty()) { cx /= path.v.size; cy /= path.v.size }
+        }
+        if (!visible(cx, cy)) return false
+        val c = FloatArray(2)
+        toComp(cx, cy, c)
+        val g = FloatArray(2)
+        if (!fromComp(c[0] + x, c[1] + y, g)) return false
+        out[0] = g[0] - cx
+        out[1] = g[1] - cy
         return true
     }
 
     companion object {
         fun of(d: FloatArray?): VPathAt? {
             if (d == null || d.size < 9) return null
+            val flags = d[6].toInt()
+            // Bit3 (camada 3D): a linha de perspectiva vem nos 3 últimos floats.
+            val persp = flags and 8 != 0 && d.size >= 12
             return try {
-                val r = VReader(d.copyOfRange(7, d.size))
-                VPathAt(d.copyOfRange(0, 6), d[6].toInt(), VBezier.decode(r))
+                val r = VReader(d.copyOfRange(7, if (persp) d.size - 3 else d.size))
+                val w = if (persp) d.copyOfRange(d.size - 3, d.size) else floatArrayOf(0f, 0f, 1f)
+                VPathAt(d.copyOfRange(0, 6), flags, VBezier.decode(r), w)
             } catch (_: IllegalStateException) {
                 null
             }

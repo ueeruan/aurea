@@ -633,6 +633,17 @@ GpuMemoryStats Backend::memory_stats() const noexcept {
     return s;
 }
 
+GpuMemoryBudget Backend::memory_budget() const noexcept {
+    GpuMemoryBudget budget;
+    const Impl& d = *impl_;
+    const u64 workingSet = d.device ? static_cast<u64>(d.device.recommendedMaxWorkingSetSize) : 0;
+    if (workingSet) {
+        budget.heaps[0] = {workingSet, static_cast<u64>(d.device.currentAllocatedSize), true};
+        budget.heapCount = 1;
+    }
+    return budget;
+}
+
 // =============================================================================
 // Cache de pipeline (MTLBinaryArchive)
 //

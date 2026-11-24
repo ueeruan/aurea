@@ -364,10 +364,10 @@
     <string name="home_ruanzitwo_ofruanzitwo_tiktok_ruanzitwo">Ruanzitwo  ·  @ofruanzitwo  ·  TikTok @ruanzitwo</string>
     <string name="home_ver_todos">See all</string>
     <string name="panel_1_caminho">1 Path</string>
-    <string name="panel_1_recortar_pelo">1. Cut by what</string>
+    <string name="panel_1_recortar_pelo">Cut by what</string>
     <string name="panel_1_to">, 1 to </string>
     <string name="panel_2_modo">2 Mode</string>
-    <string name="panel_2_qual_camada_recorta">2. Which layer cuts</string>
+    <string name="panel_2_qual_camada_recorta">Which layer cuts</string>
     <string name="panel_2_to">, 2 to</string>
     <string name="panel_3_borda">3 Border</string>
     <string name="panel_4_rastrear">4 Track</string>
@@ -2582,7 +2582,7 @@ to edit the curve.</string>
     <string name="app_export_gallery_failed">The video was created, but it couldn\'t be saved to the gallery.</string>
     <string name="app_saved_to_gallery">Saved to the gallery, in Movies › Aurea.</string>
     <string name="app_saved_to_path">Saved to %1$s.</string>
-    <string name="app_export_software_encoder">This device has no %1$s hardware encoder for this resolution: exporting in software (slower, same quality).</string>
+    <string name="app_export_software_encoder">Encoding %1$s in software. Export may take longer.</string>
     <string name="app_export_thermal">Device is hot: the export slowed down to cool off. Quality doesn\'t change.</string>
     <string name="app_export_no_hevc">This device can\'t export HEVC at this resolution. Try H.264.</string>
     <string name="app_export_unsupported_res">This device can\'t export at this resolution.</string>
@@ -3174,7 +3174,7 @@ to edit the curve.</string>
     <string name="rig_auto">Auto</string>
     <string name="rig_done">Done</string>
     <string name="rig_hint_setup">Drag the joints onto the body · tap empty space to add one</string>
-    <string name="rig_hint_animate">Drag a hand, foot or the head (sets a keyframe)</string>
+    <string name="rig_hint_animate">Drag the tip to bend and set a keyframe</string>
     <!-- Quarentena de projeto (ProjectGuard) -->
     <string name="quarantine_title">Project with a problem</string>
     <string name="quarantine_body_open">Aurea closed while opening “%1$s”. So it doesn’t close again, it was not opened automatically. Recover tries to open it again; if it closes again, send the closing diagnostics from Settings.</string>
@@ -5893,4 +5893,7 @@ to edit the curve.</string>
     <string name="fxo_bangs">Bangs</string>
     <string name="fxo_side_locks">Side locks</string>
     <string name="fxo_glasses">Glasses</string>
+    <string name="editor_parent_link_failed">Could not link the layers to the selected parent.</string>
+    <string name="mask_use_layer">Use layer as mask</string>
+    <string name="mask_hexagon">Hexagon</string>
 </resources>

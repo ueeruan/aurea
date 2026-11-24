@@ -834,6 +834,15 @@ struct ParticleData {
 
 };
 
+enum class PrecompControl : u8 { Text, Color, Opacity };
+
+struct PrecompControlValue {
+    LayerId target{};
+    PrecompControl kind = PrecompControl::Text;
+    std::string text;
+    Vec4 rgba{};
+};
+
 struct CompositionRef {
     CompositionId composition{};
     bool          collapsed = false;   ///< exibição colapsada na timeline
@@ -841,6 +850,7 @@ struct CompositionRef {
     /// (o grupo não vira um "quadro" chapado: a cena atravessa). Só vale com o
     /// grupo do mesmo tamanho da composição e uma câmera ativa lá fora.
     bool          cameraPassThrough = false;
+    std::vector<PrecompControlValue> overrides;
 };
 
 /// Etiquetas de cor: 0 = nenhuma + as 12 cores da paleta da UI (4 bits nas
@@ -1062,6 +1072,7 @@ struct Layer {
     // --- Conteúdo ------------------------------------------------------------
     AssetId source{};              ///< vídeo, imagem, áudio ou modelo
     CompositionRef nested{};       ///< quando kind == Composition
+    u8 precompExposed = 0;         ///< static child properties published to instances
     std::shared_ptr<const tracking::CameraTrackData> cameraTrack;
     std::shared_ptr<const tracking::MotionTrackData> motionTrack;
     u32 motionTrackEffect = kInvalidIndex;
@@ -1157,11 +1168,8 @@ struct Layer {
             // Só velocidade negativa chega abaixo de min(0, entrada): com as
             // positivas de sempre o resultado é o mesmo de antes.
             const f64 floor0 = std::min(0.0, l0);
-            if (reversed) {
-                const f64 lastLocal = static_cast<f64>(end.value - 1 - start.value) + l0;
-                return std::max(floor0, l0 + speed_integral(*st, lastLocal) - speed_integral(*st, lt));
-            }
-            return std::max(floor0, l0 + speed_integral(*st, lt) - speed_integral(*st, l0));
+            const f64 at = reversed ? l0 + static_cast<f64>(end.value - 1) - timelineTime : lt;
+            return std::max(floor0, l0 + speed_integral(*st, at) - speed_integral(*st, l0));
         }
         const f64 elapsed = reversed ? static_cast<f64>(end.value - 1) - timelineTime
                                      : timelineTime - static_cast<f64>(start.value);

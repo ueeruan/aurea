@@ -34,17 +34,17 @@ extension AureaColors {
     static let addNewBadge = Color(hex: 0xFFCD4B)
     static let addOnNewBadge = Color(hex: 0x1F2238)
     /// Página "Exportar e compartilhar" (clara no Omega, D1).
-    static var exportPage: Color { lightSheet }
-    static var exportCard: Color { lightSurface }
-    static var exportText: Color { lightText }
-    static var exportHint: Color { lightTextMuted }
-    static var exportLine: Color { lightDivider }
-    static var exportPrimary: Color { lightInk }
-    static var exportOnPrimary: Color { lightOnInk }
+    static var exportPage: Color { background }
+    static var exportCard: Color { surface }
+    static var exportText: Color { text }
+    static var exportHint: Color { muted }
+    static var exportLine: Color { editorBarLine }
+    static var exportPrimary: Color { accent }
+    static var exportOnPrimary: Color { onAccent }
     /// Seta e ⓘ das linhas (#a4a4a4 no Omega).
-    static var exportAction: Color { lightTextFaint }
+    static var exportAction: Color { muted }
     /// Página do resultado (azul-marinho) e os botões dela (S9).
-    static var exportResult: Color { lightIsLight ? lightInk : background }
+    static var exportResult: Color { background }
     static var exportResultButton: Color { chipHigh }
     /// Véu do progresso sobre a página (50 %).
     static let exportScrim = Color.black.opacity(0.5)
@@ -70,26 +70,32 @@ struct AddPanelView: View {
     @EnvironmentObject private var shell: ShellPresentation
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
+        let category = shell.addCategory
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                AddBarIcon(category: category, size: 18, color: AureaColors.accent).accessibilityHidden(true)
+                Text(AureaText.t(ShellAddCategories.all[category].0))
+                    .font(.aurea(size: 14, weight: .semibold))
+                    .foregroundStyle(AureaColors.text)
+                    .accessibilityAddTraits(.isHeader)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button(action: close) {
+                    CupertinoGlyph.text(CupertinoGlyph.Xmark, size: 16, color: AureaColors.muted)
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(AureaText.t("editor_fechar_adicionar"))
+                .accessibilityIdentifier("add.close")
+            }
+            .padding(.leading, 12).background(AureaColors.editorBar)
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("editor.addPanel")
-            Button(action: close) {
-                ZStack {
-                    // 0.4.1 (mockup "interface 03"): ✕ de 24 em surfaceHigh, xmark de 12.
-                    Circle().fill(AureaColors.surfaceHigh).frame(width: 24, height: 24)
-                    CupertinoGlyph.text(CupertinoGlyph.Xmark, size: 12, color: AureaColors.text)
-                }.frame(width: 48, height: 48).contentShape(Rectangle())
-            }.buttonStyle(.plain)
-                .accessibilityLabel(AureaText.t("editor_fechar_adicionar"))
-                .accessibilityIdentifier("add.close")
         }
-        // 0.4.1 (mockup "interface 03"): a gaveta é um cartão flutuante — margem de 8, cantos
-        // de 24, vidro escuro (#121214 a 96 %) e fio de 14 %.
-        .background(Color(red: 18.0 / 255.0, green: 18.0 / 255.0, blue: 20.0 / 255.0).opacity(245.0 / 255.0))
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(Color.white.opacity(0.14), lineWidth: 1))
+        .background(AureaColors.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(AureaColors.editorBarLine).allowsHitTesting(false))
         .padding(.horizontal, 8).padding(.vertical, 4)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("add.panel")
@@ -145,8 +151,7 @@ struct ObjectGridView: View {
     var footer: String? = nil
     var warning: String? = nil
 
-    // 0.4.1 (mockup "interface 03"): duas colunas de botões (ícone no destaque + nome),
-    // fundo surfaceHigh, cantos de 12; rola na vertical dentro do cartão.
+
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 6) {
@@ -168,7 +173,7 @@ struct ObjectGridView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.leading, 12).padding(.trailing, 40).padding(.top, 12).padding(.bottom, 10)
+            .padding(.horizontal, 10).padding(.vertical, 8)
         }
     }
 }
@@ -181,15 +186,14 @@ private struct ObjectCellView: View {
                 if let icon = cell.icon { icon.frame(width: 18, height: 18) }
                 else if let glyph = cell.glyph { CupertinoGlyph.text(glyph, size: 17, color: cell.tint ?? AureaColors.accent).frame(width: 18, height: 18) }
                 Text(cell.label).font(.aurea(size: 11, weight: .medium)).foregroundStyle(AureaColors.text)
-                    .lineLimit(1).truncationMode(.tail)
+                    .lineLimit(2).truncationMode(.tail)
                 Spacer(minLength: 0)
                 if cell.locked { HyperLockBadge() }
             }
             .padding(.horizontal, 10)
-            .frame(maxWidth: .infinity, minHeight: 40, maxHeight: 40)
-            .background(AureaColors.surfaceHigh, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.white.opacity(0.03), lineWidth: 1))
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .frame(maxWidth: .infinity, minHeight: 46)
+            .background(AureaColors.surfaceHigh, in: RoundedRectangle(cornerRadius: 10))
+            .contentShape(Rectangle())
         }
         .buttonStyle(AureaPressStyle())
         .accessibilityLabel(cell.label)
@@ -225,7 +229,8 @@ private struct ShapesPagerView: View {
         GeometryReader { geometry in
             let usable = max(0, geometry.size.width - 18)
             let cols = max(4, Int(usable / 48))
-            let perPage = cols * 3
+            let rows = max(1, min(3, Int((geometry.size.height - 20) / 48)))
+            let perPage = cols * rows
             let pages = max(1, (omegaShapes.count + perPage - 1) / perPage)
             let cellWidth = usable / CGFloat(cols)
             VStack(spacing: 0) {
@@ -233,7 +238,7 @@ private struct ShapesPagerView: View {
                     ForEach(0..<pages, id: \.self) { index in
                         let slice = Array(omegaShapes.dropFirst(index * perPage).prefix(perPage))
                         VStack(spacing: 0) {
-                            ForEach(0..<3, id: \.self) { row in
+                            ForEach(0..<rows, id: \.self) { row in
                                 HStack(spacing: 0) {
                                     ForEach(0..<cols, id: \.self) { col in
                                         let at = row * cols + col
@@ -250,7 +255,8 @@ private struct ShapesPagerView: View {
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
                 .accessibilityIdentifier("add.shape.pager")
-                PageDots(count: pages, current: page).accessibilityIdentifier("add.shape.dots")
+                PageDots(count: pages, current: min(page, pages - 1)).accessibilityIdentifier("add.shape.dots")
+                    .onChange(of: pages) { page = min(page, $0 - 1) }
             }
             .padding(.vertical, 5)
         }
@@ -1081,7 +1087,7 @@ private enum AddBarDrawing {
     private var card: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(AureaText.t("bar33_more"))
+                Text(AureaText.t("editor_adicionar_camada"))
                     .font(.aurea(size: 16, weight: .bold))
                     .foregroundStyle(AureaColors.text)
                     .accessibilityAddTraits(.isHeader)
@@ -1107,9 +1113,9 @@ private enum AddBarDrawing {
             }
         }
         .padding(10)
-        .background(AddBarColors.pill, in: RoundedRectangle(cornerRadius: 28))
-        .overlay(RoundedRectangle(cornerRadius: 28).strokeBorder(AddBarColors.raised))
-        .contentShape(RoundedRectangle(cornerRadius: 28))
+        .background(AddBarColors.pill, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(AddBarColors.raised).allowsHitTesting(false))
+        .contentShape(RoundedRectangle(cornerRadius: 16))
         .onTapGesture { }
     }
 
@@ -1117,17 +1123,19 @@ private enum AddBarDrawing {
         let name = AureaText.t(ShellAddCategories.all[index].0)
         return Button { open(index) } label: {
             HStack(spacing: 8) {
-                EditToolIcon(icon: icon, color: AureaColors.accent, size: 20)
-                    .frame(width: 32, height: 32)
-                    .background(AureaColors.accentDim, in: RoundedRectangle(cornerRadius: 10))
-                Text(name).font(.aurea(size: 12, weight: .semibold))
+                EditToolIcon(icon: icon, color: AureaColors.accent, size: 19)
+                    .accessibilityHidden(true)
+                Text(name).font(.aurea(size: 13, weight: .semibold))
                     .foregroundStyle(AureaColors.text)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
+                CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 12, color: AureaColors.muted)
+                    .mirrorsInRtl().accessibilityHidden(true)
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-            .background(AddBarColors.tile, in: RoundedRectangle(cornerRadius: 14))
+            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+            .background(AddBarColors.tile, in: RoundedRectangle(cornerRadius: 10))
             .contentShape(Rectangle())
         }
         .buttonStyle(AureaPressStyle())

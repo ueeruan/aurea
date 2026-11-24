@@ -2,6 +2,7 @@
 // Camadas do sistema anterior mantêm os controles até a conversão explícita.
 // Parameter IDs remain compatible with existing saved projects.
 import SwiftUI
+import UIKit
 
 /// Índices de `ParticleParam` no motor. Nomes legíveis, números do contrato.
 private enum PPP {
@@ -391,3 +392,156 @@ struct ParticlesPanel: View {
 
 /// O respiro à esquerda dos botões de preset (12 dp do Android).
 private let Aurca12: CGFloat = 12
+
+
+// The atlas is generated with the particle fragment shader. Preview cells
+// are decoded once and do not spin up a renderer for every tile.
+private enum ParticleShapeAtlas {
+    static let cells: [UIImage?] = {
+        guard let atlas = UIImage(named: "ParticleShapeAtlas")?.cgImage else { return [] }
+        return (0..<35).map { index in
+            atlas.cropping(to: CGRect(x: (index % 7) * 80, y: (index / 7) * 80, width: 80, height: 80))
+                .map { UIImage(cgImage: $0) }
+        }
+    }()
+}
+
+struct ParticleShapeField: View {
+    let current: Int
+    let enabled: Bool
+    let tag: String
+    let onPick: (Int) -> Void
+    @State private var show = false
+
+    var body: some View {
+        let label = AureaText.t("particle_gallery")
+        let name = AureaText.t(particleShapeKeys.indices.contains(current) ? particleShapeKeys[current] : particleShapeKeys[0])
+        Button { show = true } label: {
+            HStack(spacing: 10) {
+                CupertinoGlyph.text(CupertinoGlyph.Sparkles, size: 18, color: AureaColors.accent).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(AureaText.t("particular_shape")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                    Text(name).font(.aurea(size: 14, weight: .semibold)).foregroundStyle(AureaColors.text).lineLimit(1)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 14, color: AureaColors.accent)
+                    .mirrorsInRtl().accessibilityHidden(true)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 6).frame(minHeight: 52)
+            .background(AureaColors.surface, in: RoundedRectangle(cornerRadius: 12))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(AureaPressStyle()).disabled(!enabled).padding(6)
+        .accessibilityLabel(label).accessibilityValue(name).accessibilityIdentifier(tag)
+        .sheet(isPresented: $show) {
+            ParticleShapeGallery(current: current, close: { show = false }) {
+                show = false
+                onPick($0)
+            }
+        }
+    }
+}
+
+private let particleShapeKeys = [
+    "particle_shape_sphere",
+    "particle_shape_star",
+    "particle_shape_heart",
+    "particle_shape_leaf",
+    "particle_shape_petal",
+    "particle_shape_butterfly",
+    "particle_shape_confetti",
+    "particle_shape_sparkle",
+    "particle_shape_snowflake",
+    "particle_shape_line",
+    "particle_shape_shaded",
+    "particle_shape_faded",
+    "particle_shape_dark_faded",
+    "particle_shape_bubble",
+    "particle_shape_motion_polygon",
+    "particle_shape_motion_square",
+    "particle_shape_triangle",
+    "particle_shape_quad",
+    "particle_shape_textured_triangle",
+    "particle_shape_textured_quad",
+    "particle_shape_tetrahedron",
+    "particle_shape_cube",
+    "particle_shape_lens_convex",
+    "particle_shape_lens_concave",
+    "particle_shape_lens_fade",
+    "particle_shape_lens_dark_fade",
+    "particle_shape_lens_bubble",
+    "particle_shape_textured_square",
+    "particle_shape_textured_disc",
+    "particle_shape_textured_faded_disc",
+    "particle_shape_glow_sphere",
+    "particle_shape_glow_star",
+    "particle_shape_cloudlet",
+    "particle_shape_streaklet",
+    "particle_shape_sprite",
+]
+private let particleShapeSections: [(title: String, shapes: [Int])] = [
+    ("particle_basic", [0, 1, 9, 14, 15, 16, 17, 20, 21]),
+    ("particle_natural", [2, 3, 4, 5, 6, 8, 32]),
+    ("particle_optical", [7, 10, 11, 12, 13, 22, 23, 24, 25, 26, 30, 31, 33]),
+    ("particle_textures", [18, 19, 27, 28, 29, 34]),
+]
+
+private struct ParticleShapeGallery: View {
+    let current: Int
+    let close: () -> Void
+    let pick: (Int) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                Button(action: close) {
+                    CupertinoGlyph.text(CupertinoGlyph.Xmark, size: 18, color: AureaColors.text)
+                        .frame(width: 48, height: 48).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).accessibilityLabel(AureaText.t("common_close"))
+                .accessibilityIdentifier("particles.gallery.close")
+                Text(AureaText.t("particle_gallery")).font(.aurea(size: 19, weight: .bold))
+                    .foregroundStyle(AureaColors.text).frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityAddTraits(.isHeader)
+            }.padding(.trailing, 16).frame(minHeight: 54).background(AureaColors.surface)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(particleShapeSections, id: \.title) { entry in
+                        Text(AureaText.t(entry.title)).font(.aurea(size: 14, weight: .semibold))
+                            .foregroundStyle(AureaColors.text).accessibilityAddTraits(.isHeader).padding(.top, 7)
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 112), spacing: 8)], spacing: 8) {
+                            ForEach(entry.shapes, id: \.self) { id in cell(id) }
+                        }
+                    }
+                }.padding(14)
+            }
+            .accessibilityIdentifier("particles.gallery.grid")
+        }
+        .background(AureaColors.background.ignoresSafeArea())
+        .accessibilityIdentifier("particles.gallery")
+    }
+
+    private func cell(_ id: Int) -> some View {
+        let active = id == current
+        let name = AureaText.t(particleShapeKeys[id])
+        let shape = RoundedRectangle(cornerRadius: 12)
+        return Button { pick(id) } label: {
+            VStack(spacing: 3) {
+                Group {
+                    if ParticleShapeAtlas.cells.indices.contains(id), let image = ParticleShapeAtlas.cells[id] {
+                        Image(uiImage: image).resizable().scaledToFit()
+                    }
+                }.frame(width: 70, height: 70).accessibilityHidden(true)
+                Text(name).font(.aurea(size: 11.5, weight: .medium)).foregroundStyle(AureaColors.text)
+                    .multilineTextAlignment(.center).lineLimit(3).frame(minHeight: 29)
+            }
+            .padding(.horizontal, 6).padding(.vertical, 8).frame(maxWidth: .infinity, minHeight: 122)
+            .background(active ? AureaColors.accentDim : AureaColors.surface, in: shape)
+            .overlay(shape.strokeBorder(active ? AureaColors.accent : AureaColors.border).allowsHitTesting(false))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(AureaPressStyle()).accessibilityLabel(name)
+        .accessibilityAddTraits(active ? .isSelected : [])
+        .accessibilityIdentifier("particles.gallery.shape.\(id)")
+    }
+}
+

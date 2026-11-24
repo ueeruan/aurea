@@ -503,6 +503,7 @@ public:
     [[nodiscard]] Status prepare_reinitialization(u64 timeoutNs) noexcept override;
     [[nodiscard]] u32 frames_in_flight() const noexcept override { return framesInFlight_; }
     [[nodiscard]] GpuMemoryStats memory_stats() const noexcept override;
+    [[nodiscard]] GpuMemoryBudget memory_budget() const noexcept override;
     void log_memory_breakdown() noexcept override;
     void save_pipeline_cache() noexcept override;
     [[nodiscard]] PipelineCacheInfo pipeline_cache_info() const noexcept override { return cacheInfo_; }
@@ -598,7 +599,8 @@ private:
     void destroy_frames() noexcept;
     [[nodiscard]] Status create_swapchain(u32 width, u32 height) noexcept;
     void destroy_swapchain() noexcept;
-    [[nodiscard]] Status recreate_swapchain() noexcept;
+    [[nodiscard]] Status prepare_surface_frame() noexcept;
+    [[nodiscard]] Status present_pending_image() noexcept;
     [[nodiscard]] Status create_dummies() noexcept;
     [[nodiscard]] VkPipelineLayout pipeline_layout(u64 immutableSampler, VkDescriptorSetLayout& outSet) noexcept;
     /// Identidade de `desc`; falso quando algum shader é exclusivo (sem chave).
@@ -693,6 +695,7 @@ private:
     u32 graphicsFamily_ = 0;
     bool hasSurfaceExt_ = false;
     bool hasAhb_ = false;
+    bool hasMemoryBudget_ = false;
     bool hasForeignQueue_ = false;
     bool hasYcbcr_ = false;
     bool depthResolve_ = false;      ///< VK_KHR_depth_stencil_resolve + create_renderpass2
@@ -804,6 +807,7 @@ private:
     bool imageAcquired_ = false;
     bool imageAcquireWait_ = false; ///< this frame acquired; its semaphore must be consumed once
     bool heldImage_ = false;        ///< discarded image retained for the next surface frame
+    bool presentPending_ = false;  ///< submitted render whose present wait was not enqueued
     VkSwapchainKHR leasedSwapchain_ = VK_NULL_HANDLE;
     FrameBegin leasedDisplay_{}; ///< commands/frame number are not retained
     u32 leasedImageIndex_ = 0;

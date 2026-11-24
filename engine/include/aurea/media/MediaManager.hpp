@@ -174,6 +174,7 @@ public:
     /// Prioridade com que os decoders NOVOS são abertos (o export compatível
     /// abre com MediaPriority::ExportSoftwareDecode). Padrão: Preview.
     void set_open_priority(MediaPriority priority) noexcept { openPriority_.store(priority, std::memory_order_relaxed); }
+    void prefer_portable_export_sources(bool enabled) noexcept { portableExportSources_ = enabled; }
     /// O mesmo callback, para outro trabalho de fundo que o quadro espera (o
     /// mapa de profundidade de um vídeo) acordar o render do mesmo jeito.
     void ready_callback(void (*&fn)(void*), void*& ctx) const noexcept;
@@ -234,6 +235,7 @@ private:
     void (*readyFn_)(void*) = nullptr;
     void* readyCtx_ = nullptr;
     std::atomic<MediaPriority> openPriority_{MediaPriority::Preview};
+    std::atomic<bool> portableExportSources_{false};
     std::atomic<u64> decodeWork_{0};   ///< decode_work(); as fontes incrementam
     bool suspended_ = false;
     u32 pointerBits_ = kPointerBits;   ///< guarded by mutex_; AddressSpace.hpp

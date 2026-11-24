@@ -3,6 +3,7 @@
 // packet count cannot conceal reordered, repeated or missing pictures.
 #include "TestFramework.hpp"
 #include "aurea/export/FFmpegExportSink.hpp"
+#include "aurea/export/PortableVideoSource.hpp"
 #include "NativeExportVerifier.hpp"
 
 #if defined(AUREA_HAS_FFMPEG)
@@ -183,8 +184,9 @@ cleanup:
 }
 
 bool exportNumbered(ExportSink& sink, const std::string& path, u32 frames, double fps, bool withAudio,
-                    ExportCodec codec = ExportCodec::H264) {
+                    ExportCodec codec = ExportCodec::H264, bool portable = false) {
     auto video = configuration(fps); video.codec = codec; AudioStreamConfig audio;
+    video.portableFrames = video.limitedMemory = portable;
     if (!good(sink.open(path.c_str(), video, withAudio ? &audio : nullptr))) return false;
     AUREA_CHECK(sink.encoder_info().acceleration == ExportSink::Acceleration::Software);
     Picture picture;
@@ -234,6 +236,37 @@ AUREA_TEST(FFmpegExport, NativeSoftwareCfrAllPicturesAndStereoAudio) {
     AUREA_CHECK(ffmpeg_export_available());
     auto sink = make_ffmpeg_export_sink(nullptr); AUREA_CHECK(sink != nullptr); if (!sink) return;
     (void)exportNumbered(*sink, output("cfr-stereo"), 90, 30, true);
+}
+
+AUREA_TEST(FFmpegExport, PortableCompositionSourceDecodesExactFramesAndSeeks) {
+    constexpr u32 frames = 78;
+    const auto path = output("portable-composition-source");
+    auto sink = make_ffmpeg_export_sink(nullptr);
+    if (!sink || !exportNumbered(*sink, path, frames, 30, true, ExportCodec::H264, true)) return;
+    auto source = open_portable_video_source(path.c_str());
+    AUREA_CHECK(source); if (!source) return;
+    FrameRef frame, retained;
+    i64 pts = -1;
+    bool eos = false;
+    u32 count = 0;
+    while (count <= frames && good(source->next_frame(0, frame, pts, eos)) && !eos) {
+        AUREA_CHECK(frame && frame->owns_cpu_backing()); if (!frame) return;
+        AUREA_CHECK(std::llabs(pts - std::llround(count * 1'000'000. / 30.)) <= 2);
+        AUREA_CHECK_EQ(frame->rotation, 0u);
+        AUREA_CHECK(frame->color.matrix == YCbCrMatrix::BT709 && !frame->color.fullRange);
+        if (count == 1) retained = frame;
+        ++count;
+    }
+    AUREA_CHECK(eos);
+    AUREA_CHECK_EQ(count, frames);
+    AUREA_CHECK(retained && retained->planes[0][24 * retained->strides[0] + 6] > 180);
+    if (!good(source->seek_to_keyframe(2'033'333))) return;
+    for (u32 i = 0; i < frames; ++i) {
+        if (!good(source->next_frame(2'033'333, frame, pts, eos)) || eos || frame) break;
+    }
+    AUREA_CHECK(frame && !eos);
+    AUREA_CHECK(std::llabs(pts - 2'033'333) <= 2);
+    AUREA_CHECK(!open_portable_video_source("content://video/provider"));
 }
 AUREA_TEST(FFmpegExport, NativeSoftwareHevcPreservesAllPicturesAndAudio) {
     auto sink = make_ffmpeg_export_sink(nullptr); AUREA_CHECK(sink != nullptr); if (!sink) return;

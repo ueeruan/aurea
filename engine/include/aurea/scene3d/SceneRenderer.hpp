@@ -223,6 +223,10 @@ struct SceneInstance {
     bool doubleSided = false;
     bool unlitColors = false;
     u64  layerKey = 0;                 ///< camada de origem (sub-quadros do desfoque)
+    u32 replicaIndex = 0;              ///< 0 = sem repetidor, demais = cópia + 1
+    u32 celBands = 0;
+    f32 replicaOpacity = 1.0f;
+    Vec4 replicaTint{};
     bool motionBlur = false;           ///< a camada pede desfoque de movimento
     /// Ambiente PRÓPRIO deste objeto (v22). `ownEnvironment` falso = usa o do
     /// grupo. O estado é do objeto; os mapas na GPU são compartilhados por

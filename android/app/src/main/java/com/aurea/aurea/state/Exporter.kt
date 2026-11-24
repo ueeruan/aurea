@@ -1297,6 +1297,7 @@ class Exporter internal constructor(
 
     private fun noticeFor(p: ExportProgress, options: ExportOptions): String {
         val lines = ArrayList<String>(4)
+        if (p.flags and (1 shl 20) != 0) lines += text(R.string.motion_export_waiting_decode)
         if (lighterAfterClose) lines += text(R.string.export_after_system_close)
         // 0.3.6: o Android tirou o export do primeiro plano (limite de tempo, onTimeout).
         if (ExportForegroundService.timedOut) lines += text(R.string.export036_timeout_notice)
@@ -1305,12 +1306,11 @@ class Exporter internal constructor(
             4 -> lines += text(R.string.export_v2_finalizing)
             5 -> lines += text(R.string.export_v2_validating)
         }
-        if (p.safeMode) {
-            lines += text(R.string.app_export_safe_mode)
+        if (p.safeMode && !p.softwareEncoder) {
+            lines += text(R.string.export_retry_compatible)
         }
         if (p.softwareEncoder) {
-            // O modo de segurança é sempre H.264 (ExportWatchdog.hpp).
-            val codec = if (options.hevc && (!p.safeMode || ((p.flags ushr 8) and 15) != 0)) "HEVC" else "H.264"
+            val codec = if (options.hevc) "HEVC" else "H.264"
             lines += text(R.string.app_export_software_encoder, codec)
         }
         if (p.thermalReduced) {

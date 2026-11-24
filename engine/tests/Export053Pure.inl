@@ -11,6 +11,7 @@
 #include "aurea/export/ExportMemory.hpp"
 #include "aurea/export/EncoderPacketTiming.hpp"
 #include "aurea/export/FFmpegExportSink.hpp"
+#include "aurea/render/GPUBackend.hpp"
 
 #include <array>
 #include <cstring>
@@ -59,6 +60,42 @@ AUREA_TEST(Export053, MemoryStepLowersTheExportBudgetWithAFloorAndNeverRaisesIt)
     // O piso nunca sobe acima do que o processo tinha.
     AUREA_CHECK_EQ(export_memory_budget_bytes(100 * kMiB, 0, 3), 100 * kMiB);
     AUREA_CHECK_EQ(export_memory_budget_bytes(0, 512 * kMiB, 1), 0ull);
+}
+
+AUREA_TEST(Export053, DriverHeadroomUsesOneDeviceLocalHeapAndSaturatesUnderPressure) {
+    GpuMemoryBudget snapshot;
+    snapshot.heapCount = 4;
+    snapshot.heaps[0] = {128 * kMiB, 80 * kMiB, true};
+    snapshot.heaps[1] = {64 * kMiB, 24 * kMiB, true};
+    snapshot.heaps[2] = {kGiB, 0, false};
+    snapshot.heaps[3] = {0, kGiB, true};
+    AUREA_CHECK_EQ(snapshot.largest_device_local_headroom().value_or(0), 48 * kMiB);
+
+    snapshot.heaps[0].usageBytes = 140 * kMiB;
+    snapshot.heaps[1].usageBytes = 64 * kMiB;
+    AUREA_CHECK_EQ(snapshot.heaps[0].headroom_bytes(), 0ull);
+    const auto exhausted = snapshot.largest_device_local_headroom();
+    AUREA_CHECK(exhausted.has_value());
+    AUREA_CHECK_EQ(exhausted.value_or(kGiB), 0ull);
+
+    snapshot.heaps[0].budgetBytes = snapshot.heaps[1].budgetBytes = 0;
+    AUREA_CHECK(!snapshot.largest_device_local_headroom().has_value());
+    AUREA_CHECK(!GpuMemoryBudget{}.largest_device_local_headroom().has_value());
+}
+
+AUREA_TEST(Export053, DriverBudgetLimitsConcurrencyAndPreservesTraditionalFallback) {
+    constexpr u64 enough4k = 3840ull * 2160 * 16;
+    AUREA_CHECK(export_gpu_can_overlap_frames(std::nullopt, 3840, 2160));
+    AUREA_CHECK(export_gpu_can_overlap_frames(enough4k, 3840, 2160));
+    AUREA_CHECK(!export_gpu_can_overlap_frames(enough4k - 1, 3840, 2160));
+    AUREA_CHECK(!export_gpu_can_overlap_frames(0, 1920, 1080));
+    AUREA_CHECK(!export_gpu_can_overlap_frames(~0ull, ~0u, ~0u));
+
+    AUREA_CHECK_EQ(export_exposure_batch_budget_bytes(32 * kMiB, std::nullopt), 32 * kMiB);
+    AUREA_CHECK_EQ(export_exposure_batch_budget_bytes(32 * kMiB, 256 * kMiB), 32 * kMiB);
+    AUREA_CHECK_EQ(export_exposure_batch_budget_bytes(32 * kMiB, 40 * kMiB), 10 * kMiB);
+    AUREA_CHECK_EQ(export_exposure_batch_budget_bytes(32 * kMiB, 0), 1ull);
+    AUREA_CHECK_EQ(export_exposure_batch_budget_bytes(0, 0), 0ull);
 }
 
 AUREA_TEST(Export053, PacketTimeRetimedIsTheSameFrameAndALaterOneIsADrop) {

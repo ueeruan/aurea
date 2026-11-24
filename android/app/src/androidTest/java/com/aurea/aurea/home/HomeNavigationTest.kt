@@ -102,7 +102,8 @@ class HomeNavigationTest {
             AureaTheme { HomeScreen(store) }
         }
         compose.onNodeWithTag("home.start").assertIsSelected()
-        compose.onNodeWithTag("home.projects").performClick()
+        compose.onNodeWithTag("home.workspace.create").assertIsDisplayed()
+        compose.onNodeWithTag("home.workspace.projects").performClick()
         compose.onNodeWithTag("home.projects").assertIsSelected()
         compose.runOnIdle {
             val saved = context.getSharedPreferences("aurea.home", android.content.Context.MODE_PRIVATE).getInt(HomeViewModel.KEY_TAB, -1)

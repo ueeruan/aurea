@@ -86,6 +86,7 @@ struct ColorFillPanel: View {
     @State private var endFrame: CGRect = .zero
     /// Texto: Cor ou Textura (escolha da tela; a textura tem o próprio interruptor).
     @State private var textTab: ColorFillTab?
+    @State private var showPrecompControls = false
 
     /// O que a camada escolhida mostra aqui.
     private enum Target { case shape, text, original, other }
@@ -174,6 +175,11 @@ struct ColorFillPanel: View {
                 }
                 // 0.4.1 (mockup "interface 03"): as 7 cores rápidas do sistema, um toque = um desfazer.
                 if currentTab == .color && (target == .shape || target == .text) { quickColors }
+                if layerKind == 12 {
+                    Button(AureaText.t("motion_precomp_controls")) { showPrecompControls = true }
+                        .frame(minHeight: 44)
+                        .accessibilityIdentifier("precomp.controls")
+                }
                 // 0.3.4 painéis: o conteúdo ocupa a altura que sobra (o painel é alto desde a 0.3.4).
                 content
                     .frame(minHeight: ColorFillMetrics.content, maxHeight: .infinity)
@@ -186,6 +192,7 @@ struct ColorFillPanel: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .foregroundStyle(AureaColors.text)
+        .sheet(isPresented: $showPrecompControls) { PrecompControlsSheet(group: id).environmentObject(model) }
         .onAppear { loadText(); syncStage(); focusTimeline() }
         .onChange(of: id) { _ in textTab = nil; loadText(); focusTimeline() }
         .onChange(of: model.status.modelRevision) { _ in loadText() }
@@ -516,6 +523,120 @@ struct ColorFillPanel: View {
         _ = model.engine.keyframeSelection(id, references: references, action: 2, delta: 0)
         model.endGesture()
     }
+}
+
+private struct PrecompControlsSheet: View {
+    private struct Control {
+        let target: Int64
+        let kind: UInt32
+        let name: String
+        let text: String
+        let rgba: [Float]
+        let exposed: Bool
+        let overridden: Bool
+        let available: Bool
+
+        init?(_ row: [String: Any]) {
+            guard let target = row["target"] as? NSNumber, let kind = row["kind"] as? NSNumber,
+                  let rgba = row["rgba"] as? [NSNumber], rgba.count == 4 else { return nil }
+            self.target = target.int64Value
+            self.kind = kind.uint32Value
+            self.name = row["name"] as? String ?? ""
+            self.text = row["text"] as? String ?? ""
+            self.rgba = rgba.map(\.floatValue)
+            exposed = row["exposed"] as? Bool ?? false
+            overridden = row["overridden"] as? Bool ?? false
+            available = row["available"] as? Bool ?? false
+        }
+    }
+
+    @EnvironmentObject private var model: AureaModel
+    @Environment(\.dismiss) private var dismiss
+    let group: Int64
+    @State private var controls: [Control] = []
+    @State private var setup = false
+    @State private var error = false
+    @State private var editing: Control?
+    @State private var draftText = ""
+    @State private var draftColor: [Float] = [1, 1, 1, 1]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(AureaText.t("motion_precomp_controls")).font(.headline).accessibilityAddTraits(.isHeader)
+                Spacer()
+                Button(AureaText.t("panel_fechar")) { dismiss() }.frame(minHeight: 44)
+            }
+            if error { Text(AureaText.t("motion_control_unavailable")).foregroundStyle(AureaColors.warning) }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    if let active = editing { editor(active) }
+                    else {
+                        Button(AureaText.t(setup ? "panel_fechar" : "motion_precomp_publish")) { setup.toggle() }
+                            .frame(minHeight: 44)
+                        let shown = setup ? controls : controls.filter(\.exposed)
+                        if shown.isEmpty { Text(AureaText.t("motion_precomp_empty")).foregroundStyle(AureaColors.muted) }
+                        ForEach(shown.indices, id: \.self) { index in controlRow(shown[index]) }
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(18)
+        .foregroundStyle(AureaColors.text)
+        .background(AureaColors.surface.ignoresSafeArea())
+        .onAppear(perform: load)
+        .onChange(of: model.status.modelRevision) { _ in load() }
+    }
+
+    private func controlRow(_ row: Control) -> some View {
+        let kind = AureaText.t(row.kind == 0 ? "motion_control_text" : row.kind == 1 ? "panel_cor" : "panel_opacidade")
+        let name = row.name.isEmpty ? AureaText.t("motion_control_unavailable") : row.name
+        let label = name + " · " + kind
+        return HStack {
+            Button(setup && row.exposed ? "✓ " + label : label) {
+                if setup { _ = apply(row, row.exposed ? 1 : 0, row.text, row.rgba) }
+                else { editing = row; draftText = row.text; draftColor = row.rgba }
+            }
+            .frame(minHeight: 44)
+            .disabled(!row.available && !(setup && row.exposed))
+            Spacer()
+            if !setup && row.overridden {
+                Button(AureaText.t("motion_precomp_reset")) { _ = apply(row, 3, row.text, row.rgba) }
+                    .frame(minHeight: 44)
+            }
+        }
+    }
+
+    @ViewBuilder private func editor(_ row: Control) -> some View {
+        switch row.kind {
+        case 0:
+            TextField(AureaText.t("motion_control_text"), text: $draftText, axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+        case 1:
+            EmbeddedColorPicker(color: draftColor, withAlpha: true, onBegin: {}, onChange: { draftColor = $0 }, onEnd: {})
+                .frame(height: 165)
+        default:
+            Text("\(Int((draftColor[0] * 100).rounded()))%")
+            Slider(value: Binding(get: { draftColor[0] }, set: { draftColor[0] = $0 }), in: 0...1)
+                .accessibilityLabel(AureaText.t("panel_opacidade"))
+        }
+        HStack {
+            Button(AureaText.t("editor_cancelar")) { editing = nil }.frame(minHeight: 44)
+            Spacer()
+            Button(AureaText.t("common_apply")) { if apply(row, 2, draftText, draftColor) { editing = nil } }
+                .frame(minHeight: 44)
+        }
+    }
+
+    private func apply(_ row: Control, _ operation: UInt32, _ text: String, _ rgba: [Float]) -> Bool {
+        let ok = model.engine.editPrecompControl(group, target: row.target, kind: row.kind,
+            operation: operation, text: text, rgba: rgba.map { NSNumber(value: $0) })
+        error = !ok
+        if ok { model.refreshModel(force: true); load() }
+        return ok
+    }
+
+    private func load() { controls = model.engine.precompControls(group).compactMap(Control.init) }
 }
 
 // =============================================================================

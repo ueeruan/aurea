@@ -354,10 +354,10 @@
     <string name="home_ruanzitwo_ofruanzitwo_tiktok_ruanzitwo">Ruanzitwo  ·  @ofruanzitwo  ·  TikTok @ruanzitwo</string>
     <string name="home_ver_todos">Показать все</string>
     <string name="panel_1_caminho">1 Контур</string>
-    <string name="panel_1_recortar_pelo">1. Чем обрезать</string>
+    <string name="panel_1_recortar_pelo">Чем обрезать</string>
     <string name="panel_1_to">, 1 to </string>
     <string name="panel_2_modo">2 Режим</string>
-    <string name="panel_2_qual_camada_recorta">2. Какой слой обрезает</string>
+    <string name="panel_2_qual_camada_recorta">Какой слой обрезает</string>
     <string name="panel_2_to">, 2 to</string>
     <string name="panel_3_borda">3 Рамка</string>
     <string name="panel_4_rastrear">4 Слежение</string>
@@ -2544,7 +2544,7 @@
     <string name="app_export_gallery_failed">Видео создано, но сохранить его в галерею не удалось.</string>
     <string name="app_saved_to_gallery">Сохранено в галерею: Фильмы › Aurea.</string>
     <string name="app_saved_to_path">Сохранено в %1$s.</string>
-    <string name="app_export_software_encoder">У этого устройства нет аппаратного кодировщика %1$s для этого разрешения: экспорт программный (медленнее, качество то же).</string>
+    <string name="app_export_software_encoder">Программное кодирование %1$s. Экспорт может занять больше времени.</string>
     <string name="app_export_thermal">Устройство нагрелось: экспорт замедлен для охлаждения. Качество не меняется.</string>
     <string name="app_export_no_hevc">Это устройство не экспортирует HEVC в этом разрешении. Попробуйте H.264.</string>
     <string name="app_export_unsupported_res">Это устройство не экспортирует в этом разрешении.</string>
@@ -3134,7 +3134,7 @@
     <string name="rig_auto">Авто</string>
     <string name="rig_done">Готово</string>
     <string name="rig_hint_setup">Перетащите суставы на тело · коснитесь пустого места, чтобы добавить</string>
-    <string name="rig_hint_animate">Тяните руку, ногу или голову (ставит ключ)</string>
+    <string name="rig_hint_animate">Потяните за конец, чтобы согнуть цепь и создать ключ</string>
     <!-- Quarentena de projeto (ProjectGuard) -->
     <string name="quarantine_title">Проблемный проект</string>
     <string name="quarantine_body_open">Aurea закрылся при открытии «%1$s». Чтобы это не повторилось, проект не открыт автоматически. «Восстановить» попробует открыть его снова; если приложение снова закроется, отправьте диагностику закрытий из Настроек.</string>
@@ -5819,4 +5819,7 @@
     <string name="fxo_bangs">Чёлка</string>
     <string name="fxo_side_locks">Пряди</string>
     <string name="fxo_glasses">Очки</string>
+    <string name="editor_parent_link_failed">Не удалось привязать слои к выбранному родительскому слою.</string>
+    <string name="mask_use_layer">Использовать слой как маску</string>
+    <string name="mask_hexagon">Шестиугольник</string>
 </resources>

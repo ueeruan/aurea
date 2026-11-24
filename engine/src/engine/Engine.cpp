@@ -6,6 +6,7 @@
 #include "aurea/media/MediaCut.hpp"
 #include "aurea/media/MediaRelink.hpp"
 #include "aurea/media/SourceWindow.hpp"
+#include "aurea/timeline/PrecompControls.hpp"
 #include "aurea/tracking/RealCameraPreviewScope.hpp"
 #include "aurea/render/PreviewCachePolicy.hpp"
 #include "aurea/render/PreviewViewport.hpp"
@@ -81,6 +82,7 @@
 #include <cstring>
 #include <deque>
 #include <filesystem>
+#include <optional>
 #include <unordered_set>
 
 namespace aurea {
@@ -452,6 +454,8 @@ struct Engine::ExportContext {
     u64 queueByteLimit = 0;
     bool withAudio = false;
     bool strictVerification = false;
+    bool portableComposition = false;
+    bool limitedExportMemory = false;
     // --- CheckpointManager (export/ExportCheckpoint.hpp) ---------------------
     // Vídeo no registro de pacotes; o MP4 é montado, validado e publicado no
     // fim. `startFrame` > 0: esta sessão continua um checkpoint desse quadro.
@@ -3547,7 +3551,10 @@ Result<u64> Engine::parent_to_new_null(const u64* layerIds, u32 count) noexcept 
     if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
     // Edições ainda na fila (arrastos, keys) vêm ANTES: a compensação mede o estado final.
     drain_commands_locked();
-    InlineEditScope inlineScope(*this, (count == 1 && layerIds ? layerIds[0] : 0), true);
+    const u64 group = inlineEditGroup_.load(std::memory_order_acquire);
+    InlineEditScope inlineScope(*this, inlineEditOuter_.load(std::memory_order_relaxed), group, true,
+                                inlineEditInner_.load(std::memory_order_relaxed));
+    if (group && !inlineScope.active()) return Status{Errc::NotFound, "grupo da selecao indisponivel"};
     Composition* comp = current_composition();
     if (!comp) return Status{Errc::InvalidState, "projeto sem composicao"};
     const FrameIndex now = editing_frame_locked();
@@ -3612,7 +3619,10 @@ Result<u32> Engine::set_parent_many(const u64* layerIds, u32 count, u64 parentId
     if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
     // Edições ainda na fila (arrastos, keys) vêm ANTES: a compensação mede o estado final.
     drain_commands_locked();
-    InlineEditScope inlineScope(*this, (count == 1 && layerIds ? layerIds[0] : 0), true);
+    const u64 group = inlineEditGroup_.load(std::memory_order_acquire);
+    InlineEditScope inlineScope(*this, inlineEditOuter_.load(std::memory_order_relaxed), group, true,
+                                inlineEditInner_.load(std::memory_order_relaxed));
+    if (group && !inlineScope.active()) return Status{Errc::NotFound, "grupo da selecao indisponivel"};
     Composition* comp = current_composition();
     if (!comp) return Status{Errc::InvalidState, "projeto sem composicao"};
     // As duas UIs mandam 0 para "nenhum" (mesma regra do LayerSetParent).
@@ -3658,6 +3668,7 @@ Result<u32> Engine::set_parent_many(const u64* layerIds, u32 count, u64 parentId
     project_->mark_dirty();
     request_render();
     AUREA_LOG_INFO("vincular em lote: %u de %zu camadas", changed, children.size());
+    if (!changed) return Status{Errc::InvalidArgument, "camadas nao vinculadas"};
     return changed;
 }
 
@@ -4123,6 +4134,36 @@ i32 Engine::add_mask(u64 layerId, const f32* pts6, u32 count, bool closed) noexc
     project_->mark_dirty();
     request_render();
     return static_cast<i32>(l->masks.back().id);
+}
+
+i32 Engine::add_mask_preset(u64 layerId, u32 preset, f32 width, f32 height) noexcept {
+    if (!std::isfinite(width) || !std::isfinite(height) || width <= 0 || height <= 0) return -1;
+    const f32 cx = width * 0.5f, cy = height * 0.5f;
+    const f32 rx = width * 0.35f, ry = height * 0.35f;
+    if (preset == 0) {
+        const f32 p[] = { cx-rx, cy-ry, 0,0,0,0, cx+rx, cy-ry, 0,0,0,0,
+                          cx+rx, cy+ry, 0,0,0,0, cx-rx, cy+ry, 0,0,0,0 };
+        return add_mask(layerId, p, 4, true);
+    }
+    if (preset == 1) {
+        const f32 kx = rx * 0.5523f, ky = ry * 0.5523f;
+        const f32 p[] = { cx, cy-ry, -kx,0,kx,0, cx+rx, cy, 0,-ky,0,ky,
+                          cx, cy+ry, kx,0,-kx,0, cx-rx, cy, 0,ky,0,-ky };
+        return add_mask(layerId, p, 4, true);
+    }
+
+    constexpr u32 sides[] = {3, 5, 6, 8, 10, 4};
+    if (preset < 3 || preset >= 3 + sizeof(sides) / sizeof(sides[0])) return -1;
+    const u32 count = sides[preset - 3];
+    constexpr f32 pi = 3.14159265358979323846f;
+    f32 p[10 * 6]{};
+    for (u32 index = 0; index < count; ++index) {
+        const f32 angle = (2 * pi * index) / count - pi / 2;
+        const f32 radius = (preset == 7 && index % 2 != 0) ? 0.46f : 1.0f;
+        p[index * 6] = cx + rx * radius * std::cos(angle);
+        p[index * 6 + 1] = cy + ry * radius * std::sin(angle);
+    }
+    return add_mask(layerId, p, count, true);
 }
 
 bool Engine::remove_mask(u64 layerId, u32 maskId) noexcept {
@@ -6400,20 +6441,16 @@ u32 Engine::query_particle_curve(u64 layerId, u32 kind, f32* out, u32 capacity) 
 
 bool Engine::set_time_remap(u64 layerId, bool on) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || l->timeRemapEnabled == on) return l != nullptr;
+    if (!l || l->locked) return false;
+    if (l->timeRemapEnabled == on) return true;
     history_.before_mutation(*comp, project_->timeline().current(), on ? "remapear o tempo" : "desligar remapeamento");
     bump_model_revision_locked();
-    if (on && l->timeRemap.keys.empty()) {
-        // Curva equivalente ao tempo de agora: tocar igual até alguém mexer.
-        const f64 s0 = l->source_frame(l->start), s1 = l->source_frame(l->end);
-        l->timeRemap.property = TrackProperty::TimeRemap;
-        l->timeRemap.set(l->local_time(l->start), static_cast<f32>(s0));
-        l->timeRemap.set(l->local_time(l->end), static_cast<f32>(s1));
-    }
-    l->timeRemapEnabled = on;
+    if (on) enable_time_remap_curve(*l);
+    else l->timeRemapEnabled = false;
     project_->mark_dirty();
     request_render();
     return true;
@@ -6777,7 +6814,7 @@ bool Engine::reverse_time_remap(u64 layerId) noexcept {
     InlineEditScope inlineScope(*this, layerId, true);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || l->end.value - l->start.value < 2 || l->timeRemap.has_expression()) return false;
+    if (!l || l->locked || l->end.value - l->start.value < 2 || l->timeRemap.has_expression()) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "remapear ao contrário");
     bump_model_revision_locked();
     enable_time_remap_curve(*l);
@@ -8953,8 +8990,12 @@ Result<u32> Engine::ungroup_precomp_locked(u64 layerId, std::string* why, std::v
         Layer* dst = comp->layer(nid);
         if (!dst) continue;
         *dst = *src;
-        // As linhas de dentro do grupo são números de OUTRA composição: aqui
-        // viram linhas novas (as que dividiam linha lá continuam juntas).
+        for (const auto& value : group.nested.overrides) {
+            if (value.target == cid && (src->precompExposed & available_precomp_controls(*src) & precomp_control_bit(value.kind)))
+                apply_precomp_value(*dst, value);
+        }
+        dst->precompExposed = 0;
+        // As linhas de dentro pertencem a outra composição. Remapeie-as sem separar camadas que dividiam linha.
         dst->trackId = ungroupedTrack(src->trackId);
         dst->start = FrameIndex{s};
         dst->end = FrameIndex{e};
@@ -13750,6 +13791,7 @@ RenderSettings Engine::current_render_settings() noexcept {
     if (project_) rs.previewCacheComposition = project_->timeline().current().pack();
     rs.sceneEditor = sceneEditor_;
     rs.mediaGeneration = playback_.media_epoch();
+    rs.previewPlaybackGeneration = playback_.generation();
     if (rawPlaybackLayer_.valid()) {
         rs.rawPlayback = true;
         rs.gpuTimers = true;
@@ -17377,6 +17419,63 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
     return result;
 }
 
+std::vector<Engine::ExportSourceIssue> Engine::export_source_issues() noexcept {
+    struct Source { u64 comp, layer; std::string name, path; };
+    std::vector<Source> sources;
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        if (!project_) return {};
+        const auto& timeline = project_->timeline();
+        const auto root = timeline.current();
+        const auto reachable = project_->assets_reachable_from(root);
+        std::vector<CompositionId> pending{root};
+        std::vector<CompositionId> visited;
+        while (!pending.empty()) {
+            const auto id = pending.back(); pending.pop_back();
+            if (std::find(visited.begin(), visited.end(), id) != visited.end()) continue;
+            const auto* comp = timeline.composition(id);
+            if (!comp) continue;
+            visited.push_back(id);
+            comp->layers().for_each([&](LayerId lid, const Layer& layer) {
+                if (layer.guide) return;
+                const bool visual = layer.visible && !layer.trackHidden;
+                if (layer.kind == LayerKind::Composition && (visual || !layer.muted))
+                    pending.push_back(layer.nested.composition);
+                if (sources.size() >= 512 || std::find(reachable.begin(), reachable.end(), layer.source) == reachable.end()) return;
+                if (!(layer.kind == LayerKind::Image && visual) && !(layer.kind == LayerKind::Video && (visual || !layer.muted)) &&
+                    !(layer.kind == LayerKind::Audio && !layer.muted)) return;
+                if (layer.kind == LayerKind::Image && images_.contains(layer.source.pack())) return;
+                const auto* asset = project_->asset(layer.source);
+                if (!asset) return;
+                std::string path = resolve_asset_path(asset->sourcePath);
+                // Providers and recipes are checked by their own resolver during export.
+                if (path.find("://") != std::string::npos || path.rfind("aurea:", 0) == 0 ||
+                    path.rfind("aurea-seq:", 0) == 0) return;
+                sources.push_back({id.pack(), lid.pack(), layer.name, std::move(path)});
+            });
+        }
+    }
+    std::vector<ExportSourceIssue> issues;
+    std::unordered_map<std::string, u32> checked;
+    for (const auto& source : sources) {
+        const auto [it, inserted] = checked.try_emplace(source.path, 0);
+        if (inserted) {
+            try {
+                std::error_code ec;
+                const bool exists = !source.path.empty() &&
+                    std::filesystem::exists(std::filesystem::u8path(source.path), ec);
+                if (!exists && !ec) it->second = 1;
+                else {
+                    std::unique_ptr<std::FILE, decltype(&std::fclose)> file(fileio::open_file(source.path, "rb"), &std::fclose);
+                    if (!file || std::fgetc(file.get()) == EOF) it->second = 2;
+                }
+            } catch (...) { it->second = 2; }
+        }
+        if (it->second) issues.push_back({source.comp, source.layer, source.name, it->second == 1});
+    }
+    return issues;
+}
+
 Status Engine::start_export_checked(const ExportSettings& requested, const char* outputPath,
                                   const ExportRestartGuard* restartGuard, const HyperExportOverride* hyper,
                                   const PreExportRequest* preExport) noexcept {
@@ -17884,6 +17983,10 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
     vc.fps = ctx->fps;
     vc.codec = settings.videoCodec;
     vc.validateBeforePublish = true;
+    vc.portableFrames = config_.usePortableCompositionExport && !preExport && !hyper;
+    vc.limitedMemory = vc.portableFrames && (kAddressSpace32 || low_memory_device());
+    ctx->portableComposition = vc.portableFrames;
+    ctx->limitedExportMemory = vc.limitedMemory;
     // A taxa vem da MESMA regra que a tela Exportar mostra (BitratePolicy):
     // 1080p30 Normal ≈ 8 Mbps, 4K30 ≈ 32 Mbps; Mbps manual só com teto. No
     // modo de segurança, o bitrate continua sendo o solicitado.
@@ -17895,11 +17998,11 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
     // (VideoStreamConfig::avoidSurface), a 2 vai para o software.
     vc.profile = kExportProfileDefault;
     vc.avoidSurface = ctx->safeMode != 0;
-    vc.preferSoftware = ctx->safeMode >= 2;
+    vc.preferSoftware = vc.portableFrames ? ctx->safeMode >= 1 : ctx->safeMode >= 2;
     // 1.0.6: no software o HEVC (kvazaar) leva minutos por segundo de vídeo num
     // aparelho de entrada e a exportação "não termina"; o degrau 2 sai em H.264
     // (openh264) com a MESMA taxa já calculada acima (ExportWatchdog.inl).
-    if (vc.preferSoftware && vc.codec == ExportCodec::HEVC) vc.codec = ExportCodec::H264;
+    if (!vc.portableFrames && vc.preferSoftware && vc.codec == ExportCodec::HEVC) vc.codec = ExportCodec::H264;
     // CBR só quando pedido; o padrão é VBR com pico limitado no encoder.
     vc.rateMode = settings.rateMode == 0 ? 0u : 1u;
     vc.keyframeIntervalFrames = settings.keyframeIntervalFrames;
@@ -17908,7 +18011,7 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
     // só o grafo Hyper/upscale de IA (o quadro final vem da CPU, não do slot da
     // GPU) e as tentativas de compatibilidade (sem Surface). debug.aurea.enc.direct=0
     // desliga no aparelho; =1 liga mesmo com a config desligada.
-    ctx->directSurface = vc.directSurface = (config_.enableDirectSurfaceExport ||
+    ctx->directSurface = vc.directSurface = !vc.portableFrames && (config_.enableDirectSurfaceExport ||
             android_video::debug_flag("debug.aurea.enc.direct", nullptr)) &&
         !android_video::debug_flag("debug.aurea.enc.direct", "0") && !vc.avoidSurface &&
         !ctx->graphWanted && gpu_ && gpu_->capabilities().externalMemoryHardwareBuffer;
@@ -17938,7 +18041,7 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
         const u64 effective[] = {
             settings.safeMode, static_cast<u64>(vc.codec), vc.width, vc.height, std::bit_cast<u64>(vc.fps),
             vc.bitrateBps, vc.profile, vc.preferSoftware ? 1u : 0u, vc.rateMode, vc.keyframeIntervalFrames,
-            vc.directSurface ? 1u : 0u, ctx->width, ctx->height, ctx->frames, std::bit_cast<u64>(ctx->compFps),
+            vc.directSurface ? 1u : 0u, vc.portableFrames ? 1u : 0u, ctx->width, ctx->height, ctx->frames, std::bit_cast<u64>(ctx->compFps),
             withAudio ? 1u : 0u, ac.sampleRate, ac.channels, ac.bitrateBps, ctx->dither ? 1u : 0u,
             ctx->attemptBlurCap, ctx->attemptGpuStep, ctx->recovery.dependencies.size(), ctx->recovery.uriSources.size(),
         };
@@ -18281,9 +18384,12 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
         // composição (RGBA16F) nesta resolução — é o 4K num aparelho de 4 GB,
         // que antes era cortado para 1080p (DeviceCapabilities::compute_budget).
         const u64 compFrameBytes = static_cast<u64>(ctx->width) * ctx->height * 8ull;
+        const bool limitedDriverBudget = config_.enableTrackedGpuAdmission && !export_gpu_can_overlap_frames(
+            gpu_->memory_budget().largest_device_local_headroom(), ctx->width, ctx->height);
         const bool limitedBacking = (config_.enableTrackedGpuAdmission && trackedBudget < (192ull << 20))
+            || limitedDriverBudget
             || (exportBudget && exportBudget < compFrameBytes * 6);
-        const u32 want = limitedBacking || config_.exportExecutionProfile == ExportExecutionProfile::HighQuality ? 1u
+        const u32 want = vc.limitedMemory || limitedBacking || config_.exportExecutionProfile == ExportExecutionProfile::HighQuality ? 1u
             : address_space::export_readback_slots(std::clamp<u32>(config_.exportPipelineDepth ? config_.exportPipelineDepth
                                                          : (policyDepth ? policyDepth : 3u), 1u, 4u));
         const u64 slotBytes = static_cast<u64>(ctx->width) * ctx->height * 3 / 2;
@@ -18379,7 +18485,7 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
     }
 
     ctx->withAudio = withAudio;
-    ctx->strictVerification = config_.strictExportVerification;
+    ctx->strictVerification = config_.strictExportVerification || vc.portableFrames;
     ctx->diagnostic_stage(ExportDiagnostics::Lane::Session, ExportDiagnostics::Stage::Render);
     ctx->progress.running = true;
     ctx->progress.framesTotal = ctx->frames;
@@ -18652,6 +18758,7 @@ Status Engine::initialize_offline_export(ExportContext& ctx) noexcept {
             &memory_, renderBudget, static_cast<u64>(config_.exportGpuTimeoutMs) * 1'000'000ull,
             &ctx.cancelRequested); !initialized.ok())
         return initialized;
+    if (ctx.portableComposition) ctx.offline->require_complete_video_frames();
     ctx.offline->set_software_decode(ctx.settings.softwareDecode);
     auto& offlineRenderer = ctx.offline->compositor();
     // Remover fundo: o export lê os recortes já analisados na prévia.
@@ -18857,7 +18964,7 @@ Status Engine::render_export_frame(FrameIndex time, const OffscreenTarget& targe
             if (const auto it = ctx.frozenImages.find(id.pack()); it != ctx.frozenImages.end()) return it->second.get();
             return nullptr;
         }, &c, settings, gpuFrame, c.preRenderMode ? &renderMutex_ : nullptr,
-        c.preRenderMode ? &preRenderCancel_ : nullptr);
+        c.preRenderMode ? &preRenderCancel_ : nullptr, c.diagnostics.get());
     // 1.0.7.1: quadro que estourou o prazo da GPU: a próxima tentativa (o
     // mesmo degrau, export_next_attempt) já sai um passe por envio.
     if (result.code() == Errc::Timeout && !c.preRenderMode && gpu_ && gpu_->export_pass_budget() != 1)
@@ -19203,6 +19310,8 @@ void Engine::export_thread_main() noexcept {
     Status result = OkStatus;
     bool abandonedWorker = false;   ///< o worker do encoder travou na plataforma (ExportWatchdog.hpp)
     u32 previousAdmission = ctx.depth;
+    u64 driverBudgetSampleNs = 0;
+    std::optional<u64> driverHeadroom;
     // Checkpoint: os quadros antes de `startFrame` já estão no registro em GOPs
     // íntegros; o render (determinístico por tentativa) segue do seguinte.
     for (u32 i = ctx.startFrame; i < ctx.frames && result.ok(); ++i) {
@@ -19228,7 +19337,7 @@ void Engine::export_thread_main() noexcept {
         const bool hot = exportThermalSerial_.load(std::memory_order_acquire);
         u32 allowed = ctx.scheduler.admission_limit(memory_.pressure(), monotonic_ns() < osMemoryWarningUntilNs_.load(std::memory_order_acquire),
                                                     hot, monotonic_ns());
-        if (ctx.queue && config_.enableTrackedGpuAdmission) {
+        if (allowed > 1 && ctx.queue && config_.enableTrackedGpuAdmission) {
             // Reclaim completed uploads before admitting another expensive
             // scene. This changes concurrency, never shadows/blur or pixels.
             const auto residency = gpu_->memory_stats();
@@ -19243,6 +19352,19 @@ void Engine::export_thread_main() noexcept {
                                    static_cast<unsigned long long>(residency.reservedBytes >> 20),
                                    static_cast<unsigned long long>(budget >> 20));
                 allowed = 1;
+            }
+            if (allowed > 1) {
+                const u64 now = monotonic_ns();
+                if (!driverBudgetSampleNs || now - driverBudgetSampleNs >= kExportGpuBudgetSampleIntervalNs) {
+                    driverHeadroom = gpu_->memory_budget().largest_device_local_headroom();
+                    driverBudgetSampleNs = now;
+                }
+                if (!export_gpu_can_overlap_frames(driverHeadroom, ctx.width, ctx.height)) {
+                    if (previousAdmission != 1)
+                        AUREA_LOG_INFO("export: %llu MB disponiveis em um heap local da GPU, fila serial",
+                            static_cast<unsigned long long>(driverHeadroom.value_or(0) >> 20));
+                    allowed = 1;
+                }
             }
         }
         if (allowed != previousAdmission) {
@@ -19809,8 +19931,8 @@ void Engine::export_encoder_main() noexcept {
                         expected.validatedFrames = &c.validatedFrames;
                         expected.strict = c.strictVerification;
                         // Todos os núcleos (até 8) na validação: o render já acabou.
-                        expected.decodeThreads = c.safeMode ? 2
-                            : static_cast<int>(std::clamp(std::thread::hardware_concurrency(), 2u, 8u));
+                        expected.decodeThreads = c.limitedExportMemory || c.safeMode ? 2
+                            : static_cast<int>(std::clamp(std::thread::hardware_concurrency(), 2u, c.portableComposition ? 4u : 8u));
                         if (fin.ok()) fin = c.sink->validate_output(expected);
                         if (c.abandoned_worker()) { retiredExit(); return; }
                         if (const char* warned = c.sink->validation_warnings(); fin.ok() && warned && *warned)
@@ -20164,6 +20286,11 @@ Engine::ExportProgress Engine::export_progress() const noexcept {
     // Job Hyper: entre passagens (e na análise do Stable) o export "não
     // terminou" para as telas; o resultado final é o do job.
     hyper_overlay_progress(progress);
+    if (progress.running) {
+        std::unique_lock lock(exportDiagnosticsMutex_, std::try_to_lock);
+        if (lock.owns_lock() && exportDiagnostics_ && exportDiagnostics_->waiting_for_decode())
+            progress.flags |= kExportWaitingForDecode;
+    }
     return progress;
 }
 
@@ -21714,6 +21841,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             // antigo para o do novo; os valores parados viram "M × local" e os
             // keyframes animados passam pela MESMA M (a animação continua igual
             // na tela). Modelo 3D, câmera e luz: tudo pelo mundo 3D.
+            const i32 oldBone = l->parentBone;
             // Outro pai (ou nenhum): o osso do pai antigo não vale mais.
             if (parent != l->parent) l->parentBone = -1;
             if (!comp) { l->parent = parent; return OkStatus; }
@@ -21757,6 +21885,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                 const f32 determinant = x.dot(y.cross(z));
                 if (!std::isfinite(determinant) || std::fabs(determinant) < 1e-12f) {
                     l->parent = oldParent;
+                    l->parentBone = oldBone;
                     l->threeD = wasThreeD;
                     return Errc::InvalidArgument;
                 }

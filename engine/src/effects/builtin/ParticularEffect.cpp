@@ -40,6 +40,18 @@ constexpr u16 kAnimPx = kParamAnimatable | kParamPixels;
 /// Teto de slots (6 vértices cada) e de partículas por segundo.
 constexpr f32 kMaxSlots = 4000.0f;
 constexpr f32 kMaxRate = 1000.0f;
+constexpr u32 kLifeSamples = 8;
+constexpr u32 kPathSamples = 16;
+constexpr u32 kAppearanceOffset = 1;
+constexpr u32 kOpacityOffset = kAppearanceOffset + kLifeSamples;
+constexpr u32 kPathOffset = kOpacityOffset + 2;
+
+enum Behavior : u32 { Continuous, FormGrid, Burst, AlongPath };
+
+bool samples_sprite(u32 shape) noexcept {
+    return shape == kShapeTexturedTriangle || shape == kShapeTexturedQuad ||
+           (shape >= kShapeLensConvex && shape <= kShapeTexturedFadedDisc) || shape == kShapeSprite;
+}
 
 struct ParticularUniforms {
     Vec4 region, view, clock, frame, emitPos, emitSize, launch, cone, forces, motion, lifeSize, look, color0, color1;
@@ -49,9 +61,13 @@ struct ParticularUniforms {
     Mat4 layerFromComp;
     Vec4 plexus;                          // distância (px; 0 = sem rede), espessura (px), opacidade, pontos
     Vec4 plexusSurface;                   // ligada (0/1), opacidade, pontos S, -
-    Vec4 shape;                           // forma, giro (rad/s), bater/balançar 0..1, cintilar 0..1
+    Vec4 shape;
+    Vec4 behavior, options;               // modo, dimensões da grade; dispersão, caminho, mapa de vida, sprite
+    Vec4 life[kLifeSamples];              // cor linear RGB, tamanho relativo à idade
+    Vec4 opacity[2];                      // 8 amostras do multiplicador de opacidade
+    Vec4 path[kPathSamples];              // posição em pixels no plano da camada
 };
-static_assert(sizeof(ParticularUniforms) == 560, "layout std140 do particular.vert");
+static_assert(sizeof(ParticularUniforms) == 1008, "layout std140 do particular.vert");
 /// Teto de pontos ligados na rede: M(M−1)/2 pares × 6 vértices (300 → ~270 mil).
 constexpr u32 kMaxPlexusPoints = 300;
 /// Teto da superfície: S(S−1)(S−2)/6 trios × 3 vértices (80 → ~246 mil).
@@ -132,12 +148,48 @@ public:
         p.add_int("plexus_surface_points", "Pontos da superfície", 40, 3, static_cast<i32>(kMaxSurfacePoints));
         // Forma (1.0.8): o desenho de cada partícula. Borboleta bate as asas,
         // folha/pétala/confete giram e tombam, estrela/brilho cintilam.
-        static const char* const kShapes[kShapeCount] = {"Disco", "Estrela", "Coração", "Folha", "Pétala",
-                                                         "Borboleta", "Confete", "Brilho", "Floco de neve"};
+        static const char* const kShapes[kShapeCount] = {
+            "Esfera", "Estrela", "Coração", "Folha", "Pétala", "Borboleta", "Confete", "Brilho", "Floco de neve",
+            "Linha", "Esfera sombreada", "Esfera suave", "Esfera suave escura", "Bolha",
+            "Polígono em movimento", "Quadrado em movimento", "Triângulo", "Quadrilátero",
+            "Triângulo texturizado", "Quadrilátero texturizado", "Tetraedro", "Cubo",
+            "Lente convexa", "Lente côncava", "Lente suave", "Lente suave escura", "Lente bolha",
+            "Quadrado texturizado", "Disco texturizado", "Disco texturizado suave",
+            "Esfera luminosa", "Estrela luminosa", "Nuvem", "Rastro luminoso", "Sprite",
+        };
         p.add_enum("shape", "Forma da partícula", kShapes, kShapeCount, kShapeDisc);
         p.add_float("spin", "Giro", 0.0f, 0.0f, 1440.0f, kAnim, "°/s");
         p.add_float("flutter", "Bater de asas e balanço", 0.0f, 0.0f, 100.0f, kAnimPct, "%");
         p.add_float("twinkle", "Cintilar", 0.0f, 0.0f, 100.0f, kAnimPct, "%");
+        static const char* const kBehaviors[] = {"Contínua", "Forma (grade 3D)", "Rajada", "Trajetória"};
+        p.add_enum("behavior", "Emissão", kBehaviors, 4, Continuous);
+        p.add_layer_ref("path_layer", "Camada do caminho");
+        p.add_layer_ref("sprite_layer", "Camada da textura");
+        p.add_int("form_x", "Pontos X", 16, 1, 64);
+        p.add_int("form_y", "Pontos Y", 12, 1, 64);
+        p.add_int("form_z", "Pontos Z", 1, 1, 16);
+        p.add_float("form_disperse", "Dispersão", 0.0f, 0.0f, 1000.0f, kAnimPx, "px");
+        p.add_curve("size_over_life", "Tamanho ao longo da vida");
+        p.add_curve("opacity_over_life", "Opacidade ao longo da vida");
+        p.add_bool("use_life_gradient", "Gradiente ao longo da vida", false);
+        p.add_gradient("life_gradient", "Gradiente de cor");
+        p.set_enabled_by(kPathLayer, kBehavior, 1u << AlongPath);
+        for (u32 index : {kGridX, kGridY, kGridZ, kDisperse}) p.set_enabled_by(index, kBehavior, 1u << FormGrid);
+        p.set_enabled_by(kLifeGradient, kUseLifeGradient, 1);
+        p.add_section("particle_emission", "Emissão",
+            {kRate, kPreRoll, kPositionX, kPositionY, kPositionZ, kEmitterW, kEmitterH, kEmitterD,
+             kEmitterSphere, kPathLayer, kGridX, kGridY, kGridZ, kDisperse});
+        p.add_section("particle_life", "Vida e aparência",
+            {kLife, kLifeRandom, kSize, kSizeRandom, kSizeEnd, kOpacity, kFadeIn, kFadeOut, kColor, kColorEnd,
+             kColorRandom, kFeather, kSizeCurve, kOpacityCurve, kUseLifeGradient, kLifeGradient}, kInvalidIndex, false);
+        p.add_section("particle_air", "Física do ar",
+            {kVelocity, kVelocityRandom, kDirectionTilt, kDirectionSpin, kSpread, kOutwards, kGravity,
+             kWindX, kWindY, kWindZ, kAirDrag, kTurbulence, kTurbulenceSpeed}, kInvalidIndex, false);
+        p.add_section("particle_detail", "Detalhes da partícula",
+            {kStretch, kSpin, kFlutter, kTwinkle, kAddMode, kShowSource, kSeed, kMotionBlur, kShutterAngle}, kInvalidIndex, false);
+        p.add_section("particle_connections", "Conexões",
+            {kPlexus, kPlexusDistance, kPlexusWidth, kPlexusOpacity, kPlexusPoints,
+             kPlexusSurface, kPlexusSurfaceOpacity, kPlexusSurfacePoints}, kInvalidIndex, false);
     }
 
     bool is_identity(const EffectEval&) const noexcept override { return false; }
@@ -168,6 +220,53 @@ public:
     }
 
     /// Os uniforms do quadro: os mesmos na folha 2D e na cena 3D.
+    i32 input_layer_param() const noexcept override { return kSpriteLayer; }
+
+    void resolve_resources(EffectEval& e) const noexcept override {
+        if (e.count < kParamCount) return;
+        const auto* size = e.curve(kSizeCurve);
+        const auto* opacity = e.curve(kOpacityCurve);
+        const bool sizeEdited = size && !size->is_identity();
+        const bool opacityEdited = opacity && !opacity->is_identity();
+        const u64 ref = e.value(kLifeGradient).ref;
+        const GradientData* gradient = e.b(kUseLifeGradient) && e.instance && ref < e.instance->gradients.size()
+            ? &e.instance->gradients[ref] : nullptr;
+        const u64 guide = e.value(kPathLayer).ref;
+        const bool path = e.e(kBehavior) == AlongPath && guide && e.resources && e.layer;
+        if (!sizeEdited && !opacityEdited && !gradient && !path) return;
+
+        auto data = std::make_shared<std::vector<Vec4>>(kPathOffset);
+        (*data)[0] = Vec4{sizeEdited ? 1.0f : 0.0f, opacityEdited ? 1.0f : 0.0f, gradient ? 1.0f : 0.0f, 0.0f};
+        const auto sample_gradient = [](const GradientData& g, f32 t) -> Vec4 {
+            const auto hi = std::lower_bound(g.stops.begin(), g.stops.end(), t, [](const GradientStop& stop, f32 pos) {
+                return stop.position < pos;
+            });
+            if (hi == g.stops.begin()) return linear(hi->color);
+            if (hi == g.stops.end()) return linear(g.stops.back().color);
+            const auto lo = hi - 1;
+            const f32 u = std::clamp((t - lo->position) / std::max(hi->position - lo->position, 1e-5f), 0.0f, 1.0f);
+            const Vec4 a = linear(lo->color), b = linear(hi->color);
+            return Vec4{a.x + (b.x - a.x) * u, a.y + (b.y - a.y) * u, a.z + (b.z - a.z) * u, 1.0f};
+        };
+        if (gradient && gradient->stops.empty()) { gradient = nullptr; (*data)[0].z = 0.0f; }
+        for (u32 j = 0; j < kLifeSamples; ++j) {
+            const f32 t = static_cast<f32>(j) / (kLifeSamples - 1);
+            Vec4 sample = gradient ? sample_gradient(*gradient, t) : Vec4{};
+            sample.w = sizeEdited ? std::clamp(size->evaluate(0, t), 0.0f, 1.0f) : t;
+            (*data)[kAppearanceOffset + j] = sample;
+        }
+        const auto alpha = [&](u32 j) -> f32 {
+            return opacityEdited ? std::clamp(opacity->evaluate(0, static_cast<f32>(j) / (kLifeSamples - 1)), 0.0f, 1.0f) : 1.0f;
+        };
+        (*data)[kOpacityOffset] = Vec4{alpha(0), alpha(1), alpha(2), alpha(3)};
+        (*data)[kOpacityOffset + 1] = Vec4{alpha(4), alpha(5), alpha(6), alpha(7)};
+        if (path) {
+            const auto points = e.resources->repeat_path(e.layer, kPathSamples, 0.0f, guide);
+            data->insert(data->end(), points.begin(), points.end());
+        }
+        e.pathSamples = std::move(data);
+    }
+
     void make_uniforms(const EffectEval& e, Rect region, Vec2 comp, Vec2 layerSize, f32 texel, ParticularUniforms& u,
                        u32& slots, u32& plexusVerts, u32& surfaceVerts, bool& draw) const noexcept {
         // --- Grade determinística de nascimentos -----------------------------
@@ -184,7 +283,28 @@ public:
         const f32 grid = plexus ? std::clamp(rate, 1e-3f, std::min(kMaxRate, kMaxSlots / span))
                                 : std::min(kMaxRate, kMaxSlots / span);
         slots = static_cast<u32>(std::clamp(std::ceil(span * grid), 1.0f, kMaxSlots));
-        draw = rate > 0.0f && now >= 0.0f;
+        const u32 behavior = e.count > kBehavior ? e.e(kBehavior) : Continuous;
+        u32 nx = 1, ny = 1, nz = 1;
+        if (behavior == FormGrid) {
+            nx = static_cast<u32>(std::clamp(e.value(kGridX).as_int(), 1, 64));
+            ny = static_cast<u32>(std::clamp(e.value(kGridY).as_int(), 1, 64));
+            nz = static_cast<u32>(std::clamp(e.value(kGridZ).as_int(), 1, 16));
+            slots = std::min(nx * ny * nz, static_cast<u32>(kMaxSlots));
+        } else if (behavior == Burst) {
+            slots = static_cast<u32>(std::clamp(std::round(rate), 1.0f, kMaxSlots));
+        }
+        u.behavior = Vec4{static_cast<f32>(behavior), static_cast<f32>(nx), static_cast<f32>(ny), static_cast<f32>(nz)};
+        u.options.x = e.count > kDisperse ? std::clamp(finite_or(e.f(kDisperse), 0.0f), 0.0f, 1000.0f) : 0.0f;
+        if (e.pathSamples && e.pathSamples->size() >= kPathOffset) {
+            const auto& data = *e.pathSamples;
+            u.options.y = static_cast<f32>(std::min<usize>(data.size() - kPathOffset, kPathSamples));
+            u.options.z = data.front().x + data.front().y * 2.0f + data.front().z * 4.0f;
+            std::copy_n(data.begin() + kAppearanceOffset, kLifeSamples, u.life);
+            std::copy_n(data.begin() + kOpacityOffset, 2, u.opacity);
+            std::copy_n(data.begin() + kPathOffset, static_cast<u32>(u.options.y), u.path);
+        }
+        draw = now >= 0.0f && (behavior == FormGrid || rate > 0.0f)
+            && (behavior != AlongPath || u.options.y >= 2.0f);
 
         u.region = Vec4{region.x, region.y, region.w, region.h};
         // Câmera padrão da composição: 40° na vertical, olhando o centro.
@@ -237,7 +357,7 @@ public:
             u.layerFromComp = e.placement->particleLayerFromComp;
         }
         plexusVerts = 0;
-        if (plexus) {
+        if (plexus && behavior == Continuous) {
             const u32 points = std::min(slots, static_cast<u32>(std::clamp(e.e(kPlexusPoints), 2u, kMaxPlexusPoints)));
             u.plexus = Vec4{std::clamp(finite_or(e.f(kPlexusDistance), 0.0f), 0.0f, 3000.0f),
                             std::clamp(finite_or(e.f(kPlexusWidth), 1.0f), 0.2f, 12.0f) / texel,
@@ -262,7 +382,8 @@ public:
     // decide quem aparece, não a ordem na timeline. A rede (plexus) é desenhada em
     // px da tela e "Mostrar origem" precisa da camada: esses ficam na folha.
     bool scene_capable(const EffectEval& e) const noexcept override {
-        return e.placement && e.placement->particleSpace && !e.b(kPlexus) && !e.b(kShowSource);
+        const bool sprite = e.count > kSpriteLayer && samples_sprite(e.e(kShape)) && e.value(kSpriteLayer).ref != 0;
+        return e.placement && e.placement->particleSpace && !e.b(kPlexus) && !e.b(kShowSource) && !sprite;
     }
 
     bool scene_draw(const EffectEval& e, const Mat4& clip, f32 opacity, void* uniforms,
@@ -320,8 +441,15 @@ public:
 
         const bool additive = e.b(kAddMode);
         const FGTexture sprites = ctx.texture("particular-particulas", w, h);
+        const u64 spriteRef = e.count > kSpriteLayer && samples_sprite(e.e(kShape)) ? e.value(kSpriteLayer).ref : 0;
+        const LayerImage* sprite = spriteRef ? ctx.layer_input(spriteRef) : nullptr;
+        u.options.w = sprite && sprite->valid() ? 1.0f : 0.0f;
         if (ctx.geometry_pass("particular", PassStage::Effects, sprites, ShaderId::effects_particular_vert,
-                              ShaderId::effects_particular_frag, {}, &u, sizeof(u), draw ? slots * 6u + plexusVerts + surfaceVerts : 0u, false,
+                              ShaderId::effects_particular_frag,
+                              u.options.w > 0.5f
+                                  ? std::initializer_list<PassTexture>{{sprite->texture, {}, CommonSampler::LinearBorder}}
+                                  : std::initializer_list<PassTexture>{},
+                              &u, sizeof(u), draw ? slots * 6u + plexusVerts + surfaceVerts : 0u, false,
                               true, additive ? BlendMode::Add : BlendMode::Normal) == kInvalidIndex) {
             return Errc::PipelineCompileFailed;
         }

@@ -905,6 +905,16 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
     // frame (bloco zerado pelo kernel) custava milissegundos na previa.
     if (++trimCountdown_ >= 90) { trimCountdown_ = 0; allocator_.trim_empty_blocks(); }
 
+    // Retire completed resources before retrying a present that ran out of
+    // memory, while keeping surface errors outside the command recording.
+    if (withSurface
+#if defined(AUREA_VK_HOST_PRESENT)
+        && !host_.active
+#endif
+    ) {
+        if (const Status surface = prepare_surface_frame(); !surface.ok()) return surface;
+    }
+
     FrameContext& f = frames_[frameCursor_];
     if (f.submitted) {
         const VkResult w = deviceFunctions_.vkWaitForFences(device_, 1, &f.fence, VK_TRUE, 2'000'000'000ull);
@@ -979,85 +989,70 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
         return OkStatus;
     }
 #endif
-    if (swapchain_ || swapchainDirty_) {
-        // SUBOPTIMAL não é "recrie já": o Android o devolve A CADA apresentação
-        // quando a pré-rotação escolhida difere da dica da janela (transform
-        // sem suporte, espelhado...). Recriar a cada quadro = vkDeviceWaitIdle
-        // + buffers novos e vazios por quadro — o preview PISCA. Recria só se a
-        // superfície mudou de fato (rotação); tamanho chega pelo resize_surface.
-        if (swapchainSuboptimal_ && !swapchainDirty_ && surface_ && frameNumber_ >= suboptimalCheckFrame_) {
-            swapchainSuboptimal_ = false;
-            suboptimalCheckFrame_ = frameNumber_ + 30;
-            VkSurfaceCapabilitiesKHR caps{};
-            if (instanceFunctions_.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_, surface_, &caps) == VK_SUCCESS
-                && caps.currentTransform != swapCapsTransform_) {
-                swapchainDirty_ = true;
-            } else if (suboptimalIgnored_++ == 0) {
-                AUREA_LOG_WARN("swapchain: SUBOPTIMAL sem mudanca na superficie; mantido (sem recriar a cada quadro)");
+    if (swapchain_ && !swapchainDirty_) {
+        // A discarded frame keeps ownership of one acquired image. Reuse
+        // it instead of acquiring another and exhausting the swapchain.
+        // Its earlier acquire semaphore was consumed by that submission.
+        const bool reuseHeld = heldImage_;
+        u32 index = reuseHeld ? imageIndex_ : 0;
+        const VkResult r = reuseHeld ? VK_SUCCESS
+            : deviceFunctions_.vkAcquireNextImageKHR(device_, swapchain_, 1'000'000'000ull, f.acquired,
+                                   VK_NULL_HANDLE, &index);
+        if (r == VK_SUCCESS || r == VK_SUBOPTIMAL_KHR) {
+            if (r == VK_SUBOPTIMAL_KHR) swapchainSuboptimal_ = true;
+            imageAcquired_ = true;
+            imageAcquireWait_ = !reuseHeld;
+            imageIndex_ = index;
+            Texture* t = textures_.get(swapTextures_[index]);
+            // Conteúdo anterior do swapchain não interessa: o passe de
+            // saída limpa. UNDEFINED evita uma leitura inútil da imagem.
+            if (!reuseHeld) {
+                t->state = ResourceState::Undefined;
+                t->layout = VK_IMAGE_LAYOUT_UNDEFINED;
             }
-        }
-        if (swapchainDirty_ && surface_) {
-            if (const Status s = recreate_swapchain(); !s.ok()) {
-                AUREA_LOG_WARN("swapchain nao recriado: %s", s.message().data());
-                if (s.code() == Errc::DeviceLost) {
-                    deviceLost_ = true;
-                    return s;
-                }
+            out.backbuffer = TextureHandle{swapTextures_[index]};
+            out.backbufferWidth = swapExtent_.width;
+            out.backbufferHeight = swapExtent_.height;
+            out.backbufferFormat = from_vk(swapFormat_);
+            switch (swapTransform_) {
+                case VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR:  out.rotation = SurfaceRotation::Rotate90; break;
+                case VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR: out.rotation = SurfaceRotation::Rotate180; break;
+                case VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR: out.rotation = SurfaceRotation::Rotate270; break;
+                default: out.rotation = SurfaceRotation::None; break;
             }
-        }
-        if (swapchain_) {
-            // A discarded frame keeps ownership of one acquired image. Reuse
-            // it instead of acquiring another and exhausting the swapchain.
-            // Its earlier acquire semaphore was consumed by that submission.
-            const bool reuseHeld = heldImage_;
-            u32 index = reuseHeld ? imageIndex_ : 0;
-            VkResult r = reuseHeld ? VK_SUCCESS
-                : deviceFunctions_.vkAcquireNextImageKHR(device_, swapchain_, 1'000'000'000ull, f.acquired,
-                                       VK_NULL_HANDLE, &index);
-            if (r == VK_ERROR_OUT_OF_DATE_KHR) {
-                const Status recreated = recreate_swapchain();
-                if (recreated.ok()) {
-                    r = deviceFunctions_.vkAcquireNextImageKHR(device_, swapchain_, 1'000'000'000ull, f.acquired,
-                                              VK_NULL_HANDLE, &index);
-                } else if (recreated.code() == Errc::DeviceLost) {
-                    deviceLost_ = true;
-                    return recreated;
-                }
-            }
-            if (r == VK_SUCCESS || r == VK_SUBOPTIMAL_KHR) {
-                if (r == VK_SUBOPTIMAL_KHR) swapchainSuboptimal_ = true;
-                imageAcquired_ = true;
-                imageAcquireWait_ = !reuseHeld;
-                imageIndex_ = index;
-                Texture* t = textures_.get(swapTextures_[index]);
-                // Conteúdo anterior do swapchain não interessa: o passe de
-                // saída limpa. UNDEFINED evita uma leitura inútil da imagem.
-                if (!reuseHeld) {
-                    t->state = ResourceState::Undefined;
-                    t->layout = VK_IMAGE_LAYOUT_UNDEFINED;
-                }
-                out.backbuffer = TextureHandle{swapTextures_[index]};
-                out.backbufferWidth = swapExtent_.width;
-                out.backbufferHeight = swapExtent_.height;
-                out.backbufferFormat = from_vk(swapFormat_);
-                switch (swapTransform_) {
-                    case VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR:  out.rotation = SurfaceRotation::Rotate90; break;
-                    case VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR: out.rotation = SurfaceRotation::Rotate180; break;
-                    case VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR: out.rotation = SurfaceRotation::Rotate270; break;
-                    default: out.rotation = SurfaceRotation::None; break;
-                }
-            } else if (note_device_lost(r)) {
-                return Status{Errc::DeviceLost, "aquisicao"};
-            } else {
-                // Sem imagem neste vsync (superfície sumindo, timeout): o frame
-                // segue sem backbuffer — gravado e submetido vazio, o que mantém
-                // os fences e a fila de destruição andando.
-                AUREA_LOG_WARN("swapchain: aquisicao falhou (%s)", result_name(r));
-                swapchainDirty_ = r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR;
-            }
+        } else if (r == VK_ERROR_DEVICE_LOST) {
+            return fail_recording(r, "vkAcquireNextImageKHR");
+        } else {
+            // Sem imagem neste vsync (superfície sumindo, timeout): o frame
+            // segue sem backbuffer — gravado e submetido vazio, o que mantém
+            // os fences e a fila de destruição andando.
+            AUREA_LOG_WARN("swapchain: aquisicao falhou (%s)", result_name(r));
+            swapchainDirty_ = r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_ERROR_SURFACE_LOST_KHR;
         }
     }
     return OkStatus;
+}
+
+Status Backend::prepare_surface_frame() noexcept {
+    // Android can report SUBOPTIMAL on every frame with its preferred transform
+    // unchanged. Rebuild on a real transform/size change or OUT_OF_DATE.
+    if (swapchainSuboptimal_ && !swapchainDirty_ && surface_ && frameNumber_ >= suboptimalCheckFrame_) {
+        swapchainSuboptimal_ = false;
+        suboptimalCheckFrame_ = frameNumber_ + 30;
+        VkSurfaceCapabilitiesKHR caps{};
+        const VkResult result = instanceFunctions_.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_, surface_, &caps);
+        if (result != VK_SUCCESS) {
+            (void)note_device_lost(result);
+            swapchainDirty_ = result == VK_ERROR_SURFACE_LOST_KHR;
+            return check(result, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
+        }
+        swapchainDirty_ = caps.currentTransform != swapCapsTransform_;
+        if (!swapchainDirty_ && suboptimalIgnored_++ == 0)
+            AUREA_LOG_WARN("swapchain: SUBOPTIMAL sem mudanca na superficie; mantido");
+    }
+    if (swapchainDirty_ && surface_)
+        return create_swapchain(surfaceDesc_.width, surfaceDesc_.height);
+    return presentPending_ ? present_pending_image() : OkStatus;
 }
 
 Status Backend::end_frame() noexcept {
@@ -1173,27 +1168,36 @@ Status Backend::end_frame_impl(bool present) noexcept {
         imageAcquired_ = false;
     }
     if (imageAcquired_) {
-        VkPresentInfoKHR pi{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
-        pi.waitSemaphoreCount = 1;
-        pi.pWaitSemaphores = &renderDone_[imageIndex_];
-        pi.swapchainCount = 1;
-        pi.pSwapchains = &swapchain_;
-        pi.pImageIndices = &imageIndex_;
-        const VkResult pr = deviceFunctions_.vkQueuePresentKHR(queue_, &pi);
         imageAcquired_ = false;
         heldImage_ = false;
-        if (pr == VK_ERROR_OUT_OF_DATE_KHR) {
-            swapchainDirty_ = true;
-        } else if (pr == VK_SUBOPTIMAL_KHR) {
-            swapchainSuboptimal_ = true;   // conferido no próximo begin_frame
-        } else if (pr == VK_ERROR_SURFACE_LOST_KHR) {
-            swapchainDirty_ = true;
-            return Status{Errc::SurfaceLost, "superficie perdida"};
-        } else if (note_device_lost(pr)) {
-            return Status{Errc::DeviceLost, "apresentacao"};
-        }
+        presentPending_ = true;
+        return present_pending_image();
     }
     return OkStatus;
+}
+
+Status Backend::present_pending_image() noexcept {
+    VkPresentInfoKHR pi{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
+    pi.waitSemaphoreCount = 1;
+    pi.pWaitSemaphores = &renderDone_[imageIndex_];
+    pi.swapchainCount = 1;
+    pi.pSwapchains = &swapchain_;
+    pi.pImageIndices = &imageIndex_;
+    const VkResult result = deviceFunctions_.vkQueuePresentKHR(queue_, &pi);
+    // On allocation failure Vulkan leaves both the image and its semaphore
+    // untouched. Retry that exact present before acquiring/signaling again.
+    if (result == VK_ERROR_OUT_OF_HOST_MEMORY || result == VK_ERROR_OUT_OF_DEVICE_MEMORY)
+        return check(result, "vkQueuePresentKHR");
+    presentPending_ = false;
+    if (result == VK_SUCCESS) return OkStatus;
+    if (result == VK_SUBOPTIMAL_KHR) {
+        swapchainSuboptimal_ = true;
+        return OkStatus;
+    }
+    swapchainDirty_ = true;
+    if (result == VK_ERROR_OUT_OF_DATE_KHR) return OkStatus;
+    (void)note_device_lost(result);
+    return check(result, "vkQueuePresentKHR");
 }
 
 // =============================================================================

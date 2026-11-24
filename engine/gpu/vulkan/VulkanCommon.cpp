@@ -508,8 +508,33 @@ HostRing::Stats HostRing::stats() const noexcept {
     return result;
 }
 
+GpuMemoryBudget Backend::memory_budget() const noexcept {
+    GpuMemoryBudget budget;
+    if (!hasMemoryBudget_ || !device_ || deviceLost_) return budget;
+
+    VkPhysicalDeviceMemoryBudgetPropertiesEXT driver{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT};
+    VkPhysicalDeviceMemoryProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2};
+    properties.pNext = &driver;
+    instanceFunctions_.vkGetPhysicalDeviceMemoryProperties2(physical_, &properties);
+
+    budget.heapCount = std::min(properties.memoryProperties.memoryHeapCount, static_cast<u32>(budget.heaps.size()));
+    for (u32 i = 0; i < budget.heapCount; ++i) {
+        const auto& heap = properties.memoryProperties.memoryHeaps[i];
+        budget.heaps[i] = {std::min(driver.heapBudget[i], heap.size), driver.heapUsage[i],
+                          (heap.flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != 0};
+    }
+    return budget;
+}
+
 void Backend::log_memory_breakdown() noexcept {
     allocator_.log_memory_breakdown();
+    const auto budget = memory_budget();
+    for (u32 i = 0; i < budget.heapCount; ++i) {
+        const auto& heap = budget.heaps[i];
+        AUREA_LOG_WARN("GPU heap %u: local=%u driver_budget=%llu driver_usage=%llu headroom=%llu",
+            i, heap.deviceLocal ? 1u : 0u, static_cast<unsigned long long>(heap.budgetBytes),
+            static_cast<unsigned long long>(heap.usageBytes), static_cast<unsigned long long>(heap.headroom_bytes()));
+    }
     // Failure-only attribution from existing live resource pools. No resource
     // names are retained (many debugName pointers have temporary lifetimes),
     // no allocation registry is added, and this grants no admission credit.

@@ -712,33 +712,21 @@ struct SpeedPanel: View {
     }
 
     var body: some View {
-        let canKey = keyed && !remap
-        // 0.4.1: com o Remapear ligado, o ◆ e a Curva da coluna esquerda são os do remapeamento.
-        let remapOn = keyed && remap
-        let keys = remapOn ? remapKeys : []
-        let remapHere = keys.contains { $0.time == model.localPlayhead }
+        let canKey = keyed && !remap && model.selectedLayer?.locked != true
         let rail = PanelRail(
             onBack: { model.panel = .none },
-            keyframeLook: remapOn ? (remapHere ? .keyHere : !keys.isEmpty ? .animated : .none) : look,
-            onKeyframe: canKey ? { toggleSpeedKey() } : remapOn ? { toggleRemapKey() } : nil,
-            onDeleteAllKeyframes: { model.deleteAllKeyframes(id, property: remapOn ? 30 : 39) },
-            onCurve: canKey ? { openSpeedCurve() } : remapOn ? { openRemapCurve() } : nil,
-            curveReady: remapOn ? keys.count >= 2 : speedKeys.count >= 2)
-        // F10: a aba Opções só tem o que é do vídeo (de trás para a frente, repetir, câmera
-        // lenta); as fichas de velocidade repetiam a régua e saíram. Áudio: Velocidade · Curva.
-        let video = kind == 1
-        let base: [PanelTab] = media ? [
+            keyframeLook: canKey ? look : .none,
+            onKeyframe: canKey ? { toggleSpeedKey() } : nil,
+            onDeleteAllKeyframes: canKey ? { model.deleteAllKeyframes(id, property: 39) } : nil,
+            onCurve: canKey ? { openSpeedCurve() } : nil,
+            curveReady: speedKeys.count >= 2)
+        let tabs: [PanelTab] = kind == 1 ? [
             PanelTab(id: "speed", label: AureaText.t("editor_velocidade"), glyph: CupertinoGlyph.Speedometer),
-            PanelTab(id: "curve", label: AureaText.t("om_lp_speed_tab_curve"), glyph: CupertinoGlyph.Waveform),
+            PanelTab(id: "options", label: AureaText.t("om_lp_speed_tab_options"), glyph: CupertinoGlyph.SliderHorizontal3),
         ] : []
-        let tabs: [PanelTab] = base + (media && video
-            ? [PanelTab(id: "options", label: AureaText.t("om_lp_speed_tab_options"), glyph: CupertinoGlyph.SliderHorizontal3)] : [])
-        PanelFrame(rail: rail, tabs: tabs, selectedTab: tab, onTab: { tab = $0 }) {
-            switch media && (video || tab != "options") ? tab : "speed" {
-            case "curve": curveTab
-            case "options": optionsTab
-            default: mainTab
-            }
+        let activeTab = kind == 1 && tab == "options" ? "options" : "speed"
+        PanelFrame(rail: rail, tabs: tabs, selectedTab: activeTab, onTab: { tab = $0 }) {
+            if activeTab == "options" { optionsTab } else { mainTab }
         }
         .foregroundStyle(AureaColors.text)
     }
@@ -751,30 +739,6 @@ struct SpeedPanel: View {
             else { core.insertKeyframe(forLayer: id, property: 39, time: model.localPlayhead, value: speed.clamped(to: 0.05...16)) }
         }
         model.refreshModel(force: true)
-    }
-
-    /// 0.4.1: chaves do remapeamento (TrackProperty::TimeRemap = 30), em ordem.
-    private var remapKeys: [KeyframeItem] {
-        (model.keysForLayer(id) ?? []).filter { $0.property == 30 }.sorted { $0.time < $1.time }
-    }
-
-    /// 0.4.1: ◆ do remapeamento — mesmas chamadas do ◇ da linha (a curva mantém 2 chaves).
-    private func toggleRemapKey() {
-        let keys = remapKeys
-        if let index = keys.firstIndex(where: { $0.time == model.localPlayhead }) {
-            if keys.count > 2 { model.engine.removeTimeRemap(id, index: UInt32(index)) }
-        } else {
-            _ = model.engine.editTimeRemap(id, index: -1, time: Int64(model.localPlayhead), value: 0, interpolation: -1)
-        }
-        model.refreshModel(force: true)
-    }
-
-    /// 0.4.1: Curva do remapeamento — o trecho sob o cabeçote (par do `openRemapCurve`).
-    private func openRemapCurve() {
-        let keys = remapKeys.map(\.time)
-        guard keys.count >= 2 else { return }
-        let i = max(0, min(keys.count - 2, keys.lastIndex { $0 <= model.localPlayhead } ?? 0))
-        model.openCurve(property: 30, effect: UInt32.max, param: 0, time: keys[i])
     }
 
     private func openSpeedCurve() {
@@ -798,7 +762,18 @@ struct SpeedPanel: View {
             RetimeRow(layerId: id, bits: bits)
             Color.clear.frame(height: 8)
             Group {
-                if remap { hint("om_lp_speed_remap_on") }
+                if remap {
+                    PanelItemRow(glyph: CupertinoGlyph.Clock, title: AureaText.t("remap_linha_tempo"),
+                                 tag: "speed.open-remap", chevron: true) {
+                        let type = fxEffectTypeId("aurea.time.remap")
+                        if model.effects.contains(where: { $0.typeId == type }) {
+                            model.pendingEffectFocus = AureaModel.EffectFocusRequest(layer: id, type: type, previous: [])
+                        } else if model.selectedLayer?.locked != true {
+                            model.addEffectAndFocus(type, layer: id)
+                        }
+                        model.openPanel(.effects)
+                    }
+                }
                 else if frozen { hint("panel_este_trecho_quadro_parado_apare_bordas") }
                 else if notBakeable { hint("om_lp_speed_keyed") }
                 else {
@@ -811,27 +786,14 @@ struct SpeedPanel: View {
                 }
             }
             Color.clear.frame(height: 6)
-            SpeedSlider(value: speed, enabled: !blocked, height: PanelMetrics.touch, tag: "speed.slider",
-                        onStart: { model.beginGesture("velocidade") }, onValue: { setSpeed($0) }, onEnd: { model.endGesture() })
+            if !remap {
+                SpeedSlider(value: speed, enabled: !blocked, height: PanelMetrics.touch, tag: "speed.slider",
+                            onStart: { model.beginGesture("velocidade") }, onValue: { setSpeed($0) }, onEnd: { model.endGesture() })
+            }
             if !keyed { hint("om_lp_speed_constant_hint").padding(.top, 4) }
             Color.clear.frame(height: 10)
         }
         .padding(.horizontal, 15)
-    }
-
-    private var curveTab: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    SpeedChip(label: AureaText.t("remap_normal"), on: !remap) { change { $0.setTimeRemap(false, forLayer: id) } }
-                    SpeedChip(label: AureaText.t("remap_linha_tempo"), on: remap) { change { $0.setTimeRemap(true, forLayer: id) } }
-                }
-            }
-            // F10: a interpolação dos quadros mora em Opções (câmera lenta); aqui só a curva.
-            if remap { TimeRemapEffectEditor(effectId: .max, showInterpolation: false) }
-            else { hint("panel_velocidade_keyframes_duracao_fica") }
-        }
-        .padding(.horizontal, 12).padding(.vertical, 8)
     }
 
     /// Aba Opções (só vídeo): de trás para a frente, repetir a mídia e a câmera lenta.
@@ -840,10 +802,15 @@ struct SpeedPanel: View {
         let blend = flags & 16 != 0 ? 2 : flags & 8 != 0 ? 1 : 0
         return VStack(alignment: .leading, spacing: 0) {
             if kind == 1 {
-                HStack {
-                    Text(AureaText.t("panel_passar_tras_frente")).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
-                    AureaToggle(checked: flags & 1 != 0) { v in change { $0.setLayer(id, reversed: v) } }
-                }.frame(height: 48)
+                if !remap {
+                    HStack {
+                        Text(AureaText.t("panel_passar_tras_frente")).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
+                        AureaToggle(checked: flags & 1 != 0) { value in
+                            change { $0.setLayer(id, reversed: value) }
+                            model.unaliasThumbs(id)
+                        }
+                    }.frame(height: 48)
+                }
                 // 0.4.6: repetir o vídeo além do fim da fonte (par do SpeedAudioPanels.kt).
                 HStack {
                     Text(AureaText.t("layer_media_loop")).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)

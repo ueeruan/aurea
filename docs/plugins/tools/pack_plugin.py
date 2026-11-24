@@ -205,7 +205,7 @@ def check_v2(m, folder, fmt):
             raise Invalid(f'painel "{pid}": icone desconhecido (use {", ".join(sorted(ICONS))})')
         place = p.get("placement", "editor.panel")
         place = [place] if isinstance(place, str) else place
-        allowed = ("editor.panel", "home.tab") + (("editor.fullscreen",) if fmt >= 3 else ())
+        allowed = ("editor.panel", "home.tab") + (("editor.fullscreen", "scene.panel") if fmt >= 3 else ())
         if not place or any(x not in allowed for x in place):
             raise Invalid(f'painel "{pid}": "placement" deve ser {", ".join(allowed)}')
         panel_ids[pid] = place
@@ -263,7 +263,7 @@ def check_v2(m, folder, fmt):
             raise Invalid(f'acao com "id" invalido: {aid}')
         check_text(a.get("title"), f"{aid}.title")
         place = a.get("placement")
-        allowed = ("editor.menu", "layer.menu", "layer.toolbar") + (("add.menu",) if fmt >= 3 else ())
+        allowed = ("editor.menu", "layer.menu", "layer.toolbar") + (("add.menu", "scene.menu") if fmt >= 3 else ())
         if place not in allowed:
             raise Invalid(f'acao "{aid}": "placement" deve ser {", ".join(allowed)}')
         if place == "layer.toolbar" and "icon" not in a:
@@ -274,8 +274,11 @@ def check_v2(m, folder, fmt):
             raise Invalid(f'acao "{aid}": use "call" (funcao) ou "panel" (painel), um dos dois')
         if a.get("call"):
             functions.append(a["call"])
-        elif not {"editor.panel", "editor.fullscreen"} & set(panel_ids.get(a["panel"], [])):
-            raise Invalid(f'acao "{aid}": o painel "{a["panel"]}" nao existe ou nao tem "editor.panel" nem "editor.fullscreen"')
+        else:
+            target_places = {"scene.panel"} if place == "scene.menu" else {"editor.panel", "editor.fullscreen"}
+            if not target_places & set(panel_ids.get(a["panel"], [])):
+                expected = " ou ".join(sorted(target_places))
+                raise Invalid(f'acao "{aid}": o painel "{a["panel"]}" nao existe ou precisa de {expected}')
     if functions and not script:
         raise Invalid(f'a interface chama "{functions[0]}", mas o plugin nao tem "script"')
     if script:

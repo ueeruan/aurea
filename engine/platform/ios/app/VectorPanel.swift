@@ -85,6 +85,7 @@ struct VectorPanel: View {
                         case "path": pathTab
                         case "operators":
                             DrawingProgressActionView()
+                            VectorOrderView(layer: id, revision: model.status.modelRevision, onEdit: refresh)
                             operatorsTab
                         case "group": transformTab
                         default: shapeTab
@@ -557,6 +558,120 @@ struct VectorPanel: View {
     private func addGroup(_ kind: Int) {
         let created = model.engine.addVectorGroup(id, kind: UInt32(kind))
         if created >= 0 { model.vectorGroup = UInt32(created); model.vectorPath = 0; if kind == 0 { EditPointsState.shared.reset(); model.openPanel(.editPoints) } }; refresh()
+    }
+}
+
+private struct VectorOrderView: View {
+    private struct Item {
+        let group: [UInt32]
+        let kind: Int
+        let ordinal: UInt32
+        let position: UInt32
+        let name: String?
+    }
+
+    @EnvironmentObject private var model: AureaModel
+    let layer: Int64
+    let revision: UInt32
+    let onEdit: () -> Void
+    @State private var expanded = false
+    @State private var closedGroups: Set<[UInt32]> = []
+    @State private var items: [Item] = []
+    @State private var moveFailed = false
+
+    private let labels = ["panel_caminho", "panel_preenchimento_6e8f", "panel_traco",
+                          "motion_vector_trim", "motion_vector_repeat", "panel_juntar_caminhos_grupo",
+                          "edt_vec_operators", "editor_grupo"]
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $expanded) {
+            if moveFailed {
+                Text(AureaText.t("motion_vector_move_unavailable")).font(.aurea(size: 12))
+                    .foregroundStyle(AureaColors.muted)
+            }
+            let siblings = Dictionary(grouping: items.indices, by: { items[$0].group })
+            ForEach(items.indices, id: \.self) { index in
+                let item = items[index]
+                if !closedGroups.contains(where: { item.group.starts(with: $0) }) {
+                    itemRow(item, index: index, siblings: siblings[item.group] ?? [])
+                }
+            }
+        } label: {
+            Text(AureaText.t("motion_vector_order"))
+                .accessibilityHint(AureaText.t("motion_vector_order_hint"))
+        }
+        .tint(AureaColors.accent)
+        .padding(.vertical, 8)
+        .onChange(of: expanded) { if $0 { load() } }
+        .onChange(of: revision) { _ in if expanded { load() } }
+        .onChange(of: layer) { _ in
+            closedGroups.removeAll(); moveFailed = false
+            if expanded { load() }
+        }
+        .accessibilityIdentifier("vector.order")
+    }
+
+    private func itemRow(_ item: Item, index: Int, siblings: [Int]) -> some View {
+        let name = item.name.flatMap { $0.isEmpty ? nil : $0 }
+        let label = name ?? "\(AureaText.t(labels.indices.contains(item.kind) ? labels[item.kind] : "edt_vec_operators")) \(item.ordinal + 1)"
+        let group = item.group + [item.ordinal]
+        let rank = siblings.firstIndex(of: index) ?? -1
+        return HStack {
+            if item.kind == 7 {
+                Button {
+                    if closedGroups.contains(group) { closedGroups.remove(group) }
+                    else { closedGroups.insert(group) }
+                } label: {
+                    Label(label, systemImage: closedGroups.contains(group) ? "chevron.right" : "chevron.down")
+                }.buttonStyle(.plain)
+            } else {
+                Text(label)
+            }
+            Spacer()
+            if !item.group.isEmpty {
+                moveButton(item, label: label, target: rank > 0 ? items[siblings[rank - 1]] : nil, up: true)
+                moveButton(item, label: label, target: rank >= 0 && rank + 1 < siblings.count ? items[siblings[rank + 1]] : nil, up: false)
+            }
+        }
+        .font(.aurea(size: 13))
+        .padding(.leading, CGFloat(min(item.group.count, 5) * 12))
+    }
+
+    private func moveButton(_ item: Item, label: String, target: Item?, up: Bool) -> some View {
+        Button {
+            guard let target else { return }
+            moveFailed = !model.engine.moveVectorTreeItem(layer, group: item.group.map { NSNumber(value: $0) },
+                                                        from: item.position, to: target.position)
+            if !moveFailed { onEdit(); load() }
+        } label: {
+            Image(systemName: up ? "arrow.up" : "arrow.down").frame(width: 44, height: 44)
+        }
+        .buttonStyle(.plain)
+        .disabled(target == nil)
+        .accessibilityLabel(AureaText.t(up ? "motion_move_up" : "motion_move_down", label))
+    }
+
+    private func load() {
+        let tree = model.engine.vectorTree(layer)
+        let data = (tree["rows"] as? [NSNumber] ?? []).map(\.uint32Value)
+        let names = (tree["names"] as? String ?? "").components(separatedBy: "\n")
+        guard data.count >= 2, data[0] == 1 else { items = []; return }
+        var ancestors: [UInt32] = []
+        var result: [Item] = []
+        var offset = 2
+        var nameIndex = 0
+        for _ in 0..<min(Int(data[1]), (data.count - 2) / 6) {
+            guard data.count - offset >= 6 else { break }
+            let depth = Int(data[offset]), kind = Int(data[offset + 1])
+            let ordinal = data[offset + 2], position = data[offset + 3], fields = Int(data[offset + 5])
+            guard depth <= ancestors.count, fields <= data.count - offset - 6 else { break }
+            ancestors = Array(ancestors.prefix(depth))
+            result.append(Item(group: ancestors, kind: kind, ordinal: ordinal, position: position,
+                               name: kind == 7 && nameIndex < names.count ? names[nameIndex] : nil))
+            if kind == 7 { ancestors.append(ordinal); nameIndex += 1 }
+            offset += 6 + fields
+        }
+        items = result
     }
 }
 

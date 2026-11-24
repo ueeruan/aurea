@@ -352,10 +352,10 @@
     <string name="home_ruanzitwo_ofruanzitwo_tiktok_ruanzitwo">Ruanzitwo  ·  @ofruanzitwo  ·  TikTok @ruanzitwo</string>
     <string name="home_ver_todos">सभी देखें</string>
     <string name="panel_1_caminho">1 पथ</string>
-    <string name="panel_1_recortar_pelo">1. किससे काटें</string>
+    <string name="panel_1_recortar_pelo">किससे काटें</string>
     <string name="panel_1_to">, 1 to </string>
     <string name="panel_2_modo">2 मोड</string>
-    <string name="panel_2_qual_camada_recorta">2. कौन-सी लेयर काटती है</string>
+    <string name="panel_2_qual_camada_recorta">कौन-सी लेयर काटती है</string>
     <string name="panel_2_to">, 2 to</string>
     <string name="panel_3_borda">3 किनारा</string>
     <string name="panel_4_rastrear">4 ट्रैक</string>
@@ -2540,7 +2540,7 @@
     <string name="app_export_gallery_failed">वीडियो बन गया, लेकिन गैलरी में सेव नहीं हो सका।</string>
     <string name="app_saved_to_gallery">गैलरी में Movies › Aurea में सेव किया गया।</string>
     <string name="app_saved_to_path">%1$s में सेव किया गया।</string>
-    <string name="app_export_software_encoder">इस डिवाइस में इस रेज़ोल्यूशन के लिए %1$s हार्डवेयर एन्कोडर नहीं है: सॉफ़्टवेयर से एक्सपोर्ट हो रहा है (धीमा, गुणवत्ता वही)।</string>
+    <string name="app_export_software_encoder">%1$s की सॉफ़्टवेयर एन्कोडिंग जारी है। एक्सपोर्ट में ज़्यादा समय लग सकता है।</string>
     <string name="app_export_thermal">डिवाइस गर्म है: ठंडा होने के लिए एक्सपोर्ट धीमा हुआ। गुणवत्ता नहीं बदलती।</string>
     <string name="app_export_no_hevc">यह डिवाइस इस रेज़ोल्यूशन में HEVC एक्सपोर्ट नहीं करता। H.264 आज़माएँ।</string>
     <string name="app_export_unsupported_res">यह डिवाइस इस रेज़ोल्यूशन में एक्सपोर्ट नहीं करता।</string>
@@ -3130,7 +3130,7 @@
     <string name="rig_auto">ऑटो</string>
     <string name="rig_done">हो गया</string>
     <string name="rig_hint_setup">जोड़ों को शरीर पर खींचें · नया जोड़ बनाने के लिए खाली जगह टैप करें</string>
-    <string name="rig_hint_animate">हाथ, पैर या सिर खींचें (कीफ़्रेम बनता है)</string>
+    <string name="rig_hint_animate">मोड़ने और कीफ़्रेम बनाने के लिए सिरा खींचें</string>
     <!-- Quarentena de projeto (ProjectGuard) -->
     <string name="quarantine_title">समस्या वाला प्रोजेक्ट</string>
     <string name="quarantine_body_open">“%1$s” खोलते समय Aurea बंद हो गया। दोबारा बंद न हो, इसलिए इसे अपने आप नहीं खोला गया। पुनर्प्राप्त करें इसे फिर से खोलने की कोशिश करता है; अगर फिर बंद हो, तो सेटिंग्स से बंद होने का निदान भेजें।</string>
@@ -5807,4 +5807,7 @@
     <string name="fxo_bangs">माथे के बाल</string>
     <string name="fxo_side_locks">लटें</string>
     <string name="fxo_glasses">चश्मा</string>
+    <string name="editor_parent_link_failed">लेयरों को चुनी गई पैरेंट लेयर से लिंक नहीं किया जा सका।</string>
+    <string name="mask_use_layer">लेयर को मास्क की तरह इस्तेमाल करें</string>
+    <string name="mask_hexagon">षट्भुज</string>
 </resources>

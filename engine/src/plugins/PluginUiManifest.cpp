@@ -46,6 +46,8 @@ const char* placement_name(u32 bit) noexcept {
         case kPlaceLayerToolbar: return "layer.toolbar";
         case kPlaceAddMenu: return "add.menu";
         case kPlaceFullscreen: return "editor.fullscreen";
+        case kPlaceScenePanel: return "scene.panel";
+        case kPlaceSceneMenu: return "scene.menu";
         default: return "";
     }
 }
@@ -418,7 +420,9 @@ bool parse_manifest_v2(const json::Value& root, Manifest& m, u32 format, std::st
                     if (!icon->is_string() || !valid_icon(icon->string)) return r.fail(where + ": icone desconhecido (veja a lista em docs/plugins)");
                     p.icon = icon->string;
                 } else p.icon = "wand";
-                if (!read_placement(pv.get("placement"), kPlaceEditorPanel | kPlaceHomeTab | (format >= kFormatVersionV3 ? kPlaceFullscreen : 0u), p.placement, where, r)) return false;
+                const u32 panelPlaces = kPlaceEditorPanel | kPlaceHomeTab
+                    | (format >= kFormatVersionV3 ? kPlaceFullscreen | kPlaceScenePanel : 0u);
+                if (!read_placement(pv.get("placement"), panelPlaces, p.placement, where, r)) return false;
                 if (const Value* replaced = pv.get("replaces")) {
                     static const char* const kReplaceable[] = {"transform", "effects", "blend", "presets", "material"};
                     if (format < kFormatVersionV3) return r.fail(where + ": \"replaces\" pede \"aureaPlugin\": 3");
@@ -464,8 +468,10 @@ bool parse_manifest_v2(const json::Value& root, Manifest& m, u32 format, std::st
                 if (!r.only_keys(av, {"id", "title", "icon", "placement", "call", "panel", "needsLayer"}, where)) return false;
                 for (const ActionDecl& other : m.ui.actions) if (other.id == a.id) return r.fail(where + " repetida");
                 if (!r.text(av.get("title"), a.title, "\"" + a.id + "\".title", 48, true)) return false;
-                if (!av.get("placement")) return r.fail(where + ": falta \"placement\" (editor.menu, layer.menu ou layer.toolbar)");
-                if (!read_placement(av.get("placement"), kPlaceEditorMenu | kPlaceLayerMenu | kPlaceLayerToolbar | (format >= kFormatVersionV3 ? kPlaceAddMenu : 0u), a.placement, where, r))
+                if (!av.get("placement")) return r.fail(where + ": falta \"placement\"");
+                const u32 actionPlaces = kPlaceEditorMenu | kPlaceLayerMenu | kPlaceLayerToolbar
+                    | (format >= kFormatVersionV3 ? kPlaceAddMenu | kPlaceSceneMenu : 0u);
+                if (!read_placement(av.get("placement"), actionPlaces, a.placement, where, r))
                     return false;
                 if (const Value* icon = av.get("icon")) {
                     if (!icon->is_string() || !valid_icon(icon->string)) return r.fail(where + ": icone desconhecido (veja a lista em docs/plugins)");
@@ -489,7 +495,9 @@ bool parse_manifest_v2(const json::Value& root, Manifest& m, u32 format, std::st
             if (a.panel.empty()) continue;
             const PanelDecl* p = m.ui.panel(a.panel);
             if (!p) return r.fail("acao \"" + a.id + "\" abre o painel \"" + a.panel + "\", que nao existe");
-            if (!(p->placement & (kPlaceEditorPanel | kPlaceFullscreen)))
+            if ((a.placement & kPlaceSceneMenu) && !(p->placement & kPlaceScenePanel))
+                return r.fail("acao \"" + a.id + "\" em \"scene.menu\" pede um painel em \"scene.panel\"");
+            if ((a.placement & ~kPlaceSceneMenu) && !(p->placement & (kPlaceEditorPanel | kPlaceFullscreen)))
                 return r.fail("acao \"" + a.id + "\" abre \"" + a.panel + "\", que nao tem o lugar \"editor.panel\" nem \"editor.fullscreen\"");
         }
     }

@@ -47,10 +47,12 @@ Status Backend::attach_surface(const SurfaceDesc& desc) noexcept {
         return created;
     }
     VkBool32 supported = VK_FALSE;
-    instanceFunctions_.vkGetPhysicalDeviceSurfaceSupportKHR(physical_, graphicsFamily_, surface_, &supported);
-    if (!supported) {
+    const Status support = check(instanceFunctions_.vkGetPhysicalDeviceSurfaceSupportKHR(
+        physical_, graphicsFamily_, surface_, &supported), "vkGetPhysicalDeviceSurfaceSupportKHR");
+    if (!support.ok() || !supported) {
         instanceFunctions_.vkDestroySurfaceKHR(instance_, surface_, nullptr);
         surface_ = VK_NULL_HANDLE;
+        if (!support.ok()) return support;
         return Status{Errc::UnsupportedFeature, "fila grafica nao apresenta nesta superficie"};
     }
     return create_swapchain(desc.width, desc.height);
@@ -79,6 +81,7 @@ void Backend::detach_surface() noexcept {
 }
 
 Status Backend::resize_surface(u32 width, u32 height) noexcept {
+    const bool changed = width != surfaceDesc_.width || height != surfaceDesc_.height;
     surfaceDesc_.width = width;
     surfaceDesc_.height = height;
 #if defined(AUREA_VK_HOST_PRESENT)
@@ -92,14 +95,8 @@ Status Backend::resize_surface(u32 width, u32 height) noexcept {
         return OkStatus;
     }
 #endif
-    if (!surface_) return OkStatus;
-    swapchainDirty_ = true;
+    if (surface_ && changed) swapchainDirty_ = true;
     return OkStatus;
-}
-
-Status Backend::recreate_swapchain() noexcept {
-    deviceFunctions_.vkDeviceWaitIdle(device_);
-    return create_swapchain(surfaceDesc_.width, surfaceDesc_.height);
 }
 
 Status Backend::create_swapchain(u32 width, u32 height) noexcept {
@@ -168,8 +165,16 @@ Status Backend::create_swapchain(u32 width, u32 height) noexcept {
     u32 imageCount = std::max(3u, caps.minImageCount);
     if (caps.maxImageCount > 0) imageCount = std::min(imageCount, caps.maxImageCount);
 
-    VkCompositeAlphaFlagBitsKHR alpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-    if (!(caps.supportedCompositeAlpha & alpha)) alpha = VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
+    VkCompositeAlphaFlagBitsKHR alpha{};
+    for (const auto mode : {VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR, VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR,
+                            VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR, VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR}) {
+        if (caps.supportedCompositeAlpha & mode) {
+            alpha = mode;
+            break;
+        }
+    }
+    if (!alpha || !(caps.supportedUsageFlags & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT))
+        return Status{Errc::UnsupportedFeature, "superficie sem suporte a composicao"};
 
     VkSwapchainCreateInfoKHR info{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
     info.surface = surface_;
@@ -189,6 +194,11 @@ Status Backend::create_swapchain(u32 width, u32 height) noexcept {
     info.clipped = VK_TRUE;
     info.oldSwapchain = swapchain_;
 
+    if (swapchain_) {
+        const VkResult idle = deviceFunctions_.vkDeviceWaitIdle(device_);
+        (void)note_device_lost(idle);
+        if (idle != VK_SUCCESS) return check(idle, "vkDeviceWaitIdle swapchain");
+    }
     VkSwapchainKHR created = VK_NULL_HANDLE;
     if (const Status s = check(deviceFunctions_.vkCreateSwapchainKHR(device_, &info, nullptr, &created), "vkCreateSwapchainKHR");
         !s.ok()) {
@@ -273,6 +283,7 @@ void Backend::destroy_swapchain() noexcept {
     imageAcquired_ = false;
     imageAcquireWait_ = false;
     heldImage_ = false;
+    presentPending_ = false;
 }
 
 } // namespace aurea::vk

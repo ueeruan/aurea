@@ -142,6 +142,71 @@ AUREA_TEST(Rig, TwoBoneIkReachesTheTarget) {
     AUREA_CHECK_NEAR(rig::fk_delta(r, bones, 1, Vec2{10, 150}), 90.0f, 1e-3f);
 }
 
+AUREA_TEST(Rig, LongIkBendsAnInitiallyStraightChainWithoutMovingItsSibling) {
+    RigData r;
+    r.joints = {
+        {30, kInvalidIndex, {20, 60}}, {31, 30, {55, 60}}, {32, 31, {90, 60}},
+        {33, 32, {125, 60}}, {34, 33, {160, 60}}, {35, 30, {30, 90}},
+    };
+    std::vector<f32> deg(r.joints.size(), 0.0f);
+    const auto drag = [&](Vec2 target) {
+        std::vector<rig::Affine> bones;
+        rig::pose(r, deg, bones);
+        std::array<rig::JointDelta, rig::kMaxJoints> changes{};
+        const u32 count = rig::drag_deltas(r, bones, 4, target, changes);
+        AUREA_CHECK_EQ(count, 4u);
+        for (u32 i = 0; i < count; ++i) {
+            AUREA_CHECK_EQ(changes[i].index, i + 1);
+            deg[changes[i].index] += changes[i].degrees;
+        }
+        for (u32 i = 1; i <= 4; ++i)
+            AUREA_CHECK_NEAR((posed(r, deg, i) - posed(r, deg, i - 1)).length(), 35.0f, 1e-3f);
+        AUREA_CHECK((posed(r, deg, 0) - Vec2{20, 60}).length() < 1e-4f);
+        AUREA_CHECK((posed(r, deg, 5) - Vec2{30, 90}).length() < 1e-4f);
+    };
+    drag({115, 60});
+    AUREA_CHECK((posed(r, deg, 4) - Vec2{115, 60}).length() < 0.1f);
+    drag({150, 90});
+    AUREA_CHECK((posed(r, deg, 4) - Vec2{150, 90}).length() < 0.1f);
+    drag({20, 250});
+    AUREA_CHECK((posed(r, deg, 4) - Vec2{20, 200}).length() < 0.1f);
+}
+
+AUREA_TEST(Rig, LongIkClampsTargetsInsideTheMinimumReach) {
+    RigData r;
+    r.joints = {{0, kInvalidIndex, {}}, {1, 0, {10, 0}}, {2, 1, {90, 0}},
+                {3, 2, {100, 0}}, {4, 3, {110, 0}}};
+    std::vector<f32> deg(r.joints.size(), 0.0f);
+    std::vector<rig::Affine> bones;
+    rig::pose(r, deg, bones);
+    std::array<rig::JointDelta, rig::kMaxJoints> changes{};
+    const u32 count = rig::drag_deltas(r, bones, 4, {0, 1}, changes);
+    AUREA_CHECK_EQ(count, 4u);
+    for (u32 i = 0; i < count; ++i) deg[changes[i].index] += changes[i].degrees;
+    AUREA_CHECK((posed(r, deg, 4) - Vec2{0, 50}).length() < 0.1f);
+}
+
+AUREA_TEST(Rig, LongIkConvergesNearFullExtension) {
+    constexpr u32 tip = 16;
+    RigData r;
+    r.joints.push_back({0, kInvalidIndex, {}});
+    std::vector<f32> deg(tip + 1, 0.0f);
+    for (u32 j = 1; j <= tip; ++j) {
+        r.joints.push_back({j, j - 1, {30.0f * j, 0.0f}});
+        deg[j] = j % 3 == 0 ? -105.0f : 45.0f;
+    }
+    std::vector<rig::Affine> bones;
+    rig::pose(r, deg, bones);
+    std::array<rig::JointDelta, rig::kMaxJoints> changes{};
+    const Vec2 target{479.5f, 0.0f};
+    const u32 count = rig::drag_deltas(r, bones, tip, target, changes);
+    AUREA_CHECK_EQ(count, tip);
+    for (u32 i = 0; i < count; ++i) deg[changes[i].index] += changes[i].degrees;
+    AUREA_CHECK((posed(r, deg, tip) - target).length() < 0.08f);
+    for (u32 j = 1; j <= tip; ++j)
+        AUREA_CHECK_NEAR((posed(r, deg, j) - posed(r, deg, j - 1)).length(), 30.0f, 1e-3f);
+}
+
 namespace {
 
 struct RigEngine {
@@ -222,6 +287,34 @@ AUREA_TEST(Rig, EngineBuildsPosesWithKeyframesAndUndo) {
     AUREA_CHECK_NEAR(j[Engine::kRigJointFloats + 1], static_cast<f32>(a), 1e-6f);
     AUREA_CHECK(r.e.rig_clear(r.layer));
     AUREA_CHECK_EQ(r.e.query_rig(r.layer, true, nullptr, 0), 0u);
+}
+
+AUREA_TEST(Rig, EngineCommitsAllChainBonesAsOneUndoableDrag) {
+    RigEngine r;
+    const i32 root = r.e.rig_add_joint(r.layer, -1, 30, 100);
+    i32 joint = root;
+    for (u32 i = 1; i <= 4; ++i) joint = r.e.rig_add_joint(r.layer, joint, 30.0f + 55.0f * i, 100);
+    AUREA_CHECK(joint >= 0);
+    AUREA_CHECK(r.e.rig_add_joint(r.layer, root, 45, 50) >= 0);
+    r.seek(12);
+    const u32 tip = 4 * Engine::kRigJointFloats;
+    AUREA_CHECK(r.e.rig_pose_joint(r.layer, static_cast<u32>(joint), 183, 123, false));
+    AUREA_CHECK(r.e.rig_pose_joint(r.layer, static_cast<u32>(joint), 175, 139, true));
+    auto j = r.joints(false);
+    AUREA_CHECK_EQ(j.size(), static_cast<usize>(6 * Engine::kRigJointFloats));
+    if (j.size() != 6 * Engine::kRigJointFloats) return;
+    AUREA_CHECK_NEAR(j[tip + 2], 175.0f, 0.15f);
+    AUREA_CHECK_NEAR(j[tip + 3], 139.0f, 0.15f);
+    for (u32 i = 1; i <= 4; ++i) AUREA_CHECK_EQ(j[i * Engine::kRigJointFloats + 4], 1.0f);
+    AUREA_CHECK_EQ(j[tip + Engine::kRigJointFloats + 4], 0.0f);
+
+    Command undo;
+    undo.type = CommandType::Undo;
+    AUREA_CHECK(r.e.apply_command(undo).ok());
+    j = r.joints(false);
+    AUREA_CHECK_NEAR(j[tip + 2], 250.0f, 1e-3f);
+    AUREA_CHECK_NEAR(j[tip + 3], 100.0f, 1e-3f);
+    AUREA_CHECK_EQ(j[tip + 4], 0.0f);
 }
 
 // Esqueleto automático: juntas sobre a parte VISÍVEL do desenho (alfa),

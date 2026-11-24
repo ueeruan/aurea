@@ -119,7 +119,8 @@ assert "ExportMemoryStep.store(ExportMemoryStep.current() + 1)" in start and "Ex
 assert "- (void)setExportMemoryStep:(uint32_t)step;" in header and "e->set_export_memory_step(step)" in bridge
 assert prepare.count("context: self.exportReportContext()") == 1 and poll.count("context: self.exportReportContext()") == 1
 view = (IOS / "app/ExportView.swift").read_text(encoding="utf-8")
-assert "model.exportPreparing" in view and 'AureaText.t("msg_preparando")' in view
+# 1.0.8.1: o título escolhe a chave num ternário (`preparing ? "msg_preparando" : …`).
+assert "model.exportPreparing" in view and '"msg_preparando"' in view
 print("PASS: export starts/retries leave main actor; cancel, lifecycle and fresh progress guards are present")
 
 compiler = shutil.which("swiftc")

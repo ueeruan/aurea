@@ -239,7 +239,7 @@ struct EditorView: View {
         // Gravar voz: o painel por cima da timeline, com o palco à vista (VoiceRecorder.swift).
         .overlay { if shell.voiceRecorder { VoiceRecorderOverlay() } }
         // 0.3.4 plugins: o painel de plugin aberto (moldura comum), alertas e consentimento.
-        .overlay(alignment: .bottom) { PluginEditorPanelHost() }
+        .overlay(alignment: .bottom) { PluginEditorPanelHost(inScene: model.sceneEditor) }
         .overlay { ShellOverlayHost() }
         .environmentObject(shell)
         .modifier(ModelTexturesPrompt(shell: shell))
@@ -944,7 +944,7 @@ private struct ShellStageBanner: View {
         context.stroke(p, with: .color(StageInk.outlineUnder), lineWidth: under); context.stroke(p, with: .color(color), lineWidth: over)
     }
     private func drawPath(_ context: inout GraphicsContext, mask: MaskItem, selected: Bool, vector: Bool, screen: (Float, Float) -> CGPoint) {
-        let count = mask.points.count / 6, affine = model.maskAffine, row = vector ? [0, 0, 1] : model.maskPerspective
+        let count = mask.points.count / 6, affine = model.maskAffine, row = model.maskPerspective
         guard count > 0, affine.count == 6, row.count == 3 else { return }
         func point(_ index: Int, _ handle: Int = 0) -> CGPoint {
             let x = mask.points[index * 6] + (handle == 0 ? 0 : mask.points[index * 6 + handle])
@@ -2206,6 +2206,7 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
     let height: CGFloat
     let width: CGFloat
     @State private var materials = false
+    @State private var addonEffect: UInt32?
     @State private var lights = false
     @State private var curve = false
     @State private var area = 0
@@ -2252,7 +2253,12 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
         .sheet(isPresented: $lights) {
             SceneLightControls { lights = false }.environmentObject(model).presentationDetents([.medium, .large])
         }
-        .sheet(isPresented: $materials) { Panel3DView().environmentObject(model).presentationDetents([.medium, .large]) }
+        .sheet(isPresented: $materials) {
+            Group {
+                if let addonEffect { EffectsView(focusedType: addonEffect) }
+                else { Panel3DView() }
+            }.environmentObject(model).presentationDetents([.medium, .large])
+        }
         .sheet(isPresented: $transformPanel, onDismiss: { if model.panel == .transform { model.openPanel(.none) } }) {
             TransformView().environmentObject(model).presentationDetents([.medium, .large])
         }
@@ -2264,7 +2270,17 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
         .onChange(of: isModel) { now in if !now && area == Self.skeletonArea { area = 0 } }
         .onChange(of: model.primarySelection) { _ in transformOpen = false }
     }
-    private func openMaterial() { model.panel = .layer3D; materials = true }
+    private func openMaterial() { addonEffect = nil; model.panel = .layer3D; materials = true }
+    private func openAddon(_ type: UInt32) {
+        guard model.selection.count == 1, let layer = model.primarySelection, model.selectedLayer?.locked != true else { return }
+        if !model.effects.contains(where: { $0.typeId == type }) {
+            model.addEffectAndFocus(type, layer: layer)
+        } else {
+            model.openPanel(.effects)
+        }
+        addonEffect = type
+        materials = true
+    }
 
     /// Voltar, o título, tela cheia e fechar.
     private var header: some View {
@@ -2386,6 +2402,19 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
                         }
                         dockAction(CupertinoGlyph.SmallcircleCircle, "om_ap_tf_pivot", "scene.pivot") { model.transformTab = 4; model.openPanel(.transform); transformPanel = true }
                     }
+                    Menu {
+                        Button(AureaText.t("fx_model_repeat")) { openAddon(fxEffectTypeId("aurea.3d.replicator")) }
+                            .disabled(!isModel || model.selectedLayer?.locked == true).accessibilityIdentifier("scene.addons.repeater")
+                        Button(AureaText.t("fx_model_toon")) { openAddon(fxEffectTypeId("aurea.3d.toon")) }
+                            .disabled(!isModel || model.selectedLayer?.locked == true).accessibilityIdentifier("scene.addons.toon")
+                        Button(AureaText.t("scene_drawing_plane")) {
+                            model.exitSceneEditor()
+                            model.startDrawing(inScene: true)
+                        }.accessibilityIdentifier("scene.addons.drawing")
+                        Divider()
+                        ScenePluginMenuItems(onShader: openAddon)
+                    } label: { dockLabel(CupertinoGlyph.Sparkles, "scene_addons") }
+                        .accessibilityIdentifier("scene.addons")
                     Menu {
                         modeMenu; Divider(); viewMenu; Divider(); moreMenu; Divider(); selectMenu
                         Divider()
@@ -3522,7 +3551,7 @@ private struct ShellAddCategoryDialog: View {
         let tool = (model.motionStatus["tool"] as? NSNumber)?.intValue ?? 0
         let picked = model.pickedMotionPoints()
         if !picked.isEmpty || state == 2 {
-            let samples = state == 2 && model.pointPick == nil ? model.engine.motionTrackFeatures(model.status.playhead).map(\.doubleValue) : []
+            let samples = (state == 2 || state == 5) && model.pointPick == nil ? model.engine.motionTrackFeatures(model.status.playhead).map(\.doubleValue) : []
             let trail = (state == 2 && model.pointPick == nil && model.motionTrailVisible)
                 ? model.primarySelection.map { model.engine.motionTrackTrail($0, frame: model.status.playhead).map(\.doubleValue) } ?? [] : []
             let surfaceReady = (2...3).contains(tool) && samples.count == 12 &&
@@ -3739,6 +3768,9 @@ struct AeImportSheet: View {
     @EnvironmentObject private var model: AureaModel
     let result: AureaModel.AeImportResult
     @State private var showNotes = false
+    @State private var linkLayer: Int64?
+    @State private var linkVideo = false
+    @State private var linking = false
     private var partial: Bool {
         result.ok ? result.kind == "aep" && !result.skipped.isEmpty : result.hasCounts || result.changes > 0
     }
@@ -3774,6 +3806,30 @@ struct AeImportSheet: View {
         }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 8)
             .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
     }
+    @ViewBuilder private func itemGroups(_ items: [AureaModel.AeImportItem]) -> some View {
+        let groups = items.prefix(60).reduce(into: [[AureaModel.AeImportItem]]()) { groups, item in
+            if let index = groups.firstIndex(where: { $0.first?.composition == item.composition && $0.first?.layer == item.layer }) {
+                groups[index].append(item)
+            } else { groups.append([item]) }
+        }
+        ForEach(groups.indices, id: \.self) { index in
+            let entries = groups[index]
+            if let target = entries.first {
+                if !target.layerName.isEmpty { Text(target.layerName).font(.headline).accessibilityAddTraits(.isHeader) }
+                ForEach(entries) { row($0) }
+                if target.layer != 0 {
+                    Button(AureaText.t(target.kind == "midia" ? "motion_link_media" : "motion_view_layer")) {
+                        guard model.focusReportedLayer(target.composition, layer: target.layer) else { return }
+                        if target.kind == "midia", let kind = model.selectedLayer?.kind, kind == 1 || kind == 2 {
+                            linkLayer = target.layer
+                            linkVideo = kind == 1
+                            linking = true
+                        } else { model.aeImportResult = nil }
+                    }.frame(minHeight: 44)
+                }
+            }
+        }
+    }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 6) {
@@ -3789,13 +3845,13 @@ struct AeImportSheet: View {
                 if !result.skipped.isEmpty {
                     Text(AureaText.t("ae_skipped_title", result.skipped.count)).font(.aurea(size: 14, weight: .semibold))
                         .foregroundStyle(AureaColors.warning).padding(.top, 8)
-                    ForEach(result.skipped.prefix(60)) { row($0) }
+                    itemGroups(result.skipped)
                 }
                 if !result.notes.isEmpty {
                     Button { showNotes.toggle() } label: {
                         Text(AureaText.t("ae_notes_title", result.notes.count)).font(.aurea(size: 14, weight: .semibold)).foregroundStyle(AureaColors.accent)
                     }.buttonStyle(.plain).padding(.top, 8).accessibilityIdentifier("ae.notes")
-                    if showNotes { ForEach(result.notes.prefix(60)) { row($0) } }
+                    if showNotes { itemGroups(result.notes) }
                 }
                 if result.ok || partial {
                     Text(AureaText.t("ae_undo_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).padding(.top, 6)
@@ -3809,6 +3865,12 @@ struct AeImportSheet: View {
             .padding(.horizontal, 18).padding(.vertical, 16)
         }
         .background(AureaColors.surface.ignoresSafeArea())
+        .fileImporter(isPresented: $linking, allowedContentTypes: [linkVideo ? .movie : .image]) { result in
+            defer { linkLayer = nil }
+            guard let layer = linkLayer, model.primarySelection == layer, case .success(let url) = result else { return }
+            model.replaceMedia(layer: layer, url: url, video: linkVideo)
+            model.aeImportResult = nil
+        }
     }
 }
 

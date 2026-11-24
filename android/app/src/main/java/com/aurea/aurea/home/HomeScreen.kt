@@ -5,7 +5,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.Crossfade
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -25,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -134,7 +134,7 @@ fun HomeScreen(store: EditorStore) {
                 drawerContainerColor = AureaColors.HomeDrawer,
                 drawerContentColor = AureaColors.LightText,
             ) {
-                SettingsDrawer(
+                if (drawer.isOpen || drawer.targetValue == DrawerValue.Open) SettingsDrawer(
                     store = store,
                     vm = vm,
                     onImportMedia = {
@@ -203,13 +203,19 @@ fun HomeScreen(store: EditorStore) {
                     )
                 }
             }
-            // A faixa do Mural fica à vista em toda aba: a Home reabre na última usada.
-            if (!pluginTab && vm.tab != HomeViewModel.MURAL_TAB && vm.tab != HomeViewModel.MODELS_TAB && !selecting)
-                com.aurea.aurea.community.MuralBanner { vm.selectTab(HomeViewModel.MURAL_TAB) }
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (pluginTab) com.aurea.aurea.effects.PluginHomeTab(store)   // 0.3.4 plugins
                 else when (vm.tab) {
-                    HomeViewModel.HOME_TAB -> HomeNewsFeed(vm.notices)
+                    HomeViewModel.HOME_TAB -> HomeWorkspace(
+                        service = vm.notices,
+                        projects = store.projects,
+                        projectsLoaded = store.projectsLoaded,
+                        thumbnails = vm.thumbnails,
+                        onCreate = { newProject = true },
+                        onProjects = { vm.selectTab(HomeViewModel.PROJECTS_TAB) },
+                        onOpen = openProject,
+                        onMural = { vm.selectTab(HomeViewModel.MURAL_TAB) },
+                    )
                     HomeViewModel.COMMUNITY_TAB -> com.aurea.aurea.community.CommunityScreen(store, conta, false)
                     HomeViewModel.MURAL_TAB -> com.aurea.aurea.community.MuralScreen(store, conta) { vm.selectTab(HomeViewModel.HOME_TAB) }
                     HomeViewModel.PROFILE_TAB -> com.aurea.aurea.community.CommunityScreen(store, conta, true)
@@ -363,13 +369,13 @@ internal fun HomeDock(selected: Int, onSelect: (Int) -> Unit, onCreate: () -> Un
     Box(
         Modifier
             .fillMaxWidth()
-            .homeShadow(30.dp, RectangleShape, AureaColors.LightShadow)
             .background(AureaColors.LightSurface)
             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
             .testTag("home.dock"),
     ) {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(AureaColors.LightDivider))
         Row(
-            Modifier.fillMaxWidth().height(OmegaHomeDims.Dock).padding(horizontal = 8.dp, vertical = 12.dp),
+            Modifier.fillMaxWidth().height(OmegaHomeDims.Dock).padding(horizontal = 8.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -384,8 +390,8 @@ internal fun HomeDock(selected: Int, onSelect: (Int) -> Unit, onCreate: () -> Un
             Box(
                 Modifier
                     .padding(horizontal = 4.dp)
-                    .size(56.dp)
-                    .clip(CircleShape)
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(15.dp))
                     .background(AureaColors.Accent)
                     .testTag("home.create")
                     .semantics { contentDescription = createLabel }
@@ -418,13 +424,14 @@ internal fun HomeDock(selected: Int, onSelect: (Int) -> Unit, onCreate: () -> Un
 /** A aba Início do dock: o "A" do Aurea no lugar do ícone (apagado quando fora dela). */
 @Composable
 private fun RowScope.DockLogoTab(label: String, active: Boolean, tag: String, onClick: () -> Unit) {
-    val ink by animateColorAsState(if (active) AureaColors.LightText else AureaColors.LightTextMuted, tween(300), label = "aba-cor")
+    val ink = if (active) AureaColors.LightAccentInk else AureaColors.LightTextMuted
     Column(
         Modifier
             .weight(1f)
             .widthIn(max = 158.dp)
             .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(12.dp))
+            .background(if (active) AureaColors.AccentDim else Color.Transparent)
             .testTag(tag)
             .semantics { selected = active; contentDescription = label }
             .clickable(role = Role.Tab, onClick = onClick),
@@ -444,13 +451,14 @@ private fun RowScope.DockLogoTab(label: String, active: Boolean, tag: String, on
 
 @Composable
 private fun RowScope.DockTab(icon: Char, iconOn: Char, label: String, active: Boolean, tag: String, onClick: () -> Unit) {
-    val ink by animateColorAsState(if (active) AureaColors.LightText else AureaColors.LightTextMuted, tween(300), label = "aba-cor")
+    val ink = if (active) AureaColors.LightAccentInk else AureaColors.LightTextMuted
     Column(
         Modifier
             .weight(1f)
             .widthIn(max = 158.dp)
             .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(12.dp))
+            .background(if (active) AureaColors.AccentDim else Color.Transparent)
             .testTag(tag)
             .semantics { selected = active; contentDescription = label }
             .clickable(role = Role.Tab, onClick = onClick),

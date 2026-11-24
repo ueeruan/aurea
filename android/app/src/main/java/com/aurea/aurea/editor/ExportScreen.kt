@@ -24,6 +24,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.progressSemantics
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -39,11 +40,13 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -81,6 +84,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
@@ -198,7 +202,17 @@ internal fun ExportScreen(store: EditorStore, onOpenProjectSettings: (() -> Unit
     var includeMedia by remember { mutableStateOf(true) }
     var precheck by remember { mutableStateOf<Precheck?>(null) }
     var info by remember { mutableStateOf<ExportItem?>(null) }
+    var sourceIssues by remember { mutableStateOf<List<ExportSourceNotice>?>(null) }
     LaunchedEffect(store, store.projectGeneration) { exporter.reset() }
+    LaunchedEffect(store.projectGeneration, comp?.id) {
+        sourceIssues = withContext(Dispatchers.IO) {
+            store.exportSourceIssues().asList().chunked(4).mapNotNull { row ->
+                if (row.size != 4) return@mapNotNull null
+                ExportSourceNotice(row[0].toLongOrNull() ?: return@mapNotNull null,
+                    row[1].toLongOrNull() ?: return@mapNotNull null, row[2], row[3] == "1")
+            }
+        }
+    }
 
     val close = {
         if (!exporter.busy) {
@@ -238,6 +252,7 @@ internal fun ExportScreen(store: EditorStore, onOpenProjectSettings: (() -> Unit
     val tooLong3h = stringResource(R.string.exp_too_long_3h)
     val gifTooLong = stringResource(R.string.exp2_too_long)
     val gifHeavyTemplate = stringResource(R.string.om_exp_gif_heavy, GIF_RECOMMENDED_FRAMES)
+    val sourceWarning = stringResource(R.string.motion_export_source_warning)
     fun go() {
         if (item == ExportItem.Package) {
             val path = store.project.path ?: return
@@ -261,6 +276,7 @@ internal fun ExportScreen(store: EditorStore, onOpenProjectSettings: (() -> Unit
             }
             else -> null
         }
+        if (precheck == null && !sourceIssues.isNullOrEmpty()) precheck = Precheck(sourceWarning, true)
         if (precheck == null) runExport()
     }
 
@@ -270,6 +286,10 @@ internal fun ExportScreen(store: EditorStore, onOpenProjectSettings: (() -> Unit
     ) {
         if (st.phase == ExportPhase.Done) {
             ResultPage(store, item, opts, compW, compH, compFps, onClose = close)
+            return@Dialog
+        }
+        if (st.phase == ExportPhase.Running || st.phase == ExportPhase.Publishing) {
+            Progress(st, st.format) { exporter.cancel() }
             return@Dialog
         }
         Box(Modifier.fillMaxSize().background(AureaColors.ExportPage).testTag("export.page")) {
@@ -299,6 +319,14 @@ internal fun ExportScreen(store: EditorStore, onOpenProjectSettings: (() -> Unit
                             if (st.phase == ExportPhase.Failed || st.phase == ExportPhase.Cancelled) {
                                 Notice(st.message, danger = st.phase == ExportPhase.Failed)
                             }
+                            if (item != ExportItem.Package) sourceIssues.orEmpty().take(8).forEach { issue ->
+                                androidx.compose.material3.TextButton(onClick = {
+                                    if (store.focusReportedLayer(issue.comp, issue.layer)) close()
+                                }, enabled = !exporter.busy, modifier = Modifier.padding(horizontal = 10.dp)) {
+                                    Text(issue.name + " · " + stringResource(if (issue.missing) R.string.motion_export_missing
+                                        else R.string.motion_export_unreadable) + " · " + stringResource(R.string.motion_view_layer))
+                                }
+                            }
                             Estimates(store, item, opts, compW, compH, compFps, includeMedia)
                             OptionList(store, item, opts, compW, compH, onPick = { item = it }, onSettings = { item = it; settings = it },
                                 onInfo = { info = it }) { options = it }
@@ -309,9 +337,8 @@ internal fun ExportScreen(store: EditorStore, onOpenProjectSettings: (() -> Unit
                         }
                     }
                 }
-                ExportButton(enabled = !exporter.busy, onClick = ::go)
+                ExportButton(enabled = !exporter.busy && (item == ExportItem.Package || sourceIssues != null), onClick = ::go)
             }
-            if (st.phase == ExportPhase.Running || st.phase == ExportPhase.Publishing) Progress(st, st.format) { exporter.cancel() }
         }
         precheck?.let { check ->
             AureaDialog(
@@ -334,30 +361,33 @@ internal fun ExportScreen(store: EditorStore, onOpenProjectSettings: (() -> Unit
     }
 }
 
+private data class ExportSourceNotice(val comp: Long, val layer: Long, val name: String, val missing: Boolean)
+
 // =============================================================================
 // Barra, estimativas, lista
 // =============================================================================
 
-/** Barra de 49 dp, branca: ✕ (ou ← na sub-página) de 44 dp e o título centrado, 17 sp negrito. */
 @Composable
 private fun ExportTopBar(title: String, back: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val description = stringResource(if (back) R.string.om_add_back else R.string.editor_fechar)
-    Box(Modifier.fillMaxWidth().height(49.dp).background(AureaColors.ExportCard)) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 54.dp).background(AureaColors.ExportCard).padding(end = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Box(
-            Modifier.align(Alignment.CenterStart).size(44.dp).testTag(if (back) "export.back" else "export.close")
-                .semantics { contentDescription = description }.tocavel(enabled = enabled, onClick = onClick),
+            Modifier.size(48.dp).testTag(if (back) "export.back" else "export.close")
+                .semantics { contentDescription = description; role = Role.Button }
+                .tocavel(enabled = enabled, onClick = onClick),
             contentAlignment = Alignment.Center,
         ) {
-            CupertinoIcon(if (back) CupertinoGlyph.ChevronLeft else CupertinoGlyph.Xmark, 20.dp,
-                if (enabled) AureaColors.ExportText else AureaColors.ExportAction)
+            CupertinoIcon(if (back) CupertinoGlyph.ChevronLeft else CupertinoGlyph.Xmark, 18.dp, AureaColors.ExportAction)
         }
-        Text(title, modifier = Modifier.align(Alignment.Center).padding(horizontal = 52.dp), maxLines = 1, overflow = TextOverflow.Ellipsis,
-            style = AureaType.Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W700, color = AureaColors.ExportText)))
+        Text(title, Modifier.weight(1f).semantics { heading() }, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            style = AureaType.of(19f, FontWeight.Bold, color = AureaColors.ExportText))
     }
-    Box(Modifier.fillMaxWidth().height(0.7.dp).background(AureaColors.ExportLine))
+    Box(Modifier.fillMaxWidth().height(1.dp).background(AureaColors.ExportLine))
 }
 
-/** Bloco branco das estimativas: espaço disponível e tamanho (no pacote, por tipo de mídia). */
 @Composable
 private fun Estimates(store: EditorStore, item: ExportItem, opts: ExportOptions, compW: Int, compH: Int, compFps: Double, includeMedia: Boolean) {
     val context = LocalContext.current
@@ -366,7 +396,26 @@ private fun Estimates(store: EditorStore, item: ExportItem, opts: ExportOptions,
         val path = store.project.path
         value = if (item == ExportItem.Package && path != null) withContext(Dispatchers.IO) { packageSizes(store, path) } else null
     }
-    Column(Modifier.padding(horizontal = 10.dp, vertical = 10.dp).clip(RoundedCornerShape(6.dp)).background(AureaColors.ExportCard)) {
+    Column(
+        Modifier.padding(horizontal = 16.dp, vertical = 12.dp).clip(RoundedCornerShape(16.dp))
+            .background(AureaColors.ExportCard),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Box(Modifier.size(36.dp).clip(RoundedCornerShape(9.dp)).background(AureaColors.AccentDim),
+                contentAlignment = Alignment.Center) {
+                CupertinoIcon(item.glyph, 18.dp, AureaColors.Accent)
+            }
+            Text(
+                store.project.title.ifBlank { stringResource(item.nameRes()) },
+                maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).testTag("export.projectName"),
+                style = AureaType.of(16f, FontWeight.SemiBold, color = AureaColors.ExportText),
+            )
+        }
+        Box(Modifier.fillMaxWidth().padding(horizontal = 14.dp).height(1.dp).background(AureaColors.ExportLine))
         EstimateRow(stringResource(R.string.om_exp_space), if (free >= 0) fmtSize(free) else "—", "export.estimate.space")
         Box(Modifier.fillMaxWidth().height(0.7.dp).background(AureaColors.ExportLine))
         if (item == ExportItem.Package) {
@@ -388,11 +437,12 @@ private fun Estimates(store: EditorStore, item: ExportItem, opts: ExportOptions,
 @Composable
 private fun EstimateRow(label: String, value: String, tag: String) {
     Row(
-        Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 14.dp).testTag(tag).semantics(mergeDescendants = true) {},
+        Modifier.fillMaxWidth().heightIn(min = 36.dp).padding(horizontal = 14.dp, vertical = 5.dp).testTag(tag).semantics(mergeDescendants = true) {},
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(label, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
-            style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.ExportText)))
+            style = AureaType.of(13f, color = AureaColors.ExportHint))
+        Spacer(Modifier.width(8.dp))
         Text(ltrPlain(value), style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W600, color = AureaColors.ExportText, fontFeatureSettings = "tnum")))
     }
 }
@@ -442,41 +492,53 @@ private fun OptionList(
     onInfo: (ExportItem) -> Unit,
     onChange: (ExportOptions) -> Unit,
 ) {
-    Column(Modifier.padding(horizontal = 10.dp)) {
+    Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         ExportItem.entries.forEach { entry ->
-            Column(Modifier.padding(vertical = 5.dp).clip(RoundedCornerShape(6.dp)).background(AureaColors.ExportCard)) {
-                val name = stringResource(entry.nameRes())
-                val on = entry == current
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(70.dp)
-                        .semantics { selected = on; role = Role.RadioButton; contentDescription = name }
-                        .testTag("export.option.${entry.tag}")
-                        .tocavel(shrink = 1f) { onPick(entry) },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(Modifier.width(52.dp), contentAlignment = Alignment.Center) { Radio(on) }
-                    CupertinoIcon(entry.glyph, 22.dp, AureaColors.ExportText)
-                    Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                        Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            style = AureaType.Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W700, color = AureaColors.ExportText)))
-                        Text(stringResource(entry.noteRes()), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, color = AureaColors.ExportHint)))
+            val name = stringResource(entry.nameRes())
+            val on = entry == current
+            val shape = RoundedCornerShape(14.dp)
+            Column(
+                Modifier.fillMaxWidth().clip(shape).background(AureaColors.ExportCard)
+                    .border(1.dp, if (on) AureaColors.Accent else AureaColors.ExportLine, shape),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        Modifier.weight(1f).heightIn(min = 58.dp)
+                            .semantics { selected = on; role = Role.RadioButton; contentDescription = name }
+                            .testTag("export.option.${entry.tag}")
+                            .tocavel(shrink = 1f) { onPick(entry) }
+                            .padding(start = 12.dp, top = 7.dp, bottom = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Box(
+                            Modifier.size(34.dp).clip(RoundedCornerShape(9.dp))
+                                .background(if (on) AureaColors.AccentDim else AureaColors.Chip),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            CupertinoIcon(entry.glyph, 18.dp, if (on) AureaColors.Accent else AureaColors.ExportHint)
+                        }
+                        Column(Modifier.weight(1f)) {
+                            Text(name, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                style = AureaType.of(15f, FontWeight.SemiBold, color = AureaColors.ExportText))
+                            Text(stringResource(entry.noteRes()), maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                style = AureaType.of(12f, color = AureaColors.ExportHint))
+                        }
+                        Radio(on)
                     }
                     val hasSettings = entry != ExportItem.Package
                     val actionLabel = stringResource(if (hasSettings) R.string.om_exp_settings_named else R.string.om_exp_info_named, name)
                     Box(
-                        Modifier.size(width = 52.dp, height = 70.dp).testTag("export.option.${entry.tag}." + if (hasSettings) "settings" else "info")
-                            .semantics { contentDescription = actionLabel }
+                        Modifier.size(width = 48.dp, height = 58.dp).testTag("export.option.${entry.tag}." + if (hasSettings) "settings" else "info")
+                            .semantics { contentDescription = actionLabel; role = Role.Button }
                             .tocavel { if (hasSettings) onSettings(entry) else onInfo(entry) },
                         contentAlignment = Alignment.Center,
                     ) {
-                        CupertinoIcon(if (hasSettings) CupertinoGlyph.ChevronRight else CupertinoGlyph.InfoCircle, 18.dp, AureaColors.ExportAction)
+                        CupertinoIcon(if (hasSettings) CupertinoGlyph.ChevronRight else CupertinoGlyph.InfoCircle, 16.dp, AureaColors.ExportAction)
                     }
                 }
                 if (entry == ExportItem.Video && on) {
-                    Box(Modifier.fillMaxWidth().height(2.dp).background(AureaColors.ExportPage))
+                    Box(Modifier.fillMaxWidth().padding(horizontal = 12.dp).height(1.dp).background(AureaColors.ExportLine))
                     ResolutionDropdown(store, opts, compW, compH, "export.option.video.resolution", Modifier.padding(10.dp), onChange)
                 }
             }
@@ -867,21 +929,20 @@ private fun Notice(text: String, danger: Boolean) {
 @Composable
 private fun ExportButton(enabled: Boolean, onClick: () -> Unit) {
     val label = stringResource(R.string.om_exp_go)
-    Box(Modifier.fillMaxWidth().background(AureaColors.ExportCard).padding(horizontal = 15.dp, vertical = 15.dp)) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .shadow(3.dp, RoundedCornerShape(5.dp))
-                .clip(RoundedCornerShape(5.dp))
-                .background(AureaColors.ExportPrimary)
-                .semantics { contentDescription = label; role = Role.Button }
-                .testTag("export.go")
-                .tocavel(enabled = enabled, onClick = onClick)
-                .padding(12.dp),
-            contentAlignment = Alignment.Center,
+    Column(Modifier.fillMaxWidth().background(AureaColors.ExportCard)) {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(AureaColors.ExportLine))
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp).heightIn(min = 52.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(if (enabled) AureaColors.ExportPrimary else AureaColors.Chip)
+                .semantics { contentDescription = label; role = Role.Button }.testTag("export.go")
+                .tocavel(enabled = enabled, onClick = onClick).padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
         ) {
-            Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 20.sp, lineHeight = 24.sp, fontWeight = FontWeight.W600,
-                color = if (enabled) AureaColors.ExportOnPrimary else AureaColors.ExportAction)))
+            val ink = if (enabled) AureaColors.ExportOnPrimary else AureaColors.ExportHint
+            CupertinoIcon(CupertinoGlyph.SquareArrowUp, 18.dp, ink)
+            Text(label, style = AureaType.of(16f, FontWeight.SemiBold, color = ink))
         }
     }
 }
@@ -923,68 +984,65 @@ private fun Progress(st: com.aurea.aurea.state.ExportUiState, format: ExportForm
     })
     val percent = if (publishing) 100 else (st.fraction * 100).roundToInt()
     Box(
-        Modifier.fillMaxSize().background(AureaColors.ExportScrim).pointerInput(Unit) { detectTapGestures { } }.testTag("export.progress"),
+        Modifier.fillMaxSize().background(AureaColors.ExportPage).statusBarsPadding().navigationBarsPadding()
+            .testTag("export.progress"),
+        contentAlignment = Alignment.Center,
     ) {
-        Column(Modifier.align(Alignment.Center).padding(horizontal = 15.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(title, textAlign = TextAlign.Center, style = AureaType.Base.merge(TextStyle(fontSize = 18.sp, color = AureaColors.OnImage)))
-            Spacer(Modifier.height(15.dp))
-            Box(Modifier.width(220.dp).height(7.dp).clip(RoundedCornerShape(3.5.dp)).background(if (st.preparing) Color.Transparent else AureaColors.AddPanelDeep)) {
-                if (!st.preparing) Box(Modifier.fillMaxHeight().fillMaxWidth(if (publishing) 1f else st.fraction).background(AureaColors.Accent))
-            }
-            Row(Modifier.width(220.dp).padding(top = 6.dp)) {
-                Text(if (st.preparing) "" else "$percent%", modifier = Modifier.weight(1f).testTag("export.progress.percent"),
-                    style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.OnImage, fontFeatureSettings = "tnum")))
-                val eta = shownEta
-                if (!publishing && !st.preparing && eta > 0) {
-                    Text(
-                        if (eta < 60) stringResource(R.string.om_exp_eta_less)
-                        else pluralStringResource(R.plurals.om_exp_eta_minutes, ceil(eta / 60.0).toInt(), ceil(eta / 60.0).toInt()),
-                        modifier = Modifier.testTag("export.progress.eta"),
-                        style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.OnImage)),
-                    )
+        Column(
+            Modifier.widthIn(max = 480.dp).fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(AureaColors.ExportCard).padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (st.preparing) CircularProgressIndicator(Modifier.size(20.dp), color = AureaColors.Accent, strokeWidth = 2.dp)
+                    else CupertinoIcon(CupertinoGlyph.Film, 20.dp, AureaColors.Accent)
+                    Text(title, Modifier.weight(1f).semantics { heading() },
+                        style = AureaType.of(17f, FontWeight.SemiBold, color = AureaColors.ExportText))
+                }
+                if (!st.preparing) {
+                    val fraction = if (publishing) 1f else st.fraction.coerceIn(0f, 1f)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("$percent%", Modifier.weight(1f).testTag("export.progress.percent"),
+                            style = AureaType.of(34f, FontWeight.Bold, color = AureaColors.ExportText).copy(fontFeatureSettings = "tnum"))
+                        val eta = shownEta
+                        if (!publishing && eta > 0) {
+                            Text(
+                                if (eta < 60) stringResource(R.string.om_exp_eta_less)
+                                else pluralStringResource(R.plurals.om_exp_eta_minutes, ceil(eta / 60.0).toInt(), ceil(eta / 60.0).toInt()),
+                                Modifier.testTag("export.progress.eta"), style = AureaType.of(13f, color = AureaColors.ExportHint),
+                            )
+                        }
+                    }
+                    Box(Modifier.fillMaxWidth().height(8.dp).progressSemantics(fraction)
+                        .clip(RoundedCornerShape(4.dp)).background(AureaColors.Chip)) {
+                        Box(Modifier.fillMaxHeight().fillMaxWidth(fraction).background(AureaColors.Accent))
+                    }
+                    if (st.notice.isNotBlank()) {
+                        Text(st.notice, Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(AureaColors.Chip)
+                            .padding(10.dp).testTag("export.progress.notice"),
+                            style = AureaType.of(13f, color = AureaColors.Warning))
+                    }
                 }
             }
-            if (!st.preparing && st.notice.isNotEmpty()) {
-                Text(
-                    st.notice, modifier = Modifier.padding(top = 14.dp).width(260.dp).clip(RoundedCornerShape(6.dp))
-                        .background(AureaColors.AddPanelDeep).padding(10.dp).testTag("export.progress.notice"),
-                    style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Warning)),
-                )
-            }
-        }
-        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(start = 30.dp, end = 30.dp, bottom = 30.dp),
-            horizontalAlignment = Alignment.CenterHorizontally) {
             if (!publishing) {
-                Text(
-                    stringResource(R.string.editor_cancelar),
-                    modifier = Modifier.testTag("export.progress.cancel").tocavel(onClick = onCancel).padding(horizontal = 16.dp, vertical = 10.dp),
-                    style = AureaType.Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W600, color = AureaColors.Accent)),
-                )
-                Spacer(Modifier.height(30.dp))
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(RoundedCornerShape(12.dp)).background(AureaColors.ExportCard)
+                        .testTag("export.progress.cancel").tocavel(onClick = onCancel).padding(8.dp),
+                    horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(stringResource(R.string.editor_cancelar), style = AureaType.of(15f, FontWeight.SemiBold, color = AureaColors.ExportText))
+                }
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                CupertinoIcon(CupertinoGlyph.ExclamationmarkTriangle, 14.dp, AureaColors.OnImage70)
-                Spacer(Modifier.width(6.dp))
-                Text(stringResource(R.string.editor_mantenha_aurea_aberto_ate_terminar),
-                    style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.OnImage70)))
-            }
+            Text(stringResource(R.string.editor_mantenha_aurea_aberto_ate_terminar), textAlign = TextAlign.Center,
+                style = AureaType.of(12f, color = AureaColors.ExportHint))
         }
     }
 }
 
-// =============================================================================
-// Resultado (P0-11)
-// =============================================================================
-
-/**
- * A página azul-marinho do resultado: a prévia (70 %) — vídeo com ▶ de 62 dp e
- * barra de busca, GIF animado, PNG, a 1ª imagem da sequência — e a base
- * (30 %) com Salvar | Compartilhar (57 dp), Fechar e o cartão de apoio.
- * O AUREA já salvou sozinho: o Salvar diz "Salvo na galeria ✓" e só confirma
- * onde ficou (bug #12: antes abria o seletor de documentos); se a galeria
- * recusou, volta a ser "Salvar" e tenta de novo. "Salvar em…" (cópia num
- * documento escolhido) é o link separado abaixo dos botões.
- */
 @Composable
 private fun ResultPage(store: EditorStore, item: ExportItem, opts: ExportOptions, compW: Int, compH: Int, compFps: Double, onClose: () -> Unit) {
     val exporter = store.exporter
@@ -1020,15 +1078,27 @@ private fun ResultPage(store: EditorStore, item: ExportItem, opts: ExportOptions
         if (st.format == ExportFormat.Sequence) exporter.imagePlan(opts, compW, compH, compFps, store.exportDuration(opts.trimToContent)).frames else 0
     }
     Column(Modifier.fillMaxSize().background(AureaColors.ExportResult).statusBarsPadding().navigationBarsPadding().testTag("export.result")) {
-        Box(Modifier.fillMaxWidth().height(42.dp), contentAlignment = Alignment.Center) {
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 54.dp).padding(start = 16.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            CupertinoIcon(CupertinoGlyph.CheckmarkCircleFill, 22.dp, AureaColors.Accent)
             Text(stringResource(when (st.format) {
                 ExportFormat.Video -> R.string.editor_video_pronto
                 ExportFormat.Frame -> R.string.exp2_done_frame
                 ExportFormat.Sequence -> R.string.exp2_done_sequence
                 ExportFormat.Gif -> R.string.exp2_done_gif
-            }), style = AureaType.Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W700, color = AureaColors.OnImage)))
+            }), Modifier.weight(1f).semantics { heading() }, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                style = AureaType.of(19f, FontWeight.Bold, color = AureaColors.ExportText))
+            val closeLabel = stringResource(R.string.om_exp_close)
+            Box(Modifier.size(48.dp).testTag("export.result.close").semantics { contentDescription = closeLabel }
+                .tocavel(onClick = onClose), contentAlignment = Alignment.Center) {
+                CupertinoIcon(CupertinoGlyph.Xmark, 18.dp, AureaColors.ExportHint)
+            }
         }
-        Box(Modifier.weight(0.7f).fillMaxWidth().background(AureaColors.AddPanelDeep)) {
+        Box(Modifier.weight(0.58f).fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(16.dp))
+            .background(AureaColors.AddPanelDeep)) {
             if (uri != null) when (st.format) {
                 ExportFormat.Video -> ResultVideo(uri, Modifier.fillMaxSize())
                 ExportFormat.Gif -> ResultGif(uri, Modifier.fillMaxSize())
@@ -1052,7 +1122,7 @@ private fun ResultPage(store: EditorStore, item: ExportItem, opts: ExportOptions
                 )
             }
         }
-        Column(Modifier.weight(0.3f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp)) {
+        Column(Modifier.weight(0.42f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp)) {
             if (st.message.isNotBlank()) {
                 Text(st.message, maxLines = 4, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(bottom = 10.dp),
                     style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.OnImage70)))
@@ -1081,13 +1151,6 @@ private fun ResultPage(store: EditorStore, item: ExportItem, opts: ExportOptions
                 ) {
                     Text(stringResource(R.string.om_exp_save_as), style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.OnImage70)))
                 }
-            }
-            Spacer(Modifier.height(15.dp))
-            Box(
-                Modifier.fillMaxWidth().height(57.dp).testTag("export.result.close").tocavel(onClick = onClose),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(stringResource(R.string.om_exp_close), style = AureaType.Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W600, color = AureaColors.Accent)))
             }
             Spacer(Modifier.height(12.dp))
             DonationCard(exporting = false)

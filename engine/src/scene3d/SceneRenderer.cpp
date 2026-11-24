@@ -1767,12 +1767,24 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         return &mat;
     };
     auto tinted = [&](const GpuMaterial* source, const Vec4& fill) -> const GpuMaterial* {
-        if (fill.w <= 0 || source->factors.toon == 2) return source;   // o contorno do Cartoon fica na tinta dele
+        if (fill.w <= 0 || source->factors.toon == 2 || source->factors.holdout) return source;
         auto& mat = copy_material(source);
         const f32 w = std::clamp(fill.w, 0.f, 1.f);
         mat.factors.baseColor.x += (fill.x - mat.factors.baseColor.x) * w;
         mat.factors.baseColor.y += (fill.y - mat.factors.baseColor.y) * w;
         mat.factors.baseColor.z += (fill.z - mat.factors.baseColor.z) * w;
+        return &mat;
+    };
+    SceneLookup<std::pair<const GpuMaterial*, u32>, const GpuMaterial*, ScenePairHash> celCopies;
+    auto cel_shaded = [&](const GpuMaterial* source, u32 bands) -> const GpuMaterial* {
+        if (!bands || source->factors.toon == 2 || source->factors.holdout) return source;
+        const auto key = std::make_pair(source, bands);
+        if (auto found = celCopies.find(key)) return *found;
+        auto& mat = copy_material(source);
+        mat.factors.toon = 3;
+        mat.factors.toonParam = static_cast<f32>(bands);
+        mat.factors.transmission = 0.0f;
+        celCopies.emplace(key, &mat);
         return &mat;
     };
     // Equal object profiles share an EnvSlot, but a shared HDRI alone does
@@ -1802,7 +1814,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                             : static_cast<f32>(static_cast<u8>(m.alphaMode));
         // z: 2 recorte, 1 unlit, 0 PBR; 0.5.4 Cartoon: −1 − brilho (cel, −2..−1)
         // e −4 contorno (mr.xy = largura em NDC, lida também no vértice).
-        const f32 shading = m.holdout ? 2.0f : m.toon == 2 ? -4.0f
+        const f32 shading = m.holdout ? 2.0f : m.toon == 2 ? -4.0f : m.toon == 3 ? -5.0f - m.toonParam
                           : m.toon == 1 ? -1.0f - std::clamp(m.toonParam, 0.0f, 1.0f) : m.unlit ? 1.0f : 0.0f;
         b->alpha = Vec4{m.alphaCutoff, alphaMode, shading, m.doubleSided ? 1.0f : 0.0f};
         // Verniz (pintura de carro), IOR/specular (F0 do dielétrico) e
@@ -2069,7 +2081,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             const std::vector<Node>& nodes = inst.asset->nodes;
             for (u32 n : gm->drawableNodes) {
                 const i32 mi = nodes[n].mesh;
-                if (n < inst.pose().nodeOpacity.size() && inst.pose().nodeOpacity[n] < 0.5f) continue;   // letra sumindo não projeta
+                const f32 opacity = n < inst.pose().nodeOpacity.size() ? inst.pose().nodeOpacity[n] : 1.0f;
+                if (opacity * inst.replicaOpacity < 0.5f) continue;
                 const i32 skinIndex = nodes[n].skin;
                 const bool skinnedNode = joints.valid() && skinIndex >= 0
                                        && skinIndex < static_cast<i32>(inst.pose().skinJointOffset.size()) && gm->skin.valid();
@@ -2206,7 +2219,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         SceneLookup<const SceneBlock*, const SceneBlock*> sampleBlocks;
         for (u32 n : gm->drawableNodes) {
             const i32 mi = nodes[n].mesh;
-            const f32 nodeAlpha = n < inst.pose().nodeOpacity.size() ? inst.pose().nodeOpacity[n] : 1.0f;
+            const f32 nodeAlpha = inst.replicaOpacity * (n < inst.pose().nodeOpacity.size() ? inst.pose().nodeOpacity[n] : 1.0f);
             if (nodeAlpha <= 0.004f) continue;   // letra ainda invisível: nada a desenhar
             // Malha com skin: a pose vem das juntas (já no espaço da cena do
             // modelo); o nó da malha não entra (regra do glTF).
@@ -2245,6 +2258,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                     if (swap.node == n) { mat = textured(mat, swap); break; }
                 mat = faded(mat, nodeAlpha);
                 if (n < inst.pose().nodeFill.size()) mat = tinted(mat, inst.pose().nodeFill[n]);
+                mat = tinted(mat, inst.replicaTint);
+                mat = cel_shaded(mat, inst.celBands);
                 // Opacidade 0 (o ajuste do material ou a letra sumida) = nada:
                 // o vidro físico manteria o reflexo e a peça "invisível" ainda
                 // apareceria como uma caixa clara.
@@ -2311,6 +2326,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 if (skinDraw || d.morph) { d.firstIndex = p.firstIndex; d.indexCount = p.indexCount; }
                 else {
                     const u64 lodKey = (inst.layerKey * 0x9E3779B97F4A7C15ull) ^ (static_cast<u64>(n) << 20) ^ static_cast<u64>(primIndex)
+                                       ^ (static_cast<u64>(inst.replicaIndex) * 0x85EBCA77C2B2AE63ull)
                                      ^ (static_cast<u64>(instIndex) << 44);
                     pick_lod(p, world, viewFromLocal, lodKey, d.firstIndex, d.indexCount);
                 }

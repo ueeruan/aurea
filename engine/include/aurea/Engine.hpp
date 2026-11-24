@@ -237,6 +237,9 @@ struct EngineConfig {
     /// the device budget; a single frame exceeding it fails before allocation.
     u64 exportFrameQueueBudgetBytes = 0;
     ExportExecutionProfile exportExecutionProfile = ExportExecutionProfile::Balanced;
+    /// Mobile composition video uses a single NV12 handoff, with a bounded
+    /// software fallback and exact source frames.
+    bool usePortableCompositionExport = false;
     /// Staged bounded 3D exposure path, retaining the original route.
     bool enableBoundedSceneExposure = true;
     /// Admit transient targets against tracked GPU residency and known cache
@@ -730,8 +733,30 @@ public:
     bool set_vector_document(u64 layerId, const f32* data, usize count, const std::string& names, bool continuing) noexcept;
     /// Caminho avaliado no cabeçote (morph e paramétrico resolvidos), no espaço
     /// do grupo, precedido da afim grupo → composição (a b c d tx ty) e de
-    /// flags (bit0 livre, bit1 tem keyframes de forma, bit2 keyframe no cabeçote).
+    /// flags (bit0 livre, bit1 tem keyframes de forma, bit2 keyframe no cabeçote,
+    /// bit3 camada 3D). Com o bit3, a conta é PROJETIVA (a câmera que o palco
+    /// mostra): a afim vem escalada para w = 1 no centro do caminho e os 3
+    /// últimos floats são a linha de perspectiva (w = w0·x + w1·y + w2; dividir
+    /// por ela; w ≤ 0 = atrás da câmera).
     bool vector_path_at(u64 layerId, u32 group, u32 path, std::vector<f32>& out) noexcept;
+    /// Pontos 3D no palco (EngineVector3D.cpp): cada vértice e as duas alças do
+    /// caminho projetados pela câmera do palco (a ativa, ou a de navegação da
+    /// Cena 3D). Cabeçalho [nº de pontos, 3D (0/1), fechado (0/1)] e, por ponto,
+    /// kVectorStageFloats: x, y, visível, xEntrada, yEntrada, visível, xSaída,
+    /// ySaída, visível (px da composição; visível 0 = atrás da câmera).
+    static constexpr u32 kVectorStageFloats = 9;
+    bool vector_path_stage_points(u64 layerId, u32 group, u32 path, std::vector<f32>& out) noexcept;
+    /// Composição → grupo pelo PLANO da camada: raio da câmera do palco × plano
+    /// (2D: a inversa da afim). Falso = plano de lado para a câmera ou atrás dela.
+    bool vector_path_unproject(u64 layerId, u32 group, f32 compX, f32 compY, Vec2& out) noexcept;
+    /// Arrasto no palco de pontos (`handle` 0; `indices` = os pontos) ou de uma
+    /// alça (1 entrada, 2 saída; `indices[0]` = o ponto) do dedo em `from` para
+    /// `to` (px da composição). O motor leva os dois ao plano da camada e aplica
+    /// MovePoints/MoveHandle (keyframes de forma e Auto-Key como em
+    /// edit_vector_path). `locks`: bit0 trava o ângulo, bit1 o comprimento.
+    /// `continuing` = mesmo arrasto (um passo de desfazer). −1 = recusado.
+    i32 drag_vector_path_on_stage(u64 layerId, u32 group, u32 path, u32 handle, const u32* indices, u32 count,
+                                  f32 fromX, f32 fromY, f32 toX, f32 toY, u32 locks, bool continuing) noexcept;
     /// Grava a forma do caminho livre (bezier codificado). Com keyframes de
     /// forma, grava no cabeçote (cria o keyframe se não houver).
     bool set_vector_path(u64 layerId, u32 group, u32 path, const f32* bez, usize count, bool continuing) noexcept;
@@ -1674,6 +1699,9 @@ public:
     /// saída x/y (px da camada, tangentes relativas ao ponto).
     /// Máscara nova com o caminho dado. Devolve o id (−1 = falhou).
     i32 add_mask(u64 layerId, const f32* pts6, u32 count, bool closed) noexcept;
+    /// Center an editable mask in layer coordinates. 0 rectangle, 1 ellipse,
+    /// 3 triangle, 4 pentagon, 5 hexagon, 6 octagon, 7 star, 8 diamond.
+    i32 add_mask_preset(u64 layerId, u32 preset, f32 width, f32 height) noexcept;
     bool remove_mask(u64 layerId, u32 maskId) noexcept;
     /// Troca o caminho inteiro. Com o caminho animado, grava/atualiza o key no
     /// CABEÇOTE. `undo` = abre um passo de desfazer (false nos eventos
@@ -1791,8 +1819,8 @@ public:
     /// de corpo inteiro). Troca o rig que houver. Devolve quantas juntas.
     u32 rig_auto_humanoid(u64 layerId) noexcept;
     /// ANIMAR: leva a junta até (x, y) da composição e grava keyframe no
-    /// playhead. Ponta de cadeia com avô = IK de 2 ossos (a mão puxa o braço);
-    /// junta com filhos ou só um osso acima = gira o osso dela (FK).
+    /// playhead. A ponta usa IK de dois ou mais ossos conforme a cadeia;
+    /// juntas com filhos ou um só osso acima giram por FK.
     bool rig_pose_joint(u64 layerId, u32 jointId, f32 compX, f32 compY, bool continuing) noexcept;
     /// Montagem aberta nesta camada: o preview a mostra sem deformação (0 = nenhuma).
     void set_rig_setup_layer(u64 layerId) noexcept;
@@ -2109,7 +2137,9 @@ public:
     /// (counted in `lost`) and never block applying.
     bool start_motion_track(u64 layerId, u32 tool, u32 model, bool backward,
                             const f32* pointsXY, u32 count, f32 featureRadius = 12, f32 searchRadius = 48,
-                            f32 minimumConfidence = .65f, bool validateBack = false) noexcept;
+                            f32 minimumConfidence = .65f, bool validateBack = false,
+                            i64 repairFirst = -1, i64 repairLast = -1) noexcept;
+    bool finish_motion_repair(bool accept) noexcept;
     bool restore_motion_track(u64 layerId) noexcept;
     void cancel_motion_track() noexcept;
     bool pause_motion_track(bool paused) noexcept;
@@ -2390,6 +2420,9 @@ public:
     [[nodiscard]] u32 precomp_depth() noexcept;
     /// Nome da composição aberta.
     [[nodiscard]] std::string current_composition_name() noexcept;
+    struct ExportSourceIssue { u64 composition, layer; std::string name; bool missing; };
+    [[nodiscard]] std::vector<ExportSourceIssue> export_source_issues() noexcept;
+    [[nodiscard]] std::vector<u64> route_to_layer(u64 composition, u64 layer) noexcept;
 
     // --- Grupo aberto NA timeline (0.5.3: "expandir o grupo sem desagrupar") -----
     // O grupo continua grupo e a composição aberta não muda: a timeline mostra as
@@ -2425,6 +2458,14 @@ private:
     Composition* group_inner_locked(u64 groupLayerId, i64* delta, bool* linear) noexcept;
 public:
     [[nodiscard]] bool set_inline_edit_target(u64 groupLayerId, u64 childLayerId) noexcept;
+    struct PrecompControlRow {
+        PrecompControlValue value;
+        std::string name;
+        bool exposed = false, overridden = false, available = false;
+    };
+    [[nodiscard]] std::vector<PrecompControlRow> precomp_controls(u64 group) noexcept;
+    /// 0 publish, 1 hide, 2 set instance override, 3 reset instance override.
+    bool edit_precomp_control(u64 group, u64 target, u32 kind, u32 operation, const std::string& text, Vec4 rgba) noexcept;
 private:
     class InlineEditScope {
     public:
@@ -3527,6 +3568,7 @@ public:
         /// desenhado nesta sessão (modelo 3D que falhou ao subir, recurso que
         /// nunca chegou), como a prévia mostra; antes o export parava nele.
         kExportElementsOmitted = 1u << 19,
+        kExportWaitingForDecode = 1u << 20,
         // Bits 16..17: o próximo modo de segurança sugerido quando o export
         // falhou pelo encoder (kExportRetryShift, export/ExportWatchdog.hpp).
     };

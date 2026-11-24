@@ -588,6 +588,11 @@ internal fun Trackpad(store: EditorStore, at: VPathAt?, modifier: Modifier) {
             drawLine(corner, Offset(x1, y1), Offset(x1 - l, y1), w); drawLine(corner, Offset(x1, y1), Offset(x1, y1 - l), w)
         }
         Text(guide, Modifier.padding(horizontal = 18.dp), textAlign = TextAlign.Center, style = AureaType.of(12f, color = AureaColors.ContentGuide))
+        // Camada 3D: os pontos andam no plano dela, vistos pela câmera.
+        if (at?.perspective == true) {
+            Text(stringResource(R.string.om_pts_3d_plane), Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp, start = 12.dp, end = 12.dp)
+                .testTag("points.plane3d"), textAlign = TextAlign.Center, style = AureaType.of(10f, color = AureaColors.ContentGuide))
+        }
     }
 }
 
@@ -618,8 +623,10 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.trackpad
             val dx = (c.position.x - last.x) / density
             val dy = (c.position.y - last.y) / density
             last = c.position
-            if (!at.vecFromComp(dx, dy, g)) continue
             val i = EditPointsState.point(store)
+            // Camada 3D: o passo da tela vale no ponto que anda (a perspectiva muda a escala).
+            val anchor = trackpadAnchor(store, at, path, i)
+            if (!at.vecFromComp(dx, dy, g, anchor?.x ?: Float.NaN, anchor?.y ?: Float.NaN)) continue
             when {
                 atOpenEnd(store, path) || EditPointsState.kind == EditPointsState.BETWEEN || EditPointsState.pending != null -> {
                     // O ponto pendente nasce na ponta (ou no trecho) e segue o dedo.
@@ -642,6 +649,18 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.trackpad
             }
         }
         if (!moved) confirmPending(store)
+    }
+}
+
+/** O ponto do grupo que o trackpad move agora (o pendente, a alça ou o ponto); nulo = o centro. */
+private fun trackpadAnchor(store: EditorStore, at: VPathAt, path: VBezier, i: Int): Offset? {
+    EditPointsState.pending?.let { return it }
+    val p = path.v.getOrNull(i) ?: return null
+    return when (EditPointsState.kind) {
+        EditPointsState.IN -> Offset(p.x + p.inX, p.y + p.inY)
+        EditPointsState.OUT -> Offset(p.x + p.outX, p.y + p.outY)
+        EditPointsState.POINT -> Offset(p.x, p.y)
+        else -> if (atOpenEnd(store, path) || !at.perspective) Offset(p.x, p.y) else null
     }
 }
 
@@ -853,21 +872,25 @@ internal fun DrawScope.drawEditPointsOverlay(store: EditorStore, m: StageMapper)
     val at = store.vectorPathAt ?: return
     val q = FloatArray(2)
     fun sx(x: Float, y: Float): Offset { at.toComp(x, y, q); return Offset(m.sx(q[0]), m.sy(q[1])) }
+    // Camada 3D: só o que está na frente da câmera aparece (e o contorno vira
+    // amostras levadas à tela — a perspectiva curva o bezier).
+    val persp = if (at.perspective) at else null
     // Os outros contornos do grupo (finos).
     store.vectorDoc?.groups?.getOrNull(store.vectorGroup)?.paths?.forEachIndexed { n, p ->
         if (n == store.vectorPath) return@forEachIndexed
-        drawBezier(p.path, ::sx, ShellColors.OutlineUnder, HandleInk.copy(alpha = 0.6f), 1.dp.toPx())
+        drawBezier(p.path, ::sx, ShellColors.OutlineUnder, HandleInk.copy(alpha = 0.6f), 1.dp.toPx(), persp)
     }
     val path = at.path
-    drawBezier(path, ::sx, ShellColors.OutlineUnder, PathInk, 1.5.dp.toPx())
+    drawBezier(path, ::sx, ShellColors.OutlineUnder, PathInk, 1.5.dp.toPx(), persp)
     val sel = store.vectorPoint
     val kind = EditPointsState.kind
-    if (sel in path.v.indices && kind != EditPointsState.BETWEEN) {
+    if (sel in path.v.indices && kind != EditPointsState.BETWEEN && at.visible(path.v[sel].x, path.v[sel].y)) {
         val p = path.v[sel]
         val c = sx(p.x, p.y)
         for (k in 0..1) {
             val hx = if (k == 0) p.x + p.inX else p.x + p.outX
             val hy = if (k == 0) p.y + p.inY else p.y + p.outY
+            if (!at.visible(hx, hy)) continue
             val h = sx(hx, hy)
             if (hypot(h.x - c.x, h.y - c.y) < 1f) continue
             val chosen = (k == 0 && kind == EditPointsState.IN) || (k == 1 && kind == EditPointsState.OUT)
@@ -878,6 +901,7 @@ internal fun DrawScope.drawEditPointsOverlay(store: EditorStore, m: StageMapper)
     }
     val base = 4.5.dp.toPx()
     for (i in path.v.indices) {
+        if (!at.visible(path.v[i].x, path.v[i].y)) continue
         val c = sx(path.v[i].x, path.v[i].y)
         val chosen = (i == sel && kind == EditPointsState.POINT) || i in EditPointsState.multi
         // After Effects: o primeiro ponto do caminho fechado aparece maior.
@@ -926,9 +950,13 @@ internal fun DrawScope.drawMaskPointMarks(store: EditorStore, m: StageMapper) {
     drawPendingMarks(path) { x, y -> Offset(m.sx(ms.toCompX(x, y)), m.sy(ms.toCompY(x, y))) }
 }
 
-private fun DrawScope.drawBezier(path: VBezier, sx: (Float, Float) -> Offset, under: Color, ink: Color, width: Float) {
+private fun DrawScope.drawBezier(path: VBezier, sx: (Float, Float) -> Offset, under: Color, ink: Color, width: Float, persp: VPathAt? = null) {
     val v = path.v
     if (v.size < 2) return
+    if (persp != null) {
+        drawProjectedBezier(path, sx, persp, under, ink, width)
+        return
+    }
     val p = Path()
     val o0 = sx(v[0].x, v[0].y)
     p.moveTo(o0.x, o0.y)
@@ -945,6 +973,37 @@ private fun DrawScope.drawBezier(path: VBezier, sx: (Float, Float) -> Offset, un
     drawPath(p, under, style = Stroke(width * 2f))
     drawPath(p, ink, style = Stroke(width))
 }
+
+/**
+ * Camada 3D: o bezier do plano vira uma curva racional na tela — amostras do
+ * trecho no espaço do grupo, levadas à tela uma a uma. O traço quebra onde a
+ * curva passa para trás da câmera.
+ */
+private fun DrawScope.drawProjectedBezier(path: VBezier, sx: (Float, Float) -> Offset, at: VPathAt, under: Color, ink: Color, width: Float) {
+    val v = path.v
+    val p = Path()
+    var open = false
+    val segs = if (path.closed) v.size else v.size - 1
+    for (i in 0 until segs) {
+        val a = v[i]
+        val b = v[(i + 1) % v.size]
+        for (k in 0..24) {
+            if (k == 0 && i > 0 && open) continue
+            val t = k / 24f
+            val x = cubicAt(a.x, a.x + a.outX, b.x + b.inX, b.x, t)
+            val y = cubicAt(a.y, a.y + a.outY, b.y + b.inY, b.y, t)
+            if (!at.visible(x, y)) { open = false; continue }
+            val o = sx(x, y)
+            if (open) p.lineTo(o.x, o.y) else p.moveTo(o.x, o.y)
+            open = true
+        }
+    }
+    drawPath(p, under, style = Stroke(width * 2f))
+    drawPath(p, ink, style = Stroke(width))
+}
+
+/** Bits das travas da alça para o motor (bit0 ângulo, bit1 comprimento). */
+private fun handleLocks(): Int = (if (EditPointsState.lockAngle) 1 else 0) or (if (EditPointsState.lockLength) 2 else 0)
 
 /**
  * O gesto do palco no Editar pontos. Alcance de 25 dp: alça da escolha > ponto
@@ -971,8 +1030,11 @@ internal suspend fun AwaitPointerEventScope.editPointsGesture(store: EditorStore
         val c = screen(p.x, p.y)
         val hin = screen(p.x + p.inX, p.y + p.inY)
         val hout = screen(p.x + p.outX, p.y + p.outY)
-        val din = if (hypot(hin.x - c.x, hin.y - c.y) > 1f) hypot(dp.x - hin.x, dp.y - hin.y) else Float.MAX_VALUE
-        val dout = if (hypot(hout.x - c.x, hout.y - c.y) > 1f) hypot(dp.x - hout.x, dp.y - hout.y) else Float.MAX_VALUE
+        // Camada 3D: alça atrás da câmera não se pega.
+        val inOk = at.visible(p.x, p.y) && at.visible(p.x + p.inX, p.y + p.inY)
+        val outOk = at.visible(p.x, p.y) && at.visible(p.x + p.outX, p.y + p.outY)
+        val din = if (inOk && hypot(hin.x - c.x, hin.y - c.y) > 1f) hypot(dp.x - hin.x, dp.y - hin.y) else Float.MAX_VALUE
+        val dout = if (outOk && hypot(hout.x - c.x, hout.y - c.y) > 1f) hypot(dp.x - hout.x, dp.y - hout.y) else Float.MAX_VALUE
         if (din < reach && din <= dout) handle = EditPointsState.IN else if (dout < reach) handle = EditPointsState.OUT
     }
     // 2) Pontos do contorno atual.
@@ -980,6 +1042,7 @@ internal suspend fun AwaitPointerEventScope.editPointsGesture(store: EditorStore
     if (handle < 0) {
         var best = reach
         for (i in v.indices) {
+            if (!at.visible(v[i].x, v[i].y)) continue
             val c = screen(v[i].x, v[i].y)
             val d = hypot(dp.x - c.x, dp.y - c.y)
             if (d < best) { best = d; hit = i }
@@ -991,6 +1054,7 @@ internal suspend fun AwaitPointerEventScope.editPointsGesture(store: EditorStore
         group?.paths?.forEachIndexed { n, p ->
             if (n == store.vectorPath || hit >= 0) return@forEachIndexed
             for (i in p.path.v.indices) {
+                if (!at.visible(p.path.v[i].x, p.path.v[i].y)) continue
                 val c = screen(p.path.v[i].x, p.path.v[i].y)
                 if (hypot(dp.x - c.x, dp.y - c.y) < reach) {
                     drain(down)
@@ -1008,11 +1072,16 @@ internal suspend fun AwaitPointerEventScope.editPointsGesture(store: EditorStore
             EditPointsState.choosePoint(store, sel, handle)
             var last = dp
             var sent = false
+            var warned = false
+            val side = if (handle == EditPointsState.OUT) 2 else 1
             drag(down) { pos ->
-                if (!at.vecFromComp((pos.x - last.x) / m.fit, (pos.y - last.y) / m.fit, g)) return@drag
+                // O motor leva os dois toques ao plano da camada (3D: raio × plano).
+                val r = store.dragVectorPathOnStage(side, intArrayOf(sel), m.cx(last.x), m.cy(last.y), m.cx(pos.x), m.cy(pos.y), handleLocks(), sent)
+                if (r < 0) {
+                    if (at.perspective && !warned) { warned = true; store.warnVectorPlaneEdgeOn() }
+                    return@drag
+                }
                 last = pos
-                store.editVectorPath(PathOps.MOVE_HANDLE, floatArrayOf(sel.toFloat(), if (handle == EditPointsState.OUT) 1f else 0f, g[0], g[1],
-                    if (EditPointsState.lockAngle) 1f else 0f, if (EditPointsState.lockLength) 1f else 0f), sent)
                 sent = true
             }
         }
@@ -1021,15 +1090,18 @@ internal suspend fun AwaitPointerEventScope.editPointsGesture(store: EditorStore
             var last = dp
             var sent = false
             val group = (EditPointsState.multi.takeIf { hit in it } ?: setOf(hit)).sorted()
+            val indices = group.toIntArray()
+            var warned = false
             drag(down) { pos ->
                 if (!moved && hypot(pos.x - dp.x, pos.y - dp.y) < slop) return@drag
                 moved = true
-                if (!at.vecFromComp((pos.x - last.x) / m.fit, (pos.y - last.y) / m.fit, g)) return@drag
+                // O motor leva os dois toques ao plano da camada (3D: raio × plano).
+                val r = store.dragVectorPathOnStage(0, indices, m.cx(last.x), m.cy(last.y), m.cx(pos.x), m.cy(pos.y), 0, sent)
+                if (r < 0) {
+                    if (at.perspective && !warned) { warned = true; store.warnVectorPlaneEdgeOn() }
+                    return@drag
+                }
                 last = pos
-                val args = FloatArray(2 + group.size)
-                args[0] = g[0]; args[1] = g[1]
-                group.forEachIndexed { k, p -> args[2 + k] = p.toFloat() }
-                store.editVectorPath(PathOps.MOVE_POINTS, args, sent)
                 sent = true
             }
             if (!moved) {
@@ -1043,7 +1115,7 @@ internal suspend fun AwaitPointerEventScope.editPointsGesture(store: EditorStore
         }
         else -> {
             // 4) Linha: põe um ponto ali (a curva não muda).
-            val line = nearestOnLine(path, ::screen, dp, reach)
+            val line = nearestOnLine(path, ::screen, dp, reach, at::visible)
             var dragged = false
             val start = dp
             drag(down) { pos ->
@@ -1057,7 +1129,7 @@ internal suspend fun AwaitPointerEventScope.editPointsGesture(store: EditorStore
                 // Laço: os pontos dentro do retângulo andam juntos.
                 val x0 = min(box[0], box[2]); val x1 = max(box[0], box[2])
                 val y0 = min(box[1], box[3]); val y1 = max(box[1], box[3])
-                val inside = v.indices.filter { val c = screen(v[it].x, v[it].y); c.x in x0..x1 && c.y in y0..y1 }.toSet()
+                val inside = v.indices.filter { at.visible(v[it].x, v[it].y) && screen(v[it].x, v[it].y).let { c -> c.x in x0..x1 && c.y in y0..y1 } }.toSet()
                 EditPointsState.multi = inside
                 if (inside.isNotEmpty()) EditPointsState.choosePoint(store, inside.min()) else EditPointsState.choosePoint(store, -1)
                 return
@@ -1081,7 +1153,8 @@ internal suspend fun AwaitPointerEventScope.editPointsGesture(store: EditorStore
 }
 
 /** O trecho e o t do ponto da linha mais perto de [pos] (tela), ou nulo fora do alcance. */
-private fun nearestOnLine(path: VBezier, screen: (Float, Float) -> Offset, pos: Offset, reach: Float): Pair<Int, Float>? {
+private fun nearestOnLine(path: VBezier, screen: (Float, Float) -> Offset, pos: Offset, reach: Float,
+    visible: (Float, Float) -> Boolean = { _, _ -> true }): Pair<Int, Float>? {
     val n = path.v.size
     if (n < 2) return null
     val segs = if (path.closed) n else n - 1
@@ -1092,6 +1165,7 @@ private fun nearestOnLine(path: VBezier, screen: (Float, Float) -> Offset, pos: 
         for (k in 1 until 48) {
             val t = k / 48f
             val g = segmentPoint(path, i, t) ?: continue
+            if (!visible(g.x, g.y)) continue
             val c = screen(g.x, g.y)
             val d = hypot(c.x - pos.x, c.y - pos.y)
             if (d < best) { best = d; bestSeg = i; bestT = t }

@@ -50,6 +50,11 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     // Forma (1.0.8): 0 disco, 1 estrela, 2 coração, 3 folha, 4 pétala, 5 borboleta,
     // 6 confete, 7 brilho, 8 floco; giro (rad/s), bater/balançar 0..1, cintilar 0..1.
     vec4 shape;
+    vec4 behavior;  // emission mode, X/Y/Z points
+    vec4 options;   // dispersion, path count, curve flags, bound sprite
+    vec4 life[8];
+    vec4 opacityLife[2];
+    vec4 path[16];
 } p;
 
 layout(location = 0) out vec2 v_corner;   // -1..1 no quadrado da partícula
@@ -252,9 +257,12 @@ void main() {
     const float now = p.clock.x;
     const float grid = max(p.clock.y, 1e-4);
     const float cycle = max(p.clock.z / grid, 1e-4);
-    const float since = now - slot / grid;
-    const float generation = floor(since / cycle);
-    const float age = since - generation * cycle;
+    const bool form = p.behavior.x == 1.0;
+    const bool burst = p.behavior.x == 2.0;
+    const bool path = p.behavior.x == 3.0;
+    const float since = form || burst ? now : now - slot / grid;
+    const float generation = form || burst ? 0.0 : floor(since / cycle);
+    const float age = form ? 0.0 : burst ? now : since - generation * cycle;
 
     // Sorteios por (slot, geração): renascer é outra partícula.
     const float id = slot * 1.7 + generation * 91.7 + p.emitSize.w * 13.31;
@@ -265,24 +273,40 @@ void main() {
     const vec3 rE = rand3(id + 191.3);    // disparou?
 
     const float life = max(max(p.lifeSize.x, 1.0) * 0.001 * (1.0 + (rA.x - 0.5) * 2.0 * p.lifeSize.y), 1e-3);
-    const float k = age / life;
-    if (rE.x >= p.clock.w / grid || since < 0.0 || k > 1.0) {
+    if ((!form && !burst && rE.x >= p.clock.w / grid) || since < 0.0 || (!form && age > life)) {
         cull();
         return;
     }
 
     // Ponto de partida no emissor (tamanho em fração do quadro; a
     // profundidade usa a altura).
-    const vec3 halfSize = vec3(p.emitSize.x * p.frame.x, p.emitSize.y * p.frame.y, p.emitSize.z * p.frame.y) * 0.5;
+    vec3 halfSize = vec3(p.emitSize.x * p.frame.x, p.emitSize.y * p.frame.y, p.emitSize.z * p.frame.y) * 0.5;
     vec3 unit = rB * 2.0 - 1.0;
-    if (p.emitPos.w > 0.5) {
+    if (form) {
+        const vec3 count = p.behavior.yzw;
+        const float originalSlots = count.x * count.y * count.z;
+        const float index = floor((slot + 0.5) * originalSlots / max(p.clock.z, 1.0));
+        const vec3 index3 = vec3(mod(index, count.x), mod(floor(index / count.x), count.y), floor(index / (count.x * count.y)));
+        unit = mix(vec3(0.0), 2.0 * index3 / max(count - 1.0, 1.0) - 1.0, step(vec3(2.0), count));
+        if (halfSize.x <= 0.0) halfSize.x = p.frame.x * 0.34;
+        if (halfSize.y <= 0.0) halfSize.y = p.frame.y * 0.34;
+        if (halfSize.z <= 0.0 && count.z > 1.0) halfSize.z = p.frame.y * 0.14;
+    } else if (p.emitPos.w > 0.5) {
         // Uniforme na esfera (cos z / ângulo) e uniforme no volume (raiz cúbica).
         const float cz = rC.x * 2.0 - 1.0;
         const float sr = sqrt(max(0.0, 1.0 - cz * cz));
         const float ph = TWO_PI * rC.y;
         unit = vec3(sr * cos(ph), sr * sin(ph), cz) * pow(max(rB.x, 1e-4), 1.0 / 3.0);
     }
-    const vec3 offset = unit * halfSize;
+    vec3 offset = unit * halfSize;
+    if (form) offset += (rB * 2.0 - 1.0) * p.options.x;
+    if (path) {
+        const float index = clamp(rB.x, 0.0, 0.99999) * max(p.options.y - 1.0, 0.0);
+        const int lo = int(index);
+        const int hi = min(lo + 1, int(p.options.y) - 1);
+        offset += vec3(mix(p.path[lo].xy, p.path[hi].xy, fract(index)) - p.frame.zw, 0.0);
+    }
+    const float k = form ? unit.y * 0.5 + 0.5 : clamp(age / life, 0.0, 1.0);
 
     // Direção: cone de meia-abertura `spread` em volta da mira. Inclinação 0 =
     // para cima (y da tela desce). Cosseno uniforme na calota.
@@ -301,7 +325,8 @@ void main() {
 
     const float speed = p.launch.x * max(0.0, 1.0 + (rD.x - 0.5) * 2.0 * p.launch.y);
     const vec3 start = vec3(p.emitPos.x * p.frame.x, p.emitPos.y * p.frame.y, p.emitPos.z * p.frame.y) + offset;
-    const vec3 pos = vec3(p.frame.zw, 0.0) + start + flight(age, dir, speed) + wander(now, k, rC * TWO_PI, generation);
+    const vec3 pos = vec3(p.frame.zw, 0.0) + start + (form ? vec3(0.0) : flight(age, dir, speed))
+                   + wander(now, k, rC * TWO_PI, generation);
     // Desfoque de movimento POR PARTÍCULA: a folha não se
     // move, o movimento está nas partículas. Onde ela estava meia janela do
     // obturador atrás é só avaliar a mesma fórmula fechada de novo — a
@@ -309,15 +334,26 @@ void main() {
     // conte como trajeto (reusar a de agora viraria ruído de dezenas de px).
     const float shutter = p.motion.w;
     const float agePrev = max(age - shutter, 0.0);
-    const vec3 posPrev = vec3(p.frame.zw, 0.0) + start + flight(agePrev, dir, speed)
-                       + wander(now - shutter, agePrev / life, rC * TWO_PI, generation);
+    const vec3 posPrev = vec3(p.frame.zw, 0.0) + start + (form ? vec3(0.0) : flight(agePrev, dir, speed))
+                       + wander(now - shutter, form ? k : agePrev / life, rC * TWO_PI, generation);
 
-    float size = p.lifeSize.z * max(0.05, 1.0 + (rD.y - 0.5) * 2.0 * p.lifeSize.w) * mix(1.0, p.look.x, k);
-    const float fin = p.look.z <= 0.0 ? 1.0 : smoothstep(0.0, p.look.z, k);
-    const float fout = p.look.w <= 0.0 ? 1.0 : 1.0 - smoothstep(1.0 - p.look.w, 1.0, k);
-    vec3 color = mix(p.color0.rgb, p.color1.rgb, k);
+    const int flags = int(p.options.z);
+    const float table = clamp(k, 0.0, 1.0) * 7.0;
+    const int left = int(table), right = min(left + 1, 7);
+    const float blend = fract(table);
+    vec4 sampled = vec4(0.0, 0.0, 0.0, k);
+    if ((flags & 5) != 0) sampled = mix(p.life[left], p.life[right], blend);
+    const float sizeLife = (flags & 1) != 0 ? sampled.w : k;
+    float size = p.lifeSize.z * max(0.05, 1.0 + (rD.y - 0.5) * 2.0 * p.lifeSize.w) * mix(1.0, p.look.x, sizeLife);
+    const float fin = form || p.look.z <= 0.0 ? 1.0 : smoothstep(0.0, p.look.z, k);
+    const float fout = form || p.look.w <= 0.0 ? 1.0 : 1.0 - smoothstep(1.0 - p.look.w, 1.0, k);
+    float opacity = 1.0;
+    if ((flags & 2) != 0) {
+        opacity = mix(p.opacityLife[left / 4][left % 4], p.opacityLife[right / 4][right % 4], blend);
+    }
+    vec3 color = (flags & 4) != 0 ? sampled.rgb : mix(p.color0.rgb, p.color1.rgb, k);
     if (p.color0.w > 0.0) color = mix(color, hue_color(rD.z), clamp(p.color0.w, 0.0, 1.0));
-    v_color = vec4(color, p.look.y * fin * fout);
+    v_color = vec4(color, p.look.y * fin * fout * opacity);
     v_corner = corner;
     v_feather = p.cone.w;
 
@@ -326,12 +362,14 @@ void main() {
     // Disco sem cintilar: nada muda, o quadro é o de antes.
     const float shapeId = p.shape.x;
     const vec3 rF = rand3(id + 251.9);    // giro, fases do balanço e do cintilar
-    v_shape = vec4(shapeId, rF.x, 0.0, 0.0);
+    const bool motionShape = shapeId == 9.0 || shapeId == 14.0 || shapeId == 15.0 || shapeId == 33.0;
+    const float stretch = form ? 0.0 : max(p.cone.z, motionShape ? (shapeId == 33.0 ? 1.1 : 0.45) : 0.0);
+    v_shape = vec4(shapeId, rF.x, p.options.w, age);
     vec2 cq = corner;
     if (shapeId > 0.5) {
         const bool butterfly = abs(shapeId - 5.0) < 0.5;
         const bool upright = butterfly || abs(shapeId - 2.0) < 0.5;   // borboleta e coração de pé
-        float angle = upright ? (rF.x - 0.5) * 0.6 : rF.x * TWO_PI;
+        float angle = motionShape ? 0.0 : upright ? (rF.x - 0.5) * 0.6 : rF.x * TWO_PI;
         angle += p.shape.y * age * (rF.y < 0.5 ? -1.0 : 1.0) * (0.6 + 0.8 * rF.z);
         if (upright) angle += 0.35 * p.shape.z * sin(age * 1.7 + rF.y * TWO_PI);
         float sx = 1.0;
@@ -355,13 +393,13 @@ void main() {
     // movimento visível e alongado pela velocidade (a derivada da posição).
     vec2 axisU = vec2(1.0, 0.0), axisV = vec2(0.0, 1.0);
     float sizeV = size;
-    if (p.cone.z > 0.0) {
+    if (stretch > 0.0) {
         const vec3 vel = dir * speed * exp(-max(p.motion.x, 0.0) * age) + p.forces.yzw + vec3(0.0, p.forces.x, 0.0) * age;
         const float vlen = length(vel.xy);
         if (vlen > 1e-3) {
             axisV = vel.xy / vlen;
             axisU = vec2(-axisV.y, axisV.x);
-            sizeV = size * clamp(1.0 + p.cone.z * vlen / max(p.launch.x, 1.0), 1.0, 1.0 + p.cone.z * 6.0);
+            sizeV = size * clamp(1.0 + stretch * vlen / max(p.launch.x, 1.0), 1.0, 1.0 + stretch * 6.0);
         }
     }
 
@@ -378,7 +416,7 @@ void main() {
         }
         vec3 wu = R, wv = U;
         float sv = size;
-        if (p.cone.z > 0.0) {
+        if (stretch > 0.0) {
             const vec3 vel = dir * speed * exp(-max(p.motion.x, 0.0) * age) + p.forces.yzw + vec3(0.0, p.forces.x, 0.0) * age;
             const vec3 vw = mat3(p.worldFromLayer) * vel;
             const vec2 vs = vec2(dot(vw, R), dot(vw, U));
@@ -387,7 +425,7 @@ void main() {
                 const vec2 d = vs / vlen;
                 wv = R * d.x + U * d.y;
                 wu = R * -d.y + U * d.x;
-                sv = size * clamp(1.0 + p.cone.z * vlen / max(p.launch.x, 1.0), 1.0, 1.0 + p.cone.z * 6.0);
+                sv = size * clamp(1.0 + stretch * vlen / max(p.launch.x, 1.0), 1.0, 1.0 + stretch * 6.0);
             }
         }
         if (shutter > 0.0) {

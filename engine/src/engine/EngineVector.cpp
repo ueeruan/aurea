@@ -9,6 +9,7 @@
 // =============================================================================
 #include "aurea/Engine.hpp"
 #include "aurea/DefaultNames.hpp"
+#include "EngineVector3D.hpp"
 
 #include "aurea/timeline/ShapeGeometry.hpp"
 #include "aurea/vector/Vector.hpp"
@@ -183,16 +184,36 @@ bool Engine::vector_path_at(u64 layerId, u32 group, u32 path, std::vector<f32>& 
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = vector_layer(comp, layerId);
     if (!l || group >= l->shape.vector.groups.size() || path >= l->shape.vector.groups[group].paths.size()) return false;
+    const BoneAttachScope bones(&Engine::model_lookup, this);
     const FrameIndex now = editing_frame_locked();
     const f64 local = static_cast<f64>(l->local_time(now).value);
     const VectorGroup g = vector::evaluate_group(l->shape.vector.groups[group], l->tracks, group, local, comp->fps());
-    const vector::Affine2 M = affine_of(layer_world_matrix(*comp, *l, now)) * vector::group_matrix(g);
     const VectorPath& p = g.paths[path];
     u32 flags = p.kind == VectorPathKind::Free ? 1u : 0u;
     if (!p.keys.empty()) flags |= 2u;
     for (const PathKey& k : p.keys) if (k.frame == static_cast<i64>(local)) flags |= 4u;
-    out = {M.a, M.b, M.c, M.d, M.tx, M.ty, static_cast<f32>(flags)};
-    vector::encode_path(vector::path_at(p, local), out);
+    const BezierPath shape = vector::path_at(p, local);
+    // Grupo → composição pela câmera do palco (EngineVector3D). Camada 3D: a
+    // conta é projetiva; escala para w = 1 no centro do caminho (a afim vale
+    // ali) e a linha de perspectiva vai no fim (bit3).
+    const vector3d::StageFrame f = vector3d::stage_frame(*comp, *l, now, vector::group_matrix(g), sceneEditor_.enabled ? &sceneEditor_ : nullptr);
+    const Mat4& m = f.compFromGroup;
+    f32 k = 1.0f;
+    if (f.perspective) {
+        flags |= 8u;
+        Vec2 c{0.0f, 0.0f};
+        for (const BezierVertex& v : shape.v) c = c + v.p;
+        if (!shape.v.empty()) c = c * (1.0f / static_cast<f32>(shape.v.size()));
+        const f32 den = m.col[0].w * c.x + m.col[1].w * c.y + m.col[3].w;
+        if (std::isfinite(den) && std::fabs(den) > 1e-6f) k = 1.0f / std::fabs(den);
+    }
+    out = {m.col[0].x * k, m.col[0].y * k, m.col[1].x * k, m.col[1].y * k, m.col[3].x * k, m.col[3].y * k, static_cast<f32>(flags)};
+    vector::encode_path(shape, out);
+    if (f.perspective) {
+        out.push_back(m.col[0].w * k);
+        out.push_back(m.col[1].w * k);
+        out.push_back(m.col[3].w * k);
+    }
     return true;
 }
 

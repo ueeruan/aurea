@@ -170,17 +170,32 @@ internal fun FxSectionHeader(
     tag: String = "effects.section.$effectId.${section.ordinal}",
     toggleEnabled: Boolean = true,
 ) {
+    val title = when (section.id) {
+        "particle_emission" -> stringResource(R.string.particle_emission)
+        "particle_life" -> stringResource(R.string.particle_life)
+        "particle_air" -> stringResource(R.string.particle_air)
+        "particle_detail" -> stringResource(R.string.particle_detail)
+        "particle_connections" -> stringResource(R.string.particle_connections)
+        "repeat_distribution" -> stringResource(R.string.repeat_distribution)
+        "repeat_variation" -> stringResource(R.string.repeat_variation)
+        "repeat_proximity" -> stringResource(R.string.repeat_proximity)
+        "repeat_stagger" -> stringResource(R.string.repeat_stagger)
+        "repeat_colors" -> stringResource(R.string.repeat_colors)
+        "repeat_data" -> stringResource(R.string.repeat_data)
+        else -> section.label
+    }
     val angle by animateFloatAsState(
         if (section.open) 90f else 0f, tween(300, easing = FxAccelDecel), label = "secao",
     )
     val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     val a11y = stringResource(
-        if (section.open) R.string.fxui_a11y_section_collapse else R.string.fxui_a11y_section_expand, section.label,
+        if (section.open) R.string.fxui_a11y_section_collapse else R.string.fxui_a11y_section_expand, title,
     )
     val count = section.params.size
     val countText = if (count == 1) stringResource(R.string.ds_1_ajuste) else stringResource(R.string.ds_adjustment_count, count)
-    Column(Modifier.fillMaxWidth().height(43.dp)) {
-        Spacer(Modifier.height(3.dp))
+    // 1.0.8: a altura da seção vem do FxParamMath (42 = 2 de respiro + faixa de 40), par do iOS.
+    Column(Modifier.fillMaxWidth().height(com.aurea.aurea.ui.ds.FxRow.Section)) {
+        Spacer(Modifier.height(com.aurea.aurea.ui.ds.FxRow.Section - 40.dp))
         Row(
             Modifier
                 .fillMaxWidth()
@@ -208,7 +223,7 @@ internal fun FxSectionHeader(
                 )
                 Spacer(Modifier.width(13.dp))
                 Text(
-                    section.label,
+                    title,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),

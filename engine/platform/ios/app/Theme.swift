@@ -570,6 +570,25 @@ enum AureaColors {
     static var fxListIcon: Color { AureaTheme.palette.fx.listIcon }
     static var fxTextSecondary: Color { AureaTheme.palette.fx.textSecondary }
     static var fxScrim: Color { AureaTheme.palette.fx.scrim }
+    // 1.0.8 visual minimalista: tons derivados do texto e do destaque (par do AureaTokens.kt).
+    /// Ícone das colunas do painel em repouso (texto a 75 %).
+    static var railIconInk: Color { text.opacity(0.75) }
+    /// Rótulo da linha de parâmetro em repouso (texto a 85 %).
+    static var fxLabelInk: Color { text.opacity(0.85) }
+    /// Realce suave do rótulo ativo (destaque a 14 %).
+    static var fxLabelLit: Color { accent.opacity(0.14) }
+    /// Fio de 1 pt (texto a 12 %): sublinhado do valor e borda das escolhas.
+    static var fxHairline: Color { text.opacity(0.12) }
+    /// Segmento escolhido (destaque a 22 %).
+    static var fxSegmentPick: Color { accent.opacity(0.22) }
+    /// Sombra do polegar do slider (preto a 25 %).
+    static let fxThumbShadow = Color.black.opacity(0.25)
+    /// Halo do polegar enquanto arrasta (destaque a 18 %).
+    static var fxThumbHalo: Color { accent.opacity(0.18) }
+    /// Contorno fino da escolha acesa (destaque a 50 %): vagas do editor de curva.
+    static var fxPickLine: Color { accent.opacity(0.5) }
+    /// Grade do gráfico de curva (branco 6 %).
+    static let curveGridLine = Color.white.opacity(0.06)
     // Omega conteúdo (área 06): papéis dos editores de conteúdo (ver `AureaContentRoles`;
     // par dos `AureaColors.Content*` do AureaTokens.kt).
     static var contentStyleBar: Color { AureaTheme.palette.content.styleBar }
@@ -1028,10 +1047,10 @@ enum AureaDims {
     static let railModeRadius: CGFloat = 8
     static let railModeStroke: CGFloat = 1.5
     static let railMoreDot: CGFloat = 6
-    /// O ponto do `⋯` aceso, medido da referência (o `padding(start: 26,
-    /// bottom: 16)` do Android sobre um alvo de 44).
-    static let railMoreDotX: CGFloat = 13
-    static let railMoreDotY: CGFloat = -9
+    /// O ponto do `⋯` aceso (o `padding(start: 22, bottom: 14)` do Android sobre
+    /// um alvo de 44; 1.0.8: acompanha o ícone de 21, antes 13 / −9).
+    static let railMoreDotX: CGFloat = 11
+    static let railMoreDotY: CGFloat = -7
     static let chromeButtonW: CGFloat = 40
     static let chromeButtonH: CGFloat = 44
     static let chromeGlyph: CGFloat = 21

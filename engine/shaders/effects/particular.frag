@@ -10,6 +10,9 @@
 //  cima aqui): estrela, coração, folha, pétala, borboleta, confete, brilho e
 //  floco de neve. A Suavidade vira o degradê da borda.
 // =============================================================================
+#include "../common/bindings.glsl"
+layout(set = 0, binding = AUREA_TEX0) uniform sampler2D u_sprite;
+
 layout(location = 0) in vec2 v_corner;
 layout(location = 1) in vec4 v_color;
 layout(location = 2) flat in float v_feather;
@@ -132,8 +135,149 @@ float shape_sd(int s, vec2 q, out vec3 tint, out float white) {
     return min(d - 0.055, r - 0.15);
 }
 
+float soft_disc(vec2 q, float radius) {
+    return 1.0 - smoothstep(0.0, radius, length(q));
+}
+
+float coverage(float distance, float feather) {
+    const float aa = max(fwidth(distance), 1e-4);
+    return 1.0 - smoothstep(-aa * 0.5 - feather, aa * 0.5, distance);
+}
+
+float triangle(vec2 q) {
+    // Inradius form of an upright equilateral triangle.
+    return max(-q.y - 0.47, 0.8660254 * abs(q.x) + 0.5 * q.y - 0.47);
+}
+
+float quad(vec2 q) { return max(abs(q.x), abs(q.y)) - 0.78; }
+
+float quad_polygon(vec2 q) {
+    return max(abs(q.y) - 0.74, abs(q.x - q.y * 0.21) - (0.70 + q.y * 0.13));
+}
+
+vec3 solid_particle(int shape, vec2 q) {
+    // Orthographic ray against the convex solid, with the same plane test for
+    // cube and tetrahedron. The depth is local to the particle.
+    const float pitch = 0.47 + v_shape.y * 0.51 + v_shape.w * 0.65;
+    const float yaw = 0.63 + v_shape.y * 0.82 + v_shape.w * 0.31;
+    const float cp = cos(pitch), sp = sin(pitch), cy = cos(yaw), sy = sin(yaw);
+    const mat3 rot = mat3(cy, sp * sy, -cp * sy, 0.0, cp, sp, sy, -sp * cy, cp * cy);
+    const vec3 rayOrigin = rot * vec3(q, -2.0);
+    const vec3 ray = rot * vec3(0, 0, 1);
+    const vec3 cube[6] = vec3[6](vec3(1,0,0), vec3(-1,0,0), vec3(0,1,0), vec3(0,-1,0), vec3(0,0,1), vec3(0,0,-1));
+    const vec3 tetra[4] = vec3[4](vec3(1,1,1), vec3(-1,-1,1), vec3(-1,1,-1), vec3(1,-1,-1));
+    float front = 0.0, back = 5.0;
+    vec3 normal = vec3(0, 0, -1);
+    for (int i = 0; i < 6; ++i) {
+        if (shape == 20 && i >= 4) break;
+        const vec3 n = shape == 20 ? normalize(tetra[min(i, 3)]) : cube[i];
+        const float plane = shape == 20 ? 0.34 : 0.52;
+        const float a = dot(n, ray), b = plane - dot(n, rayOrigin);
+        if (abs(a) < 1e-5) {
+            if (b < 0.0) return vec3(-1.0);
+        } else {
+            const float t = b / a;
+            if (a < 0.0 && t > front) { front = t; normal = n; }
+            else if (a > 0.0) back = min(back, t);
+        }
+    }
+    if (front > back) return vec3(-1.0);
+    const vec3 light = rot * normalize(vec3(-0.48, 0.65, -0.78));
+    return vec3(0.28 + 0.72 * max(dot(normal, light), 0.0));
+}
+
+vec4 extended_particle(int shape, vec2 q, float feather) {
+    const float r = length(q);
+    const float sphere = sqrt(max(0.0, 1.0 - r * r));
+    float a = 0.0;
+    vec3 ink = v_color.rgb;
+    if (shape == 9 || shape == 33) {
+        const float d = sd_segment(q, vec2(0.0, -0.89), vec2(0.0, 0.88));
+        a = coverage(d - (shape == 9 ? 0.10 : 0.19), feather * 0.17);
+        const float taper = smoothstep(-1.0, 0.49, q.y);
+        if (shape == 33) {
+            a = max(a, soft_disc(vec2(q.x * 1.8, q.y - 0.45), 0.48) * 0.45) * (0.15 + 0.85 * taper);
+            ink = mix(ink, vec3(1.0), taper * 0.45);
+        }
+    } else if (shape >= 10 && shape <= 13) {
+        const float disc = coverage(r - 0.94, feather * (shape == 10 ? 0.12 : 0.5));
+        const float shade = 0.27 + 0.73 * max(dot(vec3(q, sphere), normalize(vec3(-0.37, 0.44, 0.82))), 0.0);
+        const float glint = pow(soft_disc(q - vec2(-0.36, 0.38), 0.35), 2.0);
+        if (shape == 10) { a = disc; ink = mix(ink * shade, vec3(1.0), glint * 0.75); }
+        if (shape == 11) { a = disc * pow(sphere, 1.6); ink = mix(ink, vec3(1.0), sphere * 0.22); }
+        if (shape == 12) { a = disc * pow(sphere, 1.65); ink *= 0.23 + 0.59 * shade; }
+        if (shape == 13) {
+            const float rimDistance = (r - 0.78) * 12.0;
+            const float rim = exp(-rimDistance * rimDistance);
+            a = disc * (0.09 + 0.66 * rim + glint * 0.24);
+            ink = mix(ink, vec3(0.78, 0.94, 1.0), clamp(rim * 0.56 + glint * 0.62, 0.0, 1.0));
+        }
+    } else if (shape >= 14 && shape <= 19) {
+        const float d = (shape == 14 || shape == 16 || shape == 18) ? triangle(q) :
+                        (shape == 17 || shape == 19) ? quad_polygon(q) : quad(q);
+        a = coverage(d, feather * 0.25);
+        if (shape == 14 || shape == 15) a *= mix(0.18, 1.0, smoothstep(-0.8, 0.8, q.y));
+    } else if (shape == 20 || shape == 21) {
+        const vec3 shade = solid_particle(shape, q);
+        if (shade.x < 0.0) return vec4(0.0);
+        a = 1.0;
+        ink *= shade;
+    } else if (shape >= 22 && shape <= 26) {
+        const float disc = coverage(r - 0.94, feather * 0.17);
+        const float rim = smoothstep(0.41, 0.89, r);
+        const float reflectance = pow(rim, 2.3);
+        const float glare = pow(soft_disc(q - vec2(-0.34, 0.42), 0.46), 2.0);
+        const float light = shape == 23 ? 1.0 - sphere : sphere;
+        ink = mix(ink * (0.4 + 0.54 * light), vec3(1.0), glare * 0.8 + reflectance * 0.12);
+        a = disc;
+        if (shape == 24 || shape == 25) a *= pow(sphere, 1.4);
+        if (shape == 25) ink *= 0.37;
+        if (shape == 26) { a *= 0.13 + 0.74 * reflectance + 0.13 * glare; }
+    } else if ((shape >= 27 && shape <= 29) || shape == 34) {
+        const float d = shape == 34 ? max(abs(q.x), abs(q.y)) - 0.98 : shape == 27 ? quad(q) : r - 0.91;
+        a = coverage(d, feather * 0.2);
+        if (shape == 29) a *= pow(sphere, 1.8);
+    } else if (shape == 30) {
+        const float core = soft_disc(q, 0.52);
+        a = clamp(core + exp(-r * r * 6.9) * coverage(r - 1.0, 0.22) * 0.75, 0.0, 1.0);
+        ink = mix(ink, vec3(1.0), core * 0.82);
+    } else if (shape == 31) {
+        const float star = coverage(sd_star(q, 4.0, 0.19), feather * 0.18);
+        const float halo = exp(-r * r * 8.0) * coverage(r - 1.0, 0.18);
+        a = max(star, halo * 0.52);
+        ink = mix(ink, vec3(1.0), clamp(halo * 0.78 + star * 0.25, 0.0, 1.0));
+    } else if (shape == 32) {
+        const float shift = (v_shape.y - 0.5) * 0.35;
+        const float cloud = max(max(soft_disc(q + vec2(0.4, 0.04), 0.52),
+                                    soft_disc(q - vec2(0.05, 0.24), 0.61)),
+                                    soft_disc(q - vec2(0.46, shift - 0.14), 0.42));
+        a = 1.0 - exp(-cloud * 2.4);
+        ink *= 0.67 + cloud * 0.32;
+    }
+    const bool textured = shape == 18 || shape == 19 || (shape >= 22 && shape <= 29) || shape == 34;
+    if (textured && v_shape.z > 0.5) {
+        vec2 uv = vec2(q.x, -q.y) * 0.5 + 0.5;
+        if (shape >= 22 && shape <= 26) {
+            const float bend = shape == 23 ? 0.43 : -0.5;
+            uv = 0.5 + (uv - 0.5) * (1.0 + bend * sphere);
+        }
+        const vec4 texel = texture(u_sprite, uv); // layer images are linear and premultiplied
+        const vec3 rgb = texel.a > 1e-5 ? texel.rgb / texel.a : vec3(0.0);
+        ink *= rgb;
+        a *= texel.a;
+    }
+    a = clamp(a, 0.0, 1.0) * v_color.a;
+    return vec4(ink * a, a);
+}
+
 void main() {
     const int s = int(v_shape.x + 0.5);
+    if (s >= 9) {
+        o_color = extended_particle(s, vec2(v_corner.x, -v_corner.y), v_feather);
+        if (o_color.a <= 0.001) discard;
+        o_scene = vec4(0.0, 0.0, 0.0, o_color.a);
+        return;
+    }
     if (s <= 0) {
         const float d = length(v_corner);
         const float core = clamp(1.0 - v_feather, 0.0, 0.95);

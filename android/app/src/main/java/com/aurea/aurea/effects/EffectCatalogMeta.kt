@@ -93,6 +93,11 @@ private val SoundTargets = listOf(EffectTarget.Audio, EffectTarget.Video, Effect
 
 private val Table: Map<Int, EffectMeta> = buildMap {
     fun put(key: String, meta: EffectMeta) = put(effectTypeId(key), meta)
+    val visual = AllTargets.filter { it != EffectTarget.Audio }
+    put("aurea.3d.replicator", EffectMeta(R.string.fx_model_repeat_desc, listOf(EffectTarget.Cena3D)))
+    put("aurea.3d.toon", EffectMeta(R.string.fx_model_toon_desc, listOf(EffectTarget.Cena3D)))
+    put("aurea.repeat.arrange", EffectMeta(R.string.fx_copy_arrange_desc, visual))
+    put("aurea.transition.ink_bloom", EffectMeta(R.string.fx_ink_bloom_desc, visual))
     put("aurea.transition.radial_wipe_reference", EffectMeta(R.string.fx_ref_radial_wipe_desc,
         listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor,
             EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Ajuste)))

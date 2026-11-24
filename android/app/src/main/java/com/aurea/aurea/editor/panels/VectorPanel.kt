@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
+import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -165,6 +166,7 @@ internal fun VectorPanel(env: PanelEnv, face: VectorFace = VectorFace.Paths, hos
             }
             if (face == VectorFace.Paths && tab == VT_OPERATORS) {
                 com.aurea.aurea.editor.DrawingProgressAction(env)
+                VectorOrder(store)
             }
             val s = Sel(sel) { sel = it }
             when (face) {
@@ -175,6 +177,86 @@ internal fun VectorPanel(env: PanelEnv, face: VectorFace = VectorFace.Paths, hos
                     VT_OPERATORS -> OperatorsTab(env, g, s)
                     VT_GROUP -> TransformTab(env, g, s)
                     else -> ShapeTab(env, s)
+                }
+            }
+        }
+    }
+}
+
+private data class VectorOrderRow(val group: List<Int>, val kind: Int, val ordinal: Int,
+                                 val position: Int, val name: String?)
+
+private fun vectorOrderRows(data: FloatArray, names: List<String>): List<VectorOrderRow> {
+    if (data.size < 2 || data[0] != 1f) return emptyList()
+    val rows = mutableListOf<VectorOrderRow>()
+    val ancestors = mutableListOf<Int>()
+    var offset = 2
+    var nameIndex = 0
+    repeat(data[1].toInt().coerceIn(0, (data.size - 2) / 6)) {
+        if (offset + 6 > data.size) return emptyList()
+        val depth = data[offset].toInt()
+        val kind = data[offset + 1].toInt()
+        val ordinal = data[offset + 2].toInt()
+        val position = data[offset + 3].toInt()
+        val fields = data[offset + 5].toInt()
+        if (depth !in 0..ancestors.size || fields !in 0..(data.size - offset - 6)) return emptyList()
+        while (ancestors.size > depth) ancestors.removeAt(ancestors.lastIndex)
+        rows += VectorOrderRow(ancestors.toList(), kind, ordinal, position,
+            if (kind == 7) names.getOrNull(nameIndex++) else null)
+        if (kind == 7) ancestors += ordinal
+        offset += 6 + fields
+    }
+    return rows
+}
+
+@Composable
+private fun VectorOrder(store: EditorStore) {
+    var expanded by remember(store.primary) { mutableStateOf(false) }
+    var closedGroups by remember(store.primary) { mutableStateOf(setOf<List<Int>>()) }
+    var moveFailed by remember(store.primary) { mutableStateOf(false) }
+    ActionCard(stringResource(R.string.motion_vector_order),
+        stringResource(if (expanded) R.string.panel_fechar else R.string.motion_vector_order_hint)) {
+        expanded = !expanded
+    }
+    if (!expanded) return
+    val rows = remember(store.primary, store.sceneSettingsRevision, store.vectorTreeRevision) {
+        store.vectorTreeRows()?.let { vectorOrderRows(it.first, it.second) }.orEmpty()
+    }
+    val siblings = remember(rows) { rows.groupBy { it.group } }
+    val kinds = listOf(R.string.panel_caminho, R.string.panel_preenchimento_6e8f, R.string.panel_traco,
+        R.string.motion_vector_trim, R.string.motion_vector_repeat, R.string.panel_juntar_caminhos_grupo,
+        R.string.edt_vec_operators, R.string.editor_grupo)
+    if (moveFailed) KitHint(stringResource(R.string.motion_vector_move_unavailable))
+    for (row in rows) {
+        if (closedGroups.any { row.group.take(it.size) == it }) continue
+        val label = row.name?.takeIf { it.isNotBlank() }
+            ?: "${stringResource(kinds.getOrElse(row.kind) { R.string.edt_vec_operators })} ${row.ordinal + 1}"
+        val own = row.group + row.ordinal
+        val adjacent = siblings[row.group].orEmpty()
+        val index = adjacent.indexOf(row)
+        Row(Modifier.fillMaxWidth().padding(start = (row.group.size.coerceAtMost(5) * 12).dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            if (row.kind == 7) {
+                Box(Modifier.weight(1f)) {
+                    KitChip(label, own !in closedGroups) {
+                        closedGroups = if (own in closedGroups) closedGroups - setOf(own) else closedGroups + setOf(own)
+                    }
+                }
+            } else {
+                Text(label, Modifier.weight(1f), style = AureaType.Base)
+            }
+            if (row.group.isNotEmpty()) {
+                for ((direction, action) in listOf(-1 to R.string.motion_move_up, 1 to R.string.motion_move_down)) {
+                    val target = adjacent.getOrNull(index + direction)
+                    val description = stringResource(action, label)
+                    IconButton(
+                        enabled = target != null,
+                        onClick = {
+                            if (target != null) moveFailed = !store.editVectorTree(
+                                row.group.toIntArray(), 2, row.position, target.position, 1)
+                        },
+                        modifier = Modifier.semantics { contentDescription = description },
+                    ) { Text(if (direction < 0) "↑" else "↓", style = AureaType.Base) }
                 }
             }
         }

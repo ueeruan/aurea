@@ -139,8 +139,51 @@ public:
     }
 };
 
+class InkBloom final : public Effect {
+    enum : u32 { Progress, Mode, Center, Drops, Fibers, Softness, Seed, Ink };
+public:
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{"aurea.transition.ink_bloom", "Nanquim expansivo", "Transição", EffectClass::Neighborhood};
+        return i;
+    }
+
+    void declare_parameters(ParameterRegistry& p) const override {
+        static const char* const modes[]{"Mancha", "Revelar camada", "Apagar camada"};
+        p.add_float("progress", "Expansão", 48, 0, 100, kAnimPct, "%");
+        p.add_enum("mode", "Modo", modes, 3, 0);
+        p.add_point2("center", "Centro", {0.5f, 0.5f}, 0, 1, kAnimRel);
+        p.add_int("drops", "Gotas", 1, 1, 6);
+        p.add_float("fibers", "Fibras", 75, 0, 100, kAnimPct, "%");
+        p.add_float("softness", "Suavidade", 1.5f, 0, 30, kAnimPx, "px");
+        p.add_int("seed", "Semente", 1, 0, 1000);
+        p.add_color("ink", "Cor do nanquim", {0.015f, 0.012f, 0.018f, 1});
+    }
+
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_luma_dissolve_frag, work));
+    }
+
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& in, f32, LayerImage& out) const override {
+        const Vec2 center = layer_point(e, in, Center);
+        const Rect box = in.region;
+        f32 radius = 1.0f;
+        for (f32 x : {box.x, box.x + box.w})
+            for (f32 y : {box.y, box.y + box.h}) radius = std::max(radius, std::hypot(x - center.x, y - center.y));
+        Uniforms u{};
+        u.p0 = {e.f(Progress) * 0.01f, e.f(Softness), static_cast<f32>(e.e(Mode)), 22.0f};
+        u.p1 = {static_cast<f32>(std::clamp(e.value(Drops).as_int(), 1, 6)), 0, e.f(Seed), 0};
+        u.p2 = {center.x, center.y, radius, e.f(Fibers) * 0.01f};
+        u.color = premultiplied_linear(e.color(Ink));
+        return run_pass(ctx, e, ShaderId::effects_luma_dissolve_frag, in, in.region, u, "ink-bloom", out,
+                        CommonSampler::LinearBorder, &in);
+    }
+};
+
 } // namespace
 
-void register_luma_dissolve_effect(EffectRegistry& r) { (void)r.add(std::make_unique<LumaDissolve>()); }
+void register_luma_dissolve_effect(EffectRegistry& r) {
+    (void)r.add(std::make_unique<LumaDissolve>());
+    (void)r.add(std::make_unique<InkBloom>());
+}
 
 } // namespace aurea::builtin

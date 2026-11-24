@@ -884,6 +884,9 @@ mesma ordem de fallback da seção 3. Os limites de tamanho contam **caracteres*
   topo do editor) e em Plugins > "Abrir". `home.tab` — vira uma **aba da Home**: com
   uma aba de plugin, o dock mostra o nome e o ícone dela; com várias, uma aba
   "Plugins" com um seletor no topo.
+- **`scene.panel`** (Aurea 1.0.8.1, formato 3) coloca o painel em **Cena 3D → Complementos**.
+  Ele usa os mesmos controles e o mesmo AureaScript. Um painel com esta
+  localização abre sobre a cena e pode usar a composição e as camadas selecionadas.
 - **`icon`**: um destes nomes (as duas plataformas usam os ícones do AUREA):
   `wand sparkles text star bolt cloud music photo film layers gear brush clock list
   cube lightbulb wrench book flag grid camera chart sliders eye folder link speed
@@ -919,9 +922,11 @@ passo de desfazer** (veja `app.beginUndoGroup`).
 | `editor.menu` | no menu de plugins do topo do editor |
 | `layer.menu` | no ⋮ da camada (seção do plugin no fim) |
 | `layer.toolbar` | botão na barra da camada escolhida (`icon` obrigatório) |
+| `scene.menu` | em Cena 3D → Complementos (formato 3) |
 
-Cada ação tem **`call`** (função do script) **ou** **`panel`** (abre esse painel,
-que precisa ter `editor.panel`). `needsLayer` (padrão `true` nas ações da camada).
+Cada ação tem **`call`** (função do script) **ou** **`panel`** (abre esse painel).
+Uma ação `scene.menu` abre um painel com `scene.panel`. Nos demais locais use
+`editor.panel` ou `editor.fullscreen`. `needsLayer` é `true` por padrão nas ações da camada.
 
 ### 14.4 Scripts: a linguagem AureaScript
 

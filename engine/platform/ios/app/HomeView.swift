@@ -426,15 +426,17 @@ struct HomeView: View {
                 }
             }
             .animation(.easeInOut(duration: 0.3), value: selecting)
-            // A faixa do Mural fica à vista em toda aba: a Home reabre na última usada.
-            if !pluginTab && tab != .mural && tab != .models && !selecting { MuralBanner { select(.mural) } }
             ZStack {
                 if pluginTab && pluginRuntime.homeTabLabel != nil {
                     PluginHomeTab()   // 0.3.4 plugins
                 } else {
                 switch tab {
                 case .mural: MuralView(onBack: { select(.start) })
-                case .start: HomeNewsFeed(notices: notices, onReleaseNotes: { showReleaseNotes = true })
+                case .start:
+                    HomeWorkspace(notices: notices, recent: Array(library.all.prefix(3)), loaded: library.loaded,
+                                  onCreate: { showNewProject = true }, onProjects: { select(.projects) },
+                                  onOpen: openProject, onMural: { select(.mural) },
+                                  onReleaseNotes: { showReleaseNotes = true })
                 case .community: CommunityView(profileMode: false)
                 case .profile: CommunityView(profileMode: true)
                 case .presets: OmegaPresetsTab(onQuickMenu: { quick = $0 })
@@ -500,7 +502,8 @@ struct HomeView: View {
                 .accessibilityLabel(AureaText.t("editor_fechar"))
                 .accessibilityAddTraits(.isButton)
         }
-        HomeSettingsDrawer(model: model, defaults: defaults,
+        if progress > 0 {
+            HomeSettingsDrawer(model: model, defaults: defaults,
                            onImportMedia: { closeDrawer(); importing = true },
                            onImportProject: { closeDrawer(); pickProjectFile() },
                            onSaveBackup: {
@@ -524,6 +527,8 @@ struct HomeView: View {
             .accessibilityElement(children: .contain)
             .accessibilityLabel(AureaText.t("home_title_settings"))
             .accessibilityIdentifier("home.drawer")
+            .transition(.offset(x: -width * rtlSign))
+        }
     }
 
     private var openDrag: some Gesture {
@@ -700,41 +705,32 @@ struct OmegaHomeTopBar: View {
     @State private var importMenu = false
 
     var body: some View {
-        ZStack {
-            HStack(spacing: 0) {
-                Button(action: onMenu) {
-                    CupertinoGlyph.text(CupertinoGlyph.LineHorizontal3, size: 24, color: AureaColors.lightText)
-                        .frame(width: 50, height: 50).contentShape(Rectangle())
-                }.buttonStyle(AureaPressStyle())
-                    .accessibilityLabel(AureaText.t("home_tab_settings"))
-                    .accessibilityIdentifier("home.menu")
-                Spacer(minLength: 0)
-                Button(action: onAccount) { avatar.frame(width: 44, height: 44).contentShape(Rectangle()) }
-                    .buttonStyle(AureaPressStyle())
-                    .accessibilityLabel(signedInEmail.map { AureaText.t("om_home_account") + " · " + $0 } ?? AureaText.t("om_home_account"))
-                    .accessibilityIdentifier("home.account")
-                    .aureaAnchoredMenu(isPresented: $accountMenu, alignEnd: true, tag: "home.account.menu", entries: accountEntries)
-            }
-            .padding(.leading, 4).padding(.trailing, 6)
-            Button { importMenu = true } label: {
-                HStack(spacing: 7) {
-                    CupertinoGlyph.text(CupertinoGlyph.ArrowDownToLine, size: 16, color: AureaColors.lightOnInk)
-                        .accessibilityHidden(true)
-                    Text(AureaText.t("home_project_import"))
-                        .font(.aurea(size: 14, weight: .semibold))
-                        .foregroundStyle(AureaColors.lightOnInk)
-                        .lineLimit(1)
-                    CupertinoGlyph.text(CupertinoGlyph.ChevronDown, size: 10, color: AureaColors.lightOnInk)
-                        .accessibilityHidden(true)
-                }
-                .padding(.horizontal, 11).padding(.vertical, 8)
-                .background(AureaColors.lightInk, in: RoundedRectangle(cornerRadius: 12))
-                .frame(minHeight: 48)
-                .contentShape(Rectangle())
+        HStack(spacing: 0) {
+            Button(action: onMenu) {
+                CupertinoGlyph.text(CupertinoGlyph.LineHorizontal3, size: 21, color: AureaColors.lightText)
+                    .frame(width: 48, height: 48).contentShape(Rectangle())
             }
             .buttonStyle(AureaPressStyle())
+            .accessibilityLabel(AureaText.t("home_tab_settings"))
+            .accessibilityIdentifier("home.menu")
+            Text(verbatim: "Aurea").font(.aurea(size: 23, weight: .bold))
+                .foregroundStyle(AureaColors.lightText).lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button { importMenu = true } label: {
+                HStack(spacing: 6) {
+                    CupertinoGlyph.text(CupertinoGlyph.ArrowDownToLine, size: 16, color: AureaColors.lightAccentInk)
+                        .accessibilityHidden(true)
+                    Text(AureaText.t("home_project_import"))
+                        .font(.aurea(size: 13, weight: .semibold)).foregroundStyle(AureaColors.lightText)
+                        .lineLimit(1).frame(maxWidth: 93)
+                }
+                .padding(.horizontal, 10).frame(minHeight: 44)
+                .background(AureaColors.lightSurface, in: RoundedRectangle(cornerRadius: 11))
+            }
+            .buttonStyle(AureaPressStyle())
+            .accessibilityLabel(AureaText.t("home_project_import"))
             .accessibilityIdentifier("home.import")
-            .aureaAnchoredMenu(isPresented: $importMenu, width: 276, tag: "home.import.menu") {
+            .aureaAnchoredMenu(isPresented: $importMenu, width: 276, alignEnd: true, tag: "home.import.menu") {
                 [
                     .item(AureaText.t("home_project_import_aurea"), glyph: CupertinoGlyph.DocText,
                           tag: "home.import.aurea", onClick: onImportAurea),
@@ -742,8 +738,13 @@ struct OmegaHomeTopBar: View {
                           tag: "home.import.aep", onClick: onImportAe),
                 ]
             }
-            .padding(.horizontal, 56)
+            Button(action: onAccount) { avatar.frame(width: 44, height: 44).contentShape(Rectangle()) }
+                .buttonStyle(AureaPressStyle()).padding(.leading, 4)
+                .accessibilityLabel(signedInEmail.map { AureaText.t("om_home_account") + " · " + $0 } ?? AureaText.t("om_home_account"))
+                .accessibilityIdentifier("home.account")
+                .aureaAnchoredMenu(isPresented: $accountMenu, alignEnd: true, tag: "home.account.menu", entries: accountEntries)
         }
+        .padding(.trailing, 10)
         .frame(height: OmegaHomeDims.topBar)
         .frame(maxWidth: .infinity)
         .background(AureaColors.lightBackground)
@@ -763,23 +764,21 @@ struct OmegaHomeTopBar: View {
     }
 }
 
-/// O Início: "Novidades e notícias". Em cima os avisos do servidor (o mesmo /aviso das
-/// faixas), embaixo o que mudou nesta versão. Par do `HomeNewsFeed.kt`.
-struct HomeNewsFeed: View {
+private struct HomeWorkspace: View {
     @ObservedObject var notices: LiveNotices
+    let recent: [HomeProjectEntry]
+    let loaded: Bool
+    let onCreate: () -> Void
+    let onProjects: () -> Void
+    let onOpen: (HomeProjectEntry) -> Void
+    let onMural: () -> Void
     let onReleaseNotes: () -> Void
     @Environment(\.openURL) private var openURL
-    private var notes: (header: String, items: [String]) {
-        let lines = AureaText.t("release_notes_body").split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        let items = lines.dropFirst().map { $0.hasPrefix("•") ? String($0.dropFirst()).trimmingCharacters(in: .whitespaces) : $0 }
-        return (lines.first ?? "", Array(items))
-    }
+
     var body: some View {
-        let version = notes
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 12) {
-                Text(AureaText.t("home_news_title")).font(OmegaHomeType.listTitle).foregroundStyle(AureaColors.lightText)
-                    .accessibilityAddTraits(.isHeader).padding(.top, 4).padding(.bottom, 2)
+            LazyVStack(alignment: .leading, spacing: 8) {
+                action("home_new_project", CupertinoGlyph.Plus, tag: "home.workspace.create", primary: true, run: onCreate)
                 ForEach(notices.visible) { notice in
                     card(stripe: notice.level == "problema" ? Color(hex: 0xE5484D) : notice.level == "atencao" ? Color(hex: 0xF5A524) : AureaColors.accent) {
                         Text(notice.text).font(.aurea(size: 15)).foregroundStyle(AureaColors.lightText).fixedSize(horizontal: false, vertical: true)
@@ -794,34 +793,73 @@ struct HomeNewsFeed: View {
                     }
                     .accessibilityIdentifier("home.news.notice")
                 }
-                Button(action: onReleaseNotes) {
-                    card(stripe: AureaColors.accent) {
-                        HStack(spacing: 8) {
-                            CupertinoGlyph.text(CupertinoGlyph.Sparkles, size: 18, color: AureaColors.lightAccentInk)
-                            Text(AureaText.t("home_news_version")).font(.aurea(size: 16, weight: .bold)).foregroundStyle(AureaColors.lightText)
-                            Spacer(minLength: 0)
-                            CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 14, color: AureaColors.lightTextMuted)
+                HStack(spacing: 8) {
+                    Text(AureaText.t("om_home_my_projects")).font(.aurea(size: 20, weight: .bold))
+                        .foregroundStyle(AureaColors.lightText).accessibilityAddTraits(.isHeader)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button(action: onProjects) {
+                        HStack(spacing: 6) {
+                            Text(AureaText.t("om_add_view_all")).font(.aurea(size: 13, weight: .semibold))
+                            CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 12, color: AureaColors.lightAccentInk)
+                                .mirrorsInRtl().accessibilityHidden(true)
+                        }.foregroundStyle(AureaColors.lightAccentInk).frame(minHeight: 48).contentShape(Rectangle())
+                    }.buttonStyle(.plain).accessibilityIdentifier("home.workspace.projects")
+                }.padding(.top, 12)
+                ForEach(recent) { entry in
+                    Button { onOpen(entry) } label: {
+                        HStack(spacing: 12) {
+                            HomeThumbnail(url: entry.thumbnailURL, stamp: entry.modified, maxPx: 256,
+                                          ratio: entry.height > 0 ? CGFloat(entry.width) / CGFloat(entry.height) : 1)
+                                .frame(width: 60, height: 44).clipShape(RoundedRectangle(cornerRadius: 8))
+                                .accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(entry.title).font(.aurea(size: 15, weight: .semibold))
+                                    .foregroundStyle(AureaColors.lightText).lineLimit(1)
+                                if entry.width > 0 && entry.height > 0 {
+                                    Text(verbatim: "\(entry.width) × \(entry.height)")
+                                        .font(.aurea(size: 12)).foregroundStyle(AureaColors.lightTextMuted)
+                                }
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                            CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 13, color: AureaColors.lightTextMuted)
+                                .mirrorsInRtl().accessibilityHidden(true)
                         }
-                        if !version.header.isEmpty {
-                            Text(version.header).font(.aurea(size: 13)).foregroundStyle(AureaColors.lightTextMuted).padding(.top, 4)
-                        }
-                        // As três primeiras; o resto na tela cheia das Novidades.
-                        ForEach(Array(version.items.prefix(3).enumerated()), id: \.offset) { _, note in
-                            HStack(alignment: .top, spacing: 8) {
-                                Text("•").font(.aurea(size: 15)).foregroundStyle(AureaColors.lightAccentInk)
-                                Text(note).font(.aurea(size: 14)).foregroundStyle(AureaColors.lightText).multilineTextAlignment(.leading)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }.padding(.top, 8)
-                        }
-                    }
+                        .padding(.horizontal, 10).padding(.vertical, 8).frame(minHeight: 66)
+                        .background(AureaColors.lightSurface, in: RoundedRectangle(cornerRadius: 14))
+                        .contentShape(Rectangle())
+                    }.buttonStyle(AureaPressStyle()).accessibilityIdentifier("home.workspace.project")
                 }
-                .buttonStyle(AureaPressStyle(shrink: 1))
-                .accessibilityIdentifier("home.releaseNotes")
+                if loaded && recent.isEmpty {
+                    Text(AureaText.t("om_home_empty_body", AureaText.t("home_new_project")))
+                        .font(.aurea(size: 14)).foregroundStyle(AureaColors.lightTextMuted)
+                        .padding(.horizontal, 4).padding(.vertical, 8)
+                }
+                action("mural_title", CupertinoGlyph.RectangleStack, tag: "home.mural", run: onMural)
+                action("home_news_version", CupertinoGlyph.Sparkles, tag: "home.releaseNotes", run: onReleaseNotes)
             }
-            .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 24)
+            .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 24)
         }
         .accessibilityIdentifier("home.news")
     }
+
+    private func action(_ key: String, _ glyph: Character, tag: String, primary: Bool = false, run: @escaping () -> Void) -> some View {
+        let ink = primary ? AureaColors.onAccent : AureaColors.lightText
+        return Button(action: run) {
+            HStack(spacing: 12) {
+                CupertinoGlyph.text(glyph, size: 20, color: primary ? ink : AureaColors.lightAccentInk)
+                    .accessibilityHidden(true)
+                Text(AureaText.t(key)).font(.aurea(size: primary ? 17 : 14, weight: .semibold))
+                    .foregroundStyle(ink).frame(maxWidth: .infinity, alignment: .leading)
+                CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 13, color: ink)
+                    .mirrorsInRtl().accessibilityHidden(true)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 8).frame(minHeight: primary ? 60 : 52)
+            .background(primary ? AureaColors.accent : AureaColors.lightSurface, in: RoundedRectangle(cornerRadius: 14))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(AureaPressStyle())
+        .accessibilityIdentifier(tag)
+    }
+
     private func card<Content: View>(stripe: Color, @ViewBuilder _ content: () -> Content) -> some View {
         HStack(spacing: 0) {
             stripe.frame(width: 4)
@@ -879,8 +917,8 @@ struct OmegaHomeDock: View {
             tab(.community, CupertinoGlyph.Person3, CupertinoGlyph.Person3Fill, "social_community", "home.community")
             Button(action: onCreate) {
                 CupertinoGlyph.text(CupertinoGlyph.Plus, size: 30, color: AureaColors.onAccent)
-                    .frame(width: 56, height: 56).background(AureaColors.accent, in: Circle())
-                    .contentShape(Circle())
+                    .frame(width: 48, height: 48).background(AureaColors.accent, in: RoundedRectangle(cornerRadius: 15))
+                    .contentShape(Rectangle())
             }.buttonStyle(AureaPressStyle()).padding(.horizontal, 4)
                 .accessibilityLabel(AureaText.t("home_new_project"))
                 .accessibilityIdentifier("home.create")
@@ -903,18 +941,18 @@ struct OmegaHomeDock: View {
                 .accessibilityIdentifier("home.pluginsTab")
             }
         }
-        .padding(.horizontal, 8).padding(.vertical, 12)
+        .padding(.horizontal, 8).padding(.vertical, 8)
         .frame(height: OmegaHomeDims.dock)
         .frame(maxWidth: .infinity)
         .background(AureaColors.lightSurface.ignoresSafeArea(edges: .bottom))
-        .shadow(color: AureaColors.lightShadow, radius: 15, x: 0, y: -2)
+        .overlay(alignment: .top) { AureaColors.lightDivider.frame(height: 1) }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("home.dock")
     }
 
     private var logoTab: some View {
         let on = selected == .start
-        let ink = on ? AureaColors.lightText : AureaColors.lightTextMuted
+        let ink = on ? AureaColors.lightAccentInk : AureaColors.lightTextMuted
         return Button { onSelect(.start) } label: {
             VStack(spacing: 2) {
                 HomeBrandLogo().frame(width: 24, height: 24).clipShape(RoundedRectangle(cornerRadius: 5)).opacity(on ? 1 : 0.55)
@@ -922,7 +960,8 @@ struct OmegaHomeDock: View {
                     .lineLimit(1).truncationMode(.tail)
             }
             .frame(maxWidth: 158, minHeight: 48).contentShape(Rectangle())
-            .animation(.easeInOut(duration: 0.3), value: on)
+            .frame(maxWidth: .infinity)
+            .background(on ? AureaColors.accentDim : .clear, in: RoundedRectangle(cornerRadius: 12))
         }.buttonStyle(.plain).frame(maxWidth: .infinity)
             .accessibilityLabel(AureaText.t("home_tab_start"))
             .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
@@ -931,7 +970,7 @@ struct OmegaHomeDock: View {
 
     private func tab(_ kind: HomeTabKind, _ glyph: Character, _ glyphOn: Character, _ label: String, _ tag: String) -> some View {
         let on = selected == kind
-        let ink = on ? AureaColors.lightText : AureaColors.lightTextMuted
+        let ink = on ? AureaColors.lightAccentInk : AureaColors.lightTextMuted
         return Button { onSelect(kind) } label: {
             VStack(spacing: 2) {
                 CupertinoGlyph.text(on ? glyphOn : glyph, size: 24, color: ink)
@@ -939,7 +978,8 @@ struct OmegaHomeDock: View {
                     .lineLimit(1).truncationMode(.tail)
             }
             .frame(maxWidth: 158, minHeight: 48).contentShape(Rectangle())
-            .animation(.easeInOut(duration: 0.3), value: on)
+            .frame(maxWidth: .infinity)
+            .background(on ? AureaColors.accentDim : .clear, in: RoundedRectangle(cornerRadius: 12))
         }.buttonStyle(.plain).frame(maxWidth: .infinity)
             .accessibilityLabel(AureaText.t(label))
             .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
@@ -2009,7 +2049,7 @@ struct HomeSettingsDrawer: View {
     /// "Otimizar vídeos pesados" (0.2.5): modo e mídia otimizada (ProxyOptimizer.swift).
     @ObservedObject private var proxies = ProxyOptimizer.shared
 
-    private var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?" }
+    private var version: String { AppConfigStore.displayVersion }
     private var build: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?" }
 
     var body: some View {
@@ -2366,7 +2406,7 @@ struct HomeAboutView: View {
 
     private var rows: [(String, String)] {
         let info = Bundle.main
-        let version = info.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        let version = AppConfigStore.displayVersion
         let build = info.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
         var system = utsname(); uname(&system)
         let machine = withUnsafePointer(to: &system.machine) { $0.withMemoryRebound(to: CChar.self, capacity: 1) { String(cString: $0) } }
@@ -2454,7 +2494,7 @@ struct OmegaReleaseNotes: View {
     let onClose: () -> Void
     @State private var page = 0
     private var parts: (header: String, pages: [[String]]) {
-        let lines = AureaText.t("release_notes_body").split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let lines = AureaText.t("motion_release_body").split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         let header = lines.first ?? ""
         let items = lines.dropFirst().map { $0.hasPrefix("•") ? String($0.dropFirst()).trimmingCharacters(in: .whitespaces) : $0 }
         var pages: [[String]] = []

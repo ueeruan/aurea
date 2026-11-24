@@ -44,15 +44,18 @@ class EffectsListOmegaDeviceTest {
 
     private fun exists(tag: String) = compose.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty()
 
-    @Test fun emptyLayerFirstEffectOpensSecondDoesNotAndHeaderCloses() {
+    @Test fun firstEffectKeepsStackAndSettingsOpenOnlyOnRequest() {
         open()
         // Camada vazia: só a linha "+ Adicionar efeito"; nada abre sozinho.
         compose.onNodeWithTag("effects.add.row").assertExists()
         compose.onNodeWithTag("aurea.effects.add").assertExists()
         compose.onNodeWithTag("effects.close").assertDoesNotExist()
-        // 1º efeito: os controles abrem sozinhos (referência: autoSelectEffect).
         compose.runOnIdle { store.addEffect(blur) }
-        compose.waitUntil(10000) { exists("effects.settings.${effectCardId(blur)}") }
+        val row = "effects.expand.${effectCardId(blur)}"
+        compose.waitUntil(10000) { exists(row) }
+        compose.onNodeWithTag("effects.settings.header").assertDoesNotExist()
+        compose.onNodeWithTag(row).performClick()
+        compose.waitUntil(5000) { exists("effects.settings.${effectCardId(blur)}") }
         // Fechar pelo cabeçalho: volta à lista.
         compose.onNodeWithTag("effects.settings.header").performClick()
         compose.waitUntil(5000) { !exists("effects.settings.header") }

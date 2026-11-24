@@ -436,8 +436,13 @@ private struct MotionTrackingSection: View {
                 button(AureaText.t("common_cancel")) { model.engine.cancelMotionTrack() }
             }
             if let message = model.motionStatus["message"] as? String, !message.isEmpty { Text(AureaEngineText.sentence(message)).foregroundStyle(AureaColors.muted) }
+            if n("state") == 5 {
+                Text(AureaText.t("motion_repair_ready"))
+                button(AureaText.t("common_apply")) { model.finishMotionRepair(true) }
+                button(AureaText.t("common_cancel")) { model.finishMotionRepair(false) }
+            }
             if n("state") == 2 && model.landmarkProgress == nil {
-                if let source = model.primarySelection { MotionTrackReview(source: source, revision: n("confidence")) }
+                if let source = model.primarySelection { MotionTrackReview(source: source, revision: n("confidence"), planar: (2...3).contains(n("tool"))) }
                 if n("tool") != 4 { Toggle(AureaText.t("trk_show_trails"), isOn: $model.motionTrailVisible) }
                 Text(AureaText.t("trk_stats", Int(n("validFrames")), Int(n("frames")), Int(n("confidence") * 100), String(format: "%.2f", n("error"))))
                 // Quadros perdidos não escondem mais as ações: ficam sem key (interpolados).
@@ -485,10 +490,12 @@ private struct MotionTrackingSection: View {
     @EnvironmentObject private var model: AureaModel
     let source: Int64
     let revision: Double
+    let planar: Bool
     @State private var bins: [Float] = []
     @State private var export: MotionCsvDocument?
     @State private var saving = false
     @State private var exporting = false
+    @State private var repairFirst: Int64?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -539,9 +546,24 @@ private struct MotionTrackingSection: View {
                         saving = true
                     }
                 }.disabled(exporting).frame(minHeight: 44)
+                if planar && model.pointPick == nil {
+                    if let start = repairFirst {
+                        Text(AureaText.t("motion_repair_end")).foregroundStyle(AureaColors.muted)
+                        Button(AureaText.t("motion_repair_corners")) {
+                            model.beginMotionRepair(first: start, last: playhead)
+                            repairFirst = nil
+                        }.disabled(playhead <= start || playhead > last).frame(minHeight: 44)
+                        Button(AureaText.t("common_cancel")) { repairFirst = nil }.frame(minHeight: 44)
+                    } else {
+                        Button(AureaText.t("motion_repair_range")) { repairFirst = playhead }
+                            .disabled(playhead < first || playhead >= last).frame(minHeight: 44)
+                            .accessibilityIdentifier("tracking.repair.start")
+                    }
+                }
             }
         }
-        .task(id: "\(source):\(revision)") { bins = model.engine.motionTrackReview(source).map(\.floatValue) }
+        .task(id: "\(source):\(revision):\(model.status.modelRevision)") { bins = model.engine.motionTrackReview(source).map(\.floatValue) }
+        .onChange(of: source) { _ in repairFirst = nil }
         .fileExporter(isPresented: $saving, document: export, contentType: .commaSeparatedText, defaultFilename: "aurea-motion") { result in
             if case .failure = result { model.toast = AureaText.t("trk_csv_failed") }
         }

@@ -1,0 +1,41 @@
+{
+  "aureaPlugin": 3,
+  "id": "com.aurea.examples.scenelayout",
+  "version": "1.0.0",
+  "author": "Aurea",
+  "kind": "panel",
+  "name": {"pt-BR": "Órbita de modelos", "en": "Model Orbit"},
+  "description": {
+    "pt-BR": "Organiza cópias do modelo selecionado em um anel na Cena 3D.",
+    "en": "Arrange copies of the selected model in a ring in the 3D Scene."
+  },
+  "script": "orbit.js",
+  "strings": {
+    "pt-BR": {"select": "Selecione um modelo 3D destravado.", "failed": "Não foi possível adicionar o Repetidor 3D."},
+    "en": {"select": "Select an unlocked 3D model.", "failed": "Could not add the 3D Repeater."}
+  },
+  "ui": {
+    "panels": [{
+      "id": "orbit",
+      "title": {"pt-BR": "Órbita de modelos", "en": "Model Orbit"},
+      "icon": "cube",
+      "placement": ["scene.panel"],
+      "controls": [
+        {"id": "copies", "type": "slider", "label": {"pt-BR": "Cópias", "en": "Copies"},
+         "min": 2, "max": 32, "step": 1, "default": 8},
+        {"id": "radius", "type": "ruler", "label": {"pt-BR": "Raio", "en": "Radius"},
+         "min": 50, "max": 3000, "step": 5, "default": 200, "unit": "px"},
+        {"id": "apply", "type": "button", "label": {"pt-BR": "Aplicar órbita", "en": "Apply orbit"},
+         "onClick": "applyOrbit"}
+      ]
+    }],
+    "actions": [{
+      "id": "openOrbit",
+      "title": {"pt-BR": "Órbita de modelos", "en": "Model Orbit"},
+      "icon": "cube",
+      "placement": "scene.menu",
+      "needsLayer": true,
+      "panel": "orbit"
+    }]
+  }
+}

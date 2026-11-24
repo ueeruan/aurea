@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="motion_vector_order">चित्र का क्रम</string>
+    <string name="motion_vector_order_hint">पथ, स्ट्रोक और ऑपरेटर व्यवस्थित करें।</string>
+    <string name="motion_vector_trim">ट्रिम</string>
+    <string name="motion_vector_repeat">दोहराव</string>
+    <string name="motion_move_up">%1$s ऊपर ले जाएँ</string>
+    <string name="motion_move_down">%1$s नीचे ले जाएँ</string>
+    <string name="motion_vector_move_unavailable">लेयर लॉक है या इस बदलाव से ऐनिमेशन बदल जाएगा।</string>
+    <string name="motion_precomp_controls">प्रीकंपोज़िशन के नियंत्रण</string>
+    <string name="motion_precomp_empty">यहाँ कोई नियंत्रण उपलब्ध नहीं है।</string>
+    <string name="motion_precomp_publish">नियंत्रण दिखाएँ</string>
+    <string name="motion_precomp_reset">मूल मान लौटाएँ</string>
+    <string name="motion_control_text">टेक्स्ट</string>
+    <string name="motion_control_unavailable">नियंत्रण या लेयर उपलब्ध नहीं है।</string>
+    <string name="motion_repair_range">यहाँ से इस हिस्से को सुधारें</string>
+    <string name="motion_repair_end">हिस्से का अंत चुनने के लिए समीक्षा पट्टी पर टैप करें।</string>
+    <string name="motion_repair_corners">चारों कोने चिह्नित करें</string>
+    <string name="motion_repair_seed">कोनों की पुष्टि के लिए शुरुआती फ़्रेम पर लौटें।</string>
+    <string name="motion_repair_ready">पूर्वावलोकन में सुधार देखें। हिस्से को बदलने के लिए लागू करें।</string>
+    <string name="motion_export_missing">मीडिया गायब है</string>
+    <string name="motion_export_unreadable">मीडिया पढ़ा नहीं जा सका</string>
+    <string name="motion_export_source_warning">कुछ लेयर का मीडिया गायब है या पढ़ा नहीं जा सकता। एक्सपोर्ट करने से पहले जाँचें।</string>
+    <string name="motion_export_waiting_decode">वीडियो डिकोडर का इंतज़ार…</string>
+    <string name="motion_link_media">मीडिया फिर जोड़ें</string>
+    <string name="motion_view_layer">लेयर देखें</string>
+    <string name="motion_release_body">Aurea 1.0.8.1 BETA (2232)\n• वेक्टर पथ, स्ट्रोक और ऑपरेटर का क्रम बदलें।\n• Android और iOS पर गति कर्व के समान नियम।\n• हर प्रीकंपोज़िशन इंस्टेंस का टेक्स्ट, रंग और अपारदर्शिता बदलें।\n• प्लेनर ट्रैकिंग के एक हिस्से की समीक्षा और सुधार।\n• एक्सपोर्ट में मीडिया और डिकोडर की स्थिति देखें।</string>
+</resources>

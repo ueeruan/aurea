@@ -5,6 +5,7 @@
 // sutilmente errada, que é o tipo de bug que ninguém reporta e todo mundo sente.
 #include "TestFramework.hpp"
 #include "aurea/animation/Curve.hpp"
+#include "aurea/animation/TemporalEase.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -12,6 +13,30 @@
 #include <limits>
 
 using namespace aurea;
+
+AUREA_TEST(Track, SpeedGraphTangentPreservesOtherHandleAndPower) {
+    f32 h[] = {0.f, 0.f, .58f, 1.f};
+    f32 x = 2.f / 3.f, v = 40.f;
+    AUREA_CHECK(speed_graph_tangent(h, true, 1, 300.f, x, v, true));
+    AUREA_CHECK_EQ(h[0], 0.f);
+    AUREA_CHECK_EQ(h[1], 0.f);
+    AUREA_CHECK_NEAR(h[2], x, 1e-6);
+    AUREA_CHECK(speed_graph_tangent(h, true, 1, 300.f, x, v, false));
+    AUREA_CHECK_NEAR(v, 40.f, .001);
+
+    x = .5f; v = -4.f;
+    AUREA_CHECK(speed_graph_tangent(h, false, 2, 1.f, x, v, true));
+    AUREA_CHECK_EQ(h[1], 0.f);
+    v = -8.f;
+    AUREA_CHECK(speed_graph_tangent(h, false, 3, 1.f, x, v, true));
+    AUREA_CHECK_NEAR(h[1], -1.f, 1e-6);
+    v = 1e6f;
+    AUREA_CHECK(speed_graph_tangent(h, false, 1, 1.f, x, v, true));
+    AUREA_CHECK_EQ(h[1], 3.f);
+    AUREA_CHECK(speed_graph_tangent(h, true, 1, 1.f, x, v, true));
+    AUREA_CHECK_EQ(h[3], -2.f);
+    AUREA_CHECK(!speed_graph_tangent(h, false, 1, 0.f, x, v, false));
+}
 
 AUREA_TEST(Track, ShutterSubframesPreserveHoldCurvesAndReverseSampling) {
     Track hold;

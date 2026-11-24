@@ -33,19 +33,22 @@ namespace aurea::ae {
 namespace {
 constexpr usize kMaxItems = 400;
 
-void push_item(std::vector<SkipItem>& v, std::string kind, std::string name, std::string reason, u32 line) {
+void push_item(std::vector<SkipItem>& v, std::string kind, std::string name, std::string reason, u32 line,
+               const ImportReport& report) {
     for (const SkipItem& s : v)
-        if (s.kind == kind && s.name == name && s.reason == reason && s.line == line) return;
+        if (s.kind == kind && s.name == name && s.reason == reason && s.line == line &&
+            s.composition == report.targetComposition && s.layer == report.targetLayer) return;
     if (v.size() >= kMaxItems) return;
-    v.push_back(SkipItem{std::move(kind), std::move(name), std::move(reason), line});
+    v.push_back(SkipItem{std::move(kind), std::move(name), std::move(reason), line,
+        report.targetComposition, report.targetLayer, report.targetLayerName});
 }
 } // namespace
 
 void ImportReport::skip(std::string k, std::string n, std::string r, u32 line) {
-    push_item(skipped, std::move(k), std::move(n), std::move(r), line);
+    push_item(skipped, std::move(k), std::move(n), std::move(r), line, *this);
 }
 void ImportReport::note(std::string k, std::string n, std::string r, u32 line) {
-    push_item(notes, std::move(k), std::move(n), std::move(r), line);
+    push_item(notes, std::move(k), std::move(n), std::move(r), line, *this);
 }
 
 namespace {
@@ -180,6 +183,12 @@ std::string report_json(const ImportReport& r) {
             w.key("name").value(std::string_view(valid_utf8(s.name)));
             w.key("reason").value(std::string_view(valid_utf8(s.reason)));
             w.key("line").value(s.line);
+            if (s.composition && s.layer) {
+                const auto compId = std::to_string(s.composition), layerId = std::to_string(s.layer);
+                w.key("composition").value(std::string_view(compId));
+                w.key("layer").value(std::string_view(layerId));
+                w.key("layerName").value(std::string_view(valid_utf8(s.layerName)));
+            }
             if (const KnownText* k = known(kReasons, s.reason)) {
                 w.key("reasonKey").value(std::string_view(k->key));
                 w.key("reasonArgs").begin_array();

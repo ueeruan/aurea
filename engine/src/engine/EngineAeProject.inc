@@ -102,11 +102,7 @@
                     asset.audio.sampleCount = FrameIndex{std::llround(std::clamp(item.duration, 0.0, 86400.0) * item.sampleRate)};
                 }
                 assetId = project_->add_asset(std::move(asset));
-                if (item.resolvedPath.empty()) {
-                    report.skip("midia", filename, item.linkProblem.empty()
-                        ? "arquivo de origem ausente; vincule a mídia original ou importe um pacote com ela"
-                        : item.linkProblem);
-                } else {
+                if (!item.resolvedPath.empty()) {
                     if (!item.recoveredFrom.empty()) report.note("midia", filename, "variante de mídia vinculada: " + item.recoveredFrom);
                     if (!standaloneTitle && kind == AssetKind::Video) {
                         if (const auto* added = project_->asset(assetId)) (void)media_.proxies().request(*added);
@@ -230,7 +226,18 @@
                     layer->transform.anchor = {width * .5f, height * .5f, 0};
                     layer->transform.position = {imported->width() * .5f, imported->height() * .5f, 0};
                 }
+                report.targetComposition = id.pack();
+                report.targetLayer = layerId.pack();
+                report.targetLayerName = layer->name;
+                if (item && layer->source.valid() && item->resolvedPath.empty()) {
+                    const auto* missing = project_->asset(layer->source);
+                    report.skip("midia", missing ? missing->originalFilename : item->name, item->linkProblem.empty()
+                        ? "arquivo de origem ausente; vincule a mídia original ou importe um pacote com ela"
+                        : item->linkProblem);
+                }
                 ae::apply_project_properties(entry, host, layerId, report);
+                report.targetComposition = report.targetLayer = 0;
+                report.targetLayerName.clear();
                 layer = imported->layer(layerId);
                 if (layer) {
                     layer->locked = (entry.flagsC & 0x20) != 0;

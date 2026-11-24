@@ -137,7 +137,18 @@ bool Engine::vector_tree_edit(u64 layerId, const u32* path, u32 depth, u32 op, u
                 ok = vector::add_item(*g, static_cast<VectorItemKind>(a), b, c, label, &remap);
                 break;
             case kVectorTreeRemove: ok = vector::remove_item(*g, a, &remap); break;
-            case kVectorTreeMove: ok = vector::move_item(*g, a, b, &remap); break;
+            case kVectorTreeMove:
+                ok = vector::move_item(*g, a, b, &remap);
+                // The mobile order panel must preserve the keyed primary paint/operator.
+                // Extra items of these types do not yet have independent parameter tracks.
+                if (ok && c != 0 && depth == 1 && !remap.map.empty() && remap.map[0] != 0) {
+                    for (u32 i = 0; i < l->tracks.size(); ++i) {
+                        const auto& track = l->tracks.at(i);
+                        if (track.property == TrackProperty::VectorParam && track.effectIndex == path[0] &&
+                            slot_param(remap.kind, track.effectParamIndex)) return false;
+                    }
+                }
+                break;
             case kVectorTreeEnable: ok = vector::set_item_enabled(*g, a, b != 0); break;
             case kVectorTreeValues: ok = vector::set_item_values(*g, a, values, count); break;
             case kVectorTreeRename:

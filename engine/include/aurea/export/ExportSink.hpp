@@ -51,6 +51,8 @@ struct VideoStreamConfig {
     /// Abrir diretamente o codec FFmpeg por software, preservando formato,
     /// resolução e relógio do fluxo solicitado.
     bool preferSoftware = false;
+    bool portableFrames = false; ///< Dedicated path for offline composition video.
+    bool limitedMemory = false;  ///< Cap codec workers to reduce peak allocations.
     /// O motor vai entregar, junto de cada quadro NV12, o mesmo quadro em
     /// R'G'B' num AHardwareBuffer (set_direct_surface_frame): a escada do
     /// Android tenta o degrau surface-direct antes do surface.

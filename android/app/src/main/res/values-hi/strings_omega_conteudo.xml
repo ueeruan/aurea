@@ -85,4 +85,6 @@
     <string name="om_anim_list_cd">टेक्स्ट एनिमेटर</string>
     <string name="om_anim_item_cd">एनिमेटर %1$d: %2$s</string>
     <string name="om_anim_collapse_cd">एनिमेटर समेटें</string>
+    <string name="om_pts_3d_plane">3D लेयर · पॉइंट उसकी सतह पर चलते हैं</string>
+    <string name="om_pts_3d_edge">लेयर कैमरे की ओर किनारे से है। पॉइंट हिलाने के लिए व्यू घुमाएँ।</string>
 </resources>

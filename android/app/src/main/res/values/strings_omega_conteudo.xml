@@ -85,4 +85,6 @@
     <string name="om_anim_list_cd">Animadores de texto</string>
     <string name="om_anim_item_cd">Animador %1$d: %2$s</string>
     <string name="om_anim_collapse_cd">Recolher animador</string>
+    <string name="om_pts_3d_plane">Camada 3D · os pontos andam no plano dela</string>
+    <string name="om_pts_3d_edge">A camada está de lado para a câmera. Gire a vista para mover os pontos.</string>
 </resources>

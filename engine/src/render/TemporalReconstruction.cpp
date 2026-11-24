@@ -3,6 +3,31 @@
 #include <limits>
 
 namespace aurea {
+namespace {
+
+bool use_mixed_temporal_attachments(const GPUCapabilities& caps) noexcept {
+    // On GLES, creating a program does not validate the mixed-format FBO.
+    // Vulkan and Metal validate both attached formats in pipeline creation.
+    return caps.maxColorAttachments >= 2 && (caps.apiName == "Vulkan" || caps.apiName == "Metal");
+}
+
+PipelineKey temporal_color_depth_key() noexcept {
+    auto key = PipelineKey::fullscreen(ShaderId::scene3d_post_temporal_mrt_frag, SurfaceFormat::RGBA16F);
+    key.hasColor1 = true;
+    key.colorFormat1 = SurfaceFormat::R32F;
+    return key;
+}
+
+} // namespace
+
+void TemporalReconstruction::warmup_pipelines(const GPUCapabilities& caps, std::vector<PipelineKey>& keys) {
+    if (use_mixed_temporal_attachments(caps)) {
+        keys.push_back(temporal_color_depth_key());
+        return;
+    }
+    keys.push_back(PipelineKey::fullscreen(ShaderId::scene3d_post_temporal_frag, SurfaceFormat::RGBA16F));
+    keys.push_back(PipelineKey::fullscreen(ShaderId::scene3d_post_temporal_depth_frag, SurfaceFormat::R32F));
+}
 
 Vec2 TemporalReconstruction::jitter(i64 frame) noexcept {
     // Eight centered Halton samples. Absolute timeline indices make scrubbing
@@ -24,6 +49,7 @@ void TemporalReconstruction::clear(GPUBackend* gpu) noexcept {
         depth = {};
     }
     bytes_ = 0;
+    resolve_ = saveDepth_ = {};
     pending_ = valid_ = false;
     previousSlot_ = 0;
 }
@@ -43,8 +69,19 @@ bool TemporalReconstruction::admit(GPUBackend& gpu, ShaderLibrary& shaders,
     clear(&gpu);
     // Both render formats are checked against actual backend creation. A failed
     // format/pipeline leaves the ordinary spatial preview available.
-    if (!shaders.pipeline(PipelineKey::fullscreen(ShaderId::scene3d_post_temporal_frag, SurfaceFormat::RGBA16F))
-        || !shaders.pipeline(PipelineKey::fullscreen(ShaderId::scene3d_post_temporal_depth_frag, SurfaceFormat::R32F))) return false;
+    if (use_mixed_temporal_attachments(caps)) {
+        const auto fused = shaders.pipeline(temporal_color_depth_key());
+        if (fused) resolve_ = *fused;
+    }
+    if (!resolve_.valid()) {
+        const auto resolve = shaders.pipeline(PipelineKey::fullscreen(
+            ShaderId::scene3d_post_temporal_frag, SurfaceFormat::RGBA16F));
+        const auto saveDepth = shaders.pipeline(PipelineKey::fullscreen(
+            ShaderId::scene3d_post_temporal_depth_frag, SurfaceFormat::R32F));
+        if (!resolve || !saveDepth) return false;
+        resolve_ = *resolve;
+        saveDepth_ = *saveDepth;
+    }
     colorDesc_ = {};
     colorDesc_.width = width; colorDesc_.height = height;
     colorDesc_.format = SurfaceFormat::RGBA16F;
@@ -69,17 +106,13 @@ bool TemporalReconstruction::admit(GPUBackend& gpu, ShaderLibrary& shaders,
 bool TemporalReconstruction::can_reuse(const Frame& frame) const noexcept {
     return valid_ && previous_.time != std::numeric_limits<i64>::max()
         && frame.time == previous_.time + 1 && frame.composition == previous_.composition
-        && frame.revision == previous_.revision && frame.quality == previous_.quality;
+        && frame.revision == previous_.revision && frame.quality == previous_.quality
+        && frame.modelSpace == previous_.modelSpace;
 }
 
 FGTexture TemporalReconstruction::build(FrameGraph& graph, ShaderLibrary& shaders,
     FGTexture color, FGTexture depth, const Frame& frame) noexcept {
     if (!bytes_ || pending_ || !color.valid() || !depth.valid()) return color;
-    const auto resolve = shaders.pipeline(PipelineKey::fullscreen(
-        ShaderId::scene3d_post_temporal_frag, SurfaceFormat::RGBA16F));
-    const auto saveDepth = shaders.pipeline(PipelineKey::fullscreen(
-        ShaderId::scene3d_post_temporal_depth_frag, SurfaceFormat::R32F));
-    if (!resolve || !saveDepth) return color;
     const bool reuse = can_reuse(frame);
     const u32 writeSlot = 1u - previousSlot_;
     const FGTexture output = graph.import_texture("preview-temporal-color", colors_[writeSlot], colorDesc_);
@@ -87,18 +120,19 @@ FGTexture TemporalReconstruction::build(FrameGraph& graph, ShaderLibrary& shader
     // Bind current inputs on a reset, avoiding any read of uninitialized memory.
     const FGTexture history = reuse ? graph.import_texture("preview-temporal-history", colors_[previousSlot_], colorDesc_) : color;
     const FGTexture historyDepth = reuse ? graph.import_texture("preview-temporal-history-depth", depths_[previousSlot_], depthDesc_) : depth;
+    if (!output.valid() || !nextDepth.valid() || !history.valid() || !historyDepth.valid()) return color;
     struct Params {
         Mat4 inverseCurrent, previous;
         Vec4 texel, options;
     } params{frame.inverseJitteredViewProjection, previous_.viewProjection,
         Vec4{1.f / colorDesc_.width, 1.f / colorDesc_.height,
             frame.jitterPixels.x / colorDesc_.width, frame.jitterPixels.y / colorDesc_.height},
-        Vec4{reuse ? .85f : 0.f, .01f, 0.f, 0.f}};
+        Vec4{reuse ? (frame.modelSpace ? .60f : .85f) : 0.f, .01f, frame.modelSpace ? .02f : .25f, 0.f}};
     const auto nearest = shaders.sampler(CommonSampler::NearestClamp);
     const auto linear = shaders.sampler(CommonSampler::LinearClamp);
     const u32 pass = graph.add_raster_pass("preview-temporal-reconstruct", PassStage::Scene3D,
         output, LoadOp::DontCare, Vec4{}, [color, depth, history, historyDepth,
-            pipeline = *resolve, nearest, linear, params](PassContext& context) {
+            pipeline = resolve_, nearest, linear, params](PassContext& context) {
             context.cmds.bind_pipeline(pipeline);
             context.cmds.bind_texture(0, context.texture(color), linear);
             context.cmds.bind_texture(1, context.texture(depth), nearest);
@@ -107,17 +141,22 @@ FGTexture TemporalReconstruction::build(FrameGraph& graph, ShaderLibrary& shader
             context.cmds.set_uniforms(&params, sizeof(params));
             context.cmds.draw(3);
         });
+    if (pass == kInvalidIndex) return color;
     graph.read(pass, color); graph.read(pass, depth);
     if (reuse) { graph.read(pass, history); graph.read(pass, historyDepth); }
-    const u32 depthPass = graph.add_raster_pass("preview-temporal-save-depth", PassStage::Scene3D,
-        nextDepth, LoadOp::DontCare, Vec4{}, [depth, nearest, pipeline = *saveDepth, texel = params.texel](PassContext& context) {
-            context.cmds.bind_pipeline(pipeline);
-            context.cmds.bind_texture(0, context.texture(depth), nearest);
-            context.cmds.set_uniforms(&texel, sizeof(texel));
-            context.cmds.draw(3);
-        });
-    graph.read(depthPass, depth);
-    if (pass == kInvalidIndex || depthPass == kInvalidIndex) return color;
+    if (saveDepth_.valid()) {
+        const u32 depthPass = graph.add_raster_pass("preview-temporal-save-depth", PassStage::Scene3D,
+            nextDepth, LoadOp::DontCare, Vec4{}, [depth, nearest, pipeline = saveDepth_, texel = params.texel](PassContext& context) {
+                context.cmds.bind_pipeline(pipeline);
+                context.cmds.bind_texture(0, context.texture(depth), nearest);
+                context.cmds.set_uniforms(&texel, sizeof(texel));
+                context.cmds.draw(3);
+            });
+        if (depthPass == kInvalidIndex) return color;
+        graph.read(depthPass, depth);
+    } else {
+        graph.set_color1(pass, nextDepth);
+    }
     graph.set_output(output, ResourceState::ShaderRead);
     graph.set_output(nextDepth, ResourceState::ShaderRead);
     pendingFrame_ = frame;

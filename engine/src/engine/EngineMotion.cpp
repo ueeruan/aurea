@@ -21,6 +21,7 @@ struct Engine::MotionTrackJob {
     std::atomic<f32> progress{0};
     std::mutex mutex;
     std::shared_ptr<const MotionTrackData> result;
+    std::shared_ptr<const MotionTrackData> repairBase;
     std::string message;
     u64 layer = 0, session = 0;
     CompositionId composition{};
@@ -107,14 +108,16 @@ bool Engine::restore_motion_track(u64 id) noexcept {
     job->state.store(2);job->progress.store(1);motionTrack_=std::move(job);return true;
 }
 bool Engine::start_motion_track(u64 id,u32 tool,u32 model,bool backward,const f32* xy,u32 count,
-                                f32 featureRadius,f32 searchRadius,f32 minimumConfidence,bool validateBack) noexcept {
+                                f32 featureRadius,f32 searchRadius,f32 minimumConfidence,bool validateBack,
+                                i64 repairFirst,i64 repairLast) noexcept {
     if(camera_track_status().state==1)return false;
     if(tool>4||model>3||count>4||(count&&!xy)||!std::isfinite(featureRadius)||!std::isfinite(searchRadius)||
         !std::isfinite(minimumConfidence))return false;
     minimumConfidence = std::clamp(minimumConfidence, .4f, .95f);
     const u32 required=tool==0?1:tool==1?2:tool==4?0:4;
     const bool autoSeeds = tool <= 1 && count == 0;
-    if(count!=required && !autoSeeds)return false;
+    const bool repair = repairFirst >= 0;
+    if ((count != required && !autoSeeds) || (repair && (count != 4 || backward || repairLast <= repairFirst))) return false;
     // Uma análise por vez. Uma CANCELADA ainda saindo não bloqueia a próxima:
     // o trabalhador olha o cancelamento a cada quadro decodificado, então o
     // join abaixo é curto (antes: "Cancelar" e tocar de novo = recusado).
@@ -134,10 +137,24 @@ bool Engine::start_motion_track(u64 id,u32 tool,u32 model,bool backward,const f3
         for(u32 i=0;i<count;++i){seeds[i]={xy[2*i],xy[2*i+1]};if(!Tracks2D::present(seeds[i])||seeds[i].x<0||seeds[i].y<0||seeds[i].x>=data->sourceW||seeds[i].y>=data->sourceH)return false;}
         if(count==2&&(seeds[1]-seeds[0]).length()<8)return false;
         if(count==4){Homography h;if(!quad_map(seeds,h))return false;}
-        const i64 first=tool==4?layer->start.value:std::clamp(playback_.current().value,layer->start.value,layer->end.value-1);
+        if (repair) {
+            const auto& original = layer->motionTrack;
+            if (layer->locked || !original || original->pointCount != 4 || original->tool != data->tool ||
+                !original->analysisW || !original->analysisH ||
+                original->sourceSignature != data->sourceSignature || !timing_matches(*layer, *original, comp->fps()) ||
+                original->points.size() != original->path.size() ||
+                repairFirst < layer->start.value || repairLast >= layer->end.value ||
+                repairLast - repairFirst >= kMaxMotionTrackFrames) return false;
+            const auto [lo, hi] = std::minmax(original->localFrames.front(), original->localFrames.back());
+            if (repairFirst - layer->start.value < lo || repairLast - layer->start.value > hi) return false;
+            job->repairBase = original;
+            data->model = original->model;
+        }
+        const i64 first=repair?repairFirst:tool==4?layer->start.value:std::clamp(playback_.current().value,layer->start.value,layer->end.value-1);
+        const i64 lastExclusive = repair ? repairLast + 1 : layer->end.value;
         const i64 step=backward&&tool!=4?-1:1;
         // Clipe mais longo que o limite: analisa até o limite (não recusa).
-        for(i64 f=first;f>=layer->start.value&&f<layer->end.value&&data->localFrames.size()<kMaxMotionTrackFrames;f+=step){
+        for(i64 f=first;f>=layer->start.value&&f<lastExclusive&&data->localFrames.size()<kMaxMotionTrackFrames;f+=step){
             data->localFrames.push_back(f-layer->start.value);
             data->sourceUs.push_back(static_cast<i64>(std::llround(std::max(0.0,layer->source_frame(FrameIndex{f}))*1e6/data->fps)));
         }
@@ -303,6 +320,44 @@ bool Engine::start_motion_track(u64 id,u32 tool,u32 model,bool backward,const f3
         if(j->cancel.load())return fail("Cancelled");
         if(data->path.size()!=data->sourceUs.size())return fail("Incomplete video: analysis stopped before the end");
         if(std::count_if(data->path.begin(),data->path.end(),[](auto& p){return p.valid;})<2)return fail("Not enough reliable motion. Choose a textured area");
+        if (j->repairBase) {
+            const auto& original = *j->repairBase;
+            auto merged = std::make_shared<MotionTrackData>(original);
+            const bool reverse = original.localFrames.front() > original.localFrames.back();
+            const auto analysis_quad = [&](const std::array<Vec2, 4>& points) {
+                auto quad = points;
+                for (auto& p : quad) {
+                    p.x = (p.x + .5f) * original.analysisW / original.sourceW - .5f;
+                    p.y = (p.y + .5f) * original.analysisH / original.sourceH - .5f;
+                }
+                return quad;
+            };
+            Homography canonical, inverse;
+            if (!quad_map(analysis_quad(original.points.front()), canonical) || !canonical.inverse(inverse))
+                return fail("Invalid reference quad");
+            for (usize i = 0; i < data->path.size(); ++i) {
+                const i64 frame = data->localFrames[i];
+                const i64 offset = reverse ? original.localFrames.front() - frame : frame - original.localFrames.front();
+                if (offset < 0 || static_cast<usize>(offset) >= original.path.size() ||
+                    original.localFrames[static_cast<usize>(offset)] != frame) return fail("Source or timing changed: analyse again");
+                if (!data->path[i].valid) continue;
+                Homography mapped;
+                if (!quad_map(analysis_quad(data->points[i]), mapped)) continue;
+                auto& cell = merged->path[static_cast<usize>(offset)];
+                cell = data->path[i];
+                cell.path = mapped * inverse;
+                cell.rms *= static_cast<f32>(original.analysisH) / std::max(1u, data->analysisH);
+                merged->points[static_cast<usize>(offset)] = data->points[i];
+            }
+            merged->lost = static_cast<u32>(std::count_if(merged->path.begin(), merged->path.end(),
+                [](const MotionFrame& cell) { return !cell.valid; }));
+            std::lock_guard<std::mutex> guard(j->mutex);
+            if (j->cancel.load()) { j->state.store(4); return; }
+            j->result = std::move(merged);
+            j->progress.store(1);
+            j->state.store(5);
+            return;
+        }
         {
             std::lock_guard<std::mutex>guard(modelMutex_);
             auto* comp=project_&&projectSession_==j->session?project_->timeline().composition(j->composition):nullptr;
@@ -314,6 +369,31 @@ bool Engine::start_motion_track(u64 id,u32 tool,u32 model,bool backward,const f3
         // Quadros sem medida não bloqueiam mais: ficam sem key (interpolados).
         // A UI mostra a contagem (status.lost) no idioma do app.
     });
+    return true;
+}
+
+bool Engine::finish_motion_repair(bool accept) noexcept {
+    auto job = motionTrack_;
+    if (!job || !job->repairBase || job->state.load() != 5) return false;
+    std::lock_guard<std::mutex> model(modelMutex_);
+    std::lock_guard<std::mutex> result(job->mutex);
+    auto* comp = project_ && projectSession_ == job->session && project_->timeline().current() == job->composition
+        ? current_composition() : nullptr;
+    auto* layer = comp ? comp->layer(LayerId::unpack(job->layer)) : nullptr;
+    if (!layer || (accept && layer->locked) || layer->source != job->source || layer->motionTrack != job->repairBase ||
+        job->repairBase->sourceSignature != source_signature(project_->asset(layer->source)) ||
+        !timing_matches(*layer, *job->repairBase, comp->fps())) return false;
+    if (accept) {
+        history_.before_mutation(*comp, comp->id(), "corrigir trecho do rastreio");
+        layer->motionTrack = job->result;
+        comp->touch();
+        project_->mark_dirty();
+        bump_model_revision_locked();
+        request_render();
+    } else {
+        job->result = job->repairBase;
+    }
+    job->state.store(2);
     return true;
 }
 Engine::MotionTrackStatus Engine::motion_track_status() noexcept {
@@ -334,7 +414,8 @@ u32 Engine::motion_track_features(i64 frame,f32* out,u32 capacity) noexcept {
     std::shared_ptr<const MotionTrackData>d;{std::lock_guard<std::mutex>g(j->mutex);d=j->result;}if(!d)return 0;
     std::lock_guard<std::mutex>g(modelMutex_);auto* comp=project_&&projectSession_==j->session?current_composition():nullptr;
     auto* layer=comp&&project_->timeline().current()==j->composition?comp->layer(LayerId::unpack(j->layer)):nullptr;
-    if (!layer || layer->source != j->source || layer->motionTrack != d ||
+    if (!layer || layer->source != j->source ||
+        (layer->motionTrack != d && !(j->state.load() == 5 && layer->motionTrack == j->repairBase)) ||
         d->sourceSignature != source_signature(project_->asset(layer->source)) ||
         d->points.size() != d->path.size() || d->localFrames.empty() ||
         d->localFrames.size() != d->path.size() || d->sourceUs.size() != d->path.size() ||

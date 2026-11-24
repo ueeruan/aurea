@@ -18,7 +18,11 @@ struct TransformView: View {
     @EnvironmentObject private var model: AureaModel
     @Environment(\.displayScale) private var displayScale
     private var tab: Int { get { model.transformTab } nonmutating set { model.transformTab = newValue } }
-    private var animatorTrack: TimelineTrack? { tab == 6 ? model.animatorRailTrack() : nil }
+    private var animatorTrack: TimelineTrack? {
+        guard tab == 6 else { return nil }
+        if let focus = model.timelineFocus, focus.count == 1, focus[0].property == 33 { return focus[0] }
+        return model.animatorRailTrack()
+    }
     /// Eixo da roda em 3D (0 X, 1 Y, 2 Z); o padrão é Z.
     @State private var axis = 2
     private var linked: Bool { model.scaleAxesLinked }
@@ -276,7 +280,10 @@ struct TransformView: View {
 
     private func updateTimelineFocus() {
         if tab == 2 && text3D && !wholeText { return }
-        if let track = animatorTrack { model.focusLayerAnimator(track); return }
+        if let track = animatorTrack {
+            if track.property != 33 { model.focusLayerAnimator(track) }
+            return
+        }
         if cameraScale, let property = model.cameraLensTrack(AureaModel.cameraLensFocal) {
             model.timelineFocus = [TimelineTrack(property: Int(property))]; return
         }
@@ -1268,7 +1275,8 @@ struct TransformView: View {
     private func toggleKey() {
         if let track = animatorTrack {
             guard !locked else { return }
-            model.engine.toggleLayerAnimKey(id, index: track.effect, param: track.param)
+            if track.property == 33 { model.engine.toggleTextAnimKey(id, index: track.effect, param: track.param) }
+            else { model.engine.toggleLayerAnimKey(id, index: track.effect, param: track.param) }
             model.refreshModel(force: true); return
         }
         if cameraScale { guard !locked else { return }; model.toggleCameraLensKey(AureaModel.cameraLensFocal); return }

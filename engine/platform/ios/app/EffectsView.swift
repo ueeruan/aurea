@@ -45,7 +45,7 @@ struct EffectsView: View {
     @State private var advancedOpen: Set<UInt32> = []
     @State private var expressionLooks: [UInt32: ExpressionLook] = [:]
     /// O 1º efeito da camada, aberto sozinho: um ponto entra ativo com o guia longo.
-    @State private var autoGuideFor: UInt32?
+
     // Reordenar (toque longo na linha ou arrasto no ≡).
     @State private var dragId: UInt32?
     @State private var dragOffset: CGFloat = 0
@@ -124,9 +124,23 @@ struct EffectsView: View {
     }
     private var canAnimate: Bool {
         guard openId != nil else { return false }
+        if remapEffect != nil {
+            guard remapEditing, let layer = model.selectedLayer else { return false }
+            return model.localPlayhead >= layer.offsetFrames && model.localPlayhead <= layer.offsetFrames + layer.duration
+        }
         return meshSelected || (railParam.map { $0.flags & 1 != 0 && fxComponentCount(Int($0.type)) > 0 } ?? false)
     }
+    private var remapEffect: EffectItem? {
+        model.effects.first { $0.effectId == openId && $0.typeId == fxEffectTypeId("aurea.time.remap") }
+    }
+    private var remapEditing: Bool {
+        remapEffect?.enabled == true && model.selectedLayer?.locked == false &&
+            ((model.detail["timeFlags"] as? NSNumber)?.uint32Value ?? 0) & 4 != 0
+    }
     private var railLook: KeyframeLook {
+        if remapEffect != nil {
+            return selectedTrack.contains { $0.time == model.localPlayhead } ? .keyHere : selectedTrack.isEmpty ? .none : .animated
+        }
         if meshSelected, let effect = openId, let layer = model.primarySelection {
             let keys = (model.keysForLayer(layer) ?? []).filter { $0.property == 44 && $0.effectIndex == effect }
             return keys.contains { $0.time == model.localPlayhead } ? .keyHere : keys.isEmpty ? .none : .animated
@@ -135,11 +149,14 @@ struct EffectsView: View {
         return look(effect: selected.effect, param: selected.param)
     }
     private var selectedTrack: [KeyframeItem] {
+        if remapEffect != nil, let layer = model.primarySelection {
+            return (model.keysForLayer(layer) ?? []).filter { $0.property == 30 }.sorted { $0.time < $1.time }
+        }
         guard let selected = railSelection, let layer = model.primarySelection else { return [] }
         return (model.keysForLayer(layer) ?? []).filter { $0.property == 31 && $0.effectIndex == selected.effect && $0.paramIndex == selected.param * 4 + UInt32(selected.component) }.sorted { $0.time < $1.time }
     }
     private var canExpress: Bool {
-        guard !meshSelected, let p = railParam else { return false }
+        guard remapEffect == nil, !meshSelected, let p = railParam else { return false }
         return p.flags & 1 != 0 && fxComponentCount(Int(p.type)) > 0
     }
     private var railExpression: ExpressionLook {
@@ -154,8 +171,8 @@ struct EffectsView: View {
         PanelRail(onBack: { model.panel = .none },
                   keyframeLook: openId != nil ? railLook : .none,
                   onKeyframe: canAnimate ? { keyframeTapped() } : nil,
-                  onDeleteAllKeyframes: canAnimate && !meshSelected ? { deleteAllKeys() } : nil,
-                  onCurve: canAnimate && !meshSelected ? { openCurve() } : nil,
+                  onDeleteAllKeyframes: remapEffect == nil && canAnimate && !meshSelected ? { deleteAllKeys() } : nil,
+                  onCurve: (remapEffect != nil ? remapEditing : canAnimate && !meshSelected) ? { openCurve() } : nil,
                   curveReady: selectedTrack.count >= 2,
                   expression: railExpression,
                   onExpression: canExpress ? { openExpression() } : nil,
@@ -278,7 +295,7 @@ struct EffectsView: View {
         guard loadedLayer != model.primarySelection else { return }
         closeNow()
         loadedLayer = model.primarySelection
-        advancedOpen = []; expressionLooks = [:]; pendingPick = nil; autoGuideFor = nil
+        advancedOpen = []; expressionLooks = [:]; pendingPick = nil
         if let requested = model.requestedEffectFocusId {
             open(requested, animated: false); model.pendingEffectFocus = nil; return
         }
@@ -319,10 +336,7 @@ struct EffectsView: View {
         }
     }
 
-    /// Efeito novo na lista (navegador, colar): abre os controles sozinho SÓ se a
-    /// camada não tinha efeito nenhum (`FxParamMath.opensAfterAdd`); senão a lista
-    /// continua fechada e rola até a linha nova. Os ids vistos ficam no MODELO: o
-    /// painel recriado ainda reconhece o que é novo.
+    /// Atualiza a pilha e mantém o controle fechado até o usuário abrir a linha.
     private func revealAdded(_ ids: [UInt32], proxy: ScrollViewProxy) {
         guard tabbed, let layer = model.primarySelection else { return }
         let seen: Set<UInt32>? = model.seenEffectIds[layer]
@@ -331,10 +345,7 @@ struct EffectsView: View {
         let added = ids.filter { !seen.contains($0) }
         guard let last = added.last else { return }
         pendingPick = nil
-        if FxParamMath.opensAfterAdd(previousCount: seen.count, addedCount: added.count) {
-            autoGuideFor = last
-            DispatchQueue.main.async { if openId != last { open(last, animated: true) } }
-        } else if openId == nil {
+        if openId == nil {
             DispatchQueue.main.async {
                 withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(last, anchor: .bottom) }
             }
@@ -416,7 +427,6 @@ struct EffectsView: View {
     private func chooseFirstParam(_ id: UInt32) {
         if model.effects.contains(where: { $0.effectId == id && $0.typeId == fxEffectTypeId("aurea.distort.mesh_warp") }) {
             selected = nil
-            autoGuideFor = nil
             return
         }
         guard selected?.effect != id else { return }
@@ -424,13 +434,6 @@ struct EffectsView: View {
         let first = all.first(where: { $0.flags & 1 != 0 && fxComponentCount(Int($0.type)) > 0 && $0.enabled })
             ?? all.first(where: { fxComponentCount(Int($0.type)) > 0 })
         selected = first.map { EffectParamSelection(effect: id, param: $0.index, component: 0) }
-        guard autoGuideFor == id else { return }
-        autoGuideFor = nil
-        if let first, let layer = model.primarySelection,
-           fxEffectParamDraggable(type: Int(first.type), flags: first.flags), first.enabled {
-            pointStage.activate(layer, effect: id, param: first.index, control: FxParamMath.controlFor(first.control, Int(first.type)),
-                                label: display(first, effectId: id).label, guide: .long)
-        }
     }
 
     /// O parâmetro ativo no preview some quando o efeito fecha ou troca.
@@ -525,6 +528,7 @@ struct EffectsView: View {
         ScrollViewReader { proxy in
             ScrollView(.vertical) {
                 VStack(spacing: 0) {
+                    if tabbed { addRow }
                     if tabbed && model.selectedLayer?.adjustment == true { adjustmentIntensity.padding(.top, gap) }
                     if tabbed && model.selectedLayer?.kind == 4 {
                         PanelItemRow(glyph: CupertinoGlyph.Textformat, title: AureaText.t("la_animators"), tag: "effects.text.animators") {
@@ -545,8 +549,8 @@ struct EffectsView: View {
                             .padding(.top, gap)
                             .id(effect.effectId)
                     }
-                    if tabbed { addRow }
-                    else if ordered.isEmpty, let type = focusedType {
+
+                    if !tabbed, ordered.isEmpty, let type = focusedType {
                         Button {
                             guard let layer = model.primarySelection else { return }
                             model.mutate { $0.addEffect(type, toLayer: layer, at: UInt32.max) }
@@ -598,8 +602,7 @@ struct EffectsView: View {
         let badge = badgeLabel(effect)
         return HStack(spacing: 0) {
             HStack(spacing: 0) {
-                CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 18, color: AureaColors.text.opacity(0.3))
-                    .mirrorsInRtl()
+                CupertinoGlyph.text(CupertinoGlyph.Sparkles, size: 14, color: effect.enabled ? AureaColors.accent : AureaColors.muted)
                     .frame(width: 18, height: 18)
                 Text(displayName(effect))
                     .font(.aurea(size: 14))
@@ -648,7 +651,7 @@ struct EffectsView: View {
                 .accessibilityIdentifier("effects.grip." + id)
         }
         .frame(height: FxParamMath.ROW_LIST)
-        .background(lifted ? AureaColors.fxSegmentOn : AureaColors.fxListSurface, in: RoundedRectangle(cornerRadius: 5))
+        .background(lifted ? AureaColors.fxSegmentOn : AureaColors.surface, in: RoundedRectangle(cornerRadius: 10))
     }
 
     /// O selo (35): cadeado do Hyper sem o acesso, "!" do efeito pesado ou a peça do plugin.
@@ -773,13 +776,16 @@ struct EffectsView: View {
     /// Contêiner `effects.add.row`, tocável `aurea.effects.add` (mantido).
     private var addRow: some View {
         Button { showAdd() } label: {
-            HStack(spacing: 6) {
-                CupertinoGlyph.text(CupertinoGlyph.Plus, size: 12, color: AureaColors.text)
+            HStack(spacing: 8) {
+                CupertinoGlyph.text(CupertinoGlyph.Plus, size: 16, color: AureaColors.accent)
                     .accessibilityHidden(true)
-                Text(AureaText.t("panel_adicionar_efeito")).font(.aurea(size: 14)).foregroundStyle(AureaColors.text)
+                Text(AureaText.t("panel_adicionar_efeito")).font(.aurea(size: 14, weight: .semibold))
+                    .foregroundStyle(AureaColors.text).frame(maxWidth: .infinity, alignment: .leading)
+                CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 13, color: AureaColors.accent)
+                    .mirrorsInRtl().accessibilityHidden(true)
             }
-            .frame(maxWidth: .infinity)
-            .frame(height: FxParamMath.ROW_LIST)
+            .padding(.horizontal, 12)
+            .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
         .buttonStyle(FxAddRowStyle())
@@ -882,7 +888,7 @@ struct EffectsView: View {
             guard !ids.isEmpty || matte else { refreshTools(); return }
             model.beginGesture("remover máscaras")
             for mask in ids { _ = model.engine.removeMask(id, mask: mask) }
-            if matte { model.engine.setTrackMatteForLayer(id, matte: 0, mode: 0) }
+            if matte { _ = model.engine.setTrackMatteForLayer(id, matte: 0, mode: 0) }
             model.endGesture()
             model.selectedMask = nil; model.selectedMaskPoint = nil; model.maskDrawing = false
         case .captions:
@@ -912,7 +918,7 @@ struct EffectsView: View {
                             accessibilityLabel: AureaText.t("om_fx_slider", AureaText.t("panel_intensidade_camada_ajuste")),
                             accessibilityValue: text,
                             onBegin: { model.beginGesture("opacidade") }, onValue: { setOpacity($0) }, onEnd: { model.endGesture() })
-                    .padding(.horizontal, 8)
+                    .frame(height: FxParamMath.ROW_RULER - 12)  // 1.0.8: o slider é régua
                 FxValueBox(text: text, height: boxH, enabled: !locked) {
                     model.numericKeypad = KeypadRequest(title: label, value: value, unit: "%", min: 0, max: 100, decimals: 0, onValue: { setOpacity($0) })
                 }
@@ -1026,6 +1032,8 @@ struct EffectsView: View {
         return ScrollViewReader { proxy in
             ScrollView(.vertical) {
                 VStack(spacing: 0) {
+                    // 1.0.8: no fim dos controles, sem quique (o toque seguinte vale).
+                    ScrollBounceProbe(bounces: false).frame(width: 0, height: 0).accessibilityHidden(true)
                     if !effect.known {
                         FxBodyNotice(text: AureaText.t("panel_este_efeito_saiu_catalogo_ele_nao"))
                     } else {
@@ -1096,7 +1104,7 @@ struct EffectsView: View {
             }
         }
         if type == fxEffectTypeId("aurea.time.remap") {
-            TimeRemapEffectEditor(effectId: effect.effectId).padding(.horizontal, 6).padding(.vertical, 4)
+            TimeRemapEffectEditor(enabled: effect.enabled).padding(.horizontal, 6).padding(.vertical, 4)
         }
         if type == fxEffectTypeId("aurea.distort.mesh_warp") {
             MeshWarpCardTools(effectId: effect.effectId, selected: meshSelected, onSelect: { selected = nil; pointStage.deactivate() })
@@ -1148,8 +1156,10 @@ struct EffectsView: View {
     /// Com a seção desligada, o motor manda os membros desabilitados.
     @ViewBuilder private func sectionView(_ section: FxSection, effect: EffectItem) -> some View {
         let id = effect.effectId
-        let toggleLabel = section.toggle.map { display($0, effectId: id).label } ?? section.label
-        FxSectionHeader(title: section.label, open: section.open, count: section.params.count,
+        let localSections = fxIsCopyLayoutEffect(effect.typeId) || effect.typeId == fxEffectTypeId("aurea.generate.particular")
+        let title = localSections ? AureaText.t(section.key) : section.label
+        let toggleLabel = section.toggle.map { display($0, effectId: id).label } ?? title
+        FxSectionHeader(title: title, open: section.open, count: section.params.count,
                         identifier: "effects.section.\(id).\(section.ordinal)",
                         toggleIdentifier: "effects.section.toggle.\(id).\(section.ordinal)",
                         toggleLabel: toggleLabel, toggleOn: section.toggle.map { $0.scalar >= 0.5 },
@@ -1193,7 +1203,8 @@ struct EffectsView: View {
             colorRow(param, effect: effect, disabledBy: disabledBy)
         case fxParamCurve:
             if let layer = model.primarySelection {
-                if fxIsPluginEffect(typeOf(effect)) {
+                if fxIsPluginEffect(typeOf(effect)) || fxIsCopyLayoutEffect(typeOf(effect)) ||
+                    (typeOf(effect) == fxEffectTypeId("aurea.generate.particular") && (59...60).contains(param.index)) {
                     CollapsibleCurveEditor(layer: layer, effect: effect, param: param.index, label: display(param, effectId: effect).label)
                 } else {
                     ColorCurveEditor(layer: layer, effect: effect, param: param.index)
@@ -1275,7 +1286,7 @@ struct EffectsView: View {
                             accessibilityLabel: AureaText.t("om_fx_slider", d.label),
                             accessibilityValue: enabled ? format(shown) : off,
                             onBegin: begin, onValue: write, onEnd: { model.endGesture() })
-                    .padding(.horizontal, 8)
+                    .frame(height: FxParamMath.ROW_RULER - 12)  // 1.0.8: o slider é régua
                 FxValueBox(text: format(shown), height: boxH, enabled: enabled, onTap: keypad)
                     .padding(FxParamMath.LABEL_MARGIN)
             } else {
@@ -1393,8 +1404,9 @@ struct EffectsView: View {
                                     .frame(width: 18, alignment: .leading)
                                 box(component, letter: nil)
                             }
-                            .padding(.top, component == 0 ? 7 : 1)
-                            .padding(.bottom, component == 0 ? 1 : 7)
+                            // 1.0.8: folgas de 4 (antes 7) na linha mais baixa.
+                            .padding(.top, component == 0 ? 4 : 1)
+                            .padding(.bottom, component == 0 ? 1 : 4)
                             .frame(maxHeight: .infinity)
                         }
                     }
@@ -1452,13 +1464,25 @@ struct EffectsView: View {
     /// ESCOLHA (38): rótulo 10 (até 75, margem 15) · botões segmentados de 27,5
     /// (estilo do motor `enumSegmented`) ou caixa suspensa (`enumDropdown`) que abre
     /// o menu ancorado. Índice arredondado e preso. Ids `effects.choice.<e>.<i>[.<k>]`.
-    private func choiceRow(_ param: EffectParamItem, effect: UInt32, disabledBy: String?) -> some View {
+    @ViewBuilder private func choiceRow(_ param: EffectParamItem, effect: UInt32, disabledBy: String?) -> some View {
         let d = display(param, effectId: effect)
         let enabled = rowEnabled(param)
         let ok = writeGuard(effect)
         // 1.0.2: opção paga sem o AureaHyper (Flow Retime › Neural (IA)) leva o cadeado.
         let type = typeOf(effect)
-        let options = enumOptions(param).enumerated().map { i, o in
+        let rawOptions: [String] = {
+            if type == fxEffectTypeId("aurea.generate.particular") && param.index == 52 {
+                return ["particle_continuous", "particle_form_grid", "particle_burst", "particle_path"].map { AureaText.t($0) }
+            }
+            if fxIsCopyLayoutEffect(type) && (param.index == 1 || param.index == 5) {
+                return ["copies_line", "copies_grid", "copies_ring", "copies_scatter"].map { AureaText.t($0) }
+            }
+            if type == fxEffectTypeId("aurea.transition.ink_bloom") && param.index == 1 {
+                return ["ink_mark", "ink_reveal", "ink_erase"].map { AureaText.t($0) }
+            }
+            return enumOptions(param)
+        }()
+        let options = rawOptions.enumerated().map { i, o in
             HyperEffectGate.optionLocked(typeId: type, param: param.index, value: Float(i)) ? o + " 🔒" : o
         }
         let top = Swift.max(0, options.count - 1)
@@ -1466,7 +1490,14 @@ struct EffectsView: View {
         let chosen = selected?.effect == effect && selected?.param == param.index
         let segmented = param.enumStyle == FxParamControl.enumSegmented
             || (param.enumStyle == 0 && options.count <= 4 && options.allSatisfy { $0.count <= 10 })
-        return choiceLayout(label: d.label, options: options, current: current, segmented: segmented, enabled: enabled,
+        if type == fxEffectTypeId("aurea.generate.particular") && param.index == 48 {
+            ParticleShapeField(current: current, enabled: enabled, tag: "effects.choice.\(effect).\(param.index)") { shape in
+                guard ok() else { return }
+                choose(param, effect: effect, component: 0, explicit: false)
+                writeComponent(param.index, effect: effect, component: 0, value: Float(shape))
+            }
+        } else {
+            choiceLayout(label: d.label, options: options, current: current, segmented: segmented, enabled: enabled,
                             labelActive: chosen, tag: "effects.choice.\(effect).\(param.index)",
                             disabledState: enabled ? nil : disabledText(disabledBy),
                             onLabel: { choose(param, effect: effect, component: 0, explicit: true) },
@@ -1479,7 +1510,8 @@ struct EffectsView: View {
                 model.hyperOptionPrompt = true
                 return
             }
-            writeComponent(param.index, effect: effect, component: 0, value: Float(index))
+                writeComponent(param.index, effect: effect, component: 0, value: Float(index))
+            }
         }
     }
 
@@ -1777,6 +1809,17 @@ struct EffectsView: View {
     // =========================================================================
 
     private func keyframeTapped() {
+        if remapEffect != nil {
+            guard canAnimate, let layer = model.primarySelection else { return }
+            let keys = selectedTrack
+            if let index = keys.firstIndex(where: { $0.time == model.localPlayhead }) {
+                if keys.count > 2 { model.engine.removeTimeRemap(layer, index: UInt32(index)) }
+            } else {
+                _ = model.engine.editTimeRemap(layer, index: -1, time: Int64(model.localPlayhead), value: 0, interpolation: -1)
+            }
+            model.refreshModel(force: true)
+            return
+        }
         toggleSelectedKey()
         // P1-5: o corpo rola até a linha do parâmetro escolhido.
         if !meshSelected, let s = railSelection, s.effect == openId {
@@ -1831,7 +1874,9 @@ struct EffectsView: View {
         model.endGesture(); model.commitPendingCommands(); model.refreshModel(force: true)
     }
     private func updateTimelineFocus() {
-        if meshSelected, let effect = openId {
+        if remapEffect != nil {
+            model.timelineFocus = [TimelineTrack(property: 30)]
+        } else if meshSelected, let effect = openId {
             model.timelineFocus = [TimelineTrack(property: 44, effect: effect, param: 0)]
         } else if let layer = model.primarySelection, let effect = openId, puppet.layer == layer,
            puppet.effect >= 0, UInt32(puppet.effect) == effect,
@@ -1852,11 +1897,15 @@ struct EffectsView: View {
         }
     }
     private func openCurve() {
-        guard let selected = railSelection else { return }
         let track = selectedTrack
         guard track.count >= 2 else { return }
         let index = Swift.min(track.count - 2, track.lastIndex(where: { $0.time <= model.localPlayhead }) ?? 0)
         let key = track[index]
+        if remapEffect != nil {
+            model.openCurve(property: 30, effect: UInt32.max, param: 0, time: key.time)
+            return
+        }
+        guard let selected = railSelection else { return }
         model.openCurve(property: 31, effect: selected.effect, param: selected.param * 4 + UInt32(selected.component), time: key.time)
     }
     private func openExpression() {
@@ -1953,8 +2002,7 @@ struct EffectsView: View {
             onFavorite: { entry in _ = prefs.toggleFavorite(entry.typeId) }, browse: true,
             onTool: { tool in fxOpenEffectTool(tool, in: model) })
     }
-    /// Escolheu no navegador: adiciona NO FIM da pilha das camadas escolhidas. A
-    /// lista decide se abre (só o 1º efeito da camada abre sozinho).
+    /// Adiciona ao fim da pilha das camadas selecionadas.
     private func pick(_ entry: EffectCatalogItem) {
         let targets = model.editingLayers.filter { model.editingSelection.contains($0.id) && !$0.locked }
         guard model.started, !targets.isEmpty, pendingPick == nil else { return }
@@ -1970,8 +2018,8 @@ struct EffectsView: View {
 private struct FxAddRowStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .background(configuration.isPressed ? AureaColors.fxListSurface : AureaColors.fxLowSurface,
-                        in: RoundedRectangle(cornerRadius: 5))
+            .background(configuration.isPressed ? AureaColors.surfaceHigh : AureaColors.accentDim,
+                        in: RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -2551,6 +2599,8 @@ struct FxEqResponseGraph: View {
 /// Tremor…), no idioma do app; `fallback` = o nome que o motor publica.
 func fxPresetLabel(_ pid: String, _ fallback: String) -> String {
     switch pid {
+    case "copies_line", "copies_orbit", "copies_magnet", "copies_field":
+        return AureaText.t(pid)
     case "impact": return AureaText.t("fxp_impact")
     case "handheld": return AureaText.t("fxp_handheld")
     case "glitch": return AureaText.t("fxp_glitch")

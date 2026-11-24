@@ -50,6 +50,9 @@ struct DiscardFrameWsiDispatch {
     PFN_vkQueueSubmit originalSubmit = backend.device_dispatch().vkQueueSubmit;
     inline static DiscardFrameWsiDispatch* active = nullptr;
     u32 acquires = 0, presents = 0, frameWaits = 0, frameSignals = 0;
+    u32 rejectedPresents = 0;
+    VkSemaphore pendingWait = VK_NULL_HANDLE;
+    bool retriedSameWait = false;
     bool attached = false;
     explicit DiscardFrameWsiDispatch(vk::Backend& b) : backend(b) {
         attached = vk::DiscardFrameTestAccess::attach_test_wsi(b).ok();
@@ -78,6 +81,15 @@ struct DiscardFrameWsiDispatch {
     }
     static VKAPI_ATTR VkResult VKAPI_CALL present(VkQueue queue, const VkPresentInfoKHR* info) {
         ++active->presents;
+        if (active->rejectedPresents) {
+            --active->rejectedPresents;
+            active->pendingWait = info->pWaitSemaphores[0];
+            return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+        }
+        if (active->pendingWait) {
+            active->retriedSameWait = active->pendingWait == info->pWaitSemaphores[0];
+            active->pendingWait = VK_NULL_HANDLE;
+        }
         std::vector<VkPipelineStageFlags> stages(info->waitSemaphoreCount, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
         VkSubmitInfo consume{VK_STRUCTURE_TYPE_SUBMIT_INFO};
         consume.waitSemaphoreCount = info->waitSemaphoreCount;
@@ -153,6 +165,43 @@ AUREA_TEST(PreviewDiscardGpu, FailedFramesReuseOneImageAndConsumeAcquireExactlyO
     AUREA_CHECK_EQ(wsi.frameWaits, 2u);
     AUREA_CHECK_EQ(wsi.frameSignals, 2u);
     AUREA_CHECK_EQ(retired, 30u);
+    AUREA_CHECK_EQ(vk::Backend::validation_errors(), errors);
+}
+
+AUREA_TEST(PreviewDiscardGpu, RejectedPresentRetriesTheQueuedSignalBeforeAnotherAcquire) {
+    AUREA_REQUIRE_GPU();
+    Gpu isolated;
+    AUREA_CHECK(isolated.ok); if (!isolated.ok) return;
+    auto& backend = isolated.backend;
+    const u32 errors = vk::Backend::validation_errors();
+    DiscardFrameWsiDispatch wsi(backend);
+    AUREA_CHECK(wsi.attached); if (!wsi.attached) return;
+    wsi.rejectedPresents = 2;
+    FrameBegin display;
+    AUREA_CHECK(backend.begin_frame(display).ok());
+    AUREA_CHECK(display.backbuffer.valid());
+    vk::DiscardFrameTestAccess::mark_unused_backbuffer_present(backend);
+    AUREA_CHECK(backend.end_frame().code() == Errc::OutOfDeviceMemory);
+
+    FrameBegin offscreen;
+    AUREA_CHECK(backend.begin_offscreen_frame(offscreen).ok());
+    AUREA_CHECK(!offscreen.backbuffer.valid());
+    AUREA_CHECK(backend.end_frame().ok());
+    AUREA_CHECK_EQ(wsi.presents, 1u);
+    AUREA_CHECK(backend.begin_frame(display).code() == Errc::OutOfDeviceMemory);
+    AUREA_CHECK_EQ(wsi.acquires, 1u);
+    AUREA_CHECK_EQ(wsi.frameSignals, 1u);
+
+    AUREA_CHECK(backend.begin_frame(display).ok());
+    AUREA_CHECK(display.backbuffer.valid());
+    AUREA_CHECK(wsi.retriedSameWait);
+    AUREA_CHECK_EQ(wsi.presents, 3u);
+    vk::DiscardFrameTestAccess::mark_unused_backbuffer_present(backend);
+    AUREA_CHECK(backend.end_frame().ok());
+    backend.wait_idle();
+    AUREA_CHECK_EQ(wsi.acquires, 2u);
+    AUREA_CHECK_EQ(wsi.presents, 4u);
+    AUREA_CHECK_EQ(wsi.frameSignals, 2u);
     AUREA_CHECK_EQ(vk::Backend::validation_errors(), errors);
 }
 #endif

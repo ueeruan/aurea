@@ -1,4 +1,6 @@
 #include "aurea/export/OfflineFrameRenderer.hpp"
+#include "aurea/export/ExportDiagnostics.hpp"
+#include "aurea/export/ExportMemory.hpp"
 #include "aurea/project/Project.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
@@ -45,6 +47,8 @@ Status OfflineFrameRenderer::initialize(GPUBackend& gpu, const EffectRegistry& e
     const std::atomic<bool>* cancel) noexcept {
     if (gpu_) return Errc::InvalidState;
     gpu_ = &gpu;
+    driverBudgetSampleNs_ = 0;
+    driverHeadroom_.reset();
     fenceTimeoutNs_ = timeout ? timeout : 120'000'000'000ull;
     media_.set_factory(sources);
     media_.set_memory(memory);
@@ -97,7 +101,7 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
     FrameIndex time, const OffscreenTarget& target,
     const ImagePixels* (*images)(void*, AssetId), void* imageContext,
     const RenderSettings& requested, u64& submittedFrame, std::mutex* pollingMutex,
-    const std::atomic<bool>* additionalCancel) noexcept {
+    const std::atomic<bool>* additionalCancel, ExportDiagnostics* diagnostics) noexcept {
     measurements_ = {};
     ScopedElapsedTime measured{measurements_.elapsedNs};
     submittedFrame = 0;
@@ -137,13 +141,21 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
         std::unique_lock<std::mutex> gpuLock;
         if (pollingMutex) gpuLock = std::unique_lock<std::mutex>(*pollingMutex);
         if (cancelled()) return Errc::Cancelled;
+        if (!measurements_.attempts && settings.boundedSceneExposure && !serialSceneExposure_) {
+            if (!driverBudgetSampleNs_ || start - driverBudgetSampleNs_ >= kExportGpuBudgetSampleIntervalNs) {
+                driverHeadroom_ = gpu_->memory_budget().largest_device_local_headroom();
+                driverBudgetSampleNs_ = start;
+            }
+            settings.sceneExposureBatchBudgetBytes = export_exposure_batch_budget_bytes(
+                settings.sceneExposureBatchBudgetBytes, driverHeadroom_);
+        }
         ++measurements_.attempts;
         const u64 observed = generation_.load(std::memory_order_acquire);
         // O prazo do quadro exato já passou (ver abaixo): a fonte pode
         // oferecer o quadro do mesmo trecho que estiver mais perto.
         const bool afterFirst = approximateFrames_ > 0;
         const u64 checkNs = monotonic_ns();
-        const bool late = approximateRun_ < kMaxApproximateRun
+        const bool late = !requireCompleteFrames_ && approximateRun_ < kMaxApproximateRun
             && (checkNs - lastProgress >= (afterFirst ? deadlines_.approximateAfterNs : deadlines_.approximateNs)
                 || checkNs - start >= (afterFirst ? deadlines_.approximateTotalAfterNs : deadlines_.approximateTotalNs));
         settings.approximateAhead = late;
@@ -159,6 +171,8 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
             media_.collect(sequence_, 2);
         }
         const bool exact = !snapshot_.missingVideoFrames && !snapshot_.staleVideoFrames;
+        if (diagnostics) diagnostics->stage(ExportDiagnostics::Lane::Producer,
+            exact ? ExportDiagnostics::Stage::Render : ExportDiagnostics::Stage::Decode);
         // 0.3.0: o quadro exato que NUNCA chega (decoder do aparelho preso num
         // ponto do clipe: "trava sempre no quadro 302", 1080p60 de celular)
         // parava o export e todo degrau da escada parava igual, porque trocar
@@ -241,6 +255,11 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
             // 0.5.2 (E1): o quadro deixou de fora algo que nunca chega (modelo que
             // falhou ao subir): ele vale como está, como a prévia mostra; avisa.
             if (renderer_.take_unavailable()) {
+                if (requireCompleteFrames_) {
+                    std::snprintf(failure_, sizeof(failure_), "recurso de composicao indisponivel (%s:%u)",
+                        site_name(renderer_.unavailable_file()), renderer_.unavailable_line());
+                    return {Errc::NotFound, failure_};
+                }
                 if (!omitted_ && !site_unresolved(renderer_.unavailable_file(), renderer_.unavailable_line()))
                     AUREA_LOG_WARN("export: quadro %lld sem um recurso indisponivel (%s:%u); sai como a previa",
                                    static_cast<long long>(time.value), site_name(renderer_.unavailable_file()), renderer_.unavailable_line());
@@ -301,9 +320,9 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
         // Decoder parado sem entregar o quadro: reabre a fonte de quem espera
         // (uma vez por quadro). Um codec do aparelho preso depois de um seek
         // volta a andar com outro codec; reabrir também refaz o seek.
-        if (!exact && !reopened
-            && now - lastProgress >= (approximateFrames_ ? deadlines_.reopenAfterNs : deadlines_.reopenNs)) {
-            reopened = true;
+        const bool exceededSourceWait = now - lastProgress >= (approximateFrames_ ? deadlines_.reopenAfterNs : deadlines_.reopenNs)
+            || (requireCompleteFrames_ && !softwareDecode_ && now - start >= deadlines_.reopenNs);
+        if (!exact && !reopened && exceededSourceWait) {
             u32 closed = 0;
             bool neverDelivered = false;
             for (const FrameSnapshot::VideoSourceWait& w : snapshot_.videoSourceWaits) {
@@ -318,12 +337,13 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
             // o quadro falhava, a escada recomeçava do zero e todo degrau parava
             // no mesmo ponto. Daqui em diante esta sessão abre a mídia no
             // decoder compatível, e a fonte reaberta já sai por ele.
-            if (closed && neverDelivered && !softwareDecode_) {
+            if (closed && (neverDelivered || requireCompleteFrames_) && !softwareDecode_) {
                 set_software_decode(true);
-                AUREA_LOG_WARN("export: quadro %lld sem nenhum quadro da fonte; decodificacao compativel daqui em diante",
+                AUREA_LOG_WARN("export: quadro %lld sem amostra exata da fonte; decodificacao compativel daqui em diante",
                                static_cast<long long>(time.value));
             }
             if (closed) {
+                reopened = true;
                 AUREA_LOG_WARN("export: quadro %lld sem o quadro exato ha %llu ms; %u fonte(s) de video reaberta(s)",
                                static_cast<long long>(time.value),
                                static_cast<unsigned long long>((now - lastProgress) / 1'000'000ull), closed);
@@ -338,7 +358,7 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
             // ele sai, o ponto entra na lista e o export avisa. Com upload ou
             // ambiente ainda a caminho (transitório), falha como antes.
             // Memory failures were handled above without encoding partial output.
-            if (exact && waitFile && !in_flight()) {
+            if (!requireCompleteFrames_ && exact && waitFile && !in_flight()) {
                 remember_unresolved(waitFile, waitLine);
                 omitted_ = true;
                 approximateRun_ = 0;

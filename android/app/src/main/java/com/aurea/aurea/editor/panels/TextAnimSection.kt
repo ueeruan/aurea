@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -36,8 +35,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -48,20 +51,20 @@ import com.aurea.aurea.engine.TrackKey
 import com.aurea.aurea.engine.TrackProperty
 import com.aurea.aurea.presets.TITLE_MOTION_PRESET_BASE
 import com.aurea.aurea.presets.TitleMotionPresetLabels
-import com.aurea.aurea.ui.ds.KeyframeLook
-import com.aurea.aurea.ui.ds.KeyframeDiamondIcon
+import com.aurea.aurea.ui.ds.FxParamLabel
+import com.aurea.aurea.ui.ds.FxRow
+import com.aurea.aurea.ui.ds.FxRuler
+import com.aurea.aurea.ui.ds.FxValueBox
 import com.aurea.aurea.ui.ds.KeypadRequest
-import com.aurea.aurea.ui.ds.PropertyCustomRow
-import com.aurea.aurea.ui.ds.TickRuler
 import com.aurea.aurea.ui.ds.ValueBox
-import com.aurea.aurea.ui.ds.valueDrag
+import com.aurea.aurea.ui.ds.numeroPtBr
+import com.aurea.aurea.ui.ds.rememberFxRulerState
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
 import com.aurea.aurea.ui.theme.LayerType
 import com.aurea.aurea.ui.theme.tocavel
-import kotlin.math.roundToInt
 
 /** 0.5.0: presets no modelo do Motion (mesma ordem de `build_motion_text_preset`). */
 private val TextPresets = listOf(
@@ -175,7 +178,11 @@ internal fun TextAnimSection(env: PanelEnv, onEditing: (Boolean) -> Unit = {}, p
     val open = parts and TEXT_ANIM_LIST != 0 && editing in list.indices
     LaunchedEffect(open) { onEditing(open) }
     if (open) {
-        AnimatorEditor(env, editing, list[editing]) { editing = -1 }
+        AnimatorEditor(env, editing, list[editing]) {
+            val focus = store.timelineFocus?.singleOrNull()
+            if (focus?.property == TrackProperty.TEXT_ANIM_PARAM && focus.effectIndex == editing) store.timelineFocus = null
+            editing = -1
+        }
         return
     }
     if (parts and TEXT_ANIM_LIST != 0) PanelSection(stringResource(R.string.ui_text_animators), CupertinoGlyph.Sparkles, "text.sec.animators", count = list.size) {
@@ -580,61 +587,59 @@ private fun AnimatorColor(env: PanelEnv, index: Int, label: String, base: Int, v
     }
 }
 
-/** Uma linha de valor: rótulo com losango, régua e o número. */
+/** A régua seleciona a propriedade que o trilho de animação controla. */
 @Composable
 private fun KeyRow(env: PanelEnv, index: Int, p: KeyParam) {
     val store = env.store
-    val state = store.textAnimValue(index, p.key)
-    val flags = state[1].toInt()
-    val look = when {
-        flags and 2 != 0 -> KeyframeLook.KeyHere
-        flags and 1 != 0 -> KeyframeLook.Animated
-        else -> KeyframeLook.None
-    }
-    val value = { store.textAnimValue(index, p.key)[0] }
+    val value = store.textAnimValue(index, p.key)[0]
     val track = TrackKey(TrackProperty.TEXT_ANIM_PARAM, index, p.key)
     val exprKeys = listOf(track)
     val exprLook by remember(store, index, p.key) { derivedStateOf { store.expressionLook(exprKeys) } }
     val label = stringResource(p.label)
     val decimals = if (p.step < 0.5f) 1 else 0
-    PropertyCustomRow(
-        label, selected = store.timelineFocus?.singleOrNull() == track, onSelect = { store.timelineFocus = exprKeys }, keyframe = look,
-        modifier = Modifier.testTag("anim.$index.key.${p.key}"),
-        expression = exprLook, onExpression = { store.openExpression(label, exprKeys, 1f, p.unit) },
+    val tag = "anim.$index.key.${p.key}"
+    val ruler = rememberFxRulerState()
+    val shown = "${numeroPtBr(ruler.live ?: value, decimals)}${p.unit}"
+    val rulerLabel = stringResource(R.string.om_fx_ruler, label)
+    val select = { store.timelineFocus = exprKeys }
+    val begin = { select(); store.beginGesture(label) }
+    val write = { next: Float -> store.setTextAnimParam(index, p.key, next.coerceIn(p.min, p.max)) }
+    val finish = { store.endGesture() }
+    Row(
+        Modifier.fillMaxWidth().height(FxRow.Ruler).testTag(tag),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            val keyLabel = stringResource(if (look == KeyframeLook.KeyHere) R.string.panel_tirar_keyframe_daqui else R.string.panel_marcar_keyframe_aqui)
-            Box(
-                Modifier.size(40.dp).testTag("anim.$index.key.${p.key}.toggle").semantics { contentDescription = keyLabel }
-                    .tocavel { store.timelineFocus = exprKeys; store.toggleTextAnimKey(index, p.key) },
-                contentAlignment = Alignment.Center,
-            ) {
-                KeyframeDiamondIcon(look, enabled = true)
-            }
-            Box(Modifier.weight(1f).height(44.dp)) {
-                TickRuler(
-                    value = value,
-                    unitsPerDp = p.step,
-                    active = true,
-                    modifier = Modifier.fillMaxSize().valueDrag(
-                        enabled = true,
-                        start = value,
-                        unitsPerDp = { p.step },
-                        min = p.min,
-                        max = p.max,
-                        onStart = { store.timelineFocus = exprKeys; store.beginGesture("animador de texto") },
-                        onValue = { store.setTextAnimParam(index, p.key, it) },
-                        onEnd = { store.endGesture() },
-                    ),
-                )
-            }
-            Spacer(Modifier.width(8.dp))
-            ValueBox(if (decimals > 0) "${com.aurea.aurea.ui.ds.numeroPtBr(state[0], 1)}${p.unit}" else "${state[0].roundToInt()}${p.unit}", onTap = {
-                env.openKeypad(KeypadRequest(label, value(), p.unit, p.min, p.max, decimals) {
-                    store.beginGesture("animador de texto"); store.setTextAnimParam(index, p.key, it.coerceIn(p.min, p.max)); store.endGesture()
-                })
+        FxParamLabel(
+            label, 45.dp, Modifier.padding(FxRow.Margin).testTag("$tag.label"),
+            active = store.timelineFocus?.singleOrNull() == track,
+            expression = exprLook,
+            onClick = select,
+            onLongClick = { select(); store.openExpression(label, exprKeys, 1f, p.unit) },
+        )
+        FxRuler(
+            value = value, step = p.step, min = p.min, max = p.max,
+            onStart = begin, onValue = write, onEnd = finish, state = ruler,
+            modifier = Modifier.weight(1f).height(FxRow.Ruler - 12.dp).testTag("$tag.ruler").semantics {
+                contentDescription = rulerLabel
+                stateDescription = shown
+                progressBarRangeInfo = ProgressBarRangeInfo(value.coerceIn(p.min, p.max), p.min..p.max)
+                setProgress { next ->
+                    if (!next.isFinite()) return@setProgress false
+                    begin()
+                    write(next)
+                    finish()
+                    true
+                }
+            },
+        )
+        FxValueBox(shown, 45.dp, Modifier.padding(FxRow.Margin).testTag("$tag.value"), onClick = {
+            select()
+            env.openKeypad(KeypadRequest(label, value, p.unit, p.min, p.max, decimals) {
+                begin()
+                write(it)
+                finish()
             })
-        }
+        })
     }
 }
 

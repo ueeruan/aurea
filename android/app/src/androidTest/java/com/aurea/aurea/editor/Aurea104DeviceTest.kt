@@ -214,7 +214,7 @@ class Aurea104DeviceTest {
         val tracking = effectCardId(EffectTool.Tracking.typeId)
         compose.onNodeWithTag("effects.search.results").performScrollToNode(hasTestTag("effects.result.$tracking"))
         compose.onNodeWithTag("effects.result.$tracking").performClick()
-        compose.onNodeWithTag("effects.detail.variant.$tracking").performScrollTo().performClick()
+
     }
 
     @Test fun automaticPointUsesRealClipAndExportsChronologicalReview() {

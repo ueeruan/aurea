@@ -628,7 +628,7 @@ struct TopBarView: View {
                                 ShellBarButton(glyph: CupertinoGlyph.Link, description: AureaText.t("editor_vincular_escolhidas_camada"), size: 19, width: 40,
                                                height: EditorLayout.topBar, tint: ink) {
                                     if model.status.playing != 0 { model.playPause() }
-                                    shell.linkIds = Array(model.selection); shell.linkAnchor = bounds.frame(in: .global)
+                                    shell.linkIds = Array(model.editingSelection); shell.linkAnchor = bounds.frame(in: .global)
                                 }.accessibilityIdentifier("batch.link")
                             }.frame(width: 40, height: EditorLayout.topBar)
                             ShellBarButton(glyph: CupertinoGlyph.Trash, description: AureaText.t("editor_excluir_selecao"), size: 19, width: 40, height: EditorLayout.topBar, tint: ink) {
@@ -681,7 +681,7 @@ struct TopBarView: View {
                 description: AureaText.t(parent != 0 ? "editor_vinculada_outra_camada_trocar" : "editor_vincular_outra_camada"), size: 20, width: width,
                 height: height, tint: tint) {
                 if model.status.playing != 0 { model.playPause() }
-                shell.linkIds = Array(model.selection); shell.linkAnchor = bounds.frame(in: .global)
+                shell.linkIds = Array(model.editingSelection); shell.linkAnchor = bounds.frame(in: .global)
             }.accessibilityIdentifier("layer.parent")
         }.frame(width: width, height: height)
     }
@@ -1362,7 +1362,7 @@ private struct CopyPasteButton: View {
                              tag: "copyPaste.more.stairs") { model.arrangeLayerTimes(1) })
             out.append(.item(AureaText.t("om_cp_link_selected"), glyph: CupertinoGlyph.Link, tag: "copyPaste.more.link") {
                 if model.status.playing != 0 { model.playPause() }
-                shell.linkIds = Array(model.selection); shell.linkAnchor = anchor
+                shell.linkIds = Array(model.editingSelection); shell.linkAnchor = anchor
             })
         }
         return out
@@ -1846,14 +1846,16 @@ private struct ShellLinkPopup: View {
     let onHeight: (CGFloat) -> Void
     private var colors: MenuColors { MenuColors.of(.light) }
     private var current: Int64 {
-        let parents = Set(model.layers.filter { ids.contains($0.id) }.map { row -> Int64 in
-            (model.engine.layerDetail(row.id)?["parentId"] as? NSNumber)?.int64Value ?? 0
+        let rows = model.editingLayers
+        let parents = Set(rows.filter { ids.contains($0.id) }.map { row -> Int64 in
+            let index = Int(row.parentIndex)
+            return rows.indices.contains(index) ? rows[index].id : 0
         })
         return parents.count == 1 ? parents.first! : -1
     }
     var body: some View {
         let candidates = Set(model.parentCandidatesForAll(ids).map(\.id))
-        let visual = model.layers.filter { $0.kind != 3 }
+        let visual = model.editingLayers.filter { $0.kind != 3 }
         let now = current
         return ScrollViewReader { proxy in
             ScrollView {

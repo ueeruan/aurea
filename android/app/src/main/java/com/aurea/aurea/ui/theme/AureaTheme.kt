@@ -3,6 +3,7 @@ package com.aurea.aurea.ui.theme
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.LocalOverscrollFactory
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -47,7 +48,16 @@ fun AureaTheme(content: @Composable () -> Unit) {
         outlineVariant = AureaColors.Border,
     )
     MaterialTheme(colorScheme = scheme) {
-        CompositionLocalProvider(LocalTextStyle provides AureaType.Base, content = content)
+        // 1.0.8 ("desci até o fim e não consigo apertar nada"): o esticão do
+        // overscroll no fim de uma lista conta como rolagem em curso, e o toque
+        // seguinte só parava a animação (medido: ~0,3–0,6 s; puxando para baixo
+        // de novo, sem fim). Subir "pesado" era o esticão voltando antes de rolar.
+        // Sem overscroll em nenhuma lista do app: chega no fim e para, toque vale.
+        CompositionLocalProvider(
+            LocalTextStyle provides AureaType.Base,
+            LocalOverscrollFactory provides null,
+            content = content,
+        )
     }
 }
 

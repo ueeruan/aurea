@@ -188,10 +188,15 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
         face == TransformTab.Mover && moveZ -> intArrayOf(TrackProperty.POSITION_Z)
         else -> face.props
     }
-    val animator = if (face == TransformTab.Animadores) animatorRailTrack(store.layerAnimators.size,
+    val layerAnimator = if (face == TransformTab.Animadores) animatorRailTrack(store.layerAnimators.size,
         store.timelineFocus?.singleOrNull(), store.transformAnimatorFocus?.takeIf { it.first == store.primary }?.second) else null
-    DisposableEffect(store, store.projectGeneration, store.composition?.id, store.primary, face, show3D, axis, animator, cameraScale) {
-        if (animator != null) store.focusLayerAnimator(animator)
+    val textAnimator = store.timelineFocus?.singleOrNull()?.takeIf {
+        face == TransformTab.Animadores && it.property == TrackProperty.TEXT_ANIM_PARAM && it.effectIndex in store.textAnimators.indices
+    }
+    val animator = textAnimator ?: layerAnimator
+    DisposableEffect(store, store.projectGeneration, store.composition?.id, store.primary, face, show3D, axis, layerAnimator, cameraScale) {
+        if (textAnimator != null) store.timelineFocus = listOf(textAnimator)
+        else if (layerAnimator != null) store.focusLayerAnimator(layerAnimator)
         else store.timelineFocus = keyProps.map { TrackKey(it) }
         onDispose { store.timelineFocus = null }
     }
@@ -199,9 +204,17 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
     val look by remember(store, face, axis, show3D, animator, cameraScale) {
         derivedStateOf {
             when {
-                animator != null -> {
-                    val values = store.layerAnimators.getOrNull(animator.effectIndex)
-                    val bit = 1 shl animator.paramIndex
+                textAnimator != null -> {
+                    val flags = store.textAnimValue(textAnimator.effectIndex, textAnimator.paramIndex)[1].toInt()
+                    when {
+                        flags and 2 != 0 -> KeyframeLook.KeyHere
+                        flags and 1 != 0 -> KeyframeLook.Animated
+                        else -> KeyframeLook.None
+                    }
+                }
+                layerAnimator != null -> {
+                    val values = store.layerAnimators.getOrNull(layerAnimator.effectIndex)
+                    val bit = 1 shl layerAnimator.paramIndex
                     when {
                         values != null && values[25].toInt() and bit != 0 -> KeyframeLook.KeyHere
                         values != null && values[24].toInt() and bit != 0 -> KeyframeLook.Animated
@@ -239,7 +252,8 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
     }
 
     val onKeyframe: (() -> Unit)? = when {
-        animator != null -> { { store.toggleLayerAnimKey(animator.effectIndex, animator.paramIndex) } }
+        textAnimator != null -> { { store.toggleTextAnimKey(textAnimator.effectIndex, textAnimator.paramIndex) } }
+        layerAnimator != null -> { { store.toggleLayerAnimKey(layerAnimator.effectIndex, layerAnimator.paramIndex) } }
         cameraScale -> { { store.toggleCameraLensKey(EditorStore.CAMERA_LENS_FOCAL) } }
         keyProps.isNotEmpty() -> { { store.toggleTransformKeyframe(keyProps) } }
         else -> null

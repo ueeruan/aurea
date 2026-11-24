@@ -20,6 +20,7 @@
 #include "aurea/project/Project.hpp"
 #include "aurea/timeline/Composition.hpp"
 #include "aurea/timeline/Layer.hpp"
+#include "aurea/timeline/PrecompControls.hpp"
 #include "aurea/timeline/Timeline.hpp"
 
 #include <algorithm>
@@ -27,6 +28,128 @@
 #include <cstring>
 
 namespace aurea {
+
+std::vector<u64> Engine::route_to_layer(u64 compId, u64 layerId) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    if (!project_) return {};
+    auto& timeline = project_->timeline();
+    const auto target = CompositionId::unpack(compId);
+    const auto layer = LayerId::unpack(layerId);
+    const auto* dest = timeline.composition(target);
+    if (!dest || !dest->layer(layer)) return {};
+    struct Step { CompositionId comp; std::vector<u64> groups; };
+    std::vector<Step> pending{{timeline.current(), {}}};
+    std::vector<CompositionId> seen{timeline.current()};
+    for (usize i = 0; i < pending.size(); ++i) {
+        const Step step = pending[i];
+        if (step.comp == target) {
+            auto path = step.groups;
+            path.push_back(layerId);
+            return path;
+        }
+        const auto* comp = timeline.composition(step.comp);
+        if (!comp || step.groups.size() >= 8) continue;
+        comp->layers().for_each([&](LayerId id, const Layer& row) {
+            if (row.kind != LayerKind::Composition || !row.nested.composition.valid() ||
+                std::find(seen.begin(), seen.end(), row.nested.composition) != seen.end()) return;
+            seen.push_back(row.nested.composition);
+            auto route = step.groups;
+            route.push_back(id.pack());
+            pending.push_back({row.nested.composition, std::move(route)});
+        });
+    }
+    return {};
+}
+
+std::vector<Engine::PrecompControlRow> Engine::precomp_controls(u64 groupId) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* inner = group_inner_locked(groupId, nullptr, nullptr);
+    if (!inner) return {};
+    const auto& edits = current_composition()->layer(LayerId::unpack(groupId))->nested.overrides;
+    std::vector<PrecompControlRow> rows;
+    const auto& order = inner->order();
+    for (u32 index = 0; index < order.size(); ++index) {
+        const LayerId id = order.at(index);
+        const Layer* child = inner->layer(id);
+        if (!child) continue;
+        const u8 available = available_precomp_controls(*child);
+        for (auto kind : {PrecompControl::Text, PrecompControl::Color, PrecompControl::Opacity}) {
+            const u8 bit = precomp_control_bit(kind);
+            if (!(available & bit) && !(child->precompExposed & bit)) continue;
+            const auto it = std::find_if(edits.begin(), edits.end(), [&](const PrecompControlValue& edit) {
+                return edit.target == id && edit.kind == kind;
+            });
+            PrecompControlRow row;
+            row.value.target = id;
+            row.value.kind = kind;
+            row.name = child->name;
+            row.exposed = (child->precompExposed & bit) != 0;
+            row.available = (available & bit) != 0;
+            row.overridden = it != edits.end();
+            if (row.overridden) row.value = *it;
+            else if (kind == PrecompControl::Text) row.value.text = child->text.content;
+            else if (kind == PrecompControl::Color) row.value.rgba = child->shape.fillColor;
+            else row.value.rgba.x = child->transform.opacity;
+            rows.push_back(std::move(row));
+        }
+    }
+    for (const auto& edit : edits) {
+        if (inner->layer(edit.target)) continue;
+        rows.push_back(PrecompControlRow{edit, {}, true, true, false});
+    }
+    return rows;
+}
+
+bool Engine::edit_precomp_control(u64 groupId, u64 targetId, u32 type, u32 operation,
+                                  const std::string& text, Vec4 rgba) noexcept {
+    if (type > static_cast<u32>(PrecompControl::Opacity) || operation > 3) return false;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* inner = group_inner_locked(groupId, nullptr, nullptr);
+    if (!inner) return false;
+    Composition* outer = current_composition();
+    Layer* group = outer->layer(LayerId::unpack(groupId));
+    if (group->locked) return false;
+    const LayerId target = LayerId::unpack(targetId);
+    Layer* child = inner->layer(target);
+    const auto kind = static_cast<PrecompControl>(type);
+    const u8 bit = precomp_control_bit(kind);
+    if (operation <= 1) {
+        if (!child || child->locked || (operation == 0 && !(available_precomp_controls(*child) & bit))) return false;
+        const u8 mask = operation == 0 ? (child->precompExposed | bit) : (child->precompExposed & ~bit);
+        if (mask == child->precompExposed) return true;
+        history_.before_mutation(*inner, inner->id(), "controle da composição");
+        child->precompExposed = mask;
+        inner->touch();
+    } else {
+        auto& edits = group->nested.overrides;
+        auto it = std::find_if(edits.begin(), edits.end(), [&](const PrecompControlValue& edit) {
+            return edit.target == target && edit.kind == kind;
+        });
+        if (operation == 3) {
+            if (it == edits.end()) return true;
+            history_.before_mutation(*outer, outer->id(), "controle da instância");
+            edits.erase(it);
+        } else {
+            if (!child || !(child->precompExposed & available_precomp_controls(*child) & bit) ||
+                (it == edits.end() && edits.size() >= kMaxPrecompControls)) return false;
+            if (kind == PrecompControl::Text && text.size() > kMaxPrecompText) return false;
+            for (f32* component : {&rgba.x, &rgba.y, &rgba.z, &rgba.w}) {
+                if (!std::isfinite(*component)) return false;
+                *component = std::clamp(*component, 0.f, 1.f);
+            }
+            const PrecompControlValue edit{target, kind, kind == PrecompControl::Text ? text : std::string{}, rgba};
+            if (it != edits.end() && it->text == edit.text && it->rgba == edit.rgba) return true;
+            history_.before_mutation(*outer, outer->id(), "controle da instância");
+            if (it == edits.end()) edits.push_back(edit); else *it = edit;
+        }
+    }
+    outer->touch();
+    bump_model_revision_locked();
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
 
 bool Engine::set_inline_edit_target(u64 groupLayerId, u64 childLayerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);

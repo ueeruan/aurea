@@ -18,15 +18,15 @@ class FxParamMathTest {
 
     @Test
     fun rowHeightsFollowTheReference() {
-        // 0.3.4 painéis: as linhas cresceram (eram 51 / 57 / 38).
-        assertEquals(60f, FxParamMath.rowHeight(ParamControl.SLIDER, ParamType.FLOAT))
-        assertEquals(66f, FxParamMath.rowHeight(ParamControl.RULER, ParamType.FLOAT))
-        assertEquals(66f, FxParamMath.rowHeight(ParamControl.POINT, ParamType.POINT2D))
-        assertEquals(66f, FxParamMath.rowHeight(ParamControl.XYZ, ParamType.POINT3D))
-        assertEquals(46f, FxParamMath.rowHeight(ParamControl.AUTO, ParamType.BOOL))
-        assertEquals(46f, FxParamMath.rowHeight(ParamControl.AUTO, ParamType.ENUM))
+        // 1.0.8 visual minimalista: linhas mais compactas (eram 60 / 66 / 46); o slider virou régua.
+        assertEquals(52f, FxParamMath.rowHeight(ParamControl.SLIDER, ParamType.FLOAT))
+        assertEquals(52f, FxParamMath.rowHeight(ParamControl.RULER, ParamType.FLOAT))
+        assertEquals(52f, FxParamMath.rowHeight(ParamControl.POINT, ParamType.POINT2D))
+        assertEquals(52f, FxParamMath.rowHeight(ParamControl.XYZ, ParamType.POINT3D))
+        assertEquals(40f, FxParamMath.rowHeight(ParamControl.AUTO, ParamType.BOOL))
+        assertEquals(40f, FxParamMath.rowHeight(ParamControl.AUTO, ParamType.ENUM))
         // Linha antiga (sem controle) num número: régua.
-        assertEquals(66f, FxParamMath.rowHeight(ParamControl.AUTO, ParamType.FLOAT))
+        assertEquals(52f, FxParamMath.rowHeight(ParamControl.AUTO, ParamType.FLOAT))
         assertEquals(ParamControl.RULER, FxParamMath.controlFor(ParamControl.AUTO, ParamType.ANGLE))
         assertEquals(ParamControl.POINT, FxParamMath.controlFor(ParamControl.AUTO, ParamType.POINT2D))
         assertEquals(ParamControl.XYZ, FxParamMath.controlFor(ParamControl.AUTO, ParamType.POINT3D))
@@ -121,5 +121,29 @@ class FxParamMathTest {
         val pitch = FxParamMath.trackball(0f, 0f, 0f, 0f, 0f, 0f, 0.5f)
         assertTrue(abs(pitch[0]) > 20f)
         assertEquals(0f, pitch[1], 1e-3f)
+    }
+
+    @Test
+    fun sliderRulerStepFitsTheRangeInAboutOneHundredTwentyTicks() {
+        assertEquals(1f, FxParamMath.sliderRulerStep(0f, 100f, 1f), 1e-6f)      // 0–100 % = 1 % por risco
+        assertEquals(1f, FxParamMath.sliderRulerStep(0f, 100f, 0.1f), 1e-5f)    // múltiplo do passo
+        assertEquals(0.01f, FxParamMath.sliderRulerStep(0f, 1f, 0f), 1e-7f)     // degradê: 1 %
+        assertEquals(5f, FxParamMath.sliderRulerStep(-180f, 180f, 1f), 1e-6f)
+        assertEquals(2f, FxParamMath.sliderRulerStep(0f, 150f, 1f), 1e-6f)
+        assertEquals(0.05f, FxParamMath.sliderRulerStep(0.25f, 4f, 0.05f), 1e-6f)
+        assertEquals(10f, FxParamMath.sliderRulerStep(0f, 100f, 10f), 1e-6f)    // passo maior manda
+        assertEquals(3f, FxParamMath.sliderRulerStep(5f, 5f, 3f), 1e-6f)        // faixa vazia
+    }
+
+    @Test
+    fun rulerFadeIsFullInTheMiddleAndSmoothAtTheEdges() {
+        // Régua de 200: some nos 44 (22 %) de cada borda, curva suave.
+        assertEquals(1f, FxParamMath.rulerFade(100f, 200f))
+        assertEquals(1f, FxParamMath.rulerFade(44f, 200f))
+        assertEquals(0f, FxParamMath.rulerFade(0f, 200f))
+        assertEquals(0f, FxParamMath.rulerFade(200f, 200f))
+        assertEquals(0.5f, FxParamMath.rulerFade(22f, 200f), 1e-6f)
+        assertEquals(0.5f, FxParamMath.rulerFade(178f, 200f), 1e-6f)
+        assertEquals(0f, FxParamMath.rulerFade(10f, 0f))
     }
 }

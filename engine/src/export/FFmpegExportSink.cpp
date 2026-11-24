@@ -1000,7 +1000,8 @@ Status FFmpegSink::try_video(const char* name, bool hardware, const char* native
         std::max(1, static_cast<int>(std::lround(video_.fps * 2)));
     // Encoder de software: todos os núcleos do aparelho (era 4 fixo — metade de
     // um celular de 8 núcleos parada no degrau mais lento da escada).
-    const int cores = static_cast<int>(std::clamp(std::thread::hardware_concurrency(), 2u, 16u));
+    const int cores = static_cast<int>(std::clamp(std::thread::hardware_concurrency(), 1u,
+        video_.limitedMemory ? 2u : video_.portableFrames ? 4u : 16u));
     ctx->max_b_frames = 0; ctx->thread_count = cores; ctx->thread_type = FF_THREAD_SLICE;
     ctx->color_primaries = static_cast<AVColorPrimaries>(video_.color.primaries);
     ctx->color_trc = static_cast<AVColorTransferCharacteristic>(video_.color.transfer);
@@ -1127,7 +1128,7 @@ void FFmpegSink::describe_rung(const RungEntry& rung, char* out, usize capacity)
     switch (rung.kind) {
         case Rung::SurfaceDirect: kind = "surface-direct"; break;
         case Rung::Surface: kind = "surface"; break;
-        case Rung::Buffer: kind = "buffer"; break;
+        case Rung::Buffer: kind = video_.portableFrames ? "nv12" : "buffer"; break;
         case Rung::Legacy: kind = "legacy"; break;
         case Rung::VideoToolbox: kind = "videotoolbox"; break;
         case Rung::VideoToolboxPlanar: kind = "videotoolbox-i420"; break;
@@ -1195,10 +1196,10 @@ void FFmpegSink::build_rungs() noexcept {
             const avenc::CodecInfo& codec = deviceCodecs_[d];
             // surface-direct só quando o motor entrega o AHardwareBuffer
             // (VideoStreamConfig::directSurface); falhou = surface NV12 a seguir.
-            if (video_.directSurface && !video_.avoidSurface && codec.surface && sdr &&
+            if (!video_.portableFrames && video_.directSurface && !video_.avoidSurface && codec.surface && sdr &&
                 !avenc::debug_flag("debug.aurea.enc.skip", "surface-direct"))
                 add(Rung::SurfaceDirect, codec.name, codec.hardware, AV_PIX_FMT_NONE, d);
-            if (codec.surface && sdr && !video_.avoidSurface && !avenc::debug_flag("debug.aurea.enc.skip", "surface"))
+            if (!video_.portableFrames && codec.surface && sdr && !video_.avoidSurface && !avenc::debug_flag("debug.aurea.enc.skip", "surface"))
                 add(Rung::Surface, codec.name, codec.hardware, AV_PIX_FMT_NONE, d);
             if (!avenc::debug_flag("debug.aurea.enc.skip", "buffer"))
                 add(Rung::Buffer, codec.name, codec.hardware, AV_PIX_FMT_NONE, d);
@@ -1208,7 +1209,7 @@ void FFmpegSink::build_rungs() noexcept {
         // encoders de hardware que aceitam a configuração (0.1.8 BETA 3:
         // sem alias, isFormatSupported com NV12 e depois I420). Nada que
         // funcionava antes deixa de ser tentado.
-        if (!avenc::debug_flag("debug.aurea.enc.skip", "legacy")) {
+        if (!video_.portableFrames && !avenc::debug_flag("debug.aurea.enc.skip", "legacy")) {
             std::array<AndroidCodecCandidate, maxAndroidCandidates> legacy{};
             const usize count = android_codecs(codec_id(video_.codec), video_, true, legacy);
             for (usize i = 0; i < count; ++i) add(Rung::Legacy, legacy[i].name, true, legacy[i].pixel);
@@ -1219,7 +1220,7 @@ void FFmpegSink::build_rungs() noexcept {
         // 0.5.3: HEVC com encoder de hardware no aparelho: se nenhum deles entregar
         // o vídeo, o próximo é o H.264 do APARELHO (degrau 1 da escada de
         // tentativas), não o HEVC por software (libkvazaar: minutos por vídeo).
-        hevcSoftwareSkipped_ = hevc && hardwareExists;
+        hevcSoftwareSkipped_ = !video_.portableFrames && hevc && hardwareExists;
 #elif defined(__APPLE__)
         // 18/11/2026: degrau sem cópia (AppleVideoEncoder): o CVPixelBuffer
         // IOSurface em que o Metal renderizou vai direto ao VTCompressionSession.
@@ -1229,18 +1230,20 @@ void FFmpegSink::build_rungs() noexcept {
         {
             const u8 t = video_.color.transfer;
             const bool sdr = t == 1 || t == 6 || t == 14 || t == 15;
-            if (video_.directSurface && !video_.avoidSurface && sdr) {
+            if (video_.portableFrames || (video_.directSurface && !video_.avoidSurface && sdr)) {
                 deviceCodecs_[0] = android_video::CodecInfo{};
                 std::snprintf(deviceCodecs_[0].name, sizeof(deviceCodecs_[0].name), "%s", "VideoToolbox");
                 deviceCodecs_[0].hardware = deviceCodecs_[0].surface = true;
                 deviceCodecCount_ = 1;
-                add(Rung::SurfaceDirect, "VideoToolbox", true, AV_PIX_FMT_NONE, 0);
+                add(video_.portableFrames ? Rung::Buffer : Rung::SurfaceDirect, "VideoToolbox", true, AV_PIX_FMT_NONE, 0);
             }
         }
-        const char* vt = hevc ? "hevc_videotoolbox" : "h264_videotoolbox";
-        add(Rung::VideoToolbox, vt, true);
-        add(Rung::VideoToolboxPlanar, vt, true);
-        hevcSoftwareSkipped_ = hevc;   // 0.5.3: o mesmo no iOS (H.264 do VideoToolbox antes do software)
+        if (!video_.portableFrames) {
+            const char* vt = hevc ? "hevc_videotoolbox" : "h264_videotoolbox";
+            add(Rung::VideoToolbox, vt, true);
+            add(Rung::VideoToolboxPlanar, vt, true);
+            hevcSoftwareSkipped_ = hevc;
+        }
 #endif
     }
     const char* candidates[4]{};
@@ -1256,7 +1259,7 @@ void FFmpegSink::build_rungs() noexcept {
     // Android can provide an explicitly classified software encoder even when
     // this FFmpeg distribution has no libx265. It is still encoded/muxed
     // through the same shared FFmpeg pipeline.
-    if (h26x && !hevcSoftwareSkipped_) {
+    if (h26x && !video_.portableFrames && !hevcSoftwareSkipped_) {
         std::array<AndroidCodecCandidate, maxAndroidCandidates> software{};
         const usize count = android_codecs(codec_id(video_.codec), video_, false, software);
         for (usize i = 0; i < count; ++i) add(Rung::PlatformSoftware, software[i].name, false, software[i].pixel);
@@ -1381,8 +1384,8 @@ Status FFmpegSink::open_rung(const RungEntry& rung) noexcept {
         encoder_.acceleration = rung.hardware ? Acceleration::Hardware : Acceleration::Software;
         return OkStatus;
 #elif defined(__APPLE__)
-        // iOS: só o degrau sem cópia (AppleVideoEncoder.cpp).
-        if (rung.kind != Rung::SurfaceDirect) return Status{Errc::NotSupported, "degrau do Android"};
+        const bool direct = rung.kind == Rung::SurfaceDirect;
+        if (!direct && rung.kind != Rung::Buffer) return Status{Errc::NotSupported, "entrada indisponivel no VideoToolbox"};
         if (!native_) native_.reset(new (std::nothrow) android_video::Encoder());
         if (!native_) return Status{Errc::OutOfMemory, "encoder do VideoToolbox"};
         android_video::Request request;
@@ -1401,8 +1404,8 @@ Status FFmpegSink::open_rung(const RungEntry& rung) noexcept {
                 export_rung_memory_count('P', learnedProfile, kLearnedSeconds) == 0;
         }
         request.color = video_.color;
-        request.input = android_video::Input::Surface;
-        request.direct = true;
+        request.input = direct ? android_video::Input::Surface : android_video::Input::Buffer;
+        request.direct = direct;
         request.heartbeat = heartbeat_;
         opened = native_->open(request, deviceCodecs_[0]);
         beat();

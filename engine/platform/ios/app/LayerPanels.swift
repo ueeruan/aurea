@@ -2262,7 +2262,12 @@ struct MaskPanel: View {
         matte = state.first?.int64Value ?? 0; mode = state.count > 1 ? state[1].intValue : 0
     }
     private func write(_ target: Int64, _ value: Int) {
-        model.engine.setTrackMatteForLayer(id, matte: target, mode: UInt32(value)); model.refreshModel(force: true); load()
+        guard model.engine.setTrackMatteForLayer(id, matte: target, mode: UInt32(value)) else {
+            model.toast = AureaText.t("msg_escolha_outra_camada_como_matte")
+            return
+        }
+        model.refreshModel(force: true)
+        load()
     }
     /// A aba Forma usa o Editar pontos sobre o caminho desta máscara.
     private func syncPen() {
@@ -2314,7 +2319,12 @@ struct MaskPanel: View {
                           PanelTab(id: "matte", label: AureaText.t("ui_mask_tab_matte"), glyph: CupertinoGlyph.Crop)],
                    selectedTab: tab, onTab: { listTab = $0 }) {
             VStack(alignment: .leading, spacing: 0) {
-                if tab == "matte" { matteBody } else { masksList }
+                if tab == "matte" { matteBody }
+                else {
+                    PanelItemRow(glyph: CupertinoGlyph.Crop, title: AureaText.t("mask_use_layer"),
+                                 tag: "mask.useLayer", chevron: true) { listTab = "matte" }
+                    masksList
+                }
             }.padding(.leading, 4).padding(.trailing, 10).padding(.bottom, 16)
                 .accessibilityElement(children: .contain).accessibilityIdentifier("mask.scroll")
         }
@@ -2345,7 +2355,7 @@ struct MaskPanel: View {
                 .accessibilityIdentifier("mask.add")
         }
         if adding || model.masks.isEmpty {
-            // As três formas de criar (como as formas prontas e o desenho vetorial da referência).
+            // O motor gera os caminhos no espaço local da camada.
             HStack(spacing: 6) {
                 MaskShapeTool(kind: 0, label: AureaText.t("panel_desenhar_mao"), selected: false) { adding = false; model.addMask(2); openTab = "shape" }
                     .accessibilityIdentifier("mask.add.draw")
@@ -2354,6 +2364,14 @@ struct MaskPanel: View {
                 MaskShapeTool(kind: 2, label: AureaText.t("panel_elipse"), selected: false) { adding = false; model.addMask(1); openTab = "shape" }
                     .accessibilityIdentifier("mask.add.ellipse")
             }.padding(.top, 4)
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 3), spacing: 6) {
+                ForEach(maskShapeOptions, id: \.id) { preset in
+                    MaskShapeTool(kind: 3, label: AureaText.t(preset.label), selected: false, preset: preset.preview) {
+                        adding = false; model.addMask(preset.id); openTab = "shape"
+                    }
+                    .accessibilityIdentifier("mask.add.shape.\(preset.id)")
+                }
+            }.padding(.top, 6)
         }
         if model.masks.isEmpty {
             Color.clear.frame(height: 10)
@@ -2529,6 +2547,14 @@ struct MaskPanel: View {
     }
     private var matteBody: some View {
         VStack(alignment: .leading, spacing: 0) {
+            PanelSection(title: AureaText.t("panel_2_qual_camada_recorta"), glyph: CupertinoGlyph.RectangleStack, tag: "matte.sec.layer", count: candidates.count) {
+                if candidates.isEmpty { hint("panel_nao_ha_outra_camada_possa_recortar") }
+                ForEach(Array(candidates.enumerated()), id: \.element.id) { n, layer in
+                    PanelItemRow(glyph: layerKindGlyph(Int(layer.kind)), title: layer.name, tag: "matte.layer.\(n)", on: matte == layer.id) { write(layer.id, mode == 0 ? 1 : mode) }
+                }
+                Color.clear.frame(height: 4)
+                hint(matte != 0 ? "panel_camada_escolhida_recorta_esta_some_tela" : "panel_pela_forma_aparece_onde_outra_camada")
+            }
             PanelSection(title: AureaText.t("panel_1_recortar_pelo"), glyph: CupertinoGlyph.Crop, tag: "matte.sec.mode") {
                 Text(AureaText.t("pn_mask_target", model.editingLayers.first { $0.id == id }?.name ?? ""))
                     .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
@@ -2554,14 +2580,6 @@ struct MaskPanel: View {
                 PanelItemGrid(items: matteModes.map { value, key, glyph in
                     PanelItem(glyph: glyph, label: AureaText.t(key), tag: "matte.mode.\(value)", on: value == mode) { pickMatteMode(value) }
                 })
-            }
-            PanelSection(title: AureaText.t("panel_2_qual_camada_recorta"), glyph: CupertinoGlyph.RectangleStack, tag: "matte.sec.layer", count: candidates.count) {
-                if candidates.isEmpty { hint("panel_nao_ha_outra_camada_possa_recortar") }
-                ForEach(Array(candidates.enumerated()), id: \.element.id) { n, layer in
-                    PanelItemRow(glyph: layerKindGlyph(Int(layer.kind)), title: layer.name, tag: "matte.layer.\(n)", on: matte == layer.id) { write(layer.id, mode == 0 ? 1 : mode) }
-                }
-                Color.clear.frame(height: 4)
-                hint(matte != 0 ? "panel_camada_escolhida_recorta_esta_some_tela" : "panel_pela_forma_aparece_onde_outra_camada")
             }
         }
     }
@@ -2616,16 +2634,25 @@ struct MaskPanel: View {
 
 /// Botão grande de criar máscara: 0 desenhar, 1 retângulo, 2 elipse. Mesmo
 /// visual da ferramenta do Vetor e do `ToolTile` do Android (MaskPanel.kt).
+private let maskShapeOptions: [(id: Int, label: String, preview: Int)] = [
+    (3, "sh_shape_triangle", 4), (4, "sh_shape_pentagon", 16), (5, "mask_hexagon", 6),
+    (6, "sh_shape_octagon", 15), (7, "editor_estrela", 11), (8, "sh_shape_diamond", 25),
+]
+
 private struct MaskShapeTool: View {
     let kind: Int
     let label: String
     let selected: Bool
+    var preset: Int? = nil
     let action: () -> Void
     var body: some View {
         let color = selected ? AureaColors.accent : AureaColors.text
         Button(action: action) {
             VStack(spacing: 4) {
-                Canvas { context, size in draw(context, width: size.width, color: color) }.frame(width: 22, height: 22)
+                Group {
+                    if let preset { color.mask { ShellShapeGlyph(preset: preset) } }
+                    else { Canvas { context, size in draw(context, width: size.width, color: color) } }
+                }.frame(width: 22, height: 22).accessibilityHidden(true)
                 Text(label).font(.aurea(size: 10, weight: .semibold)).foregroundStyle(color).lineLimit(2).multilineTextAlignment(.center)
             }.padding(.horizontal, 2).padding(.vertical, 6).frame(maxWidth: .infinity).frame(height: 60)
                 .background(selected ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
@@ -2656,14 +2683,11 @@ struct CurvePanel: View {
     var body: some View { NativeCurvePanel() }
 }
 
-// Preserved route for saved panel state; TextPanel embeds the same section.
+// Preserved route for saved panel state.
 struct TextAnimationPanel: View {
     @EnvironmentObject private var model: AureaModel
     var body: some View {
-        VStack(spacing: 0) {
-            PanelHeader(title: AureaText.t("panel_animacao")) { model.openPanel(.text) }
-            ScrollView { TextAnimationSection().padding(.horizontal, 18).padding(.bottom, 24) }.accessibilityIdentifier("text.anim.scroll")
-        }
+        AnimationPanelView(initialTab: .text, onBack: { model.openPanel(.text) })
     }
 }
 
@@ -2721,7 +2745,13 @@ struct TextAnimationSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if open && parts & 1 != 0 {
-                TextAnimatorEditor(index: editing, values: animators[editing], reload: refresh) { editing = -1 }
+                TextAnimatorEditor(index: editing, values: animators[editing], reload: refresh) {
+                    if let focus = model.timelineFocus, focus.count == 1,
+                       focus[0].property == 33, Int(focus[0].effect) == editing {
+                        model.timelineFocus = nil
+                    }
+                    editing = -1
+                }
             } else {
                 if parts & 1 != 0 {
                 PanelSection(title: AureaText.t("ui_text_animators"), glyph: CupertinoGlyph.Sparkles, tag: "text.sec.animators", count: animators.count) {
@@ -2848,25 +2878,54 @@ private struct TextAnimatorEditor: View {
         TextKeyParam(key: key, label: AureaText.t(label), unit: unit, step: step, range: range)
     }
     private func row(_ p: TextKeyParam) -> some View {
-        let state = model.engine.textAnimValues(id, index: UInt32(index), keys: [NSNumber(value: p.key)]).map(\.floatValue)
-        let value = state.first ?? 0, flags = state.count > 1 ? Int(state[1]) : 0
-        let look: KeyframeLook = flags & 2 != 0 ? .keyHere : flags & 1 != 0 ? .animated : .none
-        let track = TimelineTrack(property: 33, effect: UInt32(index), param: UInt32(p.key))
-        let info = model.engine.expression(id, property: 33, effect: UInt32(index), param: UInt32(p.key))
+        let layer = id, animator = UInt32(index), key = UInt32(p.key)
+        let value = model.engine.textAnimValues(layer, index: animator, keys: [NSNumber(value: key)]).first?.floatValue ?? 0
+        let track = TimelineTrack(property: 33, effect: animator, param: key)
+        let info = model.engine.expression(layer, property: 33, effect: animator, param: key)
         let expression: ExpressionLook = (info["exists"] as? NSNumber)?.boolValue != true ? .none
             : !((info["enabled"] as? NSNumber)?.boolValue ?? true) ? .off
             : (info["error"] as? String ?? "").isEmpty ? .ok : .error
-        return NativePanelRuler(label: p.label, value: value, step: p.step, range: p.range, unit: p.unit, decimals: p.step < 0.5 ? 1 : 0, keypad: true,
-            look: look, toggleKey: {
-                model.timelineFocus = [track]
-                model.engine.toggleTextAnimKey(id, index: UInt32(index), param: UInt32(p.key))
-                reload()
-            }, expression: expression, onExpression: {
-                model.expressionSheet = ExpressionRequest(layer: id, label: p.label, tracks: [ExpressionTrack(property: 33, effect: UInt32(index), param: UInt32(p.key))], unit: p.unit)
-            }, selected: model.timelineFocus == [track], onSelect: { model.timelineFocus = [track] }, compactUnit: true, identifier: "anim.\(index).key.\(p.key)") {
-                model.engine.setTextAnimParam(id, index: UInt32(index), param: UInt32(p.key), value: $0)
-                reload()
-            }
+        let tag = "anim.\(index).key.\(p.key)"
+        let decimals = p.step < 0.5 ? 1 : 0
+        let shown = numeroPtBr(value, casas: decimals) + p.unit
+        let select = { model.timelineFocus = [track] }
+        let begin = { select(); model.beginGesture(p.label) }
+        let write: (Float) -> Void = { next in
+            model.engine.setTextAnimParam(layer, index: animator, param: key, value: next.clamped(to: p.range))
+            reload()
+        }
+        return HStack(spacing: 0) {
+            FxParamLabel(label: p.label, height: 45, active: model.timelineFocus == [track],
+                         expression: expression, onTap: select, onLongPress: {
+                select()
+                model.expressionSheet = ExpressionRequest(layer: layer, label: p.label,
+                    tracks: [ExpressionTrack(property: 33, effect: animator, param: key)], unit: p.unit)
+            })
+            .padding(FxParamMath.LABEL_MARGIN)
+            .accessibilityIdentifier(tag + ".label")
+            FxRuler(value: value, step: p.step, min: p.range.lowerBound, max: p.range.upperBound,
+                    identifier: tag + ".ruler", accessibilityLabel: AureaText.t("om_fx_ruler", p.label),
+                    accessibilityValue: shown, onBegin: begin, onValue: write, onEnd: { model.endGesture() })
+                .frame(height: FxParamMath.ROW_RULER - 12)
+            FxValueBox(text: shown, height: 45, onTap: {
+                select()
+                let project = model.projectGeneration
+                let composition = (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value
+                model.numericKeypad = KeypadRequest(title: p.label, value: value, unit: p.unit,
+                    min: p.range.lowerBound, max: p.range.upperBound, decimals: decimals, percentBase: p.range.upperBound) {
+                    guard model.projectGeneration == project, model.primarySelection == layer,
+                          (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value == composition else { return }
+                    begin()
+                    write($0)
+                    model.endGesture()
+                }
+            })
+            .padding(FxParamMath.LABEL_MARGIN)
+            .accessibilityIdentifier(tag + ".value")
+        }
+        .frame(height: FxParamMath.ROW_RULER)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(tag)
     }
     private func choice(_ label: String, _ keys: [String], field: Int, current: Int) -> some View {
         PanelChoiceRow(label: AureaText.t(label), options: keys.map { AureaText.t($0) }, isOn: { $0 == current }) { setField(field, Float($0)) }
@@ -3652,7 +3711,14 @@ enum AnimationPanelRequest { @MainActor static var tab: AnimationTab? }
 
 struct AnimationPanelView: View {
     @EnvironmentObject private var model: AureaModel
-    @State private var chosen: AnimationTab = .layer
+    @State private var chosen: AnimationTab
+    private let initialTab: AnimationTab
+    private let onBack: (() -> Void)?
+    init(initialTab: AnimationTab = .layer, onBack: (() -> Void)? = nil) {
+        self.initialTab = initialTab
+        self.onBack = onBack
+        _chosen = State(initialValue: initialTab)
+    }
     private var id: Int64 { model.primarySelection ?? 0 }
     private var text3D: Bool { model.engine.text3D(forLayer: id) != nil }
     private var tabs: [AnimationTab] { animationTabs(kind: model.selectedLayer?.kind ?? 0, text3D: text3D) }
@@ -3690,7 +3756,12 @@ struct AnimationPanelView: View {
         let k = keys, layer = id
         guard !k.isEmpty else { return }
         model.beginGesture("apagar keyframes")
-        model.mutate { core in for key in k { core.deleteKeyframe(forLayer: layer, property: key.property, time: key.time) } }
+        model.mutate { core in
+            for key in k {
+                core.deleteKeyframe(forLayer: layer, property: key.property, effectIndex: key.effectIndex,
+                                    paramIndex: key.paramIndex, time: key.time)
+            }
+        }
         model.endGesture()
     }
     private func openCurve() {
@@ -3717,7 +3788,7 @@ struct AnimationPanelView: View {
     }
     var body: some View {
         let hasTrack = track != nil
-        PanelFrame(rail: PanelRail(onBack: { model.panel = .none }, keyframeLook: look,
+        PanelFrame(rail: PanelRail(onBack: onBack ?? { model.panel = .none }, keyframeLook: look,
                                    onKeyframe: hasTrack ? { toggleKey() } : nil,
                                    onDeleteAllKeyframes: hasTrack ? { deleteAllKeys() } : nil,
                                    onCurve: hasTrack ? { openCurve() } : nil,
@@ -3740,7 +3811,7 @@ struct AnimationPanelView: View {
             if let requested = AnimationPanelRequest.tab { chosen = requested; AnimationPanelRequest.tab = nil }
             if tab == .layer, let t = model.animatorRailTrack() { model.focusLayerAnimator(t) }
         }
-        .onChange(of: model.primarySelection) { _ in chosen = .layer }
+        .onChange(of: model.primarySelection) { _ in chosen = initialTab }
         .onDisappear { model.timelineFocus = nil }
     }
 }

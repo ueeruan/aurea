@@ -173,6 +173,7 @@ Status Host::initialize(const std::string& cacheDirectory, const std::string& do
 
     config.mediaFactory = media_.get();
     config.exportSinkFactory = &make_ffmpeg_export_sink;
+    config.usePortableCompositionExport = true;
     // 0.3.2 (CheckpointManager, export/ExportCheckpoint.hpp): o vídeo vai para
     // um registro de pacotes com checksum (em <Caches>/export-checkpoints) e o
     // MP4 é montado, validado e publicado no fim. O iOS não deixa usar a GPU em

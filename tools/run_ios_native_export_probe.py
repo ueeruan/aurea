@@ -100,6 +100,7 @@ int main(int argc, char** argv) {
 ''', encoding="utf-8")
     executable = output / "astra_ios_native_export_probe"
     sources = [source, ROOT / "engine/src/export/FFmpegExportSink.cpp",
+               ROOT / "engine/src/export/AppleVideoEncoder.cpp", ROOT / "engine/src/export/PortableVideoSource.cpp",
                ROOT / "engine/src/export/ExportPacketLog.cpp",
                ROOT / "engine/src/export/OfflineFrameQueue.cpp", ROOT / "engine/src/core/Time.cpp",
                ROOT / "engine/src/core/Log.cpp", ROOT / "engine/src/project/FileIO.cpp",

@@ -409,7 +409,7 @@ fun EditorScreen(store: EditorStore) {
                 // (também na cena 3D, cujo adicionar tem a mesma aba Áudio).
                 if (ui.voice) VoiceRecorderOverlay(store) { ui.voice = false }
                 // 0.3.4 plugins: o painel de plugin aberto (moldura comum), alertas e consentimento.
-                if (!store.sceneEditor) com.aurea.aurea.effects.PluginEditorPanelHost(store, Modifier.align(Alignment.BottomCenter))
+                com.aurea.aurea.effects.PluginEditorPanelHost(store, Modifier.align(Alignment.BottomCenter))
                 // A.01: o círculo "Voltar ao editor" no canto (a HEAD perdeu — bug 1).
                 if (ui.fullscreen) {
                     val backLabel = stringResource(R.string.editor_voltar_editor)

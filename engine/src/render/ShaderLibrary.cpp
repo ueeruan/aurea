@@ -35,6 +35,7 @@ usize PipelineKeyHash::operator()(const PipelineKey& k) const noexcept {
     mix((static_cast<u64>(bc) << 32) | bs);
     mix(static_cast<u64>(k.sampleCount) | (static_cast<u64>(k.alphaToCoverage) << 8)
         | (static_cast<u64>(k.hasColor1) << 9));
+    if (k.colorFormat1) mix(static_cast<u64>(*k.colorFormat1));
     return static_cast<usize>(h ^ (h >> 32));
 }
 
@@ -358,7 +359,7 @@ Result<PipelineHandle> ShaderLibrary::pipeline(const PipelineKey& key) noexcept 
     desc.sampleCount = std::max<u32>(1u, key.sampleCount);
     desc.alphaToCoverage = key.alphaToCoverage && desc.sampleCount > 1;
     desc.hasColor1 = key.hasColor1 && !key.depthOnly;
-    desc.colorFormat1 = key.format;
+    desc.colorFormat1 = key.colorFormat1.value_or(key.format);
 
     const u64 createStarted = pipelineProbe_ ? monotonic_ns() : 0;
     auto created = backend_->create_pipeline(desc);

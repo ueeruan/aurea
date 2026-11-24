@@ -3,6 +3,7 @@
 #include "aurea/project/FileIO.hpp"
 #include "aurea/vector/Vector.hpp"
 #include "aurea/vector/VectorTree.hpp"
+#include "aurea/timeline/PrecompControls.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
 #include "aurea/media/SourceWindow.hpp"
@@ -3304,6 +3305,68 @@ void for_each_ordered_layer(const Project& p, Fn&& fn) {
 /// primeiro item de cada tipo, na ordem de sempre). Camada = (composição na
 /// ordem da timeline, posição na ordem de desenho), como a seção Expressions.
 ///   u32 camadas · por camada: u32 comp · u32 camada · u32 floats · f32…
+std::vector<u8> build_precomp_controls_section(const Project& project) {
+    struct Row { u32 comp, layer; const Layer* value; };
+    std::vector<Row> rows;
+    for_each_ordered_layer(project, [&](u32 ci, u32 li, const Layer& layer) {
+        if (layer.precompExposed || !layer.nested.overrides.empty()) rows.push_back({ci, li, &layer});
+    });
+    if (rows.empty()) return {};
+    ByteWriter w;
+    w.u32v(static_cast<u32>(rows.size()));
+    for (const auto& row : rows) {
+        const Layer& layer = *row.value;
+        const auto* child = project.timeline().composition(layer.nested.composition);
+        w.u32v(row.comp); w.u32v(row.layer); w.u8v(layer.precompExposed);
+        w.u32v(child ? static_cast<u32>(layer.nested.overrides.size()) : 0);
+        if (!child) continue;
+        for (const auto& edit : layer.nested.overrides) {
+            u32 target = kInvalidIndex;
+            for (u32 i = 0; i < child->order().size(); ++i) {
+                if (child->order().at(i) == edit.target) { target = i; break; }
+            }
+            w.u32v(target); w.u8v(static_cast<u8>(edit.kind));
+            w.str(edit.text);
+            w.vec4(edit.rgba);
+        }
+    }
+    return {w.bytes().begin(), w.bytes().end()};
+}
+
+void apply_precomp_controls_section(const u8* data, usize size, Project& project) {
+    ByteReader r(data, size);
+    std::vector<Composition*> comps;
+    auto& timeline = project.timeline();
+    timeline.for_each_composition([&](CompositionId, Composition& c) { comps.push_back(&c); });
+    const u32 count = r.u32v();
+    if (count > 1000000u || count > r.remaining() / 13) return;
+    for (u32 index = 0; index < count && r.good(); ++index) {
+        const u32 ci = r.u32v(), li = r.u32v();
+        const u8 bits = r.u8v();
+        const u32 edits = r.u32v();
+        if (edits > kMaxPrecompControls || edits > r.remaining() / 25) return;
+        Layer* layer = ci < comps.size() && li < comps[ci]->order().size()
+            ? comps[ci]->layer(comps[ci]->order().at(li)) : nullptr;
+        const auto* child = layer && layer->kind == LayerKind::Composition ? timeline.composition(layer->nested.composition) : nullptr;
+        std::vector<PrecompControlValue> values;
+        for (u32 i = 0; i < edits && r.good(); ++i) {
+            const u32 target = r.u32v();
+            const u8 kind = r.u8v();
+            std::string text = r.str();
+            const Vec4 rgba = r.vec4();
+            if (!child || kind > static_cast<u8>(PrecompControl::Opacity) || text.size() > kMaxPrecompText ||
+                !std::isfinite(rgba.x) || !std::isfinite(rgba.y) || !std::isfinite(rgba.z) || !std::isfinite(rgba.w)) continue;
+            const auto id = target < child->order().size() ? child->order().at(target) : LayerId{};
+            values.push_back({id, static_cast<PrecompControl>(kind), std::move(text),
+                {std::clamp(rgba.x, 0.f, 1.f), std::clamp(rgba.y, 0.f, 1.f), std::clamp(rgba.z, 0.f, 1.f), std::clamp(rgba.w, 0.f, 1.f)}});
+        }
+        if (layer && r.good()) {
+            layer->precompExposed = bits & 7u;
+            layer->nested.overrides = std::move(values);
+        }
+    }
+}
+
 bool project_has_vector_tree(const Project& p) {
     bool any = false;
     for_each_ordered_layer(p, [&](u32, u32, const Layer& l) {
@@ -3754,6 +3817,8 @@ Status ProjectSerializer::encode(const Project& project, const SaveOptions& opti
     // Lote X: só quando alguma camada vetorial usa a árvore de formas.
     if (project_has_vector_tree(project))
         sections.push_back(PendingSection{SectionKind::VectorTree, 1, build_vector_tree_section(project)});
+    if (auto controls = build_precomp_controls_section(project); !controls.empty())
+        sections.push_back(PendingSection{SectionKind::PrecompControls, 1, std::move(controls)});
 
     // As seções Animations, Effects, Scene3D, Particles, Fonts e Thumbnails
     // existem no enum e no índice, mas ainda não são gravadas separadamente:
@@ -4043,6 +4108,10 @@ Status ProjectSerializer::load_bytes(Project& out, const u8* fileData, usize fil
                 break;
             case SectionKind::VectorTree:
                 apply_vector_tree_section(effective, effectiveSize, out);
+                break;
+            case SectionKind::PrecompControls:
+                if (sh.version == 1) apply_precomp_controls_section(effective, effectiveSize, out);
+                else report.sectionsSkipped.push_back(sh.kind);
                 break;
             default:
                 // Seções que esta versão não grava ainda. Se aparecerem, foram

@@ -33,7 +33,8 @@ def block(source: str, header: str) -> str:
 
 CONSTANTS = ("ROW_SLIDER", "ROW_RULER", "ROW_SMALL", "ROW_SECTION", "ROW_LIST", "LIST_GAP", "LABEL_W",
              "VALUE_W", "LABEL_MARGIN", "TICK_SPACING", "MAJOR_EVERY", "FLING_MIN_PX_S",
-             "RULER_SLOP_FRACTION", "SLIDER_SLOP_FRACTION", "SLIDER_SNAP_DP", "OPEN_MS", "SECTION_ARROW_MS")
+             "RULER_SLOP_FRACTION", "SLIDER_SLOP_FRACTION", "SLIDER_SNAP_DP", "OPEN_MS", "SECTION_ARROW_MS",
+             "RULER_FADE_EDGE", "SLIDER_RULER_TICKS")
 
 
 def constants_match(swift: str, kotlin: str) -> list:
@@ -47,7 +48,7 @@ def constants_match(swift: str, kotlin: str) -> list:
             problems.append("%s: Kotlin %s != Swift %s" % (name, k.group(1), s.group(1)))
     for name in ("rowHeight", "controlFor", "sliderValueAt", "sliderX", "rulerValueAfter", "snapToTick",
                  "limitRange", "crossedSnap", "decimalsForStep", "angleTurns", "opensAfterAdd", "trackball",
-                 "eulerToQuat", "quatToEuler", "alphaAt"):
+                 "eulerToQuat", "quatToEuler", "alphaAt", "rulerFade", "sliderRulerStep"):
         if not re.search(r"\bfun %s\b" % name, kotlin):
             problems.append("Kotlin sem %s" % name)
         if not re.search(r"\bfunc %s\b" % name, swift):
@@ -63,14 +64,23 @@ func check(_ ok: Bool, _ message: String) {
 func near(_ a: Float, _ b: Float, _ e: Float = 1e-6) -> Bool { abs(a - b) <= e }
 func near(_ a: Double, _ b: Double, _ e: Double) -> Bool { abs(a - b) <= e }
 // Alturas e controle (FxParamMathTest.rowHeightsFollowTheReference).
-// 0.3.4 painéis: as linhas cresceram (eram 51 / 57 / 38).
-check(FxParamMath.rowHeight(FxParamControl.slider, fxParamFloat) == 60, "slider 60")
-check(FxParamMath.rowHeight(FxParamControl.ruler, fxParamFloat) == 66, "régua 66")
-check(FxParamMath.rowHeight(FxParamControl.point, fxParamPoint2D) == 66, "ponto 66")
-check(FxParamMath.rowHeight(FxParamControl.xyz, fxParamPoint3D) == 66, "xyz 66")
-check(FxParamMath.rowHeight(FxParamControl.auto, fxParamBool) == 46, "interruptor 46")
-check(FxParamMath.rowHeight(FxParamControl.auto, fxParamEnum) == 46, "escolha 46")
-check(FxParamMath.rowHeight(FxParamControl.auto, fxParamFloat) == 66, "número antigo = régua")
+// 1.0.8 visual minimalista: linhas mais compactas (eram 60 / 66 / 46).
+check(FxParamMath.rowHeight(FxParamControl.slider, fxParamFloat) == 52, "slider = régua 52")
+check(FxParamMath.rowHeight(FxParamControl.ruler, fxParamFloat) == 52, "régua 52")
+check(FxParamMath.rowHeight(FxParamControl.point, fxParamPoint2D) == 52, "ponto 52")
+check(FxParamMath.rowHeight(FxParamControl.xyz, fxParamPoint3D) == 52, "xyz 52")
+check(FxParamMath.rowHeight(FxParamControl.auto, fxParamBool) == 40, "interruptor 40")
+check(FxParamMath.rowHeight(FxParamControl.auto, fxParamEnum) == 40, "escolha 40")
+check(FxParamMath.rowHeight(FxParamControl.auto, fxParamFloat) == 52, "número antigo = régua")
+// Slider-régua (sliderRulerStepFitsTheRangeInAboutOneHundredTwentyTicks).
+check(near(FxParamMath.sliderRulerStep(min: 0, max: 100, step: 1), 1), "0–100 = 1 por risco")
+check(near(FxParamMath.sliderRulerStep(min: 0, max: 1, step: 0), 0.01, 1e-7), "degradê 1 %")
+check(near(FxParamMath.sliderRulerStep(min: -180, max: 180, step: 1), 5), "ângulo 5")
+check(near(FxParamMath.sliderRulerStep(min: 0, max: 150, step: 1), 2), "0–150 = 2")
+// Esmaecimento da régua (rulerFadeIsFullInTheMiddleAndSmoothAtTheEdges).
+check(FxParamMath.rulerFade(x: 100, width: 200) == 1, "régua cheia no meio")
+check(FxParamMath.rulerFade(x: 0, width: 200) == 0, "régua some na borda")
+check(abs(FxParamMath.rulerFade(x: 22, width: 200) - 0.5) < 1e-6, "régua no meio do esmaecimento")
 check(FxParamMath.controlFor(FxParamControl.auto, fxParamAngle) == FxParamControl.ruler, "ângulo = régua")
 check(FxParamMath.controlFor(FxParamControl.auto, fxParamPoint2D) == FxParamControl.point, "ponto")
 check(FxParamMath.controlFor(FxParamControl.auto, fxParamPoint3D) == FxParamControl.xyz, "xyz")

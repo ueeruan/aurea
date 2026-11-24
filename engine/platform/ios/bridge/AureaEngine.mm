@@ -4220,6 +4220,14 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
         ? aurea::kEaseParamMarker : std::clamp(handles[3].floatValue, -2.f, 3.f);
     return to_ns(aurea::presets::make_curve_preset(to_std(name), interp, std::clamp(handles[0].floatValue, 0.f, 1.f), std::clamp(handles[1].floatValue, -2.f, 3.f), std::clamp(handles[2].floatValue, 0.f, 1.f), y2, power));
 }
+- (NSArray<NSNumber*>*)speedGraphTangent:(NSArray<NSNumber*>*)handles incoming:(BOOL)incoming
+    power:(uint32_t)power base:(float)base fraction:(float)fraction velocity:(float)velocity editing:(BOOL)editing {
+    if (handles.count < 4) return @[];
+    float values[4] = {handles[0].floatValue, handles[1].floatValue, handles[2].floatValue, handles[3].floatValue};
+    if (!aurea::speed_graph_tangent(values, incoming, power, base, fraction, velocity, editing)) return @[];
+    const float position[] = {fraction, velocity};
+    return editing ? floats_to_array(values, 4) : floats_to_array(position, 2);
+}
 - (NSArray<NSNumber*>*)temporalEase:(BOOL)toHandles values:(NSArray<NSNumber*>*)values seconds:(float)seconds delta:(float)delta {
     if (values.count < 4) return @[];
     const float a = values[0].floatValue, b = values[1].floatValue, c = values[2].floatValue, d = values[3].floatValue;
@@ -4257,6 +4265,17 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
 }
 - (void)cancelMotionTrack { if(auto* e=self.engine)e->cancel_motion_track(); }
 - (void)pauseMotionTrack:(BOOL)paused { if (auto* e = self.engine) (void)e->pause_motion_track(paused); }
+- (BOOL)startMotionRepair:(long long)layer tool:(uint32_t)tool first:(long long)first last:(long long)last points:(NSArray<NSNumber*>*)points {
+    auto* e = self.engine;
+    if (!e || points.count != 8) return NO;
+    float xy[8]{};
+    for (u32 i = 0; i < 8; ++i) xy[i] = points[i].floatValue;
+    return e->start_motion_track(layer, tool, 0, false, xy, 4, 12, 48, .65f, false, first, last);
+}
+- (BOOL)finishMotionRepair:(BOOL)accept {
+    auto* e = self.engine;
+    return e && e->finish_motion_repair(accept);
+}
 - (NSArray<NSNumber*>*)motionTrackReview:(long long)source {
     auto* e = self.engine;
     if (!e) return @[];
@@ -4950,6 +4969,56 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
 - (long long)addVector:(uint32_t)preset {
     auto* e = self.engine; if (!e) return -1; const auto r = e->add_vector_layer(preset); return r.ok() ? static_cast<long long>(*r) : -1;
 }
+- (NSArray<NSNumber*>*)reportedLayerRoute:(long long)comp layer:(long long)layer {
+    auto* e = self.engine;
+    if (!e) return @[];
+    NSMutableArray* ids = [NSMutableArray array];
+    for (u64 id : e->route_to_layer(comp, layer)) [ids addObject:@(static_cast<long long>(id))];
+    return ids;
+}
+- (NSArray<NSDictionary<NSString*, id>*>*)exportSourceIssues {
+    auto* e = self.engine;
+    if (!e) return @[];
+    NSMutableArray* rows = [NSMutableArray array];
+    for (const auto& issue : e->export_source_issues()) {
+        [rows addObject:@{@"composition": @(static_cast<long long>(issue.composition)), @"layer": @(static_cast<long long>(issue.layer)),
+            @"name": to_ns(issue.name), @"missing": @(issue.missing)}];
+    }
+    return rows;
+}
+- (NSArray<NSDictionary<NSString*, id>*>*)precompControls:(long long)group {
+    auto* e = self.engine;
+    if (!e) return @[];
+    NSMutableArray* rows = [NSMutableArray array];
+    for (const auto& row : e->precomp_controls(group)) {
+        const auto& v = row.value;
+        [rows addObject:@{@"target": @(static_cast<long long>(v.target.pack())), @"kind": @(static_cast<u32>(v.kind)),
+            @"name": to_ns(row.name), @"text": to_ns(v.text), @"rgba": @[@(v.rgba.x), @(v.rgba.y), @(v.rgba.z), @(v.rgba.w)],
+            @"exposed": @(row.exposed), @"overridden": @(row.overridden), @"available": @(row.available)}];
+    }
+    return rows;
+}
+- (BOOL)editPrecompControl:(long long)group target:(long long)target kind:(uint32_t)kind operation:(uint32_t)operation
+    text:(NSString*)text rgba:(NSArray<NSNumber*>*)rgba {
+    auto* e = self.engine;
+    return e && rgba.count == 4 && e->edit_precomp_control(group, target, kind, operation, to_std(text),
+        Vec4{rgba[0].floatValue, rgba[1].floatValue, rgba[2].floatValue, rgba[3].floatValue});
+}
+- (NSDictionary<NSString*, id>*)vectorTree:(long long)layerId {
+    auto* e = self.engine;
+    std::vector<float> rows;
+    std::string names;
+    if (!e || !e->vector_tree(layerId, rows, names)) return @{};
+    return @{@"rows": floats_to_array(rows.data(), static_cast<u32>(rows.size())), @"names": to_ns(names)};
+}
+- (BOOL)moveVectorTreeItem:(long long)layerId group:(NSArray<NSNumber*>*)path from:(uint32_t)from to:(uint32_t)to {
+    auto* e = self.engine;
+    if (!e || path.count == 0 || path.count > 32) return NO;
+    std::vector<u32> group;
+    for (NSNumber* item in path) group.push_back(item.unsignedIntValue);
+    return e->vector_tree_edit(layerId, group.data(), static_cast<u32>(group.size()),
+                               aurea::Engine::kVectorTreeMove, from, to, 1, nullptr, 0, nullptr, false);
+}
 - (NSArray<NSDictionary<NSString*, id>*>*)vectorGroups:(long long)layerId {
     auto* e = self.engine; std::vector<float> data; std::string names; aurea::VectorData doc;
     if (!e || !e->vector_document(layerId, data, names) || !aurea::vector::decode_document(data.data(), data.size(), names, doc)) return @[];
@@ -5049,6 +5118,24 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
 - (BOOL)removeVectorPath:(long long)layerId group:(uint32_t)group path:(uint32_t)path { auto* e = self.engine; return e && e->remove_vector_path(layerId, group, path); }
 - (NSArray<NSNumber*>*)vectorPath:(long long)layerId group:(uint32_t)group path:(uint32_t)path {
     auto* e = self.engine; std::vector<float> v; if (!e || !e->vector_path_at(layerId, group, path, v)) return @[]; return floats_to_array(v.data(), static_cast<u32>(v.size()));
+}
+// Pontos do vetor 3D no palco (EngineVector3D.cpp).
+- (NSArray<NSNumber*>*)vectorPathStagePoints:(long long)layerId group:(uint32_t)group path:(uint32_t)path {
+    auto* e = self.engine; std::vector<float> v; if (!e || !e->vector_path_stage_points(layerId, group, path, v)) return @[];
+    return floats_to_array(v.data(), static_cast<u32>(v.size()));
+}
+- (NSArray<NSNumber*>*)vectorPathUnproject:(long long)layerId group:(uint32_t)group x:(float)x y:(float)y {
+    auto* e = self.engine; aurea::Vec2 g; if (!e || !e->vector_path_unproject(layerId, group, x, y, g)) return @[];
+    return @[@(g.x), @(g.y)];
+}
+- (int32_t)dragVectorPathOnStage:(long long)layerId group:(uint32_t)group path:(uint32_t)path kind:(uint32_t)kind
+                          points:(NSArray<NSNumber*>*)points fromX:(float)fromX fromY:(float)fromY toX:(float)toX toY:(float)toY
+                           locks:(uint32_t)locks continuing:(BOOL)continuing {
+    auto* e = self.engine; if (!e || points.count == 0) return -1;
+    std::vector<aurea::u32> idx; idx.reserve(points.count);
+    for (NSNumber* n in points) idx.push_back(n.unsignedIntValue);
+    return e->drag_vector_path_on_stage(static_cast<aurea::u64>(layerId), group, path, kind, idx.data(), static_cast<aurea::u32>(idx.size()),
+                                        fromX, fromY, toX, toY, locks, continuing);
 }
 - (BOOL)setVectorPath:(long long)layerId group:(uint32_t)group path:(uint32_t)path values:(NSArray<NSNumber*>*)values continuing:(BOOL)continuing {
     auto* e = self.engine; std::vector<float> v; for (NSNumber* n in values) v.push_back(n.floatValue);
@@ -5225,6 +5312,11 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
     if (size > values.size()) { values.resize(size); size = e->query_masks(layerId, values.data(), static_cast<aurea::u32>(values.size())); }
     return floats_to_array(values.data(), std::min<size_t>(size, values.size()));
 }
+- (int32_t)addMaskPreset:(long long)layerId preset:(uint32_t)preset width:(float)width height:(float)height {
+    auto* e = self.engine;
+    return e ? e->add_mask_preset(layerId, preset, width, height) : -1;
+}
+
 - (int32_t)addMask:(long long)layerId points:(NSArray<NSNumber*>*)points closed:(BOOL)closed {
     auto* e = self.engine;
     if (!e || points.count % 6 || points.count > 24576) return -1;
@@ -6001,10 +6093,9 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
     }
 }
 
-- (void)setTrackMatteForLayer:(long long)layerId matte:(long long)matteLayerId mode:(uint32_t)mode {
-    if (auto* e = self.engine) {
-        (void)e->set_track_matte(static_cast<aurea::u64>(layerId), static_cast<aurea::u64>(matteLayerId), mode);
-    }
+- (BOOL)setTrackMatteForLayer:(long long)layerId matte:(long long)matteLayerId mode:(uint32_t)mode {
+    auto* e = self.engine;
+    return e && e->set_track_matte(static_cast<aurea::u64>(layerId), static_cast<aurea::u64>(matteLayerId), mode);
 }
 
 - (void)setFrameBlendForLayer:(long long)layerId mode:(uint32_t)mode {

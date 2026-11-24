@@ -108,11 +108,13 @@ class AstraExportDeviceTest {
         }
         return file
     }
-    private fun export(name: String, frames: Int, width: Int, height: Int, audio: Boolean, requireAnimation: Boolean = true, trimDuringExport: Boolean = false) {
+    private fun export(name: String, frames: Int, width: Int, height: Int, audio: Boolean, requireAnimation: Boolean = true,
+                       trimDuringExport: Boolean = false, safeMode: Int = 0) {
         val movie = File(folder, "$name.mp4")
         val progressLog = File(folder, "$name-progress.txt")
         progressLog.writeText("headless-native=true preview-surface=false frames=$frames width=$width height=$height\n")
-        assertEquals("Native FFmpeg export must open", 0, engine.startExport(movie.absolutePath, minOf(width, height), 30.0, 0, 4))
+        assertEquals("Native FFmpeg export must open", 0,
+            engine.startExport(movie.absolutePath, minOf(width, height), 30.0, 0, 4, safeMode = safeMode))
         val buffer = ByteBuffer.allocateDirect(128).order(ByteOrder.nativeOrder())
         val progress = ExportProgress()
         val began = SystemClock.elapsedRealtime()
@@ -222,6 +224,74 @@ class AstraExportDeviceTest {
         scene(60); animatedShape(60, 320, 180)
         assertTrue(engine.importAudio(tone(2).absolutePath, "Owned stereo tone") > 0)
         export("headless-2d-stereo", 60, 320, 180, true)
+    }
+
+    @Test fun portableSourceExportsImportedVideoWithEffectAndAudio() {
+        scene(60); animatedShape(60, 320, 180)
+        export("portable-source-fixture", 60, 320, 180, false)
+        scene(60)
+        val clip = engine.importVideo(File(folder, "portable-source-fixture.mp4").absolutePath, "Portable source")
+        assertTrue(clip > 0)
+        val tone = tone(2)
+        assertTrue(engine.importAudio(tone.absolutePath, "Owned stereo tone") > 0)
+        engine.beginCommandBatch()
+        assertTrue(CommandBatch(engine).addEffect(clip, effectTypeId("aurea.blur.gaussian")))
+        assertEquals(1, engine.submitCommands())
+        assertEquals(0, engine.saveProject(File(folder, "portable-imported-video.aurea").absolutePath))
+        export("portable-imported-video", 60, 320, 180, true, safeMode = 2)
+    }
+
+    @Test fun faceRigDoesNotPaintDarkBandsFromTransparentSkinSamples() {
+        val width = 384
+        val height = 384
+        scene(15, width, height)
+        val photo = ByteBuffer.allocateDirect(width * height * 4)
+        repeat(width * height) { i ->
+            if (i / width in 118..248) {
+                photo.put(if (i % width / 16 % 2 == 0) 240.toByte() else 190.toByte())
+                photo.put(170.toByte()).put(130.toByte()).put(255.toByte())
+            } else {
+                repeat(4) { photo.put(0) }
+            }
+        }
+        photo.rewind()
+        val layer = engine.importImage(photo, width, height, "Face rig opacity fixture", "")
+        assertTrue(layer > 0)
+        val type = effectTypeId("aurea.rig.face")
+        engine.beginCommandBatch()
+        assertTrue(CommandBatch(engine).addEffect(layer, type))
+        assertEquals(1, engine.submitCommands())
+        val raw = ByteBuffer.allocateDirect(width * height * 4)
+        val dimensions = IntArray(2)
+        assertEquals(raw.capacity(), engine.capturePreviewFrame(width, raw, dimensions))
+        val rows = ByteBuffer.allocateDirect(4 * LayerEffect.ROW_BYTES).order(ByteOrder.nativeOrder())
+        val names = ByteBuffer.allocateDirect(1024)
+        val count = engine.queryLayerEffects(layer, rows, 4, names)
+        val effect = List(count) { LayerEffect.read(rows, it, names) }.single { it.typeId == type }.effectId
+        // Both skin reference rows land outside the alpha silhouette while
+        // the center of the stretched eyelid remains in the opaque source.
+        assertTrue(engine.faceRigMoveHandle(layer, effect, 2, .37f, .46f, false))
+        assertTrue(engine.faceRigMoveHandle(layer, effect, 3, .46f, .565f, false))
+        assertTrue(engine.faceRigMoveHandle(layer, effect, 4, .63f, .46f, false))
+        assertTrue(engine.faceRigMoveHandle(layer, effect, 5, .72f, .565f, false))
+        engine.beginCommandBatch()
+        val edit = CommandBatch(engine)
+        assertTrue(edit.setEffectParam(layer, effect, 3, 0f))
+        assertTrue(edit.setEffectParam(layer, effect, 4, 0f))
+        assertEquals(2, engine.submitCommands())
+
+        val output = File(folder, "face-rig-transparent-samples.mp4")
+        export(output.nameWithoutExtension, 15, width, height, false, requireAnimation = false)
+        for (preview in listOf(true, false)) {
+            val captured = if (preview) engine.capturePreviewFrame(width, raw, dimensions)
+                else engine.captureFrame(width, raw, dimensions)
+            assertEquals(raw.capacity(), captured)
+            assertArrayEquals(intArrayOf(width, height), dimensions)
+            for (x in listOf(142, 242)) {
+                val red = raw.get((166 * width + x) * 4).toInt() and 255
+                assertTrue("Transparent reference painted a dark band at x=$x, preview=$preview ($red)", red > 150)
+            }
+        }
     }
 
     @Test fun textSpringKeepsItsProgressKeysAndExportsAnimatedFrames() {

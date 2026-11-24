@@ -87,6 +87,7 @@ AUREA_TEST(FlowTimeGpu, RetimeHalfSpeedShowsHalfTheSourceAndKeyframesIntegrate) 
     // 50% (o padrão): o quadro 100 da camada mostra o 50 da fonte.
     AUREA_CHECK_NEAR(shown(100), frame_gray_code(50), 0.5);
     AUREA_CHECK_NEAR(shown(40), frame_gray_code(20), 0.5);
+    AUREA_CHECK_NEAR(shown(41), frame_gray_code(21), 0.5);
     // 200%: o dobro.
     fx->params[0].constant = ParamValue::scalar(200.0f);
     AUREA_CHECK_NEAR(shown(40), frame_gray_code(80), 0.5);

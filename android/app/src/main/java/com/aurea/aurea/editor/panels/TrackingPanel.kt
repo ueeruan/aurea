@@ -213,6 +213,15 @@ private fun MotionTrackSection(env: PanelEnv) {
         androidx.compose.material3.TextButton(onClick = store::cancelMotion) { Text(stringResource(R.string.common_cancel)) }
     }
     if (store.motionMessage.isNotEmpty()) Text(store.motionMessage, color = AureaColors.Muted, fontSize = 12.sp)
+    if (s[0].toInt() == 5) {
+        Text(stringResource(R.string.motion_repair_ready))
+        androidx.compose.material3.TextButton(onClick = { store.finishMotionRepair(true) }) {
+            Text(stringResource(R.string.common_apply))
+        }
+        androidx.compose.material3.TextButton(onClick = { store.finishMotionRepair(false) }) {
+            Text(stringResource(R.string.common_cancel))
+        }
+    }
     if (s[0].toInt() == 2) {
         MotionReview(env)
         if (s[4].toInt() != 4) Row(verticalAlignment = Alignment.CenterVertically) {
@@ -270,11 +279,12 @@ private fun MotionReview(env: PanelEnv) {
     val store = env.store
     val source = store.primary ?: return
     val status = store.motionStatus
-    val bins = remember(source, status[2], status[5], status[7]) { store.motionReview(source) }
+    val bins = remember(source, status[2], status[5], status[7], store.sceneSettingsRevision) { store.motionReview(source) }
     if (bins.size <= 2 || !bins[0].isFinite() || !bins[1].isFinite()) return
     val first = bins[0].roundToInt()
     // 1.0.6: faixa invertida do motor fazia o coerceIn lançar no desenho.
     val last = maxOf(first, bins[1].roundToInt())
+    var repairFirst by remember(source) { mutableStateOf<Int?>(null) }
     val label = stringResource(R.string.trk_review)
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -324,6 +334,24 @@ private fun MotionReview(env: PanelEnv) {
         exportSource = source
         save.launch("aurea-motion.csv")
     }) { Text(stringResource(R.string.trk_export_csv)) }
+    if (status[4].toInt() in 2..3 && store.pointPick == null) {
+        val start = repairFirst
+        if (start == null) {
+            androidx.compose.material3.TextButton(enabled = store.playhead in first until last,
+                onClick = { repairFirst = store.playhead }, modifier = Modifier.testTag("tracking.repair.start")) {
+                Text(stringResource(R.string.motion_repair_range))
+            }
+        } else {
+            Text(stringResource(R.string.motion_repair_end), color = AureaColors.Muted)
+            androidx.compose.material3.TextButton(enabled = store.playhead in (start + 1)..last, onClick = {
+                store.beginMotionRepair(start, store.playhead)
+                repairFirst = null
+            }) { Text(stringResource(R.string.motion_repair_corners)) }
+            androidx.compose.material3.TextButton(onClick = { repairFirst = null }) {
+                Text(stringResource(R.string.common_cancel))
+            }
+        }
+    }
 }
 
 /**

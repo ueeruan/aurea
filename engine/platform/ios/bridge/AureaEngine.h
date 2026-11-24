@@ -1035,6 +1035,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (NSArray<NSNumber*>*)maskData:(long long)layerId;
 - (BOOL)pinLayerMasks:(long long)layerId pinned:(BOOL)pinned;
 - (int32_t)addMask:(long long)layerId points:(NSArray<NSNumber*>*)points closed:(BOOL)closed;
+- (int32_t)addMaskPreset:(long long)layerId preset:(uint32_t)preset width:(float)width height:(float)height;
 - (BOOL)removeMask:(long long)layerId mask:(uint32_t)mask;
 - (BOOL)setMaskPath:(long long)layerId mask:(uint32_t)mask points:(NSArray<NSNumber*>*)points closed:(BOOL)closed undo:(BOOL)undo;
 - (BOOL)setMaskProps:(long long)layerId mask:(uint32_t)mask operation:(uint32_t)operation inverted:(BOOL)inverted feather:(float)feather expansion:(float)expansion opacity:(float)opacity;
@@ -1156,10 +1157,14 @@ NS_SWIFT_NAME(AureaEngine)
 /// Velocidade e influência <-> alças da bézier: [x1, y1, x2, y2] ou
 /// [velocidade saída, influência saída, velocidade entrada, influência entrada]; [] = recusado.
 - (NSArray<NSNumber*>*)temporalEase:(BOOL)toHandles values:(NSArray<NSNumber*>*)values seconds:(float)seconds delta:(float)delta NS_SWIFT_NAME(temporalEase(_:values:seconds:delta:));
+- (NSArray<NSNumber*>*)speedGraphTangent:(NSArray<NSNumber*>*)handles incoming:(BOOL)incoming
+    power:(uint32_t)power base:(float)base fraction:(float)fraction velocity:(float)velocity editing:(BOOL)editing;
 - (NSString*)applyPreset:(long long)layerId json:(NSString*)json duration:(int64_t)duration;
 - (NSString*)trackPoint:(long long)layerId x:(float)x y:(float)y stabilize:(BOOL)stabilize;
 - (NSDictionary<NSString*, id>*)cameraTrackingStatus;
 - (BOOL)startMotionTrack:(long long)layer tool:(uint32_t)tool model:(uint32_t)model backward:(BOOL)backward points:(NSArray<NSNumber*>*)points feature:(float)feature search:(float)search confidence:(float)confidence validateBack:(BOOL)validateBack;
+- (BOOL)startMotionRepair:(long long)layer tool:(uint32_t)tool first:(long long)first last:(long long)last points:(NSArray<NSNumber*>*)points;
+- (BOOL)finishMotionRepair:(BOOL)accept;
 - (void)cancelMotionTrack;
 - (void)pauseMotionTrack:(BOOL)paused;
 - (NSArray<NSNumber*>*)motionTrackReview:(long long)source;
@@ -1369,6 +1374,13 @@ NS_SWIFT_NAME(AureaEngine)
 - (uint32_t)addModelCameras:(long long)layerId;
 - (long long)addVector:(uint32_t)preset;
 - (NSArray<NSDictionary<NSString*, id>*>*)vectorGroups:(long long)layerId;
+- (NSDictionary<NSString*, id>*)vectorTree:(long long)layerId;
+- (NSArray<NSDictionary<NSString*, id>*>*)precompControls:(long long)group;
+- (NSArray<NSDictionary<NSString*, id>*>*)exportSourceIssues;
+- (NSArray<NSNumber*>*)reportedLayerRoute:(long long)comp layer:(long long)layer;
+- (BOOL)editPrecompControl:(long long)group target:(long long)target kind:(uint32_t)kind operation:(uint32_t)operation
+    text:(NSString*)text rgba:(NSArray<NSNumber*>*)rgba;
+- (BOOL)moveVectorTreeItem:(long long)layerId group:(NSArray<NSNumber*>*)path from:(uint32_t)from to:(uint32_t)to;
 - (BOOL)editVectorGroup:(long long)layerId group:(uint32_t)group field:(uint32_t)field values:(NSArray<NSNumber*>*)values;
 - (BOOL)renameVectorGroup:(long long)layerId group:(uint32_t)group name:(NSString*)name;
 - (int32_t)addVectorGroup:(long long)layerId kind:(uint32_t)kind;
@@ -1376,6 +1388,19 @@ NS_SWIFT_NAME(AureaEngine)
 - (int32_t)addVectorPath:(long long)layerId group:(uint32_t)group kind:(uint32_t)kind;
 - (BOOL)removeVectorPath:(long long)layerId group:(uint32_t)group path:(uint32_t)path;
 - (NSArray<NSNumber*>*)vectorPath:(long long)layerId group:(uint32_t)group path:(uint32_t)path;
+/// Pontos do vetor 3D no palco (Engine::vector_path_stage_points): [nº, 3D, fechado] + 9 por ponto
+/// (x, y, visível; entrada; saída) em px da composição. Par do `vectorPathStagePoints` do AureaEngine.kt.
+- (NSArray<NSNumber*>*)vectorPathStagePoints:(long long)layerId group:(uint32_t)group path:(uint32_t)path
+    NS_SWIFT_NAME(vectorPathStagePoints(_:group:path:));
+/// Composição → grupo pelo plano da camada (raio × plano). Vazio = de lado ou atrás da câmera.
+- (NSArray<NSNumber*>*)vectorPathUnproject:(long long)layerId group:(uint32_t)group x:(float)x y:(float)y
+    NS_SWIFT_NAME(vectorPathUnproject(_:group:x:y:));
+/// Arrasto no palco (kind 0 pontos, 1 alça de entrada, 2 de saída) de from a to (px da composição) no
+/// plano da camada; locks: bit0 ângulo, bit1 comprimento. −1 = recusado. Par do `dragVectorPathOnStage`.
+- (int32_t)dragVectorPathOnStage:(long long)layerId group:(uint32_t)group path:(uint32_t)path kind:(uint32_t)kind
+                          points:(NSArray<NSNumber*>*)points fromX:(float)fromX fromY:(float)fromY toX:(float)toX toY:(float)toY
+                           locks:(uint32_t)locks continuing:(BOOL)continuing
+    NS_SWIFT_NAME(dragVectorPathOnStage(_:group:path:kind:points:fromX:fromY:toX:toY:locks:continuing:));
 - (BOOL)setVectorPath:(long long)layerId group:(uint32_t)group path:(uint32_t)path values:(NSArray<NSNumber*>*)values continuing:(BOOL)continuing;
 - (BOOL)keyVectorPath:(long long)layerId group:(uint32_t)group path:(uint32_t)path;
 - (BOOL)makeVectorPathEditable:(long long)layerId group:(uint32_t)group path:(uint32_t)path NS_SWIFT_NAME(makeVectorPathEditable(_:group:path:));
@@ -1620,7 +1645,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)setRgbTimeForLayer:(long long)layerId delay:(float)delay;
 - (void)setMotionBlur:(BOOL)on forLayer:(long long)layerId;
 - (void)setTransitionForLayer:(long long)layerId out:(BOOL)out type:(uint32_t)type frames:(uint32_t)frames;
-- (void)setTrackMatteForLayer:(long long)layerId matte:(long long)matteLayerId mode:(uint32_t)mode;
+- (BOOL)setTrackMatteForLayer:(long long)layerId matte:(long long)matteLayerId mode:(uint32_t)mode;
 - (void)setFrameBlendForLayer:(long long)layerId mode:(uint32_t)mode;
 /// Ao contrário do Remapear tempo: espelha a curva no clipe (liga se preciso).
 - (BOOL)reverseTimeRemapForLayer:(long long)layerId NS_SWIFT_NAME(reverseTimeRemap(forLayer:));

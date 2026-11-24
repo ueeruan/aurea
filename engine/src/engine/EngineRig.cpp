@@ -3,7 +3,7 @@
 //
 //  API do RIG 2D (timeline/Rig.hpp): montar o esqueleto sobre a imagem
 //  (juntas em px da imagem; a UI fala em px da composição) e posar no
-//  playhead (FK / IK de 2 ossos, keyframe nas trilhas RigBone). Padrão de
+//  playhead (FK / IK, keyframe nas trilhas RigBone). Padrão de
 //  mutação do motor: modelMutex_, history_.before_mutation, modelRevision_,
 //  mark_dirty, request_render. `continuing` (arrasto) pula o passo novo.
 // =============================================================================
@@ -229,28 +229,15 @@ bool Engine::rig_pose_joint(u64 layerId, u32 jointId, f32 compX, f32 compY, bool
     std::vector<rig::Affine> bones;
     rig::sample_angles(*l, local, deg);
     rig::pose(l->rig, deg, bones);
-    // Ponta de cadeia (sem filhos) com avô: IK; senão FK do osso da junta.
-    bool leaf = true;
-    for (const RigJoint& j : l->rig.joints) leaf = leaf && j.parent != jointId;
-    struct Change { u32 index; f32 delta; };
-    Change changes[2]{};
-    u32 count = 0;
-    f32 dp = 0.0f, dj = 0.0f;
-    if (leaf && rig::ik_two_bone(l->rig, bones, i, target, dp, dj)) {
-        const u32 parent = static_cast<u32>(rig::index_of(l->rig, l->rig.joints[i].parent));
-        changes[count++] = Change{parent, dp};
-        changes[count++] = Change{i, dj};
-    } else {
-        const f32 d = rig::fk_delta(l->rig, bones, i, target);
-        if (l->rig.joints[i].parent == kInvalidIndex || rig::index_of(l->rig, l->rig.joints[i].parent) < 0) return false;
-        changes[count++] = Change{i, d};
-    }
+    std::array<rig::JointDelta, rig::kMaxJoints> changes{};
+    const u32 count = rig::drag_deltas(l->rig, bones, i, target, changes);
+    if (count == 0) return false;
     if (!continuing) history_.before_mutation(*comp, project_->timeline().current(), "posar rig");
     bump_model_revision_locked();
     for (u32 k = 0; k < count; ++k) {
-        const Change& c = changes[k];
+        const rig::JointDelta& c = changes[k];
         Track& tr = l->tracks.get_or_create(TrackProperty::RigBone, kInvalidIndex, l->rig.joints[c.index].id);
-        tr.set(local, deg[c.index] + c.delta);
+        tr.set(local, deg[c.index] + c.degrees);
     }
     project_->mark_dirty();
     request_render();

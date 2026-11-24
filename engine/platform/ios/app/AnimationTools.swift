@@ -336,23 +336,6 @@ func cubicBezierLabel(_ ease: CurveEase) -> String {
     return ease.isBezier && ease.power > 1 ? label + " ×\(ease.power)" : label
 }
 
-/// s^power com o sinal de s (SpeedGraphHandles.kt `powered`).
-func curvePowered(_ s: Double, _ power: Int) -> Double {
-    var out = s
-    for _ in 1..<min(3, max(1, power)) { out *= s }
-    return out
-}
-
-/// A inversa: raiz `power` com sinal. Com força par a velocidade não fica
-/// negativa: abaixo de zero a alça para em zero (SpeedGraphHandles.kt).
-func curveRooted(_ v: Double, _ power: Int) -> Double {
-    let p = min(3, max(1, power))
-    if p == 1 { return v }
-    if v < 0 && p % 2 == 0 { return 0 }
-    let r = pow(abs(v), 1.0 / Double(p))
-    return v < 0 ? -r : r
-}
-
 /// Próxima força ao tocar no texto (CurveMath.kt `nextPower`): ×1 → ×2 → ×3 → ×1.
 func curveNextPower(_ ease: CurveEase) -> CurveEase {
     let h = ease.handles
@@ -658,9 +641,12 @@ private let curveInset: CGFloat = 15
 /// Encaixe da alça nas linhas 0 e 1 (x e y).
 private let curveHandleSnap: CGFloat = 10
 
-/// O GRÁFICO DA CURVA (`EasingCurveView`): margem 15, grade 32 × 32 (grossa a cada
-/// 8; 6 % na faixa 0..1, 3 % fora), curva de 3, alças de 12 (×1,2 no dedo) e o
-/// cabeçote tracejado. Pega a alça mais perto; o arrasto é relativo.
+/// O GRÁFICO DA CURVA (`EasingCurveView`): margem 15. 1.0.8 visual minimalista:
+/// grade discreta 4 × 4 (branco 6 %), curva de 2,5 com o degradê do slider
+/// (destaque 70 % → 100 %), pontas = ponto de 6, linhas das alças de 1,5 em
+/// destaque a 60 %, alças = círculo branco de 14 com sombra macia e halo de 26
+/// (destaque 18 %) no dedo; cabeçote tracejado fino a 35 %. Pega a alça mais
+/// perto; o arrasto é relativo.
 private struct NativeCurveGraph: View {
     let ease: CurveEase
     /// A curva amostrada pelo MOTOR (`sample_keyframe_ease`); nil = a mesma conta em Swift.
@@ -693,7 +679,7 @@ private struct NativeCurveGraph: View {
                     if let progress {
                         let x = curveInset + CGFloat(progress) * max(1, size.width - 2 * curveInset)
                         var line = Path(); line.move(to: CGPoint(x: x, y: 0)); line.addLine(to: CGPoint(x: x, y: size.height))
-                        context.stroke(line, with: .color(.white.opacity(0.6)), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                        context.stroke(line, with: .color(.white.opacity(0.35)), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
                     }
                 }
             }.contentShape(Rectangle()).accessibilityIdentifier("curve.easingGraph").gesture(DragGesture(minimumDistance: 0)
@@ -714,25 +700,18 @@ private struct NativeCurveGraph: View {
         func point(_ x: Float, _ y: Float) -> CGPoint { plot(x, y, size, low, high) }
         func line(_ a: CGPoint, _ b: CGPoint, _ color: Color, _ width: CGFloat, _ dash: [CGFloat] = []) {
             var path = Path(); path.move(to: a); path.addLine(to: b)
-            context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: width, dash: dash))
+            context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: width, lineCap: dash.isEmpty ? .round : .butt, dash: dash))
         }
         let w = max(1, size.width - 2 * curveInset), h = max(1, size.height - 2 * curveInset)
         let top = point(0, 1).y, bottom = point(0, 0).y
-        func grid(_ alpha: Double, in ctx: GraphicsContext) {
-            for index in 0...32 {
-                let width: CGFloat = index % 8 == 0 ? 1 : 0.5
-                let x = curveInset + w * CGFloat(index) / 32, y = curveInset + h * CGFloat(index) / 32
-                var v = Path(); v.move(to: CGPoint(x: x, y: curveInset)); v.addLine(to: CGPoint(x: x, y: curveInset + h))
-                var hz = Path(); hz.move(to: CGPoint(x: curveInset, y: y)); hz.addLine(to: CGPoint(x: curveInset + w, y: y))
-                ctx.stroke(v, with: .color(.white.opacity(alpha)), lineWidth: width)
-                ctx.stroke(hz, with: .color(.white.opacity(alpha)), lineWidth: width)
-            }
+        // Grade discreta 4 × 4 a 6 %, sem borda pesada.
+        for index in 0...4 {
+            let x = curveInset + w * CGFloat(index) / 4, y = curveInset + h * CGFloat(index) / 4
+            line(CGPoint(x: x, y: curveInset), CGPoint(x: x, y: curveInset + h), AureaColors.curveGridLine, 1, [CGFloat]())
+            line(CGPoint(x: curveInset, y: y), CGPoint(x: curveInset + w, y: y), AureaColors.curveGridLine, 1, [CGFloat]())
         }
-        grid(0.03, in: context)
-        var band = context
-        band.clip(to: Path(CGRect(x: 0, y: min(top, bottom), width: size.width, height: abs(bottom - top))))
-        grid(0.03, in: band)
-        for y in [top, bottom] { line(CGPoint(x: curveInset, y: y), CGPoint(x: curveInset + w, y: y), .white.opacity(0.25), 1, [2, 2]) }
+        // 0 e 1: só um tracejado fino a 12 % (com passar do ponto).
+        for y in [top, bottom] { line(CGPoint(x: curveInset, y: y), CGPoint(x: curveInset + w, y: y), .white.opacity(0.12), 1, [2, 3]) }
         var curve = Path()
         if ease.isBezier && ease.power == 1 {
             let handles = ease.handles
@@ -748,29 +727,35 @@ private struct NativeCurveGraph: View {
         }
         let start = point(0, 0), end = point(1, 1)
         if ease.hasHandles {
+            // A linha da marca até a alça: fina, em destaque a 60 %.
             let hh = ease.handles
-            line(start, point(hh[0], hh[1]), .white.opacity(0.8), 1.5)
-            line(end, point(hh[2], hh[3]), .white.opacity(0.8), 1.5)
+            line(start, point(hh[0], hh[1]), curveGreen.opacity(0.6), 1.5)
+            line(end, point(hh[2], hh[3]), curveGreen.opacity(0.6), 1.5)
         }
-        context.stroke(curve, with: .color(curveGreen), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+        // A curva com o degradê do slider (70 % → 100 %).
+        context.stroke(curve, with: .linearGradient(Gradient(colors: [curveGreen.opacity(0.7), curveGreen]), startPoint: start, endPoint: end),
+                       style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
         for p in [start, end] { context.fill(Path(ellipseIn: CGRect(x: p.x - 3, y: p.y - 3, width: 6, height: 6)), with: .color(curveGreen)) }
+        // A alça: círculo branco de 14 com sombra macia e, no dedo, halo de 26 (o polegar do slider).
+        func knob(_ c: CGPoint, held: Bool) {
+            if held {
+                context.fill(Path(ellipseIn: CGRect(x: c.x - 13, y: c.y - 13, width: 26, height: 26)), with: .color(AureaColors.fxThumbHalo))
+            }
+            var shadowed = context
+            shadowed.addFilter(.shadow(color: AureaColors.fxThumbShadow, radius: 2, x: 0, y: 1))
+            shadowed.fill(Path(ellipseIn: CGRect(x: c.x - 7, y: c.y - 7, width: 14, height: 14)), with: .color(.white))
+        }
         if !ease.hasHandles && ease.isParametric {
             let c = CGPoint(x: curveInset + CGFloat(curveParamMin + ease.paramA * curveParamSpan) * w,
                             y: curveInset + (1 - CGFloat(curveParamMin + (ease.paramB ?? 0.5) * curveParamSpan)) * h)
-            let r: CGFloat = paramDrag != nil ? 14.4 : 12
-            let rect = CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)
-            context.fill(Path(ellipseIn: rect), with: .color(.white))
-            context.stroke(Path(ellipseIn: rect), with: .color(curveGreen), lineWidth: 2)
-            line(CGPoint(x: c.x - 5, y: c.y), CGPoint(x: c.x + 5, y: c.y), curveGreen, 1.5)
-            if ease.paramB != nil { line(CGPoint(x: c.x, y: c.y - 5), CGPoint(x: c.x, y: c.y + 5), curveGreen, 1.5) }
+            knob(c, held: paramDrag != nil)
+            line(CGPoint(x: c.x - 3.5, y: c.y), CGPoint(x: c.x + 3.5, y: c.y), curveGreen, 1.5)
+            if ease.paramB != nil { line(CGPoint(x: c.x, y: c.y - 3.5), CGPoint(x: c.x, y: c.y + 3.5), curveGreen, 1.5) }
         }
         if ease.hasHandles {
             let hh = ease.handles
             for (index, p) in [point(hh[0], hh[1]), point(hh[2], hh[3])].enumerated() {
-                let r: CGFloat = (drag.map { ($0.first ? 0 : 1) == index } ?? false) ? 14.4 : 12
-                let rect = CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)
-                context.fill(Path(ellipseIn: rect), with: .color(.white))
-                context.stroke(Path(ellipseIn: rect), with: .color(curveGreen), lineWidth: 2)
+                knob(p, held: drag.map { ($0.first ? 0 : 1) == index } ?? false)
             }
         }
     }
@@ -826,7 +811,8 @@ private struct NativeCurveGraph: View {
     }
 }
 
-/// Miniatura de uma curva (vagas e grupos): a curva amostrada pelo motor.
+/// Miniatura de uma curva (vagas e grupos): a curva amostrada pelo motor (1.0.8: 28,
+/// traço 1,5; acesa em destaque, senão texto a 75 %).
 private struct CurveTypeThumbnail: View {
     let points: [Float]
     let active: Bool
@@ -834,16 +820,27 @@ private struct CurveTypeThumbnail: View {
         Canvas { context, size in
             guard points.count >= 2 else { return }
             let range = curveEaseRange(CurveEase(interpolation: 0, x1: 0, y1: 0, x2: 1, y2: 1), samples: points)
-            let pad: CGFloat = 4, w = size.width - 2 * pad, h = size.height - 2 * pad
+            let pad: CGFloat = 3, w = size.width - 2 * pad, h = size.height - 2 * pad
             var path = Path()
             for (index, v) in points.enumerated() {
                 let p = CGPoint(x: pad + w * CGFloat(index) / CGFloat(points.count - 1),
                                 y: pad + h - CGFloat((v - range.0) / (range.1 - range.0)) * h)
                 if index == 0 { path.move(to: p) } else { path.addLine(to: p) }
             }
-            context.stroke(path, with: .color(active ? curveGreen : .white), style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+            context.stroke(path, with: .color(active ? curveGreen : AureaColors.railIconInk), style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
         }
-        .frame(width: 36, height: 36)
+        .frame(width: PanelMetrics.curveThumb, height: PanelMetrics.curveThumb)
+    }
+}
+
+/// A pílula da vaga/grupo aceso (1.0.8 visual minimalista): destaque a 22 % e
+/// contorno fino; o resto transparente. Par do `Modifier.curvePick` do CurvePanel.kt.
+private struct CurvePick: ViewModifier {
+    let active: Bool
+    func body(content: Content) -> some View {
+        content
+            .background(active ? AureaColors.fxSegmentPick : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+            .overlay { if active { RoundedRectangle(cornerRadius: 8).strokeBorder(AureaColors.fxPickLine, lineWidth: 1) } }
     }
 }
 
@@ -1093,7 +1090,7 @@ struct NativeCurvePanel: View {
         let invertible = ease.supportsInversion
         return VStack(spacing: 0) {
             cell("curve.back", label: AureaText.t("panel_voltar"), action: back) {
-                CupertinoGlyph.text(CupertinoGlyph.ChevronLeft, size: PanelMetrics.railIcon).mirrorsInRtl()
+                CupertinoGlyph.text(CupertinoGlyph.ChevronLeft, size: PanelMetrics.railIcon, color: AureaColors.railIconInk).mirrorsInRtl()
             }
             cell("curve.keyframe", label: AureaText.t(keyHere ? "panel_tirar_keyframe_daqui" : "panel_marcar_keyframe_aqui"), action: { toggleKey(segment) }) {
                 KeyframeDiamondIcon(look: keyHere ? .keyHere : .animated, enabled: true)
@@ -1103,12 +1100,12 @@ struct NativeCurvePanel: View {
                 if let inverted = ease.inverted { set(inverted, to: segment.start, label: "inverter curva") }
                 else { model.toast = AureaText.t("pn_curve_symmetric") }
             }) {
-                CupertinoGlyph.text(CupertinoGlyph.ArrowRightArrowLeft, size: 24,
-                                    color: invertible && Self.isInverted(ease) ? AureaColors.accent : AureaColors.text)
+                CupertinoGlyph.text(CupertinoGlyph.ArrowRightArrowLeft, size: PanelMetrics.railIcon,
+                                    color: invertible && Self.isInverted(ease) ? AureaColors.accent : AureaColors.railIconInk)
             }
             .opacity(invertible ? 1 : 0.5)
             cell("curve.menu", label: AureaText.t("editor_mais"), action: { menuOpen = true }) {
-                CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: PanelMetrics.railIcon)
+                CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: PanelMetrics.railIcon, color: AureaColors.railIconInk)
             }
             .aureaAnchoredMenu(isPresented: $menuOpen, tag: "curve.menu.list") { menuEntries(segment) }
         }
@@ -1215,21 +1212,22 @@ struct NativeCurvePanel: View {
         let after = (navigation(local: segment.end.time)?["flags"]?.uint32Value ?? 0) & 4 != 0
         let label = graphMode == 0 ? (ease.hasHandles ? cubicBezierLabel(ease) : ease.name.uppercased())
             : AureaText.t(graphMode == 1 ? "particular_curve_value" : "panel_velocidade").uppercased()
+        // 1.0.8 visual minimalista: setas finas de 14 a 60 % e rótulo 12 a 60 %, sem caixa.
         return HStack(spacing: 0) {
             Button { jump(-1) } label: {
-                CupertinoGlyph.text(CupertinoGlyph.ChevronLeft, size: 18, color: before ? AureaColors.text : AureaColors.disabled)
+                CupertinoGlyph.text(CupertinoGlyph.ChevronLeft, size: 14, color: before ? AureaColors.text.opacity(0.6) : AureaColors.disabled)
                     .frame(width: 44, height: PanelMetrics.touch).contentShape(Rectangle())
             }.buttonStyle(AureaPressStyle(shrink: 1)).disabled(!before)
                 .accessibilityLabel(AureaText.t("om_curve_prev")).accessibilityIdentifier("curve.prev")
             // A curva do trecho; tocar troca a força (×1 → ×2 → ×3) — extra do AUREA.
             Text(label)
-                .font(.aurea(size: PanelMetrics.note, weight: .medium)).foregroundStyle(.white.opacity(0.5))
+                .font(.aurea(size: PanelMetrics.note, weight: .medium)).foregroundStyle(.white.opacity(0.6))
                 .lineLimit(1).truncationMode(.tail).multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity, minHeight: PanelMetrics.touch).contentShape(Rectangle())
                 .onTapGesture { if graphMode == 0 && ease.hasHandles { set(curveNextPower(ease), to: segment.start, label: "força da curva") } }
                 .accessibilityIdentifier("curve.power")
             Button { jump(1) } label: {
-                CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 18, color: after ? AureaColors.text : AureaColors.disabled)
+                CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 14, color: after ? AureaColors.text.opacity(0.6) : AureaColors.disabled)
                     .frame(width: 44, height: PanelMetrics.touch).contentShape(Rectangle())
             }.buttonStyle(AureaPressStyle(shrink: 1)).disabled(!after)
                 .accessibilityLabel(AureaText.t("om_curve_next")).accessibilityIdentifier("curve.next")
@@ -1253,8 +1251,8 @@ struct NativeCurvePanel: View {
                     } label: {
                         CurveTypeThumbnail(points: thumbnails[thumbnailKey(slot.ease)] ?? [], active: active)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .background(active ? AureaColors.panelFrameBackground.opacity(0.5) : Color.clear, in: RoundedRectangle(cornerRadius: 5))
-                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .modifier(CurvePick(active: active))
+                            .padding(.horizontal, 6).padding(.vertical, 4)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(AureaPressStyle(shrink: 1))
@@ -1268,8 +1266,7 @@ struct NativeCurvePanel: View {
                 }
             }
         }
-        .frame(width: PanelFrameMetrics.railWidth).frame(maxHeight: .infinity)
-        .background(AureaColors.curveColumn)
+        .frame(width: PanelMetrics.curveColumn).frame(maxHeight: .infinity)
     }
 
     private func groupColumn(_ segment: Segment) -> some View {
@@ -1284,15 +1281,8 @@ struct NativeCurvePanel: View {
                 } label: {
                     CurveTypeThumbnail(points: thumbnails[thumbnailKey(first)] ?? [], active: active)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(active ? AureaColors.panelFrameDivider : Color.clear, in: RoundedRectangle(cornerRadius: 5))
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .overlay(alignment: .leading) {
-                            // O losango de 45° encostado nos presets (cue do grupo ativo).
-                            if active {
-                                Rectangle().fill(AureaColors.panelFrameDivider).frame(width: 10, height: 10)
-                                    .rotationEffect(.degrees(45)).offset(x: -5)
-                            }
-                        }
+                        .modifier(CurvePick(active: active))
+                        .padding(.horizontal, 6).padding(.vertical, 4)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(AureaPressStyle(shrink: 1))
@@ -1303,8 +1293,7 @@ struct NativeCurvePanel: View {
                 .accessibilityIdentifier("curve.category.\(c.rawValue)")
             }
         }
-        .frame(width: PanelFrameMetrics.railWidth).frame(maxHeight: .infinity)
-        .background(AureaColors.curveColumn)
+        .frame(width: PanelMetrics.curveColumn).frame(maxHeight: .infinity)
     }
 
     /// Quique: saltos (×1..×8) e força (um desfazer por arrasto).
@@ -1456,211 +1445,109 @@ struct ExpressionEditor: View {
     }
 }
 
-/// REMAPEAR TEMPO em lista (par do TimeRemapEffectEditor do Android; UX
-/// inspirada no Node Video, com o tema do Aurea). Três linhas e o Ao contrário:
-///  1. Manter o tom do áudio.
-///  2. Remapear tempo — o MOMENTO DA FONTE no cabeçote em timecode: arrastar o
-///     valor para os lados (1 quadro a cada 4 pt) ou tocar para digitar grava a
-///     chave ali. O ◇ marca/tira a chave; a faixa fina mostra as chaves e o
-///     cabeçote (tocar numa chave vai até ela e a escolhe) e a curva abre o
-///     editor de curva NORMAL do Aurea para aquele trecho.
-///  3. Interpolação do tempo — Desligado / Mistura de quadros / Optical flow.
-/// O dado é a MESMA curva da camada (prévia, exportação e som).
+/// Source time at the playhead. The Effects sidebar edits its track.
 struct TimeRemapEffectEditor: View {
     @EnvironmentObject private var model: AureaModel
-    /// O efeito antigo (projetos salvos com ele); na aba Remapear do painel de velocidade não há efeito.
-    var effectId: UInt32 = 0
-    var showInterpolation = true
-    @State private var values: [Float] = []
-    /// Quadro da fonte no cabeçote (`query_speed_curve` [7]), em quadros da composição.
-    @State private var sourceFrame: Float = 0
-    @State private var drag: Float?
-    @State private var dragStart: Float?
+    let enabled: Bool
     @State private var dragLocal: Int32?
-    @State private var selectedKey: Int32?
     private var id: Int64 { model.primarySelection ?? 0 }
     private var fps: Float { Float(model.compositionFps > 0 ? model.compositionFps : 30) }
     private var flags: UInt32 { (model.detail["timeFlags"] as? NSNumber)?.uint32Value ?? 0 }
-    private var isVideo: Bool { model.selectedLayer?.kind == 1 }
-    private var keyTimes: [Int32] {
-        guard values.count >= 5 else { return [] }
-        let count = min(max(0, Int(values[0])), (values.count - 5) / 7)
-        return (0..<count).map { Int32(values[5 + $0 * 7]) }
-    }
-    private var lo: Int32 { values.count >= 5 ? Int32(values[1]) : 0 }
-    private var hi: Int32 { values.count >= 5 ? Int32(values[2]) : 1 }
-    private var lastFrame: Float {
-        guard values.count >= 5 else { return 1 }
-        return max(1, values[3] > 0 ? values[3] : values[2])
-    }
-    private var inside: Bool { values.count >= 5 && model.localPlayhead >= lo && model.localPlayhead <= hi }
-    private var sourceFrames: Float {
-        let source = model.engine.timeRemapCurrentSource(id)
-        return source.isFinite ? Float(source) : 0
-    }
-    private var keyHere: Int? { keyTimes.firstIndex(of: model.localPlayhead) }
-    private var shownFrames: Float { drag ?? sourceFrames }
-    private func load() { values = model.engine.timeRemap(id).map(\.floatValue) }
-    private func refresh() { model.refreshModel(force: true); load() }
-    private func seekLocal(_ local: Int32) {
-        guard let layer = model.selectedLayer else { return }
-        model.seek(toFrame: Int64(local) + Int64(layer.startFrame) - Int64(layer.offsetFrames))
-    }
+    private var unlocked: Bool { model.selectedLayer?.locked == false }
 
     var body: some View {
+        let layer = id
+        let data = model.engine.timeRemap(layer).map(\.floatValue)
         VStack(alignment: .leading, spacing: 4) {
-            toggleRow("remap_manter_tom", checked: flags & 128 != 0) { on in
-                model.mutate { $0.setKeepPitch(forLayer: id, on: on) }
-                refresh()
-            }
-            if values.count < 5 {
-                PanelNotice(AureaText.t("remap_ligue_efeito"))
-            } else {
-                PropertyCustomRow(AureaText.t("remap_linha_tempo"), selected: keyHere != nil, onSelect: toggleKey,
-                                  keyframe: keyHere != nil ? .keyHere : .animated) {
-                    HStack(spacing: 0) {
-                        ValueBox(Self.timecode(Int(shownFrames.rounded()), fps: fps), enabled: inside, width: 112) { openKeypad() }
-                            .highPriorityGesture(DragGesture(minimumDistance: 6).onChanged { value in
-                                guard inside else { return }
-                                if dragStart == nil { dragStart = sourceFrames; dragLocal = model.localPlayhead; model.beginGesture("tempo do vídeo") }
-                                let frames = min(lastFrame, max(0, (dragStart ?? 0) + Float(value.translation.width) * 0.25))
-                                drag = frames.rounded()
-                                _ = model.engine.setTimeRemapValue(id, time: Int64(dragLocal ?? model.localPlayhead), value: frames.rounded())
-                            }.onEnded { _ in finishDrag() })
-                        // 0.4.1: a curva do trecho é a da coluna esquerda (Curva), como em toda propriedade.
+            if enabled && flags & 4 != 0 && data.count >= 5 {
+                let source = model.engine.timeRemapCurrentSource(layer)
+                let value = source.isFinite ? Float(source) : 0
+                let last = max(1, data[3] > 0 ? data[3] : data[2] - data[1] - 1)
+                let local = model.localPlayhead
+                let inside = Float(local) >= data[1] && Float(local) <= data[2]
+                let editable = inside && unlocked
+                let title = AureaText.t("remap_linha_tempo")
+                let label = timecode(Int(value.rounded()))
+                HStack(spacing: 0) {
+                    FxParamLabel(label: title, height: 45, active: editable, enabled: editable)
+                        .padding(FxParamMath.LABEL_MARGIN)
+                    FxRuler(value: value, step: 1, min: 0, max: last, enabled: editable,
+                            identifier: "effects.remap.ruler", accessibilityLabel: AureaText.t("om_fx_ruler", title),
+                            accessibilityValue: label, limits: true, onBegin: {
+                        dragLocal = local
+                        model.beginGesture(title)
+                    }, onValue: { next in
+                        write(next, on: layer, at: dragLocal ?? local)
+                    }, onEnd: { finishDrag() })
+                    .frame(height: FxParamMath.ROW_RULER - 12)
+                    FxValueBox(text: label, height: 45, width: 85, enabled: editable, onTap: {
+                        openKeypad(title: title, value: value, last: last, local: local)
+                    })
+                    .padding(FxParamMath.LABEL_MARGIN)
+                    .accessibilityIdentifier("effects.remap.timecode")
+                }
+                .frame(height: FxParamMath.ROW_RULER)
+                if !inside && unlocked { PanelNotice(AureaText.t("remap_fora_clipe")) }
+                if unlocked && data[2] - data[1] >= 2 {
+                    PanelItemRow(glyph: CupertinoGlyph.ArrowLeftRight, title: AureaText.t("remap_ao_contrario"), tag: "effects.remap.reverse") {
+                        guard model.engine.reverseTimeRemap(forLayer: id) else { return }
+                        model.unaliasThumbs(id)
+                        model.refreshModel(force: true)
                     }
                 }
-                keyStrip.padding(.leading, 102).padding(.trailing, 4)
-                if !inside {
-                    Text(AureaText.t("remap_fora_clipe")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if isVideo && showInterpolation {
-                    Text(AureaText.t("remap_interpolacao")).font(.aurea(size: 13)).padding(.top, 6)
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 6) {
-                            ForEach([(0, "remap_interp_off"), (1, "remap_interp_blend"), (2, "remap_interp_flow")], id: \.0) { mode, label in
-                                chip(label, on: (flags & 16 != 0 ? 2 : flags & 8 != 0 ? 1 : 0) == mode) {
-                                    model.mutate { $0.setFrameBlendForLayer(id, mode: UInt32(mode)) }
-                                    refresh()
-                                }
+                if unlocked {
+                    PanelSection(title: AureaText.t("om_lp_speed_tab_options"), glyph: CupertinoGlyph.SliderHorizontal3,
+                                 tag: "effects.remap.options", startOpen: false, flat: true) {
+                        NativePanelToggle(AureaText.t("remap_manter_tom"), checked: flags & 128 != 0, fontSize: 13, weight: .regular) { value in
+                            model.mutate { $0.setKeepPitch(forLayer: id, on: value) }
+                            model.refreshModel(force: true)
+                        }
+                        if model.selectedLayer?.kind == 1 {
+                            PanelChoiceRow(label: AureaText.t("remap_interpolacao"),
+                                           options: ["remap_interp_off", "remap_interp_blend", "remap_interp_flow"].map { AureaText.t($0) },
+                                           isOn: { $0 == (flags & 16 != 0 ? 2 : flags & 8 != 0 ? 1 : 0) }) { mode in
+                                model.mutate { $0.setFrameBlendForLayer(id, mode: UInt32(mode)) }
+                                model.refreshModel(force: true)
                             }
                         }
                     }
                 }
-                toggleRow("remap_ao_contrario", checked: flags & 256 != 0) { _ in
-                    model.mutate { _ = $0.reverseTimeRemap(forLayer: id) }
-                    model.unaliasThumbs(id)   // o tempo do pedaço mudou: a tira dele é outra
-                    refresh()
-                }
-                Text(AureaText.t("remap_dica_lista")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
-                    .fixedSize(horizontal: false, vertical: true).padding(.top, 2)
+            } else {
+                PanelNotice(AureaText.t("remap_ligue_efeito"))
             }
-        }.frame(maxWidth: .infinity, alignment: .leading)
-            .onAppear(perform: load)
-            .onChange(of: model.status.modelRevision) { _ in load() }
-            .onChange(of: model.status.playhead) { _ in load() }
-            .onChange(of: id) { _ in load(); selectedKey = nil }
-            .onDisappear { finishDrag() }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityIdentifier("effects.remap.controls")
+        .onDisappear { finishDrag() }
     }
 
-    /// Timecode da fonte, H:MM:SS:QQ (quadros na taxa do projeto).
-    /// SpeedAudioPanels.kt `timecode`: taxa livre (29,97, 144…) com os segundos
-    /// REAIS — a mesma conta do relógio da timeline (`Timecode.split`).
-    static func timecode(_ frames: Int, fps: Float) -> String {
-        let p = Timecode.split(Int32(clamping: max(0, frames)), fps)
-        return String(format: fps > 100 ? "%d:%02d:%02d:%03d" : "%d:%02d:%02d:%02d", p.hours, p.minutes, p.seconds, p.frames)
+    private func timecode(_ frames: Int) -> String {
+        let parts = Timecode.split(Int32(clamping: max(0, frames)), fps)
+        return String(format: fps > 100 ? "%d:%02d:%02d:%03d" : "%d:%02d:%02d:%02d", parts.hours, parts.minutes, parts.seconds, parts.frames)
     }
 
     private func finishDrag() {
-        guard dragStart != nil else { return }
-        dragStart = nil; drag = nil; dragLocal = nil
+        guard dragLocal != nil else { return }
+        dragLocal = nil
         model.endGesture()
-        load()
     }
 
-    private func openKeypad() {
-        guard inside else { return }
-        let top = lastFrame / fps
-        model.numericKeypad = KeypadRequest(title: AureaText.t("remap_linha_tempo"), value: shownFrames / fps, unit: "s",
-                                            min: 0, max: top, decimals: 2) { s in
-            _ = model.engine.setTimeRemapValue(id, time: Int64(model.localPlayhead), value: (min(top, max(0, s)) * fps).rounded())
-            refresh()
+    private func write(_ value: Float, on layer: Int64, at local: Int32) {
+        guard model.primarySelection == layer,
+              model.engine.setTimeRemapValue(layer, time: Int64(local), value: value.rounded()) else { return }
+        model.refreshModel(force: true)
+    }
+
+    private func openKeypad(title: String, value: Float, last: Float, local: Int32) {
+        let project = model.projectGeneration, layer = id
+        let composition = (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value
+        model.numericKeypad = KeypadRequest(title: title, value: value / fps, unit: "s", min: 0, max: last / fps, decimals: 3) { seconds in
+            guard model.projectGeneration == project, model.primarySelection == layer,
+                  (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value == composition else { return }
+            model.beginGesture(title)
+            write(seconds * fps, on: layer, at: local)
+            model.endGesture()
         }
-    }
-
-    /// Editor de curva NORMAL: a chave escolhida na faixa, senão a que abre o
-    /// trecho sob o cabeçote (TrackProperty::TimeRemap = 30).
-    private func openCurve() {
-        let keys = keyTimes
-        guard keys.count >= 2 else { return }
-        let time: Int32
-        if let s = selectedKey, keys.contains(s), s != keys.last { time = s }
-        else if let s = selectedKey, s == keys.last { time = keys[keys.count - 2] }
-        else { time = keys[max(0, min(keys.count - 2, keys.lastIndex { $0 <= model.localPlayhead } ?? 0))] }
-        model.openCurve(property: 30, effect: UInt32.max, param: 0, time: time)
-    }
-
-    private func toggleKey() {
-        guard inside else { return }
-        if let index = keyHere {
-            if keyTimes.count > 2 { model.engine.removeTimeRemap(id, index: UInt32(index)) }
-        } else {
-            _ = model.engine.editTimeRemap(id, index: -1, time: Int64(model.localPlayhead), value: 0, interpolation: -1)
-        }
-        refresh()
-    }
-
-    /// Faixa fina das chaves: losangos, o escolhido aceso e o cabeçote. Tocar
-    /// perto de um losango vai até ele e o escolhe; o resto move o cabeçote.
-    private var keyStrip: some View {
-        GeometryReader { geometry in
-            let pad: CGFloat = 8
-            let width = max(1, geometry.size.width - pad * 2)
-            let span = CGFloat(max(1, hi - lo))
-            let xOf: (Int32) -> CGFloat = { t in pad + width * CGFloat(min(max(t, lo), hi) - lo) / span }
-            let frameAt: (CGFloat) -> Int32 = { x in lo + Int32((min(1, max(0, (x - pad) / width)) * span).rounded()) }
-            Canvas { ctx, size in
-                let y = size.height / 2
-                ctx.fill(Path(roundedRect: CGRect(x: pad, y: y - 1.5, width: width, height: 3), cornerRadius: 1.5), with: .color(AureaColors.chip))
-                let r: CGFloat = 5
-                for t in keyTimes where t >= lo - 1 && t <= hi + 1 {
-                    let x = xOf(t)
-                    var p = Path()
-                    p.move(to: CGPoint(x: x, y: y - r)); p.addLine(to: CGPoint(x: x + r, y: y))
-                    p.addLine(to: CGPoint(x: x, y: y + r)); p.addLine(to: CGPoint(x: x - r, y: y)); p.closeSubpath()
-                    ctx.fill(p, with: .color(t == selectedKey || t == model.localPlayhead ? AureaColors.accent : AureaColors.text))
-                }
-                let px = xOf(model.localPlayhead)
-                var line = Path()
-                line.move(to: CGPoint(x: px, y: 2)); line.addLine(to: CGPoint(x: px, y: size.height - 2))
-                ctx.stroke(line, with: .color(AureaColors.playhead), lineWidth: 2)
-            }.contentShape(Rectangle())
-                .gesture(DragGesture(minimumDistance: 0).onChanged { value in
-                    let start = value.startLocation.x
-                    if let hit = keyTimes.min(by: { abs(xOf($0) - start) < abs(xOf($1) - start) }), abs(xOf(hit) - start) <= 14 {
-                        if selectedKey != hit { selectedKey = hit; seekLocal(hit) }
-                    } else {
-                        selectedKey = nil
-                        seekLocal(min(max(frameAt(value.location.x), lo), max(lo, hi - 1)))
-                    }
-                })
-        }.frame(height: 32).keepLtr().accessibilityLabel(AureaText.t("remap_faixa_chaves"))
-    }
-
-    private func toggleRow(_ key: String, checked: Bool, _ onChange: @escaping (Bool) -> Void) -> some View {
-        HStack {
-            Text(AureaText.t(key)).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
-            AureaToggle(checked: checked, onCheckedChange: onChange)
-        }.frame(height: 48)
-    }
-
-    private func chip(_ label: String, on: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(AureaText.t(label)).font(.aurea(size: 12)).foregroundStyle(on ? AureaColors.accent : AureaColors.text)
-                .padding(.horizontal, 12).frame(height: 44)
-                .background(on ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
-        }.buttonStyle(AureaPressStyle()).accessibilityAddTraits(on ? .isSelected : [])
     }
 }
 
@@ -2450,20 +2337,10 @@ private struct NativeTrackGraph: View {
         /// As alças GRAVADAS (sem prender): o arrasto só escreve o par desta alça.
         let handles: [Float]
         let base: Double
-        var power: Int = 1
-        var influence: Double { min(0.99, max(0.01, Double(incoming ? 1 - handles[2] : handles[0]))) }
-        private var slope: Double { Double(incoming ? 1 - handles[3] : handles[1]) / influence }
-        var velocity: Double { base * curvePowered(slope, power) }
-        var frame: Double { Double(key.time) + (Double(end.time) - Double(key.time)) * (incoming ? 1 - influence : influence) }
-        func changed(frame: Double, velocity: Double) -> [Float] {
-            var h = handles
-            let fraction = min(0.99, max(0.01, (frame - Double(key.time)) / (Double(end.time) - Double(key.time))))
-            let s = curveRooted(velocity / base, power)
-            // y nos mesmos −2..3 da curva, do preset e do motor.
-            if incoming { h[2] = Float(fraction); h[3] = Float(min(3, max(-2, 1 - s * (1 - fraction)))) }
-            else { h[0] = Float(fraction); h[1] = Float(min(3, max(-2, s * fraction))) }
-            return h
-        }
+        let power: Int
+        let fraction: Double
+        let velocity: Double
+        var frame: Double { Double(key.time) + (Double(end.time) - Double(key.time)) * fraction }
     }
     /// Posição com outro eixo marcado nos MESMOS instantes: velocidade espacial.
     private var spatialAxes: [[KeyframeItem]] {
@@ -2499,8 +2376,13 @@ private struct NativeTrackGraph: View {
             if a.interpolation == 1 { h = [0.33333334,0.33333334,0.6666667,0.6666667] }
             // As curvas nomeadas ignoram a força no motor (`keyframe_ease`).
             let power = ease.isBezier ? min(3, max(1, ease.power)) : 1
-            result.append(SpeedHandle(key:a,end:b,incoming:false,handles:h,base:base,power:power))
-            result.append(SpeedHandle(key:a,end:b,incoming:true,handles:h,base:base,power:power))
+            for incoming in [false, true] {
+                let location = model.engine.speedGraphTangent(h.map { NSNumber(value: $0) }, incoming: incoming,
+                    power: UInt32(power), base: Float(base), fraction: 0, velocity: 0, editing: false)
+                guard location.count == 2 else { continue }
+                result.append(SpeedHandle(key: a, end: b, incoming: incoming, handles: h, base: base,
+                    power: power, fraction: location[0].doubleValue, velocity: location[1].doubleValue))
+            }
         }
         return result
     }
@@ -2782,16 +2664,19 @@ private struct NativeTrackGraph: View {
         guard var current = drag, !current.picked else { return }
         if let handle = current.handle {
             guard current.began || hypot(value.translation.width,value.translation.height) >= 4 else { return }
-            let h = handle.changed(frame:handle.frame+Double(value.translation.width/size.width)*current.initial.duration,
-                velocity:handle.velocity-Double(value.translation.height/size.height)*current.initial.range)
-            guard h.allSatisfy({ $0.isFinite }) else { return }
+            let frames = Double(handle.end.time) - Double(handle.key.time)
+            let fraction = handle.fraction + Double(value.translation.width / size.width) * current.initial.duration / frames
+            let velocity = handle.velocity - Double(value.translation.height / size.height) * current.initial.range
+            let h = model.engine.speedGraphTangent(handle.handles.map { NSNumber(value: $0) }, incoming: handle.incoming,
+                power: UInt32(handle.power), base: Float(handle.base), fraction: Float(fraction), velocity: Float(velocity), editing: true)
+            guard h.count == 4 else { return }
             if !current.began { model.beginGesture("editar velocidade do intervalo");current.began = true }
             // A curva é da PROPRIEDADE, como no painel de curva: força 0 (mantém)
             // e eixos ligados — o motor leva a mesma curva a X/Y/Z (também na 2D).
             let key = handle.key
             model.engine.editTrackKey(layer,property:key.property,effect:key.effectIndex,param:key.paramIndex,
                 time:key.time,action:3,value:key.value,targetTime:key.time,interpolation:2,
-                handles:h.map { NSNumber(value:$0) } + [NSNumber(value: 0), NSNumber(value: 1)])
+                handles:h + [NSNumber(value: handle.power), NSNumber(value: 1)])
             drag = current; model.refreshModel(force:true)
         } else if let key = current.key {
             guard current.began || hypot(value.translation.width, value.translation.height) >= 4 else { return }

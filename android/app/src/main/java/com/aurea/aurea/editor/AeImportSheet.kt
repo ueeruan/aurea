@@ -1,5 +1,7 @@
 package com.aurea.aurea.editor
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,6 +14,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,6 +47,22 @@ import com.aurea.aurea.ui.theme.tocavel
 @Composable
 internal fun AeImportSheet(store: EditorStore, result: EditorStore.AeImportResult) {
     var showNotes by remember { mutableStateOf(false) }
+    var repairLayer by remember { mutableStateOf(0L) }
+    val link = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null && repairLayer != 0L && store.primary == repairLayer) {
+            store.replaceMedia(repairLayer, uri)
+            store.dismissAeImport()
+        }
+        repairLayer = 0L
+    }
+    val open: (EditorStore.AeImportItem) -> Unit = { item ->
+        if (store.focusReportedLayer(item.composition, item.layer)) {
+            if (item.kind == "midia" && store.layers.firstOrNull { it.id == item.layer }?.kind in listOf(1, 2)) {
+                repairLayer = item.layer
+                link.launch(arrayOf(if (store.layers.firstOrNull { it.id == item.layer }?.kind == 1) "video/*" else "image/*"))
+            } else store.dismissAeImport()
+        }
+    }
     AureaModalSheet(onDismiss = { store.dismissAeImport() }) {
         Column(
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 6.dp).testTag("ae.sheet"),
@@ -72,14 +91,14 @@ internal fun AeImportSheet(store: EditorStore, result: EditorStore.AeImportResul
             if (result.skipped.isNotEmpty()) {
                 Text(stringResource(R.string.ae_skipped_title, result.skipped.size), modifier = Modifier.padding(top = 8.dp),
                     style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600, color = AureaColors.Warning)))
-                result.skipped.take(60).forEach { ItemRow(it) }
+                ImportItems(result.skipped, open)
                 if (result.skipped.size > 60) Text("…", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)))
             }
             if (result.notes.isNotEmpty()) {
                 Text(stringResource(R.string.ae_notes_title, result.notes.size), modifier = Modifier.padding(top = 8.dp).testTag("ae.notes")
                     .tocavel(shrink = 1f) { showNotes = !showNotes },
                     style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600, color = AureaColors.Accent)))
-                if (showNotes) result.notes.take(60).forEach { ItemRow(it) }
+                if (showNotes) ImportItems(result.notes, open)
             }
             if (result.ok || partial) {
                 Text(stringResource(R.string.ae_undo_hint), modifier = Modifier.padding(top = 6.dp),
@@ -94,6 +113,21 @@ internal fun AeImportSheet(store: EditorStore, result: EditorStore.AeImportResul
                 Text(stringResource(R.string.common_ok), style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W600, color = AureaColors.OnAccent)))
             }
             Spacer(Modifier.height(10.dp))
+        }
+    }
+}
+
+@Composable
+private fun ImportItems(items: List<EditorStore.AeImportItem>, open: (EditorStore.AeImportItem) -> Unit) {
+    items.take(60).groupBy { Triple(it.composition, it.layer, it.layerName) }.forEach { (group, rows) ->
+        if (group.third.isNotBlank()) {
+            Text(group.third, Modifier.padding(top = 6.dp).semantics { heading() },
+                style = AureaType.Base.merge(TextStyle(fontWeight = FontWeight.W600)))
+        }
+        rows.forEach { ItemRow(it) }
+        val target = rows.first()
+        if (target.layer != 0L) TextButton(onClick = { open(target) }) {
+            Text(stringResource(if (target.kind == "midia") R.string.motion_link_media else R.string.motion_view_layer))
         }
     }
 }

@@ -33,12 +33,12 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.LazyGridState
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.itemsIndexed
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+
+
+
+
+
+
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -92,8 +92,8 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.text.style.Hyphens
-import androidx.compose.ui.text.style.LineBreak
+
+
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
@@ -114,29 +114,7 @@ import com.aurea.aurea.ui.theme.CupertinoIcon
 import com.aurea.aurea.ui.theme.tocavel
 import java.util.Locale
 
-// =============================================================================
-//  O NAVEGADOR DE EFEITOS (0.3.2 Omega, área 07 P0-6): as medidas e os fluxos
-//  da referência, com os extras do AUREA.
-//
-//   · Moldura: fundo «superfície de lista», cabeçalho de 44 (✕/‹ · título 17 ·
-//     🔍, que some dentro da categoria) e o fio de 0,5 só com conteúdo rolado.
-//     Entrar numa categoria desliza 100 dp em 100 ms; voltar faz o inverso.
-//   · Início: RECOMENDADOS (faixa de 186, até 6, sem os efeitos que a camada já
-//     tem), RECENTES/FAVORITOS (faixa de 210 em páginas de 2 linhas; toque
-//     ADICIONA, toque longo abre o DETALHE) e as CATEGORIAS (2 colunas, 65 dp).
-//     A aba Plugins reúne instalação, gerenciamento e aplicação na camada.
-//   · Categoria: grade de cartões de 88 dp em ordem alfabética, anterior/próxima
-//     nas pontas. Toque no cartão → detalhe.
-//   · Busca: etiquetas sugeridas, etiqueta vira ficha no campo, resultados em
-//     linhas por pontos (etiqueta ×7, nome ×3, inglês ×2, descrição ×1) somados
-//     à busca do AUREA em 7 idiomas. Toque → detalhe.
-//   · Detalhe (EffectsCatalogView.kt): folha paginada com as variações; tocar
-//     numa variação adiciona (efeito + preset, um passo de desfazer) e fecha.
-//
-//  Extras do AUREA mantidos: ferramentas-efeito (Máscara, Rastreio, Legendas
-//  abrem o painel delas), plugins, selo "Novo", "!" de efeito pesado, cadeado
-//  Hyper e as prévias reais do motor (só o "depois", sem rótulos).
-// =============================================================================
+// Catálogo móvel: toque para aplicar; opções preservam a ficha, os favoritos e os presets.
 
 /** Onde o detalhe abriu: a lista que ele pagina e o item tocado. */
 private class DetailRequest(val entries: List<EffectCatalogEntry>, val index: Int)
@@ -331,14 +309,14 @@ private fun EffectBrowserBody(
     }
     val openDetail: (List<EffectCatalogEntry>, Int) -> Unit = { list, i -> nav.detail = DetailRequest(list, i) }
     val homeState = rememberLazyListState()
-    val gridState = rememberLazyGridState()
+    val groupState = key(nav.groupId) { rememberLazyListState() }
     val previewsOn = prefs.previewsEnabled
 
     Box(Modifier.fillMaxSize().background(AureaColors.FxListSurface)) {
         Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
             val openId = nav.groupId?.takeIf { id -> groups.any { it.first.id == id } }
             val open = groups.firstOrNull { it.first.id == openId }
-            val scrolled = if (open == null) homeState.canScrollBackward else gridState.canScrollBackward
+            val scrolled = if (open == null) homeState.canScrollBackward else groupState.canScrollBackward
             BrowserTopBar(
                 title = open?.let { stringResource(effectGroupLabelRes(it.first)) } ?: stringResource(R.string.fx_browser_title),
                 inGroup = open != null,
@@ -355,7 +333,7 @@ private fun EffectBrowserBody(
                 val pages = remember(pluginRecents, pluginFavorites, perPage) { quickPages(pluginRecents, pluginFavorites, perPage) }
                 PluginManagerPane(
                     store, Modifier.weight(1f), pluginEntries,
-                    onOpenEffect = { entry -> openDetail(pluginEntries, pluginEntries.indexOf(entry)) },
+                    onOpenEffect = { entry -> add(entry, -1) },
                     shortcuts = if (pages.isEmpty()) null else ({
                         QuickBand(store, pages, perPage, pluginFavorites.isEmpty(), previewsOn, add, openDetail)
                     }),
@@ -367,8 +345,9 @@ private fun EffectBrowserBody(
                         onAdd = add, onDetail = openDetail, onGroup = { nav.groupId = it.id },
                     )
                 } else {
-                    val (previous, next) = adjacentGroups(groups.map { it.first }, open.first)
-                    GroupGrid(store, gridState, open.first, open.second, previous, next, previewsOn, openDetail) { nav.groupId = it.id }
+                    key(open.first) {
+                        EffectResults(store, groupState, open.second, previewsOn, add, openDetail)
+                    }
                 }
             }
         }
@@ -376,7 +355,7 @@ private fun EffectBrowserBody(
             key(nav.searchEpoch) {
                 SearchPane(
                     store, if (nav.plugins) pluginEntries else browserEntries, nav.searchChips, onChips = { nav.searchChips = it }, previewsOn = previewsOn,
-                    onDetail = openDetail, onClose = { nav.searching = false },
+                    onAdd = add, onDetail = openDetail, onClose = { nav.searching = false },
                 )
             }
         }
@@ -455,22 +434,15 @@ private fun BrowserTopBar(title: String, inGroup: Boolean, divider: Boolean, onB
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 style = AureaType.of(19f, FontWeight.SemiBold, color = AureaColors.Text),
-                textAlign = TextAlign.Center,
                 modifier = Modifier.weight(1f).padding(horizontal = AureaDims.S1).semantics { heading() },
             )
-            if (inGroup) {
-                Spacer(Modifier.size(AureaDims.MinTap))
-            } else {
-                Box(
-                    Modifier
-                        .size(AureaDims.MinTap)
-                        .testTag("effects.search")
-                        .semantics { contentDescription = searchLabel; role = Role.Button }
-                        .tocavel(shrink = 1f, role = null, onClick = onSearch),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CupertinoIcon(CupertinoGlyph.Search, 22.dp, AureaColors.Text)
-                }
+            Box(
+                Modifier.size(AureaDims.MinTap).testTag("effects.search")
+                    .semantics { contentDescription = searchLabel; role = Role.Button }
+                    .tocavel(shrink = 1f, role = null, onClick = onSearch),
+                contentAlignment = Alignment.Center,
+            ) {
+                CupertinoIcon(CupertinoGlyph.Search, 22.dp, AureaColors.Accent)
             }
         }
         if (divider) Box(Modifier.fillMaxWidth().height(0.5.dp).background(AureaColors.FxLowSurface))
@@ -499,130 +471,49 @@ private fun BrowserHome(
     val pages = remember(recents, favorites, perPage) { quickPages(recents, favorites, perPage) }
     // Só Recentes à vista: uma página de Favoritos com o convite da estrela.
     val hint = favorites.isEmpty() && recents.isNotEmpty()
-    val categoriesLabel = stringResource(R.string.fx_browser_categories)
-    // Bugs 0.3.4 (bug 3): os itens e as chaves vêm de browserHomeRows (testada na JVM),
-    // todas com prefixo por tipo ("section:", "header:", "category:", "action:").
-    val byGroup = remember(groups) { groups.toMap() }
-    val rows = remember(recommended.isNotEmpty(), pages.isNotEmpty(), groups) {
-        browserHomeRows(recommended.isNotEmpty(), pages.isNotEmpty(), groups.map { it.first })
-    }
     CompositionLocalProvider(LocalFxThumbnailWork provides !state.isScrollInProgress) {
-        LazyColumn(state = state, modifier = Modifier.fillMaxSize().testTag("effects.home")) {
-            items(rows, key = { it.key }) { homeRow ->
-                when (homeRow) {
-                    BrowserHomeRow.Recommended -> RecommendedBand(store, recommended, previewsOn, onDetail)
-                    BrowserHomeRow.Quick -> QuickBand(store, pages, perPage, hint, previewsOn, onAdd, onDetail)
-                    BrowserHomeRow.CategoriesHeader -> Text(
-                        categoriesLabel, style = AureaType.of(15f, FontWeight.SemiBold, color = AureaColors.Text),
-                        modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp).semantics { heading() },
-                    )
-                    is BrowserHomeRow.Categories -> CategoryRow(store, homeRow.groups, byGroup, previewsOn, onGroup)
+        LazyColumn(
+            state = state, modifier = Modifier.fillMaxSize().testTag("effects.home"),
+            contentPadding = PaddingValues(top = 4.dp, bottom = 12.dp),
+        ) {
+            if (pages.isNotEmpty()) item(key = "shortcuts") {
+                QuickBand(store, pages, perPage, hint, previewsOn, onAdd, onDetail)
+            }
+            item(key = "category-heading") { CatalogHeading(stringResource(R.string.fx_browser_categories)) }
+            items(groups, key = { it.first.id }) { (group, entries) ->
+                val label = stringResource(effectGroupLabelRes(group))
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp)
+                        .clip(RoundedCornerShape(10.dp)).background(AureaColors.Surface)
+                        .testTag("effects.category." + group.id)
+                        .clickable(role = Role.Button) { onGroup(group) }
+                        .heightIn(min = 48.dp).padding(horizontal = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CupertinoIcon(effectGroupGlyph(group), 18.dp, AureaColors.Accent)
+                    Text(label, Modifier.weight(1f), style = AureaType.of(14f, FontWeight.Medium, color = AureaColors.Text))
+                    Text(entries.size.toString(), style = AureaType.of(12f, color = AureaColors.FxTextSecondary))
+                    CupertinoIcon(CupertinoGlyph.ChevronRight, 13.dp, AureaColors.FxTextSecondary)
                 }
             }
-        }
-    }
-}
-
-/** Uma linha de 2 ladrilhos de categoria (fundo «mais escuro», espaço de 1). */
-@Composable
-private fun CategoryRow(
-    store: EditorStore,
-    row: List<EffectGroup>,
-    byGroup: Map<EffectGroup, List<EffectCatalogEntry>>,
-    previewsOn: Boolean,
-    onGroup: (EffectGroup) -> Unit,
-) {
-    Row(
-        Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        row.forEach { g -> GroupTile(store, g, byGroup[g].orEmpty(), previewsOn, Modifier.weight(1f)) { onGroup(g) } }
-        if (row.size == 1) Spacer(Modifier.weight(1f))
-    }
-}
-
-/**
- * RECOMENDADOS: faixa de 186 «superfície baixa» que rola para o lado, itens de
- * 121×153 (miniatura 115) e véus de 80 nas bordas só quando dá para rolar
- * daquele lado. Toque → detalhe paginado pelos recomendados.
- */
-@Composable
-private fun RecommendedBand(
-    store: EditorStore,
-    entries: List<EffectCatalogEntry>,
-    previewsOn: Boolean,
-    onDetail: (List<EffectCatalogEntry>, Int) -> Unit,
-) {
-    val label = stringResource(R.string.om_fx_recommended)
-    val row = rememberLazyListState()
-    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
-    val veil = AureaColors.FxSunken
-    val clear = veil.copy(alpha = 0f)
-    Box(
-        Modifier.fillMaxWidth().height(186.dp).background(AureaColors.FxLowSurface)
-            .testTag("effects.featured").semantics { contentDescription = label },
-    ) {
-        LazyRow(
-            state = row,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(horizontal = 7.5.dp),
-            horizontalArrangement = Arrangement.spacedBy(7.5.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            itemsIndexed(entries, key = { _, e -> effectItemKey(e.typeId) }) { i, e ->
-                RecommendedItem(e, store.effectPreviews, previewsOn) { onDetail(entries, i) }
+            if (recommended.isNotEmpty()) item(key = "recommended-heading") {
+                CatalogHeading(stringResource(R.string.fx_browser_featured))
+            }
+            itemsIndexed(recommended, key = { _, entry -> "recommended:" + effectCardId(entry.typeId) }) { index, entry ->
+                CatalogEffectRow(entry, store.effectPreviews, previewsOn, "effects.featured.",
+                    onDetails = { onDetail(recommended, index) }) { onAdd(entry, -1) }
             }
         }
-        if (row.canScrollBackward) {
-            Box(
-                Modifier.align(Alignment.CenterStart).width(80.dp).fillMaxHeight()
-                    .background(Brush.horizontalGradient(if (rtl) listOf(clear, veil) else listOf(veil, clear))),
-            )
-        }
-        if (row.canScrollForward) {
-            Box(
-                Modifier.align(Alignment.CenterEnd).width(80.dp).fillMaxHeight()
-                    .background(Brush.horizontalGradient(if (rtl) listOf(veil, clear) else listOf(clear, veil))),
-            )
-        }
     }
 }
 
 @Composable
-private fun RecommendedItem(entry: EffectCatalogEntry, previews: EffectPreviewStore?, previewsOn: Boolean, onClick: () -> Unit) {
-    val name = pickerEntryName(entry)
-    Column(
-        Modifier
-            .width(121.dp)
-            .height(153.dp)
-            .testTag("effects.featured." + effectCardId(entry.typeId))
-            .semantics { contentDescription = name }
-            .tocavel(shrink = 0.96f, onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(Modifier.padding(top = 8.dp).size(115.dp)) {
-            Box(Modifier.fillMaxSize().clip(RoundedCornerShape(5.dp)).background(AureaColors.FxPanel)) {
-                EffectAfterPreview(entry, previews, previewsOn, FX_PREVIEW_LARGE_W, FX_PREVIEW_LARGE_H)
-            }
-            if (entry.isNew) NewBadge(Modifier.align(Alignment.TopStart).padding(5.dp))
-            if (com.aurea.aurea.editor.panels.effectFuturePaid(entry.typeId)) FreeForNowBadge(Modifier.align(Alignment.BottomStart).padding(5.dp))
-            EffectBadge(entry, Modifier.align(Alignment.TopEnd).offset(x = 5.dp, y = (-5).dp))
-        }
-        Text(
-            name,
-            style = AureaType.of(10f, color = AureaColors.Text, lineHeight = 1.2f),
-            textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 4.dp, start = 2.dp, end = 2.dp),
-        )
-    }
+private fun CatalogHeading(label: String) {
+    Text(label, style = AureaType.of(15f, FontWeight.SemiBold, color = AureaColors.Text),
+        modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp).semantics { heading() })
 }
 
-/**
- * RECENTES/FAVORITOS: faixa ajustada a uma ou duas linhas (a de Recentes, se
- * houver, e as de Favoritos) e o indicador de 9 dp embaixo (relógio = Recentes,
- * estrela = cada página de Favoritos). A página à vista é lembrada.
- * Toque ADICIONA; toque longo abre o DETALHE.
- */
 @Composable
 private fun QuickBand(
     store: EditorStore,
@@ -756,140 +647,30 @@ private fun QuickTile(
  * prévia (Texto, Áudio, Utilitário) usa a cartela com o glifo do grupo.
  */
 @Composable
-private fun GroupTile(
+private fun EffectResults(
     store: EditorStore,
-    group: EffectGroup,
+    state: LazyListState,
     entries: List<EffectCatalogEntry>,
     previewsOn: Boolean,
-    modifier: Modifier,
-    onClick: () -> Unit,
-) {
-    val label = stringResource(effectGroupLabelRes(group))
-    val description = stringResource(R.string.fx_browser_open_group, label)
-    val banner = remember(group, entries) { groupBannerEntry(group, entries) }
-    Box(
-        modifier
-            .height(72.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(AureaColors.FxPanel)
-            .testTag("effects.category." + group.id)
-            .semantics { contentDescription = description }
-            .clickable(role = Role.Button, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Box(Modifier.fillMaxSize().graphicsLayer { alpha = 0.7f }) {
-            if (banner != null) EffectAfterPreview(banner, store.effectPreviews, previewsOn, generate = false)
-            else EffectToolPlate(effectGroupGlyph(group), alpha = 0.35f)
-        }
-        Box(Modifier.fillMaxSize().background(AureaColors.FxPanel.copy(alpha = 0.5f)))
-        Text(
-            label,
-            style = AureaType.of(15f, FontWeight.Bold, color = AureaColors.Text),
-            textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(horizontal = 8.dp),
-        )
-    }
-}
-
-/**
- * Dentro de uma categoria: a grade de cartões de 88 dp (⌊(L − 30) / 103⌋
- * colunas) e, embaixo, anterior/próxima nas pontas (desabilitados nas pontas),
- * que trocam a categoria no lugar. Toque no cartão → detalhe.
- */
-@Composable
-private fun GroupGrid(
-    store: EditorStore,
-    state: LazyGridState,
-    group: EffectGroup,
-    entries: List<EffectCatalogEntry>,
-    previous: EffectGroup?,
-    next: EffectGroup?,
-    previewsOn: Boolean,
+    onAdd: (EffectCatalogEntry, Int) -> Unit,
     onDetail: (List<EffectCatalogEntry>, Int) -> Unit,
-    onGroup: (EffectGroup) -> Unit,
 ) {
-    LaunchedEffect(group) { state.scrollToItem(0) }
-    val columns = categoryGridColumns(LocalConfiguration.current.screenWidthDp.toFloat())
-    Column(Modifier.fillMaxSize()) {
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(columns),
-            state = state,
-            contentPadding = PaddingValues(start = 15.dp, end = 15.dp, top = 4.dp, bottom = 8.dp),
-            modifier = Modifier.fillMaxWidth().weight(1f).testTag("effects.grid"),
+    CompositionLocalProvider(LocalFxThumbnailWork provides !state.isScrollInProgress) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().testTag("effects.grid"),
+            state = state, contentPadding = PaddingValues(vertical = 8.dp),
         ) {
-            if (entries.isEmpty()) item(key = EMPTY_ITEM_KEY, span = { GridItemSpan(maxLineSpan) }) {
+            if (entries.isEmpty()) item(key = EMPTY_ITEM_KEY) {
                 EmptyLine(stringResource(R.string.effect_empty_category))
             }
-            itemsIndexed(entries, key = { _, e -> effectItemKey(e.typeId) }) { i, e ->
-                CompositionLocalProvider(LocalFxThumbnailWork provides !state.isScrollInProgress) {
-                    GridCard(e, store.effectPreviews, previewsOn) { onDetail(entries, i) }
-                }
+            itemsIndexed(entries, key = { _, e -> effectItemKey(e.typeId) }) { index, entry ->
+                CatalogEffectRow(entry, store.effectPreviews, previewsOn, "effects.card.",
+                    onDetails = { onDetail(entries, index) }) { onAdd(entry, -1) }
             }
         }
-        Row(Modifier.fillMaxWidth().height(50.dp), verticalAlignment = Alignment.CenterVertically) {
-            NeighborArrow(previous, forward = false, onGroup)
-            Spacer(Modifier.weight(1f))
-            NeighborArrow(next, forward = true, onGroup)
-        }
     }
 }
 
-/** Cartão de 88: miniatura 80 (raio 5), selo 23 no canto e nome 10 em 2 linhas (com hifenização). */
-@Composable
-private fun GridCard(entry: EffectCatalogEntry, previews: EffectPreviewStore?, previewsOn: Boolean, onClick: () -> Unit) {
-    val name = pickerEntryName(entry)
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .testTag("effects.card." + effectCardId(entry.typeId))
-            .semantics { contentDescription = name }
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(bottom = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(Modifier.padding(top = 8.dp).size(80.dp)) {
-            Box(Modifier.fillMaxSize().clip(RoundedCornerShape(5.dp)).background(AureaColors.FxPanel)) {
-                EffectAfterPreview(entry, previews, previewsOn)
-            }
-            if (entry.isNew) NewBadge(Modifier.align(Alignment.TopStart).padding(4.dp))
-            if (com.aurea.aurea.editor.panels.effectFuturePaid(entry.typeId)) FreeForNowBadge(Modifier.align(Alignment.BottomStart).padding(4.dp))
-            EffectBadge(entry, Modifier.align(Alignment.TopEnd).offset(x = 4.dp, y = (-4).dp))
-        }
-        Text(
-            name,
-            style = AureaType.of(10f, color = AureaColors.Text, lineHeight = 1.2f).copy(hyphens = Hyphens.Auto, lineBreak = LineBreak.Paragraph),
-            textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-        )
-    }
-}
-
-/** Anterior/próxima categoria: 40×50 na referência, alvo de 44×50 aqui. */
-@Composable
-private fun NeighborArrow(target: EffectGroup?, forward: Boolean, onGroup: (EffectGroup) -> Unit) {
-    val targetLabel = target?.let { stringResource(effectGroupLabelRes(it)) }
-    val label = if (targetLabel != null) {
-        stringResource(if (forward) R.string.fx_browser_next_group else R.string.fx_browser_prev_group, targetLabel)
-    } else {
-        stringResource(if (forward) R.string.om_fx_category_next else R.string.om_fx_category_prev)
-    }
-    val enabled = target != null
-    Box(
-        Modifier
-            .size(width = AureaDims.MinTap, height = 50.dp)
-            .testTag(if (forward) "effects.category.next" else "effects.category.prev")
-            .semantics { contentDescription = label; role = Role.Button }
-            .tocavel(enabled = enabled, shrink = 1f, role = null, onClick = { target?.let(onGroup) }),
-        contentAlignment = Alignment.Center,
-    ) {
-        CupertinoIcon(
-            if (forward) CupertinoGlyph.ChevronRight else CupertinoGlyph.ChevronLeft, 20.dp,
-            if (enabled) AureaColors.Text else AureaColors.FxDisabledText,
-        )
-    }
-}
-
-/** O selo de 23 no canto: cadeado Hyper ou o "!" de efeito pesado. */
 @Composable
 private fun EffectBadge(entry: EffectCatalogEntry, modifier: Modifier = Modifier) {
     when {
@@ -963,6 +744,7 @@ private fun SearchPane(
     chips: List<String>,
     onChips: (List<String>) -> Unit,
     previewsOn: Boolean,
+    onAdd: (EffectCatalogEntry, Int) -> Unit,
     onDetail: (List<EffectCatalogEntry>, Int) -> Unit,
     onClose: () -> Unit,
 ) {
@@ -1109,9 +891,10 @@ private fun SearchPane(
             LazyColumn(Modifier.fillMaxWidth().weight(1f).testTag("effects.search.results")) {
                 if (results.isEmpty()) item(key = EMPTY_ITEM_KEY) { EmptyLine(stringResource(R.string.effect_empty_search)) }
                 itemsIndexed(results, key = { _, e -> effectItemKey(e.typeId) }) { i, e ->
-                    ResultRow(e, index.english[e.typeId], store.effectPreviews, previewsOn) {
+                    CatalogEffectRow(e, store.effectPreviews, previewsOn, "effects.result.",
+                        onDetails = { keyboard?.hide(); onDetail(results, i) }) {
                         keyboard?.hide()
-                        onDetail(results, i)
+                        onAdd(e, -1)
                     }
                 }
             }
@@ -1162,44 +945,56 @@ private fun FieldChip(tag: String, label: String, onRemove: () -> Unit) {
 
 /** Linha de resultado: miniatura 80, nome 17, nome em inglês 14 (se diferente) e a descrição 11 até a base. */
 @Composable
-private fun ResultRow(
+private fun CatalogEffectRow(
     entry: EffectCatalogEntry,
-    english: String?,
     previews: EffectPreviewStore?,
     previewsOn: Boolean,
+    tagPrefix: String,
+    onDetails: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     val name = pickerEntryName(entry)
-    val description = effectDescription(entry.typeId, entry.category)
-    val second = english?.takeIf { it.isNotBlank() && it != name }
+    val details = stringResource(R.string.om_fx_menu_details)
+    val tag = effectCardId(entry.typeId)
     Row(
-        Modifier
-            .fillMaxWidth()
-            .testTag("effects.result." + effectCardId(entry.typeId))
-            .semantics { contentDescription = name }
-            .tocavel(shrink = 1f, onClick = onClick)
-            .padding(horizontal = 15.dp, vertical = 8.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 3.dp)
+            .clip(RoundedCornerShape(12.dp)).background(AureaColors.Surface),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(80.dp)) {
-            Box(Modifier.fillMaxSize().clip(RoundedCornerShape(5.dp)).background(AureaColors.FxPanel)) {
+        Row(
+            Modifier.weight(1f).heightIn(min = 64.dp).testTag(tagPrefix + tag)
+                .semantics { contentDescription = name }
+                .clickable(role = Role.Button, onClick = onClick)
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Box(Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)).background(AureaColors.FxPanel)) {
                 EffectAfterPreview(entry, previews, previewsOn)
             }
-            if (entry.isNew) NewBadge(Modifier.align(Alignment.TopStart).padding(4.dp))
-            if (com.aurea.aurea.editor.panels.effectFuturePaid(entry.typeId)) FreeForNowBadge(Modifier.align(Alignment.BottomStart).padding(4.dp))
-            EffectBadge(entry, Modifier.align(Alignment.TopEnd).offset(x = 4.dp, y = (-4).dp))
-        }
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f).height(80.dp)) {
-            Text(name, style = AureaType.of(17f, color = AureaColors.Text), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (second != null) {
-                Text(second, style = AureaType.of(14f, color = AureaColors.FxTextSecondary), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Column(Modifier.weight(1f)) {
+                Text(name, style = AureaType.of(14f, FontWeight.SemiBold, color = AureaColors.Text),
+                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(effectDescription(entry.typeId, entry.category),
+                    style = AureaType.of(11f, color = AureaColors.FxTextSecondary), maxLines = 2,
+                    overflow = TextOverflow.Ellipsis)
             }
-            Text(
-                description,
-                style = AureaType.of(11f, color = AureaColors.Text, lineHeight = 1.3f),
-                maxLines = if (second != null) 2 else 3, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 2.dp),
-            )
+            EffectBadge(entry)
+            if (effectToolOf(entry.typeId) != null) {
+                CupertinoIcon(CupertinoGlyph.ChevronRight, 16.dp, AureaColors.Accent)
+            } else if (!HyperEffectGate.locked(entry.typeId)) {
+                CupertinoIcon(CupertinoGlyph.Plus, 16.dp, AureaColors.Accent)
+            }
+        }
+        if (onDetails != null) {
+            Box(
+                Modifier.size(44.dp).testTag("effects.options." + tag)
+                    .semantics { contentDescription = details }
+                    .clickable(role = Role.Button, onClick = onDetails),
+                contentAlignment = Alignment.Center,
+            ) {
+                CupertinoIcon(CupertinoGlyph.Ellipsis, 16.dp, AureaColors.FxTextSecondary)
+            }
         }
     }
 }

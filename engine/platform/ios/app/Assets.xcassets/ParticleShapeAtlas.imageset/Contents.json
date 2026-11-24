@@ -1,0 +1,12 @@
+{
+  "images": [
+    {
+      "filename": "particle_shape_atlas.png",
+      "idiom": "universal"
+    }
+  ],
+  "info": {
+    "author": "xcode",
+    "version": 1
+  }
+}

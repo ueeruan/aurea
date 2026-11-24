@@ -1171,7 +1171,7 @@ struct RailMoreButton: View {
     var body: some View {
         ZStack {
             CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: PanelMetrics.railIcon,
-                                color: active ? AureaColors.accent : AureaColors.text)
+                                color: active ? AureaColors.accent : AureaColors.railIconInk)
             if active {
                 Circle()
                     .fill(AureaColors.accent)
@@ -1641,17 +1641,22 @@ enum PanelFrameMetrics {
 /// (Transformar, Câmera, Cor e preenchimento, Borda e sombra, Mesclagem, Efeitos,
 /// Velocidade/Som, Curva) lê daqui. Par do `PanelMetrics` do `PanelChrome.kt`:
 /// os mesmos valores (pt = dp). Três campos de `fieldWidth` + o fio + `fieldGap`
-/// cabem na coluna central de 360 (360 − 2 × 60 − 2 × 0,7 − 12 = 226); o número
+/// cabem na coluna central de 360 (360 − 2 × 46 − 2 × 0,7 − 12 = 254); o número
 /// encolhe antes de vazar.
 enum PanelMetrics {
     // --- Moldura ---
-    static let railWidth: CGFloat = 60
-    /// Ícones das colunas (‹, ◆, curva, ⋯ e as abas): antes 22.
-    static let railIcon: CGFloat = 26
-    /// O "=" da expressão na coluna esquerda.
-    static let railExpression: CGFloat = 26
+    /// 1.0.8 visual minimalista: colunas mais finas (antes 60); o toque segue em `touch`.
+    static let railWidth: CGFloat = 46
+    /// Ícones das colunas (‹, ◆, curva, ⋯ e as abas): antes 26.
+    static let railIcon: CGFloat = 21
+    /// O "=" da expressão na coluna esquerda (antes 26).
+    static let railExpression: CGFloat = 21
     static let tabInset: CGFloat = 5
     static let tabRadius: CGFloat = 7
+    /// Colunas de presets e grupos do editor de curva (1.0.8: 48, antes 60; o gráfico ganha o resto).
+    static let curveColumn: CGFloat = 48
+    /// Miniatura da curva nas colunas (antes 36).
+    static let curveThumb: CGFloat = 28
     /// Alvo de toque mínimo de qualquer controle do painel.
     static let touch: CGFloat = 44
     // --- Campos de valor (X/Y/Z, Largura/Altura, Inclinação, ângulos) ---
@@ -1862,16 +1867,17 @@ struct PanelFrame<Content: View>: View {
         let count = 4 + (rail.supportsAnimation && rail.onExpression != nil ? 1 : 0)
         return railLayout(count) { height in
             cell("panel.rail.back", label: AureaText.t("panel_voltar_ferramentas"), enabled: true, height: height, action: rail.onBack) {
-                CupertinoGlyph.text(CupertinoGlyph.ChevronLeft, size: PanelMetrics.railIcon).mirrorsInRtl()
+                CupertinoGlyph.text(CupertinoGlyph.ChevronLeft, size: PanelMetrics.railIcon, color: AureaColors.railIconInk).mirrorsInRtl()
             }
             if rail.supportsAnimation {
                 cell("panel.rail.keyframe",
                      label: AureaText.t(rail.keyframeLook == .keyHere ? "panel_tirar_keyframe_daqui" : "panel_marcar_keyframe_aqui"),
                      enabled: rail.onKeyframe != nil, height: height, action: rail.onKeyframe,
                      longAction: rail.keyframeLook == .keyHere && rail.onDeleteAllKeyframes != nil ? askDeleteAll : nil) {
-                    // 0.3.4 painéis: os ícones pintados no tamanho da coluna (26).
+                    // Os ícones pintados no tamanho da coluna (21); em repouso o ◆ fica a 75 %.
                     KeyframeDiamondIcon(look: rail.keyframeLook, enabled: true)
                         .scaleEffect(PanelMetrics.railIcon / AureaDims.diamondIcon)
+                        .opacity(rail.keyframeLook == .none ? 0.75 : 1)
                 }
                 cell("panel.rail.curve", label: AureaText.t("panel_editar_curva_propriedade"), enabled: rail.onCurve != nil, height: height,
                      action: rail.onCurve.map { openCurve in { if rail.curveReady { openCurve() } else { curveWarning() } } }) {
@@ -1883,17 +1889,17 @@ struct PanelFrame<Content: View>: View {
                          label: AureaText.t(rail.expression == .none ? "panel_adicionar_expressao" : "panel_editar_expressao"),
                          enabled: true, height: height, action: onExpression) {
                         Text("=").font(.aurea(size: PanelMetrics.railExpression, weight: .bold))
-                            .foregroundStyle(rail.expression == .none ? AureaColors.text : expressionColor(rail.expression))
+                            .foregroundStyle(rail.expression == .none ? AureaColors.railIconInk : expressionColor(rail.expression))
                     }
                 }
                 if let entries = rail.moreEntries {
                     cell("panel.rail.more", label: AureaText.t("editor_mais"), enabled: rail.moreEnabled, height: height, action: { moreOpen = true }) {
-                        CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: PanelMetrics.railIcon, color: rail.moreActive ? AureaColors.accent : AureaColors.text)
+                        CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: PanelMetrics.railIcon, color: rail.moreActive ? AureaColors.accent : AureaColors.railIconInk)
                     }
                     .aureaAnchoredMenu(isPresented: $moreOpen, tag: "panel.rail.more.menu", entries: entries)
                 } else if let onMore = rail.onMore {
                     cell("panel.rail.more", label: AureaText.t("editor_mais"), enabled: rail.moreEnabled, height: height, action: onMore) {
-                        CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: PanelMetrics.railIcon, color: rail.moreActive ? AureaColors.accent : AureaColors.text)
+                        CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: PanelMetrics.railIcon, color: rail.moreActive ? AureaColors.accent : AureaColors.railIconInk)
                     }
                 }
             }
@@ -1943,7 +1949,7 @@ struct PanelFrame<Content: View>: View {
                 let altOn = tab.alt.map { selectedTab == $0.id } ?? false
                 let on = selectedTab == tab.id || altOn
                 let shown = altOn ? (tab.alt ?? tab) : tab
-                let tint = on ? AureaColors.accent : AureaColors.text
+                let tint = on ? AureaColors.accent : AureaColors.railIconInk
                 Button {
                     if let alt = tab.alt, selectedTab == tab.id { onTab(alt.id) } else { onTab(tab.id) }
                 } label: {
@@ -1965,7 +1971,7 @@ struct PanelFrame<Content: View>: View {
 
     @ViewBuilder
     private func tabIcon(_ tab: PanelTab, tint: Color) -> some View {
-        // 0.3.4 painéis: abas de ícone de 26 (antes 22).
+        // 1.0.8 visual minimalista: abas de ícone de 21 (antes 26).
         if let glyph = tab.glyph {
             CupertinoGlyph.text(glyph, size: PanelMetrics.railIcon, color: tint)
         } else if let icon = tab.icon, icon.hasPrefix("material:") {
@@ -2080,10 +2086,11 @@ private struct FxKeyIndicator: View {
     }
 }
 
-/// O RÓTULO da linha (`propertyLabel`): 75 × (alt − 6), raio 4, fundo `fxLabel`
-/// (pressionado ou ativo: `fxSunken`), texto 8–12 em até 2 linhas, centralizado:
-/// `text` normal, `accent` ativo, `fxDisabledText` desabilitado (sem toque). ◆ 9×8
-/// no canto superior esquerdo SÓ com keyframe; o "=" da expressão (extra do AUREA).
+/// O RÓTULO da linha (`propertyLabel`). 1.0.8 visual minimalista: sem caixa em
+/// repouso (texto `fxLabelInk`, alinhado ao início); ATIVO ganha um realce suave de
+/// raio 8 em `fxLabelLit` e texto `accent`; pressionado, `fxSunken`. Texto 8–13 em
+/// até 2 linhas; `fxDisabledText` desabilitado (sem toque). ◆ 9×8 no canto superior
+/// inicial SÓ com keyframe; o "=" da expressão (extra do AUREA).
 struct FxParamLabel: View {
     let label: String
     var height: CGFloat = FxParamMath.ROW_RULER - 12
@@ -2097,18 +2104,19 @@ struct FxParamLabel: View {
     @State private var pressed = false
 
     var body: some View {
-        let lit = enabled && (active || pressed)
-        let ink: Color = !enabled ? AureaColors.fxDisabledText : active ? AureaColors.accent : AureaColors.text
+        let fill: Color = !enabled ? .clear : active ? AureaColors.fxLabelLit : pressed ? AureaColors.fxSunken : .clear
+        let ink: Color = !enabled ? AureaColors.fxDisabledText : active ? AureaColors.accent : AureaColors.fxLabelInk
         // 0.3.4 painéis: até 13 (antes 12), par do `FxRow.LabelText` do Android.
         return Text(label)
             .font(.aurea(size: PanelMetrics.label))
             .minimumScaleFactor(8.0 / PanelMetrics.label)
             .lineLimit(2)
-            .multilineTextAlignment(.center)
+            .multilineTextAlignment(.leading)
             .foregroundStyle(ink)
-            .padding(3)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .padding(.leading, 8).padding(.trailing, 4).padding(.vertical, 3)
             .frame(width: width, height: height)
-            .background(lit ? AureaColors.fxSunken : AureaColors.fxLabel, in: RoundedRectangle(cornerRadius: 4))
+            .background(fill, in: RoundedRectangle(cornerRadius: 8))
             .overlay(alignment: .topLeading) {
                 if keyframe != .none {
                     FxKeyIndicator(filled: keyframe == .keyHere,
@@ -2133,9 +2141,10 @@ struct FxParamLabel: View {
     }
 }
 
-/// A CAIXA DE VALOR: 56 × (alt − 6), raio 4, véu preto de 20 %, número 8–14
-/// alinhado ao fim, sempre LTR; `aux` é a linha auxiliar acima ("N× +" das voltas
-/// de um ângulo, 8–10 em `fxDisabledText`). Tocar abre o teclado (quem chama).
+/// A CAIXA DE VALOR. 1.0.8 visual minimalista: sem véu — só um fio de 1 pt
+/// (`fxHairline`) sob o número; pressionada, `fxSunken` com raio 8. Número 8–15
+/// alinhado ao fim, tabular, sempre LTR; `aux` é a linha auxiliar acima ("N× +"
+/// das voltas de um ângulo, em `fxDisabledText`). Tocar abre o teclado (quem chama).
 struct FxValueBox: View {
     let text: String
     var height: CGFloat = FxParamMath.ROW_RULER - 12
@@ -2160,12 +2169,14 @@ struct FxValueBox: View {
                 .minimumScaleFactor(8.0 / PanelMetrics.fieldValue)
                 .lineLimit(1)
                 .foregroundStyle(enabled ? AureaColors.text : AureaColors.fxDisabledText)
+            // O fio sob o número (no lugar do véu).
+            Rectangle().fill(AureaColors.fxHairline).frame(height: 1).padding(.top, 3)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
         .padding(.horizontal, 6)
         .frame(width: width, height: height)
-        .background(pressed && enabled && onTap != nil ? AureaColors.fxSunken : AureaColors.fxValueVeil,
-                    in: RoundedRectangle(cornerRadius: 4))
+        .background(pressed && enabled && onTap != nil ? AureaColors.fxSunken : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 8))
         .keepLtr()
         .contentShape(Rectangle())
         .onTapGesture { if enabled { onTap?() } }
@@ -2178,13 +2189,15 @@ struct FxValueBox: View {
     }
 }
 
-/// O SLIDER da referência: trilho de 2,5 com ponta redonda em
-/// `fxTrack`; preenchimento `accent` da ORIGEM até o polegar (bipolar quando a
-/// origem está no meio; `fxTrackDisabled` desabilitado); polegar de 18 em `text`;
-/// 10 pt de pista parada em cada valor de encaixe (o padrão). O toque parado não
-/// muda nada; passou de ½ touch slop, o valor vai para a posição do dedo
-/// (absoluto), quantizado em `step`. Um passo de desfazer por arrasto (quem chama
-/// abre em `onBegin` e fecha em `onEnd`). Valores na unidade MOSTRADA.
+/// O SLIDER do AUREA agora é a RÉGUA (`FxRuler`) com faixa FECHADA (1.0.8: "eu
+/// prefiro TUDO com isso aqui"): a mesma API de antes (nenhuma tela muda), o mesmo
+/// gesto da régua (arrasto relativo, arremesso, dois dedos = 1/10, slop e
+/// dominância do `FxParamMath`) e o valor preso em `min`...`max` — os riscos param
+/// no fim da faixa. 1 risco = `FxParamMath.sliderRulerStep` (o `step`, com a faixa
+/// inteira em ~120 riscos). `snaps` e `origin` viram riscos de encaixe (maiores,
+/// com o toque leve). Acessibilidade: rótulo, valor e ajuste (adjustable).
+/// Um passo de desfazer por gesto (quem chama abre em `onBegin` e fecha em `onEnd`).
+/// Par do `AureaSlider` do EffectsControls.kt.
 struct AureaSlider: View {
     let value: Float
     let min: Float
@@ -2200,81 +2213,24 @@ struct AureaSlider: View {
     let onValue: (Float) -> Void
     let onEnd: () -> Void
 
-    @State private var active = false
-    @State private var live: Float = 0
-    @State private var direction = 0
-    @GestureState private var held = false
-
-    private static let thumb: CGFloat = 18
-    private var shown: Float { active ? live : value }
-    private var snapPx: Float { Float(FxParamMath.SLIDER_SNAP_DP) }
+    private var low: Float { Swift.min(min, max) }
+    private var high: Float { Swift.max(min, max) }
+    private var marks: [Float] {
+        var out: [Float] = []
+        for mark in snaps + [origin].compactMap({ $0 }) where mark.isFinite && mark >= low && mark <= high && !out.contains(mark) {
+            out.append(mark)
+        }
+        return out
+    }
 
     var body: some View {
-        GeometryReader { geometry in
-            let track = Swift.max(1, geometry.size.width - AureaSlider.thumb)
-            Canvas { context, size in draw(context, size: size, track: track) }
-                .contentShape(Rectangle())
-                .simultaneousGesture(drag(track: track), including: enabled ? .all : .none)
-        }
-        .keepLtr()
-        .onChange(of: held) { down in if !down { finish() } }
-        .onChange(of: enabled) { on in if !on { finish() } }
-        .onDisappear { finish() }
-        .accessibilityElement()
-        .accessibilityLabel(accessibilityLabel)
-        .accessibilityValue(accessibilityValue)
-        .accessibilityAdjustableAction { move in
-            let unit: Float = step > 0 ? step : (max - min) / 20
-            let delta: Float = move == .increment ? unit : move == .decrement ? -unit : 0
-            guard enabled, delta != 0, unit.isFinite else { return }
-            onBegin(); onValue(Swift.min(Swift.max(value + delta, min), max)); onEnd()
-        }
-        .modifier(OptionalIdentifier(tag: identifier))
-    }
-
-    private func x(_ v: Float, track: CGFloat) -> CGFloat {
-        AureaSlider.thumb / 2 + CGFloat(FxParamMath.sliderX(value: v, width: Float(track), min: min, max: max,
-                                                             snaps: snaps, snapPx: snapPx))
-    }
-
-    private func draw(_ context: GraphicsContext, size: CGSize, track: CGFloat) {
-        let r = AureaSlider.thumb / 2
-        let cy = size.height / 2
-        let round = StrokeStyle(lineWidth: 2.5, lineCap: .round)
-        var line = Path()
-        line.move(to: CGPoint(x: r, y: cy))
-        line.addLine(to: CGPoint(x: r + track, y: cy))
-        context.stroke(line, with: .color(AureaColors.fxTrack), style: round)
-        let o = origin.flatMap { $0.isFinite ? $0 : nil } ?? min
-        let xo = x(Swift.min(Swift.max(o, min), max), track: track)
-        let xv = x(shown, track: track)
-        if abs(xv - xo) > 0.5 {
-            var fill = Path()
-            fill.move(to: CGPoint(x: xo, y: cy))
-            fill.addLine(to: CGPoint(x: xv, y: cy))
-            context.stroke(fill, with: .color(enabled ? AureaColors.accent : AureaColors.fxTrackDisabled), style: round)
-        }
-        context.fill(Path(ellipseIn: CGRect(x: xv - r, y: cy - r, width: 2 * r, height: 2 * r)),
-                     with: .color(enabled ? AureaColors.text : AureaColors.fxDisabledText))
-    }
-
-    private func drag(track: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: FxParamMath.TOUCH_SLOP * FxParamMath.SLIDER_SLOP_FRACTION)
-            .updating($held) { _, state, _ in state = true }
-            .onChanged { g in
-                if direction == 0 { direction = abs(g.translation.width) > abs(g.translation.height) * FxParamMath.HORIZONTAL_DOMINANCE ? 1 : -1 }
-                guard direction == 1 else { return }
-                if !active { live = value; active = true; onBegin() }
-                let v = FxParamMath.sliderValueAt(x: Float(g.location.x - AureaSlider.thumb / 2), width: Float(track),
-                                                  min: min, max: max, step: step, snaps: snaps, snapPx: snapPx)
-                if v.isFinite && v != live { live = v; onValue(v) }
-            }
-            .onEnded { _ in finish() }
-    }
-
-    private func finish() {
-        direction = 0
-        if active { active = false; onEnd() }
+        let lo = low, hi = high
+        FxRuler(value: value.isFinite ? Swift.min(Swift.max(value, lo), hi) : lo,
+                step: FxParamMath.sliderRulerStep(min: lo, max: hi, step: step), min: lo, max: hi,
+                snaps: marks, enabled: enabled, identifier: identifier,
+                accessibilityLabel: accessibilityLabel, accessibilityValue: accessibilityValue, limits: true,
+                onBegin: onBegin, onValue: { onValue(Swift.min(Swift.max($0, lo), hi)) }, onEnd: onEnd)
+            .frame(minHeight: FxParamMath.ROW_RULER - 12)
     }
 }
 
@@ -2284,10 +2240,13 @@ enum FxRulerFling {
     static var owner: UUID?
 }
 
-/// A RÉGUA da referência (`ValueSpinner`): risco a cada 5,5 pt com 0,5 de largura
-/// em `fxTick`, a cada 5 riscos em `text`; alfa triangular até as bordas; padding
-/// vertical de 8; agulha de 1,5 na altura toda (`needle`: `fxNeedle` ou a cor do
-/// eixo ativo); riscos de encaixe (padrão e 0) com 1,25 px e alfa (α+1)/2.
+/// A RÉGUA (`ValueSpinner`). 1.0.8 visual minimalista: risco a cada 5,5 pt, 1,5 de
+/// largura com pontas redondas, centrados na altura; menores de 10 (texto a 35 %),
+/// a cada 5 riscos um de 16 (60 %), sumindo suave nos 22 % de cada borda
+/// (`FxParamMath.rulerFade`); sem caixa. Agulha = cápsula de 3 × 24 em `needle`
+/// (`fxNeedle` ou a cor do eixo ativo) com um ponto de 5 embaixo; riscos de
+/// encaixe (padrão e 0) de 18 a 85 %. `limits` (o slider-régua): os riscos param
+/// em `min` e `max`, com um risco maior em cada limite.
 /// 1 risco = `step` (unidade mostrada) e o valor anda de risco em risco
 /// (`snapToTick`). O gesto começa depois de ¾ do touch slop (vertical acima do
 /// slop é da rolagem); dedo para a esquerda aumenta; arremesso acima de 300 pt/s
@@ -2308,6 +2267,8 @@ struct FxRuler: View {
     var identifier: String? = nil
     var accessibilityLabel = ""
     var accessibilityValue = ""
+    /// Faixa fechada (slider-régua): sem riscos além de `min`/`max`.
+    var limits = false
     let onBegin: () -> Void
     let onValue: (Float) -> Void
     let onEnd: () -> Void
@@ -2369,41 +2330,66 @@ struct FxRuler: View {
     }
 
     private func draw(_ context: GraphicsContext, size: CGSize) {
-        let top: CGFloat = 8
-        let bottom = size.height - 8
         let center = size.width / 2
-        guard bottom > top, center > 0 else { return }
+        let cy = size.height / 2
+        guard size.height > 0, center > 0 else { return }
         let v = Double(shown.isFinite ? shown : 0)
         let ticks = v / Double(tickStep)
         let whole = floor(ticks)
         let fraction = CGFloat(ticks - whole)
         let reach = Int(center / spacing) + 2
+        let round = StrokeStyle(lineWidth: 1.5, lineCap: .round)
+        // Alturas presas na régua (linhas baixas não vazam).
+        let minorH = Swift.min(10, size.height), majorH = Swift.min(16, size.height), snapH = Swift.min(18, size.height)
+        func tick(_ x: CGFloat, _ h: CGFloat, _ color: Color) {
+            var line = Path()
+            line.move(to: CGPoint(x: x, y: cy - h / 2))
+            line.addLine(to: CGPoint(x: x, y: cy + h / 2))
+            context.stroke(line, with: .color(color), style: round)
+        }
         for j in -reach...reach {
             let x = center + (CGFloat(j) - fraction) * spacing
-            let alpha = 1 - abs(x - center) / center
-            if alpha <= 0 { continue }
+            let fade = FxParamMath.rulerFade(x: x, width: size.width)
+            if fade <= 0 { continue }
             let index = whole + Double(j)
+            // Faixa fechada (slider-régua): sem riscos além dos limites.
+            if limits {
+                let at = index * Double(tickStep), slack = Double(tickStep) * 1e-3
+                if at < Double(Swift.min(min, max)) - slack || at > Double(Swift.max(min, max)) + slack { continue }
+            }
             let major = index.truncatingRemainder(dividingBy: Double(FxParamMath.MAJOR_EVERY)) == 0
-            var line = Path()
-            line.move(to: CGPoint(x: x, y: top))
-            line.addLine(to: CGPoint(x: x, y: bottom))
-            context.stroke(line, with: .color((major ? AureaColors.text : AureaColors.fxTick).opacity(Double(alpha))), lineWidth: 0.5)
+            tick(x, major ? majorH : minorH, AureaColors.text.opacity(Double((major ? 0.6 : 0.35) * fade)))
         }
-        // Riscos de encaixe (padrão e zero): 1,25 px, opacidade reforçada.
+        // Os limites da faixa fechada: um risco maior em cada ponta.
+        if limits {
+            for edge in [Swift.min(min, max), Swift.max(min, max)] where edge.isFinite {
+                let x = center + CGFloat((Double(edge) - v) / Double(tickStep)) * spacing
+                let fade = FxParamMath.rulerFade(x: x, width: size.width)
+                if fade > 0 { tick(x, majorH, AureaColors.text.opacity(Double(0.6 * fade))) }
+            }
+        }
+        // Riscos de encaixe (padrão e zero): um pouco mais altos e fortes.
         for s in snapsInRange {
             let x = center + CGFloat((Double(s) - v) / Double(tickStep)) * spacing
-            let alpha = 1 - abs(x - center) / center
-            if alpha <= 0 { continue }
-            var line = Path()
-            line.move(to: CGPoint(x: x, y: top))
-            line.addLine(to: CGPoint(x: x, y: bottom))
-            context.stroke(line, with: .color(AureaColors.text.opacity(Double((alpha + 1) / 2))),
-                           lineWidth: 1.25 / Swift.max(displayScale, 1))
+            let fade = FxParamMath.rulerFade(x: x, width: size.width)
+            if fade <= 0 { continue }
+            tick(x, snapH, AureaColors.text.opacity(Double(0.85 * fade)))
         }
-        var needleLine = Path()
-        needleLine.move(to: CGPoint(x: center, y: 0))
-        needleLine.addLine(to: CGPoint(x: center, y: size.height))
-        context.stroke(needleLine, with: .color(enabled ? needle : AureaColors.fxDisabledText), lineWidth: 1.5)
+        // Agulha: cápsula de 3 × 24 e um ponto de 5 logo abaixo (cabe na altura).
+        let tint = enabled ? needle : AureaColors.fxDisabledText
+        let dot: CGFloat = 5, gap: CGFloat = 2
+        let needleH = Swift.min(24, size.height - 2 * (dot + gap))
+        if needleH > 0 {
+            context.fill(Path(roundedRect: CGRect(x: center - 1.5, y: cy - needleH / 2, width: 3, height: needleH), cornerRadius: 1.5),
+                         with: .color(tint))
+            context.fill(Path(ellipseIn: CGRect(x: center - dot / 2, y: cy + needleH / 2 + gap, width: dot, height: dot)),
+                         with: .color(tint))
+        } else {
+            var needleLine = Path()
+            needleLine.move(to: CGPoint(x: center, y: 0))
+            needleLine.addLine(to: CGPoint(x: center, y: size.height))
+            context.stroke(needleLine, with: .color(tint), lineWidth: 1.5)
+        }
     }
 
     private var drag: some Gesture {
@@ -2523,9 +2509,10 @@ struct FxRuler: View {
 }
 
 
-/// A ESCOLHA SEGMENTADA (`effect_setting_selector`, RADIO): grupo de raio 5 com
-/// botões iguais de 27,5 em `fxSegment` (vigente `fxSegmentOn`), texto `text`
-/// (vigente `accent`, desabilitado `fxDisabledText`), uma linha com reticências.
+/// A ESCOLHA SEGMENTADA (`effect_setting_selector`, RADIO). 1.0.8 visual
+/// minimalista: moldura de raio 8 com fio de 1 (`fxHairline`), sem fundo; a vigente
+/// ganha uma pílula de raio 6 em `fxSegmentPick` e texto `accent` (desabilitado
+/// `fxDisabledText`), uma linha com reticências.
 /// `selected` −1 = nenhum marcado (a "Variação"). Ids `<id>` e `<id>.<k>`.
 struct FxSegmented: View {
     let options: [String]
@@ -2536,11 +2523,11 @@ struct FxSegmented: View {
     let onSelect: (Int) -> Void
 
     var body: some View {
-        HStack(spacing: 1) {
+        HStack(spacing: 0) {
             ForEach(Array(options.enumerated()), id: \.offset) { k, option in
                 let on = k == selected
                 Button { onSelect(k) } label: {
-                    // 0.3.4 painéis: 36 com texto 13 (antes 27,5 / 12), par do `FxRow.Segment`.
+                    // 36 no total com texto 13, par do `FxRow.Segment`; a pílula tem 2 de folga.
                     Text(option)
                         .font(.aurea(size: PanelMetrics.label))
                         .lineLimit(1)
@@ -2548,8 +2535,8 @@ struct FxSegmented: View {
                         .foregroundStyle(!enabled ? AureaColors.fxDisabledText : on ? AureaColors.accent : AureaColors.text)
                         .padding(.horizontal, 4)
                         .frame(maxWidth: .infinity)
-                        .frame(height: PanelMetrics.fieldHeight)
-                        .background(on ? AureaColors.fxSegmentOn : AureaColors.fxSegment)
+                        .frame(height: PanelMetrics.fieldHeight - 4)
+                        .background(on ? AureaColors.fxSegmentPick : Color.clear, in: RoundedRectangle(cornerRadius: 6))
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(AureaPressStyle(shrink: 1))
@@ -2559,15 +2546,16 @@ struct FxSegmented: View {
                 .modifier(OptionalIdentifier(tag: identifier.map { "\($0).\(k)" }))
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 5))
+        .padding(2)
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(AureaColors.fxHairline, lineWidth: 1))
         .accessibilityElement(children: .contain)
         .modifier(OptionalIdentifier(tag: identifier))
     }
 }
 
-/// A ESCOLHA SUSPENSA (estilo DROPDOWN): caixa de raio 5 em `fxSunken` com inset
-/// 4, a opção vigente e ▾ no destaque; o toque abre o menu ancorado com as opções
-/// (a vigente marcada). Ids `<tag>` (caixa), `<tag>.menu` e `<tag>.<k>`.
+/// A ESCOLHA SUSPENSA (estilo DROPDOWN). 1.0.8 visual minimalista: caixa de raio 8
+/// só com o fio de 1 (`fxHairline`), inset 4 × 2, a opção vigente e ▾ no destaque; o
+/// toque abre o menu ancorado com as opções (a vigente marcada). Ids `<tag>` (caixa), `<tag>.menu` e `<tag>.<k>`.
 struct FxDropdownBox: View {
     let text: String
     let options: [String]
@@ -2593,7 +2581,7 @@ struct FxDropdownBox: View {
             .padding(.horizontal, 10)
             .frame(maxWidth: .infinity)
             .frame(height: PanelMetrics.fieldHeight)  // 0.3.4 painéis: antes 30
-            .background(AureaColors.fxSunken, in: RoundedRectangle(cornerRadius: 5))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(AureaColors.fxHairline, lineWidth: 1))
             .contentShape(Rectangle())
         }
         .buttonStyle(AureaPressStyle(shrink: 1))
@@ -2606,7 +2594,8 @@ struct FxDropdownBox: View {
         .accessibilityLabel(label.isEmpty ? text : label)
         .accessibilityValue(text)
         .modifier(OptionalIdentifier(tag: tag))
-        .padding(4)
+        // 1.0.8: inset 2 em cima/embaixo (36 + 4 cabe na linha baixa de 40).
+        .padding(.horizontal, 4).padding(.vertical, 2)
     }
 }
 
@@ -2631,5 +2620,49 @@ struct PanelIconTabs: View {
                    onTab: { id in if let index = tabs.firstIndex(where: { $0.id == id }) { onSelect(index) } })
             .accessibilityElement(children: .contain)
             .accessibilityLabel(group)
+    }
+}
+
+/// 1.0.8: liga ou desliga o quique do UIScrollView que contém esta sonda (fica no
+/// fundo do conteúdo da rolagem). O app tira o quique de todas as listas
+/// (`AureaApp.init`); a sonda garante isso nos painéis longos e o religa onde ele
+/// serve (puxar para atualizar da Comunidade).
+struct ScrollBounceProbe: UIViewRepresentable {
+    let bounces: Bool
+
+    func makeUIView(context: Context) -> ScrollBounceProbeView {
+        let view = ScrollBounceProbeView()
+        view.bounces = bounces
+        return view
+    }
+
+    func updateUIView(_ view: ScrollBounceProbeView, context: Context) {
+        view.bounces = bounces
+        view.apply()
+    }
+}
+
+final class ScrollBounceProbeView: UIView {
+    var bounces = false
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        isAccessibilityElement = false
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        apply()
+    }
+
+    func apply() {
+        var ancestor = superview
+        while let current = ancestor, !(current is UIScrollView) { ancestor = current.superview }
+        guard let scroll = ancestor as? UIScrollView else { return }
+        scroll.bounces = bounces
+        scroll.alwaysBounceVertical = bounces
     }
 }

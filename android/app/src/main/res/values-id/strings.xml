@@ -351,10 +351,10 @@
     <string name="home_ruanzitwo_ofruanzitwo_tiktok_ruanzitwo">Ruanzitwo  ·  @ofruanzitwo  ·  TikTok @ruanzitwo</string>
     <string name="home_ver_todos">Lihat semua</string>
     <string name="panel_1_caminho">1 Jalur</string>
-    <string name="panel_1_recortar_pelo">1. Dipotong oleh apa</string>
+    <string name="panel_1_recortar_pelo">Dipotong oleh apa</string>
     <string name="panel_1_to">, 1 to </string>
     <string name="panel_2_modo">2 Mode</string>
-    <string name="panel_2_qual_camada_recorta">2. Lapisan mana yang memotong</string>
+    <string name="panel_2_qual_camada_recorta">Lapisan mana yang memotong</string>
     <string name="panel_2_to">, 2 to</string>
     <string name="panel_3_borda">3 Tepi</string>
     <string name="panel_4_rastrear">4 Lacak</string>
@@ -2538,7 +2538,7 @@ untuk mengedit kurvanya.</string>
     <string name="app_export_gallery_failed">Video sudah dibuat, tetapi tidak dapat disimpan ke galeri.</string>
     <string name="app_saved_to_gallery">Disimpan ke galeri, di Film › Aurea.</string>
     <string name="app_saved_to_path">Disimpan di %1$s.</string>
-    <string name="app_export_software_encoder">Perangkat ini tidak punya encoder hardware %1$s untuk resolusi ini: mengekspor lewat software (lebih lambat, kualitas sama).</string>
+    <string name="app_export_software_encoder">Mengodekan %1$s lewat perangkat lunak. Ekspor mungkin lebih lama.</string>
     <string name="app_export_thermal">Perangkat panas: ekspor diperlambat agar dingin. Kualitas tidak berubah.</string>
     <string name="app_export_no_hevc">Perangkat ini tidak bisa mengekspor HEVC pada resolusi ini. Coba H.264.</string>
     <string name="app_export_unsupported_res">Perangkat ini tidak bisa mengekspor pada resolusi ini.</string>
@@ -3128,7 +3128,7 @@ untuk mengedit kurvanya.</string>
     <string name="rig_auto">Otomatis</string>
     <string name="rig_done">Selesai</string>
     <string name="rig_hint_setup">Seret sendi ke tubuh · ketuk area kosong untuk menambah</string>
-    <string name="rig_hint_animate">Seret tangan, kaki, atau kepala (membuat keyframe)</string>
+    <string name="rig_hint_animate">Seret ujung untuk menekuk dan membuat keyframe</string>
     <!-- Quarentena de projeto (ProjectGuard) -->
     <string name="quarantine_title">Proyek bermasalah</string>
     <string name="quarantine_body_open">Aurea tertutup saat membuka “%1$s”. Agar tidak tertutup lagi, proyek ini tidak dibuka otomatis. Pulihkan mencoba membukanya lagi; jika tertutup lagi, kirim diagnostik penutupan dari Pengaturan.</string>
@@ -5801,4 +5801,7 @@ untuk mengedit kurvanya.</string>
     <string name="fxo_bangs">Poni</string>
     <string name="fxo_side_locks">Helai samping</string>
     <string name="fxo_glasses">Kacamata</string>
+    <string name="editor_parent_link_failed">Lapisan tidak dapat ditautkan ke induk yang dipilih.</string>
+    <string name="mask_use_layer">Gunakan lapisan sebagai mask</string>
+    <string name="mask_hexagon">Segi enam</string>
 </resources>

@@ -46,7 +46,7 @@ class MotionTrackingTest {
         val tracking = effectCardId(EffectTool.Tracking.typeId)
         compose.onNodeWithTag("effects.search.results").performScrollToNode(hasTestTag("effects.result.$tracking"))
         compose.onNodeWithTag("effects.result.$tracking").performClick()
-        compose.onNodeWithTag("effects.detail.variant.$tracking").performScrollTo().performClick()
+
         compose.onNodeWithText(context.getString(R.string.trk_tool_stabilizer)).performScrollTo().performClick()
         compose.onAllNodesWithText(context.getString(R.string.trk_tool_stabilizer)).onLast().performScrollTo().performClick()
         compose.waitUntil(90000) { store.motionStatus[0].toInt() != 1 }

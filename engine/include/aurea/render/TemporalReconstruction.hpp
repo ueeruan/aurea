@@ -5,8 +5,8 @@
 
 namespace aurea {
 
-// Preview camera reprojection for static 3D geometry. Animated geometry uses
-// the ordinary renderer until its per-vertex previous pose is available.
+// Preview reprojection in world space for static geometry or in model space
+// when all visible geometry shares one animated transform and a fixed pose.
 class TemporalReconstruction {
 public:
     struct Frame {
@@ -14,6 +14,8 @@ public:
         u64 revision = 0;
         u64 quality = 0;
         i64 time = 0;
+        bool modelSpace = false;
+        // Matrices map the selected reprojection space to/from clip space.
         Mat4 viewProjection = Mat4::identity();
         Mat4 inverseJitteredViewProjection = Mat4::identity();
         Vec2 jitterPixels{};
@@ -32,9 +34,11 @@ public:
     [[nodiscard]] u64 bytes() const noexcept { return bytes_; }
     [[nodiscard]] bool pending() const noexcept { return pending_; }
     [[nodiscard]] static Vec2 jitter(i64 frame) noexcept;
+    static void warmup_pipelines(const GPUCapabilities& caps, std::vector<PipelineKey>& keys);
 
 private:
     TextureHandle colors_[2]{}, depths_[2]{};
+    PipelineHandle resolve_{}, saveDepth_{};
     TextureDesc colorDesc_{}, depthDesc_{};
     Frame previous_{}, pendingFrame_{};
     u64 bytes_ = 0;

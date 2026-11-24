@@ -668,6 +668,11 @@ Status Backend::create_device() noexcept {
     q.queueCount = 1;
     q.pQueuePriorities = &priority;
 
+    hasMemoryBudget_ = apiVersion_ >= VK_API_VERSION_1_1
+        && instanceFunctions_.vkGetPhysicalDeviceMemoryProperties2
+        && has_extension(exts, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+    if (hasMemoryBudget_) enabled.push_back(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+
     VkDeviceCreateInfo info{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
     info.pNext = apiVersion_ >= VK_API_VERSION_1_1 ? &enable : nullptr;
     info.pEnabledFeatures = info.pNext ? nullptr : &enable.features;
@@ -676,6 +681,18 @@ Status Backend::create_device() noexcept {
     info.enabledExtensionCount = static_cast<u32>(enabled.size());
     info.ppEnabledExtensionNames = enabled.data();
     VkResult created = instanceFunctions_.vkCreateDevice(physical_, &info, nullptr, &device_);
+    if (hasMemoryBudget_ && (created == VK_ERROR_EXTENSION_NOT_PRESENT
+        || created == VK_ERROR_FEATURE_NOT_PRESENT || created == VK_ERROR_INITIALIZATION_FAILED)) {
+        AUREA_LOG_WARN("Vulkan: tentando dispositivo sem VK_EXT_memory_budget");
+        enabled.erase(std::remove_if(enabled.begin(), enabled.end(), [](const char* name) {
+            return std::strcmp(name, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME) == 0;
+        }), enabled.end());
+        hasMemoryBudget_ = false;
+        info.enabledExtensionCount = static_cast<u32>(enabled.size());
+        info.ppEnabledExtensionNames = enabled.data();
+        device_ = VK_NULL_HANDLE;
+        created = instanceFunctions_.vkCreateDevice(physical_, &info, nullptr, &device_);
+    }
     if (created != VK_SUCCESS && (hasAhb_ || hasYcbcr_)) {
         // Some mobile drivers advertise external video features but reject
         // device creation with them. Keep Vulkan and use the YUV upload path.

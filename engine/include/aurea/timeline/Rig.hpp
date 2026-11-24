@@ -23,6 +23,7 @@
 #include "aurea/core/Types.hpp"
 #include "aurea/core/Math.hpp"
 
+#include <array>
 #include <vector>
 
 namespace aurea {
@@ -80,6 +81,17 @@ void deform(const SkinMesh& m, const std::vector<Affine>& bones, std::vector<Vec
 /// false = a junta não tem avô.
 bool ik_two_bone(const RigData& rig, const std::vector<Affine>& bones, u32 index, Vec2 target,
                  f32& deltaParent, f32& deltaJoint) noexcept;
+
+struct JointDelta {
+    u32 index = 0;
+    f32 degrees = 0.0f;
+};
+
+/// Resolve o arrasto em px da imagem. Pontas de cadeias longas dobram até a
+/// primeira ramificação. Membros curtos usam IK de dois ossos e juntas
+/// intermediárias giram por FK. Devolve quantos ângulos foram escritos.
+[[nodiscard]] u32 drag_deltas(const RigData& rig, const std::vector<Affine>& bones, u32 index, Vec2 target,
+                              std::array<JointDelta, kMaxJoints>& deltas) noexcept;
 
 } // namespace rig
 } // namespace aurea

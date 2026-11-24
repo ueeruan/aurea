@@ -7,7 +7,7 @@ import SwiftUI
 //    escolhida: toques seguidos fazem a corrente); tocar numa junta a escolhe
 //    (de novo = solta); arrastar move. A prévia mostra o desenho parado.
 //  - ANIMAR: arrastar uma junta posa no cabeçote e grava keyframe (ponta da
-//    corrente = IK de 2 ossos; junta do meio = gira o osso dela).
+//    corrente = IK dos ossos; junta do meio = gira só o osso selecionado por FK).
 //
 // Cada arrasto = UM passo de desfazer. Malha, pesos e pose são do motor
 // (Engine::query_rig e família); aqui só dedo e desenho.

@@ -691,6 +691,7 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
     config.hasPlatformInfo = hasInfo;
     config.mediaFactory = &c->media;
     config.exportSinkFactory = &make_ffmpeg_export_sink;
+    config.usePortableCompositionExport = true;
     config.exportAssetPathResolver = &preserve_export_asset;
     // 0.3.2 (CheckpointManager, export/ExportCheckpoint.hpp): o vídeo vai para
     // um registro de pacotes com checksum e o MP4 é montado e validado no fim.
@@ -2069,6 +2070,12 @@ AUREA_JNI jint AUREA_FN(nativeAddMask)(JNIEnv* env, jclass, jlong handle, jlong 
     u32 n = 0;
     const std::vector<f32> v = mask_points(env, pts, count, n);
     return c->engine.add_mask(static_cast<u64>(layer), v.data(), n, closed == JNI_TRUE);
+}
+
+AUREA_JNI jint AUREA_FN(nativeAddMaskPreset)(JNIEnv*, jclass, jlong handle, jlong layer, jint preset, jfloat width, jfloat height) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || preset < 0) return -1;
+    return c->engine.add_mask_preset(static_cast<u64>(layer), static_cast<u32>(preset), width, height);
 }
 
 AUREA_JNI jboolean AUREA_FN(nativeRemoveMask)(JNIEnv*, jclass, jlong handle, jlong layer, jint mask) {
@@ -4742,6 +4749,20 @@ AUREA_JNI jbyteArray AUREA_FN(nativeMakeCurvePreset)(JNIEnv* env, jclass, jbyteA
 
 /// Velocidade e influência <-> alças da bézier. `in`/`out`: [x1, y1, x2, y2] ou
 /// [velocidade saída, influência saída, velocidade entrada, influência entrada].
+AUREA_JNI jfloatArray AUREA_FN(nativeSpeedGraphTangent)(JNIEnv* env, jclass, jfloatArray handles,
+    jboolean incoming, jint power, jfloat base, jfloat fraction, jfloat velocity, jboolean editing) {
+    if (!handles || env->GetArrayLength(handles) < 4) return nullptr;
+    f32 values[4]{};
+    env->GetFloatArrayRegion(handles, 0, 4, values);
+    if (env->ExceptionCheck() || !speed_graph_tangent(values, incoming, static_cast<u32>(std::max(power, 1)),
+                                                     base, fraction, velocity, editing)) return nullptr;
+    const f32 position[] = {fraction, velocity};
+    const jsize size = editing ? 4 : 2;
+    auto out = env->NewFloatArray(size);
+    if (out) env->SetFloatArrayRegion(out, 0, size, editing ? values : position);
+    return out;
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeTemporalEase)(JNIEnv* env, jclass, jboolean toHandles, jfloat a, jfloat b, jfloat c, jfloat d,
                                                 jfloat seconds, jfloat delta, jfloatArray out) {
     if (!out || env->GetArrayLength(out) < 4) return JNI_FALSE;
@@ -4899,6 +4920,18 @@ AUREA_JNI jboolean AUREA_FN(nativeStartMotionTrack)(JNIEnv* env, jclass, jlong h
     const auto n=env->GetArrayLength(points);if(n>8||n%2)return JNI_FALSE;
     f32 xy[8]{};if(n)env->GetFloatArrayRegion(points,0,n,xy);
     return c->engine.start_motion_track(layer,tool,model,backward,xy,n/2,feature,search,confidence,validateBack)?JNI_TRUE:JNI_FALSE;
+}
+AUREA_JNI jboolean AUREA_FN(nativeStartMotionRepair)(JNIEnv* env, jclass, jlong handle, jlong layer,
+    jint tool, jlong first, jlong last, jfloatArray points) {
+    auto* c = ctx_of(handle);
+    if (!c || !points || env->GetArrayLength(points) != 8) return JNI_FALSE;
+    f32 xy[8]{};
+    env->GetFloatArrayRegion(points, 0, 8, xy);
+    return !env->ExceptionCheck() && c->engine.start_motion_track(layer, tool, 0, false, xy, 4, 12, 48, .65f, false, first, last);
+}
+AUREA_JNI jboolean AUREA_FN(nativeFinishMotionRepair)(JNIEnv*, jclass, jlong handle, jboolean accept) {
+    auto* c = ctx_of(handle);
+    return c && c->engine.finish_motion_repair(accept);
 }
 AUREA_JNI void AUREA_FN(nativeCancelMotionTrack)(JNIEnv*,jclass,jlong handle){if(auto* c=ctx_of(handle))c->engine.cancel_motion_track();}
 AUREA_JNI void AUREA_FN(nativePauseMotionTrack)(JNIEnv*, jclass, jlong handle, jboolean paused) {
@@ -7131,6 +7164,34 @@ AUREA_JNI jfloatArray AUREA_FN(nativeVectorPathAt)(JNIEnv* env, jclass, jlong ha
     return to_float_array(env, v);
 }
 
+// Pontos do vetor 3D no palco (EngineVector3D.cpp): projetar, levar ao plano e arrastar.
+AUREA_JNI jfloatArray AUREA_FN(nativeVectorPathStagePoints)(JNIEnv* env, jclass, jlong handle, jlong layer, jint group, jint path) {
+    NativeContext* c = ctx_of(handle);
+    std::vector<f32> v;
+    if (!c || group < 0 || path < 0 || !c->engine.vector_path_stage_points(static_cast<u64>(layer), static_cast<u32>(group), static_cast<u32>(path), v)) return nullptr;
+    return to_float_array(env, v);
+}
+
+AUREA_JNI jfloatArray AUREA_FN(nativeVectorPathUnproject)(JNIEnv* env, jclass, jlong handle, jlong layer, jint group, jfloat x, jfloat y) {
+    NativeContext* c = ctx_of(handle);
+    Vec2 g;
+    if (!c || group < 0 || !c->engine.vector_path_unproject(static_cast<u64>(layer), static_cast<u32>(group), x, y, g)) return nullptr;
+    const std::vector<f32> v{g.x, g.y};
+    return to_float_array(env, v);
+}
+
+AUREA_JNI jint AUREA_FN(nativeDragVectorPathOnStage)(JNIEnv* env, jclass, jlong handle, jlong layer, jint group, jint path, jint kind,
+                                                     jintArray points, jfloat fromX, jfloat fromY, jfloat toX, jfloat toY, jint locks, jboolean continuing) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || group < 0 || path < 0 || kind < 0 || !points) return -1;
+    const jsize n = env->GetArrayLength(points);
+    if (n <= 0 || n > 4096) return -1;
+    std::vector<u32> idx(static_cast<usize>(n));
+    env->GetIntArrayRegion(points, 0, n, reinterpret_cast<jint*>(idx.data()));
+    return c->engine.drag_vector_path_on_stage(static_cast<u64>(layer), static_cast<u32>(group), static_cast<u32>(path), static_cast<u32>(kind),
+                                               idx.data(), static_cast<u32>(idx.size()), fromX, fromY, toX, toY, static_cast<u32>(locks), continuing == JNI_TRUE);
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeSetVectorPath)(JNIEnv* env, jclass, jlong handle, jlong layer, jint group, jint path, jfloatArray bez, jboolean continuing) {
     NativeContext* c = ctx_of(handle);
     if (!c || group < 0 || path < 0 || !bez) return JNI_FALSE;
@@ -7892,6 +7953,70 @@ plugins::HostIO make_plugin_host_io() {
 }
 
 } // namespace
+
+AUREA_JNI jlongArray AUREA_FN(nativeReportedLayerRoute)(JNIEnv* env, jclass, jlong handle, jlong comp, jlong layer) {
+    auto* c = ctx_of(handle);
+    if (!c) return nullptr;
+    const auto route = c->engine.route_to_layer(comp, layer);
+    const std::vector<jlong> ids(route.begin(), route.end());
+    auto out = env->NewLongArray(static_cast<jsize>(ids.size()));
+    if (out && !ids.empty()) env->SetLongArrayRegion(out, 0, static_cast<jsize>(ids.size()), ids.data());
+    return out;
+}
+
+AUREA_JNI jobjectArray AUREA_FN(nativeExportSourceIssues)(JNIEnv* env, jclass, jlong handle) {
+    auto* c = ctx_of(handle);
+    if (!c) return nullptr;
+    const auto issues = c->engine.export_source_issues();
+    jclass type = env->FindClass("java/lang/String");
+    if (!type) return nullptr;
+    auto out = env->NewObjectArray(static_cast<jsize>(issues.size() * 4), type, nullptr);
+    env->DeleteLocalRef(type);
+    if (!out) return nullptr;
+    jsize index = 0;
+    for (const auto& issue : issues) {
+        for (const auto& field : {std::to_string(static_cast<i64>(issue.composition)),
+             std::to_string(static_cast<i64>(issue.layer)), issue.name, std::string(issue.missing ? "1" : "0")}) {
+            jstring item = utf8_jstring(env, field);
+            if (!item) return nullptr;
+            env->SetObjectArrayElement(out, index++, item);
+            env->DeleteLocalRef(item);
+        }
+    }
+    return out;
+}
+
+AUREA_JNI jobjectArray AUREA_FN(nativePrecompControls)(JNIEnv* env, jclass, jlong handle, jlong group) {
+    auto* c = ctx_of(handle);
+    if (!c) return nullptr;
+    const auto rows = c->engine.precomp_controls(static_cast<u64>(group));
+    jclass type = env->FindClass("java/lang/String");
+    if (!type) return nullptr;
+    auto out = env->NewObjectArray(static_cast<jsize>(rows.size() * 9), type, nullptr);
+    env->DeleteLocalRef(type);
+    if (!out) return nullptr;
+    jsize index = 0;
+    for (const auto& row : rows) {
+        const auto& v = row.value;
+        const unsigned flags = (row.exposed ? 1u : 0u) | (row.overridden ? 2u : 0u) | (row.available ? 4u : 0u);
+        for (const auto& field : {std::to_string(static_cast<i64>(v.target.pack())),
+             std::to_string(static_cast<u32>(v.kind)), std::to_string(flags), row.name, v.text,
+             std::to_string(v.rgba.x), std::to_string(v.rgba.y), std::to_string(v.rgba.z), std::to_string(v.rgba.w)}) {
+            jstring item = utf8_jstring(env, field);
+            if (!item) return nullptr;
+            env->SetObjectArrayElement(out, index++, item);
+            env->DeleteLocalRef(item);
+        }
+    }
+    return out;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeEditPrecompControl)(JNIEnv* env, jclass, jlong handle, jlong group, jlong target,
+    jint kind, jint operation, jstring text, jfloat r, jfloat g, jfloat b, jfloat a) {
+    auto* c = ctx_of(handle);
+    return c && c->engine.edit_precomp_control(static_cast<u64>(group), static_cast<u64>(target),
+        static_cast<u32>(kind), static_cast<u32>(operation), plugin_utf8(env, text), Vec4{r, g, b, a});
+}
 
 /// Liga rede/área de transferência/seletor do Kotlin (`effects.PluginHost`) ao motor.
 AUREA_JNI jboolean AUREA_FN(nativeInstallPluginHost)(JNIEnv* env, jclass, jlong handle) {

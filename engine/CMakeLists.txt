@@ -118,6 +118,7 @@ set(AUREA_CORE_SOURCES
     src/export/ExportSinkStartup.cpp
     src/export/OfflineFrameQueue.cpp
     src/export/OfflineFrameRenderer.cpp
+    src/export/PortableVideoSource.cpp
     src/export/OfflineAudioSnapshot.cpp
     src/export/OfflineAudioBlockSource.cpp
     src/export/FFmpegExportSink.cpp
@@ -315,6 +316,7 @@ set(AUREA_CORE_SOURCES
     src/vector/PathEdit.cpp
     src/vector/VectorModifiers.cpp
     src/engine/EngineVector.cpp
+    src/engine/EngineVector3D.cpp   # pontos do vetor 3D no palco
     src/engine/EngineRig.cpp
     src/engine/EngineMeshWarp.cpp
     src/engine/EnginePuppet.cpp

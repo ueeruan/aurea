@@ -176,15 +176,29 @@ internal fun AddLayerPanel(
 ) {
     val close = { ui.adding = false }
     val closeLabel = stringResource(R.string.editor_fechar_adicionar)
-    // 0.4.1 (mockup "interface 03"): a gaveta é um cartão flutuante — margem de 8, cantos
-    // de 24, vidro escuro (#121214 a 96 %) e fio de 14 %.
-    val card = RoundedCornerShape(24.dp)
-    Box(
+    val card = RoundedCornerShape(16.dp)
+    Column(
         (if (chrome) modifier.padding(horizontal = 8.dp, vertical = 4.dp).clip(card)
-            .background(Color(0xF5121214)).border(1.dp, Color.White.copy(alpha = 0.14f), card) else modifier)
+            .background(AureaColors.Surface).border(1.dp, AureaColors.EditorBarLine, card) else modifier)
             .testTag("add.panel"),
     ) {
-        Box(Modifier.fillMaxSize().testTag("editor.addPanel")) {
+        if (chrome) {
+            Row(
+                Modifier.fillMaxWidth().background(AureaColors.EditorBar).padding(start = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                AddBarIcon(ui.addTab, 18.dp, AureaColors.Accent)
+                Text(stringResource(ui.addTab.label), Modifier.weight(1f).semantics { heading() },
+                    style = AureaType.of(14f, FontWeight.SemiBold, color = AureaColors.Text))
+                Box(Modifier.size(44.dp).testTag("add.close")
+                    .semantics { contentDescription = closeLabel }
+                    .tocavel(shrink = 1f, onClick = close), contentAlignment = Alignment.Center) {
+                    CupertinoIcon(CupertinoGlyph.Xmark, 16.dp, AureaColors.Muted)
+                }
+            }
+        }
+        Box(Modifier.fillMaxWidth().weight(1f).testTag("editor.addPanel")) {
             when (ui.addTab) {
                 AddTab.Shape -> ShapesPager(store, close)
                 AddTab.Media -> MediaStrip(store, ui, close)
@@ -205,22 +219,6 @@ internal fun AddLayerPanel(
                     },
                 ))
                 AddTab.Vector -> VectorGrid(store, ui)
-            }
-        }
-        if (chrome) Box(
-            Modifier
-                .align(Alignment.TopEnd)
-                .size(48.dp)
-                .testTag("add.close")
-                .semantics { contentDescription = closeLabel }
-                .tocavel(shrink = 1f, onClick = close),
-            contentAlignment = Alignment.Center,
-        ) {
-            Box(
-                Modifier.size(24.dp).clip(CircleShape).background(AureaColors.SurfaceHigh),
-                contentAlignment = Alignment.Center,
-            ) {
-                CupertinoIcon(CupertinoGlyph.Xmark, 12.dp, AureaColors.Text)
             }
         }
     }
@@ -249,10 +247,8 @@ internal class ObjectCell(
  */
 @Composable
 internal fun ObjectGrid(cells: List<ObjectCell>, footer: String? = null, warning: String? = null) {
-    // 0.4.1 (mockup "interface 03"): duas colunas de botões (ícone no destaque + nome),
-    // fundo #1C1C1E, cantos de 12; rola na vertical dentro do cartão.
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 12.dp, end = 40.dp, top = 12.dp, bottom = 10.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         cells.chunked(2).forEach { row ->
@@ -280,13 +276,12 @@ internal fun ObjectGrid(cells: List<ObjectCell>, footer: String? = null, warning
 
 @Composable
 private fun ObjectCellView(cell: ObjectCell, modifier: Modifier) {
-    val shape = RoundedCornerShape(12.dp)
+    val shape = RoundedCornerShape(10.dp)
     Row(
         modifier
-            .height(40.dp)
+            .heightIn(min = 46.dp)
             .clip(shape)
             .background(AureaColors.SurfaceHigh)
-            .border(1.dp, Color.White.copy(alpha = 0.03f), shape)
             .semantics { contentDescription = cell.label }
             .testTag(cell.tag)
             .tocavel(onClick = cell.onClick)
@@ -300,7 +295,8 @@ private fun ObjectCellView(cell: ObjectCell, modifier: Modifier) {
         Spacer(Modifier.width(8.dp))
         Text(
             cell.label,
-            maxLines = 1,
+            modifier = Modifier.weight(1f),
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, lineHeight = 13.sp, fontWeight = FontWeight.W500, color = AureaColors.Text)),
         )
@@ -348,7 +344,8 @@ private fun ShapesPager(store: EditorStore, close: () -> Unit) {
     BoxWithConstraints(Modifier.fillMaxSize().testTag("add.shape.pager")) {
         val usable = maxWidth - 18.dp
         val cols = max(4, (usable / 48.dp).toInt())
-        val perPage = cols * 3
+        val rows = ((maxHeight - 20.dp) / 48.dp).toInt().coerceIn(1, 3)
+        val perPage = cols * rows
         val pages = (SHAPES.size + perPage - 1) / perPage
         val state = rememberPagerState { pages }
         val cellWidth = usable / cols
@@ -359,7 +356,7 @@ private fun ShapesPager(store: EditorStore, close: () -> Unit) {
                     Modifier.fillMaxSize().padding(horizontal = 9.dp),
                     verticalArrangement = Arrangement.Center,
                 ) {
-                    for (row in 0 until 3) {
+                    for (row in 0 until rows) {
                         Row {
                             for (col in 0 until cols) {
                                 val shape = slice.getOrNull(row * cols + col)
@@ -412,7 +409,7 @@ internal fun PageDots(count: Int, current: Int, modifier: Modifier = Modifier) {
 }
 
 /** Silhueta de cada preset do motor (mesmo tipo e proporção que a camada nasce). */
-private fun DrawScope.drawShapePreset(preset: Int, fill: Color = ShellColors.DockTileContent) {
+internal fun DrawScope.drawShapePreset(preset: Int, fill: Color = ShellColors.DockTileContent) {
     val s = size.minDimension
     val o = Offset((size.width - s) / 2, (size.height - s) / 2)
     fun p(x: Float, y: Float) = Offset(o.x + x * s, o.y + y * s)
@@ -1410,9 +1407,9 @@ internal fun AddBarMore(store: EditorStore, ui: EditorUi, modifier: Modifier = M
 
 @Composable
 private fun AddBarGridBlock(store: EditorStore, ui: EditorUi) {
-    val title = stringResource(R.string.bar33_more)
+    val title = stringResource(R.string.editor_adicionar_camada)
     val closeLabel = stringResource(R.string.bar33_close)
-    val cardShape = RoundedCornerShape(AddBarDims.CardRadius)
+    val cardShape = RoundedCornerShape(16.dp)
     Box(Modifier.fillMaxWidth().padding(horizontal = AddBarDims.SideMargin, vertical = AddBarDims.VerticalMargin),
         contentAlignment = Alignment.Center,
     ) {
@@ -1455,7 +1452,7 @@ private fun AddBarGridBlock(store: EditorStore, ui: EditorUi) {
 private fun AddBarGridTile(store: EditorStore, ui: EditorUi, tab: AddTab, icon: EditIcon, modifier: Modifier) {
     val label = stringResource(tab.label)
     Row(
-        modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(14.dp))
+        modifier.heightIn(min = 52.dp).clip(RoundedCornerShape(10.dp))
             .background(AddBarColors.Tile)
             .testTag("addBar.grid.${tab.name}")
             .semantics { role = Role.Button }
@@ -1464,10 +1461,8 @@ private fun AddBarGridTile(store: EditorStore, ui: EditorUi, tab: AddTab, icon: 
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(32.dp).background(AureaColors.AccentDim, RoundedCornerShape(10.dp)),
-            contentAlignment = Alignment.Center) {
-            EditToolIcon(icon, AureaColors.Accent, 20.dp)
-        }
-        Text(label, style = AureaType.of(12f, FontWeight.W600, color = AureaColors.Text))
+        EditToolIcon(icon, AureaColors.Accent, 19.dp)
+        Text(label, Modifier.weight(1f), style = AureaType.of(13f, FontWeight.W600, color = AureaColors.Text))
+        CupertinoIcon(CupertinoGlyph.ChevronRight, 12.dp, AureaColors.Muted)
     }
 }

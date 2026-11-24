@@ -79,12 +79,12 @@ class TextManualPreviewTest {
         val moved=image("offset")
         assertTrue("dragging offset updates the actual preview",abs(moved[1]-before[1])>8)
 
-        // Variação de opacidade (9): faixa −100..100 vira SLIDER no motor (valor
-        // absoluto na posição do dedo): arrastar até a ponta esquerda.
+        // Variação de opacidade (9): faixa −100..100 vira SLIDER no motor. 1.0.8: o
+        // slider é régua (arrasto relativo); o ajuste direto vai pela ação de
+        // acessibilidade (setProgress), que leva ao valor de uma vez.
         if (store.paramOf(effect,9)!!.control == com.aurea.aurea.engine.ParamControl.SLIDER) {
-            compose.onNodeWithTag("effects.slider.$effect.9").performScrollTo().performTouchInput {
-                down(center); moveTo(Offset(width*.02f,center.y),250); up()
-            }
+            compose.onNodeWithTag("effects.slider.$effect.9").performScrollTo()
+                .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress) { it(-100f) }
             compose.waitUntil(5000) { store.paramOf(effect,9)!!.value[0] <= -70f }
         }
         repeat(12) {

@@ -1265,6 +1265,66 @@ AUREA_TEST(Parenting, ManyLayersLinkToExistingNullInOneUndo) {
     AUREA_CHECK(!r.e.set_parent_many(ids, 2, LayerId{7777, 3}.pack()).ok());
 }
 
+AUREA_TEST(Parenting, ExpandedGroupLinksSeveralChildrenInsideTheirOwnComposition) {
+    EditRig r;
+    const u64 originals[] = {r.a, r.b, r.c};
+    const auto group = r.e.precompose(originals, 3, "Expanded group");
+    AUREA_CHECK(group.ok());
+    if (!group) return;
+    Composition* outer = r.comp();
+    const Layer* instance = r.L(*group);
+    AUREA_CHECK(instance != nullptr);
+    if (!instance) return;
+    Composition* inner = r.e.project()->timeline().composition(instance->nested.composition);
+    AUREA_CHECK(inner && inner->order().size() == 3);
+    if (!inner || inner->order().size() != 3) return;
+    const LayerId first = inner->order().at(0), second = inner->order().at(1), parent = inner->order().at(2);
+    inner->layer(parent)->threeD = true;
+    const u64 children[] = {first.pack(), second.pack()};
+    AUREA_CHECK(r.e.set_inline_edit_target(*group, first.pack()));
+    const auto changed = r.e.set_parent_many(children, 2, parent.pack());
+    AUREA_CHECK(changed.ok() && *changed == 2);
+    AUREA_CHECK(r.comp() == outer);
+    AUREA_CHECK(inner->layer(first)->parent == parent && inner->layer(second)->parent == parent);
+    const auto created = r.e.parent_to_new_null(children, 2);
+    AUREA_CHECK(created.ok());
+    if (!created) return;
+    const LayerId newParent = LayerId::unpack(*created);
+    AUREA_CHECK(inner->layer(newParent) != nullptr);
+    AUREA_CHECK(inner->layer(first)->parent == newParent && inner->layer(second)->parent == newParent);
+    AUREA_CHECK_EQ(outer->layers().count(), 1u);
+}
+
+AUREA_TEST(Parenting, TwoPrecompositionsFollowTheSameExisting3DNull) {
+    EditRig r;
+    const auto first = r.e.precompose(&r.a, 1, "First group");
+    const auto second = r.e.precompose(&r.b, 1, "Second group");
+    AUREA_CHECK(first.ok() && second.ok());
+    if (!first || !second) return;
+    const LayerId nullId = LayerId::unpack(r.c);
+    Layer* parent = r.comp()->layer(nullId);
+    parent->threeD = true;
+    parent->transform.position = Vec3{120, 90, 4};
+    const FrameIndex time{0};
+    const u64 children[] = {*first, *second};
+    const auto linked = r.e.set_parent_many(children, 2, r.c);
+    AUREA_CHECK(linked.ok() && *linked == 2);
+    const Vec3 offset{24, -19, 7};
+    for (u64 id : children) AUREA_CHECK(r.L(id)->parent == nullId);
+    const Mat4 beforeA = layer_world_3d(*r.comp(), *r.L(*first), time);
+    const Mat4 beforeB = layer_world_3d(*r.comp(), *r.L(*second), time);
+    parent->transform.position = parent->transform.position + offset;
+    const Mat4 afterA = layer_world_3d(*r.comp(), *r.L(*first), time);
+    const Mat4 afterB = layer_world_3d(*r.comp(), *r.L(*second), time);
+    for (const Vec4 d : {afterA.col[3] - beforeA.col[3], afterB.col[3] - beforeB.col[3]}) {
+        AUREA_CHECK_NEAR(d.x, offset.x, .01f);
+        AUREA_CHECK_NEAR(d.y, offset.y, .01f);
+        AUREA_CHECK_NEAR(d.z, offset.z, .01f);
+    }
+    r.undo();
+    for (u64 id : children) AUREA_CHECK(!r.L(id)->parent.valid());
+}
+
 // =============================================================================
 //  Escalonar: cascata de N quadros na ordem escolhida (camadas ou só animação)
 // =============================================================================

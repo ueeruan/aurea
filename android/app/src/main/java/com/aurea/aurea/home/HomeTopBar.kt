@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -56,68 +57,49 @@ internal fun HomeTopBar(
     onDismissAccountMenu: () -> Unit,
     accountMenu: List<MenuEntry>,
 ) {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(OmegaHomeDims.TopBar)
-            .background(AureaColors.LightBackground)
-            .testTag("home.topBar"),
+    val menuLabel = stringResource(R.string.home_tab_settings)
+    var importMenuOpen by remember { mutableStateOf(false) }
+    Row(
+        Modifier.fillMaxWidth().height(OmegaHomeDims.TopBar)
+            .background(AureaColors.LightBackground).padding(end = 10.dp).testTag("home.topBar"),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        val menuLabel = stringResource(R.string.home_tab_settings)
         Box(
-            Modifier
-                .align(Alignment.CenterStart)
-                .padding(start = 4.dp)
-                .size(50.dp)
-                .testTag("home.menu")
-                .semantics { contentDescription = menuLabel }
-                .tocavel(onClick = onMenu),
+            Modifier.size(48.dp).testTag("home.menu")
+                .semantics { contentDescription = menuLabel }.tocavel(onClick = onMenu),
             contentAlignment = Alignment.Center,
         ) {
-            CupertinoIcon(CupertinoGlyph.LineHorizontal3, 24.dp, AureaColors.LightText)
+            CupertinoIcon(CupertinoGlyph.LineHorizontal3, 21.dp, AureaColors.LightText)
         }
-        var importMenuOpen by remember { mutableStateOf(false) }
-        Box(Modifier.align(Alignment.Center).padding(horizontal = 56.dp)) {
-            Box(
-                Modifier
-                    .heightIn(min = 48.dp)
-                    .testTag("home.import")
-                    .tocavel { importMenuOpen = true },
-                contentAlignment = Alignment.Center,
+        Text("Aurea", Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+            style = AureaType.of(23f, FontWeight.Bold, color = AureaColors.LightText))
+        Box {
+            val importLabel = stringResource(R.string.home_project_import)
+            Row(
+                Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(11.dp))
+                    .background(AureaColors.LightSurface).testTag("home.import")
+                    .semantics { contentDescription = importLabel }.tocavel { importMenuOpen = true }
+                    .padding(horizontal = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row(
-                    Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(AureaColors.LightInk)
-                        .padding(horizontal = 11.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(7.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    CupertinoIcon(CupertinoGlyph.ArrowDownToLine, 16.dp, AureaColors.LightOnInk)
-                    Text(
-                        stringResource(R.string.home_project_import),
-                        style = AureaType.of(14f, FontWeight.SemiBold, 0f, AureaColors.LightOnInk),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    CupertinoIcon(CupertinoGlyph.ChevronDown, 10.dp, AureaColors.LightOnInk)
-                }
+                CupertinoIcon(CupertinoGlyph.ArrowDownToLine, 16.dp, AureaColors.LightAccentInk)
+                Text(importLabel, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    style = AureaType.of(13f, FontWeight.SemiBold, color = AureaColors.LightText),
+                    modifier = Modifier.widthIn(max = 93.dp))
             }
             AnchoredMenu(
-                expanded = importMenuOpen,
-                onDismiss = { importMenuOpen = false },
-                width = 276.dp,
+                expanded = importMenuOpen, onDismiss = { importMenuOpen = false }, width = 276.dp,
                 entries = listOf(
                     MenuEntry.Item(stringResource(R.string.home_project_import_aurea),
                         glyph = CupertinoGlyph.DocText, tag = "home.import.aurea", onClick = onImportAurea),
                     MenuEntry.Item(stringResource(R.string.home_project_import_aep),
                         glyph = CupertinoGlyph.Film, tag = "home.import.aep", onClick = onImportAe),
                 ),
-                alignEnd = false,
-                tag = "home.import.menu",
+                alignEnd = true, tag = "home.import.menu",
             )
         }
-        Row(Modifier.align(Alignment.CenterEnd).padding(end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             // A abertura das Novidades uma vez por versão (e o pedido de doação) continua.
             ReleaseNotesEntry(button = false)
             Box {

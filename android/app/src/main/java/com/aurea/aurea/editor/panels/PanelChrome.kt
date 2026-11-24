@@ -222,12 +222,12 @@ private fun RailCell(
 @Composable
 internal fun RailMoreButton(active: Boolean, onClick: () -> Unit) {
     Box(Modifier.size(44.dp).tocavel(onClick = onClick), contentAlignment = Alignment.Center) {
-        CupertinoIcon(CupertinoGlyph.Ellipsis, PanelMetrics.RailIcon, if (active) AureaColors.Accent else AureaColors.Text)
+        CupertinoIcon(CupertinoGlyph.Ellipsis, PanelMetrics.RailIcon, if (active) AureaColors.Accent else AureaColors.RailIconInk)
         if (active) {
             Box(
                 Modifier
                     .align(Alignment.Center)
-                    .padding(start = 26.dp, bottom = 16.dp)
+                    .padding(start = 22.dp, bottom = 14.dp)
                     .size(6.dp)
                     .background(AureaColors.Accent, CircleShape),
             )
@@ -342,6 +342,9 @@ internal object PanelFrameDefaults {
     const val DISABLED_ALPHA = 0.15f
 }
 
+/** 1.0.8 visual minimalista: ícone pintado da coluna em repouso (◆), como o `RailIconInk`. */
+private const val RAIL_REST_ALPHA = 0.75f
+
 /**
  * 0.3.4 painéis: AS MEDIDAS CENTRAIS dos painéis de propriedade (moldura e
  * campos), ~25 % maiores que as da Omega ("está muito compacto"). Todo painel
@@ -350,18 +353,23 @@ internal object PanelFrameDefaults {
  * `PanelMetrics` do DesignSystem.swift: os valores são os mesmos (dp = pt, sp = pt).
  *
  * Largura: três campos de [FieldWidth] + o fio da pílula + [FieldGap] cabem
- * na coluna central de um telefone de 360 dp (360 − 2 × 60 − 2 × 0,7 − 12 = 226).
+ * na coluna central de um telefone de 360 dp (360 − 2 × 46 − 2 × 0,7 − 12 = 254).
  * O número do campo encolhe (até [FieldValueMin]) antes de vazar, com fonte grande.
  */
 internal object PanelMetrics {
     // --- Moldura -------------------------------------------------------------
-    val RailWidth = 60.dp
-    /** Ícones das colunas (‹, ◆, curva, ⋯ e as abas): antes 22. */
-    val RailIcon = 26.dp
-    /** O "=" da expressão na coluna esquerda (sp). */
-    val RailExpression = 26.sp
+    /** 1.0.8 visual minimalista: colunas mais finas (antes 60); o toque segue em [Touch]. */
+    val RailWidth = 46.dp
+    /** Ícones das colunas (‹, ◆, curva, ⋯ e as abas): antes 26. */
+    val RailIcon = 21.dp
+    /** O "=" da expressão na coluna esquerda (sp; antes 26). */
+    val RailExpression = 21.sp
     val TabInset = 5.dp
     val TabRadius = 7.dp
+    /** Colunas de presets e grupos do editor de curva (1.0.8: 48, antes 60; o gráfico ganha o resto). */
+    val CurveColumn = 48.dp
+    /** Miniatura da curva nas colunas (antes 36). */
+    val CurveThumb = 28.dp
     /** Alvo de toque mínimo de qualquer controle do painel. */
     val Touch = 44.dp
 
@@ -573,7 +581,7 @@ private fun FrameLeftRail(rail: PanelRail, onAskDeleteAll: () -> Unit, onCurveWa
     val count = 4 + if (rail.supportsAnimation && rail.onExpression != null) 1 else 0
     RailColumn(count) { height ->
         FrameCell("panel.rail.back", stringResource(R.string.panel_voltar_ferramentas), height, enabled = true, onClick = rail.onBack) {
-            CupertinoIcon(CupertinoGlyph.ChevronLeft, PanelMetrics.RailIcon, AureaColors.Text)
+            CupertinoIcon(CupertinoGlyph.ChevronLeft, PanelMetrics.RailIcon, AureaColors.RailIconInk)
         }
         if (!rail.supportsAnimation) return@RailColumn
         FrameCell(
@@ -584,7 +592,12 @@ private fun FrameLeftRail(rail: PanelRail, onAskDeleteAll: () -> Unit, onCurveWa
             onClick = rail.onKeyframe,
             onLongClick = if (rail.keyframeLook == KeyframeLook.KeyHere && rail.onDeleteAllKeyframes != null) onAskDeleteAll else null,
         ) {
-            KeyframeDiamondIcon(rail.keyframeLook, enabled = true, modifier = Modifier.size(PanelMetrics.RailIcon))
+            // Em repouso (sem keyframe) o ◆ fica a 75 %, como os outros ícones da coluna.
+            KeyframeDiamondIcon(
+                rail.keyframeLook, enabled = true,
+                modifier = Modifier.size(PanelMetrics.RailIcon)
+                    .alpha(if (rail.keyframeLook == KeyframeLook.None) RAIL_REST_ALPHA else 1f),
+            )
         }
         val curve = rail.onCurve
         FrameCell(
@@ -611,7 +624,7 @@ private fun FrameLeftRail(rail: PanelRail, onAskDeleteAll: () -> Unit, onCurveWa
                         TextStyle(
                             fontSize = PanelMetrics.RailExpression,
                             fontWeight = FontWeight.W700,
-                            color = if (rail.expression == ExpressionLook.None) AureaColors.Text else expressionColor(rail.expression),
+                            color = if (rail.expression == ExpressionLook.None) AureaColors.RailIconInk else expressionColor(rail.expression),
                         ),
                     ),
                 )
@@ -627,7 +640,7 @@ private fun FrameLeftRail(rail: PanelRail, onAskDeleteAll: () -> Unit, onCurveWa
                     enabled = rail.moreEnabled,   // Omega efeitos (área 07)
                     onClick = { if (entries != null) moreOpen = true else onMore?.invoke() },
                 ) {
-                    CupertinoIcon(CupertinoGlyph.Ellipsis, PanelMetrics.RailIcon, if (rail.moreActive) AureaColors.Accent else AureaColors.Text)
+                    CupertinoIcon(CupertinoGlyph.Ellipsis, PanelMetrics.RailIcon, if (rail.moreActive) AureaColors.Accent else AureaColors.RailIconInk)
                 }
                 if (entries != null) {
                     AnchoredMenu(
@@ -689,7 +702,7 @@ internal fun FrameRightRail(tabs: List<PanelTab>, selectedId: String?, onTab: (S
             val altOn = alt != null && selectedId == alt.id
             val on = selectedId == tab.id || altOn
             val shown = if (altOn && alt != null) alt else tab
-            val tint = if (on) AureaColors.Accent else AureaColors.Text
+            val tint = if (on) AureaColors.Accent else AureaColors.RailIconInk
             Box(
                 Modifier
                     .height(height)

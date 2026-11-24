@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -66,6 +67,7 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -280,6 +282,10 @@ internal fun fxShownInEffectList(e: LayerEffect): Boolean = !e.isDecoration
 /** Nome do preset de efeito pelo id estável (o motor fala pt-BR). */
 @androidx.annotation.StringRes
 private fun effectPresetLabel(id: String): Int? = when (id) {
+    "copies_line" -> R.string.copies_line
+    "copies_orbit" -> R.string.copies_orbit
+    "copies_magnet" -> R.string.copies_magnet
+    "copies_field" -> R.string.copies_field
     "impact" -> R.string.fxp_impact
     "handheld" -> R.string.fxp_handheld
     "glitch" -> R.string.fxp_glitch
@@ -439,8 +445,7 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
         }
     }
 
-    // Efeito novo: abre sozinho SÓ se a camada não tinha efeito (`autoSelectEffect`
-    // da referência); o aberto que sumiu fecha. Fora da composição (bug B-09).
+    // Abre os controles quando há um pedido explícito de outro painel.
     LaunchedEffect(effects, store.pendingEffectFocus) {
         val ids = effects.map { it.effectId }.toSet()
         val added = ids - known
@@ -457,8 +462,7 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
             // Pedido EXPLÍCITO de outro painel (Texto: "+ animador"; Fantoche no
             // palco): é navegação, abre o efeito pedido sempre.
             requested >= 0 -> effects[requested].effectId
-            // Adicionado pela lista/navegador: só o 1º efeito da camada abre sozinho.
-            FxParamMath.opensAfterAdd(previous, added.size) -> effects.lastOrNull { it.effectId in added }?.effectId
+
             else -> null
         }
         if (target != null) {
@@ -530,7 +534,11 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
     val activePins = remember(store, layerId, openId, puppetOpen, store.rigRevision, store.curveRevision) {
         if (puppetOpen && layerId != null && openId != null) store.puppetPins(layerId, openId!!) else FloatArray(0)
     }
-    val focus = if (meshSelected) listOf(TrackKey(TrackProperty.MESH_WARP, openId!!, 0))
+    val remapOpen = effects.any { it.effectId == openId && it.typeId == effectTypeId("aurea.time.remap") }
+    val remapEditing = remapOpen && !locked && store.detail?.timeRemap == true &&
+        effects.any { it.effectId == openId && it.enabled }
+    val focus = if (remapOpen) listOf(TrackKey(TrackProperty.TIME_REMAP))
+    else if (meshSelected) listOf(TrackKey(TrackProperty.MESH_WARP, openId!!, 0))
     else if (puppetOpen && (puppet.editing || selected == null)) puppetPanelTimelineFocus(puppet.effect, puppet.selected, activePins)
     else selected?.let { listOf(TrackKey(31, it.effectId, it.param * 4 + it.component)) } ?: emptyList()
     val puppetKey = if (!meshSelected && puppetOpen && (puppet.editing || selected == null))
@@ -571,6 +579,9 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
     val exprLook by remember(store, railKey) {
         derivedStateOf { railKey?.let { k -> store.paramOf(k.effectId, k.param)?.let { store.expressionLook(paramKeys(k.effectId, ParamSlot.of(it))) } } ?: com.aurea.aurea.engine.ExpressionLook.None }
     }
+    val remapKeys = if (remapOpen) store.primaryKeys().filter { it.property == TrackProperty.TIME_REMAP }.sortedBy { it.time } else emptyList()
+    val remapDetail = store.detail?.takeIf { remapEditing && it.localPlayhead in it.offsetFrames..it.offsetFrames + (it.endFrame - it.startFrame) }
+    val remapKey = remapDetail?.let { detail -> remapKeys.indexOfFirst { it.time == detail.localPlayhead } } ?: -1
 
     // Projeto de efeitos: qualquer arquivo (o .amproj/.xml não tem MIME padrão).
     val amPicker = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -643,8 +654,15 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
     PanelFrame(
         rail = PanelRail(
             onBack = env.onClose,
-            keyframeLook = if (openId != null) railLook else KeyframeLook.None,
-            onKeyframe = if (railAnimatable) {
+            keyframeLook = when {
+                remapKey >= 0 -> KeyframeLook.KeyHere
+                remapOpen -> if (remapKeys.isEmpty()) KeyframeLook.None else KeyframeLook.Animated
+                openId != null -> railLook
+                else -> KeyframeLook.None
+            },
+            onKeyframe = if (remapOpen) {
+                remapDetail?.let { detail -> { if (remapKey >= 0) store.remapRemove(remapKey) else store.remapInsert(detail.localPlayhead.toLong()) } }
+            } else if (railAnimatable) {
                 {
                     // Lido NO TOQUE: o parâmetro e o cabeçote de agora.
                     if (meshSelected) store.primary?.let { layer -> openId?.let { store.meshWarpToggleKey(layer, it) } }
@@ -658,12 +676,14 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
             } else {
                 null
             },
-            onDeleteAllKeyframes = if (railAnimatable && !meshSelected) {
+            onDeleteAllKeyframes = if (railAnimatable && !meshSelected && !remapOpen) {
                 { railKey?.let { k -> deleteParamKeyframes(store, k) } }
             } else {
                 null
             },
-            onCurve = if (railAnimatable) {
+            onCurve = if (remapOpen) {
+                if (remapEditing) ({ openRemapCurve(env, store.detail?.localPlayhead ?: 0) }) else null
+            } else if (railAnimatable) {
                 {
                     val layer = store.primary
                     if (layer != null) curveKey()?.let { key ->
@@ -674,7 +694,7 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
             } else {
                 null
             },
-            curveReady = curveTrackReady && curveKey() != null,
+            curveReady = if (remapOpen) remapKeys.size >= 2 else curveTrackReady && curveKey() != null,
             expression = exprLook,
             onExpression = exprSlot?.let { s ->
                 {
@@ -704,6 +724,7 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
                     userScrollEnabled = openId == null,
                     contentPadding = PaddingValues(start = FxRow.Gap, end = FxRow.Gap, bottom = FxRow.Gap),
                 ) {
+                    item(key = "catalog") { FxAddRow(onAdd = openAdd) }
                     if (kind == LayerType.Adjustment.kind) item(key = "ajuste") { AdjustmentIntensity(env) }
                     if (kind == LayerType.Text.kind) item(key = "text.animators") {
                         PanelItemRow(CupertinoGlyph.Textformat, stringResource(R.string.la_animators),
@@ -757,7 +778,7 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
                             )
                         }
                     }
-                    item(key = "rodape") { FxAddRow(onAdd = openAdd) }
+
                 }
             } else if (effects.isEmpty() && focusedType != null) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1172,8 +1193,8 @@ private fun FxListRow(
         Modifier
             .fillMaxWidth()
             .height(FxRow.List)
-            .clip(RoundedCornerShape(5.dp))
-            .background(if (lifted) AureaColors.FxSegmentOn else AureaColors.FxListSurface),
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (lifted) AureaColors.FxSegmentOn else AureaColors.Surface),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(
@@ -1199,8 +1220,8 @@ private fun FxListRow(
                 .padding(start = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            CupertinoIcon(CupertinoGlyph.ChevronRight, 18.dp, AureaColors.Text.copy(alpha = 0.3f))
-            Spacer(Modifier.width(6.dp))
+            CupertinoIcon(CupertinoGlyph.Sparkles, 14.dp, if (effect.enabled) AureaColors.Accent else AureaColors.Muted)
+            Spacer(Modifier.width(8.dp))
             Text(
                 shownName,
                 maxLines = 1,
@@ -1307,18 +1328,20 @@ private fun FxAddRow(onAdd: () -> Unit) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .height(FxRow.List)
-                .clip(RoundedCornerShape(5.dp))
-                .background(if (pressed) AureaColors.FxListSurface else AureaColors.FxLowSurface)
+                .heightIn(min = 44.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(if (pressed) AureaColors.SurfaceHigh else AureaColors.AccentDim)
                 .testTag("aurea.effects.add")
                 .semantics { role = Role.Button }
-                .clickable(interactionSource = interaction, indication = null, onClick = onAdd),
-            horizontalArrangement = Arrangement.Center,
+                .clickable(interactionSource = interaction, indication = null, onClick = onAdd)
+                .padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            CupertinoIcon(CupertinoGlyph.Plus, 12.dp, AureaColors.Text)
-            Spacer(Modifier.width(6.dp))
-            Text(stringResource(R.string.panel_adicionar_efeito), style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = AureaColors.Text)))
+            CupertinoIcon(CupertinoGlyph.Plus, 16.dp, AureaColors.Accent)
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(R.string.panel_adicionar_efeito), Modifier.weight(1f),
+                style = AureaType.of(14f, FontWeight.SemiBold, color = AureaColors.Text))
+            CupertinoIcon(CupertinoGlyph.ChevronRight, 13.dp, AureaColors.Accent)
         }
     }
 }
@@ -1355,7 +1378,8 @@ private fun AdjustmentIntensity(env: PanelEnv) {
             onStart = { store.beginGesture("opacidade") },
             onValue = { store.setTransform(TrackProperty.OPACITY, it.coerceIn(0f, 100f) / 100f) },
             onEnd = { store.endGesture() },
-            modifier = Modifier.weight(1f).height(FxRow.Slider).padding(horizontal = 8.dp).testTag("effects.intensity.slider"),
+            // 1.0.8: o slider é régua (altura da régua).
+            modifier = Modifier.weight(1f).height(FxRow.Ruler - 12.dp).testTag("effects.intensity.slider"),
             a11yLabel = label,
             a11yValue = text,
         )
@@ -1670,7 +1694,7 @@ private fun FxSpecialTools(env: PanelEnv, effect: LayerEffect, what: Int, meshSe
                     }
                 }
             }
-            SPECIAL_TIME_REMAP -> TimeRemapEffectEditor(env, id)
+            SPECIAL_TIME_REMAP -> TimeRemapEffectEditor(env, effect.enabled)
             SPECIAL_MESH -> com.aurea.aurea.editor.MeshWarpCardTools(store, id, meshSelected, onSelectMesh)
             SPECIAL_PUPPET -> com.aurea.aurea.editor.PuppetCardTools(store, id)
             SPECIAL_FACE_RIG -> com.aurea.aurea.editor.FaceRigCardTools(store, id)

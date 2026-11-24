@@ -1,6 +1,5 @@
 package com.aurea.aurea.editor.panels
 
-import com.aurea.aurea.engine.KeyframeRow
 import org.junit.Assert.*
 import org.junit.Test
 import kotlin.math.abs
@@ -8,33 +7,7 @@ import kotlin.math.sqrt
 
 /** 0.3.0: the bugs in the value/speed graphs that testers reported. */
 class SpeedGraph030Test {
-    private val a = KeyframeRow(property = 0, effectIndex = -1, time = 0, value = 0f, interpolation = Interp.BEZIER, paramIndex = 0)
-    private val b = KeyframeRow(property = 0, effectIndex = -1, time = 30, value = 300f, interpolation = Interp.LINEAR, paramIndex = 0)
-
-    @Test fun draggingOneHandleKeepsTheOtherPairAsSaved() {
-        // Ease Out (0;0)(0,58;1): the outgoing x is 0. Dragging the INCOMING
-        // handle used to rewrite it as 0.01 (both were clamped on read).
-        val saved = floatArrayOf(0f, 0f, .58f, 1f)
-        val incoming = SpeedHandle(a, b, incoming = true, ease = saved, base = 300f)
-        val h = incoming.changed(20f, 40f)
-        assertEquals(0f, h[0], 0f)
-        assertEquals(0f, h[1], 0f)
-        assertNotEquals(.58f, h[2])
-    }
-
-    @Test fun speedHandleKeepsTheCurveYRange() {
-        val out = SpeedHandle(a, b, incoming = false, ease = floatArrayOf(.3f, 0f, .7f, 1f), base = 1f)
-        val h = out.changed(15f, 1e6f)
-        assertEquals(EASE_Y_MAX, h[1], 0f)
-        val inc = SpeedHandle(a, b, incoming = true, ease = floatArrayOf(.3f, 0f, .7f, 1f), base = 1f)
-        assertEquals(EASE_Y_MIN, inc.changed(15f, 1e6f)[3], 0f)
-    }
-
-    @Test fun evenPowerStopsAtZeroInsteadOfBouncingBack() {
-        assertEquals(0f, rooted(-4f, 2), 0f)
-        assertEquals(2f, rooted(4f, 2), 1e-6f)
-        assertEquals(-2f, rooted(-8f, 3), 1e-5f)
-    }
+    // Tangent math tests moved to test_animation.cpp with the shared implementation.
 
     @Test fun namedEasesIgnoreAStaleBezierPower() {
         // The engine applies the power only to Bézier/Custom (`keyframe_ease`).

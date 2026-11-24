@@ -352,10 +352,10 @@
     <string name="home_ruanzitwo_ofruanzitwo_tiktok_ruanzitwo">Ruanzitwo  ·  @ofruanzitwo  ·  TikTok @ruanzitwo</string>
     <string name="home_ver_todos">Ver todos</string>
     <string name="panel_1_caminho">1 Camino</string>
-    <string name="panel_1_recortar_pelo">1. Recortar por qué</string>
+    <string name="panel_1_recortar_pelo">Recortar por qué</string>
     <string name="panel_1_to">, 1 to </string>
     <string name="panel_2_modo">2 Modo</string>
-    <string name="panel_2_qual_camada_recorta">2. Qué capa recorta</string>
+    <string name="panel_2_qual_camada_recorta">Qué capa recorta</string>
     <string name="panel_2_to">, 2 to</string>
     <string name="panel_3_borda">3 Borde</string>
     <string name="panel_4_rastrear">4 Rastrear</string>
@@ -2540,7 +2540,7 @@ para editar la curva.</string>
     <string name="app_export_gallery_failed">El video se generó, pero no se pudo guardar en la galería.</string>
     <string name="app_saved_to_gallery">Guardado en la galería, en Películas › Aurea.</string>
     <string name="app_saved_to_path">Guardado en %1$s.</string>
-    <string name="app_export_software_encoder">Este dispositivo no tiene codificador de hardware %1$s para esta resolución: exportando por software (más lento, misma calidad).</string>
+    <string name="app_export_software_encoder">Codificando %1$s por software. La exportación puede tardar más.</string>
     <string name="app_export_thermal">Dispositivo caliente: la exportación se ralentizó para enfriarse. La calidad no cambia.</string>
     <string name="app_export_no_hevc">Este dispositivo no exporta HEVC en esta resolución. Prueba H.264.</string>
     <string name="app_export_unsupported_res">Este dispositivo no exporta en esta resolución.</string>
@@ -3130,7 +3130,7 @@ para editar la curva.</string>
     <string name="rig_auto">Automático</string>
     <string name="rig_done">Listo</string>
     <string name="rig_hint_setup">Arrastra las articulaciones al cuerpo · toca el vacío para crear una</string>
-    <string name="rig_hint_animate">Arrastra una mano, un pie o la cabeza (graba un keyframe)</string>
+    <string name="rig_hint_animate">Arrastra la punta para doblar y crear una clave</string>
     <!-- Quarentena de projeto (ProjectGuard) -->
     <string name="quarantine_title">Proyecto con problemas</string>
     <string name="quarantine_body_open">Aurea se cerró mientras abría «%1$s». Para que no vuelva a cerrarse, no se abrió automáticamente. Recuperar intenta abrirlo otra vez; si se cierra de nuevo, envía el diagnóstico de cierres desde Ajustes.</string>
@@ -5850,4 +5850,7 @@ para editar la curva.</string>
     <string name="fxo_bangs">Flequillo</string>
     <string name="fxo_side_locks">Mechones</string>
     <string name="fxo_glasses">Gafas</string>
+    <string name="editor_parent_link_failed">No se pudieron vincular las capas a la capa padre elegida.</string>
+    <string name="mask_use_layer">Usar capa como máscara</string>
+    <string name="mask_hexagon">Hexágono</string>
 </resources>

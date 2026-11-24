@@ -249,7 +249,27 @@ void main() {
     //  z = −1 − brilho: CEL — 2 faixas por uma luz-chave presa à câmera (de cima,
     //  um pouco da esquerda), sem especular; com brilho > 0 a faixa clara onde
     //  uv1.y (direção do chanfro no espaço do texto, Y para cima) aponta para cima.
-    if (u.alpha.z < -3.5) {
+    if (u.alpha.z < -6.5) {
+        vec3 Ntoon = normalize(v_normal);
+        if (u.alpha.w > 0.5 && !gl_FrontFacing) Ntoon = -Ntoon;
+        vec3 view = normalize(u.cameraPos.xyz - v_world);
+        vec3 key = view + vec3(-0.4, -0.85, 0.0);
+        if (u.lightCount.x > 0.5) {
+            key = u.lightPos[0].xyz - v_world * step(0.5, u.lightPos[0].w);
+        }
+        float light = clamp(dot(Ntoon, key * inversesqrt(max(dot(key, key), 1e-6))), 0.0, 1.0);
+        float bands = clamp(-u.alpha.z - 5.0, 2.0, 6.0);
+        float width = clamp(fwidth(light) * bands, 1e-4, 0.35);
+        float level = light * bands;
+        float tone = (floor(max(0.0, level - width)) + smoothstep(1.0 - width, 1.0 + width, fract(level - width) + width))
+                     / (bands - 1.0);
+        vec3 color = base.rgb * mix(0.36, 1.0, clamp(tone, 0.0, 1.0)) * u.cameraPos.w;
+        float coverageAlpha = mode == 3 ? coverage : alpha;
+        o_color = vec4(color * alpha, coverageAlpha);
+        o_scene = vec4(0.0, 0.0, 0.0, coverageAlpha);
+        return;
+    }
+    if (u.alpha.z == -4.0) {
         vec3 ink = base.rgb * u.cameraPos.w;
         float toonA = mode == 3 ? coverage : alpha;
         o_color = vec4(ink * alpha, toonA);

@@ -79,6 +79,7 @@ add_executable(aurea_tests
     test_cliptime.cpp
     test_omega_timeline.cpp
     test_omega_content.cpp
+    test_vector3d_points.cpp  # pontos do vetor 3D no palco (raio × plano)
     test_omega_appearance.cpp
     test_ae_compositing.cpp   # AE compositing: modos, máscaras, tímidas, preservar transparência, B1/B2/B3/B9
     test_ae_timeline.cpp      # timeline do AE: marcas de camada, área de trabalho, escalar/easy ease, alinhar

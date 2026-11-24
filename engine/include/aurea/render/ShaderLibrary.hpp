@@ -34,6 +34,7 @@
 #include "aurea/shaders/ShaderIds.hpp"
 
 #include <atomic>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -90,6 +91,7 @@ struct PipelineKey {
     bool          alphaToCoverage = false;
     /// Segundo anexo de cor do passe 3D (MRT: HDR da cena + 2D de exibição).
     bool          hasColor1 = false;
+    std::optional<SurfaceFormat> colorFormat1; ///< padrão: mesmo formato do primeiro anexo
 
     [[nodiscard]] bool is_compute() const noexcept { return compute != ShaderId::Count; }
 

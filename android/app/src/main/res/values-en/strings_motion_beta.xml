@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="motion_vector_order">Drawing order</string>
+    <string name="motion_vector_order_hint">Arrange paths, strokes and operators.</string>
+    <string name="motion_vector_trim">Trim</string>
+    <string name="motion_vector_repeat">Repeater</string>
+    <string name="motion_move_up">Move %1$s up</string>
+    <string name="motion_move_down">Move %1$s down</string>
+    <string name="motion_vector_move_unavailable">This item cannot be moved while preserving animation, or the layer is locked.</string>
+    <string name="motion_precomp_controls">Precomposition controls</string>
+    <string name="motion_precomp_empty">No controls are available here.</string>
+    <string name="motion_precomp_publish">Expose control</string>
+    <string name="motion_precomp_reset">Restore original</string>
+    <string name="motion_control_text">Text</string>
+    <string name="motion_control_unavailable">Control or layer unavailable.</string>
+    <string name="motion_repair_range">Repair range from here</string>
+    <string name="motion_repair_end">Tap the review strip to set the end of the range.</string>
+    <string name="motion_repair_corners">Mark the four corners</string>
+    <string name="motion_repair_seed">Return to the start frame to confirm the corners.</string>
+    <string name="motion_repair_ready">Check the correction in the preview. Apply to replace the range.</string>
+    <string name="motion_export_missing">Missing media</string>
+    <string name="motion_export_unreadable">Media could not be read</string>
+    <string name="motion_export_source_warning">Some layers have missing or unreadable media. Review them before exporting.</string>
+    <string name="motion_export_waiting_decode">Waiting for the video decoder…</string>
+    <string name="motion_link_media">Relink media</string>
+    <string name="motion_view_layer">View layer</string>
+    <string name="motion_release_body">Aurea 1.0.8.1 BETA (2232)\n• Reorder vector paths, strokes and operators.\n• Shared speed-curve controls on Android and iOS.\n• Text, color and opacity overrides for each precomposition instance.\n• Review and repair a range of planar tracking.\n• Media diagnostics and decoder wait feedback during export.</string>
+</resources>

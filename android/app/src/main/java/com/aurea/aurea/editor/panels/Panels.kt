@@ -94,6 +94,7 @@ fun PanelContent(
     /** Interface de Edição: a barra de cima não tem título de seção, então o
      *  painel mostra "‹ Título" mesmo com camada escolhida. */
     alwaysHeader: Boolean = false,
+    focusedEffectType: Int? = null,
 ) {
     var keypad by remember { mutableStateOf<KeypadRequest?>(null) }
     var color by remember { mutableStateOf<ColorRequest?>(null) }
@@ -181,7 +182,10 @@ fun PanelContent(
                 when (panel) {
                     // Plugin V3: estes cinco um plugin pode substituir (sempre com volta ao original).
                     EditorPanel.Transform -> com.aurea.aurea.effects.PluginPanelOr("transform") { TransformPanel(env, transformTab, onTab = { transformTab = it }) }
-                    EditorPanel.Effects -> com.aurea.aurea.effects.PluginPanelOr("effects") { EffectsPanel(env) }
+                    EditorPanel.Effects -> {
+                        if (focusedEffectType != null) EffectsPanel(env, focusedType = focusedEffectType)
+                        else com.aurea.aurea.effects.PluginPanelOr("effects") { EffectsPanel(env) }
+                    }
                     EditorPanel.Curve -> CurvePanel(env)
                     EditorPanel.Appearance -> com.aurea.aurea.effects.PluginPanelOr("blend") { AppearancePanel(env) }
                     EditorPanel.Speed -> SpeedPanel(env)

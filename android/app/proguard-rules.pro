@@ -56,3 +56,10 @@
 -keep class * extends androidx.room.RoomDatabase { <init>(); }
 -keep class androidx.work.impl.WorkDatabase_Impl { *; }
 -keep class androidx.work.** { *; }
+
+# 1.0.8: o Firebase/ML Kit acha os componentes por reflexão (ComponentDiscovery
+# chama o construtor vazio de cada ComponentRegistrar). No build de loja o R8
+# tirava esses construtores ("NoSuchMethodException: PoseRegistrar.<init>") e a
+# pose do ML Kit (auto rig) e o FCM ficavam sem registro.
+-keep class * implements com.google.firebase.components.ComponentRegistrar { <init>(); }
+-keepnames class * implements com.google.firebase.components.ComponentRegistrar

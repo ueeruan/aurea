@@ -1,6 +1,7 @@
 package com.aurea.aurea.editor.panels
 
 import com.aurea.aurea.engine.KeyframeRow
+import com.aurea.aurea.engine.AureaEngine
 import com.aurea.aurea.state.EditorStore
 import kotlin.math.abs
 import kotlin.math.sqrt
@@ -21,42 +22,12 @@ import kotlin.math.sqrt
  */
 internal data class SpeedHandle(val key: KeyframeRow, val end: KeyframeRow, val incoming: Boolean,
     val ease: FloatArray, val base: Float, val power: Int = 1) {
-    /** Influência mostrada (a mínima de 1 % evita a divisão por zero na ponta). */
-    val influence get() = (if (incoming) 1f - ease[2] else ease[0]).coerceIn(.01f, .99f)
-    private val rise get() = if (incoming) 1f - ease[3] else ease[1]
-    private val slope get() = rise / influence
-    val velocity get() = base * powered(slope, power)
-    val frame get() = key.time + (end.time.toLong() - key.time).toFloat() * if (incoming) 1f - influence else influence
-    fun changed(frame: Float, velocity: Float): FloatArray {
-        val h = ease.copyOf()
-        val fraction = ((frame - key.time) / (end.time.toLong() - key.time).toFloat()).coerceIn(.01f, .99f)
-        val s = rooted(velocity / base, power)
-        // y nos mesmos −2..3 da curva, do preset e do motor (CurveMath.kt):
-        // fora disso o preset salvo cortava a curva e o painel de curva a pulava.
-        if (incoming) { h[2] = fraction; h[3] = (1f - s * (1f - fraction)).coerceIn(EASE_Y_MIN, EASE_Y_MAX) }
-        else { h[0] = fraction; h[1] = (s * fraction).coerceIn(EASE_Y_MIN, EASE_Y_MAX) }
-        return h
-    }
-}
-
-/** s^power com o sinal de s (a força é 1..3). */
-internal fun powered(s: Float, power: Int): Float {
-    var out = s
-    repeat(power.coerceIn(1, 3) - 1) { out *= s }
-    return out
-}
-
-/**
- * A inversa de [powered]: a raiz `power` com sinal. Com força par a velocidade
- * não fica negativa: abaixo de zero a alça PARA em zero (antes espelhava e
- * voltava a subir sob o dedo).
- */
-internal fun rooted(v: Float, power: Int): Float {
-    val p = power.coerceIn(1, 3)
-    if (p == 1) return v
-    if (v < 0f && p % 2 == 0) return 0f
-    val r = Math.pow(abs(v).toDouble(), 1.0 / p).toFloat()
-    return if (v < 0f) -r else r
+    private val duration = (end.time.toLong() - key.time).toFloat()
+    private val position = AureaEngine.nativeSpeedGraphTangent(ease, incoming, power, base, 0f, 0f, false)
+    val velocity get() = position?.get(1) ?: 0f
+    val frame get() = key.time + duration * (position?.get(0) ?: if (incoming) .99f else .01f)
+    fun changed(frame: Float, velocity: Float): FloatArray? =
+        AureaEngine.nativeSpeedGraphTangent(ease, incoming, power, base, (frame - key.time) / duration, velocity, true)
 }
 
 /**

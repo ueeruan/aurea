@@ -91,23 +91,28 @@ object ParamRowMath {
 // =============================================================================
 object FxParamMath {
     /**
-     * Alturas das linhas (dp). 0.3.4 painéis: ~15 % maiores que as da referência
-     * ("está muito compacto"; eram 51 / 57 / 38 / 43 / 37). Par do `FxParamMath` do iOS.
+     * Alturas das linhas (dp). 1.0.8 visual minimalista: mais compactas para sobrar
+     * espaço (eram 60 / 66 / 46 / 48). O slider virou régua: a linha dele tem a
+     * altura da régua. Par do `FxParamMath` do iOS.
      */
-    const val ROW_SLIDER = 60f
-    const val ROW_RULER = 66f
-    const val ROW_SMALL = 46f
-    const val ROW_SECTION = 48f
+    const val ROW_SLIDER = 52f
+    const val ROW_RULER = 52f
+    const val ROW_SMALL = 40f
+    const val ROW_SECTION = 42f
     const val ROW_LIST = 44f
     /** Folga entre itens da lista e padding da sobreposição (dp). */
     const val LIST_GAP = 6.5f
-    /** Rótulo e caixa de valor (dp; eram 75 / 56); margem 3 em volta do rótulo. */
-    const val LABEL_W = 80f
-    const val VALUE_W = 62f
+    /** Rótulo e caixa de valor (dp; eram 80 / 62); margem 3 em volta do rótulo. */
+    const val LABEL_W = 74f
+    const val VALUE_W = 56f
     const val LABEL_MARGIN = 3f
-    /** Régua: risco a cada 5,5 dp, maior a cada 5 riscos; agulha 1,5 dp. */
+    /** Régua: risco a cada 5,5 dp, maior a cada 5 riscos. */
     const val TICK_SPACING = 5.5f
     const val MAJOR_EVERY = 5
+    /** Faixa de cada borda da régua (fração da largura) onde os riscos somem. */
+    const val RULER_FADE_EDGE = 0.22f
+    /** Slider-régua: a faixa inteira cabe em até ~120 riscos. */
+    const val SLIDER_RULER_TICKS = 120
     /** Arremesso acima de 300 px/s. */
     const val FLING_MIN_PX_S = 300f
     /**
@@ -126,6 +131,38 @@ object FxParamMath {
     /** Abrir/fechar os controles e a seta da seção (ms). */
     const val OPEN_MS = 200
     const val SECTION_ARROW_MS = 300
+
+    /**
+     * Esmaecimento dos riscos da régua em `x` (largura `width`): 1 no miolo e
+     * cai suave (smoothstep) até 0 nos [RULER_FADE_EDGE] de cada borda.
+     */
+    fun rulerFade(x: Float, width: Float): Float {
+        if (!(width > 0f) || !x.isFinite()) return 0f
+        val edge = width * RULER_FADE_EDGE
+        val d = kotlin.math.min(x, width - x)
+        if (d <= 0f) return 0f
+        if (d >= edge) return 1f
+        val t = d / edge
+        return t * t * (3f - 2f * t)
+    }
+
+    /**
+     * Passo por risco do slider que virou régua (faixa fechada [min]..[max]): o
+     * [step] do parâmetro, mas nunca menor que o "redondo" (1, 2 ou 5 × 10ⁿ) que
+     * põe a faixa inteira em ~[SLIDER_RULER_TICKS] riscos; continua múltiplo de
+     * [step]. Ex.: 0–100 % com passo 1 → 1; 0–1 sem passo → 0,01; −180..180 → 5.
+     */
+    fun sliderRulerStep(min: Float, max: Float, step: Float): Float {
+        val span = abs(max.toDouble() - min.toDouble())
+        val base = if (step > 0f && step.isFinite()) step.toDouble() else 0.0
+        if (!(span > 0.0) || !span.isFinite()) return if (base > 0.0) base.toFloat() else 1f
+        val need = span / SLIDER_RULER_TICKS
+        val p = Math.pow(10.0, kotlin.math.floor(kotlin.math.log10(need)))
+        val nice = doubleArrayOf(1.0, 2.0, 5.0, 10.0).map { it * p }.first { it >= need * (1 - 1e-9) }
+        if (base <= 0.0) return nice.toFloat()
+        if (base >= nice) return base.toFloat()
+        return (base * kotlin.math.ceil(nice / base - 1e-9)).toFloat()
+    }
 
     /** Controles do motor (`ParamControl`). */
     fun rowHeight(control: Int, type: Int): Float = when (control) {

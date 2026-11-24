@@ -472,16 +472,13 @@ import UIKit
         XCTAssertTrue(field.waitForExistence(timeout: 5)); field.tap(); field.typeText("3D Extrusion")
         let result = app.buttons["effects.result.\(effectCardId("aurea.generate.raster_extrude"))"].firstMatch
         XCTAssertTrue(result.waitForExistence(timeout: 5) && result.isHittable); result.tap()
-        // Omega: o resultado abre o detalhe; a linha do efeito base adiciona.
-        let base = app.buttons["effects.detail.variant.\(effectCardId("aurea.generate.raster_extrude"))"].firstMatch
-        XCTAssertTrue(base.waitForExistence(timeout: 5)); base.tap()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: field)], timeout: 8), .completed)
         let initial = try awaitSnapshot("The extrusion card adds its real native effect") { $0.effectCount == 1 && ($0.rasterDepth ?? -1) >= 0 }
         let effect = try XCTUnwrap(initial.rasterEffectId)
         let depth = try XCTUnwrap(initial.rasterDepth)
         XCTAssertEqual(depth, 32, accuracy: 0.001)
-        // Omega efeitos (P0-2/P0-3): o 1º efeito da camada abre os controles sozinho,
-        // sobre a lista; a profundidade é régua (ou slider, pelo controle do motor).
+        let row = app.descendants(matching: .any)["effects.expand.\(effectCardId("aurea.generate.raster_extrude"))"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5)); row.tap()
         let ruler = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@ OR identifier == %@",
             "effects.ruler.\(effect).0", "effects.slider.\(effect).0")).firstMatch
         let stack = app.descendants(matching: .any)["effects.settings.\(effectCardId("aurea.generate.raster_extrude"))"].firstMatch
@@ -1341,9 +1338,6 @@ import UIKit
         let search = app.buttons["effects.search"].firstMatch
         XCTAssertTrue(search.waitForExistence(timeout: 5)); XCTAssertTrue(search.isHittable)
         XCTAssertGreaterThanOrEqual(search.frame.height, 44)
-        // Os Recomendados ficam no topo.
-        XCTAssertTrue(app.descendants(matching: .any)["effects.featured"].firstMatch.waitForExistence(timeout: 5))
-        // Os ladrilhos de categoria ficam embaixo (grade preguiçosa).
         let home = app.scrollViews["effects.home"].firstMatch
         let first = app.buttons["effects.category.color_light"].firstMatch
         for _ in 0..<6 where !(first.exists && first.isHittable) && home.exists { home.swipeUp() }
@@ -1363,23 +1357,20 @@ import UIKit
         let result = app.buttons["effects.result.\(deepGlow)"].firstMatch
         XCTAssertTrue(result.waitForExistence(timeout: 5))
         result.tap()
-        // O resultado abre o detalhe; a linha do efeito base adiciona e fecha.
-        let deepBase = app.buttons["effects.detail.variant.\(deepGlow)"].firstMatch
-        XCTAssertTrue(deepBase.waitForExistence(timeout: 5)); deepBase.tap()
         let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: field)
         XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 8), .completed)
         _ = try awaitSnapshot("One tap on a search result adds the effect") { $0.effectCount == 1 }
 
-        // Omega efeitos (P0-2/P0-3): o 1º efeito da camada abre os controles sozinho,
-        // sobre a lista (a tela de adicionar fecha).
         let leftCatalog = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: addTab)
         XCTAssertEqual(XCTWaiter.wait(for: [leftCatalog], timeout: 5), .completed)
-        XCTAssertTrue(app.descendants(matching: .any)["effects.settings.\(deepGlow)"].firstMatch.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["effects.more.\(deepGlow)"].firstMatch.waitForExistence(timeout: 5))
-        // Tocar no cabeçalho fecha os controles e a lista volta.
+        let row = app.descendants(matching: .any)["effects.expand.\(deepGlow)"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        let settings = app.descendants(matching: .any)["effects.settings.\(deepGlow)"].firstMatch
+        XCTAssertFalse(settings.exists)
+        row.tap()
+        XCTAssertTrue(settings.waitForExistence(timeout: 5))
         let header = app.descendants(matching: .any)["effects.settings.header"].firstMatch
         XCTAssertTrue(header.waitForExistence(timeout: 5)); header.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["effects.expand.\(deepGlow)"].firstMatch.waitForExistence(timeout: 5))
 
         // O "+ Adicionar efeito" da lista leva de volta ao catálogo, com o recente à vista.
         let stack = app.scrollViews["aurea.effects.stack"].firstMatch
@@ -1405,14 +1396,6 @@ import UIKit
         for _ in 0..<8 where !(vhs.exists && vhs.isHittable) { grid.swipeUp() }
         XCTAssertTrue(vhs.waitForExistence(timeout: 5))
         vhs.tap()
-        let vhsBase = app.buttons["effects.detail.variant.\(effectCardId("aurea.glitch.vhs"))"].firstMatch
-        let detailScroll = app.scrollViews["effects.detail.scroll"].firstMatch
-        XCTAssertTrue(detailScroll.waitForExistence(timeout: 5))
-        for _ in 0..<4 { detailScroll.swipeUp() }
-        for _ in 0..<4 { detailScroll.swipeDown() }
-        for _ in 0..<4 where !vhsBase.isHittable { detailScroll.swipeUp() }
-        XCTAssertTrue(vhsBase.isHittable)
-        vhsBase.tap()
         _ = try awaitSnapshot("One tap on a grid card adds the effect") { $0.effectCount == 2 }
         // Omega efeitos (P0-2): com um efeito já na camada, o novo entra no FIM da
         // lista, que continua fechada.

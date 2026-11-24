@@ -244,15 +244,15 @@ object AureaColors {
     val AddNewBadge = Color(0xFFFFCD4B)
     val AddOnNewBadge = Color(0xFF1F2238)
     /** Página "Exportar e compartilhar" (tons da paleta). */
-    val ExportPage: Color get() = palette.light.sheet
-    val ExportCard: Color get() = palette.light.surface
-    val ExportText: Color get() = palette.light.text
-    val ExportHint: Color get() = palette.light.textMuted
-    val ExportLine: Color get() = palette.light.divider
-    val ExportPrimary: Color get() = palette.light.ink
-    val ExportOnPrimary: Color get() = palette.light.onInk
+    val ExportPage: Color get() = palette.background
+    val ExportCard: Color get() = palette.surface
+    val ExportText: Color get() = Text
+    val ExportHint: Color get() = palette.muted
+    val ExportLine: Color get() = palette.editorBarLine
+    val ExportPrimary: Color get() = palette.accent
+    val ExportOnPrimary: Color get() = palette.onAccent
     /** Seta e ⓘ das linhas. */
-    val ExportAction: Color get() = palette.light.textFaint
+    val ExportAction: Color get() = palette.muted
     /** Página do resultado e os botões dela (S9). */
     val ExportResult: Color get() = palette.background
     val ExportResultButton: Color get() = palette.chipHigh
@@ -305,6 +305,25 @@ object AureaColors {
     val FxListIcon: Color get() = palette.fx.listIcon
     val FxTextSecondary: Color get() = palette.fx.textSecondary
     val FxScrim: Color get() = palette.fx.scrim
+    // 1.0.8 visual minimalista: tons derivados do texto e do destaque (par do Theme.swift).
+    /** Ícone das colunas do painel em repouso (texto a 75 %). */
+    val RailIconInk: Color get() = Text.copy(alpha = 0.75f)
+    /** Rótulo da linha de parâmetro em repouso (texto a 85 %). */
+    val FxLabelInk: Color get() = Text.copy(alpha = 0.85f)
+    /** Realce suave do rótulo ativo (destaque a 14 %). */
+    val FxLabelLit: Color get() = Accent.copy(alpha = 0.14f)
+    /** Fio de 1 dp (texto a 12 %): sublinhado do valor e borda das escolhas. */
+    val FxHairline: Color get() = Text.copy(alpha = 0.12f)
+    /** Segmento escolhido (destaque a 22 %). */
+    val FxSegmentPick: Color get() = Accent.copy(alpha = 0.22f)
+    /** Sombra do polegar do slider (preto a 25 %). */
+    val FxThumbShadow = Color(0x40000000)
+    /** Halo do polegar enquanto arrasta (destaque a 18 %). */
+    val FxThumbHalo: Color get() = Accent.copy(alpha = 0.18f)
+    /** Contorno fino da escolha acesa (destaque a 50 %): vagas do editor de curva. */
+    val FxPickLine: Color get() = Accent.copy(alpha = 0.5f)
+    /** Grade do gráfico de curva (branco 6 %). */
+    val CurveGridLine: Color get() = Color.White.copy(alpha = 0.06f)
 
     // --- Omega conteúdo (área 06): editores de texto, fontes, desenho e pontos --
     // Ver [AureaContentRoles]: os tons do tema em uso.

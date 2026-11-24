@@ -1,6 +1,7 @@
 #pragma once
 #include "aurea/render/Renderer.hpp"
 #include <condition_variable>
+#include <optional>
 
 namespace aurea {
 // A session owns every temporal render history and source decoder. Only the
@@ -29,7 +30,8 @@ public:
                   const ImagePixels* (*images)(void*, AssetId), void* imageContext,
                   const RenderSettings& settings, u64& submittedFrame,
                   std::mutex* pollingMutex = nullptr,
-                  const std::atomic<bool>* additionalCancel = nullptr) noexcept;
+                  const std::atomic<bool>* additionalCancel = nullptr,
+                  class ExportDiagnostics* diagnostics = nullptr) noexcept;
     /// O último render() saiu com algum quadro de vídeo aproximado (o mais
     /// próximo do MESMO trecho, depois de reabrir a fonte): o motor marca
     /// kExportFrameFallback e as telas avisam. Lê e zera.
@@ -68,6 +70,10 @@ public:
         u64 reopenAfterNs = 3'000'000'000ull, approximateAfterNs = 6'000'000'000ull, approximateTotalAfterNs = 15'000'000'000ull;
     };
     void set_exact_frame_deadlines(const ExactFrameDeadlines& d) noexcept { deadlines_ = d; }
+    void require_complete_video_frames() noexcept {
+        requireCompleteFrames_ = true;
+        media_.prefer_portable_export_sources(true);
+    }
     /// 0.4.6: decodificação compatível (MediaPriority::ExportSoftwareDecode)
     /// para os decoders abertos daqui em diante — o degrau da escada que pede
     /// (ExportSettings::softwareDecode), ou o próprio render ao reabrir uma
@@ -99,6 +105,8 @@ private:
     FrameSnapshot snapshot_;
     u64 sequence_ = 0, fenceTimeoutNs_ = 120'000'000'000ull;
     u64 sceneExposureBudgetBytes_ = 32ull << 20;
+    u64 driverBudgetSampleNs_ = 0;
+    std::optional<u64> driverHeadroom_;
     bool serialSceneExposure_ = false;
     bool stageUnblurredScenes_ = false;
     std::atomic<u64> generation_{0};
@@ -116,6 +124,7 @@ private:
     [[nodiscard]] bool site_unresolved(const char* file, u32 line) const noexcept;
     void remember_unresolved(const char* file, u32 line) noexcept;
     bool softwareDecode_ = false;
+    bool requireCompleteFrames_ = false;
     u32 approximateFrames_ = 0;
     u32 approximateRun_ = 0;   ///< aproximados SEGUIDOS (zera no próximo exato)
 };

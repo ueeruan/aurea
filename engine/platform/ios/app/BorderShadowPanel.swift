@@ -1185,8 +1185,10 @@ struct BorderShadowPanel: View {
 // EffectsControls.kt usadas no Android)
 // =============================================================================
 
-/// A RÉGUA DE RISCOS: risco a cada 5,5 pt (0,5 pt, «risco»; o maior a cada 5 no
-/// texto), esmaecendo até as bordas; agulha de 1,5 pt em destaque. 1 risco = 1
+/// A RÉGUA DE RISCOS (o mesmo desenho do `FxRuler`, 1.0.8 visual minimalista):
+/// risco a cada 5,5 pt, 1,5 de largura com pontas redondas, menores de 10 (35 %)
+/// e o maior a cada 5 de 16 (60 %), sumindo suave nas bordas; agulha = cápsula de
+/// 3 × 24 em destaque com um ponto de 5 embaixo. 1 risco = 1
 /// `step`; dedo para a esquerda aumenta; o valor anda de risco em risco e fica
 /// preso na faixa (estendida até o valor de partida). Um gesto = um passo de desfazer.
 private struct BorderShadowRuler: View {
@@ -1279,13 +1281,14 @@ private struct BorderShadowRuler: View {
     }
 
     private func draw(_ context: GraphicsContext, size: CGSize, value: Float) {
-        let pad: CGFloat = 8
-        let top = pad, bottom = size.height - pad
-        guard bottom > top, size.width > 0 else { return }
+        guard size.height > 0, size.width > 0 else { return }
         let spacing = BorderShadowMetrics.tickSpacing
         let center = size.width / 2
+        let cy = size.height / 2
         let v = Double(value.isFinite ? value : 0)
         let pos = step > 0 && step.isFinite ? v / Double(step) : 0
+        let round = StrokeStyle(lineWidth: 1.5, lineCap: .round)
+        let minorH = Swift.min(10, size.height), majorH = Swift.min(16, size.height)
         if abs(pos) < 1e7 {
             let reach = Double(center / spacing)
             let first = Int((pos - reach).rounded(.down)) - 1
@@ -1293,24 +1296,36 @@ private struct BorderShadowRuler: View {
             if last > first && last - first < 4000 {
                 for k in first...last {
                     let x = center + CGFloat(Double(k) - pos) * spacing
-                    let b = FxParamRowMath.tickBrightness(x: x, width: size.width)
-                    guard b > 0 else { continue }
+                    let fade = FxParamMath.rulerFade(x: x, width: size.width)
+                    guard fade > 0 else { continue }
                     let major = ((k % 5) + 5) % 5 == 0
+                    let h = major ? majorH : minorH
                     var line = Path()
-                    line.move(to: CGPoint(x: x, y: top))
-                    line.addLine(to: CGPoint(x: x, y: bottom))
-                    context.stroke(line, with: .color((major ? AureaColors.text : AureaColors.fxTick).opacity(Double(b))), lineWidth: 0.5)
+                    line.move(to: CGPoint(x: x, y: cy - h / 2))
+                    line.addLine(to: CGPoint(x: x, y: cy + h / 2))
+                    context.stroke(line, with: .color(AureaColors.text.opacity(Double((major ? 0.6 : 0.35) * fade))), style: round)
                 }
             }
         }
-        var needle = Path()
-        needle.move(to: CGPoint(x: center, y: 0))
-        needle.addLine(to: CGPoint(x: center, y: size.height))
-        context.stroke(needle, with: .color(enabled ? AureaColors.accent : AureaColors.fxDisabledText), lineWidth: 1.5)
+        let tint = enabled ? AureaColors.accent : AureaColors.fxDisabledText
+        let dot: CGFloat = 5, gap: CGFloat = 2
+        let needleH = Swift.min(24, size.height - 2 * (dot + gap))
+        if needleH > 0 {
+            context.fill(Path(roundedRect: CGRect(x: center - 1.5, y: cy - needleH / 2, width: 3, height: needleH), cornerRadius: 1.5),
+                         with: .color(tint))
+            context.fill(Path(ellipseIn: CGRect(x: center - dot / 2, y: cy + needleH / 2 + gap, width: dot, height: dot)),
+                         with: .color(tint))
+        } else {
+            var needle = Path()
+            needle.move(to: CGPoint(x: center, y: 0))
+            needle.addLine(to: CGPoint(x: center, y: size.height))
+            context.stroke(needle, with: .color(tint), lineWidth: 1.5)
+        }
     }
 }
 
-/// A CAIXA DE VALOR 55×45: raio 4, «véu 20 %», número 8–14 pt alinhado ao fim, sempre LTR.
+/// A CAIXA DE VALOR 55×45 (1.0.8 visual minimalista): sem véu, um fio de 1 pt
+/// (`fxHairline`) sob o número, alinhado ao fim, tabular, sempre LTR.
 private struct BorderShadowValueBox: View {
     let text: String
     var enabled: Bool = true
@@ -1318,15 +1333,17 @@ private struct BorderShadowValueBox: View {
 
     var body: some View {
         Button(action: onTap) {
-            Text(text)
-                .font(.aurea(size: PanelMetrics.fieldValue).monospacedDigit())
-                .foregroundStyle(enabled ? AureaColors.text : AureaColors.fxDisabledText)
-                .lineLimit(1)
-                .minimumScaleFactor(8.0 / PanelMetrics.fieldValue)
-                .padding(.horizontal, 6)
-                .frame(width: BorderShadowMetrics.valueW, height: BorderShadowMetrics.valueH, alignment: .trailing)
-                .background(AureaColors.fxValueVeil, in: RoundedRectangle(cornerRadius: 4))
-                .contentShape(Rectangle())
+            VStack(alignment: .trailing, spacing: 0) {
+                Text(text)
+                    .font(.aurea(size: PanelMetrics.fieldValue).monospacedDigit())
+                    .foregroundStyle(enabled ? AureaColors.text : AureaColors.fxDisabledText)
+                    .lineLimit(1)
+                    .minimumScaleFactor(8.0 / PanelMetrics.fieldValue)
+                Rectangle().fill(AureaColors.fxHairline).frame(height: 1).padding(.top, 3)
+            }
+            .padding(.horizontal, 6)
+            .frame(width: BorderShadowMetrics.valueW, height: BorderShadowMetrics.valueH, alignment: .trailing)
+            .contentShape(Rectangle())
         }
         .buttonStyle(AureaPressStyle(shrink: 1))
         .disabled(!enabled)
@@ -1334,8 +1351,9 @@ private struct BorderShadowValueBox: View {
     }
 }
 
-/// O RÓTULO DA LINHA: raio 4, «rótulo» (ativo: «afundado» e texto em destaque),
-/// texto 8–12 pt em até 2 linhas. Toque = foco do trilho.
+/// O RÓTULO DA LINHA (o mesmo do `FxParamLabel`, 1.0.8 visual minimalista): sem
+/// caixa em repouso, alinhado ao início; ativo com realce suave de raio 8 e texto
+/// em destaque; texto 8–13 pt em até 2 linhas. Toque = foco do trilho.
 private struct BorderShadowLabel: View {
     let label: String
     let height: CGFloat
@@ -1347,13 +1365,14 @@ private struct BorderShadowLabel: View {
         Button(action: onTap) {
             Text(label)
                 .font(.aurea(size: PanelMetrics.label))
-                .multilineTextAlignment(.center)
+                .multilineTextAlignment(.leading)
                 .lineLimit(2)
                 .minimumScaleFactor(8.0 / PanelMetrics.label)
-                .foregroundStyle(!enabled ? AureaColors.fxDisabledText : active ? AureaColors.accent : AureaColors.text)
-                .padding(3)
+                .foregroundStyle(!enabled ? AureaColors.fxDisabledText : active ? AureaColors.accent : AureaColors.fxLabelInk)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .padding(.leading, 8).padding(.trailing, 4).padding(.vertical, 3)
                 .frame(width: BorderShadowMetrics.label, height: Swift.max(0, height))
-                .background(active && enabled ? AureaColors.fxSunken : AureaColors.fxLabel, in: RoundedRectangle(cornerRadius: 4))
+                .background(active && enabled ? AureaColors.fxLabelLit : Color.clear, in: RoundedRectangle(cornerRadius: 8))
                 .contentShape(Rectangle())
         }
         .buttonStyle(AureaPressStyle(shrink: 1))
@@ -1362,8 +1381,9 @@ private struct BorderShadowLabel: View {
     }
 }
 
-/// ESCOLHA SEGMENTADA: botões de 27,5 pt em «segmento» / «segmento ativo» (raio 5);
-/// o alvo de toque de cada botão tem a altura da linha (44). Ids "\(tag).\(i)".
+/// ESCOLHA SEGMENTADA (a mesma do `FxSegmented`, 1.0.8 visual minimalista): moldura
+/// de raio 8 com fio de 1, a vigente numa pílula de raio 6 em `fxSegmentPick`; o
+/// alvo de toque de cada botão tem a altura da linha (44). Ids "\(tag).\(i)".
 private struct BorderShadowSegmented: View {
     let options: [String]
     let selected: Int
@@ -1372,7 +1392,7 @@ private struct BorderShadowSegmented: View {
     let onSelect: (Int) -> Void
 
     var body: some View {
-        HStack(spacing: 1) {
+        HStack(spacing: 0) {
             ForEach(Array(options.enumerated()), id: \.offset) { index, option in
                 let on = index == selected
                 Button { onSelect(index) } label: {
@@ -1382,8 +1402,8 @@ private struct BorderShadowSegmented: View {
                         .lineLimit(1).truncationMode(.tail).minimumScaleFactor(0.8)
                         .padding(.horizontal, 4)
                         .frame(maxWidth: .infinity)
-                        .frame(height: PanelMetrics.fieldHeight)
-                        .background(on ? AureaColors.fxSegmentOn : AureaColors.fxSegment)
+                        .frame(height: PanelMetrics.fieldHeight - 4)
+                        .background(on ? AureaColors.fxSegmentPick : Color.clear, in: RoundedRectangle(cornerRadius: 6))
                         .frame(height: 44)
                         .contentShape(Rectangle())
                 }
@@ -1393,7 +1413,8 @@ private struct BorderShadowSegmented: View {
                 .accessibilityIdentifier("\(tag).\(index)")
             }
         }
-        .mask(alignment: .center) { RoundedRectangle(cornerRadius: 5).frame(height: 27.5) }
+        .padding(.horizontal, 2)
+        .background { RoundedRectangle(cornerRadius: 8).strokeBorder(AureaColors.fxHairline, lineWidth: 1).frame(height: PanelMetrics.fieldHeight) }
     }
 }
 

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="motion_vector_order">Urutan gambar</string>
+    <string name="motion_vector_order_hint">Atur jalur, garis tepi, dan operator.</string>
+    <string name="motion_vector_trim">Pangkas</string>
+    <string name="motion_vector_repeat">Pengulang</string>
+    <string name="motion_move_up">Pindahkan %1$s ke atas</string>
+    <string name="motion_move_down">Pindahkan %1$s ke bawah</string>
+    <string name="motion_vector_move_unavailable">Lapisan terkunci atau pemindahan akan mengubah animasi.</string>
+    <string name="motion_precomp_controls">Kontrol prakomposisi</string>
+    <string name="motion_precomp_empty">Tidak ada kontrol yang tersedia di sini.</string>
+    <string name="motion_precomp_publish">Tampilkan kontrol</string>
+    <string name="motion_precomp_reset">Kembalikan nilai asli</string>
+    <string name="motion_control_text">Teks</string>
+    <string name="motion_control_unavailable">Kontrol atau lapisan tidak tersedia.</string>
+    <string name="motion_repair_range">Perbaiki rentang dari sini</string>
+    <string name="motion_repair_end">Ketuk bilah peninjauan untuk memilih akhir rentang.</string>
+    <string name="motion_repair_corners">Tandai keempat sudut</string>
+    <string name="motion_repair_seed">Kembali ke bingkai awal untuk mengonfirmasi sudut.</string>
+    <string name="motion_repair_ready">Periksa koreksi pada pratinjau, lalu terapkan untuk mengganti rentang.</string>
+    <string name="motion_export_missing">Media hilang</string>
+    <string name="motion_export_unreadable">Media tidak dapat dibaca</string>
+    <string name="motion_export_source_warning">Beberapa lapisan memiliki media yang hilang atau tidak terbaca. Tinjau sebelum mengekspor.</string>
+    <string name="motion_export_waiting_decode">Menunggu dekoder video…</string>
+    <string name="motion_link_media">Tautkan ulang media</string>
+    <string name="motion_view_layer">Lihat lapisan</string>
+    <string name="motion_release_body">Aurea 1.0.8.1 BETA (2232)\n• Atur ulang jalur, garis tepi, dan operator vektor.\n• Aturan kurva kecepatan yang sama di Android dan iOS.\n• Teks, warna, dan opasitas per instans prakomposisi.\n• Tinjau dan perbaiki sebagian pelacakan planar.\n• Diagnostik media dan status dekoder selama ekspor.</string>
+</resources>

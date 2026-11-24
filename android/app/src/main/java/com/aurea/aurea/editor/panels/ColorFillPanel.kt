@@ -21,6 +21,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.derivedStateOf
@@ -53,6 +56,9 @@ import com.aurea.aurea.R
 import com.aurea.aurea.engine.TrackKey
 import com.aurea.aurea.engine.TrackProperty
 import com.aurea.aurea.ui.ds.KeyframeLook
+import com.aurea.aurea.ui.ds.AureaModalSheet
+import com.aurea.aurea.ui.ds.EmbeddedColorPicker
+import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.ds.drawChecker
 import com.aurea.aurea.ui.ds.rgbaColor
 import com.aurea.aurea.ui.i18n.KeepLtr
@@ -199,6 +205,7 @@ internal fun ColorFillPanel(env: PanelEnv) {
             if (fill != null) store.setShapeFillValue(0, rgba) else store.setTextColor(rgba[0], rgba[1], rgba[2], rgba[3])
             store.endGesture()
         }
+        if (isGroup) store.primary?.let { PrecompControlsButton(store, it) }
         Box(
             Modifier
                 .fillMaxWidth()
@@ -234,6 +241,89 @@ internal fun ColorFillPanel(env: PanelEnv) {
         Spacer(Modifier.height(10.dp))
        }
       }
+    }
+}
+
+private data class PrecompRow(val target: Long, val kind: Int, val flags: Int, val name: String,
+                              val text: String, val rgba: FloatArray) {
+    val exposed get() = flags and 1 != 0
+    val overridden get() = flags and 2 != 0
+    val available get() = flags and 4 != 0
+}
+
+@Composable
+private fun PrecompControlsButton(store: EditorStore, group: Long) {
+    var open by remember(group) { mutableStateOf(false) }
+    TextButton(onClick = { open = true }, modifier = Modifier.testTag("precomp.controls")) {
+        Text(stringResource(R.string.motion_precomp_controls))
+    }
+    if (!open) return
+    var setup by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<PrecompRow?>(null) }
+    var draftText by remember { mutableStateOf("") }
+    var draftColor by remember { mutableStateOf(floatArrayOf(1f, 1f, 1f, 1f)) }
+    val rows = remember(group, store.sceneSettingsRevision) {
+        store.precompControls(group).asList().chunked(9).mapNotNull { fields ->
+            if (fields.size != 9) return@mapNotNull null
+            PrecompRow(fields[0].toLongOrNull() ?: return@mapNotNull null, fields[1].toInt(), fields[2].toInt(),
+                fields[3], fields[4], FloatArray(4) { fields[5 + it].toFloat() })
+        }
+    }
+    fun edit(row: PrecompRow, operation: Int, text: String = row.text, rgba: FloatArray = row.rgba): Boolean {
+        val ok = store.editPrecompControl(group, row.target, row.kind, operation, text, rgba)
+        error = !ok
+        return ok
+    }
+    AureaModalSheet(onDismiss = { open = false }) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(stringResource(R.string.motion_precomp_controls), style = AureaType.Base)
+            if (error) KitHint(stringResource(R.string.motion_control_unavailable))
+            val active = editing
+            if (active != null) {
+                when (active.kind) {
+                    0 -> OutlinedTextField(draftText, { draftText = it }, Modifier.fillMaxWidth(),
+                        label = { Text(stringResource(R.string.motion_control_text)) })
+                    1 -> EmbeddedColorPicker(draftColor, { draftColor = it }, Modifier.fillMaxWidth().height(180.dp))
+                    2 -> {
+                        Text("${(draftColor[0] * 100).roundToInt()}%")
+                        Slider(draftColor[0], { draftColor = floatArrayOf(it, 0f, 0f, 0f) })
+                    }
+                }
+                Row {
+                    TextButton(onClick = { editing = null }) { Text(stringResource(R.string.editor_cancelar)) }
+                    TextButton(onClick = { if (edit(active, 2, draftText, draftColor)) editing = null }) {
+                        Text(stringResource(R.string.common_apply))
+                    }
+                }
+            } else {
+                TextButton(onClick = { setup = !setup }) {
+                    Text(stringResource(if (setup) R.string.panel_fechar else R.string.motion_precomp_publish))
+                }
+                val shown = if (setup) rows else rows.filter { it.exposed }
+                if (shown.isEmpty()) KitHint(stringResource(R.string.motion_precomp_empty))
+                shown.forEach { row ->
+                    val kind = stringResource(when (row.kind) {
+                        0 -> R.string.motion_control_text
+                        1 -> R.string.panel_cor
+                        else -> R.string.panel_opacidade
+                    })
+                    val label = "${row.name.ifBlank { stringResource(R.string.motion_control_unavailable) }} · $kind"
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = {
+                            if (setup) edit(row, if (row.exposed) 1 else 0)
+                            else { editing = row; draftText = row.text; draftColor = row.rgba.copyOf() }
+                        }, enabled = row.available || (setup && row.exposed), modifier = Modifier.weight(1f)) {
+                            Text(if (setup && row.exposed) "✓ $label" else label)
+                        }
+                        if (!setup && row.overridden) TextButton(onClick = { edit(row, 3) }) {
+                            Text(stringResource(R.string.motion_precomp_reset))
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

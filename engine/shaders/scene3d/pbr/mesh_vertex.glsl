@@ -94,7 +94,7 @@ void main() {
     //    um quadrilátero de 0,6 × largura, com meia largura a mais nas pontas
     //    (cantos fechados), puxado um pouco para a câmera (fica por cima das
     //    faces da própria aresta; atrás de outra face continua escondido).
-    if (u.alpha.z < -3.5 && clip.w > 1e-6) {
+    if (u.alpha.z == -4.0 && clip.w > 1e-6) {
         vec2 ndcW = max(u.mr.xy, vec2(1e-7));
         if (a_uv1.y > 0.5) {
             vec4 other = u.viewProj * (model * vec4(a_normal, 1.0));

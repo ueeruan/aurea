@@ -129,7 +129,7 @@ private func pv2Texts(_ any: Any?) -> [String: String] {
     return out
 }
 
-private func pv2Places(_ any: Any?) -> Set<String> { Set((any as? [String]) ?? []) }
+private func pv2Places(_ value: Any?) -> Set<String> { Set((value as? [String]) ?? []) }
 
 private func pv2Control(_ c: [String: Any]) -> PluginV2Control {
     PluginV2Control(
@@ -627,12 +627,12 @@ private struct PluginNodeView: View {
     let busy: Bool
     let parentEnabled: Bool
     let tag: String
-    @State private var open: Bool?
+    @State private var expanded: Bool?
     @State private var tab = 0
 
     private var disabled: Set<String> { Set(state["disabled"] as? [String] ?? []) }
     private var enabled: Bool { parentEnabled && !busy && !disabled.contains(control.id) }
-    private var isOpen: Bool { open ?? !control.collapsed }
+    private var isOpen: Bool { expanded ?? !control.collapsed }
 
     private func labelOf(_ c: PluginV2Control) -> String {
         let override = (state["labels"] as? [String: Any])?[c.id] as? String
@@ -670,7 +670,7 @@ private struct PluginNodeView: View {
             .accessibilityElement(children: .contain)
         case "section":
             VStack(alignment: .leading, spacing: 0) {
-                Button { open = !isOpen } label: {
+                Button { expanded = !isOpen } label: {
                     HStack {
                         Text(labelOf(control)).font(.aurea(size: 14, weight: .semibold))
                         Spacer()
@@ -758,13 +758,12 @@ private struct PluginControlView: View {
             let shown = live ?? stored
             VStack(spacing: 4) {
                 header(pv2Number(shown, c.step) + (c.unit.isEmpty ? "" : " \(c.unit)"))
-                Slider(value: Binding(get: { shown }, set: { live = $0 }), in: c.min...max(c.max, c.min + 0.0001),
-                       step: c.step > 0 ? c.step : (c.max - c.min) / 1000,
-                       onEditingChanged: { editing in
-                           if !editing, let v = live { runtime.event(pluginId, c.id, "change", v); live = nil }
-                       })
-                .tint(AureaColors.accent)
-                .accessibilityLabel(label)
+                // 1.0.8: o slider é a régua de faixa fechada (par do `AureaSlider` do PluginUi.kt).
+                AureaSlider(value: Float(shown), min: Float(c.min), max: Float(max(c.max, c.min + 0.0001)),
+                            origin: Float(c.min), step: Float(c.step), enabled: enabled,
+                            accessibilityLabel: label, accessibilityValue: pv2Number(shown, c.step),
+                            onBegin: {}, onValue: { live = Double($0) },
+                            onEnd: { if let v = live { runtime.event(pluginId, c.id, "change", v); live = nil } })
             }
         case "ruler":
             let stored = (values[c.id] as? NSNumber)?.doubleValue ?? 0
@@ -905,6 +904,7 @@ private struct PluginControlView: View {
 
 /// O painel aberto no editor, por cima da zona inferior, na moldura comum (EditorView).
 struct PluginEditorPanelHost: View {
+    var inScene = false
     @ObservedObject private var runtime = PluginRuntime.shared
 
     var body: some View {
@@ -912,8 +912,8 @@ struct PluginEditorPanelHost: View {
             PluginOverlays()
             if let open = runtime.editorPanel,
                let plugin = runtime.active.first(where: { $0.id == open.plugin }),
-               let panel = plugin.panels.first(where: { $0.id == open.panel }) {
-                if panel.placement.contains("editor.fullscreen") && !panel.placement.contains("editor.panel") {
+               let panel = plugin.panels.first(where: { $0.id == open.panel && visible($0) }) {
+                if !inScene && panel.placement.contains("editor.fullscreen") && !panel.placement.contains("editor.panel") {
                     PluginFullscreenPanel(plugin: plugin, panel: panel)
                 } else {
                 PanelFrame(rail: PanelRail(onBack: { runtime.editorPanel = nil }, supportsAnimation: false)) {
@@ -933,10 +933,64 @@ struct PluginEditorPanelHost: View {
                 }
             }
         }
+        .onChange(of: inScene) { _ in
+            guard let open = runtime.editorPanel, let plugin = runtime.plugin(open.plugin),
+                  let panel = plugin.panels.first(where: { $0.id == open.panel }), !visible(panel) else { return }
+            runtime.editorPanel = nil
+        }
         // Quinze segundos de editor de pé: esta abertura não foi uma queda (modo seguro).
         .task {
             try? await Task.sleep(nanoseconds: 15_000_000_000)
             if !Task.isCancelled { runtime.markHealthy() }
+        }
+    }
+
+    private func visible(_ panel: PluginV2Panel) -> Bool {
+        inScene ? panel.placement.contains("scene.panel")
+            : panel.placement.contains("editor.panel") || panel.placement.contains("editor.fullscreen")
+    }
+}
+
+@MainActor
+struct ScenePluginMenuItems: View {
+    @EnvironmentObject private var model: AureaModel
+    @ObservedObject private var runtime = PluginRuntime.shared
+    var onShader: (UInt32) -> Void
+
+    private var hasLayer: Bool { model.selection.count == 1 && model.selectedLayer != nil }
+    private var canApplyShader: Bool {
+        guard hasLayer, let layer = model.selectedLayer, !layer.locked else { return false }
+        return [1, 2, 4, 5, 7, 10, 11, 12].contains(layer.kind)
+    }
+
+    var body: some View {
+        Button(AureaText.t("plug_install")) {
+            DocumentImportPicker.present(types: [UTType(filenameExtension: "aureaplugin") ?? .data, .zip, .data]) { urls in
+                if let url = urls?.first { PluginRuntime.shared.beginInstall(url) }
+            }
+        }.disabled(model.importingMedia).accessibilityIdentifier("scene.plugins.install")
+
+        ForEach(runtime.active) { plugin in
+            let actions = plugin.actions.filter { $0.placement.contains("scene.menu") }
+            let linked = Set(actions.map(\.panel))
+            let enabled = !runtime.busy.contains(plugin.id)
+            ForEach(plugin.panels.filter { $0.placement.contains("scene.panel") && !linked.contains($0.id) }, id: \.id) { panel in
+                Button(pv2Pick(panel.title, runtime.locale)) {
+                    if model.status.playing != 0 { model.playPause() }
+                    runtime.openPanel(plugin.id, panel.id)
+                }.disabled(!enabled).accessibilityIdentifier("scene.plugin.panel.\(plugin.id).\(panel.id)")
+            }
+            ForEach(actions, id: \.id) { action in
+                Button(pv2Pick(action.title, runtime.locale)) {
+                    if model.status.playing != 0 { model.playPause() }
+                    runtime.runAction(plugin.id, action)
+                }.disabled(!enabled || (action.needsLayer && !hasLayer))
+                 .accessibilityIdentifier("scene.plugin.action.\(plugin.id).\(action.id)")
+            }
+            if let shader = model.plugins.first(where: { $0.id == plugin.id && $0.scene3d }) {
+                Button(pv2Pick(shader.names, runtime.locale)) { onShader(shader.effectTypeId) }
+                    .disabled(!canApplyShader).accessibilityIdentifier("scene.plugin.shader.\(plugin.id)")
+            }
         }
     }
 }
@@ -1230,13 +1284,12 @@ struct GradientParamEditor: View {
                 }
                 HStack(spacing: 8) {
                     Text(AureaText.t("plugv3_gradient_position")).font(.aurea(size: 13))
-                    Slider(value: Binding(get: { Double(stops[min(selected, count - 1) * 5]) }, set: { move(selected, Float($0)) }), in: 0...1, onEditingChanged: { editing in
-                        gesturing = editing
-                        if !editing { commit() }
-                    })
-                    .tint(AureaColors.accent)
-                    .disabled(locked)
-                    .accessibilityLabel(AureaText.t("plugv3_gradient_position"))
+                    // 1.0.8: a posição da parada é a régua de faixa fechada (par do GradientParamEditor.kt).
+                    AureaSlider(value: stops[min(selected, count - 1) * 5], min: 0, max: 1, origin: 0, step: 0, enabled: !locked,
+                                accessibilityLabel: AureaText.t("plugv3_gradient_position"),
+                                accessibilityValue: "\(Int((stops[min(selected, count - 1) * 5] * 100).rounded())) %",
+                                onBegin: { gesturing = true }, onValue: { move(selected, $0) },
+                                onEnd: { gesturing = false; commit() })
                     Text("\(Int((stops[min(selected, count - 1) * 5] * 100).rounded())) %").font(.aurea(size: 13))
                     if count > 2 {
                         Button { removeSelected() } label: {

@@ -58,6 +58,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
+import com.aurea.aurea.editor.drawShapePreset
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -164,6 +165,9 @@ internal fun MaskPanel(env: PanelEnv) {
                             )
                         }
                     }
+                    PanelItemRow(CupertinoGlyph.Crop, stringResource(R.string.mask_use_layer), "mask.useLayer", chevron = true) {
+                        listTab = MT_MATTE
+                    }
                     MaskList(store, state?.masks.orEmpty()) { openTab = MT_SHAPE }
                 }
             }
@@ -235,6 +239,15 @@ internal fun MaskPanel(env: PanelEnv) {
 
 private const val MT_LIST = "list"
 private const val MT_MATTE = "matte"
+
+private val maskShapeOptions = listOf(
+    Triple(3, R.string.sh_shape_triangle, 4),
+    Triple(4, R.string.sh_shape_pentagon, 16),
+    Triple(5, R.string.mask_hexagon, 6),
+    Triple(6, R.string.sh_shape_octagon, 15),
+    Triple(7, R.string.editor_estrela, 11),
+    Triple(8, R.string.sh_shape_diamond, 25),
+)
 private const val MT_SHAPE = "shape"
 private const val MT_MODE = "mode"
 private const val MT_EDGE = "edge"
@@ -271,11 +284,22 @@ private fun MaskList(store: EditorStore, masks: List<EditorStore.MaskPath>, onOp
     }
     if (showTools) {
         Spacer(Modifier.height(4.dp))
-        // As três formas de criar (como as formas prontas e o desenho vetorial da referência).
+        // O motor gera os caminhos no espaço local da camada.
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             ToolTile(stringResource(R.string.panel_desenhar_mao), on = false, icon = { drawMaskPenIcon(it) }) { adding = false; store.startMaskDrawing(); onOpen() }
             ToolTile(stringResource(R.string.panel_retangulo), on = false, icon = { drawMaskShapeIcon(it, oval = false) }) { adding = false; store.addMaskPreset(0); onOpen() }
             ToolTile(stringResource(R.string.panel_elipse), on = false, icon = { drawMaskShapeIcon(it, oval = true) }) { adding = false; store.addMaskPreset(1); onOpen() }
+        }
+    }
+    if (showTools) {
+        maskShapeOptions.chunked(3).forEach { options ->
+            Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                options.forEach { (id, label, preview) ->
+                    ToolTile(stringResource(label), on = false, icon = {
+                        drawShapePreset(preview, it)
+                    }) { adding = false; store.addMaskPreset(id); onOpen() }
+                }
+            }
         }
     }
     if (masks.isEmpty()) {
@@ -481,6 +505,15 @@ private fun TrackMatteTab(store: EditorStore) {
     val rows = store.editingLayers
     val me = rows.firstOrNull { it.id == self }
     val candidates = rows.filter { it.id != self && it.kind != LayerType.Audio.kind && it.kind != LayerType.Camera.kind && it.kind != LayerType.Light.kind }
+    PanelSection(stringResource(R.string.panel_2_qual_camada_recorta), CupertinoGlyph.RectangleStack, "matte.sec.layer", count = candidates.size) {
+        if (candidates.isEmpty()) KitHint(stringResource(R.string.panel_nao_ha_outra_camada_possa_recortar))
+        candidates.forEachIndexed { i, r ->
+            val type = LayerType.of(r.kind)
+            PanelItemRow(type.glyph, r.name.ifEmpty { stringResource(type.labelRes) }, "matte.layer.$i", on = matte == r.id) { store.setTrackMatte(r.id, if (mode == 0) 1 else mode) }
+        }
+        Spacer(Modifier.height(4.dp))
+        KitHint(if (matte != 0L) stringResource(R.string.panel_camada_escolhida_recorta_esta_some_tela) else stringResource(R.string.panel_pela_forma_aparece_onde_outra_camada))
+    }
     PanelSection(stringResource(R.string.panel_1_recortar_pelo), CupertinoGlyph.Crop, "matte.sec.mode") {
         KitHint(stringResource(R.string.pn_mask_target, me?.name.orEmpty()))
         val sourceLayer = rows.firstOrNull { it.id == matte }
@@ -512,15 +545,6 @@ private fun TrackMatteTab(store: EditorStore) {
                 }
             }
         })
-    }
-    PanelSection(stringResource(R.string.panel_2_qual_camada_recorta), CupertinoGlyph.RectangleStack, "matte.sec.layer", count = candidates.size) {
-        if (candidates.isEmpty()) KitHint(stringResource(R.string.panel_nao_ha_outra_camada_possa_recortar))
-        candidates.forEachIndexed { i, r ->
-            val type = LayerType.of(r.kind)
-            PanelItemRow(type.glyph, r.name.ifEmpty { stringResource(type.labelRes) }, "matte.layer.$i", on = matte == r.id) { store.setTrackMatte(r.id, if (mode == 0) 1 else mode) }
-        }
-        Spacer(Modifier.height(4.dp))
-        KitHint(if (matte != 0L) stringResource(R.string.panel_camada_escolhida_recorta_esta_some_tela) else stringResource(R.string.panel_pela_forma_aparece_onde_outra_camada))
     }
 }
 

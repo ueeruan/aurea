@@ -45,7 +45,9 @@ inline constexpr u32 kPlaceLayerMenu = 1u << 3;     ///< ⋮ da camada
 inline constexpr u32 kPlaceLayerToolbar = 1u << 4;  ///< botão na barra da camada
 inline constexpr u32 kPlaceAddMenu = 1u << 5;       ///< item no menu de adicionar (formato 3)
 inline constexpr u32 kPlaceFullscreen = 1u << 6;    ///< painel em tela cheia no editor (formato 3)
-inline constexpr u32 kPlaceLast = kPlaceFullscreen;
+inline constexpr u32 kPlaceScenePanel = 1u << 7;    ///< painel de complemento da Cena 3D
+inline constexpr u32 kPlaceSceneMenu = 1u << 8;     ///< ação de complemento da Cena 3D
+inline constexpr u32 kPlaceLast = kPlaceSceneMenu;
 
 // --- Permissões (bits) -------------------------------------------------------------
 inline constexpr u32 kPermNetwork = 1u << 0;

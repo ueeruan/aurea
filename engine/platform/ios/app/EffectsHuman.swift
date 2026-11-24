@@ -78,7 +78,29 @@ private let FxMatrixLabels = [
 /// A TABELA. A ordem da declaração é a ordem do catálogo (não depende do
 /// idioma — ordenar pelo nome traduzido reordenaria a lista ao trocar de
 /// língua).
+private let FxCopyParams = Dictionary(uniqueKeysWithValues: [
+        "fxl_count", "repeat_distribution", "fxl_spacing", "fxl_columns",
+        "fxl_radius", "copies_end_layout", "copies_morph", "fxl_rotation_per_copy",
+        "copies_scale", "copies_scatter_xyz", "copies_scatter_angle", "fxl_seed",
+        "copies_focus", "copies_focus_radius", "copies_focus_scale", "copies_progress",
+        "copies_stagger_width", "copies_color_start", "copies_color_end", "copies_color_mix",
+        "copies_data_toggle", "copies_data_scale",
+    ].enumerated().map { (index, key) in (index, FxParamHuman(label: key)) })
+private let FxCopyKeywords = "replicator repeater array randomize proximity stagger color copies morph layout data repetir duplicar copias dispersar animar"
+private let FxCopyEffectTypes = Set(["aurea.3d.replicator", "aurea.repeat.arrange"].map { fxEffectTypeId($0) })
+func fxIsCopyLayoutEffect(_ type: UInt32) -> Bool { FxCopyEffectTypes.contains(type) }
+
 private let FxTable: [(key: String, effect: FxEffectHuman)] = [
+    ("aurea.3d.replicator", FxEffectHuman(name: "fx_model_repeat", keywords: FxCopyKeywords, params: FxCopyParams)),
+    ("aurea.repeat.arrange", FxEffectHuman(name: "fx_copy_arrange", keywords: FxCopyKeywords, params: FxCopyParams)),
+    ("aurea.3d.toon", FxEffectHuman(name: "fx_model_toon", keywords: "cel toon cartoon anime pintura faixas modelo",
+        params: [0: FxParamHuman(label: "toon_bands")])),
+    ("aurea.transition.ink_bloom", FxEffectHuman(name: "fx_ink_bloom", keywords: "nanquim tinta ink bloom drip splatter spill mancha revelar respingo",
+        principal: [0, 1, 2, 3, 4, 7, 5, 6],
+        params: [0: FxParamHuman(label: "ink_expansion"), 1: FxParamHuman(label: "fxl_mode"),
+                 2: FxParamHuman(label: "fxl_center"), 3: FxParamHuman(label: "ink_drops"),
+                 4: FxParamHuman(label: "ink_fibers"), 5: FxParamHuman(label: "fxl_softness"),
+                 6: FxParamHuman(label: "fxl_seed"), 7: FxParamHuman(label: "ink_color")])),
     ("aurea.transition.radial_wipe_reference", FxEffectHuman(name: "fx_ref_radial_wipe_name",
         keywords: "radial wipe varredura abertura circular horario anti horario both", principal: [0, 1, 2, 3, 4],
         params: [4: FxParamHuman(scale: 1, suffix: "px", decimals: 1)])),
@@ -1730,7 +1752,21 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.generate.particular", FxEffectHuman(
         name: "afx_name_particular",
         keywords: "particulas particles particular emissor emitter neve snow chuva rain fogo fire faiscas sparks fogos fireworks poeira dust bokeh cc rainfall snowfall particle world",
-        principal: [0, 9, 13, 15, 22, 24, 27, 32, 33, 35, 38])),
+        principal: [48, 52, 0, 9, 13, 15, 22, 24, 27, 32, 33, 35, 38],
+        params: [
+            48: FxParamHuman(label: "particular_shape"),
+            52: FxParamHuman(label: "particle_emission"),
+            53: FxParamHuman(label: "particle_path_layer"),
+            54: FxParamHuman(label: "particle_sprite_layer"),
+            55: FxParamHuman(label: "particle_form_x"),
+            56: FxParamHuman(label: "particle_form_y"),
+            57: FxParamHuman(label: "particle_form_z"),
+            58: FxParamHuman(label: "particle_disperse"),
+            59: FxParamHuman(label: "particle_size_curve"),
+            60: FxParamHuman(label: "particle_opacity_curve"),
+            61: FxParamHuman(label: "particle_use_life_gradient"),
+            62: FxParamHuman(label: "particle_life_gradient"),
+        ])),
     // --- 0.4.5: pedidos de usuários. Nomes de produtos de terceiros (Light Wrap
     // dos compositores, Magic Bullet Looks, Ballpoint/Dust dos pacotes de
     // transição) só como palavras de busca, como no pacote CC. Mesmos
@@ -2458,6 +2494,10 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.3d.part_hide", "fx3d_desc_part_hide", [.cena3D], "esconder partes 3d hide parts sumir ocultar visibilidade objeto modelo forma peca")
     put("aurea.3d.part_texture", "fx3d_desc_part_texture", [.cena3D], "trocar textura 3d swap texture imagem image material parte objeto modelo forma galeria")
     put("aurea.3d.explode", "fx3d_desc_explode", [.cena3D], "explosão explosao explodir explode explosion fratura fracture estilhaçar estilhacar shatter pedaços pedacos fragments desintegrar disintegrate montar assemble 3d modelo texto forma")
+    put("aurea.3d.replicator", "fx_model_repeat_desc", [.cena3D])
+    put("aurea.3d.toon", "fx_model_toon_desc", [.cena3D])
+    put("aurea.repeat.arrange", "fx_copy_arrange_desc", FxVisualTargets + [.cena3D])
+    put("aurea.transition.ink_bloom", "fx_ink_bloom_desc", FxVisualTargets + [.cena3D])
     put("aurea.3d.shatter", "fx3d_desc_shatter", FxVisualTargets + [.cena3D], "3d shatter quebrar estilhacar explodir explosao pecas vidro cacos shatter break glass")
     put("aurea.3d.stroke", "fx3d_desc_stroke", FxVisualTargets + [.cena3D], "3d stroke traco linha contorno caminho mascara circulo espiral neon trapcode write on")
     // --- Pacote CC ---
@@ -2822,22 +2862,27 @@ enum FxPluginTexts {
 // `FxParamMathTest` rodam em `verify/check_effects_omega.py` (swiftc no macOS).
 // =============================================================================
 enum FxParamMath {
-    /// Alturas das linhas (pt). 0.3.4 painéis: ~15 % maiores que as da referência
-    /// ("está muito compacto"; eram 51 / 57 / 38 / 43 / 37). Par do `ParamRowMath.kt`.
-    static let ROW_SLIDER: CGFloat = 60
-    static let ROW_RULER: CGFloat = 66
-    static let ROW_SMALL: CGFloat = 46
-    static let ROW_SECTION: CGFloat = 48
+    /// Alturas das linhas (pt). 1.0.8 visual minimalista: mais compactas para sobrar
+    /// espaço (eram 60 / 66 / 46 / 48). O slider virou régua: a linha dele tem a
+    /// altura da régua. Par do `ParamRowMath.kt`.
+    static let ROW_SLIDER: CGFloat = 52
+    static let ROW_RULER: CGFloat = 52
+    static let ROW_SMALL: CGFloat = 40
+    static let ROW_SECTION: CGFloat = 42
     static let ROW_LIST: CGFloat = 44
     /// Folga entre itens da lista e padding da sobreposição (pt).
     static let LIST_GAP: CGFloat = 6.5
-    /// Rótulo e caixa de valor (pt; eram 75 / 56); margem 3 em volta do rótulo.
-    static let LABEL_W: CGFloat = 80
-    static let VALUE_W: CGFloat = 62
+    /// Rótulo e caixa de valor (pt; eram 80 / 62); margem 3 em volta do rótulo.
+    static let LABEL_W: CGFloat = 74
+    static let VALUE_W: CGFloat = 56
     static let LABEL_MARGIN: CGFloat = 3
-    /// Régua: risco a cada 5,5 pt, maior a cada 5 riscos; agulha 1,5 pt.
+    /// Régua: risco a cada 5,5 pt, maior a cada 5 riscos.
     static let TICK_SPACING: CGFloat = 5.5
     static let MAJOR_EVERY = 5
+    /// Faixa de cada borda da régua (fração da largura) onde os riscos somem.
+    static let RULER_FADE_EDGE: CGFloat = 0.22
+    /// Slider-régua: a faixa inteira cabe em até ~120 riscos.
+    static let SLIDER_RULER_TICKS = 120
     /// Arremesso acima de 300 pt/s.
     static let FLING_MIN_PX_S: CGFloat = 300
     /// 1.0.8: régua e slider só tomam o dedo depois do touch slop INTEIRO e com
@@ -2853,6 +2898,34 @@ enum FxParamMath {
     static let SECTION_ARROW_MS = 300
     /// iOS: o touch slop (o `scaledTouchSlop` do Android, ~8 dp).
     static let TOUCH_SLOP: CGFloat = 8
+
+    /// Esmaecimento dos riscos da régua em `x` (largura `width`): 1 no miolo e
+    /// cai suave (smoothstep) até 0 nos `RULER_FADE_EDGE` de cada borda.
+    static func rulerFade(x: CGFloat, width: CGFloat) -> CGFloat {
+        guard width > 0, x.isFinite else { return 0 }
+        let edge = width * RULER_FADE_EDGE
+        let d = Swift.min(x, width - x)
+        if d <= 0 { return 0 }
+        if d >= edge { return 1 }
+        let t = d / edge
+        return t * t * (3 - 2 * t)
+    }
+
+    /// Passo por risco do slider que virou régua (faixa fechada): o `step` do
+    /// parâmetro, mas nunca menor que o "redondo" (1, 2 ou 5 × 10ⁿ) que põe a faixa
+    /// inteira em ~`SLIDER_RULER_TICKS` riscos; continua múltiplo de `step`.
+    /// Ex.: 0–100 % com passo 1 → 1; 0–1 sem passo → 0,01; −180..180 → 5.
+    static func sliderRulerStep(min: Float, max: Float, step: Float) -> Float {
+        let span = abs(Double(max) - Double(min))
+        let base = step > 0 && step.isFinite ? Double(step) : 0
+        guard span > 0, span.isFinite else { return base > 0 ? Float(base) : 1 }
+        let need = span / Double(SLIDER_RULER_TICKS)
+        let p = pow(10, floor(log10(need)))
+        let nice = [1.0, 2.0, 5.0, 10.0].map { $0 * p }.first { $0 >= need * (1 - 1e-9) } ?? 10 * p
+        if base <= 0 { return Float(nice) }
+        if base >= nice { return Float(base) }
+        return Float(base * ceil(nice / base - 1e-9))
+    }
 
     /// Altura da linha pelo controle do motor (`ParamControl`).
     static func rowHeight(_ control: Int, _ type: Int) -> CGFloat {

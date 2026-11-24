@@ -1,5 +1,7 @@
 #include "aurea/media/MediaManager.hpp"
 #include "aurea/media/ImageSequence.hpp"
+#include "aurea/media/SourceWindow.hpp"
+#include "aurea/export/PortableVideoSource.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
 
@@ -318,8 +320,14 @@ VideoSource* MediaManager::source_for(LayerId layer, AssetId assetId, const Asse
     auto ready = readyFn_;
     auto* context = readyCtx_;
     const MediaPriority openPriority = openPriority_.load(std::memory_order_relaxed);
-    pending->worker = std::thread([pending, factory, asset, decodeAsset, proxy, ready, context, openPriority] {
-        pending->decoder = factory->open_video(decodeAsset, openPriority);
+    const bool portable = portableExportSources_ && cpuDecode && !proxy && decodeAsset.kind == AssetKind::Video;
+    pending->worker = std::thread([pending, factory, asset, decodeAsset, proxy, ready, context, openPriority, portable] {
+        if (portable) {
+            pending->decoder = window_video_decoder(open_portable_video_source(decodeAsset.sourcePath.c_str()),
+                source_window_us(decodeAsset.sourcePath));
+            if (pending->decoder) AUREA_LOG_INFO("export: source decoder %s", pending->decoder->info().decoderName);
+        }
+        if (!pending->decoder) pending->decoder = factory->open_video(decodeAsset, openPriority);
         if (proxy) {
             pending->decoder = proxy_decoder(std::move(pending->decoder), proxy);
             if (!pending->decoder) pending->decoder = factory->open_video(asset, openPriority);

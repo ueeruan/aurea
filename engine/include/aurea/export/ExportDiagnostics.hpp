@@ -75,6 +75,12 @@ public:
     void result(i32 code) noexcept {
         std::lock_guard lock(mutex_); if (!state_.ended) { state_.result = code; state_.hasResult = true; }
     }
+    [[nodiscard]] bool waiting_for_decode() const noexcept {
+        std::lock_guard lock(mutex_);
+        const auto& producer = state_.lanes[static_cast<usize>(Lane::Producer)];
+        return !state_.ended && producer.stage == Stage::Decode && producer.since &&
+            monotonic_ns() - producer.since >= 1'500'000'000ull;
+    }
     /// Degrau da escada de encoders (FFmpegExportSink): o que está em uso e os
     /// que falharam antes ("surface:c2.x abrindo | falhas: ..."). ASCII seguro.
     void encoder_path(const char* text) noexcept {

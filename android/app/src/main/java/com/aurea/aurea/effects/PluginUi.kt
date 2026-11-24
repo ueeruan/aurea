@@ -481,12 +481,15 @@ internal fun PluginEditorPanelHost(store: EditorStore, modifier: Modifier = Modi
     val open = PluginRuntime.editorPanel ?: return
     val plugin = store.plugins.firstOrNull { it.id == open.first && it.ok && it.enabled }
     val panel = plugin?.panels?.firstOrNull { it.id == open.second }
-    if (plugin == null || panel == null) {
-        LaunchedEffect(open) { PluginRuntime.closeEditorPanel() }
+    val inScene = store.sceneEditor
+    val visible = panel != null && if (inScene) "scene.panel" in panel.placement
+        else "editor.panel" in panel.placement || "editor.fullscreen" in panel.placement
+    if (plugin == null || panel == null || !visible) {
+        LaunchedEffect(open, inScene) { PluginRuntime.closeEditorPanel() }
         return
     }
     val tag = localeTag()
-    if ("editor.fullscreen" in panel.placement && "editor.panel" !in panel.placement) {
+    if (!inScene && "editor.fullscreen" in panel.placement && "editor.panel" !in panel.placement) {
         PluginFullscreenPanel(plugin, panel, modifier)
         return
     }
@@ -499,6 +502,47 @@ internal fun PluginEditorPanelHost(store: EditorStore, modifier: Modifier = Modi
                         style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W600)))
                 }
                 PluginPanelContent(plugin, panel)
+            }
+        }
+    }
+}
+
+/** Complementos descobertos pelo manifesto, mantendo o host e as permissões do editor. */
+@Composable
+internal fun scenePluginMenuEntries(store: EditorStore, onShader: (Int) -> Unit): List<MenuEntry> {
+    val tag = localeTag()
+    val hasLayer = store.editingSelection.size == 1 && store.primary != null
+    val canApplyShader = hasLayer && store.detail?.let {
+        !it.locked && it.kind in setOf(1, 2, 4, 5, 7, 10, 11, 12)
+    } == true
+    return buildList {
+        for (plugin in store.plugins) {
+            if (!plugin.ok || !plugin.enabled) continue
+            val title = PluginTexts.pick(plugin.names, tag) ?: plugin.id
+            val enabled = PluginRuntime.busy[plugin.id] != true
+            val actions = plugin.actions.filter { "scene.menu" in it.placement }
+            val linked = actions.map { it.panel }.toSet()
+            for (panel in plugin.panels) {
+                if ("scene.panel" !in panel.placement || panel.id in linked) continue
+                add(MenuEntry.Item(PluginTexts.pick(panel.title, tag).orEmpty(), glyph = pluginGlyph(panel.icon),
+                    sublabel = title, enabled = enabled, tag = "scene.plugin.panel.${plugin.id}.${panel.id}") {
+                    if (store.playing) store.pause()
+                    PluginRuntime.openPanel(plugin.id, panel.id)
+                })
+            }
+            for (action in actions) {
+                add(MenuEntry.Item(PluginTexts.pick(action.title, tag).orEmpty(), glyph = pluginGlyph(action.icon),
+                    sublabel = title, enabled = enabled && (!action.needsLayer || hasLayer),
+                    tag = "scene.plugin.action.${plugin.id}.${action.id}") {
+                    if (store.playing) store.pause()
+                    PluginRuntime.runAction(plugin.id, action)
+                })
+            }
+            if (plugin.scene3d && store.catalog.any { it.typeId == plugin.effectTypeId }) {
+                add(MenuEntry.Item(title, glyph = CupertinoGlyph.Cube, sublabel = stringResource(R.string.plug_kind_shader3d),
+                    enabled = canApplyShader, tag = "scene.plugin.shader.${plugin.id}") {
+                    onShader(plugin.effectTypeId)
+                })
             }
         }
     }

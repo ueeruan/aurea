@@ -23,6 +23,50 @@ import org.junit.Test
 class MaskAnimationTest {
     @get:Rule val compose = createComposeRule()
 
+    @Test fun vectorLayerMasksDirectlyAndStarPresetCreatesAnEditablePath() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        lateinit var store: EditorStore
+        compose.setContent {
+            store = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))
+            AureaTheme {
+                Box(Modifier.fillMaxSize()) {
+                    EditorScreen(store)
+                    Box(Modifier.fillMaxSize().background(AureaColors.Surface)) {
+                        MaskPanel(PanelEnv(store, {}, {}, {}, {}, {}, { null }))
+                    }
+                }
+            }
+        }
+        compose.waitUntil(30000) { store.engineReady }
+        compose.runOnIdle { store.newProject(640, 360, 30f, "Vector mask") }
+        compose.waitUntil(15000) { store.project.title == "Vector mask" && !store.projectOperationBusy }
+        compose.runOnIdle { store.addShape(10) }
+        compose.waitUntil(5000) { store.primary != null && store.layers.size == 1 }
+        val target = checkNotNull(store.primary)
+        var source = -1L
+        compose.runOnIdle {
+            source = store.addVectorLayer(3)
+            assertTrue(source >= 0)
+            store.select(target)
+        }
+        compose.waitUntil(5000) { store.primary == target && store.layers.size == 2 }
+        compose.onNodeWithTag("mask.useLayer").performTouchInput { click() }
+        compose.onNodeWithTag("matte.layer.0").performScrollTo().performTouchInput { click() }
+        compose.waitUntil(5000) { store.trackMatte?.getOrNull(0) == source }
+        compose.runOnIdle {
+            assertEquals(2, store.layers.size)
+            assertEquals(1L, store.trackMatte?.getOrNull(1))
+            store.addMaskPreset(7)
+        }
+        compose.waitUntil(5000) { store.masks?.masks?.size == 1 }
+        compose.runOnIdle {
+            val mask = store.masks!!.masks.single()
+            assertTrue(mask.closed)
+            assertEquals(60, mask.points.size)
+            assertEquals(mask.id, store.maskEdit)
+        }
+    }
+
     @Test fun scalarKeysRemainEditableAndOpenTheirOwnCurve() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assertTrue(context.packageName.endsWith(".uitest"))

@@ -374,10 +374,10 @@
     <string name="home_ruanzitwo_ofruanzitwo_tiktok_ruanzitwo">Ruanzitwo  ·  @ofruanzitwo  ·  TikTok @ruanzitwo</string>
     <string name="home_ver_todos">عرض الكل</string>
     <string name="panel_1_caminho">1 مسار</string>
-    <string name="panel_1_recortar_pelo">1. مصدر القص</string>
+    <string name="panel_1_recortar_pelo">مصدر القص</string>
     <string name="panel_1_to">, 1 to </string>
     <string name="panel_2_modo">2 الوضع</string>
-    <string name="panel_2_qual_camada_recorta">2. الطبقة التي تقصّ</string>
+    <string name="panel_2_qual_camada_recorta">الطبقة التي تقصّ</string>
     <string name="panel_2_to">, 2 to </string>
     <string name="panel_3_borda">3 الحدود</string>
     <string name="panel_4_rastrear">4 التتبّع</string>
@@ -2566,7 +2566,7 @@
     <string name="app_export_gallery_failed">تم إنشاء الفيديو، لكن تعذّر حفظه في المعرض.</string>
     <string name="app_saved_to_gallery">تم الحفظ في المعرض، في ⁨Movies › Aurea⁩.</string>
     <string name="app_saved_to_path">تم الحفظ في ⁨%1$s⁩.</string>
-    <string name="app_export_software_encoder">لا يحتوي هذا الجهاز على مُرمِّز عتادي %1$s لهذه الدقة: جارٍ التصدير برمجيًا (أبطأ، بالجودة نفسها).</string>
+    <string name="app_export_software_encoder">جارٍ ترميز %1$s برمجيًا. قد يستغرق التصدير وقتًا أطول.</string>
     <string name="app_export_thermal">الجهاز ساخن: تم إبطاء التصدير حتى يبرد. لن تتغير الجودة.</string>
     <string name="app_export_no_hevc">لا يمكن لهذا الجهاز التصدير بصيغة HEVC بهذه الدقة. جرّب H.264.</string>
     <string name="app_export_unsupported_res">لا يمكن لهذا الجهاز التصدير بهذه الدقة.</string>
@@ -3156,7 +3156,7 @@
     <string name="rig_auto">تلقائي</string>
     <string name="rig_done">تم</string>
     <string name="rig_hint_setup">اسحب المفاصل إلى الجسم · اضغط على مكان فارغ لإضافة مفصل</string>
-    <string name="rig_hint_animate">اسحب يدًا أو قدمًا أو الرأس (يضيف إطارًا مفتاحيًا)</string>
+    <string name="rig_hint_animate">اسحب الطرف لثني السلسلة وإضافة إطار مفتاحي</string>
     <!-- Quarentena de projeto (ProjectGuard) -->
     <string name="quarantine_title">مشروع به مشكلة</string>
     <string name="quarantine_body_open">أُغلق Aurea أثناء فتح «⁨%1$s⁩». ولتجنّب إغلاقه مرة أخرى، لم يُفتح المشروع تلقائيًا. يحاول زر «استعادة» فتحه من جديد؛ وإذا أُغلق التطبيق مرة أخرى، فأرسل تشخيصات الإغلاق من الإعدادات.</string>
@@ -5849,4 +5849,7 @@
     <string name="fxo_bangs">الغرة</string>
     <string name="fxo_side_locks">الخصلات</string>
     <string name="fxo_glasses">النظارة</string>
+    <string name="editor_parent_link_failed">تعذر ربط الطبقات بالطبقة الأصل المختارة.</string>
+    <string name="mask_use_layer">استخدام طبقة كقناع</string>
+    <string name="mask_hexagon">سداسي الأضلاع</string>
 </resources>

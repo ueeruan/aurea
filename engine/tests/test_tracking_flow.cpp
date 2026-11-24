@@ -1083,6 +1083,61 @@ Vec2 shown_in_comp(Rig& rig, const Layer& v, i64 frame, Vec2 videoPx) {
 constexpr f64 kScreenPerVideo = 0.472;   // emulador 1080×2340: px de tela por px do vídeo
 } // namespace
 
+AUREA_TEST(TrackingFlow, PlanarRepairKeepsOutsideFramesAndConfirmsAtomically) {
+    FlowScene scene;
+    scene.width = 320; scene.height = 240; scene.frames = 24;
+    scene.camera = [](f64 t) { return Cam2D{14.0 * t, 7.0 * t, .025 * t, 1.0}; };
+    FlowFactory factory(scene);
+    Rig rig(factory, scene.width, scene.height, 30);
+    AUREA_CHECK(rig.ok);
+    if (!rig.ok) return;
+    const std::array<Vec2, 4> world{{{35, 30}, {260, 37}, {275, 197}, {40, 211}}};
+    const auto seeds = [&](i64 frame, f32 error) {
+        std::array<f32, 8> result{};
+        for (u32 i = 0; i < world.size(); ++i) {
+            const auto p = scene.world_to_display(static_cast<f64>(frame) / 30., world[i]);
+            result[i * 2] = p.x + error;
+            result[i * 2 + 1] = p.y;
+        }
+        return result;
+    };
+    auto points = seeds(0, 5.f);
+    AUREA_CHECK(rig.e.start_motion_track(rig.video, 3, 0, false, points.data(), 4));
+    const auto base = rig.wait_motion();
+    AUREA_CHECK_EQ(base.state, 2u);
+    const auto original = rig.layer(rig.video)->motionTrack;
+    if (!original) return;
+    points = seeds(6, 0.f);
+    const auto repair = [&] {
+        return rig.e.start_motion_track(rig.video, 3, 0, false, points.data(), 4, 12, 48, .65f, false, 6, 16);
+    };
+    AUREA_CHECK(repair());
+    AUREA_CHECK_EQ(rig.wait_motion().state, 5u);
+    AUREA_CHECK(rig.layer(rig.video)->motionTrack == original);
+    AUREA_CHECK(rig.e.finish_motion_repair(false));
+    AUREA_CHECK(rig.layer(rig.video)->motionTrack == original);
+    AUREA_CHECK(repair());
+    AUREA_CHECK_EQ(rig.wait_motion().state, 5u);
+    AUREA_CHECK(rig.e.finish_motion_repair(true));
+    const auto merged = rig.layer(rig.video)->motionTrack;
+    AUREA_CHECK(merged && merged != original);
+    if (!merged || merged == original) return;
+    AUREA_CHECK(merged->localFrames == original->localFrames);
+    for (usize i = 0; i < merged->points.size(); ++i) {
+        const i64 frame = merged->localFrames[i];
+        if (frame < 6 || frame > 16) {
+            AUREA_CHECK(merged->points[i] == original->points[i]);
+            AUREA_CHECK(merged->path[i].path.m == original->path[i].path.m);
+        } else if (merged->path[i].valid) {
+            for (u32 k = 0; k < world.size(); ++k) {
+                const auto expected = scene.world_to_display(static_cast<f64>(frame) / 30., world[k]);
+                AUREA_CHECK((merged->points[i][k] - expected).length() < 2.5f);
+            }
+        }
+    }
+    AUREA_CHECK_NEAR(merged->points[6][0].x, points[0], .01);
+}
+
 AUREA_TEST(TrackingFlow, SmallTargetOnBusyBackgroundPortraitInLandscape) {
     FlowFactory factory(ring_scene());
     Rig rig(factory, 1920, 1080, 30);

@@ -931,10 +931,11 @@ final class AureaModel: ObservableObject {
     @Published var contentRevision = 0
 
     /// "Mão livre": camada de desenho nova, escolhida, e o editor de desenho.
-    func startDrawing() {
+    func startDrawing(inScene: Bool = false) {
         if status.playing != 0 { playPause() }
         let id = engine.addDrawingLayer()
         guard id >= 0 else { toast = AureaText.t("ios_drawing_add_failed"); return }
+        if inScene { _ = engine.enableLayer3D(id) }
         vectorGroup = 0; vectorPath = 0
         selection = [id]; engine.selectLayers([NSNumber(value: id)]); showAddLayer = false
         syncAfterEdit()
@@ -962,6 +963,29 @@ final class AureaModel: ObservableObject {
         if continuing { refreshSelectedLayer(); invalidatePreview() } else { refreshModel(force: true) }
         return r
     }
+
+    /// Arrasto no palco de pontos (kind 0) ou de uma alça (1 entrada, 2 saída) do contorno escolhido,
+    /// de `from` a `to` em px da composição: o motor leva os dois ao plano da camada (3D: raio × plano)
+    /// e aplica a regra do Editar pontos. Par do `dragVectorPathOnStage` do EditorStore.kt.
+    @discardableResult
+    func dragVectorPathOnStage(kind: UInt32, points: [Int], from: SIMD2<Float>, to: SIMD2<Float>, locks: UInt32, continuing: Bool) -> Int32 {
+        guard let id = primarySelection else { return -1 }
+        if status.playing != 0 { playPause() }
+        let r = engine.dragVectorPathOnStage(id, group: vectorGroup, path: vectorPath, kind: kind, points: points.map { NSNumber(value: $0) },
+                                             fromX: from.x, fromY: from.y, toX: to.x, toY: to.y, locks: locks, continuing: continuing)
+        contentRevision &+= 1
+        if continuing { refreshSelectedLayer(); invalidatePreview() } else { refreshModel(force: true) }
+        return r
+    }
+
+    /// Pontos do contorno escolhido no palco (Engine::vector_path_stage_points).
+    func vectorStagePoints() -> [Float] {
+        guard let id = primarySelection else { return [] }
+        return engine.vectorPathStagePoints(id, group: vectorGroup, path: vectorPath).map(\.floatValue)
+    }
+
+    /// Camada 3D de lado para a câmera: o dedo não acha o plano (aviso uma vez por arrasto).
+    func warnVectorPlaneEdgeOn() { toast = AureaText.t("om_pts_3d_edge") }
 
     /// Troca o contorno do Editar pontos (mesmo grupo).
     func chooseContour(_ index: Int) {
@@ -3330,9 +3354,11 @@ final class AureaModel: ObservableObject {
         guard let id = primarySelection else { masks = []; return }
         if panel == .vector {
             let data = engine.vectorPath(id, group: vectorGroup, path: vectorPath).map(\.floatValue)
-            guard data.count >= 9, data[8] >= 0, Int(data[8]) * 6 + 9 == data.count else { masks = []; return }
-            maskAffine = Array(data.prefix(6)); maskPerspective = [0, 0, 1]
-            masks = [MaskItem(id: 0, operation: 0, inverted: false, feather: 0, expansion: 0, opacity: 1, closed: data[7] > 0.5, keyed: Int(data[6]) & 4 != 0, points: Array(data.dropFirst(9)))]
+            // Bit3 (camada 3D): a linha de perspectiva vem nos 3 últimos floats.
+            let persp = data.count >= 12 && Int(data[6]) & 8 != 0
+            guard data.count >= 9, data[8] >= 0, Int(data[8]) * 6 + 9 + (persp ? 3 : 0) == data.count else { masks = []; return }
+            maskAffine = Array(data.prefix(6)); maskPerspective = persp ? Array(data.suffix(3)) : [0, 0, 1]
+            masks = [MaskItem(id: 0, operation: 0, inverted: false, feather: 0, expansion: 0, opacity: 1, closed: data[7] > 0.5, keyed: Int(data[6]) & 4 != 0, points: Array(data.dropFirst(9).dropLast(persp ? 3 : 0)))]
             selectedMask = 0
             return
         }
@@ -3385,14 +3411,9 @@ final class AureaModel: ObservableObject {
         guard let id = primarySelection else { return }
         let source = (detail["sourceSize"] as? [NSNumber] ?? []).map(\.floatValue)
         let w = max(1, source.first ?? Float(compositionWidth)), h = max(1, source.count > 1 ? source[1] : Float(compositionHeight))
-        let cx = w / 2, cy = h / 2, rx = w * 0.35, ry = h * 0.35
-        let points: [Float]
-        if shape == 0 { points = [cx-rx, cy-ry, 0,0,0,0, cx+rx, cy-ry, 0,0,0,0, cx+rx, cy+ry, 0,0,0,0, cx-rx, cy+ry, 0,0,0,0] }
-        else if shape == 1 {
-            let kx = rx * 0.5523, ky = ry * 0.5523
-            points = [cx,cy-ry,-kx,0,kx,0, cx+rx,cy,0,-ky,0,ky, cx,cy+ry,kx,0,-kx,0, cx-rx,cy,0,ky,0,-ky]
-        } else { points = [] }
-        let mask = engine.addMask(id, points: points.map { NSNumber(value: $0) }, closed: shape != 2)
+        let mask = shape == 2
+            ? engine.addMask(id, points: [], closed: false)
+            : engine.addMaskPreset(id, preset: UInt32(shape), width: w, height: h)
         guard mask >= 0 else { toast = AureaText.t("ios_mask_add_failed"); return }
         refreshModel(force: true); refreshMasks(); selectedMask = UInt32(mask); maskDrawing = shape == 2; selectedMaskPoint = nil
     }
@@ -4683,6 +4704,7 @@ final class AureaModel: ObservableObject {
     private var motionRectanglePick = false
     private var motionModelOverride: UInt32?
     private var motionConfirmPick = false
+    private var motionRepair: ClosedRange<Int64>?
     private var motionNeeded: Int { motionTool == 0 ? 1 : motionTool == 1 || motionRectanglePick ? 2 : 4 }
     var motionPointsReady: Bool { pointPick != nil && motionPicked == motionNeeded }
 
@@ -4694,6 +4716,7 @@ final class AureaModel: ObservableObject {
         guard !(2...3).contains(tool) || requireHyperSubscription() else { return }
         engine.run { $0.pause() }
         motionAutoApply = -1
+        motionRepair = nil
         motionRectanglePick = rectangle && tool == 2
         motionConfirmPick = confirm
         motionModelOverride = modelOverride
@@ -4702,7 +4725,17 @@ final class AureaModel: ObservableObject {
         pointPick = false
         toast = AureaText.t(motionRectanglePick ? "trk_surface_hint" : tool >= 2 ? "ios_motion_tap_corners" : "ios_motion_tap_detail")
     }
-    func cancelMotionPick() { pointPick = nil; motionSeeds = []; motionPicked = 0; motionAutoApply = -1; motionRectanglePick = false; motionConfirmPick = false }
+    func cancelMotionPick() { pointPick = nil; motionSeeds = []; motionPicked = 0; motionAutoApply = -1; motionRectanglePick = false; motionConfirmPick = false; motionRepair = nil }
+    func beginMotionRepair(first: Int64, last: Int64) {
+        guard first < last, (motionStatus["state"] as? NSNumber)?.intValue == 2,
+              let tool = (motionStatus["tool"] as? NSNumber)?.uint32Value, (2...3).contains(tool) else { return }
+        beginMotionPick(tool, confirm: true)
+        if pointPick != nil { motionRepair = first...last; seek(toFrame: first) }
+    }
+    func finishMotionRepair(_ accept: Bool) {
+        if !engine.finishMotionRepair(accept) { toast = AureaText.t("track_start_failed") }
+        refreshMotionStatus()
+    }
     /// -1 nada; 0 cria o Nulo; 3 estabiliza pelo ponto — quando a análise do menu termina.
     private var motionAutoApply = -1
     private var motionPoll: Task<Void, Never>?
@@ -4735,6 +4768,10 @@ final class AureaModel: ObservableObject {
     }
     func confirmMotionPoints() {
         guard motionPointsReady, motionSource == primarySelection else { return }
+        if let first = motionRepair?.lowerBound, first != status.playhead {
+            toast = AureaText.t("motion_repair_seed")
+            return
+        }
         if motionRectanglePick {
             let left = min(motionSeeds[0].floatValue, motionSeeds[2].floatValue)
             let right = max(motionSeeds[0].floatValue, motionSeeds[2].floatValue)
@@ -4750,8 +4787,16 @@ final class AureaModel: ObservableObject {
         let solveModel = motionModelOverride ?? (motionRectanglePick ? 0 : motionModel)
         motionRectanglePick = false
         motionModelOverride = nil
-        if !engine.startMotionTrack(id, tool: motionTool, model: solveModel, backward: motionBackward, points: motionSeeds,
-                                    feature: motionFeature, search: motionSearch, confidence: motionConfidence, validateBack: motionValidateBack) {
+        let range = motionRepair
+        motionRepair = nil
+        let started: Bool
+        if let range {
+            started = engine.startMotionRepair(id, tool: motionTool, first: range.lowerBound, last: range.upperBound, points: motionSeeds)
+        } else {
+            started = engine.startMotionTrack(id, tool: motionTool, model: solveModel, backward: motionBackward, points: motionSeeds,
+                feature: motionFeature, search: motionSearch, confidence: motionConfidence, validateBack: motionValidateBack)
+        }
+        if !started {
             motionAutoApply = -1
             toast = AureaText.t("track_start_failed")
             refreshMotionStatus()
@@ -4930,6 +4975,16 @@ final class AureaModel: ObservableObject {
     struct AeImportItem: Identifiable {
         let id = UUID(); let kind: String; let name: String; let reason: String; let line: Int
         var reasonKey = ""; var reasonArgs: [String] = []
+        var composition: Int64 = 0, layer: Int64 = 0, layerName = ""
+    }
+    func focusReportedLayer(_ comp: Int64, layer: Int64) -> Bool {
+        let route = engine.reportedLayerRoute(comp, layer: layer).map(\.int64Value)
+        guard !route.isEmpty else { toast = AureaText.t("motion_control_unavailable"); return false }
+        for group in route.dropLast() { openGroup(group) }
+        guard (composition[AureaCompositionId] as? NSNumber)?.int64Value == comp,
+              layers.contains(where: { $0.id == layer }) else { return false }
+        select(layerId: layer)
+        return true
     }
     struct AeImportResult: Identifiable {
         let id = UUID()
@@ -5133,6 +5188,9 @@ final class AureaModel: ObservableObject {
                                         reason: $0["reason"] as? String ?? "", line: ($0["line"] as? NSNumber)?.intValue ?? 0)
                 item.reasonKey = $0["reasonKey"] as? String ?? ""
                 item.reasonArgs = $0["reasonArgs"] as? [String] ?? []
+                item.composition = Int64(bitPattern: UInt64($0["composition"] as? String ?? "") ?? 0)
+                item.layer = Int64(bitPattern: UInt64($0["layer"] as? String ?? "") ?? 0)
+                item.layerName = $0["layerName"] as? String ?? ""
                 return item
             }
         }
@@ -8093,8 +8151,7 @@ final class AureaModel: ObservableObject {
     /// Liga (ou solta, `parent` = 0) o pai. O motor compensa: a camada fica
     /// onde está na tela e passa a seguir o pai dali em diante.
     func setParent(_ layerId: Int64, parent: Int64) {
-        engine.run { $0.setLayer(layerId, parent: parent) }
-        refreshModel(force: true)
+        setParentMany([layerId], parent: parent)
     }
 
     // --- Prender a um osso (0.5.2) — par do EditorStore.kt ----------------------
@@ -8113,20 +8170,16 @@ final class AureaModel: ObservableObject {
 
     /// Vários filhos para o mesmo pai (0 = soltar), num passo de desfazer.
     func setParentMany(_ ids: [Int64], parent: Int64) {
-        let children = ids.filter { id in
-            id != parent && (parent == 0 || parentCandidatesForAll([id]).contains { $0.id == parent })
-        }
+        let children = ids.filter { $0 != parent }
         guard started, !children.isEmpty else { return }
-        // Uma camada só: o mesmo caminho do ⛓ da barra da camada (par do `setParent` do Android).
-        if ids.count == 1 { setParent(children[0], parent: parent); return }
         // Bug #9c: o motor liga todas de uma vez (Engine::set_parent_many) — um passo
         // de desfazer, compensação de cada filho e as bloqueadas de fora (par do Android).
         let changed = Int(engine.parentLayers(children.map { NSNumber(value: $0) }, to: parent))
         refreshModel(force: true)
         if changed < 0 {
-            if layers.contains(where: { children.contains($0.id) && $0.locked }) {
+            if editingLayers.contains(where: { children.contains($0.id) && $0.locked }) {
                 toast = AureaText.t("editor_camada_bloqueada_desbloqueie_editar")
-            }
+            } else { toast = AureaText.t("editor_parent_link_failed") }
             return
         }
         if parent != 0 { toast = AureaText.t("msg_camada_s_seguindo_o_pai_escolhido", String(changed)) }
@@ -8136,11 +8189,12 @@ final class AureaModel: ObservableObject {
     /// centro das camadas (3D se alguma é 3D) e faz dele o pai de todas — nada
     /// sai do lugar na tela. Um passo de desfazer; o nulo novo fica selecionado.
     func parentSelectionToNewNull() {
-        parentSelectionToNewNull(Array(selection))
+        parentSelectionToNewNull(Array(editingSelection))
     }
 
     func parentSelectionToNewNull(_ ids: [Int64]) {
         guard !ids.isEmpty else { return }
+        let group = groupInnerSelection?.group
         let numbers: [NSNumber] = ids.map { NSNumber(value: $0) }
         let created: Int64 = engine.parent(toNewNull: numbers)
         if created < 0 {
@@ -8148,39 +8202,31 @@ final class AureaModel: ObservableObject {
             return
         }
         refreshModel(force: true)
-        select(layerId: created)
-        var linked: Int = 0
-        for id in ids {
-            let parent: Int64 = (engine.layerDetail(id)?["parentId"] as? NSNumber)?.int64Value ?? 0
-            if parent == created { linked += 1 }
-        }
+        if let group { selectGroupInner(group: group, layer: created) }
+        else { select(layerId: created) }
+        let rows = editingLayers
+        let linked = rows.filter { row in
+            let index = Int(row.parentIndex)
+            return ids.contains(row.id) && rows.indices.contains(index) && rows[index].id == created
+        }.count
         toast = AureaText.t("msg_camadas_seguindo_novo_nulo", String(linked))
     }
 
     /// Pais possíveis para TODAS as escolhidas: nenhuma delas nem descendente.
     func parentCandidatesForAll(_ ids: [Int64]) -> [LayerItem] {
         guard !ids.isEmpty else { return [] }
-        var allowed: Set<Int64>?
-        for id in ids {
-            let candidates = Set(parentCandidates(Set([id])).map(\.id))
-            allowed = allowed.map { $0.intersection(candidates) } ?? candidates
-        }
-        let ok = (allowed ?? []).subtracting(ids)
-        return layers.filter { ok.contains($0.id) }
-    }
-
-    /// Pais possíveis de uma escolha (o mesmo ciclo do `parentCandidates`).
-    func parentCandidates(_ ids: Set<Int64>) -> [LayerItem] {
-        layers.filter { candidate in
-            var current = candidate
-            var visited = Set<Int64>()
-            while visited.insert(current.id).inserted {
-                if ids.contains(current.id) { return false }
-                let parent = (engine.layerDetail(current.id)?["parentId"] as? NSNumber)?.int64Value ?? 0
-                guard let next = layers.first(where: { $0.id == parent }) else { return true }
-                current = next
+        let rows = editingLayers
+        let children = Set(ids)
+        guard rows.filter({ children.contains($0.id) }).count == children.count else { return [] }
+        return rows.indices.compactMap { index in
+            var cursor = index
+            var steps = 0
+            while rows.indices.contains(cursor), steps <= rows.count {
+                if children.contains(rows[cursor].id) { return nil }
+                cursor = Int(rows[cursor].parentIndex)
+                steps += 1
             }
-            return false
+            return steps <= rows.count ? rows[index] : nil
         }
     }
 

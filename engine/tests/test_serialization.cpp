@@ -36,6 +36,90 @@ Project make_project() {
 
 } // namespace
 
+AUREA_TEST(Serialization, PrecompControlsKeepInstanceAndTargetIdentity) {
+    auto original = make_project();
+    auto& timeline = original.timeline();
+    auto* root = timeline.composition(timeline.root());
+    const auto childId = timeline.create_composition("Reusable", 1280, 720, 30.);
+    auto* child = timeline.composition(childId);
+    const auto old = child->add_layer(LayerKind::Shape, "Deleted");
+    const auto title = child->add_layer(LayerKind::Text, "Title");
+    child->layer(title)->text.content = "Original";
+    child->layer(title)->precompExposed = 1;
+    const auto a = root->add_layer(LayerKind::Composition, "A");
+    const auto b = root->add_layer(LayerKind::Composition, "B");
+    root->layer(a)->nested.composition = childId;
+    root->layer(b)->nested.composition = childId;
+    root->layer(a)->nested.overrides.push_back({title, PrecompControl::Text, "Second title", {}});
+    root->layer(a)->nested.overrides.push_back({old, PrecompControl::Color, {}, {0.f, 1.f, 0.f, 1.f}});
+    (void)child->remove_layer(old);
+
+    std::vector<u8> bytes;
+    AUREA_CHECK(ProjectSerializer::encode(original, SaveOptions{}, bytes).ok());
+    Project restored;
+    AUREA_CHECK(ProjectSerializer::load_bytes(restored, bytes.data(), bytes.size(), LoadOptions{}, nullptr).ok());
+    const auto* composition = restored.timeline().composition(restored.timeline().root());
+    AUREA_CHECK(composition != nullptr);
+    if (!composition) return;
+    const Layer* first = nullptr;
+    const Layer* second = nullptr;
+    composition->layers().for_each([&](LayerId, const Layer& layer) {
+        if (layer.name == "A") first = &layer;
+        if (layer.name == "B") second = &layer;
+    });
+    AUREA_CHECK(first && second);
+    if (!first || !second) return;
+    AUREA_CHECK(first->nested.composition == second->nested.composition);
+    AUREA_CHECK(second->nested.overrides.empty());
+    AUREA_CHECK_EQ(first->nested.overrides.size(), 2u);
+    if (first->nested.overrides.size() != 2) return;
+    const auto* source = restored.timeline().composition(first->nested.composition);
+    const auto* restoredTitle = source ? source->layer(first->nested.overrides[0].target) : nullptr;
+    AUREA_CHECK(restoredTitle != nullptr);
+    if (!restoredTitle) return;
+    AUREA_CHECK_EQ(restoredTitle->name, std::string("Title"));
+    AUREA_CHECK_EQ(restoredTitle->text.content, std::string("Original"));
+    AUREA_CHECK_EQ(restoredTitle->precompExposed, 1u);
+    AUREA_CHECK_EQ(first->nested.overrides[0].text, std::string("Second title"));
+    AUREA_CHECK(!first->nested.overrides[1].target.valid());
+}
+
+AUREA_TEST(Serialization, PrecompControlEditsAreInstanceLocalAndUndoable) {
+    Engine engine;
+    AUREA_CHECK(engine.initialize(EngineConfig{}).ok());
+    AUREA_CHECK(engine.new_project(1280, 720, 30., "Reusable").ok());
+    if (!engine.project()) return;
+    auto& timeline = engine.project()->timeline();
+    auto* root = timeline.composition(timeline.root());
+    const auto inner = timeline.create_composition("Source", 1280, 720, 30.);
+    auto* child = timeline.composition(inner);
+    const auto title = child->add_layer(LayerKind::Text, "Title");
+    child->layer(title)->text.content = "Source title";
+    const auto a = root->add_layer(LayerKind::Composition, "A");
+    const auto b = root->add_layer(LayerKind::Composition, "B");
+    root->layer(a)->nested.composition = inner;
+    root->layer(b)->nested.composition = inner;
+    AUREA_CHECK(engine.edit_precomp_control(a.pack(), title.pack(), 0, 0, {}, {}));
+    AUREA_CHECK(engine.edit_precomp_control(a.pack(), title.pack(), 0, 2, "Instance title", {}));
+    const auto first = engine.precomp_controls(a.pack());
+    const auto second = engine.precomp_controls(b.pack());
+    AUREA_CHECK(!first.empty() && !second.empty());
+    if (first.empty() || second.empty()) return;
+    AUREA_CHECK(first[0].exposed && second[0].exposed);
+    AUREA_CHECK(first[0].overridden && !second[0].overridden);
+    AUREA_CHECK_EQ(first[0].value.text, std::string("Instance title"));
+    AUREA_CHECK_EQ(second[0].value.text, std::string("Source title"));
+    AUREA_CHECK(engine.edit_precomp_control(a.pack(), title.pack(), 0, 3, {}, {}));
+    const auto reset = engine.precomp_controls(a.pack());
+    AUREA_CHECK(!reset.empty() && !reset[0].overridden);
+    Command undo;
+    undo.type = CommandType::Undo;
+    AUREA_CHECK(engine.apply_command(undo).ok());
+    const auto restored = engine.precomp_controls(a.pack());
+    AUREA_CHECK(!restored.empty() && restored[0].overridden);
+    engine.shutdown();
+}
+
 AUREA_TEST(Serialization, Timeline47CameraLayeringPreservesMultipleLayersAndNestedCompositions) {
     auto original = make_project();
     auto* root = original.timeline().composition(original.timeline().root());

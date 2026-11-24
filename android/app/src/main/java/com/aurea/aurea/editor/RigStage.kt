@@ -51,8 +51,8 @@ import kotlin.math.hypot
  *    mão); tocar numa junta a escolhe (para ramificar dela) e tocar de novo
  *    solta; arrastar uma junta a move. A prévia mostra o desenho parado.
  *  - ANIMAR: arrastar uma junta posa no cabeçote e grava keyframe. A ponta de
- *    uma corrente puxa os dois ossos (IK: a mão leva o braço); uma junta do
- *    meio gira o osso dela (FK).
+ *    uma corrente dobra seus ossos por IK; uma junta do meio gira só o osso
+ *    selecionado por FK.
  *
  * Cada arrasto = UM passo de desfazer. A malha, os pesos e a pose são do
  * motor (Engine::query_rig e família); aqui só dedo e desenho.

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="motion_vector_order">Orden del dibujo</string>
+    <string name="motion_vector_order_hint">Organiza trazados, contornos y operadores.</string>
+    <string name="motion_vector_trim">Recortar</string>
+    <string name="motion_vector_repeat">Repetidor</string>
+    <string name="motion_move_up">Mover %1$s hacia arriba</string>
+    <string name="motion_move_down">Mover %1$s hacia abajo</string>
+    <string name="motion_vector_move_unavailable">No se puede mover este elemento conservando la animación o la capa está bloqueada.</string>
+    <string name="motion_precomp_controls">Controles de precomposición</string>
+    <string name="motion_precomp_empty">No hay controles disponibles aquí.</string>
+    <string name="motion_precomp_publish">Mostrar control</string>
+    <string name="motion_precomp_reset">Restaurar original</string>
+    <string name="motion_control_text">Texto</string>
+    <string name="motion_control_unavailable">Control o capa no disponible.</string>
+    <string name="motion_repair_range">Corregir el tramo desde aquí</string>
+    <string name="motion_repair_end">Toca la barra de revisión para elegir el final del tramo.</string>
+    <string name="motion_repair_corners">Marcar las cuatro esquinas</string>
+    <string name="motion_repair_seed">Vuelve al fotograma inicial para confirmar las esquinas.</string>
+    <string name="motion_repair_ready">Revisa la corrección en la vista previa. Aplica para sustituir el tramo.</string>
+    <string name="motion_export_missing">Medio ausente</string>
+    <string name="motion_export_unreadable">No se pudo leer el medio</string>
+    <string name="motion_export_source_warning">Hay capas con medios ausentes o ilegibles. Revísalas antes de exportar.</string>
+    <string name="motion_export_waiting_decode">Esperando al decodificador de vídeo…</string>
+    <string name="motion_link_media">Vincular medio</string>
+    <string name="motion_view_layer">Ver capa</string>
+    <string name="motion_release_body">Aurea 1.0.8.1 BETA (2232)\n• Reordena trazados, contornos y operadores vectoriales.\n• Curvas de velocidad con las mismas reglas en Android e iOS.\n• Texto, color y opacidad por instancia de precomposición.\n• Revisa y corrige un tramo del seguimiento planar.\n• Diagnóstico de medios y avisos de espera del decodificador al exportar.</string>
+</resources>

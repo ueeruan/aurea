@@ -38,22 +38,26 @@ struct EPVertex {
 }
 
 /// O contorno no cabeçote (Engine::vector_path_at): afim grupo → composição, bits e pontos.
+/// Camada 3D (bit3): `persp` é a linha de perspectiva da câmera do palco e a conta divide por
+/// ela; em 2D ela é (0, 0, 1) e nada muda. Par do VPathAt do VectorDoc.kt.
 struct EPPath {
     var affine: [Float]
     var flags: Int
     var closed: Bool
     var v: [EPVertex]
+    var persp: [Float] = [0, 0, 1]
 
     @MainActor static func load(_ model: AureaModel, group: UInt32, path: UInt32) -> EPPath? {
         guard let id = model.primarySelection else { return nil }
         let d = model.engine.vectorPath(id, group: group, path: path).map(\.floatValue)
-        guard d.count >= 9, d[8] >= 0, Int(d[8]) * 6 + 9 == d.count else { return nil }
+        let threeD = d.count >= 12 && Int(d[6]) & 8 != 0
+        guard d.count >= 9, d[8] >= 0, Int(d[8]) * 6 + 9 + (threeD ? 3 : 0) == d.count else { return nil }
         var v: [EPVertex] = []
         for i in 0..<Int(d[8]) {
             let o = 9 + i * 6
             v.append(EPVertex(x: d[o], y: d[o + 1], inX: d[o + 2], inY: d[o + 3], outX: d[o + 4], outY: d[o + 5]))
         }
-        return EPPath(affine: Array(d[0..<6]), flags: Int(d[6]), closed: d[7] > 0.5, v: v)
+        return EPPath(affine: Array(d[0..<6]), flags: Int(d[6]), closed: d[7] > 0.5, v: v, persp: threeD ? Array(d.suffix(3)) : [0, 0, 1])
     }
 
     /// O caminho da máscara em edição, como um contorno (espaço da camada).
@@ -64,7 +68,8 @@ struct EPPath {
             let o = i * 6
             v.append(EPVertex(x: m.points[o], y: m.points[o + 1], inX: m.points[o + 2], inY: m.points[o + 3], outX: m.points[o + 4], outY: m.points[o + 5]))
         }
-        return EPPath(affine: model.maskAffine, flags: 1 | (m.keyCount > 0 ? 2 : 0) | (m.keyed ? 4 : 0), closed: m.closed, v: v)
+        return EPPath(affine: model.maskAffine, flags: 1 | (m.keyCount > 0 ? 2 : 0) | (m.keyed ? 4 : 0), closed: m.closed, v: v,
+                      persp: model.maskPerspective.count == 3 ? model.maskPerspective : [0, 0, 1])
     }
     /// O que o Editar pontos está editando: a máscara ou o contorno do vetor.
     @MainActor static func current(_ model: AureaModel) -> EPPath? {
@@ -75,15 +80,47 @@ struct EPPath {
     var animated: Bool { flags & 2 != 0 }
     var segments: Int { v.count < 2 ? 0 : (closed ? v.count : v.count - 1) }
 
+    /// Camada 3D vista pela câmera: pontos no plano dela, em perspectiva.
+    var perspective: Bool { persp[0] != 0 || persp[1] != 0 || persp[2] != 1 }
+    /// Profundidade (w) do ponto do grupo: ≤ 0 = atrás da câmera.
+    func depth(_ x: Float, _ y: Float) -> Float { persp[0] * x + persp[1] * y + persp[2] }
+    /// O ponto do grupo aparece no palco (na frente da câmera)?
+    func visible(_ x: Float, _ y: Float) -> Bool { depth(x, y) > 1e-4 }
+
     func toComp(_ x: Float, _ y: Float) -> SIMD2<Float> {
-        SIMD2(affine[0] * x + affine[2] * y + affine[4], affine[1] * x + affine[3] * y + affine[5])
+        let d = depth(x, y), k: Float = abs(d) < 1e-6 ? 1e6 : 1 / d
+        return SIMD2((affine[0] * x + affine[2] * y + affine[4]) * k, (affine[1] * x + affine[3] * y + affine[5]) * k)
     }
+    /// Composição → grupo (nulo se a conta não inverte ou o ponto cai atrás da câmera).
     func fromComp(_ x: Float, _ y: Float) -> SIMD2<Float>? {
-        guard let d = vecFromComp(x - affine[4], y - affine[5]) else { return nil }
-        return d
+        guard perspective else { return linearFromComp(x - affine[4], y - affine[5]) }
+        // Inversa da homografia [a0 a2 a4; a1 a3 a5; w0 w1 w2] (adjunta) em (x, y, 1).
+        let p = affine[0], q = affine[2], r = affine[4], s = affine[1], t = affine[3], u = affine[5]
+        let g = persp[0], h = persp[1], i = persp[2]
+        let gx = (t * i - u * h) * x + (r * h - q * i) * y + (q * u - r * t)
+        let gy = (u * g - s * i) * x + (p * i - r * g) * y + (r * s - p * u)
+        let gz = (s * h - t * g) * x + (q * g - p * h) * y + (p * t - q * s)
+        guard abs(gz) > 1e-12 else { return nil }
+        let o = SIMD2(gx / gz, gy / gz)
+        guard o.x.isFinite, o.y.isFinite, visible(o.x, o.y) else { return nil }
+        return o
     }
-    /// Um deslocamento da composição no espaço do grupo (só a parte linear).
-    func vecFromComp(_ dx: Float, _ dy: Float) -> SIMD2<Float>? {
+    /// Um deslocamento da composição no espaço do grupo. Em 3D ele depende de onde acontece:
+    /// vale no ponto `at` do grupo (padrão = o centro do contorno), levado à tela e trazido de volta.
+    func vecFromComp(_ dx: Float, _ dy: Float, at: SIMD2<Float>? = nil) -> SIMD2<Float>? {
+        guard perspective else { return linearFromComp(dx, dy) }
+        var c = at ?? .zero
+        if at == nil, !v.isEmpty {
+            for p in v { c += SIMD2(p.x, p.y) }
+            c /= Float(v.count)
+        }
+        guard visible(c.x, c.y) else { return nil }
+        let s = toComp(c.x, c.y)
+        guard let g = fromComp(s.x + dx, s.y + dy) else { return nil }
+        return g - c
+    }
+    /// Só a parte linear da afim (2D).
+    private func linearFromComp(_ dx: Float, _ dy: Float) -> SIMD2<Float>? {
         let det = affine[0] * affine[3] - affine[1] * affine[2]
         guard abs(det) > 1e-9 else { return nil }
         return SIMD2((affine[3] * dx - affine[2] * dy) / det, (-affine[1] * dx + affine[0] * dy) / det)
@@ -590,6 +627,14 @@ struct PointsTrackpad: View {
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { confirmPending() }
         .accessibilityIdentifier("points.trackpad")
+        // Camada 3D: os pontos andam no plano dela, vistos pela câmera.
+        .overlay(alignment: .bottom) {
+            if path?.perspective == true {
+                Text(AureaText.t("om_pts_3d_plane")).font(.aurea(size: 10)).foregroundStyle(AureaColors.contentGuide)
+                    .multilineTextAlignment(.center).padding(.horizontal, 12).padding(.bottom, 10).allowsHitTesting(false)
+                    .accessibilityIdentifier("points.plane3d")
+            }
+        }
     }
 
     private func step(_ g: DragGesture.Value) {
@@ -599,8 +644,9 @@ struct PointsTrackpad: View {
         guard let at = EPPath.current(model), let previous = last else { return }
         let dx = Float(g.location.x - previous.x), dy = Float(g.location.y - previous.y)
         last = g.location
-        guard let d = at.vecFromComp(dx, dy) else { return }
         let i = state.index
+        // Camada 3D: o passo da tela vale no ponto que anda (a perspectiva muda a escala).
+        guard let d = at.vecFromComp(dx, dy, at: anchor(at, i)) else { return }
         if state.atOpenEnd(at) || state.kind == EPKind.between || state.pending != nil {
             // O ponto pendente nasce na ponta (ou no trecho) e segue o dedo.
             let start = state.pending ?? pendingStart(at)
@@ -621,6 +667,19 @@ struct PointsTrackpad: View {
         if sent { model.refreshModel(force: true) }
         last = nil; moved = false; sent = false
         if !wasMoved { confirmPending() }
+    }
+
+    /// O ponto do grupo que o trackpad move agora (o pendente, a alça ou o ponto); nulo = o centro.
+    private func anchor(_ at: EPPath, _ i: Int) -> SIMD2<Float>? {
+        if let p = state.pending { return p }
+        guard at.v.indices.contains(i) else { return nil }
+        let p = at.v[i]
+        switch state.kind {
+        case EPKind.inHandle: return SIMD2(p.x + p.inX, p.y + p.inY)
+        case EPKind.outHandle: return SIMD2(p.x + p.outX, p.y + p.outY)
+        case EPKind.point: return SIMD2(p.x, p.y)
+        default: return state.atOpenEnd(at) || !at.perspective ? SIMD2(p.x, p.y) : nil
+        }
     }
 
     /// Onde o ponto pendente nasce: na ponta aberta (no último ponto) ou no trecho escolhido.
@@ -815,6 +874,7 @@ struct PointsStrip: View {
     @State private var sent = false
     @State private var startPath: EPPath?
     @State private var lineHit: (seg: Int, t: Float)?
+    @State private var warned = false
 
     private static let pathInk = Color(hex: 0x5AA8FF)
     private static let handleInk = Color(hex: 0xB8C4D0)
@@ -853,14 +913,15 @@ struct PointsStrip: View {
     private func draw(_ context: inout GraphicsContext, _ placed: (scale: CGFloat, origin: CGPoint)) {
         guard let path = EPPath.load(model, group: model.vectorGroup, path: model.vectorPath) else { return }
         func sx(_ x: Float, _ y: Float) -> CGPoint { screen(path, x, y, placed) }
-        // Os outros contornos do grupo (finos).
+        // Os outros contornos do grupo (finos). Camada 3D: só o que está na frente da câmera aparece.
         for (_, p) in others() { bezier(&context, p, { screen(p, $0, $1, placed) }, ink: Self.handleInk.opacity(0.6), width: 1) }
         bezier(&context, path, sx, ink: Self.pathInk, width: 1.5)
         let sel = state.index, kind = state.kind
-        if path.v.indices.contains(sel) && kind != EPKind.between {
+        if path.v.indices.contains(sel) && kind != EPKind.between && path.visible(path.v[sel].x, path.v[sel].y) {
             let p = path.v[sel]
             let c = sx(p.x, p.y)
             for k in 0..<2 {
+                guard k == 0 ? path.visible(p.x + p.inX, p.y + p.inY) : path.visible(p.x + p.outX, p.y + p.outY) else { continue }
                 let h = k == 0 ? sx(p.x + p.inX, p.y + p.inY) : sx(p.x + p.outX, p.y + p.outY)
                 guard hypot(h.x - c.x, h.y - c.y) >= 1 else { continue }
                 let chosen = (k == 0 && kind == EPKind.inHandle) || (k == 1 && kind == EPKind.outHandle)
@@ -872,6 +933,7 @@ struct PointsStrip: View {
         }
         let base: CGFloat = 4.5
         for i in path.v.indices {
+            guard path.visible(path.v[i].x, path.v[i].y) else { continue }
             let c = sx(path.v[i].x, path.v[i].y)
             let chosen = (i == sel && kind == EPKind.point) || state.multi.contains(i)
             // After Effects: o primeiro ponto do caminho fechado aparece maior.
@@ -913,6 +975,10 @@ struct PointsStrip: View {
 
     private func bezier(_ context: inout GraphicsContext, _ path: EPPath, _ sx: (Float, Float) -> CGPoint, ink: Color, width: CGFloat) {
         guard path.v.count >= 2 else { return }
+        if path.perspective {
+            projected(&context, path, sx, ink: ink, width: width)
+            return
+        }
         var p = Path()
         p.move(to: sx(path.v[0].x, path.v[0].y))
         for i in 0..<path.segments {
@@ -924,25 +990,51 @@ struct PointsStrip: View {
         context.stroke(p, with: .color(ink), lineWidth: width)
     }
 
+    /// Camada 3D: o bezier do plano vira uma curva racional na tela — amostras do trecho no
+    /// espaço do grupo, levadas à tela uma a uma. O traço quebra onde passa para trás da câmera.
+    private func projected(_ context: inout GraphicsContext, _ path: EPPath, _ sx: (Float, Float) -> CGPoint, ink: Color, width: CGFloat) {
+        var p = Path()
+        var open = false
+        for s in 0..<path.segments {
+            for k in 0...24 {
+                if k == 0 && s > 0 && open { continue }
+                guard let q = path.point(s, Float(k) / 24), path.visible(q.x, q.y) else { open = false; continue }
+                let c = sx(q.x, q.y)
+                if open { p.addLine(to: c) } else { p.move(to: c) }
+                open = true
+            }
+        }
+        context.stroke(p, with: .color(StageInk.outlineUnder), lineWidth: width * 2)
+        context.stroke(p, with: .color(ink), lineWidth: width)
+    }
+
     // MARK: Gesto
+
+    /// px da tela → px da composição.
+    private func comp(_ p: CGPoint, _ placed: (scale: CGFloat, origin: CGPoint)) -> SIMD2<Float> {
+        let k = max(placed.scale, 0.0001)
+        return SIMD2(Float((p.x - placed.origin.x) / k), Float((p.y - placed.origin.y) / k))
+    }
 
     private func change(_ g: DragGesture.Value, _ placed: (scale: CGFloat, origin: CGPoint)) {
         if !started { begin(g.startLocation, placed); started = true }
         guard let at = startPath else { return }
-        let k = max(placed.scale, 0.0001)
         switch mode {
         case .handle(let side):
-            guard let d = at.vecFromComp(Float((g.location.x - last.x) / k), Float((g.location.y - last.y) / k)) else { return }
+            // O motor leva os dois toques ao plano da camada (3D: raio × plano).
+            let locks: UInt32 = (state.lockAngle ? 1 : 0) | (state.lockLength ? 2 : 0)
+            let r = model.dragVectorPathOnStage(kind: side == EPKind.outHandle ? 2 : 1, points: [state.index], from: comp(last, placed),
+                                                to: comp(g.location, placed), locks: locks, continuing: sent)
+            guard r >= 0 else { warnEdge(at); return }
             last = g.location
-            model.editVectorPath(PathOps.moveHandle, [Float(state.index), side == EPKind.outHandle ? 1 : 0, d.x, d.y,
-                                                      state.lockAngle ? 1 : 0, state.lockLength ? 1 : 0], continuing: sent)
             sent = true
         case .points(let group, _):
             if !moved && hypot(g.location.x - g.startLocation.x, g.location.y - g.startLocation.y) < 6 { return }
             moved = true
-            guard let d = at.vecFromComp(Float((g.location.x - last.x) / k), Float((g.location.y - last.y) / k)) else { return }
+            let r = model.dragVectorPathOnStage(kind: 0, points: group, from: comp(last, placed), to: comp(g.location, placed),
+                                                locks: 0, continuing: sent)
+            guard r >= 0 else { warnEdge(at); return }
             last = g.location
-            model.editVectorPath(PathOps.movePoints, [d.x, d.y] + group.map { Float($0) }, continuing: sent)
             sent = true
         case .empty:
             if !moved && hypot(g.location.x - g.startLocation.x, g.location.y - g.startLocation.y) < 6 { return }
@@ -954,8 +1046,15 @@ struct PointsStrip: View {
         }
     }
 
+    /// Camada 3D de lado para a câmera: um aviso por arrasto.
+    private func warnEdge(_ at: EPPath) {
+        guard at.perspective, !warned else { return }
+        warned = true
+        model.warnVectorPlaneEdgeOn()
+    }
+
     private func begin(_ p: CGPoint, _ placed: (scale: CGFloat, origin: CGPoint)) {
-        last = p; moved = false; sent = false; mode = .idle; lineHit = nil
+        last = p; moved = false; sent = false; warned = false; mode = .idle; lineHit = nil
         guard let path = EPPath.load(model, group: model.vectorGroup, path: model.vectorPath) else { startPath = nil; return }
         startPath = path
         let reach: CGFloat = 25
@@ -965,15 +1064,18 @@ struct PointsStrip: View {
             let v = path.v[sel]
             let c = screen(path, v.x, v.y, placed)
             let hin = screen(path, v.x + v.inX, v.y + v.inY, placed), hout = screen(path, v.x + v.outX, v.y + v.outY, placed)
-            let din = hypot(hin.x - c.x, hin.y - c.y) > 1 ? hypot(p.x - hin.x, p.y - hin.y) : .greatestFiniteMagnitude
-            let dout = hypot(hout.x - c.x, hout.y - c.y) > 1 ? hypot(p.x - hout.x, p.y - hout.y) : .greatestFiniteMagnitude
+            // Camada 3D: alça atrás da câmera não se pega.
+            let inOk = path.visible(v.x, v.y) && path.visible(v.x + v.inX, v.y + v.inY)
+            let outOk = path.visible(v.x, v.y) && path.visible(v.x + v.outX, v.y + v.outY)
+            let din = inOk && hypot(hin.x - c.x, hin.y - c.y) > 1 ? hypot(p.x - hin.x, p.y - hin.y) : .greatestFiniteMagnitude
+            let dout = outOk && hypot(hout.x - c.x, hout.y - c.y) > 1 ? hypot(p.x - hout.x, p.y - hout.y) : .greatestFiniteMagnitude
             if din < reach && din <= dout { mode = .handle(EPKind.inHandle) }
             else if dout < reach { mode = .handle(EPKind.outHandle) }
             if case .handle(let side) = mode { state.choosePoint(sel, kind: side); return }
         }
         // 2) Pontos do contorno atual.
         var best = reach, hit = -1
-        for i in path.v.indices {
+        for i in path.v.indices where path.visible(path.v[i].x, path.v[i].y) {
             let c = screen(path, path.v[i].x, path.v[i].y, placed)
             let d = hypot(p.x - c.x, p.y - c.y)
             if d < best { best = d; hit = i }
@@ -984,7 +1086,7 @@ struct PointsStrip: View {
         }
         // 3) Outro contorno do grupo: troca o contorno.
         for (n, other) in others() {
-            for i in other.v.indices {
+            for i in other.v.indices where other.visible(other.v[i].x, other.v[i].y) {
                 let c = screen(other, other.v[i].x, other.v[i].y, placed)
                 if hypot(p.x - c.x, p.y - c.y) < reach {
                     model.chooseContour(n)
@@ -1001,7 +1103,7 @@ struct PointsStrip: View {
         for s in 0..<path.segments {
             for k in 1..<48 {
                 let t = Float(k) / 48
-                guard let q = path.point(s, t) else { continue }
+                guard let q = path.point(s, t), path.visible(q.x, q.y) else { continue }
                 let c = screen(path, q.x, q.y, placed)
                 let d = hypot(c.x - p.x, c.y - p.y)
                 if d < bestLine { bestLine = d; lineHit = (s, t) }
@@ -1030,7 +1132,7 @@ struct PointsStrip: View {
             if moved, let box = state.lasso {
                 state.lasso = nil
                 // Laço: os pontos dentro do retângulo andam juntos.
-                let inside = Set(path.v.indices.filter { box.contains(screen(path, path.v[$0].x, path.v[$0].y, placed)) })
+                let inside = Set(path.v.indices.filter { path.visible(path.v[$0].x, path.v[$0].y) && box.contains(screen(path, path.v[$0].x, path.v[$0].y, placed)) })
                 state.multi = inside
                 state.choosePoint(inside.min() ?? -1)
                 return

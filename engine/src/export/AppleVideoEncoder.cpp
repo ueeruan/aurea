@@ -1,9 +1,8 @@
 // =============================================================================
 //  Aurea / export / AppleVideoEncoder.cpp
 //
-//  iOS (18/11/2026): o degrau sem cópia do export — o mesmo contrato do
-//  encoder do aparelho do Android (android_video::Encoder, export/
-//  AndroidVideoEncoder.hpp), com VTCompressionSession.
+//  Encoder nativo do iOS com VTCompressionSession. A composição envia
+//  planos NV12 limitados BT.709. Outros chamadores podem enviar CVPixelBuffer.
 //
 //  Antes: Metal → blit para buffer compartilhado → cópia/sws_scale na CPU →
 //  AVFrame → o h264_videotoolbox do FFmpeg copiava de novo para o pool dele.
@@ -108,6 +107,8 @@ struct Encoder::Impl {
     Status failure = OkStatus;
     bool hevc = false, profileUsed = false, cbr = false;
     bool eosSent = false, eosDone = false;
+    bool useDirectBuffer = false;
+    u32 width = 0, height = 0;
     f64 fps = 30.0;
     void* direct = nullptr;   ///< CVPixelBufferRef do PRÓXIMO send (o motor é o dono)
     std::atomic<u64>* heartbeat = nullptr;
@@ -138,7 +139,7 @@ struct Encoder::Impl {
             self->ready.notify_all();
             return;
         }
-        {
+        try {
             int nalLength = 4;
             CMFormatDescriptionRef format = CMSampleBufferGetFormatDescription(sample);
             if (self->config.empty() && format) {
@@ -158,7 +159,11 @@ struct Encoder::Impl {
             }
             CMBlockBufferRef block = CMSampleBufferGetDataBuffer(sample);
             const size_t total = block ? CMBlockBufferGetDataLength(block) : 0;
-            if (!total) { self->ready.notify_all(); return; }
+            if (!total) {
+                self->failure = {Errc::EncodeFailed, "VideoToolbox retornou um pacote vazio"};
+                self->ready.notify_all();
+                return;
+            }
             std::vector<u8> avcc(total);
             if (CMBlockBufferCopyDataBytes(block, 0, total, avcc.data()) != kCMBlockBufferNoErr) {
                 self->failure = Status{Errc::EncodeFailed, "VideoToolbox sem os bytes do pacote"};
@@ -167,15 +172,24 @@ struct Encoder::Impl {
             }
             Packet packet;
             packet.data.reserve(total + 16);
-            for (size_t at = 0; at + static_cast<size_t>(nalLength) <= total;) {
+            size_t at = 0;
+            while (at + static_cast<size_t>(nalLength) <= total) {
                 size_t size = 0;
                 for (int b = 0; b < nalLength; ++b) size = (size << 8) | avcc[at + static_cast<size_t>(b)];
                 at += static_cast<size_t>(nalLength);
-                if (size == 0 || size > total - at) break;
+                if (size == 0 || size > total - at) {
+                    self->failure = {Errc::EncodeFailed, "VideoToolbox retornou um NAL truncado"};
+                    self->ready.notify_all();
+                    return;
+                }
                 append_start_code(packet.data, avcc.data() + at, size);
                 at += size;
             }
-            if (packet.data.empty()) { self->ready.notify_all(); return; }
+            if (at != total || packet.data.empty()) {
+                self->failure = {Errc::EncodeFailed, "VideoToolbox retornou um pacote incompleto"};
+                self->ready.notify_all();
+                return;
+            }
             // Sem a marca "não é sync" = quadro-chave.
             bool key = true;
             if (CFArrayRef attachments = CMSampleBufferGetSampleAttachmentsArray(sample, false);
@@ -190,6 +204,8 @@ struct Encoder::Impl {
             packet.ptsUs = CMTIME_IS_VALID(pts) ? CMTimeConvertScale(pts, 1'000'000, kCMTimeRoundingMethod_RoundHalfAwayFromZero).value
                                                 : 0;
             self->packets.push_back(std::move(packet));
+        } catch (...) {
+            self->failure = {Errc::OutOfMemory, "pacote do VideoToolbox"};
         }
         self->ready.notify_all();
     }
@@ -203,19 +219,34 @@ Status Encoder::open(const Request& r, const CodecInfo& codec) noexcept {
     close();
     if (!impl_) impl_.reset(new (std::nothrow) Impl());
     if (!impl_) return Status{Errc::OutOfMemory, "encoder do VideoToolbox"};
-    // Só o degrau sem cópia: o NV12 da CPU continua no h264_videotoolbox do FFmpeg.
-    if (!r.direct || r.input != Input::Surface)
-        return Status{Errc::NotSupported, "VideoToolbox direto exige o CVPixelBuffer do Metal"};
+    if (r.direct != (r.input == Input::Surface))
+        return Status{Errc::InvalidArgument, "entrada do VideoToolbox invalida"};
     if (!r.width || !r.height || !(r.fps > 0.0)) return Status{Errc::InvalidArgument, "VideoToolbox sem tamanho ou taxa"};
     Impl& d = *impl_;
     d.hevc = r.hevc;
     d.fps = r.fps;
     d.heartbeat = r.heartbeat;
     d.cbr = r.rateMode == 0;
+    d.useDirectBuffer = r.direct;
+    d.width = r.width;
+    d.height = r.height;
+    CFDictionaryRef attributes = nullptr;
+    if (!r.direct) {
+        const int32_t pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
+        CFNumberRef pixel = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &pixelFormat);
+        if (!pixel) return Errc::OutOfMemory;
+        const void* keys[] = {kCVPixelBufferPixelFormatTypeKey};
+        const void* values[] = {pixel};
+        attributes = CFDictionaryCreate(kCFAllocatorDefault, keys, values, 1,
+            &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+        CFRelease(pixel);
+        if (!attributes) return Errc::OutOfMemory;
+    }
     VTCompressionSessionRef session = nullptr;
     OSStatus status = VTCompressionSessionCreate(kCFAllocatorDefault, static_cast<int32_t>(r.width), static_cast<int32_t>(r.height),
                                                  r.hevc ? kCMVideoCodecType_HEVC : kCMVideoCodecType_H264,
-                                                 nullptr, nullptr, nullptr, &Impl::output, &d, &session);
+                                                 nullptr, attributes, nullptr, &Impl::output, &d, &session);
+    if (attributes) CFRelease(attributes);
     d.beat();
     if (status != noErr || !session) {
         AUREA_LOG_WARN("export: VTCompressionSessionCreate recusou %ux%u %s (%d)", r.width, r.height,
@@ -275,14 +306,14 @@ Status Encoder::open(const Request& r, const CodecInfo& codec) noexcept {
         close();
         return Status{Errc::EncoderUnavailable, "VideoToolbox nao preparou a sessao de compressao"};
     }
-    std::snprintf(d.description, sizeof(d.description), "videotoolbox-direct:%s%s%s", r.hevc ? "hevc" : "avc",
+    std::snprintf(d.description, sizeof(d.description), "videotoolbox-%s:%s%s%s", r.direct ? "direct" : "nv12", r.hevc ? "hevc" : "avc",
                   d.profileUsed ? (r.hevc ? ":main" : ":high") : "", d.cbr ? ":cbr" : "");
     AUREA_LOG_INFO("export: %s %ux%u %.3f fps %lld bps", d.description, r.width, r.height, r.fps,
                    static_cast<long long>(bitrate));
     return OkStatus;
 }
 
-Status Encoder::send(const u8*, u32, const u8*, u32, i64 ptsUs, u64 timeoutNs) noexcept {
+Status Encoder::send(const u8* y, u32 yStride, const u8* uv, u32 uvStride, i64 ptsUs, u64 timeoutNs) noexcept {
     (void)timeoutNs;
     if (!impl_ || !impl_->session) return Status{Errc::InvalidState, "VideoToolbox fechado"};
     Impl& d = *impl_;
@@ -292,11 +323,40 @@ Status Encoder::send(const u8*, u32, const u8*, u32, i64 ptsUs, u64 timeoutNs) n
     }
     auto* buffer = static_cast<CVPixelBufferRef>(d.direct);
     d.direct = nullptr;
-    if (!buffer) return Status{Errc::NotSupported, "quadro sem o CVPixelBuffer do Metal"};
+    if (d.useDirectBuffer) {
+        if (!buffer) return Status{Errc::NotSupported, "quadro sem o CVPixelBuffer do Metal"};
+    } else {
+        if (!y || !uv || yStride < d.width || uvStride < d.width) return Errc::InvalidArgument;
+        CVPixelBufferPoolRef pool = VTCompressionSessionGetPixelBufferPool(d.session);
+        if (!pool) return {Errc::EncoderUnavailable, "VideoToolbox sem pool NV12"};
+        if (CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &buffer) != kCVReturnSuccess)
+            return {Errc::OutOfMemory, "pool de quadros NV12 do VideoToolbox"};
+        if (CVPixelBufferLockBaseAddress(buffer, 0) != kCVReturnSuccess) {
+            CVPixelBufferRelease(buffer);
+            return {Errc::EncodeFailed, "VideoToolbox nao mapeou o quadro NV12"};
+        }
+        bool copied = CVPixelBufferGetPlaneCount(buffer) == 2;
+        const u8* sources[] = {y, uv};
+        const u32 strides[] = {yStride, uvStride};
+        for (u32 plane = 0; copied && plane < 2; ++plane) {
+            auto* dest = static_cast<u8*>(CVPixelBufferGetBaseAddressOfPlane(buffer, plane));
+            const size_t destStride = CVPixelBufferGetBytesPerRowOfPlane(buffer, plane);
+            const u32 rows = plane ? d.height / 2 : d.height;
+            copied = dest && destStride >= d.width && CVPixelBufferGetHeightOfPlane(buffer, plane) >= rows;
+            if (copied) for (u32 row = 0; row < rows; ++row)
+                std::memcpy(dest + row * destStride, sources[plane] + static_cast<size_t>(row) * strides[plane], d.width);
+        }
+        CVPixelBufferUnlockBaseAddress(buffer, 0);
+        if (!copied) {
+            CVPixelBufferRelease(buffer);
+            return {Errc::EncodeFailed, "layout NV12 do VideoToolbox invalido"};
+        }
+    }
     const CMTime pts = CMTimeMake(ptsUs, 1'000'000);
     const CMTime duration = CMTimeMake(std::max<i64>(1, std::llround(1e6 / d.fps)), 1'000'000);
     VTEncodeInfoFlags info = 0;
     OSStatus status = VTCompressionSessionEncodeFrame(d.session, buffer, pts, duration, nullptr, nullptr, &info);
+    if (!d.useDirectBuffer) CVPixelBufferRelease(buffer);
     d.beat();
     if (status != noErr) {
         AUREA_LOG_WARN("export: VTCompressionSessionEncodeFrame falhou (%d)", static_cast<int>(status));

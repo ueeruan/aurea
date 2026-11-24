@@ -93,7 +93,7 @@ internal fun ReleaseNotesEntry(button: Boolean = true) {
         )
     }
     if (showing) {
-        ReleaseNotesScreen(stringResource(R.string.release_notes_body)) {
+        ReleaseNotesScreen(stringResource(R.string.motion_release_body)) {
             prefs.edit().putString("read", edition).apply()
             showing = false
         }

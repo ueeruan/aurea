@@ -6,8 +6,9 @@ struct Fixture {
     TextureDesc colorDesc{}, depthDesc{};
     TextureHandle color{}, depth{};
     u32 width = 64, height = 32;
+    usize rasterPasses = 0;
 
-    Fixture() {
+    explicit Fixture(bool forceSplit = false) {
         colorDesc.width = width; colorDesc.height = height;
         colorDesc.format = SurfaceFormat::RGBA16F;
         colorDesc.sampled = colorDesc.transferDst = true;
@@ -17,7 +18,11 @@ struct Fixture {
         AUREA_CHECK(c.ok() && d.ok());
         if (c) color = *c;
         if (d) depth = *d;
-        AUREA_CHECK(temporal.admit(gpu().backend, gpu().renderer.shaders(), width, height, 1ull << 20));
+        auto& shaders = gpu().renderer.shaders();
+        if (forceSplit) shaders.set_test_failing_shader(ShaderId::scene3d_post_temporal_mrt_frag);
+        const bool admitted = temporal.admit(gpu().backend, shaders, width, height, 1ull << 20);
+        if (forceSplit) shaders.set_test_failing_shader(ShaderId::Count);
+        AUREA_CHECK(admitted);
     }
     ~Fixture() {
         gpu().backend.wait_idle();
@@ -27,16 +32,18 @@ struct Fixture {
         if (depth.valid()) gpu().backend.destroy_texture(depth);
     }
     std::vector<f32> render(TemporalReconstruction::Frame frame, f32 offset,
-                           f32 shift = 0.f, bool disocclusion = false, bool submitHistory = true) {
+                           f32 shift = 0.f, bool disocclusion = false, bool submitHistory = true,
+                           bool coverageChange = false) {
         auto& g = gpu();
         std::vector<u16> colors(static_cast<usize>(width) * height * 4);
         std::vector<f32> depths(static_cast<usize>(width) * height, .5f);
         for (u32 y = 0; y < height; ++y) for (u32 x = 0; x < width; ++x) {
             const usize pixel = static_cast<usize>(y) * width + x;
-            colors[pixel * 4] = scene3d::float_to_half(.1f + .005f * (x - shift) + .003f * y + offset);
-            colors[pixel * 4 + 1] = scene3d::float_to_half(.15f);
-            colors[pixel * 4 + 2] = scene3d::float_to_half(.2f);
-            colors[pixel * 4 + 3] = scene3d::float_to_half(1.f);
+            const f32 alpha = coverageChange && x == 48u ? .97f : 1.f;
+            colors[pixel * 4] = scene3d::float_to_half(alpha * (.1f + .005f * (x - shift) + .003f * y + offset));
+            colors[pixel * 4 + 1] = scene3d::float_to_half(alpha * .15f);
+            colors[pixel * 4 + 2] = scene3d::float_to_half(alpha * .2f);
+            colors[pixel * 4 + 3] = scene3d::float_to_half(alpha);
             if (disocclusion && x >= 24 && x < 40) depths[pixel] = .8f;
         }
         FrameBegin begin;
@@ -51,6 +58,7 @@ struct Fixture {
         AUREA_CHECK(output != input);
         const auto compiled = graph.compile(pool);
         AUREA_CHECK(compiled.ok());
+        rasterPasses = graph.order().size();
         const auto texture = graph.physical(output);
         if (compiled.ok()) graph.execute(*begin.commands, true);
         graph.release(pool); pool.end_frame();
@@ -100,6 +108,50 @@ AUREA_TEST(HyperAdaptive, TemporalCameraVectorsRejectDisocclusionAndResetOnSeek)
     AUREA_CHECK(!fixture.temporal.can_reuse(frame));
 }
 
+AUREA_TEST(HyperAdaptive, TemporalRigidModelVectorsRejectNewDepthAndCoverage) {
+    AUREA_REQUIRE_GPU();
+    temporal_preview_test::Fixture fixture;
+    TemporalReconstruction::Frame frame;
+    (void)fixture.render(frame, .004f);
+    ++frame.time;
+    frame.modelSpace = true;
+    AUREA_CHECK(!fixture.temporal.can_reuse(frame));
+    (void)fixture.render(frame, .004f);
+    ++frame.time;
+    AUREA_CHECK(fixture.temporal.can_reuse(frame));
+    constexpr f32 shift = 4.f;
+    frame.viewProjection = Mat4::translation(Vec3{2.f * shift / fixture.width, 0, 0});
+    frame.inverseJitteredViewProjection = Mat4::translation(Vec3{-2.f * shift / fixture.width, 0, 0});
+    const auto image = fixture.render(frame, 0.f, shift, true, true, true);
+    for (u32 x : {16u, 32u, 48u}) {
+        const usize pixel = (16u * fixture.width + x) * 4u;
+        const f32 alpha = x == 48u ? .97f : 1.f;
+        const f32 current = alpha * (.1f + .005f * (x - shift) + .003f * 16);
+        const f32 expected = current + (x == 16u ? .004f * .60f : 0.f);
+        AUREA_CHECK_NEAR(image[pixel], expected, .0008f);
+        AUREA_CHECK_NEAR(image[pixel + 3], alpha, .0005f);
+    }
+    frame.time = 1;
+    AUREA_CHECK(!fixture.temporal.can_reuse(frame));
+}
+
+AUREA_TEST(HyperAdaptive, TemporalMixedAttachmentsMatchDepthCopyFallback) {
+    AUREA_REQUIRE_GPU();
+    temporal_preview_test::Fixture preferred;
+    temporal_preview_test::Fixture split(true);
+    TemporalReconstruction::Frame frame;
+    frame.modelSpace = true;
+    AUREA_CHECK(preferred.render(frame, .004f) == split.render(frame, .004f));
+    ++frame.time;
+    frame.jitterPixels = TemporalReconstruction::jitter(frame.time);
+    frame.inverseJitteredViewProjection = Mat4::translation(Vec3{-2.f * frame.jitterPixels.x / preferred.width,
+        -2.f * frame.jitterPixels.y / preferred.height, 0.f});
+    AUREA_CHECK(preferred.render(frame, 0.f, 0.f, true) == split.render(frame, 0.f, 0.f, true));
+    AUREA_CHECK_EQ(split.rasterPasses, 2u);
+    const auto& caps = gpu().backend.capabilities();
+    if (caps.maxColorAttachments >= 2 && caps.apiName == "Vulkan") AUREA_CHECK_EQ(preferred.rasterPasses, 1u);
+}
+
 AUREA_TEST(HyperAdaptive, RendererUsesTemporalOnlyForSupportedReducedPreviewScenes) {
     AUREA_REQUIRE_GPU();
     using namespace velocity_blur;
@@ -113,10 +165,16 @@ AUREA_TEST(HyperAdaptive, RendererUsesTemporalOnlyForSupportedReducedPreviewScen
     settings.previewCacheRevision = 17;
     settings.previewCacheComposition = rig.scene.comp->id().pack();
     settings.dither = false;
-    const auto draw = [&](i64 time, bool expectTemporal) {
+    u64 modelKey = 0;
+    const auto draw = [&](i64 time, bool expectTemporal, bool expectModelSpace = false) {
         FrameSnapshot snapshot;
         g.renderer.prepare(*rig.scene.comp, rig.scene.project, FrameIndex{time}, nullptr, nullptr, nullptr,
             settings, static_cast<u64>(time + 10), 1, DecodeMode::Playback, 1.f, snapshot);
+        AUREA_CHECK_EQ(snapshot.temporalModelSpace, expectModelSpace);
+        if (expectModelSpace) {
+            if (modelKey) AUREA_CHECK_EQ(snapshot.temporalContentKey, modelKey);
+            modelKey = snapshot.temporalContentKey;
+        }
         FrameStats stats; RenderTimings timings;
         const u32 width = settings.finalQuality ? 320 : 160, height = settings.finalQuality ? 180 : 90;
         OffscreenTarget output{g.target(width, height), width, height};
@@ -136,7 +194,13 @@ AUREA_TEST(HyperAdaptive, RendererUsesTemporalOnlyForSupportedReducedPreviewScen
     for (i64 frame = 0; frame < 8; ++frame) (void)draw(frame, capable);
     model->tracks.get_or_create(TrackProperty::PositionX).set(FrameIndex{0}, 100);
     model->tracks.get_or_create(TrackProperty::PositionX).set(FrameIndex{30}, 220);
-    (void)draw(8, false);
+    (void)draw(8, capable, true);
+    (void)draw(9, capable, true);
+    const u64 beforeSeek = modelKey;
+    ++settings.previewPlaybackGeneration;
+    modelKey = 0;
+    (void)draw(10, capable, true);
+    AUREA_CHECK(beforeSeek != modelKey);
     settings.finalQuality = true;
     settings.previewDenominator = 1;
     const auto reference = draw(9, false);
@@ -144,4 +208,10 @@ AUREA_TEST(HyperAdaptive, RendererUsesTemporalOnlyForSupportedReducedPreviewScen
     settings.heavy = HeavyQuality::from_scale(.25f, 8);
     const auto stressed = draw(9, false);
     AUREA_CHECK(reference == stressed);
+    settings.finalQuality = false;
+    settings.previewDenominator = 2;
+    settings.heavyExplicit = false;
+    model->tracks.get_or_create(TrackProperty::Opacity).set(FrameIndex{0}, 1.f);
+    model->tracks.get_or_create(TrackProperty::Opacity).set(FrameIndex{30}, .5f);
+    (void)draw(11, false);
 }

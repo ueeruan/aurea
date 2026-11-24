@@ -21,6 +21,7 @@
 #include "aurea/core/Types.hpp"
 
 #include <algorithm>
+#include <optional>
 
 namespace aurea {
 
@@ -68,6 +69,20 @@ inline constexpr u64 kExportMemoryFloorBytes = 128ull << 20;
     u64 budget = deviceCap ? std::min(processBudget, deviceCap) : processBudget;
     budget = budget * export_memory_step_permille(step) / 1000;   // u64: sem estouro até 18 PB
     return std::min(processBudget, std::max(budget, kExportMemoryFloorBytes));
+}
+
+inline constexpr u64 kExportGpuBudgetSampleIntervalNs = 125'000'000;
+
+/// Leave room for two RGBA16F composition buffers before overlapping frames.
+[[nodiscard]] constexpr bool export_gpu_can_overlap_frames(std::optional<u64> headroom, u32 width, u32 height) noexcept {
+    if (!headroom || width == 0 || height == 0) return true;
+    return *headroom / 16 / width >= height;
+}
+
+/// Reserve most of the headroom for scene attachments, uploads and composition.
+/// The compositor still submits every shutter sample, at least one per batch.
+[[nodiscard]] constexpr u64 export_exposure_batch_budget_bytes(u64 planned, std::optional<u64> headroom) noexcept {
+    return headroom ? std::min(planned, std::max<u64>(1, *headroom / 4)) : planned;
 }
 
 } // namespace aurea

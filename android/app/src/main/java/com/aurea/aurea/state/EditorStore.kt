@@ -2169,6 +2169,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         return rows to (engine.vectorTreeNames(id)?.split('\n') ?: emptyList())
     }
 
+    fun editPrecompControl(group: Long, target: Long, kind: Int, operation: Int, text: String, rgba: FloatArray): Boolean {
+        if (!engine.editPrecompControl(group, target, kind, operation, text, rgba)) return false
+        refreshNow()
+        return true
+    }
+    fun precompControls(group: Long): Array<String> = engine.precompControls(group)
+    fun exportSourceIssues(): Array<String> = engine.exportSourceIssues()
+
     /** Edita a árvore (Engine::vector_tree_edit). `path` = o grupo dono, do primeiro nível até ele. */
     fun editVectorTree(path: IntArray, op: Int, a: Int = 0, b: Int = 0, c: Int = 0, values: FloatArray? = null,
         name: String? = null, continuing: Boolean = false): Boolean {
@@ -2765,6 +2773,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     class AeImportItem(
         val kind: String, val name: String, val reason: String, val line: Int,
         val reasonKey: String = "", val reasonArgs: List<String> = emptyList(),
+        val composition: Long = 0, val layer: Long = 0, val layerName: String = "",
     )
     class AeImportResult(
         val ok: Boolean, val fileName: String, val kind: String, val message: String,
@@ -2779,6 +2788,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var aeImportResult by mutableStateOf<AeImportResult?>(null)
         private set
     fun dismissAeImport() { aeImportResult = null }
+    fun focusReportedLayer(comp: Long, layer: Long): Boolean {
+        val route = engine.reportedLayerRoute(comp, layer)
+        if (route.isEmpty()) { showToast(appText(R.string.motion_control_unavailable)); return false }
+        for (index in 0 until route.lastIndex) openPrecomp(route[index])
+        if (composition?.id != comp || layers.none { it.id == layer }) return false
+        select(layer)
+        return true
+    }
 
     /** O lançador fica no AureaApp para sobreviver ao fechamento dos menus. */
     var aePickRequested by mutableStateOf(false)
@@ -2885,7 +2902,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             (0 until array.length()).mapNotNull { index ->
                 array.optJSONObject(index)?.let {
                     AeImportItem(it.optString("kind"), it.optString("name"), it.optString("reason"), it.optInt("line"),
-                        it.optString("reasonKey"), strings(it.optJSONArray("reasonArgs")))
+                        it.optString("reasonKey"), strings(it.optJSONArray("reasonArgs")),
+                        it.optString("composition").toULongOrNull()?.toLong() ?: 0L,
+                        it.optString("layer").toULongOrNull()?.toLong() ?: 0L, it.optString("layerName"))
                 }
             }
         }.orEmpty()
@@ -7106,6 +7125,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private var motionRectanglePick = false
     private var motionModelOverride: Int? = null
     private var motionConfirmPick = false
+    private var motionRepair: IntRange? = null
     private val motionNeeded get() = if (motionTool == 0) 1 else if (motionTool == 1 || motionRectanglePick) 2 else 4
     val motionPointsReady get() = pointPick != null && motionPicked == motionNeeded
 
@@ -7122,6 +7142,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (tool in 2..3 && !requireHyperSubscription()) return
         pause()
         motionAutoApply = -1
+        motionRepair = null
         motionRectanglePick = rectangle && tool == 2
         motionConfirmPick = confirm
         motionModelOverride = modelOverride
@@ -7134,7 +7155,20 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             else -> R.string.app_track_tap_detail
         }))
     }
-    fun cancelMotionPick() { pointPick = null; motionSeeds.clear(); motionPicked = 0; pickCursor = null; motionAutoApply = -1; motionRectanglePick = false; motionConfirmPick = false }
+    fun cancelMotionPick() { pointPick = null; motionSeeds.clear(); motionPicked = 0; pickCursor = null; motionAutoApply = -1; motionRectanglePick = false; motionConfirmPick = false; motionRepair = null }
+    fun beginMotionRepair(first: Int, last: Int) {
+        val tool = motionStatus[4].toInt()
+        if (tool !in 2..3 || first >= last || motionStatus[0].toInt() != 2) return
+        beginMotionPick(tool, confirm = true)
+        if (pointPick != null) {
+            motionRepair = first..last
+            seek(first)
+        }
+    }
+    fun finishMotionRepair(accept: Boolean) {
+        if (!engine.finishMotionRepair(accept)) showToast(appText(R.string.track_start_failed))
+        refreshMotionStatus()
+    }
     fun finishPointPick(x: Float, y: Float) {
         if (pointPick == null || motionSource != primary) { cancelMotionPick(); return }
         if (motionPointsReady) return
@@ -7154,6 +7188,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
     fun confirmMotionPoints() {
         if (!motionPointsReady || motionSource != primary) return
+        if (motionRepair?.first?.let { it != playhead } == true) {
+            showToast(appText(R.string.motion_repair_seed))
+            return
+        }
         if (motionRectanglePick) {
             val x = motionSeeds[2]
             val y = motionSeeds[3]
@@ -7178,8 +7216,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val solveModel = motionModelOverride ?: if (motionRectanglePick) 0 else motionModel
         motionRectanglePick = false
         motionModelOverride = null
-        if (!engine.startMotionTrack(id, motionTool, solveModel, motionBackward, motionSeeds.toFloatArray(),
-                motionFeature, motionSearch, motionConfidence, motionValidateBack)) {
+        val range = motionRepair
+        motionRepair = null
+        val points = motionSeeds.toFloatArray()
+        val started = if (range != null) engine.startMotionRepair(id, motionTool, range.first, range.last, points)
+            else engine.startMotionTrack(id, motionTool, solveModel, motionBackward, points,
+                motionFeature, motionSearch, motionConfidence, motionValidateBack)
+        if (!started) {
             motionAutoApply = -1
             showToast(appText(R.string.track_start_failed))
             refreshMotionStatus()
@@ -7213,7 +7256,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         }
     }
     fun motionSurface(): FloatArray? {
-        if (pointPick != null || motionStatus[0].toInt() != 2 || motionStatus[4].toInt() !in 2..3) return null
+        if (pointPick != null || motionStatus[0].toInt() !in listOf(2, 5) || motionStatus[4].toInt() !in 2..3) return null
         val points = FloatArray(12)
         return points.takeIf { engine.motionTrackFeatures(playhead, it) == 4 }
     }
@@ -7477,28 +7520,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         showToast(appText(R.string.msg_toque_no_palco_para_por_pontos))
     }
 
-    /** Máscara pronta (0 retângulo, 1 elipse) em 70 % da camada, centrada. */
+    /** Cria um caminho editável nas coordenadas da camada. */
     fun addMaskPreset(shape: Int) {
         val id = primary ?: return
         val d = detail ?: return
         val w = com.aurea.aurea.editor.LayerGeometry.width(d)
         val h = com.aurea.aurea.editor.LayerGeometry.height(d)
-        if (w <= 0f || h <= 0f) return
-        val cx = w / 2
-        val cy = h / 2
-        val rx = w * 0.35f
-        val ry = h * 0.35f
-        val pts = if (shape == 0) {
-            floatArrayOf(cx - rx, cy - ry, 0f, 0f, 0f, 0f, cx + rx, cy - ry, 0f, 0f, 0f, 0f,
-                cx + rx, cy + ry, 0f, 0f, 0f, 0f, cx - rx, cy + ry, 0f, 0f, 0f, 0f)
-        } else {
-            // Elipse de 4 cúbicas (k = 0,5523: erro radial < 0,03 %).
-            val kx = rx * 0.5523f
-            val ky = ry * 0.5523f
-            floatArrayOf(cx, cy - ry, -kx, 0f, kx, 0f, cx + rx, cy, 0f, -ky, 0f, ky,
-                cx, cy + ry, kx, 0f, -kx, 0f, cx - rx, cy, 0f, ky, 0f, -ky)
-        }
-        val mid = engine.addMask(id, pts, 4, true)
+        val mid = engine.addMaskPreset(id, shape, w, h)
         if (mid < 0) { showToast(appText(R.string.msg_esta_camada_nao_aceita_mais_mascaras)); return }
         refreshNow()
         maskEdit = mid
@@ -7534,7 +7562,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             com.aurea.aurea.engine.VVertex(m.points[o], m.points[o + 1], m.points[o + 2], m.points[o + 3], m.points[o + 4], m.points[o + 5])
         }
         val flags = 1 or (if (m.keyCount > 0) 2 else 0) or (if (m.keyHere) 4 else 0)
-        return com.aurea.aurea.engine.VPathAt(state.m, flags, com.aurea.aurea.engine.VBezier(v, m.closed))
+        return com.aurea.aurea.engine.VPathAt(state.m, flags, com.aurea.aurea.engine.VBezier(v, m.closed), state.w)
     }
 
     /** Fim de um gesto de máscara no palco: relê tudo (timeline, keyframes). */
@@ -7924,10 +7952,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshNow()
     }
 
-    /** Remapear tempo: o momento do vídeo (segundos da fonte) na chave do cabeçote. */
-    fun setRemapTime(effectId: Int, seconds: Float, localFrame: Int = detail?.localPlayhead ?: 0) {
+    /** Momento da fonte em quadros da composição, na chave indicada. */
+    fun setRemapSourceFrame(localFrame: Int, sourceFrame: Float) {
         val id = primary ?: return
-        if (!engine.setTimeRemapValue(id, localFrame.toLong(), seconds * project.fps.coerceAtLeast(1f))) return
+        if (!engine.setTimeRemapValue(id, localFrame.toLong(), sourceFrame)) return
         refreshNow()
     }
 
@@ -7941,7 +7969,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Ao contrário: espelha a curva de tempo no clipe (um passo de desfazer). */
     fun reverseRemap() {
         val id = primary ?: return
-        engine.reverseTimeRemap(id)
+        if (!engine.reverseTimeRemap(id)) return
         thumbnails.unalias(id)
         refreshNow()
     }
@@ -10594,8 +10622,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * fica onde está na tela e passa a seguir o pai dali em diante.
      */
     fun setParent(layer: Long, parent: Long) {
-        send { setLayerParent(layer, parent) }
-        refreshNow()
+        setParentMany(listOf(layer), parent)
     }
 
     // --- Prender a um osso (0.5.2) ----------------------------------------------
@@ -10617,14 +10644,17 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** Vários filhos para o mesmo pai (0 = soltar), num passo de desfazer. */
     fun setParentMany(ids: Collection<Long>, parent: Long) {
-        val children = ids.filter { it != parent && (parent == 0L || parentCandidates(it).any { c -> c.id == parent }) }
+        val rows = editingLayers
+        val children = ids.filter { it != parent }
         if (children.isEmpty()) return
         // Bug #9c: o motor liga todas de uma vez (Engine::set_parent_many) — um passo
         // de desfazer, compensação de cada filho e as bloqueadas de fora.
         val changed = engine.setParentMany(children.toLongArray(), parent)
         refreshNow()
         if (changed < 0) {
-            if (layers.any { it.id in children && it.locked }) showToast(appText(R.string.editor_camada_bloqueada_desbloqueie_editar))
+            val reason = if (rows.any { it.id in children && it.locked }) R.string.editor_camada_bloqueada_desbloqueie_editar
+                else R.string.editor_parent_link_failed
+            showToast(appText(reason))
             return
         }
         if (parent != 0L) showToast(appText(R.string.msg_camada_s_seguindo_o_pai_escolhido, changed))
@@ -10637,14 +10667,15 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      */
     fun parentSelectionToNewNull(ids: Collection<Long> = editingSelection) {
         if (ids.isEmpty()) return
+        val group = groupInnerSelection?.first
         val id = engine.parentToNewNull(ids.toLongArray())
         if (id < 0) {
             errorMessage = appText(R.string.msg_nao_foi_possivel_criar_o_nulo, -id)
             return
         }
         refreshNow()
-        select(id)
-        val rows = layers
+        if (group != null) selectGroupInner(group, id) else select(id)
+        val rows = editingLayers
         val linked = rows.count { rows.getOrNull(it.parentIndex)?.id == id }
         showToast(appText(R.string.msg_camadas_seguindo_novo_nulo, linked))
     }
@@ -10652,30 +10683,19 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Pais possíveis para todas: nenhuma das escolhidas nem descendente delas. */
     fun parentCandidatesForAll(ids: Collection<Long>): List<LayerRow> {
         if (ids.isEmpty()) return emptyList()
-        var set: Set<Long>? = null
-        for (id in ids) {
-            val c = parentCandidates(id).map { it.id }.toSet()
-            set = set?.intersect(c) ?: c
-        }
-        val ok = (set ?: emptySet()) - ids.toSet()
-        return layers.filter { it.id in ok }
-    }
-
-    /** Pais possíveis: toda camada que não é ela nem descendente dela. */
-    fun parentCandidates(layer: Long): List<LayerRow> {
-        val rows = layers
-        val self = rows.indexOfFirst { it.id == layer }
-        if (self < 0) return emptyList()
+        val rows = editingLayers
+        val selected = ids.toSet()
+        if (rows.count { it.id in selected } != selected.size) return emptyList()
         return rows.filterIndexed { i, _ ->
             var cur = i
             var steps = 0
             // Omega grid: cadeia de pais sem teto (o limite só corta um ciclo).
             while (cur >= 0 && cur < rows.size && steps <= rows.size) {
-                if (cur == self) return@filterIndexed false
+                if (rows[cur].id in selected) return@filterIndexed false
                 cur = rows[cur].parentIndex
                 steps++
             }
-            true
+            steps <= rows.size
         }
     }
 
@@ -10879,6 +10899,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun setLayerReversed(reversed: Boolean) {
         val id = primary ?: return
         send { setLayerReversed(id, reversed) }
+        thumbnails.unalias(id)
         refreshNow()
     }
 
@@ -12350,7 +12371,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     val isDrawingLayer: Boolean get() = isVectorLayer && vectorDoc?.drawing == true
 
     /** "Mão livre": camada de desenho nova, escolhida, e o editor de desenho. */
-    fun startDrawing() {
+    fun startDrawing(inScene: Boolean = false) {
         if (playing) pause()
         vectorTool = 0
         val id = engine.addDrawingLayer()
@@ -12358,6 +12379,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             errorMessage = appText(R.string.msg_nao_foi_possivel_criar_o_desenho, -id)
             return
         }
+        if (inScene) engine.setLayer3D(id, true)
         refreshNow()
         vectorGroup = 0
         vectorPath = 0
@@ -12389,6 +12411,28 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (!continuing) refreshNow()
         return r
     }
+
+    /**
+     * Arrasto de pontos (kind 0) ou de uma alça (1 entrada, 2 saída) do caminho
+     * escolhido no palco, de `from` a `to` em px da composição: o motor leva os
+     * dois ao plano da camada (3D: raio da câmera × plano) e aplica a regra do
+     * Editar pontos. `locks`: bit0 trava o ângulo, bit1 o comprimento.
+     */
+    fun dragVectorPathOnStage(kind: Int, points: IntArray, fromX: Float, fromY: Float, toX: Float, toY: Float,
+        locks: Int, continuing: Boolean): Int {
+        val id = primary ?: return -1
+        if (playing) pause()
+        val r = engine.dragVectorPathOnStage(id, vectorGroup, vectorPath, kind, points, fromX, fromY, toX, toY, locks, continuing)
+        refreshVector()
+        if (!continuing) refreshNow()
+        return r
+    }
+
+    /** Camada 3D de lado para a câmera: o dedo não acha o plano (aviso uma vez por arrasto). */
+    fun warnVectorPlaneEdgeOn() = showToast(appText(R.string.om_pts_3d_edge))
+
+    /** Pontos do caminho escolhido no palco (Engine::vector_path_stage_points). */
+    fun vectorStagePoints(): FloatArray? = primary?.let { engine.vectorPathStagePoints(it, vectorGroup, vectorPath) }
 
     /** Escolhe o contorno (caminho) do grupo atual sem soltar o ponto da faixa. */
     fun chooseContour(path: Int) {

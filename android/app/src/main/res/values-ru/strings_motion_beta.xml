@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="motion_vector_order">Порядок отрисовки</string>
+    <string name="motion_vector_order_hint">Упорядочьте контуры, обводки и операции.</string>
+    <string name="motion_vector_trim">Обрезка</string>
+    <string name="motion_vector_repeat">Повторитель</string>
+    <string name="motion_move_up">Переместить %1$s вверх</string>
+    <string name="motion_move_down">Переместить %1$s вниз</string>
+    <string name="motion_vector_move_unavailable">Слой заблокирован или перемещение изменит анимацию.</string>
+    <string name="motion_precomp_controls">Настройки прекомпозиции</string>
+    <string name="motion_precomp_empty">Доступных настроек нет.</string>
+    <string name="motion_precomp_publish">Открыть настройку</string>
+    <string name="motion_precomp_reset">Вернуть исходное значение</string>
+    <string name="motion_control_text">Текст</string>
+    <string name="motion_control_unavailable">Слой или настройка недоступны.</string>
+    <string name="motion_repair_range">Исправить участок отсюда</string>
+    <string name="motion_repair_end">Нажмите на полосу просмотра, чтобы выбрать конец участка.</string>
+    <string name="motion_repair_corners">Отметить четыре угла</string>
+    <string name="motion_repair_seed">Вернитесь к начальному кадру и подтвердите углы.</string>
+    <string name="motion_repair_ready">Проверьте исправление в предпросмотре и примените его к участку.</string>
+    <string name="motion_export_missing">Файл отсутствует</string>
+    <string name="motion_export_unreadable">Файл не удалось прочитать</string>
+    <string name="motion_export_source_warning">Некоторые файлы отсутствуют или не читаются. Проверьте слои перед экспортом.</string>
+    <string name="motion_export_waiting_decode">Ожидание декодера видео…</string>
+    <string name="motion_link_media">Привязать файл</string>
+    <string name="motion_view_layer">Показать слой</string>
+    <string name="motion_release_body">Aurea 1.0.8.1 BETA (2232)\n• Новый порядок контуров, обводок и векторных операций.\n• Общие правила кривых скорости на Android и iOS.\n• Текст, цвет и прозрачность для каждого экземпляра прекомпозиции.\n• Проверка и исправление участка плоского трекинга.\n• Диагностика файлов и ожидания декодера при экспорте.</string>
+</resources>

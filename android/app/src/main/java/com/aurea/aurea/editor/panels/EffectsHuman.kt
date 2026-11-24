@@ -30,6 +30,9 @@ internal fun effectTypeId(key: String): Int {
     return h
 }
 
+private val copyEffectTypes = setOf(effectTypeId("aurea.3d.replicator"), effectTypeId("aurea.repeat.arrange"))
+internal fun isCopyLayoutEffect(type: Int?): Boolean = type != null && type in copyEffectTypes
+
 /**
  * Como UM parâmetro aparece: rótulo simples, fator de exibição (motor × [scale]
  * = o que a pessoa vê), sufixo ("%", "°", "px", "x") e casas FIXAS. Campos nulos
@@ -79,6 +82,26 @@ private val MatrixLabels = listOf(
 
 private val Table: Map<Int, EffectHuman> = buildMap {
     fun put(key: String, e: EffectHuman) = put(effectTypeId(key), e)
+    val copyParams = listOf(
+        R.string.fxl_count, R.string.repeat_distribution, R.string.fxl_spacing, R.string.fxl_columns,
+        R.string.fxl_radius, R.string.copies_end_layout, R.string.copies_morph, R.string.fxl_rotation_per_copy,
+        R.string.copies_scale, R.string.copies_scatter_xyz, R.string.copies_scatter_angle, R.string.fxl_seed,
+        R.string.copies_focus, R.string.copies_focus_radius, R.string.copies_focus_scale, R.string.copies_progress,
+        R.string.copies_stagger_width, R.string.copies_color_start, R.string.copies_color_end, R.string.copies_color_mix,
+        R.string.copies_data_toggle, R.string.copies_data_scale,
+    ).mapIndexed { index, label -> index to ParamHuman(label = label) }.toMap()
+    val copyKeywords = "replicator repeater array randomize proximity stagger color copies morph layout data repetir duplicar copias dispersar animar"
+    put("aurea.3d.replicator", EffectHuman(name = R.string.fx_model_repeat, keywords = copyKeywords, params = copyParams))
+    put("aurea.repeat.arrange", EffectHuman(name = R.string.fx_copy_arrange, keywords = copyKeywords, params = copyParams))
+    put("aurea.3d.toon", EffectHuman(name = R.string.fx_model_toon, keywords = "cel toon cartoon anime pintura faixas modelo",
+        params = mapOf(0 to ParamHuman(label = R.string.toon_bands))))
+    put("aurea.transition.ink_bloom", EffectHuman(name = R.string.fx_ink_bloom,
+        keywords = "nanquim tinta ink bloom drip splatter spill mancha revelar respingo",
+        principal = listOf(0, 1, 2, 3, 4, 7, 5, 6),
+        params = mapOf(0 to ParamHuman(label = R.string.ink_expansion), 1 to ParamHuman(label = R.string.fxl_mode),
+            2 to ParamHuman(label = R.string.fxl_center), 3 to ParamHuman(label = R.string.ink_drops),
+            4 to ParamHuman(label = R.string.ink_fibers), 5 to ParamHuman(label = R.string.fxl_softness), 6 to ParamHuman(label = R.string.fxl_seed),
+            7 to ParamHuman(label = R.string.ink_color))))
     put("aurea.transition.radial_wipe_reference", EffectHuman(name = R.string.fx_ref_radial_wipe_name,
         keywords = "radial wipe varredura abertura circular horario anti horario both", principal = listOf(0, 1, 2, 3, 4),
         params = mapOf(4 to ParamHuman(scale = 1f, suffix = "px", decimals = 1))))
@@ -1986,7 +2009,21 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put("aurea.generate.particular", EffectHuman(
         name = R.string.afx_name_particular,
         keywords = "particulas particles particular emissor emitter neve snow chuva rain fogo fire faiscas sparks fogos fireworks poeira dust bokeh cc rainfall snowfall particle world",
-        principal = listOf(0, 9, 13, 15, 22, 24, 27, 32, 33, 35, 38),
+        principal = listOf(48, 52, 0, 9, 13, 15, 22, 24, 27, 32, 33, 35, 38),
+        params = mapOf(
+            48 to ParamHuman(label = R.string.particular_shape),
+            52 to ParamHuman(label = R.string.particle_emission),
+            53 to ParamHuman(label = R.string.particle_path_layer),
+            54 to ParamHuman(label = R.string.particle_sprite_layer),
+            55 to ParamHuman(label = R.string.particle_form_x),
+            56 to ParamHuman(label = R.string.particle_form_y),
+            57 to ParamHuman(label = R.string.particle_form_z),
+            58 to ParamHuman(label = R.string.particle_disperse),
+            59 to ParamHuman(label = R.string.particle_size_curve),
+            60 to ParamHuman(label = R.string.particle_opacity_curve),
+            61 to ParamHuman(label = R.string.particle_use_life_gradient),
+            62 to ParamHuman(label = R.string.particle_life_gradient),
+        ),
     ))
     // --- 0.4.5: pedidos de usuários. Nomes de produtos de terceiros (Light Wrap
     // dos compositores, Magic Bullet Looks, Ballpoint/Dust dos pacotes de

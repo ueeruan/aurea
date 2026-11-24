@@ -276,6 +276,8 @@ class AureaEngine private constructor() {
          */
         @JvmStatic external fun nativeSampleEase(interp: Int, x1: Float, y1: Float, x2: Float, y2: Float, power: Int, out: FloatArray): Int
         @JvmStatic external fun nativeTemporalEase(toHandles: Boolean, a: Float, b: Float, c: Float, d: Float, seconds: Float, delta: Float, out: FloatArray): Boolean
+        @JvmStatic external fun nativeSpeedGraphTangent(handles: FloatArray, incoming: Boolean, power: Int,
+            base: Float, fraction: Float, velocity: Float, editing: Boolean): FloatArray?
         /** Taxa de vídeo (bps) que o export usaria: a regra do motor (BitratePolicy). `quality` 0/1/2. */
         @JvmStatic external fun nativeExportBitrateBps(width: Int, height: Int, fps: Double, codec: Int, quality: Int, customMbps: Int): Long
         /**
@@ -910,6 +912,8 @@ class AureaEngine private constructor() {
     // Máscaras (roto) e track matte. Pontos = 6 floats cada (x, y, entrada x/y,
     // saída x/y — px da camada).
     fun addMask(layer: Long, pts: FloatArray?, count: Int, closed: Boolean): Int = nativeAddMask(nativeHandle, layer, pts, count, closed)
+    fun addMaskPreset(layer: Long, preset: Int, width: Float, height: Float): Int =
+        nativeAddMaskPreset(nativeHandle, layer, preset, width, height)
     fun removeMask(layer: Long, mask: Int): Boolean = nativeRemoveMask(nativeHandle, layer, mask)
     fun setMaskPath(layer: Long, mask: Int, pts: FloatArray?, count: Int, closed: Boolean, undo: Boolean): Boolean =
         nativeSetMaskPath(nativeHandle, layer, mask, pts, count, closed, undo)
@@ -1604,6 +1608,9 @@ class AureaEngine private constructor() {
                          confidence: Float = .65f, validateBack: Boolean = false): Boolean =
         nativeStartMotionTrack(nativeHandle, layer, tool, model, backward, points, feature, search, confidence, validateBack)
     fun cancelMotionTrack() = nativeCancelMotionTrack(nativeHandle)
+    fun startMotionRepair(layer: Long, tool: Int, first: Int, last: Int, points: FloatArray): Boolean =
+        nativeStartMotionRepair(nativeHandle, layer, tool, first.toLong(), last.toLong(), points)
+    fun finishMotionRepair(accept: Boolean): Boolean = nativeFinishMotionRepair(nativeHandle, accept)
     fun pauseMotionTrack(paused: Boolean) = nativePauseMotionTrack(nativeHandle, paused)
     fun motionTrackReview(source: Long): FloatArray = nativeMotionTrackReview(nativeHandle, source) ?: FloatArray(0)
     fun motionTrackTrail(source: Long, frame: Int): FloatArray =
@@ -1618,6 +1625,8 @@ class AureaEngine private constructor() {
     fun applyMotionTrack(target: Long, apply: Int, lock: Boolean, smooth: Float, maxScale: Float, crop: Int): Long = nativeApplyMotionTrack(nativeHandle, target, apply, lock, smooth, maxScale, crop)
     private external fun nativeStartMotionTrack(handle: Long, layer: Long, tool: Int, model: Int, backward: Boolean, points: FloatArray, feature: Float, search: Float, confidence: Float, validateBack: Boolean): Boolean
     private external fun nativeCancelMotionTrack(handle: Long)
+    private external fun nativeStartMotionRepair(handle: Long, layer: Long, tool: Int, first: Long, last: Long, points: FloatArray): Boolean
+    private external fun nativeFinishMotionRepair(handle: Long, accept: Boolean): Boolean
     private external fun nativePauseMotionTrack(handle: Long, paused: Boolean)
     private external fun nativeMotionTrackReview(handle: Long, source: Long): FloatArray?
     private external fun nativeMotionTrackTrail(handle: Long, source: Long, frame: Long): FloatArray?
@@ -2683,6 +2692,7 @@ class AureaEngine private constructor() {
     private external fun nativeSetTransition(handle: Long, layer: Long, out: Boolean, type: Int, frames: Int): Boolean
     private external fun nativeSetEcho(handle: Long, layer: Long, count: Int, delay: Float, decay: Float): Boolean
     private external fun nativeAddMask(handle: Long, layer: Long, pts: FloatArray?, count: Int, closed: Boolean): Int
+    private external fun nativeAddMaskPreset(handle: Long, layer: Long, preset: Int, width: Float, height: Float): Int
     private external fun nativeRemoveMask(handle: Long, layer: Long, mask: Int): Boolean
     private external fun nativeSetMaskPath(handle: Long, layer: Long, mask: Int, pts: FloatArray?, count: Int, closed: Boolean, undo: Boolean): Boolean
     private external fun nativeSetMaskProps(handle: Long, layer: Long, mask: Int, op: Int, inverted: Boolean, feather: Float, expansion: Float, opacity: Float): Boolean
@@ -2881,12 +2891,30 @@ class AureaEngine private constructor() {
     fun vectorTree(layer: Long): FloatArray? = nativeVectorTree(nativeHandle, layer)
     /** O nome de cada linha de GRUPO da árvore, um por linha de texto. */
     fun vectorTreeNames(layer: Long): String? = nativeVectorTreeNames(nativeHandle, layer)
+    fun precompControls(group: Long): Array<String> = nativePrecompControls(nativeHandle, group) ?: emptyArray()
+    fun exportSourceIssues(): Array<String> = nativeWork.run(emptyArray()) { nativeExportSourceIssues(nativeHandle) ?: emptyArray() }
+    fun reportedLayerRoute(comp: Long, layer: Long): LongArray = nativeReportedLayerRoute(nativeHandle, comp, layer) ?: LongArray(0)
+    private external fun nativeExportSourceIssues(handle: Long): Array<String>?
+    private external fun nativeReportedLayerRoute(handle: Long, comp: Long, layer: Long): LongArray?
+    fun editPrecompControl(group: Long, target: Long, kind: Int, operation: Int, text: String, rgba: FloatArray): Boolean =
+        rgba.size == 4 && nativeEditPrecompControl(nativeHandle, group, target, kind, operation, text, rgba[0], rgba[1], rgba[2], rgba[3])
+    private external fun nativePrecompControls(handle: Long, group: Long): Array<String>?
+    private external fun nativeEditPrecompControl(handle: Long, group: Long, target: Long,
+        kind: Int, operation: Int, text: String, r: Float, g: Float, b: Float, a: Float): Boolean
     /** Edita a árvore (Engine::vector_tree_edit): `path` = o grupo dono; op 0 acrescentar, 1 remover, 2 mover, 3 ligar, 4 valores, 5 renomear, 6 transform do grupo, 7 ordem livre, 8 grupo novo no primeiro nível. */
     fun vectorTreeEdit(layer: Long, path: IntArray, op: Int, a: Int = 0, b: Int = 0, c: Int = 0, values: FloatArray? = null,
         name: String? = null, continuing: Boolean = false): Boolean =
         nativeVectorTreeEdit(nativeHandle, layer, path, op, a, b, c, values, name, continuing)
-    /** [afim grupo→composição (6), flags, bezier…] do caminho no cabeçote. */
+    /** [afim grupo→composição (6), flags, bezier…] do caminho no cabeçote; flags bit3 (3D): + linha de perspectiva (3). */
     fun vectorPathAt(layer: Long, group: Int, path: Int): FloatArray? = nativeVectorPathAt(nativeHandle, layer, group, path)
+    /** Pontos 3D no palco: [nº, 3D, fechado] + 9 por ponto (x, y, visível; entrada; saída) em px da composição. */
+    fun vectorPathStagePoints(layer: Long, group: Int, path: Int): FloatArray? = nativeVectorPathStagePoints(nativeHandle, layer, group, path)
+    /** Composição → grupo pelo plano da camada (raio × plano); nulo = de lado ou atrás da câmera. */
+    fun vectorPathUnproject(layer: Long, group: Int, x: Float, y: Float): FloatArray? = nativeVectorPathUnproject(nativeHandle, layer, group, x, y)
+    /** Arrasto no palco (kind 0 pontos, 1 alça de entrada, 2 de saída) de `from` a `to` (px da composição) no plano da camada. */
+    fun dragVectorPathOnStage(layer: Long, group: Int, path: Int, kind: Int, points: IntArray, fromX: Float, fromY: Float,
+        toX: Float, toY: Float, locks: Int, continuing: Boolean): Int =
+        nativeDragVectorPathOnStage(nativeHandle, layer, group, path, kind, points, fromX, fromY, toX, toY, locks, continuing)
     fun setVectorPath(layer: Long, group: Int, path: Int, bez: FloatArray, continuing: Boolean): Boolean =
         nativeSetVectorPath(nativeHandle, layer, group, path, bez, continuing)
     /** 0.5.0: keyframe só dos pontos escolhidos da máscara, no cabeçote. */
@@ -2969,6 +2997,10 @@ class AureaEngine private constructor() {
     private external fun nativeVectorTreeEdit(handle: Long, layer: Long, path: IntArray, op: Int, a: Int, b: Int, c: Int,
         values: FloatArray?, name: String?, continuing: Boolean): Boolean
     private external fun nativeVectorPathAt(handle: Long, layer: Long, group: Int, path: Int): FloatArray?
+    private external fun nativeVectorPathStagePoints(handle: Long, layer: Long, group: Int, path: Int): FloatArray?
+    private external fun nativeVectorPathUnproject(handle: Long, layer: Long, group: Int, x: Float, y: Float): FloatArray?
+    private external fun nativeDragVectorPathOnStage(handle: Long, layer: Long, group: Int, path: Int, kind: Int, points: IntArray,
+        fromX: Float, fromY: Float, toX: Float, toY: Float, locks: Int, continuing: Boolean): Int
     private external fun nativeSetVectorPath(handle: Long, layer: Long, group: Int, path: Int, bez: FloatArray, continuing: Boolean): Boolean
     private external fun nativeToggleMaskPathPointsKey(handle: Long, layer: Long, mask: Int, points: IntArray): Boolean
     private external fun nativeToggleVectorPathPointsKey(handle: Long, layer: Long, group: Int, path: Int, points: IntArray): Boolean

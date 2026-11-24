@@ -16,6 +16,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.test.platform.app.InstrumentationRegistry
 import com.aurea.aurea.effects.PluginTexts
 import com.aurea.aurea.effects.effectCardId
+import com.aurea.aurea.editor.panels.effectTypeId
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.theme.AureaTheme
 import org.junit.Assert.*
@@ -40,6 +41,62 @@ class Plugins030DeviceTest {
         val out = File(dir, name)
         instrumentation.context.assets.open("plugins/$name").use { input -> out.outputStream().use { input.copyTo(it) } }
         return Uri.fromFile(out)
+    }
+
+    @Test fun sceneMenuRunsAUserScriptAgainstTheSelectedModel() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        lateinit var store: EditorStore
+        var ready = false
+        compose.setContent {
+            store = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))
+            ready = true
+            AureaTheme { EditorScreen(store) }
+        }
+        compose.waitUntil(30000) { ready && store.engineReady }
+        val id = "aurea.tests.scene-panel"
+        val archive = File(context.cacheDir, "scene-action.aureaplugin")
+        ZipOutputStream(archive.outputStream()).use { zip ->
+            fun add(name: String, content: String) {
+                zip.putNextEntry(ZipEntry(name))
+                zip.write(content.toByteArray(Charsets.UTF_8))
+                zip.closeEntry()
+            }
+            add("plugin.json", """
+                {"aureaPlugin":3,"id":"$id","name":"Scene action","version":"1.0.0","kind":"panel","script":"main.js",
+                 "ui":{"panels":[{"id":"tools","title":"Scene tools","placement":["scene.panel"],
+                 "controls":[{"id":"applyScene","type":"button","label":"Apply","onClick":"runScene"}]}],
+                 "actions":[{"id":"open","title":"Open scene tools","placement":"scene.menu","needsLayer":true,"panel":"tools"}]}}
+            """.trimIndent())
+            add("main.js", """
+                function runScene() {
+                  const layer = app.project.activeItem.selectedLayers[0];
+                  const effect = layer.addEffect("aurea.3d.replicator");
+                  effect.property("count").setValue(7);
+                }
+            """.trimIndent())
+        }
+        compose.runOnIdle {
+            if (store.plugins.any { it.id == id }) store.removePlugin(id)
+            store.newProject(320, 240, 30f, "Scene plugin test")
+        }
+        compose.waitUntil(20000) { store.project.title == "Scene plugin test" && !store.projectOperationBusy }
+        compose.runOnIdle { store.installPlugin(Uri.fromFile(archive)) }
+        compose.waitUntil(20000) { store.plugins.any { it.id == id && it.ok } && store.busyMessage == null }
+        compose.runOnIdle {
+            assertTrue(store.addShape3D(0) > 0)
+            store.enterSceneEditor()
+        }
+        compose.waitUntil(10000) { store.sceneEditor && store.detail?.kind == 10 }
+        compose.onNodeWithTag("scene.addons").performScrollTo().performClick()
+        compose.onNodeWithTag("scene.plugin.action.$id.open").performScrollTo().performClick()
+        compose.onNodeWithTag("plugin.ctl.applyScene").assertIsDisplayed().performClick()
+        val repeatType = effectTypeId("aurea.3d.replicator")
+        compose.waitUntil(10000) {
+            val effect = store.effects.firstOrNull { it.typeId == repeatType }
+            effect != null && store.effectParams[effect.effectId]?.firstOrNull()?.value?.firstOrNull() == 7f
+        }
+        assertEquals(1, store.layers.size)
+        compose.runOnIdle { store.removePlugin(id) }
     }
 
     @Test fun textureParametersAtSlot1023ReachTheGpuAndPresetsUpdateTheEditor() {
@@ -111,8 +168,7 @@ class Plugins030DeviceTest {
         compose.onNodeWithTag(pluginAction).assertIsDisplayed()
         captureBrowser("audit-effects-plugins")
         compose.onNodeWithTag(pluginAction).performClick()
-        compose.onNodeWithTag("effects.detail.variant.${effectCardId(plugin.effectTypeId)}")
-            .performScrollTo().performClick()
+
         compose.waitUntil(15000) {
             val effect = store.effects.firstOrNull { it.typeId == plugin.effectTypeId }
             effect != null && store.effectParams[effect.effectId]?.size == params.size

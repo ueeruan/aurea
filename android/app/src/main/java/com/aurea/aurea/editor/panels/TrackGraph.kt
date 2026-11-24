@@ -210,7 +210,7 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
                             // A curva é da PROPRIEDADE, como no painel de curva: os
                             // eixos irmãos levam a mesma (antes, só na camada 3D — na
                             // 2D o X e o Y ficavam com tempos diferentes).
-                            if (h.all { it.isFinite() }) store.setKeyframeEasing(layer, activeHandle.key, Interp.BEZIER, h[0], h[1], h[2], h[3], linkAxes = true)
+                            if (h != null) store.setKeyframeEasing(layer, activeHandle.key, Interp.BEZIER, h[0], h[1], h[2], h[3], power = activeHandle.power, linkAxes = true)
                         } else if (activeKey != null) {
                             val dy = change.position.y - down.position.y
                             val dx = change.position.x - down.position.x

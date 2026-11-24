@@ -112,12 +112,19 @@ class TextAnimatorEditingTest {
         compose.onNodeWithTag("anim.item.0").performScrollTo().performClick()
         compose.runOnIdle { store.seek(15) }
         compose.waitUntil(5000) { store.detail?.localPlayhead == 15 }
-        val keyButton = compose.onNodeWithTag("anim.0.key.0.toggle")
+        compose.onNodeWithTag("anim.0.key.0.toggle", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithTag("anim.0.key.0.label").performScrollTo().performClick()
+        val ruler = compose.onNodeWithTag("anim.0.key.0.ruler", useUnmergedTree = true)
+        ruler.assertExists()
+        val keyButton = compose.onNodeWithTag("panel.rail.keyframe")
         fun progressKeys() = store.primaryKeys().filter {
             it.property == TrackProperty.TEXT_ANIM_PARAM && it.effectIndex == 0 && it.paramIndex == 0
         }
-        keyButton.performScrollTo().performClick()
+        keyButton.performClick()
         compose.waitUntil(5000) { progressKeys().any { it.time == 15 } }
+        val valueBeforeDrag = progressKeys().first { it.time == 15 }.value
+        ruler.performTouchInput { swipeLeft(durationMillis = 450) }
+        compose.waitUntil(5000) { progressKeys().any { it.time == 15 && it.value != valueBeforeDrag } }
         keyButton.performClick()
         compose.waitUntil(5000) { progressKeys().none { it.time == 15 } }
         val presetKeys = progressKeys()
@@ -126,7 +133,8 @@ class TextAnimatorEditingTest {
         compose.waitUntil(5000) { store.textAnimators.size == 2 }
         compose.runOnIdle { store.undo() }
         compose.waitUntil(5000) { store.textAnimators.size == 1 }
-        keyButton.performScrollTo().performClick()
+        compose.onNodeWithTag("anim.0.key.0.label").performScrollTo().performClick()
+        keyButton.performClick()
         compose.waitUntil(5000) { progressKeys().size == 3 }
         compose.onNodeWithContentDescription(context.getString(R.string.panel_editar_curva_propriedade)).performClick()
         compose.runOnIdle {

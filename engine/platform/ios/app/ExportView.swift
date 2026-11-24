@@ -58,6 +58,7 @@ struct ExportView: View {
     @State private var sharedProject: SharedProjectFile?
     @State private var freeBytes: Int64 = -1
     @State private var packageSizes: (project: Int64, images: Int64, videos: Int64, audio: Int64, other: Int64)?
+    @State private var sourceIssues: [ExportSourceNotice]?
     /// Teclado do fps livre (fullScreenCover fica acima do overlay do ContentView).
     @State private var fpsKeypad: KeypadRequest?
     /// Lado menor → rótulo (o mesmo do Android).
@@ -73,14 +74,22 @@ struct ExportView: View {
         ZStack {
             if model.exportedURL != nil && !model.exporting {
                 ExportResultPage(preview: preview, sequenceFrames: sequenceFrames) { close() }
+            } else if model.exporting {
+                ExportProgressPanel(cancelled: $cancelled)
             } else {
                 page
-                if model.exporting { ExportProgressPanel(cancelled: $cancelled) }
             }
         }
         .interactiveDismissDisabled(model.exporting)
         .overlay { if let request = fpsKeypad { NumericKeypadSheet(request: request) { fpsKeypad = nil }.id(request.id) } }
         .sheet(item: $sharedProject) { file in ProjectFileShareSheet(url: file.url) }
+        .task(id: model.projectGeneration) {
+            let engine = model.engine
+            let found = await Task.detached {
+                engine.exportSourceIssues().compactMap(ExportSourceNotice.init)
+            }.value
+            if !Task.isCancelled { sourceIssues = found }
+        }
         .task {
             guard !model.exporting else { return }
             model.exportOptions = ExportOptions()
@@ -88,8 +97,11 @@ struct ExportView: View {
             model.exportOptions.bitrateMbps = 0
             model.exportOptions.quality = 60
             refreshFree()
+        }
+        .task(id: item) {
+            guard item == .sequence, !model.exporting else { return }
             let project = model.projectGeneration
-            if let frame = await model.capturePreviewFrame(640),
+            if let frame = await model.capturePreviewFrame(640, previewQuality: true),
                !Task.isCancelled, model.projectGeneration == project {
                 preview = UIImage.fromRGBA(frame.data, width: Int(frame.width), height: Int(frame.height))
             }
@@ -108,6 +120,18 @@ struct ExportView: View {
                     ScrollView {
                         VStack(spacing: 0) {
                             if attempted, let notice = failureNotice { noticeView(notice, danger: !cancelled) }
+                            if item != .package {
+                                let issues = Array((sourceIssues ?? []).prefix(8))
+                                ForEach(issues.indices, id: \.self) { index in
+                                    let issue = issues[index]
+                                    Button {
+                                        if model.focusReportedLayer(issue.comp, layer: issue.layer) { close() }
+                                    } label: {
+                                        noticeView(issue.name + " · " + AureaText.t(issue.missing ? "motion_export_missing" : "motion_export_unreadable")
+                                            + " · " + AureaText.t("motion_view_layer"), danger: true)
+                                    }.buttonStyle(.plain).disabled(model.exporting)
+                                }
+                            }
                             estimates(item)
                             optionList
                         }.padding(.bottom, 10)
@@ -133,27 +157,25 @@ struct ExportView: View {
 
     private var topBar: some View {
         VStack(spacing: 0) {
-            ZStack {
-                Text(settings.map { AureaText.t($0.nameKey) } ?? AureaText.t("om_exp_title"))
-                    .font(.aurea(size: 17, weight: .bold)).foregroundStyle(AureaColors.exportText).lineLimit(1).padding(.horizontal, 52)
-                HStack(spacing: 0) {
-                    Button {
-                        if settings != nil { settings = nil } else { close() }
-                    } label: {
-                        CupertinoGlyph.text(settings != nil ? CupertinoGlyph.ChevronLeft : CupertinoGlyph.Xmark, size: 20,
-                                            color: model.exporting ? AureaColors.exportAction : AureaColors.exportText)
-                            .mirrorsInRtl(settings != nil)
-                            .frame(width: 44, height: 44).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain).disabled(model.exporting)
-                    .accessibilityLabel(AureaText.t(settings != nil ? "om_add_back" : "editor_fechar"))
-                    .accessibilityIdentifier(settings != nil ? "export.back" : "export.close")
-                    Spacer(minLength: 0)
+            HStack(spacing: 0) {
+                Button {
+                    if settings != nil { settings = nil } else { close() }
+                } label: {
+                    CupertinoGlyph.text(settings != nil ? CupertinoGlyph.ChevronLeft : CupertinoGlyph.Xmark,
+                                        size: 18, color: AureaColors.exportAction)
+                        .mirrorsInRtl(settings != nil)
+                        .frame(width: 48, height: 48).contentShape(Rectangle())
                 }
+                .buttonStyle(.plain).disabled(model.exporting)
+                .accessibilityLabel(AureaText.t(settings != nil ? "om_add_back" : "editor_fechar"))
+                .accessibilityIdentifier(settings != nil ? "export.back" : "export.close")
+                Text(settings.map { AureaText.t($0.nameKey) } ?? AureaText.t("om_exp_title"))
+                    .font(.aurea(size: 19, weight: .bold)).foregroundStyle(AureaColors.exportText)
+                    .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityAddTraits(.isHeader)
             }
-            .frame(height: 49)
-            .background(AureaColors.exportCard)
-            Rectangle().fill(AureaColors.exportLine).frame(height: 0.7)
+            .padding(.trailing, 16).frame(minHeight: 54).background(AureaColors.exportCard)
+            AureaColors.exportLine.frame(height: 1)
         }
     }
 
@@ -167,6 +189,17 @@ struct ExportView: View {
 
     private func estimates(_ which: ExportItem) -> some View {
         VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                CupertinoGlyph.text(which.glyph, size: 18, color: AureaColors.accent)
+                    .frame(width: 36, height: 36)
+                    .background(AureaColors.accentDim, in: RoundedRectangle(cornerRadius: 9))
+                    .accessibilityHidden(true)
+                Text(model.projectName.isEmpty ? AureaText.t(which.nameKey) : model.projectName)
+                    .font(.aurea(size: 16, weight: .semibold)).foregroundStyle(AureaColors.exportText)
+                    .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("export.projectName")
+            }.padding(.horizontal, 14).padding(.vertical, 12)
+            AureaColors.exportLine.frame(height: 1).padding(.horizontal, 14)
             estimateRow("om_exp_space", freeBytes >= 0 ? sizeLabel(Double(freeBytes)) : "—", "export.estimate.space")
             Rectangle().fill(AureaColors.exportLine).frame(height: 0.7)
             if which == .package {
@@ -181,8 +214,8 @@ struct ExportView: View {
                 estimateRow("om_exp_size", sizeLabel(estimatedBytes(which)), "export.estimate.size")
             }
         }
-        .background(AureaColors.exportCard, in: RoundedRectangle(cornerRadius: 6))
-        .padding(10)
+        .background(AureaColors.exportCard, in: RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal, 16).padding(.vertical, 12)
         .task(id: which == .package ? model.projectURL : nil) { if which == .package { await loadPackageSizes() } }
     }
 
@@ -260,47 +293,55 @@ struct ExportView: View {
     // MARK: Lista
 
     private var optionList: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: 6) {
             ForEach(ExportItem.allCases, id: \.self) { entry in
+                let on = entry == item
+                let shape = RoundedRectangle(cornerRadius: 14)
                 VStack(spacing: 0) {
                     HStack(spacing: 0) {
                         Button { pick(entry) } label: {
-                            HStack(spacing: 0) {
-                                radio(entry == item).frame(width: 52)
-                                CupertinoGlyph.text(entry.glyph, size: 22, color: AureaColors.exportText)
+                            HStack(spacing: 10) {
+                                CupertinoGlyph.text(entry.glyph, size: 18, color: on ? AureaColors.accent : AureaColors.exportHint)
+                                    .frame(width: 34, height: 34)
+                                    .background(on ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 9))
+                                    .accessibilityHidden(true)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(AureaText.t(entry.nameKey)).font(.aurea(size: 17, weight: .bold)).foregroundStyle(AureaColors.exportText).lineLimit(1)
-                                    Text(AureaText.t(entry.noteKey)).font(.aurea(size: 11)).foregroundStyle(AureaColors.exportHint).lineLimit(1)
-                                }.padding(.leading, 12)
-                                Spacer(minLength: 0)
-                            }.frame(height: 70).contentShape(Rectangle())
+                                    Text(AureaText.t(entry.nameKey)).font(.aurea(size: 15, weight: .semibold))
+                                        .foregroundStyle(AureaColors.exportText).lineLimit(2)
+                                    Text(AureaText.t(entry.noteKey)).font(.aurea(size: 12))
+                                        .foregroundStyle(AureaColors.exportHint).lineLimit(2)
+                                }.frame(maxWidth: .infinity, alignment: .leading)
+                                radio(on).accessibilityHidden(true)
+                            }
+                            .padding(.leading, 12).padding(.vertical, 7).frame(minHeight: 58).contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel(AureaText.t(entry.nameKey))
-                        .accessibilityAddTraits(entry == item ? [.isButton, .isSelected] : .isButton)
+                        .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
                         .accessibilityIdentifier("export.option.\(entry.rawValue)")
                         let hasSettings = entry != .package
                         Button {
                             if hasSettings { pick(entry); settings = entry } else { showInfo(entry) }
                         } label: {
-                            CupertinoGlyph.text(hasSettings ? CupertinoGlyph.ChevronRight : CupertinoGlyph.InfoCircle, size: 18, color: AureaColors.exportAction)
+                            CupertinoGlyph.text(hasSettings ? CupertinoGlyph.ChevronRight : CupertinoGlyph.InfoCircle,
+                                                size: 16, color: AureaColors.exportAction)
                                 .mirrorsInRtl(hasSettings)
-                                .frame(width: 52, height: 70).contentShape(Rectangle())
+                                .frame(width: 48, height: 58).contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel(AureaText.t(hasSettings ? "om_exp_settings_named" : "om_exp_info_named", AureaText.t(entry.nameKey)))
                         .accessibilityIdentifier("export.option.\(entry.rawValue)." + (hasSettings ? "settings" : "info"))
                     }
-                    if entry == .video && item == .video {
-                        Rectangle().fill(AureaColors.exportPage).frame(height: 2)
+                    if entry == .video && on {
+                        AureaColors.exportLine.frame(height: 1).padding(.horizontal, 12)
                         resolutionDropdown(tag: "export.option.video.resolution").padding(10)
                     }
                 }
-                .background(AureaColors.exportCard, in: RoundedRectangle(cornerRadius: 6))
-                .padding(.vertical, 5)
+                .background(AureaColors.exportCard, in: shape)
+                .overlay(shape.strokeBorder(on ? AureaColors.accent : AureaColors.exportLine).allowsHitTesting(false))
             }
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 16)
     }
 
     private func pick(_ entry: ExportItem) {
@@ -609,16 +650,23 @@ struct ExportView: View {
     // MARK: Exportar (pré-checagens, P1-11)
 
     private var exportButton: some View {
-        Button(action: go) {
-            Text(AureaText.t("om_exp_go")).font(.aurea(size: 20, weight: .semibold))
-                .foregroundStyle(model.exporting ? AureaColors.exportAction : AureaColors.exportOnPrimary)
-                .frame(maxWidth: .infinity).padding(12)
-                .background(AureaColors.exportPrimary, in: RoundedRectangle(cornerRadius: 5))
-                .shadow(color: AureaColors.lightShadow, radius: 3, y: 1)
+        let disabled = model.exporting || (item != .package && sourceIssues == nil)
+        let ink = disabled ? AureaColors.exportHint : AureaColors.exportOnPrimary
+        return Button(action: go) {
+            HStack(spacing: 10) {
+                CupertinoGlyph.text(CupertinoGlyph.SquareArrowUp, size: 18, color: ink)
+                    .accessibilityHidden(true)
+                Text(AureaText.t("om_exp_go")).font(.aurea(size: 16, weight: .semibold))
+                    .foregroundStyle(ink)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 8).frame(maxWidth: .infinity, minHeight: 52)
+            .background(disabled ? AureaColors.chip : AureaColors.exportPrimary, in: RoundedRectangle(cornerRadius: 14))
+            .contentShape(Rectangle())
         }
-        .buttonStyle(AureaPressStyle()).disabled(model.exporting)
-        .padding(15)
+        .buttonStyle(AureaPressStyle()).disabled(disabled)
+        .padding(.horizontal, 16).padding(.vertical, 10)
         .background(AureaColors.exportCard.ignoresSafeArea(edges: .bottom))
+        .overlay(alignment: .top) { AureaColors.exportLine.frame(height: 1) }
         .accessibilityLabel(AureaText.t("om_exp_go"))
         .accessibilityIdentifier("export.go")
     }
@@ -643,6 +691,7 @@ struct ExportView: View {
             if model.exportOptions.kind.tooLong(planned) { check = (AureaText.t("exp2_too_long"), false) }
             else if item == .gif && planned > Self.gifRecommendedFrames { check = (AureaText.t("om_exp_gif_heavy", Self.gifRecommendedFrames), true) }
         }
+        if check == nil && !(sourceIssues ?? []).isEmpty { check = (AureaText.t("motion_export_source_warning"), true) }
         guard let check else { start(); return }
         AureaPopupPresenter.shared.presentDialog { close in
             AureaDialog(title: nil, message: check.0, actions: check.1
@@ -742,6 +791,21 @@ struct ExportView: View {
     private func format(_ value: Double) -> String { ExportFormatText.number(value) }
 }
 
+private struct ExportSourceNotice: Sendable {
+    let comp: Int64
+    let layer: Int64
+    let name: String
+    let missing: Bool
+
+    init?(_ row: [String: Any]) {
+        guard let comp = row["composition"] as? NSNumber, let layer = row["layer"] as? NSNumber else { return nil }
+        self.comp = comp.int64Value
+        self.layer = layer.int64Value
+        name = row["name"] as? String ?? ""
+        missing = row["missing"] as? Bool ?? false
+    }
+}
+
 /// "Mais…": as taxas do AUREA (24 a 120 e personalizado) num menu ancorado.
 private struct FpsMoreLink: View {
     let current: Double
@@ -799,58 +863,54 @@ private struct ExportProgressPanel: View {
         let eta = (model.exportProgress["etaSeconds"] as? NSNumber)?.doubleValue ?? 0
         let publishing = model.exportPublishing
         let preparing = model.exportPreparing
-        ZStack {
-            AureaColors.exportScrim.ignoresSafeArea().contentShape(Rectangle()).onTapGesture {}
-            VStack(spacing: 0) {
-                Text(preparing ? AureaText.t("msg_preparando") : AureaText.t(publishing ? "editor_salvando_galeria" : ExportProgressPanel.renderingKey(model.exportedKind)))
-                    .font(.aurea(size: 18)).foregroundStyle(AureaColors.onImage).multilineTextAlignment(.center)
-                ZStack(alignment: .leading) {
+        ScrollView {
+            VStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 10) {
+                        if preparing { ProgressView().tint(AureaColors.accent) }
+                        else { CupertinoGlyph.text(CupertinoGlyph.Film, size: 20, color: AureaColors.accent).accessibilityHidden(true) }
+                        Text(AureaText.t(preparing ? "msg_preparando" : publishing ? "editor_salvando_galeria" : Self.renderingKey(model.exportedKind)))
+                            .font(.aurea(size: 17, weight: .semibold)).foregroundStyle(AureaColors.exportText)
+                            .accessibilityAddTraits(.isHeader)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
                     if !preparing {
-                        AureaColors.addPanelDeep
-                        AureaColors.accent.frame(width: 220 * (publishing ? 1 : fraction))
+                        HStack {
+                            Text("\(publishing ? 100 : Int((fraction * 100).rounded()))%")
+                                .font(.aurea(size: 34, weight: .bold).monospacedDigit()).foregroundStyle(AureaColors.exportText)
+                                .accessibilityIdentifier("export.progress.percent")
+                            Spacer(minLength: 12)
+                            if !publishing && shownEta > 0 {
+                                Text(shownEta < 60 ? AureaText.t("om_exp_eta_less") : AureaText.plural("om_exp_eta_minutes", Int((shownEta / 60).rounded(.up)), Int((shownEta / 60).rounded(.up))))
+                                    .font(.aurea(size: 13)).foregroundStyle(AureaColors.exportHint)
+                                    .accessibilityIdentifier("export.progress.eta")
+                            }
+                        }
+                        ProgressView(value: publishing ? 1 : fraction).tint(AureaColors.accent)
+                        let notice = progressNotice
+                        if !notice.isEmpty {
+                            Text(notice).font(.aurea(size: 13)).foregroundStyle(AureaColors.warning)
+                                .frame(maxWidth: .infinity, alignment: .leading).padding(10)
+                                .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
+                                .accessibilityIdentifier("export.progress.notice")
+                        }
                     }
                 }
-                .frame(width: 220, height: 7).clipShape(RoundedRectangle(cornerRadius: 3.5)).padding(.top, 15)
-                .accessibilityElement().accessibilityValue("\(Int((fraction * 100).rounded()))%")
-                HStack {
-                    Text(preparing ? "" : "\(publishing ? 100 : Int((fraction * 100).rounded()))%")
-                        .font(.aurea(size: 13).monospacedDigit()).foregroundStyle(AureaColors.onImage)
-                        .accessibilityIdentifier("export.progress.percent")
-                    Spacer(minLength: 0)
-                    if !publishing && !preparing && shownEta > 0 {
-                        Text(shownEta < 60 ? AureaText.t("om_exp_eta_less") : AureaText.plural("om_exp_eta_minutes", Int((shownEta / 60).rounded(.up)), Int((shownEta / 60).rounded(.up))))
-                            .font(.aurea(size: 13)).foregroundStyle(AureaColors.onImage)
-                            .accessibilityIdentifier("export.progress.eta")
-                    }
-                }.frame(width: 220).padding(.top, 6)
-                let notice = progressNotice
-                if !preparing && !notice.isEmpty {
-                    Text(notice).font(.aurea(size: 12)).foregroundStyle(AureaColors.warning)
-                        .frame(width: 240, alignment: .leading).padding(10)
-                        .background(AureaColors.addPanelDeep, in: RoundedRectangle(cornerRadius: 6)).padding(.top, 14)
-                        .accessibilityIdentifier("export.progress.notice")
-                }
-            }
-            .padding(.horizontal, 15)
-            VStack(spacing: 0) {
-                Spacer()
+                .padding(20).background(AureaColors.exportCard, in: RoundedRectangle(cornerRadius: 20))
                 if !publishing {
                     Button { cancelled = true; model.cancelExport() } label: {
-                        Text(AureaText.t("editor_cancelar")).font(.aurea(size: 17, weight: .semibold)).foregroundStyle(AureaColors.accent)
-                            .padding(.horizontal, 16).padding(.vertical, 10)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityHint(AureaText.t(preparing ? "msg_preparando" : "editor_cancelar"))
-                    .accessibilityIdentifier("export.progress.cancel")
-                    .padding(.bottom, 30)
+                        Text(AureaText.t("editor_cancelar")).font(.aurea(size: 15, weight: .semibold))
+                            .foregroundStyle(AureaColors.exportText).frame(maxWidth: .infinity, minHeight: 48)
+                            .background(AureaColors.exportCard, in: RoundedRectangle(cornerRadius: 12))
+                            .contentShape(Rectangle())
+                    }.buttonStyle(.plain).accessibilityIdentifier("export.progress.cancel")
                 }
-                HStack(spacing: 6) {
-                    CupertinoGlyph.text(CupertinoGlyph.ExclamationmarkTriangle, size: 14, color: AureaColors.onImage70)
-                    Text(AureaText.t("editor_mantenha_aurea_aberto_ate_terminar")).font(.aurea(size: 12)).foregroundStyle(AureaColors.onImage70)
-                }
-                .padding(.horizontal, 30).padding(.bottom, 30)
+                Text(AureaText.t("editor_mantenha_aurea_aberto_ate_terminar"))
+                    .font(.aurea(size: 12)).foregroundStyle(AureaColors.exportHint).multilineTextAlignment(.center)
             }
+            .padding(16).frame(maxWidth: 480).frame(maxWidth: .infinity)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(AureaColors.exportPage.ignoresSafeArea())
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("export.progress")
         .onAppear { if !model.exportPreparing && startedAt == nil { startedAt = Date() } }
@@ -877,6 +937,7 @@ private struct ExportProgressPanel: View {
         if model.exportPreparing { return "" }
         let flags = (model.exportProgress["flags"] as? NSNumber)?.uint32Value ?? 0
         var notices: [String] = []
+        if flags & (1 << 20) != 0 { notices.append(AureaText.t("motion_export_waiting_decode")) }
         if model.exportLighterAfterClose { notices.append(AureaText.t("export_after_system_close")) }
         // 0.3.2 (CheckpointManager): continuou de um checkpoint.
         if flags & AureaExportFlag.resumed.rawValue != 0 && model.exportResumedFromPercent >= 0 {
@@ -887,12 +948,16 @@ private struct ExportProgressPanel: View {
         case 5: notices.append(AureaText.t("export_v2_validating"))
         default: break
         }
-        if flags & AureaExportFlag.safeMode.rawValue != 0 { notices.append(AureaText.t("app_export_safe_mode")) }
+        let softwareEncoder = flags & AureaExportFlag.softwareEncoder.rawValue != 0
+        if flags & AureaExportFlag.safeMode.rawValue != 0 && !softwareEncoder {
+            notices.append(AureaText.t("export_retry_compatible"))
+        }
         if model.exportOptions.aiUpscale > 0, let message = model.exportProgress["message"] as? String, message.hasPrefix("IA:") {
             notices.append(AureaEngineText.aiProgress(message))
         }
-        if flags & AureaExportFlag.softwareEncoder.rawValue != 0 {
-            notices.append(AureaText.t("ios_export_software_encoder", model.exportOptions.codec == .hevc ? "HEVC" : "H.264"))
+        if softwareEncoder {
+            let codec = model.exportOptions.codec == .hevc ? "HEVC" : "H.264"
+            notices.append(AureaText.t("app_export_software_encoder", codec))
         }
         if flags & AureaExportFlag.thermalReduced.rawValue != 0 { notices.append(AureaText.t("ios_export_thermal")) }
         if flags & AureaExportFlag.frameFallback.rawValue != 0 { notices.append(AureaText.t("ios_export_frame_fallback")) }
@@ -924,8 +989,19 @@ private struct ExportResultPage: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Text(AureaText.t(Self.doneKey(model.exportedKind))).font(.aurea(size: 17, weight: .bold)).foregroundStyle(AureaColors.onImage)
-                .frame(maxWidth: .infinity).frame(height: 42)
+            HStack(spacing: 10) {
+                CupertinoGlyph.text(CupertinoGlyph.CheckmarkCircleFill, size: 22, color: AureaColors.accent)
+                    .accessibilityHidden(true)
+                Text(AureaText.t(Self.doneKey(model.exportedKind))).font(.aurea(size: 19, weight: .bold))
+                    .foregroundStyle(AureaColors.exportText).lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading).accessibilityAddTraits(.isHeader)
+                Button(action: onClose) {
+                    CupertinoGlyph.text(CupertinoGlyph.Xmark, size: 18, color: AureaColors.exportHint)
+                        .frame(width: 48, height: 48).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).accessibilityLabel(AureaText.t("om_exp_close"))
+                .accessibilityIdentifier("export.result.close")
+            }.padding(.leading, 16).padding(.trailing, 8).frame(minHeight: 54)
             GeometryReader { geometry in
                 VStack(spacing: 0) {
                     ZStack {
@@ -935,7 +1011,7 @@ private struct ExportResultPage: View {
                             case .video: ResultVideoPlayer(url: url)
                             case .gif: ResultGifView(url: url).padding(10)
                             case .frame:
-                                if let image = UIImage(contentsOfFile: url.path) { Image(uiImage: image).resizable().scaledToFit().padding(10) }
+                                ExportStillPreview(url: url).padding(10)
                             case .sequence:
                                 ZStack(alignment: .bottom) {
                                     if let preview { Image(uiImage: preview).resizable().scaledToFit().padding(10) }
@@ -955,7 +1031,9 @@ private struct ExportResultPage: View {
                                 .accessibilityIdentifier("export.result.notice")
                         }
                     }
-                    .frame(height: geometry.size.height * 0.7)
+                    .frame(height: geometry.size.height * 0.58)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .padding(.horizontal, 16)
                     ScrollView {
                         VStack(spacing: 0) {
                             if let message = model.exportMessage, !message.isEmpty {
@@ -986,10 +1064,6 @@ private struct ExportResultPage: View {
                                 .disabled(model.exportPublishing)
                                 .accessibilityIdentifier("export.result.saveAs")
                             }
-                            Button(action: onClose) {
-                                Text(AureaText.t("om_exp_close")).font(.aurea(size: 17, weight: .semibold)).foregroundStyle(AureaColors.accent)
-                                    .frame(maxWidth: .infinity).frame(height: 57).contentShape(Rectangle())
-                            }.buttonStyle(.plain).padding(.top, 15).accessibilityIdentifier("export.result.close")
                             DonationCard(exporting: false).padding(.top, 12)
                         }.padding(20)
                     }
@@ -997,7 +1071,6 @@ private struct ExportResultPage: View {
             }
         }
         .background(AureaColors.exportResult.ignoresSafeArea())
-        .preferredColorScheme(.dark)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("export.result")
         .sheet(isPresented: $sharing) { if let url = model.exportedURL { ExportShareSheet(url: url) } }
@@ -1047,6 +1120,24 @@ private struct ExportResultPage: View {
 }
 
 /// O vídeo pronto (sem controles do sistema) com a barra de 62: ▶ de 62 e a busca.
+private struct ExportStillPreview: View {
+    let url: URL
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image { Image(uiImage: image).resizable().scaledToFit() }
+        }
+        .task(id: url) {
+            let path = url.path
+            let loaded = await Task.detached(priority: .userInitiated) {
+                decodeHomeThumbnail(path: path, maxPx: 1536)
+            }.value
+            if !Task.isCancelled { image = loaded }
+        }
+    }
+}
+
 private struct ResultVideoPlayer: View {
     let url: URL
     @State private var player: AVPlayer?

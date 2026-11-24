@@ -21,6 +21,11 @@ struct AureaApp: App {
         // Antes de qualquer tela: a pilha de um crash precisa ser gravada mesmo
         // que ele aconteça no primeiro quadro (CrashReporter.swift).
         CrashReporter.shared.instalar()
+        // 1.0.8 ("desci até o fim e não consigo apertar nada"): o quique no fim de
+        // uma rolagem conta como rolagem em curso e o toque seguinte só a parava;
+        // subir "pesado" era o quique voltando. Sem quique nas listas do app
+        // (a Comunidade religa para o puxar-para-atualizar: `ScrollBounceProbe`).
+        UIScrollView.appearance().bounces = false
     }
 
     var body: some Scene {

@@ -108,7 +108,8 @@ class EffectsAddSheetTest {
         val card = "effects.card.$invertCard"
         compose.onNodeWithTag("effects.grid").performScrollToNode(hasTestTag(card))
         compose.onNodeWithTag(card).performTouchInput { click(Offset(right - 3f, centerY)) }
-        compose.onNodeWithTag("effects.detail.variant.$invertCard").performScrollTo().performTouchInput { click() }
+        compose.onNodeWithTag("effects.detail").assertDoesNotExist()
+        compose.onNodeWithTag("effects.close").assertDoesNotExist()
         compose.runOnIdle { assertEquals(invertId, picked) }
     }
 
@@ -230,22 +231,17 @@ class EffectsAddSheetTest {
         compose.runOnIdle { showBrowser = true }
         compose.waitUntil(5000) { exists("effects.close") }
         compose.onNodeWithTag("effects.search").assertIsDisplayed()
-        compose.onNodeWithTag("effects.featured").assertIsDisplayed()
+
         compose.onNodeWithTag("effects.quick").assertDoesNotExist()
         capture("fx-add-home")
 
-        // Categoria Texto: dentro dela não há 🔍; o cartão das Legendas abre o DETALHE,
-        // e a linha do efeito base abre a ferramenta.
+        // A linha da ferramenta abre o destino com um toque.
         compose.onNodeWithTag("effects.home").performScrollToNode(hasTestTag("effects.category.text"))
         compose.onNodeWithTag("effects.category.text").performClick()
         compose.onNodeWithTag("effects.back").assertIsDisplayed()
-        compose.onNodeWithTag("effects.search").assertDoesNotExist()
-        compose.onNodeWithTag("effects.category.prev").assertIsDisplayed()
+        compose.onNodeWithTag("effects.search").assertIsDisplayed()
         compose.onNodeWithTag("effects.grid").performScrollToNode(hasTestTag("effects.card.$captions"))
         compose.onNodeWithTag("effects.card.$captions").performClick()
-        compose.waitUntil(5000) { exists("effects.detail.variant.$captions") }
-        capture("fx-detail-captions")
-        compose.onNodeWithTag("effects.detail.variant.$captions").performScrollTo().performClick()
         compose.waitUntil(5000) { opened == EffectTool.Captions }
         compose.onNodeWithTag("effects.close").assertDoesNotExist()
 
@@ -258,7 +254,7 @@ class EffectsAddSheetTest {
         compose.onNodeWithTag("effects.home").performScrollToNode(hasTestTag("effects.category.glitch"))
         compose.onNodeWithTag("effects.category.glitch").performClick()
         compose.onNodeWithTag("effects.grid").performScrollToNode(hasTestTag("effects.card.$vhs"))
-        compose.onNodeWithTag("effects.card.$vhs").performClick()
+        compose.onNodeWithTag("effects.options.$vhs").performClick()
         compose.waitUntil(5000) { exists("effects.detail.favorite.$vhs") }
         compose.onNodeWithTag("effects.detail.favorite.$vhs").performScrollTo().performTouchInput { click() }
         compose.runOnIdle { assertTrue(store.effectPrefs.isFavorite(vhsId)) }
@@ -292,7 +288,7 @@ class EffectsAddSheetTest {
         compose.onNodeWithTag("effects.home").performScrollToNode(hasTestTag("effects.category.color_light"))
         compose.onNodeWithTag("effects.category.color_light").performClick()
         compose.onNodeWithTag("effects.grid").performScrollToNode(hasTestTag("effects.card.$colorGrade"))
-        compose.onNodeWithTag("effects.card.$colorGrade").performClick()
+        compose.onNodeWithTag("effects.options.$colorGrade").performClick()
         compose.waitUntil(5000) { exists("effects.detail.variant.$colorGrade.0") }
         capture("fx-detail-variations")
         val before = store.effects.size
@@ -324,7 +320,10 @@ class EffectsAddSheetTest {
         compose.onNodeWithTag("effects.search.back").performClick()
 
         // Recomendado → detalhe; a etiqueta do detalhe abre a busca com a ficha.
-        compose.onAllNodes(tagPrefix("effects.featured.")).onFirst().performClick()
+        compose.onNodeWithTag("effects.home").performScrollToNode(tagPrefix("effects.featured."))
+        val recommendedTag = checkNotNull(compose.onAllNodes(tagPrefix("effects.featured.")).onFirst()
+            .fetchSemanticsNode().config.getOrNull(SemanticsProperties.TestTag))
+        compose.onNodeWithTag(recommendedTag.replace("effects.featured.", "effects.options.")).performClick()
         compose.waitUntil(5000) { exists("effects.detail") }
         compose.onAllNodes(tagPrefix("effects.detail.tag.")).onFirst().performClick()
         compose.waitUntil(5000) { compose.onAllNodes(tagPrefix("effects.search.chip.")).fetchSemanticsNodes().isNotEmpty() }

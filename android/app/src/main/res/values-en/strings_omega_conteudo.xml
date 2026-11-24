@@ -85,4 +85,6 @@
     <string name="om_anim_list_cd">Text animators</string>
     <string name="om_anim_item_cd">Animator %1$d: %2$s</string>
     <string name="om_anim_collapse_cd">Collapse animator</string>
+    <string name="om_pts_3d_plane">3D layer · points move on its plane</string>
+    <string name="om_pts_3d_edge">The layer is edge-on to the camera. Rotate the view to move points.</string>
 </resources>

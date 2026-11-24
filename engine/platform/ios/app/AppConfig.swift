@@ -132,6 +132,10 @@ final class AppConfigStore: ObservableObject {
     private let key = AppConfigVerifier.publicKey(AppConfigKeys.publicKeySPKI)
 
     static var versionCode: Int64 { Int64(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") ?? 0 }
+    nonisolated static var displayVersion: String {
+        let beta = Bundle.main.object(forInfoDictionaryKey: "AureaReleaseLabel") as? String ?? ""
+        return beta.isEmpty ? Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?" : beta
+    }
     static func now() -> Int64 { Int64(Date().timeIntervalSince1970) }
 
     var updateRequired: Bool { AppConfigPolicy.updateRequired(config, versionCode: Self.versionCode) }

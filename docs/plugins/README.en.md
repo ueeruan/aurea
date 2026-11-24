@@ -865,9 +865,16 @@ Handlers receive `(value, controlId)`. Every call coming from the interface is
 | `editor.menu` | in the plugin menu at the top of the editor |
 | `layer.menu` | in the layer ⋮ menu (plugin section at the end) |
 | `layer.toolbar` | button on the selected layer's bar (`icon` required) |
+| `scene.menu` | in 3D Scene → Add-ons (format 3, Aurea 1.0.8.1) |
 
 Each action has **`call`** (a script function) **or** **`panel`** (opens that
-panel, which needs `editor.panel`). `needsLayer` (default `true` for layer actions).
+panel). Use `scene.panel` for panels opened from `scene.menu`, or
+`editor.panel` or `editor.fullscreen` for other actions. `needsLayer` defaults to
+`true` for layer actions.
+
+Panels with `"placement": ["scene.panel"]` appear under **3D Scene → Add-ons**.
+See [Model Orbit](examples/scene-layout/plugin.json) for a panel and action that
+arrange instances of the selected 3D model.
 
 ### 14.4 Scripts: the AureaScript language
 

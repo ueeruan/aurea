@@ -34,17 +34,32 @@ vec3 straight(vec4 c) { return c.rgb / max(c.a, 1e-3); }
 
 float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
 
-// A amostra mais clara das quatro: acima do olho do desenho há cílios e franja,
-// abaixo pode haver o aro dos óculos; a pele costuma ser a mais clara.
-vec3 skin_of(vec4 above, vec4 below) {
-    vec3 best = straight(texture(u_tex0, above.xy));
-    vec3 s = straight(texture(u_tex0, above.zw));
-    if (luma(s) > luma(best)) best = s;
-    s = straight(texture(u_tex0, below.xy));
-    if (luma(s) > luma(best)) best = s;
-    s = straight(texture(u_tex0, below.zw));
-    if (luma(s) > luma(best)) best = s;
+float opaque_reference(vec4 sampleColor) {
+    return smoothstep(0.35, 0.85, sampleColor.a);
+}
+
+float skin_score(vec4 sampleColor) {
+    return opaque_reference(sampleColor) * (0.05 + luma(straight(sampleColor)));
+}
+
+// Prefer the brighter opaque reference. Hair, drawn outlines and transparent
+// pixels around a cutout should not replace the skin in the stretched band.
+vec4 skin_of(vec4 above, vec4 below) {
+    vec4 best = texture(u_tex0, above.xy);
+    vec4 s = texture(u_tex0, above.zw);
+    if (skin_score(s) > skin_score(best)) best = s;
+    s = texture(u_tex0, below.xy);
+    if (skin_score(s) > skin_score(best)) best = s;
+    s = texture(u_tex0, below.zw);
+    if (skin_score(s) > skin_score(best)) best = s;
     return best;
+}
+
+float skin_weight(vec4 reference, vec4 source) {
+    // Keep the original image when the reference is transparent or nearly
+    // black next to lit skin. Relative luminance also covers dark palettes.
+    float relativeLight = luma(straight(reference)) / max(luma(straight(source)), 0.025);
+    return opaque_reference(reference) * smoothstep(0.025, 0.11, relativeLight);
 }
 
 vec4 lid(vec4 c, vec4 e, float k, vec4 skinUv, vec4 skinLowUv, vec2 lashUv) {
@@ -61,27 +76,31 @@ vec4 lid(vec4 c, vec4 e, float k, vec4 skinUv, vec4 skinLowUv, vec2 lashUv) {
     if (wx <= 0.0) return c;
     const float kk = min(k, 1.0);
     // Cores sem alfa (o alfa da camada fica): pele e cílio bem escuro.
-    const vec3 skinS = skin_of(skinUv, skinLowUv);
-    const vec3 lashS = min(straight(texture(u_tex0, lashUv)), skinS * 0.3);
+    const vec4 reference = skin_of(skinUv, skinLowUv);
+    const float weight = skin_weight(reference, c);
+    if (weight <= 0.0) return c;
+    const vec3 skinS = straight(reference);
     if (v_rest.y <= top) {
         // Faixa que estica por cima do olho: vira pele lisa (franja e cílios de
         // cima não arrastam), com a linha dos cílios na borda de baixo.
         const float t = (v_rest.y - band) / (top - band);
-        c.rgb = mix(c.rgb, skinS * c.a, kk * wx * smoothstep(0.0, 0.2, t));
+        c.rgb = mix(c.rgb, skinS * c.a, weight * kk * wx * smoothstep(0.0, 0.2, t));
         const float stretched = (top - band) + kk * (low - top);
         // Cílios em arco (‿): mais baixos no meio, afinando nas pontas.
         const float u = clamp((v_rest.x - e.x) / max(1.2 * e.z, 0.5), -1.0, 1.0);
         const float dt = clamp(0.28 * sy / max(stretched, 1e-3), 0.0, 0.5) * (1.0 - 0.6 * u * u);
         const float line = 1.0 - 0.3 * clamp(0.28 * sy / max(stretched, 1e-3), 0.0, 0.5) * 4.0 * u * u;
         const float lash = smoothstep(line - dt, line - 0.6 * dt, t) * (1.0 - smoothstep(line - 0.2 * dt, line, t));
-        c.rgb = mix(c.rgb, lashS * c.a, kk * kk * wx * lash);
+        const vec4 lashReference = texture(u_tex0, lashUv);
+        const vec3 lashS = mix(skinS * 0.22, min(straight(lashReference), skinS * 0.3), opaque_reference(lashReference));
+        c.rgb = mix(c.rgb, lashS * c.a, weight * kk * kk * wx * lash);
         return c;
     }
     // Abaixo da linha da pálpebra fechada (fora da área esticada): o resto do
     // olho (fundo da íris, cílios de baixo) some na pele.
     if (v_rest.y > low) {
         const float under = 1.0 - smoothstep(e.y + 0.85 * sy, e.y + 1.1 * sy, v_rest.y);
-        c.rgb = mix(c.rgb, skinS * c.a, kk * kk * wx * under);
+        c.rgb = mix(c.rgb, skinS * c.a, weight * kk * kk * wx * under);
     }
     return c;
 }
@@ -95,12 +114,14 @@ void main() {
         const float wx = 1.0 - smoothstep(0.9, 1.5, abs(v_rest.x - p.mouth.x) / max(p.mouth.z, 0.5));
         const float t = (v_rest.y - p.mouthK.y) / max(p.mouthK.z - p.mouthK.y, 1e-3);
         const float inner = smoothstep(0.0, 0.25, t) * (1.0 - smoothstep(0.75, 1.0, t));
-        const vec3 lineS = straight(texture(u_tex0, p.mouthUv.xy));
-        const vec3 cheekS = straight(texture(u_tex0, p.mouthUv.zw));
+        const vec4 cheek = texture(u_tex0, p.mouthUv.zw);
+        const vec3 cheekS = straight(cheek);
+        const vec4 line = texture(u_tex0, p.mouthUv.xy);
+        const vec3 lineS = mix(cheekS * 0.35, straight(line), opaque_reference(line));
         // Miolo: a cor da linha puxada para um vermelho escuro da pele; língua embaixo.
         vec3 inside = mix(lineS, cheekS * vec3(0.5, 0.16, 0.16), 0.6);
         inside = mix(inside, cheekS * vec3(0.75, 0.35, 0.35), smoothstep(0.55, 0.9, t) * 0.6);
-        const float amt = smoothstep(0.0, 0.3, open) * wx * (0.35 + 0.65 * inner);
+        const float amt = skin_weight(cheek, c) * smoothstep(0.0, 0.3, open) * wx * (0.35 + 0.65 * inner);
         c.rgb = mix(c.rgb, clamp(inside, 0.0, 1.0) * c.a, amt);
     }
     o_color = c;

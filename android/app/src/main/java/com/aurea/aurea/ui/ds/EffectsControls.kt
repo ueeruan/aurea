@@ -6,6 +6,7 @@ import androidx.compose.animation.core.animateDecay
 import androidx.compose.animation.splineBasedDecay
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -104,6 +106,8 @@ object FxRow {
     val Value: Dp = FxParamMath.VALUE_W.dp
     val Margin: Dp = FxParamMath.LABEL_MARGIN.dp
     val Radius: Dp = 4.dp
+    /** 1.0.8 visual minimalista: raio do realce do rótulo, da caixa de valor e das escolhas. */
+    val Soft: Dp = 8.dp
     val Slider: Dp = FxParamMath.ROW_SLIDER.dp
     val Ruler: Dp = FxParamMath.ROW_RULER.dp
     val Small: Dp = FxParamMath.ROW_SMALL.dp
@@ -131,11 +135,12 @@ object FxRow {
 }
 
 /**
- * O RÓTULO DA LINHA (`propertyLabel`): [width] × [height], raio 4, fundo «rótulo»
- * normal e «afundado» pressionado ou ATIVO; texto 8–12 sp autoajustável, até 2
- * linhas, centralizado (texto / destaque ativo / desabilitado). O ◆ de 9×8 no
- * canto superior esquerdo aparece SÓ com keyframe; o "=" de expressão (extra do
- * AUREA) no canto superior direito.
+ * O RÓTULO DA LINHA (`propertyLabel`): [width] × [height]. 1.0.8 visual
+ * minimalista: sem caixa em repouso (texto a 85 %, alinhado ao início); ATIVO
+ * ganha um realce suave de raio 8 em destaque a 14 % e texto em destaque;
+ * pressionado, «afundado». Texto 8–13 sp autoajustável, até 2 linhas. O ◆ de 9×8
+ * no canto superior inicial aparece SÓ com keyframe; o "=" de expressão (extra
+ * do AUREA) no canto superior final.
  */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
@@ -153,17 +158,22 @@ fun FxParamLabel(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    val on = active || pressed
     val textColor = when {
         !enabled -> AureaColors.FxDisabledText
         active -> AureaColors.Accent
-        else -> AureaColors.Text
+        else -> AureaColors.FxLabelInk
+    }
+    val fill = when {
+        !enabled -> Color.Transparent
+        active -> AureaColors.FxLabelLit
+        pressed -> AureaColors.FxSunken
+        else -> Color.Transparent
     }
     Box(
         modifier
             .size(width, height)
-            .clip(RoundedCornerShape(FxRow.Radius))
-            .background(if (on && enabled) AureaColors.FxSunken else AureaColors.FxLabel)
+            .clip(RoundedCornerShape(FxRow.Soft))
+            .background(fill)
             .then(
                 if (enabled && (onClick != null || onLongClick != null)) {
                     Modifier.combinedClickable(
@@ -177,8 +187,8 @@ fun FxParamLabel(
                     Modifier
                 },
             )
-            .padding(3.dp),
-        contentAlignment = Alignment.Center,
+            .padding(start = 8.dp, end = 4.dp, top = 3.dp, bottom = 3.dp),
+        contentAlignment = Alignment.CenterStart,
     ) {
         BasicText(
             text = label,
@@ -186,12 +196,12 @@ fun FxParamLabel(
             overflow = TextOverflow.Ellipsis,
             autoSize = TextAutoSize.StepBased(minFontSize = 8.sp, maxFontSize = FxRow.LabelText, stepSize = 0.5.sp),
             style = AureaType.Base.merge(
-                TextStyle(fontSize = FxRow.LabelText, lineHeight = 1.1.em, color = textColor, textAlign = TextAlign.Center),
+                TextStyle(fontSize = FxRow.LabelText, lineHeight = 1.1.em, color = textColor, textAlign = TextAlign.Start),
             ),
         )
         if (keyframe != KeyframeLook.None) {
             val tint = if (active && enabled) AureaColors.Accent else AureaColors.Text.copy(alpha = 0.5f)
-            Canvas(Modifier.align(Alignment.TopStart).offset(x = (-1).dp, y = (-1).dp).size(9.dp, 8.dp)) {
+            Canvas(Modifier.align(Alignment.TopStart).offset(x = (-6).dp, y = (-1).dp).size(9.dp, 8.dp)) {
                 val p = Path().apply {
                     moveTo(size.width / 2f, 0f)
                     lineTo(size.width, size.height / 2f)
@@ -209,10 +219,11 @@ fun FxParamLabel(
 }
 
 /**
- * A CAIXA DE VALOR (`propertyValue`): [width] × [height], raio 4, fundo «véu
- * 20 %»; número 8–14 sp autoajustável alinhado ao FIM, sempre LTR. [aux] é a
- * linha auxiliar acima do número (as voltas "N× +" do ângulo), em «texto
- * desabilitado». Desabilitada: texto apagado e sem toque.
+ * A CAIXA DE VALOR (`propertyValue`): [width] × [height]. 1.0.8 visual
+ * minimalista: sem véu — só um fio de 1 dp (texto a 12 %) sob o número;
+ * pressionada, «afundado» com raio 8. Número 8–15 sp autoajustável alinhado ao
+ * FIM, tabular, sempre LTR. [aux] é a linha auxiliar acima do número (as voltas
+ * "N× +" do ângulo), em «texto desabilitado». Desabilitada: texto apagado e sem toque.
  */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
@@ -224,7 +235,7 @@ fun FxValueBox(
     enabled: Boolean = true,
     color: Color = AureaColors.Text,
     aux: String? = null,
-    background: Color = AureaColors.FxValueVeil,
+    background: Color = Color.Transparent,
     pressedBackground: Color = AureaColors.FxSunken,
     onClick: (() -> Unit)? = null,
     onLongClick: (() -> Unit)? = null,
@@ -234,7 +245,7 @@ fun FxValueBox(
     Box(
         modifier
             .size(width, height)
-            .clip(RoundedCornerShape(FxRow.Radius))
+            .clip(RoundedCornerShape(FxRow.Soft))
             .background(if (pressed && enabled) pressedBackground else background)
             .then(
                 if (enabled && (onClick != null || onLongClick != null)) {
@@ -279,21 +290,26 @@ fun FxValueBox(
                     ),
                 ),
             )
+            // O fio sob o número (no lugar do véu).
+            Spacer(Modifier.height(3.dp))
+            Box(Modifier.fillMaxWidth().height(1.dp).background(AureaColors.FxHairline))
         }
     }
 }
 
 // =============================================================================
-// Slider (como o da referência)
+// Slider = régua (1.0.8: "eu prefiro TUDO com isso aqui")
 // =============================================================================
 
 /**
- * O SLIDER: trilho de 2,5 dp com ponta redonda em «trilho»; preenchimento em
- * destaque da [origin] até o polegar (bipolar quando a origem é 0 numa faixa que
- * cruza o zero); polegar = círculo de 18 dp no texto. [snap] (o padrão) ganha
- * 10 dp de pista onde o valor fica parado. Gesto: o toque parado não muda nada;
- * passou de ½ touch slop, o valor vai para a POSIÇÃO DO DEDO, preso e quantizado
- * em [step]. [onStart]/[onEnd] abrem e fecham o passo de desfazer.
+ * O SLIDER do AUREA agora é a RÉGUA ([FxRuler]) com faixa FECHADA: a mesma API
+ * de antes (nenhuma tela muda), o mesmo gesto da régua (arrasto relativo,
+ * arremesso, dois dedos = 1/10, slop e dominância do [FxParamMath]) e o valor
+ * preso em [min]..[max] — os riscos param no fim da faixa. 1 risco =
+ * [FxParamMath.sliderRulerStep] (o [step], com a faixa inteira em ~120 riscos).
+ * [snap] e [origin] viram riscos de encaixe (maiores, com o toque de vibração).
+ * Acessibilidade igual à do slider: rótulo, valor, faixa e `setProgress`.
+ * [onStart]/[onEnd] abrem e fecham o passo de desfazer (o arremesso fica dentro).
  */
 @Composable
 fun AureaSlider(
@@ -311,23 +327,25 @@ fun AureaSlider(
     a11yLabel: String = "",
     a11yValue: String = "",
 ) {
-    val density = LocalDensity.current
-    val thumbR = with(density) { 9.dp.toPx() }
-    val snapPx = with(density) { FxParamMath.SLIDER_SNAP_DP.dp.toPx() }
-    val slop = LocalViewConfiguration.current.touchSlop
-    var live by remember { mutableStateOf<Float?>(null) }
+    val lo = kotlin.math.min(min, max)
+    val hi = kotlin.math.max(min, max)
+    val tick = FxParamMath.sliderRulerStep(lo, hi, step)
+    val marks = listOfNotNull(snap, origin).filter { it.isFinite() && it >= lo && it <= hi }.distinct()
     val begin by rememberUpdatedState(onStart)
     val send by rememberUpdatedState(onValue)
     val finish by rememberUpdatedState(onEnd)
-    val lo = kotlin.math.min(min, max)
-    val hi = kotlin.math.max(min, max)
-    val snaps = listOfNotNull(snap?.takeIf { it.isFinite() && it > lo && it < hi })
-    val shown = live ?: value
-    val accent = if (enabled) AureaColors.Accent else AureaColors.FxTrackDisabled
-    val track = AureaColors.FxTrack
-    val thumb = if (enabled) AureaColors.Text else AureaColors.FxDisabledText
-    Canvas(
-        modifier
+    val shown = if (value.isFinite()) value.coerceIn(lo, hi) else lo
+    FxRuler(
+        value = shown,
+        step = tick,
+        min = lo,
+        max = hi,
+        onStart = { begin() },
+        onValue = { send(it.coerceIn(lo, hi)) },
+        onEnd = { finish() },
+        modifier = modifier
+            .fillMaxWidth()
+            .defaultMinSize(minHeight = FxRow.Ruler - 12.dp)
             .semantics {
                 contentDescription = a11yLabel
                 stateDescription = a11yValue
@@ -336,52 +354,11 @@ fun AureaSlider(
                     if (!next.isFinite()) return@setProgress false
                     begin(); send(next.coerceIn(lo, hi)); finish(); true
                 }
-            }
-            .pointerInput(enabled, lo, hi, step, snap) {
-                if (!enabled || !(hi > lo)) return@pointerInput
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    var dragging = false
-                    while (true) {
-                        val e = awaitPointerEvent()
-                        val ch = e.changes.firstOrNull { it.id == down.id } ?: break
-                        if (!ch.pressed) break
-                        if (!dragging) {
-                            if (ch.isConsumed) return@awaitEachGesture
-                            val dx = ch.position.x - down.position.x
-                            val dy = ch.position.y - down.position.y
-                            // Vertical: é da rolagem da lista.
-                            if (abs(dy) > slop && abs(dy) > abs(dx)) return@awaitEachGesture
-                            if (abs(dx) <= abs(dy) * FxParamMath.HORIZONTAL_DOMINANCE ||
-                                abs(dx) <= slop * FxParamMath.SLIDER_SLOP_FRACTION) continue
-                            dragging = true
-                            begin()
-                        }
-                        ch.consume()
-                        val w = size.width - 2f * thumbR
-                        val v = FxParamMath.sliderValueAt(ch.position.x - thumbR, w, lo, hi, step, snaps, snapPx)
-                        if (v != live) {
-                            live = v
-                            send(v)
-                        }
-                    }
-                    if (dragging) {
-                        live = null
-                        finish()
-                    }
-                }
             },
-    ) {
-        if (!(hi > lo)) return@Canvas
-        val w = size.width - 2f * thumbR
-        val cy = size.height / 2f
-        val stroke = 2.5.dp.toPx()
-        drawLine(track, Offset(thumbR, cy), Offset(thumbR + w, cy), stroke, StrokeCap.Round)
-        val xo = thumbR + FxParamMath.sliderX(origin.coerceIn(lo, hi), w, lo, hi, snaps, snapPx)
-        val xv = thumbR + FxParamMath.sliderX(shown, w, lo, hi, snaps, snapPx)
-        if (xo != xv) drawLine(accent, Offset(xo, cy), Offset(xv, cy), stroke, StrokeCap.Round)
-        drawCircle(thumb, thumbR, Offset(xv, cy))
-    }
+        enabled = enabled,
+        snaps = marks,
+        limits = true,
+    )
 }
 
 // =============================================================================
@@ -409,9 +386,13 @@ internal object FxRulerFling {
 }
 
 /**
- * A RÉGUA DE RISCOS da referência: risco a cada 5,5 dp e 0,5 dp de largura em
- * «risco», o maior a cada 5 riscos no texto, esmaecendo até as bordas; agulha de
- * 1,5 dp em [needle] (nas linhas de vetor, a cor do eixo ativo). 1 risco =
+ * A RÉGUA DE RISCOS. 1.0.8 visual minimalista: risco a cada 5,5 dp, 1,5 dp de
+ * largura com pontas redondas, centrados na altura; menores de 10 dp (texto a
+ * 35 %), o maior a cada 5 riscos de 16 dp (60 %), sumindo suave nos 22 % de cada
+ * borda ([FxParamMath.rulerFade]); sem caixa. Agulha = cápsula de 3 × 24 dp em
+ * [needle] (nas linhas de vetor, a cor do eixo ativo) com um ponto de 5 dp
+ * embaixo. [limits] (o slider-régua): os riscos param em [min] e [max], com um
+ * risco maior em cada limite. 1 risco =
  * [step] (unidade mostrada). O gesto começa depois de ¾ do touch slop; dedo para
  * a esquerda aumenta; arremesso acima de 300 px/s com desaceleração; o valor anda
  * de risco em risco (encaixado) e fica preso em [min]..[max] (estendida até o
@@ -432,6 +413,7 @@ fun FxRuler(
     enabled: Boolean = true,
     needle: Color = AureaColors.FxNeedle,
     snaps: List<Float> = emptyList(),
+    limits: Boolean = false,
 ) {
     val density = LocalDensity.current
     val spacing = with(density) { FxParamMath.TICK_SPACING.dp.toPx() }
@@ -575,43 +557,72 @@ fun FxRuler(
             }
         },
     ) {
-        drawFxRuler(state.live ?: value, stepNow, spacing, needle, snaps, 8.dp.toPx())
+        drawFxRuler(state.live ?: value, stepNow, spacing, if (enabled) needle else AureaColors.FxDisabledText, snaps,
+            if (limits) kotlin.math.min(min, max) else Float.NEGATIVE_INFINITY,
+            if (limits) kotlin.math.max(min, max) else Float.POSITIVE_INFINITY)
     }
 }
 
-private fun DrawScope.drawFxRuler(value: Float, step: Float, spacing: Float, needle: Color, snaps: List<Float>, pad: Float) {
-    val top = pad
-    val bottom = size.height - pad
-    if (bottom <= top || size.width <= 0f) return
+private fun DrawScope.drawFxRuler(
+    value: Float, step: Float, spacing: Float, needle: Color, snaps: List<Float>,
+    lo: Float = Float.NEGATIVE_INFINITY, hi: Float = Float.POSITIVE_INFINITY,
+) {
+    if (size.height <= 0f || size.width <= 0f) return
     val c = size.width / 2f
+    val cy = size.height / 2f
     val v = if (value.isFinite()) value else 0f
     val pos = v.toDouble() / step
     val reach = c / spacing
     val first = floor(pos - reach).toLong() - 1
     val last = ceil(pos + reach).toLong() + 1
-    val w = 0.5.dp.toPx()
-    val minor = AureaColors.FxTick
-    val major = AureaColors.Text
+    val w = 1.5.dp.toPx()
+    val ink = AureaColors.Text
+    // Alturas presas na régua (linhas baixas não vazam).
+    val minorH = kotlin.math.min(10.dp.toPx(), size.height)
+    val majorH = kotlin.math.min(16.dp.toPx(), size.height)
+    val snapH = kotlin.math.min(18.dp.toPx(), size.height)
     if (last - first < 4000) {
         var k = first
         while (k <= last) {
             val x = c + ((k - pos) * spacing).toFloat()
-            val b = ParamRowMath.tickBrightness(x, size.width)
-            if (b > 0f) {
+            val fade = FxParamMath.rulerFade(x, size.width)
+            // Faixa fechada (slider-régua): sem riscos além dos limites.
+            val at = k * step.toDouble()
+            val inside = at >= lo - step * 1e-3 && at <= hi + step * 1e-3
+            if (fade > 0f && inside) {
                 val isMajor = Math.floorMod(k, FxParamMath.MAJOR_EVERY.toLong()) == 0L
-                drawLine((if (isMajor) major else minor).copy(alpha = b), Offset(x, top), Offset(x, bottom), w)
+                val h = if (isMajor) majorH else minorH
+                val a = if (isMajor) 0.6f else 0.35f
+                drawLine(ink.copy(alpha = a * fade), Offset(x, cy - h / 2f), Offset(x, cy + h / 2f), w, StrokeCap.Round)
             }
             k++
         }
     }
-    // Riscos de encaixe (padrão, zero): 1,25 px, opacidade reforçada.
+    // Os limites da faixa fechada: um risco maior em cada ponta.
+    for (edge in floatArrayOf(lo, hi)) {
+        if (!edge.isFinite()) continue
+        val x = c + ((edge - v) / step) * spacing
+        val fade = FxParamMath.rulerFade(x, size.width)
+        if (fade > 0f) drawLine(ink.copy(alpha = 0.6f * fade), Offset(x, cy - majorH / 2f), Offset(x, cy + majorH / 2f), w, StrokeCap.Round)
+    }
+    // Riscos de encaixe (padrão, zero): um pouco mais altos e fortes.
     for (s in snaps) {
         if (!s.isFinite()) continue
         val x = c + ((s - v) / step) * spacing
-        val b = ParamRowMath.tickBrightness(x, size.width)
-        if (b > 0f) drawLine(major.copy(alpha = (b + 1f) / 2f), Offset(x, top), Offset(x, bottom), 1.25f)
+        val fade = FxParamMath.rulerFade(x, size.width)
+        if (fade > 0f) drawLine(ink.copy(alpha = 0.85f * fade), Offset(x, cy - snapH / 2f), Offset(x, cy + snapH / 2f), w, StrokeCap.Round)
     }
-    drawLine(needle, Offset(c, 0f), Offset(c, size.height), 1.5.dp.toPx())
+    // Agulha: cápsula de 3 × 24 dp e um ponto de 5 dp logo abaixo (cabe na altura).
+    val dot = 5.dp.toPx()
+    val gap = 2.dp.toPx()
+    val needleH = kotlin.math.min(24.dp.toPx(), size.height - 2f * (dot + gap))
+    if (needleH > 0f) {
+        val nw = 3.dp.toPx()
+        drawLine(needle, Offset(c, cy - needleH / 2f + nw / 2f), Offset(c, cy + needleH / 2f - nw / 2f), nw, StrokeCap.Round)
+        drawCircle(needle, dot / 2f, Offset(c, cy + needleH / 2f + gap + dot / 2f))
+    } else {
+        drawLine(needle, Offset(c, 0f), Offset(c, size.height), 1.5.dp.toPx())
+    }
 }
 
 // =============================================================================
@@ -619,10 +630,10 @@ private fun DrawScope.drawFxRuler(value: Float, step: Float, spacing: Float, nee
 // =============================================================================
 
 /**
- * ESCOLHA SEGMENTADA (`effect_setting_selector`, estilo RADIO): cartão de raio 5
- * com botões de altura igual (27,5 dp) em «segmento» / «segmento ativo», texto
- * no texto / destaque, uma linha com reticências. [selected] < 0 = nenhuma.
- * testTags `"$tag.<k>"`.
+ * ESCOLHA SEGMENTADA (`effect_setting_selector`, estilo RADIO). 1.0.8 visual
+ * minimalista: moldura de raio 8 com fio de 1 dp (texto a 12 %), sem fundo; o
+ * escolhido ganha uma pílula de raio 6 em destaque a 22 % e texto em destaque.
+ * Uma linha com reticências. [selected] < 0 = nenhuma. testTags `"$tag.<k>"`.
  */
 @Composable
 fun FxSegmented(
@@ -636,9 +647,10 @@ fun FxSegmented(
     Row(
         modifier
             .height(FxRow.Segment)
-            .clip(RoundedCornerShape(5.dp))
+            .clip(RoundedCornerShape(FxRow.Soft))
+            .border(1.dp, AureaColors.FxHairline, RoundedCornerShape(FxRow.Soft))
+            .padding(2.dp)
             .testTag(tag),
-        horizontalArrangement = Arrangement.spacedBy(1.dp),
     ) {
         options.forEachIndexed { i, o ->
             val on = i == selected
@@ -646,7 +658,8 @@ fun FxSegmented(
                 Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .background(if (on) AureaColors.FxSegmentOn else AureaColors.FxSegment)
+                    .clip(RoundedCornerShape(FxRow.Soft - 2.dp))
+                    .background(if (on) AureaColors.FxSegmentPick else Color.Transparent)
                     .testTag("$tag.$i")
                     .semantics {
                         role = Role.RadioButton
@@ -678,8 +691,9 @@ fun FxSegmented(
 }
 
 /**
- * ESCOLHA SUSPENSA (estilo DROPDOWN): caixa de raio 5 em «afundado» com inset 4,
- * a opção vigente e ▾ no destaque; o toque abre o menu ancorado com as opções.
+ * ESCOLHA SUSPENSA (estilo DROPDOWN). 1.0.8 visual minimalista: caixa de raio 8
+ * só com o fio de 1 dp (texto a 12 %), inset 4 × 2, a opção vigente e ▾ no destaque;
+ * o toque abre o menu ancorado com as opções.
  */
 @Composable
 fun FxDropdownBox(
@@ -695,10 +709,11 @@ fun FxDropdownBox(
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(4.dp)
+                // 1.0.8: inset 2 em cima/embaixo (36 + 4 cabe na linha baixa de 40).
+                .padding(horizontal = 4.dp, vertical = 2.dp)
                 .height(FxRow.Segment)  // 0.3.4 painéis: 36 (antes 30)
-                .clip(RoundedCornerShape(5.dp))
-                .background(AureaColors.FxSunken)
+                .clip(RoundedCornerShape(FxRow.Soft))
+                .border(1.dp, AureaColors.FxHairline, RoundedCornerShape(FxRow.Soft))
                 .testTag(tag)
                 .semantics { this.contentDescription = contentDescription; if (!enabled) disabled() }
                 .tocavel(enabled = enabled, shrink = 1f) { open = true }

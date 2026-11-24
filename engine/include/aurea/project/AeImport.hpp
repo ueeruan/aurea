@@ -54,6 +54,8 @@ struct SkipItem {
     std::string name;     ///< nome/matchName do AE (ou a chamada do script)
     std::string reason;   ///< por quê, em pt-BR
     u32         line = 0; ///< linha do .jsx (0 = não se aplica)
+    u64         composition = 0, layer = 0;
+    std::string layerName;
 };
 
 struct ImportReport {
@@ -73,6 +75,8 @@ struct ImportReport {
     /// o texto em pt-BR de reserva.
     std::string messageKey;
     std::vector<std::string> messageArgs;
+    u64 targetComposition = 0, targetLayer = 0;
+    std::string targetLayerName;
 
     /// Acrescenta (sem repetir o mesmo item; teto de 400 por lista).
     void skip(std::string kind, std::string name, std::string reason, u32 line = 0);

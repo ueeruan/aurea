@@ -52,6 +52,8 @@ u64 layer_bytes(const Layer& l) noexcept {
     n += l.rig.joints.size() * sizeof(RigJoint);
     n += l.model.materials.size() * sizeof(MaterialOverride);
     n += l.adjustmentTargets.size() * sizeof(LayerId);
+    n += l.nested.overrides.size() * sizeof(PrecompControlValue);
+    for (const auto& value : l.nested.overrides) n += value.text.size();
     n += l.shape.path.size() * sizeof(Vec2) + vector_bytes(l.shape.vector);
     // Conservative accounting: shared snapshots do not allocate this again,
     // but an old snapshot may be the last owner after reanalysis.

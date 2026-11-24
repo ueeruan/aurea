@@ -288,7 +288,7 @@ struct PreviewMetalView: UIViewRepresentable {
         }
 
         private func maskLocal(_ p: CGPoint) -> SIMD2<Float>? {
-            let m = model.maskAffine, r = model.panel == .vector ? [0, 0, 1] : model.maskPerspective
+            let m = model.maskAffine, r = model.maskPerspective
             guard m.count == 6, r.count == 3 else { return nil }
             // Inversa da homografia (a camada 3D é projetiva; em 2D a linha é 0, 0, 1).
             let a = m[0], b = m[2], c = m[4], d = m[1], e = m[3], f = m[5], g = r[0], h = r[1], i = r[2]

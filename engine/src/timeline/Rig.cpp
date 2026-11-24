@@ -233,4 +233,164 @@ bool ik_two_bone(const RigData& rig, const std::vector<Affine>& bones, u32 index
     return true;
 }
 
+namespace {
+
+Vec2 at_distance(Vec2 anchor, Vec2 point, f32 distance, Vec2 fallbackDirection) noexcept {
+    const Vec2 offset = point - anchor;
+    const f32 length = offset.length();
+    const Vec2 direction = length > 1e-6f ? offset / length : fallbackDirection;
+    return anchor + direction * distance;
+}
+
+void extend_chain(std::array<Vec2, kMaxJoints>& points, const std::array<f32, kMaxJoints>& lengths,
+                  u32 count, Vec2 axis, f32 distance) noexcept {
+    // Perto da extensão máxima, o FABRIK converge lentamente. Diminui a
+    // dobra atual sem trocar de lado e gira a cadeia em direção ao alvo.
+    const Vec2 tipAxis = points[count - 1].normalized();
+    std::array<f32, kMaxJoints> bend{};
+    for (u32 j = 1; j < count; ++j) {
+        const Vec2 segment = points[j] - points[j - 1];
+        bend[j] = std::atan2(tipAxis.x * segment.y - tipAxis.y * segment.x, tipAxis.dot(segment));
+    }
+    const auto endpoint = [&](f32 fraction) {
+        Vec2 tip{};
+        for (u32 j = 1; j < count; ++j) {
+            const f32 angle = bend[j] * fraction;
+            tip += Vec2{std::cos(angle), std::sin(angle)} * lengths[j];
+        }
+        return tip;
+    };
+    f32 low = 0.0f, high = 1.0f;
+    for (u32 iteration = 0; iteration < 12; ++iteration) {
+        const f32 fraction = (low + high) * 0.5f;
+        if (endpoint(fraction).length_sq() > distance * distance) low = fraction;
+        else high = fraction;
+    }
+    const f32 fraction = (low + high) * 0.5f;
+    const Vec2 tip = endpoint(fraction);
+    const f32 turn = std::atan2(axis.y, axis.x) - std::atan2(tip.y, tip.x);
+    for (u32 j = 1; j < count; ++j) {
+        const f32 angle = bend[j] * fraction + turn;
+        points[j] = points[j - 1] + Vec2{std::cos(angle), std::sin(angle)} * lengths[j];
+    }
+}
+
+u32 ik_long_chain(const RigData& rig, const std::vector<Affine>& bones, u32 tip, Vec2 target,
+                  std::array<JointDelta, kMaxJoints>& deltas) noexcept {
+    // Inclui a junta bifurcada como âncora fixa. Girar qualquer osso acima
+    // desse ponto também moveria membros que o usuário não está arrastando.
+    std::array<u32, kMaxJoints> chain{};
+    chain[0] = tip;
+    u32 count = 1;
+    while (count < rig.joints.size()) {
+        const i32 parent = parent_index(rig, chain[count - 1]);
+        if (parent < 0) break;
+        const u32 index = static_cast<u32>(parent);
+        if (std::find(chain.begin(), chain.begin() + count, index) != chain.begin() + count) return 0;
+        chain[count++] = index;
+        const u32 id = rig.joints[index].id;
+        if (std::count_if(rig.joints.begin(), rig.joints.end(), [id](const RigJoint& joint) { return joint.parent == id; }) > 1)
+            break;
+    }
+    // O braço do rig automático tem até três segmentos contando a clavícula.
+    // Mantém o ombro fixo e o gesto de cotovelo existente nesses membros.
+    if (count < 5) return 0;
+    std::reverse(chain.begin(), chain.begin() + count);
+
+    const Vec2 anchor = bones[chain[0]].apply(rig.joints[chain[0]].pos);
+    std::array<Vec2, kMaxJoints> points{};
+    std::array<Vec2, kMaxJoints> oldDirections{};
+    std::array<f32, kMaxJoints> lengths{};
+    f32 reach = 0.0f;
+    u32 longest = 1;
+    for (u32 j = 1; j < count; ++j) {
+        const u32 index = chain[j];
+        points[j] = bones[index].apply(rig.joints[index].pos) - anchor;
+        const Vec2 segment = points[j] - points[j - 1];
+        lengths[j] = segment.length();
+        if (!std::isfinite(lengths[j]) || lengths[j] < 1e-4f) return 0;
+        oldDirections[j] = segment / lengths[j];
+        reach += lengths[j];
+        if (lengths[j] > lengths[longest]) longest = j;
+    }
+
+    const Vec2 goal = target - anchor;
+    const f32 distance = goal.length();
+    if (!std::isfinite(distance)) return 0;
+    const Vec2 axis = distance > 1e-6f ? goal / distance : oldDirections[1];
+    const f32 minReach = lengths[longest] - (reach - lengths[longest]);
+    if (distance >= reach || distance < minReach) {
+        const bool fold = distance < minReach;
+        for (u32 j = 1; j < count; ++j) {
+            const f32 distanceAlongAxis = fold && j != longest ? -lengths[j] : lengths[j];
+            points[j] = points[j - 1] + axis * distanceAlongAxis;
+        }
+    } else {
+        // FABRIK pode parar numa cadeia perfeitamente reta. Nessa situação
+        // começa com uma dobra pequena e determinística na direção normal.
+        const Vec2 normal{axis.y, -axis.x};
+        bool collinear = true;
+        for (u32 j = 1; j < count; ++j)
+            collinear = collinear && std::abs(oldDirections[j].dot(normal)) < 1e-5f;
+        if (collinear) {
+            const f32 height = 0.35f * std::sqrt(reach - distance) * std::sqrt(reach + distance);
+            f32 along = 0.0f;
+            for (u32 j = 1; j < count - 1; ++j) {
+                along += lengths[j];
+                const f32 t = along / reach;
+                points[j] = goal * t + normal * (4.0f * t * (1.0f - t) * height);
+            }
+        }
+
+        // FABRIK (Aristidou e Lasenby): alterna prender a ponta no alvo e a
+        // base na âncora, preservando os comprimentos a cada passagem.
+        constexpr f32 tolerance = 0.05f;
+        const u32 end = count - 1;
+        for (u32 iteration = 0; iteration < 48; ++iteration) {
+            if (!collinear && (points[end] - goal).length_sq() <= tolerance * tolerance) break;
+            points[end] = goal;
+            for (u32 j = end; j > 0; --j)
+                points[j - 1] = at_distance(points[j], points[j - 1], lengths[j], -oldDirections[j]);
+            points[0] = {};
+            for (u32 j = 1; j <= end; ++j)
+                points[j] = at_distance(points[j - 1], points[j], lengths[j], oldDirections[j]);
+            collinear = false;
+        }
+        if (distance > 0.95f * reach && points[end].length() < distance - tolerance)
+            extend_chain(points, lengths, count, axis, distance);
+    }
+
+    f32 parentTurn = 0.0f;
+    for (u32 j = 1; j < count; ++j) {
+        const f32 turn = angle_of(points[j] - points[j - 1]) - angle_of(oldDirections[j]);
+        deltas[j - 1] = JointDelta{chain[j], wrap_deg(turn - parentTurn)};
+        parentTurn = turn;
+    }
+    return count - 1;
+}
+
+} // namespace
+
+u32 drag_deltas(const RigData& rig, const std::vector<Affine>& bones, u32 index, Vec2 target,
+                std::array<JointDelta, kMaxJoints>& deltas) noexcept {
+    if (index >= rig.joints.size() || rig.joints.size() > kMaxJoints || bones.size() < rig.joints.size() ||
+        !std::isfinite(target.x) || !std::isfinite(target.y)) return 0;
+    const i32 parent = parent_index(rig, index);
+    if (parent < 0) return 0;
+    const u32 id = rig.joints[index].id;
+    const bool leaf = std::none_of(rig.joints.begin(), rig.joints.end(), [id](const RigJoint& joint) { return joint.parent == id; });
+    if (leaf) {
+        const u32 count = ik_long_chain(rig, bones, index, target, deltas);
+        if (count > 0) return count;
+        f32 parentDelta = 0.0f, jointDelta = 0.0f;
+        if (ik_two_bone(rig, bones, index, target, parentDelta, jointDelta)) {
+            deltas[0] = JointDelta{static_cast<u32>(parent), parentDelta};
+            deltas[1] = JointDelta{index, jointDelta};
+            return 2;
+        }
+    }
+    deltas[0] = JointDelta{index, fk_delta(rig, bones, index, target)};
+    return 1;
+}
+
 } // namespace aurea::rig

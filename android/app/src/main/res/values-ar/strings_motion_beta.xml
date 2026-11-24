@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="motion_vector_order">ترتيب الرسم</string>
+    <string name="motion_vector_order_hint">رتّب المسارات والحدود والعمليات.</string>
+    <string name="motion_vector_trim">قص</string>
+    <string name="motion_vector_repeat">تكرار</string>
+    <string name="motion_move_up">انقل %1$s إلى الأعلى</string>
+    <string name="motion_move_down">انقل %1$s إلى الأسفل</string>
+    <string name="motion_vector_move_unavailable">الطبقة مقفلة أو لا يمكن نقل العنصر مع الحفاظ على التحريك.</string>
+    <string name="motion_precomp_controls">عناصر تحكم التكوين الفرعي</string>
+    <string name="motion_precomp_empty">لا تتوفر عناصر تحكم هنا.</string>
+    <string name="motion_precomp_publish">إظهار عنصر تحكم</string>
+    <string name="motion_precomp_reset">استعادة القيمة الأصلية</string>
+    <string name="motion_control_text">نص</string>
+    <string name="motion_control_unavailable">عنصر التحكم أو الطبقة غير متاح.</string>
+    <string name="motion_repair_range">إصلاح المقطع من هنا</string>
+    <string name="motion_repair_end">اضغط على شريط المراجعة لاختيار نهاية المقطع.</string>
+    <string name="motion_repair_corners">تحديد الزوايا الأربع</string>
+    <string name="motion_repair_seed">عُد إلى الإطار الأول لتأكيد الزوايا.</string>
+    <string name="motion_repair_ready">راجع التصحيح في المعاينة ثم طبّقه لاستبدال المقطع.</string>
+    <string name="motion_export_missing">وسائط مفقودة</string>
+    <string name="motion_export_unreadable">تعذّرت قراءة الوسائط</string>
+    <string name="motion_export_source_warning">بعض الطبقات تستخدم وسائط مفقودة أو غير قابلة للقراءة. راجعها قبل التصدير.</string>
+    <string name="motion_export_waiting_decode">جارٍ انتظار وحدة فك ترميز الفيديو…</string>
+    <string name="motion_link_media">إعادة ربط الوسائط</string>
+    <string name="motion_view_layer">عرض الطبقة</string>
+    <string name="motion_release_body">Aurea 1.0.8.1 BETA (2232)\n• أعد ترتيب المسارات والحدود وعمليات الرسم المتجهي.\n• منحنيات سرعة بالقواعد نفسها على أندرويد وiOS.\n• تحكم في النص واللون والشفافية لكل نسخة من التكوين الفرعي.\n• راجع مقطع التتبع المستوي وصححه.\n• تشخيص الوسائط وحالة انتظار فك الترميز أثناء التصدير.</string>
+</resources>

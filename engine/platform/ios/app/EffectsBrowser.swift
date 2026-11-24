@@ -1133,7 +1133,7 @@ struct EffectAddSheet: View {
                 .accessibilityHidden(searching || detail != nil)
             if searching {
                 FxSearchPane(sorted: request.browse ? (showingPlugins ? plugins : catalog) : catalog + plugins,
-                             chips: $searchChips, onDetail: openDetail,
+                             chips: $searchChips, onAdd: add, onDetail: openDetail,
                              onClose: { if request.browse { searching = false } else { close() } })
                     .id(searchEpoch)
                     .allowsHitTesting(detail == nil)
@@ -1184,10 +1184,9 @@ struct EffectAddSheet: View {
                 if showingPlugins {
                     PluginManagerView(prefs: prefs, effects: plugins, onOpenEffect: openDetail, onAdd: add)
                 } else if let group {
-                    let near = fxAdjacentGroups(groups.map { $0.group }, group.group)
-                    FxGroupGrid(group: group.group, entries: group.entries, store: model.effectPreviews,
-                                previous: near.previous, next: near.next, onDetail: openDetail,
-                                onGroup: { groupId = $0.id }, onScrolled: { if gridScrolled != $0 { gridScrolled = $0 } })
+                    FxGroupGrid(entries: group.entries, store: model.effectPreviews, onAdd: add, onDetail: openDetail,
+                                onScrolled: { if gridScrolled != $0 { gridScrolled = $0 } })
+                        .id(group.group.id)
                 } else {
                     home(sorted: catalog, groups: groups)
                 }
@@ -1250,19 +1249,14 @@ struct EffectAddSheet: View {
                     .accessibilityLabel(AureaText.t(inGroup ? "fxui_back_categories" : "common_close"))
                     .accessibilityIdentifier(inGroup ? "effects.back" : "effects.close")
                 Text(title).font(.aurea(size: 19, weight: .semibold)).lineLimit(1).truncationMode(.tail)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, AureaDims.s1).frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.horizontal, AureaDims.s1).frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityAddTraits(.isHeader)
-                if inGroup {
-                    Color.clear.frame(width: AureaDims.minTap, height: AureaDims.minTap)
-                } else {
-                    Button { openSearch([]) } label: {
-                        CupertinoGlyph.text(CupertinoGlyph.Search, size: 22)
-                            .frame(width: AureaDims.minTap, height: AureaDims.minTap).contentShape(Rectangle())
-                    }.buttonStyle(AureaPressStyle(shrink: 1))
-                        .accessibilityLabel(AureaText.t("fxui_search_effects"))
-                        .accessibilityIdentifier("effects.search")
-                }
+                Button { openSearch([]) } label: {
+                    CupertinoGlyph.text(CupertinoGlyph.Search, size: 22, color: AureaColors.accent)
+                        .frame(width: AureaDims.minTap, height: AureaDims.minTap).contentShape(Rectangle())
+                }.buttonStyle(AureaPressStyle(shrink: 1))
+                    .accessibilityLabel(AureaText.t("fxui_search_effects"))
+                    .accessibilityIdentifier("effects.search")
             }.frame(height: 52)
             AureaColors.fxLowSurface.opacity(divider ? 1 : 0).frame(height: 0.5)
         }
@@ -1291,22 +1285,39 @@ private struct FxBrowserHome: View {
             let perPage = fxFavoritesPerPage(geometry.size.width)
             let pages = fxQuickPages(recents, favorites, perPage: perPage)
             ScrollView {
-                LazyVStack(spacing: 0) {
-                    FxScrollProbe(space: "fx.home")
-                    if !recommended.isEmpty {
-                        FxRecommendedBand(entries: recommended, store: store, onDetail: onDetail)
-                    }
+                FxScrollProbe(space: "fx.home")
+                LazyVStack(alignment: .leading, spacing: 4) {
                     if !pages.isEmpty {
-                        FxQuickBand(pages: pages, perPage: perPage, hint: favorites.isEmpty && !recents.isEmpty, prefs: prefs,
+                        FxQuickBand(pages: pages, perPage: perPage, hint: favorites.isEmpty(), prefs: prefs,
                                     store: store, onAdd: onAdd, onDetail: onDetail)
                     }
-                    Text(AureaText.t("fx_browser_categories"))
-                        .font(.aurea(size: 15, weight: .semibold))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 8)
-                        .accessibilityAddTraits(.isHeader)
-                    categories
-                }
+                    heading("fx_browser_categories")
+                    ForEach(groups, id: \.group.id) { item in
+                        Button { onGroup(item.group) } label: {
+                            HStack(spacing: 10) {
+                                CupertinoGlyph.text(item.group.glyph, size: 18, color: AureaColors.accent)
+                                    .accessibilityHidden(true)
+                                Text(item.group.label).font(.aurea(size: 14, weight: .medium))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                Text(item.entries.count.formatted()).font(.aurea(size: 12))
+                                    .foregroundStyle(AureaColors.fxTextSecondary)
+                                CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 13, color: AureaColors.fxTextSecondary)
+                                    .mirrorsInRtl(true).accessibilityHidden(true)
+                            }
+                            .padding(.horizontal, 12).frame(minHeight: 48).contentShape(Rectangle())
+                            .background(AureaColors.surface, in: RoundedRectangle(cornerRadius: 10))
+                        }
+                        .buttonStyle(.plain).padding(.horizontal, 16)
+                        .accessibilityIdentifier("effects.category." + item.group.id)
+                    }
+                    if !recommended.isEmpty {
+                        heading("fx_browser_featured")
+                        ForEach(Array(recommended.enumerated()), id: \.element.typeId) { index, entry in
+                            FxCatalogEffectRow(entry: entry, store: store, tag: "effects.featured.",
+                                               onDetails: { onDetail(recommended, index) }) { onAdd(entry, -1) }
+                        }
+                    }
+                }.padding(.bottom, 12)
             }
             .coordinateSpace(name: "fx.home")
             .onPreferenceChange(FxScrollOffsetKey.self) { onScrolled($0 < -0.5) }
@@ -1316,109 +1327,13 @@ private struct FxBrowserHome: View {
         }
     }
 
-    /// Categorias: 2 colunas, espaço de 1, fundo «mais escuro», ladrilhos de 65.
-    private var categories: some View {
-        LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
-            ForEach(fxUniqueGroups(groups.map { $0.group }), id: \.self) { group in
-                FxGroupTile(group: group, entries: groups.first { $0.group == group }?.entries ?? [], store: store) {
-                    onGroup(group)
-                }
-            }
-        }
-        .padding(.horizontal, 16).padding(.bottom, 8)
+    private func heading(_ label: String) -> some View {
+        Text(AureaText.t(label)).font(.aurea(size: 15, weight: .semibold))
+            .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 4)
+            .accessibilityAddTraits(.isHeader)
     }
 }
 
-/// Posição e largura do conteúdo de uma faixa horizontal (para os véus das bordas).
-private struct FxHorizontalScroll: Equatable {
-    var minX: CGFloat = 0
-    var width: CGFloat = 0
-}
-
-private struct FxHorizontalScrollKey: PreferenceKey {
-    static var defaultValue = FxHorizontalScroll()
-    static func reduce(value: inout FxHorizontalScroll, nextValue: () -> FxHorizontalScroll) { value = nextValue() }
-}
-
-/// RECOMENDADOS: faixa de 186 «superfície baixa», itens de 121×153 (miniatura
-/// 115), véus de 80 nas bordas só quando dá para rolar daquele lado.
-private struct FxRecommendedBand: View {
-    let entries: [EffectCatalogItem]
-    let store: EffectPreviewStore
-    let onDetail: ([EffectCatalogItem], Int) -> Void
-    @State private var scroll = FxHorizontalScroll()
-
-    var body: some View {
-        GeometryReader { outer in
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 7.5) {
-                    ForEach(Array(entries.enumerated()), id: \.element.typeId) { index, entry in
-                        FxRecommendedItem(entry: entry, store: store) { onDetail(entries, index) }
-                    }
-                }
-                .padding(.horizontal, 7.5)
-                .frame(height: 186)
-                .background(GeometryReader { inner in
-                    Color.clear.preference(key: FxHorizontalScrollKey.self,
-                                           value: FxHorizontalScroll(minX: inner.frame(in: .named("fx.recommended")).minX, width: inner.size.width))
-                })
-            }
-            .coordinateSpace(name: "fx.recommended")
-            .onPreferenceChange(FxHorizontalScrollKey.self) { scroll = $0 }
-            .overlay(alignment: .leading) {
-                if scroll.minX < -1 { veil(leading: true) }
-            }
-            .overlay(alignment: .trailing) {
-                if scroll.width + scroll.minX > outer.size.width + 1 { veil(leading: false) }
-            }
-        }
-        .frame(height: 186)
-        .background(AureaColors.fxLowSurface)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(AureaText.t("om_fx_recommended"))
-        .accessibilityIdentifier("effects.featured")
-    }
-
-    private func veil(leading: Bool) -> some View {
-        let solid = AureaColors.fxSunken
-        let clear = AureaColors.fxSunken.opacity(0)
-        return LinearGradient(colors: leading ? [solid, clear] : [clear, solid], startPoint: .leading, endPoint: .trailing)
-            .frame(width: 80).allowsHitTesting(false)
-    }
-}
-
-private struct FxRecommendedItem: View {
-    let entry: EffectCatalogItem
-    let store: EffectPreviewStore
-    let action: () -> Void
-
-    var body: some View {
-        let name = fxPickerEntryName(entry)
-        Button(action: action) {
-            VStack(spacing: 4) {
-                FxAfterThumb(entry: entry, store: store)
-                    .frame(width: 115, height: 115)
-                    .background(AureaColors.fxPanel)
-                    .clipShape(RoundedRectangle(cornerRadius: 5))
-                    .overlay(alignment: .topLeading) { if entry.isNew { FxNewBadge().padding(5) } }
-                    .overlay(alignment: .bottomLeading) { if fxEffectFuturePaid(entry.typeId) { FxFreeForNowBadge().padding(5) } }
-                    .overlay(alignment: .topTrailing) { FxEffectBadge(entry: entry).offset(x: 5, y: -5) }
-                    .padding(.top, 8)
-                Text(name).font(.aurea(size: 10)).foregroundStyle(AureaColors.text)
-                    .multilineTextAlignment(.center).lineLimit(2).frame(width: 117)
-                Spacer(minLength: 0)
-            }
-            .frame(width: 121, height: 153)
-            .contentShape(Rectangle())
-        }.buttonStyle(AureaPressStyle(shrink: 0.96))
-            .accessibilityLabel(name)
-            .accessibilityIdentifier("effects.featured." + fxEffectCardId(entry.typeId))
-    }
-}
-
-/// RECENTES/FAVORITOS: faixa de 210 com páginas de 2 linhas e o indicador de 9
-/// (relógio = Recentes, estrela = cada página de Favoritos). A página é lembrada.
-/// Toque ADICIONA; toque longo abre o DETALHE.
 private struct FxQuickBand: View {
     let pages: [(recent: Bool, items: [FxQuickItem])]
     let perPage: Int
@@ -1562,127 +1477,29 @@ private struct FxQuickTile: View {
     }
 }
 
-/// O LADRILHO de uma categoria (65): prévia a 70 %, véu «painel» a 50 % e o nome 15 negrito.
-private struct FxGroupTile: View {
-    let group: FxEffectGroup
-    let entries: [EffectCatalogItem]
-    let store: EffectPreviewStore
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            ZStack {
-                Group {
-                    if let banner = fxGroupBannerEntry(group, entries) {
-                        FxAfterThumb(entry: banner, store: store, generate: false)
-                    } else {
-                        FxToolPlate(glyph: group.glyph, opacity: 0.35)
-                    }
-                }.opacity(0.7)
-                AureaColors.fxPanel.opacity(0.5)
-                Text(group.label).font(.aurea(size: 15, weight: .bold)).foregroundStyle(AureaColors.text)
-                    .multilineTextAlignment(.center).lineLimit(2).padding(.horizontal, 8)
-            }
-            .frame(maxWidth: .infinity).frame(height: 72)
-            .background(AureaColors.fxPanel)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-            .contentShape(Rectangle())
-        }.buttonStyle(.plain)
-            .accessibilityLabel(AureaText.t("fx_browser_open_group", group.label))
-            .accessibilityIdentifier("effects.category." + group.id)
-    }
-}
-
-/// Dentro de uma categoria: a grade de 88 (⌊(L − 30) / 103⌋ colunas) e,
-/// embaixo, anterior/próxima nas pontas (desabilitados nas pontas, trocam no lugar).
 private struct FxGroupGrid: View {
-    let group: FxEffectGroup
     let entries: [EffectCatalogItem]
     let store: EffectPreviewStore
-    let previous: FxEffectGroup?
-    let next: FxEffectGroup?
+    let onAdd: (EffectCatalogItem, Int) -> Void
     let onDetail: ([EffectCatalogItem], Int) -> Void
-    let onGroup: (FxEffectGroup) -> Void
     let onScrolled: (Bool) -> Void
     @State private var scrolling = false
 
     var body: some View {
-        GeometryReader { geometry in
-            let columns = Array(repeating: GridItem(.flexible(), spacing: 0, alignment: .top),
-                                count: fxCategoryGridColumns(geometry.size.width))
-            VStack(spacing: 0) {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        FxScrollProbe(space: "fx.grid").id("topo")
-                        if entries.isEmpty {
-                            Text(AureaText.t("effect_empty_category")).font(.aurea(size: 14)).foregroundStyle(AureaColors.fxTextSecondary)
-                                .multilineTextAlignment(.center).padding(24)
-                        }
-                        LazyVGrid(columns: columns, spacing: 0) {
-                            ForEach(Array(entries.enumerated()), id: \.element.typeId) { index, entry in
-                                FxGridCard(entry: entry, store: store) { onDetail(entries, index) }
-                            }
-                        }
-                        .padding(.horizontal, 15).padding(.top, 4).padding(.bottom, 8)
-                    }
-                    .coordinateSpace(name: "fx.grid")
-                    .onPreferenceChange(FxScrollOffsetKey.self) { onScrolled($0 < -0.5) }
-                    .observeFxScrolling($scrolling)
-                    .environment(\.fxThumbnailWork, !scrolling)
-                    .accessibilityIdentifier("effects.grid")
-                    .onChange(of: group) { _ in proxy.scrollTo("topo", anchor: .top) }
+        ScrollView {
+            FxScrollProbe(space: "fx.grid")
+            LazyVStack(spacing: 6) {
+                ForEach(Array(entries.enumerated()), id: \.element.typeId) { index, entry in
+                    FxCatalogEffectRow(entry: entry, store: store, tag: "effects.card.",
+                                       onDetails: { onDetail(entries, index) }) { onAdd(entry, -1) }
                 }
-                HStack(spacing: 0) {
-                    neighbor(previous, forward: false)
-                    Spacer(minLength: 0)
-                    neighbor(next, forward: true)
-                }.frame(height: 50)
-            }
+            }.padding(.vertical, 8)
         }
-    }
-
-    private func neighbor(_ target: FxEffectGroup?, forward: Bool) -> some View {
-        let label = target.map { AureaText.t(forward ? "fx_browser_next_group" : "fx_browser_prev_group", $0.label) }
-            ?? AureaText.t(forward ? "om_fx_category_next" : "om_fx_category_prev")
-        return Button { if let target { onGroup(target) } } label: {
-            CupertinoGlyph.text(forward ? CupertinoGlyph.ChevronRight : CupertinoGlyph.ChevronLeft, size: 20,
-                                color: target == nil ? AureaColors.fxDisabledText : AureaColors.text)
-                .mirrorsInRtl()
-                .frame(width: AureaDims.minTap, height: 50).contentShape(Rectangle())
-        }
-        .buttonStyle(AureaPressStyle(shrink: 1))
-        .disabled(target == nil)
-        .accessibilityLabel(label)
-        .accessibilityIdentifier(forward ? "effects.category.next" : "effects.category.prev")
-    }
-}
-
-/// Cartão de 88: miniatura 80 (raio 5), selo no canto e nome 10 em 2 linhas.
-private struct FxGridCard: View {
-    let entry: EffectCatalogItem
-    let store: EffectPreviewStore
-    let action: () -> Void
-
-    var body: some View {
-        let name = fxPickerEntryName(entry)
-        Button(action: action) {
-            VStack(spacing: 4) {
-                FxAfterThumb(entry: entry, store: store)
-                    .frame(width: 80, height: 80)
-                    .background(AureaColors.fxPanel)
-                    .clipShape(RoundedRectangle(cornerRadius: 5))
-                    .overlay(alignment: .topLeading) { if entry.isNew { FxNewBadge().padding(4) } }
-                    .overlay(alignment: .bottomLeading) { if fxEffectFuturePaid(entry.typeId) { FxFreeForNowBadge().padding(4) } }
-                    .overlay(alignment: .topTrailing) { FxEffectBadge(entry: entry).offset(x: 4, y: -4) }
-                    .padding(.top, 8)
-                Text(name).font(.aurea(size: 10)).foregroundStyle(AureaColors.text)
-                    .multilineTextAlignment(.center).lineLimit(2).frame(width: 88)
-            }
-            .frame(maxWidth: .infinity).padding(.bottom, 8)
-            .contentShape(Rectangle())
-        }.buttonStyle(.plain)
-            .accessibilityLabel(name)
-            .accessibilityIdentifier("effects.card." + fxEffectCardId(entry.typeId))
+        .coordinateSpace(name: "fx.grid")
+        .onPreferenceChange(FxScrollOffsetKey.self) { onScrolled($0 < -0.5) }
+        .observeFxScrolling($scrolling)
+        .environment(\.fxThumbnailWork, !scrolling)
+        .accessibilityIdentifier("effects.grid")
     }
 }
 
@@ -1812,6 +1629,7 @@ private struct FxSearchPane: View {
     @EnvironmentObject private var model: AureaModel
     let sorted: [EffectCatalogItem]
     @Binding var chips: [String]
+    let onAdd: (EffectCatalogItem, Int) -> Void
     let onDetail: ([EffectCatalogItem], Int) -> Void
     let onClose: () -> Void
     @State private var text = ""
@@ -1965,9 +1783,10 @@ private struct FxSearchPane: View {
                         .multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(AureaDims.s4)
                 }
                 ForEach(Array(results.enumerated()), id: \.element.typeId) { position, entry in
-                    FxResultRow(entry: entry, english: index?.english[entry.typeId], store: model.effectPreviews) {
+                    FxCatalogEffectRow(entry: entry, store: model.effectPreviews, tag: "effects.result.",
+                                       onDetails: { focused = false; onDetail(results, position) }) {
                         focused = false
-                        onDetail(results, position)
+                        onAdd(entry, -1)
                     }
                 }
             }
@@ -1977,41 +1796,51 @@ private struct FxSearchPane: View {
     }
 }
 
-/// Linha de resultado: miniatura 80, nome 17, nome em inglês 14 (se diferente), descrição 11.
-private struct FxResultRow: View {
+private struct FxCatalogEffectRow: View {
     let entry: EffectCatalogItem
-    let english: String?
     let store: EffectPreviewStore
+    let tag: String
+    let onDetails: () -> Void
     let action: () -> Void
 
     var body: some View {
         let name = fxPickerEntryName(entry)
-        let second: String? = (english ?? "").isEmpty || english == name ? nil : english
-        Button(action: action) {
-            HStack(alignment: .top, spacing: 12) {
-                FxAfterThumb(entry: entry, store: store)
-                    .frame(width: 80, height: 80)
-                    .background(AureaColors.fxPanel)
-                    .clipShape(RoundedRectangle(cornerRadius: 5))
-                    .overlay(alignment: .topLeading) { if entry.isNew { FxNewBadge().padding(4) } }
-                    .overlay(alignment: .bottomLeading) { if fxEffectFuturePaid(entry.typeId) { FxFreeForNowBadge().padding(4) } }
-                    .overlay(alignment: .topTrailing) { FxEffectBadge(entry: entry).offset(x: 4, y: -4) }
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(name).font(.aurea(size: 17)).lineLimit(1)
-                    if let second {
-                        Text(second).font(.aurea(size: 14)).foregroundStyle(AureaColors.fxTextSecondary).lineLimit(1)
+        let id = fxEffectCardId(entry.typeId)
+        HStack(spacing: 0) {
+            Button(action: action) {
+                HStack(spacing: 10) {
+                    FxAfterThumb(entry: entry, store: store)
+                        .frame(width: 40, height: 40)
+                        .background(AureaColors.fxPanel)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(name).font(.aurea(size: 14, weight: .semibold)).lineLimit(2)
+                        Text(fxEffectDescription(entry.typeId, entry.category)).font(.aurea(size: 11))
+                            .foregroundStyle(AureaColors.fxTextSecondary).lineLimit(2)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    FxEffectBadge(entry: entry)
+                    if fxEffectToolOf(entry.typeId) != nil {
+                        CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 16, color: AureaColors.accent).mirrorsInRtl()
+                    } else if !HyperEffectGate.locked(typeId: entry.typeId) {
+                        CupertinoGlyph.text(CupertinoGlyph.Plus, size: 16, color: AureaColors.accent)
                     }
-                    Text(fxEffectDescription(entry.typeId, entry.category)).font(.aurea(size: 11))
-                        .lineLimit(second == nil ? 3 : 2).padding(.top, 2)
                 }
-                .frame(maxWidth: .infinity, maxHeight: 80, alignment: .topLeading)
+                .padding(.horizontal, 10).padding(.vertical, 8)
+                .frame(minHeight: 64).contentShape(Rectangle())
             }
-            .foregroundStyle(AureaColors.text)
-            .padding(.horizontal, 15).padding(.vertical, 8)
-            .contentShape(Rectangle())
-        }.buttonStyle(AureaPressStyle(shrink: 1))
-            .accessibilityLabel(name)
-            .accessibilityIdentifier("effects.result." + fxEffectCardId(entry.typeId))
+            .buttonStyle(.plain).accessibilityLabel(name).accessibilityIdentifier(tag + id)
+            Button(action: onDetails) {
+                CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: 16, color: AureaColors.fxTextSecondary)
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(AureaText.t("om_fx_menu_details"))
+            .accessibilityIdentifier("effects.options." + id)
+        }
+        .foregroundStyle(AureaColors.text)
+        .background(AureaColors.surface, in: RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 16)
     }
 }
 
@@ -2586,7 +2415,7 @@ struct PluginManagerView: View {
                 }
                 PluginV2Controls(pluginId: p.id)   // 0.3.4 plugins: ligar, permissões, painéis, console
                 if let index = effects.firstIndex(where: { $0.typeId == p.effectTypeId }) {
-                    Button { onOpenEffect(effects, index) } label: {
+                    Button { onAdd(effects[index], -1) } label: {
                         Text(AureaText.t("fxo_add")).font(.aurea(size: 14, weight: .semibold))
                             .foregroundStyle(AureaColors.accent).frame(minHeight: 44)
                             .contentShape(Rectangle())

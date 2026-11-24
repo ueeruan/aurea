@@ -247,6 +247,7 @@ public:
     [[nodiscard]] bool is_device_lost() const noexcept override;
     [[nodiscard]] u32 frames_in_flight() const noexcept override;
     [[nodiscard]] GpuMemoryStats memory_stats() const noexcept override;
+    [[nodiscard]] GpuMemoryBudget memory_budget() const noexcept override;
 
     void save_pipeline_cache() noexcept override;
     [[nodiscard]] PipelineCacheInfo pipeline_cache_info() const noexcept override;

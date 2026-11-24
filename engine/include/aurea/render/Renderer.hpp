@@ -989,6 +989,8 @@ public:
     [[nodiscard]] TextureHandle audio_spectrum(const AudioSpectrumRequest& request) noexcept override;
     [[nodiscard]] std::vector<Vec4> repeat_path(const Layer* host, u32 count, f32 phase, u64 guide = 0) noexcept override;
     [[nodiscard]] bool layer_world(const Layer* host, u64 ref, f64 compTime, LayerWorldInfo& out) noexcept override;
+    [[nodiscard]] u32 layer_effect_values(const Layer* host, u64 ref, u32 type, f64 compTime, ParamValue* out,
+                                          u32 capacity) noexcept override;
     /// Mapa de profundidade da fonte da camada no instante do `prepare` em
     /// curso (render/RendererDepth.cpp). Imagem: síncrono, uma vez. Vídeo: o
     /// export espera o quadro; o preview agenda e mostra o último pronto.

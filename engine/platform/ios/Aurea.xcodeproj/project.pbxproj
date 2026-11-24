@@ -55,6 +55,7 @@
 		AE00000000000000000029D1 /* ProxyOptimizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000029D0 /* ProxyOptimizer.swift */; };
 		AE00000000000000000052A1 /* StorageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000052A0 /* StorageView.swift */; };
 		AE0000000000000000010201 /* PreRenderPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000010200 /* PreRenderPanelView.swift */; };
+		AE0000000000000000010801 /* AutoEditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000010800 /* AutoEditView.swift */; };
 		AE00000000000000000000F4 /* RealCameraStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000000F3 /* RealCameraStage.swift */; };
 		AE0000000000000000000E02 /* VoiceRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000E01 /* VoiceRecorder.swift */; };
 		AE0000000000000000003402 /* PluginsV2.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000003401 /* PluginsV2.swift */; };
@@ -83,6 +84,7 @@
 		AE0000000000000000000083 /* LayerPanels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000082 /* LayerPanels.swift */; };
 		AE00000000000000000027C1 /* AureaPropertyPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000027C0 /* AureaPropertyPanel.swift */; };
 		AE00000000000000B1E0C004 /* PuppetStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000B1E0C003 /* PuppetStage.swift */; };
+		AE00000000000000FACE0002 /* FaceRigStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000FACE0001 /* FaceRigStage.swift */; };
 		AE00000000000000B2FE5A02 /* SaberStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000B2FE5A01 /* SaberStage.swift */; };
 		AE00000000000000B1E0C002 /* BlendCutThumb.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000B1E0C001 /* BlendCutThumb.swift */; };
 		AE0000000000000000000085 /* ParticleControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000084 /* ParticleControls.swift */; };
@@ -191,6 +193,7 @@
 		AE00000000000000000029D0 /* ProxyOptimizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyOptimizer.swift; sourceTree = "<group>"; };
 		AE00000000000000000052A0 /* StorageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageView.swift; sourceTree = "<group>"; };
 		AE0000000000000000010200 /* PreRenderPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreRenderPanelView.swift; sourceTree = "<group>"; };
+		AE0000000000000000010800 /* AutoEditView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoEditView.swift; sourceTree = "<group>"; };
 		AE00000000000000000000F3 /* RealCameraStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealCameraStage.swift; sourceTree = "<group>"; };
 		AE0000000000000000000E01 /* VoiceRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceRecorder.swift; sourceTree = "<group>"; };
 		AE0000000000000000003401 /* PluginsV2.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginsV2.swift; sourceTree = "<group>"; };
@@ -224,6 +227,7 @@
 		AE0000000000000000000082 /* LayerPanels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayerPanels.swift; sourceTree = "<group>"; };
 		AE00000000000000000027C0 /* AureaPropertyPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AureaPropertyPanel.swift; sourceTree = "<group>"; };
 		AE00000000000000B1E0C003 /* PuppetStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PuppetStage.swift; sourceTree = "<group>"; };
+		AE00000000000000FACE0001 /* FaceRigStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaceRigStage.swift; sourceTree = "<group>"; };
 		AE00000000000000B2FE5A01 /* SaberStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SaberStage.swift; sourceTree = "<group>"; };
 		AE00000000000000B1E0C001 /* BlendCutThumb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlendCutThumb.swift; sourceTree = "<group>"; };
 		AE0000000000000000000084 /* ParticleControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParticleControls.swift; sourceTree = "<group>"; };
@@ -352,6 +356,7 @@
 				AE0000000000000000000082 /* LayerPanels.swift */,
 				AE00000000000000000027C0 /* AureaPropertyPanel.swift */,
 				AE00000000000000B1E0C003 /* PuppetStage.swift */,
+				AE00000000000000FACE0001 /* FaceRigStage.swift */,
 				AE00000000000000B2FE5A01 /* SaberStage.swift */,
 				AE00000000000000B1E0C001 /* BlendCutThumb.swift */,
 				AE0000000000000000000088 /* MediaPanels.swift */,
@@ -377,6 +382,7 @@
 				AE00000000000000000029D0 /* ProxyOptimizer.swift */,
 				AE00000000000000000052A0 /* StorageView.swift */,
 				AE0000000000000000010200 /* PreRenderPanelView.swift */,
+				AE0000000000000000010800 /* AutoEditView.swift */,
 				AE00000000000000000000F3 /* RealCameraStage.swift */,
 				AE0000000000000000000E01 /* VoiceRecorder.swift */,
 				AE0000000000000000003401 /* PluginsV2.swift */,
@@ -671,6 +677,7 @@
 				AE0000000000000000000083 /* LayerPanels.swift in Sources */,
 				AE00000000000000000027C1 /* AureaPropertyPanel.swift in Sources */,
 				AE00000000000000B1E0C004 /* PuppetStage.swift in Sources */,
+				AE00000000000000FACE0002 /* FaceRigStage.swift in Sources */,
 				AE00000000000000B2FE5A02 /* SaberStage.swift in Sources */,
 				AE00000000000000B1E0C002 /* BlendCutThumb.swift in Sources */,
 				AE0000000000000000000089 /* MediaPanels.swift in Sources */,
@@ -694,6 +701,7 @@
 				AE00000000000000000029D1 /* ProxyOptimizer.swift in Sources */,
 				AE00000000000000000052A1 /* StorageView.swift in Sources */,
 				AE0000000000000000010201 /* PreRenderPanelView.swift in Sources */,
+				AE0000000000000000010801 /* AutoEditView.swift in Sources */,
 				AE00000000000000000000F4 /* RealCameraStage.swift in Sources */,
 				AE0000000000000000000E02 /* VoiceRecorder.swift in Sources */,
 				AE0000000000000000003402 /* PluginsV2.swift in Sources */,
@@ -800,8 +808,8 @@
 				CODE_SIGN_ENTITLEMENTS = app/Aurea.entitlements;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2230;
-				MARKETING_VERSION = 1.0.7;
+				CURRENT_PROJECT_VERSION = 2231;
+				MARKETING_VERSION = 1.0.8;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
@@ -878,8 +886,8 @@
 				CODE_SIGN_ENTITLEMENTS = app/Aurea.entitlements;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2230;
-				MARKETING_VERSION = 1.0.7;
+				CURRENT_PROJECT_VERSION = 2231;
+				MARKETING_VERSION = 1.0.8;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",

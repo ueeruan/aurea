@@ -32,6 +32,7 @@ add_executable(aurea_tests
     test_prerender_cache.cpp
     test_prerender_plan.cpp   # 1.0.2 Pre Render & Pre Export: qualidade, cabe ~Xs, livro por trecho
     test_storage.cpp
+    test_media_relink.cpp   # 1.0.8: mídia ausente religada antes do erro 18
     test_motion_blur.cpp
     test_serialization.cpp
     test_engine.cpp
@@ -67,11 +68,13 @@ add_executable(aurea_tests
     test_scene_param_keys.cpp
     test_builtin_property_schema.cpp
     test_effect3d_sweep.cpp
+    test_explode3d.cpp
     test_audio.cpp
     test_audio_fx.cpp
     test_audio_plugins.cpp
     test_audio_transport.cpp
     test_captions.cpp
+    test_autoedit.cpp         # 1.0.8 Edição automática
     test_captions_quality.cpp
     test_cliptime.cpp
     test_omega_timeline.cpp
@@ -95,6 +98,8 @@ add_executable(aurea_tests
     test_beats.cpp
     test_headbop_motion.cpp
     test_headbop.cpp          # 0.5.2 Headbop: rig e deformação
+    test_face_rig.cpp         # Rig 2D de rosto: campo, grade e busca dos pontos
+    test_face_rig_parts.cpp   # Rig 2D v2: separar em partes, preencher, mover
     test_edit.cpp
     test_ui_mode.cpp
     test_edit_tracks.cpp

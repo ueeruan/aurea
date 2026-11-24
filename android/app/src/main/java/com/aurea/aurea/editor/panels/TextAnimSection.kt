@@ -72,6 +72,12 @@ private val TextPresets = listOf(
     R.string.app_text_preset_smooth_bounce to CupertinoGlyph.Waveform,
 )
 
+/** Ícones dos 8 presets do Juan (JUAN_TEXT_PRESETS), na mesma ordem do LayerPanels.swift. */
+private val JuanPresetGlyphs = listOf(
+    CupertinoGlyph.ArrowDownToLine, CupertinoGlyph.ArrowUp, CupertinoGlyph.Eye, CupertinoGlyph.ArrowLeftRight,
+    CupertinoGlyph.Sparkles, CupertinoGlyph.Waveform, CupertinoGlyph.DocText, CupertinoGlyph.Fullscreen,
+)
+
 private val TitlePresetGlyphs = listOf(
     CupertinoGlyph.Textformat, CupertinoGlyph.ArrowLeftRight, CupertinoGlyph.LineHorizontal3,
     CupertinoGlyph.ArrowCounterclockwise, CupertinoGlyph.SquareOnSquare, CupertinoGlyph.Scissors,
@@ -189,6 +195,17 @@ internal fun TextAnimSection(env: PanelEnv, onEditing: (Boolean) -> Unit = {}, p
         }
         PanelItemGrid(TextPresets.mapIndexed { i, (label, glyph) ->
             PanelItem(glyph, stringResource(label), "text.motion.preset.$i") { store.applyMotionTextPreset(i) }
+        } + listOfNotNull(
+            // 1.0.8: o Salto suave original (palavra a palavra), de volta no texto 2D.
+            if (store.detail?.kind == LayerType.Text.kind) PanelItem(CupertinoGlyph.ArrowDownToLine,
+                stringResource(R.string.app_text_preset_smooth_bounce_classic), "text.preset.classicBounce") {
+                store.applyTextPreset(com.aurea.aurea.presets.SMOOTH_BOUNCE_CLASSIC_PRESET)
+            } else null,
+        ) + com.aurea.aurea.presets.JUAN_TEXT_PRESETS.mapIndexed { i, preset ->
+            // 1.0.8: os 8 presets do Juan (motor 11..18), de volta no texto 2D e 3D.
+            PanelItem(JuanPresetGlyphs[i], stringResource(com.aurea.aurea.presets.ExtraTextPresetLabels[i]), "text.preset.juan.$i") {
+                store.applyTextPreset(preset)
+            }
         })
     }
     // 0.4.4 Explodir texto (só camada de texto 2D): cada pedaço vira uma camada.

@@ -160,7 +160,7 @@ internal fun suggestedProjectName(titles: Collection<String>, nameFor: (Int) -> 
 
 /** A folha "Novo projeto", com o que ela lembra (ou os padrões dos Ajustes). */
 @Composable
-internal fun NewProjectSheetFor(store: EditorStore, vm: HomeViewModel, all: List<ProjectEntry>, onDismiss: () -> Unit) {
+internal fun NewProjectSheetFor(store: EditorStore, vm: HomeViewModel, all: List<ProjectEntry>, onAutoEdit: (() -> Unit)? = null, onDismiss: () -> Unit) {
     val template = stringResource(R.string.project_new, 0)
     val context = androidx.compose.ui.platform.LocalContext.current
     val suggested = remember(all, template) {
@@ -194,5 +194,6 @@ internal fun NewProjectSheetFor(store: EditorStore, vm: HomeViewModel, all: List
         },
         onDismiss = onDismiss,
         device = store.deviceReport,
+        onAutoEdit = onAutoEdit,
     )
 }

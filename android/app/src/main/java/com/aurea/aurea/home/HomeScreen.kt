@@ -86,6 +86,10 @@ fun HomeScreen(store: EditorStore) {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) vm.createFromMedia(store, uri)
     }
+    // 1.0.8 Edição automática: um vídeo vira projeto e a folha abre nele (EditorScreen).
+    val autoEditPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) { store.autoEdit.armForProject(store.projectGeneration + 1); vm.createFromMedia(store, uri) }
+    }
     // "Importar arquivo do projeto": qualquer tipo (o .aureaproj não tem MIME
     // registrado); o motor diz se é projeto do Aurea.
     val projectFilePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -244,7 +248,10 @@ fun HomeScreen(store: EditorStore) {
     }
 
     ProjectDialogs(store, vm, store.projects, dialogs, openProject)
-    if (newProject) NewProjectSheetFor(store, vm, store.projects) { newProject = false }
+    if (newProject) NewProjectSheetFor(store, vm, store.projects, onAutoEdit = {
+        newProject = false
+        autoEditPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
+    }) { newProject = false }
     if (showAccount) androidx.compose.ui.window.Dialog(
         onDismissRequest = { showAccount = false },
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),

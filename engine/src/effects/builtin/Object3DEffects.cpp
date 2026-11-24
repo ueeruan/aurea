@@ -584,6 +584,7 @@ void register_object3d_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<Part3DTexture>());
     (void)r.add(std::make_unique<Shatter3D>());
     (void)r.add(std::make_unique<Stroke3D>());
+    register_explode3d_effect(r);   // Explosão (23/11/2026), no fim
 }
 
 } // namespace aurea::builtin

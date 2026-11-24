@@ -699,6 +699,9 @@ void register_builtin_effects(EffectRegistry& registry) {
     builtin::register_reference_batch_b(registry);
     // AE reference batch A2: Detail-preserving Upscale. Always appended.
     builtin::register_upscale_reference(registry);
+    // Rig 2D de rosto (Distorcer): parâmetros de rosto sem IA. No fim.
+    builtin::register_face_rig_effect(registry);
+    builtin::register_face_rig_part_effect(registry);
 }
 
 } // namespace aurea

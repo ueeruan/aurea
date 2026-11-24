@@ -440,6 +440,10 @@ fun EditorScreen(store: EditorStore) {
     LayerPresetsEmptyDialog(store, ui)
     if (ui.effectsBrowser) EffectsBrowserSheet(store, onOpenPanel = { openPanel(store, ui, it) }) { ui.effectsBrowser = false }
     store.expressionTarget?.let { com.aurea.aurea.editor.panels.ExpressionSheet(store, it) }
+    // 1.0.8: Edição automática (dock do clipe de vídeo, ou o vídeo que a Home acabou de importar).
+    if (store.autoEdit.target != null) com.aurea.aurea.autoedit.AutoEditSheet(store)
+    val firstVideo = store.layers.firstOrNull { it.kind == 1 }?.id
+    androidx.compose.runtime.LaunchedEffect(store.projectGeneration, firstVideo) { store.autoEdit.onLayers(store.projectGeneration, firstVideo) }
     // 0.5.4: texto 3D pedido sem o acesso (Text3DGate em EditorStore.addText3D): o paywall (assinatura do
     // Texto 3D ou AureaHyper; 16/11/2026).
     if (store.hyperLockedPrompt) com.aurea.aurea.hyper.PaywallDialog(com.aurea.aurea.hyper.PaidItem.text3d(), null) { store.hyperLockedPrompt = false }

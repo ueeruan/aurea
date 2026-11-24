@@ -786,7 +786,7 @@ private fun Model3DGrid(store: EditorStore, close: () -> Unit) {
     }
     ObjectGrid(
         listOf(
-            ObjectCell(stringResource(R.string.model_shop_title), "add.model3d.library", glyph = CupertinoGlyph.Cube,
+            ObjectCell(stringResource(R.string.model_library_3d), "add.model3d.library", glyph = CupertinoGlyph.Cube,
                 tint = AureaColors.Accent) { library = true },
             ObjectCell(stringResource(R.string.shape3d_title), "add.model3d.shapes", draw = { drawShape3DIcon(0) }) { shapes = true },
             ObjectCell(stringResource(R.string.sh_add_model_3d), "add.model3d.file", glyph = CupertinoGlyph.Cube, tint = AureaColors.Accent) {

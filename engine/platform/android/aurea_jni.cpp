@@ -2287,6 +2287,46 @@ AUREA_JNI jboolean AUREA_FN(nativePuppetRotatePins)(JNIEnv*, jclass, jlong handl
         ? JNI_TRUE : JNI_FALSE;
 }
 
+// --- Rig 2D de rosto (Engine::query_face_rig e família; u, v = fração da camada) ---
+AUREA_JNI jint AUREA_FN(nativeQueryFaceRig)(JNIEnv* env, jclass, jlong handle, jlong layer, jint effect, jfloatArray out) {
+    return puppet_query(env, out, [](NativeContext* c, u64 l, u32 e, f32* o, u32 n) { return c->engine.query_face_rig(l, e, o, n); },
+                        ctx_of(handle), layer, effect);
+}
+
+AUREA_JNI jint AUREA_FN(nativeFaceRigAutoPlace)(JNIEnv*, jclass, jlong handle, jlong layer, jint effect) {
+    NativeContext* c = ctx_of(handle);
+    return c && effect >= 0 ? c->engine.face_rig_auto_place(static_cast<u64>(layer), static_cast<u32>(effect)) : -1;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeFaceRigMoveHandle)(JNIEnv*, jclass, jlong handle, jlong layer, jint effect, jint h, jfloat u,
+                                                     jfloat v, jboolean continuing) {
+    NativeContext* c = ctx_of(handle);
+    return c && effect >= 0 && h >= 0
+        && c->engine.face_rig_move_handle(static_cast<u64>(layer), static_cast<u32>(effect), static_cast<u32>(h), u, v,
+                                          continuing == JNI_TRUE)
+        ? JNI_TRUE : JNI_FALSE;
+}
+
+/// Rig 2D v2 "Separar em partes" (pesado: chamar fora da UI). Devolve a camada
+/// da pré-composição (e o Controle em out[0]) ou −Errc.
+AUREA_JNI jlong AUREA_FN(nativeFaceRigSplitParts)(JNIEnv* env, jclass, jlong handle, jlong layer, jint effect, jlongArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || effect < 0) return -static_cast<jlong>(Errc::InvalidArgument);
+    u64 controller = 0;
+    const auto r = c->engine.face_rig_split_parts(static_cast<u64>(layer), static_cast<u32>(effect), &controller);
+    if (!r.ok()) return -static_cast<jlong>(r.status().code());
+    if (out && env->GetArrayLength(out) >= 1) {
+        const jlong v = static_cast<jlong>(controller);
+        env->SetLongArrayRegion(out, 0, 1, &v);
+    }
+    return static_cast<jlong>(*r);
+}
+
+AUREA_JNI jfloat AUREA_FN(nativeFaceRigSplitProgress)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    return c ? c->engine.face_rig_split_progress() : 1.0f;
+}
+
 /// Quadros rastreados, ou −Errc.
 AUREA_JNI jint AUREA_FN(nativeTrackMask)(JNIEnv*, jclass, jlong handle, jlong layer, jint mask, jint mode) {
     NativeContext* c = ctx_of(handle);
@@ -3652,6 +3692,28 @@ AUREA_JNI jobjectArray AUREA_FN(nativeProjectFileMedia)(JNIEnv* env, jclass, jlo
     return string_array(env, flat);
 }
 
+/// 1.0.8 (erro 18): troca, num `.aurea` FECHADO, o caminho gravado de cada
+/// mídia pelo arquivo novo dentro do app (pares gravado, novo). É a migração
+/// das mídias guardadas por URI `content://` para cópias do app antes de
+/// abrir o projeto. Devolve quantas religou, ou −Errc.
+AUREA_JNI jint AUREA_FN(nativeRelinkProjectFileMedia)(JNIEnv* env, jclass, jlong handle, jstring path, jobjectArray pairs) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !path || !pairs) return -static_cast<jint>(Errc::InvalidArgument);
+    const jsize n = env->GetArrayLength(pairs);
+    std::vector<std::pair<std::string, std::string>> map;
+    for (jsize i = 0; i + 1 < n; i += 2) {
+        auto* from = static_cast<jstring>(env->GetObjectArrayElement(pairs, i));
+        auto* to = static_cast<jstring>(env->GetObjectArrayElement(pairs, i + 1));
+        if (from && to) map.emplace_back(to_string(env, from), to_string(env, to));
+        if (from) env->DeleteLocalRef(from);
+        if (to) env->DeleteLocalRef(to);
+    }
+    if (map.empty()) return 0;
+    u32 relinked = 0;
+    const Status s = package::relink_media(to_string(env, path), map, &relinked);
+    return s.ok() ? static_cast<jint>(relinked) : -static_cast<jint>(s.raw());
+}
+
 /// Plugins instalados que um `.aurea` fechado usa: 3 strings por plugin (id, versão, pasta).
 AUREA_JNI jobjectArray AUREA_FN(nativeProjectFilePlugins)(JNIEnv* env, jclass, jlong handle, jstring path) {
     NativeContext* c = ctx_of(handle);
@@ -3932,6 +3994,16 @@ AUREA_JNI jint AUREA_FN(nativeCaptionProgress)(JNIEnv*, jclass, jlong handle, jb
     auto* c = ctx_of(handle); if (!c) return 0;
     if (cancel) c->engine.captionCancelled.store(true);
     return c->engine.captionProgress.load();
+}
+// 1.0.8: edição automática (relatório JSON; roda numa thread de trabalho do app).
+AUREA_JNI jbyteArray AUREA_FN(nativeAutoEdit)(JNIEnv* env, jclass, jlong handle, jlong layer, jbyteArray request) {
+    auto* c = ctx_of(handle);
+    return bytes_of(env, c ? c->engine.auto_edit(static_cast<u64>(layer), utf8_of(env, request)) : std::string("{\"ok\":false,\"error\":\"engine\"}"));
+}
+AUREA_JNI jint AUREA_FN(nativeAutoEditProgress)(JNIEnv*, jclass, jlong handle, jboolean cancel) {
+    auto* c = ctx_of(handle); if (!c) return 0;
+    if (cancel) c->engine.autoEditCancelled.store(true);
+    return c->engine.autoEditProgress.load();
 }
 AUREA_JNI jint AUREA_FN(nativeCaptionCount)(JNIEnv*, jclass, jlong handle, jlong layer) {
     NativeContext* c = ctx_of(handle);

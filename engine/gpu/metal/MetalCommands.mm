@@ -865,6 +865,10 @@ Status Backend::end_frame() noexcept {
 
 void Backend::set_export_pass_split(bool split, u32 passes) noexcept {
     if (!impl_) return;
+    // 1.0.8: a fatia no Metal ainda não rodou num iPhone e a 1.0.7 de teste
+    // fechava no export logo depois de ela poder ligar sozinha (quadro > 400 ms).
+    // Fica desligada; `aurea.export.metalPassSplit` liga para diagnóstico.
+    if (split && ![NSUserDefaults.standardUserDefaults boolForKey:@"aurea.export.metalPassSplit"]) return;
     const u32 want = split ? std::max(1u, passes) : 0u;
     if (want == impl_->passesPerCommandBuffer) return;
     if (split) AUREA_LOG_INFO("metal: export com %u passe(s) por envio", want);

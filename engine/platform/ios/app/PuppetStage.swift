@@ -386,6 +386,13 @@ private func puppetToUv(_ c: [Float], _ x: Float, _ y: Float) -> (Float, Float)?
                 .accessibilityIdentifier("fx.puppet.autoRigImage")
                 .frame(minHeight: 44)
             }
+            // Rig 2D de rosto: parâmetros de rosto (virar, piscar, boca...) na mesma camada (FaceRigStage.swift).
+            if let layer = model.selectedLayer, layer.kind == 2, !layer.locked {
+                Button(AureaText.t("fx_name_face_rig") + " · " + AureaText.t("hyper_title")) { model.addFaceRig() }
+                .disabled(rigTask != nil)
+                .accessibilityIdentifier("fx.puppet.faceRig")
+                .frame(minHeight: 44)
+            }
             Text(AureaText.t("puppet_hint"))
                 .font(.system(size: 11.5))
                 .foregroundStyle(AureaColors.muted)

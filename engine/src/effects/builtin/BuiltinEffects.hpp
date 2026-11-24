@@ -90,6 +90,8 @@ void register_raster_extrude(EffectRegistry& r);
 /// Animar parte 3D, Esconder partes 3D, Trocar textura 3D, 3D Shatter e
 /// 3D Stroke (Object3DEffects.cpp). No fim.
 void register_object3d_effects(EffectRegistry& r);
+/// Explosão (Explode3DEffect.cpp; o movimento 3D em scene3d/Explode3D.cpp).
+void register_explode3d_effect(EffectRegistry& r);
 /// Flow Retime (câmera lenta por optical flow) e Flow Motion Blur
 /// (FlowTimeEffects.cpp). No fim.
 void register_flow_time_effects(EffectRegistry& r);
@@ -110,6 +112,9 @@ void register_disintegrate_effect(EffectRegistry& r);
 void register_mesh_warp_effect(EffectRegistry& r);
 /// Fantoche — pinos com ARAP (PuppetEffect.cpp). No fim.
 void register_puppet_effect(EffectRegistry& r);
+/// Rig 2D de rosto — parâmetros de rosto sem IA (FaceRigEffect.cpp). No fim.
+void register_face_rig_effect(EffectRegistry& r);
+void register_face_rig_part_effect(EffectRegistry& r);   // Rig 2D v2: partes separadas
 /// Pacote CC: distorções/ladrilhos (CCEffects.cpp), estilo/luz/cor
 /// (CCStylizeEffects.cpp) e transições (CCTransitions.cpp). No fim.
 void register_cc_distort_effects(EffectRegistry& r);

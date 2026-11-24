@@ -212,6 +212,7 @@ private fun effectPresetLabelRes(typeId: Int, id: String): Int? {
         "matte" -> R.string.look_matte
         else -> null
     }
+    if (typeId == effectTypeId("aurea.3d.explode")) return explodePresetLabel(id)
     if (typeId == effectTypeId("aurea.enhance.video")) return when (id) {
         "auto" -> R.string.fxp_enhance_auto
         "social" -> R.string.fxp_enhance_social
@@ -240,6 +241,17 @@ private fun effectPresetLabelRes(typeId: Int, id: String): Int? {
         "living_grid" -> R.string.fxp_constellation_living_grid
         else -> null
     }
+}
+
+/** As variações da Explosão 3D (`aurea.3d.explode`, Effect::presets), só deste efeito. Par do iOS: `fxExplodePresetKey`. */
+@StringRes
+internal fun explodePresetLabel(id: String): Int? = when (id) {
+    "explode" -> R.string.fxl_explosion
+    "glass" -> R.string.fxp_explode_glass
+    "disintegrate" -> R.string.afx_name_disintegrate
+    "assemble" -> R.string.fxp_explode_assemble
+    "side_impact" -> R.string.fxp_explode_side_impact
+    else -> null
 }
 
 /**

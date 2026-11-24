@@ -111,6 +111,15 @@ struct AureaApp: App {
         // O que o sistema copiou para Documents/Inbox sai depois de importado.
         let inbox = file.path.hasPrefix(documents.appendingPathComponent("Inbox", isDirectory: true).path + "/")
         let model = self.model
+        // 1.0.8 (par do EditorStore.openExternalFile): projeto do After Effects
+        // (.aep/.aet, .rar, .zip com .aep) vai para a importação do AE; o
+        // conteúdo decide, não só o nome.
+        if AureaModel.isAeProjectSource(url) {
+            model.importHomeAeProject(url, fromOutside: true) {
+                if inbox { try? FileManager.default.removeItem(at: url) }
+            }
+            return
+        }
         model.importProjectFile(url) {
             model.refreshProjectList()
             if inbox { try? FileManager.default.removeItem(at: url) }

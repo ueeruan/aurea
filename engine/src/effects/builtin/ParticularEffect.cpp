@@ -49,8 +49,9 @@ struct ParticularUniforms {
     Mat4 layerFromComp;
     Vec4 plexus;                          // distância (px; 0 = sem rede), espessura (px), opacidade, pontos
     Vec4 plexusSurface;                   // ligada (0/1), opacidade, pontos S, -
+    Vec4 shape;                           // forma, giro (rad/s), bater/balançar 0..1, cintilar 0..1
 };
-static_assert(sizeof(ParticularUniforms) == 544, "layout std140 do particular.vert");
+static_assert(sizeof(ParticularUniforms) == 560, "layout std140 do particular.vert");
 /// Teto de pontos ligados na rede: M(M−1)/2 pares × 6 vértices (300 → ~270 mil).
 constexpr u32 kMaxPlexusPoints = 300;
 /// Teto da superfície: S(S−1)(S−2)/6 trios × 3 vértices (80 → ~246 mil).
@@ -129,6 +130,14 @@ public:
         p.add_bool("plexus_surface", "Superfície da rede", false);
         p.add_float("plexus_surface_opacity", "Opacidade da superfície", 25.0f, 0.0f, 100.0f, kAnimPct, "%");
         p.add_int("plexus_surface_points", "Pontos da superfície", 40, 3, static_cast<i32>(kMaxSurfacePoints));
+        // Forma (1.0.8): o desenho de cada partícula. Borboleta bate as asas,
+        // folha/pétala/confete giram e tombam, estrela/brilho cintilam.
+        static const char* const kShapes[kShapeCount] = {"Disco", "Estrela", "Coração", "Folha", "Pétala",
+                                                         "Borboleta", "Confete", "Brilho", "Floco de neve"};
+        p.add_enum("shape", "Forma da partícula", kShapes, kShapeCount, kShapeDisc);
+        p.add_float("spin", "Giro", 0.0f, 0.0f, 1440.0f, kAnim, "°/s");
+        p.add_float("flutter", "Bater de asas e balanço", 0.0f, 0.0f, 100.0f, kAnimPct, "%");
+        p.add_float("twinkle", "Cintilar", 0.0f, 0.0f, 100.0f, kAnimPct, "%");
     }
 
     bool is_identity(const EffectEval&) const noexcept override { return false; }
@@ -214,6 +223,9 @@ public:
         u.color0.w = pct(e, kColorRandom, 0.0f, 100.0f);
         u.color1 = linear(e.color(kColorEnd));
         u.color1.w = 0.0f;
+        u.shape = Vec4{static_cast<f32>(std::min<u32>(e.e(kShape), kShapeCount - 1)),
+                       std::clamp(finite_or(e.f(kSpin), 0.0f), 0.0f, 1440.0f) * 0.01745329252f,
+                       pct(e, kFlutter, 0.0f, 100.0f), pct(e, kTwinkle, 0.0f, 100.0f)};
         if (e.placement && e.placement->particleSpace) {
             // Camada do Particular: a rotação da camada gira o espaço das
             // partículas; a câmera é a da composição.
@@ -403,6 +415,60 @@ const Preset& preset_table(u32 i) noexcept {
           {kOpacity, 100}, {kFadeIn, 8}, {kFadeOut, 8}, {kFeather, 70}, {kStretch, 0}, {kAddMode, 1},
           {kPlexus, 1}, {kPlexusDistance, 230}, {kPlexusWidth, 1.3f}, {kPlexusOpacity, 65}, {kPlexusPoints, 200}},
          {1, 1, 1}, {0.85f, 0.92f, 1.0f}},
+        // 9 Borboletas: poucas, lentas, vagando e batendo as asas.
+        {{{kRate, 5}, {kPreRoll, 16000}, {kEmitterW, 140}, {kEmitterH, 130}, {kEmitterD, 120}, {kVelocity, 45},
+          {kVelocityRandom, 60}, {kSpread, 180}, {kGravity, -4}, {kAirDrag, 30}, {kTurbulence, 150},
+          {kTurbulenceSpeed, 28}, {kLife, 14000}, {kLifeRandom, 30}, {kSize, 64}, {kSizeRandom, 40},
+          {kSizeEnd, 100}, {kOpacity, 100}, {kFadeIn, 8}, {kFadeOut, 12}, {kFeather, 4}, {kStretch, 0},
+          {kColorRandom, 55}, {kAddMode, 0}, {kShape, kShapeButterfly}, {kFlutter, 100}},
+         {1.0f, 0.62f, 0.12f}, {1.0f, 0.62f, 0.12f}},
+        // 10 Folhas caindo: tombando e girando com o vento, outono no fim da vida.
+        {{{kRate, 24}, {kPreRoll, 12000}, {kEmitterW, 170}, {kEmitterH, 240}, {kEmitterD, 160}, {kVelocity, 70},
+          {kVelocityRandom, 50}, {kDirectionTilt, 180}, {kSpread, 25}, {kGravity, 28}, {kWindX, 70}, {kAirDrag, 60},
+          {kTurbulence, 120}, {kTurbulenceSpeed, 40}, {kLife, 11000}, {kLifeRandom, 35}, {kSize, 46},
+          {kSizeRandom, 45}, {kSizeEnd, 100}, {kOpacity, 100}, {kFadeIn, 5}, {kFadeOut, 10}, {kFeather, 4},
+          {kAddMode, 0}, {kShape, kShapeLeaf}, {kSpin, 80}, {kFlutter, 50}},
+         {0.55f, 0.72f, 0.16f}, {0.92f, 0.42f, 0.08f}},
+        // 11 Pétalas (cerejeira)
+        {{{kRate, 45}, {kPreRoll, 10000}, {kEmitterW, 170}, {kEmitterH, 240}, {kEmitterD, 180}, {kVelocity, 60},
+          {kVelocityRandom, 60}, {kDirectionTilt, 180}, {kSpread, 30}, {kGravity, 22}, {kWindX, 90}, {kAirDrag, 60},
+          {kTurbulence, 110}, {kTurbulenceSpeed, 45}, {kLife, 9000}, {kLifeRandom, 40}, {kSize, 26},
+          {kSizeRandom, 45}, {kSizeEnd, 100}, {kOpacity, 95}, {kFadeIn, 5}, {kFadeOut, 12}, {kFeather, 6},
+          {kAddMode, 0}, {kShape, kShapePetal}, {kSpin, 120}, {kFlutter, 70}},
+         {1.0f, 0.80f, 0.88f}, {1.0f, 0.66f, 0.78f}},
+        // 12 Corações: sobem de baixo, balançando de leve.
+        {{{kRate, 14}, {kPreRoll, 4000}, {kPositionY, 55}, {kEmitterW, 120}, {kEmitterH, 4}, {kEmitterD, 60},
+          {kVelocity, 170}, {kVelocityRandom, 40}, {kDirectionTilt, 0}, {kSpread, 18}, {kGravity, -25},
+          {kAirDrag, 20}, {kTurbulence, 70}, {kTurbulenceSpeed, 40}, {kLife, 5500}, {kLifeRandom, 30}, {kSize, 54},
+          {kSizeRandom, 45}, {kSizeEnd, 70}, {kOpacity, 100}, {kFadeIn, 10}, {kFadeOut, 40}, {kFeather, 6},
+          {kAddMode, 0}, {kShape, kShapeHeart}, {kFlutter, 25}},
+         {1.0f, 0.22f, 0.42f}, {1.0f, 0.52f, 0.70f}},
+        // 13 Estrelas cintilantes
+        {{{kRate, 36}, {kPreRoll, 6000}, {kEmitterW, 160}, {kEmitterH, 160}, {kEmitterD, 100}, {kVelocity, 6},
+          {kVelocityRandom, 100}, {kSpread, 180}, {kGravity, 0}, {kAirDrag, 0}, {kTurbulence, 0}, {kLife, 5000},
+          {kLifeRandom, 50}, {kSize, 28}, {kSizeRandom, 70}, {kSizeEnd, 100}, {kOpacity, 100}, {kFadeIn, 25},
+          {kFadeOut, 35}, {kFeather, 20}, {kAddMode, 1}, {kShape, kShapeSparkle}, {kSpin, 25}, {kTwinkle, 85}},
+         {1.0f, 0.95f, 0.72f}, {0.82f, 0.90f, 1.0f}},
+        // 14 Vaga-lumes: pontos quentes vagando, acendendo e apagando.
+        {{{kRate, 10}, {kPreRoll, 15000}, {kEmitterW, 150}, {kEmitterH, 150}, {kEmitterD, 120}, {kVelocity, 20},
+          {kVelocityRandom, 80}, {kSpread, 180}, {kGravity, 0}, {kAirDrag, 20}, {kTurbulence, 95},
+          {kTurbulenceSpeed, 25}, {kLife, 9000}, {kLifeRandom, 40}, {kSize, 16}, {kSizeRandom, 50}, {kSizeEnd, 100},
+          {kOpacity, 100}, {kFadeIn, 15}, {kFadeOut, 20}, {kFeather, 100}, {kAddMode, 1}, {kTwinkle, 100}},
+         {0.85f, 1.0f, 0.35f}, {0.60f, 1.0f, 0.30f}},
+        // 15 Confetes: caem de cima girando, todas as cores.
+        {{{kRate, 110}, {kPreRoll, 3000}, {kPositionY, -58}, {kEmitterW, 170}, {kEmitterH, 4}, {kEmitterD, 120},
+          {kVelocity, 260}, {kVelocityRandom, 50}, {kDirectionTilt, 180}, {kSpread, 25}, {kGravity, 180},
+          {kWindX, 30}, {kAirDrag, 150}, {kTurbulence, 60}, {kTurbulenceSpeed, 60}, {kLife, 5500}, {kLifeRandom, 25},
+          {kSize, 20}, {kSizeRandom, 40}, {kSizeEnd, 100}, {kOpacity, 100}, {kFadeIn, 2}, {kFadeOut, 10},
+          {kFeather, 2}, {kColorRandom, 100}, {kAddMode, 0}, {kShape, kShapeConfetti}, {kSpin, 360}, {kFlutter, 100}},
+         {1.0f, 0.35f, 0.45f}, {1.0f, 0.35f, 0.45f}},
+        // 16 Flocos de neve: a Neve com flocos de seis pontas.
+        {{{kRate, 70}, {kPreRoll, 9000}, {kEmitterW, 160}, {kEmitterH, 240}, {kEmitterD, 200}, {kVelocity, 60},
+          {kVelocityRandom, 60}, {kDirectionTilt, 180}, {kSpread, 30}, {kGravity, 30}, {kWindX, 40}, {kAirDrag, 60},
+          {kTurbulence, 120}, {kTurbulenceSpeed, 30}, {kLife, 10000}, {kLifeRandom, 45}, {kSize, 30}, {kSizeRandom, 60},
+          {kSizeEnd, 100}, {kOpacity, 92}, {kFadeIn, 6}, {kFadeOut, 12}, {kFeather, 10}, {kAddMode, 0},
+          {kShape, kShapeSnowflake}, {kSpin, 30}},
+         {1, 1, 1}, {0.88f, 0.94f, 1.0f}},
     };
     return kPresets[std::min(i, kPresetCount - 1)];
 }

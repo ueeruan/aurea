@@ -33,6 +33,9 @@ struct ProjectLayer {
 
 struct ProjectComp {
     u32 id = 0, width = 0, height = 0;
+    /// Tamanho que cabe no Aurea (textura máxima): igual ao do AE quando cabe;
+    /// menor = o conteúdo é reduzido na mesma proporção (resize_content).
+    u32 fitWidth = 0, fitHeight = 0;
     std::string name;
     f64 fps = 0, duration = 0;
     bool motionBlur = false;
@@ -40,9 +43,17 @@ struct ProjectComp {
     std::vector<ProjectLayer> layers; // AE top to bottom.
 };
 
+/// Item que a leitura pulou (malformado, além dos limites) ou aproximou: o
+/// projeto entra sem ele e o relatório diz qual foi.
+struct ProjectIssue {
+    std::string kind, name, reason;
+    bool skipped = true;   ///< falso = aproximação (nota)
+};
+
 struct ProjectDocument {
     std::vector<ProjectComp> comps;
     std::vector<ProjectMedia> media;
+    std::vector<ProjectIssue> issues;
 };
 
 [[nodiscard]] bool is_project_file(std::string_view bytes) noexcept;

@@ -218,6 +218,8 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.distort.page_turn", FxEffectHuman(name: "fx_name_page_turn", keywords: "page turn pagina papel cc", principal: [0, 1, 2, 3, 8])),
     ("aurea.distort.mesh_warp", FxEffectHuman(name: "fx_name_mesh_warp", keywords: "mesh warp malha deformacao grade bezier entortar", principal: [0, 1, 2])),
     ("aurea.distort.puppet", FxEffectHuman(name: "fx_name_puppet", keywords: "puppet fantoche pino pin marionete rig autorig 2d autoanimacao png personagem deformar arap", principal: [0, 1, 2])),
+    ("aurea.rig.face", FxEffectHuman(name: "fx_name_face_rig", keywords: "rig rosto face live2d anime piscar olho boca falar virar cabeca acenar respirar sobrancelha sorriso personagem 2d", principal: [0, 1, 2, 3, 4, 5])),
+    ("aurea.rig.part", FxEffectHuman(name: "fx_name_face_rig_part", keywords: "rig parte live2d camada profundidade controle", principal: [1, 2])),
     ("aurea.distort.headbop", FxEffectHuman(name: "fx_name_headbop", keywords: "headbop head bop cabeça balançar batida musica ritmo danca dancar pessoa beat nod groove", principal: [0, 1, 2, 3, 13])),
     ("aurea.distort.liquid_glass", FxEffectHuman(name: "fx_name_liquid_glass", keywords: "liquid glass vidro liquido lente refracao glassmorphism", principal: [0, 1, 2, 3, 5])),
     ("aurea.transition.noise_dissolve", FxEffectHuman(name: "fx_name_noise_dissolve", keywords: "dissolve dissolver ruido queimar desintegrar", principal: [0, 1, 3, 8, 10])),
@@ -250,6 +252,10 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         keywords: "trocar textura 3d swap texture imagem image material parte objeto modelo forma galeria", principal: Array(0...3))),
     ("aurea.3d.shatter", FxEffectHuman(name: "fx3d_name_shatter",
         keywords: "3d shatter quebrar estilhacar explodir explosao pecas vidro cacos shatter break glass", principal: [0, 1, 2, 4, 5, 3])),
+    // Explosão (aurea.3d.explode): o objeto 3D inteiro (modelo, forma, texto 3D) em pedaços. Pago (HyperEffectGate).
+    ("aurea.3d.explode", FxEffectHuman(name: "fx3d_name_explode",
+        keywords: "explosao explodir explode explosion fratura fracture estilhacar shatter pedacos fragments desintegrar disintegrate montar assemble 3d modelo texto forma",
+        principal: [0, 1, 4, 7, 9, 12, 14, 19])),
     ("aurea.3d.stroke", FxEffectHuman(name: "fx3d_name_stroke",
         keywords: "3d stroke traco linha contorno caminho mascara circulo espiral neon trapcode write on", principal: [0, 1, 3, 4, 5, 9])),
     // --- Pacote CC (CCEffects.cpp e irmãos): o nome "CC" fica só na busca ---
@@ -2451,6 +2457,7 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.3d.part_transform", "fx3d_desc_part_transform", [.cena3D], "animar parte 3d animate part mover girar escala objeto modelo forma keyframe peca")
     put("aurea.3d.part_hide", "fx3d_desc_part_hide", [.cena3D], "esconder partes 3d hide parts sumir ocultar visibilidade objeto modelo forma peca")
     put("aurea.3d.part_texture", "fx3d_desc_part_texture", [.cena3D], "trocar textura 3d swap texture imagem image material parte objeto modelo forma galeria")
+    put("aurea.3d.explode", "fx3d_desc_explode", [.cena3D], "explosão explosao explodir explode explosion fratura fracture estilhaçar estilhacar shatter pedaços pedacos fragments desintegrar disintegrate montar assemble 3d modelo texto forma")
     put("aurea.3d.shatter", "fx3d_desc_shatter", FxVisualTargets + [.cena3D], "3d shatter quebrar estilhacar explodir explosao pecas vidro cacos shatter break glass")
     put("aurea.3d.stroke", "fx3d_desc_stroke", FxVisualTargets + [.cena3D], "3d stroke traco linha contorno caminho mascara circulo espiral neon trapcode write on")
     // --- Pacote CC ---
@@ -2497,6 +2504,7 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     // --- IA: a rede lê a FONTE da camada (foto ou vídeo) ---
     put("aurea.ai.depth_map", "fx_desc_ai_depth_map", [.imagem, .video], "profundidade depth mapa ia ai midas distancia perto longe z matte fundo")
     put("aurea.distort.puppet", "fx_desc_puppet", FxAllTargets, "fantoche puppet pino pin marionete rig autorig 2d autoanimacao png personagem deformar")
+    put("aurea.rig.face", "fx_desc_face_rig", [.imagem, .video], "rig rosto face live2d anime piscar olho boca falar virar cabeca acenar respirar sobrancelha sorriso personagem 2d")
     // --- 0.4.5: pedidos de usuários (mesma tabela no Android, EffectCatalogMeta.kt) ---
     put("aurea.distort.water_reflection", "fx045_desc_water_reflection", [.imagem, .video, .texto, .vetor, .forma, .preComposicao, .cena3D],
         "reflejo agua отражение вода प्रतिबिंब पानी انعكاس ماء pantulan air")
@@ -2830,11 +2838,15 @@ enum FxParamMath {
     /// Régua: risco a cada 5,5 pt, maior a cada 5 riscos; agulha 1,5 pt.
     static let TICK_SPACING: CGFloat = 5.5
     static let MAJOR_EVERY = 5
-    /// Arremesso acima de 300 pt/s; o gesto começa depois de ¾ do touch slop.
+    /// Arremesso acima de 300 pt/s.
     static let FLING_MIN_PX_S: CGFloat = 300
-    static let RULER_SLOP_FRACTION: CGFloat = 0.75
-    /// Slider: o gesto começa depois de ½ touch slop; 10 pt de pista em cada encaixe.
-    static let SLIDER_SLOP_FRACTION: CGFloat = 0.5
+    /// 1.0.8: régua e slider só tomam o dedo depois do touch slop INTEIRO e com
+    /// o movimento claramente de lado (par do ParamRowMath.kt).
+    static let RULER_SLOP_FRACTION: CGFloat = 1
+    /// Slider: 10 pt de pista em cada encaixe.
+    static let SLIDER_SLOP_FRACTION: CGFloat = 1
+    /// O lateral tem de passar 1,5× o vertical para o controle tomar o gesto.
+    static let HORIZONTAL_DOMINANCE: CGFloat = 1.5
     static let SLIDER_SNAP_DP: CGFloat = 10
     /// Abrir/fechar os controles e a seta da seção (ms).
     static let OPEN_MS = 200

@@ -23,6 +23,7 @@
 #include "aurea/text/TextTransform.hpp"
 #include "aurea/scene3d/Shape3D.hpp"
 #include "aurea/scene3d/PartEffects.hpp"
+#include "aurea/scene3d/Explode3D.hpp"
 #include "aurea/scene3d/RigPose.hpp"
 #include "aurea/rig/Mocap.hpp"
 #include "aurea/scene3d/StudioEnvironment.hpp"
@@ -428,6 +429,9 @@ void place_model(const Composition& comp, const Layer& l, const scene3d::SceneAs
     // Animar parte 3D / Esconder partes 3D: por último (os animadores refazem a opacidade).
     scene3d::apply_part_effects(asset, l, materialTime, pose.nodeWorld, inst.nodeOpacity);
     if (!asset.skins.empty() && scene3d::has_part_effects(l)) scene3d::rebuild_skin_matrices(asset, pose);
+    // Explosão: no asset fraturado as peças seguem o nó de origem (já posado
+    // acima) e voam; o interior ganha o brilho do quadro (Explode3D.hpp).
+    scene3d::explode3d::apply(asset, l, materialTime, comp.fps(), inst.world, pose.nodeWorld, inst.nodeOpacity, inst.materials);
     inst.nodeWorld = std::move(pose.nodeWorld);
     inst.jointMatrices = std::move(pose.jointMatrices);
     inst.skinJointOffset = std::move(pose.skinJointOffset);
@@ -443,6 +447,7 @@ bool can_share_static_pose(const Layer& layer, const scene3d::SceneAsset& asset)
     // Cartoon: a largura do contorno depende do tamanho da composição (place_model).
     for (const auto& m : asset.materials) if (m.toon == 2) return false;
     if (scene3d::has_part_effects(layer)) return false;
+    if (scene3d::explode3d::find(layer)) return false;   // Explosão: as peças andam por quadro
     if (scene3d::has_bone_pose(layer)) return false;
     for (u32 i = 0; i < layer.tracks.size(); ++i) {
         const auto property = layer.tracks.at(i).property;
@@ -1641,6 +1646,26 @@ bool Renderer::layer_world(const Layer* host, u64 ref, f64 compTime, LayerWorldI
     if (l->kind == LayerKind::Camera) out.fovY = std::clamp(camera_fov_frac(*l, local), 1.0f, 170.0f) * kDeg2Rad;
     out.valid = std::isfinite(out.position.x) && std::isfinite(out.position.y) && std::isfinite(out.position.z);
     return out.valid;
+}
+
+// Rig 2D v2: cada parte lê o "Controle do rig" (os parâmetros do aurea.rig.face
+// do nulo) no instante pedido — também em instantes passados, para a física do
+// cabelo. Mesma composição do planejamento; sem estado.
+u32 Renderer::layer_effect_values(const Layer* host, u64 ref, u32 type, f64 compTime, ParamValue* out,
+                                  u32 capacity) noexcept {
+    if (!planComp_ || !host || !ref || !out || !capacity || !effects_ || !std::isfinite(compTime)) return 0;
+    const Layer* l = planComp_->layer(LayerId::unpack(ref));
+    if (!l || l == host) return 0;
+    const ParameterRegistry* params = effects_->params(type);
+    if (!params) return 0;
+    for (const EffectInstance& inst : l->effects) {
+        if (inst.type != type || !inst.enabled) continue;
+        const f64 local = compTime - static_cast<f64>(l->start.value) + static_cast<f64>(l->offset.value);
+        const u32 n = std::min({capacity, params->count(), static_cast<u32>(inst.params.size())});
+        for (u32 p = 0; p < n; ++p) out[p] = evaluate_param_f(l->tracks, inst, p, params->at(p), local);
+        return n;
+    }
+    return 0;
 }
 
 void Renderer::temporal_failure(Status failure) noexcept {
@@ -3475,6 +3500,22 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 std::shared_ptr<const scene3d::SceneAsset> asset =
                     modelLookup_ ? modelLookup_(modelCtx_, l->model.scene) : nullptr;
                 if (!asset) { mark_incomplete(__FILE__, __LINE__); continue; }
+                // Explosão (Explode3D.hpp): com progresso > 0 o modelo é trocado
+                // pelas peças da fratura (cache); progresso 0 = o original.
+                u64 modelKey = l->model.scene.pack();
+                bool explodeHollow = false;
+                std::shared_ptr<const scene3d::explode3d::Fractured> explodePieces;
+                if (scene3d::explode3d::find(*l)) {
+                    const f64 explodeTime = static_cast<f64>(time.value) - static_cast<f64>(l->start.value)
+                                          + static_cast<f64>(l->offset.value);
+                    const auto active = scene3d::explode3d::resolve(*l, asset, modelKey, explodeTime, comp.fps());
+                    if (active.exploding) {
+                        explodePieces = active.fractured;
+                        asset = scene3d::explode3d::asset_of(active.fractured);
+                        modelKey = active.fractured->key;
+                        explodeHollow = !(active.values.spec.thickness > 0.0f);
+                    }
+                }
                 scene3d::SceneInstance inst;
                 fill_object_environment(*l, inst);
                 // Matriz 3D para qualquer pai (num pai 2D comum ela é a mesma
@@ -3494,6 +3535,12 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                             swap.image, imageLookup(imageCtx, AssetId::unpack(swap.image)), frameNumber);
                         if (tex.valid())
                             inst.nodeTextures.push_back(scene3d::SceneNodeTexture{swap.node, tex, swap.repeat, swap.offset, swap.rotation});
+                        // Explosão: as peças levam a textura trocada do nó de onde saíram.
+                        if (tex.valid() && explodePieces)
+                            for (u32 piece = 0; piece < explodePieces->source.size(); ++piece)
+                                if (explodePieces->source[piece] == swap.node)
+                                    inst.nodeTextures.push_back(scene3d::SceneNodeTexture{
+                                        explodePieces->firstFragment + piece, tex, swap.repeat, swap.offset, swap.rotation});
                     }
                 }
                 // 0.3.6 TEXTURA DO MATERIAL: a imagem já na GPU; a camada fica
@@ -3521,8 +3568,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 inst.motionBlur = l->motionBlur;
                 inst.castShadows = l->model.castShadows;
                 inst.unlitColors = l->model.unlitColors;
-                inst.doubleSided = model_interior_visible(l->model.interior, asset->shapeParts);
-                inst.assetKey = l->model.scene.pack();
+                inst.doubleSided = model_interior_visible(l->model.interior, asset->shapeParts) || explodeHollow;
+                inst.assetKey = modelKey;
                 inst.asset = std::move(asset);
                 // EFEITOS DA CAMADA (Raios de luz, Brilho, Reflexo de lente...)
                 // num modelo / texto 3D / forma 3D: valem sobre o RESULTADO 3D
@@ -6162,7 +6209,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     // partes): parado, era tratado como deformando e o motion blur
                     // fazia 16 cenas por quadro sem nada mudar (0.2.7).
                     || ((in.asset->textGlyphLayout || in.asset->shapeParts) && !can_share_static_pose(*layer, *in.asset))
-                    || scene3d::has_part_effects(*layer);
+                    || scene3d::has_part_effects(*layer) || scene3d::explode3d::find(*layer) != nullptr;
                 for (u32 t = 0; t < layer->tracks.size(); ++t)
                     if (layer->tracks.at(t).property == TrackProperty::MaterialParam && layer->tracks.at(t).animated()) deforming[i] = true;
                 changing |= deforming[i];

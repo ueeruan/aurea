@@ -1400,11 +1400,28 @@ constexpr PRule kBccHls[] = {
     P(2, "Hue", "hue"), P(3, "Saturation", "saturation"), P(4, "Lightness", "lightness"),
 };
 
+// 1.0.8: "Importar tudo do AE". Efeitos de plugins e do AE que o Aurea tem,
+// sem a lista de parâmetros conferida num preset: entram com os padrões do
+// Aurea (nota "parâmetros aproximados"). I(0, "*") = os parâmetros do AE que
+// a regra não conhece ficam de fora em silêncio (a nota já diz).
+constexpr PRule kApprox[] = {I(0, "*")};
+// Unsharp Mask do AE: Amount (%), Radius (px), Threshold (0..255 níveis).
+constexpr PRule kAeUnsharp[] = {
+    P(1, "Amount", "amount"), P(2, "Radius", "radius"),
+    P(3, "Threshold", "threshold", PConv::Same, 100.0 / 255.0),
+    I(0, "*"),
+};
+// Camera Lens Blur: o raio; íris, mapa de desfoque e realces ficam no padrão.
+constexpr PRule kCameraLensBlur[] = {P(1, "Blur Radius", "radius"), I(0, "*")};
+// O padrão do Flow Retime é 50 %; sem a velocidade do plugin, fica 100 %.
+constexpr FixedValue kRetimeFixed[] = {{"speed", {100, 0, 0, 0}}};
+
 // --- a tabela ----------------------------------------------------------------
 #define RULE(ae, name, key, params) ERule{ae, name, key, params, static_cast<u32>(std::size(params)), nullptr, nullptr, 0, nullptr}
 #define RULEX(ae, name, key, params, reason, fixed, nfixed, post) \
     ERule{ae, name, key, params, static_cast<u32>(std::size(params)), reason, fixed, nfixed, post}
 #define NONE(ae, name, reason) ERule{ae, name, nullptr, nullptr, 0, reason, nullptr, 0, nullptr}
+#define SAPPHIRE(ae, key) RULEX(ae, ae, key, kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr)
 
 const ERule kRules[] = {
     // Controles de expressão
@@ -1591,12 +1608,92 @@ const ERule kRules[] = {
           "curvas do Aurea com os nomes do AE; índices dos grupos pela ordem do .aex (sem preset para conferir)", nullptr, 0, nullptr),
     RULEX("ADBE Aud Gate", "Gate", "aurea.audio.gate", kAudGate, "parâmetros pela ordem da documentação do AE (sem preset para conferir os números)", nullptr, 0, nullptr),
 
+    // 1.0.8: plugins e efeitos que antes ficavam "sem equivalente".
+    RULEX("ADBE Unsharp Mask", "Unsharp Mask", effect_keys::kUnsharp, kAeUnsharp,
+          "parâmetros pela ordem da documentação do AE (sem preset para conferir os números)", nullptr, 0, nullptr),
+    RULEX("ADBE Unsharp Mask2", "Unsharp Mask", effect_keys::kUnsharp, kAeUnsharp,
+          "parâmetros pela ordem da documentação do AE (sem preset para conferir os números)", nullptr, 0, nullptr),
+    RULEX("ADBE Camera Lens Blur", "Camera Lens Blur", effect_keys::kLensBlur, kCameraLensBlur, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr),
+    RULEX("ADBE Lumetri", "Lumetri Color", effect_keys::kColorGrade, kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr),
+    RULEX("ADBE CurvesCustom", "Curves", effect_keys::kCurves, kApprox,
+          "curva aproximada: os pontos da curva do AE não são lidos; a curva do Aurea entrou neutra para ajustar",
+          nullptr, 0, nullptr),
+    RULEX("ADBE Displacement Map", "Displacement Map", effect_keys::kDisplacementMap, kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr),
+    RULEX("ADBE Optics Compensation", "Optics Compensation", effect_keys::kOpticsCompensation, kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr),
+    RULEX("CC Scale Wipe", "CC Scale Wipe", effect_keys::kScaleWipe, kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr),
+    RULEX("CC Light Rays", "CC Light Rays", effect_keys::kRays, kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr),
+    RULEX("MB LookSuite3", "Looks", "aurea.color.looks", kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr),
+    RULEX("RG MB COLORISTA IV", "Colorista", effect_keys::kColorGrade, kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr),
+    RULEX("Twixtor Pro", "Twixtor Pro", effect_keys::kFlowRetime, kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", kRetimeFixed, 1, nullptr),
+    RULEX("RSMB", "RSMB", effect_keys::kFlowMotionBlur, kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr),
+    RULEX("CROSSPHERE_Bokeh", "Bokeh", effect_keys::kLensBlur, kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr),
+    RULEX("Universe_Blur_Box_Bokeh", "uni.Bokeh", effect_keys::kLensBlur, kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr),
+    RULEX("DRFL Depth of Field", "FL Depth Of Field", effect_keys::kLensBlur, kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr),
+    RULEX("DRFL RadialBlur", "FL Radial Blur", "aurea.blur.radial_blur_reference", kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr),
+    RULEX("FilmConvert Nitrate", "FilmConvert Nitrate", "aurea.stylize.film_profile_grain", kApprox,
+          "parâmetros aproximados: só o grão de película entra; a emulação de cor do FilmConvert não", nullptr, 0, nullptr),
+    RULEX("BCC Magic Sharp", "BCC Magic Sharp", effect_keys::kUnsharp, kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr),
+    RULEX("BCC Fast Film Glow", "BCC Fast Film Glow", effect_keys::kGlow, kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr),
+    RULEX("Universe_Stylize_Glitch", "uni.Glitch", "aurea.glitch.video_glitch", kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr),
+    RULEX("com.FXHOME.HitFilm.Flicker", "HitFilm Flicker", "aurea.motion.flicker", kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr),
+    RULEX("com.FXHOME.HitFilm.Echo", "HitFilm Echo", effect_keys::kEchoTrail, kApprox, "parâmetros aproximados: o que o Aurea não lê do plugin ficou no padrão do Aurea", nullptr, 0, nullptr),
+
+    // Sapphire (docs/release/1.0.7-effects.md): o efeito do Aurea de cada um,
+    // com os padrões do Aurea. S_Rays, S_Shake e S_RandomEdits têm tabela acima.
+    SAPPHIRE("S_Invert", "aurea.color.invert"), SAPPHIRE("S_Threshold", "aurea.color.soft_rgb_threshold"),
+    SAPPHIRE("S_Gamma", "aurea.color.levels"), SAPPHIRE("S_Tint", "aurea.color.tint"),
+    SAPPHIRE("S_DuoTone", "aurea.color.duotone"), SAPPHIRE("S_TriTone", "aurea.color.gradient_map"),
+    SAPPHIRE("S_QuadTone", "aurea.color.quadtone"), SAPPHIRE("S_Monochrome", "aurea.color.black_white"),
+    SAPPHIRE("S_HueSatBright", "aurea.color.hue_saturation"), SAPPHIRE("S_ChannelSwitcher", "aurea.color.shift_channels"),
+    SAPPHIRE("S_Posterize", "aurea.color.luma_posterize"), SAPPHIRE("S_PseudoColor", "aurea.color.luma_hue_cycle"),
+    SAPPHIRE("S_BleachBypass", "aurea.color.silver_retention"), SAPPHIRE("S_Solarize", "aurea.color.solarize"),
+    SAPPHIRE("S_ClampChroma", "aurea.color.video_limiter"), SAPPHIRE("S_MathOps", "aurea.color.arithmetic"),
+    SAPPHIRE("S_MatteOps", "aurea.key.matte_refine"), SAPPHIRE("S_ShowBadColors", "aurea.color.overbrights"),
+    SAPPHIRE("S_Vignette", "aurea.stylize.optical_vignette"), SAPPHIRE("S_Blur", "aurea.blur.photographic"),
+    SAPPHIRE("S_BlurChannels", "aurea.blur.rgb_channels"), SAPPHIRE("S_BlurChroma", "aurea.blur.chroma_luma"),
+    SAPPHIRE("S_BlurDirectional", "aurea.blur.photographic_direction"), SAPPHIRE("S_BlurMoCurves", "aurea.blur.motion_curves"),
+    SAPPHIRE("S_BlurMotion", "aurea.blur.transform_motion"), SAPPHIRE("S_AdvancedDefocus", "aurea.blur.lens"),
+    SAPPHIRE("S_DefocusPrism", "aurea.blur.prism_defocus"), SAPPHIRE("S_EdgeAwareBlur", "aurea.blur.bilateral"),
+    SAPPHIRE("S_EdgeBlur", "aurea.blur.edge_masked"), SAPPHIRE("S_RackDefocus", "aurea.blur.rack_defocus"),
+    SAPPHIRE("S_Sharpen", "aurea.blur.detail_sharpen"), SAPPHIRE("S_SoftFocus", "aurea.blur.soft_focus"),
+    SAPPHIRE("S_Median", "aurea.blur.median"), SAPPHIRE("S_Glow", "aurea.light.chromatic_halo"),
+    SAPPHIRE("S_GlowAura", "aurea.light.spectral_aura"), SAPPHIRE("S_GlowDarks", "aurea.light.shadow_halo"),
+    SAPPHIRE("S_GlowEdges", "aurea.light.outline_halo"), SAPPHIRE("S_GlowRainbow", "aurea.light.rainbow_halo"),
+    SAPPHIRE("S_GlowRings", "aurea.light.glow_rings"), SAPPHIRE("S_UltraGlow", "aurea.light.multiscale_glow"),
+    SAPPHIRE("S_Glare", "aurea.light.diffraction_glare"), SAPPHIRE("S_Glint", "aurea.light.spectral_glint"),
+    SAPPHIRE("S_GlintRainbow", "aurea.light.prismatic_glints"), SAPPHIRE("S_LensFlare", "aurea.light.lens_flare"),
+    SAPPHIRE("S_EdgeRays", "aurea.light.outline_rays"), SAPPHIRE("S_SpotLight", "aurea.light.spotlight"),
+    SAPPHIRE("S_Hotspots", "aurea.light.hotspots"), SAPPHIRE("S_Streaks", "aurea.light.exposure_streaks"),
+    SAPPHIRE("S_LightLeak", "aurea.light.light_leak"), SAPPHIRE("S_Caustics", "aurea.light.caustics"),
+    SAPPHIRE("S_DropShadow", "aurea.stylize.drop_shadow_reference"), SAPPHIRE("S_Flicker", "aurea.motion.flicker"),
+    SAPPHIRE("S_MotionDetect", "aurea.time.motion_detect"), SAPPHIRE("S_Retime", "aurea.time.flow_retime"),
+    SAPPHIRE("S_TimeDisplace", "aurea.time.time_displacement_reference"), SAPPHIRE("S_TimeSlice", "aurea.time.slice"),
+    SAPPHIRE("S_TimeWarpRGB", "aurea.time.warp_rgb"), SAPPHIRE("S_TimeAverage", "aurea.time.wide_time"),
+    SAPPHIRE("S_Trails", "aurea.time.echo"), SAPPHIRE("S_PixelSort", "aurea.stylize.pixel_sort"),
+    SAPPHIRE("S_PixelMosh", "aurea.glitch.datamosh"), SAPPHIRE("S_JpegDamage", "aurea.stylize.jpeg_compression_damage"),
+    SAPPHIRE("S_VHSDamage", "aurea.stylize.analog_tape_damage"), SAPPHIRE("S_TVDamage", "aurea.glitch.signal_reference"),
+    SAPPHIRE("S_FilmDamage", "aurea.stylize.photochemical_film_damage"), SAPPHIRE("S_Grain", "aurea.stylize.photographic_grain"),
+    SAPPHIRE("S_UltraGrain", "aurea.stylize.film_profile_grain"), SAPPHIRE("S_ScanLines", "aurea.stylize.sinusoidal_scanlines"),
+    SAPPHIRE("S_ScanLinesMono", "aurea.stylize.sinusoidal_scanlines_mono"), SAPPHIRE("S_HalfTone", "aurea.stylize.radial_screen"),
+    SAPPHIRE("S_HalfToneColor", "aurea.stylize.radial_screen_color"), SAPPHIRE("S_Mosaic", "aurea.stylize.mosaic"),
+    SAPPHIRE("S_Emboss", "aurea.stylize.emboss"), SAPPHIRE("S_EdgeDetect", "aurea.stylize.chromatic_edges"),
+    SAPPHIRE("S_Distort", "aurea.distort.refraction"), SAPPHIRE("S_DistortRGB", "aurea.distort.refraction_rgb"),
+    SAPPHIRE("S_DistortChroma", "aurea.distort.refraction_rgb"), SAPPHIRE("S_WarpCornerPin", "aurea.distort.projective_pin"),
+    SAPPHIRE("S_WarpFishEye", "aurea.distort.optical_fisheye"), SAPPHIRE("S_WarpMagnify", "aurea.distort.optical_lens"),
+    SAPPHIRE("S_WarpPerspective", "aurea.distort.plane_perspective"), SAPPHIRE("S_WarpPolar", "aurea.distort.polar_coordinates"),
+    SAPPHIRE("S_WarpRepeat", "aurea.distort.repeated_transform"), SAPPHIRE("S_WarpTransform", "aurea.transform.raster"),
+    SAPPHIRE("S_WarpVortex", "aurea.distort.swirl"), SAPPHIRE("S_WarpWaves", "aurea.distort.sine_waves"),
+    SAPPHIRE("S_WarpBubble", "aurea.distort.turbulent_displace_reference"), SAPPHIRE("S_Kaleido", "aurea.distort.kaleidoscope"),
+    SAPPHIRE("S_KaleidoPolar", "aurea.distort.polar_kaleidoscope"), SAPPHIRE("S_DissolveShake", "aurea.glitch.dissolve_shake"),
+    SAPPHIRE("S_DissolveLuma", "aurea.transition.luma_dissolve"), SAPPHIRE("S_DissolveBlur", "aurea.transition.blur_dissolve"),
+    SAPPHIRE("S_WipeLine", "aurea.transition.range_wipe"), SAPPHIRE("S_WipeFlux", "aurea.transition.wipe_flux"),
+    SAPPHIRE("S_WipePlasma", "aurea.transition.wipe_plasma"), SAPPHIRE("S_WipeCircle", "aurea.transition.circular_aperture"),
+
     // --- sem equivalente no Aurea (relatados com o motivo) --------------------
     RULE("ADBE Solid Composite", "Solid Composite", "aurea.key.solid_matte", kSolidComposite),
     // Cálculos existe (aurea.color.calculations), mas a importação fica de fora: a segunda camada e
     // os 30 modos do menu do AE não têm leitura confiável (os testes AeImport usam este como "desconhecido").
     NONE("ADBE Calculations", "Calculations", "a importação de Cálculos não lê a segunda camada nem os modos do AE: aplique Cálculos no Aurea"),
-    NONE("ADBE CurvesCustom", "Curves", "a curva é um dado próprio do AE que o importador não lê"),
     NONE("ADBE Set Matte3", "Set Matte", "fosco de outra camada: use o recorte (track matte) do Aurea"),
     NONE("CS Composite", "CC Composite", "composição com o original não existe no Aurea"),
     NONE("ADBE Layer Control", "Layer Control", "controle de camada não existe no Aurea"),
@@ -1628,6 +1725,7 @@ const ERule kRules[] = {
 #undef RULE
 #undef RULEX
 #undef NONE
+#undef SAPPHIRE
 
 /// Número do sufixo "-NNNN" do matchName do parâmetro (0 = não tem).
 u16 suffix_number(std::string_view m, std::string_view effect) noexcept {
@@ -1642,9 +1740,43 @@ u16 suffix_number(std::string_view m, std::string_view effect) noexcept {
 
 } // namespace
 
-const ERule* find_effect_rule(std::string_view m) noexcept {
+namespace {
+/// matchNames e nomes de exibição alternativos de plugins de terceiros (a
+/// versão e o fabricante mudam o matchName; o nome no painel do AE fica).
+struct RuleAlias { const char* name; const char* rule; };
+constexpr RuleAlias kAliases[] = {
+    {"Twixtor", "Twixtor Pro"}, {"Twixtor Pro, Vectors In", "Twixtor Pro"},
+    {"REVisionEffects Twixtor", "Twixtor Pro"}, {"REVisionEffects Twixtor Pro", "Twixtor Pro"},
+    {"RE:Vision Twixtor Pro", "Twixtor Pro"},
+    {"RSMB Pro", "RSMB"}, {"RSMB Pro Vectors", "RSMB"}, {"ReelSmart Motion Blur", "RSMB"},
+    {"ReelSmart Motion Blur Pro", "RSMB"}, {"RE:Vision Smart Motion Blur", "RSMB"},
+    {"REVisionEffects RSMB", "RSMB"}, {"REVisionEffects RSMB Pro", "RSMB"},
+    {"Magic Bullet Looks", "MB LookSuite3"}, {"Looks", "MB LookSuite3"}, {"MB LookSuite", "MB LookSuite3"},
+    {"MB LookSuite4", "MB LookSuite3"}, {"MB Looks", "MB LookSuite3"},
+    {"FilmConvert", "FilmConvert Nitrate"}, {"FilmConvert Pro", "FilmConvert Nitrate"},
+    {"FilmConvert Nitrate AE", "FilmConvert Nitrate"},
+    {"Colorista V", "RG MB COLORISTA IV"}, {"Colorista IV", "RG MB COLORISTA IV"},
+    {"VIDEOCOPILOT CROSSPHERE", "CROSSPHERE_Bokeh"}, {"CROSSPHERE Bokeh", "CROSSPHERE_Bokeh"},
+    {"Lumetri Color", "ADBE Lumetri"}, {"BCC Magic Sharp OBSOLETE", "BCC Magic Sharp"},
+    {"BCC Fast Film Glow OBSOLETE", "BCC Fast Film Glow"},
+};
+
+const ERule* exact_rule(std::string_view m) noexcept {
     for (const ERule& r : kRules) if (m == r.ae) return &r;
     return nullptr;
+}
+} // namespace
+
+const ERule* find_effect_rule(std::string_view m) noexcept {
+    if (const ERule* r = exact_rule(m)) return r;
+    for (const RuleAlias& a : kAliases) if (iequals(m, a.name)) return exact_rule(a.rule);
+    return nullptr;
+}
+
+const ERule* find_effect_rule_alias(std::string_view displayName) noexcept {
+    for (const RuleAlias& a : kAliases) if (iequals(displayName, a.name)) return exact_rule(a.rule);
+    // Plugin cujo nome no painel é o matchName de uma regra ("Twixtor Pro").
+    return exact_rule(displayName);
 }
 
 const ERule* find_effect_rule_by_name(std::string_view name) noexcept {

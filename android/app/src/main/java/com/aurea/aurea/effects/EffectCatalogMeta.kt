@@ -271,6 +271,8 @@ private val Table: Map<Int, EffectMeta> = buildMap {
         "espelhar camada mirror layer flip dois eixos sobrepor copia alight motion"))
     put("aurea.distort.puppet", EffectMeta(R.string.fx_desc_puppet, AllTargets,
         "fantoche puppet pino pin marionete rig autorig 2d autoanimacao png personagem deformar"))
+    put("aurea.rig.face", EffectMeta(R.string.fx_desc_face_rig, listOf(EffectTarget.Imagem, EffectTarget.Video),
+        "rig rosto face live2d anime piscar olho boca falar virar cabeca acenar respirar sobrancelha sorriso personagem 2d"))
     put("aurea.transform.crop", EffectMeta(R.string.fx_desc_transform_crop, AllTargets))
     put("aurea.stylize.vignette", EffectMeta(R.string.fx_desc_stylize_vignette, AllTargets))
     put("aurea.stylize.mosaic", EffectMeta(R.string.fx_desc_stylize_mosaic, AllTargets))
@@ -353,6 +355,8 @@ private val Table: Map<Int, EffectMeta> = buildMap {
         "esconder partes 3d hide parts sumir ocultar visibilidade objeto modelo forma peca"))
     put("aurea.3d.part_texture", EffectMeta(R.string.fx3d_desc_part_texture, listOf(EffectTarget.Cena3D),
         "trocar textura 3d swap texture imagem image material parte objeto modelo forma galeria"))
+    put("aurea.3d.explode", EffectMeta(R.string.fx3d_desc_explode, listOf(EffectTarget.Cena3D),
+        "explosão explosao explodir explode explosion fratura fracture estilhaçar estilhacar shatter pedaços pedacos fragments desintegrar disintegrate montar assemble 3d modelo texto forma"))
     put("aurea.3d.shatter", EffectMeta(R.string.fx3d_desc_shatter,
         listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
         "3d shatter quebrar estilhacar explodir explosao pecas vidro cacos shatter break glass"))
@@ -896,7 +900,7 @@ private val TagByKey: Map<Int, List<String>> by lazy {
         "particles" to listOf(
             "aurea.generate.particular", "aurea.transition.disintegrate", "aurea.stylize.ball_grid",
             "aurea.stylize.star_field", "aurea.stylize.scatter", "aurea.generate.constellation", "aurea.3d.shatter",
-            "aurea.transition.dust",
+            "aurea.3d.explode", "aurea.transition.dust",
         ),
         "shadow" to listOf("aurea.stylize.drop_shadow", "aurea.stylize.drop_shadow_reference", "aurea.distort.slant", "aurea.stylize.bevel_alpha"),
         "outline" to listOf(
@@ -906,7 +910,7 @@ private val TagByKey: Map<Int, List<String>> by lazy {
         "3d" to listOf(
             "aurea.distort.sphere_wrap", "aurea.distort.cylinder_wrap", "aurea.generate.raster_extrude",
             "aurea.3d.part_transform", "aurea.3d.part_hide", "aurea.3d.part_texture", "aurea.3d.shatter",
-            "aurea.3d.stroke", "aurea.shape3d.layout", "aurea.generate.aurora", "aurea.generate.constellation",
+            "aurea.3d.explode", "aurea.3d.stroke", "aurea.shape3d.layout", "aurea.generate.aurora", "aurea.generate.constellation",
             "aurea.ai.depth_map", EffectTool.CameraTrack.key, "aurea.distort.hollow_box",
         ),
         "transition" to listOf(

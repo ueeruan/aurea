@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.0.8 Edição automática (autoedit/AutoEdit.kt; iOS AutoEditView.swift). -->
+<resources>
+    <string name="autoedit_title">Edit otomatis</string>
+    <string name="autoedit_subtitle">Potongan, zoom, suara, musik, vokal, warna, dan teks dalam komposisi baru. Klip asli tetap utuh.</string>
+    <string name="autoedit_home_hint">Pilih video dan Aurea mengeditnya sendiri</string>
+    <string name="autoedit_intensity">Intensitas potongan</string>
+    <string name="autoedit_light">Ringan</string>
+    <string name="autoedit_medium">Sedang</string>
+    <string name="autoedit_strong">Kuat</string>
+    <string name="autoedit_recording">Jenis rekaman</string>
+    <string name="autoedit_retakes">Dengan pengambilan ulang</string>
+    <string name="autoedit_continuous">Berkelanjutan (wawancara)</string>
+    <string name="autoedit_language">Bahasa ucapan</string>
+    <string name="autoedit_lang_pt">Portugis</string>
+    <string name="autoedit_lang_en">Inggris</string>
+    <string name="autoedit_lang_es">Spanyol</string>
+    <string name="autoedit_steps">Tahapan</string>
+    <string name="autoedit_cuts">Potongan</string>
+    <string name="autoedit_zoom">Zoom dan kilat</string>
+    <string name="autoedit_sounds">Suara</string>
+    <string name="autoedit_music">Musik</string>
+    <string name="autoedit_voice">Vokal</string>
+    <string name="autoedit_color">Warna</string>
+    <string name="autoedit_captions">Teks</string>
+    <string name="autoedit_start">Edit</string>
+    <string name="autoedit_again">Edit lagi</string>
+    <string name="autoedit_cancel">Batal</string>
+    <string name="autoedit_close">Tutup</string>
+    <string name="autoedit_step_transcribe">Mentranskripsi ucapan</string>
+    <string name="autoedit_step_prepare">Menyiapkan</string>
+    <string name="autoedit_step_audio">Menganalisis audio</string>
+    <string name="autoedit_step_cuts">Merencanakan potongan</string>
+    <string name="autoedit_step_faces">Mencari wajah</string>
+    <string name="autoedit_step_zoom">Merencanakan zoom</string>
+    <string name="autoedit_step_sounds">Memilih suara</string>
+    <string name="autoedit_step_music">Memilih musik</string>
+    <string name="autoedit_step_voice">Mengolah vokal</string>
+    <string name="autoedit_step_color">Memeriksa warna</string>
+    <string name="autoedit_step_build">Menyusun editan</string>
+    <string name="autoedit_done">Selesai: %1$s → %2$s</string>
+    <string name="autoedit_failed">Tidak dapat mengedit: %1$s</string>
+    <string name="autoedit_cancelled">Edit otomatis dibatalkan</string>
+    <string name="autoedit_need_video">Pilih klip video</string>
+    <string name="autoedit_error_speed">Kecepatan klip diubah; kembalikan ke kecepatan normal lalu coba lagi</string>
+    <string name="autoedit_error_short">Klip terlalu pendek</string>
+</resources>

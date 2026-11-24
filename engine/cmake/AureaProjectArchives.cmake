@@ -2,6 +2,11 @@ include(FetchContent)
 
 function(aurea_add_project_archive_reader)
     set(BUILD_SHARED_LIBS OFF)
+    # 1.0.8: LZMA/XZ, BZip2 e Zstandard ficam desligados: Android e Windows não
+    # têm essas bibliotecas no sistema (ligar exigiria trazer o código delas) e
+    # o iOS sozinho quebraria a paridade. ZIP com esses métodos chega ao usuário
+    # como "compressão não suportada; compacte de novo com Deflate"
+    # (AeProjectSource.cpp). Deflate, Store e o RAR/RAR5 nativo da libarchive leem.
     foreach(feature TAR CPIO CAT UNZIP TEST INSTALL WERROR ACL XATTR OPENSSL CNG MD
             LIBB2 LIBXML2 BSDXML EXPAT WIN32_XMLLITE PCREPOSIX PCRE2POSIX LZ4 LZMA ZSTD BZip2)
         set(ENABLE_${feature} OFF)

@@ -29,11 +29,12 @@
 #include <filesystem>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace aurea {
 
 namespace {
-constexpr usize kMaxAeFile = 64u << 20;
+constexpr usize kMaxAeFile = 256u << 20;   // 1.0.8: o mesmo teto do .aep
 
 bool read_ae_file(const char* path, std::string& data, std::string& why) {
     if (!path || !*path) { why = "Nenhum arquivo escolhido."; return false; }
@@ -81,39 +82,66 @@ BlendMode ae_blend(u8 mode, u8 flags) {
     return mode < std::size(modes) ? modes[mode] : B::Normal;
 }
 
-bool ae_composition_roots(const ae::ProjectDocument& doc, std::vector<usize>& roots) {
+/// O grafo de pré-composições do AE, sem recusar nada (1.0.8): um ciclo
+/// (arquivo malformado) é cortado na camada que fecha o ciclo; a altura de cada
+/// composição (níveis de pré-composição) vai para a nota de profundidade.
+struct AeCompPlan {
+    std::vector<usize> roots;        ///< composições de cima, a de mais camadas primeiro
+    std::vector<usize> height;       ///< níveis de composição a partir desta (1 = sem pré-comp)
+    std::unordered_set<u64> cut;     ///< índice da composição << 32 | id da camada (ciclo cortado)
+    [[nodiscard]] static u64 key(usize comp, u32 layer) noexcept { return (static_cast<u64>(comp) << 32) | layer; }
+    [[nodiscard]] bool is_cut(usize comp, u32 layer) const noexcept { return cut.contains(key(comp, layer)); }
+};
+
+void ae_composition_plan(const ae::ProjectDocument& doc, AeCompPlan& plan) {
+    const usize n = doc.comps.size();
     std::unordered_map<u32, usize> indices;
-    for (usize i = 0; i < doc.comps.size(); ++i) indices.emplace(doc.comps[i].id, i);
-    std::vector<bool> dependent(doc.comps.size(), false);
-    struct RenderCost { usize depth = 0, layers = 0; };
-    std::vector<RenderCost> costs(doc.comps.size());
-    std::vector<bool> visiting(doc.comps.size(), false);
-    auto visit = [&](auto&& self, usize index, usize depth) -> bool {
-        if (depth >= kMaxNestingDepth - 1 || visiting[index]) return false;
-        if (costs[index].depth) return depth + costs[index].depth < kMaxNestingDepth;
-        visiting[index] = true;
-        RenderCost cost{1, doc.comps[index].layers.size()};
-        for (const auto& layer : doc.comps[index].layers) {
+    for (usize i = 0; i < n; ++i) indices.emplace(doc.comps[i].id, i);
+    std::vector<bool> dependent(n, false);
+    std::vector<u8> state(n, 0);          // 0 = novo, 1 = no caminho, 2 = pronto
+    std::vector<usize> cost(n, 0);        // camadas somadas (só ordena as de cima)
+    plan.height.assign(n, 1);
+    // Busca em profundidade sem recursão: o arquivo pode ter milhares de níveis.
+    struct Frame { usize comp, next; };
+    std::vector<Frame> stack;
+    for (usize start = 0; start < n; ++start) {
+        if (state[start]) continue;
+        stack.push_back({start, 0});
+        state[start] = 1;
+        cost[start] = doc.comps[start].layers.size();
+        while (!stack.empty()) {
+            Frame& f = stack.back();
+            const auto& layers = doc.comps[f.comp].layers;
+            if (f.next == layers.size()) {
+                state[f.comp] = 2;
+                const usize done = f.comp;
+                stack.pop_back();
+                if (!stack.empty()) {
+                    const usize parent = stack.back().comp;
+                    plan.height[parent] = std::max(plan.height[parent], plan.height[done] + 1);
+                    cost[parent] = std::min<usize>(cost[parent] + cost[done], usize{1} << 40);
+                }
+                continue;
+            }
+            const auto& layer = layers[f.next++];
             const auto child = indices.find(layer.source);
             if (child == indices.end()) continue;
-            dependent[child->second] = true;
-            if (!self(self, child->second, depth + 1)) return false;
-            cost.depth = std::max(cost.depth, 1 + costs[child->second].depth);
-            cost.layers += costs[child->second].layers;
-            if (cost.layers > kMaxLayerCount) return false;
+            const usize c = child->second;
+            if (state[c] == 1) { plan.cut.insert(AeCompPlan::key(f.comp, layer.id)); continue; }
+            dependent[c] = true;
+            if (state[c] == 2) {
+                plan.height[f.comp] = std::max(plan.height[f.comp], plan.height[c] + 1);
+                cost[f.comp] = std::min<usize>(cost[f.comp] + cost[c], usize{1} << 40);
+                continue;
+            }
+            state[c] = 1;
+            cost[c] = doc.comps[c].layers.size();
+            stack.push_back({c, 0});
         }
-        visiting[index] = false;
-        costs[index] = cost;
-        return true;
-    };
-    for (usize i = 0; i < doc.comps.size(); ++i)
-        if (!visit(visit, i, 0)) return false;
-    for (usize i = 0; i < doc.comps.size(); ++i)
-        if (!dependent[i]) roots.push_back(i);
-    std::stable_sort(roots.begin(), roots.end(), [&](usize a, usize b) {
-        return costs[a].layers > costs[b].layers;
-    });
-    return !roots.empty();
+    }
+    for (usize i = 0; i < n; ++i)
+        if (!dependent[i]) plan.roots.push_back(i);
+    std::stable_sort(plan.roots.begin(), plan.roots.end(), [&](usize a, usize b) { return cost[a] > cost[b]; });
 }
 
 std::string unique_name(const Composition& comp, const std::string& base) {
@@ -212,6 +240,15 @@ bool text_to_utf8(const std::string& d, std::string& out) {
     return true;
 }
 
+/// Exceção inesperada: o relatório diz o que houve (antes saía vazio e a
+/// interface mostrava "não foi possível ler").
+ae::ImportReport internal_failure_report() {
+    ae::ImportReport r;
+    r.message = "Erro interno ao importar do After Effects; nada foi alterado. Tente de novo.";
+    r.messageKey = "ae_err_internal";
+    return r;
+}
+
 /// "pasta/Desfoque leve.ffx" → "Desfoque leve".
 std::string file_stem(const std::string& path) {
     const usize slash = path.find_last_of("/\\");
@@ -225,7 +262,8 @@ std::string file_stem(const std::string& path) {
 ae::ImportReport Engine::import_ae_file(const char* path, u64 targetLayer, bool textAnimatorPro) noexcept try {
     std::string data;
     ae::ImportReport r;
-    if (path && ae::is_project_source_name(path)) {
+    // 1.0.8: pelo nome ou, sem extensão (URI do Android), pelos primeiros bytes.
+    if (path && !ae::project_source_kind(path).empty()) {
         const auto root = config_.documentsDirectory.empty() ? std::filesystem::u8path(path).parent_path()
                                                              : std::filesystem::u8path(config_.documentsDirectory);
         ae::ProjectImportMedia media(root / "Media");
@@ -236,7 +274,7 @@ ae::ImportReport Engine::import_ae_file(const char* path, u64 targetLayer, bool 
     if (!read_ae_file(path, data, r.message)) return r;
     return import_ae_data(data, path, targetLayer, textAnimatorPro);
 } catch (...) {
-    return {};
+    return internal_failure_report();
 }
 
 ae::ImportReport Engine::import_ae_project_file(const char* inputPath, const char* outputPath,
@@ -247,7 +285,7 @@ ae::ImportReport Engine::import_ae_project_file(const char* inputPath, const cha
         r.message = "Escolha um nome livre para o novo projeto.";
         return r;
     }
-    if (!inputPath || !ae::is_project_source_name(inputPath)) {
+    if (!inputPath || ae::project_source_kind(inputPath).empty()) {
         r.message = "Escolha um projeto .aep ou um pacote .zip ou .rar do After Effects.";
         return r;
     }
@@ -280,7 +318,14 @@ ae::ImportReport Engine::import_ae_project_file(const char* inputPath, const cha
     const bool written = staging->save_project(stagePath.c_str()).ok();
     // Publish only a complete project, and fail safely if the name was taken
     // during import. Both files live in the same app-owned directory.
-    if (written) fs::create_hard_link(saved, dest, ec);
+    // 1.0.8: o Android proíbe hard link a apps (SELinux: "Permission denied"
+    // em /data/data); a importação do AE falhava SEMPRE no aparelho. Mover na
+    // mesma pasta é atômico; um nome que apareceu no meio do caminho não é
+    // sobrescrito.
+    if (written) {
+        if (fs::exists(dest, ec)) ec = std::make_error_code(std::errc::file_exists);
+        else { ec.clear(); fs::rename(saved, dest, ec); }
+    }
     const bool published = written && !ec;
     media.keep = published;
     (void)fileio::remove_file(stagePath);
@@ -295,7 +340,9 @@ ae::ImportReport Engine::import_ae_project_file(const char* inputPath, const cha
     }
     return r;
 } catch (...) {
-    return {};
+    auto failed = internal_failure_report();
+    failed.kind = "aep";
+    return failed;
 }
 
 ae::ImportReport Engine::import_ae_data(const std::string& raw, const std::string& fileName, u64 targetLayer, bool textAnimatorPro) noexcept {
@@ -317,7 +364,8 @@ ae::ImportReport Engine::import_ae_data_impl(const std::string& raw, const std::
     }
     ae::ProjectDocument aep;
     std::unordered_map<std::string, std::shared_ptr<const ImagePixels>> aeImages;
-    std::vector<usize> roots;
+    AeCompPlan plan;
+    std::vector<usize>& roots = plan.roots;
     usize imageBudget = 0;
     u64 session = 0;
     CompositionId destination{};
@@ -340,9 +388,11 @@ ae::ImportReport Engine::import_ae_data_impl(const std::string& raw, const std::
             report.message = sourceMedia ? error : "Projeto do After Effects ilegível: " + error + ".";
             return report;
         }
-        if (!ae_composition_roots(aep, roots)) {
-            report.message = "A hierarquia de composições do After Effects é inválida ou excede o limite do Aurea.";
-            return report;
+        // Nunca recusa: ciclos são cortados (a camada vira nulo, relatada).
+        ae_composition_plan(aep, plan);
+        for (const auto& issue : aep.issues) {
+            if (issue.skipped) report.skip(issue.kind, issue.name, issue.reason);
+            else report.note(issue.kind, issue.name, issue.reason);
         }
         if (!standaloneTitle && sourceMedia && config_.imageLoader) {
             std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
@@ -646,7 +696,7 @@ ae::ImportReport Engine::import_ae_data_impl(const std::string& raw, const std::
     }
     return report;
 } catch (...) {
-    return {};
+    return internal_failure_report();
 }
 
 } // namespace aurea

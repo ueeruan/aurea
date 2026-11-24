@@ -221,12 +221,19 @@ internal fun MediaBrowser(store: EditorStore, onAdded: () -> Unit, onDismiss: ()
                     }
                     override suspend fun onPreFling(available: Velocity): Velocity {
                         if (collapsed <= 0f || collapsed >= previewPx) return Velocity.Zero
-                        // Soltou: abaixo de 1/3 volta; acima, recolhe. Fling para baixo reabre.
-                        val target = if (available.y > 1500f) 0f else if (collapsed > previewPx / 3f) previewPx else 0f
+                        // Soltou: fling para baixo reabre. 1.0.8: um arrasto lento para cima
+                        // (15 % da prévia, ou qualquer fling para cima) já recolhe — antes,
+                        // abaixo de 1/3 a prévia voltava e o arrasto lento "não fazia nada".
+                        val target = when {
+                            available.y > 1500f -> 0f
+                            available.y < -300f || collapsed > previewPx * 0.15f -> previewPx
+                            else -> 0f
+                        }
                         val ms = (abs(target - collapsed) / 2f).roundToInt().coerceIn(120, 450)
                         animate(collapsed, target, animationSpec = tween(ms, easing = Overshoot)) { value, _ -> collapsed = value }
                         collapsed = target
-                        return available
+                        // Recolhida: o resto do arremesso segue para a grade rolar.
+                        return if (target >= previewPx) Velocity.Zero else available
                     }
                 }
             }

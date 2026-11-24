@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.0.8 Edição automática (autoedit/AutoEdit.kt; iOS AutoEditView.swift). -->
+<resources>
+    <string name="autoedit_title">Auto edit</string>
+    <string name="autoedit_subtitle">Cuts, zoom, sounds, music, voice, color and captions in a new composition. The original clip stays untouched.</string>
+    <string name="autoedit_home_hint">Pick a video and Aurea edits it for you</string>
+    <string name="autoedit_intensity">Cut intensity</string>
+    <string name="autoedit_light">Light</string>
+    <string name="autoedit_medium">Medium</string>
+    <string name="autoedit_strong">Strong</string>
+    <string name="autoedit_recording">Recording type</string>
+    <string name="autoedit_retakes">With retakes</string>
+    <string name="autoedit_continuous">Continuous (interview)</string>
+    <string name="autoedit_language">Speech language</string>
+    <string name="autoedit_lang_pt">Portuguese</string>
+    <string name="autoedit_lang_en">English</string>
+    <string name="autoedit_lang_es">Spanish</string>
+    <string name="autoedit_steps">Steps</string>
+    <string name="autoedit_cuts">Cuts</string>
+    <string name="autoedit_zoom">Zoom and flash</string>
+    <string name="autoedit_sounds">Sounds</string>
+    <string name="autoedit_music">Music</string>
+    <string name="autoedit_voice">Voice</string>
+    <string name="autoedit_color">Color</string>
+    <string name="autoedit_captions">Captions</string>
+    <string name="autoedit_start">Edit</string>
+    <string name="autoedit_again">Edit again</string>
+    <string name="autoedit_cancel">Cancel</string>
+    <string name="autoedit_close">Close</string>
+    <string name="autoedit_step_transcribe">Transcribing speech</string>
+    <string name="autoedit_step_prepare">Preparing</string>
+    <string name="autoedit_step_audio">Analyzing audio</string>
+    <string name="autoedit_step_cuts">Planning cuts</string>
+    <string name="autoedit_step_faces">Looking for faces</string>
+    <string name="autoedit_step_zoom">Planning zoom</string>
+    <string name="autoedit_step_sounds">Choosing sounds</string>
+    <string name="autoedit_step_music">Choosing music</string>
+    <string name="autoedit_step_voice">Treating the voice</string>
+    <string name="autoedit_step_color">Checking color</string>
+    <string name="autoedit_step_build">Assembling the edit</string>
+    <string name="autoedit_done">Done: %1$s → %2$s</string>
+    <string name="autoedit_failed">Could not edit: %1$s</string>
+    <string name="autoedit_cancelled">Auto edit canceled</string>
+    <string name="autoedit_need_video">Choose a video clip</string>
+    <string name="autoedit_error_speed">The clip has a changed speed; set it back to normal speed and try again</string>
+    <string name="autoedit_error_short">The clip is too short</string>
+</resources>

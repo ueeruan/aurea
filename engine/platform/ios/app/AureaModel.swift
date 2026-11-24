@@ -1111,6 +1111,11 @@ final class AureaModel: ObservableObject {
     // --- Pre Render & Pre Export (1.0.2; PreRenderPanelView.swift) --------------
     /// O painel aberto: o laço de status lê o trecho e o "cabe" a 5 Hz.
     @Published var preRenderPanelOpen = false
+    // --- Edição automática (1.0.8; AutoEditView.swift, regras no motor: Engine::auto_edit) ---
+    /// Camada de vídeo com a folha da edição automática aberta (nil = fechada).
+    @Published var autoEditTarget: Int64?
+    /// Opções, transcrição e progresso da edição automática (o par do AutoEditState do Android).
+    let autoEdit = AutoEditState()
     @Published private(set) var preRenderRange = PreRenderRangeState()
     /// 1 Inteira, 2, 4, 8 (divisor da composição).
     @Published private(set) var preRenderQuality = 2
@@ -2725,6 +2730,69 @@ final class AureaModel: ObservableObject {
         return engine.puppetRotatePins(layer, effect: effect, pivot: pivot, mask: mask, u0: u0, v0: v0, u1: u1, v1: v1,
                                        autoKey: autoKeyTransforms, continuing: continuing)
     }
+    // --- Rig 2D de rosto no palco (FaceRigStage.swift; espelho de EditorStore.faceRig*) ---
+    /// 10 alças (u, v) e o estado dos pontos (0 proporções, 1 só olhos, 2 olhos e boca, 3 à mão).
+    func faceRigHandles(_ layer: Int64, effect: Int32) -> [Float] { engine.faceRigHandles(layer, effect: effect).map(\.floatValue) }
+    /// Acha os pontos de novo nos pixels (um passo de desfazer): 2 olhos e boca, 1 só olhos, 0 proporções.
+    @discardableResult
+    func faceRigAutoPlace(_ layer: Int64, effect: Int32) -> Int32 {
+        if status.playing != 0 { playPause() }
+        let quality = engine.faceRigAutoPlace(layer, effect: effect)
+        if quality >= 0 { refreshModel(force: true) }
+        return quality
+    }
+    /// Arrasto de uma alça; `continuing` = mesmo gesto (um passo de desfazer).
+    func faceRigMoveHandle(_ layer: Int64, effect: Int32, handle: Int32, u: Float, v: Float, continuing: Bool) -> Bool {
+        if status.playing != 0 { playPause() }
+        return engine.faceRigMoveHandle(layer, effect: effect, handle: handle, u: u, v: v, continuing: continuing)
+    }
+    /// Rig 2D v2 "Separar em partes" (EditorStore.faceRigSplitParts): a imagem vira
+    /// uma pré-composição com uma camada por parte e o nulo "Controle do rig". O
+    /// motor trabalha fora da main; o véu mostra o andamento. No fim abre a
+    /// pré-composição com o Controle escolhido e o cartão do rig dele aberto.
+    func faceRigSplitParts(_ layer: Int64, effect: Int32) {
+        guard !importingMedia, effect >= 0 else { return }
+        if status.playing != 0 { playPause() }
+        let label = AureaText.t("face_rig_splitting")
+        importingMedia = true
+        operationMessage = label
+        let native = engine
+        let poll = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.importingMedia else { return }
+                let done = min(max(native.faceRigSplitProgress(), 0), 1)
+                self.operationMessage = "\(label) \(Int(done * 100))%"
+            }
+        }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            var controller: Int64 = 0
+            let rig = native.faceRigSplitParts(layer, effect: effect, controller: &controller)
+            DispatchQueue.main.async {
+                poll.invalidate()
+                guard let self else { return }
+                self.importingMedia = false
+                guard rig > 0 else { self.toast = AureaText.t("face_rig_split_failed"); return }
+                self.syncAfterEdit()
+                self.openGroup(rig)
+                if controller != 0 {
+                    self.select(layerId: controller, additive: false)
+                    self.pendingEffectFocus = EffectFocusRequest(layer: controller, type: FaceRigStageState.type, previous: [])
+                }
+                self.toast = AureaText.t("face_rig_split_done")
+            }
+        }
+    }
+    /// Põe o Rig 2D de rosto na camada escolhida (ou abre o que ela já tem); o
+    /// motor acha os pontos ao pôr. Mesmo portão do AutoRig (AureaHyper).
+    func addFaceRig() {
+        guard let layer = primarySelection, requireHyperSubscription() else { return }
+        let type = FaceRigStageState.type
+        if effects.contains(where: { $0.typeId == type }) {
+            pendingEffectFocus = EffectFocusRequest(layer: layer, type: type, previous: [])
+        } else {
+            addEffectAndFocus(type, layer: layer)
+        }
+    }
     /// A ferramenta Fantoche (a entrada "Rig" da doca): abre o cartão do efeito
     /// na camada escolhida — cria se ainda não tem — já no modo de pinos.
     func openPuppetTool() {
@@ -3030,6 +3098,8 @@ final class AureaModel: ObservableObject {
         case 8, 9: return AureaText.t("msg_memoria_insuficiente_feche_outros_apps_e")
         case 10: return AureaText.t("msg_erro_ao_ler_ou_gravar_o")
         case 14: return AureaText.t("msg_nao_foi_possivel_decodificar_a_midia")
+        // 1.0.8: mídia ausente diz o que fazer (Substituir mídia), como o Android.
+        case 18: return AureaText.t("msg_a_midia_original_nao_esta_mais")
         case 19: return AureaText.t("msg_a_gpu_foi_reiniciada_tente_de")
         case 20: return AureaText.t("msg_memoria_de_video_gpu_insuficiente_baixe")
         case 28: return AureaText.t("msg_sem_espaco_no_aparelho_libere_espaco")
@@ -4856,7 +4926,11 @@ final class AureaModel: ObservableObject {
     }
 
     // MARK: Importar do After Effects (0.3.0, EditorStore.importAeFile)
-    struct AeImportItem: Identifiable { let id = UUID(); let kind: String; let name: String; let reason: String; let line: Int }
+    /// 1.0.8: `reasonKey`/`messageKey` = código do motor para traduzir (o texto em pt-BR fica de reserva).
+    struct AeImportItem: Identifiable {
+        let id = UUID(); let kind: String; let name: String; let reason: String; let line: Int
+        var reasonKey = ""; var reasonArgs: [String] = []
+    }
     struct AeImportResult: Identifiable {
         let id = UUID()
         let ok: Bool; let fileName: String; let kind: String; let message: String
@@ -4864,6 +4938,7 @@ final class AureaModel: ObservableObject {
         let skipped: [AeImportItem]; let notes: [AeImportItem]
         /// Escritas no projeto: com `ok` falso e > 0, o script parou com erro depois de mudar algo.
         var changes: Int = 0
+        var messageKey = ""; var messageArgs: [String] = []
         var hasCounts: Bool { effects + keyframes + layers + expressions + animators > 0 }
     }
 
@@ -4871,8 +4946,88 @@ final class AureaModel: ObservableObject {
     var aeImportTextPro = false
     private var aeImportExecuting = false
 
-    nonisolated private static func isAeProjectExtension(_ ext: String) -> Bool {
-        ["aep", "zip", "rar"].contains(ext.lowercased())
+    /// 1.0.8 (par do EditorStore.aeSourceKind): o arquivo do AE pelo nome ou,
+    /// sem extensão conhecida, pelos primeiros bytes. "aep" (RIFX + Egg!, também
+    /// o modelo .aet), "zip" (PK), "rar" (Rar!) ou nil.
+    nonisolated static func aeSourceKind(_ url: URL) -> String? {
+        switch url.pathExtension.lowercased() {
+        case "aep", "aet": return "aep"
+        case "zip": return "zip"
+        case "rar": return "rar"
+        default: break
+        }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        let header = [UInt8]((try? handle.read(upToCount: 12)) ?? Data())
+        func at(_ offset: Int, _ text: String) -> Bool {
+            let bytes = Array(text.utf8)
+            return header.count >= offset + bytes.count && Array(header[offset ..< offset + bytes.count]) == bytes
+        }
+        if at(0, "RIFX") && at(8, "Egg!") { return "aep" }
+        if header.count >= 4 && header[0] == 0x50 && header[1] == 0x4B &&
+            ((header[2] == 3 && header[3] == 4) || (header[2] == 5 && header[3] == 6)) { return "zip" }
+        if at(0, "Rar!") && header.count >= 6 && header[4] == 0x1A && header[5] == 7 { return "rar" }
+        return nil
+    }
+
+    /// 1.0.8: o ZIP traz um .aep/.aet (pacote do AE)? Lê só o diretório central
+    /// do fim do arquivo, sem descompactar. nil = não deu para ler.
+    nonisolated static func zipHasAeProject(_ url: URL) -> Bool? {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard let handle = try? FileHandle(forReadingFrom: url),
+              let size = try? handle.seekToEnd(), size >= 22 else { return nil }
+        defer { try? handle.close() }
+        func read(_ offset: UInt64, _ count: Int) -> [UInt8] {
+            guard (try? handle.seek(toOffset: offset)) != nil else { return [] }
+            return [UInt8]((try? handle.read(upToCount: count)) ?? Data())
+        }
+        func u16(_ b: [UInt8], _ i: Int) -> Int { Int(b[i]) | Int(b[i + 1]) << 8 }
+        func u32(_ b: [UInt8], _ i: Int) -> UInt64 { UInt64(u16(b, i)) | UInt64(u16(b, i + 2)) << 16 }
+        func u64(_ b: [UInt8], _ i: Int) -> UInt64 { u32(b, i) | u32(b, i + 4) << 32 }
+        let tailLength = Int(min(size, 65_557))
+        let tail = read(size - UInt64(tailLength), tailLength)
+        guard tail.count == tailLength else { return nil }
+        var eocd = -1
+        var i = tail.count - 22
+        while i >= 0 { if u32(tail, i) == 0x06054b50 { eocd = i; break }; i -= 1 }
+        guard eocd >= 0 else { return nil }
+        var cdSize = u32(tail, eocd + 12), cdOffset = u32(tail, eocd + 16)
+        if cdSize == 0xffffffff || cdOffset == 0xffffffff {
+            // ZIP64: o localizador fica logo antes do fim do diretório.
+            let locator = eocd - 20
+            guard locator >= 0, u32(tail, locator) == 0x07064b50 else { return nil }
+            let record = read(u64(tail, locator + 8), 56)
+            guard record.count == 56, u32(record, 0) == 0x06064b50 else { return nil }
+            cdSize = u64(record, 40); cdOffset = u64(record, 48)
+        }
+        guard cdSize > 0, cdSize <= 64 << 20, cdOffset + cdSize <= size else { return nil }
+        let directory = read(cdOffset, Int(cdSize))
+        var p = 0
+        while p + 46 <= directory.count && u32(directory, p) == 0x02014b50 {
+            let nameLength = u16(directory, p + 28), extra = u16(directory, p + 30), comment = u16(directory, p + 32)
+            guard p + 46 + nameLength <= directory.count else { break }
+            let entry = String(decoding: directory[(p + 46) ..< (p + 46 + nameLength)], as: UTF8.self)
+                .replacingOccurrences(of: "\\", with: "/").lowercased()
+            let base = (entry as NSString).lastPathComponent
+            if (entry.hasSuffix(".aep") || entry.hasSuffix(".aet")) && !entry.hasPrefix("__macosx/") && !base.hasPrefix("._") {
+                return true
+            }
+            p += 46 + nameLength + extra + comment
+        }
+        return false
+    }
+
+    /// 1.0.8: arquivo de fora ("Abrir com", AirDrop) que é do After Effects:
+    /// .aep/.aet, .rar ou .zip com um .aep dentro (AureaApp.onOpenURL).
+    nonisolated static func isAeProjectSource(_ url: URL) -> Bool {
+        switch aeSourceKind(url) {
+        case "aep", "rar": return true
+        case "zip": return zipHasAeProject(url) == true
+        default: return false
+        }
     }
 
     nonisolated private static func readAeFile(_ url: URL) throws -> Data {
@@ -4890,19 +5045,21 @@ final class AureaModel: ObservableObject {
         return data
     }
 
-    func importAeFile(url: URL, projectFile: Bool = false) {
-        guard started, screen == .editor, !openingProject, canChangeProject() else { return }
+    func importAeFile(url: URL, projectFile _: Bool = false) {
+        guard started, screen == .editor else { return }
+        // 1.0.8: a recusa calada parecia "não importa nada"; agora diz o porquê.
+        if openingProject { toast = AureaText.t("ae_import_busy"); return }
+        guard canChangeProject() else { return }
         let fileName = url.lastPathComponent
         let ext = url.pathExtension.lowercased()
-        let isProjectSource = Self.isAeProjectExtension(ext)
-        if ext == "aepx" || (projectFile && !isProjectSource) {
-            toast = AureaText.t("ae_project_select_file")
+        if ext == "aepx" {
+            toast = AureaText.t("ae_err_aepx")
             return
         }
-        if !projectFile && isProjectSource {
-            toast = AureaText.t("ae_project_use_separate_import")
-            return
-        }
+        // 1.0.8: o tipo vem do conteúdo: projeto escolhido no seletor de preset
+        // (ou o contrário) segue pelo caminho certo em vez de ser recusado.
+        let sourceKind = Self.aeSourceKind(url)
+        let projectFile = sourceKind != nil
         let project = projectGeneration
         let compositionID = (composition[AureaCompositionId] as? NSNumber)?.uint64Value
         importingMedia = true; operationMessage = AureaText.t("ae_importing")
@@ -4916,7 +5073,7 @@ final class AureaModel: ObservableObject {
             mediaQueue.async { [weak self] in
                 defer { if scoped { url.stopAccessingSecurityScopedResource() } }
                 let imported = Result {
-                    try Self.withStagedAeProject(url) { native.importAeFile($0.path, layer: 0) }
+                    try Self.withStagedAeProject(url, kind: sourceKind ?? "aep") { native.importAeFile($0.path, layer: 0) }
                 }
                 DispatchQueue.main.async {
                     guard let self else { return }
@@ -4972,16 +5129,22 @@ final class AureaModel: ObservableObject {
         }
         func items(_ key: String) -> [AeImportItem] {
             (raw[key] as? [[String: Any]] ?? []).map {
-                AeImportItem(kind: $0["kind"] as? String ?? "", name: $0["name"] as? String ?? "",
-                             reason: $0["reason"] as? String ?? "", line: ($0["line"] as? NSNumber)?.intValue ?? 0)
+                var item = AeImportItem(kind: $0["kind"] as? String ?? "", name: $0["name"] as? String ?? "",
+                                        reason: $0["reason"] as? String ?? "", line: ($0["line"] as? NSNumber)?.intValue ?? 0)
+                item.reasonKey = $0["reasonKey"] as? String ?? ""
+                item.reasonArgs = $0["reasonArgs"] as? [String] ?? []
+                return item
             }
         }
         func int(_ key: String) -> Int { (raw[key] as? NSNumber)?.intValue ?? 0 }
-        return AeImportResult(ok: (raw["ok"] as? NSNumber)?.boolValue ?? false, fileName: fileName,
-                              kind: raw["kind"] as? String ?? "", message: raw["message"] as? String ?? "",
-                              effects: int("effects"), keyframes: int("keyframes"), layers: int("layers"),
-                              expressions: int("expressions"), animators: int("animators"),
-                              skipped: items("skipped"), notes: items("notes"), changes: int("changes"))
+        var result = AeImportResult(ok: (raw["ok"] as? NSNumber)?.boolValue ?? false, fileName: fileName,
+                                    kind: raw["kind"] as? String ?? "", message: raw["message"] as? String ?? "",
+                                    effects: int("effects"), keyframes: int("keyframes"), layers: int("layers"),
+                                    expressions: int("expressions"), animators: int("animators"),
+                                    skipped: items("skipped"), notes: items("notes"), changes: int("changes"))
+        result.messageKey = raw["messageKey"] as? String ?? ""
+        result.messageArgs = raw["messageArgs"] as? [String] ?? []
+        return result
     }
 
     private func finishAeImport(_ json: String, fileName: String, projectFile: Bool) {
@@ -4995,11 +5158,15 @@ final class AureaModel: ObservableObject {
         if !projectFile && (result.ok || result.changes > 0) { _ = saveProject(writeThumbnail: false) }
     }
 
-    nonisolated private static func withStagedAeProject<T>(_ source: URL, convert: (URL) throws -> T) throws -> T {
+    nonisolated private static func withStagedAeProject<T>(_ source: URL, kind: String, convert: (URL) throws -> T) throws -> T {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("aurea-ae-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: directory) }
-        let destination = directory.appendingPathComponent(source.lastPathComponent)
+        // 1.0.8: a cópia leva a extensão do tipo detectado (o motor também confere os bytes).
+        let nameExt = source.pathExtension.lowercased()
+        let ext = ["aep", "aet", "zip", "rar"].contains(nameExt) ? nameExt : kind
+        let base = nameExt == ext ? source.deletingPathExtension().lastPathComponent : source.lastPathComponent
+        let destination = directory.appendingPathComponent((base.isEmpty ? "project" : base) + "." + ext)
         try AureaPaths.readImport(source) { readable in
             let input = try FileHandle(forReadingFrom: readable)
             defer { try? input.close() }
@@ -5008,7 +5175,7 @@ final class AureaModel: ObservableObject {
             }
             let output = try FileHandle(forWritingTo: destination)
             defer { try? output.close() }
-            var remaining = source.pathExtension.lowercased() == "aep" ? 64 << 20 : 8 << 30
+            var remaining = ext == "aep" || ext == "aet" ? 256 << 20 : 8 << 30
             while let chunk = try input.read(upToCount: 65_536), !chunk.isEmpty {
                 guard chunk.count <= remaining else { throw CocoaError(.fileReadTooLarge) }
                 try output.write(contentsOf: chunk)
@@ -5018,11 +5185,16 @@ final class AureaModel: ObservableObject {
         return try convert(destination)
     }
 
-    /// Importa um projeto independente na biblioteca, sem trocar o projeto do editor.
-    func importHomeAeProject(_ url: URL, done: @escaping () -> Void) {
-        guard screen == .home, !openingProject, canChangeProject() else { return }
-        guard Self.isAeProjectExtension(url.pathExtension) else {
-            toast = AureaText.t("ae_project_select_file")
+    /// Importa um projeto independente na biblioteca, sem trocar o projeto do
+    /// editor. `fromOutside` ("Abrir com", AirDrop): vale em qualquer tela,
+    /// porque a importação não mexe no projeto aberto.
+    func importHomeAeProject(_ url: URL, fromOutside: Bool = false, done: @escaping () -> Void) {
+        // 1.0.8: a recusa calada parecia "não importa nada"; agora diz o porquê.
+        if screen != .home && !fromOutside { toast = AureaText.t("ae_project_go_home"); return }
+        if openingProject { toast = AureaText.t("ae_import_busy"); return }
+        guard canChangeProject() else { return }
+        guard let sourceKind = Self.aeSourceKind(url) else {
+            toast = AureaText.t("ae_err_choose_project")
             return
         }
         let basename = url.deletingPathExtension().lastPathComponent
@@ -5035,7 +5207,7 @@ final class AureaModel: ObservableObject {
         mediaQueue.async { [weak self] in
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             let imported = Result { () throws -> AeImportResult in
-                let json = try Self.withStagedAeProject(url) {
+                let json = try Self.withStagedAeProject(url, kind: sourceKind) {
                     AureaEngine.importAeProjectFile($0.path, outputPath: project.path, title: title)
                 }
                 guard let report = Self.parseAeImportResult(json, fileName: url.lastPathComponent),
@@ -6538,6 +6710,8 @@ final class AureaModel: ObservableObject {
     }
 
     private var exportTimer: Timer?
+    /// 1.0.8: conta os ticks do export para a etapa do relatório (CrashReporter.etapaExport).
+    private var exportBreadcrumbTick = 0
     /// 0.2.4 (C5): o watchdog também vigia o "Preparando" (antes só o render).
     private var preparingTimer: Timer?
     private var preparingWatch = ExportStallWatch()
@@ -6747,6 +6921,13 @@ final class AureaModel: ObservableObject {
             Task { @MainActor in
                 guard let self, self.started, self.exporting, !self.exportPreparing else { return }
                 self.exportProgress = self.engine.exportProgress()
+                // 1.0.8: a cada ~2 s, quadro e memória na etapa do relatório de fechamento.
+                self.exportBreadcrumbTick += 1
+                if self.exportBreadcrumbTick % 6 == 0 {
+                    CrashReporter.shared.etapaExport(
+                        feitos: (self.exportProgress["framesDone"] as? NSNumber)?.intValue ?? 0,
+                        total: (self.exportProgress["framesTotal"] as? NSNumber)?.intValue ?? 0)
+                }
                 self.exportBackgroundRun.update(
                     done: (self.exportProgress["framesDone"] as? NSNumber)?.int64Value ?? 0,
                     total: (self.exportProgress["framesTotal"] as? NSNumber)?.int64Value ?? 0)

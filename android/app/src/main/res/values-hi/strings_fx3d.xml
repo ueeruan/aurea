@@ -19,4 +19,18 @@
     <string name="fx3d_image_none">कोई छवि नहीं</string>
     <string name="fx3d_effect_added">इफ़ेक्ट जोड़ा गया — इफ़ेक्ट्स में बदलें</string>
     <string name="fx3d_add_failed">यह इफ़ेक्ट सिर्फ़ अनलॉक 3D ऑब्जेक्ट पर काम करता है।</string>
+    <!-- Explosão 3D (aurea.3d.explode) -->
+    <string name="fx3d_name_explode">विस्फोट</string>
+    <string name="fx3d_desc_explode">3D ऑब्जेक्ट को टुकड़ों में तोड़ता है जो टक्कर के बिंदु से घूमते हुए, गुरुत्व और चमकते किनारों के साथ उड़ते हैं; या उल्टा जोड़ता है।</string>
+    <string name="fxo_by_progress">प्रगति से</string>
+    <string name="fxl_impact_point">टक्कर का बिंदु</string>
+    <string name="fxl_spread_out">फैलाएँ</string>
+    <string name="fxl_random_axis">रैंडम अक्ष</string>
+    <string name="fxl_impact_wave">टक्कर की लहर</string>
+    <string name="fxl_scale_at_end">अंत में स्केल</string>
+    <string name="fxl_assemble_reverse">जोड़ें (उल्टा)</string>
+    <string name="fxl_dark_interior">गहरा भीतरी भाग</string>
+    <string name="fxp_explode_glass">काँच तोड़ें</string>
+    <string name="fxp_explode_assemble">जोड़ना</string>
+    <string name="fxp_explode_side_impact">साइड से टक्कर</string>
 </resources>

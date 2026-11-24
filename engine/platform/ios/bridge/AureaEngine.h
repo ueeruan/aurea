@@ -1075,6 +1075,17 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)puppetRemovePin:(long long)layerId effect:(int32_t)effectId pin:(int32_t)pin NS_SWIFT_NAME(puppetRemovePin(_:effect:pin:));
 /// 0.4.5: gira os pinos de `mask` (bit i = pino i) em volta do pino `pivot`; o dedo de (u0, v0) a (u1, v1).
 - (BOOL)puppetRotatePins:(long long)layerId effect:(int32_t)effectId pivot:(int32_t)pivot mask:(int32_t)mask u0:(float)u0 v0:(float)v0 u1:(float)u1 v1:(float)v1 autoKey:(BOOL)autoKey continuing:(BOOL)continuing NS_SWIFT_NAME(puppetRotatePins(_:effect:pivot:mask:u0:v0:u1:v1:autoKey:continuing:));
+// Rig 2D de rosto (Engine::query_face_rig e família; u, v = fração da caixa da camada):
+// 10 alças (u, v) na ordem de face_rig::Handle e o estado dos pontos (0 proporções,
+// 1 só olhos, 2 olhos e boca, 3 à mão). Detectar: 2/1/0 ou −1 sem efeito.
+- (NSArray<NSNumber*>*)faceRigHandles:(long long)layerId effect:(int32_t)effectId NS_SWIFT_NAME(faceRigHandles(_:effect:));
+- (int32_t)faceRigAutoPlace:(long long)layerId effect:(int32_t)effectId NS_SWIFT_NAME(faceRigAutoPlace(_:effect:));
+- (BOOL)faceRigMoveHandle:(long long)layerId effect:(int32_t)effectId handle:(int32_t)handle u:(float)u v:(float)v continuing:(BOOL)continuing NS_SWIFT_NAME(faceRigMoveHandle(_:effect:handle:u:v:continuing:));
+/// Rig 2D v2 "Separar em partes" (pesado: fora da main). Devolve a camada da
+/// pré-composição (e o Controle em `controller`) ou −código.
+- (long long)faceRigSplitParts:(long long)layerId effect:(int32_t)effectId controller:(long long*)controller NS_SWIFT_NAME(faceRigSplitParts(_:effect:controller:));
+/// Andamento do "Separar em partes" em curso (0..1; 1 = parado).
+- (float)faceRigSplitProgress NS_SWIFT_NAME(faceRigSplitProgress());
 // Formas 3D (Engine::add_shape3d e família; scene3d/Shape3D.hpp). Receita:
 // [forma, nº de partes, 5 por parte (RGBA sRGB, 1 = tem imagem)]. Partes no
 // cabeçote: 14 floats cada (Engine::kShapePartFloats).
@@ -1253,6 +1264,10 @@ NS_SWIFT_NAME(AureaEngine)
 /// 0.4.1 (legendas na nuvem): trechos WAV 16 kHz mono da camada em `dir`; linhas "início	fim	caminho".
 - (NSString* _Nullable)exportSpeechChunks:(long long)layerId dir:(NSString*)dir error:(NSError* _Nullable * _Nullable)error;
 - (int)captionProgress:(BOOL)cancel;
+/// 1.0.8 Edição automática (Engine::auto_edit): relatório JSON ({"ok":…}); demora — chamar fora da thread principal.
+- (NSString*)autoEdit:(long long)layer request:(NSString*)request;
+/// Etapa × 100 + porcentagem (1000 = pronto); `cancel` pede para parar.
+- (int)autoEditProgress:(BOOL)cancel;
 - (NSString*)captionTracks;
 - (NSString*)saveCaptionBundle:(long long)layer name:(NSString*)name;
 - (BOOL)applyCaptionBundle:(long long)layer data:(NSString*)data;

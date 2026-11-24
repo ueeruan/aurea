@@ -19,4 +19,18 @@
     <string name="fx3d_image_none">Tidak ada gambar</string>
     <string name="fx3d_effect_added">Efek ditambahkan — atur di Efek</string>
     <string name="fx3d_add_failed">Efek ini hanya berfungsi pada objek 3D yang tidak terkunci.</string>
+    <!-- Explosão 3D (aurea.3d.explode) -->
+    <string name="fx3d_name_explode">Ledakan</string>
+    <string name="fx3d_desc_explode">Memecah objek 3D menjadi kepingan yang terlempar dari titik benturan, dengan putaran, gravitasi, dan tepi membara; atau merakitnya secara terbalik.</string>
+    <string name="fxo_by_progress">Menurut progres</string>
+    <string name="fxl_impact_point">Titik benturan</string>
+    <string name="fxl_spread_out">Sebarkan</string>
+    <string name="fxl_random_axis">Sumbu acak</string>
+    <string name="fxl_impact_wave">Gelombang benturan</string>
+    <string name="fxl_scale_at_end">Skala di akhir</string>
+    <string name="fxl_assemble_reverse">Rakit (terbalik)</string>
+    <string name="fxl_dark_interior">Bagian dalam gelap</string>
+    <string name="fxp_explode_glass">Pecahkan kaca</string>
+    <string name="fxp_explode_assemble">Rakit</string>
+    <string name="fxp_explode_side_impact">Benturan samping</string>
 </resources>

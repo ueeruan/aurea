@@ -1,13 +1,49 @@
         auto& timeline = project_->timeline();
         const u32 primarySource = aep.comps[roots.front()].id;
-        const usize newComps = standaloneTitle ? aep.comps.size() - 1 : aep.comps.size();
-        if (timeline.composition_count() + newComps > 256 ||
-            comp->layers().count() + roots.size() > kMaxLayerCount) {
-            report.message = "O projeto aberto não tem espaço para as composições importadas.";
-            return report;
+        // 1.0.8: o Aurea comporta 256 composições por projeto. Entram as de
+        // cima (a maior primeiro) com tudo o que elas usam; as que não cabem
+        // ficam de fora, relatadas, e as camadas que as usam viram nulos.
+        std::vector<bool> keep(aep.comps.size(), false);
+        {
+            usize room = timeline.composition_count() >= 256 ? 0 : 256 - timeline.composition_count();
+            if (standaloneTitle) ++room;   // a de cima usa a composição do projeto novo
+            std::unordered_map<u32, usize> indexOf;
+            for (usize i = 0; i < aep.comps.size(); ++i) indexOf.emplace(aep.comps[i].id, i);
+            std::vector<usize> pending;
+            for (const usize root : roots) {
+                pending.assign(1, root);
+                while (!pending.empty() && room > 0) {
+                    const usize i = pending.back();
+                    pending.pop_back();
+                    if (keep[i]) continue;
+                    keep[i] = true;
+                    --room;
+                    const auto& layers = aep.comps[i].layers;
+                    for (auto it = layers.rbegin(); it != layers.rend(); ++it) {
+                        const auto child = indexOf.find(it->source);
+                        if (child != indexOf.end() && !keep[child->second] && !plan.is_cut(i, it->id))
+                            pending.push_back(child->second);
+                    }
+                }
+            }
+            if (!keep[roots.front()]) {
+                report.message = "O projeto aberto já tem 256 composições; abra um projeto novo para importar.";
+                return report;
+            }
+            for (usize i = 0; i < aep.comps.size(); ++i)
+                if (!keep[i]) report.skip("composicao", aep.comps[i].name, "o Aurea comporta até 256 composições por projeto; esta ficou de fora");
         }
+        // Profundidade: o render do Aurea desenha até 8 níveis de composição.
+        const usize depthRoom = standaloneTitle ? kMaxNestingDepth : kMaxNestingDepth - 1;
+        for (const usize root : roots)
+            if (keep[root] && plan.height[root] > depthRoom)
+                report.note("composicao", aep.comps[root].name, "tem " + std::to_string(plan.height[root]) +
+                            " níveis de pré-composição; o Aurea desenha até " + std::to_string(depthRoom) +
+                            " e os mais internos não aparecem");
         std::unordered_map<u32, CompositionId> compositionIds;
-        for (const auto& source : aep.comps) {
+        for (usize index = 0; index < aep.comps.size(); ++index) {
+            if (!keep[index]) continue;
+            const auto& source = aep.comps[index];
             const CompositionId id = standaloneTitle && source.id == primarySource
                 ? compId : timeline.create_composition(source.name, source.width, source.height, source.fps);
             auto* imported = timeline.composition(id);
@@ -88,7 +124,9 @@
             return assetId;
         };
 
-        for (auto& source : aep.comps) {
+        for (usize sourceIndex = 0; sourceIndex < aep.comps.size(); ++sourceIndex) {
+            if (!keep[sourceIndex]) continue;
+            auto& source = aep.comps[sourceIndex];
             const CompositionId id = compositionIds.at(source.id);
             (void)timeline.set_current(id);
             auto* imported = timeline.composition(id);
@@ -106,7 +144,8 @@
                 const i64 first = std::clamp<i64>(std::llround(std::min(in, out) * fps), 0, imported->duration().value);
                 const i64 last = std::clamp<i64>(std::llround(std::max(in, out) * fps), 0, imported->duration().value);
                 if (first >= last) continue;
-                const auto child = compositionIds.find(entry.source);
+                const bool cycle = plan.is_cut(sourceIndex, entry.id);
+                const auto child = cycle ? compositionIds.end() : compositionIds.find(entry.source);
                 const auto media = mediaBySource.find(entry.source);
                 const ae::ProjectMedia* item = media != mediaBySource.end() ? media->second : nullptr;
                 const Composition* nested = child == compositionIds.end() ? nullptr : timeline.composition(child->second);
@@ -149,7 +188,13 @@
                     if (auto* layer = imported->layer(layerId)) layer->source = source_asset(*item, mediaKind);
                 } else {
                     layerId = host.create_layer(ae::NewLayer::Null, spec);
-                    report.skip("camada", spec.name, "tipo ou fonte sem equivalente no Aurea; a estrutura foi preservada como nulo");
+                    const bool droppedComp = std::any_of(aep.comps.begin(), aep.comps.end(), [&](const auto& c) {
+                        return c.id == entry.source;
+                    });
+                    report.skip("camada", spec.name,
+                        cycle ? "a pré-composição usa a si mesma (ciclo no arquivo); a camada virou nulo"
+                        : droppedComp ? "a pré-composição desta camada ficou de fora (limite de composições); a camada virou nulo"
+                        : "tipo ou fonte sem equivalente no Aurea; a estrutura foi preservada como nulo");
                 }
                 auto* layer = imported->layer(layerId);
                 if (!layer) {
@@ -218,16 +263,68 @@
             imported->rebuild_draw_order();
         }
 
+        // Composição maior que a textura máxima: encolhe com o conteúdo
+        // (resize_content) e quem a usa compensa a escala, para o tamanho na
+        // tela da composição de cima ficar o do AE.
+        std::unordered_map<u64, f32> shrunk;
+        for (usize index = 0; index < aep.comps.size(); ++index) {
+            const auto& source = aep.comps[index];
+            if (!keep[index] || (source.fitWidth == source.width && source.fitHeight == source.height) ||
+                !source.fitWidth || !source.fitHeight) continue;
+            auto* resized = timeline.composition(compositionIds.at(source.id));
+            if (!resized) continue;
+            const f32 k = std::min(static_cast<f32>(source.fitWidth) / source.width,
+                                   static_cast<f32>(source.fitHeight) / source.height);
+            resized->resize_content(source.fitWidth, source.fitHeight);
+            shrunk.emplace(compositionIds.at(source.id).pack(), k);
+        }
+        if (!shrunk.empty()) {
+            for (usize index = 0; index < aep.comps.size(); ++index) {
+                if (!keep[index]) continue;
+                auto* parent = timeline.composition(compositionIds.at(aep.comps[index].id));
+                if (!parent) continue;
+                for (u32 i = 0; i < parent->order().size(); ++i) {
+                    Layer* l = parent->layer(parent->order().at(i));
+                    if (!l || l->kind != LayerKind::Composition) continue;
+                    const auto found = shrunk.find(l->nested.composition.pack());
+                    if (found == shrunk.end()) continue;
+                    const f32 k = found->second;
+                    l->transform.anchor.x *= k; l->transform.anchor.y *= k;
+                    l->transform.scale.x /= k; l->transform.scale.y /= k;
+                    for (u32 t = 0; t < l->tracks.size(); ++t) {
+                        Track& track = l->tracks.at(t);
+                        const bool anchor = track.property == TrackProperty::AnchorX || track.property == TrackProperty::AnchorY;
+                        const bool scale = track.property == TrackProperty::ScaleX || track.property == TrackProperty::ScaleY;
+                        if (!anchor && !scale) continue;
+                        const f32 m = anchor ? k : 1.0f / k;
+                        track.staticValue *= m;
+                        for (Keyframe& key : track.keys) { key.value *= m; key.tangentIn *= m; key.tangentOut *= m; }
+                    }
+                }
+            }
+        }
+
         (void)timeline.set_current(compId);
         comp = timeline.composition(compId);
         // Keep the existing edit intact. Each top-level AE comp gets its own editable layer.
+        usize wrapperRoom = comp->layers().count() >= kMaxLayerCount ? 0 : kMaxLayerCount - comp->layers().count();
         for (auto i = roots.rbegin(); i != roots.rend(); ++i) {
             if (standaloneTitle && *i == roots.front()) continue;
+            if (!keep[*i]) continue;
+            if (wrapperRoom == 0) {
+                report.note("composicao", aep.comps[*i].name, "a composição entrou no projeto, mas a linha do tempo aberta está cheia; use-a pela lista de composições");
+                continue;
+            }
+            --wrapperRoom;
             const auto& source = aep.comps[*i];
             const LayerId layerId = comp->add_layer(LayerKind::Composition, source.name);
             auto* layer = comp->layer(layerId);
+            if (!layer) continue;
             layer->nested.composition = compositionIds.at(source.id);
-            layer->transform.anchor = {source.width * .5f, source.height * .5f, 0};
+            const auto* nestedComp = timeline.composition(layer->nested.composition);
+            const f32 nw = static_cast<f32>(nestedComp ? nestedComp->width() : source.width);
+            const f32 nh = static_cast<f32>(nestedComp ? nestedComp->height() : source.height);
+            layer->transform.anchor = {nw * .5f, nh * .5f, 0};
             layer->transform.position = {comp->width() * .5f, comp->height() * .5f, 0};
             layer->end = FrameIndex{std::max<i64>(1, std::llround(source.duration * comp->fps()))};
             layer->visible = *i == roots.front();
@@ -241,6 +338,6 @@
         project_->mark_dirty();
         request_render();
         report.ok = true;
-        report.changes += static_cast<u32>(aep.comps.size()) + report.layers;
+        report.changes += static_cast<u32>(compositionIds.size()) + report.layers;
         ae::finish_report(report);
         return report;

@@ -52,10 +52,12 @@ struct ReadBudget {
     u32 chunks = 0;
     const char* error = nullptr;
 
+    /// .ffx: 32 MB; projeto .aep (todas as camadas somadas): 256 MB (1.0.8).
+    usize limit = 32u << 20;
+
     bool take(usize allocation) {
-        constexpr usize kMaxExpandedBytes = 32u << 20;
         if (error) return false;
-        if (allocation > kMaxExpandedBytes - bytes) {
+        if (allocation > limit - bytes) {
             error = "projeto do After Effects excede o limite de dados expandidos";
             return false;
         }
@@ -462,6 +464,7 @@ bool parse_property_tree(std::string_view payload, u32 fallbackTimescale,
     }
     Reader r;
     r.timescale = fallbackTimescale;
+    r.budget.limit = 256u << 20;
     if (!r.budget.take(expandedBytes)) {
         error = r.budget.error;
         return false;

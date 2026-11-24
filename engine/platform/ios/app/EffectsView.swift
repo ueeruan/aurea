@@ -1118,6 +1118,9 @@ struct EffectsView: View {
         if type == fxEffectTypeId("aurea.distort.puppet") {
             PuppetCardTools(effectId: effect.effectId).padding(.horizontal, 6).padding(.vertical, 4)
         }
+        if type == fxEffectTypeId("aurea.rig.face") {
+            FaceRigCardTools(effectId: effect.effectId).padding(.horizontal, 6).padding(.vertical, 4)
+        }
         if type == fxEffectTypeId("aurea.light.saber") { SaberCardTools(effectId: effect.effectId) }
         // Omega grid (0.3.5): "Controlado por" (nulo de controle) no topo do efeito da grade.
         if type == fxEffectTypeId("aurea.layout.grid_builder") { GridControlRow() }
@@ -1127,7 +1130,10 @@ struct EffectsView: View {
     /// escolher aplica o preset num passo de desfazer. Id `effects.variation.<efeito>`.
     @ViewBuilder private func variationRow(_ effect: EffectItem) -> some View {
         let presets = model.engine.effectPresets(effect.typeId)
-        let labels = stride(from: 0, to: presets.count - 1, by: 2).map { fxPresetLabel(presets[$0], presets[$0 + 1]) }
+        let explode = effect.typeId == fxEffectTypeId("aurea.3d.explode")
+        let labels = stride(from: 0, to: presets.count - 1, by: 2).map {
+            explode ? fxPresetName(effect.typeId, presets[$0], presets[$0 + 1]) : fxPresetLabel(presets[$0], presets[$0 + 1])
+        }
         if !labels.isEmpty {
             choiceLayout(label: AureaText.t("om_fx_variation"), options: labels, current: -1,
                          segmented: labels.count <= 4 && labels.allSatisfy { $0.count <= 10 },

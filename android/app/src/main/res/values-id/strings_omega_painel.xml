@@ -28,7 +28,7 @@
     <string name="om_lp_volume_close">Tutup volume</string>
     <string name="om_lp_volume_tab_fades">Fade</string>
     <string name="om_lp_missing_media_title">Media tidak ditemukan</string>
-    <string name="om_lp_missing_media">Media asli lapisan ini hilang atau dipindahkan.</string>
+    <string name="om_lp_missing_media">File lapisan ini sudah tidak ada di perangkat. Ketuk Ganti media dan pilih file lagi: transformasi, keyframe, efek, dan masker tetap ada.</string>
     <string name="om_presets_empty_title">Belum ada preset</string>
     <string name="om_presets_empty_body">Simpan properti dan keyframe lapisan sebagai preset untuk dipakai lagi.</string>
     <string name="om_presets_empty_browse">Lihat preset</string>

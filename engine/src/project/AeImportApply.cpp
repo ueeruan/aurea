@@ -171,6 +171,9 @@ struct Applier {
         if (n.kind != Node::Kind::Effect) return;
         const std::string shown = !n.effectName.empty() ? n.effectName : !n.name.empty() ? n.name : n.match;
         const ERule* rule = find_effect_rule(n.match);
+        // 1.0.8: plugin de terceiros com outro matchName (versão, fabricante):
+        // o nome no painel do AE decide (só os apelidos conhecidos).
+        if (!rule && !n.effectName.empty()) rule = find_effect_rule_alias(n.effectName);
         if (!rule) {
             std::vector<std::string> missing;
             const std::vector<const ERule*> controls = pseudo_controls(n, missing);
@@ -251,6 +254,12 @@ struct Applier {
                     known = true;
                     if (p.hasDef && c.hasValue && !c.value.empty() && std::fabs(c.value[0] - p.def) > 1e-4) report = true;
                 }
+                // I(0, "*"): a regra aproxima o efeito; os outros parâmetros
+                // ficam no padrão do Aurea sem um item por parâmetro.
+                bool rest = false;
+                for (u32 i = 0; i < rule->paramCount; ++i)
+                    rest = rest || (rule->params[i].ae == 0 && rule->params[i].silent);
+                if (!known && rest) continue;
                 if (!known) report = report || (c.hasValue && !c.value.empty() && c.dims <= 4);
                 if (report) {
                     // Caixas de seleção guardam o rótulo no menu (pdnm), não no nome.

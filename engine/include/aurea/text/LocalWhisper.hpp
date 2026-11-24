@@ -20,4 +20,9 @@ struct SpeechChunk { std::string path; double start = 0, end = 0; };
 Result<std::vector<SpeechChunk>> export_speech_chunks(
     VideoSourceFactory& factory, const std::string& source, const std::string& dir,
     std::atomic<bool>& cancelled, const std::function<void(int)>& progress) noexcept;
+
+/// 1.0.8 (edição automática): o áudio inteiro da mídia em 16 kHz mono (até
+/// `maxSeconds`), para a análise da fala, da música e dos sons.
+Result<std::vector<float>> decode_mono16k(VideoSourceFactory& factory, const std::string& source,
+    std::atomic<bool>& cancelled, double maxSeconds = 1200.0) noexcept;
 }

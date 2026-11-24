@@ -155,6 +155,11 @@
                 <data android:pathPattern=".*\\..*\\..*\\.aureaproj"/>
                 <data android:pathPattern=".*\\.pjf"/>
                 <data android:pathPattern=".*\\..*\\.pjf"/>
+                <!-- 1.0.8: projeto e modelo do After Effects (MainActivity →
+                     EditorStore.openExternalFile decide pelo conteúdo). -->
+                <data android:pathPattern=".*\\.aep"/>
+                <data android:pathPattern=".*\\..*\\.aep"/>
+                <data android:pathPattern=".*\\.aet"/>
             </intent-filter>
             <!-- Só o MIME (sem esquema: content: entra implícito). -->
             <intent-filter>
@@ -162,6 +167,11 @@
                 <category android:name="android.intent.category.DEFAULT"/>
                 <data android:mimeType="application/octet-stream"/>
                 <data android:mimeType="application/x-aurea-project"/>
+                <!-- 1.0.8: pacotes do After Effects (Coletar arquivos) em .zip e .rar. -->
+                <data android:mimeType="application/zip"/>
+                <data android:mimeType="application/x-zip-compressed"/>
+                <data android:mimeType="application/vnd.rar"/>
+                <data android:mimeType="application/x-rar-compressed"/>
             </intent-filter>
             <!-- AureaMCP: a página de autorização do agente (Claude.ai, ChatGPT…)
                  tem "Abrir no Aurea" = aurea://mcp/pair?code=ABCD-2345; o app abre
@@ -179,6 +189,11 @@
                 <category android:name="android.intent.category.DEFAULT"/>
                 <data android:mimeType="application/octet-stream"/>
                 <data android:mimeType="application/x-aurea-project"/>
+                <!-- 1.0.8: pacotes do After Effects (Coletar arquivos) em .zip e .rar. -->
+                <data android:mimeType="application/zip"/>
+                <data android:mimeType="application/x-zip-compressed"/>
+                <data android:mimeType="application/vnd.rar"/>
+                <data android:mimeType="application/x-rar-compressed"/>
             </intent-filter>
         </activity>
         <service

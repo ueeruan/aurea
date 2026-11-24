@@ -20,6 +20,7 @@
 // =============================================================================
 import CryptoKit
 import Darwin
+import os
 import Foundation
 import MetricKit
 
@@ -149,6 +150,27 @@ final class CrashReporter: NSObject, MXMetricManagerSubscriber {
             let anterior: sig_t? = signal(sinal, aureaTratarSinal)
             tabela[Int(sinal)] = anterior
         }
+    }
+
+    /// 1.0.8 ("o export fecha o app do nada"): o jetsam (memória) e o watchdog
+    /// não deixam pilha nem pelo MetricKit. Durante o export a etapa leva o
+    /// quadro e a memória do processo; o próximo ABNORMAL_EXIT mostra onde e
+    /// com quanto o app morreu.
+    func etapaExport(feitos: Int, total: Int) {
+        let livre = Int(os_proc_available_memory() / 1_048_576)
+        primeiroPlano(true, etapa: "screen=editor export f=\(feitos)/\(total) mem=\(Self.memoriaMB())MB livre=\(livre)MB")
+    }
+
+    /// phys_footprint (o número que o jetsam compara com o limite), em MB.
+    static func memoriaMB() -> Int {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+        let kr = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        return kr == KERN_SUCCESS ? Int(info.phys_footprint / 1_048_576) : -1
     }
 
     /// Ida e volta do primeiro plano (scenePhase). Sem o "voltar", a próxima

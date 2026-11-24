@@ -205,6 +205,8 @@ struct PostIn {
 [[nodiscard]] const ERule* find_effect_rule(std::string_view aeMatch) noexcept;
 /// Regra pelo nome exibido em inglês ("Gaussian Blur") — scripting.
 [[nodiscard]] const ERule* find_effect_rule_by_name(std::string_view name) noexcept;
+/// 1.0.8: só os apelidos de plugins de terceiros (nome no painel do AE).
+[[nodiscard]] const ERule* find_effect_rule_alias(std::string_view displayName) noexcept;
 /// O parâmetro do AE pela posição na interface (1..), pelo nome em inglês ou
 /// pelo matchName ("ADBE Gaussian Blur 2-0001"). 0 = não achou.
 [[nodiscard]] u16 effect_param_number(const ERule& r, std::string_view nameOrMatch) noexcept;

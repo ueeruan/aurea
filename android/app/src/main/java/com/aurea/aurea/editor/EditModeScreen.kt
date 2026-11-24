@@ -601,6 +601,10 @@ private fun rememberEditActions(store: EditorStore, ui: EditorUi, setLevel: (Edi
                     if (video) add(EditDockItem("freeze", EditIcon.Freeze, R.string.edit_clip_freeze) { store.freezeFrame() })
                     if (video) add(EditDockItem("extract", EditIcon.Extract, R.string.edit_clip_extract_audio) { store.extractAudio() })
                     if (video) add(EditDockItem("stabilize", EditIcon.Track, R.string.edit_clip_stabilize) { panel(EditorPanel.Tracking) })
+                    // 1.0.8: Edição automática do clipe (cortes, zoom, sons, música, voz, cor, legendas).
+                    if (video && clip != null) add(EditDockItem("autoEdit", EditIcon.Sequence, R.string.autoedit_title) {
+                        if (store.playing) store.pause(); store.autoEdit.open(clip.id)
+                    })
                     if (clip != null) {
                         if (main) add(EditDockItem("toOverlay", EditIcon.Overlay, R.string.edit_clip_to_overlay) { store.moveClipToOverlay(clip.id) })
                         else add(EditDockItem("toMain", EditIcon.MainTrack, R.string.edit_clip_to_main) { store.moveClipToMainTrack(clip.id) })

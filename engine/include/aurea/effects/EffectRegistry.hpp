@@ -282,6 +282,9 @@ namespace effect_keys {
     // Geometria na GPU, em qualquer camada.
     inline constexpr const char* kShatter3D             = "aurea.3d.shatter";
     inline constexpr const char* kStroke3D              = "aurea.3d.stroke";
+    // Explosão (23/11/2026): o objeto 3D quebra em peças da própria malha
+    // (scene3d/Explode3D.cpp); em camada 2D, peças planas como o 3D Shatter.
+    inline constexpr const char* kExplode3D             = "aurea.3d.explode";
 
     // --- Tempo por optical flow (0.1.8; FlowTimeEffects.cpp) ----------------
     // Declarativos: o renderer lê os parâmetros onde escolhe os quadros da

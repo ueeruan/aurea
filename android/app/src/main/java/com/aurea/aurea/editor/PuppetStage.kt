@@ -416,6 +416,13 @@ internal fun PuppetCardTools(store: EditorStore, effectId: Int) {
                 Text(stringResource(R.string.autorig2d_pins))
             }
         }
+        // Rig 2D de rosto: parâmetros de rosto (virar, piscar, boca...) na mesma camada (FaceRigStage.kt).
+        if (row?.kind == 2 && !row.locked) {
+            androidx.compose.material3.TextButton(enabled = !analyzing,
+                modifier = Modifier.testTag("fx.puppet.faceRig"), onClick = { addFaceRig(store) }) {
+                Text("${stringResource(R.string.fx_name_face_rig)} · ${stringResource(R.string.hyper_title)}")
+            }
+        }
         Text(
             stringResource(R.string.puppet_hint),
             style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, color = AureaColors.Muted)),

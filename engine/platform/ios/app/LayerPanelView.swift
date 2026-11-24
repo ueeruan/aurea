@@ -158,6 +158,8 @@ struct LayerPanelView: View {
     @State private var reveal: CGFloat = 0
     @State private var enter: CGFloat = 0
     @State private var popoutLayer: Int64 = 0
+    /// 1.0.8: "Substituir mídia" pedido pelo aviso de mídia ausente.
+    @State private var replaceTarget: LayerRef?
 
     private func info(_ row: LayerItem) -> PanelLayerInfo {
         PanelLayerInfo(id: row.id, kind: row.kind, locked: row.locked, start: row.startFrame, end: row.endFrame,
@@ -225,6 +227,12 @@ struct LayerPanelView: View {
                 warnMissingMedia(id, bits: model.layerPanelBits(id))
             }
             .onDisappear { model.layerSpeedPopout = false }
+            .sheet(item: $replaceTarget) { target in
+                ShellMediaPicker(selectionLimit: 1, filter: .any(of: [.images, .videos])) { items in
+                    replaceTarget = nil
+                    if let (url, video) = items.first { model.replaceMedia(layer: target.id, url: url, video: video) }
+                }
+            }
         }
     }
 
@@ -460,9 +468,14 @@ struct LayerPanelView: View {
     private func warnMissingMedia(_ id: Int64, bits: UInt32) {
         guard bits & LayerPanelBits.missingMedia != 0, !model.layerPanelWarnedMissing.contains(id) else { return }
         model.layerPanelWarnedMissing.insert(id)
+        // 1.0.8 (erro 18): o aviso deixa de ser beco sem saída. Vídeo (1) e foto (2)
+        // ganham "Substituir mídia" ali mesmo, como no Android (LayerPanel.kt).
+        let kind = model.selectedLayer?.id == id ? model.selectedLayer?.kind ?? 0 : 0
+        let replaceable = kind == 1 || kind == 2
         AureaPopupPresenter.shared.presentDialog { close in
             AureaAlert(title: AureaText.t("om_lp_missing_media_title"), message: AureaText.t("om_lp_missing_media"),
-                       confirmLabel: AureaText.t("common_ok"), showCancel: false, onConfirm: {}, onDismiss: close)
+                       confirmLabel: AureaText.t(replaceable ? "layer_replace_media" : "common_ok"), showCancel: replaceable,
+                       onConfirm: { if replaceable { replaceTarget = LayerRef(id: id) } }, onDismiss: close)
         }
     }
 

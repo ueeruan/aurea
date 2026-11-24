@@ -19,4 +19,18 @@
     <string name="fx3d_image_none">لا توجد صورة</string>
     <string name="fx3d_effect_added">تمت إضافة التأثير — اضبطه في التأثيرات</string>
     <string name="fx3d_add_failed">يعمل هذا التأثير فقط على كائن ثلاثي الأبعاد غير مقفل.</string>
+    <!-- Explosão 3D (aurea.3d.explode) -->
+    <string name="fx3d_name_explode">انفجار</string>
+    <string name="fx3d_desc_explode">يكسر الكائن ثلاثي الأبعاد إلى قطع تتطاير من نقطة الاصطدام مع دوران وجاذبية وحواف متوهجة، أو يجمّعه بالعكس.</string>
+    <string name="fxo_by_progress">حسب التقدّم</string>
+    <string name="fxl_impact_point">نقطة الاصطدام</string>
+    <string name="fxl_spread_out">تشتيت</string>
+    <string name="fxl_random_axis">محور عشوائي</string>
+    <string name="fxl_impact_wave">موجة الاصطدام</string>
+    <string name="fxl_scale_at_end">الحجم في النهاية</string>
+    <string name="fxl_assemble_reverse">تجميع (بالعكس)</string>
+    <string name="fxl_dark_interior">داخل داكن</string>
+    <string name="fxp_explode_glass">تحطيم الزجاج</string>
+    <string name="fxp_explode_assemble">تجميع</string>
+    <string name="fxp_explode_side_impact">اصطدام جانبي</string>
 </resources>

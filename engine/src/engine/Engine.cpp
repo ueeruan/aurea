@@ -4,12 +4,14 @@
 #include "aurea/scene3d/Image3D.hpp"
 #include "aurea/media/ImageResample.hpp"
 #include "aurea/media/MediaCut.hpp"
+#include "aurea/media/MediaRelink.hpp"
 #include "aurea/media/SourceWindow.hpp"
 #include "aurea/tracking/RealCameraPreviewScope.hpp"
 #include "aurea/render/PreviewCachePolicy.hpp"
 #include "aurea/render/PreviewViewport.hpp"
 #include "aurea/scene3d/StudioEnvironment.hpp"
 #include "aurea/scene3d/PartEffects.hpp"
+#include "aurea/scene3d/Explode3D.hpp"
 #include "aurea/text/LocalWhisper.hpp"
 #include "aurea/audio/Beats.hpp"
 #include "aurea/effects/Headbop.hpp"
@@ -978,6 +980,8 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
     // Headbop: a trilha do rig no cache (regenerável); sem desfoque de movimento no aparelho fraco.
     headbop::RigStore::shared().set_directory(config_.cacheDirectory.empty() ? std::string{} : config_.cacheDirectory + "/headbop");
     headbop::set_low_end_device(caps_.tier() == DeviceTier::Low);
+    // Explosão 3D: teto de peças pela classe do aparelho (Explode3D.hpp).
+    scene3d::explode3d::set_device_tier(caps_.tier());
     waveforms_->attach(&memory_);
     thumbs_.set_factory(config_.mediaFactory);
     thumbs_.attach(&memory_);
@@ -1317,6 +1321,7 @@ void Engine::shutdown() noexcept {
     state_ = EngineState::ShuttingDown;
     offscreenCancelled_.store(true, std::memory_order_release);
     captionCancelled.store(true);
+    autoEditCancelled.store(true);   // 1.0.8: a edição automática do projeto anterior para
 
     if (exportCtx_ && exportCtx_->thread.joinable()) {
         (void)cancel_export();   // marca e ACORDA as esperas do pipeline
@@ -1382,6 +1387,7 @@ void Engine::shutdown() noexcept {
         ++projectSession_;
     inlineEditGroup_.store(0); inlineEditLayer_.store(0); inlineEditOuter_.store(0);
         captionCancelled.store(true);
+        autoEditCancelled.store(true);   // 1.0.8: a edição automática do projeto anterior para
         images_.clear();
         models_.clear();
         hdris_.clear();
@@ -1951,6 +1957,7 @@ Status Engine::new_project(u32 width, u32 height, f64 fps, const char* title, co
     ++projectSession_;
     inlineEditGroup_.store(0); inlineEditLayer_.store(0); inlineEditOuter_.store(0);
     captionCancelled.store(true);
+    autoEditCancelled.store(true);   // 1.0.8: a edição automática do projeto anterior para
     compStack_.clear();
     images_.clear();
     models_.clear();
@@ -2069,6 +2076,40 @@ u32 rebase_project_paths(Project& project, const std::string& docs) {
             std::string r = rebase_moved_documents(l->text.fontPath, docs);
             if (!r.empty()) { l->text.fontPath = std::move(r); ++moved; }
         }
+    });
+    return moved;
+}
+
+/// 1.0.8 ("a mídia original não está mais no aparelho", erro 18): vídeo,
+/// áudio e foto cujo arquivo gravado não abre mais são procurados ANTES de
+/// qualquer aviso — no contêiner atual (qualquer pasta do app, não só
+/// Documents) e pelo nome/tamanho nas pastas de mídia do app
+/// (media/MediaRelink.hpp). URI (`content:`) não é conferida aqui: a
+/// plataforma copia para o app antes de abrir. Devolve quantas mudaram.
+template <class Resolve>
+u32 relink_missing_media(Project& project, const std::string& docs, Resolve&& resolve) {
+    if (docs.empty()) return 0;
+    namespace fs = std::filesystem;
+    media_relink::NameIndex index;
+    bool indexed = false;
+    u32 moved = 0;
+    project.for_each_asset([&](AssetId, Asset& a) {
+        if (a.kind != AssetKind::Video && a.kind != AssetKind::Audio && a.kind != AssetKind::Image) return;
+        if (a.sourcePath.empty()) return;
+        const bool docsRef = a.sourcePath.rfind("docs:", 0) == 0;
+        if (!docsRef && !media_relink::is_local_file_path(a.sourcePath)) return;
+        const std::string resolved = resolve(a.sourcePath);
+        std::error_code ec;
+        if (!resolved.empty() && fs::is_regular_file(fs::u8path(resolved), ec) && !ec) return;
+        if (!indexed) {
+            index.build(media_relink::search_roots(docs));
+            indexed = true;
+        }
+        std::string found = media_relink::relocate(a.sourcePath, docs, a.fileSizeBytes, a.originalFilename, &index);
+        if (found.empty()) return;
+        AUREA_LOG_INFO("projeto: midia ausente religada (%s)", docsRef ? "docs" : "caminho absoluto");
+        a.sourcePath = std::move(found);
+        ++moved;
     });
     return moved;
 }
@@ -2213,6 +2254,11 @@ Status Engine::load_project_checked(const char* path, ExportRestartGuard* restar
     if (const u32 moved = rebase_project_paths(loaded, config_.documentsDirectory)) {
         AUREA_LOG_INFO("projeto: %u caminho(s) da instalacao anterior religados a pasta atual", moved);
     }
+    // 1.0.8: o que ainda não abre é procurado antes de virar "mídia ausente";
+    // o caminho novo fica gravado (o projeto sai sujo e o autosave o grava).
+    const u32 relinkedMedia = relink_missing_media(loaded, config_.documentsDirectory,
+        [this](const std::string& stored) { return resolve_asset_path(stored); });
+    if (relinkedMedia) AUREA_LOG_INFO("projeto: %u midia(s) ausente(s) religada(s) a arquivos do app", relinkedMedia);
 
     join_camera_track();
     join_motion_track();
@@ -2248,6 +2294,7 @@ Status Engine::load_project_checked(const char* path, ExportRestartGuard* restar
         loadedSession = ++projectSession_;
     inlineEditGroup_.store(0); inlineEditLayer_.store(0); inlineEditOuter_.store(0);
         captionCancelled.store(true);
+        autoEditCancelled.store(true);   // 1.0.8: a edição automática do projeto anterior para
         // The saved current composition is only an editor view. Its navigation
         // stack is not serialized, so reopening it would strand the user in a
         // child and make the rest of the project appear lost after a crash.
@@ -2313,6 +2360,7 @@ Status Engine::load_project_checked(const char* path, ExportRestartGuard* restar
         }
         // Recuperado de cópia/parcial: está sujo (o principal ainda é o ruim).
         if (mainFileSuspect_) project_->mark_dirty();
+        if (relinkedMedia) project_->mark_dirty();   // 1.0.8: grava o caminho religado
         // Reopening the saved project may keep its complete picture while its
         // decoder reopens. Never carry a picture across different files.
         if (reopenPresentedProject) {
@@ -11528,6 +11576,10 @@ std::string Engine::resolve_media_for_storage(const std::string& stored) const {
     // UUID da pasta): a abertura religa ao arquivo de agora; a limpeza também,
     // senão a mídia em uso pareceria sem dono.
     if (std::string moved = rebase_moved_documents(stored, config_.documentsDirectory); !moved.empty()) return moved;
+    // 1.0.8: qualquer pasta do contêiner anterior (não só Documents) e o
+    // outro nome da mesma pasta no Android (/data/data ↔ /data/user/0).
+    if (std::string moved = media_relink::rebase_into_container(stored, config_.documentsDirectory); !moved.empty())
+        return moved;
     return resolve_asset_path(stored);
 }
 
@@ -16711,6 +16763,8 @@ u32 Engine::query_effect_catalog(bridge::EffectCatalogRow* out, u32 capacity, ch
         effect_type_id("aurea.audio.echo"), effect_type_id(effect_keys::kAudioSpectrum),
         // Created together with their controller/membership by create_grid.
         effect_type_id("aurea.layout.grid_builder"), effect_type_id("aurea.layout.grid_item"),
+        // Rig 2D v2: cada parte nasce com o seu efeito pelo "Separar em partes".
+        effect_type_id("aurea.rig.part"),
         // Brilho profundo 2 duplica o Brilho profundo (brilho em oitavas):
         // projetos que o usam abrem e renderizam igual; não entra mais no menu.
         effect_type_id(effect_keys::kDeepGlow2),
@@ -18618,6 +18672,13 @@ Status Engine::initialize_offline_export(ExportContext& ctx) noexcept {
     if (low_memory_device()) {
         offlineRenderer.set_low_memory_device(true);
         offlineRenderer.set_transient_allocation_limit(std::max<u64>(192ull << 20, export_budget_bytes()));
+#if defined(__APPLE__)
+        // 1.0.8 ("o export fecha o app" no iPhone de 4 GB): no iOS o jetsam
+        // mata o processo sem a alocação falhar, então a redução reativa do
+        // OfflineFrameRenderer nunca chega a rodar. Sombra 2048 e MSAA ≤ 2 já
+        // desde o primeiro quadro.
+        (void)offlineRenderer.reduce_export_scene_memory();
+#endif
     }
     offlineRenderer.set_model_lookup([](void* p, AssetId id) -> std::shared_ptr<const scene3d::SceneAsset> {
         const auto& c = *static_cast<ExportContext*>(p);
@@ -22290,6 +22351,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             e.id = l->alloc_effect_id();
             e.type = type;
             initialize_instance(e, *params);
+            // Rig 2D de rosto: os pontos saem dos pixels já ao pôr (mesmo passo).
+            face_rig_seed_locked(*l, e);
             // One history transaction owns both the effect and3D activation.
             if (type == effect_type_id(effect_keys::kRasterExtrude)) l->threeD = true;
             // 3D Shatter de verdade: a camada entra na cena 3D e as peças voam

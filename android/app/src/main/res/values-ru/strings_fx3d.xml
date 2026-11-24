@@ -19,4 +19,18 @@
     <string name="fx3d_image_none">Нет изображения</string>
     <string name="fx3d_effect_added">Эффект добавлен — настройте его в «Эффектах»</string>
     <string name="fx3d_add_failed">Этот эффект работает только с незаблокированным 3D-объектом.</string>
+    <!-- Explosão 3D (aurea.3d.explode) -->
+    <string name="fx3d_name_explode">Взрыв</string>
+    <string name="fx3d_desc_explode">Разбивает 3D-объект на осколки, которые разлетаются от точки удара с вращением, гравитацией и раскалёнными краями, или собирает его в обратном порядке.</string>
+    <string name="fxo_by_progress">По прогрессу</string>
+    <string name="fxl_impact_point">Точка удара</string>
+    <string name="fxl_spread_out">Разлёт</string>
+    <string name="fxl_random_axis">Случайная ось</string>
+    <string name="fxl_impact_wave">Волна удара</string>
+    <string name="fxl_scale_at_end">Масштаб в конце</string>
+    <string name="fxl_assemble_reverse">Собрать (в обратную сторону)</string>
+    <string name="fxl_dark_interior">Тёмная сердцевина</string>
+    <string name="fxp_explode_glass">Разбить стекло</string>
+    <string name="fxp_explode_assemble">Сборка</string>
+    <string name="fxp_explode_side_impact">Боковой удар</string>
 </resources>

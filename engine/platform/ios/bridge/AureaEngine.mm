@@ -4643,6 +4643,11 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
     return to_ns(*result);
 }
 - (int)captionProgress:(BOOL)cancel { auto* e = self.engine; if (!e) return 0; if (cancel) e->captionCancelled.store(true); return e->captionProgress.load(); }
+- (NSString*)autoEdit:(long long)layer request:(NSString*)request {
+    auto* e = self.engine;
+    return e ? to_ns(e->auto_edit(static_cast<aurea::u64>(layer), to_std(request))) : @"{\"ok\":false,\"error\":\"engine\"}";
+}
+- (int)autoEditProgress:(BOOL)cancel { auto* e = self.engine; if (!e) return 0; if (cancel) e->autoEditCancelled.store(true); return e->autoEditProgress.load(); }
 - (NSString*)captionTracks { auto* e = self.engine; return e ? to_ns(e->caption_tracks()) : @"[]"; }
 - (NSString*)saveCaptionBundle:(long long)layer name:(NSString*)name { auto* e = self.engine; return e ? to_ns(e->save_caption_bundle(layer,to_std(name))) : @""; }
 - (BOOL)applyCaptionBundle:(long long)layer data:(NSString*)data { auto* e = self.engine; return e && e->apply_caption_bundle(layer,to_std(data)); }
@@ -5368,6 +5373,34 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
     return e && effectId >= 0 && pivot >= 0
         && e->puppet_rotate_pins(layerId, static_cast<aurea::u32>(effectId), static_cast<aurea::u32>(pivot),
                                  static_cast<aurea::u32>(mask), u0, v0, u1, v1, autoKey, continuing);
+}
+- (NSArray<NSNumber*>*)faceRigHandles:(long long)layerId effect:(int32_t)effectId {
+    auto* e = self.engine;
+    if (!e || effectId < 0) return @[];
+    float v[aurea::Engine::kFaceRigQueryFloats];
+    const aurea::u32 got = e->query_face_rig(layerId, static_cast<aurea::u32>(effectId), v, aurea::Engine::kFaceRigQueryFloats);
+    return got == aurea::Engine::kFaceRigQueryFloats ? floats_to_array(v, got) : @[];
+}
+- (int32_t)faceRigAutoPlace:(long long)layerId effect:(int32_t)effectId {
+    auto* e = self.engine; return e && effectId >= 0 ? e->face_rig_auto_place(layerId, static_cast<aurea::u32>(effectId)) : -1;
+}
+- (BOOL)faceRigMoveHandle:(long long)layerId effect:(int32_t)effectId handle:(int32_t)handle u:(float)u v:(float)v continuing:(BOOL)continuing {
+    auto* e = self.engine;
+    return e && effectId >= 0 && handle >= 0
+        && e->face_rig_move_handle(layerId, static_cast<aurea::u32>(effectId), static_cast<aurea::u32>(handle), u, v, continuing);
+}
+- (long long)faceRigSplitParts:(long long)layerId effect:(int32_t)effectId controller:(long long*)controller {
+    if (controller) *controller = 0;
+    auto* e = self.engine;
+    if (!e || effectId < 0) return -static_cast<long long>(aurea::Errc::InvalidArgument);
+    aurea::u64 control = 0;
+    const auto r = e->face_rig_split_parts(static_cast<aurea::u64>(layerId), static_cast<aurea::u32>(effectId), &control);
+    if (!r.ok()) return -static_cast<long long>(r.status().code());
+    if (controller) *controller = static_cast<long long>(control);
+    return static_cast<long long>(*r);
+}
+- (float)faceRigSplitProgress {
+    auto* e = self.engine; return e ? e->face_rig_split_progress() : 1.0f;
 }
 - (long long)layerToImage3D:(long long)layerId path:(NSString*)path name:(NSString*)name {
     auto* e = self.engine;

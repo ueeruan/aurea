@@ -2276,7 +2276,13 @@ AUREA_TEST(AeImport, AepBuildsEditableCompositionAndUndoPreservesExistingProject
     AUREA_CHECK(layerTiming != std::string::npos);
     if (layerTiming == std::string::npos) return;
     cyclic.replace(layerTiming + 8 + 0x28, 4, be32(7));
-    AUREA_CHECK(!rig.e.import_ae_data(cyclic, "cycle.aep", 0).ok);
+    // 1.0.8: o ciclo (a composição usa a si mesma) não recusa o projeto: a
+    // referência é cortada (aqui a camada é de ajuste e nem usa a fonte) e o
+    // resto entra. O ciclo numa camada comum está em AepOverOldLimitsImportsPartially.
+    const auto cycleReport = rig.e.import_ae_data(cyclic, "cycle.aep", 0);
+    if (!cycleReport.ok) dump(cycleReport);
+    AUREA_CHECK(cycleReport.ok);
+    AUREA_CHECK(rig.undo());
     AUREA_CHECK_EQ(rig.comp()->layers().count(), 1u);
     const auto report = rig.e.import_ae_data(file, "test.AEP", 0);
     if (!report.ok || report.effects != 1) dump(report);
@@ -2399,8 +2405,8 @@ AUREA_TEST(AeImport, AepBuildsEditableCompositionAndUndoPreservesExistingProject
     AUREA_CHECK(!std::filesystem::exists(noProject));
     const auto rejected = directory / "Rejected.aurea";
     std::ofstream(input, std::ios::binary | std::ios::trunc) << cyclic;
-    AUREA_CHECK(!Engine::import_ae_project_file(input.string().c_str(), rejected.string().c_str(), "Cycle").ok);
-    AUREA_CHECK(!std::filesystem::exists(rejected));
+    AUREA_CHECK(Engine::import_ae_project_file(input.string().c_str(), rejected.string().c_str(), "Cycle").ok);
+    AUREA_CHECK(std::filesystem::exists(rejected));
     AUREA_CHECK(rig.L(existing));
     std::filesystem::remove_all(directory, ec);
 }
@@ -2585,4 +2591,208 @@ dof.property(4).setValue(25);
     AUREA_CHECK_NEAR(d.params[param_index(rig.e, dof, "max_radius")].constant.v[0], 8, 1e-6);
     AUREA_CHECK_NEAR(d.params[param_index(rig.e, dof, "focal_thickness")].constant.v[0], 40, 1e-6);
     AUREA_CHECK_NEAR(d.params[param_index(rig.e, dof, "focal_bias")].constant.v[0], 25, 1e-6);
+}
+
+// =============================================================================
+// 1.0.8: importar tudo do AE (sem recusar o projeto inteiro)
+// =============================================================================
+
+namespace {
+std::string aep_comp(u32 id, const std::string& name, u32 w, u32 h, const std::string& layers) {
+    std::string header(204, '\0');
+    header.replace(4, 4, be32(1024));
+    header.replace(8, 4, be32(30720));      // 30 fps
+    header.replace(0x2c, 4, be32(61440));   // 2 s
+    header.replace(0x30, 4, be32(30720));
+    header.replace(0x8c, 4, be16(w) + be16(h));
+    std::string identity(84, '\0');
+    identity.replace(0, 2, be16(4));
+    identity.replace(16, 4, be32(id));
+    return list("Item", chunk("idta", identity) + chunk("Utf8", name) + chunk("cdta", header) + layers);
+}
+std::string aep_layer(u32 id, const std::string& name, u32 source, u8 flagsB) {
+    std::string timing(164, '\0');
+    timing.replace(0, 4, be32(id));
+    timing.replace(8, 4, be32(1));
+    timing.replace(12, 8, be32(0) + be32(60));
+    timing.replace(20, 8, be32(0) + be32(60));
+    timing.replace(28, 8, be32(120) + be32(60));
+    timing.replace(0x28, 4, be32(source));
+    timing.replace(0x6c, 4, be32(1));
+    timing[0x26] = static_cast<char>(flagsB);
+    timing[0x27] = 1;
+    return list("Layr", chunk("ldta", timing) + chunk("Utf8", name));
+}
+std::string aep_file(const std::string& items) {
+    const auto body = "Egg!" + list("Fold", items);
+    return "RIFX" + be32(static_cast<u32>(body.size())) + body;
+}
+std::string u8path(const std::filesystem::path& p) {
+    const auto s = p.u8string();
+    return std::string(s.begin(), s.end());
+}
+} // namespace
+
+AUREA_TEST(AeImport, AepDetectedByHeaderWithoutExtension) {
+    const std::string file = aep_file(aep_comp(7, "Edit", 640, 360, aep_layer(1, "Nulo", 0, 0x80)));
+    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto directory = std::filesystem::temp_directory_path() / ("aurea-ae-sniff-" + std::to_string(stamp));
+    std::error_code ec;
+    AUREA_CHECK(std::filesystem::create_directory(directory, ec));
+    // Nome de URI do Android, sem extensão: o RIFX+Egg! decide.
+    const auto bare = directory / "msf_1000123";
+    std::ofstream(bare, std::ios::binary) << file;
+    const auto fromBare = Engine::import_ae_project_file(u8path(bare).c_str(), u8path(directory / "A.aurea").c_str(), "A");
+    if (!fromBare.ok) dump(fromBare);
+    AUREA_CHECK(fromBare.ok && fromBare.layers == 1);
+    AUREA_CHECK(ae::report_json(fromBare).find("\"messageKey\":\"ae_msg_ok_aep\"") != std::string::npos);
+    // Modelo do AE (.aet): o mesmo formato.
+    const auto templ = directory / "Modelo.aet";
+    std::ofstream(templ, std::ios::binary) << file;
+    AUREA_CHECK(Engine::import_ae_project_file(u8path(templ).c_str(), u8path(directory / "B.aurea").c_str(), "B").ok);
+    // ZIP sem extensão (o PK decide) com o .aep dentro.
+    const auto zipped = directory / "document";
+    {
+        std::unique_ptr<archive, decltype(&archive_write_free)> zip(archive_write_new(), archive_write_free);
+        AUREA_CHECK(zip && archive_write_set_format_zip(zip.get()) == ARCHIVE_OK);
+#ifdef _WIN32
+        AUREA_CHECK(archive_write_open_filename_w(zip.get(), zipped.c_str()) == ARCHIVE_OK);
+#else
+        AUREA_CHECK(archive_write_open_filename(zip.get(), zipped.c_str()) == ARCHIVE_OK);
+#endif
+        std::unique_ptr<archive_entry, decltype(&archive_entry_free)> entry(archive_entry_new(), archive_entry_free);
+        archive_entry_set_pathname(entry.get(), "Pasta/Edit.aep");
+        archive_entry_set_filetype(entry.get(), AE_IFREG);
+        archive_entry_set_perm(entry.get(), 0644);
+        archive_entry_set_size(entry.get(), static_cast<la_int64_t>(file.size()));
+        AUREA_CHECK(archive_write_header(zip.get(), entry.get()) == ARCHIVE_OK);
+        AUREA_CHECK(archive_write_data(zip.get(), file.data(), file.size()) == static_cast<la_ssize_t>(file.size()));
+        AUREA_CHECK(archive_write_close(zip.get()) == ARCHIVE_OK);
+    }
+    const auto fromZip = Engine::import_ae_project_file(u8path(zipped).c_str(), u8path(directory / "C.aurea").c_str(), "C");
+    if (!fromZip.ok) dump(fromZip);
+    AUREA_CHECK(fromZip.ok && fromZip.layers == 1);
+    // Texto qualquer sem extensão: recusa com mensagem e código para traduzir.
+    const auto text = directory / "notes";
+    std::ofstream(text, std::ios::binary) << "isto não é um projeto";
+    const auto refused = Engine::import_ae_project_file(u8path(text).c_str(), u8path(directory / "D.aurea").c_str(), "D");
+    AUREA_CHECK(!refused.ok && !refused.message.empty());
+    AUREA_CHECK(ae::report_json(refused).find("\"messageKey\":\"ae_err_choose_project\"") != std::string::npos);
+    std::filesystem::remove_all(directory, ec);
+}
+
+AUREA_TEST(AeImport, AepOverOldLimitsImportsPartially) {
+    // 1100 camadas numa pré-composição usada 5 vezes (5500 camadas somadas:
+    // antes passava do teto de 4096 e de 1024 camadas por projeto) e itens
+    // malformados que agora ficam de fora sem derrubar o resto.
+    std::string inner;
+    for (u32 i = 1; i <= 1100; ++i) inner += aep_layer(i, "N" + std::to_string(i), 0, 0x80);
+    std::string main;
+    for (u32 i = 1; i <= 5; ++i) main += aep_layer(i, "Uso " + std::to_string(i), 8, 0);
+    main += list("Layr", chunk("ldta", std::string(40, '\0')) + chunk("Utf8", "Quebrada"));
+    main += aep_layer(5, "Repetida", 0, 0x80);
+    std::string brokenIdentity(84, '\0');
+    brokenIdentity.replace(0, 2, be16(4));
+    brokenIdentity.replace(16, 4, be32(10));
+    const std::string broken = list("Item", chunk("idta", brokenIdentity) + chunk("Utf8", "Sem dados") +
+                                            chunk("cdta", std::string(16, '\0')));
+    const std::string file = aep_file(aep_comp(7, "Principal", 640, 360, main) + aep_comp(8, "Interna", 640, 360, inner) +
+                                      aep_comp(9, "Panorama", 9000, 100, aep_layer(1, "Nulo", 0, 0x80)) + broken +
+                                      aep_comp(11, "Laço", 320, 180, aep_layer(1, "Eu mesma", 11, 0)));
+    ae::ProjectDocument doc;
+    std::string error;
+    AUREA_CHECK(ae::parse_project(file, doc, error));
+    AUREA_CHECK_EQ(doc.comps.size(), 4u);
+
+    AeRig rig;
+    (void)rig.shape();
+    const auto report = rig.e.import_ae_data(file, "grande.aep", 0);
+    if (!report.ok) dump(report);
+    AUREA_CHECK(report.ok);
+    AUREA_CHECK_EQ(report.layers, 1100u + 5u + 1u + 1u);
+    AUREA_CHECK(has_item(report.skipped, "dados de camada incompletos"));
+    AUREA_CHECK(has_item(report.skipped, "identificador de camada repetido"));
+    AUREA_CHECK(has_item(report.skipped, "dados de composição incompletos"));
+    AUREA_CHECK(has_item(report.skipped, "ciclo"));
+    AUREA_CHECK(has_item(report.notes, "reduzida"));
+    // Três composições de cima (Principal, Panorama, Laço) entram na edição aberta.
+    AUREA_CHECK_EQ(rig.comp()->layers().count(), 4u);
+    const Layer* wide = layer_named(rig, "Panorama");
+    AUREA_CHECK(wide && wide->kind == LayerKind::Composition);
+    if (wide) {
+        const auto* panorama = rig.e.project()->timeline().composition(wide->nested.composition);
+        AUREA_CHECK(panorama && panorama->width() == 8192 && panorama->height() == 91);
+    }
+    const Layer* top = layer_named(rig, "Principal");
+    AUREA_CHECK(top && top->kind == LayerKind::Composition);
+    if (top) {
+        const auto* principal = rig.e.project()->timeline().composition(top->nested.composition);
+        AUREA_CHECK(principal && principal->layers().count() == 5u);
+    }
+}
+
+AUREA_TEST(AeImport, PluginAndSapphireEffectsMapToAureaEffects) {
+    struct Case { const char* match; const char* name; const char* key; };
+    const Case cases[] = {
+        {"S_Glow", "S_Glow", "aurea.light.chromatic_halo"},
+        {"S_GlowAura", "S_GlowAura", "aurea.light.spectral_aura"},
+        {"S_GlowRings", "S_GlowRings", "aurea.light.glow_rings"},
+        {"S_GlowDarks", "S_GlowDarks", "aurea.light.shadow_halo"},
+        {"S_GlowEdges", "S_GlowEdges", "aurea.light.outline_halo"},
+        {"S_GlowRainbow", "S_GlowRainbow", "aurea.light.rainbow_halo"},
+        {"S_UltraGlow", "S_UltraGlow", "aurea.light.multiscale_glow"},
+        {"S_FilmDamage", "S_FilmDamage", "aurea.stylize.photochemical_film_damage"},
+        {"S_Vignette", "S_Vignette", "aurea.stylize.optical_vignette"},
+        {"S_Flicker", "S_Flicker", "aurea.motion.flicker"},
+        {"S_DissolveShake", "S_DissolveShake", "aurea.glitch.dissolve_shake"},
+        {"S_DuoTone", "S_DuoTone", "aurea.color.duotone"},
+        {"ADBE Lumetri", "Lumetri Color", "aurea.color.grade"},
+        {"MB LookSuite3", "Looks", "aurea.color.looks"},
+        {"RSMB", "RSMB", "aurea.time.flow_motion_blur"},
+        {"CROSSPHERE_Bokeh", "Bokeh", "aurea.blur.lens"},
+        {"FilmConvert Nitrate", "FilmConvert Nitrate", "aurea.stylize.film_profile_grain"},
+        {"ADBE CurvesCustom", "Curves", "aurea.color.curves"},
+        // matchName desconhecido de outra versão: o nome no painel decide.
+        {"REVisionEffects Twixtor Pro 8", "Twixtor Pro", "aurea.time.flow_retime"},
+    };
+    const u32 ts = 24000;
+    for (const Case& c : cases) {
+        const std::string fx = effect(c.match, c.name, {{"Amount", 2}}, {{1, prop("", 1, {37.0}, ts)}});
+        const std::string file = ffx(ts, {{{{"ADBE Effect Parade", -1}, {c.match, 0}}, c.name}}, {fx});
+        AeRig rig;
+        const u64 layer = rig.shape();
+        const ae::ImportReport r = rig.e.import_ae_data(file, "plugin.ffx", layer);
+        const Layer* l = rig.L(layer);
+        const bool mapped = r.ok && r.skipped.empty() && l && l->effects.size() == 1 &&
+                            l->effects[0].type == effect_type_id(c.key);
+        if (!mapped) { std::printf("\n      %s -> %s", c.match, c.key); dump(r); }
+        AUREA_CHECK(mapped);
+        AUREA_CHECK(!r.notes.empty());
+        if (std::string_view(c.key) == "aurea.time.flow_retime" && mapped)
+            AUREA_CHECK_NEAR(l->effects[0].params[param_index(rig.e, c.key, "speed")].constant.v[0], 100.0, 1e-4);
+    }
+    // Unsharp Mask do AE: limiar em níveis (0..255) vira % do Aurea.
+    const std::string unsharp = effect("ADBE Unsharp Mask2", "Unsharp Mask", {{"Amount", 2}, {"Radius", 2}, {"Threshold", 2}},
+                                       {{1, prop("", 1, {150.0}, ts)}, {2, prop("", 1, {3.0}, ts)}, {3, prop("", 1, {255.0}, ts)}});
+    const std::string file = ffx(ts, {{{{"ADBE Effect Parade", -1}, {"ADBE Unsharp Mask2", 0}}, "Unsharp"}}, {unsharp});
+    AeRig rig;
+    const u64 layer = rig.shape();
+    const auto r = rig.e.import_ae_data(file, "unsharp.ffx", layer);
+    const Layer* l = rig.L(layer);
+    AUREA_CHECK(r.ok && l && l->effects.size() == 1);
+    if (l && l->effects.size() == 1) {
+        const char* key = "aurea.blur.unsharp";
+        AUREA_CHECK_EQ(l->effects[0].type, effect_type_id(key));
+        AUREA_CHECK_NEAR(l->effects[0].params[param_index(rig.e, key, "amount")].constant.v[0], 150.0, 1e-3);
+        AUREA_CHECK_NEAR(l->effects[0].params[param_index(rig.e, key, "radius")].constant.v[0], 3.0, 1e-3);
+        AUREA_CHECK_NEAR(l->effects[0].params[param_index(rig.e, key, "threshold")].constant.v[0], 100.0, 1e-3);
+    }
+    // Relatório traduzível: a nota dos parâmetros aproximados tem código.
+    const std::string fx = effect("S_Glow", "S_Glow", {{"Amount", 2}}, {{1, prop("", 1, {1.0}, ts)}});
+    AeRig other;
+    const u64 glowLayer = other.shape();
+    const auto glow = other.e.import_ae_data(ffx(ts, {{{{"ADBE Effect Parade", -1}, {"S_Glow", 0}}, "S_Glow"}}, {fx}), "g.ffx", glowLayer);
+    const std::string json = ae::report_json(glow);
+    AUREA_CHECK(json.find("\"reasonKey\":\"ae_reason_params_approx\"") != std::string::npos);
+    AUREA_CHECK(json.find("\"messageKey\":\"ae_msg_ok_ffx\"") != std::string::npos);
 }

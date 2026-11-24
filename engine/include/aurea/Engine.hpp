@@ -1440,6 +1440,23 @@ public:
     /// "família\tpeso\titálico\tcaminho real" da camada de texto (vazio = não é texto).
     [[nodiscard]] std::string text_font(u64 layerId) noexcept;
 
+    // --- Edição automática (1.0.8; EngineAutoEdit.cpp, regras em autoedit/AutoEdit.hpp) ---
+    /// Edita o clipe de vídeo `sourceLayer` sozinho (cortes, zoom, flash, sons,
+    /// música, voz, cor e legendas) numa composição NOVA "<nome> — edição
+    /// automática", mostrada por uma camada no lugar do clipe original — que
+    /// fica intacto, só desligado e mudo embaixo dela. Um passo de desfazer.
+    /// `requestJson`: {"options":{intensity 0..2, recording 0 retomadas/1
+    /// contínua, language, cuts, zoom, sounds, music, voice, color, captions},
+    /// "words":[{text,start,end}] (segundos da mídia), "library":[{path,name,
+    /// category,duration,bpm}], "captionOptions", "lightLeak", "name"}.
+    /// Devolve o relatório em JSON ({"ok":true,"layer":…} ou {"ok":false,
+    /// "error":…}). Demora (decodifica o áudio): chamar fora da thread da UI.
+    [[nodiscard]] std::string auto_edit(u64 sourceLayer, const std::string& requestJson) noexcept;
+    /// Etapa × 100 + porcentagem (0 preparar, 1 áudio, 2 cortes, 3 rostos,
+    /// 4 zoom, 5 sons, 6 música, 7 voz, 8 cor, 9 montar, 10 fim); 1000 = pronto.
+    std::atomic<int> autoEditProgress{0};
+    std::atomic<bool> autoEditCancelled{false};
+
     /// Nova camada de texto ("Texto", centralizada), do cabeçote até o fim.
     [[nodiscard]] Result<u64> add_text(const char* content = nullptr) noexcept;
     /// Nulo (não desenha; serve de pai/controle). `threeD` = nulo 3D (vive na
@@ -1824,6 +1841,31 @@ public:
     /// (alfa) ou recorte do Rotobrush já calculado. Sob modelMutex_.
     void puppet_layer_size(const Layer& l, f32& w, f32& h) const noexcept;
     bool puppet_capture_outline(const Composition& comp, const Layer& l, FrameIndex local, f32* rows) noexcept;
+    // --- Rig 2D de rosto (aurea.rig.face; effects/FaceRig.hpp) — EngineFaceRig.cpp.
+    // u, v = fração da caixa da camada (como o Fantoche).
+    /// Alças na ordem de face_rig::Handle, (u, v) cada, e no fim o estado dos
+    /// pontos (0 padrão, 1 só olhos, 2 olhos e boca, 3 ajustado à mão).
+    static constexpr u32 kFaceRigHandles = 10;
+    static constexpr u32 kFaceRigQueryFloats = kFaceRigHandles * 2 + 1;
+    u32 query_face_rig(u64 layerId, u32 effectId, f32* out, u32 capacity) noexcept;
+    /// Acha os pontos nos pixels da camada (sem IA): 2 olhos e boca, 1 só
+    /// olhos, 0 proporções do rosto; −1 sem efeito/camada. Um passo de desfazer.
+    i32 face_rig_auto_place(u64 layerId, u32 effectId) noexcept;
+    /// Arrasto de uma alça; `continuing` = o mesmo gesto (um passo de desfazer).
+    bool face_rig_move_handle(u64 layerId, u32 effectId, u32 handle, f32 u, f32 v, bool continuing) noexcept;
+    /// Todas as alças de uma vez (kFaceRigHandles × (u, v)). Um passo de desfazer.
+    bool face_rig_set_handles(u64 layerId, u32 effectId, const f32* uv, u32 count) noexcept;
+    /// Pontos iniciais do efeito recém-posto, dentro do passo de quem o pôs.
+    void face_rig_seed_locked(const Layer& l, EffectInstance& e) noexcept;
+    /// Rig 2D v2 — "Separar em partes" (effects/FaceRigParts.hpp; EngineFaceRigParts.cpp):
+    /// a imagem da camada vira a pré-composição "Rig — <camada>" com uma camada
+    /// por parte (PNG em Documents/Media: salva e reabre com o projeto), ligadas
+    /// ao nulo "Controle do rig" que leva os parâmetros (cópia do aurea.rig.face).
+    /// A original fica oculta. Pesado (CPU): fora da thread de UI. Um passo de
+    /// desfazer. Devolve a camada da pré-composição; `controllerOut` = o nulo.
+    [[nodiscard]] Result<u64> face_rig_split_parts(u64 layerId, u32 effectId, u64* controllerOut = nullptr) noexcept;
+    /// Andamento do "Separar em partes" em curso (0..1; 1 = parado).
+    [[nodiscard]] f32 face_rig_split_progress() const noexcept;
     /// Rastreia a máscara no vídeo da camada do cabeçote em diante (NCC no
     /// centro e em 4 pontos por dentro dela) e grava um key de caminho por
     /// quadro. `mode` 0 = só posição; 1 = posição + escala + giro. Síncrono

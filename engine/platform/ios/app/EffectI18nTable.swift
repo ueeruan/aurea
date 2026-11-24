@@ -46,6 +46,33 @@ enum EffectI18nTable {
     aurea.color.tint|0|map_black|fx_cor_sombras|
     aurea.color.tint|1|map_white|fx_cor_luzes|
     aurea.color.tint|2|amount|fxl_amount|
+    aurea.color.duotone|0|amount|fxl_amount|
+    aurea.color.duotone|1|shadow_color|fx_cor_sombras|
+    aurea.color.duotone|2|highlight_color|fx_cor_luzes|
+    aurea.color.duotone|3|threshold|fx_limiar|
+    aurea.color.duotone|4|softness|fxl_softness|
+    aurea.color.duotone|5|invert|fxl_invert_tones|
+    aurea.color.duotone|6|matte|fxl_mask_layer|
+    aurea.color.duotone|7|matte_channel|fxl_mask_channel|fxo_luminance,fxo_alpha_2
+    aurea.color.duotone|8|matte_blur|fxl_mask_blur|
+    aurea.color.duotone|9|invert_matte|fxl_invert_mask_2|
+    aurea.color.quadtone|0|amount|fxl_amount|
+    aurea.color.quadtone|1|shadow_color|fx_cor_sombras|
+    aurea.color.quadtone|2|low_color|fxl_darks_color|
+    aurea.color.quadtone|3|high_color|fxl_lights_color|
+    aurea.color.quadtone|4|highlight_color|fx_cor_luzes|
+    aurea.color.quadtone|5|shadow_level|fxl_shadows_threshold|
+    aurea.color.quadtone|6|low_level|fxl_darks_threshold|
+    aurea.color.quadtone|7|high_level|fxl_lights_threshold|
+    aurea.color.quadtone|8|highlight_level|fxl_highlights_threshold|
+    aurea.color.quadtone|9|softness|fxl_softness|
+    aurea.color.quadtone|10|shadow_softness|fxl_shadows_softness|
+    aurea.color.quadtone|11|midtone_softness|fxl_midtones_softness|
+    aurea.color.quadtone|12|highlight_softness|fxl_highlights_softness|
+    aurea.color.quadtone|13|matte|fxl_mask_layer|
+    aurea.color.quadtone|14|matte_channel|fxl_mask_channel|fxo_luminance,fxo_alpha_2
+    aurea.color.quadtone|15|matte_blur|fxl_mask_blur|
+    aurea.color.quadtone|16|invert_matte|fxl_invert_mask_2|
     aurea.color.matrix|0|rr|fx_matrix_rr|
     aurea.color.matrix|1|rg|fx_matrix_rg|
     aurea.color.matrix|2|rb|fx_matrix_rb|
@@ -72,6 +99,26 @@ enum EffectI18nTable {
     aurea.color.balance_hls|0|hue|fx_matiz|
     aurea.color.balance_hls|1|lightness|fx_luminosidade|
     aurea.color.balance_hls|2|saturation|fx_saturacao|
+    aurea.color.space_transform|0|input|fxl_input_space|fxo_linear_rec_709,fxo_srgb,fxo_rec_709_oetf,fxo_linear_display_p3,fxo_display_p3,fxo_linear_rec_2020,fxo_rec_2020_oetf,fxo_acescg,fxo_acescct,fxo_aces2065_1
+    aurea.color.space_transform|1|output|fxl_output_space|fxo_linear_rec_709,fxo_srgb,fxo_rec_709_oetf,fxo_linear_display_p3,fxo_display_p3,fxo_linear_rec_2020,fxo_rec_2020_oetf,fxo_acescg,fxo_acescct,fxo_aces2065_1
+    aurea.color.space_transform|2|mix|fxl_amount|
+    aurea.light.exposure_streaks|0|center|fxl_center|
+    aurea.light.exposure_streaks|1|from_distance|fxl_start_distance|
+    aurea.light.exposure_streaks|2|to_distance|fxl_end_distance|
+    aurea.light.exposure_streaks|3|from_angle|fxl_start_rotation|
+    aurea.light.exposure_streaks|4|to_angle|fxl_end_rotation|
+    aurea.light.exposure_streaks|5|from_shift|fxl_start_offset|
+    aurea.light.exposure_streaks|6|to_shift|fxl_end_offset|
+    aurea.light.exposure_streaks|7|bias|fxl_exposure_bias|
+    aurea.light.exposure_streaks|8|gain|fxl_trails_brightness|
+    aurea.light.exposure_streaks|9|threshold|fx_limiar|
+    aurea.light.exposure_streaks|10|threshold_color|fxl_threshold_color|
+    aurea.light.exposure_streaks|11|mix_darks|fxl_shadows_blend|
+    aurea.light.exposure_streaks|12|mix_brights|fxl_highlights_blend|
+    aurea.light.exposure_streaks|13|exposure|fxo_tracery_brightness|
+    aurea.light.exposure_streaks|14|alpha|fxl_alpha_influence|
+    aurea.light.exposure_streaks|15|combine|fxl_combine|fxo_add_2,fxo_screen
+    aurea.light.exposure_streaks|16|boundary|fxl_edges|fxo_reflect,fxl_repeat_edge_pixels,fxo_transparent,fxo_repeat_image
     aurea.blur.gaussian|0|blurriness|fx_intensidade|
     aurea.blur.gaussian|1|dimensions|fx_direcao|fxo_horizontal_and_vertical,fxo_horizontal,fxo_vertical
     aurea.blur.gaussian|2|repeat_edges|fx_esticar_bordas|
@@ -81,7 +128,118 @@ enum EffectI18nTable {
     aurea.blur.zoom|1|amount|fx_intensidade|
     aurea.blur.zoom|2|repeat_edge|fx_esticar_bordas|
     aurea.blur.zoom|3|mix|fx_mistura|
-    aurea.blur.zoom|4|mode|fxl_mode|fxo_normal,core2_fxo_motion_brighter,core2_fxo_motion_darker
+    aurea.blur.zoom|4|mode|fxl_mode|fxo_normal,fxo_brighter,fxo_darker_2
+    aurea.blur.chromatic_zoom|0|center|fx_centro|
+    aurea.blur.chromatic_zoom|1|amount|fx_intensidade|
+    aurea.blur.chromatic_zoom|2|repeat_edge|fx_esticar_bordas|
+    aurea.blur.chromatic_zoom|3|mix|fx_mistura|
+    aurea.blur.chromatic_zoom|4|separation|fxl_rgb_separation|
+    aurea.blur.chromatic_zoom|5|adaptive|fxl_adaptive_sampling|
+    aurea.blur.photographic|0|amount|fxl_blur|
+    aurea.blur.photographic|1|width_x|fxl_relative_width_x|
+    aurea.blur.photographic|2|width_y|fxl_relative_width_y|
+    aurea.blur.photographic|3|kernel|fxl_blur_shape|fxo_gaussian,fx_name_box_wipe,fxo_triangle_2
+    aurea.blur.photographic|4|boundary|fxl_edges|fxo_reflect,fxl_repeat_edge_pixels,fxo_transparent,fxo_repeat_image
+    aurea.blur.photographic|5|gain|fxo_tracery_brightness|
+    aurea.blur.photographic|6|offset|fxl_darks_offset|
+    aurea.blur.photographic|7|mix_source|fx_mistura_original|
+    aurea.blur.photographic|8|opacity_scale|fxl_opacity_scale|
+    aurea.blur.rgb_channels|0|amount|fxl_blur|
+    aurea.blur.rgb_channels|1|width_x|fxl_relative_width_x|
+    aurea.blur.rgb_channels|2|width_y|fxl_relative_width_y|
+    aurea.blur.rgb_channels|3|kernel|fxl_blur_shape|fxo_gaussian,fx_name_box_wipe,fxo_triangle_2
+    aurea.blur.rgb_channels|4|boundary|fxl_edges|fxo_reflect,fxl_repeat_edge_pixels,fxo_transparent,fxo_repeat_image
+    aurea.blur.rgb_channels|5|gain|fxo_tracery_brightness|
+    aurea.blur.rgb_channels|6|offset|fxl_darks_offset|
+    aurea.blur.rgb_channels|7|mix_source|fx_mistura_original|
+    aurea.blur.rgb_channels|8|blur_red|fxl_red_blur|
+    aurea.blur.rgb_channels|9|blur_green|fxl_green_blur|
+    aurea.blur.rgb_channels|10|blur_blue|fxl_blue_blur|
+    aurea.blur.rgb_channels|11|blur_alpha|fxl_alpha_blur|
+    aurea.blur.chroma_luma|0|amount|fxl_chroma_blur|
+    aurea.blur.chroma_luma|1|width_x|fxl_relative_width_x|
+    aurea.blur.chroma_luma|2|width_y|fxl_relative_width_y|
+    aurea.blur.chroma_luma|3|kernel|fxl_blur_shape|fxo_gaussian,fx_name_box_wipe,fxo_triangle_2
+    aurea.blur.chroma_luma|4|boundary|fxl_edges|fxo_reflect,fxl_repeat_edge_pixels,fxo_transparent,fxo_repeat_image
+    aurea.blur.chroma_luma|5|gain|fxo_tracery_brightness|
+    aurea.blur.chroma_luma|6|offset|fxl_darks_offset|
+    aurea.blur.chroma_luma|7|mix_source|fx_mistura_original|
+    aurea.blur.chroma_luma|8|luma|fxl_luma_blur|
+    aurea.blur.chroma_luma|9|chroma_scale|fxl_chroma_scale|
+    aurea.blur.chroma_luma|10|luma_scale|fxl_luma_scale|
+    aurea.blur.soft_focus|0|amount|fxl_blur|
+    aurea.blur.soft_focus|1|width_x|fxl_relative_width_x|
+    aurea.blur.soft_focus|2|width_y|fxl_relative_width_y|
+    aurea.blur.soft_focus|3|kernel|fxl_blur_shape|fxo_gaussian,fx_name_box_wipe,fxo_triangle_2
+    aurea.blur.soft_focus|4|boundary|fxl_edges|fxo_reflect,fxl_repeat_edge_pixels,fxo_transparent,fxo_repeat_image
+    aurea.blur.soft_focus|5|gain|fxo_tracery_brightness|
+    aurea.blur.soft_focus|6|offset|fxl_darks_offset|
+    aurea.blur.soft_focus|7|mix_source|fx_mistura_original|
+    aurea.blur.soft_focus|8|mix_blur|fxl_blend_with_blur|
+    aurea.blur.edge_masked|0|amount|fxl_blur|
+    aurea.blur.edge_masked|1|width_x|fxl_relative_width_x|
+    aurea.blur.edge_masked|2|width_y|fxl_relative_width_y|
+    aurea.blur.edge_masked|3|kernel|fxl_blur_shape|fxo_gaussian,fx_name_box_wipe,fxo_triangle_2
+    aurea.blur.edge_masked|4|boundary|fxl_edges|fxo_reflect,fxl_repeat_edge_pixels,fxo_transparent,fxo_repeat_image
+    aurea.blur.edge_masked|5|gain|fxo_tracery_brightness|
+    aurea.blur.edge_masked|6|offset|fxl_darks_offset|
+    aurea.blur.edge_masked|7|mix_source|fx_mistura_original|
+    aurea.blur.edge_masked|8|edge_width|fxl_stroke_width|
+    aurea.blur.edge_masked|9|edge_strength|fxl_outline_strength|
+    aurea.blur.edge_masked|10|edge_threshold|fxl_outline_threshold|
+    aurea.blur.detail_sharpen|0|amount|fxl_sharpen_width|
+    aurea.blur.detail_sharpen|1|width_x|fxl_relative_width_x|
+    aurea.blur.detail_sharpen|2|width_y|fxl_relative_width_y|
+    aurea.blur.detail_sharpen|3|kernel|fxl_blur_shape|fxo_gaussian,fx_name_box_wipe,fxo_triangle_2
+    aurea.blur.detail_sharpen|4|boundary|fxl_edges|fxo_reflect,fxl_repeat_edge_pixels,fxo_transparent,fxo_repeat_image
+    aurea.blur.detail_sharpen|5|gain|fxo_tracery_brightness|
+    aurea.blur.detail_sharpen|6|offset|fxl_darks_offset|
+    aurea.blur.detail_sharpen|7|mix_source|fx_mistura_original|
+    aurea.blur.detail_sharpen|8|strength|fxl_amount|
+    aurea.blur.detail_sharpen|9|detail_size|fxl_detail_size|
+    aurea.blur.detail_sharpen|10|chroma|fxl_chroma_sharpness|
+    aurea.blur.photographic_direction|0|gain|fxo_tracery_brightness|
+    aurea.blur.photographic_direction|1|offset|fxl_darks_offset|
+    aurea.blur.photographic_direction|2|mix_source|fx_mistura_original|
+    aurea.blur.photographic_direction|3|boundary|fxl_edges|fxo_reflect,fxl_repeat_edge_pixels,fxo_transparent,fxo_repeat_image
+    aurea.blur.photographic_direction|4|bias|fxl_exposure_bias|
+    aurea.blur.photographic_direction|5|amount|fxl_blur_width|
+    aurea.blur.photographic_direction|6|angle|fxl_angle|
+    aurea.blur.photographic_direction|7|shift|fxl_offset|
+    aurea.blur.photographic_direction|8|kernel|fxl_blur_shape|fxo_gaussian,fx_name_box_wipe,fxo_triangle_2
+    aurea.blur.transform_motion|0|gain|fxo_tracery_brightness|
+    aurea.blur.transform_motion|1|offset|fxl_darks_offset|
+    aurea.blur.transform_motion|2|mix_source|fx_mistura_original|
+    aurea.blur.transform_motion|3|boundary|fxl_edges|fxo_reflect,fxl_repeat_edge_pixels,fxo_transparent,fxo_repeat_image
+    aurea.blur.transform_motion|4|bias|fxl_exposure_bias|
+    aurea.blur.transform_motion|5|center|fxl_center|
+    aurea.blur.transform_motion|6|from_distance|fxl_start_distance|
+    aurea.blur.transform_motion|7|to_distance|fxl_end_distance|
+    aurea.blur.transform_motion|8|from_rotate|fxl_start_rotation|
+    aurea.blur.transform_motion|9|to_rotate|fxl_end_rotation|
+    aurea.blur.transform_motion|10|from_shift|fxl_start_offset|
+    aurea.blur.transform_motion|11|to_shift|fxl_end_offset|
+    aurea.blur.motion_curves|0|distance|fx_distancia|
+    aurea.blur.motion_curves|1|rotation|fx_rotacao|
+    aurea.blur.motion_curves|2|shift|fxl_offset|
+    aurea.blur.motion_curves|3|center|fxl_center|
+    aurea.blur.motion_curves|4|duration|fxl_shutter_duration|
+    aurea.blur.motion_curves|5|shutter_shift|fxl_shutter_offset|
+    aurea.blur.motion_curves|6|bias|fxl_exposure_bias|
+    aurea.blur.motion_curves|7|boundary|fxl_edges|fxo_reflect,fxl_repeat_edge_pixels,fxo_transparent,fxo_repeat_image
+    aurea.blur.motion_curves|8|mode|fxl_mode|fxo_transform_and_blur,fxo_blur_only
+    aurea.blur.prism_defocus|0|width|fxl_blur_width|
+    aurea.blur.prism_defocus|1|height|fxl_relative_height|
+    aurea.blur.prism_defocus|2|shape|fxl_aperture_shape|fxo_circle,fxo_triangle,fxo_square,fxo_pentagon,fxo_hexagon,fxo_octagon
+    aurea.blur.prism_defocus|3|rotation|fxl_aperture_rotation|
+    aurea.blur.prism_defocus|4|separation|fxl_chromatic_separation|
+    aurea.blur.prism_defocus|5|ring_thickness|fxl_ring_thickness|
+    aurea.blur.prism_defocus|6|chromatic_warp|fxl_chromatic_distortion|
+    aurea.blur.prism_defocus|7|gamma|fxl_gamma_2|
+    aurea.blur.prism_defocus|8|gain|fxo_tracery_brightness|
+    aurea.blur.prism_defocus|9|offset|fxl_darks_offset|
+    aurea.blur.prism_defocus|10|mix_source|fx_mistura_original|
+    aurea.blur.prism_defocus|11|boundary|fxl_edges|fxo_reflect,fxl_repeat_edge_pixels,fxo_transparent,fxo_repeat_image
     aurea.light.glow|0|threshold|fx_limite|
     aurea.light.glow|1|radius|fxl_radius|
     aurea.light.glow|2|intensity|fx_intensidade|
@@ -166,7 +324,7 @@ enum EffectI18nTable {
     aurea.distort.turbulence|8|edges|fx_bordas|fxo_repeat,fxo_clip,fxo_stretch
     aurea.distort.turbulence|9|spin|fx_girar_deslocamento|
     aurea.distort.turbulence|10|mix|fxl_mix|
-    aurea.distort.turbulence|11|pinning|fxl_pin_edges|fxo_none,fxo_all,fx_esquerda,fx_direita,fxo_top,fxo_bottom,fxo_horizontal_edges,fxo_vertical_edges,fxo_all_locked,fxo_horizontal_edges_locked,fxo_vertical_edges_locked
+    aurea.distort.turbulence|11|pinning|fxl_pin_edges|fxo_none,fxo_all,fxl_left,fxl_right,fxl_top,fxl_bottom,fxo_horizontal_edges,fxo_vertical_edges,fxo_all_locked,fxo_horizontal_edges_locked,fxo_vertical_edges_locked
     aurea.distort.turbulence|12|displacement|fxl_displacement_type|fxo_turbulent,fxo_bulge,fxl_twist,fxo_turbulent_smoother,fxo_bulge_smoother,fxo_twist_smoother,fxo_vertical,fxo_horizontal,fxo_cross_2
     aurea.distort.turbulence|13|cycle_evolution|fxl_cycle_evolution|
     aurea.distort.turbulence|14|cycle|fxl_cycle_in_revolutions|
@@ -186,9 +344,22 @@ enum EffectI18nTable {
     aurea.distort.wave_warp_reference|2|width|fxl_wave_width|
     aurea.distort.wave_warp_reference|3|direction|fxl_direction|
     aurea.distort.wave_warp_reference|4|speed|fx_velocidade_onda|
-    aurea.distort.wave_warp_reference|5|pinning|fxl_pinning|fxo_none,fxo_all_edges,fxl_center,fx_esquerda,fxo_top,fx_direita,fxo_bottom,fxo_horizontal_edges,fxo_vertical_edges
+    aurea.distort.wave_warp_reference|5|pinning|fxl_pinning|fxo_none,fxo_all_edges,fxl_center,fxl_left,fxl_top,fxl_right,fxl_bottom,fxo_horizontal_edges,fxo_vertical_edges
     aurea.distort.wave_warp_reference|6|phase|fxl_phase|
     aurea.distort.wave_warp_reference|7|antialias|fxl_antialiasing_2|fxo_2_2_2,fxo_3_3,fxo_4_4
+    aurea.distort.sine_waves|0|amplitude|fx_amplitude|
+    aurea.distort.sine_waves|1|frequency|fxl_frequency|
+    aurea.distort.sine_waves|2|angle|fxl_wave_angle|
+    aurea.distort.sine_waves|3|displacement_angle|fxl_offset_angle|
+    aurea.distort.sine_waves|4|phase|fxl_phase|
+    aurea.distort.sine_waves|5|speed|fxl_phase_speed_2|
+    aurea.distort.sine_waves|6|distance|fx_distancia|
+    aurea.distort.sine_waves|7|wrap_x|fxl_horizontal_edge|fxo_transparent,fxo_repeat,fxo_mirror
+    aurea.distort.sine_waves|8|wrap_y|fxl_vertical_edge|fxo_transparent,fxo_repeat,fxo_mirror
+    aurea.distort.sine_waves|9|filter|fxl_adaptive_filtering|
+    aurea.distort.sine_waves|10|matte|fxl_matte_layer|
+    aurea.distort.sine_waves|11|matte_channel|fxl_matte_channel|fxo_luminance,fxo_alpha_2
+    aurea.distort.sine_waves|12|invert_matte|fxl_invert_matte|
     aurea.distort.turbulent_displace_reference|0|displacement|fxl_offset|fxo_turbulent,fxo_bulge,fxl_twist,fxo_turbulent_smoother_2,fxo_bulge_smoother_2,fxo_twist_smoother_2,fxo_vertical,fxo_horizontal,fxo_cross_2
     aurea.distort.turbulent_displace_reference|1|amount|fxl_value|
     aurea.distort.turbulent_displace_reference|2|size|fx_tamanho|
@@ -198,7 +369,7 @@ enum EffectI18nTable {
     aurea.distort.turbulent_displace_reference|6|cycle_evolution|fxl_cycle_evolution_2|
     aurea.distort.turbulent_displace_reference|7|cycle|fxl_cycle_in_revolutions_3|
     aurea.distort.turbulent_displace_reference|8|seed|fxl_random_seed_2|
-    aurea.distort.turbulent_displace_reference|9|pinning|fxl_pinning|fxo_none,fxo_all,fxo_horizontal_edges,fxo_vertical_edges,fx_esquerda,fx_direita,fxo_top,fxo_bottom,fxo_all_locked,fxo_pin_horizontal,fxo_pin_vertical,fxo_pin_left,fxo_pin_right,fxo_pin_top,fxo_pin_bottom
+    aurea.distort.turbulent_displace_reference|9|pinning|fxl_pinning|fxo_none,fxo_all,fxo_horizontal_edges,fxo_vertical_edges,fxl_left,fxl_right,fxl_top,fxl_bottom,fxo_all_locked,fxo_pin_horizontal,fxo_pin_vertical,fxo_pin_left,fxo_pin_right,fxo_pin_top,fxo_pin_bottom
     aurea.distort.turbulent_displace_reference|10|resize|fxl_resize_layer|
     aurea.distort.turbulent_displace_reference|11|antialias|fxl_antialiasing_3|fxo_normal,fxo_high
     aurea.distort.warp|0|mode|fx_modo|fxo_push,fxo_pull,fxo_twist,fxo_sphere,fxo_corner
@@ -241,6 +412,40 @@ enum EffectI18nTable {
     aurea.distort.magnify|3|rim|fxl_rim|
     aurea.distort.magnify|4|rim_color|fxl_rim_color|
     aurea.distort.magnify|5|softness|fxl_softness|
+    aurea.distort.optical_fisheye|0|center|fxl_center|
+    aurea.distort.optical_fisheye|1|amount|fxl_amount|
+    aurea.distort.optical_fisheye|2|distance|fx_distancia|
+    aurea.distort.optical_fisheye|3|rotation|fx_rotacao|
+    aurea.distort.optical_fisheye|4|shift|fxl_offset|
+    aurea.distort.optical_fisheye|5|reflect|fx_mt_espelhar_bordas|
+    aurea.distort.optical_lens|0|center|fxl_center|
+    aurea.distort.optical_lens|1|magnification|fxl_magnification|
+    aurea.distort.optical_lens|2|radius|fxl_radius|
+    aurea.distort.optical_lens|3|edge|fx_suavidade_borda|
+    aurea.distort.optical_lens|4|edge_curve|fxl_edge_curve|
+    aurea.distort.optical_lens|5|relative_width|fxl_relative_width|
+    aurea.distort.optical_lens|6|relative_height|fxl_relative_height|
+    aurea.distort.optical_lens|7|rotation|fx_rotacao|
+    aurea.distort.repeated_transform|0|center|fxl_center|
+    aurea.distort.repeated_transform|1|steps|fxl_samples|
+    aurea.distort.repeated_transform|2|start_distance|fxl_start_distance|
+    aurea.distort.repeated_transform|3|end_distance|fxl_end_distance|
+    aurea.distort.repeated_transform|4|start_rotation|fxl_start_rotation|
+    aurea.distort.repeated_transform|5|end_rotation|fxl_end_rotation|
+    aurea.distort.repeated_transform|6|start_shift|fxl_start_offset|
+    aurea.distort.repeated_transform|7|end_shift|fxl_end_offset|
+    aurea.distort.repeated_transform|8|strength|fxl_amount|
+    aurea.distort.repeated_transform|9|exposure_bias|fxl_exposure_bias_2|
+    aurea.distort.repeated_transform|10|reflect|fx_mt_espelhar_bordas|
+    aurea.distort.plane_perspective|0|center|fxl_center|
+    aurea.distort.plane_perspective|1|latitude|fxl_skew|
+    aurea.distort.plane_perspective|2|swing|fxl_plane_rotation|
+    aurea.distort.plane_perspective|3|roll|fxl_camera_rotation|
+    aurea.distort.plane_perspective|4|distance|fx_distancia|
+    aurea.distort.plane_perspective|5|lens_width|fxl_lens_width|
+    aurea.distort.plane_perspective|6|shift|fxl_offset|
+    aurea.distort.plane_perspective|7|tile|fxl_repeat_edges|
+    aurea.distort.plane_perspective|8|wrap_horizon|fxl_repeat_above_horizon|
     aurea.stylize.long_shadow|0|shadow_color|fx_cor_sombra|
     aurea.stylize.long_shadow|1|opacity|fxl_opacity|
     aurea.stylize.long_shadow|2|direction|fxl_direction|
@@ -259,7 +464,7 @@ enum EffectI18nTable {
     aurea.light.inner_glow|0|color|fxl_color|
     aurea.light.inner_glow|1|radius|fxl_radius|
     aurea.light.inner_glow|2|intensity|fx_intensidade|
-    aurea.light.inner_glow|3|source|fxl_from|fx_name_border,fxl_center
+    aurea.light.inner_glow|3|source|fxl_from|fxl_border,fxl_center
     aurea.light.inner_glow|4|choke|fxl_choke|
     aurea.generate.lightning|0|start|fx_deform_start|
     aurea.generate.lightning|1|end|fx_deform_end|
@@ -279,14 +484,14 @@ enum EffectI18nTable {
     aurea.generate.voronoi_cells|5|evolution|fx_evolucao|
     aurea.generate.voronoi_cells|6|mix|fxl_mix|
     aurea.audio.reverb|0|wet|fxl_effect_level|
-    aurea.audio.reverb|1|delay|fx_tempo|
+    aurea.audio.reverb|1|delay|fxl_time|
     aurea.audio.reverb|2|decay|afx_p_decay|
     aurea.audio.flanger|0|wet|fxl_effect_level|
-    aurea.audio.flanger|1|delay|fx_tempo|
+    aurea.audio.flanger|1|delay|fxl_time|
     aurea.audio.flanger|2|rate|fxl_speed|
     aurea.audio.flanger|3|decay|afx_p_feedback|
     aurea.audio.echo|0|wet|fxl_effect_level|
-    aurea.audio.echo|1|delay|fx_tempo|
+    aurea.audio.echo|1|delay|fxl_time|
     aurea.audio.echo|2|decay|afx_p_decay|
     aurea.stylize.omino_diffusion|0|amount|fx_intensidade|
     aurea.stylize.omino_diffusion|1|error_weight|fx_diffusion_weight|
@@ -302,7 +507,7 @@ enum EffectI18nTable {
     aurea.stylize.omino_diffusion|11|color_d|fx_cor_4|
     aurea.color.invert|0|invert_color|fxl_invert_colors|
     aurea.color.invert|1|invert_alpha|fxl_invert_transparency|
-    aurea.color.invert|2|channel|fx_canal|fxo_rgb,fx_vermelho_c031,fx_verde_14e6,fx_azul_582d,fxo_hls,fx_matiz,fx_luminosidade,fx_saturacao,fxo_yiq,fxo_luminance,fxo_in_phase_chrominance_i,fxo_quadrature_chrominance_q,fxo_alpha_2
+    aurea.color.invert|2|channel|fx_canal|fxo_rgb,fx_vermelho_c031,fx_verde_14e6,fx_azul_582d,fxo_hls,fx_matiz,fxl_lightness,fx_saturacao,fxo_yiq,fxo_luminance,fxo_in_phase_chrominance_i,fxo_quadrature_chrominance_q,fxo_alpha_2
     aurea.color.invert|3|blend|fxl_blend_with_original|
     aurea.stylize.scanlines|0|height|fx_altura_linha|
     aurea.stylize.scanlines|1|intensity|fx_intensidade|
@@ -314,6 +519,25 @@ enum EffectI18nTable {
     aurea.stylize.scanlines|7|blur|fxl_vertical_blur|
     aurea.stylize.scanlines|8|roll|fx_rolagem|
     aurea.stylize.scanlines|9|color|fxl_sweep_color|
+    aurea.stylize.sinusoidal_scanlines|0|frequency|fxl_frequency|
+    aurea.stylize.sinusoidal_scanlines|1|sharpness|fxl_sea_sharpness|
+    aurea.stylize.sinusoidal_scanlines|2|angle|fxl_angle|
+    aurea.stylize.sinusoidal_scanlines|3|phase|fxl_phase|
+    aurea.stylize.sinusoidal_scanlines|4|brightness|fxo_tracery_brightness|
+    aurea.stylize.sinusoidal_scanlines|5|offset|fxl_tonal_offset|
+    aurea.stylize.sinusoidal_scanlines|6|gamma|fxl_gamma_2|
+    aurea.stylize.sinusoidal_scanlines|7|saturation|fx_saturacao|
+    aurea.stylize.sinusoidal_scanlines|8|red_phase|fxl_red_phase|
+    aurea.stylize.sinusoidal_scanlines|9|green_phase|fxl_green_phase|
+    aurea.stylize.sinusoidal_scanlines|10|blue_phase|fxl_blue_phase|
+    aurea.stylize.sinusoidal_scanlines|11|tint|fxl_color|
+    aurea.stylize.sinusoidal_scanlines_mono|0|frequency|fxl_frequency|
+    aurea.stylize.sinusoidal_scanlines_mono|1|sharpness|fxl_sea_sharpness|
+    aurea.stylize.sinusoidal_scanlines_mono|2|angle|fxl_angle|
+    aurea.stylize.sinusoidal_scanlines_mono|3|phase|fxl_phase|
+    aurea.stylize.sinusoidal_scanlines_mono|4|brightness|fxo_tracery_brightness|
+    aurea.stylize.sinusoidal_scanlines_mono|5|offset|fxl_tonal_offset|
+    aurea.stylize.sinusoidal_scanlines_mono|6|gamma|fxl_gamma_2|
     aurea.stylize.grain|0|intensity|fx_intensidade|
     aurea.stylize.grain|1|grain_size|fx_tamanho_grao|
     aurea.stylize.grain|2|color_grain|fx_grao_cor|
@@ -323,6 +547,38 @@ enum EffectI18nTable {
     aurea.stylize.grain|6|seed|fxl_seed|
     aurea.stylize.grain|7|animated|fx_animado|
     aurea.stylize.grain|8|monochrome|fx_monocromatico|
+    aurea.stylize.photographic_grain|0|color_strength|fxl_color_grain_amount|
+    aurea.stylize.photographic_grain|1|color_frequency|fxl_color_grain_frequency|
+    aurea.stylize.photographic_grain|2|color_octaves|fxl_color_octaves|
+    aurea.stylize.photographic_grain|3|mono_strength|fxl_b_w_grain_amount|
+    aurea.stylize.photographic_grain|4|mono_frequency|fxl_b_w_grain_frequency|
+    aurea.stylize.photographic_grain|5|mono_octaves|fxl_b_w_octaves|
+    aurea.stylize.photographic_grain|6|red_frequency|fxl_red_frequency|
+    aurea.stylize.photographic_grain|7|green_frequency|fxl_green_frequency|
+    aurea.stylize.photographic_grain|8|blue_frequency|fxl_blue_frequency|
+    aurea.stylize.photographic_grain|9|seed|fxl_seed|
+    aurea.stylize.photographic_grain|10|jitter_frames|fxl_frame_interval|
+    aurea.stylize.photographic_grain|11|tint|fxl_grain_color|
+    aurea.stylize.film_profile_grain|0|profile|fxl_grain_profile|fxo_digital,fxo_fine_negative,fxo_16_mm,fxo_b_w_silver
+    aurea.stylize.film_profile_grain|1|amount|fxl_amount|
+    aurea.stylize.film_profile_grain|2|size|fx_tamanho_grao|
+    aurea.stylize.film_profile_grain|3|softness|fxl_softness|
+    aurea.stylize.film_profile_grain|4|shadow_strength|fxl_shadows_grain|
+    aurea.stylize.film_profile_grain|5|midtone_strength|fxl_midtones_grain|
+    aurea.stylize.film_profile_grain|6|highlight_strength|fxl_highlights_grain|
+    aurea.stylize.film_profile_grain|7|red_strength|fxl_red_amount|
+    aurea.stylize.film_profile_grain|8|green_strength|fxl_green_amount|
+    aurea.stylize.film_profile_grain|9|blue_strength|fxl_blue_amount|
+    aurea.stylize.film_profile_grain|10|red_midpoint|fxl_red_midtone|
+    aurea.stylize.film_profile_grain|11|green_midpoint|fxl_green_midtone|
+    aurea.stylize.film_profile_grain|12|blue_midpoint|fxl_blue_midtone|
+    aurea.stylize.film_profile_grain|13|red_softness|fx_soft_rgb_threshold_red|
+    aurea.stylize.film_profile_grain|14|green_softness|fx_soft_rgb_threshold_green|
+    aurea.stylize.film_profile_grain|15|blue_softness|fx_soft_rgb_threshold_blue|
+    aurea.stylize.film_profile_grain|16|monochrome|fx_monocromatico|
+    aurea.stylize.film_profile_grain|17|seed|fxl_seed|
+    aurea.stylize.film_profile_grain|18|animate|fxl_animated_grain|
+    aurea.stylize.film_profile_grain|19|matte|fxl_mask_layer|
     aurea.stylize.halftone|0|cell|fx_passo_grade|
     aurea.stylize.halftone|1|contrast|fx_contraste|
     aurea.stylize.halftone|2|angle|fx_angulo|
@@ -340,11 +596,34 @@ enum EffectI18nTable {
     aurea.stylize.halftone|14|angle_2|fx_angulo_canal_2|
     aurea.stylize.halftone|15|angle_3|fx_angulo_canal_3|
     aurea.stylize.halftone|16|angle_4|fx_angulo_canal_4|
+    aurea.stylize.radial_screen|0|frequency|fxl_frequency|
+    aurea.stylize.radial_screen|1|angle|fxl_angle|
+    aurea.stylize.radial_screen|2|relative_width|fxl_relative_width|
+    aurea.stylize.radial_screen|3|sharpness|fxl_sea_sharpness|
+    aurea.stylize.radial_screen|4|lighten|fxo_lighter|
+    aurea.stylize.radial_screen|5|shift|fxl_offset|
+    aurea.stylize.radial_screen|6|ink_mode|fxo_point_color|fxo_black,fxo_white
+    aurea.stylize.radial_screen|7|dark|fxl_dark_color|
+    aurea.stylize.radial_screen|8|light|fxl_bright_color|
+    aurea.stylize.radial_screen_color|0|frequency|fxl_frequency|
+    aurea.stylize.radial_screen_color|1|angle|fxl_angle|
+    aurea.stylize.radial_screen_color|2|relative_width|fxl_relative_width|
+    aurea.stylize.radial_screen_color|3|sharpness|fxl_sea_sharpness|
+    aurea.stylize.radial_screen_color|4|lighten|fxo_lighter|
+    aurea.stylize.radial_screen_color|5|shift|fxl_offset|
+    aurea.stylize.radial_screen_color|6|ink_mode|fxo_point_color|fxo_cmy,fxo_rgb
+    aurea.stylize.radial_screen_color|7|red_shift|fxl_red_offset|
+    aurea.stylize.radial_screen_color|8|green_shift|fxl_green_offset|
+    aurea.stylize.radial_screen_color|9|blue_shift|fxl_blue_offset|
+    aurea.stylize.radial_screen_color|10|saturation|fx_saturacao|
     aurea.stylize.minimax|0|radius|fx_raio|
     aurea.stylize.minimax|1|mode|fx_operacao|fxo_dilate,fxo_erode,fxo_open,fxo_close
     aurea.stylize.minimax|2|shape|fx_forma|fxo_cross,fxo_square,fxo_diamond
     aurea.stylize.minimax|3|amount|fx_intensidade|
     aurea.stylize.minimax|4|channel|fx_comparar|fxo_brightness_and_alpha,fxo_alpha,fxo_colors,fxo_colors_and_alpha
+    aurea.blur.median|0|radius_x|fxl_radius_x|
+    aurea.blur.median|1|radius_y|fxl_radius_y|
+    aurea.blur.median|2|amount|fx_intensidade|
     aurea.blur.unsharp|0|amount|fx_intensidade|
     aurea.blur.unsharp|1|radius|fx_raio|
     aurea.blur.unsharp|2|threshold|fx_limiar|
@@ -407,6 +686,136 @@ enum EffectI18nTable {
     aurea.light.hotspots|3|saturation|fx_saturacao|
     aurea.light.hotspots|4|threshold_color|fxl_extra_threshold_color|
     aurea.light.hotspots|5|mix|fxl_mix|
+    aurea.light.chromatic_halo|0|brightness|fxo_tracery_brightness|
+    aurea.light.chromatic_halo|1|width|fxl_halo_width|
+    aurea.light.chromatic_halo|2|threshold|fxl_threshold|
+    aurea.light.chromatic_halo|3|tint|fxl_halo_color|
+    aurea.light.chromatic_halo|4|width_x|fxl_width_x|
+    aurea.light.chromatic_halo|5|width_y|fxl_width_y|
+    aurea.light.chromatic_halo|6|width_red|fxl_red_width|
+    aurea.light.chromatic_halo|7|width_green|fxl_green_width|
+    aurea.light.chromatic_halo|8|width_blue|fxl_blue_width|
+    aurea.light.chromatic_halo|9|saturation|fx_saturacao|
+    aurea.light.chromatic_halo|10|alpha_gain|fxl_alpha_amount|
+    aurea.light.chromatic_halo|11|glow_only|fxl_halo_only|
+    aurea.light.chromatic_halo|12|add|fxl_add_mode_2|
+    aurea.light.chromatic_halo|13|wrap|fxl_edges|fxo_reflect,fxo_extend_edge,fxo_transparent
+    aurea.light.chromatic_halo|14|threshold_color|fxl_extra_threshold_color|
+    aurea.light.shadow_halo|0|brightness|fxl_darkening|
+    aurea.light.shadow_halo|1|width|fxl_halo_width|
+    aurea.light.shadow_halo|2|threshold|fxl_threshold|
+    aurea.light.shadow_halo|3|tint|fxl_halo_color|
+    aurea.light.shadow_halo|4|width_x|fxl_width_x|
+    aurea.light.shadow_halo|5|width_y|fxl_width_y|
+    aurea.light.shadow_halo|6|width_red|fxl_red_width|
+    aurea.light.shadow_halo|7|width_green|fxl_green_width|
+    aurea.light.shadow_halo|8|width_blue|fxl_blue_width|
+    aurea.light.shadow_halo|9|saturation|fx_saturacao|
+    aurea.light.shadow_halo|11|glow_only|fxl_halo_only|
+    aurea.light.shadow_halo|13|wrap|fxl_edges|fxo_reflect,fxo_extend_edge,fxo_transparent
+    aurea.light.shadow_halo|14|threshold_color|fxl_extra_threshold_color|
+    aurea.light.outline_halo|0|brightness|fxo_tracery_brightness|
+    aurea.light.outline_halo|1|width|fxl_halo_width|
+    aurea.light.outline_halo|2|threshold|fxl_threshold|
+    aurea.light.outline_halo|3|tint|fxl_halo_color|
+    aurea.light.outline_halo|4|width_x|fxl_width_x|
+    aurea.light.outline_halo|5|width_y|fxl_width_y|
+    aurea.light.outline_halo|6|width_red|fxl_red_width|
+    aurea.light.outline_halo|7|width_green|fxl_green_width|
+    aurea.light.outline_halo|8|width_blue|fxl_blue_width|
+    aurea.light.outline_halo|9|saturation|fx_saturacao|
+    aurea.light.outline_halo|10|alpha_gain|fxl_alpha_amount|
+    aurea.light.outline_halo|11|glow_only|fxl_halo_only|
+    aurea.light.outline_halo|12|add|fxl_add_mode_2|
+    aurea.light.outline_halo|13|wrap|fxl_edges|fxo_reflect,fxo_extend_edge,fxo_transparent
+    aurea.light.outline_halo|14|edge_strength|fxl_outline_strength|
+    aurea.light.spectral_aura|0|brightness|fxo_tracery_brightness|
+    aurea.light.spectral_aura|1|width|fxl_halo_width|
+    aurea.light.spectral_aura|2|threshold|fxl_threshold|
+    aurea.light.spectral_aura|3|tint|fxl_halo_color|
+    aurea.light.spectral_aura|4|saturation|fx_saturacao|
+    aurea.light.spectral_aura|5|alpha_gain|fxl_alpha_amount|
+    aurea.light.spectral_aura|6|glow_only|fxl_halo_only|
+    aurea.light.spectral_aura|7|add|fxl_add_mode_2|
+    aurea.light.spectral_aura|8|threshold_color|fxl_extra_threshold_color|
+    aurea.light.spectral_aura|9|expand|fxl_expand_edges|
+    aurea.light.spectral_aura|10|frequency|fxl_frequency|
+    aurea.light.spectral_aura|11|frequency_red|fxl_red_frequency|
+    aurea.light.spectral_aura|12|frequency_green|fxl_green_frequency|
+    aurea.light.spectral_aura|13|frequency_blue|fxl_blue_frequency|
+    aurea.light.spectral_aura|14|phase|fxl_phase|
+    aurea.light.spectral_aura|15|phase_speed|fxl_phase_speed|
+    aurea.light.spectral_aura|16|phase_red|fxl_red_phase|
+    aurea.light.spectral_aura|17|phase_green|fxl_green_phase|
+    aurea.light.spectral_aura|18|phase_blue|fxl_blue_phase|
+    aurea.light.spectral_aura|19|twist|fxl_twist|
+    aurea.light.spectral_aura|20|outer_brightness|fxl_outer_glow|
+    aurea.light.rainbow_halo|0|brightness|fxo_tracery_brightness|
+    aurea.light.rainbow_halo|1|width|fxl_halo_width|
+    aurea.light.rainbow_halo|2|threshold|fxl_threshold|
+    aurea.light.rainbow_halo|3|tint|fxl_halo_color|
+    aurea.light.rainbow_halo|4|saturation|fx_saturacao|
+    aurea.light.rainbow_halo|5|alpha_gain|fxl_alpha_amount|
+    aurea.light.rainbow_halo|6|glow_only|fxl_halo_only|
+    aurea.light.rainbow_halo|7|add|fxl_add_mode_2|
+    aurea.light.rainbow_halo|8|threshold_color|fxl_extra_threshold_color|
+    aurea.light.rainbow_halo|9|expand|fxl_expand_edges|
+    aurea.light.rainbow_halo|10|frequency|fxl_frequency|
+    aurea.light.rainbow_halo|11|frequency_red|fxl_red_frequency|
+    aurea.light.rainbow_halo|12|frequency_green|fxl_green_frequency|
+    aurea.light.rainbow_halo|13|frequency_blue|fxl_blue_frequency|
+    aurea.light.rainbow_halo|14|phase|fxl_phase|
+    aurea.light.rainbow_halo|15|phase_speed|fxl_phase_speed|
+    aurea.light.rainbow_halo|16|phase_red|fxl_red_phase|
+    aurea.light.rainbow_halo|17|phase_green|fxl_green_phase|
+    aurea.light.rainbow_halo|18|phase_blue|fxl_blue_phase|
+    aurea.light.glow_rings|0|brightness|fxo_tracery_brightness|
+    aurea.light.glow_rings|1|width|fxl_halo_width|
+    aurea.light.glow_rings|2|threshold|fxl_threshold|
+    aurea.light.glow_rings|3|tint|fxl_halo_color|
+    aurea.light.glow_rings|4|saturation|fx_saturacao|
+    aurea.light.glow_rings|5|alpha_gain|fxl_alpha_amount|
+    aurea.light.glow_rings|6|glow_only|fxl_halo_only|
+    aurea.light.glow_rings|7|add|fxl_add_mode_2|
+    aurea.light.glow_rings|8|threshold_color|fxl_extra_threshold_color|
+    aurea.light.glow_rings|9|expand|fxl_expand_edges|
+    aurea.light.glow_rings|10|width_x|fxl_width_x|
+    aurea.light.glow_rings|11|width_y|fxl_width_y|
+    aurea.light.glow_rings|12|width_red|fxl_red_width|
+    aurea.light.glow_rings|13|width_green|fxl_green_width|
+    aurea.light.glow_rings|14|width_blue|fxl_blue_width|
+    aurea.light.glow_rings|15|thickness_red|fxl_red_thickness|
+    aurea.light.glow_rings|16|thickness_green|fxl_green_thickness|
+    aurea.light.glow_rings|17|thickness_blue|fxl_blue_thickness|
+    aurea.light.displaced_halo|0|brightness|fxo_tracery_brightness|
+    aurea.light.displaced_halo|1|width|fxl_halo_width|
+    aurea.light.displaced_halo|2|threshold|fxl_threshold|
+    aurea.light.displaced_halo|3|tint|fxl_halo_color|
+    aurea.light.displaced_halo|4|saturation|fx_saturacao|
+    aurea.light.displaced_halo|5|alpha_gain|fxl_alpha_amount|
+    aurea.light.displaced_halo|6|glow_only|fxl_halo_only|
+    aurea.light.displaced_halo|7|add|fxl_add_mode_2|
+    aurea.light.displaced_halo|8|threshold_color|fxl_extra_threshold_color|
+    aurea.light.displaced_halo|9|expand|fxl_expand_edges|
+    aurea.light.displaced_halo|10|width_red|fxl_red_width|
+    aurea.light.displaced_halo|11|width_green|fxl_green_width|
+    aurea.light.displaced_halo|12|width_blue|fxl_blue_width|
+    aurea.light.multiscale_glow|0|brightness|fxl_light_boost|
+    aurea.light.multiscale_glow|1|threshold|fx_limiar|
+    aurea.light.multiscale_glow|2|width|fxl_halo_width|
+    aurea.light.multiscale_glow|3|falloff|fxl_falloff|
+    aurea.light.multiscale_glow|4|width_x|fxl_width_x|
+    aurea.light.multiscale_glow|5|width_y|fxl_width_y|
+    aurea.light.multiscale_glow|6|color|fxl_scan_color|
+    aurea.light.multiscale_glow|7|after_width|fxl_secondary_halo_width|
+    aurea.light.multiscale_glow|8|after_gain|fxl_secondary_halo_amount|
+    aurea.light.multiscale_glow|9|after_stretch_x|fxl_secondary_stretch_x|
+    aurea.light.multiscale_glow|10|after_stretch_y|fxl_secondary_stretch_y|
+    aurea.light.multiscale_glow|11|after_color|fxl_secondary_halo_color|
+    aurea.light.multiscale_glow|12|affect_alpha|fxl_alpha_spread|
+    aurea.light.multiscale_glow|13|only_glow|fxo_glow_only|
+    aurea.light.multiscale_glow|14|add|fxl_add_mode_2|
+    aurea.light.multiscale_glow|15|expand|fxl_expand_edges|
     aurea.light.halation|0|threshold|fxl_highlight_threshold|
     aurea.light.halation|1|radius|fxl_radius|
     aurea.light.halation|2|amount|fxl_amount|
@@ -444,6 +853,25 @@ enum EffectI18nTable {
     aurea.blur.lens|8|iris_curvature|fx_curvatura_iris|
     aurea.blur.lens|9|scale_x|fx_escala_x|
     aurea.blur.lens|10|scale_y|fx_escala_y|
+    aurea.blur.rack_defocus|0|focus_from|fxl_start_blur|
+    aurea.blur.rack_defocus|1|highlight_boost|fx_ganho_luzes|
+    aurea.blur.rack_defocus|2|iris_sides|fx_lados_iris|
+    aurea.blur.rack_defocus|3|iris_rotation|fx_rotacao_iris|
+    aurea.blur.rack_defocus|4|quality|fxl_quality|
+    aurea.blur.rack_defocus|5|iris_sharpness|fxl_softness|
+    aurea.blur.rack_defocus|6|only_blur|fxl_blur_only|
+    aurea.blur.rack_defocus|7|mix|fxl_mix|
+    aurea.blur.rack_defocus|8|iris_curvature|fx_curvatura_iris|
+    aurea.blur.rack_defocus|9|scale_x|fx_escala_x|
+    aurea.blur.rack_defocus|10|scale_y|fx_escala_y|
+    aurea.blur.rack_defocus|11|focus_to|fxl_end_blur|
+    aurea.blur.rack_defocus|12|progress|fxl_focus_progress|
+    aurea.blur.rack_defocus|13|auto|fxl_layer_duration|
+    aurea.blur.rack_defocus|14|gamma|fxl_gamma_2|
+    aurea.blur.rack_defocus|15|bokeh|fxl_bokeh|
+    aurea.blur.rack_defocus|16|highlight_threshold|fxl_highlights_threshold|
+    aurea.blur.rack_defocus|17|edges|fxl_edges|fxo_transparent,fxo_repeat,fxo_reflect
+    aurea.blur.rack_defocus|18|soft_borders|fxl_soft_edges|
     aurea.color.colorama|0|phase|fx_fase|
     aurea.color.colorama|1|cycles|fx_ciclos|
     aurea.color.colorama|2|saturation|fx_saturacao|
@@ -583,6 +1011,26 @@ enum EffectI18nTable {
     aurea.stylize.film_damage|9|scratch_length|fx_comprimento_risco|
     aurea.stylize.film_damage|10|splice_speed|fxl_splice_speed|
     aurea.stylize.film_damage|11|burn_color|fx_calor_queimado|
+    aurea.stylize.photochemical_film_damage|0|grain|fxl_grain_amount|
+    aurea.stylize.photochemical_film_damage|1|grain_shadows|fxl_shadows_grain|
+    aurea.stylize.photochemical_film_damage|2|grain_highlights|fxl_highlights_grain|
+    aurea.stylize.photochemical_film_damage|3|dust|fx_poeira|
+    aurea.stylize.photochemical_film_damage|4|stains|fxl_blotches|
+    aurea.stylize.photochemical_film_damage|5|hairs|fxl_fibers|
+    aurea.stylize.photochemical_film_damage|6|scratches|fx_riscos|
+    aurea.stylize.photochemical_film_damage|7|scratch_width|fxl_scratch_width|
+    aurea.stylize.photochemical_film_damage|8|weave|fxl_film_weave|
+    aurea.stylize.photochemical_film_damage|9|weave_frequency|fxl_wiggle_frequency|
+    aurea.stylize.photochemical_film_damage|10|vignette|fxl_vignette_darkening|
+    aurea.stylize.photochemical_film_damage|11|vignette_radius|fxl_vignette_radius|
+    aurea.stylize.photochemical_film_damage|12|vignette_softness|fxl_vignette_feather|
+    aurea.stylize.photochemical_film_damage|13|vignette_aspect|fxl_vignette_relative_height|
+    aurea.stylize.photochemical_film_damage|14|flicker|fxl_flicker|
+    aurea.stylize.photochemical_film_damage|15|flicker_frequency|fxl_flicker_frequency|
+    aurea.stylize.photochemical_film_damage|16|saturation|fx_saturacao|
+    aurea.stylize.photochemical_film_damage|17|scale_lights|fx_ganho_luzes|
+    aurea.stylize.photochemical_film_damage|18|offset_darks|fxl_shadows_offset|
+    aurea.stylize.photochemical_film_damage|19|seed|fxl_seed|
     aurea.stylize.jpeg_damage|0|quality|fx_qualidade|
     aurea.stylize.jpeg_damage|1|blocks|fx_blocos|
     aurea.stylize.jpeg_damage|2|ringing|fx_anelamento|
@@ -599,7 +1047,7 @@ enum EffectI18nTable {
     aurea.stylize.pixel_sort|3|randomness|fx_aleatoriedade|
     aurea.stylize.pixel_sort|4|direction|fx_direcao|fxo_horizontal,fxo_vertical,fxo_diagonal,fxo_radial,fxl_angle
     aurea.stylize.pixel_sort|5|reverse|fx_sentido_inverso|
-    aurea.stylize.pixel_sort|6|mode|fx_ordenar|fxo_brightness,afx_name_tone,fx_vermelho_c031,fx_verde_14e6,fx_azul_582d,fx_saturacao
+    aurea.stylize.pixel_sort|6|mode|fx_ordenar|fxl_light,afx_name_tone,fx_vermelho_c031,fx_verde_14e6,fx_azul_582d,fx_saturacao
     aurea.stylize.pixel_sort|7|seed|fxl_seed|
     aurea.stylize.pixel_sort|8|band_mode|fx_faixa_tom|
     aurea.stylize.pixel_sort|9|step|fx_passo|
@@ -610,7 +1058,7 @@ enum EffectI18nTable {
     aurea.glitch.hyper_glitch|2|speed|fxl_speed|
     aurea.glitch.hyper_glitch|3|block_size|fx_tamanho_bloco|
     aurea.glitch.hyper_glitch|4|blocks|fx_blocos|
-    aurea.glitch.hyper_glitch|5|rgb_split|fx_separacao_rgb|
+    aurea.glitch.hyper_glitch|5|rgb_split|fxl_rgb_separation|
     aurea.glitch.hyper_glitch|6|slices|fxl_slices|
     aurea.glitch.hyper_glitch|7|slice_height|fx045g_slice_height|
     aurea.glitch.hyper_glitch|8|streak|fxl_pixel_streak|
@@ -622,16 +1070,16 @@ enum EffectI18nTable {
     aurea.glitch.block_glitch|2|block_height|fxl_block_height|
     aurea.glitch.block_glitch|3|size_variation|fx045g_size_variation|
     aurea.glitch.block_glitch|4|displacement|fxl_offset|
-    aurea.glitch.block_glitch|5|frequency|fx_frequencia|
+    aurea.glitch.block_glitch|5|frequency|fxl_frequency|
     aurea.glitch.block_glitch|6|channel_swap|fx045g_channel_swap|
-    aurea.glitch.block_glitch|7|rgb_offset|fx_separacao_rgb|
+    aurea.glitch.block_glitch|7|rgb_offset|fxl_rgb_separation|
     aurea.glitch.block_glitch|8|direction|fxl_direction|fxo_horizontal,fxo_vertical,fxo_horizontal_and_vertical
     aurea.glitch.block_glitch|9|seed|fxl_seed|
     aurea.glitch.block_glitch|10|mix|fxl_mix|
-    aurea.color.shift_channels|0|take_alpha|fx045g_take_alpha|fxo_alpha_2,fx_vermelho_c031,fx_verde_14e6,fx_azul_582d,fxo_luminance,fx_matiz,fx045g_opt_lightness,fx_saturacao,fx045g_opt_full,fx3o_desligado
-    aurea.color.shift_channels|1|take_red|fx045g_take_red|fxo_alpha_2,fx_vermelho_c031,fx_verde_14e6,fx_azul_582d,fxo_luminance,fx_matiz,fx045g_opt_lightness,fx_saturacao,fx045g_opt_full,fx3o_desligado
-    aurea.color.shift_channels|2|take_green|fx045g_take_green|fxo_alpha_2,fx_vermelho_c031,fx_verde_14e6,fx_azul_582d,fxo_luminance,fx_matiz,fx045g_opt_lightness,fx_saturacao,fx045g_opt_full,fx3o_desligado
-    aurea.color.shift_channels|3|take_blue|fx045g_take_blue|fxo_alpha_2,fx_vermelho_c031,fx_verde_14e6,fx_azul_582d,fxo_luminance,fx_matiz,fx045g_opt_lightness,fx_saturacao,fx045g_opt_full,fx3o_desligado
+    aurea.color.shift_channels|0|take_alpha|fx045g_take_alpha|fxo_alpha_2,fx_vermelho_c031,fx_verde_14e6,fx_azul_582d,fxo_luminance,fx_matiz,fx045g_opt_lightness,fx_saturacao,fx045g_opt_full,fxo_off
+    aurea.color.shift_channels|1|take_red|fx045g_take_red|fxo_alpha_2,fx_vermelho_c031,fx_verde_14e6,fx_azul_582d,fxo_luminance,fx_matiz,fx045g_opt_lightness,fx_saturacao,fx045g_opt_full,fxo_off
+    aurea.color.shift_channels|2|take_green|fx045g_take_green|fxo_alpha_2,fx_vermelho_c031,fx_verde_14e6,fx_azul_582d,fxo_luminance,fx_matiz,fx045g_opt_lightness,fx_saturacao,fx045g_opt_full,fxo_off
+    aurea.color.shift_channels|3|take_blue|fx045g_take_blue|fxo_alpha_2,fx_vermelho_c031,fx_verde_14e6,fx_azul_582d,fxo_luminance,fx_matiz,fx045g_opt_lightness,fx_saturacao,fx045g_opt_full,fxo_off
     aurea.color.shift_channels|4|mix|fxl_mix|
     aurea.time.posterize|0|frame_rate|fx_quadros_segundo|
     aurea.time.posterize|1|hold|fx_segurar_quadro|
@@ -673,11 +1121,25 @@ enum EffectI18nTable {
     aurea.transition.block_dissolve|4|block_width|fxl_block_width_2|
     aurea.transition.block_dissolve|5|block_height|fxl_block_height|
     aurea.transition.block_dissolve|6|seed|fxl_seed|
+    aurea.transition.range_wipe|0|start|fxl_start|
+    aurea.transition.range_wipe|1|end|fxl_end|
+    aurea.transition.range_wipe|2|angle|fx_angulo|
+    aurea.transition.range_wipe|3|feather|fxl_softness|
     aurea.transition.block_dissolve_reference|0|completion|fxl_transition_completion_2|
     aurea.transition.block_dissolve_reference|1|block_width|fxl_block_width_2|
     aurea.transition.block_dissolve_reference|2|block_height|fxl_block_height|
     aurea.transition.block_dissolve_reference|3|feather|afx_p_diffusion|
     aurea.transition.block_dissolve_reference|4|soft_edges|fxl_soft_edges|
+    aurea.transition.blur_dissolve|0|progress|fx_progresso|
+    aurea.transition.blur_dissolve|1|background|fxl_background_layer|
+    aurea.transition.blur_dissolve|2|direction|fxl_direction|fxo_out,fxo_in
+    aurea.transition.blur_dissolve|3|auto|fxl_layer_duration|
+    aurea.transition.blur_dissolve|4|radius|fxl_blur|
+    aurea.transition.blur_dissolve|5|axis|fxl_width_x_y|
+    aurea.transition.blur_dissolve|6|outgoing|fxl_output_blur|
+    aurea.transition.blur_dissolve|7|incoming|fxl_input_blur_2|
+    aurea.transition.blur_dissolve|8|filter|fxl_filter|fxo_gaussian,fx_name_box_wipe,fxo_triangle_2
+    aurea.transition.blur_dissolve|9|repeat_edges|fxl_repeat_edge_pixels|
     aurea.transition.radial_wipe_reference|0|completion|fxl_transition_completion_2|
     aurea.transition.radial_wipe_reference|1|angle|fxl_start_angle|
     aurea.transition.radial_wipe_reference|2|center|fxl_center|
@@ -803,6 +1265,65 @@ enum EffectI18nTable {
     aurea.text.transform|15|shape|fxl_shape|fxo_square_2,fxo_smooth,fxo_triangle
     aurea.text.transform|16|random_order|fxl_random_order|
     aurea.text.transform|17|seed|fxl_seed|
+    aurea.text.prism|0|shape|fxl_shape|fxo_linear,fxo_radial,fxo_conical
+    aurea.text.prism|1|mapping|fxl_map_by|fxo_character,fxo_word,fxo_line,fxo_entire_text
+    aurea.text.prism|2|target|fx_aplicar_em|fxo_fill,fxo_stroke,fxo_fill_and_stroke
+    aurea.text.prism|3|palette|fx_diffusion_palette|fxo_custom_2,fxo_prism,fxo_glacier,fxo_ember,fxo_silver,fxo_spectrum
+    aurea.text.prism|4|gradient|fxl_rgba_gradient|
+    aurea.text.prism|5|color_space|fxl_color_space|fxo_rgb,fxo_hsl,fxo_oklab
+    aurea.text.prism|6|blend|fxl_blend_mode_3|fxo_normal,fxo_multiply,fxo_screen,fxo_overlay,fxo_alpha_matte
+    aurea.text.prism|7|mix|fxl_amount|
+    aurea.text.prism|8|center_x|fxl_center_x|
+    aurea.text.prism|9|center_y|fxl_center_y|
+    aurea.text.prism|10|angle|fxl_angle|
+    aurea.text.prism|11|scale|fxl_scale|
+    aurea.text.prism|12|aspect|fxl_aspect_ratio|
+    aurea.text.prism|13|offset|fxl_offset|
+    aurea.text.prism|14|repeats|fxl_repeats|
+    aurea.text.prism|15|extend|fxl_extend|fxo_clamp,fxo_repeat,fxo_mirror
+    aurea.text.prism|16|gamma|fxl_gamma_2|
+    aurea.text.prism|17|hue|fx_matiz|
+    aurea.text.prism|18|exposure|fxl_hdr_exposure|
+    aurea.text.prism|19|stagger_by|fxl_stagger_by|fxo_character,fxo_word,fxo_line
+    aurea.text.prism|20|delay|fxl_delay_per_unit|
+    aurea.text.prism|21|offset_step|fxl_offset_per_unit|
+    aurea.text.prism|22|order|fxl_draw_order|fxo_forward,fxo_reverse,fxo_random_2,fxo_interleave
+    aurea.text.prism|23|seed|fxl_seed|
+    aurea.text.prism|24|size_mode|fxl_size_mode|fxo_auto,fxo_manual
+    aurea.text.prism|25|size_px|fxl_fixed_size|
+    aurea.text.prism|26|align_bounds|fxl_bounds_alignment|fxo_none_2,fxo_x,fxo_y,fxo_xy
+    aurea.text.prism|27|range_start|fxl_start|
+    aurea.text.prism|28|range_end|fxl_end|
+    aurea.text.prism|29|outside_range|fxl_outside_range|fxo_original,fxo_hidden
+    aurea.text.prism|30|radial_x|fxl_radial_origin_x|
+    aurea.text.prism|31|radial_y|fxl_radial_origin_y|
+    aurea.text.prism|32|offset_mode|fxl_gradient_offset_mode|fxo_cascade,fxo_stack
+    aurea.text.prism|33|size_step|fxl_size_per_unit|
+    aurea.text.prism|34|hue_step|fxl_hue_per_unit|
+    aurea.text.prism|35|angle_step|fxl_angle_per_unit|
+    aurea.text.prism|36|center_step_x|fxl_center_x_per_unit|
+    aurea.text.prism|37|center_step_y|fxl_center_y_per_unit|
+    aurea.text.prism|38|scale_step_x|fxl_scale_x_per_unit|
+    aurea.text.prism|39|scale_step_y|fxl_scale_y_per_unit|
+    aurea.text.prism|40|opacity_step|fxl_opacity_per_unit|
+    aurea.text.prism|41|path_mode|fxl_path_offset_mode|fxo_cascade,fxo_stack
+    aurea.text.prism|42|path_delay|fxl_path_delay|
+    aurea.text.prism|43|path_x|fxl_path_position_x|
+    aurea.text.prism|44|path_y|fxl_path_position_y|
+    aurea.text.prism|45|path_rotation|fxl_path_rotation|
+    aurea.text.prism|46|path_scale_x|fxl_path_scale_x|
+    aurea.text.prism|47|path_scale_y|fxl_path_scale_y|
+    aurea.text.prism|48|stroke_width|fxl_stroke_thickness_2|
+    aurea.text.prism|49|solo_stroke|fxl_stroke_only|
+    aurea.text.prism|50|original|fxl_composite_original_3|fxo_none_2,fxo_behind,fxo_above
+    aurea.text.prism|51|original_opacity|fxl_original_opacity|
+    aurea.text.prism|52|source_matte|fxl_source_matte|fxo_none_2,fxo_alpha_2,fx045g_opt_luma
+    aurea.text.prism|53|invert_matte|fxl_invert_mask_2|
+    aurea.text.prism|54|stop_blend|fxl_color_transition_softness|
+    aurea.text.prism|55|range_units|fxl_units|fxo_percentage,fxo_index
+    aurea.text.prism|56|range_offset|fxl_range_offset|
+    aurea.text.prism|57|wrap_cycle|fxl_wrap_cycle|
+    aurea.text.prism|58|mirror_palette|fxl_mirror_palette|
     aurea.text.progress|0|start|fxl_start|
     aurea.text.progress|1|end|fxl_end|
     aurea.text.progress|2|cursor|fxl_cursor|fxo_none_2,fxo_x_2,fxo_x_3,fxo_x_4,fxo_x_5,fxo_x_6,fxo_x_7,fxo_x_8,fxo_x_9
@@ -832,7 +1353,7 @@ enum EffectI18nTable {
     aurea.text.animator|13|scale|fxl_scale|
     aurea.text.animator|14|rotation|fx_rotacao|
     aurea.text.animator|15|opacity|fxl_opacity|
-    aurea.text.animator|16|blur|fx_name_gaussian_blur|
+    aurea.text.animator|16|blur|fxl_blur|
     aurea.text.animator|17|tracking|fxl_letter_spacing_2|
     aurea.text.animator|18|skew|fxl_skew|
     aurea.text.animator|19|stroke_width|fxl_stroke_width|
@@ -881,7 +1402,7 @@ enum EffectI18nTable {
     aurea.text.animator_pro|38|stroke_width|fxl_stroke_width|
     aurea.text.animator_pro|39|tracking|fxl_letter_spacing_2|
     aurea.text.animator_pro|40|line_spacing|fxl_line_spacing|
-    aurea.text.animator_pro|41|blur|fx_name_gaussian_blur|
+    aurea.text.animator_pro|41|blur|fxl_blur|
     aurea.text.animator_pro|42|grouping|fxl_anchor_point_grouping|fxo_letter,fxo_word,fxo_line,fxo_all_2
     aurea.text.animator_pro|43|group_align|fxl_grouping_alignment|
     aurea.text.animator_pro|44|expr_selector|fxl_expression_selector|
@@ -921,6 +1442,15 @@ enum EffectI18nTable {
     aurea.distort.corner_pin|6|bl_x|fxl_bottom_left_x|
     aurea.distort.corner_pin|7|bl_y|fxl_bottom_left_y|
     aurea.distort.corner_pin|8|crop|fxl_crop_to_layer|
+    aurea.distort.projective_pin|0|tl_x|fxl_top_left_x|
+    aurea.distort.projective_pin|1|tl_y|fxl_top_left_y|
+    aurea.distort.projective_pin|2|tr_x|fxl_top_right_x|
+    aurea.distort.projective_pin|3|tr_y|fxl_top_right_y|
+    aurea.distort.projective_pin|4|br_x|fxl_bottom_right_x|
+    aurea.distort.projective_pin|5|br_y|fxl_bottom_right_y|
+    aurea.distort.projective_pin|6|bl_x|fxl_bottom_left_x|
+    aurea.distort.projective_pin|7|bl_y|fxl_bottom_left_y|
+    aurea.distort.projective_pin|8|crop|fxl_crop_to_layer|
     aurea.glitch.jpeg_codec|0|quality|fxl_jpeg_quality|
     aurea.glitch.jpeg_codec|1|damage|fxl_coefficient_damage|
     aurea.glitch.jpeg_codec|2|strength|fxl_damage_strength|
@@ -936,6 +1466,25 @@ enum EffectI18nTable {
     aurea.glitch.jpeg_codec|12|dc_shift|fxl_dc_drift|
     aurea.glitch.jpeg_codec|13|frequency_start|fxl_first_frequency|
     aurea.glitch.jpeg_codec|14|frequency_end|fxl_last_frequency|
+    aurea.stylize.jpeg_compression_damage|0|quality|fxl_quality|
+    aurea.stylize.jpeg_compression_damage|1|resolution_factor|fxl_reduction_factor|
+    aurea.stylize.jpeg_compression_damage|2|resolution_x|fxl_relative_reduction_x|
+    aurea.stylize.jpeg_compression_damage|3|frequency_all|fxl_all_frequencies|
+    aurea.stylize.jpeg_compression_damage|4|frequency_x|fxl_horizontal_frequencies|
+    aurea.stylize.jpeg_compression_damage|5|frequency_y|fxl_vertical_frequencies|
+    aurea.stylize.jpeg_compression_damage|6|frequency_low|fxl_low_frequencies|
+    aurea.stylize.jpeg_compression_damage|7|frequency_mid|fxl_mid_frequencies|
+    aurea.stylize.jpeg_compression_damage|8|frequency_high|fxl_high_frequencies|
+    aurea.stylize.jpeg_compression_damage|9|affect_luma|fxl_luma_influence|
+    aurea.stylize.jpeg_compression_damage|10|affect_chroma|fxl_chroma_influence|
+    aurea.stylize.jpeg_compression_damage|11|error_rate|fxl_error_rate|
+    aurea.stylize.jpeg_compression_damage|12|error_density|fxl_error_density|
+    aurea.stylize.jpeg_compression_damage|13|error_amplitude|fxl_error_amplitude|
+    aurea.stylize.jpeg_compression_damage|14|seed|fxl_seed|
+    aurea.stylize.jpeg_compression_damage|15|frame_interval|fxl_frame_interval|
+    aurea.stylize.jpeg_compression_damage|16|scale_lights|fx_ganho_luzes|
+    aurea.stylize.jpeg_compression_damage|17|offset_darks|fxl_shadows_offset|
+    aurea.stylize.jpeg_compression_damage|18|saturation|fx_saturacao|
     aurea.glitch.analog_signal|0|noise|fxl_signal_noise|
     aurea.glitch.analog_signal|1|bandwidth|fxl_chroma_bandwidth|
     aurea.glitch.analog_signal|2|bend|fxl_horizontal_bend|
@@ -1055,7 +1604,7 @@ enum EffectI18nTable {
     aurea.motion.oscillate|9|pivot|fx_pivo|
     aurea.motion.oscillate.cycles|0|direction|fxl_direction|fxl_angle,fxo_depth,fxo_orbit
     aurea.motion.oscillate.cycles|1|angle|fxl_angle|
-    aurea.motion.oscillate.cycles|2|frequency|fx_frequencia|
+    aurea.motion.oscillate.cycles|2|frequency|fxl_frequency|
     aurea.motion.oscillate.cycles|3|magnitude|fx_amplitude|
     aurea.motion.oscillate.cycles|4|wave|fx_forma_onda|fxo_sine,fxo_triangle
     aurea.motion.oscillate.cycles|5|phase|fxl_phase|
@@ -1074,6 +1623,10 @@ enum EffectI18nTable {
     aurea.motion.wiggle|7|hold|fx_segurar_saltos|
     aurea.motion.wiggle|8|seed|fx_semente|
     aurea.motion.wiggle|9|pivot|fx_pivo|
+    aurea.move.autobeat|0|scale|fx_pulso_escala|
+    aurea.move.autobeat|1|lift|fx_altura|
+    aurea.move.autobeat|2|tilt|fx_rotacao|
+    aurea.move.autobeat|3|release|fxl_duration|
     aurea.transition.iris_wipe|0|completion|fx_conclusao|
     aurea.transition.iris_wipe|1|feather|fx_suavidade|
     aurea.transition.iris_wipe|2|reverse|fx_sentido_inverso|
@@ -1093,6 +1646,10 @@ enum EffectI18nTable {
     aurea.transition.venetian_blinds|3|direction|fx_direcao|
     aurea.transition.venetian_blinds|4|count|fx_faixas|
     aurea.transition.venetian_blinds|5|width|fx_largura_faixa|
+    aurea.transition.circular_aperture|0|completion|fx_conclusao|
+    aurea.transition.circular_aperture|1|feather|fxl_softness|
+    aurea.transition.circular_aperture|2|reverse|fxl_reverse_direction|
+    aurea.transition.circular_aperture|3|center|fxl_center|
     aurea.blur.radial|0|type|fx_tipo|fxo_spin,fxl_zoom
     aurea.blur.radial|1|amount|fx_intensidade|
     aurea.blur.radial|2|center|fx_centro|
@@ -1116,6 +1673,16 @@ enum EffectI18nTable {
     aurea.stylize.vignette|3|roundness|fx_arredondamento|
     aurea.stylize.vignette|4|center|fx_centro|
     aurea.stylize.vignette|5|color|fx_cor|
+    aurea.stylize.optical_vignette|0|radius|fxl_radius|
+    aurea.stylize.optical_vignette|1|softness|fxl_softness|
+    aurea.stylize.optical_vignette|2|curve|fxl_softness_curve|
+    aurea.stylize.optical_vignette|3|relative_width|fxl_relative_width|
+    aurea.stylize.optical_vignette|4|relative_height|fxl_relative_height|
+    aurea.stylize.optical_vignette|5|squareness|fxl_square_shape|
+    aurea.stylize.optical_vignette|6|center|fxl_center|
+    aurea.stylize.optical_vignette|7|rotation|fx_rotacao|
+    aurea.stylize.optical_vignette|8|opacity|fxl_opacity|
+    aurea.stylize.optical_vignette|9|color|fxl_color|
     aurea.stylize.mosaic|0|cell_size|fx_tamanho_celula|
     aurea.stylize.mosaic|1|gap|fx_vao_celulas|
     aurea.stylize.mosaic|2|round|fx_celulas_redondas|
@@ -1130,6 +1697,14 @@ enum EffectI18nTable {
     aurea.stylize.find_edges|3|mix|fx_mistura|
     aurea.stylize.find_edges_reference|0|invert|fx_inverter|
     aurea.stylize.find_edges_reference|1|blend_original|fxl_blend_with_original_2|
+    aurea.stylize.chromatic_edges|0|edge_smooth|fxl_softness|
+    aurea.stylize.chromatic_edges|1|subpixel_smooth|fxl_subpixel_smoothing|
+    aurea.stylize.chromatic_edges|2|brightness|fxo_tracery_brightness|
+    aurea.stylize.chromatic_edges|3|saturation|fx_saturacao|
+    aurea.stylize.chromatic_edges|4|threshold|fxl_threshold|
+    aurea.stylize.chromatic_edges|5|weight_red|fxl_red_weight|
+    aurea.stylize.chromatic_edges|6|weight_green|fxl_green_weight|
+    aurea.stylize.chromatic_edges|7|weight_blue|fxl_blue_weight|
     aurea.color.hue_saturation|0|hue|fx_matiz|
     aurea.color.hue_saturation|1|saturation|fx_saturacao|
     aurea.color.hue_saturation|2|lightness|fx_luminosidade|
@@ -1190,7 +1765,7 @@ enum EffectI18nTable {
     aurea.generate.four_color_gradient|10|opacity|fx_opacidade|
     aurea.generate.four_color_gradient|11|blend|fx_mistura_camada|fxo_normal,fxo_multiply,fxo_screen,fxo_overlay,fxo_add
     aurea.generate.four_color_gradient|12|fill_box|fx_preencher_caixa|
-    aurea.generate.audio_spectrum|0|source|fx_fonte_som|fxo_automatic,fxo_this_layer,fxo_first_with_audio
+    aurea.generate.audio_spectrum|0|source|fx_fonte_som|fxo_auto,fxo_this_layer,fxo_first_with_audio
     aurea.generate.audio_spectrum|1|bands|fx_bandas|
     aurea.generate.audio_spectrum|2|start|fx_ponto_inicial|
     aurea.generate.audio_spectrum|3|end|fx_ponto_final|
@@ -1216,7 +1791,7 @@ enum EffectI18nTable {
     aurea.key.matte_refine|2|show_matte|fx_mostrar_mascara|
     aurea.stylize.vhs|0|intensity|fx_intensidade|
     aurea.stylize.vhs|1|chroma_bleed|fxl_color_bleed|
-    aurea.stylize.vhs|2|soften|fx_suavizacao|
+    aurea.stylize.vhs|2|soften|fxl_easing|
     aurea.stylize.vhs|3|noise|fx_ruido|
     aurea.stylize.vhs|4|scanlines|fxl_scanlines|
     aurea.stylize.vhs|5|tracking|fxl_tracking|
@@ -1230,6 +1805,23 @@ enum EffectI18nTable {
     aurea.stylize.vhs|13|osd_color|fxl_osd_color|
     aurea.stylize.vhs|14|osd_size|fxl_osd_size|
     aurea.stylize.vhs|15|seed|fxl_seed|
+    aurea.stylize.analog_tape_damage|0|capture_width|fxl_capture_width|
+    aurea.stylize.analog_tape_damage|1|chroma_width|fxl_horizontal_chroma_smoothing|
+    aurea.stylize.analog_tape_damage|2|chroma_height|fxl_vertical_chroma_smoothing|
+    aurea.stylize.analog_tape_damage|3|chroma_delay|fxl_chroma_delay_2|
+    aurea.stylize.analog_tape_damage|4|luma_blur|fxl_luma_smoothing|
+    aurea.stylize.analog_tape_damage|5|color_style|fxl_color_style|
+    aurea.stylize.analog_tape_damage|6|tint|fx_matiz|
+    aurea.stylize.analog_tape_damage|7|saturation|fx_saturacao|
+    aurea.stylize.analog_tape_damage|8|bloom|fxl_color_halo|
+    aurea.stylize.analog_tape_damage|9|tape_noise|fxl_tape_noise|
+    aurea.stylize.analog_tape_damage|10|fine_noise|fxl_fine_noise|
+    aurea.stylize.analog_tape_damage|11|horizontal_jitter|fxl_horizontal_shift|
+    aurea.stylize.analog_tape_damage|12|vertical_jitter|fxl_vertical_shift|
+    aurea.stylize.analog_tape_damage|13|scanlines|fxl_sweep_intensity|
+    aurea.stylize.analog_tape_damage|14|line_frequency|fxl_scan_frequency|
+    aurea.stylize.analog_tape_damage|15|seed|fxl_seed|
+    aurea.stylize.analog_tape_damage|16|mix|fxl_mix|
     aurea.ai.depth_map|0|mix|fx_mistura|
     aurea.ai.depth_map|1|invert|fx_inverter|
     aurea.ai.depth_map|2|smoothing|fx_suavizacao|
@@ -1420,7 +2012,7 @@ enum EffectI18nTable {
     aurea.generate.particular|30|feather|fx_suavidade_borda|
     aurea.generate.particular|31|stretch|fxl_motion_stretch|
     aurea.generate.particular|32|color|fxl_particle_color|
-    aurea.generate.particular|33|color_end|fx_cor_final|
+    aurea.generate.particular|33|color_end|fxl_end_color_2|
     aurea.generate.particular|34|color_random|fxl_color_random|
     aurea.generate.particular|35|add_mode|fxl_add_mode|
     aurea.generate.particular|36|show_source|fxl_show_layer|
@@ -1435,6 +2027,10 @@ enum EffectI18nTable {
     aurea.generate.particular|45|plexus_surface|fxl_network_surface|
     aurea.generate.particular|46|plexus_surface_opacity|fxl_surface_opacity|
     aurea.generate.particular|47|plexus_surface_points|fxl_surface_points|
+    aurea.generate.particular|48|shape|fxl_particle_shape|fxo_disc,fxo_star,fxo_heart,fxo_leaf,fxo_petal,fxo_butterfly,fxo_confetti,fxo_tracery_brightness,fxo_snowflake
+    aurea.generate.particular|49|spin|fxo_spin|
+    aurea.generate.particular|50|flutter|fxl_wing_flap_and_sway|
+    aurea.generate.particular|51|twinkle|fxl_twinkle|
     aurea.shape3d.layout|0|rotation_x|fxl_part_rotation_x|
     aurea.shape3d.layout|1|rotation_y|fxl_part_rotation_y|
     aurea.shape3d.layout|2|rotation_z|fxl_part_rotation_z|
@@ -1453,7 +2049,7 @@ enum EffectI18nTable {
     aurea.time.motion_detect|1|brightness|fx_brilho|
     aurea.time.motion_detect|2|offset_darks|core2_fx_offset_darks|
     aurea.time.motion_detect|3|saturation|fx_saturacao|
-    aurea.time.motion_detect|4|motion|core2_fx_motion_mode|fx_browser_all,core2_fxo_motion_brighter,core2_fxo_motion_darker
+    aurea.time.motion_detect|4|motion|core2_fx_motion_mode|fx_browser_all,fxo_brighter,fxo_darker_2
     aurea.time.motion_detect|5|mix|fx_mistura|
     aurea.stylize.crt_emulator|0|curvature|fx3_curvatura|
     aurea.stylize.crt_emulator|1|scanline_intensity|fx3_linhas_intensidade|
@@ -1484,8 +2080,8 @@ enum EffectI18nTable {
     aurea.glitch.dissolve_shake|9|seed|fx_semente|
     aurea.glitch.dissolve_shake|10|mix|fx_mistura|
     aurea.distort.displacement_map|0|map_layer|fx3_camada_mapa|
-    aurea.distort.displacement_map|1|horizontal_channel|fx3_canal_horizontal|fx_vermelho_c031,fx_verde_14e6,fx_azul_582d,fxo_luminance,fxo_alpha_2,fx3o_desligado
-    aurea.distort.displacement_map|2|vertical_channel|fx3_canal_vertical|fx_vermelho_c031,fx_verde_14e6,fx_azul_582d,fxo_luminance,fxo_alpha_2,fx3o_desligado
+    aurea.distort.displacement_map|1|horizontal_channel|fx3_canal_horizontal|fx_vermelho_c031,fx_verde_14e6,fx_azul_582d,fxo_luminance,fxo_alpha_2,fxo_off
+    aurea.distort.displacement_map|2|vertical_channel|fx3_canal_vertical|fx_vermelho_c031,fx_verde_14e6,fx_azul_582d,fxo_luminance,fxo_alpha_2,fxo_off
     aurea.distort.displacement_map|3|max_horizontal|fx3_desloc_h_max|
     aurea.distort.displacement_map|4|max_vertical|fx3_desloc_v_max|
     aurea.distort.displacement_map|5|map_behavior|fx3_comportamento_mapa|fx3o_centralizar,fxo_stretch,fxo_repeat
@@ -1499,37 +2095,37 @@ enum EffectI18nTable {
     aurea.glitch.datamosh|4|corruption|fx_datamosh_corruption|
     aurea.glitch.datamosh|5|color_bleed|fx_datamosh_color_bleed|
     aurea.glitch.datamosh|6|seed|fx_semente|
-    aurea.motion.blink|0|frequency|fx_frequencia|
+    aurea.motion.blink|0|frequency|fxl_frequency|
     aurea.motion.blink|1|phase|fxl_phase|
     aurea.motion.blink|2|duty|fxl_visible_duration|
     aurea.motion.blink|3|pivot|fx_pivo|
-    aurea.motion.flicker|0|frequency|fx_frequencia|
+    aurea.motion.flicker|0|frequency|fxl_frequency|
     aurea.motion.flicker|1|minimum|fxl_minimum_opacity|
     aurea.motion.flicker|2|maximum|fxl_maximum_opacity|
     aurea.motion.flicker|3|seed|fxl_seed|
     aurea.motion.flicker|4|phase|fxl_phase|
     aurea.motion.flicker|5|pivot|fx_pivo|
-    aurea.motion.pulse_size|0|frequency|fx_frequencia|
+    aurea.motion.pulse_size|0|frequency|fxl_frequency|
     aurea.motion.pulse_size|1|grow|fxl_grow|
     aurea.motion.pulse_size|2|shrink|fx_encolher|
     aurea.motion.pulse_size|3|phase|fxl_phase|
     aurea.motion.pulse_size|4|wave|fx_forma_onda|fxo_sine,fxo_triangle
     aurea.motion.pulse_size|5|pivot|fx_pivo|
     aurea.motion.random_displacement|0|magnitude|fx_amplitude|
-    aurea.motion.random_displacement|1|frequency|fx_frequencia|
+    aurea.motion.random_displacement|1|frequency|fxl_frequency|
     aurea.motion.random_displacement|2|phase|fxl_phase|
     aurea.motion.random_displacement|3|seed|fxl_seed|
     aurea.motion.random_displacement|4|scatter|fxl_vertical_scatter|
     aurea.motion.random_displacement|5|pivot|fx_pivo|
     aurea.motion.random_jitter|0|magnitude|fx_amplitude|
-    aurea.motion.random_jitter|1|frequency|fx_frequencia|
+    aurea.motion.random_jitter|1|frequency|fxl_frequency|
     aurea.motion.random_jitter|2|phase|fxl_phase|
     aurea.motion.random_jitter|3|seed|fxl_seed|
     aurea.motion.random_jitter|4|angle|fxl_angle|
     aurea.motion.random_jitter|5|pivot|fx_pivo|
     aurea.motion.swing_range|0|angle1|fxl_start_angle|
     aurea.motion.swing_range|1|angle2|fxl_end_angle|
-    aurea.motion.swing_range|2|frequency|fx_frequencia|
+    aurea.motion.swing_range|2|frequency|fxl_frequency|
     aurea.motion.swing_range|3|phase|fxl_phase|
     aurea.motion.swing_range|4|wave|fx_forma_onda|fxo_sine,fxo_triangle
     aurea.motion.swing_range|5|pivot|fx_pivo|
@@ -1699,7 +2295,7 @@ enum EffectI18nTable {
     aurea.transition.wipe_flux|0|wipe_percent|fx_progresso|
     aurea.transition.wipe_flux|1|transition_dir|fxl_direction|fxo_remove_layer,fxo_reveal_layer
     aurea.transition.wipe_flux|2|auto_transition|fxl_automatic_transition|
-    aurea.transition.wipe_flux|3|frequency|fx_frequencia|
+    aurea.transition.wipe_flux|3|frequency|fxl_frequency|
     aurea.transition.wipe_flux|4|frequency_rel_x|fxl_relative_x_frequency|
     aurea.transition.wipe_flux|5|seed|fxl_seed|
     aurea.transition.wipe_flux|6|octaves|fx_oitavas|
@@ -1729,7 +2325,7 @@ enum EffectI18nTable {
     aurea.transition.wipe_plasma|0|wipe_percent|fx_progresso|
     aurea.transition.wipe_plasma|1|transition_dir|fxl_direction|fxo_remove_layer,fxo_reveal_layer
     aurea.transition.wipe_plasma|2|auto_transition|fxl_automatic_transition|
-    aurea.transition.wipe_plasma|3|frequency|fx_frequencia|
+    aurea.transition.wipe_plasma|3|frequency|fxl_frequency|
     aurea.transition.wipe_plasma|4|frequency_rel_x|fxl_relative_x_frequency|
     aurea.transition.wipe_plasma|5|seed|fxl_seed|
     aurea.transition.wipe_plasma|6|octaves|fx_oitavas|
@@ -1774,6 +2370,45 @@ enum EffectI18nTable {
     aurea.distort.lens_gradient|15|crop_top|fxl_crop_top|
     aurea.distort.lens_gradient|16|crop_right|fxl_crop_right|
     aurea.distort.lens_gradient|17|crop_bottom|fxl_crop_bottom|
+    aurea.distort.refraction|0|lens|fxl_lens_layer|
+    aurea.distort.refraction|1|matte|fxl_matte_layer|
+    aurea.distort.refraction|2|amount|fxl_amount|
+    aurea.distort.refraction|3|fine|fxl_fine_adjustment|
+    aurea.distort.refraction|4|blur_lens|fxl_lens_softness|
+    aurea.distort.refraction|5|rotate_warp|fxl_warp_rotation|
+    aurea.distort.refraction|6|amount_rel|fxl_relative_xy_strength|
+    aurea.distort.refraction|7|wrap_x|fxo_horizontal_edges|fxo_no_wrapping,fxo_repeat,fxo_reflect
+    aurea.distort.refraction|8|wrap_y|fxo_vertical_edges|fxo_no_wrapping,fxo_repeat,fxo_reflect
+    aurea.distort.refraction|9|filter|fxl_adaptive_filtering|
+    aurea.distort.refraction|10|blur_matte|fxl_matte_softness|
+    aurea.distort.refraction|11|invert_matte|fxl_invert_matte|
+    aurea.distort.refraction|12|matte_use|fxl_matte_channel|fxo_luminance,fxo_alpha_2
+    aurea.distort.refraction|13|opacity|fxl_alpha_processing|fxo_normal,fxo_all_opaque,fxo_premultiplied
+    aurea.distort.refraction|14|crop_left|fxl_crop_left|
+    aurea.distort.refraction|15|crop_top|fxl_crop_top|
+    aurea.distort.refraction|16|crop_right|fxl_crop_right|
+    aurea.distort.refraction|17|crop_bottom|fxl_crop_bottom|
+    aurea.distort.refraction_rgb|0|lens|fxl_lens_layer|
+    aurea.distort.refraction_rgb|1|matte|fxl_matte_layer|
+    aurea.distort.refraction_rgb|2|amount|fxl_amount|
+    aurea.distort.refraction_rgb|3|fine|fxl_fine_adjustment|
+    aurea.distort.refraction_rgb|4|blur_lens|fxl_lens_softness|
+    aurea.distort.refraction_rgb|5|rotate_warp|fxl_warp_rotation|
+    aurea.distort.refraction_rgb|6|amount_rel|fxl_relative_xy_strength|
+    aurea.distort.refraction_rgb|7|wrap_x|fxo_horizontal_edges|fxo_no_wrapping,fxo_repeat,fxo_reflect
+    aurea.distort.refraction_rgb|8|wrap_y|fxo_vertical_edges|fxo_no_wrapping,fxo_repeat,fxo_reflect
+    aurea.distort.refraction_rgb|9|filter|fxl_adaptive_filtering|
+    aurea.distort.refraction_rgb|10|blur_matte|fxl_matte_softness|
+    aurea.distort.refraction_rgb|11|invert_matte|fxl_invert_matte|
+    aurea.distort.refraction_rgb|12|matte_use|fxl_matte_channel|fxo_luminance,fxo_alpha_2
+    aurea.distort.refraction_rgb|13|opacity|fxl_alpha_processing|fxo_normal,fxo_all_opaque,fxo_premultiplied
+    aurea.distort.refraction_rgb|14|crop_left|fxl_crop_left|
+    aurea.distort.refraction_rgb|15|crop_top|fxl_crop_top|
+    aurea.distort.refraction_rgb|16|crop_right|fxl_crop_right|
+    aurea.distort.refraction_rgb|17|crop_bottom|fxl_crop_bottom|
+    aurea.distort.refraction_rgb|18|warp_red|fxl_red_refraction|
+    aurea.distort.refraction_rgb|19|warp_green|fxl_green_refraction|
+    aurea.distort.refraction_rgb|20|warp_blue|fxl_blue_refraction|
     aurea.stylize.pixel_encoder|0|scale|fxl_cell_size_xy|
     aurea.stylize.pixel_encoder|1|lock_scale|fxl_link_xy_size|
     aurea.stylize.pixel_encoder|2|pattern|fx_padrao|fxo_high_detail,fxo_numbers_and_letters,fxo_horizontal_lines,fxo_dots,fxo_vertical_lines,fxo_grunge,fxo_rings,fxo_solid,fxo_left_diagonal,fxo_right_diagonal
@@ -1794,7 +2429,7 @@ enum EffectI18nTable {
     aurea.light.starglow|1|boost|fxl_light_boost|
     aurea.light.starglow|2|threshold|fx_limiar|
     aurea.light.starglow|3|threshold_softness|fxl_threshold_softness_2|
-    aurea.light.starglow|4|channel|fxl_input_channel|fx_luminosidade,fxo_luminance,fx_vermelho_c031,fx_verde_14e6,fx_azul_582d,fxo_alpha_2
+    aurea.light.starglow|4|channel|fxl_input_channel|fxl_lightness,fxo_luminance,fx_vermelho_c031,fx_verde_14e6,fx_azul_582d,fxo_alpha_2
     aurea.light.starglow|5|circle_mask|fxl_circular_mask|
     aurea.light.starglow|6|mask_center|fxl_mask_center|
     aurea.light.starglow|7|mask_radius|fxl_mask_radius|
@@ -1841,6 +2476,98 @@ enum EffectI18nTable {
     aurea.light.starglow|48|map3_color3|fxl_map_3_color_3|
     aurea.light.starglow|49|map3_color4|fxl_map_3_color_4|
     aurea.light.starglow|50|map3_color5|fxl_map_3_color_5|
+    aurea.light.spectral_glint|0|brightness|fxl_light_boost|
+    aurea.light.spectral_glint|1|size|fx_tamanho|
+    aurea.light.spectral_glint|2|tint|fxl_light_color|
+    aurea.light.spectral_glint|3|source_opacity|fxl_source_opacity|
+    aurea.light.spectral_glint|4|background_gain|fxl_background_brightness|
+    aurea.light.spectral_glint|5|affect_alpha|fxl_alpha_spread|
+    aurea.light.spectral_glint|6|under_source|fxl_light_under_source|
+    aurea.light.spectral_glint|7|threshold|fx_limiar|
+    aurea.light.spectral_glint|8|threshold_blur|fxl_threshold_softness_2|
+    aurea.light.spectral_glint|9|blur|fxl_light_blur|
+    aurea.light.spectral_glint|10|threshold_color|fxl_threshold_color|
+    aurea.light.spectral_glint|11|angle|fxl_light_rotation|
+    aurea.light.spectral_glint|12|from_alpha|fxl_generate_from_alpha|
+    aurea.light.spectral_glint|13|length_red|fxl_red_length|
+    aurea.light.spectral_glint|14|length_green|fxl_green_length|
+    aurea.light.spectral_glint|15|length_blue|fxl_blue_length|
+    aurea.light.spectral_glint|16|horizontal|fxl_horizontal_length|
+    aurea.light.spectral_glint|17|vertical|fxl_vertical_length|
+    aurea.light.spectral_glint|18|diagonal_1|fxl_first_diagonal_length|
+    aurea.light.spectral_glint|19|diagonal_2|fxl_second_diagonal_length|
+    aurea.light.diffraction_glare|0|brightness|fxl_light_boost|
+    aurea.light.diffraction_glare|1|size|fx_tamanho|
+    aurea.light.diffraction_glare|2|tint|fxl_light_color|
+    aurea.light.diffraction_glare|3|source_opacity|fxl_source_opacity|
+    aurea.light.diffraction_glare|4|background_gain|fxl_background_brightness|
+    aurea.light.diffraction_glare|5|affect_alpha|fxl_alpha_spread|
+    aurea.light.diffraction_glare|6|under_source|fxl_light_under_source|
+    aurea.light.diffraction_glare|7|threshold|fx_limiar|
+    aurea.light.diffraction_glare|8|threshold_blur|fxl_threshold_softness_2|
+    aurea.light.diffraction_glare|9|blur|fxl_light_blur|
+    aurea.light.diffraction_glare|10|threshold_color|fxl_threshold_color|
+    aurea.light.diffraction_glare|11|angle|fxl_light_rotation|
+    aurea.light.diffraction_glare|12|from_alpha|fxl_generate_from_alpha|
+    aurea.light.diffraction_glare|13|length_red|fxl_red_length|
+    aurea.light.diffraction_glare|14|length_green|fxl_green_length|
+    aurea.light.diffraction_glare|15|length_blue|fxl_blue_length|
+    aurea.light.diffraction_glare|16|ray_length|fxl_ray_length|
+    aurea.light.diffraction_glare|17|diffuse|fxl_diffuse_light_amount|
+    aurea.light.diffraction_glare|18|saturation|fx_saturacao|
+    aurea.light.outline_rays|0|brightness|fxl_light_boost|
+    aurea.light.outline_rays|1|size|fxl_ray_length|
+    aurea.light.outline_rays|2|tint|fxl_light_color|
+    aurea.light.outline_rays|3|source_opacity|fxl_source_opacity|
+    aurea.light.outline_rays|4|background_gain|fxl_background_brightness|
+    aurea.light.outline_rays|5|affect_alpha|fxl_alpha_spread|
+    aurea.light.outline_rays|6|under_source|fxl_light_under_source|
+    aurea.light.outline_rays|7|center|fxl_center|
+    aurea.light.outline_rays|8|edge_thickness|fxl_stroke_thickness_2|
+    aurea.light.outline_rays|9|edge_gain|fxl_outline_amount|
+    aurea.light.outline_rays|10|outer_bias|fxl_tip_brightness|
+    aurea.light.outline_rays|11|shimmer|fxl_flicker|
+    aurea.light.outline_rays|12|shimmer_frequency|fxl_flicker_frequency|
+    aurea.light.outline_rays|13|view|fxl_show|fxo_result,fxo_outlines,fxl_rays
+    aurea.light.outline_rays|14|length_red|fxl_red_length|
+    aurea.light.outline_rays|15|length_green|fxl_green_length|
+    aurea.light.outline_rays|16|length_blue|fxl_blue_length|
+    aurea.light.prismatic_glints|0|brightness|fxl_light_boost|
+    aurea.light.prismatic_glints|1|size|fx_tamanho|
+    aurea.light.prismatic_glints|2|tint|fxl_light_color|
+    aurea.light.prismatic_glints|3|source_opacity|fxl_source_opacity|
+    aurea.light.prismatic_glints|4|background_gain|fxl_background_brightness|
+    aurea.light.prismatic_glints|5|affect_alpha|fxl_alpha_spread|
+    aurea.light.prismatic_glints|6|under_source|fxl_light_under_source|
+    aurea.light.prismatic_glints|7|threshold|fx_limiar|
+    aurea.light.prismatic_glints|8|threshold_blur|fxl_threshold_softness_2|
+    aurea.light.prismatic_glints|9|blur|fxl_light_blur|
+    aurea.light.prismatic_glints|10|threshold_color|fxl_threshold_color|
+    aurea.light.prismatic_glints|11|angle|fxl_light_rotation|
+    aurea.light.prismatic_glints|12|from_alpha|fxl_generate_from_alpha|
+    aurea.light.prismatic_glints|13|length_red|fxl_red_length|
+    aurea.light.prismatic_glints|14|length_green|fxl_green_length|
+    aurea.light.prismatic_glints|15|length_blue|fxl_blue_length|
+    aurea.light.prismatic_glints|16|horizontal|fxl_horizontal_length|
+    aurea.light.prismatic_glints|17|vertical|fxl_vertical_length|
+    aurea.light.prismatic_glints|18|diagonal_1|fxl_first_diagonal_length|
+    aurea.light.prismatic_glints|19|diagonal_2|fxl_second_diagonal_length|
+    aurea.light.prismatic_glints|20|shift_out|fxl_push_rays_away|
+    aurea.light.prismatic_glints|21|shift_red|fxl_red_offset|
+    aurea.light.prismatic_glints|22|shift_blue|fxl_blue_offset|
+    aurea.light.light_leak|0|brightness|fxl_light_boost|
+    aurea.light.light_leak|1|tint|fxl_light_color|
+    aurea.light.light_leak|2|center|fxl_center|
+    aurea.light.light_leak|3|size|fx_tamanho|
+    aurea.light.light_leak|4|height|fxl_relative_height|
+    aurea.light.light_leak|5|angle|fxl_motion_angle|
+    aurea.light.light_leak|6|speed|fxl_speed|
+    aurea.light.light_leak|7|flicker|fxl_flicker|
+    aurea.light.light_leak|8|frequency|fxl_flicker_frequency|
+    aurea.light.light_leak|9|background|fxl_background_brightness|
+    aurea.light.light_leak|10|affect_alpha|fxl_alpha_spread|
+    aurea.light.light_leak|11|mode|fxl_combine|fxo_screen,fxo_add_2,fxo_leak_only
+    aurea.light.light_leak|12|seed|fxl_seed|
     aurea.stylize.pix_dither|0|method|fxl_dither_method|fxl_threshold,fxo_floyd_steinberg,fxo_false_floyd_steinberg,fxo_filter_lite,fxo_zhigang_fan,fxo_shiau_fan,fxo_jarvis_judice_ninke,fxo_stucki,fxo_burkes,fxo_sierra,fxo_two_row_sierra,fxo_atkinson,fxo_bayer_2x2,fxo_bayer_3x3,fxo_bayer_5x3,fxo_bayer_4x4,fxo_bayer_8x8,fxo_cluster_dot_4x4,fxo_cluster_dot_8x8,fxo_horizontal_2x2,fxo_horizontal_8x1,fxo_horizontal_12x4,fxo_vertical_2x2,fxo_vertical_1x8,fxo_vertical_4x12,fxo_diagonal_5x5
     aurea.stylize.pix_dither|1|palette|fx_diffusion_palette|fxo_gray_1_bit,fxo_gray_2_bit,fxo_gray_4_bit,fxo_rgb_3_bit,fxo_rgb_6_bit,fxo_rgb_9_bit,fxo_pico_8,fxo_gameboy,fxo_cga,fxo_zx_spectrum,fxo_web_safe,fxo_two_colors
     aurea.stylize.pix_dither|2|amount|fxl_dither_amount|
@@ -1850,9 +2577,41 @@ enum EffectI18nTable {
     aurea.color.threshold|1|softness|fxl_softness|
     aurea.color.threshold|2|dark|fxl_dark_color|
     aurea.color.threshold|3|light|fxl_bright_color|
+    aurea.color.soft_rgb_threshold|0|limit|fx_limite|
+    aurea.color.soft_rgb_threshold|1|softness|fx_suavidade|
+    aurea.color.soft_rgb_threshold|2|offset|fx_soft_rgb_threshold_offset|
+    aurea.color.soft_rgb_threshold|3|soft_red|fx_soft_rgb_threshold_red|
+    aurea.color.soft_rgb_threshold|4|soft_green|fx_soft_rgb_threshold_green|
+    aurea.color.soft_rgb_threshold|5|soft_blue|fx_soft_rgb_threshold_blue|
+    aurea.color.soft_rgb_threshold|6|saturation|fx_saturacao|
+    aurea.color.solarize|0|threshold|fx_limite|
+    aurea.color.solarize|1|saturation|fx_saturacao|
+    aurea.color.solarize|2|invert|fx_inverter|
+    aurea.color.solarize|3|brightness|fx_brilho|
+    aurea.color.solarize|4|shadows|fx_sombras|
+    aurea.color.luma_hue_cycle|0|frequency|fxl_frequency|
+    aurea.color.luma_hue_cycle|1|phase|fxl_hue_shift_2|
+    aurea.color.luma_hue_cycle|2|scale_source|fxl_scale_by_brightness|
+    aurea.color.luma_hue_cycle|3|source_gamma|fxl_brightness_exponent|
+    aurea.color.luma_hue_cycle|4|saturation|fx_saturacao|
+    aurea.color.luma_hue_cycle|5|brightness|fxo_tracery_brightness|
+    aurea.color.luma_hue_cycle|6|original_mix|fx_mistura_original|
+    aurea.color.silver_retention|0|amount|fxl_amount|
+    aurea.color.silver_retention|1|dark_offset|fxl_shadows_offset|
+    aurea.color.silver_retention|2|saturation|fx_saturacao|
+    aurea.color.silver_retention|3|brightness|fxo_tracery_brightness|
+    aurea.color.silver_retention|4|original_mix|fx_mistura_original|
     aurea.color.posterize|0|levels|fx_name_levels|
     aurea.color.posterize|1|gamma|fxl_gamma|
     aurea.color.posterize|2|luma_only|fxl_luma_only|
+    aurea.color.luma_posterize|0|step|fxl_step_size|
+    aurea.color.luma_posterize|1|preserve_chroma|fxl_preserve_chroma|
+    aurea.color.luma_posterize|2|smooth_edges|fx_suavidade_borda|
+    aurea.color.luma_posterize|3|smooth_source|fxl_smooth_source|
+    aurea.color.luma_posterize|4|phase|fxl_color_phase_2|
+    aurea.color.luma_posterize|5|brightness|fxo_tracery_brightness|
+    aurea.color.luma_posterize|6|shadows|fx_sombras|
+    aurea.color.luma_posterize|7|saturation|fx_saturacao|
     aurea.color.palettize|0|palette|fx_diffusion_palette|fxo_game_boy,fxo_nes,fxo_pico_8,fxo_cga,fxo_black_and_white,fxo_imported
     aurea.color.palettize|1|file|fxl_palette_file|
     aurea.color.palettize|2|dither|fxl_dither|fxo_none_2,fxo_floyd_steinberg,fxo_false_floyd_steinberg,fxo_filter_lite,fxo_zhigang_fan,fxo_shiau_fan,fxo_jarvis_judice_ninke,fxo_stucki,fxo_burkes,fxo_sierra,fxo_two_row_sierra,fxo_atkinson,fxo_bayer_2x2,fxo_bayer_3x3,fxo_bayer_5x3,fxo_bayer_4x4,fxo_bayer_8x8,fxo_cluster_dot_4x4,fxo_cluster_dot_8x8,fxo_horizontal_2x2,fxo_horizontal_8x1,fxo_horizontal_12x4,fxo_vertical_2x2,fxo_vertical_1x8,fxo_vertical_4x12,fxo_diagonal_5x5
@@ -1875,7 +2634,7 @@ enum EffectI18nTable {
     aurea.glitch.video_glitch|2|duration|fxl_glitch_duration|
     aurea.glitch.video_glitch|3|seed|fxl_global_seed|
     aurea.glitch.video_glitch|4|start_frame|fxl_start_frame|
-    aurea.glitch.video_glitch|5|trigger|fxl_trigger|fxo_automatic,fxo_intensity_crossing
+    aurea.glitch.video_glitch|5|trigger|fxl_trigger|fxo_auto,fxo_intensity_crossing
     aurea.glitch.video_glitch|6|threshold|fxl_intensity_threshold|
     aurea.glitch.video_glitch|7|intensity_randomness|fxl_intensity_randomness|
     aurea.glitch.video_glitch|8|interval_randomness|fxl_interval_randomness|
@@ -1921,12 +2680,12 @@ enum EffectI18nTable {
     aurea.glitch.video_glitch|48|skew|fxl_band_skew|
     aurea.glitch.video_glitch|49|shake_xy|fxl_shake_xy|
     aurea.glitch.video_glitch|50|shake_rotation|fxl_shake_rotation|
-    aurea.glitch.video_glitch|51|rgb_split|fx_separacao_rgb|
+    aurea.glitch.video_glitch|51|rgb_split|fxl_rgb_separation|
     aurea.glitch.video_glitch|52|flicker_brightness|fxl_brightness_variation|
     aurea.glitch.video_glitch|53|flicker_saturation|fxl_saturation_variation|
     aurea.glitch.video_glitch|54|edges|fxl_edges|fxo_repeat,fxo_reflect,fx3o_repetir_pixels,fxo_transparent
     aurea.glitch.video_glitch|55|mix|fxl_mix|
-    aurea.glitch.video_glitch|56|curve_view|fxl_curves_view|fx3o_desligado,fxo_over_black,fxo_over_effect
+    aurea.glitch.video_glitch|56|curve_view|fxl_curves_view|fxo_off,fxo_over_black,fxo_over_effect
     aurea.glitch.video_glitch|57|time_view|fxl_curve_time_window|
     aurea.glitch.video_glitch|58|freeze_source|fxl_freeze_block_source|
     aurea.distort.displace_transform|0|map|fxl_deformation_map|
@@ -2017,6 +2776,29 @@ enum EffectI18nTable {
     aurea.3d.stroke|19|copy_fade|fxl_fade_repeats|
     aurea.3d.stroke|20|composite|fxl_show|fxo_over_the_layer,fxo_stroke_only,fxo_behind_the_layer
     aurea.3d.stroke|21|opacity|fxl_opacity|
+    aurea.3d.explode|0|progress|fx_progresso|
+    aurea.3d.explode|1|timing|fxl_time|fxo_by_progress,fxo_auto
+    aurea.3d.explode|2|start|fxl_start_at|
+    aurea.3d.explode|3|duration|fxl_duration|
+    aurea.3d.explode|4|pieces|fxl_pieces|
+    aurea.3d.explode|5|seed|fxl_seed|
+    aurea.3d.explode|6|thickness|fx_espessura|
+    aurea.3d.explode|7|impact|fxl_impact_point|
+    aurea.3d.explode|8|direction|fxl_direction|
+    aurea.3d.explode|9|force|fxl_strength|
+    aurea.3d.explode|10|spread|fxl_spread_out|
+    aurea.3d.explode|11|velocity_random|fxl_variation|
+    aurea.3d.explode|12|spin|fxo_spin|
+    aurea.3d.explode|13|axis_random|fxl_random_axis|
+    aurea.3d.explode|14|gravity|fxl_gravity|
+    aurea.3d.explode|15|drag|fxl_drag|
+    aurea.3d.explode|16|wave|fxl_impact_wave|
+    aurea.3d.explode|17|end_scale|fxl_scale_at_end|
+    aurea.3d.explode|18|fade|fxl_fade|
+    aurea.3d.explode|19|reassemble|fxl_assemble_reverse|
+    aurea.3d.explode|20|glow_color|fxl_scan_color|
+    aurea.3d.explode|21|glow|fx_brilho_bordas|
+    aurea.3d.explode|22|interior_dark|fxl_dark_interior|
     aurea.time.flow_retime|0|speed|fxl_speed|
     aurea.time.flow_retime|1|frames|fxo_frames|fxo_nearest,fxl_mix,core2_fx_motion_mode
     aurea.time.flow_retime|2|vectors|fxl_vector_quality|fxo_fast,fxo_good,fxo_best,fxo_neural_ai
@@ -2032,6 +2814,14 @@ enum EffectI18nTable {
     aurea.distort.kaleidoscope|2|mirroring|fxl_mirroring|fxo_flower,fxo_wheel,fxo_unfold,fxl_triangles
     aurea.distort.kaleidoscope|3|rotation|fx_rotacao|
     aurea.distort.kaleidoscope|4|segments|fxl_slices|
+    aurea.distort.polar_kaleidoscope|0|center|fxl_center|
+    aurea.distort.polar_kaleidoscope|1|distance|fx_distancia|
+    aurea.distort.polar_kaleidoscope|2|rotation|fx_rotacao|
+    aurea.distort.polar_kaleidoscope|3|stretch|fxl_stretch|
+    aurea.distort.polar_kaleidoscope|4|inside_shift|fxl_radial_offset|
+    aurea.distort.polar_kaleidoscope|5|repeats|fxl_repeats|
+    aurea.distort.polar_kaleidoscope|6|amount|fxl_amount|
+    aurea.distort.polar_kaleidoscope|7|filter|fxl_adaptive_filtering|
     aurea.distort.sphere_wrap|0|radius|fxl_radius|
     aurea.distort.sphere_wrap|1|position|fx_posicao|
     aurea.distort.sphere_wrap|2|rotation_x|fxl_rotation_x|
@@ -2297,7 +3087,7 @@ enum EffectI18nTable {
     aurea.generate.reflective_floor|0|horizon|fxl_horizon|
     aurea.generate.reflective_floor|1|reflection|fxl_reflection|
     aurea.generate.reflective_floor|2|falloff|fxl_reflection_distance|
-    aurea.generate.reflective_floor|3|blur|fx_name_gaussian_blur|
+    aurea.generate.reflective_floor|3|blur|fxl_blur|
     aurea.generate.reflective_floor|4|distortion|fxs_distortion|
     aurea.generate.reflective_floor|5|floor|fxl_floor|fxo_smooth_2,fxl_tiling,fxo_worn_tiles
     aurea.generate.reflective_floor|6|color|fxl_floor_color|
@@ -2376,7 +3166,7 @@ enum EffectI18nTable {
     aurea.color.grade|61|shadow_tint|fxl_shadow_tint|
     aurea.color.grade|62|highlight_tint|fxl_highlight_tint|
     aurea.color.grade|63|tint_balance|fxl_tint_balance|
-    aurea.color.grade|64|sharpen|fx_name_sharpen|
+    aurea.color.grade|64|sharpen|fxl_sharpen|
     aurea.color.grade|65|vignette|fx_vinheta|
     aurea.color.grade|66|vignette_mid|fxl_vignette_start|
     aurea.color.grade|67|vignette_feather|fxl_vignette_feather|
@@ -2457,10 +3247,10 @@ enum EffectI18nTable {
     aurea.generate.constellation|62|show_layer|fx030c_show_layer|
     aurea.generate.constellation|63|follow_camera|fx030_follow_camera|
     aurea.generate.constellation|64|fov|fxl_field_of_view|
-    aurea.enhance.video|0|model|fxl_model|fxo_automatic,fxo_compressed_video,fxo_old_noisy_video,fxo_animation,fxo_low_resolution_blurry,fxo_manual
+    aurea.enhance.video|0|model|fxl_model|fxo_auto,fxo_compressed_video,fxo_old_noisy_video,fxo_animation,fxo_low_resolution_blurry,fxo_manual
     aurea.enhance.video|1|revert_compression|fxl_revert_compression|
     aurea.enhance.video|2|recover_details|fxl_recover_details|
-    aurea.enhance.video|3|sharpen|fx_name_sharpen|
+    aurea.enhance.video|3|sharpen|fxl_sharpen|
     aurea.enhance.video|4|reduce_noise|fxl_reduce_noise|
     aurea.enhance.video|5|dehalo|fxl_dehalo|
     aurea.enhance.video|6|antialias_deblur|fxl_anti_alias_deblur|
@@ -2478,7 +3268,7 @@ enum EffectI18nTable {
     aurea.hyper.upscale|3|path|fxo_path|fxo_turbo_preview,fxo_lite,fxo_max
     aurea.hyper.clean|0|denoise|fxl_reduce_noise|
     aurea.hyper.clean|1|deblock|fxl_remove_compression_blocks|
-    aurea.hyper.clean|2|deinterlace|fxl_deinterlace|fx3o_desligado,fxo_automatic,fxo_always
+    aurea.hyper.clean|2|deinterlace|fxl_deinterlace|fxo_off,fxo_auto,fxo_always
     aurea.hyper.clean|3|frames|fxl_neighbouring_frames|
     aurea.hyper.clean|4|path|fxo_path|fxo_turbo_preview,fxo_lite,fxo_max
     aurea.hyper.motion|0|slow_motion|fxl_slow_motion|fxo_1_extra_frames_only,fxo_2,fxo_4,fxo_8
@@ -2494,17 +3284,17 @@ enum EffectI18nTable {
     aurea.key.background_remove|7|smooth|fxl_roto_smooth|
     aurea.key.background_remove|8|decontaminate|fxl_roto_decontaminate|
     aurea.key.background_remove|9|edge_radius|fxl_fine_edge|
-    aurea.key.background_remove|10|model|fxl_model|fxo_automatic,fxo_person
+    aurea.key.background_remove|10|model|fxl_model|fxo_auto,fxo_person
     aurea.distort.water_reflection|0|horizon|fxl_horizon|
     aurea.distort.water_reflection|1|length|fxl_reflection_length|
     aurea.distort.water_reflection|2|opacity|fxl_reflection_opacity|
     aurea.distort.water_reflection|3|falloff|fxl_falloff_2|
     aurea.distort.water_reflection|4|amount|fx_ondulacao|
-    aurea.distort.water_reflection|5|frequency|fx_frequencia|
+    aurea.distort.water_reflection|5|frequency|fxl_frequency|
     aurea.distort.water_reflection|6|speed|fxl_speed|
     aurea.distort.water_reflection|7|direction|fxl_direction|
     aurea.distort.water_reflection|8|perspective|fxl_perspective|
-    aurea.distort.water_reflection|9|blur|fx_name_gaussian_blur|
+    aurea.distort.water_reflection|9|blur|fxl_blur|
     aurea.distort.water_reflection|10|tint|fxl_water_color|
     aurea.distort.water_reflection|11|tint_amount|afx_name_tone|
     aurea.light.light_wrap|0|background|fxl_background_layer|
@@ -2587,12 +3377,12 @@ enum EffectI18nTable {
     aurea.distort.hollow_box|11|perspective|fxl_perspective|
     aurea.distort.hollow_box|12|front|fxo_front|fxo_normal,fxo_hidden,fxo_circular_hole,fxo_circular_cut,fxo_square_hole,fxo_square_cut
     aurea.distort.hollow_box|13|back|fxl_back|fxo_normal,fxo_hidden,fxo_circular_hole,fxo_circular_cut,fxo_square_hole,fxo_square_cut
-    aurea.distort.hollow_box|14|left|fx_esquerda|fxo_normal,fxo_hidden,fxo_circular_hole,fxo_circular_cut,fxo_square_hole,fxo_square_cut
-    aurea.distort.hollow_box|15|right|fx_direita|fxo_normal,fxo_hidden,fxo_circular_hole,fxo_circular_cut,fxo_square_hole,fxo_square_cut
+    aurea.distort.hollow_box|14|left|fxl_left|fxo_normal,fxo_hidden,fxo_circular_hole,fxo_circular_cut,fxo_square_hole,fxo_square_cut
+    aurea.distort.hollow_box|15|right|fxl_right|fxo_normal,fxo_hidden,fxo_circular_hole,fxo_circular_cut,fxo_square_hole,fxo_square_cut
     aurea.distort.hollow_box|16|top|fx_topo|fxo_normal,fxo_hidden,fxo_circular_hole,fxo_circular_cut,fxo_square_hole,fxo_square_cut
     aurea.distort.hollow_box|17|bottom|fx_base|fxo_normal,fxo_hidden,fxo_circular_hole,fxo_circular_cut,fxo_square_hole,fxo_square_cut
     aurea.distort.hollow_box|18|cutout|fxl_hole_size|
-    aurea.distort.hollow_box|19|shading|fxo_brightness|
+    aurea.distort.hollow_box|19|shading|fxl_light|
     aurea.distort.hollow_box|20|light_intensity|fxl_light_boost|
     aurea.distort.hollow_box|21|light_color|fxl_light_color|
     aurea.distort.hollow_box|22|light_direction|fx_deform_light_direction|
@@ -2717,13 +3507,13 @@ enum EffectI18nTable {
     aurea.stylize.strobe_light|7|seed|fxl_random_seed|
     aurea.stylize.noise_hls|0|noise|fx_ruido|fx045g_opt_uniform,fxo_squared,fx_name_grain
     aurea.stylize.noise_hls|1|hue|fx_matiz|
-    aurea.stylize.noise_hls|2|lightness|fx_luminosidade|
+    aurea.stylize.noise_hls|2|lightness|fxl_lightness|
     aurea.stylize.noise_hls|3|saturation|fx_saturacao|
     aurea.stylize.noise_hls|4|grain_size|fx_tamanho_grao|
     aurea.stylize.noise_hls|5|phase|fxl_noise_phase|
     aurea.stylize.noise_hls_auto|0|noise|fx_ruido|fx045g_opt_uniform,fxo_squared,fx_name_grain
     aurea.stylize.noise_hls_auto|1|hue|fx_matiz|
-    aurea.stylize.noise_hls_auto|2|lightness|fx_luminosidade|
+    aurea.stylize.noise_hls_auto|2|lightness|fxl_lightness|
     aurea.stylize.noise_hls_auto|3|saturation|fx_saturacao|
     aurea.stylize.noise_hls_auto|4|grain_size|fx_tamanho_grao|
     aurea.stylize.noise_hls_auto|5|speed|fxl_animation_speed|
@@ -2812,25 +3602,25 @@ enum EffectI18nTable {
     aurea.stylize.plastic|15|metal|fxl_metal|
     aurea.blur.bilateral|0|radius|fxl_radius|
     aurea.blur.bilateral|1|threshold|fx_limiar|
-    aurea.blur.bilateral|2|colorize|fx_colorir|
+    aurea.blur.bilateral|2|colorize|fxl_colorize|
     aurea.blur.smart|0|radius|fxl_radius|
     aurea.blur.smart|1|threshold|fx_limiar|
     aurea.blur.smart|2|quality|fxl_quality|scene_low,scene_medium,fxo_high
     aurea.blur.smart|3|mode|fxl_mode|fxo_normal,fxo_edges_only,fxo_overlay_edges
     aurea.blur.cross|0|radius_x|fxl_radius_x|
     aurea.blur.cross|1|radius_y|fxl_radius_y|
-    aurea.blur.cross|2|transfer_mode|fxl_transfer_mode|fxo_none_2,fxo_add_2,fxo_screen,core2_fxo_motion_brighter,core2_fxo_motion_darker,fxo_multiply
+    aurea.blur.cross|2|transfer_mode|fxl_transfer_mode|fxo_none_2,fxo_add_2,fxo_screen,fxo_brighter,fxo_darker_2,fxo_multiply
     aurea.blur.cross|3|repeat_edge|fxl_repeat_edge_pixels|
     aurea.generate.circle|0|center|fxl_center|
     aurea.generate.circle|1|radius|fxl_radius|
-    aurea.generate.circle|2|edge|fx_name_border|fxo_none,fxl_edge_radius,fx_espessura,fxo_thickness_radius,fxo_thickness_feather_radius
+    aurea.generate.circle|2|edge|fxl_border|fxo_none,fxl_edge_radius,fx_espessura,fxo_thickness_radius,fxo_thickness_feather_radius
     aurea.generate.circle|3|thickness|fx_espessura|
     aurea.generate.circle|4|feather_outer|fxl_feather_outer_edge|
     aurea.generate.circle|5|feather_inner|fxl_feather_inner_edge|
     aurea.generate.circle|6|invert|fxl_invert_circle|
     aurea.generate.circle|7|color|fxl_color|
     aurea.generate.circle|8|opacity|fxl_opacity|
-    aurea.generate.circle|9|blend|fxl_blending_mode|fxo_none_2,fxo_normal,fxo_add_2,fxo_multiply,fxo_screen,fxo_overlay,fxo_stencil_alpha,fxo_silhouette_alpha
+    aurea.generate.circle|9|blend|fxl_blend_mode_2|fxo_none_2,fxo_normal,fxo_add_2,fxo_multiply,fxo_screen,fxo_overlay,fxo_stencil_alpha,fxo_silhouette_alpha
     aurea.generate.ellipse|0|center|fxl_center|
     aurea.generate.ellipse|1|width|fxl_width|
     aurea.generate.ellipse|2|height|fx_altura|
@@ -2861,7 +3651,7 @@ enum EffectI18nTable {
     aurea.transition.grid_wipe|0|completion|fx_conclusao|
     aurea.transition.grid_wipe|1|center|fxl_center|
     aurea.transition.grid_wipe|2|rotation|fx_rotacao|
-    aurea.transition.grid_wipe|3|border|fx_name_border|
+    aurea.transition.grid_wipe|3|border|fxl_border|
     aurea.transition.grid_wipe|4|tiles|fxl_tiling|
     aurea.transition.grid_wipe|5|shape|fxl_shape|fxo_doors,fxo_radial,fxo_rectangular
     aurea.transition.grid_wipe|6|reverse|fxl_reverse_transition|
@@ -2888,7 +3678,7 @@ enum EffectI18nTable {
     aurea.generate.snow|0|amount|fxl_flake_amount|
     aurea.generate.snow|1|speed|fxl_speed|
     aurea.generate.snow|2|amplitude|fx_amplitude|
-    aurea.generate.snow|3|frequency|fx_frequencia|
+    aurea.generate.snow|3|frequency|fxl_frequency|
     aurea.generate.snow|4|flake_size|fxl_flake_size|
     aurea.generate.snow|5|source_depth|fxl_source_depth|
     aurea.generate.snow|6|opacity|fxl_opacity|
@@ -2905,8 +3695,8 @@ enum EffectI18nTable {
     aurea.ai.fog_3d|6|smoothing|fx_suavizacao|
     aurea.audio.bass_treble|0|bass|fxl_bass|
     aurea.audio.bass_treble|1|treble|fxl_treble|
-    aurea.color.channel_combiner|0|from|fxl_from_2|fx_matiz,fx_luminosidade,fx_saturacao,fxo_luminance,fx_vermelho_c031,fx_verde_14e6,fx_azul_582d,fxo_alpha_2,fxo_min_rgb,fxo_max_rgb,fxo_rgb_to_hls,fxo_hls_to_rgb,fxo_rgb_to_yuv,fxo_yuv_to_rgb
-    aurea.color.channel_combiner|1|to|fxl_to_3|fx_vermelho_c031,fx_verde_14e6,fx_azul_582d,fxo_alpha_2,fx_matiz,fx_luminosidade,fx_saturacao
+    aurea.color.channel_combiner|0|from|fxl_from_2|fx_matiz,fxl_lightness,fx_saturacao,fxo_luminance,fx_vermelho_c031,fx_verde_14e6,fx_azul_582d,fxo_alpha_2,fxo_min_rgb,fxo_max_rgb,fxo_rgb_to_hls,fxo_hls_to_rgb,fxo_rgb_to_yuv,fxo_yuv_to_rgb
+    aurea.color.channel_combiner|1|to|fxl_to_3|fx_vermelho_c031,fx_verde_14e6,fx_azul_582d,fxo_alpha_2,fx_matiz,fxl_lightness,fx_saturacao
     aurea.color.channel_combiner|2|invert|fx_inverter|
     aurea.color.channel_combiner|3|solid_alpha|fxl_solid_alpha|
     aurea.color.broadcast_colors|0|locale|fxl_broadcast_locale|fxo_ntsc,fxo_pal
@@ -2961,7 +3751,7 @@ enum EffectI18nTable {
     aurea.color.calculations|5|invert_second|fxl_invert_second_layer|
     aurea.color.calculations|6|stretch|fxl_stretch_second_layer_to_fit|
     aurea.color.calculations|7|preserve_transparency|fxl_preserve_transparency|
-    aurea.color.calculations|8|blend_mode|fxl_blending_mode|fxo_normal,fxo_add_2,fxo_multiply,fxo_screen,fxo_overlay,fxo_difference,fxo_darker,fxo_lighter,fxo_subtract
+    aurea.color.calculations|8|blend_mode|fxl_blend_mode_2|fxo_normal,fxo_add_2,fxo_multiply,fxo_screen,fxo_overlay,fxo_difference,fxo_darker,fxo_lighter,fxo_subtract
     aurea.stylize.glasses_3d|0|right_view|fxl_right_view|
     aurea.stylize.glasses_3d|1|convergence|fxl_scene_convergence|
     aurea.stylize.glasses_3d|2|vertical_alignment|fxl_vertical_alignment|
@@ -3013,7 +3803,7 @@ enum EffectI18nTable {
     aurea.distort.headbop|14|bpm|fxl_bpm|
     aurea.distort.headbop|15|audio_layer|afx_p_audio_layer|
     aurea.distort.headbop|16|pose_source|fxl_pose_source|fxo_beat,fxo_keyframes
-    aurea.distort.headbop|17|output|fxs_output|fxo_normal,fxo_person_only_transparent,fxo_person_only_solid_color
+    aurea.distort.headbop|17|output|fxo_out|fxo_normal,fxo_person_only_transparent,fxo_person_only_solid_color
     aurea.distort.headbop|18|solid_color|fxl_color|
     aurea.distort.headbop|19|motion_blur|fxl_motion_blur_2|
     aurea.distort.headbop|20|pivot_manual|fxl_manual_pivot|
@@ -3217,7 +4007,7 @@ enum EffectI18nTable {
     aurea.generate.extrude_reference|33|corner_threshold|fxl_corner_angle_threshold|
     aurea.generate.extrude_reference|34|flatness|fxl_flatness_threshold|
     aurea.generate.extrude_reference|35|front_resolution|fxl_front_mask_resolution_scale|
-    aurea.generate.extrude_reference|36|debug_view|fxl_debug_view|fxo_front,fxl_back,fxo_sides,fxo_outline,fxo_composite
+    aurea.generate.extrude_reference|36|debug_view|fxl_debug_view|fxo_front,fxl_back,fxo_sides,fxo_stroke,fxo_composite
     aurea.generate.extrude_reference|37|debug_x|fxl_debug_view_x_offset|
     aurea.generate.extrude_reference|38|debug_y|fxl_debug_view_y_offset|
     aurea.generate.extrude_reference|39|left|fxl_left_expansion|
@@ -3254,7 +4044,7 @@ enum EffectI18nTable {
     aurea.glitch.glitchify_reference|12|crop_bottom_right|fxl_crop_bottom_right|
     aurea.glitch.glitchify_reference|13|crop_wiggle|fxl_crop_wiggle_2|
     aurea.glitch.glitchify_reference|14|transform_opacity|fxl_opacity|
-    aurea.glitch.glitchify_reference|15|transform_mode|fxl_transfer_mode|fxo_normal,fxo_copy,fxo_behind,fxo_on_top,fxo_darker,fxo_multiply,fxo_color_burn,fxo_classic_color_burn,fxo_linear_burn,fxo_darker_color,fxo_add,fxo_lighter,fxo_screen,fxo_color_dodge,fxo_classic_color_dodge,fxo_linear_dodge,fxo_lighter_color,fxo_overlay,fxo_soft_light,fxo_hard_light,fxo_linear_light,fxo_vivid_light,fxo_pin_light,fxo_hard_mix,fxo_difference,fxo_classic_difference,fxo_exclusion,fxo_subtract,fxo_divide,fx_matiz,fx_saturacao,fxl_color,fx_luminosidade,fxo_stencil_alpha,fxo_stencil_luma,fxo_silhouette_alpha,fxo_silhouette_luma,fxo_additive_premultiply,fxo_alpha_add
+    aurea.glitch.glitchify_reference|15|transform_mode|fxl_transfer_mode|fxo_normal,fxo_copy,fxo_behind,fxo_on_top,fxo_darker,fxo_multiply,fxo_color_burn,fxo_classic_color_burn,fxo_linear_burn,fxo_darker_color,fxo_add,fxo_lighter,fxo_screen,fxo_color_dodge,fxo_classic_color_dodge,fxo_linear_dodge,fxo_lighter_color,fxo_overlay,fxo_soft_light,fxo_hard_light,fxo_linear_light,fxo_vivid_light,fxo_pin_light,fxo_hard_mix,fxo_difference,fxo_classic_difference,fxo_exclusion,fxo_subtract,fxo_divide,fx_matiz,fx_saturacao,fxl_color,fxl_lightness,fxo_stencil_alpha,fxo_stencil_luma,fxo_silhouette_alpha,fxo_silhouette_luma,fxo_additive_premultiply,fxo_alpha_add
     aurea.glitch.glitchify_reference|16|composite_over|fx_compor_original|
     aurea.glitch.glitchify_reference|17|channel_enabled|fxl_enable|
     aurea.glitch.glitchify_reference|18|split_channel|fx_canal|fx045g_opt_red_cyan,fx045g_opt_green_magenta,fx045g_opt_blue_yellow,fxo_y_2,fx045g_opt_cb,fx045g_opt_cr,fx_matiz,fx_saturacao,fxl_value
@@ -3266,25 +4056,25 @@ enum EffectI18nTable {
     aurea.glitch.glitchify_reference|24|scale_vertical|fxo_vertical|
     aurea.glitch.glitchify_reference|25|scale_offset|fxl_offset|
     aurea.glitch.glitchify_reference|26|scale_speed|fxl_speed_multiplier|
-    aurea.glitch.glitchify_reference|27|channel_mode|fxl_transfer_mode|fxo_normal,fxo_copy,fxo_behind,fxo_on_top,fxo_darker,fxo_multiply,fxo_color_burn,fxo_classic_color_burn,fxo_linear_burn,fxo_darker_color,fxo_add,fxo_lighter,fxo_screen,fxo_color_dodge,fxo_classic_color_dodge,fxo_linear_dodge,fxo_lighter_color,fxo_overlay,fxo_soft_light,fxo_hard_light,fxo_linear_light,fxo_vivid_light,fxo_pin_light,fxo_hard_mix,fxo_difference,fxo_classic_difference,fxo_exclusion,fxo_subtract,fxo_divide,fx_matiz,fx_saturacao,fxl_color,fx_luminosidade,fxo_stencil_alpha,fxo_stencil_luma,fxo_silhouette_alpha,fxo_silhouette_luma,fxo_additive_premultiply,fxo_alpha_add
+    aurea.glitch.glitchify_reference|27|channel_mode|fxl_transfer_mode|fxo_normal,fxo_copy,fxo_behind,fxo_on_top,fxo_darker,fxo_multiply,fxo_color_burn,fxo_classic_color_burn,fxo_linear_burn,fxo_darker_color,fxo_add,fxo_lighter,fxo_screen,fxo_color_dodge,fxo_classic_color_dodge,fxo_linear_dodge,fxo_lighter_color,fxo_overlay,fxo_soft_light,fxo_hard_light,fxo_linear_light,fxo_vivid_light,fxo_pin_light,fxo_hard_mix,fxo_difference,fxo_classic_difference,fxo_exclusion,fxo_subtract,fxo_divide,fx_matiz,fx_saturacao,fxl_color,fxl_lightness,fxo_stencil_alpha,fxo_stencil_luma,fxo_silhouette_alpha,fxo_silhouette_luma,fxo_additive_premultiply,fxo_alpha_add
     aurea.glitch.glitchify_reference|28|color_enabled|fxl_enable|
     aurea.glitch.glitchify_reference|29|color_offset|fxl_offset|
     aurea.glitch.glitchify_reference|30|color_amount|fx045g_amount|
     aurea.glitch.glitchify_reference|31|color_opacity|fxl_opacity|
-    aurea.glitch.glitchify_reference|32|color_mode|fxl_transfer_mode|fxo_normal,fxo_copy,fxo_behind,fxo_on_top,fxo_darker,fxo_multiply,fxo_color_burn,fxo_classic_color_burn,fxo_linear_burn,fxo_darker_color,fxo_add,fxo_lighter,fxo_screen,fxo_color_dodge,fxo_classic_color_dodge,fxo_linear_dodge,fxo_lighter_color,fxo_overlay,fxo_soft_light,fxo_hard_light,fxo_linear_light,fxo_vivid_light,fxo_pin_light,fxo_hard_mix,fxo_difference,fxo_classic_difference,fxo_exclusion,fxo_subtract,fxo_divide,fx_matiz,fx_saturacao,fxl_color,fx_luminosidade,fxo_stencil_alpha,fxo_stencil_luma,fxo_silhouette_alpha,fxo_silhouette_luma,fxo_additive_premultiply,fxo_alpha_add
+    aurea.glitch.glitchify_reference|32|color_mode|fxl_transfer_mode|fxo_normal,fxo_copy,fxo_behind,fxo_on_top,fxo_darker,fxo_multiply,fxo_color_burn,fxo_classic_color_burn,fxo_linear_burn,fxo_darker_color,fxo_add,fxo_lighter,fxo_screen,fxo_color_dodge,fxo_classic_color_dodge,fxo_linear_dodge,fxo_lighter_color,fxo_overlay,fxo_soft_light,fxo_hard_light,fxo_linear_light,fxo_vivid_light,fxo_pin_light,fxo_hard_mix,fxo_difference,fxo_classic_difference,fxo_exclusion,fxo_subtract,fxo_divide,fx_matiz,fx_saturacao,fxl_color,fxl_lightness,fxo_stencil_alpha,fxo_stencil_luma,fxo_silhouette_alpha,fxo_silhouette_luma,fxo_additive_premultiply,fxo_alpha_add
     aurea.glitch.glitchify_reference|33|image_enabled|fxl_enable|
     aurea.glitch.glitchify_reference|34|pixel_streak|fxl_pixel_streak|
     aurea.glitch.glitchify_reference|35|vertical_sort|fxl_vertical_sort|
     aurea.glitch.glitchify_reference|36|slice_amount|fx045g_amount|
     aurea.glitch.glitchify_reference|37|slice_position|fx_posicao|
     aurea.glitch.glitchify_reference|38|slice_opacity|fxl_opacity|
-    aurea.glitch.glitchify_reference|39|slice_mode|fxl_transfer_mode|fxo_normal,fxo_copy,fxo_behind,fxo_on_top,fxo_darker,fxo_multiply,fxo_color_burn,fxo_classic_color_burn,fxo_linear_burn,fxo_darker_color,fxo_add,fxo_lighter,fxo_screen,fxo_color_dodge,fxo_classic_color_dodge,fxo_linear_dodge,fxo_lighter_color,fxo_overlay,fxo_soft_light,fxo_hard_light,fxo_linear_light,fxo_vivid_light,fxo_pin_light,fxo_hard_mix,fxo_difference,fxo_classic_difference,fxo_exclusion,fxo_subtract,fxo_divide,fx_matiz,fx_saturacao,fxl_color,fx_luminosidade,fxo_stencil_alpha,fxo_stencil_luma,fxo_silhouette_alpha,fxo_silhouette_luma,fxo_additive_premultiply,fxo_alpha_add
+    aurea.glitch.glitchify_reference|39|slice_mode|fxl_transfer_mode|fxo_normal,fxo_copy,fxo_behind,fxo_on_top,fxo_darker,fxo_multiply,fxo_color_burn,fxo_classic_color_burn,fxo_linear_burn,fxo_darker_color,fxo_add,fxo_lighter,fxo_screen,fxo_color_dodge,fxo_classic_color_dodge,fxo_linear_dodge,fxo_lighter_color,fxo_overlay,fxo_soft_light,fxo_hard_light,fxo_linear_light,fxo_vivid_light,fxo_pin_light,fxo_hard_mix,fxo_difference,fxo_classic_difference,fxo_exclusion,fxo_subtract,fxo_divide,fx_matiz,fx_saturacao,fxl_color,fxl_lightness,fxo_stencil_alpha,fxo_stencil_luma,fxo_silhouette_alpha,fxo_silhouette_luma,fxo_additive_premultiply,fxo_alpha_add
     aurea.glitch.glitchify_reference|40|block_amount|fx045g_amount|
     aurea.glitch.glitchify_reference|41|block_speed|fxl_speed_multiplier|
     aurea.glitch.glitchify_reference|42|block_width|fxl_horizontal_size|
     aurea.glitch.glitchify_reference|43|block_height|fxl_vertical_size|
     aurea.glitch.glitchify_reference|44|block_direction|fxl_direction|fxo_horizontal,fxo_vertical,fxo_horizontal_and_vertical
-    aurea.glitch.glitchify_reference|45|image_mode|fxl_transfer_mode|fxo_normal,fxo_copy,fxo_behind,fxo_on_top,fxo_darker,fxo_multiply,fxo_color_burn,fxo_classic_color_burn,fxo_linear_burn,fxo_darker_color,fxo_add,fxo_lighter,fxo_screen,fxo_color_dodge,fxo_classic_color_dodge,fxo_linear_dodge,fxo_lighter_color,fxo_overlay,fxo_soft_light,fxo_hard_light,fxo_linear_light,fxo_vivid_light,fxo_pin_light,fxo_hard_mix,fxo_difference,fxo_classic_difference,fxo_exclusion,fxo_subtract,fxo_divide,fx_matiz,fx_saturacao,fxl_color,fx_luminosidade,fxo_stencil_alpha,fxo_stencil_luma,fxo_silhouette_alpha,fxo_silhouette_luma,fxo_additive_premultiply,fxo_alpha_add
+    aurea.glitch.glitchify_reference|45|image_mode|fxl_transfer_mode|fxo_normal,fxo_copy,fxo_behind,fxo_on_top,fxo_darker,fxo_multiply,fxo_color_burn,fxo_classic_color_burn,fxo_linear_burn,fxo_darker_color,fxo_add,fxo_lighter,fxo_screen,fxo_color_dodge,fxo_classic_color_dodge,fxo_linear_dodge,fxo_lighter_color,fxo_overlay,fxo_soft_light,fxo_hard_light,fxo_linear_light,fxo_vivid_light,fxo_pin_light,fxo_hard_mix,fxo_difference,fxo_classic_difference,fxo_exclusion,fxo_subtract,fxo_divide,fx_matiz,fx_saturacao,fxl_color,fxl_lightness,fxo_stencil_alpha,fxo_stencil_luma,fxo_silhouette_alpha,fxo_silhouette_luma,fxo_additive_premultiply,fxo_alpha_add
     aurea.glitch.glitchify_reference|46|compression_enabled|fxl_enable|
     aurea.glitch.glitchify_reference|47|compression_multiplier|fxl_multiplier|
     aurea.glitch.glitchify_reference|48|dither_amount|fxl_dither_amount_2|
@@ -3411,75 +4201,22 @@ enum EffectI18nTable {
     aurea.distort.upscale_reference|1|reduce_noise|fxl_reduce_noise|
     aurea.distort.upscale_reference|2|detail|fxl_detail|
     aurea.distort.upscale_reference|3|alpha|fxo_alpha_2|fxo_detail_preserving,fxo_bicubic
-    aurea.text.prism|0|shape|fxl_shape|fxo_linear,fxo_radial,fxo_conical
-    aurea.text.prism|1|mapping|fxl_map_by|fxo_character,fxo_word,fxo_line,fxo_entire_text
-    aurea.text.prism|2|target|fx_aplicar_em|fxo_fill,fxo_stroke,fxo_fill_and_stroke
-    aurea.text.prism|3|palette|fx_diffusion_palette|fxo_custom_2,fxo_prism,fxo_glacier,fxo_ember,fxo_silver,fxo_spectrum
-    aurea.text.prism|4|gradient|fxl_rgba_gradient|
-    aurea.text.prism|5|color_space|fxl_color_space|fxo_rgb,fxo_hsl,fxo_oklab
-    aurea.text.prism|6|blend|fxl_blend_mode_3|fxo_normal,fxo_multiply,fxo_screen,fxo_overlay,fxo_alpha_matte
-    aurea.text.prism|7|mix|fxl_amount|
-    aurea.text.prism|8|center_x|fxl_center_x|
-    aurea.text.prism|9|center_y|fxl_center_y|
-    aurea.text.prism|10|angle|fxl_angle|
-    aurea.text.prism|11|scale|fxl_scale|
-    aurea.text.prism|12|aspect|fxl_aspect_ratio|
-    aurea.text.prism|13|offset|fxl_offset|
-    aurea.text.prism|14|repeats|fxl_repeats|
-    aurea.text.prism|15|extend|fxl_extend|fxo_clamp,fxo_repeat,fxo_mirror
-    aurea.text.prism|16|gamma|fxl_gamma_2|
-    aurea.text.prism|17|hue|fx_matiz|
-    aurea.text.prism|18|exposure|fxl_hdr_exposure|
-    aurea.text.prism|19|stagger_by|fxl_stagger_by|fxo_character,fxo_word,fxo_line
-    aurea.text.prism|20|delay|fxl_delay_per_unit|
-    aurea.text.prism|21|offset_step|fxl_offset_per_unit|
-    aurea.text.prism|22|order|fxl_draw_order|fxo_forward,fxo_reverse,fxo_random_2,fxo_interleave
-    aurea.text.prism|23|seed|fxl_seed|
-    aurea.text.prism|24|size_mode|fxl_size_mode|fxo_auto,fxo_manual
-    aurea.text.prism|25|size_px|fxl_fixed_size|
-    aurea.text.prism|26|align_bounds|fxl_bounds_alignment|fxo_none_2,fxo_x,fxo_y,fxo_xy
-    aurea.text.prism|27|range_start|fxl_start|
-    aurea.text.prism|28|range_end|fxl_end|
-    aurea.text.prism|29|outside_range|fxl_outside_range|fxo_original,fxo_hidden
-    aurea.text.prism|30|radial_x|fxl_radial_origin_x|
-    aurea.text.prism|31|radial_y|fxl_radial_origin_y|
-    aurea.text.prism|32|offset_mode|fxl_gradient_offset_mode|fxo_cascade,fxo_stack
-    aurea.text.prism|33|size_step|fxl_size_per_unit|
-    aurea.text.prism|34|hue_step|fxl_hue_per_unit|
-    aurea.text.prism|35|angle_step|fxl_angle_per_unit|
-    aurea.text.prism|36|center_step_x|fxl_center_x_per_unit|
-    aurea.text.prism|37|center_step_y|fxl_center_y_per_unit|
-    aurea.text.prism|38|scale_step_x|fxl_scale_x_per_unit|
-    aurea.text.prism|39|scale_step_y|fxl_scale_y_per_unit|
-    aurea.text.prism|40|opacity_step|fxl_opacity_per_unit|
-    aurea.text.prism|41|path_mode|fxl_path_offset_mode|fxo_cascade,fxo_stack
-    aurea.text.prism|42|path_delay|fxl_path_delay|
-    aurea.text.prism|43|path_x|fxl_path_position_x|
-    aurea.text.prism|44|path_y|fxl_path_position_y|
-    aurea.text.prism|45|path_rotation|fxl_path_rotation|
-    aurea.text.prism|46|path_scale_x|fxl_path_scale_x|
-    aurea.text.prism|47|path_scale_y|fxl_path_scale_y|
-    aurea.text.prism|48|stroke_width|fxl_stroke_thickness_2|
-    aurea.text.prism|49|solo_stroke|fxl_stroke_only|
-    aurea.text.prism|50|original|fxl_composite_original_3|fxo_none_2,fxo_behind,fxo_above
-    aurea.text.prism|51|original_opacity|fxl_original_opacity|
-    aurea.text.prism|52|source_matte|fxl_source_matte|fxo_none_2,fxo_alpha_2,fx045g_opt_luma
-    aurea.text.prism|53|invert_matte|fxl_invert_mask_2|
-    aurea.text.prism|54|stop_blend|fxl_color_transition_softness|
-    aurea.text.prism|55|range_units|fxl_units|fxo_percentage,fxo_index
-    aurea.text.prism|56|range_offset|fxl_range_offset|
-    aurea.text.prism|57|wrap_cycle|fxl_wrap_cycle|
-    aurea.text.prism|58|mirror_palette|fxl_mirror_palette|
-    aurea.transition.range_wipe|0|start|fxl_start|
-    aurea.transition.range_wipe|1|end|fxl_end|
-    aurea.transition.range_wipe|2|angle|fx_angulo|
-    aurea.transition.range_wipe|3|feather|fxl_softness|
-    aurea.blur.chromatic_zoom|0|center|fx_centro|
-    aurea.blur.chromatic_zoom|1|amount|fx_intensidade|
-    aurea.blur.chromatic_zoom|2|repeat_edge|fx_esticar_bordas|
-    aurea.blur.chromatic_zoom|3|mix|fx_mistura|
-    aurea.blur.chromatic_zoom|4|separation|fxl_rgb_separation|
-    aurea.blur.chromatic_zoom|5|adaptive|fxl_adaptive_sampling|
+    aurea.rig.face|0|head_turn_x|fxl_head_turn|
+    aurea.rig.face|1|nod_y|fxl_nod|
+    aurea.rig.face|2|tilt_z|fxl_head_tilt|
+    aurea.rig.face|3|eye_open_left|fxl_left_eye_open|
+    aurea.rig.face|4|eye_open_right|fxl_right_eye_open|
+    aurea.rig.face|5|mouth_open|fxl_mouth_open|
+    aurea.rig.face|6|mouth_smile|fxl_smile|
+    aurea.rig.face|7|brow_left|fxl_left_brow|
+    aurea.rig.face|8|brow_right|fxl_right_brow|
+    aurea.rig.face|9|body_sway|fxl_body|
+    aurea.rig.face|10|breathing|fxl_breathing|
+    aurea.rig.face|11|breathing_speed|fxl_breathing_speed|
+    aurea.rig.face|23|hair_physics|fxl_hair_physics|
+    aurea.rig.part|0|role|fxl_part|fxo_background,fxo_back_hair,fxl_body,fxo_neck,fxo_face,fxo_ears,fxo_left_eye_white,fxo_right_eye_white,fxo_left_iris,fxo_right_iris,fxo_left_lashes,fxo_right_lashes,fxl_left_brow,fxl_right_brow,fxo_nose,fxo_mouth,fxo_bangs,fxo_side_locks,fxo_glasses
+    aurea.rig.part|1|depth|fxo_depth|
+    aurea.rig.part|2|controller|fxl_rig_control|
     """
 
     /// "typeId#índice" → dica do parâmetro.
@@ -3494,6 +4231,7 @@ enum EffectI18nTable {
     }()
 
     private static let tipsTable = """
+    aurea.color.space_transform|0|input|fxt_interprets_the_rgb_values_in_this_space
     aurea.distort.turbulence|11|pinning|fxt_pinning_holds_the_image_at_the_layer_s_e
     aurea.light.deep_glow|0|threshold|fxt_only_what_is_brighter_than_the_threshold
     aurea.distort.ripple|6|speed|fxl_sea_tip_ripple_speed
@@ -3544,11 +4282,16 @@ enum EffectI18nTable {
     }()
 
     private static let sectionsTable = """
+    aurea.color.duotone|1|matte|fxo_matte
+    aurea.color.quadtone|1|levels|fxs_positions_softness
+    aurea.color.quadtone|2|matte|fxo_matte
     aurea.distort.turbulence|1|cycle|fxl_cycle_evolution
     aurea.distort.turbulence|2|offset|fxl_offset
     aurea.distort.turbulence|3|edges|fxl_edges
-    aurea.distort.turbulence|4|output|fxs_output
+    aurea.distort.turbulence|4|output|fxo_out
     aurea.distort.turbulent_displace_reference|1|evolution|fxs_evolution_options
+    aurea.stylize.film_profile_grain|1|tones|fxs_tonal_response
+    aurea.stylize.film_profile_grain|2|channels|fxs_color_channels
     aurea.light.deep_glow|1|threshold|fxl_threshold
     aurea.light.deep_glow|2|color|fxl_color
     aurea.light.deep_glow|3|ref_input|fxs_input
@@ -3556,6 +4299,9 @@ enum EffectI18nTable {
     aurea.light.deep_glow|5|ref_tint|fxl_tint
     aurea.light.deep_glow|6|ref_quality|fxs_quality
     aurea.light.deep_glow|7|ref_output|fxs_compositing
+    aurea.light.multiscale_glow|1|secondary|fxs_secondary_halo
+    aurea.blur.rack_defocus|1|focus|fx_name_rack_focus
+    aurea.blur.rack_defocus|2|optics|fx_name_warp
     aurea.light.lens_flare|1|color|fxl_color
     aurea.light.lens_flare|2|elements|fxs_elements
     aurea.light.scene_flare|1|color|fxl_color
@@ -3565,27 +4311,40 @@ enum EffectI18nTable {
     aurea.text.transform|3|visual|fxs_visual_attrs
     aurea.text.transform|4|interpolation|fxs_interp_ease
     aurea.text.transform|5|random|fxl_random_order
+    aurea.text.prism|1|style|fxl_style
+    aurea.text.prism|2|geometry|fxs_geometry
+    aurea.text.prism|3|color|fxl_color
+    aurea.text.prism|4|stagger|fxs_stagger
+    aurea.text.prism|5|paths|fxs_path_motion
+    aurea.text.prism|6|stroke|fxo_stroke
+    aurea.text.prism|7|composite|fxo_composite
     aurea.glitch.signal_reference|1|luma|fxl_luma_modulation
     aurea.glitch.signal_reference|2|distortion|fxs_tv_distortion
     aurea.glitch.signal_reference|3|experimental|fxs_experimental_parameters
     aurea.distort.mirror|1|copy|fxs_copy
+    aurea.light.light_leak|1|shape|fxs_shape_motion
+    aurea.light.light_leak|2|flicker|fxl_flicker
     aurea.generate.raster_extrude|1|material|fxs_material
     aurea.3d.shatter|1|pieces|fxl_pieces
     aurea.3d.shatter|2|physics|fxs_physics
     aurea.3d.shatter|3|look|fxs_appearance
+    aurea.3d.explode|1|timing|fxl_time
+    aurea.3d.explode|2|pieces|fxl_pieces
+    aurea.3d.explode|3|physics|fxs_physics
+    aurea.3d.explode|4|look|fxs_appearance
     aurea.time.flow_retime|1|duplicates|fxl_replace_duplicate_frames
-    aurea.light.saber|1|glow|fxs_outer_glow
+    aurea.light.saber|1|glow|fxl_outer_glow
     aurea.light.saber|2|core|fxs_core
     aurea.light.saber|3|core_shape|fxs_core_shape
     aurea.light.saber|4|masks|fxs_masks
     aurea.light.saber|5|flicker|fxl_flicker
     aurea.light.saber|6|distortion|fxs_distortion
-    aurea.light.saber|7|output|fxs_output
+    aurea.light.saber|7|output|fxo_out
     aurea.generate.aurora|1|environment|fxl_ambient
     aurea.color.grade|1|basic|fxs_basic
     aurea.color.grade|2|wheels|fxs_color_wheels
     aurea.color.grade|3|curves|fx_name_curves
-    aurea.color.grade|4|hsl|fxs_hsl
+    aurea.color.grade|4|hsl|fxo_hsl
     aurea.color.grade|5|secondary|fxl_secondary_correction
     aurea.color.grade|6|creative|fxs_creative
     aurea.color.grade|7|lut|fxs_lut
@@ -3603,12 +4362,12 @@ enum EffectI18nTable {
     aurea.distort.hex_tile_rotate|1|grid|fx_grade
     aurea.distort.hex_tile_shift|1|grid|fx_grade
     aurea.distort.hollow_box|1|sides|fxs_sides
-    aurea.distort.hollow_box|2|light|fxo_brightness
+    aurea.distort.hollow_box|2|light|fxl_light
     aurea.distort.hollow_box|3|quality|fxl_quality
     aurea.generate.extrude_reference|1|paths|fxs_paths
     aurea.generate.extrude_reference|2|extrusion|fxs_extrusion
-    aurea.generate.extrude_reference|3|stroke|fxo_outline
-    aurea.generate.extrude_reference|4|fill|fxs_fill
+    aurea.generate.extrude_reference|3|stroke|fxo_stroke
+    aurea.generate.extrude_reference|4|fill|fxo_fill
     aurea.generate.extrude_reference|5|placement|fxs_placement
     aurea.generate.extrude_reference|6|quality|fxl_quality
     aurea.generate.extrude_reference|7|buffers|fxs_buffers
@@ -3634,13 +4393,6 @@ enum EffectI18nTable {
     aurea.3d.card_dance_reference|5|camera|fxo_camera_position
     aurea.3d.card_dance_reference|6|lighting|fx_deform_lighting
     aurea.3d.card_dance_reference|7|material|fxs_material
-    aurea.text.prism|1|style|fxl_style
-    aurea.text.prism|2|geometry|fxs_geometry
-    aurea.text.prism|3|color|fxl_color
-    aurea.text.prism|4|stagger|fxs_stagger
-    aurea.text.prism|5|paths|fxs_path_motion
-    aurea.text.prism|6|stroke|fxo_stroke
-    aurea.text.prism|7|composite|fxo_composite
     """
 
 }

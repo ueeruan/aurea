@@ -1,6 +1,10 @@
 package com.aurea.aurea.editor
 
 import android.app.Application
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
 import androidx.compose.animation.core.Animatable
@@ -310,7 +314,7 @@ internal fun LayerPanel(store: EditorStore, ui: EditorUi, layerId: Long) {
     DisposableEffect(Unit) { onDispose { LayerPanelState.speedPopout = false } }
     // Voltar fecha o painel embutido antes de sair do painel da camada.
     BackHandler(enabled = popout != LayerPopout.None) { closePopout() }
-    MissingMediaNotice(layerId, bits)
+    MissingMediaNotice(store, layerId, l.kind, bits)
 
     // P1-10: o painel sobe 100 dp em 100 ms ao escolher a camada (voltar de um
     // painel de propriedade não anima: ele já estava embaixo).
@@ -717,18 +721,32 @@ internal fun LayerPresetsEmptyDialog(store: EditorStore, ui: EditorUi) {
 // =============================================================================
 
 @Composable
-private fun MissingMediaNotice(layerId: Long, bits: Int) {
+private fun MissingMediaNotice(store: EditorStore, layerId: Long, kind: Int, bits: Int) {
     var show by remember(layerId) { mutableStateOf(false) }
+    // 1.0.8 (erro 18): o aviso deixa de ser beco sem saída. Vídeo e foto
+    // ganham "Substituir mídia" ali mesmo (o motor troca a fonte e mantém
+    // transformação, keyframes, efeitos e máscaras). A mídia guardada por URI
+    // que não abre mais (o motor não confere URI) também acende o aviso.
+    val replaceable = kind == LayerType.Video.kind || kind == LayerType.Image.kind
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
+        if (uri != null) store.replaceMedia(layerId, uri)
+    }
     LaunchedEffect(layerId, bits and LayerPanelBits.MISSING_MEDIA) {
-        if (bits and LayerPanelBits.MISSING_MEDIA != 0 && LayerPanelState.warnedMissing.add(layerId)) show = true
+        val missing = bits and LayerPanelBits.MISSING_MEDIA != 0 ||
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { store.layerMediaUnreadable(layerId) }
+        if (missing && LayerPanelState.warnedMissing.add(layerId)) show = true
     }
     if (show) {
         AureaAlert(
             title = stringResource(R.string.om_lp_missing_media_title),
             message = stringResource(R.string.om_lp_missing_media),
-            confirmLabel = stringResource(R.string.common_ok),
-            showCancel = false,
-            onConfirm = {},
+            confirmLabel = stringResource(if (replaceable) R.string.layer_replace_media else R.string.common_ok),
+            showCancel = replaceable,
+            onConfirm = {
+                if (replaceable) runCatching {
+                    picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+                }
+            },
             onDismiss = { show = false },
         )
     }

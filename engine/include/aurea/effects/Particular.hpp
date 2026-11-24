@@ -21,8 +21,10 @@
 namespace aurea::particular {
 
 /// Presets: 0 Padrão, 1 Chuva, 2 Neve, 3 Fogo, 4 Faíscas, 5 Fogos de
-/// artifício, 6 Poeira, 7 Bokeh, 8 Rede (plexus).
-inline constexpr u32 kPresetCount = 9;
+/// artifício, 6 Poeira, 7 Bokeh, 8 Rede (plexus); 1.0.8: 9 Borboletas,
+/// 10 Folhas caindo, 11 Pétalas, 12 Corações, 13 Estrelas cintilantes,
+/// 14 Vaga-lumes, 15 Confetes, 16 Flocos de neve.
+inline constexpr u32 kPresetCount = 17;
 /// Número do preset 0 na API do motor/bridges (preset `kPresetBase + i`).
 inline constexpr u32 kPresetBase = 20;
 
@@ -40,7 +42,16 @@ enum Param : u32 {
     kPlexus, kPlexusDistance, kPlexusWidth, kPlexusOpacity, kPlexusPoints,
     // Superfície da rede (0.2.1): faces transparentes entre trios ligados.
     kPlexusSurface, kPlexusSurfaceOpacity, kPlexusSurfacePoints,
+    // Forma da partícula (1.0.8): desenho, giro, bater de asas/balanço, cintilar.
+    kShape, kSpin, kFlutter, kTwinkle,
     kParamCount,
+};
+
+/// Formas de `kShape` (ordem = contrato com os projetos).
+enum Shape : u32 {
+    kShapeDisc = 0, kShapeStar, kShapeHeart, kShapeLeaf, kShapePetal, kShapeButterfly,
+    kShapeConfetti, kShapeSparkle, kShapeSnowflake,
+    kShapeCount,
 };
 
 /// Escreve o preset `preset` (0..kPresetCount-1) na instância: volta todos os

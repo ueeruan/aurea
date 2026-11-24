@@ -19,4 +19,18 @@
     <string name="fx3d_image_none">No image</string>
     <string name="fx3d_effect_added">Effect added — adjust it in Effects</string>
     <string name="fx3d_add_failed">This effect only works on an unlocked 3D object.</string>
+    <!-- Explosão 3D (aurea.3d.explode) -->
+    <string name="fx3d_name_explode">Explode</string>
+    <string name="fx3d_desc_explode">Breaks the 3D object into pieces that fly from the impact point, with spin, gravity and glowing edges; or assembles it in reverse.</string>
+    <string name="fxo_by_progress">By progress</string>
+    <string name="fxl_impact_point">Impact point</string>
+    <string name="fxl_spread_out">Spread out</string>
+    <string name="fxl_random_axis">Random axis</string>
+    <string name="fxl_impact_wave">Impact wave</string>
+    <string name="fxl_scale_at_end">Scale at end</string>
+    <string name="fxl_assemble_reverse">Assemble (reverse)</string>
+    <string name="fxl_dark_interior">Dark interior</string>
+    <string name="fxp_explode_glass">Shatter glass</string>
+    <string name="fxp_explode_assemble">Assemble</string>
+    <string name="fxp_explode_side_impact">Side impact</string>
 </resources>

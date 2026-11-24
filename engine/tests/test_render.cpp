@@ -1704,6 +1704,7 @@ AUREA_TEST(ShaderLibrary, RejectedNewShaderDoesNotTakeDownTheRenderer) {
         ShaderId::effects_glow_octave_down_frag, ShaderId::effects_glow_octave_up_frag,
         ShaderId::effects_glow_octave_composite_frag, ShaderId::effects_mesh_warp_vert,
         ShaderId::effects_mesh_warp_frag, ShaderId::effects_puppet_vert, ShaderId::effects_puppet_frag,
+        ShaderId::effects_face_rig_vert, ShaderId::effects_face_rig_frag,
         ShaderId::effects_ball_grid_vert, ShaderId::effects_ball_grid_frag, ShaderId::effects_rotobrush_frag,
         ShaderId::scene3d_plane_frag, ShaderId::composite_blend_frag,
     };

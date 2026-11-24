@@ -692,7 +692,9 @@ struct MediaBrowserView: View {
         }.onEnded { value in
             guard dragStart != nil else { return }
             dragStart = nil
-            let target: CGFloat = value.predictedEndTranslation.height > 300 ? 0 : (collapsed > previewFull / 3 ? previewFull : 0)
+            // 1.0.8 (par do MediaBrowser.kt): arrasto lento para cima recolhe a partir de 15 %.
+            let target: CGFloat = value.predictedEndTranslation.height > 300 ? 0
+                : (value.predictedEndTranslation.height < -60 || collapsed > previewFull * 0.15 ? previewFull : 0)
             withAnimation(omegaOvershoot) { collapsed = target }
         })
     }

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.0.8 Edição automática (autoedit/AutoEdit.kt; iOS AutoEditView.swift). -->
+<resources>
+    <string name="autoedit_title">Edición automática</string>
+    <string name="autoedit_subtitle">Cortes, zoom, sonidos, música, voz, color y subtítulos en una composición nueva. El clip original queda intacto.</string>
+    <string name="autoedit_home_hint">Elige un video y Aurea lo edita solo</string>
+    <string name="autoedit_intensity">Intensidad de los cortes</string>
+    <string name="autoedit_light">Suave</string>
+    <string name="autoedit_medium">Media</string>
+    <string name="autoedit_strong">Fuerte</string>
+    <string name="autoedit_recording">Tipo de grabación</string>
+    <string name="autoedit_retakes">Con repeticiones</string>
+    <string name="autoedit_continuous">Continua (entrevista)</string>
+    <string name="autoedit_language">Idioma del habla</string>
+    <string name="autoedit_lang_pt">Portugués</string>
+    <string name="autoedit_lang_en">Inglés</string>
+    <string name="autoedit_lang_es">Español</string>
+    <string name="autoedit_steps">Etapas</string>
+    <string name="autoedit_cuts">Cortes</string>
+    <string name="autoedit_zoom">Zoom y destello</string>
+    <string name="autoedit_sounds">Sonidos</string>
+    <string name="autoedit_music">Música</string>
+    <string name="autoedit_voice">Voz</string>
+    <string name="autoedit_color">Color</string>
+    <string name="autoedit_captions">Subtítulos</string>
+    <string name="autoedit_start">Editar</string>
+    <string name="autoedit_again">Editar de nuevo</string>
+    <string name="autoedit_cancel">Cancelar</string>
+    <string name="autoedit_close">Cerrar</string>
+    <string name="autoedit_step_transcribe">Transcribiendo el habla</string>
+    <string name="autoedit_step_prepare">Preparando</string>
+    <string name="autoedit_step_audio">Analizando el audio</string>
+    <string name="autoedit_step_cuts">Planeando los cortes</string>
+    <string name="autoedit_step_faces">Buscando rostros</string>
+    <string name="autoedit_step_zoom">Planeando el zoom</string>
+    <string name="autoedit_step_sounds">Eligiendo los sonidos</string>
+    <string name="autoedit_step_music">Eligiendo la música</string>
+    <string name="autoedit_step_voice">Tratando la voz</string>
+    <string name="autoedit_step_color">Revisando el color</string>
+    <string name="autoedit_step_build">Montando la edición</string>
+    <string name="autoedit_done">Listo: %1$s → %2$s</string>
+    <string name="autoedit_failed">No se pudo editar: %1$s</string>
+    <string name="autoedit_cancelled">Edición automática cancelada</string>
+    <string name="autoedit_need_video">Elige un clip de video</string>
+    <string name="autoedit_error_speed">El clip tiene la velocidad cambiada; vuelve a la velocidad normal e inténtalo de nuevo</string>
+    <string name="autoedit_error_short">El clip es demasiado corto</string>
+</resources>

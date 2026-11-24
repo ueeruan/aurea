@@ -207,6 +207,37 @@ internal fun Element3DPanel(env: PanelEnv) {
     }
 }
 
+/**
+ * EXPLOSÃO (`aurea.3d.explode`): o objeto 3D INTEIRO (modelo, forma ou texto 3D) em
+ * pedaços — efeito do objeto, não de uma parte (por isso `addEffect`, não
+ * `addPartEffect`, que gravaria a parte no 1º parâmetro). Uma vez por camada: já
+ * aplicado, só abre os Efeitos. Pago (o motor decide, HyperEffectGate): sem o
+ * acesso o cartão leva o cadeado e abre o paywall. Par do iOS: `Explode3DCard`
+ * (Panel3DView.swift), id `panel3d.fx.explode`.
+ */
+@Composable
+private fun Explode3DCard(env: PanelEnv) {
+    val store = env.store
+    val type = effectTypeId("aurea.3d.explode")
+    val locked = com.aurea.aurea.effects.HyperEffectGate.locked(type)
+    var paywall by remember { mutableStateOf(false) }
+    val name = stringResource(R.string.fx3d_name_explode)
+    Box(Modifier.fillMaxWidth().testTag("panel3d.fx.explode")) {
+        ActionCard(name, stringResource(R.string.fx3d_desc_explode)) {
+            when {
+                store.effects.any { it.typeId == type } -> env.onOpenPanel(EditorPanel.Effects)
+                locked -> paywall = true
+                else -> {
+                    store.addEffect(type)
+                    env.onOpenPanel(EditorPanel.Effects)
+                }
+            }
+        }
+        if (locked) com.aurea.aurea.effects.HyperLockBadge(Modifier.align(Alignment.TopEnd).padding(6.dp))
+    }
+    if (paywall) com.aurea.aurea.hyper.PaywallDialog(com.aurea.aurea.hyper.PaidItem.effect(type), name) { paywall = false }
+}
+
 /** 0.5.4: o aviso do texto 3D sem o acesso (o par do selo da linha de um efeito pago já aplicado). */
 @Composable
 private fun Text3DLockedNotice(onOpen: () -> Unit) {
@@ -314,6 +345,8 @@ private fun PartsTab(env: PanelEnv, shape: com.aurea.aurea.state.Shape3DInfo?) {
         val names = remember(store.primary, store.curveRevision) { store.modelPartNames(includeJoints = true) }
         if (names.isNotEmpty()) {
             Parts3DEditor(env, names, animationOnly = true)
+            Spacer(Modifier.height(8.dp))
+            Explode3DCard(env)
             return
         }
     }
@@ -333,6 +366,8 @@ private fun PartsTab(env: PanelEnv, shape: com.aurea.aurea.state.Shape3DInfo?) {
     Box(Modifier.testTag("panel3d.fx.part_texture")) {
         ActionCard(stringResource(R.string.fx3d_name_part_texture), stringResource(R.string.fx3d_desc_part_texture)) { add("aurea.3d.part_texture") }
     }
+    Spacer(Modifier.height(6.dp))
+    Explode3DCard(env)
     if (shape != null) {
         Spacer(Modifier.height(6.dp))
         ActionCard(stringResource(R.string.shape3d_layout_effect), stringResource(R.string.shape3d_layout_hint)) {
@@ -615,6 +650,7 @@ private fun Text3DShapeTab(env: PanelEnv, info: Text3DInfo) {
         env.onOpenPanel(EditorPanel.Effects)
     }
     }
+    Box(Modifier.padding(horizontal = 10.dp)) { Explode3DCard(env) }
 }
 
 @Composable

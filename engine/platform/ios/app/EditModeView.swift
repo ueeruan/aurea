@@ -379,6 +379,8 @@ struct EditModeView: View {
                     _ = model.engine.extractAudio(fromLayer: clip.id); model.refreshModel(force: true)
                 })
                 list.append(item("stabilize", .track, "edit_clip_stabilize") { panel(.tracking) })
+                // 1.0.8: Edição automática do clipe (cortes, zoom, sons, música, voz, cor, legendas).
+                list.append(item("autoEdit", .sequence, "autoedit_title") { model.pause(); model.autoEdit.open(clip.id, model: model) })
             }
             if isMain(clip) { list.append(item("toOverlay", .overlay, "edit_clip_to_overlay") { model.moveClipToOverlay(clip.id) }) }
             else { list.append(item("toMain", .mainTrack, "edit_clip_to_main") { model.moveClipToMainTrack(clip.id) }) }

@@ -157,6 +157,32 @@ Result<std::vector<SpeechChunk>> export_speech_chunks(VideoSourceFactory& factor
     }
 }
 
+Result<std::vector<f32>> decode_mono16k(VideoSourceFactory& factory, const std::string& source,
+    std::atomic<bool>& cancelled, double maxSeconds) noexcept {
+    try {
+        auto decoder = factory.open_audio(source.c_str());
+        if (!decoder) return Status{Errc::DecodeFailed, "midia sem audio compativel"};
+        const auto info = decoder->info();
+        if (info.channels == 0 || info.channels > 32 || info.sampleRate < 8000 || info.sampleRate > 192000)
+            return Status{Errc::UnsupportedFormat, "formato de audio invalido"};
+        const f64 duration = std::min(info.durationUs / 1000000.0, std::max(0.0, maxSeconds));
+        if (!(duration > 0.05)) return Status{Errc::InvalidArgument, "midia sem audio"};
+        const i64 last = static_cast<i64>(std::llround(duration * kRate));
+        std::vector<f32> out;
+        out.reserve(static_cast<usize>(last));
+        bool ended = false;
+        for (i64 at = 0; at < last && !ended;) {
+            const i64 n = std::min<i64>(last - at, static_cast<i64>(kReadSec * kRate));
+            auto read = read_span(*decoder, info, at, n, cancelled, out, ended);
+            if (!read) return read;
+            at += n;
+        }
+        return out;
+    } catch (const std::bad_alloc&) {
+        return Status{Errc::OutOfMemory, "memoria insuficiente"};
+    }
+}
+
 Result<std::vector<CaptionWord>> transcribe_local(VideoSourceFactory& factory,
     const std::string& source, const std::string& model, const std::string& language,
     std::atomic<bool>& cancelled, const std::function<void(int)>& progress, double start, double end, bool translateEnglish) noexcept {

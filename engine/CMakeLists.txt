@@ -204,6 +204,10 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/MeshWarpEffect.cpp
     src/effects/Puppet.cpp
     src/effects/builtin/PuppetEffect.cpp
+    src/effects/FaceRig.cpp                      # Rig 2D de rosto
+    src/effects/builtin/FaceRigEffect.cpp
+    src/effects/FaceRigParts.cpp                 # Rig 2D v2: separar em partes
+    src/effects/builtin/FaceRigPartEffect.cpp
     src/effects/HeadbopRig.cpp
     src/effects/builtin/HeadbopEffect.cpp
     src/effects/builtin/KeyingExtras.cpp
@@ -228,6 +232,7 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/ParticularEffect.cpp
     src/effects/builtin/DisintegrateEffect.cpp
     src/effects/builtin/Object3DEffects.cpp
+    src/effects/builtin/Explode3DEffect.cpp
     src/effects/builtin/FlowTimeEffects.cpp
     src/effects/builtin/CCEffects.cpp
     src/effects/builtin/CCStylizeEffects.cpp
@@ -261,6 +266,7 @@ set(AUREA_CORE_SOURCES
     src/media/ImageSequence.cpp
     src/media/SourceWindow.cpp
     src/media/MediaCut.cpp
+    src/media/MediaRelink.cpp   # 1.0.8: mídia ausente religada antes do erro 18
     src/media/ThumbnailService.cpp
     src/media/PreviewProxy.cpp
     src/ai/DepthMapService.cpp
@@ -294,6 +300,11 @@ set(AUREA_CORE_SOURCES
     src/engine/EngineTextExplode.cpp
     src/engine/EngineUiMode.cpp
     src/engine/EngineCaptionPresets.cpp
+    src/autoedit/AutoEditAudio.cpp     # 1.0.8 Edição automática (regras puras)
+    src/autoedit/AutoEditCuts.cpp
+    src/autoedit/AutoEditMotion.cpp
+    src/autoedit/AutoEditSounds.cpp
+    src/engine/EngineAutoEdit.cpp
     src/engine/EngineAssistant.cpp
     src/engine/EngineMcpTools.cpp
     src/vector/Vector.cpp
@@ -307,6 +318,8 @@ set(AUREA_CORE_SOURCES
     src/engine/EngineRig.cpp
     src/engine/EngineMeshWarp.cpp
     src/engine/EnginePuppet.cpp
+    src/engine/EngineFaceRig.cpp   # Rig 2D de rosto
+    src/engine/EngineFaceRigParts.cpp   # Rig 2D v2: separar em partes
     src/engine/EngineHeadbop.cpp   # 0.5.2 Headbop
     src/engine/EngineShape3D.cpp
     src/engine/EngineRigPose.cpp
@@ -360,6 +373,7 @@ set(AUREA_CORE_SOURCES
     src/scene3d/Text3D.cpp
     src/scene3d/Shape3D.cpp
     src/scene3d/PartEffects.cpp
+    src/scene3d/Explode3D.cpp
     src/scene3d/RigPose.cpp
     src/scene3d/RigSkeleton.cpp
     src/scene3d/MaterialPreview.cpp
@@ -532,6 +546,8 @@ set(AUREA_IMPORT_BOUNDARIES
 # 0.5.2 armazenamento: leitura de projetos e varredura de pastas devolvem Status.
 list(APPEND AUREA_IMPORT_BOUNDARIES src/project/MediaStorage.cpp src/engine/EngineStorage.cpp)
 list(APPEND AUREA_IMPORT_BOUNDARIES src/engine/EngineAeImport.cpp src/project/AeProject.cpp src/project/AeProjectSource.cpp)
+# 1.0.8: religar mídia (varredura de pastas) e separar o rig em partes (alocação grande).
+list(APPEND AUREA_IMPORT_BOUNDARIES src/media/MediaRelink.cpp src/engine/EngineFaceRigParts.cpp)
 list(APPEND AUREA_IMPORT_BOUNDARIES src/export/ExportRecovery.cpp src/export/ExportCheckpoint.cpp src/export/ExportSinkStartup.cpp
     src/export/FFmpegExportSink.cpp src/export/AndroidVideoEncoder.cpp src/export/AppleVideoEncoder.cpp
     src/export/OfflineAudioSnapshot.cpp src/export/OfflineAudioBlockSource.cpp)

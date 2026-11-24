@@ -66,7 +66,9 @@ internal fun AeImportSheet(store: EditorStore, result: EditorStore.AeImportResul
                 Text(stringResource(R.string.ae_counts, result.effects, result.keyframes, result.layers, result.expressions, result.animators),
                     modifier = Modifier.testTag("ae.counts"), style = AureaType.Base.merge(TextStyle(fontSize = 14.sp)))
             }
-            if (result.message.isNotBlank()) Text(result.message, style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)))
+            // 1.0.8: o código do motor na língua do app; o texto em pt-BR fica de reserva.
+            val message = aeReportText(result.messageKey, result.messageArgs) ?: result.message
+            if (message.isNotBlank()) Text(message, style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)))
             if (result.skipped.isNotEmpty()) {
                 Text(stringResource(R.string.ae_skipped_title, result.skipped.size), modifier = Modifier.padding(top = 8.dp),
                     style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600, color = AureaColors.Warning)))
@@ -102,7 +104,8 @@ private fun ItemRow(item: EditorStore.AeImportItem) {
     val line = if (item.line > 0) " · " + stringResource(R.string.ae_line, item.line) else ""
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(AureaColors.Chip).padding(horizontal = 12.dp, vertical = 8.dp)) {
         Text("$kind · ${item.name}$line", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W500)))
-        if (item.reason.isNotBlank()) Text(item.reason, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
+        val reason = aeReportText(item.reasonKey, item.reasonArgs) ?: item.reason
+        if (reason.isNotBlank()) Text(reason, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
     }
 }
 
@@ -115,9 +118,60 @@ private fun aeKindLabel(kind: String): Int = when (kind) {
     "seletor" -> R.string.ae_kind_selector
     "expressao" -> R.string.ae_kind_expression
     "camada" -> R.string.ae_kind_layer
+    "composicao" -> R.string.ae_kind_composition
     "midia" -> R.string.ae_kind_media
     "mascara" -> R.string.ae_kind_mask
     "script" -> R.string.ae_kind_script
     "chamada" -> R.string.ae_kind_call
     else -> R.string.ae_kind_other
+}
+
+/**
+ * 1.0.8: códigos estáveis do relatório do motor (`messageKey`, `reasonKey`) →
+ * texto na língua do app. Nulo = código desconhecido (versão nova do motor):
+ * quem chama mostra o texto em pt-BR que veio junto. Par do iOS: AeImportSheet.
+ */
+@Composable
+internal fun aeReportText(key: String, args: List<String>): String? {
+    val id = aeReportString(key) ?: return null
+    return if (args.isEmpty()) stringResource(id) else stringResource(id, *args.toTypedArray())
+}
+
+private fun aeReportString(key: String): Int? = when (key) {
+    "ae_msg_ok_aep" -> R.string.ae_msg_ok_aep
+    "ae_msg_ok_jsx" -> R.string.ae_msg_ok_jsx
+    "ae_msg_ok_ffx" -> R.string.ae_msg_ok_ffx
+    "ae_err_nothing" -> R.string.ae_err_nothing
+    "ae_err_save_failed" -> R.string.ae_err_save_failed
+    "ae_err_name_taken" -> R.string.ae_err_name_taken
+    "ae_err_choose_project" -> R.string.ae_err_choose_project
+    "ae_err_choose_file" -> R.string.ae_err_choose_file
+    "ae_err_aep_unreadable" -> R.string.ae_err_aep_unreadable
+    "ae_err_ffx_unreadable" -> R.string.ae_err_ffx_unreadable
+    "ae_err_too_big" -> R.string.ae_err_too_big
+    "ae_err_open_failed" -> R.string.ae_err_open_failed
+    "ae_err_no_project" -> R.string.ae_err_no_project
+    "ae_err_project_changed" -> R.string.ae_err_project_changed
+    "ae_err_comp_limit" -> R.string.ae_err_comp_limit
+    "ae_err_aepx" -> R.string.ae_err_aepx
+    "ae_err_jsxbin" -> R.string.ae_err_jsxbin
+    "ae_err_archive_no_aep" -> R.string.ae_err_archive_no_aep
+    "ae_err_archive_compression" -> R.string.ae_err_archive_compression
+    "ae_err_archive_invalid" -> R.string.ae_err_archive_invalid
+    "ae_err_archive_password" -> R.string.ae_err_archive_password
+    "ae_err_archive_corrupt" -> R.string.ae_err_archive_corrupt
+    "ae_err_no_space" -> R.string.ae_err_no_space
+    "ae_err_internal" -> R.string.ae_err_internal
+    "ae_reason_effect_unknown" -> R.string.ae_reason_effect_unknown
+    "ae_reason_param_unknown" -> R.string.ae_reason_param_unknown
+    "ae_reason_media_missing" -> R.string.ae_reason_media_missing
+    "ae_reason_text_document" -> R.string.ae_reason_text_document
+    "ae_reason_params_approx" -> R.string.ae_reason_params_approx
+    "ae_reason_params_doc_order" -> R.string.ae_reason_params_doc_order
+    "ae_reason_curve_defaults" -> R.string.ae_reason_curve_defaults
+    "ae_reason_layer_null" -> R.string.ae_reason_layer_null
+    "ae_reason_comp_limit" -> R.string.ae_reason_comp_limit
+    "ae_reason_comp_cycle" -> R.string.ae_reason_comp_cycle
+    "ae_reason_media_variant" -> R.string.ae_reason_media_variant
+    else -> null
 }

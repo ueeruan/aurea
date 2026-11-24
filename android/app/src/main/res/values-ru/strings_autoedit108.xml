@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.0.8 Edição automática (autoedit/AutoEdit.kt; iOS AutoEditView.swift). -->
+<resources>
+    <string name="autoedit_title">Автомонтаж</string>
+    <string name="autoedit_subtitle">Склейки, зум, звуки, музыка, голос, цвет и субтитры в новой композиции. Исходный клип не меняется.</string>
+    <string name="autoedit_home_hint">Выберите видео, и Aurea смонтирует его сама</string>
+    <string name="autoedit_intensity">Сила склеек</string>
+    <string name="autoedit_light">Слабая</string>
+    <string name="autoedit_medium">Средняя</string>
+    <string name="autoedit_strong">Сильная</string>
+    <string name="autoedit_recording">Тип записи</string>
+    <string name="autoedit_retakes">С повторными дублями</string>
+    <string name="autoedit_continuous">Непрерывная (интервью)</string>
+    <string name="autoedit_language">Язык речи</string>
+    <string name="autoedit_lang_pt">Португальский</string>
+    <string name="autoedit_lang_en">Английский</string>
+    <string name="autoedit_lang_es">Испанский</string>
+    <string name="autoedit_steps">Этапы</string>
+    <string name="autoedit_cuts">Склейки</string>
+    <string name="autoedit_zoom">Зум и вспышка</string>
+    <string name="autoedit_sounds">Звуки</string>
+    <string name="autoedit_music">Музыка</string>
+    <string name="autoedit_voice">Голос</string>
+    <string name="autoedit_color">Цвет</string>
+    <string name="autoedit_captions">Субтитры</string>
+    <string name="autoedit_start">Смонтировать</string>
+    <string name="autoedit_again">Смонтировать заново</string>
+    <string name="autoedit_cancel">Отмена</string>
+    <string name="autoedit_close">Закрыть</string>
+    <string name="autoedit_step_transcribe">Расшифровка речи</string>
+    <string name="autoedit_step_prepare">Подготовка</string>
+    <string name="autoedit_step_audio">Анализ звука</string>
+    <string name="autoedit_step_cuts">Планирование склеек</string>
+    <string name="autoedit_step_faces">Поиск лиц</string>
+    <string name="autoedit_step_zoom">Планирование зума</string>
+    <string name="autoedit_step_sounds">Подбор звуков</string>
+    <string name="autoedit_step_music">Подбор музыки</string>
+    <string name="autoedit_step_voice">Обработка голоса</string>
+    <string name="autoedit_step_color">Проверка цвета</string>
+    <string name="autoedit_step_build">Сборка монтажа</string>
+    <string name="autoedit_done">Готово: %1$s → %2$s</string>
+    <string name="autoedit_failed">Не удалось смонтировать: %1$s</string>
+    <string name="autoedit_cancelled">Автомонтаж отменён</string>
+    <string name="autoedit_need_video">Выберите видеоклип</string>
+    <string name="autoedit_error_speed">У клипа изменена скорость; верните обычную скорость и попробуйте снова</string>
+    <string name="autoedit_error_short">Клип слишком короткий</string>
+</resources>

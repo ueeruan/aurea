@@ -94,6 +94,71 @@ std::string count_parts(const ImportReport& r) {
     add(r.expressions, "expressão", "expressões");
     return parts;
 }
+
+/// 1.0.8: textos conhecidos → código estável que as interfaces traduzem
+/// (strings_aeimport030.xml / AureaStrings.swift). Casa pelo começo do texto;
+/// `arg` = o que vem depois do prefixo vira o argumento (nome de arquivo etc.).
+struct KnownText { const char* prefix; const char* key; bool arg; };
+constexpr KnownText kMessages[] = {
+    {"Projeto do After Effects importado", "ae_msg_ok_aep", false},
+    {"Script do After Effects executado", "ae_msg_ok_jsx", false},
+    {"Preset do After Effects importado", "ae_msg_ok_ffx", false},
+    {"Nada do arquivo do After Effects", "ae_err_nothing", false},
+    {"Não foi possível salvar o novo projeto", "ae_err_save_failed", false},
+    {"Não foi possível preparar o arquivo do novo projeto", "ae_err_save_failed", false},
+    {"Não foi possível criar o projeto do After Effects", "ae_err_save_failed", false},
+    {"Não foi possível preparar as composições", "ae_err_save_failed", false},
+    {"Escolha um nome livre", "ae_err_name_taken", false},
+    {"Escolha um projeto .aep ou um pacote", "ae_err_choose_project", false},
+    {"Escolha um projeto .aep, um preset", "ae_err_choose_file", false},
+    {"Projeto do After Effects ilegível", "ae_err_aep_unreadable", false},
+    {"Preset do After Effects ilegível", "ae_err_ffx_unreadable", false},
+    {"Arquivo grande demais", "ae_err_too_big", false},
+    {"Script grande demais", "ae_err_too_big", false},
+    {"O arquivo .aep dentro do pacote excede", "ae_err_too_big", false},
+    {"Não foi possível ler o projeto .aep", "ae_err_too_big", false},
+    {"O conteúdo descompactado do projeto excede", "ae_err_too_big", false},
+    {"Não foi possível ler o pacote ou ele excede", "ae_err_too_big", false},
+    {"Nenhum arquivo escolhido", "ae_err_open_failed", false},
+    {"Não foi possível abrir o arquivo", "ae_err_open_failed", false},
+    {"Não foi possível ler o arquivo inteiro", "ae_err_open_failed", false},
+    {"Não foi possível abrir o ZIP ou RAR", "ae_err_archive_invalid", false},
+    {"Abra um projeto do Aurea", "ae_err_no_project", false},
+    {"Nenhum projeto aberto", "ae_err_no_project", false},
+    {"O projeto aberto mudou", "ae_err_project_changed", false},
+    {"O projeto aberto já tem 256 composições", "ae_err_comp_limit", false},
+    {"Salve o projeto do After Effects como .aep", "ae_err_aepx", false},
+    {"Script compilado (.jsxbin)", "ae_err_jsxbin", false},
+    {"O pacote não contém um projeto .aep", "ae_err_archive_no_aep", false},
+    {"Compressão do pacote não suportada", "ae_err_archive_compression", false},
+    {"Pacote inválido", "ae_err_archive_invalid", false},
+    {"O pacote contém um caminho", "ae_err_archive_invalid", false},
+    {"O arquivo selecionado pertence a um pacote protegido", "ae_err_archive_password", false},
+    {"Um arquivo dentro do pacote está incompleto", "ae_err_archive_corrupt", false},
+    {"Espaço insuficiente", "ae_err_no_space", false},
+    {"Não foi possível guardar as mídias originais", "ae_err_no_space", false},
+    {"Erro interno ao importar", "ae_err_internal", false},
+};
+constexpr KnownText kReasons[] = {
+    {"efeito sem equivalente no Aurea", "ae_reason_effect_unknown", false},
+    {"parâmetro sem equivalente no Aurea", "ae_reason_param_unknown", false},
+    {"arquivo de origem ausente", "ae_reason_media_missing", false},
+    {"o documento de texto do AE", "ae_reason_text_document", false},
+    {"parâmetros aproximados", "ae_reason_params_approx", false},
+    {"parâmetros pela ordem da documentação do AE", "ae_reason_params_doc_order", false},
+    {"curva aproximada", "ae_reason_curve_defaults", false},
+    {"tipo ou fonte sem equivalente no Aurea", "ae_reason_layer_null", false},
+    {"o Aurea comporta até 256 composições", "ae_reason_comp_limit", false},
+    {"a pré-composição usa a si mesma", "ae_reason_comp_cycle", false},
+    {"variante de mídia vinculada: ", "ae_reason_media_variant", true},
+};
+
+template <usize N>
+const KnownText* known(const KnownText (&table)[N], std::string_view text) noexcept {
+    for (const KnownText& k : table)
+        if (text.substr(0, std::strlen(k.prefix)) == k.prefix) return &k;
+    return nullptr;
+}
 } // namespace
 
 std::string report_json(const ImportReport& r) {
@@ -115,6 +180,12 @@ std::string report_json(const ImportReport& r) {
             w.key("name").value(std::string_view(valid_utf8(s.name)));
             w.key("reason").value(std::string_view(valid_utf8(s.reason)));
             w.key("line").value(s.line);
+            if (const KnownText* k = known(kReasons, s.reason)) {
+                w.key("reasonKey").value(std::string_view(k->key));
+                w.key("reasonArgs").begin_array();
+                if (k->arg) w.value(std::string_view(valid_utf8(std::string_view(s.reason).substr(std::strlen(k->prefix)))));
+                w.end_array();
+            }
             w.end_object();
         }
         w.end_array();
@@ -122,6 +193,14 @@ std::string report_json(const ImportReport& r) {
     list("skipped", r.skipped);
     list("notes", r.notes);
     w.key("message").value(std::string_view(valid_utf8(r.message)));
+    const KnownText* mk = r.messageKey.empty() ? known(kMessages, r.message) : nullptr;
+    const std::string_view messageKey = !r.messageKey.empty() ? std::string_view(r.messageKey) : mk ? std::string_view(mk->key) : std::string_view();
+    if (!messageKey.empty()) {
+        w.key("messageKey").value(messageKey);
+        w.key("messageArgs").begin_array();
+        for (const std::string& a : r.messageArgs) w.value(std::string_view(valid_utf8(a)));
+        w.end_array();
+    }
     w.end_object();
     return w.str();
 }

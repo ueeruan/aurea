@@ -1,7 +1,7 @@
 import SwiftUI
 
 var extraTextPresetNames: [String] { [AureaText.t("ios_textpreset_x_bounce"), AureaText.t("ios_textpreset_x_soft_in"), AureaText.t("ios_textpreset_x_reveal"), AureaText.t("ios_textpreset_x_slide"),
-                          AureaText.t("ios_textpreset_x_fast_in"), AureaText.t("ios_textpreset_x_elastic_jump"), AureaText.t("ios_textpreset_x_word_jump"), AureaText.t("ios_textpreset_x_smooth_motion")] + ["pack_text_0", "pack_text_1", "pack_text_2", "pack_text_3", "pack_text_4", "pack_text_5", "app_text_preset_explosion", "app_text_preset_smooth_bounce"].map { AureaText.t($0) }
+                          AureaText.t("ios_textpreset_x_fast_in"), AureaText.t("ios_textpreset_x_elastic_jump"), AureaText.t("ios_textpreset_x_word_jump"), AureaText.t("ios_textpreset_x_smooth_motion")] + ["pack_text_0", "pack_text_1", "pack_text_2", "pack_text_3", "pack_text_4", "pack_text_5", "app_text_preset_explosion", "app_text_preset_smooth_bounce_classic"].map { AureaText.t($0) }
 }
 import UIKit
 import UniformTypeIdentifiers
@@ -540,9 +540,18 @@ struct PanelPresetEntry: Identifiable {
     static let titleMotionBase: UInt32 = 1100
     static let titleMotionKeys = ["tp_title_cascade", "tp_title_tracking", "tp_title_bar", "tp_title_return",
                                   "tp_title_crossfade", "tp_title_split", "tp_title_orbit"]
+    /// 1.0.8: o Salto suave ORIGINAL da 0.4.4 (Engine::apply_text_preset 26),
+    /// de volta no texto 2D (par do BuiltinPresets.kt).
+    static let smoothBounceClassic: UInt32 = 26
+    /// 1.0.8 ("os presets de texto do Juan"): os 8 presets do Juan (be50c494,
+    /// motor `JuanTextPresets.inc`, ids 11..18; nomes nos 8 primeiros de
+    /// `extraTextPresetNames`). Desde a 0.5.0 presos ao texto 3D: voltam ao 2D
+    /// e ao 3D (par do `JUAN_TEXT_PRESETS` do BuiltinPresets.kt).
+    static let juanTextPresets: ClosedRange<UInt32> = 11...18
     /// Os do modelo Motion só no 2D; os antigos só no 3D; os salvos em ambos.
     func fitsText(threeD: Bool) -> Bool {
         guard let preset = textPreset else { return true }
+        if preset == Self.smoothBounceClassic || Self.juanTextPresets.contains(preset) { return true }
         return preset >= Self.motionTextBase ? !threeD : threeD
     }
     var object: [String: Any]? {
@@ -2679,6 +2688,21 @@ struct TextAnimationSection: View {
         ("tp_m_spin", CupertinoGlyph.ArrowCounterclockwise), ("tp_m_scale_word", CupertinoGlyph.Fullscreen), ("tp_m_scale_out", CupertinoGlyph.FullscreenExit),
         ("app_text_preset_smooth_bounce", CupertinoGlyph.Waveform),
     ] }
+    /// 1.0.8: os 8 presets do Juan (motor 11..18), de volta no texto 2D e 3D
+    /// (mesmos ícones e tags do TextAnimSection.kt).
+    private var juanItems: [PanelItem] {
+        let glyphs: [Character] = [CupertinoGlyph.ArrowDownToLine, CupertinoGlyph.ArrowUp, CupertinoGlyph.Eye, CupertinoGlyph.ArrowLeftRight,
+                                   CupertinoGlyph.Sparkles, CupertinoGlyph.Waveform, CupertinoGlyph.DocText, CupertinoGlyph.Fullscreen]
+        let names = Array(extraTextPresetNames.prefix(glyphs.count))
+        return PanelPresetEntry.juanTextPresets.enumerated().map { pair -> PanelItem in
+            let index = pair.offset, preset = pair.element
+            return PanelItem(glyph: glyphs[index], label: names[index], tag: "text.preset.juan.\(index)") {
+                beforeAnimation()
+                animationError = !model.engine.applyTextPreset(id, preset: preset)
+                refresh()
+            }
+        }
+    }
     private func load() {
         let flat = model.engine.textAnimators(id).map(\.floatValue)
         animators = stride(from: 0, to: flat.count - flat.count % 40, by: 40).map { Array(flat[$0..<($0 + 40)]) }
@@ -2730,7 +2754,15 @@ struct TextAnimationSection: View {
                             animationError = !model.engine.applyMotionTextPreset(id, preset: UInt32(n))
                             refresh()
                         }
-                    })
+                    } + (model.selectedLayer?.kind == 4 ? [
+                        // 1.0.8: o Salto suave original (palavra a palavra), de volta no texto 2D.
+                        PanelItem(glyph: CupertinoGlyph.ArrowDownToLine, label: AureaText.t("app_text_preset_smooth_bounce_classic"),
+                                  tag: "text.preset.classicBounce") {
+                            beforeAnimation()
+                            animationError = !model.engine.applyTextPreset(id, preset: PanelPresetEntry.smoothBounceClassic)
+                            refresh()
+                        },
+                    ] : []) + juanItems)
                 }
                 }
                 // 0.4.4 Explodir texto (só camada de texto 2D): cada pedaço vira uma camada.

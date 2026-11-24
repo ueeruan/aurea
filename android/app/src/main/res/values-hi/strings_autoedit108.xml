@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.0.8 Edição automática (autoedit/AutoEdit.kt; iOS AutoEditView.swift). -->
+<resources>
+    <string name="autoedit_title">ऑटो एडिट</string>
+    <string name="autoedit_subtitle">नई कंपोज़िशन में कट, ज़ूम, साउंड, संगीत, आवाज़, रंग और कैप्शन। मूल क्लिप वैसी ही रहती है।</string>
+    <string name="autoedit_home_hint">एक वीडियो चुनें और Aurea उसे खुद एडिट करेगा</string>
+    <string name="autoedit_intensity">कट की तीव्रता</string>
+    <string name="autoedit_light">हल्की</string>
+    <string name="autoedit_medium">मध्यम</string>
+    <string name="autoedit_strong">तेज़</string>
+    <string name="autoedit_recording">रिकॉर्डिंग का प्रकार</string>
+    <string name="autoedit_retakes">रीटेक के साथ</string>
+    <string name="autoedit_continuous">लगातार (इंटरव्यू)</string>
+    <string name="autoedit_language">बोली की भाषा</string>
+    <string name="autoedit_lang_pt">पुर्तगाली</string>
+    <string name="autoedit_lang_en">अंग्रेज़ी</string>
+    <string name="autoedit_lang_es">स्पैनिश</string>
+    <string name="autoedit_steps">चरण</string>
+    <string name="autoedit_cuts">कट</string>
+    <string name="autoedit_zoom">ज़ूम और फ़्लैश</string>
+    <string name="autoedit_sounds">साउंड</string>
+    <string name="autoedit_music">संगीत</string>
+    <string name="autoedit_voice">आवाज़</string>
+    <string name="autoedit_color">रंग</string>
+    <string name="autoedit_captions">कैप्शन</string>
+    <string name="autoedit_start">एडिट करें</string>
+    <string name="autoedit_again">फिर से एडिट करें</string>
+    <string name="autoedit_cancel">रद्द करें</string>
+    <string name="autoedit_close">बंद करें</string>
+    <string name="autoedit_step_transcribe">बोली को लिख रहे हैं</string>
+    <string name="autoedit_step_prepare">तैयारी</string>
+    <string name="autoedit_step_audio">ऑडियो का विश्लेषण</string>
+    <string name="autoedit_step_cuts">कट की योजना</string>
+    <string name="autoedit_step_faces">चेहरे खोज रहे हैं</string>
+    <string name="autoedit_step_zoom">ज़ूम की योजना</string>
+    <string name="autoedit_step_sounds">साउंड चुन रहे हैं</string>
+    <string name="autoedit_step_music">संगीत चुन रहे हैं</string>
+    <string name="autoedit_step_voice">आवाज़ सुधार रहे हैं</string>
+    <string name="autoedit_step_color">रंग जाँच रहे हैं</string>
+    <string name="autoedit_step_build">एडिट जोड़ रहे हैं</string>
+    <string name="autoedit_done">तैयार: %1$s → %2$s</string>
+    <string name="autoedit_failed">एडिट नहीं हो सका: %1$s</string>
+    <string name="autoedit_cancelled">ऑटो एडिट रद्द हुआ</string>
+    <string name="autoedit_need_video">एक वीडियो क्लिप चुनें</string>
+    <string name="autoedit_error_speed">क्लिप की गति बदली हुई है; सामान्य गति पर लौटाकर फिर कोशिश करें</string>
+    <string name="autoedit_error_short">क्लिप बहुत छोटी है</string>
+</resources>

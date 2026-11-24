@@ -49,6 +49,11 @@ constexpr PaidEffect kPaidEffects[] = {
     {effect_type_id("aurea.transition.radial_wipe_reference"), "aurea_fx_radial_wipe"},
     // Headbop: pago desde a 1.0.2 (pedido do dono, 18/11/2026), mesma regra dos outros.
     {effect_type_id("aurea.distort.headbop"), "aurea_fx_headbop"},
+    // Explosão 3D (23/11/2026): efeito 3D premium como o Texto 3D; sem
+    // assinatura avulsa na loja ainda, entra no AureaHyper.
+    {effect_type_id(aurea::effect_keys::kExplode3D), nullptr},
+    // Rig 2D de rosto: o mesmo portão do AutoRig do Fantoche (só o AureaHyper).
+    {effect_type_id("aurea.rig.face"), nullptr},
     // Seleções da galeria 1.0.7. Esses efeitos entram no plano AureaHyper.
     {effect_type_id("aurea.blur.rgb_channels"), nullptr},
     {effect_type_id("aurea.blur.chroma_luma"), nullptr},

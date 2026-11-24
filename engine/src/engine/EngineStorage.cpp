@@ -9,11 +9,14 @@
 // =============================================================================
 #include "aurea/Engine.hpp"
 #include "aurea/core/Log.hpp"
+#include "aurea/media/MediaRelink.hpp"
 #include "aurea/project/ProjectPackage.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <new>
+#include <unordered_set>
 
 namespace aurea {
 namespace {
@@ -32,6 +35,42 @@ bool family_of(const std::string& file, const std::string& main) {
 
 bool family_of_any(const std::string& file, const std::vector<std::string>& mains) {
     return std::any_of(mains.begin(), mains.end(), [&](const std::string& m) { return family_of(file, m); });
+}
+
+// 1.0.8 (limpeza nunca leva mídia em uso): uma referência que não resolve para
+// arquivo nenhum (caminho de outra instalação, cópia que mudou de pasta) não
+// conta como uso na regra do MediaStorage — e o arquivo dela, ainda no app com
+// o mesmo nome, viraria "órfão" e sairia. Os nomes dessas referências seguram
+// o arquivo homônimo: a abertura do projeto o religa (MediaRelink.hpp).
+std::string lower_name(const std::string& path) {
+    std::string n = media_relink::file_name_of(path);
+    for (char& c : n) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return n;
+}
+
+void note_missing_reference(const std::string& stored, const std::string& resolved,
+                            std::unordered_set<std::string>& names) {
+    if (stored.empty() || stored.find("://") != std::string::npos || stored.rfind("content:", 0) == 0) return;
+    const bool docsRef = stored.rfind("docs:", 0) == 0;
+    if (!docsRef && !media_relink::is_local_file_path(stored) && !media_relink::is_local_file_path(resolved)) return;
+    const std::string& path = resolved.empty() ? stored : resolved;
+    std::error_code ec;
+    if (!path.empty() && media_relink::is_local_file_path(path) && std::filesystem::exists(std::filesystem::u8path(path), ec) && !ec)
+        return;
+    if (std::string n = lower_name(stored); !n.empty()) names.insert(std::move(n));
+}
+
+u64 bytes_of(const std::string& path, u32& files) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path p = fs::u8path(path);
+    if (fs::is_regular_file(p, ec)) { ++files; return static_cast<u64>(fs::file_size(p, ec)); }
+    u64 total = 0;
+    for (fs::recursive_directory_iterator it(p, fs::directory_options::skip_permission_denied, ec), end; !ec && it != end; it.increment(ec)) {
+        std::error_code e;
+        if (it->is_regular_file(e) && !e) { ++files; total += static_cast<u64>(it->file_size(e)); }
+    }
+    return total;
 }
 
 } // namespace
@@ -96,7 +135,25 @@ Status Engine::media_release_plan(const MediaStorageRequest& request, storage::R
             r.live.paths.push_back(std::move(c));
             r.live.kinds.push_back(static_cast<u8>(m.kind));
         }
-    const Status s = storage::plan_release(r, [this](const std::string& stored) { return resolve_media_for_storage(stored); }, out);
+    std::unordered_set<std::string> missingNames;
+    const Status s = storage::plan_release(r, [this, &missingNames](const std::string& stored) {
+        std::string resolved = resolve_media_for_storage(stored);
+        note_missing_reference(stored, resolved, missingNames);
+        return resolved;
+    }, out);
+    if (!missingNames.empty()) {
+        const auto kept = std::remove_if(out.paths.begin(), out.paths.end(), [&](const std::string& p) {
+            if (missingNames.count(lower_name(p)) == 0) return false;
+            u32 files = 0;
+            const u64 bytes = bytes_of(p, files);
+            out.bytes = out.bytes > bytes ? out.bytes - bytes : 0;
+            return true;
+        });
+        if (kept != out.paths.end())
+            AUREA_LOG_INFO("armazenamento: %zu item(ns) mantido(s): o nome bate com uma referencia que ainda nao abre",
+                           static_cast<usize>(out.paths.end() - kept));
+        out.paths.erase(kept, out.paths.end());
+    }
     AUREA_LOG_INFO("armazenamento: apagar %zu projeto(s) libera %zu item(ns), %llu MB%s", mains.size(), out.paths.size(),
                    static_cast<unsigned long long>(out.bytes >> 20), out.blocked ? " (bloqueado: projeto ilegivel)" : "");
     return s;
@@ -137,7 +194,25 @@ Status Engine::media_storage_scan(const MediaStorageRequest& request, storage::S
             r.live.paths.push_back(std::move(c));
             r.live.kinds.push_back(static_cast<u8>(m.kind));
         }
-    const Status s = storage::scan(r, [this](const std::string& stored) { return resolve_media_for_storage(stored); }, out);
+    std::unordered_set<std::string> missingNames;
+    const Status s = storage::scan(r, [this, &missingNames](const std::string& stored) {
+        std::string resolved = resolve_media_for_storage(stored);
+        note_missing_reference(stored, resolved, missingNames);
+        return resolved;
+    }, out);
+    if (!missingNames.empty()) {
+        const auto kept = std::remove_if(out.orphans.begin(), out.orphans.end(), [&](const std::string& p) {
+            if (missingNames.count(lower_name(p)) == 0) return false;
+            u32 files = 0;
+            const u64 bytes = bytes_of(p, files);
+            out.orphanBytes = out.orphanBytes > bytes ? out.orphanBytes - bytes : 0;
+            out.orphanFiles = out.orphanFiles > files ? out.orphanFiles - files : 0;
+            out.referencedBytes += bytes;
+            out.referencedFiles += files;
+            return true;
+        });
+        out.orphans.erase(kept, out.orphans.end());
+    }
     out.unreadable += quarantined;
     // Pasta de projetos que não lista, quarentena ou export em curso: tamanhos sim, órfãos não.
     if (!listed || quarantined || config_.documentsDirectory.empty() || exportActive_.load(std::memory_order_acquire)

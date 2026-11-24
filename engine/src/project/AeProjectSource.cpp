@@ -153,7 +153,9 @@ struct Reader {
             const auto count = archive_read_data(input.get(), chunk.data(), chunk.size());
             if (count == 0 && remaining == 0) return true;
             if (count <= 0 || static_cast<u64>(count) > remaining) {
-                error = "Um arquivo dentro do pacote está incompleto, corrompido ou usa compressão incompatível.";
+                error = unsupported_compression()
+                    ? "Compressão do pacote não suportada; compacte de novo com Deflate (o ZIP padrão)."
+                    : "Um arquivo dentro do pacote está incompleto ou corrompido.";
                 return false;
             }
             if (!write(chunk.data(), static_cast<usize>(count))) {
@@ -162,6 +164,16 @@ struct Reader {
             }
             remaining -= static_cast<u64>(count);
         }
+    }
+
+    /// LZMA, XZ, BZip2 e Zstandard dentro do ZIP precisam de bibliotecas que
+    /// o app não leva; a libarchive diz "Unsupported ZIP compression method".
+    [[nodiscard]] bool unsupported_compression() {
+        const char* why = archive_error_string(input.get());
+        if (!why) return false;
+        const std::string text = normalized(why);
+        return text.find("unsupported") != text.npos || text.find("compression method") != text.npos ||
+               text.find("not supported") != text.npos;
     }
 
     std::unique_ptr<std::FILE, decltype(&std::fclose)> file;
@@ -358,6 +370,16 @@ bool extract_media(const std::string& path, const MediaIndex& files, ProjectDocu
         return false;
     }
     usize pending = selected.size();
+    // 1.0.8: uma mídia que não sai do pacote (senha, compressão, dano) fica
+    // sem vínculo, com o motivo; o projeto entra com as outras.
+    const auto dropMedia = [&](Selection& selection, const std::string& why) {
+        for (const auto& use : selection.uses) use.item->linkProblem = why;
+        if (!selection.output.empty()) (void)fileio::remove_file(selection.output);
+        selection.output.clear();
+        --pending;
+        return true;
+    };
+    std::string scanError;
     if (!reader.scan([&](const Entry& entry, bool encrypted) {
         const auto match = selected.find(entry.index);
         if (match == selected.end()) return true;
@@ -368,9 +390,15 @@ bool extract_media(const std::string& path, const MediaIndex& files, ProjectDocu
             error = "Não foi possível abrir o destino de uma mídia do projeto.";
             return false;
         }
+        std::string why;
         if (!reader.read(entry, encrypted, [&](const char* bytes, usize count) {
             return std::fwrite(bytes, 1, count, output.get()) == count;
-        }, error)) return false;
+        }, why)) {
+            output.reset();
+            // Disco cheio vale para todas: aí, sim, para.
+            if (why.find("espaço livre") != std::string::npos) { error = why; return false; }
+            return dropMedia(selection, why);
+        }
         if (std::fclose(output.release()) != 0) {
             error = "Não foi possível concluir a gravação de uma mídia do projeto.";
             return false;
@@ -396,10 +424,21 @@ bool extract_media(const std::string& path, const MediaIndex& files, ProjectDocu
         if (!used) (void)fileio::remove_file(selection.output);
         --pending;
         return true;
-    }, error, &pending)) return false;
-    if (pending == 0) return true;
-    error = "O pacote mudou durante a importação.";
-    return false;
+    }, scanError, &pending)) {
+        if (!error.empty()) return false;
+        // O resto do pacote não pôde ser lido: as mídias que faltam ficam sem vínculo.
+        for (auto& [index, selection] : selected)
+            for (const auto& use : selection.uses)
+                if (use.item->resolvedPath.empty() && use.item->linkProblem.empty()) use.item->linkProblem = scanError;
+        return true;
+    }
+    if (pending != 0) {
+        for (auto& [index, selection] : selected)
+            for (const auto& use : selection.uses)
+                if (use.item->resolvedPath.empty() && use.item->linkProblem.empty())
+                    use.item->linkProblem = "a mídia não foi encontrada ao reler o pacote";
+    }
+    return true;
 }
 
 bool read_archive(const std::string& path, ProjectDocument& document, ProjectImportMedia& media, std::string& error) {
@@ -421,17 +460,19 @@ bool read_archive(const std::string& path, ProjectDocument& document, ProjectImp
     bool found = false;
     bool tied = false;
     bool oversized = false;
+    std::string chosen, other;
     if (!reader.scan([&](const Entry& entry, bool encrypted) {
         const auto ext = extension(entry.path);
         if (media_extension(ext) && entry.bytes > 0) files[std::string(basename(entry.path))].push_back(entry);
-        if (ext != ".aep") return true;
+        if (ext != ".aep" && ext != ".aet") return true;
         const Rank rank{is_backup(entry.path), stem(entry.path) != stem(archiveName),
                         static_cast<usize>(std::count(entry.path.begin(), entry.path.end(), '/'))};
-        if (found && rank == best) tied = true;
+        if (found && rank == best && !tied) { tied = true; other = std::string(basename(entry.path)); }
         if (found && rank >= best) return true;
         found = true;
         best = rank;
         tied = false;
+        chosen = std::string(basename(entry.path));
         oversized = entry.bytes > kMaxProjectBytes;
         project.clear();
         if (oversized) return true;
@@ -442,10 +483,13 @@ bool read_archive(const std::string& path, ProjectDocument& document, ProjectImp
         }, error);
     }, error)) return false;
     if (!found) error = "O pacote não contém um projeto .aep do After Effects.";
-    else if (tied) error = "Há mais de um projeto .aep principal no pacote. Importe cada projeto em um pacote separado.";
-    else if (oversized) error = "O arquivo .aep dentro do pacote excede o limite de 64 MB.";
+    else if (oversized) error = "O arquivo .aep dentro do pacote excede o limite de 256 MB.";
     else if (!parse_project(project, document, error)) error = "Projeto do After Effects ilegível: " + error + ".";
     if (!error.empty()) return false;
+    // Mais de um .aep principal: entra o primeiro do pacote (o outro fica listado).
+    if (tied)
+        document.issues.push_back({"arquivo", other, "o pacote tem mais de um projeto principal; entrou " + chosen +
+                                   " (importe os outros separadamente)", true});
     std::string{}.swap(project);
     return extract_media(path, files, document, media, error);
 }
@@ -461,17 +505,38 @@ ProjectImportMedia::~ProjectImportMedia() {
 bool is_project_source_name(std::string_view name) {
     const auto lower = normalized(name);
     const auto ext = extension(lower);
-    return ext == ".aep" || ext == ".zip" || ext == ".rar";
+    return ext == ".aep" || ext == ".aet" || ext == ".zip" || ext == ".rar";
+}
+
+std::string project_source_kind_of_header(std::string_view h) {
+    if (is_project_file(h)) return "aep";
+    if (h.size() >= 4 && (h.substr(0, 4) == std::string_view("PK\x03\x04", 4) ||
+                          h.substr(0, 4) == std::string_view("PK\x05\x06", 4))) return "zip";
+    if (h.size() >= 6 && h.substr(0, 6) == std::string_view("Rar!\x1A\x07", 6)) return "rar";
+    return {};
+}
+
+std::string project_source_kind(const std::string& path) {
+    const auto lower = normalized(path);
+    const auto ext = extension(lower);
+    if (ext == ".aep" || ext == ".aet") return "aep";
+    if (ext == ".zip") return "zip";
+    if (ext == ".rar") return "rar";
+    // Sem extensão conhecida (URI "msf:123"): os primeiros bytes decidem.
+    std::unique_ptr<std::FILE, decltype(&std::fclose)> file(fileio::open_file(path, "rb"), std::fclose);
+    if (!file) return {};
+    char header[16]{};
+    const usize n = std::fread(header, 1, sizeof(header), file.get());
+    return project_source_kind_of_header(std::string_view(header, n));
 }
 
 bool read_project_source(const std::string& path, ProjectDocument& document,
                          ProjectImportMedia& media, std::string& error) {
-    const auto lower = normalized(path);
-    const auto ext = extension(lower);
-    if (ext == ".zip" || ext == ".rar") return read_archive(path, document, media, error);
+    const auto kind = project_source_kind(path);
+    if (kind == "zip" || kind == "rar") return read_archive(path, document, media, error);
     std::vector<u8> bytes;
     if (!fileio::read_all(path, bytes, kMaxProjectBytes) || bytes.empty()) {
-        error = "Não foi possível ler o projeto .aep, ou ele excede o limite de 64 MB.";
+        error = "Não foi possível ler o projeto .aep, ou ele excede o limite de 256 MB.";
         return false;
     }
     const std::string_view data(reinterpret_cast<const char*>(bytes.data()), bytes.size());

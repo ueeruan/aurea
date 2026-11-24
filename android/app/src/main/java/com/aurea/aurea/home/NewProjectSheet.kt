@@ -164,6 +164,8 @@ internal fun NewProjectSheet(
     onDismiss: () -> Unit,
     /** O que o motor decidiu para o aparelho (nulo = motor subindo: nada a avisar). */
     device: com.aurea.aurea.engine.DeviceReport? = null,
+    /** 1.0.8: "Edição automática" — escolher um vídeo e o Aurea edita sozinho (nulo = sem o botão). */
+    onAutoEdit: (() -> Unit)? = null,
 ) {
     var aspectKey by rememberSaveable { mutableStateOf(ProjectPresets.aspectByKey(defaults.aspectKey).key) }
     var free by rememberSaveable { mutableStateOf(defaults.free) }
@@ -249,6 +251,25 @@ internal fun NewProjectSheet(
                         .padding(start = 20.dp, top = 24.dp, end = 20.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
+                    // 1.0.8: Edição automática (escolhe um vídeo; a folha da edição abre no editor).
+                    if (onAutoEdit != null) {
+                        val autoLabel = stringResource(R.string.autoedit_title)
+                        val autoHint = stringResource(R.string.autoedit_home_hint)
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(AureaColors.Accent)
+                                .testTag("newProject.autoEdit")
+                                .semantics(mergeDescendants = true) { contentDescription = "$autoLabel. $autoHint" }
+                                .tocavel(shrink = 1f) { open = false; onAutoEdit() }
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                        ) {
+                            Text(autoLabel, style = AureaType.of(16f, FontWeight.W700, 0f, AureaColors.OnAccent))
+                            Text(autoHint, style = AureaType.of(12f, color = AureaColors.OnAccent.copy(alpha = 0.85f)))
+                        }
+                        Spacer(Modifier.height(18.dp))
+                    }
                     // (1) Interface: Composição | Edição.
                     UiModeToggle(uiMode) { uiMode = it }
                     Spacer(Modifier.height(6.dp))

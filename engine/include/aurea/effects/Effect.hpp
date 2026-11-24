@@ -371,6 +371,15 @@ public:
         (void)host; (void)ref; (void)compTime; out = LayerWorldInfo{};
         return false;
     }
+    /// Rig 2D v2 (aurea.rig.part): os valores, no instante `compTime` (quadros
+    /// da composição de `host`), do primeiro efeito `type` ligado da camada `ref`
+    /// da mesma composição — o "Controle do rig" das partes. Devolve quantos
+    /// valores escreveu em `out` (0 = sem camada ou sem o efeito).
+    [[nodiscard]] virtual u32 layer_effect_values(const Layer* host, u64 ref, u32 type, f64 compTime, ParamValue* out,
+                                                  u32 capacity) noexcept {
+        (void)host; (void)ref; (void)type; (void)compTime; (void)out; (void)capacity;
+        return 0;
+    }
     /// LUT 256x1 da curva, criada/atualizada só quando a curva muda.
     virtual void temporal_failure(Status) noexcept {}
     /// Reports a failed effect while the preview retains its input fallback.

@@ -28,7 +28,7 @@
     <string name="om_lp_volume_close">Fechar o volume</string>
     <string name="om_lp_volume_tab_fades">Suavizar</string>
     <string name="om_lp_missing_media_title">Mídia não encontrada</string>
-    <string name="om_lp_missing_media">A mídia original desta camada sumiu ou mudou de lugar.</string>
+    <string name="om_lp_missing_media">O arquivo desta camada não está mais no aparelho. Toque em Substituir mídia e escolha o arquivo de novo: transformação, keyframes, efeitos e máscaras ficam.</string>
     <string name="om_presets_empty_title">Ainda não há presets</string>
     <string name="om_presets_empty_body">Salve as propriedades e os keyframes de uma camada como preset para usar de novo.</string>
     <string name="om_presets_empty_browse">Ver presets</string>

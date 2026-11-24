@@ -1,5 +1,7 @@
 #include "aurea/core/Thread.hpp"
 
+#include <cstdio>
+
 #if defined(AUREA_PLATFORM_ANDROID)
     #include <dlfcn.h>
     #include <pthread.h>
@@ -117,7 +119,12 @@ void PerformanceHintSession::close() noexcept {
 void set_current_thread_name(const char* name) noexcept {
     if (!name) return;
 #if defined(AUREA_PLATFORM_ANDROID) || defined(__linux__)
-    (void)pthread_setname_np(pthread_self(), name);
+    // 1.0.8: o Linux recusa (ERANGE) nome com mais de 15 bytes e a thread
+    // ficava com o nome de quem a criou: "aurea-enc-surface" aparecia como
+    // "aurea-export" nos crashes do driver GLES (POCO X6 Pro, 1.0.7.1).
+    char shortName[16]{};
+    std::snprintf(shortName, sizeof(shortName), "%s", name);
+    (void)pthread_setname_np(pthread_self(), shortName);
 #elif defined(__APPLE__)
     (void)pthread_setname_np(name);
 #elif defined(_WIN32)

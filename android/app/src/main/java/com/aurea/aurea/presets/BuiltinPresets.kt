@@ -27,9 +27,25 @@ internal val TitleMotionPresetLabels = listOf(
     R.string.tp_title_return, R.string.tp_title_crossfade, R.string.tp_title_split, R.string.tp_title_orbit,
 )
 
+/**
+ * 1.0.8 ("o salto suave sumiu"): o Salto suave ORIGINAL da 0.4.4 (cada palavra
+ * cai e assenta num quique amortecido; Engine::apply_text_preset 26). A 0.5.0
+ * o deixou só no texto 3D e a 1.0.5 pôs outro, de varredura, com o mesmo nome.
+ */
+internal const val SMOOTH_BOUNCE_CLASSIC_PRESET = 26
+
+/**
+ * 1.0.8 ("os presets de texto do Juan"): os 8 presets extraídos dos arquivos do
+ * Juan (be50c494, motor `JuanTextPresets.inc`, ids 11..18; nomes em
+ * [ExtraTextPresetLabels]). Renomeados para "Preset …" na 2111 e, desde a
+ * 0.5.0, presos ao texto 3D pelo [fitsText]: voltam ao texto 2D e ao 3D.
+ */
+internal val JUAN_TEXT_PRESETS = 11..18
+
 /** O preset serve para este texto? Os do modelo Motion só no 2D; os antigos só no 3D; os salvos em ambos. */
 internal fun PresetEntry.fitsText(threeD: Boolean): Boolean {
     val id = textPreset ?: return true
+    if (id == SMOOTH_BOUNCE_CLASSIC_PRESET || id in JUAN_TEXT_PRESETS) return true
     return if (id >= MOTION_TEXT_PRESET_BASE) !threeD else threeD
 }
 
@@ -39,7 +55,7 @@ internal val ExtraTextPresetLabels = listOf(R.string.app_text_preset_bounce, R.s
     R.string.app_text_preset_smooth)
 
 internal val PackTextPresetLabels = listOf(R.string.pack_text_0, R.string.pack_text_1, R.string.pack_text_2, R.string.pack_text_3, R.string.pack_text_4, R.string.pack_text_5,
-    R.string.app_text_preset_explosion, R.string.app_text_preset_smooth_bounce)
+    R.string.app_text_preset_explosion, R.string.app_text_preset_smooth_bounce_classic)
 
 internal val TextPresetNames = listOf(
     R.string.pn_pop, R.string.pn_textpreset_bounce, R.string.pn_textpreset_slide, R.string.panel_escala,

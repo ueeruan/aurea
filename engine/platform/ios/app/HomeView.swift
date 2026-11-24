@@ -271,6 +271,8 @@ struct HomeView: View {
     @State private var confirmDelete = false
     @State private var showAbout = false
     @State private var importing = false
+    /// 1.0.8: o seletor de vídeo da Edição automática (o vídeo vira projeto e a folha abre nele).
+    @State private var autoEditPicking = false
     @State private var backupFile: SharedProjectFile?
     /// "Relatar um problema" (ProjectTransfer.swift). "Importar arquivo do
     /// projeto" não tem estado aqui: abre pelo UIKit (`pickProjectFile`).
@@ -305,6 +307,7 @@ struct HomeView: View {
                 NewProjectSheet(defaults: defaults,
                                 suggestedName: omegaSuggestedName(library.all.map(\.title)) { AureaText.t("project_new", $0) },
                                 device: model.deviceReport,
+                                onAutoEdit: { showNewProject = false; autoEditPicking = true },
                                 onDismiss: { showNewProject = false }) { draft in
                     pendingProject = draft
                     showNewProject = false
@@ -354,6 +357,12 @@ struct HomeView: View {
                 importing = false; model.createFromMedia(url: url, kind: kind)
             }, onError: { error in importing = false; model.toast = error })
         }
+        .background(Color.clear.sheet(isPresented: $autoEditPicking) {
+            HomeMediaPicker(onDismiss: { autoEditPicking = false }, onPick: { [project = model.projectGeneration] url, kind in
+                guard project == model.projectGeneration, kind == .video else { autoEditPicking = false; return }
+                autoEditPicking = false; model.autoEdit.arm(); model.createFromMedia(url: url, kind: kind)
+            }, onError: { error in autoEditPicking = false; model.toast = error }, videosOnly: true)
+        })
         .fullScreenCover(isPresented: $showAbout) { HomeAboutView { showAbout = false } }
         #if DEBUG
         .sheet(isPresented: $model.parityHomePaywall) { PaywallSheet(item: .text3D()) { model.parityHomePaywall = false } }
@@ -1580,6 +1589,8 @@ struct NewProjectSheet: View {
     @ObservedObject var defaults: HomeDefaults
     let suggestedName: String
     let device: [String: NSNumber]
+    /// 1.0.8: "Edição automática" — escolher um vídeo e o Aurea edita sozinho (nil = sem o botão).
+    var onAutoEdit: (() -> Void)? = nil
     let onDismiss: () -> Void
     let onCreate: (NewProjectDraft) -> Void
     @State private var aspectKey = "16:9"
@@ -1656,8 +1667,30 @@ struct NewProjectSheet: View {
         }
     }
 
+    /// 1.0.8: Edição automática (escolhe um vídeo; a folha da edição abre no editor).
+    @ViewBuilder private var autoEditButton: some View {
+        if let onAutoEdit {
+            Button { onAutoEdit() } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(AureaText.t("autoedit_title")).font(.aurea(size: 16, weight: .bold)).foregroundStyle(AureaColors.onAccent)
+                    Text(AureaText.t("autoedit_home_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.onAccent.opacity(0.85))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16).padding(.vertical, 12)
+                .background(RoundedRectangle(cornerRadius: 14).fill(AureaColors.accent))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(AureaPressStyle(shrink: 1))
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(AureaText.t("autoedit_title")). \(AureaText.t("autoedit_home_hint"))")
+            .accessibilityIdentifier("newProject.autoEdit")
+            .padding(.bottom, 18)
+        }
+    }
+
     private var content: some View {
         VStack(spacing: 0) {
+            autoEditButton
             uiModeToggle
             Text(AureaText.t(uiMode == AureaUiMode.edit ? "ui_mode_edit_hint" : "ui_mode_composition_hint"))
                 .font(.aurea(size: 12)).foregroundStyle(AureaColors.lightTextMuted).multilineTextAlignment(.center)
@@ -2487,10 +2520,12 @@ private struct HomeMediaPicker: UIViewControllerRepresentable {
     let onDismiss: () -> Void
     let onPick: (URL, AureaModel.ImportKind) -> Void
     let onError: (String) -> Void
+    /// 1.0.8 Edição automática: só vídeos.
+    var videosOnly = false
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeUIViewController(context: Context) -> PHPickerViewController {
         var configuration = PHPickerConfiguration()
-        configuration.filter = .any(of: [.images, .videos])
+        configuration.filter = videosOnly ? .videos : .any(of: [.images, .videos])
         configuration.selectionLimit = 1
         configuration.preferredAssetRepresentationMode = .current
         let picker = PHPickerViewController(configuration: configuration)

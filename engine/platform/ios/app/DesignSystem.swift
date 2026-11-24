@@ -372,7 +372,7 @@ private struct ValueDragModifier: ViewModifier {
         DragGesture(minimumDistance: 4)
             .updating($dragging) { _, held, _ in held = true }
             .onChanged { g in
-                if direction == 0 { direction = abs(g.translation.width) > abs(g.translation.height) ? 1 : -1 }
+                if direction == 0 { direction = abs(g.translation.width) > abs(g.translation.height) * FxParamMath.HORIZONTAL_DOMINANCE ? 1 : -1 }
                 guard direction == 1 else { return }
                 if !active {
                     let s = start()
@@ -2262,7 +2262,7 @@ struct AureaSlider: View {
         DragGesture(minimumDistance: FxParamMath.TOUCH_SLOP * FxParamMath.SLIDER_SLOP_FRACTION)
             .updating($held) { _, state, _ in state = true }
             .onChanged { g in
-                if direction == 0 { direction = abs(g.translation.width) > abs(g.translation.height) ? 1 : -1 }
+                if direction == 0 { direction = abs(g.translation.width) > abs(g.translation.height) * FxParamMath.HORIZONTAL_DOMINANCE ? 1 : -1 }
                 guard direction == 1 else { return }
                 if !active { live = value; active = true; onBegin() }
                 let v = FxParamMath.sliderValueAt(x: Float(g.location.x - AureaSlider.thumb / 2), width: Float(track),
@@ -2419,7 +2419,7 @@ struct FxRuler: View {
         let dy = g.translation.height
         if phase == 0 {
             // Rolagem vertical continua no ScrollView, mesmo com a régua em movimento.
-            if abs(dy) >= abs(dx) { phase = -1; return }
+            if abs(dx) <= abs(dy) * FxParamMath.HORIZONTAL_DOMINANCE { phase = -1; return }
             if let owner = FxRulerFling.owner, owner != token { phase = -1; return }
             let resumedValue = shown
             stopFling()

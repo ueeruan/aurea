@@ -2,11 +2,11 @@ package com.aurea.aurea.editor.panels
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -1022,11 +1022,14 @@ private fun Modifier.reorderHandle(
     enabled: Boolean,
 ): Modifier = if (!enabled) this else this.then(
     Modifier.pointerInput(id, visible) {
-        detectVerticalDragGestures(
+        // 1.0.8: a alça (32 dp na borda direita, onde o polegar direito rola)
+        // tomava QUALQUER arrasto vertical e reordenava em vez de rolar a lista.
+        // Agora ergue depois do toque longo, como a linha inteira.
+        detectDragGesturesAfterLongPress(
             onDragStart = { state.begin(id, visible) },
-            onVerticalDrag = { change, amount ->
+            onDrag = { change, amount ->
                 change.consume()
-                state.offset += amount
+                state.offset += amount.y
                 state.swapIfNeeded(list)
             },
             onDragEnd = { state.finish(store) },
@@ -1438,6 +1441,8 @@ private const val SPECIAL_BG_REMOVE = 45
 // 0.5.2: Headbop (Analisar, tap tempo, Converter em keyframes) — HeadbopPanel.kt.
 private const val SPECIAL_HEADBOP = 52
 private const val SPECIAL_AUTOBEAT = 53
+// Rig 2D de rosto: pontos achados, "Ajustar pontos" e "Detectar de novo" — FaceRigStage.kt.
+private const val SPECIAL_FACE_RIG = 54
 
 /**
  * O CORPO, na ordem do P0-3: 1) ferramentas do efeito especial; 2) "Variação"
@@ -1456,6 +1461,7 @@ private fun fxBodyItems(store: EditorStore, effectId: Int, typeId: Int, visible:
     }
     if (typeId == effectTypeId("aurea.distort.mesh_warp")) add(FxBody.Special(SPECIAL_MESH))
     if (typeId == effectTypeId("aurea.distort.puppet")) add(FxBody.Special(SPECIAL_PUPPET))
+    if (typeId == effectTypeId("aurea.rig.face")) add(FxBody.Special(SPECIAL_FACE_RIG))
     if (typeId == effectTypeId("aurea.light.saber")) add(FxBody.Special(SPECIAL_SABER))
     if (typeId == effectTypeId("aurea.layout.grid_builder")) add(FxBody.Special(SPECIAL_GRID))   // Omega grid
     if (visible.isEmpty()) {
@@ -1588,7 +1594,10 @@ private fun FxSettingsOverlay(
                     is FxBody.Special -> FxSpecialTools(env, effect, item.what, meshSelected, onSelectMesh)
                     is FxBody.Notice -> FxBodyNotice(stringResource(item.text))
                     is FxBody.Variation -> {
-                        val labels = item.presets.map { (pid, n) -> effectPresetLabel(pid)?.let { stringResource(it) } ?: n }
+                        val explode = effect.typeId == effectTypeId("aurea.3d.explode")
+                        val labels = item.presets.map { (pid, n) ->
+                            (if (explode) com.aurea.aurea.effects.explodePresetLabel(pid) else effectPresetLabel(pid))?.let { stringResource(it) } ?: n
+                        }
                         FxChoiceLayout(
                             label = stringResource(R.string.om_fx_variation),
                             options = labels,
@@ -1664,6 +1673,7 @@ private fun FxSpecialTools(env: PanelEnv, effect: LayerEffect, what: Int, meshSe
             SPECIAL_TIME_REMAP -> TimeRemapEffectEditor(env, id)
             SPECIAL_MESH -> com.aurea.aurea.editor.MeshWarpCardTools(store, id, meshSelected, onSelectMesh)
             SPECIAL_PUPPET -> com.aurea.aurea.editor.PuppetCardTools(store, id)
+            SPECIAL_FACE_RIG -> com.aurea.aurea.editor.FaceRigCardTools(store, id)
             SPECIAL_SABER -> com.aurea.aurea.editor.SaberCardTools(store, id)
             SPECIAL_EQ -> EqResponseGraph(env, id)
             SPECIAL_GRID -> GridControlRow(store)   // Omega grid

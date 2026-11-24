@@ -489,6 +489,7 @@ struct Panel3DView: View {
                 model.openPanel(.effects)
             }
             .padding(10)
+            Explode3DCard(layerId: layerId, beforeAction: finishEditing).padding(.horizontal, 10)
         }
     }
 
@@ -952,6 +953,8 @@ struct Panel3DView: View {
                 // O modelo importado tem as abas Textura e Animação; isto sobra para um objeto 3D
                 // sem forma pronta que não é modelo importado (par do Android).
                 Parts3DEditor(layerId: layerId, names: names, animationOnly: true)
+                gap(8)
+                Explode3DCard(layerId: layerId, beforeAction: finishEditing)
             } else {
             if isShape {
                 Shape3DPanelSection(layerId: layerId, page: .shape)
@@ -962,6 +965,7 @@ struct Panel3DView: View {
             partEffectCard("aurea.3d.part_transform", name: "fx3d_name_part_transform", detail: "fx3d_desc_part_transform")
             partEffectCard("aurea.3d.part_hide", name: "fx3d_name_part_hide", detail: "fx3d_desc_part_hide")
             partEffectCard("aurea.3d.part_texture", name: "fx3d_name_part_texture", detail: "fx3d_desc_part_texture")
+            Explode3DCard(layerId: layerId, beforeAction: finishEditing)
             }
             if isShape {
                 shapeLayoutButton
@@ -2408,5 +2412,53 @@ struct Parts3DEditor: View {
                 keys.claim(id, look: look, toggle: toggle)
                 write(effect, index: UInt32(index), $0)
             }
+    }
+}
+
+/// EXPLOSÃO (`aurea.3d.explode`): o objeto 3D INTEIRO (modelo, forma ou texto 3D) em
+/// pedaços — efeito do objeto, não de uma parte (por isso `addCatalogEffect`, não
+/// `addPartEffect`, que gravaria a parte no 1º parâmetro). Uma vez por camada: já
+/// aplicado, só abre os Efeitos. Pago (o motor decide, HyperEffectGate): sem o acesso
+/// o cartão leva o cadeado e abre o paywall. Par de `Explode3DCard` (Element3DPanel.kt),
+/// id `panel3d.fx.explode`.
+private struct Explode3DCard: View {
+    @EnvironmentObject private var model: AureaModel
+    @ObservedObject private var entitlements = HyperEntitlements.shared
+    @State private var paywall: PaidItem?
+    let layerId: Int64
+    var beforeAction: () -> Void = {}
+
+    private var type: UInt32 { fxEffectTypeId("aurea.3d.explode") }
+
+    var body: some View {
+        let locked = HyperEffectGate.locked(typeId: type)
+        Button {
+            beforeAction()
+            if model.effects.contains(where: { $0.typeId == type }) {
+                model.openPanel(.effects)
+            } else if locked {
+                paywall = .effect(type, name: AureaText.t("fx3d_name_explode"))
+            } else {
+                model.addCatalogEffect(type, layers: [layerId])
+                model.openPanel(.effects)
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(AureaText.t("fx3d_name_explode")).font(.aurea(size: 14, weight: .semibold)).foregroundStyle(AureaColors.text)
+                Text(AureaText.t("fx3d_desc_explode")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14).padding(.vertical, 11)
+            .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(alignment: .topTrailing) { if locked { HyperLockBadge().padding(6) } }
+        }
+        .buttonStyle(AureaPressStyle())
+        .padding(.bottom, 6)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(AureaText.t("fx3d_name_explode") + (locked ? " · " + AureaText.t("hyper_effect_locked") : ""))
+        .accessibilityHint(AureaText.t("fx3d_desc_explode"))
+        .accessibilityIdentifier("panel3d.fx.explode")
+        .sheet(item: $paywall) { item in PaywallSheet(item: item) { paywall = nil } }
     }
 }

@@ -6603,6 +6603,51 @@ AUREA_TEST(Gpu, JuanPresetsRenderAndKeepExpressionsAfterReopen) {
     }
 }
 
+/// 1.0.8 ("adicione aqueles presets de texto de novo que eram do Juan"): os 8
+/// presets do Juan (11..18, JuanTextPresets.inc) voltaram à UI do texto 2D.
+/// Cada um cria animadores numa camada de texto 2D e o desenho muda com o tempo.
+AUREA_TEST(Gpu, JuanPresetsRestoredAnimate2DTextOverTime) {
+    AUREA_REQUIRE_GPU();
+    for (u32 preset = 11; preset <= 18; ++preset) {
+        Scene3DRig rig(960, 540);
+        auto id = rig.e.add_text("AUREA JUAN 108");
+        AUREA_CHECK(id.ok());
+        AUREA_CHECK(rig.e.apply_text_preset(*id, preset));
+        Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+        const Layer* layer = comp->layer(LayerId::unpack(*id));
+        AUREA_CHECK(layer != nullptr && layer->kind == LayerKind::Text);
+        const u32 count = rig.e.query_text_animators(*id, nullptr, 0);
+        AUREA_CHECK(count >= 1u && count == layer->text.animators.size());
+        bool driven = false;
+        for (u32 i = 0; i < layer->tracks.size(); ++i)
+            driven |= layer->tracks.at(i).property == TrackProperty::TextAnimParam && layer->tracks.at(i).animated();
+        AUREA_CHECK(driven);
+        auto seek = [&](i64 frame) {
+            Command command;
+            command.type = CommandType::PlaybackSeek;
+            command.seek.time = tick_at(FrameIndex{frame}, 30.0);
+            AUREA_CHECK(rig.e.apply_command(command).ok());
+        };
+        Image8 previous;
+        u32 changes = 0, largest = 0;
+        for (i64 frame : {0, 3, 6, 9, 12, 18, 24, 36, 60}) {
+            seek(frame);
+            Image8 now = rig.capture(480);
+            if (!previous.rgba.empty()) {
+                const u32 diff = max_diff(previous, now);
+                largest = std::max(largest, diff);
+                if (diff > 24) ++changes;
+            }
+            previous = std::move(now);
+        }
+        const f32 settled = coverage(previous);
+        std::printf("    Juan %u (%s): %u animadores, %u mudanças (máx %u), cobertura final %.5f\n", preset,
+                    text::text_preset_name(preset), count, changes, largest, settled);
+        AUREA_CHECK(changes >= 1u);
+        AUREA_CHECK(settled > .00001f);
+    }
+}
+
 AUREA_TEST(Gpu, TextAnimatorTypewriterPerCharRotationAndMotionBlur) {
     AUREA_REQUIRE_GPU();
     Scene3DRig rig(640, 360);
@@ -15043,3 +15088,6 @@ AUREA_TEST(Gpu, BorderOnOpaqueImageUsesTheChosenColor) {
 
 // AE layers (2026-11-12): qualidade da camada (Arame/Rascunho) e amostragem bicúbica nos pixels.
 #include "AeLayersGpu.inl"
+
+// Rig 2D de rosto: repouso = imagem, olho fechado vira pele, boca abre, pontos no motor.
+#include "FaceRigGpu.inl"

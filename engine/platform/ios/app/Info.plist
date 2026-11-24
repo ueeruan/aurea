@@ -198,6 +198,14 @@
             <key>UTTypeConformsTo</key><array><string>public.data</string></array>
             <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>pjf</string></array></dict>
         </dict>
+        <!-- 1.0.8: projeto e modelo do After Effects. "Abrir com" chega pelo
+             onOpenURL (AureaApp.swift) e o conteúdo decide a importação. -->
+        <dict>
+            <key>UTTypeIdentifier</key><string>com.adobe.after-effects.project</string>
+            <key>UTTypeDescription</key><string>After Effects project</string>
+            <key>UTTypeConformsTo</key><array><string>public.data</string><string>public.content</string></array>
+            <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>aep</string><string>aet</string></array></dict>
+        </dict>
     </array>
 
     <!-- Bugs 0.3.4 (importar projeto): os tipos do AUREA. Sem eles, tocar num
@@ -232,6 +240,14 @@
             <key>CFBundleTypeRole</key><string>Viewer</string>
             <key>LSHandlerRank</key><string>Alternate</string>
             <key>LSItemContentTypes</key><array><string>com.aurea.import.pjf</string></array>
+        </dict>
+        <!-- 1.0.8: After Effects (.aep/.aet) e os pacotes do "Coletar arquivos"
+             (.zip, .rar); o AUREA aparece como alternativa, sem tomar o tipo. -->
+        <dict>
+            <key>CFBundleTypeName</key><string>After Effects project</string>
+            <key>CFBundleTypeRole</key><string>Viewer</string>
+            <key>LSHandlerRank</key><string>Alternate</string>
+            <key>LSItemContentTypes</key><array><string>com.adobe.after-effects.project</string><string>public.zip-archive</string><string>com.rarlab.rar-archive</string></array>
         </dict>
     </array>
 

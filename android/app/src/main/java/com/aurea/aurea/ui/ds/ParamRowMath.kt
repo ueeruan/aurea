@@ -108,11 +108,20 @@ object FxParamMath {
     /** Régua: risco a cada 5,5 dp, maior a cada 5 riscos; agulha 1,5 dp. */
     const val TICK_SPACING = 5.5f
     const val MAJOR_EVERY = 5
-    /** Arremesso acima de 300 px/s; o gesto começa depois de ¾ do touch slop. */
+    /** Arremesso acima de 300 px/s. */
     const val FLING_MIN_PX_S = 300f
-    const val RULER_SLOP_FRACTION = 0.75f
-    /** Slider: o gesto começa depois de ½ touch slop; 10 dp de pista em cada encaixe. */
-    const val SLIDER_SLOP_FRACTION = 0.5f
+    /**
+     * 1.0.8 ("não consigo rolar a tela sem o arremesso rápido"): régua e slider
+     * só tomam o dedo depois do touch slop INTEIRO e com o movimento claramente
+     * de lado ([HORIZONTAL_DOMINANCE]). Com ½–¾ do slop e qualquer folga lateral,
+     * o leve desvio de um polegar lento virava ajuste do controle e a lista
+     * parava; só o arremesso rápido (vertical já no 1º evento) rolava.
+     */
+    const val RULER_SLOP_FRACTION = 1f
+    /** Slider: 10 dp de pista em cada encaixe. */
+    const val SLIDER_SLOP_FRACTION = 1f
+    /** O lateral tem de passar 1,5× o vertical para o controle tomar o gesto. */
+    const val HORIZONTAL_DOMINANCE = 1.5f
     const val SLIDER_SNAP_DP = 10f
     /** Abrir/fechar os controles e a seta da seção (ms). */
     const val OPEN_MS = 200

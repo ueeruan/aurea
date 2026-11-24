@@ -236,6 +236,11 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         keywords = "mesh warp malha deformacao grade bezier entortar", principal = listOf(0, 1, 2)))
     put("aurea.distort.puppet", EffectHuman(name = R.string.fx_name_puppet,
         keywords = "puppet fantoche pino pin marionete rig autorig 2d autoanimacao png personagem deformar arap", principal = listOf(0, 1, 2)))
+    put("aurea.rig.face", EffectHuman(name = R.string.fx_name_face_rig,
+        keywords = "rig rosto face live2d anime piscar olho boca falar virar cabeca acenar respirar sobrancelha sorriso personagem 2d", principal = listOf(0, 1, 2, 3, 4, 5)))
+    // Rig 2D v2: o efeito de cada camada de parte (nasce pelo "Separar em partes").
+    put("aurea.rig.part", EffectHuman(name = R.string.fx_name_face_rig_part,
+        keywords = "rig parte live2d camada profundidade controle", principal = listOf(1, 2)))
     put("aurea.distort.headbop", EffectHuman(name = R.string.fx_name_headbop,
         keywords = "headbop head bop cabeça balançar batida musica ritmo danca dancar pessoa beat nod groove", principal = listOf(0, 1, 2, 3, 13)))
     put("aurea.move.autobeat", EffectHuman(keywords = "beat batida audio música music pulso sync", principal = listOf(0, 1, 2, 3)))
@@ -291,6 +296,10 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         keywords = "trocar textura 3d swap texture imagem image material parte objeto modelo forma galeria", principal = (0..3).toList()))
     put("aurea.3d.shatter", EffectHuman(name = R.string.fx3d_name_shatter,
         keywords = "3d shatter quebrar estilhacar explodir explosao pecas vidro cacos shatter break glass", principal = listOf(0, 1, 2, 4, 5, 3)))
+    // Explosão (aurea.3d.explode): o objeto 3D inteiro (modelo, forma, texto 3D) em pedaços. Pago (HyperEffectGate).
+    put("aurea.3d.explode", EffectHuman(name = R.string.fx3d_name_explode,
+        keywords = "explosao explodir explode explosion fratura fracture estilhacar shatter pedacos fragments desintegrar disintegrate montar assemble 3d modelo texto forma",
+        principal = listOf(0, 1, 4, 7, 9, 12, 14, 19)))
     put("aurea.3d.stroke", EffectHuman(name = R.string.fx3d_name_stroke,
         keywords = "3d stroke traco linha contorno caminho mascara circulo espiral neon trapcode write on", principal = listOf(0, 1, 3, 4, 5, 9)))
     // --- Pacote CC (CCEffects.cpp e irmãos): o nome "CC" fica só na busca ---

@@ -352,7 +352,8 @@ fun AureaSlider(
                             val dy = ch.position.y - down.position.y
                             // Vertical: é da rolagem da lista.
                             if (abs(dy) > slop && abs(dy) > abs(dx)) return@awaitEachGesture
-                            if (abs(dx) <= abs(dy) || abs(dx) <= slop * FxParamMath.SLIDER_SLOP_FRACTION) continue
+                            if (abs(dx) <= abs(dy) * FxParamMath.HORIZONTAL_DOMINANCE ||
+                                abs(dx) <= slop * FxParamMath.SLIDER_SLOP_FRACTION) continue
                             dragging = true
                             begin()
                         }
@@ -511,7 +512,8 @@ fun FxRuler(
                         val dx = main.position.x - down.position.x
                         val dy = main.position.y - down.position.y
                         if (abs(dy) > touchSlop && abs(dy) > abs(dx)) return@awaitEachGesture
-                        if (abs(dx) <= abs(dy) || abs(dx) <= touchSlop * FxParamMath.RULER_SLOP_FRACTION) continue
+                        if (abs(dx) <= abs(dy) * FxParamMath.HORIZONTAL_DOMINANCE ||
+                            abs(dx) <= touchSlop * FxParamMath.RULER_SLOP_FRACTION) continue
                         inGesture = true
                         lastX = main.position.x
                         main.consume()

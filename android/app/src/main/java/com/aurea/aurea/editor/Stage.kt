@@ -580,6 +580,11 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
         drawPuppetOverlay(store, m)
         return
     }
+    // Rig 2D de rosto em "Ajustar pontos": elipses e alças (FaceRigStage.kt).
+    if (faceRigActive(store)) {
+        drawFaceRigOverlay(store, m)
+        return
+    }
     // Saber com o cartão aberto (núcleo único): início e fim do núcleo (SaberStage.kt).
     if (saberActive(store)) drawSaberOverlay(store, m)
     // Ponto de efeito ativo (parâmetro tocado no cartão): a alça dele (EffectPointStage.kt).
@@ -1363,6 +1368,10 @@ private suspend fun PointerInputScope.stageGestures(
         }
         if (puppetActive(store)) {
             puppetGesture(store, m, down)
+            return@awaitEachGesture
+        }
+        if (faceRigActive(store)) {
+            faceRigGesture(store, m, down)
             return@awaitEachGesture
         }
         // Saber (cartão aberto, núcleo único): os pontos de início/fim têm a vez;

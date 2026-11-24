@@ -163,6 +163,19 @@ object ExitDiagnostics {
         return true
     }
 
+    /**
+     * 1.0.8: a última morte no export foi um crash NATIVO (SIGSEGV no driver).
+     * POCO X6 Pro (Mali, 1.0.7.1): o driver GLES caía no glTexSubImage2D da
+     * Surface do encoder; o export continuava do checkpoint NO MESMO degrau e
+     * caía de novo alguns quadros depois. Só lê (não consome). Fora da main.
+     */
+    fun lastExportDeathWasNativeCrash(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < 30) return false
+        val exit = runCatching { exits(context).firstOrNull() }.getOrNull() ?: return false
+        return exit.reason == ApplicationExitInfo.REASON_CRASH_NATIVE &&
+            diedDuringExport(exit.reason, parseSummary(exit.processStateSummary))
+    }
+
     /** O encerramento foi uma morte durante o export de vídeo (não o usuário fechando). */
     internal fun diedDuringExport(reason: Int, summary: String?): Boolean {
         if (summary == null || !summary.contains("phase=${Phase.PROJECT_EXPORT_VIDEO.name} ")) return false

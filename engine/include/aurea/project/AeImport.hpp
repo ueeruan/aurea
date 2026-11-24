@@ -68,6 +68,11 @@ struct ImportReport {
     u32 changes = 0;              ///< escritas no projeto (0 = nada mudou: sem passo de desfazer)
     std::vector<SkipItem> skipped;
     std::vector<SkipItem> notes;
+    /// 1.0.8: código estável da mensagem para as interfaces traduzirem (vazio =
+    /// report_json deduz pela tabela de textos conhecidos); `message` fica como
+    /// o texto em pt-BR de reserva.
+    std::string messageKey;
+    std::vector<std::string> messageArgs;
 
     /// Acrescenta (sem repetir o mesmo item; teto de 400 por lista).
     void skip(std::string kind, std::string name, std::string reason, u32 line = 0);
@@ -77,7 +82,8 @@ struct ImportReport {
 /// JSON para as pontes (contrato com Android e iOS):
 /// {"ok":bool,"kind":"ffx|jsx","effects":n,"keyframes":n,"layers":n,
 ///  "expressions":n,"animators":n,"changes":n,
-///  "skipped":[{"kind","name","reason","line"}],
+///  "skipped":[{"kind","name","reason","line","reasonKey"?,"reasonArgs"?}],
+///  "messageKey"?,"messageArgs"? (1.0.8: códigos para traduzir; o texto fica de reserva),
 ///  "notes":[{"kind","name","reason","line"}],"message":"…"}
 /// Os textos saem sempre em UTF-8 válido. `ok` falso com `changes` > 0 = o
 /// script parou com erro depois de mudar o projeto (o que entrou fica).

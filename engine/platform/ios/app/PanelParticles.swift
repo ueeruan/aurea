@@ -237,7 +237,11 @@ struct ParticlesPanel: View {
     // Os presets do Particular (ordem = `particular::apply_preset`).
     private let presetKeys = ["particular_preset_default", "particular_preset_rain", "particular_preset_snow",
                               "particular_preset_fire", "particular_preset_sparks", "particular_preset_fireworks",
-                              "particular_preset_dust", "particular_preset_bokeh", "particular_preset_plexus"]
+                              "particular_preset_dust", "particular_preset_bokeh", "particular_preset_plexus",
+                              // 1.0.8: formas (borboleta, folha, pétala, coração, brilho, confete, floco).
+                              "particular_preset_butterflies", "particular_preset_leaves", "particular_preset_petals",
+                              "particular_preset_hearts", "particular_preset_twinkle", "particular_preset_fireflies",
+                              "particular_preset_confetti", "particular_preset_snowflakes"]
 
     private func group(_ title: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {

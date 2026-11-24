@@ -477,10 +477,25 @@ class Exporter internal constructor(
             }
         }
         val died = auto && killed
+        // 1.0.8: crash NATIVO no export anterior (driver GLES do Mali caindo na
+        // Surface do encoder, POCO X6 Pro): continuar no MESMO degrau caía de novo
+        // poucos quadros depois. A escada do motor decide o próximo caminho do
+        // encoder (mesma qualidade, sem a Surface GLES) e o export recomeça nele.
+        val nativeCrash = died && withContext(Dispatchers.IO) { ExitDiagnostics.lastExportDeathWasNativeCrash(app) }
         // O checkpoint é procurado SEMPRE no Automático, não só quando a morte foi
         // vista: o motor só o devolve se for deste projeto com estas opções.
-        val checkpoint = if (auto) withContext(Dispatchers.IO) { resumeCandidate(options, mbps) } else null
-        if (checkpoint != null) {
+        val found = if (auto) withContext(Dispatchers.IO) { resumeCandidate(options, mbps) } else null
+        val crashedRung = if (nativeCrash) (found?.safeMode ?: 0).coerceIn(0, AureaEngine.EXPORT_ATTEMPT_MAX) else -1
+        val afterCrash = if (crashedRung >= 0) AureaEngine.nativeExportNextAttempt(crashedRung, ENCODE_FAILED, ExportProgress.FAILURE_ENCODER,
+            false, false, options.shortSide, options.fps, options.hevc, options.aiUpscale > 0) else 0
+        val checkpoint = found.takeIf { afterCrash !in 1..AureaEngine.EXPORT_ATTEMPT_MAX }
+        if (afterCrash in 1..AureaEngine.EXPORT_ATTEMPT_MAX) {
+            android.util.Log.w("AureaExport", "Previous export died with a native crash at attempt $crashedRung; starting at attempt $afterCrash")
+            ExportDiagnosticReport.note(diagnosticTicket, "native-crash-rung", afterCrash)
+            attempt = afterCrash
+            lighterAfterClose = true
+            state = state.copy(notice = text(R.string.export_after_system_close))
+        } else if (checkpoint != null) {
             android.util.Log.w("AureaExport", "Resumable checkpoint found (previous process died=$killed, memory step $memoryStep); " +
                 "continuing attempt ${checkpoint.safeMode} from frame ${checkpoint.resumeFrame}/${checkpoint.totalFrames}")
             attempt = checkpoint.safeMode.coerceIn(0, AureaEngine.EXPORT_ATTEMPT_MAX)

@@ -652,6 +652,7 @@ func fxPickerEntries(_ model: AureaModel, layerHasAudio: Bool) -> [EffectCatalog
 
 /// O nome de uma variação (preset) pelo id estável; sem tradução, o nome do motor.
 func fxPresetName(_ typeId: UInt32, _ pid: String, _ fallback: String) -> String {
+    if typeId == fxEffectTypeId("aurea.3d.explode") { return fxExplodePresetKey(pid).map { AureaText.t($0) } ?? fallback }
     if typeId == fxEffectTypeId("aurea.color.grade") {
         let looks = ["cinema", "warm", "cool", "vintage", "mono", "noir", "vivid", "faded", "sunset", "teal", "film", "anime", "matte"]
         return looks.contains(pid) ? AureaText.t("look_" + pid) : fallback
@@ -668,6 +669,19 @@ func fxPresetName(_ typeId: UInt32, _ pid: String, _ fallback: String) -> String
     case "classic", "dust", "living_grid": return AureaText.t("fxp_constellation_" + pid)
     case "sphere": return AureaText.t("fx030c_src_sphere")
     default: return fallback
+    }
+}
+
+/// As variações da Explosão 3D (`aurea.3d.explode`, Effect::presets), só deste efeito.
+/// Par de `explodePresetLabel` (EffectsCatalogView.kt).
+func fxExplodePresetKey(_ pid: String) -> String? {
+    switch pid {
+    case "explode": return "fxl_explosion"
+    case "glass": return "fxp_explode_glass"
+    case "disintegrate": return "afx_name_disintegrate"
+    case "assemble": return "fxp_explode_assemble"
+    case "side_impact": return "fxp_explode_side_impact"
+    default: return nil
     }
 }
 
@@ -879,13 +893,13 @@ private let fxTagByKey: [UInt32: [String]] = {
                    "aurea.transition.noise_dissolve", "aurea.stylize.scatter", "aurea.distort.turbulence", "aurea.distort.turbulent_displace_reference"]),
         ("particles", ["aurea.generate.particular", "aurea.transition.disintegrate", "aurea.stylize.ball_grid",
                        "aurea.stylize.star_field", "aurea.stylize.scatter", "aurea.generate.constellation", "aurea.3d.shatter",
-                       "aurea.transition.dust"]),
+                       "aurea.3d.explode", "aurea.transition.dust"]),
         ("shadow", ["aurea.stylize.drop_shadow", "aurea.stylize.drop_shadow_reference", "aurea.distort.slant", "aurea.stylize.bevel_alpha"]),
         ("outline", ["aurea.stylize.stroke_outline", "aurea.stylize.border", "aurea.stylize.find_edges", "aurea.stylize.find_edges_reference", "aurea.3d.stroke",
                      "aurea.draw.drawing_progress", "aurea.light.saber", "aurea.transition.ballpoint"]),
         ("3d", ["aurea.distort.sphere_wrap", "aurea.distort.cylinder_wrap", "aurea.generate.raster_extrude",
                 "aurea.3d.part_transform", "aurea.3d.part_hide", "aurea.3d.part_texture", "aurea.3d.shatter",
-                "aurea.3d.stroke", "aurea.shape3d.layout", "aurea.generate.aurora", "aurea.generate.constellation",
+                "aurea.3d.explode", "aurea.3d.stroke", "aurea.shape3d.layout", "aurea.generate.aurora", "aurea.generate.constellation",
                 "aurea.ai.depth_map", FxEffectTool.cameraTrack.key, "aurea.distort.hollow_box"]),
         ("transition", ["aurea.transition.luma_dissolve", "aurea.distort.ripple_dissolve", "aurea.glitch.dissolve_shake",
                         "aurea.transition.disintegrate", "aurea.transition.noise_dissolve"]),

@@ -262,6 +262,16 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * Criadas no primeiro uso (8I): a abertura não lê o cofre da chave.
      */
     val captions by lazy { com.aurea.aurea.captions.CaptionsState(app, engine, viewModelScope) { refreshNow() } }
+    /**
+     * 1.0.8 Edição automática (folha + transcrição; as regras e a montagem são do
+     * motor, Engine::auto_edit). Pronta = a camada nova da edição fica escolhida.
+     */
+    val autoEdit by lazy {
+        com.aurea.aurea.autoedit.AutoEditState(app, engine, viewModelScope,
+            captionOptions = { captions.settings.toJson() },
+            whisperQuality = { captions.quality },
+            onDone = { id -> refreshNow(); if (id != 0L) select(id, openOptions = false) })
+    }
     /** 0.4.6: o painel que o assistente de IA pediu para abrir (o editor consome e zera). */
     var assistantPanel by mutableStateOf<String?>(null)
     /** 0.4.6: o assistente de IA (a conversa sobrevive a fechar e abrir o chat). */
@@ -951,6 +961,28 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private val lifecycleLock = Any()
     private val lifecycleThread = Executors.newSingleThreadExecutor { r -> Thread(r, "aurea-ciclo") }
     @Volatile private var ready = false
+    /** 1.0.8: o motor recusou iniciar (a mensagem já está na tela). */
+    @Volatile private var engineStartFailed = false
+    /**
+     * 1.0.8 ("criar projeto não abre", Infinix Smart 9): num aparelho lento a
+     * primeira abertura depois de atualizar leva dezenas de segundos até o motor
+     * ficar pronto, e criar/abrir/importar era recusado em SILÊNCIO. Agora o
+     * pedido espera e roda sozinho quando o motor fica pronto (o último vale).
+     */
+    private var pendingWhenReady: (() -> Unit)? = null
+
+    /** true = pode seguir agora; false = guardado para quando o motor ficar pronto (ou o motor falhou). */
+    private fun whenEngineReady(action: () -> Unit): Boolean {
+        if (ready) return true
+        if (destroyed) return false
+        if (engineStartFailed) {
+            showToast(appText(R.string.msg_nao_foi_possivel_iniciar_o_motor))
+            return false
+        }
+        pendingWhenReady = action
+        showToast(appText(R.string.engine_preparing_queued))
+        return false
+    }
     @Volatile private var destroyed = false
     private var pendingSurface: Triple<Surface, Int, Int>? = null
     private var surfaceOwner: Surface? = null
@@ -1013,11 +1045,19 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 // textura/preview/export a partir dela e da GPU real.
                 val probe = runCatching { com.aurea.aurea.engine.DeviceProfile.probe(app) }.getOrNull()
                 ExitDiagnostics.mark(app, Phase.ENGINE_START)
+                // 1.0.8: motor que não fica pronto não pode virar silêncio na Home.
+                main.postDelayed({
+                    if (!destroyed && !engineReady && !engineStartFailed && errorMessage == null) {
+                        errorMessage = appText(R.string.engine_slow_start) +
+                            "\n\n${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} · Android ${android.os.Build.VERSION.RELEASE}"
+                    }
+                }, ENGINE_SLOW_START_MS)
                 val ok = engine.initialize(
                     displayRefreshRate(), dirs.cache.absolutePath, dirs.projects.absolutePath, debug,
                     probe?.memory, probe?.codecs,
                 )
                 ready = ok && !destroyed
+                engineStartFailed = !ok
                 // Fechou por crash nativo com vídeo aberto na sessão anterior:
                 // sem zero-copy daqui em diante neste aparelho (qualquer marca).
                 if (ok && ExitDiagnostics.safeVideoMode(app)) engine.useReadableVideoPlanes()
@@ -1046,7 +1086,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                             ::renderEffectPreviewSequence)
                         startStatusLoop()
                         proxies.startTracking()
+                        // 1.0.8: o pedido que esperou o motor (criar, abrir, importar AE).
+                        pendingWhenReady?.let { action -> pendingWhenReady = null; action() }
                     } else {
+                        pendingWhenReady = null
                         errorMessage = appText(R.string.msg_nao_foi_possivel_iniciar_o_motor) +
                             "\n\n${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} · Android ${android.os.Build.VERSION.RELEASE}" +
                             "\n${engine.startupError()}"
@@ -2351,6 +2394,57 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     fun puppetPins(layer: Long, effect: Int): FloatArray = puppetQuery(layer, effect, false)
     fun puppetMesh(layer: Long, effect: Int): FloatArray = puppetQuery(layer, effect, true)
+    // Rig 2D de rosto no palco (editor/FaceRigStage.kt): 10 alças (u, v) + estado dos pontos.
+    fun faceRigHandles(layer: Long, effect: Int): FloatArray {
+        val buf = FloatArray(32)
+        val need = engine.queryFaceRig(layer, effect, buf)
+        return if (need <= 0 || need > buf.size) FloatArray(0) else buf.copyOf(need)
+    }
+    /** Acha os pontos de novo nos pixels (um passo de desfazer): 2 olhos e boca, 1 só olhos, 0 proporções. */
+    fun faceRigAutoPlace(layer: Long, effect: Int): Int {
+        if (playing) pause()
+        val quality = engine.faceRigAutoPlace(layer, effect)
+        if (quality >= 0) { rigRevision++; refreshNow() }
+        return quality
+    }
+    /**
+     * Rig 2D v2 "Separar em partes": a imagem vira uma pré-composição com uma
+     * camada por parte e o nulo "Controle do rig". O motor trabalha na thread de
+     * IO; o véu mostra o andamento. No fim, abre a pré-composição com o Controle
+     * escolhido e o cartão do rig dele aberto (os mesmos controles + física do cabelo).
+     */
+    fun faceRigSplitParts(layer: Long, effect: Int) {
+        if (busyMessage != null || effect < 0) return
+        if (playing) pause()
+        val label = appText(R.string.face_rig_splitting)
+        busyMessage = label
+        viewModelScope.launch {
+            val poll = launch {
+                while (true) {
+                    val done = engine.faceRigSplitProgress()
+                    busyMessage = "$label ${(done.coerceIn(0f, 1f) * 100).toInt()}%"
+                    kotlinx.coroutines.delay(150)
+                }
+            }
+            val result = withContext(Dispatchers.IO) { engine.faceRigSplitParts(layer, effect) }
+            poll.cancel()
+            busyMessage = null
+            if (result[0] <= 0L) { errorMessage = appText(R.string.face_rig_split_failed); return@launch }
+            rigRevision++
+            refreshNow()
+            openPrecomp(result[0])
+            if (result[1] != 0L) {
+                select(result[1])
+                focusExistingEffect(com.aurea.aurea.editor.FaceRigStage.TYPE)
+            }
+            showToast(appText(R.string.face_rig_split_done))
+        }
+    }
+    /** Arrasto de uma alça; `continuing` = mesmo gesto (um passo de desfazer). */
+    fun faceRigMoveHandle(layer: Long, effect: Int, handle: Int, u: Float, v: Float, continuing: Boolean) {
+        if (playing) pause()
+        if (engine.faceRigMoveHandle(layer, effect, handle, u, v, continuing)) rigRevision++
+    }
     fun puppetAddPin(layer: Long, effect: Int, u: Float, v: Float): Int {
         if (playing) pause()
         val pin = engine.puppetAddPin(layer, effect, u, v)
@@ -2667,13 +2761,18 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     // de desfazer; o que ficou de fora vem listado, com a linha do script.
     // =========================================================================
 
-    class AeImportItem(val kind: String, val name: String, val reason: String, val line: Int)
+    /** 1.0.8: `reasonKey`/`messageKey` = código do motor para traduzir (o texto em pt-BR fica de reserva). */
+    class AeImportItem(
+        val kind: String, val name: String, val reason: String, val line: Int,
+        val reasonKey: String = "", val reasonArgs: List<String> = emptyList(),
+    )
     class AeImportResult(
         val ok: Boolean, val fileName: String, val kind: String, val message: String,
         val effects: Int, val keyframes: Int, val layers: Int, val expressions: Int, val animators: Int,
         val skipped: List<AeImportItem>, val notes: List<AeImportItem>,
         /** Escritas no projeto: com `ok` falso e > 0, o script parou com erro depois de mudar algo. */
         val changes: Int = 0,
+        val messageKey: String = "", val messageArgs: List<String> = emptyList(),
     ) {
         val hasCounts: Boolean get() = effects + keyframes + layers + expressions + animators > 0
     }
@@ -2718,20 +2817,19 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         launchImport launch@{
             val name = withContext(Dispatchers.IO) { displayName(uri) ?: uri.lastPathSegment.orEmpty() }
             val ext = name.substringAfterLast('.', "")
-            val isProjectSource = aeProjectExtension(ext)
-            if (ext.equals("aepx", ignoreCase = true) || (pick.projectFile && !isProjectSource)) {
-                errorMessage = appText(R.string.ae_project_select_file)
+            // 1.0.8: o tipo pelo nome, pelo MIME e pelos primeiros bytes ("msf:123" não
+            // tem extensão). Projeto escolhido no seletor de preset (ou o contrário)
+            // segue pelo caminho certo em vez de ser recusado.
+            val sourceKind = withContext(Dispatchers.IO) { aeSourceKind(uri, name) }
+            if (ext.equals("aepx", ignoreCase = true)) {
+                errorMessage = appText(R.string.ae_err_aepx)
                 return@launch
             }
-            if (!pick.projectFile && isProjectSource) {
-                errorMessage = appText(R.string.ae_project_use_separate_import)
-                return@launch
-            }
-            if (pick.projectFile) {
+            if (sourceKind != null) {
                 aeImportExecuting = true
                 val json = try {
                     withContext(Dispatchers.IO) {
-                        withStagedAeProject(uri, name) { engine.importAeFile(it.absolutePath, 0L) }
+                        withStagedAeProject(uri, name, sourceKind) { engine.importAeFile(it.absolutePath, 0L) }
                     }
                 } catch (_: AeProjectTooLarge) {
                     errorMessage = appText(R.string.ae_project_too_big)
@@ -2745,6 +2843,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 refreshNow(); refreshDetail()
                 return@launch
             }
+            val presetTarget = if (pick.projectFile) primary ?: 0L else target
             var tooBig = false
             val bytes = withContext(Dispatchers.IO) {
                 app.contentResolver.openInputStream(uri)?.use { input ->
@@ -2754,7 +2853,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                         val n = input.read(buf)
                         if (n < 0) break
                         if (n == 0) return@withContext null
-                        // O mesmo teto do motor (kMaxAeFile, 64 MB).
+                        // Preset e script: 64 MB em memória (o .aep vai por arquivo, até 256 MB).
                         if (n > 64 * 1024 * 1024 - out.size()) { tooBig = true; return@withContext null }
                         out.write(buf, 0, n)
                     }
@@ -2767,7 +2866,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             // estável enquanto a chamada nativa já não pode ser cancelada.
             aeImportExecuting = true
             val json = try {
-                withContext(Dispatchers.IO) { engine.importAeData(bytes, name, target, pick.textPro) }
+                withContext(Dispatchers.IO) { engine.importAeData(bytes, name, presetTarget, pick.textPro) }
             } finally {
                 aeImportExecuting = false
             }
@@ -2781,10 +2880,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     private fun parseAeImportResult(json: String, fileName: String): AeImportResult? {
         val report = runCatching { JSONObject(json) }.getOrNull() ?: return null
+        fun strings(array: org.json.JSONArray?) = array?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
         fun items(key: String) = report.optJSONArray(key)?.let { array ->
             (0 until array.length()).mapNotNull { index ->
                 array.optJSONObject(index)?.let {
-                    AeImportItem(it.optString("kind"), it.optString("name"), it.optString("reason"), it.optInt("line"))
+                    AeImportItem(it.optString("kind"), it.optString("name"), it.optString("reason"), it.optInt("line"),
+                        it.optString("reasonKey"), strings(it.optJSONArray("reasonArgs")))
                 }
             }
         }.orEmpty()
@@ -2793,25 +2894,144 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             report.optInt("effects"), report.optInt("keyframes"), report.optInt("layers"),
             report.optInt("expressions"), report.optInt("animators"),
             items("skipped"), items("notes"), report.optInt("changes"),
+            report.optString("messageKey"), strings(report.optJSONArray("messageArgs")),
         )
     }
 
-    private fun aeProjectExtension(ext: String) = ext.equals("aep", true) ||
-        ext.equals("zip", true) || ext.equals("rar", true)
+    /**
+     * 1.0.8: o arquivo do AE pelo nome, pelos primeiros bytes e pelo MIME (o
+     * seletor e o "Abrir com" mandam nomes como "msf:1000123", sem extensão).
+     * "aep" (RIFX + Egg!, também o modelo .aet), "zip" (PK), "rar" (Rar!) ou nulo.
+     */
+    private fun aeSourceKind(uri: Uri, name: String): String? {
+        when (name.substringAfterLast('.', "").lowercase()) {
+            "aep", "aet" -> return "aep"
+            "zip" -> return "zip"
+            "rar" -> return "rar"
+        }
+        val resolver = getApplication<Application>().contentResolver
+        val header = ByteArray(12)
+        val count = runCatching {
+            resolver.openInputStream(uri)?.use { input ->
+                var read = 0
+                while (read < header.size) {
+                    val n = input.read(header, read, header.size - read)
+                    if (n <= 0) break
+                    read += n
+                }
+                read
+            } ?: 0
+        }.getOrDefault(0)
+        fun at(offset: Int, text: String) = count >= offset + text.length &&
+            text.indices.all { header[offset + it] == text[it].code.toByte() }
+        if (at(0, "RIFX") && at(8, "Egg!")) return "aep"
+        if (at(0, "PK") && count >= 4 && ((header[2] == 3.toByte() && header[3] == 4.toByte()) ||
+                (header[2] == 5.toByte() && header[3] == 6.toByte()))) return "zip"
+        if (at(0, "Rar!") && count >= 6 && header[4] == 0x1A.toByte() && header[5] == 7.toByte()) return "rar"
+        // .ffx também é RIFX (FaFX): não é projeto. Sem cabeçalho legível, o MIME decide.
+        if (at(0, "RIFX")) return null
+        val mime = runCatching { resolver.getType(uri) }.getOrNull().orEmpty().lowercase()
+        return when {
+            mime.contains("zip") -> "zip"
+            mime.contains("rar") -> "rar"
+            mime.contains("aftereffects") || mime.contains("after-effects") -> "aep"
+            else -> null
+        }
+    }
+
+    /**
+     * 1.0.8: o ZIP traz um .aep/.aet (pacote do AE)? Lê só o diretório central
+     * (fim do arquivo), sem descompactar nada. Nulo = não deu para ler (fluxo
+     * sem posição, ZIP quebrado): quem chama decide pelo resto.
+     */
+    private fun zipHasAeProject(uri: Uri): Boolean? = runCatching {
+        getApplication<Application>().contentResolver.openFileDescriptor(uri, "r")?.use { descriptor ->
+            java.io.FileInputStream(descriptor.fileDescriptor).channel.use { channel ->
+                val le = java.nio.ByteOrder.LITTLE_ENDIAN
+                fun readAt(position: Long, length: Int): java.nio.ByteBuffer {
+                    val buffer = java.nio.ByteBuffer.allocate(length).order(le)
+                    var at = position
+                    while (buffer.hasRemaining()) {
+                        val n = channel.read(buffer, at)
+                        if (n <= 0) break
+                        at += n
+                    }
+                    buffer.flip()
+                    return buffer
+                }
+                val size = channel.size()
+                if (size < 22) return@use null
+                val tailLength = minOf(size, 65_557L).toInt()
+                val tail = readAt(size - tailLength, tailLength)
+                var eocd = -1
+                for (i in tail.limit() - 22 downTo 0) if (tail.getInt(i) == 0x06054b50) { eocd = i; break }
+                if (eocd < 0) return@use null
+                var cdSize = tail.getInt(eocd + 12).toLong() and 0xffffffffL
+                var cdOffset = tail.getInt(eocd + 16).toLong() and 0xffffffffL
+                if (cdSize == 0xffffffffL || cdOffset == 0xffffffffL) {
+                    // ZIP64: o localizador fica logo antes do fim do diretório.
+                    val locator = eocd - 20
+                    if (locator < 0 || tail.getInt(locator) != 0x07064b50) return@use null
+                    val record = readAt(tail.getLong(locator + 8), 56)
+                    if (record.limit() < 56 || record.getInt(0) != 0x06064b50) return@use null
+                    cdSize = record.getLong(40)
+                    cdOffset = record.getLong(48)
+                }
+                if (cdSize <= 0 || cdSize > (64L shl 20) || cdOffset < 0 || cdOffset + cdSize > size) return@use null
+                val directory = readAt(cdOffset, cdSize.toInt())
+                var p = 0
+                while (p + 46 <= directory.limit() && directory.getInt(p) == 0x02014b50) {
+                    val nameLength = directory.getShort(p + 28).toInt() and 0xffff
+                    val extra = directory.getShort(p + 30).toInt() and 0xffff
+                    val comment = directory.getShort(p + 32).toInt() and 0xffff
+                    if (p + 46 + nameLength > directory.limit()) break
+                    val bytes = ByteArray(nameLength)
+                    directory.position(p + 46)
+                    directory.get(bytes)
+                    val entry = String(bytes, Charsets.UTF_8).replace('\\', '/').lowercase()
+                    if ((entry.endsWith(".aep") || entry.endsWith(".aet")) && !entry.startsWith("__macosx/") &&
+                        !entry.substringAfterLast('/').startsWith("._")) return@use true
+                    p += 46 + nameLength + extra + comment
+                }
+                false
+            }
+        }
+    }.getOrNull()
+
+    /**
+     * 1.0.8: "Abrir com" / "Compartilhar" (MainActivity). Projeto do AE
+     * (.aep/.aet, .rar, ou .zip com um .aep dentro) vai para a importação do
+     * AE; o resto segue como arquivo do projeto do Aurea (.aureaproj etc.).
+     */
+    fun openExternalFile(uri: Uri) {
+        viewModelScope.launch {
+            val afterEffects = withContext(Dispatchers.IO) {
+                val name = displayName(uri) ?: uri.lastPathSegment.orEmpty()
+                when (aeSourceKind(uri, name)) {
+                    "aep", "rar" -> true
+                    "zip" -> zipHasAeProject(uri) == true
+                    else -> false
+                }
+            }
+            if (afterEffects) importHomeAeProject(uri, fromOutside = true) else importProjectFile(uri)
+        }
+    }
 
     private class AeProjectTooLarge : java.io.IOException()
 
-    private suspend fun <T> withStagedAeProject(uri: Uri, fileName: String, convert: (File) -> T): T? {
+    private suspend fun <T> withStagedAeProject(uri: Uri, fileName: String, kind: String, convert: (File) -> T): T? {
         val app = getApplication<Application>()
         val name = fileName.substringAfterLast('/').substringAfterLast('\\')
-        val ext = name.substringAfterLast('.')
-        val base = name.substringBeforeLast('.').ifBlank { "project" }
+        // A cópia leva a extensão do tipo detectado (o motor também confere os bytes).
+        val nameExt = name.substringAfterLast('.', "").lowercase()
+        val ext = if (nameExt in setOf("aep", "aet", "zip", "rar")) nameExt else kind
+        val base = (if (nameExt == ext) name.substringBeforeLast('.') else name).replace(':', '_').ifBlank { "project" }
             .let { if (it.toByteArray(Charsets.UTF_8).size <= 230) it else it.take(48) }
         val directory = java.nio.file.Files.createTempDirectory(app.cacheDir.toPath(), "aurea-ae-").toFile()
         val file = File(directory, "$base.$ext")
         try {
             val input = app.contentResolver.openInputStream(uri) ?: return null
-            var remaining = if (ext.equals("aep", true)) 64L shl 20 else 8L shl 30
+            var remaining = if (ext == "aep" || ext == "aet") 256L shl 20 else 8L shl 30
             input.use { source ->
                 file.outputStream().use { destination ->
                     val buffer = ByteArray(65_536)
@@ -2834,20 +3054,29 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Importa um projeto independente na biblioteca, sem trocar o projeto do editor. */
-    fun importHomeAeProject(uri: Uri) {
-        if (screen != Screen.Home || !acceptsImport()) return
+    /**
+     * Importa um projeto independente na biblioteca, sem trocar o projeto do
+     * editor. `fromOutside` ("Abrir com"): vale em qualquer tela, porque a
+     * importação não mexe no projeto aberto.
+     */
+    fun importHomeAeProject(uri: Uri, fromOutside: Boolean = false) {
+        if (!whenEngineReady { importHomeAeProject(uri, fromOutside) }) return
+        // 1.0.8: a recusa calada parecia "não importa nada"; agora diz o porquê.
+        if (screen != Screen.Home && !fromOutside) { showToast(appText(R.string.ae_project_go_home)); return }
+        if (!acceptsImport()) return
         busyMessage = appText(R.string.ae_importing)
         launchImport launch@{
             val fileName = withContext(Dispatchers.IO) { displayName(uri) ?: uri.lastPathSegment.orEmpty() }
-            if (!aeProjectExtension(fileName.substringAfterLast('.', ""))) {
-                errorMessage = appText(R.string.ae_project_select_file)
+            val sourceKind = withContext(Dispatchers.IO) { aeSourceKind(uri, fileName) }
+            if (sourceKind == null) {
+                errorMessage = appText(R.string.ae_err_choose_project)
                 return@launch
             }
-            val fallback = fileName.substringBeforeLast('.').take(60).ifBlank { appText(R.string.project_file_imported_title) }
+            val fallback = fileName.substringAfterLast('/').let { if (it.contains('.')) it.substringBeforeLast('.') else it }
+                .replace(':', ' ').trim().take(60).ifBlank { appText(R.string.project_file_imported_title) }
             val result = try {
                 withContext(Dispatchers.IO) {
-                    withStagedAeProject(uri, fileName) { inputFile ->
+                    withStagedAeProject(uri, fileName, sourceKind) { inputFile ->
                         val title = uniqueName(fallback)
                         val project = File(directories().projects, "$title.aurea")
                         val json = engine.importAeProjectFile(inputFile.absolutePath, project.absolutePath, title)
@@ -5675,6 +5904,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         private set
 
     private fun acceptsImport(): Boolean {
+        if (!ready && !destroyed) { showToast(appText(R.string.engine_not_ready)); return false }
         val ok = !destroyed && ready && !projectWork && activeImports == 0 && !exporter.busy
         // A recusa calada parecia "o arquivo não entra" (beta: "não importa nada"):
         // o seletor fechava e nada acontecia. Agora diz o porquê.
@@ -5705,6 +5935,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private fun acceptsProjectChange(): Boolean {
         if (preRenderPreparing) { showToast(appText(R.string.prerender_preparing)); return false }
         if (preExportPreparing || preExport.running) { showToast(appText(R.string.prx_busy)); return false }
+        if (!ready && !destroyed) { showToast(appText(R.string.engine_not_ready)); return false }
         if (destroyed || !ready || projectWork) return false
         if (exporter.busy) { showToast(appText(R.string.msg_aguarde_a_exportacao_terminar)); return false }
         if (activeImports > 0 || busyMessage != null || captions.busy != null || tracking || maskTracking || detectingBeats) return false
@@ -11253,8 +11484,112 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * o iOS já faz na importação. Bloqueia: chame fora da main.
      */
     private fun durableSource(uri: Uri): String {
-        if (uri.scheme != android.content.ContentResolver.SCHEME_CONTENT || takePermission(uri)) return uri.toString()
-        return copyIntoApp(uri)?.absolutePath ?: uri.toString()
+        // 1.0.8 ("A mídia original não está mais no aparelho", erro 18): a
+        // permissão persistente NÃO segura o arquivo — a galeria apaga, o
+        // WhatsApp limpa, o cartão sai, a nuvem fica offline, a reinstalação
+        // perde a permissão — e o projeto que guardava a URI parava no export.
+        // Agora TODA mídia vira cópia do app (projetos/import-sources, mesmo
+        // conteúdo = mesma cópia). Só sem espaço (ou provedor que recusa ler)
+        // fica a URI com permissão persistente, como antes.
+        if (uri.scheme == android.content.ContentResolver.SCHEME_CONTENT) {
+            copyIntoApp(uri)?.let { return it.absolutePath }
+            takePermission(uri)
+            return uri.toString()
+        }
+        // Arquivo: o que já mora nas pastas duráveis do app fica onde está;
+        // cache/temporário (seletor, MCP, câmera) vira cópia antes que o
+        // sistema o apague.
+        val file = localFileOf(uri) ?: return uri.toString()
+        if (isDurableAppFile(file)) return file.absolutePath
+        return copyIntoApp(uri)?.absolutePath ?: file.absolutePath
+    }
+
+    /** O arquivo de uma URI `file:` (ou caminho cru); null para outras. */
+    private fun localFileOf(uri: Uri): File? = when (uri.scheme) {
+        null, "", android.content.ContentResolver.SCHEME_FILE -> uri.path?.let(::File)
+        else -> null
+    }
+
+    /** Dentro de `files/` do app e fora de qualquer cache: sobrevive às limpezas do sistema. */
+    private fun isDurableAppFile(file: File): Boolean {
+        val app = getApplication<Application>()
+        val path = runCatching { file.canonicalPath }.getOrNull() ?: return false
+        fun under(dir: File?): Boolean {
+            val root = dir?.let { runCatching { it.canonicalPath }.getOrNull() } ?: return false
+            return path.startsWith(root + File.separator)
+        }
+        if (under(app.cacheDir) || under(app.codeCacheDir) || under(app.externalCacheDir)) return false
+        return under(app.filesDir)
+    }
+
+    /** Arquivo que o sistema pode apagar sozinho (cache do app): a migração do projeto o copia. */
+    private fun isEphemeralAppFile(path: String): Boolean {
+        if (!path.startsWith("/")) return false
+        val app = getApplication<Application>()
+        val canonical = runCatching { File(path).canonicalPath }.getOrNull() ?: return false
+        return listOfNotNull(app.cacheDir, app.codeCacheDir, app.externalCacheDir).any { dir ->
+            val root = runCatching { dir.canonicalPath }.getOrNull()
+            root != null && canonical.startsWith(root + File.separator)
+        }
+    }
+
+    /**
+     * 1.0.8 (erro 18): antes de abrir um projeto, a mídia que ele ainda guarda
+     * por URI `content://` (importações até a 1.0.7.1) ou no cache do app vira
+     * cópia do app ENQUANTO ainda abre, e o `.aurea` passa a apontar para a
+     * cópia (motor: package::relink_media). A que já não abre fica listada em
+     * [unreadableSources]: a camada mostra "mídia ausente" com Substituir mídia.
+     * Bloqueia: chame fora da main, com o projeto fechado.
+     */
+    internal fun migrateProjectMedia(path: String): Int {
+        val refs = runCatching { engine.projectFileMedia(path) }.getOrNull() ?: return 0
+        val pairs = ArrayList<String>()
+        val unreadable = HashSet<String>()
+        val seen = HashSet<String>()
+        var announced = false
+        var i = 0
+        while (i + 3 < refs.size) {
+            val stored = refs[i]
+            val kind = refs[i + 3].toIntOrNull() ?: 0
+            i += 4
+            // AssetKind: 1 vídeo, 2 áudio, 3 imagem.
+            if (kind !in 1..3 || !seen.add(stored)) continue
+            val uri = when {
+                stored.startsWith("content:") -> Uri.parse(stored)
+                isEphemeralAppFile(stored) && File(stored).isFile -> Uri.fromFile(File(stored))
+                else -> null
+            } ?: continue
+            if (!announced) {
+                announced = true
+                busyMessage = appText(R.string.media_keep_in_app)
+            }
+            val copy = copyIntoApp(uri)
+            if (copy != null) {
+                pairs += stored
+                pairs += copy.absolutePath
+            } else if (stored.startsWith("content:")) {
+                unreadable += stored
+            }
+        }
+        unreadableSources = unreadable
+        if (pairs.isEmpty()) return 0
+        val relinked = engine.relinkProjectFileMedia(path, pairs.toTypedArray())
+        Log.i(TAG, "abrir projeto: ${pairs.size / 2} midia(s) copiada(s) para o app; religadas=$relinked")
+        return relinked
+    }
+
+    /**
+     * Mídias do projeto aberto guardadas por URI que não abre mais (o motor não
+     * confere URI). A camada com uma delas mostra o aviso de mídia ausente.
+     */
+    var unreadableSources: Set<String> = emptySet()
+        private set
+
+    /** A camada aponta para uma mídia que não está mais no aparelho (URI morta). */
+    fun layerMediaUnreadable(layer: Long): Boolean {
+        if (unreadableSources.isEmpty() || !ready) return false
+        val source = engine.layerSourcePath(layer) ?: return false
+        return source in unreadableSources
     }
 
     /** A fonte durável de um vídeo com corte (1.0.2): o caminho, onde o trecho começa no original e de onde veio. */
@@ -11270,9 +11605,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * Bloqueia: chame fora da main.
      */
     private fun durableTrimmedSource(uri: Uri, inUs: Long, outUs: Long): DurableMedia {
-        if (uri.scheme != android.content.ContentResolver.SCHEME_CONTENT || takePermission(uri)) return DurableMedia(uri.toString())
+        // 1.0.8: com ou sem permissão persistente, o trecho (ou a cópia) mora no app.
+        if (uri.scheme != android.content.ContentResolver.SCHEME_CONTENT) return DurableMedia(durableSource(uri))
         if (outUs > inUs && inUs >= 0) cutIntoApp(uri, inUs, outUs)?.let { return it }
-        return DurableMedia(copyIntoApp(uri)?.absolutePath ?: uri.toString())
+        return DurableMedia(durableSource(uri))
     }
 
     private fun cutIntoApp(uri: Uri, inUs: Long, outUs: Long): DurableMedia? {
@@ -11303,7 +11639,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private fun copyIntoApp(uri: Uri): File? {
         val app = getApplication<Application>()
         val dir = File(app.filesDir, "projetos/import-sources").apply { mkdirs() }
-        val ext = displayName(uri)?.substringAfterLast('.', "")?.lowercase(java.util.Locale.ROOT)
+        val ext = (displayName(uri) ?: uri.lastPathSegment)?.substringAfterLast('.', "")?.lowercase(java.util.Locale.ROOT)
             ?.takeIf { it.length in 1..5 && it.all(Char::isLetterOrDigit) }
         val tmp = File(dir, "copy-${System.nanoTime()}.tmp")
         return try {
@@ -11353,6 +11689,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** fps livre (1–240) e, opcional, o fundo inicial em RGBA sRGB (nulo = preto). */
     fun newProject(width: Int, height: Int, fps: Double, title: String, background: FloatArray?, uiMode: Int = UI_MODE_COMPOSITION) {
+        if (!whenEngineReady { newProject(width, height, fps, title, background, uiMode) }) return
         if (!acceptsProjectChange()) return
         projectGeneration++
         launchProjectWork launch@{
@@ -11378,6 +11715,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     fun openProject(path: String) {
+        if (!whenEngineReady { openProject(path) }) return
         if (!acceptsProjectChange()) return
         // Projeto que já derrubou o app: só com a pessoa escolhendo "Recuperar".
         quarantined.firstOrNull { it.path == path }?.let { quarantinePrompt = it; return }
@@ -11387,6 +11725,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             // Marcador ANTES de o motor tocar no projeto; sai alguns segundos
             // depois de abrir (os primeiros quadros também são "abrir").
             withContext(Dispatchers.IO) { ProjectGuard.begin(app, ProjectGuard.Stage.OPEN, path) }
+            // 1.0.8 (erro 18): mídia por URI/cache vira cópia do app antes de abrir.
+            try {
+                withContext(Dispatchers.IO) { runCatching { migrateProjectMedia(path) } }
+            } finally { busyMessage = null }
             val code = withContext(Dispatchers.Default) { engine.loadProject(path) }
             if (code != 0) {
                 withContext(Dispatchers.IO) { ProjectGuard.end(app, ProjectGuard.Stage.OPEN) }
@@ -11411,6 +11753,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 if (notice and 2 != 0) add(appText(R.string.app_open_notice_partial))
                 if (notice and 4 != 0) add(appText(R.string.app_open_notice_old_version))
                 if (notice and 8 != 0) add(appText(R.string.app_open_notice_missing, missing))
+                // 1.0.8: URI que não abre mais (o motor não confere URI).
+                if (unreadableSources.isNotEmpty()) add(appText(R.string.media_missing_relink_hint, unreadableSources.size))
             }
             if (parts.isNotEmpty()) {
                 Log.w(TAG, "abertura com avisos: 0x${Integer.toHexString(notice)}")
@@ -12120,6 +12464,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         const val META_SUFFIX = ".meta.json"
         /** Quanto tempo depois de abrir um crash ainda conta como "ao abrir" (ProjectGuard). */
         const val OPEN_GUARD_MS = 5_000L
+        /** 1.0.8: motor que não ficou pronto em 30 s vira aviso na tela (era silêncio). */
+        const val ENGINE_SLOW_START_MS = 30_000L
         /** `kInvalidIndex` do C++: keyframe que não é de efeito. */
         const val NO_EFFECT = -1
         /** Dividir TOCANDO: quadros de atraso do cabeçote lido aqui que ainda contam (o motor decide). */

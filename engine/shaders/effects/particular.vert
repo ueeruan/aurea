@@ -47,11 +47,15 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 plexus;
     // Superfície da rede: ligada (0/1), opacidade, pontos S (os primeiros S slots).
     vec4 plexusSurface;
+    // Forma (1.0.8): 0 disco, 1 estrela, 2 coração, 3 folha, 4 pétala, 5 borboleta,
+    // 6 confete, 7 brilho, 8 floco; giro (rad/s), bater/balançar 0..1, cintilar 0..1.
+    vec4 shape;
 } p;
 
 layout(location = 0) out vec2 v_corner;   // -1..1 no quadrado da partícula
 layout(location = 1) out vec4 v_color;    // cor linear (reta) e alfa
 layout(location = 2) flat out float v_feather;   // suavidade da borda 0..1
+layout(location = 3) flat out vec4 v_shape;      // forma, sorteio 0..1, -, -
 
 const float TWO_PI = 6.28318530718;
 
@@ -94,6 +98,7 @@ void cull() {
     v_color = vec4(0.0);
     v_corner = vec2(0.0);
     v_feather = 0.0;
+    v_shape = vec4(0.0);
 }
 
 // --- Rede (plexus) -------------------------------------------------------------
@@ -193,6 +198,7 @@ void plexus_vertex(int vid) {
     v_color = vec4(mix(ca.rgb, cb.rgb, t), min(ca.a, cb.a) * fade * fade * clamp(p.plexus.z, 0.0, 1.0));
     v_corner = vec2(0.0, side);
     v_feather = clamp(1.0 / half_width, 0.3, 1.0);
+    v_shape = vec4(0.0);
     gl_Position = vec4((at - p.region.xy) / max(p.region.zw, vec2(1e-4)) * 2.0 - 1.0, 0.5, 1.0);
 }
 
@@ -224,6 +230,7 @@ void surface_vertex(int vid) {
     v_color = vec4(col.rgb, min(ca.a, min(cb.a, cc.a)) * fade * clamp(p.plexusSurface.y, 0.0, 1.0));
     v_corner = vec2(0.0);   // miolo: o frag não recorta o disco
     v_feather = 0.0;
+    v_shape = vec4(0.0);
     gl_Position = vec4((at - p.region.xy) / max(p.region.zw, vec2(1e-4)) * 2.0 - 1.0, 0.5, 1.0);
 }
 
@@ -314,6 +321,36 @@ void main() {
     v_corner = corner;
     v_feather = p.cone.w;
 
+    // Forma (1.0.8). O desenho fica parado no quadrado (v_corner); é o quadrado
+    // que gira, tomba (folha, pétala, confete) ou fecha as asas (borboleta).
+    // Disco sem cintilar: nada muda, o quadro é o de antes.
+    const float shapeId = p.shape.x;
+    const vec3 rF = rand3(id + 251.9);    // giro, fases do balanço e do cintilar
+    v_shape = vec4(shapeId, rF.x, 0.0, 0.0);
+    vec2 cq = corner;
+    if (shapeId > 0.5) {
+        const bool butterfly = abs(shapeId - 5.0) < 0.5;
+        const bool upright = butterfly || abs(shapeId - 2.0) < 0.5;   // borboleta e coração de pé
+        float angle = upright ? (rF.x - 0.5) * 0.6 : rF.x * TWO_PI;
+        angle += p.shape.y * age * (rF.y < 0.5 ? -1.0 : 1.0) * (0.6 + 0.8 * rF.z);
+        if (upright) angle += 0.35 * p.shape.z * sin(age * 1.7 + rF.y * TWO_PI);
+        float sx = 1.0;
+        if (p.shape.z > 0.0 && (butterfly || !upright)) {
+            // Asas: ~2 batidas/s; tombo: ~0,5 volta/s, cada uma no seu ritmo.
+            const float beat = cos(age * (butterfly ? 13.0 : 3.2) * (0.75 + 0.5 * rF.z) + rF.y * TWO_PI);
+            sx = mix(1.0, butterfly ? 0.12 + 0.88 * abs(beat) : beat, clamp(p.shape.z, 0.0, 1.0));
+        }
+        const float ca = cos(angle), sa = sin(angle);
+        const vec2 c2 = vec2(corner.x * sx, corner.y);
+        cq = vec2(c2.x * ca - c2.y * sa, c2.x * sa + c2.y * ca);
+    }
+    if (p.shape.w > 0.0) {
+        // Cintilar: acende e apaga no ritmo de cada partícula (vaga-lume, estrela).
+        float tw = 0.5 + 0.5 * sin(age * (2.2 + 3.0 * rF.x) + rF.z * TWO_PI);
+        tw *= tw;
+        v_color.a *= mix(1.0, tw, clamp(p.shape.w, 0.0, 1.0));
+    }
+
     // Eixos do quadrado: os da tela; com Esticar, deitado na direção do
     // movimento visível e alongado pela velocidade (a derivada da posição).
     vec2 axisU = vec2(1.0, 0.0), axisV = vec2(0.0, 1.0);
@@ -387,7 +424,7 @@ void main() {
                 }
             }
         }
-        const vec3 world = center + wu * (corner.x * size * 0.5) + wv * (corner.y * sv * 0.5);
+        const vec3 world = center + wu * (cq.x * size * 0.5) + wv * (cq.y * sv * 0.5);
         // Dentro do passe da cena 3D: a profundidade é a dos modelos e planos.
         if (p.view.w > 0.5) {
             gl_Position = p.layerFromComp * vec4(world, 1.0);
@@ -428,7 +465,7 @@ void main() {
         }
     }
     const vec2 at = p.view.xy + (pos.xy - p.view.xy) * scale
-                  + (axisU * (corner.x * size * 0.5) + axisV * (corner.y * sizeV * 0.5)) * scale;
+                  + (axisU * (cq.x * size * 0.5) + axisV * (cq.y * sizeV * 0.5)) * scale;
     const vec2 ndc = (at - p.region.xy) / max(p.region.zw, vec2(1e-4)) * 2.0 - 1.0;
     gl_Position = vec4(ndc, 0.5, 1.0);
 }

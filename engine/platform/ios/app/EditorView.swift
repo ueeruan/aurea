@@ -182,6 +182,8 @@ struct EditorView: View {
         // num modificador próprio (EditorPresentations102): na mesma cadeia o body passava
         // do limite de checagem de tipos do compilador Swift.
         .modifier(EditorPresentations102(model: model))
+        // 1.0.8: Edição automática (AutoEditView.swift).
+        .modifier(AutoEditPresentation(model: model))
         // 0.4.6: o assistente de IA em tela cheia (AssistantView.swift).
         .background(Color.clear.fullScreenCover(isPresented: $model.assistantOpen) {
             // AureaMCP substitui o chat de IA; o chat antigo volta com AureaMcpFlags.legacyChat.
@@ -449,6 +451,7 @@ private struct ModelOptimizePrompt: ViewModifier {
                 .overlay { if !model.fullscreen && !model.rawPlayback { RigStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { MeshWarpStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { PuppetStageOverlay() } }
+                .overlay { if !model.fullscreen && !model.rawPlayback { FaceRigStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { SaberStageOverlay() } }
                 // Ponto de efeito ativo (parâmetro tocado no cartão): a alça dele (SaberStage.swift).
                 .overlay { if !model.fullscreen && !model.rawPlayback { EffectPointStageOverlay() } }
@@ -1844,7 +1847,7 @@ private struct AddLayerSheet: View {
                                 }.accessibilityIdentifier("shape3d.add.\(kind)")
                             }
                         } else {
-                        card("model_shop_title", glyph: CupertinoGlyph.Cube, accent: true) { modelLibrary = true }
+                        card("model_library_3d", glyph: CupertinoGlyph.Cube, accent: true) { modelLibrary = true }
                             .accessibilityIdentifier("add.model3d.library")
                         cardBody("shape3d_title", action: { shapes3D = true }) { Shape3DGlyph(kind: 0).frame(width: 30, height: 30) }
                         card("scene_workspace", glyph: CupertinoGlyph.Cube, accent: true) { close(); model.enterSceneEditor() }
@@ -3748,6 +3751,7 @@ struct AeImportSheet: View {
         case "seletor": return AureaText.t("ae_kind_selector")
         case "expressao": return AureaText.t("ae_kind_expression")
         case "camada": return AureaText.t("ae_kind_layer")
+        case "composicao": return AureaText.t("ae_kind_composition")
         case "midia": return AureaText.t("ae_kind_media")
         case "mascara": return AureaText.t("ae_kind_mask")
         case "script": return AureaText.t("ae_kind_script")
@@ -3755,11 +3759,18 @@ struct AeImportSheet: View {
         default: return AureaText.t("ae_kind_other")
         }
     }
+    /// 1.0.8 (par do aeReportText do Android): o código do motor na língua do
+    /// app; código desconhecido (motor mais novo) = o texto em pt-BR que veio junto.
+    static func reportText(_ key: String, _ args: [String], fallback: String) -> String {
+        guard key.hasPrefix("ae_"), AureaText.t(key) != key else { return fallback }
+        return args.isEmpty ? AureaText.t(key) : AureaText.format(AureaText.t(key), args.map { $0 as CVarArg })
+    }
     private func row(_ item: AureaModel.AeImportItem) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        let reason = Self.reportText(item.reasonKey, item.reasonArgs, fallback: item.reason)
+        return VStack(alignment: .leading, spacing: 2) {
             Text(kindLabel(item.kind) + " · " + item.name + (item.line > 0 ? " · " + AureaText.t("ae_line", item.line) : ""))
                 .font(.aurea(size: 13, weight: .medium))
-            if !item.reason.isEmpty { Text(item.reason).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted) }
+            if !reason.isEmpty { Text(reason).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted) }
         }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 8)
             .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
     }
@@ -3773,7 +3784,8 @@ struct AeImportSheet: View {
                     Text(AureaText.t("ae_counts", result.effects, result.keyframes, result.layers, result.expressions, result.animators))
                         .font(.aurea(size: 14)).accessibilityIdentifier("ae.counts")
                 }
-                if !result.message.isEmpty { Text(result.message).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted) }
+                let message = Self.reportText(result.messageKey, result.messageArgs, fallback: result.message)
+                if !message.isEmpty { Text(message).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted) }
                 if !result.skipped.isEmpty {
                     Text(AureaText.t("ae_skipped_title", result.skipped.count)).font(.aurea(size: 14, weight: .semibold))
                         .foregroundStyle(AureaColors.warning).padding(.top, 8)

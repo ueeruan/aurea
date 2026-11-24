@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.0.8 Edição automática (autoedit/AutoEdit.kt; iOS AutoEditView.swift). -->
+<resources>
+    <string name="autoedit_title">تحرير تلقائي</string>
+    <string name="autoedit_subtitle">قصّ وتكبير وأصوات وموسيقى وصوت ولون وترجمة في تكوين جديد. يبقى المقطع الأصلي كما هو.</string>
+    <string name="autoedit_home_hint">اختر فيديو وسيحرّره Aurea تلقائيًا</string>
+    <string name="autoedit_intensity">شدة القص</string>
+    <string name="autoedit_light">خفيفة</string>
+    <string name="autoedit_medium">متوسطة</string>
+    <string name="autoedit_strong">قوية</string>
+    <string name="autoedit_recording">نوع التسجيل</string>
+    <string name="autoedit_retakes">مع إعادات</string>
+    <string name="autoedit_continuous">متواصل (مقابلة)</string>
+    <string name="autoedit_language">لغة الكلام</string>
+    <string name="autoedit_lang_pt">البرتغالية</string>
+    <string name="autoedit_lang_en">الإنجليزية</string>
+    <string name="autoedit_lang_es">الإسبانية</string>
+    <string name="autoedit_steps">المراحل</string>
+    <string name="autoedit_cuts">القص</string>
+    <string name="autoedit_zoom">تكبير ووميض</string>
+    <string name="autoedit_sounds">أصوات</string>
+    <string name="autoedit_music">موسيقى</string>
+    <string name="autoedit_voice">الصوت</string>
+    <string name="autoedit_color">اللون</string>
+    <string name="autoedit_captions">الترجمة</string>
+    <string name="autoedit_start">تحرير</string>
+    <string name="autoedit_again">تحرير مجددًا</string>
+    <string name="autoedit_cancel">إلغاء</string>
+    <string name="autoedit_close">إغلاق</string>
+    <string name="autoedit_step_transcribe">تفريغ الكلام</string>
+    <string name="autoedit_step_prepare">تحضير</string>
+    <string name="autoedit_step_audio">تحليل الصوت</string>
+    <string name="autoedit_step_cuts">تخطيط القص</string>
+    <string name="autoedit_step_faces">البحث عن الوجوه</string>
+    <string name="autoedit_step_zoom">تخطيط التكبير</string>
+    <string name="autoedit_step_sounds">اختيار الأصوات</string>
+    <string name="autoedit_step_music">اختيار الموسيقى</string>
+    <string name="autoedit_step_voice">معالجة الصوت</string>
+    <string name="autoedit_step_color">فحص اللون</string>
+    <string name="autoedit_step_build">تجميع التحرير</string>
+    <string name="autoedit_done">تم: %1$s ← %2$s</string>
+    <string name="autoedit_failed">تعذّر التحرير: %1$s</string>
+    <string name="autoedit_cancelled">أُلغي التحرير التلقائي</string>
+    <string name="autoedit_need_video">اختر مقطع فيديو</string>
+    <string name="autoedit_error_speed">سرعة المقطع معدّلة؛ أعدها إلى السرعة العادية وحاول مجددًا</string>
+    <string name="autoedit_error_short">المقطع قصير جدًا</string>
+</resources>

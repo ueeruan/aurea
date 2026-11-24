@@ -411,7 +411,9 @@ class MainActivity : ComponentActivity() {
         val uri = projectFileUri(intent) ?: return
         lifecycleScope.launch {
             snapshotFlow { store.engineReady }.first { it }
-            store.importProjectFile(uri)
+            // 1.0.8: o After Effects (.aep/.aet, .rar, .zip com .aep) chega como
+            // octet-stream também: o conteúdo decide para qual importação vai.
+            store.openExternalFile(uri)
         }
     }
 

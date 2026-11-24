@@ -499,6 +499,7 @@ class AureaEngine private constructor() {
             nativeCancelExport(nativeHandle)
             nativeCancelPreRender(nativeHandle)
             nativeCaptionProgress(nativeHandle, true)
+            nativeAutoEditProgress(nativeHandle, true)   // 1.0.8: a edição automática também para
         }
     }) { if (nativeHandle != 0L) nativeShutdown(nativeHandle) }
 
@@ -963,6 +964,27 @@ class AureaEngine private constructor() {
     fun puppetRotatePins(layer: Long, effect: Int, pivot: Int, mask: Int, u0: Float, v0: Float, u1: Float, v1: Float,
                          autoKey: Boolean, continuing: Boolean): Boolean =
         nativePuppetRotatePins(nativeHandle, layer, effect, pivot, mask, u0, v0, u1, v1, autoKey, continuing)
+    // Rig 2D de rosto (Engine::query_face_rig): 10 alças (u, v) e o estado dos pontos
+    // (0 proporções, 1 só olhos, 2 olhos e boca, 3 à mão). u, v = fração da camada.
+    fun queryFaceRig(layer: Long, effect: Int, out: FloatArray): Int = nativeQueryFaceRig(nativeHandle, layer, effect, out)
+    /** Acha os pontos nos pixels (sem IA): 2 olhos e boca, 1 só olhos, 0 proporções, −1 sem efeito. */
+    fun faceRigAutoPlace(layer: Long, effect: Int): Int = nativeFaceRigAutoPlace(nativeHandle, layer, effect)
+    fun faceRigMoveHandle(layer: Long, effect: Int, handle: Int, u: Float, v: Float, continuing: Boolean): Boolean =
+        nativeFaceRigMoveHandle(nativeHandle, layer, effect, handle, u, v, continuing)
+    private external fun nativeQueryFaceRig(handle: Long, layer: Long, effect: Int, out: FloatArray): Int
+    private external fun nativeFaceRigAutoPlace(handle: Long, layer: Long, effect: Int): Int
+    /** Rig 2D v2 "Separar em partes" (pesado: fora da UI): [pré-composição, Controle], ou [−código, 0]. */
+    fun faceRigSplitParts(layer: Long, effect: Int): LongArray {
+        val out = LongArray(1)
+        val rig = nativeFaceRigSplitParts(nativeHandle, layer, effect, out)
+        return longArrayOf(rig, out[0])
+    }
+    /** Andamento do "Separar em partes" em curso (0..1; 1 = parado). */
+    fun faceRigSplitProgress(): Float = nativeFaceRigSplitProgress(nativeHandle)
+    private external fun nativeFaceRigSplitParts(handle: Long, layer: Long, effect: Int, out: LongArray): Long
+    private external fun nativeFaceRigSplitProgress(handle: Long): Float
+    private external fun nativeFaceRigMoveHandle(handle: Long, layer: Long, effect: Int, h: Int, u: Float, v: Float,
+                                                 continuing: Boolean): Boolean
     fun setTrackMatte(layer: Long, matte: Long, mode: Int): Boolean = nativeSetTrackMatte(nativeHandle, layer, matte, mode)
     /** {matte, modo} (matte 0 = nenhuma). */
     fun queryTrackMatte(layer: Long, out: LongArray): Boolean = nativeQueryTrackMatte(nativeHandle, layer, out)
@@ -1284,6 +1306,12 @@ class AureaEngine private constructor() {
     fun layerSourcePath(layer: Long): String? = nativeWork.run(null) { nativeLayerSourcePath(nativeHandle, layer) }
     /** Mídias de um `.aurea` fechado: 4 strings por mídia (gravado, legível, nome, tipo). null = não abre. */
     fun projectFileMedia(path: String): Array<String>? = nativeWork.run(null) { nativeProjectFileMedia(nativeHandle, path) }
+    /**
+     * 1.0.8 (erro 18): num `.aurea` FECHADO, troca o caminho gravado de cada mídia
+     * (`pairs` = gravado, novo, gravado, novo…). Devolve quantas religou ou −Errc.
+     */
+    fun relinkProjectFileMedia(path: String, pairs: Array<String>): Int =
+        nativeWork.run(-5) { nativeRelinkProjectFileMedia(nativeHandle, path, pairs) }
     /** Arquivo do projeto: [erro (0 = ok), incluídas, puladas]. `media` = 3 strings por mídia. */
     fun projectFilePlugins(path: String): Array<String>? = nativeWork.run(null) { nativeProjectFilePlugins(nativeHandle, path) }
 
@@ -1347,6 +1375,13 @@ class AureaEngine private constructor() {
     fun transcribeLocal(layer: Long, model: String, language: String, translateEnglish: Boolean = false): String =
         nativeWork.run("") { nativeTranscribeLocal(nativeHandle, layer, model.toByteArray(Charsets.UTF_8), language.toByteArray(Charsets.UTF_8), translateEnglish).toString(Charsets.UTF_8) }
     fun captionProgress(cancel: Boolean = false): Int = nativeWork.run(0) { nativeCaptionProgress(nativeHandle, cancel) }
+    /** 1.0.8 Edição automática: relatório JSON (`{"ok":…}`); demora — chamar fora da thread da UI. */
+    fun autoEdit(layer: Long, request: String): String =
+        nativeWork.run("{\"ok\":false,\"error\":\"engine\"}") { nativeAutoEdit(nativeHandle, layer, request.toByteArray(Charsets.UTF_8)).toString(Charsets.UTF_8) }
+    /** Etapa × 100 + porcentagem (1000 = pronto); [cancel] pede para parar. */
+    fun autoEditProgress(cancel: Boolean = false): Int = nativeWork.run(0) { nativeAutoEditProgress(nativeHandle, cancel) }
+    private external fun nativeAutoEdit(handle: Long, layer: Long, request: ByteArray): ByteArray
+    private external fun nativeAutoEditProgress(handle: Long, cancel: Boolean): Int
     fun captionTracks(): String = nativeCaptionTracks(nativeHandle).toString(Charsets.UTF_8)
     fun saveCaptionBundle(layer: Long, name: String): String = nativeSaveCaptionBundle(nativeHandle, layer, name.toByteArray(Charsets.UTF_8)).toString(Charsets.UTF_8)
     fun applyCaptionBundle(layer: Long, data: String): Boolean = nativeApplyCaptionBundle(nativeHandle, layer, data.toByteArray(Charsets.UTF_8))
@@ -2425,6 +2460,7 @@ class AureaEngine private constructor() {
     ): Long
     private external fun nativeLayerSourcePath(handle: Long, layer: Long): String?
     private external fun nativeProjectFileMedia(handle: Long, path: String): Array<String>?
+    private external fun nativeRelinkProjectFileMedia(handle: Long, path: String, pairs: Array<String>): Int
     private external fun nativeProjectFilePlugins(handle: Long, path: String): Array<String>?
     private external fun nativeMediaReleasePlan(
         handle: Long, projects: String, deleted: Array<String>, roots: Array<String>, keep: Array<String>, skip: Array<String>,

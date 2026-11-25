@@ -118,11 +118,12 @@ jobs:
               if candidate.is_symlink():
                   candidate.unlink()
               else:
-                  shutil.rmtree(candidate)
+                  # Runner macOS 26: parte do SDK fica protegida; apagar o que der basta.
+                  shutil.rmtree(candidate, ignore_errors=True)
           # This job packages for physical iOS. Android tooling is unused here.
           sdk = Path.home() / 'Library/Android/sdk'
           if sdk.is_dir() and not sdk.is_symlink():
-              shutil.rmtree(sdk)
+              shutil.rmtree(sdk, ignore_errors=True)
           print('Disk free before/after cleanup', before, shutil.disk_usage('/').free)
           PY
           df -h /
